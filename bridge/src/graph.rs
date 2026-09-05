@@ -1,12 +1,5 @@
-//! GraphDoc 的 Rust 侧表示与**结构校验**。
-//!
-//! 校验分三层（见 docs/graph-doc.md）：
-//!   前端 —— 手感，挡掉明显错误，可被绕过
-//!   Rust —— 结构完整性，就是本文件
-//!   C++  —— 权威，类型系统 / 参数范围 / 资源可行性
-//!
-//! 这里刻意**不碰算子语义**：不检查端口类型是否匹配、参数是否在范围内。
-//! 那需要 manifest，而一旦桥接层开始理解 manifest，它就不再只是转发层了。
+//! GraphDoc 的 Rust 侧表示与结构校验（三层校验的中间那层，见 docs/graph-doc.md）。
+//! 刻意不碰算子语义 —— 那需要 manifest，桥接层一旦理解它就不再只是转发层。
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -39,9 +32,8 @@ pub struct Node {
     pub op: String,
     #[serde(rename = "opVersion", default, skip_serializing_if = "Option::is_none")]
     pub op_version: Option<String>,
-    /// 静音：透传输入到输出。这是**执行语义**不是 UI 状态，所以不在 ui 里 ——
-    /// 一张被 bypass 的图 headless 跑出来必须和界面里一样。
-    /// M2 只是接住并原样转发给 C++，执行语义 M3 实现。
+    /// 静音：透传输入到输出。是**执行语义**不是 UI 状态（headless 跑出来必须和界面
+    /// 里一样），所以不在 ui 里。M2 只接住并原样转发给 C++，执行语义 M3 实现。
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub bypass: bool,
     #[serde(default)]

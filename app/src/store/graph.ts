@@ -1,21 +1,5 @@
-//
-// 图 store —— GraphDoc 是唯一真实数据源（ADR-0002）。
-//
-// 两条规则：
-//
-// 1. **改图只能走这里的语义化动作**，不能直接写 doc。动作的集合是封闭的：
-//    addNode / deleteNodes / moveNodes / setParam / setNodeUi / connect /
-//    disconnect / pasteNodes。这样撤销栈的每一步都对应一个用户能理解的操作，
-//    而不是「节点数组第 3 项的 x 变了」。
-//
-// 2. **纯 UI 操作不进撤销栈**。画布平移缩放、选中变化都在 store/ui.ts 里。
-//    按 Ctrl+Z 结果只是取消了一次选中，用户会觉得撤销坏了。
-//
-// 历史用整份 doc 快照，不用 patch。理由：immer 的结构共享让未改动的节点在
-// 新旧快照之间共用同一份对象，几十个节点的图一次快照的增量只有被改动的那部分；
-// 而 patch 的路径是基于数组下标的，删一个节点会让之前所有 patch 的下标失效，
-// 要么维护稳定路径要么每次重算，复杂度换不来这点内存。
-//
+// 图 store —— GraphDoc 是唯一真实数据源（ADR-0002）：改图只能走这里封闭的那组
+// 语义化动作，纯 UI 操作不进撤销栈，历史存整份 doc 快照而非 patch（见 README）。
 
 import { enablePatches, produce } from "immer";
 import { create } from "zustand";

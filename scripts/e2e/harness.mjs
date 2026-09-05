@@ -1,6 +1,4 @@
-//
-// 验收脚手架：起 app、连 CDP、记断言、收尾。
-//
+// 验收脚手架：起 app、连 CDP、记断言、收尾。见 ./README.md。
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -64,16 +62,8 @@ export class Report {
 
 // ------------------------------------------------------------------ 起 app
 
-/**
- * 把 `tauri build` 的产物复刻成一个**干净目录**里的安装结果。
- *
- * 拷的是 exe + 同目录的全部 DLL —— 这正是两个安装包往 `$INSTDIR` 放的东西
- * （NSIS 的 `SetOutPath $INSTDIR`，WiX 的 INSTALLDIR）。目的是验证
- * 「DLL 随包」和「从 exe 同目录加载」这条路径，而不是验证安装程序本身。
- *
- * 注意这**不等于**在一台干净机器上验证：这台机器有 MSVC 和 vcpkg，
- * 漏打包的 DLL 仍然可能被系统从别处找到。见 docs/m2-acceptance.md。
- */
+/** 把 `tauri build` 的产物复刻成一个**干净目录**里的安装结果：exe + 同目录的全部
+ * DLL。验的是「DLL 随包 + 从 exe 同目录加载」，不等于干净机器 —— 见 ./README.md。 */
 export function stagePackagedApp() {
   const release = path.join(ROOT, "bridge", "target", "release");
   const exe = path.join(release, "lyflow.exe");
@@ -92,17 +82,8 @@ export function stagePackagedApp() {
   return { dir, exe: path.join(dir, "lyflow.exe"), dlls };
 }
 
-/**
- * 启动 app 并连上它的 WebView2。
- *
- * WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS 是 WebView2 官方的注入口，
- * 必须在**进程启动前**设进环境变量 —— WebView2 只在创建环境时读一次。
- *
- * 三种模式：
- *   默认              起 `tauri dev`
- *   packagedExe       起一个已经打包好的 exe（干净目录验收）
- *   LYFLOW_E2E_ATTACH 连到已经开着的实例，调试脚本本身时省掉重编
- */
+/** 启动 app 并连上它的 WebView2。三种模式（默认 `tauri dev` / `packagedExe` /
+ * `LYFLOW_E2E_ATTACH`）与那条 WebView2 注入口的用法见 ./README.md。 */
 export async function launchApp({ verbose = false, packagedExe = null } = {}) {
   const attach = process.env.LYFLOW_E2E_ATTACH === "1";
   let child = null;

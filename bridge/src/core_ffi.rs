@@ -1,11 +1,5 @@
-//! C ABI 边界的 Rust 侧。
-//!
-//! 这一层只做四件事：加载 DLL、调用、把 C 的堆内存拷成 Rust 的、立刻还回去。
-//! **不在这里理解算子语义** —— 那是 architecture.md 划的线：桥接层只转发。
-//!
-//! ADR-0004：core 是运行时加载的 DLL，不是静态链接的库。所有调用都经
-//! `Core` 里那张函数表。M3 的算子热重载因此只是「drop 掉这个 Arc<Core> 再建一个」，
-//! 调用点一行都不用改。
+//! C ABI 边界的 Rust 侧：加载 DLL、调用、把 C 的堆内存拷成 Rust 的、立刻还回去。
+//! 所有调用都经 `Core` 里那张函数表，热重载因此只是换一个 Arc<Core>（ADR-0004/0009）。
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
@@ -14,9 +8,7 @@ use std::sync::{Arc, OnceLock};
 
 use libloading::{Library, Symbol};
 
-// ---------------------------------------------------------------------------
-// C ABI 的类型镜像。与 core/include/lyflow/c_api.h 一一对应。
-// ---------------------------------------------------------------------------
+// ------------- C ABI 的类型镜像，与 core/include/lyflow/c_api.h 一一对应
 
 pub type EventCb = unsafe extern "C" fn(*const c_char, *mut c_void);
 
@@ -65,9 +57,8 @@ pub enum CoreError {
     NoSuchOutput,
 }
 
-/// 函数表的签名。写成 alias 而不是内联在结构体里，是因为取符号的宏需要
-/// 一个**具名**类型：`Symbol<_>` 推不出来（`into_raw()` 断了推导链），
-/// 而每处写一遍完整签名，早晚会有一处和 c_api.h 对不上。
+/// 函数表的签名。写成 alias 是因为取符号的宏需要一个具名类型
+/// （`Symbol<_>` 推不出来，`into_raw()` 断了推导链）。
 type FnVersion = unsafe extern "C" fn() -> *const c_char;
 type FnJson = unsafe extern "C" fn() -> *mut c_char;
 type FnStringFree = unsafe extern "C" fn(*mut c_char);
@@ -89,15 +80,10 @@ type FnOutputCloud = unsafe extern "C" fn(
 type FnCloudViewFree = unsafe extern "C" fn(*mut CloudViewRaw);
 type FnOutputInfo = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
 
-/// 加载好的 core，外加一张函数表。
-///
-/// 所有 `Symbol` 都从 `lib` 里取，而 `Symbol<'a>` 借用 `Library` —— 自引用结构
-/// 在 Rust 里很难写对，所以这里存的是裸函数指针（`unsafe { sym.into_raw() }`
-/// 之后的形态），由 `Arc<Core>` 保证 `lib` 活得比任何一次调用都久。
+/// 加载好的 core，外加一张函数表。存的是裸函数指针而不是借用 `Library` 的
+/// `Symbol<'a>`（自引用结构难写对），由 `Arc<Core>` 保证 lib 活得比调用久。
 pub struct Core {
-    // 顺序有意义：函数指针必须在 Library 之前析构。
-    // 实际上它们是 Copy 的裸指针，但把 lib 放最后可以让「DLL 先于指针卸载」
-    // 这件事在类型层面就不可能发生。
+    // 顺序有意义：把 lib 放最后，让「DLL 先于函数指针卸载」在类型层面不可能发生。
     version: FnVersion,
     manifest_json: FnJson,
     manifest_problems: FnJson,
@@ -150,10 +136,8 @@ impl Core {
         })
     }
 
-    /// 接管 core 返回的堆字符串：拷贝一份，然后立刻用 core 自己的 free 还回去。
-    ///
-    /// 必须用 `lyflow_string_free` 而不是 Rust 的 dealloc —— 跨 DLL 边界时
-    /// 分配器不是同一个，用错了在 release 下才崩，还崩在无关的地方。
+    /// 接管 core 返回的堆字符串：拷一份，再用 core 自己的 free 还回去。
+    /// 必须用 lyflow_string_free —— 跨 DLL 边界时分配器不是同一个。
     unsafe fn take_owned(&self, ptr: *mut c_char) -> Result<String, CoreError> {
         if ptr.is_null() {
             return Err(CoreError::NullReturn);
@@ -230,10 +214,8 @@ impl Core {
     }
 }
 
-/// core 借出来的点云缓冲。Drop 时还回去。
-///
-/// 这是整个桥接层里唯一一处「持有 C++ 的指针一段时间」的地方，所以包成 RAII：
-/// 忘了 free 一次就是一次泄漏，而点云动辄几十兆，泄漏几次内存就没了。
+/// core 借出来的点云缓冲，Drop 时还回去。桥接层里唯一持有 C++ 指针一段时间的地方，
+/// 所以包成 RAII —— 点云动辄几十兆，忘了 free 几次内存就没了。
 pub struct CloudView {
     raw: CloudViewRaw,
     core: Arc<Core>,
@@ -275,15 +257,10 @@ impl Drop for CloudView {
     }
 }
 
-// ---------------------------------------------------------------------------
-// RunHandle
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------- RunHandle
 
-/// 一次运行的句柄。
-///
-/// C ABI 的生命周期契约是 start → (cancel)* → join → free，而且
-/// **join 返回之后回调保证不再被触发**。`user` 指针的生命期就挂在这上面：
-/// 它必须活到 join 之后，所以由本结构体持有，Drop 里在 join 完成后才释放。
+/// 一次运行的句柄。C ABI 契约：start → (cancel)* → join → free，
+/// join 返回后不再回调 —— `user` 指针因此由本结构体持有，Drop 里 join 完才释放。
 pub struct RunHandle {
     handle: *mut RunOpaque,
     core: Arc<Core>,
@@ -291,27 +268,20 @@ pub struct RunHandle {
     user: *mut c_void,
     /// 用来释放 user 的函数。类型擦除，免得 RunHandle 变成泛型。
     drop_user: unsafe fn(*mut c_void),
-    /// join 只能真正发生一次。用 Mutex 而不是 AtomicBool：第二个调用者
-    /// 必须**等**第一个 join 返回，否则「join 返回后回调不再触发」这条契约
-    /// 对它就不成立了。
+    /// join 只能真正发生一次。用 Mutex 而不是 AtomicBool：第二个调用者必须
+    /// 等第一个 join 返回，否则「join 返回后不再回调」对它不成立。
     joined: std::sync::Mutex<bool>,
     run_id: String,
 }
 
-// 跨线程共享安全的依据，逐个说清楚（这段注释以前是错的，说「core 侧各自加了锁」——
-// 当时 C++ 的 Run::join 读写的是一个裸 bool，什么锁都没有）：
-//   cancel  —— core 侧是一次 relaxed 原子写，天然可并发
-//   join    —— core 侧 Run::join 现在自己持一把 mutex；这一侧的 Mutex<bool>
-//              只是省掉重复进 FFI，两层都不能少（C ABI 还有 headless CLI 这个调用方）
-//   free    —— 只在 Drop 里发生，那时已经没有别的引用
+// 跨线程共享的依据：cancel 是 relaxed 原子写；join 在 core 侧自己持一把 mutex，
+// 这一侧的 Mutex<bool> 只是省掉重复进 FFI；free 只在 Drop 里发生。
 unsafe impl Send for RunHandle {}
 unsafe impl Sync for RunHandle {}
 
 impl RunHandle {
-    /// 启动一次运行。`user` 由本函数接管，join 之后才会被释放。
-    ///
-    /// # Safety
-    /// `cb` 必须能安全地在 core 的工作线程上被调用，且只解引用 `user`。
+    /// 启动一次运行。`user` 由本函数接管，join 之后才会被释放。调用者须保证
+    /// `cb` 能安全地在 core 的工作线程上被调用，且只解引用 `user`。
     pub unsafe fn start<T>(
         core: Arc<Core>,
         graph_json: &str,
@@ -394,16 +364,10 @@ impl Drop for RunHandle {
     }
 }
 
-// ---------------------------------------------------------------------------
-// 进程级单例
-// ---------------------------------------------------------------------------
+// ----------------------------------------------------------------- 进程级单例
 
-/// lyflow_core.dll 的位置：**exe 同目录**。
-///
-/// 不用 PATH 搜索，也不用当前工作目录 —— 前者会在用户机器上加载到某个
-/// 无关的同名 DLL，后者在双击启动时根本不是安装目录。
-/// 开发期由 build.rs 把它拷到 target/<profile>/ 和 deps/；
-/// 安装包里由 tauri.conf.json 的 bundle.resources 带到 exe 旁边。
+/// lyflow_core.dll 的位置：exe 同目录。不搜 PATH（会加载到无关的同名 DLL），
+/// 也不看工作目录（双击启动时那不是安装目录）。
 fn dll_path() -> PathBuf {
     let name = if cfg!(windows) {
         "lyflow_core.dll"
@@ -443,7 +407,7 @@ mod tests {
     use super::*;
 
     /// 契约的核心断言：C++ 侧的自检必须是干净的。
-    /// 这条挂了说明有人写错了算子描述 —— 在这里失败远好过在前端表现成怪现象。
+    /// 挂了说明有人写错了算子描述，在这里失败远好过在前端表现成怪现象。
     #[test]
     fn core_self_check_is_clean() {
         let problems = manifest_problems().expect("读不到自检结果");

@@ -1,12 +1,6 @@
 #pragma once
-//
 // 测试用的小工具：拼 GraphDoc、跑一次 run、把事件收成数组。
-//
-// 这里刻意**不读任何数据文件**：点云一律用 gen.synthetic 现生成
-// （m2-plan.md §5「点云全部用 gen.synthetic 在代码里生成，仓库不进二进制数据」）。
-// 好处不只是仓库干净 —— 一份 .pcd 样例的语义会随着时间被遗忘，而
-// 「seed=1 的合成云」是自解释的、可复现的、跨机器一致的。
-//
+// 刻意不读任何数据文件，点云一律由 gen.synthetic 现生成（仓库不进二进制数据）。
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -120,11 +114,8 @@ inline void collect(const char* json, void* user) {
 
 }  // namespace detail
 
-/// 跑一张图的完整上下文。
-///
-/// 结果仓的生命周期挂在 Run 上（析构即 freeRun），所以想断言输出的测试
-/// 必须让 Run 活着。把 Run 和事件日志捆在同一个对象里，测试就不会写出
-/// 「runGraph 返回后再去取点云，取到 nullopt，然后花半小时怀疑执行器」这种事。
+/// 跑一张图的完整上下文。结果仓的索引挂在 Run 上（析构即 freeRun），
+/// 所以想断言输出的测试必须让 Run 活着 —— Run 和事件日志捆在同一个对象里。
 class Session {
  public:
   Session(const Json& doc, std::filesystem::path baseDir = {},

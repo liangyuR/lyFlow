@@ -37,9 +37,8 @@ std::string jsonEscape(const std::string& s) {
 }
 
 std::string jsonNumber(double v) {
-  // JSON 没有 NaN 和 Infinity。写出裸的 `nan` / `inf` 会得到一份任何解析器都
-  // 读不了的文档，而且症状出现在很远的地方（前端 JSON.parse 整个失败）。
-  // 写 null 至少是合法 JSON，前端能看出「这里有个值但它不是数」。
+  // JSON 没有 NaN/Infinity。写裸的 nan/inf 会让整份文档解析失败，
+  // 写 null 至少合法，前端能看出「这里有个值但它不是数」。
   if (!std::isfinite(v)) return "null";
 
   // to_chars 的 general 格式给出最短往返表示，没有 printf("%g") 的精度损失，

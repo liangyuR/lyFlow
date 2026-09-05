@@ -1,9 +1,5 @@
-//
-// ExecutionEvent 的 TypeScript 镜像。见 schema/execution-event.schema.json。
-//
-// 与 manifest 一样，这里只是给编辑器用的视图，契约在 schema 里。
-// 改动顺序永远是：schema → C++ → 这里。
-//
+// ExecutionEvent 的 TypeScript 镜像，契约在 schema/execution-event.schema.json。
+// 与 manifest 一样，这里只是给编辑器用的视图；改动顺序永远是 schema → C++ → 这里。
 
 export type NodeState =
   | "idle"
@@ -20,10 +16,8 @@ export type Phase = "validate" | "compile" | "execute";
 
 export interface Diagnostic {
   phase: Phase;
-  /**
-   * 机器可读短码。**不要穷举它做逻辑分支** —— core 随时可能加新的 code，
-   * 前端把未知 code 当通用错误显示就行（schema 里也是这么写的）。
-   */
+  /** 机器可读短码。**不要穷举它做逻辑分支** —— core 随时可能加新的 code，
+   *  前端把未知 code 当通用错误显示就行（schema 里也是这么写的）。 */
   code: string;
   message: string;
   /** 出错的参数名。红框直接标到那个输入框上（交互清单 P0 #15）。 */
@@ -111,9 +105,7 @@ export interface OutputInfo {
   byteSize: number;
 }
 
-// ---------------------------------------------------------------------------
-// 二进制点云（ADR-0006）
-// ---------------------------------------------------------------------------
+// 二进制点云（ADR-0006） ------------------------------------------------------
 
 /** 'LYPC' 小端。 */
 export const CLOUD_MAGIC = 0x4350594c;
@@ -129,12 +121,8 @@ export interface CloudPayload {
   intensity: Float32Array | null;
 }
 
-/**
- * 解析二进制点云。
- *
- * 用 subarray 视图而不是拷贝：一百万点是 12MB，多拷一次就是多 12MB 和一次
- * 明显的卡顿。`buffer` 本身来自 IPC，之后不会有人改它。
- */
+/** 解析二进制点云。用视图而不是拷贝：一百万点是 12MB，多拷一次就是多 12MB
+ *  和一次明显的卡顿。`buffer` 本身来自 IPC，之后不会有人改它。 */
 export function decodeCloud(buffer: ArrayBuffer): CloudPayload {
   if (buffer.byteLength < 40) {
     throw new Error(`点云载荷太短（${buffer.byteLength} 字节），多半不是点云数据`);

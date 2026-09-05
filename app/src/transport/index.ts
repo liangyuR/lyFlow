@@ -1,13 +1,5 @@
-//
-// 传输层抽象。
-//
-// 存在的唯一理由：让 UI 代码不知道自己跑在 Tauri 里还是浏览器里。
-// 浏览器模式下用 dump 出来的静态 manifest，可以不启动 Tauri、不重编 C++
-// 就迭代界面 —— 这个反馈循环的差别是秒级 vs 分钟级。
-//
-// 但它必须显眼：状态栏会明确标出当前是哪种 transport，
-// 否则迟早有人对着一份三天前 dump 的 manifest 调半天。
-//
+// 传输层抽象：让 UI 代码不知道自己跑在 Tauri 里还是浏览器里。
+// 浏览器模式用 dump 的静态 manifest，状态栏必须显眼标出当前是哪种 transport。
 
 import type { CoreInfo, OperatorManifestBundle } from "../types/manifest";
 import type { GraphDoc } from "../types/graph";
@@ -103,10 +95,8 @@ const tauriTransport: Transport = {
   },
 };
 
-/**
- * 浏览器模式：读 public/manifest.dev.json。
- * 用 `pnpm --dir app run dump-manifest` 之类的方式刷新它（见 scripts/）。
- */
+/** 浏览器模式：读 public/manifest.dev.json，
+ *  用 `pnpm --dir app run dump-manifest` 之类的方式刷新它（见 scripts/）。 */
 const staticTransport: Transport = {
   kind: "static",
   async getManifest() {

@@ -1,13 +1,5 @@
-//
-// 参数值的读写规则。
-//
-// 核心是**稀疏存储**（docs/graph-doc.md）：GraphDoc 的 params 只记与 manifest
-// 默认值不同的项。好处是默认值改动能自动传播到老图、文件更小、diff 更干净。
-//
-// 所以「读一个参数」永远是 manifest 默认值与节点覆盖值的合并，
-// 「写一个参数」在写回默认值时要把这一项**删掉**而不是存一个等于默认的副本。
-// 这条如果漏了，稀疏存储就退化成全量存储，而且是静默退化。
-//
+// 参数值的读写规则。核心是**稀疏存储**（docs/graph-doc.md，理由见 README「参数的稀疏存储」）：
+// 读 = manifest 默认值 ← 节点覆盖值；写回默认值时必须**删键**，而不是存一个等于默认的副本。
 
 import type { GraphDoc, GraphNode } from "../types/graph";
 import type { Condition, OperatorDesc, Param } from "../types/manifest";
@@ -51,11 +43,8 @@ export function effectiveValue(
   return op.params.find((p) => p.name === paramName)?.default;
 }
 
-/**
- * 写一个参数，返回新的稀疏 params。
- *
- * 值等于 manifest 默认值时删除该键 —— 这是稀疏存储的关键一半。
- */
+/** 写一个参数，返回新的稀疏 params。
+ *  值等于 manifest 默认值时删除该键 —— 这是稀疏存储的关键一半。 */
 export function sparseSet(
   op: OperatorDesc,
   params: Record<string, unknown> | undefined,
@@ -109,10 +98,8 @@ export function isEnabled(param: Param, effective: Record<string, unknown>): boo
   return isConditionMet(param.enabledWhen, effective);
 }
 
-/**
- * 分组：先按 group 字段聚合，再把 advanced 的收到末尾的「高级」组。
- * 保持 manifest 里的声明顺序 —— 算子作者排的顺序是有意义的。
- */
+/** 分组：先按 group 字段聚合，再把 advanced 的收到末尾的「高级」组。
+ *  保持 manifest 里的声明顺序 —— 算子作者排的顺序是有意义的。 */
 export interface ParamGroup {
   name: string;
   advanced: boolean;
@@ -146,13 +133,8 @@ function isAbsolutePath(p: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith("\\\\") || p.startsWith("/");
 }
 
-/**
- * 图里有没有用到相对路径的参数。
- *
- * 相对路径是相对**图文件所在目录**解析的（C++ 侧的 baseDir），
- * 所以一张没保存过的图带相对路径就没法运行 —— 与其让 core 报一句
- * 「文件不存在: samples/bin.pcd」，不如在运行前直接说「先保存」。
- */
+/** 图里有没有用到相对路径的参数。相对路径按**图文件所在目录**解析（C++ 侧的 baseDir），
+ *  没保存过的图带相对路径就跑不了 —— 与其让 core 报「文件不存在」，不如先说「先保存」。 */
 export function hasRelativePathParam(
   doc: GraphDoc,
   operatorsById: ReadonlyMap<string, OperatorDesc>,

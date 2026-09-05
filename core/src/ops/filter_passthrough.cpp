@@ -47,10 +47,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
 
   PointCloud out;
   if (keepOrganized) {
-    // 有序结构：删掉的点填 NaN 而不是移除，点数与输入一一对应。
-    // 下游要能对得上下标时（比如再接一个 extract_indices）这是唯一正确的做法。
-    // 逐通道拷贝而不是 out = in：拷贝赋值会连 id 一起搬过来，
-    // 而这是一片**新**点云，老的 Indices 不该还能对得上它。
+    // 有序结构：删掉的点填 NaN 而不是移除，下标与输入一一对应。
+    // 逐通道拷贝而不是 out = in —— 后者会把 id 一起搬来，老 Indices 就还能对上这片新云。
     out.xyz = in.xyz;
     out.intensity = in.intensity;
     out.normals = in.normals;
@@ -143,9 +141,7 @@ void registerFilterPassthrough(Registry& r) {
   keepOrganized.def = Value::boolean(false);
   keepOrganized.advanced = true;
 
-  // 单位标注只对空间字段成立，intensity 是无量纲的。
-  // 这里用 visibleWhen 的兄弟条件 enabledWhen 演示参数联动：
-  // 选了 intensity 时把 keepOrganized 禁用（有序结构是空间概念）。
+  // 参数联动示例：选了 intensity 时禁用 keepOrganized（有序结构是空间概念）。
   keepOrganized.enabledWhen.param = "field";
   keepOrganized.enabledWhen.in = {Value::text("x"), Value::text("y"), Value::text("z")};
 

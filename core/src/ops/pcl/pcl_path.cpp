@@ -64,8 +64,7 @@ std::filesystem::path uniqueTempPath(const std::string& extension) {
 
 NarrowMode probe() {
   // 用宽字符 API 写一个带中文名的文件，再试着用窄字符串打开它。
-  // 这里刻意用 std::ofstream/ifstream 而不是 Win32 API —— PCL 走的就是 CRT，
-  // 探测必须走同一条路，不然探到的结论和实际用的接口对不上。
+  // 刻意走 std::ofstream/ifstream 而不是 Win32 API —— PCL 走的就是 CRT。
   std::error_code ec;
   std::filesystem::path dir = std::filesystem::temp_directory_path(ec);
   if (ec) return NarrowMode::TempCopy;

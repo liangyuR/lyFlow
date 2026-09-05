@@ -1,10 +1,5 @@
-//
-// UI store —— 所有**不该进撤销栈、不该进文件**的状态。
-//
-// 这个 store 的存在本身就是 ADR-0002 的一部分：选中状态、画布视口、搜索面板
-// 开没开、剪贴板，全都是 UI 运行时状态。它们混进 GraphDoc 会同时污染文件格式
-// 和撤销栈 —— 按 Ctrl+Z 却只是取消了一次选中，用户会认为撤销坏了。
-//
+// UI store —— 选中、视口、搜索面板、剪贴板这些**不该进撤销栈、不该进文件**的
+// 状态（ADR-0002）。混进 GraphDoc 会同时污染文件格式和撤销栈。
 
 import { create } from "zustand";
 
@@ -15,10 +10,8 @@ export interface SearchPopup {
   screen: { x: number; y: number };
   /** 画布坐标，用来放置新节点 */
   flow: { x: number; y: number };
-  /**
-   * 从某个端口拖出连线、中途松手弹出的搜索面板（交互清单 P1 #18）。
-   * 选中算子后会自动把新节点接上去。M1 先把数据通路留好。
-   */
+  /** 从某个端口拖出连线、中途松手弹出的搜索面板（交互清单 P1 #18）。
+   *  选中算子后会自动把新节点接上去；M1 先把数据通路留好。 */
   pendingFrom?: PortRef;
 }
 
@@ -62,9 +55,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   inspectedOperator: null,
 
   setSelection(nodes, edges) {
-    // 必须比对后再写。选中状态会流回画布（映射层把它写进 node.selected），
-    // 画布又会回调 onSelectionChange —— 无条件 set 新 Set 会让引用每次都变，
-    // 于是 useMemo 重算、节点数组换新、再次触发回调，形成渲染死循环。
+    // 必须比对后再写：选中会流回画布、画布又回调 onSelectionChange，无条件
+    // set 新 Set 会形成渲染死循环（见 README「踩过的坑」）。
     const prev = get();
     if (sameIds(prev.selectedNodes, nodes) && sameIds(prev.selectedEdges, edges)) return;
     set({ selectedNodes: new Set(nodes), selectedEdges: new Set(edges) });

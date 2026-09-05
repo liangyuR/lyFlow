@@ -1,25 +1,6 @@
 #pragma once
-//
-// 算子之间流动的数据。
-//
-// 四条设计决定：
-//
-// 1. **点云用 SoA**，坐标一块连续的 float 数组。降采样、裁剪这类算子是纯内存
-//    带宽受限的，SoA 让它们能顺序扫；给前端做预览时也可以直接把坐标缓冲整块
-//    丢过去，不用逐点重排（M2 的二进制 IPC 就是这么干的）。
-//
-// 2. **数据用 shared_ptr<const T> 传递**。一个输出端口连多个输入是常态，
-//    共享只读引用意味着零拷贝；也为 M3 的跨运行缓存留好了路 —— 缓存命中时
-//    直接把同一份 shared_ptr 交出去。const 是关键：算子拿到输入后不能就地改。
-//
-// 3. **intensity / normals / rgb 是可选通道，不是另一个类型**（D10）。
-//    原来那个 PointCloudXYZI 端口类型已经删掉了：类型系统说一套、数据模型
-//    做一套，迟早会在「XYZI 连到 XYZ 端口之后强度去哪了」这种问题上翻车。
-//
-// 4. **点云有进程内唯一 id**。Indices 只是一串下标，脱离它所指的点云毫无意义；
-//    有了 id，extract_indices 才能在拿到张冠李戴的下标时报错，而不是默默
-//    索引越界或者取出一堆无关的点。
-//
+// 算子之间流动的数据。SoA 坐标、shared_ptr<const T> 零拷贝共享、
+// 可选通道而非独立类型、点云带进程内唯一 id —— 四条理由见 core/README.md「数据模型」。
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -66,11 +47,8 @@ struct PointCloud {
 
   Bounds bounds() const;
 
-  /// 唯一的「按下标取子集」入口。
-  ///
-  /// 所有滤波类算子必须经它出结果 —— 否则每个算子都要记得手工搬运 intensity /
-  /// normals / rgb，而漏搬的表现是「下游的着色突然没了」，没人会想到是上游
-  /// 某个滤波器的锅。集中在这里，加一个通道只改一处。
+  /// 唯一的「按下标取子集」入口。滤波类算子必须经它出结果，
+  /// 否则 intensity/normals/rgb 会被漏搬（core/README.md「写 compute 的约定」）。
   PointCloud select(const std::vector<std::int32_t>& keep) const;
   PointCloud selectInverse(const std::vector<std::int32_t>& drop) const;
 

@@ -1,20 +1,6 @@
 #pragma once
-//
-// 结果仓（D4）。
-//
-// 两层结构，从第一天就是终态：
-//
-//   内容寻址层   cacheKey ──► Data        真正持有数据，同键只有一份
-//   索引层       runId ──► (nodeId, port) ──► cacheKey
-//
-// 为什么不直接 runId+node+port ──► Data？因为 M3 要开缓存复用：两次运行里
-// 参数没变的节点算出来的是同一个 cacheKey，直接共享同一份 shared_ptr，
-// 到时候只需要「run_free 时不再删无人引用的 Data」+ 加一个 LRU 字节预算，
-// 结构一行不用改。反过来如果 M2 按 runId 存数据，M3 要重写这一层和它的所有调用点。
-//
-// 点云绝不 JSON 化：一百万个点是 30MB 文本，前端还得整段解析一次。
-// previewCloud 直接给出可以零拷贝进 Float32Array 的连续缓冲。
-//
+// 结果仓（D4）。两层结构：内容寻址层 cacheKey→Data，索引层 runId→(nodeId,port)→cacheKey。
+// 点云绝不 JSON 化，previewCloud 给出可零拷贝进 Float32Array 的连续缓冲。
 #include <cstdint>
 #include <map>
 #include <mutex>

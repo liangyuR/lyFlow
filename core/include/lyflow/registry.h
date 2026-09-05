@@ -1,7 +1,5 @@
 #pragma once
-//
 // 算子注册表。进程内唯一，启动时由 registerBuiltinOps() 填充。
-//
 #include <string>
 #include <vector>
 
@@ -23,8 +21,7 @@ class Registry {
   const OperatorDesc* find(const std::string& id) const;
   const PortType* findType(const std::string& name) const;
 
-  // 自检。在导出 manifest 前跑，把算子作者的笔误挡在这里，
-  // 而不是让前端拿到一份自相矛盾的 manifest 再去猜。
+  // 自检。导出 manifest 前跑，把算子作者的笔误挡在这里。
   // 返回人类可读的问题列表，空 = 无问题。
   std::vector<std::string> validate() const;
 
@@ -38,21 +35,12 @@ class Registry {
   std::vector<OperatorDesc> operators_;
 };
 
-// 注册所有内置算子与端口类型。
-//
-// 这里用显式调用列表，不用「静态对象自注册」。原因：core 是静态库，
-// 链接器会丢掉没有任何符号被引用的 .obj，自注册的算子会静默消失，
-// 而且是在 release 构建里才消失。要绕开得靠 /WHOLEARCHIVE 之类的链接器开关,
-// 那是把正确性押在构建配置上。加一个算子多写一行调用，换来确定性，划算。
-//
-// 加新算子的完整流程：写 src/ops/xxx.cpp -> 在 builtin_ops.cpp 加一行。
-// 前端不用动 —— 这是 ADR-0003 的承诺，也是这套设计的全部意义。
+// 注册所有内置算子与端口类型。显式调用列表而非静态自注册，理由与加算子的流程
+// 见 core/README.md「加一个算子」。
 void registerBuiltinOps(Registry& registry);
 
 // 进程内那一份注册表，保证只填充一次。
-//
-// C ABI 的每个入口、执行器、dump 工具、测试都从这里拿 —— 之前 c_api.cpp 里
-// 藏着一个 call_once，执行器再写一份就会出现「两条路径各自初始化」的竞态。
+// C ABI 入口、执行器、dump 工具、测试都从这里拿，避免两条路径各自初始化的竞态。
 Registry& ensureRegistry();
 
 }  // namespace lyflow

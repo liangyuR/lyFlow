@@ -1,12 +1,5 @@
-//
-// 算子详情。
-//
-// M0 里这是**只读**的：它证明 manifest 里的每一个字段都真的走通了三层，
-// 包括端口类型着色、参数范围、enum 选项、参数联动条件。
-//
-// M1 会把「参数」那一段换成真正可编辑的表单（同样由 manifest 驱动），
-// 端口那一段搬到画布上的节点里去。这里的渲染逻辑到时候可以直接搬走。
-//
+// 算子详情（只读）。没选中节点时展示，用来在加进图之前先看清楚这个算子是什么。
+// 它同时证明 manifest 的每个字段都真的走通了三层。
 
 import { usePortColor } from "../store/manifest";
 import type { OperatorDesc, Param, Port } from "../types/manifest";

@@ -1,9 +1,5 @@
-# 门禁：一条命令验完整条链路。
-#
-#   C++ 编译 + 算子自检 + core 的 doctest 测试
-#   -> 三份契约样例对着 schema 校验（manifest 是真实产物，事件与图是样例）
-#   -> Rust 编译 + 测试（DLL 加载、执行事件、二进制输出、中文路径）
-#   -> 前端 strict typecheck + build
+# 门禁：一条命令验完整条链路 —— C++ 编译/算子自检/doctest -> 三份契约对着 schema 校验
+# -> cargo test（DLL 加载、执行事件、二进制输出、中文路径）-> 前端 strict typecheck + build。
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 
@@ -21,9 +17,7 @@ python "$PSScriptRoot\validate_schema.py" $tmp (Join-Path $root "schema\operator
 if ($LASTEXITCODE -ne 0) { throw "manifest 不符合 schema" }
 
 Step "execution-event vs schema"
-# 事件流没有「真实产物文件」可校验，所以校验的是手写样例。
-# 它的作用是让 schema 的改动至少被一份具体载荷验证过 —— 光改 schema 不改样例，
-# 很容易写出一份谁都满足不了（或者谁都满足）的约束。
+# 事件流没有「真实产物文件」可校验，所以校验的是手写样例（理由见 schema/README.md）。
 python "$PSScriptRoot\validate_schema.py" `
     (Join-Path $root "schema\examples\execution-event.example.json") `
     (Join-Path $root "schema\execution-event.schema.json") --each

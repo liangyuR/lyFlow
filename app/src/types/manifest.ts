@@ -1,12 +1,5 @@
-//
-// OperatorManifest 的 TypeScript 镜像。
-//
-// 必须与 schema/operator-manifest.schema.json 保持一致 —— 那份 schema 是契约，
-// 这里只是给编辑器用的视图。改动顺序永远是：schema -> C++ -> 这里。
-//
-// 注意：这里没有任何具体算子的知识。前端唯一的「算子知识」是
-// ParamType 到控件的映射表（M1 才用得上），见 docs/operator-manifest.md。
-//
+// OperatorManifest 的 TypeScript 镜像，必须与 schema/operator-manifest.schema.json
+// 一致。改动顺序永远是：schema → C++ → 这里。
 
 export type ParamType =
   | "bool" | "int" | "float"

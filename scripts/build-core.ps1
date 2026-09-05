@@ -1,14 +1,5 @@
-# 单独构建 C++ core，跑算子自检 + doctest 测试。
-#
-# 与 M1 的区别：core 现在是 CMake 构建的 DLL（D1/ADR-0004），bridge/build.rs
-# 调的也是这套 CMake，不再用 cc crate 逐个编 .cpp —— PCL 是 vcpkg 动态三元组，
-# 几十个 DLL 手工链是死路。所以这个脚本和 cargo 走的是同一条构建路径，
-# 「单独调 core」和「跑整个 app」不会再出现只有一边能编过的情况。
-#
-# 用法：
-#   build-core.ps1                     RelWithDebInfo，构建 + 自检 + 测试
-#   build-core.ps1 RelWithDebInfo      同上
-#   build-core.ps1 RelWithDebInfo -NoTests   只构建
+# 单独构建 C++ core，跑算子自检 + doctest 测试。与 bridge/build.rs 同一条 CMake 路径。
+# 用法：build-core.ps1 [RelWithDebInfo] [-NoTests]
 $ErrorActionPreference = "Stop"
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -39,9 +30,8 @@ foreach ($a in $args) {
   else { $config = $a }
 }
 
-# vcpkg 工具链只在**首次** configure 时生效。如果缓存是没有工具链的旧配置
-# （比如 M1 留下的），后面怎么传都不会生效，只会得到一句莫名其妙的
-# 「找不到 PCLConfig.cmake」。所以发现不一致就直接重配。
+# vcpkg 工具链只在首次 configure 时生效，缓存里没有它的话之后怎么传都不管用
+# （症状是「找不到 PCLConfig.cmake」）。所以发现不一致就直接重配。
 $vcpkgRoot = if ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } else { "C:/vcpkg" }
 $toolchain = (Join-Path $vcpkgRoot "scripts/buildsystems/vcpkg.cmake") -replace '\\', '/'
 if (-not (Test-Path $toolchain)) {
@@ -57,8 +47,7 @@ if (Test-Path $cache) {
 }
 
 # 必须在 vcvars 之后调 cmake，所以整条命令交给一个 cmd 进程。
-# 注意用 && 而不是 PowerShell here-string 里的 ^ 续行 —— 后者传给 cmd 时
-# 换行已经被 PowerShell 吃掉了，^ 反而会把下一行的第一个字符转义掉。
+# 用 && 而不是 ^ 续行：换行已被 PowerShell 吃掉，^ 会转义掉下一行的首字符。
 $line = "call `"$vcvars`" >nul 2>&1" +
         " && `"$cmake`" -S `"$source`" -B `"$build`" -G Ninja" +
         " -DCMAKE_MAKE_PROGRAM=`"$ninja`" -DCMAKE_BUILD_TYPE=$config" +

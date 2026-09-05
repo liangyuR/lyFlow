@@ -1,16 +1,5 @@
-//
-// M2 验收脚本 —— 用 CDP 驱动真实运行的 Tauri app。
-//
-// 覆盖 docs/m2-plan.md §11 里所有标着「CDP」的验收项，外加中文路径那一条。
-// 跑法：`pnpm e2e`。调试脚本本身时，另开一个窗口跑
-// `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" pnpm tauri dev`，
-// 然后 `LYFLOW_E2E_ATTACH=1 pnpm e2e`，省掉每次两分钟的重编。
-//
-// 为什么是 CDP 而不是前端单元测试：CLAUDE.md 规定不写 UI 单元测试，
-// 而 M1 的经验是——真正会咬人的 bug（d3-zoom 吞掉双击、MiniMap 不画节点、
-// 选中状态渲染死循环）没有一个是单元测试能发现的，它们全都要求
-// 「真实的浏览器 + 真实的事件 + 真实的后端」。
-//
+// M2 验收脚本 —— 用 CDP 驱动真实运行的 Tauri app，覆盖 docs/m2-plan.md §11 里
+// 标着「CDP」的验收项，外加中文路径那一条。跑法与「为什么是 CDP」见 ./README.md。
 
 import fs from "node:fs";
 import path from "node:path";
@@ -34,12 +23,8 @@ async function newDoc(cdp) {
   `);
 }
 
-/**
- * 按声明搭一张图。
- *
- * 走 store 的语义化动作而不是直接塞 doc：验收要验的是真实代码路径，
- * 塞一份构造好的 doc 会跳过 addNode/connect 里的校验与 id 分配。
- */
+/** 按声明搭一张图。走 store 的语义化动作而不是直接塞 doc —— 塞一份构造好的 doc
+ * 会跳过 addNode/connect 里的校验与 id 分配，验的就不是真实代码路径了。 */
 async function buildGraph(cdp, nodes, edges) {
   return cdp.eval(`
     const g = window.__lyflow.stores.graph.getState();
@@ -85,14 +70,8 @@ async function pressKey(cdp, key, windowsVirtualKeyCode) {
 const pressF5 = (cdp) => pressKey(cdp, "F5", 116);
 const pressEscape = (cdp) => pressKey(cdp, "Escape", 27);
 
-/**
- * 触发一次运行并等它结束。
- *
- * 关键是**先记下当前的 runId**：连续跑第二次时，`runStatus` 在按下 F5 的
- * 那一刻还是上一次的 'ok'，只等「不是 running」会立刻返回上一次的快照，
- * 于是断言全部对着旧结果做 —— 这个坑第一次跑验收时就踩到了，
- * 症状是「画布上明明是红的，快照里却是 done」。
- */
+/** 触发一次运行并等它结束。关键是**先记下当前的 runId** —— 只等「不是 running」
+ * 会立刻拿到上一次运行的快照，断言全对着旧结果做。见 ./README.md。 */
 async function runAndWait(cdp, fire, timeoutMs = 120_000) {
   const before = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
   await cdp.eval(`window.__lyflow.clearTransitions(); return true;`);
@@ -112,12 +91,8 @@ async function select(cdp, nodeId) {
   `);
 }
 
-/**
- * 选中一个节点，等 3D 视图真的切过去，返回它显示的点数与状态。
- *
- * 先等 `.viewer[data-node=<id>]` 再读数字：不等的话会读到上一个节点残留的
- * 那个计数，然后得到一个「点数 > 0」的假绿。
- */
+/** 选中一个节点，等 3D 视图真的切过去，返回它显示的点数与状态。先等
+ * `.viewer[data-node=<id>]` 再读数字，否则读到上一个节点残留的计数 = 假绿。 */
 async function selectAndReadViewer(cdp, nodeId, timeoutMs = 30_000) {
   await select(cdp, nodeId);
   const deadline = Date.now() + timeoutMs;
@@ -336,13 +311,8 @@ async function suiteBadParam(cdp, report, ids) {
   `);
 }
 
-/**
- * 只校验（不执行）与取输出信息两条 command。
- *
- * 这两条 UI 目前没有调用点 —— `validate_graph` 是给 M3 的「边编辑边标红」
- * 留的，`get_output_info` 是给日志抽屉留的。没有调用点的接口最容易悄悄坏掉，
- * 所以在这里直接过一遍真实的 IPC。
- */
+/** 只校验（不执行）与取输出信息两条 command。UI 目前没有调用点（`validate_graph`
+ * 留给 M3 的边编辑边标红，`get_output_info` 留给日志抽屉），最容易悄悄坏掉。 */
 async function suiteValidateAndInfo(cdp, report, ids) {
   report.section("validate_graph / get_output_info");
 

@@ -1,15 +1,6 @@
 #pragma once
-//
-// 结构化错误与诊断集合。
-//
-// 关键字段是 paramPath 和 portName：它们让前端能把红框**直接标到出错的那个
-// 输入框或那个端口上**，而不是弹一句「执行失败」让人自己找
-// （docs/architecture.md 的 ExecutionEvent 约定）。
-//
-// D5：校验返回**全部诊断**而不是第一个错误。第一个错误的做法会逼用户
-// 「改一个 → 重跑 → 又一个」地挤牙膏，而事后要改成全量得动 C++/Rust/前端三层。
-// 所以从第一天就是 Diagnostics 而不是 Status。
-//
+// 结构化错误与诊断集合。paramPath/portName 让前端把红框标到具体的输入框或端口上；
+// D5：校验一次返回全部诊断而不是第一个错误（docs/architecture.md）。
 #include <string>
 #include <utility>
 #include <vector>
@@ -26,9 +17,8 @@ enum class Severity { Error, Warning };
 
 const char* toString(Severity s);
 
-/// `code` 的取值集合与 schema/execution-event.schema.json 的 error.code 一致：
-///   unknown_op | unknown_port | type_mismatch | missing_input | unknown_param |
-///   bad_param | bad_input | cycle | io | cancelled | upstream_failed | internal
+/// `code` 的取值集合与 schema/execution-event.schema.json 的 error.code 一致
+/// （unknown_op / type_mismatch / bad_param / cycle / io / cancelled / internal …）。
 struct Status {
   bool ok = true;
   Phase phase = Phase::Execute;

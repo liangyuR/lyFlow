@@ -1,10 +1,5 @@
-//
-// 连接合法性校验 + 拓扑。
-//
-// 这一层是**手感**，不是正确性（docs/architecture.md）。它的职责是在用户
-// 拖线时即时挡掉明显错误、给出人话原因。C++ 侧在执行前必须独立完整校验一遍 ——
-// 这里可以被绕过（手改文件、脚本生成的图、旧版本客户端）。
-//
+// 连接合法性校验 + 拓扑。这一层是**手感**不是正确性（docs/architecture.md）：拖线时即时挡错、给人话原因。
+// C++ 侧执行前必须独立完整校验一遍 —— 这里能被绕过（手改文件、脚本生成的图、旧版本客户端）。
 
 import type { GraphDoc, PortRef } from "../types/graph";
 import type { OperatorDesc, Port, PortType } from "../types/manifest";
@@ -28,10 +23,8 @@ export function findPort(
   return (side === "input" ? op.inputs : op.outputs).find((p) => p.name === name);
 }
 
-/**
- * 端口类型是否可连。V1 规则刻意简单（docs/operator-manifest.md）：
- * 精确匹配 / Any 通配 / manifest 声明的 castableTo 单向转换。不做泛型。
- */
+/** 端口类型是否可连。V1 规则刻意简单（docs/operator-manifest.md）：
+ *  精确匹配 / Any 通配 / manifest 声明的 castableTo 单向转换，不做泛型。 */
 export function typesCompatible(
   ctx: GraphContext,
   fromType: string,
@@ -48,12 +41,8 @@ function upstreamOf(doc: GraphDoc, nodeId: string): string[] {
   return doc.edges.filter((e) => e.to.node === nodeId).map((e) => e.from.node);
 }
 
-/**
- * 从 `from` 连到 `to` 会不会成环。
- *
- * 等价于问：`from` 是不是已经在 `to` 的下游？也就是从 `from` 沿上游走，
- * 能不能走回 `to`。DFS，图规模是几十个节点，不需要更聪明的做法。
- */
+/** 从 `from` 连到 `to` 会不会成环。等价于问：`from` 是不是已经在 `to` 的下游。
+ *  DFS 沿上游走，图规模是几十个节点，不需要更聪明的做法。 */
 export function wouldCreateCycle(doc: GraphDoc, fromNode: string, toNode: string): boolean {
   if (fromNode === toNode) return true;
   const seen = new Set<string>();
@@ -68,12 +57,8 @@ export function wouldCreateCycle(doc: GraphDoc, fromNode: string, toNode: string
   return false;
 }
 
-/**
- * 拓扑排序。返回 null 表示有环。
- *
- * M1 用不到执行顺序，但它是环检测的权威实现 —— wouldCreateCycle 只在增量
- * 连线时用，这个负责校验一整张图（比如打开别人存的文件）。
- */
+/** 拓扑排序，返回 null 表示有环。M1 用不到执行顺序，但它是环检测的权威实现 ——
+ *  wouldCreateCycle 只管增量连线，这个负责校验一整张图（比如打开别人存的文件）。 */
 export function topoSort(doc: GraphDoc): string[] | null {
   const indegree = new Map<string, number>();
   const downstream = new Map<string, string[]>();
@@ -101,9 +86,7 @@ export function topoSort(doc: GraphDoc): string[] | null {
   return order.length === doc.nodes.length ? order : null;
 }
 
-/**
- * 能不能从 from 连到 to。返回的 reason 会直接显示给用户，所以写人话。
- */
+/** 能不能从 from 连到 to。返回的 reason 会直接显示给用户，所以写人话。 */
 export function canConnect(
   ctx: GraphContext,
   doc: GraphDoc,
@@ -138,11 +121,8 @@ export function canConnect(
     };
   }
 
-  // 输入端口是单连接。多输入合并要由算子显式声明多个端口来表达，
-  // 靠往一个端口连多条边的话求值顺序是隐式的（docs/graph-doc.md）。
-  //
-  // 注意这里不算「已经存在的同一条边」—— 重复连同一对端口应该是 no-op，
-  // 而不是报「端口已被占用」这种让人困惑的错。
+  // 输入端口是单连接：多输入合并要由算子显式声明多个端口，否则求值顺序是隐式的（docs/graph-doc.md）。
+  // 但不算「已经存在的同一条边」—— 重连同一对端口该是 no-op，而不是报「端口已被占用」。
   const occupied = doc.edges.find(
     (e) => e.to.node === to.node && e.to.port === to.port,
   );
@@ -157,10 +137,8 @@ export function canConnect(
   return { ok: true };
 }
 
-/**
- * 拖线时用：给定拖出的源端口，哪些输入端口是可落点。
- * UI 拿它把不兼容的端口置灰 —— 让类型系统「看得见」。
- */
+/** 拖线时用：给定拖出的源端口，哪些输入端口是可落点。
+ *  UI 拿它把不兼容的端口置灰 —— 让类型系统「看得见」。 */
 export function compatibleTargets(
   ctx: GraphContext,
   doc: GraphDoc,

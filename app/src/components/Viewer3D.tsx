@@ -1,13 +1,5 @@
-//
-// 3D 点云预览（交互清单 P1 #30）。
-//
-// three.js 随包打，**不走 CDN**：这是个桌面应用，装完就该能用；
-// 依赖一个外部域名意味着断网或内网机器上打开就是黑屏。
-//
-// 数据路径见 ADR-0006：点云是二进制的，`decodeCloud` 拿到的 Float32Array
-// 是 IPC 缓冲上的**视图**，直接交给 BufferAttribute，全程零拷贝。
-// 一百万点走 JSON 的话是 30MB 文本加一次全量解析，那条路根本走不通。
-//
+// 3D 点云预览（交互清单 P1 #30）。three.js 随包打、**不走 CDN**：桌面应用断网也得能用。
+// 点云走二进制 IPC，`decodeCloud` 给的 Float32Array 是缓冲上的**视图**，全程零拷贝（ADR-0006）。
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -31,21 +23,12 @@ interface Display {
 
 const MAX_POINTS_CHOICES = [100_000, 500_000, 2_000_000, 8_000_000];
 
-/**
- * 已取回的点云缓存。
- *
- * 键是 runId+node+port+maxPoints —— 少了任何一段都会串味：
- * 少 runId 会在重跑之后拿到上一次的结果，少 maxPoints 会让滑块拖了没反应。
- * 切换选中节点来回看是最常见的操作，没有它每次都要走一遍 IPC。
- */
+/** 已取回的点云缓存。键是 runId+node+port+maxPoints，少任何一段都会串味：
+ *  少 runId 会在重跑后拿到上次结果，少 maxPoints 会让滑块拖了没反应。 */
 const cloudCache = new Map<string, CloudPayload>();
 
-/**
- * 缓存的**字节**预算，不是条数预算。
- *
- * 按条数封顶是错的：maxPoints 最大到 8M，一条就是 96MB 坐标 + 32MB 强度，
- * 8 条能攒到 1GB。按字节算才对得上「大概占多少内存」这个人能理解的量。
- */
+/** 缓存的**字节**预算，不是条数预算：8M 点一条就是 96MB 坐标 + 32MB 强度，
+ *  按条数封顶的话 8 条能攒到 1GB。 */
 const CACHE_BYTES = 256 * 1024 * 1024;
 
 function payloadBytes(p: CloudPayload) {
@@ -146,10 +129,8 @@ function createScene(host: HTMLDivElement): Scene {
         if (Array.isArray(m)) m.forEach((x) => x.dispose());
         else m.dispose();
       }
-      // renderer.dispose() **不释放 WebGL 上下文**（那是 forceContextLoss）。
-      // 少了这一句，每次挂载/卸载（StrictMode 的双挂载、HMR、面板开合）
-      // 就漏一个上下文；浏览器攒够十几个之后开始逐出最老的，
-      // 表现是视图突然变全黑而且不报错。
+      // renderer.dispose() **不释放 WebGL 上下文**（那是 forceContextLoss），
+      // 少了它每次挂载/卸载漏一个，攒够十几个后视图突然全黑（见 README「踩过的坑」）。
       renderer.dispose();
       renderer.forceContextLoss();
       host.removeChild(renderer.domElement);
@@ -230,9 +211,8 @@ export function Viewer3D() {
   const [pointSize, setPointSize] = useState(1.6);
   const pointSizeRef = useRef(1.6);
   const [maxPoints, setMaxPoints] = useState(2_000_000);
-  // 云、状态、以及**它属于哪个节点**必须一起更新。
-  // 拆成三个 useState 的话，切换节点时会短暂出现「标题是新节点、点云还是旧节点」
-  // 的中间态 —— 肉眼几乎看不见，但验收脚本会稳定地读到它。
+  // 云、状态、以及**它属于哪个节点**必须一起换：拆成三个 useState 的话，切换节点时会出现
+  // 「标题是新节点、点云还是旧节点」的中间态 —— 肉眼看不见，但验收脚本会稳定读到它。
   const [display, setDisplay] = useState<Display>({
     nodeId: null,
     cloud: null,
@@ -251,18 +231,14 @@ export function Viewer3D() {
     () => (selectedId ? nodes.find((n) => n.id === selectedId) : undefined),
     [selectedId, nodes],
   );
-  // 只订阅**这一个节点的状态字符串**，不要订阅整张 nodes Map。
-  // 那张 Map 每来一条事件就是一个新引用（包括每 50ms 一条的 node_progress），
-  // 拿它当 effect 依赖的话：取云请求发出去 → 下一条进度事件让 effect 重跑 →
-  // 旧请求作废、发新请求 → 循环。选中一个刚跑完的节点、而别的节点还在跑时，
-  // 会排起一队几十兆的 IPC 往返。
+  // 只订阅**这一个节点的状态字符串**，不要订阅整张 nodes Map ——
+  // 那张 Map 每来一条事件就是新引用，会排起一队几十兆的 IPC（见 README「踩过的坑」）。
   const selectedState = useExecutionStore((s) =>
     selectedId ? s.nodes.get(selectedId)?.state : undefined,
   );
 
-  // 选了「强度」但这片云没有强度通道时，实际用的是高度着色 ——
-  // 那就让下拉框也显示「高度」。下拉框写着强度、画面却是高度，
-  // 用户只会以为强度数据本身有问题。
+  // 选了「强度」但这片云没有强度通道时实际走高度着色，那就让下拉框也显示「高度」——
+  // 下拉框写着强度、画面却是高度，用户只会以为强度数据本身有问题。
   const effectiveColorMode: ColorMode =
     colorMode === "intensity" && display.cloud?.intensity == null ? "height" : colorMode;
 
@@ -348,9 +324,8 @@ export function Viewer3D() {
       } catch (e) {
         show(e instanceof Error ? e.message : String(e));
       } finally {
-        // 注意这里**不看 cancelled**：切换节点时旧请求会被作废，
-        // 如果那时不把 loading 放下来，而新选中的节点又不需要发请求
-        // （比如它根本没有点云输出），界面就会永远停在「正在取点云…」。
+        // 这里**不看 cancelled**：切换节点会作废旧请求，若那时不放下 loading，
+        // 而新节点又不需要发请求（比如没有点云输出），界面就永远停在「正在取点云…」。
         setLoading(false);
       }
     })();
@@ -403,11 +378,8 @@ export function Viewer3D() {
     scene.points = points;
   }, [cloud, effectiveColorMode]);
 
-  // 点大小只改材质，不重建几何体。
-  //
-  // 这一条曾经形同虚设：pointSize 同时也在上面那个 effect 的依赖里，于是拖一下
-  // 滑块就要重新分配一次 24MB 的颜色数组、重扫两百万个点、再传一次 GPU ——
-  // 每个 input 事件一遍，拖动全程界面是卡死的。
+  // 点大小只改材质，不重建几何体 —— 它曾经也在上面那个 effect 的依赖里，
+  // 拖一下滑块就要重分配 24MB 颜色数组、重扫两百万点（见 README「踩过的坑」）。
   useEffect(() => {
     pointSizeRef.current = pointSize;
     const p = sceneRef.current?.points;

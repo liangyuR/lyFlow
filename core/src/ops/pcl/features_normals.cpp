@@ -49,9 +49,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   if (ctx.cancelled()) return Status::Ok();
   ctx.progress(0.9f);
 
-  // 输出是「输入点云 + normals 通道」，不是一片新的云 —— 所以从 in 拷一份，
-  // 而不是 adapter::fromPcl()：后者只带 xyz，intensity/rgb 会凭空消失，
-  // 而「估个法线把颜色估没了」是那种一周后才有人发现的 bug。
+  // 输出是「输入点云 + normals 通道」，所以从 in 拷一份而不是 adapter::fromPcl()——
+  // 后者只带 xyz，intensity/rgb 会凭空消失。
   PointCloud out = in;
   out.normals.assign(in.pointCount() * 3, 0.0f);
   std::size_t degenerate = 0;

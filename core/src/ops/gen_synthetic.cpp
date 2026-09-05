@@ -5,12 +5,8 @@
 namespace lyflow::ops {
 namespace {
 
-// 一块地面 + 一个立方体 + 高斯噪声 + 离群点。
-//
-// 这个算子存在的理由是**不让测试与演示依赖二进制样例数据**：
-// 仓库里不放 .pcd，CI 上也不需要下载什么东西，`gen.synthetic → ...` 就是
-// 一条完整可跑的 pipeline。而且它的形状是刻意选的 —— 有平面（喂 RANSAC）、
-// 有明显离群点（喂离群点滤波）、有厚度（喂体素降采样）。
+// 一块地面 + 一个立方体 + 高斯噪声 + 离群点。形状是刻意选的：有平面、有离群点、有厚度。
+// 存在的理由是让测试与演示不依赖二进制样例数据（仓库里不放 .pcd）。
 Status compute(const Inputs&, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   const auto total = static_cast<std::size_t>(params.integer("pointCount"));
   const double noise = params.number("noise");

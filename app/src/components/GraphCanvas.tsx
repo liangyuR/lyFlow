@@ -1,10 +1,5 @@
-//
-// 画布。
-//
-// 这里把 React Flow 的交互事件翻译成 graph store 的**语义化动作**。
-// 翻译层很薄但很重要：React Flow 说的是「节点数组第 3 项的 position 变了」，
-// GraphDoc 要听的是「移动了这几个节点」。前者没法做撤销，后者可以。
-//
+// 画布。把 React Flow 的交互事件翻译成 graph store 的语义化动作 ——
+// 「节点数组第 3 项的 position 变了」没法做撤销，「移动了这几个节点」可以。
 
 import {
   Background,
@@ -56,9 +51,8 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
   const { screenToFlowPosition } = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
 
-  // 节点量测尺寸的旁路缓存。不进 GraphDoc（那是 UI 运行时状态），
-  // 但 React Flow 的 MiniMap 需要它才肯画节点 —— 见 mapping.ts 的 MeasuredSizes。
-  // 用 ref 存数据、用一个计数器触发重渲染：尺寸稳定后计数器就不再变，不会自激。
+  // 节点量测尺寸的旁路缓存：不进 GraphDoc，但 MiniMap 需要它才肯画节点。
+  // ref 存数据 + 计数器触发重渲染，尺寸稳定后计数器不再变，不会自激。
   const measured = useRef(new Map<string, { width: number; height: number }>());
   const [measuredTick, setMeasuredTick] = useState(0);
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
@@ -127,10 +121,8 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     }
   }, []);
 
-  /**
-   * 拖线过程中实时判定能不能落。这是「手感」那一层：不合法的端口连不上，
-   * 用户不用先连上再被弹错。权威校验仍然在 C++ 侧（docs/architecture.md）。
-   */
+  /** 拖线过程中实时判定能不能落。这是「手感」那一层，
+   *  权威校验仍然在 C++ 侧（docs/architecture.md）。 */
   const isValidConnection = useCallback(
     (c: Connection | Edge) => {
       const source = "source" in c ? c.source : null;
@@ -219,11 +211,8 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         onSelectionChange={onSelectionChange}
         onNodeContextMenu={onNodeContextMenu}
         onPaneClick={closeMenu}
-        // Backspace 不参与删除：在参数输入框里退格却删掉了节点是经典事故。
-        // React Flow 会忽略来自输入框的按键，但显式收窄更保险。
-        // 必须关掉：React Flow 底层的 d3-zoom 给 pane 装了 dblclick 缩放，
-        // 它会 stopImmediatePropagation，把 dblclick 拦死在冒泡到这里之前。
-        // 而且双击空白处开搜索面板才是节点编辑器的通用预期，缩放有滚轮。
+        // zoomOnDoubleClick 必须关：d3-zoom 会 stopImmediatePropagation 把双击拦死。
+        // deleteKeyCode 不含 Backspace：输入框里退格却删掉节点是经典事故（app/README.md）。
         zoomOnDoubleClick={false}
         deleteKeyCode={["Delete"]}
         multiSelectionKeyCode={["Shift", "Control"]}

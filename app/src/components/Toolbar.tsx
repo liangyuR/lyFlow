@@ -23,12 +23,8 @@ function formatDuration(ms: number): string {
   return `${Math.round(ms)} ms`;
 }
 
-/**
- * 运行中的计时器。
- *
- * 单独拆出来是为了不让每秒一次的重渲染波及整个工具栏 ——
- * 尤其是那个文档名输入框，重渲染会打断输入法的组合状态。
- */
+/** 运行中的计时器。单独拆出来，免得每秒一次的重渲染波及整个工具栏 ——
+ *  尤其是文档名输入框，重渲染会打断输入法的组合状态。 */
 function RunClock({ startedAt }: { startedAt: number }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {

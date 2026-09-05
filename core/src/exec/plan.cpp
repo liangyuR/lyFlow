@@ -434,8 +434,6 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
   }
 
   // -- cacheKey：内容寻址（D4）--------------------------------------------
-  // 从第一天就算，即便 M2 还不复用。M3 打开缓存时只是「不再清空 + 加 LRU」，
-  // 键的定义不用动 —— 否则老缓存全部失效，等于白算一个里程碑。
   for (PlanNode& pn : out.nodes) {
     if (!pn.op || !pn.valid) continue;
     Hasher h;

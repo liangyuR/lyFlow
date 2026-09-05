@@ -49,9 +49,7 @@ void writeError(JsonWriter& w, const Status& s) {
 }
 
 /// 事件序列化 + 回调。seq 单调递增，前端据此检测丢包与乱序。
-///
-/// 事件全部在**同一个工作线程**上产生，所以这里不用加锁；
-/// 一旦将来并行执行（M3），入口就要串行化。
+/// 并行执行下多个 worker 会同时发事件，所以入口整体加锁。
 class EventSink {
  public:
   EventSink(std::string runId, lyflow_event_cb cb, void* user)
@@ -243,9 +241,8 @@ Run::~Run() {
 void Run::cancel() { cancelled_.store(true, std::memory_order_relaxed); }
 
 void Run::join() {
-  // 必须自己加锁：两个线程同时 join 是数据竞争，而且对已经 join 过的 thread
-  // 再 join 一次是 UD。Rust 侧的 RunHandle 也有一把锁，但 C ABI 不能把正确性
-  // 押在「调用方一定加了锁」上 —— headless CLI（M4）就是另一个调用方。
+  // 必须自己加锁：并发 join 是数据竞争，重复 join 已 join 过的 thread 是 UB。
+  // C ABI 不能把正确性押在「调用方一定加了锁」上。
   std::lock_guard<std::mutex> lock(joinMutex_);
   if (joined_) return;
   if (thread_.joinable()) thread_.join();
@@ -253,10 +250,8 @@ void Run::join() {
 }
 
 void Run::work() {
-  // c_api.h 的承诺是「异常绝不跨 ABI」，而这个函数是一个 std::thread 的函数体：
-  // 从这里逃出去的异常直接 std::terminate，整个 app 无声无息地没了。
-  // compute() 已经单独兜过一层，这一层兜的是 parse / buildPlan / externalKey 钩子 /
-  // 事件序列化 / 结果仓写入 —— 它们同样可能抛 bad_alloc。
+  // 这是 std::thread 的函数体：逃出去的异常直接 std::terminate，整个 app 无声无息地没了。
+  // compute() 另有一层，这里兜的是 parse / buildPlan / externalKey / 事件序列化 / 写结果仓。
   try {
     workImpl();
   } catch (const std::exception& e) {
@@ -349,9 +344,8 @@ void Run::workImpl() {
       continue;
     }
 
-    // 上游失败 → cancelled + upstream_failed。
-    // 严格不用 skipped：skipped 保留给缓存命中（M3），两者混用的话
-    // 用户永远分不清「没跑」和「不用跑」。
+    // 上游失败 → cancelled + upstream_failed。严格不用 skipped：
+    // 后者保留给缓存命中，混用的话用户分不清「没跑」和「不用跑」。
     std::string blockedBy;
     for (const InputBinding& b : node.inputs) {
       if (b.fromNode < 0) continue;
@@ -385,10 +379,8 @@ void Run::workImpl() {
         inputsOk = false;
         break;
       }
-      // 端口**声明的**类型在编译期查过了，但真正流过来的 Data 是什么 Kind
-      // 还没人查。Any 类型（Reroute、Debug View）会让声明层面的检查全部通过，
-      // 而算子里那句 `*inputs.get("cloud").asCloud()` 会对着 nullptr 解引用 ——
-      // 在 MSVC 上那是 SEH，下面那个 catch(...) 根本兜不住。
+      // 声明类型编译期查过了，但流过来的 Data 是什么 Kind 还没人查。Any 端口会让
+      // 声明层面的检查全过，而算子里的 asCloud() 返回 nullptr，解引用是 SEH，兜不住。
       const Port* declared = nullptr;
       for (const Port& p : node.op->inputs) {
         if (p.name == b.port) { declared = &p; break; }

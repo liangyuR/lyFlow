@@ -1,15 +1,5 @@
-//
-// 参数控件。
-//
-// **这里是前端唯一的「算子知识」**：一张 param.type -> React 控件的映射表
-// （docs/operator-manifest.md）。新增一种参数类型的成本是这里加一个 case，
-// 有界且可接受；新增一个算子的成本是零。
-//
-// 撤销粒度的处理贯穿全文件：
-//   输入框  —— 本地 state，失焦/回车才提交，一次编辑一条撤销
-//   滑块    —— 按下时 begin()，松开时 commit()，一次拖动一条撤销
-// 少了这层，拖一次滑块会在撤销栈里塞几十条，Ctrl+Z 变成没有意义的操作。
-//
+// 参数控件。**前端唯一的「算子知识」**：一张 param.type -> React 控件的映射表（docs/operator-manifest.md）。
+// 撤销粒度贯穿全文件：输入框失焦/回车才提交，滑块用 begin()/commit() 包住一次拖动（见 README）。
 
 import { useEffect, useRef, useState } from "react";
 

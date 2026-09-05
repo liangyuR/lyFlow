@@ -1,11 +1,6 @@
 #pragma once
-//
-// cacheKey 的哈希。XXH3-128：非加密但抗碰撞足够（128 位），而且快到可以忽略 ——
-// 编译一张几十个节点的图时哈希开销必须是零头，否则 live preview 每次拖参数
-// 都要为算键付一次钱。
-//
-// 单头 vendored（D7），XXH_INLINE_ALL 方式引入，不需要额外的 .c。
-//
+// cacheKey 的哈希。XXH3-128：非加密但 128 位抗碰撞足够，快到编译一张图时可以忽略。
+// 单头 vendored（D7），XXH_INLINE_ALL 引入，不需要额外的 .c。
 #include <cstdint>
 #include <string>
 #include <vector>

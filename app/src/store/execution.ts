@@ -1,18 +1,5 @@
-//
-// 执行状态 store。
-//
-// **不进 GraphDoc，不进撤销栈。** 节点跑成什么样是运行时状态，和 selected、
-// 画布视口是同一类东西（ADR-0002）。混进 GraphDoc 的后果是文件里出现
-// "state": "done" 这种字段，以及按 Ctrl+Z 撤销掉一次运行结果。
-//
-// 事件流的两条纪律：
-//   1. runId 对不上的事件不进状态 —— 抢占式运行（D3）下，旧 run 的事件会在
-//      新 run 开始之后才到，混进去的话节点会在两次运行的状态之间跳。
-//      但也不能直接扔：新 run 的事件可能比 run_graph 的返回值还早到，
-//      所以先攒在 orphans 里，beginRun 时按 runId 认领（见下）。
-//   2. seq 不连续就 warn 但继续 —— 丢一条事件不该让界面停摆，但必须留下痕迹，
-//      否则「偶尔有个节点一直是 running」这种问题永远查不出来。
-//
+// 执行状态 store。运行时状态，不进 GraphDoc、不进撤销栈（ADR-0002）。
+// runId 对不上的事件先攒进 orphans 等 beginRun 认领；seq 不连续只 warn 不停摆。
 
 import { useMemo } from "react";
 import { create } from "zustand";
@@ -62,24 +49,15 @@ interface ExecutionState {
   targets: string[];
   nodes: Map<string, NodeExecution>;
   logs: LogEntry[];
-  /**
-   * 结果是否已经过时：运行之后图被改过。
-   * 缓存语义的可视化（交互清单 P1 #23），成本极低但很值钱 ——
-   * 否则用户看着一片绿色的节点，却不知道那是三次修改之前的结果。
-   */
+  /** 结果是否已经过时：运行之后图被改过（交互清单 P1 #23）。
+   *  否则用户看着一片绿，却不知道那是三次修改之前的结果。 */
   stale: boolean;
   /** 上一次收到的 seq，用来检测丢包。 */
   lastSeq: number;
   /** 启动失败之类的错误，直接显示在工具栏上。 */
   error: string | null;
-  /**
-   * 还不知道该归给谁的事件。
-   *
-   * C++ 的 `lyflow_run_start` 是**先起线程再返回句柄**，所以事件完全可能在
-   * `run_graph` 这个 IPC 调用返回之前就到了前端 —— 那一刻 store 里还没有
-   * runId。直接按「runId 对不上就丢」处理的话，一张小图可能整场运行都跑完了，
-   * 界面上什么都没发生。所以先攒着，`beginRun` 时按 runId 认领。
-   */
+  /** 还不知道该归给谁的事件：C++ 先起线程再返回句柄，事件可能比 `run_graph`
+   *  的返回值先到。直接丢会让小图整场跑完而界面毫无反应，所以先攒着认领。 */
   orphans: ExecutionEvent[];
 
   beginRun(runId: string, targets: string[]): void;
@@ -132,9 +110,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   apply(event) {
     const s = get();
     if (s.runId !== event.runId) {
-      // 还没认领的运行：先攒着（上限防止一场失控的运行把内存吃光）。
-      // 已经过期的运行：runId 不会再被 beginRun 认领，攒下的那点很快被下一次
-      // beginRun 清掉。
+      // 还没认领的运行先攒着（上限防止失控的运行吃光内存）；已过期的 runId
+      // 不会再被认领，攒下的那点很快被下一次 beginRun 清掉。
       if (s.orphans.length < ORPHAN_LIMIT) {
         set({ orphans: s.orphans.concat(event) });
       }
@@ -227,9 +204,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   },
 }));
 
-// ---------------------------------------------------------------------------
-// 派生选择器
-// ---------------------------------------------------------------------------
+// 派生选择器 -----------------------------------------------------------------
 
 const NO_ERRORS: ReadonlyMap<string, string> = new Map();
 
@@ -238,12 +213,8 @@ export function useNodeExecution(nodeId: string): NodeExecution | undefined {
   return useExecutionStore((s) => s.nodes.get(nodeId));
 }
 
-/**
- * 某节点的 paramPath → 错误消息。ParamControls 据此画红框（交互清单 P0 #15）。
- *
- * 没有错误时返回同一个空 Map 而不是每次新建：这个 hook 挂在每一个参数控件上，
- * 每次返回新引用会让整个检查器在每条事件到达时全量重渲染。
- */
+/** 某节点的 paramPath → 错误消息，ParamControls 据此画红框（交互清单 P0 #15）。
+ *  没有错误时返回同一个空 Map：新引用会让整个检查器每来一条事件就全量重渲染。 */
 export function useParamErrors(nodeId: string): ReadonlyMap<string, string> {
   const node = useNodeExecution(nodeId);
   return useMemo(() => {
@@ -277,18 +248,10 @@ export function summarize(nodes: ReadonlyMap<string, NodeExecution>): {
   return { done, error, cancelled, running, total: nodes.size };
 }
 
-// ---------------------------------------------------------------------------
-// 事件订阅
-// ---------------------------------------------------------------------------
+// 事件订阅 -------------------------------------------------------------------
 
-/**
- * 订阅只能有一份，而守卫必须是**这个 Promise**，不是它的结果。
- *
- * 守 `unlisten !== null` 是不够的：它在 await 之后才赋值，而 StrictMode 的
- * 挂载→卸载→再挂载会让 effect 跑两遍，两次都看到 null。后果是注册了两个监听器，
- * 第一个的 unlisten 被覆盖再也调不到（泄漏），而且每条事件都被 apply 两遍 ——
- * 表现是控制台刷满「seq 不连续」的告警、日志条目翻倍。
- */
+/** 订阅只能有一份，守卫必须是**这个 Promise** 而不是它的结果：unlisten 在
+ *  await 之后才赋值，StrictMode 的两遍 effect 都看到 null（见 README）。 */
 let subscription: Promise<() => void> | null = null;
 
 /** 在 App 挂载时调一次。重复调用是幂等的。 */
@@ -297,23 +260,10 @@ export async function subscribeExecutionEvents(): Promise<void> {
   await subscription;
 }
 
-/**
- * 启动一次运行。
- *
- * 「先 beginRun 再 await」不行 —— 那时还没有 runId；「先 await 再 beginRun」
- * 也不行 —— 事件可能在 invoke 返回之前就到了。所以走第三条路：
- * 认不出 runId 的事件先进 orphans，beginRun 时按 runId 认领（见上）。
- * 抢占式运行下这也顺带处理了「新 run 的头几条事件和旧 run 的尾巴交错」。
- */
-/**
- * 本地的运行序号。
- *
- * 两次 run_graph 走的是不同的 Tauri 工作线程，**回复的顺序不保证等于运行开始的
- * 顺序**。用户快点两下（也就是 D3 抢占的正常路径），如果 A 的回复后到，
- * `beginRun(A)` 会盖掉 `beginRun(B)`，于是 store 认的是已经被取消的 A，
- * B 的事件全部落进 orphans 再也无人认领 —— 界面会永远停在 running。
- * 序号让后发的那次调用赢，与 C++ 侧「后开始的 run 抢占先开始的」一致。
- */
+/** 启动一次运行。beginRun 只能在拿到 runId 之后，而事件可能更早到，
+ *  所以认不出 runId 的先进 orphans、beginRun 时认领（见上）。 */
+/** 本地的运行序号：两次 run_graph 走不同的 Tauri 工作线程，回复顺序不保证等于
+ *  发起顺序。序号让后发的那次赢，与 C++ 侧「后开始的抢占先开始的」一致。 */
 let runTicket = 0;
 
 export async function startRun(

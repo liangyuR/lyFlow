@@ -46,12 +46,8 @@ struct FieldReader {
     }
   }
 
-  /// rgb 在 PCD 里的历史包袱：可能声明成 float32（32 位里塞的其实是 uint32），
-  /// 也可能就是 uint32。两种都要认，否则彩色点云读进来是一片黑。
-  ///
-  /// 按字段**声明的宽度**读，不要无条件读 4 字节：一个
-  /// `FIELDS x y z rgb / SIZE 4 4 4 1` 的头 PCL 解析得下来，point_step 是 13，
-  /// 无条件读 4 字节会在最后一个点上越过 data 的末尾三个字节。
+  /// rgb 在 PCD 里可能声明成 float32 也可能是 uint32，两种都要认。
+  /// 按字段声明的宽度读 —— 无条件读 4 字节会在 SIZE 为 1 的头上越过 data 末尾。
   std::uint32_t readPacked(const std::uint8_t* p) const {
     std::uint32_t v = 0;
     std::memcpy(&v, p + offset, width < 4 ? width : 4);

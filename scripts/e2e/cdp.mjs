@@ -1,13 +1,5 @@
-//
-// 极简 CDP 客户端。
-//
-// 为什么不用 puppeteer/playwright：它们要下载自己的浏览器，而我们要驱动的是
-// **Tauri 里那个 WebView2**，不是另开一个 Chrome。真正需要的能力只有三件：
-// 找到 target、开 WebSocket、发 Runtime.evaluate —— 一百来行，不值得为它
-// 引一棵几百兆的依赖树，也不值得让验收依赖一次网络下载。
-//
-// Node 22+ 自带 WebSocket 与 fetch，所以这里零依赖。
-//
+// 极简 CDP 客户端：找 target、开 WebSocket、发 Runtime.evaluate。零依赖
+// （Node 22+ 自带 WebSocket 与 fetch）；为什么不用 puppeteer 见 ./README.md。
 
 /** 轮询 CDP 的 /json/list，直到出现一个页面 target。 */
 export async function waitForTarget(port, { timeoutMs = 90_000, match } = {}) {
@@ -84,13 +76,8 @@ export class Cdp {
     });
   }
 
-  /**
-   * 在页面里跑一段表达式，拿回 JSON 化的结果。
-   *
-   * `awaitPromise` 默认开着：验收里几乎每一步都要等一个 Promise，
-   * 忘了开的话拿到的是 `{}`（一个 Promise 的 JSON 形态），
-   * 断言会以一种极其费解的方式失败。
-   */
+  /** 在页面里跑一段表达式，拿回 JSON 化的结果。`awaitPromise` 默认开着 ——
+   * 忘了开拿到的是 `{}`（Promise 的 JSON 形态），断言会以极费解的方式失败。 */
   async eval(expression, { awaitPromise = true } = {}) {
     const result = await this.send("Runtime.evaluate", {
       expression: `(async () => { ${expression} })()`,

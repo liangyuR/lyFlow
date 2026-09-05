@@ -41,9 +41,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
 
   pcl::SACSegmentation<pcl::PointXYZ> seg;
   seg.setOptimizeCoefficients(true);
-  // 带轴约束时换成 PERPENDICULAR_PLANE：地面提取这类任务里，
-  // 「最大的平面」不一定是想要的那个（墙面往往更大），
-  // 加约束比事后拿法线去筛省事得多。
+  // 带轴约束时换成 PERPENDICULAR_PLANE：地面提取里「最大的平面」常是墙面，
+  // 加约束比事后拿法线去筛省事。
   seg.setModelType(useAxis ? pcl::SACMODEL_PERPENDICULAR_PLANE : pcl::SACMODEL_PLANE);
   seg.setMethodType(pcl::SAC_RANSAC);
   seg.setDistanceThreshold(distanceThreshold);

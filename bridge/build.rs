@@ -1,10 +1,7 @@
 use std::path::{Path, PathBuf};
 
-/// 递归收集需要监听变更的文件与目录。
-///
-/// 目录本身也要 `rerun-if-changed`：新增一个 `src/ops/xxx.cpp` 时目录 mtime 会变，
-/// cargo 才会重跑 build.rs 把新算子编进去。否则「加算子」要手动 touch 才生效，
-/// 正好毁掉 ADR-0003 想要的那个流畅反馈循环。
+/// 递归收集需要监听变更的文件与目录。目录本身也要 rerun-if-changed：
+/// 新增 src/ops/xxx.cpp 时只有目录 mtime 变，否则加算子要手动 touch 才生效。
 fn collect(dir: &Path, files: &mut Vec<PathBuf>, dirs: &mut Vec<PathBuf>) {
     dirs.push(dir.to_path_buf());
     let entries = match std::fs::read_dir(dir) {
@@ -38,15 +35,8 @@ fn which(name: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// Ninja 的位置。
-///
-/// cargo 不像开发者的命令行那样跑过 vcvars，所以 PATH 上通常**没有** ninja ——
-/// 只写 `.generator("Ninja")` 的话，在一台干净机器上会得到一句
-/// 「CMake was unable to find a build program corresponding to Ninja」。
-/// Visual Studio 自带一份 ninja，就在它自带的那个 cmake 旁边：
-///   Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe
-///   Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe
-/// 找不到就退回 CMake 的默认生成器（Visual Studio），慢一点但能用。
+/// Ninja 的位置。cargo 没跑过 vcvars，PATH 上通常没有 ninja；
+/// 依次试 LYFLOW_NINJA → PATH → VS 自带的那份 → vswhere，都没有就退回默认生成器。
 fn find_ninja() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("LYFLOW_NINJA").map(PathBuf::from) {
         if p.is_file() {
@@ -96,9 +86,8 @@ fn find_ninja() -> Option<PathBuf> {
     ninja.is_file().then_some(ninja)
 }
 
-/// CMake 的 binary dir 一旦用某个生成器配置过，就不能换 —— 换了只会得到
-/// 「Does not match the generator used previously」。这种情况下把目录清掉
-/// 重来，比让开发者去猜该删哪个目录强。
+/// CMake 的 binary dir 一旦用某个生成器配置过就不能换（「Does not match the
+/// generator used previously」）。发现不一致就把目录清掉重来。
 fn drop_incompatible_cache(build_dir: &Path, generator: Option<&str>) {
     let cache = build_dir.join("CMakeCache.txt");
     let Ok(text) = std::fs::read_to_string(&cache) else {
@@ -125,15 +114,8 @@ fn vcpkg_toolchain() -> Option<PathBuf> {
 }
 
 fn main() {
-    // ADR-0004：core 是 CMake 构建的 DLL，Rust 用 libloading 运行时加载。
-    //
-    // 这里**不发任何 rustc-link-lib**：不链 import 库，也就不需要在 build 期
-    // 解析 PCL 那二十多个依赖。构建脚本的全部工作是「让 CMake 把 DLL 编出来，
-    // 再把整个输出目录拷到 cargo 的 target 下」。
-    // 用 CARGO_MANIFEST_DIR 拼绝对路径，**不要** canonicalize()：
-    // Windows 上它会返回 `\\?\D:\...` 这种扩展长度路径，而 CMake 的
-    // file(GLOB) 在这种路径下一个文件都匹配不到，最后报的是
-    // 「No SOURCES given to target」—— 离真正的原因十万八千里。
+    // ADR-0004：core 是 CMake 构建的 DLL，这里不发任何 rustc-link-lib。
+    // 路径别 canonicalize()——扩展长度前缀会让 CMake 的 file(GLOB) 一个文件都匹配不到。
     let core = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("bridge 应当有父目录")
@@ -158,16 +140,12 @@ fn main() {
     println!("cargo:rerun-if-env-changed=VCPKG_ROOT");
 
     let mut cfg = cmake::Config::new(&core);
-    // D8：core 永远 RelWithDebInfo，**不跟 cargo profile 走**。
-    // Rust 总是 /MD，而 vcpkg 的 debug 库是 /MDd —— 混用两种 CRT
-    // 不会链接失败，会在完全无关的地方运行时崩溃。
+    // D8：core 永远 RelWithDebInfo，不跟 cargo profile 走。
+    // Rust 总是 /MD 而 vcpkg 的 debug 库是 /MDd，混用会在无关的地方崩。
     cfg.profile("RelWithDebInfo")
         .define("CMAKE_BUILD_TYPE", "RelWithDebInfo")
-        // cmake crate 默认会 `--build . --target install`。core 没有 install 规则；
-        // 而且这里只需要 DLL —— dump-manifest 和 core-tests 两个 exe 归
-        // scripts/build-core.ps1 管，在这儿再编一遍只是白等。
-        // vcpkg 的 applocal 对 SHARED 目标同样生效，PCL 那堆依赖 DLL 照样会
-        // 被拷到 bin/ 旁边。
+        // 只构建 lyflow_core：core 没有 install 规则，两个 exe 归 build-core.ps1 管。
+        // vcpkg 的 applocal 对 SHARED 目标同样生效，PCL 的依赖 DLL 照样落到 bin/。
         .build_target("lyflow_core");
     let ninja = find_ninja();
     if let Some(ninja) = &ninja {
@@ -187,10 +165,8 @@ fn main() {
     }
     let out = cfg.build();
 
-    // CMake 的所有产物（lyflow_core.dll、两个 exe，以及 vcpkg applocal 拷来的
-    // PCL/boost/flann/lz4 等依赖）都在 <build>/bin。整目录拷到 target/<profile>/
-    // 和它的 deps/ —— 前者给 tauri dev / tauri build 用，后者给 cargo test 用
-    // （测试可执行文件跑在 deps/ 里，LoadLibrary 只看它自己那个目录）。
+    // CMake 的产物都在 <build>/bin，整目录拷到 target/<profile>/ 与它的 deps/：
+    // 前者给 tauri dev/build，后者给 cargo test（测试 exe 跑在 deps/ 里）。
     let bin = out.join("build").join("bin");
     let bin = if bin.exists() { bin } else { out.join("bin") };
     println!("cargo:rustc-env=LYFLOW_CORE_BIN={}", bin.display());
@@ -202,11 +178,8 @@ fn main() {
         }
     }
 
-    // D9：给 exe 贴一份带 activeCodePage=UTF-8 的清单。
-    //
-    // 注意 app_manifest 是**整份替换**而不是合并（tauri-build 2.6.3 的
-    // `res.set_manifest`），所以 lyflow-app.manifest 里必须自带 Tauri 原来的
-    // Common-Controls v6 依赖，否则文件对话框会掉回旧样式且不报错。
+    // D9：给 exe 贴带 activeCodePage=UTF-8 的清单。app_manifest 是整份替换而非合并，
+    // 所以 lyflow-app.manifest 必须自带 Common-Controls v6 依赖（bridge/README.md）。
     println!("cargo:rerun-if-changed=lyflow-app.manifest");
     let windows = tauri_build::WindowsAttributes::new().app_manifest(include_str!(
         "lyflow-app.manifest"
@@ -215,11 +188,8 @@ fn main() {
         .expect("tauri_build 失败");
 }
 
-/// 从 OUT_DIR 反推 `target/<profile>/`。
-///
-/// OUT_DIR 形如 `target/debug/build/lyflow-<hash>/out`，往上数四层就是
-/// `target/debug`。cargo 没有提供这个路径的官方变量，但这个布局十几年没变过，
-/// 而且拷贝失败只是 warning + 运行时报「找不到 lyflow_core.dll」，不是静默错误。
+/// 从 OUT_DIR 反推 `target/<profile>/`（往上数四层）。cargo 没有官方变量，
+/// 但拷贝失败只是 warning + 运行时报「找不到 lyflow_core.dll」，不是静默错误。
 fn target_profile_dir() -> PathBuf {
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     out.ancestors()

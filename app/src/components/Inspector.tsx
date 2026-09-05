@@ -1,9 +1,5 @@
-//
-// 右侧检查器：选中节点的参数表单。
-//
-// 表单完全由 manifest 生成 —— 字段、控件、范围、单位、分组、联动条件全部来自
-// C++ 侧（ADR-0003）。这个文件里没有任何算子的名字。
-//
+// 右侧检查器：选中节点的参数表单。字段、控件、范围、单位、分组、联动条件
+// 全部由 manifest 生成（ADR-0003），这个文件里没有任何算子的名字。
 
 import { groupParams, effectiveParams, isEnabled, isVisible, valueEquals } from "../lib/params";
 import { useNodeExecution, useParamErrors } from "../store/execution";

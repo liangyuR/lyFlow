@@ -31,7 +31,6 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   auto cloud = adapter::toPcl(in);
 
   // 产出 Indices 而不是点云（adapter.h 的约定）：PCL 只认识 XYZ，
-  // 让它直接出云的话 intensity/normals/rgb 会被悄悄吃掉。
   // 拿下标回来再走 PointCloud::select，通道搬运只在一处发生。
   pcl::Indices kept;
   pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;

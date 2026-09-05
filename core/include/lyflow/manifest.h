@@ -1,10 +1,6 @@
 #pragma once
-//
-// LyFlow 算子描述数据结构。
-//
-// 这是三层契约的 C++ 侧真实来源。序列化结果必须符合
-// schema/operator-manifest.schema.json —— 改这里等于改跨语言 API。
-//
+// 算子描述数据结构 —— 三层契约的 C++ 侧真实来源。
+// 序列化结果必须符合 schema/operator-manifest.schema.json，改这里等于改跨语言 API。
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -14,25 +10,21 @@
 
 namespace lyflow {
 
-// 算子的计算实体。定义在 operator.h —— 这里只需要不完整类型就能声明函数指针，
-// 这样 manifest.h 不必反过来依赖 operator.h（后者要用本文件的 Value）。
+// 算子的计算实体，定义在 operator.h。这里用不完整类型声明函数指针，
+// 免得 manifest.h 反过来依赖 operator.h（后者要用本文件的 Value）。
 class Inputs;
 class ParamView;
 class Outputs;
 class ExecContext;
 
-/// 算子的计算函数。签名从第一天就是最终形态（D3/D6）：
-/// 输入已按端口类型校验过，参数已合并默认值，ctx 提供取消与进度。
+/// 算子的计算函数。输入已按端口类型校验过，参数已合并默认值，ctx 提供取消与进度。
 using ComputeFn = Status (*)(const Inputs&, const ParamView&, Outputs&, ExecContext&);
 
 /// 可选钩子：把「文件内容变了」这类外部状态揉进 cacheKey。
 /// IO 算子返回 "size:mtime"，读不到文件时返回空串（当作没有外部状态）。
-/// M3 的缓存复用完全靠它，M2 先把口子留好。
 using ExternalKeyFn = std::string (*)(const ParamView&);
 
-// ---------------------------------------------------------------------------
-// Value —— 参数默认值。只覆盖 schema 中 param.default 允许出现的形态。
-// ---------------------------------------------------------------------------
+// ------------------------------- Value —— 参数默认值（只覆盖 param.default 的形态）
 class Value {
  public:
   enum class Kind { Null, Bool, Int, Float, String, FloatVec };
@@ -63,9 +55,7 @@ class Value {
   std::vector<double> vec_;
 };
 
-// ---------------------------------------------------------------------------
-// 端口类型表
-// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------- 端口类型表
 struct PortType {
   std::string name;
   std::string color;                      // 端口与连线着色，前端直接用
@@ -81,9 +71,7 @@ struct Port {
   bool required = true;                   // 仅对 inputs 有意义
 };
 
-// ---------------------------------------------------------------------------
-// 参数
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------- 参数
 enum class ParamType {
   Bool, Int, Float, Vec2f, Vec3f, Vec4f, Enum, Flags,
   String, Text, Path, Color, Transform, Curve,

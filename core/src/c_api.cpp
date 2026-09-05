@@ -15,12 +15,8 @@
 
 namespace {
 
-/// 进程级一次性初始化。
-///
-/// setlocale(".UTF-8") 是 D9 的第二道保险：exe 的 manifest 把**进程 ACP**
-/// 设成 UTF-8，而这一句把 **CRT 的窄字符串区域设置**也设成 UTF-8。
-/// 两者都影响 PCL 的窄字符串文件 IO，但生效范围不同 —— 而且 cargo 生成的
-/// 测试 exe 拿不到我们的 manifest，只能靠这一句。
+/// 进程级一次性初始化。setlocale(".UTF-8") 是 D9 的第二道保险：
+/// cargo 生成的测试 exe 拿不到我们的 manifest，窄字符串 IO 只能靠这一句。
 void ensureProcessInit() {
   static std::once_flag once;
   std::call_once(once, [] { std::setlocale(LC_ALL, ".UTF-8"); });

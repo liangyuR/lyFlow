@@ -48,9 +48,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
     }
   }
 
-  // 可选的姿态输入：盒子定义在这个变换的局部坐标系里。
-  // 判定时把点变到局部系再比 AABB —— 比把盒子的 8 个角变到世界系再算 OBB 简单得多，
-  // 而且对非正交变换（带缩放）也成立。
+  // 可选姿态输入：盒子定义在该变换的局部系里，判定时把点变到局部系再比 AABB。
+  // 比把 8 个角变到世界系算 OBB 简单，且对带缩放的非正交变换也成立。
   float toLocal[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
   bool hasPose = false;
   if (inputs.has("pose")) {

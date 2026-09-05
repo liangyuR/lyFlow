@@ -1,19 +1,6 @@
 #pragma once
-//
-// 算子作者面对的全部接口。
-//
-// D6：**参数校验与默认值合并集中在执行器**，manifest 驱动。算子拿到的
-// `ParamView` 已经过校验并合并了默认值，取值不会失败 —— 所以下面这些
-// getter 没有一个返回 optional 或错误码。
-//
-// 15 个算子各写一遍「参数在不在、类型对不对、有没有超范围」的后果不是多写几行，
-// 而是 paramPath 永远缺漏：某个算子忘了带 paramPath，前端就标不出红框，
-// 用户在二十个参数里猜是哪个填错了。集中一处，一次做对。
-//
-// 算子里只剩两类错误需要自己报：
-//   1. 跨参数的语义约束（passthrough 的 min >= max，带 paramPath="min"）
-//   2. IO / 输入内容问题（文件读不了带 paramPath="path"，下标不匹配带 portName）
-//
+// 算子作者面对的全部接口。D6：参数校验与默认值合并集中在执行器，取值不会失败。
+// 算子只需自己报两类错，见 core/README.md「写 compute 时的约定」。
 #include <array>
 #include <filesystem>
 #include <string>
@@ -92,10 +79,7 @@ enum class LogLevel { Debug, Info, Warn, Error };
 const char* toString(LogLevel l);
 
 /// 算子与执行器之间的回边：取消、进度、日志。
-///
-/// D3：执行从第一天就是异步 + 可取消。取消是**协作式**的 —— 算子在自己的
-/// 循环里轮询 cancelled()。抢占式取消（杀线程）在有 PCL 这种第三方库时
-/// 是纯粹的未定义行为来源。
+/// 取消是协作式的 —— 抢占式杀线程在有 PCL 时是纯粹的未定义行为来源。
 class ExecContext {
  public:
   virtual ~ExecContext() = default;

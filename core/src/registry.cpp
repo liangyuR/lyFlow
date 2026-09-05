@@ -10,9 +10,8 @@
 namespace lyflow {
 namespace {
 
-// param.type -> default 值应有的 Value::Kind。
-// 这张表是 validate() 的依据：算子作者把 leafSize 的默认值写成标量而不是
-// vec3f 时，应该在启动时炸掉，而不是让前端渲染出一个空的三分量输入框。
+// param.type -> default 值应有的 Value::Kind，validate() 的依据。
+// 默认值与声明类型不符应当在启动自检时炸掉，而不是让前端渲染出空控件。
 bool defaultKindMatches(ParamType t, const Value& v) {
   using K = Value::Kind;
   switch (t) {

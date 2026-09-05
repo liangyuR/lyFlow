@@ -7,15 +7,8 @@ Status compute(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecCon
   const PointCloud& a = *inputs.get("a").asCloud();
   const PointCloud& b = *inputs.get("b").asCloud();
 
-  // 通道求交：一方没有的通道整体丢弃。
-  //
-  // 备选做法是给缺失的一方补零，但那是在**编造数据** —— 一半点的强度是真值、
-  // 另一半是 0，下游的强度着色会显示出一条根本不存在的分界。丢掉并 log warn
-  // 至少是诚实的，用户能立刻看见发生了什么。
-  //
-  // 空点云要单独放过：hasIntensity() 就是 !intensity.empty()，所以一片
-  // 0 个点的云在这里会「什么通道都没有」，于是上游一个恰好裁空的 crop_box
-  // 会把另一侧完好的强度和颜色一起带走。空的一方对通道没有意见。
+  // 通道求交：一方没有的通道整体丢弃并 log warn（补零等于编造数据）。
+  // 空点云单独放过 —— 否则一个裁空的上游会把另一侧完好的通道一起带走。
   auto agrees = [](const PointCloud& c, bool (PointCloud::*has)() const) {
     return c.pointCount() == 0 || (c.*has)();
   };

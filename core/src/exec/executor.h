@@ -1,15 +1,6 @@
 #pragma once
-//
-// 一次运行。
-//
-// D3：执行接口从第一天就是**异步 + 回调 + 可取消**。同一时刻一个活跃 run，
-// 新 run 抢占旧 run（抢占在 Rust 侧的 RunManager 做，core 只保证 cancel/join
-// 语义可靠）。这是 live preview 的前提 —— 拖参数时每一帧都要能打断上一帧。
-//
-// 生命周期契约（也是 C ABI 的契约）：
-//   start ──► [工作线程跑] ──► cancel(可选，可多次) ──► join ──► free
-//   join 返回后回调保证不再被触发，Rust 侧据此安全释放 user 指针。
-//
+// 一次运行。D3：异步 + 回调 + 可取消，抢占在 Rust 侧的 RunManager 做。
+// 生命周期契约：start → cancel(可选、可多次) → join → free；join 返回后不再回调。
 #include <atomic>
 #include <filesystem>
 #include <mutex>

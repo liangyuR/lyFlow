@@ -1,11 +1,5 @@
-//
-// 左侧算子面板。
-//
-// 分类树完全由 manifest 的 category 字段推导（用 / 分层），前端不硬编码任何
-// 分类名。加一个新分类的算子，面板里自动长出新分支 —— 这是 M0 验收过的。
-//
-// 三种加节点的方式，因为三种人都会试：拖到画布上、双击、以及画布上双击搜索。
-//
+// 左侧算子面板。分类树完全由 manifest 的 category 推导，前端不硬编码分类名。
+// 三种加节点的方式：拖到画布、双击、画布上双击搜索 —— 因为三种人都会试。
 
 import { useReactFlow } from "@xyflow/react";
 import { useEffect, useMemo, useRef, useState } from "react";

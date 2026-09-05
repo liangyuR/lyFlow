@@ -1,13 +1,5 @@
-//! 运行的生命周期管理。
-//!
-//! D3：同一时刻只有一个活跃 run，**新 run 抢占旧 run**。这是 live preview
-//! （M4）的前提 —— 拖参数时每一帧都要能打断上一帧，所以接口从第一天就是
-//! 异步 + 可取消，而不是先做个同步版本再回来改。
-//!
-//! 内存上界由这里决定：最多同时持有两份 run 的结果 ——
-//! 正在跑的那个，和上一次跑完的那个（用户可能正在 3D 视图里看它）。
-//! 第三个出现时，最老的那个 `RunHandle` 被 drop，`lyflow_run_free` 顺手
-//! 把它在结果仓里的东西全删掉。
+//! 运行的生命周期管理。D3：同一时刻一个活跃 run，新 run 抢占旧 run。
+//! 最多同时持有两份 run 的索引（正在跑的 + 上一次完成的），详见 bridge/README.md。
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
@@ -28,11 +20,8 @@ struct EmitCtx {
     run_id: String,
 }
 
-/// C++ 工作线程调过来的回调。
-///
-/// `catch_unwind` 不是防御性编程的摆设：这里是**跨语言边界**，
-/// panic 展开穿过 C++ 栈帧是未定义行为。序列化失败、emit 失败都不该
-/// 让整个进程死掉 —— 丢一条事件，前端的 seq 检查会 warn 出来。
+/// C++ 工作线程调过来的回调。`catch_unwind` 不是摆设：panic 展开穿过 C++ 栈帧
+/// 是未定义行为，而丢一条事件只会让前端的 seq 检查 warn 一句。
 unsafe extern "C" fn trampoline(event_json: *const c_char, user: *mut c_void) {
     let _ = std::panic::catch_unwind(|| {
         if event_json.is_null() || user.is_null() {
@@ -73,12 +62,8 @@ impl RunManager {
         Self::default()
     }
 
-    /// 启动一次运行，返回 run id。
-    ///
-    /// 抢占是**同步**的：旧 run 的 cancel + join 在本函数里做完才返回。
-    /// 这样前端拿到新 run id 的时候，旧 run 的 `run_finished(cancelled)`
-    /// 一定已经发出去了，前端的「丢弃过期 runId 的事件」规则不会漏掉它。
-    /// 代价是：如果旧 run 卡在一个不可取消的 PCL 算子里，这里会等它跑完。
+    /// 启动一次运行，返回 run id。抢占是同步的：旧 run 的 cancel+join 在本函数里做完，
+    /// 前端拿到新 runId 时旧 run 的 run_finished(cancelled) 一定已经发出去了。
     pub fn start(
         &self,
         app: &AppHandle,
@@ -149,8 +134,7 @@ impl RunManager {
     }
 
     /// 当前是否还有活跃的运行。
-    // 目前只有测试在用。留着是因为 M3 的「将重算 N 个节点」提示要查它，
-    // 而它是这个类型唯一的只读窗口 —— 删掉再加回来只会让人重新想一遍锁的边界。
+    // 这个类型唯一的只读窗口。目前只有测试在用，但删掉再加回来只会让人重新想一遍锁的边界。
     #[allow(dead_code)]
     pub fn active_run_id(&self) -> Option<String> {
         self.inner
@@ -162,16 +146,8 @@ impl RunManager {
     }
 }
 
-/// 二进制点云载荷（ADR-0006）。
-///
-/// 布局（小端）：
-/// ```text
-/// u32 magic 'LYPC' | u32 pointCount | u32 totalPoints | u32 flags
-/// f32 bounds[6] | f32 xyz[3n] | [f32 intensity[n]]
-/// ```
-/// 前端 `new Float32Array(buffer, offset, len)` 零拷贝进 attribute。
-/// magic 不是装饰：IPC 上游出错时返回的可能是一段 JSON 错误文本，
-/// 没有 magic 的话前端会把它当点云画出来，然后花很久怀疑是数据的问题。
+/// 二进制点云载荷（ADR-0006）。布局见 bridge/README.md「二进制点云」。
+/// magic 不是装饰：没有它，一段 JSON 错误文本会被前端当成坐标画出来。
 pub const CLOUD_MAGIC: u32 = 0x4350_594C; // 'LYPC' 小端
 
 pub fn encode_cloud(view: &core_ffi::CloudView) -> Vec<u8> {
@@ -204,12 +180,8 @@ mod tests {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
-    /// 测试侧的事件收集器。
-    ///
-    /// 这里不经 Tauri：`trampoline` 除了 `app.emit` 之外没有别的逻辑，
-    /// 而起一个真实的 AppHandle 会把这些测试变成需要窗口系统的集成测试。
-    /// 真正值得测的是**下面这一整条**：libloading 加载 DLL → C ABI 启动 run →
-    /// 工作线程回调 → 事件 JSON → cancel/join/free 的生命周期。
+    /// 测试侧的事件收集器。不经 Tauri —— 值得测的是 libloading 加载 DLL →
+    /// C ABI 启动 run → 工作线程回调 → 事件 JSON → cancel/join/free 这一整条。
     struct Collector {
         events: Mutex<Vec<serde_json::Value>>,
     }

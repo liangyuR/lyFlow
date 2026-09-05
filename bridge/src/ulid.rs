@@ -1,12 +1,5 @@
-//! 极简 ULID 生成器。
-//!
-//! 为什么不引 `ulid` crate：这里唯一的用途是给一次运行取个 id，需求只有
-//! 「进程内唯一、按时间递增、URL 安全、看着像个 id」。为此多一个依赖不划算 ——
-//! 依赖的成本不在下载，在于以后每次升级都要过一遍它的变更。
-//!
-//! 格式与 ULID 规范一致：48 位毫秒时间戳 + 80 位随机，Crockford base32，26 个字符。
-//! 随机部分的熵来自 `RandomState`（进程启动时由操作系统播种）加一个自增计数器 ——
-//! 计数器保证同一毫秒内连续生成也不会重复，这一点比密码学强度重要得多。
+//! 极简 ULID 生成器：48 位毫秒时间戳 + 80 位随机，Crockford base32，26 个字符。
+//! 熵来自 RandomState 加一个自增计数器 —— 同毫秒不重复比密码学强度重要。
 
 use std::hash::{BuildHasher, Hasher, RandomState};
 use std::sync::atomic::{AtomicU64, Ordering};

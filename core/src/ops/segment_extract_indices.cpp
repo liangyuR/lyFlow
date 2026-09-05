@@ -7,9 +7,8 @@ Status compute(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecCon
   const PointCloud& cloud = *inputs.get("cloud").asCloud();
   const Indices& indices = *inputs.get("indices").asIndices();
 
-  // 下标对账。这是 PointCloud::id 存在的全部理由：
-  // 把「一片云的下标喂给另一片云」这种错误变成一句人话，而不是一堆
-  // 越界跳过之后「结果少了一半点，但没人报错」。
+  // 下标对账 —— PointCloud::id 存在的全部理由：把「一片云的下标喂给另一片云」
+  // 变成一句人话，而不是越界跳过后「结果少一半点却没人报错」。
   if (indices.sourceCloudId != cloud.id) {
     return Status::Error(Phase::Execute, "bad_input",
                          "这组下标不是从当前输入点云上取的（中间可能插了一个会重建点云的算子）",

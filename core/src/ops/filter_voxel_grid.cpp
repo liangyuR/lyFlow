@@ -6,13 +6,8 @@
 namespace lyflow::ops {
 namespace {
 
-/// 三维体素下标。
-///
-/// 曾经把三个下标各截成 21 位塞进一个 uint64 当键 —— 省事，但那是个**静默**的
-/// 陷阱：超出 ±2^20 个体素的点会绕回来和另一个体素撞在一起，于是远处的点被拿去
-/// 和原点的点求质心，几何整个错掉，而且不报错、不告警。默认叶大小 0.01 时
-/// 这个范围只有 ±10 km，最小叶大小 0.0001 时只有 ±104 m —— 一次室外扫描就够越界。
-/// 现在用完整的三个 int64 做键，哈希碰撞由 unordered_map 自己解决，不会张冠李戴。
+/// 三维体素下标。用完整的三个 int64 做键，不把它们打包进一个 uint64 ——
+/// 打包会在超出范围时静默绕回、把远处的点和原点的点求质心（core/README.md「踩过的坑」）。
 struct VoxelIndex {
   std::int64_t i, j, k;
   bool operator==(const VoxelIndex& o) const { return i == o.i && j == o.j && k == o.k; }
@@ -114,9 +109,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
     // 最后一次性 select —— 通道搬运交给 select 一处负责（data.h 的约定）。
     std::vector<std::int32_t> best(voxels.size(), -1);
     std::vector<double> bestDist(voxels.size(), 1e300);
-    // 第二遍同样要轮询取消：这一趟和第一趟一样长，漏掉它的话
-    // capabilities.cancellable=true 就成了一句谎话，而抢占式运行是同步等 join 的，
-    // 前端会整整卡住这一趟的时间。
+    // 第二遍同样要轮询取消：漏掉的话 cancellable=true 成了谎话，
+    // 而抢占式运行同步等 join，前端会整整卡住这一趟。
     Ticker ticker2(ctx, n);
     for (std::size_t p = 0; p < n; ++p) {
       if (ticker2.tick(p)) return Status::Ok();

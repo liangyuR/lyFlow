@@ -1,10 +1,5 @@
-//
-// 文件操作（交互清单 P0 #13）。
-//
-// 存盘走 Rust 侧的 save_graph：结构校验在那里做，前端拒绝自己写文件。
-// 理由是 headless 执行、脚本生成的图走的也是同一条校验路径，
+// 文件操作（交互清单 P0 #13）。存盘走 Rust 侧的 save_graph，前端拒绝自己写文件 ——
 // 校验逻辑放前端就会有一条绕过它的路（docs/graph-doc.md）。
-//
 
 import { transport } from "../transport";
 import type { GraphDoc } from "../types/graph";

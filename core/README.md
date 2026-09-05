@@ -54,14 +54,25 @@ powershell -File scripts/build-core.ps1 RelWithDebInfo -NoTests   # 只构建
 | `lyflow-core-tests.exe` | doctest。直接跑就行，无参数 |
 | `pcl_*.dll` / `boost_*.dll` / … | vcpkg 的 applocal 自动拷来的运行时依赖 |
 
-三条硬约束：
+五条硬约束：
 
 - **D8：固定 RelWithDebInfo**，不跟 cargo 的 profile 联动。Rust 永远用 `/MD`，
   vcpkg 的 debug 库是 `/MDd`，混用会在完全无关的地方崩。
 - **D9：两个 exe 都内嵌 `activeCodePage=UTF-8` 的 manifest**（`lyflow-utf8.manifest`）。
   只有 exe 的 manifest 决定进程 ACP，给 DLL 贴无效。
 - `/EHsc` 显式写在编译选项里。cmake crate 会整个替换 `CMAKE_CXX_FLAGS`，
-  把 CMake 默认带的那个顶掉，而 `c_api.cpp` 的每个入口都依赖 try/catch。
+  把 CMake 默认带的那个顶掉，后果是 MSVC 静默进入「异常关闭」模式，
+  而 `c_api.cpp` 的每个入口都依赖 try/catch 兜住异常、绝不让它跨 ABI。
+- `/utf-8` 同理。源文件里有中文字面量，少了它 MSVC 按系统代码页解释，
+  而症状要到前端看见 manifest 里的乱码才暴露。
+- **PCL 的导出目标名两种都认。** 上游 `PCLConfig.cmake` 造的是非命名空间的
+  `pcl_common` / `pcl_io`，某些发行版（以及 PCL 未来的版本）用 `PCL::common`。
+  硬写一种就等着在别人机器上炸；两种都找不到时退回经典的
+  `${PCL_LIBRARIES}` + `${PCL_INCLUDE_DIRS}`。
+
+所有产物（DLL、exe、vcpkg applocal 拷来的依赖 DLL）都落在同一个 `bin/`，
+`bridge/build.rs` 整目录拷贝它 —— Rust 侧运行时才能 `LoadLibrary` 到
+`lyflow_core.dll` 以及它依赖的那几十个 PCL/boost DLL。
 
 手工调 CMake 时记得先进 MSVC 环境（`vcvars64.bat`）并传 vcpkg 工具链：
 

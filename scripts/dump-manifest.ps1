@@ -1,7 +1,5 @@
-# 把 C++ 侧的 manifest dump 到 app/public/manifest.dev.json。
-#
-# 用途：浏览器模式（pnpm app:dev）下不启动 Tauri、不重编 C++ 就能迭代界面。
-# 状态栏会把这种模式标成「静态快照」，避免对着过期数据调半天。
+# 把 C++ 侧的 manifest dump 到 app/public/manifest.dev.json，
+# 供浏览器模式（pnpm app:dev）不启动 Tauri 就能迭代界面。状态栏会标成「静态快照」。
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot

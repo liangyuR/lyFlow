@@ -1,10 +1,5 @@
-//
-// 画布上的算子节点。
-//
-// **按 op id 现查 manifest，不接受把算子描述塞进节点 data。**
-// 这是 M3 热重载的前提：C++ 重编后推一份新 manifest 进 store，
-// 所有节点的外观和端口自动跟着变，当前打开的图不需要重置。
-//
+// 画布上的算子节点。按 op id 现查 manifest，不把算子描述塞进节点 data ——
+// 这是热重载的前提：推一份新 manifest 进 store，节点外观自动跟着变。
 
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { memo } from "react";
@@ -57,9 +52,8 @@ function PortHandle({ port, side, index }: PortHandleProps) {
 function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   const { opId, title, collapsed } = data as OperatorNodeData;
   const op = useManifestStore((s) => s.operatorsById.get(opId));
-  // 执行状态从**独立的 store** 现查（交互清单 P0 #14）。它不在 GraphDoc 里，
-  // 也不在节点 data 里 —— 否则每来一条事件就要重建整个节点数组，几十个节点
-  // 的图会肉眼可见地卡。
+  // 执行状态从独立的 store 现查（P0 #14）：放进节点 data 的话，
+  // 每来一条事件就要重建整个节点数组，几十个节点的图会肉眼可见地卡。
   const exec = useNodeExecution(id);
   const stale = useExecutionStore((s) => s.stale);
 

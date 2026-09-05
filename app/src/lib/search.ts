@@ -1,7 +1,5 @@
-//
 // 算子搜索。节点面板和画布上的搜索弹层共用这一份排序逻辑 ——
 // 两处给出不一样的排序会让人觉得软件在骗自己。
-//
 
 import { fuzzyMatchAny } from "./fuzzy";
 import type { OperatorDesc } from "../types/manifest";

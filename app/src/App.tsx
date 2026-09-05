@@ -76,12 +76,8 @@ function Toast() {
   return <div className={`toast toast--${toast.kind}`}>{toast.text}</div>;
 }
 
-/**
- * 右侧的可拖分栏。
- *
- * 用一条 4px 的把手 + 全局 pointermove，而不是引一个分栏库：
- * 一个库的成本是十几 KB 加一套自己的 API，这里只要一个数字。
- */
+/** 右侧的可拖分栏。一条 4px 把手 + 全局 pointermove，
+ *  不引分栏库 —— 一个库的成本是十几 KB 加一套 API，这里只要一个数字。 */
 function useDragSplit(initial: number, min: number, max: number) {
   const [width, setWidth] = useState(initial);
   const dragging = useRef(false);
@@ -144,11 +140,8 @@ function Workspace() {
     void subscribeExecutionEvents();
   }, []);
 
-  // 运行之后图被改过 → 结果标为过时（交互清单 P1 #23）。
-  //
-  // 订阅的是 doc 的**引用**：graph store 的每个语义化动作都用 immer 产出一份
-  // 新 doc，所以引用变了就等于「图被改过」。这比在每个 change 动作里手动打标
-  // 可靠得多 —— 后者一定会漏掉将来新加的动作。
+  // 运行之后图被改过 → 结果标为过时（交互清单 P1 #23）。订阅 doc 的**引用**：
+  // 每个语义化动作都用 immer 产出新 doc，比在每个动作里手动打标可靠。
   useEffect(() => {
     return useGraphStore.subscribe((state, prev) => {
       if (state.doc !== prev.doc) useExecutionStore.getState().markStale();

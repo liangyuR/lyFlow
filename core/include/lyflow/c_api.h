@@ -1,17 +1,7 @@
 #ifndef LYFLOW_C_API_H
 #define LYFLOW_C_API_H
-//
-// C ABI v2。Rust 桥接层只看见这个头文件。
-//
-// 约定：
-//   * 所有返回 char* 的函数都返回 UTF-8、NUL 结尾的堆内存，调用方必须用
-//     lyflow_string_free 释放。返回 NULL 表示分配失败。
-//   * **异常绝不跨 ABI。** c_api.cpp 的每个入口都是 try/catch(...)，
-//     内部异常转成返回码或事件里的 internal 错误。跨 DLL 边界抛异常在
-//     MSVC 上是可以「工作」的，但一旦 Rust 侧栈帧介入就是未定义行为。
-//   * D1：这个 DLL 只导出下面这些 C 函数。Registry / Executor 这些 C++ 类
-//     不导出 —— 导出 C++ 类等于把 ABI 焊死在编译器版本上，而 M3 要热重载。
-//
+// C ABI v3。Rust 桥接层只看见这个头文件。
+// 三条约定（char* 归属、异常不跨 ABI、只导出 C 函数）见 core/README.md「C ABI 约定」。
 #include <stddef.h>
 #include <stdint.h>
 

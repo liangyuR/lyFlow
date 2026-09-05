@@ -1,15 +1,5 @@
-//
-// manifest store。
-//
-// **算子描述存在这里，不存进节点。**
-//
-// 这是 M0 必须做对、后期改代价很大的一个决定（见 docs/operator-manifest.md
-// 结尾）。节点只记 op id，渲染时按 id 现查。这样 M3 的热重载才可能：
-// C++ 重编译后推一份新 manifest 进这个 store，所有节点的外观和参数表单
-// 自动跟着变，当前打开的图不需要重置。
-//
-// 如果反过来在创建节点时把 manifest 快照进节点里，热重载就永久失效了。
-//
+// manifest store —— **算子描述存这里，不存进节点**：节点只记 op id、渲染时现查。
+// 这是 M3 热重载的前提；快照进节点热重载就永久失效（docs/operator-manifest.md）。
 
 import { create } from "zustand";
 
