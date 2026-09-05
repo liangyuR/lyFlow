@@ -1,6 +1,7 @@
 #include "lyflow/json_writer.h"
 
 #include <charconv>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -36,6 +37,11 @@ std::string jsonEscape(const std::string& s) {
 }
 
 std::string jsonNumber(double v) {
+  // JSON 没有 NaN 和 Infinity。写出裸的 `nan` / `inf` 会得到一份任何解析器都
+  // 读不了的文档，而且症状出现在很远的地方（前端 JSON.parse 整个失败）。
+  // 写 null 至少是合法 JSON，前端能看出「这里有个值但它不是数」。
+  if (!std::isfinite(v)) return "null";
+
   // to_chars 的 general 格式给出最短往返表示，没有 printf("%g") 的精度损失，
   // 也没有 printf("%.17g") 的 0.30000000000000004 噪声。
   char buf[64];
@@ -47,8 +53,7 @@ std::string jsonNumber(double v) {
 
   // 整数值补 .0。GraphDoc 的 diff 稳定性依赖于同一个值总是写成同样的字节，
   // 而 leafSize 从 0.01 调到 1 时不应该让类型形态发生变化。
-  if (s.find('.') == std::string::npos && s.find('e') == std::string::npos &&
-      s.find("inf") == std::string::npos && s.find("nan") == std::string::npos) {
+  if (s.find('.') == std::string::npos && s.find('e') == std::string::npos) {
     s += ".0";
   }
   return s;

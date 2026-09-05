@@ -6,6 +6,7 @@ import { Inspector } from "./components/Inspector";
 import { NodePalette } from "./components/NodePalette";
 import { NodeSearch } from "./components/NodeSearch";
 import { Toolbar } from "./components/Toolbar";
+import { Viewer3D } from "./components/Viewer3D";
 import { useShortcuts } from "./hooks/useShortcuts";
 import {
   confirmDiscard,
@@ -15,9 +16,16 @@ import {
   saveDocTo,
   suggestFileName,
 } from "./lib/files";
+import {
+  cancelCurrentRun,
+  startRun,
+  subscribeExecutionEvents,
+  useExecutionStore,
+} from "./store/execution";
 import { useGraphStore } from "./store/graph";
 import { useManifestStore } from "./store/manifest";
 import { useUiStore } from "./store/ui";
+import { hasRelativePathParam } from "./lib/params";
 
 function StatusBar() {
   const coreInfo = useManifestStore((s) => s.coreInfo);
@@ -28,7 +36,7 @@ function StatusBar() {
 
   return (
     <footer className="statusbar">
-      <span className="statusbar__milestone">M1 · 能编辑</span>
+      <span className="statusbar__milestone">M2 · 能跑</span>
       <span>{nodeCount} 节点</span>
       <span>{edgeCount} 连线</span>
       {selected > 0 && <span>已选 {selected}</span>}
@@ -68,9 +76,46 @@ function Toast() {
   return <div className={`toast toast--${toast.kind}`}>{toast.text}</div>;
 }
 
+/**
+ * 右侧的可拖分栏。
+ *
+ * 用一条 4px 的把手 + 全局 pointermove，而不是引一个分栏库：
+ * 一个库的成本是十几 KB 加一套自己的 API，这里只要一个数字。
+ */
+function useDragSplit(initial: number, min: number, max: number) {
+  const [width, setWidth] = useState(initial);
+  const dragging = useRef(false);
+
+  useEffect(() => {
+    const move = (e: PointerEvent) => {
+      if (!dragging.current) return;
+      const next = window.innerWidth - e.clientX;
+      setWidth(Math.max(min, Math.min(max, next)));
+    };
+    const up = () => {
+      dragging.current = false;
+      document.body.classList.remove("is-resizing");
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+  }, [min, max]);
+
+  const onPointerDown = useCallback(() => {
+    dragging.current = true;
+    document.body.classList.add("is-resizing");
+  }, []);
+
+  return { width, onPointerDown };
+}
+
 function Workspace() {
   const { screenToFlowPosition } = useReactFlow();
   const [paletteWidth] = useState(280);
+  const rightPane = useDragSplit(380, 260, 900);
 
   // 粘贴和搜索面板要知道往哪儿放。跟着鼠标走比总是放在画布中心自然得多。
   const cursor = useRef({ x: 0, y: 0 });
@@ -93,6 +138,22 @@ function Workspace() {
     useUiStore.getState().showToast(rejection, "warn");
     useGraphStore.getState().clearRejection();
   }, [rejection]);
+
+  // -- 执行事件流 -----------------------------------------------------------
+  useEffect(() => {
+    void subscribeExecutionEvents();
+  }, []);
+
+  // 运行之后图被改过 → 结果标为过时（交互清单 P1 #23）。
+  //
+  // 订阅的是 doc 的**引用**：graph store 的每个语义化动作都用 immer 产出一份
+  // 新 doc，所以引用变了就等于「图被改过」。这比在每个 change 动作里手动打标
+  // 可靠得多 —— 后者一定会漏掉将来新加的动作。
+  useEffect(() => {
+    return useGraphStore.subscribe((state, prev) => {
+      if (state.doc !== prev.doc) useExecutionStore.getState().markStale();
+    });
+  }, []);
 
   // -- 文件操作 -------------------------------------------------------------
   const doSave = useCallback(async (forcePicker: boolean) => {
@@ -135,16 +196,51 @@ function Workspace() {
     useUiStore.getState().clearSelection();
   }, []);
 
+  // -- 运行 -----------------------------------------------------------------
+  const doRun = useCallback(async (targets?: string[]) => {
+    const graph = useGraphStore.getState();
+    const ui = useUiStore.getState();
+    if (graph.doc.nodes.length === 0) {
+      ui.showToast("图是空的，先加几个节点", "warn");
+      return;
+    }
+    // 相对路径参数是相对图文件所在目录解析的，没保存过就没有那个目录。
+    // 在这里挡下来，比让 core 报「文件不存在: samples/bin.pcd」清楚得多。
+    if (
+      !graph.filePath &&
+      hasRelativePathParam(graph.doc, useManifestStore.getState().operatorsById)
+    ) {
+      ui.showToast("图里有相对路径参数，请先保存图（相对路径以图文件所在目录为基准）", "warn");
+      return;
+    }
+    try {
+      await startRun(graph.doc, graph.filePath, targets);
+    } catch (e) {
+      ui.showToast(e instanceof Error ? e.message : String(e), "warn");
+    }
+  }, []);
+
+  const doCancel = useCallback(async () => {
+    try {
+      await cancelCurrentRun();
+    } catch (e) {
+      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
+    }
+  }, []);
+
   const handlers = useMemo(
     () => ({
       onSave: () => void doSave(false),
       onSaveAs: () => void doSave(true),
       onOpen: () => void doOpen(),
       onNew: () => void doNew(),
+      onRun: () => void doRun(),
+      onCancel: () => void doCancel(),
+      onRunToNode: (nodeId: string) => void doRun([nodeId]),
       cursorFlowPosition: () => screenToFlowPosition(cursor.current),
       cursorScreenPosition: () => cursor.current,
     }),
-    [doSave, doOpen, doNew, screenToFlowPosition],
+    [doSave, doOpen, doNew, doRun, doCancel, screenToFlowPosition],
   );
 
   useShortcuts(handlers);
@@ -156,6 +252,8 @@ function Workspace() {
         onOpen={handlers.onOpen}
         onSave={handlers.onSave}
         onSaveAs={handlers.onSaveAs}
+        onRun={handlers.onRun}
+        onCancel={handlers.onCancel}
       />
 
       <main className="app__body">
@@ -174,11 +272,26 @@ function Workspace() {
         </aside>
 
         <section className="app__canvas">
-          <GraphCanvas />
+          <GraphCanvas onRunToNode={handlers.onRunToNode} />
         </section>
 
-        <aside className="app__inspector">
-          <Inspector />
+        <div
+          className="app__splitter"
+          onPointerDown={rightPane.onPointerDown}
+          role="separator"
+          aria-orientation="vertical"
+          data-testid="right-splitter"
+        />
+
+        <aside className="app__right" style={{ width: rightPane.width }}>
+          {/* 3D 视图在上、参数在下：视觉项目的核心闭环是「改参数 → 看结果」，
+              两者离得越近越好（交互清单 P1 #30）。 */}
+          <div className="app__viewer">
+            <Viewer3D />
+          </div>
+          <div className="app__inspector">
+            <Inspector />
+          </div>
         </aside>
       </main>
 

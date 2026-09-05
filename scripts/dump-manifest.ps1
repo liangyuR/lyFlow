@@ -5,9 +5,9 @@
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-& "$PSScriptRoot\build-core.ps1"
+& "$PSScriptRoot\build-core.ps1" -NoTests
 
-$exe = Join-Path $root "build\core\lyflow-dump-manifest.exe"
+$exe = Join-Path $root "build\core\bin\lyflow-dump-manifest.exe"
 $out = Join-Path $root "app\public\manifest.dev.json"
 New-Item -ItemType Directory -Force (Split-Path $out) | Out-Null
 

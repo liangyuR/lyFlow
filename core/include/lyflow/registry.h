@@ -49,4 +49,10 @@ class Registry {
 // 前端不用动 —— 这是 ADR-0003 的承诺，也是这套设计的全部意义。
 void registerBuiltinOps(Registry& registry);
 
+// 进程内那一份注册表，保证只填充一次。
+//
+// C ABI 的每个入口、执行器、dump 工具、测试都从这里拿 —— 之前 c_api.cpp 里
+// 藏着一个 call_once，执行器再写一份就会出现「两条路径各自初始化」的竞态。
+Registry& ensureRegistry();
+
 }  // namespace lyflow

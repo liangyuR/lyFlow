@@ -23,6 +23,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 
 import { extractMoves, extractSizes, toReactFlow, type LyNode } from "../lib/mapping";
 import { canConnect } from "../lib/typecheck";
+import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
@@ -34,7 +35,18 @@ import "@xyflow/react/dist/style.css";
 
 const nodeTypes = { operator: OperatorNode };
 
-export function GraphCanvas() {
+export interface CanvasActions {
+  /** 只跑到某个节点（交互清单 P1 #27）。数据通路 M2 已经全部就绪，UI 就这一行。 */
+  onRunToNode: (nodeId: string) => void;
+}
+
+interface ContextMenuState {
+  nodeId: string;
+  x: number;
+  y: number;
+}
+
+export function GraphCanvas({ onRunToNode }: CanvasActions) {
   const doc = useGraphStore((s) => s.doc);
   const operatorsById = useManifestStore((s) => s.operatorsById);
   const typesByName = useManifestStore((s) => s.typesByName);
@@ -49,6 +61,8 @@ export function GraphCanvas() {
   // 用 ref 存数据、用一个计数器触发重渲染：尺寸稳定后计数器就不再变，不会自激。
   const measured = useRef(new Map<string, { width: number; height: number }>());
   const [measuredTick, setMeasuredTick] = useState(0);
+  const [menu, setMenu] = useState<ContextMenuState | null>(null);
+  const running = useExecutionStore((s) => s.runStatus === "running");
 
   const ctx = useMemo(() => ({ operatorsById, typesByName }), [operatorsById, typesByName]);
 
@@ -156,6 +170,14 @@ export function GraphCanvas() {
     [screenToFlowPosition],
   );
 
+  // -- 右键菜单（Run to node）----------------------------------------------
+  const onNodeContextMenu = useCallback((e: React.MouseEvent, node: { id: string }) => {
+    e.preventDefault();
+    setMenu({ nodeId: node.id, x: e.clientX, y: e.clientY });
+  }, []);
+
+  const closeMenu = useCallback(() => setMenu(null), []);
+
   // -- 从面板拖算子进来 -----------------------------------------------------
   const onDragOver = useCallback((e: React.DragEvent) => {
     if (!e.dataTransfer.types.includes(OPERATOR_DND_MIME)) return;
@@ -182,6 +204,7 @@ export function GraphCanvas() {
       onDoubleClick={onDoubleClick}
       onDragOver={onDragOver}
       onDrop={onDrop}
+      onClick={closeMenu}
     >
       <ReactFlow
         nodes={nodes}
@@ -194,6 +217,8 @@ export function GraphCanvas() {
         onConnect={onConnect}
         isValidConnection={isValidConnection}
         onSelectionChange={onSelectionChange}
+        onNodeContextMenu={onNodeContextMenu}
+        onPaneClick={closeMenu}
         // Backspace 不参与删除：在参数输入框里退格却删掉了节点是经典事故。
         // React Flow 会忽略来自输入框的按键，但显式收窄更保险。
         // 必须关掉：React Flow 底层的 d3-zoom 给 pane 装了 dblclick 缩放，
@@ -222,6 +247,27 @@ export function GraphCanvas() {
           maskColor="rgba(20, 22, 26, 0.75)"
         />
       </ReactFlow>
+
+      {menu && (
+        <div
+          className="ctxmenu"
+          style={{ left: menu.x, top: menu.y }}
+          data-testid="node-context-menu"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            data-testid="run-to-node"
+            disabled={running}
+            onClick={() => {
+              onRunToNode(menu.nodeId);
+              setMenu(null);
+            }}
+          >
+            运行到此节点
+          </button>
+        </div>
+      )}
     </div>
   );
 }

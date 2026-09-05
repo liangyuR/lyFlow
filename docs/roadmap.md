@@ -58,36 +58,102 @@ Rust 15 个测试（含 FFI、中文穿越边界、GraphDoc round-trip）→ 前
 3. 选中状态会流回画布再回调 `onSelectionChange`，无条件写新 Set 会造成渲染死循环。
    `setSelection` 加了幂等比对
 
-## M2 — 能跑
+## M2 — 能跑 ✅
 
 **目标：点运行，C++ 真的执行，前端看到状态。**
 
-- [ ] C++ 侧：GraphDoc 校验 + 编译成执行计划 + 顺序执行
-- [ ] `ExecutionEvent` 流式推送
-- [ ] 交互清单 P0 第 14–16 项（状态高亮、错误定位、环检测）
-- [ ] 3D 视图：选中节点看其输出点云
-- [ ] 算子扩到 10–15 个，覆盖一条真实 pipeline
+详细实施计划见 [m2-plan.md](m2-plan.md)：定死的决定、C ABI v2、执行器、结果仓与二进制 IPC、15 个算子、验收定义。
+逐条验收记录见 [m2-acceptance.md](m2-acceptance.md)：`pnpm check` 全链路绿、
+`pnpm e2e` 64/64、`pnpm e2e:packaged`（打包产物在干净目录里）67/67。
+唯一没验成的是「同一份产物在一台**干净机器**上能跑」—— 手上没有干净机器，如实标为未验证。
+
+- [x] C++ 侧：GraphDoc 校验 + 编译成执行计划 + 顺序执行
+- [x] `ExecutionEvent` 流式推送
+- [x] 交互清单 P0 第 14–16 项（状态高亮、错误定位、环检测）
+- [x] 3D 视图：选中节点看其输出点云
+- [x] 算子扩到 10–15 个，覆盖一条真实 pipeline
 
 产出：**第一条端到端可演示的流程。** 这是项目的分水岭。
 
+**三条形态上的变化**（都在 m2-plan.md §0 里定死，M3+ 只填功能不改形态）：
+
+- core 从「cc crate 编的静态库」变成 **CMake 构建的 DLL + libloading 运行时加载**
+  （[ADR-0004](adr/0004-core-as-dll.md)）。PCL 是 vcpkg 动态三元组，
+  几十个 DLL 手工链是死路；顺带把 M3 的热重载降级成「drop 再建一个」。
+- PCL 关在 `src/ops/pcl/` 里，`include/` 下零 PCL 头（[ADR-0005](adr/0005-pcl-boundary.md)）。
+  代价是进出各拷一次 xyz，换来「加一个手写算子」仍然是秒级反馈。
+- 结果留在 C++ 的**内容寻址结果仓**，点云走二进制 IPC
+  （[ADR-0006](adr/0006-result-store-binary-ipc.md)）。M3 开缓存复用只是
+  「不再删 + 加 LRU 预算」，键的定义不用动。
+
+**这轮验证抓到的两个真 bug**（同样不是单元测试能发现的）：
+
+1. 3D 视图切换节点时，上一次取点云的请求被作废，而 `setLoading(false)` 写在
+   `if (!cancelled)` 里面 —— 于是切到一个**没有点云输出**的节点（不发新请求）
+   就永远停在「正在取点云…」。修法是 `finally` 里无条件放下 loading。
+2. 验收脚本连跑两次运行时，按下 F5 的那一刻 `runStatus` 还是上一次的 `ok`，
+   只等「不是 running」会立刻返回上一次的快照。症状极具迷惑性：
+   画布上明明是红的，断言拿到的却是 `done`。修法是先记下 `runId` 再等它变。
+
+全绿之后又做了一轮独立代码审查，改掉 17 处缺陷 —— 全是**静默出错**那一类：
+体素栅格把相距十公里的点折叠进同一个体素（下标截成 21 位，绕回来了）、
+3D 视图对同一片云发起一串重复的 IPC、畸形 PCD 读到缓冲区外面、
+`Run::work()` 没有顶层 try/catch（异常直接 terminate，而 `c_api.h` 承诺过
+「异常绝不跨 ABI」）、`unsafe impl Sync` 的理由是假的。逐条见
+[m2-acceptance.md](m2-acceptance.md) 的「代码审查抓到的缺陷」。
+教训是：全绿只说明测到的路径是对的，说明不了没测到的路径。
+
+**已知毛刺**：`pnpm check` 会把 core 编两遍（`build-core.ps1` 一遍产出两个 exe 与测试，
+`bridge/build.rs` 一遍产出 DLL），两个构建树各自增量，冷启动时要多等一次。
+合并成一个需要让两边传完全相同的编译选项，而 cmake crate 会强行注入自己的一套 ——
+为此把两边焊死不划算。
+
 ## M3 — 能用
 
-**目标：自己愿意天天用它，而不是回去改代码。**
+**目标：自己愿意天天用它，而不是回去改代码。** 详细计划见 [m3-plan.md](m3-plan.md)。
 
-- [ ] 交互清单 P1 全部
-- [ ] 中间结果缓存与复用 + stale 可视化
-- [ ] Run to node / bypass
-- [ ] 算子热重载
-- [ ] 参数联动 `visibleWhen`
+核心轨（C++/Rust）：
+- [ ] 缓存复用 + `skipped`；`lyflow_plan` 给前端精确 stale 与「将重算 N 个节点」
+- [ ] 并行执行（依赖计数驱动，PCL 线程数配合）
+- [ ] bypass 执行语义 + Reroute + `Any` 类型推导
+- [ ] 算子迁移表与 aliases，迁移以诊断形式回写 GraphDoc（headless 同路径）
+- [ ] 算子热重载（运行时重新加载 core DLL）
+- [ ] 参数联动 `visibleWhen` / `enabledWhen`
 
-产出：可以交给同组其他人用的版本。
+编辑轨（前端）：
+- [ ] 交互清单 P1 全部（#17–#30）
+- [ ] 快捷键单表驱动 + 面板；自动布局；最近文件 / 备份恢复；日志与诊断抽屉
+- [ ] 3D 视图着色模式 / 钉住 / 导出
+
+产出：可以交给同组其他人用的版本。验收含「一位未参与开发者 10 分钟内完成一句话任务」。
 
 ## M4 — 能扩展
 
-- [ ] 子图 / 复合算子
-- [ ] Live preview
-- [ ] headless 执行（CLI 跑 `.lyflow` 文件，接 CI / 批处理）
-- [ ] 算子版本迁移表
+**目标：图成为可复用、可脚本化、可交互探索的资产。** 详细计划见 [m4-plan.md](m4-plan.md)。
+
+- [ ] 子图 / 复合算子：C++ compile 期展开成平图，路径式节点 id，参数提升，库算子目录
+- [ ] Live preview：源头抽稀的 preview run，独立缓存命名空间
+- [ ] headless CLI `lyflow`：run / validate / plan / migrate / dump / sweep / diff，JSON Lines 事件流
+- [ ] 分组框（P2 #32）、参数扫描（#34）、图 diff（#36）、大图性能（#37）
+
+产出：一条真实任务能用「库算子 + CLI」跑在无 GUI 的机器上。
+
+## M5 — 外延（只列方向，动工前再写计划）
+
+- 第二种数据域 **Image**：`Data::Kind::Image`、2D 视图、OpenCV 算子按 PCL 同样的边界规则接入。
+  这是对「数据模型是否通用」的真正检验，也是项目名里「Vision Flow」的兑现
+- 第三方算子插件 DLL：`lyflow_plugin_init(Registry*)`，同工具链约束
+- 缓存落盘（`externalKey` 机制已留口子）
+- 两节点输出并排对比（P2 #35）
+
+不计划：协作 / 多人编辑（P2 #38）。
+
+## 已从后续里程碑提前到 M2 的接口决定
+
+这些在 M2 就按终态定下，后面只填功能不改形态（详见 m2-plan.md §0）：
+运行时加载的 core DLL（→ M3 热重载）、cacheKey 内容寻址的结果仓（→ M3 缓存）、
+`run_started.nodes[].cacheKey`（→ M3 stale）、GraphDoc `bypass` 字段（→ M3 静音）、
+抢占式 run（→ M4 live preview）、Plan 的 level（→ M3 并行）、`targets`（→ M3 Run to node、M4 CLI `--to`）。
 
 ## 优先级判断依据
 

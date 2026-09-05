@@ -621,3 +621,278 @@
   border-color: var(--warn);
   color: var(--warn);
 }
+
+/* =========================================================================
+   M2 —— 执行状态、错误定位、3D 视图
+   ========================================================================= */
+
+/* ------------------------------------------------- 节点状态高亮（P0 #14）*/
+
+/*
+ * 状态用**边框色 + 一个色点**表达，不改节点底色。
+ * 改底色的话端口文字的对比度会随状态漂移，而端口才是节点上最需要看清的东西。
+ */
+.node--pending  { border-color: #6b7280; }
+.node--running  { border-color: var(--accent); }
+.node--done     { border-color: #46a758; }
+.node--error    { border-color: #e5484d; }
+.node--cancelled{ border-color: #e0a030; }
+.node--skipped  { border-color: #46a758; border-style: dashed; }
+
+.node--running {
+  box-shadow: 0 0 0 1px var(--accent), 0 2px 14px rgba(74, 158, 255, 0.35);
+  animation: node-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes node-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px var(--accent), 0 2px 10px rgba(74, 158, 255, 0.25); }
+  50%      { box-shadow: 0 0 0 2px var(--accent), 0 2px 18px rgba(74, 158, 255, 0.55); }
+}
+
+/* stale = 整体变虚，不换颜色。颜色已经被状态占满了（P1 #23）。 */
+.node.is-stale {
+  opacity: 0.45;
+  border-style: dashed;
+}
+
+.node__head {
+  position: relative;
+}
+
+/* 运行进度：标题栏底部的一条细线，不占额外高度 */
+.node__progress {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 2px;
+  width: calc(var(--p, 0) * 100%);
+  background: var(--accent);
+  transition: width 0.15s linear;
+}
+
+.node__stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.node__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #6b7280;
+}
+
+.node__dot--running   { background: var(--accent); }
+.node__dot--done      { background: #46a758; }
+.node__dot--error     { background: #e5484d; }
+.node__dot--cancelled { background: #e0a030; }
+.node__dot--skipped   { background: #46a758; opacity: 0.6; }
+
+.node__count { color: var(--fg-1); font-variant-numeric: tabular-nums; }
+.node__time  { font-variant-numeric: tabular-nums; }
+
+.node__err {
+  color: #ff9a9a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+/* --------------------------------------------------------------- 右键菜单 */
+
+.ctxmenu {
+  position: fixed;
+  z-index: 40;
+  min-width: 150px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.ctxmenu button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-0);
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ctxmenu button:hover:not(:disabled) { background: var(--bg-3); }
+.ctxmenu button:disabled { color: var(--fg-2); cursor: default; }
+
+/* ------------------------------------------------ 工具栏的运行区 */
+
+.toolbar__group--run {
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar__run:not(:disabled) { color: #9ce6ad; }
+.toolbar__cancel:not(:disabled) { color: #ffb4b4; }
+
+.toolbar__elapsed {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-2);
+  font-size: 12px;
+  min-width: 60px;
+}
+
+.toolbar__summary {
+  display: inline-flex;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.toolbar__stat--done      { color: #9ce6ad; }
+.toolbar__stat--error     { color: #ff9a9a; }
+.toolbar__stat--cancelled { color: #ffd08a; }
+.toolbar__stat--stale     { color: var(--fg-2); font-style: italic; }
+
+.toolbar__runerror {
+  color: #ff9a9a;
+  font-size: 12px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------ 参数红框与错误列表（P0 #15）*/
+
+.insp-param.has-error input,
+.insp-param.has-error select,
+.insp-param.has-error textarea {
+  border-color: #e5484d !important;
+  box-shadow: 0 0 0 1px rgba(229, 72, 77, 0.35);
+}
+
+.insp-param__error {
+  margin: 4px 0 0;
+  color: #ff9a9a;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.insp__errors {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: rgba(229, 72, 77, 0.08);
+}
+
+.insp__errors-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: #ff9a9a;
+}
+
+.insp__errors ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.insp__errors li {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.insp__errcode {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(229, 72, 77, 0.2);
+  color: #ffb4b4;
+  font-size: 10.5px;
+}
+
+/* ----------------------------------------------------- 3D 视图（P1 #30）*/
+
+.viewer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: #11141a;
+}
+
+.viewer__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+  font-size: 11.5px;
+}
+
+.viewer__title { color: var(--fg-1); font-weight: 500; }
+.viewer__count { color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.viewer__spacer { flex: 1; }
+
+.viewer__select {
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 1px 3px;
+}
+
+.viewer__size { width: 64px; }
+
+.viewer__fit {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--fg-0);
+  cursor: pointer;
+  padding: 1px 6px;
+}
+
+.viewer__canvas {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.viewer__canvas canvas { display: block; }
+
+/* 空态文案压在画布上而不是替换它：换来换去会让 WebGL 上下文反复销毁重建 */
+.viewer__empty {
+  position: absolute;
+  inset: 28px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  color: var(--fg-2);
+  font-size: 12px;
+  background: rgba(17, 20, 26, 0.88);
+  pointer-events: none;
+}

@@ -39,6 +39,11 @@ pub struct Node {
     pub op: String,
     #[serde(rename = "opVersion", default, skip_serializing_if = "Option::is_none")]
     pub op_version: Option<String>,
+    /// 静音：透传输入到输出。这是**执行语义**不是 UI 状态，所以不在 ui 里 ——
+    /// 一张被 bypass 的图 headless 跑出来必须和界面里一样。
+    /// M2 只是接住并原样转发给 C++，执行语义 M3 实现。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bypass: bool,
     #[serde(default)]
     pub params: serde_json::Map<String, serde_json::Value>,
     /// 纯 UI 状态。桥接层原样透传，从不解释 —— 后端不关心坐标（ADR-0002）。
@@ -142,6 +147,7 @@ mod tests {
                     id: (*id).into(),
                     op: (*op).into(),
                     op_version: None,
+                    bypass: false,
                     params: Default::default(),
                     ui: None,
                 })
@@ -236,5 +242,7 @@ mod tests {
         assert_eq!(out["nodes"][0]["ui"]["position"]["x"], 12);
         assert_eq!(out["nodes"][0]["ui"]["title"], "自定义标题");
         assert_eq!(out["x"]["futureField"][2], 3);
+        // bypass 默认 false 时不写进文件：稀疏存储，老图的 diff 不该被它污染
+        assert!(out["nodes"][0].get("bypass").is_none());
     }
 }

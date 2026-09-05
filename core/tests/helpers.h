@@ -1,0 +1,161 @@
+#pragma once
+//
+// 测试用的小工具：拼 GraphDoc、跑一次 run、把事件收成数组。
+//
+// 这里刻意**不读任何数据文件**：点云一律用 gen.synthetic 现生成
+// （m2-plan.md §5「点云全部用 gen.synthetic 在代码里生成，仓库不进二进制数据」）。
+// 好处不只是仓库干净 —— 一份 .pcd 样例的语义会随着时间被遗忘，而
+// 「seed=1 的合成云」是自解释的、可复现的、跨机器一致的。
+//
+#include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+
+#include "exec/executor.h"
+#include "lyflow/registry.h"
+
+namespace lyflow::test {
+
+using Json = nlohmann::json;
+
+/// 一个节点的描述，拼图时用。
+struct N {
+  std::string id;
+  std::string op;
+  Json params = Json::object();
+};
+
+/// from "node.port" -> to "node.port"
+struct E {
+  std::string from;
+  std::string to;
+};
+
+inline Json makeGraph(const std::vector<N>& nodes, const std::vector<E>& edges) {
+  Json doc;
+  doc["schemaVersion"] = 1;
+  doc["id"] = "01TESTTESTTESTTESTTESTTEST";
+  doc["nodes"] = Json::array();
+  doc["edges"] = Json::array();
+  for (const N& n : nodes) {
+    Json jn;
+    jn["id"] = n.id;
+    jn["op"] = n.op;
+    jn["params"] = n.params;
+    doc["nodes"].push_back(std::move(jn));
+  }
+  int i = 0;
+  for (const E& e : edges) {
+    const auto dot1 = e.from.find('.');
+    const auto dot2 = e.to.find('.');
+    Json je;
+    je["id"] = "e" + std::to_string(i++);
+    je["from"] = Json{{"node", e.from.substr(0, dot1)}, {"port", e.from.substr(dot1 + 1)}};
+    je["to"] = Json{{"node", e.to.substr(0, dot2)}, {"port", e.to.substr(dot2 + 1)}};
+    doc["edges"].push_back(std::move(je));
+  }
+  return doc;
+}
+
+/// 一次运行收集到的全部事件。
+struct RunLog {
+  std::string runId;
+  std::vector<Json> events;
+
+  std::vector<Json> ofKind(const std::string& kind) const {
+    std::vector<Json> out;
+    for (const Json& e : events) {
+      if (e.value("kind", "") == kind) out.push_back(e);
+    }
+    return out;
+  }
+
+  /// 某节点最后一次 node_state 的 state。没有事件时返回空串。
+  std::string finalState(const std::string& nodeId) const {
+    std::string state;
+    for (const Json& e : events) {
+      if (e.value("kind", "") == "node_state" && e.value("nodeId", "") == nodeId) {
+        state = e.value("state", "");
+      }
+    }
+    return state;
+  }
+
+  Json nodeEvent(const std::string& nodeId, const std::string& state) const {
+    for (const Json& e : events) {
+      if (e.value("kind", "") == "node_state" && e.value("nodeId", "") == nodeId &&
+          e.value("state", "") == state) {
+        return e;
+      }
+    }
+    return Json::object();
+  }
+
+  std::string runStatus() const {
+    const auto finished = ofKind("run_finished");
+    return finished.empty() ? std::string{} : finished.back().value("status", "");
+  }
+
+  /// seq 从 0 开始且连续。丢一条事件前端就会漏掉一个状态，所以每个测试都值得查一次。
+  bool seqIsDense() const {
+    for (std::size_t i = 0; i < events.size(); ++i) {
+      if (events[i].value("seq", -1) != static_cast<int>(i)) return false;
+    }
+    return true;
+  }
+};
+
+namespace detail {
+
+inline void collect(const char* json, void* user) {
+  auto* log = static_cast<RunLog*>(user);
+  log->events.push_back(Json::parse(json));
+}
+
+}  // namespace detail
+
+/// 跑一张图的完整上下文。
+///
+/// 结果仓的生命周期挂在 Run 上（析构即 freeRun），所以想断言输出的测试
+/// 必须让 Run 活着。把 Run 和事件日志捆在同一个对象里，测试就不会写出
+/// 「runGraph 返回后再去取点云，取到 nullopt，然后花半小时怀疑执行器」这种事。
+class Session {
+ public:
+  Session(const Json& doc, std::filesystem::path baseDir = {},
+          std::vector<std::string> targets = {}) {
+    static std::atomic<int> counter{0};
+    log_.runId = "test-run-" + std::to_string(counter.fetch_add(1));
+    exec::RunOptions options;
+    options.runId = log_.runId;
+    options.baseDir = std::move(baseDir);
+    options.targets = std::move(targets);
+    run_ = std::make_unique<exec::Run>(doc.dump(), options, &detail::collect, &log_);
+  }
+
+  exec::Run& run() { return *run_; }
+  /// 等执行结束。返回后事件不会再增加。
+  RunLog& wait() {
+    run_->join();
+    return log_;
+  }
+  const std::string& runId() const { return log_.runId; }
+
+ private:
+  RunLog log_;
+  std::unique_ptr<exec::Run> run_;
+};
+
+/// 只关心事件、不关心结果时的快捷方式。
+inline RunLog runGraph(const Json& doc, const std::filesystem::path& baseDir = {},
+                       const std::vector<std::string>& targets = {}) {
+  Session s(doc, baseDir, targets);
+  return s.wait();
+}
+
+}  // namespace lyflow::test

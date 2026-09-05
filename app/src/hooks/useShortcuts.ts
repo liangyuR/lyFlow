@@ -8,6 +8,7 @@
 
 import { useEffect } from "react";
 
+import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
 
@@ -28,6 +29,8 @@ export interface ShortcutHandlers {
   onSaveAs: () => void;
   onOpen: () => void;
   onNew: () => void;
+  onRun: () => void;
+  onCancel: () => void;
   /** 画布坐标，粘贴和搜索面板需要知道往哪儿放 */
   cursorFlowPosition: () => { x: number; y: number };
   cursorScreenPosition: () => { x: number; y: number };
@@ -43,6 +46,21 @@ export function useShortcuts(handlers: ShortcutHandlers) {
       // 搜索弹层自己处理按键，别在这里抢
       if (ui.searchPopup) {
         if (e.key === "Escape") ui.closeSearch();
+        return;
+      }
+
+      // -- 运行 ------------------------------------------------------------
+      // F5 和 Esc 要在 inTextField 之前处理：用户很可能刚改完一个参数、
+      // 焦点还在输入框里就按 F5。这两个键在输入框里都没有别的含义，
+      // 不会和「在输入框里打字时什么都不拦」那条铁律冲突。
+      if (e.key === "F5") {
+        e.preventDefault();
+        handlers.onRun();
+        return;
+      }
+      if (e.key === "Escape" && useExecutionStore.getState().runStatus === "running") {
+        e.preventDefault();
+        handlers.onCancel();
         return;
       }
 

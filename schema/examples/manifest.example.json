@@ -3,10 +3,10 @@
   "generatedBy": "lyflow-core/0.1.0",
   "types": [
     { "name": "Any", "color": "#8a8f98", "doc": "透传节点专用通配类型。" },
-    { "name": "PointCloud", "color": "#4a9eff" },
-    { "name": "PointCloudXYZI", "color": "#4a9eff", "castableTo": ["PointCloud"] },
+    { "name": "PointCloud", "color": "#4a9eff", "doc": "强度/法线/颜色是可选通道，不是另一个类型。" },
     { "name": "Indices", "color": "#c586c0" },
-    { "name": "Transform", "color": "#a0d030" }
+    { "name": "Transform", "color": "#a0d030" },
+    { "name": "Plane", "color": "#e0a030" }
   ],
   "operators": [
     {

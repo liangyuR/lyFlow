@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Tauri exe 的应用程序清单。
+
+  两块内容缺一不可，而且**必须写在同一份文件里**：
+  tauri_build 的 `WindowsAttributes::app_manifest` 是整份替换，不是合并
+  （tauri-build 2.6.3 `src/lib.rs`：`res.set_manifest(&manifest)`）。
+  只写 activeCodePage 的话，Tauri 自带的 Common-Controls v6 依赖会被顶掉，
+  文件对话框会退回 Windows 95 的样式 —— 而且不报错，只是看着不对。
+
+  1. Common-Controls v6：Tauri 默认清单的原内容，dialog 插件需要。
+  2. activeCodePage=UTF-8（D9）：PCL 的文件 IO 走 CRT 的窄字符串，
+     路径按**进程**的 ANSI 代码页解释。936 代码页下 UTF-8 的中文路径
+     会被当成 GBK，表现是「文件不存在」，排查方向完全错。
+     只有 exe 的清单决定进程 ACP，给 DLL 贴无效。
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>

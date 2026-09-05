@@ -6,6 +6,7 @@
 //
 
 import { groupParams, effectiveParams, isEnabled, isVisible, valueEquals } from "../lib/params";
+import { useNodeExecution, useParamErrors } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
@@ -19,10 +20,12 @@ function ParamRow({
   param,
   node,
   effective,
+  error,
 }: {
   param: Param;
   node: GraphNode;
   effective: Record<string, unknown>;
+  error?: string | undefined;
 }) {
   const setParam = useGraphStore((s) => s.setParam);
   const value = effective[param.name];
@@ -31,7 +34,11 @@ function ParamRow({
   const overridden = node.params?.[param.name] !== undefined;
 
   return (
-    <div className={`insp-param${disabled ? " is-disabled" : ""}`}>
+    <div
+      className={`insp-param${disabled ? " is-disabled" : ""}${error ? " has-error" : ""}`}
+      data-testid={`param-${param.name}`}
+      data-param-error={error ? "1" : undefined}
+    >
       <div className="insp-param__label">
         <span className={overridden ? "is-overridden" : ""} title={param.doc}>
           {param.label || param.name}
@@ -56,6 +63,9 @@ function ParamRow({
             if (!valueEquals(v, value)) setParam(node.id, param.name, v);
           }}
         />
+        {/* 错误消息直接贴在控件下面，而不是只做个红框 ——
+            红框只说明「这里错了」，用户还得自己猜错在哪（P0 #15）。 */}
+        {error && <p className="insp-param__error">{error}</p>}
       </div>
     </div>
   );
@@ -63,6 +73,8 @@ function ParamRow({
 
 function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
   const setNodeUi = useGraphStore((s) => s.setNodeUi);
+  const errors = useParamErrors(node.id);
+  const exec = useNodeExecution(node.id);
   const effective = effectiveParams(op, node);
   const groups = groupParams(op.params);
 
@@ -91,6 +103,24 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
         {op.doc && <p className="insp__doc">{op.doc}</p>}
       </header>
 
+      {/* 该节点这次运行的全部诊断（D5）。带 paramPath 的会同时在下面标红框，
+          不带的（端口、IO 问题）只有这里看得到，所以一条都不能省。 */}
+      {exec && exec.errors.length > 0 && (
+        <section className="insp__errors" data-testid="inspector-errors">
+          <h4 className="insp__errors-title">
+            {exec.state === "cancelled" ? "未执行" : "执行出错"}
+          </h4>
+          <ul>
+            {exec.errors.map((e, i) => (
+              <li key={i}>
+                <code className="insp__errcode">{e.code}</code>
+                <span>{e.message}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {op.params.length === 0 ? (
         <p className="insp__none">此算子没有参数</p>
       ) : (
@@ -101,7 +131,13 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
             <section key={`${g.name}-${g.advanced}`} className="insp__group">
               {g.name && <h4 className="insp__group-title">{g.name}</h4>}
               {visible.map((p) => (
-                <ParamRow key={p.name} param={p} node={node} effective={effective} />
+                <ParamRow
+                  key={p.name}
+                  param={p}
+                  node={node}
+                  effective={effective}
+                  error={errors.get(p.name)}
+                />
               ))}
             </section>
           );

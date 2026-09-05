@@ -133,7 +133,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "cancellable": { "type": "boolean", "default": false, "description": "支持中途取消 → 可用于 live preview。" },
+        "cancellable": { "type": "boolean", "default": false, "description": "支持中途取消 → 可用于 live preview。协作式：算子要在自己的循环里轮询。PCL 之类第三方算法一旦进去就出不来，这类算子必须如实填 false，否则前端会承诺一个做不到的 Esc。" },
         "previewable": { "type": "boolean", "default": false, "description": "支持降级质量的快速预览。" },
         "deterministic": { "type": "boolean", "default": true, "description": "同输入同输出 → 可参与缓存。" }
       }

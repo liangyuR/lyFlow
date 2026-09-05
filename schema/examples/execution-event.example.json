@@ -1,0 +1,131 @@
+[
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000000",
+    "seq": 0,
+    "at": "2026-09-05T12:00:00.000Z",
+    "kind": "run_started",
+    "nodeCount": 3,
+    "plan": ["n_load", "n_voxel", "n_save"],
+    "targets": [],
+    "nodes": [
+      { "id": "n_load", "cacheKey": "3f2a9c1e4b7d0a8265f1c3e90d47ab12", "level": 0 },
+      { "id": "n_voxel", "cacheKey": "b81d4f0c62a7e3591acd0847f2b6e935", "level": 1 },
+      { "id": "n_save", "cacheKey": "0c7e5a91d3b842f6a05be23917cd48f0", "level": 2 }
+    ]
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000000",
+    "seq": 1,
+    "at": "2026-09-05T12:00:00.001Z",
+    "kind": "node_state",
+    "nodeId": "n_load",
+    "state": "pending"
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000000",
+    "seq": 2,
+    "at": "2026-09-05T12:00:00.002Z",
+    "kind": "node_state",
+    "nodeId": "n_load",
+    "state": "running"
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000000",
+    "seq": 3,
+    "at": "2026-09-05T12:00:00.180Z",
+    "kind": "node_progress",
+    "nodeId": "n_load",
+    "progress": 0.62,
+    "message": "读取中"
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000000",
+    "seq": 4,
+    "at": "2026-09-05T12:00:00.240Z",
+    "kind": "log",
+    "level": "info",
+    "nodeId": "n_load",
+    "message": "读入 1234567 个点"
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000000",
+    "seq": 5,
+    "at": "2026-09-05T12:00:00.250Z",
+    "kind": "node_state",
+    "nodeId": "n_load",
+    "state": "done",
+    "durationMs": 248.5,
+    "stats": {
+      "elementCount": 1234567,
+      "byteSize": 19753072,
+      "outputs": [{ "port": "cloud", "type": "PointCloud", "elementCount": 1234567 }]
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000000",
+    "seq": 6,
+    "at": "2026-09-05T12:00:00.251Z",
+    "kind": "node_state",
+    "nodeId": "n_voxel",
+    "state": "error",
+    "durationMs": 0.4,
+    "error": {
+      "phase": "validate",
+      "code": "bad_param",
+      "message": "Leaf Size：不能小于 0.0001",
+      "paramPath": "leafSize"
+    },
+    "errors": [
+      {
+        "phase": "validate",
+        "code": "bad_param",
+        "message": "Leaf Size：不能小于 0.0001",
+        "paramPath": "leafSize"
+      },
+      {
+        "phase": "validate",
+        "code": "unknown_param",
+        "message": "算子没有参数 'leafsize'",
+        "paramPath": "leafsize"
+      }
+    ]
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000000",
+    "seq": 7,
+    "at": "2026-09-05T12:00:00.252Z",
+    "kind": "node_state",
+    "nodeId": "n_save",
+    "state": "cancelled",
+    "errors": [
+      {
+        "phase": "execute",
+        "code": "upstream_failed",
+        "message": "上游节点 n_voxel 失败，未执行"
+      }
+    ]
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000000",
+    "seq": 8,
+    "at": "2026-09-05T12:00:00.253Z",
+    "kind": "run_finished",
+    "status": "error",
+    "durationMs": 253.1,
+    "error": {
+      "phase": "validate",
+      "code": "bad_param",
+      "message": "Leaf Size：不能小于 0.0001",
+      "paramPath": "leafSize"
+    }
+  }
+]

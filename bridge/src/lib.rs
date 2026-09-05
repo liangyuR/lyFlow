@@ -5,7 +5,9 @@
 
 mod commands;
 mod core_ffi;
+mod execution;
 mod graph;
+mod ulid;
 
 pub use graph::{Edge, GraphDoc, Node, PortRef};
 
@@ -28,6 +30,8 @@ pub fn run() {
             std::process::exit(1);
         }
         Err(e) => {
+            // 最常见的原因是 lyflow_core.dll 不在 exe 旁边。错误信息里已经
+            // 写了它该在哪 —— 白屏加一句「加载失败」是最难排查的形态。
             eprintln!("无法读取 lyflow-core 自检结果: {e}");
             std::process::exit(1);
         }
@@ -36,11 +40,17 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(execution::RunManager::new())
         .invoke_handler(tauri::generate_handler![
             commands::get_manifest,
             commands::get_core_info,
             commands::save_graph,
             commands::load_graph,
+            commands::validate_graph,
+            commands::run_graph,
+            commands::cancel_run,
+            commands::get_output_info,
+            commands::get_output_cloud,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Tauri 失败");

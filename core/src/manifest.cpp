@@ -18,6 +18,13 @@ Value Value::vec(std::vector<double> v) {
   Value x; x.kind_ = Kind::FloatVec; x.vec_ = std::move(v); return x;
 }
 
+const Param* findParam(const OperatorDesc& op, const std::string& name) {
+  for (const auto& p : op.params) {
+    if (p.name == name) return &p;
+  }
+  return nullptr;
+}
+
 const char* toString(ParamType t) {
   switch (t) {
     case ParamType::Bool:      return "bool";

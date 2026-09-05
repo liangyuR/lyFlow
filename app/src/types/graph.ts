@@ -21,6 +21,13 @@ export interface GraphNode {
   id: string;
   op: string;
   opVersion?: string;
+  /**
+   * 静音：透传输入到输出。这是**执行语义**不是 UI 状态，所以不在 `ui` 里。
+   * M2 只是让它在三层之间原样穿过（schema / Rust / C++ 都已接住），
+   * 执行语义 M3 实现。前端必须带着它 —— 任何重建节点对象而不是就地改的路径
+   * （复制粘贴、迁移写回）漏掉它，用户存盘时静音状态就没了。
+   */
+  bypass?: boolean;
   /** 稀疏：只存与 manifest 默认值不同的项。 */
   params?: Record<string, unknown>;
   ui?: NodeUi;

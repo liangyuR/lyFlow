@@ -10,7 +10,25 @@
 #include <string>
 #include <vector>
 
+#include "lyflow/status.h"
+
 namespace lyflow {
+
+// 算子的计算实体。定义在 operator.h —— 这里只需要不完整类型就能声明函数指针，
+// 这样 manifest.h 不必反过来依赖 operator.h（后者要用本文件的 Value）。
+class Inputs;
+class ParamView;
+class Outputs;
+class ExecContext;
+
+/// 算子的计算函数。签名从第一天就是最终形态（D3/D6）：
+/// 输入已按端口类型校验过，参数已合并默认值，ctx 提供取消与进度。
+using ComputeFn = Status (*)(const Inputs&, const ParamView&, Outputs&, ExecContext&);
+
+/// 可选钩子：把「文件内容变了」这类外部状态揉进 cacheKey。
+/// IO 算子返回 "size:mtime"，读不到文件时返回空串（当作没有外部状态）。
+/// M3 的缓存复用完全靠它，M2 先把口子留好。
+using ExternalKeyFn = std::string (*)(const ParamView&);
 
 // ---------------------------------------------------------------------------
 // Value —— 参数默认值。只覆盖 schema 中 param.default 允许出现的形态。
@@ -143,6 +161,14 @@ struct OperatorDesc {
   std::vector<Port> outputs;
   std::vector<Param> params;
   Capabilities capabilities;
+
+  /// 计算实体。Registry::validate() 要求非空 —— 一个「有描述没实现」的算子
+  /// 会在用户点运行时才暴露，那时已经画完整张图了。
+  ComputeFn compute = nullptr;
+  ExternalKeyFn externalKey = nullptr;
 };
+
+/// 按名字找参数描述。执行器和算子都要用，放这里免得各写一遍线性查找。
+const Param* findParam(const OperatorDesc& op, const std::string& name);
 
 }  // namespace lyflow

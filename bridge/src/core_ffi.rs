@@ -1,60 +1,441 @@
 //! C ABI 边界的 Rust 侧。
 //!
-//! 这一层只做三件事：调用、把 C 的堆内存拷成 Rust 的、立刻还回去。
-//! **不在这里理解算子语义** —— 那是 ADR-0001 划的线：桥接层只转发。
+//! 这一层只做四件事：加载 DLL、调用、把 C 的堆内存拷成 Rust 的、立刻还回去。
+//! **不在这里理解算子语义** —— 那是 architecture.md 划的线：桥接层只转发。
+//!
+//! ADR-0004：core 是运行时加载的 DLL，不是静态链接的库。所有调用都经
+//! `Core` 里那张函数表。M3 的算子热重载因此只是「drop 掉这个 Arc<Core> 再建一个」，
+//! 调用点一行都不用改。
 
-use std::ffi::CStr;
-use std::os::raw::c_char;
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_int, c_void};
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 
-extern "C" {
-    fn lyflow_version() -> *const c_char;
-    fn lyflow_manifest_json() -> *mut c_char;
-    fn lyflow_manifest_problems() -> *mut c_char;
-    fn lyflow_string_free(s: *mut c_char);
+use libloading::{Library, Symbol};
+
+// ---------------------------------------------------------------------------
+// C ABI 的类型镜像。与 core/include/lyflow/c_api.h 一一对应。
+// ---------------------------------------------------------------------------
+
+pub type EventCb = unsafe extern "C" fn(*const c_char, *mut c_void);
+
+#[repr(C)]
+pub struct RunOptionsRaw {
+    pub run_id: *const c_char,
+    pub base_dir: *const c_char,
+    pub targets: *const *const c_char,
+    pub target_count: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CloudViewRaw {
+    pub point_count: u32,
+    pub total_points: u32,
+    pub flags: u32,
+    pub reserved: u32,
+    pub bounds: [f32; 6],
+    pub xyz: *const f32,
+    pub intensity: *const f32,
+    pub handle: *mut c_void,
+}
+
+pub const CLOUD_HAS_INTENSITY: u32 = 1;
+
+/// `lyflow_run` 是 core 内部类型，这边只当成不透明指针。
+#[repr(C)]
+pub struct RunOpaque {
+    _private: [u8; 0],
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
+    #[error("加载 lyflow_core.dll 失败: {0}\n（DLL 应当与 exe 同目录；开发期由 build.rs 拷贝，安装包里由 bundle.resources 带上）")]
+    Load(String),
+    #[error("lyflow_core.dll 里找不到符号 {0}（DLL 版本与本程序不匹配）")]
+    MissingSymbol(&'static str),
     #[error("core 返回了空指针（内存分配失败）")]
     NullReturn,
     #[error("core 返回的不是合法 UTF-8: {0}")]
     NotUtf8(#[from] std::str::Utf8Error),
+    #[error("参数里有 NUL 字节: {0}")]
+    NulInArgument(#[from] std::ffi::NulError),
+    #[error("core 没有该结果（节点没跑完，或该输出不是点云）")]
+    NoSuchOutput,
 }
 
-/// 接管 core 返回的堆字符串：拷贝一份，然后立刻用 core 自己的 free 还回去。
+/// 函数表的签名。写成 alias 而不是内联在结构体里，是因为取符号的宏需要
+/// 一个**具名**类型：`Symbol<_>` 推不出来（`into_raw()` 断了推导链），
+/// 而每处写一遍完整签名，早晚会有一处和 c_api.h 对不上。
+type FnVersion = unsafe extern "C" fn() -> *const c_char;
+type FnJson = unsafe extern "C" fn() -> *mut c_char;
+type FnStringFree = unsafe extern "C" fn(*mut c_char);
+type FnValidate = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
+type FnRunStart = unsafe extern "C" fn(
+    *const c_char,
+    *const RunOptionsRaw,
+    Option<EventCb>,
+    *mut c_void,
+) -> *mut RunOpaque;
+type FnRunOp = unsafe extern "C" fn(*mut RunOpaque);
+type FnOutputCloud = unsafe extern "C" fn(
+    *const c_char,
+    *const c_char,
+    *const c_char,
+    u32,
+    *mut CloudViewRaw,
+) -> c_int;
+type FnCloudViewFree = unsafe extern "C" fn(*mut CloudViewRaw);
+type FnOutputInfo = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
+
+/// 加载好的 core，外加一张函数表。
 ///
-/// 必须用 `lyflow_string_free` 而不是 Rust 的 dealloc —— 跨 ABI 边界时
-/// 分配器可能不是同一个，用错了在 release 下才崩，还崩在无关的地方。
-unsafe fn take_owned(ptr: *mut c_char) -> Result<String, CoreError> {
-    if ptr.is_null() {
-        return Err(CoreError::NullReturn);
-    }
-    let result = CStr::from_ptr(ptr).to_str().map(str::to_owned);
-    lyflow_string_free(ptr);
-    Ok(result?)
+/// 所有 `Symbol` 都从 `lib` 里取，而 `Symbol<'a>` 借用 `Library` —— 自引用结构
+/// 在 Rust 里很难写对，所以这里存的是裸函数指针（`unsafe { sym.into_raw() }`
+/// 之后的形态），由 `Arc<Core>` 保证 `lib` 活得比任何一次调用都久。
+pub struct Core {
+    // 顺序有意义：函数指针必须在 Library 之前析构。
+    // 实际上它们是 Copy 的裸指针，但把 lib 放最后可以让「DLL 先于指针卸载」
+    // 这件事在类型层面就不可能发生。
+    version: FnVersion,
+    manifest_json: FnJson,
+    manifest_problems: FnJson,
+    string_free: FnStringFree,
+    validate: FnValidate,
+    run_start: FnRunStart,
+    run_cancel: FnRunOp,
+    run_join: FnRunOp,
+    run_free: FnRunOp,
+    output_cloud: FnOutputCloud,
+    cloud_view_free: FnCloudViewFree,
+    output_info: FnOutputInfo,
+    #[allow(dead_code)]
+    lib: Library,
 }
 
-/// core 的版本号。静态存储，不需要释放。
+// Core 里只有函数指针和 Library。core 侧的每个入口自己加锁（结果仓有 mutex，
+// Run 有 atomic），所以跨线程共享是安全的。
+unsafe impl Send for Core {}
+unsafe impl Sync for Core {}
+
+macro_rules! sym {
+    ($lib:expr, $name:literal, $ty:ty) => {{
+        let s: Symbol<$ty> = unsafe { $lib.get(concat!($name, "\0").as_bytes()) }
+            .map_err(|_| CoreError::MissingSymbol($name))?;
+        unsafe { *s.into_raw() }
+    }};
+}
+
+impl Core {
+    fn load() -> Result<Self, CoreError> {
+        let path = dll_path();
+        let lib = unsafe { Library::new(&path) }
+            .map_err(|e| CoreError::Load(format!("{} —— {e}", path.display())))?;
+
+        Ok(Core {
+            version: sym!(lib, "lyflow_version", FnVersion),
+            manifest_json: sym!(lib, "lyflow_manifest_json", FnJson),
+            manifest_problems: sym!(lib, "lyflow_manifest_problems", FnJson),
+            string_free: sym!(lib, "lyflow_string_free", FnStringFree),
+            validate: sym!(lib, "lyflow_validate", FnValidate),
+            run_start: sym!(lib, "lyflow_run_start", FnRunStart),
+            run_cancel: sym!(lib, "lyflow_run_cancel", FnRunOp),
+            run_join: sym!(lib, "lyflow_run_join", FnRunOp),
+            run_free: sym!(lib, "lyflow_run_free", FnRunOp),
+            output_cloud: sym!(lib, "lyflow_output_cloud", FnOutputCloud),
+            cloud_view_free: sym!(lib, "lyflow_cloud_view_free", FnCloudViewFree),
+            output_info: sym!(lib, "lyflow_output_info", FnOutputInfo),
+            lib,
+        })
+    }
+
+    /// 接管 core 返回的堆字符串：拷贝一份，然后立刻用 core 自己的 free 还回去。
+    ///
+    /// 必须用 `lyflow_string_free` 而不是 Rust 的 dealloc —— 跨 DLL 边界时
+    /// 分配器不是同一个，用错了在 release 下才崩，还崩在无关的地方。
+    unsafe fn take_owned(&self, ptr: *mut c_char) -> Result<String, CoreError> {
+        if ptr.is_null() {
+            return Err(CoreError::NullReturn);
+        }
+        let result = CStr::from_ptr(ptr).to_str().map(str::to_owned);
+        (self.string_free)(ptr);
+        Ok(result?)
+    }
+
+    pub fn version(&self) -> String {
+        unsafe {
+            CStr::from_ptr((self.version)())
+                .to_string_lossy()
+                .into_owned()
+        }
+    }
+
+    pub fn manifest_json(&self) -> Result<String, CoreError> {
+        unsafe { self.take_owned((self.manifest_json)()) }
+    }
+
+    pub fn manifest_problems(&self) -> Result<Vec<String>, CoreError> {
+        let raw = unsafe { self.take_owned((self.manifest_problems)()) }?;
+        if raw.is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(raw.lines().map(str::to_owned).collect())
+    }
+
+    /// 只校验不执行。返回诊断 JSON 数组的文本。
+    pub fn validate(&self, graph_json: &str, base_dir: &str) -> Result<String, CoreError> {
+        let g = CString::new(graph_json)?;
+        let b = CString::new(base_dir)?;
+        unsafe { self.take_owned((self.validate)(g.as_ptr(), b.as_ptr())) }
+    }
+
+    pub fn output_info(&self, run_id: &str, node_id: &str) -> Result<String, CoreError> {
+        let r = CString::new(run_id)?;
+        let n = CString::new(node_id)?;
+        unsafe { self.take_owned((self.output_info)(r.as_ptr(), n.as_ptr())) }
+    }
+
+    /// 取某节点某端口的点云预览。返回的 `CloudView` 在 Drop 里还给 core。
+    pub fn output_cloud(
+        self: &Arc<Self>,
+        run_id: &str,
+        node_id: &str,
+        port: &str,
+        max_points: u32,
+    ) -> Result<CloudView, CoreError> {
+        let r = CString::new(run_id)?;
+        let n = CString::new(node_id)?;
+        let p = CString::new(port)?;
+        let mut raw = CloudViewRaw {
+            point_count: 0,
+            total_points: 0,
+            flags: 0,
+            reserved: 0,
+            bounds: [0.0; 6],
+            xyz: std::ptr::null(),
+            intensity: std::ptr::null(),
+            handle: std::ptr::null_mut(),
+        };
+        let rc = unsafe {
+            (self.output_cloud)(r.as_ptr(), n.as_ptr(), p.as_ptr(), max_points, &mut raw)
+        };
+        if rc != 0 {
+            return Err(CoreError::NoSuchOutput);
+        }
+        Ok(CloudView {
+            raw,
+            core: Arc::clone(self),
+        })
+    }
+}
+
+/// core 借出来的点云缓冲。Drop 时还回去。
+///
+/// 这是整个桥接层里唯一一处「持有 C++ 的指针一段时间」的地方，所以包成 RAII：
+/// 忘了 free 一次就是一次泄漏，而点云动辄几十兆，泄漏几次内存就没了。
+pub struct CloudView {
+    raw: CloudViewRaw,
+    core: Arc<Core>,
+}
+
+impl CloudView {
+    pub fn point_count(&self) -> u32 {
+        self.raw.point_count
+    }
+    pub fn total_points(&self) -> u32 {
+        self.raw.total_points
+    }
+    pub fn flags(&self) -> u32 {
+        self.raw.flags
+    }
+    pub fn bounds(&self) -> [f32; 6] {
+        self.raw.bounds
+    }
+    pub fn has_intensity(&self) -> bool {
+        self.raw.flags & CLOUD_HAS_INTENSITY != 0 && !self.raw.intensity.is_null()
+    }
+    pub fn xyz(&self) -> &[f32] {
+        if self.raw.xyz.is_null() {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts(self.raw.xyz, self.raw.point_count as usize * 3) }
+    }
+    pub fn intensity(&self) -> &[f32] {
+        if !self.has_intensity() {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts(self.raw.intensity, self.raw.point_count as usize) }
+    }
+}
+
+impl Drop for CloudView {
+    fn drop(&mut self) {
+        unsafe { (self.core.cloud_view_free)(&mut self.raw) };
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RunHandle
+// ---------------------------------------------------------------------------
+
+/// 一次运行的句柄。
+///
+/// C ABI 的生命周期契约是 start → (cancel)* → join → free，而且
+/// **join 返回之后回调保证不再被触发**。`user` 指针的生命期就挂在这上面：
+/// 它必须活到 join 之后，所以由本结构体持有，Drop 里在 join 完成后才释放。
+pub struct RunHandle {
+    handle: *mut RunOpaque,
+    core: Arc<Core>,
+    /// 回调的 user 指针。join 之后才允许 drop。
+    user: *mut c_void,
+    /// 用来释放 user 的函数。类型擦除，免得 RunHandle 变成泛型。
+    drop_user: unsafe fn(*mut c_void),
+    /// join 只能真正发生一次。用 Mutex 而不是 AtomicBool：第二个调用者
+    /// 必须**等**第一个 join 返回，否则「join 返回后回调不再触发」这条契约
+    /// 对它就不成立了。
+    joined: std::sync::Mutex<bool>,
+    run_id: String,
+}
+
+// 跨线程共享安全的依据，逐个说清楚（这段注释以前是错的，说「core 侧各自加了锁」——
+// 当时 C++ 的 Run::join 读写的是一个裸 bool，什么锁都没有）：
+//   cancel  —— core 侧是一次 relaxed 原子写，天然可并发
+//   join    —— core 侧 Run::join 现在自己持一把 mutex；这一侧的 Mutex<bool>
+//              只是省掉重复进 FFI，两层都不能少（C ABI 还有 headless CLI 这个调用方）
+//   free    —— 只在 Drop 里发生，那时已经没有别的引用
+unsafe impl Send for RunHandle {}
+unsafe impl Sync for RunHandle {}
+
+impl RunHandle {
+    /// 启动一次运行。`user` 由本函数接管，join 之后才会被释放。
+    ///
+    /// # Safety
+    /// `cb` 必须能安全地在 core 的工作线程上被调用，且只解引用 `user`。
+    pub unsafe fn start<T>(
+        core: Arc<Core>,
+        graph_json: &str,
+        run_id: &str,
+        base_dir: &str,
+        targets: &[String],
+        cb: EventCb,
+        user: Box<T>,
+    ) -> Result<Self, CoreError> {
+        let graph = CString::new(graph_json)?;
+        let rid = CString::new(run_id)?;
+        let base = CString::new(base_dir)?;
+        let target_cstrings: Vec<CString> = targets
+            .iter()
+            .map(|t| CString::new(t.as_str()))
+            .collect::<Result<_, _>>()?;
+        let target_ptrs: Vec<*const c_char> =
+            target_cstrings.iter().map(|c| c.as_ptr()).collect();
+
+        let options = RunOptionsRaw {
+            run_id: rid.as_ptr(),
+            base_dir: base.as_ptr(),
+            targets: if target_ptrs.is_empty() {
+                std::ptr::null()
+            } else {
+                target_ptrs.as_ptr()
+            },
+            target_count: target_ptrs.len(),
+        };
+
+        let user_ptr = Box::into_raw(user) as *mut c_void;
+        unsafe fn drop_user<T>(p: *mut c_void) {
+            drop(Box::from_raw(p as *mut T));
+        }
+
+        let handle = (core.run_start)(graph.as_ptr(), &options, Some(cb), user_ptr);
+        if handle.is_null() {
+            drop_user::<T>(user_ptr);
+            return Err(CoreError::NullReturn);
+        }
+        Ok(RunHandle {
+            handle,
+            core,
+            user: user_ptr,
+            drop_user: drop_user::<T>,
+            joined: std::sync::Mutex::new(false),
+            run_id: run_id.to_string(),
+        })
+    }
+
+    pub fn run_id(&self) -> &str {
+        &self.run_id
+    }
+
+    pub fn cancel(&self) {
+        unsafe { (self.core.run_cancel)(self.handle) };
+    }
+
+    pub fn join(&self) {
+        let mut joined = self.joined.lock().unwrap_or_else(|e| e.into_inner());
+        if *joined {
+            return;
+        }
+        unsafe { (self.core.run_join)(self.handle) };
+        *joined = true;
+    }
+}
+
+impl Drop for RunHandle {
+    fn drop(&mut self) {
+        // cancel → join → free 的顺序不能变：free 会释放该 run 在结果仓的
+        // 全部结果，而工作线程还可能正在往里写。
+        self.cancel();
+        self.join();
+        unsafe {
+            (self.core.run_free)(self.handle);
+            // 到这里 core 保证不会再回调，user 才可以走。
+            (self.drop_user)(self.user);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 进程级单例
+// ---------------------------------------------------------------------------
+
+/// lyflow_core.dll 的位置：**exe 同目录**。
+///
+/// 不用 PATH 搜索，也不用当前工作目录 —— 前者会在用户机器上加载到某个
+/// 无关的同名 DLL，后者在双击启动时根本不是安装目录。
+/// 开发期由 build.rs 把它拷到 target/<profile>/ 和 deps/；
+/// 安装包里由 tauri.conf.json 的 bundle.resources 带到 exe 旁边。
+fn dll_path() -> PathBuf {
+    let name = if cfg!(windows) {
+        "lyflow_core.dll"
+    } else {
+        "liblyflow_core.so"
+    };
+    match std::env::current_exe().ok().and_then(|p| p.parent().map(PathBuf::from)) {
+        Some(dir) => dir.join(name),
+        None => PathBuf::from(name),
+    }
+}
+
+static CORE: OnceLock<Result<Arc<Core>, String>> = OnceLock::new();
+
+/// 进程内那一份 core。第一次调用时加载 DLL。
+pub fn core() -> Result<Arc<Core>, String> {
+    CORE.get_or_init(|| Core::load().map(Arc::new).map_err(|e| e.to_string()))
+        .clone()
+}
+
+// 下面四个是给不需要拿 Arc 的调用点用的便捷包装。
+
 pub fn version() -> String {
-    unsafe {
-        CStr::from_ptr(lyflow_version())
-            .to_string_lossy()
-            .into_owned()
-    }
+    core().map(|c| c.version()).unwrap_or_default()
 }
 
-/// 全量算子描述的原始 JSON 文本。
-pub fn manifest_json() -> Result<String, CoreError> {
-    unsafe { take_owned(lyflow_manifest_json()) }
+pub fn manifest_json() -> Result<String, String> {
+    core()?.manifest_json().map_err(|e| e.to_string())
 }
 
-/// 注册表自检结果。空 vec = 没问题。
-pub fn manifest_problems() -> Result<Vec<String>, CoreError> {
-    let raw = unsafe { take_owned(lyflow_manifest_problems()) }?;
-    if raw.is_empty() {
-        return Ok(Vec::new());
-    }
-    Ok(raw.lines().map(str::to_owned).collect())
+pub fn manifest_problems() -> Result<Vec<String>, String> {
+    core()?.manifest_problems().map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -76,7 +457,7 @@ mod tests {
 
         assert_eq!(v["schemaVersion"], 1);
         let ops = v["operators"].as_array().expect("operators 不是数组");
-        assert!(!ops.is_empty(), "一个算子都没注册");
+        assert!(ops.len() >= 15, "M2 应当有 15 个算子，实际 {}", ops.len());
 
         // 每个算子引用的端口类型都必须在类型表里 —— C++ 侧 validate() 已经查过，
         // 这里再查一遍是为了确认「查过的那份」和「导出的那份」是同一份。
@@ -94,6 +475,9 @@ mod tests {
                 }
             }
         }
+        // D10：PointCloudXYZI 已经删除，Plane 已经加入
+        assert!(!types.contains(&"PointCloudXYZI"));
+        assert!(types.contains(&"Plane"));
     }
 
     /// /utf-8 编译开关掉了的话，中文 doc 会变成乱码 —— 而且只在前端才看得出来。
@@ -110,5 +494,41 @@ mod tests {
     #[test]
     fn version_is_non_empty() {
         assert!(!version().is_empty());
+    }
+
+    #[test]
+    fn validate_reports_all_diagnostics_not_just_the_first() {
+        let core = core().unwrap();
+        let doc = serde_json::json!({
+            "schemaVersion": 1, "id": "t",
+            "nodes": [
+                {"id": "a", "op": "gen.synthetic", "params": {"pointCount": -1}},
+                {"id": "b", "op": "no.such.op"}
+            ],
+            "edges": []
+        });
+        let raw = core.validate(&doc.to_string(), "").unwrap();
+        let diags: Vec<serde_json::Value> = serde_json::from_str(&raw).unwrap();
+        assert!(diags.len() >= 2, "D5 要求一次返回全部诊断: {raw}");
+        assert!(diags.iter().any(|d| d["code"] == "bad_param"));
+        assert!(diags.iter().any(|d| d["code"] == "unknown_op"));
+    }
+
+    #[test]
+    fn validate_accepts_a_good_graph() {
+        let core = core().unwrap();
+        let doc = serde_json::json!({
+            "schemaVersion": 1, "id": "t",
+            "nodes": [
+                {"id": "a", "op": "gen.synthetic"},
+                {"id": "b", "op": "filter.voxel_grid"}
+            ],
+            "edges": [
+                {"id": "e", "from": {"node": "a", "port": "cloud"},
+                            "to": {"node": "b", "port": "cloud"}}
+            ]
+        });
+        let raw = core.validate(&doc.to_string(), "").unwrap();
+        assert_eq!(raw.trim(), "[]", "干净的图不该有诊断: {raw}");
     }
 }

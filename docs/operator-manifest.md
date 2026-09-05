@@ -102,14 +102,21 @@ V1 的规则刻意简单：
 ```jsonc
 {
   "types": [
-    { "name": "PointCloud",     "color": "#4a9eff" },
-    { "name": "PointCloudXYZI", "color": "#4a9eff", "castableTo": ["PointCloud"] },
-    { "name": "Image",          "color": "#f0a020" },
-    { "name": "Transform",      "color": "#a0d030" },
-    { "name": "Any",            "color": "#888888" }
+    { "name": "PointCloud", "color": "#4a9eff" },
+    { "name": "Indices",    "color": "#c586c0" },
+    { "name": "Transform",  "color": "#a0d030" },
+    { "name": "Plane",      "color": "#e0a030" },
+    { "name": "Any",        "color": "#888888" }
   ]
 }
 ```
+
+> `castableTo` 目前一条都没用上，这是有意的。曾经有过一个
+> `PointCloudXYZI castableTo: ["PointCloud"]`，M2 把它删了（m2-plan.md 的 D10）：
+> 强度、法线、颜色是 `PointCloud` 的**可选通道**，不是另一个类型。
+> 让类型系统承诺一件数据模型做不到的事，迟早要在
+> 「XYZI 连到 XYZ 端口之后强度去哪了」这种问题上翻车。
+> 字段留着 —— 真出现「Image 与 ImageGray 可以隐式转」这类需求时它就位。
 
 `color` 让前端能给端口和连线着色——这是零成本的巨大可读性提升，一定要在 M0 就做。
 

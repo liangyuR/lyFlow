@@ -9,7 +9,7 @@
 // 这条如果漏了，稀疏存储就退化成全量存储，而且是静默退化。
 //
 
-import type { GraphNode } from "../types/graph";
+import type { GraphDoc, GraphNode } from "../types/graph";
 import type { Condition, OperatorDesc, Param } from "../types/manifest";
 
 /** 深比较。参数值只可能是标量、字符串或数字数组（vec/color/transform）。 */
@@ -34,7 +34,7 @@ export function effectiveParams(
 ): Record<string, unknown> {
   const out = defaultParams(op);
   for (const [k, v] of Object.entries(node.params ?? {})) {
-    // 只认 manifest 里still存在的参数。算子删过参数的老图会残留无主键值，
+    // 只认 manifest 里仍然存在的参数。算子删过参数的老图会残留无主键值，
     // 那些应该被忽略而不是渲染成幽灵控件。
     if (k in out) out[k] = v;
   }
@@ -137,4 +137,34 @@ export function groupParams(params: readonly Param[]): ParamGroup[] {
     out.push({ name: name || "高级", advanced: true, params: list });
   }
   return out;
+}
+
+// ---------------------------------------------------------------- 相对路径
+
+/** Windows 盘符、UNC，以及 POSIX 的绝对路径。 */
+function isAbsolutePath(p: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith("\\\\") || p.startsWith("/");
+}
+
+/**
+ * 图里有没有用到相对路径的参数。
+ *
+ * 相对路径是相对**图文件所在目录**解析的（C++ 侧的 baseDir），
+ * 所以一张没保存过的图带相对路径就没法运行 —— 与其让 core 报一句
+ * 「文件不存在: samples/bin.pcd」，不如在运行前直接说「先保存」。
+ */
+export function hasRelativePathParam(
+  doc: GraphDoc,
+  operatorsById: ReadonlyMap<string, OperatorDesc>,
+): boolean {
+  for (const node of doc.nodes) {
+    const op = operatorsById.get(node.op);
+    if (!op) continue;
+    for (const param of op.params) {
+      if (param.type !== "path") continue;
+      const value = effectiveValue(op, node, param.name);
+      if (typeof value === "string" && value !== "" && !isAbsolutePath(value)) return true;
+    }
+  }
+  return false;
 }

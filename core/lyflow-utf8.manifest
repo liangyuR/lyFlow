@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  D9：声明进程的 ANSI 代码页为 UTF-8。
+
+  PCL 的文件 IO 最终走 CRT 的窄字符串 _open/ifstream，路径按进程 ACP 解释。
+  默认 ACP（简体中文是 936）下，UTF-8 编码的中文路径会被当成 GBK 乱码，
+  文件打不开而且报的是「文件不存在」，排查方向完全错。
+
+  只有 exe 的 manifest 决定进程 ACP，DLL 上贴无效 —— 所以这份 manifest 要
+  同时进 lyflow-dump-manifest、lyflow-core-tests 和 Tauri 的 exe。
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>

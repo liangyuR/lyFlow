@@ -17,7 +17,25 @@
       "properties": {
         "kind": { "const": "run_started" },
         "nodeCount": { "type": "integer" },
-        "plan": { "type": "array", "items": { "type": "string" }, "description": "拓扑序的节点 id 列表。" }
+        "plan": { "type": "array", "items": { "type": "string" }, "description": "拓扑序的节点 id 列表。" },
+        "targets": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Run to node 的目标集。全图运行时为空数组。"
+        },
+        "nodes": {
+          "type": "array",
+          "description": "编译结果，与 plan 同序。M3 的精确 stale 标记与「将重算 N 个节点」提示靠它。",
+          "items": {
+            "type": "object",
+            "required": ["id", "cacheKey", "level"],
+            "properties": {
+              "id": { "type": "string" },
+              "cacheKey": { "type": "string", "description": "内容寻址键。参数或上游变了它就变。" },
+              "level": { "type": "integer", "description": "拓扑层号。同层无依赖，M3 并行执行按它分批。" }
+            }
+          }
+        }
       },
       "required": ["kind"]
     },
@@ -27,10 +45,16 @@
         "nodeId": { "type": "string" },
         "state": {
           "enum": ["idle", "pending", "running", "done", "error", "cancelled", "skipped"],
-          "description": "skipped = 命中缓存未重算，必须与 done 区分显示，否则用户以为没跑。"
+          "description": "skipped = 命中缓存未重算，必须与 done 区分显示，否则用户以为没跑。因上游失败而未执行的节点是 cancelled + errors[0].code=upstream_failed，不是 skipped。"
         },
         "durationMs": { "type": "number" },
-        "error": { "$ref": "#/$defs/error" }
+        "stats": { "$ref": "#/$defs/stats" },
+        "error": { "$ref": "#/$defs/error", "description": "errors[0] 的快捷方式。只读一条错误的老代码不至于瞎。" },
+        "errors": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/error" },
+          "description": "该节点的全部诊断（D5）。前端一次把所有红框标出来，用户不用挤牙膏。"
+        }
       },
       "required": ["kind", "nodeId", "state"]
     },
@@ -63,12 +87,35 @@
     }
   ],
   "$defs": {
+    "stats": {
+      "type": "object",
+      "description": "节点完成后的产出规模。节点上直接显示「12.3 万点」靠它。",
+      "properties": {
+        "elementCount": { "type": "integer", "description": "第一个输出端口的元素数：点云=点数，Indices=下标个数。" },
+        "byteSize": { "type": "integer", "description": "全部输出的粗略内存占用，含所有通道。" },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["port", "type", "elementCount"],
+            "properties": {
+              "port": { "type": "string" },
+              "type": { "type": "string", "description": "端口类型名，与 manifest 的 types 表一致。" },
+              "elementCount": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
     "error": {
       "type": "object",
       "required": ["phase", "code", "message"],
       "properties": {
         "phase": { "enum": ["validate", "compile", "execute"] },
-        "code": { "type": "string" },
+        "code": {
+          "type": "string",
+          "description": "机器可读短码。当前取值集合：unknown_op | unknown_port | type_mismatch | missing_input | multi_input | unknown_param | bad_param | bad_input | unknown_node | duplicate_id | version_mismatch | cycle | io | cancelled | upstream_failed | internal。前端不得穷举它做逻辑分支——未知 code 一律按通用错误显示。"
+        },
         "message": { "type": "string" },
         "paramPath": { "type": "string", "description": "出错的参数名。让前端把红框直接标到那个输入框上。" },
         "portName": { "type": "string" }

@@ -34,6 +34,11 @@
         "id": { "$ref": "#/$defs/localId" },
         "op": { "type": "string", "description": "对应 OperatorManifest.id" },
         "opVersion": { "$ref": "#/$defs/semver", "description": "保存时的算子版本，用于迁移提示。" },
+        "bypass": {
+          "type": "boolean",
+          "default": false,
+          "description": "静音：透传输入到输出。这是执行语义不是 UI 状态，所以不放在 ui 里 —— 一张被 bypass 的图 headless 跑出来必须和 UI 里一样。M2 只在 schema/Rust/C++ 三侧接住它，执行语义 M3 实现。"
+        },
         "params": {
           "type": "object",
           "additionalProperties": true,

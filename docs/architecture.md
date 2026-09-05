@@ -10,6 +10,9 @@
 | 桥接 | Rust | IPC、序列化/反序列化、文件读写、进程与生命周期、事件推流、崩溃隔离 | 理解算子语义、改写图结构 |
 | 核心 | C++ | 算子实现、算子注册表、拓扑调度、中间结果缓存与复用、并行与显存管理、**权威校验** | UI 状态、节点坐标 |
 
+核心编译成一个只导出 C ABI 的 DLL，桥接层在运行时加载它（[ADR-0004](adr/0004-core-as-dll.md)）。
+这条边界同时是崩溃隔离面和 M3 热重载的接缝。
+
 两点值得强调：
 
 **执行调度必须在 C++。** 调度需要知道点云有多大、中间结果能不能复用、显存够不够、哪几步能并行。
@@ -62,8 +65,14 @@ NodeState: idle → pending → running → (done | error | cancelled | skipped)
 ```
 
 - `skipped` 表示命中缓存，没有真正重算。这个状态要单独显示，否则用户会以为没跑。
-- `error` 必须带结构化信息：`{ nodeId, phase: 'validate'|'execute', code, message, paramPath? }`。
+- `error` 必须带结构化信息：`{ phase, code, message, paramPath?, portName? }`。
   `paramPath` 让前端能直接把红框标到具体那个参数输入框上。
+- 一个节点可能同时有**多条**诊断，所以事件里给的是 `errors[]`，`error` 是 `errors[0]`
+  的快捷方式。校验一次返回全部而不是第一条：前端一次标出所有红框，
+  用户不用「改一个 → 重跑 → 又一个」地挤牙膏，而事后要改成全量得动三层。
+- 因上游失败而没跑的节点是 `cancelled` + `errors[0].code = upstream_failed`，
+  **不是** `skipped`。`skipped` 严格留给缓存命中 —— 两者混用的话，
+  用户永远分不清「没跑」和「不用跑」。
 
 ## 运行模式
 
@@ -86,6 +95,11 @@ cacheKey(node) = hash(op.id, op.version, params, [cacheKey(upstream_i) for i in 
 
 前端不参与缓存决策，但需要理解一件事：**改一个上游节点的参数，会让它所有下游失效。**
 UI 上把受影响的下游节点标成 stale（虚线边框之类）是很值钱的反馈，成本很低。
+
+中间结果本身也留在 C++（[ADR-0006](adr/0006-result-store-binary-ipc.md)）：
+结果仓按 cacheKey 内容寻址，`runId → (nodeId, port) → cacheKey` 只是索引。
+前端要看点云时按需拉一份**二进制**载荷 —— 一百万点的 JSON 是 30MB 文本加一次
+全量解析，那条路走不通。
 
 ## 为什么先不做子图
 

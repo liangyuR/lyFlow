@@ -29,6 +29,7 @@
 │  C++ 核心                                    │
 │  · 算子实现 + 算子注册表（导出 Manifest）      │
 │  · 执行引擎：拓扑调度 / 中间结果复用 / 显存管理 │
+│  · 编成 DLL，只导出 C ABI；Rust 运行时加载     │
 └─────────────────────────────────────────────┘
 ```
 
@@ -53,6 +54,8 @@ C++ 生成的 `OperatorManifest`，Rust 转发给前端。**加新算子只改 C
 | [docs/operator-manifest.md](docs/operator-manifest.md) | 算子描述格式、参数控件映射、端口类型系统 |
 | [docs/interaction-checklist.md](docs/interaction-checklist.md) | 交互清单（P0/P1/P2），对照 ComfyUI 与 Blender Geometry Nodes |
 | [docs/roadmap.md](docs/roadmap.md) | 里程碑与工作量估计 |
+| [docs/m2-plan.md](docs/m2-plan.md) | M2 实施计划：定死的决定、C ABI v2、执行器、结果仓 |
+| [docs/m2-acceptance.md](docs/m2-acceptance.md) | M2 逐条验收记录（含未验证项与偏离决策） |
 | [docs/adr/](docs/adr/) | 架构决策记录 |
 | [schema/](schema/) | GraphDoc / OperatorManifest / ExecutionEvent 的 JSON Schema + 已校验的示例 |
 
@@ -66,16 +69,23 @@ C++ 生成的 `OperatorManifest`，Rust 转发给前端。**加新算子只改 C
 ## 目录
 
 ```
-core/     C++ 核心：算子注册表 + manifest 导出。目前只有描述，计算实体是 M2
-bridge/   Rust 桥接层：Tauri 壳，FFI 链入 core，IPC / GraphDoc 结构校验 / 文件读写
-app/      前端：Vite + React + TS + React Flow。节点编辑器
+core/     C++ 核心：算子注册表 + manifest 导出 + 校验/编译/执行 + 结果仓。编成 DLL
+bridge/   Rust 桥接层：Tauri 壳，运行时加载 core DLL，IPC / 事件推流 / 文件读写
+app/      前端：Vite + React + TS + React Flow + three.js。节点编辑器 + 3D 预览
 schema/   三份 JSON Schema —— 跨语言契约的真实来源
-scripts/  构建与门禁脚本
+scripts/  构建与门禁脚本；scripts/e2e 是 CDP 验收
 ```
 
 ## 快速开始
 
-需要 Visual Studio（含 C++ 工具集）、Rust、Node + pnpm。CMake 用 VS 自带的即可。
+需要 Visual Studio（含 C++ 工具集）、Rust、Node + pnpm，以及 **vcpkg 装的 PCL**。
+CMake 与 Ninja 用 VS 自带的即可。
+
+```powershell
+vcpkg install pcl:x64-windows
+```
+
+约定 vcpkg 装在 `C:/vcpkg`，`VCPKG_ROOT` 可以覆盖。
 
 ```bash
 pnpm install
@@ -92,7 +102,9 @@ pnpm app:dev      # 浏览器模式，状态栏会标「静态快照」提示数
 一条命令验完整条链路：
 
 ```bash
-pnpm check
+pnpm check         # C++ 编译 + 自检 + core 测试 → schema 校验 → cargo test → 前端 build
+pnpm e2e           # CDP 驱动真实 app 的端到端验收（自己起 tauri dev，跑完自己收尾）
+pnpm e2e:packaged  # 同一套断言，但跑的是 tauri build 的产物在一个干净目录里的拷贝
 ```
 
 ## 加一个算子
@@ -109,13 +121,18 @@ pnpm check
 
 ## 状态
 
-**M1 完成。** 可以拖节点、连线、改参数、撤销重做、复制粘贴、存盘读盘，
-连线时会按端口类型校验并拒绝成环。
+**M2 完成 —— 能跑。** 在 M1 的编辑能力之上：按 F5（或点运行）真的在 C++ 里执行，
+节点按状态变色、带点数与耗时，参数填错时红框直接标到那个输入框，Esc 可以取消，
+选中节点就能在右侧 3D 视图里看它的输出点云。15 个算子覆盖一条真实 pipeline：
+`load_pcd → crop_box → voxel_grid → statistical_outlier → ransac_plane →
+extract_indices → save_pcd`。
 
-**还不能执行** —— 算子只有描述没有计算实体，点不了「运行」。那是 M2。
+下一步是 M3「能用」：缓存复用与 `skipped`、并行执行、算子热重载、P1 交互全部补齐。
 见 [roadmap](docs/roadmap.md)。
 
-前端不写单元测试，验证方式是通过 CDP 驱动真实运行的 app（见 roadmap 的 M1 验收记录）。
+前端不写单元测试，验证方式是通过 CDP 驱动真实运行的 app
+（[scripts/e2e](scripts/e2e/)：`pnpm e2e` 64 项断言，`pnpm e2e:packaged` 对打包产物再跑 67 项）。
+逐条验收记录见 [docs/m2-acceptance.md](docs/m2-acceptance.md)。
 
 ## License
 

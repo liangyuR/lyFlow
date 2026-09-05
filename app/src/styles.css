@@ -79,12 +79,62 @@ code {
   position: relative;
 }
 
-.app__inspector {
-  width: 320px;
+/* 右侧一整列：3D 视图在上、参数在下。可拖宽。 */
+.app__right {
   flex-shrink: 0;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
   border-left: 1px solid var(--border);
   background: var(--bg-1);
+  min-height: 0;
+}
+
+.app__viewer {
+  flex: 0 0 44%;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+
+.app__inspector {
+  flex: 1;
   overflow-y: auto;
+  min-height: 0;
+}
+
+/* 分栏把手。4px 太细不好抓，所以视觉 1px、命中区 7px。 */
+.app__splitter {
+  flex: 0 0 7px;
+  margin-right: -3px;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  z-index: 5;
+}
+
+.app__splitter::after {
+  content: "";
+  position: absolute;
+  inset: 0 3px;
+  background: var(--border);
+}
+
+.app__splitter:hover::after {
+  background: var(--accent);
+}
+
+/* 拖动分栏时禁掉选中与 iframe/canvas 的指针事件，否则鼠标一进画布就丢事件 */
+body.is-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.is-resizing .app__canvas,
+body.is-resizing .app__viewer {
+  pointer-events: none;
 }
 
 .app__hint,

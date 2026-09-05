@@ -1,6 +1,7 @@
 #include "lyflow/registry.h"
 
 #include <algorithm>
+#include <mutex>
 #include <set>
 
 #include "lyflow/json_writer.h"
@@ -141,6 +142,13 @@ Registry& Registry::instance() {
   return r;
 }
 
+Registry& ensureRegistry() {
+  static std::once_flag once;
+  Registry& r = Registry::instance();
+  std::call_once(once, [&] { registerBuiltinOps(r); });
+  return r;
+}
+
 void Registry::addType(PortType type) { types_.push_back(std::move(type)); }
 void Registry::addOperator(OperatorDesc op) { operators_.push_back(std::move(op)); }
 
@@ -191,6 +199,12 @@ std::vector<std::string> Registry::validate() const {
     if (op.label.empty())    fail(where + " has no label");
     if (op.category.empty()) fail(where + " has no category");
     if (!opIds.insert(op.id).second) fail("duplicate operator id: " + op.id);
+    // 「有描述没实现」的算子只会在用户画完整张图、点了运行之后才暴露。
+    // 挡在启动自检里，代价是一行。
+    if (!op.compute) fail(where + " has no compute function");
+    if (op.outputs.empty() && op.inputs.empty()) {
+      fail(where + " has neither inputs nor outputs");
+    }
 
     auto checkPorts = [&](const std::vector<Port>& ports, const char* kind) {
       std::set<std::string> seen;
