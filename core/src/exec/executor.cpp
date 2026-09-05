@@ -11,6 +11,7 @@
 #include "exec/graph.h"
 #include "exec/plan.h"
 #include "exec/result_store.h"
+#include "exec/subgraph.h"
 #include "lyflow/json_writer.h"
 #include "lyflow/operator.h"
 #include "lyflow/registry.h"
@@ -57,12 +58,15 @@ class EventSink {
   EventSink(std::string runId, lyflow_event_cb cb, void* user)
       : runId_(std::move(runId)), cb_(cb), user_(user) {}
 
-  void runStarted(const Plan& plan, const std::vector<std::string>& targets, int maxParallel) {
+  void runStarted(const Plan& plan, const std::vector<std::string>& targets, int maxParallel,
+                  bool preview, std::uint32_t previewMaxPoints) {
     JsonWriter w;
     std::lock_guard<std::mutex> lock(mu_);
     begin(w, "run_started");
     w.field("nodeCount", static_cast<std::int64_t>(plan.nodes.size()));
     w.field("maxParallel", static_cast<std::int64_t>(maxParallel));
+    w.field("mode", std::string(preview ? "preview" : "full"));
+    if (preview) w.field("previewMaxPoints", static_cast<std::int64_t>(previewMaxPoints));
     w.key("plan");
     w.beginArray();
     for (const auto& n : plan.nodes) w.value(n.id);
@@ -252,6 +256,26 @@ std::vector<std::string> outputPortNames(const OperatorDesc& op) {
   names.reserve(op.outputs.size());
   for (const Port& p : op.outputs) names.push_back(p.name);
   return names;
+}
+
+/// 等步长抽稀（F5）。走 PointCloud::select，intensity/normals/rgb 一起搬。
+PointCloud decimateCloud(const PointCloud& src, std::size_t maxPoints) {
+  const std::size_t n = src.pointCount();
+  std::vector<std::int32_t> keep;
+  keep.reserve(maxPoints);
+  const double step = static_cast<double>(n) / static_cast<double>(maxPoints);
+  for (std::size_t i = 0; i < maxPoints; ++i) {
+    const auto idx = static_cast<std::size_t>(static_cast<double>(i) * step);
+    keep.push_back(static_cast<std::int32_t>(idx < n ? idx : n - 1));
+  }
+  return src.select(keep);
+}
+
+/// 预览结果的缓存命名空间（F5）。full 模式返回空串，键与 M3 完全一致。
+std::string previewNamespace(const RunOptions& o) {
+  if (o.mode != RunMode::Preview) return {};
+  const std::uint32_t cap = o.previewMaxPoints ? o.previewMaxPoints : kDefaultPreviewMaxPoints;
+  return "preview:" + std::to_string(cap);
 }
 
 // ------------------------------------------------------------------- 调度器
@@ -444,6 +468,17 @@ class Scheduler {
     if (const Status contract = checkOutputs(node, outputValues, bypassed); !contract.ok) {
       sink_.nodeFailed(node.id, "error", {contract}, durationMs);
       return Verdict::Failed;
+    }
+
+    // 预览抽稀只在源头做一次：无输入的节点抽完，整条链自然都变快（F5）。
+    if (options_.mode == RunMode::Preview && node.inputs.empty()) {
+      const std::size_t cap = options_.previewMaxPoints ? options_.previewMaxPoints
+                                                        : kDefaultPreviewMaxPoints;
+      for (auto& kv : outputValues) {
+        const PointCloud* c = kv.second.asCloud();
+        if (!c || c->pointCount() <= cap) continue;
+        kv.second = Data::cloud(decimateCloud(*c, cap));
+      }
     }
 
     std::size_t totalBytes = 0;
@@ -650,17 +685,21 @@ void Run::workImpl() {
   Plan plan;
   plan.runId = options_.runId;
 
-  const bool parsed = parseGraph(graphJson_, raw, diags);
+  const bool parsed = prepareGraph(graphJson_, raw, diags);
   if (parsed) {
     BuildOptions build;
     build.runId = options_.runId;
     build.baseDir = options_.baseDir;
     build.targets = options_.targets;
+    build.cacheNamespace = previewNamespace(options_);
     buildPlan(ensureRegistry(), raw, build, plan, diags);
   }
 
   const int workers = resolveMaxParallel(options_.maxParallel);
-  sink.runStarted(plan, options_.targets, workers);
+  const bool preview = options_.mode == RunMode::Preview;
+  sink.runStarted(plan, options_.targets, workers, preview,
+                  options_.previewMaxPoints ? options_.previewMaxPoints
+                                            : kDefaultPreviewMaxPoints);
 
   // warning 与迁移走 log 通道：不阻断执行，但用户必须看得见。
   // 静默的兼容性降级（「默认值悄悄变了」）是最难排查的一类问题。
@@ -702,6 +741,16 @@ void Run::workImpl() {
   scheduler.run();
 
   const double total = msSince(t0);
+  // 超预算的预览要说出来：用户看到的「拖不动」在这里有个可读的名字（F5）。
+  if (options_.mode == RunMode::Preview) {
+    const std::uint32_t budget =
+        options_.previewBudgetMs ? options_.previewBudgetMs : kDefaultPreviewBudgetMs;
+    if (total > static_cast<double>(budget)) {
+      sink.log("warn", std::string(),
+               "预览耗时 " + std::to_string(static_cast<long long>(total)) + " ms，超过预算 " +
+                   std::to_string(budget) + " ms；建议降低预览点数");
+    }
+  }
   if (scheduler.sawCancel() || cancelled_.load(std::memory_order_relaxed)) {
     Status s = Status::Error(Phase::Execute, "cancelled", "运行已取消");
     sink.runFinished("cancelled", total, &s);
@@ -716,11 +765,18 @@ void Run::workImpl() {
 
 // ------------------------------------------------------------------ validate
 
+bool prepareGraph(const std::string& graphJson, RawGraph& out, Diagnostics& diags) {
+  RawGraph parsed;
+  if (!parseGraph(graphJson, parsed, diags)) return false;
+  if (!expandGraph(parsed, out, diags)) return false;
+  return true;
+}
+
 std::string validateGraphJson(const std::string& graphJson,
                               const std::filesystem::path& baseDir) {
   Diagnostics diags;
   RawGraph raw;
-  if (parseGraph(graphJson, raw, diags)) {
+  if (prepareGraph(graphJson, raw, diags)) {
     Plan plan;
     BuildOptions build;
     build.runId = "validate";
@@ -737,7 +793,7 @@ std::string planGraphJson(const std::string& graphJson, const std::filesystem::p
   Diagnostics diags;
   RawGraph raw;
   Plan plan;
-  if (!parseGraph(graphJson, raw, diags)) return diags.toJson();
+  if (!prepareGraph(graphJson, raw, diags)) return diags.toJson();
 
   BuildOptions build;
   build.runId = "plan";

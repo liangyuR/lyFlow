@@ -2,12 +2,13 @@
 // 全部由 manifest 生成（ADR-0003），这个文件里没有任何算子的名字。
 
 import { groupParams, effectiveParams, isEnabled, isVisible, valueEquals } from "../lib/params";
+import { augmentOperators, levelOf, promotedBy } from "../lib/subgraph";
 import { useNodeExecution, useParamErrors } from "../store/execution";
-import { useGraphStore } from "../store/graph";
+import { currentSubgraph, useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
 import type { OperatorDesc, Param } from "../types/manifest";
-import type { GraphNode } from "../types/graph";
+import type { GraphNode, SubgraphDef } from "../types/graph";
 
 import { OperatorDetail } from "./OperatorDetail";
 import { ParamControl } from "./ParamControls";
@@ -17,15 +18,19 @@ function ParamRow({
   node,
   effective,
   error,
+  def,
 }: {
   param: Param;
   node: GraphNode;
   effective: Record<string, unknown>;
   error?: string | undefined;
+  def?: SubgraphDef | undefined;
 }) {
   const setParam = useGraphStore((s) => s.setParam);
   const value = effective[param.name];
-  const disabled = !isEnabled(param, effective);
+  // 已提升的内参在内部只读：真正的值来自外层表单，两处都能改就没人知道谁赢（F4）
+  const promoted = promotedBy(def, node.id, param.name);
+  const disabled = !isEnabled(param, effective) || promoted !== undefined;
   // 稀疏存储的直接可视化：params 里有这个键 = 用户改过它。
   const overridden = node.params?.[param.name] !== undefined;
 
@@ -34,12 +39,18 @@ function ParamRow({
       className={`insp-param${disabled ? " is-disabled" : ""}${error ? " has-error" : ""}`}
       data-testid={`param-${param.name}`}
       data-param-error={error ? "1" : undefined}
+      data-promoted={promoted ? promoted.name : undefined}
     >
       <div className="insp-param__label">
         <span className={overridden ? "is-overridden" : ""} title={param.doc}>
           {param.label || param.name}
         </span>
-        {overridden && (
+        {promoted && (
+          <span className="insp-param__promoted" title={`已提升为子图参数 ${promoted.name}`}>
+            ↑{promoted.name}
+          </span>
+        )}
+        {overridden && !promoted && (
           <button
             type="button"
             className="insp-param__reset"
@@ -55,6 +66,8 @@ function ParamRow({
           param={param}
           value={value}
           disabled={disabled}
+          nodeId={node.id}
+          promotedAs={promoted?.name}
           onChange={(v) => {
             if (!valueEquals(v, value)) setParam(node.id, param.name, v);
           }}
@@ -71,6 +84,9 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
   const setNodeUi = useGraphStore((s) => s.setNodeUi);
   const errors = useParamErrors(node.id);
   const exec = useNodeExecution(node.id);
+  const doc = useGraphStore((s) => s.doc);
+  const path = useUiStore((s) => s.path);
+  const def = currentSubgraph(doc, path);
   const effective = effectiveParams(op, node);
   const groups = groupParams(op.params);
 
@@ -133,6 +149,7 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
                   node={node}
                   effective={effective}
                   error={errors.get(p.name)}
+                  def={def}
                 />
               ))}
             </section>
@@ -143,11 +160,65 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
   );
 }
 
+/** 子图本身的说明：名字、提升出来的参数。没选中节点时占着右侧那块地方。 */
+function SubgraphInspector({ subgraphId, def }: { subgraphId: string; def: SubgraphDef }) {
+  const rename = useGraphStore((s) => s.renameSubgraph);
+  const unpromote = useGraphStore((s) => s.unpromoteParam);
+  return (
+    <div className="insp" data-testid="subgraph-inspector">
+      <header className="insp__head">
+        <input
+          className="insp__title"
+          data-testid="subgraph-name"
+          value={def.name ?? ""}
+          placeholder={subgraphId}
+          spellCheck={false}
+          onChange={(e) => rename(subgraphId, e.target.value)}
+        />
+        <div className="insp__meta">
+          <code>sub:{subgraphId}</code>
+          <span className="tag tag--version">
+            {def.nodes.length} 节点 · {def.inputs.length} 入 · {def.outputs.length} 出
+          </span>
+        </div>
+      </header>
+      <section className="insp__group">
+        <h4 className="insp__group-title">提升的参数</h4>
+        {def.params.length === 0 ? (
+          <p className="insp__none">还没有提升任何参数。在内部节点的参数上右键即可提升。</p>
+        ) : (
+          def.params.map((p) => (
+            <div className="insp-param" key={p.name} data-testid={`promoted-${p.name}`}>
+              <div className="insp-param__label">
+                <span>{p.label || p.name}</span>
+              </div>
+              <div className="insp-param__control">
+                <code>{p.binds.map((b) => `${b.node}.${b.param}`).join(", ")}</code>
+                <button
+                  type="button"
+                  className="ctl-btn"
+                  data-testid={`unpromote-${p.name}`}
+                  onClick={() => unpromote(p.name)}
+                >
+                  取消提升
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </section>
+    </div>
+  );
+}
+
 export function Inspector() {
   const selectedNodes = useUiStore((s) => s.selectedNodes);
   const inspectedOperator = useUiStore((s) => s.inspectedOperator);
-  const doc = useGraphStore((s) => s.doc);
-  const operatorsById = useManifestStore((s) => s.operatorsById);
+  const path = useUiStore((s) => s.path);
+  const fullDoc = useGraphStore((s) => s.doc);
+  const base = useManifestStore((s) => s.operatorsById);
+  const operatorsById = augmentOperators(base, fullDoc.subgraphs);
+  const doc = levelOf(fullDoc, path);
 
   if (selectedNodes.size === 1) {
     const id = [...selectedNodes][0]!;
@@ -173,6 +244,11 @@ export function Inspector() {
       </div>
     );
   }
+
+  // 在子图里且没选中节点：显示子图自己的说明与提升出来的参数
+  const last = path[path.length - 1];
+  const def = last ? fullDoc.subgraphs?.[last.subgraphId] : undefined;
+  if (last && def) return <SubgraphInspector subgraphId={last.subgraphId} def={def} />;
 
   // 没选中节点时，展示面板里高亮的算子说明 —— 加进图之前先看清楚它是什么。
   const op = inspectedOperator ? operatorsById.get(inspectedOperator) : undefined;

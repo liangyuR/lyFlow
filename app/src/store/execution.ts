@@ -1,11 +1,12 @@
-// 执行状态 store。运行时状态，不进 GraphDoc、不进撤销栈（ADR-0002）。
-// runId 对不上的事件先攒进 orphans 等 beginRun 认领；seq 不连续只 warn 不停摆。
+// 执行状态 store。运行时状态不进 GraphDoc、不进撤销栈；runId 对不上的事件先攒进 orphans。
+// M4：node_state / node_progress 按 16 ms 批量落库，事件 id 是路径、按层聚合（F2）。
 
-import { useMemo } from "react";
 import { create } from "zustand";
 
+import { pathPrefix, type SubPath } from "../lib/subgraph";
 import { transport } from "../transport";
 import { refreshCacheStats, useCacheStore } from "./cache";
+import { useUiStore } from "./ui";
 import type {
   Diagnostic,
   ExecutionEvent,
@@ -24,6 +25,8 @@ export interface NodeExecution {
   message?: string | undefined;
   errors: Diagnostic[];
   stats?: NodeStats | undefined;
+  /** 聚合出来的（子图节点）：内部一共几个节点、跑完了几个。 */
+  children?: { total: number; finished: number } | undefined;
 }
 
 export interface LogEntry {
@@ -39,19 +42,24 @@ const LOG_LIMIT = 500;
 /** 未认领事件的上限。正常情况只会攒到个位数（就是 run_started 前后那几条）。 */
 const ORPHAN_LIMIT = 2000;
 
+/** 事件合并窗口（§4）。一帧一次 set，三百个节点的图才不会每条事件重渲一遍。 */
+const BATCH_MS = 16;
+
 export type RunPhase = "idle" | "running" | "ok" | "error" | "cancelled";
 
 interface ExecutionState {
   runId: string | null;
   runStatus: RunPhase;
+  /** 本次运行是不是预览（ADR-0011）。正式结果到达后会覆盖它。 */
+  preview: boolean;
   startedAt: number | null;
   durationMs: number | null;
   /** 本次运行是「只跑到某个节点」还是全图。空 = 全图。 */
   targets: string[];
+  /** 事件里的 nodeId 是**路径**，键就是路径原样。按层聚合见 useNodeExecution。 */
   nodes: Map<string, NodeExecution>;
   logs: LogEntry[];
-  /** 结果是否已经过时：运行之后图被改过（交互清单 P1 #23）。
-   *  否则用户看着一片绿，却不知道那是三次修改之前的结果。 */
+  /** 结果是否已经过时：运行之后图被改过（交互清单 P1 #23）。 */
   stale: boolean;
   /** 上一次收到的 seq，用来检测丢包。 */
   lastSeq: number;
@@ -61,7 +69,7 @@ interface ExecutionState {
    *  的返回值先到。直接丢会让小图整场跑完而界面毫无反应，所以先攒着认领。 */
   orphans: ExecutionEvent[];
 
-  beginRun(runId: string, targets: string[]): void;
+  beginRun(runId: string, targets: string[], preview: boolean): void;
   failRun(message: string): void;
   apply(event: ExecutionEvent): void;
   markStale(): void;
@@ -70,9 +78,64 @@ interface ExecutionState {
 
 const emptyNode = (): NodeExecution => ({ state: "idle", errors: [] });
 
+// -------------------------------------------------------------- 事件合并
+
+/** 攒着还没落库的节点状态。null = 没有待落库的改动。 */
+let staged: Map<string, NodeExecution> | null = null;
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+let latestSeq = -1;
+
+/** 事件级的状态流水账。devbridge 靠它断言「节点依次变色」——
+ *  从 store 快照推的话，合并窗口会把中间态吃掉。 */
+export interface StateTransition {
+  nodeId: string;
+  state: NodeState;
+  at: number;
+}
+const transitionListeners = new Set<(t: StateTransition) => void>();
+
+export function onNodeTransition(fn: (t: StateTransition) => void): () => void {
+  transitionListeners.add(fn);
+  return () => transitionListeners.delete(fn);
+}
+
+function flushNow(): void {
+  if (flushTimer !== null) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  if (!staged) return;
+  const nodes = staged;
+  staged = null;
+  useExecutionStore.setState({ nodes, lastSeq: latestSeq });
+}
+
+function scheduleFlush(): void {
+  if (flushTimer !== null) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    flushNow();
+  }, BATCH_MS);
+}
+
+function stage(): Map<string, NodeExecution> {
+  staged ??= new Map(useExecutionStore.getState().nodes);
+  return staged;
+}
+
+function dropStaged(): void {
+  if (flushTimer !== null) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  staged = null;
+  latestSeq = -1;
+}
+
 export const useExecutionStore = create<ExecutionState>((set, get) => ({
   runId: null,
   runStatus: "idle",
+  preview: false,
   startedAt: null,
   durationMs: null,
   targets: [],
@@ -83,13 +146,15 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   error: null,
   orphans: [],
 
-  beginRun(runId, targets) {
+  beginRun(runId, targets, preview) {
     const claimed = get()
       .orphans.filter((e) => e.runId === runId)
       .sort((a, b) => a.seq - b.seq);
+    dropStaged();
     set({
       runId,
       runStatus: "running",
+      preview,
       startedAt: Date.now(),
       durationMs: null,
       targets,
@@ -105,6 +170,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   },
 
   failRun(message) {
+    dropStaged();
     set({ runId: null, runStatus: "error", error: message, durationMs: null, orphans: [] });
   },
 
@@ -119,27 +185,32 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       return;
     }
 
-    if (s.lastSeq >= 0 && event.seq !== s.lastSeq + 1) {
+    if (latestSeq >= 0 && event.seq !== latestSeq + 1) {
       console.warn(
-        `[lyflow] 执行事件 seq 不连续：期望 ${s.lastSeq + 1}，收到 ${event.seq}。` +
+        `[lyflow] 执行事件 seq 不连续：期望 ${latestSeq + 1}，收到 ${event.seq}。` +
           `界面继续更新，但可能漏了状态。`,
       );
     }
-
-    const nodes = new Map(s.nodes);
-    const patch: Partial<ExecutionState> = { lastSeq: event.seq };
+    latestSeq = event.seq;
 
     switch (event.kind) {
       case "run_started": {
-        for (const id of event.plan ?? []) nodes.set(id, emptyNode());
-        patch.nodes = nodes;
-        patch.targets = event.targets ?? [];
-        // 记下这次跑用的是哪一批 cacheKey。stale 就是「现在编译出来的和它不一样」
-        // ——判定在 C++，这里只做对比（ADR-0007）。
+        const nodes = new Map<string, NodeExecution>();
+        const at = Date.now();
+        for (const id of event.plan ?? []) {
+          nodes.set(id, emptyNode());
+          // 计划里的节点先全部亮成「排队中」。这一下也是一次状态变化，
+          // 流水账里少了它，「节点依次变色」的序列就从 pending 开始了。
+          for (const fn of transitionListeners) fn({ nodeId: id, state: "idle", at });
+        }
+        staged = nodes;
         useCacheStore.getState().setRanWith(event.nodes ?? []);
+        flushNow();
+        set({ targets: event.targets ?? [] });
         break;
       }
       case "node_state": {
+        const nodes = stage();
         const prev = nodes.get(event.nodeId) ?? emptyNode();
         nodes.set(event.nodeId, {
           ...prev,
@@ -152,23 +223,27 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
           // 进入 running 时清掉上一轮的进度，否则进度条会从 100% 开始倒着走
           progress: event.state === "running" ? 0 : prev.progress,
         });
-        patch.nodes = nodes;
+        const t: StateTransition = { nodeId: event.nodeId, state: event.state, at: Date.now() };
+        for (const fn of transitionListeners) fn(t);
+        scheduleFlush();
         break;
       }
       case "node_progress": {
+        const nodes = stage();
         const prev = nodes.get(event.nodeId) ?? emptyNode();
-        nodes.set(event.nodeId, {
-          ...prev,
-          progress: event.progress,
-          message: event.message,
-        });
-        patch.nodes = nodes;
+        nodes.set(event.nodeId, { ...prev, progress: event.progress, message: event.message });
+        scheduleFlush();
         break;
       }
       case "run_finished": {
-        patch.runStatus = event.status as RunStatus;
-        patch.durationMs = event.durationMs ?? null;
-        void refreshCacheStats();
+        flushNow();
+        set({
+          runStatus: event.status as RunStatus,
+          durationMs: event.durationMs ?? null,
+          lastSeq: event.seq,
+        });
+        // 预览时不刷缓存统计：那是「事件到渲染」这条热路径上白多出来的一次 IPC
+        if (!s.preview) void refreshCacheStats();
         break;
       }
       case "log": {
@@ -178,12 +253,10 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
           nodeId: event.nodeId,
           message: event.message,
         });
-        patch.logs = logs.length > LOG_LIMIT ? logs.slice(-LOG_LIMIT) : logs;
+        set({ logs: logs.length > LOG_LIMIT ? logs.slice(-LOG_LIMIT) : logs, lastSeq: event.seq });
         break;
       }
     }
-
-    set(patch);
   },
 
   markStale() {
@@ -193,9 +266,11 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   },
 
   reset() {
+    dropStaged();
     set({
       runId: null,
       runStatus: "idle",
+      preview: false,
       startedAt: null,
       durationMs: null,
       targets: [],
@@ -209,30 +284,116 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   },
 }));
 
-// 派生选择器 -----------------------------------------------------------------
+// ------------------------------------------------------- 按层聚合（F2）
+
+const RANK: Record<NodeState, number> = {
+  error: 6,
+  running: 5,
+  cancelled: 4,
+  pending: 3,
+  idle: 2,
+  done: 1,
+  skipped: 0,
+};
+
+/** 子图节点的状态 = 内部节点的归约：任一 error → error，任一 running → running，
+ *  全 done/skipped → done（全 skipped 才算 skipped）。 */
+function reduceExecutions(list: readonly NodeExecution[]): NodeExecution {
+  let state: NodeState = "skipped";
+  let duration = 0;
+  let finished = 0;
+  const errors: Diagnostic[] = [];
+  for (const n of list) {
+    if (RANK[n.state] > RANK[state]) state = n.state;
+    duration += n.durationMs ?? 0;
+    if (n.state === "done" || n.state === "skipped") finished += 1;
+    errors.push(...n.errors);
+  }
+  // 全 done/skipped → done（全 skipped 才算 skipped）；有跑完的但还有没开始的 → pending
+  if (state === "done" || state === "skipped") {
+    state = list.every((n) => n.state === "skipped") ? "skipped" : "done";
+  } else if (state === "idle" && finished > 0) {
+    state = "pending";
+  }
+  return {
+    state,
+    durationMs: duration > 0 ? duration : undefined,
+    progress: list.length > 0 ? finished / list.length : undefined,
+    errors,
+    children: { total: list.length, finished },
+  };
+}
+
+function sameAggregate(a: NodeExecution | undefined, b: NodeExecution): boolean {
+  if (!a) return false;
+  return (
+    a.state === b.state &&
+    a.durationMs === b.durationMs &&
+    a.progress === b.progress &&
+    a.stats === b.stats &&
+    a.message === b.message &&
+    a.errors.length === b.errors.length &&
+    a.children?.finished === b.children?.finished &&
+    a.children?.total === b.children?.total
+  );
+}
+
+let aggCache: {
+  path: SubPath;
+  nodes: ReadonlyMap<string, NodeExecution>;
+  result: Map<string, NodeExecution>;
+} | null = null;
+
+/** 当前层级的「本地 id → 执行状态」。按对象身份缓存，一次事件批只算一遍。 */
+export function aggregatedNodes(
+  path: SubPath,
+  nodes: ReadonlyMap<string, NodeExecution>,
+): ReadonlyMap<string, NodeExecution> {
+  if (aggCache && aggCache.path === path && aggCache.nodes === nodes) return aggCache.result;
+  const prefix = pathPrefix(path);
+  const groups = new Map<string, NodeExecution[]>();
+  for (const [id, exec] of nodes) {
+    if (prefix && !id.startsWith(prefix)) continue;
+    const rest = id.slice(prefix.length);
+    if (!rest) continue;
+    const slash = rest.indexOf("/");
+    const local = slash < 0 ? rest : rest.slice(0, slash);
+    const list = groups.get(local);
+    if (list) list.push(exec);
+    else groups.set(local, [exec]);
+  }
+  const previous = aggCache?.result;
+  const result = new Map<string, NodeExecution>();
+  for (const [local, list] of groups) {
+    // 叶子节点直接复用原对象，引用不变，节点组件就不会白重渲
+    const merged = list.length === 1 ? list[0]! : reduceExecutions(list);
+    const prev = previous?.get(local);
+    result.set(local, prev && sameAggregate(prev, merged) ? prev : merged);
+  }
+  aggCache = { path, nodes, result };
+  return result;
+}
+
+/** 某节点在**当前层级**的执行状态。节点组件和检查器都按本地 id 现查。 */
+export function useNodeExecution(nodeId: string): NodeExecution | undefined {
+  const path = useUiStore((s) => s.path);
+  return useExecutionStore((s) => aggregatedNodes(path, s.nodes).get(nodeId));
+}
 
 const NO_ERRORS: ReadonlyMap<string, string> = new Map();
 
-/** 某节点的执行状态。节点组件和检查器都按 id 现查。 */
-export function useNodeExecution(nodeId: string): NodeExecution | undefined {
-  return useExecutionStore((s) => s.nodes.get(nodeId));
-}
-
-/** 某节点的 paramPath → 错误消息，ParamControls 据此画红框（交互清单 P0 #15）。
- *  没有错误时返回同一个空 Map：新引用会让整个检查器每来一条事件就全量重渲染。 */
+/** 某节点的 paramPath → 错误消息，ParamControls 据此画红框（交互清单 P0 #15）。 */
 export function useParamErrors(nodeId: string): ReadonlyMap<string, string> {
   const node = useNodeExecution(nodeId);
-  return useMemo(() => {
-    if (!node || node.errors.length === 0) return NO_ERRORS;
-    const out = new Map<string, string>();
-    for (const e of node.errors) {
-      if (e.paramPath) out.set(e.paramPath, e.message);
-    }
-    return out.size === 0 ? NO_ERRORS : out;
-  }, [node]);
+  if (!node || node.errors.length === 0) return NO_ERRORS;
+  const out = new Map<string, string>();
+  for (const e of node.errors) {
+    if (e.paramPath) out.set(e.paramPath, e.message);
+  }
+  return out.size === 0 ? NO_ERRORS : out;
 }
 
-/** 「done 7 / error 1」那一行。 */
+/** 「done 7 / error 1」那一行。统计的是**展开后**的全部节点。 */
 export function summarize(nodes: ReadonlyMap<string, NodeExecution>): {
   done: number;
   error: number;
@@ -265,23 +426,33 @@ export async function subscribeExecutionEvents(): Promise<void> {
   await subscription;
 }
 
-/** 启动一次运行。beginRun 只能在拿到 runId 之后，而事件可能更早到，
- *  所以认不出 runId 的先进 orphans、beginRun 时认领（见上）。 */
 /** 本地的运行序号：两次 run_graph 走不同的 Tauri 工作线程，回复顺序不保证等于
  *  发起顺序。序号让后发的那次赢，与 C++ 侧「后开始的抢占先开始的」一致。 */
 let runTicket = 0;
 
+export interface RunRequest {
+  targets?: string[] | undefined;
+  /** 预览模式：源算子输出先抽稀，结果进独立缓存命名空间（ADR-0011）。 */
+  preview?: boolean | undefined;
+  previewMaxPoints?: number | undefined;
+}
+
 export async function startRun(
   doc: GraphDoc,
   graphPath: string | null,
-  targets?: string[],
+  request: RunRequest = {},
 ): Promise<void> {
   const store = useExecutionStore.getState();
   const ticket = ++runTicket;
+  const preview = request.preview === true;
   try {
-    const runId = await transport.runGraph(doc, graphPath, targets);
-    if (ticket !== runTicket) return;  // 已经有更晚的一次运行发起了，这次的回复作废
-    store.beginRun(runId, targets ?? []);
+    const runId = await transport.runGraph(doc, graphPath, {
+      targets: request.targets,
+      mode: preview ? "preview" : "full",
+      previewMaxPoints: request.previewMaxPoints,
+    });
+    if (ticket !== runTicket) return; // 已经有更晚的一次运行发起了，这次的回复作废
+    store.beginRun(runId, request.targets ?? [], preview);
   } catch (e) {
     if (ticket !== runTicket) throw e;
     store.failRun(e instanceof Error ? e.message : String(e));

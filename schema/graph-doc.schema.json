@@ -4,36 +4,95 @@
   "title": "GraphDoc",
   "description": "LyFlow 图文档。唯一真实数据源：前端状态、磁盘文件、传给 C++ 的载荷都是它。",
   "type": "object",
-  "required": ["schemaVersion", "id", "nodes", "edges"],
+  "required": [
+    "schemaVersion",
+    "id",
+    "nodes",
+    "edges"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schemaVersion": { "type": "integer", "const": 1 },
-    "id": { "type": "string", "description": "ULID。文件重命名后仍可追踪。" },
-    "name": { "type": "string" },
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "description": "ULID。文件重命名后仍可追踪。"
+    },
+    "name": {
+      "type": "string"
+    },
     "meta": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "createdAt": { "type": "string", "format": "date-time" },
-        "modifiedAt": { "type": "string", "format": "date-time" },
-        "app": { "type": "string", "description": "写入方标识，如 lyflow/0.1.0" }
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "modifiedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "app": {
+          "type": "string",
+          "description": "写入方标识，如 lyflow/0.1.0"
+        }
       }
     },
-    "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
-    "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } },
-    "groups": { "type": "array", "items": { "$ref": "#/$defs/group" }, "description": "预留：节点分组框。" },
-    "subgraphs": { "type": "object", "additionalProperties": true, "description": "预留：复合算子定义，M4+。" },
-    "x": { "type": "object", "additionalProperties": true, "description": "扩展位。读取时保留未知字段，保证向前兼容。" }
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edge"
+      }
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/group"
+      },
+      "description": "预留：节点分组框。"
+    },
+    "subgraphs": {
+      "type": "object",
+      "description": "复合算子定义（ADR-0010）。键是 subgraphId，节点用 op: \"sub:<subgraphId>\" 引用。compile 之前由 C++ 递归展开成平图，执行器/缓存/事件对子图一无所知。",
+      "additionalProperties": {
+        "$ref": "#/$defs/subgraph"
+      }
+    },
+    "x": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "扩展位。读取时保留未知字段，保证向前兼容。"
+    }
   },
   "$defs": {
     "node": {
       "type": "object",
-      "required": ["id", "op"],
+      "required": [
+        "id",
+        "op"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/localId" },
-        "op": { "type": "string", "description": "对应 OperatorManifest.id" },
-        "opVersion": { "$ref": "#/$defs/semver", "description": "保存时的算子版本，用于迁移提示。" },
+        "id": {
+          "$ref": "#/$defs/localId"
+        },
+        "op": {
+          "type": "string",
+          "description": "对应 OperatorManifest.id；`sub:<subgraphId>` 引用本文档的子图，`lib.<id>` 引用库目录里的子图（ADR-0010）。"
+        },
+        "opVersion": {
+          "$ref": "#/$defs/semver",
+          "description": "保存时的算子版本，用于迁移提示。"
+        },
         "bypass": {
           "type": "boolean",
           "default": false,
@@ -44,7 +103,9 @@
           "additionalProperties": true,
           "description": "稀疏存储：只记与 manifest 默认值不同的项。"
         },
-        "ui": { "$ref": "#/$defs/nodeUi" }
+        "ui": {
+          "$ref": "#/$defs/nodeUi"
+        }
       }
     },
     "nodeUi": {
@@ -54,47 +115,280 @@
       "properties": {
         "position": {
           "type": "object",
-          "required": ["x", "y"],
+          "required": [
+            "x",
+            "y"
+          ],
           "additionalProperties": false,
-          "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          }
         },
-        "collapsed": { "type": "boolean", "default": false },
-        "title": { "type": ["string", "null"], "description": "null 表示用 manifest 的 label。" },
-        "color": { "type": ["string", "null"] },
-        "width": { "type": ["number", "null"], "description": "null 表示自适应。" }
+        "collapsed": {
+          "type": "boolean",
+          "default": false
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "null 表示用 manifest 的 label。"
+        },
+        "color": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "null 表示自适应。"
+        }
       }
     },
     "edge": {
       "type": "object",
-      "required": ["id", "from", "to"],
+      "required": [
+        "id",
+        "from",
+        "to"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/localId" },
-        "from": { "$ref": "#/$defs/portRef", "description": "源：某节点的输出端口。输出端口可一对多。" },
-        "to": { "$ref": "#/$defs/portRef", "description": "目标：某节点的输入端口。输入端口至多一条边。" }
+        "id": {
+          "$ref": "#/$defs/localId"
+        },
+        "from": {
+          "$ref": "#/$defs/portRef",
+          "description": "源：某节点的输出端口。输出端口可一对多。"
+        },
+        "to": {
+          "$ref": "#/$defs/portRef",
+          "description": "目标：某节点的输入端口。输入端口至多一条边。"
+        }
       }
     },
     "portRef": {
       "type": "object",
-      "required": ["node", "port"],
+      "required": [
+        "node",
+        "port"
+      ],
       "additionalProperties": false,
       "properties": {
-        "node": { "$ref": "#/$defs/localId" },
-        "port": { "type": "string", "description": "端口名，不用序号——增删端口时老图不会错位。" }
+        "node": {
+          "$ref": "#/$defs/localId"
+        },
+        "port": {
+          "type": "string",
+          "description": "端口名，不用序号——增删端口时老图不会错位。"
+        }
       }
     },
     "group": {
       "type": "object",
-      "required": ["id", "nodes"],
+      "required": [
+        "id",
+        "nodes"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/$defs/localId" },
-        "label": { "type": "string" },
-        "nodes": { "type": "array", "items": { "$ref": "#/$defs/localId" } },
-        "color": { "type": "string" }
+        "id": {
+          "$ref": "#/$defs/localId"
+        },
+        "label": {
+          "type": "string"
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/localId"
+          }
+        },
+        "color": {
+          "type": "string"
+        }
       }
     },
-    "localId": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9_.:-]+$" },
-    "semver": { "type": "string", "pattern": "^[0-9]+[.][0-9]+[.][0-9]+$" }
+    "localId": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_.:-]+$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^[0-9]+[.][0-9]+[.][0-9]+$"
+    },
+    "subgraph": {
+      "type": "object",
+      "required": [
+        "nodes",
+        "edges"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "显示名。合成出来的算子拿它当 label。"
+        },
+        "doc": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string",
+          "description": "库算子在面板里的分类，前缀 Library/ 由 core 加。"
+        },
+        "version": {
+          "$ref": "#/$defs/semver"
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "id": {
+          "type": "string",
+          "description": "只有存成库文件时才有：算子 id 是 lib.<id>。"
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/node"
+          },
+          "description": "与顶层同构，可以再引用别的 sub:（深度上限 32）。"
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/edge"
+          }
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/subInput"
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/subOutput"
+          }
+        },
+        "params": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/subParam"
+          },
+          "description": "提升出来的对外参数（F4）。一个外参可绑多个内参。"
+        }
+      }
+    },
+    "subInput": {
+      "type": "object",
+      "required": [
+        "name",
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "description": "端口类型名，与 manifest 的 types 表一致。"
+        },
+        "label": {
+          "type": "string"
+        },
+        "doc": {
+          "type": "string"
+        },
+        "to": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/portRef"
+          },
+          "description": "内部落点。一个输入可扇出到多个内部端口。"
+        }
+      }
+    },
+    "subOutput": {
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "from"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "doc": {
+          "type": "string"
+        },
+        "from": {
+          "$ref": "#/$defs/portRef",
+          "description": "只能来自一个内部端口。"
+        }
+      }
+    },
+    "subParam": {
+      "type": "object",
+      "required": [
+        "name",
+        "type",
+        "default",
+        "binds"
+      ],
+      "additionalProperties": true,
+      "description": "一份 manifest 的 param 声明（type/default/min/max/options… 原样）加一组绑定。",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "default": {},
+        "binds": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "node",
+              "param"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "node": {
+                "$ref": "#/$defs/localId"
+              },
+              "param": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }

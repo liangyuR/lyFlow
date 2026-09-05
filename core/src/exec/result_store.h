@@ -17,9 +17,12 @@ struct CloudPreview {
   std::uint32_t pointCount = 0;   ///< 抽样后
   std::uint32_t totalPoints = 0;  ///< 抽样前
   bool hasIntensity = false;
+  bool hasNormals = false;
   float bounds[6] = {0, 0, 0, 0, 0, 0};
   std::vector<float> xyz;
   std::vector<float> intensity;
+  /// 3 * pointCount，或空。3D 视图的「法线着色」靠它（M3 尾巴 c）。
+  std::vector<float> normals;
 };
 
 struct OutputInfo {

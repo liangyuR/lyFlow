@@ -57,7 +57,7 @@ React Flow 的 `Node` / `Edge` 只是渲染时的派生产物。
   ],
 
   "groups": [],        // 预留：节点分组框
-  "subgraphs": {},     // 预留：复合算子定义，M4+
+  "subgraphs": {},     // 复合算子定义，见下面「子图」
   "x": {}              // 扩展位：未知字段容器，保证向前兼容
 }
 ```
@@ -84,11 +84,48 @@ JSON Schema： [`schema/graph-doc.schema.json`](../schema/graph-doc.schema.json)
 代价：manifest 改默认值会静默改变老图的行为。缓解办法是节点上记了 `opVersion`，
 可以在打开时提示「此图保存于 v1.1.0，当前 v1.2.0，`leafSize` 默认值已变更」。
 
+### 子图（M4，[ADR-0010](adr/0010-subgraph-by-expansion.md)）
+
+`subgraphs` 的键是 subgraphId，节点用 `op: "sub:<subgraphId>"` 引用它：
+
+```jsonc
+"subgraphs": {
+  "sg_clean": {
+    "name": "去噪",
+    "nodes": [...], "edges": [...],           // 与顶层同构，可以再引用别的 sub:
+    "inputs":  [{ "name": "cloud", "type": "PointCloud",
+                  "to": [{ "node": "s_voxel", "port": "cloud" }] }],
+    "outputs": [{ "name": "cloud", "type": "PointCloud",
+                  "from": { "node": "s_sor", "port": "cloud" } }],
+    "params":  [{ "name": "leafSize", "type": "vec3f", "default": [0.005, 0.005, 0.005],
+                  "binds": [{ "node": "s_voxel", "param": "leafSize" }] }]
+  }
+}
+```
+
+四条规则：
+
+- **一个输入可以扇出到多个内部端口**（`to` 是数组），一个输出只能来自一个内部端口。
+- **对外参数是提升出来的**：`params[]` 就是一份 manifest 的 param 声明加一组 `binds`。
+  外层节点的 `params` 里写的是外参名；展开时把值写进每一个绑定的内参（覆盖内参自己的值）。
+- **子图不能直接或间接引用自己**，C++ 展开时报 `recursive_subgraph`；嵌套深度上限 32。
+- **库算子**（`op: "lib.<id>"`）是同一份结构存成独立文件 `*.lyflow-op.json`，
+  由 C++ 扫描库目录注册成普通算子。库文件必须自包含 —— 里面不能再有 `sub:` 引用。
+
+展开发生在 C++ 的 compile **之前**，展开后的节点 id 是路径 `outer/inner/leaf`，
+事件里的 `nodeId` 就是它。执行器、结果仓、缓存、事件流对子图一无所知。
+前端按当前所在层级（`ui.path`）的前缀把事件聚合到那一层的节点上。
+
+在界面里：选中若干节点按 **Ctrl+G** 合成子图，**Ctrl+Shift+G** 解散；双击子图节点进去，
+**Esc** 或面包屑出来；内部节点的参数右键可以「提升为子图参数」；
+子图节点右键可以「保存到库」。
+
 ### `ui` 可以整体丢弃
 
 后端处理时直接忽略 `ui`。反过来，一个没有 `ui` 的 GraphDoc（比如脚本生成的）也必须能被前端打开——
 缺失坐标时自动布局。M3 用 `@dagrejs/dagre` 做 LR 分层（E8），只在**两种**时机触发：
-打开时发现有节点缺 `ui.position`，以及用户主动点「整理」/ 按 Ctrl+G。
+打开时发现有节点缺 `ui.position`，以及用户主动点「整理」/ 按 Ctrl+L
+（M4 起 Ctrl+G 让给了「合成子图」）。
 **永远不自动覆盖用户摆好的位置**，而且整段布局是一条撤销记录。
 
 ## 前端映射层
@@ -99,7 +136,9 @@ GraphDoc ──(toReactFlow)──► { nodes: Node[], edges: Edge[] }   仅渲�
    └──────(applyChange)◄────────────────┘   用户交互 → 语义化 change → 写回 GraphDoc
 ```
 
-写回时走**语义化的 change 动作**（`moveNode`、`setParam`、`connect`、`disconnect`、`addNode`、`deleteNodes`），
+写回时走**语义化的 change 动作**（`moveNode`、`setParam`、`connect`、`disconnect`、`addNode`、`deleteNodes`、
+M4 起还有 `composeSubgraph`、`dissolveSubgraph`、`promoteParam`），
+它们一律作用于**当前层级**（`ui.path` 指的那一层），
 不要直接 diff 节点数组。原因有二：撤销重做需要的是有语义的 patch；批量操作（多选移动）应该合成一条 undo 记录。
 
 撤销重做用 immer patch 或 `zustand` + `zundo`，逆向 patch 直接由 immer 生成。

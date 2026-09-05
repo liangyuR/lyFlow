@@ -1,5 +1,5 @@
-// 画布。把 React Flow 的交互事件翻译成 graph store 的语义化动作 ——
-// 「节点数组第 3 项的 position 变了」没法做撤销，「移动了这几个节点」可以。
+// 画布。React Flow 的交互事件在这里翻译成 graph store 的语义化动作。
+// M4 起只渲染 ui.path 指的那一层，面包屑负责进出（ADR-0010）。
 
 import {
   Background,
@@ -17,7 +17,7 @@ import {
   type OnNodeDrag,
   type OnSelectionChangeParams,
 } from "@xyflow/react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { layoutGraph } from "../lib/layout";
 import {
@@ -28,13 +28,15 @@ import {
   toReactFlow,
   type LyNode,
 } from "../lib/mapping";
+import { augmentOperators, levelOf, pathIsValid } from "../lib/subgraph";
 import { canConnect, compatibleSources, compatibleTargets, inferAnyTypes } from "../lib/typecheck";
 import { keyHint } from "../lib/keymap";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
-import type { GraphDoc } from "../types/graph";
+import { transport } from "../transport";
+import { subgraphIdOf, type GraphDoc } from "../types/graph";
 
 import { OPERATOR_DND_MIME } from "./NodePalette";
 import { OperatorNode } from "./OperatorNode";
@@ -54,6 +56,8 @@ const GUIDE_TOLERANCE = 4;
 const EDGE_HIT_RADIUS = 12;
 /** 插入用的透传算子。它是普通算子不是特殊节点类型（E5）。 */
 const REROUTE_OP = "util.reroute";
+/** 超过这个节点数就只渲染可见的那些（§4）。小图下全量渲染的手感更好。 */
+const VIRTUALIZE_ABOVE = 80;
 
 export interface CanvasActions {
   /** 只跑到某个节点（交互清单 P1 #27）。 */
@@ -83,9 +87,119 @@ function rectOf(
   return { x: p.x, y: p.y, w: size.width, h: size.height };
 }
 
+/** 当前层级的「像一份 doc」的视图。只认 GraphDoc 的函数都吃它。 */
+function levelView(): GraphDoc {
+  const doc = useGraphStore.getState().doc;
+  const lvl = levelOf(doc, useUiStore.getState().path);
+  return lvl === doc ? doc : { ...doc, nodes: lvl.nodes, edges: lvl.edges };
+}
+
+/** 面包屑。点任意一段回到那一层（F2）。 */
+function Breadcrumb() {
+  const path = useUiStore((s) => s.path);
+  const doc = useGraphStore((s) => s.doc);
+  const exitTo = useUiStore((s) => s.exitTo);
+  if (path.length === 0) return null;
+  return (
+    <nav className="breadcrumb" data-testid="breadcrumb" data-depth={path.length}>
+      <button type="button" data-testid="breadcrumb-root" onClick={() => exitTo(0)}>
+        顶层
+      </button>
+      {path.map((seg, i) => (
+        <span key={`${seg.nodeId}-${i}`} className="breadcrumb__seg">
+          <span className="breadcrumb__sep">/</span>
+          <button
+            type="button"
+            data-testid={`breadcrumb-${i}`}
+            onClick={() => exitTo(i + 1)}
+            disabled={i === path.length - 1}
+          >
+            {doc.subgraphs?.[seg.subgraphId]?.name || seg.subgraphId}
+          </button>
+        </span>
+      ))}
+      <span className="breadcrumb__hint">Esc 退出上一层</span>
+    </nav>
+  );
+}
+
+/** 保存到库的小表单。id 决定文件名与算子 id，所以必须让人自己填。 */
+function LibraryDialog({
+  subgraphId,
+  onClose,
+}: {
+  subgraphId: string;
+  onClose: () => void;
+}) {
+  const def = useGraphStore((s) => s.doc.subgraphs?.[subgraphId]);
+  const [id, setId] = useState((def?.name || subgraphId).replace(/[^\w.-]+/g, "_"));
+  const [category, setCategory] = useState(def?.category?.replace(/^Library\//, "") || "General");
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const status = await transport.saveAsLibrary(useGraphStore.getState().doc, subgraphId, {
+        id,
+        category,
+      });
+      const refreshed = await transport.refreshLibrary();
+      useManifestStore.getState().replaceBundle(refreshed.manifest, 0);
+      useUiStore
+        .getState()
+        .showToast(`已保存到库：lib.${id}（库里现在有 ${status.count} 个算子）`);
+      onClose();
+    } catch (e) {
+      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal" data-testid="library-dialog" onClick={(e) => e.stopPropagation()}>
+      <h4>保存到库</h4>
+      <label>
+        算子 id
+        <input
+          data-testid="library-id"
+          value={id}
+          spellCheck={false}
+          onChange={(e) => setId(e.target.value)}
+        />
+      </label>
+      <label>
+        分类
+        <input
+          data-testid="library-category"
+          value={category}
+          spellCheck={false}
+          onChange={(e) => setCategory(e.target.value)}
+        />
+      </label>
+      <p className="modal__hint">
+        会写成 <code>{id}.lyflow-op.json</code>，在面板的 <code>Library/{category}</code> 下出现。
+      </p>
+      <div className="modal__row">
+        <button type="button" onClick={onClose}>
+          取消
+        </button>
+        <button
+          type="button"
+          data-testid="library-save"
+          disabled={busy || !id.trim()}
+          onClick={() => void save()}
+        >
+          保存
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function GraphCanvas({ onRunToNode }: CanvasActions) {
   const doc = useGraphStore((s) => s.doc);
-  const operatorsById = useManifestStore((s) => s.operatorsById);
+  const path = useUiStore((s) => s.path);
+  const baseOperators = useManifestStore((s) => s.operatorsById);
   const typesByName = useManifestStore((s) => s.typesByName);
   const selectedNodes = useUiStore((s) => s.selectedNodes);
   const selectedEdges = useUiStore((s) => s.selectedEdges);
@@ -100,21 +214,37 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const [guides, setGuides] = useState<Guide[]>([]);
   const [snapping, setSnapping] = useState(true);
+  const [libraryFor, setLibraryFor] = useState<string | null>(null);
   const running = useExecutionStore((s) => s.runStatus === "running");
   const dragged = useRef<string | null>(null);
   /** onReconnect 有没有接住这次拖动。onReconnectEnd 的第四个参数各版本形态不一，
    *  与其猜它，不如自己记一笔 —— 猜错的后果是把一条好边直接删掉。 */
   const reconnected = useRef(false);
 
+  const operatorsById = useMemo(
+    () => augmentOperators(baseOperators, doc.subgraphs),
+    [baseOperators, doc.subgraphs],
+  );
   const ctx = useMemo(() => ({ operatorsById, typesByName }), [operatorsById, typesByName]);
-  const anyTypes = useMemo(() => inferAnyTypes(ctx, doc), [ctx, doc]);
+
+  // 当前层级。子图被删掉之后路径就失效了，弹回顶层比画一张空图诚实。
+  const view = useMemo<GraphDoc>(() => {
+    const lvl = levelOf(doc, path);
+    return lvl === doc ? doc : { ...doc, nodes: lvl.nodes, edges: lvl.edges };
+  }, [doc, path]);
+
+  useEffect(() => {
+    if (path.length > 0 && !pathIsValid(doc, path)) useUiStore.getState().setPath([]);
+  }, [doc, path]);
+
+  const anyTypes = useMemo(() => inferAnyTypes(ctx, view), [ctx, view]);
 
   const { nodes, edges } = useMemo(
     () =>
-      toReactFlow(doc, ctx, { nodes: selectedNodes, edges: selectedEdges }, measured.current, anyTypes),
+      toReactFlow(view, ctx, { nodes: selectedNodes, edges: selectedEdges }, measured.current, anyTypes),
     // measuredTick 是 measured.current 的变更信号，故意作为依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [doc, ctx, selectedNodes, selectedEdges, measuredTick, anyTypes],
+    [view, ctx, selectedNodes, selectedEdges, measuredTick, anyTypes],
   );
 
   // -- 节点变更 ------------------------------------------------------------
@@ -164,8 +294,8 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       setGuides([]);
       return;
     }
-    const doc = useGraphStore.getState().doc;
-    const me = rectOf(doc, node.id, measured.current);
+    const current = levelView();
+    const me = rectOf(current, node.id, measured.current);
     const found: Guide[] = [];
     const pairs = (axis: "x" | "y", mine: number[], theirs: number[]) => {
       for (let i = 0; i < mine.length; i += 1) {
@@ -174,9 +304,9 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         if (Math.abs(a - b) < GUIDE_TOLERANCE) found.push({ axis, at: b });
       }
     };
-    for (const other of doc.nodes) {
+    for (const other of current.nodes) {
       if (other.id === node.id) continue;
-      const r = rectOf(doc, other.id, measured.current);
+      const r = rectOf(current, other.id, measured.current);
       pairs("x", [me.x, me.x + me.w / 2, me.x + me.w], [r.x, r.x + r.w / 2, r.x + r.w]);
       pairs("y", [me.y, me.y + me.h / 2, me.y + me.h], [r.y, r.y + r.h / 2, r.y + r.h]);
     }
@@ -187,19 +317,17 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
   const insertOnHoveredEdge = useCallback(
     (nodeId: string) => {
       const graph = useGraphStore.getState();
-      const doc = graph.doc;
-      const me = rectOf(doc, nodeId, measured.current);
+      const current = levelView();
+      const me = rectOf(current, nodeId, measured.current);
       const center = { x: me.x + me.w / 2, y: me.y + me.h / 2 };
-      const op = useManifestStore.getState().operatorsById.get(
-        doc.nodes.find((n) => n.id === nodeId)?.op ?? "",
-      );
+      const op = ctx.operatorsById.get(current.nodes.find((n) => n.id === nodeId)?.op ?? "");
       if (!op) return false;
       // 已经有连线的节点不参与插入：它多半只是被挪到了别的连线附近
-      if (doc.edges.some((e) => e.from.node === nodeId || e.to.node === nodeId)) return false;
+      if (current.edges.some((e) => e.from.node === nodeId || e.to.node === nodeId)) return false;
 
-      for (const edge of doc.edges) {
-        const a = rectOf(doc, edge.from.node, measured.current);
-        const b = rectOf(doc, edge.to.node, measured.current);
+      for (const edge of current.edges) {
+        const a = rectOf(current, edge.from.node, measured.current);
+        const b = rectOf(current, edge.to.node, measured.current);
         const from = { x: a.x + a.w, y: a.y + a.h / 2 };
         const to = { x: b.x, y: b.y + b.h / 2 };
         const hit =
@@ -207,7 +335,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         if (!hit) continue;
 
         // 有且仅有一对兼容端口时才插入。多于一对就没有唯一解，宁可不动。
-        const without: GraphDoc = { ...doc, edges: doc.edges.filter((e) => e.id !== edge.id) };
+        const without: GraphDoc = { ...current, edges: current.edges.filter((e) => e.id !== edge.id) };
         const pairs: { inPort: string; outPort: string }[] = [];
         for (const inPort of op.inputs) {
           for (const outPort of op.outputs) {
@@ -269,12 +397,12 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       params: { nodeId: string | null; handleId: string | null; handleType: string | null },
     ) => {
       if (!params.nodeId || !params.handleId) return;
-      const doc = useGraphStore.getState().doc;
+      const current = levelView();
       const fromOutput = params.handleType === "source";
       const ref = { node: params.nodeId, port: params.handleId };
       const compatible = fromOutput
-        ? compatibleTargets(ctx, doc, ref)
-        : compatibleSources(ctx, doc, ref);
+        ? compatibleTargets(ctx, current, ref)
+        : compatibleSources(ctx, current, ref);
       useUiStore.getState().beginConnection(
         { ...ref, side: fromOutput ? "output" : "input" },
         compatible,
@@ -326,7 +454,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         return;
       }
       const graph = useGraphStore.getState();
-      const from = graph.doc.edges.find((e) => e.id === edge.id)?.from;
+      const from = levelView().edges.find((e) => e.id === edge.id)?.from;
       graph.disconnect([edge.id]);
       if (!from || !("clientX" in event)) return;
       const point = { x: event.clientX, y: event.clientY };
@@ -351,7 +479,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       if (!source || !target || !sourceHandle || !targetHandle) return false;
       return canConnect(
         ctx,
-        useGraphStore.getState().doc,
+        levelView(),
         { node: source, port: sourceHandle },
         { node: target, port: targetHandle },
       ).ok;
@@ -367,7 +495,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     );
   }, []);
 
-  // -- 双击：空白处开搜索面板，连线中点插一个 reroute -----------------------
+  // -- 双击：空白处开搜索面板，连线中点插一个 reroute，子图节点进去 ----------
   const onDoubleClick = useCallback(
     (e: React.MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -378,6 +506,25 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       });
     },
     [screenToFlowPosition],
+  );
+
+  const enterSubgraph = useCallback((nodeId: string) => {
+    const current = levelView();
+    const node = current.nodes.find((n) => n.id === nodeId);
+    const subgraphId = node ? subgraphIdOf(node.op) : null;
+    if (!subgraphId) return false;
+    useUiStore.getState().enterSubgraph({ nodeId, subgraphId });
+    setTimeout(() => void fitView({ duration: 200 }), 60);
+    return true;
+    // fitView 的引用是稳定的（useReactFlow 返回的都是），列进依赖只是为了 lint
+  }, [fitView]);
+
+  const onNodeDoubleClick = useCallback(
+    (e: React.MouseEvent, node: { id: string }) => {
+      // 双击标题改名的事件先冒泡到这里，标题那一片已经 stopPropagation 过了
+      if (enterSubgraph(node.id)) e.stopPropagation();
+    },
+    [enterSubgraph],
   );
 
   const onEdgeDoubleClick = useCallback(
@@ -393,7 +540,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     [screenToFlowPosition],
   );
 
-  // -- 右键菜单（交互清单 P1 #24 #25 #27）----------------------------------
+  // -- 右键菜单（交互清单 P1 #24 #25 #27 + P2 #31）--------------------------
   const onNodeContextMenu = useCallback((e: React.MouseEvent, node: { id: string }) => {
     e.preventDefault();
     // 右键的节点如果不在选区里，就先把它选上 —— 否则菜单里的动作作用于谁很含糊
@@ -409,7 +556,31 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     return ui.selectedNodes.size > 0 ? [...ui.selectedNodes] : menu ? [menu.nodeId] : [];
   }, [menu]);
 
-  const menuNode = menu ? doc.nodes.find((n) => n.id === menu.nodeId) : undefined;
+  const menuNode = menu ? view.nodes.find((n) => n.id === menu.nodeId) : undefined;
+  const menuSubgraphId = menuNode ? subgraphIdOf(menuNode.op) : null;
+  const menuIsLibrary = menuNode?.op.startsWith("lib.") === true;
+
+  const doCompose = useCallback(() => {
+    const ids = menuTargets();
+    const result = useGraphStore.getState().composeSubgraph(ids);
+    if (result) {
+      useUiStore.getState().setSelection([result.nodeId], []);
+      useUiStore.getState().showToast(`已合成子图（${ids.length} 个节点）`);
+    }
+    setMenu(null);
+  }, [menuTargets]);
+
+  const doDissolve = useCallback(() => {
+    if (!menu) return;
+    const inlined = useGraphStore.getState().dissolveSubgraph(menu.nodeId);
+    if (inlined.length > 0) {
+      useUiStore.getState().setSelection(inlined, []);
+      useUiStore.getState().showToast(`已解散，内联了 ${inlined.length} 个节点`);
+    } else {
+      useUiStore.getState().showToast("这个节点不是子图", "warn");
+    }
+    setMenu(null);
+  }, [menu]);
 
   // -- 从面板拖算子进来 -----------------------------------------------------
   const onDragOver = useCallback((e: React.DragEvent) => {
@@ -437,9 +608,14 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       onDoubleClick={onDoubleClick}
       onDragOver={onDragOver}
       onDrop={onDrop}
-      onClick={closeMenu}
+      onClick={() => {
+        closeMenu();
+        setLibraryFor(null);
+      }}
       data-snapping={snapping ? "1" : "0"}
+      data-depth={path.length}
     >
+      <Breadcrumb />
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -461,8 +637,11 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         isValidConnection={isValidConnection}
         onSelectionChange={onSelectionChange}
         onNodeContextMenu={onNodeContextMenu}
+        onNodeDoubleClick={onNodeDoubleClick}
         onEdgeDoubleClick={onEdgeDoubleClick}
         onPaneClick={closeMenu}
+        // 大图只画视野里的节点（§4）。小图不开：开了之后平移会有一帧空窗。
+        onlyRenderVisibleElements={nodes.length > VIRTUALIZE_ABOVE}
         // zoomOnDoubleClick 必须关：d3-zoom 会 stopImmediatePropagation 把双击拦死。
         // deleteKeyCode 不含 Backspace：输入框里退格却删掉节点是经典事故（app/README.md）。
         zoomOnDoubleClick={false}
@@ -534,6 +713,54 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
           </button>
           <button
             type="button"
+            data-testid="ctx-compose"
+            onClick={doCompose}
+          >
+            合成子图 <kbd>{keyHint("compose")}</kbd>
+          </button>
+          {menuSubgraphId && (
+            <>
+              <button
+                type="button"
+                data-testid="ctx-enter"
+                onClick={() => {
+                  enterSubgraph(menu.nodeId);
+                  setMenu(null);
+                }}
+              >
+                进入子图
+              </button>
+              <button type="button" data-testid="ctx-dissolve" onClick={doDissolve}>
+                解散子图 <kbd>{keyHint("dissolve")}</kbd>
+              </button>
+              <button
+                type="button"
+                data-testid="ctx-save-library"
+                onClick={() => {
+                  setLibraryFor(menuSubgraphId);
+                  setMenu(null);
+                }}
+              >
+                保存到库…
+              </button>
+            </>
+          )}
+          {menuIsLibrary && (
+            <button
+              type="button"
+              data-testid="ctx-inline-library"
+              onClick={() => {
+                useUiStore
+                  .getState()
+                  .showToast("库算子要先在库目录里编辑，或从原图重新合成", "warn");
+                setMenu(null);
+              }}
+            >
+              展开为内联子图
+            </button>
+          )}
+          <button
+            type="button"
             data-testid="ctx-mute"
             onClick={() => {
               const ids = menuTargets();
@@ -559,7 +786,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
             data-testid="ctx-layout"
             onClick={() => {
               const ids = new Set(menuTargets());
-              const moves = layoutGraph(useGraphStore.getState().doc, {
+              const moves = layoutGraph(levelView(), {
                 only: ids,
                 measured: measured.current,
               });
@@ -580,6 +807,10 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
             适配视图 <kbd>{keyHint("fitView")}</kbd>
           </button>
         </div>
+      )}
+
+      {libraryFor && (
+        <LibraryDialog subgraphId={libraryFor} onClose={() => setLibraryFor(null)} />
       )}
     </div>
   );

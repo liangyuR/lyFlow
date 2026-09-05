@@ -139,7 +139,10 @@ export function hasRelativePathParam(
   doc: GraphDoc,
   operatorsById: ReadonlyMap<string, OperatorDesc>,
 ): boolean {
-  for (const node of doc.nodes) {
+  // 子图里的路径参数一样要查：展开之后它们和顶层节点没有区别（F1）
+  const nodes = [...doc.nodes];
+  for (const def of Object.values(doc.subgraphs ?? {})) nodes.push(...def.nodes);
+  for (const node of nodes) {
     const op = operatorsById.get(node.op);
     if (!op) continue;
     for (const param of op.params) {

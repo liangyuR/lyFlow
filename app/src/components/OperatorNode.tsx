@@ -4,9 +4,10 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { memo, useEffect, useRef, useState } from "react";
 
+import { augmentOperators } from "../lib/subgraph";
 import { ANY } from "../lib/typecheck";
 import type { OperatorNodeData } from "../lib/mapping";
-import { useCacheStore } from "../store/cache";
+import { useNodeStale } from "../store/cache";
 import { useNodeExecution } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
@@ -104,18 +105,16 @@ function TitleEditor({ id, initial, onDone }: { id: string; initial: string; onD
 }
 
 function OperatorNodeImpl({ id, data, selected }: NodeProps) {
-  const { opId, title, collapsed, bypass, anyType } = data as OperatorNodeData;
-  const op = useManifestStore((s) => s.operatorsById.get(opId));
+  const { opId, title, collapsed, bypass, anyType, subgraphId, library } =
+    data as OperatorNodeData;
+  const base = useManifestStore((s) => s.operatorsById);
+  const subgraphs = useGraphStore((s) => s.doc.subgraphs);
+  const op = augmentOperators(base, subgraphs).get(opId);
   // 执行状态从独立的 store 现查（P0 #14）：放进节点 data 的话，
   // 每来一条事件就要重建整个节点数组，几十个节点的图会肉眼可见地卡。
   const exec = useNodeExecution(id);
   // 精确到节点的 stale（交互清单 P1 #23）：判定在 C++，这里只读结论（ADR-0007）
-  const stale = useCacheStore((s) => {
-    const node = s.plan.get(id);
-    const previous = s.ranWith.get(id);
-    if (!node || previous === undefined) return false;
-    return node.cacheKey !== previous && !node.cached;
-  });
+  const stale = useNodeStale(id);
   const [renaming, setRenaming] = useState(false);
 
   // 算子在当前 core 里不存在：可能是打开了别人存的图，也可能是热重载删掉了它。
@@ -147,6 +146,7 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
     stale ? "is-stale" : "",
     // 静音整体半透明加斜纹，一眼看得出这个节点这次不算
     bypass ? "is-bypassed" : "",
+    subgraphId || library ? "node--sub" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -160,6 +160,8 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
       data-node-state={state}
       data-stale={stale ? "1" : "0"}
       data-bypass={bypass ? "1" : "0"}
+      data-subgraph={subgraphId ?? undefined}
+      data-library={library ? "1" : undefined}
       data-testid={`node-${id}`}
     >
       <div
@@ -174,6 +176,15 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
           <TitleEditor id={id} initial={title ?? op.label} onDone={() => setRenaming(false)} />
         ) : (
           <span className="node__title">{title ?? op.label}</span>
+        )}
+        {(subgraphId || library) && (
+          <span
+            className="node__badge node__badge--sub"
+            data-testid={`node-subbadge-${id}`}
+            title={subgraphId ? "子图：双击进入" : "库算子：右键可展开为内联子图"}
+          >
+            {subgraphId ? "⧉" : "L"}
+          </span>
         )}
         {bypass && <span className="node__badge node__badge--mute" title="已静音 (Ctrl+M)">M</span>}
         {state === "running" && exec?.progress != null && (
@@ -221,6 +232,11 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
           )}
           {exec?.stats?.elementCount != null && (
             <span className="node__count">{formatCount(exec.stats.elementCount)}</span>
+          )}
+          {exec?.children && (
+            <span className="node__count" data-testid={`node-children-${id}`}>
+              {exec.children.finished}/{exec.children.total}
+            </span>
           )}
           {exec?.durationMs != null && (
             <span className="node__time">{formatDuration(exec.durationMs)}</span>

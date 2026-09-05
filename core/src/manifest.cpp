@@ -45,4 +45,20 @@ const char* toString(ParamType t) {
   return "float";
 }
 
+bool parseParamType(const std::string& name, ParamType& out) {
+  static const ParamType kAll[] = {
+      ParamType::Bool,   ParamType::Int,    ParamType::Float,     ParamType::Vec2f,
+      ParamType::Vec3f,  ParamType::Vec4f,  ParamType::Enum,      ParamType::Flags,
+      ParamType::String, ParamType::Text,   ParamType::Path,      ParamType::Color,
+      ParamType::Transform, ParamType::Curve,
+  };
+  for (ParamType t : kAll) {
+    if (name == toString(t)) {
+      out = t;
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace lyflow

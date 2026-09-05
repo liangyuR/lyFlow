@@ -54,7 +54,11 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: "collapse", keys: ["Ctrl+E"], label: "折叠 / 展开", scope: "canvas", group: "节点" },
   { id: "search", keys: ["Tab", "Space"], label: "搜索并添加算子", scope: "canvas", group: "节点" },
 
-  { id: "layout", keys: ["Ctrl+G"], label: "整理布局", scope: "canvas", group: "视图" },
+  { id: "compose", keys: ["Ctrl+G"], label: "合成子图", scope: "canvas", group: "节点" },
+  { id: "dissolve", keys: ["Ctrl+Shift+G"], label: "解散子图", scope: "canvas", group: "节点" },
+  { id: "enterSubgraph", keys: ["Ctrl+Enter"], label: "进入子图", scope: "canvas", group: "节点" },
+
+  { id: "layout", keys: ["Ctrl+L"], label: "整理布局", scope: "canvas", group: "视图" },
   { id: "fitView", keys: ["Ctrl+Shift+F"], label: "适配视图", scope: "canvas", group: "视图" },
   { id: "toggleDrawer", keys: ["Ctrl+`"], label: "日志与诊断抽屉", scope: "global", group: "视图" },
   { id: "help", keys: ["?"], label: "快捷键面板", scope: "global", group: "视图" },

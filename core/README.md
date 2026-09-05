@@ -9,8 +9,9 @@ include/lyflow/       公共头。零 PCL（ADR-0005），算子作者只需要�
   operator.h          ParamView / Inputs / Outputs / ExecContext / ComputeFn
   manifest.h          算子描述的数据结构，序列化成 operator-manifest.json
   status.h            结构化诊断（paramPath / portName）
-  c_api.h             C ABI v4 —— DLL 只导出这里的东西
-src/exec/             parse → validate → compile(Plan) → execute + ResultStore
+  c_api.h             C ABI v5 —— DLL 只导出这里的东西
+src/exec/             parse → expand → validate → compile(Plan) → execute + ResultStore
+  subgraph.cpp        子图展开成平图（ADR-0010）；library.cpp 扫描库目录
 src/ops/              手写算子。**不许 include 任何 PCL 头**
 src/ops/pcl/          PCL 算子，经 adapter 进出；单独吃一个 PCH
 third_party/          vendored 单头：nlohmann/json、doctest、xxhash
@@ -124,6 +125,32 @@ cmake --build build/core
 - **`ctx.threadBudget()` = max(1, cores / maxParallel)**。PCL 的 OMP 版本算子
   （`NormalEstimationOMP` 这类）应当把它传给 `setNumberOfThreads`。
 
+## 子图与库算子
+
+`sub:<id>` 与 `lib.<id>` 两种节点在 **compile 之前**被 `expandGraph` 递归替换成平图
+（[ADR-0010](../docs/adr/0010-subgraph-by-expansion.md)）。执行器、结果仓、事件流
+一行都没为它们改过 —— 它们看见的永远是一张平图。
+
+- 展开后的 id 是路径 `outer/inner/leaf`；`Run to node` 的目标按**路径前缀**匹配，
+  所以给一个子图节点的 id 等于给它展开后的全部内部节点。
+- 提升参数（`params[].binds`）在展开时把外参的值写进内参，覆盖内参自己的值。
+- 静音一个子图节点 = 整棵子树都静音，每个内部节点各自按 E5 透传。
+- 递归引用报 `recursive_subgraph`，嵌套深度上限 32，两者都是整图级失败。
+- 库算子由 `lyflow_set_library_dirs` 扫描 `*.lyflow-op.json` 注册成 `lib.<id>`，
+  分类前缀 `Library/`。合成出来的 `OperatorDesc` 单独过一遍 `Registry::validate()`，
+  坏的那一个被跳过而不牵连其余。**调用它之前必须放掉所有 run**：
+  它会重建注册表的后半段，旧的 `OperatorDesc*` 随之失效（与热重载同一条约定）。
+
+## live preview
+
+`RunOptions::mode == Preview` 时，**没有输入边**的节点在输出进结果仓之前先等步长抽稀到
+`previewMaxPoints`（默认 20 万），其余算子一行都不改
+（[ADR-0011](../docs/adr/0011-preview-as-decimated-run.md)）。
+抽稀走 `PointCloud::select`，所有通道一起搬。
+
+cacheKey 混入 `preview:<maxPoints>`，所以预览与正式的结果互不命中；
+超过 `previewBudgetMs`（默认 300）时发一条 `log warn`。
+
 ## 缓存
 
 结果仓按 cacheKey 内容寻址，**判定只在这里**（[ADR-0007](../docs/adr/0007-cache-authority.md)）。
@@ -139,6 +166,7 @@ cmake --build build/core
 
 `lyflow_plan` 把每节点的 `{ cacheKey, cached, level, upstreamMissing, bypass }` 报给前端，
 `lyflow_cache_stats` / `lyflow_cache_clear` 给状态栏和菜单用。
+预览的那一份用的是另一组键，两边在同一个 LRU 里但永远不会互相命中。
 
 ## 算子改版本
 

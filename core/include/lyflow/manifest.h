@@ -93,6 +93,9 @@ enum class ParamType {
 // 与 schema 的 param.type enum 一一对应。新增类型要同步改 schema 和前端控件表。
 const char* toString(ParamType t);
 
+/// toString 的逆。认不出来返回 false，out 不动（子图/库算子的参数声明是数据，不是代码）。
+bool parseParamType(const std::string& name, ParamType& out);
+
 struct EnumOption {
   std::string value;
   std::string label;

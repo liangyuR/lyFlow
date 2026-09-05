@@ -23,8 +23,17 @@ std::string lowerExtension(const std::filesystem::path& p) {
 Status compute(const Inputs& inputs, const ParamView& params, Outputs&, ExecContext& ctx) {
   const PointCloud& cloud = *inputs.get("cloud").asCloud();
   const std::filesystem::path file = params.path("path");
-  const std::string& format = params.choice("format");
+  const Status s = saveCloudToFile(cloud, file, params.choice("format"));
+  if (!s.ok) return s;
+  ctx.log(LogLevel::Info,
+          "写出 " + std::to_string(cloud.pointCount()) + " 个点 -> " + file.u8string());
+  return Status::Ok();
+}
 
+}  // namespace
+
+Status saveCloudToFile(const PointCloud& cloud, const std::filesystem::path& file,
+                       const std::string& format) {
   std::error_code ec;
   if (!file.parent_path().empty()) {
     std::filesystem::create_directories(file.parent_path(), ec);
@@ -70,13 +79,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs&, ExecCont
   if (!narrow.commit()) {
     return Status::Error(Phase::Execute, "io", narrow.error(), "path");
   }
-
-  ctx.log(LogLevel::Info,
-          "写出 " + std::to_string(cloud.pointCount()) + " 个点 -> " + file.u8string());
   return Status::Ok();
 }
-
-}  // namespace
 
 void registerIoSavePcd(Registry& r) {
   OperatorDesc op;

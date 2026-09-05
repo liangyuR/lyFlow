@@ -18,6 +18,7 @@ import {
   selectAndReadViewer,
 } from "./page.mjs";
 import { m3Suites } from "./m3.mjs";
+import { m4Suites } from "./m4.mjs";
 
 // ------------------------------------------------------------------- 各分组
 
@@ -436,7 +437,10 @@ async function main() {
       `${staged.dlls} 个 DLL`);
     const info = await cdp.eval(`return await window.__lyflow.transport.getCoreInfo();`);
     report.ok("core 版本可读", Boolean(info?.version), JSON.stringify(info));
-    report.eq("15 个算子", info?.operatorCount, 15);
+    // 内置算子 16 个；库目录里可能还有别的，所以只断言下界
+    report.ok("内置算子全在（≥ 16）", (info?.operatorCount ?? 0) >= 16,
+      String(info?.operatorCount));
+    report.ok("CLI 也随包", staged.cli != null && fs.existsSync(staged.cli), String(staged.cli));
   }
 
   try {
@@ -451,6 +455,7 @@ async function main() {
     await suiteRunToNode(cdp, report);
 
     for (const suite of m3Suites) await suite(cdp, report, ws);
+    for (const suite of m4Suites) await suite(cdp, report, ws);
 
     report.section("控制台");
     // React 的 StrictMode 在 dev 下会重复挂载并打一些 warning，

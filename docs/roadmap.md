@@ -149,16 +149,42 @@ C ABI 升到 v4：加了 `lyflow_plan` / `lyflow_cache_clear` / `lyflow_cache_st
 
 产出：可以交给同组其他人用的版本。
 
-## M4 — 能扩展
+## M4 — 能扩展 ✅
 
-**目标：图成为可复用、可脚本化、可交互探索的资产。** 详细计划见 [m4-plan.md](m4-plan.md)。
+**目标：图成为可复用、可脚本化、可交互探索的资产。** 详细计划见 [m4-plan.md](m4-plan.md)，
+验收见 [m4-acceptance.md](m4-acceptance.md)。
 
-- [ ] 子图 / 复合算子：C++ compile 期展开成平图，路径式节点 id，参数提升，库算子目录
-- [ ] Live preview：源头抽稀的 preview run，独立缓存命名空间
-- [ ] headless CLI `lyflow`：run / validate / plan / migrate / dump / sweep / diff，JSON Lines 事件流
-- [ ] 分组框（P2 #32）、参数扫描（#34）、图 diff（#36）、大图性能（#37）
+- [x] 子图 / 复合算子：C++ compile 期展开成平图，路径式节点 id，参数提升，库算子目录
+- [x] Live preview：源头抽稀的 preview run，独立缓存命名空间
+- [x] headless CLI `lyflow`：run / validate / plan / migrate / manifest / dump / sweep / diff，JSON Lines 事件流
+- [x] 参数扫描（P2 #34）、图 diff（#36）、大图性能（#37）；分组框（#32）以子图取代
 
 产出：一条真实任务能用「库算子 + CLI」跑在无 GUI 的机器上。
+
+**三份新契约**：[ADR-0010](adr/0010-subgraph-by-expansion.md)（子图靠编译期展开）、
+[ADR-0011](adr/0011-preview-as-decimated-run.md)（preview 是抽稀过的普通 run）、
+[ADR-0012](adr/0012-headless-cli.md)（CLI 是第二个 bin，JSON Lines）。
+C ABI 升到 v5：加了 `lyflow_set_library_dirs` / `lyflow_library_count` / `lyflow_output_save`，
+`lyflow_run_options` 多了 `mode` / `preview_max_points` / `preview_budget_ms`，
+`lyflow_cloud_view` 多了 normals 通道。
+
+**这一轮抓到的真 bug**：`ofKind()` 返回的临时 vector 在 range-for 里活不过
+初始化那一句（C++17 的经典坑，症状是断言看到一个空列表而事件本身是对的）、
+`RunHandle` 一 drop 结果仓的索引就没了导致 `dump` 拿不到刚跑完的结果、
+两个 bin 让 `cargo run` 不知道该跑哪个（`tauri dev` 直接 101 退出）、
+**`tauri build` 按 cargo 包名找 exe 再改名，把 CLI 盖到了桌面壳头上**（只在打包路径上暴露）、
+事件合并窗口把 `run_started` 播下的 idle 占位吃掉了、
+把 float 绑到 vec3f 的内参上产生的是 `bad_param` 而不是显式的类型错误。
+逐条见 [m4-acceptance.md](m4-acceptance.md)。
+
+**已知毛刺**：
+- 子图内部节点的诊断挂在路径 id 上，顶层只看得到「这个子图红了」，
+  要进去才知道是哪个内参（ADR-0010 的代价一）。
+- 库算子不能「展开为内联子图」：定义在库文件里，前端手上只有合成出来的 OperatorDesc。
+  右键那一项会明说这一点。
+- `save_as_library` 拒绝嵌套了 `sub:` 的子图 —— 库文件必须自包含。
+- preview 只跑到选中节点。没选中节点时拖参数不会触发预览。
+- 300 节点的基准是合成图（30 条链 × 10 个 reroute），不是真实 pipeline。
 
 ## M5 — 外延（只列方向，动工前再写计划）
 
@@ -176,8 +202,9 @@ C ABI 升到 v4：加了 `lyflow_plan` / `lyflow_cache_clear` / `lyflow_cache_st
 运行时加载的 core DLL（→ M3 热重载 ✅）、cacheKey 内容寻址的结果仓（→ M3 缓存 ✅）、
 `run_started.nodes[].cacheKey`（→ M3 stale ✅）、GraphDoc `bypass` 字段（→ M3 静音 ✅）、
 Plan 的 level（→ M3 并行 ✅）、`targets`（→ M3 Run to node ✅、M4 CLI `--to`）、
-抢占式 run（→ M4 live preview）、`externalKey`（→ 缓存落盘）、
-参数右键的「复制路径名」（→ M4 CLI 的 `--set`）。
+抢占式 run（→ M4 live preview ✅）、`externalKey`（→ 缓存落盘）、
+参数右键的「复制路径名」（→ M4 CLI 的 `--set` ✅）、
+GraphDoc 的 `subgraphs` 字段与 `op` 命名空间（→ M4 子图 ✅）。
 
 ## 优先级判断依据
 

@@ -5,8 +5,9 @@ import { keyHint } from "../lib/keymap";
 import { useCacheStore } from "../store/cache";
 import { summarize, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
+import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
-import type { RecentEntry } from "../transport";
+import { transport, type RecentEntry } from "../transport";
 
 export interface ToolbarActions {
   onNew: () => void;
@@ -77,6 +78,78 @@ function Recompute() {
     >
       {n === 0 ? "全部命中缓存" : `将重算 ${n} 个节点`}
     </span>
+  );
+}
+
+/** live preview 的两个旋钮（ADR-0011）。放工具栏是因为它们会改变「运行」的含义。 */
+function PreviewControls() {
+  const autoRun = useUiStore((s) => s.autoRun);
+  const maxPoints = useUiStore((s) => s.previewMaxPoints);
+  const previewing = useUiStore((s) => s.previewing);
+  return (
+    <>
+      <label className="toolbar__toggle" title="拖完参数自动补一次正式运行">
+        <input
+          type="checkbox"
+          data-testid="auto-run"
+          checked={autoRun}
+          onChange={(e) => useUiStore.getState().setAutoRun(e.target.checked)}
+        />
+        自动运行
+      </label>
+      <select
+        className="toolbar__select"
+        data-testid="preview-points"
+        value={maxPoints}
+        title="预览时源算子抽稀到多少点"
+        onChange={(e) => useUiStore.getState().setPreviewMaxPoints(Number(e.target.value))}
+      >
+        <option value={50_000}>预览 5 万</option>
+        <option value={200_000}>预览 20 万</option>
+        <option value={1_000_000}>预览 100 万</option>
+      </select>
+      {previewing && (
+        <span className="toolbar__stat toolbar__stat--preview" data-testid="previewing">
+          预览中
+        </span>
+      )}
+    </>
+  );
+}
+
+/** 重扫库算子目录（ADR-0010）。库文件是手工放进去的，得有个不重启的入口。 */
+function LibraryButton() {
+  const [busy, setBusy] = useState(false);
+  const refresh = async () => {
+    setBusy(true);
+    try {
+      const result = await transport.refreshLibrary();
+      useManifestStore.getState().replaceBundle(result.manifest, 0);
+      const problems = result.status.problems;
+      useUiStore
+        .getState()
+        .showToast(
+          problems.length === 0
+            ? `库里有 ${result.status.count} 个算子`
+            : `库算子有 ${problems.length} 个问题：${problems[0]}`,
+          problems.length === 0 ? "info" : "warn",
+        );
+    } catch (e) {
+      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      data-testid="library-refresh"
+      disabled={busy}
+      title="重扫库算子目录"
+      onClick={() => void refresh()}
+    >
+      库
+    </button>
   );
 }
 
@@ -232,6 +305,7 @@ export function Toolbar({
         >
           抽屉
         </button>
+        <LibraryButton />
         <button
           type="button"
           data-testid="help-toggle"
@@ -243,6 +317,9 @@ export function Toolbar({
       </div>
 
       <RunControls onRun={onRun} onCancel={onCancel} />
+      <div className="toolbar__group toolbar__group--preview">
+        <PreviewControls />
+      </div>
 
       <div className="toolbar__doc">
         <input

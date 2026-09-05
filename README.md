@@ -58,6 +58,8 @@ C++ 生成的 `OperatorManifest`，Rust 转发给前端。**加新算子只改 C
 | [docs/m2-acceptance.md](docs/m2-acceptance.md) | M2 逐条验收记录（含未验证项与偏离决策） |
 | [docs/m3-plan.md](docs/m3-plan.md) | M3 实施计划：缓存与并行、bypass/reroute、迁移、热重载、P1 交互 |
 | [docs/m3-acceptance.md](docs/m3-acceptance.md) | M3 逐条验收记录（含未验证项与偏离决策） |
+| [docs/m4-plan.md](docs/m4-plan.md) | M4 实施计划：子图、live preview、headless CLI、大图性能 |
+| [docs/m4-acceptance.md](docs/m4-acceptance.md) | M4 逐条验收记录（含未验证项与偏离决策） |
 | [docs/adr/](docs/adr/) | 架构决策记录 |
 | [schema/](schema/) | GraphDoc / OperatorManifest / ExecutionEvent 的 JSON Schema + 已校验的示例 |
 
@@ -71,8 +73,8 @@ C++ 生成的 `OperatorManifest`，Rust 转发给前端。**加新算子只改 C
 ## 目录
 
 ```
-core/     C++ 核心：算子注册表 + manifest 导出 + 校验/编译/执行 + 结果仓。编成 DLL
-bridge/   Rust 桥接层：Tauri 壳，运行时加载 core DLL，IPC / 事件推流 / 文件读写
+core/     C++ 核心：算子注册表 + manifest 导出 + 校验/展开/编译/执行 + 结果仓。编成 DLL
+bridge/   Rust 桥接层：Tauri 壳（lyflow-app）与 headless CLI（lyflow），共用 core_ffi
 app/      前端：Vite + React + TS + React Flow + three.js。节点编辑器 + 3D 预览
 schema/   三份 JSON Schema —— 跨语言契约的真实来源
 scripts/  构建与门禁脚本；scripts/e2e 是 CDP 验收
@@ -109,10 +111,68 @@ pnpm app:dev      # 浏览器模式，状态栏会标「静态快照」提示数
 一条命令验完整条链路：
 
 ```bash
-pnpm check         # C++ 编译 + 自检 + core 测试 → schema 校验 → cargo test → 前端 build
+pnpm check         # C++ 编译 + 自检 + core 测试 → schema 校验 → cargo test → CLI → 前端 build
 pnpm e2e           # CDP 驱动真实 app 的端到端验收（自己起 tauri dev，跑完自己收尾）
 pnpm e2e:packaged  # 同一套断言，但跑的是 tauri build 的产物在一个干净目录里的拷贝
 ```
+
+## 命令行（headless）
+
+`lyflow` 是同一个 crate 的第二个 bin，**不依赖 Tauri**，与桌面共用同一份加载、校验、
+迁移和执行代码（[ADR-0012](docs/adr/0012-headless-cli.md)）。构建：
+
+```bash
+pnpm cli:build     # cargo build --release --bin lyflow --no-default-features
+# 产物：bridge/target/release/lyflow.exe，与 lyflow_core.dll 同目录
+```
+
+stdout 是 **JSON Lines**（`run` 输出的就是 ExecutionEvent 原样，一行一条），
+stderr 给人看。退出码：`0` 成功、`1` 校验失败、`2` 执行失败、`3` 被 Ctrl+C 取消、`4` 参数错。
+
+```bash
+lyflow run      graph.lyflow.json [--to nodeId]... [--set nodeId.param=<json>]...
+                                  [--base-dir d] [--parallel n] [--no-cache]
+                                  [--preview] [--preview-points n]
+lyflow validate graph.lyflow.json
+lyflow plan     graph.lyflow.json [--to nodeId]...
+lyflow migrate  graph.lyflow.json [--write]
+lyflow manifest [--check]
+lyflow dump     graph.lyflow.json nodeId:port out.pcd [--format binary|ascii|binary_compressed]
+lyflow sweep    graph.lyflow.json --param nodeId.param=start:end:steps [--param ...]
+                                  --metric nodeId:port.elementCount [--csv out.csv]
+lyflow diff     a.lyflow.json b.lyflow.json [--json]
+```
+
+几个例子：
+
+```bash
+# 跑一张图，用 jq 挑出最终点数
+lyflow run demo.lyflow.json | jq -r 'select(.kind=="node_state" and .state=="done")
+                                     | "\(.nodeId) \(.stats.elementCount)"'
+
+# 覆盖一个参数再跑（路径与界面里参数右键的「复制路径名」一致）
+lyflow run demo.lyflow.json --set n_voxel.leafSize='[0.02,0.02,0.02]'
+
+# 扫 5 组 leafSize，源头只加载一次（其余 4 次是 skipped）
+lyflow sweep demo.lyflow.json --param n_voxel.minPointsPerVoxel=1:5:5 \
+             --metric n_voxel:cloud.elementCount --csv sweep.csv
+
+# 只移动了节点位置的两份图，diff 输出为空（ui 不算）
+lyflow diff before.lyflow.json after.lyflow.json
+```
+
+## 库算子（可复用的子图）
+
+选中若干节点 **Ctrl+G** 合成子图，右键「保存到库」写成一个
+`<id>.lyflow-op.json`，它就变成一个普通算子 `lib.<id>`，出现在面板的 `Library/` 分类下
+（[ADR-0010](docs/adr/0010-subgraph-by-expansion.md)）。库目录是：
+
+```
+%APPDATA%\com.lyflow.app\library\        # 桌面与 CLI 共用同一个位置
+```
+
+额外目录可以用环境变量 `LYFLOW_LIBRARY_DIRS`（分号分隔）加。改动库文件不用重启：
+app 盯着这个目录，工具栏的「库」按钮也能手动重扫。
 
 ## 加一个算子
 
@@ -130,7 +190,19 @@ pnpm e2e:packaged  # 同一套断言，但跑的是 tauri build 的产物在一�
 
 ## 状态
 
-**M3 完成 —— 能用。** 在 M2「能跑」之上，把它变成一个愿意天天开着的工具：
+**M4 完成 —— 能扩展。** 图本身成了可复用、可脚本化、可交互探索的资产：
+
+- **子图 / 库算子。** Ctrl+G 合成、双击进入、参数提升、保存成库文件。
+  子图在 C++ 的 compile 之前展开成平图，执行器与缓存对它一无所知
+  （[ADR-0010](docs/adr/0010-subgraph-by-expansion.md)）。
+- **live preview。** 拖参数时发一次抽稀过的 run，3D 视图跟手；松手补一次正式运行。
+  预览结果进独立的缓存命名空间，绝不会被当成正式结果
+  （[ADR-0011](docs/adr/0011-preview-as-decimated-run.md)）。
+- **headless CLI。** `lyflow run/validate/plan/migrate/manifest/dump/sweep/diff`，
+  JSON Lines 事件流，与桌面同一条代码路径（[ADR-0012](docs/adr/0012-headless-cli.md)）。
+- **大图能用。** 300 节点的图打开 < 1 s，拖动 ≥ 30 fps；执行事件按 16 ms 合并。
+
+**M3 —— 能用。** 在 M2「能跑」之上，把它变成一个愿意天天开着的工具：
 
 - **不重复算。** 结果按内容寻址缓存，原图重跑全部 `skipped`（几十毫秒），
   改一个参数只重算它和它的下游；哪几个节点会重算，工具栏和虚线框直接告诉你
@@ -146,11 +218,11 @@ pnpm e2e:packaged  # 同一套断言，但跑的是 tauri build 的产物在一�
 16 个算子覆盖一条真实 pipeline：`load_pcd → crop_box → voxel_grid →
 statistical_outlier → ransac_plane → extract_indices → save_pcd`。
 
-下一步是 M4「能扩展」：子图、live preview、CLI。见 [roadmap](docs/roadmap.md)。
+下一步是 M5「外延」：第二种数据域 Image、第三方算子插件 DLL。见 [roadmap](docs/roadmap.md)。
 
 前端不写单元测试，验证方式是通过 CDP 驱动真实运行的 app
-（[scripts/e2e](scripts/e2e/)：`pnpm e2e` 188 项断言）。
-逐条验收记录见 [docs/m3-acceptance.md](docs/m3-acceptance.md)。
+（[scripts/e2e](scripts/e2e/)）。逐条验收记录见
+[docs/m4-acceptance.md](docs/m4-acceptance.md)。
 
 ## License
 

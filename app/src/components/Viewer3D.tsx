@@ -5,23 +5,24 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
+import { augmentOperators, levelOf, resolveOutput } from "../lib/subgraph";
 import { transport } from "../transport";
-import { useExecutionStore } from "../store/execution";
+import { aggregatedNodes, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
 import { decodeCloud, type CloudPayload } from "../types/execution";
+import type { GraphDoc } from "../types/graph";
 import "../styles.viewer.css";
 
 export type ShadingMode = "intensity" | "height" | "normal" | "flat";
 export type RampName = "viridis" | "gray" | "jet";
 
-/** 载荷里还没有法线通道（ADR-0006 只有 xyz + intensity），法线着色先禁用。 */
-const HAS_NORMAL: boolean = false;
-
 /** 当前展示的东西。三者永远一起换，见 Viewer3D 里的注释。 */
 interface Display {
   nodeId: string | null;
+  /** 这片云属于哪一次运行。验收脚本用它量「事件到渲染」的延迟。 */
+  runId: string | null;
   cloud: CloudPayload | null;
   status: string | null;
 }
@@ -67,8 +68,8 @@ function putCache(key: string, payload: CloudPayload) {
 }
 
 /** 该节点的第一个 PointCloud 输出端口。没有就返回 null。 */
-function firstCloudPort(opId: string): string | null {
-  const op = useManifestStore.getState().operatorsById.get(opId);
+function firstCloudPort(opId: string, subgraphs: GraphDoc["subgraphs"]): string | null {
+  const op = augmentOperators(useManifestStore.getState().operatorsById, subgraphs).get(opId);
   if (!op) return null;
   for (const p of op.outputs) {
     if (p.type === "PointCloud") return p.name;
@@ -193,6 +194,17 @@ function shadingValue(cloud: CloudPayload, mode: ShadingMode, i: number): number
   return cloud.xyz[i * 3 + 2]!;
 }
 
+/** 法线着色：分量的绝对值直接当 RGB。色带对它没有意义，所以走单独一条路。 */
+function writeNormalColors(out: Float32Array, cloud: CloudPayload): void {
+  const n = cloud.normals;
+  if (!n) return;
+  for (let i = 0; i < cloud.pointCount; i += 1) {
+    out[i * 3] = Math.abs(n[i * 3] ?? 0);
+    out[i * 3 + 1] = Math.abs(n[i * 3 + 1] ?? 0);
+    out[i * 3 + 2] = Math.abs(n[i * 3 + 2] ?? 0);
+  }
+}
+
 /** 就地写颜色。复用已有数组是为了换色带时不再分配几十兆。 */
 function writeColors(
   out: Float32Array,
@@ -270,6 +282,7 @@ export function Viewer3D() {
   // 「标题是新节点、点云还是旧节点」的中间态 —— 肉眼看不见，但验收脚本会稳定读到它。
   const [display, setDisplay] = useState<Display>({
     nodeId: null,
+    runId: null,
     cloud: null,
     status: "未运行",
   });
@@ -277,9 +290,13 @@ export function Viewer3D() {
   const { cloud } = display;
 
   const selected = useUiStore((s) => s.selectedNodes);
-  const nodes = useGraphStore((s) => s.doc.nodes);
+  const path = useUiStore((s) => s.path);
+  const doc = useGraphStore((s) => s.doc);
+  const nodes = useMemo(() => levelOf(doc, path).nodes, [doc, path]);
   const runId = useExecutionStore((s) => s.runId);
   const runStatus = useExecutionStore((s) => s.runStatus);
+  const isPreview = useExecutionStore((s) => s.preview);
+  const previewMaxPoints = useUiStore((s) => s.previewMaxPoints);
 
   const selectedId = selected.size === 1 ? [...selected][0]! : null;
   // 钉住优先于选中：钉住期间在画布上点别的节点，视图不跟着走（§2.6）。
@@ -291,17 +308,19 @@ export function Viewer3D() {
   // 只订阅**这一个节点的状态字符串**，不要订阅整张 nodes Map ——
   // 那张 Map 每来一条事件就是新引用，会排起一队几十兆的 IPC（见 README「踩过的坑」）。
   const activeState = useExecutionStore((s) =>
-    activeId ? s.nodes.get(activeId)?.state : undefined,
+    activeId ? aggregatedNodes(path, s.nodes).get(activeId)?.state : undefined,
   );
 
   const hasIntensity = cloud?.intensity != null;
+  const hasNormals = cloud?.normals != null;
   // 选了「强度」但这片云没有强度通道时实际走高度着色，那就让下拉框也显示「高度」——
   // 下拉框写着强度、画面却是高度，用户只会以为强度数据本身有问题。
   const effectiveShading: ShadingMode =
-    (shading === "intensity" && !hasIntensity) || (shading === "normal" && !HAS_NORMAL)
+    (shading === "intensity" && !hasIntensity) || (shading === "normal" && !hasNormals)
       ? "height"
       : shading;
   const isFlat = effectiveShading === "flat";
+  const isNormalShading = effectiveShading === "normal";
 
   const dataRange = useMemo(
     () => dataRangeOf(cloud, effectiveShading),
@@ -349,7 +368,7 @@ export function Viewer3D() {
     let cancelled = false;
     const show = (status: string | null, payload: CloudPayload | null = null) => {
       if (cancelled) return;
-      setDisplay({ nodeId: activeId, cloud: payload, status });
+      setDisplay({ nodeId: activeId, runId: runId ?? null, cloud: payload, status });
     };
 
     if (!activeNode) {
@@ -372,15 +391,22 @@ export function Viewer3D() {
       show(activeState === "running" ? "正在计算…" : "该节点尚未产出结果");
       return;
     }
-    const port = firstCloudPort(activeNode.op);
+    const port = firstCloudPort(activeNode.op, doc.subgraphs);
     if (!port) {
       setLoading(false);
       show("该节点无点云输出");
       return;
     }
+    // 子图节点的结果在内部那个叶子上，按路径查结果仓（F2）
+    const resolved = resolveOutput(doc, path, activeNode.id, port);
+    if (!resolved) {
+      setLoading(false);
+      show("这个算子的内部结果查不到（库算子的定义在库文件里）");
+      return;
+    }
 
     dropOtherRuns(runId);
-    const key = cacheKey(runId, activeNode.id, port, maxPoints);
+    const key = cacheKey(runId, resolved.nodeId, resolved.port, maxPoints);
     const hit = cloudCache.get(key);
     if (hit) {
       // 命中也要 delete+set 一下，否则 LRU 的「最近使用」永远不更新
@@ -393,7 +419,14 @@ export function Viewer3D() {
     setLoading(true);
     void (async () => {
       try {
-        const buffer = await transport.getOutputCloud(runId, activeNode.id, port, maxPoints);
+        // 预览时没必要拉超过预览点数的量：那条路径上本来就不会有更多点
+        const cap = isPreview ? Math.min(maxPoints, previewMaxPoints) : maxPoints;
+        const buffer = await transport.getOutputCloud(
+          runId,
+          resolved.nodeId,
+          resolved.port,
+          cap,
+        );
         if (cancelled) return;
         const payload = decodeCloud(buffer);
         putCache(key, payload);
@@ -410,7 +443,8 @@ export function Viewer3D() {
     return () => {
       cancelled = true;
     };
-  }, [activeNode, activeId, selected.size, runId, runStatus, activeState, maxPoints]);
+  }, [activeNode, activeId, selected.size, runId, runStatus, activeState, maxPoints, doc, path,
+      isPreview, previewMaxPoints]);
 
   // -- 几何体：只随点云重建，着色参数一律不进这个 effect ---------------------
   useEffect(() => {
@@ -476,13 +510,14 @@ export function Viewer3D() {
         ? prev
         : null;
     const arr = reuse ? (reuse.array as Float32Array) : new Float32Array(cloud.pointCount * 3);
-    writeColors(arr, cloud, effectiveShading, ramp, lo, hi);
+    if (isNormalShading) writeNormalColors(arr, cloud);
+    else writeColors(arr, cloud, effectiveShading, ramp, lo, hi);
     if (reuse) reuse.needsUpdate = true;
     else geometry.setAttribute("color", new THREE.BufferAttribute(arr, 3));
     material.vertexColors = true;
     material.color.setHex(0xffffff);
     material.needsUpdate = true;
-  }, [cloud, effectiveShading, isFlat, ramp, lo, hi]);
+  }, [cloud, effectiveShading, isFlat, isNormalShading, ramp, lo, hi]);
 
   // 点大小只改材质，不重建几何体 —— 它曾经也在上面那个 effect 的依赖里，
   // 拖一下滑块就要重分配 24MB 颜色数组、重扫两百万点（见 README「踩过的坑」）。
@@ -505,7 +540,7 @@ export function Viewer3D() {
     setRangeAuto(false);
   };
 
-  const exportPng = () => {
+  const exportPng = async () => {
     const scene = sceneRef.current;
     if (!scene) return;
     // 读 buffer 前立刻重画一帧：换成 preserveDrawingBuffer 的话每一帧都要多付一次代价。
@@ -513,13 +548,34 @@ export function Viewer3D() {
     const url = scene.renderer.domElement.toDataURL("image/png");
     const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
     const name = (display.nodeId ?? "view").replace(/[^\w.-]+/g, "_");
-    // 没装 Tauri fs 插件，用 <a download> 交给 webview 自己下载，浏览器模式下同样能用。
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${name}-${stamp}.png`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    const file = `${name}-${stamp}.png`;
+
+    if (transport.kind !== "tauri") {
+      // 浏览器模式没有保存对话框，退回让 webview 自己下载
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = file;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      return;
+    }
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const picked = await save({
+        defaultPath: file,
+        filters: [{ name: "PNG", extensions: ["png"] }],
+      });
+      if (typeof picked !== "string") return;
+      const base64 = url.slice(url.indexOf(",") + 1);
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      await transport.writeFileBytes(picked, bytes);
+      useUiStore.getState().showToast(`已导出 ${picked}`);
+    } catch (e) {
+      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
+    }
   };
 
   return (
@@ -531,9 +587,16 @@ export function Viewer3D() {
       data-view={loading ? "loading" : cloud ? "cloud" : "empty"}
       data-shading={effectiveShading}
       data-pinned={pinnedId ? "1" : "0"}
+      data-run={display.runId ?? ""}
+      data-preview={isPreview ? "1" : "0"}
     >
       <div className="viewer__bar">
         <span className="viewer__title">3D 预览</span>
+        {isPreview && (
+          <span className="viewer__preview" data-testid="viewer-preview-badge">
+            预览 {Math.round(previewMaxPoints / 10000)} 万点
+          </span>
+        )}
         {cloud && (
           <span className="viewer__count" title="显示点数 / 总点数">
             {cloud.pointCount.toLocaleString()} / {cloud.totalPoints.toLocaleString()} 点
@@ -593,8 +656,8 @@ export function Viewer3D() {
             强度{hasIntensity ? "" : "（无）"}
           </option>
           <option value="height">高度</option>
-          <option value="normal" disabled={!HAS_NORMAL} title="点云载荷暂无法线通道">
-            法线（暂无通道）
+          <option value="normal" disabled={!hasNormals} title="需要点云带法线通道">
+            法线{hasNormals ? "" : "（无）"}
           </option>
           <option value="flat">单色</option>
         </select>
@@ -661,7 +724,7 @@ export function Viewer3D() {
           type="button"
           className="viewer__btn"
           data-testid="viewer-export"
-          onClick={exportPng}
+          onClick={() => void exportPng()}
           title="把当前画面存成 PNG"
         >
           PNG

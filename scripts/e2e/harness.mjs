@@ -66,7 +66,8 @@ export class Report {
  * DLL。验的是「DLL 随包 + 从 exe 同目录加载」，不等于干净机器 —— 见 ./README.md。 */
 export function stagePackagedApp() {
   const release = path.join(ROOT, "bridge", "target", "release");
-  const exe = path.join(release, "lyflow.exe");
+  // M4 起桌面壳叫 lyflow-app.exe：包名那个 bin 名让给了 CLI（ADR-0012）
+  const exe = path.join(release, "lyflow-app.exe");
   if (!fs.existsSync(exe)) {
     throw new Error(`找不到 ${exe} —— 先跑 \`pnpm tauri build\``);
   }
@@ -74,12 +75,14 @@ export function stagePackagedApp() {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   let dlls = 0;
+  // CLI 也拷进去：无 GUI 机器上的验收跑的就是这一份（§6 第二条）
+  const exes = ["lyflow-app.exe", "lyflow.exe"];
   for (const name of fs.readdirSync(release)) {
     if (name.endsWith(".dll")) dlls += 1;
-    else if (name !== "lyflow.exe") continue;
+    else if (!exes.includes(name)) continue;
     fs.copyFileSync(path.join(release, name), path.join(dir, name));
   }
-  return { dir, exe: path.join(dir, "lyflow.exe"), dlls };
+  return { dir, exe: path.join(dir, "lyflow-app.exe"), cli: path.join(dir, "lyflow.exe"), dlls };
 }
 
 /** 启动 app 并连上它的 WebView2。三种模式（默认 `tauri dev` / `packagedExe` /

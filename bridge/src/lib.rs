@@ -1,15 +1,21 @@
 //! LyFlow 桥接层：IPC、序列化、文件读写、进程生命周期、事件推流、崩溃隔离。
 //! 不理解算子语义，不改写图结构（docs/architecture.md）。
 
+pub mod cli;
+pub mod core_ffi;
+pub mod graph;
+pub mod ulid;
+
+#[cfg(feature = "desktop")]
 mod commands;
-mod core_ffi;
+#[cfg(feature = "desktop")]
 mod execution;
-mod graph;
-mod ulid;
+#[cfg(feature = "desktop")]
 mod watcher;
 
 pub use graph::{Edge, GraphDoc, Node, PortRef};
 
+#[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 启动自检当 fatal：契约破了继续跑，前端会拿到一份自相矛盾的 manifest，
@@ -45,6 +51,17 @@ pub fn run() {
         .manage(execution::RunManager::new())
         .setup(|app| {
             watcher::spawn(app.handle().clone());
+            // 库算子目录（ADR-0010）。扫不出来只是少几个算子，不该拦住启动。
+            match commands::rescan_library(app.handle()) {
+                Ok(status) if !status.problems.is_empty() => {
+                    for p in &status.problems {
+                        eprintln!("库算子: {p}");
+                    }
+                }
+                Err(e) => eprintln!("库算子目录不可用: {e}"),
+                Ok(_) => {}
+            }
+            watcher::spawn_library(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -66,6 +83,10 @@ pub fn run() {
             commands::backup_status,
             commands::read_backup,
             commands::discard_backup,
+            commands::write_file_bytes,
+            commands::get_library_status,
+            commands::refresh_library,
+            commands::save_as_library,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Tauri 失败");

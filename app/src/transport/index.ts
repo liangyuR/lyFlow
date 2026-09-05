@@ -38,6 +38,33 @@ export interface RecentEntry {
   openedAt: number;
 }
 
+/** 一次运行的选项。preview 会让源算子先抽稀（ADR-0011）。 */
+export interface RunOptions {
+  targets?: string[] | undefined;
+  mode?: "full" | "preview" | undefined;
+  previewMaxPoints?: number | undefined;
+  previewBudgetMs?: number | undefined;
+}
+
+/** 库算子目录的状态（ADR-0010）。 */
+export interface LibraryStatus {
+  dirs: string[];
+  count: number;
+  problems: string[];
+}
+
+export interface LibraryRefresh {
+  status: LibraryStatus;
+  manifest: OperatorManifestBundle;
+}
+
+export interface LibraryMeta {
+  id: string;
+  category?: string;
+  keywords?: string[];
+  version?: string;
+}
+
 /** `<file>~` 备份与正文的比较结果。newer = 上次多半是崩溃退出的。 */
 export interface BackupStatus {
   exists: boolean;
@@ -60,7 +87,7 @@ export interface Transport {
   clearCache(): Promise<void>;
   cacheStats(): Promise<CacheStats>;
   /** 启动一次运行，返回 runId。状态走 `onExecutionEvent`。 */
-  runGraph(doc: GraphDoc, graphPath: string | null, targets?: string[]): Promise<string>;
+  runGraph(doc: GraphDoc, graphPath: string | null, options?: RunOptions): Promise<string>;
   cancelRun(runId: string): Promise<void>;
   getOutputInfo(runId: string, nodeId: string): Promise<OutputInfo[]>;
   /** 点云走二进制，绝不 JSON（ADR-0006）。 */
@@ -80,6 +107,14 @@ export interface Transport {
   backupStatus(path: string): Promise<BackupStatus>;
   readBackup(path: string): Promise<LoadedGraph>;
   discardBackup(path: string): Promise<void>;
+
+  /** 写一段二进制到磁盘。3D 视图导出 PNG 用它（M3 尾巴 b）。 */
+  writeFileBytes(path: string, contents: Uint8Array): Promise<void>;
+  getLibraryStatus(): Promise<LibraryStatus>;
+  /** 重扫库目录并拿回新 manifest。 */
+  refreshLibrary(): Promise<LibraryRefresh>;
+  /** 把 doc 里的一个子图存成库文件。 */
+  saveAsLibrary(doc: GraphDoc, subgraphId: string, meta: LibraryMeta): Promise<LibraryStatus>;
 }
 
 /** 浏览器模式下所有执行相关的入口都走这里。 */
@@ -134,9 +169,16 @@ const tauriTransport: Transport = {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<CacheStats>("cache_stats");
   },
-  async runGraph(doc, graphPath, targets) {
+  async runGraph(doc, graphPath, options) {
     const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<string>("run_graph", { doc, graphPath, targets: targets ?? null });
+    return invoke<string>("run_graph", {
+      doc,
+      graphPath,
+      targets: options?.targets ?? null,
+      mode: options?.mode ?? "full",
+      previewMaxPoints: options?.previewMaxPoints ?? null,
+      previewBudgetMs: options?.previewBudgetMs ?? null,
+    });
   },
   async cancelRun(runId) {
     const { invoke } = await import("@tauri-apps/api/core");
@@ -195,6 +237,23 @@ const tauriTransport: Transport = {
   async discardBackup(path) {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<void>("discard_backup", { path });
+  },
+  async writeFileBytes(path, contents) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    // Tauri 的 command 参数走 JSON，Uint8Array 要拍成普通数组
+    return invoke<void>("write_file_bytes", { path, contents: Array.from(contents) });
+  },
+  async getLibraryStatus() {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<LibraryStatus>("get_library_status");
+  },
+  async refreshLibrary() {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<LibraryRefresh>("refresh_library");
+  },
+  async saveAsLibrary(doc, subgraphId, meta) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<LibraryStatus>("save_as_library", { doc, subgraphId, meta });
   },
 };
 
@@ -280,6 +339,18 @@ const staticTransport: Transport = {
   },
   async discardBackup() {
     /* 同上 */
+  },
+  async writeFileBytes() {
+    throw new Error("浏览器模式不能写盘，请在 Tauri 里运行");
+  },
+  async getLibraryStatus() {
+    return { dirs: [], count: 0, problems: [] };
+  },
+  async refreshLibrary() {
+    return browserOnly("刷新库算子");
+  },
+  async saveAsLibrary() {
+    return browserOnly("保存到库");
   },
 };
 

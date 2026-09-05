@@ -4,6 +4,8 @@
 import { useEffect } from "react";
 
 import { matchShortcut } from "../lib/keymap";
+import { subgraphIdOf } from "../types/graph";
+import { levelOf } from "../lib/subgraph";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
@@ -67,6 +69,12 @@ export function useShortcuts(handlers: ShortcutHandlers) {
           handlers.onRunToSelected();
           return;
         case "cancel":
+          // Esc 先退子图再取消运行：在子图里按 Esc，用户想的是「出去」
+          if (ui.path.length > 0 && useExecutionStore.getState().runStatus !== "running") {
+            e.preventDefault();
+            ui.exitTo(ui.path.length - 1);
+            return;
+          }
           if (useExecutionStore.getState().runStatus !== "running") return;
           e.preventDefault();
           handlers.onCancel();
@@ -168,6 +176,45 @@ export function useShortcuts(handlers: ShortcutHandlers) {
             flow: handlers.cursorFlowPosition(),
           });
           return;
+
+        case "compose": {
+          const ids = [...ui.selectedNodes];
+          if (ids.length === 0) {
+            ui.showToast("先选中要合成的节点", "warn");
+            return;
+          }
+          e.preventDefault();
+          const result = graph.composeSubgraph(ids);
+          if (result) {
+            ui.setSelection([result.nodeId], []);
+            ui.showToast(`已合成子图（${ids.length} 个节点）`);
+          }
+          return;
+        }
+        case "dissolve": {
+          const ids = [...ui.selectedNodes];
+          if (ids.length !== 1) return;
+          e.preventDefault();
+          const inlined = graph.dissolveSubgraph(ids[0]!);
+          if (inlined.length > 0) {
+            ui.setSelection(inlined, []);
+            ui.showToast(`已解散，内联了 ${inlined.length} 个节点`);
+          } else {
+            ui.showToast("选中的不是子图节点", "warn");
+          }
+          return;
+        }
+        case "enterSubgraph": {
+          const ids = [...ui.selectedNodes];
+          if (ids.length !== 1) return;
+          const level = levelOf(graph.doc, ui.path);
+          const node = level.nodes.find((n) => n.id === ids[0]);
+          const subgraphId = node ? subgraphIdOf(node.op) : null;
+          if (!subgraphId) return;
+          e.preventDefault();
+          ui.enterSubgraph({ nodeId: ids[0]!, subgraphId });
+          return;
+        }
 
         case "layout":
           e.preventDefault();

@@ -62,6 +62,13 @@ CMake + Ninja + vcpkg（PCL）。Ninja 通常不在 PATH 上，`build.rs` 会依
 | `get_output_cloud` | C++ → 前端 | **二进制**点云（见下）。 |
 | `get_recent_files` / `push_recent_file` | 磁盘 ↔ 前端 | 最近文件，存在 Tauri 的 app data 里，最多 10 条。 |
 | `write_backup` / `backup_status` / `read_backup` / `discard_backup` | 磁盘 ↔ 前端 | `<file>~` 自动备份与崩溃恢复。 |
+| `write_file_bytes` | 前端 → 磁盘 | 写一段二进制到用户选的路径。3D 视图导出 PNG 走它。 |
+| `get_library_status` / `refresh_library` | C++ ↔ 前端 | 库算子目录的状态与重扫（ADR-0010）。 |
+| `save_as_library` | 前端 → 磁盘 | 把 doc 里的一个子图写成 `<id>.lyflow-op.json`。 |
+
+`run_graph` 多了 `mode` / `previewMaxPoints` / `previewBudgetMs`
+（[ADR-0011](../docs/adr/0011-preview-as-decimated-run.md)）。`mode: "preview"` 时
+源算子的输出先抽稀，结果进独立的缓存命名空间。
 
 三条事件流：`execution-event`（符合
 [`schema/execution-event.schema.json`](../schema/execution-event.schema.json)）、
@@ -111,12 +118,43 @@ PCL 算子里时，这个 command 会等它跑完。
 
 ```
 u32 magic 'LYPC' | u32 pointCount | u32 totalPoints | u32 flags
-f32 bounds[6] | f32 xyz[3n] | [f32 intensity[n]]
+f32 bounds[6] | f32 xyz[3n] | [f32 intensity[n]] | [f32 normals[3n]]
 ```
+
+可选通道按 `flags` 的位序依次排在坐标后面：bit0 = intensity，bit1 = normals。
+前端按同样的顺序算偏移，所以加通道只要在两端各加一个位。
 
 一百万点走 JSON 是 30MB 文本加一次全量解析；走这条是 12MB 字节加一次
 `new Float32Array(buffer, offset, len)`。magic 不是装饰：IPC 上游出错时返回的
 可能是一段错误文本，没有它前端会把那段文本当坐标画出来。
+
+## 两个 bin
+
+| bin | 说明 |
+|---|---|
+| `lyflow-app` | Tauri 桌面壳，需要 `desktop` feature（默认开）。`tauri.conf.json` 的 `mainBinaryName`。 |
+| `lyflow` | headless CLI，**不依赖 Tauri**（[ADR-0012](../docs/adr/0012-headless-cli.md)）。 |
+
+`cargo build --bin lyflow --no-default-features` 是这条边界唯一靠得住的证据，
+它进了 `pnpm check`。实现在 `src/cli.rs`（lib 里）而不是 bin 里，
+这样每个子命令的退出码与输出形状都能被 `cargo test` 覆盖。
+
+包名那个 bin 名（`lyflow`）让给了 CLI，所以桌面壳改叫 `lyflow-app`。连带的两处：
+
+- `default-run = "lyflow-app"` —— `tauri dev` 跑的是不带 `--bin` 的 `cargo run`，
+  两个 bin 会让它报「could not determine which binary to run」。
+- **cargo 包名也改成了 `lyflow-app`** —— `tauri build` 按**包名**去找刚编出来的 exe，
+  再改名成 `mainBinaryName`。包名叫 `lyflow` 的话，它会把 CLI 改名盖到桌面壳头上，
+  而且只在打包路径上暴露（`pnpm e2e` 走 `cargo run`，永远碰不到）。
+
+## 库算子目录
+
+`commands::library_dirs` 给出扫描列表：app data 下的 `library/`，
+外加环境变量 `LYFLOW_LIBRARY_DIRS`（分号分隔）里的额外目录。
+`watcher::spawn_library` 盯着它们，`*.lyflow-op.json` 变了就重扫并推一条
+`manifest-updated` —— 与热重载同一条通路，前端零改动。
+
+重扫会重建注册表，所以必须先 `RunManager::drop_all()`，理由与热重载完全一样。
 
 ## 启动自检
 

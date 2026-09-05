@@ -13,6 +13,7 @@
     "core:build": "powershell -ExecutionPolicy Bypass -File scripts/build-core.ps1",
     "core:dump": "powershell -ExecutionPolicy Bypass -File scripts/dump-manifest.ps1",
     "core:watch": "powershell -ExecutionPolicy Bypass -File scripts/core-watch.ps1",
+    "cli:build": "cargo build --release --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features",
     "check": "powershell -ExecutionPolicy Bypass -File scripts/check.ps1",
     "e2e": "node scripts/e2e/run.mjs",
     "e2e:packaged": "node scripts/e2e/run.mjs --packaged"

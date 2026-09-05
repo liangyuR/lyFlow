@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Emitter};
 
-use crate::core_ffi::{self, Core, RunHandle};
+use crate::core_ffi::{self, Core, RunHandle, RunSpec};
 use crate::ulid;
 
 /// 事件推流的前端事件名。前端 `onExecutionEvent` 监听的就是它。
@@ -43,6 +43,13 @@ unsafe extern "C" fn trampoline(event_json: *const c_char, user: *mut c_void) {
     });
 }
 
+/// live preview 的两个旋钮（ADR-0011）。0 表示交给 core 用它的默认值。
+#[derive(Clone, Copy, Default)]
+pub struct PreviewOptions {
+    pub max_points: u32,
+    pub budget_ms: u32,
+}
+
 #[derive(Default)]
 struct State {
     /// 正在跑的那个。
@@ -71,6 +78,7 @@ impl RunManager {
         graph_json: &str,
         base_dir: &str,
         targets: &[String],
+        preview: Option<PreviewOptions>,
     ) -> Result<String, String> {
         let previous = self.inner.lock().unwrap().active.take();
         if let Some(prev) = previous {
@@ -85,18 +93,14 @@ impl RunManager {
             app: app.clone(),
             run_id: run_id.clone(),
         });
-        let handle = unsafe {
-            RunHandle::start(
-                core,
-                graph_json,
-                &run_id,
-                base_dir,
-                targets,
-                trampoline,
-                ctx,
-            )
+        let mut spec = RunSpec::new(graph_json, &run_id, base_dir, targets);
+        if let Some(p) = preview {
+            spec.mode = 1;
+            spec.preview_max_points = p.max_points;
+            spec.preview_budget_ms = p.budget_ms;
         }
-        .map_err(|e| e.to_string())?;
+        let handle = unsafe { RunHandle::start(core, spec, trampoline, ctx) }
+            .map_err(|e| e.to_string())?;
         let handle = Arc::new(handle);
 
         self.inner.lock().unwrap().active = Some(Arc::clone(&handle));
@@ -165,25 +169,45 @@ impl RunManager {
 /// magic 不是装饰：没有它，一段 JSON 错误文本会被前端当成坐标画出来。
 pub const CLOUD_MAGIC: u32 = 0x4350_594C; // 'LYPC' 小端
 
+/// f32 切片 → 小端字节。逐个 `to_le_bytes` 在 debug 构建里是一百万次未内联的调用，
+/// 3D 视图「事件到渲染」的延迟有一大半花在那上面。
+fn append_f32(out: &mut Vec<u8>, values: &[f32]) {
+    #[cfg(target_endian = "little")]
+    {
+        // 小端机器上 f32 的内存布局就是我们要的字节序，整段拷过去即可
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                values.as_ptr().cast::<u8>(),
+                std::mem::size_of_val(values),
+            )
+        };
+        out.extend_from_slice(bytes);
+    }
+    #[cfg(not(target_endian = "little"))]
+    for v in values {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+}
+
 pub fn encode_cloud(view: &core_ffi::CloudView) -> Vec<u8> {
     let n = view.point_count() as usize;
     let has_intensity = view.has_intensity();
-    let mut out = Vec::with_capacity(16 + 24 + n * 12 + if has_intensity { n * 4 } else { 0 });
+    let has_normals = view.has_normals();
+    let extra = if has_intensity { n * 4 } else { 0 } + if has_normals { n * 12 } else { 0 };
+    let mut out = Vec::with_capacity(16 + 24 + n * 12 + extra);
 
     out.extend_from_slice(&CLOUD_MAGIC.to_le_bytes());
     out.extend_from_slice(&view.point_count().to_le_bytes());
     out.extend_from_slice(&view.total_points().to_le_bytes());
     out.extend_from_slice(&view.flags().to_le_bytes());
-    for b in view.bounds() {
-        out.extend_from_slice(&b.to_le_bytes());
-    }
-    for v in view.xyz() {
-        out.extend_from_slice(&v.to_le_bytes());
-    }
+    append_f32(&mut out, &view.bounds());
+    append_f32(&mut out, view.xyz());
     if has_intensity {
-        for v in view.intensity() {
-            out.extend_from_slice(&v.to_le_bytes());
-        }
+        append_f32(&mut out, view.intensity());
+    }
+    // 法线排在强度之后：前端按 flags 里的两个位依次算偏移
+    if has_normals {
+        append_f32(&mut out, view.normals());
     }
     out
 }
@@ -261,18 +285,10 @@ mod tests {
             events: Mutex::new(Vec::new()),
         });
         let ptr = &*ctx as *const Collector;
-        let handle = unsafe {
-            RunHandle::start(
-                Arc::clone(&core),
-                &doc.to_string(),
-                &run_id,
-                base_dir,
-                &[],
-                collect,
-                ctx,
-            )
-        }
-        .expect("启动运行失败");
+        let graph = doc.to_string();
+        let spec = RunSpec::new(&graph, &run_id, base_dir, &[]);
+        let handle = unsafe { RunHandle::start(Arc::clone(&core), spec, collect, ctx) }
+            .expect("启动运行失败");
         during(&handle);
         handle.join();
         // join 返回后回调保证不再被触发，这时候读收集到的事件才是安全的。
@@ -362,6 +378,39 @@ mod tests {
         let voxel = f.core.output_cloud(&f.run_id, "v", "cloud", 0).unwrap();
         assert!(voxel.total_points() > 0);
         assert!(voxel.total_points() < view.total_points());
+    }
+
+    /// M3 尾巴 c：法线进了点云载荷，3D 视图的「法线着色」才有东西可画。
+    #[test]
+    fn cloud_payload_carries_normals_when_the_op_produces_them() {
+        let doc = serde_json::json!({
+            "schemaVersion": 1, "id": "t",
+            "nodes": [
+                {"id": "g", "op": "gen.synthetic",
+                 "params": {"pointCount": 4000, "seed": 909}},
+                {"id": "n", "op": "features.normals", "params": {"kSearch": 10}}
+            ],
+            "edges": [{"id": "e", "from": {"node": "g", "port": "cloud"},
+                                  "to": {"node": "n", "port": "cloud"}}]
+        });
+        let f = run(doc, "");
+        assert_eq!(f.run_status(), "ok", "{:#?}", f.events);
+
+        let plain = f.core.output_cloud(&f.run_id, "g", "cloud", 0).unwrap();
+        assert!(!plain.has_normals(), "源头本来就没有法线");
+
+        let view = f.core.output_cloud(&f.run_id, "n", "cloud", 0).unwrap();
+        assert!(view.has_normals(), "features.normals 的输出应当带法线");
+        assert_eq!(view.normals().len(), view.point_count() as usize * 3);
+
+        let bytes = encode_cloud(&view);
+        let n = view.point_count() as usize;
+        let flags = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
+        assert_eq!(flags & crate::core_ffi::CLOUD_HAS_NORMALS, 2);
+        // 布局：头 40 字节 + xyz + intensity + normals
+        assert_eq!(bytes.len(), 16 + 24 + n * 12 + n * 4 + n * 12);
+        let first = f32::from_le_bytes(bytes[16 + 24 + n * 12 + n * 4..][..4].try_into().unwrap());
+        assert_eq!(first, view.normals()[0]);
     }
 
     #[test]

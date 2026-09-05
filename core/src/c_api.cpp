@@ -8,7 +8,9 @@
 #include <vector>
 
 #include "exec/executor.h"
+#include "exec/library.h"
 #include "exec/result_store.h"
+#include "ops/ops.h"
 #include "lyflow/json_writer.h"
 #include "lyflow/registry.h"
 #include "lyflow/version.h"
@@ -67,6 +69,36 @@ char* lyflow_manifest_problems(void) {
 }
 
 void lyflow_string_free(char* s) { std::free(s); }
+
+char* lyflow_set_library_dirs(const char* const* dirs, size_t n) {
+  try {
+    registry();
+    std::vector<std::filesystem::path> paths;
+    for (std::size_t i = 0; dirs && i < n; ++i) {
+      const std::string d = fromC(dirs[i]);
+      if (!d.empty()) paths.push_back(std::filesystem::u8path(d));
+    }
+    const auto problems = lyflow::exec::Library::instance().setDirs(paths);
+    std::string joined;
+    for (const auto& p : problems) {
+      if (!joined.empty()) joined += "\n";
+      joined += p;
+    }
+    return dup(joined);
+  } catch (const std::exception& e) {
+    return dup(std::string("扫描库目录时内部异常: ") + e.what());
+  } catch (...) {
+    return dup(std::string("扫描库目录时内部异常"));
+  }
+}
+
+size_t lyflow_library_count(void) {
+  try {
+    return lyflow::exec::Library::instance().size();
+  } catch (...) {
+    return 0;
+  }
+}
 
 char* lyflow_validate(const char* graph_json, const char* base_dir) {
   try {
@@ -141,6 +173,10 @@ lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* o
       }
       options.maxParallel = opts->max_parallel;
       options.cacheBudgetBytes = opts->cache_budget_bytes;
+      options.mode = opts->mode == LYFLOW_RUN_MODE_PREVIEW ? lyflow::exec::RunMode::Preview
+                                                           : lyflow::exec::RunMode::Full;
+      options.previewMaxPoints = opts->preview_max_points;
+      options.previewBudgetMs = opts->preview_budget_ms;
     }
     if (options.runId.empty()) options.runId = "run";
     return reinterpret_cast<lyflow_run*>(
@@ -187,10 +223,12 @@ int lyflow_output_cloud(const char* run_id, const char* node_id, const char* por
     }
     out->point_count = preview->pointCount;
     out->total_points = preview->totalPoints;
-    out->flags = preview->hasIntensity ? LYFLOW_CLOUD_HAS_INTENSITY : 0u;
+    out->flags = (preview->hasIntensity ? LYFLOW_CLOUD_HAS_INTENSITY : 0u) |
+                 (preview->hasNormals ? LYFLOW_CLOUD_HAS_NORMALS : 0u);
     std::memcpy(out->bounds, preview->bounds, sizeof(out->bounds));
     out->xyz = preview->xyz.data();
     out->intensity = preview->hasIntensity ? preview->intensity.data() : nullptr;
+    out->normals = preview->hasNormals ? preview->normals.data() : nullptr;
     out->handle = preview;
     return 0;
   } catch (...) {
@@ -221,6 +259,31 @@ char* lyflow_output_info(const char* run_id, const char* node_id) {
     return dup(w.str());
   } catch (...) {
     return dup(std::string("[]"));
+  }
+}
+
+char* lyflow_output_save(const char* run_id, const char* node_id, const char* port,
+                         const char* path, const char* format) {
+  try {
+    const std::string file = fromC(path);
+    if (file.empty()) return dup(std::string("没有给输出路径"));
+    lyflow::Data data;
+    if (!lyflow::exec::ResultStore::instance().get(fromC(run_id), fromC(node_id), fromC(port),
+                                                   data)) {
+      return dup(std::string("结果仓里没有 ") + fromC(node_id) + "." + fromC(port));
+    }
+    const lyflow::PointCloud* cloud = data.asCloud();
+    if (!cloud) {
+      return dup(std::string("端口 ") + fromC(port) + " 不是点云（是 " + data.typeName() + "）");
+    }
+    const std::string fmt = fromC(format);
+    const lyflow::Status s = lyflow::ops::saveCloudToFile(
+        *cloud, std::filesystem::u8path(file), fmt.empty() ? std::string("binary") : fmt);
+    return dup(s.ok ? std::string() : s.message);
+  } catch (const std::exception& e) {
+    return dup(std::string("写盘时内部异常: ") + e.what());
+  } catch (...) {
+    return dup(std::string("写盘时内部异常"));
   }
 }
 

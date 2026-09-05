@@ -26,6 +26,11 @@ void registerFilterRadiusOutlier(Registry& r);
 void registerSegmentRansacPlane(Registry& r);
 void registerFeaturesNormals(Registry& r);
 
+/// 把一片点云写到磁盘（按扩展名选 PCD 或 PLY）。CLI 的 `lyflow dump` 经 C ABI 走这里 ——
+/// 写盘格式的知识只有 ops/pcl/io_save_pcd.cpp 有，不该在桥接层重写一遍。
+Status saveCloudToFile(const PointCloud& cloud, const std::filesystem::path& file,
+                       const std::string& format);
+
 /// 长循环里的取消轮询 + 进度上报。按 8192 个点问一次：
 /// 每点一次会让原子读成为热点循环的瓶颈，而晚 8192 个点响应取消人感觉不到。
 class Ticker {

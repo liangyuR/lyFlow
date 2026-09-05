@@ -173,3 +173,16 @@ C++ 侧算子库重新编译后推一条 `manifest-updated`，前端整份替换
 
 热重载会**清空结果缓存并取消正在跑的 run**：缓存里的 `shared_ptr` 指向旧 DLL 里的对象，
 跨代持有它是未定义行为。这是 E4 定死的取舍。
+
+## 子图与库算子也是算子（M4）
+
+`sub:<subgraphId>` 与 `lib.<id>` 两种节点的 OperatorDesc 是**合成**出来的
+（[ADR-0010](adr/0010-subgraph-by-expansion.md)）：端口来自子图的 `inputs`/`outputs`，
+参数来自提升出来的 `params`。合成结果与内置算子在形态上没有任何区别 ——
+
+- **库算子进 manifest**，所以节点面板、搜索、参数表单、类型着色全都零改动就支持它，
+  分类挂在 `Library/` 下。这是 ADR-0003 第三次兑现。
+- **文档内的子图不进 manifest**：它的定义随文档走，而 manifest 是进程级的。
+  前端在渲染时把 `doc.subgraphs` 合成进算子表（`lib/subgraph.ts` 的 `augmentOperators`）。
+- 合成出来的算子有一个只会在「展开漏了」时被调到的 compute 桩：
+  `Registry::validate()` 要求 compute 非空，而一个静默产出空结果的算子是最难查的。

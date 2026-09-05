@@ -51,7 +51,10 @@ struct BuildOptions {
   std::string runId;
   std::filesystem::path baseDir;
   /// Run to node：只保留这些节点的上游闭包。空 = 跑全图。
+  /// 目标按路径前缀匹配：给一个子图节点的 id 等于给它展开后的全部内部节点（F2）。
   std::vector<std::string> targets;
+  /// 非空时混进每个 cacheKey，把预览结果关进独立的缓存命名空间（F5）。
+  std::string cacheNamespace;
 };
 
 /// 校验 + 编译。诊断（含 warning 与迁移）全部写进 diags；节点级诊断同时挂在 PlanNode 上。

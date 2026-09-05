@@ -1,29 +1,48 @@
 [package]
-name = "lyflow"
+# 包名就是桌面壳那个 bin 的名字：tauri build 按**包名**去找刚编出来的 exe，
+# 再把它改名成 mainBinaryName。叫 lyflow 的话它会把 CLI 改名盖掉 app（ADR-0012）。
+name = "lyflow-app"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.77"
 description = "LyFlow 桥接层：IPC、序列化、文件读写、事件推流"
 publish = false
+# 两个 bin 都显式声明，autobins 会把 src/main.rs 也叫成 lyflow，和 CLI 撞名。
+# default-run 是给 `tauri dev` 的：它跑的是不带 --bin 的 cargo run。
+autobins = false
+default-run = "lyflow-app"
 
 [lib]
 name = "lyflow_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# 桌面壳。CLI 不依赖 Tauri，所以它被关在 desktop feature 后面（F6）。
+[[bin]]
+name = "lyflow-app"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "lyflow"
+path = "src/bin/lyflow.rs"
+
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", features = [], optional = true }
 cmake = "0.1.58"
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = [], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"
-tauri-plugin-dialog = "2"
+tauri-plugin-dialog = { version = "2", optional = true }
 libloading = "0.8.9"
 notify = { version = "8.2.0", default-features = false }
 
 [features]
+default = ["desktop"]
+# 桌面壳需要的一切。关掉它 `cargo build --bin lyflow` 就完全不碰 Tauri。
+desktop = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog"]
 # Tauri 自定义协议，release 构建需要
 custom-protocol = ["tauri/custom-protocol"]
 

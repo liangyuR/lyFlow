@@ -12,29 +12,198 @@
       "id": "n_load",
       "op": "io.load_pcd",
       "opVersion": "1.0.0",
-      "params": { "path": "samples/bin.pcd" },
-      "ui": { "position": { "x": 0, "y": 0 } }
+      "params": {
+        "path": "samples/bin.pcd"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
     },
     {
       "id": "n_voxel",
       "op": "filter.voxel_grid",
       "opVersion": "1.2.0",
-      "params": { "leafSize": [0.005, 0.005, 0.005] },
-      "ui": { "position": { "x": 280, "y": 0 } }
+      "params": {
+        "leafSize": [
+          0.005,
+          0.005,
+          0.005
+        ]
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 0
+        }
+      }
     },
     {
       "id": "n_plane",
       "op": "segment.plane",
       "opVersion": "1.0.0",
-      "params": { "distanceThreshold": 0.006, "constraint": "axis" },
-      "ui": { "position": { "x": 560, "y": 0 }, "title": "去料箱底面" }
+      "params": {
+        "distanceThreshold": 0.006,
+        "constraint": "axis"
+      },
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 0
+        },
+        "title": "去料箱底面"
+      }
+    },
+    {
+      "id": "n_clean",
+      "op": "sub:sg_clean",
+      "opVersion": "1.0.0",
+      "params": {
+        "leafSize": [
+          0.01,
+          0.01,
+          0.01
+        ]
+      },
+      "ui": {
+        "position": {
+          "x": 840,
+          "y": 0
+        },
+        "title": "去噪子图"
+      }
     }
   ],
   "edges": [
-    { "id": "e_1", "from": { "node": "n_load", "port": "cloud" }, "to": { "node": "n_voxel", "port": "cloud" } },
-    { "id": "e_2", "from": { "node": "n_voxel", "port": "cloud" }, "to": { "node": "n_plane", "port": "cloud" } }
+    {
+      "id": "e_1",
+      "from": {
+        "node": "n_load",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "n_voxel",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "e_2",
+      "from": {
+        "node": "n_voxel",
+        "port": "cloud"
+      },
+      "to": {
+        "node": "n_plane",
+        "port": "cloud"
+      }
+    },
+    {
+      "id": "e_3",
+      "from": {
+        "node": "n_plane",
+        "port": "rest"
+      },
+      "to": {
+        "node": "n_clean",
+        "port": "cloud"
+      }
+    }
   ],
   "groups": [],
-  "subgraphs": {},
+  "subgraphs": {
+    "sg_clean": {
+      "name": "去噪",
+      "doc": "体素降采样 + 统计离群点剔除。leafSize 提升成对外参数。",
+      "category": "Cleanup",
+      "version": "1.0.0",
+      "nodes": [
+        {
+          "id": "s_voxel",
+          "op": "filter.voxel_grid",
+          "opVersion": "1.0.0",
+          "params": {},
+          "ui": {
+            "position": {
+              "x": 0,
+              "y": 0
+            }
+          }
+        },
+        {
+          "id": "s_sor",
+          "op": "filter.statistical_outlier",
+          "opVersion": "1.0.0",
+          "params": {
+            "meanK": 20
+          },
+          "ui": {
+            "position": {
+              "x": 260,
+              "y": 0
+            }
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "s_e1",
+          "from": {
+            "node": "s_voxel",
+            "port": "cloud"
+          },
+          "to": {
+            "node": "s_sor",
+            "port": "cloud"
+          }
+        }
+      ],
+      "inputs": [
+        {
+          "name": "cloud",
+          "type": "PointCloud",
+          "label": "Cloud",
+          "to": [
+            {
+              "node": "s_voxel",
+              "port": "cloud"
+            }
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "name": "cloud",
+          "type": "PointCloud",
+          "label": "Cloud",
+          "from": {
+            "node": "s_sor",
+            "port": "cloud"
+          }
+        }
+      ],
+      "params": [
+        {
+          "name": "leafSize",
+          "type": "vec3f",
+          "label": "Leaf size",
+          "default": [
+            0.005,
+            0.005,
+            0.005
+          ],
+          "min": 0.0001,
+          "unit": "m",
+          "binds": [
+            {
+              "node": "s_voxel",
+              "param": "leafSize"
+            }
+          ]
+        }
+      ]
+    }
+  },
   "x": {}
 }

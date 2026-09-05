@@ -811,9 +811,9 @@ async function suiteLayout(cdp, report) {
   `);
   report.ok("参考线容器已挂上画布", guides.guidesEl);
 
-  // Ctrl+G 整理整图
+  // Ctrl+L 整理整图（M4 起 Ctrl+G 让给了「合成子图」）
   await cdp.eval(`window.__lyflow.stores.ui.getState().clearSelection(); return true;`);
-  await pressCtrl(cdp, "G");
+  await pressCtrl(cdp, "L");
   await sleep(400);
   const laid = await cdp.eval(`
     const doc = window.__lyflow.snapshot().doc;

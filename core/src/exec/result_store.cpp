@@ -211,16 +211,24 @@ bool ResultStore::previewCloud(const std::string& runId, const std::string& node
 
   out.totalPoints = static_cast<std::uint32_t>(total);
   out.hasIntensity = cloud->hasIntensity();
+  out.hasNormals = cloud->hasNormals();
   out.xyz.clear();
   out.intensity.clear();
+  out.normals.clear();
   out.xyz.reserve((total / step + 1) * 3);
   if (out.hasIntensity) out.intensity.reserve(total / step + 1);
+  if (out.hasNormals) out.normals.reserve((total / step + 1) * 3);
 
   for (std::size_t i = 0; i < total; i += step) {
     out.xyz.push_back(cloud->xyz[i * 3]);
     out.xyz.push_back(cloud->xyz[i * 3 + 1]);
     out.xyz.push_back(cloud->xyz[i * 3 + 2]);
     if (out.hasIntensity) out.intensity.push_back(cloud->intensity[i]);
+    if (out.hasNormals) {
+      out.normals.push_back(cloud->normals[i * 3]);
+      out.normals.push_back(cloud->normals[i * 3 + 1]);
+      out.normals.push_back(cloud->normals[i * 3 + 2]);
+    }
   }
   out.pointCount = static_cast<std::uint32_t>(out.xyz.size() / 3);
 

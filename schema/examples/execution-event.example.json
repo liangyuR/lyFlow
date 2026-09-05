@@ -219,5 +219,74 @@
         "portName": "cloud"
       }
     ]
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000001",
+    "seq": 0,
+    "at": "2026-09-05T12:01:00.000Z",
+    "kind": "run_started",
+    "nodeCount": 2,
+    "maxParallel": 4,
+    "mode": "preview",
+    "previewMaxPoints": 200000,
+    "plan": [
+      "n_load",
+      "n_clean/s_voxel"
+    ],
+    "targets": [
+      "n_clean"
+    ],
+    "nodes": [
+      {
+        "id": "n_load",
+        "cacheKey": "3f2a9c1e4b7d0a8265f1c3e90d47ab12",
+        "level": 0
+      },
+      {
+        "id": "n_clean/s_voxel",
+        "cacheKey": "b81d4f0c62a7e3591acd0847f2b6e935",
+        "level": 1
+      }
+    ]
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000001",
+    "seq": 1,
+    "at": "2026-09-05T12:01:00.020Z",
+    "kind": "node_state",
+    "nodeId": "n_clean/s_voxel",
+    "state": "done",
+    "durationMs": 4.2,
+    "stats": {
+      "elementCount": 51234,
+      "byteSize": 819744,
+      "outputs": [
+        {
+          "port": "cloud",
+          "type": "PointCloud",
+          "elementCount": 51234
+        }
+      ]
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000001",
+    "seq": 2,
+    "at": "2026-09-05T12:01:00.030Z",
+    "kind": "log",
+    "level": "warn",
+    "message": "预览耗时 412 ms，超过预算 300 ms；建议降低预览点数"
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000001",
+    "seq": 3,
+    "at": "2026-09-05T12:01:00.031Z",
+    "kind": "run_finished",
+    "status": "ok",
+    "durationMs": 412.0
   }
 ]

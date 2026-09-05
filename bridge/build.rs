@@ -178,15 +178,24 @@ fn main() {
         }
     }
 
-    // D9：给 exe 贴带 activeCodePage=UTF-8 的清单。app_manifest 是整份替换而非合并，
-    // 所以 lyflow-app.manifest 必须自带 Common-Controls v6 依赖（bridge/README.md）。
     println!("cargo:rerun-if-changed=lyflow-app.manifest");
+    tauri_step();
+}
+
+/// D9：给 exe 贴带 activeCodePage=UTF-8 的清单。app_manifest 是整份替换而非合并，
+/// 所以 lyflow-app.manifest 必须自带 Common-Controls v6 依赖（bridge/README.md）。
+#[cfg(feature = "desktop")]
+fn tauri_step() {
     let windows = tauri_build::WindowsAttributes::new().app_manifest(include_str!(
         "lyflow-app.manifest"
     ));
     tauri_build::try_build(tauri_build::Attributes::new().windows_attributes(windows))
         .expect("tauri_build 失败");
 }
+
+/// 关掉 desktop feature 时只构建 CLI，Tauri 一行都不碰（F6）。
+#[cfg(not(feature = "desktop"))]
+fn tauri_step() {}
 
 /// 从 OUT_DIR 反推 `target/<profile>/`（往上数四层）。cargo 没有官方变量，
 /// 但拷贝失败只是 warning + 运行时报「找不到 lyflow_core.dll」，不是静默错误。

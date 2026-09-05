@@ -125,6 +125,90 @@ fn reload(app: &AppHandle, source: &Path) {
     }
 }
 
+/// 盯着库目录。库文件变了走的是和热重载同一条 `manifest-updated` 通路（ADR-0010）。
+pub fn spawn_library(app: AppHandle) {
+    let Ok(dirs) = crate::commands::library_dirs(&app) else {
+        return;
+    };
+    std::thread::spawn(move || {
+        let (tx, rx) = mpsc::channel();
+        let Ok(mut watcher): Result<RecommendedWatcher, _> =
+            notify::recommended_watcher(move |res| {
+                let _ = tx.send(res);
+            })
+        else {
+            return;
+        };
+        let mut watching = 0;
+        for dir in &dirs {
+            if watcher.watch(Path::new(dir), RecursiveMode::NonRecursive).is_ok() {
+                watching += 1;
+            }
+        }
+        if watching == 0 {
+            return;
+        }
+        let mut pending: Option<Instant> = None;
+        loop {
+            let timeout = pending.map_or(Duration::from_secs(3600), |_| QUIET);
+            match rx.recv_timeout(timeout) {
+                Ok(Ok(event)) => {
+                    if event.paths.iter().any(|p| is_library_file(p)) {
+                        pending = Some(Instant::now());
+                    }
+                }
+                Ok(Err(_)) => {}
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+            if pending.is_some_and(|t| t.elapsed() >= QUIET) {
+                pending = None;
+                reload_library(&app);
+            }
+        }
+    });
+}
+
+fn is_library_file(p: &Path) -> bool {
+    p.file_name()
+        .map(|n| n.to_string_lossy().ends_with(".lyflow-op.json"))
+        .unwrap_or(false)
+}
+
+fn reload_library(app: &AppHandle) {
+    if let Some(runs) = app.try_state::<RunManager>() {
+        runs.drop_all();
+    }
+    match crate::commands::rescan_library(app) {
+        Ok(status) => {
+            let payload = core_ffi::core()
+                .and_then(|c| c.manifest_json().map_err(|e| e.to_string()))
+                .and_then(|raw| {
+                    serde_json::from_str::<serde_json::Value>(&raw).map_err(|e| e.to_string())
+                });
+            match payload {
+                Ok(manifest) => {
+                    let count = manifest["operators"].as_array().map_or(0, Vec::len);
+                    println!("库算子已重扫：{} 个库算子", status.count);
+                    let _ = app.emit(
+                        EVENT_UPDATED,
+                        ReloadOk {
+                            generation: core_ffi::generation(),
+                            manifest,
+                            operator_count: count,
+                        },
+                    );
+                }
+                Err(e) => emit_failed(app, vec![e]),
+            }
+            if !status.problems.is_empty() {
+                emit_failed(app, status.problems);
+            }
+        }
+        Err(e) => emit_failed(app, vec![e]),
+    }
+}
+
 fn emit_failed(app: &AppHandle, problems: Vec<String>) {
     let _ = app.emit(
         EVENT_FAILED,

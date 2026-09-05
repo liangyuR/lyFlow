@@ -153,6 +153,7 @@ export interface OutputInfo {
 /** 'LYPC' 小端。 */
 export const CLOUD_MAGIC = 0x4350594c;
 export const CLOUD_HAS_INTENSITY = 1;
+export const CLOUD_HAS_NORMALS = 2;
 
 export interface CloudPayload {
   pointCount: number;
@@ -162,6 +163,8 @@ export interface CloudPayload {
   /** 3n 个 float，可以直接喂给 BufferAttribute。 */
   xyz: Float32Array;
   intensity: Float32Array | null;
+  /** 3n 个 float，或 null。法线着色靠它（M3 尾巴 c）。 */
+  normals: Float32Array | null;
 }
 
 /** 解析二进制点云。用视图而不是拷贝：一百万点是 12MB，多拷一次就是多 12MB
@@ -184,10 +187,18 @@ export function decodeCloud(buffer: ArrayBuffer): CloudPayload {
   const bounds = new Float32Array(buffer, 16, 6);
   const xyzOffset = 40;
   const xyz = new Float32Array(buffer, xyzOffset, pointCount * 3);
-  const intensity =
-    flags & CLOUD_HAS_INTENSITY
-      ? new Float32Array(buffer, xyzOffset + pointCount * 12, pointCount)
-      : null;
+  // 通道按 flags 的位序依次排在坐标后面：先 intensity，再 normals
+  let offset = xyzOffset + pointCount * 12;
+  let intensity: Float32Array | null = null;
+  if (flags & CLOUD_HAS_INTENSITY) {
+    intensity = new Float32Array(buffer, offset, pointCount);
+    offset += pointCount * 4;
+  }
+  let normals: Float32Array | null = null;
+  if (flags & CLOUD_HAS_NORMALS) {
+    normals = new Float32Array(buffer, offset, pointCount * 3);
+    offset += pointCount * 12;
+  }
 
-  return { pointCount, totalPoints, bounds, xyz, intensity };
+  return { pointCount, totalPoints, bounds, xyz, intensity, normals };
 }

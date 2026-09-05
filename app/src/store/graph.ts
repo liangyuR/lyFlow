@@ -1,15 +1,33 @@
-// 图 store —— GraphDoc 是唯一真实数据源（ADR-0002）：改图只能走这里封闭的那组
-// 语义化动作，纯 UI 操作不进撤销栈，历史存整份 doc 快照而非 patch（见 README）。
+// 图 store —— GraphDoc 是唯一真实数据源（ADR-0002）：改图只能走这里的语义化动作。
+// M4 起动作作用于**当前层级**（ui.path），撤销栈仍然是整份 doc 快照（ADR-0010）。
 
 import { enablePatches, produce } from "immer";
 import { create } from "zustand";
 
 import { newDocId, newLocalId } from "../lib/ids";
 import { pruneUnknownParams, sparseSet } from "../lib/params";
+import {
+  augmentOperators,
+  composeSubgraph as composeInto,
+  dissolveSubgraph as dissolveFrom,
+  levelOf,
+  promotedBy,
+  type ComposeResult,
+} from "../lib/subgraph";
 import { canConnect, type ConnectVerdict, type GraphContext } from "../lib/typecheck";
 import type { MigrationAction } from "../types/execution";
-import { GRAPH_SCHEMA_VERSION, type GraphDoc, type GraphNode, type NodeUi, type PortRef } from "../types/graph";
+import {
+  GRAPH_SCHEMA_VERSION,
+  subgraphIdOf,
+  type GraphDoc,
+  type GraphLevel,
+  type GraphNode,
+  type NodeUi,
+  type PortRef,
+  type SubParam,
+} from "../types/graph";
 import { useManifestStore } from "./manifest";
+import { useUiStore } from "./ui";
 
 enablePatches();
 
@@ -33,16 +51,35 @@ export function emptyDoc(): GraphDoc {
   };
 }
 
-/** 从 manifest store 取算子/类型索引。图 store 需要它来做连线校验。 */
-function ctx(): GraphContext {
+/** 从 manifest store 取算子/类型索引，并合上本文档里的 `sub:` 定义。 */
+function ctx(doc: GraphDoc): GraphContext {
   const m = useManifestStore.getState();
-  return { operatorsById: m.operatorsById, typesByName: m.typesByName };
+  return {
+    operatorsById: augmentOperators(m.operatorsById, doc.subgraphs),
+    typesByName: m.typesByName,
+  };
 }
 
+/** 当前层级。ui.path 是导航状态，改图的动作都作用在它指的那一层。 */
+function level(doc: GraphDoc): GraphLevel {
+  return levelOf(doc, useUiStore.getState().path);
+}
+
+/** 当前层级的「像一份 doc」的视图，喂给只认 GraphDoc 的校验函数。 */
+function levelDoc(doc: GraphDoc): GraphDoc {
+  const lvl = level(doc);
+  return lvl === doc ? doc : { ...doc, nodes: lvl.nodes, edges: lvl.edges };
+}
+
+/** 全文档已用的 id。跨层唯一不是必须的，但重名会让路径读起来很费劲。 */
 function allIds(doc: GraphDoc): Set<string> {
   const s = new Set<string>();
-  for (const n of doc.nodes) s.add(n.id);
-  for (const e of doc.edges) s.add(e.id);
+  const add = (lvl: GraphLevel) => {
+    for (const n of lvl.nodes) s.add(n.id);
+    for (const e of lvl.edges) s.add(e.id);
+  };
+  add(doc);
+  for (const def of Object.values(doc.subgraphs ?? {})) add(def);
   return s;
 }
 
@@ -94,6 +131,17 @@ interface GraphState {
   duplicateNodes(ids: readonly string[]): PasteResult;
   /** 把 C++ 给的迁移动作写回 doc（ADR-0008）。返回真正改动的节点数。 */
   applyMigrations(actions: readonly MigrationAction[]): number;
+
+  // -- 子图（ADR-0010）-----------------------------------------------------
+  /** 把选中的节点合成一个子图。返回新节点与子图的 id。 */
+  composeSubgraph(ids: readonly string[]): ComposeResult | null;
+  /** 解散一个子图节点，内容内联回本层。返回内联出来的节点 id。 */
+  dissolveSubgraph(nodeId: string): string[];
+  /** 把当前子图里某个内参提升成对外参数（F4）。返回外参名。 */
+  promoteParam(nodeId: string, paramName: string): string | null;
+  /** 取消提升。内参回到可编辑，值保持提升时的那个。 */
+  unpromoteParam(paramName: string): void;
+  renameSubgraph(subgraphId: string, name: string): void;
 
   // -- 历史 ---------------------------------------------------------------
   undo(): void;
@@ -162,14 +210,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     addNode(opId, position) {
-      const op = ctx().operatorsById.get(opId);
+      const op = ctx(get().doc).operatorsById.get(opId);
       if (!op) {
         set({ lastRejection: `算子未注册：${opId}` });
         return null;
       }
       const id = newLocalId("n", allIds(get().doc));
       transact(`添加 ${op.label}`, (d) => {
-        d.nodes.push({
+        level(d).nodes.push({
           id,
           op: op.id,
           opVersion: op.version,
@@ -185,9 +233,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const kill = new Set(ids);
       const label = ids.length === 1 ? "删除节点" : `删除 ${ids.length} 个节点`;
       transact(label, (d) => {
-        d.nodes = d.nodes.filter((n) => !kill.has(n.id));
+        const lvl = level(d);
+        lvl.nodes = lvl.nodes.filter((n) => !kill.has(n.id));
         // 删节点自动清理相连边（交互清单 P0 #5）
-        d.edges = d.edges.filter((e) => !kill.has(e.from.node) && !kill.has(e.to.node));
+        lvl.edges = lvl.edges.filter((e) => !kill.has(e.from.node) && !kill.has(e.to.node));
       });
     },
 
@@ -196,8 +245,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
       // 拖动过程中每帧都调，所以走 mutate 不记撤销；
       // 一次拖动的撤销由 begin/commit 包住整体记一条。
       mutate((d) => {
+        const lvl = level(d);
         for (const m of moves) {
-          const node = d.nodes.find((n) => n.id === m.id);
+          const node = lvl.nodes.find((n) => n.id === m.id);
           if (!node) continue;
           node.ui = { ...node.ui, position: m.position };
         }
@@ -206,14 +256,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     setParam(nodeId, name, value) {
       const { doc } = get();
-      const node = doc.nodes.find((n) => n.id === nodeId);
+      const node = level(doc).nodes.find((n) => n.id === nodeId);
       if (!node) return;
-      const op = ctx().operatorsById.get(node.op);
+      const op = ctx(doc).operatorsById.get(node.op);
       if (!op) return;
 
       const nextParams = sparseSet(op, node.params, name, value);
       const apply = (d: GraphDoc) => {
-        const target = d.nodes.find((n) => n.id === nodeId);
+        const target = level(d).nodes.find((n) => n.id === nodeId);
         if (target) target.params = nextParams;
       };
 
@@ -224,21 +274,21 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     setNodeUi(nodeId, patch) {
       transact("修改节点外观", (d) => {
-        const node = d.nodes.find((n) => n.id === nodeId);
+        const node = level(d).nodes.find((n) => n.id === nodeId);
         if (node) node.ui = { ...node.ui, ...patch };
       });
     },
 
     connect(from, to) {
       const { doc } = get();
-      const verdict = canConnect(ctx(), doc, from, to);
+      const verdict = canConnect(ctx(doc), levelDoc(doc), from, to);
       if (!verdict.ok) {
         set({ lastRejection: verdict.reason });
         return verdict;
       }
       const id = newLocalId("e", allIds(doc));
       transact("连线", (d) => {
-        d.edges.push({ id, from: { ...from }, to: { ...to } });
+        level(d).edges.push({ id, from: { ...from }, to: { ...to } });
       });
       return verdict;
     },
@@ -247,14 +297,15 @@ export const useGraphStore = create<GraphState>((set, get) => {
       if (edgeIds.length === 0) return;
       const kill = new Set(edgeIds);
       transact(edgeIds.length === 1 ? "断开连线" : `断开 ${edgeIds.length} 条连线`, (d) => {
-        d.edges = d.edges.filter((e) => !kill.has(e.id));
+        const lvl = level(d);
+        lvl.edges = lvl.edges.filter((e) => !kill.has(e.id));
       });
     },
 
     pasteNodes(payload, at) {
       const taken = allIds(get().doc);
       const idMap = new Map<string, string>();
-      const manifest = ctx().operatorsById;
+      const manifest = ctx(get().doc).operatorsById;
 
       // 粘贴的节点整体平移到目标位置，保持相对布局
       const origin = payload.nodes.reduce(
@@ -305,8 +356,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
       if (newNodes.length === 0) return { nodeIds: [] };
 
       transact(newNodes.length === 1 ? "粘贴节点" : `粘贴 ${newNodes.length} 个节点`, (d) => {
-        d.nodes.push(...newNodes);
-        d.edges.push(...newEdges);
+        const lvl = level(d);
+        lvl.nodes.push(...newNodes);
+        lvl.edges.push(...newEdges);
       });
       return { nodeIds: newNodes.map((n) => n.id) };
     },
@@ -318,7 +370,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         ? ids.length === 1 ? "静音节点" : `静音 ${ids.length} 个节点`
         : ids.length === 1 ? "取消静音" : `取消静音 ${ids.length} 个节点`;
       transact(label, (d) => {
-        for (const n of d.nodes) {
+        for (const n of level(d).nodes) {
           if (!target.has(n.id)) continue;
           // 稀疏存储：false 就把键删掉，老图的 diff 不该被默认值污染
           if (value) n.bypass = true;
@@ -331,7 +383,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       if (ids.length === 0) return;
       const target = new Set(ids);
       transact(value ? "折叠节点" : "展开节点", (d) => {
-        for (const n of d.nodes) {
+        for (const n of level(d).nodes) {
           if (!target.has(n.id)) continue;
           n.ui = { ...n.ui, collapsed: value };
         }
@@ -340,7 +392,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     renameNode(id, title) {
       transact("重命名节点", (d) => {
-        const node = d.nodes.find((n) => n.id === id);
+        const node = level(d).nodes.find((n) => n.id === id);
         if (!node) return;
         // null = 回到 manifest 的 label
         node.ui = { ...node.ui, title: title && title.trim() ? title : null };
@@ -349,17 +401,18 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     reconnectEdge(edgeId, to) {
       const { doc } = get();
-      const edge = doc.edges.find((e) => e.id === edgeId);
+      const lvl = level(doc);
+      const edge = lvl.edges.find((e) => e.id === edgeId);
       if (!edge) return { ok: false, reason: "连线不存在" };
       // 先把老边摘掉再判：不然「重连到同一个端口」会撞上「输入端口已有连线」
-      const without: GraphDoc = { ...doc, edges: doc.edges.filter((e) => e.id !== edgeId) };
-      const verdict = canConnect(ctx(), without, edge.from, to);
+      const without: GraphDoc = { ...levelDoc(doc), edges: lvl.edges.filter((e) => e.id !== edgeId) };
+      const verdict = canConnect(ctx(doc), without, edge.from, to);
       if (!verdict.ok) {
         set({ lastRejection: verdict.reason });
         return verdict;
       }
       transact("改接连线", (d) => {
-        const target = d.edges.find((e) => e.id === edgeId);
+        const target = level(d).edges.find((e) => e.id === edgeId);
         if (target) target.to = { ...to };
       });
       return verdict;
@@ -367,16 +420,17 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     insertOnEdge(edgeId, nodeId, inPort, outPort) {
       const { doc } = get();
-      const edge = doc.edges.find((e) => e.id === edgeId);
+      const edge = level(doc).edges.find((e) => e.id === edgeId);
       if (!edge) return false;
       const taken = allIds(doc);
       const a = newLocalId("e", taken);
       taken.add(a);
       const b = newLocalId("e", taken);
       transact("插入到连线中间", (d) => {
-        d.edges = d.edges.filter((e) => e.id !== edgeId);
-        d.edges.push({ id: a, from: { ...edge.from }, to: { node: nodeId, port: inPort } });
-        d.edges.push({ id: b, from: { node: nodeId, port: outPort }, to: { ...edge.to } });
+        const lvl = level(d);
+        lvl.edges = lvl.edges.filter((e) => e.id !== edgeId);
+        lvl.edges.push({ id: a, from: { ...edge.from }, to: { node: nodeId, port: inPort } });
+        lvl.edges.push({ id: b, from: { node: nodeId, port: outPort }, to: { ...edge.to } });
       });
       return true;
     },
@@ -384,8 +438,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
     applyLayout(moves) {
       if (moves.length === 0) return;
       transact(moves.length === 1 ? "整理布局" : `整理 ${moves.length} 个节点的布局`, (d) => {
+        const lvl = level(d);
         for (const m of moves) {
-          const node = d.nodes.find((n) => n.id === m.id);
+          const node = lvl.nodes.find((n) => n.id === m.id);
           if (node) node.ui = { ...node.ui, position: m.position };
         }
       });
@@ -394,10 +449,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
     duplicateNodes(ids) {
       if (ids.length === 0) return { nodeIds: [] };
       const { doc } = get();
+      const lvl = level(doc);
       const kept = new Set(ids);
-      const nodes = doc.nodes.filter((n) => kept.has(n.id));
+      const nodes = lvl.nodes.filter((n) => kept.has(n.id));
       if (nodes.length === 0) return { nodeIds: [] };
-      const edges = doc.edges.filter((e) => kept.has(e.from.node) && kept.has(e.to.node));
+      const edges = lvl.edges.filter((e) => kept.has(e.from.node) && kept.has(e.to.node));
       const origin = nodes.reduce(
         (acc, n) => ({
           x: Math.min(acc.x, n.ui?.position?.x ?? 0),
@@ -419,18 +475,111 @@ export const useGraphStore = create<GraphState>((set, get) => {
       transact(
         actions.length === 1 ? "迁移 1 个节点" : `迁移 ${actions.length} 个节点`,
         (d) => {
-          for (const node of d.nodes) {
-            const action = byNode.get(node.id);
-            if (!action) continue;
-            node.op = action.op;
-            node.opVersion = action.opVersion;
-            // params 是**完整**对象而不是补丁：改名参数没法用补丁表达
-            node.params = { ...action.params };
-            changed += 1;
-          }
+          // 迁移诊断的 nodeId 是路径，顶层节点的路径就是它自己
+          const apply = (nodes: GraphNode[]) => {
+            for (const node of nodes) {
+              const action = byNode.get(node.id);
+              if (!action) continue;
+              node.op = action.op;
+              node.opVersion = action.opVersion;
+              // params 是**完整**对象而不是补丁：改名参数没法用补丁表达
+              node.params = { ...action.params };
+              changed += 1;
+            }
+          };
+          apply(d.nodes);
+          for (const def of Object.values(d.subgraphs ?? {})) apply(def.nodes);
         },
       );
       return changed;
+    },
+
+    composeSubgraph(ids) {
+      if (ids.length === 0) return null;
+      const path = useUiStore.getState().path;
+      let result: ComposeResult | null = null;
+      transact(ids.length === 1 ? "合成子图" : `把 ${ids.length} 个节点合成子图`, (d) => {
+        result = composeInto(ctx(d), d, path, ids, allIds(d));
+      });
+      return result;
+    },
+
+    dissolveSubgraph(nodeId) {
+      const path = useUiStore.getState().path;
+      let inlined: string[] = [];
+      transact("解散子图", (d) => {
+        inlined = dissolveFrom(d, path, nodeId, allIds(d));
+      });
+      return inlined;
+    },
+
+    promoteParam(nodeId, paramName) {
+      const { doc } = get();
+      const path = useUiStore.getState().path;
+      const last = path[path.length - 1];
+      if (!last) {
+        set({ lastRejection: "只有在子图里才能提升参数" });
+        return null;
+      }
+      const def = doc.subgraphs?.[last.subgraphId];
+      const node = def?.nodes.find((n) => n.id === nodeId);
+      const op = node ? ctx(doc).operatorsById.get(node.op) : undefined;
+      const param = op?.params.find((p) => p.name === paramName);
+      if (!def || !node || !param) return null;
+      if (promotedBy(def, nodeId, paramName)) {
+        set({ lastRejection: "这个参数已经提升过了" });
+        return null;
+      }
+      const taken = new Set(def.params.map((p) => p.name));
+      let name = paramName;
+      for (let i = 2; taken.has(name); i += 1) name = `${paramName}_${i}`;
+      // 提升时把当前值当成外参的默认值，界面上的数字不会因为提升而跳变
+      const current = node.params?.[paramName];
+      transact(`提升参数 ${name}`, (d) => {
+        const target = d.subgraphs?.[last.subgraphId];
+        if (!target) return;
+        const promoted: SubParam = {
+          ...param,
+          name,
+          default: current !== undefined ? current : param.default,
+          binds: [{ node: nodeId, param: paramName }],
+        };
+        target.params = [...(target.params ?? []), promoted];
+      });
+      return name;
+    },
+
+    unpromoteParam(paramName) {
+      const path = useUiStore.getState().path;
+      const last = path[path.length - 1];
+      if (!last) return;
+      transact(`取消提升 ${paramName}`, (d) => {
+        const def = d.subgraphs?.[last.subgraphId];
+        if (!def) return;
+        const promoted = def.params?.find((p) => p.name === paramName);
+        if (!promoted) return;
+        // 把外参当前的默认值写回内参，取消提升不该悄悄改变行为
+        for (const bind of promoted.binds ?? []) {
+          const node = def.nodes.find((n) => n.id === bind.node);
+          if (node) node.params = { ...(node.params ?? {}), [bind.param]: promoted.default };
+        }
+        def.params = def.params.filter((p) => p.name !== paramName);
+        // 外层节点上那个键也要跟着走，否则展开时会报 unknown_param
+        const strip = (nodes: GraphNode[]) => {
+          for (const n of nodes) {
+            if (subgraphIdOf(n.op) === last.subgraphId && n.params) delete n.params[paramName];
+          }
+        };
+        strip(d.nodes);
+        for (const other of Object.values(d.subgraphs ?? {})) strip(other.nodes);
+      });
+    },
+
+    renameSubgraph(subgraphId, name) {
+      transact("重命名子图", (d) => {
+        const def = d.subgraphs?.[subgraphId];
+        if (def) def.name = name;
+      });
     },
 
     undo() {
@@ -463,6 +612,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     canRedo: () => get().future.length > 0,
 
     newDoc() {
+      useUiStore.getState().setPath([]);
       set({
         doc: emptyDoc(),
         filePath: null,
@@ -474,6 +624,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     loadDoc(doc, path) {
+      useUiStore.getState().setPath([]);
       set({
         doc,
         filePath: path,
@@ -499,3 +650,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
   };
 });
+
+/** 当前层级的子图定义。Inspector 与画布都要读它。 */
+export function currentSubgraph(doc: GraphDoc, path: readonly { subgraphId: string }[]) {
+  const last = path[path.length - 1];
+  return last ? doc.subgraphs?.[last.subgraphId] : undefined;
+}

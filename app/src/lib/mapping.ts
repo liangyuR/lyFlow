@@ -3,7 +3,7 @@
 
 import type { Edge, Node } from "@xyflow/react";
 
-import type { GraphDoc } from "../types/graph";
+import { subgraphIdOf, type GraphDoc } from "../types/graph";
 import type { AnyTypes, GraphContext } from "./typecheck";
 import { ANY, findPort, inferAnyTypes } from "./typecheck";
 
@@ -17,6 +17,10 @@ export interface OperatorNodeData extends Record<string, unknown> {
   bypass: boolean;
   /** 该节点 Any 端口推导出的实际类型，null = 推不出来（E6）。 */
   anyType: string | null;
+  /** 引用的子图 id，null = 普通算子。双击进入靠它（F2）。 */
+  subgraphId: string | null;
+  /** 库算子（`lib.`）。可以「展开为内联子图」，但不能直接进去编辑。 */
+  library: boolean;
 }
 
 export type LyNode = Node<OperatorNodeData, "operator">;
@@ -55,6 +59,8 @@ export function toReactFlow(
         collapsed: n.ui?.collapsed ?? false,
         bypass: n.bypass === true,
         anyType: anyTypes.get(n.id) ?? null,
+        subgraphId: subgraphIdOf(n.op),
+        library: n.op.startsWith("lib."),
       },
       ...(size ? { measured: size } : {}),
       ...(n.ui?.width != null ? { width: n.ui.width } : {}),

@@ -3,7 +3,9 @@
 
 import { create } from "zustand";
 
+import { localIdOf, type SubPath } from "../lib/subgraph";
 import { transport } from "../transport";
+import { useUiStore } from "./ui";
 import type { CacheStats, PlanNode } from "../types/execution";
 import type { GraphDoc } from "../types/graph";
 
@@ -48,8 +50,8 @@ export const useCacheStore = create<CacheState>((set) => ({
   },
 }));
 
-/** 某个节点是不是 stale：这次编译出来的 cacheKey 与上次运行时不同，且现在没有缓存。
- *  两个条件缺一不可 —— 只看 key 变化的话，改回原值也会一直标着红。 */
+/** 某个**展开后**的节点是不是 stale：这次编译出来的 cacheKey 与上次运行时不同，
+ *  且现在没有缓存。两个条件缺一不可 —— 只看 key 变化的话，改回原值也会一直标着红。 */
 export function isNodeStale(nodeId: string): boolean {
   const { plan, ranWith } = useCacheStore.getState();
   const node = plan.get(nodeId);
@@ -57,6 +59,34 @@ export function isNodeStale(nodeId: string): boolean {
   const previous = ranWith.get(nodeId);
   if (previous === undefined) return false;
   return node.cacheKey !== previous && !node.cached;
+}
+
+let staleCache: {
+  path: SubPath;
+  plan: ReadonlyMap<string, PlanNode>;
+  ranWith: ReadonlyMap<string, string>;
+  result: ReadonlySet<string>;
+} | null = null;
+
+/** 当前层级里哪些节点该画虚线框。子图节点只要内部有一个 stale 就算 stale（F2）。 */
+export function staleLocalIds(
+  path: SubPath,
+  plan: ReadonlyMap<string, PlanNode>,
+  ranWith: ReadonlyMap<string, string>,
+): ReadonlySet<string> {
+  if (staleCache && staleCache.path === path && staleCache.plan === plan &&
+      staleCache.ranWith === ranWith) {
+    return staleCache.result;
+  }
+  const out = new Set<string>();
+  for (const [id, node] of plan) {
+    const previous = ranWith.get(id);
+    if (previous === undefined || node.cacheKey === previous || node.cached) continue;
+    const local = localIdOf(path, id);
+    if (local) out.add(local);
+  }
+  staleCache = { path, plan, ranWith, result: out };
+  return out;
 }
 
 /** 下一次运行要真算的节点数。工具栏的「将重算 N 个节点」就是它。 */
@@ -69,14 +99,15 @@ export function pendingRecompute(): number {
 }
 
 export function useStaleNodeIds(): ReadonlySet<string> {
+  const path = useUiStore((s) => s.path);
   const plan = useCacheStore((s) => s.plan);
   const ranWith = useCacheStore((s) => s.ranWith);
-  const out = new Set<string>();
-  for (const [id, node] of plan) {
-    const previous = ranWith.get(id);
-    if (previous !== undefined && node.cacheKey !== previous && !node.cached) out.add(id);
-  }
-  return out;
+  return staleLocalIds(path, plan, ranWith);
+}
+
+/** 当前层级的某个节点是不是 stale。节点组件按本地 id 现查。 */
+export function useNodeStale(localId: string): boolean {
+  return useStaleNodeIds().has(localId);
 }
 
 export function formatBytes(bytes: number): string {

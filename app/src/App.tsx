@@ -27,6 +27,7 @@ import {
   writeBackup,
 } from "./lib/files";
 import { layoutGraph, needsInitialLayout } from "./lib/layout";
+import { fullId, levelOf } from "./lib/subgraph";
 import { formatBytes, refreshCacheStats, schedulePlan, useCacheStore } from "./store/cache";
 import {
   cancelCurrentRun,
@@ -45,16 +46,32 @@ import type { GraphDoc } from "./types/graph";
 function StatusBar() {
   const coreInfo = useManifestStore((s) => s.coreInfo);
   const transportKind = useManifestStore((s) => s.transportKind);
-  const nodeCount = useGraphStore((s) => s.doc.nodes.length);
-  const edgeCount = useGraphStore((s) => s.doc.edges.length);
+  const path = useUiStore((s) => s.path);
+  const doc = useGraphStore((s) => s.doc);
+  const level = levelOf(doc, path);
+  const nodeCount = level.nodes.length;
+  const edgeCount = level.edges.length;
   const selected = useUiStore((s) => s.selectedNodes.size);
   const stats = useCacheStore((s) => s.stats);
+  const [libraryCount, setLibraryCount] = useState(0);
+
+  useEffect(() => {
+    void transport
+      .getLibraryStatus()
+      .then((s) => setLibraryCount(s.count))
+      .catch(() => setLibraryCount(0));
+  }, []);
 
   return (
     <footer className="statusbar">
-      <span className="statusbar__milestone">M3 · 能用</span>
+      <span className="statusbar__milestone">M4 · 能扩展</span>
       <span>{nodeCount} 节点</span>
       <span>{edgeCount} 连线</span>
+      {libraryCount > 0 && (
+        <span data-testid="statusbar-library" title="库算子（app data 下的 library/）">
+          库 {libraryCount}
+        </span>
+      )}
       {selected > 0 && <span>已选 {selected}</span>}
       <span className="statusbar__spacer" />
       {stats && (
@@ -365,7 +382,10 @@ function Workspace() {
       return;
     }
     try {
-      await startRun(graph.doc, graph.filePath, targets);
+      // 目标是**展开后**的路径 id：在子图里点「运行到此节点」也要说得清是哪一个（F2）
+      const path = useUiStore.getState().path;
+      const full = targets?.map((t) => fullId(path, t));
+      await startRun(graph.doc, graph.filePath, { targets: full });
     } catch (e) {
       ui.showToast(e instanceof Error ? e.message : String(e), "warn");
     }
@@ -381,8 +401,10 @@ function Workspace() {
 
   const doLayout = useCallback(() => {
     const graph = useGraphStore.getState();
-    const selected = useUiStore.getState().selectedNodes;
-    const moves = layoutGraph(graph.doc, selected.size > 1 ? { only: selected } : {});
+    const ui = useUiStore.getState();
+    const level = levelOf(graph.doc, ui.path);
+    const view = { ...graph.doc, nodes: level.nodes, edges: level.edges };
+    const moves = layoutGraph(view, ui.selectedNodes.size > 1 ? { only: ui.selectedNodes } : {});
     graph.applyLayout(moves);
     setTimeout(() => void fitView({ duration: 200 }), 50);
   }, [fitView]);

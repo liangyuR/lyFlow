@@ -7,8 +7,14 @@
 ```
 cdp.mjs      极简 CDP 客户端
 harness.mjs  起 app、连 CDP、记断言、收尾
-run.mjs      各验收分组 + main
+page.mjs     页面侧的公共动作（搭图、按键、真鼠标拖拽、等一次运行）
+run.mjs      M2 的分组 + main
+m3.mjs       M3 的分组（缓存、静音、迁移、连线手感、布局、面板、3D）
+m4.mjs       M4 的分组（子图、库算子、live preview、大图性能）
 ```
+
+CLI（m4-plan §3）不在这里：它没有界面，验收走 `cargo test`
+（`bridge/src/cli.rs` 的 `mod tests`），理由见 docs/m4-acceptance.md。
 
 ## 为什么是 CDP，不是前端单元测试
 

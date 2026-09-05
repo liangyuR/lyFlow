@@ -3,6 +3,7 @@
   "productName": "LyFlow",
   "version": "0.1.0",
   "identifier": "com.lyflow.app",
+  "mainBinaryName": "lyflow-app",
   "build": {
     "frontendDist": "../app/dist",
     "devUrl": "http://localhost:5173",

@@ -3,6 +3,7 @@
 
 import { create } from "zustand";
 
+import type { PathSegment, SubPath } from "../lib/subgraph";
 import type { GraphDoc, GraphNode, PortRef } from "../types/graph";
 
 export interface SearchPopup {
@@ -32,6 +33,14 @@ export interface PendingConnection {
 export type DrawerTab = "log" | "diagnostics" | "cache";
 
 interface UiState {
+  /** 当前所在的子图栈（F2）。空 = 顶层。纯导航状态，不进 doc 也不进撤销栈。 */
+  path: SubPath;
+  /** 自动运行：预览松手后自动补一次正式运行（ADR-0011）。 */
+  autoRun: boolean;
+  /** 预览点数上限。0 = 用 core 的默认值。 */
+  previewMaxPoints: number;
+  /** 正在拖参数：这期间发的是 preview run。 */
+  previewing: boolean;
   selectedNodes: ReadonlySet<string>;
   selectedEdges: ReadonlySet<string>;
   searchPopup: SearchPopup | null;
@@ -66,6 +75,15 @@ interface UiState {
   toggleDrawer(tab?: DrawerTab): void;
   setHelpOpen(open: boolean): void;
   focusDiagnostic(nodeId: string, paramPath?: string): void;
+
+  /** 进入一个子图节点。选中会被清掉 —— 层级换了，旧的选中没有意义。 */
+  enterSubgraph(segment: PathSegment): void;
+  /** 退到第 depth 层（0 = 顶层）。 */
+  exitTo(depth: number): void;
+  setPath(path: SubPath): void;
+  setAutoRun(on: boolean): void;
+  setPreviewMaxPoints(n: number): void;
+  setPreviewing(on: boolean): void;
 }
 
 const NO_PORTS: ReadonlySet<string> = new Set();
@@ -76,7 +94,13 @@ function sameIds(a: ReadonlySet<string>, b: readonly string[]): boolean {
   return true;
 }
 
+const NO_PATH: SubPath = [];
+
 export const useUiStore = create<UiState>((set, get) => ({
+  path: NO_PATH,
+  autoRun: true,
+  previewMaxPoints: 200_000,
+  previewing: false,
   selectedNodes: new Set(),
   selectedEdges: new Set(),
   searchPopup: null,
@@ -136,5 +160,35 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   focusDiagnostic(nodeId, paramPath) {
     set({ focusedDiagnostic: { nodeId, paramPath }, selectedNodes: new Set([nodeId]) });
+  },
+
+  enterSubgraph(segment) {
+    set({
+      path: [...get().path, segment],
+      selectedNodes: new Set(),
+      selectedEdges: new Set(),
+    });
+  },
+  exitTo(depth) {
+    const path = get().path;
+    if (depth >= path.length) return;
+    set({
+      path: path.slice(0, depth),
+      selectedNodes: new Set(),
+      selectedEdges: new Set(),
+    });
+  },
+  setPath(path) {
+    set({ path, selectedNodes: new Set(), selectedEdges: new Set() });
+  },
+  setAutoRun(on) {
+    set({ autoRun: on });
+  },
+  setPreviewMaxPoints(n) {
+    set({ previewMaxPoints: n });
+  },
+  setPreviewing(on) {
+    if (get().previewing === on) return;
+    set({ previewing: on });
   },
 }));

@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { beginPreview, endPreview, schedulePreview } from "../lib/preview";
 import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
 import type { EnumOption, Param } from "../types/manifest";
@@ -14,6 +15,10 @@ export interface ControlProps {
   value: unknown;
   disabled: boolean;
   onChange: (value: unknown) => void;
+  /** 所在节点。live preview 要用它当 run 的目标，参数右键要用它做提升。 */
+  nodeId?: string | undefined;
+  /** 这个内参已经被提升成哪个子图参数了（F4）。 */
+  promotedAs?: string | undefined;
 }
 
 // ---------------------------------------------------------------- 数值输入
@@ -51,11 +56,12 @@ function quantize(v: number, q: number): number {
 }
 
 /** 收尾一次拖动。卸载路径也要走这里，否则事务悬着、body 上的类留着。 */
-function finishDrag(d: DragState | null): void {
+function finishDrag(d: DragState | null, nodeId?: string): void {
   if (!d?.active) return;
   d.active = false;
   document.body.classList.remove("param-dragging");
   useGraphStore.getState().commit("拖动参数");
+  endPreview(nodeId);
 }
 
 interface NumberInputProps {
@@ -67,6 +73,7 @@ interface NumberInputProps {
   step?: number | undefined;
   dragStep: number;
   dragName?: string | undefined;
+  nodeId?: string | undefined;
   onCommit: (v: number) => void;
 }
 
@@ -79,6 +86,7 @@ function NumberInput({
   step,
   dragStep,
   dragName,
+  nodeId,
   onCommit,
 }: NumberInputProps) {
   const [text, setText] = useState(String(value));
@@ -92,7 +100,7 @@ function NumberInput({
     if (!editing.current) setText(String(value));
   }, [value]);
 
-  useEffect(() => () => finishDrag(drag.current), []);
+  useEffect(() => () => finishDrag(drag.current, nodeId), [nodeId]);
 
   const clamp = (v: number) => {
     let n = v;
@@ -132,6 +140,7 @@ function NumberInput({
       document.body.classList.add("param-dragging");
       setDragging(true);
       useGraphStore.getState().begin();
+      if (nodeId) beginPreview(nodeId);
     }
     const mult = (e.shiftKey ? 10 : 1) * (e.altKey ? 0.1 : 1);
     d.acc = clamp(d.acc + ((e.clientX - d.lastX) / DRAG_PX_PER_STEP) * dragStep * mult);
@@ -139,7 +148,10 @@ function NumberInput({
     let next = clamp(quantize(d.acc, dragStep));
     if (integer) next = clamp(Math.round(next));
     setText(String(next));
-    if (next !== value) onCommit(next);
+    if (next !== value) {
+      onCommit(next);
+      if (nodeId) schedulePreview(nodeId);
+    }
   };
 
   const onPointerEnd = (e: React.PointerEvent<HTMLInputElement>) => {
@@ -148,7 +160,7 @@ function NumberInput({
     drag.current = null;
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
     if (!d.active) return;
-    finishDrag(d);
+    finishDrag(d, nodeId);
     setDragging(false);
   };
 
@@ -191,6 +203,8 @@ function Slider({
   max,
   step,
   disabled,
+  nodeId,
+  testId,
   onDrag,
 }: {
   value: number;
@@ -198,25 +212,37 @@ function Slider({
   max: number;
   step: number | undefined;
   disabled: boolean;
+  nodeId?: string | undefined;
+  testId?: string | undefined;
   onDrag: (v: number) => void;
 }) {
   return (
     <input
       className="ctl ctl--slider"
       type="range"
+      data-testid={testId}
       disabled={disabled}
       min={min}
       max={max}
       step={step ?? (max - min) / 200}
       value={Math.min(Math.max(value, min), max)}
-      onPointerDown={() => useGraphStore.getState().begin()}
-      onPointerUp={() => useGraphStore.getState().commit("拖动参数")}
-      onChange={(e) => onDrag(parseFloat(e.target.value))}
+      onPointerDown={() => {
+        useGraphStore.getState().begin();
+        if (nodeId) beginPreview(nodeId);
+      }}
+      onPointerUp={() => {
+        useGraphStore.getState().commit("拖动参数");
+        endPreview(nodeId);
+      }}
+      onChange={(e) => {
+        onDrag(parseFloat(e.target.value));
+        if (nodeId) schedulePreview(nodeId);
+      }}
     />
   );
 }
 
-function NumberControl({ param, value, disabled, onChange }: ControlProps) {
+function NumberControl({ param, value, disabled, onChange, nodeId }: ControlProps) {
   const integer = param.type === "int";
   const num = typeof value === "number" ? value : 0;
   const sMin = param.softMin ?? param.min;
@@ -234,6 +260,7 @@ function NumberControl({ param, value, disabled, onChange }: ControlProps) {
         step={param.step}
         dragStep={dragStepOf(param, integer)}
         dragName={param.name}
+        nodeId={nodeId}
         onCommit={onChange}
       />
       {hasSlider && (
@@ -243,6 +270,8 @@ function NumberControl({ param, value, disabled, onChange }: ControlProps) {
           max={sMax}
           step={param.step}
           disabled={disabled}
+          nodeId={nodeId}
+          testId={`param-slider-${param.name}`}
           onDrag={(v) => onChange(integer ? Math.round(v) : v)}
         />
       )}
@@ -255,7 +284,7 @@ function NumberControl({ param, value, disabled, onChange }: ControlProps) {
 
 const DEFAULT_COMPONENTS = ["X", "Y", "Z", "W"];
 
-function VectorControl({ param, value, disabled, onChange }: ControlProps) {
+function VectorControl({ param, value, disabled, onChange, nodeId }: ControlProps) {
   const size = param.type === "vec2f" ? 2 : param.type === "vec3f" ? 3 : 4;
   const vec = Array.isArray(value) ? (value as number[]) : new Array<number>(size).fill(0);
   const labels = param.componentLabels ?? DEFAULT_COMPONENTS;
@@ -284,6 +313,7 @@ function VectorControl({ param, value, disabled, onChange }: ControlProps) {
               step={param.step}
               dragStep={dragStepOf(param, false)}
               dragName={`${param.name}-${i}`}
+              nodeId={nodeId}
               onCommit={(v) => setComponent(i, v)}
             />
           </label>
@@ -595,6 +625,8 @@ function ParamMenu({
   value,
   x,
   y,
+  nodeId,
+  promotedAs,
   onChange,
   onClose,
 }: {
@@ -602,9 +634,12 @@ function ParamMenu({
   value: unknown;
   x: number;
   y: number;
+  nodeId?: string | undefined;
+  promotedAs?: string | undefined;
   onChange: (v: unknown) => void;
   onClose: () => void;
 }) {
+  const inSubgraph = useUiStore((s) => s.path.length > 0);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -693,6 +728,32 @@ function ParamMenu({
       >
         复制路径名
       </button>
+      {inSubgraph && nodeId && !promotedAs && (
+        <button
+          type="button"
+          data-testid="param-menu-promote"
+          title="提升成子图的对外参数，外层表单上就能改（F4）"
+          onClick={() => {
+            const name = useGraphStore.getState().promoteParam(nodeId, param.name);
+            onClose();
+            if (name) useUiStore.getState().showToast(`已提升为子图参数 ${name}`);
+          }}
+        >
+          提升为子图参数
+        </button>
+      )}
+      {inSubgraph && promotedAs && (
+        <button
+          type="button"
+          data-testid="param-menu-unpromote"
+          onClick={() => {
+            useGraphStore.getState().unpromoteParam(promotedAs);
+            onClose();
+          }}
+        >
+          取消提升 {promotedAs}
+        </button>
+      )}
     </div>
   );
 }
@@ -758,6 +819,8 @@ export function ParamControl(props: ControlProps) {
           value={props.value}
           x={menu.x}
           y={menu.y}
+          nodeId={props.nodeId}
+          promotedAs={props.promotedAs}
           onChange={props.onChange}
           onClose={close}
         />

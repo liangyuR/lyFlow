@@ -21,6 +21,9 @@ pub struct RunOptionsRaw {
     pub target_count: usize,
     pub max_parallel: i32,
     pub cache_budget_bytes: u64,
+    pub mode: i32,
+    pub preview_max_points: u32,
+    pub preview_budget_ms: u32,
 }
 
 #[repr(C)]
@@ -33,10 +36,47 @@ pub struct CloudViewRaw {
     pub bounds: [f32; 6],
     pub xyz: *const f32,
     pub intensity: *const f32,
+    pub normals: *const f32,
     pub handle: *mut c_void,
 }
 
 pub const CLOUD_HAS_INTENSITY: u32 = 1;
+pub const CLOUD_HAS_NORMALS: u32 = 2;
+
+/// 一次运行的全部选项（C ABI v5）。写成位置参数就没人读得懂了。
+#[derive(Clone)]
+pub struct RunSpec<'a> {
+    pub graph_json: &'a str,
+    pub run_id: &'a str,
+    pub base_dir: &'a str,
+    pub targets: &'a [String],
+    /// 0 = min(4, 核数)。
+    pub max_parallel: i32,
+    /// 0 = full，1 = preview（ADR-0011）。
+    pub mode: i32,
+    pub preview_max_points: u32,
+    pub preview_budget_ms: u32,
+}
+
+impl<'a> RunSpec<'a> {
+    pub fn new(
+        graph_json: &'a str,
+        run_id: &'a str,
+        base_dir: &'a str,
+        targets: &'a [String],
+    ) -> Self {
+        RunSpec {
+            graph_json,
+            run_id,
+            base_dir,
+            targets,
+            max_parallel: 0,
+            mode: 0,
+            preview_max_points: 0,
+            preview_budget_ms: 0,
+        }
+    }
+}
 
 /// `lyflow_run` 是 core 内部类型，这边只当成不透明指针。
 #[repr(C)]
@@ -89,6 +129,15 @@ type FnOutputCloud = unsafe extern "C" fn(
 ) -> c_int;
 type FnCloudViewFree = unsafe extern "C" fn(*mut CloudViewRaw);
 type FnOutputInfo = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
+type FnSetLibraryDirs = unsafe extern "C" fn(*const *const c_char, usize) -> *mut c_char;
+type FnLibraryCount = unsafe extern "C" fn() -> usize;
+type FnOutputSave = unsafe extern "C" fn(
+    *const c_char,
+    *const c_char,
+    *const c_char,
+    *const c_char,
+    *const c_char,
+) -> *mut c_char;
 
 /// 加载好的 core，外加一张函数表。存的是裸函数指针而不是借用 `Library` 的
 /// `Symbol<'a>`（自引用结构难写对），由 `Arc<Core>` 保证 lib 活得比调用久。
@@ -109,6 +158,9 @@ pub struct Core {
     output_cloud: FnOutputCloud,
     cloud_view_free: FnCloudViewFree,
     output_info: FnOutputInfo,
+    output_save: FnOutputSave,
+    set_library_dirs: FnSetLibraryDirs,
+    library_count: FnLibraryCount,
     #[allow(dead_code)]
     lib: Library,
 }
@@ -147,6 +199,9 @@ impl Core {
             output_cloud: sym!(lib, "lyflow_output_cloud", FnOutputCloud),
             cloud_view_free: sym!(lib, "lyflow_cloud_view_free", FnCloudViewFree),
             output_info: sym!(lib, "lyflow_output_info", FnOutputInfo),
+            output_save: sym!(lib, "lyflow_output_save", FnOutputSave),
+            set_library_dirs: sym!(lib, "lyflow_set_library_dirs", FnSetLibraryDirs),
+            library_count: sym!(lib, "lyflow_library_count", FnLibraryCount),
             lib,
         })
     }
@@ -234,6 +289,58 @@ impl Core {
         Ok(())
     }
 
+    /// 重扫库算子目录（ADR-0010）。返回问题列表，空 = 干净。
+    /// 调用方必须先放掉所有 RunHandle：它会重建注册表。
+    pub fn set_library_dirs(&self, dirs: &[String]) -> Result<Vec<String>, CoreError> {
+        let owned: Vec<CString> = dirs
+            .iter()
+            .map(|d| CString::new(d.as_str()))
+            .collect::<Result<_, _>>()?;
+        let ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
+        let head = if ptrs.is_empty() {
+            std::ptr::null()
+        } else {
+            ptrs.as_ptr()
+        };
+        let raw = unsafe { self.take_owned((self.set_library_dirs)(head, ptrs.len())) }?;
+        if raw.is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(raw.lines().map(str::to_owned).collect())
+    }
+
+    pub fn library_count(&self) -> usize {
+        unsafe { (self.library_count)() }
+    }
+
+    /// 把某个输出整份写盘。Err 里是一句人话的失败原因。
+    pub fn output_save(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        port: &str,
+        path: &str,
+        format: &str,
+    ) -> Result<(), String> {
+        let cs = |s: &str| CString::new(s).map_err(|e| e.to_string());
+        let (r, n, p, f, fmt) = (cs(run_id)?, cs(node_id)?, cs(port)?, cs(path)?, cs(format)?);
+        let message = unsafe {
+            self.take_owned((self.output_save)(
+                r.as_ptr(),
+                n.as_ptr(),
+                p.as_ptr(),
+                f.as_ptr(),
+                fmt.as_ptr(),
+            ))
+        }
+        .map_err(|e| e.to_string())?;
+        if message.is_empty() {
+            Ok(())
+        } else {
+            Err(message)
+        }
+    }
+
     pub fn output_info(&self, run_id: &str, node_id: &str) -> Result<String, CoreError> {
         let r = CString::new(run_id)?;
         let n = CString::new(node_id)?;
@@ -259,6 +366,7 @@ impl Core {
             bounds: [0.0; 6],
             xyz: std::ptr::null(),
             intensity: std::ptr::null(),
+            normals: std::ptr::null(),
             handle: std::ptr::null_mut(),
         };
         let rc = unsafe {
@@ -309,6 +417,15 @@ impl CloudView {
         }
         unsafe { std::slice::from_raw_parts(self.raw.intensity, self.raw.point_count as usize) }
     }
+    pub fn has_normals(&self) -> bool {
+        self.raw.flags & CLOUD_HAS_NORMALS != 0 && !self.raw.normals.is_null()
+    }
+    pub fn normals(&self) -> &[f32] {
+        if !self.has_normals() {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts(self.raw.normals, self.raw.point_count as usize * 3) }
+    }
 }
 
 impl Drop for CloudView {
@@ -344,17 +461,15 @@ impl RunHandle {
     /// `cb` 能安全地在 core 的工作线程上被调用，且只解引用 `user`。
     pub unsafe fn start<T>(
         core: Arc<Core>,
-        graph_json: &str,
-        run_id: &str,
-        base_dir: &str,
-        targets: &[String],
+        spec: RunSpec<'_>,
         cb: EventCb,
         user: Box<T>,
     ) -> Result<Self, CoreError> {
-        let graph = CString::new(graph_json)?;
-        let rid = CString::new(run_id)?;
-        let base = CString::new(base_dir)?;
-        let target_cstrings: Vec<CString> = targets
+        let graph = CString::new(spec.graph_json)?;
+        let rid = CString::new(spec.run_id)?;
+        let base = CString::new(spec.base_dir)?;
+        let target_cstrings: Vec<CString> = spec
+            .targets
             .iter()
             .map(|t| CString::new(t.as_str()))
             .collect::<Result<_, _>>()?;
@@ -370,8 +485,11 @@ impl RunHandle {
                 target_ptrs.as_ptr()
             },
             target_count: target_ptrs.len(),
-            max_parallel: 0,
+            max_parallel: spec.max_parallel,
             cache_budget_bytes: 0,
+            mode: spec.mode,
+            preview_max_points: spec.preview_max_points,
+            preview_budget_ms: spec.preview_budget_ms,
         };
 
         let user_ptr = Box::into_raw(user) as *mut c_void;
@@ -390,7 +508,7 @@ impl RunHandle {
             user: user_ptr,
             drop_user: drop_user::<T>,
             joined: std::sync::Mutex::new(false),
-            run_id: run_id.to_string(),
+            run_id: spec.run_id.to_string(),
         })
     }
 

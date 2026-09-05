@@ -1,0 +1,369 @@
+// 子图（ADR-0010）与 live preview（ADR-0011）的 C++ 侧行为。
+// 关键断言：展开成平图之后，执行器/缓存/事件一律看不见子图这回事（F1）。
+#include <doctest/doctest.h>
+
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+
+#include "exec/executor.h"
+#include "exec/library.h"
+#include "exec/plan.h"
+#include "exec/result_store.h"
+#include "exec/subgraph.h"
+#include "helpers.h"
+#include "lyflow/registry.h"
+
+using namespace lyflow;
+using namespace lyflow::test;
+
+namespace {
+
+/// 三节点直链的平版本：生成 → 体素 → 直通。
+Json flatGraph(int seed) {
+  Json doc;
+  doc["schemaVersion"] = 1;
+  doc["id"] = "01FLAT";
+  doc["nodes"] = Json::array({
+      Json{{"id", "g"}, {"op", "gen.synthetic"}, {"params", {{"pointCount", 20000}, {"seed", seed}}}},
+      Json{{"id", "v"},
+           {"op", "filter.voxel_grid"},
+           {"params", {{"leafSize", Json::array({0.02, 0.02, 0.02})}}}},
+      Json{{"id", "p"}, {"op", "filter.passthrough"}, {"params", {{"min", -100.0}, {"max", 100.0}}}},
+  });
+  doc["edges"] = Json::array({
+      Json{{"id", "e1"}, {"from", {{"node", "g"}, {"port", "cloud"}}},
+           {"to", {{"node", "v"}, {"port", "cloud"}}}},
+      Json{{"id", "e2"}, {"from", {{"node", "v"}, {"port", "cloud"}}},
+           {"to", {{"node", "p"}, {"port", "cloud"}}}},
+  });
+  return doc;
+}
+
+/// 同一条链，中间两个节点收进一个子图。参数 leaf 提升成子图的对外参数。
+Json subgraphGraph(int seed, double leaf = 0.02) {
+  Json doc;
+  doc["schemaVersion"] = 1;
+  doc["id"] = "01SUB";
+  doc["nodes"] = Json::array({
+      Json{{"id", "g"}, {"op", "gen.synthetic"}, {"params", {{"pointCount", 20000}, {"seed", seed}}}},
+      Json{{"id", "s"},
+           {"op", "sub:clean"},
+           {"params", {{"leaf", Json::array({leaf, leaf, leaf})}}}},
+  });
+  doc["edges"] = Json::array({
+      Json{{"id", "e1"}, {"from", {{"node", "g"}, {"port", "cloud"}}},
+           {"to", {{"node", "s"}, {"port", "cloud"}}}},
+  });
+  doc["subgraphs"] = Json::object();
+  doc["subgraphs"]["clean"] = Json{
+      {"name", "去噪"},
+      {"nodes", Json::array({
+                    Json{{"id", "v"}, {"op", "filter.voxel_grid"}},
+                    Json{{"id", "p"},
+                         {"op", "filter.passthrough"},
+                         {"params", {{"min", -100.0}, {"max", 100.0}}}},
+                })},
+      {"edges", Json::array({Json{{"id", "ei"},
+                                  {"from", {{"node", "v"}, {"port", "cloud"}}},
+                                  {"to", {{"node", "p"}, {"port", "cloud"}}}}})},
+      {"inputs", Json::array({Json{{"name", "cloud"},
+                                   {"type", "PointCloud"},
+                                   {"to", Json::array({Json{{"node", "v"}, {"port", "cloud"}}})}}})},
+      {"outputs", Json::array({Json{{"name", "cloud"},
+                                    {"type", "PointCloud"},
+                                    {"from", {{"node", "p"}, {"port", "cloud"}}}}})},
+      {"params", Json::array({Json{{"name", "leaf"},
+                                   {"type", "vec3f"},
+                                   {"default", Json::array({0.02, 0.02, 0.02})},
+                                   {"min", 0.0001},
+                                   {"binds", Json::array({Json{{"node", "v"}, {"param", "leafSize"}}})}}})},
+  };
+  return doc;
+}
+
+std::size_t elementCountOf(const RunLog& log, const std::string& nodeId) {
+  const Json e = log.nodeEvent(nodeId, "done");
+  if (e.contains("stats")) return e["stats"].value("elementCount", 0);
+  const Json s = log.nodeEvent(nodeId, "skipped");
+  return s.contains("stats") ? s["stats"].value("elementCount", 0) : 0;
+}
+
+std::vector<std::string> planIds(const RunLog& log) {
+  std::vector<std::string> out;
+  // ofKind 返回临时 vector：range-for 不会延长它的寿命，必须先落地成局部变量
+  const std::vector<Json> started = log.ofKind("run_started");
+  if (started.empty()) return out;
+  for (const Json& n : started.front()["nodes"]) out.push_back(n["id"].get<std::string>());
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("子图展开：结果与平图逐点一致") {
+  const RunLog flat = runGraph(flatGraph(11));
+  REQUIRE(flat.runStatus() == "ok");
+
+  const RunLog sub = runGraph(subgraphGraph(11));
+  REQUIRE(sub.runStatus() == "ok");
+
+  // 展开后的 id 是路径（F2），子图这个节点本身不在计划里
+  const auto ids = planIds(sub);
+  CHECK(std::find(ids.begin(), ids.end(), "s") == ids.end());
+  CHECK(std::find(ids.begin(), ids.end(), "s/v") != ids.end());
+  CHECK(std::find(ids.begin(), ids.end(), "s/p") != ids.end());
+
+  CHECK(elementCountOf(sub, "s/v") == elementCountOf(flat, "v"));
+  CHECK(elementCountOf(sub, "s/p") == elementCountOf(flat, "p"));
+  CHECK(elementCountOf(sub, "s/p") > 0);
+}
+
+TEST_CASE("子图参数：外参覆盖内参，一个外参可绑多个内参") {
+  const RunLog coarse = runGraph(subgraphGraph(12, 0.05));
+  const RunLog fine = runGraph(subgraphGraph(12, 0.005));
+  REQUIRE(coarse.runStatus() == "ok");
+  REQUIRE(fine.runStatus() == "ok");
+  CHECK(elementCountOf(coarse, "s/v") < elementCountOf(fine, "s/v"));
+
+  // 一个外参绑两个内参：两级体素都跟着它走
+  Json doc = subgraphGraph(13, 0.04);
+  doc["subgraphs"]["clean"]["nodes"].push_back(
+      Json{{"id", "v2"}, {"op", "filter.voxel_grid"}});
+  doc["subgraphs"]["clean"]["edges"] = Json::array({
+      Json{{"id", "ei"}, {"from", {{"node", "v"}, {"port", "cloud"}}},
+           {"to", {{"node", "v2"}, {"port", "cloud"}}}},
+      Json{{"id", "ej"}, {"from", {{"node", "v2"}, {"port", "cloud"}}},
+           {"to", {{"node", "p"}, {"port", "cloud"}}}},
+  });
+  doc["subgraphs"]["clean"]["params"][0]["binds"].push_back(
+      Json{{"node", "v2"}, {"param", "leafSize"}});
+
+  const RunLog two = runGraph(doc);
+  REQUIRE(two.runStatus() == "ok");
+  // 同一个 leafSize 跑两遍体素：第二级什么都不该再减掉
+  CHECK(elementCountOf(two, "s/v2") == elementCountOf(two, "s/v"));
+}
+
+TEST_CASE("子图嵌套两层：cacheKey 稳定，重跑全部 skipped") {
+  Json doc = subgraphGraph(14);
+  // outer 只包着 clean 这一个子图节点
+  doc["subgraphs"]["outer"] = Json{
+      {"name", "外层"},
+      {"nodes", Json::array({Json{{"id", "inner"}, {"op", "sub:clean"}}})},
+      {"edges", Json::array()},
+      {"inputs", Json::array({Json{{"name", "cloud"},
+                                   {"type", "PointCloud"},
+                                   {"to", Json::array({Json{{"node", "inner"}, {"port", "cloud"}}})}}})},
+      {"outputs", Json::array({Json{{"name", "cloud"},
+                                    {"type", "PointCloud"},
+                                    {"from", {{"node", "inner"}, {"port", "cloud"}}}}})},
+      {"params", Json::array()},
+  };
+  doc["nodes"][1] = Json{{"id", "s"}, {"op", "sub:outer"}};
+
+  exec::ResultStore::instance().clear();
+  const RunLog first = runGraphCached(doc);
+  REQUIRE(first.runStatus() == "ok");
+  const auto ids = planIds(first);
+  CHECK(std::find(ids.begin(), ids.end(), "s/inner/v") != ids.end());
+  CHECK(std::find(ids.begin(), ids.end(), "s/inner/p") != ids.end());
+
+  const RunLog second = runGraphCached(doc);
+  REQUIRE(second.runStatus() == "ok");
+  for (const std::string& id : planIds(second)) {
+    CHECK_MESSAGE(second.finalState(id) == "skipped", id);
+  }
+  // 两次编译的 cacheKey 必须逐个相同，否则 stale 标记会自己闪
+  const Json a = first.ofKind("run_started").front()["nodes"];
+  const Json b = second.ofKind("run_started").front()["nodes"];
+  CHECK(a == b);
+}
+
+TEST_CASE("子图递归引用被拒") {
+  Json doc = subgraphGraph(15);
+  doc["subgraphs"]["clean"]["nodes"].push_back(Json{{"id", "self"}, {"op", "sub:clean"}});
+
+  Diagnostics diags;
+  exec::RawGraph raw;
+  const bool ok = exec::prepareGraph(doc.dump(), raw, diags);
+  CHECK_FALSE(ok);
+  bool found = false;
+  for (const auto& d : diags.items()) {
+    if (d.status.code == "recursive_subgraph") found = true;
+  }
+  CHECK(found);
+
+  // 走完整条运行路径也一样：整图级失败，不是崩溃
+  const RunLog log = runGraph(doc);
+  CHECK(log.runStatus() == "error");
+}
+
+TEST_CASE("子图引用了不存在的定义 → unknown_op") {
+  Json doc = flatGraph(16);
+  doc["nodes"].push_back(Json{{"id", "x"}, {"op", "sub:nope"}});
+  Diagnostics diags;
+  exec::RawGraph raw;
+  CHECK_FALSE(exec::prepareGraph(doc.dump(), raw, diags));
+  bool found = false;
+  for (const auto& d : diags.items()) {
+    if (d.status.code == "unknown_op" && d.nodeId == "x") found = true;
+  }
+  CHECK(found);
+}
+
+TEST_CASE("子图节点静音：整棵子树透传") {
+  Json doc = subgraphGraph(17);
+  doc["nodes"][1]["bypass"] = true;
+  const RunLog log = runGraph(doc);
+  REQUIRE(log.runStatus() == "ok");
+  CHECK(log.finalState("s/v") == "skipped");
+  CHECK(log.finalState("s/p") == "skipped");
+  CHECK(log.nodeEvent("s/v", "skipped")["stats"]["bypassed"] == true);
+  // 透传之后下游拿到的就是源头那份
+  CHECK(elementCountOf(log, "s/p") == 20000);
+}
+
+TEST_CASE("Run to node 的目标可以是子图节点：按路径前缀收编整棵子树") {
+  Json doc = subgraphGraph(18);
+  const RunLog log = runGraph(doc, {}, {"s"});
+  REQUIRE(log.runStatus() == "ok");
+  const auto ids = planIds(log);
+  CHECK(std::find(ids.begin(), ids.end(), "s/v") != ids.end());
+  CHECK(std::find(ids.begin(), ids.end(), "s/p") != ids.end());
+  CHECK(std::find(ids.begin(), ids.end(), "g") != ids.end());
+}
+
+TEST_CASE("子图的未知参数会被报出来") {
+  Json doc = subgraphGraph(19);
+  doc["nodes"][1]["params"]["nosuch"] = 1;
+  Diagnostics diags;
+  exec::RawGraph raw;
+  CHECK_FALSE(exec::prepareGraph(doc.dump(), raw, diags));
+  bool found = false;
+  for (const auto& d : diags.items()) {
+    if (d.status.code == "unknown_param" && d.status.paramPath == "nosuch") found = true;
+  }
+  CHECK(found);
+}
+
+TEST_CASE("子图合成出来的 OperatorDesc 通得过注册表自检") {
+  Json doc = subgraphGraph(20);
+  exec::SubgraphDef def;
+  std::string error;
+  REQUIRE(exec::parseSubgraphDef(doc["subgraphs"]["clean"], "clean", def, error));
+  CHECK(error.empty());
+  const OperatorDesc op = exec::synthesizeOperator(def, "lib.clean");
+  CHECK(op.inputs.size() == 1);
+  CHECK(op.outputs.size() == 1);
+  CHECK(op.params.size() == 1);
+  CHECK(op.params[0].name == "leaf");
+  CHECK(std::string(toString(op.params[0].type)) == "vec3f");
+  CHECK(op.compute != nullptr);
+
+  Registry probe;
+  for (const auto& t : ensureRegistry().types()) probe.addType(t);
+  probe.addOperator(op);
+  CHECK(probe.validate().empty());
+}
+
+TEST_CASE("库目录：*.lyflow-op.json 注册成 lib.<id>，和内置算子无差别") {
+  const auto dir = std::filesystem::temp_directory_path() / "lyflow-lib-test";
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+
+  Json def = subgraphGraph(21)["subgraphs"]["clean"];
+  def["id"] = "clean";
+  def["category"] = "Cleanup";
+  {
+    std::ofstream out(dir / "clean.lyflow-op.json");
+    out << def.dump(2);
+  }
+
+  const auto problems = exec::Library::instance().setDirs({dir});
+  const std::string firstProblem = problems.empty() ? std::string() : problems.front();
+  CHECK_MESSAGE(problems.empty(), firstProblem);
+  CHECK(exec::Library::instance().size() == 1);
+
+  const OperatorDesc* op = ensureRegistry().find("lib.clean");
+  REQUIRE(op != nullptr);
+  CHECK(op->category == "Library/Cleanup");
+  CHECK(ensureRegistry().validate().empty());
+
+  Json doc = flatGraph(21);
+  doc["nodes"] = Json::array({
+      Json{{"id", "g"}, {"op", "gen.synthetic"}, {"params", {{"pointCount", 20000}, {"seed", 21}}}},
+      Json{{"id", "s"},
+           {"op", "lib.clean"},
+           {"params", {{"leaf", Json::array({0.02, 0.02, 0.02})}}}},
+  });
+  doc["edges"] = Json::array({Json{{"id", "e1"},
+                                   {"from", {{"node", "g"}, {"port", "cloud"}}},
+                                   {"to", {{"node", "s"}, {"port", "cloud"}}}}});
+  const RunLog log = runGraph(doc);
+  REQUIRE(log.runStatus() == "ok");
+  CHECK(log.finalState("s/v") == "done");
+  CHECK(elementCountOf(log, "s/p") > 0);
+
+  // 收尾：库必须清空，否则后面的测试会看到一个多出来的算子
+  exec::Library::instance().setDirs({});
+  CHECK(ensureRegistry().find("lib.clean") == nullptr);
+  std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("preview 模式：源头抽稀，且不污染正式缓存") {
+  Json doc = flatGraph(22);
+  doc["nodes"][0]["params"]["pointCount"] = 500000;
+
+  exec::ResultStore::instance().clear();
+  const std::size_t before = exec::ResultStore::instance().liveEntryCount();
+  CHECK(before == 0);
+
+  exec::RunOptions opts;
+  opts.runId = "preview-run";
+  opts.mode = exec::RunMode::Preview;
+  opts.previewMaxPoints = 20000;
+  RunLog preview;
+  preview.runId = opts.runId;
+  {
+    exec::Run run(doc.dump(), opts, &detail::collect, &preview);
+    run.join();
+  }
+  REQUIRE(preview.runStatus() == "ok");
+  CHECK(elementCountOf(preview, "g") == 20000);
+  CHECK(elementCountOf(preview, "v") > 0);
+
+  // 正式跑一遍：因为命名空间不同，一条都命不中，源头也不是抽稀后的
+  const RunLog full = runGraphCached(doc);
+  REQUIRE(full.runStatus() == "ok");
+  CHECK(full.finalState("g") == "done");
+  CHECK(elementCountOf(full, "g") == 500000);
+
+  const Json pk = preview.ofKind("run_started").front()["nodes"];
+  const Json fk = full.ofKind("run_started").front()["nodes"];
+  CHECK(pk[0]["cacheKey"] != fk[0]["cacheKey"]);
+}
+
+TEST_CASE("preview 超预算会发一条 warn 日志") {
+  Json doc = flatGraph(23);
+  doc["nodes"][0]["params"]["pointCount"] = 400000;
+
+  exec::RunOptions opts;
+  opts.runId = "preview-budget";
+  opts.mode = exec::RunMode::Preview;
+  opts.previewMaxPoints = 200000;
+  opts.previewBudgetMs = 1;  // 一定超
+  RunLog log;
+  log.runId = opts.runId;
+  {
+    exec::Run run(doc.dump(), opts, &detail::collect, &log);
+    run.join();
+  }
+  REQUIRE(log.runStatus() == "ok");
+  bool warned = false;
+  for (const Json& e : log.ofKind("log")) {
+    if (e.value("level", "") == "warn" && e.value("message", "").find("预览耗时") == 0) {
+      warned = true;
+    }
+  }
+  CHECK(warned);
+}

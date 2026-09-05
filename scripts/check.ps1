@@ -36,6 +36,16 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "cargo test 失败" }
 } finally { Pop-Location }
 
+Step "headless CLI（不带 Tauri）"
+# --no-default-features 是 F6 的证据：关掉 desktop 之后 tauri 一行都不该被编到。
+Push-Location (Join-Path $root "bridge")
+try {
+  cargo build --quiet --bin lyflow --no-default-features
+  if ($LASTEXITCODE -ne 0) { throw "CLI 构建失败" }
+  & (Join-Path $root "bridge/target/debug/lyflow.exe") manifest --check | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "lyflow manifest --check 失败" }
+} finally { Pop-Location }
+
 Step "frontend"
 Push-Location $root
 try {

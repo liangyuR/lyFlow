@@ -7,7 +7,7 @@ use std::sync::RwLock;
 use tauri::Manager;
 
 use crate::core_ffi;
-use crate::execution::{encode_cloud, RunManager};
+use crate::execution::{encode_cloud, PreviewOptions, RunManager};
 use crate::graph::GraphDoc;
 
 /// 解析过的 manifest，连同它属于第几代 core。热重载换代后这份要作废（ADR-0009）。
@@ -138,25 +138,39 @@ pub fn validate_graph(
 }
 
 /// 启动一次运行。立刻返回 run id，状态通过 `execution-event` 事件流推。
+/// `mode = "preview"` 时源算子的输出先抽稀，结果进独立的缓存命名空间（ADR-0011）。
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn run_graph(
     app: tauri::AppHandle,
     runs: tauri::State<'_, RunManager>,
     doc: GraphDoc,
     #[allow(non_snake_case)] graphPath: Option<String>,
     targets: Option<Vec<String>>,
+    mode: Option<String>,
+    #[allow(non_snake_case)] previewMaxPoints: Option<u32>,
+    #[allow(non_snake_case)] previewBudgetMs: Option<u32>,
 ) -> Result<String, String> {
     // 结构校验挡在前面：C++ 也会查一遍，但那要等到事件流里才看得见，
     // 而一个悬空的边根本不该走到执行器。
     doc.validate_structure().map_err(|e| e.to_string())?;
     let core = core_ffi::core()?;
     let json = serde_json::to_string(&doc).map_err(|e| e.to_string())?;
+    let preview = if mode.as_deref() == Some("preview") {
+        Some(PreviewOptions {
+            max_points: previewMaxPoints.unwrap_or(0),
+            budget_ms: previewBudgetMs.unwrap_or(0),
+        })
+    } else {
+        None
+    };
     runs.start(
         &app,
         core,
         &json,
         &base_dir_of(graphPath),
         &targets.unwrap_or_default(),
+        preview,
     )
 }
 
@@ -219,6 +233,162 @@ pub fn get_output_cloud(
         .output_cloud(&runId, &nodeId, &port, maxPoints.unwrap_or(2_000_000))
         .map_err(|e| e.to_string())?;
     Ok(tauri::ipc::Response::new(encode_cloud(&view)))
+}
+
+/// 写一段二进制到磁盘。3D 视图导出 PNG 与「把结果另存」都走它 ——
+/// 装 fs 插件要开一整片 ACL，而前端真正需要的只有「写用户刚选的那个文件」。
+#[tauri::command]
+pub fn write_file_bytes(path: String, contents: Vec<u8>) -> Result<(), String> {
+    let target = PathBuf::from(&path);
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
+    }
+    std::fs::write(&target, contents).map_err(|e| format!("写入 {path} 失败: {e}"))
+}
+
+// ---- 库算子目录（ADR-0010）
+
+#[derive(Serialize, Clone)]
+pub struct LibraryStatus {
+    /// 扫描过的目录，第一个是 app data 下的默认库。
+    pub dirs: Vec<String>,
+    pub count: usize,
+    pub problems: Vec<String>,
+}
+
+/// 默认库目录：app data 下的 `library/`。设置里的额外目录排在它后面。
+pub fn library_dirs(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("拿不到 app data 目录: {e}"))?
+        .join("library");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 {} 失败: {e}", dir.display()))?;
+    let mut dirs = vec![dir.to_string_lossy().into_owned()];
+    if let Ok(extra) = std::env::var("LYFLOW_LIBRARY_DIRS") {
+        for d in extra.split(';').filter(|d| !d.is_empty()) {
+            dirs.push(d.to_string());
+        }
+    }
+    Ok(dirs)
+}
+
+/// 重扫一遍库目录。调用方必须保证没有活跃 run —— 它会重建注册表。
+pub fn rescan_library(app: &tauri::AppHandle) -> Result<LibraryStatus, String> {
+    let dirs = library_dirs(app)?;
+    let core = core_ffi::core()?;
+    let problems = core.set_library_dirs(&dirs).map_err(|e| e.to_string())?;
+    // 算子集合变了，缓存的 manifest 立刻作废
+    *MANIFEST.write().unwrap_or_else(|e| e.into_inner()) = None;
+    Ok(LibraryStatus {
+        dirs,
+        count: core.library_count(),
+        problems,
+    })
+}
+
+#[tauri::command]
+pub fn get_library_status(app: tauri::AppHandle) -> Result<LibraryStatus, String> {
+    let dirs = library_dirs(&app)?;
+    let core = core_ffi::core()?;
+    Ok(LibraryStatus {
+        dirs,
+        count: core.library_count(),
+        problems: Vec::new(),
+    })
+}
+
+#[derive(Serialize)]
+pub struct LibraryRefresh {
+    pub status: LibraryStatus,
+    pub manifest: serde_json::Value,
+}
+
+#[tauri::command]
+pub fn refresh_library(
+    app: tauri::AppHandle,
+    runs: tauri::State<'_, RunManager>,
+) -> Result<LibraryRefresh, String> {
+    runs.drop_all();
+    let status = rescan_library(&app)?;
+    Ok(LibraryRefresh {
+        status,
+        manifest: manifest_value()?,
+    })
+}
+
+#[derive(Deserialize)]
+pub struct LibraryMeta {
+    pub id: String,
+    #[serde(default)]
+    pub category: String,
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    #[serde(default)]
+    pub version: Option<String>,
+}
+
+/// 把 doc 里的一个子图存成库文件。文件名就是 `<id>.lyflow-op.json`。
+#[tauri::command]
+pub fn save_as_library(
+    app: tauri::AppHandle,
+    runs: tauri::State<'_, RunManager>,
+    doc: GraphDoc,
+    #[allow(non_snake_case)] subgraphId: String,
+    meta: LibraryMeta,
+) -> Result<LibraryStatus, String> {
+    if meta.id.trim().is_empty() {
+        return Err("库算子的 id 不能为空".into());
+    }
+    if !meta
+        .id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+    {
+        return Err("库算子的 id 只能用字母、数字、下划线、短横线和点".into());
+    }
+    let def = doc
+        .subgraphs
+        .get(&subgraphId)
+        .ok_or_else(|| format!("doc 里没有子图 {subgraphId}"))?
+        .clone();
+    // 库文件是自包含的：里面再引用别的子图就没人解得开了
+    if let Some(nodes) = def.get("nodes").and_then(|n| n.as_array()) {
+        for n in nodes {
+            if let Some(op) = n.get("op").and_then(|o| o.as_str()) {
+                if op.starts_with("sub:") {
+                    return Err(format!(
+                        "子图里还嵌着 {op}，库文件必须自包含 —— 先把内层也保存到库，或者解散它"
+                    ));
+                }
+            }
+        }
+    }
+
+    let mut body = def;
+    if let Some(obj) = body.as_object_mut() {
+        obj.insert("id".into(), serde_json::json!(meta.id));
+        obj.insert(
+            "version".into(),
+            serde_json::json!(meta.version.unwrap_or_else(|| "1.0.0".into())),
+        );
+        if !meta.category.is_empty() {
+            obj.insert("category".into(), serde_json::json!(meta.category));
+        }
+        if !meta.keywords.is_empty() {
+            obj.insert("keywords".into(), serde_json::json!(meta.keywords));
+        }
+    }
+
+    let dirs = library_dirs(&app)?;
+    let root = PathBuf::from(dirs.first().ok_or("没有可写的库目录")?);
+    let file = root.join(format!("{}.lyflow-op.json", meta.id));
+    let mut text = serde_json::to_string_pretty(&body).map_err(|e| e.to_string())?;
+    text.push('\n');
+    std::fs::write(&file, text).map_err(|e| format!("写入 {} 失败: {e}", file.display()))?;
+
+    runs.drop_all();
+    rescan_library(&app)
 }
 
 // ---- 最近文件与备份

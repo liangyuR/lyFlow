@@ -4,24 +4,65 @@
   "title": "ExecutionEvent",
   "description": "C++ → Rust → 前端 的流式执行事件。每次节点状态变化推一条。",
   "type": "object",
-  "required": ["schemaVersion", "runId", "seq", "kind"],
+  "required": [
+    "schemaVersion",
+    "runId",
+    "seq",
+    "kind"
+  ],
   "properties": {
-    "schemaVersion": { "type": "integer", "const": 1 },
-    "runId": { "type": "string", "description": "一次运行的 id。前端据此丢弃过期运行的事件。" },
-    "seq": { "type": "integer", "description": "单调递增，用于检测丢包与乱序。" },
-    "at": { "type": "string", "format": "date-time" },
-    "kind": { "enum": ["run_started", "node_state", "node_progress", "run_finished", "log"] }
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "runId": {
+      "type": "string",
+      "description": "一次运行的 id。前端据此丢弃过期运行的事件。"
+    },
+    "seq": {
+      "type": "integer",
+      "description": "单调递增，用于检测丢包与乱序。"
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "kind": {
+      "enum": [
+        "run_started",
+        "node_state",
+        "node_progress",
+        "run_finished",
+        "log"
+      ]
+    }
   },
   "oneOf": [
     {
       "properties": {
-        "kind": { "const": "run_started" },
-        "nodeCount": { "type": "integer" },
-        "maxParallel": { "type": "integer", "minimum": 1, "description": "本次实际用了几个 worker。默认 min(4, 核数)。" },
-        "plan": { "type": "array", "items": { "type": "string" }, "description": "拓扑序的节点 id 列表。" },
+        "kind": {
+          "const": "run_started"
+        },
+        "nodeCount": {
+          "type": "integer"
+        },
+        "maxParallel": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "本次实际用了几个 worker。默认 min(4, 核数)。"
+        },
+        "plan": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "拓扑序的节点 id 列表。子图展开后是路径 `outer/inner/leaf`（ADR-0010）。"
+        },
         "targets": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Run to node 的目标集。全图运行时为空数组。"
         },
         "nodes": {
@@ -29,63 +70,165 @@
           "description": "编译结果，与 plan 同序。M3 的精确 stale 标记与「将重算 N 个节点」提示靠它。",
           "items": {
             "type": "object",
-            "required": ["id", "cacheKey", "level"],
+            "required": [
+              "id",
+              "cacheKey",
+              "level"
+            ],
             "properties": {
-              "id": { "type": "string" },
-              "cacheKey": { "type": "string", "description": "内容寻址键。参数或上游变了它就变。缓存判定的唯一权威在 C++（ADR-0007）。" },
-              "level": { "type": "integer", "description": "拓扑层号。就绪队列按它再按拓扑序排。" },
-              "bypass": { "type": "boolean", "description": "该节点被静音，不会调 compute。" }
+              "id": {
+                "type": "string"
+              },
+              "cacheKey": {
+                "type": "string",
+                "description": "内容寻址键。参数或上游变了它就变。缓存判定的唯一权威在 C++（ADR-0007）。"
+              },
+              "level": {
+                "type": "integer",
+                "description": "拓扑层号。就绪队列按它再按拓扑序排。"
+              },
+              "bypass": {
+                "type": "boolean",
+                "description": "该节点被静音，不会调 compute。"
+              }
             }
           }
+        },
+        "mode": {
+          "enum": [
+            "full",
+            "preview"
+          ],
+          "description": "preview 时无输入的源算子输出先抽稀，结果进独立的缓存命名空间（ADR-0011）。"
+        },
+        "previewMaxPoints": {
+          "type": "integer",
+          "description": "preview 模式下源算子输出的点数上限。默认 200000。"
         }
       },
-      "required": ["kind"]
+      "required": [
+        "kind"
+      ]
     },
     {
       "properties": {
-        "kind": { "const": "node_state" },
-        "nodeId": { "type": "string" },
+        "kind": {
+          "const": "node_state"
+        },
+        "nodeId": {
+          "type": "string",
+          "description": "**展开后**的节点路径，用 / 分隔：`outer/inner/leaf`。前端按当前所在层级的前缀聚合到那一层的节点上（F2）。"
+        },
         "state": {
-          "enum": ["idle", "pending", "running", "done", "error", "cancelled", "skipped"],
+          "enum": [
+            "idle",
+            "pending",
+            "running",
+            "done",
+            "error",
+            "cancelled",
+            "skipped"
+          ],
           "description": "skipped = 命中缓存未重算，必须与 done 区分显示，否则用户以为没跑。因上游失败而未执行的节点是 cancelled + errors[0].code=upstream_failed，不是 skipped。"
         },
-        "durationMs": { "type": "number" },
-        "stats": { "$ref": "#/$defs/stats" },
-        "error": { "$ref": "#/$defs/error", "description": "errors[0] 的快捷方式。只读一条错误的老代码不至于瞎。" },
+        "durationMs": {
+          "type": "number"
+        },
+        "stats": {
+          "$ref": "#/$defs/stats"
+        },
+        "error": {
+          "$ref": "#/$defs/error",
+          "description": "errors[0] 的快捷方式。只读一条错误的老代码不至于瞎。"
+        },
         "errors": {
           "type": "array",
-          "items": { "$ref": "#/$defs/error" },
+          "items": {
+            "$ref": "#/$defs/error"
+          },
           "description": "该节点的全部诊断（D5）。前端一次把所有红框标出来，用户不用挤牙膏。"
         }
       },
-      "required": ["kind", "nodeId", "state"]
+      "required": [
+        "kind",
+        "nodeId",
+        "state"
+      ]
     },
     {
       "properties": {
-        "kind": { "const": "node_progress" },
-        "nodeId": { "type": "string" },
-        "progress": { "type": "number", "minimum": 0, "maximum": 1 },
-        "message": { "type": "string" }
+        "kind": {
+          "const": "node_progress"
+        },
+        "nodeId": {
+          "type": "string",
+          "description": "**展开后**的节点路径，用 / 分隔：`outer/inner/leaf`。前端按当前所在层级的前缀聚合到那一层的节点上（F2）。"
+        },
+        "progress": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "message": {
+          "type": "string"
+        }
       },
-      "required": ["kind", "nodeId", "progress"]
+      "required": [
+        "kind",
+        "nodeId",
+        "progress"
+      ]
     },
     {
       "properties": {
-        "kind": { "const": "run_finished" },
-        "status": { "enum": ["ok", "error", "cancelled"] },
-        "durationMs": { "type": "number" },
-        "error": { "$ref": "#/$defs/error" }
+        "kind": {
+          "const": "run_finished"
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "error",
+            "cancelled"
+          ]
+        },
+        "durationMs": {
+          "type": "number"
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
       },
-      "required": ["kind", "status"]
+      "required": [
+        "kind",
+        "status"
+      ]
     },
     {
       "properties": {
-        "kind": { "const": "log" },
-        "level": { "enum": ["debug", "info", "warn", "error"] },
-        "nodeId": { "type": "string" },
-        "message": { "type": "string" }
+        "kind": {
+          "const": "log"
+        },
+        "level": {
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ]
+        },
+        "nodeId": {
+          "type": "string",
+          "description": "**展开后**的节点路径，用 / 分隔：`outer/inner/leaf`。前端按当前所在层级的前缀聚合到那一层的节点上（F2）。"
+        },
+        "message": {
+          "type": "string"
+        }
       },
-      "required": ["kind", "level", "message"]
+      "required": [
+        "kind",
+        "level",
+        "message"
+      ]
     }
   ],
   "$defs": {
@@ -93,19 +236,42 @@
       "type": "object",
       "description": "节点完成后的产出规模。节点上直接显示「12.3 万点」靠它。",
       "properties": {
-        "elementCount": { "type": "integer", "description": "第一个输出端口的元素数：点云=点数，Indices=下标个数。" },
-        "byteSize": { "type": "integer", "description": "全部输出的粗略内存占用，含所有通道。" },
-        "cached": { "type": "boolean", "description": "state=skipped 的原因是命中缓存。与 bypassed 互斥（ADR-0007）。" },
-        "bypassed": { "type": "boolean", "description": "state=skipped 的原因是节点被静音，输出由输入透传而来。" },
+        "elementCount": {
+          "type": "integer",
+          "description": "第一个输出端口的元素数：点云=点数，Indices=下标个数。"
+        },
+        "byteSize": {
+          "type": "integer",
+          "description": "全部输出的粗略内存占用，含所有通道。"
+        },
+        "cached": {
+          "type": "boolean",
+          "description": "state=skipped 的原因是命中缓存。与 bypassed 互斥（ADR-0007）。"
+        },
+        "bypassed": {
+          "type": "boolean",
+          "description": "state=skipped 的原因是节点被静音，输出由输入透传而来。"
+        },
         "outputs": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["port", "type", "elementCount"],
+            "required": [
+              "port",
+              "type",
+              "elementCount"
+            ],
             "properties": {
-              "port": { "type": "string" },
-              "type": { "type": "string", "description": "端口类型名，与 manifest 的 types 表一致。" },
-              "elementCount": { "type": "integer" }
+              "port": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "description": "端口类型名，与 manifest 的 types 表一致。"
+              },
+              "elementCount": {
+                "type": "integer"
+              }
             }
           }
         }
@@ -113,16 +279,33 @@
     },
     "error": {
       "type": "object",
-      "required": ["phase", "code", "message"],
+      "required": [
+        "phase",
+        "code",
+        "message"
+      ],
       "properties": {
-        "phase": { "enum": ["validate", "compile", "execute"] },
+        "phase": {
+          "enum": [
+            "validate",
+            "compile",
+            "execute"
+          ]
+        },
         "code": {
           "type": "string",
-          "description": "机器可读短码。当前取值集合：unknown_op | unknown_port | type_mismatch | missing_input | multi_input | unknown_param | bad_param | bad_input | unknown_node | duplicate_id | version_mismatch | migration | bypassed_no_source | cycle | io | cancelled | upstream_failed | internal。前端不得穷举它做逻辑分支——未知 code 一律按通用错误显示。"
+          "description": "机器可读短码。当前取值集合：unknown_op | unknown_port | type_mismatch | missing_input | multi_input | unknown_param | bad_param | bad_input | unknown_node | duplicate_id | version_mismatch | migration | bypassed_no_source | recursive_subgraph | cycle | io | cancelled | upstream_failed | internal。前端不得穷举它做逻辑分支——未知 code 一律按通用错误显示。"
         },
-        "message": { "type": "string" },
-        "paramPath": { "type": "string", "description": "出错的参数名。让前端把红框直接标到那个输入框上。" },
-        "portName": { "type": "string" }
+        "message": {
+          "type": "string"
+        },
+        "paramPath": {
+          "type": "string",
+          "description": "出错的参数名。让前端把红框直接标到那个输入框上。"
+        },
+        "portName": {
+          "type": "string"
+        }
       }
     }
   }

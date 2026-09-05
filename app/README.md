@@ -108,6 +108,30 @@ src/transport/    Tauri / 静态快照两种 transport
 - **React Flow 的 `nodeDragThreshold` 会吞掉第一段位移。** 拖拽类的 CDP 断言必须先
   发一个 2 px 的「唤醒」移动，否则落点永远差第一步那么多，位移越大差得越多。
 
+## 层级（子图）
+
+`ui.path` 是当前所在的子图栈（`{ nodeId, subgraphId }[]`），**纯导航状态**：
+不进 doc、不进撤销栈。画布只渲染 `levelOf(doc, path)` 那一层，
+graph store 里所有改图的动作也都作用在那一层。
+
+事件里的 `nodeId` 是**展开后的路径**（`outer/inner/leaf`）。
+`aggregatedNodes(path, nodes)` 把它按当前层级的前缀聚合成「本地 id → 状态」：
+叶子节点直接复用原对象（引用不变，组件不白重渲），子图节点按
+「任一 error → error，任一 running → running，全 done/skipped → done」归约。
+
+`sub:` 节点的 `OperatorDesc` 是**合成**出来的（`lib/subgraph.ts` 的
+`augmentOperators`），因为子图定义随文档走而 manifest 是进程级的。
+合成结果按 `doc.subgraphs` 的对象身份缓存，doc 不变就不重建。
+
+## 大图性能
+
+- 节点数超过 80 才开 React Flow 的 `onlyRenderVisibleElements`：
+  小图下全量渲染的手感更好，开了之后平移会有一帧空窗。
+- `node_state` / `node_progress` 按 **16 ms** 合并成一次 store 更新；
+  `run_started` / `run_finished` 立刻 flush，所以「等运行结束再读状态」仍然准。
+- 状态流水账（`window.__lyflow.transitions`）来自**事件**而不是 store 快照 ——
+  合并窗口会把中间态吃掉，从快照推就断言不了「节点依次变色」。
+
 ## 验收
 
 不写 UI 单元测试（CLAUDE.md）。验收方式是 CDP 驱动真实运行的 Tauri app：

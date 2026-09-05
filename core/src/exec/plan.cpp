@@ -520,12 +520,24 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     keep.assign(n, false);
     std::vector<std::size_t> stack;
     for (const std::string& t : options.targets) {
+      // 精确匹配优先；匹配不到时按路径前缀收编整棵子图（F2）。
       auto it = indexById.find(t);
-      if (it == indexById.end()) {
+      if (it != indexById.end()) {
+        stack.push_back(it->second);
+        continue;
+      }
+      const std::string prefix = t + "/";
+      std::size_t matched = 0;
+      for (std::size_t i = 0; i < n; ++i) {
+        if (graph.nodes[i].id.compare(0, prefix.size(), prefix) == 0) {
+          stack.push_back(i);
+          matched += 1;
+        }
+      }
+      if (matched == 0) {
         diags.error("", Phase::Compile, "unknown_node", "Run to node 的目标不存在: " + t);
         return false;
       }
-      stack.push_back(it->second);
     }
     std::vector<std::vector<std::size_t>> upstream(n);
     for (const RawEdge& e : graph.edges) {
@@ -592,6 +604,8 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
   for (PlanNode& pn : out.nodes) {
     if (!pn.op || !pn.valid) continue;
     Hasher h;
+    // 预览命名空间：preview 的结果与正式结果永不互相命中（F5）。
+    h.add(options.cacheNamespace);
     h.add(pn.op->id);
     h.add(pn.op->version);
     // bypass 改变的是结果本身，所以必须进键 —— 不然静音再取消静音会拿到旧结果。

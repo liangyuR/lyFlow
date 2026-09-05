@@ -15,6 +15,10 @@ class Registry {
   void addOperator(OperatorDesc op);
   void clear();
 
+  /// 整份替换库算子（ADR-0010）。它们排在内置算子之后，其余处处与内置无差别。
+  /// 与热重载同一条约定：调用时必须没有活跃的 run —— 会让旧的 OperatorDesc* 失效。
+  void setLibraryOperators(std::vector<OperatorDesc> ops);
+
   const std::vector<PortType>& types() const { return types_; }
   const std::vector<OperatorDesc>& operators() const { return operators_; }
 
@@ -35,6 +39,8 @@ class Registry {
  private:
   std::vector<PortType> types_;
   std::vector<OperatorDesc> operators_;
+  /// operators_ 里前多少个是内置的。setLibraryOperators 从这里往后重写。
+  std::size_t builtinCount_ = 0;
 };
 
 // 注册所有内置算子与端口类型。显式调用列表而非静态自注册，理由与加算子的流程

@@ -159,11 +159,21 @@ Registry& ensureRegistry() {
 }
 
 void Registry::addType(PortType type) { types_.push_back(std::move(type)); }
-void Registry::addOperator(OperatorDesc op) { operators_.push_back(std::move(op)); }
+
+void Registry::addOperator(OperatorDesc op) {
+  operators_.push_back(std::move(op));
+  builtinCount_ = operators_.size();
+}
+
+void Registry::setLibraryOperators(std::vector<OperatorDesc> ops) {
+  operators_.resize(builtinCount_);
+  for (auto& op : ops) operators_.push_back(std::move(op));
+}
 
 void Registry::clear() {
   types_.clear();
   operators_.clear();
+  builtinCount_ = 0;
 }
 
 const OperatorDesc* Registry::find(const std::string& id) const {
