@@ -1,4 +1,4 @@
-# M0 门禁：一条命令验完整条链路。
+# 门禁：一条命令验完整条链路。
 #
 #   C++ 编译 + 算子自检
 #   -> manifest 对着 schema 校验（契约真的没破）
@@ -33,4 +33,4 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "前端构建失败" }
 } finally { Pop-Location }
 
-Write-Host "`nM0 链路全绿" -ForegroundColor Green
+Write-Host "`n全链路绿" -ForegroundColor Green

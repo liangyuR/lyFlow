@@ -1,9 +1,8 @@
 /*
- * M0 的样式基线。
+ * 设计变量与基础样式。编辑器（画布/节点/检查器/控件）在 styles.editor.css。
  *
  * 暗色是节点编辑器的默认预期（ComfyUI / Blender / Houdini 都是），
- * 而且点云视图在暗底上更容易看。变量集中在这里，M1 引入画布时
- * 节点和连线直接复用同一套。
+ * 而且点云视图在暗底上更容易看。变量只在这里定义，其他地方只消费。
  */
 
 :root {
@@ -66,7 +65,6 @@ code {
 }
 
 .app__sidebar {
-  width: 300px;
   flex-shrink: 0;
   border-right: 1px solid var(--border);
   background: var(--bg-1);
@@ -75,10 +73,18 @@ code {
   min-height: 0;
 }
 
-.app__content {
+.app__canvas {
   flex: 1;
-  overflow-y: auto;
   min-width: 0;
+  position: relative;
+}
+
+.app__inspector {
+  width: 320px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-1);
+  overflow-y: auto;
 }
 
 .app__hint,

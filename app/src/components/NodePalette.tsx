@@ -1,31 +1,23 @@
 //
-// 节点面板 —— 交互清单 P0 第 9 项。
+// 左侧算子面板。
 //
-// 两种模式：
-//   空查询   -> 按 category 的树形结构分组展示
-//   有查询   -> 扁平的排序结果，命中字符高亮
+// 分类树完全由 manifest 的 category 字段推导（用 / 分层），前端不硬编码任何
+// 分类名。加一个新分类的算子，面板里自动长出新分支 —— 这是 M0 验收过的。
 //
-// 分类树完全由 manifest 的 category 字段推导（用 / 分层），前端不硬编码
-// 任何分类名。加一个新分类的算子，面板里自动长出新分支。
+// 三种加节点的方式，因为三种人都会试：拖到画布上、双击、以及画布上双击搜索。
 //
 
+import { useReactFlow } from "@xyflow/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { fuzzyMatchAny } from "../lib/fuzzy";
+import { FIELD_LABELS, searchOperators, type OperatorHit } from "../lib/search";
+import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
+import { useUiStore } from "../store/ui";
 import type { OperatorDesc } from "../types/manifest";
 
-interface Props {
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-}
-
-interface Hit {
-  op: OperatorDesc;
-  score: number;
-  fieldIndex: number;
-  indices: number[];
-}
+/** 拖到画布时用的 MIME。GraphCanvas 的 onDrop 读它。 */
+export const OPERATOR_DND_MIME = "application/lyflow-operator";
 
 interface TreeNode {
   name: string;
@@ -58,7 +50,6 @@ function buildTree(operators: readonly OperatorDesc[]): TreeNode {
   return root;
 }
 
-/** 搜索时把匹配到的字符包成 <mark>。 */
 function Highlight({ text, indices }: { text: string; indices: readonly number[] }) {
   if (indices.length === 0) return <>{text}</>;
   const marked = new Set(indices);
@@ -88,49 +79,55 @@ function OperatorRow({
   op,
   active,
   hit,
-  onSelect,
 }: {
   op: OperatorDesc;
   active: boolean;
-  hit?: Hit;
-  onSelect: (id: string) => void;
+  hit?: OperatorHit;
 }) {
-  // fieldIndex 对应 searchFields 的顺序：0=label 1=id 2=keywords 3=doc
+  const setInspected = useUiStore((s) => s.setInspectedOperator);
+  const { screenToFlowPosition } = useReactFlow();
   const highlightLabel = hit?.fieldIndex === 0 ? hit.indices : [];
-  const matchedElsewhere = hit && hit.fieldIndex > 0;
+
+  /** 画布可视区中心的画布坐标。双击添加时落在这里，比写死原点合理。 */
+  const viewportCenter = () => {
+    const pane = document.querySelector(".react-flow__pane");
+    const rect = pane?.getBoundingClientRect();
+    if (!rect) return { x: 0, y: 0 };
+    return screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+  };
 
   return (
     <button
       type="button"
       className={`op-row${active ? " is-active" : ""}`}
       data-op-id={op.id}
-      onClick={() => onSelect(op.id)}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(OPERATOR_DND_MIME, op.id);
+        e.dataTransfer.effectAllowed = "copy";
+      }}
+      onClick={() => setInspected(op.id)}
+      onDoubleClick={() => {
+        // 拖拽是精确落点的方式，双击是图省事的方式，都得有。
+        const id = useGraphStore.getState().addNode(op.id, viewportCenter());
+        if (id) useUiStore.getState().setSelection([id], []);
+      }}
+      title={op.doc}
     >
       <span className="op-row__label">
         <Highlight text={op.label} indices={highlightLabel} />
       </span>
       <span className="op-row__id">{op.id}</span>
-      {matchedElsewhere && (
-        <span className="op-row__why">
-          {hit.fieldIndex === 1 ? "id" : hit.fieldIndex === 2 ? "关键词" : "说明"}
-        </span>
+      {hit && hit.fieldIndex > 0 && (
+        <span className="op-row__why">{FIELD_LABELS[hit.fieldIndex]}</span>
       )}
     </button>
   );
 }
 
-function TreeBranch({
-  node,
-  depth,
-  selectedId,
-  onSelect,
-}: {
-  node: TreeNode;
-  depth: number;
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-}) {
+function TreeBranch({ node, depth }: { node: TreeNode; depth: number }) {
   const [open, setOpen] = useState(true);
+  const inspected = useUiStore((s) => s.inspectedOperator);
   const childBranches = [...node.children.values()];
 
   return (
@@ -140,28 +137,15 @@ function TreeBranch({
           ▸
         </span>
         {node.name}
-        <span className="tree-branch__count">
-          {node.operators.length + childBranches.length}
-        </span>
+        <span className="tree-branch__count">{node.operators.length + childBranches.length}</span>
       </button>
       {open && (
         <div className="tree-branch__body">
           {childBranches.map((child) => (
-            <TreeBranch
-              key={child.path}
-              node={child}
-              depth={depth + 1}
-              selectedId={selectedId}
-              onSelect={onSelect}
-            />
+            <TreeBranch key={child.path} node={child} depth={depth + 1} />
           ))}
           {node.operators.map((op) => (
-            <OperatorRow
-              key={op.id}
-              op={op}
-              active={op.id === selectedId}
-              onSelect={onSelect}
-            />
+            <OperatorRow key={op.id} op={op} active={op.id === inspected} />
           ))}
         </div>
       )}
@@ -169,38 +153,18 @@ function TreeBranch({
   );
 }
 
-export function NodePalette({ selectedId, onSelect }: Props) {
-  const bundle = useManifestStore((s) => s.bundle);
+export function NodePalette() {
+  const operators = useManifestStore((s) => s.bundle?.operators);
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const operators = useMemo(() => bundle?.operators ?? [], [bundle]);
-
-  const hits = useMemo<Hit[]>(() => {
-    const q = query.trim();
-    if (!q) return [];
-    const result: Hit[] = [];
-    for (const op of operators) {
-      // 顺序即优先级：label 命中比 keyword 命中更值钱（fuzzyMatchAny 按下标降权）
-      const match = fuzzyMatchAny(q, [
-        op.label,
-        op.id,
-        (op.keywords ?? []).join(" "),
-        op.doc ?? "",
-      ]);
-      if (match) result.push({ op, ...match });
-    }
-    result.sort((a, b) => b.score - a.score);
-    return result;
-  }, [query, operators]);
-
-  const tree = useMemo(() => buildTree(operators), [operators]);
+  const all = useMemo(() => operators ?? [], [operators]);
+  const hits = useMemo(() => searchOperators(all, query), [all, query]);
+  const tree = useMemo(() => buildTree(all), [all]);
 
   useEffect(() => setCursor(0), [query]);
 
-  // 键盘选中的项滚进视野。搜索面板不支持键盘会立刻显得很笨重。
   useEffect(() => {
     if (!query.trim() || hits.length === 0) return;
     const id = hits[Math.min(cursor, hits.length - 1)]?.op.id;
@@ -221,7 +185,7 @@ export function NodePalette({ selectedId, onSelect }: Props) {
     } else if (e.key === "Enter") {
       e.preventDefault();
       const hit = hits[Math.min(cursor, hits.length - 1)];
-      if (hit) onSelect(hit.op.id);
+      if (hit) useUiStore.getState().setInspectedOperator(hit.op.id);
     } else if (e.key === "Escape") {
       e.preventDefault();
       setQuery("");
@@ -234,10 +198,9 @@ export function NodePalette({ selectedId, onSelect }: Props) {
     <div className="palette">
       <div className="palette__search">
         <input
-          ref={inputRef}
           type="search"
           value={query}
-          placeholder="搜索算子…  ↑↓ 选择  Enter 确认"
+          placeholder="搜索算子…"
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}
           spellCheck={false}
@@ -255,22 +218,17 @@ export function NodePalette({ selectedId, onSelect }: Props) {
                 op={hit.op}
                 hit={hit}
                 active={i === Math.min(cursor, hits.length - 1)}
-                onSelect={onSelect}
               />
             ))
           )
         ) : (
           [...tree.children.values()].map((child) => (
-            <TreeBranch
-              key={child.path}
-              node={child}
-              depth={0}
-              selectedId={selectedId}
-              onSelect={onSelect}
-            />
+            <TreeBranch key={child.path} node={child} depth={0} />
           ))
         )}
       </div>
+
+      <p className="palette__tip">拖到画布，或双击添加；单击查看说明。</p>
     </div>
   );
 }

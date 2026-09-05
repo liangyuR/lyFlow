@@ -33,6 +33,25 @@
 
 ## 实施要点
 
-- 映射层放在单独模块，禁止其他地方直接引用 React Flow 的类型作为持久化结构
-- change 动作是封闭集合：`addNode` / `deleteNodes` / `moveNodes` / `setParam` / `connect` / `disconnect` / `setNodeUi`
+- 映射层放在单独模块（`app/src/lib/mapping.ts`），禁止其他地方直接引用 React Flow
+  的类型作为持久化结构
+- change 动作是封闭集合：`addNode` / `deleteNodes` / `moveNodes` / `setParam` /
+  `connect` / `disconnect` / `setNodeUi` / `pasteNodes`
 - 纯 UI 操作（平移、缩放、选中变化）不进 undo 栈
+
+## M1 实施后的两条补充
+
+**撤销历史存整份 doc 快照，不存 patch。** 原文说「基于语义化 patch」，实际落地时
+选了快照。语义化的部分保留在 change 动作上 —— 它决定了「一步撤销」的边界，这才是
+关键。存储形式则用快照：immer 的结构共享让未改动的节点在新旧快照间共用同一份对象，
+几十个节点的图一次快照只增量存被改动的那部分；而 patch 的路径基于数组下标，删一个
+节点会让此前所有 patch 的下标失效，复杂度换不来这点内存。
+
+**UI 运行时状态必须有个去处，不能只是「丢掉」。** 节点的量测尺寸是纯 UI 状态，
+按本 ADR 不进 GraphDoc，我们在 `onNodesChange` 里丢弃了 dimensions 事件 ——
+结果 React Flow 的 MiniMap 一个节点都不画，因为它判断「节点有没有尺寸」看的正是
+我们传回去的那个对象。
+
+修法不是妥协把尺寸塞进 GraphDoc，而是给它一个 UI 侧的旁路缓存（画布组件里的 ref），
+映射时合并进去。教训是：**「不进数据模型」和「不存在」是两回事**，丢弃 UI 状态前
+要先问一句渲染层还需不需要它。

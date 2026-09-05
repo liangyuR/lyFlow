@@ -1,0 +1,623 @@
+/*
+ * M1 编辑器样式：工具栏、画布、节点、检查器、参数控件、搜索弹层。
+ *
+ * 设计变量在 styles.css 里，这里只消费不定义。
+ */
+
+/* --------------------------------------------------------------- toolbar */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+  height: 36px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-1);
+}
+
+.toolbar__group {
+  display: flex;
+  gap: 3px;
+}
+
+.toolbar button {
+  padding: 4px 10px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--fg-1);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.toolbar button:hover:not(:disabled) {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+.toolbar button:disabled {
+  color: var(--fg-2);
+  opacity: 0.45;
+  cursor: default;
+}
+
+.toolbar__doc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.toolbar__name {
+  width: 180px;
+  padding: 3px 8px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg-0);
+  font: inherit;
+  font-size: 12px;
+  text-align: right;
+  outline: none;
+}
+
+.toolbar__name:focus {
+  border-color: var(--accent-dim);
+  text-align: left;
+}
+
+.toolbar__dirty {
+  color: var(--warn);
+  font-size: 10px;
+}
+
+.toolbar__path {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-2);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* ---------------------------------------------------------------- canvas */
+
+.canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.react-flow__pane {
+  background: var(--bg-0);
+}
+
+.react-flow__controls-button {
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  fill: var(--fg-1);
+}
+
+.react-flow__controls-button:hover {
+  background: var(--bg-3);
+}
+
+.react-flow__minimap {
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.react-flow__attribution {
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 9px;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke-width: 3.5;
+}
+
+/* ------------------------------------------------------------------ node */
+
+.node {
+  min-width: 170px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--bg-2);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+}
+
+.node.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 2px 14px rgba(74, 158, 255, 0.25);
+}
+
+.node__head {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  border-radius: 6px 6px 0 0;
+  background: var(--bg-3);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node__body {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 16px;
+  padding: 8px 0;
+}
+
+.node__col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.node__col--out {
+  align-items: flex-end;
+}
+
+.node-port {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 12px;
+}
+
+.node-port__label {
+  color: var(--fg-1);
+  white-space: nowrap;
+}
+
+.node-port__opt {
+  margin-left: 3px;
+  color: var(--fg-2);
+  font-style: normal;
+}
+
+/* React Flow 的 Handle 默认贴节点边缘，这里把它对齐到各自的端口行上 */
+.node-port .react-flow__handle {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border: 2px solid;
+  border-radius: 50%;
+  transform: translateY(-50%);
+}
+
+.node-port--input .react-flow__handle {
+  left: -6px;
+}
+
+.node-port--output .react-flow__handle {
+  right: -6px;
+}
+
+/* 连线时把可落点放大，吸附范围跟着变大 —— 手感的第一名（交互清单 P1 #17） */
+.react-flow__handle-connecting,
+.react-flow__handle-valid {
+  transform: translateY(-50%) scale(1.4);
+}
+
+.node__collapsed .react-flow__handle {
+  width: 8px;
+  height: 8px;
+  background: var(--fg-2);
+  border: 2px solid var(--border-strong);
+}
+
+.node--missing {
+  border-color: #a04040;
+  background: #2a1c1c;
+}
+
+.node--missing .node__head {
+  background: #3a2424;
+  color: #ff9a9a;
+}
+
+.node__missing-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 12px;
+  color: var(--fg-2);
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------------- inspector */
+
+.insp {
+  padding: 14px 14px 40px;
+}
+
+.insp__head {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.insp__title {
+  width: 100%;
+  padding: 4px 8px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg-0);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  outline: none;
+}
+
+.insp__title:focus {
+  border-color: var(--accent-dim);
+}
+
+.insp__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 7px;
+  color: var(--fg-2);
+  font-size: 11px;
+}
+
+.insp__doc {
+  margin: 8px 0 0;
+  color: var(--fg-1);
+  font-size: 12px;
+}
+
+.insp__warn {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border-left: 2px solid var(--warn);
+  background: rgba(240, 160, 32, 0.08);
+  color: var(--warn);
+  font-size: 11px;
+}
+
+.insp__group {
+  margin-top: 14px;
+}
+
+.insp__group-title {
+  margin: 0 0 8px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+
+.insp__none,
+.insp__hint {
+  color: var(--fg-2);
+  font-size: 12px;
+}
+
+.insp--empty,
+.insp--multi,
+.insp--missing {
+  padding: 28px 18px;
+  color: var(--fg-1);
+}
+
+.insp--missing code {
+  display: block;
+  margin: 6px 0;
+  color: #ff9a9a;
+}
+
+.insp-param {
+  margin-bottom: 10px;
+}
+
+.insp-param.is-disabled {
+  opacity: 0.4;
+}
+
+.insp-param__label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 3px;
+  color: var(--fg-1);
+  font-size: 11px;
+}
+
+/* 稀疏存储的可视化：改过默认值的参数标出来 */
+.insp-param__label .is-overridden {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.insp-param__reset {
+  padding: 0 4px;
+  background: none;
+  border: 0;
+  color: var(--fg-2);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.insp-param__reset:hover {
+  color: var(--accent);
+}
+
+/* -------------------------------------------------------------- controls */
+
+.ctl {
+  padding: 4px 7px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg-0);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.ctl:focus {
+  border-color: var(--accent-dim);
+}
+
+.ctl:disabled {
+  cursor: not-allowed;
+}
+
+.ctl-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* 选项说明另起一行。跟控件挤在一行时中文说明会把下拉框压成一个箭头。 */
+.ctl-hint {
+  flex-basis: 100%;
+  line-height: 1.4;
+}
+
+.ctl--num {
+  width: 76px;
+  font-family: var(--mono);
+}
+
+.ctl--str,
+.ctl--select,
+.ctl--text {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+
+.ctl--text {
+  resize: vertical;
+  font-family: var(--mono);
+}
+
+.ctl--slider {
+  flex: 1;
+  min-width: 60px;
+  padding: 0;
+  background: none;
+  border: 0;
+  accent-color: var(--accent);
+}
+
+.ctl-unit,
+.ctl-hint {
+  color: var(--fg-2);
+  font-size: 11px;
+}
+
+.ctl--select {
+  min-width: 140px;
+}
+
+.ctl-row--vec {
+  align-items: flex-start;
+}
+
+.ctl-vec {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.ctl-vec__item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ctl-vec__axis {
+  width: 12px;
+  color: var(--fg-2);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.ctl-vec .ctl--num {
+  flex: 1;
+  width: auto;
+}
+
+.ctl-lock,
+.ctl-btn {
+  padding: 3px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--fg-1);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ctl-lock:hover,
+.ctl-btn:hover {
+  border-color: var(--accent-dim);
+}
+
+.ctl-lock.is-on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ctl-check input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+
+.ctl-flags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.ctl-chip {
+  padding: 2px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ctl-chip.is-on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ctl--color {
+  width: 42px;
+  height: 24px;
+  padding: 2px;
+}
+
+.ctl-unsupported {
+  color: var(--fg-2);
+  font-size: 11px;
+  font-style: italic;
+}
+
+/* ---------------------------------------------------------- search popup */
+
+.search-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.search-popup {
+  position: fixed;
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.search-popup__input {
+  padding: 9px 12px;
+  background: var(--bg-0);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-0);
+  font: inherit;
+  outline: none;
+}
+
+.search-popup__list {
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.search-popup__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 12px;
+  background: none;
+  border: 0;
+  color: var(--fg-0);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-popup__row.is-active {
+  background: var(--accent-dim);
+}
+
+.search-popup__cat {
+  margin-left: auto;
+  color: var(--fg-2);
+  font-size: 11px;
+}
+
+.search-popup__why {
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--bg-3);
+  color: var(--fg-2);
+  font-size: 10px;
+}
+
+.search-popup__empty {
+  padding: 14px;
+  color: var(--fg-2);
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ misc */
+
+.palette__tip {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-2);
+  font-size: 11px;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 46px;
+  z-index: 50;
+  transform: translateX(-50%);
+  padding: 7px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  color: var(--fg-0);
+  font-size: 12px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+}
+
+.toast--warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}

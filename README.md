@@ -66,9 +66,9 @@ C++ 生成的 `OperatorManifest`，Rust 转发给前端。**加新算子只改 C
 ## 目录
 
 ```
-core/     C++ 核心：算子注册表 + manifest 导出。M0 只有描述，计算实体是 M2
-bridge/   Rust 桥接层：Tauri 壳，FFI 链入 core，IPC / 文件读写
-app/      前端：Vite + React + TS。M0 是节点面板，画布是 M1
+core/     C++ 核心：算子注册表 + manifest 导出。目前只有描述，计算实体是 M2
+bridge/   Rust 桥接层：Tauri 壳，FFI 链入 core，IPC / GraphDoc 结构校验 / 文件读写
+app/      前端：Vite + React + TS + React Flow。节点编辑器
 schema/   三份 JSON Schema —— 跨语言契约的真实来源
 scripts/  构建与门禁脚本
 ```
@@ -109,8 +109,13 @@ pnpm check
 
 ## 状态
 
-M0 完成 —— 三层契约打通，「C++ 加算子 → 前端自动出现」这条链路可跑。
-还不能连线、不能编辑参数、不能执行；那是 M1 和 M2。见 [roadmap](docs/roadmap.md)。
+**M1 完成。** 可以拖节点、连线、改参数、撤销重做、复制粘贴、存盘读盘，
+连线时会按端口类型校验并拒绝成环。
+
+**还不能执行** —— 算子只有描述没有计算实体，点不了「运行」。那是 M2。
+见 [roadmap](docs/roadmap.md)。
+
+前端不写单元测试，验证方式是通过 CDP 驱动真实运行的 app（见 roadmap 的 M1 验收记录）。
 
 ## License
 
