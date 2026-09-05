@@ -1,0 +1,30 @@
+[package]
+name = "lyflow"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+description = "LyFlow 桥接层：IPC、序列化、文件读写、事件推流"
+publish = false
+
+[lib]
+name = "lyflow_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+cc = "1"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+
+[features]
+# Tauri 自定义协议，release 构建需要
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true

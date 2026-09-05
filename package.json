@@ -1,0 +1,19 @@
+{
+  "name": "lyflow",
+  "private": true,
+  "version": "0.1.0",
+  "description": "通用 Vision Flow：节点图编排点云/图像算子，图在前端编辑，计算在 C++ 执行",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri",
+    "app:dev": "pnpm --filter lyflow-app dev",
+    "typecheck": "pnpm --filter lyflow-app typecheck",
+    "core:build": "powershell -ExecutionPolicy Bypass -File scripts/build-core.ps1",
+    "core:dump": "powershell -ExecutionPolicy Bypass -File scripts/dump-manifest.ps1",
+    "check": "powershell -ExecutionPolicy Bypass -File scripts/check.ps1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

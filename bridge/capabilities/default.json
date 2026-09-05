@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "主窗口的默认权限。M0 只用到自定义 command，不开任何插件权限。",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

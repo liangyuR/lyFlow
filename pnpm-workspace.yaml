@@ -1,0 +1,7 @@
+packages:
+  - app
+
+# esbuild 要跑安装脚本才能装上原生二进制，否则 vite 起不来。
+# pnpm 默认阻止所有安装脚本，这里只放行这一个。
+allowBuilds:
+  esbuild: true

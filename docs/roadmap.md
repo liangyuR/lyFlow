@@ -2,18 +2,26 @@
 
 里程碑按「能演示什么」划分，不按「写完哪个模块」划分。
 
-## M0 — 契约先行
+## M0 — 契约先行 ✅
 
 **目标：三层之间的接口定死，各自可以独立开工。**
 
-- [ ] `OperatorManifest` JSON Schema 定稿
-- [ ] `GraphDoc` JSON Schema 定稿
-- [ ] `ExecutionEvent` 格式定稿
-- [ ] C++ 侧：算子注册宏 + manifest 导出，先注册 3 个算子（load_pcd / voxel_grid / passthrough）
-- [ ] Rust 侧：能把 manifest 转发到前端，能接收 GraphDoc 落盘
-- [ ] 前端：读 manifest 渲染出节点面板（还不能连线）
+- [x] `OperatorManifest` JSON Schema 定稿
+- [x] `GraphDoc` JSON Schema 定稿
+- [x] `ExecutionEvent` 格式定稿
+- [x] C++ 侧：算子注册表 + manifest 导出 + 自检，注册 3 个算子（load_pcd / voxel_grid / passthrough）
+- [x] Rust 侧：Tauri 壳，FFI 链入 core，manifest 转发到前端，GraphDoc 结构校验 + 落盘
+- [x] 前端：读 manifest 渲染出节点面板 + 算子详情（还不能连线）
 
 产出：一份能跑通的「C++ 加算子 → 前端节点面板自动出现」的链路。这条链路通了，后面加算子就是无痛的。
+
+**验收记录**：在 `core/src/ops/` 新增一个 `.cpp` 并在 `builtin_ops.cpp` 加一行调用后重启，
+新算子出现在面板里，且树上自动长出了它所属的新分类分支 —— 前端源码零改动。
+门禁 `pnpm check` 覆盖：C++ 编译 + 算子自检 → manifest 对着 schema 校验 →
+Rust 15 个测试（含 FFI、中文穿越边界、GraphDoc round-trip）→ 前端 strict typecheck + build。
+
+**已知毛刺**：`tauri dev` 只 watch `bridge/`，改了 `core/` 的 C++ 不会自动重编，需要重启。
+算子热重载是 M3 的事，在那之前手动重启。
 
 ## M1 — 能编辑
 

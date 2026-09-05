@@ -1,0 +1,115 @@
+//
+// OperatorManifest 的 TypeScript 镜像。
+//
+// 必须与 schema/operator-manifest.schema.json 保持一致 —— 那份 schema 是契约，
+// 这里只是给编辑器用的视图。改动顺序永远是：schema -> C++ -> 这里。
+//
+// 注意：这里没有任何具体算子的知识。前端唯一的「算子知识」是
+// ParamType 到控件的映射表（M1 才用得上），见 docs/operator-manifest.md。
+//
+
+export type ParamType =
+  | "bool" | "int" | "float"
+  | "vec2f" | "vec3f" | "vec4f"
+  | "enum" | "flags"
+  | "string" | "text" | "path"
+  | "color" | "transform" | "curve";
+
+export interface PortType {
+  name: string;
+  /** 端口与连线着色。让类型系统「看得见」。 */
+  color: string;
+  castableTo?: string[];
+  doc?: string;
+}
+
+export interface Port {
+  name: string;
+  type: string;
+  label?: string;
+  doc?: string;
+  /** 仅对 inputs 有意义，缺省为 true。 */
+  required?: boolean;
+}
+
+export interface EnumOption {
+  value: string | number;
+  label: string;
+  doc?: string;
+}
+
+/** 参数联动条件。只支持对同节点其他参数的等值/包含判断。 */
+export interface Condition {
+  param: string;
+  eq?: unknown;
+  ne?: unknown;
+  in?: unknown[];
+}
+
+export interface FileFilter {
+  name: string;
+  extensions: string[];
+}
+
+export interface Param {
+  name: string;
+  type: ParamType;
+  label?: string;
+  doc?: string;
+  default: unknown;
+  group?: string;
+  advanced?: boolean;
+
+  min?: number;
+  max?: number;
+  softMin?: number;
+  softMax?: number;
+  step?: number;
+  unit?: string;
+
+  componentLabels?: string[];
+  options?: EnumOption[];
+  placeholder?: string;
+  pattern?: string;
+  rows?: number;
+  filters?: FileFilter[];
+  mode?: "open" | "save" | "dir";
+  alpha?: boolean;
+
+  visibleWhen?: Condition;
+  enabledWhen?: Condition;
+}
+
+export interface Capabilities {
+  cancellable?: boolean;
+  previewable?: boolean;
+  deterministic?: boolean;
+}
+
+export interface OperatorDesc {
+  id: string;
+  version: string;
+  aliases?: string[];
+  label: string;
+  /** 用 / 分层，决定搜索面板的树形结构。 */
+  category: string;
+  keywords?: string[];
+  doc?: string;
+  inputs: Port[];
+  outputs: Port[];
+  params: Param[];
+  capabilities?: Capabilities;
+}
+
+export interface OperatorManifestBundle {
+  schemaVersion: number;
+  generatedBy?: string;
+  types: PortType[];
+  operators: OperatorDesc[];
+}
+
+export interface CoreInfo {
+  version: string;
+  operatorCount: number;
+  typeCount: number;
+}
