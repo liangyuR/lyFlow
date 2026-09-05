@@ -16,6 +16,7 @@ void registerSegmentExtractIndices(Registry& r);
 void registerTransformMake(Registry& r);
 void registerTransformApply(Registry& r);
 void registerUtilMerge(Registry& r);
+void registerUtilReroute(Registry& r);
 
 // -- PCL --------------------------------------------------------------------
 void registerIoLoadPcd(Registry& r);

@@ -6,6 +6,7 @@ mod core_ffi;
 mod execution;
 mod graph;
 mod ulid;
+mod watcher;
 
 pub use graph::{Edge, GraphDoc, Node, PortRef};
 
@@ -33,19 +34,38 @@ pub fn run() {
         Ok(_) => {}
     }
 
+    // 上一代的 gen DLL 那时还被自己锁着，删不掉；清理只能放在下次启动（ADR-0009）。
+    let stale = core_ffi::cleanup_old_generations();
+    if stale > 0 {
+        println!("清理了 {stale} 个上次留下的热重载 DLL");
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(execution::RunManager::new())
+        .setup(|app| {
+            watcher::spawn(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::get_manifest,
             commands::get_core_info,
             commands::save_graph,
             commands::load_graph,
             commands::validate_graph,
+            commands::plan_graph,
+            commands::clear_cache,
+            commands::cache_stats,
             commands::run_graph,
             commands::cancel_run,
             commands::get_output_info,
             commands::get_output_cloud,
+            commands::get_recent_files,
+            commands::push_recent_file,
+            commands::write_backup,
+            commands::backup_status,
+            commands::read_backup,
+            commands::discard_backup,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Tauri 失败");

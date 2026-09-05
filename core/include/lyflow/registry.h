@@ -28,9 +28,11 @@ class Registry {
   // 序列化为符合 schema/operator-manifest.schema.json 的 JSON。
   std::string toManifestJson() const;
 
- private:
+  /// 进程内那一份走 instance()。允许自建是给测试和将来的子图用的 ——
+  /// 一个隔离的注册表比「往全局塞个坏算子再想办法收拾」安全得多。
   Registry() = default;
 
+ private:
   std::vector<PortType> types_;
   std::vector<OperatorDesc> operators_;
 };

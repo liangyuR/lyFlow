@@ -29,6 +29,43 @@ export interface Diagnostic {
 export interface GraphDiagnostic extends Diagnostic {
   nodeId: string;
   severity: "error" | "warning";
+  /** "diagnostic" 或 "migration"。老 core 不带这个字段，缺省按普通诊断。 */
+  kind?: "diagnostic" | "migration";
+}
+
+/** 迁移动作（ADR-0008）：C++ 只说「该改成什么」，写回 doc 是 applyMigrations 的事。
+ *  params 是**完整**的参数对象而不是补丁 —— 改名参数没法用补丁表达。 */
+export interface MigrationAction extends GraphDiagnostic {
+  kind: "migration";
+  op: string;
+  opVersion: string;
+  params: Record<string, unknown>;
+  notes?: string[];
+}
+
+export function isMigration(d: GraphDiagnostic): d is MigrationAction {
+  return d.kind === "migration";
+}
+
+/** `plan_graph` 的每节点结果。缓存判定的唯一权威在 C++（ADR-0007）。 */
+export interface PlanNode {
+  nodeId: string;
+  cacheKey: string;
+  cached: boolean;
+  level: number;
+  /** 至少一个直接上游没有缓存 —— 这个节点这次一定得重算。 */
+  upstreamMissing: boolean;
+  bypass: boolean;
+}
+
+/** `cache_stats` 的返回。 */
+export interface CacheStats {
+  entries: number;
+  bytes: number;
+  budgetBytes: number;
+  hits: number;
+  misses: number;
+  evictions: number;
 }
 
 export interface OutputStat {
@@ -40,6 +77,10 @@ export interface OutputStat {
 export interface NodeStats {
   elementCount?: number;
   byteSize?: number;
+  /** state=skipped 是因为命中缓存。与 bypassed 互斥。 */
+  cached?: boolean;
+  /** state=skipped 是因为节点被静音，输出由输入透传而来。 */
+  bypassed?: boolean;
   outputs?: OutputStat[];
 }
 
@@ -53,10 +94,12 @@ interface EventBase {
 export interface RunStartedEvent extends EventBase {
   kind: "run_started";
   nodeCount?: number;
+  /** 本次实际用了几个 worker（E2）。 */
+  maxParallel?: number;
   plan?: string[];
   targets?: string[];
-  /** 编译结果。M3 的精确 stale 与「将重算 N 个节点」提示靠它。 */
-  nodes?: { id: string; cacheKey: string; level: number }[];
+  /** 编译结果。精确 stale 与「将重算 N 个节点」提示靠它（ADR-0007）。 */
+  nodes?: { id: string; cacheKey: string; level: number; bypass?: boolean }[];
 }
 
 export interface NodeStateEvent extends EventBase {

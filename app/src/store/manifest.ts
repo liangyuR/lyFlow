@@ -25,6 +25,8 @@ interface ManifestState {
   typesByName: Map<string, PortType>;
 
   load: () => Promise<void>;
+  /** 热重载换代（ADR-0009）：整份替换，当前 doc 一个字都不动。 */
+  replaceBundle: (bundle: OperatorManifestBundle, generation: number) => void;
 }
 
 function index(bundle: OperatorManifestBundle) {
@@ -60,7 +62,35 @@ export const useManifestStore = create<ManifestState>((set) => ({
       set({ status: "error", error: e instanceof Error ? e.message : String(e) });
     }
   },
+
+  replaceBundle: (bundle, generation) => {
+    set((prev) => ({
+      status: "ready",
+      error: null,
+      bundle,
+      coreInfo: prev.coreInfo
+        ? {
+            ...prev.coreInfo,
+            operatorCount: bundle.operators.length,
+            typeCount: bundle.types.length,
+            generation,
+          }
+        : prev.coreInfo,
+      ...index(bundle),
+    }));
+  },
 }));
+
+/** doc 里引用了但当前 core 没有的算子。热重载删掉一个算子之后，
+ *  这些节点保留在 doc 里显示成「算子缺失」，可删可等（1.5）。 */
+export function missingOperators(ops: readonly string[]): Set<string> {
+  const known = useManifestStore.getState().operatorsById;
+  const out = new Set<string>();
+  for (const id of ops) {
+    if (!known.has(id)) out.add(id);
+  }
+  return out;
+}
 
 /** 按 op id 现查算子描述。节点渲染必须走这里，不要缓存结果。 */
 export function useOperator(id: string): OperatorDesc | undefined {

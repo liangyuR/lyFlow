@@ -1,0 +1,26 @@
+/* 参数右键菜单 + 数字框拖动改值（m3-plan §2.3 / §2.4）。 */
+
+.ctl-wrap {
+  min-width: 0;
+}
+
+.param-menu {
+  min-width: 168px;
+}
+
+/* 拖动的可供性：光标提示这个框可以横向拖 */
+.ctl--num.is-draggable:not(:disabled) {
+  cursor: ew-resize;
+}
+
+.ctl--num[data-dragging="1"] {
+  border-color: var(--accent-dim);
+  user-select: none;
+}
+
+/* 拖动期间全局压掉选中与光标，否则横拖会在页面上刷出一片蓝 */
+body.param-dragging,
+body.param-dragging * {
+  cursor: ew-resize !important;
+  user-select: none !important;
+}

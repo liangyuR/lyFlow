@@ -164,6 +164,8 @@ bool checkRange(const Param& p, const Value& v, std::string& message) {
 
 // ------------------------------------------------------------------ 类型兼容
 
+constexpr const char* kAnyType = "Any";
+
 bool typesCompatible(const Registry& r, const std::string& from, const std::string& to) {
   if (from == to) return true;
   if (from == "Any" || to == "Any") return true;
@@ -179,7 +181,53 @@ const Port* findPort(const std::vector<Port>& ports, const std::string& name) {
   return nullptr;
 }
 
+const Migration* findMigration(const OperatorDesc& op, int fromMajor) {
+  for (const Migration& m : op.migrations) {
+    if (m.fromMajor == fromMajor && m.apply) return &m;
+  }
+  return nullptr;
+}
+
+// ------------------------------------------------------------------ 参数联动
+
+bool valueEquals(const Value& a, const Value& b) {
+  if (a.kind() != b.kind()) return false;
+  switch (a.kind()) {
+    case Value::Kind::Null:     return true;
+    case Value::Kind::Bool:     return a.boolValue() == b.boolValue();
+    case Value::Kind::Int:      return a.intValue() == b.intValue();
+    case Value::Kind::Float:    return a.floatValue() == b.floatValue();
+    case Value::Kind::String:   return a.stringValue() == b.stringValue();
+    case Value::Kind::FloatVec: return a.vecValue() == b.vecValue();
+  }
+  return false;
+}
+
+/// 条件未设置视为成立。引用了不存在的参数也视为成立 —— 那是 Registry::validate()
+/// 的活，校验期不该因为算子描述的笔误把用户的图判成非法。
+bool conditionHolds(const Condition& c, const ParamMap& params) {
+  if (!c.isSet()) return true;
+  auto it = params.find(c.param);
+  if (it == params.end()) return true;
+  if (!c.eq.isNull()) return valueEquals(it->second, c.eq);
+  if (!c.in.empty()) {
+    for (const Value& v : c.in) {
+      if (valueEquals(it->second, v)) return true;
+    }
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
+
+// ------------------------------------------------------------------- Any 推导
+
+const std::string& effectiveType(const std::unordered_map<std::string, std::string>& resolved,
+                                 const std::string& port, const std::string& declared) {
+  auto it = resolved.find(port);
+  return it == resolved.end() ? declared : it->second;
+}
 
 // ------------------------------------------------------- 规范化参数 JSON
 
@@ -254,15 +302,46 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     }
     prepared[i].op = op;
 
-    // 版本。主版本不同是破坏性变更 —— 参数含义可能整个变了，不能猜。
+    // -- 别名重定向与迁移（E3）。先算出「该用哪份参数」，再拿它去做常规校验。
+    nlohmann::json params = rn.params;
+    std::vector<std::string> notes;
+    bool migrated = false;
+    if (op->id != rn.op) {
+      notes.push_back("算子 '" + rn.op + "' 已重命名为 '" + op->id + "'");
+      migrated = true;
+    }
+
+    const Semver current = parseSemver(op->version);
     if (!rn.opVersion.empty()) {
       const Semver saved = parseSemver(rn.opVersion);
-      const Semver current = parseSemver(op->version);
       if (saved.valid && current.valid) {
-        if (saved.major != current.major) {
+        if (saved.major > current.major) {
           fail(i, "version_mismatch",
-               "此节点存于 " + rn.op + " v" + rn.opVersion + "，当前是 v" + op->version +
-                   "（主版本不同，参数含义可能已变更）");
+               "此节点存于 " + op->id + " v" + rn.opVersion + "，比当前的 v" + op->version +
+                   " 还新，无法降级");
+        } else if (saved.major < current.major) {
+          bool chainOk = true;
+          for (int m = saved.major; m < current.major && chainOk; ++m) {
+            const Migration* step = findMigration(*op, m);
+            if (!step) { chainOk = false; break; }
+            try {
+              nlohmann::json next = step->apply(params);
+              if (!next.is_object()) { chainOk = false; break; }
+              params = std::move(next);
+            } catch (...) {
+              chainOk = false;
+              break;
+            }
+            notes.push_back("v" + std::to_string(m) + " → v" + std::to_string(m + 1) +
+                            "：参数已按迁移规则改写");
+          }
+          if (!chainOk) {
+            fail(i, "version_mismatch",
+                 "此节点存于 " + op->id + " v" + rn.opVersion + "，当前是 v" + op->version +
+                     "（主版本不同，而算子没有提供完整的迁移链）");
+          } else {
+            migrated = true;
+          }
         } else if (saved.minor != current.minor) {
           diags.warn(rn.id, Phase::Validate, "version_mismatch",
                      "此节点存于 v" + rn.opVersion + "，当前是 v" + op->version +
@@ -270,17 +349,28 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
         }
       }
     }
+    if (migrated && prepared[i].valid) {
+      MigrationPlan plan;
+      plan.op = op->id;
+      plan.opVersion = op->version;
+      plan.paramsJson = params.dump();
+      plan.notes = notes;
+      diags.migration(rn.id, "节点已从 " + rn.op + " v" +
+                                 (rn.opVersion.empty() ? std::string("?") : rn.opVersion) +
+                                 " 迁移到 " + op->id + " v" + op->version,
+                      std::move(plan));
+    }
 
     // 参数：先查未知键，再逐个规整 + 查范围。
-    for (auto it = rn.params.begin(); it != rn.params.end(); ++it) {
+    for (auto it = params.begin(); it != params.end(); ++it) {
       if (!findParam(*op, it.key())) {
         fail(i, "unknown_param", "算子没有参数 '" + it.key() + "'", it.key());
       }
     }
     for (const Param& p : op->params) {
       Value v = p.def;
-      auto it = rn.params.find(p.name);
-      if (it != rn.params.end()) {
+      auto it = params.find(p.name);
+      if (it != params.end()) {
         std::string message;
         if (!coerceParam(p, *it, v, message)) {
           fail(i, "bad_param", (p.label.empty() ? p.name : p.label) + "：" + message, p.name);
@@ -291,20 +381,33 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
       if (!checkRange(p, v, rangeMessage)) {
         fail(i, "bad_param", (p.label.empty() ? p.name : p.label) + "：" + rangeMessage, p.name);
       }
-      // path 参数为空 = 用户还没选文件。让它在校验期就红，而不是到执行时
-      // 报一句「打不开 ''」。
-      if (p.type == ParamType::Path && v.kind() == Value::Kind::String &&
-          v.stringValue().empty()) {
+      prepared[i].params[p.name] = std::move(v);
+    }
+    // 必填只对**可见**的参数成立（1.6）：被 visibleWhen 藏起来的 path 参数
+    // 用户根本没机会选文件，为它标红只会让人找不到那个红框在哪。
+    for (const Param& p : op->params) {
+      if (p.type != ParamType::Path) continue;
+      if (!conditionHolds(p.visibleWhen, prepared[i].params)) continue;
+      const Value& v = prepared[i].params[p.name];
+      if (v.kind() == Value::Kind::String && v.stringValue().empty()) {
         fail(i, "bad_param", (p.label.empty() ? p.name : p.label) + "：还没有选择文件", p.name);
       }
-      prepared[i].params[p.name] = std::move(v);
     }
   }
 
-  // -- 边：端口存在性与类型兼容 ---------------------------------------------
+  // -- 边：端口存在性 -------------------------------------------------------
   std::vector<std::vector<InputBinding>> inputsOf(n);
   std::vector<std::unordered_map<std::string, int>> consumersOf(n);
   std::vector<std::set<std::string>> connectedInputs(n);
+
+  struct Wire {
+    std::size_t fi = 0, ti = 0;
+    const Port* outPort = nullptr;
+    const Port* inPort = nullptr;
+    const RawEdge* edge = nullptr;
+  };
+  std::vector<Wire> wires;
+  wires.reserve(graph.edges.size());
 
   for (const RawEdge& e : graph.edges) {
     const std::size_t fi = indexById.at(e.fromNode);
@@ -323,15 +426,46 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
       fail(ti, "unknown_port", "算子没有输入端口 '" + e.toPort + "'", {}, e.toPort);
       continue;
     }
-    if (!typesCompatible(registry, outPort->type, inPort->type)) {
-      fail(ti, "type_mismatch",
-           "类型不匹配：" + outPort->type + " → " + inPort->type + "（端口 " + e.toPort + "）",
-           {}, e.toPort);
+    wires.push_back(Wire{fi, ti, outPort, inPort, &e});
+  }
+
+  // -- Any 推导（E6）。一个节点的全部 Any 端口共用一个类型变量 —— reroute 与
+  // debug view 这类透传算子正是这个语义，别的算子干脆别声明多个 Any。
+  std::vector<std::string> anyType(n);
+  auto concreteType = [&](std::size_t node, const Port* port) -> const std::string& {
+    return port->type == kAnyType ? anyType[node] : port->type;
+  };
+  for (std::size_t round = 0; round <= n; ++round) {
+    bool changed = false;
+    for (const Wire& w : wires) {
+      const std::string& fromT = concreteType(w.fi, w.outPort);
+      const std::string& toT = concreteType(w.ti, w.inPort);
+      if (!fromT.empty() && toT.empty() && w.inPort->type == kAnyType) {
+        anyType[w.ti] = fromT;
+        changed = true;
+      } else if (!toT.empty() && fromT.empty() && w.outPort->type == kAnyType) {
+        anyType[w.fi] = toT;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+
+  // -- 类型兼容（按推导后的实际类型）+ 装配输入绑定 -------------------------
+  for (const Wire& w : wires) {
+    const RawEdge& e = *w.edge;
+    const std::string& fromT = concreteType(w.fi, w.outPort);
+    const std::string& toT = concreteType(w.ti, w.inPort);
+    // 推导不出来的一端仍是 Any，不报错：脚本生成的图里孤立的 reroute 很常见。
+    const bool bothKnown = !fromT.empty() && !toT.empty();
+    if (bothKnown && !typesCompatible(registry, fromT, toT)) {
+      fail(w.ti, "type_mismatch",
+           "类型不匹配：" + fromT + " → " + toT + "（端口 " + e.toPort + "）", {}, e.toPort);
       continue;
     }
-    connectedInputs[ti].insert(e.toPort);
-    inputsOf[ti].push_back(InputBinding{e.toPort, static_cast<int>(fi), e.fromPort});
-    consumersOf[fi][e.fromPort] += 1;
+    connectedInputs[w.ti].insert(e.toPort);
+    inputsOf[w.ti].push_back(InputBinding{e.toPort, static_cast<int>(w.fi), e.fromPort});
+    consumersOf[w.fi][e.fromPort] += 1;
   }
 
   for (std::size_t i = 0; i < n; ++i) {
@@ -416,8 +550,17 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     pn.op = prepared[id].op;
     pn.level = level[id];
     pn.valid = prepared[id].valid;
+    pn.bypass = graph.nodes[id].bypass;
     pn.errors = prepared[id].errors;
     pn.params = std::move(prepared[id].params);
+    if (pn.op && !anyType[id].empty()) {
+      for (const Port& p : pn.op->inputs) {
+        if (p.type == kAnyType) pn.inputTypes[p.name] = anyType[id];
+      }
+      for (const Port& p : pn.op->outputs) {
+        if (p.type == kAnyType) pn.outputTypes[p.name] = anyType[id];
+      }
+    }
     for (const InputBinding& b : inputsOf[id]) {
       InputBinding remapped = b;
       remapped.fromNode = planIndex[static_cast<std::size_t>(b.fromNode)];
@@ -430,7 +573,19 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
   for (const RawEdge& e : graph.edges) {
     const int fi = planIndex[indexById.at(e.fromNode)];
     const int ti = planIndex[indexById.at(e.toNode)];
-    if (fi >= 0 && ti >= 0) out.nodes[static_cast<std::size_t>(fi)].consumers[e.fromPort] += 1;
+    if (fi < 0 || ti < 0) continue;
+    out.nodes[static_cast<std::size_t>(fi)].consumers[e.fromPort] += 1;
+  }
+
+  // 并行调度的依赖计数（E2）。按**输入绑定**去重而不是按边：类型不兼容的边
+  // 已经被丢掉了，照着边算会让下游永远等一个不会来的上游。
+  for (std::size_t i = 0; i < out.nodes.size(); ++i) {
+    std::set<int> ups;
+    for (const InputBinding& b : out.nodes[i].inputs) {
+      if (b.fromNode >= 0) ups.insert(b.fromNode);
+    }
+    out.nodes[i].upstream.assign(ups.begin(), ups.end());
+    for (int u : ups) out.nodes[static_cast<std::size_t>(u)].downstream.push_back(static_cast<int>(i));
   }
 
   // -- cacheKey：内容寻址（D4）--------------------------------------------
@@ -439,6 +594,8 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     Hasher h;
     h.add(pn.op->id);
     h.add(pn.op->version);
+    // bypass 改变的是结果本身，所以必须进键 —— 不然静音再取消静音会拿到旧结果。
+    h.add(pn.bypass ? std::string("bypass") : std::string());
     h.add(canonicalParamsJson(pn.params));
     if (pn.op->externalKey) {
       ParamView view(pn.params, options.baseDir);

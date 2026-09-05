@@ -1,16 +1,17 @@
 //! Tauri commands —— 前端能调到的全部东西。错误一律是 String：
 //! 前端拿到错误只显示给人看，不做程序化分支。
 
-use serde::Serialize;
-use std::path::PathBuf;
-use std::sync::OnceLock;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::sync::RwLock;
+use tauri::Manager;
 
 use crate::core_ffi;
 use crate::execution::{encode_cloud, RunManager};
 use crate::graph::GraphDoc;
 
-/// manifest 在进程生命周期内不变（热重载是 M3 的事），解析一次就够。
-static MANIFEST: OnceLock<serde_json::Value> = OnceLock::new();
+/// 解析过的 manifest，连同它属于第几代 core。热重载换代后这份要作废（ADR-0009）。
+static MANIFEST: RwLock<Option<(u32, serde_json::Value)>> = RwLock::new(None);
 
 #[derive(Serialize)]
 pub struct CoreInfo {
@@ -19,23 +20,40 @@ pub struct CoreInfo {
     pub operator_count: usize,
     #[serde(rename = "typeCount")]
     pub type_count: usize,
+    /// 热重载换了几代。前端拿它判断 manifest 要不要重取。
+    pub generation: u32,
+    /// 开发期才是 true：安装包里没有可盯的 CMake 产物。
+    #[serde(rename = "hotReload")]
+    pub hot_reload: bool,
 }
 
-fn manifest_value() -> Result<&'static serde_json::Value, String> {
-    if let Some(v) = MANIFEST.get() {
-        return Ok(v);
+/// `load_graph` 的回包。迁移动作由前端以语义化动作写回 doc（ADR-0008）——
+/// 桥接层不改图，C++ 不拥有文档，诊断是两者之间唯一干净的通道。
+#[derive(Serialize)]
+pub struct LoadedGraph {
+    pub doc: GraphDoc,
+    pub migrations: Vec<serde_json::Value>,
+}
+
+fn manifest_value() -> Result<serde_json::Value, String> {
+    let generation = core_ffi::generation();
+    if let Some((cached, value)) = MANIFEST.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if *cached == generation {
+            return Ok(value.clone());
+        }
     }
     let raw = core_ffi::manifest_json()?;
     // 在边界上解析一次，等于顺手验证了 C++ 那个手写 JSON writer 的输出。
     // 它坏掉的话应该在这里炸，而不是让前端拿到半截 JSON 去猜。
     let value: serde_json::Value = serde_json::from_str(&raw)
         .map_err(|e| format!("core 返回的 manifest 不是合法 JSON: {e}"))?;
-    Ok(MANIFEST.get_or_init(|| value))
+    *MANIFEST.write().unwrap_or_else(|e| e.into_inner()) = Some((generation, value.clone()));
+    Ok(value)
 }
 
 #[tauri::command]
 pub fn get_manifest() -> Result<serde_json::Value, String> {
-    manifest_value().cloned()
+    manifest_value()
 }
 
 #[tauri::command]
@@ -45,6 +63,9 @@ pub fn get_core_info() -> Result<CoreInfo, String> {
         version: core_ffi::version(),
         operator_count: m["operators"].as_array().map_or(0, Vec::len),
         type_count: m["types"].as_array().map_or(0, Vec::len),
+        generation: core_ffi::generation(),
+        #[allow(clippy::redundant_closure_for_method_calls)]
+        hot_reload: core_ffi::watch_source().is_some(),
     })
 }
 
@@ -63,12 +84,29 @@ pub fn save_graph(path: String, doc: GraphDoc) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn load_graph(path: String) -> Result<GraphDoc, String> {
+pub fn load_graph(path: String) -> Result<LoadedGraph, String> {
     let text = std::fs::read_to_string(&path).map_err(|e| format!("读取 {path} 失败: {e}"))?;
     let doc: GraphDoc =
         serde_json::from_str(&text).map_err(|e| format!("{path} 不是合法的 GraphDoc: {e}"))?;
     doc.validate_structure().map_err(|e| e.to_string())?;
-    Ok(doc)
+    let migrations = migrations_of(&doc, Some(path))?;
+    Ok(LoadedGraph { doc, migrations })
+}
+
+/// 走一遍 C++ 的 validate，把 kind=migration 的诊断挑出来。
+/// 别名重定向与主版本迁移都在里面，前端只管把它们写回 doc。
+fn migrations_of(doc: &GraphDoc, path: Option<String>) -> Result<Vec<serde_json::Value>, String> {
+    let core = core_ffi::core()?;
+    let json = serde_json::to_string(doc).map_err(|e| e.to_string())?;
+    let raw = core
+        .validate(&json, &base_dir_of(path))
+        .map_err(|e| e.to_string())?;
+    let diags: Vec<serde_json::Value> =
+        serde_json::from_str(&raw).map_err(|e| format!("core 返回的诊断不是合法 JSON: {e}"))?;
+    Ok(diags
+        .into_iter()
+        .filter(|d| d["kind"] == "migration")
+        .collect())
 }
 
 // --------------------------------------------------------------------- 执行
@@ -127,6 +165,34 @@ pub fn cancel_run(runs: tauri::State<'_, RunManager>, #[allow(non_snake_case)] r
     runs.cancel(&runId);
 }
 
+/// 编译一次但不执行，报告每节点的 cacheKey 与是否已缓存（ADR-0007）。
+/// 前端的 stale 标记只读它的结论 —— 自己推一定会在 IO 算子上错。
+#[tauri::command]
+pub fn plan_graph(
+    doc: GraphDoc,
+    #[allow(non_snake_case)] graphPath: Option<String>,
+    targets: Option<Vec<String>>,
+) -> Result<serde_json::Value, String> {
+    let core = core_ffi::core()?;
+    let json = serde_json::to_string(&doc).map_err(|e| e.to_string())?;
+    let raw = core
+        .plan(&json, &base_dir_of(graphPath), &targets.unwrap_or_default())
+        .map_err(|e| e.to_string())?;
+    serde_json::from_str(&raw).map_err(|e| format!("core 返回的计划不是合法 JSON: {e}"))
+}
+
+#[tauri::command]
+pub fn clear_cache() -> Result<(), String> {
+    core_ffi::core()?.cache_clear();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cache_stats() -> Result<serde_json::Value, String> {
+    let raw = core_ffi::core()?.cache_stats().map_err(|e| e.to_string())?;
+    serde_json::from_str(&raw).map_err(|e| format!("core 返回的缓存统计不是合法 JSON: {e}"))
+}
+
 /// 某节点全部输出的 { port, type, elementCount, byteSize }。
 #[tauri::command]
 pub fn get_output_info(
@@ -153,6 +219,123 @@ pub fn get_output_cloud(
         .output_cloud(&runId, &nodeId, &port, maxPoints.unwrap_or(2_000_000))
         .map_err(|e| e.to_string())?;
     Ok(tauri::ipc::Response::new(encode_cloud(&view)))
+}
+
+// ---- 最近文件与备份
+
+/// 备份文件名：`<file>~`。编辑器的老约定，一眼看得出是什么，也不会被
+/// `*.lyflow.json` 的通配符扫到。
+fn backup_path(path: &str) -> PathBuf {
+    PathBuf::from(format!("{path}~"))
+}
+
+fn modified_ms(path: &Path) -> Option<u64> {
+    let meta = std::fs::metadata(path).ok()?;
+    let t = meta.modified().ok()?;
+    Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64)
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct RecentEntry {
+    pub path: String,
+    /// 毫秒时间戳，前端按它排序与显示。
+    #[serde(rename = "openedAt")]
+    pub opened_at: u64,
+}
+
+fn recent_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("拿不到 app data 目录: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 {} 失败: {e}", dir.display()))?;
+    Ok(dir.join("recent.json"))
+}
+
+/// 最多 10 条。读不出来就当空列表 —— 最近文件坏了不该拦住用户开 app。
+#[tauri::command]
+pub fn get_recent_files(app: tauri::AppHandle) -> Vec<RecentEntry> {
+    let Ok(path) = recent_file(&app) else {
+        return Vec::new();
+    };
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Vec<RecentEntry>>(&t).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn push_recent_file(app: tauri::AppHandle, path: String) -> Result<Vec<RecentEntry>, String> {
+    let mut list = get_recent_files(app.clone());
+    list.retain(|e| e.path != path);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    list.insert(
+        0,
+        RecentEntry {
+            path,
+            opened_at: now,
+        },
+    );
+    list.truncate(10);
+    let file = recent_file(&app)?;
+    std::fs::write(&file, serde_json::to_string_pretty(&list).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("写入 {} 失败: {e}", file.display()))?;
+    Ok(list)
+}
+
+/// 定时备份。只在有文件路径时才有意义 —— 没存过盘的图没有 `<file>~` 可写。
+#[tauri::command]
+pub fn write_backup(path: String, doc: GraphDoc) -> Result<(), String> {
+    let text = serde_json::to_string(&doc).map_err(|e| e.to_string())?;
+    let target = backup_path(&path);
+    std::fs::write(&target, text).map_err(|e| format!("写入 {} 失败: {e}", target.display()))
+}
+
+#[derive(Serialize)]
+pub struct BackupStatus {
+    pub exists: bool,
+    /// 备份比正文新 —— 上次是崩溃或强杀退出的，值得问一句要不要恢复。
+    pub newer: bool,
+    #[serde(rename = "backupModified")]
+    pub backup_modified: Option<u64>,
+    #[serde(rename = "fileModified")]
+    pub file_modified: Option<u64>,
+}
+
+#[tauri::command]
+pub fn backup_status(path: String) -> BackupStatus {
+    let backup = backup_path(&path);
+    let backup_modified = modified_ms(&backup);
+    let file_modified = modified_ms(Path::new(&path));
+    BackupStatus {
+        exists: backup_modified.is_some(),
+        newer: match (backup_modified, file_modified) {
+            (Some(b), Some(f)) => b > f + 1000,
+            (Some(_), None) => true,
+            _ => false,
+        },
+        backup_modified,
+        file_modified,
+    }
+}
+
+#[tauri::command]
+pub fn read_backup(path: String) -> Result<LoadedGraph, String> {
+    let backup = backup_path(&path);
+    load_graph(backup.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn discard_backup(path: String) -> Result<(), String> {
+    let backup = backup_path(&path);
+    match std::fs::remove_file(&backup) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("删除 {} 失败: {e}", backup.display())),
+    }
 }
 
 #[cfg(test)]
@@ -201,18 +384,119 @@ mod tests {
         let doc: GraphDoc = serde_json::from_str(raw).unwrap();
 
         save_graph(path.to_string_lossy().into_owned(), doc).expect("save_graph 失败");
-        let back = load_graph(path.to_string_lossy().into_owned()).expect("load_graph 失败");
+        let loaded = load_graph(path.to_string_lossy().into_owned()).expect("load_graph 失败");
+        let back = loaded.doc;
 
         assert_eq!(back.nodes.len(), 2);
         assert_eq!(back.edges.len(), 1);
         assert_eq!(back.nodes[1].params["leafSize"][0], 0.005);
         // ui 是纯 UI 状态，桥接层原样透传不解释（ADR-0002）
         assert_eq!(back.nodes[1].ui.as_ref().unwrap()["title"], "粗降采样");
+        // 两个节点都是当前版本，没有迁移可做
+        assert!(loaded.migrations.is_empty(), "{:?}", loaded.migrations);
 
         // 存盘格式必须是可 diff 的：缩进 + 结尾换行
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("\n  \"id\""), "存盘不是 pretty JSON");
         assert!(text.ends_with('\n'), "存盘缺结尾换行");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn graph_with(nodes: serde_json::Value, edges: serde_json::Value) -> GraphDoc {
+        serde_json::from_value(serde_json::json!({
+            "schemaVersion": 1, "id": "01J8XQZ4K7N3M2R5V8W1YB6TCD",
+            "nodes": nodes, "edges": edges
+        }))
+        .unwrap()
+    }
+
+    /// ADR-0007：stale 标记的权威在 C++。前端只对 cacheKey，不自己推。
+    #[test]
+    fn plan_graph_reports_cache_keys_and_levels() {
+        clear_cache().unwrap();
+        let doc = graph_with(
+            serde_json::json!([
+                {"id": "g", "op": "gen.synthetic", "params": {"pointCount": 3000, "seed": 77}},
+                {"id": "v", "op": "filter.voxel_grid"}
+            ]),
+            serde_json::json!([
+                {"id": "e", "from": {"node": "g", "port": "cloud"},
+                            "to": {"node": "v", "port": "cloud"}}
+            ]),
+        );
+
+        let plan = plan_graph(doc.clone(), None, None).expect("plan_graph 失败");
+        let nodes = plan.as_array().expect("计划不是数组");
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0]["nodeId"], "g");
+        assert_eq!(nodes[0]["level"], 0);
+        assert_eq!(nodes[1]["level"], 1);
+        assert_eq!(nodes[0]["cached"], false);
+        assert_eq!(nodes[0]["cacheKey"].as_str().unwrap().len(), 32);
+        // 同一张图两次编译必须给出同一批 cacheKey，否则 stale 标记会自己闪
+        let again = plan_graph(doc, None, None).unwrap();
+        assert_eq!(again, plan);
+    }
+
+    #[test]
+    fn plan_graph_returns_diagnostics_when_validation_fails() {
+        let doc = graph_with(
+            serde_json::json!([{"id": "a", "op": "no.such.op"}]),
+            serde_json::json!([]),
+        );
+        let out = plan_graph(doc, None, None).unwrap();
+        let items = out.as_array().unwrap();
+        assert_eq!(items[0]["kind"], "diagnostic");
+        assert_eq!(items[0]["code"], "unknown_op");
+    }
+
+    #[test]
+    fn cache_stats_has_the_documented_shape() {
+        let stats = cache_stats().expect("cache_stats 失败");
+        for key in ["entries", "bytes", "budgetBytes", "hits", "misses", "evictions"] {
+            assert!(stats[key].is_number(), "{key} 不是数字: {stats}");
+        }
+        assert!(stats["budgetBytes"].as_u64().unwrap() > 0);
+    }
+
+    /// ADR-0008：C++ 出诊断，前端写回。桥接层只负责把迁移动作从诊断里挑出来。
+    #[test]
+    fn load_graph_returns_migrations_for_an_old_document() {
+        let dir = std::env::temp_dir().join("lyflow-test-migration");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("old.lyflow.json");
+        std::fs::write(
+            &path,
+            r#"{
+                "schemaVersion": 1,
+                "id": "01J8XQZ4K7N3M2R5V8W1YB6TCD",
+                "nodes": [
+                    {"id": "g", "op": "gen.synthetic", "opVersion": "1.0.0",
+                     "params": {"pointCount": 1000}},
+                    {"id": "s", "op": "filter.random_sample", "opVersion": "1.0.0",
+                     "params": {"count": 250, "seed": 3}}
+                ],
+                "edges": [
+                    {"id": "e", "from": {"node": "g", "port": "cloud"},
+                                "to": {"node": "s", "port": "cloud"}}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let loaded = load_graph(path.to_string_lossy().into_owned()).expect("load_graph 失败");
+        assert_eq!(loaded.doc.nodes.len(), 2);
+        assert_eq!(loaded.migrations.len(), 1, "{:?}", loaded.migrations);
+        let m = &loaded.migrations[0];
+        assert_eq!(m["kind"], "migration");
+        assert_eq!(m["nodeId"], "s");
+        assert_eq!(m["op"], "filter.random_sample");
+        assert_eq!(m["opVersion"], "2.0.0");
+        assert_eq!(m["params"]["keepCount"], 250);
+        assert!(m["params"].get("count").is_none());
+        // 文档本身没被改写：写回 doc 是前端的事，桥接层不改图
+        assert_eq!(loaded.doc.nodes[1].params["count"], 250);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

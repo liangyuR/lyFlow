@@ -4,8 +4,8 @@
 import type { Edge, Node } from "@xyflow/react";
 
 import type { GraphDoc } from "../types/graph";
-import type { GraphContext } from "./typecheck";
-import { findPort } from "./typecheck";
+import type { AnyTypes, GraphContext } from "./typecheck";
+import { ANY, findPort, inferAnyTypes } from "./typecheck";
 
 /** 节点上只放 op id 和 UI 状态。算子描述由节点组件按 op 现查 —— 热重载的前提。 */
 export interface OperatorNodeData extends Record<string, unknown> {
@@ -13,6 +13,10 @@ export interface OperatorNodeData extends Record<string, unknown> {
   /** null 表示用 manifest 的 label */
   title: string | null;
   collapsed: boolean;
+  /** 静音（E5）。执行语义，来自 doc 而不是 UI 状态。 */
+  bypass: boolean;
+  /** 该节点 Any 端口推导出的实际类型，null = 推不出来（E6）。 */
+  anyType: string | null;
 }
 
 export type LyNode = Node<OperatorNodeData, "operator">;
@@ -36,6 +40,7 @@ export function toReactFlow(
   ctx: GraphContext,
   selection: Selection = EMPTY_SELECTION,
   measured?: MeasuredSizes,
+  anyTypes: AnyTypes = inferAnyTypes(ctx, doc),
 ): { nodes: LyNode[]; edges: LyEdge[] } {
   const nodes: LyNode[] = doc.nodes.map((n) => {
     const size = measured?.get(n.id);
@@ -48,6 +53,8 @@ export function toReactFlow(
         opId: n.op,
         title: n.ui?.title ?? null,
         collapsed: n.ui?.collapsed ?? false,
+        bypass: n.bypass === true,
+        anyType: anyTypes.get(n.id) ?? null,
       },
       ...(size ? { measured: size } : {}),
       ...(n.ui?.width != null ? { width: n.ui.width } : {}),
@@ -55,7 +62,7 @@ export function toReactFlow(
   });
 
   const edges: LyEdge[] = doc.edges.map((e) => {
-    const color = edgeColor(doc, ctx, e.from.node, e.from.port);
+    const color = edgeColor(doc, ctx, e.from.node, e.from.port, anyTypes);
     return {
       id: e.id,
       source: e.from.node,
@@ -63,6 +70,8 @@ export function toReactFlow(
       target: e.to.node,
       targetHandle: e.to.port,
       selected: selection.edges.has(e.id),
+      // 拖离输入端时另一端跟着鼠标走，而不是直接删掉（交互清单 P1 #19）
+      reconnectable: "target",
       // 连线按源端口类型着色 —— 让类型系统「看得见」（交互清单 P0 #8）
       style: { stroke: color, strokeWidth: 2 },
     };
@@ -71,18 +80,55 @@ export function toReactFlow(
   return { nodes, edges };
 }
 
-/** 连线颜色取自源端口的类型。查不到时给灰色，不要静默用默认色掩盖问题。 */
+/** 连线颜色取自源端口的**实际**类型：串了 reroute 之后颜色也要跟着源变（E6）。 */
 function edgeColor(
   doc: GraphDoc,
   ctx: GraphContext,
   nodeId: string,
   portName: string,
+  anyTypes: AnyTypes,
 ): string {
   const node = doc.nodes.find((n) => n.id === nodeId);
   const op = node ? ctx.operatorsById.get(node.op) : undefined;
   const port = findPort(op, portName, "output");
   if (!port) return "#6b7280";
-  return ctx.typesByName.get(port.type)?.color ?? "#6b7280";
+  const type = port.type === ANY ? (anyTypes.get(nodeId) ?? ANY) : port.type;
+  return ctx.typesByName.get(type)?.color ?? "#6b7280";
+}
+
+/** 点到线段的距离。拖节点到连线上要用（交互清单 P1 #21）。 */
+export function distanceToSegment(
+  point: { x: number; y: number },
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSq = dx * dx + dy * dy;
+  if (lengthSq === 0) return Math.hypot(point.x - a.x, point.y - a.y);
+  let t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSq;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy));
+}
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** 线段有没有穿过这个矩形。「把节点拖到线上」这个手势的字面意思就是它 ——
+ *  只判中心距离的话，画布缩到一半时容差就只剩几个屏幕像素，够不着。 */
+export function segmentHitsRect(a: { x: number; y: number }, b: { x: number; y: number }, r: Rect): boolean {
+  const inside = (p: { x: number; y: number }) =>
+    p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+  const steps = 32;
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    if (inside({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })) return true;
+  }
+  return false;
 }
 
 /** 从 React Flow 的变更里提取量测尺寸。 */

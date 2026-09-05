@@ -133,6 +133,21 @@ impl RunManager {
         }
     }
 
+    /// 放掉全部 run。热重载前必须调 —— 只要还有一个 RunHandle 活着，
+    /// 旧 DLL 的引用计数就归不了零，新一代加载了也顶不掉它（ADR-0009）。
+    pub fn drop_all(&self) {
+        let (active, finished) = {
+            let mut st = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            (st.active.take(), st.finished.take())
+        };
+        if let Some(run) = &active {
+            run.cancel();
+            run.join();
+        }
+        drop(active);
+        drop(finished);
+    }
+
     /// 当前是否还有活跃的运行。
     // 这个类型唯一的只读窗口。目前只有测试在用，但删掉再加回来只会让人重新想一遍锁的边界。
     #[allow(dead_code)]
@@ -270,11 +285,14 @@ mod tests {
         }
     }
 
-    fn two_node_graph() -> serde_json::Value {
+    /// seed 参数化不是装饰：缓存是进程级的，两个测试用同一张图的话
+    /// 后跑的那个会拿到 skipped 而不是 done，而 cargo 默认并行跑测试。
+    fn two_node_graph(seed: i64) -> serde_json::Value {
         serde_json::json!({
             "schemaVersion": 1, "id": "t",
             "nodes": [
-                {"id": "g", "op": "gen.synthetic", "params": {"pointCount": 20000}},
+                {"id": "g", "op": "gen.synthetic",
+                 "params": {"pointCount": 20000, "seed": seed}},
                 {"id": "v", "op": "filter.voxel_grid",
                  "params": {"leafSize": [0.02, 0.02, 0.02]}}
             ],
@@ -285,7 +303,7 @@ mod tests {
 
     #[test]
     fn two_node_run_emits_events_in_order_with_dense_seq() {
-        let f = run(two_node_graph(), "");
+        let f = run(two_node_graph(101), "");
 
         assert_eq!(f.run_status(), "ok");
         for (i, e) in f.events.iter().enumerate() {
@@ -310,7 +328,7 @@ mod tests {
 
     #[test]
     fn output_cloud_binary_header_is_correct() {
-        let f = run(two_node_graph(), "");
+        let f = run(two_node_graph(102), "");
         assert_eq!(f.run_status(), "ok");
 
         let view = f

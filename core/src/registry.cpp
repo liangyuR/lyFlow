@@ -34,6 +34,16 @@ bool defaultKindMatches(ParamType t, const Value& v) {
   return false;
 }
 
+/// semver 的主版本。解析不出来当作 1 —— 版本号本身的格式由别处报错。
+int majorOf(const std::string& version) {
+  try {
+    const std::size_t dot = version.find('.');
+    return std::stoi(dot == std::string::npos ? version : version.substr(0, dot));
+  } catch (...) {
+    return 1;
+  }
+}
+
 void writeValue(JsonWriter& w, const Value& v) {
   switch (v.kind()) {
     case Value::Kind::Null:     w.valueNull(); break;
@@ -250,6 +260,28 @@ std::vector<std::string> Registry::validate() const {
         if (c->isSet() && !paramNames.count(c->param)) {
           fail(where + " param '" + p.name + "' references unknown param '" + c->param + "'");
         }
+      }
+    }
+
+    // 迁移链必须覆盖 1..currentMajor-1 且无断档（ADR-0008）。半条链比没有链更糟：
+    // 老图能打开一半、参数改了一半，最后表现成「算法结果莫名其妙」。
+    const int major = majorOf(op.version);
+    std::set<int> steps;
+    for (const auto& m : op.migrations) {
+      if (!m.apply) fail(where + " migration from major " + std::to_string(m.fromMajor) +
+                         " has no function");
+      if (m.fromMajor < 1 || m.fromMajor >= major) {
+        fail(where + " migration fromMajor " + std::to_string(m.fromMajor) +
+             " is outside 1.." + std::to_string(major - 1));
+      }
+      if (!steps.insert(m.fromMajor).second) {
+        fail(where + " has two migrations from major " + std::to_string(m.fromMajor));
+      }
+    }
+    for (int m = 1; m < major; ++m) {
+      if (!steps.count(m)) {
+        fail(where + " is v" + op.version + " but has no migration from major " +
+             std::to_string(m));
       }
     }
   }

@@ -9,7 +9,7 @@ include/lyflow/       公共头。零 PCL（ADR-0005），算子作者只需要�
   operator.h          ParamView / Inputs / Outputs / ExecContext / ComputeFn
   manifest.h          算子描述的数据结构，序列化成 operator-manifest.json
   status.h            结构化诊断（paramPath / portName）
-  c_api.h             C ABI v2 —— DLL 只导出这里的东西
+  c_api.h             C ABI v4 —— DLL 只导出这里的东西
 src/exec/             parse → validate → compile(Plan) → execute + ResultStore
 src/ops/              手写算子。**不许 include 任何 PCL 头**
 src/ops/pcl/          PCL 算子，经 adapter 进出；单独吃一个 PCH
@@ -97,7 +97,7 @@ cmake --build build/core
 > `/WHOLEARCHIVE` 之类的链接器开关，等于把正确性押在构建配置上。
 > 多写一行调用换确定性，划算。
 
-写 compute 时的三条约定：
+写 compute 时的四条约定：
 
 - **参数不用校验。** `ParamView` 拿到的值已经过执行器校验并合并了默认值（D6）。
   算子只需要报两类错：跨参数的语义约束（带 `paramPath`）、IO/输入内容问题
@@ -106,6 +106,57 @@ cmake --build build/core
   会被悄悄丢掉，而症状是「下游的着色突然没了」。
 - **长循环里用 `ops::Ticker` 轮询取消**，并在 `capabilities.cancellable` 里如实申报。
   PCL 的算法一旦进去就出不来，这类算子要填 `false`。
+- **自己开线程时问 `ctx.threadBudget()`**，别按核数开。执行器已经在同时跑
+  `maxParallel` 个节点，算子内部再按核数开一遍就是超订，比串行还慢。
+
+## 并行
+
+执行器是**依赖计数驱动的线程池**（E2，没有层同步屏障 —— 屏障会让一层里最慢的
+节点拖住全部）。`maxParallel` 由 run 选项给，默认 `min(4, 硬件线程数)`；
+就绪队列按 `level` 再按拓扑序排，所以同样一张图两次跑出来的调度是稳定的。
+
+三条要点：
+
+- `EventSink` 整个入口加锁，`seq` 仍然全局单调。前端靠 seq 检测丢包，
+  并行下最容易坏的就是它。
+- 取消是所有 worker 共用的一个 `atomic<bool>`。每个节点在开跑前和算完后各查一次，
+  加上 `ops::Ticker` 在循环里查 —— 所以取消的响应时间是「最慢的那个算子的一次轮询」。
+- **`ctx.threadBudget()` = max(1, cores / maxParallel)**。PCL 的 OMP 版本算子
+  （`NormalEstimationOMP` 这类）应当把它传给 `setNumberOfThreads`。
+
+## 缓存
+
+结果仓按 cacheKey 内容寻址，**判定只在这里**（[ADR-0007](../docs/adr/0007-cache-authority.md)）。
+命中的节点直接把仓里的 `shared_ptr` 挂到输出，发 `node_state: skipped` + `stats.cached`，
+不调 compute。
+
+- 生命周期由 **LRU 字节预算**管，默认 `min(8 GB, 物理内存 40%)`，
+  `lyflow_run_options.cache_budget_bytes` 可覆盖。`freeRun` 只丢索引不删数据。
+- 一次运行开始时用 `CachePin` 把计划里所有键钉住，防止上游结果在下游读到之前被淘汰。
+- **没有输出端口的算子永远不复用**（`io.save_pcd` 这类纯副作用的）。
+  跳过它的表现是「跑成功了但文件没写出来」。
+- `bypass` 进 cacheKey：静音改变结果本身，不进键的话取消静音会拿到旧结果。
+
+`lyflow_plan` 把每节点的 `{ cacheKey, cached, level, upstreamMissing, bypass }` 报给前端，
+`lyflow_cache_stats` / `lyflow_cache_clear` 给状态栏和菜单用。
+
+## 算子改版本
+
+主版本升级要配一条迁移（[ADR-0008](../docs/adr/0008-migration-as-diagnostic.md)）：
+
+```cpp
+nlohmann::json migrateFromV1(const nlohmann::json& params) { /* 改写参数 */ }
+...
+op.version = "2.0.0";
+op.migrations = { Migration{1, &migrateFromV1} };
+```
+
+`Registry::validate()` 要求链条覆盖 `1..currentMajor-1` 且无断档 —— 缺一环启动就报。
+改 id 用 `op.aliases`，老 id 会被自动重定向，同样产出一条迁移诊断。
+迁移只碰参数：端口增删改名要靠新算子 id + aliases，因为连线不归算子管。
+
+现成的例子是 `filter.random_sample` 的 1.0.0 → 2.0.0（`count`/`ratio` →
+`keepCount`/`keepRatio`）。
 
 ## 自检与测试
 
@@ -117,7 +168,15 @@ id 是否重复、参数默认值与声明类型是否匹配、enum 默认值是
 理由：契约破了还继续跑，前端会拿到一份自相矛盾的 manifest 然后用各种
 离奇的方式崩掉，排查成本远高于启动时直接报错。
 
+`Registry::validate()` 还检查迁移链是否覆盖 `1..currentMajor-1`。
+
 `tests/` 是 doctest，覆盖：拓扑与环、诊断全量返回且 paramPath 正确、默认值合并、
 类型兼容矩阵、取消在第 k 个节点生效、上游失败传播、`select` 保留全部通道、
-结果仓的抽样与 bounds、中文路径下的 PCD 往返。
+结果仓的抽样与 bounds、中文路径下的 PCD 往返，以及 M3 的
+缓存命中/LRU 淘汰/plan 预测一致性、并行菱形图与随机取消 100 次、
+bypass 透传与 `bypassed_no_source`、`Any` 推导、迁移链与隐藏参数。
 点云一律由 `gen.synthetic` 现生成，**仓库里不放二进制样例数据**。
+
+> `test::Session` 默认在构造时清空结果仓。缓存是进程级的，不清的话
+> 「第二个用同一张图的测试」会拿到 `skipped` 而不是 `done` —— 那是真实行为，
+> 但会让断言测的是运行顺序而不是被测的那件事。要验缓存就用 `runGraphCached`。

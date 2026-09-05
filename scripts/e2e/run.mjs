@@ -1,125 +1,23 @@
-// M2 验收脚本 —— 用 CDP 驱动真实运行的 Tauri app，覆盖 docs/m2-plan.md §11 里
-// 标着「CDP」的验收项，外加中文路径那一条。跑法与「为什么是 CDP」见 ./README.md。
+// 验收脚本 —— 用 CDP 驱动真实运行的 Tauri app。M2 的分组在本文件，M3 的在 ./m3.mjs。
+// 跑法与「为什么是 CDP」见 ./README.md。
 
 import fs from "node:fs";
 import path from "node:path";
 
 import { sleep } from "./cdp.mjs";
 import { launchApp, makeChineseWorkspace, Report, stagePackagedApp } from "./harness.mjs";
-
-// ---------------------------------------------------------------- 页面侧工具
-
-/** JS 字符串字面量。路径里有反斜杠和中文，手工拼会出事。 */
-const lit = (v) => JSON.stringify(v);
-
-async function newDoc(cdp) {
-  await cdp.eval(`
-    const b = window.__lyflow;
-    b.stores.graph.getState().newDoc();
-    b.stores.ui.getState().clearSelection();
-    b.stores.execution.getState().reset();
-    b.clearTransitions();
-    return true;
-  `);
-}
-
-/** 按声明搭一张图。走 store 的语义化动作而不是直接塞 doc —— 塞一份构造好的 doc
- * 会跳过 addNode/connect 里的校验与 id 分配，验的就不是真实代码路径了。 */
-async function buildGraph(cdp, nodes, edges) {
-  return cdp.eval(`
-    const g = window.__lyflow.stores.graph.getState();
-    const ids = {};
-    const specs = ${lit(nodes)};
-    for (let i = 0; i < specs.length; i++) {
-      const s = specs[i];
-      const id = g.addNode(s.op, { x: 40 + i * 210, y: 80 + (s.row ?? 0) * 150 });
-      if (!id) throw new Error('addNode 失败: ' + s.op);
-      ids[s.key] = id;
-      for (const [k, v] of Object.entries(s.params ?? {})) {
-        window.__lyflow.stores.graph.getState().setParam(id, k, v);
-      }
-    }
-    for (const e of ${lit(edges)}) {
-      const verdict = window.__lyflow.stores.graph.getState().connect(
-        { node: ids[e.from[0]], port: e.from[1] },
-        { node: ids[e.to[0]], port: e.to[1] },
-      );
-      if (!verdict.ok) throw new Error('connect 失败 ' + JSON.stringify(e) + ': ' + verdict.reason);
-    }
-    return ids;
-  `);
-}
-
-async function saveGraphTo(cdp, filePath) {
-  return cdp.eval(`
-    const b = window.__lyflow;
-    const g = b.stores.graph.getState();
-    await b.transport.saveGraph(${lit(filePath)}, g.doc);
-    b.stores.graph.getState().markSaved(${lit(filePath)});
-    return b.stores.graph.getState().filePath;
-  `);
-}
-
-/** 真实按键，走完整的快捷键链路（CDP 的 Input 域 = 用户真的按下去）。 */
-async function pressKey(cdp, key, windowsVirtualKeyCode) {
-  const base = { key, code: key, windowsVirtualKeyCode, nativeVirtualKeyCode: windowsVirtualKeyCode };
-  await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...base });
-  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
-}
-
-const pressF5 = (cdp) => pressKey(cdp, "F5", 116);
-const pressEscape = (cdp) => pressKey(cdp, "Escape", 27);
-
-/** 触发一次运行并等它结束。关键是**先记下当前的 runId** —— 只等「不是 running」
- * 会立刻拿到上一次运行的快照，断言全对着旧结果做。见 ./README.md。 */
-async function runAndWait(cdp, fire, timeoutMs = 120_000) {
-  const before = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
-  await cdp.eval(`window.__lyflow.clearTransitions(); return true;`);
-  await fire();
-  await cdp.waitFor(
-    `(() => { const s = window.__lyflow.stores.execution.getState();
-              return s.runId !== ${lit(before)} && s.runStatus !== 'idle' && s.runStatus !== 'running'; })()`,
-    { timeoutMs, what: "新一次运行结束" },
-  );
-  return cdp.eval(`return window.__lyflow.snapshot().run;`);
-}
-
-async function select(cdp, nodeId) {
-  await cdp.eval(`
-    window.__lyflow.stores.ui.getState().setSelection([${lit(nodeId)}], []);
-    return true;
-  `);
-}
-
-/** 选中一个节点，等 3D 视图真的切过去，返回它显示的点数与状态。先等
- * `.viewer[data-node=<id>]` 再读数字，否则读到上一个节点残留的计数 = 假绿。 */
-async function selectAndReadViewer(cdp, nodeId, timeoutMs = 30_000) {
-  await select(cdp, nodeId);
-  const deadline = Date.now() + timeoutMs;
-  let info = null;
-  while (Date.now() < deadline) {
-    info = await cdp.eval(`
-      const v = document.querySelector('.viewer');
-      if (!v || v.getAttribute('data-node') !== ${lit(nodeId)}) return null;
-      if (v.getAttribute('data-view') === 'loading') return null;
-      const count = v.querySelector('.viewer__count');
-      const status = v.querySelector('[data-testid="viewer3d-status"]');
-      return {
-        view: v.getAttribute('data-view'),
-        text: count ? count.textContent : null,
-        status: status ? status.textContent : null,
-        hasCanvas: !!v.querySelector('.viewer__canvas canvas'),
-      };
-    `);
-    if (info) break;
-    await sleep(120);
-  }
-  if (!info) return { count: 0, hasCanvas: false, status: "等视图切换超时" };
-  const count = info.text
-    ? Number(info.text.replace(/\s/g, "").split("/")[0].replace(/,/g, ""))
-    : 0;
-  return { count, hasCanvas: info.hasCanvas, status: info.status, view: info.view };
-}
+import {
+  buildGraph,
+  lit,
+  newDoc,
+  pressEscape,
+  pressF5,
+  runAndWait,
+  saveGraphTo,
+  select,
+  selectAndReadViewer,
+} from "./page.mjs";
+import { m3Suites } from "./m3.mjs";
 
 // ------------------------------------------------------------------- 各分组
 
@@ -263,9 +161,10 @@ async function suiteBadParam(cdp, report, ids) {
     run.nodes[ids.voxel]?.errors?.[0]?.paramPath,
     "leafSize",
   );
-  // 上游不受影响：一次看到所有能看到的
-  report.eq("上游 load 仍然 done", run.nodes[ids.load]?.state, "done");
-  report.eq("上游 crop 仍然 done", run.nodes[ids.crop]?.state, "done");
+  // 上游不受影响：一次看到所有能看到的。缓存复用后它们是 skipped 而不是 done（ADR-0007）
+  const upstreamOk = (id) => ["done", "skipped"].includes(run.nodes[id]?.state);
+  report.ok("上游 load 仍然跑通", upstreamOk(ids.load), run.nodes[ids.load]?.state);
+  report.ok("上游 crop 仍然跑通", upstreamOk(ids.crop), run.nodes[ids.crop]?.state);
   // 下游是 cancelled + upstream_failed，不是 skipped
   for (const key of ["sor", "plane", "split", "out"]) {
     report.eq(`下游 ${key} 标 cancelled`, run.nodes[ids[key]]?.state, "cancelled");
@@ -500,8 +399,10 @@ async function suiteRunToNode(cdp, report) {
   );
   report.eq("运行状态 ok", run.status, "ok");
   report.eq("目标节点被记录", run.targets, [ids.voxel]);
-  report.eq("上游 gen 执行了", run.nodes[ids.gen]?.state, "done");
-  report.eq("目标 voxel 执行了", run.nodes[ids.voxel]?.state, "done");
+  // M3 起这两个可能是 skipped（命中缓存），两种都算跑通（ADR-0007）
+  const ran = (id) => ["done", "skipped"].includes(run.nodes[id]?.state);
+  report.ok("上游 gen 执行了", ran(ids.gen), run.nodes[ids.gen]?.state);
+  report.ok("目标 voxel 执行了", ran(ids.voxel), run.nodes[ids.voxel]?.state);
   report.ok("下游 tail 根本没进计划", run.nodes[ids.tail] === undefined,
     JSON.stringify(run.nodes[ids.tail]));
 }
@@ -548,6 +449,8 @@ async function main() {
     await suiteCancel(cdp, report);
     await suiteStale(cdp, report);
     await suiteRunToNode(cdp, report);
+
+    for (const suite of m3Suites) await suite(cdp, report, ws);
 
     report.section("控制台");
     // React 的 StrictMode 在 dev 下会重复挂载并打一些 warning，

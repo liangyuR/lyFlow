@@ -1,21 +1,83 @@
 import { useEffect, useState } from "react";
 
+import { baseName, recentFiles } from "../lib/files";
+import { keyHint } from "../lib/keymap";
+import { useCacheStore } from "../store/cache";
 import { summarize, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
+import { useUiStore } from "../store/ui";
+import type { RecentEntry } from "../transport";
 
 export interface ToolbarActions {
   onNew: () => void;
   onOpen: () => void;
+  onOpenRecent: (path: string) => void;
   onSave: () => void;
   onSaveAs: () => void;
   onRun: () => void;
   onCancel: () => void;
+  onLayout: () => void;
 }
 
-/** 从完整路径里取文件名，用于标题栏显示。 */
-function baseName(path: string): string {
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] ?? path;
+/** 最近文件下拉（最多 10 条，存在 Tauri 的 app data 里）。 */
+function RecentMenu({ onPick }: { onPick: (path: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<RecentEntry[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    void recentFiles().then(setItems);
+  }, [open]);
+
+  return (
+    <div className="toolbar__recent">
+      <button
+        type="button"
+        data-testid="recent-toggle"
+        title="最近打开"
+        onClick={() => setOpen((v) => !v)}
+      >
+        ▾
+      </button>
+      {open && (
+        <div className="toolbar__recentmenu" data-testid="recent-menu">
+          {items.length === 0 && <span className="toolbar__recentempty">还没有打开过文件</span>}
+          {items.map((r) => (
+            <button
+              key={r.path}
+              type="button"
+              data-testid="recent-item"
+              title={r.path}
+              onClick={() => {
+                setOpen(false);
+                onPick(r.path);
+              }}
+            >
+              {baseName(r.path)}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 「将重算 N 个节点」。数字来自 plan_graph，前端不自己推（ADR-0007）。 */
+function Recompute() {
+  const plan = useCacheStore((s) => s.plan);
+  if (plan.size === 0) return null;
+  let n = 0;
+  for (const node of plan.values()) if (!node.cached) n += 1;
+  return (
+    <span
+      className="toolbar__recompute"
+      data-testid="recompute-hint"
+      data-count={n}
+      title="其余节点会直接复用缓存结果"
+    >
+      {n === 0 ? "全部命中缓存" : `将重算 ${n} 个节点`}
+    </span>
+  );
 }
 
 function formatDuration(ms: number): string {
@@ -97,6 +159,7 @@ function RunControls({ onRun, onCancel }: { onRun: () => void; onCancel: () => v
           )}
         </span>
       )}
+      <Recompute />
       {error && (
         <span className="toolbar__runerror" title={error}>
           {error}
@@ -106,7 +169,16 @@ function RunControls({ onRun, onCancel }: { onRun: () => void; onCancel: () => v
   );
 }
 
-export function Toolbar({ onNew, onOpen, onSave, onSaveAs, onRun, onCancel }: ToolbarActions) {
+export function Toolbar({
+  onNew,
+  onOpen,
+  onOpenRecent,
+  onSave,
+  onSaveAs,
+  onRun,
+  onCancel,
+  onLayout,
+}: ToolbarActions) {
   const undo = useGraphStore((s) => s.undo);
   const redo = useGraphStore((s) => s.redo);
   // 选长度而不是调 canUndo()：函数引用不变，组件不会因为栈变化而重渲染。
@@ -123,7 +195,8 @@ export function Toolbar({ onNew, onOpen, onSave, onSaveAs, onRun, onCancel }: To
     <header className="toolbar">
       <div className="toolbar__group">
         <button type="button" onClick={onNew} title="新建 (Ctrl+N)">新建</button>
-        <button type="button" onClick={onOpen} title="打开 (Ctrl+O)">打开</button>
+        <button type="button" onClick={onOpen} title={`打开 (${keyHint("open")})`}>打开</button>
+        <RecentMenu onPick={onOpenRecent} />
         <button type="button" onClick={onSave} title="保存 (Ctrl+S)">保存</button>
         <button type="button" onClick={onSaveAs} title="另存为 (Ctrl+Shift+S)">另存为</button>
       </div>
@@ -144,6 +217,28 @@ export function Toolbar({ onNew, onOpen, onSave, onSaveAs, onRun, onCancel }: To
           title={nextRedo ? `重做：${nextRedo} (Ctrl+Shift+Z)` : "重做 (Ctrl+Shift+Z)"}
         >
           ↷ 重做
+        </button>
+      </div>
+
+      <div className="toolbar__group">
+        <button type="button" onClick={onLayout} title={`整理布局 (${keyHint("layout")})`}>
+          整理
+        </button>
+        <button
+          type="button"
+          data-testid="drawer-toggle"
+          onClick={() => useUiStore.getState().toggleDrawer()}
+          title={`日志与诊断 (${keyHint("toggleDrawer")})`}
+        >
+          抽屉
+        </button>
+        <button
+          type="button"
+          data-testid="help-toggle"
+          onClick={() => useUiStore.getState().setHelpOpen(true)}
+          title="快捷键 (?)"
+        >
+          ?
         </button>
       </div>
 

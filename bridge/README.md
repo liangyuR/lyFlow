@@ -49,18 +49,46 @@ CMake + Ninja + vcpkg（PCL）。Ninja 通常不在 PATH 上，`build.rs` 会依
 
 | command | 方向 | 说明 |
 |---|---|---|
-| `get_manifest` | C++ → 前端 | 全量算子描述。进程内缓存，解析一次。 |
-| `get_core_info` | C++ → 前端 | core 版本 + 算子/类型数量，给状态栏用。 |
+| `get_manifest` | C++ → 前端 | 全量算子描述。按**代数**缓存解析结果，热重载后自动作废。 |
+| `get_core_info` | C++ → 前端 | core 版本、算子/类型数量、热重载代数，给状态栏用。 |
 | `save_graph` | 前端 → 磁盘 | 结构校验后写盘，pretty JSON。 |
-| `load_graph` | 磁盘 → 前端 | 读盘 + 结构校验。 |
+| `load_graph` | 磁盘 → 前端 | 读盘 + 结构校验，返回 `{ doc, migrations }`（ADR-0008）。 |
 | `validate_graph` | 前端 → C++ | 权威校验，返回**全部**诊断（D5）。 |
+| `plan_graph` | 前端 → C++ | 编译但不执行，报每节点的 cacheKey 与是否已缓存（ADR-0007）。 |
+| `clear_cache` / `cache_stats` | 前端 → C++ | 结果仓的清空与统计，给菜单和状态栏用。 |
 | `run_graph` | 前端 → C++ | 启动一次运行，立刻返回 runId。 |
 | `cancel_run` | 前端 → C++ | 协作式取消。id 对不上就无操作。 |
 | `get_output_info` | C++ → 前端 | 某节点全部输出的 type/elementCount。 |
 | `get_output_cloud` | C++ → 前端 | **二进制**点云（见下）。 |
+| `get_recent_files` / `push_recent_file` | 磁盘 ↔ 前端 | 最近文件，存在 Tauri 的 app data 里，最多 10 条。 |
+| `write_backup` / `backup_status` / `read_backup` / `discard_backup` | 磁盘 ↔ 前端 | `<file>~` 自动备份与崩溃恢复。 |
 
-外加一条事件流：`execution-event`，符合
-[`schema/execution-event.schema.json`](../schema/execution-event.schema.json)。
+三条事件流：`execution-event`（符合
+[`schema/execution-event.schema.json`](../schema/execution-event.schema.json)）、
+`manifest-updated` 与 `core-reload-failed`（热重载，见下）。
+
+`load_graph` 返回的是 `{ doc, migrations }` 而不是裸 `doc`：**桥接层不改图**。
+它只是替 C++ 把 `kind === "migration"` 的诊断挑出来交给前端，
+写回 GraphDoc 是 `applyMigrations` 的事（[ADR-0008](../docs/adr/0008-migration-as-diagnostic.md)）。
+
+## 热重载（开发期）
+
+`watcher.rs` 盯着 `build/core/bin/lyflow_core.dll`（`scripts/core-watch.ps1` 的产物）。
+变了就走一轮换代，**顺序不能变**（[ADR-0009](../docs/adr/0009-hot-reload-by-copy.md)）：
+
+```
+取消活跃 run → RunManager::drop_all() → 清空结果仓
+  → 复制成 lyflow_core.gen<N>.dll → 加载 → 自检 → 换掉 Arc<Core>
+```
+
+- **必须先 `drop_all()`。** `RunHandle` 持有 `Arc<Core>`；不放掉的话旧 DLL 只是
+  「被顶下去」而不是被卸载，两代同时活着、两个结果仓，症状会非常离奇。
+- **必须复制。** Windows 锁住已加载的 DLL，不复制的话第一次热重载之后 CMake
+  就再也构建不了了。旧代的 gen 文件删不掉是常态，清理放在下次启动。
+- 自检（`manifest_problems` 为空 + manifest 可解析）不过就保留旧代，
+  emit `core-reload-failed`。半坏的一代比旧的一代难查十倍。
+- `watch_source()` 靠 `env!("CARGO_MANIFEST_DIR")` 推路径，安装包里不存在 →
+  watcher 不启动，`get_core_info().hotReload` 是 false。
 
 ### 运行的生命周期（`execution.rs`）
 

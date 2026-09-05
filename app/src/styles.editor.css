@@ -889,3 +889,275 @@
   background: rgba(17, 20, 26, 0.88);
   pointer-events: none;
 }
+
+/* M3：静音 / 折叠 / 重命名 / 精确 stale / 端口兼容性 / 参考线 / 抽屉 / 快捷键面板 */
+
+/* 静音：半透明加斜纹，一眼看得出这个节点这次不参与计算（E5） */
+.node.is-bypassed {
+  opacity: 0.6;
+}
+.node.is-bypassed .node__body {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 6px,
+    rgba(111, 120, 135, 0.16) 6px 12px
+  );
+}
+
+.node__badge {
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+}
+.node__badge--mute {
+  background: var(--bg-3);
+  color: var(--fg-1);
+}
+
+/* 就地改名：输入框撑满标题栏，视觉上和标题同一个位置 */
+.node__rename {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--accent);
+  background: transparent;
+  color: var(--fg-0);
+  font: inherit;
+  outline: none;
+}
+
+.node__skip {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--bg-3);
+  color: var(--fg-2);
+  font-size: 10px;
+}
+
+.node__collapsed {
+  position: relative;
+  height: 6px;
+}
+
+/* 拖线中的兼容性可视化（P1 #20）：能落的放大高亮，不能落的整体压暗 */
+.node-port--compatible .node-port__handle {
+  transform: scale(1.45);
+  box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.35);
+}
+.node-port--compatible .node-port__label {
+  color: var(--fg-0);
+}
+.node-port--incompatible {
+  opacity: 0.25;
+}
+
+/* 对齐参考线。活在 ViewportPortal 里，所以坐标就是画布坐标（P1 #22） */
+.canvas__guides {
+  position: absolute;
+  pointer-events: none;
+}
+.canvas__guide {
+  position: absolute;
+  background: rgba(240, 160, 32, 0.85);
+}
+.canvas__guide--x { width: 1px; }
+.canvas__guide--y { height: 1px; }
+
+.ctxmenu kbd {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--fg-2);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.ctxmenu button {
+  display: flex;
+  align-items: center;
+}
+
+/* -- 工具栏：最近文件 + 将重算 N 个节点 ---------------------------------- */
+
+.toolbar__recent {
+  position: relative;
+}
+.toolbar__recentmenu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.toolbar__recentmenu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--fg-1);
+  text-align: left;
+}
+.toolbar__recentmenu button:hover { background: var(--bg-3); }
+.toolbar__recentempty {
+  display: block;
+  padding: 6px 8px;
+  color: var(--fg-2);
+  font-size: 11px;
+}
+
+.toolbar__recompute {
+  color: var(--fg-2);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.toolbar__recompute[data-count="0"] { color: #46a758; }
+
+/* -- 状态栏 ---------------------------------------------------------------- */
+
+.statusbar__cache { font-variant-numeric: tabular-nums; }
+.statusbar__hot {
+  padding: 0 6px;
+  border-radius: 3px;
+  background: rgba(240, 160, 32, 0.16);
+  color: var(--warn);
+}
+
+/* -- 底部抽屉（§2.5）------------------------------------------------------- */
+
+.drawer {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--bg-1);
+}
+.drawer.is-open { height: 220px; }
+
+.drawer__tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--border);
+}
+.drawer__tabs button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 12px;
+}
+.drawer__tabs button.is-active {
+  border-bottom-color: var(--accent);
+  color: var(--fg-0);
+}
+.drawer__spacer { flex: 1; }
+.drawer__badge {
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--bg-3);
+  font-size: 10px;
+}
+.drawer__badge--error { background: rgba(224, 64, 64, 0.25); color: #ff8b8b; }
+
+.drawer__body {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.drawer__empty { color: var(--fg-2); }
+
+.drawer__logs { margin: 0; padding: 0; list-style: none; font-family: var(--mono); }
+.drawer__log { display: flex; gap: 8px; padding: 1px 0; }
+.drawer__log-level { width: 42px; color: var(--fg-2); }
+.drawer__log--warn .drawer__log-level { color: var(--warn); }
+.drawer__log--error .drawer__log-level { color: #ff8b8b; }
+.drawer__log-node { color: var(--accent-dim); }
+.drawer__log-text { color: var(--fg-1); }
+
+.drawer__diags { margin: 0; padding: 0; list-style: none; }
+.drawer__diags button {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-1);
+  text-align: left;
+}
+.drawer__diags button:hover { background: var(--bg-2); }
+.drawer__diag-node { color: var(--fg-0); }
+.drawer__diag-code,
+.drawer__diag-param { color: var(--warn); font-family: var(--mono); font-size: 11px; }
+
+.drawer__cache dl { display: grid; grid-template-columns: repeat(3, auto); gap: 4px 24px; margin: 0; }
+.drawer__cache dt { color: var(--fg-2); font-size: 11px; }
+.drawer__cache dd { margin: 0; color: var(--fg-0); font-variant-numeric: tabular-nums; }
+.drawer__cache-actions { display: flex; gap: 8px; margin-top: 12px; }
+
+/* -- 快捷键面板（E7）------------------------------------------------------- */
+
+.sheet {
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 12, 16, 0.6);
+}
+.sheet__box {
+  width: min(760px, 92vw);
+  max-height: 82vh;
+  overflow: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.sheet__head h2 { margin: 0; font-size: 14px; }
+.sheet__body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+  padding: 14px;
+}
+.sheet__group h3 { margin: 0 0 6px; color: var(--fg-2); font-size: 11px; font-weight: 600; }
+.sheet__group ul { margin: 0; padding: 0; list-style: none; }
+.sheet__group li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.sheet__label { color: var(--fg-0); }
+.sheet__scope { color: var(--fg-2); font-size: 10px; }
+.sheet__keys { margin-left: auto; display: flex; gap: 4px; }
+.sheet__keys kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--bg-3);
+  color: var(--fg-1);
+  font-family: var(--mono);
+  font-size: 10px;
+}

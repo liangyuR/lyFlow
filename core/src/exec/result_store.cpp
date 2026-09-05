@@ -1,19 +1,126 @@
 #include "exec/result_store.h"
 
-#include <set>
+#include <algorithm>
+
+#if defined(_WIN32)
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+#endif
 
 namespace lyflow::exec {
+namespace {
+
+constexpr std::uint64_t kGiB = 1024ull * 1024ull * 1024ull;
+
+std::string entryKey(const std::string& cacheKey, const std::string& port) {
+  return cacheKey + ":" + port;
+}
+
+}  // namespace
+
+std::uint64_t defaultCacheBudget() {
+#if defined(_WIN32)
+  MEMORYSTATUSEX status{};
+  status.dwLength = sizeof(status);
+  if (GlobalMemoryStatusEx(&status)) {
+    const std::uint64_t forty = static_cast<std::uint64_t>(status.ullTotalPhys * 0.4);
+    return std::min<std::uint64_t>(8 * kGiB, forty);
+  }
+#endif
+  return 2 * kGiB;
+}
+
+CachePin::CachePin(ResultStore& store, std::vector<std::string> keys)
+    : store_(&store), keys_(std::move(keys)) {
+  for (const auto& k : keys_) store_->pin(k);
+}
+
+CachePin::~CachePin() {
+  if (!store_) return;
+  for (const auto& k : keys_) store_->unpin(k);
+}
+
+void CachePin::add(const std::string& cacheKey) {
+  if (!store_) return;
+  store_->pin(cacheKey);
+  keys_.push_back(cacheKey);
+}
 
 ResultStore& ResultStore::instance() {
   static ResultStore store;
   return store;
 }
 
+void ResultStore::setBudget(std::uint64_t bytes) {
+  std::lock_guard<std::mutex> lock(mu_);
+  budget_ = bytes;
+  evictLocked();
+}
+
+std::uint64_t ResultStore::budget() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return budget_ ? budget_ : defaultCacheBudget();
+}
+
+void ResultStore::pin(const std::string& cacheKey) {
+  std::lock_guard<std::mutex> lock(mu_);
+  pins_[cacheKey] += 1;
+}
+
+void ResultStore::unpin(const std::string& cacheKey) {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto it = pins_.find(cacheKey);
+  if (it == pins_.end()) return;
+  if (--it->second <= 0) pins_.erase(it);
+}
+
+void ResultStore::touchLocked(const std::string& key) {
+  auto it = byKey_.find(key);
+  if (it == byKey_.end()) return;
+  lru_.erase(it->second.lru);
+  lru_.push_back(key);
+  it->second.lru = std::prev(lru_.end());
+}
+
+void ResultStore::evictLocked() {
+  const std::uint64_t limit = budget_ ? budget_ : defaultCacheBudget();
+  // 从最久没用的一头淘汰，跳过被活跃 run 钉住的。全被钉住时就超预算 ——
+  // 正在算的那一份不能扔，扔了这次运行直接失败。
+  for (auto it = lru_.begin(); bytes_ > limit && it != lru_.end();) {
+    auto entry = byKey_.find(*it);
+    if (entry == byKey_.end()) {
+      it = lru_.erase(it);
+      continue;
+    }
+    if (pins_.count(entry->second.cacheKey)) {
+      ++it;
+      continue;
+    }
+    bytes_ -= entry->second.bytes;
+    byKey_.erase(entry);
+    it = lru_.erase(it);
+    counters_.evictions += 1;
+  }
+}
+
 void ResultStore::put(const std::string& runId, const std::string& nodeId, const std::string& port,
                       const std::string& cacheKey, Data data) {
   std::lock_guard<std::mutex> lock(mu_);
-  const std::string key = cacheKey + ":" + port;
-  byKey_.emplace(key, std::move(data));  // 已存在就是缓存命中，保留原来那份
+  const std::string key = entryKey(cacheKey, port);
+  auto it = byKey_.find(key);
+  if (it == byKey_.end()) {
+    Entry e;
+    e.bytes = data.byteSize();
+    e.cacheKey = cacheKey;
+    e.data = std::move(data);
+    lru_.push_back(key);
+    e.lru = std::prev(lru_.end());
+    bytes_ += e.bytes;
+    byKey_.emplace(key, std::move(e));
+    evictLocked();
+  } else {
+    touchLocked(key);  // 已经在仓里就是同一份内容，保留原来那个 shared_ptr
+  }
   index_[runId][nodeId][port] = key;
 }
 
@@ -28,7 +135,44 @@ bool ResultStore::get(const std::string& runId, const std::string& nodeId, const
   if (p == node->second.end()) return false;
   auto data = byKey_.find(p->second);
   if (data == byKey_.end()) return false;
-  out = data->second;
+  out = data->second.data;
+  return true;
+}
+
+bool ResultStore::peek(const std::string& cacheKey,
+                       const std::vector<std::string>& ports) const {
+  if (cacheKey.empty() || ports.empty()) return false;
+  std::lock_guard<std::mutex> lock(mu_);
+  for (const auto& port : ports) {
+    if (!byKey_.count(entryKey(cacheKey, port))) return false;
+  }
+  return true;
+}
+
+bool ResultStore::reuse(const std::string& runId, const std::string& nodeId,
+                        const std::string& cacheKey, const std::vector<std::string>& ports,
+                        std::vector<OutputInfo>& infos) {
+  if (cacheKey.empty() || ports.empty()) {
+    std::lock_guard<std::mutex> lock(mu_);
+    counters_.misses += 1;
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(mu_);
+  for (const auto& port : ports) {
+    if (!byKey_.count(entryKey(cacheKey, port))) {
+      counters_.misses += 1;
+      return false;
+    }
+  }
+  infos.clear();
+  for (const auto& port : ports) {
+    const std::string key = entryKey(cacheKey, port);
+    const Entry& e = byKey_.at(key);
+    infos.push_back(OutputInfo{port, e.data.typeName(), e.data.elementCount(), e.bytes});
+    touchLocked(key);
+    index_[runId][nodeId][port] = key;
+  }
+  counters_.hits += 1;
   return true;
 }
 
@@ -43,8 +187,8 @@ std::vector<OutputInfo> ResultStore::outputsOf(const std::string& runId,
   for (const auto& kv : node->second) {
     auto data = byKey_.find(kv.second);
     if (data == byKey_.end()) continue;
-    out.push_back(OutputInfo{kv.first, data->second.typeName(), data->second.elementCount(),
-                             data->second.byteSize()});
+    out.push_back(OutputInfo{kv.first, data->second.data.typeName(),
+                             data->second.data.elementCount(), data->second.bytes});
   }
   return out;
 }
@@ -92,30 +236,34 @@ bool ResultStore::previewCloud(const std::string& runId, const std::string& node
 
 void ResultStore::freeRun(const std::string& runId) {
   std::lock_guard<std::mutex> lock(mu_);
+  // 只丢索引。Data 留着等下一次运行按 cacheKey 复用，超预算时由 LRU 淘汰。
   index_.erase(runId);
-
-  // 顺带删无人引用的 Data。M3 换成 LRU 字节预算 —— 那时候「还有没有人引用」
-  // 不再是删除的判据，「总字节数超没超」才是。
-  std::set<std::string> referenced;
-  for (const auto& run : index_) {
-    for (const auto& node : run.second) {
-      for (const auto& port : node.second) referenced.insert(port.second);
-    }
-  }
-  for (auto it = byKey_.begin(); it != byKey_.end();) {
-    it = referenced.count(it->first) ? std::next(it) : byKey_.erase(it);
-  }
+  evictLocked();
 }
 
 void ResultStore::clear() {
   std::lock_guard<std::mutex> lock(mu_);
   index_.clear();
   byKey_.clear();
+  lru_.clear();
+  bytes_ = 0;
+  counters_.hits = 0;
+  counters_.misses = 0;
+  counters_.evictions = 0;
 }
 
 std::size_t ResultStore::liveEntryCount() const {
   std::lock_guard<std::mutex> lock(mu_);
   return byKey_.size();
+}
+
+CacheStats ResultStore::stats() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  CacheStats s = counters_;
+  s.entries = byKey_.size();
+  s.bytes = bytes_;
+  s.budgetBytes = budget_ ? budget_ : defaultCacheBudget();
+  return s;
 }
 
 }  // namespace lyflow::exec

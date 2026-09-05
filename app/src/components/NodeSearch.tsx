@@ -62,9 +62,12 @@ export function NodeSearch() {
       // 接不上（类型不匹配）不算错误 —— 节点已经落下了，用户可以自己改。
       if (popup.pendingFrom) {
         const op = useManifestStore.getState().operatorsById.get(opId);
-        const firstInput = op?.inputs[0];
-        if (firstInput) {
-          graph.connect(popup.pendingFrom, { node: nodeId, port: firstInput.name });
+        // 拖的是输入端时新节点在上游，端口方向要反过来（P1 #18/#19）
+        const fromInput = popup.pendingSide === "input";
+        const port = fromInput ? op?.outputs[0] : op?.inputs[0];
+        if (port) {
+          if (fromInput) graph.connect({ node: nodeId, port: port.name }, popup.pendingFrom);
+          else graph.connect(popup.pendingFrom, { node: nodeId, port: port.name });
         }
       }
     }

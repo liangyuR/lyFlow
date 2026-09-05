@@ -1,6 +1,7 @@
 #pragma once
 // 结构化错误与诊断集合。paramPath/portName 让前端把红框标到具体的输入框或端口上；
 // D5：校验一次返回全部诊断而不是第一个错误（docs/architecture.md）。
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -48,18 +49,35 @@ struct Status {
   explicit operator bool() const { return ok; }
 };
 
+/// 迁移诊断的载荷（ADR-0008）。C++ 只说「该改成什么」，写回 GraphDoc 是前端的事。
+/// paramsJson 是完整的参数对象文本，不是补丁 —— 改名参数没法用补丁表达。
+struct MigrationPlan {
+  std::string op;
+  std::string opVersion;
+  std::string paramsJson = "{}";
+  std::vector<std::string> notes;
+};
+
 /// 一条挂在某个节点上的诊断。nodeId 为空表示是整张图级别的问题。
 struct Diagnostic {
   std::string nodeId;
   Severity severity = Severity::Error;
   Status status;
+  /// 非空 = 这是一条迁移诊断，序列化时 kind 写成 "migration"。
+  std::shared_ptr<MigrationPlan> migration;
 };
 
 /// 校验/编译的产物。顺序即产生顺序，前端按顺序展示。
 class Diagnostics {
  public:
   void add(std::string nodeId, Status status, Severity severity = Severity::Error) {
-    items_.push_back(Diagnostic{std::move(nodeId), severity, std::move(status)});
+    items_.push_back(Diagnostic{std::move(nodeId), severity, std::move(status), nullptr});
+  }
+  /// 迁移诊断。severity 是 warning：它不阻止执行，执行器在内存里已经用迁移后的值跑了。
+  void migration(std::string nodeId, std::string message, MigrationPlan plan) {
+    Status s = Status::Error(Phase::Validate, "migration", std::move(message));
+    items_.push_back(Diagnostic{std::move(nodeId), Severity::Warning, std::move(s),
+                                std::make_shared<MigrationPlan>(std::move(plan))});
   }
   void error(std::string nodeId, Phase phase, std::string code, std::string message,
              std::string paramPath = {}, std::string portName = {}) {

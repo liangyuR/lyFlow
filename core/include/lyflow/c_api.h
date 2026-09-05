@@ -1,6 +1,6 @@
 #ifndef LYFLOW_C_API_H
 #define LYFLOW_C_API_H
-// C ABI v3。Rust 桥接层只看见这个头文件。
+// C ABI v4。Rust 桥接层只看见这个头文件。
 // 三条约定（char* 归属、异常不跨 ABI、只导出 C 函数）见 core/README.md「C ABI 约定」。
 #include <stddef.h>
 #include <stdint.h>
@@ -36,8 +36,21 @@ LYFLOW_API void lyflow_string_free(char* s);
 // ------------------------------------------------------------------ 只校验
 
 // 同步校验一张图，不执行。返回诊断 JSON 数组（可能是空数组 "[]"）。
-// 每一项：{ nodeId, severity, phase, code, message, paramPath?, portName? }
+// 每一项带 kind："diagnostic" 是普通诊断，"migration" 另带 op/opVersion/params/notes。
 LYFLOW_API char* lyflow_validate(const char* graph_json, const char* base_dir);
+
+// -------------------------------------------------------------- 计划与缓存
+
+// 编译一次，报告每节点 { nodeId, cacheKey, cached, level, upstreamMissing, bypass }。
+// 校验失败时返回的是 lyflow_validate 那种诊断数组，靠 kind 字段区分（ADR-0007）。
+LYFLOW_API char* lyflow_plan(const char* graph_json, const char* base_dir,
+                             const char* const* targets, size_t n);
+
+// 丢掉全部缓存结果。活跃 run 的结果也一并丢，所以调用方应当先取消。
+LYFLOW_API void lyflow_cache_clear(void);
+
+// { entries, bytes, budgetBytes, hits, misses, evictions } 的 JSON 对象。
+LYFLOW_API char* lyflow_cache_stats(void);
 
 // -------------------------------------------------------------------- 执行
 
@@ -52,6 +65,8 @@ typedef struct {
   const char* base_dir;            /* 相对路径参数的基准目录，可为 NULL */
   const char* const* targets;      /* Run to node 的目标节点，NULL/0 表示跑全图 */
   size_t target_count;
+  int32_t max_parallel;            /* 同时跑几个节点。0 = min(4, 核数)，1 = 顺序执行 */
+  uint64_t cache_budget_bytes;     /* 结果仓字节预算。0 = min(8 GB, 物理内存 40%) */
 } lyflow_run_options;
 
 // 立即返回句柄，执行在后台线程。opts/cb 允许为 NULL（cb 为 NULL 时事件丢弃）。

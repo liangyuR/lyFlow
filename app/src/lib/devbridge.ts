@@ -2,6 +2,7 @@
 // 三条自律（只读转发、应用代码不许 import、正式构建里也在）见 app/README.md。
 
 import { transport } from "../transport";
+import { requestPlan, useCacheStore } from "../store/cache";
 import { useExecutionStore } from "../store/execution";
 import type { NodeState } from "../types/execution";
 import { useGraphStore } from "../store/graph";
@@ -22,7 +23,10 @@ interface DevBridge {
     ui: typeof useUiStore;
     manifest: typeof useManifestStore;
     execution: typeof useExecutionStore;
+    cache: typeof useCacheStore;
   };
+  /** 立刻编译一次，不等 debounce。验收脚本不想为 150ms 睡一觉。 */
+  plan(): Promise<void>;
   /** 节点状态变迁的流水账，用来断言「节点依次变色」。 */
   transitions: StateTransition[];
   clearTransitions(): void;
@@ -54,13 +58,18 @@ export function installDevBridge(): void {
   });
 
   window.__lyflow = {
-    version: "m2",
+    version: "m3",
     transport,
     stores: {
       graph: useGraphStore,
       ui: useUiStore,
       manifest: useManifestStore,
       execution: useExecutionStore,
+      cache: useCacheStore,
+    },
+    async plan() {
+      const g = useGraphStore.getState();
+      await requestPlan(g.doc, g.filePath);
     },
     transitions,
     clearTransitions() {
@@ -72,14 +81,30 @@ export function installDevBridge(): void {
       const e = useExecutionStore.getState();
       const u = useUiStore.getState();
       const m = useManifestStore.getState();
+      const c = useCacheStore.getState();
       return {
         transport: m.transportKind,
         manifestStatus: m.status,
         operatorCount: m.bundle?.operators.length ?? 0,
+        generation: m.coreInfo?.generation ?? 0,
         doc: g.doc,
         filePath: g.filePath,
         dirty: g.dirty,
+        undoLabel: g.past[g.past.length - 1]?.label ?? null,
         selected: [...u.selectedNodes],
+        drawer: u.drawer,
+        helpOpen: u.helpOpen,
+        cache: {
+          stats: c.stats,
+          plan: Object.fromEntries([...c.plan].map(([id, n]) => [id, n])),
+          ranWith: Object.fromEntries(c.ranWith),
+          stale: [...c.plan]
+            .filter(([id, n]) => {
+              const previous = c.ranWith.get(id);
+              return previous !== undefined && n.cacheKey !== previous && !n.cached;
+            })
+            .map(([id]) => id),
+        },
         run: {
           runId: e.runId,
           status: e.runStatus,
@@ -94,6 +119,8 @@ export function installDevBridge(): void {
                 state: n.state,
                 durationMs: n.durationMs ?? null,
                 elementCount: n.stats?.elementCount ?? null,
+                cached: n.stats?.cached === true,
+                bypassed: n.stats?.bypassed === true,
                 errors: n.errors,
               },
             ]),

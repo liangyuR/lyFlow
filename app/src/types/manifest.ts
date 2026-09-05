@@ -105,4 +105,8 @@ export interface CoreInfo {
   version: string;
   operatorCount: number;
   typeCount: number;
+  /** 热重载换了几代。0 = 启动时加载的那一份（ADR-0009）。 */
+  generation?: number;
+  /** 开发期才是 true：安装包里没有可盯的 CMake 产物。 */
+  hotReload?: boolean;
 }

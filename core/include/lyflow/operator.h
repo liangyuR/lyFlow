@@ -94,6 +94,10 @@ class ExecContext {
   /// 图文件所在目录。相对路径参数已经由 ParamView::path 解析过，
   /// 这里给需要自己拼路径的算子用。
   virtual const std::filesystem::path& baseDir() const = 0;
+
+  /// 本节点可以自己开几个线程。执行器已经在跑 maxParallel 个节点，
+  /// 算子内部再按核数开一遍就是超订（core/README.md「并行」）。
+  virtual int threadBudget() const = 0;
 };
 
 }  // namespace lyflow

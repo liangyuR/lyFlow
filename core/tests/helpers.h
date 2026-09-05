@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include "exec/executor.h"
+#include "exec/result_store.h"
 #include "lyflow/registry.h"
 
 namespace lyflow::test {
@@ -118,14 +119,19 @@ inline void collect(const char* json, void* user) {
 /// 所以想断言输出的测试必须让 Run 活着 —— Run 和事件日志捆在同一个对象里。
 class Session {
  public:
+  /// keepCache=false 时先清空结果仓。缓存是进程级的，不清的话「第二个用同一张图的
+  /// 测试」会拿到 skipped 而不是 done —— 那是真实行为，但会让断言测的是运行顺序。
   Session(const Json& doc, std::filesystem::path baseDir = {},
-          std::vector<std::string> targets = {}) {
+          std::vector<std::string> targets = {}, bool keepCache = false,
+          int maxParallel = 0) {
     static std::atomic<int> counter{0};
+    if (!keepCache) exec::ResultStore::instance().clear();
     log_.runId = "test-run-" + std::to_string(counter.fetch_add(1));
     exec::RunOptions options;
     options.runId = log_.runId;
     options.baseDir = std::move(baseDir);
     options.targets = std::move(targets);
+    options.maxParallel = maxParallel;
     run_ = std::make_unique<exec::Run>(doc.dump(), options, &detail::collect, &log_);
   }
 
@@ -146,6 +152,12 @@ class Session {
 inline RunLog runGraph(const Json& doc, const std::filesystem::path& baseDir = {},
                        const std::vector<std::string>& targets = {}) {
   Session s(doc, baseDir, targets);
+  return s.wait();
+}
+
+/// 不清缓存地跑一次。缓存复用的测试要靠它跑第二遍。
+inline RunLog runGraphCached(const Json& doc, const std::filesystem::path& baseDir = {}) {
+  Session s(doc, baseDir, {}, /*keepCache=*/true);
   return s.wait();
 }
 

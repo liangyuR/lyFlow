@@ -6,13 +6,31 @@
     "at": "2026-09-05T12:00:00.000Z",
     "kind": "run_started",
     "nodeCount": 3,
-    "plan": ["n_load", "n_voxel", "n_save"],
+    "plan": [
+      "n_load",
+      "n_voxel",
+      "n_save"
+    ],
     "targets": [],
     "nodes": [
-      { "id": "n_load", "cacheKey": "3f2a9c1e4b7d0a8265f1c3e90d47ab12", "level": 0 },
-      { "id": "n_voxel", "cacheKey": "b81d4f0c62a7e3591acd0847f2b6e935", "level": 1 },
-      { "id": "n_save", "cacheKey": "0c7e5a91d3b842f6a05be23917cd48f0", "level": 2 }
-    ]
+      {
+        "id": "n_load",
+        "cacheKey": "3f2a9c1e4b7d0a8265f1c3e90d47ab12",
+        "level": 0
+      },
+      {
+        "id": "n_voxel",
+        "cacheKey": "b81d4f0c62a7e3591acd0847f2b6e935",
+        "level": 1
+      },
+      {
+        "id": "n_save",
+        "cacheKey": "0c7e5a91d3b842f6a05be23917cd48f0",
+        "level": 2,
+        "bypass": true
+      }
+    ],
+    "maxParallel": 4
   },
   {
     "schemaVersion": 1,
@@ -64,7 +82,13 @@
     "stats": {
       "elementCount": 1234567,
       "byteSize": 19753072,
-      "outputs": [{ "port": "cloud", "type": "PointCloud", "elementCount": 1234567 }]
+      "outputs": [
+        {
+          "port": "cloud",
+          "type": "PointCloud",
+          "elementCount": 1234567
+        }
+      ]
     }
   },
   {
@@ -127,5 +151,73 @@
       "message": "Leaf Size：不能小于 0.0001",
       "paramPath": "leafSize"
     }
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000000",
+    "seq": 9,
+    "at": "2026-09-05T12:00:00.300Z",
+    "kind": "node_state",
+    "nodeId": "n_load",
+    "state": "skipped",
+    "durationMs": 0.4,
+    "stats": {
+      "elementCount": 120000,
+      "byteSize": 1920000,
+      "cached": true,
+      "outputs": [
+        {
+          "port": "cloud",
+          "type": "PointCloud",
+          "elementCount": 120000
+        }
+      ]
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000000",
+    "seq": 10,
+    "at": "2026-09-05T12:00:00.301Z",
+    "kind": "node_state",
+    "nodeId": "n_voxel",
+    "state": "skipped",
+    "durationMs": 0.1,
+    "stats": {
+      "elementCount": 120000,
+      "byteSize": 1920000,
+      "bypassed": true,
+      "outputs": [
+        {
+          "port": "cloud",
+          "type": "PointCloud",
+          "elementCount": 120000
+        }
+      ]
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000000",
+    "seq": 11,
+    "at": "2026-09-05T12:00:00.302Z",
+    "kind": "node_state",
+    "nodeId": "n_save",
+    "state": "error",
+    "durationMs": 0.2,
+    "error": {
+      "phase": "execute",
+      "code": "bypassed_no_source",
+      "message": "上游 n_voxel 已静音，且它的 cloud 端口找不到类型兼容的输入可以透传",
+      "portName": "cloud"
+    },
+    "errors": [
+      {
+        "phase": "execute",
+        "code": "bypassed_no_source",
+        "message": "上游 n_voxel 已静音，且它的 cloud 端口找不到类型兼容的输入可以透传",
+        "portName": "cloud"
+      }
+    ]
   }
 ]

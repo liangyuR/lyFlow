@@ -56,6 +56,8 @@ C++ 生成的 `OperatorManifest`，Rust 转发给前端。**加新算子只改 C
 | [docs/roadmap.md](docs/roadmap.md) | 里程碑与工作量估计 |
 | [docs/m2-plan.md](docs/m2-plan.md) | M2 实施计划：定死的决定、C ABI v2、执行器、结果仓 |
 | [docs/m2-acceptance.md](docs/m2-acceptance.md) | M2 逐条验收记录（含未验证项与偏离决策） |
+| [docs/m3-plan.md](docs/m3-plan.md) | M3 实施计划：缓存与并行、bypass/reroute、迁移、热重载、P1 交互 |
+| [docs/m3-acceptance.md](docs/m3-acceptance.md) | M3 逐条验收记录（含未验证项与偏离决策） |
 | [docs/adr/](docs/adr/) | 架构决策记录 |
 | [schema/](schema/) | GraphDoc / OperatorManifest / ExecutionEvent 的 JSON Schema + 已校验的示例 |
 
@@ -89,8 +91,13 @@ vcpkg install pcl:x64-windows
 
 ```bash
 pnpm install
-pnpm dev          # tauri dev：编 C++ -> 编 Rust -> 起 vite -> 开窗口
+pnpm dev          # core-watch + tauri dev：编 C++ -> 编 Rust -> 起 vite -> 开窗口
 ```
+
+`pnpm dev` 会同时起 [`scripts/core-watch.ps1`](scripts/core-watch.ps1)：改了 `core/`
+的 C++ 存盘即增量构建，app 那边**热重载**新的 core，画布上的图与撤销栈原样保留
+（[ADR-0009](docs/adr/0009-hot-reload-by-copy.md)）。不想要它就 `pnpm dev --no-core-watch`，
+只要监视不要 app 就 `pnpm core:watch`。
 
 只想调界面、不想启动整个 app：
 
@@ -113,26 +120,37 @@ pnpm e2e:packaged  # 同一套断言，但跑的是 tauri build 的产物在一�
 2. 在 `core/src/ops/ops.h` 加声明
 3. 在 `core/src/builtin_ops.cpp` 的 `registerBuiltinOps` 加一行调用
 
-重启后它就出现在节点面板里，连同它的分类、端口颜色、参数控件和取值范围。
-**前端不用改任何东西**（[ADR-0003](docs/adr/0003-manifest-from-cpp.md)）。
+存盘之后几秒内它就出现在节点面板里，连同它的分类、端口颜色、参数控件和取值范围。
+**前端不用改任何东西**（[ADR-0003](docs/adr/0003-manifest-from-cpp.md)），
+**也不用重启**（`pnpm dev` 下的热重载）。
 
-> `tauri dev` 只 watch `bridge/`，改了 `core/` 的 C++ 需要重启才生效。
-> 算子热重载是 M3 的事。
+> 热重载会清空结果缓存并取消正在跑的 run —— 缓存里的对象属于旧那份 DLL，
+> 跨代持有它是未定义行为（[ADR-0009](docs/adr/0009-hot-reload-by-copy.md)）。
+> 新算子的 C++ 编不过时旧的一代继续服役，界面上会弹一条失败提示。
 
 ## 状态
 
-**M2 完成 —— 能跑。** 在 M1 的编辑能力之上：按 F5（或点运行）真的在 C++ 里执行，
-节点按状态变色、带点数与耗时，参数填错时红框直接标到那个输入框，Esc 可以取消，
-选中节点就能在右侧 3D 视图里看它的输出点云。15 个算子覆盖一条真实 pipeline：
-`load_pcd → crop_box → voxel_grid → statistical_outlier → ransac_plane →
-extract_indices → save_pcd`。
+**M3 完成 —— 能用。** 在 M2「能跑」之上，把它变成一个愿意天天开着的工具：
 
-下一步是 M3「能用」：缓存复用与 `skipped`、并行执行、算子热重载、P1 交互全部补齐。
-见 [roadmap](docs/roadmap.md)。
+- **不重复算。** 结果按内容寻址缓存，原图重跑全部 `skipped`（几十毫秒），
+  改一个参数只重算它和它的下游；哪几个节点会重算，工具栏和虚线框直接告诉你
+  （判定全在 C++，[ADR-0007](docs/adr/0007-cache-authority.md)）。
+- **并行执行。** 依赖计数驱动的线程池，默认 `min(4, 核数)`，没有层同步屏障。
+- **调试顺手。** Ctrl+M 静音一个节点让它透传、reroute 整理连线、Shift+F5 只跑到选中节点、
+  底部抽屉里有日志/诊断/缓存统计。
+- **老图打得开。** 算子升主版本要配迁移，打开老图时以一条可撤销的动作写回
+  （[ADR-0008](docs/adr/0008-migration-as-diagnostic.md)）。
+- **改 C++ 不用重启。** `pnpm dev` 下热重载（[ADR-0009](docs/adr/0009-hot-reload-by-copy.md)）。
+- **交互清单 P0 + P1 全部完成**（[interaction-checklist](docs/interaction-checklist.md)）。
+
+16 个算子覆盖一条真实 pipeline：`load_pcd → crop_box → voxel_grid →
+statistical_outlier → ransac_plane → extract_indices → save_pcd`。
+
+下一步是 M4「能扩展」：子图、live preview、CLI。见 [roadmap](docs/roadmap.md)。
 
 前端不写单元测试，验证方式是通过 CDP 驱动真实运行的 app
-（[scripts/e2e](scripts/e2e/)：`pnpm e2e` 64 项断言，`pnpm e2e:packaged` 对打包产物再跑 67 项）。
-逐条验收记录见 [docs/m2-acceptance.md](docs/m2-acceptance.md)。
+（[scripts/e2e](scripts/e2e/)：`pnpm e2e` 188 项断言）。
+逐条验收记录见 [docs/m3-acceptance.md](docs/m3-acceptance.md)。
 
 ## License
 

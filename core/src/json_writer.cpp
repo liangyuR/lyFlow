@@ -121,6 +121,11 @@ void JsonWriter::value(double v)              { prepareValue(); out_ += jsonNumb
 void JsonWriter::value(const char* v)         { prepareValue(); out_ += jsonEscape(v ? v : ""); }
 void JsonWriter::value(const std::string& v)  { prepareValue(); out_ += jsonEscape(v); }
 
+void JsonWriter::raw(const std::string& json) {
+  prepareValue();
+  out_ += json.empty() ? "null" : json;
+}
+
 void JsonWriter::field(const std::string& k, bool v)               { key(k); value(v); }
 void JsonWriter::field(const std::string& k, std::int64_t v)       { key(k); value(v); }
 void JsonWriter::field(const std::string& k, double v)             { key(k); value(v); }

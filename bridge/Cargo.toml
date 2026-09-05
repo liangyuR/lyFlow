@@ -21,6 +21,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"
 tauri-plugin-dialog = "2"
 libloading = "0.8.9"
+notify = { version = "8.2.0", default-features = false }
 
 [features]
 # Tauri 自定义协议，release 构建需要

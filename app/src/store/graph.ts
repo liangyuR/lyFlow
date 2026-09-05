@@ -7,6 +7,7 @@ import { create } from "zustand";
 import { newDocId, newLocalId } from "../lib/ids";
 import { pruneUnknownParams, sparseSet } from "../lib/params";
 import { canConnect, type ConnectVerdict, type GraphContext } from "../lib/typecheck";
+import type { MigrationAction } from "../types/execution";
 import { GRAPH_SCHEMA_VERSION, type GraphDoc, type GraphNode, type NodeUi, type PortRef } from "../types/graph";
 import { useManifestStore } from "./manifest";
 
@@ -77,6 +78,22 @@ interface GraphState {
   connect(from: PortRef, to: PortRef): ConnectVerdict;
   disconnect(edgeIds: readonly string[]): void;
   pasteNodes(payload: { nodes: GraphNode[]; edges: GraphDoc["edges"] }, at: { x: number; y: number }): PasteResult;
+
+  /** 静音（交互清单 P1 #25）。是执行语义，所以进 doc、进撤销栈。 */
+  setBypass(ids: readonly string[], value: boolean): void;
+  /** 折叠：只显示标题与已连端口。纯 UI，但存进文件里下次打开还在。 */
+  setCollapsed(ids: readonly string[], value: boolean): void;
+  renameNode(id: string, title: string | null): void;
+  /** 把一条边改接到别的输入端口（#19 拖离输入端后重新落点）。 */
+  reconnectEdge(edgeId: string, to: PortRef): ConnectVerdict;
+  /** 把一个节点插到一条边中间（#21 / #24 双击连线）。 */
+  insertOnEdge(edgeId: string, nodeId: string, inPort: string, outPort: string): boolean;
+  /** 自动布局的落点。整段算一条撤销记录（E8）。 */
+  applyLayout(moves: readonly { id: string; position: { x: number; y: number } }[]): void;
+  /** 原地复制选中节点（Ctrl+D）。 */
+  duplicateNodes(ids: readonly string[]): PasteResult;
+  /** 把 C++ 给的迁移动作写回 doc（ADR-0008）。返回真正改动的节点数。 */
+  applyMigrations(actions: readonly MigrationAction[]): number;
 
   // -- 历史 ---------------------------------------------------------------
   undo(): void;
@@ -292,6 +309,128 @@ export const useGraphStore = create<GraphState>((set, get) => {
         d.edges.push(...newEdges);
       });
       return { nodeIds: newNodes.map((n) => n.id) };
+    },
+
+    setBypass(ids, value) {
+      if (ids.length === 0) return;
+      const target = new Set(ids);
+      const label = value
+        ? ids.length === 1 ? "静音节点" : `静音 ${ids.length} 个节点`
+        : ids.length === 1 ? "取消静音" : `取消静音 ${ids.length} 个节点`;
+      transact(label, (d) => {
+        for (const n of d.nodes) {
+          if (!target.has(n.id)) continue;
+          // 稀疏存储：false 就把键删掉，老图的 diff 不该被默认值污染
+          if (value) n.bypass = true;
+          else delete n.bypass;
+        }
+      });
+    },
+
+    setCollapsed(ids, value) {
+      if (ids.length === 0) return;
+      const target = new Set(ids);
+      transact(value ? "折叠节点" : "展开节点", (d) => {
+        for (const n of d.nodes) {
+          if (!target.has(n.id)) continue;
+          n.ui = { ...n.ui, collapsed: value };
+        }
+      });
+    },
+
+    renameNode(id, title) {
+      transact("重命名节点", (d) => {
+        const node = d.nodes.find((n) => n.id === id);
+        if (!node) return;
+        // null = 回到 manifest 的 label
+        node.ui = { ...node.ui, title: title && title.trim() ? title : null };
+      });
+    },
+
+    reconnectEdge(edgeId, to) {
+      const { doc } = get();
+      const edge = doc.edges.find((e) => e.id === edgeId);
+      if (!edge) return { ok: false, reason: "连线不存在" };
+      // 先把老边摘掉再判：不然「重连到同一个端口」会撞上「输入端口已有连线」
+      const without: GraphDoc = { ...doc, edges: doc.edges.filter((e) => e.id !== edgeId) };
+      const verdict = canConnect(ctx(), without, edge.from, to);
+      if (!verdict.ok) {
+        set({ lastRejection: verdict.reason });
+        return verdict;
+      }
+      transact("改接连线", (d) => {
+        const target = d.edges.find((e) => e.id === edgeId);
+        if (target) target.to = { ...to };
+      });
+      return verdict;
+    },
+
+    insertOnEdge(edgeId, nodeId, inPort, outPort) {
+      const { doc } = get();
+      const edge = doc.edges.find((e) => e.id === edgeId);
+      if (!edge) return false;
+      const taken = allIds(doc);
+      const a = newLocalId("e", taken);
+      taken.add(a);
+      const b = newLocalId("e", taken);
+      transact("插入到连线中间", (d) => {
+        d.edges = d.edges.filter((e) => e.id !== edgeId);
+        d.edges.push({ id: a, from: { ...edge.from }, to: { node: nodeId, port: inPort } });
+        d.edges.push({ id: b, from: { node: nodeId, port: outPort }, to: { ...edge.to } });
+      });
+      return true;
+    },
+
+    applyLayout(moves) {
+      if (moves.length === 0) return;
+      transact(moves.length === 1 ? "整理布局" : `整理 ${moves.length} 个节点的布局`, (d) => {
+        for (const m of moves) {
+          const node = d.nodes.find((n) => n.id === m.id);
+          if (node) node.ui = { ...node.ui, position: m.position };
+        }
+      });
+    },
+
+    duplicateNodes(ids) {
+      if (ids.length === 0) return { nodeIds: [] };
+      const { doc } = get();
+      const kept = new Set(ids);
+      const nodes = doc.nodes.filter((n) => kept.has(n.id));
+      if (nodes.length === 0) return { nodeIds: [] };
+      const edges = doc.edges.filter((e) => kept.has(e.from.node) && kept.has(e.to.node));
+      const origin = nodes.reduce(
+        (acc, n) => ({
+          x: Math.min(acc.x, n.ui?.position?.x ?? 0),
+          y: Math.min(acc.y, n.ui?.position?.y ?? 0),
+        }),
+        { x: Infinity, y: Infinity },
+      );
+      // 偏移一点，否则复制出来的节点完全盖在原件上，用户以为什么都没发生
+      return get().pasteNodes(
+        { nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) },
+        { x: (Number.isFinite(origin.x) ? origin.x : 0) + 40, y: (Number.isFinite(origin.y) ? origin.y : 0) + 40 },
+      );
+    },
+
+    applyMigrations(actions) {
+      if (actions.length === 0) return 0;
+      const byNode = new Map(actions.map((a) => [a.nodeId, a]));
+      let changed = 0;
+      transact(
+        actions.length === 1 ? "迁移 1 个节点" : `迁移 ${actions.length} 个节点`,
+        (d) => {
+          for (const node of d.nodes) {
+            const action = byNode.get(node.id);
+            if (!action) continue;
+            node.op = action.op;
+            node.opVersion = action.opVersion;
+            // params 是**完整**对象而不是补丁：改名参数没法用补丁表达
+            node.params = { ...action.params };
+            changed += 1;
+          }
+        },
+      );
+      return changed;
     },
 
     undo() {

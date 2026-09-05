@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 
 import { transport } from "../transport";
+import { refreshCacheStats, useCacheStore } from "./cache";
 import type {
   Diagnostic,
   ExecutionEvent,
@@ -133,6 +134,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         for (const id of event.plan ?? []) nodes.set(id, emptyNode());
         patch.nodes = nodes;
         patch.targets = event.targets ?? [];
+        // 记下这次跑用的是哪一批 cacheKey。stale 就是「现在编译出来的和它不一样」
+        // ——判定在 C++，这里只做对比（ADR-0007）。
+        useCacheStore.getState().setRanWith(event.nodes ?? []);
         break;
       }
       case "node_state": {
@@ -164,6 +168,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       case "run_finished": {
         patch.runStatus = event.status as RunStatus;
         patch.durationMs = event.durationMs ?? null;
+        void refreshCacheStats();
         break;
       }
       case "log": {

@@ -1,11 +1,13 @@
 // 参数控件。**前端唯一的「算子知识」**：一张 param.type -> React 控件的映射表（docs/operator-manifest.md）。
-// 撤销粒度贯穿全文件：输入框失焦/回车才提交，滑块用 begin()/commit() 包住一次拖动（见 README）。
+// 撤销粒度贯穿全文件：输入框失焦/回车才提交，滑块与数字框拖动用 begin()/commit() 包住一整段（见 README）。
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
 import type { EnumOption, Param } from "../types/manifest";
+
+import "../styles.params.css";
 
 export interface ControlProps {
   param: Param;
@@ -16,6 +18,46 @@ export interface ControlProps {
 
 // ---------------------------------------------------------------- 数值输入
 
+/** 拖过这么多像素才算一格。太小手抖就改值，太大又拖不动。 */
+const DRAG_PX_PER_STEP = 4;
+/** 先动这么多像素才进入拖动，否则普通点击就没法聚焦输入框打字了。 */
+const DRAG_THRESHOLD_PX = 3;
+
+interface DragState {
+  id: number;
+  startX: number;
+  lastX: number;
+  /** 未量化的累计值。量化只作用于写出去的那一份，否则慢拖会永远走不动。 */
+  acc: number;
+  active: boolean;
+}
+
+/** 一格的大小：manifest 的 step 优先，其次整数 1、soft 范围的 1/200，最后 0.01。 */
+function dragStepOf(param: Param, integer: boolean): number {
+  if (param.step !== undefined && param.step > 0) return param.step;
+  if (integer) return 1;
+  const lo = param.softMin ?? param.min;
+  const hi = param.softMax ?? param.max;
+  if (lo !== undefined && hi !== undefined && Number.isFinite(lo) && Number.isFinite(hi) && hi > lo) {
+    return (hi - lo) / 200;
+  }
+  return 0.01;
+}
+
+/** 吸到 step 的整数倍，并抹掉二进制浮点的尾巴（0.30000000000000004）。 */
+function quantize(v: number, q: number): number {
+  if (!(q > 0)) return v;
+  return Number.parseFloat((Math.round(v / q) * q).toPrecision(12));
+}
+
+/** 收尾一次拖动。卸载路径也要走这里，否则事务悬着、body 上的类留着。 */
+function finishDrag(d: DragState | null): void {
+  if (!d?.active) return;
+  d.active = false;
+  document.body.classList.remove("param-dragging");
+  useGraphStore.getState().commit("拖动参数");
+}
+
 interface NumberInputProps {
   value: number;
   disabled: boolean;
@@ -23,18 +65,41 @@ interface NumberInputProps {
   min?: number | undefined;
   max?: number | undefined;
   step?: number | undefined;
+  dragStep: number;
+  dragName?: string | undefined;
   onCommit: (v: number) => void;
 }
 
-function NumberInput({ value, disabled, integer, min, max, step, onCommit }: NumberInputProps) {
+function NumberInput({
+  value,
+  disabled,
+  integer,
+  min,
+  max,
+  step,
+  dragStep,
+  dragName,
+  onCommit,
+}: NumberInputProps) {
   const [text, setText] = useState(String(value));
+  const [dragging, setDragging] = useState(false);
   const editing = useRef(false);
+  const drag = useRef<DragState | null>(null);
 
   // 外部值变了（撤销、切换节点）且用户没在编辑时才同步，
   // 否则会在用户打字的中途把输入框内容抢走。
   useEffect(() => {
     if (!editing.current) setText(String(value));
   }, [value]);
+
+  useEffect(() => () => finishDrag(drag.current), []);
+
+  const clamp = (v: number) => {
+    let n = v;
+    if (min !== undefined) n = Math.max(n, min);
+    if (max !== undefined) n = Math.min(n, max);
+    return n;
+  };
 
   const commit = () => {
     editing.current = false;
@@ -43,20 +108,63 @@ function NumberInput({ value, disabled, integer, min, max, step, onCommit }: Num
       setText(String(value)); // 输入非法，恢复原值而不是写入 NaN
       return;
     }
-    let next = parsed;
-    if (min !== undefined) next = Math.max(next, min);
-    if (max !== undefined) next = Math.min(next, max);
+    const next = clamp(parsed);
     setText(String(next));
     if (next !== value) onCommit(next);
   };
 
+  // 先抓住指针再判阈值：拖出输入框之外的那一段也要收得到
+  const onPointerDown = (e: React.PointerEvent<HTMLInputElement>) => {
+    if (disabled || e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { id: e.pointerId, startX: e.clientX, lastX: e.clientX, acc: value, active: false };
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLInputElement>) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    if (!d.active) {
+      if (Math.abs(e.clientX - d.startX) < DRAG_THRESHOLD_PX) return;
+      d.active = true;
+      d.lastX = e.clientX;
+      d.acc = value;
+      editing.current = false; // 拖动压过打字，接下来由它接管显示
+      document.body.classList.add("param-dragging");
+      setDragging(true);
+      useGraphStore.getState().begin();
+    }
+    const mult = (e.shiftKey ? 10 : 1) * (e.altKey ? 0.1 : 1);
+    d.acc = clamp(d.acc + ((e.clientX - d.lastX) / DRAG_PX_PER_STEP) * dragStep * mult);
+    d.lastX = e.clientX;
+    let next = clamp(quantize(d.acc, dragStep));
+    if (integer) next = clamp(Math.round(next));
+    setText(String(next));
+    if (next !== value) onCommit(next);
+  };
+
+  const onPointerEnd = (e: React.PointerEvent<HTMLInputElement>) => {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    drag.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    if (!d.active) return;
+    finishDrag(d);
+    setDragging(false);
+  };
+
   return (
     <input
-      className="ctl ctl--num"
+      className={`ctl ctl--num${disabled ? "" : " is-draggable"}`}
       type="number"
       disabled={disabled}
       value={text}
       step={step ?? (integer ? 1 : "any")}
+      data-testid={dragName ? `param-drag-${dragName}` : undefined}
+      data-dragging={dragging ? "1" : undefined}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
       onFocus={() => (editing.current = true)}
       onChange={(e) => {
         editing.current = true;
@@ -124,6 +232,8 @@ function NumberControl({ param, value, disabled, onChange }: ControlProps) {
         min={param.min}
         max={param.max}
         step={param.step}
+        dragStep={dragStepOf(param, integer)}
+        dragName={param.name}
         onCommit={onChange}
       />
       {hasSlider && (
@@ -172,6 +282,8 @@ function VectorControl({ param, value, disabled, onChange }: ControlProps) {
               min={param.min}
               max={param.max}
               step={param.step}
+              dragStep={dragStepOf(param, false)}
+              dragName={`${param.name}-${i}`}
               onCommit={(v) => setComponent(i, v)}
             />
           </label>
@@ -368,9 +480,226 @@ function UnsupportedControl({ param }: ControlProps) {
   );
 }
 
+// ----------------------------------------------------------- 参数右键（#26）
+
+type Coerced = { ok: true; value: unknown } | { ok: false; msg: string };
+
+/** 数组类型能接受的长度。color 的 alpha 可有可无，transform 以默认值的长度为准。 */
+function arrayLengths(param: Param): number[] {
+  switch (param.type) {
+    case "vec2f":
+      return [2];
+    case "vec3f":
+      return [3];
+    case "vec4f":
+      return [4];
+    case "color":
+      return [3, 4];
+    case "transform":
+      return [Array.isArray(param.default) ? param.default.length : 16];
+    default:
+      return [];
+  }
+}
+
+function clampToParam(param: Param, v: number): number {
+  let n = v;
+  if (param.min !== undefined) n = Math.max(n, param.min);
+  if (param.max !== undefined) n = Math.min(n, param.max);
+  return n;
+}
+
+/** 粘贴的形状校验。对不上就退回一条人话，绝不往 GraphDoc 里塞坏值。 */
+function coerceValue(param: Param, raw: unknown): Coerced {
+  const isNum = typeof raw === "number" && Number.isFinite(raw);
+  switch (param.type) {
+    case "bool":
+      return typeof raw === "boolean"
+        ? { ok: true, value: raw }
+        : { ok: false, msg: `粘贴失败：${param.name} 需要 true / false` };
+    case "int":
+    case "flags":
+      return isNum
+        ? { ok: true, value: clampToParam(param, Math.round(raw)) }
+        : { ok: false, msg: `粘贴失败：${param.name} 需要一个整数` };
+    case "float":
+      return isNum
+        ? { ok: true, value: clampToParam(param, raw) }
+        : { ok: false, msg: `粘贴失败：${param.name} 需要一个数字` };
+    case "enum": {
+      const hit = (param.options ?? []).some((o) => o.value === raw);
+      return hit
+        ? { ok: true, value: raw }
+        : { ok: false, msg: `粘贴失败：${JSON.stringify(raw)} 不是 ${param.name} 的合法选项` };
+    }
+    case "string":
+    case "text":
+    case "path":
+      return typeof raw === "string"
+        ? { ok: true, value: raw }
+        : { ok: false, msg: `粘贴失败：${param.name} 需要一个字符串` };
+    case "vec2f":
+    case "vec3f":
+    case "vec4f":
+    case "color":
+    case "transform": {
+      const want = arrayLengths(param);
+      const ok =
+        Array.isArray(raw) &&
+        want.includes(raw.length) &&
+        raw.every((v) => typeof v === "number" && Number.isFinite(v));
+      return ok
+        ? { ok: true, value: raw }
+        : { ok: false, msg: `粘贴失败：${param.name} 需要长度 ${want.join(" 或 ")} 的数字数组` };
+    }
+    case "curve":
+      return { ok: false, msg: `粘贴失败：${param.name} 是 curve，暂不支持` };
+  }
+}
+
+/** 剪贴板可能因为不安全上下文或没授权而不可用，一律吞掉异常返回失败。 */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return legacyCopy(text);
+  }
+}
+
+function legacyCopy(text: string): boolean {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;top:-1000px;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+async function readClipboard(): Promise<string | null> {
+  try {
+    return await navigator.clipboard.readText();
+  } catch {
+    return null;
+  }
+}
+
+function ParamMenu({
+  param,
+  value,
+  x,
+  y,
+  onChange,
+  onClose,
+}: {
+  param: Param;
+  value: unknown;
+  x: number;
+  y: number;
+  onChange: (v: unknown) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation(); // Esc 先关菜单，不要顺带触发全局快捷键
+      onClose();
+    };
+    document.addEventListener("mousedown", onDown, true);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [onClose]);
+
+  const copy = (text: string, what: string) => {
+    onClose();
+    void copyText(text).then((ok) => {
+      const msg = ok ? `已复制${what}` : "剪贴板不可用，复制失败";
+      useUiStore.getState().showToast(msg, ok ? "info" : "warn");
+    });
+  };
+
+  const paste = () => {
+    onClose();
+    void readClipboard().then((text) => {
+      const ui = useUiStore.getState();
+      if (text === null) {
+        ui.showToast("剪贴板不可用，粘贴失败", "warn");
+        return;
+      }
+      let raw: unknown;
+      try {
+        raw = JSON.parse(text) as unknown;
+      } catch {
+        ui.showToast("粘贴失败：剪贴板内容不是合法 JSON", "warn");
+        return;
+      }
+      const r = coerceValue(param, raw);
+      if (!r.ok) {
+        ui.showToast(r.msg, "warn");
+        return;
+      }
+      onChange(r.value);
+    });
+  };
+
+  return (
+    <div
+      ref={ref}
+      className="ctxmenu param-menu"
+      data-testid="param-menu"
+      style={{ left: Math.max(4, Math.min(x, window.innerWidth - 180)), top: y }}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <button
+        type="button"
+        data-testid="param-menu-reset"
+        title={`默认值 ${JSON.stringify(param.default)}`}
+        onClick={() => {
+          onChange(param.default);
+          onClose();
+        }}
+      >
+        重置为默认
+      </button>
+      <button
+        type="button"
+        data-testid="param-menu-copy"
+        onClick={() => copy(JSON.stringify(value ?? null), `${param.name} 的值`)}
+      >
+        复制值
+      </button>
+      <button type="button" data-testid="param-menu-paste" onClick={paste}>
+        粘贴值
+      </button>
+      <button
+        type="button"
+        data-testid="param-menu-path"
+        title="给 CLI 的 --set <name>=<value> 用"
+        onClick={() => copy(param.name, `参数名 ${param.name}`)}
+      >
+        复制路径名
+      </button>
+    </div>
+  );
+}
+
 // ------------------------------------------------- param.type -> 控件 映射表
 
-export function ParamControl(props: ControlProps) {
+function ParamWidget(props: ControlProps) {
   switch (props.param.type) {
     case "bool":
       return <BoolControl {...props} />;
@@ -398,4 +727,41 @@ export function ParamControl(props: ControlProps) {
     case "curve":
       return <UnsupportedControl {...props} />;
   }
+}
+
+export function ParamControl(props: ControlProps) {
+  const wrap = useRef<HTMLDivElement>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+
+  // 右键挂到整行（.insp-param）上而不是控件上：标签那一片也要能唤出菜单，
+  // 而那一行由 Inspector 渲染，这里只能顺着 DOM 往上找。
+  useEffect(() => {
+    const host = wrap.current?.closest(".insp-param") ?? wrap.current;
+    if (!host) return;
+    const onCtx = (e: Event) => {
+      e.preventDefault();
+      const me = e as MouseEvent;
+      setMenu({ x: me.clientX, y: me.clientY });
+    };
+    host.addEventListener("contextmenu", onCtx);
+    return () => host.removeEventListener("contextmenu", onCtx);
+  }, []);
+
+  const close = useCallback(() => setMenu(null), []);
+
+  return (
+    <div className="ctl-wrap" ref={wrap}>
+      <ParamWidget {...props} />
+      {menu && (
+        <ParamMenu
+          param={props.param}
+          value={props.value}
+          x={menu.x}
+          y={menu.y}
+          onChange={props.onChange}
+          onClose={close}
+        />
+      )}
+    </div>
+  );
 }

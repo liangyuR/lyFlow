@@ -34,6 +34,8 @@ std::string Diagnostics::toJson() const {
   w.beginArray();
   for (const auto& d : items_) {
     w.beginObject();
+    // kind 让前端一眼分得出普通诊断和迁移动作，不用靠字段有无去猜（ADR-0008）。
+    w.field("kind", std::string(d.migration ? "migration" : "diagnostic"));
     w.field("nodeId", d.nodeId);
     w.field("severity", std::string(toString(d.severity)));
     w.field("phase", std::string(toString(d.status.phase)));
@@ -41,6 +43,14 @@ std::string Diagnostics::toJson() const {
     w.field("message", d.status.message);
     w.fieldIfSet("paramPath", d.status.paramPath);
     w.fieldIfSet("portName", d.status.portName);
+    if (d.migration) {
+      w.field("op", d.migration->op);
+      w.field("opVersion", d.migration->opVersion);
+      // params 已经是 JSON 文本，原样嵌进去 —— 再解析一遍只是为了重新写出来。
+      w.key("params");
+      w.raw(d.migration->paramsJson);
+      w.fieldIfSet("notes", d.migration->notes);
+    }
     w.endObject();
   }
   w.endArray();

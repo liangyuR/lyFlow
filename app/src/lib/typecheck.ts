@@ -11,8 +11,13 @@ export interface GraphContext {
 
 export type ConnectVerdict = { ok: true } | { ok: false; reason: string };
 
-/** 通配类型：Reroute、Debug View 这类透传节点用，可与任意类型互连。 */
-const ANY = "Any";
+/** 通配类型：Reroute、Debug View 这类透传节点用，实际类型由连线推导（E6）。 */
+export const ANY = "Any";
+
+/** nodeId → 该节点全部 Any 端口的实际类型。推不出来的节点不在表里。 */
+export type AnyTypes = ReadonlyMap<string, string>;
+
+const NO_ANY: AnyTypes = new Map();
 
 export function findPort(
   op: OperatorDesc | undefined,
@@ -34,6 +39,55 @@ export function typesCompatible(
   if (fromType === ANY || toType === ANY) return true;
   // castableTo 是有方向的：PointCloudXYZI 能当 PointCloud 用，反过来不行。
   return ctx.typesByName.get(fromType)?.castableTo?.includes(toType) ?? false;
+}
+
+/** 沿连线把具体类型传播到 Any 端口，迭代到定点（E6）。C++ 的 buildPlan 里有
+ *  同样一份实现 —— 一个节点的**全部** Any 端口共用一个类型变量，reroute 正是这个语义。 */
+export function inferAnyTypes(ctx: GraphContext, doc: GraphDoc): AnyTypes {
+  const resolved = new Map<string, string>();
+  const hasAny = (op: OperatorDesc | undefined) =>
+    !!op && [...op.inputs, ...op.outputs].some((p) => p.type === ANY);
+
+  const nodeOp = new Map<string, OperatorDesc | undefined>();
+  let anyNodes = 0;
+  for (const n of doc.nodes) {
+    const op = ctx.operatorsById.get(n.op);
+    nodeOp.set(n.id, op);
+    if (hasAny(op)) anyNodes += 1;
+  }
+  if (anyNodes === 0) return NO_ANY;
+
+  const concrete = (nodeId: string, port: Port | undefined): string | null => {
+    if (!port) return null;
+    if (port.type !== ANY) return port.type;
+    return resolved.get(nodeId) ?? null;
+  };
+
+  for (let round = 0; round <= doc.nodes.length; round += 1) {
+    let changed = false;
+    for (const e of doc.edges) {
+      const outPort = findPort(nodeOp.get(e.from.node), e.from.port, "output");
+      const inPort = findPort(nodeOp.get(e.to.node), e.to.port, "input");
+      if (!outPort || !inPort) continue;
+      const fromT = concrete(e.from.node, outPort);
+      const toT = concrete(e.to.node, inPort);
+      if (fromT && !toT && inPort.type === ANY) {
+        resolved.set(e.to.node, fromT);
+        changed = true;
+      } else if (toT && !fromT && outPort.type === ANY) {
+        resolved.set(e.from.node, toT);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return resolved;
+}
+
+/** 端口的实际类型。推导表里没有就用声明类型（可能还是 Any）。 */
+export function portType(port: Port, nodeId: string, anyTypes: AnyTypes): string {
+  if (port.type !== ANY) return port.type;
+  return anyTypes.get(nodeId) ?? ANY;
 }
 
 /** 反向邻接：给定节点的所有上游节点 id。 */
@@ -92,6 +146,7 @@ export function canConnect(
   doc: GraphDoc,
   from: PortRef,
   to: PortRef,
+  anyTypes?: AnyTypes,
 ): ConnectVerdict {
   if (from.node === to.node) {
     return { ok: false, reason: "不能连到自己" };
@@ -114,10 +169,14 @@ export function canConnect(
   if (!outPort) return { ok: false, reason: `${fromOp.label} 没有输出端口 ${from.port}` };
   if (!inPort) return { ok: false, reason: `${toOp.label} 没有输入端口 ${to.port}` };
 
-  if (!typesCompatible(ctx, outPort.type, inPort.type)) {
+  // 按推导后的实际类型判：串了两级 reroute 之后仍然接得住类型不匹配（E6）。
+  const types = anyTypes ?? inferAnyTypes(ctx, doc);
+  const fromType = portType(outPort, from.node, types);
+  const toType = portType(inPort, to.node, types);
+  if (!typesCompatible(ctx, fromType, toType)) {
     return {
       ok: false,
-      reason: `类型不匹配：${outPort.type} → ${inPort.type}`,
+      reason: `类型不匹配：${fromType} → ${toType}`,
     };
   }
 
@@ -145,11 +204,31 @@ export function compatibleTargets(
   from: PortRef,
 ): Set<string> {
   const out = new Set<string>();
+  const types = inferAnyTypes(ctx, doc);
   for (const node of doc.nodes) {
     const op = ctx.operatorsById.get(node.op);
     if (!op) continue;
     for (const port of op.inputs) {
-      const verdict = canConnect(ctx, doc, from, { node: node.id, port: port.name });
+      const verdict = canConnect(ctx, doc, from, { node: node.id, port: port.name }, types);
+      if (verdict.ok) out.add(`${node.id}:${port.name}`);
+    }
+  }
+  return out;
+}
+
+/** 反向：拖的是输入端口时，哪些输出端口可以当源。#20 的置灰要两个方向都覆盖。 */
+export function compatibleSources(
+  ctx: GraphContext,
+  doc: GraphDoc,
+  to: PortRef,
+): Set<string> {
+  const out = new Set<string>();
+  const types = inferAnyTypes(ctx, doc);
+  for (const node of doc.nodes) {
+    const op = ctx.operatorsById.get(node.op);
+    if (!op) continue;
+    for (const port of op.outputs) {
+      const verdict = canConnect(ctx, doc, { node: node.id, port: port.name }, to, types);
       if (verdict.ok) out.add(`${node.id}:${port.name}`);
     }
   }

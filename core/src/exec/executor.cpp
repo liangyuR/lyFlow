@@ -1,7 +1,10 @@
 #include "exec/executor.h"
 
+#include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <ctime>
+#include <queue>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -48,17 +51,18 @@ void writeError(JsonWriter& w, const Status& s) {
   w.endObject();
 }
 
-/// 事件序列化 + 回调。seq 单调递增，前端据此检测丢包与乱序。
-/// 并行执行下多个 worker 会同时发事件，所以入口整体加锁。
+/// 事件序列化 + 回调。seq 全局单调，多个 worker 同时发事件所以整个入口加锁（E2）。
 class EventSink {
  public:
   EventSink(std::string runId, lyflow_event_cb cb, void* user)
       : runId_(std::move(runId)), cb_(cb), user_(user) {}
 
-  void runStarted(const Plan& plan, const std::vector<std::string>& targets) {
+  void runStarted(const Plan& plan, const std::vector<std::string>& targets, int maxParallel) {
     JsonWriter w;
+    std::lock_guard<std::mutex> lock(mu_);
     begin(w, "run_started");
     w.field("nodeCount", static_cast<std::int64_t>(plan.nodes.size()));
+    w.field("maxParallel", static_cast<std::int64_t>(maxParallel));
     w.key("plan");
     w.beginArray();
     for (const auto& n : plan.nodes) w.value(n.id);
@@ -67,8 +71,7 @@ class EventSink {
     w.beginArray();
     for (const auto& t : targets) w.value(t);
     w.endArray();
-    // M3 的「将重算 N 个节点」提示与精确 stale 标记全靠这一段。
-    // 现在就发出去，前端可以先忽略，接口不用再改一次。
+    // 前端的精确 stale 标记与「将重算 N 个节点」全靠这一段（ADR-0007）。
     w.key("nodes");
     w.beginArray();
     for (const auto& n : plan.nodes) {
@@ -76,6 +79,7 @@ class EventSink {
       w.field("id", n.id);
       w.field("cacheKey", n.cacheKey);
       w.field("level", static_cast<std::int64_t>(n.level));
+      if (n.bypass) w.field("bypass", true);
       w.endObject();
     }
     w.endArray();
@@ -84,23 +88,29 @@ class EventSink {
 
   void nodeState(const std::string& nodeId, const char* state) {
     JsonWriter w;
+    std::lock_guard<std::mutex> lock(mu_);
     begin(w, "node_state");
     w.field("nodeId", nodeId);
     w.field("state", std::string(state));
     end(w);
   }
 
-  void nodeDone(const std::string& nodeId, double durationMs, std::size_t elementCount,
-                std::size_t byteSize, const std::vector<OutputInfo>& outputs) {
+  /// done / skipped 共用。cached 与 bypassed 让用户分得清「不用跑」和「被静音」。
+  void nodeFinished(const std::string& nodeId, const char* state, double durationMs,
+                    std::size_t elementCount, std::size_t byteSize,
+                    const std::vector<OutputInfo>& outputs, bool cached, bool bypassed) {
     JsonWriter w;
+    std::lock_guard<std::mutex> lock(mu_);
     begin(w, "node_state");
     w.field("nodeId", nodeId);
-    w.field("state", std::string("done"));
+    w.field("state", std::string(state));
     w.field("durationMs", durationMs);
     w.key("stats");
     w.beginObject();
     w.field("elementCount", static_cast<std::int64_t>(elementCount));
     w.field("byteSize", static_cast<std::int64_t>(byteSize));
+    if (cached) w.field("cached", true);
+    if (bypassed) w.field("bypassed", true);
     w.key("outputs");
     w.beginArray();
     for (const auto& o : outputs) {
@@ -115,11 +125,11 @@ class EventSink {
     end(w);
   }
 
-  /// 失败/取消。errors 是**全部**诊断，error 是 errors[0] 的快捷方式 ——
-  /// 前端老代码只看 error 也不会瞎，新代码一次标出所有红框（D5）。
+  /// 失败/取消。errors 是**全部**诊断，error 是 errors[0] 的快捷方式（D5）。
   void nodeFailed(const std::string& nodeId, const char* state,
                   const std::vector<Status>& errors, double durationMs) {
     JsonWriter w;
+    std::lock_guard<std::mutex> lock(mu_);
     begin(w, "node_state");
     w.field("nodeId", nodeId);
     w.field("state", std::string(state));
@@ -137,6 +147,7 @@ class EventSink {
 
   void nodeProgress(const std::string& nodeId, float ratio, const std::string& message) {
     JsonWriter w;
+    std::lock_guard<std::mutex> lock(mu_);
     begin(w, "node_progress");
     w.field("nodeId", nodeId);
     w.field("progress", static_cast<double>(ratio < 0 ? 0.0f : (ratio > 1 ? 1.0f : ratio)));
@@ -146,6 +157,7 @@ class EventSink {
 
   void log(const char* level, const std::string& nodeId, const std::string& message) {
     JsonWriter w;
+    std::lock_guard<std::mutex> lock(mu_);
     begin(w, "log");
     w.field("level", std::string(level));
     w.fieldIfSet("nodeId", nodeId);
@@ -155,6 +167,7 @@ class EventSink {
 
   void runFinished(const char* status, double durationMs, const Status* error) {
     JsonWriter w;
+    std::lock_guard<std::mutex> lock(mu_);
     begin(w, "run_finished");
     w.field("status", std::string(status));
     w.field("durationMs", durationMs);
@@ -182,18 +195,20 @@ class EventSink {
     cb_(json.c_str(), user_);
   }
 
+  std::mutex mu_;
   std::string runId_;
   lyflow_event_cb cb_ = nullptr;
   void* user_ = nullptr;
   std::int64_t seq_ = 0;
 };
 
-/// 算子看到的 ExecContext。
+/// 算子看到的 ExecContext。每个节点一份，所以本身不用加锁。
 class NodeContext final : public ExecContext {
  public:
   NodeContext(EventSink& sink, const std::atomic<bool>& cancelled, std::string nodeId,
-              const std::filesystem::path& baseDir)
-      : sink_(sink), cancelled_(cancelled), nodeId_(std::move(nodeId)), baseDir_(baseDir) {}
+              const std::filesystem::path& baseDir, int threadBudget)
+      : sink_(sink), cancelled_(cancelled), nodeId_(std::move(nodeId)), baseDir_(baseDir),
+        threadBudget_(threadBudget) {}
 
   bool cancelled() const override { return cancelled_.load(std::memory_order_relaxed); }
 
@@ -214,16 +229,376 @@ class NodeContext final : public ExecContext {
   }
 
   const std::filesystem::path& baseDir() const override { return baseDir_; }
+  int threadBudget() const override { return threadBudget_; }
 
  private:
   EventSink& sink_;
   const std::atomic<bool>& cancelled_;
   std::string nodeId_;
   const std::filesystem::path& baseDir_;
+  int threadBudget_ = 1;
   Clock::time_point lastProgress_{};
 };
 
+const Port* findPortByName(const std::vector<Port>& ports, const std::string& name) {
+  for (const Port& p : ports) {
+    if (p.name == name) return &p;
+  }
+  return nullptr;
+}
+
+std::vector<std::string> outputPortNames(const OperatorDesc& op) {
+  std::vector<std::string> names;
+  names.reserve(op.outputs.size());
+  for (const Port& p : op.outputs) names.push_back(p.name);
+  return names;
+}
+
+// ------------------------------------------------------------------- 调度器
+
+enum class Verdict { Ok, Failed, Cancelled };
+
+/// 依赖计数驱动的线程池（E2）。没有层同步屏障 —— 屏障会让一层里最慢的节点
+/// 拖住全部，而依赖计数天然就是最优调度。
+class Scheduler {
+ public:
+  Scheduler(Plan& plan, EventSink& sink, const std::atomic<bool>& cancelled,
+            const RunOptions& options, ResultStore& store, int workers)
+      : plan_(plan), sink_(sink), cancelled_(cancelled), options_(options), store_(store),
+        workers_(workers), threadBudget_(threadBudgetFor(workers)), n_(plan.nodes.size()),
+        remaining_(n_, 0), verdict_(n_, Verdict::Ok), done_(n_, 0), poisoned_(n_, 0),
+        poisonCancelled_(n_, 0), blockedBy_(n_) {
+    for (std::size_t i = 0; i < n_; ++i) {
+      remaining_[i] = static_cast<int>(plan_.nodes[i].upstream.size());
+      if (remaining_[i] == 0) ready_.push(i);
+    }
+  }
+
+  void run() {
+    if (n_ == 0) return;
+    const int count = std::max(1, std::min<int>(workers_, static_cast<int>(n_)));
+    std::vector<std::thread> pool;
+    pool.reserve(static_cast<std::size_t>(count) - 1);
+    for (int i = 1; i < count; ++i) pool.emplace_back([this] { worker(); });
+    worker();
+    for (auto& t : pool) t.join();
+
+    // 依赖计数坏掉时的兜底。正常路径永远走不到这里 —— 有环在编译期就拦下了。
+    for (std::size_t i = 0; i < n_; ++i) {
+      if (done_[i]) continue;
+      sink_.nodeFailed(plan_.nodes[i].id, "error",
+                       {Status::Error(Phase::Execute, "internal", "调度器没有排到这个节点")}, -1);
+      anyError_ = true;
+      failed_ += 1;
+    }
+  }
+
+  bool anyError() const { return anyError_; }
+  bool sawCancel() const { return sawCancel_; }
+  std::size_t failedCount() const { return failed_; }
+
+ private:
+  void worker() {
+    for (;;) {
+      std::size_t index = 0;
+      {
+        std::unique_lock<std::mutex> lock(mu_);
+        cv_.wait(lock, [this] { return !ready_.empty() || inflight_ == 0; });
+        if (ready_.empty()) {
+          cv_.notify_all();  // 叫醒其余 worker 一起收工
+          return;
+        }
+        index = ready_.top();
+        ready_.pop();
+        inflight_ += 1;
+      }
+
+      const Verdict v = execute(index);
+
+      {
+        std::lock_guard<std::mutex> lock(mu_);
+        verdict_[index] = v;
+        done_[index] = 1;
+        inflight_ -= 1;
+        if (v != Verdict::Ok) {
+          failed_ += 1;
+          if (v == Verdict::Failed) anyError_ = true;
+          else sawCancel_ = true;
+        }
+        for (int d : plan_.nodes[index].downstream) {
+          const auto di = static_cast<std::size_t>(d);
+          if (v != Verdict::Ok && !poisoned_[di]) {
+            poisoned_[di] = 1;
+            poisonCancelled_[di] = v == Verdict::Cancelled ? 1 : 0;
+            blockedBy_[di] = plan_.nodes[index].id;
+          }
+          if (--remaining_[di] == 0) ready_.push(di);
+        }
+      }
+      cv_.notify_all();
+    }
+  }
+
+  bool poisonOf(std::size_t i, bool& byCancel, std::string& blockedBy) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (!poisoned_[i]) return false;
+    byCancel = poisonCancelled_[i] != 0;
+    blockedBy = blockedBy_[i];
+    return true;
+  }
+
+  Verdict execute(std::size_t i) {
+    PlanNode& node = plan_.nodes[i];
+    sink_.nodeState(node.id, "pending");
+
+    if (cancelled_.load(std::memory_order_relaxed)) {
+      sink_.nodeFailed(node.id, "cancelled",
+                       {Status::Error(Phase::Execute, "cancelled", "运行已取消")}, -1);
+      return Verdict::Cancelled;
+    }
+
+    // 自身校验没过：报它全部的诊断，然后当作失败往下传。其余节点照常跑 ——
+    // 一次看到所有能看到的（D5 的执行期对应物）。
+    if (!node.valid || !node.op) {
+      std::vector<Status> errors;
+      for (const auto& d : node.errors) errors.push_back(d.status);
+      if (errors.empty()) {
+        errors.push_back(Status::Error(Phase::Validate, "internal", "节点校验未通过"));
+      }
+      sink_.nodeFailed(node.id, "error", errors, -1);
+      return Verdict::Failed;
+    }
+
+    // 上游失败 → cancelled + upstream_failed。严格不用 skipped：
+    // 后者保留给缓存命中，混用的话用户分不清「没跑」和「不用跑」。
+    bool byCancel = false;
+    std::string blockedBy;
+    if (poisonOf(i, byCancel, blockedBy)) {
+      const Status s =
+          byCancel ? Status::Error(Phase::Execute, "cancelled", "运行已取消")
+                   : Status::Error(Phase::Execute, "upstream_failed",
+                                   "上游节点 " + blockedBy + " 失败，未执行");
+      sink_.nodeFailed(node.id, "cancelled", {s}, -1);
+      return byCancel ? Verdict::Cancelled : Verdict::Failed;
+    }
+
+    const auto nodeStart = Clock::now();
+
+    // 缓存命中：直接把仓里那份挂到本次运行，不调 compute（ADR-0007）。
+    // 没有输出端口的算子（io.save_pcd 这类纯副作用）永远不复用。
+    if (!node.bypass && node.op->capabilities.deterministic && !node.op->outputs.empty()) {
+      std::vector<OutputInfo> infos;
+      if (store_.reuse(options_.runId, node.id, node.cacheKey, outputPortNames(*node.op), infos)) {
+        std::size_t bytes = 0;
+        for (const auto& o : infos) bytes += o.byteSize;
+        const std::size_t primary = infos.empty() ? 0 : infos.front().elementCount;
+        sink_.nodeFinished(node.id, "skipped", msSince(nodeStart), primary, bytes, infos,
+                           /*cached=*/true, /*bypassed=*/false);
+        return Verdict::Ok;
+      }
+    }
+
+    sink_.nodeState(node.id, "running");
+
+    std::unordered_map<std::string, Data> inputValues;
+    if (const Status bad = collectInputs(node, inputValues); !bad.ok) {
+      sink_.nodeFailed(node.id, "error", {bad}, msSince(nodeStart));
+      return Verdict::Failed;
+    }
+
+    std::unordered_map<std::string, Data> outputValues;
+    bool bypassed = false;
+    Status status = Status::Ok();
+    if (node.bypass) {
+      bypassed = true;
+      passThrough(node, inputValues, outputValues);
+    } else {
+      Inputs inputs(inputValues);
+      Outputs outputs(outputValues);
+      ParamView params(node.params, options_.baseDir);
+      NodeContext ctx(sink_, cancelled_, node.id, options_.baseDir, threadBudget_);
+      try {
+        status = node.op->compute(inputs, params, outputs, ctx);
+      } catch (const std::exception& e) {
+        // 算子抛出的任何异常都在这里兜住。绝不让它穿到 C ABI ——
+        // 跨 DLL 边界抛异常一旦有 Rust 栈帧介入就是未定义行为。
+        status = Status::Error(Phase::Execute, "internal",
+                               std::string("算子内部异常: ") + e.what());
+      } catch (...) {
+        status = Status::Error(Phase::Execute, "internal", "算子内部异常（未知类型）");
+      }
+    }
+
+    const double durationMs = msSince(nodeStart);
+
+    if (cancelled_.load(std::memory_order_relaxed)) {
+      sink_.nodeFailed(node.id, "cancelled",
+                       {Status::Error(Phase::Execute, "cancelled", "运行已取消")}, durationMs);
+      return Verdict::Cancelled;
+    }
+    if (!status.ok) {
+      sink_.nodeFailed(node.id, "error", {status}, durationMs);
+      return Verdict::Failed;
+    }
+
+    if (const Status contract = checkOutputs(node, outputValues, bypassed); !contract.ok) {
+      sink_.nodeFailed(node.id, "error", {contract}, durationMs);
+      return Verdict::Failed;
+    }
+
+    std::size_t totalBytes = 0;
+    std::size_t primaryElements = 0;
+    std::vector<OutputInfo> infos;
+    bool first = true;
+    for (const Port& p : node.op->outputs) {
+      auto it = outputValues.find(p.name);
+      if (it == outputValues.end() || it->second.empty()) continue;  // bypass 找不到源
+      Data& d = it->second;
+      totalBytes += d.byteSize();
+      if (first) {
+        primaryElements = d.elementCount();
+        first = false;
+      }
+      infos.push_back(OutputInfo{p.name, d.typeName(), d.elementCount(), d.byteSize()});
+      store_.put(options_.runId, node.id, p.name, node.cacheKey, d);
+    }
+
+    sink_.nodeFinished(node.id, bypassed ? "skipped" : "done", durationMs, primaryElements,
+                       totalBytes, infos, /*cached=*/false, bypassed);
+    return Verdict::Ok;
+  }
+
+  Status collectInputs(const PlanNode& node, std::unordered_map<std::string, Data>& values) const {
+    for (const InputBinding& b : node.inputs) {
+      if (b.fromNode < 0) continue;
+      const PlanNode& up = plan_.nodes[static_cast<std::size_t>(b.fromNode)];
+      Data d;
+      if (!store_.get(options_.runId, up.id, b.fromPort, d)) {
+        // 上游是被静音的节点、而它那个输出没找到可透传的源（E5）。
+        const bool bypassSource = up.bypass;
+        return Status::Error(
+            Phase::Execute, bypassSource ? "bypassed_no_source" : "internal",
+            bypassSource ? "上游 " + up.id + " 已静音，且它的 " + b.fromPort +
+                               " 端口找不到类型兼容的输入可以透传"
+                         : "上游 " + up.id + "." + b.fromPort + " 没有产出结果",
+            {}, b.port);
+      }
+      // 声明类型编译期查过了，但流过来的 Data 是什么 Kind 还没人查。Any 端口会让
+      // 声明层面的检查全过，而算子里的 asCloud() 返回 nullptr，解引用是 SEH，兜不住。
+      const Port* declared = findPortByName(node.op->inputs, b.port);
+      if (declared) {
+        const std::string& want = effectiveType(node.inputTypes, b.port, declared->type);
+        const Data::Kind expected = kindFromTypeName(want);
+        if (expected != Data::Kind::None && d.kind() != expected) {
+          return Status::Error(Phase::Execute, "type_mismatch",
+                               std::string("输入端口 '") + b.port + "' 需要 " + want +
+                                   "，实际收到 " + d.typeName(),
+                               {}, b.port);
+        }
+      }
+      values[b.port] = std::move(d);
+    }
+    return Status::Ok();
+  }
+
+  /// 静音节点的透传（E5）：每个输出取第一个类型兼容且已连线的输入。
+  void passThrough(const PlanNode& node, const std::unordered_map<std::string, Data>& inputs,
+                   std::unordered_map<std::string, Data>& outputs) const {
+    for (const Port& out : node.op->outputs) {
+      const std::string& want = effectiveType(node.outputTypes, out.name, out.type);
+      const Data::Kind wantKind = kindFromTypeName(want);
+      for (const InputBinding& b : node.inputs) {
+        auto it = inputs.find(b.port);
+        if (it == inputs.end() || it->second.empty()) continue;
+        if (wantKind != Data::Kind::None && it->second.kind() != wantKind) continue;
+        outputs[out.name] = it->second;
+        break;
+      }
+    }
+  }
+
+  Status checkOutputs(const PlanNode& node, std::unordered_map<std::string, Data>& values,
+                      bool bypassed) const {
+    for (const Port& p : node.op->outputs) {
+      auto it = values.find(p.name);
+      if (it == values.end() || it->second.empty()) {
+        // 静音节点找不到源时该输出就是空的，报错留给下游（E5）。
+        if (bypassed) continue;
+        // 算子必须把声明过的输出端口都填上。少填了是算子的 bug，早点炸在这里，
+        // 好过让下游收到一个空 Data 再报「上游没有产出」。
+        return Status::Error(Phase::Execute, "internal",
+                             "算子没有写输出端口 '" + p.name + "'", {}, p.name);
+      }
+      const std::string& want = effectiveType(node.outputTypes, p.name, p.type);
+      const Data::Kind expected = kindFromTypeName(want);
+      if (expected != Data::Kind::None && it->second.kind() != expected) {
+        return Status::Error(Phase::Execute, "internal",
+                             std::string("输出端口 '") + p.name + "' 声明为 " + want +
+                                 "，实际是 " + it->second.typeName(),
+                             {}, p.name);
+      }
+      if (const PointCloud* c = it->second.asCloud()) {
+        if (!c->channelsConsistent()) {
+          return Status::Error(Phase::Execute, "internal",
+                               std::string("输出端口 '") + p.name +
+                                   "' 的点云通道长度不一致（intensity/normals/rgb "
+                                   "必须为空或与点数对齐）",
+                               {}, p.name);
+        }
+      }
+    }
+    return Status::Ok();
+  }
+
+  struct ByLevelThenIndex {
+    const Plan* plan;
+    bool operator()(std::size_t a, std::size_t b) const {
+      const int la = plan->nodes[a].level, lb = plan->nodes[b].level;
+      if (la != lb) return la > lb;  // 小的先出队
+      return a > b;
+    }
+  };
+
+  Plan& plan_;
+  EventSink& sink_;
+  const std::atomic<bool>& cancelled_;
+  const RunOptions& options_;
+  ResultStore& store_;
+  int workers_ = 1;
+  int threadBudget_ = 1;
+  std::size_t n_ = 0;
+
+  mutable std::mutex mu_;
+  std::condition_variable cv_;
+  std::priority_queue<std::size_t, std::vector<std::size_t>, ByLevelThenIndex> ready_{
+      ByLevelThenIndex{&plan_}};
+  std::vector<int> remaining_;
+  std::vector<Verdict> verdict_;
+  std::vector<char> done_;
+  std::vector<char> poisoned_;
+  std::vector<char> poisonCancelled_;
+  std::vector<std::string> blockedBy_;
+  int inflight_ = 0;
+  bool anyError_ = false;
+  bool sawCancel_ = false;
+  std::size_t failed_ = 0;
+};
+
 }  // namespace
+
+// ------------------------------------------------------------------ 并行度
+
+int resolveMaxParallel(int requested) {
+  if (requested > 0) return requested;
+  const unsigned cores = std::thread::hardware_concurrency();
+  return std::max(1, std::min<int>(4, cores == 0 ? 1 : static_cast<int>(cores)));
+}
+
+int threadBudgetFor(int maxParallel) {
+  const unsigned cores = std::thread::hardware_concurrency();
+  const int total = cores == 0 ? 1 : static_cast<int>(cores);
+  return std::max(1, total / std::max(1, maxParallel));
+}
 
 // --------------------------------------------------------------------- Run
 
@@ -284,9 +659,10 @@ void Run::workImpl() {
     buildPlan(ensureRegistry(), raw, build, plan, diags);
   }
 
-  sink.runStarted(plan, options_.targets);
+  const int workers = resolveMaxParallel(options_.maxParallel);
+  sink.runStarted(plan, options_.targets, workers);
 
-  // warning 走 log 通道：不阻断执行，但用户必须看得见。
+  // warning 与迁移走 log 通道：不阻断执行，但用户必须看得见。
   // 静默的兼容性降级（「默认值悄悄变了」）是最难排查的一类问题。
   for (const auto& d : diags.items()) {
     if (d.severity == Severity::Warning) sink.log("warn", d.nodeId, d.status.message);
@@ -312,199 +688,26 @@ void Run::workImpl() {
   }
 
   ResultStore& store = ResultStore::instance();
-  std::unordered_set<std::string> failed;  // 自身失败或上游失败的节点
-  bool anyError = false;
-  bool wasCancelled = false;
+  if (options_.cacheBudgetBytes) store.setBudget(options_.cacheBudgetBytes);
 
-  for (std::size_t i = 0; i < plan.nodes.size(); ++i) {
-    PlanNode& node = plan.nodes[i];
-
-    if (cancelled_.load(std::memory_order_relaxed)) {
-      wasCancelled = true;
-      for (std::size_t j = i; j < plan.nodes.size(); ++j) {
-        sink.nodeFailed(plan.nodes[j].id, "cancelled",
-                        {Status::Error(Phase::Execute, "cancelled", "运行已取消")}, -1);
-      }
-      break;
-    }
-
-    sink.nodeState(node.id, "pending");
-
-    // 自身校验没过：报它全部的诊断，然后当作失败往下传。
-    // 注意其余节点照常跑 —— 一次看到所有能看到的（D5 的执行期对应物）。
-    if (!node.valid || !node.op) {
-      std::vector<Status> errors;
-      for (const auto& d : node.errors) errors.push_back(d.status);
-      if (errors.empty()) {
-        errors.push_back(Status::Error(Phase::Validate, "internal", "节点校验未通过"));
-      }
-      sink.nodeFailed(node.id, "error", errors, -1);
-      failed.insert(node.id);
-      anyError = true;
-      continue;
-    }
-
-    // 上游失败 → cancelled + upstream_failed。严格不用 skipped：
-    // 后者保留给缓存命中，混用的话用户分不清「没跑」和「不用跑」。
-    std::string blockedBy;
-    for (const InputBinding& b : node.inputs) {
-      if (b.fromNode < 0) continue;
-      const std::string& upstream = plan.nodes[static_cast<std::size_t>(b.fromNode)].id;
-      if (failed.count(upstream)) { blockedBy = upstream; break; }
-    }
-    if (!blockedBy.empty()) {
-      sink.nodeFailed(node.id, "cancelled",
-                      {Status::Error(Phase::Execute, "upstream_failed",
-                                     "上游节点 " + blockedBy + " 失败，未执行")},
-                      -1);
-      failed.insert(node.id);
-      continue;
-    }
-
-    sink.nodeState(node.id, "running");
-    const auto nodeStart = Clock::now();
-
-    std::unordered_map<std::string, Data> inputValues;
-    bool inputsOk = true;
-    for (const InputBinding& b : node.inputs) {
-      if (b.fromNode < 0) continue;
-      Data d;
-      const std::string& upstream = plan.nodes[static_cast<std::size_t>(b.fromNode)].id;
-      if (!store.get(options_.runId, upstream, b.fromPort, d)) {
-        sink.nodeFailed(node.id, "error",
-                        {Status::Error(Phase::Execute, "internal",
-                                       "上游 " + upstream + "." + b.fromPort + " 没有产出结果",
-                                       {}, b.port)},
-                        msSince(nodeStart));
-        inputsOk = false;
-        break;
-      }
-      // 声明类型编译期查过了，但流过来的 Data 是什么 Kind 还没人查。Any 端口会让
-      // 声明层面的检查全过，而算子里的 asCloud() 返回 nullptr，解引用是 SEH，兜不住。
-      const Port* declared = nullptr;
-      for (const Port& p : node.op->inputs) {
-        if (p.name == b.port) { declared = &p; break; }
-      }
-      const Data::Kind expected =
-          declared ? kindFromTypeName(declared->type) : Data::Kind::None;
-      if (expected != Data::Kind::None && d.kind() != expected) {
-        sink.nodeFailed(node.id, "error",
-                        {Status::Error(Phase::Execute, "type_mismatch",
-                                       std::string("输入端口 '") + b.port + "' 需要 " +
-                                           declared->type + "，实际收到 " + d.typeName(),
-                                       {}, b.port)},
-                        msSince(nodeStart));
-        inputsOk = false;
-        break;
-      }
-
-      inputValues[b.port] = std::move(d);
-    }
-    if (!inputsOk) {
-      failed.insert(node.id);
-      anyError = true;
-      continue;
-    }
-
-    std::unordered_map<std::string, Data> outputValues;
-    Inputs inputs(inputValues);
-    Outputs outputs(outputValues);
-    ParamView params(node.params, options_.baseDir);
-    NodeContext ctx(sink, cancelled_, node.id, options_.baseDir);
-
-    Status status;
-    try {
-      status = node.op->compute(inputs, params, outputs, ctx);
-    } catch (const std::exception& e) {
-      // 算子抛出的任何异常都在这里兜住。绝不让它穿到 C ABI ——
-      // 跨 DLL 边界抛异常一旦有 Rust 栈帧介入就是未定义行为。
-      status = Status::Error(Phase::Execute, "internal",
-                             std::string("算子内部异常: ") + e.what());
-    } catch (...) {
-      status = Status::Error(Phase::Execute, "internal", "算子内部异常（未知类型）");
-    }
-
-    const double durationMs = msSince(nodeStart);
-
-    if (cancelled_.load(std::memory_order_relaxed)) {
-      wasCancelled = true;
-      sink.nodeFailed(node.id, "cancelled",
-                      {Status::Error(Phase::Execute, "cancelled", "运行已取消")}, durationMs);
-      for (std::size_t j = i + 1; j < plan.nodes.size(); ++j) {
-        sink.nodeFailed(plan.nodes[j].id, "cancelled",
-                        {Status::Error(Phase::Execute, "cancelled", "运行已取消")}, -1);
-      }
-      break;
-    }
-
-    if (!status.ok) {
-      sink.nodeFailed(node.id, "error", {status}, durationMs);
-      failed.insert(node.id);
-      anyError = true;
-      continue;
-    }
-
-    // 算子必须把声明过的输出端口都填上。少填了是算子的 bug，
-    // 早点炸在这里，好过让下游收到一个空 Data 再报「上游没有产出」。
-    Status contract = Status::Ok();
-    for (const Port& p : node.op->outputs) {
-      auto it = outputValues.find(p.name);
-      if (it == outputValues.end() || it->second.empty()) {
-        contract = Status::Error(Phase::Execute, "internal",
-                                 "算子没有写输出端口 '" + p.name + "'", {}, p.name);
-        break;
-      }
-      const Data::Kind expected = kindFromTypeName(p.type);
-      if (expected != Data::Kind::None && it->second.kind() != expected) {
-        contract = Status::Error(Phase::Execute, "internal",
-                                 std::string("输出端口 '") + p.name + "' 声明为 " + p.type +
-                                     "，实际是 " + it->second.typeName(),
-                                 {}, p.name);
-        break;
-      }
-      if (const PointCloud* c = it->second.asCloud()) {
-        if (!c->channelsConsistent()) {
-          contract = Status::Error(Phase::Execute, "internal",
-                                   std::string("输出端口 '") + p.name +
-                                       "' 的点云通道长度不一致（intensity/normals/rgb "
-                                       "必须为空或与点数对齐）",
-                                   {}, p.name);
-          break;
-        }
-      }
-    }
-    if (!contract.ok) {
-      sink.nodeFailed(node.id, "error", {contract}, durationMs);
-      failed.insert(node.id);
-      anyError = true;
-      continue;
-    }
-
-    std::size_t totalBytes = 0;
-    std::size_t primaryElements = 0;
-    std::vector<OutputInfo> infos;
-    bool first = true;
-    for (const Port& p : node.op->outputs) {
-      Data& d = outputValues[p.name];
-      totalBytes += d.byteSize();
-      if (first) {
-        primaryElements = d.elementCount();
-        first = false;
-      }
-      infos.push_back(OutputInfo{p.name, d.typeName(), d.elementCount(), d.byteSize()});
-      store.put(options_.runId, node.id, p.name, node.cacheKey, d);
-    }
-
-    sink.nodeDone(node.id, durationMs, primaryElements, totalBytes, infos);
+  // 本次计划涉及的键全部钉住：正在算的那份不能被 LRU 从下游脚下抽走。
+  std::vector<std::string> keys;
+  keys.reserve(plan.nodes.size());
+  for (const auto& n : plan.nodes) {
+    if (!n.cacheKey.empty()) keys.push_back(n.cacheKey);
   }
+  CachePin pinned(store, std::move(keys));
+
+  Scheduler scheduler(plan, sink, cancelled_, options_, store, workers);
+  scheduler.run();
 
   const double total = msSince(t0);
-  if (wasCancelled) {
+  if (scheduler.sawCancel() || cancelled_.load(std::memory_order_relaxed)) {
     Status s = Status::Error(Phase::Execute, "cancelled", "运行已取消");
     sink.runFinished("cancelled", total, &s);
-  } else if (anyError || !failed.empty()) {
+  } else if (scheduler.anyError()) {
     Status s = Status::Error(Phase::Execute, "internal",
-                             std::to_string(failed.size()) + " 个节点未能完成");
+                             std::to_string(scheduler.failedCount()) + " 个节点未能完成");
     sink.runFinished("error", total, &s);
   } else {
     sink.runFinished("ok", total, nullptr);
@@ -525,6 +728,52 @@ std::string validateGraphJson(const std::string& graphJson,
     buildPlan(ensureRegistry(), raw, build, plan, diags);
   }
   return diags.toJson();
+}
+
+// ---------------------------------------------------------------------- plan
+
+std::string planGraphJson(const std::string& graphJson, const std::filesystem::path& baseDir,
+                          const std::vector<std::string>& targets) {
+  Diagnostics diags;
+  RawGraph raw;
+  Plan plan;
+  if (!parseGraph(graphJson, raw, diags)) return diags.toJson();
+
+  BuildOptions build;
+  build.runId = "plan";
+  build.baseDir = baseDir;
+  build.targets = targets;
+  buildPlan(ensureRegistry(), raw, build, plan, diags);
+  if (diags.hasErrors() || !plan.ok) return diags.toJson();
+
+  ResultStore& store = ResultStore::instance();
+  std::vector<char> cached(plan.nodes.size(), 0);
+  for (std::size_t i = 0; i < plan.nodes.size(); ++i) {
+    const PlanNode& n = plan.nodes[i];
+    if (!n.op || n.op->outputs.empty() || !n.op->capabilities.deterministic || n.bypass) continue;
+    cached[i] = store.peek(n.cacheKey, outputPortNames(*n.op)) ? 1 : 0;
+  }
+
+  JsonWriter w;
+  w.setIndent(0);
+  w.beginArray();
+  for (std::size_t i = 0; i < plan.nodes.size(); ++i) {
+    const PlanNode& n = plan.nodes[i];
+    bool upstreamMissing = false;
+    for (int u : n.upstream) {
+      if (!cached[static_cast<std::size_t>(u)]) { upstreamMissing = true; break; }
+    }
+    w.beginObject();
+    w.field("nodeId", n.id);
+    w.field("cacheKey", n.cacheKey);
+    w.field("cached", cached[i] != 0);
+    w.field("level", static_cast<std::int64_t>(n.level));
+    w.field("upstreamMissing", upstreamMissing);
+    w.field("bypass", n.bypass);
+    w.endObject();
+  }
+  w.endArray();
+  return w.str();
 }
 
 }  // namespace lyflow::exec

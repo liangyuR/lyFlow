@@ -83,6 +83,50 @@ char* lyflow_validate(const char* graph_json, const char* base_dir) {
   }
 }
 
+char* lyflow_plan(const char* graph_json, const char* base_dir, const char* const* targets,
+                  size_t n) {
+  try {
+    registry();
+    const std::string base = fromC(base_dir);
+    std::vector<std::string> ts;
+    for (std::size_t i = 0; targets && i < n; ++i) ts.push_back(fromC(targets[i]));
+    return dup(lyflow::exec::planGraphJson(
+        fromC(graph_json),
+        base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base), ts));
+  } catch (const std::exception& e) {
+    lyflow::Diagnostics d;
+    d.error("", lyflow::Phase::Compile, "internal", std::string("编译时内部异常: ") + e.what());
+    return dup(d.toJson());
+  } catch (...) {
+    return dup(std::string("[]"));
+  }
+}
+
+void lyflow_cache_clear(void) {
+  try {
+    lyflow::exec::ResultStore::instance().clear();
+  } catch (...) {
+  }
+}
+
+char* lyflow_cache_stats(void) {
+  try {
+    const auto s = lyflow::exec::ResultStore::instance().stats();
+    lyflow::JsonWriter w;
+    w.beginObject();
+    w.field("entries", static_cast<std::int64_t>(s.entries));
+    w.field("bytes", static_cast<std::int64_t>(s.bytes));
+    w.field("budgetBytes", static_cast<std::int64_t>(s.budgetBytes));
+    w.field("hits", static_cast<std::int64_t>(s.hits));
+    w.field("misses", static_cast<std::int64_t>(s.misses));
+    w.field("evictions", static_cast<std::int64_t>(s.evictions));
+    w.endObject();
+    return dup(w.str());
+  } catch (...) {
+    return dup(std::string("{}"));
+  }
+}
+
 lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* opts,
                              lyflow_event_cb cb, void* user) {
   try {
@@ -95,6 +139,8 @@ lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* o
       for (std::size_t i = 0; opts->targets && i < opts->target_count; ++i) {
         options.targets.push_back(fromC(opts->targets[i]));
       }
+      options.maxParallel = opts->max_parallel;
+      options.cacheBudgetBytes = opts->cache_budget_bytes;
     }
     if (options.runId.empty()) options.runId = "run";
     return reinterpret_cast<lyflow_run*>(

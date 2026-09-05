@@ -17,6 +17,7 @@
       "properties": {
         "kind": { "const": "run_started" },
         "nodeCount": { "type": "integer" },
+        "maxParallel": { "type": "integer", "minimum": 1, "description": "本次实际用了几个 worker。默认 min(4, 核数)。" },
         "plan": { "type": "array", "items": { "type": "string" }, "description": "拓扑序的节点 id 列表。" },
         "targets": {
           "type": "array",
@@ -31,8 +32,9 @@
             "required": ["id", "cacheKey", "level"],
             "properties": {
               "id": { "type": "string" },
-              "cacheKey": { "type": "string", "description": "内容寻址键。参数或上游变了它就变。" },
-              "level": { "type": "integer", "description": "拓扑层号。同层无依赖，M3 并行执行按它分批。" }
+              "cacheKey": { "type": "string", "description": "内容寻址键。参数或上游变了它就变。缓存判定的唯一权威在 C++（ADR-0007）。" },
+              "level": { "type": "integer", "description": "拓扑层号。就绪队列按它再按拓扑序排。" },
+              "bypass": { "type": "boolean", "description": "该节点被静音，不会调 compute。" }
             }
           }
         }
@@ -93,6 +95,8 @@
       "properties": {
         "elementCount": { "type": "integer", "description": "第一个输出端口的元素数：点云=点数，Indices=下标个数。" },
         "byteSize": { "type": "integer", "description": "全部输出的粗略内存占用，含所有通道。" },
+        "cached": { "type": "boolean", "description": "state=skipped 的原因是命中缓存。与 bypassed 互斥（ADR-0007）。" },
+        "bypassed": { "type": "boolean", "description": "state=skipped 的原因是节点被静音，输出由输入透传而来。" },
         "outputs": {
           "type": "array",
           "items": {
@@ -114,7 +118,7 @@
         "phase": { "enum": ["validate", "compile", "execute"] },
         "code": {
           "type": "string",
-          "description": "机器可读短码。当前取值集合：unknown_op | unknown_port | type_mismatch | missing_input | multi_input | unknown_param | bad_param | bad_input | unknown_node | duplicate_id | version_mismatch | cycle | io | cancelled | upstream_failed | internal。前端不得穷举它做逻辑分支——未知 code 一律按通用错误显示。"
+          "description": "机器可读短码。当前取值集合：unknown_op | unknown_port | type_mismatch | missing_input | multi_input | unknown_param | bad_param | bad_input | unknown_node | duplicate_id | version_mismatch | migration | bypassed_no_source | cycle | io | cancelled | upstream_failed | internal。前端不得穷举它做逻辑分支——未知 code 一律按通用错误显示。"
         },
         "message": { "type": "string" },
         "paramPath": { "type": "string", "description": "出错的参数名。让前端把红框直接标到那个输入框上。" },

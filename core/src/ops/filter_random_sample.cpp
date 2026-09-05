@@ -16,9 +16,9 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
 
   std::size_t want = n;
   if (byRatio) {
-    want = static_cast<std::size_t>(static_cast<double>(n) * params.number("ratio"));
+    want = static_cast<std::size_t>(static_cast<double>(n) * params.number("keepRatio"));
   } else {
-    want = static_cast<std::size_t>(params.integer("count"));
+    want = static_cast<std::size_t>(params.integer("keepCount"));
   }
   want = std::min(want, n);
 
@@ -42,16 +42,31 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
   return Status::Ok();
 }
 
+/// v1 → v2：count/ratio 改名成 keepCount/keepRatio（ADR-0008）。
+/// 只搬键名，值原样保留 —— 语义没变，变的只是「keep 还是 drop」读不出来这件事。
+nlohmann::json migrateFromV1(const nlohmann::json& params) {
+  nlohmann::json out = params;
+  for (const auto& rename : {std::pair<const char*, const char*>{"count", "keepCount"},
+                             std::pair<const char*, const char*>{"ratio", "keepRatio"}}) {
+    auto it = out.find(rename.first);
+    if (it == out.end()) continue;
+    out[rename.second] = *it;
+    out.erase(rename.first);
+  }
+  return out;
+}
+
 }  // namespace
 
 void registerFilterRandomSample(Registry& r) {
   OperatorDesc op;
   op.id = "filter.random_sample";
-  op.version = "1.0.0";
+  op.version = "2.0.0";
   op.label = "Random Sample";
   op.category = "Filter/Downsample";
   op.keywords = {"random", "sample", "subsample", "随机", "抽样", "降采样"};
   op.doc = "随机抽取一部分点。种子固定，同输入同结果。";
+  // v2 把 count/ratio 改名成 keepCount/keepRatio：原来的名字读不出「保留还是丢弃」。
 
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "输入点云。", true}};
   op.outputs = {Port{"cloud", "PointCloud", "Cloud", "抽样后的点云。", true}};
@@ -67,9 +82,9 @@ void registerFilterRandomSample(Registry& r) {
   };
 
   Param count;
-  count.name = "count";
+  count.name = "keepCount";
   count.type = ParamType::Int;
-  count.label = "Count";
+  count.label = "Keep Count";
   count.def = Value::integer(10000);
   count.min = 0.0;
   count.softMax = 200000.0;
@@ -77,9 +92,9 @@ void registerFilterRandomSample(Registry& r) {
   count.visibleWhen.eq = Value::text("count");
 
   Param ratio;
-  ratio.name = "ratio";
+  ratio.name = "keepRatio";
   ratio.type = ParamType::Float;
-  ratio.label = "Ratio";
+  ratio.label = "Keep Ratio";
   ratio.def = Value::number(0.5);
   ratio.min = 0.0;
   ratio.max = 1.0;
@@ -100,6 +115,7 @@ void registerFilterRandomSample(Registry& r) {
   op.params = {mode, count, ratio, seed};
   op.capabilities = {/*cancellable=*/true, /*previewable=*/true, /*deterministic=*/true};
   op.compute = &compute;
+  op.migrations = {Migration{1, &migrateFromV1}};
 
   r.addOperator(std::move(op));
 }

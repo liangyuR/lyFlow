@@ -1,0 +1,47 @@
+/* 3D 视图补齐（M3 §2.6）新增的样式。styles.editor.css 有人并行在改，新类一律放这里。 */
+
+.viewer__bar--tools { border-bottom: 1px solid var(--border); }
+
+.viewer__label { color: var(--fg-2); }
+
+.viewer__pinned {
+  max-width: 120px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #8fb8ff;
+}
+
+.viewer__num {
+  width: 66px;
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 1px 3px;
+}
+
+.viewer__btn {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--fg-0);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 1px 6px;
+}
+
+.viewer__btn:disabled { opacity: 0.45; cursor: default; }
+
+.viewer__btn[data-pinned="1"] { border-color: #8fb8ff; color: #8fb8ff; }
+
+/* 空态文案要盖住画布而不是压住工具栏；老规则写死的 inset:28px 在两行栏下会错位。 */
+.viewer__stage {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.viewer__stage .viewer__empty { inset: 0; }

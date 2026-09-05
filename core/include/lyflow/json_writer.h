@@ -28,6 +28,8 @@ class JsonWriter {
   void value(double v);
   void value(const char* v);
   void value(const std::string& v);
+  /// 原样嵌入一段已经序列化好的 JSON。调用方负责它是合法的。
+  void raw(const std::string& json);
 
   // 便捷：写一个 "key": value 对
   void field(const std::string& k, bool v);

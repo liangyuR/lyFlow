@@ -2,11 +2,15 @@
 // 这是热重载的前提：推一份新 manifest 进 store，节点外观自动跟着变。
 
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { memo } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 
+import { ANY } from "../lib/typecheck";
 import type { OperatorNodeData } from "../lib/mapping";
-import { useExecutionStore, useNodeExecution } from "../store/execution";
+import { useCacheStore } from "../store/cache";
+import { useNodeExecution } from "../store/execution";
+import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
+import { useUiStore } from "../store/ui";
 import type { Port } from "../types/manifest";
 
 /** 「12.3 万点」比「123456」好读得多，而节点上的空间只有一行。 */
@@ -22,18 +26,34 @@ function formatDuration(ms: number): string {
 }
 
 interface PortHandleProps {
+  nodeId: string;
   port: Port;
   side: "input" | "output";
   index: number;
+  /** Any 端口推导出的实际类型，null = 还推不出来（E6）。 */
+  anyType: string | null;
 }
 
-function PortHandle({ port, side, index }: PortHandleProps) {
-  const color = useManifestStore((s) => s.typesByName.get(port.type)?.color ?? "#6b7280");
+function PortHandle({ nodeId, port, side, index, anyType }: PortHandleProps) {
+  const type = port.type === ANY ? (anyType ?? ANY) : port.type;
+  const color = useManifestStore((s) => s.typesByName.get(type)?.color ?? "#6b7280");
+  // 拖线中的兼容性可视化（交互清单 P1 #20）：能落的高亮，不能落的置灰。
+  const verdict = useUiStore((s) => {
+    if (!s.pendingFrom) return "";
+    const key = `${nodeId}:${port.name}`;
+    if (s.pendingFrom.side === side) return "";
+    return s.compatiblePorts.has(key) ? "compatible" : "incompatible";
+  });
   const isInput = side === "input";
   const optional = isInput && port.required === false;
 
   return (
-    <div className={`node-port node-port--${side}`} style={{ ["--i" as string]: index }}>
+    <div
+      className={`node-port node-port--${side}${verdict ? ` node-port--${verdict}` : ""}`}
+      style={{ ["--i" as string]: index }}
+      data-port-verdict={verdict || undefined}
+      data-testid={`port-${nodeId}-${port.name}`}
+    >
       <Handle
         id={port.name}
         type={isInput ? "target" : "source"}
@@ -41,7 +61,7 @@ function PortHandle({ port, side, index }: PortHandleProps) {
         className="node-port__handle"
         style={{ background: color, borderColor: color }}
       />
-      <span className="node-port__label" title={`${port.type}${port.doc ? " — " + port.doc : ""}`}>
+      <span className="node-port__label" title={`${type}${port.doc ? " — " + port.doc : ""}`}>
         {port.label || port.name}
         {optional && <em className="node-port__opt">?</em>}
       </span>
@@ -49,20 +69,65 @@ function PortHandle({ port, side, index }: PortHandleProps) {
   );
 }
 
+/** 双击标题就地改名（交互清单 P1 #25）。空串 = 回到 manifest 的 label。 */
+function TitleEditor({ id, initial, onDone }: { id: string; initial: string; onDone: () => void }) {
+  const [text, setText] = useState(initial);
+  const input = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    input.current?.focus();
+    input.current?.select();
+  }, []);
+
+  const commit = () => {
+    useGraphStore.getState().renameNode(id, text.trim() ? text : null);
+    onDone();
+  };
+
+  return (
+    <input
+      ref={input}
+      className="node__rename"
+      data-testid={`node-rename-${id}`}
+      value={text}
+      spellCheck={false}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") onDone();
+      }}
+      onDoubleClick={(e) => e.stopPropagation()}
+    />
+  );
+}
+
 function OperatorNodeImpl({ id, data, selected }: NodeProps) {
-  const { opId, title, collapsed } = data as OperatorNodeData;
+  const { opId, title, collapsed, bypass, anyType } = data as OperatorNodeData;
   const op = useManifestStore((s) => s.operatorsById.get(opId));
   // 执行状态从独立的 store 现查（P0 #14）：放进节点 data 的话，
   // 每来一条事件就要重建整个节点数组，几十个节点的图会肉眼可见地卡。
   const exec = useNodeExecution(id);
-  const stale = useExecutionStore((s) => s.stale);
+  // 精确到节点的 stale（交互清单 P1 #23）：判定在 C++，这里只读结论（ADR-0007）
+  const stale = useCacheStore((s) => {
+    const node = s.plan.get(id);
+    const previous = s.ranWith.get(id);
+    if (!node || previous === undefined) return false;
+    return node.cacheKey !== previous && !node.cached;
+  });
+  const [renaming, setRenaming] = useState(false);
 
-  // 算子在当前 core 里不存在：可能是打开了别人存的图，或者算子被删/改名了。
-  // 必须显式画出来 —— 静默渲染成空节点会让人以为图坏了。
+  // 算子在当前 core 里不存在：可能是打开了别人存的图，也可能是热重载删掉了它。
+  // 必须显式画出来 —— 静默渲染成空节点会让人以为图坏了（1.5）。
   if (!op) {
     return (
-      <div className={`node node--missing${selected ? " is-selected" : ""}`}>
-        <div className="node__head">未知算子</div>
+      <div
+        className={`node node--missing${selected ? " is-selected" : ""}`}
+        data-node-state="missing"
+        data-testid={`node-${id}`}
+      >
+        <div className="node__head">算子缺失</div>
         <div className="node__missing-body">
           <code>{opId}</code>
           <span>当前 core 未注册</span>
@@ -78,17 +143,39 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
     "node",
     selected ? "is-selected" : "",
     state !== "idle" ? `node--${state}` : "",
-    // stale 是整体降不透明度，不是换颜色：颜色已经被状态占满了，
-    // 再加一种色就没人分得清了。
-    stale && state !== "idle" ? "is-stale" : "",
+    // stale 是虚线框，不是换颜色：颜色已经被状态占满了，再加一种就没人分得清
+    stale ? "is-stale" : "",
+    // 静音整体半透明加斜纹，一眼看得出这个节点这次不算
+    bypass ? "is-bypassed" : "",
   ]
     .filter(Boolean)
     .join(" ");
 
+  const cached = exec?.stats?.cached === true;
+  const skipReason = cached ? "命中缓存，未重算" : bypass ? "已静音，输入直接透传" : "";
+
   return (
-    <div className={classes} data-node-state={state} data-testid={`node-${id}`}>
-      <div className="node__head" title={errorText ?? op.doc}>
-        <span className="node__title">{title ?? op.label}</span>
+    <div
+      className={classes}
+      data-node-state={state}
+      data-stale={stale ? "1" : "0"}
+      data-bypass={bypass ? "1" : "0"}
+      data-testid={`node-${id}`}
+    >
+      <div
+        className="node__head"
+        title={errorText ?? op.doc}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          setRenaming(true);
+        }}
+      >
+        {renaming ? (
+          <TitleEditor id={id} initial={title ?? op.label} onDone={() => setRenaming(false)} />
+        ) : (
+          <span className="node__title">{title ?? op.label}</span>
+        )}
+        {bypass && <span className="node__badge node__badge--mute" title="已静音 (Ctrl+M)">M</span>}
         {state === "running" && exec?.progress != null && (
           <span className="node__progress" style={{ ["--p" as string]: exec.progress }} />
         )}
@@ -98,12 +185,26 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
         <div className="node__body" style={{ ["--rows" as string]: rows }}>
           <div className="node__col node__col--in">
             {op.inputs.map((p, i) => (
-              <PortHandle key={p.name} port={p} side="input" index={i} />
+              <PortHandle
+                key={p.name}
+                nodeId={id}
+                port={p}
+                side="input"
+                index={i}
+                anyType={anyType}
+              />
             ))}
           </div>
           <div className="node__col node__col--out">
             {op.outputs.map((p, i) => (
-              <PortHandle key={p.name} port={p} side="output" index={i} />
+              <PortHandle
+                key={p.name}
+                nodeId={id}
+                port={p}
+                side="output"
+                index={i}
+                anyType={anyType}
+              />
             ))}
           </div>
         </div>
@@ -113,6 +214,11 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
       {state !== "idle" && (
         <div className="node__stats" data-testid={`node-stats-${id}`}>
           <span className={`node__dot node__dot--${state}`} />
+          {state === "skipped" && skipReason && (
+            <span className="node__skip" data-testid={`node-skip-${id}`}>
+              {cached ? "缓存" : "静音"}
+            </span>
+          )}
           {exec?.stats?.elementCount != null && (
             <span className="node__count">{formatCount(exec.stats.elementCount)}</span>
           )}
@@ -123,9 +229,10 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
         </div>
       )}
 
-      {/* 折叠时端口仍要存在，否则已有连线会掉。只是收到标题两侧。 */}
+      {/* 折叠时只显示标题与**已连线**的端口，其余收起来（交互清单 P1 #25）。
+          端口本身必须还在，否则已有连线会掉。 */}
       {collapsed && (
-        <div className="node__collapsed">
+        <div className="node__collapsed" data-testid={`node-collapsed-${id}`}>
           {op.inputs.map((p) => (
             <Handle
               key={`in-${p.name}`}

@@ -97,6 +97,10 @@ V1 的规则刻意简单：
 
 1. **精确匹配** — `type` 字符串相同即可连。
 2. **`"Any"` 通配** — 用于 Reroute、Debug View 这类透传节点。
+   M3 起 `Any` 端口的**实际类型由连线推导**（E6）：沿边把已知的具体类型传播到定点，
+   C++ 的 `buildPlan` 和前端的 `typecheck.ts` 各有一份同样的实现。
+   一个节点的**全部** `Any` 端口共用一个类型变量 —— `util.reroute` 正是这个语义，
+   需要多个互相独立的 `Any` 端口的算子请拆开。推不出来的端口仍是 `Any`，不报错。
 3. **显式转换表** — manifest 包里附一张全局类型表，声明哪些类型可隐式转换：
 
 ```jsonc
@@ -133,11 +137,39 @@ V1 的规则刻意简单：
 | 改参数含义、删参数、改端口类型 | major | 打开时警告，走迁移表 |
 | 重命名算子 | 保留 `aliases: ["old.id"]` | 自动重定向 |
 
-迁移表放在 C++ 侧（`migrate(oldVersion, params) -> params`），前端只负责展示提示。
-迁移逻辑不能在前端，否则脚本生成的图和 headless 执行走不到迁移。
+迁移表放在 C++ 侧，前端只负责把结果写回文档
+（[ADR-0008](adr/0008-migration-as-diagnostic.md)）：
+
+```cpp
+op.version = "2.0.0";
+op.migrations = { Migration{1, &migrateFromV1} };   // json(const json&)
+```
+
+`Registry::validate()` 要求链条覆盖 `1..currentMajor-1` 且无断档，缺一环启动就报。
+校验阶段套用迁移后产出一条 `kind: "migration"` 的诊断
+（`{ nodeId, op, opVersion, params, notes[] }`，severity 是 warning），
+执行器**在内存里**用迁移后的值继续跑 —— 老图当场就能运行，不必先存一次盘。
+前端把这批动作交给 `applyMigrations`：一条撤销记录、置 dirty、toast 提示。
+
+迁移逻辑不能在前端，否则脚本生成的图和 headless 执行走不到迁移；
+写回不能在 C++，因为它不拥有文档（ADR-0002）。
+
+迁移只碰参数。端口改名、增删要靠新算子 id + `aliases` —— 连线不归算子管，
+它没法在自己的迁移函数里改边。
+
+现成的例子：`filter.random_sample` 1.0.0 → 2.0.0，`count`/`ratio` 改名成
+`keepCount`/`keepRatio`。
 
 ## 热重载
 
-开发期最值钱的功能之一：C++ 侧算子库重新编译后，推一次全量 manifest，前端刷新节点面板和参数表单，
-**当前打开的图不重置**。实现上要求前端把 manifest 存在独立 store，节点渲染时按 `op` 现查，
-而不是在创建节点时把 manifest 快照进节点里。这个决定在 M0 就要做对，后面改代价很大。
+开发期最值钱的功能之一，M3 已实现（[ADR-0009](adr/0009-hot-reload-by-copy.md)）：
+C++ 侧算子库重新编译后推一条 `manifest-updated`，前端整份替换 manifest store，
+**当前打开的图与撤销栈一个字都不动**。算子被删掉的节点保留在 doc 里，
+画布上显示成「算子缺失」，可删可等。
+
+实现上要求前端把 manifest 存在独立 store、节点渲染时按 `op` 现查，
+而不是在创建节点时把 manifest 快照进节点里。这个决定在 M0 就做对了，
+所以 M3 这一段几乎没有前端改动。
+
+热重载会**清空结果缓存并取消正在跑的 run**：缓存里的 `shared_ptr` 指向旧 DLL 里的对象，
+跨代持有它是未定义行为。这是 E4 定死的取舍。

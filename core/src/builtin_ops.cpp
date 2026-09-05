@@ -54,6 +54,7 @@ void registerBuiltinOps(Registry& r) {
   ops::registerTransformMake(r);
   ops::registerTransformApply(r);
   ops::registerUtilMerge(r);
+  ops::registerUtilReroute(r);
 }
 
 }  // namespace lyflow

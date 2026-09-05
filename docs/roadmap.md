@@ -20,8 +20,9 @@
 门禁 `pnpm check` 覆盖：C++ 编译 + 算子自检 → manifest 对着 schema 校验 →
 Rust 15 个测试（含 FFI、中文穿越边界、GraphDoc round-trip）→ 前端 strict typecheck + build。
 
-**已知毛刺**：`tauri dev` 只 watch `bridge/`，改了 `core/` 的 C++ 不会自动重编，需要重启。
-算子热重载是 M3 的事，在那之前手动重启。
+**已知毛刺**（M3 已解决）：`tauri dev` 只 watch `bridge/`，改了 `core/` 的 C++ 不会自动重编。
+M3 起 `pnpm dev` 会同时起 `scripts/core-watch.ps1`，改 C++ 存盘即热重载
+（[ADR-0009](adr/0009-hot-reload-by-copy.md)）。
 
 ## M1 — 能编辑 ✅
 
@@ -108,24 +109,45 @@ Rust 15 个测试（含 FFI、中文穿越边界、GraphDoc round-trip）→ 前
 合并成一个需要让两边传完全相同的编译选项，而 cmake crate 会强行注入自己的一套 ——
 为此把两边焊死不划算。
 
-## M3 — 能用
+## M3 — 能用 ✅
 
-**目标：自己愿意天天用它，而不是回去改代码。** 详细计划见 [m3-plan.md](m3-plan.md)。
+**目标：自己愿意天天用它，而不是回去改代码。** 详细计划见 [m3-plan.md](m3-plan.md)，
+验收见 [m3-acceptance.md](m3-acceptance.md)。
 
 核心轨（C++/Rust）：
-- [ ] 缓存复用 + `skipped`；`lyflow_plan` 给前端精确 stale 与「将重算 N 个节点」
-- [ ] 并行执行（依赖计数驱动，PCL 线程数配合）
-- [ ] bypass 执行语义 + Reroute + `Any` 类型推导
-- [ ] 算子迁移表与 aliases，迁移以诊断形式回写 GraphDoc（headless 同路径）
-- [ ] 算子热重载（运行时重新加载 core DLL）
-- [ ] 参数联动 `visibleWhen` / `enabledWhen`
+- [x] 缓存复用 + `skipped`；`lyflow_plan` 给前端精确 stale 与「将重算 N 个节点」
+- [x] 并行执行（依赖计数驱动，`ExecContext::threadBudget()` 供算子内部分配线程）
+- [x] bypass 执行语义 + Reroute + `Any` 类型推导
+- [x] 算子迁移表与 aliases，迁移以诊断形式回写 GraphDoc（headless 同路径）
+- [x] 算子热重载（运行时重新加载 core DLL）
+- [x] 参数联动 `visibleWhen` / `enabledWhen`
 
 编辑轨（前端）：
-- [ ] 交互清单 P1 全部（#17–#30）
-- [ ] 快捷键单表驱动 + 面板；自动布局；最近文件 / 备份恢复；日志与诊断抽屉
-- [ ] 3D 视图着色模式 / 钉住 / 导出
+- [x] 交互清单 P1 全部（#17–#30）
+- [x] 快捷键单表驱动 + 面板；自动布局；最近文件 / 备份恢复；日志与诊断抽屉
+- [x] 3D 视图着色模式 / 钉住 / 导出
 
-产出：可以交给同组其他人用的版本。验收含「一位未参与开发者 10 分钟内完成一句话任务」。
+**三份新契约**：[ADR-0007](adr/0007-cache-authority.md)（缓存判定只在 C++）、
+[ADR-0008](adr/0008-migration-as-diagnostic.md)（迁移走诊断通道）、
+[ADR-0009](adr/0009-hot-reload-by-copy.md)（热重载靠复制 DLL）。
+C ABI 升到 v4：加了 `lyflow_plan` / `lyflow_cache_clear` / `lyflow_cache_stats`，
+`lyflow_run_options` 多了 `max_parallel` 与 `cache_budget_bytes`。
+
+**这一轮 CDP 抓到的真 bug**：Shift+F5 被 F5 抢先匹配（键表的 Shift 判定太松）、
+重连端点被上游节点盖住时按下去变成拖节点、缓存复用让 M2 的「上游仍然 done」断言
+变成 skipped、`onReconnectEnd` 的回调签名各版本不一致（改成自己记一笔而不是猜参数）。
+逐条见 [m3-acceptance.md](m3-acceptance.md)。
+
+**已知毛刺**：
+- 结果仓不再随 run 结束而缩小，常驻内存约等于 LRU 预算（默认 min(8 GB, 物理内存 40%)）。
+  状态栏显示占用，抽屉里可以清空 —— 但**没有**按图/按节点的细粒度淘汰。
+- 热重载会清空缓存并取消正在跑的 run。这是 E4 定死的取舍，不是遗漏。
+- `filter.random_sample` 升到了 2.0.0（`count`/`ratio` → `keepCount`/`keepRatio`）。
+  M2 以前存的图打开时会提示迁移一次，保存后不再提示。
+- 对齐参考线只画「与另一个节点的边缘/中心对齐」，不画等距分布线。
+- 「一位未参与开发者 10 分钟完成任务」与「连续使用一天」两条人工验收**未执行**。
+
+产出：可以交给同组其他人用的版本。
 
 ## M4 — 能扩展
 
@@ -151,9 +173,11 @@ Rust 15 个测试（含 FFI、中文穿越边界、GraphDoc round-trip）→ 前
 ## 已从后续里程碑提前到 M2 的接口决定
 
 这些在 M2 就按终态定下，后面只填功能不改形态（详见 m2-plan.md §0）：
-运行时加载的 core DLL（→ M3 热重载）、cacheKey 内容寻址的结果仓（→ M3 缓存）、
-`run_started.nodes[].cacheKey`（→ M3 stale）、GraphDoc `bypass` 字段（→ M3 静音）、
-抢占式 run（→ M4 live preview）、Plan 的 level（→ M3 并行）、`targets`（→ M3 Run to node、M4 CLI `--to`）。
+运行时加载的 core DLL（→ M3 热重载 ✅）、cacheKey 内容寻址的结果仓（→ M3 缓存 ✅）、
+`run_started.nodes[].cacheKey`（→ M3 stale ✅）、GraphDoc `bypass` 字段（→ M3 静音 ✅）、
+Plan 的 level（→ M3 并行 ✅）、`targets`（→ M3 Run to node ✅、M4 CLI `--to`）、
+抢占式 run（→ M4 live preview）、`externalKey`（→ 缓存落盘）、
+参数右键的「复制路径名」（→ M4 CLI 的 `--set`）。
 
 ## 优先级判断依据
 

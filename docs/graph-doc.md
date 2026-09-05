@@ -87,7 +87,9 @@ JSON Schema： [`schema/graph-doc.schema.json`](../schema/graph-doc.schema.json)
 ### `ui` 可以整体丢弃
 
 后端处理时直接忽略 `ui`。反过来，一个没有 `ui` 的 GraphDoc（比如脚本生成的）也必须能被前端打开——
-缺失坐标时自动布局（拓扑分层 + 简单避让）。
+缺失坐标时自动布局。M3 用 `@dagrejs/dagre` 做 LR 分层（E8），只在**两种**时机触发：
+打开时发现有节点缺 `ui.position`，以及用户主动点「整理」/ 按 Ctrl+G。
+**永远不自动覆盖用户摆好的位置**，而且整段布局是一条撤销记录。
 
 ## 前端映射层
 

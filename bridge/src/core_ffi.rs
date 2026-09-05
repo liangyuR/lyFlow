@@ -3,8 +3,9 @@
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
-use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use libloading::{Library, Symbol};
 
@@ -18,6 +19,8 @@ pub struct RunOptionsRaw {
     pub base_dir: *const c_char,
     pub targets: *const *const c_char,
     pub target_count: usize,
+    pub max_parallel: i32,
+    pub cache_budget_bytes: u64,
 }
 
 #[repr(C)]
@@ -63,6 +66,13 @@ type FnVersion = unsafe extern "C" fn() -> *const c_char;
 type FnJson = unsafe extern "C" fn() -> *mut c_char;
 type FnStringFree = unsafe extern "C" fn(*mut c_char);
 type FnValidate = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
+type FnPlan = unsafe extern "C" fn(
+    *const c_char,
+    *const c_char,
+    *const *const c_char,
+    usize,
+) -> *mut c_char;
+type FnVoid = unsafe extern "C" fn();
 type FnRunStart = unsafe extern "C" fn(
     *const c_char,
     *const RunOptionsRaw,
@@ -89,6 +99,9 @@ pub struct Core {
     manifest_problems: FnJson,
     string_free: FnStringFree,
     validate: FnValidate,
+    plan: FnPlan,
+    cache_clear: FnVoid,
+    cache_stats: FnJson,
     run_start: FnRunStart,
     run_cancel: FnRunOp,
     run_join: FnRunOp,
@@ -114,9 +127,8 @@ macro_rules! sym {
 }
 
 impl Core {
-    fn load() -> Result<Self, CoreError> {
-        let path = dll_path();
-        let lib = unsafe { Library::new(&path) }
+    fn load_from(path: &Path) -> Result<Self, CoreError> {
+        let lib = unsafe { Library::new(path) }
             .map_err(|e| CoreError::Load(format!("{} —— {e}", path.display())))?;
 
         Ok(Core {
@@ -125,6 +137,9 @@ impl Core {
             manifest_problems: sym!(lib, "lyflow_manifest_problems", FnJson),
             string_free: sym!(lib, "lyflow_string_free", FnStringFree),
             validate: sym!(lib, "lyflow_validate", FnValidate),
+            plan: sym!(lib, "lyflow_plan", FnPlan),
+            cache_clear: sym!(lib, "lyflow_cache_clear", FnVoid),
+            cache_stats: sym!(lib, "lyflow_cache_stats", FnJson),
             run_start: sym!(lib, "lyflow_run_start", FnRunStart),
             run_cancel: sym!(lib, "lyflow_run_cancel", FnRunOp),
             run_join: sym!(lib, "lyflow_run_join", FnRunOp),
@@ -172,6 +187,51 @@ impl Core {
         let g = CString::new(graph_json)?;
         let b = CString::new(base_dir)?;
         unsafe { self.take_owned((self.validate)(g.as_ptr(), b.as_ptr())) }
+    }
+
+    /// 编译一次，报告每节点的 cacheKey 与是否已缓存（ADR-0007）。
+    pub fn plan(
+        &self,
+        graph_json: &str,
+        base_dir: &str,
+        targets: &[String],
+    ) -> Result<String, CoreError> {
+        let g = CString::new(graph_json)?;
+        let b = CString::new(base_dir)?;
+        let owned: Vec<CString> = targets
+            .iter()
+            .map(|t| CString::new(t.as_str()))
+            .collect::<Result<_, _>>()?;
+        let ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
+        let head = if ptrs.is_empty() {
+            std::ptr::null()
+        } else {
+            ptrs.as_ptr()
+        };
+        unsafe { self.take_owned((self.plan)(g.as_ptr(), b.as_ptr(), head, ptrs.len())) }
+    }
+
+    pub fn cache_clear(&self) {
+        unsafe { (self.cache_clear)() };
+    }
+
+    pub fn cache_stats(&self) -> Result<String, CoreError> {
+        unsafe { self.take_owned((self.cache_stats)()) }
+    }
+
+    /// 加载之后立刻验一遍契约。坏的一代绝不能顶掉好的那一代（ADR-0009）。
+    fn self_check(&self) -> Result<(), String> {
+        let problems = self.manifest_problems().map_err(|e| e.to_string())?;
+        if !problems.is_empty() {
+            return Err(format!("算子描述自检有 {} 条问题：
+  - {}", problems.len(),
+                               problems.join("
+  - ")));
+        }
+        let raw = self.manifest_json().map_err(|e| e.to_string())?;
+        serde_json::from_str::<serde_json::Value>(&raw)
+            .map_err(|e| format!("manifest 不是合法 JSON: {e}"))?;
+        Ok(())
     }
 
     pub fn output_info(&self, run_id: &str, node_id: &str) -> Result<String, CoreError> {
@@ -310,6 +370,8 @@ impl RunHandle {
                 target_ptrs.as_ptr()
             },
             target_count: target_ptrs.len(),
+            max_parallel: 0,
+            cache_budget_bytes: 0,
         };
 
         let user_ptr = Box::into_raw(user) as *mut c_void;
@@ -366,26 +428,103 @@ impl Drop for RunHandle {
 
 // ----------------------------------------------------------------- 进程级单例
 
-/// lyflow_core.dll 的位置：exe 同目录。不搜 PATH（会加载到无关的同名 DLL），
-/// 也不看工作目录（双击启动时那不是安装目录）。
-fn dll_path() -> PathBuf {
-    let name = if cfg!(windows) {
-        "lyflow_core.dll"
-    } else {
-        "liblyflow_core.so"
-    };
-    match std::env::current_exe().ok().and_then(|p| p.parent().map(PathBuf::from)) {
-        Some(dir) => dir.join(name),
-        None => PathBuf::from(name),
-    }
+const DLL_NAME: &str = if cfg!(windows) {
+    "lyflow_core.dll"
+} else {
+    "liblyflow_core.so"
+};
+
+/// exe 同目录。不搜 PATH（会加载到无关的同名 DLL），也不看工作目录
+/// （双击启动时那不是安装目录）。
+fn exe_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
-static CORE: OnceLock<Result<Arc<Core>, String>> = OnceLock::new();
+fn dll_path() -> PathBuf {
+    exe_dir().join(DLL_NAME)
+}
 
-/// 进程内那一份 core。第一次调用时加载 DLL。
+/// 开发期热重载的源头：`scripts/core-watch.ps1` 就往这里构建（ADR-0009）。
+/// 安装包里这个路径不存在，watcher 于是不启动。
+pub fn watch_source() -> Option<PathBuf> {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent()?;
+    let path = repo.join("build").join("core").join("bin").join(DLL_NAME);
+    path.exists().then_some(path)
+}
+
+fn generation_path(n: u32) -> PathBuf {
+    let stem = DLL_NAME.trim_end_matches(".dll").trim_end_matches(".so");
+    exe_dir().join(format!("{stem}.gen{n}.{}", if cfg!(windows) { "dll" } else { "so" }))
+}
+
+/// 上一代的 gen DLL 还被自己锁着，删不掉是常态 —— 所以清理放在下次启动。
+pub fn cleanup_old_generations() -> usize {
+    let stem = DLL_NAME.trim_end_matches(".dll").trim_end_matches(".so");
+    let prefix = format!("{stem}.gen");
+    let mut removed = 0;
+    let Ok(entries) = std::fs::read_dir(exe_dir()) else {
+        return 0;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with(&prefix) && std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+struct Slot {
+    current: RwLock<Result<Arc<Core>, String>>,
+    generation: AtomicU32,
+}
+
+fn slot() -> &'static Slot {
+    static SLOT: OnceLock<Slot> = OnceLock::new();
+    SLOT.get_or_init(|| Slot {
+        current: RwLock::new(
+            Core::load_from(&dll_path())
+                .map(Arc::new)
+                .map_err(|e| e.to_string()),
+        ),
+        generation: AtomicU32::new(0),
+    })
+}
+
+/// 进程内当前那一份 core。热重载只是换掉这个 Arc（ADR-0004 / ADR-0009）。
 pub fn core() -> Result<Arc<Core>, String> {
-    CORE.get_or_init(|| Core::load().map(Arc::new).map_err(|e| e.to_string()))
+    slot()
+        .current
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
         .clone()
+}
+
+/// 当前是第几代。manifest 缓存靠它判断要不要重读。
+pub fn generation() -> u32 {
+    slot().generation.load(Ordering::Acquire)
+}
+
+/// 换一代 core：复制成 `lyflow_core.gen<N>.dll` 再加载（E4，Windows 会锁住原文件）。
+/// 自检不过就保留旧代返回 Err —— 半坏的一代比旧的一代难查得多。
+pub fn reload_from(source: &Path) -> Result<u32, String> {
+    let next = generation().wrapping_add(1);
+    let staged = generation_path(next);
+    std::fs::copy(source, &staged)
+        .map_err(|e| format!("复制 {} → {} 失败: {e}", source.display(), staged.display()))?;
+
+    let candidate = Core::load_from(&staged).map_err(|e| e.to_string())?;
+    candidate.self_check()?;
+
+    let mut guard = slot().current.write().unwrap_or_else(|e| e.into_inner());
+    // 旧的 Arc<Core> 在这一行被丢掉。调用方必须已经放掉所有 RunHandle，
+    // 否则旧 DLL 只是引用计数没归零，不会真的卸载。
+    *guard = Ok(Arc::new(candidate));
+    slot().generation.store(next, Ordering::Release);
+    Ok(next)
 }
 
 // 下面四个是给不需要拿 Arc 的调用点用的便捷包装。
@@ -458,6 +597,64 @@ mod tests {
     #[test]
     fn version_is_non_empty() {
         assert!(!version().is_empty());
+    }
+
+    /// ADR-0009 的一整轮：复制成 gen<N>.dll → 加载 → 自检 → 换掉全局那份。
+    /// 复制而不是直接加载，是因为 Windows 锁住已加载的 DLL，CMake 就写不回去了。
+    #[test]
+    fn hot_reload_swaps_in_a_fresh_generation() {
+        let before = generation();
+        let old = core().expect("加载 core 失败");
+        let old_ops = serde_json::from_str::<serde_json::Value>(&old.manifest_json().unwrap())
+            .unwrap()["operators"]
+            .as_array()
+            .unwrap()
+            .len();
+
+        // 源就用当前这份 DLL：本测试要验的是换代机制，不是「新代码生效了没有」
+        let generation_id = reload_from(&dll_path()).expect("热重载失败");
+        assert_eq!(generation_id, before.wrapping_add(1));
+        assert_eq!(generation(), generation_id);
+        assert!(
+            generation_path(generation_id).exists(),
+            "没有生成 {}",
+            generation_path(generation_id).display()
+        );
+
+        let fresh = core().expect("换代后拿不到 core");
+        assert!(!Arc::ptr_eq(&old, &fresh), "还是旧的那一份");
+        assert!(fresh.manifest_problems().unwrap().is_empty());
+        let fresh_ops = serde_json::from_str::<serde_json::Value>(&fresh.manifest_json().unwrap())
+            .unwrap()["operators"]
+            .as_array()
+            .unwrap()
+            .len();
+        assert_eq!(fresh_ops, old_ops);
+
+        // 新一代真的能干活：编译一张图并拿到 cacheKey
+        let doc = serde_json::json!({
+            "schemaVersion": 1, "id": "t",
+            "nodes": [{"id": "g", "op": "gen.synthetic"}], "edges": []
+        });
+        let plan: serde_json::Value =
+            serde_json::from_str(&fresh.plan(&doc.to_string(), "", &[]).unwrap()).unwrap();
+        assert_eq!(plan[0]["nodeId"], "g");
+        assert_eq!(plan[0]["cacheKey"].as_str().unwrap().len(), 32);
+
+        // 旧代的 gen DLL 删不掉是常态（自己还锁着），所以清理只在启动时做一次
+        drop(old);
+    }
+
+    #[test]
+    fn generation_dll_names_are_distinct_and_cleanup_is_safe() {
+        assert_ne!(generation_path(1), generation_path(2));
+        assert!(generation_path(7)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .contains("gen7"));
+        // 没有可删的东西时也不许 panic
+        let _ = cleanup_old_generations();
     }
 
     #[test]

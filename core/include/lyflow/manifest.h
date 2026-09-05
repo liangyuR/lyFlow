@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "lyflow/status.h"
 
 namespace lyflow {
@@ -23,6 +25,17 @@ using ComputeFn = Status (*)(const Inputs&, const ParamView&, Outputs&, ExecCont
 /// 可选钩子：把「文件内容变了」这类外部状态揉进 cacheKey。
 /// IO 算子返回 "size:mtime"，读不到文件时返回空串（当作没有外部状态）。
 using ExternalKeyFn = std::string (*)(const ParamView&);
+
+/// 主版本升级时的参数改写：拿旧参数对象，还一份新的（ADR-0008）。
+/// 只碰参数 —— 端口改名要靠新算子 + aliases，因为连线不归算子管。
+using MigrateFn = nlohmann::json (*)(const nlohmann::json&);
+
+/// 从 fromMajor 升到 fromMajor+1 的一步。链条必须覆盖 1..current-1，
+/// 缺一环 Registry::validate() 就报 —— 半条链比没有链更难查。
+struct Migration {
+  int fromMajor = 1;
+  MigrateFn apply = nullptr;
+};
 
 // ------------------------------- Value —— 参数默认值（只覆盖 param.default 的形态）
 class Value {
@@ -154,6 +167,9 @@ struct OperatorDesc {
   /// 会在用户点运行时才暴露，那时已经画完整张图了。
   ComputeFn compute = nullptr;
   ExternalKeyFn externalKey = nullptr;
+
+  /// 参数迁移链，按 fromMajor 任意顺序给都行。空 = 该算子从没破坏性升级过。
+  std::vector<Migration> migrations;
 };
 
 /// 按名字找参数描述。执行器和算子都要用，放这里免得各写一遍线性查找。

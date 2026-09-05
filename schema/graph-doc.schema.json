@@ -37,7 +37,7 @@
         "bypass": {
           "type": "boolean",
           "default": false,
-          "description": "静音：透传输入到输出。这是执行语义不是 UI 状态，所以不放在 ui 里 —— 一张被 bypass 的图 headless 跑出来必须和 UI 里一样。M2 只在 schema/Rust/C++ 三侧接住它，执行语义 M3 实现。"
+          "description": "静音：不调 compute，每个输出取第一个类型兼容且已连线的输入透传。这是执行语义不是 UI 状态，所以不放在 ui 里 —— 一张被 bypass 的图 headless 跑出来必须和 UI 里一样。找不到可透传的源时该输出为空，下游报 bypassed_no_source。"
         },
         "params": {
           "type": "object",
