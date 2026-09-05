@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "01J8XQZ4K7N3M2R5V8W1YB6TCD",
+  "name": "bin picking preprocess",
+  "meta": {
+    "createdAt": "2026-09-05T10:00:00Z",
+    "modifiedAt": "2026-09-05T11:30:00Z",
+    "app": "lyflow/0.1.0"
+  },
+  "nodes": [
+    {
+      "id": "n_load",
+      "op": "io.load_pcd",
+      "opVersion": "1.0.0",
+      "params": { "path": "samples/bin.pcd" },
+      "ui": { "position": { "x": 0, "y": 0 } }
+    },
+    {
+      "id": "n_voxel",
+      "op": "filter.voxel_grid",
+      "opVersion": "1.2.0",
+      "params": { "leafSize": [0.005, 0.005, 0.005] },
+      "ui": { "position": { "x": 280, "y": 0 } }
+    },
+    {
+      "id": "n_plane",
+      "op": "segment.plane",
+      "opVersion": "1.0.0",
+      "params": { "distanceThreshold": 0.006, "constraint": "axis" },
+      "ui": { "position": { "x": 560, "y": 0 }, "title": "去料箱底面" }
+    }
+  ],
+  "edges": [
+    { "id": "e_1", "from": { "node": "n_load", "port": "cloud" }, "to": { "node": "n_voxel", "port": "cloud" } },
+    { "id": "e_2", "from": { "node": "n_voxel", "port": "cloud" }, "to": { "node": "n_plane", "port": "cloud" } }
+  ],
+  "groups": [],
+  "subgraphs": {},
+  "x": {}
+}

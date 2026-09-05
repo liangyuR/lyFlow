@@ -1,0 +1,114 @@
+# GraphDoc — 图数据模型
+
+GraphDoc 是 LyFlow 的**唯一真实数据源**。前端状态、磁盘文件、传给 C++ 的载荷都是它。
+React Flow 的 `Node` / `Edge` 只是渲染时的派生产物。
+
+## 设计约束
+
+1. **不含运行时状态。** 没有 `selected`、`dragging`、`measured`、`status`。这些活在内存里的独立 store 中。
+2. **UI 与语义分离。** 坐标、折叠状态等放在每个节点的 `ui` 子对象里。后端可以整体忽略 `ui`。
+3. **可稳定序列化。** 字段顺序固定、无浮点噪声、数组有序，保证同一个图两次保存产生相同字节，git diff 才有意义。
+4. **可前向演进。** 顶层有 `schemaVersion`，节点记录 `opVersion`，未知字段保留不丢。
+
+## 结构
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "id": "01J8X...",              // ULID，文件重命名后仍可追踪
+  "name": "bin picking preprocess",
+  "meta": {
+    "createdAt": "2026-09-05T10:00:00Z",
+    "modifiedAt": "2026-09-05T11:30:00Z",
+    "app": "lyflow/0.1.0"
+  },
+
+  "nodes": [
+    {
+      "id": "n_load",
+      "op": "io.load_pcd",         // 对应 OperatorManifest.id
+      "opVersion": "1.0.0",        // 保存时的算子版本，用于迁移
+      "params": {
+        "path": "samples/bin.pcd"
+      },
+      "ui": {
+        "position": { "x": 0, "y": 0 },
+        "collapsed": false,
+        "title": null,             // null = 用 manifest 的 label
+        "color": null,
+        "width": null              // null = 自适应
+      }
+    },
+    {
+      "id": "n_voxel",
+      "op": "filter.voxel_grid",
+      "opVersion": "1.2.0",
+      "params": { "leafSize": [0.005, 0.005, 0.005] },
+      "ui": { "position": { "x": 260, "y": 0 } }
+    }
+  ],
+
+  "edges": [
+    {
+      "id": "e_1",
+      "from": { "node": "n_load",  "port": "cloud" },
+      "to":   { "node": "n_voxel", "port": "cloud" }
+    }
+  ],
+
+  "groups": [],        // 预留：节点分组框
+  "subgraphs": {},     // 预留：复合算子定义，M4+
+  "x": {}              // 扩展位：未知字段容器，保证向前兼容
+}
+```
+
+JSON Schema： [`schema/graph-doc.schema.json`](../schema/graph-doc.schema.json)
+
+## 关键决策
+
+### 端口用名字，不用序号
+
+`{ "node": "n_load", "port": "cloud" }` 而不是 `"outputIndex": 0`。
+算子演进时增删端口不会让老图错位；`git diff` 也读得懂。
+
+### 一个输入端口最多一条边
+
+输入端口是单连接，输出端口可以一对多。多输入合并（比如拼接两片点云）由**算子显式声明多个输入端口**
+或声明可变长端口来表达，而不是靠往一个端口上连多条边——后者的求值顺序是隐式的，是 bug 温床。
+
+### 参数是稀疏的
+
+`params` 只存**与 manifest 默认值不同**的项。好处：默认值改动能自动传播到老图；文件更小；diff 更干净。
+读取时用 `manifest.defaults` 与 `params` 合并得到有效值。
+
+代价：manifest 改默认值会静默改变老图的行为。缓解办法是节点上记了 `opVersion`，
+可以在打开时提示「此图保存于 v1.1.0，当前 v1.2.0，`leafSize` 默认值已变更」。
+
+### `ui` 可以整体丢弃
+
+后端处理时直接忽略 `ui`。反过来，一个没有 `ui` 的 GraphDoc（比如脚本生成的）也必须能被前端打开——
+缺失坐标时自动布局（拓扑分层 + 简单避让）。
+
+## 前端映射层
+
+```
+GraphDoc ──(toReactFlow)──► { nodes: Node[], edges: Edge[] }   仅渲染用
+   ▲                                    │
+   └──────(applyChange)◄────────────────┘   用户交互 → 语义化 change → 写回 GraphDoc
+```
+
+写回时走**语义化的 change 动作**（`moveNode`、`setParam`、`connect`、`disconnect`、`addNode`、`deleteNodes`），
+不要直接 diff 节点数组。原因有二：撤销重做需要的是有语义的 patch；批量操作（多选移动）应该合成一条 undo 记录。
+
+撤销重做用 immer patch 或 `zustand` + `zundo`，逆向 patch 直接由 immer 生成。
+**注意把纯 UI 操作排除在 undo 栈之外**（画布平移缩放、选中变化），否则用户按 Ctrl+Z 会觉得没反应。
+
+## 校验分层
+
+| 层级 | 时机 | 目的 |
+|---|---|---|
+| 前端 | 连线时 / 输入时 | 手感。挡掉明显错误，即时反馈 |
+| Rust | 反序列化时 | 结构完整性。字段类型、引用存在性、无悬空边 |
+| C++ | 执行前 | 权威。类型系统、参数范围、环检测、资源可行性 |
+
+三层都要做。前端那层可以被绕过，后两层不能省。

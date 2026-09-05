@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/liangyuR/lyFlow/schema/execution-event.schema.json",
+  "title": "ExecutionEvent",
+  "description": "C++ → Rust → 前端 的流式执行事件。每次节点状态变化推一条。",
+  "type": "object",
+  "required": ["schemaVersion", "runId", "seq", "kind"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "runId": { "type": "string", "description": "一次运行的 id。前端据此丢弃过期运行的事件。" },
+    "seq": { "type": "integer", "description": "单调递增，用于检测丢包与乱序。" },
+    "at": { "type": "string", "format": "date-time" },
+    "kind": { "enum": ["run_started", "node_state", "node_progress", "run_finished", "log"] }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "kind": { "const": "run_started" },
+        "nodeCount": { "type": "integer" },
+        "plan": { "type": "array", "items": { "type": "string" }, "description": "拓扑序的节点 id 列表。" }
+      },
+      "required": ["kind"]
+    },
+    {
+      "properties": {
+        "kind": { "const": "node_state" },
+        "nodeId": { "type": "string" },
+        "state": {
+          "enum": ["idle", "pending", "running", "done", "error", "cancelled", "skipped"],
+          "description": "skipped = 命中缓存未重算，必须与 done 区分显示，否则用户以为没跑。"
+        },
+        "durationMs": { "type": "number" },
+        "error": { "$ref": "#/$defs/error" }
+      },
+      "required": ["kind", "nodeId", "state"]
+    },
+    {
+      "properties": {
+        "kind": { "const": "node_progress" },
+        "nodeId": { "type": "string" },
+        "progress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "message": { "type": "string" }
+      },
+      "required": ["kind", "nodeId", "progress"]
+    },
+    {
+      "properties": {
+        "kind": { "const": "run_finished" },
+        "status": { "enum": ["ok", "error", "cancelled"] },
+        "durationMs": { "type": "number" },
+        "error": { "$ref": "#/$defs/error" }
+      },
+      "required": ["kind", "status"]
+    },
+    {
+      "properties": {
+        "kind": { "const": "log" },
+        "level": { "enum": ["debug", "info", "warn", "error"] },
+        "nodeId": { "type": "string" },
+        "message": { "type": "string" }
+      },
+      "required": ["kind", "level", "message"]
+    }
+  ],
+  "$defs": {
+    "error": {
+      "type": "object",
+      "required": ["phase", "code", "message"],
+      "properties": {
+        "phase": { "enum": ["validate", "compile", "execute"] },
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "paramPath": { "type": "string", "description": "出错的参数名。让前端把红框直接标到那个输入框上。" },
+        "portName": { "type": "string" }
+      }
+    }
+  }
+}

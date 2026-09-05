@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/liangyuR/lyFlow/schema/graph-doc.schema.json",
+  "title": "GraphDoc",
+  "description": "LyFlow 图文档。唯一真实数据源：前端状态、磁盘文件、传给 C++ 的载荷都是它。",
+  "type": "object",
+  "required": ["schemaVersion", "id", "nodes", "edges"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "id": { "type": "string", "description": "ULID。文件重命名后仍可追踪。" },
+    "name": { "type": "string" },
+    "meta": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "createdAt": { "type": "string", "format": "date-time" },
+        "modifiedAt": { "type": "string", "format": "date-time" },
+        "app": { "type": "string", "description": "写入方标识，如 lyflow/0.1.0" }
+      }
+    },
+    "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+    "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } },
+    "groups": { "type": "array", "items": { "$ref": "#/$defs/group" }, "description": "预留：节点分组框。" },
+    "subgraphs": { "type": "object", "additionalProperties": true, "description": "预留：复合算子定义，M4+。" },
+    "x": { "type": "object", "additionalProperties": true, "description": "扩展位。读取时保留未知字段，保证向前兼容。" }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": ["id", "op"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "op": { "type": "string", "description": "对应 OperatorManifest.id" },
+        "opVersion": { "$ref": "#/$defs/semver", "description": "保存时的算子版本，用于迁移提示。" },
+        "params": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "稀疏存储：只记与 manifest 默认值不同的项。"
+        },
+        "ui": { "$ref": "#/$defs/nodeUi" }
+      }
+    },
+    "nodeUi": {
+      "type": "object",
+      "description": "纯 UI 状态。后端可整体忽略；缺失时前端自动布局。",
+      "additionalProperties": false,
+      "properties": {
+        "position": {
+          "type": "object",
+          "required": ["x", "y"],
+          "additionalProperties": false,
+          "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+        },
+        "collapsed": { "type": "boolean", "default": false },
+        "title": { "type": ["string", "null"], "description": "null 表示用 manifest 的 label。" },
+        "color": { "type": ["string", "null"] },
+        "width": { "type": ["number", "null"], "description": "null 表示自适应。" }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": ["id", "from", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "from": { "$ref": "#/$defs/portRef", "description": "源：某节点的输出端口。输出端口可一对多。" },
+        "to": { "$ref": "#/$defs/portRef", "description": "目标：某节点的输入端口。输入端口至多一条边。" }
+      }
+    },
+    "portRef": {
+      "type": "object",
+      "required": ["node", "port"],
+      "additionalProperties": false,
+      "properties": {
+        "node": { "$ref": "#/$defs/localId" },
+        "port": { "type": "string", "description": "端口名，不用序号——增删端口时老图不会错位。" }
+      }
+    },
+    "group": {
+      "type": "object",
+      "required": ["id", "nodes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "label": { "type": "string" },
+        "nodes": { "type": "array", "items": { "$ref": "#/$defs/localId" } },
+        "color": { "type": "string" }
+      }
+    },
+    "localId": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9_.:-]+$" },
+    "semver": { "type": "string", "pattern": "^[0-9]+[.][0-9]+[.][0-9]+$" }
+  }
+}

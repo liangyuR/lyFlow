@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "lyflow-core/0.1.0",
+  "types": [
+    { "name": "Any", "color": "#8a8f98", "doc": "透传节点专用通配类型。" },
+    { "name": "PointCloud", "color": "#4a9eff" },
+    { "name": "PointCloudXYZI", "color": "#4a9eff", "castableTo": ["PointCloud"] },
+    { "name": "Indices", "color": "#c586c0" },
+    { "name": "Transform", "color": "#a0d030" }
+  ],
+  "operators": [
+    {
+      "id": "io.load_pcd",
+      "version": "1.0.0",
+      "label": "Load PCD",
+      "category": "IO/Input",
+      "keywords": ["load", "read", "pcd", "读取"],
+      "doc": "从磁盘读取 PCD 点云文件。",
+      "inputs": [],
+      "outputs": [{ "name": "cloud", "type": "PointCloud", "label": "Cloud" }],
+      "params": [
+        {
+          "name": "path",
+          "type": "path",
+          "label": "File",
+          "default": "",
+          "mode": "open",
+          "filters": [{ "name": "Point Cloud", "extensions": ["pcd", "ply"] }]
+        }
+      ],
+      "capabilities": { "cancellable": true, "previewable": false, "deterministic": true }
+    },
+    {
+      "id": "filter.voxel_grid",
+      "version": "1.2.0",
+      "label": "Voxel Grid",
+      "category": "Filter/Downsample",
+      "keywords": ["downsample", "降采样", "体素"],
+      "doc": "用体素栅格对点云降采样，每个体素保留质心。",
+      "inputs": [{ "name": "cloud", "type": "PointCloud", "label": "Cloud", "required": true }],
+      "outputs": [{ "name": "cloud", "type": "PointCloud", "label": "Cloud" }],
+      "params": [
+        {
+          "name": "leafSize",
+          "type": "vec3f",
+          "label": "Leaf Size",
+          "default": [0.01, 0.01, 0.01],
+          "min": 0.0001,
+          "max": 1.0,
+          "step": 0.001,
+          "unit": "m",
+          "doc": "体素边长。越大点越少。"
+        },
+        {
+          "name": "minPointsPerVoxel",
+          "type": "int",
+          "label": "Min Points / Voxel",
+          "default": 0,
+          "min": 0,
+          "advanced": true
+        }
+      ],
+      "capabilities": { "cancellable": true, "previewable": true, "deterministic": true }
+    },
+    {
+      "id": "segment.plane",
+      "version": "1.0.0",
+      "label": "Plane Segmentation",
+      "category": "Segment",
+      "keywords": ["ransac", "plane", "平面", "分割"],
+      "doc": "RANSAC 拟合平面，输出内点与剩余点。",
+      "inputs": [{ "name": "cloud", "type": "PointCloud", "required": true }],
+      "outputs": [
+        { "name": "inliers", "type": "PointCloud", "label": "Inliers" },
+        { "name": "rest", "type": "PointCloud", "label": "Rest" },
+        { "name": "indices", "type": "Indices", "label": "Indices" }
+      ],
+      "params": [
+        { "name": "distanceThreshold", "type": "float", "label": "Distance Threshold", "default": 0.01, "min": 0.0, "softMax": 0.1, "step": 0.001, "unit": "m" },
+        { "name": "maxIterations", "type": "int", "label": "Max Iterations", "default": 1000, "min": 1, "advanced": true },
+        {
+          "name": "constraint",
+          "type": "enum",
+          "label": "Axis Constraint",
+          "default": "none",
+          "options": [
+            { "value": "none", "label": "None" },
+            { "value": "axis", "label": "Perpendicular To Axis" }
+          ]
+        },
+        {
+          "name": "axis",
+          "type": "vec3f",
+          "label": "Axis",
+          "default": [0.0, 0.0, 1.0],
+          "visibleWhen": { "param": "constraint", "eq": "axis" }
+        },
+        {
+          "name": "epsAngle",
+          "type": "float",
+          "label": "Eps Angle",
+          "default": 5.0,
+          "min": 0.0,
+          "max": 90.0,
+          "unit": "deg",
+          "visibleWhen": { "param": "constraint", "eq": "axis" }
+        }
+      ],
+      "capabilities": { "cancellable": true, "previewable": true, "deterministic": false }
+    }
+  ]
+}

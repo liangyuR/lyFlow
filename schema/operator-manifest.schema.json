@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/liangyuR/lyFlow/schema/operator-manifest.schema.json",
+  "title": "OperatorManifestBundle",
+  "description": "C++ 算子注册表导出的全量描述。前端据此生成节点面板、参数表单与类型校验，不硬编码任何算子。",
+  "type": "object",
+  "required": ["schemaVersion", "types", "operators"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "generatedBy": { "type": "string", "description": "生成方标识，如 lyflow-core/0.1.0" },
+    "types": {
+      "type": "array",
+      "description": "端口类型表。V1 规则：精确匹配 + Any 通配 + castableTo 显式转换。不做泛型。",
+      "items": { "$ref": "#/$defs/portType" }
+    },
+    "operators": { "type": "array", "items": { "$ref": "#/$defs/operator" } }
+  },
+  "$defs": {
+    "portType": {
+      "type": "object",
+      "required": ["name", "color"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "color": { "type": "string", "description": "端口与连线着色。零成本的可读性提升，M0 就做。" },
+        "castableTo": { "type": "array", "items": { "type": "string" }, "description": "可隐式转换到的类型。" },
+        "doc": { "type": "string" }
+      }
+    },
+    "operator": {
+      "type": "object",
+      "required": ["id", "version", "label", "category", "inputs", "outputs", "params"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "全局唯一，用 . 分命名空间，如 filter.voxel_grid" },
+        "version": { "$ref": "#/$defs/semver" },
+        "aliases": { "type": "array", "items": { "type": "string" }, "description": "旧 id，用于重命名后自动重定向。" },
+        "label": { "type": "string" },
+        "category": { "type": "string", "description": "用 / 分层，决定搜索面板的树形结构。" },
+        "keywords": { "type": "array", "items": { "type": "string" } },
+        "doc": { "type": "string" },
+        "inputs": { "type": "array", "items": { "$ref": "#/$defs/port" } },
+        "outputs": { "type": "array", "items": { "$ref": "#/$defs/port" } },
+        "params": { "type": "array", "items": { "$ref": "#/$defs/param" } },
+        "capabilities": { "$ref": "#/$defs/capabilities" }
+      }
+    },
+    "port": {
+      "type": "object",
+      "required": ["name", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string", "description": "必须出现在 bundle 的 types 表中。" },
+        "label": { "type": "string" },
+        "doc": { "type": "string" },
+        "required": { "type": "boolean", "default": true, "description": "仅对 inputs 有意义。" }
+      }
+    },
+    "param": {
+      "type": "object",
+      "required": ["name", "type", "default"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "type": {
+          "enum": ["bool", "int", "float", "vec2f", "vec3f", "vec4f", "enum", "flags",
+                   "string", "text", "path", "color", "transform", "curve"],
+          "description": "决定前端渲染哪个控件。新增类型 = 前端加一个 case。"
+        },
+        "label": { "type": "string" },
+        "doc": { "type": "string" },
+        "default": { "description": "任意 JSON 值，需与 type 匹配。GraphDoc 稀疏存储时以此为基准。" },
+        "group": { "type": "string", "description": "参数分组标题。" },
+        "advanced": { "type": "boolean", "default": false, "description": "默认收进折叠区。" },
+        "min": { "type": "number" },
+        "max": { "type": "number", "description": "硬边界，超出即非法。" },
+        "softMin": { "type": "number" },
+        "softMax": { "type": "number", "description": "滑块范围，可手输超出。" },
+        "step": { "type": "number" },
+        "unit": { "type": "string" },
+        "componentLabels": { "type": "array", "items": { "type": "string" }, "description": "vecNf 的分量名，默认 X/Y/Z/W。" },
+        "options": {
+          "type": "array",
+          "description": "enum / flags 的选项。",
+          "items": {
+            "type": "object",
+            "required": ["value", "label"],
+            "additionalProperties": false,
+            "properties": {
+              "value": { "type": ["string", "integer"] },
+              "label": { "type": "string" },
+              "doc": { "type": "string" }
+            }
+          }
+        },
+        "placeholder": { "type": "string" },
+        "pattern": { "type": "string", "description": "string 的校验正则。" },
+        "rows": { "type": "integer", "description": "text 的行数。" },
+        "filters": {
+          "type": "array",
+          "description": "path 的文件类型过滤。",
+          "items": {
+            "type": "object",
+            "required": ["name", "extensions"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "extensions": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "mode": { "enum": ["open", "save", "dir"], "description": "path 的选择模式。" },
+        "alpha": { "type": "boolean", "description": "color 是否带 alpha 通道。" },
+        "visibleWhen": { "$ref": "#/$defs/condition" },
+        "enabledWhen": { "$ref": "#/$defs/condition" }
+      }
+    },
+    "condition": {
+      "type": "object",
+      "description": "有意做得很弱：只支持对同节点其他参数的等值/包含判断，不是通用表达式引擎。需要复杂逻辑说明算子该拆了。",
+      "required": ["param"],
+      "additionalProperties": false,
+      "properties": {
+        "param": { "type": "string" },
+        "eq": {},
+        "ne": {},
+        "in": { "type": "array" }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cancellable": { "type": "boolean", "default": false, "description": "支持中途取消 → 可用于 live preview。" },
+        "previewable": { "type": "boolean", "default": false, "description": "支持降级质量的快速预览。" },
+        "deterministic": { "type": "boolean", "default": true, "description": "同输入同输出 → 可参与缓存。" }
+      }
+    },
+    "semver": { "type": "string", "pattern": "^[0-9]+[.][0-9]+[.][0-9]+$" }
+  }
+}

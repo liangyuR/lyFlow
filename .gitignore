@@ -1,0 +1,48 @@
+# Node
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock.orig
+
+# C++ / CMake
+build/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.a
+*.lib
+*.pdb
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# LyFlow runtime output
+*.lyflow.autosave
+/samples/out/
+/logs/
