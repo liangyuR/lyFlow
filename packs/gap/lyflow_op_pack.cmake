@@ -1,8 +1,3 @@
-# LyFlow 领域算子包：线扫双头剖面的间隙/段差测量（ADR-0015）。
-# 默认关闭 —— 纯平台开发者不该为一个领域包装 yaml-cpp。打开它：
-#   $env:LYFLOW_PACKS = "gap"; pnpm check
-# 算法源码在 algo/，从 xyz-gap-inspector 迁入；通用部分已经进 lyflow_std_algo。
-
 file(GLOB_RECURSE GAP_ALGO_SOURCES CONFIGURE_DEPENDS "${LYFLOW_PACK_DIR}/algo/*.cpp")
 file(GLOB GAP_OP_SOURCES CONFIGURE_DEPENDS "${LYFLOW_PACK_DIR}/ops/*.cpp")
 file(GLOB GAP_TESTS CONFIGURE_DEPENDS "${LYFLOW_PACK_DIR}/tests/*.cpp")
