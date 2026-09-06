@@ -17,14 +17,26 @@ M2 起改成了 **CMake 构建的 DLL + libloading 运行时加载**
 
 1. 用 cmake crate 驱动 `core/CMakeLists.txt`，只构建 `lyflow_core` 这一个目标
    （两个 exe 归 `scripts/build-core.ps1` 管）。固定 `RelWithDebInfo`（D8）。
-2. 把 `<build>/bin/` 里的 `.dll/.exe/.pdb` 拷到 `target/<profile>/` 和它的
-   `deps/` —— 前者给 `tauri dev`、`tauri build`，后者给 `cargo test`
-   （测试可执行文件跑在 `deps/` 里，`LoadLibrary` 只看它自己那个目录）。
+2. 发 `cargo:rustc-env=LYFLOW_CORE_BIN=<build>/bin`，并把该目录里的
+   `.dll/.exe/.pdb` 拷到 `target/<profile>/` 和它的 `deps/`，给 `tauri build`
+   与打包用。
 3. 给 exe 贴 `lyflow-app.manifest`（D9：`activeCodePage=UTF-8`）。
 
-**不发任何 `rustc-link-lib`。** DLL 在运行时才加载，从 exe 同目录
-（不搜 PATH，也不看当前工作目录 —— 前者会加载到无关的同名 DLL，
+**不发任何 `rustc-link-lib`。** DLL 在运行时才加载：**开发构建**
+（`debug_assertions`）从**本配置自己的** `LYFLOW_CORE_BIN` 加载，其余情况从 exe
+同目录（不搜 PATH，也不看当前工作目录 —— 前者会加载到无关的同名 DLL，
 后者在双击启动时根本不是安装目录）。
+
+为什么开发构建不用 exe 同目录：cargo 会按 feature 集把同一个 crate 建好几遍
+（`lyflow-app` 带 `desktop`、lib 的 test、CLI `--no-default-features`），
+每一份有自己的 `OUT_DIR` 和自己的 `lyflow_core.dll`，而 `target/<profile>/`
+是**共用**的 —— 谁最后跑过 `build.rs` 谁的 DLL 就留在那里。带 `LYFLOW_OP_PACKS`
+构建的 app 因此会加载到不带包那次留下的 DLL，表现是算子凭空少一半。
+拷贝是 `build.rs` 的副作用，只在这个配置的 `build.rs` 重跑时才发生，
+所以「重新构建一次」并不能纠正它。
+
+Windows 上用 `LOAD_WITH_ALTERED_SEARCH_PATH` 加载：PCL、`yaml-cpp` 这些依赖
+DLL 跟着从**核心 DLL 自己的目录**解析，而不是 exe 目录。
 
 新增 `core/src/**/*.cpp` 会被自动编进来：`build.rs` 递归 glob 源文件与目录，
 并对每一项发 `cargo:rerun-if-changed`，所以加文件会触发重编。

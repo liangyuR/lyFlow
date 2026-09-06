@@ -86,7 +86,7 @@ pub struct RunOpaque {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
-    #[error("加载 lyflow_core.dll 失败: {0}\n（DLL 应当与 exe 同目录；开发期由 build.rs 拷贝，安装包里由 bundle.resources 带上）")]
+    #[error("加载 lyflow_core.dll 失败: {0}\n（开发构建找本配置的 LYFLOW_CORE_BIN，其余情况找 exe 同目录）")]
     Load(String),
     #[error("lyflow_core.dll 里找不到符号 {0}（DLL 版本与本程序不匹配）")]
     MissingSymbol(&'static str),
@@ -178,9 +178,27 @@ macro_rules! sym {
     }};
 }
 
+/// Windows：绝对路径 + LOAD_WITH_ALTERED_SEARCH_PATH，PCL / yaml-cpp 那些依赖
+/// 从 DLL 自己的目录解析，而不是 exe 目录 —— 开发期这两处装的不是同一套。
+#[cfg(windows)]
+fn open_library(path: &Path) -> Result<Library, libloading::Error> {
+    use libloading::os::windows::{Library as WinLibrary, LOAD_WITH_ALTERED_SEARCH_PATH};
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(path)
+    };
+    unsafe { WinLibrary::load_with_flags(&abs, LOAD_WITH_ALTERED_SEARCH_PATH) }.map(Library::from)
+}
+
+#[cfg(not(windows))]
+fn open_library(path: &Path) -> Result<Library, libloading::Error> {
+    unsafe { Library::new(path) }
+}
+
 impl Core {
     fn load_from(path: &Path) -> Result<Self, CoreError> {
-        let lib = unsafe { Library::new(path) }
+        let lib = open_library(path)
             .map_err(|e| CoreError::Load(format!("{} —— {e}", path.display())))?;
 
         Ok(Core {
@@ -561,7 +579,15 @@ fn exe_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// 开发构建先用本配置自己的 cmake 产物（build.rs 的 `LYFLOW_CORE_BIN`）：cargo 按
+/// feature 集把同一个 crate 建好几遍，而 target/<profile>/ 是共用的，谁后拷谁说了算。
 fn dll_path() -> PathBuf {
+    if cfg!(debug_assertions) {
+        let own = Path::new(env!("LYFLOW_CORE_BIN")).join(DLL_NAME);
+        if own.is_file() {
+            return own;
+        }
+    }
     exe_dir().join(DLL_NAME)
 }
 

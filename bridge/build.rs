@@ -183,8 +183,8 @@ fn main() {
     }
     let out = cfg.build();
 
-    // CMake 的产物都在 <build>/bin，整目录拷到 target/<profile>/ 与它的 deps/：
-    // 前者给 tauri dev/build，后者给 cargo test（测试 exe 跑在 deps/ 里）。
+    // CMake 的产物都在 <build>/bin。开发构建直接从这里加载（下面这个 LYFLOW_CORE_BIN），
+    // 再整目录拷到共享的 target/<profile>/ 与 deps/，供 tauri build 与打包取用。
     let bin = out.join("build").join("bin");
     let bin = if bin.exists() { bin } else { out.join("bin") };
     println!("cargo:rustc-env=LYFLOW_CORE_BIN={}", bin.display());
@@ -240,12 +240,13 @@ fn copy_dir_contents(from: &Path, to: &Path) -> std::io::Result<()> {
             _ => continue,
         }
         let dst = to.join(entry.file_name());
-        // 目标文件正被占用（比如上一次 tauri dev 还开着）时不要让整个构建挂掉，
-        // 旧的那份多半就是同一个文件。
+        // 目标文件正被占用（比如上一次 tauri dev 还开着）时不让整个构建挂掉，
+        // 但必须说出来 —— 静默跳过等于「悄悄用了别人留下的那一份」。
         if let Err(e) = std::fs::copy(&src, &dst) {
             if e.kind() != std::io::ErrorKind::PermissionDenied {
                 return Err(e);
             }
+            println!("cargo:warning=被占用，没能覆盖 {}（那里还是旧的一份）", dst.display());
         }
     }
     Ok(())

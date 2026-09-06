@@ -20,6 +20,15 @@ pnpm check          # 或 pnpm core:build / pnpm dev
 包目录进了 `build.rs` 的 rerun 列表与 `core-watch.ps1` 的源码指纹，
 所以改包里的算子会触发增量构建和热重载，和改 `core/src/` 一样。
 
+### 带包和不带包混着跑
+
+cargo 会按 feature 集把 `lyflow-app` 建好几遍（app、lib 的 test、CLI），
+每一份有自己的 `OUT_DIR` 和自己的 `lyflow_core.dll`。开发构建里每个 exe
+**加载的是自己那一份**（`build.rs` 发的 `LYFLOW_CORE_BIN`），
+所以两种模式来回切不会串味 —— 不带包跑过 `pnpm check` 之后，
+带包的 `pnpm tauri dev` 仍然是 32 个算子，反过来也一样。
+`target/debug/` 与 `deps/` 里那份拷贝只服务 `tauri build` 与打包。
+
 ## 一个包长什么样
 
 ```

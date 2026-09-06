@@ -363,17 +363,41 @@ HEAD cargo-test failures = 4 / 8
 计划没提。理由见 §5 第 6 条：不加的话一次增量重建 10.5 s，热重载跟不上手。
 所有包共用一个对象库，所以 PCH 只能有一份；两个包给了不同的 PCH 会直接 FATAL_ERROR。
 
-**16. 一个构建期的坑，reviewer 大概率会踩：`bridge/build.rs` 拷 DLL 时会静默跳过被占用的文件。**
-`copy_dir_contents` 对 `PermissionDenied` 是 `continue`（那是 M2 就有的行为，
-为的是「上一次 tauri dev 还开着」不要让整个构建挂掉）。
-后果是：如果 `target/debug/lyflow_core.dll` 当时被占着，
-新的（带包的）DLL 只落到了 `deps/`，app 起来之后所有 `gap.*` 都是 `unknown_op`。
-我在验收过程中踩到过一次，症状是「3D 视图叠画数是 0」，
-查到底是 `n_rois` 报 `unknown_op`。
-**处理**：确认没有 app 在跑 → 删掉 `bridge/target/debug/lyflow_core.dll` →
-`touch bridge/build.rs` 强制 build.rs 重跑（光删 DLL 不够，cargo 认为没有变化就不会重跑构建脚本）。
-没有顺手改 build.rs：那是通用侧的行为，改它要连带想清楚「拷不过去时该不该让构建失败」，
-不该塞进这个 commit。
+**16. 一个构建期的缺陷，已经修掉（`fix: 开发构建按自己的配置加载 core DLL…`）。**
+症状：设了 `LYFLOW_OP_PACKS` 跑 `pnpm tauri dev`，状态栏显示「16 算子」，
+`gap.*` 全部「未知算子」；而同一环境下带包的 `pnpm check` 是绿的、32 个算子。
+本条原先归因成「DLL 被占用时 `copy_dir_contents` 静默跳过」——**那是错的**：
+一个 app 都没在跑的时候照样复现。
+
+**真正的根因**：cargo 对同一个 crate 会按 feature 集构建多次
+（`lyflow-app` 带 `desktop`、lib 的 test、CLI `--no-default-features`），
+每种配置有自己的 `OUT_DIR`，各自跑一遍 `bridge/build.rs`、各自编出一个
+`lyflow_core.dll`，然后**都往共享的** `target/debug/` 与 `target/debug/deps/` 里拷。
+实测的现场：带包那个配置的 OUT_DIR 是 5.2 MB，不带包的两个各 2.28 MB，
+而 `target/debug/lyflow_core.dll` 是 2.28 MB —— 不带包那次 `pnpm check` 里
+`cargo test` / CLI 构建拷过去的。之后带包跑 `tauri dev`，这个配置的输入一个没变，
+`build.rs` 不重跑、也就不重拷，app 从 exe 同目录加载到的正是别人留下的那一份。
+`rerun-if-env-changed=LYFLOW_OP_PACKS` 一直都在，不是它的问题；
+「拷贝是 `build.rs` 的副作用，只在本配置的 `build.rs` 重跑时发生，而目的地是共享的」才是。
+所以「再构建一次」并不能纠正它 —— 输入没变，就不会有第二次拷贝。
+
+**修法**：`build.rs` 本来就发了
+`cargo:rustc-env=LYFLOW_CORE_BIN=<本配置的 cmake bin 目录>`，此前没人读。
+现在 `core_ffi::dll_path()` 在 `debug_assertions` 且该目录里有 DLL 时优先用它，
+否则回落到 exe 同目录（release 与安装包走这条，行为不变）。
+Windows 上加载改用 `LOAD_WITH_ALTERED_SEARCH_PATH`：PCL、`yaml-cpp` 这些依赖
+跟着从**核心 DLL 自己的目录**解析，而不是 exe 目录。
+热重载不变 —— 仍然盯 `build/core/bin/lyflow_core.dll`，仍然复制成 exe 目录下的
+`lyflow_core.gen<N>.dll` 再加载；换代时依赖 DLL 已经在进程里，Windows 按模块名解析。
+顺带把 `copy_dir_contents` 对 `PermissionDenied` 的静默跳过改成 `cargo:warning`，
+「没能覆盖，那里还是旧的一份」这句话得有人看得见。
+
+**实测**（状态栏算子数 + app 进程里 `lyflow_core` 那个模块的真实路径）：
+
+| 场景 | `target/debug/` 里躺着的 | 修复前 | 修复后 |
+|---|---|---|---|
+| 不带包 `check` → 带包 `dev` | 不带包 2.28 MB | **16**，加载 `target/debug/` | **32**，加载本配置 OUT_DIR |
+| 带包 `check` → 不带包 `dev` | 带包 5.2 MB | 同一机制，没单独复现 | **16**，加载本配置 OUT_DIR |
 
 **17. A/B 脚本挑 `lyflow.exe` 时按 mtime 取最新的。**
 第一次跑的时候它按「release 优先」挑中了一个几小时前构建的、不带算子包的 exe，
