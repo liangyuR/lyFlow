@@ -36,8 +36,11 @@ class ClientError : public std::runtime_error {
 struct InputCloud {
   std::string nodeId;
   std::string port;
+  /// 交错的 x,y,z。其余三个通道要么为空，要么与点数对齐。
   std::vector<float> xyz;
   std::vector<float> intensity;
+  std::vector<float> normals;
+  std::vector<std::uint8_t> rgb;
 };
 
 struct RunOptions {
@@ -347,6 +350,8 @@ inline void Client::runAsync(const std::string& graphJson, const RunOptions& opt
     raw.count = static_cast<std::uint32_t>(in.xyz.size() / 3);
     raw.xyz = in.xyz.empty() ? nullptr : in.xyz.data();
     raw.intensity = in.intensity.empty() ? nullptr : in.intensity.data();
+    raw.normals = in.normals.empty() ? nullptr : in.normals.data();
+    raw.rgb = in.rgb.empty() ? nullptr : in.rgb.data();
     inputs.push_back(raw);
   }
 

@@ -81,6 +81,8 @@ typedef struct {
   uint32_t count;                  /* 点数 */
   const float* xyz;                /* 3 * count */
   const float* intensity;          /* count，或 NULL */
+  const float* normals;            /* 3 * count，或 NULL */
+  const uint8_t* rgb;              /* 3 * count，或 NULL */
 } lyflow_run_input;
 
 #define LYFLOW_INPUT_POINT_CLOUD 0

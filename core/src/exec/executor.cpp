@@ -420,11 +420,34 @@ class Scheduler {
   /// 「模型路径失败、回退到模板路径、量出结果」这条路必须以 run_finished: ok 收场
   /// （ADR-0016）。
   void tally() {
-    std::vector<std::vector<const InputBinding*>> consumers(n_);
+    struct Edge {
+      std::size_t consumer;
+      bool acceptsError;
+    };
+    std::vector<std::vector<Edge>> consumers(n_);
     for (std::size_t i = 0; i < n_; ++i) {
       for (const InputBinding& b : plan_.nodes[i].inputs) {
-        if (b.fromNode >= 0) consumers[static_cast<std::size_t>(b.fromNode)].push_back(&b);
+        if (b.fromNode < 0) continue;
+        consumers[static_cast<std::size_t>(b.fromNode)].push_back(Edge{i, b.acceptsError});
       }
+    }
+    // 逆拓扑序一遍：消费者的下标一定更大，所以倒着算，absorbed 现成可用。
+    // 「被接住」是传递的 —— 一个失败先连坐了几个中间节点、最后才撞上
+    // acceptsError 端口，整条级联都算被接住（ADR-0016）。
+    std::vector<char> absorbed(n_, 0);
+    for (std::size_t k = n_; k-- > 0;) {
+      if (!done_[k] || verdict_[k] != Verdict::Failed) continue;
+      if (consumers[k].empty()) continue;
+      bool all = true;
+      for (const Edge& e : consumers[k]) {
+        if (e.acceptsError) continue;
+        if (verdict_[e.consumer] == Verdict::Failed && done_[e.consumer] && absorbed[e.consumer]) {
+          continue;
+        }
+        all = false;
+        break;
+      }
+      absorbed[k] = all ? 1 : 0;
     }
     for (std::size_t i = 0; i < n_; ++i) {
       if (!done_[i] || verdict_[i] == Verdict::Ok) continue;
@@ -433,11 +456,7 @@ class Scheduler {
         failed_ += 1;
         continue;
       }
-      bool absorbed = !consumers[i].empty();
-      for (const InputBinding* b : consumers[i]) {
-        if (!b->acceptsError) absorbed = false;
-      }
-      if (absorbed) continue;
+      if (absorbed[i]) continue;
       anyError_ = true;
       failed_ += 1;
     }

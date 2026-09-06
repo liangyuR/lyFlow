@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(lyflow CONFIG REQUIRED)
 
-foreach(sample embed_minimal embed_concurrent)
+foreach(sample embed_minimal embed_concurrent embed_inject)
   add_executable(${sample} "${LYFLOW_EXAMPLES_DIR}/${sample}.cpp")
   target_link_libraries(${sample} PRIVATE lyflow::client)
   if(MSVC)

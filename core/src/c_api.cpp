@@ -189,6 +189,12 @@ lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* o
         if (in.intensity && in.count) {
           cloud.intensity.assign(in.intensity, in.intensity + in.count);
         }
+        if (in.normals && in.count) {
+          cloud.normals.assign(in.normals, in.normals + static_cast<std::size_t>(in.count) * 3);
+        }
+        if (in.rgb && in.count) {
+          cloud.rgb.assign(in.rgb, in.rgb + static_cast<std::size_t>(in.count) * 3);
+        }
         options.inputs.push_back(lyflow::exec::InjectedInput{
             fromC(in.node_id), fromC(in.port), lyflow::Data::cloud(std::move(cloud))});
       }

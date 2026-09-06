@@ -124,6 +124,32 @@ TEST_CASE("acceptsError 的端口收到 Error Data 而不是被连坐") {
   CHECK(reason.find("测试用的失败") != std::string::npos);
 }
 
+TEST_CASE("失败先连坐几个中间节点、最后撞上 acceptsError，整轮仍然是 ok") {
+  ensureTestOps();
+  // n_a 失败 → n_t1 → n_t2 连坐 → 才落到 fallback 的 acceptsError 端口上。
+  // 这条级联整个算被接住，run_finished 不该因此变成 error（ADR-0016）。
+  const Json doc = makeGraph(
+      {N{"n_a", "test.fail", Json::object()},
+       N{"n_t1", "test.thin", Json::object()},
+       N{"n_t2", "test.thin", Json::object()},
+       N{"n_b", "test.counted", Json{{"pointCount", 5}}},
+       N{"n_fb", "flow.fallback", Json::object()}},
+      {E{"n_a.cloud", "n_t1.cloud"}, E{"n_t1.cloud", "n_t2.cloud"},
+       E{"n_t2.cloud", "n_fb.a"}, E{"n_b.cloud", "n_fb.b"}});
+  Session s(doc);
+  RunLog& log = s.wait();
+
+  CHECK(log.runStatus() == "ok");
+  CHECK(log.finalState("n_a") == "error");
+  CHECK(log.finalState("n_t1") == "cancelled");
+  CHECK(log.finalState("n_t2") == "cancelled");
+  CHECK(log.finalState("n_fb") == "done");
+
+  Data out;
+  REQUIRE(ResultStore::instance().get(s.runId(), "n_fb", "out", out));
+  CHECK(out.asCloud()->pointCount() == 5);
+}
+
 TEST_CASE("没有声明 acceptsError 的端口仍然被上游失败连坐") {
   ensureTestOps();
   const Json doc = makeGraph({N{"n_a", "test.fail", Json::object()},

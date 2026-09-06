@@ -72,11 +72,12 @@ async function suitePlanExtended(cdp, report) {
 
   await newDoc(cdp);
   // 主路径读一个不存在的文件：路径非空所以过得了校验，在执行期报 io。
+  // 必须写**绝对**路径 —— 没保存过的图带相对路径参数时 App 会拦下运行。
   // fallback 的 a 端口声明了 acceptsError，所以整轮不该被它拖成 error。
   const ids = await buildGraph(
     cdp,
     [
-      { key: "bad", op: "io.load_pcd", params: { path: "没有这个文件.pcd" } },
+      { key: "bad", op: "io.load_pcd", params: { path: "Z:/lyflow-没有这个文件.pcd" } },
       { key: "b", op: "gen.synthetic", params: { pointCount: 999, seed: 2 } },
       { key: "fb", op: "flow.fallback" },
     ],

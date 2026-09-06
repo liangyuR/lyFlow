@@ -328,6 +328,7 @@ install(DIRECTORY "${LYFLOW_INCLUDE}/lyflow"
 
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_minimal.cpp"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_concurrent.cpp"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_inject.cpp"
         DESTINATION examples)
 
 # 库算子目录（ADR-0010）。宿主往里放 *.lyflow-op.json，所以布局里要有它。

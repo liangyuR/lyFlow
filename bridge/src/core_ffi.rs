@@ -25,6 +25,8 @@ pub struct RunInputRaw {
     pub count: u32,
     pub xyz: *const f32,
     pub intensity: *const f32,
+    pub normals: *const f32,
+    pub rgb: *const u8,
 }
 
 pub const INPUT_POINT_CLOUD: i32 = 0;
@@ -67,8 +69,11 @@ pub const CLOUD_HAS_NORMALS: u32 = 2;
 pub struct RunInput {
     pub node_id: String,
     pub port: String,
+    /// 交错的 x,y,z。其余三个通道要么为空，要么与点数对齐。
     pub xyz: Vec<f32>,
     pub intensity: Vec<f32>,
+    pub normals: Vec<f32>,
+    pub rgb: Vec<u8>,
 }
 
 /// 一次运行的全部选项（C ABI v7）。写成位置参数就没人读得懂了。
@@ -575,6 +580,16 @@ impl RunHandle {
                     std::ptr::null()
                 } else {
                     i.intensity.as_ptr()
+                },
+                normals: if i.normals.is_empty() {
+                    std::ptr::null()
+                } else {
+                    i.normals.as_ptr()
+                },
+                rgb: if i.rgb.is_empty() {
+                    std::ptr::null()
+                } else {
+                    i.rgb.as_ptr()
                 },
             })
             .collect();
