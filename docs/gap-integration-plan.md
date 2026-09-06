@@ -1,5 +1,11 @@
 # 接入 xyz-gap-inspector：线扫双头点云的间隙/段差测量
 
+> **这份文档记的是当时的状态。** 算子包后来搬进了 LyFlow 的 `packs/gap/`，
+> `xyz-gap-inspector/lyflow/` 只剩一份指路 README，`LYFLOW_OP_PACKS` 换成了
+> `LYFLOW_PACKS=gap`，脚本在 `packs/gap/tools/`。见 ADR-0015 与
+> [gap-pack-migration-acceptance.md](gap-pack-migration-acceptance.md)。
+
+
 目标：把 `D:\project\xyz-gap-inspector` 的「配置/模板 + ICP」测量主路径拆成 LyFlow 算子，
 输入是一个测点目录下的 Master/Slave 两片 PCD，输出 gap / flush 数值与判定；
 每个中间阶段（裁剪、ICP、有效 ROI、拟合）都能在画布上点开看。

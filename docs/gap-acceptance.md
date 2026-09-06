@@ -1,5 +1,11 @@
 # 接入 xyz-gap-inspector 验收记录
 
+> **这份文档记的是当时的状态。** 算子包后来搬进了 LyFlow 的 `packs/gap/`，
+> `xyz-gap-inspector/lyflow/` 只剩一份指路 README，`LYFLOW_OP_PACKS` 换成了
+> `LYFLOW_PACKS=gap`，脚本在 `packs/gap/tools/`。见 ADR-0015 与
+> [gap-pack-migration-acceptance.md](gap-pack-migration-acceptance.md)。
+
+
 逐条对着 [gap-integration-plan.md](gap-integration-plan.md) 走一遍：**怎么跑 + 实际输出 + 通过/未通过/未验证**。
 第一部分（配置/模板 + ICP 路径）对 §5，第二部分（模型 ROI 路径）对 §10。
 与计划不同的地方全部记在最后的「偏离与决策」里，编号连续。
