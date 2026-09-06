@@ -11,6 +11,8 @@ page.mjs     页面侧的公共动作（搭图、按键、真鼠标拖拽、等�
 run.mjs      M2 的分组 + main
 m3.mjs       M3 的分组（缓存、静音、迁移、连线手感、布局、面板、3D）
 m4.mjs       M4 的分组（子图、库算子、live preview、大图性能）
+gap.mjs      gap 领域包的分组（量测输出、真实 gap 图、模型 gap 图）
+phase_a.mjs  阶段 A 的分组（惰性分支半透明、plan_extended、图级输出）
 ```
 
 CLI（m4-plan §3）不在这里：它没有界面，验收走 `cargo test`

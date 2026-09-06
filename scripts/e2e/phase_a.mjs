@@ -71,36 +71,30 @@ async function suitePlanExtended(cdp, report) {
   report.section("惰性分支：主路径失败时经 plan_extended 追加（ADR-0016）");
 
   await newDoc(cdp);
-  // 主路径是一个必填参数没填的 io.load_pcd —— 它在执行期失败，而 fallback 的
-  // a 端口声明了 acceptsError，所以整轮不该被它拖成 error。
+  // 主路径读一个不存在的文件：路径非空所以过得了校验，在执行期报 io。
+  // fallback 的 a 端口声明了 acceptsError，所以整轮不该被它拖成 error。
   const ids = await buildGraph(
     cdp,
     [
-      { key: "a", op: "gen.synthetic", params: { pointCount: 16, seed: 1 } },
-      { key: "bad", op: "filter.crop_box", params: { min: [1, 1, 1], max: [-1, -1, -1] } },
+      { key: "bad", op: "io.load_pcd", params: { path: "没有这个文件.pcd" } },
       { key: "b", op: "gen.synthetic", params: { pointCount: 999, seed: 2 } },
       { key: "fb", op: "flow.fallback" },
     ],
     [
-      { from: ["a", "cloud"], to: ["bad", "cloud"] },
       { from: ["bad", "cloud"], to: ["fb", "a"] },
       { from: ["b", "cloud"], to: ["fb", "b"] },
     ],
   );
 
   const run = await runAndWait(cdp, () => pressF5(cdp));
-  // crop_box 的 min > max 未必是执行期失败；两种结局都要能说清楚，所以只断言
-  // 「b 这一路的状态与 fallback 的结局是自洽的」。
-  const bState = run.nodes[ids.b]?.state ?? "(缺)";
-  const fbState = run.nodes[ids.fb]?.state ?? "(缺)";
-  if (fbState === "done" && run.nodes[ids.b]?.reason !== "not_demanded") {
-    report.eq("b 被 demand 之后跑完了", bState, "done");
-    const painted = await opacityOf(cdp, ids.b);
-    report.eq("被 demand 的节点不再半透明", painted?.notDemanded, "0");
-  } else {
-    report.eq("主路径没失败时 b 仍是 not_demanded", run.nodes[ids.b]?.reason, "not_demanded");
-  }
-  report.ok("整轮没有被吸收掉的失败拖垮", run.status !== "error", `status=${run.status}`);
+  report.eq("主路径失败了", run.nodes[ids.bad]?.state, "error");
+  report.eq("fallback 仍然跑完", run.nodes[ids.fb]?.state, "done");
+  report.eq("备用路径被 demand 之后跑完了", run.nodes[ids.b]?.state, "done");
+  report.eq("整轮不因被吸收的失败而 error", run.status, "ok");
+  report.eq("fallback 透传的是备用路径的点数", run.nodes[ids.fb]?.elementCount, 999);
+
+  const painted = await opacityOf(cdp, ids.b);
+  report.eq("被 demand 的节点不再半透明", painted?.notDemanded, "0");
 
   await select(cdp, ids.fb);
 }
