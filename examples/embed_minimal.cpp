@@ -81,6 +81,47 @@ int main(int argc, char** argv) {
       return 1;
     }
 
+    lyflow::RunOptions handleOptions;
+    handleOptions.runId = "embed-minimal-handle";
+    handleOptions.maxParallel = 1;
+    handleOptions.noReuse = true;
+    std::size_t handleEvents = 0;
+    lyflow::RunHandle handle =
+        client.startRun(kGraph, handleOptions, [&](const char*) { handleEvents += 1; });
+    if (!handle.valid()) {
+      std::cerr << "startRun 没有给出句柄\n";
+      return 1;
+    }
+    handle.join();
+    if (handle.status() != "ok" || handleEvents == 0) {
+      std::cerr << "startRun 的运行没跑成：" << handle.status() << "\n";
+      return 1;
+    }
+    if (handle.outputs().find("\"cloud\"") == std::string::npos) {
+      std::cerr << "startRun 的 outputs 里没有 cloud\n";
+      return 1;
+    }
+    const lyflow::CloudView handleCloud = handle.cloud("pipe", "out", 100);
+    if (!handleCloud.valid() || handleCloud.totalPoints() != 4096) {
+      std::cerr << "startRun 的句柄取不到点云\n";
+      return 1;
+    }
+    std::cout << "startRun " << handle.status() << "，" << handleEvents << " 条事件\n";
+
+    lyflow::RunOptions cancelOptions;
+    cancelOptions.runId = "embed-minimal-cancel";
+    cancelOptions.maxParallel = 1;
+    cancelOptions.noReuse = true;
+    lyflow::RunHandle cancelled = client.startRun(kGraph, cancelOptions);
+    cancelled.cancel();
+    cancelled.join();
+    const std::string cancelStatus = cancelled.status();
+    if (cancelStatus != "cancelled" && cancelStatus != "ok") {
+      std::cerr << "取消之后的状态不对：" << cancelStatus << "\n";
+      return 1;
+    }
+    std::cout << "cancel " << cancelStatus << "\n";
+
     std::cout << "embed_minimal ok\n";
     return 0;
   } catch (const std::exception& e) {

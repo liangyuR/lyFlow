@@ -121,7 +121,7 @@ options.inputs = { std::move(primary), std::move(secondary) };
 2. 缓冲只需活到 `run()` 返回，core 在内部拷一份。
 3. 注入数据的摘要进 cacheKey，换一片云一定重算。
 
-## 回调版与取消
+## 回调版
 
 ```cpp
 lyflow::RunResult result = client.runAsync(graphJson, options, [&](const char* eventJson) {
@@ -134,8 +134,47 @@ lyflow::RunResult result = client.runAsync(graphJson, options, [&](const char* e
 惰性分支相关的两种（`plan_extended` 与 `stats.reason = "not_demanded"`）见
 [ADR-0016](adr/0016-error-as-value-and-lazy-ports.md)。
 
-当前 SDK 只有同步与回调两种形态，没有暴露 `cancel`：`run`/`runAsync` 内部就 join 了。
-需要中途取消时用 C ABI 的 `lyflow_run_cancel`。
+## 不阻塞的 run 句柄与取消
+
+`run` 与 `runAsync` 都在内部 join 了，调用线程被占住，也就没有办法在中途取消。
+需要「先返回、后取消」的宿主（HTTP 服务的 `POST /lyflow/run` + `POST /lyflow/cancel`
+就是这个形态）用 `startRun`：
+
+```cpp
+lyflow::RunHandle handle = client.startRun(graphJson, options, [&](const char* eventJson) {
+  bus.publish(eventJson);              // 同样在 core 的工作线程上
+});
+registry.keep(handle.runId(), std::move(handle));   // 句柄存起来，函数就可以返回了
+
+// 另一个请求线程上：
+handle.cancel();                       // 尽力而为，不阻塞
+handle.join();                         // 等这次运行真的结束；可重复调用
+handle.status();                       // "ok" / "error" / "cancelled"
+handle.outputs();                      // lyflow_run_outputs 的原始 JSON
+handle.diagnostics();                  // warn/error 级别的日志事件
+lyflow::CloudView view = handle.cloud("n_merge", "cloud", 20000);
+```
+
+| 成员 | 说明 |
+|---|---|
+| `runId()` | 这次运行的 id（`options.runId` 为空时是 `"embed-run"`） |
+| `valid()` | `run_start` 成功给出了句柄 |
+| `cancel()` | 置取消位，立即返回。core 保证这次运行最终仍发出一条 `run_finished` |
+| `join()` | 等运行结束。幂等，多线程调用安全 |
+| `status()` / `diagnostics()` | join 之前也能读，读到的是「到目前为止」；join 之后才是最终值 |
+| `outputs()` | 图级命名输出的 JSON，要 join 之后才完整 |
+| `cloud()` | 等价于 `client.cloud(runId(), …)`，句柄活着就取得到 |
+| `result()` | join 之后装成一个 `RunResult`（不含 `events`），点云索引转交给它 |
+
+三条约定：
+
+1. **句柄是 move-only 的，析构会先 `join()`**。想让运行在后台继续，就得让句柄活着 ——
+   丢掉句柄等于同步等它跑完。
+2. 句柄持有这次运行在结果仓里的索引，与 `RunResult::retain` 是同一样东西：
+   句柄（或它 `result()` 出来的 `RunResult`）一析构，`cloud()` 就再也取不到东西。
+3. `Client` 必须比所有句柄活得久。
+
+`run` 与 `runAsync` 现在就是 `startRun` + `result()` 的两个包装，行为不变。
 
 ## 并发
 

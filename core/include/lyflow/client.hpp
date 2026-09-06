@@ -5,6 +5,7 @@
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -118,6 +119,109 @@ class CloudView {
   void (*free_)(lyflow_cloud_view*) = nullptr;
 };
 
+namespace detail {
+
+struct EventSink {
+  const std::function<void(const char*)>* fn = nullptr;
+};
+
+inline void dispatchEvent(const char* eventJson, void* user) {
+  auto* sink = static_cast<EventSink*>(user);
+  if (sink && sink->fn && eventJson) (*sink->fn)(eventJson);
+}
+
+struct RunState {
+  mutable std::mutex mutex;
+  std::string status = "error";
+  std::vector<std::string> diagnostics;
+  std::function<void(const char*)> onEvent;
+  std::function<void(const char*)> tap;
+  EventSink sink;
+
+  void observe(const char* eventJson) {
+    const std::string text(eventJson);
+    if (text.find("\"kind\":\"run_finished\"") != std::string::npos) {
+      const std::size_t at = text.find("\"status\":\"");
+      if (at != std::string::npos) {
+        const std::size_t begin = at + 10;
+        const std::size_t end = text.find('"', begin);
+        if (end != std::string::npos) {
+          std::lock_guard<std::mutex> lock(mutex);
+          status = text.substr(begin, end - begin);
+        }
+      }
+    } else if (text.find("\"kind\":\"log\"") != std::string::npos &&
+               (text.find("\"level\":\"warn\"") != std::string::npos ||
+                text.find("\"level\":\"error\"") != std::string::npos)) {
+      std::lock_guard<std::mutex> lock(mutex);
+      diagnostics.push_back(text);
+    }
+    if (onEvent) onEvent(eventJson);
+  }
+};
+
+}  // namespace detail
+
+class RunHandle {
+ public:
+  RunHandle() = default;
+  ~RunHandle() { join(); }
+
+  RunHandle(const RunHandle&) = delete;
+  RunHandle& operator=(const RunHandle&) = delete;
+  RunHandle(RunHandle&& other) noexcept { steal(other); }
+  RunHandle& operator=(RunHandle&& other) noexcept {
+    if (this != &other) {
+      join();
+      reset();
+      steal(other);
+    }
+    return *this;
+  }
+
+  bool valid() const { return static_cast<bool>(run_); }
+  const std::string& runId() const { return runId_; }
+  bool joined() const { return joined_; }
+
+  void cancel() const;
+  void join();
+
+  std::string status() const;
+  std::vector<std::string> diagnostics() const;
+
+  std::string outputs() const;
+
+  CloudView cloud(const std::string& nodeId, const std::string& port,
+                  std::uint32_t maxPoints = 0) const;
+
+  RunResult result();
+
+ private:
+  friend class Client;
+
+  void reset() {
+    state_.reset();
+    run_.reset();
+    joined_ = false;
+  }
+
+  void steal(RunHandle& other) {
+    client_ = other.client_;
+    runId_ = std::move(other.runId_);
+    state_ = std::move(other.state_);
+    run_ = std::move(other.run_);
+    joined_ = other.joined_;
+    other.client_ = nullptr;
+    other.joined_ = true;
+  }
+
+  const Client* client_ = nullptr;
+  std::string runId_;
+  std::shared_ptr<detail::RunState> state_;
+  std::shared_ptr<void> run_;
+  bool joined_ = false;
+};
+
 class Client {
  public:
   explicit Client(const std::string& dllPath) { load(dllPath); }
@@ -164,22 +268,26 @@ class Client {
     return owned(fn_.import(kind.c_str(), text.c_str(), baseDir.c_str()));
   }
 
-  /// 同步跑一张图。回调版是 runAsync。
+  /// 同步跑一张图。回调版是 runAsync，不阻塞的是 startRun。
   RunResult run(const std::string& graphJson, const RunOptions& options = {}) const {
-    RunResult result;
-    runAsync(graphJson, options, [&result](const char* eventJson) {
-      result.events.emplace_back(eventJson);
-    }, &result);
+    std::vector<std::string> events;
+    RunHandle handle = startRun(graphJson, options, [&events](const char* eventJson) {
+      events.emplace_back(eventJson);
+    });
+    RunResult result = handle.result();
+    result.events = std::move(events);
     return result;
   }
 
   /// 回调版。onEvent 在 core 的工作线程上被调用，本函数返回时保证不会再被调用。
   RunResult runAsync(const std::string& graphJson, const RunOptions& options,
                      const std::function<void(const char*)>& onEvent) const {
-    RunResult result;
-    runAsync(graphJson, options, onEvent, &result);
-    return result;
+    RunHandle handle = startRun(graphJson, options, onEvent);
+    return handle.result();
   }
+
+  RunHandle startRun(const std::string& graphJson, const RunOptions& options,
+                     const std::function<void(const char*)>& onEvent = {}) const;
 
   /// 某个节点某个输出端口的点云，等步长抽样到 maxPoints 以内。
   CloudView cloud(const std::string& runId, const std::string& nodeId, const std::string& port,
@@ -213,6 +321,8 @@ class Client {
   std::string cacheStats() const { return owned(fn_.cache_stats()); }
 
  private:
+  friend class RunHandle;
+
   struct Table {
     const char* (*version)() = nullptr;
     char* (*manifest_json)() = nullptr;
@@ -236,18 +346,6 @@ class Client {
     char* (*output_save)(const char*, const char*, const char*, const char*,
                          const char*) = nullptr;
   };
-
-  struct Sink {
-    const std::function<void(const char*)>* fn;
-  };
-
-  static void dispatch(const char* eventJson, void* user) {
-    auto* sink = static_cast<Sink*>(user);
-    if (sink && sink->fn && eventJson) (*sink->fn)(eventJson);
-  }
-
-  void runAsync(const std::string& graphJson, const RunOptions& options,
-                const std::function<void(const char*)>& onEvent, RunResult* result) const;
 
   void load(const std::string& dllPath);
 #if defined(_WIN32)
@@ -337,10 +435,64 @@ inline void Client::bind(const std::string& where) {
   need(fn_.output_save, "lyflow_output_save", where);
 }
 
-inline void Client::runAsync(const std::string& graphJson, const RunOptions& options,
-                             const std::function<void(const char*)>& onEvent,
-                             RunResult* result) const {
-  result->runId = options.runId.empty() ? std::string("embed-run") : options.runId;
+inline void RunHandle::cancel() const {
+  if (run_ && client_) client_->fn_.run_cancel(static_cast<lyflow_run*>(run_.get()));
+}
+
+inline void RunHandle::join() {
+  if (joined_ || !run_ || !client_) return;
+  client_->fn_.run_join(static_cast<lyflow_run*>(run_.get()));
+  joined_ = true;
+}
+
+inline std::string RunHandle::status() const {
+  if (!state_) return std::string("error");
+  std::lock_guard<std::mutex> lock(state_->mutex);
+  return state_->status;
+}
+
+inline std::vector<std::string> RunHandle::diagnostics() const {
+  if (!state_) return {};
+  std::lock_guard<std::mutex> lock(state_->mutex);
+  return state_->diagnostics;
+}
+
+inline std::string RunHandle::outputs() const {
+  if (!client_) return {};
+  return client_->owned(client_->fn_.run_outputs(runId_.c_str()));
+}
+
+inline CloudView RunHandle::cloud(const std::string& nodeId, const std::string& port,
+                                  std::uint32_t maxPoints) const {
+  if (!client_) return CloudView();
+  return client_->cloud(runId_, nodeId, port, maxPoints);
+}
+
+inline RunResult RunHandle::result() {
+  join();
+  RunResult out;
+  out.runId = runId_;
+  out.retain = run_;
+  if (state_) {
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    out.status = state_->status;
+    out.diagnostics = state_->diagnostics;
+  }
+  out.outputs = outputs();
+  return out;
+}
+
+inline RunHandle Client::startRun(const std::string& graphJson, const RunOptions& options,
+                                  const std::function<void(const char*)>& onEvent) const {
+  RunHandle handle;
+  handle.client_ = this;
+  handle.runId_ = options.runId.empty() ? std::string("embed-run") : options.runId;
+  handle.state_ = std::make_shared<detail::RunState>();
+
+  detail::RunState* state = handle.state_.get();
+  state->onEvent = onEvent;
+  state->tap = [state](const char* eventJson) { state->observe(eventJson); };
+  state->sink.fn = &state->tap;
 
   std::vector<const char*> targets;
   for (const std::string& t : options.targets) targets.push_back(t.c_str());
@@ -361,7 +513,7 @@ inline void Client::runAsync(const std::string& graphJson, const RunOptions& opt
   }
 
   lyflow_run_options opts{};
-  opts.run_id = result->runId.c_str();
+  opts.run_id = handle.runId_.c_str();
   opts.base_dir = options.baseDir.c_str();
   opts.targets = targets.empty() ? nullptr : targets.data();
   opts.target_count = targets.size();
@@ -374,38 +526,15 @@ inline void Client::runAsync(const std::string& graphJson, const RunOptions& opt
   opts.inputs = inputs.empty() ? nullptr : inputs.data();
   opts.input_count = inputs.size();
 
-  std::string status = "error";
-  std::vector<std::string> diagnostics;
-  const std::function<void(const char*)> tap = [&](const char* eventJson) {
-    const std::string text(eventJson);
-    // 不在 SDK 里引 JSON 库：宿主自己有一个。这里只做两处最小的字符串提取。
-    if (text.find("\"kind\":\"run_finished\"") != std::string::npos) {
-      const std::size_t at = text.find("\"status\":\"");
-      if (at != std::string::npos) {
-        const std::size_t begin = at + 10;
-        const std::size_t end = text.find('"', begin);
-        if (end != std::string::npos) status = text.substr(begin, end - begin);
-      }
-    } else if (text.find("\"kind\":\"log\"") != std::string::npos &&
-               (text.find("\"level\":\"warn\"") != std::string::npos ||
-                text.find("\"level\":\"error\"") != std::string::npos)) {
-      diagnostics.push_back(text);
-    }
-    if (onEvent) onEvent(eventJson);
-  };
-  Sink sink{&tap};
-
-  lyflow_run* run = fn_.run_start(graphJson.c_str(), &opts, &Client::dispatch, &sink);
+  lyflow_run* run =
+      fn_.run_start(graphJson.c_str(), &opts, &detail::dispatchEvent, &state->sink);
   if (!run) throw ClientError("lyflow_run_start 返回空句柄（内存不足）");
 
-  fn_.run_join(run);
   auto freeRun = fn_.run_free;
-  result->retain = std::shared_ptr<void>(run, [freeRun](void* p) {
+  handle.run_ = std::shared_ptr<void>(run, [freeRun](void* p) {
     if (p) freeRun(static_cast<lyflow_run*>(p));
   });
-  result->outputs = owned(fn_.run_outputs(result->runId.c_str()));
-  result->status = status;
-  result->diagnostics = std::move(diagnostics);
+  return handle;
 }
 
 }  // namespace lyflow
