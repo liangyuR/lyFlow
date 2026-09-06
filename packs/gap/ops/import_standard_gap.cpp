@@ -112,7 +112,11 @@ struct Candidate {
 
 enum class Mode { Template, Model, Auto };
 
-YAML::Node modelRoiSetting(const fs::path& baseDir) {
+// 优先用文档自带的 model_roi：宿主把自己那份 setting.yml 的这一段并进来源文本，
+// 就不必在 baseDir 边上放一个 setting.yml。真实的 StandardGap.yml 没有这个键，行为不变。
+YAML::Node modelRoiSetting(const fs::path& baseDir, const YAML::Node& cfg) {
+  const YAML::Node inline_ = child(cfg, "model_roi");
+  if (present(inline_)) return inline_;
   for (const fs::path& dir : {baseDir, baseDir.parent_path()}) {
     if (dir.empty()) continue;
     const fs::path candidate = dir / "setting.yml";
@@ -194,7 +198,7 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   }
 
   std::string modelPath;
-  const YAML::Node setting = modelRoiSetting(baseDir);
+  const YAML::Node setting = modelRoiSetting(baseDir, cfg);
   if (mode == Mode::Auto) {
     mode = present(setting) && boolOr(setting, "enabled", false) ? Mode::Model : Mode::Template;
   }

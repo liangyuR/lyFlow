@@ -54,6 +54,7 @@ target_link_libraries(my_app PRIVATE lyflow::client)
 | `LYFLOW_CLI` | `lyflow.exe`，离线跑图/导入用 |
 | `LYFLOW_LIBRARY_DIR` | 库算子目录 |
 | `LYFLOW_ABI_VERSION` | 整数，与头文件里的常量对照 |
+| `LYFLOW_SOURCE_COMMIT` | 产出这份安装目录的 LyFlow commit（工作区脏时带 `-dirty`），宿主用来钉版本 |
 
 完整可编译的例子见 `examples/consumer/`（`pnpm check` 每次都会对着安装目录编它并跑一遍）。
 

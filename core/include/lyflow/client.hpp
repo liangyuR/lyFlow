@@ -195,6 +195,11 @@ class Client {
     return out;
   }
 
+  /// 某个节点全部输出端口的元信息 JSON 数组；非点云的项带 value。
+  std::string outputInfo(const std::string& runId, const std::string& nodeId) const {
+    return owned(fn_.output_info(runId.c_str(), nodeId.c_str()));
+  }
+
   /// 把某个输出整份写盘（PCD/PLY 按扩展名）。失败时抛 ClientError。
   void save(const std::string& runId, const std::string& nodeId, const std::string& port,
             const std::string& path, const std::string& format = {}) const {

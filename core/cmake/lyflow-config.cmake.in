@@ -6,6 +6,8 @@
 
 set(LYFLOW_VERSION "@LYFLOW_INSTALL_VERSION@")
 set(LYFLOW_ABI_VERSION @LYFLOW_INSTALL_ABI_VERSION@)
+# 产出这份安装目录的 LyFlow 源码 commit。宿主用它把依赖钉在一个已验收的版本上。
+set(LYFLOW_SOURCE_COMMIT "@LYFLOW_INSTALL_COMMIT@")
 
 set_and_check(LYFLOW_INCLUDE_DIR "${PACKAGE_PREFIX_DIR}/include")
 set_and_check(LYFLOW_BIN_DIR "${PACKAGE_PREFIX_DIR}/bin")
