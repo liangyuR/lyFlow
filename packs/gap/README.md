@@ -16,9 +16,9 @@
 
 ```
 packs/gap/
-  ops/     21 个 gap.* 算子
+  ops/     22 个 gap.* 算子 + StandardGap.yml 导入器
   algo/    算法源码，从 xyz-gap-inspector 的 src/ 复制而来，命名空间不改
-  tools/   图生成器与 A/B 脚本
+  tools/   图生成器、两条 A/B、回退图 A/B 与导入器等价性脚本
   tests/   随包走的 doctest
 ```
 
@@ -58,6 +58,7 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 | `gap.load_template` | → left, right | 读一对模板 PCD |
 | `gap.align_template` | cloud, tplLeft, tplRight → alignment | 全局粗配 + 左右两侧 ICP + 信赖域 + 退化锁定 |
 | `gap.select_alignment` | a,[b],[c],[d] → alignment | 按 `min(l,r)` ↓、`mean` ↓、配置顺序 ↑、id ↑ 选模板 |
+| `gap.result_bundle` | gap, flush, 五个框, 三份 quality, cropStatus, alignment, fallback, 三片云 → bundle | 汇成一个 `GapResultBundle`，字段对齐旧 `QualityMetrics` |
 | `gap.business_rois` | alignment → 四个 Box2D | 业务 ROI 按 ICP 变换搬到当前样本上 |
 | `gap.fit_line` | cloud, box → line, inliers, innerEnd | 直线拟合 + 靠缝隙一端的截取重拟合 |
 | `gap.selected_point` | cloud, box → point | 离 ROI min 角最近的点（取自整片云） |
@@ -128,7 +129,94 @@ python packs\gap\tools\lyflow_ab.py --dataset <dataset.yml> `
   这样选中四框那个节点时，框叠的是自己那片按类着色的测量帧剖面 ——
   不接的话 LyFlow 的底图规则会往上游借一片**传感器帧**的云（y≡0），
   2D 剖面俯视 XY 时它退化成一条线，框飘在别处，两者对不上。
-- 模型失败**不回退模板路径**：一张图一条路径，失败就红框（H6）。回退是调度策略，不是算法。
+- 模型失败在**算子层面**不回退模板路径：一张图一条路径，失败就红框（H6）。
+  回退是调度策略不是算法 —— 它由导入器生成的 `flow.fallback` 节点表达（见下一节）。
+
+## 导入器：StandardGap.yml → 图
+
+`lyflow import` 直接把一份 `StandardGap.yml` 转成图，不必装 Python
+（A1-7，实现在 `ops/import_standard_gap.cpp`，是 `tools/lyflow_graph_from_config.py`
+的 `build()` 的逐字移植）。三个 kind 共用同一份实现：
+
+| kind | 走哪条路径 |
+|---|---|
+| `StandardGap.yml` | auto：看 `setting.yml` 的 `model_roi.enabled` |
+| `StandardGap.yml:template` | 强制模板 / ICP 路径 |
+| `StandardGap.yml:model` | 强制模型 ROI 路径 |
+
+```powershell
+lyflow import <StandardGap.yml> --kind StandardGap.yml -o graph.lyflow.json
+```
+
+导入器只拿得到 (文本, baseDir) 两样东西，所以模式与路径都从**约定**推导：
+
+- **auto 的推导**：在 `baseDir` 与它的父目录里找 `setting.yml`，读顶层
+  `model_roi.enabled`。为真走模型路径并带 `flow.fallback` 的模板备用闭包；
+  为假或**找不到 `setting.yml`** 一律退回模板路径。
+- **ONNX 路径**：`setting.yml` 的 `model_roi.model_path`；它没有就找 `baseDir` 下
+  **唯一**的 `*.onnx`；都没有报 `bad_param`。
+- **点云**：`gap.load_profile_pair.dir = "."`（相对图文件目录解析），即 baseDir 就是测点目录。
+- **模板目录 / 配置路径**：`"StandardGap"` 与 `"StandardGap.yml"`，相对 baseDir ——
+  kind 的名字就是那个文件名，与 Python 版的 `<配置目录>/<配置主名>` 同一条规则。
+- Python 版 `raise SystemExit(...)` 的每一处，这里是
+  `Status::Error(Validate, bad_input|bad_param, 同一句中文)`，经 `lyflow import` 出成诊断数组。
+
+三种 kind 产出的图都声明 `outputs: {gap, flush, bundle}`。
+
+### 带 `flow.fallback` 的完整图
+
+`model_roi.enabled` 为真时，模型路径与模板路径同在一张图里，十二个 `flow.fallback`
+选择（`ref_type` 不是 `line end` 时十一个）。备用闭包的节点 id 一律带 `b_` 前缀，
+且**只**经 fallback 的惰性 `b` 端口流出 —— 主路径成功时它们一个 compute 都不跑。
+
+回退发生在**两层**上，因为两条路径不是处处同参：
+
+- **ROI 与云**这一层：四个业务框、合并云、两片裁剪云、整体窗，八个 fallback；
+- **段差的拟合结果**这一层：`gap.fit_line` 的 `endpoints` 在两条路径上不同
+  （模型是 `inlier_ends`，模板是 `roi_intersection`，见 §3 与生成器里同一行），
+  所以段差那一段的裁剪与拟合在备用闭包里**各有一份**，fallback 挪到拟合结果上。
+  只有一套 fit 的话，真回退时基准线会用模型路径的端点语义，
+  `definition: A` 的间隙跟着错 —— 实测 R4_2 差 0.0087 mm，容差是 0.002 mm。
+
+间隙那一段不用分身：`gap.fit_gap_circles` 的参数在两条路径上一模一样，
+它接的三片云与两个框已经在 fallback 后面了。
+
+```
+n_load ─┬─ n_frame_p/s ─ n_drop_p/s ─┬─ n_roll ─ n_merge ─ n_filter        （模型，a 路）
+        │                            │            └─ n_crop_flushBase/Ref ─ n_fit_base/ref
+        └─ n_tensor ─ n_infer ─ n_seg ─ n_rois
+
+b_n_load ─ b_n_frame_p/s ─ b_n_overall ─ b_n_crop_p/s ─ b_n_merge ─ b_n_filter （惰性，b 路）
+                                          ├─ b_n_align_* ─ b_n_select ─ b_n_rois
+                                          └─ b_n_crop_flushBase/Ref ─ b_n_fit_base/ref
+
+a = 模型侧                       b = 模板侧                    →  下游只认 fallback 的 out
+n_fb_flushBase     n_rois.flushBase          b_n_rois.flushBase
+n_fb_flushRef      n_rois.flushRef           b_n_rois.flushRef
+n_fb_gapLeft       n_rois.gapLeft            b_n_rois.gapLeft
+n_fb_gapRight      n_rois.gapRight           b_n_rois.gapRight
+n_fb_merged        n_filter.cloud            b_n_filter.cloud
+n_fb_crop_p        n_roll.primary            b_n_crop_p.cloud
+n_fb_crop_s        n_roll.secondary          b_n_crop_s.cloud
+n_fb_overall       n_roll.window             b_n_overall.box
+n_fb_line          n_fit_base.line           b_n_fit_base.line
+n_fb_ref_point     参考点端口                 备用侧同名端口
+n_fb_quality_base  n_fit_base.quality        b_n_fit_base.quality
+n_fb_quality_ref   n_fit_ref.quality         b_n_fit_ref.quality
+```
+
+`n_fb_line.out` 接 `gap.flush.baseLine`；`n_fb_ref_point.out` 接 `gap.flush.refPoint`
+（`ref_type: line end` 时两侧都取 `gap.fit_line.innerEnd`，另两种取 `point`）；
+两个 quality 接 `gap.result_bundle` 的 `fitBase` / `fitRef`。`n_fb_quality_ref`
+只在 `ref_type: line end` 时存在。`gap.gap` 的 `baseLine` 仍取 `gap.flush` 那一份
+（并进垂足之后的线段），与另外两种模式一致。
+
+主路径的 `n_crop_flushBase` / `n_crop_flushRef` / `n_fit_base` 因此**直接接模型侧**的
+`n_filter` 与 `n_rois`，不再接 fallback 的 `out` —— 接了的话模型失败时它们照样算得出来，
+`n_fb_line` 永远选 a，回退就是个摆设。
+
+`n_fb_flushBase.choice` 接进 `gap.result_bundle.fallback`，回退与否与原因因此进 bundle。
+`n_bundle` 不直接接任何 `b_` 节点 —— 接了那条闭包就不再是惰性的。
 
 ## 脚本
 
@@ -141,6 +229,33 @@ python packs\gap\tools\lyflow_graph_from_config.py `
 python packs\gap\tools\lyflow_ab.py `
     --dataset <dataset.yml> --baseline <放 results.csv 的目录> [--model <onnx>]
 ```
+
+```powershell
+# 逐节点等价：C++ 导入器 vs Python 生成器（六种组合，全部一致退出 0）
+python packs\gap\tools\compare_importer.py [--dataset <dataset.yml>]
+
+# 回退图的 A/B：lyflow import 产回退图 -> lyflow run -> 与模型基线比 gap/flush
+python packs\gap\tools\ab_fallback.py `
+    --dataset <dataset.yml> --baseline "$env:TEMP\lyflow-gap-baseline-model"
+
+# 把 n_infer.modelPath 指到不存在的文件，逼出回退分支，与**模板**基线比
+python packs\gap\tools\ab_fallback.py `
+    --dataset <dataset.yml> --baseline "$env:TEMP\lyflow-gap-baseline" `
+    --break-model --only <sample_id>
+```
+
+`compare_importer.py` 比节点集合（id + op + 参数值）与边集合，忽略 ui 坐标与 meta；
+路径参数两边形态不同是预期的（Python 写绝对路径，导入器写相对路径），比之前统一规范化成绝对路径。
+数据集里的配置目录没有 `setting.yml`，所以模型与回退两种形态用一份暂存夹具造出来 ——
+auto 的推导规则因此与 Python 生成器完全无关地被单独测到。
+
+`ab_fallback.py` 跑的是**导入器产的回退图**（`lyflow_ab.py` 跑的是 Python 生成器的图）。
+它同样为每份配置暂存一份带 `model_roi.enabled: true` 的夹具，点云不进夹具 ——
+`n_load` 与 `b_n_load` 两个读盘节点都用 `--set` 覆盖成 `source=files` 加两个绝对路径。
+它顺带统计**回退真的触发了**的样本（`n_fb_flushBase.choice == "b"` 或出现 `plan_extended`），
+与批测器基线 `diagnostics.jsonl` 里 `fallback_reason` 非空的那一份比对。
+`--break-model` 把 `n_infer.modelPath` 指到一个不存在的文件，主路径必失败，
+这时基线要换成**模板基线** —— 那是唯一能验到备用闭包数值的跑法。
 
 `lyflow_ab.py` 全部一致时退出 0，否则 1 并列出不一致的样本。
 它默认挑 `bridge/target/{release,debug}` 里**最新**的那个 `lyflow.exe` ——

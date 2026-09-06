@@ -25,7 +25,9 @@ void registerPackOps(Registry& r) {
   registerFlush(r);
   registerGap(r);
   registerJudge(r);
+  registerResultBundle(r);
   registerMeasureReference(r);
+  registerStandardGapImporter(r);
 }
 
 }  // namespace lyflow::packs::gap

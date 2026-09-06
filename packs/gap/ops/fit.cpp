@@ -12,6 +12,127 @@ namespace {
 
 namespace utils = ::detection::utils;
 
+nlohmann::json numberOrNull(double v) {
+  return std::isfinite(v) ? nlohmann::json(v) : nlohmann::json();
+}
+
+nlohmann::json lineQualityJson(const GapCloud& cloud, const Eigen::VectorXf& line,
+                               const pcl::Indices& inliers) {
+  nlohmann::json q;
+  q["model"] = "line";
+  q["pointCount"] = cloud.size();
+  q["inlierCount"] = inliers.size();
+  q["inlierRatio"] =
+      cloud.empty() ? nlohmann::json()
+                    : nlohmann::json(static_cast<double>(inliers.size()) / cloud.size());
+  double pointX = std::numeric_limits<double>::quiet_NaN();
+  double pointY = std::numeric_limits<double>::quiet_NaN();
+  double dirX = std::numeric_limits<double>::quiet_NaN();
+  double dirY = std::numeric_limits<double>::quiet_NaN();
+  if (line.size() >= 5) {
+    pointX = line[0] * kScale;
+    pointY = line[1] * kScale;
+    const double norm = std::hypot(line[3], line[4]);
+    if (norm > 0) {
+      dirX = line[3] / norm;
+      dirY = line[4] / norm;
+    }
+  }
+  q["linePointXMm"] = numberOrNull(pointX);
+  q["linePointYMm"] = numberOrNull(pointY);
+  q["lineDirX"] = numberOrNull(dirX);
+  q["lineDirY"] = numberOrNull(dirY);
+
+  double rms = std::numeric_limits<double>::quiet_NaN();
+  double maximum = std::numeric_limits<double>::quiet_NaN();
+  if (line.size() >= 5 && !inliers.empty()) {
+    const double dx = line[3];
+    const double dy = line[4];
+    const double norm = std::hypot(dx, dy);
+    double squareSum = 0;
+    double worst = 0;
+    std::size_t valid = 0;
+    if (norm > 0) {
+      for (const auto index : inliers) {
+        if (index < 0 || static_cast<std::size_t>(index) >= cloud.size()) continue;
+        const auto& point = cloud[index];
+        const double residual =
+            std::fabs((point.x - line[0]) * dy - (point.y - line[1]) * dx) / norm * kScale;
+        squareSum += residual * residual;
+        worst = std::max(worst, residual);
+        ++valid;
+      }
+    }
+    if (valid > 0) {
+      rms = std::sqrt(squareSum / static_cast<double>(valid));
+      maximum = worst;
+    }
+  }
+  q["rmsResidualMm"] = numberOrNull(rms);
+  q["maxResidualMm"] = numberOrNull(maximum);
+  return q;
+}
+
+nlohmann::json circleQualityJson(const GapCloud& cloud, const Eigen::VectorXf& circle,
+                                 const pcl::Indices& inliers, const std::string& model,
+                                 const std::string& radiusMode) {
+  nlohmann::json q;
+  q["model"] = model;
+  q["radiusMode"] = radiusMode;
+  q["pointCount"] = cloud.size();
+  q["inlierCount"] = inliers.size();
+  q["inlierRatio"] =
+      cloud.empty() ? nlohmann::json()
+                    : nlohmann::json(static_cast<double>(inliers.size()) / cloud.size());
+  double radius = std::numeric_limits<double>::quiet_NaN();
+  double centerX = std::numeric_limits<double>::quiet_NaN();
+  double centerY = std::numeric_limits<double>::quiet_NaN();
+  if (circle.size() >= 3) {
+    radius = circle[2] * kScale;
+    centerX = circle[0] * kScale;
+    centerY = circle[1] * kScale;
+  }
+  q["radiusMm"] = numberOrNull(radius);
+  q["centerXMm"] = numberOrNull(centerX);
+  q["centerYMm"] = numberOrNull(centerY);
+
+  double rms = std::numeric_limits<double>::quiet_NaN();
+  double maximum = std::numeric_limits<double>::quiet_NaN();
+  double arcCoverage = std::numeric_limits<double>::quiet_NaN();
+  if (circle.size() >= 3 && !inliers.empty()) {
+    double squareSum = 0;
+    double worst = 0;
+    std::vector<double> angles;
+    angles.reserve(inliers.size());
+    for (const auto index : inliers) {
+      if (index < 0 || static_cast<std::size_t>(index) >= cloud.size()) continue;
+      const auto& point = cloud[index];
+      const double deltaX = point.x - circle[0];
+      const double deltaY = point.y - circle[1];
+      const double residual = std::fabs(std::hypot(deltaX, deltaY) - circle[2]) * kScale;
+      squareSum += residual * residual;
+      worst = std::max(worst, residual);
+      double angle = std::atan2(deltaY, deltaX);
+      if (angle < 0) angle += 2 * M_PI;
+      angles.push_back(angle);
+    }
+    if (!angles.empty()) {
+      rms = std::sqrt(squareSum / static_cast<double>(angles.size()));
+      maximum = worst;
+      std::sort(angles.begin(), angles.end());
+      double largestGap = angles.front() + 2 * M_PI - angles.back();
+      for (std::size_t i = 1; i < angles.size(); ++i) {
+        largestGap = std::max(largestGap, angles[i] - angles[i - 1]);
+      }
+      arcCoverage = (2 * M_PI - largestGap) * 180.0 / M_PI;
+    }
+  }
+  q["rmsResidualMm"] = numberOrNull(rms);
+  q["maxResidualMm"] = numberOrNull(maximum);
+  q["arcCoverageDeg"] = numberOrNull(arcCoverage);
+  return q;
+}
+
 lyflow::Line2D lineFromCoefficients(const Eigen::VectorXf& c) {
   lyflow::Line2D line;
   line.point[0] = c[0];
@@ -106,6 +227,11 @@ Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   out.values.reserve(indices.size());
   for (auto i : indices) out.values.push_back(static_cast<std::int32_t>(i));
   outputs.set("inliers", Data::indices(std::move(out)));
+
+  lyflow::Record quality;
+  quality.type = "GapFitQuality";
+  quality.data = lineQualityJson(cloud, coefficients, indices);
+  outputs.set("quality", Data::record(std::move(quality)));
   return Status::Ok();
 }
 
@@ -127,6 +253,8 @@ struct SideResult {
   std::array<Eigen::VectorXf, 2> candidates;
   std::array<pcl::Indices, 2> candidateIndices;
   std::array<GapCloud, 2> candidateClouds;
+  std::string model = "circle";
+  bool separatedFixedFree = false;
 };
 
 GapCloud cropStrict(const GapCloud& src, const Eigen::Matrix2f& roi) {
@@ -216,6 +344,9 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
       side.circle = takePrimary ? primaryCircle : secondaryCircle;
       side.indices = takePrimary ? primaryIndices : secondaryIndices;
       side.fitted = true;
+      side.model = takePrimary ? "camera-separated-circle-primary"
+                               : "camera-separated-circle-secondary";
+      side.separatedFixedFree = separatedFixed <= 0;
     };
     if (selectClosestNominal && primaryEligible && secondaryEligible) {
       side.deferred = true;
@@ -291,6 +422,9 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
       sides[i].circle = sides[i].candidates[picked[i]];
       sides[i].indices = sides[i].candidateIndices[picked[i]];
       sides[i].cloud = sides[i].candidateClouds[picked[i]];
+      sides[i].model = std::string("camera-separated-circle-") +
+                       (picked[i] == 0 ? "primary" : "secondary") + "-closest-gap-nominal";
+      sides[i].separatedFixedFree = true;
     }
   }
 
@@ -312,6 +446,21 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
     outputs.set(kClouds[i], Data::cloud(std::move(fitted)));
     outputs.set(kInliers[i], Data::indices(std::move(idx)));
   }
+
+  lyflow::Record quality;
+  quality.type = "GapFitQualityPair";
+  static const char* kSides[2] = {"left", "right"};
+  for (int i = 0; i < 2; ++i) {
+    const bool isFixed = !sides[i].separatedFixedFree && cfg[i].rFixed > 0;
+    const std::string radiusMode =
+        sides[i].circle.size() >= 3
+            ? utils::classifyRadiusMode(sides[i].circle[2], cfg[i].rMin, cfg[i].rMax, isFixed)
+            : std::string();
+    quality.data[kSides[i]] =
+        circleQualityJson(sides[i].cloud, sides[i].circle, sides[i].indices, sides[i].model,
+                          radiusMode);
+  }
+  outputs.set("quality", Data::record(std::move(quality)));
   return Status::Ok();
 }
 
@@ -359,6 +508,7 @@ void registerFitLine(Registry& r) {
       Port{"line", "Line2D", "Line", "拟合出的直线（带端点）。", true},
       Port{"inliers", "Indices", "Inliers", "内点下标，指向输入点云。", true},
       Port{"innerEnd", "Point2D", "Inner End", "内点里靠缝隙那一端的真实云点。", true},
+      Port{"quality", "Record", "Quality", "GapFitQuality：点数、内点、残差、直线方程。", true},
   };
 
   Param side;
@@ -436,6 +586,7 @@ void registerFitGapCircles(Registry& r) {
       Port{"rightCloud", "PointCloud", "Right Cloud", "右圆真正拟合用的那片点。", true},
       Port{"leftInliers", "Indices", "Left Inliers", "左圆内点，指向 leftCloud。", true},
       Port{"rightInliers", "Indices", "Right Inliers", "右圆内点，指向 rightCloud。", true},
+      Port{"quality", "Record", "Quality", "GapFitQualityPair：两侧各一份 GapFitQuality。", true},
   };
 
   Param preferred;

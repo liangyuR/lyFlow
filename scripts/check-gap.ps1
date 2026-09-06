@@ -29,10 +29,14 @@ try {
 
 $ab = Join-Path $root "packs\gap\tools\lyflow_ab.py"
 if (-not (Test-Path $dataset)) {
-  Write-Host "找不到数据集 $dataset，跳过两条 A/B" -ForegroundColor Yellow
+  Write-Host "找不到数据集 $dataset，跳过 A/B 与导入器等价性" -ForegroundColor Yellow
   Write-Host "`ngap 门禁绿（A/B 未跑）" -ForegroundColor Yellow
   exit 0
 }
+
+Step "导入器逐节点等价（C++ vs Python，六种组合）"
+python (Join-Path $root "packs\gap\tools\compare_importer.py") --dataset $dataset --model $model
+if ($LASTEXITCODE -ne 0) { throw "导入器与 Python 生成器不等价" }
 
 Step "A/B：模板路径"
 python $ab --dataset $dataset --baseline $baseline `
@@ -44,4 +48,10 @@ python $ab --dataset $dataset --baseline $baselineModel --model $model `
     --out "$env:TEMP\lyflow-gap-ab-model" --json "$env:TEMP\lyflow-gap-ab-model\ab.json"
 if ($LASTEXITCODE -ne 0) { throw "模型路径 A/B 失败" }
 
-Write-Host "`ngap 门禁全绿（两条 A/B 都过）" -ForegroundColor Green
+Step "A/B：回退图（导入器产出，模型主路径 + 模板备用闭包）"
+python (Join-Path $root "packs\gap\tools\ab_fallback.py") --dataset $dataset `
+    --baseline $baselineModel --model $model `
+    --out "$env:TEMP\lyflow-gap-ab-fallback" --json "$env:TEMP\lyflow-gap-ab-fallback\ab.json"
+if ($LASTEXITCODE -ne 0) { throw "回退图 A/B 失败" }
+
+Write-Host "`ngap 门禁全绿（三条 A/B + 导入器等价性都过）" -ForegroundColor Green

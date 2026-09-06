@@ -60,7 +60,7 @@ class GraphBuilder:
             "to": {"node": dst, "port": dst_port},
         })
 
-    def doc(self, graph_id: str, name: str) -> dict:
+    def doc(self, graph_id: str, name: str, outputs: dict | None = None) -> dict:
         return {
             "schemaVersion": 1,
             "id": graph_id,
@@ -68,6 +68,7 @@ class GraphBuilder:
             "meta": {"app": "lyflow_graph_from_config.py"},
             "nodes": self.nodes,
             "edges": self.edges,
+            "outputs": outputs or {},
         }
 
 
@@ -218,6 +219,9 @@ def build(config_path: Path, args) -> dict:
 
         crop_p, crop_p_port = roll, "primary"
         crop_s, crop_s_port = roll, "secondary"
+        overall_node, overall_port = roll, "window"
+        crop_status_node, align_node = roll, None
+        cloud_p, cloud_s = drop_p, drop_s
         merge = g.node("n_merge", "util.merge", None, 5, 1, "合并（secondary 在前）")
         g.edge(roll, "secondary", merge, "a")
         g.edge(roll, "primary", merge, "b")
@@ -299,6 +303,9 @@ def build(config_path: Path, args) -> dict:
 
         rois = g.node("n_rois", "gap.business_rois", {"baseSide": base_side}, 8, 3, "业务 ROI")
         g.edge(select, "alignment", rois, "alignment")
+        overall_node, overall_port = overall, "box"
+        crop_status_node, align_node = None, select
+        cloud_p, cloud_s = frame_p, frame_s
 
     # -- 四个业务 ROI 的裁剪 --------------------------------------------------
     crops = {}
@@ -327,6 +334,7 @@ def build(config_path: Path, args) -> dict:
     g.edge(crops["flushBase"], "cloud", fit_base, "cloud")
     g.edge(rois, "flushBase", fit_base, "box")
 
+    fit_ref_node = None
     if ref_type == "line end":
         fit_ref = g.node("n_fit_ref", "gap.fit_line", {
             "side": "right" if base_is_left else "left",
@@ -337,6 +345,7 @@ def build(config_path: Path, args) -> dict:
         g.edge(crops["flushRef"], "cloud", fit_ref, "cloud")
         g.edge(rois, "flushRef", fit_ref, "box")
         ref_node, ref_port = fit_ref, "innerEnd"
+        fit_ref_node = fit_ref
     elif ref_type == "selected point":  # 取自整片云，不裁 ROI（§3.6）
         sel = g.node("n_sel_ref", "gap.selected_point", None, 10, 1, "选参考点")
         g.edge(merged, merged_port, sel, "cloud")
@@ -405,6 +414,28 @@ def build(config_path: Path, args) -> dict:
         }, 12, row * 2, title)
         g.edge(source, "value", judge, "value")
 
+    bundle_params = {}
+    if not crop_status_node and (common.get("roll_anchored_crop") or {}).get("enabled", False):
+        bundle_params["cropStatus"] = "skipped:no_model_roi"
+    bundle = g.node("n_bundle", "gap.result_bundle", bundle_params, 12, 4, "结果汇总")
+    g.edge(gap_node, "value", bundle, "gap")
+    g.edge(flush_node, "value", bundle, "flush")
+    for port, bundle_port in (("flushBase", "roiFlushBase"), ("flushRef", "roiFlushRef"),
+                              ("gapLeft", "roiGapLeft"), ("gapRight", "roiGapRight")):
+        g.edge(rois, port, bundle, bundle_port)
+    g.edge(overall_node, overall_port, bundle, "roiOverall")
+    g.edge(circles, "quality", bundle, "fits")
+    g.edge(fit_base, "quality", bundle, "fitBase")
+    if fit_ref_node:
+        g.edge(fit_ref_node, "quality", bundle, "fitRef")
+    if crop_status_node:
+        g.edge(crop_status_node, "status", bundle, "cropStatus")
+    if align_node:
+        g.edge(align_node, "alignment", bundle, "alignment")
+    g.edge(cloud_p, "cloud", bundle, "cloudPrimary")
+    g.edge(cloud_s, "cloud", bundle, "cloudSecondary")
+    g.edge(merged, merged_port, bundle, "cloudMerged")
+
     # -- 旁路：黑盒对照（G5）---------------------------------------------------
     ref_params = {
         "configPath": str(config_path),
@@ -421,7 +452,12 @@ def build(config_path: Path, args) -> dict:
 
     suffix = " · 模型" if args.model else ""
     name = args.name or f"{config_path.parent.name} · {config_path.stem}{suffix}"
-    return g.doc(safe_id(args.graph_id or f"gap_{config_path.parent.name}"), name)
+    outputs = {
+        "gap": {"node": gap_node, "port": "value", "label": "间隙"},
+        "flush": {"node": flush_node, "port": "value", "label": "段差"},
+        "bundle": {"node": bundle, "port": "bundle", "label": "结果汇总"},
+    }
+    return g.doc(safe_id(args.graph_id or f"gap_{config_path.parent.name}"), name, outputs)
 
 
 def main(argv: list[str]) -> int:

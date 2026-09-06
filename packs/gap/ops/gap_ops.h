@@ -88,5 +88,7 @@ void registerRoiFromLabels(Registry& r);
 void registerLabelsToCloud(Registry& r);
 void registerDropNonFinite(Registry& r);
 void registerRollAnchoredCrop(Registry& r);
+void registerResultBundle(Registry& r);
+void registerStandardGapImporter(Registry& r);
 
 }  // namespace lyflow::packs::gap
