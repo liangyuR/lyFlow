@@ -8,6 +8,7 @@ import type {
   ExecutionEvent,
   GraphDiagnostic,
   OutputInfo,
+  RunOutputs,
   PlanNode,
 } from "../types/execution";
 
@@ -90,6 +91,8 @@ export interface Transport {
   runGraph(doc: GraphDoc, graphPath: string | null, options?: RunOptions): Promise<string>;
   cancelRun(runId: string): Promise<void>;
   getOutputInfo(runId: string, nodeId: string): Promise<OutputInfo[]>;
+  /** 图级命名输出（ADR-0017）。宿主与验收脚本按名字取值，不认节点 id。 */
+  getRunOutputs(runId: string): Promise<RunOutputs>;
   /** 点云走二进制，绝不 JSON（ADR-0006）。 */
   getOutputCloud(
     runId: string,
@@ -187,6 +190,10 @@ const tauriTransport: Transport = {
   async getOutputInfo(runId, nodeId) {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<OutputInfo[]>("get_output_info", { runId, nodeId });
+  },
+  async getRunOutputs(runId) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<RunOutputs>("get_run_outputs", { runId });
   },
   async getOutputCloud(runId, nodeId, port, maxPoints) {
     const { invoke } = await import("@tauri-apps/api/core");
@@ -306,6 +313,9 @@ const staticTransport: Transport = {
     return browserOnly("运行");
   },
   async getOutputInfo() {
+    return browserOnly("取运行结果");
+  },
+  async getRunOutputs() {
     return browserOnly("取运行结果");
   },
   async getOutputCloud() {

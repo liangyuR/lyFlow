@@ -101,6 +101,10 @@ V1 的规则刻意简单：
    C++ 的 `buildPlan` 和前端的 `typecheck.ts` 各有一份同样的实现。
    一个节点的**全部** `Any` 端口共用一个类型变量 —— `util.reroute` 正是这个语义，
    需要多个互相独立的 `Any` 端口的算子请拆开。推不出来的端口仍是 `Any`，不报错。
+   > 阶段 A 加了个逃生口：C++ 侧的 `Port::anyGroup`（不进 manifest）让同节点上
+   > 分组不同的 `Any` 端口各用各的类型变量。目前只有 `flow.select` 的 `cond` 用了它
+   > （[ADR-0016](adr/0016-error-as-value-and-lazy-ports.md)）。前端不需要知道这件事：
+   > 推导结果一致，因为 `cond` 与 `a`/`b` 之间本来就没有边。
 3. **显式转换表** — manifest 包里附一张全局类型表，声明哪些类型可隐式转换：
 
 ```jsonc
@@ -126,6 +130,37 @@ V1 的规则刻意简单：
 
 **不做泛型。** `PointCloud<T>` 这类参数化类型会把校验器复杂度抬一个量级。
 真需要时，做法是让 C++ 侧针对具体实例化导出多个算子条目，而不是让前端做类型推导。
+
+## 端口上的两条执行语义（阶段 A）
+
+输入端口可以多带两个布尔标志（[ADR-0016](adr/0016-error-as-value-and-lazy-ports.md)）：
+
+```jsonc
+"inputs": [
+  { "name": "a", "type": "Any", "acceptsError": true },
+  { "name": "b", "type": "Any", "lazy": true, "acceptsError": true }
+]
+```
+
+- `acceptsError`：上游失败时本节点不被连坐，而是在这个端口上收到一个 `Error` 值
+  （类型表里因此多了一个 `Error` 类型）。
+- `lazy`：这个端口的上游闭包不进初始计划，算子返回 `Status::Demand` 时才被调度。
+
+两条都只对 `inputs` 有意义；写在 `outputs` 上会被 `Registry::validate()` 拦下。
+前端只需把它们画成角标，语义全在 C++ 侧。
+
+## 导入器（阶段 A）
+
+manifest 顶层可能多一段 `importers`（[ADR-0017](adr/0017-graph-outputs-injection-importers.md)）：
+
+```jsonc
+"importers": [
+  { "kind": "StandardGap.yml", "label": "StandardGap 配置", "pack": "gap@1.0.0" }
+]
+```
+
+`kind` 是传给 `lyflow_import` 的第一个参数。前端据此列「导入…」，不硬编码任何格式名。
+一个导入器都没注册时这一段整个不出现。
 
 ## 版本与迁移
 

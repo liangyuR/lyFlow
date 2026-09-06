@@ -20,6 +20,7 @@ import {
 import { gapSuites } from "./gap.mjs";
 import { m3Suites } from "./m3.mjs";
 import { m4Suites } from "./m4.mjs";
+import { phaseASuites } from "./phase_a.mjs";
 
 // ------------------------------------------------------------------- 各分组
 
@@ -464,6 +465,7 @@ async function main() {
 
     for (const suite of m3Suites) await suite(cdp, report, ws);
     for (const suite of m4Suites) await suite(cdp, report, ws);
+    for (const suite of phaseASuites) await suite(cdp, report, ws);
     for (const suite of gapSuites) await suite(cdp, report, ws);
 
     report.section("控制台");

@@ -1,0 +1,24 @@
+@PACKAGE_INIT@
+
+# LyFlow 的消费方配置。嵌入宿主只需要两样东西：include/lyflow/client.hpp 的
+# include 路径，和运行时那一份 bin/（core DLL + 全部依赖 DLL）。
+# client.hpp 是 header-only 且只依赖 c_api.h，所以导入目标是 INTERFACE，不链任何库。
+
+set(LYFLOW_VERSION "@LYFLOW_INSTALL_VERSION@")
+set(LYFLOW_ABI_VERSION @LYFLOW_INSTALL_ABI_VERSION@)
+
+set_and_check(LYFLOW_INCLUDE_DIR "${PACKAGE_PREFIX_DIR}/include")
+set_and_check(LYFLOW_BIN_DIR "${PACKAGE_PREFIX_DIR}/bin")
+set_and_check(LYFLOW_EXAMPLES_DIR "${PACKAGE_PREFIX_DIR}/examples")
+set(LYFLOW_LIBRARY_DIR "${PACKAGE_PREFIX_DIR}/library")
+set(LYFLOW_CORE_DLL "${LYFLOW_BIN_DIR}/@LYFLOW_INSTALL_DLL_NAME@")
+set(LYFLOW_CLI "${LYFLOW_BIN_DIR}/lyflow@CMAKE_EXECUTABLE_SUFFIX@")
+
+if(NOT TARGET lyflow::client)
+  add_library(lyflow::client INTERFACE IMPORTED)
+  set_target_properties(lyflow::client PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${LYFLOW_INCLUDE_DIR}"
+    INTERFACE_COMPILE_FEATURES "cxx_std_17")
+endif()
+
+check_required_components(lyflow)

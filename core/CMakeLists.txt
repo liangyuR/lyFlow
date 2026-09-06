@@ -300,3 +300,52 @@ target_link_libraries(lyflow-core-tests PRIVATE ${LYFLOW_PACK_LIBS})
 
 enable_testing()
 add_test(NAME lyflow-core-tests COMMAND lyflow-core-tests)
+
+# --------------------------------------------------------------- 安装布局
+# A1-11 / docs/embedding.md。产出 bin（core DLL + 依赖 DLL + lyflow CLI）、
+# include/lyflow、空的 library/、examples/ 与 lyflow-config.cmake。
+# CLI 由 cargo 构建，所以它是 scripts/install-lyflow.ps1 拷进去的，不在这里。
+include(CMakePackageConfigHelpers)
+
+set(LYFLOW_INSTALL_VERSION "${PROJECT_VERSION}")
+set(LYFLOW_INSTALL_ABI_VERSION 7)
+set(LYFLOW_INSTALL_DLL_NAME "$<TARGET_FILE_NAME:lyflow_core>")
+
+install(TARGETS lyflow_core
+        RUNTIME DESTINATION bin
+        LIBRARY DESTINATION bin
+        ARCHIVE DESTINATION lib)
+
+# vcpkg 的 applocal 部署把 PCL/boost/onnxruntime 那些依赖 DLL 拷进了 build 的 bin/。
+# 整目录带走 —— 少一个的表现是宿主 LoadLibrary 失败而错误信息只说「找不到模块」。
+install(DIRECTORY "${CMAKE_BINARY_DIR}/bin/"
+        DESTINATION bin
+        FILES_MATCHING PATTERN "*.dll")
+
+install(DIRECTORY "${LYFLOW_INCLUDE}/lyflow"
+        DESTINATION include
+        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_minimal.cpp"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_concurrent.cpp"
+        DESTINATION examples)
+
+# 库算子目录（ADR-0010）。宿主往里放 *.lyflow-op.json，所以布局里要有它。
+install(CODE "file(MAKE_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/library\")")
+
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/lyflow-config.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/lyflow-config.cmake"
+  INSTALL_DESTINATION ".")
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/lyflow-config-version.cmake"
+  VERSION "${PROJECT_VERSION}"
+  COMPATIBILITY SameMajorVersion)
+
+# DLL 名字里有生成器表达式，configure_package_config_file 展不开，所以再过一道 file(GENERATE)。
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/lyflow-config.cmake"
+     INPUT "${CMAKE_CURRENT_BINARY_DIR}/lyflow-config.cmake")
+
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/generated/lyflow-config.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/lyflow-config-version.cmake"
+        DESTINATION ".")

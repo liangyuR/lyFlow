@@ -36,6 +36,8 @@ interface DevBridge {
   clearTransitions(): void;
   /** 每次运行结束的时刻，live preview 的「跟手」断言靠它算延迟。 */
   runMarks: { runId: string; status: string; at: number }[];
+  /** 图级命名输出（ADR-0017）。只读转发，不碰 store。 */
+  runOutputs(runId: string): Promise<unknown>;
   /** 把 Map 拍平成可以 JSON 化的对象 —— CDP 的 evaluate 只认 JSON。 */
   snapshot(): unknown;
 }
@@ -90,6 +92,9 @@ export function installDevBridge(): void {
       runMarks.length = 0;
     },
     runMarks,
+    async runOutputs(runId) {
+      return transport.getRunOutputs(runId);
+    },
     snapshot() {
       const g = useGraphStore.getState();
       const e = useExecutionStore.getState();
@@ -153,6 +158,7 @@ export function installDevBridge(): void {
           stale: e.stale,
           preview: e.preview,
           targets: e.targets,
+          outputs: e.outputs,
           error: e.error,
           nodes: Object.fromEntries(
             [...e.nodes].map(([id, n]) => [
@@ -163,6 +169,8 @@ export function installDevBridge(): void {
                 elementCount: n.stats?.elementCount ?? null,
                 cached: n.stats?.cached === true,
                 bypassed: n.stats?.bypassed === true,
+                provided: n.stats?.provided === true,
+                reason: n.stats?.reason ?? null,
                 errors: n.errors,
               },
             ]),

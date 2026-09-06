@@ -56,6 +56,10 @@ React Flow 的 `Node` / `Edge` 只是渲染时的派生产物。
     }
   ],
 
+  "outputs": {         // 图级命名输出，见下面「图级输出」
+    "cloud": { "node": "n_voxel", "port": "cloud" }
+  },
+
   "groups": [],        // 预留：节点分组框
   "subgraphs": {},     // 复合算子定义，见下面「子图」
   "x": {}              // 扩展位：未知字段容器，保证向前兼容
@@ -83,6 +87,17 @@ JSON Schema： [`schema/graph-doc.schema.json`](../schema/graph-doc.schema.json)
 
 代价：manifest 改默认值会静默改变老图的行为。缓解办法是节点上记了 `opVersion`，
 可以在打开时提示「此图保存于 v1.1.0，当前 v1.2.0，`leafSize` 默认值已变更」。
+
+### 图级输出（阶段 A，[ADR-0017](adr/0017-graph-outputs-injection-importers.md)）
+
+`outputs` 是 `{ 名字: { node, port, label? } }`。嵌入 LyFlow 的宿主只认名字，
+不认节点 id —— 用户在编辑器里重命名一个节点不该让产线停摆。
+
+`lyflow_run_outputs(run_id)` 按名字返回 `{ node, port, type, elementCount, byteSize, value? }`；
+点云只给元信息，二进制仍走 `lyflow_output_cloud`。该端口这次没有结果时多一个
+`"missing": true`，而不是把这一项省掉：宿主拿到的键集合应当只由图决定。
+
+指子图内部的端口时写**展开后**的路径 id（`outer/inner`），与 `run_started.plan` 同一套 id。
 
 ### 子图（M4，[ADR-0010](adr/0010-subgraph-by-expansion.md)）
 

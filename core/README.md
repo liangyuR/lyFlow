@@ -8,8 +8,9 @@ include/lyflow/       公共头。零 PCL（ADR-0005），算子作者只需要�
   data.h              PointCloud / Indices / Transform / Plane
   operator.h          ParamView / Inputs / Outputs / ExecContext / ComputeFn
   manifest.h          算子描述的数据结构，序列化成 operator-manifest.json
-  status.h            结构化诊断（paramPath / portName）
-  c_api.h             C ABI v6 —— DLL 只导出这里的东西
+  status.h            结构化诊断（paramPath / portName）+ Status::Demand（ADR-0016）
+  c_api.h             C ABI v7 —— DLL 只导出这里的东西
+  client.hpp          嵌入宿主用的 header-only 封装，只依赖 c_api.h（docs/embedding.md）
 src/exec/             parse → expand → validate → compile(Plan) → execute + ResultStore
   subgraph.cpp        子图展开成平图（ADR-0010）；library.cpp 扫描库目录
 src/ops/              手写算子。**不许 include 任何 PCL 头**
@@ -161,6 +162,42 @@ cmake --build build/core
   分类前缀 `Library/`。合成出来的 `OperatorDesc` 单独过一遍 `Registry::validate()`，
   坏的那一个被跳过而不牵连其余。**调用它之前必须放掉所有 run**：
   它会重建注册表的后半段，旧的 `OperatorDesc*` 随之失效（与热重载同一条约定）。
+
+## 端口级的两条执行语义
+
+`acceptsError` 与 `lazy` 是**输入端口**上的声明
+（[ADR-0016](../docs/adr/0016-error-as-value-and-lazy-ports.md)）。core 内置的
+`flow.fallback` / `flow.select` 是它们唯二的使用者，但机制对任何算子开放。
+
+- **`acceptsError`**：上游失败时本节点不被连坐成 `cancelled`，而是在这个端口上
+  收到一个 `Data::Kind::Error`（载荷就是那条 `Status`）。一个失败若被它在计划里的
+  **每一个**消费者都接住，`run_finished` 仍然是 `ok`。
+- **`lazy`**：这个端口的上游闭包在编译期标 `deferred`，不进初始就绪队列，
+  也不进 `run_started.nodes`。算子在 compute 里返回 `Status::Demand("b")` 时，
+  执行器把那条闭包按拓扑序跑完（发一条 `plan_extended`，`nodes[]` 与
+  `run_started.nodes` 同构），再**重新调用**同一个 compute。
+  跑到最后没被 demand 的节点报 `skipped` + `stats.reason = "not_demanded"`。
+
+写这类算子时：**先 `inputs.has(port)` 再 `get`**，缺席就 `return Status::Demand(port)`。
+compute 可能被调用不止一次，所以它必须是纯的 —— 有副作用的算子不要声明惰性端口。
+
+`Port::anyGroup` 是配套的类型系统改动：同节点同组的 `Any` 端口才共用类型变量。
+默认全在 0 组，与历史行为一致；只有 `flow.select` 的 `cond` 用了第 1 组。
+
+## 图级输出、注入与导入器
+
+三样都属于「被嵌入」这条线（[ADR-0017](../docs/adr/0017-graph-outputs-injection-importers.md)，
+宿主侧用法见 [docs/embedding.md](../docs/embedding.md)）：
+
+- **`outputs`** 是 GraphDoc 顶层的 `{ 名字: {node, port} }`。`buildPlan` 查节点与端口
+  是否存在，结果登记进结果仓；`lyflow_run_outputs(run_id)` 按名字返回元信息与可读值。
+  点云只给元信息，二进制仍走 `lyflow_output_cloud`。
+- **`lyflow_run_options.inputs`** 把一片内存点云直接当成某个源节点的输出：
+  该节点标 `provided`，**compute 整个不调用**，所以它的每个输出端口都要给一项。
+  注入数据的 xxh3 摘要进 cacheKey。
+- **`Registry::addImporter`** 注册「文本 → 图」。`lyflow_import` 成功返回 GraphDoc
+  对象、失败返回诊断数组（与 `lyflow_plan` 同一套区分办法）。注册了哪些进 manifest 的
+  `importers` 段。
 
 ## live preview
 
