@@ -75,7 +75,9 @@ C++ 生成的 `OperatorManifest`，Rust 转发给前端。**加新算子只改 C
 ```
 core/     C++ 核心：算子注册表 + manifest 导出 + 校验/展开/编译/执行 + 结果仓。编成 DLL
 bridge/   Rust 桥接层：Tauri 壳（lyflow-app）与 headless CLI（lyflow），共用 core_ffi
-app/      前端：Vite + React + TS + React Flow + three.js。节点编辑器 + 3D 预览
+packages/editor/  @lyflow/editor：节点编辑器 + 3D 预览，一个可嵌进任意 React 宿主的组件
+app/      Tauri 壳：入口、文件对话框、窗口标题、验收窗口桥
+examples/host-react/  最小 Vite + React 宿主，经 HttpTransport 连后端
 schema/   三份 JSON Schema —— 跨语言契约的真实来源
 scripts/  构建与门禁脚本；scripts/e2e 是 CDP 验收
 ```
@@ -113,6 +115,7 @@ pnpm app:dev      # 浏览器模式，状态栏会标「静态快照」提示数
 ```bash
 pnpm check         # C++ 编译 + 自检 + core 测试 → schema 校验 → cargo test → CLI → 前端 build
 pnpm e2e           # CDP 驱动真实 app 的端到端验收（自己起 tauri dev，跑完自己收尾）
+pnpm e2e:http      # 另一条线：Node 桩服务器 + 系统 Chrome + examples/host-react
 pnpm e2e:packaged  # 同一套断言，但跑的是 tauri build 的产物在一个干净目录里的拷贝
 ```
 

@@ -12,7 +12,8 @@ run.mjs      M2 的分组 + main
 m3.mjs       M3 的分组（缓存、静音、迁移、连线手感、布局、面板、3D）
 m4.mjs       M4 的分组（子图、库算子、live preview、大图性能）
 gap.mjs      gap 领域包的分组（量测输出、真实 gap 图、模型 gap 图）
-phase_a.mjs  阶段 A 的分组（惰性分支半透明、plan_extended、图级输出）
+phase_a.mjs  阶段 A 的分组（惰性分支半透明、plan_extended、图级输出与「标为输出」UI）
+http.mjs     e2e:http —— Node 桩服务器 + 系统 Chrome + examples/host-react
 ```
 
 CLI（m4-plan §3）不在这里：它没有界面，验收走 `cargo test`
@@ -55,6 +56,38 @@ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222" pnpm tauri 
 
 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` 是 WebView2 官方的注入口，必须在
 **进程启动前**设进环境变量 —— WebView2 只在创建环境时读一次。
+
+## `pnpm e2e:http`
+
+另一条线：验的是 `@lyflow/editor` + `HttpTransport` 在**普通浏览器**里的样子。
+Tauri 那条一条断言都不共享后端，但共享 `cdp.mjs` / `harness.mjs` / `page.mjs`。
+
+```
+node scripts/e2e/http.mjs
+```
+
+它自己拉起三样东西，跑完全部收掉：
+
+1. `packages/editor/test-server/server.mjs` —— [docs/http-transport.md](../../docs/http-transport.md)
+   的最小实现，每个请求起一次 `lyflow` CLI。工作区是一个临时目录，鉴权 token 每次随机。
+2. `examples/host-react` 的 vite dev server（5174），
+   `VITE_LYFLOW_API` / `VITE_LYFLOW_TOKEN` 经环境变量注进去 —— **不进 URL**。
+3. 系统装的 Chrome 或 Edge，带 `--remote-debugging-port` 与一个一次性 user-data-dir。
+
+**前置条件只有一个**：`bridge/target/debug/lyflow.exe` 存在。没有就先
+
+```
+cargo build --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features
+```
+
+（`pnpm check` 会顺手建好这一份。）
+
+可调的环境变量：`LYFLOW_HTTP_PORT`（默认 8788）、`LYFLOW_HOST_PORT`（5174）、
+`LYFLOW_HTTP_CDP_PORT`（9333）、`LYFLOW_BROWSER`（浏览器可执行文件）、
+`LYFLOW_E2E_HEADLESS=1`（无头，3D 那条要 SwiftShader 才过）。
+
+宿主侧的窗口桥是 `examples/host-react/src/bridge.ts`，形状与 app 的 devbridge 一样
+但只有 HTTP 子集用得到的那些。
 
 ## 干净目录验收（`stagePackagedApp`）
 

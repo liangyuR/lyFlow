@@ -6,10 +6,17 @@
 
 | 层 | 语言 | 负责 | 明确不负责 |
 |---|---|---|---|
-| 前端 | TS / React | 图编辑、类型校验（UI 级）、参数表单、状态展示、本地撤销重做 | 执行调度、算子语义、结果计算、内存管理 |
+| 编辑器包 `packages/editor` | TS / React | 图编辑、类型校验（UI 级）、参数表单、3D 视图、状态展示、本地撤销重做、快捷键、`--lyflow-*` 主题 | 执行调度、算子语义、结果计算、内存管理、**怎么和后端说话**、文件对话框、页面级样式 |
+| 宿主壳 `app/`（Tauri）或 `examples/host-react/`（浏览器） | TS / React | 装配一个 `Transport`、文件对话框、窗口标题与菜单、页面级 CSS、验收窗口桥 | 图的任何语义 |
 | 桥接 | Rust | IPC、序列化/反序列化、文件读写、进程与生命周期、事件推流、崩溃隔离 | 理解算子语义、改写图结构 |
 | 核心 | C++ | 算子注册表、拓扑调度、中间结果缓存与复用、并行与显存管理、**权威校验** | UI 状态、节点坐标、**任何具体算法** |
 | 算子包 | C++ | 算子实现、对第三方库（PCL、领域库）的依赖 | 执行调度、类型表、缓存策略 |
+
+编辑器与「计算在哪儿」之间隔着 `Transport`（[ADR-0018](adr/0018-editor-as-package.md)）：
+`TauriTransport` 走 `#[tauri::command]`，`HttpTransport` 走
+[docs/http-transport.md](http-transport.md) 的 REST + WebSocket，
+`StaticTransport` 只读一份 dump 出来的 manifest。三者的方法一一对应，
+再一一对应到 C ABI v7 —— 换传输不换语义。
 
 核心编译成一个只导出 C ABI 的 DLL，桥接层在运行时加载它（[ADR-0004](adr/0004-core-as-dll.md)）。
 这条边界同时是崩溃隔离面和 M3 热重载的接缝。
