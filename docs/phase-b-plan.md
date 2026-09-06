@@ -2,7 +2,7 @@
 
 上游设计：[gap-inspector-integration-design.md](gap-inspector-integration-design.md) §3、§4；依赖阶段 A 的产物：
 C ABI v7 与 `client.hpp`（[phase-a1-acceptance.md](phase-a1-acceptance.md)）、`@lyflow/editor` 与 HTTP 传输契约（[http-transport.md](http-transport.md)）。
-工作在 `D:\project\xyz-gap-inspector` 的新分支 `lyflow-integration`（从 `lyflow-ops` 切出）。**不双轨**：同一分支上完成切换与删除。
+工作在 `D:\project\xyz-gap-inspector` 的新分支 `lyflow-integration`（从 `release/2.1.0` 切出，`lyflow-ops` 已合入其中）。**不双轨**：同一分支上完成切换与删除，完成后以 PR 合入 `release/2.1.0`。用户已确认：标定 `calibrateWithCylinder` 保留在业务仓库。
 
 ## 1. 决定
 
