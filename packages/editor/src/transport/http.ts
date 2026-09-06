@@ -42,6 +42,10 @@ export interface HttpTransportOptions {
   /** 事件流的地址。宿主的 WebSocket 不在 HTTP 端口上时给这一项；
    *  缺省是 baseUrl 换成 ws(s) 之后加 `/lyflow/events`。 */
   eventsUrl?: string;
+  /** 握手时请求的子协议。缺省是 `lyflow.v1` 加上带 token 的那一项。
+   *  后端的 WebSocket 库不会回 `Sec-WebSocket-Protocol` 时（浏览器会因此拒绝握手）
+   *  给 `[]`，并把鉴权放进 `eventsUrl` 自己。 */
+  eventsProtocols?: string[];
 }
 
 export class HttpTransport implements Transport {
@@ -49,6 +53,7 @@ export class HttpTransport implements Transport {
   readonly baseUrl: string;
   readonly token: string | undefined;
   readonly eventsUrl: string;
+  readonly eventsProtocols: string[] | undefined;
 
   #socket: WebSocket | null = null;
   #listeners = new Set<Listener>();
@@ -60,6 +65,7 @@ export class HttpTransport implements Transport {
     this.token = token;
     this.eventsUrl =
       options?.eventsUrl ?? joinUrl(this.baseUrl, "/lyflow/events").replace(/^http/, "ws");
+    this.eventsProtocols = options?.eventsProtocols;
   }
 
   // ---- 底层 ---------------------------------------------------------------
@@ -192,8 +198,11 @@ export class HttpTransport implements Transport {
   #ensureSocket(): void {
     if (this.#socket || this.#closed) return;
     // token 走子协议而不是查询串：查询串会进日志和 Referer
-    const protocols = this.token ? ["lyflow.v1", `lyflow-token.${this.token}`] : ["lyflow.v1"];
-    const socket = new WebSocket(this.eventsUrl, protocols);
+    const protocols =
+      this.eventsProtocols ??
+      (this.token ? ["lyflow.v1", `lyflow-token.${this.token}`] : ["lyflow.v1"]);
+    const socket =
+      protocols.length > 0 ? new WebSocket(this.eventsUrl, protocols) : new WebSocket(this.eventsUrl);
     this.#socket = socket;
     socket.addEventListener("open", () => {
       this.#attempt = 0;
