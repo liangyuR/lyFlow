@@ -1,84 +1,29 @@
 // 执行器：事件顺序与 seq、上游失败传播、取消在第 k 个节点生效、结果仓。
+// 算子一律用 gen.synthetic 与 test.*（S6）—— 点云算法的测试在 packs/std-pointcloud/tests。
 #include <doctest/doctest.h>
 
 #include <chrono>
-#include <mutex>
 #include <thread>
 
 #include "exec/result_store.h"
 #include "helpers.h"
 #include "lyflow/operator.h"
+#include "test_ops.h"
 
 using namespace lyflow;
 using namespace lyflow::test;
 
 namespace {
 
-// 取消测试专用的阻塞算子：一直等到 ctx.cancelled() 为止。
-// 靠「跑一张大图再取消」是偶发失败的来源，这样才能让取消时机成为确定性事件。
-std::atomic<bool>& blockEntered() {
-  static std::atomic<bool> flag{false};
-  return flag;
-}
-
-Status blockCompute(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecContext& ctx) {
-  blockEntered().store(true);
-  while (!ctx.cancelled()) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  // 返回 Ok：执行器看的是 cancelled 标志而不是返回值（operator.h 的约定）
-  outputs.set("cloud", inputs.get("cloud"));
-  return Status::Ok();
-}
-
-void ensureBlockOp() {
-  static std::once_flag once;
-  std::call_once(once, [] {
-    OperatorDesc op;
-    op.id = "test.block";
-    op.version = "1.0.0";
-    op.label = "Block Until Cancelled";
-    op.category = "Test";
-    op.doc = "只在测试里注册：一直阻塞到收到取消为止。";
-    op.inputs = {Port{"cloud", "PointCloud", "Cloud", "", true}};
-    op.outputs = {Port{"cloud", "PointCloud", "Cloud", "", true}};
-    op.capabilities = {/*cancellable=*/true, /*previewable=*/false, /*deterministic=*/false};
-    op.compute = &blockCompute;
-    ensureRegistry().addOperator(std::move(op));
-  });
-}
-
-/// 一个 Any → Any 的透传算子。M3 的 Reroute 就长这样，
-/// 而它正是「声明类型全通过、实际载荷对不上」这条路径的唯一入口。
-Status anyPassCompute(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecContext&) {
-  outputs.set("out", inputs.get("in"));
-  return Status::Ok();
-}
-
-void ensureAnyPassOp() {
-  static std::once_flag once;
-  std::call_once(once, [] {
-    OperatorDesc op;
-    op.id = "test.any_pass";
-    op.version = "1.0.0";
-    op.label = "Any Passthrough";
-    op.category = "Test";
-    op.doc = "只在测试里注册：Any 进 Any 出的透传节点。";
-    op.inputs = {Port{"in", "Any", "In", "", true}};
-    op.outputs = {Port{"out", "Any", "Out", "", true}};
-    op.capabilities = {/*cancellable=*/true, /*previewable=*/false, /*deterministic=*/true};
-    op.compute = &anyPassCompute;
-    ensureRegistry().addOperator(std::move(op));
-  });
-}
-
 const Json kSmall = Json{{"pointCount", 2000}};
+const Json kBadLeaf = Json{{"leaf", {0.0, 0.01, 0.01}}};
 
 }  // namespace
 
 TEST_CASE("两节点图：事件顺序与 seq 连续") {
-  const Json doc = makeGraph(
-      {{"g", "gen.synthetic", kSmall}, {"v", "filter.voxel_grid"}}, {{"g.cloud", "v.cloud"}});
+  ensureTestOps();
+  const Json doc =
+      makeGraph({{"g", "gen.synthetic", kSmall}, {"v", "test.thin"}}, {{"g.cloud", "v.cloud"}});
 
   Session s(doc);
   RunLog& log = s.wait();
@@ -171,14 +116,15 @@ TEST_CASE("run_free 之后结果仓不再持有该 run 的数据") {
 }
 
 TEST_CASE("上游失败：下游标 cancelled + upstream_failed，旁支照常执行") {
-  // v 的 leafSize 非法 → v 失败 → p 是它的下游 → cancelled
+  ensureTestOps();
+  // v 的 leaf 非法 → v 失败 → p 是它的下游 → cancelled
   // 与此同时 o 只依赖 g，必须照常跑完（D5 的执行期对应物：一次看到所有能看到的）
   const Json doc = makeGraph(
       {
           {"g", "gen.synthetic", kSmall},
-          {"v", "filter.voxel_grid", Json{{"leafSize", {0.0, 0.01, 0.01}}}},
-          {"p", "filter.passthrough"},
-          {"o", "filter.random_sample"},
+          {"v", "test.thin", kBadLeaf},
+          {"p", "test.thin"},
+          {"o", "test.half_indices"},
       },
       {{"g.cloud", "v.cloud"}, {"v.cloud", "p.cloud"}, {"g.cloud", "o.cloud"}});
 
@@ -192,7 +138,7 @@ TEST_CASE("上游失败：下游标 cancelled + upstream_failed，旁支照常�
 
   const Json v = log.nodeEvent("v", "error");
   REQUIRE(v.contains("errors"));
-  CHECK(v["errors"][0]["paramPath"] == "leafSize");
+  CHECK(v["errors"][0]["paramPath"] == "leaf");
   // error 是 errors[0] 的快捷方式，两者必须一致
   CHECK(v["error"] == v["errors"][0]);
 
@@ -205,15 +151,16 @@ TEST_CASE("上游失败：下游标 cancelled + upstream_failed，旁支照常�
 }
 
 TEST_CASE("算子内部异常被兜住，转成 internal 而不是穿过 ABI") {
-  // extract_indices 拿到的下标来自另一片点云 → bad_input（不是崩溃）
+  ensureTestOps();
+  // split 拿到的下标来自另一片点云 → bad_input（不是崩溃）
   const Json doc = makeGraph(
       {
           {"g1", "gen.synthetic", kSmall},
           {"g2", "gen.synthetic", Json{{"pointCount", 2000}, {"seed", 9}}},
-          {"s", "segment.ransac_plane"},
-          {"e", "segment.extract_indices"},
+          {"s", "test.half_indices"},
+          {"e", "test.split"},
       },
-      {{"g1.cloud", "s.cloud"}, {"s.inliers", "e.indices"}, {"g2.cloud", "e.cloud"}});
+      {{"g1.cloud", "s.cloud"}, {"s.indices", "e.indices"}, {"g2.cloud", "e.cloud"}});
 
   const RunLog log = runGraph(doc);
   CHECK(log.finalState("e") == "error");
@@ -223,24 +170,24 @@ TEST_CASE("算子内部异常被兜住，转成 internal 而不是穿过 ABI") {
 }
 
 TEST_CASE("取消：在第 k 个节点生效，join 在 1 秒内返回") {
-  ensureBlockOp();
-  blockEntered().store(false);
+  ensureTestOps();
+  ops::blockEntered().store(false);
 
   const Json doc = makeGraph(
       {
           {"g", "gen.synthetic", kSmall},
           {"b", "test.block"},
-          {"p", "filter.passthrough"},
+          {"p", "test.thin"},
       },
       {{"g.cloud", "b.cloud"}, {"b.cloud", "p.cloud"}});
 
   Session s(doc);
   // 等到执行确实进了 b 才取消 —— 这样断言的是「运行中取消」而不是「还没开始就取消」
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (!blockEntered().load() && std::chrono::steady_clock::now() < deadline) {
+  while (!ops::blockEntered().load() && std::chrono::steady_clock::now() < deadline) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
-  REQUIRE(blockEntered().load());
+  REQUIRE(ops::blockEntered().load());
 
   const auto t0 = std::chrono::steady_clock::now();
   s.run().cancel();
@@ -258,9 +205,9 @@ TEST_CASE("取消：在第 k 个节点生效，join 在 1 秒内返回") {
 }
 
 TEST_CASE("整图级失败（环）：run_finished 是 error，节点仍然标红") {
-  const Json doc = makeGraph(
-      {{"a", "filter.passthrough"}, {"b", "filter.voxel_grid"}},
-      {{"a.cloud", "b.cloud"}, {"b.cloud", "a.cloud"}});
+  ensureTestOps();
+  const Json doc = makeGraph({{"a", "test.thin"}, {"b", "test.thin"}},
+                             {{"a.cloud", "b.cloud"}, {"b.cloud", "a.cloud"}});
 
   const RunLog log = runGraph(doc);
   CHECK(log.runStatus() == "error");
@@ -270,11 +217,12 @@ TEST_CASE("整图级失败（环）：run_finished 是 error，节点仍然标�
 }
 
 TEST_CASE("Run to node：只执行目标的上游闭包") {
+  ensureTestOps();
   const Json doc = makeGraph(
       {
           {"g", "gen.synthetic", kSmall},
-          {"v", "filter.voxel_grid"},
-          {"p", "filter.passthrough"},
+          {"v", "test.thin"},
+          {"p", "test.thin", Json{{"leaf", {0.05, 0.05, 0.05}}}},
       },
       {{"g.cloud", "v.cloud"}, {"v.cloud", "p.cloud"}});
 
@@ -286,126 +234,12 @@ TEST_CASE("Run to node：只执行目标的上游闭包") {
   CHECK(log.events.front()["targets"][0] == "v");
 }
 
-TEST_CASE("一条完整 pipeline 跑通：合成 → 裁剪 → 降采样 → 去噪 → 平面 → 分离") {
-  const Json doc = makeGraph(
-      {
-          {"g", "gen.synthetic", Json{{"pointCount", 20000}}},
-          {"c", "filter.crop_box"},
-          {"v", "filter.voxel_grid", Json{{"leafSize", {0.005, 0.005, 0.005}}}},
-          {"s", "filter.statistical_outlier"},
-          {"r", "segment.ransac_plane", Json{{"distanceThreshold", 0.02}}},
-          {"e", "segment.extract_indices"},
-          {"n", "features.normals"},
-      },
-      {
-          {"g.cloud", "c.cloud"},
-          {"c.cloud", "v.cloud"},
-          {"v.cloud", "s.cloud"},
-          {"s.cloud", "r.cloud"},
-          {"s.cloud", "e.cloud"},
-          {"r.inliers", "e.indices"},
-          {"e.rest", "n.cloud"},
-      });
-
-  Session session(doc);
-  RunLog& log = session.wait();
-  for (const Json& e : log.ofKind("node_state")) {
-    if (e.value("state", "") == "error") MESSAGE(e.dump());
-  }
-  CHECK(log.runStatus() == "ok");
-  CHECK(log.seqIsDense());
-
-  auto& store = exec::ResultStore::instance();
-  for (const char* id : {"g", "c", "v", "s", "e", "n"}) {
-    exec::CloudPreview p;
-    const char* port = std::string(id) == "e" ? "selected" : "cloud";
-    CAPTURE(id);
-    REQUIRE(store.previewCloud(session.runId(), id, port, 100000, p));
-    CHECK(p.totalPoints > 0);
-  }
-
-  // 通道保留：合成云带 intensity，经过 crop/voxel/sor/extract 之后仍然带
-  exec::CloudPreview tail;
-  REQUIRE(store.previewCloud(session.runId(), "e", "rest", 100000, tail));
-  CHECK(tail.hasIntensity);
-
-  // 法线估计不该把强度弄丢
-  Data withNormals;
-  REQUIRE(store.get(session.runId(), "n", "cloud", withNormals));
-  REQUIRE(withNormals.asCloud() != nullptr);
-  CHECK(withNormals.asCloud()->hasNormals());
-  CHECK(withNormals.asCloud()->hasIntensity());
-}
-
-// ------- 下面这组来自一次代码审查抓到的缺陷，全都是静默出错的那一类
-
-TEST_CASE("体素栅格：相距很远的点不会被折叠进同一个体素") {
-  // 曾经把三个体素下标打包进一个 uint64，越界的点会绕回来和原点附近的点求质心。
-  // 这里用一个远超那个范围的坐标守住它。
-  const Json doc = makeGraph(
-      {{"g", "gen.synthetic", Json{{"pointCount", 10}}}, {"v", "filter.voxel_grid"}},
-      {{"g.cloud", "v.cloud"}});
-  Session s(doc);
-  REQUIRE(s.wait().runStatus() == "ok");
-
-  // 直接用数据模型验：造两片只差一个巨大平移的点，降采样后必须还是两个点
-  PointCloud far;
-  far.push(0.0f, 0.0f, 0.0f);
-  far.push(300000.0f, 0.0f, 0.0f);  // 3e5 / 0.01 = 3e7 个体素，远超旧键的 ±2^20
-  CHECK(far.pointCount() == 2);
-  const Bounds b = far.bounds();
-  CHECK(b.max[0] - b.min[0] == doctest::Approx(300000.0f));
-}
-
-TEST_CASE("体素栅格：坐标相对叶大小过大时报错而不是静默算错") {
-  const Json doc = makeGraph(
-      {
-          {"g", "gen.synthetic", Json{{"pointCount", 100}}},
-          {"t", "transform.make", Json{{"translation", {1e30, 0.0, 0.0}}}},
-          {"a", "transform.apply"},
-          {"v", "filter.voxel_grid"},
-      },
-      {
-          {"g.cloud", "a.cloud"},
-          {"t.transform", "a.transform"},
-          {"a.cloud", "v.cloud"},
-      });
-  const RunLog log = runGraph(doc);
-  CHECK(log.finalState("v") == "error");
-  const Json e = log.nodeEvent("v", "error");
-  REQUIRE(e.contains("errors"));
-  CHECK(e["errors"][0]["paramPath"] == "leafSize");
-}
-
-TEST_CASE("体素栅格 nearest 模式也响应取消") {
-  // 第二趟扫描曾经没有轮询点。抢占式运行是同步等 join 的，
-  // 所以这一趟不响应取消 = 前端整整卡住这一趟的时间。
-  const Json doc = makeGraph(
-      {
-          {"g", "gen.synthetic", Json{{"pointCount", 2000000}}},
-          {"v", "filter.voxel_grid",
-           Json{{"leafSize", {0.0005, 0.0005, 0.0005}}, {"representative", "nearest"}}},
-          {"w", "filter.voxel_grid",
-           Json{{"leafSize", {0.0005, 0.0005, 0.0005}}, {"representative", "nearest"}}},
-      },
-      {{"g.cloud", "v.cloud"}, {"v.cloud", "w.cloud"}});
-
-  Session s(doc);
-  const auto t0 = std::chrono::steady_clock::now();
-  s.run().cancel();
-  RunLog& log = s.wait();
-  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                           std::chrono::steady_clock::now() - t0)
-                           .count();
-  CHECK(log.runStatus() == "cancelled");
-  CHECK(elapsed < 2000);
-}
-
 TEST_CASE("溢出的数字字面量在解析期就被挡住，不会变成 inf 参数") {
+  ensureTestOps();
   // nlohmann 在解析期就拒绝 1e400（out_of_range.406），所以非有限 double 进不到参数里。
   // 这条把「路是断的」钉住：换 JSON 库或放宽解析策略时它会立刻响。
   const std::string raw = R"({"schemaVersion":1,"id":"t",
-    "nodes":[{"id":"p","op":"filter.passthrough","params":{"min":1e400}}],
+    "nodes":[{"id":"p","op":"test.thin","params":{"leaf":1e400}}],
     "edges":[]})";
   const auto parsed = Json::parse(exec::validateGraphJson(raw, {}));
   REQUIRE(parsed.size() >= 1);
@@ -419,43 +253,19 @@ TEST_CASE("溢出的数字字面量在解析期就被挡住，不会变成 inf �
   CHECK(manifest.find("nan") == std::string::npos);
 }
 
-TEST_CASE("util.merge：空点云不该把另一侧的通道带走") {
-  // crop_box 恰好裁空时，合并结果曾经会连另一侧完好的 intensity 一起丢掉，
-  // 还倒打一耙 log 出「只有一侧带 intensity 通道」。
-  const Json doc = makeGraph(
-      {
-          {"g", "gen.synthetic", Json{{"pointCount", 3000}}},
-          {"empty", "filter.crop_box",
-           Json{{"min", {1000.0, 1000.0, 1000.0}}, {"max", {1001.0, 1001.0, 1001.0}}}},
-          {"m", "util.merge"},
-      },
-      {
-          {"g.cloud", "empty.cloud"},
-          {"empty.cloud", "m.a"},
-          {"g.cloud", "m.b"},
-      });
-
-  Session s(doc);
-  REQUIRE(s.wait().runStatus() == "ok");
-  Data merged;
-  REQUIRE(exec::ResultStore::instance().get(s.runId(), "m", "cloud", merged));
-  REQUIRE(merged.asCloud() != nullptr);
-  CHECK(merged.asCloud()->pointCount() == 3000);
-  CHECK(merged.asCloud()->hasIntensity());
-}
-
 TEST_CASE("输入端口的实际类型对不上时报 type_mismatch，而不是解引用空指针") {
   // Any 端口会让声明层面的检查全部通过，而算子里的 asCloud() 会返回 nullptr。
   // 解引用它在 MSVC 上是 SEH，执行器的 catch(...) 兜不住。
-  ensureAnyPassOp();
+  ensureTestOps();
 
   const Json doc = makeGraph(
       {
-          {"t", "transform.make"},
+          {"g", "gen.synthetic", kSmall},
+          {"h", "test.half_indices"},
           {"r", "test.any_pass"},
-          {"v", "filter.voxel_grid"},
+          {"v", "test.thin"},
       },
-      {{"t.transform", "r.in"}, {"r.out", "v.cloud"}});
+      {{"g.cloud", "h.cloud"}, {"h.indices", "r.in"}, {"r.out", "v.cloud"}});
 
   const RunLog log = runGraph(doc);
   CHECK(log.finalState("v") == "error");

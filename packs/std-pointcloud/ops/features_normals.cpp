@@ -5,8 +5,8 @@
 
 #include <cmath>
 
-#include "ops/ops.h"
-#include "ops/pcl/adapter.h"
+#include "ops.h"
+#include "lyflow_pcl/adapter.h"
 
 namespace lyflow::ops {
 namespace {

@@ -155,6 +155,7 @@ struct Capabilities {
 struct OperatorDesc {
   std::string id;                         // 全局唯一，用 . 分命名空间
   std::string version;                    // semver
+  std::string pack;                       // 来自哪个算子包，「名字」或「名字@版本」；core 自带的留空
   std::vector<std::string> aliases;       // 旧 id，重命名后自动重定向
   std::string label;
   std::string category;                   // 用 / 分层，决定搜索面板树形结构

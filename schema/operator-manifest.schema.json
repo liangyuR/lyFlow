@@ -35,6 +35,7 @@
       "properties": {
         "id": { "type": "string", "description": "全局唯一，用 . 分命名空间，如 filter.voxel_grid" },
         "version": { "$ref": "#/$defs/semver" },
+        "pack": { "type": "string", "description": "算子来自哪个算子包，「名字」或「名字@版本」。core 自带的算子没有这一项。前端不解释它（ADR-0014）。" },
         "aliases": { "type": "array", "items": { "type": "string" }, "description": "旧 id，用于重命名后自动重定向。" },
         "label": { "type": "string" },
         "category": { "type": "string", "description": "用 / 分层，决定搜索面板的树形结构。" },

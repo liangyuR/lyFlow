@@ -58,31 +58,13 @@ void registerBuiltinTypes(Registry& r) {
 void registerBuiltinOps(Registry& r) {
   registerBuiltinTypes(r);
 
-  // 加新算子在这里加一行，前端不用动（ADR-0003）。
-  // 顺序即面板里同分类下的排列顺序，按「一条 pipeline 从左到右」排。
+  // core 只剩两个算子（S1 / ADR-0014）。点云算法在 packs/std-pointcloud/。
+  // 这里的夹心顺序是为了让默认构建的 manifest 与拆包之前逐字节相同：
+  // 合成数据源一直排在最前，reroute 一直排在标准包之后、外部包之前。
   ops::registerGenSynthetic(r);
-  ops::registerIoLoadPcd(r);
-  ops::registerIoSavePcd(r);
-
-  ops::registerFilterPassthrough(r);
-  ops::registerFilterVoxelGrid(r);
-  ops::registerFilterCropBox(r);
-  ops::registerFilterRandomSample(r);
-  ops::registerFilterStatisticalOutlier(r);
-  ops::registerFilterRadiusOutlier(r);
-
-  ops::registerFeaturesNormals(r);
-
-  ops::registerSegmentRansacPlane(r);
-  ops::registerSegmentExtractIndices(r);
-
-  ops::registerTransformMake(r);
-  ops::registerTransformApply(r);
-  ops::registerUtilMerge(r);
+  registerStdPacks(r);
   ops::registerUtilReroute(r);
-
-  // 算子包排在内置之后（ADR-0013）。不带包构建时这是个空函数。
-  registerOpPacks(r);
+  registerExternalPacks(r);
 }
 
 }  // namespace lyflow

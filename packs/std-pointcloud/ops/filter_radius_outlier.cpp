@@ -2,8 +2,8 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
-#include "ops/ops.h"
-#include "ops/pcl/adapter.h"
+#include "ops.h"
+#include "lyflow_pcl/adapter.h"
 
 namespace lyflow::ops {
 namespace {

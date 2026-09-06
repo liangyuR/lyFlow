@@ -7,6 +7,7 @@
 #include "exec/plan.h"
 #include "helpers.h"
 #include "lyflow/registry.h"
+#include "test_ops.h"
 
 using namespace lyflow;
 using namespace lyflow::test;
@@ -61,24 +62,17 @@ const exec::PlanNode* nodeOf(const exec::Plan& plan, const std::string& id) {
 
 }  // namespace
 
-TEST_CASE("注册表自检干净，15 个算子都在") {
+TEST_CASE("注册表自检干净，core 自带的两个算子都在") {
+  ensureTestOps();
   const auto problems = ensureRegistry().validate();
   for (const auto& p : problems) MESSAGE(p);
   CHECK(problems.empty());
 
-  const std::vector<std::string> expected = {
-      "gen.synthetic",       "io.load_pcd",
-      "io.save_pcd",         "filter.passthrough",
-      "filter.voxel_grid",   "filter.crop_box",
-      "filter.random_sample", "filter.statistical_outlier",
-      "filter.radius_outlier", "features.normals",
-      "segment.ransac_plane", "segment.extract_indices",
-      "transform.make",      "transform.apply",
-      "util.merge",
-  };
-  for (const auto& id : expected) {
+  // S1：core 只剩这两个，其余都在算子包里（包自己的清单在包的测试里）
+  for (const auto& id : {"gen.synthetic", "util.reroute"}) {
     CAPTURE(id);
     CHECK(ensureRegistry().find(id) != nullptr);
+    CHECK(ensureRegistry().find(id)->pack.empty());
   }
   // D10：PointCloudXYZI 已从类型表删除
   CHECK(ensureRegistry().findType("PointCloudXYZI") == nullptr);
@@ -86,11 +80,12 @@ TEST_CASE("注册表自检干净，15 个算子都在") {
 }
 
 TEST_CASE("拓扑序：上游一定排在下游之前") {
+  ensureTestOps();
   const Json doc = makeGraph(
       {
-          {"c", "filter.voxel_grid"},
+          {"c", "test.thin"},
           {"a", "gen.synthetic"},
-          {"b", "filter.passthrough"},
+          {"b", "test.thin"},
       },
       {{"a.cloud", "b.cloud"}, {"b.cloud", "c.cloud"}});
 
@@ -106,13 +101,14 @@ TEST_CASE("拓扑序：上游一定排在下游之前") {
 }
 
 TEST_CASE("环：环上每个节点各一条 cycle 诊断，整图级失败") {
-  // b 用 util.merge（两个输入端口）：换成单输入算子的话，「a 和 c 都连到
+  ensureTestOps();
+  // b 用 test.merge2（两个输入端口）：换成单输入算子的话，「a 和 c 都连到
   // b.cloud」会先被单连接规则挡下来，测到的就不是环检测了。
   const Json doc = makeGraph(
       {
           {"a", "gen.synthetic"},
-          {"b", "util.merge"},
-          {"c", "filter.voxel_grid"},
+          {"b", "test.merge2"},
+          {"c", "test.thin"},
       },
       {{"a.cloud", "b.a"}, {"b.cloud", "c.cloud"}, {"c.cloud", "b.b"}});
 
@@ -125,10 +121,11 @@ TEST_CASE("环：环上每个节点各一条 cycle 诊断，整图级失败") {
 }
 
 TEST_CASE("D5：一次返回全部诊断，不在第一个错误处早退") {
+  ensureTestOps();
   const Json doc = makeGraph(
       {
           {"a", "gen.synthetic", Json{{"pointCount", -5}, {"noise", "字符串不是数字"}}},
-          {"b", "filter.voxel_grid", Json{{"leafSize", 0.01}, {"nonexistent", 1}}},
+          {"b", "test.thin", Json{{"leaf", 0.01}, {"nonexistent", 1}}},
           {"c", "no.such.operator"},
       },
       {{"a.cloud", "b.cloud"}});
@@ -151,7 +148,7 @@ TEST_CASE("D5：一次返回全部诊断，不在第一个错误处早退") {
   CHECK(std::find(aParams.begin(), aParams.end(), "pointCount") != aParams.end());
   CHECK(std::find(aParams.begin(), aParams.end(), "noise") != aParams.end());
 
-  // b：leafSize 是标量而不是长度 3 的数组，外加一个未知参数名
+  // b：leaf 是标量而不是长度 3 的数组，外加一个未知参数名
   CHECK(r.hasCode("b", "bad_param"));
   const Diagnostic* unknown = r.find("b", "unknown_param");
   REQUIRE(unknown != nullptr);
@@ -166,15 +163,17 @@ TEST_CASE("D5：一次返回全部诊断，不在第一个错误处早退") {
 }
 
 TEST_CASE("paramPath 精确指向出错的参数框") {
-  const Json doc = makeGraph({{"v", "filter.voxel_grid", Json{{"leafSize", {0.0, 0.01, 0.01}}}}}, {});
+  ensureTestOps();
+  const Json doc = makeGraph({{"v", "test.thin", Json{{"leaf", {0.0, 0.01, 0.01}}}}}, {});
   const Built r = build(doc);
   const Diagnostic* d = r.find("v", "bad_param");
   REQUIRE(d != nullptr);
-  CHECK(d->status.paramPath == "leafSize");
+  CHECK(d->status.paramPath == "leaf");
   CHECK(std::string(toString(d->status.phase)) == "validate");
 }
 
 TEST_CASE("默认值合并：没写的参数用 manifest 的默认值") {
+  ensureTestOps();
   const Json doc = makeGraph({{"g", "gen.synthetic", Json{{"seed", 7}}}}, {});
   const Built r = build(doc);
   REQUIRE(r.built);
@@ -188,9 +187,10 @@ TEST_CASE("默认值合并：没写的参数用 manifest 的默认值") {
 }
 
 TEST_CASE("类型兼容矩阵") {
+  ensureTestOps();
   // 相等：PointCloud → PointCloud
   {
-    const Json doc = makeGraph({{"a", "gen.synthetic"}, {"b", "filter.passthrough"}},
+    const Json doc = makeGraph({{"a", "gen.synthetic"}, {"b", "test.thin"}},
                                {{"a.cloud", "b.cloud"}});
     CHECK(build(doc).errorCount() == 0);
   }
@@ -199,37 +199,38 @@ TEST_CASE("类型兼容矩阵") {
     const Json doc = makeGraph(
         {
             {"a", "gen.synthetic"},
-            {"s", "segment.ransac_plane"},
-            {"b", "filter.passthrough"},
+            {"s", "test.half_indices"},
+            {"b", "test.thin"},
         },
-        {{"a.cloud", "s.cloud"}, {"s.inliers", "b.cloud"}});
+        {{"a.cloud", "s.cloud"}, {"s.indices", "b.cloud"}});
     const Built r = build(doc);
     CHECK(r.hasCode("b", "type_mismatch"));
   }
   // 端口不存在
   {
     const Json doc =
-        makeGraph({{"a", "gen.synthetic"}, {"b", "filter.passthrough"}}, {{"a.nope", "b.cloud"}});
+        makeGraph({{"a", "gen.synthetic"}, {"b", "test.thin"}}, {{"a.nope", "b.cloud"}});
     CHECK(build(doc).hasCode("a", "unknown_port"));
   }
   // 必填输入没连
   {
-    const Json doc = makeGraph({{"b", "filter.passthrough"}}, {});
+    const Json doc = makeGraph({{"b", "test.thin"}}, {});
     const Built r = build(doc);
     const Diagnostic* d = r.find("b", "missing_input");
     REQUIRE(d != nullptr);
     CHECK(d->status.portName == "cloud");
   }
-  // 可选输入没连：crop_box 的 pose 是 required=false，不该报
+  // 可选输入没连：test.merge2 的 b 是 required=false，不该报
   {
-    const Json doc = makeGraph({{"a", "gen.synthetic"}, {"c", "filter.crop_box"}},
-                               {{"a.cloud", "c.cloud"}});
+    const Json doc = makeGraph({{"a", "gen.synthetic"}, {"c", "test.merge2"}},
+                               {{"a.cloud", "c.a"}});
     CHECK(build(doc).errorCount() == 0);
   }
 }
 
 TEST_CASE("path 参数为空在校验期就红，而不是等到执行时报打不开空文件名") {
-  const Json doc = makeGraph({{"l", "io.load_pcd"}}, {});
+  ensureTestOps();
+  const Json doc = makeGraph({{"l", "test.sink"}}, {});
   const Built r = build(doc);
   const Diagnostic* d = r.find("l", "bad_param");
   REQUIRE(d != nullptr);
@@ -237,6 +238,7 @@ TEST_CASE("path 参数为空在校验期就红，而不是等到执行时报打�
 }
 
 TEST_CASE("结构性问题也是诊断，不是异常") {
+  ensureTestOps();
   Diagnostics diags;
   exec::RawGraph raw;
   // 边指向不存在的节点
@@ -253,7 +255,8 @@ TEST_CASE("结构性问题也是诊断，不是异常") {
 }
 
 TEST_CASE("输入端口是单连接") {
-  Json doc = makeGraph({{"a", "gen.synthetic"}, {"b", "gen.synthetic"}, {"m", "util.merge"}},
+  ensureTestOps();
+  Json doc = makeGraph({{"a", "gen.synthetic"}, {"b", "gen.synthetic"}, {"m", "test.merge2"}},
                        {{"a.cloud", "m.a"}, {"b.cloud", "m.a"}});
   Diagnostics diags;
   exec::RawGraph raw;
@@ -266,6 +269,7 @@ TEST_CASE("输入端口是单连接") {
 }
 
 TEST_CASE("cacheKey：参数变则键变，书写顺序变则键不变") {
+  ensureTestOps();
   const Json a = makeGraph({{"g", "gen.synthetic", Json{{"seed", 1}, {"pointCount", 100}}}}, {});
   const Json b = makeGraph({{"g", "gen.synthetic", Json{{"pointCount", 100}, {"seed", 1}}}}, {});
   const Json c = makeGraph({{"g", "gen.synthetic", Json{{"seed", 2}, {"pointCount", 100}}}}, {});
@@ -280,9 +284,10 @@ TEST_CASE("cacheKey：参数变则键变，书写顺序变则键不变") {
 }
 
 TEST_CASE("cacheKey 沿着依赖链传播") {
+  ensureTestOps();
   auto keyOf = [](int seed) {
     const Json doc = makeGraph(
-        {{"g", "gen.synthetic", Json{{"seed", seed}}}, {"v", "filter.voxel_grid"}},
+        {{"g", "gen.synthetic", Json{{"seed", seed}}}, {"v", "test.thin"}},
         {{"g.cloud", "v.cloud"}});
     return nodeOf(build(doc).plan, "v")->cacheKey;
   };
@@ -291,11 +296,12 @@ TEST_CASE("cacheKey 沿着依赖链传播") {
 }
 
 TEST_CASE("Run to node 只保留目标的上游闭包") {
+  ensureTestOps();
   const Json doc = makeGraph(
       {
           {"g", "gen.synthetic"},
-          {"v", "filter.voxel_grid"},
-          {"p", "filter.passthrough"},
+          {"v", "test.thin"},
+          {"p", "test.thin", Json{{"leaf", {0.05, 0.05, 0.05}}}},
       },
       {{"g.cloud", "v.cloud"}, {"v.cloud", "p.cloud"}});
 
@@ -307,6 +313,7 @@ TEST_CASE("Run to node 只保留目标的上游闭包") {
 }
 
 TEST_CASE("canonicalParamsJson 键排序且数字稳定") {
+  ensureTestOps();
   ParamMap m;
   m["z"] = Value::integer(1);
   m["a"] = Value::number(2.0);

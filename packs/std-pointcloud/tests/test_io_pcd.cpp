@@ -7,7 +7,7 @@
 
 #include "exec/result_store.h"
 #include "helpers.h"
-#include "ops/pcl/pcl_path.h"
+#include "lyflow_pcl/pcl_path.h"
 
 using namespace lyflow;
 using namespace lyflow::test;

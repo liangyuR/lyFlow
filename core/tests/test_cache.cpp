@@ -1,8 +1,8 @@
 // M3 核心轨：缓存复用与 LRU、并行调度、bypass 透传、Any 推导、迁移链。
+// 算子一律用 gen.synthetic / util.reroute / test.*（S6）。
 #include <doctest/doctest.h>
 
 #include <chrono>
-#include <mutex>
 #include <random>
 #include <set>
 #include <thread>
@@ -11,6 +11,7 @@
 #include "exec/result_store.h"
 #include "helpers.h"
 #include "lyflow/operator.h"
+#include "test_ops.h"
 
 using namespace lyflow;
 using namespace lyflow::test;
@@ -19,59 +20,13 @@ namespace {
 
 using Ms = std::chrono::milliseconds;
 
-/// 睡指定毫秒再透传。并行验收要的是「墙钟时间」这一个可观测量，
-/// 而真算子的耗时随机器浮动，没法拿来断言。
-Status sleepCompute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
-                    ExecContext& ctx) {
-  const auto deadline = std::chrono::steady_clock::now() + Ms(params.integer("ms"));
-  while (std::chrono::steady_clock::now() < deadline && !ctx.cancelled()) {
-    std::this_thread::sleep_for(Ms(2));
-  }
-  outputs.set("cloud", inputs.get("cloud"));
-  return Status::Ok();
-}
-
-void ensureSleepOp() {
-  static std::once_flag once;
-  std::call_once(once, [] {
-    OperatorDesc op;
-    op.id = "test.sleep";
-    op.version = "1.0.0";
-    op.label = "Sleep";
-    op.category = "Test";
-    op.doc = "只在测试里注册：睡一会儿再把输入原样传出去。";
-    op.inputs = {Port{"cloud", "PointCloud", "Cloud", "", true}};
-    op.outputs = {Port{"cloud", "PointCloud", "Cloud", "", true}};
-
-    Param ms;
-    ms.name = "ms";
-    ms.type = ParamType::Int;
-    ms.label = "Milliseconds";
-    ms.def = Value::integer(200);
-    ms.min = 0.0;
-
-    // tag 只为让并行的几支拿到不同的 cacheKey —— 参数一样的话第二支就命中缓存了，
-    // 于是「四支并行」会变成「一支算完三支复用」，测出来的时间是假的。
-    Param tag;
-    tag.name = "tag";
-    tag.type = ParamType::String;
-    tag.label = "Tag";
-    tag.def = Value::text("");
-
-    op.params = {ms, tag};
-    op.capabilities = {/*cancellable=*/true, /*previewable=*/false, /*deterministic=*/true};
-    op.compute = &sleepCompute;
-    ensureRegistry().addOperator(std::move(op));
-  });
-}
-
 const Json kSmall = Json{{"pointCount", 4000}};
 
 Json chainGraph() {
   return makeGraph(
       {
           {"g", "gen.synthetic", kSmall},
-          {"v", "filter.voxel_grid", Json{{"leafSize", {0.02, 0.02, 0.02}}}},
+          {"v", "test.thin", Json{{"leaf", {0.02, 0.02, 0.02}}}},
           {"p", "util.reroute"},
       },
       {{"g.cloud", "v.cloud"}, {"v.cloud", "p.in"}});
@@ -86,10 +41,10 @@ Json diamondGraph(int sleepMs) {
     nodes.push_back(N{id, "test.sleep", Json{{"ms", sleepMs}, {"tag", id}}});
     edges.push_back(E{"g.cloud", id + ".cloud"});
   }
-  // 汇点靠 util.merge 两两合并成一棵小树，因为输入端口是单连接的
-  nodes.push_back(N{"m0", "util.merge"});
-  nodes.push_back(N{"m1", "util.merge"});
-  nodes.push_back(N{"m", "util.merge"});
+  // 汇点靠 test.merge2 两两合并成一棵小树，因为输入端口是单连接的
+  nodes.push_back(N{"m0", "test.merge2"});
+  nodes.push_back(N{"m1", "test.merge2"});
+  nodes.push_back(N{"m", "test.merge2"});
   edges.push_back(E{"s0.cloud", "m0.a"});
   edges.push_back(E{"s1.cloud", "m0.b"});
   edges.push_back(E{"s2.cloud", "m1.a"});
@@ -119,6 +74,7 @@ double runDurationMs(const RunLog& log) {
 // ---------------------------------------------------------------- 1.1 缓存
 
 TEST_CASE("原图重跑：全部 skipped，总耗时 < 50 ms") {
+  ensureTestOps();
   const Json doc = chainGraph();
   const RunLog first = runGraph(doc);
   REQUIRE(first.runStatus() == "ok");
@@ -139,13 +95,14 @@ TEST_CASE("原图重跑：全部 skipped，总耗时 < 50 ms") {
 }
 
 TEST_CASE("改中间节点参数：只重算它和它的下游") {
+  ensureTestOps();
   const RunLog first = runGraph(chainGraph());
   REQUIRE(first.runStatus() == "ok");
 
   const Json changed = makeGraph(
       {
           {"g", "gen.synthetic", kSmall},
-          {"v", "filter.voxel_grid", Json{{"leafSize", {0.05, 0.05, 0.05}}}},
+          {"v", "test.thin", Json{{"leaf", {0.05, 0.05, 0.05}}}},
           {"p", "util.reroute"},
       },
       {{"g.cloud", "v.cloud"}, {"v.cloud", "p.in"}});
@@ -158,6 +115,7 @@ TEST_CASE("改中间节点参数：只重算它和它的下游") {
 }
 
 TEST_CASE("lyflow_plan 的预测集合与实际 skipped 集合完全一致") {
+  ensureTestOps();
   const Json doc = chainGraph();
   exec::ResultStore::instance().clear();
 
@@ -186,6 +144,7 @@ TEST_CASE("lyflow_plan 的预测集合与实际 skipped 集合完全一致") {
 }
 
 TEST_CASE("lyflow_plan 校验失败时返回的是诊断而不是计划") {
+  ensureTestOps();
   const Json doc = makeGraph({{"a", "no.such.op"}}, {});
   const Json out = Json::parse(exec::planGraphJson(doc.dump(), {}, {}));
   REQUIRE(out.is_array());
@@ -195,6 +154,7 @@ TEST_CASE("lyflow_plan 校验失败时返回的是诊断而不是计划") {
 }
 
 TEST_CASE("LRU 字节预算：超预算时从最久没用的一头淘汰") {
+  ensureTestOps();
   exec::ResultStore& store = exec::ResultStore::instance();
   store.clear();
   const std::uint64_t original = store.budget();
@@ -222,13 +182,14 @@ TEST_CASE("LRU 字节预算：超预算时从最久没用的一头淘汰") {
 }
 
 TEST_CASE("纯副作用算子不参与缓存：没有输出端口就永远不 skipped") {
+  ensureTestOps();
   const auto dir = std::filesystem::temp_directory_path() / "lyflow-cache-sink";
   std::filesystem::remove_all(dir);
   std::filesystem::create_directories(dir);
   const Json doc = makeGraph(
       {
           {"g", "gen.synthetic", Json{{"pointCount", 500}}},
-          {"w", "io.save_pcd", Json{{"path", "out.pcd"}}},
+          {"w", "test.sink", Json{{"path", "out.pcd"}}},
       },
       {{"g.cloud", "w.cloud"}});
 
@@ -247,7 +208,7 @@ TEST_CASE("纯副作用算子不参与缓存：没有输出端口就永远不 sk
 // ---------------------------------------------------------------- 1.2 并行
 
 TEST_CASE("菱形图：四支各睡 200 ms，并行墙钟 < 500 ms") {
-  ensureSleepOp();
+  ensureTestOps();
   const Json doc = diamondGraph(200);
 
   Session parallel(doc);
@@ -261,7 +222,7 @@ TEST_CASE("菱形图：四支各睡 200 ms，并行墙钟 < 500 ms") {
 }
 
 TEST_CASE("同一张图串行跑要慢得多 —— 证明快的那次真的是并行") {
-  ensureSleepOp();
+  ensureTestOps();
   Session serial(diamondGraph(120), {}, {}, /*keepCache=*/false, /*maxParallel=*/1);
   RunLog& log = serial.wait();
 
@@ -270,7 +231,7 @@ TEST_CASE("同一张图串行跑要慢得多 —— 证明快的那次真的是�
 }
 
 TEST_CASE("并行下事件 seq 无重复无空洞") {
-  ensureSleepOp();
+  ensureTestOps();
   const RunLog log = runGraph(diamondGraph(20));
   REQUIRE(log.runStatus() == "ok");
 
@@ -287,7 +248,7 @@ TEST_CASE("并行下事件 seq 无重复无空洞") {
 }
 
 TEST_CASE("随机取消 100 次：不死锁、不泄漏、状态始终自洽") {
-  ensureSleepOp();
+  ensureTestOps();
   const Json doc = diamondGraph(60);
   std::mt19937 rng(20260906);
   std::uniform_int_distribution<int> delay(0, 40);
@@ -312,7 +273,8 @@ TEST_CASE("随机取消 100 次：不死锁、不泄漏、状态始终自洽") {
 
 // ------------------------------------------------------ 1.3 bypass 与 Any
 
-TEST_CASE("bypass：静音的体素节点让下游拿到原始点数") {
+TEST_CASE("bypass：静音的抽稀节点让下游拿到原始点数") {
+  ensureTestOps();
   Json doc = chainGraph();
   doc["nodes"][1]["bypass"] = true;
   const RunLog log = runGraph(doc);
@@ -325,12 +287,13 @@ TEST_CASE("bypass：静音的体素节点让下游拿到原始点数") {
 
   const Json g = log.nodeEvent("g", "done");
   const Json p = log.nodeEvent("p", "done");
-  // 体素没跑，所以下游看到的就是源头那个点数
+  // 抽稀没跑，所以下游看到的就是源头那个点数
   CHECK(v["stats"]["elementCount"] == g["stats"]["elementCount"]);
   CHECK(p["stats"]["elementCount"] == g["stats"]["elementCount"]);
 }
 
 TEST_CASE("bypass 改变 cacheKey：取消静音之后不会拿到静音时的结果") {
+  ensureTestOps();
   Json muted = chainGraph();
   muted["nodes"][1]["bypass"] = true;
   const RunLog a = runGraph(muted);
@@ -345,21 +308,22 @@ TEST_CASE("bypass 改变 cacheKey：取消静音之后不会拿到静音时的�
 }
 
 TEST_CASE("bypass 找不到类型兼容的源：下游报 bypassed_no_source") {
-  // extract_indices 吃 cloud + indices 出 selected/rest，静音后 indices
+  ensureTestOps();
+  // split 吃 cloud + indices 出 selected/rest，静音后 indices
   // 那一路没有 Indices 类型的输入可以透传。
   const Json doc = makeGraph(
       {
           {"g", "gen.synthetic", kSmall},
-          {"pl", "segment.ransac_plane"},
-          {"x", "segment.extract_indices"},
-          {"tail", "filter.passthrough"},
+          {"pl", "test.half_indices"},
+          {"x", "test.split"},
+          {"tail", "test.thin"},
       },
       {{"g.cloud", "pl.cloud"},
        {"g.cloud", "x.cloud"},
-       {"pl.inliers", "x.indices"},
+       {"pl.indices", "x.indices"},
        {"x.rest", "tail.cloud"}});
   Json muted = doc;
-  muted["nodes"][1]["bypass"] = true;  // 静音 ransac_plane
+  muted["nodes"][1]["bypass"] = true;  // 静音 half_indices
 
   const RunLog log = runGraph(muted);
   CHECK(log.runStatus() == "error");
@@ -371,12 +335,13 @@ TEST_CASE("bypass 找不到类型兼容的源：下游报 bypassed_no_source") {
 }
 
 TEST_CASE("Any 推导：reroute 串两级后端口是 PointCloud，接错类型被拒") {
+  ensureTestOps();
   const Json ok = makeGraph(
       {
           {"g", "gen.synthetic", kSmall},
           {"r1", "util.reroute"},
           {"r2", "util.reroute"},
-          {"p", "filter.passthrough"},
+          {"p", "test.thin"},
       },
       {{"g.cloud", "r1.in"}, {"r1.out", "r2.in"}, {"r2.out", "p.cloud"}});
 
@@ -403,7 +368,7 @@ TEST_CASE("Any 推导：reroute 串两级后端口是 PointCloud，接错类型�
       {
           {"g", "gen.synthetic", kSmall},
           {"r", "util.reroute"},
-          {"x", "segment.extract_indices"},
+          {"x", "test.split"},
       },
       {{"g.cloud", "r.in"}, {"g.cloud", "x.cloud"}, {"r.out", "x.indices"}});
   Diagnostics badDiags;
@@ -419,6 +384,7 @@ TEST_CASE("Any 推导：reroute 串两级后端口是 PointCloud，接错类型�
 }
 
 TEST_CASE("孤立的 reroute 推不出类型也不报错") {
+  ensureTestOps();
   const Json doc = makeGraph({{"r", "util.reroute"}}, {});
   Diagnostics diags;
   exec::RawGraph raw;
@@ -435,11 +401,12 @@ TEST_CASE("孤立的 reroute 推不出类型也不报错") {
 
 // ---------------------------------------------------------------- 1.4 迁移
 
-TEST_CASE("迁移链：v1 的 random_sample 图产出 migration 诊断") {
+TEST_CASE("迁移链：v1 的图产出 migration 诊断") {
+  ensureTestOps();
   Json doc = makeGraph(
       {
           {"g", "gen.synthetic", kSmall},
-          {"s", "filter.random_sample", Json{{"count", 123}, {"seed", 9}}},
+          {"s", "test.migrated", Json{{"count", 123}, {"seed", 9}}},
       },
       {{"g.cloud", "s.cloud"}});
   doc["nodes"][1]["opVersion"] = "1.0.0";
@@ -453,7 +420,7 @@ TEST_CASE("迁移链：v1 的 random_sample 图产出 migration 诊断") {
   REQUIRE_FALSE(migration.is_null());
   CHECK(migration["nodeId"] == "s");
   CHECK(migration["severity"] == "warning");
-  CHECK(migration["op"] == "filter.random_sample");
+  CHECK(migration["op"] == "test.migrated");
   CHECK(migration["opVersion"] == "2.0.0");
   CHECK(migration["params"]["keepCount"] == 123);
   CHECK(migration["params"].contains("count") == false);
@@ -467,10 +434,11 @@ TEST_CASE("迁移链：v1 的 random_sample 图产出 migration 诊断") {
 }
 
 TEST_CASE("迁移是在内存里生效的：老图直接跑得通") {
+  ensureTestOps();
   Json doc = makeGraph(
       {
           {"g", "gen.synthetic", kSmall},
-          {"s", "filter.random_sample", Json{{"count", 100}}},
+          {"s", "test.migrated", Json{{"count", 100}}},
       },
       {{"g.cloud", "s.cloud"}});
   doc["nodes"][1]["opVersion"] = "1.0.0";
@@ -482,10 +450,11 @@ TEST_CASE("迁移是在内存里生效的：老图直接跑得通") {
 }
 
 TEST_CASE("迁移之后再存再开：不再产出迁移诊断") {
+  ensureTestOps();
   Json doc = makeGraph(
       {
           {"g", "gen.synthetic", kSmall},
-          {"s", "filter.random_sample", Json{{"keepCount", 123}, {"seed", 9}}},
+          {"s", "test.migrated", Json{{"keepCount", 123}, {"seed", 9}}},
       },
       {{"g.cloud", "s.cloud"}});
   doc["nodes"][1]["opVersion"] = "2.0.0";
@@ -496,6 +465,7 @@ TEST_CASE("迁移之后再存再开：不再产出迁移诊断") {
 }
 
 TEST_CASE("别名重定向也是一次迁移") {
+  ensureTestOps();
   Registry r;
   OperatorDesc op;
   op.id = "test.renamed";
@@ -528,6 +498,7 @@ TEST_CASE("别名重定向也是一次迁移") {
 }
 
 TEST_CASE("注册表自检：迁移链断档会被挡在启动时") {
+  ensureTestOps();
   auto makeOp = [](const char* version, std::vector<Migration> migrations) {
     OperatorDesc op;
     op.id = "test.chain";
@@ -560,11 +531,12 @@ TEST_CASE("注册表自检：迁移链断档会被挡在启动时") {
 // ------------------------------------------------------------- 1.6 参数联动
 
 TEST_CASE("隐藏的 path 参数不校验必填") {
-  // io.save_pcd 的 path 是可见的必填项，空着就该红
+  ensureTestOps();
+  // test.sink 的 path 是可见的必填项，空着就该红
   const Json empty = makeGraph(
       {
           {"g", "gen.synthetic", kSmall},
-          {"w", "io.save_pcd", Json{{"path", ""}}},
+          {"w", "test.sink", Json{{"path", ""}}},
       },
       {{"g.cloud", "w.cloud"}});
   const Json diags = Json::parse(exec::validateGraphJson(empty.dump(), {}));
@@ -578,6 +550,7 @@ TEST_CASE("隐藏的 path 参数不校验必填") {
 }
 
 TEST_CASE("被 visibleWhen 藏起来的参数只查形态不查必填") {
+  ensureTestOps();
   Registry r;
   r.addType(PortType{"Transform", "#a0d030", {}, ""});
 

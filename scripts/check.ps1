@@ -6,6 +6,8 @@ $root = Split-Path -Parent $PSScriptRoot
 function Step($name) { Write-Host "`n=== $name ===" -ForegroundColor Cyan }
 
 Step "C++ core"
+# 标准算子包（ADR-0014）：默认开，LYFLOW_STD_PACKS=0 跑纯平台构建
+if ($env:LYFLOW_STD_PACKS -eq "0") { Write-Host "标准包已关：纯平台构建" -ForegroundColor Yellow }
 & "$PSScriptRoot\build-core.ps1"
 
 Step "manifest vs schema"

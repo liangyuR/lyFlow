@@ -29,6 +29,9 @@ $interesting = @(".cpp", ".h", ".hpp", ".txt", ".cmake")
 
 # 算子包目录也一起盯着（ADR-0013）：改包里的算子同样要触发增量构建 + 热重载。
 $watched = @($source)
+# 仓库内的标准包也在监视范围里（ADR-0014）
+$packsDir = Join-Path $root "packs"
+if ($env:LYFLOW_STD_PACKS -ne "0" -and (Test-Path $packsDir)) { $watched += $packsDir }
 if ($env:LYFLOW_OP_PACKS) {
   foreach ($p in $env:LYFLOW_OP_PACKS.Split(";")) {
     if ($p -and (Test-Path $p)) { $watched += (Resolve-Path $p).Path }

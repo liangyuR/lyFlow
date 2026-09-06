@@ -100,4 +100,23 @@ class ExecContext {
   virtual int threadBudget() const = 0;
 };
 
+/// 长循环里的取消轮询 + 进度上报。按 8192 个点问一次：
+/// 每点一次会让原子读成为热点循环的瓶颈，而晚 8192 个点响应取消人感觉不到。
+class Ticker {
+ public:
+  Ticker(ExecContext& ctx, std::size_t total) : ctx_(ctx), total_(total ? total : 1) {}
+
+  /// 返回 true 表示应当立刻退出。
+  bool tick(std::size_t i) {
+    if ((i & 0x1FFF) != 0) return false;
+    if (ctx_.cancelled()) return true;
+    ctx_.progress(static_cast<float>(static_cast<double>(i) / static_cast<double>(total_)));
+    return false;
+  }
+
+ private:
+  ExecContext& ctx_;
+  std::size_t total_;
+};
+
 }  // namespace lyflow

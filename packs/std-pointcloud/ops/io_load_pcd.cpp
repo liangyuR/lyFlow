@@ -6,9 +6,9 @@
 #include <cctype>
 #include <system_error>
 
-#include "ops/ops.h"
-#include "ops/pcl/adapter.h"
-#include "ops/pcl/pcl_path.h"
+#include "ops.h"
+#include "lyflow_pcl/adapter.h"
+#include "lyflow_pcl/pcl_path.h"
 
 namespace lyflow::ops {
 namespace {

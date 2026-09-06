@@ -82,6 +82,8 @@ export interface Capabilities {
 export interface OperatorDesc {
   id: string;
   version: string;
+  /** 来自哪个算子包（ADR-0014）。只用于排查，前端不据此改任何行为。 */
+  pack?: string;
   aliases?: string[];
   label: string;
   /** 用 / 分层，决定搜索面板的树形结构。 */

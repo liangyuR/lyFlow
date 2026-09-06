@@ -20,15 +20,21 @@ tests/                doctest 测试
 
 ## 依赖
 
-- **PCL**（vcpkg，`x64-windows` 动态三元组）：`common io filters kdtree search
-  segmentation sample_consensus features`。约定装在 `C:\vcpkg`，`VCPKG_ROOT` 可覆盖。
-- **vendored 单头**（不走 vcpkg，见 D7）：`nlohmann/json`（GraphDoc 解析）、
-  `doctest`（测试）、`xxhash`（cacheKey）。这三样进 vcpkg 会让 core 自身的
-  构建从秒级变成分钟级，而它们各自只有一个头文件。
+**core 只有 vendored 单头**（不走 vcpkg，见 D7）：`nlohmann/json`（GraphDoc 解析）、
+`doctest`（测试）、`xxhash`（cacheKey）。这三样进 vcpkg 会让 core 自身的构建
+从秒级变成分钟级，而它们各自只有一个头文件。**没有别的了** ——
+`find_package` 一个都不调，`LYFLOW_STD_PACKS=0` 下 `lyflow_core.dll` 的导入表里
+只有 KERNEL32 与 CRT（[ADR-0014](../docs/adr/0014-std-as-pack-core-zero-dep.md)）。
 
-M0/M1 时期这里写着「零第三方依赖是有意的」。M2 引入 PCL 之后那句话不再成立，
-但它保护的东西还在：**「加一个手写算子」的反馈循环仍然是秒级的** ——
-PCL 的重量被关在 `src/ops/pcl/` 和它专属的 PCH 里（[ADR-0005](../docs/adr/0005-pcl-boundary.md)）。
+**PCL 归标准算子包** `packs/std-pointcloud`（vcpkg，`x64-windows` 动态三元组：
+`common io filters kdtree search segmentation sample_consensus features`；
+约定装在 `C:\vcpkg`，`VCPKG_ROOT` 可覆盖）。默认构建会把它编进来，开箱行为与
+M2 以来完全一致；它同时导出 `lyflow_pcl_support`，别的包要 PCL 就链它，
+不各自 `find_package`（[ADR-0005](../docs/adr/0005-pcl-boundary.md)）。
+
+M0/M1 时期这里写着「零第三方依赖是有意的」。M2 引入 PCL 之后那句话失效了三个
+里程碑，ADR-0014 把它拿了回来 —— 代价是「内置算子」这个概念没有了，
+所有算法都是包。
 
 ## 构建
 

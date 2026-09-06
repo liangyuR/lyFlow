@@ -15,6 +15,10 @@ class Registry {
   void addOperator(OperatorDesc op);
   void clear();
 
+  /// 之后 addOperator 进来的算子归属哪个包（S7）。生成的注册入口在调包之前设、
+  /// 调完清空；core 自己的算子因此留空。格式是「包名」或「包名@版本」。
+  void setCurrentPack(std::string pack);
+
   /// 整份替换库算子（ADR-0010）。它们排在内置算子之后，其余处处与内置无差别。
   /// 与热重载同一条约定：调用时必须没有活跃的 run —— 会让旧的 OperatorDesc* 失效。
   void setLibraryOperators(std::vector<OperatorDesc> ops);
@@ -41,15 +45,17 @@ class Registry {
   std::vector<OperatorDesc> operators_;
   /// operators_ 里前多少个是内置的。setLibraryOperators 从这里往后重写。
   std::size_t builtinCount_ = 0;
+  std::string currentPack_;
 };
 
 // 注册所有内置算子与端口类型。显式调用列表而非静态自注册，理由与加算子的流程
 // 见 core/README.md「加一个算子」。
 void registerBuiltinOps(Registry& registry);
 
-/// 注册编进本次构建的算子包（ADR-0013）。实现由 CMake 按 LYFLOW_OP_PACKS 生成；
-/// 不带包时是空函数。registerBuiltinOps 末尾会调它。
-void registerOpPacks(Registry& registry);
+/// 注册编进本次构建的算子包（ADR-0013 / ADR-0014）。两份实现都由 CMake 生成，
+/// 没有对应的包时是空函数：std 是仓库内的 packs/*，external 是 LYFLOW_OP_PACKS。
+void registerStdPacks(Registry& registry);
+void registerExternalPacks(Registry& registry);
 
 // 进程内那一份注册表，保证只填充一次。
 // C ABI 入口、执行器、dump 工具、测试都从这里拿，避免两条路径各自初始化的竞态。

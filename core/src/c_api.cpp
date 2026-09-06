@@ -10,7 +10,7 @@
 #include "exec/executor.h"
 #include "exec/library.h"
 #include "exec/result_store.h"
-#include "ops/ops.h"
+#include "lyflow/cloud_io.h"
 #include "lyflow/json_writer.h"
 #include "lyflow/registry.h"
 #include "lyflow/version.h"
@@ -281,7 +281,7 @@ char* lyflow_output_save(const char* run_id, const char* node_id, const char* po
       return dup(std::string("端口 ") + fromC(port) + " 不是点云（是 " + data.typeName() + "）");
     }
     const std::string fmt = fromC(format);
-    const lyflow::Status s = lyflow::ops::saveCloudToFile(
+    const lyflow::Status s = lyflow::saveCloudToFile(
         *cloud, std::filesystem::u8path(file), fmt.empty() ? std::string("binary") : fmt);
     return dup(s.ok ? std::string() : s.message);
   } catch (const std::exception& e) {

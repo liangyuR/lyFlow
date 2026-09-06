@@ -139,6 +139,22 @@ fn main() {
     }
     println!("cargo:rerun-if-env-changed=VCPKG_ROOT");
 
+    // 仓库内的标准算子包（ADR-0014）。默认 1；LYFLOW_STD_PACKS=0 是纯平台构建。
+    // 空串按「没设」处理：PowerShell 里 $env:X="" 留下的是空串而不是删除
+    let std_packs = match std::env::var("LYFLOW_STD_PACKS") {
+        Ok(v) if !v.trim().is_empty() => v,
+        _ => "1".to_string(),
+    };
+    println!("cargo:rerun-if-env-changed=LYFLOW_STD_PACKS");
+    let packs_root = core.parent().expect("core 应当有父目录").join("packs");
+    if std_packs != "0" && packs_root.is_dir() {
+        let (mut pf, mut pd) = (Vec::new(), Vec::new());
+        collect(&packs_root, &mut pf, &mut pd);
+        for f in pf.iter().chain(pd.iter()) {
+            println!("cargo:rerun-if-changed={}", f.display());
+        }
+    }
+
     // 算子包（ADR-0013）。包目录也进 rerun 列表，改包里的算子才会重新构建 core。
     let packs = std::env::var("LYFLOW_OP_PACKS").unwrap_or_default();
     println!("cargo:rerun-if-env-changed=LYFLOW_OP_PACKS");
@@ -164,7 +180,8 @@ fn main() {
         // 只构建 lyflow_core：core 没有 install 规则，两个 exe 归 build-core.ps1 管。
         // vcpkg 的 applocal 对 SHARED 目标同样生效，PCL 的依赖 DLL 照样落到 bin/。
         .build_target("lyflow_core")
-        .define("LYFLOW_OP_PACKS", &packs);
+        .define("LYFLOW_OP_PACKS", &packs)
+        .define("LYFLOW_STD_PACKS", &std_packs);
     let ninja = find_ninja();
     if let Some(ninja) = &ninja {
         cfg.generator("Ninja").define("CMAKE_MAKE_PROGRAM", ninja);

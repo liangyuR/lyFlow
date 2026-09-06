@@ -13,13 +13,14 @@
 #include "exec/subgraph.h"
 #include "helpers.h"
 #include "lyflow/registry.h"
+#include "test_ops.h"
 
 using namespace lyflow;
 using namespace lyflow::test;
 
 namespace {
 
-/// 三节点直链的平版本：生成 → 体素 → 直通。
+/// 三节点直链的平版本：生成 → 抽稀 → 直通。
 Json flatGraph(int seed) {
   Json doc;
   doc["schemaVersion"] = 1;
@@ -27,9 +28,9 @@ Json flatGraph(int seed) {
   doc["nodes"] = Json::array({
       Json{{"id", "g"}, {"op", "gen.synthetic"}, {"params", {{"pointCount", 20000}, {"seed", seed}}}},
       Json{{"id", "v"},
-           {"op", "filter.voxel_grid"},
-           {"params", {{"leafSize", Json::array({0.02, 0.02, 0.02})}}}},
-      Json{{"id", "p"}, {"op", "filter.passthrough"}, {"params", {{"min", -100.0}, {"max", 100.0}}}},
+           {"op", "test.thin"},
+           {"params", {{"leaf", Json::array({0.02, 0.02, 0.02})}}}},
+      Json{{"id", "p"}, {"op", "test.thin"}, {"params", {{"leaf", Json::array({0.01, 0.01, 0.01})}}}},
   });
   doc["edges"] = Json::array({
       Json{{"id", "e1"}, {"from", {{"node", "g"}, {"port", "cloud"}}},
@@ -59,10 +60,10 @@ Json subgraphGraph(int seed, double leaf = 0.02) {
   doc["subgraphs"]["clean"] = Json{
       {"name", "去噪"},
       {"nodes", Json::array({
-                    Json{{"id", "v"}, {"op", "filter.voxel_grid"}},
+                    Json{{"id", "v"}, {"op", "test.thin"}},
                     Json{{"id", "p"},
-                         {"op", "filter.passthrough"},
-                         {"params", {{"min", -100.0}, {"max", 100.0}}}},
+                         {"op", "test.thin"},
+                         {"params", {{"leaf", Json::array({0.01, 0.01, 0.01})}}}},
                 })},
       {"edges", Json::array({Json{{"id", "ei"},
                                   {"from", {{"node", "v"}, {"port", "cloud"}}},
@@ -77,7 +78,7 @@ Json subgraphGraph(int seed, double leaf = 0.02) {
                                    {"type", "vec3f"},
                                    {"default", Json::array({0.02, 0.02, 0.02})},
                                    {"min", 0.0001},
-                                   {"binds", Json::array({Json{{"node", "v"}, {"param", "leafSize"}}})}}})},
+                                   {"binds", Json::array({Json{{"node", "v"}, {"param", "leaf"}}})}}})},
   };
   return doc;
 }
@@ -101,6 +102,7 @@ std::vector<std::string> planIds(const RunLog& log) {
 }  // namespace
 
 TEST_CASE("子图展开：结果与平图逐点一致") {
+  ensureTestOps();
   const RunLog flat = runGraph(flatGraph(11));
   REQUIRE(flat.runStatus() == "ok");
 
@@ -119,16 +121,17 @@ TEST_CASE("子图展开：结果与平图逐点一致") {
 }
 
 TEST_CASE("子图参数：外参覆盖内参，一个外参可绑多个内参") {
+  ensureTestOps();
   const RunLog coarse = runGraph(subgraphGraph(12, 0.05));
   const RunLog fine = runGraph(subgraphGraph(12, 0.005));
   REQUIRE(coarse.runStatus() == "ok");
   REQUIRE(fine.runStatus() == "ok");
   CHECK(elementCountOf(coarse, "s/v") < elementCountOf(fine, "s/v"));
 
-  // 一个外参绑两个内参：两级体素都跟着它走
+  // 一个外参绑两个内参：两级抽稀都跟着它走
   Json doc = subgraphGraph(13, 0.04);
   doc["subgraphs"]["clean"]["nodes"].push_back(
-      Json{{"id", "v2"}, {"op", "filter.voxel_grid"}});
+      Json{{"id", "v2"}, {"op", "test.thin"}});
   doc["subgraphs"]["clean"]["edges"] = Json::array({
       Json{{"id", "ei"}, {"from", {{"node", "v"}, {"port", "cloud"}}},
            {"to", {{"node", "v2"}, {"port", "cloud"}}}},
@@ -136,15 +139,17 @@ TEST_CASE("子图参数：外参覆盖内参，一个外参可绑多个内参") 
            {"to", {{"node", "p"}, {"port", "cloud"}}}},
   });
   doc["subgraphs"]["clean"]["params"][0]["binds"].push_back(
-      Json{{"node", "v2"}, {"param", "leafSize"}});
+      Json{{"node", "v2"}, {"param", "leaf"}});
 
   const RunLog two = runGraph(doc);
   REQUIRE(two.runStatus() == "ok");
-  // 同一个 leafSize 跑两遍体素：第二级什么都不该再减掉
-  CHECK(elementCountOf(two, "s/v2") == elementCountOf(two, "s/v"));
+  // leaf=0.04 是四取一：两级都真的拿到了外参，点数就该连着除两次 4
+  CHECK(elementCountOf(two, "s/v") == 5000);
+  CHECK(elementCountOf(two, "s/v2") == 1250);
 }
 
 TEST_CASE("子图嵌套两层：cacheKey 稳定，重跑全部 skipped") {
+  ensureTestOps();
   Json doc = subgraphGraph(14);
   // outer 只包着 clean 这一个子图节点
   doc["subgraphs"]["outer"] = Json{
@@ -180,6 +185,7 @@ TEST_CASE("子图嵌套两层：cacheKey 稳定，重跑全部 skipped") {
 }
 
 TEST_CASE("子图递归引用被拒") {
+  ensureTestOps();
   Json doc = subgraphGraph(15);
   doc["subgraphs"]["clean"]["nodes"].push_back(Json{{"id", "self"}, {"op", "sub:clean"}});
 
@@ -199,6 +205,7 @@ TEST_CASE("子图递归引用被拒") {
 }
 
 TEST_CASE("子图引用了不存在的定义 → unknown_op") {
+  ensureTestOps();
   Json doc = flatGraph(16);
   doc["nodes"].push_back(Json{{"id", "x"}, {"op", "sub:nope"}});
   Diagnostics diags;
@@ -212,6 +219,7 @@ TEST_CASE("子图引用了不存在的定义 → unknown_op") {
 }
 
 TEST_CASE("子图节点静音：整棵子树透传") {
+  ensureTestOps();
   Json doc = subgraphGraph(17);
   doc["nodes"][1]["bypass"] = true;
   const RunLog log = runGraph(doc);
@@ -224,6 +232,7 @@ TEST_CASE("子图节点静音：整棵子树透传") {
 }
 
 TEST_CASE("Run to node 的目标可以是子图节点：按路径前缀收编整棵子树") {
+  ensureTestOps();
   Json doc = subgraphGraph(18);
   const RunLog log = runGraph(doc, {}, {"s"});
   REQUIRE(log.runStatus() == "ok");
@@ -234,6 +243,7 @@ TEST_CASE("Run to node 的目标可以是子图节点：按路径前缀收编整
 }
 
 TEST_CASE("子图的未知参数会被报出来") {
+  ensureTestOps();
   Json doc = subgraphGraph(19);
   doc["nodes"][1]["params"]["nosuch"] = 1;
   Diagnostics diags;
@@ -247,6 +257,7 @@ TEST_CASE("子图的未知参数会被报出来") {
 }
 
 TEST_CASE("子图合成出来的 OperatorDesc 通得过注册表自检") {
+  ensureTestOps();
   Json doc = subgraphGraph(20);
   exec::SubgraphDef def;
   std::string error;
@@ -267,6 +278,7 @@ TEST_CASE("子图合成出来的 OperatorDesc 通得过注册表自检") {
 }
 
 TEST_CASE("库目录：*.lyflow-op.json 注册成 lib.<id>，和内置算子无差别") {
+  ensureTestOps();
   const auto dir = std::filesystem::temp_directory_path() / "lyflow-lib-test";
   std::filesystem::remove_all(dir);
   std::filesystem::create_directories(dir);
@@ -311,6 +323,7 @@ TEST_CASE("库目录：*.lyflow-op.json 注册成 lib.<id>，和内置算子无�
 }
 
 TEST_CASE("preview 模式：源头抽稀，且不污染正式缓存") {
+  ensureTestOps();
   Json doc = flatGraph(22);
   doc["nodes"][0]["params"]["pointCount"] = 500000;
 
@@ -344,6 +357,7 @@ TEST_CASE("preview 模式：源头抽稀，且不污染正式缓存") {
 }
 
 TEST_CASE("preview 超预算会发一条 warn 日志") {
+  ensureTestOps();
   Json doc = flatGraph(23);
   doc["nodes"][0]["params"]["pointCount"] = 400000;
 

@@ -160,7 +160,10 @@ Registry& ensureRegistry() {
 
 void Registry::addType(PortType type) { types_.push_back(std::move(type)); }
 
+void Registry::setCurrentPack(std::string pack) { currentPack_ = std::move(pack); }
+
 void Registry::addOperator(OperatorDesc op) {
+  if (op.pack.empty()) op.pack = currentPack_;
   operators_.push_back(std::move(op));
   builtinCount_ = operators_.size();
 }
@@ -322,6 +325,8 @@ std::string Registry::toManifestJson() const {
     w.beginObject();
     w.field("id", op.id);
     w.field("version", op.version);
+    // S7：算子来自哪个包。core 自带的两个算子没有这一项，前端一律不解释它。
+    w.fieldIfSet("pack", op.pack);
     w.fieldIfSet("aliases", op.aliases);
     w.field("label", op.label);
     w.field("category", op.category);

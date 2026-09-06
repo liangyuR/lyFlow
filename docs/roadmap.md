@@ -186,6 +186,32 @@ C ABI 升到 v5：加了 `lyflow_set_library_dirs` / `lyflow_library_count` / `l
 - preview 只跑到选中节点。没选中节点时拖参数不会触发预览。
 - 300 节点的基准是合成图（30 条链 × 10 个 reroute），不是真实 pipeline。
 
+## M4 之后 — core 零第三方依赖
+
+内置的 14 个点云算子整体搬进仓库内的标准算子包 `packs/std-pointcloud/`，
+走的是和 gap 包同一套 `lyflow_op_pack` 机制。core 只剩 `gen.synthetic` 与
+`util.reroute`，不再 `find_package(PCL)`。用户视角零变化：默认构建导出的 manifest
+与拆包前逐字节相同，只多了每个包内算子的一个 `pack` 字段。
+见 [ADR-0014](adr/0014-std-as-pack-core-zero-dep.md) 与
+[std-pack-acceptance.md](std-pack-acceptance.md)。
+
+顺带放开了两条 ADR-0013 的限制：**每包一个 PCH**（拆包前全局只能有一份，
+标准包和 gap 包没法共存）、**包名可以带连字符**（进命名空间前过一遍
+`MAKE_C_IDENTIFIER`）。
+
+**已知毛刺**：
+- **默认构建里，改一个 core 头文件仍然会重编包的 14 个 TU**（它们 include
+  `lyflow/registry.h` → `manifest.h` → `status.h`）。零依赖买到的是「可以不装 PCL
+  地开发 core」（`LYFLOW_STD_PACKS=0` 那条路），不是「装了 PCL 也不重编」。
+  后者要一层稳定的算子 ABI，那正是 ADR-0013 排除掉的方案。
+- 注册顺序被 manifest 的字节兼容性钉住了：`registerBuiltinOps` 是
+  `gen.synthetic → 标准包 → util.reroute → 外部包` 的夹心。
+  「包永远排在内置之后」这句话不再成立。
+- 包用 `file(COPY ...)` 往 `bin/` 里放的 DLL（gap 包的 `onnxruntime.dll`）
+  不会因为下次不带包构建就消失。换模式打包前要自己删。
+- `lyflow_output_save` / CLI `lyflow dump` 依赖标准包装进来的写盘钩子。
+  纯平台构建里它们返回 `unsupported` —— 这是设计，但错误信息是运行期才看到的。
+
 ## M5 — 外延（只列方向，动工前再写计划）
 
 - 第二种数据域 **Image**：`Data::Kind::Image`、2D 视图、OpenCV 算子按 PCL 同样的边界规则接入。
