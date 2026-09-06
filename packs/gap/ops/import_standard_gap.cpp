@@ -160,6 +160,8 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   const YAML::Node align = child(cfg, "align");
   const YAML::Node icp = child(align, "ICP");
 
+  const std::string templateDir = textOr(cfg, "template_dir", "StandardGap");
+
   const std::string segMode = textOr(common, "seg_mode", "ROI");
   if (segMode != "ROI") {
     return badInput("只支持 seg_mode: ROI，这份配置是 '" + segMode + "'");
@@ -336,7 +338,7 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
       const Candidate& c = candidates[order];
       const std::string cid = safeId(c.id);
       nlohmann::json tplParams;
-      tplParams["dir"] = "StandardGap";
+      tplParams["dir"] = templateDir;
       tplParams["left"] = c.left;
       tplParams["right"] = c.right;
       const std::string tpl = g.node(prefix + "n_tpl_" + cid, "gap.load_template", tplParams,
@@ -776,7 +778,7 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   nlohmann::json refParams;
   refParams["configPath"] = "StandardGap.yml";
   refParams["deriveTemplateDir"] = false;
-  refParams["templateDir"] = "StandardGap";
+  refParams["templateDir"] = templateDir;
   refParams["sampleId"] = sampleId;
   if (useModel) {
     refParams["useModel"] = true;
@@ -821,7 +823,8 @@ void registerStandardGapImporter(Registry& r) {
   desc.label = "StandardGap.yml（自动）";
   desc.doc =
       "把一份 StandardGap.yml 转成一张测量图。模式由 baseDir 或其父目录里的 setting.yml 决定："
-      "model_roi.enabled 为真走模型路径并带 flow.fallback，否则走模板/ICP 路径。";
+      "model_roi.enabled 为真走模型路径并带 flow.fallback，否则走模板/ICP 路径。"
+      "文档顶层的 template_dir 决定模板 PCD 所在的相对目录，缺省 StandardGap。";
   desc.fn = &importAuto;
   r.addImporter(desc);
 
