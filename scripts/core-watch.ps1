@@ -25,23 +25,33 @@ if (-not (Test-Path $cmake)) { $cmake = "cmake" }
 # 编它们只是让「改一行 cpp 到界面上出现新算子」多等几秒。
 $buildCmd = "call `"$vcvars`" >nul 2>&1 && `"$cmake`" --build `"$build`" --target lyflow_core"
 
-$interesting = @(".cpp", ".h", ".hpp", ".txt")
+$interesting = @(".cpp", ".h", ".hpp", ".txt", ".cmake")
+
+# 算子包目录也一起盯着（ADR-0013）：改包里的算子同样要触发增量构建 + 热重载。
+$watched = @($source)
+if ($env:LYFLOW_OP_PACKS) {
+  foreach ($p in $env:LYFLOW_OP_PACKS.Split(";")) {
+    if ($p -and (Test-Path $p)) { $watched += (Resolve-Path $p).Path }
+  }
+}
 
 # 「源码指纹」：关心的文件的最后写入时间之和 + 个数。改名式写入（sed -i、编辑器的
 # 原子保存）事件监视很容易漏掉，而指纹对「怎么写进去的」完全不敏感。
 function Get-SourceFingerprint {
   $sum = 0.0
   $count = 0
-  Get-ChildItem -Path $source -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
-    if ($interesting -contains $_.Extension.ToLowerInvariant()) {
-      $sum += $_.LastWriteTimeUtc.ToFileTimeUtc() / 1e7
-      $count += 1
+  foreach ($dir in $watched) {
+    Get-ChildItem -Path $dir -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+      if ($interesting -contains $_.Extension.ToLowerInvariant()) {
+        $sum += $_.LastWriteTimeUtc.ToFileTimeUtc() / 1e7
+        $count += 1
+      }
     }
   }
   return "$count/$sum"
 }
 
-Write-Host "core-watch：盯着 $source（Ctrl+C 退出）" -ForegroundColor Green
+Write-Host "core-watch：盯着 $($watched -join '、')（Ctrl+C 退出）" -ForegroundColor Green
 
 # 事件监视只当「快一点」的信号源，真正的判据永远是指纹。
 $fsw = New-Object System.IO.FileSystemWatcher $source, "*.*"
@@ -52,9 +62,9 @@ $fsw.NotifyFilter = [System.IO.NotifyFilters]::LastWrite -bor
 
 $fingerprint = Get-SourceFingerprint
 $lastChange = $null
-# 轮询兜底：两秒一次。FileSystemWatcher.WaitForChanged 只在被调用的那一刻才注册，
-# 两次调用之间发生的改名事件是直接丢掉的。
-$pollEverySeconds = 2
+# 轮询兜底：FileSystemWatcher.WaitForChanged 只在被调用的那一刻才注册，
+# 两次调用之间发生的改名事件是直接丢掉的。包目录更是只有轮询这一条路。
+$pollEverySeconds = if ($watched.Count -gt 1) { 0.5 } else { 2 }
 $lastPoll = Get-Date
 
 try {

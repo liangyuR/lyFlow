@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 namespace lyflow {
 
 /// 轴对齐包围盒。空点云时 valid=false。
@@ -74,10 +76,60 @@ struct Plane {
   float d = 0;
 };
 
+// 以下六种是 2D 量测域的通用载荷。坐标一律是**米**，与点云同单位；
+// 只有 Measurement 的 value 例外，它带自己的 unit（通常是 mm）。
+
+/// 轴对齐 2D 包围盒。
+struct Box2D {
+  float min[2] = {0, 0};
+  float max[2] = {0, 0};
+};
+
+/// 2D 直线：过 point、方向 dir（单位向量）。可选带两个端点变成线段。
+struct Line2D {
+  float point[2] = {0, 0};
+  float dir[2] = {1, 0};
+  bool hasSegment = false;
+  float start[2] = {0, 0};
+  float end[2] = {0, 0};
+};
+
+struct Circle2D {
+  float center[2] = {0, 0};
+  float radius = 0;
+};
+
+struct Point2D {
+  float p[2] = {0, 0};
+};
+
+/// 一次测量的结果。value 非有限表示没测出来，此时 ok=false 且 message 说明原因。
+struct Measurement {
+  double value = 0;
+  bool ok = false;
+  std::string unit = "mm";
+  std::string message;
+  /// 判定结果："" 未判定 / ok / high / low / margin
+  std::string verdict;
+  bool hasLimits = false;
+  double nominal = 0;
+  double upper = 0;
+  double lower = 0;
+};
+
+/// 带类型标签的 JSON。算子包用它定义领域结构而不必改 core（ADR-0013）。
+struct Record {
+  std::string type;
+  nlohmann::json data = nlohmann::json::object();
+};
+
 /// 端口上流动的值。类型标签必须和 manifest 的端口类型对得上。
 class Data {
  public:
-  enum class Kind { None, PointCloud, Indices, Transform, Plane };
+  enum class Kind {
+    None, PointCloud, Indices, Transform, Plane,
+    Box2D, Line2D, Circle2D, Point2D, Measurement, Record,
+  };
 
   Data() = default;
 
@@ -89,6 +141,12 @@ class Data {
   static Data transform(Transform t) { return transform(std::make_shared<const Transform>(t)); }
   static Data plane(std::shared_ptr<const Plane> p);
   static Data plane(Plane p) { return plane(std::make_shared<const Plane>(p)); }
+  static Data box2d(lyflow::Box2D b);
+  static Data line2d(lyflow::Line2D l);
+  static Data circle2d(lyflow::Circle2D c);
+  static Data point2d(lyflow::Point2D p);
+  static Data measurement(lyflow::Measurement m);
+  static Data record(lyflow::Record r);
 
   Kind kind() const { return kind_; }
   bool empty() const { return kind_ == Kind::None; }
@@ -99,6 +157,12 @@ class Data {
   const Indices* asIndices() const;
   const Transform* asTransform() const;
   const Plane* asPlane() const;
+  const lyflow::Box2D* asBox2D() const;
+  const lyflow::Line2D* asLine2D() const;
+  const lyflow::Circle2D* asCircle2D() const;
+  const lyflow::Point2D* asPoint2D() const;
+  const lyflow::Measurement* asMeasurement() const;
+  const lyflow::Record* asRecord() const;
 
   std::shared_ptr<const PointCloud> cloudPtr() const { return cloud_; }
 
@@ -111,12 +175,21 @@ class Data {
   /// 点数 / 元素数。点云 = 点数，Indices = 下标个数，其余 = 1。
   std::size_t elementCount() const;
 
+  /// 给 Inspector / 3D 叠画看的可读 JSON。点云与 Indices 返回空串（太大，走二进制）。
+  std::string valueJson() const;
+
  private:
   Kind kind_ = Kind::None;
   std::shared_ptr<const PointCloud> cloud_;
   std::shared_ptr<const Indices> indices_;
   std::shared_ptr<const Transform> transform_;
   std::shared_ptr<const Plane> plane_;
+  std::shared_ptr<const lyflow::Box2D> box2d_;
+  std::shared_ptr<const lyflow::Line2D> line2d_;
+  std::shared_ptr<const lyflow::Circle2D> circle2d_;
+  std::shared_ptr<const lyflow::Point2D> point2d_;
+  std::shared_ptr<const lyflow::Measurement> measurement_;
+  std::shared_ptr<const lyflow::Record> record_;
 };
 
 /// manifest 端口类型名 -> Data::Kind。未知类型（含 "Any"）返回 None。

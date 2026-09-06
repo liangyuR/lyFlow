@@ -139,6 +139,23 @@ fn main() {
     }
     println!("cargo:rerun-if-env-changed=VCPKG_ROOT");
 
+    // 算子包（ADR-0013）。包目录也进 rerun 列表，改包里的算子才会重新构建 core。
+    let packs = std::env::var("LYFLOW_OP_PACKS").unwrap_or_default();
+    println!("cargo:rerun-if-env-changed=LYFLOW_OP_PACKS");
+    for dir in packs.split(';').filter(|s| !s.is_empty()) {
+        let path = Path::new(dir);
+        if !path.is_dir() {
+            println!("cargo:warning=算子包目录不存在: {dir}");
+            continue;
+        }
+        let (mut pf, mut pd) = (Vec::new(), Vec::new());
+        collect(path, &mut pf, &mut pd);
+        for f in pf.iter().chain(pd.iter()) {
+            println!("cargo:rerun-if-changed={}", f.display());
+        }
+        println!("cargo:rerun-if-changed={}", path.join("lyflow_op_pack.cmake").display());
+    }
+
     let mut cfg = cmake::Config::new(&core);
     // D8：core 永远 RelWithDebInfo，不跟 cargo profile 走。
     // Rust 总是 /MD 而 vcpkg 的 debug 库是 /MDd，混用会在无关的地方崩。
@@ -146,7 +163,8 @@ fn main() {
         .define("CMAKE_BUILD_TYPE", "RelWithDebInfo")
         // 只构建 lyflow_core：core 没有 install 规则，两个 exe 归 build-core.ps1 管。
         // vcpkg 的 applocal 对 SHARED 目标同样生效，PCL 的依赖 DLL 照样落到 bin/。
-        .build_target("lyflow_core");
+        .build_target("lyflow_core")
+        .define("LYFLOW_OP_PACKS", &packs);
     let ninja = find_ninja();
     if let Some(ninja) = &ninja {
         cfg.generator("Ninja").define("CMAKE_MAKE_PROGRAM", ninja);

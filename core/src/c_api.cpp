@@ -253,6 +253,10 @@ char* lyflow_output_info(const char* run_id, const char* node_id) {
       w.field("type", i.type);
       w.field("elementCount", static_cast<std::int64_t>(i.elementCount));
       w.field("byteSize", static_cast<std::int64_t>(i.byteSize));
+      if (!i.valueJson.empty()) {
+        w.key("value");
+        w.raw(i.valueJson);
+      }
       w.endObject();
     }
     w.endArray();

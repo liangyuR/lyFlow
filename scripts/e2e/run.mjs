@@ -17,6 +17,7 @@ import {
   select,
   selectAndReadViewer,
 } from "./page.mjs";
+import { gapSuites } from "./gap.mjs";
 import { m3Suites } from "./m3.mjs";
 import { m4Suites } from "./m4.mjs";
 
@@ -456,6 +457,7 @@ async function main() {
 
     for (const suite of m3Suites) await suite(cdp, report, ws);
     for (const suite of m4Suites) await suite(cdp, report, ws);
+    for (const suite of gapSuites) await suite(cdp, report, ws);
 
     report.section("控制台");
     // React 的 StrictMode 在 dev 下会重复挂载并打一些 warning，

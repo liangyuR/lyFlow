@@ -46,12 +46,18 @@ if (Test-Path $cache) {
   }
 }
 
+# 算子包（ADR-0013）：环境变量 LYFLOW_OP_PACKS 是分号分隔的目录列表，缺省空。
+# 永远显式传 -D，缓存里那份才不会和当前环境脱节。
+$packs = if ($env:LYFLOW_OP_PACKS) { $env:LYFLOW_OP_PACKS } else { "" }
+if ($packs) { Write-Host "算子包: $packs" -ForegroundColor Cyan }
+
 # 必须在 vcvars 之后调 cmake，所以整条命令交给一个 cmd 进程。
 # 用 && 而不是 ^ 续行：换行已被 PowerShell 吃掉，^ 会转义掉下一行的首字符。
 $line = "call `"$vcvars`" >nul 2>&1" +
         " && `"$cmake`" -S `"$source`" -B `"$build`" -G Ninja" +
         " -DCMAKE_MAKE_PROGRAM=`"$ninja`" -DCMAKE_BUILD_TYPE=$config" +
         " -DCMAKE_TOOLCHAIN_FILE=`"$toolchain`"" +
+        " -DLYFLOW_OP_PACKS=`"$packs`"" +
         " && `"$cmake`" --build `"$build`""
 
 cmd /c $line

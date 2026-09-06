@@ -47,6 +47,10 @@ class Registry {
 // 见 core/README.md「加一个算子」。
 void registerBuiltinOps(Registry& registry);
 
+/// 注册编进本次构建的算子包（ADR-0013）。实现由 CMake 按 LYFLOW_OP_PACKS 生成；
+/// 不带包时是空函数。registerBuiltinOps 末尾会调它。
+void registerOpPacks(Registry& registry);
+
 // 进程内那一份注册表，保证只填充一次。
 // C ABI 入口、执行器、dump 工具、测试都从这里拿，避免两条路径各自初始化的竞态。
 Registry& ensureRegistry();

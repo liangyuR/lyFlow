@@ -5,8 +5,18 @@
 #include <cmath>
 #include <limits>
 
+#include "lyflow/json_writer.h"
+
 namespace lyflow {
 namespace {
+
+void writePair(JsonWriter& w, const char* key, const float v[2]) {
+  w.key(key);
+  w.beginArray();
+  w.value(static_cast<double>(v[0]));
+  w.value(static_cast<double>(v[1]));
+  w.endArray();
+}
 
 std::atomic<std::uint64_t>& cloudIdCounter() {
   static std::atomic<std::uint64_t> counter{1};
@@ -133,12 +143,64 @@ Data Data::plane(std::shared_ptr<const Plane> p) {
   return d;
 }
 
+Data Data::box2d(lyflow::Box2D b) {
+  Data d;
+  d.kind_ = Kind::Box2D;
+  d.box2d_ = std::make_shared<const lyflow::Box2D>(b);
+  return d;
+}
+
+Data Data::line2d(lyflow::Line2D l) {
+  Data d;
+  d.kind_ = Kind::Line2D;
+  d.line2d_ = std::make_shared<const lyflow::Line2D>(l);
+  return d;
+}
+
+Data Data::circle2d(lyflow::Circle2D c) {
+  Data d;
+  d.kind_ = Kind::Circle2D;
+  d.circle2d_ = std::make_shared<const lyflow::Circle2D>(c);
+  return d;
+}
+
+Data Data::point2d(lyflow::Point2D p) {
+  Data d;
+  d.kind_ = Kind::Point2D;
+  d.point2d_ = std::make_shared<const lyflow::Point2D>(p);
+  return d;
+}
+
+Data Data::measurement(lyflow::Measurement m) {
+  Data d;
+  d.kind_ = Kind::Measurement;
+  d.measurement_ = std::make_shared<const lyflow::Measurement>(std::move(m));
+  return d;
+}
+
+Data Data::record(lyflow::Record r) {
+  Data d;
+  d.kind_ = Kind::Record;
+  d.record_ = std::make_shared<const lyflow::Record>(std::move(r));
+  return d;
+}
+
 const PointCloud* Data::asCloud() const { return kind_ == Kind::PointCloud ? cloud_.get() : nullptr; }
 const Indices* Data::asIndices() const { return kind_ == Kind::Indices ? indices_.get() : nullptr; }
 const Transform* Data::asTransform() const {
   return kind_ == Kind::Transform ? transform_.get() : nullptr;
 }
 const Plane* Data::asPlane() const { return kind_ == Kind::Plane ? plane_.get() : nullptr; }
+const Box2D* Data::asBox2D() const { return kind_ == Kind::Box2D ? box2d_.get() : nullptr; }
+const Line2D* Data::asLine2D() const { return kind_ == Kind::Line2D ? line2d_.get() : nullptr; }
+const Circle2D* Data::asCircle2D() const {
+  return kind_ == Kind::Circle2D ? circle2d_.get() : nullptr;
+}
+const Point2D* Data::asPoint2D() const { return kind_ == Kind::Point2D ? point2d_.get() : nullptr; }
+const Measurement* Data::asMeasurement() const {
+  return kind_ == Kind::Measurement ? measurement_.get() : nullptr;
+}
+const Record* Data::asRecord() const { return kind_ == Kind::Record ? record_.get() : nullptr; }
 
 const char* Data::typeName() const { return typeNameFromKind(kind_); }
 
@@ -157,6 +219,19 @@ std::size_t Data::byteSize() const {
       return sizeof(Transform);
     case Kind::Plane:
       return sizeof(Plane);
+    case Kind::Box2D:
+      return sizeof(Box2D);
+    case Kind::Line2D:
+      return sizeof(Line2D);
+    case Kind::Circle2D:
+      return sizeof(Circle2D);
+    case Kind::Point2D:
+      return sizeof(Point2D);
+    case Kind::Measurement:
+      return measurement_ ? sizeof(Measurement) + measurement_->message.size() : 0;
+    case Kind::Record:
+      // 粗估：序列化一遍太贵，节点数乘个常数够 LRU 预算用了
+      return record_ ? sizeof(Record) + record_->type.size() + record_->data.size() * 64 : 0;
   }
   return 0;
 }
@@ -171,9 +246,85 @@ std::size_t Data::elementCount() const {
       return indices_ ? indices_->values.size() : 0;
     case Kind::Transform:
     case Kind::Plane:
+    case Kind::Box2D:
+    case Kind::Line2D:
+    case Kind::Circle2D:
+    case Kind::Point2D:
+    case Kind::Measurement:
+    case Kind::Record:
       return 1;
   }
   return 0;
+}
+
+std::string Data::valueJson() const {
+  // 点云与 Indices 走二进制通道（ADR-0006），这里给空串。
+  if (kind_ == Kind::None || kind_ == Kind::PointCloud || kind_ == Kind::Indices) return {};
+
+  JsonWriter w;
+  w.setIndent(0);
+  w.beginObject();
+  w.field("kind", std::string(typeName()));
+  switch (kind_) {
+    case Kind::Transform: {
+      w.key("m");
+      w.beginArray();
+      for (int i = 0; i < 16; ++i) w.value(static_cast<double>(transform_->m[i]));
+      w.endArray();
+      break;
+    }
+    case Kind::Plane: {
+      w.key("normal");
+      w.beginArray();
+      for (int i = 0; i < 3; ++i) w.value(static_cast<double>(plane_->normal[i]));
+      w.endArray();
+      w.field("d", static_cast<double>(plane_->d));
+      break;
+    }
+    case Kind::Box2D:
+      writePair(w, "min", box2d_->min);
+      writePair(w, "max", box2d_->max);
+      break;
+    case Kind::Line2D:
+      writePair(w, "point", line2d_->point);
+      writePair(w, "dir", line2d_->dir);
+      w.field("hasSegment", line2d_->hasSegment);
+      if (line2d_->hasSegment) {
+        writePair(w, "start", line2d_->start);
+        writePair(w, "end", line2d_->end);
+      }
+      break;
+    case Kind::Circle2D:
+      writePair(w, "center", circle2d_->center);
+      w.field("radius", static_cast<double>(circle2d_->radius));
+      break;
+    case Kind::Point2D:
+      writePair(w, "p", point2d_->p);
+      break;
+    case Kind::Measurement: {
+      const Measurement& m = *measurement_;
+      w.field("value", m.value);  // 非有限值写成 null，见 jsonNumber
+      w.field("ok", m.ok);
+      w.fieldIfSet("unit", m.unit);
+      w.fieldIfSet("message", m.message);
+      w.fieldIfSet("verdict", m.verdict);
+      if (m.hasLimits) {
+        w.field("nominal", m.nominal);
+        w.field("upper", m.upper);
+        w.field("lower", m.lower);
+      }
+      break;
+    }
+    case Kind::Record:
+      w.field("type", record_->type);
+      w.key("data");
+      w.raw(record_->data.dump());
+      break;
+    default:
+      break;
+  }
+  w.endObject();
+  return w.str();
 }
 
 Data::Kind kindFromTypeName(const std::string& typeName) {
@@ -181,16 +332,28 @@ Data::Kind kindFromTypeName(const std::string& typeName) {
   if (typeName == "Indices") return Data::Kind::Indices;
   if (typeName == "Transform") return Data::Kind::Transform;
   if (typeName == "Plane") return Data::Kind::Plane;
+  if (typeName == "Box2D") return Data::Kind::Box2D;
+  if (typeName == "Line2D") return Data::Kind::Line2D;
+  if (typeName == "Circle2D") return Data::Kind::Circle2D;
+  if (typeName == "Point2D") return Data::Kind::Point2D;
+  if (typeName == "Measurement") return Data::Kind::Measurement;
+  if (typeName == "Record") return Data::Kind::Record;
   return Data::Kind::None;  // 含 "Any"：不约束具体载荷
 }
 
 const char* typeNameFromKind(Data::Kind kind) {
   switch (kind) {
-    case Data::Kind::None:       return "None";
-    case Data::Kind::PointCloud: return "PointCloud";
-    case Data::Kind::Indices:    return "Indices";
-    case Data::Kind::Transform:  return "Transform";
-    case Data::Kind::Plane:      return "Plane";
+    case Data::Kind::None:        return "None";
+    case Data::Kind::PointCloud:  return "PointCloud";
+    case Data::Kind::Indices:     return "Indices";
+    case Data::Kind::Transform:   return "Transform";
+    case Data::Kind::Plane:       return "Plane";
+    case Data::Kind::Box2D:       return "Box2D";
+    case Data::Kind::Line2D:      return "Line2D";
+    case Data::Kind::Circle2D:    return "Circle2D";
+    case Data::Kind::Point2D:     return "Point2D";
+    case Data::Kind::Measurement: return "Measurement";
+    case Data::Kind::Record:      return "Record";
   }
   return "None";
 }

@@ -11,12 +11,14 @@ import { aggregatedNodes, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
-import { decodeCloud, type CloudPayload } from "../types/execution";
+import { decodeCloud, type CloudPayload, type OutputStat } from "../types/execution";
 import type { GraphDoc } from "../types/graph";
 import "../styles.viewer.css";
 
 export type ShadingMode = "intensity" | "height" | "normal" | "flat";
 export type RampName = "viridis" | "gray" | "jet";
+/** 相机模式（G7）。2d = 正交俯视 XY，看剖面用。 */
+export type CameraMode = "3d" | "2d";
 
 /** 当前展示的东西。三者永远一起换，见 Viewer3D 里的注释。 */
 interface Display {
@@ -81,8 +83,19 @@ interface Scene {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
+  /** 2D 剖面相机（G7）：正交、俯视 XY、不许旋转。 */
+  ortho: THREE.OrthographicCamera;
   controls: OrbitControls;
+  mode: CameraMode;
   points: THREE.Points | null;
+  /** 叠画的 2D 几何（G7）。整组一起换，不逐个增删。 */
+  overlay: THREE.Group;
+  /** 正交相机的可视半宽，随 fit 改变；aspect 变了要重算上下边。 */
+  halfWidth: number;
+  aspect: number;
+  active(): THREE.Camera;
+  applyOrtho(): void;
+  setMode(mode: CameraMode): void;
   dispose(): void;
 }
 
@@ -97,6 +110,11 @@ function createScene(host: HTMLDivElement): Scene {
   camera.up.set(0, 0, 1); // 点云世界里 Z 朝上，别用 three 默认的 Y 朝上
   camera.position.set(2, -2, 1.5);
 
+  // 正交相机看 −Z 方向，up 是 +Y：屏幕上就是标准的 XY 平面。
+  const ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 1000);
+  ortho.up.set(0, 1, 0);
+  ortho.position.set(0, 0, 10);
+
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.12;
@@ -106,21 +124,53 @@ function createScene(host: HTMLDivElement): Scene {
   scene.add(grid);
   const axes = new THREE.AxesHelper(0.5);
   scene.add(axes);
+  const overlay = new THREE.Group();
+  scene.add(overlay);
 
   let raf = 0;
   const tick = () => {
     raf = requestAnimationFrame(tick);
     controls.update();
-    renderer.render(scene, camera);
+    renderer.render(scene, state.active());
   };
-  tick();
 
   const state: Scene = {
     renderer,
     scene,
     camera,
+    ortho,
     controls,
+    mode: "3d",
     points: null,
+    overlay,
+    halfWidth: 2,
+    aspect: 1,
+    active() {
+      return state.mode === "2d" ? state.ortho : state.camera;
+    },
+    applyOrtho() {
+      const h = state.halfWidth / Math.max(state.aspect, 1e-3);
+      ortho.left = -state.halfWidth;
+      ortho.right = state.halfWidth;
+      ortho.top = h;
+      ortho.bottom = -h;
+      ortho.updateProjectionMatrix();
+    },
+    setMode(mode) {
+      if (state.mode === mode) return;
+      state.mode = mode;
+      // OrbitControls 只认它构造时那台相机，换模式就换 object；
+      // 2D 下关掉旋转，否则一拖就离开了 XY 平面，那这个模式就没意义了。
+      const target = state.controls.target;
+      state.controls.object = state.active() as THREE.PerspectiveCamera;
+      state.controls.enableRotate = mode === "3d";
+      if (mode === "2d") {
+        ortho.position.set(target.x, target.y, target.z + 10);
+        ortho.zoom = 1;
+        state.applyOrtho();
+      }
+      state.controls.update();
+    },
     dispose() {
       cancelAnimationFrame(raf);
       controls.dispose();
@@ -128,6 +178,7 @@ function createScene(host: HTMLDivElement): Scene {
         state.points.geometry.dispose();
         (state.points.material as THREE.Material).dispose();
       }
+      disposeOverlay(overlay);
       // helper 自己也有 geometry 和 material。不放的话每次挂载都漏一份。
       for (const helper of [grid, axes]) {
         helper.geometry.dispose();
@@ -142,7 +193,96 @@ function createScene(host: HTMLDivElement): Scene {
       host.removeChild(renderer.domElement);
     },
   };
+  tick();
   return state;
+}
+
+// --------------------------------------------------------- 2D 几何叠画（G7）
+
+/** 叠画一条折线/线段集合。z 全部为 0：这些几何本来就定义在 XY 平面上。 */
+function polyline(points: number[], color: number, loop: boolean): THREE.Line {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(points), 3));
+  const material = new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true });
+  const line = loop ? new THREE.LineLoop(geometry, material) : new THREE.Line(geometry, material);
+  line.renderOrder = 10; // 永远画在点云之上，否则细线会被点糊掉
+  return line;
+}
+
+function disposeOverlay(group: THREE.Group) {
+  for (const child of [...group.children]) {
+    group.remove(child);
+    const line = child as THREE.Line;
+    line.geometry?.dispose();
+    const m = line.material as THREE.Material | THREE.Material[];
+    if (Array.isArray(m)) m.forEach((x) => x.dispose());
+    else m?.dispose();
+  }
+}
+
+/** 这个几何自己有多大。没有点云做尺度参照时拿它当兜底。 */
+function extentOf(out: OutputStat): number {
+  const v = out.value;
+  if (!v) return 0;
+  if (v.kind === "Box2D" && v.min && v.max) {
+    return Math.max(Math.abs(v.max[0] - v.min[0]), Math.abs(v.max[1] - v.min[1]));
+  }
+  if (v.kind === "Circle2D") return (v.radius ?? 0) * 4;
+  if (v.kind === "Line2D" && v.hasSegment && v.start && v.end) {
+    return Math.hypot(v.end[0] - v.start[0], v.end[1] - v.start[1]);
+  }
+  return 0;
+}
+
+/** 一个输出值 → 若干条线。认不出的 kind 返回空数组（前端不硬编码算子，也不该硬编码到崩）。 */
+function shapesOf(out: OutputStat, color: number, span: number): THREE.Line[] {
+  const v = out.value;
+  if (!v) return [];
+  switch (v.kind) {
+    case "Box2D": {
+      const [x0, y0] = v.min ?? [0, 0];
+      const [x1, y1] = v.max ?? [0, 0];
+      return [polyline([x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0], color, true)];
+    }
+    case "Line2D": {
+      if (v.hasSegment && v.start && v.end) {
+        return [polyline([v.start[0], v.start[1], 0, v.end[0], v.end[1], 0], color, false)];
+      }
+      const [px, py] = v.point ?? [0, 0];
+      const [dx, dy] = v.dir ?? [1, 0];
+      const n = Math.hypot(dx, dy) || 1;
+      const h = span / 2;
+      return [
+        polyline(
+          [px - (dx / n) * h, py - (dy / n) * h, 0, px + (dx / n) * h, py + (dy / n) * h, 0],
+          color,
+          false,
+        ),
+      ];
+    }
+    case "Circle2D": {
+      const [cx, cy] = v.center ?? [0, 0];
+      const r = v.radius ?? 0;
+      const pts: number[] = [];
+      const SEGMENTS = 72;
+      for (let i = 0; i < SEGMENTS; i += 1) {
+        const t = (i / SEGMENTS) * Math.PI * 2;
+        pts.push(cx + r * Math.cos(t), cy + r * Math.sin(t), 0);
+      }
+      return [polyline(pts, color, true)];
+    }
+    case "Point2D": {
+      const [x, y] = v.p ?? [0, 0];
+      // 十字而不是一个点：单个 Point 在细线材质下根本看不见
+      const s = span * 0.01 || 0.001;
+      return [
+        polyline([x - s, y, 0, x + s, y, 0], color, false),
+        polyline([x, y - s, 0, x, y + s, 0], color, false),
+      ];
+    }
+    default:
+      return [];
+  }
 }
 
 /** matplotlib viridis 的 11 个采样点，线性插值就够看。 */
@@ -263,6 +403,14 @@ function fitToBounds(scene: Scene, bounds: Float32Array) {
   scene.camera.near = size / 1000;
   scene.camera.far = size * 100;
   scene.camera.updateProjectionMatrix();
+
+  // 正交相机按 XY 的实际跨度取景，Z 不参与 —— 剖面视图里 Z 是「厚度」。
+  const spanX = Math.max(bounds[3]! - bounds[0]!, 1e-4);
+  const spanY = Math.max(bounds[4]! - bounds[1]!, 1e-4);
+  scene.halfWidth = Math.max(spanX, spanY * Math.max(scene.aspect, 1e-3)) * 0.6;
+  scene.ortho.position.set(cx, cy, cz + Math.max(size * 10, 1));
+  scene.ortho.zoom = 1;
+  scene.applyOrtho();
   scene.controls.update();
 }
 
@@ -277,6 +425,7 @@ export function Viewer3D() {
   const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [pointSize, setPointSize] = useState(1.6);
   const pointSizeRef = useRef(1.6);
+  const [cameraMode, setCameraMode] = useState<CameraMode>("3d");
   const [maxPoints, setMaxPoints] = useState(2_000_000);
   // 云、状态、以及**它属于哪个节点**必须一起换：拆成三个 useState 的话，切换节点时会出现
   // 「标题是新节点、点云还是旧节点」的中间态 —— 肉眼看不见，但验收脚本会稳定读到它。
@@ -310,6 +459,11 @@ export function Viewer3D() {
   const activeState = useExecutionStore((s) =>
     activeId ? aggregatedNodes(path, s.nodes).get(activeId)?.state : undefined,
   );
+  // 叠画用的非点云输出（G7）。stats 是事件里那一份，引用稳定，不会每帧新建。
+  const activeOutputs = useExecutionStore((s) =>
+    activeId ? aggregatedNodes(path, s.nodes).get(activeId)?.stats?.outputs : undefined,
+  );
+  const typesByName = useManifestStore((s) => s.typesByName);
 
   const hasIntensity = cloud?.intensity != null;
   const hasNormals = cloud?.normals != null;
@@ -351,6 +505,8 @@ export function Viewer3D() {
       scene.renderer.setSize(w, h, false);
       scene.camera.aspect = w / h;
       scene.camera.updateProjectionMatrix();
+      scene.aspect = w / h;
+      scene.applyOrtho();
     };
     resize();
     const observer = new ResizeObserver(resize);
@@ -533,6 +689,51 @@ export function Viewer3D() {
     if (scene && cloud) fitToBounds(scene, cloud.bounds);
   }, [cloud]);
 
+  // -- 2D 几何叠画（G7）：整组重建，线与端口同色 -----------------------------
+  const overlayShapes = useMemo(
+    () => (activeOutputs ?? []).filter((o) => o.value !== undefined),
+    [activeOutputs],
+  );
+  const overlayCount = useMemo(() => {
+    let n = 0;
+    for (const o of overlayShapes) {
+      const k = o.value?.kind;
+      if (k === "Box2D" || k === "Line2D" || k === "Circle2D" || k === "Point2D") n += 1;
+    }
+    return n;
+  }, [overlayShapes]);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    disposeOverlay(scene.overlay);
+    if (overlayShapes.length === 0) return;
+    // 线的长度/十字的大小要有个尺度参照：优先用点云的跨度，没有云就用几何自己的。
+    const span = cloud
+      ? Math.max(cloud.bounds[3]! - cloud.bounds[0]!, cloud.bounds[4]! - cloud.bounds[1]!, 1e-3)
+      : Math.max(...overlayShapes.map(extentOf), 1e-3);
+    for (const out of overlayShapes) {
+      const hex = typesByName.get(out.type)?.color ?? "#6b7280";
+      const color = new THREE.Color(hex).getHex();
+      for (const line of shapesOf(out, color, span)) scene.overlay.add(line);
+    }
+    // 没有点云时相机没人负责取景，用几何自己的包围盒 fit 一次
+    if (!cloud && scene.overlay.children.length > 0) {
+      const box = new THREE.Box3().setFromObject(scene.overlay);
+      if (!box.isEmpty()) {
+        fitToBounds(
+          scene,
+          new Float32Array([box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z]),
+        );
+      }
+    }
+  }, [overlayShapes, cloud, typesByName]);
+
+  // 相机模式（G7）。只换 controls 挂的那台相机，场景与几何原封不动。
+  useEffect(() => {
+    sceneRef.current?.setMode(cameraMode);
+  }, [cameraMode]);
+
   const setRangeEnd = (end: 0 | 1, raw: string) => {
     const v = Number(raw);
     if (!Number.isFinite(v)) return;
@@ -589,6 +790,8 @@ export function Viewer3D() {
       data-pinned={pinnedId ? "1" : "0"}
       data-run={display.runId ?? ""}
       data-preview={isPreview ? "1" : "0"}
+      data-camera={cameraMode}
+      data-overlay={overlayCount}
     >
       <div className="viewer__bar">
         <span className="viewer__title">3D 预览</span>
@@ -603,6 +806,16 @@ export function Viewer3D() {
           </span>
         )}
         <span className="viewer__spacer" />
+        <select
+          className="viewer__select"
+          data-testid="viewer-camera"
+          value={cameraMode}
+          onChange={(e) => setCameraMode(e.target.value as CameraMode)}
+          title="相机：3D 自由视角 / 2D 正交俯视 XY（剖面）"
+        >
+          <option value="3d">3D</option>
+          <option value="2d">2D 剖面</option>
+        </select>
         <select
           className="viewer__select"
           value={maxPoints}

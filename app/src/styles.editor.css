@@ -1258,3 +1258,50 @@
   color: var(--fg-0);
   font-size: 10px;
 }
+
+/* 非点云输出的值（算子包的 Measurement / 2D 几何）。一行一个端口，值右对齐。 */
+.insp-out {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.insp-out__port {
+  color: var(--fg-2);
+  flex: 0 0 auto;
+}
+
+.insp-out__value {
+  flex: 1 1 auto;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.insp-out__verdict {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  background: var(--bg-2);
+  color: var(--fg-1);
+}
+
+.insp-out__verdict.is-ok {
+  background: #1f6f4a;
+  color: #d8ffe9;
+}
+
+.insp-out__verdict.is-high,
+.insp-out__verdict.is-low {
+  background: #7a2b2b;
+  color: #ffdede;
+}
+
+.insp-out__verdict.is-margin {
+  background: #7a5c1f;
+  color: #fff1cf;
+}

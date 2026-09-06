@@ -26,6 +26,31 @@ void registerBuiltinTypes(Registry& r) {
   r.addType(PortType{
       "Plane", "#e0a030", {},
       "平面方程 n·p + d = 0，法向量已归一化。"});
+
+  // 2D 量测域的通用载荷。坐标与点云同单位（米），3D 视图会为选中节点叠画它们。
+  r.addType(PortType{
+      "Box2D", "#e2725b", {},
+      "轴对齐 2D 包围盒，XY 平面上的 min/max 两角。"});
+
+  r.addType(PortType{
+      "Line2D", "#5ec8c0", {},
+      "2D 直线：过一点、带单位方向；可选带两个端点变成线段。"});
+
+  r.addType(PortType{
+      "Circle2D", "#7f9cf5", {},
+      "2D 圆：圆心与半径。"});
+
+  r.addType(PortType{
+      "Point2D", "#d4a5f0", {},
+      "XY 平面上的一个点。"});
+
+  r.addType(PortType{
+      "Measurement", "#4cd18a", {},
+      "一次测量的结果：值、单位、是否成功、判定与上下限。"});
+
+  r.addType(PortType{
+      "Record", "#9aa5b1", {},
+      "带类型标签的 JSON。算子包用它定义领域结构而不必改 core（ADR-0013）。"});
 }
 
 }  // namespace
@@ -55,6 +80,9 @@ void registerBuiltinOps(Registry& r) {
   ops::registerTransformApply(r);
   ops::registerUtilMerge(r);
   ops::registerUtilReroute(r);
+
+  // 算子包排在内置之后（ADR-0013）。不带包构建时这是个空函数。
+  registerOpPacks(r);
 }
 
 }  // namespace lyflow

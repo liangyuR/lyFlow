@@ -168,7 +168,8 @@ bool ResultStore::reuse(const std::string& runId, const std::string& nodeId,
   for (const auto& port : ports) {
     const std::string key = entryKey(cacheKey, port);
     const Entry& e = byKey_.at(key);
-    infos.push_back(OutputInfo{port, e.data.typeName(), e.data.elementCount(), e.bytes});
+    infos.push_back(
+        OutputInfo{port, e.data.typeName(), e.data.elementCount(), e.bytes, e.data.valueJson()});
     touchLocked(key);
     index_[runId][nodeId][port] = key;
   }
@@ -188,7 +189,8 @@ std::vector<OutputInfo> ResultStore::outputsOf(const std::string& runId,
     auto data = byKey_.find(kv.second);
     if (data == byKey_.end()) continue;
     out.push_back(OutputInfo{kv.first, data->second.data.typeName(),
-                             data->second.data.elementCount(), data->second.bytes});
+                             data->second.data.elementCount(), data->second.bytes,
+                             data->second.data.valueJson()});
   }
   return out;
 }

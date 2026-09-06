@@ -123,6 +123,110 @@ TEST_CASE("Indices 记住来源点云 id") {
   CHECK(d.elementCount() == 2);
 }
 
+// ------------------------------------------- 2D 量测域的六种载荷（ADR-0013）
+
+TEST_CASE("六种 2D 载荷的类型名往返") {
+  for (const char* name : {"Box2D", "Line2D", "Circle2D", "Point2D", "Measurement", "Record"}) {
+    const Data::Kind k = kindFromTypeName(name);
+    CHECK(k != Data::Kind::None);
+    CHECK(std::string(typeNameFromKind(k)) == name);
+  }
+}
+
+TEST_CASE("Box2D / Point2D 的 valueJson") {
+  Box2D b;
+  b.min[0] = -0.5f;
+  b.min[1] = 0.25f;
+  b.max[0] = 1.5f;
+  b.max[1] = 2.0f;
+  const Data d = Data::box2d(b);
+  CHECK(std::string(d.typeName()) == "Box2D");
+  CHECK(d.elementCount() == 1);
+  const nlohmann::json j = nlohmann::json::parse(d.valueJson());
+  CHECK(j["kind"] == "Box2D");
+  CHECK(j["min"][0].get<double>() == doctest::Approx(-0.5));
+  CHECK(j["max"][1].get<double>() == doctest::Approx(2.0));
+
+  Point2D p;
+  p.p[0] = 3.0f;
+  p.p[1] = -4.0f;
+  const nlohmann::json jp = nlohmann::json::parse(Data::point2d(p).valueJson());
+  CHECK(jp["p"][0].get<double>() == doctest::Approx(3.0));
+  CHECK(jp["p"][1].get<double>() == doctest::Approx(-4.0));
+}
+
+TEST_CASE("Line2D 只有带端点时才写 start/end") {
+  Line2D l;
+  l.point[0] = 1.0f;
+  l.dir[1] = 1.0f;
+  const nlohmann::json bare = nlohmann::json::parse(Data::line2d(l).valueJson());
+  CHECK(bare["hasSegment"] == false);
+  CHECK_FALSE(bare.contains("start"));
+
+  l.hasSegment = true;
+  l.start[0] = -1.0f;
+  l.end[0] = 2.0f;
+  const nlohmann::json seg = nlohmann::json::parse(Data::line2d(l).valueJson());
+  CHECK(seg["hasSegment"] == true);
+  CHECK(seg["start"][0].get<double>() == doctest::Approx(-1.0));
+  CHECK(seg["end"][0].get<double>() == doctest::Approx(2.0));
+}
+
+TEST_CASE("Circle2D 的 valueJson") {
+  Circle2D c;
+  c.center[0] = 0.1f;
+  c.center[1] = -0.2f;
+  c.radius = 0.0075f;
+  const nlohmann::json j = nlohmann::json::parse(Data::circle2d(c).valueJson());
+  CHECK(j["kind"] == "Circle2D");
+  CHECK(j["radius"].get<double>() == doctest::Approx(0.0075));
+}
+
+TEST_CASE("Measurement 的非有限值写成 null 而不是把整份 JSON 弄坏") {
+  Measurement m;
+  m.value = std::numeric_limits<double>::quiet_NaN();
+  m.ok = false;
+  m.message = "gap_left 圆拟合失败";
+  const nlohmann::json bad = nlohmann::json::parse(Data::measurement(m).valueJson());
+  CHECK(bad["value"].is_null());
+  CHECK(bad["ok"] == false);
+  CHECK(bad["message"] == "gap_left 圆拟合失败");
+  CHECK(bad["unit"] == "mm");
+  CHECK_FALSE(bad.contains("nominal"));  // 没设上下限就不写，免得前端以为判过了
+
+  m.value = 6.4138;
+  m.ok = true;
+  m.message.clear();
+  m.verdict = "ok";
+  m.hasLimits = true;
+  m.nominal = 6.4;
+  m.upper = 7.0;
+  m.lower = 5.8;
+  const nlohmann::json good = nlohmann::json::parse(Data::measurement(m).valueJson());
+  CHECK(good["value"].get<double>() == doctest::Approx(6.4138));
+  CHECK(good["verdict"] == "ok");
+  CHECK(good["upper"].get<double>() == doctest::Approx(7.0));
+  CHECK_FALSE(good.contains("message"));
+}
+
+TEST_CASE("Record 原样带着算子包定义的 JSON") {
+  Record r;
+  r.type = "GapAlignment";
+  r.data = nlohmann::json{{"templateId", "f1"}, {"score", 92.5}, {"bidirectional", false}};
+  const Data d = Data::record(r);
+  CHECK(std::string(d.typeName()) == "Record");
+  const nlohmann::json j = nlohmann::json::parse(d.valueJson());
+  CHECK(j["type"] == "GapAlignment");
+  CHECK(j["data"]["templateId"] == "f1");
+  CHECK(j["data"]["score"].get<double>() == doctest::Approx(92.5));
+}
+
+TEST_CASE("点云与 Indices 不走 valueJson") {
+  CHECK(Data::cloud(makeCloud(3, false, false, false)).valueJson().empty());
+  CHECK(Data::indices(Indices{}).valueJson().empty());
+  CHECK(Data().valueJson().empty());
+}
+
 // ----------- 下面这组来自一次代码审查抓到的缺陷，每条对着一个具体的失败场景
 
 TEST_CASE("jsonNumber 对非有限值给出合法 JSON") {

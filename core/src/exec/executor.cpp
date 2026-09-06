@@ -122,6 +122,11 @@ class EventSink {
       w.field("port", o.port);
       w.field("type", o.type);
       w.field("elementCount", static_cast<std::int64_t>(o.elementCount));
+      // 非点云输出把值一并带上：A/B 脚本与 Inspector 靠它，不必再回头查结果仓。
+      if (!o.valueJson.empty()) {
+        w.key("value");
+        w.raw(o.valueJson);
+      }
       w.endObject();
     }
     w.endArray();
@@ -494,7 +499,8 @@ class Scheduler {
         primaryElements = d.elementCount();
         first = false;
       }
-      infos.push_back(OutputInfo{p.name, d.typeName(), d.elementCount(), d.byteSize()});
+      infos.push_back(
+          OutputInfo{p.name, d.typeName(), d.elementCount(), d.byteSize(), d.valueJson()});
       store_.put(options_.runId, node.id, p.name, node.cacheKey, d);
     }
 

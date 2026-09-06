@@ -271,6 +271,18 @@
               },
               "elementCount": {
                 "type": "integer"
+              },
+              "value": {
+                "type": "object",
+                "description": "非点云输出的可读值（几何参数、Measurement 数值）。点云与 Indices 走二进制通道，没有这个字段。带 kind 字段，等于端口类型名。",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  }
+                }
               }
             }
           }

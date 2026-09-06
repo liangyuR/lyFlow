@@ -30,6 +30,8 @@ struct OutputInfo {
   std::string type;
   std::size_t elementCount = 0;
   std::size_t byteSize = 0;
+  /// 非点云输出的可读 JSON（Data::valueJson）。点云/Indices 为空串。
+  std::string valueJson;
 };
 
 struct CacheStats {

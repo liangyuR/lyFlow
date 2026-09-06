@@ -699,6 +699,27 @@ mod tests {
         // D10：PointCloudXYZI 已经删除，Plane 已经加入
         assert!(!types.contains(&"PointCloudXYZI"));
         assert!(types.contains(&"Plane"));
+        // 2D 量测域的六种通用载荷（ADR-0013）。算子包的端口全指着它们，
+        // 少一个的表现是「包里的算子注册不上」，而报错离现场很远。
+        for ty in [
+            "Box2D",
+            "Line2D",
+            "Circle2D",
+            "Point2D",
+            "Measurement",
+            "Record",
+        ] {
+            assert!(types.contains(&ty), "类型表里少了 {ty}");
+        }
+        // 每个类型都得有颜色：前端给端口和连线着色时没有兜底
+        for t in v["types"].as_array().unwrap() {
+            let color = t["color"].as_str().unwrap_or("");
+            assert!(
+                color.starts_with('#') && color.len() == 7,
+                "{} 的颜色不合法: {color:?}",
+                t["name"]
+            );
+        }
     }
 
     /// /utf-8 编译开关掉了的话，中文 doc 会变成乱码 —— 而且只在前端才看得出来。

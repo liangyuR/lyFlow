@@ -68,10 +68,48 @@ export interface CacheStats {
   evictions: number;
 }
 
+/** 非点云输出的值。`kind` 就是端口类型名，其余字段随类型而定（core 的 Data::valueJson）。
+ *  坐标一律是米；Measurement 的 value 带自己的 unit。 */
+export interface OutputValue {
+  kind: string;
+  /** Box2D */
+  min?: [number, number];
+  max?: [number, number];
+  /** Line2D */
+  point?: [number, number];
+  dir?: [number, number];
+  hasSegment?: boolean;
+  start?: [number, number];
+  end?: [number, number];
+  /** Circle2D */
+  center?: [number, number];
+  radius?: number;
+  /** Point2D */
+  p?: [number, number];
+  /** Measurement。value 为 null 表示没测出来（C++ 侧的非有限值）。 */
+  value?: number | null;
+  ok?: boolean;
+  unit?: string;
+  message?: string;
+  verdict?: string;
+  nominal?: number;
+  upper?: number;
+  lower?: number;
+  /** Record */
+  type?: string;
+  data?: Record<string, unknown>;
+  /** Plane / Transform */
+  normal?: number[];
+  d?: number;
+  m?: number[];
+}
+
 export interface OutputStat {
   port: string;
   type: string;
   elementCount: number;
+  /** 非点云输出才有。点云与 Indices 走二进制通道（ADR-0006）。 */
+  value?: OutputValue;
 }
 
 export interface NodeStats {
@@ -146,6 +184,7 @@ export interface OutputInfo {
   type: string;
   elementCount: number;
   byteSize: number;
+  value?: OutputValue;
 }
 
 // 二进制点云（ADR-0006） ------------------------------------------------------

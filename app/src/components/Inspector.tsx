@@ -7,11 +7,78 @@ import { useNodeExecution, useParamErrors } from "../store/execution";
 import { currentSubgraph, useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
+import type { OutputStat, OutputValue } from "../types/execution";
 import type { OperatorDesc, Param } from "../types/manifest";
 import type { GraphNode, SubgraphDef } from "../types/graph";
 
 import { OperatorDetail } from "./OperatorDetail";
 import { ParamControl } from "./ParamControls";
+
+/** 六位有效数字。2D 几何的坐标是米，原样打印会拖一串浮点噪声。 */
+function num(v: number | undefined): string {
+  if (v === undefined || !Number.isFinite(v)) return "—";
+  return String(Number(v.toPrecision(6)));
+}
+
+function pair(v: [number, number] | undefined): string {
+  return v ? `(${num(v[0])}, ${num(v[1])})` : "—";
+}
+
+/** 非点云输出的一行文本。类型未知时退回类型名，永远不抛。 */
+export function formatOutputValue(o: OutputStat): string {
+  const v: OutputValue | undefined = o.value;
+  if (!v) return `${o.elementCount} 个元素`;
+  switch (v.kind) {
+    case "Measurement":
+      if (v.value === null || v.value === undefined) return v.message || "未测出";
+      return `${num(v.value)} ${v.unit ?? ""}`.trim();
+    case "Box2D":
+      return `${pair(v.min)} → ${pair(v.max)}`;
+    case "Line2D":
+      return v.hasSegment
+        ? `${pair(v.start)} → ${pair(v.end)}`
+        : `过 ${pair(v.point)} 方向 ${pair(v.dir)}`;
+    case "Circle2D":
+      return `圆心 ${pair(v.center)} 半径 ${num(v.radius)}`;
+    case "Point2D":
+      return pair(v.p);
+    case "Record":
+      return `${v.type ?? ""} ${JSON.stringify(v.data ?? {})}`.trim();
+    case "Plane":
+      return `n=(${(v.normal ?? []).map(num).join(", ")}) d=${num(v.d)}`;
+    default:
+      return `${o.elementCount} 个元素`;
+  }
+}
+
+/** 该节点这次运行的非点云输出。点云走 3D 视图，这里只显示能读的值。 */
+function OutputValues({ outputs }: { outputs: OutputStat[] }) {
+  const shown = outputs.filter((o) => o.value !== undefined);
+  if (shown.length === 0) return null;
+  return (
+    <section className="insp__group" data-testid="inspector-outputs">
+      <h4 className="insp__group-title">输出</h4>
+      {shown.map((o) => {
+        const verdict = o.value?.kind === "Measurement" ? o.value.verdict : undefined;
+        return (
+          <div
+            className="insp-out"
+            key={o.port}
+            data-testid={`output-${o.port}`}
+            data-type={o.type}
+            data-verdict={verdict || undefined}
+          >
+            <span className="insp-out__port" title={o.type}>
+              {o.port}
+            </span>
+            <span className="insp-out__value">{formatOutputValue(o)}</span>
+            {verdict && <span className={`insp-out__verdict is-${verdict}`}>{verdict}</span>}
+          </div>
+        );
+      })}
+    </section>
+  );
+}
 
 function ParamRow({
   param,
@@ -132,6 +199,8 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
           </ul>
         </section>
       )}
+
+      {exec?.stats?.outputs && <OutputValues outputs={exec.stats.outputs} />}
 
       {op.params.length === 0 ? (
         <p className="insp__none">此算子没有参数</p>
