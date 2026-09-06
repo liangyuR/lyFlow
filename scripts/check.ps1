@@ -86,8 +86,14 @@ if ($LASTEXITCODE -ne 0) { throw "embed_minimal 跑合成图失败" }
 Step "frontend"
 Push-Location $root
 try {
+  # 包先单独过一遍 strict typecheck：app 那一遍是顺着 import 走的，
+  # 漏掉的文件（比如只有宿主才用的入口）在这里才会暴露。
+  pnpm --filter "@lyflow/editor" typecheck
+  if ($LASTEXITCODE -ne 0) { throw "@lyflow/editor 类型检查失败" }
   pnpm --filter lyflow-app build
   if ($LASTEXITCODE -ne 0) { throw "前端构建失败" }
+  pnpm --filter lyflow-host-react build
+  if ($LASTEXITCODE -ne 0) { throw "examples/host-react 构建失败" }
 } finally { Pop-Location }
 
 Write-Host "`n全链路绿" -ForegroundColor Green

@@ -1,0 +1,36 @@
+/* 宿主自己的样式。编辑器只管 `.app` 以内，页面布局归宿主。 */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #0e1013;
+  color: #cfd6e4;
+  font: 13px/1.55 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+  overflow: hidden;
+}
+
+.host {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.host__bar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid #2a3040;
+  background: #171a21;
+  flex-shrink: 0;
+}
+
+.host__editor {
+  flex: 1;
+  min-height: 0;
+}

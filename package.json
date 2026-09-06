@@ -9,7 +9,7 @@
     "build": "tauri build",
     "tauri": "tauri",
     "app:dev": "pnpm --filter lyflow-app dev",
-    "typecheck": "pnpm --filter lyflow-app typecheck",
+    "typecheck": "pnpm --filter @lyflow/editor typecheck && pnpm --filter lyflow-app typecheck",
     "core:build": "powershell -ExecutionPolicy Bypass -File scripts/build-core.ps1",
     "core:dump": "powershell -ExecutionPolicy Bypass -File scripts/dump-manifest.ps1",
     "core:watch": "powershell -ExecutionPolicy Bypass -File scripts/core-watch.ps1",
@@ -17,7 +17,10 @@
     "check": "powershell -ExecutionPolicy Bypass -File scripts/check.ps1",
     "check:gap": "powershell -ExecutionPolicy Bypass -File scripts/check-gap.ps1",
     "e2e": "node scripts/e2e/run.mjs",
-    "e2e:packaged": "node scripts/e2e/run.mjs --packaged"
+    "e2e:packaged": "node scripts/e2e/run.mjs --packaged",
+    "e2e:http": "node scripts/e2e/http.mjs",
+    "test-server": "node packages/editor/test-server/server.mjs",
+    "host:dev": "pnpm --filter lyflow-host-react dev"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

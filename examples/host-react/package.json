@@ -1,0 +1,28 @@
+{
+  "name": "lyflow-host-react",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "最小 Vite + React 宿主：装 @lyflow/editor，经 HttpTransport 连后端",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@lyflow/editor": "workspace:*",
+    "@xyflow/react": "^12.11.6",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.169.0",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.169.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3"
+  }
+}
