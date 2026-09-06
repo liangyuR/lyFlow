@@ -35,14 +35,14 @@ function fire(nodeId: string, preview: boolean): void {
 
 /** 参数开始拖动。进入预览态，节点上的状态条会标出来。 */
 export function beginPreview(nodeId: string): void {
-  if (transport.kind !== "tauri") return;
+  if (transport.kind === "static") return;
   lastNode = nodeId;
   useUiStore.getState().setPreviewing(true);
 }
 
 /** 值变了：debounce 一次 preview run，目标是这个节点。 */
 export function schedulePreview(nodeId: string): void {
-  if (transport.kind !== "tauri") return;
+  if (transport.kind === "static") return;
   if (!useUiStore.getState().previewing) return;
   lastNode = nodeId;
   cancelPending();
@@ -54,7 +54,7 @@ export function schedulePreview(nodeId: string): void {
 
 /** 松手。开了自动运行就补一次正式 run —— 预览结果是抽稀过的，不能当结论。 */
 export function endPreview(nodeId?: string): void {
-  if (transport.kind !== "tauri") return;
+  if (transport.kind === "static") return;
   const ui = useUiStore.getState();
   if (!ui.previewing) return;
   cancelPending();

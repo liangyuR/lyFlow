@@ -10,8 +10,8 @@
   flex-shrink: 0;
   height: 36px;
   padding: 0 10px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-1);
+  border-bottom: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-1);
 }
 
 .toolbar__group {
@@ -23,20 +23,20 @@
   padding: 4px 10px;
   background: none;
   border: 1px solid transparent;
-  border-radius: var(--radius);
-  color: var(--fg-1);
+  border-radius: var(--lyflow-radius);
+  color: var(--lyflow-fg-1);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
 }
 
 .toolbar button:hover:not(:disabled) {
-  background: var(--bg-3);
-  color: var(--fg-0);
+  background: var(--lyflow-bg-3);
+  color: var(--lyflow-fg-0);
 }
 
 .toolbar button:disabled {
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   opacity: 0.45;
   cursor: default;
 }
@@ -51,10 +51,10 @@
 .toolbar__name {
   width: 180px;
   padding: 3px 8px;
-  background: var(--bg-0);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--fg-0);
+  background: var(--lyflow-bg-0);
+  border: 1px solid var(--lyflow-border);
+  border-radius: var(--lyflow-radius);
+  color: var(--lyflow-fg-0);
   font: inherit;
   font-size: 12px;
   text-align: right;
@@ -62,12 +62,12 @@
 }
 
 .toolbar__name:focus {
-  border-color: var(--accent-dim);
+  border-color: var(--lyflow-accent-dim);
   text-align: left;
 }
 
 .toolbar__dirty {
-  color: var(--warn);
+  color: var(--lyflow-warn);
   font-size: 10px;
 }
 
@@ -76,8 +76,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--fg-2);
-  font-family: var(--mono);
+  color: var(--lyflow-fg-2);
+  font-family: var(--lyflow-mono);
   font-size: 11px;
 }
 
@@ -89,28 +89,28 @@
 }
 
 .react-flow__pane {
-  background: var(--bg-0);
+  background: var(--lyflow-bg-0);
 }
 
 .react-flow__controls-button {
-  background: var(--bg-2);
-  border-bottom: 1px solid var(--border);
-  fill: var(--fg-1);
+  background: var(--lyflow-bg-2);
+  border-bottom: 1px solid var(--lyflow-border);
+  fill: var(--lyflow-fg-1);
 }
 
 .react-flow__controls-button:hover {
-  background: var(--bg-3);
+  background: var(--lyflow-bg-3);
 }
 
 .react-flow__minimap {
-  background: var(--bg-0);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--lyflow-bg-0);
+  border: 1px solid var(--lyflow-border);
+  border-radius: var(--lyflow-radius);
 }
 
 .react-flow__attribution {
   background: transparent;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-size: 9px;
 }
 
@@ -122,23 +122,23 @@
 
 .node {
   min-width: 170px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--lyflow-border-strong);
   border-radius: 7px;
-  background: var(--bg-2);
+  background: var(--lyflow-bg-2);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
   font-size: 12px;
 }
 
 .node.is-selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), 0 2px 14px rgba(74, 158, 255, 0.25);
+  border-color: var(--lyflow-accent);
+  box-shadow: 0 0 0 1px var(--lyflow-accent), 0 2px 14px rgba(74, 158, 255, 0.25);
 }
 
 .node__head {
   padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--lyflow-border);
   border-radius: 6px 6px 0 0;
-  background: var(--bg-3);
+  background: var(--lyflow-bg-3);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -171,13 +171,13 @@
 }
 
 .node-port__label {
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
   white-space: nowrap;
 }
 
 .node-port__opt {
   margin-left: 3px;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-style: normal;
 }
 
@@ -192,7 +192,7 @@
   color: #e5484d;
 }
 .node-port__mark--lazy {
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
 }
 
 /* React Flow 的 Handle 默认贴节点边缘，这里把它对齐到各自的端口行上 */
@@ -223,8 +223,8 @@
 .node__collapsed .react-flow__handle {
   width: 8px;
   height: 8px;
-  background: var(--fg-2);
-  border: 2px solid var(--border-strong);
+  background: var(--lyflow-fg-2);
+  border: 2px solid var(--lyflow-border-strong);
 }
 
 .node--missing {
@@ -242,7 +242,7 @@
   flex-direction: column;
   gap: 3px;
   padding: 8px 12px;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-size: 11px;
 }
 
@@ -254,16 +254,16 @@
 
 .insp__head {
   padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--lyflow-border);
 }
 
 .insp__title {
   width: 100%;
   padding: 4px 8px;
-  background: var(--bg-0);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--fg-0);
+  background: var(--lyflow-bg-0);
+  border: 1px solid var(--lyflow-border);
+  border-radius: var(--lyflow-radius);
+  color: var(--lyflow-fg-0);
   font: inherit;
   font-size: 14px;
   font-weight: 600;
@@ -271,7 +271,7 @@
 }
 
 .insp__title:focus {
-  border-color: var(--accent-dim);
+  border-color: var(--lyflow-accent-dim);
 }
 
 .insp__meta {
@@ -279,22 +279,22 @@
   align-items: center;
   gap: 8px;
   margin-top: 7px;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-size: 11px;
 }
 
 .insp__doc {
   margin: 8px 0 0;
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
   font-size: 12px;
 }
 
 .insp__warn {
   margin: 8px 0 0;
   padding: 6px 8px;
-  border-left: 2px solid var(--warn);
+  border-left: 2px solid var(--lyflow-warn);
   background: rgba(240, 160, 32, 0.08);
-  color: var(--warn);
+  color: var(--lyflow-warn);
   font-size: 11px;
 }
 
@@ -308,12 +308,12 @@
   font-weight: 500;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
 }
 
 .insp__none,
 .insp__hint {
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-size: 12px;
 }
 
@@ -321,7 +321,7 @@
 .insp--multi,
 .insp--missing {
   padding: 28px 18px;
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
 }
 
 .insp--missing code {
@@ -343,13 +343,13 @@
   align-items: center;
   gap: 5px;
   margin-bottom: 3px;
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
   font-size: 11px;
 }
 
 /* 稀疏存储的可视化：改过默认值的参数标出来 */
 .insp-param__label .is-overridden {
-  color: var(--accent);
+  color: var(--lyflow-accent);
   font-weight: 500;
 }
 
@@ -357,31 +357,31 @@
   padding: 0 4px;
   background: none;
   border: 0;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
 }
 
 .insp-param__reset:hover {
-  color: var(--accent);
+  color: var(--lyflow-accent);
 }
 
 /* -------------------------------------------------------------- controls */
 
 .ctl {
   padding: 4px 7px;
-  background: var(--bg-0);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--fg-0);
+  background: var(--lyflow-bg-0);
+  border: 1px solid var(--lyflow-border);
+  border-radius: var(--lyflow-radius);
+  color: var(--lyflow-fg-0);
   font: inherit;
   font-size: 12px;
   outline: none;
 }
 
 .ctl:focus {
-  border-color: var(--accent-dim);
+  border-color: var(--lyflow-accent-dim);
 }
 
 .ctl:disabled {
@@ -403,7 +403,7 @@
 
 .ctl--num {
   width: 76px;
-  font-family: var(--mono);
+  font-family: var(--lyflow-mono);
 }
 
 .ctl--str,
@@ -416,7 +416,7 @@
 
 .ctl--text {
   resize: vertical;
-  font-family: var(--mono);
+  font-family: var(--lyflow-mono);
 }
 
 .ctl--slider {
@@ -425,12 +425,12 @@
   padding: 0;
   background: none;
   border: 0;
-  accent-color: var(--accent);
+  accent-color: var(--lyflow-accent);
 }
 
 .ctl-unit,
 .ctl-hint {
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-size: 11px;
 }
 
@@ -457,8 +457,8 @@
 
 .ctl-vec__axis {
   width: 12px;
-  color: var(--fg-2);
-  font-family: var(--mono);
+  color: var(--lyflow-fg-2);
+  font-family: var(--lyflow-mono);
   font-size: 11px;
 }
 
@@ -470,10 +470,10 @@
 .ctl-lock,
 .ctl-btn {
   padding: 3px 8px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--fg-1);
+  background: var(--lyflow-bg-2);
+  border: 1px solid var(--lyflow-border);
+  border-radius: var(--lyflow-radius);
+  color: var(--lyflow-fg-1);
   font: inherit;
   font-size: 11px;
   cursor: pointer;
@@ -481,18 +481,18 @@
 
 .ctl-lock:hover,
 .ctl-btn:hover {
-  border-color: var(--accent-dim);
+  border-color: var(--lyflow-accent-dim);
 }
 
 .ctl-lock.is-on {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--lyflow-accent);
+  color: var(--lyflow-accent);
 }
 
 .ctl-check input {
   width: 15px;
   height: 15px;
-  accent-color: var(--accent);
+  accent-color: var(--lyflow-accent);
 }
 
 .ctl-flags {
@@ -503,18 +503,18 @@
 
 .ctl-chip {
   padding: 2px 8px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
+  background: var(--lyflow-bg-2);
+  border: 1px solid var(--lyflow-border);
   border-radius: 10px;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font: inherit;
   font-size: 11px;
   cursor: pointer;
 }
 
 .ctl-chip.is-on {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--lyflow-accent);
+  color: var(--lyflow-accent);
 }
 
 .ctl--color {
@@ -524,7 +524,7 @@
 }
 
 .ctl-unsupported {
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-size: 11px;
   font-style: italic;
 }
@@ -542,19 +542,19 @@
   z-index: 41;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--lyflow-border-strong);
   border-radius: 8px;
-  background: var(--bg-1);
+  background: var(--lyflow-bg-1);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
   overflow: hidden;
 }
 
 .search-popup__input {
   padding: 9px 12px;
-  background: var(--bg-0);
+  background: var(--lyflow-bg-0);
   border: 0;
-  border-bottom: 1px solid var(--border);
-  color: var(--fg-0);
+  border-bottom: 1px solid var(--lyflow-border);
+  color: var(--lyflow-fg-0);
   font: inherit;
   outline: none;
 }
@@ -572,33 +572,33 @@
   padding: 5px 12px;
   background: none;
   border: 0;
-  color: var(--fg-0);
+  color: var(--lyflow-fg-0);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .search-popup__row.is-active {
-  background: var(--accent-dim);
+  background: var(--lyflow-accent-dim);
 }
 
 .search-popup__cat {
   margin-left: auto;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-size: 11px;
 }
 
 .search-popup__why {
   padding: 0 5px;
   border-radius: 3px;
-  background: var(--bg-3);
-  color: var(--fg-2);
+  background: var(--lyflow-bg-3);
+  color: var(--lyflow-fg-2);
   font-size: 10px;
 }
 
 .search-popup__empty {
   padding: 14px;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   text-align: center;
 }
 
@@ -608,8 +608,8 @@
   flex-shrink: 0;
   margin: 0;
   padding: 8px 10px;
-  border-top: 1px solid var(--border);
-  color: var(--fg-2);
+  border-top: 1px solid var(--lyflow-border);
+  color: var(--lyflow-fg-2);
   font-size: 11px;
 }
 
@@ -620,17 +620,17 @@
   z-index: 50;
   transform: translateX(-50%);
   padding: 7px 16px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--bg-3);
-  color: var(--fg-0);
+  border: 1px solid var(--lyflow-border-strong);
+  border-radius: var(--lyflow-radius);
+  background: var(--lyflow-bg-3);
+  color: var(--lyflow-fg-0);
   font-size: 12px;
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
 }
 
-.toast--warn {
-  border-color: var(--warn);
-  color: var(--warn);
+.toast--lyflow-warn {
+  border-color: var(--lyflow-warn);
+  color: var(--lyflow-warn);
 }
 
 /* ============== M2 —— 执行状态、错误定位、3D 视图 ============== */
@@ -640,20 +640,20 @@
 /* 状态用**边框色 + 一个色点**表达，不改节点底色：改底色会让端口文字的对比度
    随状态漂移，而端口才是节点上最需要看清的东西。 */
 .node--pending  { border-color: #6b7280; }
-.node--running  { border-color: var(--accent); }
+.node--running  { border-color: var(--lyflow-accent); }
 .node--done     { border-color: #46a758; }
 .node--error    { border-color: #e5484d; }
 .node--cancelled{ border-color: #e0a030; }
 .node--skipped  { border-color: #46a758; border-style: dashed; }
 
 .node--running {
-  box-shadow: 0 0 0 1px var(--accent), 0 2px 14px rgba(74, 158, 255, 0.35);
+  box-shadow: 0 0 0 1px var(--lyflow-accent), 0 2px 14px rgba(74, 158, 255, 0.35);
   animation: node-pulse 1.2s ease-in-out infinite;
 }
 
 @keyframes node-pulse {
-  0%, 100% { box-shadow: 0 0 0 1px var(--accent), 0 2px 10px rgba(74, 158, 255, 0.25); }
-  50%      { box-shadow: 0 0 0 2px var(--accent), 0 2px 18px rgba(74, 158, 255, 0.55); }
+  0%, 100% { box-shadow: 0 0 0 1px var(--lyflow-accent), 0 2px 10px rgba(74, 158, 255, 0.25); }
+  50%      { box-shadow: 0 0 0 2px var(--lyflow-accent), 0 2px 18px rgba(74, 158, 255, 0.55); }
 }
 
 /* stale = 整体变虚，不换颜色。颜色已经被状态占满了（P1 #23）。 */
@@ -673,7 +673,7 @@
   bottom: -1px;
   height: 2px;
   width: calc(var(--p, 0) * 100%);
-  background: var(--accent);
+  background: var(--lyflow-accent);
   transition: width 0.15s linear;
 }
 
@@ -682,9 +682,9 @@
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--lyflow-border);
   font-size: 11px;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   white-space: nowrap;
   overflow: hidden;
 }
@@ -697,13 +697,13 @@
   background: #6b7280;
 }
 
-.node__dot--running   { background: var(--accent); }
+.node__dot--running   { background: var(--lyflow-accent); }
 .node__dot--done      { background: #46a758; }
 .node__dot--error     { background: #e5484d; }
 .node__dot--cancelled { background: #e0a030; }
 .node__dot--skipped   { background: #46a758; opacity: 0.6; }
 
-.node__count { color: var(--fg-1); font-variant-numeric: tabular-nums; }
+.node__count { color: var(--lyflow-fg-1); font-variant-numeric: tabular-nums; }
 .node__time  { font-variant-numeric: tabular-nums; }
 
 .node__err {
@@ -720,9 +720,9 @@
   z-index: 40;
   min-width: 150px;
   padding: 4px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--lyflow-border-strong);
   border-radius: 6px;
-  background: var(--bg-2);
+  background: var(--lyflow-bg-2);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
@@ -733,14 +733,14 @@
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--fg-0);
+  color: var(--lyflow-fg-0);
   text-align: left;
   font-size: 12px;
   cursor: pointer;
 }
 
-.ctxmenu button:hover:not(:disabled) { background: var(--bg-3); }
-.ctxmenu button:disabled { color: var(--fg-2); cursor: default; }
+.ctxmenu button:hover:not(:disabled) { background: var(--lyflow-bg-3); }
+.ctxmenu button:disabled { color: var(--lyflow-fg-2); cursor: default; }
 
 /* ------------------------------------------------ 工具栏的运行区 */
 
@@ -754,7 +754,7 @@
 
 .toolbar__elapsed {
   font-variant-numeric: tabular-nums;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-size: 12px;
   min-width: 60px;
 }
@@ -768,7 +768,7 @@
 .toolbar__stat--done      { color: #9ce6ad; }
 .toolbar__stat--error     { color: #ff9a9a; }
 .toolbar__stat--cancelled { color: #ffd08a; }
-.toolbar__stat--stale     { color: var(--fg-2); font-style: italic; }
+.toolbar__stat--stale     { color: var(--lyflow-fg-2); font-style: italic; }
 
 .toolbar__runerror {
   color: #ff9a9a;
@@ -798,8 +798,8 @@
 .insp__errors {
   margin: 0 0 10px;
   padding: 8px 12px;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--lyflow-border);
+  border-bottom: 1px solid var(--lyflow-border);
   background: rgba(229, 72, 77, 0.08);
 }
 
@@ -851,19 +851,19 @@
   align-items: center;
   gap: 6px;
   padding: 4px 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-1);
+  border-bottom: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-1);
   font-size: 11.5px;
 }
 
-.viewer__title { color: var(--fg-1); font-weight: 500; }
-.viewer__count { color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.viewer__title { color: var(--lyflow-fg-1); font-weight: 500; }
+.viewer__count { color: var(--lyflow-fg-2); font-variant-numeric: tabular-nums; }
 .viewer__spacer { flex: 1; }
 
 .viewer__select {
-  background: var(--bg-2);
-  color: var(--fg-0);
-  border: 1px solid var(--border);
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-fg-0);
+  border: 1px solid var(--lyflow-border);
   border-radius: 4px;
   font-size: 11px;
   padding: 1px 3px;
@@ -872,10 +872,10 @@
 .viewer__size { width: 64px; }
 
 .viewer__fit {
-  border: 1px solid var(--border);
+  border: 1px solid var(--lyflow-border);
   border-radius: 4px;
-  background: var(--bg-2);
-  color: var(--fg-0);
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-fg-0);
   cursor: pointer;
   padding: 1px 6px;
 }
@@ -898,7 +898,7 @@
   justify-content: center;
   padding: 16px;
   text-align: center;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-size: 12px;
   background: rgba(17, 20, 26, 0.88);
   pointer-events: none;
@@ -933,8 +933,8 @@
   line-height: 15px;
 }
 .node__badge--mute {
-  background: var(--bg-3);
-  color: var(--fg-1);
+  background: var(--lyflow-bg-3);
+  color: var(--lyflow-fg-1);
 }
 
 /* 就地改名：输入框撑满标题栏，视觉上和标题同一个位置 */
@@ -942,9 +942,9 @@
   width: 100%;
   padding: 0;
   border: 0;
-  border-bottom: 1px solid var(--accent);
+  border-bottom: 1px solid var(--lyflow-accent);
   background: transparent;
-  color: var(--fg-0);
+  color: var(--lyflow-fg-0);
   font: inherit;
   outline: none;
 }
@@ -952,8 +952,8 @@
 .node__skip {
   padding: 0 4px;
   border-radius: 3px;
-  background: var(--bg-3);
-  color: var(--fg-2);
+  background: var(--lyflow-bg-3);
+  color: var(--lyflow-fg-2);
   font-size: 10px;
 }
 
@@ -968,7 +968,7 @@
   box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.35);
 }
 .node-port--compatible .node-port__label {
-  color: var(--fg-0);
+  color: var(--lyflow-fg-0);
 }
 .node-port--incompatible {
   opacity: 0.25;
@@ -989,8 +989,8 @@
 .ctxmenu kbd {
   margin-left: auto;
   padding-left: 12px;
-  color: var(--fg-2);
-  font-family: var(--mono);
+  color: var(--lyflow-fg-2);
+  font-family: var(--lyflow-mono);
   font-size: 10px;
 }
 .ctxmenu button {
@@ -1010,9 +1010,9 @@
   left: 0;
   min-width: 220px;
   padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-2);
+  border: 1px solid var(--lyflow-border);
+  border-radius: var(--lyflow-radius);
+  background: var(--lyflow-bg-2);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 .toolbar__recentmenu button {
@@ -1020,19 +1020,19 @@
   width: 100%;
   border: 0;
   background: transparent;
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
   text-align: left;
 }
-.toolbar__recentmenu button:hover { background: var(--bg-3); }
+.toolbar__recentmenu button:hover { background: var(--lyflow-bg-3); }
 .toolbar__recentempty {
   display: block;
   padding: 6px 8px;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-size: 11px;
 }
 
 .toolbar__recompute {
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-size: 11px;
   white-space: nowrap;
 }
@@ -1045,7 +1045,7 @@
   padding: 0 6px;
   border-radius: 3px;
   background: rgba(240, 160, 32, 0.16);
-  color: var(--warn);
+  color: var(--lyflow-warn);
 }
 
 /* -- 底部抽屉（§2.5）------------------------------------------------------- */
@@ -1053,8 +1053,8 @@
 .drawer {
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--border);
-  background: var(--bg-1);
+  border-top: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-1);
 }
 .drawer.is-open { height: 220px; }
 
@@ -1063,7 +1063,7 @@
   align-items: center;
   gap: 2px;
   padding: 0 6px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--lyflow-border);
 }
 .drawer__tabs button {
   display: flex;
@@ -1073,18 +1073,18 @@
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-size: 12px;
 }
 .drawer__tabs button.is-active {
-  border-bottom-color: var(--accent);
-  color: var(--fg-0);
+  border-bottom-color: var(--lyflow-accent);
+  color: var(--lyflow-fg-0);
 }
 .drawer__spacer { flex: 1; }
 .drawer__badge {
   padding: 0 5px;
   border-radius: 8px;
-  background: var(--bg-3);
+  background: var(--lyflow-bg-3);
   font-size: 10px;
 }
 .drawer__badge--error { background: rgba(224, 64, 64, 0.25); color: #ff8b8b; }
@@ -1095,15 +1095,15 @@
   padding: 8px 10px;
   font-size: 12px;
 }
-.drawer__empty { color: var(--fg-2); }
+.drawer__empty { color: var(--lyflow-fg-2); }
 
-.drawer__logs { margin: 0; padding: 0; list-style: none; font-family: var(--mono); }
+.drawer__logs { margin: 0; padding: 0; list-style: none; font-family: var(--lyflow-mono); }
 .drawer__log { display: flex; gap: 8px; padding: 1px 0; }
-.drawer__log-level { width: 42px; color: var(--fg-2); }
-.drawer__log--warn .drawer__log-level { color: var(--warn); }
+.drawer__log-level { width: 42px; color: var(--lyflow-fg-2); }
+.drawer__log--lyflow-warn .drawer__log-level { color: var(--lyflow-warn); }
 .drawer__log--error .drawer__log-level { color: #ff8b8b; }
-.drawer__log-node { color: var(--accent-dim); }
-.drawer__log-text { color: var(--fg-1); }
+.drawer__log-node { color: var(--lyflow-accent-dim); }
+.drawer__log-text { color: var(--lyflow-fg-1); }
 
 .drawer__diags { margin: 0; padding: 0; list-style: none; }
 .drawer__diags button {
@@ -1113,17 +1113,17 @@
   padding: 3px 4px;
   border: 0;
   background: transparent;
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
   text-align: left;
 }
-.drawer__diags button:hover { background: var(--bg-2); }
-.drawer__diag-node { color: var(--fg-0); }
+.drawer__diags button:hover { background: var(--lyflow-bg-2); }
+.drawer__diag-node { color: var(--lyflow-fg-0); }
 .drawer__diag-code,
-.drawer__diag-param { color: var(--warn); font-family: var(--mono); font-size: 11px; }
+.drawer__diag-param { color: var(--lyflow-warn); font-family: var(--lyflow-mono); font-size: 11px; }
 
 .drawer__cache dl { display: grid; grid-template-columns: repeat(3, auto); gap: 4px 24px; margin: 0; }
-.drawer__cache dt { color: var(--fg-2); font-size: 11px; }
-.drawer__cache dd { margin: 0; color: var(--fg-0); font-variant-numeric: tabular-nums; }
+.drawer__cache dt { color: var(--lyflow-fg-2); font-size: 11px; }
+.drawer__cache dd { margin: 0; color: var(--lyflow-fg-0); font-variant-numeric: tabular-nums; }
 .drawer__cache-actions { display: flex; gap: 8px; margin-top: 12px; }
 
 /* -- 快捷键面板（E7）------------------------------------------------------- */
@@ -1141,9 +1141,9 @@
   width: min(760px, 92vw);
   max-height: 82vh;
   overflow: auto;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--bg-1);
+  border: 1px solid var(--lyflow-border-strong);
+  border-radius: var(--lyflow-radius);
+  background: var(--lyflow-bg-1);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
 }
 .sheet__head {
@@ -1151,7 +1151,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--lyflow-border);
 }
 .sheet__head h2 { margin: 0; font-size: 14px; }
 .sheet__body {
@@ -1160,7 +1160,7 @@
   gap: 18px;
   padding: 14px;
 }
-.sheet__group h3 { margin: 0 0 6px; color: var(--fg-2); font-size: 11px; font-weight: 600; }
+.sheet__group h3 { margin: 0 0 6px; color: var(--lyflow-fg-2); font-size: 11px; font-weight: 600; }
 .sheet__group ul { margin: 0; padding: 0; list-style: none; }
 .sheet__group li {
   display: flex;
@@ -1169,16 +1169,16 @@
   padding: 3px 0;
   font-size: 12px;
 }
-.sheet__label { color: var(--fg-0); }
-.sheet__scope { color: var(--fg-2); font-size: 10px; }
+.sheet__label { color: var(--lyflow-fg-0); }
+.sheet__scope { color: var(--lyflow-fg-2); font-size: 10px; }
 .sheet__keys { margin-left: auto; display: flex; gap: 4px; }
 .sheet__keys kbd {
   padding: 1px 6px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--lyflow-border-strong);
   border-radius: 3px;
-  background: var(--bg-3);
-  color: var(--fg-1);
-  font-family: var(--mono);
+  background: var(--lyflow-bg-3);
+  color: var(--lyflow-fg-1);
+  font-family: var(--lyflow-mono);
   font-size: 10px;
 }
 
@@ -1193,9 +1193,9 @@
   align-items: center;
   gap: 4px;
   padding: 4px 10px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--lyflow-border-strong);
   border-radius: 6px;
-  background: color-mix(in srgb, var(--bg-2) 92%, transparent);
+  background: color-mix(in srgb, var(--lyflow-bg-2) 92%, transparent);
   font-size: 12px;
 }
 .breadcrumb button {
@@ -1203,27 +1203,27 @@
   border: none;
   border-radius: 3px;
   background: transparent;
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
   cursor: pointer;
 }
-.breadcrumb button:hover:not(:disabled) { background: var(--bg-3); color: var(--fg-0); }
-.breadcrumb button:disabled { color: var(--fg-0); cursor: default; font-weight: 600; }
+.breadcrumb button:hover:not(:disabled) { background: var(--lyflow-bg-3); color: var(--lyflow-fg-0); }
+.breadcrumb button:disabled { color: var(--lyflow-fg-0); cursor: default; font-weight: 600; }
 .breadcrumb__seg { display: inline-flex; align-items: center; gap: 4px; }
-.breadcrumb__sep { color: var(--fg-2); }
-.breadcrumb__hint { margin-left: 8px; color: var(--fg-2); font-size: 10px; }
+.breadcrumb__sep { color: var(--lyflow-fg-2); }
+.breadcrumb__hint { margin-left: 8px; color: var(--lyflow-fg-2); font-size: 10px; }
 
-.node--sub .node__head { background: color-mix(in srgb, var(--accent) 18%, var(--bg-3)); }
+.node--sub .node__head { background: color-mix(in srgb, var(--lyflow-accent) 18%, var(--lyflow-bg-3)); }
 .node__badge--sub {
-  background: color-mix(in srgb, var(--accent) 40%, transparent);
-  color: var(--fg-0);
+  background: color-mix(in srgb, var(--lyflow-accent) 40%, transparent);
+  color: var(--lyflow-fg-0);
 }
 
 .insp-param__promoted {
   margin-left: 6px;
   padding: 0 4px;
   border-radius: 3px;
-  background: color-mix(in srgb, var(--accent) 25%, transparent);
-  color: var(--fg-1);
+  background: color-mix(in srgb, var(--lyflow-accent) 25%, transparent);
+  color: var(--lyflow-fg-1);
   font-size: 10px;
 }
 
@@ -1235,22 +1235,22 @@
   transform: translate(-50%, -50%);
   min-width: 320px;
   padding: 14px 16px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--lyflow-border-strong);
   border-radius: 8px;
-  background: var(--bg-2);
+  background: var(--lyflow-bg-2);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 .modal h4 { margin: 0 0 10px; font-size: 13px; }
-.modal label { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; font-size: 11px; color: var(--fg-2); }
+.modal label { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; font-size: 11px; color: var(--lyflow-fg-2); }
 .modal input {
   padding: 4px 6px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--lyflow-border-strong);
   border-radius: 4px;
-  background: var(--bg-1);
-  color: var(--fg-0);
+  background: var(--lyflow-bg-1);
+  color: var(--lyflow-fg-0);
   font-size: 12px;
 }
-.modal__hint { margin: 0 0 10px; color: var(--fg-2); font-size: 11px; }
+.modal__hint { margin: 0 0 10px; color: var(--lyflow-fg-2); font-size: 11px; }
 .modal__row { display: flex; justify-content: flex-end; gap: 8px; }
 
 .toolbar__toggle {
@@ -1258,24 +1258,24 @@
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
 }
 .toolbar__select {
   padding: 2px 4px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--lyflow-border-strong);
   border-radius: 4px;
-  background: var(--bg-2);
-  color: var(--fg-1);
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-fg-1);
   font-size: 11px;
 }
-.toolbar__stat--preview { color: var(--accent); }
+.toolbar__stat--preview { color: var(--lyflow-accent); }
 .toolbar__group--preview { gap: 6px; }
 
 .viewer__preview {
   padding: 1px 6px;
   border-radius: 3px;
-  background: color-mix(in srgb, var(--accent) 30%, transparent);
-  color: var(--fg-0);
+  background: color-mix(in srgb, var(--lyflow-accent) 30%, transparent);
+  color: var(--lyflow-fg-0);
   font-size: 10px;
 }
 
@@ -1289,7 +1289,7 @@
 }
 
 .insp-out__port {
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   flex: 0 0 auto;
 }
 
@@ -1306,8 +1306,8 @@
   border-radius: 3px;
   font-size: 10px;
   text-transform: uppercase;
-  background: var(--bg-2);
-  color: var(--fg-1);
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-fg-1);
 }
 
 .insp-out__verdict.is-ok {
@@ -1325,3 +1325,4 @@
   background: #7a5c1f;
   color: #fff1cf;
 }
+

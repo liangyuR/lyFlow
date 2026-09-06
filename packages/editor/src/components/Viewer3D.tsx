@@ -7,6 +7,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import { findBaseCloud, firstCloudPort, type BaseCloud } from "../lib/basecloud";
 import { augmentOperators, levelOf, resolveOutput } from "../lib/subgraph";
+import { dialogs } from "../lib/dialogs";
 import { transport } from "../transport";
 import { aggregatedNodes, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
@@ -796,8 +797,9 @@ export function Viewer3D() {
     const name = (display.nodeId ?? "view").replace(/[^\w.-]+/g, "_");
     const file = `${name}-${stamp}.png`;
 
-    if (transport.kind !== "tauri") {
-      // 浏览器模式没有保存对话框，退回让 webview 自己下载
+    const pickPath = dialogs().pickPath;
+    if (!pickPath) {
+      // 宿主没有保存对话框，退回让浏览器自己下载
       const a = document.createElement("a");
       a.href = url;
       a.download = file;
@@ -807,8 +809,8 @@ export function Viewer3D() {
       return;
     }
     try {
-      const { save } = await import("@tauri-apps/plugin-dialog");
-      const picked = await save({
+      const picked = await pickPath({
+        mode: "save",
         defaultPath: file,
         filters: [{ name: "PNG", extensions: ["png"] }],
       });

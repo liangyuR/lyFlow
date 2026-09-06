@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { dialogs } from "../lib/dialogs";
 import { beginPreview, endPreview, schedulePreview } from "../lib/preview";
 import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
@@ -446,16 +447,16 @@ function TextishControl({ param, value, disabled, onChange }: ControlProps) {
 
 function PathControl({ param, value, disabled, onChange }: ControlProps) {
   const pick = async () => {
-    if (!("__TAURI_INTERNALS__" in window)) {
-      useUiStore.getState().showToast("浏览器模式没有文件对话框，请在 Tauri 里运行", "warn");
+    const pickPath = dialogs().pickPath;
+    if (!pickPath) {
+      useUiStore.getState().showToast("当前宿主没有文件对话框，请手动填路径", "warn");
       return;
     }
-    const { open, save } = await import("@tauri-apps/plugin-dialog");
     const filters = (param.filters ?? []).map((f) => ({ name: f.name, extensions: f.extensions }));
-    const picked =
-      param.mode === "save"
-        ? await save({ filters })
-        : await open({ directory: param.mode === "dir", multiple: false, filters });
+    const picked = await pickPath({
+      mode: param.mode === "save" ? "save" : param.mode === "dir" ? "dir" : "open",
+      filters,
+    });
     if (typeof picked === "string") onChange(picked);
   };
 

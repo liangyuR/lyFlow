@@ -1,23 +1,25 @@
 // 验收用的窗口桥：把 store 挂到 window.__lyflow，让 CDP 脚本既能点按钮也能读状态。
 // 三条自律（只读转发、应用代码不许 import、正式构建里也在）见 app/README.md。
 
-import { transport } from "../transport";
-import { requestPlan, useCacheStore } from "../store/cache";
 import {
+  levelOf,
   onNodeTransition,
+  pathPrefix,
+  requestPlan,
   startRun,
+  useCacheStore,
   useExecutionStore,
+  useGraphStore,
+  useManifestStore,
+  useUiStore,
   type RunRequest,
   type StateTransition,
-} from "../store/execution";
-import { useGraphStore } from "../store/graph";
-import { useManifestStore } from "../store/manifest";
-import { useUiStore } from "../store/ui";
-import { levelOf, pathPrefix } from "./subgraph";
+  type Transport,
+} from "@lyflow/editor";
 
 interface DevBridge {
   version: string;
-  transport: typeof transport;
+  transport: Transport;
   stores: {
     graph: typeof useGraphStore;
     ui: typeof useUiStore;
@@ -48,7 +50,7 @@ declare global {
   }
 }
 
-export function installDevBridge(): void {
+export function installDevBridge(transport: Transport): void {
   if (typeof window === "undefined" || window.__lyflow) return;
 
   const transitions: StateTransition[] = [];

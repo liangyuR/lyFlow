@@ -1,8 +1,8 @@
 /* 3D 视图补齐（M3 §2.6）新增的样式。styles.editor.css 有人并行在改，新类一律放这里。 */
 
-.viewer__bar--tools { border-bottom: 1px solid var(--border); }
+.viewer__bar--tools { border-bottom: 1px solid var(--lyflow-border); }
 
-.viewer__label { color: var(--fg-2); }
+.viewer__label { color: var(--lyflow-fg-2); }
 
 .viewer__pinned {
   max-width: 120px;
@@ -19,26 +19,26 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   color: #9aa6b8;
-  border: 1px solid var(--border);
+  border: 1px solid var(--lyflow-border);
   border-radius: 4px;
   padding: 0 4px;
 }
 
 .viewer__num {
   width: 66px;
-  background: var(--bg-2);
-  color: var(--fg-0);
-  border: 1px solid var(--border);
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-fg-0);
+  border: 1px solid var(--lyflow-border);
   border-radius: 4px;
   font-size: 11px;
   padding: 1px 3px;
 }
 
 .viewer__btn {
-  border: 1px solid var(--border);
+  border: 1px solid var(--lyflow-border);
   border-radius: 4px;
-  background: var(--bg-2);
-  color: var(--fg-0);
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-fg-0);
   font-size: 11px;
   cursor: pointer;
   padding: 1px 6px;

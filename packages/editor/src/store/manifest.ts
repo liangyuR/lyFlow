@@ -46,12 +46,13 @@ export const useManifestStore = create<ManifestState>((set) => ({
   error: null,
   bundle: null,
   coreInfo: null,
-  transportKind: transport.kind,
+  // 真正的种类在 load 里补 —— store 建起来时宿主还没装上传输。
+  transportKind: "static",
   operatorsById: new Map(),
   typesByName: new Map(),
 
   load: async () => {
-    set({ status: "loading", error: null });
+    set({ status: "loading", error: null, transportKind: transport.kind });
     try {
       const [bundle, coreInfo] = await Promise.all([
         transport.getManifest(),

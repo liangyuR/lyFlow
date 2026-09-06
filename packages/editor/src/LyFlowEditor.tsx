@@ -13,7 +13,6 @@ import { useShortcuts } from "./hooks/useShortcuts";
 import {
   backupStatus,
   BACKUP_INTERVAL_MS,
-  baseName,
   confirmDiscard,
   confirmRestore,
   discardBackup,
@@ -38,10 +37,26 @@ import {
 import { useGraphStore } from "./store/graph";
 import { useManifestStore } from "./store/manifest";
 import { useUiStore } from "./store/ui";
-import { transport } from "./transport";
+import { setTransport, transport, type Transport } from "./transport";
+import { setDialogs, type EditorDialogs } from "./lib/dialogs";
 import { hasRelativePathParam } from "./lib/params";
 import { isMigration, type MigrationAction } from "./types/execution";
 import type { GraphDoc } from "./types/graph";
+
+import "./styles.css";
+import "./styles.editor.css";
+
+const TRANSPORT_LABEL: Record<string, string> = {
+  tauri: "Tauri · 实时",
+  http: "HTTP · 实时",
+  static: "静态快照",
+};
+
+const TRANSPORT_TITLE: Record<string, string> = {
+  tauri: "实时读取 C++ 注册表",
+  http: "经 HTTP 后端读取 C++ 注册表",
+  static: "静态模式：读的是 dump 出来的 manifest 快照，可能过期",
+};
 
 function StatusBar() {
   const coreInfo = useManifestStore((s) => s.coreInfo);
@@ -102,12 +117,10 @@ function StatusBar() {
       <span
         className={`statusbar__transport statusbar__transport--${transportKind}`}
         title={
-          transportKind === "tauri"
-            ? "实时读取 C++ 注册表"
-            : "浏览器模式：读的是 public/manifest.dev.json 静态快照，可能过期"
+          TRANSPORT_TITLE[transportKind]
         }
       >
-        {transportKind === "tauri" ? "Tauri · 实时" : "静态快照"}
+        {TRANSPORT_LABEL[transportKind]}
       </span>
     </footer>
   );
@@ -164,19 +177,9 @@ function useDragSplit(initial: number, min: number, max: number) {
   return { width, onPointerDown };
 }
 
-/** 窗口标题 `文件名 *`。没有它用户开两个窗口就分不清哪个是哪个。 */
-function useWindowTitle() {
-  const filePath = useGraphStore((s) => s.filePath);
-  const dirty = useGraphStore((s) => s.dirty);
-  const name = useGraphStore((s) => s.doc.name);
-  useEffect(() => {
-    const label = filePath ? baseName(filePath) : (name ?? "未命名");
-    document.title = `${label}${dirty ? " *" : ""} — LyFlow`;
-  }, [filePath, dirty, name]);
-}
-
-function Workspace() {
+function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps) {
   const { screenToFlowPosition, fitView } = useReactFlow();
+  const root = useRef<HTMLDivElement>(null);
   const [paletteWidth] = useState(280);
   const rightPane = useDragSplit(380, 260, 900);
 
@@ -189,7 +192,6 @@ function Workspace() {
   const loadManifest = useManifestStore((s) => s.load);
   const manifestStatus = useManifestStore((s) => s.status);
   const manifestError = useManifestStore((s) => s.error);
-  useWindowTitle();
 
   useEffect(() => {
     void loadManifest();
@@ -434,10 +436,57 @@ function Workspace() {
     [doSave, doOpen, doNew, doRun, doCancel, doLayout, fitView, screenToFlowPosition],
   );
 
-  useShortcuts(handlers);
+  useShortcuts(handlers, root);
+
+  // 键盘事件挂在根元素上，所以根元素必须拿得到焦点（A2-3）
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    const refocus = () => {
+      setTimeout(() => {
+        const active = el.ownerDocument.activeElement;
+        if (!active || active === el.ownerDocument.body) el.focus({ preventScroll: true });
+      }, 0);
+    };
+    // relatedTarget 为空 = 焦点掉回 body，没被别人接走，可以收回来
+    const onFocusOut = (e: FocusEvent) => {
+      if (e.relatedTarget === null) refocus();
+    };
+    el.addEventListener("pointerdown", refocus);
+    el.addEventListener("focusout", onFocusOut);
+    return () => {
+      el.removeEventListener("pointerdown", refocus);
+      el.removeEventListener("focusout", onFocusOut);
+    };
+  }, []);
+
+  // 宿主给了初始图就打开它
+  const openedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!graphPath || openedRef.current === graphPath) return;
+    openedRef.current = graphPath;
+    void openPath(graphPath);
+  }, [graphPath, openPath]);
+
+  // doc 变化推给宿主
+  useEffect(() => {
+    if (!onDocChange) return;
+    return useGraphStore.subscribe((state, prev) => {
+      if (state.doc === prev.doc && state.dirty === prev.dirty) return;
+      onDocChange(state.doc, state.dirty);
+    });
+  }, [onDocChange]);
 
   return (
-    <div className="app" onMouseMove={onMouseMove}>
+    <div
+      className={className ? `app ${className}` : "app"}
+      ref={root}
+      tabIndex={-1}
+      data-lyflow-editor="1"
+      style={theme as React.CSSProperties | undefined}
+      onMouseMove={onMouseMove}
+    >
       <Toolbar
         onNew={handlers.onNew}
         onOpen={handlers.onOpen}
@@ -497,12 +546,33 @@ function Workspace() {
   );
 }
 
-export default function App() {
+interface WorkspaceProps {
+  /** 挂载后自动打开这张图。 */
+  graphPath?: string | undefined;
+  /** 文档或 dirty 状态变化时回调，给宿主做自己的标题栏/保存提示。 */
+  onDocChange?: ((doc: GraphDoc, dirty: boolean) => void) | undefined;
+  className?: string | undefined;
+  /** `--lyflow-*` 变量的覆盖值，写在编辑器根元素上。 */
+  theme?: Record<string, string> | undefined;
+}
+
+export interface LyFlowEditorProps extends WorkspaceProps {
+  /** 必填。宿主自己 new 一个 TauriTransport / HttpTransport / StaticTransport。 */
+  transport: Transport;
+  /** 打开/另存/确认对话框。不给就退回 window.confirm，且没有文件选择器。 */
+  dialogs?: EditorDialogs | undefined;
+}
+
+export function LyFlowEditor({ transport: t, dialogs: d, ...rest }: LyFlowEditorProps) {
+  // 装在 render 里而不是 effect 里：子树的 store 一挂载就会去调传输层。
+  setTransport(t);
+  setDialogs(d);
+
   // GraphCanvas 和快捷键都要用 useReactFlow（screenToFlowPosition），
   // 所以 Provider 必须包在整个工作区外面，不能只包画布。
   return (
     <ReactFlowProvider>
-      <Workspace />
+      <Workspace {...rest} />
     </ReactFlowProvider>
   );
 }

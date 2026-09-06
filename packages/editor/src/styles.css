@@ -1,48 +1,39 @@
 /* 设计变量与基础样式，只在这里定义、别处只消费；编辑器样式在 styles.editor.css。
    暗色是节点编辑器的默认预期（ComfyUI / Blender / Houdini），点云在暗底上也更好看。 */
 
-:root {
-  --bg-0: #14161a;
-  --bg-1: #1a1d23;
-  --bg-2: #21252d;
-  --bg-3: #2a2f39;
-  --border: #333a46;
-  --border-strong: #454d5c;
+/* 定义在编辑器根元素上而不是 :root：宿主页面的其余部分不该被我们改色。
+   宿主想换皮就在更外层或 `theme` prop 里覆盖同名变量。 */
+.app {
+  --lyflow-bg-0: #14161a;
+  --lyflow-bg-1: #1a1d23;
+  --lyflow-bg-2: #21252d;
+  --lyflow-bg-3: #2a2f39;
+  --lyflow-border: #333a46;
+  --lyflow-border-strong: #454d5c;
 
-  --fg-0: #e6e9ef;
-  --fg-1: #a8b0bd;
-  --fg-2: #6f7887;
+  --lyflow-fg-0: #e6e9ef;
+  --lyflow-fg-1: #a8b0bd;
+  --lyflow-fg-2: #6f7887;
 
-  --accent: #4a9eff;
-  --accent-dim: #2d6099;
-  --warn: #f0a020;
+  --lyflow-accent: #4a9eff;
+  --lyflow-accent-dim: #2d6099;
+  --lyflow-warn: #f0a020;
 
-  --radius: 6px;
-  --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  --lyflow-radius: 6px;
+  --lyflow-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
 
   color-scheme: dark;
 }
 
-* {
+.app,
+.app *,
+.lyflow-portal,
+.lyflow-portal * {
   box-sizing: border-box;
 }
 
-html,
-body,
-#root {
-  height: 100%;
-  margin: 0;
-}
-
-body {
-  background: var(--bg-0);
-  color: var(--fg-0);
-  font: 13px/1.55 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-  overflow: hidden;
-}
-
-code {
-  font-family: var(--mono);
+.app code {
+  font-family: var(--lyflow-mono);
   font-size: 0.92em;
 }
 
@@ -52,6 +43,17 @@ code {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+  background: var(--lyflow-bg-0);
+  color: var(--lyflow-fg-0);
+  font: 13px/1.55 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  overflow: hidden;
+  color-scheme: dark;
+}
+
+.app:focus,
+.app:focus-visible {
+  outline: none;
 }
 
 .app__body {
@@ -62,8 +64,8 @@ code {
 
 .app__sidebar {
   flex-shrink: 0;
-  border-right: 1px solid var(--border);
-  background: var(--bg-1);
+  border-right: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-1);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -81,8 +83,8 @@ code {
   min-width: 260px;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--border);
-  background: var(--bg-1);
+  border-left: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-1);
   min-height: 0;
 }
 
@@ -91,7 +93,7 @@ code {
   min-height: 160px;
   display: flex;
   flex-direction: column;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--lyflow-border);
   min-width: 0;
 }
 
@@ -115,11 +117,11 @@ code {
   content: "";
   position: absolute;
   inset: 0 3px;
-  background: var(--border);
+  background: var(--lyflow-border);
 }
 
 .app__splitter:hover::after {
-  background: var(--accent);
+  background: var(--lyflow-accent);
 }
 
 /* 拖动分栏时禁掉选中与 iframe/canvas 的指针事件，否则鼠标一进画布就丢事件 */
@@ -136,7 +138,7 @@ body.is-resizing .app__viewer {
 .app__hint,
 .app__error {
   padding: 16px;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
 }
 
 .app__error {
@@ -144,7 +146,7 @@ body.is-resizing .app__viewer {
 }
 
 .app__error p {
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
   font-size: 12px;
   word-break: break-word;
 }
@@ -152,15 +154,15 @@ body.is-resizing .app__viewer {
 .app__error button {
   margin-top: 8px;
   padding: 4px 12px;
-  background: var(--bg-3);
-  color: var(--fg-0);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
+  background: var(--lyflow-bg-3);
+  color: var(--lyflow-fg-0);
+  border: 1px solid var(--lyflow-border-strong);
+  border-radius: var(--lyflow-radius);
   cursor: pointer;
 }
 
 .app__error button:hover {
-  border-color: var(--accent);
+  border-color: var(--lyflow-accent);
 }
 
 /* --------------------------------------------------------------- palette */
@@ -174,26 +176,26 @@ body.is-resizing .app__viewer {
 
 .palette__search {
   padding: 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--lyflow-border);
 }
 
 .palette__search input {
   width: 100%;
   padding: 7px 10px;
-  background: var(--bg-0);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--fg-0);
+  background: var(--lyflow-bg-0);
+  border: 1px solid var(--lyflow-border);
+  border-radius: var(--lyflow-radius);
+  color: var(--lyflow-fg-0);
   font: inherit;
   outline: none;
 }
 
 .palette__search input:focus {
-  border-color: var(--accent-dim);
+  border-color: var(--lyflow-accent-dim);
 }
 
 .palette__search input::placeholder {
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
 }
 
 .palette__list {
@@ -204,7 +206,7 @@ body.is-resizing .app__viewer {
 
 .palette__empty {
   padding: 16px;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   text-align: center;
 }
 
@@ -218,7 +220,7 @@ body.is-resizing .app__viewer {
   padding: 4px 10px 4px calc(10px + var(--depth) * 12px);
   background: none;
   border: 0;
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
   font: inherit;
   font-size: 12px;
   letter-spacing: 0.02em;
@@ -227,13 +229,13 @@ body.is-resizing .app__viewer {
 }
 
 .tree-branch__head:hover {
-  color: var(--fg-0);
+  color: var(--lyflow-fg-0);
 }
 
 .tree-branch__caret {
   display: inline-block;
   transition: transform 0.12s ease;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-size: 10px;
 }
 
@@ -243,8 +245,8 @@ body.is-resizing .app__viewer {
 
 .tree-branch__count {
   margin-left: auto;
-  color: var(--fg-2);
-  font-family: var(--mono);
+  color: var(--lyflow-fg-2);
+  font-family: var(--lyflow-mono);
   font-size: 11px;
 }
 
@@ -257,19 +259,19 @@ body.is-resizing .app__viewer {
   background: none;
   border: 0;
   border-left: 2px solid transparent;
-  color: var(--fg-0);
+  color: var(--lyflow-fg-0);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .op-row:hover {
-  background: var(--bg-2);
+  background: var(--lyflow-bg-2);
 }
 
 .op-row.is-active {
-  background: var(--bg-3);
-  border-left-color: var(--accent);
+  background: var(--lyflow-bg-3);
+  border-left-color: var(--lyflow-accent);
 }
 
 .op-row__label {
@@ -278,13 +280,13 @@ body.is-resizing .app__viewer {
 
 .op-row__label mark {
   background: none;
-  color: var(--accent);
+  color: var(--lyflow-accent);
   font-weight: 600;
 }
 
 .op-row__id {
-  color: var(--fg-2);
-  font-family: var(--mono);
+  color: var(--lyflow-fg-2);
+  font-family: var(--lyflow-mono);
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -296,8 +298,8 @@ body.is-resizing .app__viewer {
   flex-shrink: 0;
   padding: 0 5px;
   border-radius: 3px;
-  background: var(--bg-3);
-  color: var(--fg-2);
+  background: var(--lyflow-bg-3);
+  color: var(--lyflow-fg-2);
   font-size: 10px;
 }
 
@@ -319,11 +321,11 @@ body.is-resizing .app__viewer {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
 }
 
 .detail__meta code {
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
 }
 
 .detail__category {
@@ -332,7 +334,7 @@ body.is-resizing .app__viewer {
 
 .detail__doc {
   margin: 12px 0 0;
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
   max-width: 60ch;
 }
 
@@ -353,12 +355,12 @@ body.is-resizing .app__viewer {
   gap: 10px;
   margin: 0 0 12px;
   padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--lyflow-border);
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
 }
 
 .detail__hint {
@@ -366,7 +368,7 @@ body.is-resizing .app__viewer {
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
 }
 
 .detail__section h4 {
@@ -375,7 +377,7 @@ body.is-resizing .app__viewer {
   font-weight: 500;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
 }
 
 .detail__ports {
@@ -386,7 +388,7 @@ body.is-resizing .app__viewer {
 
 .detail__none {
   margin: 0;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-style: italic;
 }
 
@@ -422,15 +424,15 @@ body.is-resizing .app__viewer {
 .port__optional {
   padding: 0 5px;
   border-radius: 3px;
-  background: var(--bg-3);
-  color: var(--fg-2);
+  background: var(--lyflow-bg-3);
+  color: var(--lyflow-fg-2);
   font-size: 10px;
 }
 
 .port__doc {
   flex-basis: 100%;
   padding-left: 16px;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-size: 12px;
 }
 
@@ -438,7 +440,7 @@ body.is-resizing .app__viewer {
 
 .param {
   padding: 12px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--lyflow-border);
 }
 
 .param:last-child {
@@ -456,13 +458,13 @@ body.is-resizing .app__viewer {
 }
 
 .param__type {
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
   font-size: 11px;
 }
 
 .param__doc {
   margin: 4px 0 0;
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
   max-width: 62ch;
 }
 
@@ -475,17 +477,17 @@ body.is-resizing .app__viewer {
 }
 
 .param__facts dt {
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
 }
 
 .param__facts dd {
   margin: 0;
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
 }
 
 .param__unit {
   margin-left: 5px;
-  color: var(--fg-2);
+  color: var(--lyflow-fg-2);
 }
 
 .param__options {
@@ -495,7 +497,7 @@ body.is-resizing .app__viewer {
 }
 
 .param__condition {
-  color: var(--warn);
+  color: var(--lyflow-warn);
 }
 
 /* ------------------------------------------------------------------ tags */
@@ -503,27 +505,27 @@ body.is-resizing .app__viewer {
 .tag {
   display: inline-block;
   padding: 1px 7px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--lyflow-border-strong);
   border-radius: 10px;
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
   font-size: 11px;
   white-space: nowrap;
 }
 
 .tag--muted {
-  border-color: var(--border);
-  color: var(--fg-2);
+  border-color: var(--lyflow-border);
+  color: var(--lyflow-fg-2);
 }
 
 .tag--version {
-  border-color: var(--accent-dim);
-  color: var(--accent);
-  font-family: var(--mono);
+  border-color: var(--lyflow-accent-dim);
+  color: var(--lyflow-accent);
+  font-family: var(--lyflow-mono);
 }
 
-.tag--warn {
-  border-color: var(--warn);
-  color: var(--warn);
+.tag--lyflow-warn {
+  border-color: var(--lyflow-warn);
+  color: var(--lyflow-warn);
 }
 
 /* ----------------------------------------------------------- placeholder */
@@ -542,7 +544,7 @@ body.is-resizing .app__viewer {
 
 .placeholder__lead {
   margin: 0 0 26px;
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
   font-size: 14px;
   line-height: 1.65;
 }
@@ -550,7 +552,7 @@ body.is-resizing .app__viewer {
 .placeholder__steps {
   margin: 0 0 26px;
   padding-left: 20px;
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
 }
 
 .placeholder__steps li {
@@ -560,14 +562,14 @@ body.is-resizing .app__viewer {
 .placeholder__steps code {
   padding: 1px 5px;
   border-radius: 3px;
-  background: var(--bg-2);
-  color: var(--accent);
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-accent);
 }
 
 .placeholder__note {
   padding-top: 20px;
-  border-top: 1px solid var(--border);
-  color: var(--fg-2);
+  border-top: 1px solid var(--lyflow-border);
+  color: var(--lyflow-fg-2);
   font-size: 12px;
   line-height: 1.8;
 }
@@ -581,15 +583,15 @@ body.is-resizing .app__viewer {
   flex-shrink: 0;
   height: 26px;
   padding: 0 12px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-1);
-  color: var(--fg-2);
+  border-top: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-1);
+  color: var(--lyflow-fg-2);
   font-size: 11px;
-  font-family: var(--mono);
+  font-family: var(--lyflow-mono);
 }
 
 .statusbar__milestone {
-  color: var(--fg-1);
+  color: var(--lyflow-fg-1);
 }
 
 .statusbar__spacer {
@@ -604,12 +606,12 @@ body.is-resizing .app__viewer {
 
 .statusbar__transport--tauri {
   background: rgba(74, 158, 255, 0.15);
-  color: var(--accent);
+  color: var(--lyflow-accent);
 }
 
 .statusbar__transport--static {
   background: rgba(240, 160, 32, 0.15);
-  color: var(--warn);
+  color: var(--lyflow-warn);
 }
 
 .statusbar__status {

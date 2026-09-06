@@ -14,7 +14,7 @@
 }
 
 .ctl--num[data-dragging="1"] {
-  border-color: var(--accent-dim);
+  border-color: var(--lyflow-accent-dim);
   user-select: none;
 }
 

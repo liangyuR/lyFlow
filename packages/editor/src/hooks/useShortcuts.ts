@@ -1,7 +1,7 @@
-// 全局快捷键的分发。铁律：在输入框里打字时，除了表里标了 inTextField 的什么都不拦。
+// 快捷键的分发。铁律：在输入框里打字时，除了表里标了 inTextField 的什么都不拦。
 // 键表本身在 lib/keymap.ts —— 处理器和 `?` 面板都从那一张表生成（E7）。
 
-import { useEffect } from "react";
+import { useEffect, type RefObject } from "react";
 
 import { matchShortcut } from "../lib/keymap";
 import { subgraphIdOf } from "../types/graph";
@@ -37,7 +37,10 @@ export interface ShortcutHandlers {
   cursorScreenPosition: () => { x: number; y: number };
 }
 
-export function useShortcuts(handlers: ShortcutHandlers) {
+export function useShortcuts(
+  handlers: ShortcutHandlers,
+  root: RefObject<HTMLElement | null>,
+) {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const graph = useGraphStore.getState();
@@ -235,7 +238,21 @@ export function useShortcuts(handlers: ShortcutHandlers) {
       }
     };
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handlers]);
+    // 挂在编辑器根元素上（A2-3）：宿主页面里的其它输入不该被我们拦截。
+    const el = root.current;
+    if (!el) return;
+    const owner = el.ownerDocument;
+    // 焦点掉回 body（刚才那个输入框被卸载了之类）时谁都收不到键，
+    // 这一条只接管「无主」的按键，宿主自己的控件仍然不受影响。
+    const onOrphanKeyDown = (e: KeyboardEvent) => {
+      if (e.target !== owner.body) return;
+      onKeyDown(e);
+    };
+    el.addEventListener("keydown", onKeyDown);
+    owner.addEventListener("keydown", onOrphanKeyDown);
+    return () => {
+      el.removeEventListener("keydown", onKeyDown);
+      owner.removeEventListener("keydown", onOrphanKeyDown);
+    };
+  }, [handlers, root]);
 }

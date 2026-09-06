@@ -25,6 +25,10 @@ import {
   select,
   selectAndReadViewer,
 } from "./page.mjs";
+import { ROOT } from "./harness.mjs";
+
+/** dev server 里编辑器包的源码路径。生产构建下 import 不到，调用点有兜底。 */
+const LAYOUT_MODULE_URL = `/@fs/${ROOT.replace(/\\/g, "/")}/packages/editor/src/lib/layout.ts`;
 
 /** 一条三节点直链：生成 → 体素 → 透传。缓存与 stale 的分组都用它。 */
 const CHAIN_NODES = [
@@ -828,7 +832,8 @@ async function suiteLayout(cdp, report) {
 
   // 文档缺 ui.position 时打开即布局（脚本生成的图必须能打开）
   const auto = await cdp.eval(`
-    const { layoutGraph, needsInitialLayout } = await import('/src/lib/layout.ts');
+    // 布局函数搬进 @lyflow/editor 之后，dev server 上的路径是 /@fs/<仓库>/packages/…
+    const { layoutGraph, needsInitialLayout } = await import(${lit(LAYOUT_MODULE_URL)});
     const doc = {
       schemaVersion: 1, id: 'x', nodes: [
         { id: 'a', op: 'gen.synthetic' },

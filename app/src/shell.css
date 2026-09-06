@@ -1,0 +1,13 @@
+/* 壳自己的页面级重置。编辑器包只管 `.app` 以内，页面高度与底色归壳。 */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #14161a;
+  overflow: hidden;
+}
