@@ -47,12 +47,20 @@ function PortHandle({ nodeId, port, side, index, anyType }: PortHandleProps) {
   });
   const isInput = side === "input";
   const optional = isInput && port.required === false;
+  // 两条端口级执行语义（ADR-0016）。用角标而不是换颜色：颜色是类型的语言。
+  const acceptsError = isInput && port.acceptsError === true;
+  const lazy = isInput && port.lazy === true;
+  const marks = [acceptsError ? "接受上游的错误值" : "", lazy ? "惰性：被 demand 时才调度" : ""]
+    .filter(Boolean)
+    .join("；");
 
   return (
     <div
       className={`node-port node-port--${side}${verdict ? ` node-port--${verdict}` : ""}`}
       style={{ ["--i" as string]: index }}
       data-port-verdict={verdict || undefined}
+      data-port-accepts-error={acceptsError ? "1" : undefined}
+      data-port-lazy={lazy ? "1" : undefined}
       data-testid={`port-${nodeId}-${port.name}`}
     >
       <Handle
@@ -62,9 +70,14 @@ function PortHandle({ nodeId, port, side, index, anyType }: PortHandleProps) {
         className="node-port__handle"
         style={{ background: color, borderColor: color }}
       />
-      <span className="node-port__label" title={`${type}${port.doc ? " — " + port.doc : ""}`}>
+      <span
+        className="node-port__label"
+        title={`${type}${port.doc ? " — " + port.doc : ""}${marks ? ` (${marks})` : ""}`}
+      >
         {port.label || port.name}
         {optional && <em className="node-port__opt">?</em>}
+        {acceptsError && <em className="node-port__mark node-port__mark--err">!</em>}
+        {lazy && <em className="node-port__mark node-port__mark--lazy">~</em>}
       </span>
     </div>
   );
@@ -138,6 +151,8 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   const rows = Math.max(op.inputs.length, op.outputs.length);
   const state = exec?.state ?? "idle";
   const errorText = exec?.errors[0]?.message;
+  // 只被惰性端口依赖、这次没被 demand（ADR-0016）。画成半透明，与「命中缓存」区分开。
+  const notDemanded = exec?.stats?.reason === "not_demanded";
   const classes = [
     "node",
     selected ? "is-selected" : "",
@@ -146,13 +161,20 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
     stale ? "is-stale" : "",
     // 静音整体半透明加斜纹，一眼看得出这个节点这次不算
     bypass ? "is-bypassed" : "",
+    notDemanded ? "is-not-demanded" : "",
     subgraphId || library ? "node--sub" : "",
   ]
     .filter(Boolean)
     .join(" ");
 
   const cached = exec?.stats?.cached === true;
-  const skipReason = cached ? "命中缓存，未重算" : bypass ? "已静音，输入直接透传" : "";
+  const skipReason = notDemanded
+    ? "备用分支，这次没被用到"
+    : cached
+      ? "命中缓存，未重算"
+      : bypass
+        ? "已静音，输入直接透传"
+        : "";
 
   return (
     <div
@@ -160,6 +182,7 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
       data-node-state={state}
       data-stale={stale ? "1" : "0"}
       data-bypass={bypass ? "1" : "0"}
+      data-not-demanded={notDemanded ? "1" : "0"}
       data-subgraph={subgraphId ?? undefined}
       data-library={library ? "1" : undefined}
       data-testid={`node-${id}`}

@@ -220,6 +220,30 @@ pub fn get_output_info(
     serde_json::from_str(&raw).map_err(|e| format!("core 返回的输出信息不是合法 JSON: {e}"))
 }
 
+/// 图级命名输出（ADR-0017）。`{ 名字: { node, port, type, elementCount, byteSize, value? } }`。
+#[tauri::command]
+pub fn get_run_outputs(
+    #[allow(non_snake_case)] runId: String,
+) -> Result<serde_json::Value, String> {
+    let core = core_ffi::core()?;
+    let raw = core.run_outputs(&runId).map_err(|e| e.to_string())?;
+    serde_json::from_str(&raw).map_err(|e| format!("core 返回的图输出不是合法 JSON: {e}"))
+}
+
+/// 走注册好的导入器把一段文本变成图（ADR-0017）。可用的 kind 见 manifest 的 importers。
+#[tauri::command]
+pub fn import_graph(
+    kind: String,
+    text: String,
+    #[allow(non_snake_case)] baseDir: Option<String>,
+) -> Result<GraphDoc, String> {
+    let core = core_ffi::core()?;
+    let raw = core
+        .import(&kind, &text, baseDir.as_deref().unwrap_or(""))
+        .map_err(|diags| format!("导入失败: {diags}"))?;
+    serde_json::from_str(&raw).map_err(|e| format!("导入器产出的不是合法 GraphDoc: {e}"))
+}
+
 /// 点云走二进制，绝不 JSON（ADR-0006）。布局见 `execution::encode_cloud`。
 #[tauri::command]
 pub fn get_output_cloud(

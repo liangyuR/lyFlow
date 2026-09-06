@@ -181,6 +181,20 @@
   font-style: normal;
 }
 
+/* acceptsError / lazy 的角标（ADR-0016）。颜色留给类型，这两条只用符号 */
+.node-port__mark {
+  margin-left: 3px;
+  font-style: normal;
+  font-weight: 700;
+  opacity: 0.75;
+}
+.node-port__mark--err {
+  color: #e5484d;
+}
+.node-port__mark--lazy {
+  color: var(--fg-2);
+}
+
 /* React Flow 的 Handle 默认贴节点边缘，这里把它对齐到各自的端口行上 */
 .node-port .react-flow__handle {
   position: absolute;
@@ -902,6 +916,12 @@
     transparent 0 6px,
     rgba(111, 120, 135, 0.16) 6px 12px
   );
+}
+
+/* 惰性闭包没被 demand（ADR-0016）：只降透明度，不加斜纹 —— 斜纹是「被静音」的意思，
+   而这里是「这条备用分支这次没用上」，两者不该长得一样 */
+.node.is-not-demanded {
+  opacity: 0.45;
 }
 
 .node__badge {

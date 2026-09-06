@@ -23,6 +23,8 @@ interface CacheState {
 
   setPlan(nodes: PlanNode[]): void;
   setRanWith(nodes: { id: string; cacheKey: string }[]): void;
+  /** plan_extended 追加的惰性闭包节点（ADR-0016）。不清掉已有的那些。 */
+  extendRanWith(nodes: { id: string; cacheKey: string }[]): void;
   setStats(stats: CacheStats | null): void;
   reset(): void;
 }
@@ -41,6 +43,13 @@ export const useCacheStore = create<CacheState>((set) => ({
   },
   setRanWith(nodes) {
     set({ ranWith: new Map(nodes.map((n) => [n.id, n.cacheKey])) });
+  },
+  extendRanWith(nodes) {
+    set((s) => {
+      const ranWith = new Map(s.ranWith);
+      for (const n of nodes) ranWith.set(n.id, n.cacheKey);
+      return { ranWith };
+    });
   },
   setStats(stats) {
     set({ stats });

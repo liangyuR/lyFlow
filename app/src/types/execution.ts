@@ -123,7 +123,27 @@ export interface NodeStats {
   cached?: boolean;
   /** state=skipped 是因为节点被静音，输出由输入透传而来。 */
   bypassed?: boolean;
+  /** 输出由宿主注入，compute 没有被调用（ADR-0017）。 */
+  provided?: boolean;
+  /** state=skipped 的机器可读原因。目前只有 `not_demanded`（ADR-0016）：
+   *  这个节点只被惰性端口依赖，而那条端口没被 demand。前端画成半透明。 */
+  reason?: string;
   outputs?: OutputStat[];
+}
+
+/** run_started.nodes 与 plan_extended.nodes 共用的形状。 */
+export interface RunPlanNode {
+  id: string;
+  cacheKey: string;
+  level: number;
+  bypass?: boolean;
+}
+
+/** 图级命名输出的声明（ADR-0017）。 */
+export interface GraphOutputRef {
+  name: string;
+  node: string;
+  port: string;
 }
 
 interface EventBase {
@@ -140,8 +160,19 @@ export interface RunStartedEvent extends EventBase {
   maxParallel?: number;
   plan?: string[];
   targets?: string[];
-  /** 编译结果。精确 stale 与「将重算 N 个节点」提示靠它（ADR-0007）。 */
-  nodes?: { id: string; cacheKey: string; level: number; bypass?: boolean }[];
+  /** 编译结果。精确 stale 与「将重算 N 个节点」提示靠它（ADR-0007）。
+   *  只被惰性端口依赖的节点不在这里，被 demand 时经 plan_extended 追加（ADR-0016）。 */
+  nodes?: RunPlanNode[];
+  /** GraphDoc 顶层 outputs 的编译结果（ADR-0017）。 */
+  outputs?: GraphOutputRef[];
+}
+
+/** 惰性闭包被 demand，追加进本次计划（ADR-0016）。nodes 与 run_started.nodes 同构。 */
+export interface PlanExtendedEvent extends EventBase {
+  kind: "plan_extended";
+  demandedBy?: string;
+  port?: string;
+  nodes: RunPlanNode[];
 }
 
 export interface NodeStateEvent extends EventBase {
@@ -177,10 +208,26 @@ export interface LogEvent extends EventBase {
 
 export type ExecutionEvent =
   | RunStartedEvent
+  | PlanExtendedEvent
   | NodeStateEvent
   | NodeProgressEvent
   | RunFinishedEvent
   | LogEvent;
+
+/** `lyflow_run_outputs` 的返回：名字 → 该端口的元信息（ADR-0017）。 */
+export interface RunOutput {
+  node: string;
+  port: string;
+  type: string;
+  elementCount: number;
+  byteSize: number;
+  /** 非点云输出才有。点云走二进制通道。 */
+  value?: OutputValue;
+  /** 该端口没有结果（节点没跑到，或惰性闭包没被 demand）。 */
+  missing?: boolean;
+}
+
+export type RunOutputs = Record<string, RunOutput>;
 
 /** `get_output_info` 的返回。 */
 export interface OutputInfo {

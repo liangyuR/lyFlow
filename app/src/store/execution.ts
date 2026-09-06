@@ -10,6 +10,7 @@ import { useUiStore } from "./ui";
 import type {
   Diagnostic,
   ExecutionEvent,
+  GraphOutputRef,
   NodeState,
   NodeStats,
   RunStatus,
@@ -56,6 +57,8 @@ interface ExecutionState {
   durationMs: number | null;
   /** 本次运行是「只跑到某个节点」还是全图。空 = 全图。 */
   targets: string[];
+  /** 图级命名输出的声明（ADR-0017）。run_started 带过来，前端不再自己解析图。 */
+  outputs: GraphOutputRef[];
   /** 事件里的 nodeId 是**路径**，键就是路径原样。按层聚合见 useNodeExecution。 */
   nodes: Map<string, NodeExecution>;
   logs: LogEntry[];
@@ -139,6 +142,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   startedAt: null,
   durationMs: null,
   targets: [],
+  outputs: [],
   nodes: new Map(),
   logs: [],
   stale: false,
@@ -158,6 +162,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       startedAt: Date.now(),
       durationMs: null,
       targets,
+      outputs: [],
       nodes: new Map(),
       logs: [],
       stale: false,
@@ -206,7 +211,21 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         staged = nodes;
         useCacheStore.getState().setRanWith(event.nodes ?? []);
         flushNow();
-        set({ targets: event.targets ?? [] });
+        set({ targets: event.targets ?? [], outputs: event.outputs ?? [] });
+        break;
+      }
+      case "plan_extended": {
+        // 惰性闭包被 demand 了（ADR-0016）。这些节点不在 run_started 里，
+        // 现在才进节点表；cacheKey 也要补进 ranWith，否则 stale 会漏判。
+        const nodes = stage();
+        const at = Date.now();
+        for (const n of event.nodes) {
+          if (nodes.has(n.id)) continue;
+          nodes.set(n.id, emptyNode());
+          for (const fn of transitionListeners) fn({ nodeId: n.id, state: "idle", at });
+        }
+        useCacheStore.getState().extendRanWith(event.nodes);
+        scheduleFlush();
         break;
       }
       case "node_state": {
@@ -274,6 +293,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       startedAt: null,
       durationMs: null,
       targets: [],
+      outputs: [],
       nodes: new Map(),
       logs: [],
       stale: false,

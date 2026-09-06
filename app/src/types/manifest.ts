@@ -23,6 +23,18 @@ export interface Port {
   doc?: string;
   /** 仅对 inputs 有意义，缺省为 true。 */
   required?: boolean;
+  /** 仅对 inputs 有意义（ADR-0016）。上游失败时本节点收到一个 Error 值而不是被连坐。 */
+  acceptsError?: boolean;
+  /** 仅对 inputs 有意义（ADR-0016）。这条边的上游闭包只有被 demand 时才调度。 */
+  lazy?: boolean;
+}
+
+/** 一种可导入的外部格式（ADR-0017）。`kind` 是传给 import 的第一个参数。 */
+export interface Importer {
+  kind: string;
+  label: string;
+  doc?: string;
+  pack?: string;
 }
 
 export interface EnumOption {
@@ -101,6 +113,8 @@ export interface OperatorManifestBundle {
   generatedBy?: string;
   types: PortType[];
   operators: OperatorDesc[];
+  /** 注册了的「文本 → 图」导入器（ADR-0017）。没有任何导入器时这一项不出现。 */
+  importers?: Importer[];
 }
 
 export interface CoreInfo {

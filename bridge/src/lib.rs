@@ -76,6 +76,8 @@ pub fn run() {
             commands::run_graph,
             commands::cancel_run,
             commands::get_output_info,
+            commands::get_run_outputs,
+            commands::import_graph,
             commands::get_output_cloud,
             commands::get_recent_files,
             commands::push_recent_file,

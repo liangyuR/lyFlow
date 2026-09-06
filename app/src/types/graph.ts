@@ -99,8 +99,17 @@ export interface GraphDoc {
   edges: GraphEdge[];
   groups?: unknown[];
   subgraphs?: Record<string, SubgraphDef>;
+  /** 图级命名输出（ADR-0017）。宿主按名字取值，不认节点 id；
+   *  子图内部的端口写展开后的路径 id（`outer/inner`）。 */
+  outputs?: Record<string, GraphOutput>;
   /** 未知字段容器：老客户端打开新版本写的图时不丢数据。 */
   x?: Record<string, unknown>;
+}
+
+export interface GraphOutput {
+  node: string;
+  port: string;
+  label?: string;
 }
 
 /** 图里的一个层级：顶层是 doc 本身，进了子图就是那份定义。 */
