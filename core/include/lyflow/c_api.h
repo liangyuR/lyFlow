@@ -1,6 +1,6 @@
 #ifndef LYFLOW_C_API_H
 #define LYFLOW_C_API_H
-// C ABI v5。Rust 桥接层只看见这个头文件。
+// C ABI v6。Rust 桥接层只看见这个头文件。
 // 三条约定（char* 归属、异常不跨 ABI、只导出 C 函数）见 core/README.md「C ABI 约定」。
 #include <stddef.h>
 #include <stdint.h>
@@ -55,7 +55,8 @@ LYFLOW_API char* lyflow_validate(const char* graph_json, const char* base_dir);
 LYFLOW_API char* lyflow_plan(const char* graph_json, const char* base_dir,
                              const char* const* targets, size_t n);
 
-// 丢掉全部缓存结果。活跃 run 的结果也一并丢，所以调用方应当先取消。
+// 进程级地丢掉全部缓存结果，别的 run 的结果也一并丢，所以调用方应当先取消。
+// 只想让某一次运行不吃缓存的，用 lyflow_run_options.no_reuse。
 LYFLOW_API void lyflow_cache_clear(void);
 
 // { entries, bytes, budgetBytes, hits, misses, evictions } 的 JSON 对象。
@@ -79,6 +80,7 @@ typedef struct {
   int32_t mode;                    /* 0 = full，1 = preview（源算子输出先抽稀，ADR-0011） */
   uint32_t preview_max_points;     /* preview 的点数上限。0 = 200000 */
   uint32_t preview_budget_ms;      /* 超过它发一条 warn 日志。0 = 300 */
+  int32_t no_reuse;                /* 非 0 = 本次运行不复用结果仓里的旧结果 */
 } lyflow_run_options;
 
 #define LYFLOW_RUN_MODE_FULL 0

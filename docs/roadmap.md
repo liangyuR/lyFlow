@@ -211,6 +211,11 @@ C ABI 升到 v5：加了 `lyflow_set_library_dirs` / `lyflow_library_count` / `l
   不会因为下次不带包构建就消失。换模式打包前要自己删。
 - `lyflow_output_save` / CLI `lyflow dump` 依赖标准包装进来的写盘钩子。
   纯平台构建里它们返回 `unsupported` —— 这是设计，但错误信息是运行期才看到的。
+- ~~`cargo test` 偶发 `NoSuchOutput`（gap-acceptance.md 偏离第 8 条）~~ **已修**：
+  「不吃缓存」从进程级的 `lyflow_cache_clear()` 降成 run 级的
+  `lyflow_run_options.no_reuse`（C ABI 升 v6），不再连累并行跑着的别的测试。
+  同批修掉第二个同族根因：换代 DLL 的落地名加了 pid，
+  `cargo test` 进程之间不再抢 `deps/lyflow_core.gen1.dll` 这一个文件名。
 
 ## M5 — 外延（只列方向，动工前再写计划）
 

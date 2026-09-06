@@ -67,7 +67,7 @@ CMake + Ninja + vcpkg（PCL）。Ninja 通常不在 PATH 上，`build.rs` 会依
 | `load_graph` | 磁盘 → 前端 | 读盘 + 结构校验，返回 `{ doc, migrations }`（ADR-0008）。 |
 | `validate_graph` | 前端 → C++ | 权威校验，返回**全部**诊断（D5）。 |
 | `plan_graph` | 前端 → C++ | 编译但不执行，报每节点的 cacheKey 与是否已缓存（ADR-0007）。 |
-| `clear_cache` / `cache_stats` | 前端 → C++ | 结果仓的清空与统计，给菜单和状态栏用。 |
+| `clear_cache` / `cache_stats` | 前端 → C++ | 结果仓的清空与统计，给菜单和状态栏用。`clear_cache` 是**进程级**的，别的 run 的结果也会没；只想让一次运行不吃缓存用 `no_reuse`（CLI `--no-cache`）。 |
 | `run_graph` | 前端 → C++ | 启动一次运行，立刻返回 runId。 |
 | `cancel_run` | 前端 → C++ | 协作式取消。id 对不上就无操作。 |
 | `get_output_info` | C++ → 前端 | 某节点全部输出的 type/elementCount。 |

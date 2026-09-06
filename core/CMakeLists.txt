@@ -57,9 +57,7 @@ function(lyflow_apply_common target)
 endfunction()
 
 # ------------------------------------------------------------------- 算子包
-# ADR-0013 / ADR-0014。两类包：仓库内的标准包（packs/*，LYFLOW_STD_PACKS 默认 ON）
-# 与外部领域包（LYFLOW_OP_PACKS，分号分隔的目录列表）。怎么写一个包见 docs/op-packs.md。
-# 空串按「没设」处理：-D 传了个空值不该悄悄变成「关掉标准包」。
+# 两类包、两个开关、空串为何按「没设」处理，全在 docs/op-packs.md（ADR-0013 / ADR-0014）。
 if(NOT DEFINED LYFLOW_STD_PACKS OR "${LYFLOW_STD_PACKS}" STREQUAL "")
   if(DEFINED ENV{LYFLOW_STD_PACKS} AND NOT "$ENV{LYFLOW_STD_PACKS}" STREQUAL "")
     set(LYFLOW_STD_PACKS "$ENV{LYFLOW_STD_PACKS}")

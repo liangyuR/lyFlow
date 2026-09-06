@@ -94,6 +94,22 @@ TEST_CASE("原图重跑：全部 skipped，总耗时 < 50 ms") {
   CHECK(v["stats"]["elementCount"].get<int>() > 0);
 }
 
+TEST_CASE("noReuse：本次全部重算，但别的 run 的结果还在仓里") {
+  ensureTestOps();
+  const Json doc = chainGraph();
+  Session keeper(doc);
+  REQUIRE(keeper.wait().runStatus() == "ok");
+
+  const RunLog fresh = runGraphNoReuse(doc);
+  CHECK(fresh.runStatus() == "ok");
+  CHECK(statesOf(fresh, "done") == std::set<std::string>{"g", "v", "p"});
+  CHECK(statesOf(fresh, "skipped").empty());
+
+  // 关键：--no-cache 不再是进程级 clear，keeper 那次运行的索引必须完好
+  Data out;
+  CHECK(exec::ResultStore::instance().get(keeper.runId(), "v", "cloud", out));
+}
+
 TEST_CASE("改中间节点参数：只重算它和它的下游") {
   ensureTestOps();
   const RunLog first = runGraph(chainGraph());

@@ -24,6 +24,7 @@ pub struct RunOptionsRaw {
     pub mode: i32,
     pub preview_max_points: u32,
     pub preview_budget_ms: u32,
+    pub no_reuse: i32,
 }
 
 #[repr(C)]
@@ -43,7 +44,7 @@ pub struct CloudViewRaw {
 pub const CLOUD_HAS_INTENSITY: u32 = 1;
 pub const CLOUD_HAS_NORMALS: u32 = 2;
 
-/// 一次运行的全部选项（C ABI v5）。写成位置参数就没人读得懂了。
+/// 一次运行的全部选项（C ABI v6）。写成位置参数就没人读得懂了。
 #[derive(Clone)]
 pub struct RunSpec<'a> {
     pub graph_json: &'a str,
@@ -56,6 +57,8 @@ pub struct RunSpec<'a> {
     pub mode: i32,
     pub preview_max_points: u32,
     pub preview_budget_ms: u32,
+    /// 本次运行不复用结果仓里的旧结果。不动别的 run 的结果（对比 `cache_clear`）。
+    pub no_reuse: bool,
 }
 
 impl<'a> RunSpec<'a> {
@@ -74,6 +77,7 @@ impl<'a> RunSpec<'a> {
             mode: 0,
             preview_max_points: 0,
             preview_budget_ms: 0,
+            no_reuse: false,
         }
     }
 }
@@ -508,6 +512,7 @@ impl RunHandle {
             mode: spec.mode,
             preview_max_points: spec.preview_max_points,
             preview_budget_ms: spec.preview_budget_ms,
+            no_reuse: i32::from(spec.no_reuse),
         };
 
         let user_ptr = Box::into_raw(user) as *mut c_void;
@@ -599,17 +604,25 @@ pub fn watch_source() -> Option<PathBuf> {
     path.exists().then_some(path)
 }
 
+/// 带 pid：`deps/` 是所有 cargo 测试进程共用的，重名会撞上另一个进程还映射着的
+/// 那一份，copy 直接 os error 32（sharing violation）。
 fn generation_path(n: u32) -> PathBuf {
     let stem = DLL_NAME.trim_end_matches(".dll").trim_end_matches(".so");
-    exe_dir().join(format!("{stem}.gen{n}.{}", if cfg!(windows) { "dll" } else { "so" }))
+    let ext = if cfg!(windows) { "dll" } else { "so" };
+    exe_dir().join(format!("{stem}.gen{n}.p{}.{ext}", std::process::id()))
 }
 
 /// 上一代的 gen DLL 还被自己锁着，删不掉是常态 —— 所以清理放在下次启动。
 pub fn cleanup_old_generations() -> usize {
+    cleanup_generations_in(&exe_dir())
+}
+
+/// 还被哪个进程映射着的那些删不掉，`remove_file` 会失败，跳过就是了。
+fn cleanup_generations_in(dir: &Path) -> usize {
     let stem = DLL_NAME.trim_end_matches(".dll").trim_end_matches(".so");
     let prefix = format!("{stem}.gen");
     let mut removed = 0;
-    let Ok(entries) = std::fs::read_dir(exe_dir()) else {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return 0;
     };
     for entry in entries.flatten() {
@@ -655,6 +668,8 @@ pub fn generation() -> u32 {
 /// 换一代 core：复制成 `lyflow_core.gen<N>.dll` 再加载（E4，Windows 会锁住原文件）。
 /// 自检不过就保留旧代返回 Err —— 半坏的一代比旧的一代难查得多。
 pub fn reload_from(source: &Path) -> Result<u32, String> {
+    // 名字带 pid 之后每个进程留下自己的一份，不顺手扫 deps/ 会越攒越多
+    cleanup_generations_in(&exe_dir());
     let next = generation().wrapping_add(1);
     let staged = generation_path(next);
     std::fs::copy(source, &staged)
@@ -813,13 +828,19 @@ mod tests {
     #[test]
     fn generation_dll_names_are_distinct_and_cleanup_is_safe() {
         assert_ne!(generation_path(1), generation_path(2));
-        assert!(generation_path(7)
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .contains("gen7"));
-        // 没有可删的东西时也不许 panic
-        let _ = cleanup_old_generations();
+        let name = generation_path(7).file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.contains("gen7"), "{name}");
+        // 同一个 deps/ 下可能有别的测试进程在换代，名字必须带 pid 才不会撞上
+        assert!(name.contains(&format!("p{}", std::process::id())), "{name}");
+
+        // 扫的是本测试自己的空目录：cleanup 是进程外可见的动作，
+        // 对着共用的 deps/ 扫会删掉并行跑着的另一个测试刚落地的那一代。
+        let dir = std::env::temp_dir().join(format!("lyflow-gen-cleanup-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(cleanup_generations_in(&dir), 0);
+        std::fs::write(dir.join(generation_path(9).file_name().unwrap()), b"x").unwrap();
+        assert_eq!(cleanup_generations_in(&dir), 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

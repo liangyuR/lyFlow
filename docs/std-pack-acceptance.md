@@ -354,4 +354,5 @@ filter_random_sample.cpp   （外加 core 自己的 16 个 TU）
   且都只是 include 路径（`ops/pcl/xxx.h` → `lyflow_pcl/xxx.h`、`ops/ops.h` → `ops.h`）。
 - 没有改 `scripts/e2e`、CLI 测试、schema 样例、图生成器 —— S5 成立的直接证据。
 - `cargo test` 的已知并发不稳定（gap-acceptance.md 偏离第 8 条）本轮没有复现，
-  也没有去动它。
+  也没有去动它。**其后已修**：`--no-cache` 与那个 `plan_graph` 测试都不再调
+  进程级的 `lyflow_cache_clear()`，改用 run 级的 `no_reuse`（C ABI v6）。

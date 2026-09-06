@@ -59,8 +59,7 @@ void registerBuiltinOps(Registry& r) {
   registerBuiltinTypes(r);
 
   // core 只剩两个算子（S1 / ADR-0014）。点云算法在 packs/std-pointcloud/。
-  // 这里的夹心顺序是为了让默认构建的 manifest 与拆包之前逐字节相同：
-  // 合成数据源一直排在最前，reroute 一直排在标准包之后、外部包之前。
+  // 下面的夹心注册顺序钉住 manifest 的字节兼容性，理由见 ADR-0014。
   ops::registerGenSynthetic(r);
   registerStdPacks(r);
   ops::registerUtilReroute(r);

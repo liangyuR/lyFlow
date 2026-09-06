@@ -1,6 +1,5 @@
 # LyFlow 标准算子包：点云域的 14 个算子（ADR-0014）。
-# 本文件同时是全仓库唯一一处 find_package(PCL)：别的包链 lyflow_pcl_support 就好。
-# LYFLOW_PACK_DIR 由 core/CMakeLists.txt 在 include 之前设好。
+# 同时是全仓库唯一一处 find_package(PCL)：别的包链 lyflow_pcl_support 就好。
 
 set(LYFLOW_PCL_COMPONENTS common io filters kdtree search segmentation sample_consensus features)
 find_package(PCL 1.12 REQUIRED COMPONENTS ${LYFLOW_PCL_COMPONENTS})

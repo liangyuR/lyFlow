@@ -123,7 +123,7 @@ class Session {
   /// 测试」会拿到 skipped 而不是 done —— 那是真实行为，但会让断言测的是运行顺序。
   Session(const Json& doc, std::filesystem::path baseDir = {},
           std::vector<std::string> targets = {}, bool keepCache = false,
-          int maxParallel = 0) {
+          int maxParallel = 0, bool noReuse = false) {
     static std::atomic<int> counter{0};
     if (!keepCache) exec::ResultStore::instance().clear();
     log_.runId = "test-run-" + std::to_string(counter.fetch_add(1));
@@ -132,6 +132,7 @@ class Session {
     options.baseDir = std::move(baseDir);
     options.targets = std::move(targets);
     options.maxParallel = maxParallel;
+    options.noReuse = noReuse;
     run_ = std::make_unique<exec::Run>(doc.dump(), options, &detail::collect, &log_);
   }
 
@@ -158,6 +159,12 @@ inline RunLog runGraph(const Json& doc, const std::filesystem::path& baseDir = {
 /// 不清缓存地跑一次。缓存复用的测试要靠它跑第二遍。
 inline RunLog runGraphCached(const Json& doc, const std::filesystem::path& baseDir = {}) {
   Session s(doc, baseDir, {}, /*keepCache=*/true);
+  return s.wait();
+}
+
+/// 结果仓照旧，但本次运行不吃缓存（CLI 的 --no-cache）。
+inline RunLog runGraphNoReuse(const Json& doc, const std::filesystem::path& baseDir = {}) {
+  Session s(doc, baseDir, {}, /*keepCache=*/true, /*maxParallel=*/0, /*noReuse=*/true);
   return s.wait();
 }
 

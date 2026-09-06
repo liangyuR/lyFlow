@@ -177,6 +177,7 @@ lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* o
                                                            : lyflow::exec::RunMode::Full;
       options.previewMaxPoints = opts->preview_max_points;
       options.previewBudgetMs = opts->preview_budget_ms;
+      options.noReuse = opts->no_reuse != 0;
     }
     if (options.runId.empty()) options.runId = "run";
     return reinterpret_cast<lyflow_run*>(

@@ -30,6 +30,8 @@ struct RunOptions {
   std::uint32_t previewMaxPoints = 0;
   /// preview 超过这个耗时就发一条 warn 日志。0 = 用默认值 300。
   std::uint32_t previewBudgetMs = 0;
+  /// 本次运行不复用结果仓里的旧结果（CLI 的 --no-cache）。仍然照常写入。
+  bool noReuse = false;
 };
 
 /// preview 的两个默认值。C ABI 传 0 表示「用默认」，两侧因此不必同步常量。

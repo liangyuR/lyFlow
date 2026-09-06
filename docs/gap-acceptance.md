@@ -90,7 +90,7 @@ python D:\project\xyz-gap-inspector\lyflow\tools\lyflow_graph_from_config.py `
 带包时新增的 16 个算子全部通过 `Registry::validate()` 与 schema 校验，
 这一条正是「包作者的笔误挡在启动自检里」的兑现（ADR-0013）。
 
-> **一个已知的既有不稳定**：`cargo test` 有大约 1/6 的概率在
+> **一个已知的既有不稳定**（**已修**，见「偏离与决策」第 8 条末尾）：`cargo test` 有大约 1/6 的概率在
 > `execution::tests::cloud_payload_carries_normals_when_the_op_produces_them`
 > 上报 `NoSuchOutput`。原因是 `commands`/`cli` 里的测试会调 `lyflow_cache_clear()`，
 > 而结果仓是进程级的，它会把并行跑着的另一个测试的结果一起清掉。
@@ -282,7 +282,7 @@ Indices/Plane）上，断言 `.viewer[data-base]` 是 `gen` 那个节点、
 
 | 场景 | 结果 |
 |---|---|
-| 不带包 `pnpm check` | 绿（`cargo test` 的既有并发不稳定重跑一次，见「偏离与决策」第 8 条） |
+| 不带包 `pnpm check` | 绿（`cargo test` 的既有并发不稳定重跑一次，见「偏离与决策」第 8 条；该不稳定其后已修） |
 | 不带包 `pnpm e2e` | 绿 |
 | 带包 `pnpm check` | 绿 |
 | 带包 + `LYFLOW_GAP_GRAPH`（R5）`pnpm e2e` | 绿 |
@@ -427,6 +427,7 @@ python D:\project\xyz-gap-inspector\lyflow\tools\lyflow_graph_from_config.py `
 （带包一次 `cloud_payload_carries_normals_when_the_op_produces_them`，
 不带包两次 `sweep_reuses_the_upstream_across_the_grid` + 同一个），重跑即绿。
 补了一条佐证：`cargo test --lib -- --test-threads=1` 一次就是 `53 passed; 0 failed`。
+（这条不稳定其后已修，见「偏离与决策」第 8 条末尾；现在默认并行下连跑 10 次也全绿。）
 
 **DLL 随包**：`build/core/bin/` 与 `bridge/target/release/` 下都有
 `onnxruntime.dll`（11 234 848 B）与 `onnxruntime_providers_shared.dll`（22 048 B）。
@@ -622,7 +623,7 @@ R6 与 L4 两份配置各有 4 个 `template_candidates`。生成器遇到超过
 配置里真的出现 `enforce` 时，`gap.align_template` 报 `bad_param` 而不是静默降级。
 （这一条没有样本覆盖，标**未验证**。）
 
-**8. `cargo test` 有一个既有的并发不稳定，不是这次引入的。**
+**8. `cargo test` 有一个既有的并发不稳定，不是这次引入的。**（**已修**，见本条末尾）
 `execution::tests::cloud_payload_carries_normals_when_the_op_produces_them`
 （有时还有 `output_cloud_binary_header_is_correct`、`cli::tests::*`）会报
 `NoSuchOutput`。原因是 `commands`/`cli` 里的测试会调 `lyflow_cache_clear()`，
@@ -644,6 +645,24 @@ HEAD cargo-test failures = 4 / 8
 **没有顺手修**：它是 LyFlow 通用侧的测试隔离问题，与本次接入无关，
 在这个 commit 里改会把两件事搅在一起。修法很清楚（给测试各自的 runId 命名空间，
 或者别在单测里调进程级的 `cache_clear`），但那是另一个 commit 的事。
+
+> **已修**（`fix: cargo 测试不再共享进程级缓存清理；注释收敛`）。
+> 修法是把「不吃缓存」从进程级动作降成 run 级选项：C ABI 升 v6，
+> `lyflow_run_options` 加 `no_reuse`，执行器据此跳过 `ResultStore::reuse()`
+> 而**不动别人的结果**；CLI 的 `--no-cache` 改走这条路，
+> `commands` 那个测试改成靠专属 seed 拿 `cached=false`，不再调 `clear_cache()`。
+> 现在没有任何测试路径会调 `lyflow_cache_clear()`。
+>
+> 修的过程中翻出**第二个同族的根因**，本条原来没记：
+> `core_ffi::tests::hot_reload_swaps_in_a_fresh_generation` 偶发
+> `复制 … → lyflow_core.gen1.dll 失败: 另一个程序正在使用此文件 (os error 32)`。
+> 换代 DLL 的落地名只带代数，而代数每个进程都从 0 起，
+> 于是所有 `cargo test` 进程都往 `deps/lyflow_core.gen1.dll` 这一个名字上拷 ——
+> 上一个进程还没把它 unmap，拷贝就撞上 sharing violation。
+> 名字里加了 pid（`lyflow_core.gen1.p<pid>.dll`），并把「扫 `deps/`」这个
+> 进程外可见的动作从那个命名测试里挪走（改成扫它自己的临时目录）。
+>
+> 连跑 `cargo test`：10/10 全绿（`53 passed; 0 failed`），另跑两轮 30 次同样 0 失败。
 
 **9. `gap.judge` 的 `patrol` 语义是自己定的。**
 计划只列了参数名。这里定成「巡检模式：超差也只标 `margin`，不判 `high`/`low`」。
@@ -876,7 +895,7 @@ CDP 要断言「底图与四框在同一平面」就得读到两个包围盒，�
 - 带包 `pnpm check`：全链路绿，**37** 个算子、11 个端口类型、**101** 个 doctest 用例。
 - 不带包 `pnpm check`：16 个算子、11 个端口类型、84 个 doctest 用例
   （两边各撞一次偏离第 8 条那个既有并发不稳定，重跑即绿；
-  `cargo test --lib -- --test-threads=1` 一次就 53 passed）。
+  `cargo test --lib -- --test-threads=1` 一次就 53 passed。该不稳定其后已修）。
 - 模型 A/B：39/39 一致，78 个可比数值的最大 |Δ| = **4.77e-7 mm**；
   与 `gap.measure_reference`（带 modelPath）之差同样 ≤ 4.77e-7 mm。
 - 模型 A/B 对现场值 `manifest.csv`：**41/41** 在 0.006 mm 内，最大 0.00499 mm。

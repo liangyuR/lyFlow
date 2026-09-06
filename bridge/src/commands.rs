@@ -584,7 +584,8 @@ mod tests {
     /// ADR-0007：stale 标记的权威在 C++。前端只对 cacheKey，不自己推。
     #[test]
     fn plan_graph_reports_cache_keys_and_levels() {
-        clear_cache().unwrap();
+        // seed 77 是本测试专属：靠它拿到 cached=false，不能清进程级缓存 ——
+        // 那会把并行跑着的别的测试刚放进结果仓的结果一并清掉。
         let doc = graph_with(
             serde_json::json!([
                 {"id": "g", "op": "gen.synthetic", "params": {"pointCount": 3000, "seed": 77}},

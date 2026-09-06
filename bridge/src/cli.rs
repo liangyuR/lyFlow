@@ -330,6 +330,8 @@ struct RunRequest<'a> {
     parallel: i32,
     preview_points: u32,
     preview: bool,
+    /// `--no-cache`：本次运行不吃缓存。不清进程级结果仓 —— 那会连累别的 run。
+    no_cache: bool,
     stream: Option<Sink>,
 }
 
@@ -343,6 +345,7 @@ fn execute(core: &Arc<Core>, req: RunRequest<'_>) -> Result<RunResult, String> {
     let ptr = &*ctx as *const RunCtx;
     let mut spec = RunSpec::new(req.graph_json, &run_id, req.base_dir, req.targets);
     spec.max_parallel = req.parallel;
+    spec.no_reuse = req.no_cache;
     if req.preview {
         spec.mode = 1;
         spec.preview_max_points = req.preview_points;
@@ -562,9 +565,6 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(_) => {}
         Err(e) => return fail(err, &e, EXIT_FAILED),
     }
-    if parsed.has("no-cache") {
-        core.cache_clear();
-    }
     let parallel = parsed
         .one("parallel")
         .and_then(|v| v.parse::<i32>().ok())
@@ -584,6 +584,7 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             parallel,
             preview_points,
             preview: parsed.has("preview"),
+            no_cache: parsed.has("no-cache"),
             stream: Some(Arc::clone(out)),
         },
     ) {
@@ -626,6 +627,7 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             parallel: 0,
             preview_points: 0,
             preview: false,
+            no_cache: parsed.has("no-cache"),
             stream: Some(Arc::clone(out)),
         },
     ) {
@@ -819,6 +821,7 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
                 parallel: 0,
                 preview_points: 0,
                 preview: false,
+                no_cache: false,
                 stream: None,
             },
         ) {

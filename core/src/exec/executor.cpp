@@ -415,7 +415,8 @@ class Scheduler {
 
     // 缓存命中：直接把仓里那份挂到本次运行，不调 compute（ADR-0007）。
     // 没有输出端口的算子（io.save_pcd 这类纯副作用）永远不复用。
-    if (!node.bypass && node.op->capabilities.deterministic && !node.op->outputs.empty()) {
+    if (!options_.noReuse && !node.bypass && node.op->capabilities.deterministic &&
+        !node.op->outputs.empty()) {
       std::vector<OutputInfo> infos;
       if (store_.reuse(options_.runId, node.id, node.cacheKey, outputPortNames(*node.op), infos)) {
         std::size_t bytes = 0;

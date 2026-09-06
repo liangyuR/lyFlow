@@ -29,6 +29,10 @@ pnpm check          # 或 pnpm core:build / pnpm dev
 不设这个变量就是默认构建：core + `packs/*`。
 `scripts/build-core.ps1`、`bridge/build.rs`、`scripts/core-watch.ps1` 都读同一个变量。
 
+两个开关（`LYFLOW_STD_PACKS`、`LYFLOW_OP_PACKS`）都按「CMake 缓存变量 → 同名环境变量 →
+默认值」的顺序取值，**空串一律按「没设」处理** —— `-DLYFLOW_STD_PACKS=` 传了个空值，
+不该悄悄变成「关掉标准包」；要关就显式写 `0`。
+
 包目录进了 `build.rs` 的 rerun 列表与 `core-watch.ps1` 的源码指纹，
 所以改包里的算子会触发增量构建和热重载，和改 `core/src/` 一样；
 `packs/` 同样在这两条监视链里。
