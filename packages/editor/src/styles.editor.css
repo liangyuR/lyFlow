@@ -1326,3 +1326,20 @@
   color: #fff1cf;
 }
 
+/* 图级输出（ADR-0017）。它不属于任何一个选中节点，所以钉在检查器最上面。 */
+.insp__outputs {
+  margin: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-2);
+}
+
+.insp__outputs .insp-out {
+  align-items: center;
+}
+
+.insp__outputs .ctl-btn {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  line-height: 18px;
+}

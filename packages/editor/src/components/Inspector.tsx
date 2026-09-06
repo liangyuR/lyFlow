@@ -3,7 +3,7 @@
 
 import { groupParams, effectiveParams, isEnabled, isVisible, valueEquals } from "../lib/params";
 import { augmentOperators, levelOf, promotedBy } from "../lib/subgraph";
-import { useNodeExecution, useParamErrors } from "../store/execution";
+import { useExecutionStore, useNodeExecution, useParamErrors } from "../store/execution";
 import { currentSubgraph, useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
@@ -75,6 +75,51 @@ function OutputValues({ outputs }: { outputs: OutputStat[] }) {
             </span>
             <span className="insp-out__value">{formatOutputValue(o)}</span>
             {verdict && <span className={`insp-out__verdict is-${verdict}`}>{verdict}</span>}
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+/** 图级命名输出（ADR-0017）。宿主按名字取值，所以这张表必须看得见、删得掉。 */
+function GraphOutputs() {
+  const outputs = useGraphStore((s) => s.doc.outputs);
+  const remove = useGraphStore((s) => s.removeGraphOutput);
+  const nodes = useExecutionStore((s) => s.nodes);
+  const names = Object.keys(outputs ?? {});
+  if (names.length === 0) return null;
+
+  return (
+    <section className="insp__group insp__outputs" data-testid="graph-outputs">
+      <h4 className="insp__group-title">图级输出</h4>
+      {names.map((name) => {
+        const ref = outputs![name]!;
+        const stat = nodes.get(ref.node)?.stats?.outputs?.find((o) => o.port === ref.port);
+        return (
+          <div
+            className="insp-out"
+            key={name}
+            data-testid={`graph-output-${name}`}
+            data-node={ref.node}
+            data-port={ref.port}
+            data-type={stat?.type}
+          >
+            <span className="insp-out__port" title={`${ref.node}.${ref.port}`}>
+              {name}
+            </span>
+            <span className="insp-out__value">
+              {stat ? formatOutputValue(stat) : `${ref.node}.${ref.port}`}
+            </span>
+            <button
+              type="button"
+              className="ctl-btn"
+              data-testid={`remove-output-${name}`}
+              title="取消这个图级输出"
+              onClick={() => remove(name)}
+            >
+              ✕
+            </button>
           </div>
         );
       })}
@@ -283,6 +328,15 @@ function SubgraphInspector({ subgraphId, def }: { subgraphId: string; def: Subgr
 }
 
 export function Inspector() {
+  return (
+    <>
+      <GraphOutputs />
+      <InspectorBody />
+    </>
+  );
+}
+
+function InspectorBody() {
   const selectedNodes = useUiStore((s) => s.selectedNodes);
   const inspectedOperator = useUiStore((s) => s.inspectedOperator);
   const path = useUiStore((s) => s.path);

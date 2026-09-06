@@ -143,6 +143,11 @@ interface GraphState {
   unpromoteParam(paramName: string): void;
   renameSubgraph(subgraphId: string, name: string): void;
 
+  // -- 图级输出（ADR-0017）-------------------------------------------------
+  /** 把一个端口标成图级命名输出。名字重了自动加后缀，返回最终用的名字。 */
+  markGraphOutput(ref: PortRef, name?: string): string;
+  removeGraphOutput(name: string): void;
+
   // -- 历史 ---------------------------------------------------------------
   undo(): void;
   redo(): void;
@@ -579,6 +584,32 @@ export const useGraphStore = create<GraphState>((set, get) => {
       transact("重命名子图", (d) => {
         const def = d.subgraphs?.[subgraphId];
         if (def) def.name = name;
+      });
+    },
+
+    markGraphOutput(ref, name) {
+      const { doc } = get();
+      const existing = doc.outputs ?? {};
+      // 同一个端口已经标过就复用原来的名字，右键两次不会冒出两条
+      const already = Object.entries(existing).find(
+        ([, o]) => o.node === ref.node && o.port === ref.port,
+      );
+      if (already) return already[0];
+      const base = name ?? ref.port;
+      let final = base;
+      for (let i = 2; existing[final] !== undefined; i += 1) final = `${base}_${i}`;
+      transact(`标为输出 ${final}`, (d) => {
+        d.outputs = { ...(d.outputs ?? {}), [final]: { node: ref.node, port: ref.port } };
+      });
+      return final;
+    },
+
+    removeGraphOutput(name) {
+      if (get().doc.outputs?.[name] === undefined) return;
+      transact(`取消输出 ${name}`, (d) => {
+        const next = { ...(d.outputs ?? {}) };
+        delete next[name];
+        d.outputs = next;
       });
     },
 

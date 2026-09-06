@@ -113,11 +113,47 @@ async function suiteGraphOutputs(cdp, report) {
     [{ from: ["gen", "cloud"], to: ["pipe", "in"] }],
   );
 
-  // 编辑器还没有「标为输出」的右键项（那是 A2），所以直接往 doc 上写
+  // A2-5：走右键菜单的「标为输出」，不再直接往 doc 上写
+  const marked = await cdp.eval(`
+    const el = document.querySelector('[data-testid="node-${ids.pipe}"]');
+    if (!el) return 'no-node';
+    const r = el.getBoundingClientRect();
+    el.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true, cancelable: true,
+      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+    }));
+    await new Promise((r2) => setTimeout(r2, 120));
+    const btn = document.querySelector('[data-testid="ctx-mark-output-out"]');
+    if (!btn) return 'no-item';
+    const label = btn.textContent;
+    btn.click();
+    await new Promise((r2) => setTimeout(r2, 120));
+    return { label, outputs: window.__lyflow.stores.graph.getState().doc.outputs ?? {} };
+  `);
+  report.ok("右键菜单里有「标为输出」", marked !== 'no-node' && marked !== 'no-item', String(marked));
+  report.eq("标出来的名字取自端口名", Object.keys(marked.outputs ?? {}), ["out"]);
+  report.eq(
+    "指向的是刚才那个端口",
+    [marked.outputs?.out?.node, marked.outputs?.out?.port],
+    [ids.pipe, "out"],
+  );
+
+  // Inspector 的图级输出列表（A2-5）
+  const listed = await cdp.eval(`
+    const row = document.querySelector('[data-testid="graph-output-out"]');
+    return row ? { node: row.getAttribute('data-node'), port: row.getAttribute('data-port'),
+                   canRemove: !!document.querySelector('[data-testid="remove-output-out"]') } : null;
+  `);
+  report.ok("Inspector 列出了这个图级输出", listed !== null, JSON.stringify(listed));
+  report.eq("列表里写明来自哪个端口", [listed?.node, listed?.port], [ids.pipe, "out"]);
+  report.ok("列表里能取消", listed?.canRemove === true, JSON.stringify(listed));
+
+  // 名字统一叫 cloud，后面的断言沿用 A1 的写法
   await cdp.eval(`
     const g = window.__lyflow.stores.graph.getState();
-    g.loadDoc({ ...g.doc, outputs: { cloud: { node: ${lit(ids.pipe)}, port: "out" } } },
-              g.filePath);
+    g.removeGraphOutput('out');
+    window.__lyflow.stores.graph.getState()
+      .markGraphOutput({ node: ${lit(ids.pipe)}, port: 'out' }, 'cloud');
     return true;
   `);
 
@@ -137,6 +173,24 @@ async function suiteGraphOutputs(cdp, report) {
     outputs?.cloud?.type === "PointCloud" && outputs.cloud.elementCount === 2048,
     JSON.stringify(outputs),
   );
+
+  // 跑完之后列表里带上实测值，并且能删掉
+  const withValue = await cdp.eval(`
+    const row = document.querySelector('[data-testid="graph-output-cloud"]');
+    return row ? { type: row.getAttribute('data-type'), text: row.textContent } : null;
+  `);
+  report.eq("列表里补上了输出类型", withValue?.type, "PointCloud");
+
+  const removed = await cdp.eval(`
+    document.querySelector('[data-testid="remove-output-cloud"]').click();
+    await new Promise((r) => setTimeout(r, 120));
+    return {
+      outputs: window.__lyflow.stores.graph.getState().doc.outputs ?? {},
+      section: !!document.querySelector('[data-testid="graph-outputs"]'),
+    };
+  `);
+  report.eq("取消后 doc 上没有图级输出了", Object.keys(removed.outputs), []);
+  report.ok("列表也跟着收起来了", removed.section === false, JSON.stringify(removed));
 }
 
 export const phaseASuites = [suiteLazyBranch, suitePlanExtended, suiteGraphOutputs];

@@ -28,7 +28,7 @@ import {
   toReactFlow,
   type LyNode,
 } from "../lib/mapping";
-import { augmentOperators, levelOf, pathIsValid } from "../lib/subgraph";
+import { augmentOperators, fullId, levelOf, pathIsValid } from "../lib/subgraph";
 import { canConnect, compatibleSources, compatibleTargets, inferAnyTypes } from "../lib/typecheck";
 import { keyHint } from "../lib/keymap";
 import { useExecutionStore } from "../store/execution";
@@ -560,6 +560,22 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
   const menuSubgraphId = menuNode ? subgraphIdOf(menuNode.op) : null;
   const menuIsLibrary = menuNode?.op.startsWith("lib.") === true;
 
+  // 图级输出（ADR-0017）：outputs 里存的是**展开后**的路径 id，
+  // 所以在子图里标输出也说得清是哪一个端口。
+  const menuOutputs = useMemo(() => {
+    if (!menuNode) return [];
+    const op = operatorsById.get(menuNode.op);
+    if (!op) return [];
+    const declared = doc.outputs ?? {};
+    const full = fullId(path, menuNode.id);
+    return op.outputs.map((port) => {
+      const hit = Object.entries(declared).find(
+        ([, o]) => o.node === full && o.port === port.name,
+      );
+      return { port: port.name, name: hit?.[0] };
+    });
+  }, [menuNode, operatorsById, doc.outputs, path]);
+
   const doCompose = useCallback(() => {
     const ids = menuTargets();
     const result = useGraphStore.getState().composeSubgraph(ids);
@@ -759,6 +775,30 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
               展开为内联子图
             </button>
           )}
+          {menuOutputs.map((o) => (
+            <button
+              key={o.port}
+              type="button"
+              data-testid={`ctx-mark-output-${o.port}`}
+              data-marked={o.name ? "1" : "0"}
+              onClick={() => {
+                const graph = useGraphStore.getState();
+                if (o.name) {
+                  graph.removeGraphOutput(o.name);
+                  useUiStore.getState().showToast(`已取消图级输出 ${o.name}`);
+                } else {
+                  const name = graph.markGraphOutput({
+                    node: fullId(path, menu.nodeId),
+                    port: o.port,
+                  });
+                  useUiStore.getState().showToast(`已标为图级输出 ${name}`);
+                }
+                setMenu(null);
+              }}
+            >
+              {o.name ? `取消输出 ${o.name}` : `标为输出：${o.port}`}
+            </button>
+          ))}
           <button
             type="button"
             data-testid="ctx-mute"
