@@ -18,7 +18,7 @@ pnpm check            # core 只剩 gen.synthetic 与 util.reroute，DLL 里没�
 
 ## 算子
 
-14 个，id / 版本 / 参数 / 分类与它们还在 `core/src/ops/` 时逐字相同。
+18 个。前 14 个的 id / 版本 / 参数 / 分类与它们还在 `core/src/ops/` 时逐字相同。
 
 | id | 分类 | 名字 | 端口 |
 |---|---|---|---|
@@ -37,6 +37,15 @@ pnpm check            # core 只剩 gen.synthetic 与 util.reroute，DLL 里没�
 | `transform.apply` | Transform | Apply Transform | cloud, transform → cloud |
 | `util.merge` | Util | Merge Clouds | a, b → cloud |
 
+2D 量测域的四个（[ADR-0015](../../docs/adr/0015-algorithms-live-in-lyflow-packs.md)）：
+
+| id | 分类 | 名字 | 端口 |
+|---|---|---|---|
+| `filter.crop_box2d` | Filter/Crop | Crop Box 2D | cloud, box → cloud |
+| `fit.line_2d` | Fit/Line | Fit Line 2D | cloud, [clipTo] → line, inliers |
+| `fit.circle_2d` | Fit/Circle | Fit Circle 2D | cloud → circle, inliers |
+| `register.icp_2d` | Register/ICP | ICP 2D | source, target, [init] → transform, result |
+
 长度参数一律是**米**，与点云同单位。
 
 ## 目录
@@ -51,11 +60,18 @@ ops/
   ops.h                         14 个注册函数的声明
   register.cpp                  registerPackOps + setCloudWriter
   *.cpp                         一个算子一个文件
+algo/
+  cloud2d.*                     Cloud2D = pcl::PointCloud<pcl::PointXYZRGB> 与转换
+  fit2d.*                       直线/圆拟合（双迹线、定半径重定圆心）
+  icp2d.*                       2D point-to-plane ICP
+  profile_geometry.*            剖面法线估计
+  crop2d.*                      XY 盒裁剪（开/闭区间）
 src/
   adapter.cpp、pcl_path.cpp     上面两个头的实现
 tests/
   test_std_ops.cpp              算子语义（体素键、通道保留、迁移链…）
   test_io_pcd.cpp               中文路径下的 PCD 往返
+  test_2d_ops.cpp               2D 四个算子（开闭区间、拟合、ICP 恢复平移）
 ```
 
 ## `lyflow_pcl_support`
@@ -76,6 +92,25 @@ lyflow_op_pack(
 
 `LYFLOW_STD_PACKS=0` 时这个目标不存在 —— 依赖它的包会在 configure 期
 `FATAL_ERROR`，而不是编到一半才报找不到头。
+
+## `lyflow_std_algo`
+
+第二个 INTERFACE 目标，把 `algo/` 挂成 include 根，让别的包直接调这些算法
+而不是再抄一遍（ADR-0015）：
+
+```cmake
+lyflow_op_pack(NAME mypack LINK lyflow_std_algo ...)
+```
+
+```cpp
+#include "algo/fit2d.h"   // lyflow::std_pc::fitLine2D / fitCircle2D / fitCircleFixedRadius2D
+#include "algo/icp2d.h"   // lyflow::std_pc::Icp2D
+#include "algo/crop2d.h"  // lyflow::std_pc::insideBox2D / cropBox2D
+```
+
+`algo/` 里的 2D 算法一律吃 `pcl::PointCloud<pcl::PointXYZRGB>`，
+与它们迁出来的那份（xyz-gap-inspector 的 `GapUtils` / `Icp2D`）同一个点类型 ——
+换点类型就要重新证明一遍逐位一致，而 `packs/gap` 的两条 A/B 正压在这上面。
 
 ## 写盘钩子
 

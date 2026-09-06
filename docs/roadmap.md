@@ -207,8 +207,9 @@ C ABI 升到 v5：加了 `lyflow_set_library_dirs` / `lyflow_library_count` / `l
 - 注册顺序被 manifest 的字节兼容性钉住了：`registerBuiltinOps` 是
   `gen.synthetic → 标准包 → util.reroute → 外部包` 的夹心。
   「包永远排在内置之后」这句话不再成立。
-- 包用 `file(COPY ...)` 往 `bin/` 里放的 DLL（gap 包的 `onnxruntime.dll`）
-  不会因为下次不带包构建就消失。换模式打包前要自己删。
+- 包用 `file(COPY ...)` 往 `bin/` 里放的 DLL（`std-ml` 的 `onnxruntime.dll`）
+  不会因为下次不带那个包构建就消失。`std-ml` 默认开之后这一条只在
+  `LYFLOW_STD_PACKS=0` 与默认之间来回切时咬人。
 - `lyflow_output_save` / CLI `lyflow dump` 依赖标准包装进来的写盘钩子。
   纯平台构建里它们返回 `unsupported` —— 这是设计，但错误信息是运行期才看到的。
 - ~~`cargo test` 偶发 `NoSuchOutput`（gap-acceptance.md 偏离第 8 条）~~ **已修**：
@@ -217,9 +218,31 @@ C ABI 升到 v5：加了 `lyflow_set_library_dirs` / `lyflow_library_count` / `l
   同批修掉第二个同族根因：换代 DLL 的落地名加了 pid，
   `cargo test` 进程之间不再抢 `deps/lyflow_core.gen1.dll` 这一个文件名。
 
+## M4 之后 — 算法进包，通用算法进标准包
+
+gap 领域包从 `xyz-gap-inspector/lyflow/` 搬进本仓库的 `packs/gap/`，算法源码一起搬；
+其中通用的那部分（直线/圆拟合、2D ICP、盒裁剪）进 `packs/std-pointcloud/algo/`，
+经新的 INTERFACE 目标 `lyflow_std_algo` 导出；ONNX 推理拆出独立的
+`packs/std-ml`（`ml.onnx_run`），core 新增端口类型 `Tensor`。
+见 [ADR-0015](adr/0015-algorithms-live-in-lyflow-packs.md) 与
+[gap-pack-migration-acceptance.md](gap-pack-migration-acceptance.md)。
+
+包因此有了 `DEFAULT ON|OFF`：领域包默认不编，`LYFLOW_PACKS=gap` 打开。
+
+**已知毛刺**：
+- **同一份算法暂时有两份拷贝**：`packs/gap/algo/` 与 `xyz-gap-inspector/src/`。
+  业务仓库接入 LyFlow 之前不能删那一份，这段时间靠两条 A/B 兜住漂移。
+- `packs/*` 之间有了顺序依赖（谁定义 `lyflow_std_algo`、谁解析
+  `LYFLOW_ONNXRUNTIME_ROOT`），core 的 CMakeLists 里因此有一小段显式的优先级列表。
+  再加一个提供公共目标的包时要记得改它。
+- onnxruntime 不在 vcpkg 里，靠 `scripts/fetch-onnxruntime.ps1` 备到
+  `third_party/onnxruntime/`。缺了 CMake 直接 FATAL —— 这是设计（不静默少一个算子），
+  但对第一次 clone 的人是一道额外的手续。
+
 ## M5 — 外延（只列方向，动工前再写计划）
 
 - 第二种数据域 **Image**：`Data::Kind::Image`、2D 视图、OpenCV 算子按 PCL 同样的边界规则接入。
+  `Tensor` 与 `ml.onnx_run` 已经就位，图像推理不用再造一遍。
   这是对「数据模型是否通用」的真正检验，也是项目名里「Vision Flow」的兑现
 - 第三方算子插件 DLL：`lyflow_plugin_init(Registry*)`，同工具链约束
 - 缓存落盘（`externalKey` 机制已留口子）

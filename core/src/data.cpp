@@ -41,6 +41,25 @@ void Bounds::extend(float x, float y, float z) {
   max[2] = std::max(max[2], z);
 }
 
+std::size_t Tensor::elementCount() const {
+  if (shape.empty()) return 0;
+  std::size_t n = 1;
+  for (std::int64_t d : shape) {
+    if (d <= 0) return 0;
+    n *= static_cast<std::size_t>(d);
+  }
+  return n;
+}
+
+std::string Tensor::shapeString() const {
+  std::string s = "[";
+  for (std::size_t i = 0; i < shape.size(); ++i) {
+    if (i) s += ",";
+    s += std::to_string(shape[i]);
+  }
+  return s + "]";
+}
+
 PointCloud::PointCloud() : id(cloudIdCounter().fetch_add(1, std::memory_order_relaxed)) {}
 
 void PointCloud::reserve(std::size_t n) {
@@ -185,6 +204,13 @@ Data Data::record(lyflow::Record r) {
   return d;
 }
 
+Data Data::tensor(std::shared_ptr<const lyflow::Tensor> t) {
+  Data d;
+  d.kind_ = Kind::Tensor;
+  d.tensor_ = std::move(t);
+  return d;
+}
+
 const PointCloud* Data::asCloud() const { return kind_ == Kind::PointCloud ? cloud_.get() : nullptr; }
 const Indices* Data::asIndices() const { return kind_ == Kind::Indices ? indices_.get() : nullptr; }
 const Transform* Data::asTransform() const {
@@ -201,6 +227,7 @@ const Measurement* Data::asMeasurement() const {
   return kind_ == Kind::Measurement ? measurement_.get() : nullptr;
 }
 const Record* Data::asRecord() const { return kind_ == Kind::Record ? record_.get() : nullptr; }
+const Tensor* Data::asTensor() const { return kind_ == Kind::Tensor ? tensor_.get() : nullptr; }
 
 const char* Data::typeName() const { return typeNameFromKind(kind_); }
 
@@ -232,6 +259,10 @@ std::size_t Data::byteSize() const {
     case Kind::Record:
       // 粗估：序列化一遍太贵，节点数乘个常数够 LRU 预算用了
       return record_ ? sizeof(Record) + record_->type.size() + record_->data.size() * 64 : 0;
+    case Kind::Tensor:
+      return tensor_ ? tensor_->data.size() * sizeof(float) +
+                           tensor_->shape.size() * sizeof(std::int64_t)
+                     : 0;
   }
   return 0;
 }
@@ -253,6 +284,8 @@ std::size_t Data::elementCount() const {
     case Kind::Measurement:
     case Kind::Record:
       return 1;
+    case Kind::Tensor:
+      return tensor_ ? tensor_->data.size() : 0;
   }
   return 0;
 }
@@ -320,6 +353,29 @@ std::string Data::valueJson() const {
       w.key("data");
       w.raw(record_->data.dump());
       break;
+    case Kind::Tensor: {
+      const Tensor& t = *tensor_;
+      w.key("shape");
+      w.beginArray();
+      for (std::int64_t d : t.shape) w.value(d);
+      w.endArray();
+      w.field("count", static_cast<std::int64_t>(t.data.size()));
+      // 张量本身不进 IPC，Inspector 只看得到这三个数（T7）
+      double lo = 0, hi = 0, sum = 0;
+      std::size_t finite = 0;
+      for (float v : t.data) {
+        if (!std::isfinite(v)) continue;
+        const double x = static_cast<double>(v);
+        if (finite == 0) { lo = hi = x; } else { lo = std::min(lo, x); hi = std::max(hi, x); }
+        sum += x;
+        ++finite;
+      }
+      const double nan = std::numeric_limits<double>::quiet_NaN();
+      w.field("min", finite ? lo : nan);
+      w.field("max", finite ? hi : nan);
+      w.field("mean", finite ? sum / static_cast<double>(finite) : nan);
+      break;
+    }
     default:
       break;
   }
@@ -338,6 +394,7 @@ Data::Kind kindFromTypeName(const std::string& typeName) {
   if (typeName == "Point2D") return Data::Kind::Point2D;
   if (typeName == "Measurement") return Data::Kind::Measurement;
   if (typeName == "Record") return Data::Kind::Record;
+  if (typeName == "Tensor") return Data::Kind::Tensor;
   return Data::Kind::None;  // 含 "Any"：不约束具体载荷
 }
 
@@ -354,6 +411,7 @@ const char* typeNameFromKind(Data::Kind kind) {
     case Data::Kind::Point2D:     return "Point2D";
     case Data::Kind::Measurement: return "Measurement";
     case Data::Kind::Record:      return "Record";
+    case Data::Kind::Tensor:      return "Tensor";
   }
   return "None";
 }

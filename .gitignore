@@ -40,6 +40,13 @@ bridge/gen/
 .DS_Store
 Thumbs.db
 
+# 第三方运行时：onnxruntime 由 scripts/fetch-onnxruntime.ps1 准备（ADR-0015）
+third_party/onnxruntime/
+
+# Python
+__pycache__/
+*.pyc
+
 # LyFlow runtime output
 *.lyflow.autosave
 /samples/out/

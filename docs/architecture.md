@@ -15,10 +15,21 @@
 这条边界同时是崩溃隔离面和 M3 热重载的接缝。
 
 算子包在**构建期**编进同一个 DLL，没有第四个进程也没有插件 ABI
-（[ADR-0013](adr/0013-op-packs-static.md)）。包分两类，机制相同：仓库内的**标准包**
-（`packs/std-pointcloud`，14 个点云算子）与外部**领域包**（`xyz-gap-inspector/lyflow`
-的 21 个 `gap.*`）。core 自己只留 `gen.synthetic`（测试基础设施）与 `util.reroute`
-（编辑器语义），零第三方依赖（[ADR-0014](adr/0014-std-as-pack-core-zero-dep.md)）。
+（[ADR-0013](adr/0013-op-packs-static.md)）。包分两类，机制相同：仓库内的
+`packs/*` 与 `LYFLOW_OP_PACKS` 指到的外部目录。core 自己只留 `gen.synthetic`
+（测试基础设施）与 `util.reroute`（编辑器语义），零第三方依赖
+（[ADR-0014](adr/0014-std-as-pack-core-zero-dep.md)）。
+
+仓库内现在有三个包（[ADR-0015](adr/0015-algorithms-live-in-lyflow-packs.md)）：
+
+| 包 | 算子 | 默认 |
+|---|---|---|
+| `packs/std-pointcloud` | 14 个点云 + 4 个 2D 量测（拟合、ICP、盒裁剪） | 开 |
+| `packs/std-ml` | `ml.onnx_run` | 开 |
+| `packs/gap` | 21 个 `gap.*`（间隙/段差测量） | 关，`LYFLOW_PACKS=gap` 打开 |
+
+**算法住在包里，通用的那部分住在标准包里。** 标准包导出 `lyflow_std_algo`，
+领域包调它而不是再抄一份拟合 —— 「加一个领域」因此不会把同一个 RANSAC 复制第二遍。
 
 两点值得强调：
 

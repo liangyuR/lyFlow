@@ -216,7 +216,7 @@ function disposeOverlay(group: THREE.Group) {
 function extentOf(out: OutputStat): number {
   const v = out.value;
   if (!v) return 0;
-  if (v.kind === "Box2D" && v.min && v.max) {
+  if (v.kind === "Box2D" && Array.isArray(v.min) && Array.isArray(v.max)) {
     return Math.max(Math.abs(v.max[0] - v.min[0]), Math.abs(v.max[1] - v.min[1]));
   }
   if (v.kind === "Circle2D") return (v.radius ?? 0) * 4;
@@ -232,8 +232,8 @@ function shapesOf(out: OutputStat, color: number, span: number): THREE.Line[] {
   if (!v) return [];
   switch (v.kind) {
     case "Box2D": {
-      const [x0, y0] = v.min ?? [0, 0];
-      const [x1, y1] = v.max ?? [0, 0];
+      const [x0, y0] = Array.isArray(v.min) ? v.min : [0, 0];
+      const [x1, y1] = Array.isArray(v.max) ? v.max : [0, 0];
       return [polyline([x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0], color, true)];
     }
     case "Line2D": {

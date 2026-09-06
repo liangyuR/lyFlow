@@ -51,6 +51,10 @@ void registerBuiltinTypes(Registry& r) {
   r.addType(PortType{
       "Record", "#9aa5b1", {},
       "带类型标签的 JSON。算子包用它定义领域结构而不必改 core（ADR-0013）。"});
+
+  r.addType(PortType{
+      "Tensor", "#f0b429", {},
+      "稠密 float32 张量，行主序。推理算子的输入输出；只有形状与统计量进 Inspector。"});
 }
 
 }  // namespace

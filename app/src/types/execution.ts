@@ -72,9 +72,9 @@ export interface CacheStats {
  *  坐标一律是米；Measurement 的 value 带自己的 unit。 */
 export interface OutputValue {
   kind: string;
-  /** Box2D */
-  min?: [number, number];
-  max?: [number, number];
+  /** Box2D（两角）。Tensor 复用这两个键，但那里是标量统计量。 */
+  min?: [number, number] | number | null;
+  max?: [number, number] | number | null;
   /** Line2D */
   point?: [number, number];
   dir?: [number, number];
@@ -102,6 +102,10 @@ export interface OutputValue {
   normal?: number[];
   d?: number;
   m?: number[];
+  /** Tensor。张量本身不进 IPC，只有形状与统计量。 */
+  shape?: number[];
+  count?: number;
+  mean?: number | null;
 }
 
 export interface OutputStat {

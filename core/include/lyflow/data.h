@@ -117,6 +117,19 @@ struct Measurement {
   double lower = 0;
 };
 
+/// 稠密 float32 张量，行主序。推理算子的输入输出（ADR-0015）。
+/// 不进二进制 IPC —— Inspector 只看形状与 min/max/mean。
+struct Tensor {
+  std::vector<std::int64_t> shape;
+  std::vector<float> data;
+
+  /// shape 各维之积。shape 为空时是 0（不是标量 1）。
+  std::size_t elementCount() const;
+  /// data.size() 与 shape 对得上。
+  bool consistent() const { return data.size() == elementCount(); }
+  std::string shapeString() const;
+};
+
 /// 带类型标签的 JSON。算子包用它定义领域结构而不必改 core（ADR-0013）。
 struct Record {
   std::string type;
@@ -128,7 +141,7 @@ class Data {
  public:
   enum class Kind {
     None, PointCloud, Indices, Transform, Plane,
-    Box2D, Line2D, Circle2D, Point2D, Measurement, Record,
+    Box2D, Line2D, Circle2D, Point2D, Measurement, Record, Tensor,
   };
 
   Data() = default;
@@ -147,6 +160,10 @@ class Data {
   static Data point2d(lyflow::Point2D p);
   static Data measurement(lyflow::Measurement m);
   static Data record(lyflow::Record r);
+  static Data tensor(std::shared_ptr<const lyflow::Tensor> t);
+  static Data tensor(lyflow::Tensor t) {
+    return tensor(std::make_shared<const lyflow::Tensor>(std::move(t)));
+  }
 
   Kind kind() const { return kind_; }
   bool empty() const { return kind_ == Kind::None; }
@@ -163,8 +180,10 @@ class Data {
   const lyflow::Point2D* asPoint2D() const;
   const lyflow::Measurement* asMeasurement() const;
   const lyflow::Record* asRecord() const;
+  const lyflow::Tensor* asTensor() const;
 
   std::shared_ptr<const PointCloud> cloudPtr() const { return cloud_; }
+  std::shared_ptr<const lyflow::Tensor> tensorPtr() const { return tensor_; }
 
   /// 对应 manifest 里的端口类型名，用于错误信息与事件里的 stats。
   const char* typeName() const;
@@ -190,6 +209,7 @@ class Data {
   std::shared_ptr<const lyflow::Point2D> point2d_;
   std::shared_ptr<const lyflow::Measurement> measurement_;
   std::shared_ptr<const lyflow::Record> record_;
+  std::shared_ptr<const lyflow::Tensor> tensor_;
 };
 
 /// manifest 端口类型名 -> Data::Kind。未知类型（含 "Any"）返回 None。

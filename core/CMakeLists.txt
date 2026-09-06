@@ -70,6 +70,11 @@ if(NOT DEFINED LYFLOW_OP_PACKS)
   set(LYFLOW_OP_PACKS "$ENV{LYFLOW_OP_PACKS}")
 endif()
 
+# 仓库内默认关闭的包（gap 这种领域包）用它按名字打开：分号分隔的包名（ADR-0015）。
+if(NOT DEFINED LYFLOW_PACKS OR "${LYFLOW_PACKS}" STREQUAL "")
+  set(LYFLOW_PACKS "$ENV{LYFLOW_PACKS}")
+endif()
+
 set(LYFLOW_STD_PACK_NAMES "")
 set(LYFLOW_EXT_PACK_NAMES "")
 set(LYFLOW_PACK_VERSIONS "")
@@ -82,7 +87,7 @@ set(LYFLOW_PACK_LIBS "")
 # 每个包一个对象库，所以每个包可以有自己的 PCH（拆包前是全局只能有一份）。
 macro(lyflow_op_pack)
   set(_opts "")
-  set(_one NAME VERSION PCH)
+  set(_one NAME VERSION PCH DEFAULT)
   set(_multi SOURCES TEST_SOURCES INCLUDES LINK OPTIONS DEFINES)
   cmake_parse_arguments(LYPACK "${_opts}" "${_one}" "${_multi}" ${ARGN})
   if(NOT LYPACK_NAME)
@@ -91,6 +96,20 @@ macro(lyflow_op_pack)
   if(NOT LYPACK_SOURCES)
     message(FATAL_ERROR "算子包 ${LYPACK_NAME} 没有 SOURCES")
   endif()
+
+  # DEFAULT OFF 的仓库内包要在 LYFLOW_PACKS 里点名才编（T8）。外部包是显式列出的，
+  # 不受它管。包在调用之后读 LYFLOW_PACK_ENABLED 决定要不要做依赖检查与拷 DLL。
+  set(LYFLOW_PACK_ENABLED TRUE)
+  if(LYFLOW_PACK_IS_STD AND DEFINED LYPACK_DEFAULT AND NOT LYPACK_DEFAULT)
+    set(LYFLOW_PACK_ENABLED FALSE)
+    if("${LYPACK_NAME}" IN_LIST LYFLOW_PACKS)
+      set(LYFLOW_PACK_ENABLED TRUE)
+    endif()
+  endif()
+  if(NOT LYFLOW_PACK_ENABLED)
+    message(STATUS "lyflow: 跳过默认关闭的包 ${LYPACK_NAME}（LYFLOW_PACKS=${LYPACK_NAME} 打开）")
+  else()
+
   # 包名进 C++ 命名空间，所以 std-pointcloud 这种带连字符的要先转成标识符
   string(MAKE_C_IDENTIFIER "${LYPACK_NAME}" LYPACK_IDENT)
   set(LYPACK_TARGET "lyflow_pack_${LYPACK_IDENT}")
@@ -131,6 +150,7 @@ macro(lyflow_op_pack)
   list(APPEND LYFLOW_PACK_TEST_SOURCES ${LYPACK_TEST_SOURCES})
   list(APPEND LYFLOW_PACK_INCLUDES ${LYPACK_INCLUDES})
   list(APPEND LYFLOW_PACK_LIBS ${LYPACK_LINK})
+  endif()
 endmacro()
 
 # 收集包目录：标准包在前，外部包追加在后（S4）。
@@ -144,6 +164,20 @@ if(LYFLOW_STD_PACKS)
     if(EXISTS "${d}/lyflow_op_pack.cmake")
       list(APPEND LYFLOW_STD_PACK_DIRS "${d}")
     endif()
+  endforeach()
+  # 提供公共设施的包排在前面：std-pointcloud 定义 lyflow_pcl_support 与 lyflow_std_algo，
+  # std-ml 解析 LYFLOW_ONNXRUNTIME_ROOT。字母序会把 gap 排到它们前面，那时目标还不存在。
+  set(_priority std-pointcloud std-ml)
+  list(REVERSE _priority)
+  foreach(_want IN LISTS _priority)
+    foreach(d IN LISTS LYFLOW_STD_PACK_DIRS)
+      get_filename_component(_n "${d}" NAME)
+      if(_n STREQUAL "${_want}")
+        list(REMOVE_ITEM LYFLOW_STD_PACK_DIRS "${d}")
+        list(INSERT LYFLOW_STD_PACK_DIRS 0 "${d}")
+        break()
+      endif()
+    endforeach()
   endforeach()
 endif()
 

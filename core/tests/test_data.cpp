@@ -221,6 +221,37 @@ TEST_CASE("Record 原样带着算子包定义的 JSON") {
   CHECK(j["data"]["score"].get<double>() == doctest::Approx(92.5));
 }
 
+TEST_CASE("Tensor 只把形状与统计量写进 valueJson") {
+  Tensor t;
+  t.shape = {2, 3};
+  t.data = {1.f, 2.f, 3.f, 4.f, 5.f, 6.f};
+  CHECK(t.elementCount() == 6);
+  CHECK(t.consistent());
+  CHECK(t.shapeString() == "[2,3]");
+
+  const Data d = Data::tensor(t);
+  CHECK(std::string(d.typeName()) == "Tensor");
+  CHECK(d.elementCount() == 6);
+  const nlohmann::json j = nlohmann::json::parse(d.valueJson());
+  CHECK(j["kind"] == "Tensor");
+  CHECK(j["shape"] == nlohmann::json::array({2, 3}));
+  CHECK(j["count"].get<int>() == 6);
+  CHECK(j["min"].get<double>() == doctest::Approx(1.0));
+  CHECK(j["max"].get<double>() == doctest::Approx(6.0));
+  CHECK(j["mean"].get<double>() == doctest::Approx(3.5));
+  CHECK(kindFromTypeName("Tensor") == Data::Kind::Tensor);
+}
+
+TEST_CASE("Tensor 全是非有限值时统计量写成 null 而不是坏 JSON") {
+  Tensor t;
+  t.shape = {2};
+  t.data = {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()};
+  const nlohmann::json j = nlohmann::json::parse(Data::tensor(t).valueJson());
+  CHECK(j["min"].is_null());
+  CHECK(j["mean"].is_null());
+  CHECK(j["count"].get<int>() == 2);
+}
+
 TEST_CASE("点云与 Indices 不走 valueJson") {
   CHECK(Data::cloud(makeCloud(3, false, false, false)).valueJson().empty());
   CHECK(Data::indices(Indices{}).valueJson().empty());

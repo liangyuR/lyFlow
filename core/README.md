@@ -32,6 +32,21 @@ tests/                doctest 测试
 M2 以来完全一致；它同时导出 `lyflow_pcl_support`，别的包要 PCL 就链它，
 不各自 `find_package`（[ADR-0005](../docs/adr/0005-pcl-boundary.md)）。
 
+**onnxruntime 归 `packs/std-ml`**，**yaml-cpp 归 `packs/gap`**
+（[ADR-0015](../docs/adr/0015-algorithms-live-in-lyflow-packs.md)）。前者不在 vcpkg 里，
+构建前跑一次 `scripts/fetch-onnxruntime.ps1` 备到 `third_party/onnxruntime/`（已 gitignore），
+或者设 `LYFLOW_ONNXRUNTIME_ROOT` 指向已有的一份；缺了 CMake 会直接 FATAL 并打印这条命令。
+后者一条 `C:cpkgcpkg.exe install yaml-cpp:x64-windows` 就够，而且只有
+`LYFLOW_PACKS=gap` 时才需要。
+
+依赖准备（一台新机器上从零开始）：
+
+```powershell
+C:cpkgcpkg.exe install pcl:x64-windows                  # 标准点云包
+powershell -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1  # std-ml
+C:cpkgcpkg.exe install yaml-cpp:x64-windows             # 只有 gap 包要
+```
+
 M0/M1 时期这里写着「零第三方依赖是有意的」。M2 引入 PCL 之后那句话失效了三个
 里程碑，ADR-0014 把它拿了回来 —— 代价是「内置算子」这个概念没有了，
 所有算法都是包。

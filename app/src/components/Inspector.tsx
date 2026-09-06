@@ -20,8 +20,8 @@ function num(v: number | undefined): string {
   return String(Number(v.toPrecision(6)));
 }
 
-function pair(v: [number, number] | undefined): string {
-  return v ? `(${num(v[0])}, ${num(v[1])})` : "—";
+function pair(v: [number, number] | number | null | undefined): string {
+  return Array.isArray(v) ? `(${num(v[0])}, ${num(v[1])})` : "—";
 }
 
 /** 非点云输出的一行文本。类型未知时退回类型名，永远不抛。 */
@@ -46,6 +46,8 @@ export function formatOutputValue(o: OutputStat): string {
       return `${v.type ?? ""} ${JSON.stringify(v.data ?? {})}`.trim();
     case "Plane":
       return `n=(${(v.normal ?? []).map(num).join(", ")}) d=${num(v.d)}`;
+    case "Tensor":
+      return `[${(v.shape ?? []).join(", ")}] 均值 ${num(v.mean ?? undefined)}`;
     default:
       return `${o.elementCount} 个元素`;
   }

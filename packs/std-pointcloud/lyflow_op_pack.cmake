@@ -31,15 +31,25 @@ if(MSVC)
   target_compile_options(lyflow_pcl_support INTERFACE /wd4127 /wd4267 /wd4244 /wd4324)
 endif()
 
+# T2：第二个 INTERFACE 目标，导出 algo/ 的头文件给别的包（gap）直接调。
+# include 根是包目录本身，所以调用方写的是 #include "algo/fit2d.h"。
+add_library(lyflow_std_algo INTERFACE)
+target_include_directories(lyflow_std_algo INTERFACE "${LYFLOW_PACK_DIR}")
+target_link_libraries(lyflow_std_algo INTERFACE lyflow_pcl_support)
+
 file(GLOB STD_PC_SOURCES CONFIGURE_DEPENDS
-  "${LYFLOW_PACK_DIR}/ops/*.cpp" "${LYFLOW_PACK_DIR}/src/*.cpp")
+  "${LYFLOW_PACK_DIR}/ops/*.cpp" "${LYFLOW_PACK_DIR}/src/*.cpp"
+  "${LYFLOW_PACK_DIR}/algo/*.cpp")
 file(GLOB STD_PC_TESTS CONFIGURE_DEPENDS "${LYFLOW_PACK_DIR}/tests/*.cpp")
 
 lyflow_op_pack(
   NAME         std-pointcloud
   VERSION      0.1.0
+  DEFAULT      ON
   SOURCES      ${STD_PC_SOURCES}
   TEST_SOURCES ${STD_PC_TESTS}
   PCH          "${LYFLOW_PACK_DIR}/include/lyflow_pcl/pcl_pch.h"
-  LINK         lyflow_pcl_support
+  LINK         lyflow_pcl_support lyflow_std_algo
+  # Eigen 5 把 jacobiSvd 的旧签名标了 deprecated，而迁来的 ICP 用的就是它
+  OPTIONS      /wd4996
 )

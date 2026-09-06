@@ -26,6 +26,13 @@ void registerPackOps(Registry& r) {
   ops::registerTransformApply(r);
   ops::registerUtilMerge(r);
 
+  // 2D 量测域的四个算子追加在最后：原来那 14 个的相对顺序不动，
+  // manifest 里它们的描述因此逐字节不变（ADR-0014 的 S5 仍然成立）。
+  ops::registerFilterCropBox2D(r);
+  ops::registerFitLine2D(r);
+  ops::registerFitCircle2D(r);
+  ops::registerRegisterIcp2D(r);
+
   // 写盘格式的知识只有本包有，core 的 C ABI 经这个钩子转交（ADR-0014）。
   setCloudWriter(&ops::saveCloudToFile);
 }

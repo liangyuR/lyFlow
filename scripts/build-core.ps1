@@ -55,6 +55,10 @@ if ($packs) { Write-Host "算子包: $packs" -ForegroundColor Cyan }
 $stdPacks = if ($env:LYFLOW_STD_PACKS) { $env:LYFLOW_STD_PACKS } else { "1" }
 if ($stdPacks -eq "0") { Write-Host "标准包: 关（纯平台构建）" -ForegroundColor Yellow }
 
+# 仓库内默认关闭的包按名字打开（ADR-0015），分号分隔，例如 LYFLOW_PACKS=gap。
+$repoPacks = if ($env:LYFLOW_PACKS) { $env:LYFLOW_PACKS } else { "" }
+if ($repoPacks) { Write-Host "仓库内包: $repoPacks" -ForegroundColor Cyan }
+
 # 必须在 vcvars 之后调 cmake，所以整条命令交给一个 cmd 进程。
 # 用 && 而不是 ^ 续行：换行已被 PowerShell 吃掉，^ 会转义掉下一行的首字符。
 $line = "call `"$vcvars`" >nul 2>&1" +
@@ -62,6 +66,7 @@ $line = "call `"$vcvars`" >nul 2>&1" +
         " -DCMAKE_MAKE_PROGRAM=`"$ninja`" -DCMAKE_BUILD_TYPE=$config" +
         " -DCMAKE_TOOLCHAIN_FILE=`"$toolchain`"" +
         " -DLYFLOW_OP_PACKS=`"$packs`" -DLYFLOW_STD_PACKS=`"$stdPacks`"" +
+        " -DLYFLOW_PACKS=`"$repoPacks`"" +
         " && `"$cmake`" --build `"$build`""
 
 cmd /c $line

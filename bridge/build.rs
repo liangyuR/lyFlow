@@ -155,6 +155,13 @@ fn main() {
         }
     }
 
+    // 仓库内默认关闭的包按名字打开（ADR-0015），分号分隔的包名。
+    let repo_packs = std::env::var("LYFLOW_PACKS").unwrap_or_default();
+    println!("cargo:rerun-if-env-changed=LYFLOW_PACKS");
+    // onnxruntime 的位置（T9）。缺省 third_party/onnxruntime/，由 std-ml 包自己兜底。
+    let ort_root = std::env::var("LYFLOW_ONNXRUNTIME_ROOT").unwrap_or_default();
+    println!("cargo:rerun-if-env-changed=LYFLOW_ONNXRUNTIME_ROOT");
+
     // 算子包（ADR-0013）。包目录也进 rerun 列表，改包里的算子才会重新构建 core。
     let packs = std::env::var("LYFLOW_OP_PACKS").unwrap_or_default();
     println!("cargo:rerun-if-env-changed=LYFLOW_OP_PACKS");
@@ -181,7 +188,9 @@ fn main() {
         // vcpkg 的 applocal 对 SHARED 目标同样生效，PCL 的依赖 DLL 照样落到 bin/。
         .build_target("lyflow_core")
         .define("LYFLOW_OP_PACKS", &packs)
-        .define("LYFLOW_STD_PACKS", &std_packs);
+        .define("LYFLOW_STD_PACKS", &std_packs)
+        .define("LYFLOW_PACKS", &repo_packs)
+        .define("LYFLOW_ONNXRUNTIME_ROOT", &ort_root);
     let ninja = find_ninja();
     if let Some(ninja) = &ninja {
         cfg.generator("Ninja").define("CMAKE_MAKE_PROGRAM", ninja);

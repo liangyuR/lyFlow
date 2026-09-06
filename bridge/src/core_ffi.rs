@@ -749,6 +749,7 @@ mod tests {
             "Point2D",
             "Measurement",
             "Record",
+            "Tensor",
         ] {
             assert!(types.contains(&ty), "类型表里少了 {ty}");
         }
