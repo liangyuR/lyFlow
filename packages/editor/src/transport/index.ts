@@ -8,6 +8,7 @@ export * from "./types";
 export { TauriTransport } from "./tauri";
 export { StaticTransport } from "./static";
 export { HttpTransport } from "./http";
+export type { HttpTransportOptions } from "./http";
 
 let current: Transport | null = null;
 

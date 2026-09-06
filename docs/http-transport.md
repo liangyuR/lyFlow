@@ -244,6 +244,9 @@ magic 对不上时编辑器会当成「响应不是点云」直接报错，所�
 客户端握手时带 `Sec-WebSocket-Protocol: lyflow.v1, lyflow-token.<token>`；
 服务端校验第二项，并回 `Sec-WebSocket-Protocol: lyflow.v1`。校验不过回 401，不要升级。
 
+**事件流不在 HTTP 端口上时**：`new HttpTransport(baseUrl, token, { eventsUrl })` 可以把这一条连接指到别处
+（业务服务的 WebSocket 是独立端口）。REST 仍走 `baseUrl`，只有事件流改地址。
+
 **重连**：`HttpTransport` 在连接断开后按 200/500/1000/2000/4000 ms 退避重连，
 只要还有订阅者就一直重连。断线期间的事件**会丢** —— 后端不需要缓冲重放，
 编辑器会在下一次运行时重新拿到完整的事件序列。

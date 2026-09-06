@@ -38,19 +38,28 @@ function joinUrl(base: string, path: string): string {
 
 /** 走 HTTP/WebSocket 后端的传输。契约见 docs/http-transport.md，
  *  与 C ABI v7 一一对应；阶段 B 的业务服务照它实现即可。 */
+export interface HttpTransportOptions {
+  /** 事件流的地址。宿主的 WebSocket 不在 HTTP 端口上时给这一项；
+   *  缺省是 baseUrl 换成 ws(s) 之后加 `/lyflow/events`。 */
+  eventsUrl?: string;
+}
+
 export class HttpTransport implements Transport {
   readonly kind: TransportKind = "http";
   readonly baseUrl: string;
   readonly token: string | undefined;
+  readonly eventsUrl: string;
 
   #socket: WebSocket | null = null;
   #listeners = new Set<Listener>();
   #closed = false;
   #attempt = 0;
 
-  constructor(baseUrl: string, token?: string) {
+  constructor(baseUrl: string, token?: string, options?: HttpTransportOptions) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.token = token;
+    this.eventsUrl =
+      options?.eventsUrl ?? joinUrl(this.baseUrl, "/lyflow/events").replace(/^http/, "ws");
   }
 
   // ---- 底层 ---------------------------------------------------------------
@@ -182,10 +191,9 @@ export class HttpTransport implements Transport {
   /** 三个 on* 共用一条连接：后端只暴露一个 `/lyflow/events`。 */
   #ensureSocket(): void {
     if (this.#socket || this.#closed) return;
-    const url = joinUrl(this.baseUrl, "/lyflow/events").replace(/^http/, "ws");
     // token 走子协议而不是查询串：查询串会进日志和 Referer
     const protocols = this.token ? ["lyflow.v1", `lyflow-token.${this.token}`] : ["lyflow.v1"];
-    const socket = new WebSocket(url, protocols);
+    const socket = new WebSocket(this.eventsUrl, protocols);
     this.#socket = socket;
     socket.addEventListener("open", () => {
       this.#attempt = 0;
