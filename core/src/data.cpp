@@ -211,6 +211,13 @@ Data Data::tensor(std::shared_ptr<const lyflow::Tensor> t) {
   return d;
 }
 
+Data Data::error(lyflow::Status s) {
+  Data d;
+  d.kind_ = Kind::Error;
+  d.error_ = std::make_shared<const lyflow::Status>(std::move(s));
+  return d;
+}
+
 const PointCloud* Data::asCloud() const { return kind_ == Kind::PointCloud ? cloud_.get() : nullptr; }
 const Indices* Data::asIndices() const { return kind_ == Kind::Indices ? indices_.get() : nullptr; }
 const Transform* Data::asTransform() const {
@@ -228,6 +235,7 @@ const Measurement* Data::asMeasurement() const {
 }
 const Record* Data::asRecord() const { return kind_ == Kind::Record ? record_.get() : nullptr; }
 const Tensor* Data::asTensor() const { return kind_ == Kind::Tensor ? tensor_.get() : nullptr; }
+const Status* Data::asError() const { return kind_ == Kind::Error ? error_.get() : nullptr; }
 
 const char* Data::typeName() const { return typeNameFromKind(kind_); }
 
@@ -263,6 +271,8 @@ std::size_t Data::byteSize() const {
       return tensor_ ? tensor_->data.size() * sizeof(float) +
                            tensor_->shape.size() * sizeof(std::int64_t)
                      : 0;
+    case Kind::Error:
+      return error_ ? sizeof(Status) + error_->code.size() + error_->message.size() : 0;
   }
   return 0;
 }
@@ -283,6 +293,7 @@ std::size_t Data::elementCount() const {
     case Kind::Point2D:
     case Kind::Measurement:
     case Kind::Record:
+    case Kind::Error:
       return 1;
     case Kind::Tensor:
       return tensor_ ? tensor_->data.size() : 0;
@@ -376,6 +387,15 @@ std::string Data::valueJson() const {
       w.field("mean", finite ? sum / static_cast<double>(finite) : nan);
       break;
     }
+    case Kind::Error: {
+      const Status& s = *error_;
+      w.field("phase", std::string(toString(s.phase)));
+      w.field("code", s.code);
+      w.field("message", s.message);
+      w.fieldIfSet("paramPath", s.paramPath);
+      w.fieldIfSet("portName", s.portName);
+      break;
+    }
     default:
       break;
   }
@@ -395,6 +415,7 @@ Data::Kind kindFromTypeName(const std::string& typeName) {
   if (typeName == "Measurement") return Data::Kind::Measurement;
   if (typeName == "Record") return Data::Kind::Record;
   if (typeName == "Tensor") return Data::Kind::Tensor;
+  if (typeName == "Error") return Data::Kind::Error;
   return Data::Kind::None;  // 含 "Any"：不约束具体载荷
 }
 
@@ -412,6 +433,7 @@ const char* typeNameFromKind(Data::Kind kind) {
     case Data::Kind::Measurement: return "Measurement";
     case Data::Kind::Record:      return "Record";
     case Data::Kind::Tensor:      return "Tensor";
+    case Data::Kind::Error:       return "Error";
   }
   return "None";
 }

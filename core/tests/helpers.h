@@ -123,7 +123,8 @@ class Session {
   /// 测试」会拿到 skipped 而不是 done —— 那是真实行为，但会让断言测的是运行顺序。
   Session(const Json& doc, std::filesystem::path baseDir = {},
           std::vector<std::string> targets = {}, bool keepCache = false,
-          int maxParallel = 0, bool noReuse = false) {
+          int maxParallel = 0, bool noReuse = false,
+          std::vector<exec::InjectedInput> inputs = {}) {
     static std::atomic<int> counter{0};
     if (!keepCache) exec::ResultStore::instance().clear();
     log_.runId = "test-run-" + std::to_string(counter.fetch_add(1));
@@ -133,6 +134,7 @@ class Session {
     options.targets = std::move(targets);
     options.maxParallel = maxParallel;
     options.noReuse = noReuse;
+    options.inputs = std::move(inputs);
     run_ = std::make_unique<exec::Run>(doc.dump(), options, &detail::collect, &log_);
   }
 

@@ -30,6 +30,7 @@
     "kind": {
       "enum": [
         "run_started",
+        "plan_extended",
         "node_state",
         "node_progress",
         "run_finished",
@@ -38,6 +39,32 @@
     }
   },
   "oneOf": [
+    {
+      "properties": {
+        "kind": {
+          "const": "plan_extended"
+        },
+        "demandedBy": {
+          "type": "string",
+          "description": "是哪个节点的 compute 返回了 Demand。"
+        },
+        "port": {
+          "type": "string",
+          "description": "被 demand 的惰性输入端口名。"
+        },
+        "nodes": {
+          "type": "array",
+          "description": "追加进计划的节点，结构与 run_started.nodes 完全相同（ADR-0016）。前端把它们并进本次运行的节点表。",
+          "items": {
+            "$ref": "#/$defs/planNode"
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "nodes"
+      ]
+    },
     {
       "properties": {
         "kind": {
@@ -67,29 +94,30 @@
         },
         "nodes": {
           "type": "array",
-          "description": "编译结果，与 plan 同序。M3 的精确 stale 标记与「将重算 N 个节点」提示靠它。",
+          "description": "编译结果，与 plan 同序。M3 的精确 stale 标记与「将重算 N 个节点」提示靠它。只惰性可达的节点不在这里，被 demand 时经 plan_extended 追加（ADR-0016）。",
+          "items": {
+            "$ref": "#/$defs/planNode"
+          }
+        },
+        "outputs": {
+          "type": "array",
+          "description": "GraphDoc 顶层 outputs 的编译结果（ADR-0017）。宿主 run_finished 之后按名字取值。",
           "items": {
             "type": "object",
             "required": [
-              "id",
-              "cacheKey",
-              "level"
+              "name",
+              "node",
+              "port"
             ],
             "properties": {
-              "id": {
+              "name": {
                 "type": "string"
               },
-              "cacheKey": {
-                "type": "string",
-                "description": "内容寻址键。参数或上游变了它就变。缓存判定的唯一权威在 C++（ADR-0007）。"
+              "node": {
+                "type": "string"
               },
-              "level": {
-                "type": "integer",
-                "description": "拓扑层号。就绪队列按它再按拓扑序排。"
-              },
-              "bypass": {
-                "type": "boolean",
-                "description": "该节点被静音，不会调 compute。"
+              "port": {
+                "type": "string"
               }
             }
           }
@@ -232,6 +260,31 @@
     }
   ],
   "$defs": {
+    "planNode": {
+      "type": "object",
+      "required": [
+        "id",
+        "cacheKey",
+        "level"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "cacheKey": {
+          "type": "string",
+          "description": "内容寻址键。参数或上游变了它就变。缓存判定的唯一权威在 C++（ADR-0007）。"
+        },
+        "level": {
+          "type": "integer",
+          "description": "拓扑层号。就绪队列按它再按拓扑序排。"
+        },
+        "bypass": {
+          "type": "boolean",
+          "description": "该节点被静音，不会调 compute。"
+        }
+      }
+    },
     "stats": {
       "type": "object",
       "description": "节点完成后的产出规模。节点上直接显示「12.3 万点」靠它。",
@@ -251,6 +304,14 @@
         "bypassed": {
           "type": "boolean",
           "description": "state=skipped 的原因是节点被静音，输出由输入透传而来。"
+        },
+        "provided": {
+          "type": "boolean",
+          "description": "该节点的输出由宿主经 lyflow_run_options.inputs 注入，compute 没有被调用（ADR-0017）。"
+        },
+        "reason": {
+          "type": "string",
+          "description": "state=skipped 的机器可读原因。目前只有 not_demanded：这个节点只被惰性端口依赖，而那条端口没被 demand（ADR-0016）。前端把它画成半透明。"
         },
         "outputs": {
           "type": "array",

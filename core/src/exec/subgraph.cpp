@@ -325,6 +325,8 @@ bool expandGraph(const RawGraph& in, RawGraph& out, Diagnostics& diags) {
   out.id = in.id;
   out.nodes.clear();
   out.edges.clear();
+  // 图输出直接写展开后的路径 id（F2 的 `父/子` 形式），所以原样带过来。
+  out.outputs = in.outputs;
   Expander expander(in, out, diags);
   return expander.run();
 }

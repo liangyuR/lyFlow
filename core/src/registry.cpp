@@ -80,8 +80,10 @@ void writePort(JsonWriter& w, const Port& p, bool isInput) {
   w.field("type", p.type);
   w.fieldIfSet("label", p.label);
   w.fieldIfSet("doc", p.doc);
-  // required 只对输入端口有意义，schema 也是这么说的。输出端口写了就是噪声。
+  // required / acceptsError / lazy 只对输入端口有意义，schema 也是这么说的。
   if (isInput && !p.required) w.field("required", false);
+  if (isInput && p.acceptsError) w.field("acceptsError", true);
+  if (isInput && p.lazy) w.field("lazy", true);
   w.endObject();
 }
 
@@ -173,9 +175,21 @@ void Registry::setLibraryOperators(std::vector<OperatorDesc> ops) {
   for (auto& op : ops) operators_.push_back(std::move(op));
 }
 
+void Registry::addImporter(ImporterDesc importer) {
+  if (importer.pack.empty()) importer.pack = currentPack_;
+  for (auto& existing : importers_) {
+    if (existing.kind == importer.kind) {
+      existing = std::move(importer);
+      return;
+    }
+  }
+  importers_.push_back(std::move(importer));
+}
+
 void Registry::clear() {
   types_.clear();
   operators_.clear();
+  importers_.clear();
   builtinCount_ = 0;
 }
 
@@ -183,6 +197,13 @@ const OperatorDesc* Registry::find(const std::string& id) const {
   for (const auto& op : operators_) {
     if (op.id == id) return &op;
     if (std::find(op.aliases.begin(), op.aliases.end(), id) != op.aliases.end()) return &op;
+  }
+  return nullptr;
+}
+
+const ImporterDesc* Registry::findImporter(const std::string& kind) const {
+  for (const auto& i : importers_) {
+    if (i.kind == kind) return &i;
   }
   return nullptr;
 }
@@ -229,6 +250,7 @@ std::vector<std::string> Registry::validate() const {
     }
 
     auto checkPorts = [&](const std::vector<Port>& ports, const char* kind) {
+      const bool isInput = std::string(kind) == "input";
       std::set<std::string> seen;
       for (const auto& p : ports) {
         if (p.name.empty()) fail(where + " has a " + kind + " port with empty name");
@@ -238,6 +260,9 @@ std::vector<std::string> Registry::validate() const {
         if (!typeNames.count(p.type)) {
           fail(where + " " + kind + " port '" + p.name +
                "' uses unknown type '" + p.type + "'");
+        }
+        if (!isInput && (p.acceptsError || p.lazy)) {
+          fail(where + " output port '" + p.name + "' sets acceptsError/lazy (inputs only)");
         }
       }
     };
@@ -297,6 +322,13 @@ std::vector<std::string> Registry::validate() const {
              std::to_string(m));
       }
     }
+  }
+
+  std::set<std::string> importerKinds;
+  for (const auto& i : importers_) {
+    if (i.kind.empty()) fail("importer with empty kind");
+    if (!i.fn) fail("importer '" + i.kind + "' has no function");
+    if (!importerKinds.insert(i.kind).second) fail("duplicate importer kind: " + i.kind);
   }
   return problems;
 }
@@ -358,6 +390,21 @@ std::string Registry::toManifestJson() const {
     w.endObject();
   }
   w.endArray();
+
+  // 导入器（ADR-0017）。前端据此列出「导入…」菜单，不必再硬编码格式名。
+  if (!importers_.empty()) {
+    w.key("importers");
+    w.beginArray();
+    for (const auto& i : importers_) {
+      w.beginObject();
+      w.field("kind", i.kind);
+      w.field("label", i.label.empty() ? i.kind : i.label);
+      w.fieldIfSet("doc", i.doc);
+      w.fieldIfSet("pack", i.pack);
+      w.endObject();
+    }
+    w.endArray();
+  }
 
   w.endObject();
   return w.str();

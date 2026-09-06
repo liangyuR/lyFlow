@@ -281,6 +281,36 @@ bool parseGraph(const std::string& json, RawGraph& out, Diagnostics& diags) {
     }
   }
 
+  // -- 图级命名输出（ADR-0017）。节点/端口是否存在留给 buildPlan：这里还没展开子图。
+  auto outputsIt = doc.find("outputs");
+  if (outputsIt != doc.end()) {
+    if (!outputsIt->is_object()) {
+      diags.error("", Phase::Validate, "bad_input", "outputs 必须是对象 { 名字: {node, port} }");
+    } else {
+      for (auto it = outputsIt->begin(); it != outputsIt->end(); ++it) {
+        if (it.key().empty()) {
+          diags.error("", Phase::Validate, "bad_input", "outputs 里有一个空名字");
+          continue;
+        }
+        if (!it.value().is_object()) {
+          diags.error("", Phase::Validate, "bad_input",
+                      "图输出 '" + it.key() + "' 不是 {node, port} 对象");
+          continue;
+        }
+        GraphOutput o;
+        o.name = it.key();
+        o.node = asString(it.value(), "node");
+        o.port = asString(it.value(), "port");
+        if (o.node.empty() || o.port.empty()) {
+          diags.error("", Phase::Validate, "bad_input",
+                      "图输出 '" + o.name + "' 缺少 node 或 port");
+          continue;
+        }
+        out.outputs.push_back(std::move(o));
+      }
+    }
+  }
+
   // -- 子图定义（F3）。结构性问题在这里一次报完，展开阶段就不用再防了。
   auto subsIt = doc.find("subgraphs");
   if (subsIt != doc.end() && subsIt->is_object()) {

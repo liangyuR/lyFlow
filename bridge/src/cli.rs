@@ -43,7 +43,8 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
 
   lyflow run      <graph> [--to <nodeId>]... [--set <nodeId>.<param>=<json>]...
                           [--base-dir <dir>] [--parallel <n>] [--no-cache]
-                          [--preview] [--preview-points <n>]
+                          [--preview] [--preview-points <n>] [--outputs]
+  lyflow import   <file> --kind <kind> [-o <out.lyflow.json>] [--base-dir <dir>]
   lyflow validate <graph> [--base-dir <dir>] [--set ...]
   lyflow plan     <graph> [--to <nodeId>]... [--base-dir <dir>] [--set ...]
   lyflow migrate  <graph> [--write]
@@ -85,7 +86,14 @@ fn parse_args(args: &[String], value_opts: &[&str], bool_opts: &[&str]) -> Resul
     };
     let mut i = 0;
     while i < args.len() {
-        let a = &args[i];
+        // -o 是 --output 的短写。整个 CLI 只有这一个短选项，所以不做通用的短选项表。
+        let expanded;
+        let a = if args[i] == "-o" {
+            expanded = String::from("--output");
+            &expanded
+        } else {
+            &args[i]
+        };
         if let Some(name) = a.strip_prefix("--") {
             // 同时认 `--name=value` 与 `--name value`：前者在 shell 里更省心
             let (name, inline) = match name.split_once('=') {
@@ -256,6 +264,10 @@ struct RunResult {
 }
 
 impl RunResult {
+    fn run_id(&self) -> &str {
+        self._handle.run_id()
+    }
+
     fn exit_code(&self) -> i32 {
         match self.status.as_str() {
             "ok" => EXIT_OK,
@@ -591,11 +603,99 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(r) => r,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
+    // --outputs：图级命名输出（ADR-0017）。必须在 RunResult 还活着时取 ——
+    // 它一 drop 就 lyflow_run_free，结果仓的索引跟着没了。
+    if parsed.has("outputs") {
+        match core.run_outputs(result.run_id()) {
+            Ok(raw) => match serde_json::from_str::<Value>(&raw) {
+                Ok(v) => json_line(out, &v),
+                Err(e) => return fail(err, &format!("图输出不是合法 JSON: {e}"), EXIT_FAILED),
+            },
+            Err(e) => return fail(err, &e.to_string(), EXIT_FAILED),
+        }
+    }
     line(
         err,
         &format!("run {} in {:.0} ms", result.status, result.duration_ms()),
     );
     result.exit_code()
+}
+
+/// `lyflow import --kind <kind> <file> [-o out.json]`。导入器由算子包注册（ADR-0017）。
+fn cmd_import(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
+    let Some(path) = parsed.positional.first().cloned() else {
+        line(err, "用法：lyflow import --kind <kind> <file> [-o <out.lyflow.json>]");
+        return EXIT_USAGE;
+    };
+    let Some(kind) = parsed.one("kind") else {
+        line(err, "缺 --kind。可用的 kind 见 `lyflow manifest` 的 importers 段");
+        return EXIT_USAGE;
+    };
+    let core = match core() {
+        Ok(c) => c,
+        Err(e) => return fail(err, &e, EXIT_FAILED),
+    };
+    let file = PathBuf::from(&path);
+    let text = match std::fs::read_to_string(&file) {
+        Ok(t) => t,
+        Err(e) => return fail(err, &format!("读取 {path} 失败: {e}"), EXIT_INVALID),
+    };
+    // baseDir 默认是被导入文件所在目录：导入器写出来的相对路径据它解析
+    let base_dir = match parsed.one("base-dir") {
+        Some(d) => d.to_string(),
+        None => file
+            .parent()
+            .map(|d| d.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    };
+
+    let graph_json = match core.import(kind, &text, &base_dir) {
+        Ok(g) => g,
+        Err(diags) => {
+            if let Ok(items) = serde_json::from_str::<Vec<Value>>(&diags) {
+                for d in &items {
+                    json_line(out, d);
+                }
+            } else {
+                line(err, &diags);
+            }
+            line(err, "导入失败");
+            return EXIT_INVALID;
+        }
+    };
+
+    // 导入器产出的图必须自己就是合法的 GraphDoc：坏图不该落盘
+    let doc: GraphDoc = match serde_json::from_str(&graph_json) {
+        Ok(d) => d,
+        Err(e) => return fail(err, &format!("导入器产出的不是合法 GraphDoc: {e}"), EXIT_FAILED),
+    };
+    if let Err(e) = doc.validate_structure() {
+        return fail(err, &e.to_string(), EXIT_FAILED);
+    }
+
+    let pretty = match serde_json::to_string_pretty(&doc) {
+        Ok(t) => t,
+        Err(e) => return fail(err, &e.to_string(), EXIT_FAILED),
+    };
+    match parsed.one("output") {
+        Some(target) => {
+            let dest = PathBuf::from(target);
+            if let Some(dir) = dest.parent() {
+                if !dir.as_os_str().is_empty() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+            }
+            if let Err(e) = std::fs::write(&dest, pretty + "\n") {
+                return fail(err, &format!("写 {target} 失败: {e}"), EXIT_FAILED);
+            }
+            line(
+                err,
+                &format!("{target}  ({} 节点, {} 连线)", doc.nodes.len(), doc.edges.len()),
+            );
+        }
+        None => line(out, &pretty),
+    }
+    EXIT_OK
 }
 
 fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
@@ -1068,8 +1168,9 @@ fn fail(err: &Sink, message: &str, code: i32) -> i32 {
 
 const VALUE_OPTS: &[&str] = &[
     "to", "set", "base-dir", "parallel", "preview-points", "param", "metric", "csv", "format",
+    "kind", "output",
 ];
-const BOOL_OPTS: &[&str] = &["no-cache", "preview", "write", "check", "json", "help"];
+const BOOL_OPTS: &[&str] = &["no-cache", "preview", "write", "check", "json", "help", "outputs"];
 
 pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
     let Some(command) = args.first().cloned() else {
@@ -1098,6 +1199,7 @@ pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
         "plan" => cmd_plan(&parsed, out, err),
         "migrate" => cmd_migrate(&parsed, out, err),
         "manifest" => cmd_manifest(&parsed, out, err),
+        "import" => cmd_import(&parsed, out, err),
         "dump" => cmd_dump(&parsed, out, err),
         "sweep" => cmd_sweep(&parsed, out, err),
         "diff" => cmd_diff(&parsed, out, err),

@@ -34,6 +34,13 @@ struct OutputInfo {
   std::string valueJson;
 };
 
+/// 一条图级命名输出的登记（ADR-0017）。执行器编译完就登记，宿主按名字取。
+struct NamedOutput {
+  std::string name;
+  std::string nodeId;
+  std::string port;
+};
+
 struct CacheStats {
   std::size_t entries = 0;
   std::uint64_t bytes = 0;
@@ -81,6 +88,13 @@ class ResultStore {
 
   std::vector<OutputInfo> outputsOf(const std::string& runId, const std::string& nodeId) const;
 
+  void setNamedOutputs(const std::string& runId, std::vector<NamedOutput> outputs);
+  std::vector<NamedOutput> namedOutputs(const std::string& runId) const;
+
+  /// 单个端口的元信息（类型、元素数、字节数、可读值）。没有该结果时返回 false。
+  bool outputInfo(const std::string& runId, const std::string& nodeId, const std::string& port,
+                  OutputInfo& out) const;
+
   /// 等步长抽样。maxPoints=0 视为不抽样。
   bool previewCloud(const std::string& runId, const std::string& nodeId, const std::string& port,
                     std::uint32_t maxPoints, CloudPreview& out) const;
@@ -122,6 +136,7 @@ class ResultStore {
   mutable std::mutex mu_;
   std::unordered_map<std::string, Entry> byKey_;
   std::unordered_map<std::string, NodeMap> index_;
+  std::unordered_map<std::string, std::vector<NamedOutput>> namedOutputs_;
   /// 前 = 最久没用，后 = 刚用过
   std::list<std::string> lru_;
   /// cacheKey（不带端口）-> 钉住它的运行数

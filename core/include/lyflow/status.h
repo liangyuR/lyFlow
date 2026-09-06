@@ -46,6 +46,21 @@ struct Status {
     return s;
   }
 
+  /// 惰性端口的调度请求（ADR-0016）：执行器编译并跑完该端口的上游闭包，再重新调 compute。
+  static Status Demand(std::string portName) {
+    Status s;
+    s.ok = false;
+    s.phase = Phase::Execute;
+    s.code = kDemandCode;
+    s.message = "需要惰性端口 '" + portName + "' 的上游";
+    s.portName = std::move(portName);
+    return s;
+  }
+
+  bool isDemand() const { return !ok && code == kDemandCode; }
+
+  static constexpr const char* kDemandCode = "demand";
+
   explicit operator bool() const { return ok; }
 };
 

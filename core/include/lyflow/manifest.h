@@ -2,6 +2,7 @@
 // 算子描述数据结构 —— 三层契约的 C++ 侧真实来源。
 // 序列化结果必须符合 schema/operator-manifest.schema.json，改这里等于改跨语言 API。
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -82,6 +83,13 @@ struct Port {
   std::string label;
   std::string doc;
   bool required = true;                   // 仅对 inputs 有意义
+  // 下面两条只对 inputs 有意义，语义见 ADR-0016。新字段一律追加在末尾：
+  // 现有算子用聚合初始化写了前五个成员，插在中间会静默改掉它们的 required。
+  bool acceptsError = false;
+  bool lazy = false;
+  /// 同一节点上、同一组的 Any 端口共用一个类型变量。默认全在 0 组（历史语义）。
+  /// flow.select 的 cond 与 a/b/out 不是一回事，靠它分开。不进 manifest。
+  int anyGroup = 0;
 };
 
 // --------------------------------------------------------------------------- 参数
@@ -178,5 +186,19 @@ struct OperatorDesc {
 
 /// 按名字找参数描述。执行器和算子都要用，放这里免得各写一遍线性查找。
 const Param* findParam(const OperatorDesc& op, const std::string& name);
+
+/// 「一段文本 → 一张图」。text 是原文，baseDir 是它所在目录（相对路径参数据此写）。
+/// 成功时把 GraphDoc JSON 写进 graphJson；失败时返回 Status（ADR-0017）。
+using ImportFn = Status (*)(const std::string& text, const std::filesystem::path& baseDir,
+                            std::string& graphJson);
+
+/// 一种可导入的外部格式。kind 是调用方给 lyflow_import 的第一个参数。
+struct ImporterDesc {
+  std::string kind;
+  std::string label;
+  std::string doc;
+  std::string pack;
+  ImportFn fn = nullptr;
+};
 
 }  // namespace lyflow

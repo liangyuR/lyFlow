@@ -178,6 +178,20 @@ lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* o
       options.previewMaxPoints = opts->preview_max_points;
       options.previewBudgetMs = opts->preview_budget_ms;
       options.noReuse = opts->no_reuse != 0;
+      for (std::size_t i = 0; opts->inputs && i < opts->input_count; ++i) {
+        const lyflow_run_input& in = opts->inputs[i];
+        if (in.kind != LYFLOW_INPUT_POINT_CLOUD) continue;
+        lyflow::PointCloud cloud;
+        // 调用方的缓冲只保证活到本函数返回，所以在这里就拷成 core 自己的。
+        if (in.xyz && in.count) {
+          cloud.xyz.assign(in.xyz, in.xyz + static_cast<std::size_t>(in.count) * 3);
+        }
+        if (in.intensity && in.count) {
+          cloud.intensity.assign(in.intensity, in.intensity + in.count);
+        }
+        options.inputs.push_back(lyflow::exec::InjectedInput{
+            fromC(in.node_id), fromC(in.port), lyflow::Data::cloud(std::move(cloud))});
+      }
     }
     if (options.runId.empty()) options.runId = "run";
     return reinterpret_cast<lyflow_run*>(
@@ -262,6 +276,30 @@ char* lyflow_output_info(const char* run_id, const char* node_id) {
     }
     w.endArray();
     return dup(w.str());
+  } catch (...) {
+    return dup(std::string("[]"));
+  }
+}
+
+char* lyflow_run_outputs(const char* run_id) {
+  try {
+    return dup(lyflow::exec::runOutputsJson(fromC(run_id)));
+  } catch (...) {
+    return dup(std::string("{}"));
+  }
+}
+
+char* lyflow_import(const char* kind, const char* text, const char* base_dir) {
+  try {
+    registry();
+    const std::string base = fromC(base_dir);
+    return dup(lyflow::exec::importGraphJson(
+        fromC(kind), fromC(text),
+        base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base)));
+  } catch (const std::exception& e) {
+    lyflow::Diagnostics d;
+    d.error("", lyflow::Phase::Validate, "internal", std::string("导入时内部异常: ") + e.what());
+    return dup(d.toJson());
   } catch (...) {
     return dup(std::string("[]"));
   }

@@ -4,11 +4,14 @@
 #include <chrono>
 #include <condition_variable>
 #include <ctime>
+#include <map>
 #include <queue>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 
 #include "exec/graph.h"
+#include "exec/hash.h"
 #include "exec/plan.h"
 #include "exec/result_store.h"
 #include "exec/subgraph.h"
@@ -58,18 +61,26 @@ class EventSink {
   EventSink(std::string runId, lyflow_event_cb cb, void* user)
       : runId_(std::move(runId)), cb_(cb), user_(user) {}
 
+  /// deferred 节点不进 run_started：它们要么被 demand 时经 plan_extended 追加，
+  /// 要么在 run_finished 前以 skipped/not_demanded 收场（ADR-0016）。
   void runStarted(const Plan& plan, const std::vector<std::string>& targets, int maxParallel,
                   bool preview, std::uint32_t previewMaxPoints) {
     JsonWriter w;
     std::lock_guard<std::mutex> lock(mu_);
+    std::size_t eager = 0;
+    for (const auto& n : plan.nodes) {
+      if (!n.deferred) eager += 1;
+    }
     begin(w, "run_started");
-    w.field("nodeCount", static_cast<std::int64_t>(plan.nodes.size()));
+    w.field("nodeCount", static_cast<std::int64_t>(eager));
     w.field("maxParallel", static_cast<std::int64_t>(maxParallel));
     w.field("mode", std::string(preview ? "preview" : "full"));
     if (preview) w.field("previewMaxPoints", static_cast<std::int64_t>(previewMaxPoints));
     w.key("plan");
     w.beginArray();
-    for (const auto& n : plan.nodes) w.value(n.id);
+    for (const auto& n : plan.nodes) {
+      if (!n.deferred) w.value(n.id);
+    }
     w.endArray();
     w.key("targets");
     w.beginArray();
@@ -79,14 +90,53 @@ class EventSink {
     w.key("nodes");
     w.beginArray();
     for (const auto& n : plan.nodes) {
-      w.beginObject();
-      w.field("id", n.id);
-      w.field("cacheKey", n.cacheKey);
-      w.field("level", static_cast<std::int64_t>(n.level));
-      if (n.bypass) w.field("bypass", true);
-      w.endObject();
+      if (n.deferred) continue;
+      writePlanNode(w, n);
     }
     w.endArray();
+    if (!plan.outputs.empty()) {
+      w.key("outputs");
+      w.beginArray();
+      for (const auto& o : plan.outputs) {
+        w.beginObject();
+        w.field("name", o.name);
+        w.field("node", o.nodeId);
+        w.field("port", o.port);
+        w.endObject();
+      }
+      w.endArray();
+    }
+    end(w);
+  }
+
+  /// 惰性闭包被 demand 时追加进计划。nodes[] 与 run_started.nodes 同构。
+  void planExtended(const Plan& plan, const std::vector<std::size_t>& added,
+                    const std::string& demandedBy, const std::string& port) {
+    JsonWriter w;
+    std::lock_guard<std::mutex> lock(mu_);
+    begin(w, "plan_extended");
+    w.field("demandedBy", demandedBy);
+    w.field("port", port);
+    w.key("nodes");
+    w.beginArray();
+    for (std::size_t i : added) writePlanNode(w, plan.nodes[i]);
+    w.endArray();
+    end(w);
+  }
+
+  /// 惰性闭包没被 demand。前端把这些节点画成半透明（A2-5）。
+  void nodeNotDemanded(const std::string& nodeId) {
+    JsonWriter w;
+    std::lock_guard<std::mutex> lock(mu_);
+    begin(w, "node_state");
+    w.field("nodeId", nodeId);
+    w.field("state", std::string("skipped"));
+    w.key("stats");
+    w.beginObject();
+    w.field("elementCount", static_cast<std::int64_t>(0));
+    w.field("byteSize", static_cast<std::int64_t>(0));
+    w.field("reason", std::string("not_demanded"));
+    w.endObject();
     end(w);
   }
 
@@ -99,10 +149,12 @@ class EventSink {
     end(w);
   }
 
-  /// done / skipped 共用。cached 与 bypassed 让用户分得清「不用跑」和「被静音」。
+  /// done / skipped 共用。cached / bypassed / provided 让用户分得清
+  /// 「不用跑」「被静音」和「由宿主注入」。
   void nodeFinished(const std::string& nodeId, const char* state, double durationMs,
                     std::size_t elementCount, std::size_t byteSize,
-                    const std::vector<OutputInfo>& outputs, bool cached, bool bypassed) {
+                    const std::vector<OutputInfo>& outputs, bool cached, bool bypassed,
+                    bool provided = false) {
     JsonWriter w;
     std::lock_guard<std::mutex> lock(mu_);
     begin(w, "node_state");
@@ -115,6 +167,7 @@ class EventSink {
     w.field("byteSize", static_cast<std::int64_t>(byteSize));
     if (cached) w.field("cached", true);
     if (bypassed) w.field("bypassed", true);
+    if (provided) w.field("provided", true);
     w.key("outputs");
     w.beginArray();
     for (const auto& o : outputs) {
@@ -188,6 +241,15 @@ class EventSink {
   }
 
  private:
+  static void writePlanNode(JsonWriter& w, const PlanNode& n) {
+    w.beginObject();
+    w.field("id", n.id);
+    w.field("cacheKey", n.cacheKey);
+    w.field("level", static_cast<std::int64_t>(n.level));
+    if (n.bypass) w.field("bypass", true);
+    w.endObject();
+  }
+
   void begin(JsonWriter& w, const char* kind) {
     w.setIndent(0);
     w.beginObject();
@@ -292,14 +354,35 @@ enum class Verdict { Ok, Failed, Cancelled };
 class Scheduler {
  public:
   Scheduler(Plan& plan, EventSink& sink, const std::atomic<bool>& cancelled,
-            const RunOptions& options, ResultStore& store, int workers)
+            const RunOptions& options, ResultStore& store, int workers,
+            const std::unordered_map<std::string, std::unordered_map<std::string, Data>>& injected)
       : plan_(plan), sink_(sink), cancelled_(cancelled), options_(options), store_(store),
-        workers_(workers), threadBudget_(threadBudgetFor(workers)), n_(plan.nodes.size()),
-        remaining_(n_, 0), verdict_(n_, Verdict::Ok), done_(n_, 0), poisoned_(n_, 0),
-        poisonCancelled_(n_, 0), blockedBy_(n_) {
+        injected_(injected), workers_(workers), threadBudget_(threadBudgetFor(workers)),
+        n_(plan.nodes.size()), remaining_(n_, 0), verdict_(n_, Verdict::Ok), done_(n_, 0),
+        failure_(n_), releases_(n_) {
+    // 惰性节点不进就绪队列，但它们的**非惰性**祖先仍要在 demand 发生前跑完 ——
+    // 否则 satisfyDemand 会撞上一个还没轮到的普通节点。所以每个非惰性节点的依赖
+    // 是「直接上游穿过惰性节点后落到的那圈非惰性节点」（ADR-0016）。
+    // Plan::nodes 是拓扑序，上游下标一定更小，所以升序算一遍就够。
+    std::vector<std::vector<int>> frontier(n_);
+    auto absorb = [&](std::set<int>& into, int u) {
+      const auto ui = static_cast<std::size_t>(u);
+      if (!plan_.nodes[ui].deferred) {
+        into.insert(u);
+        return;
+      }
+      into.insert(frontier[ui].begin(), frontier[ui].end());
+    };
     for (std::size_t i = 0; i < n_; ++i) {
-      remaining_[i] = static_cast<int>(plan_.nodes[i].upstream.size());
-      if (remaining_[i] == 0) ready_.push(i);
+      std::set<int> deps;
+      for (int u : plan_.nodes[i].upstream) absorb(deps, u);
+      if (plan_.nodes[i].deferred) {
+        frontier[i].assign(deps.begin(), deps.end());
+        continue;
+      }
+      remaining_[i] = static_cast<int>(deps.size());
+      for (int d : deps) releases_[static_cast<std::size_t>(d)].push_back(static_cast<int>(i));
+      if (deps.empty()) ready_.push(i);
     }
   }
 
@@ -312,14 +395,20 @@ class Scheduler {
     worker();
     for (auto& t : pool) t.join();
 
-    // 依赖计数坏掉时的兜底。正常路径永远走不到这里 —— 有环在编译期就拦下了。
     for (std::size_t i = 0; i < n_; ++i) {
       if (done_[i]) continue;
+      // 没被 demand 的惰性闭包：这不是错误，是它该有的结局（ADR-0016）。
+      if (plan_.nodes[i].deferred) {
+        sink_.nodeNotDemanded(plan_.nodes[i].id);
+        continue;
+      }
+      // 依赖计数坏掉时的兜底。正常路径永远走不到这里 —— 有环在编译期就拦下了。
       sink_.nodeFailed(plan_.nodes[i].id, "error",
                        {Status::Error(Phase::Execute, "internal", "调度器没有排到这个节点")}, -1);
-      anyError_ = true;
-      failed_ += 1;
+      verdict_[i] = Verdict::Failed;
+      done_[i] = 1;
     }
+    tally();
   }
 
   bool anyError() const { return anyError_; }
@@ -327,6 +416,33 @@ class Scheduler {
   std::size_t failedCount() const { return failed_; }
 
  private:
+  /// 整轮跑完后清点。一个失败若被下游的 acceptsError 端口全数接住，就不算整体失败 ——
+  /// 「模型路径失败、回退到模板路径、量出结果」这条路必须以 run_finished: ok 收场
+  /// （ADR-0016）。
+  void tally() {
+    std::vector<std::vector<const InputBinding*>> consumers(n_);
+    for (std::size_t i = 0; i < n_; ++i) {
+      for (const InputBinding& b : plan_.nodes[i].inputs) {
+        if (b.fromNode >= 0) consumers[static_cast<std::size_t>(b.fromNode)].push_back(&b);
+      }
+    }
+    for (std::size_t i = 0; i < n_; ++i) {
+      if (!done_[i] || verdict_[i] == Verdict::Ok) continue;
+      if (verdict_[i] == Verdict::Cancelled) {
+        sawCancel_ = true;
+        failed_ += 1;
+        continue;
+      }
+      bool absorbed = !consumers[i].empty();
+      for (const InputBinding* b : consumers[i]) {
+        if (!b->acceptsError) absorbed = false;
+      }
+      if (absorbed) continue;
+      anyError_ = true;
+      failed_ += 1;
+    }
+  }
+
   void worker() {
     for (;;) {
       std::size_t index = 0;
@@ -343,37 +459,46 @@ class Scheduler {
       }
 
       const Verdict v = execute(index);
-
-      {
-        std::lock_guard<std::mutex> lock(mu_);
-        verdict_[index] = v;
-        done_[index] = 1;
-        inflight_ -= 1;
-        if (v != Verdict::Ok) {
-          failed_ += 1;
-          if (v == Verdict::Failed) anyError_ = true;
-          else sawCancel_ = true;
-        }
-        for (int d : plan_.nodes[index].downstream) {
-          const auto di = static_cast<std::size_t>(d);
-          if (v != Verdict::Ok && !poisoned_[di]) {
-            poisoned_[di] = 1;
-            poisonCancelled_[di] = v == Verdict::Cancelled ? 1 : 0;
-            blockedBy_[di] = plan_.nodes[index].id;
-          }
-          if (--remaining_[di] == 0) ready_.push(di);
-        }
-      }
+      finish(index, v, /*releaseDownstream=*/true);
       cv_.notify_all();
     }
   }
 
-  bool poisonOf(std::size_t i, bool& byCancel, std::string& blockedBy) const {
+  /// 记账：裁决、完成标记、放行下游。惰性闭包里的节点不放行下游 —— 它的下游要么
+  /// 也在闭包里（由 satisfyDemand 顺序跑），要么是正在等它的那个 demand 发起者。
+  void finish(std::size_t index, Verdict v, bool releaseDownstream) {
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      verdict_[index] = v;
+      done_[index] = 1;
+      if (releaseDownstream) inflight_ -= 1;
+      // 惰性闭包里的节点从不是别人的 blocker（frontier 只收非惰性节点），
+      // releases_ 为空，所以这一段对它们天然是空转。
+      for (int d : releases_[index]) {
+        const auto di = static_cast<std::size_t>(d);
+        if (--remaining_[di] == 0) ready_.push(di);
+      }
+    }
+  }
+
+  Verdict verdictOf(std::size_t i) const {
     std::lock_guard<std::mutex> lock(mu_);
-    if (!poisoned_[i]) return false;
-    byCancel = poisonCancelled_[i] != 0;
-    blockedBy = blockedBy_[i];
-    return true;
+    return done_[i] ? verdict_[i] : Verdict::Ok;
+  }
+
+  bool doneOf(std::size_t i) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    return done_[i] != 0;
+  }
+
+  Status failureOf(std::size_t i) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    return failure_[i];
+  }
+
+  void recordFailure(std::size_t i, const Status& s) {
+    std::lock_guard<std::mutex> lock(mu_);
+    failure_[i] = s;
   }
 
   Verdict execute(std::size_t i) {
@@ -381,8 +506,9 @@ class Scheduler {
     sink_.nodeState(node.id, "pending");
 
     if (cancelled_.load(std::memory_order_relaxed)) {
-      sink_.nodeFailed(node.id, "cancelled",
-                       {Status::Error(Phase::Execute, "cancelled", "运行已取消")}, -1);
+      const Status s = Status::Error(Phase::Execute, "cancelled", "运行已取消");
+      recordFailure(i, s);
+      sink_.nodeFailed(node.id, "cancelled", {s}, -1);
       return Verdict::Cancelled;
     }
 
@@ -394,20 +520,18 @@ class Scheduler {
       if (errors.empty()) {
         errors.push_back(Status::Error(Phase::Validate, "internal", "节点校验未通过"));
       }
+      recordFailure(i, errors.front());
       sink_.nodeFailed(node.id, "error", errors, -1);
       return Verdict::Failed;
     }
 
-    // 上游失败 → cancelled + upstream_failed。严格不用 skipped：
-    // 后者保留给缓存命中，混用的话用户分不清「没跑」和「不用跑」。
+    // 上游失败 → cancelled + upstream_failed。严格不用 skipped：后者保留给缓存命中。
+    // 例外是声明了 acceptsError 的端口：它收到一个 Error Data，本节点照跑（ADR-0016）。
+    Status poison = Status::Ok();
     bool byCancel = false;
-    std::string blockedBy;
-    if (poisonOf(i, byCancel, blockedBy)) {
-      const Status s =
-          byCancel ? Status::Error(Phase::Execute, "cancelled", "运行已取消")
-                   : Status::Error(Phase::Execute, "upstream_failed",
-                                   "上游节点 " + blockedBy + " 失败，未执行");
-      sink_.nodeFailed(node.id, "cancelled", {s}, -1);
+    if (!upstreamOk(node, poison, byCancel)) {
+      recordFailure(i, poison);
+      sink_.nodeFailed(node.id, "cancelled", {poison}, -1);
       return byCancel ? Verdict::Cancelled : Verdict::Failed;
     }
 
@@ -415,8 +539,9 @@ class Scheduler {
 
     // 缓存命中：直接把仓里那份挂到本次运行，不调 compute（ADR-0007）。
     // 没有输出端口的算子（io.save_pcd 这类纯副作用）永远不复用。
-    if (!options_.noReuse && !node.bypass && node.op->capabilities.deterministic &&
-        !node.op->outputs.empty()) {
+    // provided 节点不复用：注入摘要已经进了 cacheKey，但直接装配比查仓更省事。
+    if (!options_.noReuse && !node.bypass && !node.provided &&
+        node.op->capabilities.deterministic && !node.op->outputs.empty()) {
       std::vector<OutputInfo> infos;
       if (store_.reuse(options_.runId, node.id, node.cacheKey, outputPortNames(*node.op), infos)) {
         std::size_t bytes = 0;
@@ -431,47 +556,91 @@ class Scheduler {
     sink_.nodeState(node.id, "running");
 
     std::unordered_map<std::string, Data> inputValues;
-    if (const Status bad = collectInputs(node, inputValues); !bad.ok) {
-      sink_.nodeFailed(node.id, "error", {bad}, msSince(nodeStart));
-      return Verdict::Failed;
-    }
-
     std::unordered_map<std::string, Data> outputValues;
     bool bypassed = false;
     Status status = Status::Ok();
-    if (node.bypass) {
+
+    if (node.provided) {
+      // 宿主注入：整个 compute 被跳过，输出直接从注入数据装配（ADR-0017）。
+      auto it = injected_.find(node.id);
+      if (it != injected_.end()) {
+        for (const auto& kv : it->second) outputValues[kv.first] = kv.second;
+      }
+    } else if (node.bypass) {
       bypassed = true;
+      if (const Status bad = collectInputs(node, inputValues); !bad.ok) {
+        recordFailure(i, bad);
+        sink_.nodeFailed(node.id, "error", {bad}, msSince(nodeStart));
+        return Verdict::Failed;
+      }
       passThrough(node, inputValues, outputValues);
     } else {
-      Inputs inputs(inputValues);
-      Outputs outputs(outputValues);
-      ParamView params(node.params, options_.baseDir);
-      NodeContext ctx(sink_, cancelled_, node.id, options_.baseDir, threadBudget_);
-      try {
-        status = node.op->compute(inputs, params, outputs, ctx);
-      } catch (const std::exception& e) {
-        // 算子抛出的任何异常都在这里兜住。绝不让它穿到 C ABI ——
-        // 跨 DLL 边界抛异常一旦有 Rust 栈帧介入就是未定义行为。
-        status = Status::Error(Phase::Execute, "internal",
-                               std::string("算子内部异常: ") + e.what());
-      } catch (...) {
-        status = Status::Error(Phase::Execute, "internal", "算子内部异常（未知类型）");
+      // 惰性端口（ADR-0016）：compute 返回 Demand 就把那条闭包编进计划、跑完、再调一次。
+      // 上限按惰性端口个数 +1 —— 一个算子最多把每个惰性端口 demand 一遍。
+      int budget = 1;
+      for (const Port& p : node.op->inputs) {
+        if (p.lazy) budget += 1;
+      }
+      for (int attempt = 0; attempt < budget; ++attempt) {
+        inputValues.clear();
+        outputValues.clear();
+        if (const Status bad = collectInputs(node, inputValues); !bad.ok) {
+          recordFailure(i, bad);
+          sink_.nodeFailed(node.id, "error", {bad}, msSince(nodeStart));
+          return Verdict::Failed;
+        }
+        Inputs inputs(inputValues);
+        Outputs outputs(outputValues);
+        ParamView params(node.params, options_.baseDir);
+        NodeContext ctx(sink_, cancelled_, node.id, options_.baseDir, threadBudget_);
+        try {
+          status = node.op->compute(inputs, params, outputs, ctx);
+        } catch (const std::exception& e) {
+          // 算子抛出的任何异常都在这里兜住。绝不让它穿到 C ABI ——
+          // 跨 DLL 边界抛异常一旦有 Rust 栈帧介入就是未定义行为。
+          status = Status::Error(Phase::Execute, "internal",
+                                 std::string("算子内部异常: ") + e.what());
+        } catch (...) {
+          status = Status::Error(Phase::Execute, "internal", "算子内部异常（未知类型）");
+        }
+        if (!status.isDemand()) break;
+        if (attempt + 1 >= budget) {
+          status = Status::Error(Phase::Execute, "internal",
+                                 "算子反复 demand 同一批端口，超过 " + std::to_string(budget) +
+                                     " 次");
+          break;
+        }
+        if (const Status bad = satisfyDemand(i, status.portName); !bad.ok) {
+          status = bad;
+          break;
+        }
+        // demand 之后上游可能刚失败：不接受 Error 的端口在这里连坐。
+        Status latePoison = Status::Ok();
+        bool lateCancel = false;
+        if (!upstreamOk(node, latePoison, lateCancel)) {
+          recordFailure(i, latePoison);
+          sink_.nodeFailed(node.id, "cancelled", {latePoison}, msSince(nodeStart));
+          return lateCancel ? Verdict::Cancelled : Verdict::Failed;
+        }
       }
     }
 
     const double durationMs = msSince(nodeStart);
 
     if (cancelled_.load(std::memory_order_relaxed)) {
-      sink_.nodeFailed(node.id, "cancelled",
-                       {Status::Error(Phase::Execute, "cancelled", "运行已取消")}, durationMs);
+      const Status s = Status::Error(Phase::Execute, "cancelled", "运行已取消");
+      recordFailure(i, s);
+      sink_.nodeFailed(node.id, "cancelled", {s}, durationMs);
       return Verdict::Cancelled;
     }
     if (!status.ok) {
+      recordFailure(i, status);
       sink_.nodeFailed(node.id, "error", {status}, durationMs);
       return Verdict::Failed;
     }
 
     if (const Status contract = checkOutputs(node, outputValues, bypassed); !contract.ok) {
+      recordFailure(i, contract);
       sink_.nodeFailed(node.id, "error", {contract}, durationMs);
       return Verdict::Failed;
     }
@@ -506,14 +675,82 @@ class Scheduler {
     }
 
     sink_.nodeFinished(node.id, bypassed ? "skipped" : "done", durationMs, primaryElements,
-                       totalBytes, infos, /*cached=*/false, bypassed);
+                       totalBytes, infos, /*cached=*/false, bypassed, node.provided);
     return Verdict::Ok;
+  }
+
+  /// 把某个惰性端口的上游闭包编进计划、按拓扑序跑完（ADR-0016）。
+  /// 整个过程串行且加锁：两个 fallback 共用一条备用闭包时，那条闭包只跑一遍。
+  Status satisfyDemand(std::size_t i, const std::string& port) {
+    std::lock_guard<std::mutex> lock(demandMu_);
+    const PlanNode& node = plan_.nodes[i];
+    const InputBinding* binding = nullptr;
+    for (const InputBinding& b : node.inputs) {
+      if (b.port == port) {
+        binding = &b;
+        break;
+      }
+    }
+    if (!binding || binding->fromNode < 0) {
+      return Status::Error(Phase::Execute, "missing_input",
+                           "算子 demand 了端口 '" + port + "'，但它没有连线", {}, port);
+    }
+
+    std::vector<std::size_t> closure;
+    std::vector<char> seen(n_, 0);
+    std::vector<std::size_t> stack{static_cast<std::size_t>(binding->fromNode)};
+    while (!stack.empty()) {
+      const std::size_t id = stack.back();
+      stack.pop_back();
+      if (seen[id]) continue;
+      seen[id] = 1;
+      if (doneOf(id)) continue;
+      closure.push_back(id);
+      for (int u : plan_.nodes[id].upstream) stack.push_back(static_cast<std::size_t>(u));
+    }
+    if (closure.empty()) return Status::Ok();
+    // Plan::nodes 本身是拓扑序，下标升序就是执行顺序。
+    std::sort(closure.begin(), closure.end());
+    sink_.planExtended(plan_, closure, node.id, port);
+    for (std::size_t id : closure) {
+      if (doneOf(id)) continue;
+      finish(id, execute(id), /*releaseDownstream=*/false);
+    }
+    return Status::Ok();
+  }
+
+  /// 上游裁决。全 Ok（或失败但落在 acceptsError 端口上）返回 true；
+  /// 否则填 poison 并说明是取消还是失败连坐。
+  bool upstreamOk(const PlanNode& node, Status& poison, bool& byCancel) const {
+    for (const InputBinding& b : node.inputs) {
+      if (b.fromNode < 0) continue;
+      const auto ui = static_cast<std::size_t>(b.fromNode);
+      if (!doneOf(ui)) continue;  // 惰性且尚未 demand：端口缺席，不是失败
+      const Verdict v = verdictOf(ui);
+      if (v == Verdict::Ok) continue;
+      if (v == Verdict::Failed && b.acceptsError) continue;
+      byCancel = v == Verdict::Cancelled;
+      poison = byCancel ? Status::Error(Phase::Execute, "cancelled", "运行已取消")
+                        : Status::Error(Phase::Execute, "upstream_failed",
+                                        "上游节点 " + plan_.nodes[ui].id + " 失败，未执行", {},
+                                        b.port);
+      return false;
+    }
+    return true;
   }
 
   Status collectInputs(const PlanNode& node, std::unordered_map<std::string, Data>& values) const {
     for (const InputBinding& b : node.inputs) {
       if (b.fromNode < 0) continue;
-      const PlanNode& up = plan_.nodes[static_cast<std::size_t>(b.fromNode)];
+      const auto ui = static_cast<std::size_t>(b.fromNode);
+      // 惰性上游还没被 demand：端口就是缺席的，算子据此返回 Status::Demand。
+      if (!doneOf(ui)) continue;
+      // 失败的上游落在 acceptsError 端口上：这里把那条 Status 变成一个 Error Data。
+      if (verdictOf(ui) == Verdict::Failed && b.acceptsError) {
+        values[b.port] = Data::error(failureOf(ui));
+        continue;
+      }
+      const PlanNode& up = plan_.nodes[ui];
       Data d;
       if (!store_.get(options_.runId, up.id, b.fromPort, d)) {
         // 上游是被静音的节点、而它那个输出没找到可透传的源（E5）。
@@ -606,20 +843,23 @@ class Scheduler {
   const std::atomic<bool>& cancelled_;
   const RunOptions& options_;
   ResultStore& store_;
+  const std::unordered_map<std::string, std::unordered_map<std::string, Data>>& injected_;
   int workers_ = 1;
   int threadBudget_ = 1;
   std::size_t n_ = 0;
 
   mutable std::mutex mu_;
+  std::mutex demandMu_;
   std::condition_variable cv_;
   std::priority_queue<std::size_t, std::vector<std::size_t>, ByLevelThenIndex> ready_{
       ByLevelThenIndex{&plan_}};
   std::vector<int> remaining_;
   std::vector<Verdict> verdict_;
   std::vector<char> done_;
-  std::vector<char> poisoned_;
-  std::vector<char> poisonCancelled_;
-  std::vector<std::string> blockedBy_;
+  /// 每个节点的失败原因。acceptsError 端口据此造 Error Data。
+  std::vector<Status> failure_;
+  /// 某节点跑完时该给谁减依赖计数（穿过惰性节点后的实际依赖）。
+  std::vector<std::vector<int>> releases_;
   int inflight_ = 0;
   bool anyError_ = false;
   bool sawCancel_ = false;
@@ -692,6 +932,25 @@ void Run::workImpl() {
   Plan plan;
   plan.runId = options_.runId;
 
+  // 注入的数据按节点归拢，顺手算出进 cacheKey 的摘要（ADR-0017）。
+  std::unordered_map<std::string, std::unordered_map<std::string, Data>> injected;
+  std::unordered_map<std::string, std::string> providedDigest;
+  {
+    std::map<std::string, Hasher> digests;
+    for (const InjectedInput& in : options_.inputs) {
+      if (in.nodeId.empty() || in.port.empty()) continue;
+      injected[in.nodeId][in.port] = in.data;
+      Hasher& h = digests[in.nodeId];
+      h.add(in.port);
+      h.add(std::string(in.data.typeName()));
+      if (const PointCloud* c = in.data.asCloud()) {
+        h.addBytes(c->xyz.data(), c->xyz.size() * sizeof(float));
+        h.addBytes(c->intensity.data(), c->intensity.size() * sizeof(float));
+      }
+    }
+    for (auto& kv : digests) providedDigest[kv.first] = kv.second.hex();
+  }
+
   const bool parsed = prepareGraph(graphJson_, raw, diags);
   if (parsed) {
     BuildOptions build;
@@ -699,6 +958,7 @@ void Run::workImpl() {
     build.baseDir = options_.baseDir;
     build.targets = options_.targets;
     build.cacheNamespace = previewNamespace(options_);
+    build.providedDigest = providedDigest;
     buildPlan(ensureRegistry(), raw, build, plan, diags);
   }
 
@@ -736,6 +996,14 @@ void Run::workImpl() {
   ResultStore& store = ResultStore::instance();
   if (options_.cacheBudgetBytes) store.setBudget(options_.cacheBudgetBytes);
 
+  // 图级命名输出：编译完就登记，宿主 join 之后按名字取（ADR-0017）。
+  {
+    std::vector<NamedOutput> named;
+    named.reserve(plan.outputs.size());
+    for (const auto& o : plan.outputs) named.push_back(NamedOutput{o.name, o.nodeId, o.port});
+    store.setNamedOutputs(options_.runId, std::move(named));
+  }
+
   // 本次计划涉及的键全部钉住：正在算的那份不能被 LRU 从下游脚下抽走。
   std::vector<std::string> keys;
   keys.reserve(plan.nodes.size());
@@ -744,7 +1012,7 @@ void Run::workImpl() {
   }
   CachePin pinned(store, std::move(keys));
 
-  Scheduler scheduler(plan, sink, cancelled_, options_, store, workers);
+  Scheduler scheduler(plan, sink, cancelled_, options_, store, workers, injected);
   scheduler.run();
 
   const double total = msSince(t0);
@@ -837,6 +1105,71 @@ std::string planGraphJson(const std::string& graphJson, const std::filesystem::p
   }
   w.endArray();
   return w.str();
+}
+
+// ------------------------------------------------------------------- 图级输出
+
+std::string runOutputsJson(const std::string& runId) {
+  ResultStore& store = ResultStore::instance();
+  JsonWriter w;
+  w.setIndent(0);
+  w.beginObject();
+  for (const NamedOutput& o : store.namedOutputs(runId)) {
+    w.key(o.name);
+    w.beginObject();
+    w.field("node", o.nodeId);
+    w.field("port", o.port);
+    OutputInfo info;
+    if (store.outputInfo(runId, o.nodeId, o.port, info)) {
+      w.field("type", info.type);
+      w.field("elementCount", static_cast<std::int64_t>(info.elementCount));
+      w.field("byteSize", static_cast<std::int64_t>(info.byteSize));
+      // 点云只给元信息，二进制仍走 lyflow_output_cloud（D4）。
+      if (!info.valueJson.empty()) {
+        w.key("value");
+        w.raw(info.valueJson);
+      }
+    } else {
+      w.field("type", std::string("None"));
+      w.field("elementCount", static_cast<std::int64_t>(0));
+      w.field("byteSize", static_cast<std::int64_t>(0));
+      w.field("missing", true);
+    }
+    w.endObject();
+  }
+  w.endObject();
+  return w.str();
+}
+
+// --------------------------------------------------------------------- 导入器
+
+std::string importGraphJson(const std::string& kind, const std::string& text,
+                            const std::filesystem::path& baseDir) {
+  auto asDiagnostics = [](const Status& s) {
+    Diagnostics d;
+    d.add("", s, Severity::Error);
+    return d.toJson();
+  };
+  const ImporterDesc* importer = ensureRegistry().findImporter(kind);
+  if (!importer || !importer->fn) {
+    return asDiagnostics(Status::Error(Phase::Validate, "unknown_importer",
+                                       "没有注册 '" + kind + "' 这种导入器"));
+  }
+  std::string graphJson;
+  Status s = Status::Ok();
+  try {
+    s = importer->fn(text, baseDir, graphJson);
+  } catch (const std::exception& e) {
+    s = Status::Error(Phase::Validate, "internal", std::string("导入时内部异常: ") + e.what());
+  } catch (...) {
+    s = Status::Error(Phase::Validate, "internal", "导入时内部异常（未知类型）");
+  }
+  if (!s.ok) return asDiagnostics(s);
+  if (graphJson.empty() || graphJson.front() != '{') {
+    return asDiagnostics(Status::Error(Phase::Validate, "internal",
+                                       "导入器 '" + kind + "' 没有产出一个 GraphDoc 对象"));
+  }
+  return graphJson;
 }
 
 }  // namespace lyflow::exec

@@ -21,9 +21,20 @@ pub struct GraphDoc {
     pub groups: Vec<serde_json::Value>,
     #[serde(default)]
     pub subgraphs: serde_json::Map<String, serde_json::Value>,
+    /// 图级命名输出（ADR-0017）。宿主按名字取值，不认节点 id。
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub outputs: std::collections::BTreeMap<String, GraphOutput>,
     /// 未知字段容器。老客户端打开新版本写的图时不该丢数据。
     #[serde(default)]
     pub x: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphOutput {
+    pub node: String,
+    pub port: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,6 +96,19 @@ impl GraphDoc {
             }
             if node.op.is_empty() {
                 problems.push(format!("节点 {} 没有 op", node.id));
+            }
+        }
+
+        // 图输出必须指向存在的节点。端口是否存在要 manifest 才知道，留给 C++（ADR-0017）。
+        for (name, out) in &self.outputs {
+            if name.is_empty() {
+                problems.push("存在名字为空的图输出".to_string());
+            }
+            if !node_ids.contains(out.node.as_str()) {
+                problems.push(format!("图输出 {name} 指向不存在的节点: {}", out.node));
+            }
+            if out.port.is_empty() {
+                problems.push(format!("图输出 {name} 没有 port"));
             }
         }
 
@@ -154,6 +178,7 @@ mod tests {
                 .collect(),
             groups: Vec::new(),
             subgraphs: Default::default(),
+            outputs: Default::default(),
             x: Default::default(),
         }
     }
@@ -236,5 +261,28 @@ mod tests {
         assert_eq!(out["x"]["futureField"][2], 3);
         // bypass 默认 false 时不写进文件：稀疏存储，老图的 diff 不该被它污染
         assert!(out["nodes"][0].get("bypass").is_none());
+        // 没有声明图输出时 outputs 也不写进文件
+        assert!(out.get("outputs").is_none());
+    }
+
+    #[test]
+    fn keeps_graph_outputs_and_checks_their_node() {
+        let raw = r#"{
+            "schemaVersion": 1,
+            "id": "g1",
+            "nodes": [{"id": "n1", "op": "gen.synthetic"}],
+            "edges": [],
+            "outputs": {"cloud": {"node": "n1", "port": "cloud", "label": "点云"}}
+        }"#;
+        let doc: GraphDoc = serde_json::from_str(raw).unwrap();
+        doc.validate_structure().unwrap();
+        let out = serde_json::to_value(&doc).unwrap();
+        assert_eq!(out["outputs"]["cloud"]["node"], "n1");
+        assert_eq!(out["outputs"]["cloud"]["label"], "点云");
+
+        let mut bad = doc.clone();
+        bad.outputs.get_mut("cloud").unwrap().node = "ghost".into();
+        let err = bad.validate_structure().unwrap_err().to_string();
+        assert!(err.contains("指向不存在的节点"), "{err}");
     }
 }

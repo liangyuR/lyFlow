@@ -13,6 +13,22 @@ use libloading::{Library, Symbol};
 
 pub type EventCb = unsafe extern "C" fn(*const c_char, *mut c_void);
 
+/// C ABI 的版本号。与 core/include/lyflow/c_api.h 的 LYFLOW_ABI_VERSION 必须一致。
+pub const ABI_VERSION: u32 = 7;
+
+/// 运行时注入一个源节点的输出（v7）。缓冲由调用方持有到 `lyflow_run_start` 返回。
+#[repr(C)]
+pub struct RunInputRaw {
+    pub node_id: *const c_char,
+    pub port: *const c_char,
+    pub kind: i32,
+    pub count: u32,
+    pub xyz: *const f32,
+    pub intensity: *const f32,
+}
+
+pub const INPUT_POINT_CLOUD: i32 = 0;
+
 #[repr(C)]
 pub struct RunOptionsRaw {
     pub run_id: *const c_char,
@@ -25,6 +41,8 @@ pub struct RunOptionsRaw {
     pub preview_max_points: u32,
     pub preview_budget_ms: u32,
     pub no_reuse: i32,
+    pub inputs: *const RunInputRaw,
+    pub input_count: usize,
 }
 
 #[repr(C)]
@@ -44,7 +62,16 @@ pub struct CloudViewRaw {
 pub const CLOUD_HAS_INTENSITY: u32 = 1;
 pub const CLOUD_HAS_NORMALS: u32 = 2;
 
-/// 一次运行的全部选项（C ABI v6）。写成位置参数就没人读得懂了。
+/// 一次运行注入的一片点云（v7）。Rust 侧持有缓冲，转成 RunInputRaw 交给 core。
+#[derive(Clone, Debug)]
+pub struct RunInput {
+    pub node_id: String,
+    pub port: String,
+    pub xyz: Vec<f32>,
+    pub intensity: Vec<f32>,
+}
+
+/// 一次运行的全部选项（C ABI v7）。写成位置参数就没人读得懂了。
 #[derive(Clone)]
 pub struct RunSpec<'a> {
     pub graph_json: &'a str,
@@ -59,6 +86,8 @@ pub struct RunSpec<'a> {
     pub preview_budget_ms: u32,
     /// 本次运行不复用结果仓里的旧结果。不动别的 run 的结果（对比 `cache_clear`）。
     pub no_reuse: bool,
+    /// 运行时注入的源数据（ADR-0017）。
+    pub inputs: &'a [RunInput],
 }
 
 impl<'a> RunSpec<'a> {
@@ -78,6 +107,7 @@ impl<'a> RunSpec<'a> {
             preview_max_points: 0,
             preview_budget_ms: 0,
             no_reuse: false,
+            inputs: &[],
         }
     }
 }
@@ -133,6 +163,9 @@ type FnOutputCloud = unsafe extern "C" fn(
 ) -> c_int;
 type FnCloudViewFree = unsafe extern "C" fn(*mut CloudViewRaw);
 type FnOutputInfo = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
+type FnRunOutputs = unsafe extern "C" fn(*const c_char) -> *mut c_char;
+type FnImport =
+    unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> *mut c_char;
 type FnSetLibraryDirs = unsafe extern "C" fn(*const *const c_char, usize) -> *mut c_char;
 type FnLibraryCount = unsafe extern "C" fn() -> usize;
 type FnOutputSave = unsafe extern "C" fn(
@@ -162,6 +195,8 @@ pub struct Core {
     output_cloud: FnOutputCloud,
     cloud_view_free: FnCloudViewFree,
     output_info: FnOutputInfo,
+    run_outputs: FnRunOutputs,
+    import: FnImport,
     output_save: FnOutputSave,
     set_library_dirs: FnSetLibraryDirs,
     library_count: FnLibraryCount,
@@ -221,6 +256,8 @@ impl Core {
             output_cloud: sym!(lib, "lyflow_output_cloud", FnOutputCloud),
             cloud_view_free: sym!(lib, "lyflow_cloud_view_free", FnCloudViewFree),
             output_info: sym!(lib, "lyflow_output_info", FnOutputInfo),
+            run_outputs: sym!(lib, "lyflow_run_outputs", FnRunOutputs),
+            import: sym!(lib, "lyflow_import", FnImport),
             output_save: sym!(lib, "lyflow_output_save", FnOutputSave),
             set_library_dirs: sym!(lib, "lyflow_set_library_dirs", FnSetLibraryDirs),
             library_count: sym!(lib, "lyflow_library_count", FnLibraryCount),
@@ -369,6 +406,26 @@ impl Core {
         unsafe { self.take_owned((self.output_info)(r.as_ptr(), n.as_ptr())) }
     }
 
+    /// 图级命名输出（ADR-0017）。返回 `{ 名字: { node, port, type, ... } }` 的 JSON 文本。
+    pub fn run_outputs(&self, run_id: &str) -> Result<String, CoreError> {
+        let r = CString::new(run_id)?;
+        unsafe { self.take_owned((self.run_outputs)(r.as_ptr())) }
+    }
+
+    /// 走注册好的导入器把一段文本变成图。Err 里是诊断数组的文本（'[' 开头）。
+    pub fn import(&self, kind: &str, text: &str, base_dir: &str) -> Result<String, String> {
+        let cs = |s: &str| CString::new(s).map_err(|e| e.to_string());
+        let (k, t, b) = (cs(kind)?, cs(text)?, cs(base_dir)?);
+        let raw = unsafe { self.take_owned((self.import)(k.as_ptr(), t.as_ptr(), b.as_ptr())) }
+            .map_err(|e| e.to_string())?;
+        // 成功是 GraphDoc 对象，失败是诊断数组 —— 与 lyflow_plan 同一套区分办法。
+        if raw.starts_with('{') {
+            Ok(raw)
+        } else {
+            Err(raw)
+        }
+    }
+
     /// 取某节点某端口的点云预览。返回的 `CloudView` 在 Drop 里还给 core。
     pub fn output_cloud(
         self: &Arc<Self>,
@@ -498,6 +555,30 @@ impl RunHandle {
         let target_ptrs: Vec<*const c_char> =
             target_cstrings.iter().map(|c| c.as_ptr()).collect();
 
+        // node_id / port 的 CString 与点云缓冲都必须活到 run_start 返回：core 在里面拷贝。
+        let input_names: Vec<(CString, CString)> = spec
+            .inputs
+            .iter()
+            .map(|i| Ok((CString::new(i.node_id.as_str())?, CString::new(i.port.as_str())?)))
+            .collect::<Result<_, std::ffi::NulError>>()?;
+        let input_raw: Vec<RunInputRaw> = spec
+            .inputs
+            .iter()
+            .zip(input_names.iter())
+            .map(|(i, (node, port))| RunInputRaw {
+                node_id: node.as_ptr(),
+                port: port.as_ptr(),
+                kind: INPUT_POINT_CLOUD,
+                count: (i.xyz.len() / 3) as u32,
+                xyz: i.xyz.as_ptr(),
+                intensity: if i.intensity.is_empty() {
+                    std::ptr::null()
+                } else {
+                    i.intensity.as_ptr()
+                },
+            })
+            .collect();
+
         let options = RunOptionsRaw {
             run_id: rid.as_ptr(),
             base_dir: base.as_ptr(),
@@ -513,6 +594,12 @@ impl RunHandle {
             preview_max_points: spec.preview_max_points,
             preview_budget_ms: spec.preview_budget_ms,
             no_reuse: i32::from(spec.no_reuse),
+            inputs: if input_raw.is_empty() {
+                std::ptr::null()
+            } else {
+                input_raw.as_ptr()
+            },
+            input_count: input_raw.len(),
         };
 
         let user_ptr = Box::into_raw(user) as *mut c_void;

@@ -11,11 +11,20 @@
 
 #include "exec/graph.h"
 #include "lyflow/c_api.h"
+#include "lyflow/data.h"
 
 namespace lyflow::exec {
 
 /// 运行模式（F5）。preview 只改一件事：无输入的源算子先把输出抽稀。
 enum class RunMode { Full = 0, Preview = 1 };
+
+/// 运行时注入（ADR-0017）：这个节点的这个输出端口不由 compute 产出，由宿主直接给。
+/// 一个节点只要被注入一次，它的**全部**输出端口都得给 —— compute 整个被跳过。
+struct InjectedInput {
+  std::string nodeId;
+  std::string port;
+  Data data;
+};
 
 struct RunOptions {
   std::string runId;
@@ -32,6 +41,8 @@ struct RunOptions {
   std::uint32_t previewBudgetMs = 0;
   /// 本次运行不复用结果仓里的旧结果（CLI 的 --no-cache）。仍然照常写入。
   bool noReuse = false;
+  /// 运行时注入的源数据。摘要进 cacheKey。
+  std::vector<InjectedInput> inputs;
 };
 
 /// preview 的两个默认值。C ABI 传 0 表示「用默认」，两侧因此不必同步常量。
@@ -84,5 +95,14 @@ bool prepareGraph(const std::string& graphJson, RawGraph& out, Diagnostics& diag
 /// 校验有错时返回诊断数组而不是计划数组，两者靠 kind 字段区分。
 std::string planGraphJson(const std::string& graphJson, const std::filesystem::path& baseDir,
                           const std::vector<std::string>& targets);
+
+/// 某次运行的图级命名输出（ADR-0017）。返回
+/// `{ name: { node, port, type, elementCount, byteSize, value? } }`。
+std::string runOutputsJson(const std::string& runId);
+
+/// 走注册好的导入器把一段文本变成图。失败时返回诊断 JSON 数组（以 '[' 开头），
+/// 成功时返回 GraphDoc 对象（以 '{' 开头）。
+std::string importGraphJson(const std::string& kind, const std::string& text,
+                            const std::filesystem::path& baseDir);
 
 }  // namespace lyflow::exec

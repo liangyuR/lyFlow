@@ -195,6 +195,33 @@ std::vector<OutputInfo> ResultStore::outputsOf(const std::string& runId,
   return out;
 }
 
+bool ResultStore::outputInfo(const std::string& runId, const std::string& nodeId,
+                             const std::string& port, OutputInfo& out) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto run = index_.find(runId);
+  if (run == index_.end()) return false;
+  auto node = run->second.find(nodeId);
+  if (node == run->second.end()) return false;
+  auto entry = node->second.find(port);
+  if (entry == node->second.end()) return false;
+  auto data = byKey_.find(entry->second);
+  if (data == byKey_.end()) return false;
+  out = OutputInfo{port, data->second.data.typeName(), data->second.data.elementCount(),
+                   data->second.bytes, data->second.data.valueJson()};
+  return true;
+}
+
+void ResultStore::setNamedOutputs(const std::string& runId, std::vector<NamedOutput> outputs) {
+  std::lock_guard<std::mutex> lock(mu_);
+  namedOutputs_[runId] = std::move(outputs);
+}
+
+std::vector<NamedOutput> ResultStore::namedOutputs(const std::string& runId) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto it = namedOutputs_.find(runId);
+  return it == namedOutputs_.end() ? std::vector<NamedOutput>{} : it->second;
+}
+
 bool ResultStore::previewCloud(const std::string& runId, const std::string& nodeId,
                                const std::string& port, std::uint32_t maxPoints,
                                CloudPreview& out) const {
@@ -248,12 +275,14 @@ void ResultStore::freeRun(const std::string& runId) {
   std::lock_guard<std::mutex> lock(mu_);
   // 只丢索引。Data 留着等下一次运行按 cacheKey 复用，超预算时由 LRU 淘汰。
   index_.erase(runId);
+  namedOutputs_.erase(runId);
   evictLocked();
 }
 
 void ResultStore::clear() {
   std::lock_guard<std::mutex> lock(mu_);
   index_.clear();
+  namedOutputs_.clear();
   byKey_.clear();
   lru_.clear();
   bytes_ = 0;

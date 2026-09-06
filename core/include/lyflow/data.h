@@ -8,6 +8,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "lyflow/status.h"
+
 namespace lyflow {
 
 /// 轴对齐包围盒。空点云时 valid=false。
@@ -141,7 +143,7 @@ class Data {
  public:
   enum class Kind {
     None, PointCloud, Indices, Transform, Plane,
-    Box2D, Line2D, Circle2D, Point2D, Measurement, Record, Tensor,
+    Box2D, Line2D, Circle2D, Point2D, Measurement, Record, Tensor, Error,
   };
 
   Data() = default;
@@ -164,6 +166,7 @@ class Data {
   static Data tensor(lyflow::Tensor t) {
     return tensor(std::make_shared<const lyflow::Tensor>(std::move(t)));
   }
+  static Data error(lyflow::Status s);
 
   Kind kind() const { return kind_; }
   bool empty() const { return kind_ == Kind::None; }
@@ -181,6 +184,8 @@ class Data {
   const lyflow::Measurement* asMeasurement() const;
   const lyflow::Record* asRecord() const;
   const lyflow::Tensor* asTensor() const;
+  const lyflow::Status* asError() const;
+  bool isError() const { return kind_ == Kind::Error; }
 
   std::shared_ptr<const PointCloud> cloudPtr() const { return cloud_; }
   std::shared_ptr<const lyflow::Tensor> tensorPtr() const { return tensor_; }
@@ -210,6 +215,7 @@ class Data {
   std::shared_ptr<const lyflow::Measurement> measurement_;
   std::shared_ptr<const lyflow::Record> record_;
   std::shared_ptr<const lyflow::Tensor> tensor_;
+  std::shared_ptr<const lyflow::Status> error_;
 };
 
 /// manifest 端口类型名 -> Data::Kind。未知类型（含 "Any"）返回 None。

@@ -60,6 +60,31 @@
       },
       "description": "预留：节点分组框。"
     },
+    "outputs": {
+      "type": "object",
+      "description": "图级命名输出（ADR-0017）。宿主用 lyflow_run_outputs 按名字取值，不认节点 id。子图内部的端口写展开后的路径 id（`outer/inner`）。",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "node",
+          "port"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "node": {
+            "type": "string",
+            "description": "展开后的节点路径 id。"
+          },
+          "port": {
+            "type": "string",
+            "description": "该节点的输出端口名。"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "subgraphs": {
       "type": "object",
       "description": "复合算子定义（ADR-0010）。键是 subgraphId，节点用 op: \"sub:<subgraphId>\" 引用。compile 之前由 C++ 递归展开成平图，执行器/缓存/事件对子图一无所知。",

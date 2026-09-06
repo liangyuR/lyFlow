@@ -59,12 +59,21 @@ struct SubgraphDef {
   std::vector<SubParam> params;
 };
 
+/// 图级命名输出（ADR-0017）。宿主只认名字，不认节点 id。
+struct GraphOutput {
+  std::string name;
+  std::string node;
+  std::string port;
+};
+
 struct RawGraph {
   std::string id;
   std::vector<RawNode> nodes;
   std::vector<RawEdge> edges;
   /// 图内定义的子图，键是 subgraphId（节点用 `sub:<id>` 引用）。
   std::map<std::string, SubgraphDef> subgraphs;
+  /// 按名字升序（JSON 对象键的顺序），展开后仍用路径 id 指节点。
+  std::vector<GraphOutput> outputs;
 };
 
 /// 解析并做结构校验。返回 false 表示图不可用（诊断已写进 diags）。

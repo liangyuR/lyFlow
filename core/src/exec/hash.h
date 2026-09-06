@@ -19,8 +19,15 @@ class Hasher {
     buffer_.push_back('\0');
   }
 
-  std::string hex() const {
-    const XXH128_hash_t h = XXH3_128bits(buffer_.data(), buffer_.size());
+  /// 大块二进制（注入的点云缓冲）先摘要再入队，免得整片云被拷进 buffer_。
+  void addBytes(const void* data, std::size_t bytes) {
+    add(toHex(XXH3_128bits(data, bytes)));
+  }
+
+  std::string hex() const { return toHex(XXH3_128bits(buffer_.data(), buffer_.size())); }
+
+ private:
+  static std::string toHex(const XXH128_hash_t& h) {
     static const char* kDigits = "0123456789abcdef";
     std::string out;
     out.reserve(32);
@@ -33,7 +40,6 @@ class Hasher {
     return out;
   }
 
- private:
   std::vector<char> buffer_;
 };
 

@@ -1,7 +1,8 @@
 #ifndef LYFLOW_C_API_H
 #define LYFLOW_C_API_H
-// C ABI v6。Rust 桥接层只看见这个头文件。
+// C ABI v7。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
 // 三条约定（char* 归属、异常不跨 ABI、只导出 C 函数）见 core/README.md「C ABI 约定」。
+#define LYFLOW_ABI_VERSION 7
 #include <stddef.h>
 #include <stdint.h>
 
@@ -70,6 +71,20 @@ typedef void (*lyflow_event_cb)(const char* event_json, void* user);
 
 typedef struct lyflow_run lyflow_run;
 
+/* 运行时注入一个源节点的输出（v7）。被注入的节点整个 compute 都不会被调用，
+   所以它声明的**每个**输出端口都要给一项，否则执行器报「算子没有写输出端口」。
+   缓冲由调用方持有，必须活到 lyflow_run_start 返回为止（core 内部会拷一份）。 */
+typedef struct {
+  const char* node_id;
+  const char* port;
+  int32_t kind;                    /* 目前只支持 LYFLOW_INPUT_POINT_CLOUD */
+  uint32_t count;                  /* 点数 */
+  const float* xyz;                /* 3 * count */
+  const float* intensity;          /* count，或 NULL */
+} lyflow_run_input;
+
+#define LYFLOW_INPUT_POINT_CLOUD 0
+
 typedef struct {
   const char* run_id;              /* 由调用方分配（Rust 用 ULID），事件里原样回传 */
   const char* base_dir;            /* 相对路径参数的基准目录，可为 NULL */
@@ -81,6 +96,8 @@ typedef struct {
   uint32_t preview_max_points;     /* preview 的点数上限。0 = 200000 */
   uint32_t preview_budget_ms;      /* 超过它发一条 warn 日志。0 = 300 */
   int32_t no_reuse;                /* 非 0 = 本次运行不复用结果仓里的旧结果 */
+  const lyflow_run_input* inputs;  /* v7：运行时注入的源数据，NULL/0 表示没有 */
+  size_t input_count;
 } lyflow_run_options;
 
 #define LYFLOW_RUN_MODE_FULL 0
@@ -129,6 +146,17 @@ LYFLOW_API void lyflow_cloud_view_free(lyflow_cloud_view* view);
 
 // 某节点全部输出的 { port, type, elementCount, byteSize } JSON 数组。
 LYFLOW_API char* lyflow_output_info(const char* run_id, const char* node_id);
+
+// v7：图级命名输出（GraphDoc 顶层 outputs）。返回
+// { 名字: { node, port, type, elementCount, byteSize, value?, missing? } }。
+// 点云只给元信息，二进制仍走 lyflow_output_cloud。图没声明 outputs 时返回 "{}"。
+LYFLOW_API char* lyflow_run_outputs(const char* run_id);
+
+// v7：走注册好的导入器把一段文本变成图（比如 gap 包的 "StandardGap.yml"）。
+// 成功返回 GraphDoc 对象（'{' 开头），失败返回诊断数组（'[' 开头），
+// 与 lyflow_plan 的两种返回值同一套区分办法（ADR-0007）。
+// 可用的 kind 见 manifest 的 importers 段。base_dir 可为 NULL。
+LYFLOW_API char* lyflow_import(const char* kind, const char* text, const char* base_dir);
 
 // 把某个输出整份写到磁盘（PCD/PLY 按扩展名）。CLI 的 `lyflow dump` 用它 ——
 // 写盘格式的知识留在 core。返回空串 = 成功，否则是一句人话的失败原因。

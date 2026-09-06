@@ -155,6 +155,41 @@ inline nlohmann::json migrateV1(const nlohmann::json& params) {
   return out;
 }
 
+// ------------------------------------------------------------ test.counted
+/// 惰性调度的锁：备用闭包没被 demand 时，这个计数必须一动不动（A1 验收）。
+inline std::atomic<int>& computeCalls() {
+  static std::atomic<int> calls{0};
+  return calls;
+}
+
+inline Status countedCompute(const Inputs&, const ParamView& params, Outputs& outputs,
+                             ExecContext&) {
+  computeCalls().fetch_add(1, std::memory_order_relaxed);
+  PointCloud cloud;
+  const auto n = static_cast<std::size_t>(params.integer("pointCount"));
+  cloud.reserve(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    const auto f = static_cast<float>(i);
+    cloud.push(f, f, f);
+  }
+  outputs.set("cloud", Data::cloud(std::move(cloud)));
+  return Status::Ok();
+}
+
+// ------------------------------------------------------------ test.fail
+inline Status failCompute(const Inputs&, const ParamView& params, Outputs&, ExecContext&) {
+  return Status::Error(Phase::Execute, params.text("code"), params.text("message"));
+}
+
+inline Param textParam(const char* name, const char* def) {
+  Param p;
+  p.name = name;
+  p.type = ParamType::String;
+  p.label = name;
+  p.def = Value::text(def);
+  return p;
+}
+
 inline Param intParam(const char* name, std::int64_t def, double min) {
   Param p;
   p.name = name;
@@ -315,6 +350,32 @@ inline void ensureTestOps() {
       op.capabilities = {true, true, true};
       op.compute = &ops::migratedCompute;
       op.migrations = {Migration{1, &ops::migrateV1}};
+      r.addOperator(std::move(op));
+    }
+    {  // 数自己被调了几次。惰性端口的「没被 demand 就绝不调 compute」全靠它钉住
+      OperatorDesc op;
+      op.id = "test.counted";
+      op.version = "1.0.0";
+      op.label = "Counted Source";
+      op.category = "Test";
+      op.doc = "只在测试里注册：产一片点云，并把自己被调用的次数记进全局计数器。";
+      op.outputs = {cloudOut};
+      op.params = {ops::intParam("pointCount", 8, 0.0), ops::intParam("seed", 0, 0.0)};
+      op.capabilities = {false, false, true};
+      op.compute = &ops::countedCompute;
+      r.addOperator(std::move(op));
+    }
+    {  // 一定失败：acceptsError 与 upstream_failed 两条路都要它
+      OperatorDesc op;
+      op.id = "test.fail";
+      op.version = "1.0.0";
+      op.label = "Always Fails";
+      op.category = "Test";
+      op.doc = "只在测试里注册：按参数报一条错误。";
+      op.outputs = {cloudOut};
+      op.params = {ops::textParam("code", "io"), ops::textParam("message", "测试用的失败")};
+      op.capabilities = {false, false, true};
+      op.compute = &ops::failCompute;
       r.addOperator(std::move(op));
     }
   });

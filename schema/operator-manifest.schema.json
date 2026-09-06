@@ -14,7 +14,12 @@
       "description": "端口类型表。V1 规则：精确匹配 + Any 通配 + castableTo 显式转换。不做泛型。",
       "items": { "$ref": "#/$defs/portType" }
     },
-    "operators": { "type": "array", "items": { "$ref": "#/$defs/operator" } }
+    "operators": { "type": "array", "items": { "$ref": "#/$defs/operator" } },
+    "importers": {
+      "type": "array",
+      "description": "注册了的「文本 → 图」导入器（ADR-0017）。前端据此列出「导入…」，不硬编码格式名。没有任何导入器时这一项不出现。",
+      "items": { "$ref": "#/$defs/importer" }
+    }
   },
   "$defs": {
     "portType": {
@@ -56,7 +61,26 @@
         "type": { "type": "string", "description": "必须出现在 bundle 的 types 表中。" },
         "label": { "type": "string" },
         "doc": { "type": "string" },
-        "required": { "type": "boolean", "default": true, "description": "仅对 inputs 有意义。" }
+        "required": { "type": "boolean", "default": true, "description": "仅对 inputs 有意义。" },
+        "acceptsError": {
+          "type": "boolean", "default": false,
+          "description": "仅对 inputs 有意义（ADR-0016）。上游失败时本节点不被连坐成 cancelled，而是在这个端口上收到一个 Error 值。"
+        },
+        "lazy": {
+          "type": "boolean", "default": false,
+          "description": "仅对 inputs 有意义（ADR-0016）。这个端口的上游闭包不进初始计划，算子 compute 返回 Demand 时才被调度。"
+        }
+      }
+    },
+    "importer": {
+      "type": "object",
+      "required": ["kind", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "description": "传给 lyflow_import 的第一个参数。" },
+        "label": { "type": "string" },
+        "doc": { "type": "string" },
+        "pack": { "type": "string", "description": "来自哪个算子包。core 自带的没有这一项。" }
       }
     },
     "param": {

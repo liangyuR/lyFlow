@@ -288,5 +288,64 @@
     "kind": "run_finished",
     "status": "ok",
     "durationMs": 412.0
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000002",
+    "seq": 0,
+    "at": "2026-09-05T12:02:00.000Z",
+    "kind": "run_started",
+    "nodeCount": 2,
+    "maxParallel": 4,
+    "plan": ["n_model", "n_fb"],
+    "targets": [],
+    "nodes": [
+      { "id": "n_model", "cacheKey": "1f2e3d4c5b6a79880011223344556677", "level": 0 },
+      { "id": "n_fb", "cacheKey": "aabbccddeeff00112233445566778899", "level": 1 }
+    ],
+    "outputs": [{ "name": "gap", "node": "n_fb", "port": "out" }]
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000002",
+    "seq": 1,
+    "at": "2026-09-05T12:02:00.120Z",
+    "kind": "plan_extended",
+    "demandedBy": "n_fb",
+    "port": "b",
+    "nodes": [
+      { "id": "n_tpl", "cacheKey": "0f0e0d0c0b0a09080706050403020100", "level": 0 },
+      { "id": "n_icp", "cacheKey": "99887766554433221100ffeeddccbbaa", "level": 1 }
+    ]
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000002",
+    "seq": 2,
+    "at": "2026-09-05T12:02:00.121Z",
+    "kind": "node_state",
+    "nodeId": "n_spare",
+    "state": "skipped",
+    "stats": {
+      "elementCount": 0,
+      "byteSize": 0,
+      "reason": "not_demanded"
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000002",
+    "seq": 3,
+    "at": "2026-09-05T12:02:00.130Z",
+    "kind": "node_state",
+    "nodeId": "n_load",
+    "state": "done",
+    "durationMs": 0.4,
+    "stats": {
+      "elementCount": 1280,
+      "byteSize": 15360,
+      "provided": true,
+      "outputs": [{ "port": "primary", "type": "PointCloud", "elementCount": 1280 }]
+    }
   }
 ]

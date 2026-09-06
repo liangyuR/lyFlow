@@ -55,6 +55,10 @@ void registerBuiltinTypes(Registry& r) {
   r.addType(PortType{
       "Tensor", "#f0b429", {},
       "稠密 float32 张量，行主序。推理算子的输入输出；只有形状与统计量进 Inspector。"});
+
+  r.addType(PortType{
+      "Error", "#e5484d", {},
+      "一条失败的 Status。只出现在声明了 acceptsError 的输入端口上（ADR-0016）。"});
 }
 
 }  // namespace
@@ -67,6 +71,7 @@ void registerBuiltinOps(Registry& r) {
   ops::registerGenSynthetic(r);
   registerStdPacks(r);
   ops::registerUtilReroute(r);
+  ops::registerFlowOps(r);
   registerExternalPacks(r);
 }
 

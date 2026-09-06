@@ -17,6 +17,8 @@ struct InputBinding {
   std::string port;        ///< 本节点的输入端口名
   int fromNode = -1;       ///< 上游在 Plan::nodes 里的下标
   std::string fromPort;
+  bool acceptsError = false;
+  bool lazy = false;
 };
 
 struct PlanNode {
@@ -25,6 +27,10 @@ struct PlanNode {
   int level = 0;                      ///< 同层可并行，就绪队列按它排序
   bool valid = true;                  ///< false = 该节点自身校验没过，执行时直接标 error
   bool bypass = false;                ///< 静音：不调 compute，输出从输入透传（E5）
+  /// 只被惰性端口依赖：不进初始就绪队列，被 demand 时才调度（ADR-0016）。
+  bool deferred = false;
+  /// 该节点的输出由 RunOptions::inputs 注入：不调 compute（ADR-0017）。
+  bool provided = false;
   std::vector<Diagnostic> errors;     ///< 该节点的全部阻塞性诊断（D5）
   ParamMap params;                    ///< 已合并默认值（迁移之后的）
   std::vector<InputBinding> inputs;
@@ -41,9 +47,18 @@ struct PlanNode {
   std::vector<int> downstream;
 };
 
+/// 编译好的图级输出。node 是 Plan::nodes 的下标，-1 = 该节点不在本次计划里。
+struct PlanOutput {
+  std::string name;
+  std::string nodeId;
+  std::string port;
+  int node = -1;
+};
+
 struct Plan {
   std::string runId;
   std::vector<PlanNode> nodes;  ///< 拓扑序
+  std::vector<PlanOutput> outputs;
   bool ok = false;              ///< false = 整图级失败（有环 / 解析失败 / 目标不存在）
 };
 
@@ -55,6 +70,8 @@ struct BuildOptions {
   std::vector<std::string> targets;
   /// 非空时混进每个 cacheKey，把预览结果关进独立的缓存命名空间（F5）。
   std::string cacheNamespace;
+  /// 被注入的节点 id → 注入数据的摘要。进 cacheKey，也让编译期知道该节点是 provided。
+  std::unordered_map<std::string, std::string> providedDigest;
 };
 
 /// 校验 + 编译。诊断（含 warning 与迁移）全部写进 diags；节点级诊断同时挂在 PlanNode 上。

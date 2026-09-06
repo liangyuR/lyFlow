@@ -269,6 +269,7 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
                Plan& out, Diagnostics& diags) {
   out.runId = options.runId;
   out.nodes.clear();
+  out.outputs.clear();
   out.ok = false;
 
   const std::size_t n = graph.nodes.size();
@@ -429,11 +430,14 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     wires.push_back(Wire{fi, ti, outPort, inPort, &e});
   }
 
-  // -- Any 推导（E6）。一个节点的全部 Any 端口共用一个类型变量 —— reroute 与
-  // debug view 这类透传算子正是这个语义，别的算子干脆别声明多个 Any。
-  std::vector<std::string> anyType(n);
+  // -- Any 推导（E6）。同一节点、同一 anyGroup 的 Any 端口共用一个类型变量 —— reroute 与
+  // debug view 这类透传算子正是这个语义；只有 flow.select 的 cond 需要自己一组。
+  std::vector<std::map<int, std::string>> anyType(n);
+  static const std::string kEmpty;
   auto concreteType = [&](std::size_t node, const Port* port) -> const std::string& {
-    return port->type == kAnyType ? anyType[node] : port->type;
+    if (port->type != kAnyType) return port->type;
+    auto it = anyType[node].find(port->anyGroup);
+    return it == anyType[node].end() ? kEmpty : it->second;
   };
   for (std::size_t round = 0; round <= n; ++round) {
     bool changed = false;
@@ -441,10 +445,10 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
       const std::string& fromT = concreteType(w.fi, w.outPort);
       const std::string& toT = concreteType(w.ti, w.inPort);
       if (!fromT.empty() && toT.empty() && w.inPort->type == kAnyType) {
-        anyType[w.ti] = fromT;
+        anyType[w.ti][w.inPort->anyGroup] = fromT;
         changed = true;
       } else if (!toT.empty() && fromT.empty() && w.outPort->type == kAnyType) {
-        anyType[w.fi] = toT;
+        anyType[w.fi][w.outPort->anyGroup] = toT;
         changed = true;
       }
     }
@@ -464,7 +468,8 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
       continue;
     }
     connectedInputs[w.ti].insert(e.toPort);
-    inputsOf[w.ti].push_back(InputBinding{e.toPort, static_cast<int>(w.fi), e.fromPort});
+    inputsOf[w.ti].push_back(InputBinding{e.toPort, static_cast<int>(w.fi), e.fromPort,
+                                          w.inPort->acceptsError, w.inPort->lazy});
     consumersOf[w.fi][e.fromPort] += 1;
   }
 
@@ -552,6 +557,37 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     }
   }
 
+  // -- 惰性闭包（ADR-0016）：只被惰性端口依赖的节点标 deferred，不进初始拓扑序。
+  // 逆拓扑序一遍即可：叶子必须跑；其余看有没有一条落在非惰性端口上的、通向要跑的节点的边。
+  const std::set<std::string> targetSet(options.targets.begin(), options.targets.end());
+  struct Consumer {
+    std::size_t node;
+    bool lazy;
+  };
+  std::vector<std::vector<Consumer>> consumersByNode(n);
+  for (std::size_t j = 0; j < n; ++j) {
+    if (!keep[j]) continue;
+    for (const InputBinding& b : inputsOf[j]) {
+      if (b.fromNode < 0 || !keep[static_cast<std::size_t>(b.fromNode)]) continue;
+      consumersByNode[static_cast<std::size_t>(b.fromNode)].push_back(Consumer{j, b.lazy});
+    }
+  }
+  std::vector<char> demandedEagerly(n, 0);
+  for (std::size_t k = order.size(); k-- > 0;) {
+    const std::size_t id = order[k];
+    if (!keep[id]) continue;
+    if (consumersByNode[id].empty() || targetSet.count(graph.nodes[id].id)) {
+      demandedEagerly[id] = 1;
+      continue;
+    }
+    for (const Consumer& c : consumersByNode[id]) {
+      if (!c.lazy && demandedEagerly[c.node]) {
+        demandedEagerly[id] = 1;
+        break;
+      }
+    }
+  }
+
   // -- 装配 Plan ------------------------------------------------------------
   std::vector<int> planIndex(n, -1);
   for (std::size_t id : order) {
@@ -563,14 +599,18 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     pn.level = level[id];
     pn.valid = prepared[id].valid;
     pn.bypass = graph.nodes[id].bypass;
+    pn.deferred = demandedEagerly[id] == 0;
+    pn.provided = options.providedDigest.count(pn.id) != 0;
     pn.errors = prepared[id].errors;
     pn.params = std::move(prepared[id].params);
-    if (pn.op && !anyType[id].empty()) {
+    if (pn.op) {
       for (const Port& p : pn.op->inputs) {
-        if (p.type == kAnyType) pn.inputTypes[p.name] = anyType[id];
+        const std::string& t = concreteType(id, &p);
+        if (p.type == kAnyType && !t.empty()) pn.inputTypes[p.name] = t;
       }
       for (const Port& p : pn.op->outputs) {
-        if (p.type == kAnyType) pn.outputTypes[p.name] = anyType[id];
+        const std::string& t = concreteType(id, &p);
+        if (p.type == kAnyType && !t.empty()) pn.outputTypes[p.name] = t;
       }
     }
     for (const InputBinding& b : inputsOf[id]) {
@@ -611,6 +651,11 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     // bypass 改变的是结果本身，所以必须进键 —— 不然静音再取消静音会拿到旧结果。
     h.add(pn.bypass ? std::string("bypass") : std::string());
     h.add(canonicalParamsJson(pn.params));
+    // 注入的数据取代了 compute 的结果，所以它必须进键，否则换一片云会命中旧结果。
+    {
+      auto injected = options.providedDigest.find(pn.id);
+      h.add(injected == options.providedDigest.end() ? std::string() : injected->second);
+    }
     if (pn.op->externalKey) {
       ParamView view(pn.params, options.baseDir);
       h.add(pn.op->externalKey(view));
@@ -631,6 +676,23 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     // 不确定性算子（比如带随机种子却不暴露 seed 的）永远不该命中缓存
     if (!pn.op->capabilities.deterministic) h.add(options.runId);
     pn.cacheKey = h.hex();
+  }
+
+  // -- 图级命名输出（ADR-0017）。名字唯一由 JSON 对象保证，这里查节点与端口。
+  for (const GraphOutput& g : graph.outputs) {
+    auto it = indexById.find(g.node);
+    if (it == indexById.end()) {
+      diags.error("", Phase::Validate, "unknown_node",
+                  "图输出 '" + g.name + "' 指向不存在的节点 " + g.node);
+      continue;
+    }
+    const OperatorDesc* op = prepared[it->second].op;
+    if (op && !findPort(op->outputs, g.port)) {
+      diags.error(g.node, Phase::Validate, "unknown_port",
+                  "图输出 '" + g.name + "' 指向的节点没有输出端口 '" + g.port + "'", {}, g.port);
+      continue;
+    }
+    out.outputs.push_back(PlanOutput{g.name, g.node, g.port, planIndex[it->second]});
   }
 
   out.ok = true;
