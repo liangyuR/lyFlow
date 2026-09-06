@@ -220,24 +220,8 @@ async function suiteRealGapGraph(cdp, report) {
   if (!graphPath) return;
   report.section("真实 gap 图：ROI 框 / 基准线 / 圆");
 
-  await newDoc(cdp);
-  const loaded = await cdp
-    .eval(
-      `
-    const b = window.__lyflow;
-    // 前面的分组可能停在某个子图里；层级不回到顶层的话，选中的节点在
-    // aggregatedNodes 的前缀过滤里根本找不到（F2）
-    b.stores.ui.getState().setPath([]);
-    const loaded = await b.transport.loadGraph(${lit(graphPath)});
-    b.stores.graph.getState().loadDoc(loaded.doc, ${lit(graphPath)});
-    return true;
-  `,
-    )
-    .catch((e) => String(e));
-  report.ok("打开图", loaded === true, String(loaded));
-  if (loaded !== true) return;
-
-  const run = await runAndWait(cdp, () => pressF5(cdp));
+  const run = await openAndRun(cdp, report, graphPath);
+  if (!run) return;
   const failed = Object.entries(run.nodes ?? {})
     .filter(([, n]) => n.state === "error")
     .map(([id, n]) => `${id}: ${(n.errors?.[0] ?? {}).message ?? ""}`);
@@ -297,4 +281,136 @@ async function suiteRealGapGraph(cdp, report) {
   }
 }
 
-export const gapSuites = [suiteMeasurementOutputs, suiteRealGapGraph];
+/** 打开一张真实的图并跑一遍。返回 run 结果；打不开返回 null。 */
+async function openAndRun(cdp, report, graphPath) {
+  await newDoc(cdp);
+  const loaded = await cdp
+    .eval(
+      `
+    const b = window.__lyflow;
+    // 前面的分组可能停在某个子图里；层级不回到顶层的话，选中的节点在
+    // aggregatedNodes 的前缀过滤里根本找不到（F2）
+    b.stores.ui.getState().setPath([]);
+    const loaded = await b.transport.loadGraph(${lit(graphPath)});
+    b.stores.graph.getState().loadDoc(loaded.doc, ${lit(graphPath)});
+    return true;
+  `,
+    )
+    .catch((e) => String(e));
+  report.ok("打开图", loaded === true, String(loaded));
+  if (loaded !== true) return null;
+  return runAndWait(cdp, () => pressF5(cdp));
+}
+
+/** 图里第一个用某个算子的节点 id。没有返回 null。 */
+function nodeOfOp(cdp, op) {
+  return cdp.eval(`
+    const nodes = window.__lyflow.stores.graph.getState().doc.nodes;
+    return nodes.find((n) => n.op === ${lit(op)})?.id ?? null;
+  `);
+}
+
+/** §10：模型 ROI 路径的图。`LYFLOW_GAP_GRAPH_MODEL` 指向 R1 的模型图；未设时整组跳过。
+ *  怎么生成那张图见 docs/gap-acceptance.md「第二部分」。 */
+async function suiteModelGapGraph(cdp, report) {
+  const graphPath = process.env.LYFLOW_GAP_GRAPH_MODEL;
+  if (!graphPath) return;
+  report.section("模型 ROI 图：四框 / 按类着色 / 裁剪窗状态");
+
+  const run = await openAndRun(cdp, report, graphPath);
+  if (!run) return;
+  const failed = Object.entries(run.nodes ?? {})
+    .filter(([, n]) => n.state === "error")
+    .map(([id, n]) => `${id}: ${(n.errors?.[0] ?? {}).message ?? ""}`);
+  report.ok("模型路径整张图跑通（一个红框都不该有）", run.status === "ok",
+    `${run.status} ${failed.join(" | ")}`);
+
+  // -- roi_from_labels：四框叠在底图上 --------------------------------------
+  const rois = await nodeOfOp(cdp, "gap.roi_from_labels");
+  report.ok("图里有 roi_from_labels 节点", typeof rois === "string", String(rois));
+  if (typeof rois === "string") {
+    const view = await selectAndReadViewer(cdp, rois);
+    const overlay = Number(await waitAttr(cdp, "data-overlay", 4));
+    report.eq("四个模型 ROI 框都叠上了", overlay, 4, `view=${view.view} count=${view.count}`);
+    report.ok("框叠在一片真实的剖面上", view.count > 0, `count=${view.count} base=${view.base}`);
+  }
+
+  // -- labels_to_cloud：有点，且类别是逐点的一个通道 --------------------------
+  const colored = await nodeOfOp(cdp, "gap.labels_to_cloud");
+  report.ok("图里有 labels_to_cloud 节点", typeof colored === "string", String(colored));
+  if (typeof colored === "string") {
+    const view = await selectAndReadViewer(cdp, colored);
+    report.ok("着色后的剖面有点", view.count > 0, `count=${view.count} view=${view.view}`);
+    // 3D 视图没有 rgb 着色模式，所以算子把类 id 也写进 intensity：
+    // 「强度」这一项没被禁用，就说明逐点的类别通道确实到了前端（见 gap-acceptance.md 偏离 20）
+    const shading = await cdp.eval(`
+      const sel = document.querySelector('[data-testid="viewer-shading"]');
+      if (!sel) return null;
+      const opt = [...sel.options].find((o) => o.value === 'intensity');
+      return { disabled: opt ? opt.disabled : null, value: sel.value };
+    `);
+    report.ok(
+      "逐点的类别通道到了前端（强度可选）",
+      shading !== null && shading.disabled === false,
+      JSON.stringify(shading),
+    );
+  }
+
+  // -- roll_anchored_crop：status 显示在 Inspector ---------------------------
+  const roll = await nodeOfOp(cdp, "gap.roll_anchored_crop");
+  report.ok("图里有 roll_anchored_crop 节点", typeof roll === "string", String(roll));
+  if (typeof roll === "string") {
+    await selectAndReadViewer(cdp, roll);
+    const status = await cdp.eval(`
+      const row = document.querySelector('[data-testid="output-status"]');
+      if (!row) return null;
+      return {
+        type: row.getAttribute('data-type'),
+        text: row.querySelector('.insp-out__value').textContent,
+      };
+    `);
+    report.ok("Inspector 里有 status 这一行", status !== null, JSON.stringify(status));
+    if (status) {
+      report.eq("status 是个 Record", status.type, "Record");
+      report.ok(
+        "status 写明了裁剪窗的结局与前后点数",
+        /GapRollCrop/.test(status.text) &&
+          /"status":"(applied|reverted:min_points|disabled|rejected:[a-z_]+)"/.test(status.text) &&
+          /beforePrimary/.test(status.text),
+        status.text,
+      );
+    }
+    const windowRow = await cdp.eval(`
+      const row = document.querySelector('[data-testid="output-window"]');
+      return row ? row.querySelector('.insp-out__value').textContent : null;
+    `);
+    report.ok("窗本身也列出来了", typeof windowRow === "string" && windowRow.includes("→"),
+      String(windowRow));
+  }
+
+  // -- 数值：R1 的模型路径基线 gap 3.7838 / flush 2.3504 ----------------------
+  const values = await cdp.eval(`
+    const e = window.__lyflow.stores.execution.getState();
+    const doc = window.__lyflow.stores.graph.getState().doc;
+    const pick = (op) => {
+      const n = doc.nodes.find((x) => x.op === op && x.id.startsWith('n_'));
+      return n ? n.id : null;
+    };
+    const read = (id, port) => {
+      const n = id ? e.nodes.get(id) : null;
+      const o = n ? (n.stats?.outputs ?? []).find((x) => x.port === port) : null;
+      return o && o.value ? o.value.value : null;
+    };
+    return { gap: read('n_gap', 'value'), flush: read('n_flush', 'value'),
+             ref: [read('n_ref', 'gap'), read('n_ref', 'flush')] };
+  `);
+  report.ok(
+    "拆分算子与黑盒对照给出同一对数（差 ≤ 0.002 mm）",
+    values.gap !== null && values.flush !== null &&
+      Math.abs(values.gap - values.ref[0]) <= 0.002 &&
+      Math.abs(values.flush - values.ref[1]) <= 0.002,
+    JSON.stringify(values),
+  );
+}
+
+export const gapSuites = [suiteMeasurementOutputs, suiteRealGapGraph, suiteModelGapGraph];

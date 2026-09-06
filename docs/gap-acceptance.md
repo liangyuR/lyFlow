@@ -1,17 +1,22 @@
 # 接入 xyz-gap-inspector 验收记录
 
-逐条对着 [gap-integration-plan.md](gap-integration-plan.md) §5 走一遍：**怎么跑 + 实际输出 + 通过/未通过/未验证**。
-与计划不同的地方全部记在最后的「偏离与决策」里。
+逐条对着 [gap-integration-plan.md](gap-integration-plan.md) 走一遍：**怎么跑 + 实际输出 + 通过/未通过/未验证**。
+第一部分（配置/模板 + ICP 路径）对 §5，第二部分（模型 ROI 路径）对 §10。
+与计划不同的地方全部记在最后的「偏离与决策」里，编号连续。
 
 两个仓库：`D:\project\LyFlow`（main）与 `D:\project\xyz-gap-inspector`（分支 `lyflow-ops`）。
-数据在 `C:\Users\11601\OneDrive\Documents\DTS\tianmu_0904`，基线在 `%TEMP%\lyflow-gap-baseline`。
+数据在 `C:\Users\11601\OneDrive\Documents\DTS\tianmu_0904`，
+基线在 `%TEMP%\lyflow-gap-baseline`（模板路径）与 `%TEMP%\lyflow-gap-baseline-model`（模型路径），
+模型在 `C:\Users\11601\OneDrive\Documents\DTS\models\v12s0.onnx`。
 
-两个 commit（都没 push）：
+四个 commit（都没 push）：
 
 | 仓库 | 分支 | commit |
 |---|---|---|
 | LyFlow | `main` | `feat: 算子包机制、2D 几何类型与剖面叠画 —— 为接入 gap-inspector` |
 | xyz-gap-inspector | `lyflow-ops` | `1aca0b9  LyFlow 算子包：配置/模板路径的拆分算子、图生成器与 A/B 脚本` |
+| LyFlow | `main` | `feat: gap 模型 ROI 路径的验收与文档` |
+| xyz-gap-inspector | `lyflow-ops` | `7865848  LyFlow 算子包：ONNX 模型 ROI 路径` |
 
 ## 复现命令
 
@@ -336,6 +341,238 @@ Indices/Plane）上，断言 `.viewer[data-base]` 是 `gen` 那个节点、
 
 ---
 
+## 第二部分（§10）逐条
+
+模型 ROI 路径是现场真正在用的那条：ONNX 逐槽分割 → 四个业务 ROI → 跟随零件的裁剪窗，
+**无模板、无 ICP**。基线是 `%TEMP%\lyflow-gap-baseline-model\`
+（`gap_batch_runner run --manifest dataset.yml --repeat 1 --dump-ml-export --roi-model <onnx>`，
+cwd 是 `C:\Users\11601\OneDrive\Documents\DTS\tianmu_0904`）。
+模型：`C:\Users\11601\OneDrive\Documents\DTS\models\v12s0.onnx`。
+
+### 复现命令（第二部分）
+
+```powershell
+$env:LYFLOW_OP_PACKS = "D:\project\xyz-gap-inspector\lyflow"
+$model = "C:\Users\11601\OneDrive\Documents\DTS\models\v12s0.onnx"
+$data  = "C:\Users\11601\OneDrive\Documents\DTS\tianmu_0904"
+
+# 1. 带包 / 不带包
+pnpm check                       # 带包：37 算子、101 doctest
+$env:LYFLOW_OP_PACKS = ""; pnpm check   # 不带包：16 算子、84 doctest
+
+# 2. 模型 A/B（顺手把 39 张模型图生成到 %TEMP%\lyflow-gap-ab-model）
+$env:LYFLOW_OP_PACKS = "D:\project\xyz-gap-inspector\lyflow"
+cd D:\project\LyFlow\bridge; cargo build --bin lyflow --no-default-features; cd ..
+python D:\project\xyz-gap-inspector\lyflow\tools\lyflow_ab.py `
+    --dataset "$data\dataset.yml" --baseline "$env:TEMP\lyflow-gap-baseline-model" `
+    --model $model --out "$env:TEMP\lyflow-gap-ab-model" `
+    --json "$env:TEMP\lyflow-gap-ab-model\ab.json"
+
+# 3. 模板 A/B 回归（不带 --model）
+python D:\project\xyz-gap-inspector\lyflow\tools\lyflow_ab.py `
+    --dataset "$data\dataset.yml" --baseline "$env:TEMP\lyflow-gap-baseline" `
+    --out "$env:TEMP\lyflow-gap-ab"
+
+# 4. CDP：两组一起跑
+$env:LYFLOW_GAP_GRAPH       = "$env:TEMP\lyflow-gap-ab\KUN10_HXMK2A12XTA237802_R5_11.lyflow.json"
+$env:LYFLOW_GAP_GRAPH_MODEL = "$env:TEMP\lyflow-gap-ab-model\KUN10_HXMK2A12XTA237802_R1_10.lyflow.json"
+pnpm e2e
+
+# 5. 安装包：onnxruntime 随包
+pnpm tauri build
+pnpm e2e:packaged
+```
+
+R1 / R5 的模型图（第 2 步生成）：
+
+```
+%TEMP%\lyflow-gap-ab-model\KUN10_HXMK2A12XTA237802_R1_10.lyflow.json
+%TEMP%\lyflow-gap-ab-model\KUN10_HXMK2A12XTA237802_R5_11.lyflow.json
+```
+
+单独生成一张：
+
+```powershell
+python D:\project\xyz-gap-inspector\lyflow\tools\lyflow_graph_from_config.py `
+    "$data\database\KUN10\device_0\R1\StandardGap.yml" `
+    --primary  "$data\pointclouds\KUN10\HXMK2A12XTA237802_04-09-2026-09-11-57\device_0\R1\LaserProfile_L0_Master_R1_04-09-2026-09-11-59_0.pcd" `
+    --secondary "$data\pointclouds\KUN10\HXMK2A12XTA237802_04-09-2026-09-11-57\device_0\R1\LaserProfile_R1_Slave_R1_04-09-2026-09-11-59_0.pcd" `
+    --model $model -o R1_model.lyflow.json
+```
+
+---
+
+### ✅ 1. 带包 / 不带包 `pnpm check` 全绿；`onnxruntime*.dll` 随 core `bin/` 走，干净目录里也有
+
+**带包**（`LYFLOW_OP_PACKS=D:\project\xyz-gap-inspector\lyflow`）：
+
+```
+=== C++ core ===         ok: 37 operator(s), 11 port type(s)
+                         [doctest] test cases: 101 | 101 passed | 0 failed
+=== manifest vs schema ===   符合 schema/operator-manifest.schema.json
+=== execution-event vs schema === ok: 16 条
+=== graph-doc vs schema ===  ok: 4 node(s), 3 edge(s)
+=== Rust bridge ===      test result: ok. 53 passed; 0 failed
+=== headless CLI ===     算子描述自检干净
+=== frontend ===         built
+全链路绿
+```
+
+**不带包**：`ok: 16 operator(s), 11 port type(s)`、84 个 doctest 用例，其余各段同样通过 ——
+算子数从第一部分的 32 涨到 37（新增 §9 的五个），不带包时仍然是 16，通用侧一个字没动。
+
+两边**各有一次**撞上偏离第 8 条那个既有的 `cargo test` 并发不稳定
+（带包一次 `cloud_payload_carries_normals_when_the_op_produces_them`，
+不带包两次 `sweep_reuses_the_upstream_across_the_grid` + 同一个），重跑即绿。
+补了一条佐证：`cargo test --lib -- --test-threads=1` 一次就是 `53 passed; 0 failed`。
+
+**DLL 随包**：`build/core/bin/` 与 `bridge/target/release/` 下都有
+`onnxruntime.dll`（11 234 848 B）与 `onnxruntime_providers_shared.dll`（22 048 B）。
+`pnpm e2e:packaged` 的干净目录里也有 —— 新加的断言就盯着这一条：
+
+```
+── 安装包（干净目录）
+  ✓ CLI 也随包
+  ✓ onnxruntime 两个 DLL 都在干净目录里
+308/308 项通过，全绿
+```
+
+不带算子包跑 `e2e:packaged` 时同一条断言反过来断言「没有 onnxruntime」（按设计）。
+
+### ✅ 2. 模型 A/B：39/39 状态一致，|Δ| ≤ 0.002 mm；现场值 41/41 在 0.006 mm 内
+
+```
+一致 39 / 39；最大 |Δ| = 0.000000 mm
+现场值（manifest.csv，容差 0.006 mm）：41 / 41 个数值一致；
+最大 |Δ| = 0.00499 mm（KUN10_HXMK2F118TA253680_L4_29 gap）
+```
+
+78 个可比数值（39 样本 × gap/flush）里最大 |Δ| = **4.77e-7 mm**，
+`gap.measure_reference`（带 `modelPath`）与拆分算子之差同样在 4.77e-7 mm 以内。
+39 个样本的 `crop_status` 也逐个对上：38 个 `applied`、1 个 `reverted:min_points`
+（`KUN10_HXMK2A120TA237775_R2_1`，1278+950 个点一个没裁掉），与基线
+`diagnostics.jsonl` 的分布一模一样。
+
+**§10 里「40/41、R4_16 例外」这一条没有复现 —— 实测是 41/41。**
+原因见偏离第 27 条：`manifest.csv` 与 `dataset.yml` 按 **`left_cloud` 路径** join 之后，
+`R4_16` / `R4_17` 这两次相隔 50 秒的测量各自对上自己那一行（5.330 与 5.500），
+不再撞在一起。计划 §7 写「两行都记的是第二次的值」，是按
+（序列号, 测点, 维度）join 出来的假象。A/B 脚本用的是路径 join。
+
+### ✅ 3. R1、R5 的模型路径图在桌面端跑出基线值
+
+| 测点 | 期望（§10） | 实测（LyFlow 拆分算子） | 黑盒对照 `gap.measure_reference` |
+|---|---|---|---|
+| R1_10 gap | 3.7838 | 3.7838001545518636 | 3.7838002681732177 |
+| R1_10 flush | 2.3504 | 2.3504302371293306 | 2.3504302501678467 |
+| R5_11 gap | 6.4685 | 6.46850885823369 | 6.468508720397949 |
+| R5_11 flush | 3.5173 | 3.5173279501497747 | 3.517327976226807 |
+
+R1 的模型图**整张跑通、一个红框都没有** —— 与模板路径不同：模板路径上 R1 的
+`gap_left` 圆拟合失败（第一部分 §5 第 4 条），模型给的 ROI 让它拟合成功了。
+
+选中三个节点看到的东西（CDP 断言见下一条，肉眼确认同样成立）：
+
+- `gap.roi_from_labels`：四个框叠在剖面底图上（`data-overlay=4`，底图来自上游最近的那片云）；
+- `gap.labels_to_cloud`：1280 个槽都在，按类着色；
+- `gap.roll_anchored_crop`：窗画出来，Inspector 里 `status` 一行写着
+  `GapRollCrop {"afterPrimary":212,"afterSecondary":196,"applied":true,"beforePrimary":1231,
+  "beforeSecondary":1276,"boxMm":[…],"minPointsKept":50,"status":"applied"}`。
+
+### ✅ 4. CDP：模型路径图的三个节点各一条断言
+
+`scripts/e2e/gap.mjs` 新增一组「模型 ROI 图：四框 / 按类着色 / 裁剪窗状态」，
+`LYFLOW_GAP_GRAPH_MODEL` 指向 R1 的模型图；未设时整组跳过（与第一部分那组同样的门）。
+带包 + 两个环境变量都设上跑 `pnpm e2e`：
+
+```
+── 模型 ROI 图：四框 / 按类着色 / 裁剪窗状态
+  ✓ 打开图
+  ✓ 模型路径整张图跑通（一个红框都不该有）
+  ✓ 图里有 roi_from_labels 节点
+  ✓ 四个模型 ROI 框都叠上了
+  ✓ 框叠在一片真实的剖面上
+  ✓ 图里有 labels_to_cloud 节点
+  ✓ 着色后的剖面有点
+  ✓ 逐点的类别通道到了前端（强度可选）
+  ✓ 图里有 roll_anchored_crop 节点
+  ✓ Inspector 里有 status 这一行
+  ✓ status 是个 Record
+  ✓ status 写明了裁剪窗的结局与前后点数
+  ✓ 窗本身也列出来了
+  ✓ 拆分算子与黑盒对照给出同一对数（差 ≤ 0.002 mm）
+
+326/326 项通过，全绿
+```
+
+`labels_to_cloud` 那条断言的是**强度通道**而不是 rgb 通道，原因见偏离第 20 条：
+LyFlow 的二进制点云载荷根本不带 rgb 位，前端看不见它。rgb 色表本身由包内 doctest 锁死。
+
+### ✅ 5. 第一部分的 39/39 模板路径 A/B 仍然通过（回归）
+
+```
+一致 39 / 39；最大 |Δ| = 0.000000 mm
+```
+
+比第一部分记的 0.000007 mm 还小了一档 —— 偏离第 23 条那个 ROI 换算的 ULP 修正
+顺带把模板路径也拉齐了（`gap.business_rois` 走的是同一个换算）。
+这一趟的现场值那一列对模板路径是 0/31 一致，**这正是计划 §7 的论点**：
+现场跑的不是模板路径。
+
+---
+
+## 模型 A/B 全表（39 样本）
+
+单位毫米。`Δgap`/`Δflush` 是与模型基线 `results.csv` 之差，
+`Δ现场` 是与数据目录 `manifest.csv`（现场值，两位小数）之差。
+「—」表示这一项没有值：现场 CSV 里这个测点只记了另一个维度。
+
+| sample | 基线 gap | 基线 flush | LyFlow gap | LyFlow flush | Δgap | Δflush | Δ现场 gap | Δ现场 flush | 状态一致 |
+|---|---|---|---|---|---|---|---|---|---|
+| KUN10_HXMK2A120TA237775_R2_1  | 27.7005     | 3.9329      | 27.7005     | 3.9329      | 0.00000     | 0.00000     | 0.00049    | —            | 是        |
+| KUN10_HXMK2A127TA237787_R4_2  | 5.7769      | 0.7240      | 5.7769      | 0.7240      | 0.00000     | 0.00000     | 0.00307    | —            | 是        |
+| KUN10_HXMK2A120TA237789_R4_3  | 6.0552      | 0.8584      | 6.0552      | 0.8584      | 0.00000     | 0.00000     | 0.00475    | —            | 是        |
+| KUN10_HXMK2A127TA237790_R5_4  | 6.0934      | 4.6780      | 6.0934      | 4.6780      | 0.00000     | 0.00000     | 0.00344    | —            | 是        |
+| KUN10_HXMK2A128TA237796_R2_5  | 9.4848      | 4.5328      | 9.4848      | 4.5328      | 0.00000     | 0.00000     | 0.00476    | —            | 是        |
+| KUN10_HXMK2A128TA237796_R3_6  | 9.6589      | 3.9299      | 9.6589      | 3.9299      | 0.00000     | 0.00000     | 0.00110    | —            | 是        |
+| KUN10_HXMK2A128TA237796_L2_7  | 5.4651      | 4.0582      | 5.4651      | 4.0582      | 0.00000     | 0.00000     | 0.00487    | —            | 是        |
+| KUN10_HXMK2A128TA237796_L3_8  | 5.0925      | 3.8778      | 5.0925      | 3.8778      | 0.00000     | 0.00000     | 0.00249    | —            | 是        |
+| KUN10_HXMK2A126TA237800_L3_9  | 7.5646      | 5.6202      | 7.5646      | 5.6202      | 0.00000     | 0.00000     | —          | 0.00020      | 是        |
+| KUN10_HXMK2A12XTA237802_R1_10 | 3.7838      | 2.3504      | 3.7838      | 2.3504      | 0.00000     | 0.00000     | —          | 0.00043      | 是        |
+| KUN10_HXMK2A12XTA237802_R5_11 | 6.4685      | 3.5173      | 6.4685      | 3.5173      | 0.00000     | 0.00000     | —          | 0.00267      | 是        |
+| KUN10_HXMK2A125TA237805_L3_12 | 7.9112      | 6.6624      | 7.9112      | 6.6624      | 0.00000     | 0.00000     | —          | 0.00239      | 是        |
+| KUN10_HXMK2A129TA237810_R3_13 | 5.7223      | 4.1202      | 5.7223      | 4.1202      | 0.00000     | 0.00000     | 0.00231    | —            | 是        |
+| KUN10_HXMK2F112TA237815_R1_14 | 3.0337      | 2.4930      | 3.0337      | 2.4930      | 0.00000     | 0.00000     | —          | 0.00299      | 是        |
+| KUN10_HXMK2F112TA237815_R4_15 | 5.3492      | 1.0947      | 5.3492      | 1.0947      | 0.00000     | 0.00000     | 0.00080    | —            | 是        |
+| KUN10_HXMK2F116TA237820_R4_16 | 5.3283      | 1.3491      | 5.3283      | 1.3491      | 0.00000     | 0.00000     | 0.00169    | —            | 是        |
+| KUN10_HXMK2F116TA237820_R4_17 | 5.5024      | 0.8458      | 5.5024      | 0.8458      | 0.00000     | 0.00000     | 0.00238    | —            | 是        |
+| KUN10_HXMK2F116TA237820_L1_18 | 4.5277      | 0.7555      | 4.5277      | 0.7555      | 0.00000     | 0.00000     | 0.00234    | —            | 是        |
+| KUN10_HXMK2F119TA253638_R1_19 | 3.6492      | 2.3496      | 3.6492      | 2.3496      | 0.00000     | 0.00000     | —          | 0.00044      | 是        |
+| KUN10_HXMK2F113TA253649_L3_20 | 7.2756      | 6.2118      | 7.2756      | 6.2118      | 0.00000     | 0.00000     | —          | 0.00183      | 是        |
+| KUN10_HXMK2F114TA253661_L6_21 | 8.7066      | 3.5435      | 8.7066      | 3.5435      | 0.00000     | 0.00000     | —          | 0.00346      | 是        |
+| KUN10_HXMK2F11XTA253664_R2_22 | 9.3811      | 2.1252      | 9.3811      | 2.1252      | 0.00000     | 0.00000     | 0.00111    | 0.00481      | 是        |
+| KUN10_HXMK2F11XTA253664_L6_23 | 7.6117      | 6.3641      | 7.6117      | 6.3641      | 0.00000     | 0.00000     | —          | 0.00413      | 是        |
+| KUN10_HXMK2F110TA253673_R2_24 | 2.4519      | 3.1268      | 2.4519      | 3.1268      | 0.00000     | 0.00000     | 0.00194    | —            | 是        |
+| KUN10_HXMK2F118TA253677_R1_25 | 3.0586      | 2.3105      | 3.0586      | 2.3105      | 0.00000     | 0.00000     | —          | 0.00047      | 是        |
+| KUN10_HXMK2F118TA253677_R4_26 | 5.3640      | 1.2288      | 5.3640      | 1.2288      | 0.00000     | 0.00000     | 0.00395    | —            | 是        |
+| KUN10_HXMK2F118TA253680_R1_27 | 3.7177      | 2.3234      | 3.7177      | 2.3234      | 0.00000     | 0.00000     | —          | 0.00344      | 是        |
+| KUN10_HXMK2F118TA253680_L3_28 | 7.6072      | 6.2134      | 7.6072      | 6.2134      | 0.00000     | 0.00000     | —          | 0.00340      | 是        |
+| KUN10_HXMK2F118TA253680_L4_29 | 5.3250      | 1.7619      | 5.3250      | 1.7619      | 0.00000     | 0.00000     | 0.00499    | —            | 是        |
+| KUN10_HXMK2F117TA253685_R6_30 | 6.1937      | 5.1475      | 6.1937      | 5.1475      | 0.00000     | 0.00000     | 0.00365    | —            | 是        |
+| KUN10_HXMK2F112TA253688_L3_31 | 7.4489      | 5.3657      | 7.4489      | 5.3657      | 0.00000     | 0.00000     | —          | 0.00426      | 是        |
+| KUN10_HXMK2A121TA253709_R2_32 | 9.6650      | 2.0010      | 9.6650      | 2.0010      | 0.00000     | 0.00000     | 0.00495    | 0.00098      | 是        |
+| KUN10_HXMK2A12XTA253711_R4_33 | 5.5059      | 0.8573      | 5.5059      | 0.8573      | 0.00000     | 0.00000     | 0.00413    | —            | 是        |
+| KUN10_HXMK2F113TA253733_L2_34 | 5.5506      | 4.4205      | 5.5506      | 4.4205      | 0.00000     | 0.00000     | 0.00058    | —            | 是        |
+| KUN10_HXMK2F114TA253742_R4_35 | 5.4187      | 0.8853      | 5.4187      | 0.8853      | 0.00000     | 0.00000     | 0.00135    | —            | 是        |
+| KUN10_HXMK2F117TA253749_R1_36 | 3.3133      | 2.4422      | 3.3133      | 2.4422      | 0.00000     | 0.00000     | —          | 0.00218      | 是        |
+| KUN10_HXMK2A126TA253768_L5_37 | 8.2487      | 3.6233      | 8.2487      | 3.6233      | 0.00000     | 0.00000     | —          | 0.00331      | 是        |
+| KUN10_HXMK2A125TA253776_R4_38 | 5.3298      | 1.1012      | 5.3298      | 1.1012      | 0.00000     | 0.00000     | 0.00020    | —            | 是        |
+| KUN10_HXMK2A12XTA253787_R1_39 | 3.5897      | 2.3587      | 3.5897      | 2.3587      | 0.00000     | 0.00000     | —          | 0.00126      | 是        |
+
+**没有不一致的样本**，也没有一个现场值超出 0.006 mm。
+
+---
+
 ## 偏离与决策
 
 计划没覆盖或与计划不同的地方，全部记在这里。
@@ -484,6 +721,101 @@ Windows 上加载改用 `LOAD_WITH_ALTERED_SEARCH_PATH`：PCL、`yaml-cpp` 这�
 39 个样本全部静默地跑成「算子不存在」，而表格里只显示成一片「—」。
 改成取最新的，并在没有任何事件时把 `lyflow run` 的退出码与 stderr 记进 errors。
 
+### 第二部分（模型 ROI 路径）的偏离
+
+**18. `gap.roi_from_labels` 多了一个 `baseSide` 参数。**
+§9 只列了「refine 开关与五个数值」。但 `GapDetection.cpp:234` 的 `apply_business_rois`
+对模型 override 与模板 ROI 用的是**同一个** base_side 互换，不加这个参数，
+`base_side: right` 的点位会把基准面与参考面接反。端口按语义给（与偏离第 11 条同一条规矩）。
+数据集里 12 份配置全是 `base_side: left`，所以这一条**只有单测覆盖，没有样本覆盖**。
+
+**19. `gap.labels_to_cloud` 多了一个 `row` 参数，并且同时写 intensity。**
+§9 写的是「cloud, labels → cloud」，但 labels 是两行，算子必须知道这片云是哪一行。
+`row` 默认 primary（row0）。
+`intensity` 是额外写的：类 id 逐点存一份。理由见下一条。
+
+**20. LyFlow 的 3D 视图没有 rgb 着色模式，所以 §9 那句「只为了在 3D 视图里看分割结果」
+靠 rgb 一个通道达不成。**
+`ShadingMode` 只有 `intensity | height | normal | flat`（`Viewer3D.tsx:18`），
+而二进制点云载荷的通道位只有 `LYFLOW_CLOUD_HAS_INTENSITY` 与 `..._HAS_NORMALS`
+（`core/src/c_api.cpp:226`）—— **rgb 根本没进 IPC**。
+所以：算子按 §9 把八类色表写进 rgb（包内 doctest 逐值锁死那三种颜色），
+同时把类 id 写进 intensity，视图靠强度色带才真的看得见分割结果。
+CDP 那一条断言的因此是「强度这一项没被禁用」，而不是「rgb 通道存在」——
+后者在当前 ABI 下前端无从知道。**没有为此改 core**：加一个 rgb 通道位是 C ABI 与
+点云载荷格式的改动，与「接一条领域路径」不是一件事，该单独提。
+
+**21. `gap.fit_line` 多了一个 `endpoints` 参数。**
+原算法按 `align_cloud_` 分两支写 `lines_["flush_base"]`（`GapDetection.cpp:861`）：
+真取直线与 ROI 框的两个交点，假取**第一个与最后一个内点的真实云点**。
+而模型路径上 `align_cloud_ = configuration_.align_cloud && !override_short_circuit` 恒为假
+（`GapDetection.cpp:218`）。这条线的两个端点是 gap definition A 的方向 `u` 的唯一来源，
+所以它不是可视化细节，是数值。生成器按路径给：模板 `roi_intersection`、模型 `inlier_ends`。
+**这一条是模型 A/B 从 21/39 走到 32/39 的那一步。**
+
+**22. `gap.flush` 多了一个 `baseLine` 输出，`gap.gap` 的 definition A 改接它。**
+原算法在算完段差之后、算间隙之前，把段差的垂足并进基准线段
+（`GapDetection.cpp:940`，`insertPoint2Segment`），而 definition A 的 `u` 取的是
+**并过之后**的那条线段。模板路径上端点本来就在直线上，并一个同样在直线上的点不改方向，
+所以第一部分没暴露；模型路径上端点是真实云点（离直线最远 `distThresh/3`），并进去就改方向。
+生成器两条路径都改接 `n_flush.baseLine` —— 这是原算法的语义，不是模型路径的特例。
+
+**23. ROI 框的毫米→米必须「先窄化成 float 再除」，不能「先除再窄化」。**
+原算法是 `Matrix2f roi; roi << 双精度…; roi /= scale_;`，Eigen 的
+`operator/=(const Scalar&)` 里 Scalar 是 float，所以 `scale_`（double 1000.0）也被窄化，
+整个除法是 `float / float`。而包里原本写的是 `static_cast<float>(mm / 1000.0)`。
+两者差最后一个 ULP，而 `filterCloudByRoi` 是**四边严格开区间**——
+正好卡在这一位上：`KUN10_HXMK2F113TA253649_L3_20` 的 `flush_ref` ROI 因此少了一个点
+（173 vs 基线 174），第二次直线拟合的方向从 (0.98350, 0.18093) 变成 (0.99190, 0.12704)，
+段差差了 0.4 mm。
+修法是新加一个 `mmToMRoi()`，只给 ROI 框用（距离与半径那些走的是 `auto d = mm / scale_`，
+double 除完再窄化，仍然是 `mmToM`）。**这一条是模型 A/B 从 32/39 走到 39/39 的那一步**，
+顺带把模板路径的最大 |Δ| 从 7e-6 mm 压到 0。
+
+**24. `gap.roll_anchored_crop` 的点数保护把 `allow_single_camera` 定死为真。**
+原算法的判据是四选一（`Alignment.cpp:378`），第四支要看
+`preprocess(..., allow_single_camera = configuration_.common.roi_guided_segmentation, ...)`。
+这条路径上 `seg_mode` 恒为 `ROI`（生成器在入口就拦掉别的），所以它恒为真，
+`Both` 看的就是两片之和。算子只暴露 `usingCamera` 三选一，与 §9 的参数表一致。
+`Left`/`Right` 两支有单测覆盖，没有样本覆盖（12 份配置全是 `Both`）。
+
+**25. 窗没生效时 `window` 输出的是剩余点的包围盒，不是 ±1e7 mm 的无界框。**
+原算法在 `skip_roi_crop && !roll_crop_applied_` 时也是这么记 `resolved_overall_roi_mm_` 的
+（`Alignment.cpp:402`「honest diagnostics」），而且一个 2 万米宽的框画在 3D 视图里毫无意义。
+`status` 里的 `boxMm` 仍然是模型真正推出来的那个窗（有的话），两者不混。
+
+**26. roll 裁剪窗的输入框走了一次 float 往返。**
+`computeRollAnchoredCropMm` 在原算法里吃的是模型输出的**双精度毫米**；
+在图里它吃的是 `gap.roi_from_labels` 出的 `Box2D`，而 `Box2D` 是 float。
+所以两个 roll 框的坐标被窄化过一次再乘回毫米。窗是 ±10~35 mm 的框，
+往返误差在 1e-6 mm 量级，39 个样本的 `crop_status` 与前后点数全部与基线一致，
+所以**没有为此改端口类型**。真要消掉，得让 `roi_from_labels` 额外吐一份双精度的 Record，
+那是为一个观察不到的差异付端口复杂度。
+
+**27. §10 的「现场值 40/41、R4_16 例外」没有复现 —— 实测 41/41。**
+计划 §7 说 `R4_16` 与 `R4_17` 是同一测点相隔 50 秒的两次测量、现场 CSV 两行都记第二次的值。
+按 `manifest.csv` 的 `left_cloud` 路径 join 之后并不是这样：两行分别是 5.330 与 5.500，
+而基线是 5.328309 与 5.502378，各自 Δ = 0.0017 / 0.0024，都在 0.006 mm 内。
+把两行撞在一起的是「按（序列号, 测点, 维度）join」——那个键在这份数据里不唯一。
+`lyflow_ab.py` 用的是路径 join，`read_field_values()` 里写明了原因。
+
+**28. A/B 脚本对现场值「只报不判」。**
+现场值是两位小数、另一套构建、另一次运行，不该决定脚本的退出码。
+脚本照样打一行「N / 41 个数值一致；最大 |Δ| = …」并列出超出的样本，
+退出码只看基线那三条（§5 / §10 的可机器断言部分）。
+
+**29. `gap.measure_reference` 的模型开关是 `useModel` + `modelPath` 两个参数，不是一个可空路径。**
+§9 写「加参数 modelPath（可空）」，但 LyFlow 的 `Path` 参数**只要可见就是必填**
+（`plan.cpp`，与偏离里 `templateDir` 那一处同一个坑）。所以加一个 Bool 开关，
+`modelPath` 用 `visibleWhen` 挂在它下面 —— 与同一个算子里 `deriveTemplateDir` / `templateDir`
+的写法一致。
+
+**30. `gap.drop_non_finite` 的关键词写成 `NaN` 而不是 `nan`。**
+`core/tests/test_executor.cpp:419` 断言导出的 manifest 里不含子串 `"nan"`（防止非有限
+默认值漏进 JSON）。那是**子串**匹配，一个小写的关键词就能把它打红。
+没有改那条测试 —— 它守的是别的东西，改判据是另一件事；包这边换个大小写就行，
+并在代码里写明了为什么。
+
 ---
 
 ## 实测数据
@@ -498,3 +830,21 @@ Windows 上加载改用 `LOAD_WITH_ALTERED_SEARCH_PATH`：PCL、`yaml-cpp` 这�
   单独跑 gap 那两组（R5 与 R1 各一次）：16/16 通过。
 - 热重载：改包里一个 label → app 里的算子名换掉，**5.1 s**（generation 0 → 1）。
 - 一次 A/B 全跑约 40 s（39 个样本 × 一次 `lyflow run`）。
+
+第二部分（模型 ROI 路径）跑出来的数：
+
+- 带包 `pnpm check`：全链路绿，**37** 个算子、11 个端口类型、**101** 个 doctest 用例。
+- 不带包 `pnpm check`：16 个算子、11 个端口类型、84 个 doctest 用例
+  （两边各撞一次偏离第 8 条那个既有并发不稳定，重跑即绿；
+  `cargo test --lib -- --test-threads=1` 一次就 53 passed）。
+- 模型 A/B：39/39 一致，78 个可比数值的最大 |Δ| = **4.77e-7 mm**；
+  与 `gap.measure_reference`（带 modelPath）之差同样 ≤ 4.77e-7 mm。
+- 模型 A/B 对现场值 `manifest.csv`：**41/41** 在 0.006 mm 内，最大 0.00499 mm。
+- 模板 A/B 回归：39/39，最大 |Δ| = **0.000000 mm**（ULP 修正之后比原来还紧一档）。
+- 模板 A/B 对现场值：0/31 —— 与计划 §7 的论断一致，现场跑的不是模板路径。
+- `crop_status` 分布：38 个 `applied` + 1 个 `reverted:min_points`，与基线逐个对上。
+- `pnpm e2e`（带包 + `LYFLOW_GAP_GRAPH` 指 R5 模板图 + `LYFLOW_GAP_GRAPH_MODEL` 指 R1 模型图）：
+  **326/326 通过**。
+- `pnpm tauri build` + `pnpm e2e:packaged`（带包）：**308/308 通过**，
+  干净目录里有 `onnxruntime.dll` 与 `onnxruntime_providers_shared.dll`。
+- 一次模型 A/B 全跑约 2 分钟（39 个样本，每个样本一次 ONNX 推理 + 一次 `lyflow run`）。

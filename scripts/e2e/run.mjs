@@ -444,6 +444,15 @@ async function main() {
     report.ok("内置算子全在（≥ 16）", (info?.operatorCount ?? 0) >= 16,
       String(info?.operatorCount));
     report.ok("CLI 也随包", staged.cli != null && fs.existsSync(staged.cli), String(staged.cli));
+    // gap 算子包的模型 ROI 路径要这两个 DLL，而它们不在 vcpkg 里 —— applocal 看不见，
+    // 是包的 cmake 拷进 core 的 bin/ 的（gap-integration-plan.md H1）。带包构建时必须随包。
+    const ort = ["onnxruntime.dll", "onnxruntime_providers_shared.dll"];
+    const present = ort.filter((n) => fs.existsSync(path.join(staged.dir, n)));
+    if (process.env.LYFLOW_OP_PACKS) {
+      report.eq("onnxruntime 两个 DLL 都在干净目录里", present, ort);
+    } else {
+      report.ok("不带算子包时没有 onnxruntime（按设计）", present.length === 0, present.join(", "));
+    }
   }
 
   try {

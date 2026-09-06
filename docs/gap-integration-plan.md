@@ -92,3 +92,57 @@
 
 - ONNX 模型 ROI 路径（模型不在手上）；`roll_anchored_crop`；region growing 分割；强度门限；圆补偿（`compensation.enabled`）；`2-points line`、`circle tangent`、`nearest point` 类型
 - 改进算法。所有已知缺口（`docs/roi_measurement_pipeline.md`）原样保留，先做到一致再谈优化
+
+---
+
+# 第二部分：模型 ROI 路径（现场真正在用的那条）
+
+模型文件已到手：`C:\Users\11601\OneDrive\Documents\DTS\models\v12s0.onnx`。
+用它跑 `gap_batch_runner run --manifest dataset.yml --roi-model <onnx>`，39 个样本里 41 个数值有 40 个与现场值
+（`manifest.csv`，两位小数）在 0.006 mm 内一致；唯一例外 R4_16 与 R4_17 是同一测点相隔 50 秒的两次测量，
+现场 CSV 两行都记的是第二次的值，所以不是算法差异。**这条路径的基线在 `%TEMP%\lyflow-gap-baseline-model\`**。
+
+## 7. 模型路径的事实（源码已核对）
+
+- 推理在 `MeasurementEngine::measure` **之前**，输入是**原始 1280 槽**的两片云（NaN 槽保留；`profileRowsFromSensorXzCloud` 取 `x*1000, z*1000, r, isFinite`），点数不是 1280 直接报错（`BatchRunner.cpp:627-657`）。
+- `OnnxRoiPredictor::predict(primary, secondary, MaskRefineOptions{})` → `RoiBoxesResult{rois(四框，绝对传感器 mm，[x_lo,z_lo,x_hi,z_hi]), missing_segments, refinements}`；有 `missing_segments` 即失败 `model_roi_failed`。
+- 四框写进 `configuration.roi_override`，`roi_override_source="model"`。之后 `GapDetection::run()`：
+  - `override_short_circuit = true` → **不做 overall ROI 裁剪、不做 ICP、不用模板**；
+  - `roll_anchored_crop.enabled` 时用 `computeRollAnchoredCropMm(gap_left, gap_right, cfg)` 得到跟随零件的窗（`box_mm` 或 `skip_reason`），`preprocess` 用它裁两片相机云；裁后点数 < `min_points_kept`（Both 模式看两片之和）则**回退无界框**并标 `reverted:min_points`（`Alignment.cpp:330-400`）；
+  - 之后与模板路径完全相同：`secondary + primary` 合并、RadiusOutlierRemoval、四个业务 ROI 直接取 override（`base_side` 互换仍生效）、裁点、拟合、求值。
+- 库：`build/Release/lib/xyz_gap_ml.lib`，依赖 `3rdparty/onnxruntime/onnxruntime-win-x64-1.19.2/{include,lib}`，运行时 `onnxruntime.dll` + `onnxruntime_providers_shared.dll`（在 `build/Release/bin/`）。头文件 `src/gap_ml/{OnnxRoiPredictor,RoiBoxes,RoiFeatures,SensorXzProfile}.hpp`。
+- R1_10 模型基线：gap 3.7838、flush 2.3504；R5_11：gap 6.4685、flush 3.5173。
+
+## 8. 定死的决定
+
+| # | 决定 | 理由 |
+|---|---|---|
+| H1 | 模型路径算子进**同一个算子包**，链 `xyz_gap_ml.lib` + onnxruntime；`onnxruntime*.dll` 由包的 cmake 拷进 core `bin/`（与 yaml-cpp 同法） | 一份包、一份构建入口 |
+| H2 | `OnnxRoiPredictor` 是长驻资源：算子内按「模型路径 + 文件 mtime」缓存实例，`predict` 内部已加锁 | 每次运行重新加载 10 MB 模型不可接受；live preview 会连续触发 |
+| H3 | 模型输出的框在算子里就转成**测量帧、米**的 `Box2D`（`x→x, z→y, /1000`），与第一部分的 Box2D 同一约定 | 下游 `gap.crop_box` / 叠画零改动 |
+| H4 | 复刻 `roll_anchored_crop` 的全部失效保护（`skip_reason` 五种、`min_points_kept` 回退无界框），状态以 `Record` 输出 | 与基线一致的前提；这也是现场最值得看的诊断 |
+| H5 | 生成器加 `--model <onnx>`：产出模型路径的图（无模板、无 ICP）；A/B 脚本加 `--model`，对 `lyflow-gap-baseline-model` 比对 | 两条路径都能一键出图、一键对拍 |
+| H6 | 批测器的「模型失败回退模板路径」**不在图里做** | 一张图一条路径，失败就红框；回退是调度策略不是算法 |
+
+## 9. 新增算子
+
+| id | 输入 → 输出 | 复用 | 备注 |
+|---|---|---|---|
+| `gap.onnx_segment` | primary, secondary（原始 1280 槽、传感器帧）→ labels:Record | `profileRowsFromSensorXzCloud`、`OnnxRoiPredictor::predictLabels` | 参数 modelPath；`Record{type:"GapLabels", row0[1280], row1[1280]}`；点数≠1280 报 `bad_input` 带 portName |
+| `gap.roi_from_labels` | primary, secondary, labels → flushBase, gapLeft, flushRef, gapRight:Box2D, refinements:Record | `boxesFromRefinedLabels` | 参数 refine 开关与五个数值（`MaskRefineOptions`）；`missing_segments` 非空 → error `model_roi_failed`，消息列出缺的段 |
+| `gap.labels_to_cloud` | cloud, labels → cloud | — | 按类别给 rgb 上色（8 类固定色表），只为了在 3D 视图里看分割结果 |
+| `gap.drop_non_finite` | cloud → cloud | — | 对应 `NonFinitePointPolicy::kRemove`；模型路径里 load 必须保留 NaN，所以单独一步 |
+| `gap.roll_anchored_crop` | primary, secondary（测量帧）, gapLeft, gapRight → primary, secondary, window:Box2D, status:Record | `computeRollAnchoredCropMm`、`filterCloudByRoi` | 参数 halfWidth、halfHeight、maxRollBoxHeight、minPointsKept、usingCamera；status 含 `applied/reverted/rejected:<reason>` 与前后点数；disabled 时原样透传 |
+| `gap.measure_reference` | 加参数 modelPath（可空） | `OnnxRoiPredictor` + `MeasurementEngine` | 非空时复刻 `applyModelRoi` 再 measure |
+
+生成器 `--model` 产出的图：`load_profile_pair(dropNonFinite=false)` → `onnx_segment` → `roi_from_labels` → `labels_to_cloud`（旁路，只为看）；
+`to_measurement_frame ×2` → `drop_non_finite ×2` → `roll_anchored_crop` → `util.merge(secondary, primary)` → `filter.radius_outlier` →
+`crop_box ×4` → 第一部分的拟合与求值算子 → `judge`；旁路 `measure_reference(modelPath)`。
+
+## 10. 验收
+
+- [ ] 带包 / 不带包 `pnpm check` 全绿；`onnxruntime*.dll` 随 core `bin/` 走，`pnpm e2e:packaged` 的干净目录里也有
+- [ ] `tools/lyflow_ab.py --model <onnx> --baseline %TEMP%\lyflow-gap-baseline-model`：39/39 状态一致，gap/flush |Δ| ≤ 0.002 mm；同时对 `manifest.csv` 现场值 40/41 在 0.006 mm 内（R4_16 例外并注明原因）
+- [ ] R1、R5 的模型路径图在桌面端运行：R1 gap 3.7838 / flush 2.3504，R5 gap 6.4685 / flush 3.5173；选中 `roi_from_labels` 看到四框叠在剖面上，选中 `labels_to_cloud` 看到按类着色的剖面，选中 `roll_anchored_crop` 看到窗与 status
+- [ ] CDP：模型路径图的上述三个节点各一条断言（`LYFLOW_GAP_GRAPH_MODEL` 指向 R1 模型图；未设时跳过）
+- [ ] 第一部分的 39/39 模板路径 A/B 仍然通过（回归）
