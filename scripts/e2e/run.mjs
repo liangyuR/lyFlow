@@ -132,13 +132,15 @@ async function suiteDemoPipeline(cdp, report, ws, pcdName) {
     );
   }
 
-  // ransac_plane 没有点云输出，视图要说人话而不是一片空白
+  // ransac_plane 没有点云输出，视图借上游最近的那片云当底图（不再是一片空白）
   const planeView = await selectAndReadViewer(cdp, ids.plane);
+  report.eq("选中 ransac_plane → 底图取自上游的 sor", planeView.base, ids.sor);
   report.ok(
-    "选中 ransac_plane → 视图提示无点云输出",
-    /无点云输出/.test(planeView.status ?? ""),
-    `status=${planeView.status}`,
+    "底图标签写明是谁的云",
+    /^底图：/.test(planeView.baseText ?? ""),
+    `baseText=${planeView.baseText} status=${planeView.status}`,
   );
+  report.ok("底图真的画出了点", planeView.count > 0, `count=${planeView.count}`);
 
   const outPcd = path.join(ws.dir, "去平面 结果.pcd");
   report.ok("下游 PCD 写到中文目录", fs.existsSync(outPcd), outPcd);

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
+import { findBaseCloud, firstCloudPort, type BaseCloud } from "../lib/basecloud";
 import { augmentOperators, levelOf, resolveOutput } from "../lib/subgraph";
 import { transport } from "../transport";
 import { aggregatedNodes, useExecutionStore } from "../store/execution";
@@ -12,7 +13,6 @@ import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
 import { decodeCloud, type CloudPayload, type OutputStat } from "../types/execution";
-import type { GraphDoc } from "../types/graph";
 import "../styles.viewer.css";
 
 export type ShadingMode = "intensity" | "height" | "normal" | "flat";
@@ -27,6 +27,8 @@ interface Display {
   runId: string | null;
   cloud: CloudPayload | null;
   status: string | null;
+  /** 这片云是从上游借来的底图时，借的是谁。自己有云时为 null。 */
+  base: BaseCloud | null;
 }
 
 const MAX_POINTS_CHOICES = [100_000, 500_000, 2_000_000, 8_000_000];
@@ -67,16 +69,6 @@ function putCache(key: string, payload: CloudPayload) {
     total -= payloadBytes(cloudCache.get(oldest)!);
     cloudCache.delete(oldest);
   }
-}
-
-/** 该节点的第一个 PointCloud 输出端口。没有就返回 null。 */
-function firstCloudPort(opId: string, subgraphs: GraphDoc["subgraphs"]): string | null {
-  const op = augmentOperators(useManifestStore.getState().operatorsById, subgraphs).get(opId);
-  if (!op) return null;
-  for (const p of op.outputs) {
-    if (p.type === "PointCloud") return p.name;
-  }
-  return null;
 }
 
 interface Scene {
@@ -387,6 +379,32 @@ function round3(v: number) {
   return Number.isFinite(v) ? Math.round(v * 1000) / 1000 : 0;
 }
 
+/** 「底图云 + 叠画几何」的联合包围盒。取并集而不是二选一：几何再小也挤不掉云，
+ *  云再大也不会把 ROI 框推出画面。两者都空时返回 null。 */
+function unionBounds(cloud: CloudPayload | null, overlay: THREE.Group): Float32Array | null {
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  if (cloud && cloud.pointCount > 0) {
+    for (let i = 0; i < 3; i += 1) {
+      min[i] = Math.min(min[i]!, cloud.bounds[i]!);
+      max[i] = Math.max(max[i]!, cloud.bounds[i + 3]!);
+    }
+  }
+  if (overlay.children.length > 0) {
+    const box = new THREE.Box3().setFromObject(overlay);
+    if (!box.isEmpty()) {
+      const lo = [box.min.x, box.min.y, box.min.z];
+      const hi = [box.max.x, box.max.y, box.max.z];
+      for (let i = 0; i < 3; i += 1) {
+        min[i] = Math.min(min[i]!, lo[i]!);
+        max[i] = Math.max(max[i]!, hi[i]!);
+      }
+    }
+  }
+  if (!Number.isFinite(min[0]) || !Number.isFinite(max[0])) return null;
+  return new Float32Array([min[0]!, min[1]!, min[2]!, max[0]!, max[1]!, max[2]!]);
+}
+
 function fitToBounds(scene: Scene, bounds: Float32Array) {
   const cx = (bounds[0]! + bounds[3]!) / 2;
   const cy = (bounds[1]! + bounds[4]!) / 2;
@@ -434,6 +452,7 @@ export function Viewer3D() {
     runId: null,
     cloud: null,
     status: "未运行",
+    base: null,
   });
   const [loading, setLoading] = useState(false);
   const { cloud } = display;
@@ -464,6 +483,11 @@ export function Viewer3D() {
     activeId ? aggregatedNodes(path, s.nodes).get(activeId)?.stats?.outputs : undefined,
   );
   const typesByName = useManifestStore((s) => s.typesByName);
+  const operatorsById = useManifestStore((s) => s.operatorsById);
+  const ops = useMemo(
+    () => augmentOperators(operatorsById, doc.subgraphs),
+    [operatorsById, doc.subgraphs],
+  );
 
   const hasIntensity = cloud?.intensity != null;
   const hasNormals = cloud?.normals != null;
@@ -522,9 +546,13 @@ export function Viewer3D() {
   // -- 取点云 ---------------------------------------------------------------
   useEffect(() => {
     let cancelled = false;
-    const show = (status: string | null, payload: CloudPayload | null = null) => {
+    const show = (
+      status: string | null,
+      payload: CloudPayload | null = null,
+      base: BaseCloud | null = null,
+    ) => {
       if (cancelled) return;
-      setDisplay({ nodeId: activeId, runId: runId ?? null, cloud: payload, status });
+      setDisplay({ nodeId: activeId, runId: runId ?? null, cloud: payload, status, base });
     };
 
     if (!activeNode) {
@@ -547,17 +575,24 @@ export function Viewer3D() {
       show(activeState === "running" ? "正在计算…" : "该节点尚未产出结果");
       return;
     }
-    const port = firstCloudPort(activeNode.op, doc.subgraphs);
-    if (!port) {
-      setLoading(false);
-      show("该节点无点云输出");
-      return;
-    }
+    // 自己有云就用自己的；没有就沿输入边往上游借最近的一片当底图，几何叠在它上面 ——
+    // 只输出 Box2D/Line2D 的节点若显示成空白，用户就看不出框压在剖面的哪里。
+    const port = firstCloudPort(ops, activeNode.op);
+    let base: BaseCloud | null = null;
     // 子图节点的结果在内部那个叶子上，按路径查结果仓（F2）
-    const resolved = resolveOutput(doc, path, activeNode.id, port);
-    if (!resolved) {
+    let resolved = port ? resolveOutput(doc, path, activeNode.id, port) : null;
+    if (port && !resolved) {
       setLoading(false);
       show("这个算子的内部结果查不到（库算子的定义在库文件里）");
+      return;
+    }
+    if (!port) {
+      base = findBaseCloud(doc, path, activeNode.id, ops);
+      resolved = base?.resolved ?? null;
+    }
+    if (!resolved) {
+      setLoading(false);
+      show("该节点无点云输出，上游也没有可当底图的点云");
       return;
     }
 
@@ -568,7 +603,7 @@ export function Viewer3D() {
       // 命中也要 delete+set 一下，否则 LRU 的「最近使用」永远不更新
       putCache(key, hit);
       setLoading(false);
-      show(hit.pointCount === 0 ? "该节点的点云是空的" : null, hit);
+      show(hit.pointCount === 0 ? "该节点的点云是空的" : null, hit, base);
       return;
     }
 
@@ -586,7 +621,7 @@ export function Viewer3D() {
         if (cancelled) return;
         const payload = decodeCloud(buffer);
         putCache(key, payload);
-        show(payload.pointCount === 0 ? "该节点的点云是空的" : null, payload);
+        show(payload.pointCount === 0 ? "该节点的点云是空的" : null, payload, base);
       } catch (e) {
         show(e instanceof Error ? e.message : String(e));
       } finally {
@@ -600,7 +635,7 @@ export function Viewer3D() {
       cancelled = true;
     };
   }, [activeNode, activeId, selected.size, runId, runStatus, activeState, maxPoints, doc, path,
-      isPreview, previewMaxPoints]);
+      isPreview, previewMaxPoints, ops]);
 
   // -- 几何体：只随点云重建，着色参数一律不进这个 effect ---------------------
   useEffect(() => {
@@ -683,12 +718,6 @@ export function Viewer3D() {
     if (p) (p.material as THREE.PointsMaterial).size = pointSize;
   }, [pointSize]);
 
-  // 换了一片云就自动 fit 一次；同一片云里调参数不该把视角拉回去
-  useEffect(() => {
-    const scene = sceneRef.current;
-    if (scene && cloud) fitToBounds(scene, cloud.bounds);
-  }, [cloud]);
-
   // -- 2D 几何叠画（G7）：整组重建，线与端口同色 -----------------------------
   const overlayShapes = useMemo(
     () => (activeOutputs ?? []).filter((o) => o.value !== undefined),
@@ -717,17 +746,16 @@ export function Viewer3D() {
       const color = new THREE.Color(hex).getHex();
       for (const line of shapesOf(out, color, span)) scene.overlay.add(line);
     }
-    // 没有点云时相机没人负责取景，用几何自己的包围盒 fit 一次
-    if (!cloud && scene.overlay.children.length > 0) {
-      const box = new THREE.Box3().setFromObject(scene.overlay);
-      if (!box.isEmpty()) {
-        fitToBounds(
-          scene,
-          new Float32Array([box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z]),
-        );
-      }
-    }
   }, [overlayShapes, cloud, typesByName]);
+
+  // 换了云或换了几何就自动取景一次；同一份内容里调参数不该把视角拉回去。
+  // 必须排在上面那个 effect 之后：取景要量的是它刚建好的那一组线。
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const bounds = unionBounds(cloud, scene.overlay);
+    if (bounds) fitToBounds(scene, bounds);
+  }, [cloud, overlayShapes]);
 
   // 相机模式（G7）。只换 controls 挂的那台相机，场景与几何原封不动。
   useEffect(() => {
@@ -792,12 +820,23 @@ export function Viewer3D() {
       data-preview={isPreview ? "1" : "0"}
       data-camera={cameraMode}
       data-overlay={overlayCount}
+      data-base={display.base?.localId ?? ""}
     >
       <div className="viewer__bar">
         <span className="viewer__title">3D 预览</span>
         {isPreview && (
           <span className="viewer__preview" data-testid="viewer-preview-badge">
             预览 {Math.round(previewMaxPoints / 10000)} 万点
+          </span>
+        )}
+        {display.base && (
+          <span
+            className="viewer__base"
+            data-testid="viewer-base"
+            data-node={display.base.localId}
+            title={`该节点没有点云输出，底图取自上游最近的一片云（${display.base.localId}）`}
+          >
+            底图：{display.base.label}
           </span>
         )}
         {cloud && (
@@ -843,10 +882,11 @@ export function Viewer3D() {
           className="viewer__fit"
           onClick={() => {
             const scene = sceneRef.current;
-            if (scene && cloud) fitToBounds(scene, cloud.bounds);
+            const bounds = scene ? unionBounds(cloud, scene.overlay) : null;
+            if (scene && bounds) fitToBounds(scene, bounds);
           }}
-          disabled={!cloud}
-          title="缩放到全部"
+          disabled={!cloud && overlayCount === 0}
+          title="缩放到全部（底图云 + 叠画几何）"
         >
           ⤢
         </button>

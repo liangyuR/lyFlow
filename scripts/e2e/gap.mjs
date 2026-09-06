@@ -2,7 +2,47 @@
 // 值从**执行事件**灌进去而不是靠某个算子：前端不该知道算子的名字（ADR-0003）。
 
 import { sleep } from "./cdp.mjs";
-import { buildGraph, lit, newDoc, pressF5, runAndWait, select } from "./page.mjs";
+import {
+  buildGraph,
+  lit,
+  newDoc,
+  pressF5,
+  runAndWait,
+  select,
+  selectAndReadViewer,
+} from "./page.mjs";
+
+/** 把一条带几何输出的 node_state 灌进执行 store。走的是 transport 用的同一条 apply()。 */
+function feedOutputs(cdp, nodeId, seq) {
+  return cdp.eval(`
+    const e = window.__lyflow.stores.execution.getState();
+    e.apply({
+      schemaVersion: 1,
+      runId: e.runId,
+      seq: ${seq},
+      kind: 'node_state',
+      nodeId: ${lit(nodeId)},
+      state: 'done',
+      durationMs: 1,
+      stats: { elementCount: 1, byteSize: 64, outputs: ${lit(fakeOutputs())} },
+    });
+    return true;
+  `);
+}
+
+/** 等 `.viewer` 上某个属性变成期望值，返回它最后读到的值。 */
+async function waitAttr(cdp, name, want, tries = 50) {
+  let got = null;
+  for (let i = 0; i < tries; i += 1) {
+    got = await cdp.eval(`
+      const v = document.querySelector('.viewer');
+      return v ? v.getAttribute(${lit(name)}) : null;
+    `);
+    if (String(got) === String(want)) break;
+    await sleep(120);
+  }
+  return got;
+}
 
 /** 造一条 node_state 事件，端口上挂四种几何 + 一个 Measurement。 */
 function fakeOutputs() {
@@ -63,29 +103,19 @@ async function suiteMeasurementOutputs(cdp, report) {
   await newDoc(cdp);
   const ids = await buildGraph(
     cdp,
-    [{ key: "gen", op: "gen.synthetic", params: { pointCount: 5000, seed: 3 } }],
-    [],
+    [
+      { key: "gen", op: "gen.synthetic", params: { pointCount: 5000, seed: 3 } },
+      // 只输出 Indices/Plane，没有点云 —— 底图规则的最小复现
+      { key: "plane", op: "segment.ransac_plane", params: { distanceThreshold: 0.02 } },
+    ],
+    [{ from: ["gen", "cloud"], to: ["plane", "cloud"] }],
   );
   const run = await runAndWait(cdp, () => pressF5(cdp));
   report.eq("底图跑通了", run.status, "ok");
 
   await select(cdp, ids.gen);
 
-  // 把带几何的输出灌进执行 store。走的是 transport 用的同一条 apply()。
-  const applied = await cdp.eval(`
-    const e = window.__lyflow.stores.execution.getState();
-    e.apply({
-      schemaVersion: 1,
-      runId: e.runId,
-      seq: 100000,
-      kind: 'node_state',
-      nodeId: ${lit(ids.gen)},
-      state: 'done',
-      durationMs: 1,
-      stats: { elementCount: 1, byteSize: 64, outputs: ${lit(fakeOutputs())} },
-    });
-    return true;
-  `);
+  const applied = await feedOutputs(cdp, ids.gen, 100000);
   report.ok("事件灌进去了", applied === true);
 
   // -- 3D 叠画 -------------------------------------------------------------
@@ -165,6 +195,22 @@ async function suiteMeasurementOutputs(cdp, report) {
       inspector.boxText,
     );
   }
+
+  // -- 底图：几何节点借上游最近的那片云 ---------------------------------------
+  const fed = await feedOutputs(cdp, ids.plane, 100001);
+  report.ok("几何输出灌到没有点云输出的节点上", fed === true);
+
+  const planeView = await selectAndReadViewer(cdp, ids.plane);
+  report.eq("底图取自上游的 gen", planeView.base, ids.gen);
+  report.ok(
+    "底图标签写明是谁的云",
+    /^底图：/.test(planeView.baseText ?? ""),
+    `baseText=${planeView.baseText} status=${planeView.status}`,
+  );
+  report.ok("底图真的画出了点", planeView.count > 0, `count=${planeView.count}`);
+
+  const planeOverlay = await waitAttr(cdp, "data-overlay", 4);
+  report.eq("几何仍然叠在底图上", Number(planeOverlay), 4);
 }
 
 /** 可选：打开一张真实的 gap 图跑一遍，看 ROI 框有没有画出来。跑法见
@@ -204,15 +250,8 @@ async function suiteRealGapGraph(cdp, report) {
   `);
   report.ok("图里有 business_rois 节点", typeof rois === "string", String(rois));
   if (typeof rois === "string") {
-    await select(cdp, rois);
-    let overlay = -1;
-    for (let i = 0; i < 50; i += 1) {
-      overlay = await cdp.eval(
-        `const v = document.querySelector('.viewer'); return v ? Number(v.getAttribute('data-overlay') || 0) : -1;`,
-      );
-      if (overlay === 4) break;
-      await sleep(120);
-    }
+    const view = await selectAndReadViewer(cdp, rois);
+    const overlay = Number(await waitAttr(cdp, "data-overlay", 4));
     // 失败时把节点的输出一并打出来 —— 光看 0 猜不出是没跑还是没选中
     const detail = await cdp.eval(`
       const e = window.__lyflow.stores.execution.getState();
@@ -227,6 +266,20 @@ async function suiteRealGapGraph(cdp, report) {
       });
     `);
     report.ok("四个业务 ROI 框都叠上了", overlay === 4, `overlay=${overlay} ${detail}`);
+
+    // business_rois 只输出 Box2D，底图应当落在上游最近的那片云上
+    const upstreamCloud = await cdp.eval(`
+      const doc = window.__lyflow.stores.graph.getState().doc;
+      const n = doc.nodes.find((x) => x.op === 'filter.radius_outlier');
+      return n ? n.id : null;
+    `);
+    report.eq("底图落在上游的 filter.radius_outlier 上", view.base, upstreamCloud);
+    report.ok(
+      "底图标签写明是谁的云",
+      /^底图：/.test(view.baseText ?? ""),
+      `baseText=${view.baseText} status=${view.status}`,
+    );
+    report.ok("底图真的画出了点", view.count > 0, `count=${view.count} view=${view.view}`);
   }
 
   const circles = await cdp.eval(`

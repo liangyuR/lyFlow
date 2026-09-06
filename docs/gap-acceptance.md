@@ -202,6 +202,86 @@ manifest 里的算子名也跟着换了。5.1 s 的构成大致是：
 
 ---
 
+## §7 后续改动：几何节点叠画时用上游最近的点云做底图
+
+**问题**：接入之后选中 `gap.business_rois` / `gap.fit_line` / `gap.selected_point`
+这类只输出 Box2D/Line2D/Circle2D/Point2D 的节点，视图里只有几条细线，
+中间还写着「该节点无点云输出」；2D 剖面的取景又只按几何的跨度框，
+**用户看不出 ROI 框压在剖面的哪个位置** —— 而这恰恰是要看的东西。
+钉住（§2.6）解决不了：`activeId = pinnedId ?? selectedId` 是整体替换显示节点，
+拼不出「A 的云 + B 的几何」。
+
+### 规则
+
+1. **底图**：显示节点自己没有 PointCloud 输出时，沿**输入边**往上游广度优先找第一片云。
+   - 「最近」是硬性的：队列先进先出，同一深度全部试完才往上走一层。
+   - 同深度的先后来自**输入端口的声明顺序**（`OperatorDesc.inputs` 的次序），
+     不是边在 JSON 里的次序 —— 后者是生成器的实现细节，不该影响用户看到什么。
+   - 找到的节点若是子图节点，用 `resolveOutput` 展开成叶子的**路径 id**（F2/M4）；
+     解不开的（库算子的定义在库文件里）不算数，继续往上找。
+   - 显示节点在子图**内部**、而某个入口是从外面喂进来的，搜索会翻过边界到父层继续
+     （`SubgraphDef.inputs[].to` 反查端口名，再在父层找喂它的边）。
+   - 上游一片云都没有时才是空态，文案改成
+     「该节点无点云输出，上游也没有可当底图的点云」。
+2. **标注**：栏上出现「底图：<节点名>」（`[data-testid="viewer-base"]`，
+   `.viewer[data-base]` 是那个节点的本地 id），不再显示「该节点无点云输出」。
+   名字取节点标题，没改过标题就取算子 label。
+3. **取景**：2D 剖面与 3D 的 fit 都按「底图云 + 叠画几何」的**联合**包围盒。
+   取并集而不是二选一：ROI 框只有几毫米时不会把整片剖面挤出画面，
+   反过来云再大也不会把框推到画外。⤢ 按钮走同一条路。
+4. **钉住语义不变**：仍然是 `pinnedId ?? selectedId` 决定显示哪个节点；
+   钉住的那个节点没有云时，同样走底图规则。
+5. **数据通路不变**：底图云还是既有的二进制 IPC `getOutputCloud`，
+   缓存键仍是 `runId|node|port|maxPoints`（键里的 node 是底图节点，
+   所以共用同一片云的几个几何节点之间来回切是命中缓存的）。**没有新增 C ABI**，
+   上游查找全部在前端用 GraphDoc 的 `edges` 做（`app/src/lib/basecloud.ts`）。
+
+### 为什么上游查找放在前端
+
+图的连接关系本来就在前端手里（GraphDoc 是唯一数据模型，ADR-0002），
+而底图是**展示决策**不是执行语义 —— 放进 C++ 就得让执行器知道「谁给谁当背景」，
+那是把 UI 的口味写进内核。前端也不需要知道任何算子的名字：
+判据只有「输出端口的类型是不是 PointCloud」（ADR-0003）。
+
+### 改了哪些文件
+
+| 文件 | 改动 |
+|---|---|
+| `app/src/lib/basecloud.ts` | 新增。`firstCloudPort` + `findBaseCloud`（BFS，跨子图边界） |
+| `app/src/components/Viewer3D.tsx` | 取云时按底图规则挑端口；`Display` 多带一个 `base`；`unionBounds` 联合取景；栏上的「底图：」标签与 `data-base` |
+| `app/src/styles.viewer.css` | `.viewer__base` |
+| `scripts/e2e/page.mjs` | `selectAndReadViewer` 顺带回 `base` / `baseText` |
+| `scripts/e2e/run.mjs` | ransac_plane 那条断言从「提示无点云输出」改成「底图取自上游的 sor + 画出了点」 |
+| `scripts/e2e/gap.mjs` | 合成图那组加 `gen.synthetic → segment.ransac_plane` 的底图断言；真实 gap 图那组加「底图落在 `filter.radius_outlier` 上」 |
+
+### CDP 断言
+
+**默认门禁里也覆盖**（`suiteMeasurementOutputs`，不需要算子包）：
+`gen.synthetic → segment.ransac_plane`，把四个几何输出灌到 `ransac_plane`（它只输出
+Indices/Plane）上，断言 `.viewer[data-base]` 是 `gen` 那个节点、
+底图标签以「底图：」开头、`.viewer__count` 的点数 > 0、`data-overlay` 仍是 4。
+`suiteDemoPipeline` 里那条老断言也顺势变成同一个形状（底图取自 `sor`）。
+
+**带算子包时**（`suiteRealGapGraph`，`LYFLOW_GAP_GRAPH` 未设时整组照旧跳过）：
+选中 `gap.business_rois` 断言 `data-overlay === 4`、
+`data-base` 等于图里 `filter.radius_outlier` 那个节点的 id、底图点数 > 0。
+
+那条链路是 `n_rois ←alignment― n_select ←a― n_align_f2 ←cloud― n_filter`：
+深度 3 上同时有 `n_filter`（`cloud` 口）和 `n_tpl_f2`（`tplLeft`/`tplRight` 口，
+它也输出 PointCloud），端口声明顺序把 `cloud` 排在前面，所以底图是滤波后的测量云
+而不是模板 —— 这正是想看的那一片。
+
+### 验收
+
+| 场景 | 结果 |
+|---|---|
+| 不带包 `pnpm check` | 绿（`cargo test` 的既有并发不稳定重跑一次，见「偏离与决策」第 8 条） |
+| 不带包 `pnpm e2e` | 绿 |
+| 带包 `pnpm check` | 绿 |
+| 带包 + `LYFLOW_GAP_GRAPH`（R5）`pnpm e2e` | 绿 |
+
+---
+
 ## A/B 全表（39 样本）
 
 单位毫米。Δ 是 LyFlow 的拆分算子与基线 `results.csv` 之差。

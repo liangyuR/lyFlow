@@ -12,6 +12,18 @@
   color: #8fb8ff;
 }
 
+/* 「底图：xxx」——几何节点借上游的云当背景时得说清楚画的是谁的点。 */
+.viewer__base {
+  max-width: 150px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: #9aa6b8;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
 .viewer__num {
   width: 66px;
   background: var(--bg-2);

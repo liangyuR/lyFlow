@@ -209,10 +209,13 @@ export async function selectAndReadViewer(cdp, nodeId, timeoutMs = 30_000) {
       if (v.getAttribute('data-view') === 'loading') return null;
       const count = v.querySelector('.viewer__count');
       const status = v.querySelector('[data-testid="viewer3d-status"]');
+      const base = v.querySelector('[data-testid="viewer-base"]');
       return {
         view: v.getAttribute('data-view'),
         text: count ? count.textContent : null,
         status: status ? status.textContent : null,
+        base: v.getAttribute('data-base'),
+        baseText: base ? base.textContent : null,
         hasCanvas: !!v.querySelector('.viewer__canvas canvas'),
       };
     `);
@@ -223,5 +226,12 @@ export async function selectAndReadViewer(cdp, nodeId, timeoutMs = 30_000) {
   const count = info.text
     ? Number(info.text.replace(/\s/g, "").split("/")[0].replace(/,/g, ""))
     : 0;
-  return { count, hasCanvas: info.hasCanvas, status: info.status, view: info.view };
+  return {
+    count,
+    hasCanvas: info.hasCanvas,
+    status: info.status,
+    view: info.view,
+    base: info.base,
+    baseText: info.baseText,
+  };
 }
