@@ -222,16 +222,28 @@ export async function selectAndReadViewer(cdp, nodeId, timeoutMs = 30_000) {
     if (info) break;
     await sleep(120);
   }
-  if (!info) return { count: 0, hasCanvas: false, status: "等视图切换超时" };
-  const count = info.text
-    ? Number(info.text.replace(/\s/g, "").split("/")[0].replace(/,/g, ""))
-    : 0;
+  if (!info) return { count: 0, total: 0, hasCanvas: false, status: "等视图切换超时" };
+  const nth = (i) =>
+    info.text ? Number(info.text.replace(/\s/g, "").split("/")[i].replace(/[^\d]/g, "")) : 0;
   return {
-    count,
+    count: nth(0),
+    total: info.text && info.text.includes("/") ? nth(1) : nth(0),
     hasCanvas: info.hasCanvas,
     status: info.status,
     view: info.view,
     base: info.base,
     baseText: info.baseText,
   };
+}
+
+/** 视图上两个只读的包围盒：底图云的与叠画几何的。各是六个数 [minXYZ, maxXYZ]，读不到是 null。 */
+export async function viewerBounds(cdp) {
+  const read = await cdp.eval(`
+    const v = document.querySelector('.viewer');
+    if (!v) return null;
+    return { cloud: v.getAttribute('data-cloud-bounds'),
+             overlay: v.getAttribute('data-overlay-bounds') };
+  `);
+  const parse = (s) => (s ? s.split(",").map(Number) : null);
+  return { cloud: parse(read?.cloud), overlay: parse(read?.overlay) };
 }

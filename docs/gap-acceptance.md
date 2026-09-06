@@ -9,7 +9,7 @@
 基线在 `%TEMP%\lyflow-gap-baseline`（模板路径）与 `%TEMP%\lyflow-gap-baseline-model`（模型路径），
 模型在 `C:\Users\11601\OneDrive\Documents\DTS\models\v12s0.onnx`。
 
-四个 commit（都没 push）：
+六个 commit（都没 push）：
 
 | 仓库 | 分支 | commit |
 |---|---|---|
@@ -17,6 +17,8 @@
 | xyz-gap-inspector | `lyflow-ops` | `1aca0b9  LyFlow 算子包：配置/模板路径的拆分算子、图生成器与 A/B 脚本` |
 | LyFlow | `main` | `feat: gap 模型 ROI 路径的验收与文档` |
 | xyz-gap-inspector | `lyflow-ops` | `7865848  LyFlow 算子包：ONNX 模型 ROI 路径` |
+| xyz-gap-inspector | `lyflow-ops` | `a3cce54  LyFlow 算子包：模型四框与着色剖面共用测量帧底图` |
+| LyFlow | `main` | `test: 模型图底图同帧断言` |
 
 ## 复现命令
 
@@ -816,6 +818,44 @@ double 除完再窄化，仍然是 `mmToM`）。**这一条是模型 A/B 从 32/
 没有改那条测试 —— 它守的是别的东西，改判据是另一件事；包这边换个大小写就行，
 并在代码里写明了为什么。
 
+### 看图体验：模型四框与着色剖面共用测量帧底图
+
+**31. `gap.roi_from_labels` 加了一个可选输入 `backdrop:PointCloud` 与同名输出。**
+症状（截图核实）：选中 `gap.roi_from_labels` 时，底图规则（§7）取到的是它直接上游的
+**原始传感器帧**云（y≡0 的 XZ 剖面），而四个框已经按 H3 换到了**测量帧**（x, y=z）。
+2D 剖面俯视 XY，云退化成一条线、框飘在别处，两者根本对不上 ——
+而「框压在剖面的哪里」正是这个节点唯一值得看的东西。
+
+底图规则本身没错：它只知道「这个节点没有 PointCloud 输出」，不知道帧。
+所以修法是让节点**自己带一片同帧的云**：`backdrop` 输入原样透传到同名输出
+（同一个 `shared_ptr`，零拷贝），有它时 `firstCloudPort` 直接命中，BFS 不再往上游找。
+没接时输出一片空云 —— 声明过的输出端口必须填（执行器的 `checkOutputs`）。
+**没有改 LyFlow 的底图规则**：那条规则是通用的展示决策，
+「哪一片云与我同帧」是领域知识，该由图的连接关系表达。
+
+**32. `gap.labels_to_cloud` 改接测量帧的云。**
+原先生成器把它接在 `n_load` 的原始传感器帧云上，同样俯视成一条线，
+按类着色看不出剖面形状。改接 `gap.to_measurement_frame` 的输出：
+换轴只换轴不删点（`pcl::transformPointCloud` 对 `is_dense=false` 的云保留 NaN 槽），
+槽位与标签仍然一一对应。**必须排在 `gap.drop_non_finite` 之前** ——
+删点会让槽位错位；上游已经删过点时槽数不再是 1280，算子报 `bad_input` 并说明这一点。
+生成器把它的输出再接进 `roi_from_labels.backdrop`，所以选中四框时看到的
+就是按类着色的测量帧剖面。`gap.roll_anchored_crop` 已自带点云输出，没有动。
+
+**33. 为验收在 `Viewer3D` 上加了两个只读的 `data-` 属性。**
+`data-cloud-bounds` / `data-overlay-bounds`（各六个数，`minXYZ,maxXYZ`）。
+CDP 要断言「底图与四框在同一平面」就得读到两个包围盒，而既有的 `data-*` 只有
+点数与 `data-overlay` 的个数。属性是纯只读的展示派生值，不进任何存档格式。
+新增断言（`scripts/e2e/gap.mjs` 模型图那组）：四框与底图的包围盒在 XY 上相交；
+底图来自节点自己的输出（`data-base` 为空）；`labels_to_cloud` 的槽数是 1280
+且包围盒 y 跨度 > 0（不是一条线）。
+按 CLAUDE.md 的规矩**没有写 UI 单元测试**，这一条只有 CDP 覆盖。
+
+**验证**：带包 `pnpm check` 全绿（37 算子、**102** 个 doctest —— 多的那个是
+`backdrop` 零拷贝透传与「没接就是空云」）；模型 A/B **39/39**、最大 |Δ| = 0.000000 mm、
+现场值 41/41 —— 数值一个没动，这一改只动了图的连线与一个旁路输出；
+带包 + 两个图的 `pnpm e2e` **331/331 通过**（比上一轮多 5 条，就是上面那几条断言）。
+
 ---
 
 ## 实测数据
@@ -848,3 +888,9 @@ double 除完再窄化，仍然是 `mmToM`）。**这一条是模型 A/B 从 32/
 - `pnpm tauri build` + `pnpm e2e:packaged`（带包）：**308/308 通过**，
   干净目录里有 `onnxruntime.dll` 与 `onnxruntime_providers_shared.dll`。
 - 一次模型 A/B 全跑约 2 分钟（39 个样本，每个样本一次 ONNX 推理 + 一次 `lyflow run`）。
+
+底图同帧那一轮（偏离 31–33）之后：
+
+- 带包 `pnpm check`：全链路绿，37 个算子、**102** 个 doctest 用例。
+- 模型 A/B：**39/39**，最大 |Δ| = 0.000000 mm；现场值 41/41 在 0.006 mm 内。
+- `pnpm e2e`（带包 + R5 模板图 + R1 模型图）：**331/331 通过**。

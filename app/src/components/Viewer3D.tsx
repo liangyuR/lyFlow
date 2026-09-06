@@ -405,6 +405,20 @@ function unionBounds(cloud: CloudPayload | null, overlay: THREE.Group): Float32A
   return new Float32Array([min[0]!, min[1]!, min[2]!, max[0]!, max[1]!, max[2]!]);
 }
 
+/** 叠画几何自己的包围盒。空组返回 null。 */
+function overlayBoundsOf(overlay: THREE.Group): Float32Array | null {
+  if (overlay.children.length === 0) return null;
+  const box = new THREE.Box3().setFromObject(overlay);
+  if (box.isEmpty()) return null;
+  return new Float32Array([box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z]);
+}
+
+/** 包围盒 → data- 属性上的六个数。null 是空串。 */
+function boundsAttr(bounds: ArrayLike<number> | null): string {
+  if (!bounds) return "";
+  return Array.from(bounds, round3).join(",");
+}
+
 function fitToBounds(scene: Scene, bounds: Float32Array) {
   const cx = (bounds[0]! + bounds[3]!) / 2;
   const cy = (bounds[1]! + bounds[4]!) / 2;
@@ -455,6 +469,8 @@ export function Viewer3D() {
     base: null,
   });
   const [loading, setLoading] = useState(false);
+  // 只读地暴露给验收脚本：底图云与叠画几何各自的包围盒，用来断言两者在同一个平面上。
+  const [overlayBounds, setOverlayBounds] = useState<Float32Array | null>(null);
   const { cloud } = display;
 
   const selected = useUiStore((s) => s.selectedNodes);
@@ -753,6 +769,7 @@ export function Viewer3D() {
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
+    setOverlayBounds(overlayBoundsOf(scene.overlay));
     const bounds = unionBounds(cloud, scene.overlay);
     if (bounds) fitToBounds(scene, bounds);
   }, [cloud, overlayShapes]);
@@ -821,6 +838,8 @@ export function Viewer3D() {
       data-camera={cameraMode}
       data-overlay={overlayCount}
       data-base={display.base?.localId ?? ""}
+      data-cloud-bounds={boundsAttr(cloud && cloud.pointCount > 0 ? cloud.bounds : null)}
+      data-overlay-bounds={boundsAttr(overlayBounds)}
     >
       <div className="viewer__bar">
         <span className="viewer__title">3D 预览</span>

@@ -10,7 +10,14 @@ import {
   runAndWait,
   select,
   selectAndReadViewer,
+  viewerBounds,
 } from "./page.mjs";
+
+/** 两个包围盒在 XY 上有没有交集。任一为空算不相交。 */
+function overlapsXY(a, b) {
+  if (!a || !b || a.length !== 6 || b.length !== 6) return false;
+  return a[0] <= b[3] && b[0] <= a[3] && a[1] <= b[4] && b[1] <= a[4];
+}
 
 /** 把一条带几何输出的 node_state 灌进执行 store。走的是 transport 用的同一条 apply()。 */
 function feedOutputs(cdp, nodeId, seq) {
@@ -333,6 +340,19 @@ async function suiteModelGapGraph(cdp, report) {
     const overlay = Number(await waitAttr(cdp, "data-overlay", 4));
     report.eq("四个模型 ROI 框都叠上了", overlay, 4, `view=${view.view} count=${view.count}`);
     report.ok("框叠在一片真实的剖面上", view.count > 0, `count=${view.count} base=${view.base}`);
+    // 底图走自己的 backdrop 输出，不再靠底图规则往上游借传感器帧的云
+    report.eq("底图是节点自己的输出（不借上游）", view.base, "");
+    const bounds = await viewerBounds(cdp);
+    report.ok(
+      "底图与四框在同一平面（XY 上相交）",
+      overlapsXY(bounds.cloud, bounds.overlay),
+      `cloud=${JSON.stringify(bounds.cloud)} overlay=${JSON.stringify(bounds.overlay)}`,
+    );
+    report.ok(
+      "底图是测量帧的剖面（y 有跨度，不是一条线）",
+      bounds.cloud !== null && bounds.cloud[4] - bounds.cloud[1] > 0,
+      JSON.stringify(bounds.cloud),
+    );
   }
 
   // -- labels_to_cloud：有点，且类别是逐点的一个通道 --------------------------
@@ -341,6 +361,14 @@ async function suiteModelGapGraph(cdp, report) {
   if (typeof colored === "string") {
     const view = await selectAndReadViewer(cdp, colored);
     report.ok("着色后的剖面有点", view.count > 0, `count=${view.count} view=${view.view}`);
+    report.eq("1280 个槽一个不少", view.total, 1280, `count=${view.count}`);
+    // 接的是测量帧的云：俯视 XY 才看得出剖面形状，接传感器帧的话 y 恒为 0
+    const shape = await viewerBounds(cdp);
+    report.ok(
+      "着色剖面在测量帧里（y 有跨度，不是一条线）",
+      shape.cloud !== null && shape.cloud[4] - shape.cloud[1] > 0,
+      JSON.stringify(shape.cloud),
+    );
     // 3D 视图没有 rgb 着色模式，所以算子把类 id 也写进 intensity：
     // 「强度」这一项没被禁用，就说明逐点的类别通道确实到了前端（见 gap-acceptance.md 偏离 20）
     const shading = await cdp.eval(`
