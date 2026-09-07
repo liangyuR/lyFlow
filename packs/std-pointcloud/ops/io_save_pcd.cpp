@@ -86,8 +86,8 @@ void registerIoSavePcd(Registry& r) {
   OperatorDesc op;
   op.id = "io.save_pcd";
   op.version = "1.0.0";
-  op.label = "Save PCD";
-  op.category = "IO/Output";
+  op.label = "保存 PCD";
+  op.category = "输入输出/输出";
   op.keywords = {"save", "write", "export", "pcd", "ply", "保存", "导出"};
   op.doc = "把点云写到磁盘。按扩展名选 PCD 或 PLY，实际存在的通道都会写进去。";
 

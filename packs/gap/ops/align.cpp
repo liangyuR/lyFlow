@@ -318,8 +318,8 @@ void registerAlignTemplate(Registry& r) {
   OperatorDesc op;
   op.id = "gap.align_template";
   op.version = "1.0.0";
-  op.label = "Align Template";
-  op.category = "Gap/Align";
+  op.label = "配准模板";
+  op.category = "间隙/配准";
   op.keywords = {"icp", "template", "align", "配准", "模板"};
   op.doc =
       "把一对模板配到当前样本上（复刻 evaluate_pair）：全局粗配 → 左右两侧 ICP、"
@@ -378,8 +378,8 @@ void registerSelectAlignment(Registry& r) {
   OperatorDesc op;
   op.id = "gap.select_alignment";
   op.version = "1.0.0";
-  op.label = "Select Alignment";
-  op.category = "Gap/Align";
+  op.label = "选择配准结果";
+  op.category = "间隙/配准";
   op.keywords = {"template", "select", "best icp", "模板选择"};
   op.doc =
       "在候选模板里挑一个：先过滤左右都 ≥ minScore 的，"

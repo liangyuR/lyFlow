@@ -167,8 +167,8 @@ void registerMlOnnxRun(Registry& r) {
   OperatorDesc op;
   op.id = "ml.onnx_run";
   op.version = "1.0.0";
-  op.label = "ONNX Run";
-  op.category = "ML/Inference";
+  op.label = "ONNX 推理";
+  op.category = "机器学习/推理";
   // 关键词里不能出现小写的 i-n-f：manifest 的序列化用例是子串匹配（test_executor.cpp:252）
   op.keywords = {"onnx", "Inference", "model", "tensor", "推理", "模型"};
   op.doc =

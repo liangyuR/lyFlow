@@ -253,8 +253,8 @@ void registerResultBundle(Registry& r) {
   OperatorDesc op;
   op.id = "gap.result_bundle";
   op.version = "1.0.0";
-  op.label = "Result Bundle";
-  op.category = "Gap/Measure";
+  op.label = "结果汇总";
+  op.category = "间隙/测量";
   op.keywords = {"bundle", "quality", "diagnostics", "汇总", "质量"};
   op.doc =
       "把一次测量的所有结果与质量指标汇聚成一个 GapResultBundle Record，"

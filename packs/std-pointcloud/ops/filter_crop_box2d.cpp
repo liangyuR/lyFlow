@@ -35,8 +35,8 @@ void registerFilterCropBox2D(Registry& r) {
   OperatorDesc op;
   op.id = "filter.crop_box2d";
   op.version = "1.0.0";
-  op.label = "Crop Box 2D";
-  op.category = "Filter/Crop";
+  op.label = "裁剪框 2D";
+  op.category = "过滤/裁剪";
   op.keywords = {"crop", "box", "roi", "2d", "裁剪", "感兴趣区域"};
   op.doc =
       "按 Box2D 在 XY 平面上裁剪（z 不参与）。\n"

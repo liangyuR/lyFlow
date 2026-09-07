@@ -448,8 +448,8 @@ void registerProfileTensor(Registry& r) {
   OperatorDesc op;
   op.id = "gap.profile_tensor";
   op.version = "1.0.0";
-  op.label = "Profile Tensor";
-  op.category = "Gap/Model";
+  op.label = "剖面张量";
+  op.category = "间隙/模型";
   op.keywords = {"onnx", "tensor", "channels", "剖面", "张量"};
   op.doc =
       "把两片**原始 1280 槽**剖面拼成模型输入张量 [2, 6, 1280]。"
@@ -471,8 +471,8 @@ void registerLabelsFromLogits(Registry& r) {
   OperatorDesc op;
   op.id = "gap.labels_from_logits";
   op.version = "1.0.0";
-  op.label = "Labels from Logits";
-  op.category = "Gap/Model";
+  op.label = "由 Logits 得到标签";
+  op.category = "间隙/模型";
   op.keywords = {"argmax", "labels", "logits", "分割", "类别"};
   op.doc =
       "逐槽 argmax：[2, 类别数, 1280] 的 logits -> 两行各 1280 个类 id。"
@@ -488,8 +488,8 @@ void registerRoiFromLabels(Registry& r) {
   OperatorDesc op;
   op.id = "gap.roi_from_labels";
   op.version = "1.0.0";
-  op.label = "ROI from Labels";
-  op.category = "Gap/Model";
+  op.label = "由标签得到 ROI";
+  op.category = "间隙/模型";
   op.keywords = {"roi", "boxes", "refine", "模型框"};
   op.doc =
       "逐槽标签 → 四个业务 ROI。框在这里就换成测量帧的米（x→x, z→y, /1000），"
@@ -546,8 +546,8 @@ void registerLabelsToCloud(Registry& r) {
   OperatorDesc op;
   op.id = "gap.labels_to_cloud";
   op.version = "1.0.0";
-  op.label = "Labels to Cloud";
-  op.category = "Gap/Model";
+  op.label = "标签映射到点云";
+  op.category = "间隙/模型";
   op.keywords = {"labels", "color", "着色", "分割结果"};
   op.doc =
       "按类别给点上色，只为了在 3D 视图里看分割结果。八类固定色表写进 rgb，"
@@ -581,8 +581,8 @@ void registerDropNonFinite(Registry& r) {
   OperatorDesc op;
   op.id = "gap.drop_non_finite";
   op.version = "1.0.0";
-  op.label = "Drop Non-finite";
-  op.category = "Gap/Prepare";
+  op.label = "剔除非有限值";
+  op.category = "间隙/预处理";
   // 关键词不能出现小写的 n-a-n：core 的 manifest 序列化用例是子串匹配（test_executor.cpp:419）
   op.keywords = {"NaN", "finite", "剔除", "无效槽"};
   op.doc =
@@ -599,8 +599,8 @@ void registerRollAnchoredCrop(Registry& r) {
   OperatorDesc op;
   op.id = "gap.roll_anchored_crop";
   op.version = "1.0.0";
-  op.label = "Roll-anchored Crop";
-  op.category = "Gap/Model";
+  op.label = "随动裁剪";
+  op.category = "间隙/模型";
   op.keywords = {"crop", "roll", "window", "跟随零件"};
   op.doc =
       "跟随零件的整体裁剪窗：中心取两个 roll 框中心的中点，半宽半高来自参数。"

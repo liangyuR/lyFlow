@@ -146,8 +146,8 @@ void registerLoadProfilePair(Registry& r) {
   OperatorDesc op;
   op.id = "gap.load_profile_pair";
   op.version = "1.0.0";
-  op.label = "Load Profile Pair";
-  op.category = "Gap/IO";
+  op.label = "加载剖面对";
+  op.category = "间隙/输入输出";
   op.keywords = {"pcd", "profile", "master", "slave", "线扫", "测点"};
   op.doc =
       "读一个测点目录下的双头线扫剖面：Master 是 primary，Slave 是 secondary。"
@@ -203,8 +203,8 @@ void registerToMeasurementFrame(Registry& r) {
   OperatorDesc op;
   op.id = "gap.to_measurement_frame";
   op.version = "1.0.0";
-  op.label = "To Measurement Frame";
-  op.category = "Gap/Prepare";
+  op.label = "转换到测量帧";
+  op.category = "间隙/预处理";
   op.keywords = {"axis", "swap", "frame", "换轴", "测量帧"};
   op.doc = "传感器 XZ 帧 → 测量 XY 帧：交换 y 与 z。这是反射不是旋转（复刻 swapCloudAxis）。";
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "传感器帧的点云。", true}};
@@ -218,8 +218,8 @@ void registerLoadTemplate(Registry& r) {
   OperatorDesc op;
   op.id = "gap.load_template";
   op.version = "1.0.0";
-  op.label = "Load Template";
-  op.category = "Gap/IO";
+  op.label = "加载模板";
+  op.category = "间隙/输入输出";
   op.keywords = {"template", "模板", "pcd"};
   op.doc = "读一对模板 PCD。模板已经在测量 XY 帧里（z=0），不需要换轴。";
   op.outputs = {

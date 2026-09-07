@@ -55,8 +55,8 @@ void registerUtilMerge(Registry& r) {
   OperatorDesc op;
   op.id = "util.merge";
   op.version = "1.0.0";
-  op.label = "Merge Clouds";
-  op.category = "Util";
+  op.label = "合并点云";
+  op.category = "工具";
   op.keywords = {"merge", "concat", "combine", "join", "合并", "拼接"};
   op.doc = "把两片点云拼成一片。通道求交：只有一方带的通道会被丢弃并告警。";
 

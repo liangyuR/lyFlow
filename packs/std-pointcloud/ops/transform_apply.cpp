@@ -49,8 +49,8 @@ void registerTransformApply(Registry& r) {
   OperatorDesc op;
   op.id = "transform.apply";
   op.version = "1.0.0";
-  op.label = "Apply Transform";
-  op.category = "Transform";
+  op.label = "应用变换";
+  op.category = "变换";
   op.keywords = {"transform", "apply", "rigid", "变换", "应用"};
   op.doc = "把 4x4 变换作用到点云上。法线同时被旋转并重新归一化。";
 

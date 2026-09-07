@@ -90,8 +90,8 @@ void registerFitLine2D(Registry& r) {
   OperatorDesc op;
   op.id = "fit.line_2d";
   op.version = "1.0.0";
-  op.label = "Fit Line 2D";
-  op.category = "Fit/Line";
+  op.label = "拟合直线 2D";
+  op.category = "拟合/直线";
   op.keywords = {"line", "ransac", "fit", "2d", "直线", "拟合"};
   op.doc =
       "在 XY 平面上拟合一条直线（z 不参与）。RANSAC 的 random 关掉，同输入同结果。\n"

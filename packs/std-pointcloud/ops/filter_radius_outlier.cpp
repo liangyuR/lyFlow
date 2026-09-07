@@ -55,8 +55,8 @@ void registerFilterRadiusOutlier(Registry& r) {
   OperatorDesc op;
   op.id = "filter.radius_outlier";
   op.version = "1.0.0";
-  op.label = "Radius Outlier Removal";
-  op.category = "Filter/Outlier";
+  op.label = "半径离群点剔除";
+  op.category = "过滤/离群点";
   op.keywords = {"outlier", "radius", "noise", "半径", "离群", "去噪"};
   op.doc = "半径内邻居数不足的点被认为是孤立噪点。比统计法更直观：直接说「多远之内至少要有几个同伴」。";
 

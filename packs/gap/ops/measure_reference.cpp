@@ -199,8 +199,8 @@ void registerMeasureReference(Registry& r) {
   OperatorDesc op;
   op.id = "gap.measure_reference";
   op.version = "1.0.0";
-  op.label = "Measure (Reference)";
-  op.category = "Gap/Reference";
+  op.label = "测量（参考）";
+  op.category = "间隙/参考";
   op.keywords = {"reference", "blackbox", "对照", "基线"};
   op.doc =
       "整条主路径的黑盒实现：直接调 MeasurementEngine::measure。"

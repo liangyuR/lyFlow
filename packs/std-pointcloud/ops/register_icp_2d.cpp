@@ -94,8 +94,8 @@ void registerRegisterIcp2D(Registry& r) {
   OperatorDesc op;
   op.id = "register.icp_2d";
   op.version = "1.0.0";
-  op.label = "ICP 2D";
-  op.category = "Register/ICP";
+  op.label = "ICP 配准 2D";
+  op.category = "配准/ICP";
   op.keywords = {"icp", "register", "align", "2d", "配准", "对齐"};
   op.doc =
       "XY 平面上的 point-to-plane ICP。源云的法线由 knn 邻域现估，"

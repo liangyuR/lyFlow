@@ -82,8 +82,8 @@ void registerFilterPassthrough(Registry& r) {
   OperatorDesc op;
   op.id = "filter.passthrough";
   op.version = "1.0.0";
-  op.label = "Passthrough";
-  op.category = "Filter/Crop";
+  op.label = "直通滤波";
+  op.category = "过滤/裁剪";
   op.keywords = {"crop", "clip", "range", "limit", "裁剪", "直通", "范围"};
   op.doc = "沿某个字段做区间裁剪，保留（或排除）落在 [min, max] 内的点。";
 

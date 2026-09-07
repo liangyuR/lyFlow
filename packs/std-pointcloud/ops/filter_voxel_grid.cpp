@@ -174,8 +174,8 @@ void registerFilterVoxelGrid(Registry& r) {
   OperatorDesc op;
   op.id = "filter.voxel_grid";
   op.version = "1.0.0";
-  op.label = "Voxel Grid";
-  op.category = "Filter/Downsample";
+  op.label = "体素网格";
+  op.category = "过滤/降采样";
   op.keywords = {"downsample", "voxel", "grid", "降采样", "体素", "抽稀"};
   op.doc = "用体素栅格降采样，每个体素保留一个代表点。";
 

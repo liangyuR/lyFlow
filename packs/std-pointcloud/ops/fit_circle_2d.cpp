@@ -72,8 +72,8 @@ void registerFitCircle2D(Registry& r) {
   OperatorDesc op;
   op.id = "fit.circle_2d";
   op.version = "1.0.0";
-  op.label = "Fit Circle 2D";
-  op.category = "Fit/Circle";
+  op.label = "拟合圆 2D";
+  op.category = "拟合/圆";
   op.keywords = {"circle", "ransac", "fit", "2d", "圆", "拟合"};
   op.doc =
       "在 XY 平面上拟合一个圆（PCL 的 SACMODEL_CIRCLE2D）。\n"

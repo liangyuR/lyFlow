@@ -26,8 +26,8 @@ void registerSegmentExtractIndices(Registry& r) {
   OperatorDesc op;
   op.id = "segment.extract_indices";
   op.version = "1.0.0";
-  op.label = "Extract Indices";
-  op.category = "Segment";
+  op.label = "提取索引";
+  op.category = "分割";
   op.keywords = {"extract", "indices", "split", "select", "提取", "下标", "分离"};
   op.doc = "按下标把点云一分为二。两个输出端口同时给出，不需要 negative 参数。";
 

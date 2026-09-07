@@ -90,8 +90,8 @@ void registerFilterCropBox(Registry& r) {
   OperatorDesc op;
   op.id = "filter.crop_box";
   op.version = "1.0.0";
-  op.label = "Crop Box";
-  op.category = "Filter/Crop";
+  op.label = "裁剪框";
+  op.category = "过滤/裁剪";
   op.keywords = {"crop", "box", "roi", "aabb", "裁剪", "包围盒", "感兴趣区域"};
   op.doc = "用一个长方体裁剪点云。接了 Pose 输入时，盒子定义在该变换的局部坐标系里。";
 

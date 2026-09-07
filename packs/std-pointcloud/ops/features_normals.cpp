@@ -82,8 +82,8 @@ void registerFeaturesNormals(Registry& r) {
   OperatorDesc op;
   op.id = "features.normals";
   op.version = "1.0.0";
-  op.label = "Estimate Normals";
-  op.category = "Features";
+  op.label = "估计法线";
+  op.category = "特征";
   op.keywords = {"normal", "normals", "法线", "法向量"};
   op.doc = "估计每个点的法线，写进点云的 normals 通道。原有的强度与颜色通道保持不变。";
 

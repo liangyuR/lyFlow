@@ -494,8 +494,8 @@ void registerFitLine(Registry& r) {
   OperatorDesc op;
   op.id = "gap.fit_line";
   op.version = "1.0.0";
-  op.label = "Fit Line";
-  op.category = "Gap/Fit";
+  op.label = "拟合直线";
+  op.category = "间隙/拟合";
   op.keywords = {"line", "ransac", "直线", "拟合"};
   op.doc =
       "在 ROI 里拟合一条直线：先整体拟合，再截取靠缝隙那一端的 segmentPoints 个内点、"
@@ -566,8 +566,8 @@ void registerFitGapCircles(Registry& r) {
   OperatorDesc op;
   op.id = "gap.fit_gap_circles";
   op.version = "1.0.0";
-  op.label = "Fit Gap Circles";
-  op.category = "Gap/Fit";
+  op.label = "拟合间隙圆";
+  op.category = "间隙/拟合";
   op.keywords = {"circle", "ransac", "圆", "拟合", "间隙"};
   op.doc =
       "间隙两侧的圆拟合。先在合并云的 ROI 里拟合；失败按 retryDistance 再试一次；"

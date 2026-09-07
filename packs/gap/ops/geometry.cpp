@@ -199,8 +199,8 @@ void registerOverallRoi(Registry& r) {
   OperatorDesc op;
   op.id = "gap.overall_roi";
   op.version = "1.0.0";
-  op.label = "Overall ROI";
-  op.category = "Gap/Prepare";
+  op.label = "整体 ROI";
+  op.category = "间隙/预处理";
   op.keywords = {"roi", "auto center", "整体", "裁剪框"};
   op.doc =
       "整体 ROI 框。auto_center 保留配置的宽高，中心跟着两片云各自的稳健中心"
@@ -241,8 +241,8 @@ void registerBusinessRois(Registry& r) {
   OperatorDesc op;
   op.id = "gap.business_rois";
   op.version = "1.0.0";
-  op.label = "Business ROIs";
-  op.category = "Gap/Align";
+  op.label = "业务 ROI";
+  op.category = "间隙/配准";
   op.keywords = {"roi", "business", "业务框"};
   op.doc =
       "把选中模板的四个业务 ROI 按 ICP 变换搬到当前样本上。"
@@ -272,8 +272,8 @@ void registerSelectedPoint(Registry& r) {
   OperatorDesc op;
   op.id = "gap.selected_point";
   op.version = "1.0.0";
-  op.label = "Selected Point";
-  op.category = "Gap/Fit";
+  op.label = "选点";
+  op.category = "间隙/拟合";
   op.keywords = {"selected point", "选点"};
   op.doc = "取离 ROI 的 min 角最近的点。注意取自**整片云**，不裁 ROI（§3.6）。";
   op.inputs = {
@@ -290,8 +290,8 @@ void registerNearestToLine(Registry& r) {
   OperatorDesc op;
   op.id = "gap.nearest_to_line";
   op.version = "1.0.0";
-  op.label = "Nearest To Line";
-  op.category = "Gap/Fit";
+  op.label = "最近点到直线";
+  op.category = "间隙/拟合";
   op.keywords = {"nearest point", "最近点"};
   op.doc =
       "取离给定直线垂距最小的那个云点（复刻 lineCloudDistance 的选点），"

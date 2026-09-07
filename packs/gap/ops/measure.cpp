@@ -152,9 +152,9 @@ void registerFlush(Registry& r) {
   OperatorDesc op;
   op.id = "gap.flush";
   op.version = "1.0.0";
-  op.label = "Flush";
-  op.category = "Gap/Measure";
-  op.keywords = {"flush", "段差"};
+  op.label = "面差";
+  op.category = "间隙/测量";
+  op.keywords = {"flush", "段差", "面差"};
   op.doc = "段差 = 参考点到基准线的距离，取绝对值再加 offset。符号在原算法里是死代码（§3.7）。";
   op.inputs = {
       Port{"baseLine", "Line2D", "Base Line", "基准面拟合出的直线。", true},
@@ -176,8 +176,8 @@ void registerGap(Registry& r) {
   OperatorDesc op;
   op.id = "gap.gap";
   op.version = "1.0.0";
-  op.label = "Gap";
-  op.category = "Gap/Measure";
+  op.label = "间隙";
+  op.category = "间隙/测量";
   op.keywords = {"gap", "间隙"};
   op.doc =
       "间隙。definition B 是两圆的圆心连线距离；definition A 是沿基准面方向的两条切线之间的"
@@ -210,8 +210,8 @@ void registerJudge(Registry& r) {
   OperatorDesc op;
   op.id = "gap.judge";
   op.version = "1.0.0";
-  op.label = "Judge";
-  op.category = "Gap/Measure";
+  op.label = "判定";
+  op.category = "间隙/测量";
   op.keywords = {"judge", "tolerance", "判定", "公差"};
   op.doc =
       "按标称值与上下偏差判定。margin 是「接近边界」的宽度，"

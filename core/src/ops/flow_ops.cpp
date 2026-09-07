@@ -102,8 +102,8 @@ void registerFlowOps(Registry& r) {
     OperatorDesc op;
     op.id = "flow.fallback";
     op.version = "1.0.0";
-    op.label = "Fallback";
-    op.category = "Flow";
+    op.label = "回退";
+    op.category = "流程";
     op.keywords = {"fallback", "retry", "error", "回退", "备用", "容错"};
     op.doc =
         "a 成功就透传 a；a 失败（或没有产出）才调度 b 的上游闭包并透传 b。"
@@ -130,8 +130,8 @@ void registerFlowOps(Registry& r) {
     OperatorDesc op;
     op.id = "flow.select";
     op.version = "1.0.0";
-    op.label = "Select";
-    op.category = "Flow";
+    op.label = "选择";
+    op.category = "流程";
     op.keywords = {"select", "switch", "if", "condition", "条件", "分支", "选择"};
     op.doc =
         "按 cond 选一路：Measurement 看它的 ok，Record 看 path 指向的布尔字段。"

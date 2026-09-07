@@ -14,8 +14,8 @@ void registerUtilReroute(Registry& r) {
   OperatorDesc op;
   op.id = "util.reroute";
   op.version = "1.0.0";
-  op.label = "Reroute";
-  op.category = "Util";
+  op.label = "路由";
+  op.category = "工具";
   op.keywords = {"reroute", "pipe", "wire", "整理", "转接", "布线"};
   // 不是特殊节点类型，就是一个 Any → Any 的普通算子（E5）。实际类型由连线推导。
   op.doc = "把输入原样传给输出。只为整理连线，端口类型跟着连上的那一端走。";

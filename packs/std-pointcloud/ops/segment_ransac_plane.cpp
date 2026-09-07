@@ -90,8 +90,8 @@ void registerSegmentRansacPlane(Registry& r) {
   OperatorDesc op;
   op.id = "segment.ransac_plane";
   op.version = "1.0.0";
-  op.label = "RANSAC Plane";
-  op.category = "Segment";
+  op.label = "RANSAC 平面";
+  op.category = "分割";
   op.keywords = {"plane", "ransac", "ground", "segmentation", "平面", "地面", "分割"};
   op.doc = "用 RANSAC 拟合最大平面，输出内点下标与平面方程。接 Extract Indices 就能把地面分离出去。";
 

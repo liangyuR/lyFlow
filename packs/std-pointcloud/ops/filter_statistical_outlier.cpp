@@ -69,8 +69,8 @@ void registerFilterStatisticalOutlier(Registry& r) {
   OperatorDesc op;
   op.id = "filter.statistical_outlier";
   op.version = "1.0.0";
-  op.label = "Statistical Outlier Removal";
-  op.category = "Filter/Outlier";
+  op.label = "统计离群点剔除";
+  op.category = "过滤/离群点";
   op.keywords = {"outlier", "noise", "statistical", "sor", "离群", "去噪", "统计"};
   op.doc = "按每个点到 K 近邻的平均距离剔除离群点。距离超过 均值 + n×标准差 的点被认为是噪声。";
 

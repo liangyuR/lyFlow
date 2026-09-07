@@ -78,8 +78,8 @@ void registerGenSynthetic(Registry& r) {
   OperatorDesc op;
   op.id = "gen.synthetic";
   op.version = "1.0.0";
-  op.label = "Synthetic Cloud";
-  op.category = "Generate";
+  op.label = "合成点云";
+  op.category = "生成";
   op.keywords = {"synthetic", "test", "demo", "sample", "生成", "测试", "合成"};
   op.doc = "生成一片测试点云：地面 + 立方体 + 高斯噪声 + 离群点。不依赖任何数据文件。";
 
