@@ -259,12 +259,23 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
 
     // 量测尺寸：不进 GraphDoc，但要留在旁路缓存里供 MiniMap 使用。
     // 只在尺寸真的变了时才 bump，否则会和 React Flow 的重新量测互相触发。
+    // 严格 !== 曾经假设 ResizeObserver 两次量出的同一个稳定尺寸会是完全相等的浮点数，
+    // 但 Windows 下的分数 DPI 缩放会让同一个节点连续两次量出例如 142.3999939 / 142.4000015
+    // 这种差 0.001px 的"抖动"，永远不会严格相等 -> sizeChanged 永远是 true -> 计数器无限自增
+    // -> 触发 React Flow 自己的 setNodes 重新量测 -> 再抖一次，构成"Maximum update depth
+    // exceeded" 的死循环（点击"显示点位配置"首次挂载画布时最容易撞上，因为那一刻正好赶上
+    // Splitter 面板重新分配宽度）。改成容差比较：小于半个像素的差异视为同一个尺寸，不再触发。
+    const SIZE_EPSILON_PX = 0.5;
     let sizeChanged = false;
     for (const s of extractSizes(
       changes as { type: string; id: string; dimensions?: { width: number; height: number } }[],
     )) {
       const prev = measured.current.get(s.id);
-      if (!prev || prev.width !== s.width || prev.height !== s.height) {
+      if (
+        !prev ||
+        Math.abs(prev.width - s.width) > SIZE_EPSILON_PX ||
+        Math.abs(prev.height - s.height) > SIZE_EPSILON_PX
+      ) {
         measured.current.set(s.id, { width: s.width, height: s.height });
         sizeChanged = true;
       }
