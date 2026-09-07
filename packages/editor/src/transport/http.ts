@@ -42,9 +42,9 @@ export interface HttpTransportOptions {
   /** 事件流的地址。宿主的 WebSocket 不在 HTTP 端口上时给这一项；
    *  缺省是 baseUrl 换成 ws(s) 之后加 `/lyflow/events`。 */
   eventsUrl?: string;
-  /** 握手时请求的子协议。缺省是 `lyflow.v1` 加上带 token 的那一项。
-   *  后端的 WebSocket 库不会回 `Sec-WebSocket-Protocol` 时（浏览器会因此拒绝握手）
-   *  给 `[]`，并把鉴权放进 `eventsUrl` 自己。 */
+  /** 握手时请求的子协议。缺省是 `lyflow.v1` 加上带 token 的那一项，也是契约的正路。
+   *  历史兼容：后端的 WebSocket 库不会回 `Sec-WebSocket-Protocol` 时（浏览器会因此拒绝握手）
+   *  给 `[]`，并把鉴权放进 `eventsUrl` 自己。新后端不要走这一条。 */
   eventsProtocols?: string[];
 }
 
