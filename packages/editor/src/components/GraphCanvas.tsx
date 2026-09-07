@@ -211,6 +211,8 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
   // ref 存数据 + 计数器触发重渲染，尺寸稳定后计数器不再变，不会自激。
   const measured = useRef(new Map<string, { width: number; height: number }>());
   const [measuredTick, setMeasuredTick] = useState(0);
+  // 同一次挂载/布局抖动里，允许连续触发重渲染的次数上限，见下面 onNodesChange 里的说明。
+  const sizeBurst = useRef({ count: 0, resetHandle: null as number | null });
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const [guides, setGuides] = useState<Guide[]>([]);
   const [snapping, setSnapping] = useState(true);
@@ -263,8 +265,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     // 但 Windows 下的分数 DPI 缩放会让同一个节点连续两次量出例如 142.3999939 / 142.4000015
     // 这种差 0.001px 的"抖动"，永远不会严格相等 -> sizeChanged 永远是 true -> 计数器无限自增
     // -> 触发 React Flow 自己的 setNodes 重新量测 -> 再抖一次，构成"Maximum update depth
-    // exceeded" 的死循环（点击"显示点位配置"首次挂载画布时最容易撞上，因为那一刻正好赶上
-    // Splitter 面板重新分配宽度）。改成容差比较：小于半个像素的差异视为同一个尺寸，不再触发。
+    // exceeded" 的死循环。改成容差比较：小于半个像素的差异视为同一个尺寸，不再触发。
     const SIZE_EPSILON_PX = 0.5;
     let sizeChanged = false;
     for (const s of extractSizes(
@@ -280,7 +281,29 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         sizeChanged = true;
       }
     }
-    if (sizeChanged) setMeasuredTick((t) => t + 1);
+    // 容差挡不住的情况依然存在（比如画布在挂载瞬间跟着 Splitter/Segmented 一起被重新
+    // 布局，量出的宽高每次都真的差好几像素，不是浮点抖动）。这里再加一道熔断：同一阵
+    // "还在变"的连续触发超过 MAX_SIZE_BUMPS_PER_BURST 次就不再 setState 了 —— 尺寸缓存
+    // 仍然照量到的最新值更新（下次真正需要用到时不会是陈旧值），只是不再拿它去触发
+    // React Flow 重新渲染，从而不管抖动多大都不可能撞上 React 的嵌套更新上限。等一帧
+    // 没有新的尺寸变化，计数器复位，不影响之后用户手动拖拽调整节点大小之类的正常场景。
+    if (sizeChanged) {
+      const burst = sizeBurst.current;
+      burst.count += 1;
+      if (burst.resetHandle !== null) cancelAnimationFrame(burst.resetHandle);
+      burst.resetHandle = requestAnimationFrame(() => {
+        sizeBurst.current.count = 0;
+        sizeBurst.current.resetHandle = null;
+      });
+      const MAX_SIZE_BUMPS_PER_BURST = 8;
+      if (burst.count <= MAX_SIZE_BUMPS_PER_BURST) {
+        setMeasuredTick((t) => t + 1);
+      } else if (burst.count === MAX_SIZE_BUMPS_PER_BURST + 1) {
+        console.warn(
+          "[LyFlow] 节点尺寸连续多次变化未收敛，已停止跟随重渲染以避免死循环（Maximum update depth exceeded）。",
+        );
+      }
+    }
 
     // select / dragging 是 UI 运行时状态，不进 GraphDoc。
     // 选中由 onSelectionChange 统一处理，这里忽略。
