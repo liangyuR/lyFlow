@@ -80,6 +80,7 @@ void registerNearestToLine(Registry& r);
 void registerFitGapCircles(Registry& r);
 void registerFlush(Registry& r);
 void registerGap(Registry& r);
+void registerCornerVertex(Registry& r);
 void registerJudge(Registry& r);
 void registerMeasureReference(Registry& r);
 void registerProfileTensor(Registry& r);

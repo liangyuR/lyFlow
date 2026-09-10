@@ -1,6 +1,9 @@
 // 段差、间隙、判定。三个算子都很短 —— 真正的复杂度在上游的拟合里。
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
+#include <string>
 
 #include "gap_detection/GapUtils.hpp"
 #include "gap_ops.h"
@@ -135,6 +138,132 @@ Status judge(const Inputs& inputs, const ParamView& params, Outputs& outputs, Ex
   return Status::Ok();
 }
 
+// ------------------------------------------------------------ 软装夹角（corner）
+
+constexpr double kPi = 3.14159265358979323846;
+
+/// 一条带端点的线段里离顶点远的那一端 —— 用来定「这条翼面从顶点往哪边走」。
+/// 没有端点就退回 line.point，它总落在拟合用的那段点云中间。
+Eigen::Vector2f farEndOf(const lyflow::Line2D& line, const Eigen::Vector2f& vertex) {
+  if (!line.hasSegment) return Eigen::Vector2f(line.point[0], line.point[1]);
+  const Eigen::Vector2f a(line.start[0], line.start[1]);
+  const Eigen::Vector2f b(line.end[0], line.end[1]);
+  return (a - vertex).squaredNorm() >= (b - vertex).squaredNorm() ? a : b;
+}
+
+std::string degText(double deg) {
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%.1f", deg);
+  return buf;
+}
+
+Status cornerVertex(const Inputs& inputs, const ParamView& params, Outputs& outputs,
+                    ExecContext& ctx) {
+  const lyflow::Line2D& left = *inputs.get("lineLeft").asLine2D();
+  const lyflow::Line2D& right = *inputs.get("lineRight").asLine2D();
+
+  Eigen::Vector2f dL(left.dir[0], left.dir[1]);
+  Eigen::Vector2f dR(right.dir[0], right.dir[1]);
+  if (!(dL.norm() > 0) || !(dR.norm() > 0)) {
+    return Status::Error(Phase::Execute, "bad_input", "翼面直线的方向是零向量");
+  }
+  dL.normalize();
+  dR.normalize();
+
+  // 两线求交。近平行时行列式趋零、交点飞到无穷远 —— 这是本算法唯一的退化模式。先在这里
+  // 挡住，再由 minAngle/maxAngle 挡住「交点还在、但几何已经不对」的情形。
+  const float det = dL.x() * dR.y() - dL.y() * dR.x();
+  if (std::fabs(det) < 1e-6F) {
+    return Status::Error(Phase::Execute, "invalid_geometry", "两条翼面线近乎平行，交点不成立");
+  }
+  const Eigen::Vector2f pL(left.point[0], left.point[1]);
+  const Eigen::Vector2f pR(right.point[0], right.point[1]);
+  const Eigen::Vector2f w = pR - pL;
+  const Eigen::Vector2f vertex = pL + ((w.x() * dR.y() - w.y() * dR.x()) / det) * dL;
+
+  // 夹角取「两条翼面各自从顶点出发的方向」之间的角，∈ (0, 180)。直接拿 dir 点乘不行：
+  // dir 的正负是拟合给的，60° 的尖角会被算成 120°。
+  Eigen::Vector2f aL = farEndOf(left, vertex) - vertex;
+  Eigen::Vector2f aR = farEndOf(right, vertex) - vertex;
+  double angleDeg = 0;
+  if (aL.norm() > 0 && aR.norm() > 0) {
+    aL.normalize();
+    aR.normalize();
+    angleDeg = std::acos(std::clamp(static_cast<double>(aL.dot(aR)), -1.0, 1.0)) * 180.0 / kPi;
+  }
+  const double minAngle = params.number("minAngle");
+  const double maxAngle = params.number("maxAngle");
+  if (angleDeg < minAngle || angleDeg > maxAngle) {
+    return Status::Error(Phase::Execute, "invalid_geometry",
+                         "夹角 " + degText(angleDeg) + "° 不在 [" + degText(minAngle) + ", " +
+                             degText(maxAngle) + "] 之内");
+  }
+
+  // u：间隙的量取方向。与 gap.gap definition A 同一约定 —— 沿基准面、从基准件指向另一件。
+  Eigen::Vector2f u = dL;
+  if (inputs.has("baseLine")) {
+    const lyflow::Line2D& base = *inputs.get("baseLine").asLine2D();
+    const Eigen::Vector2f b(base.dir[0], base.dir[1]);
+    if (b.norm() > 0) u = b;
+  }
+  u.normalize();
+  if (u.x() < 0) u = -u;
+  const Eigen::Vector2f nrm(-u.y(), u.x());
+
+  // 金件顶点是模板坐标系里的常数（和四个业务 ROI 一样），用 ICP 变换搬到当前样本上。
+  Eigen::Vector2f origin(mmToM(params.number("originX")), mmToM(params.number("originY")));
+  bool aligned = false;
+  if (inputs.has("alignment")) {
+    const lyflow::Record* rec = inputs.get("alignment").asRecord();
+    if (rec == nullptr || rec->type != "GapAlignment") {
+      return Status::Error(Phase::Execute, "bad_input", "输入不是 GapAlignment", {}, "alignment");
+    }
+    if (rec->data.contains("left") && rec->data["left"].contains("transform")) {
+      const Eigen::Matrix3f t = transformFromJson(rec->data["left"]["transform"]);
+      const Eigen::Vector3f q = t * Eigen::Vector3f(origin.x(), origin.y(), 1.0F);
+      origin = Eigen::Vector2f(q.x(), q.y());
+      aligned = true;
+    }
+  }
+
+  const Eigen::Vector2f delta = vertex - origin;
+  const double scale = params.number("scale");
+  const double alongU = mToMm(static_cast<double>(delta.dot(u)));
+  const double alongN = mToMm(static_cast<double>(delta.dot(nrm)));
+  const double gapMm = alongU * scale + params.number("gapOffset");
+  const double flushMm = alongN * scale + params.number("flushOffset");
+
+  lyflow::Point2D vp;
+  vp.p[0] = vertex.x();
+  vp.p[1] = vertex.y();
+  outputs.set("vertex", Data::point2d(vp));
+  setMeasurement(outputs, "gap", gapMm, true, {});
+  setMeasurement(outputs, "flush", flushMm, true, {});
+
+  lyflow::Measurement angle;
+  angle.value = angleDeg;
+  angle.ok = std::isfinite(angleDeg);
+  angle.unit = "deg";
+  outputs.set("angle", Data::measurement(std::move(angle)));
+  outputs.set("segment", Data::line2d(segmentOf(origin, vertex)));
+
+  lyflow::Record quality;
+  quality.type = "GapCornerQuality";
+  quality.data["vertexMm"] = {mToMm(vertex.x()), mToMm(vertex.y())};
+  quality.data["originMm"] = {mToMm(origin.x()), mToMm(origin.y())};
+  quality.data["deltaMm"] = {{"u", alongU}, {"n", alongN}};
+  quality.data["angleDeg"] = angleDeg;
+  quality.data["baseDirection"] = {u.x(), u.y()};
+  quality.data["scale"] = scale;
+  quality.data["alignmentApplied"] = aligned;
+  outputs.set("quality", Data::record(std::move(quality)));
+
+  ctx.log(LogLevel::Info, "corner: 顶点 (" + degText(mToMm(vertex.x())) + ", " +
+                              degText(mToMm(vertex.y())) + ") mm，夹角 " + degText(angleDeg) +
+                              "°");
+  return Status::Ok();
+}
+
 Param numParam(const char* name, const char* label, double def, const char* doc) {
   Param p;
   p.name = name;
@@ -203,6 +332,71 @@ void registerGap(Registry& r) {
   op.params = {definition, numParam("offset", "Offset", 0.0, "加在绝对值上的偏置。")};
   op.capabilities = {false, true, true};
   op.compute = &gapValue;
+  r.addOperator(std::move(op));
+}
+
+void registerCornerVertex(Registry& r) {
+  OperatorDesc op;
+  op.id = "gap.corner_vertex";
+  op.version = "1.0.0";
+  op.label = "软装夹角";
+  op.category = "间隙/测量";
+  op.keywords = {"corner", "vertex", "夹角", "软装", "间隙"};
+  op.doc =
+      "两件软装贴合成一个夹角时的间隙。两侧翼面各给一条拟合直线，取交点作虚拟顶点 V，"
+      "间隙 = V 相对金件顶点沿基准面方向的位移。相对「两侧圆拟合」的好处是 V 由几十个点的"
+      "直线拟合决定，不依赖缝边那几个受遮挡影响最大的点。\n"
+      "夹角接近 90° 时 V 只能沿基准线滑动，flush 与 gap 成定比、不可分辨 —— 这一路请用 "
+      "gap.judge 的 patrol 模式只出值不判定。";
+  op.inputs = {
+      Port{"lineLeft", "Line2D", "Left Flank", "基准件翼面拟合出的直线。", true},
+      Port{"lineRight", "Line2D", "Right Flank", "另一件翼面拟合出的直线。", true},
+      Port{"baseLine", "Line2D", "Base Line", "基准面直线，只取方向定 u。缺省用左翼面。", false},
+      Port{"alignment", "Record", "Alignment",
+           "GapAlignment：把模板坐标系里的金件顶点搬到当前样本上。不接就当单位变换。", false},
+  };
+  op.outputs = {
+      Port{"vertex", "Point2D", "Vertex", "两条翼面线的交点。", true},
+      Port{"gap", "Measurement", "Gap", "间隙，毫米。", true},
+      Port{"flush", "Measurement", "Flush", "段差，毫米。近 90° 夹角下不可观测。", true},
+      Port{"angle", "Measurement", "Angle", "两条翼面的夹角，度。", true},
+      Port{"segment", "Line2D", "Segment", "金件顶点到当前顶点的位移段。", true},
+      Port{"quality", "Record", "Quality", "GapCornerQuality：顶点、位移分量、夹角。", true},
+  };
+
+  Param scale;
+  scale.name = "scale";
+  scale.type = ParamType::Float;
+  scale.label = "Scale";
+  scale.doc =
+      "读数增益：gap = Δ·u × scale + offset。顶点位移比真实间隙大，用金件加已知位移标定。";
+  scale.def = Value::number(1.0);
+
+  Param minAngle;
+  minAngle.name = "minAngle";
+  minAngle.type = ParamType::Float;
+  minAngle.label = "Min Angle";
+  minAngle.doc = "夹角下限，超出即判失败。挡住近平行导致交点乱飞。";
+  minAngle.def = Value::number(20.0);
+  minAngle.unit = "deg";
+
+  Param maxAngle = minAngle;
+  maxAngle.name = "maxAngle";
+  maxAngle.label = "Max Angle";
+  maxAngle.doc = "夹角上限，超出即判失败。";
+  maxAngle.def = Value::number(160.0);
+
+  op.params = {
+      numParam("originX", "Origin X", 0.0, "金件顶点在模板坐标系里的 X，毫米。"),
+      numParam("originY", "Origin Y", 0.0, "金件顶点在模板坐标系里的 Y，毫米。"),
+      scale,
+      numParam("gapOffset", "Gap Offset", 0.0, "加在间隙上的偏置，用它让金件读 0。"),
+      numParam("flushOffset", "Flush Offset", 0.0, "加在段差上的偏置。"),
+      minAngle,
+      maxAngle,
+  };
+  op.capabilities = {false, true, true};
+  op.compute = &cornerVertex;
   r.addOperator(std::move(op));
 }
 

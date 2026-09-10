@@ -316,3 +316,114 @@ TEST_CASE("gap.overall_roi 的 auto_center 保留宽高、中心取两片云中�
   CHECK(out->min[1] == doctest::Approx(0.130));
   CHECK(out->max[1] == doctest::Approx(0.170));
 }
+
+// ------------------------------------------------------------ gap.corner_vertex
+
+namespace {
+
+/// 一条带端点的 2D 线段。dir 由两端点算出，正负与端点顺序一致 —— 算子不该依赖它。
+Line2D seg(float x0, float y0, float x1, float y1) {
+  Line2D l;
+  l.hasSegment = true;
+  l.start[0] = x0;
+  l.start[1] = y0;
+  l.end[0] = x1;
+  l.end[1] = y1;
+  l.point[0] = x0;
+  l.point[1] = y0;
+  const float dx = x1 - x0;
+  const float dy = y1 - y0;
+  const float n = std::sqrt(dx * dx + dy * dy);
+  l.dir[0] = dx / n;
+  l.dir[1] = dy / n;
+  return l;
+}
+
+}  // namespace
+
+TEST_CASE("gap.corner_vertex 交点相对金件顶点沿基准面方向分解") {
+  // 左翼面 y = 0.17 那条横线，右翼面 x = 0.01 那条竖线 → 交点 (0.01, 0.17)
+  const Line2D left = seg(-0.005f, 0.17f, 0.005f, 0.17f);
+  const Line2D right = seg(0.01f, 0.17f, 0.01f, 0.19f);
+  Line2D base = left;  // u = +x
+
+  Call call;
+  call.inputs["lineLeft"] = Data::line2d(left);
+  call.inputs["lineRight"] = Data::line2d(right);
+  call.inputs["baseLine"] = Data::line2d(base);
+  // 金件顶点 (8 mm, 170 mm) → 位移沿 u 是 2 mm，沿 n 是 0
+  REQUIRE(call.run("gap.corner_vertex", {{"originX", Value::number(8.0)},
+                                         {"originY", Value::number(170.0)},
+                                         {"gapOffset", Value::number(0.4)}})
+              .ok);
+  const Point2D* v = call.out("vertex").asPoint2D();
+  REQUIRE(v != nullptr);
+  CHECK(v->p[0] == doctest::Approx(0.01));
+  CHECK(v->p[1] == doctest::Approx(0.17));
+  CHECK(call.out("gap").asMeasurement()->value == doctest::Approx(2.4));
+  CHECK(call.out("flush").asMeasurement()->value == doctest::Approx(0.0));
+  CHECK(call.out("angle").asMeasurement()->value == doctest::Approx(90.0));
+  CHECK(call.out("angle").asMeasurement()->unit == "deg");
+
+  // scale 是读数增益：顶点位移比真实间隙大，标定用
+  Call scaled;
+  scaled.inputs = call.inputs;
+  REQUIRE(scaled.run("gap.corner_vertex", {{"originX", Value::number(8.0)},
+                                           {"originY", Value::number(170.0)},
+                                           {"scale", Value::number(0.5)}})
+              .ok);
+  CHECK(scaled.out("gap").asMeasurement()->value == doctest::Approx(1.0));
+}
+
+TEST_CASE("gap.corner_vertex 的夹角取两条翼面从顶点出发的方向，60° 不会变成 120°") {
+  // 两条翼面都从顶点往左走，夹角 60°。直接拿 dir 点乘会得到 120°。
+  const Line2D left = seg(0.0f, 0.0f, -0.01f, 0.0f);
+  const Line2D right = seg(0.0f, 0.0f, -0.005f, -0.0086602540f);
+
+  Call call;
+  call.inputs["lineLeft"] = Data::line2d(left);
+  call.inputs["lineRight"] = Data::line2d(right);
+  REQUIRE(call.run("gap.corner_vertex").ok);
+  CHECK(call.out("angle").asMeasurement()->value == doctest::Approx(60.0).epsilon(0.01));
+}
+
+TEST_CASE("gap.corner_vertex 近平行与夹角出界都判失败") {
+  Call parallel;
+  parallel.inputs["lineLeft"] = Data::line2d(seg(0.0f, 0.0f, 0.01f, 0.0f));
+  parallel.inputs["lineRight"] = Data::line2d(seg(0.0f, 0.001f, 0.01f, 0.001f));
+  const Status ps = parallel.run("gap.corner_vertex");
+  CHECK_FALSE(ps.ok);
+  CHECK(ps.code == "invalid_geometry");
+
+  Call narrow;
+  narrow.inputs["lineLeft"] = Data::line2d(seg(-0.005f, 0.17f, 0.005f, 0.17f));
+  narrow.inputs["lineRight"] = Data::line2d(seg(0.01f, 0.17f, 0.01f, 0.19f));
+  const Status ns = narrow.run("gap.corner_vertex", {{"maxAngle", Value::number(45.0)}});
+  CHECK_FALSE(ns.ok);
+  CHECK(ns.code == "invalid_geometry");
+}
+
+TEST_CASE("gap.corner_vertex 用 ICP 变换把模板坐标系里的金件顶点搬到样本上") {
+  const Line2D left = seg(-0.005f, 0.17f, 0.005f, 0.17f);
+  const Line2D right = seg(0.01f, 0.17f, 0.01f, 0.19f);
+
+  Record alignment;
+  alignment.type = "GapAlignment";
+  // 沿 +x 平移 2 mm：模板里的 (8, 170) 搬到样本上就是 (10, 170) = 交点 → 间隙读 0
+  alignment.data["left"]["transform"] = {1.0, 0.0, 0.002, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+
+  Call call;
+  call.inputs["lineLeft"] = Data::line2d(left);
+  call.inputs["lineRight"] = Data::line2d(right);
+  call.inputs["baseLine"] = Data::line2d(left);
+  call.inputs["alignment"] = Data::record(alignment);
+  REQUIRE(call.run("gap.corner_vertex",
+                   {{"originX", Value::number(8.0)}, {"originY", Value::number(170.0)}})
+              .ok);
+  // float 舍入下 1e-6 mm 量级的残差，绝对比较
+  CHECK(std::fabs(call.out("gap").asMeasurement()->value) < 1e-3);
+  const Record* q = call.out("quality").asRecord();
+  REQUIRE(q != nullptr);
+  CHECK(q->type == "GapCornerQuality");
+  CHECK(q->data["alignmentApplied"].get<bool>());
+}

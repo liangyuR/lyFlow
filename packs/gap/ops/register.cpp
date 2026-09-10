@@ -24,6 +24,7 @@ void registerPackOps(Registry& r) {
   registerFitGapCircles(r);
   registerFlush(r);
   registerGap(r);
+  registerCornerVertex(r);
   registerJudge(r);
   registerResultBundle(r);
   registerMeasureReference(r);
