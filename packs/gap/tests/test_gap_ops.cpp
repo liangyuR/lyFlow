@@ -428,6 +428,75 @@ TEST_CASE("gap.corner_vertex 用 ICP 变换把模板坐标系里的金件顶点�
   CHECK(q->data["alignmentApplied"].get<bool>());
 }
 
+// ------------------------------------------------------------ gap.point_offset
+
+namespace {
+
+Point2D pt(float x, float y) {
+  Point2D p;
+  p.p[0] = x;
+  p.p[1] = y;
+  return p;
+}
+
+}  // namespace
+
+TEST_CASE("gap.point_offset 把 b 相对 a 的位移分解到 x/y 两个轴") {
+  const Point2D a = pt(0.010f, 0.190f);
+  const Point2D b = pt(0.0125f, 0.1915f);
+
+  Call call;
+  call.inputs["a"] = Data::point2d(a);
+  call.inputs["b"] = Data::point2d(b);
+  REQUIRE(call.run("gap.point_offset").ok);
+  CHECK(call.out("dx").asMeasurement()->value == doctest::Approx(2.5).epsilon(1e-3));
+  CHECK(call.out("dy").asMeasurement()->value == doctest::Approx(1.5).epsilon(1e-3));
+  CHECK(call.out("distance").asMeasurement()->value ==
+        doctest::Approx(std::hypot(2.5, 1.5)).epsilon(1e-3));
+
+  const Line2D* segment = call.out("segment").asLine2D();
+  REQUIRE(segment != nullptr);
+  CHECK(segment->hasSegment);
+  CHECK(segment->start[0] == doctest::Approx(a.p[0]));
+  CHECK(segment->start[1] == doctest::Approx(a.p[1]));
+  CHECK(segment->end[0] == doctest::Approx(b.p[0]));
+  CHECK(segment->end[1] == doctest::Approx(b.p[1]));
+}
+
+TEST_CASE("gap.point_offset 交换 a/b 翻符号，absDx/absDy 拉回正值") {
+  const Point2D a = pt(0.0125f, 0.1915f);
+  const Point2D b = pt(0.010f, 0.190f);
+
+  Call call;
+  call.inputs["a"] = Data::point2d(a);
+  call.inputs["b"] = Data::point2d(b);
+  REQUIRE(call.run("gap.point_offset").ok);
+  CHECK(call.out("dx").asMeasurement()->value == doctest::Approx(-2.5).epsilon(1e-3));
+  CHECK(call.out("dy").asMeasurement()->value == doctest::Approx(-1.5).epsilon(1e-3));
+
+  Call abs;
+  abs.inputs = call.inputs;
+  REQUIRE(abs.run("gap.point_offset",
+                  {{"absDx", Value::boolean(true)}, {"absDy", Value::boolean(true)}})
+              .ok);
+  CHECK(abs.out("dx").asMeasurement()->value == doctest::Approx(2.5).epsilon(1e-3));
+  CHECK(abs.out("dy").asMeasurement()->value == doctest::Approx(1.5).epsilon(1e-3));
+}
+
+TEST_CASE("gap.point_offset 的 scale 与 offset 是线性的") {
+  const Point2D a = pt(0.010f, 0.190f);
+  const Point2D b = pt(0.0125f, 0.1915f);
+
+  Call call;
+  call.inputs["a"] = Data::point2d(a);
+  call.inputs["b"] = Data::point2d(b);
+  REQUIRE(call.run("gap.point_offset", {{"scaleDx", Value::number(2.0)},
+                                        {"dxOffset", Value::number(0.1)},
+                                        {"dyOffset", Value::number(-0.2)}})
+              .ok);
+  CHECK(call.out("dx").asMeasurement()->value == doctest::Approx(5.1).epsilon(1e-3));
+  CHECK(call.out("dy").asMeasurement()->value == doctest::Approx(1.3).epsilon(1e-3));
+}
 
 namespace {
 
