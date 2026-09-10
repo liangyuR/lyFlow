@@ -427,3 +427,152 @@ TEST_CASE("gap.corner_vertex 用 ICP 变换把模板坐标系里的金件顶点�
   CHECK(q->type == "GapCornerQuality");
   CHECK(q->data["alignmentApplied"].get<bool>());
 }
+
+
+namespace {
+
+float mmf(double v) { return static_cast<float>(v / 1000.0); }
+
+constexpr double kGrooveXcMm = -3.0;
+constexpr double kGrooveY0Mm = 230.0;
+constexpr double kGrooveSlopeK = 0.5;
+
+PointCloud grooveCloud(double gapHalfMm, double flushMm) {
+  PointCloud c;
+  const auto baseY = [](double xMm) {
+    return kGrooveY0Mm + kGrooveSlopeK * (xMm - kGrooveXcMm);
+  };
+  for (int i = 0; i <= 200; ++i) {
+    const double xMm = kGrooveXcMm - 10.0 + 0.1 * i;
+    if (xMm < kGrooveXcMm - gapHalfMm) {
+      c.push(mmf(xMm), mmf(baseY(xMm)), 0.0f);
+    } else if (xMm > kGrooveXcMm + gapHalfMm) {
+      c.push(mmf(xMm), mmf(baseY(xMm) + flushMm), 0.0f);
+    }
+  }
+  for (int i = 1; i <= 9; ++i) {
+    const double d = 0.2 * i;
+    const double xl = kGrooveXcMm - gapHalfMm;
+    const double xr = kGrooveXcMm + gapHalfMm;
+    c.push(mmf(xl), mmf(baseY(xl) + d), 0.0f);
+    c.push(mmf(xr), mmf(baseY(xr) + flushMm + d), 0.0f);
+  }
+  for (int j = -2; j <= 2; ++j) {
+    const double xMm = kGrooveXcMm + 0.05 * j;
+    c.push(mmf(xMm), mmf(baseY(xMm) + 2.5), 0.0f);
+  }
+  return c;
+}
+
+PointCloud flatCloud() {
+  PointCloud c;
+  for (int i = 0; i <= 200; ++i) {
+    const double xMm = kGrooveXcMm - 10.0 + 0.1 * i;
+    c.push(mmf(xMm), mmf(kGrooveY0Mm + kGrooveSlopeK * (xMm - kGrooveXcMm)), 0.0f);
+  }
+  return c;
+}
+
+PointCloud shiftedInY(const PointCloud& src, double dyMm) {
+  PointCloud c;
+  for (std::size_t i = 0; i < src.pointCount(); ++i) {
+    c.push(src.xyz[3 * i], src.xyz[3 * i + 1] + mmf(dyMm), src.xyz[3 * i + 2]);
+  }
+  return c;
+}
+
+double nominalFlushMm(double flushMm) {
+  return -flushMm * std::cos(std::atan(kGrooveSlopeK));
+}
+
+}  // namespace
+
+TEST_CASE("gap.groove_joint 量出槽宽与面差") {
+  const PointCloud cloud = grooveCloud(0.15, 0.4);
+  Call call;
+  call.inputs["primary"] = Data::cloud(cloud);
+  call.inputs["secondary"] = Data::cloud(cloud);
+  REQUIRE(call.run("gap.groove_joint").ok);
+
+  CHECK(call.out("gap").asMeasurement()->value == doctest::Approx(0.3).epsilon(0.05));
+  CHECK(call.out("flush").asMeasurement()->value ==
+        doctest::Approx(nominalFlushMm(0.4)).epsilon(0.02));
+
+  const Point2D* groove = call.out("groove").asPoint2D();
+  REQUIRE(groove != nullptr);
+  CHECK(std::fabs(static_cast<double>(groove->p[0]) - kGrooveXcMm / 1000.0) < 0.0002);
+
+  const Record* q = call.out("quality").asRecord();
+  REQUIRE(q != nullptr);
+  CHECK(q->type == "GapGrooveQuality");
+  CHECK(q->data["lowerSurface"].get<std::string>() == "ref");
+  CHECK(q->data["cameras"]["primary"]["valid"].get<bool>());
+
+  const Record* qb = call.out("qualityBase").asRecord();
+  REQUIRE(qb != nullptr);
+  CHECK(qb->type == "GapFitQuality");
+  CHECK(qb->data["model"].get<std::string>() == "line");
+  const Record* qr = call.out("qualityRef").asRecord();
+  REQUIRE(qr != nullptr);
+  CHECK(qr->type == "GapFitQuality");
+}
+
+TEST_CASE("gap.groove_joint 换基准侧只翻 flush 的符号") {
+  const PointCloud cloud = grooveCloud(0.15, 0.4);
+  Call call;
+  call.inputs["primary"] = Data::cloud(cloud);
+  call.inputs["secondary"] = Data::cloud(cloud);
+  REQUIRE(call.run("gap.groove_joint", {{"baseSide", Value::text("right")}}).ok);
+  CHECK(call.out("flush").asMeasurement()->value ==
+        doctest::Approx(-nominalFlushMm(0.4)).epsilon(0.02));
+  CHECK(call.out("gap").asMeasurement()->value == doctest::Approx(0.3).epsilon(0.05));
+  CHECK(call.out("quality").asRecord()->data["lowerSurface"].get<std::string>() == "base");
+}
+
+TEST_CASE("gap.groove_joint 没有槽就报 groove_not_found") {
+  Call call;
+  call.inputs["primary"] = Data::cloud(flatCloud());
+  call.inputs["secondary"] = Data::cloud(flatCloud());
+  const Status s = call.run("gap.groove_joint");
+  CHECK_FALSE(s.ok);
+  CHECK(s.code == "groove_not_found");
+}
+
+TEST_CASE("gap.groove_joint 只有一台相机也能测，另一台标 valid=false") {
+  const PointCloud cloud = grooveCloud(0.15, 0.4);
+  Call call;
+  call.inputs["primary"] = Data::cloud(cloud);
+  call.inputs["secondary"] = Data::cloud(PointCloud{});
+  REQUIRE(call.run("gap.groove_joint").ok);
+  CHECK(call.out("gap").asMeasurement()->value == doctest::Approx(0.3).epsilon(0.05));
+  CHECK(call.out("flush").asMeasurement()->value ==
+        doctest::Approx(nominalFlushMm(0.4)).epsilon(0.02));
+  const Record* q = call.out("quality").asRecord();
+  REQUIRE(q != nullptr);
+  CHECK(q->data["cameras"]["primary"]["valid"].get<bool>());
+  CHECK_FALSE(q->data["cameras"]["secondary"]["valid"].get<bool>());
+}
+
+TEST_CASE("gap.groove_joint 两台相机整体差 0.2 mm，平均之后 flush 不动") {
+  const PointCloud cloud = grooveCloud(0.15, 0.4);
+  Call call;
+  call.inputs["primary"] = Data::cloud(cloud);
+  call.inputs["secondary"] = Data::cloud(shiftedInY(cloud, 0.2));
+  REQUIRE(call.run("gap.groove_joint").ok);
+  CHECK(std::fabs(call.out("flush").asMeasurement()->value - nominalFlushMm(0.4)) < 0.02);
+  CHECK(call.out("gap").asMeasurement()->value == doctest::Approx(0.3).epsilon(0.05));
+}
+
+TEST_CASE("gap.groove_joint 的 scale 与两个 offset 是线性的") {
+  const PointCloud cloud = grooveCloud(0.15, 0.4);
+  Call call;
+  call.inputs["primary"] = Data::cloud(cloud);
+  call.inputs["secondary"] = Data::cloud(cloud);
+  REQUIRE(call.run("gap.groove_joint", {{"scale", Value::number(2.0)},
+                                        {"gapOffset", Value::number(0.1)},
+                                        {"flushOffset", Value::number(0.05)}})
+              .ok);
+  CHECK(call.out("gap").asMeasurement()->value == doctest::Approx(0.7).epsilon(0.05));
+  CHECK(call.out("flush").asMeasurement()->value ==
+        doctest::Approx(nominalFlushMm(0.4) + 0.05).epsilon(0.05));
+}

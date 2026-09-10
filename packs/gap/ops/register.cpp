@@ -25,6 +25,7 @@ void registerPackOps(Registry& r) {
   registerFlush(r);
   registerGap(r);
   registerCornerVertex(r);
+  registerGrooveJoint(r);
   registerJudge(r);
   registerResultBundle(r);
   registerMeasureReference(r);

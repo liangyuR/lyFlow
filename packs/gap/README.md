@@ -16,7 +16,7 @@
 
 ```
 packs/gap/
-  ops/     22 个 gap.* 算子 + StandardGap.yml 导入器
+  ops/     24 个 gap.* 算子 + StandardGap.yml 导入器
   algo/    算法源码，从 xyz-gap-inspector 的 src/ 复制而来，命名空间不改
   tools/   图生成器、两条 A/B、回退图 A/B 与导入器等价性脚本
   tests/   随包走的 doctest
@@ -66,6 +66,8 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 | `gap.fit_gap_circles` | merged, primary, secondary, boxLeft, boxRight → 两个圆 | 圆拟合 + 重试 + 相机分开回退 + 按标称值挑候选 |
 | `gap.flush` | baseLine, refPoint → value, segment | 段差 |
 | `gap.gap` | left, right, [baseLine] → value, segment | 间隙（definition A / B） |
+| `gap.corner_vertex` | lineLeft, lineRight, [baseLine], [alignment] → vertex, gap, flush, angle | 软装夹角：两翼面直线求交，顶点相对金件顶点沿基准面分解 |
+| `gap.groove_joint` | primary, secondary → gap, flush, 四条线, groove, 三份 quality | 软装对接缝：最深点定槽心，两侧面逐相机拟合再平均，槽宽在低面下方 `gapDepth` 处量 |
 | `gap.judge` | value → value | 公差判定 |
 | `gap.measure_reference` | primary, secondary → gap, flush | 黑盒对照：直接调 `MeasurementEngine::measure`；`useModel` 开了就先跑一次模型 ROI |
 
