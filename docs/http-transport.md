@@ -98,10 +98,17 @@
 
 ```json
 { "doc": {}, "graphPath": null, "targets": ["n1"] ,
-  "mode": "full", "previewMaxPoints": null, "previewBudgetMs": null }
+  "mode": "full", "previewMaxPoints": null, "previewBudgetMs": null,
+  "sceneId": null }
 ```
 
 `mode` 是 `"full"` 或 `"preview"`（ADR-0011：预览模式下源算子先抽稀）。
+
+`sceneId` 是**可选**的宿主扩展：宿主页面上已经加载好一对点云时，把它的会话 id 带上，
+后端就把那对云注入到起始算子的输入端口，而不是让图自己按参数去读盘。不带（或 `null`）
+就是原来的行为。会话不存在时返回 404，图里没有可注入的节点时返回 400 —— 两者都要能和
+「运行失败」区分开，因为用户能做的动作完全不同（重新读一次点云 / 改图）。宿主自己决定
+「一对点云」对应哪个算子的哪个端口；编辑器只负责把 id 透传下去。
 
 **响应必须在第一条事件之后才发出**，因为 runId 是后端分配的，前端要拿它认领事件。
 事件可以比响应先到：编辑器会把认不出的事件先攒着，`runId` 一回来就补上。

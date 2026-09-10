@@ -45,6 +45,10 @@ export interface RunOptions {
   mode?: "full" | "preview" | undefined;
   previewMaxPoints?: number | undefined;
   previewBudgetMs?: number | undefined;
+  /** 宿主已经加载好的点云会话 id。给了它，后端就把那对云注入
+   *  `gap.load_profile_pair` 的端口，图里的路径参数一个字不用改（见
+   *  `LyFlowEditorProps.sceneId`）。 */
+  sceneId?: string | null | undefined;
 }
 
 /** 库算子目录的状态（ADR-0010）。 */

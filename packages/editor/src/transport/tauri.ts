@@ -85,6 +85,7 @@ export class TauriTransport implements Transport {
       mode: options?.mode ?? "full",
       previewMaxPoints: options?.previewMaxPoints ?? null,
       previewBudgetMs: options?.previewBudgetMs ?? null,
+      sceneId: options?.sceneId ?? null,
     });
   }
   async cancelRun(runId: string): Promise<void> {

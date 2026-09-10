@@ -450,6 +450,19 @@ export async function subscribeExecutionEvents(): Promise<void> {
  *  发起顺序。序号让后发的那次赢，与 C++ 侧「后开始的抢占先开始的」一致。 */
 let runTicket = 0;
 
+/** 宿主给的点云会话 id。`setRunSceneId` 由 `<LyFlowEditor sceneId>` 在渲染期装上，和
+ *  `setTransport` / `setDialogs` 是同一类宿主配置：运行是从工具栏、快捷键、实时预览三处
+ *  发起的，穿 props 会把它拖过整棵树。 */
+let sceneId: string | null = null;
+
+export function setRunSceneId(next: string | null): void {
+  sceneId = next;
+}
+
+export function runSceneId(): string | null {
+  return sceneId;
+}
+
 export interface RunRequest {
   targets?: string[] | undefined;
   /** 预览模式：源算子输出先抽稀，结果进独立缓存命名空间（ADR-0011）。 */
@@ -470,6 +483,7 @@ export async function startRun(
       targets: request.targets,
       mode: preview ? "preview" : "full",
       previewMaxPoints: request.previewMaxPoints,
+      sceneId,
     });
     if (ticket !== runTicket) return; // 已经有更晚的一次运行发起了，这次的回复作废
     store.beginRun(runId, request.targets ?? [], preview);

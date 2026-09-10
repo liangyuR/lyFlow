@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { layoutGraph } from "../lib/layout";
 import {
+  createMappingCache,
   distanceToSegment,
   extractMoves,
   extractSizes,
@@ -58,6 +59,18 @@ const EDGE_HIT_RADIUS = 12;
 const REROUTE_OP = "util.reroute";
 /** 超过这个节点数就只渲染可见的那些（§4）。小图下全量渲染的手感更好。 */
 const VIRTUALIZE_ABOVE = 80;
+
+// 下面这几个都必须是模块常量，不能写成 JSX 里的字面量。React Flow 的 StoreUpdater
+// 按**引用**比较它跟踪的那批 props（`defaultEdgeOptions` 就在里面），内联对象每次渲染
+// 都是新引用，effect 于是每帧跑满一遍并往 store 里写一次、通知一遍所有订阅者。
+// 剩下几个虽然不在跟踪表里，但一样会白白透传给内层组件。
+const DELETE_KEYS = ["Delete"];
+const MULTI_SELECTION_KEYS = ["Shift", "Control"];
+/** 中键与右键平移。左键留给框选。 */
+const PAN_BUTTONS = [1, 2];
+const PRO_OPTIONS = { hideAttribution: false };
+const CONNECTION_LINE_STYLE = { stroke: "#4a9eff", strokeWidth: 2 };
+const DEFAULT_EDGE_OPTIONS = { type: "default" };
 
 export interface CanvasActions {
   /** 只跑到某个节点（交互清单 P1 #27）。 */
@@ -207,10 +220,21 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
   const { screenToFlowPosition, fitView } = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
 
-  // 节点量测尺寸的旁路缓存：不进 GraphDoc，但 MiniMap 需要它才肯画节点。
-  // ref 存数据 + 计数器触发重渲染，尺寸稳定后计数器不再变，不会自激。
+  /**
+   * 节点量测尺寸的旁路缓存。不进 GraphDoc，但 MiniMap 靠它才肯画节点：React Flow 的
+   * `NodeComponentWrapperInner` 走的是 `getNodeDimensions(node.internals.userNode)` 加
+   * `nodeHasDimensions(userNode)`，读的是**这里传进 props 的那份 measured**，而不是它自己
+   * 量完存在 internals 上的那份。所以量测结果必须回流到节点对象上，这条边不能简单砍掉。
+   *
+   * 回流意味着存在一条 量测 -> setState -> 新节点对象 -> setNodes -> 重新量测 的回路，
+   * 下面 onNodesChange 里的容差与熔断是给它加的阻尼；lib/mapping.ts 的引用归一让没变的
+   * 节点保持同一个对象，把每轮的重建面从"整张图"缩到"真的变了的那个节点"。
+   */
   const measured = useRef(new Map<string, { width: number; height: number }>());
   const [measuredTick, setMeasuredTick] = useState(0);
+  // 映射结果的引用归一：没变的节点保持同一个对象，React Flow 的 adoptUserNodes 才会走
+  // checkEquality 快路径，不重建内部节点、不丢 measured。详见 lib/mapping.ts 的 MappingCache。
+  const mapping = useRef(createMappingCache());
   // 同一次挂载/布局抖动里，允许连续触发重渲染的次数上限，见下面 onNodesChange 里的说明。
   const sizeBurst = useRef({ count: 0, resetHandle: null as number | null });
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
@@ -243,7 +267,14 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
 
   const { nodes, edges } = useMemo(
     () =>
-      toReactFlow(view, ctx, { nodes: selectedNodes, edges: selectedEdges }, measured.current, anyTypes),
+      toReactFlow(
+        view,
+        ctx,
+        { nodes: selectedNodes, edges: selectedEdges },
+        measured.current,
+        anyTypes,
+        mapping.current,
+      ),
     // measuredTick 是 measured.current 的变更信号，故意作为依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [view, ctx, selectedNodes, selectedEdges, measuredTick, anyTypes],
@@ -259,7 +290,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     const removed = changes.filter((c) => c.type === "remove").map((c) => c.id);
     if (removed.length > 0) graph.deleteNodes(removed);
 
-    // 量测尺寸：不进 GraphDoc，但要留在旁路缓存里供 MiniMap 使用。
+    // 量测尺寸：不进 GraphDoc，但要回流到节点对象上供 MiniMap 使用（见上面 measured 的注释）。
     // 只在尺寸真的变了时才 bump，否则会和 React Flow 的重新量测互相触发。
     // 严格 !== 曾经假设 ResizeObserver 两次量出的同一个稳定尺寸会是完全相等的浮点数，
     // 但 Windows 下的分数 DPI 缩放会让同一个节点连续两次量出例如 142.3999939 / 142.4000015
@@ -695,19 +726,19 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         // zoomOnDoubleClick 必须关：d3-zoom 会 stopImmediatePropagation 把双击拦死。
         // deleteKeyCode 不含 Backspace：输入框里退格却删掉节点是经典事故（app/README.md）。
         zoomOnDoubleClick={false}
-        deleteKeyCode={["Delete"]}
-        multiSelectionKeyCode={["Shift", "Control"]}
+        deleteKeyCode={DELETE_KEYS}
+        multiSelectionKeyCode={MULTI_SELECTION_KEYS}
         selectionKeyCode={null}
-        panOnDrag={[1, 2]}
+        panOnDrag={PAN_BUTTONS}
         selectionOnDrag
         snapToGrid={snapping}
         snapGrid={GRID}
-        proOptions={{ hideAttribution: false }}
+        proOptions={PRO_OPTIONS}
         fitView
         minZoom={0.2}
         maxZoom={2.5}
-        connectionLineStyle={{ stroke: "#4a9eff", strokeWidth: 2 }}
-        defaultEdgeOptions={{ type: "default" }}
+        connectionLineStyle={CONNECTION_LINE_STYLE}
+        defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#2a2f39" />
         <Controls showInteractive={false} />

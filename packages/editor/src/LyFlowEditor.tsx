@@ -30,6 +30,7 @@ import { fullId, levelOf } from "./lib/subgraph";
 import { formatBytes, refreshCacheStats, schedulePlan, useCacheStore } from "./store/cache";
 import {
   cancelCurrentRun,
+  setRunSceneId,
   startRun,
   subscribeExecutionEvents,
   useExecutionStore,
@@ -561,12 +562,19 @@ export interface LyFlowEditorProps extends WorkspaceProps {
   transport: Transport;
   /** 打开/另存/确认对话框。不给就退回 window.confirm，且没有文件选择器。 */
   dialogs?: EditorDialogs | undefined;
+  /**
+   * 宿主已经加载好的点云会话 id。给了它，「运行」就用那对云跑，而不是让图自己按参数读盘 ——
+   * 宿主页面上已经有云的时候（交互测量、数据库页读过点云之后），这是唯一不用改图就能试跑
+   * 的办法。不给就是老行为。
+   */
+  sceneId?: string | null | undefined;
 }
 
-export function LyFlowEditor({ transport: t, dialogs: d, ...rest }: LyFlowEditorProps) {
+export function LyFlowEditor({ transport: t, dialogs: d, sceneId, ...rest }: LyFlowEditorProps) {
   // 装在 render 里而不是 effect 里：子树的 store 一挂载就会去调传输层。
   setTransport(t);
   setDialogs(d);
+  setRunSceneId(sceneId ?? null);
 
   // GraphCanvas 和快捷键都要用 useReactFlow（screenToFlowPosition），
   // 所以 Provider 必须包在整个工作区外面，不能只包画布。

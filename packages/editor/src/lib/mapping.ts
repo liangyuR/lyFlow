@@ -37,14 +37,38 @@ export type MeasuredSizes = ReadonlyMap<string, { width: number; height: number 
 
 const EMPTY_SELECTION: Selection = { nodes: new Set(), edges: new Set() };
 
+/** 上一轮的映射结果：按 id 存的对象 + 整批的数组引用。作用是让**没变的节点/连线保持
+ *  同一个对象**。
+ *
+ *  这不是优化，是正确性。React Flow 的 `adoptUserNodes` 只在
+ *  `userNode === internals.userNode` 时走快路径；引用一变就重建内部节点，`measured`
+ *  只认 `userNode.measured`、`handleBounds` 一并作废，于是整张图重新量测。而量测结果
+ *  又经 `onNodesChange` -> 画布的 measured 旁路缓存 -> 这里流回节点对象，构成
+ *  「量测 -> setNodes -> 重建 -> 再量测」的自激环，报 Maximum update depth exceeded。
+ *  整批都没变时连数组引用一起复用，React Flow 的 StoreUpdater 就直接跳过 setNodes。 */
+export interface MappingCache {
+  nodes: Map<string, LyNode>;
+  edges: Map<string, LyEdge>;
+  lastNodes: LyNode[] | null;
+  lastEdges: LyEdge[] | null;
+}
+
+export function createMappingCache(): MappingCache {
+  return { nodes: new Map(), edges: new Map(), lastNodes: null, lastEdges: null };
+}
+
 /** GraphDoc -> React Flow。注意方向：这是单向的**派生**，React Flow 的交互结果不会写回
- *  这里产生的对象，而是转成语义化动作打给 graph store（见 GraphCanvas）。 */
+ *  这里产生的对象，而是转成语义化动作打给 graph store（见 GraphCanvas）。
+ *
+ *  给了 `cache` 就顺带做引用归一：同样的输入拿到同样的对象。归一是幂等的，所以在
+ *  `useMemo` 里调用（渲染期写 ref）是安全的 —— StrictMode 的双跑会得到同一个结果。 */
 export function toReactFlow(
   doc: GraphDoc,
   ctx: GraphContext,
   selection: Selection = EMPTY_SELECTION,
   measured?: MeasuredSizes,
   anyTypes: AnyTypes = inferAnyTypes(ctx, doc),
+  cache?: MappingCache,
 ): { nodes: LyNode[]; edges: LyEdge[] } {
   const nodes: LyNode[] = doc.nodes.map((n) => {
     const size = measured?.get(n.id);
@@ -83,7 +107,67 @@ export function toReactFlow(
     };
   });
 
-  return { nodes, edges };
+  if (!cache) return { nodes, edges };
+  cache.lastNodes = keepIdentity(cache.nodes, cache.lastNodes, nodes, sameNode);
+  cache.lastEdges = keepIdentity(cache.edges, cache.lastEdges, edges, sameEdge);
+  return { nodes: cache.lastNodes, edges: cache.lastEdges };
+}
+
+/** 逐个换成缓存里的等价对象；整批都换成了上一轮的原对象时，连数组一起复用。 */
+function keepIdentity<T extends { id: string }>(
+  byId: Map<string, T>,
+  previous: T[] | null,
+  next: T[],
+  same: (a: T, b: T) => boolean,
+): T[] {
+  const live = new Set<string>();
+  for (let i = 0; i < next.length; i += 1) {
+    const fresh = next[i] as T;
+    live.add(fresh.id);
+    const cached = byId.get(fresh.id);
+    if (cached && same(cached, fresh)) next[i] = cached;
+    else byId.set(fresh.id, fresh);
+  }
+  // 删掉的 id 不能留在缓存里：同名节点被重新建出来时会拿到一个过期的对象。
+  for (const id of [...byId.keys()]) if (!live.has(id)) byId.delete(id);
+  if (previous === null || previous.length !== next.length) return next;
+  for (let i = 0; i < next.length; i += 1) if (previous[i] !== next[i]) return next;
+  return previous;
+}
+
+/** 节点对象的全部字段。漏一个就会漏掉一次真实更新（画布不跟着 doc 走），
+ *  多一个只是白重建一次，所以宁可写全。 */
+function sameNode(a: LyNode, b: LyNode): boolean {
+  return (
+    a.id === b.id &&
+    a.type === b.type &&
+    a.selected === b.selected &&
+    a.width === b.width &&
+    a.position.x === b.position.x &&
+    a.position.y === b.position.y &&
+    a.measured?.width === b.measured?.width &&
+    a.measured?.height === b.measured?.height &&
+    a.data.opId === b.data.opId &&
+    a.data.title === b.data.title &&
+    a.data.collapsed === b.data.collapsed &&
+    a.data.bypass === b.data.bypass &&
+    a.data.anyType === b.data.anyType &&
+    a.data.subgraphId === b.data.subgraphId &&
+    a.data.library === b.data.library
+  );
+}
+
+/** 连线上只有 style.stroke 是算出来的，其余都是常量或直接来自 doc。 */
+function sameEdge(a: LyEdge, b: LyEdge): boolean {
+  return (
+    a.id === b.id &&
+    a.source === b.source &&
+    a.sourceHandle === b.sourceHandle &&
+    a.target === b.target &&
+    a.targetHandle === b.targetHandle &&
+    a.selected === b.selected &&
+    a.style?.stroke === b.style?.stroke
+  );
 }
 
 /** 连线颜色取自源端口的**实际**类型：串了 reroute 之后颜色也要跟着源变（E6）。 */

@@ -24,6 +24,7 @@ export {
   startRun,
   cancelCurrentRun,
   subscribeExecutionEvents,
+  setRunSceneId,
   type RunRequest,
   type StateTransition,
 } from "./store/execution";
