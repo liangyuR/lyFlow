@@ -47,6 +47,8 @@ import type { GraphDoc } from "./types/graph";
 import "./styles.css";
 import "./styles.editor.css";
 
+const kMinCanvasWidth = 320;
+
 const TRANSPORT_LABEL: Record<string, string> = {
   tauri: "Tauri · 实时",
   http: "HTTP · 实时",
@@ -148,15 +150,24 @@ function Toast() {
 
 /** 右侧的可拖分栏。一条 4px 把手 + 全局 pointermove，
  *  不引分栏库 —— 一个库的成本是十几 KB 加一套 API，这里只要一个数字。 */
-function useDragSplit(initial: number, min: number, max: number) {
+function useDragSplit(
+  initial: number,
+  min: number,
+  max: number,
+  container: React.RefObject<HTMLElement | null>,
+  reserve: number,
+) {
   const [width, setWidth] = useState(initial);
   const dragging = useRef(false);
 
   useEffect(() => {
     const move = (e: PointerEvent) => {
       if (!dragging.current) return;
-      const next = window.innerWidth - e.clientX;
-      setWidth(Math.max(min, Math.min(max, next)));
+      const rect = container.current?.getBoundingClientRect();
+      const right = rect ? rect.right : window.innerWidth;
+      const limit = rect ? Math.max(min, Math.min(max, rect.width - reserve)) : max;
+      const next = right - e.clientX;
+      setWidth(Math.max(min, Math.min(limit, next)));
     };
     const up = () => {
       dragging.current = false;
@@ -168,7 +179,7 @@ function useDragSplit(initial: number, min: number, max: number) {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
-  }, [min, max]);
+  }, [container, min, max, reserve]);
 
   const onPointerDown = useCallback(() => {
     dragging.current = true;
@@ -182,7 +193,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   const { screenToFlowPosition, fitView } = useReactFlow();
   const root = useRef<HTMLDivElement>(null);
   const [paletteWidth] = useState(280);
-  const rightPane = useDragSplit(380, 260, 900);
+  const rightPane = useDragSplit(380, 260, 900, root, paletteWidth + kMinCanvasWidth);
 
   // 粘贴和搜索面板要知道往哪儿放。跟着鼠标走比总是放在画布中心自然得多。
   const cursor = useRef({ x: 0, y: 0 });
