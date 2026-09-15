@@ -102,6 +102,8 @@ export interface OperatorDesc {
   category: string;
   keywords?: string[];
   doc?: string;
+  /** 本算子成立的前提与明确不适用的情形。Inspector 在 doc 下方原样列出。 */
+  preconditions?: string[];
   inputs: Port[];
   outputs: Port[];
   params: Param[];

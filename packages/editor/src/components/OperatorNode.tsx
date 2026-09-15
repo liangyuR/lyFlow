@@ -168,13 +168,17 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
     .join(" ");
 
   const cached = exec?.stats?.cached === true;
-  const skipReason = notDemanded
-    ? "备用分支，这次没被用到"
+  // 输出能不能取，认 outputsAvailable 而不是认 state：skipped 既可能是「算过了，输出照样在」
+  // 也可能是「这一支根本没被需要，什么都没有」。老 core 不带这个字段，按 not_demanded 兜底。
+  const outputsAvailable = exec?.stats?.outputsAvailable ?? !notDemanded;
+  const skipLabel = !outputsAvailable ? "未被需要" : cached ? "已缓存" : "静音";
+  const skipReason = !outputsAvailable
+    ? "未被需要：这一支这次没被 demand，没有输出可取"
     : cached
-      ? "命中缓存，未重算"
+      ? "已缓存：命中缓存未重算，输出可取"
       : bypass
-        ? "已静音，输入直接透传"
-        : "";
+        ? "已静音：输入直接透传，输出可取"
+        : "输出可取";
 
   return (
     <div
@@ -248,9 +252,14 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
       {state !== "idle" && (
         <div className="node__stats" data-testid={`node-stats-${id}`}>
           <span className={`node__dot node__dot--${state}`} />
-          {state === "skipped" && skipReason && (
-            <span className="node__skip" data-testid={`node-skip-${id}`}>
-              {cached ? "缓存" : "静音"}
+          {state === "skipped" && (
+            <span
+              className="node__skip"
+              data-testid={`node-skip-${id}`}
+              data-outputs-available={outputsAvailable ? "1" : "0"}
+              title={skipReason}
+            >
+              {skipLabel}
             </span>
           )}
           {exec?.stats?.elementCount != null && (

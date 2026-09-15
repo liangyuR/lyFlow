@@ -500,6 +500,13 @@ void registerFitLine(Registry& r) {
   op.doc =
       "在 ROI 里拟合一条直线：先整体拟合，再截取靠缝隙那一端的 segmentPoints 个内点、"
       "用 1/3 的阈值重拟合一次（§3.5）。line 带与 ROI 框的两个交点作端点。";
+  op.preconditions = {
+      "innerEnd 取靠缝的那一端，由 side 决定；side 填反时截取的窗口与 innerEnd 都跑到背"
+      "离缝的那一头。",
+      "distThresh 过紧时第二次拟合（阈值 1/3）的内点集会在弯曲的棱边上跳，逐帧结果不稳；"
+      "收紧之前先看 quality 的 inlierRatio 与 rmsResidualMm。",
+      "假定 ROI 里那条边确实近似一条直线；圆角或台阶进了 ROI，拟合会咬住它们。",
+  };
   op.inputs = {
       Port{"cloud", "PointCloud", "Cloud", "已经按业务 ROI 裁过的点云。", true},
       Port{"box", "Box2D", "Box", "同一个业务 ROI，用来求端点。", true},
@@ -572,6 +579,14 @@ void registerFitGapCircles(Registry& r) {
   op.doc =
       "间隙两侧的圆拟合。先在合并云的 ROI 里拟合；失败按 retryDistance 再试一次；"
       "还失败就退到「两台相机各拟合一个」，两台都合格时按 |gap − nominal| 二选一（§3.9）。";
+  op.preconditions = {
+      "假定缝两侧各有一段看得见的圆边、半径落在 [radiusMin, radiusMax] 内；缝闭合到两圆"
+      "边相碰时 ROI 里凑不出圆弧，那种缝用 gap.notch_width。",
+      "相机分开拟合的回退只在合并云拟合失败后触发；被遮挡的那台若先给出合格圆，读到的是"
+      "它自己的阴影。",
+      "selectClosestNominal 按 |gap − nominal| 挑候选，nominal 填错会稳定地挑错一侧的"
+      "圆。",
+  };
   op.inputs = {
       Port{"merged", "PointCloud", "Merged", "合并并滤波之后的云。", true},
       Port{"primary", "PointCloud", "Primary", "整体 ROI 裁过、**未**滤波的 Master 云。", true},

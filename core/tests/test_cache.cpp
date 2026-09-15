@@ -91,6 +91,7 @@ TEST_CASE("原图重跑：全部 skipped，总耗时 < 50 ms") {
   const Json v = second.nodeEvent("v", "skipped");
   CHECK(v["stats"]["cached"] == true);
   CHECK(v["stats"].contains("bypassed") == false);
+  CHECK(v["stats"]["outputsAvailable"] == true);
   CHECK(v["stats"]["elementCount"].get<int>() > 0);
 }
 

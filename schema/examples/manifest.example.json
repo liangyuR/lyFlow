@@ -37,6 +37,10 @@
       "category": "Filter/Downsample",
       "keywords": ["downsample", "降采样", "体素"],
       "doc": "用体素栅格对点云降采样，每个体素保留质心。",
+      "preconditions": [
+        "每个体素只留质心，原始点被丢弃；后续需要逐点强度或法线的算子要在降采样之前接。",
+        "叶子尺寸接近点间距时等于不降采样，远大于特征尺度时会把特征一起抹平。"
+      ],
       "inputs": [{ "name": "cloud", "type": "PointCloud", "label": "Cloud", "required": true }],
       "outputs": [{ "name": "cloud", "type": "PointCloud", "label": "Cloud" }],
       "params": [
@@ -69,6 +73,10 @@
       "category": "Segment",
       "keywords": ["ransac", "plane", "平面", "分割"],
       "doc": "RANSAC 拟合平面，输出内点与剩余点。",
+      "preconditions": [
+        "假定视野里存在一个点数占优的平面；两个大小相当的平面共存时结果在两者之间跳。",
+        "RANSAC 有随机性，deterministic=false，同一份输入两次运行可以给出不同内点集。"
+      ],
       "inputs": [{ "name": "cloud", "type": "PointCloud", "required": true }],
       "outputs": [
         { "name": "inliers", "type": "PointCloud", "label": "Inliers" },

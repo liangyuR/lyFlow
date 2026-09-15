@@ -72,7 +72,7 @@ typedef void (*lyflow_event_cb)(const char* event_json, void* user);
 typedef struct lyflow_run lyflow_run;
 
 /* 运行时注入一个源节点的输出（v7）。被注入的节点整个 compute 都不会被调用，
-   所以它声明的**每个**输出端口都要给一项，否则执行器报「算子没有写输出端口」。
+   所以它声明的**每个**输出端口都要给一项，否则执行器报 output_not_written。
    缓冲由调用方持有，必须活到 lyflow_run_start 返回为止（core 内部会拷一份）。 */
 typedef struct {
   const char* node_id;

@@ -82,6 +82,7 @@
     "stats": {
       "elementCount": 1234567,
       "byteSize": 19753072,
+      "outputsAvailable": true,
       "outputs": [
         {
           "port": "cloud",
@@ -165,6 +166,7 @@
       "elementCount": 120000,
       "byteSize": 1920000,
       "cached": true,
+      "outputsAvailable": true,
       "outputs": [
         {
           "port": "cloud",
@@ -187,6 +189,7 @@
       "elementCount": 120000,
       "byteSize": 1920000,
       "bypassed": true,
+      "outputsAvailable": true,
       "outputs": [
         {
           "port": "cloud",
@@ -262,6 +265,7 @@
     "stats": {
       "elementCount": 51234,
       "byteSize": 819744,
+      "outputsAvailable": true,
       "outputs": [
         {
           "port": "cloud",
@@ -329,6 +333,7 @@
     "stats": {
       "elementCount": 0,
       "byteSize": 0,
+      "outputsAvailable": false,
       "reason": "not_demanded"
     }
   },
@@ -345,6 +350,7 @@
       "elementCount": 1280,
       "byteSize": 15360,
       "provided": true,
+      "outputsAvailable": true,
       "outputs": [{ "port": "primary", "type": "PointCloud", "elementCount": 1280 }]
     }
   }

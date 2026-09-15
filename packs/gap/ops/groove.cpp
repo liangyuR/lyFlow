@@ -454,6 +454,14 @@ void registerGrooveJoint(Registry& r) {
       "gap = 槽在「低面下方 gapDepth」这个水平面上的宽度：两侧最内侧的浅点之间的水平距离。"
       "gapDepth 必须落在两侧圆角/台阶之下、槽底之上 —— 罗石 点 2 实测可用带 ≈ 1.3~1.7 mm，"
       "太浅会咬到圆角把槽读宽，太深会掉进槽底把槽读窄。";
+  op.preconditions = {
+      "假定缝底有一条比两侧面都深的槽。缝闭合、两圆边直接相碰时没有这条槽，水平刀口要么"
+      "切不到点、要么切在另一台相机的阴影上 —— 那种缝用 gap.notch_width。",
+      "gapDepth 必须落在两侧圆角/台阶之下、槽底之上：太浅会咬到圆角把槽读宽，太深会掉进"
+      "槽底把槽读窄。",
+      "两侧的面要各自近似平面，且拟合窗口 [near, far] 里没有别的特征；两台相机都凑不够 "
+      "minLinePoints 时整帧失败。",
+  };
   op.inputs = {
       Port{"primary", "PointCloud", "Primary", "整体 ROI 裁过的 Master 云（测量帧）。", true},
       Port{"secondary", "PointCloud", "Secondary", "整体 ROI 裁过的 Slave 云（测量帧）。", true},

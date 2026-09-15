@@ -205,6 +205,11 @@ void registerOverallRoi(Registry& r) {
   op.doc =
       "整体 ROI 框。auto_center 保留配置的宽高，中心跟着两片云各自的稳健中心"
       "（逐坐标中位数）的中点走。";
+  op.preconditions = {
+      "auto_center 假定两片云的稳健中心（逐坐标中位数）落在待测特征附近；视野里有大片背"
+      "景或另一件零件时中心会被拖走。",
+      "框恒为轴对齐，宽高来自配置，不随零件姿态旋转。",
+  };
   op.inputs = {
       Port{"primary", "PointCloud", "Primary", "测量帧的 Master 云。", true},
       Port{"secondary", "PointCloud", "Secondary", "测量帧的 Slave 云。", true},
@@ -247,6 +252,11 @@ void registerBusinessRois(Registry& r) {
   op.doc =
       "把选中模板的四个业务 ROI 按 ICP 变换搬到当前样本上。"
       "只变换对角两个角点，之后仍按轴对齐解释 —— 这是原算法的行为（G8）。";
+  op.preconditions = {
+      "假定四个业务 ROI 是模板坐标系里的常数，样本与模板之间的差异能被一次刚体变换吃掉。",
+      "只变换对角两个角点、之后仍按轴对齐解释，所以模板转角明显时框会被拉大或缩小 —— "
+      "这是原算法行为，不是可以「修正」的。",
+  };
   op.inputs = {Port{"alignment", "Record", "Alignment", "GapAlignment。", true}};
   op.outputs = {
       Port{"flushBase", "Box2D", "Flush Base", "段差基准面 ROI。", true},
@@ -276,6 +286,10 @@ void registerSelectedPoint(Registry& r) {
   op.category = "间隙/拟合";
   op.keywords = {"selected point", "选点"};
   op.doc = "取离 ROI 的 min 角最近的点。注意取自**整片云**，不裁 ROI（§3.6）。";
+  op.preconditions = {
+      "在**整片输入云**上选离 ROI min 角最近的点，不裁 ROI：框外更近的点照样会被选中。",
+      "ROI 只用到 min 角，框的大小不影响结果。",
+  };
   op.inputs = {
       Port{"cloud", "PointCloud", "Cloud", "整片云（合并后的那一份）。", true},
       Port{"box", "Box2D", "Box", "业务 ROI，只用它的 min 角。", true},
@@ -296,6 +310,11 @@ void registerNearestToLine(Registry& r) {
   op.doc =
       "取离给定直线垂距最小的那个云点（复刻 lineCloudDistance 的选点），"
       "对应配置里的 ref_type: nearest point。";
+  op.preconditions = {
+      "判据是到直线的垂距最小，不要求点落在线段两端之间；输入云必须先按业务 ROI 裁过，"
+      "否则远处同样贴线的点会被选中。",
+      "只比垂距，垂距相同时取点序靠前的那个（点序就是文件里的槽序）。",
+  };
   op.inputs = {
       Port{"cloud", "PointCloud", "Cloud", "已经按业务 ROI 裁过的点云。", true},
       Port{"line", "Line2D", "Line", "基准线。", true},

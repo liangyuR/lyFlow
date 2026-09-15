@@ -90,6 +90,10 @@ NodeState: idle → pending → running → (done | error | cancelled | skipped)
 ```
 
 - `skipped` 表示命中缓存，没有真正重算。这个状态要单独显示，否则用户会以为没跑。
+- `stats.outputsAvailable` 说的是「这个节点的输出此刻取得到」：`done` 与命中缓存、
+  被静音、由宿主注入的 `skipped` 都是 `true`，只有 `skipped` + `reason=not_demanded` 是 `false`。
+  **消费方要认它，不要认 `state == "done"`** —— 缓存命中时状态是 `skipped` 而输出照样在，
+  业务侧只 harvest `done` 的话会在第二次运行时「几何突然消失」。
 - `error` 必须带结构化信息：`{ phase, code, message, paramPath?, portName? }`。
   `paramPath` 让前端能直接把红框标到具体那个参数输入框上。
 - 一个节点可能同时有**多条**诊断，所以事件里给的是 `errors[]`，`error` 是 `errors[0]`
