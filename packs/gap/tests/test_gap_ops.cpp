@@ -885,3 +885,78 @@ TEST_CASE("gap.result_bundle 不接 flush 时把它记成 inactive") {
   CHECK(bundle->data["flush"]["status"].get<std::string>() == "inactive");
   CHECK(bundle->data["gap"]["status"].get<std::string>() == "success");
 }
+
+// ---------------------------------------------------------------- gap.camera_consistency
+
+namespace {
+
+/// 一段水平面，高度 yMm，横跨 [0, 10] mm。offsetMm 整体抬高/压低。
+PointCloud flatCloud(double yMm) {
+  PointCloud c;
+  for (int i = 0; i <= 100; ++i) c.push(mmf(0.1 * i), mmf(yMm), 0.0f);
+  return c;
+}
+
+}  // namespace
+
+TEST_CASE("gap.camera_consistency 两台看到同一个面时不超限，box 原样透传") {
+  Call call;
+  call.inputs["primary"] = Data::cloud(flatCloud(170.0));
+  call.inputs["secondary"] = Data::cloud(flatCloud(170.02));
+  const Box2D in = box(mmf(1.0), mmf(160.0), mmf(9.0), mmf(180.0));
+  call.inputs["box"] = Data::box2d(in);
+  REQUIRE(call.run("gap.camera_consistency", {{"mode", Value::text("enforce")}}).ok);
+  const Record* q = call.out("quality").asRecord();
+  REQUIRE(q != nullptr);
+  CHECK(q->data["evaluated"].get<bool>());
+  CHECK_FALSE(q->data["exceeded"].get<bool>());
+  CHECK(q->data["deltaMedianMm"].get<double>() == doctest::Approx(-0.02).epsilon(0.05));
+  const Box2D* out = call.out("box").asBox2D();
+  REQUIRE(out != nullptr);
+  CHECK(out->min[0] == doctest::Approx(in.min[0]));
+  CHECK(out->max[0] == doctest::Approx(in.max[0]));
+}
+
+TEST_CASE("gap.camera_consistency 两台差一大截时 enforce 报 camera_disagree，shadow 只记录") {
+  Call shadow;
+  shadow.inputs["primary"] = Data::cloud(flatCloud(170.0));
+  shadow.inputs["secondary"] = Data::cloud(flatCloud(172.5));
+  shadow.inputs["box"] = Data::box2d(box(mmf(1.0), mmf(160.0), mmf(9.0), mmf(180.0)));
+  REQUIRE(shadow.run("gap.camera_consistency", {{"mode", Value::text("shadow")}}).ok);
+  const Record* q = shadow.out("quality").asRecord();
+  REQUIRE(q != nullptr);
+  CHECK(q->data["exceeded"].get<bool>());
+  CHECK(q->data["deltaMedianMm"].get<double>() == doctest::Approx(-2.5).epsilon(0.05));
+
+  Call enforce;
+  enforce.inputs = shadow.inputs;
+  const auto status = enforce.run("gap.camera_consistency", {{"mode", Value::text("enforce")}});
+  CHECK_FALSE(status.ok);
+  CHECK(status.code == "camera_disagree");
+}
+
+TEST_CASE("gap.camera_consistency 只有一台看得见时判不了，不拦") {
+  PointCloud empty;
+  Call call;
+  call.inputs["primary"] = Data::cloud(flatCloud(170.0));
+  call.inputs["secondary"] = Data::cloud(empty);
+  call.inputs["box"] = Data::box2d(box(mmf(1.0), mmf(160.0), mmf(9.0), mmf(180.0)));
+  REQUIRE(call.run("gap.camera_consistency", {{"mode", Value::text("enforce")}}).ok);
+  const Record* q = call.out("quality").asRecord();
+  REQUIRE(q != nullptr);
+  CHECK_FALSE(q->data["evaluated"].get<bool>());
+  CHECK_FALSE(q->data["exceeded"].get<bool>());
+  CHECK(q->data["reason"].get<std::string>() == "insufficient_overlap");
+}
+
+TEST_CASE("gap.camera_consistency mode=off 不算，也不拦") {
+  Call call;
+  call.inputs["primary"] = Data::cloud(flatCloud(170.0));
+  call.inputs["secondary"] = Data::cloud(flatCloud(175.0));
+  call.inputs["box"] = Data::box2d(box(mmf(1.0), mmf(160.0), mmf(9.0), mmf(180.0)));
+  REQUIRE(call.run("gap.camera_consistency", {{"mode", Value::text("off")}}).ok);
+  const Record* q = call.out("quality").asRecord();
+  REQUIRE(q != nullptr);
+  CHECK_FALSE(q->data["evaluated"].get<bool>());
+  CHECK_FALSE(q->data["exceeded"].get<bool>());
+}

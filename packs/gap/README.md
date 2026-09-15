@@ -70,6 +70,7 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 | `gap.groove_joint` | primary, secondary → gap, flush, 四条线, groove, 三份 quality | 软装对接缝：最深点定槽心，两侧面逐相机拟合再平均，槽宽在低面下方 `gapDepth` 处量 |
 | `gap.point_offset` | a, b → dx, dy, distance, segment | 两点分量：b 相对 a 的位移沿测量帧 x/y 两轴分解，面板边/翻边平台这类横向缝用 |
 | `gap.notch_width` | primary, secondary → gap, flush, baseLine, refLine, gapSegment, flushSegment, anchor, 三份 quality | V 缝开口：两圆边贴合、缝底无槽时，基准翼面线下 `levelDepth` 处切基准侧圆边得 A，过 A 的水平刀切对面立边得 B，A→B 水平距离；逐相机，被遮挡的相机用 `camera` 排除 |
+| `gap.camera_consistency` | primary, secondary, box → box, quality | 双相机一致性：在 ROI 横向范围里逐点比两台相机的中位高度，中位差超 `maxDeltaMm` 就判这一帧「两台看的不是同一个面」。玻璃二次反射会让合并云里出现两条平行轮廓、圆拟到错的那条上，而拟合残差照样很小，只能这样查。**比的是高度差、对斜率敏感，门限逐点定** |
 | `gap.judge` | value → value | 公差判定 |
 | `gap.measure_reference` | primary, secondary → gap, flush | 黑盒对照：直接调 `MeasurementEngine::measure`；`useModel` 开了就先跑一次模型 ROI |
 
