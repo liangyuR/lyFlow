@@ -143,8 +143,20 @@ lyflow manifest [--check]
 lyflow dump     graph.lyflow.json nodeId:port out.pcd [--format binary|ascii|binary_compressed]
 lyflow sweep    graph.lyflow.json --param nodeId.param=start:end:steps [--param ...]
                                   --metric nodeId:port.elementCount [--csv out.csv]
+lyflow eval     graph.lyflow.json [--samples samples.jsonl | --samples-glob pat --bind n.p]
+                                  [--params sets.json] [--param n.p=start:end:steps]...
+                                  --metric <值路径> [--metric ...] [--holdout tag=value]
+                                  [--group-by tag] [--csv out.csv]
+lyflow perturb  graph.lyflow.json --after nodeId:port --region <选区 JSON>
+                                  --axis x|y|z=start:end:steps --metric <值路径>
+                                  [--samples samples.jsonl] [--expect slope] [--tolerance v]
 lyflow diff     a.lyflow.json b.lyflow.json [--json]
 ```
+
+`eval` 与 `perturb` 的 `--metric` 是**值路径**：`outputs.gap`、`nodes.n_fit.quality.rmsResidualMm`、
+`nodes.v.elementCount`、`run.durationMs`。路径拼错时 stderr 会列出这张图上所有可用的标量路径
+（[ADR-0020](docs/adr/0020-eval-and-perturb-as-cli.md)）。用法见
+[docs/agent-tuning.md](docs/agent-tuning.md)。
 
 几个例子：
 
@@ -159,6 +171,15 @@ lyflow run demo.lyflow.json --set n_voxel.leafSize='[0.02,0.02,0.02]'
 # 扫 5 组 leafSize，源头只加载一次（其余 4 次是 skipped）
 lyflow sweep demo.lyflow.json --param n_voxel.minPointsPerVoxel=1:5:5 \
              --metric n_voxel:cloud.elementCount --csv sweep.csv
+
+# 一组样本 × 一组参数 → 指标 → 内建统计，按时间前后各半留出
+lyflow eval demo.lyflow.json --samples frames.jsonl --param n_fit.distThresh=0.2:0.8:4 \
+            --metric outputs.gap --holdout half=b
+
+# 合成位移：在源头之后插一个 edit.translate_region，看读数跟不跟得上
+lyflow perturb demo.lyflow.json --after n_frame_s:cloud \
+            --region '{"kind":"halfspace","point":[0.0134,0,0],"normal":[1,0,0]}' \
+            --axis x=0:0.0006:5 --samples frames.jsonl --metric outputs.gap --expect 1000
 
 # 只移动了节点位置的两份图，diff 输出为空（ui 不算）
 lyflow diff before.lyflow.json after.lyflow.json
@@ -201,7 +222,7 @@ app 盯着这个目录，工具栏的「库」按钮也能手动重扫。
 - **live preview。** 拖参数时发一次抽稀过的 run，3D 视图跟手；松手补一次正式运行。
   预览结果进独立的缓存命名空间，绝不会被当成正式结果
   （[ADR-0011](docs/adr/0011-preview-as-decimated-run.md)）。
-- **headless CLI。** `lyflow run/validate/plan/migrate/manifest/dump/sweep/diff`，
+- **headless CLI。** `lyflow run/validate/plan/migrate/manifest/dump/sweep/eval/perturb/diff`，
   JSON Lines 事件流，与桌面同一条代码路径（[ADR-0012](docs/adr/0012-headless-cli.md)）。
 - **大图能用。** 300 节点的图打开 < 1 s，拖动 ≥ 30 fps；执行事件按 16 ms 合并。
 

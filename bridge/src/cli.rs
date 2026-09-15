@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 
 use crate::core_ffi::{self, Core, RunHandle, RunSpec};
 use crate::eval;
+use crate::perturb;
 use crate::graph::GraphDoc;
 use crate::ulid;
 
@@ -62,6 +63,13 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                           [--set <nodeId>.<param>=<json>]...
         指标路径：outputs.<名字>[.字段...] / nodes.<节点>.<端口>[.字段...]
                   nodes.<节点>.durationMs|elementCount|byteSize / run.durationMs
+  lyflow perturb  <graph> --after <nodeId>:<port> --region <json> --axis <x|y|z>=<s>:<e>:<n>
+                          [--samples <samples.jsonl> | --samples-glob <pat> --bind <n>.<p>]
+                          --metric <path> [--metric <path>]...
+                          [--expect <slope>] [--tolerance <v>] [--csv <out.csv>]
+                          [--base-dir <dir>] [--parallel <n>] [--no-cache] [--set ...]
+        选区 JSON：{\"kind\":\"halfspace\",\"point\":[x,y,z],\"normal\":[x,y,z]}
+                   {\"kind\":\"box\",\"min\":[x,y,z],\"max\":[x,y,z]}
   lyflow diff     <a> <b> [--json]
 
 退出码：0 成功，1 校验失败，2 执行失败，3 被取消（Ctrl+C），4 参数错。";
@@ -1149,6 +1157,7 @@ pub(crate) fn fail(err: &Sink, message: &str, code: i32) -> i32 {
 const VALUE_OPTS: &[&str] = &[
     "to", "set", "base-dir", "parallel", "preview-points", "param", "metric", "csv", "format",
     "kind", "output", "samples", "samples-glob", "bind", "params", "holdout", "group-by",
+    "after", "region", "axis", "expect", "tolerance",
 ];
 const BOOL_OPTS: &[&str] = &["no-cache", "preview", "write", "check", "json", "help", "outputs"];
 
@@ -1183,6 +1192,7 @@ pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
         "dump" => cmd_dump(&parsed, out, err),
         "sweep" => cmd_sweep(&parsed, out, err),
         "eval" => eval::cmd_eval(&parsed, out, err),
+        "perturb" => perturb::cmd_perturb(&parsed, out, err),
         "diff" => cmd_diff(&parsed, out, err),
         other => {
             line(err, &format!("不认识的子命令 {other}"));
@@ -1841,7 +1851,6 @@ mod tests {
         assert_eq!(rows[5]["params"]["v.minPointsPerVoxel"], 3.0);
         let summaries: Vec<&Value> = lines.iter().filter(|l| l["kind"] == "eval_summary").collect();
         assert_eq!(summaries.len(), 3);
-        // 指标随 minPointsPerVoxel 单调下降：扫的是真参数
         let mean = |s: &Value| s["groups"]["all"]["mean"].as_f64().unwrap();
         assert!(mean(summaries[2]) < mean(summaries[0]));
     }
@@ -1863,8 +1872,6 @@ mod tests {
         assert!(r.err.contains("outputs.gap"), "{}", r.err);
         assert!(r.err.contains("nodes.v.elementCount"), "{}", r.err);
         assert!(r.err.contains("run.durationMs"), "{}", r.err);
-
-        // 语法就不对的路径连图都不用跑
         let bad = cli(&["eval", &graph, "--samples", &samples, "--metric", "gap"]);
         assert_eq!(bad.code, EXIT_USAGE);
     }
@@ -1886,13 +1893,11 @@ mod tests {
         assert!(r.err.contains("scene"), "{}", r.err);
     }
 
-    /// --samples-glob 把每个匹配到的文件变成一个样本，路径写进 --bind 指的那个参数。
     #[test]
     fn eval_builds_samples_from_a_glob() {
         let dir = workspace("evalglob");
         let clouds = dir.join("clouds");
         std::fs::create_dir_all(&clouds).unwrap();
-        // 先用 dump 造两份真点云：glob 出来的样本要真能被 io.load_pcd 读进去
         let source = chain(&dir, 325);
         for name in ["one", "two"] {
             let target = clouds.join(format!("{name}.pcd"));
@@ -1925,8 +1930,6 @@ mod tests {
         assert_eq!(rows[0]["sample"], "one");
         assert_eq!(rows[1]["sample"], "two");
         assert!(rows[0]["metrics"]["nodes.r.elementCount"].as_f64().unwrap() > 0.0);
-
-        // 一个 --bind 都不给是用法错
         let no_bind = cli(&[
             "eval",
             &file.to_string_lossy(),
@@ -1938,7 +1941,6 @@ mod tests {
         assert_eq!(no_bind.code, EXIT_USAGE);
     }
 
-    /// 校验失败与执行失败是两个退出码，逐样本区分。
     #[test]
     fn eval_separates_validation_failures_from_run_failures() {
         let dir = workspace("evalfail");
@@ -1986,7 +1988,6 @@ mod tests {
         );
     }
 
-    /// 没给 --samples 时就是一组「图原样」：eval 退化成 sweep 的超集。
     #[test]
     fn eval_without_samples_runs_the_graph_once() {
         let dir = workspace("evalnosample");
@@ -2002,7 +2003,6 @@ mod tests {
         assert_eq!(rows[0]["sample"], "-");
     }
 
-    /// sweep 的旧 --metric 写法在 eval 里照样认。
     #[test]
     fn eval_accepts_the_old_sweep_metric_spelling() {
         let dir = workspace("evallegacy");
@@ -2015,6 +2015,167 @@ mod tests {
             .find(|l| l["kind"] == "eval_row")
             .unwrap();
         assert!(row["metrics"]["v:cloud.elementCount"].as_f64().unwrap() > 0.0);
+    }
+
+
+    fn crop_chain(dir: &Path, seed: i64, count: i64) -> String {
+        let doc = json!({
+            "schemaVersion": 1,
+            "id": "01J8XQZ4K7N3M2R5V8W1YB6TP1",
+            "name": "perturb",
+            "nodes": [
+                {"id": "g", "op": "gen.synthetic",
+                 "params": {"pointCount": count, "seed": seed, "outlierRatio": 0.0}},
+                {"id": "c", "op": "filter.crop_box",
+                 "params": {"min": [0.05, -10.0, -10.0], "max": [10.0, 10.0, 10.0]}}
+            ],
+            "edges": [
+                {"id": "e1", "from": {"node": "g", "port": "cloud"},
+                             "to": {"node": "c", "port": "cloud"}}
+            ]
+        });
+        let file = dir.join("p.lyflow.json");
+        std::fs::write(&file, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+        file.to_string_lossy().into_owned()
+    }
+
+    const HALFSPACE: &str = r#"{"kind":"halfspace","point":[0,0,0],"normal":[1,0,0]}"#;
+
+    #[test]
+    fn perturb_inserts_the_node_and_reports_a_slope() {
+        let dir = workspace("perturb");
+        let graph = crop_chain(&dir, 3401, 17003);
+        let r = cli(&[
+            "perturb",
+            &graph,
+            "--after",
+            "g:cloud",
+            "--region",
+            HALFSPACE,
+            "--axis",
+            "x=-0.04:0.04:5",
+            "--metric",
+            "nodes.c.elementCount",
+        ]);
+        assert_eq!(r.code, EXIT_OK, "{} / {}", r.out, r.err);
+        let lines = r.lines();
+        let rows: Vec<&Value> = lines.iter().filter(|l| l["kind"] == "perturb_row").collect();
+        assert_eq!(rows.len(), 5);
+        assert!((rows[0]["displacement"].as_f64().unwrap() + 0.04).abs() < 1e-12);
+        assert!(rows[2]["displacement"].as_f64().unwrap().abs() < 1e-12);
+        assert!((rows[4]["displacement"].as_f64().unwrap() - 0.04).abs() < 1e-12);
+        assert_eq!(rows[0]["sample"], "-");
+
+        let counts: Vec<f64> = rows
+            .iter()
+            .map(|r| r["metrics"]["nodes.c.elementCount"].as_f64().unwrap())
+            .collect();
+        assert!(counts[0] < counts[4], "{counts:?}");
+
+        let per: Vec<&Value> = lines
+            .iter()
+            .filter(|l| l["kind"] == "perturb_sample")
+            .collect();
+        assert_eq!(per.len(), 1);
+        assert_eq!(per[0]["n"], 5);
+        assert!(per[0]["slope"].as_f64().unwrap() > 0.0, "{}", per[0]);
+        assert!(per[0]["slopeNeg"].as_f64().unwrap() > 0.0, "{}", per[0]);
+        assert!(per[0]["slopePos"].as_f64().unwrap() > 0.0, "{}", per[0]);
+        assert!(per[0]["pass"].is_null(), "没给 --expect 时不判定");
+
+        let sum = lines
+            .iter()
+            .find(|l| l["kind"] == "perturb_summary")
+            .unwrap();
+        assert_eq!(sum["samples"], 1);
+        assert_eq!(sum["signFold"], 0);
+        assert_eq!(sum["nonResponsive"], 0);
+        assert_eq!(sum["metric"], "nodes.c.elementCount");
+        assert!(r.err.contains("__perturb"), "{}", r.err);
+    }
+
+    #[test]
+    fn perturb_flags_a_reading_that_does_not_move_and_exits_failed() {
+        let dir = workspace("perturbflat");
+        let graph = crop_chain(&dir, 3402, 17005);
+        let r = cli(&[
+            "perturb",
+            &graph,
+            "--after",
+            "g:cloud",
+            "--region",
+            HALFSPACE,
+            "--axis",
+            "x=-0.04:0.04:5",
+            "--metric",
+            "nodes.g.elementCount",
+            "--expect",
+            "1",
+        ]);
+        assert_eq!(r.code, EXIT_FAILED, "{} / {}", r.out, r.err);
+        let lines = r.lines();
+        let per = lines
+            .iter()
+            .find(|l| l["kind"] == "perturb_sample")
+            .unwrap();
+        assert_eq!(per["slope"], 0.0);
+        assert_eq!(per["pass"], false);
+        let sum = lines
+            .iter()
+            .find(|l| l["kind"] == "perturb_summary")
+            .unwrap();
+        assert_eq!(sum["pass"], 0);
+        assert_eq!(sum["nonResponsive"], 1);
+    }
+
+    #[test]
+    fn perturb_refuses_a_subgraph_internal_port() {
+        let dir = workspace("perturbsub");
+        let graph = crop_chain(&dir, 3403, 17007);
+        let r = cli(&[
+            "perturb",
+            &graph,
+            "--after",
+            "sub/g:cloud",
+            "--region",
+            HALFSPACE,
+            "--axis",
+            "x=0:1:2",
+            "--metric",
+            "nodes.c.elementCount",
+        ]);
+        assert_eq!(r.code, EXIT_USAGE);
+        assert!(r.err.contains("子图"), "{}", r.err);
+
+        let bad_region = cli(&[
+            "perturb",
+            &graph,
+            "--after",
+            "g:cloud",
+            "--region",
+            r#"{"kind":"sphere"}"#,
+            "--axis",
+            "x=0:1:2",
+            "--metric",
+            "nodes.c.elementCount",
+        ]);
+        assert_eq!(bad_region.code, EXIT_USAGE);
+        assert!(bad_region.err.contains("kind"), "{}", bad_region.err);
+
+        let ghost = cli(&[
+            "perturb",
+            &graph,
+            "--after",
+            "nope:cloud",
+            "--region",
+            HALFSPACE,
+            "--axis",
+            "x=0:1:2",
+            "--metric",
+            "nodes.c.elementCount",
+        ]);
+        assert_eq!(ghost.code, EXIT_USAGE);
+        assert!(ghost.err.contains("没有节点"), "{}", ghost.err);
     }
 
 }

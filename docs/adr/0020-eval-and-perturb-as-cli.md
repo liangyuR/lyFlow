@@ -1,6 +1,6 @@
 # ADR-0020：评估与扰动是 CLI 子命令，指标是值路径
 
-日期：2026-09-16（M5）　状态：已采纳（`eval` 已实现；`perturb` 与 `edit.translate_region` 在后续步骤）
+日期：2026-09-16（M5）　状态：已采纳并实现（`eval`、`edit.translate_region`、`perturb` 都已落地）
 
 ## 背景
 
@@ -112,20 +112,65 @@ lyflow eval <graph> [--samples <samples.jsonl> | --samples-glob <pat> --bind <no
 
 ```
 lyflow perturb <graph> --after <node>:<port> --region <json> --axis <x|y|z>=<start>:<end>:<steps>
-                       --samples … --metric <path> [--expect <slope>] [--tolerance <v>]
+                       [--samples <samples.jsonl> | --samples-glob <pat> --bind <n>.<p>]
+                       --metric <path> [--metric <path>]...
+                       [--expect <slope>] [--tolerance <v>] [--csv <out.csv>]
+                       [--base-dir <dir>] [--parallel <n>] [--no-cache] [--set ...]
 ```
 
-新标准算子 `edit.translate_region`（`packs/std-pointcloud`）：输入 cloud，
-参数 `region: { kind: halfspace, point, normal } | { kind: box, min, max }` 与 `translation: vec3f`，
-输出 cloud；选区内的点加平移，其余原样。确定性、可缓存，在编辑器里也能单独用来「模拟缝张开」。
+新标准算子 `edit.translate_region`（`packs/std-pointcloud`）：输入 cloud，输出 cloud，
+选区内的点加 `translation`，其余原样，intensity / rgb / normals 与点序一并保留。
+manifest 没有 object 类型，所以选区拆成平参数：`regionKind: halfspace | box`、
+`point` / `normal`（halfspace）、`boxMin` / `boxMax`（box，闭区间）、`translation`。
+确定性、可缓存，在编辑器里也能单独用来「模拟缝张开」。
 
-`perturb` 把它插在 `--after` 指定的端口之后，对 `translation` 的一个分量做轴扫描，其余走 eval，
-报每个样本的斜率 `d(指标)/d(位移)`（最小二乘）与残差。
-两个真实失效模式都要能在报告里直接看出来：
-「读数不响应」是斜率 ≈ 0，「取绝对值折叠」是正负两侧斜率符号相反且残差大。
+**图手术。** `perturb` 在 `--after <node>:<port>` 之后插一个 id 为 `__perturb` 的
+`edit.translate_region`（撞名就 `__perturb_2`、`__perturb_3`…），把原先从该端口出发的
+**每一条边**改成从新节点的 `cloud` 出发，再补一条 `<node>:<port> → __perturb:cloud`；
+指向该端口的图级命名输出一并跟过去。子图内部端口（`--after` 里带 `/` 的路径）本轮不支持，
+是 `EXIT_USAGE`。手术后先 `validate_structure()` 再交给 eval 引擎。
 
-**不写 900 个合成 PCD。** 复盘里那 900 个文件是三版脚本各写一遍的产物，
-其中两版切错了还不报错 —— 把这件事做对一次，做在平台里。
+`--region` 的 JSON 直接映射到那几个平参数：
+
+```jsonc
+{"kind":"halfspace","point":[0.0134,0,0],"normal":[1,0,0]}
+{"kind":"box","min":[0.013,0.18,-1],"max":[0.02,0.19,1]}
+```
+
+**单位跟着输入云走。** `gap.to_measurement_frame` 只交换 y 与 z，不换单位 ——
+传感器帧与测量帧都是**米**，而 `outputs.gap` 这类 Measurement 是 **mm**。
+所以「缝张开 1 mm 读数加 1 mm」在报告里是 `slope ≈ 1000`（mm/m），不是 1。
+`--expect` 写的是这个数。
+
+**轴扫描。** `--axis x=-0.0003:0.0003:5` 复用 `--param` 的 `start:end:steps` 解析，
+把每个位移值写成 `translation` 的一个分量（其余两个为 0），当作一个参数组交给 eval 引擎，
+跑 样本 × 位移。
+
+**输出。** 每个（样本 × 位移）一行 `perturb_row`（eval_row 的字段 + `displacement`），
+每个（样本 × 指标）一行 `perturb_sample`，每个指标最后一行 `perturb_summary`：
+
+```jsonc
+{"kind":"perturb_row","paramSet":0,"displacement":-0.0003,"params":{…},"sample":"…",
+ "tags":{},"holdout":false,"status":"ok","metrics":{"outputs.gap":-0.256},"errors":[],"durationMs":4.1}
+{"kind":"perturb_sample","sample":"…","metric":"outputs.gap","n":5,
+ "slope":955.4,"intercept":0.017,"rmse":0.0095,"slopeNeg":776.9,"slopePos":1000.0,"pass":true}
+{"kind":"perturb_summary","metric":"outputs.gap","axis":"x=-0.0003:0.0003:5",
+ "expect":1000.0,"tolerance":100.0,"samples":51,"pass":47,
+ "slopeMean":913.4,"slopeStd":297.0,"slopeMin":-336.4,"slopeMax":1000.0,
+ "nonResponsive":3,"signFold":0}
+```
+
+- `slope` / `intercept` / `rmse` 是该样本上「指标对位移」的最小二乘拟合（`rmse` 按 n 除，不是 n-2）。
+  位移值少于 2 个、或所有位移相同时是 `null`。
+- `slopeNeg` / `slopePos` 分别只用位移 < 0 与 > 0 的点各拟一次，不足 2 个点记 `null`。
+  **它们是抓「取绝对值折叠」的唯一手段**：整体斜率可以是 0 而两侧是 −1 和 +1。
+- `pass` 只在给了 `--expect` 时不是 `null`：`|slope − expect| ≤ tolerance`
+  且 `slopeNeg`、`slopePos` 同号（任一为 `null` 时这一条不判）。`--tolerance` 默认 0.1。
+- `nonResponsive` = `|slope| < tolerance/2` 的样本数；`signFold` = 两侧斜率异号的样本数。
+
+**给了 `--expect` 且有样本不 pass 时退出码是 2。** 与「执行失败」同一个码：
+对调用方来说「这张图测的不是那条缝」和「这张图跑崩了」都是「这次结果不能用」，
+都要人回去看，没必要为它再发明一个码（ADR-0012 的码表不加新成员）。
 
 ### G7　选区只做几何选区
 
@@ -136,6 +181,13 @@ lyflow perturb <graph> --after <node>:<port> --region <json> --axis <x|y|z>=<sta
 复盘里两版切错都出在领域判断。平台能做的是把「切在哪」变成显式的、可审计的输入，
 而不是替人猜。文档里要写明：切分线穿过近竖直壁、或压在被选中的锚点上，会得出错误结论，
 **选区必须在剖面上核对**。
+
+实测补一条限制（M5 验收，罗石 51 帧）：**一条固定的几何选区只在「缝的帧间游走量小于缝宽」时成立**。
+点 1 的缝在 51 帧里左右游走 0.7 mm，缝本身 0.7 mm 宽，最好的一刀能把 50/51 帧切对；
+Audio_1 的缝只有 0.04~0.15 mm 宽却游走 0.9 mm，**任何一条固定的刀都切不对多数帧**。
+这不是工具能修的 —— 要修得让选区跟着帧走，那就是 G7 说的「输出 region 的 gap 算子」。
+在那之前，`perturb` 在这类测点上给出的是「选区对不对」的信息，不是「读数准不准」的信息，
+`agent-tuning.md` 里写了怎么分辨。
 
 ## 后果
 

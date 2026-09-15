@@ -157,6 +157,7 @@ C ABI 升到 v4：加了 `lyflow_plan` / `lyflow_cache_clear` / `lyflow_cache_st
 - [x] 子图 / 复合算子：C++ compile 期展开成平图，路径式节点 id，参数提升，库算子目录
 - [x] Live preview：源头抽稀的 preview run，独立缓存命名空间
 - [x] headless CLI `lyflow`：run / validate / plan / migrate / manifest / dump / sweep / diff，JSON Lines 事件流
+      （M5 又加了 `eval` 与 `perturb`，见下）
 - [x] 参数扫描（P2 #34）、图 diff（#36）、大图性能（#37）；分组框（#32）以子图取代
 
 产出：一条真实任务能用「库算子 + CLI」跑在无 GUI 的机器上。
@@ -239,7 +240,23 @@ gap 领域包从 `xyz-gap-inspector/lyflow/` 搬进本仓库的 `packs/gap/`，�
   `third_party/onnxruntime/`。缺了 CMake 直接 FATAL —— 这是设计（不静默少一个算子），
   但对第一次 clone 的人是一道额外的手续。
 
-## M5 — 外延（只列方向，动工前再写计划）
+## M5 — 能被 Agent 用（进行中）
+
+计划见 [m5-plan.md](m5-plan.md)，决定见 [ADR-0020](adr/0020-eval-and-perturb-as-cli.md)。
+目标：**一个只拿得到 CLI 或 MCP、拿不到仓库源码的 Agent，能独立完成「给一组测点设计图并调稳参数」**，
+过程中不用自己写解析器、批跑器或评估脚本。范围来自一次真实任务的复盘（12 个 Python 脚本里
+至少一半是重复劳动，两版合成位移脚本给出错误结论还不报错）。
+
+- [x] manifest 加 `preconditions`，gap 包 26 个算子全部填；事件加 `outputsAvailable`；
+      新错误码 `output_not_written`
+- [x] `lyflow eval`：样本集 × 参数组 → **值路径**指标 → 内建统计（含 `--holdout` / `--group-by`）；
+      `sweep` 改成它的一层壳
+- [x] `edit.translate_region` 标准算子 + `lyflow perturb`：图手术插节点 → 轴扫描位移 →
+      每样本报斜率与正负两侧斜率，抓「读数不响应」与「取绝对值折叠」两种失效
+- [x] [agent-tuning.md](agent-tuning.md)：给只有 CLI/MCP 的人与 Agent 的工作法
+- [ ] `packages/mcp`：对着 `/lyflow/*` HTTP 契约的 MCP 服务，以子代理盲测验收
+
+## M5 之后 — 外延（只列方向，动工前再写计划）
 
 - 第二种数据域 **Image**：`Data::Kind::Image`、2D 视图、OpenCV 算子按 PCL 同样的边界规则接入。
   `Tensor` 与 `ml.onnx_run` 已经就位，图像推理不用再造一遍。

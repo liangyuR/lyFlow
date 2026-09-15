@@ -169,8 +169,6 @@ struct OperatorDesc {
   std::string category;                   // 用 / 分层，决定搜索面板树形结构
   std::vector<std::string> keywords;
   std::string doc;
-  /// 本算子成立的前提与明确不适用的情形。每条一句话，给使用者与 Agent 看；
-  /// 空的话 manifest 里不出现这一项。
   std::vector<std::string> preconditions;
 
   std::vector<Port> inputs;

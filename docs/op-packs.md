@@ -21,7 +21,7 @@ core 本身只有 `gen.synthetic` 与 `util.reroute` 两个算子，不链接任
 
 | 包 | 版本 | DEFAULT | 算子 | 依赖 |
 |---|---|---|---|---|
-| `std-pointcloud` | 0.1.0 | ON | 18 个点云 / 2D 量测算子 | PCL |
+| `std-pointcloud` | 0.1.0 | ON | 19 个点云 / 2D 量测 / 编辑算子 | PCL |
 | `std-ml` | 0.1.0 | ON | `ml.onnx_run` | onnxruntime |
 | `gap` | 0.2.0 | **OFF** | 21 个 `gap.*` | PCL、yaml-cpp、onnxruntime |
 

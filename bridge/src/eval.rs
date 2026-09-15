@@ -1298,7 +1298,7 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     code
 }
 
-fn collect_samples(parsed: &Parsed) -> Result<Vec<Sample>, String> {
+pub(crate) fn collect_samples(parsed: &Parsed) -> Result<Vec<Sample>, String> {
     let file = parsed.one("samples");
     let pattern = parsed.one("samples-glob");
     if file.is_some() && pattern.is_some() {
@@ -1540,7 +1540,6 @@ mod tests {
         }
     }
 
-    /// 手算：2 4 4 4 5 -> mean 3.8，样本方差 4.8/4 = 1.2，std = sqrt(1.2)。
     #[test]
     fn holdout_and_group_statistics_are_the_hand_computed_numbers() {
         let samples: Vec<Sample> = vec![
