@@ -40,7 +40,6 @@ inline Status anyPassCompute(const Inputs& inputs, const ParamView&, Outputs& ou
   return Status::Ok();
 }
 
-// ------------------------------------------------------------ test.no_output
 inline Status noOutputCompute(const Inputs&, const ParamView&, Outputs&, ExecContext&) {
   return Status::Ok();
 }
@@ -241,7 +240,7 @@ inline void ensureTestOps() {
       op.compute = &ops::anyPassCompute;
       r.addOperator(std::move(op));
     }
-    {  // 声明了输出端口却不写：G10 的 output_not_written
+    {
       OperatorDesc op;
       op.id = "test.no_output";
       op.version = "1.0.0";

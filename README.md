@@ -60,6 +60,8 @@ C++ 生成的 `OperatorManifest`，Rust 转发给前端。**加新算子只改 C
 | [docs/m3-acceptance.md](docs/m3-acceptance.md) | M3 逐条验收记录（含未验证项与偏离决策） |
 | [docs/m4-plan.md](docs/m4-plan.md) | M4 实施计划：子图、live preview、headless CLI、大图性能 |
 | [docs/m4-acceptance.md](docs/m4-acceptance.md) | M4 逐条验收记录（含未验证项与偏离决策） |
+| [docs/agent-tuning.md](docs/agent-tuning.md) | 只拿得到 CLI/MCP 时，给一组测点调稳参数的工作法 |
+| [docs/mcp.md](docs/mcp.md) | MCP 服务：怎么起、工具一览、`.mcp.json` 片段、明确不做的事 |
 | [docs/adr/](docs/adr/) | 架构决策记录 |
 | [schema/](schema/) | GraphDoc / OperatorManifest / ExecutionEvent 的 JSON Schema + 已校验的示例 |
 
@@ -76,6 +78,7 @@ C++ 生成的 `OperatorManifest`，Rust 转发给前端。**加新算子只改 C
 core/     C++ 核心：算子注册表 + manifest 导出 + 校验/展开/编译/执行 + 结果仓。编成 DLL
 bridge/   Rust 桥接层：Tauri 壳（lyflow-app）与 headless CLI（lyflow），共用 core_ffi
 packages/editor/  @lyflow/editor：节点编辑器 + 3D 预览，一个可嵌进任意 React 宿主的组件
+packages/mcp/     @lyflow/mcp：给 Agent 用的 MCP 服务（stdio），消费同一份 HTTP 契约 + 本地 CLI
 app/      Tauri 壳：入口、文件对话框、窗口标题、验收窗口桥
 examples/host-react/  最小 Vite + React 宿主，经 HttpTransport 连后端
 schema/   三份 JSON Schema —— 跨语言契约的真实来源
@@ -113,7 +116,7 @@ pnpm app:dev      # 浏览器模式，状态栏会标「静态快照」提示数
 一条命令验完整条链路：
 
 ```bash
-pnpm check         # C++ 编译 + 自检 + core 测试 → schema 校验 → cargo test → CLI → 前端 build
+pnpm check         # C++ 编译 + 自检 + core 测试 → schema 校验 → cargo test → CLI → 前端 build → MCP
 pnpm e2e           # CDP 驱动真实 app 的端到端验收（自己起 tauri dev，跑完自己收尾）
 pnpm e2e:http      # 另一条线：Node 桩服务器 + 系统 Chrome + examples/host-react
 pnpm e2e:packaged  # 同一套断言，但跑的是 tauri build 的产物在一个干净目录里的拷贝
@@ -184,6 +187,18 @@ lyflow perturb demo.lyflow.json --after n_frame_s:cloud \
 # 只移动了节点位置的两份图，diff 输出为空（ui 不算）
 lyflow diff before.lyflow.json after.lyflow.json
 ```
+
+## 给 Agent 用（MCP）
+
+`@lyflow/mcp`（[packages/mcp/](packages/mcp/)）是一个 stdio 的 MCP 服务：
+**描述、校验、执行走 [HTTP 契约](docs/http-transport.md)，`eval` / `perturb` / `diff` 起本地 `lyflow`**。
+它是那份契约的又一个消费方，不是第四种传输（[ADR-0021](docs/adr/0021-mcp-as-transport-consumer.md)），
+所以同一个二进制既能接仓库里的桩服务器，也能接阶段 B 的业务服务 —— 换后端只改一个环境变量。
+
+11 个工具：`list_operators` / `get_operator` / `list_port_types` / `validate_graph` /
+`plan_graph` / `run_graph` / `get_node_outputs` / `summarize_output` / `eval` / `perturb` / `diff_graphs`。
+输出一律裁过（Agent 每次调用都在花上下文）：点云只给点数、包围盒、每通道 min/max/mean 与前几个点，
+`eval_row` 落盘给路径。起法、`.mcp.json` 片段与每个工具的返回形状见 [docs/mcp.md](docs/mcp.md)。
 
 ## 库算子（可复用的子图）
 

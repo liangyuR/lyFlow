@@ -190,3 +190,27 @@ lyflow eval g.lyflow.json --samples frames.jsonl --set n_notch.lineDistThresh=0.
 ```
 
 第 3 步在第 4 步之前，不是排版顺序：**在一个测错了缝的图上调参数，调出来的是更稳的错数。**
+
+## 7. 用 MCP 时对应的工具名
+
+同一件事换个名字而已，语义与上面各节一模一样，这里不重复解释。
+怎么起、每个工具的输出形状见 [mcp.md](mcp.md)。
+
+| 上面用的命令 | MCP 工具 | 差别 |
+|---|---|---|
+| `lyflow manifest` + `jq '.operators[] \| select(…)'` | `list_operators` → `get_operator` | 列表一行一个算子，详情含 `preconditions` |
+| `lyflow manifest` 里的 `types` | `list_port_types` | — |
+| `lyflow validate <g>` | `validate_graph` | 图可以给路径，也可以内联 |
+| `lyflow plan <g>` | `plan_graph` | — |
+| `lyflow run <g> --outputs --set …` | `run_graph` | `set` 是对象不是字符串；返回里没有点云 |
+| `run` 之后看 `stats.outputs` | `get_node_outputs` | — |
+| `lyflow dump <g> n:port out.pcd` 再自己统计 | `summarize_output` | 不落 PCD，直接给包围盒、每通道 min/max/mean 与前几个点 |
+| `lyflow eval …` | `eval` | 只回 `eval_summary` 与失败清单，逐行的 `eval_row` 落盘给路径 |
+| `lyflow perturb …` | `perturb` | 只回 `perturb_summary` 与不通过的样本 |
+| `lyflow diff a b --json` | `diff_graphs` | 原样 |
+
+两条只在 MCP 这边成立的规矩：
+
+- **退出码变成返回值里的 `exitCode`。** 用法错（`4`）时额外带一个 `stderr` 全文 ——
+  「这张图上可用的标量路径」在那里面。
+- **没有写图的工具。** 改完的图自己用文件系统存，再把路径交给 `validate_graph` / `run_graph`。

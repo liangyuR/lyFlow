@@ -254,7 +254,13 @@ gap 领域包从 `xyz-gap-inspector/lyflow/` 搬进本仓库的 `packs/gap/`，�
 - [x] `edit.translate_region` 标准算子 + `lyflow perturb`：图手术插节点 → 轴扫描位移 →
       每样本报斜率与正负两侧斜率，抓「读数不响应」与「取绝对值折叠」两种失效
 - [x] [agent-tuning.md](agent-tuning.md)：给只有 CLI/MCP 的人与 Agent 的工作法
-- [ ] `packages/mcp`：对着 `/lyflow/*` HTTP 契约的 MCP 服务，以子代理盲测验收
+- [x] `packages/mcp`：对着 `/lyflow/*` HTTP 契约的 MCP 服务（stdio，11 个工具、8 类 resource），
+      `eval` / `perturb` / `diff_graphs` 起本地 CLI；输出一律裁过（点云只给统计量，
+      `eval_row` 落盘给路径）。不依赖 `@lyflow/editor`，同一个二进制既接 test-server
+      也接阶段 B 的业务服务（[mcp.md](mcp.md)、[ADR-0021](adr/0021-mcp-as-transport-consumer.md)）
+- [ ] 子代理盲测：只给 MCP 服务、[agent-tuning.md](agent-tuning.md) 与数据路径，
+      重做点 4/4_4 的 `distThresh` 调参、对 Audio_1 独立发现「读数不响应」。
+      **工具面在盲测之前不锁定**（m5-plan §8）：盲测暴露出来的工具再加，没暴露的不加
 
 ## M5 之后 — 外延（只列方向，动工前再写计划）
 

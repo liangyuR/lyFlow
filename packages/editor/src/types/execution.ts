@@ -125,8 +125,6 @@ export interface NodeStats {
   bypassed?: boolean;
   /** 输出由宿主注入，compute 没有被调用（ADR-0017）。 */
   provided?: boolean;
-  /** 该节点的输出此刻可取。done / cached / bypassed / provided 为 true；
-   *  skipped 且 reason=not_demanded 为 false。消费方应认它而不是认 state==done。 */
   outputsAvailable?: boolean;
   /** state=skipped 的机器可读原因。目前只有 `not_demanded`（ADR-0016）：
    *  这个节点只被惰性端口依赖，而那条端口没被 demand。前端画成半透明。 */

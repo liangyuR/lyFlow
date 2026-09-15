@@ -868,7 +868,6 @@ TEST_CASE("gap.notch_width 对面翼面拟不出来时面差无效、开口照�
   REQUIRE(call.run("gap.notch_width", {{"refNear", Value::number(20.0)}, {"refFar", Value::number(25.0)}}).ok);
   CHECK(call.out("gap").asMeasurement()->ok);
   CHECK_FALSE(call.out("flush").asMeasurement()->ok);
-  // 声明过的输出端口一个都不能少，否则执行器报 output_not_written（点 3 的合成位移上踩到过）。
   CHECK(call.out("refLine").asLine2D() != nullptr);
   CHECK(call.out("flushSegment").asLine2D() != nullptr);
   CHECK(call.out("qualityRef").asRecord() != nullptr);
