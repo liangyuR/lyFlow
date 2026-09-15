@@ -3,6 +3,7 @@
 
 pub mod cli;
 pub mod core_ffi;
+mod eval;
 pub mod graph;
 pub mod ulid;
 

@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use serde_json::{json, Value};
 
 use crate::core_ffi::{self, Core, RunHandle, RunSpec};
+use crate::eval;
 use crate::graph::GraphDoc;
 use crate::ulid;
 
@@ -27,14 +28,14 @@ pub fn sink_of<W: Write + Send + 'static>(w: W) -> Sink {
     Arc::new(Mutex::new(Box::new(w) as Box<dyn Write + Send>))
 }
 
-fn line(sink: &Sink, text: &str) {
+pub(crate) fn line(sink: &Sink, text: &str) {
     if let Ok(mut w) = sink.lock() {
         let _ = writeln!(w, "{text}");
         let _ = w.flush();
     }
 }
 
-fn json_line(sink: &Sink, value: &Value) {
+pub(crate) fn json_line(sink: &Sink, value: &Value) {
     line(sink, &value.to_string());
 }
 
@@ -53,27 +54,35 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
   lyflow sweep    <graph> --param <nodeId>.<param>=<start>:<end>:<steps> [--param ...]
                           --metric <nodeId>:<port>.<elementCount|byteSize|durationMs>
                           [--csv <out.csv>] [--base-dir <dir>]
+  lyflow eval     <graph> [--samples <samples.jsonl> | --samples-glob <pat> --bind <n>.<p>]
+                          [--params <paramsets.json>] [--param <n>.<p>=<start>:<end>:<steps>]...
+                          --metric <path> [--metric <path>]...
+                          [--holdout <tag>=<value>] [--group-by <tag>]
+                          [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--no-cache]
+                          [--set <nodeId>.<param>=<json>]...
+        指标路径：outputs.<名字>[.字段...] / nodes.<节点>.<端口>[.字段...]
+                  nodes.<节点>.durationMs|elementCount|byteSize / run.durationMs
   lyflow diff     <a> <b> [--json]
 
 退出码：0 成功，1 校验失败，2 执行失败，3 被取消（Ctrl+C），4 参数错。";
 
 // ------------------------------------------------------------------ 参数解析
 
-struct Parsed {
-    positional: Vec<String>,
-    values: BTreeMap<String, Vec<String>>,
-    flags: HashSet<String>,
+pub(crate) struct Parsed {
+    pub positional: Vec<String>,
+    pub values: BTreeMap<String, Vec<String>>,
+    pub flags: HashSet<String>,
 }
 
 impl Parsed {
-    fn one(&self, name: &str) -> Option<&str> {
+    pub(crate) fn one(&self, name: &str) -> Option<&str> {
         self.values.get(name).and_then(|v| v.last()).map(String::as_str)
     }
-    fn many(&self, name: &str) -> &[String] {
+    pub(crate) fn many(&self, name: &str) -> &[String] {
         static EMPTY: &[String] = &[];
         self.values.get(name).map(Vec::as_slice).unwrap_or(EMPTY)
     }
-    fn has(&self, name: &str) -> bool {
+    pub(crate) fn has(&self, name: &str) -> bool {
         self.flags.contains(name)
     }
 }
@@ -129,11 +138,11 @@ fn parse_args(args: &[String], value_opts: &[&str], bool_opts: &[&str]) -> Resul
 
 // ------------------------------------------------------------------ 图的装载
 
-struct Loaded {
-    doc: GraphDoc,
-    json: String,
-    base_dir: String,
-    path: PathBuf,
+pub(crate) struct Loaded {
+    pub doc: GraphDoc,
+    pub json: String,
+    pub base_dir: String,
+    pub path: PathBuf,
 }
 
 /// `--set nodeId.param=<json>`。值先按 JSON 解析，解析不了就当字符串 ——
@@ -155,7 +164,7 @@ fn apply_set(doc: &mut GraphDoc, spec: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn load_graph(parsed: &Parsed, path: &str) -> Result<Loaded, String> {
+pub(crate) fn load_graph(parsed: &Parsed, path: &str) -> Result<Loaded, String> {
     let file = PathBuf::from(path);
     let text = std::fs::read_to_string(&file).map_err(|e| format!("读取 {path} 失败: {e}"))?;
     let mut doc: GraphDoc =
@@ -180,7 +189,7 @@ fn load_graph(parsed: &Parsed, path: &str) -> Result<Loaded, String> {
     })
 }
 
-fn core() -> Result<Arc<Core>, String> {
+pub(crate) fn core() -> Result<Arc<Core>, String> {
     core_ffi::core()
 }
 
@@ -256,19 +265,19 @@ mod console {
     pub fn install() {}
 }
 
-struct RunResult {
-    events: Vec<Value>,
-    status: String,
+pub(crate) struct RunResult {
+    pub events: Vec<Value>,
+    pub status: String,
     /// 句柄活着结果仓的索引才在（Drop 会 freeRun）。dump 要在这之后取输出。
     _handle: Arc<RunHandle>,
 }
 
 impl RunResult {
-    fn run_id(&self) -> &str {
+    pub(crate) fn run_id(&self) -> &str {
         self._handle.run_id()
     }
 
-    fn exit_code(&self) -> i32 {
+    pub(crate) fn exit_code(&self) -> i32 {
         match self.status.as_str() {
             "ok" => EXIT_OK,
             "cancelled" => EXIT_CANCELLED,
@@ -285,7 +294,7 @@ impl RunResult {
             .and_then(|e| e["state"].as_str().map(str::to_owned))
     }
 
-    fn skipped_nodes(&self) -> Vec<String> {
+    pub(crate) fn skipped_nodes(&self) -> Vec<String> {
         let mut out = Vec::new();
         let mut seen = HashSet::new();
         for e in &self.events {
@@ -325,7 +334,7 @@ impl RunResult {
         None
     }
 
-    fn duration_ms(&self) -> f64 {
+    pub(crate) fn duration_ms(&self) -> f64 {
         self.events
             .iter()
             .rev()
@@ -335,19 +344,19 @@ impl RunResult {
     }
 }
 
-struct RunRequest<'a> {
-    graph_json: &'a str,
-    base_dir: &'a str,
-    targets: &'a [String],
-    parallel: i32,
-    preview_points: u32,
-    preview: bool,
+pub(crate) struct RunRequest<'a> {
+    pub graph_json: &'a str,
+    pub base_dir: &'a str,
+    pub targets: &'a [String],
+    pub parallel: i32,
+    pub preview_points: u32,
+    pub preview: bool,
     /// `--no-cache`：本次运行不吃缓存。不清进程级结果仓 —— 那会连累别的 run。
-    no_cache: bool,
-    stream: Option<Sink>,
+    pub no_cache: bool,
+    pub stream: Option<Sink>,
 }
 
-fn execute(core: &Arc<Core>, req: RunRequest<'_>) -> Result<RunResult, String> {
+pub(crate) fn execute(core: &Arc<Core>, req: RunRequest<'_>) -> Result<RunResult, String> {
     console::install();
     let run_id = ulid::new();
     let ctx = Box::new(RunCtx {
@@ -390,14 +399,14 @@ fn execute(core: &Arc<Core>, req: RunRequest<'_>) -> Result<RunResult, String> {
 
 // ---------------------------------------------------------------- 各子命令
 
-fn diagnostics_of(core: &Arc<Core>, loaded: &Loaded) -> Result<Vec<Value>, String> {
+pub(crate) fn diagnostics_of(core: &Arc<Core>, loaded: &Loaded) -> Result<Vec<Value>, String> {
     let raw = core
         .validate(&loaded.json, &loaded.base_dir)
         .map_err(|e| e.to_string())?;
     serde_json::from_str(&raw).map_err(|e| format!("core 返回的诊断不是合法 JSON: {e}"))
 }
 
-fn has_errors(diags: &[Value]) -> bool {
+pub(crate) fn has_errors(diags: &[Value]) -> bool {
     diags.iter().any(|d| d["severity"] == "error")
 }
 
@@ -764,15 +773,15 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
 }
 
 /// `nodeId.param=start:end:steps`。steps=1 时只取 start。
-struct SweepAxis {
-    node: String,
-    param: String,
-    values: Vec<f64>,
+pub(crate) struct SweepAxis {
+    pub node: String,
+    pub param: String,
+    pub values: Vec<f64>,
     /// vecNf 参数的分量数。0 = 标量。扫 leafSize 时一个数广播到三个分量。
-    components: usize,
+    pub components: usize,
 }
 
-fn parse_axis(spec: &str) -> Result<SweepAxis, String> {
+pub(crate) fn parse_axis(spec: &str) -> Result<SweepAxis, String> {
     let (left, range) = spec
         .split_once('=')
         .ok_or_else(|| format!("--param 的写法是 nodeId.param=start:end:steps，收到 {spec}"))?;
@@ -807,7 +816,7 @@ fn parse_axis(spec: &str) -> Result<SweepAxis, String> {
 
 /// 这个参数当前是几个分量。先看图里写了什么，再看 manifest 的默认值，
 /// 最后看子图定义 —— 三处都问不到就当标量。
-fn component_count(
+pub(crate) fn component_count(
     doc: &GraphDoc,
     defaults: &BTreeMap<String, BTreeMap<String, Value>>,
     node_id: &str,
@@ -842,30 +851,17 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         line(err, "用法：lyflow sweep <graph> --param ... --metric ...");
         return EXIT_USAGE;
     };
-    let mut axes: Vec<SweepAxis> = match parsed
-        .many("param")
-        .iter()
-        .map(|s| parse_axis(s))
-        .collect::<Result<Vec<_>, _>>()
-    {
-        Ok(a) => a,
-        Err(e) => return fail(err, &e, EXIT_USAGE),
-    };
-    if axes.is_empty() {
+    if parsed.many("param").is_empty() {
         line(err, "至少给一个 --param nodeId.param=start:end:steps");
         return EXIT_USAGE;
     }
-    let Some(metric) = parsed.one("metric").map(str::to_string) else {
+    let Some(metric_spec) = parsed.one("metric").map(str::to_string) else {
         line(err, "缺 --metric nodeId:port.field");
         return EXIT_USAGE;
     };
-    let Some((metric_target, field)) = metric.rsplit_once('.') else {
-        line(err, "--metric 的写法是 nodeId:port.field");
-        return EXIT_USAGE;
-    };
-    let Some((metric_node, metric_port)) = metric_target.split_once(':') else {
-        line(err, "--metric 的写法是 nodeId:port.field");
-        return EXIT_USAGE;
+    let metric = match eval::parse_metric(&metric_spec) {
+        Ok(m) => m,
+        Err(e) => return fail(err, &e, EXIT_USAGE),
     };
 
     let core = match core() {
@@ -880,91 +876,75 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(d) => d,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
-    for axis in &mut axes {
-        axis.components = component_count(&loaded.doc, &defaults, &axis.node, &axis.param);
-    }
+    let param_sets = match eval::axis_param_sets(&loaded.doc, &defaults, parsed.many("param")) {
+        Ok(v) => v,
+        Err(e) => return fail(err, &e, EXIT_USAGE),
+    };
 
-    // 笛卡尔积。上游靠缓存只算一次 —— 这正是 sweep 值得做在同一个进程里的理由。
-    let total: usize = axes.iter().map(|a| a.values.len()).product();
-    let mut rows: Vec<Vec<u8>> = Vec::new();
-    let mut worst = EXIT_OK;
-    for index in 0..total {
-        let mut doc = loaded.doc.clone();
-        let mut combo = serde_json::Map::new();
-        let mut rest = index;
-        for axis in &axes {
-            let pick = rest % axis.values.len();
-            rest /= axis.values.len();
-            let value = axis.values[pick];
-            let Some(node) = doc.nodes.iter_mut().find(|n| n.id == axis.node) else {
-                return fail(err, &format!("图里没有节点 {}", axis.node), EXIT_USAGE);
-            };
-            // vecNf 的参数把一个数广播到全部分量：扫 leafSize 才写得出来
-            let written = if axis.components > 0 {
-                json!(vec![value; axis.components])
-            } else {
-                json!(value)
-            };
-            node.params.insert(axis.param.clone(), written);
-            combo.insert(format!("{}.{}", axis.node, axis.param), json!(value));
-        }
-        let graph_json = match serde_json::to_string(&doc) {
-            Ok(j) => j,
-            Err(e) => return fail(err, &e.to_string(), EXIT_FAILED),
+    let metrics = [metric];
+    let samples = [eval::Sample::whole_graph()];
+    let engine = eval::Engine {
+        core: &core,
+        base: &loaded,
+        metrics: &metrics,
+        param_sets: &param_sets,
+        samples: &samples,
+        parallel: 0,
+        no_cache: false,
+    };
+
+    let mut csv_rows: Vec<String> = Vec::new();
+    let keys: Vec<String> = param_sets
+        .first()
+        .map(|ps| ps.display.keys().cloned().collect())
+        .unwrap_or_default();
+    let worst = {
+        let mut on_row = |row: &eval::Row| {
+            let combo = param_sets[row.param_set].display.clone();
+            let value = row.metrics.first().copied().flatten();
+            json_line(
+                out,
+                &json!({
+                    "kind": "sweep_row",
+                    "index": row.param_set,
+                    "params": Value::Object(combo.clone()),
+                    "metric": metric_spec,
+                    "value": value,
+                    "status": row.status,
+                    "durationMs": row.duration_ms,
+                    "skipped": row.skipped,
+                }),
+            );
+            let mut cells: Vec<String> = keys
+                .iter()
+                .map(|k| combo.get(k).map(|v| v.to_string()).unwrap_or_default())
+                .collect();
+            cells.push(value.map(|v| v.to_string()).unwrap_or_default());
+            csv_rows.push(cells.join(","));
         };
-        let result = match execute(
-            &core,
-            RunRequest {
-                graph_json: &graph_json,
-                base_dir: &loaded.base_dir,
-                targets: &[],
-                parallel: 0,
-                preview_points: 0,
-                preview: false,
-                no_cache: false,
-                stream: None,
-            },
-        ) {
-            Ok(r) => r,
-            Err(e) => return fail(err, &e, EXIT_FAILED),
-        };
-        if result.exit_code() != EXIT_OK {
-            worst = result.exit_code();
+        match engine.run(&mut on_row) {
+            Ok(c) => c,
+            Err(eval::EngineError::Failed(e)) => return fail(err, &e, EXIT_FAILED),
+            Err(eval::EngineError::Usage(message, available)) => {
+                line(err, &message);
+                for p in available.iter().take(200) {
+                    line(err, &format!("  {p}"));
+                }
+                return EXIT_USAGE;
+            }
         }
-        let value = result.metric(metric_node, metric_port, field);
-        let row = json!({
-            "kind": "sweep_row",
-            "index": index,
-            "params": Value::Object(combo.clone()),
-            "metric": metric,
-            "value": value,
-            "status": result.status,
-            "durationMs": result.duration_ms(),
-            "skipped": result.skipped_nodes(),
-        });
-        json_line(out, &row);
-        let mut csv = Vec::new();
-        for axis in &axes {
-            let key = format!("{}.{}", axis.node, axis.param);
-            let _ = write!(csv, "{},", combo[&key]);
-        }
-        let _ = write!(
-            csv,
-            "{}",
-            value.map(|v| v.to_string()).unwrap_or_default()
-        );
-        rows.push(csv);
-    }
+    };
 
     if let Some(csv_path) = parsed.one("csv") {
         let mut text = String::new();
-        for axis in &axes {
-            text.push_str(&format!("{}.{},", axis.node, axis.param));
+        for k in &keys {
+            text.push_str(k);
+            text.push(',');
         }
-        text.push_str(&metric);
+        text.push_str(&metric_spec);
         text.push('\n');
-        for row in &rows {
-            text.push_str(&String::from_utf8_lossy(row));
+        for row in &csv_rows {
+            text.push_str(row);
             text.push('\n');
         }
         if let Err(e) = std::fs::write(csv_path, text) {
@@ -972,7 +952,7 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         }
         line(err, &format!("表格写到 {csv_path}"));
     }
-    line(err, &format!("扫了 {total} 组"));
+    line(err, &format!("扫了 {} 组", param_sets.len()));
     worst
 }
 
@@ -989,7 +969,7 @@ fn effective_params(defaults: &BTreeMap<String, Value>, node: &crate::graph::Nod
     out
 }
 
-fn defaults_by_op(core: &Arc<Core>) -> Result<BTreeMap<String, BTreeMap<String, Value>>, String> {
+pub(crate) fn defaults_by_op(core: &Arc<Core>) -> Result<BTreeMap<String, BTreeMap<String, Value>>, String> {
     let raw = core.manifest_json().map_err(|e| e.to_string())?;
     let manifest: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
     let mut out = BTreeMap::new();
@@ -1161,14 +1141,14 @@ fn cmd_diff(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
 
 // ---------------------------------------------------------------------- 入口
 
-fn fail(err: &Sink, message: &str, code: i32) -> i32 {
+pub(crate) fn fail(err: &Sink, message: &str, code: i32) -> i32 {
     line(err, message);
     code
 }
 
 const VALUE_OPTS: &[&str] = &[
     "to", "set", "base-dir", "parallel", "preview-points", "param", "metric", "csv", "format",
-    "kind", "output",
+    "kind", "output", "samples", "samples-glob", "bind", "params", "holdout", "group-by",
 ];
 const BOOL_OPTS: &[&str] = &["no-cache", "preview", "write", "check", "json", "help", "outputs"];
 
@@ -1202,6 +1182,7 @@ pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
         "import" => cmd_import(&parsed, out, err),
         "dump" => cmd_dump(&parsed, out, err),
         "sweep" => cmd_sweep(&parsed, out, err),
+        "eval" => eval::cmd_eval(&parsed, out, err),
         "diff" => cmd_diff(&parsed, out, err),
         other => {
             line(err, &format!("不认识的子命令 {other}"));
@@ -1727,4 +1708,313 @@ mod tests {
         assert_eq!(r.code, EXIT_INVALID);
         assert!(r.err.contains("没有节点"), "{}", r.err);
     }
+
+    fn samples_file(dir: &Path, name: &str, lines: &[&str]) -> String {
+        let file = dir.join(name);
+        std::fs::write(&file, format!("{}\n", lines.join("\n"))).unwrap();
+        file.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn eval_reports_rows_and_per_group_statistics() {
+        let dir = workspace("eval");
+        let graph = chain(&dir, 320);
+        let samples = samples_file(
+            &dir,
+            "s.jsonl",
+            &[
+                r#"{"id":"a","set":{"g.seed":3201},"tags":{"half":"a"}}"#,
+                r#"{"id":"b","set":{"g.seed":3202},"tags":{"half":"a"}}"#,
+                r#"{"id":"c","set":{"g.seed":3203},"tags":{"half":"b"}}"#,
+            ],
+        );
+        let csv = dir.join("eval.csv");
+        let r = cli(&[
+            "eval",
+            &graph,
+            "--samples",
+            &samples,
+            "--metric",
+            "nodes.v.elementCount",
+            "--metric",
+            "run.durationMs",
+            "--holdout",
+            "half=b",
+            "--csv",
+            &csv.to_string_lossy(),
+        ]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        let lines = r.lines();
+        let rows: Vec<&Value> = lines.iter().filter(|l| l["kind"] == "eval_row").collect();
+        let summaries: Vec<&Value> = lines.iter().filter(|l| l["kind"] == "eval_summary").collect();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(summaries.len(), 2, "每个 metric 一行 summary");
+
+        assert_eq!(rows[0]["sample"], "a");
+        assert_eq!(rows[0]["status"], "ok");
+        assert_eq!(rows[0]["holdout"], false);
+        assert_eq!(rows[0]["tags"]["half"], "a");
+        assert!(rows[0]["metrics"]["nodes.v.elementCount"].as_f64().unwrap() > 0.0);
+        assert_eq!(rows[2]["holdout"], true);
+
+        let first = summaries[0];
+        assert_eq!(first["metric"], "nodes.v.elementCount");
+        assert_eq!(first["groups"]["train"]["n"], 2);
+        assert_eq!(first["groups"]["train"]["ok"], 2);
+        assert_eq!(first["groups"]["holdout"]["n"], 1);
+        assert!(first["groups"]["holdout"]["std"].is_null(), "n<2 时 std 是 null");
+        assert!(first["groups"]["train"]["std"].as_f64().unwrap() >= 0.0);
+
+        let text = std::fs::read_to_string(&csv).unwrap();
+        assert!(
+            text.starts_with("paramSet,sample,holdout,status,nodes.v.elementCount,run.durationMs"),
+            "{text}"
+        );
+        assert_eq!(text.lines().count(), 4);
+    }
+
+    #[test]
+    fn eval_groups_by_a_tag_key() {
+        let dir = workspace("evalgroup");
+        let graph = chain(&dir, 321);
+        let samples = samples_file(
+            &dir,
+            "s.jsonl",
+            &[
+                r#"{"id":"a","set":{"g.seed":3211},"tags":{"lot":"x"}}"#,
+                r#"{"id":"b","set":{"g.seed":3212},"tags":{"lot":"y"}}"#,
+                r#"{"id":"c","set":{"g.seed":3213}}"#,
+            ],
+        );
+        let r = cli(&[
+            "eval",
+            &graph,
+            "--samples",
+            &samples,
+            "--metric",
+            "nodes.v.elementCount",
+            "--group-by",
+            "lot",
+        ]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        let summary = r
+            .lines()
+            .into_iter()
+            .find(|l| l["kind"] == "eval_summary")
+            .unwrap();
+        let groups = summary["groups"].as_object().unwrap();
+        assert_eq!(groups.len(), 3, "{summary}");
+        assert_eq!(groups["x"]["n"], 1);
+        assert_eq!(groups["y"]["n"], 1);
+        assert_eq!(groups["(none)"]["n"], 1);
+    }
+
+    #[test]
+    fn eval_crosses_parameter_sets_with_samples() {
+        let dir = workspace("evalparam");
+        let graph = chain(&dir, 322);
+        let samples = samples_file(
+            &dir,
+            "s.jsonl",
+            &[
+                r#"{"id":"a","set":{"g.seed":3221}}"#,
+                r#"{"id":"b","set":{"g.seed":3222}}"#,
+            ],
+        );
+        let r = cli(&[
+            "eval",
+            &graph,
+            "--samples",
+            &samples,
+            "--param",
+            "v.minPointsPerVoxel=1:3:3",
+            "--metric",
+            "nodes.v.elementCount",
+        ]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        let lines = r.lines();
+        let rows: Vec<&Value> = lines.iter().filter(|l| l["kind"] == "eval_row").collect();
+        assert_eq!(rows.len(), 6);
+        assert_eq!(rows[0]["paramSet"], 0);
+        assert_eq!(rows[0]["params"]["v.minPointsPerVoxel"], 1.0);
+        assert_eq!(rows[5]["paramSet"], 2);
+        assert_eq!(rows[5]["params"]["v.minPointsPerVoxel"], 3.0);
+        let summaries: Vec<&Value> = lines.iter().filter(|l| l["kind"] == "eval_summary").collect();
+        assert_eq!(summaries.len(), 3);
+        // 指标随 minPointsPerVoxel 单调下降：扫的是真参数
+        let mean = |s: &Value| s["groups"]["all"]["mean"].as_f64().unwrap();
+        assert!(mean(summaries[2]) < mean(summaries[0]));
+    }
+
+    #[test]
+    fn eval_lists_the_available_paths_when_the_metric_is_wrong() {
+        let dir = workspace("evalpath");
+        let graph = chain(&dir, 323);
+        let samples = samples_file(&dir, "s.jsonl", &[r#"{"id":"a","set":{"g.seed":3231}}"#]);
+        let r = cli(&[
+            "eval",
+            &graph,
+            "--samples",
+            &samples,
+            "--metric",
+            "outputs.gap",
+        ]);
+        assert_eq!(r.code, EXIT_USAGE, "{}", r.out);
+        assert!(r.err.contains("outputs.gap"), "{}", r.err);
+        assert!(r.err.contains("nodes.v.elementCount"), "{}", r.err);
+        assert!(r.err.contains("run.durationMs"), "{}", r.err);
+
+        // 语法就不对的路径连图都不用跑
+        let bad = cli(&["eval", &graph, "--samples", &samples, "--metric", "gap"]);
+        assert_eq!(bad.code, EXIT_USAGE);
+    }
+
+    #[test]
+    fn eval_refuses_the_scene_field() {
+        let dir = workspace("evalscene");
+        let graph = chain(&dir, 324);
+        let samples = samples_file(&dir, "s.jsonl", &[r#"{"id":"a","scene":"sc_1"}"#]);
+        let r = cli(&[
+            "eval",
+            &graph,
+            "--samples",
+            &samples,
+            "--metric",
+            "nodes.v.elementCount",
+        ]);
+        assert_eq!(r.code, EXIT_USAGE);
+        assert!(r.err.contains("scene"), "{}", r.err);
+    }
+
+    /// --samples-glob 把每个匹配到的文件变成一个样本，路径写进 --bind 指的那个参数。
+    #[test]
+    fn eval_builds_samples_from_a_glob() {
+        let dir = workspace("evalglob");
+        let clouds = dir.join("clouds");
+        std::fs::create_dir_all(&clouds).unwrap();
+        // 先用 dump 造两份真点云：glob 出来的样本要真能被 io.load_pcd 读进去
+        let source = chain(&dir, 325);
+        for name in ["one", "two"] {
+            let target = clouds.join(format!("{name}.pcd"));
+            let d = cli(&["dump", &source, "v:cloud", &target.to_string_lossy()]);
+            assert_eq!(d.code, EXIT_OK, "{}", d.err);
+        }
+        let doc = json!({
+            "schemaVersion": 1, "id": "01J8XQZ4K7N3M2R5V8W1YB6TD1",
+            "nodes": [{"id": "r", "op": "io.load_pcd", "params": {"path": "placeholder.pcd"}}],
+            "edges": []
+        });
+        let file = dir.join("load.lyflow.json");
+        std::fs::write(&file, doc.to_string()).unwrap();
+        let pattern = format!("{}/*.pcd", clouds.to_string_lossy().replace('\\', "/"));
+
+        let r = cli(&[
+            "eval",
+            &file.to_string_lossy(),
+            "--samples-glob",
+            &pattern,
+            "--bind",
+            "r.path",
+            "--metric",
+            "nodes.r.elementCount",
+        ]);
+        assert_eq!(r.code, EXIT_OK, "{} / {}", r.out, r.err);
+        let lines = r.lines();
+        let rows: Vec<&Value> = lines.iter().filter(|l| l["kind"] == "eval_row").collect();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["sample"], "one");
+        assert_eq!(rows[1]["sample"], "two");
+        assert!(rows[0]["metrics"]["nodes.r.elementCount"].as_f64().unwrap() > 0.0);
+
+        // 一个 --bind 都不给是用法错
+        let no_bind = cli(&[
+            "eval",
+            &file.to_string_lossy(),
+            "--samples-glob",
+            &pattern,
+            "--metric",
+            "nodes.r.elementCount",
+        ]);
+        assert_eq!(no_bind.code, EXIT_USAGE);
+    }
+
+    /// 校验失败与执行失败是两个退出码，逐样本区分。
+    #[test]
+    fn eval_separates_validation_failures_from_run_failures() {
+        let dir = workspace("evalfail");
+        let doc = json!({
+            "schemaVersion": 1, "id": "01J8XQZ4K7N3M2R5V8W1YB6TD2",
+            "nodes": [{"id": "r", "op": "io.load_pcd", "params": {"path": "有.pcd"}}],
+            "edges": []
+        });
+        let file = dir.join("load.lyflow.json");
+        std::fs::write(&file, doc.to_string()).unwrap();
+        let samples = samples_file(
+            &dir,
+            "s.jsonl",
+            &[r#"{"id":"missing","set":{"r.path":"没有这个文件.pcd"}}"#],
+        );
+        let r = cli(&[
+            "eval",
+            &file.to_string_lossy(),
+            "--samples",
+            &samples,
+            "--metric",
+            "nodes.r.elementCount",
+        ]);
+        assert_eq!(r.code, EXIT_FAILED, "{} / {}", r.out, r.err);
+        let row = r
+            .lines()
+            .into_iter()
+            .find(|l| l["kind"] == "eval_row")
+            .unwrap();
+        assert_eq!(row["status"], "failed");
+        assert!(row["metrics"]["nodes.r.elementCount"].is_null());
+        let summary = r
+            .lines()
+            .into_iter()
+            .find(|l| l["kind"] == "eval_summary")
+            .unwrap();
+        assert_eq!(summary["groups"]["all"]["ok"], 0);
+        assert!(
+            summary["groups"]["all"]["failCodes"]
+                .as_object()
+                .unwrap()
+                .values()
+                .any(|v| v == 1),
+            "{summary}"
+        );
+    }
+
+    /// 没给 --samples 时就是一组「图原样」：eval 退化成 sweep 的超集。
+    #[test]
+    fn eval_without_samples_runs_the_graph_once() {
+        let dir = workspace("evalnosample");
+        let graph = chain(&dir, 326);
+        let r = cli(&["eval", &graph, "--metric", "nodes.v.elementCount"]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        let rows: Vec<Value> = r
+            .lines()
+            .into_iter()
+            .filter(|l| l["kind"] == "eval_row")
+            .collect();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["sample"], "-");
+    }
+
+    /// sweep 的旧 --metric 写法在 eval 里照样认。
+    #[test]
+    fn eval_accepts_the_old_sweep_metric_spelling() {
+        let dir = workspace("evallegacy");
+        let graph = chain(&dir, 327);
+        let r = cli(&["eval", &graph, "--metric", "v:cloud.elementCount"]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        let row = r
+            .lines()
+            .into_iter()
+            .find(|l| l["kind"] == "eval_row")
+            .unwrap();
+        assert!(row["metrics"]["v:cloud.elementCount"].as_f64().unwrap() > 0.0);
+    }
+
 }

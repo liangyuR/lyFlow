@@ -16,8 +16,11 @@ phase_a.mjs  阶段 A 的分组（惰性分支半透明、plan_extended、图级
 http.mjs     e2e:http —— Node 桩服务器 + 系统 Chrome + examples/host-react
 ```
 
-CLI（m4-plan §3）不在这里：它没有界面，验收走 `cargo test`
-（`bridge/src/cli.rs` 的 `mod tests`），理由见 docs/m4-acceptance.md。
+CLI（m4-plan §3、m5-plan §1）不在这里：它没有界面，验收走 `cargo test`
+（`bridge/src/cli.rs` 与 `bridge/src/eval.rs` 的 `mod tests`），理由见 docs/m4-acceptance.md。
+`lyflow eval` 的批量评估也归这一档 —— 值路径解析、留出与分组统计、glob 生成样本
+都是纯逻辑，对着手算的数字断言比开浏览器便宜得多
+（[ADR-0020](../../docs/adr/0020-eval-and-perturb-as-cli.md)）。
 
 ## 为什么是 CDP，不是前端单元测试
 
