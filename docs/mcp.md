@@ -86,8 +86,8 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 | `run_graph` | 同上 + `targets?` `set?` `mode?` `timeoutMs?` | `POST /lyflow/run` + WS 等该 `runId` 的 `run_finished` | `{runId,status,durationMs,outputs,nodes,diagnostics}` |
 | `get_node_outputs` | `runId` `nodeId` | `GET /lyflow/runs/:id/nodes/:node/outputs` | `{outputs:[OutputInfo]}` 原样 |
 | `summarize_output` | `runId` `nodeId` `port` `maxPoints?` `head?` | 点云走 `GET …/clouds/:node/:port`，其余用 `OutputInfo.value` | 见下 |
-| `eval` | `graphPath` 样本 参数 `metric[]` … | `LYFLOW_CLI eval …` | `eval_summary` 数组 + 失败样本清单 + `rowsPath` |
-| `perturb` | `graphPath` `after` `region` `axis` `metric[]` … | `LYFLOW_CLI perturb …` | `perturb_summary` 数组 + 不通过样本 + `rowsPath` |
+| `eval` | `graphPath` 样本 参数 `metric[]` … | `LYFLOW_CLI eval …` | 压紧的统计（`compact`，默认开）+ 失败样本清单 + `rowsPath` |
+| `perturb` | `graphPath` `after` `region` `axis` `metric[]` … | `LYFLOW_CLI perturb …` | `perturb_summary` 数组 + 不通过样本 + `samplesPath` + `rowsPath` |
 | `diff_graphs` | `a` `b` | `LYFLOW_CLI diff a b --json` | `{exitCode, diff}` 原样 |
 
 ### 图怎么给
@@ -141,30 +141,83 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 只有形状与统计量）；`Indices` 给 `{kind:"indices", count}`（这一版契约只有点云有二进制端点，
 取不到逐个下标）；`Measurement` 这类小值给 `{kind:"value", value}` 原样。
 
+### `eval` / `perturb` 的样本集
+
+样本集三选一，与 CLI 一一对应（[agent-tuning.md](agent-tuning.md) §3）：
+`samplesPath`（手写的 JSON Lines）、`samplesGlob` + `bind`（单文件一步生成）、
+`samplesDir` + `bindPair`/`bind` + `pattern`（一帧一目录，工具自己配对）。
+后者还认 `sampleSubdir`、`sortBy`（`name` / `mtime`）、`splitHalf`：
+
+```jsonc
+{"graphPath":"…/4.lyflow.json",
+ "samplesDir":"…/sensor","sampleSubdir":"4",
+ "bindPair":"n_load.primaryFile,n_load.secondaryFile",
+ "pattern":"*Master*.pcd,*Slave*.pcd","splitHalf":"half",
+ "set":["n_load.source=files"],"metric":["outputs.gap"],"holdout":"half=b"}
+```
+
+每个 glob 在一帧里要**恰好匹配到一个**文件，否则 `exitCode` 4 并在 `stderr` 里说是哪一帧。
+
+CLI 的 `--samples-jsonl-out` 与 `--parallel` **MCP 不提供**，逐条对照见
+[agent-tuning.md](agent-tuning.md) §7。
+
 ### `eval` 的返回
+
+默认 `compact: true`，每个（参数组 × 指标 × 分组）压成一行：
 
 ```jsonc
 {"exitCode":0,"timedOut":false,
- "argv":["eval","a.lyflow.json","--param","gen.pointCount=2000:6000:3","--metric","nodes.voxel.elementCount"],
- "summaries":[{"kind":"eval_summary","paramSet":0,"params":{"gen.pointCount":2000},
-               "metric":"nodes.voxel.elementCount",
-               "groups":{"all":{"n":1,"ok":1,"failCodes":{},"mean":1817,"std":null,
-                                "min":1817,"max":1817,"p2p":0}}}],
- "rowCount":3,"rowsPath":"…/lyflow-mcp/eval-2026-09-15T18-08-41-671Z-27848/rows.jsonl",
+ "argv":["eval","…/4.lyflow.json","--samples-dir","…","--metric","outputs.gap","--holdout","half=b"],
+ "compact":true,
+ "summaries":[{"paramSet":0,"params":{},"metric":"outputs.gap","group":"holdout",
+               "n":25,"ok":25,"mean":1.04935,"std":0.05318},
+              {"paramSet":0,"params":{},"metric":"outputs.gap","group":"train",
+               "n":26,"ok":26,"mean":1.08380,"std":0.07507}],
+ "rowCount":51,"rowsPath":"…/lyflow-mcp/eval-…/rows.jsonl",
+ "csvPath":"…/p4.csv",
  "failureCount":0,"failures":[],"failuresTruncated":false,
- "stderrTail":"3 组参数 × 1 个样本 = 3 次运行，3 次 ok"}
+ "stderrTail":"1 组参数 × 51 个样本 = 51 次运行，51 次 ok"}
 ```
 
+- `compact` 的字段是 `{paramSet, params, metric, group, n, ok, failCodes（非空才带）, mean, std}`。
+  `compact: false` 回原样的 `eval_summary`（`groups` 嵌套，带 `min` / `max` / `p2p`）。
+  8 组参数 × 5 个指标 × 2 组在盲测里是 31 KB，压紧之后是它的几分之一。
 - 逐行的 `eval_row` **不进返回值**，整份写在 `rowsPath` 指的 JSON Lines 文件里。
   51 帧 × 8 组参数就是 408 行，那是给 `jq` 看的，不是给上下文窗口看的。
-- `failures` 是状态不是 `ok` 的样本，最多 20 条，超了 `failuresTruncated` 为 `true`。
+- `csv` 给了路径就原样透给 CLI 的 `--csv`，返回里回一个 `csvPath`。
+- `failures` 是状态不是 `ok` 的样本，最多 `failuresLimit` 条（默认 20，`0` 表示一条都不回、
+  只给 `rowsPath`），超了 `failuresTruncated` 为 `true`。
 - **读 summary 的顺序是先 `ok/n` 与 `failCodes`，再 `std`**，理由见
   [agent-tuning.md](agent-tuning.md) §3。
 - 退出码 4（用法错，比如指标路径拼错）或者根本起不来时，额外带一个 `stderr` 字段放**全文** ——
   那里面有「这张图上可用的标量路径」这样必须看全的东西。其余情况只给 `stderrTail`。
 
-`perturb` 的返回同构：`summaries` 是 `perturb_summary`，`failures` 是 `pass:false` 的
-`perturb_sample`（最多 20 条），`rowsPath` 里是全量的 `perturb_row` + `perturb_sample` + summary。
+### `perturb` 的返回
+
+同构，另有一个 `samplesPath`：
+
+```jsonc
+{"exitCode":2,"timedOut":false,"argv":[…],
+ "summaries":[{"kind":"perturb_summary","metric":"outputs.gap","axis":"x=-0.0003:0.0003:5",
+               "expect":1000,"tolerance":100,"samples":51,"pass":49,
+               "slopeMean":983.06,"slopeStd":39.44,"slopeMin":795.93,"slopeMax":1060.17,
+               "nonResponsive":0,"signFold":0}],
+ "sampleCount":51,
+ "samplesPath":"…/lyflow-mcp/perturb-…/samples.jsonl",
+ "rowsPath":"…/lyflow-mcp/perturb-…/rows.jsonl",
+ "failureCount":2,"failures":[{"kind":"perturb_sample","sample":"…","n":5,"slope":795.93,
+                               "slopeNeg":990.91,"slopePos":990.91,"pass":false}],
+ "failuresTruncated":false,
+ "stderrTail":"在 n_frame_s:cloud 之后插入 __perturb；5 个位移 × 51 个样本 = 255 次运行"}
+```
+
+- **`samplesPath` 里是全量的 `perturb_sample`**，每样本每指标一行，不受 `failuresLimit` 影响。
+  「不响应的帧是不是缝位置偏得最远的那些」这类诊断要读它 —— 只看被截断的 `failures` 做不完。
+- `failures` 是 `pass:false` 的那些，最多 `failuresLimit` 条（默认 20，`0` 表示只给路径）。
+- `rowsPath` 里是全量的 `perturb_row` + `perturb_sample` + summary。
+- `region` 的 `point` / `min` / `max` 与 `axis` 的位移都是**米**；`outputs.*` 是**毫米**，
+  所以 `expect` 常写 ±1000。`after` 要插在被图里 `camera` 参数选中的那一路相机之后
+  （[agent-tuning.md](agent-tuning.md) §4）。
 
 ---
 

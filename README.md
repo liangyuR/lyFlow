@@ -146,20 +146,27 @@ lyflow manifest [--check]
 lyflow dump     graph.lyflow.json nodeId:port out.pcd [--format binary|ascii|binary_compressed]
 lyflow sweep    graph.lyflow.json --param nodeId.param=start:end:steps [--param ...]
                                   --metric nodeId:port.elementCount [--csv out.csv]
-lyflow eval     graph.lyflow.json [--samples samples.jsonl | --samples-glob pat --bind n.p]
+lyflow eval     graph.lyflow.json <样本集>
                                   [--params sets.json] [--param n.p=start:end:steps]...
                                   --metric <值路径> [--metric ...] [--holdout tag=value]
                                   [--group-by tag] [--csv out.csv]
 lyflow perturb  graph.lyflow.json --after nodeId:port --region <选区 JSON>
                                   --axis x|y|z=start:end:steps --metric <值路径>
-                                  [--samples samples.jsonl] [--expect slope] [--tolerance v]
+                                  <样本集> [--expect slope] [--tolerance v]
 lyflow diff     a.lyflow.json b.lyflow.json [--json]
+
+<样本集> 三选一，eval 与 perturb 共用：
+  --samples samples.jsonl
+  --samples-glob pat --bind n.p
+  --samples-dir root --bind-pair n.pA,n.pB --pattern globA,globB
+                [--sample-subdir name] [--sort-by name|mtime] [--split-half tagKey]
 ```
 
 `eval` 与 `perturb` 的 `--metric` 是**值路径**：`outputs.gap`、`nodes.n_fit.quality.rmsResidualMm`、
 `nodes.v.elementCount`、`run.durationMs`。路径拼错时 stderr 会列出这张图上所有可用的标量路径
-（[ADR-0020](docs/adr/0020-eval-and-perturb-as-cli.md)）。用法见
-[docs/agent-tuning.md](docs/agent-tuning.md)。
+（[ADR-0020](docs/adr/0020-eval-and-perturb-as-cli.md)）。
+样本集的目录模式（`--samples-dir`）把「双相机配对 + 按时间前后各半打 tag」也内建了，
+不用再为每个测点写生成脚本。用法见 [docs/agent-tuning.md](docs/agent-tuning.md)。
 
 几个例子：
 
@@ -176,8 +183,11 @@ lyflow sweep demo.lyflow.json --param n_voxel.minPointsPerVoxel=1:5:5 \
              --metric n_voxel:cloud.elementCount --csv sweep.csv
 
 # 一组样本 × 一组参数 → 指标 → 内建统计，按时间前后各半留出
-lyflow eval demo.lyflow.json --samples frames.jsonl --param n_fit.distThresh=0.2:0.8:4 \
-            --metric outputs.gap --holdout half=b
+# 样本集直接指采集目录：一帧一个子目录，两个 glob 配成双相机一帧
+lyflow eval demo.lyflow.json --samples-dir kun10/sensor --sample-subdir 4 \
+            --bind-pair n_load.primaryFile,n_load.secondaryFile \
+            --pattern "*Master*.pcd,*Slave*.pcd" --split-half half \
+            --param n_fit.distThresh=0.2:0.8:4 --metric outputs.gap --holdout half=b
 
 # 合成位移：在源头之后插一个 edit.translate_region，看读数跟不跟得上
 lyflow perturb demo.lyflow.json --after n_frame_s:cloud \
@@ -198,7 +208,9 @@ lyflow diff before.lyflow.json after.lyflow.json
 11 个工具：`list_operators` / `get_operator` / `list_port_types` / `validate_graph` /
 `plan_graph` / `run_graph` / `get_node_outputs` / `summarize_output` / `eval` / `perturb` / `diff_graphs`。
 输出一律裁过（Agent 每次调用都在花上下文）：点云只给点数、包围盒、每通道 min/max/mean 与前几个点，
-`eval_row` 落盘给路径。起法、`.mcp.json` 片段与每个工具的返回形状见 [docs/mcp.md](docs/mcp.md)。
+`eval` 的统计默认压成一行一组（`compact`）、`eval_row` 与 `perturb_sample` 落盘给路径。
+起法、`.mcp.json` 片段与每个工具的返回形状见 [docs/mcp.md](docs/mcp.md)，
+CLI 选项与 MCP 字段的逐条对照见 [docs/agent-tuning.md](docs/agent-tuning.md) §7。
 
 ## 库算子（可复用的子图）
 

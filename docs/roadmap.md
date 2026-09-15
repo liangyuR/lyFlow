@@ -268,12 +268,21 @@ gap 领域包从 `xyz-gap-inspector/lyflow/` 搬进本仓库的 `packs/gap/`，�
 验收：`pnpm check` 与 `pnpm e2e`（332/332）全绿；`lyflow eval` 零脚本复现真实任务 19 个点的 std 表；
 `perturb` 抓出点 7 `gap.flush` 取绝对值的符号折叠（51/51）与点 1 的 1.000 mm/mm 斜率。
 
-**盲测暴露、尚未做的**（m5-plan §8 第 3 条：暴露出来的才加）：
-- `perturb` 逐样本斜率落盘；MCP `failures` 加 `limit`
-- `eval --samples-dir` 双相机配对 + 按时间戳排序前后各半打 tag
-- MCP `eval` 的 `compact` 返回；文档里的 `--csv` 在 MCP 工具上没有对应
+**盲测暴露、已补上的**（m5-plan §8 第 3 条：暴露出来的才加）：
+- [x] `perturb` 逐样本斜率落盘：CLI 的 `perturb_sample` 本来就在 stdout，MCP 现在把整份写进
+      `samplesPath`（`samples.jsonl`）；`eval` / `perturb` 的失败清单加 `failuresLimit`
+      （默认 20，`0` 表示一条都不回、只给路径）
+- [x] `eval` / `perturb` 共用的样本集目录模式：`--samples-dir <root> --bind-pair <a>,<b>
+      --pattern <globA>,<globB> [--sample-subdir] [--sort-by name|mtime] [--split-half <tagKey>]`
+      加 `--samples-jsonl-out`。按帧目录名里的 `dd-MM-yyyy-HH-mm-ss` 排序，读不出退字典序
+- [x] MCP `eval` 的 `compact` 返回（默认开，一组一行）；`--csv` 在 `eval` / `perturb` 上都有了
+      对应字段，`mcp.md` 与 `agent-tuning.md` §7 把每条 CLI 选项逐条对齐（含「MCP 不提供」）
+- [x] 文档补「`--after` 插在被 `camera` 选中的那一路相机之后、`camera=both` 时两路各跑一次」
+      与 region / axis 的位移是米（同一句也写进 `edit.translate_region` 的 `doc` 与 `perturb` 的 USAGE）
+
+**仍未做的**：
 - `--region` 允许 `pointFrom: <node>:<port>` 让刀口逐帧跟锚点（平台级引用，不违背 G7）
-- `list_metrics(graphPath)`；文档补「`--after` 插在被 `camera` 选中的那一路」与 region/axis 单位
+- `list_metrics(graphPath)`
 - `outputsAvailable` 的业务侧 harvest 与 `devbridge.ts` 快照透出（留给阶段 B）
 
 ## M5 之后 — 外延（只列方向，动工前再写计划）

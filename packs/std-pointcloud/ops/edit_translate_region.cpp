@@ -77,8 +77,10 @@ void registerEditTranslateRegion(Registry& r) {
                  "平移", "选区", "扰动", "半空间", "合成位移"};
   op.doc =
       "把几何选区内的点整体平移，其余点原样。选区是半空间（点 + 法向，取 dot(p-point, "
-      "normal) > 0 的一侧）或轴对齐盒（闭区间）。平移量与选区参数和输入云同帧同单位 —— "
-      "传感器帧是米，测量帧里就是毫米。点数与点序不变，intensity / rgb / normals 原样带过。"
+      "normal) > 0 的一侧）或轴对齐盒（闭区间）。平移量与选区参数（point / boxMin / boxMax）"
+      "和输入云同帧同单位，都是米 —— 传感器帧与测量帧都是米（gap.to_measurement_frame "
+      "只交换 y 与 z，不换单位），只有 Measurement 那类读数是毫米，所以 lyflow perturb 的 "
+      "--expect 写 ±1000 而不是 ±1。点数与点序不变，intensity / rgb / normals 原样带过。"
       "主要用途是合成位移：把缝的一侧推开若干毫米，看读数跟不跟得上（lyflow perturb）。";
   op.preconditions = {
       "选区是**纯几何**的，不认识缝、壁、锚点这些语义。切分面穿过一面近竖直的壁时，"
@@ -107,7 +109,7 @@ void registerEditTranslateRegion(Registry& r) {
   point.name = "point";
   point.type = ParamType::Vec3f;
   point.label = "Point";
-  point.doc = "半空间切分面上的一点。";
+  point.doc = "半空间切分面上的一点。与输入云同帧同单位，是米。";
   point.def = Value::vec({0.0, 0.0, 0.0});
   point.step = 0.001;
   point.unit = "m";
@@ -150,7 +152,7 @@ void registerEditTranslateRegion(Registry& r) {
   translation.name = "translation";
   translation.type = ParamType::Vec3f;
   translation.label = "Translation";
-  translation.doc = "选区内的点加上的位移。与输入云同帧同单位。";
+  translation.doc = "选区内的点加上的位移。与输入云同帧同单位，是米：1 mm 写 0.001。";
   translation.def = Value::vec({0.0, 0.0, 0.0});
   translation.step = 0.001;
   translation.unit = "m";

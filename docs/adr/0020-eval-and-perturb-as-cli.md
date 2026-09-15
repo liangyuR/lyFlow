@@ -78,8 +78,32 @@ lyflow eval <graph> [--samples <samples.jsonl> | --samples-glob <pat> --bind <no
 
 `--samples-glob <pattern> --bind <node>.<param>` 是一步生成：每个匹配到的文件是一个样本，
 绝对路径写进 `--bind` 指的那个参数，`id` 取文件名去扩展名（重名时前面补上父目录名）。
-**只支持一个 `--bind`** —— 双相机那类要两个路径的情况请写 `samples.jsonl`，
-让「哪两个文件算一帧」显式落在文件里，而不是靠两个 glob 的排序恰好对齐。
+**只支持一个 `--bind`** —— 双相机那类要两个路径的情况走下面的目录模式。
+
+**目录模式**（M5 盲测补的，见 [m5-acceptance.md](../m5-acceptance.md)「盲测暴露的缺口」第 2 条）。
+采集落盘几乎总是「一帧一个目录」，那就直接认这个形状：
+
+```
+--samples-dir <root> --bind-pair <node>.<paramA>,<node>.<paramB> --pattern <globA>,<globB>
+              [--sample-subdir <name>] [--sort-by name|mtime] [--split-half <tagKey>]
+              [--samples-jsonl-out <path>]
+```
+
+- `<root>` 下每个**直接子目录**是一帧，样本 `id` 取帧目录名。给了 `--sample-subdir <name>`
+  就在 `<root>/<帧>/<name>/` 下找文件，否则在 `<root>/<帧>/` 下找；都不递归。
+- 两个 glob 按位置对应 `--bind-pair` 的两个参数，每个在那一帧里要**恰好匹配到一个**文件。
+  匹配到 0 个或多个是 `EXIT_USAGE`，并报出是哪一帧、匹配到了哪几个 ——
+  「哪两个文件算一帧」仍然是显式的、可审计的，只是不再要求人先写一个脚本把它拼出来。
+  单文件的情况用 `--bind <node>.<param> --pattern <glob>`（一个 glob）。
+- `--sort-by name`（默认）先从帧目录名里解析 `dd-MM-yyyy-HH-mm-ss`
+  （真实数据形如 `12345678998765432_14-09-2026-03-44-38`），**所有**帧都解析得出才按时间排；
+  有一帧解析不出就整体退回字典序，并在 stderr 说一句。`--sort-by mtime` 按目录修改时间。
+  两种都不去猜别的时间格式 —— 猜错的排序会让留出集悄悄失效。
+- `--split-half <tagKey>`：排序后前一半打 `tags[tagKey]="a"`、后一半 `"b"`，奇数时前半多一个。
+  它只是把 G5 里已经写过的那条方法论做成一个开关，**切法仍然由人选**：不给它就没有任何 tag。
+- `--samples-jsonl-out <path>` 把生成的样本集按上面的行格式写出来，供核对与复用。
+
+三种样本源（`--samples` / `--samples-glob` / `--samples-dir`）只能给一个；`perturb` 共用同一组。
 
 行格式**预留 `scene` 字段**：这一轮遇到它直接 `EXIT_USAGE`「本版本不支持 scene 注入」。
 将来接业务服务的 sceneId 注入时，已经写好的样本文件不用改（m5-plan §8.1）。

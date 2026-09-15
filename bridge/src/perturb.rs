@@ -431,7 +431,7 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         None => DEFAULT_TOLERANCE,
     };
 
-    let samples = match collect_samples(parsed) {
+    let samples = match collect_samples(parsed, err) {
         Ok(s) => s,
         Err(e) => {
             line(err, &e);

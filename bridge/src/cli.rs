@@ -55,21 +55,34 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
   lyflow sweep    <graph> --param <nodeId>.<param>=<start>:<end>:<steps> [--param ...]
                           --metric <nodeId>:<port>.<elementCount|byteSize|durationMs>
                           [--csv <out.csv>] [--base-dir <dir>]
-  lyflow eval     <graph> [--samples <samples.jsonl> | --samples-glob <pat> --bind <n>.<p>]
-                          [--params <paramsets.json>] [--param <n>.<p>=<start>:<end>:<steps>]...
+  lyflow eval     <graph> [<样本集>] [--params <paramsets.json>]
+                          [--param <n>.<p>=<start>:<end>:<steps>]...
                           --metric <path> [--metric <path>]...
                           [--holdout <tag>=<value>] [--group-by <tag>]
                           [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--no-cache]
                           [--set <nodeId>.<param>=<json>]...
         指标路径：outputs.<名字>[.字段...] / nodes.<节点>.<端口>[.字段...]
                   nodes.<节点>.durationMs|elementCount|byteSize / run.durationMs
+        样本集三选一：
+          --samples <samples.jsonl>
+          --samples-glob <pat> --bind <n>.<p>
+          --samples-dir <root> --bind-pair <n>.<pA>,<n>.<pB> --pattern <globA>,<globB>
+                        （单文件时 --bind <n>.<p> --pattern <glob>）
+                        [--sample-subdir <name>] [--sort-by name|mtime] [--split-half <tagKey>]
+        另有 [--samples-jsonl-out <path>]：把生成的样本集写出来，可核对可复用。
+        --samples-dir 下每个直接子目录是一帧，样本 id 取帧目录名；--sample-subdir 再往下一层。
+        --sort-by name（默认）先从帧目录名里读 dd-MM-yyyy-HH-mm-ss 时间戳排序，读不出退字典序；
+        --split-half 排序后前一半打 a、后一半打 b（奇数时前半多一个），配 --holdout <tagKey>=b 用。
   lyflow perturb  <graph> --after <nodeId>:<port> --region <json> --axis <x|y|z>=<s>:<e>:<n>
-                          [--samples <samples.jsonl> | --samples-glob <pat> --bind <n>.<p>]
+                          [<样本集>，与 eval 同一组选项]
                           --metric <path> [--metric <path>]...
                           [--expect <slope>] [--tolerance <v>] [--csv <out.csv>]
                           [--base-dir <dir>] [--parallel <n>] [--no-cache] [--set ...]
         选区 JSON：{\"kind\":\"halfspace\",\"point\":[x,y,z],\"normal\":[x,y,z]}
                    {\"kind\":\"box\",\"min\":[x,y,z],\"max\":[x,y,z]}
+        单位：--region 的 point / min / max 与 --axis 的位移都是「米」，与点云同帧同单位
+              （传感器帧与测量帧都是米）；outputs.* 这类 Measurement 是「毫米」。
+              所以「张开 1 mm 读数加 1 mm」是 --expect 1000，不是 1。
   lyflow diff     <a> <b> [--json]
 
 退出码：0 成功，1 校验失败，2 执行失败，3 被取消（Ctrl+C），4 参数错。";
@@ -1157,7 +1170,8 @@ pub(crate) fn fail(err: &Sink, message: &str, code: i32) -> i32 {
 const VALUE_OPTS: &[&str] = &[
     "to", "set", "base-dir", "parallel", "preview-points", "param", "metric", "csv", "format",
     "kind", "output", "samples", "samples-glob", "bind", "params", "holdout", "group-by",
-    "after", "region", "axis", "expect", "tolerance",
+    "after", "region", "axis", "expect", "tolerance", "samples-dir", "bind-pair", "pattern",
+    "sample-subdir", "sort-by", "split-half", "samples-jsonl-out",
 ];
 const BOOL_OPTS: &[&str] = &["no-cache", "preview", "write", "check", "json", "help", "outputs"];
 

@@ -165,11 +165,18 @@ f32 bounds[6] | f32 xyz[3n] | [f32 intensity[n]] | [f32 normals[3n]]
 不用再写解析器、批跑器和统计脚本（[ADR-0020](../docs/adr/0020-eval-and-perturb-as-cli.md)）。
 
 ```
-lyflow eval <graph> [--samples <samples.jsonl> | --samples-glob <pat> --bind <node>.<param>]
+lyflow eval <graph> <样本集>
                     [--params <paramsets.json>] [--param <node>.<param>=<start>:<end>:<steps>]...
                     --metric <path> [--metric <path>]...
                     [--holdout <tag>=<value>] [--group-by <tag>]
                     [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--no-cache] [--set ...]
+
+<样本集> 三选一（perturb 共用同一组）：
+    --samples <samples.jsonl>
+    --samples-glob <pat> --bind <node>.<param>
+    --samples-dir <root> --bind-pair <node>.<pA>,<node>.<pB> --pattern <globA>,<globB>
+                  [--sample-subdir <name>] [--sort-by name|mtime] [--split-half <tagKey>]
+另有 [--samples-jsonl-out <path>]：把生成的样本集写出来，可核对可复用
 ```
 
 ```bash
@@ -184,6 +191,12 @@ lyflow eval 4.lyflow.json --samples kun10-p4.jsonl \
 # glob 一步生成样本：每个文件一个样本，绝对路径写进 --bind 指的参数
 lyflow eval load.lyflow.json --samples-glob "clouds/*.pcd" --bind r.path \
   --metric nodes.r.elementCount
+
+# 目录模式：一帧一个目录，两个 glob 配成双相机一帧，按时间前后各半打 tag
+lyflow eval 4.lyflow.json --samples-dir kun10/sensor --sample-subdir 4 \
+  --bind-pair n_load.primaryFile,n_load.secondaryFile \
+  --pattern "*Master*.pcd,*Slave*.pcd" --split-half half \
+  --set n_load.source=files --metric outputs.gap --holdout half=b
 ```
 
 - **指标是值路径**：`outputs.<名字>[.a.b]`、`nodes.<节点>.<端口>[.a.b]`、
@@ -192,6 +205,11 @@ lyflow eval load.lyflow.json --samples-glob "clouds/*.pcd" --bind r.path \
   拼错是 `EXIT_USAGE`，stderr 会把这张图上所有可用的标量路径列出来 —— 第一次总会拼错。
 - **样本**每行 `{ id, set: { "<node>.<param>": <json> }, tags? }`。`scene` 字段留给将来的注入，
   这一版遇到就报用法错。覆盖顺序：全局 `--set` → 参数组 → 样本的 `set`。
+- **目录模式**（`--samples-dir`）：`<root>` 下每个直接子目录是一帧，样本 id 取帧目录名；
+  `--sample-subdir` 再往下一层。每个 glob 在一帧里要**恰好匹配到一个**文件，
+  0 个或多个是 `EXIT_USAGE` 并报出是哪一帧。`--sort-by name`（默认）先读帧目录名里的
+  `dd-MM-yyyy-HH-mm-ss` 时间戳，有一帧读不出就整体退回字典序并在 stderr 说一句；
+  `--split-half` 排序后前一半 `a`、后一半 `b`（奇数时前半多一个），配 `--holdout <key>=b`。
 - stdout 每行一个 `eval_row`，末尾每个（参数组 × 指标）一行 `eval_summary`
   （`n / ok / failCodes / mean / std / min / max / p2p`；`std` 是样本标准差，`n<2` 给 `null`）。
 - 样本之间**顺序跑**，`--parallel` 是传给 core 的节点并行度，与 `run` 同义。缓存默认开。

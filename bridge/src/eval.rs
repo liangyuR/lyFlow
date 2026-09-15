@@ -1129,7 +1129,7 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         group_by: parsed.one("group-by").map(str::to_string),
     };
 
-    let samples = match collect_samples(parsed) {
+    let samples = match collect_samples(parsed, err) {
         Ok(s) => s,
         Err(e) => {
             line(err, &e);
@@ -1298,34 +1298,374 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     code
 }
 
-pub(crate) fn collect_samples(parsed: &Parsed) -> Result<Vec<Sample>, String> {
-    let file = parsed.one("samples");
-    let pattern = parsed.one("samples-glob");
-    if file.is_some() && pattern.is_some() {
-        return Err("--samples 与 --samples-glob 只能给一个".to_string());
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum SortBy {
+    Name,
+    Mtime,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct DirSpec {
+    pub root: PathBuf,
+    pub subdir: Option<String>,
+    pub binds: Vec<String>,
+    pub patterns: Vec<String>,
+    pub sort_by: SortBy,
+    pub split_half: Option<String>,
+}
+
+pub(crate) fn parse_dir_timestamp(name: &str) -> Option<[u32; 6]> {
+    const WIDTHS: [usize; 6] = [2, 2, 4, 2, 2, 2];
+    const TOTAL: usize = 2 + 1 + 2 + 1 + 4 + 1 + 2 + 1 + 2 + 1 + 2;
+    let b = name.as_bytes();
+    if b.len() < TOTAL {
+        return None;
     }
-    if let Some(file) = file {
-        if !parsed.many("bind").is_empty() {
-            return Err("--bind 只跟 --samples-glob 配套；用 --samples 时样本自己写 set".to_string());
+    for start in 0..=(b.len() - TOTAL) {
+        if start > 0 && b[start - 1].is_ascii_digit() {
+            continue;
         }
-        return load_samples(file);
+        let end = start + TOTAL;
+        if end < b.len() && b[end].is_ascii_digit() {
+            continue;
+        }
+        let mut pos = start;
+        let mut vals = [0u32; 6];
+        let mut ok = true;
+        for (i, w) in WIDTHS.iter().enumerate() {
+            if i > 0 {
+                if b[pos] != b'-' {
+                    ok = false;
+                    break;
+                }
+                pos += 1;
+            }
+            let mut v = 0u32;
+            for k in 0..*w {
+                let c = b[pos + k];
+                if !c.is_ascii_digit() {
+                    ok = false;
+                    break;
+                }
+                v = v * 10 + u32::from(c - b'0');
+            }
+            if !ok {
+                break;
+            }
+            vals[i] = v;
+            pos += w;
+        }
+        if ok {
+            return Some([vals[2], vals[1], vals[0], vals[3], vals[4], vals[5]]);
+        }
     }
-    if let Some(pattern) = pattern {
+    None
+}
+
+fn dir_mtime(path: &Path) -> u128 {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
+}
+
+fn pick_one(dir: &Path, pattern: &str, frame: &str) -> Result<PathBuf, String> {
+    let entries = std::fs::read_dir(dir)
+        .map_err(|e| format!("帧 {frame}：读不了目录 {} ({e})", dir.display()))?;
+    let mut hits: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| wildcard_match(pattern, n))
+                .unwrap_or(false)
+        })
+        .collect();
+    hits.sort();
+    match hits.len() {
+        1 => Ok(hits.remove(0)),
+        0 => Err(format!(
+            "帧 {frame}：--pattern {pattern} 在 {} 下没匹配到文件",
+            dir.display()
+        )),
+        n => {
+            let names: Vec<String> = hits
+                .iter()
+                .filter_map(|p| p.file_name().and_then(|s| s.to_str()))
+                .map(str::to_string)
+                .collect();
+            Err(format!(
+                "帧 {frame}：--pattern {pattern} 在 {} 下匹配到 {n} 个文件（{}），要正好一个",
+                dir.display(),
+                names.join(", ")
+            ))
+        }
+    }
+}
+
+pub(crate) fn samples_from_dir(spec: &DirSpec) -> Result<(Vec<Sample>, Option<String>), String> {
+    let root = absolute(&spec.root);
+    if !root.is_dir() {
+        return Err(format!("--samples-dir 不是一个目录: {}", root.display()));
+    }
+    let entries = std::fs::read_dir(&root)
+        .map_err(|e| format!("读不了 --samples-dir {} ({e})", root.display()))?;
+    let mut frames: Vec<(String, PathBuf)> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .filter_map(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| (n.to_string(), p.clone()))
+        })
+        .collect();
+    if frames.is_empty() {
+        return Err(format!(
+            "--samples-dir {} 下一个子目录都没有（每个直接子目录是一帧）",
+            root.display()
+        ));
+    }
+
+    let mut note = None;
+    match spec.sort_by {
+        SortBy::Mtime => {
+            let mut keyed: Vec<(u128, String, PathBuf)> = frames
+                .into_iter()
+                .map(|(n, p)| (dir_mtime(&p), n, p))
+                .collect();
+            keyed.sort();
+            frames = keyed.into_iter().map(|(_, n, p)| (n, p)).collect();
+        }
+        SortBy::Name => {
+            let stamps: Vec<Option<[u32; 6]>> =
+                frames.iter().map(|(n, _)| parse_dir_timestamp(n)).collect();
+            if stamps.iter().all(Option::is_some) {
+                let mut keyed: Vec<([u32; 6], String, PathBuf)> = frames
+                    .into_iter()
+                    .zip(&stamps)
+                    .map(|((n, p), ts)| (ts.unwrap_or_default(), n, p))
+                    .collect();
+                keyed.sort();
+                frames = keyed.into_iter().map(|(_, n, p)| (n, p)).collect();
+            } else {
+                let bad = frames
+                    .iter()
+                    .zip(&stamps)
+                    .find(|(_, ts)| ts.is_none())
+                    .map(|((n, _), _)| n.clone())
+                    .unwrap_or_default();
+                note = Some(format!(
+                    "--sort-by name：帧目录名里读不出 dd-MM-yyyy-HH-mm-ss 时间戳（比如 {bad}），退回字典序"
+                ));
+                frames.sort();
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for (name, dir) in &frames {
+        let look = match &spec.subdir {
+            Some(s) => dir.join(s),
+            None => dir.clone(),
+        };
+        if !look.is_dir() {
+            return Err(format!(
+                "帧 {name}：找不到目录 {}",
+                look.display()
+            ));
+        }
+        let mut set = Vec::new();
+        for (bind, pattern) in spec.binds.iter().zip(&spec.patterns) {
+            let file = pick_one(&look, pattern, name)?;
+            set.push((
+                bind.clone(),
+                Value::String(absolute(&file).to_string_lossy().replace('\\', "/")),
+            ));
+        }
+        out.push(Sample {
+            id: name.clone(),
+            set,
+            tags: BTreeMap::new(),
+        });
+    }
+
+    if let Some(key) = &spec.split_half {
+        let first = out.len().div_ceil(2);
+        for (i, s) in out.iter_mut().enumerate() {
+            s.tags
+                .insert(key.clone(), if i < first { "a" } else { "b" }.to_string());
+        }
+    }
+    Ok((out, note))
+}
+
+fn sample_to_json(s: &Sample) -> Value {
+    let mut set = Map::new();
+    for (k, v) in &s.set {
+        set.insert(k.clone(), v.clone());
+    }
+    let mut o = Map::new();
+    o.insert("id".to_string(), Value::String(s.id.clone()));
+    o.insert("set".to_string(), Value::Object(set));
+    if !s.tags.is_empty() {
+        o.insert("tags".to_string(), s.tags_json());
+    }
+    Value::Object(o)
+}
+
+pub(crate) fn samples_jsonl(samples: &[Sample]) -> String {
+    let mut text = String::new();
+    for s in samples {
+        text.push_str(&sample_to_json(s).to_string());
+        text.push('\n');
+    }
+    text
+}
+
+fn dir_spec(parsed: &Parsed, root: &str) -> Result<DirSpec, String> {
+    let explicit = parsed.many("bind");
+    let binds: Vec<String> = match parsed.one("bind-pair") {
+        Some(spec) => {
+            if !explicit.is_empty() {
+                return Err("--bind-pair 与 --bind 只能给一个".to_string());
+            }
+            let parts: Vec<String> = spec
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect();
+            if parts.len() != 2 {
+                return Err(format!(
+                    "--bind-pair 要正好两个，写成 <节点>.<参数A>,<节点>.<参数B>，收到 {spec}"
+                ));
+            }
+            parts
+        }
+        None => {
+            if explicit.len() != 1 {
+                return Err(
+                    "--samples-dir 要配 --bind-pair <a>,<b>（双相机）或一个 --bind <节点>.<参数>（单文件）"
+                        .to_string(),
+                );
+            }
+            vec![explicit[0].clone()]
+        }
+    };
+    for b in &binds {
+        split_target(b, "--bind-pair")?;
+    }
+    let Some(raw) = parsed.one("pattern") else {
+        return Err(
+            "--samples-dir 要配 --pattern <glob>；两个相机时用逗号隔开两个 glob"
+                .to_string(),
+        );
+    };
+    let patterns: Vec<String> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    if patterns.len() != binds.len() {
+        return Err(format!(
+            "--pattern 给了 {} 个，--bind-pair/--bind 给了 {} 个，要一一对应",
+            patterns.len(),
+            binds.len()
+        ));
+    }
+    let sort_by = match parsed.one("sort-by") {
+        None | Some("name") => SortBy::Name,
+        Some("mtime") => SortBy::Mtime,
+        Some(other) => {
+            return Err(format!(
+                "--sort-by 只认 name 或 mtime，收到 {other}"
+            ))
+        }
+    };
+    Ok(DirSpec {
+        root: PathBuf::from(root),
+        subdir: parsed.one("sample-subdir").map(str::to_string),
+        binds,
+        patterns,
+        sort_by,
+        split_half: parsed.one("split-half").map(str::to_string),
+    })
+}
+
+pub(crate) fn collect_samples(parsed: &Parsed, err: &Sink) -> Result<Vec<Sample>, String> {
+    let file = parsed.one("samples");
+    let glob = parsed.one("samples-glob");
+    let dir = parsed.one("samples-dir");
+    let given = [file.is_some(), glob.is_some(), dir.is_some()]
+        .iter()
+        .filter(|b| **b)
+        .count();
+    if given > 1 {
+        return Err(
+            "--samples / --samples-glob / --samples-dir 只能给一个".to_string(),
+        );
+    }
+    if dir.is_none() {
+        for name in ["bind-pair", "pattern", "sample-subdir", "sort-by", "split-half"] {
+            if parsed.one(name).is_some() {
+                return Err(format!("--{name} 要和 --samples-dir 一起给"));
+            }
+        }
+    }
+
+    let samples = if let Some(file) = file {
+        if !parsed.many("bind").is_empty() {
+            return Err(
+                "--bind 只跟 --samples-glob / --samples-dir 配套；用 --samples 时样本自己写 set"
+                    .to_string(),
+            );
+        }
+        load_samples(file)?
+    } else if let Some(glob) = glob {
         let binds = parsed.many("bind");
         if binds.len() != 1 {
             return Err(
-                "--samples-glob 要正好配一个 --bind <节点>.<参数>；两个相机这类情况请改写 samples.jsonl"
+                "--samples-glob 要正好配一个 --bind <节点>.<参数>；两个相机请用 --samples-dir --bind-pair"
                     .to_string(),
             );
         }
         split_target(&binds[0], "--bind")?;
-        let files = glob_files(pattern)?;
-        return Ok(samples_from_files(&files, &binds[0]));
+        let files = glob_files(glob)?;
+        samples_from_files(&files, &binds[0])
+    } else if let Some(root) = dir {
+        let spec = dir_spec(parsed, root)?;
+        let (samples, note) = samples_from_dir(&spec)?;
+        if let Some(note) = note {
+            line(err, &note);
+        }
+        samples
+    } else {
+        if !parsed.many("bind").is_empty() {
+            return Err(
+                "--bind 要和 --samples-glob 或 --samples-dir 一起给".to_string(),
+            );
+        }
+        vec![Sample::whole_graph()]
+    };
+
+    if let Some(out) = parsed.one("samples-jsonl-out") {
+        std::fs::write(out, samples_jsonl(&samples))
+            .map_err(|e| format!("写入 {out} 失败: {e}"))?;
+        line(
+            err,
+            &format!(
+                "样本集写到 {out}（{} 个样本）",
+                samples.len()
+            ),
+        );
     }
-    if !parsed.many("bind").is_empty() {
-        return Err("--bind 要和 --samples-glob 一起给".to_string());
-    }
-    Ok(vec![Sample::whole_graph()])
+    Ok(samples)
 }
 
 #[cfg(test)]
@@ -1625,5 +1965,209 @@ mod tests {
         assert_eq!(parse_holdout("half=b").unwrap(), ("half".to_string(), "b".to_string()));
         assert!(parse_holdout("half").is_err());
         assert!(parse_holdout("=b").is_err());
+    }
+
+    struct TempTree(PathBuf);
+
+    impl Drop for TempTree {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn tree(tag: &str, frames: &[(&str, &[&str])], subdir: Option<&str>) -> TempTree {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root =
+            std::env::temp_dir().join(format!("lyflow-eval-{tag}-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for (frame, files) in frames {
+            let dir = match subdir {
+                Some(sub) => root.join(frame).join(sub),
+                None => root.join(frame),
+            };
+            std::fs::create_dir_all(&dir).expect("建目录");
+            for f in *files {
+                std::fs::write(dir.join(f), b"").expect("建文件");
+            }
+        }
+        TempTree(root)
+    }
+
+    fn pair_spec(root: &Path, subdir: Option<&str>, split: Option<&str>, sort: SortBy) -> DirSpec {
+        DirSpec {
+            root: root.to_path_buf(),
+            subdir: subdir.map(str::to_string),
+            binds: vec![
+                "n_load.primaryFile".to_string(),
+                "n_load.secondaryFile".to_string(),
+            ],
+            patterns: vec!["*Master*.pcd".to_string(), "*Slave*.pcd".to_string()],
+            sort_by: sort,
+            split_half: split.map(str::to_string),
+        }
+    }
+
+    const MASTER: &str = "LaserProfile_L0_Master_4_x_0.pcd";
+    const SLAVE: &str = "LaserProfile_R1_Slave_4_x_0.pcd";
+
+    #[test]
+    fn a_samples_dir_pairs_two_globs_per_frame() {
+        let files: &[&str] = &[MASTER, SLAVE, "notes.txt"];
+        let t = tree(
+            "pair",
+            &[
+                ("vin_15-09-2026-08-00-00", files),
+                ("vin_15-09-2026-08-01-00", files),
+                ("vin_14-09-2026-03-44-38", files),
+            ],
+            Some("4"),
+        );
+        let (samples, note) =
+            samples_from_dir(&pair_spec(&t.0, Some("4"), None, SortBy::Name)).expect("配对");
+        assert!(note.is_none());
+        assert_eq!(samples.len(), 3);
+        assert_eq!(samples[0].id, "vin_14-09-2026-03-44-38");
+        assert_eq!(samples[2].id, "vin_15-09-2026-08-01-00");
+        assert_eq!(samples[0].set.len(), 2);
+        assert_eq!(samples[0].set[0].0, "n_load.primaryFile");
+        assert!(samples[0]
+            .set[0]
+            .1
+            .as_str()
+            .unwrap()
+            .ends_with(&format!("vin_14-09-2026-03-44-38/4/{MASTER}")));
+        assert_eq!(samples[0].set[1].0, "n_load.secondaryFile");
+        assert!(samples[0].set[1].1.as_str().unwrap().ends_with(SLAVE));
+        assert!(samples[0].tags.is_empty());
+    }
+
+    #[test]
+    fn without_a_subdir_the_files_sit_in_the_frame_dir() {
+        let files: &[&str] = &[MASTER, SLAVE];
+        let t = tree("flat", &[("15-09-2026-08-00-00", files)], None);
+        let (samples, _) =
+            samples_from_dir(&pair_spec(&t.0, None, None, SortBy::Name)).expect("配对");
+        assert_eq!(samples.len(), 1);
+        assert!(samples[0].set[0].1.as_str().unwrap().ends_with(MASTER));
+    }
+
+    #[test]
+    fn the_timestamp_in_the_dir_name_beats_lexicographic_order() {
+        assert_eq!(
+            parse_dir_timestamp("12345678998765432_14-09-2026-03-44-38"),
+            Some([2026, 9, 14, 3, 44, 38])
+        );
+        assert_eq!(parse_dir_timestamp("frame-001"), None);
+        assert_eq!(parse_dir_timestamp("1-09-2026-03-44-38"), None);
+
+        let files: &[&str] = &[MASTER, SLAVE];
+        let t = tree(
+            "order",
+            &[
+                ("a_09-10-2026-08-00-00", files),
+                ("b_10-09-2026-08-00-00", files),
+            ],
+            None,
+        );
+        let (by_time, note) =
+            samples_from_dir(&pair_spec(&t.0, None, None, SortBy::Name)).expect("配对");
+        assert!(note.is_none());
+        assert_eq!(by_time[0].id, "b_10-09-2026-08-00-00");
+        assert_eq!(by_time[1].id, "a_09-10-2026-08-00-00");
+    }
+
+    #[test]
+    fn an_unparsable_dir_name_falls_back_to_lexicographic_and_says_so() {
+        let files: &[&str] = &[MASTER, SLAVE];
+        let t = tree("fallback", &[("frame-002", files), ("frame-001", files)], None);
+        let (samples, note) =
+            samples_from_dir(&pair_spec(&t.0, None, None, SortBy::Name)).expect("配对");
+        assert_eq!(samples[0].id, "frame-001");
+        assert_eq!(samples[1].id, "frame-002");
+        let note = note.expect("要在 stderr 说一句");
+        assert!(note.contains("dd-MM-yyyy-HH-mm-ss"), "{note}");
+    }
+
+    #[test]
+    fn split_half_tags_the_front_half_a_and_gives_it_the_odd_one() {
+        let files: &[&str] = &[MASTER, SLAVE];
+        let frames: Vec<String> = (0..5).map(|i| format!("f_15-09-2026-08-0{i}-00")).collect();
+        let spec: Vec<(&str, &[&str])> = frames.iter().map(|f| (f.as_str(), files)).collect();
+        let t = tree("half", &spec, None);
+        let (samples, _) =
+            samples_from_dir(&pair_spec(&t.0, None, Some("half"), SortBy::Name)).expect("配对");
+        let tags: Vec<&str> = samples
+            .iter()
+            .map(|s| s.tags.get("half").map(String::as_str).unwrap_or(""))
+            .collect();
+        assert_eq!(tags, vec!["a", "a", "a", "b", "b"]);
+    }
+
+    #[test]
+    fn zero_or_two_matches_name_the_frame_and_fail() {
+        let t = tree("zero", &[("f_15-09-2026-08-00-00", &[SLAVE])], None);
+        let e = samples_from_dir(&pair_spec(&t.0, None, None, SortBy::Name)).unwrap_err();
+        assert!(e.contains("f_15-09-2026-08-00-00"), "{e}");
+        assert!(e.contains("*Master*.pcd"), "{e}");
+
+        let t2 = tree(
+            "two",
+            &[(
+                "f_15-09-2026-08-00-00",
+                &["a_Master_1.pcd", "b_Master_2.pcd", SLAVE],
+            )],
+            None,
+        );
+        let e2 = samples_from_dir(&pair_spec(&t2.0, None, None, SortBy::Name)).unwrap_err();
+        assert!(e2.contains("f_15-09-2026-08-00-00"), "{e2}");
+        assert!(e2.contains("a_Master_1.pcd"), "{e2}");
+        assert!(e2.contains("b_Master_2.pcd"), "{e2}");
+    }
+
+    #[test]
+    fn a_single_bind_binds_one_glob_per_frame() {
+        let t = tree(
+            "single",
+            &[
+                ("f_15-09-2026-08-00-00", &[MASTER]),
+                ("f_15-09-2026-08-01-00", &[MASTER]),
+            ],
+            None,
+        );
+        let spec = DirSpec {
+            root: t.0.clone(),
+            subdir: None,
+            binds: vec!["r.path".to_string()],
+            patterns: vec!["*.pcd".to_string()],
+            sort_by: SortBy::Name,
+            split_half: None,
+        };
+        let (samples, _) = samples_from_dir(&spec).expect("配对");
+        assert_eq!(samples.len(), 2);
+        assert_eq!(samples[0].set.len(), 1);
+        assert_eq!(samples[0].set[0].0, "r.path");
+    }
+
+    #[test]
+    fn the_generated_sample_set_round_trips_through_jsonl() {
+        let files: &[&str] = &[MASTER, SLAVE];
+        let t = tree(
+            "jsonl",
+            &[
+                ("f_15-09-2026-08-00-00", files),
+                ("f_15-09-2026-08-01-00", files),
+            ],
+            None,
+        );
+        let (samples, _) =
+            samples_from_dir(&pair_spec(&t.0, None, Some("half"), SortBy::Name)).expect("配对");
+        let text = samples_jsonl(&samples);
+        let back = parse_samples(&text, "<mem>").expect("回读");
+        assert_eq!(back.len(), 2);
+        assert_eq!(back[0].id, samples[0].id);
+        assert_eq!(back[0].set, samples[0].set);
+        assert_eq!(back[0].tags.get("half").map(String::as_str), Some("a"));
+        assert_eq!(back[1].tags.get("half").map(String::as_str), Some("b"));
     }
 }

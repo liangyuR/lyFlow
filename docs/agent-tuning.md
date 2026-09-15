@@ -46,8 +46,33 @@ lyflow validate graph.lyflow.json && lyflow run graph.lyflow.json --outputs
 ```
 
 `set` 的键是 `<节点>.<参数>`，语义与 `--set` 完全一样。
-双相机这类「哪两个文件算一帧」的事必须写在文件里，不要靠两个 glob 的排序恰好对齐；
-单路径的情况可以用 `--samples-glob <pat> --bind <节点>.<参数>` 一步生成。
+
+**这份文件不用手写。** 采集通常落成「一帧一个目录」的形状，`--samples-dir` 直接认它：
+
+```bash
+lyflow eval graph.lyflow.json \
+  --samples-dir <采集根> --sample-subdir 4 \
+  --bind-pair n_load.primaryFile,n_load.secondaryFile \
+  --pattern "*Master*.pcd,*Slave*.pcd" --split-half half \
+  --metric outputs.gap --holdout half=b
+```
+
+`<采集根>` 下每个直接子目录是一帧（给了 `--sample-subdir` 就在 `<帧>/<name>/` 下找文件），
+两个 glob 各要在那一帧里**恰好匹配到一个**文件，分别写进 `--bind-pair` 的两个参数；
+匹配到 0 个或多个就退出 4 并报出是哪一帧 —— 「哪两个文件算一帧」仍然是显式的，
+只是不用再自己写脚本拼。样本 id 取帧目录名。
+
+`--split-half half` 把「按时间前后各半打 tag」也内建了：排序后前一半 `"half":"a"`、
+后一半 `"half":"b"`（奇数时前半多一个），直接配 `--holdout half=b`。
+排序默认 `--sort-by name`，它先从帧目录名里读 `dd-MM-yyyy-HH-mm-ss`
+（`12345678998765432_14-09-2026-03-44-38` 这种）按真实时间排，读不出来才退回字典序，
+并在 stderr 说一句；目录名带别的时间格式时改用 `--sort-by mtime`。
+**这一组选项取代了以前那个「给每个测点生成一份 samples.jsonl」的脚本** ——
+盲测里唯一还需要写脚本的地方就是它。想核对或复用生成的结果就加 `--samples-jsonl-out <path>`。
+`perturb` 用的是同一组选项。
+
+手写样本集仍然支持（`--samples`）；单路径的情况也可以用
+`--samples-glob <pat> --bind <节点>.<参数>` 一步生成。三种样本源只能给一个。
 
 ```bash
 lyflow eval graph.lyflow.json --samples frames.jsonl \
@@ -101,9 +126,28 @@ lyflow perturb graph.lyflow.json --after n_frame_s:cloud \
 它在 `--after` 指的端口后插一个 `edit.translate_region`，把原先从那个端口出发的边全部改到新节点，
 然后对 `translation` 的一个分量做等距扫描，报每个样本的 `slope = d(指标)/d(位移)`。
 
-**单位。** 点云在传感器帧和测量帧里都是**米**（`gap.to_measurement_frame` 只交换 y 与 z，不换单位），
-而 `outputs.gap` 这类 Measurement 是**毫米**。所以「张开 1 mm 读数加 1 mm」是 `slope ≈ 1000`，
-`--expect` 写 1000 不是 1。位移范围也按米写：`x=0:0.0006:5` 是 0 到 0.6 mm 五档。
+**单位。** `--region` 的 `point` / `min` / `max` 与 `--axis` 的位移**都是米** ——
+它们和输入点云同帧同单位，而点云在传感器帧和测量帧里都是米
+（`gap.to_measurement_frame` 只交换 y 与 z，不换单位）。
+只有 `outputs.*` 这类 **Measurement 是毫米**。
+所以「张开 1 mm 读数加 1 mm」是 `slope ≈ 1000`，`--expect` 写 1000 不是 1；
+位移范围也按米写：`x=0:0.0006:5` 是 0 到 0.6 mm 五档。
+同一句话写在 `edit.translate_region` 的 `doc` 与 `lyflow perturb` 的 `--help` 里，
+不用回头翻文档。
+
+### `--after` 插在哪一路相机后面
+
+**插在被 `camera` 参数选中的那一路之后。** gap 的图通常有两条相机支路
+（`n_frame_p` / `n_frame_s` 这类），而下游算子用一个 `camera` 参数决定读哪一路：
+`camera=primary` 就要 `--after n_frame_p:cloud`，`camera=secondary` 才是 `--after n_frame_s:cloud`。
+插错一路的症状是**整批不响应**（`nonResponsive` 接近样本数），
+很容易被误读成「这张图测的不是那条缝」—— 先核对 `camera`，再怀疑选区。
+本文档后面的例子写 `n_frame_s` 只是因为那张图恰好用 secondary，不是默认值。
+
+`camera=both`（两路各算一次再合并）时没有「那一路」：`--after` 只接受一个端口，
+所以**两路各跑一次 `perturb`，两次都要通过**。只推一路而读数只加了一半，
+说明合并用的是两路的平均；只推一路读数就整量跟上，说明另一路实际没参与这个读数 ——
+两种都要在报告里写清楚。
 
 ### 选区怎么定
 
@@ -130,6 +174,9 @@ lyflow perturb graph.lyflow.json --after n_frame_s:cloud \
 Audio_1 的缝 0.04~0.15 mm 宽、帧间游走 0.9 mm，任何固定的刀都切不对多数帧。
 分辨办法：看 `nonResponsive` 的样本是不是集中在缝位置偏离中位数最远的那些帧 ——
 是的话问题在选区，不在读数。
+逐样本的 `perturb_sample` 每样本每指标一行，CLI 直接在 stdout 里，
+MCP 落在返回值的 `samplesPath`（**全量**，不受 `failuresLimit` 影响），
+拿它和 `eval` 取出来的逐帧缝位置（`nodes.<节点>.quality.…midXMm` 这类）对齐看就够了。
 
 ### signFold：取绝对值把两个方向折成一个
 
@@ -175,17 +222,29 @@ lyflow validate g.lyflow.json && lyflow run g.lyflow.json --outputs --set n_load
        --set n_load.primaryFile=a.pcd --set n_load.secondaryFile=b.pcd
 
 # 3. 测的是不是那条缝（先做这一步，别先调参）
+#    --after 跟着图里的 camera 参数走：camera=primary 就是 n_frame_p:cloud
 lyflow perturb g.lyflow.json --after n_frame_s:cloud \
        --region '{"kind":"halfspace","point":[0.01345,0,0],"normal":[1,0,0]}' \
-       --axis x=-0.0003:0.0003:5 --samples frames.jsonl \
+       --axis x=-0.0003:0.0003:5 \
+       --samples-dir <采集根> --sample-subdir 4 \
+       --bind-pair n_load.primaryFile,n_load.secondaryFile \
+       --pattern "*Master*.pcd,*Slave*.pcd" \
        --metric outputs.gap --expect 1000 --tolerance 100
 
-# 4. 确认测对了，再扫参数；只看 train 组
-lyflow eval g.lyflow.json --samples frames.jsonl --param n_notch.lineDistThresh=0.1:0.4:4 \
+# 4. 确认测对了，再扫参数；只看 train 组（样本集与打 tag 都是命令的一部分，不写脚本）
+lyflow eval g.lyflow.json \
+       --samples-dir <采集根> --sample-subdir 4 \
+       --bind-pair n_load.primaryFile,n_load.secondaryFile \
+       --pattern "*Master*.pcd,*Slave*.pcd" --split-half half \
+       --param n_notch.lineDistThresh=0.1:0.4:4 \
        --metric outputs.gap --holdout half=b --csv eval.csv
 
 # 5. 选定参数写回图，重跑一遍看 holdout 组掉了多少
-lyflow eval g.lyflow.json --samples frames.jsonl --set n_notch.lineDistThresh=0.3 \
+lyflow eval g.lyflow.json \
+       --samples-dir <采集根> --sample-subdir 4 \
+       --bind-pair n_load.primaryFile,n_load.secondaryFile \
+       --pattern "*Master*.pcd,*Slave*.pcd" --split-half half \
+       --set n_notch.lineDistThresh=0.3 \
        --metric outputs.gap --holdout half=b
 ```
 
@@ -205,12 +264,46 @@ lyflow eval g.lyflow.json --samples frames.jsonl --set n_notch.lineDistThresh=0.
 | `lyflow run <g> --outputs --set …` | `run_graph` | `set` 是对象不是字符串；返回里没有点云 |
 | `run` 之后看 `stats.outputs` | `get_node_outputs` | — |
 | `lyflow dump <g> n:port out.pcd` 再自己统计 | `summarize_output` | 不落 PCD，直接给包围盒、每通道 min/max/mean 与前几个点 |
-| `lyflow eval …` | `eval` | 只回 `eval_summary` 与失败清单，逐行的 `eval_row` 落盘给路径 |
-| `lyflow perturb …` | `perturb` | 只回 `perturb_summary` 与不通过的样本 |
+| `lyflow eval …` | `eval` | 默认 `compact`：一组一行，只回 `paramSet/params/metric/group/n/ok/failCodes?/mean/std`；逐行 `eval_row` 落盘给 `rowsPath` |
+| `lyflow perturb …` | `perturb` | 只回 `perturb_summary` 与不通过的样本；**全部** `perturb_sample` 落盘给 `samplesPath` |
 | `lyflow diff a b --json` | `diff_graphs` | 原样 |
 
-两条只在 MCP 这边成立的规矩：
+### `eval` / `perturb` 的选项逐条对照
+
+CLI 上有的，MCP 上要么有同名字段，要么在这里写明不提供 —— 不留第三种。
+
+| CLI 选项 | `eval` 工具 | `perturb` 工具 | 差别 |
+|---|---|---|---|
+| `<graph>` | `graphPath` | `graphPath` | 只认路径，不收内联图（CLI 也只认路径） |
+| `--samples` | `samplesPath` | 同 | — |
+| `--samples-glob` / `--bind` | `samplesGlob` / `bind` | 同 | — |
+| `--samples-dir` | `samplesDir` | 同 | — |
+| `--bind-pair` | `bindPair` | 同 | 仍是 `"<节点>.<A>,<节点>.<B>"` 一个字符串 |
+| `--pattern` | `pattern` | 同 | 两个 glob 用逗号隔开，仍是一个字符串 |
+| `--sample-subdir` | `sampleSubdir` | 同 | — |
+| `--sort-by` | `sortBy` | 同 | 枚举 `name` / `mtime` |
+| `--split-half` | `splitHalf` | 同 | — |
+| `--samples-jsonl-out` | **MCP 不提供** | **MCP 不提供** | 要核对生成的样本集就跑一次 CLI；MCP 这边 `rowsPath` 里每行都带 `sample` 与 `tags` |
+| `--params <file>` | `params` | — | 直接给对象数组，MCP 自己落成临时文件 |
+| `--param` | `param` | — | 字符串数组 |
+| `--metric` | `metric` | `metric` | 字符串数组 |
+| `--holdout` | `holdout` | — | `perturb` 不分组 |
+| `--group-by` | `groupBy` | — | 同上 |
+| `--csv` | `csv` | `csv` | 路径原样透传，返回里回 `csvPath` |
+| `--base-dir` | `baseDir` | `baseDir` | — |
+| `--set` | `set` | `set` | 字符串数组，写法与 CLI 完全一样 |
+| `--no-cache` | `noCache` | `noCache` | 布尔 |
+| `--parallel` | **MCP 不提供** | **MCP 不提供** | 它是传给 core 的节点并行度，不在判断的关键路径上 |
+| `--after` | — | `after` | — |
+| `--region` | — | `region` | 给对象不给 JSON 字符串；`point` / `min` / `max` 是米 |
+| `--axis` | — | `axis` | 位移是米 |
+| `--expect` / `--tolerance` | — | `expect` / `tolerance` | — |
+| 只在 MCP 这边 | `compact`（默认 `true`）、`failuresLimit`（默认 20） | `failuresLimit`（默认 20） | 都是为了裁上下文；`failuresLimit: 0` 表示一条都不回，只给路径 |
+
+三条只在 MCP 这边成立的规矩：
 
 - **退出码变成返回值里的 `exitCode`。** 用法错（`4`）时额外带一个 `stderr` 全文 ——
   「这张图上可用的标量路径」在那里面。
 - **没有写图的工具。** 改完的图自己用文件系统存，再把路径交给 `validate_graph` / `run_graph`。
+- **大结果一律落盘。** `eval` 的 `rowsPath`、`perturb` 的 `samplesPath` 与 `rowsPath`
+  是本地文件路径，用 `jq` 去读；返回值里只有统计与被截断过的失败清单。

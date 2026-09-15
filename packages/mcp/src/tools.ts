@@ -53,8 +53,77 @@ const graphInput = {
 const cliSamples = {
   samplesPath: z.string().optional().describe("样本集 JSON Lines 的路径"),
   samplesGlob: z.string().optional().describe("样本文件通配符，要配 bind"),
-  bind: z.string().optional().describe("<节点>.<参数>，samplesGlob 把每个文件绑到它上面"),
+  bind: z
+    .string()
+    .optional()
+    .describe("<节点>.<参数>，samplesGlob / samplesDir 把每帧的那个文件绑到它上面"),
+  samplesDir: z
+    .string()
+    .optional()
+    .describe("样本根目录，下面每个直接子目录是一帧，样本 id 取帧目录名"),
+  bindPair: z
+    .string()
+    .optional()
+    .describe("双相机配对，<节点>.<参数A>,<节点>.<参数B>，配 samplesDir 与两个 pattern"),
+  pattern: z
+    .string()
+    .optional()
+    .describe("帧目录下的文件名 glob；两个相机时用逗号隔开两个，各要恰好匹配到一个文件"),
+  sampleSubdir: z.string().optional().describe("文件不在帧目录下，而在它的这个子目录里"),
+  sortBy: z
+    .enum(["name", "mtime"])
+    .optional()
+    .describe(
+      "name（默认）先读帧目录名里的 dd-MM-yyyy-HH-mm-ss 时间戳，读不出退字典序；mtime 按目录修改时间",
+    ),
+  splitHalf: z
+    .string()
+    .optional()
+    .describe('排序后前一半打 tags[这个键]="a"、后一半 "b"（奇数时前半多一个），配 holdout 用'),
 };
+
+const failuresLimitField = z
+  .number()
+  .int()
+  .nonnegative()
+  .optional()
+  .describe(`失败清单回传几条，0 表示只给 samplesPath / rowsPath 不回传，默认 ${MAX_FAILURES}`);
+
+function limited<T>(items: T[], limit: number): { shown: T[]; truncated: boolean } {
+  const n = Math.max(0, limit);
+  return { shown: items.slice(0, n), truncated: items.length > n };
+}
+
+function compactSummaries(summaries: Record<string, unknown>[]): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (const s of summaries) {
+    const groups = s["groups"];
+    if (!groups || typeof groups !== "object") continue;
+    for (const [group, raw] of Object.entries(groups as Record<string, unknown>)) {
+      const g = (raw ?? {}) as Record<string, unknown>;
+      const row: Record<string, unknown> = {
+        paramSet: s["paramSet"],
+        params: s["params"],
+        metric: s["metric"],
+        group,
+        n: g["n"],
+        ok: g["ok"],
+      };
+      const codes = g["failCodes"];
+      if (codes && typeof codes === "object" && Object.keys(codes).length > 0) {
+        row["failCodes"] = codes;
+      }
+      row["mean"] = g["mean"];
+      row["std"] = g["std"];
+      out.push(row);
+    }
+  }
+  return out;
+}
+
+function writeLines(file: string, lines: { text: string }[]): void {
+  fs.writeFileSync(file, lines.map((l) => l.text).join("\n") + (lines.length ? "\n" : ""), "utf8");
+}
 
 function workRun(config: Config, prefix: string): string {
   const dir = path.join(
@@ -341,7 +410,8 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
       title: "样本集 × 参数组 → 指标 → 统计",
       description:
         "起本地 lyflow eval。只回统计与失败清单，逐行的 eval_row 落盘给路径。" +
-        "读 summary 先看 ok/n 与 failCodes，再看 std。",
+        "读 summary 先看 ok/n 与 failCodes，再看 std。" +
+        "样本集可以给 samplesPath，也可以用 samplesDir + bindPair + pattern 让它自己配对与打 tag。",
       inputSchema: {
         graphPath: z.string().describe("图文件路径，CLI 直接读它"),
         ...cliSamples,
@@ -356,6 +426,14 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         metric: z.array(z.string()).min(1).describe("值路径，例如 outputs.gap"),
         holdout: z.string().optional().describe("<tag>=<value>，带这个标签的样本进 holdout 组"),
         groupBy: z.string().optional().describe("按这个标签键分组报数"),
+        csv: z.string().optional().describe("把逐行结果也写一份 CSV 到这个路径，返回里带 csvPath"),
+        compact: z
+          .boolean()
+          .optional()
+          .describe(
+            "默认 true：每个组压成一行 {paramSet,params,metric,group,n,ok,failCodes?,mean,std}；false 回原样 eval_summary",
+          ),
+        failuresLimit: failuresLimitField,
         baseDir: z.string().optional(),
         set: z.array(z.string()).optional().describe("<节点>.<参数>=<json>，与 CLI --set 相同"),
         noCache: z.boolean().optional(),
@@ -380,11 +458,12 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
       const result = await runCli(config, argv);
       const rowsPath = path.join(dir, "rows.jsonl");
       const rows = result.lines.filter((l) => l.value["kind"] === "eval_row");
-      fs.writeFileSync(rowsPath, rows.map((l) => l.text).join("\n") + (rows.length ? "\n" : ""), "utf8");
+      writeLines(rowsPath, rows);
 
-      const summaries = result.lines
+      const raw = result.lines
         .filter((l) => l.value["kind"] === "eval_summary")
         .map((l) => l.value);
+      const compact = args.compact ?? true;
       const failures = rows
         .filter((l) => l.value["status"] !== "ok")
         .map((l) => ({
@@ -393,17 +472,20 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           status: l.value["status"],
           errors: l.value["errors"],
         }));
+      const shown = limited(failures, args.failuresLimit ?? MAX_FAILURES);
 
       return ok({
         exitCode: result.code,
         timedOut: result.timedOut,
         argv,
-        summaries,
+        compact,
+        summaries: compact ? compactSummaries(raw) : raw,
         rowCount: rows.length,
         rowsPath,
+        ...(args.csv ? { csvPath: args.csv } : {}),
         failureCount: failures.length,
-        failures: failures.slice(0, MAX_FAILURES),
-        failuresTruncated: failures.length > MAX_FAILURES,
+        failures: shown.shown,
+        failuresTruncated: shown.truncated,
         stderrTail: stderrTail(result.stderr),
         ...(result.code === 4 || result.spawnError !== null ? { stderr: result.stderr } : {}),
       });
@@ -416,20 +498,27 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
       title: "合成位移测灵敏度",
       description:
         "起本地 lyflow perturb：在某个端口后插 edit.translate_region，对位移做轴扫描，" +
-        "报 d(指标)/d(位移)。std 小不等于测对了缝 —— 调参之前先跑这个。",
+        "报 d(指标)/d(位移)。std 小不等于测对了缝 —— 调参之前先跑这个。" +
+        "逐样本的 perturb_sample 全量落盘在 samplesPath，诊断「哪几帧不响应」要读它。" +
+        "扰动要插在被 camera 参数选中的那一路相机之后；camera=both 时两路各跑一次。",
       inputSchema: {
         graphPath: z.string(),
         after: z.string().describe("<节点>:<端口>，在它后面插扰动算子"),
         region: z
           .record(z.unknown())
-          .describe('几何选区，{"kind":"halfspace","point":[..],"normal":[..]} 或 kind=box'),
+          .describe(
+            '几何选区，{"kind":"halfspace","point":[..],"normal":[..]} 或 kind=box；point / min / max 都是米',
+          ),
         axis: z.string().describe("<x|y|z>=<起>:<止>:<档数>，单位是米；要跨过 0 才抓得到 signFold"),
         ...cliSamples,
         metric: z.array(z.string()).min(1),
         expect: z.number().optional().describe("期望斜率。点云是米、Measurement 是毫米，所以常写 1000"),
         tolerance: z.number().optional(),
+        csv: z.string().optional().describe("把逐行结果也写一份 CSV 到这个路径，返回里带 csvPath"),
+        failuresLimit: failuresLimitField,
         baseDir: z.string().optional(),
         set: z.array(z.string()).optional(),
+        noCache: z.boolean().optional(),
       },
     },
     async (args) => {
@@ -445,17 +534,16 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
 
       const result = await runCli(config, argv);
       const rowsPath = path.join(dir, "rows.jsonl");
-      fs.writeFileSync(
-        rowsPath,
-        result.lines.map((l) => l.text).join("\n") + (result.lines.length ? "\n" : ""),
-        "utf8",
-      );
+      writeLines(rowsPath, result.lines);
 
       const summaries = result.lines
         .filter((l) => l.value["kind"] === "perturb_summary")
         .map((l) => l.value);
       const samples = result.lines.filter((l) => l.value["kind"] === "perturb_sample");
+      const samplesPath = path.join(dir, "samples.jsonl");
+      writeLines(samplesPath, samples);
       const failures = samples.filter((l) => l.value["pass"] === false).map((l) => l.value);
+      const shown = limited(failures, args.failuresLimit ?? MAX_FAILURES);
 
       return ok({
         exitCode: result.code,
@@ -463,10 +551,12 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         argv,
         summaries,
         sampleCount: samples.length,
+        samplesPath,
         rowsPath,
+        ...(args.csv ? { csvPath: args.csv } : {}),
         failureCount: failures.length,
-        failures: failures.slice(0, MAX_FAILURES),
-        failuresTruncated: failures.length > MAX_FAILURES,
+        failures: shown.shown,
+        failuresTruncated: shown.truncated,
         stderrTail: stderrTail(result.stderr),
         ...(result.code === 4 || result.spawnError !== null ? { stderr: result.stderr } : {}),
       });

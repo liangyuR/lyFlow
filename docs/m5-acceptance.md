@@ -194,3 +194,17 @@ samples.jsonl；`work/` 下没有任何引用 `D:/project` 的东西。它主动
 6. `outputsAvailable` 的业务侧改动留给阶段 B。
 7. 零注释规则在前两步各漏了几处，第三、四步顺手删掉；实现者与验收者都没发现前先交代的一处
    （`core/tests/test_ops.h` 里一行）由验收者删掉。
+
+## 盲测缺口的补齐（第 1–4 条）
+
+用户决定前四条立刻补，第五条与 `list_metrics` 留待单独决定。实现一个 Opus 子代理，验收如下：
+
+| 项 | 怎么验 | 结果 |
+|---|---|---|
+| `perturb_sample` 落盘、`failuresLimit` | MCP `perturb` 点 7 `signed=true`，`samplesPath` 文件 51 行，`failuresLimit:2` 时 `failures` 2 条 | ✅ summary 与上文 49/51、983.1 一致 |
+| 样本集目录模式 | `--samples-dir sensor --sample-subdir 4 --bind-pair n_load.primaryFile,n_load.secondaryFile --pattern '*Master*.pcd,*Slave*.pcd' --split-half half` 对点 4，与手写 `4.jsonl` 的 summary `diff` | ✅ **逐字节相同**（train n=26 std 0.0751、holdout n=25 std 0.0532）。这份数据字典序与时间戳序恰好一致，两者不一致的分支只有 cargo test 覆盖 |
+| MCP `eval` 的 `compact` 与 `csv` | sdk Client 走 stdio 跑真实数据 | ✅ compact 1188 B 一组一行；`compact:false` 回原样 |
+| 文档三处 | 逐条对照 `mcp.md` / `agent-tuning.md` §7 | ✅ 每条 CLI 选项有字段或明写「MCP 不提供」（`--parallel`、`--samples-jsonl-out`） |
+| 门禁 | `LYFLOW_PACKS=gap pnpm check` 由验收者独立复跑 | ✅ core 173/173、`cargo test` 96/96、MCP 39/39 |
+
+顺手修了一处文档错误：`edit.translate_region` 的 `doc` 原写「测量帧里就是毫米」，与 ADR-0020 G6 矛盾，测量帧仍是米。

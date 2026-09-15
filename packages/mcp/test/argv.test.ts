@@ -141,3 +141,116 @@ test("perturb 的 expect=0 也要传下去", () => {
   assert.ok(argv.includes("--expect"));
   assert.equal(argv[argv.indexOf("--expect") + 1], "0");
 });
+
+test("eval 的 samplesDir 把配对、子目录、排序与打 tag 都映射成 CLI 选项", () => {
+  const argv = evalArgv(
+    {
+      graphPath: "4.lyflow.json",
+      samplesDir: "D:/data/sensor",
+      sampleSubdir: "4",
+      bindPair: "n_load.primaryFile,n_load.secondaryFile",
+      pattern: "*Master*.pcd,*Slave*.pcd",
+      sortBy: "mtime",
+      splitHalf: "half",
+      metric: ["outputs.gap"],
+      holdout: "half=b",
+      csv: "D:/tmp/p4.csv",
+    },
+    null,
+  );
+  assert.deepEqual(argv, [
+    "eval",
+    "4.lyflow.json",
+    "--samples-dir",
+    "D:/data/sensor",
+    "--bind-pair",
+    "n_load.primaryFile,n_load.secondaryFile",
+    "--pattern",
+    "*Master*.pcd,*Slave*.pcd",
+    "--sample-subdir",
+    "4",
+    "--sort-by",
+    "mtime",
+    "--split-half",
+    "half",
+    "--metric",
+    "outputs.gap",
+    "--holdout",
+    "half=b",
+    "--csv",
+    "D:/tmp/p4.csv",
+  ]);
+});
+
+test("samplesDir 的单文件写法用 bind，不用 bindPair", () => {
+  assert.deepEqual(
+    evalArgv(
+      {
+        graphPath: "g",
+        samplesDir: "D:/data",
+        bind: "r.path",
+        pattern: "*.pcd",
+        metric: ["m"],
+      },
+      null,
+    ),
+    ["eval", "g", "--samples-dir", "D:/data", "--bind", "r.path", "--pattern", "*.pcd", "--metric", "m"],
+  );
+});
+
+test("samplesDir 缺 pattern / 缺绑定 / 与别的样本源同时给都报错", () => {
+  assert.throws(
+    () => evalArgv({ graphPath: "g", metric: ["m"], samplesDir: "D:/d", bindPair: "a.b,a.c" }, null),
+    /pattern/,
+  );
+  assert.throws(
+    () => evalArgv({ graphPath: "g", metric: ["m"], samplesDir: "D:/d", pattern: "*.pcd" }, null),
+    /bindPair/,
+  );
+  assert.throws(
+    () =>
+      evalArgv(
+        { graphPath: "g", metric: ["m"], samplesDir: "D:/d", samplesPath: "s.jsonl" },
+        null,
+      ),
+    /只能给一个/,
+  );
+  assert.throws(
+    () => evalArgv({ graphPath: "g", metric: ["m"], samplesPath: "s.jsonl", splitHalf: "half" }, null),
+    /samplesDir/,
+  );
+});
+
+test("perturb 也认 samplesDir 那一组，csv 与 noCache 一并透传", () => {
+  const argv = perturbArgv({
+    graphPath: "g",
+    after: "n_frame_p:cloud",
+    region: { kind: "halfspace", point: [0.0098, 0, 0], normal: [-1, 0, 0] },
+    axis: "x=-0.0003:0.0003:5",
+    samplesDir: "D:/data/sensor",
+    sampleSubdir: "Audio_1",
+    bindPair: "n_load.primaryFile,n_load.secondaryFile",
+    pattern: "*Master*.pcd,*Slave*.pcd",
+    metric: ["outputs.gap"],
+    expect: -1000,
+    csv: "D:/tmp/a1.csv",
+    noCache: true,
+  });
+  assert.deepEqual(argv.slice(argv.indexOf("--samples-dir")), [
+    "--samples-dir",
+    "D:/data/sensor",
+    "--bind-pair",
+    "n_load.primaryFile,n_load.secondaryFile",
+    "--pattern",
+    "*Master*.pcd,*Slave*.pcd",
+    "--sample-subdir",
+    "Audio_1",
+    "--metric",
+    "outputs.gap",
+    "--expect",
+    "-1000",
+    "--csv",
+    "D:/tmp/a1.csv",
+    "--no-cache",
+  ]);
+});
