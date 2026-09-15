@@ -92,7 +92,9 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
                     ExecContext&) {
   nlohmann::json bundle;
   bundle["gap"] = measurementJson(inputs.get("gap").asMeasurement());
-  bundle["flush"] = measurementJson(inputs.get("flush").asMeasurement());
+  // 没有面差需求的测点（HUD/Audio、V 缝开口）可以不接 flush，汇总里记 inactive。
+  bundle["flush"] =
+      measurementJson(inputs.has("flush") ? inputs.get("flush").asMeasurement() : nullptr);
 
   nlohmann::json pointCounts = nlohmann::json::object();
   nlohmann::json fits = nlohmann::json::array();
@@ -261,7 +263,7 @@ void registerResultBundle(Registry& r) {
       "字段与旧 QualityMetrics 一一对应，业务侧的 results.csv 与 metadata.json 由它填。";
   op.inputs = {
       Port{"gap", "Measurement", "Gap", "间隙测量值。", true},
-      Port{"flush", "Measurement", "Flush", "段差测量值。", true},
+      optional("flush", "Measurement", "Flush", "段差测量值。没有面差需求的测点可以不接，记 inactive。"),
       optional("roiFlushBase", "Box2D", "ROI Flush Base", "生效的段差基准面框。"),
       optional("roiFlushRef", "Box2D", "ROI Flush Ref", "生效的段差参考面框。"),
       optional("roiGapLeft", "Box2D", "ROI Gap Left", "生效的间隙左框。"),

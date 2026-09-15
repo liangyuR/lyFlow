@@ -645,3 +645,243 @@ TEST_CASE("gap.groove_joint 的 scale 与两个 offset 是线性的") {
   CHECK(call.out("flush").asMeasurement()->value ==
         doctest::Approx(nominalFlushMm(0.4) + 0.05).epsilon(0.05));
 }
+
+// ------------------------------------------------------------------ gap.notch_width
+namespace {
+
+float notchMm(double v) { return static_cast<float>(v / 1000.0); }
+
+constexpr double kNotchXcMm = 13.0;
+constexpr double kNotchY0Mm = 187.0;
+constexpr double kNotchSlopeA = 0.4;   // 基准翼面：向缝越走越深
+constexpr double kNotchEdgeDrop = 0.6; // 基准侧圆边在最后 1 mm 里额外下沉的深度
+constexpr double kNotchWallHeight = 1.2;
+
+/// 基准翼面 + 1 mm 陡降的圆边 | 对面的竖直立边 + 斜肩。openMm 是对面整体右移的量，
+/// raiseMm 是对面整体抬高的量（面差）。withWall=false 模拟被遮挡的相机：看不到立边，
+/// 也看不到圆边最后 0.3 mm。
+PointCloud notchCloud(double openMm, bool withWall = true, double raiseMm = 0.0) {
+  PointCloud c;
+  const auto yA = [](double xMm) { return kNotchY0Mm + kNotchSlopeA * (xMm - kNotchXcMm); };
+  for (int i = 0; i <= 100; ++i) {
+    const double xMm = kNotchXcMm - 10.0 + 0.1 * i;
+    const double edge = xMm > kNotchXcMm - 1.0 ? kNotchEdgeDrop * (xMm - (kNotchXcMm - 1.0)) : 0.0;
+    if (!withWall && xMm > kNotchXcMm - 0.3) continue;
+    c.push(notchMm(xMm), notchMm(yA(xMm) + edge), 0.0f);
+  }
+  const double yCorner = yA(kNotchXcMm) + kNotchEdgeDrop - raiseMm;
+  const double xWall = kNotchXcMm + openMm;
+  if (withWall) {
+    for (int i = 0; i <= 12; ++i) {
+      c.push(notchMm(xWall), notchMm(yCorner - 0.1 * i), 0.0f);
+    }
+  }
+  for (int i = 1; i <= 80; ++i) {
+    const double xMm = xWall + 0.1 * i;
+    c.push(notchMm(xMm), notchMm(yCorner - kNotchWallHeight - 0.6 * 0.1 * i), 0.0f);
+  }
+  return c;
+}
+
+/// 在基准线下方 level 处，圆边穿出点离缝角 (1 - level/drop) mm，立边就在 xWall 上。
+double notchNominalMm(double levelMm, double openMm) {
+  return (1.0 - levelMm / kNotchEdgeDrop) + openMm;
+}
+
+}  // namespace
+
+TEST_CASE("gap.flush 的 scale 与 offset 是线性的") {
+  Line2D base;
+  base.point[0] = 0.0f;
+  base.point[1] = 0.0f;
+  base.dir[0] = 1.0f;
+  base.dir[1] = 0.0f;
+  Point2D ref;
+  ref.p[0] = 0.0f;
+  ref.p[1] = 0.002f;  // 2 mm
+  Call call;
+  call.inputs["baseLine"] = Data::line2d(base);
+  call.inputs["refPoint"] = Data::point2d(ref);
+  REQUIRE(call.run("gap.flush").ok);
+  CHECK(call.out("value").asMeasurement()->value == doctest::Approx(2.0).epsilon(1e-6));
+  REQUIRE(call.run("gap.flush", {{"scale", Value::number(2.06)}, {"offset", Value::number(-0.1)}}).ok);
+  CHECK(call.out("value").asMeasurement()->value ==
+        doctest::Approx(2.0 * 2.06 - 0.1).epsilon(1e-6));
+}
+
+TEST_CASE("gap.flush 的 signed 模式给带符号垂距，两侧不再折回同一方向") {
+  Line2D base;
+  base.point[0] = 0.0f;
+  base.point[1] = 0.0f;
+  base.dir[0] = 1.0f;
+  base.dir[1] = 0.0f;
+  Call call;
+  call.inputs["baseLine"] = Data::line2d(base);
+  Point2D below;
+  below.p[0] = 0.0f;
+  below.p[1] = 0.002f;  // y 更大 = 基准线下方
+  Point2D above;
+  above.p[0] = 0.0f;
+  above.p[1] = -0.002f;
+  call.inputs["refPoint"] = Data::point2d(below);
+  REQUIRE(call.run("gap.flush", {{"signed", Value::boolean(true)}}).ok);
+  const double d1 = call.out("value").asMeasurement()->value;
+  call.inputs["refPoint"] = Data::point2d(above);
+  REQUIRE(call.run("gap.flush", {{"signed", Value::boolean(true)}}).ok);
+  const double d2 = call.out("value").asMeasurement()->value;
+  CHECK(d1 == doctest::Approx(-2.0).epsilon(1e-5));
+  CHECK(d2 == doctest::Approx(2.0).epsilon(1e-5));
+  // 默认仍是绝对值：两侧读数相同
+  call.inputs["refPoint"] = Data::point2d(below);
+  REQUIRE(call.run("gap.flush").ok);
+  CHECK(call.out("value").asMeasurement()->value == doctest::Approx(2.0).epsilon(1e-5));
+}
+
+TEST_CASE("gap.notch_width 闭合缝读出圆边固有宽度，张开多少就多读多少") {
+  for (const double open : {0.0, 0.5, 1.2}) {
+    Call call;
+    call.inputs["primary"] = Data::cloud(notchCloud(open));
+    call.inputs["secondary"] = Data::cloud(notchCloud(open));
+    REQUIRE(call.run("gap.notch_width").ok);
+    CHECK(call.out("gap").asMeasurement()->value ==
+          doctest::Approx(notchNominalMm(0.25, open)).epsilon(0.03));
+    const Record* q = call.out("quality").asRecord();
+    REQUIRE(q != nullptr);
+    CHECK(q->type == "GapNotchQuality");
+    CHECK(q->data["validCameras"].get<int>() == 2);
+    CHECK(q->data["cameras"]["primary"]["cornerDepthMm"].get<double>() ==
+          doctest::Approx(kNotchEdgeDrop).epsilon(0.05));
+    const Point2D* anchor = call.out("anchor").asPoint2D();
+    REQUIRE(anchor != nullptr);
+    CHECK(std::fabs(static_cast<double>(anchor->p[0]) - kNotchXcMm / 1000.0) < 0.0002);
+    CHECK(call.out("qualityBase").asRecord()->type == "GapFitQuality");
+  }
+}
+
+TEST_CASE("gap.notch_width 换 levelDepth 沿圆边滑动，读数按 1/坡度 变") {
+  Call call;
+  call.inputs["primary"] = Data::cloud(notchCloud(0.0));
+  call.inputs["secondary"] = Data::cloud(notchCloud(0.0));
+  REQUIRE(call.run("gap.notch_width", {{"levelDepth", Value::number(0.4)}}).ok);
+  CHECK(call.out("gap").asMeasurement()->value ==
+        doctest::Approx(notchNominalMm(0.4, 0.0)).epsilon(0.05));
+}
+
+TEST_CASE("gap.notch_width 的 camera 只取指定那一台，both 取有效相机的平均") {
+  Call call;
+  call.inputs["primary"] = Data::cloud(notchCloud(0.0));
+  call.inputs["secondary"] = Data::cloud(notchCloud(0.6));
+  REQUIRE(call.run("gap.notch_width", {{"camera", Value::text("secondary")}}).ok);
+  CHECK(call.out("gap").asMeasurement()->value ==
+        doctest::Approx(notchNominalMm(0.25, 0.6)).epsilon(0.03));
+  REQUIRE(call.run("gap.notch_width", {{"camera", Value::text("primary")}}).ok);
+  CHECK(call.out("gap").asMeasurement()->value ==
+        doctest::Approx(notchNominalMm(0.25, 0.0)).epsilon(0.03));
+  REQUIRE(call.run("gap.notch_width").ok);
+  CHECK(call.out("gap").asMeasurement()->value ==
+        doctest::Approx(notchNominalMm(0.25, 0.3)).epsilon(0.03));
+}
+
+TEST_CASE("gap.notch_width 被遮挡的相机量的是自己的阴影，与看得见立边的那台不同") {
+  Call call;
+  call.inputs["primary"] = Data::cloud(notchCloud(0.0, /*withWall=*/false));
+  call.inputs["secondary"] = Data::cloud(notchCloud(0.0));
+  REQUIRE(call.run("gap.notch_width", {{"camera", Value::text("secondary")}}).ok);
+  const double seen = call.out("gap").asMeasurement()->value;
+  CHECK(seen == doctest::Approx(notchNominalMm(0.25, 0.0)).epsilon(0.03));
+  REQUIRE(call.run("gap.notch_width", {{"camera", Value::text("primary")}}).ok);
+  const double shadow = call.out("gap").asMeasurement()->value;
+  CHECK(std::fabs(shadow - seen) > 0.3);
+}
+
+TEST_CASE("gap.notch_width 对面整体抬高（面差）不改变开口读数") {
+  Call call;
+  call.inputs["primary"] = Data::cloud(notchCloud(0.4, true, 0.0));
+  call.inputs["secondary"] = Data::cloud(notchCloud(0.4, true, 0.0));
+  REQUIRE(call.run("gap.notch_width").ok);
+  const double flat = call.out("gap").asMeasurement()->value;
+  call.inputs["primary"] = Data::cloud(notchCloud(0.4, true, 0.3));
+  call.inputs["secondary"] = Data::cloud(notchCloud(0.4, true, 0.3));
+  REQUIRE(call.run("gap.notch_width").ok);
+  CHECK(call.out("gap").asMeasurement()->value == doctest::Approx(flat).epsilon(0.02));
+  const Record* q = call.out("quality").asRecord();
+  REQUIRE(q != nullptr);
+  CHECK(q->data["cameras"]["secondary"]["levelYMm"].is_number());
+}
+
+TEST_CASE("gap.notch_width 没有 V 缝就报 notch_too_shallow") {
+  PointCloud flat;
+  for (int i = 0; i <= 200; ++i) {
+    const double xMm = kNotchXcMm - 10.0 + 0.1 * i;
+    flat.push(notchMm(xMm), notchMm(kNotchY0Mm + kNotchSlopeA * (xMm - kNotchXcMm)), 0.0f);
+  }
+  Call call;
+  call.inputs["primary"] = Data::cloud(flat);
+  call.inputs["secondary"] = Data::cloud(flat);
+  const Status s = call.run("gap.notch_width");
+  CHECK_FALSE(s.ok);
+  CHECK(s.code == "notch_too_shallow");
+}
+
+TEST_CASE("gap.notch_width 的 scale 与 gapOffset 是线性的") {
+  Call call;
+  call.inputs["primary"] = Data::cloud(notchCloud(0.0));
+  call.inputs["secondary"] = Data::cloud(notchCloud(0.0));
+  REQUIRE(call.run("gap.notch_width").ok);
+  const double raw = call.out("gap").asMeasurement()->value;
+  REQUIRE(call.run("gap.notch_width",
+                   {{"scale", Value::number(2.0)}, {"gapOffset", Value::number(-0.1)}})
+              .ok);
+  CHECK(call.out("gap").asMeasurement()->value == doctest::Approx(raw * 2.0 - 0.1).epsilon(1e-6));
+}
+
+TEST_CASE("gap.notch_width 的面差随对面抬高而变，flushBase 决定符号") {
+  Call call;
+  call.inputs["primary"] = Data::cloud(notchCloud(0.4, true, 0.0));
+  call.inputs["secondary"] = Data::cloud(notchCloud(0.4, true, 0.0));
+  REQUIRE(call.run("gap.notch_width").ok);
+  REQUIRE(call.out("flush").asMeasurement()->ok);
+  const double flat = call.out("flush").asMeasurement()->value;
+  // 对面（右侧，斜肩 -0.6）整体抬高 0.3：以左为基准，右侧更高 → 面差增加约 0.3·cos(atan 0.4)
+  call.inputs["primary"] = Data::cloud(notchCloud(0.4, true, 0.3));
+  call.inputs["secondary"] = Data::cloud(notchCloud(0.4, true, 0.3));
+  REQUIRE(call.run("gap.notch_width").ok);
+  const double raised = call.out("flush").asMeasurement()->value;
+  CHECK(raised - flat == doctest::Approx(0.3 * std::cos(std::atan(kNotchSlopeA))).epsilon(0.05));
+  CHECK(call.out("refLine").asLine2D() != nullptr);
+  CHECK(call.out("flushSegment").asLine2D() != nullptr);
+  CHECK(call.out("qualityRef").asRecord()->type == "GapFitQuality");
+  // 换面差基准到右侧：符号取反；垂距按新基准线的方向算，两侧坡度不同（0.4 与 -0.6）所以大小差几个百分点
+  REQUIRE(call.run("gap.notch_width", {{"flushBase", Value::text("right")}}).ok);
+  CHECK(call.out("flush").asMeasurement()->value == doctest::Approx(-raised).epsilon(0.1));
+  // 开口不受 flushBase 影响
+  const double gapRight = call.out("gap").asMeasurement()->value;
+  REQUIRE(call.run("gap.notch_width", {{"flushBase", Value::text("left")}}).ok);
+  CHECK(call.out("gap").asMeasurement()->value == doctest::Approx(gapRight).epsilon(1e-6));
+}
+
+TEST_CASE("gap.notch_width 对面翼面拟不出来时面差无效、开口照常") {
+  Call call;
+  call.inputs["primary"] = Data::cloud(notchCloud(0.0));
+  call.inputs["secondary"] = Data::cloud(notchCloud(0.0));
+  REQUIRE(call.run("gap.notch_width", {{"refNear", Value::number(20.0)}, {"refFar", Value::number(25.0)}}).ok);
+  CHECK(call.out("gap").asMeasurement()->ok);
+  CHECK_FALSE(call.out("flush").asMeasurement()->ok);
+  // 声明过的输出端口一个都不能少，否则执行器报 internal（点 3 的合成位移上踩到过）。
+  CHECK(call.out("refLine").asLine2D() != nullptr);
+  CHECK(call.out("flushSegment").asLine2D() != nullptr);
+  CHECK(call.out("qualityRef").asRecord() != nullptr);
+}
+
+TEST_CASE("gap.result_bundle 不接 flush 时把它记成 inactive") {
+  Call call;
+  Measurement gap;
+  gap.value = 0.5;
+  gap.ok = true;
+  call.inputs["gap"] = Data::measurement(gap);
+  REQUIRE(call.run("gap.result_bundle").ok);
+  const Record* bundle = call.out("bundle").asRecord();
+  REQUIRE(bundle != nullptr);
+  CHECK(bundle->data["flush"]["status"].get<std::string>() == "inactive");
+  CHECK(bundle->data["gap"]["status"].get<std::string>() == "success");
+}

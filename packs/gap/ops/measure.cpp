@@ -42,8 +42,19 @@ Status flush(const Inputs& inputs, const ParamView& params, Outputs& outputs, Ex
   Eigen::Vector2f start;
   // 法线强制朝 −y，返回的是带符号距离；最终值取绝对值再加 offset（§3.7）
   utils::pointLineDistance(toLineCoefficients(base), end, &start);
-  const double valueMm = std::fabs(static_cast<double>((end - start).norm()) * kScale) +
-                         params.number("offset");
+  // 默认取绝对值（§3.7 的历史行为）。signed 模式给带符号垂距：法线取 (dir.y, -dir.x)，
+  // 点在基准线下方（y 更大）为负。闭合缝上参考点几乎落在基准线上，绝对值会把响应折回去
+  // —— 罗石 点 7 必须用带符号的那一支。
+  double distanceMm = static_cast<double>((end - start).norm()) * kScale;
+  if (params.flag("signed")) {
+    Eigen::Vector2f normal(base.dir[1], -base.dir[0]);
+    const float norm = normal.norm();
+    if (norm > 0) {
+      normal /= norm;
+      distanceMm = static_cast<double>(normal.dot(end - start)) * kScale;
+    }
+  }
+  const double valueMm = distanceMm * params.number("scale") + params.number("offset");
 
   setMeasurement(outputs, "value", valueMm, true, {});
   outputs.set("segment", Data::line2d(segmentOf(start, end)));
@@ -295,7 +306,27 @@ void registerFlush(Registry& r) {
       Port{"baseLine", "Line2D", "Base Line", "并进垂足之后的基准线段，gap definition A 用它。",
            true},
   };
-  op.params = {numParam("offset", "Offset", 0.0, "加在绝对值上的偏置。")};
+  Param flushScale;
+  flushScale.name = "scale";
+  flushScale.type = ParamType::Float;
+  flushScale.label = "Scale";
+  flushScale.doc =
+      "读数增益：value = |垂距| × scale + offset。默认 1.0 就是原来的行为。"
+      "把垂距折算到别的方向时用它 —— 罗石 点 7 要的是水平开口，而基准线倾斜 29°，"
+      "水平量 = 垂距 / |n_x| = 垂距 × 2.06。";
+  flushScale.def = Value::number(1.0);
+
+  Param flushSigned;
+  flushSigned.name = "signed";
+  flushSigned.type = ParamType::Bool;
+  flushSigned.label = "Signed";
+  flushSigned.doc =
+      "输出带符号的垂距（法线 (dir.y, -dir.x)，参考点在基准线下方为负），而不是绝对值。"
+      "默认 false 就是原来的行为。闭合缝上参考点几乎落在基准线上时必须打开，"
+      "否则绝对值会把「缝张开」和「缝收紧」折成同一个方向。";
+  flushSigned.def = Value::boolean(false);
+
+  op.params = {numParam("offset", "Offset", 0.0, "加在距离上的偏置。"), flushScale, flushSigned};
   op.capabilities = {false, true, true};
   op.compute = &flush;
   r.addOperator(std::move(op));

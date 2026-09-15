@@ -82,6 +82,7 @@ void registerFlush(Registry& r);
 void registerGap(Registry& r);
 void registerCornerVertex(Registry& r);
 void registerGrooveJoint(Registry& r);
+void registerNotchWidth(Registry& r);
 void registerPointOffset(Registry& r);
 void registerJudge(Registry& r);
 void registerMeasureReference(Registry& r);
