@@ -240,9 +240,10 @@ gap 领域包从 `xyz-gap-inspector/lyflow/` 搬进本仓库的 `packs/gap/`，�
   `third_party/onnxruntime/`。缺了 CMake 直接 FATAL —— 这是设计（不静默少一个算子），
   但对第一次 clone 的人是一道额外的手续。
 
-## M5 — 能被 Agent 用（进行中）
+## M5 — 能被 Agent 用 ✅
 
-计划见 [m5-plan.md](m5-plan.md)，决定见 [ADR-0020](adr/0020-eval-and-perturb-as-cli.md)。
+计划见 [m5-plan.md](m5-plan.md)，验收见 [m5-acceptance.md](m5-acceptance.md)，
+决定见 [ADR-0020](adr/0020-eval-and-perturb-as-cli.md) 与 [ADR-0021](adr/0021-mcp-as-transport-consumer.md)。
 目标：**一个只拿得到 CLI 或 MCP、拿不到仓库源码的 Agent，能独立完成「给一组测点设计图并调稳参数」**，
 过程中不用自己写解析器、批跑器或评估脚本。范围来自一次真实任务的复盘（12 个 Python 脚本里
 至少一半是重复劳动，两版合成位移脚本给出错误结论还不报错）。
@@ -258,9 +259,22 @@ gap 领域包从 `xyz-gap-inspector/lyflow/` 搬进本仓库的 `packs/gap/`，�
       `eval` / `perturb` / `diff_graphs` 起本地 CLI；输出一律裁过（点云只给统计量，
       `eval_row` 落盘给路径）。不依赖 `@lyflow/editor`，同一个二进制既接 test-server
       也接阶段 B 的业务服务（[mcp.md](mcp.md)、[ADR-0021](adr/0021-mcp-as-transport-consumer.md)）
-- [ ] 子代理盲测：只给 MCP 服务、[agent-tuning.md](agent-tuning.md) 与数据路径，
-      重做点 4/4_4 的 `distThresh` 调参、对 Audio_1 独立发现「读数不响应」。
-      **工具面在盲测之前不锁定**（m5-plan §8）：盲测暴露出来的工具再加，没暴露的不加
+- [x] 子代理盲测：只给 MCP 服务、[agent-tuning.md](agent-tuning.md) 与数据路径，
+      在仓库外重做点 4/4_4 的 `distThresh` 调参与 Audio_1 的灵敏度判断。
+      21 次 MCP 调用、1 个输入数据脚本、0 个解析/统计脚本，结论比真实任务更细
+      （点 4 在 0.3~0.4 到平台，4_4 要 0.6~0.8；Audio_1 的读数**确实响应**，
+      不响应是固定选区跟不上游走 0.9 mm 的 0.1 mm 窄缝）
+
+验收：`pnpm check` 与 `pnpm e2e`（332/332）全绿；`lyflow eval` 零脚本复现真实任务 19 个点的 std 表；
+`perturb` 抓出点 7 `gap.flush` 取绝对值的符号折叠（51/51）与点 1 的 1.000 mm/mm 斜率。
+
+**盲测暴露、尚未做的**（m5-plan §8 第 3 条：暴露出来的才加）：
+- `perturb` 逐样本斜率落盘；MCP `failures` 加 `limit`
+- `eval --samples-dir` 双相机配对 + 按时间戳排序前后各半打 tag
+- MCP `eval` 的 `compact` 返回；文档里的 `--csv` 在 MCP 工具上没有对应
+- `--region` 允许 `pointFrom: <node>:<port>` 让刀口逐帧跟锚点（平台级引用，不违背 G7）
+- `list_metrics(graphPath)`；文档补「`--after` 插在被 `camera` 选中的那一路」与 region/axis 单位
+- `outputsAvailable` 的业务侧 harvest 与 `devbridge.ts` 快照透出（留给阶段 B）
 
 ## M5 之后 — 外延（只列方向，动工前再写计划）
 
