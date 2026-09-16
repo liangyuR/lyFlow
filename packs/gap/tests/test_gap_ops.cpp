@@ -5,6 +5,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -1024,4 +1025,105 @@ TEST_CASE("gap.camera_guard 接了 box 就只比那一段") {
   left.inputs["box"] = Data::box2d(box(mmf(0.0), mmf(160.0), mmf(4.5), mmf(180.0)));
   REQUIRE(left.run("gap.camera_guard", {{"onDisagree", Value::text("record")}}).ok);
   CHECK_FALSE(guardQuality(left)->data["exceeded"].get<bool>());
+}
+
+namespace {
+
+/// 圆弧点：角度 [from, to] 度，落在测量帧里。r 与坐标都是米。
+void pushArc(PointCloud& c, double cx, double cy, double r, double from, double to,
+             std::size_t n) {
+  for (std::size_t i = 0; i < n; ++i) {
+    const double t = (from + (to - from) * static_cast<double>(i) /
+                                 static_cast<double>(n - 1)) *
+                     3.14159265358979323846 / 180.0;
+    c.push(static_cast<float>(cx + r * std::cos(t)), static_cast<float>(cy + r * std::sin(t)),
+           0.0f);
+  }
+}
+
+/// 左侧永远给一段干净的弧，测试只关心右侧。
+void pushLeftArc(PointCloud& c) { pushArc(c, -0.0035, -0.0005, 0.0015, 200, 340, 60); }
+
+Line2D flatLine() {
+  Line2D l;
+  l.dir[0] = 1.0f;
+  return l;  // 过原点、水平
+}
+
+/// 右圆的圆心 y（米）。测量帧里 y 越小越高。
+double rightCenterY(Call& call) { return call.out("right").asCircle2D()->center[1]; }
+
+}  // namespace
+
+TEST_CASE("gap.fit_gap_circles 的 rightCamera 把右圆钉到指定那台相机") {
+  // 两台各锁在相距 1 mm 的两个界面上（夹胶玻璃那种）。合并云里是两层点。
+  const auto build = [](const char* camera) {
+    PointCloud primary, secondary, merged;
+    pushLeftArc(primary);
+    pushLeftArc(secondary);
+    pushLeftArc(merged);
+    pushArc(primary, 0.0035, -0.0005, 0.0009, 200, 340, 60);
+    pushArc(secondary, 0.0035, -0.0015, 0.0009, 200, 340, 60);
+    pushArc(merged, 0.0035, -0.0005, 0.0009, 200, 340, 60);
+    pushArc(merged, 0.0035, -0.0015, 0.0009, 200, 340, 60);
+    auto call = std::make_unique<Call>();
+    call->inputs["merged"] = Data::cloud(merged);
+    call->inputs["primary"] = Data::cloud(primary);
+    call->inputs["secondary"] = Data::cloud(secondary);
+    call->inputs["boxLeft"] = Data::box2d(box(-0.006f, -0.004f, -0.001f, 0.002f));
+    call->inputs["boxRight"] = Data::box2d(box(0.001f, -0.004f, 0.006f, 0.002f));
+    REQUIRE(call->run("gap.fit_gap_circles", {{"rightCamera", Value::text(camera)}}).ok);
+    return call;
+  };
+  auto master = build("Primary");
+  auto slave = build("Secondary");
+  CHECK(rightCenterY(*master) == doctest::Approx(-0.0005).epsilon(0.02));
+  CHECK(rightCenterY(*slave) == doctest::Approx(-0.0015).epsilon(0.02));
+}
+
+TEST_CASE("gap.fit_gap_circles 的圆心高度带把圆心按到参考线上方") {
+  // 右 ROI 里有两段弧：真实的那段在参考线上方 0.5 mm，点少；
+  // 下方 0.5 mm 的那段点多一倍 —— 不加约束时 RANSAC 会选点多的那段。
+  const auto build = [] {
+    PointCloud primary, secondary, merged;
+    pushLeftArc(primary);
+    pushLeftArc(secondary);
+    pushLeftArc(merged);
+    pushArc(merged, 0.0035, -0.0005, 0.0009, 200, 340, 40);
+    pushArc(merged, 0.0035, 0.0005, 0.0009, 200, 340, 90);
+    pushArc(primary, 0.0035, -0.0005, 0.0009, 200, 340, 40);
+    pushArc(secondary, 0.0035, 0.0005, 0.0009, 200, 340, 90);
+    auto call = std::make_unique<Call>();
+    call->inputs["merged"] = Data::cloud(merged);
+    call->inputs["primary"] = Data::cloud(primary);
+    call->inputs["secondary"] = Data::cloud(secondary);
+    call->inputs["boxLeft"] = Data::box2d(box(-0.006f, -0.004f, -0.001f, 0.002f));
+    call->inputs["boxRight"] = Data::box2d(box(0.001f, -0.004f, 0.006f, 0.002f));
+    call->inputs["refLine"] = Data::line2d(flatLine());
+    return call;
+  };
+  auto loose = build();
+  REQUIRE(loose->run("gap.fit_gap_circles").ok);
+  CHECK(rightCenterY(*loose) == doctest::Approx(0.0005).epsilon(0.05));
+
+  auto banded = build();
+  REQUIRE(banded->run("gap.fit_gap_circles", {{"rightCenterAbove", Value::number(0.5)},
+                                              {"rightCenterTol", Value::number(0.3)}})
+              .ok);
+  CHECK(rightCenterY(*banded) == doctest::Approx(-0.0005).epsilon(0.05));
+}
+
+TEST_CASE("gap.fit_gap_circles 配了圆心高度带却没接 refLine 就报错") {
+  PointCloud cloud;
+  pushLeftArc(cloud);
+  pushArc(cloud, 0.0035, -0.0005, 0.0009, 200, 340, 60);
+  Call call;
+  call.inputs["merged"] = Data::cloud(cloud);
+  call.inputs["primary"] = Data::cloud(cloud);
+  call.inputs["secondary"] = Data::cloud(cloud);
+  call.inputs["boxLeft"] = Data::box2d(box(-0.006f, -0.004f, -0.001f, 0.002f));
+  call.inputs["boxRight"] = Data::box2d(box(0.001f, -0.004f, 0.006f, 0.002f));
+  const Status s = call.run("gap.fit_gap_circles", {{"rightCenterTol", Value::number(0.3)}});
+  CHECK_FALSE(s.ok);
+  CHECK(s.code == "bad_param");
 }

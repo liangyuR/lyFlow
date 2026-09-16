@@ -634,6 +634,22 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
     g.edge(fitBase, "line", refNode, "line");
   }
 
+  // 圆心高度带（可选）：容差 <= 0 就是不启用，这时连 refLine 都不接，图和以前一样。
+  const YAML::Node band = child(gap, "center_band");
+  const double bandTol[2] = {numberOr(band, "left_tolerance", 0.0),
+                             numberOr(band, "right_tolerance", 0.0)};
+  const bool wantBand = bandTol[0] > 0 || bandTol[1] > 0;
+  const std::string bandRef = textOr(band, "reference", "flush_ref");
+  if (wantBand && bandRef != "flush_ref" && bandRef != "flush_base") {
+    return badInput("gap.center_band.reference 只能是 flush_ref 或 flush_base，这份写的是 '" +
+                    bandRef + "'");
+  }
+  if (wantBand && bandRef == "flush_ref" && fitRef.empty()) {
+    return badInput(
+        "gap.center_band.reference 是 flush_ref，但 flush.ref_type 不是 'line end'，"
+        "图里没有参考线可接");
+  }
+
   std::string lineNode = fitBase;
   const char* linePort = "line";
   std::string refOutNode = refNode;
@@ -642,6 +658,9 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   const char* qualityBasePort = "quality";
   std::string qualityRef = fitRef;
   const char* qualityRefPort = "quality";
+  // 参考线本体（圆心高度带要接），refType 不是 line end 时为空。
+  std::string refLineNode = fitRef;
+  const char* refLineNodePort = "line";
   if (splitFlush) {
     nlohmann::json bp;
     bp["bounds"] = "open";
@@ -705,6 +724,10 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
       qualityRef = fitFallback("n_fb_quality_ref", fitRef, "quality", bFitRef, "quality", 8,
                                "回退参考线质量");
       qualityRefPort = "out";
+      if (wantBand && bandRef == "flush_ref") {
+        refLineNode = fitFallback("n_fb_ref_line", fitRef, "line", bFitRef, "line", 9, "回退参考线");
+        refLineNodePort = "out";
+      }
     }
   }
 
@@ -741,6 +764,12 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   circleParams["cameraFallback"] = cameraFallback;
   circleParams["selectClosestNominal"] = selectClosest;
   circleParams["preferredCamera"] = textOr(gap, "camera_separated_preferred_camera", "Both");
+  circleParams["leftCamera"] = textOr(gap, "left_circle_camera", "Both");
+  circleParams["rightCamera"] = textOr(gap, "right_circle_camera", "Both");
+  circleParams["leftCenterAbove"] = numberOr(band, "left_above", 0.0);
+  circleParams["leftCenterTol"] = bandTol[0];
+  circleParams["rightCenterAbove"] = numberOr(band, "right_above", 0.0);
+  circleParams["rightCenterTol"] = bandTol[1];
   const std::string circles =
       g.node("n_circles", "gap.fit_gap_circles", circleParams, 10, 2, "两侧圆拟合");
   g.edge(merged, mergedPort, circles, "merged");
@@ -748,6 +777,13 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   g.edge(cropS, cropSPort, circles, "secondary");
   g.edge(roiSource[2], roiSourcePort[2], circles, "boxLeft");
   g.edge(roiSource[3], roiSourcePort[3], circles, "boxRight");
+  if (wantBand) {
+    if (bandRef == "flush_ref") {
+      g.edge(refLineNode, refLineNodePort, circles, "refLine");
+    } else {
+      g.edge(lineNode, linePort, circles, "refLine");
+    }
+  }
 
   const std::string definition = textOr(gap, "definition", "B");
   nlohmann::json gapParams;

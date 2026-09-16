@@ -63,7 +63,7 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 | `gap.fit_line` | cloud, box → line, inliers, innerEnd | 直线拟合 + 靠缝隙一端的截取重拟合 |
 | `gap.selected_point` | cloud, box → point | 离 ROI min 角最近的点（取自整片云） |
 | `gap.nearest_to_line` | cloud, line → point | 离基准线垂距最小的云点（`ref_type: nearest point`） |
-| `gap.fit_gap_circles` | merged, primary, secondary, boxLeft, boxRight → 两个圆 | 圆拟合 + 重试 + 相机分开回退 + 按标称值挑候选 |
+| `gap.fit_gap_circles` | merged, primary, secondary, boxLeft, boxRight, refLine? → 两个圆 | 圆拟合 + 重试 + 相机分开回退 + 按标称值挑候选。另有两个**逐侧**的收紧手段：`leftCamera`/`rightCamera` 把某一侧钉到单台相机（两台锁在不同界面上时，合并云里是相距一两毫米的两层点），`centerAbove`/`centerTol` 要求圆心落在 `refLine` 上方的一条窄带里（夹胶玻璃：玻璃面不成像，圆心该在 flush 线上方）|
 | `gap.flush` | baseLine, refPoint → value, segment | 段差 |
 | `gap.gap` | left, right, [baseLine] → value, segment | 间隙（definition A / B） |
 | `gap.corner_vertex` | lineLeft, lineRight, [baseLine], [alignment] → vertex, gap, flush, angle | 软装夹角：两翼面直线求交，顶点相对金件顶点沿基准面分解 |
@@ -167,6 +167,26 @@ lyflow import <StandardGap.yml> --kind StandardGap.yml -o graph.lyflow.json
   `Status::Error(Validate, bad_input|bad_param, 同一句中文)`，经 `lyflow import` 出成诊断数组。
 
 三种 kind 产出的图都声明 `outputs: {gap, flush, bundle}`。
+
+### `gap:` 下的几个非原版键
+
+原版 `StandardGap.yml` 没有这几个键，是这边为难点位加的；**不写就是不启用**，
+图与参数和以前逐位一致。
+
+| 键 | 作用 |
+|---|---|
+| `gap.left_circle_camera` / `gap.right_circle_camera` | `Both`（默认）/ `Primary` / `Secondary`。把这一侧的圆钉到单台相机。两台锁在不同界面上时（夹胶玻璃：一台看表面、一台看夹胶层），合并云里是相距一两毫米的**两层点**，拟出来的圆没有意义。钉死之后这一侧不再走相机分开的回退 |
+| `gap.center_band.reference` | `flush_ref`（默认，段差的参考线）或 `flush_base`（基准线）。`flush_ref` 要求 `flush.ref_type` 是 `line end`，否则导入报错 |
+| `gap.center_band.left_above` / `right_above` | 圆心应当高出那条参考线多少毫米 |
+| `gap.center_band.left_tolerance` / `right_tolerance` | 容差，**<= 0 就是不启用**。启用时 RANSAC 只接受圆心落在这条窄带里的候选 |
+
+窄带是在 RANSAC 里**筛候选**，不是把圆心焊到那个高度；带比真实散布还窄时合格候选
+被筛光，那一侧直接拟不出。先量一批正常帧的圆心高度再定带宽。
+
+天幕 L4 是这两个键的来由：右侧 ROI 只有 2.29 mm 宽，玻璃表面不成像、成的是夹胶层，
+圆心本该在 flush 线**上方**。332 帧上 `right_above: 0.23 / right_tolerance: 0.45`
+把 std 0.667 → 0.639、超差 9 → 7 且一帧不丢；再叠 `right_circle_camera: Secondary`
+是 0.648 / 7（单钉 Secondary 不加窄带会丢 8 帧）。
 
 ### 带 `flow.fallback` 的完整图
 

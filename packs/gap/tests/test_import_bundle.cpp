@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -371,4 +372,89 @@ TEST_CASE("gap.fit_line 与 gap.fit_gap_circles 各出一份 quality Record") {
     }
     CHECK(found);
   }
+}
+
+namespace {
+
+/// 用改过的 YAML 文本跑一次导入（上面的 import() 固定用 kConfig）。
+nlohmann::json importText(const std::string& kind, const std::string& yaml, Status* status) {
+  const ImporterDesc* desc = importer(kind);
+  REQUIRE(desc != nullptr);
+  std::string out;
+  const Status s = desc->fn(yaml, std::filesystem::path(), out);
+  if (status != nullptr) *status = s;
+  if (!s.ok) return nlohmann::json();
+  return nlohmann::json::parse(out);
+}
+
+/// 往 kConfig 的 gap: 段里插几行（直接拼在末尾会落到 align: 底下）。
+std::string withGapKeys(const std::string& lines) {
+  std::string yaml = kConfig;
+  const std::size_t at = yaml.find("align:\n");
+  REQUIRE(at != std::string::npos);
+  yaml.insert(at, lines);
+  return yaml;
+}
+
+const nlohmann::json& nodeById(const nlohmann::json& doc, const char* id) {
+  for (const auto& n : doc["nodes"]) {
+    if (n["id"] == id) return n;
+  }
+  FAIL("图里没有 " << id);
+  static const nlohmann::json empty;
+  return empty;
+}
+
+bool hasEdge(const nlohmann::json& doc, const char* toNode, const char* toPort) {
+  for (const auto& e : doc["edges"]) {
+    if (e["to"]["node"] == toNode && e["to"]["port"] == toPort) return true;
+  }
+  return false;
+}
+
+}  // namespace
+
+TEST_CASE("圆心高度带没配时不接 refLine，配了才接参考线") {
+  const nlohmann::json bare = importText("StandardGap.yml:template", kConfig, nullptr);
+  CHECK(nodeById(bare, "n_circles")["params"]["rightCenterTol"] == 0.0);
+  CHECK_FALSE(hasEdge(bare, "n_circles", "refLine"));
+
+  const nlohmann::json banded = importText(
+      "StandardGap.yml:template",
+      withGapKeys("  center_band: {right_above: 0.25, right_tolerance: 0.45}\n"), nullptr);
+  const auto& p = nodeById(banded, "n_circles")["params"];
+  CHECK(p["rightCenterAbove"] == 0.25);
+  CHECK(p["rightCenterTol"] == 0.45);
+  CHECK(hasEdge(banded, "n_circles", "refLine"));
+}
+
+TEST_CASE("圆心高度带接的是 flush_ref 的那条线，ref_type 不对就报错") {
+  const std::string banded = withGapKeys(
+      "  center_band: {right_above: 0.25, right_tolerance: 0.45}\n");
+  const nlohmann::json doc = importText("StandardGap.yml:template", banded, nullptr);
+  bool seen = false;
+  for (const auto& e : doc["edges"]) {
+    if (e["to"]["node"] == "n_circles" && e["to"]["port"] == "refLine") {
+      seen = true;
+      CHECK(e["from"]["node"] == "n_fit_ref");
+      CHECK(e["from"]["port"] == "line");
+    }
+  }
+  CHECK(seen);
+
+  std::string noRefLine = banded;
+  const std::size_t at = noRefLine.find("ref_type: line end");
+  REQUIRE(at != std::string::npos);
+  noRefLine.replace(at, std::strlen("ref_type: line end"), "ref_type: selected point");
+  Status s;
+  importText("StandardGap.yml:template", noRefLine, &s);
+  CHECK_FALSE(s.ok);
+}
+
+TEST_CASE("逐侧相机从 YAML 落到 n_circles 的参数上") {
+  const nlohmann::json doc = importText(
+      "StandardGap.yml:template", withGapKeys("  right_circle_camera: Secondary\n"), nullptr);
+  const auto& p = nodeById(doc, "n_circles")["params"];
+  CHECK(p["leftCamera"] == "Both");
+  CHECK(p["rightCamera"] == "Secondary");
 }
