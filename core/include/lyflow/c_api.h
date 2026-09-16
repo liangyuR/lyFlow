@@ -1,8 +1,8 @@
 #ifndef LYFLOW_C_API_H
 #define LYFLOW_C_API_H
-// C ABI v7。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
+// C ABI v8。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
 // 三条约定（char* 归属、异常不跨 ABI、只导出 C 函数）见 core/README.md「C ABI 约定」。
-#define LYFLOW_ABI_VERSION 7
+#define LYFLOW_ABI_VERSION 8
 #include <stddef.h>
 #include <stdint.h>
 
@@ -145,6 +145,40 @@ LYFLOW_API int lyflow_output_cloud(const char* run_id, const char* node_id, cons
                                    uint32_t max_points, lyflow_cloud_view* out);
 
 LYFLOW_API void lyflow_cloud_view_free(lyflow_cloud_view* view);
+
+// v8：张量按切片取（ADR-0019）。与点云不同，这里**零拷贝** ——
+// shape/data 直接指进结果仓里那一份，handle 一释放就失效。
+typedef struct {
+  uint32_t rank;
+  uint32_t count;         /* 本次返回的元素数 */
+  uint64_t offset;        /* 本次切片的起始元素下标 */
+  uint64_t total;         /* 张量总元素数 */
+  const int64_t* shape;   /* rank 个，永远是完整形状，不随 offset/count 变 */
+  const float* data;      /* count 个 */
+  void* handle;           /* 内部持有，勿动 */
+} lyflow_tensor_view;
+
+// offset 越界返回 count=0；count=0 表示「从 offset 取到末尾」。
+// 返回 0 = 成功；1 = 没有这个结果 / 该输出不是张量；2 = out 为空；3 = 异常。
+LYFLOW_API int lyflow_output_tensor(const char* run_id, const char* node_id, const char* port,
+                                    uint64_t offset, uint32_t count, lyflow_tensor_view* out);
+
+LYFLOW_API void lyflow_tensor_view_free(lyflow_tensor_view* view);
+
+// v8：点下标集合，同样零拷贝按切片取。
+typedef struct {
+  uint32_t count;            /* 本次返回的下标个数 */
+  uint32_t total;            /* 下标总数 */
+  uint64_t source_cloud_id;  /* 指向哪片云；前端只显示，不校验 */
+  const int32_t* values;     /* count 个 */
+  void* handle;              /* 内部持有，勿动 */
+} lyflow_indices_view;
+
+// 越界与返回码的约定与 lyflow_output_tensor 完全一致，1 表示该输出不是下标集合。
+LYFLOW_API int lyflow_output_indices(const char* run_id, const char* node_id, const char* port,
+                                     uint64_t offset, uint32_t count, lyflow_indices_view* out);
+
+LYFLOW_API void lyflow_indices_view_free(lyflow_indices_view* view);
 
 // 某节点全部输出的 { port, type, elementCount, byteSize } JSON 数组。
 LYFLOW_API char* lyflow_output_info(const char* run_id, const char* node_id);

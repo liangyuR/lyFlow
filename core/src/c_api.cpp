@@ -263,6 +263,86 @@ void lyflow_cloud_view_free(lyflow_cloud_view* view) {
   std::memset(view, 0, sizeof(*view));
 }
 
+int lyflow_output_tensor(const char* run_id, const char* node_id, const char* port,
+                         uint64_t offset, uint32_t count, lyflow_tensor_view* out) {
+  if (!out) return 2;
+  std::memset(out, 0, sizeof(*out));
+  try {
+    lyflow::Data data;
+    if (!lyflow::exec::ResultStore::instance().get(fromC(run_id), fromC(node_id), fromC(port),
+                                                   data)) {
+      return 1;
+    }
+    const lyflow::Tensor* tensor = data.asTensor();
+    if (!tensor) return 1;
+
+    const std::uint64_t total = static_cast<std::uint64_t>(tensor->data.size());
+    const std::uint64_t begin = offset > total ? total : offset;
+    const std::uint64_t avail = total - begin;
+    std::uint64_t take = (count == 0 || static_cast<std::uint64_t>(count) > avail)
+                             ? avail
+                             : static_cast<std::uint64_t>(count);
+    if (take > 0xFFFFFFFFull) take = 0xFFFFFFFFull;
+
+    auto* held = new lyflow::Data(data);
+    out->rank = static_cast<uint32_t>(tensor->shape.size());
+    out->count = static_cast<uint32_t>(take);
+    out->offset = offset;
+    out->total = total;
+    out->shape = tensor->shape.empty() ? nullptr : tensor->shape.data();
+    out->data = take == 0 ? nullptr : tensor->data.data() + static_cast<std::size_t>(begin);
+    out->handle = held;
+    return 0;
+  } catch (...) {
+    return 3;
+  }
+}
+
+void lyflow_tensor_view_free(lyflow_tensor_view* view) {
+  if (!view || !view->handle) return;
+  delete reinterpret_cast<lyflow::Data*>(view->handle);
+  std::memset(view, 0, sizeof(*view));
+}
+
+int lyflow_output_indices(const char* run_id, const char* node_id, const char* port,
+                          uint64_t offset, uint32_t count, lyflow_indices_view* out) {
+  if (!out) return 2;
+  std::memset(out, 0, sizeof(*out));
+  try {
+    lyflow::Data data;
+    if (!lyflow::exec::ResultStore::instance().get(fromC(run_id), fromC(node_id), fromC(port),
+                                                   data)) {
+      return 1;
+    }
+    const lyflow::Indices* indices = data.asIndices();
+    if (!indices) return 1;
+
+    const std::uint64_t total = static_cast<std::uint64_t>(indices->values.size());
+    const std::uint64_t begin = offset > total ? total : offset;
+    const std::uint64_t avail = total - begin;
+    std::uint64_t take = (count == 0 || static_cast<std::uint64_t>(count) > avail)
+                             ? avail
+                             : static_cast<std::uint64_t>(count);
+    if (take > 0xFFFFFFFFull) take = 0xFFFFFFFFull;
+
+    auto* held = new lyflow::Data(data);
+    out->count = static_cast<uint32_t>(take);
+    out->total = static_cast<uint32_t>(total > 0xFFFFFFFFull ? 0xFFFFFFFFull : total);
+    out->source_cloud_id = indices->sourceCloudId;
+    out->values = take == 0 ? nullptr : indices->values.data() + static_cast<std::size_t>(begin);
+    out->handle = held;
+    return 0;
+  } catch (...) {
+    return 3;
+  }
+}
+
+void lyflow_indices_view_free(lyflow_indices_view* view) {
+  if (!view || !view->handle) return;
+  delete reinterpret_cast<lyflow::Data*>(view->handle);
+  std::memset(view, 0, sizeof(*view));
+}
+
 char* lyflow_output_info(const char* run_id, const char* node_id) {
   try {
     const auto infos = lyflow::exec::ResultStore::instance().outputsOf(fromC(run_id), fromC(node_id));

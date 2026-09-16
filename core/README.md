@@ -9,7 +9,7 @@ include/lyflow/       公共头。零 PCL（ADR-0005），算子作者只需要�
   operator.h          ParamView / Inputs / Outputs / ExecContext / ComputeFn
   manifest.h          算子描述的数据结构，序列化成 operator-manifest.json
   status.h            结构化诊断（paramPath / portName）+ Status::Demand（ADR-0016）
-  c_api.h             C ABI v7 —— DLL 只导出这里的东西
+  c_api.h             C ABI v8 —— DLL 只导出这里的东西
   client.hpp          嵌入宿主用的 header-only 封装，只依赖 c_api.h（docs/embedding.md）
 src/exec/             parse → expand → validate → compile(Plan) → execute + ResultStore
   subgraph.cpp        子图展开成平图（ADR-0010）；library.cpp 扫描库目录

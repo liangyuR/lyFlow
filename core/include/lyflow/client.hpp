@@ -119,6 +119,78 @@ class CloudView {
   void (*free_)(lyflow_cloud_view*) = nullptr;
 };
 
+class TensorView {
+ public:
+  TensorView() = default;
+  ~TensorView() { reset(); }
+  TensorView(const TensorView&) = delete;
+  TensorView& operator=(const TensorView&) = delete;
+  TensorView(TensorView&& other) noexcept { steal(other); }
+  TensorView& operator=(TensorView&& other) noexcept {
+    if (this != &other) {
+      reset();
+      steal(other);
+    }
+    return *this;
+  }
+
+  bool valid() const { return view_.handle != nullptr; }
+  std::uint32_t rank() const { return view_.rank; }
+  std::uint32_t count() const { return view_.count; }
+  std::uint64_t offset() const { return view_.offset; }
+  std::uint64_t total() const { return view_.total; }
+  const std::int64_t* shape() const { return view_.shape; }
+  const float* data() const { return view_.data; }
+
+ private:
+  friend class Client;
+  void reset();
+  void steal(TensorView& other) {
+    view_ = other.view_;
+    free_ = other.free_;
+    std::memset(&other.view_, 0, sizeof(other.view_));
+    other.free_ = nullptr;
+  }
+
+  lyflow_tensor_view view_{};
+  void (*free_)(lyflow_tensor_view*) = nullptr;
+};
+
+class IndicesView {
+ public:
+  IndicesView() = default;
+  ~IndicesView() { reset(); }
+  IndicesView(const IndicesView&) = delete;
+  IndicesView& operator=(const IndicesView&) = delete;
+  IndicesView(IndicesView&& other) noexcept { steal(other); }
+  IndicesView& operator=(IndicesView&& other) noexcept {
+    if (this != &other) {
+      reset();
+      steal(other);
+    }
+    return *this;
+  }
+
+  bool valid() const { return view_.handle != nullptr; }
+  std::uint32_t count() const { return view_.count; }
+  std::uint32_t total() const { return view_.total; }
+  std::uint64_t sourceCloudId() const { return view_.source_cloud_id; }
+  const std::int32_t* values() const { return view_.values; }
+
+ private:
+  friend class Client;
+  void reset();
+  void steal(IndicesView& other) {
+    view_ = other.view_;
+    free_ = other.free_;
+    std::memset(&other.view_, 0, sizeof(other.view_));
+    other.free_ = nullptr;
+  }
+
+  lyflow_indices_view view_{};
+  void (*free_)(lyflow_indices_view*) = nullptr;
+};
+
 namespace detail {
 
 struct EventSink {
@@ -193,6 +265,12 @@ class RunHandle {
 
   CloudView cloud(const std::string& nodeId, const std::string& port,
                   std::uint32_t maxPoints = 0) const;
+
+  TensorView tensor(const std::string& nodeId, const std::string& port,
+                    std::uint64_t offset = 0, std::uint32_t count = 0) const;
+
+  IndicesView indices(const std::string& nodeId, const std::string& port,
+                      std::uint64_t offset = 0, std::uint32_t count = 0) const;
 
   RunResult result();
 
@@ -303,6 +381,32 @@ class Client {
     return out;
   }
 
+  TensorView tensor(const std::string& runId, const std::string& nodeId, const std::string& port,
+                    std::uint64_t offset = 0, std::uint32_t count = 0) const {
+    TensorView out;
+    const int rc = fn_.output_tensor(runId.c_str(), nodeId.c_str(), port.c_str(), offset, count,
+                                     &out.view_);
+    if (rc != 0) {
+      std::memset(&out.view_, 0, sizeof(out.view_));
+      return out;
+    }
+    out.free_ = fn_.tensor_view_free;
+    return out;
+  }
+
+  IndicesView indices(const std::string& runId, const std::string& nodeId, const std::string& port,
+                      std::uint64_t offset = 0, std::uint32_t count = 0) const {
+    IndicesView out;
+    const int rc = fn_.output_indices(runId.c_str(), nodeId.c_str(), port.c_str(), offset, count,
+                                      &out.view_);
+    if (rc != 0) {
+      std::memset(&out.view_, 0, sizeof(out.view_));
+      return out;
+    }
+    out.free_ = fn_.indices_view_free;
+    return out;
+  }
+
   /// 某个节点全部输出端口的元信息 JSON 数组；非点云的项带 value。
   std::string outputInfo(const std::string& runId, const std::string& nodeId) const {
     return owned(fn_.output_info(runId.c_str(), nodeId.c_str()));
@@ -342,6 +446,12 @@ class Client {
     int (*output_cloud)(const char*, const char*, const char*, uint32_t,
                         lyflow_cloud_view*) = nullptr;
     void (*cloud_view_free)(lyflow_cloud_view*) = nullptr;
+    int (*output_tensor)(const char*, const char*, const char*, uint64_t, uint32_t,
+                         lyflow_tensor_view*) = nullptr;
+    void (*tensor_view_free)(lyflow_tensor_view*) = nullptr;
+    int (*output_indices)(const char*, const char*, const char*, uint64_t, uint32_t,
+                          lyflow_indices_view*) = nullptr;
+    void (*indices_view_free)(lyflow_indices_view*) = nullptr;
     char* (*output_info)(const char*, const char*) = nullptr;
     char* (*output_save)(const char*, const char*, const char*, const char*,
                          const char*) = nullptr;
@@ -389,6 +499,18 @@ inline void CloudView::reset() {
   free_ = nullptr;
 }
 
+inline void TensorView::reset() {
+  if (free_ && view_.handle) free_(&view_);
+  std::memset(&view_, 0, sizeof(view_));
+  free_ = nullptr;
+}
+
+inline void IndicesView::reset() {
+  if (free_ && view_.handle) free_(&view_);
+  std::memset(&view_, 0, sizeof(view_));
+  free_ = nullptr;
+}
+
 #if defined(_WIN32)
 inline void Client::loadW(const std::wstring& dllPath) {
   handle_ = ::LoadLibraryExW(dllPath.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -431,6 +553,10 @@ inline void Client::bind(const std::string& where) {
   need(fn_.import, "lyflow_import", where);
   need(fn_.output_cloud, "lyflow_output_cloud", where);
   need(fn_.cloud_view_free, "lyflow_cloud_view_free", where);
+  need(fn_.output_tensor, "lyflow_output_tensor", where);
+  need(fn_.tensor_view_free, "lyflow_tensor_view_free", where);
+  need(fn_.output_indices, "lyflow_output_indices", where);
+  need(fn_.indices_view_free, "lyflow_indices_view_free", where);
   need(fn_.output_info, "lyflow_output_info", where);
   need(fn_.output_save, "lyflow_output_save", where);
 }
@@ -466,6 +592,18 @@ inline CloudView RunHandle::cloud(const std::string& nodeId, const std::string& 
                                   std::uint32_t maxPoints) const {
   if (!client_) return CloudView();
   return client_->cloud(runId_, nodeId, port, maxPoints);
+}
+
+inline TensorView RunHandle::tensor(const std::string& nodeId, const std::string& port,
+                                    std::uint64_t offset, std::uint32_t count) const {
+  if (!client_) return TensorView();
+  return client_->tensor(runId_, nodeId, port, offset, count);
+}
+
+inline IndicesView RunHandle::indices(const std::string& nodeId, const std::string& port,
+                                      std::uint64_t offset, std::uint32_t count) const {
+  if (!client_) return IndicesView();
+  return client_->indices(runId_, nodeId, port, offset, count);
 }
 
 inline RunResult RunHandle::result() {

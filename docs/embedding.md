@@ -4,7 +4,7 @@
 只依赖同目录的 `lyflow/c_api.h`，不 include 任何 core 内部头，也不链接任何库 ——
 core 是运行时加载的 DLL（[ADR-0004](adr/0004-core-as-dll.md)）。
 
-契约版本是 **C ABI v7**（[ADR-0017](adr/0017-graph-outputs-injection-importers.md)）。
+契约版本是 **C ABI v8**（[ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)）。
 `lyflow::kClientAbiVersion` 与 core 的 `LYFLOW_ABI_VERSION` 必须一致；对不上时
 `Client` 的构造函数会抛 `ClientError`，而不是等到某次调用才崩。
 
