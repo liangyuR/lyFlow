@@ -55,12 +55,13 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 | `gap.load_profile_pair` | → primary, secondary | 读一个测点目录下的 Master/Slave 两片 PCD |
 | `gap.to_measurement_frame` | cloud → cloud | 传感器 XZ 帧 → 测量 XY 帧（换轴，是反射不是旋转） |
 | `gap.overall_roi` | primary, secondary → box | 整体 ROI，支持 auto_center |
+| `gap.datum_window` | anchor, heightAnchor? → box | 由锚框推出一条长窗，用来在**旁边那张长面**上拟方向基准线。x 锚在缝的框上（模型对缝定位最稳），y 锚在基准面框上 |
 | `gap.load_template` | → left, right | 读一对模板 PCD |
 | `gap.align_template` | cloud, tplLeft, tplRight → alignment | 全局粗配 + 左右两侧 ICP + 信赖域 + 退化锁定 |
 | `gap.select_alignment` | a,[b],[c],[d] → alignment | 按 `min(l,r)` ↓、`mean` ↓、配置顺序 ↑、id ↑ 选模板 |
 | `gap.result_bundle` | gap, flush, 五个框, 三份 quality, cropStatus, alignment, fallback, 三片云 → bundle | 汇成一个 `GapResultBundle`，字段对齐旧 `QualityMetrics` |
 | `gap.business_rois` | alignment → 四个 Box2D | 业务 ROI 按 ICP 变换搬到当前样本上 |
-| `gap.fit_line` | cloud, box → line, inliers, innerEnd | 直线拟合 + 靠缝隙一端的截取重拟合 |
+| `gap.fit_line` | cloud, box, refLine? → line, inliers, innerEnd | 直线拟合 + 靠缝隙一端的截取重拟合。`dirMode` 可把方向锚到 `refLine` 上（`band` 只兜底，`fixed` 一律钉死、只拟法向偏移）—— ROI 只有两三毫米宽时它自己拟出来的方向基本是噪声，还会偶尔整条歪几十度而残差很小。`minInliers` 是唯一拦得住「ROI 跑偏、照样拟出一条没意义的线」的地方 |
 | `gap.selected_point` | cloud, box → point | 离 ROI min 角最近的点（取自整片云） |
 | `gap.nearest_to_line` | cloud, line → point | 离基准线垂距最小的云点（`ref_type: nearest point`） |
 | `gap.fit_gap_circles` | merged, primary, secondary, boxLeft, boxRight, refLine? → 两个圆 | 圆拟合 + 重试 + 相机分开回退 + 按标称值挑候选。另有两个**逐侧**的收紧手段：`leftCamera`/`rightCamera` 把某一侧钉到单台相机（两台锁在不同界面上时，合并云里是相距一两毫米的两层点），`centerAbove`/`centerTol` 要求圆心落在 `refLine` 上方的一条窄带里（夹胶玻璃：玻璃面不成像，圆心该在 flush 线上方）|
@@ -167,6 +168,45 @@ lyflow import <StandardGap.yml> --kind StandardGap.yml -o graph.lyflow.json
   `Status::Error(Validate, bad_input|bad_param, 同一句中文)`，经 `lyflow import` 出成诊断数组。
 
 三种 kind 产出的图都声明 `outputs: {gap, flush, bundle}`。
+
+### `flush.base_direction`：方向锚到旁边那张长面上
+
+基准面是一道很窄的台肩时，它自己拟出来的方向基本是噪声 —— 而且会偶尔整条歪几十度，
+**残差反而很小，任何质量指标都看不出来**（天幕 L4 的两帧：内点率 0.500 / 0.577 正好落在
+正常中位 0.533 上，rms 0.030 也在正常范围里，只有方向是 +26° 和 −21°）。
+台肩外面那张长面通常有十几毫米、两百个点，方向稳得多，两张面之间的相对倾角是零件的
+固有量，量一次定下来就行。
+
+不写这一段就是不启用，`n_fit_base` 上一个方向相关的参数都不生成，图与以前逐节点相同。
+
+```yaml
+flush:
+  base_direction:
+    datum: long_plane      # off（默认）/ long_plane
+    side: left             # 长面在基准面的哪一侧（背离缝的那一侧）
+    start_mm: 0.6          # 窗口离缝的 ROI 那条边的让开量
+    length_mm: 13.4
+    height_mm: 2.5         # 以基准面 ROI 的 y 范围为中心上下各撑开
+    fit_distance: 0.35     # 长面拟合的内点距离
+    min_inliers: 30        # 少于它就报失败，别拿没意义的线当基准
+    mode: fixed            # fixed（一律钉死）/ band（只在出界时钉）
+    nominal_deg: 2.75      # 基准面相对长面的标称倾角
+    tolerance_deg: 12.0    # 只有 band 用
+```
+
+导入器由此生成三个节点：`n_datum_box`（`gap.datum_window`）→ `n_crop_datum` →
+`n_fit_datum`（`gap.fit_line`），把 `line` 接到 `n_fit_base.refLine`；模板备用分支
+有自己的一份（`b_` 前缀）。
+
+**x 锚在缝的 ROI 上，不是基准面 ROI 上。** 一开始两个都锚在基准面上，结果有几帧
+基准面框整个跑偏十来毫米，窗口跟着飞到没点的地方，拟出一条没意义的线还被当成基准 ——
+比不加约束更糟。所以既分了锚，也配了 `min_inliers`。
+
+`nominal_deg` **必须量**，填 0 等于假设两张面平行。L4 的定法：扫一遍偏置取 flush 散布
+最小的那个，再看均值有没有贴着标称；一半帧定、另一半验证得到 +2.95° 与 +3.20°，
+取 +2.75°（std 最小值附近，均值正好落在标称 1.0 上）。332 帧上
+std 0.468 → **0.284**、超差 2 → **0**、一帧不丢；`definition A` 的 u 也取自这条线，
+gap 跟着 0.648 → 0.637（超差 7 不变）。
 
 ### `gap:` 下的几个非原版键
 

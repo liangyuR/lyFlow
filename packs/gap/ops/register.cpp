@@ -13,6 +13,7 @@ void registerPackOps(Registry& r) {
   registerRoiFromLabels(r);
   registerLabelsToCloud(r);
   registerRollAnchoredCrop(r);
+  registerDatumWindow(r);
   registerOverallRoi(r);
   registerLoadTemplate(r);
   registerAlignTemplate(r);

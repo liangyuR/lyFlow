@@ -458,3 +458,72 @@ TEST_CASE("逐侧相机从 YAML 落到 n_circles 的参数上") {
   CHECK(p["leftCamera"] == "Both");
   CHECK(p["rightCamera"] == "Secondary");
 }
+
+namespace {
+
+std::string withFlushKeys(const std::string& lines) {
+  std::string yaml = kConfig;
+  const std::size_t at = yaml.find("gap:\n");
+  REQUIRE(at != std::string::npos);
+  yaml.insert(at, lines);
+  return yaml;
+}
+
+}  // namespace
+
+TEST_CASE("方向基准默认不生成任何节点") {
+  const nlohmann::json doc = importText("StandardGap.yml:template", kConfig, nullptr);
+  CHECK_FALSE(hasOp(doc, "gap.datum_window"));
+  CHECK_FALSE(hasEdge(doc, "n_fit_base", "refLine"));
+  // 一个方向相关的参数都不写进图，留给算子默认的 free —— 老图逐位不变
+  CHECK_FALSE(nodeById(doc, "n_fit_base")["params"].contains("dirMode"));
+}
+
+TEST_CASE("配了 long_plane 就长出「窗 → 裁 → 拟」三个节点并接到 n_fit_base") {
+  const nlohmann::json doc = importText(
+      "StandardGap.yml:template",
+      withFlushKeys("  base_direction: {datum: long_plane, side: left, length_mm: 13,"
+                    " height_mm: 2.5, mode: fixed, nominal_deg: 3.0}\n"),
+      nullptr);
+  REQUIRE(hasOp(doc, "gap.datum_window"));
+  const auto& win = nodeById(doc, "n_datum_box")["params"];
+  CHECK(win["side"] == "left");
+  CHECK(win["lengthMm"] == 13.0);
+  CHECK(win["heightMm"] == 2.5);
+  const auto& base = nodeById(doc, "n_fit_base")["params"];
+  CHECK(base["dirMode"] == "fixed");
+  CHECK(base["dirNominalDeg"] == 3.0);
+  REQUIRE(hasEdge(doc, "n_fit_base", "refLine"));
+  for (const auto& e : doc["edges"]) {
+    if (e["to"]["node"] == "n_fit_base" && e["to"]["port"] == "refLine") {
+      CHECK(e["from"]["node"] == "n_fit_datum");
+      CHECK(e["from"]["port"] == "line");
+    }
+  }
+  // x 锚在缝的框上、y 锚在基准面框上：基准面框偶尔会整个跑偏，拿它定 x 窗口会飞出去
+  bool sawAnchor = false;
+  bool sawHeight = false;
+  for (const auto& e : doc["edges"]) {
+    if (e["to"]["node"] != "n_datum_box") continue;
+    if (e["to"]["port"] == "anchor") {
+      sawAnchor = true;
+      CHECK(e["from"]["port"] == "gapLeft");
+    }
+    if (e["to"]["port"] == "heightAnchor") {
+      sawHeight = true;
+      CHECK(e["from"]["port"] == "flushBase");
+    }
+  }
+  CHECK(sawAnchor);
+  CHECK(sawHeight);
+  CHECK(nodeById(doc, "n_fit_datum")["params"]["minInliers"] == 60);
+}
+
+TEST_CASE("datum 与 mode 写错了导入就报错") {
+  for (const char* line : {"  base_direction: {datum: whatever}\n",
+                           "  base_direction: {datum: long_plane, mode: whatever}\n"}) {
+    Status s;
+    importText("StandardGap.yml:template", withFlushKeys(line), &s);
+    CHECK_FALSE(s.ok);
+  }
+}

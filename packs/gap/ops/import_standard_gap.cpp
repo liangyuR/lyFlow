@@ -600,15 +600,73 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   const double lineDist = numberOr(common, "line_fit_distance", 0.1);
   const auto segmentPoints = intOr(flush, "segment_points", 0);
   const char* endpoints = useModel ? "inlier_ends" : "roi_intersection";
+
+  // 方向基准（可选）：基准面很窄时它自己拟出来的方向不可信，改锚到旁边那张长面上。
+  // datum: off（默认）时下面一个节点都不生成，图与以前逐节点相同。
+  const YAML::Node baseDirCfg = child(flush, "base_direction");
+  const std::string datumKind = textOr(baseDirCfg, "datum", "off");
+  const bool wantDatum = datumKind != "off";
+  if (wantDatum && datumKind != "long_plane") {
+    return badInput("flush.base_direction.datum 只能是 off 或 long_plane，这份写的是 '" +
+                    datumKind + "'");
+  }
+  const std::string datumMode = textOr(baseDirCfg, "mode", "fixed");
+  if (wantDatum && datumMode != "fixed" && datumMode != "band") {
+    return badInput("flush.base_direction.mode 只能是 fixed 或 band，这份写的是 '" + datumMode +
+                    "'");
+  }
+  // 长窗与基准面拟合各自成节点：拟合复用 gap.fit_line，不另写一份 RANSAC。
+  // x 锚在缝的框上（模型对缝的定位最稳），y 锚在基准面框上（长面就在它上下几毫米内）。
+  // 早先把两者都锚在基准面上，结果有几帧基准面框整个跑偏十来毫米，窗口跟着飞到没点的
+  // 地方，拟出一条没意义的线还被当成基准 —— 所以既分了锚，也配了 min_inliers。
+  const char* datumAnchorPort = baseIsLeft ? kRoiPorts[2] : kRoiPorts[3];  // gapLeft / gapRight
+  const auto buildDatum = [&](const std::string& prefix, const std::string& rois,
+                              const std::string& cloud, const char* cloudPort, int row) {
+    nlohmann::json winParams;
+    winParams["side"] = textOr(baseDirCfg, "side", baseIsLeft ? "left" : "right");
+    winParams["startMm"] = numberOr(baseDirCfg, "start_mm", 0.6);
+    winParams["lengthMm"] = numberOr(baseDirCfg, "length_mm", 13.4);
+    winParams["heightMm"] = numberOr(baseDirCfg, "height_mm", 2.5);
+    const std::string win =
+        g.node(prefix + "n_datum_box", "gap.datum_window", winParams, 8, row, "方向基准窗");
+    g.edge(rois, datumAnchorPort, win, "anchor");
+    g.edge(rois, kRoiPorts[0], win, "heightAnchor");
+    const std::string crop = g.node(prefix + "n_crop_datum", "filter.crop_box2d", cropOpen, 9, row,
+                                    "裁方向基准窗");
+    g.edge(cloud, cloudPort, crop, "cloud");
+    g.edge(win, "box", crop, "box");
+    nlohmann::json fitParams;
+    fitParams["side"] = baseIsLeft ? "left" : "right";
+    fitParams["distThresh"] = numberOr(baseDirCfg, "fit_distance", 0.35);
+    fitParams["segmentPoints"] = 100000;   // 长面整条都要，不截
+    fitParams["endpoints"] = "inlier_ends";
+    fitParams["minInliers"] = intOr(baseDirCfg, "min_inliers", 60);
+    const std::string fit =
+        g.node(prefix + "n_fit_datum", "gap.fit_line", fitParams, 10, row, "拟合方向基准线");
+    g.edge(crop, "cloud", fit, "cloud");
+    g.edge(win, "box", fit, "box");
+    return fit;
+  };
+
   nlohmann::json fitBaseParams;
   fitBaseParams["side"] = baseIsLeft ? "left" : "right";
   fitBaseParams["distThresh"] = lineDist;
   fitBaseParams["segmentPoints"] = segmentPoints;
   fitBaseParams["endpoints"] = endpoints;
+  if (wantDatum) {
+    fitBaseParams["dirMode"] = datumMode;
+    fitBaseParams["dirNominalDeg"] = numberOr(baseDirCfg, "nominal_deg", 0.0);
+    fitBaseParams["dirTolDeg"] = numberOr(baseDirCfg, "tolerance_deg", 12.0);
+  }
   const std::string fitBase =
       g.node("n_fit_base", "gap.fit_line", fitBaseParams, 10, 0, "拟合基准线");
   g.edge(crops[0], "cloud", fitBase, "cloud");
   g.edge(flushBox[0], flushBoxPort[0], fitBase, "box");
+  if (wantDatum) {
+    const std::string datum = buildDatum(
+        "", splitFlush ? modelFlushRois : roiSource[0], flushCloud, flushCloudPort, 11);
+    g.edge(datum, "line", fitBase, "refLine");
+  }
 
   std::string refNode;
   const char* refPort = "point";
@@ -679,6 +737,11 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
         g.node("b_n_fit_base", "gap.fit_line", bBaseParams, 10, 9, "拟合基准线（备用）");
     g.edge(bCropBase, "cloud", bFitBase, "cloud");
     g.edge(backupFlushRois, kRoiPorts[0], bFitBase, "box");
+    if (wantDatum) {
+      const std::string bDatum =
+          buildDatum("b_", backupFlushRois, backupFlushCloud, backupFlushCloudPort, 12);
+      g.edge(bDatum, "line", bFitBase, "refLine");
+    }
 
     std::string bRefNode;
     const char* bRefPort = "point";

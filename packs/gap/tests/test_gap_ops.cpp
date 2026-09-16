@@ -1127,3 +1127,105 @@ TEST_CASE("gap.fit_gap_circles 配了圆心高度带却没接 refLine 就报错"
   CHECK_FALSE(s.ok);
   CHECK(s.code == "bad_param");
 }
+
+namespace {
+
+/// n 个点的直线，角度 deg，过 (0, y0)，米。
+PointCloud slopedLine(std::size_t n, double deg, double y0 = 0.0, double lenM = 0.004) {
+  PointCloud c;
+  const double a = deg * 3.14159265358979323846 / 180.0;
+  for (std::size_t i = 0; i < n; ++i) {
+    const double t = lenM * static_cast<double>(i) / static_cast<double>(n - 1);
+    c.push(static_cast<float>(t * std::cos(a)), static_cast<float>(y0 + t * std::sin(a)), 0.0f);
+  }
+  return c;
+}
+
+Line2D lineAt(double deg) {
+  Line2D l;
+  const double a = deg * 3.14159265358979323846 / 180.0;
+  l.dir[0] = static_cast<float>(std::cos(a));
+  l.dir[1] = static_cast<float>(std::sin(a));
+  return l;
+}
+
+double dirDeg(const Line2D& l) {
+  return std::atan2(l.dir[1], l.dir[0]) * 180.0 / 3.14159265358979323846;
+}
+
+}  // namespace
+
+TEST_CASE("gap.datum_window 把窗推到锚框外面，不含锚框本身") {
+  const auto run = [](const char* side) {
+    Call call;
+    call.inputs["anchor"] = Data::box2d(box(-0.014f, 0.1438f, -0.0127f, 0.1443f));
+    REQUIRE(call.run("gap.datum_window", {{"side", Value::text(side)},
+                                          {"startMm", Value::number(0.5)},
+                                          {"lengthMm", Value::number(13.0)},
+                                          {"heightMm", Value::number(2.5)}})
+                .ok);
+    return *call.out("box").asBox2D();
+  };
+  const Box2D left = run("left");
+  // 右边界贴在锚框左边界往外 0.5 mm，再往左 13 mm
+  CHECK(left.max[0] == doctest::Approx(-0.0145).epsilon(1e-3));
+  CHECK(left.min[0] == doctest::Approx(-0.0275).epsilon(1e-3));
+  CHECK(left.max[0] < -0.014f);            // 不含锚框
+  CHECK(left.min[1] == doctest::Approx(0.1413).epsilon(1e-4));
+  CHECK(left.max[1] == doctest::Approx(0.1468).epsilon(1e-4));
+
+  const Box2D right = run("right");
+  CHECK(right.min[0] == doctest::Approx(-0.0122).epsilon(1e-3));
+  CHECK(right.max[0] == doctest::Approx(0.0008).epsilon(1e-2));
+  CHECK(right.min[0] > -0.0127f);
+}
+
+TEST_CASE("gap.fit_line 的 dirMode=fixed 把方向钉在 refLine + 标称上") {
+  Call call;
+  call.inputs["cloud"] = Data::cloud(slopedLine(40, 25.0));   // 点本身是 25°
+  call.inputs["box"] = Data::box2d(box(-0.001f, -0.001f, 0.005f, 0.004f));
+  call.inputs["refLine"] = Data::line2d(lineAt(0.0));
+  REQUIRE(call.run("gap.fit_line", {{"dirMode", Value::text("fixed")},
+                                    {"dirNominalDeg", Value::number(3.0)},
+                                    {"distThresh", Value::number(5.0)}})
+              .ok);
+  CHECK(dirDeg(*call.out("line").asLine2D()) == doctest::Approx(3.0).epsilon(0.02));
+}
+
+TEST_CASE("gap.fit_line 的 dirMode=band 只在方向出界时才钉，合规时逐位不变") {
+  const auto fit = [](double cloudDeg, const char* mode) {
+    auto call = std::make_unique<Call>();
+    call->inputs["cloud"] = Data::cloud(slopedLine(40, cloudDeg));
+    call->inputs["box"] = Data::box2d(box(-0.001f, -0.002f, 0.005f, 0.004f));
+    call->inputs["refLine"] = Data::line2d(lineAt(0.0));
+    REQUIRE(call->run("gap.fit_line", {{"dirMode", Value::text(mode)},
+                                       {"dirNominalDeg", Value::number(0.0)},
+                                       {"dirTolDeg", Value::number(10.0)},
+                                       {"distThresh", Value::number(5.0)}})
+                .ok);
+    return call;
+  };
+  // 带内：和 free 逐位一致
+  auto banded = fit(2.0, "band");
+  auto freeFit = fit(2.0, "free");
+  const Line2D& a = *banded->out("line").asLine2D();
+  const Line2D& b = *freeFit->out("line").asLine2D();
+  CHECK(a.dir[0] == b.dir[0]);
+  CHECK(a.dir[1] == b.dir[1]);
+  CHECK(a.point[0] == b.point[0]);
+  CHECK(a.point[1] == b.point[1]);
+
+  // 出界：钉到标称
+  auto pinned = fit(30.0, "band");
+  CHECK(dirDeg(*pinned->out("line").asLine2D()) == doctest::Approx(0.0).epsilon(0.02));
+  CHECK(dirDeg(*fit(30.0, "free")->out("line").asLine2D()) == doctest::Approx(30.0).epsilon(0.05));
+}
+
+TEST_CASE("gap.fit_line 的 dirMode 不是 free 却没接 refLine 就报错") {
+  Call call;
+  call.inputs["cloud"] = Data::cloud(slopedLine(20, 1.0));
+  call.inputs["box"] = Data::box2d(box(-0.001f, -0.001f, 0.005f, 0.002f));
+  const Status s = call.run("gap.fit_line", {{"dirMode", Value::text("fixed")}});
+  CHECK_FALSE(s.ok);
+  CHECK(s.code == "bad_param");
+}

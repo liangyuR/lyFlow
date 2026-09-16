@@ -144,6 +144,78 @@ lyflow::Line2D lineFromCoefficients(const Eigen::VectorXf& c) {
   return line;
 }
 
+/// 直线方向 a 相对 b 的夹角，折进 (-90, 90]：直线没有正反，差 180° 是同一条线。
+double lineAngleDeltaDeg(double ax, double ay, double bx, double by) {
+  const double d = (std::atan2(ay, ax) - std::atan2(by, bx)) * 180.0 / M_PI;
+  double r = std::fmod(d, 180.0);
+  if (r > 90.0) r -= 180.0;
+  if (r <= -90.0) r += 180.0;
+  return r;
+}
+
+/// 方向钉死之后，直线只剩法向偏移一个自由度。取全部点投影的中位定位置（中位对
+/// 「一半点落在台阶另一侧」这种情形免疫），再用内点的中位收一次。
+/// coefficients 仍按 PCL 的 6 维直线模型写回，下游的端点/质量逻辑零改动。
+bool fitFixedDirection(const GapCloud& cloud, double dirX, double dirY, float dist,
+                       Eigen::VectorXf* coefficients, pcl::Indices* indices) {
+  const std::size_t n = cloud.size();
+  if (n < 2) return false;
+  const double len = std::hypot(dirX, dirY);
+  if (!(len > 0)) return false;
+  const double ux = dirX / len;
+  const double uy = dirY / len;
+  const double nx = -uy;  // 法向
+  const double ny = ux;
+  std::vector<double> proj;
+  proj.reserve(n);
+  for (const auto& q : cloud) proj.push_back(q.x * nx + q.y * ny);
+  const auto median = [](std::vector<double> v) {
+    std::nth_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(v.size() / 2), v.end());
+    return v[v.size() / 2];
+  };
+  double t = median(proj);
+  std::vector<double> kept;
+  pcl::Indices inliers;
+  for (int pass = 0; pass < 2; ++pass) {
+    kept.clear();
+    inliers.clear();
+    for (std::size_t i = 0; i < n; ++i) {
+      if (std::fabs(proj[i] - t) <= dist) {
+        inliers.push_back(static_cast<int>(i));
+        kept.push_back(proj[i]);
+      }
+    }
+    // 方向被钉住之后，点沿法向的散布 ≈ ROI 宽度 × 两条线的夹角；窄 ROI 上这个量能
+    // 直接超过 distThresh，按内点收就一个都收不到。那时退而取最近的一半点 ——
+    // 位置本来就只由中位定，收不到内点不该让整帧算不出来。
+    if (kept.size() < 2) {
+      std::vector<std::size_t> order(n);
+      for (std::size_t i = 0; i < n; ++i) order[i] = i;
+      const std::size_t half = std::max<std::size_t>(2, n / 2);
+      std::partial_sort(order.begin(), order.begin() + static_cast<std::ptrdiff_t>(half),
+                        order.end(), [&](std::size_t a, std::size_t b) {
+                          return std::fabs(proj[a] - t) < std::fabs(proj[b] - t);
+                        });
+      order.resize(half);
+      std::sort(order.begin(), order.end());
+      for (std::size_t i : order) {
+        inliers.push_back(static_cast<int>(i));
+        kept.push_back(proj[i]);
+      }
+    }
+    t = median(kept);
+  }
+  coefficients->resize(6);
+  (*coefficients)[0] = static_cast<float>(t * nx);
+  (*coefficients)[1] = static_cast<float>(t * ny);
+  (*coefficients)[2] = 0.0f;
+  (*coefficients)[3] = static_cast<float>(ux);
+  (*coefficients)[4] = static_cast<float>(uy);
+  (*coefficients)[5] = 0.0f;
+  *indices = std::move(inliers);
+  return true;
+}
+
 Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   const lyflow::PointCloud& in = *inputs.get("cloud").asCloud();
   const lyflow::Box2D& box = *inputs.get("box").asBox2D();
@@ -157,20 +229,38 @@ Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   const bool isLeft = params.choice("side") == "left";
   const std::string lineType = params.choice("lineType");
 
+  // 方向约束：把方向锚到另一条线上（通常是 gap.datum_window 在旁边长面上拟的基准线）。
+  // free 时下面每一行都和以前一样，逐位不变。
+  const std::string dirMode = params.choice("dirMode");
+  const lyflow::Line2D* refLine = inputs.has("refLine") ? inputs.get("refLine").asLine2D() : nullptr;
+  if (dirMode != "free" && refLine == nullptr) {
+    return Status::Error(Phase::Execute, "bad_param", "dirMode 不是 free 时必须接 refLine",
+                         "dirMode", "refLine");
+  }
+  const double nominal = params.number("dirNominalDeg");
+  const double tol = params.number("dirTolDeg");
+  double pinX = 1.0;
+  double pinY = 0.0;
+  if (refLine != nullptr) {
+    const double a = std::atan2(refLine->dir[1], refLine->dir[0]) + nominal * M_PI / 180.0;
+    pinX = std::cos(a);
+    pinY = std::sin(a);
+  }
+
   Eigen::VectorXf coefficients;
   pcl::Indices indices;
-  const bool ok = lineType == "fit"
-                      ? gap_std::lineFit2D(cloud, &coefficients, &indices, dist)
-                      : gap_std::lineFit2D(cloud, &coefficients, &indices,
-                                           lineType == "vertical" ? "vertical line"
-                                                                  : "horizontal line",
-                                           dist);
-  if (!ok) {
+  bool fitted = lineType == "fit"
+                    ? gap_std::lineFit2D(cloud, &coefficients, &indices, dist)
+                    : gap_std::lineFit2D(cloud, &coefficients, &indices,
+                                         lineType == "vertical" ? "vertical line"
+                                                                : "horizontal line",
+                                         dist);
+  if (!fitted && dirMode == "free") {
     return Status::Error(Phase::Execute, "line_fit_failed", "直线拟合失败", {}, "cloud");
   }
 
   // 截取靠缝隙那一端再拟合一次。方向判据见 §3.5：ascend == isLeft 留尾巴，否则留头。
-  if (segmentPoints < indices.size()) {
+  if (fitted && segmentPoints < indices.size()) {
     const bool ascend = cloud[0].x <= cloud.back().x;
     if (ascend == isLeft) {
       indices.erase(indices.begin(), indices.end() - static_cast<std::ptrdiff_t>(segmentPoints));
@@ -180,15 +270,46 @@ Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     const GapCloud segment(cloud, indices);
     pcl::Indices second;
     if (!gap_std::lineFit2D(segment, &coefficients, &second, dist / 3)) {
-      return Status::Error(Phase::Execute, "line_fit_failed", "截取之后的第二次直线拟合失败", {},
+      if (dirMode == "free") {
+        return Status::Error(Phase::Execute, "line_fit_failed", "截取之后的第二次直线拟合失败",
+                             {}, "cloud");
+      }
+      fitted = false;
+    } else {
+      std::size_t j = 0;
+      for (auto i : second) indices[j++] = indices[static_cast<std::size_t>(i)];
+      indices.resize(second.size());
+    }
+  }
+  if (fitted && indices.empty()) {
+    if (dirMode == "free") {
+      return Status::Error(Phase::Execute, "line_fit_failed", "拟合之后一个内点都没有", {},
                            "cloud");
     }
-    std::size_t j = 0;
-    for (auto i : second) indices[j++] = indices[static_cast<std::size_t>(i)];
-    indices.resize(second.size());
+    fitted = false;
   }
-  if (indices.empty()) {
-    return Status::Error(Phase::Execute, "line_fit_failed", "拟合之后一个内点都没有", {}, "cloud");
+
+  // fixed 一律钉死；band 只在自由拟合失败、或方向出了带宽时才钉 —— 合规帧照旧。
+  bool pinned = dirMode == "fixed";
+  if (dirMode == "band" && !pinned) {
+    pinned = !fitted || std::fabs(lineAngleDeltaDeg(coefficients[3], coefficients[4], pinX,
+                                                    pinY)) > tol;
+  }
+  if (pinned && !fitFixedDirection(cloud, pinX, pinY, dist, &coefficients, &indices)) {
+    return Status::Error(Phase::Execute, "line_fit_failed",
+                         "方向钉死之后仍然拟不出直线（内点不足）", {}, "cloud");
+  }
+  if (!pinned && !fitted) {
+    return Status::Error(Phase::Execute, "line_fit_failed", "直线拟合失败", {}, "cloud");
+  }
+  // 内点太少时宁可报失败：ROI 跑偏、窗口落到没点的地方时，拟合照样"成功"，
+  // 只是拟出一条没意义的线，下游拿它当基准就是把错误往前传。
+  const auto minInliers = static_cast<std::size_t>(params.integer("minInliers"));
+  if (indices.size() < minInliers) {
+    return Status::Error(Phase::Execute, "insufficient_points",
+                         "内点只有 " + std::to_string(indices.size()) + " 个，少于 minInliers " +
+                             std::to_string(minInliers),
+                         "minInliers", "cloud");
   }
 
   lyflow::Line2D line = lineFromCoefficients(coefficients);
@@ -651,10 +772,16 @@ void registerFitLine(Registry& r) {
       "distThresh 过紧时第二次拟合（阈值 1/3）的内点集会在弯曲的棱边上跳，逐帧结果不稳；"
       "收紧之前先看 quality 的 inlierRatio 与 rmsResidualMm。",
       "假定 ROI 里那条边确实近似一条直线；圆角或台阶进了 ROI，拟合会咬住它们。",
+      "dirMode 不是 free 时，refLine 与这条线之间的相对倾角被当成常数（dirNominalDeg）。"
+      "两张面之间真有随件变化的相对转动时，钉死方向就是把那部分变化抹掉 —— 先量一批正常帧"
+      "的相对倾角散布，再决定钉死（fixed）还是只兜底（band）。",
   };
   op.inputs = {
       Port{"cloud", "PointCloud", "Cloud", "已经按业务 ROI 裁过的点云。", true},
       Port{"box", "Box2D", "Box", "同一个业务 ROI，用来求端点。", true},
+      Port{"refLine", "Line2D", "Ref Line",
+           "方向约束的参考线，通常是 gap.datum_window 推出来的长面上拟的那条。"
+           "只有 dirMode 不是 free 时才需要。", false},
   };
   op.outputs = {
       Port{"line", "Line2D", "Line", "拟合出的直线（带端点）。", true},
@@ -710,7 +837,57 @@ void registerFitLine(Registry& r) {
   endpoints.options = {EnumOption{"roi_intersection", "ROI 交点", "直线与 ROI 框的两个交点。"},
                        EnumOption{"inlier_ends", "首尾内点", "第一个与最后一个内点的真实云点。"}};
 
-  op.params = {side, lineType, distThresh, segmentPoints, endpoints};
+  Param dirMode;
+  dirMode.name = "dirMode";
+  dirMode.type = ParamType::Enum;
+  dirMode.label = "Dir Mode";
+  dirMode.doc =
+      "方向怎么定。ROI 很窄时（天幕 L4 的段差基准面只有 2 mm）拟出来的方向基本是噪声，"
+      "而偶尔会整条歪掉几十度 —— 那时残差反而很小，任何质量指标都看不出来。"
+      "把方向锚到旁边那张长面上就没有这个问题。";
+  dirMode.def = Value::text("free");
+  dirMode.advanced = true;
+  dirMode.options = {
+      EnumOption{"free", "Free", "照旧，方向由这片点自己定。"},
+      EnumOption{"band", "Band", "方向出了带宽（或自由拟合失败）才钉死，合规帧逐位不变。"},
+      EnumOption{"fixed", "Fixed", "方向一律钉死成 refLine + 标称偏置，只拟法向偏移。"}};
+
+  Param dirNominal;
+  dirNominal.name = "dirNominalDeg";
+  dirNominal.type = ParamType::Float;
+  dirNominal.label = "Dir Nominal";
+  dirNominal.doc =
+      "这条线相对 refLine 的标称倾角。两张面之间的相对倾角是零件的固有量，量一批正常帧"
+      "定下来 —— 填 0 等于假设两张面平行，多半不对。";
+  dirNominal.def = Value::number(0.0);
+  dirNominal.unit = "°";
+  dirNominal.advanced = true;
+  dirNominal.visibleWhen.param = "dirMode";
+  dirNominal.visibleWhen.in = {Value::text("band"), Value::text("fixed")};
+
+  Param dirTol;
+  dirTol.name = "dirTolDeg";
+  dirTol.type = ParamType::Float;
+  dirTol.label = "Dir Tol";
+  dirTol.doc = "band 用：偏离标称超过它就钉死。fixed 不看这个值。";
+  dirTol.def = Value::number(12.0);
+  dirTol.unit = "°";
+  dirTol.advanced = true;
+  dirTol.visibleWhen.param = "dirMode";
+  dirTol.visibleWhen.eq = Value::text("band");
+
+  Param minInliers;
+  minInliers.name = "minInliers";
+  minInliers.type = ParamType::Int;
+  minInliers.label = "Min Inliers";
+  minInliers.doc =
+      "内点少于它就报 insufficient_points。0 = 不检查（默认，老行为）。"
+      "ROI 偶尔整个跑偏时拟合不会失败，只会给一条没意义的线 —— 这是唯一拦得住的地方。";
+  minInliers.def = Value::integer(0);
+  minInliers.advanced = true;
+
+  op.params = {side,    lineType,   distThresh, segmentPoints,
+               endpoints, dirMode, dirNominal, dirTol, minInliers};
   op.capabilities = {false, false, true};
   op.compute = &fitLine;
   r.addOperator(std::move(op));

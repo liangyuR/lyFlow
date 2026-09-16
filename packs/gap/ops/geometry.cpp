@@ -181,6 +181,48 @@ Status nearestToLine(const Inputs& inputs, const ParamView&, Outputs& outputs, E
   return Status::Ok();
 }
 
+
+/// 方向基准窗：把一个锚框沿 side 的方向推出去一条长窗，高度以锚框的 y 范围为中心撑开。
+/// 之所以不是「把锚框加宽」：基准面常常是一道很窄的台肩，它和外面那张长面之间有台阶，
+/// 加宽会让拟合横跨台阶；这里要的是**另一张面**，所以窗口整个挪出去。
+Status datumWindow(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
+  const lyflow::Box2D& anchor = *inputs.get("anchor").asBox2D();
+  // 高度单独找一个锚：x 要贴着缝（模型对缝的定位最稳），y 要贴着基准面。
+  const lyflow::Box2D& heightAnchor =
+      inputs.has("heightAnchor") ? *inputs.get("heightAnchor").asBox2D() : anchor;
+  const double start = mmToM(params.number("startMm"));
+  const double length = mmToM(params.number("lengthMm"));
+  const double height = mmToM(params.number("heightMm"));
+  if (!(length > 0)) {
+    return Status::Error(Phase::Execute, "bad_param", "窗口长度必须大于 0", "lengthMm");
+  }
+  const bool toLeft = params.choice("side") == "left";
+  lyflow::Box2D box;
+  if (toLeft) {
+    box.max[0] = static_cast<float>(anchor.min[0] - start);
+    box.min[0] = static_cast<float>(box.max[0] - length);
+  } else {
+    box.min[0] = static_cast<float>(anchor.max[0] + start);
+    box.max[0] = static_cast<float>(box.min[0] + length);
+  }
+  box.min[1] = static_cast<float>(heightAnchor.min[1] - height);
+  box.max[1] = static_cast<float>(heightAnchor.max[1] + height);
+  outputs.set("box", Data::box2d(box));
+  return Status::Ok();
+}
+
+Param numMm(const char* name, const char* label, double def, const char* doc) {
+  Param p;
+  p.name = name;
+  p.type = ParamType::Float;
+  p.label = label;
+  p.doc = doc;
+  p.def = Value::number(def);
+  p.unit = "mm";
+  p.min = 0.0;
+  return p;
+}
+
 Param vec4Mm(const char* name, const char* label, const char* doc) {
   Param p;
   p.name = name;
@@ -194,6 +236,55 @@ Param vec4Mm(const char* name, const char* label, const char* doc) {
 }
 
 }  // namespace
+
+void registerDatumWindow(Registry& r) {
+  OperatorDesc op;
+  op.id = "gap.datum_window";
+  op.version = "1.0.0";
+  op.label = "方向基准窗";
+  op.category = "间隙/预处理";
+  op.keywords = {"roi", "datum", "方向", "基准", "长面"};
+  op.doc =
+      "由一个锚框推出一条长窗，用来在**旁边那张长面**上拟一条方向基准线。\n"
+      "基准面是一道很窄的台肩时（天幕 L4 只有 2 mm），它自己拟出来的方向基本是噪声；"
+      "而台肩外面那张面往往有十几毫米长、几百个点，方向稳得多。两张面之间有固定的相对"
+      "倾角，量一次写进 dirNominalDeg 就行 —— 见 gap.fit_line 的方向约束。";
+  op.preconditions = {
+      "窗口整个挪到锚框外面，不含锚框本身 —— 台肩与长面之间通常有台阶，混在一起拟就是"
+      "横跨台阶。startMm 是留给台阶过渡带的让开量。",
+      "假定窗口范围内只有那一张面。长度给过头会吃进别的特征，先量一批帧的内点率再定。",
+      "窗口恒为轴对齐，位置完全由锚框决定 —— 锚框跑偏，窗口就跟着跑到没有点的地方，"
+      "而下游的拟合不一定会失败，可能只是拟出一条没意义的线。给拟合配上最少内点数。",
+      "框恒为轴对齐；零件姿态转得厉害时 heightMm 要跟着放宽，否则面会跑出窗口。",
+  };
+  op.inputs = {
+      Port{"anchor", "Box2D", "Anchor",
+           "定 x 的锚框。取模型定位最稳的那个 —— 通常是缝的 ROI，而不是基准面 ROI："
+           "很窄的基准面框偶尔会整个跑偏，拿它当 x 锚，窗口会跟着飞出去。", true},
+      Port{"heightAnchor", "Box2D", "Height Anchor",
+           "定 y 的锚框，不接就用 anchor。通常接基准面 ROI —— 长面就在它上下几毫米内。",
+           false},
+  };
+  op.outputs = {Port{"box", "Box2D", "Box", "推出去的长窗。", true}};
+
+  Param side;
+  side.name = "side";
+  side.type = ParamType::Enum;
+  side.label = "Side";
+  side.doc = "长面在锚框的哪一侧。取背离缝隙的那一侧。";
+  side.def = Value::text("left");
+  side.options = {EnumOption{"left", "Left", "锚框左边。"}, EnumOption{"right", "Right", "锚框右边。"}};
+
+  op.params = {
+      side,
+      numMm("startMm", "Start", 0.0, "窗口离锚框那条边的让开量，用来躲开台阶的过渡带。"),
+      numMm("lengthMm", "Length", 13.0, "窗口沿 x 的长度。"),
+      numMm("heightMm", "Height", 2.5, "以锚框的 y 范围为中心，上下各撑开多少。"),
+  };
+  op.capabilities = {false, true, true};
+  op.compute = &datumWindow;
+  r.addOperator(std::move(op));
+}
 
 void registerOverallRoi(Registry& r) {
   OperatorDesc op;

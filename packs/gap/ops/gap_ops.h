@@ -88,6 +88,7 @@ nlohmann::json resultBundle();
 // ------------------------------------------------------------------ 注册函数
 void registerLoadProfilePair(Registry& r);
 void registerToMeasurementFrame(Registry& r);
+void registerDatumWindow(Registry& r);
 void registerOverallRoi(Registry& r);
 void registerLoadTemplate(Registry& r);
 void registerAlignTemplate(Registry& r);
