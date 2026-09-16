@@ -146,8 +146,15 @@ fn main() {
         _ => "1".to_string(),
     };
     println!("cargo:rerun-if-env-changed=LYFLOW_STD_PACKS");
+
+    // 仓库内默认关闭的包按名字打开（ADR-0015），分号分隔的包名。
+    let repo_packs = std::env::var("LYFLOW_PACKS").unwrap_or_default();
+    println!("cargo:rerun-if-env-changed=LYFLOW_PACKS");
+
     let packs_root = core.parent().expect("core 应当有父目录").join("packs");
-    if std_packs != "0" && packs_root.is_dir() {
+    // LYFLOW_STD_PACKS=0 时也可能按 LYFLOW_PACKS 点名编仓库内的包，那一趟 packs/ 照样要监听，
+    // 否则改 packs/dts 里的算子不会触发 core 重编。
+    if (std_packs != "0" || !repo_packs.trim().is_empty()) && packs_root.is_dir() {
         let (mut pf, mut pd) = (Vec::new(), Vec::new());
         collect(&packs_root, &mut pf, &mut pd);
         for f in pf.iter().chain(pd.iter()) {
@@ -155,9 +162,6 @@ fn main() {
         }
     }
 
-    // 仓库内默认关闭的包按名字打开（ADR-0015），分号分隔的包名。
-    let repo_packs = std::env::var("LYFLOW_PACKS").unwrap_or_default();
-    println!("cargo:rerun-if-env-changed=LYFLOW_PACKS");
     // onnxruntime 的位置（T9）。缺省 third_party/onnxruntime/，由 std-ml 包自己兜底。
     let ort_root = std::env::var("LYFLOW_ONNXRUNTIME_ROOT").unwrap_or_default();
     println!("cargo:rerun-if-env-changed=LYFLOW_ONNXRUNTIME_ROOT");
