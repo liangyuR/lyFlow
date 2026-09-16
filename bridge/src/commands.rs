@@ -1,14 +1,18 @@
 //! Tauri commands —— 前端能调到的全部东西。错误一律是 String：
 //! 前端拿到错误只显示给人看，不做程序化分支。
+//!
+//! 每条命令都对 `R: tauri::Runtime` 泛型：外部宿主（docs/embedding.md「Rust/Tauri 宿主」）
+//! 与测试里的 `MockRuntime` 都不是 `Wry`，写死 `AppHandle` 就只有 LyFlow 自己能用。
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
-use tauri::Manager;
+use tauri::{Manager, Runtime};
 
 use crate::core_ffi;
 use crate::execution::{encode_cloud, encode_indices, encode_tensor, PreviewOptions, RunManager};
 use crate::graph::GraphDoc;
+use crate::host::{self, HostConfig};
 
 /// 解析过的 manifest，连同它属于第几代 core。热重载换代后这份要作废（ADR-0009）。
 static MANIFEST: RwLock<Option<(u32, serde_json::Value)>> = RwLock::new(None);
@@ -70,24 +74,41 @@ pub fn get_core_info() -> Result<CoreInfo, String> {
 }
 
 #[tauri::command]
-pub fn save_graph(path: String, doc: GraphDoc) -> Result<(), String> {
+pub fn save_graph<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    path: String,
+    doc: GraphDoc,
+) -> Result<(), String> {
+    save_graph_at(&host::resolve_path(&host::config(&app), &path)?, &doc)
+}
+
+/// `save_graph` 去掉 Tauri 那一层。
+fn save_graph_at(path: &Path, doc: &GraphDoc) -> Result<(), String> {
     doc.validate_structure().map_err(|e| e.to_string())?;
 
-    let path = PathBuf::from(path);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
     }
     // pretty 两空格 + 结尾换行：图文件是要进 git 的，diff 必须可读。
-    let mut text = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
+    let mut text = serde_json::to_string_pretty(doc).map_err(|e| e.to_string())?;
     text.push('\n');
-    std::fs::write(&path, text).map_err(|e| format!("写入 {} 失败: {e}", path.display()))
+    std::fs::write(path, text).map_err(|e| format!("写入 {} 失败: {e}", path.display()))
 }
 
 #[tauri::command]
-pub fn load_graph(path: String) -> Result<LoadedGraph, String> {
-    let text = std::fs::read_to_string(&path).map_err(|e| format!("读取 {path} 失败: {e}"))?;
+pub fn load_graph<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    path: String,
+) -> Result<LoadedGraph, String> {
+    load_graph_at(&host::resolve_path(&host::config(&app), &path)?)
+}
+
+/// `load_graph` 去掉 Tauri 那一层。`read_backup` 与测试都走它。
+fn load_graph_at(path: &Path) -> Result<LoadedGraph, String> {
+    let shown = path.display();
+    let text = std::fs::read_to_string(path).map_err(|e| format!("读取 {shown} 失败: {e}"))?;
     let doc: GraphDoc =
-        serde_json::from_str(&text).map_err(|e| format!("{path} 不是合法的 GraphDoc: {e}"))?;
+        serde_json::from_str(&text).map_err(|e| format!("{shown} 不是合法的 GraphDoc: {e}"))?;
     doc.validate_structure().map_err(|e| e.to_string())?;
     let migrations = migrations_of(&doc, Some(path))?;
     Ok(LoadedGraph { doc, migrations })
@@ -95,7 +116,7 @@ pub fn load_graph(path: String) -> Result<LoadedGraph, String> {
 
 /// 走一遍 C++ 的 validate，把 kind=migration 的诊断挑出来。
 /// 别名重定向与主版本迁移都在里面，前端只管把它们写回 doc。
-fn migrations_of(doc: &GraphDoc, path: Option<String>) -> Result<Vec<serde_json::Value>, String> {
+fn migrations_of(doc: &GraphDoc, path: Option<&Path>) -> Result<Vec<serde_json::Value>, String> {
     let core = core_ffi::core()?;
     let json = serde_json::to_string(doc).map_err(|e| e.to_string())?;
     let raw = core
@@ -113,26 +134,33 @@ fn migrations_of(doc: &GraphDoc, path: Option<String>) -> Result<Vec<serde_json:
 
 /// 图文件所在目录，相对路径参数靠它解析。图没保存时为空 —— 不替用户猜一个目录，
 /// 猜错的表现是「读到了另一个文件夹里的同名 pcd」，比直接报错难查。
-fn base_dir_of(graph_path: Option<String>) -> String {
+///
+/// 收的是**已经过 `resolve_path`** 的路径：工作区语义只有一处实现，
+/// 两处就会出现「save 拦得住、run 拦不住」。
+fn base_dir_of(graph_path: Option<&Path>) -> String {
     graph_path
-        .and_then(|p| {
-            PathBuf::from(p)
-                .parent()
-                .map(|d| d.to_string_lossy().into_owned())
-        })
+        .and_then(Path::parent)
+        .map(|d| d.to_string_lossy().into_owned())
         .unwrap_or_default()
+}
+
+/// `graphPath` 这类可选路径参数的统一入口。
+fn resolve_opt(cfg: &HostConfig, path: Option<String>) -> Result<Option<PathBuf>, String> {
+    path.map(|p| host::resolve_path(cfg, &p)).transpose()
 }
 
 /// 权威校验（C++ 侧）。返回全部诊断，不是第一条（D5）。
 #[tauri::command]
-pub fn validate_graph(
+pub fn validate_graph<R: Runtime>(
+    app: tauri::AppHandle<R>,
     doc: GraphDoc,
     #[allow(non_snake_case)] graphPath: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    let graph_path = resolve_opt(&host::config(&app), graphPath)?;
     let core = core_ffi::core()?;
     let json = serde_json::to_string(&doc).map_err(|e| e.to_string())?;
     let raw = core
-        .validate(&json, &base_dir_of(graphPath))
+        .validate(&json, &base_dir_of(graph_path.as_deref()))
         .map_err(|e| e.to_string())?;
     serde_json::from_str(&raw).map_err(|e| format!("core 返回的诊断不是合法 JSON: {e}"))
 }
@@ -141,8 +169,8 @@ pub fn validate_graph(
 /// `mode = "preview"` 时源算子的输出先抽稀，结果进独立的缓存命名空间（ADR-0011）。
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub fn run_graph(
-    app: tauri::AppHandle,
+pub fn run_graph<R: Runtime>(
+    app: tauri::AppHandle<R>,
     runs: tauri::State<'_, RunManager>,
     doc: GraphDoc,
     #[allow(non_snake_case)] graphPath: Option<String>,
@@ -150,10 +178,27 @@ pub fn run_graph(
     mode: Option<String>,
     #[allow(non_snake_case)] previewMaxPoints: Option<u32>,
     #[allow(non_snake_case)] previewBudgetMs: Option<u32>,
+    #[allow(non_snake_case)] sceneId: Option<String>,
 ) -> Result<String, String> {
     // 结构校验挡在前面：C++ 也会查一遍，但那要等到事件流里才看得见，
     // 而一个悬空的边根本不该走到执行器。
     doc.validate_structure().map_err(|e| e.to_string())?;
+    let cfg = host::config(&app);
+    let graph_path = resolve_opt(&cfg, graphPath)?;
+
+    // 点云注入（ADR-0017）。宿主没配 SceneProvider 时直接报错 —— 静默地跑一张
+    // 没注入的图，表现是 dts.profile_in 那条「这次运行没有注入轮廓」，离现场太远。
+    let inputs = match sceneId {
+        Some(id) => {
+            let provider = cfg
+                .scenes
+                .as_ref()
+                .ok_or("这个宿主不支持点云注入（没有配置 SceneProvider）")?;
+            provider.inputs(&id, &doc, &manifest_value()?)?
+        }
+        None => Vec::new(),
+    };
+
     let core = core_ffi::core()?;
     let json = serde_json::to_string(&doc).map_err(|e| e.to_string())?;
     let preview = if mode.as_deref() == Some("preview") {
@@ -168,9 +213,10 @@ pub fn run_graph(
         &app,
         core,
         &json,
-        &base_dir_of(graphPath),
+        &base_dir_of(graph_path.as_deref()),
         &targets.unwrap_or_default(),
         preview,
+        &inputs,
     )
 }
 
@@ -182,15 +228,26 @@ pub fn cancel_run(runs: tauri::State<'_, RunManager>, #[allow(non_snake_case)] r
 /// 编译一次但不执行，报告每节点的 cacheKey 与是否已缓存（ADR-0007）。
 /// 前端的 stale 标记只读它的结论 —— 自己推一定会在 IO 算子上错。
 #[tauri::command]
-pub fn plan_graph(
+pub fn plan_graph<R: Runtime>(
+    app: tauri::AppHandle<R>,
     doc: GraphDoc,
     #[allow(non_snake_case)] graphPath: Option<String>,
     targets: Option<Vec<String>>,
 ) -> Result<serde_json::Value, String> {
+    let graph_path = resolve_opt(&host::config(&app), graphPath)?;
+    plan_graph_at(&doc, graph_path.as_deref(), &targets.unwrap_or_default())
+}
+
+/// `plan_graph` 去掉 Tauri 那一层。
+fn plan_graph_at(
+    doc: &GraphDoc,
+    graph_path: Option<&Path>,
+    targets: &[String],
+) -> Result<serde_json::Value, String> {
     let core = core_ffi::core()?;
-    let json = serde_json::to_string(&doc).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(doc).map_err(|e| e.to_string())?;
     let raw = core
-        .plan(&json, &base_dir_of(graphPath), &targets.unwrap_or_default())
+        .plan(&json, &base_dir_of(graph_path), targets)
         .map_err(|e| e.to_string())?;
     serde_json::from_str(&raw).map_err(|e| format!("core 返回的计划不是合法 JSON: {e}"))
 }
@@ -301,12 +358,16 @@ pub fn get_output_indices(
 /// 写一段二进制到磁盘。3D 视图导出 PNG 与「把结果另存」都走它 ——
 /// 装 fs 插件要开一整片 ACL，而前端真正需要的只有「写用户刚选的那个文件」。
 #[tauri::command]
-pub fn write_file_bytes(path: String, contents: Vec<u8>) -> Result<(), String> {
-    let target = PathBuf::from(&path);
+pub fn write_file_bytes<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    path: String,
+    contents: Vec<u8>,
+) -> Result<(), String> {
+    let target = host::resolve_path(&host::config(&app), &path)?;
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
     }
-    std::fs::write(&target, contents).map_err(|e| format!("写入 {path} 失败: {e}"))
+    std::fs::write(&target, contents).map_err(|e| format!("写入 {} 失败: {e}", target.display()))
 }
 
 // ---- 库算子目录（ADR-0010）
@@ -320,7 +381,15 @@ pub struct LibraryStatus {
 }
 
 /// 默认库目录：app data 下的 `library/`。设置里的额外目录排在它后面。
-pub fn library_dirs(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
+/// 宿主在 `HostConfig::library_dirs` 里给了清单时以它为准（连 app data 都不碰 ——
+/// 外部宿主的 app data 是它自己的标识符，往里塞一个 LyFlow 的 library/ 很唐突）。
+pub fn library_dirs<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<Vec<String>, String> {
+    if let Some(dirs) = host::config(app).library_dirs.as_ref() {
+        return Ok(dirs
+            .iter()
+            .map(|d| d.to_string_lossy().into_owned())
+            .collect());
+    }
     let dir = app
         .path()
         .app_data_dir()
@@ -337,7 +406,7 @@ pub fn library_dirs(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
 }
 
 /// 重扫一遍库目录。调用方必须保证没有活跃 run —— 它会重建注册表。
-pub fn rescan_library(app: &tauri::AppHandle) -> Result<LibraryStatus, String> {
+pub fn rescan_library<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<LibraryStatus, String> {
     let dirs = library_dirs(app)?;
     let core = core_ffi::core()?;
     let problems = core.set_library_dirs(&dirs).map_err(|e| e.to_string())?;
@@ -351,7 +420,7 @@ pub fn rescan_library(app: &tauri::AppHandle) -> Result<LibraryStatus, String> {
 }
 
 #[tauri::command]
-pub fn get_library_status(app: tauri::AppHandle) -> Result<LibraryStatus, String> {
+pub fn get_library_status<R: Runtime>(app: tauri::AppHandle<R>) -> Result<LibraryStatus, String> {
     let dirs = library_dirs(&app)?;
     let core = core_ffi::core()?;
     Ok(LibraryStatus {
@@ -368,8 +437,8 @@ pub struct LibraryRefresh {
 }
 
 #[tauri::command]
-pub fn refresh_library(
-    app: tauri::AppHandle,
+pub fn refresh_library<R: Runtime>(
+    app: tauri::AppHandle<R>,
     runs: tauri::State<'_, RunManager>,
 ) -> Result<LibraryRefresh, String> {
     runs.drop_all();
@@ -393,8 +462,8 @@ pub struct LibraryMeta {
 
 /// 把 doc 里的一个子图存成库文件。文件名就是 `<id>.lyflow-op.json`。
 #[tauri::command]
-pub fn save_as_library(
-    app: tauri::AppHandle,
+pub fn save_as_library<R: Runtime>(
+    app: tauri::AppHandle<R>,
     runs: tauri::State<'_, RunManager>,
     doc: GraphDoc,
     #[allow(non_snake_case)] subgraphId: String,
@@ -458,8 +527,8 @@ pub fn save_as_library(
 
 /// 备份文件名：`<file>~`。编辑器的老约定，一眼看得出是什么，也不会被
 /// `*.lyflow.json` 的通配符扫到。
-fn backup_path(path: &str) -> PathBuf {
-    PathBuf::from(format!("{path}~"))
+fn backup_path(path: &Path) -> PathBuf {
+    PathBuf::from(format!("{}~", path.display()))
 }
 
 fn modified_ms(path: &Path) -> Option<u64> {
@@ -476,7 +545,7 @@ pub struct RecentEntry {
     pub opened_at: u64,
 }
 
-fn recent_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn recent_file<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_data_dir()
@@ -487,7 +556,7 @@ fn recent_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 /// 最多 10 条。读不出来就当空列表 —— 最近文件坏了不该拦住用户开 app。
 #[tauri::command]
-pub fn get_recent_files(app: tauri::AppHandle) -> Vec<RecentEntry> {
+pub fn get_recent_files<R: Runtime>(app: tauri::AppHandle<R>) -> Vec<RecentEntry> {
     let Ok(path) = recent_file(&app) else {
         return Vec::new();
     };
@@ -498,7 +567,10 @@ pub fn get_recent_files(app: tauri::AppHandle) -> Vec<RecentEntry> {
 }
 
 #[tauri::command]
-pub fn push_recent_file(app: tauri::AppHandle, path: String) -> Result<Vec<RecentEntry>, String> {
+pub fn push_recent_file<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    path: String,
+) -> Result<Vec<RecentEntry>, String> {
     let mut list = get_recent_files(app.clone());
     list.retain(|e| e.path != path);
     let now = std::time::SystemTime::now()
@@ -521,9 +593,13 @@ pub fn push_recent_file(app: tauri::AppHandle, path: String) -> Result<Vec<Recen
 
 /// 定时备份。只在有文件路径时才有意义 —— 没存过盘的图没有 `<file>~` 可写。
 #[tauri::command]
-pub fn write_backup(path: String, doc: GraphDoc) -> Result<(), String> {
+pub fn write_backup<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    path: String,
+    doc: GraphDoc,
+) -> Result<(), String> {
     let text = serde_json::to_string(&doc).map_err(|e| e.to_string())?;
-    let target = backup_path(&path);
+    let target = backup_path(&host::resolve_path(&host::config(&app), &path)?);
     std::fs::write(&target, text).map_err(|e| format!("写入 {} 失败: {e}", target.display()))
 }
 
@@ -539,11 +615,15 @@ pub struct BackupStatus {
 }
 
 #[tauri::command]
-pub fn backup_status(path: String) -> BackupStatus {
+pub fn backup_status<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    path: String,
+) -> Result<BackupStatus, String> {
+    let path = host::resolve_path(&host::config(&app), &path)?;
     let backup = backup_path(&path);
     let backup_modified = modified_ms(&backup);
-    let file_modified = modified_ms(Path::new(&path));
-    BackupStatus {
+    let file_modified = modified_ms(&path);
+    Ok(BackupStatus {
         exists: backup_modified.is_some(),
         newer: match (backup_modified, file_modified) {
             (Some(b), Some(f)) => b > f + 1000,
@@ -552,18 +632,20 @@ pub fn backup_status(path: String) -> BackupStatus {
         },
         backup_modified,
         file_modified,
-    }
+    })
 }
 
 #[tauri::command]
-pub fn read_backup(path: String) -> Result<LoadedGraph, String> {
-    let backup = backup_path(&path);
-    load_graph(backup.to_string_lossy().into_owned())
+pub fn read_backup<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    path: String,
+) -> Result<LoadedGraph, String> {
+    load_graph_at(&backup_path(&host::resolve_path(&host::config(&app), &path)?))
 }
 
 #[tauri::command]
-pub fn discard_backup(path: String) -> Result<(), String> {
-    let backup = backup_path(&path);
+pub fn discard_backup<R: Runtime>(app: tauri::AppHandle<R>, path: String) -> Result<(), String> {
+    let backup = backup_path(&host::resolve_path(&host::config(&app), &path)?);
     match std::fs::remove_file(&backup) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -616,8 +698,8 @@ mod tests {
         }"#;
         let doc: GraphDoc = serde_json::from_str(raw).unwrap();
 
-        save_graph(path.to_string_lossy().into_owned(), doc).expect("save_graph 失败");
-        let loaded = load_graph(path.to_string_lossy().into_owned()).expect("load_graph 失败");
+        save_graph_at(&path, &doc).expect("save_graph 失败");
+        let loaded = load_graph_at(&path).expect("load_graph 失败");
         let back = loaded.doc;
 
         assert_eq!(back.nodes.len(), 2);
@@ -660,7 +742,7 @@ mod tests {
             ]),
         );
 
-        let plan = plan_graph(doc.clone(), None, None).expect("plan_graph 失败");
+        let plan = plan_graph_at(&doc, None, &[]).expect("plan_graph 失败");
         let nodes = plan.as_array().expect("计划不是数组");
         assert_eq!(nodes.len(), 2);
         assert_eq!(nodes[0]["nodeId"], "g");
@@ -669,7 +751,7 @@ mod tests {
         assert_eq!(nodes[0]["cached"], false);
         assert_eq!(nodes[0]["cacheKey"].as_str().unwrap().len(), 32);
         // 同一张图两次编译必须给出同一批 cacheKey，否则 stale 标记会自己闪
-        let again = plan_graph(doc, None, None).unwrap();
+        let again = plan_graph_at(&doc, None, &[]).unwrap();
         assert_eq!(again, plan);
     }
 
@@ -679,7 +761,7 @@ mod tests {
             serde_json::json!([{"id": "a", "op": "no.such.op"}]),
             serde_json::json!([]),
         );
-        let out = plan_graph(doc, None, None).unwrap();
+        let out = plan_graph_at(&doc, None, &[]).unwrap();
         let items = out.as_array().unwrap();
         assert_eq!(items[0]["kind"], "diagnostic");
         assert_eq!(items[0]["code"], "unknown_op");
@@ -719,7 +801,7 @@ mod tests {
         )
         .unwrap();
 
-        let loaded = load_graph(path.to_string_lossy().into_owned()).expect("load_graph 失败");
+        let loaded = load_graph_at(&path).expect("load_graph 失败");
         assert_eq!(loaded.doc.nodes.len(), 2);
         assert_eq!(loaded.migrations.len(), 1, "{:?}", loaded.migrations);
         let m = &loaded.migrations[0];
@@ -747,7 +829,7 @@ mod tests {
         let path = std::env::temp_dir().join("lyflow-should-not-exist.json");
         let _ = std::fs::remove_file(&path);
 
-        let err = save_graph(path.to_string_lossy().into_owned(), doc).unwrap_err();
+        let err = save_graph_at(&path, &doc).unwrap_err();
         assert!(err.contains("目标节点不存在"), "{err}");
         assert!(!path.exists(), "校验失败却还是写盘了");
     }

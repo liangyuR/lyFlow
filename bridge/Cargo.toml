@@ -39,10 +39,18 @@ tauri-plugin-dialog = { version = "2", optional = true }
 libloading = "0.8.9"
 notify = { version = "8.2.0", default-features = false }
 
+[dev-dependencies]
+# mock_builder / get_ipc_response 关在 tauri 的 test feature 后面。写成 dev-dependency
+# 而不是给 lib 加 feature：它只在编测试时生效，`--features host` 的产物里没有它。
+tauri = { version = "2", features = ["test"] }
+
 [features]
 default = ["desktop"]
+# IPC 层：commands / execution / watcher / host。外部 Rust 宿主（dts-check）只要这一份 ——
+# 它自己建 Builder、自己开窗，用不着 tauri-build 与 dialog 插件。
+host = ["dep:tauri"]
 # 桌面壳需要的一切。关掉它 `cargo build --bin lyflow` 就完全不碰 Tauri。
-desktop = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog"]
+desktop = ["host", "dep:tauri-build", "dep:tauri-plugin-dialog"]
 # Tauri 自定义协议，release 构建需要
 custom-protocol = ["tauri/custom-protocol"]
 
