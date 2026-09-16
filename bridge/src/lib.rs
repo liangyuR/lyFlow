@@ -79,6 +79,8 @@ pub fn run() {
             commands::get_run_outputs,
             commands::import_graph,
             commands::get_output_cloud,
+            commands::get_output_tensor,
+            commands::get_output_indices,
             commands::get_recent_files,
             commands::push_recent_file,
             commands::write_backup,

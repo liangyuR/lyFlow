@@ -2,11 +2,13 @@
 
 `@lyflow/editor` 的 `HttpTransport` 与后端之间的协议。**阶段 B 的业务服务照这一份实现。**
 
-一句话：`Transport` 接口的每个方法对着 C ABI v7 的一个入口，这里再对着一个 REST 端点。
-三方一一对应，见下面的对照表。ABI 清单在 [phase-a1-acceptance.md](phase-a1-acceptance.md#c-abi-v7-的最终签名清单)。
+一句话：`Transport` 接口的每个方法对着 C ABI v8 的一个入口，这里再对着一个 REST 端点。
+三方一一对应，见下面的对照表。v7 的 ABI 清单在 [phase-a1-acceptance.md](phase-a1-acceptance.md#c-abi-v7-的最终签名清单)，
+v8 加的两个取数入口见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)。
 
 - **基址**：构造时给的 `baseUrl`，例如 `http://127.0.0.1:8787`。所有路径都挂在 `/lyflow/` 下。
-- **编码**：请求体与响应体都是 `application/json; charset=utf-8`，**点云除外**（`application/octet-stream`）。
+- **编码**：请求体与响应体都是 `application/json; charset=utf-8`，
+  **点云、张量、下标三个端点除外**（`application/octet-stream`）。
 - **鉴权**：给了 `token` 时每个 HTTP 请求带 `Authorization: Bearer <token>`；
   WebSocket 走子协议（见 [事件流](#事件流websocket)）。没给 token 时两边都不带。
 - **错误**：非 2xx 的响应体是 `{"error": "给人看的一句话"}`；`HttpTransport` 把它抛成 `Error`。
@@ -30,6 +32,8 @@
 | GET | `/lyflow/runs/:runId/outputs` | `getRunOutputs` | `lyflow_run_outputs` |
 | GET | `/lyflow/runs/:runId/nodes/:nodeId/outputs` | `getOutputInfo` | `lyflow_output_info` |
 | GET | `/lyflow/runs/:runId/clouds/:nodeId/:port` | `getOutputCloud` | `lyflow_output_cloud` |
+| GET | `/lyflow/runs/:runId/tensors/:nodeId/:port?offset=&count=` | `getOutputTensor` | `lyflow_output_tensor` |
+| GET | `/lyflow/runs/:runId/indices/:nodeId/:port?offset=&count=` | `getOutputIndices` | `lyflow_output_indices` |
 | GET | `/lyflow/cache` | `cacheStats` | `lyflow_cache_stats` |
 | DELETE | `/lyflow/cache` | `clearCache` | `lyflow_cache_clear` |
 | GET | `/lyflow/library` | `getLibraryStatus` | `lyflow_library_count` |
@@ -171,6 +175,57 @@
 magic 对不上时编辑器会当成「响应不是点云」直接报错，所以**错误一定要走非 2xx + JSON**，
 不要往这个端点里塞错误文本。
 
+### `GET /lyflow/runs/:runId/tensors/:nodeId/:port?offset=&count=`
+
+`Content-Type: application/octet-stream`，载荷是 `lyflow_output_tensor` 的视图
+（ADR-0019；编码在 `bridge/src/execution.rs` 的 `encode_tensor`）。**小端**：
+
+| 偏移 | 类型 | 含义 |
+|---|---|---|
+| 0 | `u32` | magic `0x4E54594C`（'LYTN'） |
+| 4 | `u32` | `rank` —— 形状有几维 |
+| 8 | `u32` | `flags`，保留，这一版恒为 0 |
+| 12 | `u32` | `count` —— 这一片里有几个元素 |
+| 16 | `u64` | `offset` —— 这一片从第几个元素开始 |
+| 24 | `u64` | `total` —— 整个张量有几个元素 |
+| 32 | `i64[rank]` | `shape`，**永远是完整形状**，不随 `offset/count` 变 |
+| 32+8·rank | `f32[count]` | 数据 |
+
+### `GET /lyflow/runs/:runId/indices/:nodeId/:port?offset=&count=`
+
+`Content-Type: application/octet-stream`，载荷是 `lyflow_output_indices` 的视图
+（ADR-0019；编码在 `bridge/src/execution.rs` 的 `encode_indices`）。**小端**：
+
+| 偏移 | 类型 | 含义 |
+|---|---|---|
+| 0 | `u32` | magic `0x5849594C`（'LYIX'） |
+| 4 | `u32` | `count` —— 这一片里有几个下标 |
+| 8 | `u32` | `total` —— 一共有几个下标 |
+| 12 | `u32` | `flags`，保留，这一版恒为 0 |
+| 16 | `u64` | `sourceCloudId` —— 这些下标指向哪片云；前端只显示，不校验 |
+| 24 | `i32[count]` | 下标 |
+
+两份布局都让 `shape`（8 字节）与数值数组（4 字节）落在自然对齐上，前端可以直接开
+`BigInt64Array` / `Float32Array` / `Int32Array` 视图，零拷贝。
+
+共同的约定（与 C ABI 一字不差）：
+
+- `offset` 缺省 0；`count` 缺省 0 表示「从 `offset` 取到末尾」。
+- **`offset` 越界是成功 + 空切片**（`count = 0`、没有数据段），不是错误 ——
+  翻页翻到最后一片是正常操作，不该逼出一个「这个错要不要弹提示」的判断。
+- 张量**不抽稀**：抽稀过的图像不是同一张图，数据量只靠切片控制（ADR-0019）。
+- 桥接层把 `count` clamp 到 **4 194 304**（16 MB 的 f32 / i32）。**`count = 0` 同样被
+  clamp**，不是原样透传 —— 否则一个一亿元素的张量会一次性 400 MB 过 IPC。
+  上限是「一次请求该多大」的产品判断，属于传输层；core 自己不设限。
+- 端口上没有结果、或那个端口不是张量 / 下标集合时返回非 2xx + JSON 错误体。
+  与点云同理：magic 对不上编辑器就当成「响应不是张量」，**不要往这两个端点里塞错误文本**。
+
+**参考实现（`packages/editor/test-server/`）不覆盖这两个端点，返回 501。**
+那个桩服务器每次请求起一次 `lyflow` CLI，没有常驻的结果仓；点云能work 是因为 CLI 的
+`dump` 会写出 PCD 文件，而张量与下标没有对应的落盘格式。理由见
+[ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md) 的「代价」一节。
+真正的业务服务常驻 core，按 ABI 直接实现，不受此限。
+
 ---
 
 ## 缓存与库算子
@@ -276,6 +331,8 @@ magic 对不上时编辑器会当成「响应不是点云」直接报错，所�
 - **取点云会重跑一遍图**：`lyflow dump` 自己跑一次再写 PCD，服务端把 ASCII PCD 转成上面的二进制布局。
   真实服务应该常驻 core（`core/include/lyflow/client.hpp`），直接把 `lyflow_output_cloud`
   的视图写进响应体。
+- **取张量与取下标返回 501**：这两样没有像 PCD 那样的落盘格式，一个没有常驻结果仓的
+  桩服务器拿不到它们（ADR-0019 的「代价」）。
 - **`loadGraph` 的 `migrations` 恒为 `[]`**：桩不跑 `lyflow migrate`。
 - **`saveAsLibrary` 返回 501**。
 - **不发热重载帧**。

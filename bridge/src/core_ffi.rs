@@ -14,7 +14,7 @@ use libloading::{Library, Symbol};
 pub type EventCb = unsafe extern "C" fn(*const c_char, *mut c_void);
 
 /// C ABI 的版本号。与 core/include/lyflow/c_api.h 的 LYFLOW_ABI_VERSION 必须一致。
-pub const ABI_VERSION: u32 = 7;
+pub const ABI_VERSION: u32 = 8;
 
 /// 运行时注入一个源节点的输出（v7）。缓冲由调用方持有到 `lyflow_run_start` 返回。
 #[repr(C)]
@@ -63,6 +63,28 @@ pub struct CloudViewRaw {
 
 pub const CLOUD_HAS_INTENSITY: u32 = 1;
 pub const CLOUD_HAS_NORMALS: u32 = 2;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct TensorViewRaw {
+    pub rank: u32,
+    pub count: u32,
+    pub offset: u64,
+    pub total: u64,
+    pub shape: *const i64,
+    pub data: *const f32,
+    pub handle: *mut c_void,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct IndicesViewRaw {
+    pub count: u32,
+    pub total: u32,
+    pub source_cloud_id: u64,
+    pub values: *const i32,
+    pub handle: *mut c_void,
+}
 
 /// 一次运行注入的一片点云（v7）。Rust 侧持有缓冲，转成 RunInputRaw 交给 core。
 #[derive(Clone, Debug)]
@@ -167,6 +189,24 @@ type FnOutputCloud = unsafe extern "C" fn(
     *mut CloudViewRaw,
 ) -> c_int;
 type FnCloudViewFree = unsafe extern "C" fn(*mut CloudViewRaw);
+type FnOutputTensor = unsafe extern "C" fn(
+    *const c_char,
+    *const c_char,
+    *const c_char,
+    u64,
+    u32,
+    *mut TensorViewRaw,
+) -> c_int;
+type FnTensorViewFree = unsafe extern "C" fn(*mut TensorViewRaw);
+type FnOutputIndices = unsafe extern "C" fn(
+    *const c_char,
+    *const c_char,
+    *const c_char,
+    u64,
+    u32,
+    *mut IndicesViewRaw,
+) -> c_int;
+type FnIndicesViewFree = unsafe extern "C" fn(*mut IndicesViewRaw);
 type FnOutputInfo = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
 type FnRunOutputs = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type FnImport =
@@ -199,6 +239,10 @@ pub struct Core {
     run_free: FnRunOp,
     output_cloud: FnOutputCloud,
     cloud_view_free: FnCloudViewFree,
+    output_tensor: FnOutputTensor,
+    tensor_view_free: FnTensorViewFree,
+    output_indices: FnOutputIndices,
+    indices_view_free: FnIndicesViewFree,
     output_info: FnOutputInfo,
     run_outputs: FnRunOutputs,
     import: FnImport,
@@ -260,6 +304,10 @@ impl Core {
             run_free: sym!(lib, "lyflow_run_free", FnRunOp),
             output_cloud: sym!(lib, "lyflow_output_cloud", FnOutputCloud),
             cloud_view_free: sym!(lib, "lyflow_cloud_view_free", FnCloudViewFree),
+            output_tensor: sym!(lib, "lyflow_output_tensor", FnOutputTensor),
+            tensor_view_free: sym!(lib, "lyflow_tensor_view_free", FnTensorViewFree),
+            output_indices: sym!(lib, "lyflow_output_indices", FnOutputIndices),
+            indices_view_free: sym!(lib, "lyflow_indices_view_free", FnIndicesViewFree),
             output_info: sym!(lib, "lyflow_output_info", FnOutputInfo),
             run_outputs: sym!(lib, "lyflow_run_outputs", FnRunOutputs),
             import: sym!(lib, "lyflow_import", FnImport),
@@ -464,6 +512,68 @@ impl Core {
             core: Arc::clone(self),
         })
     }
+
+    pub fn output_tensor(
+        self: &Arc<Self>,
+        run_id: &str,
+        node_id: &str,
+        port: &str,
+        offset: u64,
+        count: u32,
+    ) -> Result<TensorView, CoreError> {
+        let r = CString::new(run_id)?;
+        let n = CString::new(node_id)?;
+        let p = CString::new(port)?;
+        let mut raw = TensorViewRaw {
+            rank: 0,
+            count: 0,
+            offset: 0,
+            total: 0,
+            shape: std::ptr::null(),
+            data: std::ptr::null(),
+            handle: std::ptr::null_mut(),
+        };
+        let rc = unsafe {
+            (self.output_tensor)(r.as_ptr(), n.as_ptr(), p.as_ptr(), offset, count, &mut raw)
+        };
+        if rc != 0 {
+            return Err(CoreError::NoSuchOutput);
+        }
+        Ok(TensorView {
+            raw,
+            core: Arc::clone(self),
+        })
+    }
+
+    pub fn output_indices(
+        self: &Arc<Self>,
+        run_id: &str,
+        node_id: &str,
+        port: &str,
+        offset: u64,
+        count: u32,
+    ) -> Result<IndicesView, CoreError> {
+        let r = CString::new(run_id)?;
+        let n = CString::new(node_id)?;
+        let p = CString::new(port)?;
+        let mut raw = IndicesViewRaw {
+            count: 0,
+            total: 0,
+            source_cloud_id: 0,
+            values: std::ptr::null(),
+            handle: std::ptr::null_mut(),
+        };
+        let rc = unsafe {
+            (self.output_indices)(r.as_ptr(), n.as_ptr(), p.as_ptr(), offset, count, &mut raw)
+        };
+        if rc != 0 {
+            return Err(CoreError::NoSuchOutput);
+        }
+        Ok(IndicesView {
+            raw,
+            core: Arc::clone(self),
+        })
+    }
 }
 
 /// core 借出来的点云缓冲，Drop 时还回去。桥接层里唯一持有 C++ 指针一段时间的地方，
@@ -515,6 +625,95 @@ impl CloudView {
 impl Drop for CloudView {
     fn drop(&mut self) {
         unsafe { (self.core.cloud_view_free)(&mut self.raw) };
+    }
+}
+
+pub struct TensorView {
+    raw: TensorViewRaw,
+    core: Arc<Core>,
+}
+
+impl TensorView {
+    pub fn rank(&self) -> u32 {
+        self.raw.rank
+    }
+    pub fn count(&self) -> u32 {
+        self.raw.count
+    }
+    pub fn offset(&self) -> u64 {
+        self.raw.offset
+    }
+    pub fn total(&self) -> u64 {
+        self.raw.total
+    }
+    pub fn shape(&self) -> &[i64] {
+        if self.raw.shape.is_null() || self.raw.rank == 0 {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts(self.raw.shape, self.raw.rank as usize) }
+    }
+    pub fn data(&self) -> &[f32] {
+        if self.raw.data.is_null() || self.raw.count == 0 {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts(self.raw.data, self.raw.count as usize) }
+    }
+
+    #[cfg(test)]
+    pub unsafe fn borrowed(
+        core: Arc<Core>,
+        offset: u64,
+        total: u64,
+        shape: &[i64],
+        data: &[f32],
+    ) -> Self {
+        TensorView {
+            raw: TensorViewRaw {
+                rank: shape.len() as u32,
+                count: data.len() as u32,
+                offset,
+                total,
+                shape: shape.as_ptr(),
+                data: data.as_ptr(),
+                handle: std::ptr::null_mut(),
+            },
+            core,
+        }
+    }
+}
+
+impl Drop for TensorView {
+    fn drop(&mut self) {
+        unsafe { (self.core.tensor_view_free)(&mut self.raw) };
+    }
+}
+
+pub struct IndicesView {
+    raw: IndicesViewRaw,
+    core: Arc<Core>,
+}
+
+impl IndicesView {
+    pub fn count(&self) -> u32 {
+        self.raw.count
+    }
+    pub fn total(&self) -> u32 {
+        self.raw.total
+    }
+    pub fn source_cloud_id(&self) -> u64 {
+        self.raw.source_cloud_id
+    }
+    pub fn values(&self) -> &[i32] {
+        if self.raw.values.is_null() || self.raw.count == 0 {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts(self.raw.values, self.raw.count as usize) }
+    }
+}
+
+impl Drop for IndicesView {
+    fn drop(&mut self) {
+        unsafe { (self.core.indices_view_free)(&mut self.raw) };
     }
 }
 

@@ -390,6 +390,22 @@ async function route(req, res, url) {
     return res.end(buf);
   }
 
+  m = /^\/lyflow\/runs\/([^/]+)\/tensors\/([^/]+)\/([^/]+)$/.exec(p);
+  if (req.method === "GET" && m) {
+    throw Object.assign(
+      new Error("桩服务器不支持取张量（没有常驻结果仓），见 docs/http-transport.md"),
+      { status: 501 },
+    );
+  }
+
+  m = /^\/lyflow\/runs\/([^/]+)\/indices\/([^/]+)\/([^/]+)$/.exec(p);
+  if (req.method === "GET" && m) {
+    throw Object.assign(
+      new Error("桩服务器不支持取下标（没有常驻结果仓），见 docs/http-transport.md"),
+      { status: 501 },
+    );
+  }
+
   if (p === "/lyflow/cache") {
     // 桩服务器每次请求都是新进程，进程间没有共享缓存
     if (req.method === "DELETE") return send(res, 200, {});

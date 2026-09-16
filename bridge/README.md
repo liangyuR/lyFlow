@@ -140,6 +140,28 @@ f32 bounds[6] | f32 xyz[3n] | [f32 intensity[n]] | [f32 normals[3n]]
 `new Float32Array(buffer, offset, len)`。magic 不是装饰：IPC 上游出错时返回的
 可能是一段错误文本，没有它前端会把那段文本当坐标画出来。
 
+### 二进制张量与下标（v8）
+
+[ADR-0019](../docs/adr/0019-output-tensor-and-indices-over-abi.md)。布局（小端），
+逐字节的表在 [docs/http-transport.md](../docs/http-transport.md)：
+
+```
+u32 magic 'LYTN' | u32 rank | u32 flags | u32 count
+u64 offset | u64 total | i64 shape[rank] | f32 data[count]
+
+u32 magic 'LYIX' | u32 count | u32 total | u32 flags
+u64 sourceCloudId | i32 values[count]
+```
+
+`shape` 永远是**完整**形状，不随 `offset/count` 变 —— 前端要靠它算下一片在哪。
+两处的头长度（32 与 24）都让数组落在自然对齐上，前端直接开
+`BigInt64Array` / `Float32Array` / `Int32Array` 视图。
+
+切片是这两条路控制数据量的唯一手段：张量不抽稀（抽稀过的图像是**另一张图**）。
+`count` 在 command 里被 clamp 到 4 194 304（16 MB），**`count = 0`（取到末尾）同样被
+clamp**，否则一个一亿元素的张量会一次性 400 MB 过 IPC。上限是「一次 IPC 该多大」
+的产品判断，属于桥接层，core 自己不设限。
+
 ## 两个 bin
 
 | bin | 说明 |

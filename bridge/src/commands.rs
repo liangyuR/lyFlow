@@ -7,7 +7,7 @@ use std::sync::RwLock;
 use tauri::Manager;
 
 use crate::core_ffi;
-use crate::execution::{encode_cloud, PreviewOptions, RunManager};
+use crate::execution::{encode_cloud, encode_indices, encode_tensor, PreviewOptions, RunManager};
 use crate::graph::GraphDoc;
 
 /// 解析过的 manifest，连同它属于第几代 core。热重载换代后这份要作废（ADR-0009）。
@@ -257,6 +257,45 @@ pub fn get_output_cloud(
         .output_cloud(&runId, &nodeId, &port, maxPoints.unwrap_or(2_000_000))
         .map_err(|e| e.to_string())?;
     Ok(tauri::ipc::Response::new(encode_cloud(&view)))
+}
+
+const SLICE_LIMIT: u32 = 4_194_304;
+
+fn clamp_slice(count: Option<u32>) -> u32 {
+    match count {
+        Some(0) | None => SLICE_LIMIT,
+        Some(n) => n.min(SLICE_LIMIT),
+    }
+}
+
+#[tauri::command]
+pub fn get_output_tensor(
+    #[allow(non_snake_case)] runId: String,
+    #[allow(non_snake_case)] nodeId: String,
+    port: String,
+    offset: Option<u64>,
+    count: Option<u32>,
+) -> Result<tauri::ipc::Response, String> {
+    let core = core_ffi::core()?;
+    let view = core
+        .output_tensor(&runId, &nodeId, &port, offset.unwrap_or(0), clamp_slice(count))
+        .map_err(|e| e.to_string())?;
+    Ok(tauri::ipc::Response::new(encode_tensor(&view)))
+}
+
+#[tauri::command]
+pub fn get_output_indices(
+    #[allow(non_snake_case)] runId: String,
+    #[allow(non_snake_case)] nodeId: String,
+    port: String,
+    offset: Option<u64>,
+    count: Option<u32>,
+) -> Result<tauri::ipc::Response, String> {
+    let core = core_ffi::core()?;
+    let view = core
+        .output_indices(&runId, &nodeId, &port, offset.unwrap_or(0), clamp_slice(count))
+        .map_err(|e| e.to_string())?;
+    Ok(tauri::ipc::Response::new(encode_indices(&view)))
 }
 
 /// 写一段二进制到磁盘。3D 视图导出 PNG 与「把结果另存」都走它 ——

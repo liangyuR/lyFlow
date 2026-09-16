@@ -212,6 +212,72 @@ pub fn encode_cloud(view: &core_ffi::CloudView) -> Vec<u8> {
     out
 }
 
+pub const TENSOR_MAGIC: u32 = 0x4E54_594C;
+pub const INDICES_MAGIC: u32 = 0x5849_594C;
+
+fn append_i64(out: &mut Vec<u8>, values: &[i64]) {
+    #[cfg(target_endian = "little")]
+    {
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                values.as_ptr().cast::<u8>(),
+                std::mem::size_of_val(values),
+            )
+        };
+        out.extend_from_slice(bytes);
+    }
+    #[cfg(not(target_endian = "little"))]
+    for v in values {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+}
+
+fn append_i32(out: &mut Vec<u8>, values: &[i32]) {
+    #[cfg(target_endian = "little")]
+    {
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                values.as_ptr().cast::<u8>(),
+                std::mem::size_of_val(values),
+            )
+        };
+        out.extend_from_slice(bytes);
+    }
+    #[cfg(not(target_endian = "little"))]
+    for v in values {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+}
+
+pub fn encode_tensor(view: &core_ffi::TensorView) -> Vec<u8> {
+    let shape = view.shape();
+    let data = view.data();
+    let mut out = Vec::with_capacity(32 + shape.len() * 8 + data.len() * 4);
+
+    out.extend_from_slice(&TENSOR_MAGIC.to_le_bytes());
+    out.extend_from_slice(&view.rank().to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&view.count().to_le_bytes());
+    out.extend_from_slice(&view.offset().to_le_bytes());
+    out.extend_from_slice(&view.total().to_le_bytes());
+    append_i64(&mut out, shape);
+    append_f32(&mut out, data);
+    out
+}
+
+pub fn encode_indices(view: &core_ffi::IndicesView) -> Vec<u8> {
+    let values = view.values();
+    let mut out = Vec::with_capacity(24 + values.len() * 4);
+
+    out.extend_from_slice(&INDICES_MAGIC.to_le_bytes());
+    out.extend_from_slice(&view.count().to_le_bytes());
+    out.extend_from_slice(&view.total().to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&view.source_cloud_id().to_le_bytes());
+    append_i32(&mut out, values);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -411,6 +477,146 @@ mod tests {
         assert_eq!(bytes.len(), 16 + 24 + n * 12 + n * 4 + n * 12);
         let first = f32::from_le_bytes(bytes[16 + 24 + n * 12 + n * 4..][..4].try_into().unwrap());
         assert_eq!(first, view.normals()[0]);
+    }
+
+    fn u32_at(bytes: &[u8], off: usize) -> u32 {
+        u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap())
+    }
+    fn u64_at(bytes: &[u8], off: usize) -> u64 {
+        u64::from_le_bytes(bytes[off..off + 8].try_into().unwrap())
+    }
+    fn i64_at(bytes: &[u8], off: usize) -> i64 {
+        i64::from_le_bytes(bytes[off..off + 8].try_into().unwrap())
+    }
+    fn i32_at(bytes: &[u8], off: usize) -> i32 {
+        i32::from_le_bytes(bytes[off..off + 4].try_into().unwrap())
+    }
+    fn f32_at(bytes: &[u8], off: usize) -> f32 {
+        f32::from_le_bytes(bytes[off..off + 4].try_into().unwrap())
+    }
+
+    fn passthrough_graph(seed: i64, count: i64) -> serde_json::Value {
+        serde_json::json!({
+            "schemaVersion": 1, "id": "t",
+            "nodes": [
+                {"id": "g", "op": "gen.synthetic",
+                 "params": {"pointCount": count, "seed": seed}},
+                {"id": "p", "op": "filter.passthrough",
+                 "params": {"field": "z", "min": -100.0, "max": 100.0}}
+            ],
+            "edges": [{"id": "e", "from": {"node": "g", "port": "cloud"},
+                                  "to": {"node": "p", "port": "cloud"}}]
+        })
+    }
+
+    #[test]
+    fn indices_payload_header_is_correct_and_carries_source_cloud_id() {
+        let f = run(passthrough_graph(4101, 5000), "");
+        assert_eq!(f.run_status(), "ok", "{:#?}", f.events);
+
+        let all = f
+            .core
+            .output_indices(&f.run_id, "p", "indices", 0, 0)
+            .expect("取不到下标");
+        assert_eq!(all.total(), 5_000);
+        assert_eq!(all.count(), 5_000, "min/max 放到 ±100，所有点都该留下");
+        assert_ne!(all.source_cloud_id(), 0, "sourceCloudId 应当指向上游那片云");
+        assert_eq!(all.values().first().copied(), Some(0));
+        assert_eq!(all.values().last().copied(), Some(4_999));
+
+        let bytes = encode_indices(&all);
+        assert_eq!(u32_at(&bytes, 0), INDICES_MAGIC, "magic 不对");
+        assert_eq!(u32_at(&bytes, 4), 5_000);
+        assert_eq!(u32_at(&bytes, 8), 5_000);
+        assert_eq!(u32_at(&bytes, 12), 0, "flags 这一版保留 0");
+        assert_eq!(u64_at(&bytes, 16), all.source_cloud_id());
+        assert_eq!(bytes.len(), 24 + 5_000 * 4, "载荷长度与头部对不上");
+        assert_eq!(i32_at(&bytes, 24), 0);
+        assert_eq!(i32_at(&bytes, 24 + 4_999 * 4), 4_999);
+    }
+
+    #[test]
+    fn indices_paging_keeps_total_and_clips_at_the_tail() {
+        let f = run(passthrough_graph(4102, 1200), "");
+        assert_eq!(f.run_status(), "ok", "{:#?}", f.events);
+
+        let all = f.core.output_indices(&f.run_id, "p", "indices", 0, 0).unwrap();
+        assert_eq!(all.count(), 1_200);
+
+        let page = f.core.output_indices(&f.run_id, "p", "indices", 500, 64).unwrap();
+        assert_eq!(page.count(), 64);
+        assert_eq!(page.total(), 1_200, "total 是全量，不随切片变");
+        assert_eq!(page.source_cloud_id(), all.source_cloud_id());
+        assert_eq!(page.values(), &all.values()[500..564]);
+        let page_bytes = encode_indices(&page);
+        assert_eq!(page_bytes.len(), 24 + 64 * 4);
+        assert_eq!(u32_at(&page_bytes, 4), 64);
+        assert_eq!(u32_at(&page_bytes, 8), 1_200);
+        assert_eq!(i32_at(&page_bytes, 24), all.values()[500]);
+
+        let tail = f.core.output_indices(&f.run_id, "p", "indices", 1_190, 64).unwrap();
+        assert_eq!(tail.count(), 10, "尾巴上要多少给多少，不越界");
+        assert_eq!(tail.values(), &all.values()[1_190..1_200]);
+
+        let past = f.core.output_indices(&f.run_id, "p", "indices", 9_999, 16).unwrap();
+        assert_eq!(past.count(), 0);
+        assert!(past.values().is_empty(), "count=0 时 C 侧给的是 nullptr");
+        assert_eq!(past.total(), 1_200);
+        let past_bytes = encode_indices(&past);
+        assert_eq!(past_bytes.len(), 24, "空切片只有帧头");
+        assert_eq!(u32_at(&past_bytes, 4), 0);
+    }
+
+    #[test]
+    fn tensor_and_indices_reject_ports_of_the_wrong_type() {
+        let f = run(passthrough_graph(4103, 800), "");
+        assert_eq!(f.run_status(), "ok", "{:#?}", f.events);
+
+        assert!(f.core.output_tensor(&f.run_id, "p", "cloud", 0, 0).is_err());
+        assert!(f.core.output_tensor(&f.run_id, "p", "indices", 0, 0).is_err());
+        assert!(f.core.output_indices(&f.run_id, "p", "cloud", 0, 0).is_err());
+        assert!(f.core.output_indices(&f.run_id, "p", "nope", 0, 0).is_err());
+        assert!(f.core.output_tensor("no-such-run", "p", "tensor", 0, 0).is_err());
+    }
+
+    #[test]
+    fn encode_tensor_frame_matches_the_documented_layout() {
+        let core = crate::core_ffi::core().expect("加载 core 失败");
+        let shape: Vec<i64> = vec![2, 3, 4];
+        let data: Vec<f32> = (0..6).map(|i| i as f32 * 0.25 - 1.0).collect();
+        let view = unsafe { core_ffi::TensorView::borrowed(Arc::clone(&core), 6, 24, &shape, &data) };
+
+        assert_eq!(view.rank(), 3);
+        assert_eq!(view.count(), 6);
+        assert_eq!(view.offset(), 6);
+        assert_eq!(view.total(), 24);
+        assert_eq!(view.shape(), &shape[..]);
+        assert_eq!(view.data(), &data[..]);
+
+        let bytes = encode_tensor(&view);
+        assert_eq!(u32_at(&bytes, 0), TENSOR_MAGIC, "magic 不对");
+        assert_eq!(u32_at(&bytes, 4), 3, "rank");
+        assert_eq!(u32_at(&bytes, 8), 0, "flags 这一版保留 0");
+        assert_eq!(u32_at(&bytes, 12), 6, "count");
+        assert_eq!(u64_at(&bytes, 16), 6, "offset");
+        assert_eq!(u64_at(&bytes, 24), 24, "total");
+        assert_eq!(i64_at(&bytes, 32), 2);
+        assert_eq!(i64_at(&bytes, 40), 3);
+        assert_eq!(i64_at(&bytes, 48), 4);
+        assert_eq!(bytes.len(), 32 + 3 * 8 + 6 * 4);
+        for (i, expected) in data.iter().enumerate() {
+            assert_eq!(f32_at(&bytes, 32 + 3 * 8 + i * 4), *expected, "data[{i}]");
+        }
+        assert_eq!(32 % 8, 0, "shape 必须 8 字节对齐，前端才能零拷贝开 BigInt64Array");
+        assert_eq!((32 + 3 * 8) % 4, 0, "数据必须 4 字节对齐");
+
+        let empty = unsafe { core_ffi::TensorView::borrowed(core, 24, 24, &shape, &[]) };
+        assert_eq!(empty.count(), 0);
+        assert!(empty.data().is_empty());
+        let empty_bytes = encode_tensor(&empty);
+        assert_eq!(empty_bytes.len(), 32 + 3 * 8, "空切片只有帧头加 shape");
+        assert_eq!(u32_at(&empty_bytes, 12), 0);
+        assert_eq!(u64_at(&empty_bytes, 16), 24);
     }
 
     #[test]
