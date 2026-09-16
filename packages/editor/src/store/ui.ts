@@ -50,6 +50,8 @@ interface UiState {
   /** 面板里高亮的算子，用于在没选中节点时展示算子说明。 */
   inspectedOperator: string | null;
 
+  pinnedNode: string | null;
+
   /** 拖线中的那一端。null = 没在拖（交互清单 P1 #20）。 */
   pendingFrom: PendingConnection | null;
   /** 与 pendingFrom 兼容的端口集合，键是 `nodeId:portName`。 */
@@ -70,6 +72,7 @@ interface UiState {
   showToast(text: string, kind?: "info" | "warn"): void;
   hideToast(): void;
   setInspectedOperator(id: string | null): void;
+  setPinnedNode(id: string | null): void;
   beginConnection(from: PendingConnection, compatible: ReadonlySet<string>): void;
   endConnection(): void;
   toggleDrawer(tab?: DrawerTab): void;
@@ -107,6 +110,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   clipboard: null,
   toast: null,
   inspectedOperator: null,
+  pinnedNode: null,
   pendingFrom: null,
   compatiblePorts: NO_PORTS,
   drawer: null,
@@ -141,6 +145,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   setInspectedOperator(id) {
     set({ inspectedOperator: id });
+  },
+  setPinnedNode(id) {
+    if (get().pinnedNode === id) return;
+    set({ pinnedNode: id });
   },
   beginConnection(from, compatible) {
     set({ pendingFrom: from, compatiblePorts: compatible });

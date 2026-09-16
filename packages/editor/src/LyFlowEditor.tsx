@@ -46,6 +46,7 @@ import type { GraphDoc } from "./types/graph";
 
 import "./styles.css";
 import "./styles.editor.css";
+import "./styles.peek.css";
 
 const kMinCanvasWidth = 320;
 

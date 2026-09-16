@@ -15,7 +15,7 @@ import { OperatorDetail } from "./OperatorDetail";
 import { ParamControl } from "./ParamControls";
 
 /** 六位有效数字。2D 几何的坐标是米，原样打印会拖一串浮点噪声。 */
-function num(v: number | undefined): string {
+export function num(v: number | undefined): string {
   if (v === undefined || !Number.isFinite(v)) return "—";
   return String(Number(v.toPrecision(6)));
 }

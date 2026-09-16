@@ -1,0 +1,417 @@
+.peek {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  min-height: 140px;
+  overflow: hidden;
+  resize: both;
+  border: 1px solid var(--lyflow-border-strong);
+  border-radius: var(--lyflow-radius);
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-fg-0);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.peek.is-flash {
+  border-color: var(--lyflow-accent);
+  box-shadow: 0 0 0 2px var(--lyflow-accent), 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.peek__title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 5px 6px 5px 9px;
+  border-bottom: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-3);
+  font-size: 12px;
+  cursor: move;
+  user-select: none;
+  touch-action: none;
+}
+
+.peek__name {
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.peek__sep { color: var(--lyflow-fg-2); }
+
+.peek__port {
+  font-family: var(--lyflow-mono);
+  color: var(--lyflow-fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.peek__type {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.peek__locked {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border: 1px solid var(--lyflow-accent);
+  border-radius: 3px;
+  color: var(--lyflow-accent);
+  font-size: 10px;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+.peek__spacer { flex: 1 1 auto; }
+
+.peek__btn {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--lyflow-fg-1);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.peek__btn:hover { background: var(--lyflow-bg-2); color: var(--lyflow-fg-0); }
+.peek__btn[data-on="1"] { color: var(--lyflow-accent); }
+
+.peek__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--lyflow-border);
+}
+
+.peek__tool {
+  padding: 2px 8px;
+  border: 1px solid var(--lyflow-border);
+  border-radius: 3px;
+  background: var(--lyflow-bg-1);
+  color: var(--lyflow-fg-1);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.peek__tool:hover { border-color: var(--lyflow-border-strong); color: var(--lyflow-fg-0); }
+
+.peek__tool:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  border-color: var(--lyflow-border);
+  color: var(--lyflow-fg-2);
+}
+
+.peek__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.peek__status {
+  margin: 0;
+  padding: 14px 12px;
+  color: var(--lyflow-fg-2);
+  font-size: 12px;
+}
+
+.peek-value {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.peek-value__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.peek-value__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.peek-value__table th,
+.peek-value__table td {
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--lyflow-border);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.peek-value__table th {
+  width: 1%;
+  color: var(--lyflow-fg-2);
+  font-weight: normal;
+  font-family: var(--lyflow-mono);
+}
+
+.peek-value__table td {
+  color: var(--lyflow-fg-0);
+  font-family: var(--lyflow-mono);
+}
+
+.peek-value__raw {
+  flex: 0 0 auto;
+  max-height: 55%;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-1);
+}
+
+.peek-value__rawtoggle {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--lyflow-fg-2);
+  text-align: left;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.peek-value__rawtoggle:hover { color: var(--lyflow-fg-0); }
+
+.peek-value__raw pre {
+  margin: 0;
+  padding: 0 8px 8px;
+  overflow: auto;
+  color: var(--lyflow-fg-1);
+  font-family: var(--lyflow-mono);
+  font-size: 11px;
+}
+
+.peek__views {
+  display: flex;
+  flex: 0 0 auto;
+  margin-right: 2px;
+  border: 1px solid var(--lyflow-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.peek__view {
+  padding: 2px 7px;
+  border: 0;
+  border-left: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-1);
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.peek__view:first-child { border-left: 0; }
+.peek__view:hover { color: var(--lyflow-fg-0); }
+
+.peek__view[data-active="1"] {
+  background: var(--lyflow-accent-dim);
+  color: var(--lyflow-fg-0);
+}
+
+/* ------------------------------------------------------------- 点云视图 */
+
+.peek-cloud {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.peek-cloud__bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px 4px;
+  flex: 0 0 auto;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-1);
+  font-size: 11px;
+  color: var(--lyflow-fg-2);
+}
+
+.peek-cloud__spacer { flex: 1 1 auto; }
+
+.peek-cloud__base {
+  flex: 0 1 auto;
+  min-width: 4em;
+  max-width: 150px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 0 4px;
+  border: 1px solid var(--lyflow-border);
+  border-radius: 3px;
+  color: var(--lyflow-fg-1);
+}
+
+.peek-cloud__count {
+  flex: 0 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--lyflow-mono);
+}
+
+.peek-cloud__select {
+  flex: 0 0 auto;
+  max-width: 84px;
+  padding: 1px 2px;
+  border: 1px solid var(--lyflow-border);
+  border-radius: 3px;
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-fg-1);
+  font-size: 11px;
+}
+
+.peek-cloud__select:disabled { opacity: 0.45; }
+
+.peek-cloud__stage {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.peek-cloud__canvas {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.peek-cloud__canvas canvas {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.peek-cloud__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  text-align: center;
+  color: var(--lyflow-fg-2);
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------ 下标视图 */
+
+.peek-indices {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.peek-indices__head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-1);
+  font-size: 11px;
+  color: var(--lyflow-fg-1);
+}
+
+.peek-indices__sep { color: var(--lyflow-fg-2); }
+.peek-indices__spacer { flex: 1 1 auto; }
+
+.peek-indices__src,
+.peek-indices__shown {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--lyflow-fg-2);
+  font-family: var(--lyflow-mono);
+}
+
+.peek-indices__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.peek-indices__spacerbox {
+  position: relative;
+  width: 100%;
+}
+
+.peek-indices__row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  font-family: var(--lyflow-mono);
+  font-size: 11px;
+}
+
+.peek-indices__ord {
+  flex: 0 0 auto;
+  min-width: 46px;
+  text-align: right;
+  color: var(--lyflow-fg-2);
+}
+
+.peek-indices__val { color: var(--lyflow-fg-0); }
+
+.peek-indices__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-top: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-1);
+  font-size: 11px;
+  color: var(--lyflow-fg-2);
+}
+
+.peek-indices__foot--err { color: var(--lyflow-warn); }
+
+.peek-indices__more {
+  padding: 2px 8px;
+  border: 1px solid var(--lyflow-border);
+  border-radius: 3px;
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-fg-1);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.peek-indices__more:hover:not(:disabled) {
+  border-color: var(--lyflow-border-strong);
+  color: var(--lyflow-fg-0);
+}
+
+.peek-indices__more:disabled { opacity: 0.45; cursor: default; }

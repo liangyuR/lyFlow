@@ -7,6 +7,7 @@ export type * from "./types/graph";
 export type * from "./types/manifest";
 export type * from "./types/execution";
 export { isMigration, decodeCloud, CLOUD_MAGIC } from "./types/execution";
+export { decodeTensor, decodeIndices, TENSOR_MAGIC, INDICES_MAGIC } from "./types/execution";
 export {
   GRAPH_SCHEMA_VERSION,
   LIBRARY_OP_PREFIX,
@@ -17,6 +18,8 @@ export {
 // 宿主要自己搭工具栏或验收桥时用得到的内部件。语义化动作永远走 store。
 export { useGraphStore, currentSubgraph, emptyDoc } from "./store/graph";
 export { useUiStore } from "./store/ui";
+export { usePeekStore, type PeekWindow, type PeekView } from "./store/peek";
+export { peekSourceOf, type PeekSource } from "./lib/peekSource";
 export { useManifestStore, missingOperators, useOperator } from "./store/manifest";
 export {
   useExecutionStore,

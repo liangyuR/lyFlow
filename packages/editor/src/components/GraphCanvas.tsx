@@ -29,16 +29,24 @@ import {
   toReactFlow,
   type LyNode,
 } from "../lib/mapping";
+import { defaultViewFor, peekSourceOf } from "../lib/peekSource";
 import { augmentOperators, fullId, levelOf, pathIsValid } from "../lib/subgraph";
 import { canConnect, compatibleSources, compatibleTargets, inferAnyTypes } from "../lib/typecheck";
 import { keyHint } from "../lib/keymap";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
+import {
+  clampPeekScreen,
+  findWindowForEdge,
+  usePeekStore,
+  PEEK_DEFAULT_SIZE,
+} from "../store/peek";
 import { useUiStore } from "../store/ui";
 import { transport } from "../transport";
 import { subgraphIdOf, type GraphDoc } from "../types/graph";
 
+import { EdgePeekLayer } from "./EdgePeekLayer";
 import { OPERATOR_DND_MIME } from "./NodePalette";
 import { OperatorNode } from "./OperatorNode";
 
@@ -81,6 +89,21 @@ interface ContextMenuState {
   nodeId: string;
   x: number;
   y: number;
+}
+
+interface EdgeMenuState {
+  edgeId: string;
+  x: number;
+  y: number;
+}
+
+const PEEK_FLASH_MS = 200;
+
+function flashPeek(root: HTMLElement | null, id: string): void {
+  const el = root?.querySelector(`[data-peek-id="${id}"]`);
+  if (!el) return;
+  el.classList.add("is-flash");
+  setTimeout(() => el.classList.remove("is-flash"), PEEK_FLASH_MS);
 }
 
 interface Guide {
@@ -238,6 +261,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
   // 同一次挂载/布局抖动里，允许连续触发重渲染的次数上限，见下面 onNodesChange 里的说明。
   const sizeBurst = useRef({ count: 0, resetHandle: null as number | null });
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
+  const [edgeMenu, setEdgeMenu] = useState<EdgeMenuState | null>(null);
   const [guides, setGuides] = useState<Guide[]>([]);
   const [snapping, setSnapping] = useState(true);
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
@@ -261,6 +285,10 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
 
   useEffect(() => {
     if (path.length > 0 && !pathIsValid(doc, path)) useUiStore.getState().setPath([]);
+  }, [doc, path]);
+
+  useEffect(() => {
+    usePeekStore.getState().prune(doc, path);
   }, [doc, path]);
 
   const anyTypes = useMemo(() => inferAnyTypes(ctx, view), [ctx, view]);
@@ -592,17 +620,47 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     [enterSubgraph],
   );
 
-  const onEdgeDoubleClick = useCallback(
-    (e: React.MouseEvent, edge: Edge) => {
-      e.stopPropagation();
+  const insertReroute = useCallback(
+    (edgeId: string, screen: { x: number; y: number }) => {
       const graph = useGraphStore.getState();
-      const at = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const at = screenToFlowPosition(screen);
       const id = graph.addNode(REROUTE_OP, { x: at.x - 40, y: at.y - 20 });
       if (!id) return;
-      if (!graph.insertOnEdge(edge.id, id, "in", "out")) graph.deleteNodes([id]);
+      if (!graph.insertOnEdge(edgeId, id, "in", "out")) graph.deleteNodes([id]);
       else useUiStore.getState().setSelection([id], []);
     },
     [screenToFlowPosition],
+  );
+
+  const openPeek = useCallback((edgeId: string, screen: { x: number; y: number }) => {
+    const ui = useUiStore.getState();
+    const edge = levelView().edges.find((e) => e.id === edgeId);
+    if (!edge) return;
+    const peek = usePeekStore.getState();
+    const existing = findWindowForEdge(peek.windows, edgeId, ui.path);
+    if (existing) {
+      peek.focus(existing.id);
+      flashPeek(wrapper.current, existing.id);
+      return;
+    }
+    const rect = wrapper.current?.getBoundingClientRect();
+    const at = { x: screen.x + 12, y: screen.y + 12 };
+    const doc = useGraphStore.getState().doc;
+    peek.open({
+      edgeId,
+      path: ui.path,
+      from: edge.from,
+      screen: rect ? clampPeekScreen(rect, at, PEEK_DEFAULT_SIZE) : at,
+      view: defaultViewFor(peekSourceOf(doc, ui.path, edge.from).type),
+    });
+  }, []);
+
+  const onEdgeDoubleClick = useCallback(
+    (e: React.MouseEvent, edge: Edge) => {
+      e.stopPropagation();
+      openPeek(edge.id, { x: e.clientX, y: e.clientY });
+    },
+    [openPeek],
   );
 
   // -- 右键菜单（交互清单 P1 #24 #25 #27 + P2 #31）--------------------------
@@ -611,10 +669,20 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     // 右键的节点如果不在选区里，就先把它选上 —— 否则菜单里的动作作用于谁很含糊
     const ui = useUiStore.getState();
     if (!ui.selectedNodes.has(node.id)) ui.setSelection([node.id], []);
+    setEdgeMenu(null);
     setMenu({ nodeId: node.id, x: e.clientX, y: e.clientY });
   }, []);
 
-  const closeMenu = useCallback(() => setMenu(null), []);
+  const onEdgeContextMenu = useCallback((e: React.MouseEvent, edge: Edge) => {
+    e.preventDefault();
+    setMenu(null);
+    setEdgeMenu({ edgeId: edge.id, x: e.clientX, y: e.clientY });
+  }, []);
+
+  const closeMenu = useCallback(() => {
+    setMenu(null);
+    setEdgeMenu(null);
+  }, []);
 
   const menuTargets = useCallback((): string[] => {
     const ui = useUiStore.getState();
@@ -720,6 +788,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         onNodeContextMenu={onNodeContextMenu}
         onNodeDoubleClick={onNodeDoubleClick}
         onEdgeDoubleClick={onEdgeDoubleClick}
+        onEdgeContextMenu={onEdgeContextMenu}
         onPaneClick={closeMenu}
         // 大图只画视野里的节点（§4）。小图不开：开了之后平移会有一帧空窗。
         onlyRenderVisibleElements={nodes.length > VIRTUALIZE_ABOVE}
@@ -773,6 +842,48 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
           </div>
         </ViewportPortal>
       </ReactFlow>
+
+      <EdgePeekLayer />
+
+      {edgeMenu && (
+        <div
+          className="ctxmenu"
+          style={{ left: edgeMenu.x, top: edgeMenu.y }}
+          data-testid="edge-context-menu"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            data-testid="edge-ctx-peek"
+            onClick={() => {
+              openPeek(edgeMenu.edgeId, { x: edgeMenu.x, y: edgeMenu.y });
+              setEdgeMenu(null);
+            }}
+          >
+            查看内容
+          </button>
+          <button
+            type="button"
+            data-testid="edge-ctx-reroute"
+            onClick={() => {
+              insertReroute(edgeMenu.edgeId, { x: edgeMenu.x, y: edgeMenu.y });
+              setEdgeMenu(null);
+            }}
+          >
+            在此插入 Reroute
+          </button>
+          <button
+            type="button"
+            data-testid="edge-ctx-delete"
+            onClick={() => {
+              useGraphStore.getState().disconnect([edgeMenu.edgeId]);
+              setEdgeMenu(null);
+            }}
+          >
+            删除连线
+          </button>
+        </div>
+      )}
 
       {menu && (
         <div
