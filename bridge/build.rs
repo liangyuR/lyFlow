@@ -227,7 +227,25 @@ fn main() {
     }
 
     println!("cargo:rerun-if-changed=lyflow-app.manifest");
+    manifest_for_tests();
     tauri_step();
+}
+
+/// 给**测试** exe 也贴上那份清单。tauri-build 只管 bin 目标，而 tests/host.rs 会把
+/// tao 的窗口代码链进来，那里 import 的是 comctl32 **v6** 才有的入口；没有清单的进程
+/// 拿到的是 system32 里的 v5.82，于是在 main 之前就 STATUS_ENTRYPOINT_NOT_FOUND
+/// （0xC0000139），一行输出都没有。顺带也让测试进程的 ACP 是 UTF-8，和 exe 一致。
+fn manifest_for_tests() {
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") {
+        return;
+    }
+    let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
+        .join("lyflow-app.manifest");
+    println!("cargo:rustc-link-arg-tests=/MANIFEST:EMBED");
+    println!(
+        "cargo:rustc-link-arg-tests=/MANIFESTINPUT:{}",
+        manifest.display()
+    );
 }
 
 /// D9：给 exe 贴带 activeCodePage=UTF-8 的清单。app_manifest 是整份替换而非合并，
