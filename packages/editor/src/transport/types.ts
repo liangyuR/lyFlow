@@ -104,6 +104,20 @@ export interface Transport {
     port: string,
     maxPoints: number,
   ): Promise<ArrayBuffer>;
+  getOutputTensor(
+    runId: string,
+    nodeId: string,
+    port: string,
+    offset: number,
+    count: number,
+  ): Promise<ArrayBuffer>;
+  getOutputIndices(
+    runId: string,
+    nodeId: string,
+    port: string,
+    offset: number,
+    count: number,
+  ): Promise<ArrayBuffer>;
   onExecutionEvent(cb: (e: ExecutionEvent) => void): Promise<Unlisten>;
   onManifestUpdated(cb: (e: ManifestUpdated) => void): Promise<Unlisten>;
   onCoreReloadFailed(cb: (e: CoreReloadFailed) => void): Promise<Unlisten>;

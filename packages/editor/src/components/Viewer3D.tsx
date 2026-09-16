@@ -6,18 +6,21 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import { findBaseCloud, firstCloudPort, type BaseCloud } from "../lib/basecloud";
+import { cacheKey, cloudCache, dropOtherRuns, putCache } from "../lib/cloudCache";
+import { RAMPS, type RampName } from "../lib/ramps";
+import { disposeOverlay, extentOf, shapesOf } from "../lib/shapes2d";
 import { augmentOperators, levelOf, resolveOutput } from "../lib/subgraph";
-import { dialogs } from "../lib/dialogs";
+import { exportCanvasPng } from "../lib/exportPng";
 import { transport } from "../transport";
 import { aggregatedNodes, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
-import { decodeCloud, type CloudPayload, type OutputStat } from "../types/execution";
+import { decodeCloud, type CloudPayload } from "../types/execution";
 import "../styles.viewer.css";
 
 export type ShadingMode = "intensity" | "height" | "normal" | "flat";
-export type RampName = "viridis" | "gray" | "jet";
+export type { RampName } from "../lib/ramps";
 /** 相机模式（G7）。2d = 正交俯视 XY，看剖面用。 */
 export type CameraMode = "3d" | "2d";
 
@@ -33,44 +36,6 @@ interface Display {
 }
 
 const MAX_POINTS_CHOICES = [100_000, 500_000, 2_000_000, 8_000_000];
-
-/** 已取回的点云缓存。键是 runId+node+port+maxPoints，少任何一段都会串味：
- *  少 runId 会在重跑后拿到上次结果，少 maxPoints 会让滑块拖了没反应。 */
-const cloudCache = new Map<string, CloudPayload>();
-
-/** 缓存的**字节**预算，不是条数预算：8M 点一条就是 96MB 坐标 + 32MB 强度，
- *  按条数封顶的话 8 条能攒到 1GB。 */
-const CACHE_BYTES = 256 * 1024 * 1024;
-
-function payloadBytes(p: CloudPayload) {
-  return p.xyz.byteLength + (p.intensity?.byteLength ?? 0);
-}
-
-function cacheKey(runId: string, nodeId: string, port: string, maxPoints: number) {
-  return `${runId}|${nodeId}|${port}|${maxPoints}`;
-}
-
-/** 换了一次运行就把旧运行的条目全丢掉 —— 它们再也不会被命中。 */
-function dropOtherRuns(runId: string) {
-  for (const key of [...cloudCache.keys()]) {
-    if (!key.startsWith(`${runId}|`)) cloudCache.delete(key);
-  }
-}
-
-function putCache(key: string, payload: CloudPayload) {
-  // delete + set 让它变成真正的 LRU：Map.set 命中已有键时不会调整顺序，
-  // 少了这一行，你来回切着看的那片云恰恰是最先被淘汰的那个。
-  cloudCache.delete(key);
-  cloudCache.set(key, payload);
-  let total = 0;
-  for (const p of cloudCache.values()) total += payloadBytes(p);
-  while (total > CACHE_BYTES && cloudCache.size > 1) {
-    const oldest = cloudCache.keys().next().value;
-    if (oldest === undefined) break;
-    total -= payloadBytes(cloudCache.get(oldest)!);
-    cloudCache.delete(oldest);
-  }
-}
 
 interface Scene {
   renderer: THREE.WebGLRenderer;
@@ -189,137 +154,6 @@ function createScene(host: HTMLDivElement): Scene {
   tick();
   return state;
 }
-
-// --------------------------------------------------------- 2D 几何叠画（G7）
-
-/** 叠画一条折线/线段集合。z 全部为 0：这些几何本来就定义在 XY 平面上。 */
-function polyline(points: number[], color: number, loop: boolean): THREE.Line {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(points), 3));
-  const material = new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true });
-  const line = loop ? new THREE.LineLoop(geometry, material) : new THREE.Line(geometry, material);
-  line.renderOrder = 10; // 永远画在点云之上，否则细线会被点糊掉
-  return line;
-}
-
-function disposeOverlay(group: THREE.Group) {
-  for (const child of [...group.children]) {
-    group.remove(child);
-    const line = child as THREE.Line;
-    line.geometry?.dispose();
-    const m = line.material as THREE.Material | THREE.Material[];
-    if (Array.isArray(m)) m.forEach((x) => x.dispose());
-    else m?.dispose();
-  }
-}
-
-/** 这个几何自己有多大。没有点云做尺度参照时拿它当兜底。 */
-function extentOf(out: OutputStat): number {
-  const v = out.value;
-  if (!v) return 0;
-  if (v.kind === "Box2D" && Array.isArray(v.min) && Array.isArray(v.max)) {
-    return Math.max(Math.abs(v.max[0] - v.min[0]), Math.abs(v.max[1] - v.min[1]));
-  }
-  if (v.kind === "Circle2D") return (v.radius ?? 0) * 4;
-  if (v.kind === "Line2D" && v.hasSegment && v.start && v.end) {
-    return Math.hypot(v.end[0] - v.start[0], v.end[1] - v.start[1]);
-  }
-  return 0;
-}
-
-/** 一个输出值 → 若干条线。认不出的 kind 返回空数组（前端不硬编码算子，也不该硬编码到崩）。 */
-function shapesOf(out: OutputStat, color: number, span: number): THREE.Line[] {
-  const v = out.value;
-  if (!v) return [];
-  switch (v.kind) {
-    case "Box2D": {
-      const [x0, y0] = Array.isArray(v.min) ? v.min : [0, 0];
-      const [x1, y1] = Array.isArray(v.max) ? v.max : [0, 0];
-      return [polyline([x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0], color, true)];
-    }
-    case "Line2D": {
-      if (v.hasSegment && v.start && v.end) {
-        return [polyline([v.start[0], v.start[1], 0, v.end[0], v.end[1], 0], color, false)];
-      }
-      const [px, py] = v.point ?? [0, 0];
-      const [dx, dy] = v.dir ?? [1, 0];
-      const n = Math.hypot(dx, dy) || 1;
-      const h = span / 2;
-      return [
-        polyline(
-          [px - (dx / n) * h, py - (dy / n) * h, 0, px + (dx / n) * h, py + (dy / n) * h, 0],
-          color,
-          false,
-        ),
-      ];
-    }
-    case "Circle2D": {
-      const [cx, cy] = v.center ?? [0, 0];
-      const r = v.radius ?? 0;
-      const pts: number[] = [];
-      const SEGMENTS = 72;
-      for (let i = 0; i < SEGMENTS; i += 1) {
-        const t = (i / SEGMENTS) * Math.PI * 2;
-        pts.push(cx + r * Math.cos(t), cy + r * Math.sin(t), 0);
-      }
-      return [polyline(pts, color, true)];
-    }
-    case "Point2D": {
-      const [x, y] = v.p ?? [0, 0];
-      // 十字而不是一个点：单个 Point 在细线材质下根本看不见
-      const s = span * 0.01 || 0.001;
-      return [
-        polyline([x - s, y, 0, x + s, y, 0], color, false),
-        polyline([x, y - s, 0, x, y + s, 0], color, false),
-      ];
-    }
-    default:
-      return [];
-  }
-}
-
-/** matplotlib viridis 的 11 个采样点，线性插值就够看。 */
-const VIRIDIS: [number, number, number][] = [
-  [0.267, 0.005, 0.329],
-  [0.283, 0.141, 0.458],
-  [0.254, 0.265, 0.53],
-  [0.207, 0.372, 0.553],
-  [0.164, 0.471, 0.558],
-  [0.128, 0.567, 0.551],
-  [0.135, 0.659, 0.518],
-  [0.267, 0.749, 0.441],
-  [0.478, 0.821, 0.318],
-  [0.741, 0.873, 0.15],
-  [0.993, 0.906, 0.144],
-];
-
-function viridisRamp(t: number, out: THREE.Color) {
-  const x = Math.max(0, Math.min(1, t)) * (VIRIDIS.length - 1);
-  const i = Math.min(VIRIDIS.length - 2, Math.floor(x));
-  const f = x - i;
-  const a = VIRIDIS[i]!;
-  const b = VIRIDIS[i + 1]!;
-  out.setRGB(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f);
-}
-
-/** 灰度。打印和做对比图时比彩色可靠。 */
-function grayRamp(t: number, out: THREE.Color) {
-  const v = 0.12 + 0.85 * Math.max(0, Math.min(1, t));
-  out.setRGB(v, v, v);
-}
-
-/** 蓝→青→黄→红。饱和度高，找异常点最快。 */
-function jetRamp(t: number, out: THREE.Color) {
-  const x = Math.max(0, Math.min(1, t));
-  if (x < 0.5) out.setRGB(0.15 + 0.1 * x, 0.4 + 1.2 * x, 1.0 - 0.6 * x);
-  else out.setRGB(0.35 + 1.3 * (x - 0.5), 1.0 - 1.2 * (x - 0.5), 0.4 - 0.7 * (x - 0.5));
-}
-
-const RAMPS: Record<RampName, (t: number, out: THREE.Color) => void> = {
-  viridis: viridisRamp,
-  gray: grayRamp,
-  jet: jetRamp,
-};
 
 /** 着色用的标量：强度模式取强度通道，其余取 Z。 */
 function shadingValue(cloud: CloudPayload, mode: ShadingMode, i: number): number {
@@ -455,7 +289,6 @@ export function Viewer3D() {
   const [ramp, setRamp] = useState<RampName>("viridis");
   const [rangeAuto, setRangeAuto] = useState(true);
   const [manualRange, setManualRange] = useState<[number, number]>([0, 1]);
-  const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [pointSize, setPointSize] = useState(1.6);
   const pointSizeRef = useRef(1.6);
   const [cameraMode, setCameraMode] = useState<CameraMode>("3d");
@@ -476,6 +309,8 @@ export function Viewer3D() {
 
   const selected = useUiStore((s) => s.selectedNodes);
   const path = useUiStore((s) => s.path);
+  const pinnedId = useUiStore((s) => s.pinnedNode);
+  const setPinnedId = useUiStore((s) => s.setPinnedNode);
   const doc = useGraphStore((s) => s.doc);
   const nodes = useMemo(() => levelOf(doc, path).nodes, [doc, path]);
   const runId = useExecutionStore((s) => s.runId);
@@ -792,38 +627,7 @@ export function Viewer3D() {
     if (!scene) return;
     // 读 buffer 前立刻重画一帧：换成 preserveDrawingBuffer 的话每一帧都要多付一次代价。
     scene.renderer.render(scene.scene, scene.camera);
-    const url = scene.renderer.domElement.toDataURL("image/png");
-    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*$/, "");
-    const name = (display.nodeId ?? "view").replace(/[^\w.-]+/g, "_");
-    const file = `${name}-${stamp}.png`;
-
-    const pickPath = dialogs().pickPath;
-    if (!pickPath) {
-      // 宿主没有保存对话框，退回让浏览器自己下载
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = file;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      return;
-    }
-    try {
-      const picked = await pickPath({
-        mode: "save",
-        defaultPath: file,
-        filters: [{ name: "PNG", extensions: ["png"] }],
-      });
-      if (typeof picked !== "string") return;
-      const base64 = url.slice(url.indexOf(",") + 1);
-      const binary = atob(base64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-      await transport.writeFileBytes(picked, bytes);
-      useUiStore.getState().showToast(`已导出 ${picked}`);
-    } catch (e) {
-      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
-    }
+    await exportCanvasPng(scene.renderer.domElement, display.nodeId ?? "view");
   };
 
   return (

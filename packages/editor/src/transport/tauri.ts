@@ -119,6 +119,44 @@ export class TauriTransport implements Transport {
     const view = raw as Uint8Array;
     return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
   }
+  async getOutputTensor(
+    runId: string,
+    nodeId: string,
+    port: string,
+    offset: number,
+    count: number,
+  ): Promise<ArrayBuffer> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const raw = await invoke<ArrayBuffer | Uint8Array>("get_output_tensor", {
+      runId,
+      nodeId,
+      port,
+      offset,
+      count,
+    });
+    if (raw instanceof ArrayBuffer) return raw;
+    const view = raw as Uint8Array;
+    return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
+  }
+  async getOutputIndices(
+    runId: string,
+    nodeId: string,
+    port: string,
+    offset: number,
+    count: number,
+  ): Promise<ArrayBuffer> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const raw = await invoke<ArrayBuffer | Uint8Array>("get_output_indices", {
+      runId,
+      nodeId,
+      port,
+      offset,
+      count,
+    });
+    if (raw instanceof ArrayBuffer) return raw;
+    const view = raw as Uint8Array;
+    return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
+  }
   async onExecutionEvent(cb: (e: ExecutionEvent) => void): Promise<Unlisten> {
     const { listen } = await import("@tauri-apps/api/event");
     return listen<ExecutionEvent>("execution-event", (e) => cb(e.payload));

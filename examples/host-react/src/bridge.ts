@@ -3,12 +3,14 @@
 
 import {
   onNodeTransition,
+  peekSourceOf,
   requestPlan,
   startRun,
   useCacheStore,
   useExecutionStore,
   useGraphStore,
   useManifestStore,
+  usePeekStore,
   useUiStore,
   type RunRequest,
   type StateTransition,
@@ -24,6 +26,7 @@ interface HostBridge {
     manifest: typeof useManifestStore;
     execution: typeof useExecutionStore;
     cache: typeof useCacheStore;
+    peek: typeof usePeekStore;
   };
   plan(): Promise<void>;
   run(request?: RunRequest): Promise<void>;
@@ -54,6 +57,7 @@ export function installHostBridge(transport: Transport): void {
       manifest: useManifestStore,
       execution: useExecutionStore,
       cache: useCacheStore,
+      peek: usePeekStore,
     },
     async plan() {
       const g = useGraphStore.getState();
@@ -75,6 +79,7 @@ export function installHostBridge(transport: Transport): void {
       const e = useExecutionStore.getState();
       const u = useUiStore.getState();
       const m = useManifestStore.getState();
+      const p = usePeekStore.getState();
       return {
         transport: m.transportKind,
         manifestStatus: m.status,
@@ -83,6 +88,19 @@ export function installHostBridge(transport: Transport): void {
         filePath: g.filePath,
         dirty: g.dirty,
         selected: [...u.selectedNodes],
+        peek: p.windows.map((w) => {
+          const src = peekSourceOf(g.doc, w.path, w.from);
+          return {
+            id: w.id,
+            edgeId: w.edgeId,
+            view: w.view,
+            locked: !!w.locked,
+            node: w.from.node,
+            port: w.from.port,
+            type: src.type,
+            status: src.status,
+          };
+        }),
         run: {
           runId: e.runId,
           status: e.runStatus,

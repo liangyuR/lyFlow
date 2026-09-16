@@ -5,12 +5,14 @@ import {
   levelOf,
   onNodeTransition,
   pathPrefix,
+  peekSourceOf,
   requestPlan,
   startRun,
   useCacheStore,
   useExecutionStore,
   useGraphStore,
   useManifestStore,
+  usePeekStore,
   useUiStore,
   type RunRequest,
   type StateTransition,
@@ -26,6 +28,7 @@ interface DevBridge {
     manifest: typeof useManifestStore;
     execution: typeof useExecutionStore;
     cache: typeof useCacheStore;
+    peek: typeof usePeekStore;
   };
   /** 立刻编译一次，不等 debounce。验收脚本不想为 150ms 睡一觉。 */
   plan(): Promise<void>;
@@ -79,6 +82,7 @@ export function installDevBridge(transport: Transport): void {
       manifest: useManifestStore,
       execution: useExecutionStore,
       cache: useCacheStore,
+      peek: usePeekStore,
     },
     async plan() {
       const g = useGraphStore.getState();
@@ -103,6 +107,7 @@ export function installDevBridge(transport: Transport): void {
       const u = useUiStore.getState();
       const m = useManifestStore.getState();
       const c = useCacheStore.getState();
+      const p = usePeekStore.getState();
       const level = levelOf(g.doc, u.path);
       return {
         transport: m.transportKind,
@@ -136,6 +141,19 @@ export function installDevBridge(transport: Transport): void {
             },
           ]),
         ),
+        peek: p.windows.map((w) => {
+          const src = peekSourceOf(g.doc, w.path, w.from);
+          return {
+            id: w.id,
+            edgeId: w.edgeId,
+            view: w.view,
+            locked: !!w.locked,
+            node: w.from.node,
+            port: w.from.port,
+            type: src.type,
+            status: src.status,
+          };
+        }),
         preview: {
           active: u.previewing,
           autoRun: u.autoRun,

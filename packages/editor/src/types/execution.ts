@@ -292,3 +292,65 @@ export function decodeCloud(buffer: ArrayBuffer): CloudPayload {
 
   return { pointCount, totalPoints, bounds, xyz, intensity, normals };
 }
+
+export const TENSOR_MAGIC = 0x4e54594c;
+export const INDICES_MAGIC = 0x5849594c;
+
+export interface TensorPayload {
+  rank: number;
+  count: number;
+  offset: number;
+  total: number;
+  shape: number[];
+  data: Float32Array;
+}
+
+export function decodeTensor(buffer: ArrayBuffer): TensorPayload {
+  if (buffer.byteLength < 32) {
+    throw new Error(`张量载荷太短（${buffer.byteLength} 字节），多半不是张量数据`);
+  }
+  const header = new DataView(buffer);
+  const magic = header.getUint32(0, true);
+  if (magic !== TENSOR_MAGIC) {
+    throw new Error(`张量载荷的 magic 不对（0x${magic.toString(16)}），响应不是张量`);
+  }
+  const rank = header.getUint32(4, true);
+  const count = header.getUint32(12, true);
+  const offset = Number(header.getBigUint64(16, true));
+  const total = Number(header.getBigUint64(24, true));
+  const dataOffset = 32 + rank * 8;
+  if (buffer.byteLength < dataOffset + count * 4) {
+    throw new Error(
+      `张量载荷太短（${buffer.byteLength} 字节），装不下 rank=${rank} 与 count=${count}`,
+    );
+  }
+  const shape = Array.from(new BigInt64Array(buffer, 32, rank), Number);
+  const data = new Float32Array(buffer, dataOffset, count);
+  return { rank, count, offset, total, shape, data };
+}
+
+export interface IndicesPayload {
+  count: number;
+  total: number;
+  sourceCloudId: number;
+  values: Int32Array;
+}
+
+export function decodeIndices(buffer: ArrayBuffer): IndicesPayload {
+  if (buffer.byteLength < 24) {
+    throw new Error(`下标载荷太短（${buffer.byteLength} 字节），多半不是下标数据`);
+  }
+  const header = new DataView(buffer);
+  const magic = header.getUint32(0, true);
+  if (magic !== INDICES_MAGIC) {
+    throw new Error(`下标载荷的 magic 不对（0x${magic.toString(16)}），响应不是下标`);
+  }
+  const count = header.getUint32(4, true);
+  const total = header.getUint32(8, true);
+  const sourceCloudId = Number(header.getBigUint64(16, true));
+  if (buffer.byteLength < 24 + count * 4) {
+    throw new Error(`下标载荷太短（${buffer.byteLength} 字节），装不下 count=${count}`);
+  }
+  const values = new Int32Array(buffer, 24, count);
+  return { count, total, sourceCloudId, values };
+}

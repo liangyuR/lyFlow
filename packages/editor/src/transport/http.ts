@@ -37,7 +37,7 @@ function joinUrl(base: string, path: string): string {
 }
 
 /** 走 HTTP/WebSocket 后端的传输。契约见 docs/http-transport.md，
- *  与 C ABI v7 一一对应；阶段 B 的业务服务照它实现即可。 */
+ *  与 C ABI v8 一一对应；阶段 B 的业务服务照它实现即可。 */
 export interface HttpTransportOptions {
   /** 事件流的地址。宿主的 WebSocket 不在 HTTP 端口上时给这一项；
    *  缺省是 baseUrl 换成 ws(s) 之后加 `/lyflow/events`。 */
@@ -182,6 +182,34 @@ export class HttpTransport implements Transport {
     const res = await this.#request(
       `/lyflow/runs/${encodeURIComponent(runId)}/clouds/${encodeURIComponent(nodeId)}/` +
         `${encodeURIComponent(port)}?maxPoints=${maxPoints}`,
+    );
+    return res.arrayBuffer();
+  }
+
+  async getOutputTensor(
+    runId: string,
+    nodeId: string,
+    port: string,
+    offset: number,
+    count: number,
+  ): Promise<ArrayBuffer> {
+    const res = await this.#request(
+      `/lyflow/runs/${encodeURIComponent(runId)}/tensors/${encodeURIComponent(nodeId)}/` +
+        `${encodeURIComponent(port)}?offset=${offset}&count=${count}`,
+    );
+    return res.arrayBuffer();
+  }
+
+  async getOutputIndices(
+    runId: string,
+    nodeId: string,
+    port: string,
+    offset: number,
+    count: number,
+  ): Promise<ArrayBuffer> {
+    const res = await this.#request(
+      `/lyflow/runs/${encodeURIComponent(runId)}/indices/${encodeURIComponent(nodeId)}/` +
+        `${encodeURIComponent(port)}?offset=${offset}&count=${count}`,
     );
     return res.arrayBuffer();
   }

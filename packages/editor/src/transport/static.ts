@@ -89,6 +89,12 @@ export class StaticTransport implements Transport {
   async getOutputCloud(): Promise<ArrayBuffer> {
     return browserOnly("取运行结果");
   }
+  async getOutputTensor(): Promise<ArrayBuffer> {
+    return browserOnly("取运行结果");
+  }
+  async getOutputIndices(): Promise<ArrayBuffer> {
+    return browserOnly("取运行结果");
+  }
   async onExecutionEvent(_cb: (e: ExecutionEvent) => void): Promise<Unlisten> {
     // 这几个不抛：界面启动时无条件订阅，静态模式下静默给个空的取消函数
     // 比让整个编辑器挂在一个 useEffect 里强。真去点运行才会拿到上面那条错误。
