@@ -11,11 +11,12 @@
 |---|---|---|
 | 在哪 | 本仓库的 `packs/*` | 任意目录 |
 | 怎么加入 | `LYFLOW_STD_PACKS`（默认 ON）自动扫，`LYFLOW_PACKS` 按**包名**点名 | `LYFLOW_OP_PACKS` 按**目录**显式列出 |
-| 注册顺序 | 紧跟 `gen.synthetic` | 紧跟 `util.reroute` |
-| 例子 | `packs/std-pointcloud`、`packs/std-ml`、`packs/gap` | 任何自己写的包 |
+| 注册顺序 | 紧跟 `gen.synthetic` | 排在 core 自带的算子全注册完之后（`flow.select` 之后） |
+| 例子 | `packs/std-pointcloud`、`packs/std-ml`、`packs/gap`、`packs/dts` | 任何自己写的包 |
 
-core 本身只有 `gen.synthetic` 与 `util.reroute` 两个算子，不链接任何第三方库
-（[ADR-0014](adr/0014-std-as-pack-core-zero-dep.md)）。
+core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fallback`、`flow.select`
+（后两个是 [ADR-0016](adr/0016-error-as-value-and-lazy-ports.md) 的调度原语）——
+不链接任何第三方库（[ADR-0014](adr/0014-std-as-pack-core-zero-dep.md)）。
 
 仓库内的包不一定默认编：每个包在 `lyflow_op_pack()` 里声明 `DEFAULT ON|OFF`。
 
@@ -75,8 +76,8 @@ $env:LYFLOW_STD_PACKS = "0"
 pnpm check
 ```
 
-不点名就 `packs/*` 一个都不编。manifest 里只剩 `gen.synthetic` 与 `util.reroute`，
-`lyflow_core.dll` 的导入表里只有 KERNEL32 与 CRT。
+不点名就 `packs/*` 一个都不编。manifest 里只剩 `gen.synthetic`、`util.reroute`、
+`flow.fallback`、`flow.select` 四个，`lyflow_core.dll` 的导入表里只有 KERNEL32 与 CRT。
 这一趟是「core 真的零依赖」的唯一证据，也是不装 PCL 就能开发平台本身的路子。
 
 ### 只编某一个仓库内的包
