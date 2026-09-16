@@ -1,0 +1,150 @@
+.peek-tensor {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.peek-tensor__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 8px;
+  flex: 0 0 auto;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-1);
+  font-size: 11px;
+  color: var(--lyflow-fg-2);
+}
+
+.peek-tensor__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.peek-tensor__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+}
+
+.peek-tensor__check input {
+  margin: 0;
+  width: 11px;
+  height: 11px;
+  accent-color: var(--lyflow-accent);
+}
+
+.peek-tensor__eff {
+  padding: 0 4px;
+  border: 1px solid var(--lyflow-border);
+  border-radius: 3px;
+  color: var(--lyflow-fg-1);
+  font-family: var(--lyflow-mono);
+  line-height: 15px;
+}
+
+.peek-tensor__select,
+.peek-tensor__num {
+  padding: 1px 2px;
+  border: 1px solid var(--lyflow-border);
+  border-radius: 3px;
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-fg-1);
+  font-size: 11px;
+}
+
+.peek-tensor__num {
+  width: 58px;
+  font-family: var(--lyflow-mono);
+}
+
+.peek-tensor__num--idx { width: 44px; }
+
+.peek-tensor__stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--lyflow-bg-0);
+}
+
+.peek-tensor__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.peek-tensor__canvas[data-mode="image"] { image-rendering: pixelated; }
+
+.peek-tensor__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 8px 12px;
+  text-align: center;
+  color: var(--lyflow-fg-2);
+  font-size: 12px;
+  background: rgba(20, 22, 26, 0.72);
+}
+
+.peek-tensor__foot {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-top: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-1);
+  color: var(--lyflow-fg-2);
+  font-family: var(--lyflow-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.peek-tensor__msg {
+  margin: 0;
+  padding: 14px 12px;
+  color: var(--lyflow-fg-2);
+  font-size: 12px;
+}
+
+.peek-tensor__stats {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.peek-tensor__stats table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.peek-tensor__stats th,
+.peek-tensor__stats td {
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--lyflow-border);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+  font-family: var(--lyflow-mono);
+}
+
+.peek-tensor__stats th {
+  width: 1%;
+  color: var(--lyflow-fg-2);
+  font-weight: normal;
+}
+
+.peek-tensor__stats td { color: var(--lyflow-fg-0); }
