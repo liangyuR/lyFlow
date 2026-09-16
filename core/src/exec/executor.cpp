@@ -135,6 +135,7 @@ class EventSink {
     w.beginObject();
     w.field("elementCount", static_cast<std::int64_t>(0));
     w.field("byteSize", static_cast<std::int64_t>(0));
+    w.field("outputsAvailable", false);
     w.field("reason", std::string("not_demanded"));
     w.endObject();
     end(w);
@@ -168,6 +169,7 @@ class EventSink {
     if (cached) w.field("cached", true);
     if (bypassed) w.field("bypassed", true);
     if (provided) w.field("provided", true);
+    w.field("outputsAvailable", true);
     w.key("outputs");
     w.beginArray();
     for (const auto& o : outputs) {
@@ -824,8 +826,10 @@ class Scheduler {
         if (bypassed) continue;
         // 算子必须把声明过的输出端口都填上。少填了是算子的 bug，早点炸在这里，
         // 好过让下游收到一个空 Data 再报「上游没有产出」。
-        return Status::Error(Phase::Execute, "internal",
-                             "算子没有写输出端口 '" + p.name + "'", {}, p.name);
+        return Status::Error(Phase::Execute, "output_not_written",
+                             "算子没有写输出端口 '" + p.name +
+                                 "'：声明过的每个输出端口都必须写，Port.required 只对输入有效",
+                             {}, p.name);
       }
       const std::string& want = effectiveType(node.outputTypes, p.name, p.type);
       const Data::Kind expected = kindFromTypeName(want);

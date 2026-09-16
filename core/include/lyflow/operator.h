@@ -65,7 +65,6 @@ class Inputs {
   const std::unordered_map<std::string, Data>* values_;
 };
 
-/// 输出端口。没写的端口视为算子的 bug，执行器会报 internal。
 class Outputs {
  public:
   explicit Outputs(std::unordered_map<std::string, Data>& values) : values_(&values) {}

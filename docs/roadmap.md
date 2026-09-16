@@ -157,6 +157,7 @@ C ABI 升到 v4：加了 `lyflow_plan` / `lyflow_cache_clear` / `lyflow_cache_st
 - [x] 子图 / 复合算子：C++ compile 期展开成平图，路径式节点 id，参数提升，库算子目录
 - [x] Live preview：源头抽稀的 preview run，独立缓存命名空间
 - [x] headless CLI `lyflow`：run / validate / plan / migrate / manifest / dump / sweep / diff，JSON Lines 事件流
+      （M5 又加了 `eval` 与 `perturb`，见下）
 - [x] 参数扫描（P2 #34）、图 diff（#36）、大图性能（#37）；分组框（#32）以子图取代
 
 产出：一条真实任务能用「库算子 + CLI」跑在无 GUI 的机器上。
@@ -239,7 +240,52 @@ gap 领域包从 `xyz-gap-inspector/lyflow/` 搬进本仓库的 `packs/gap/`，�
   `third_party/onnxruntime/`。缺了 CMake 直接 FATAL —— 这是设计（不静默少一个算子），
   但对第一次 clone 的人是一道额外的手续。
 
-## M5 — 外延（只列方向，动工前再写计划）
+## M5 — 能被 Agent 用 ✅
+
+计划见 [m5-plan.md](m5-plan.md)，验收见 [m5-acceptance.md](m5-acceptance.md)，
+决定见 [ADR-0020](adr/0020-eval-and-perturb-as-cli.md) 与 [ADR-0021](adr/0021-mcp-as-transport-consumer.md)。
+目标：**一个只拿得到 CLI 或 MCP、拿不到仓库源码的 Agent，能独立完成「给一组测点设计图并调稳参数」**，
+过程中不用自己写解析器、批跑器或评估脚本。范围来自一次真实任务的复盘（12 个 Python 脚本里
+至少一半是重复劳动，两版合成位移脚本给出错误结论还不报错）。
+
+- [x] manifest 加 `preconditions`，gap 包 26 个算子全部填；事件加 `outputsAvailable`；
+      新错误码 `output_not_written`
+- [x] `lyflow eval`：样本集 × 参数组 → **值路径**指标 → 内建统计（含 `--holdout` / `--group-by`）；
+      `sweep` 改成它的一层壳
+- [x] `edit.translate_region` 标准算子 + `lyflow perturb`：图手术插节点 → 轴扫描位移 →
+      每样本报斜率与正负两侧斜率，抓「读数不响应」与「取绝对值折叠」两种失效
+- [x] [agent-tuning.md](agent-tuning.md)：给只有 CLI/MCP 的人与 Agent 的工作法
+- [x] `packages/mcp`：对着 `/lyflow/*` HTTP 契约的 MCP 服务（stdio，11 个工具、8 类 resource），
+      `eval` / `perturb` / `diff_graphs` 起本地 CLI；输出一律裁过（点云只给统计量，
+      `eval_row` 落盘给路径）。不依赖 `@lyflow/editor`，同一个二进制既接 test-server
+      也接阶段 B 的业务服务（[mcp.md](mcp.md)、[ADR-0021](adr/0021-mcp-as-transport-consumer.md)）
+- [x] 子代理盲测：只给 MCP 服务、[agent-tuning.md](agent-tuning.md) 与数据路径，
+      在仓库外重做点 4/4_4 的 `distThresh` 调参与 Audio_1 的灵敏度判断。
+      21 次 MCP 调用、1 个输入数据脚本、0 个解析/统计脚本，结论比真实任务更细
+      （点 4 在 0.3~0.4 到平台，4_4 要 0.6~0.8；Audio_1 的读数**确实响应**，
+      不响应是固定选区跟不上游走 0.9 mm 的 0.1 mm 窄缝）
+
+验收：`pnpm check` 与 `pnpm e2e`（332/332）全绿；`lyflow eval` 零脚本复现真实任务 19 个点的 std 表；
+`perturb` 抓出点 7 `gap.flush` 取绝对值的符号折叠（51/51）与点 1 的 1.000 mm/mm 斜率。
+
+**盲测暴露、已补上的**（m5-plan §8 第 3 条：暴露出来的才加）：
+- [x] `perturb` 逐样本斜率落盘：CLI 的 `perturb_sample` 本来就在 stdout，MCP 现在把整份写进
+      `samplesPath`（`samples.jsonl`）；`eval` / `perturb` 的失败清单加 `failuresLimit`
+      （默认 20，`0` 表示一条都不回、只给路径）
+- [x] `eval` / `perturb` 共用的样本集目录模式：`--samples-dir <root> --bind-pair <a>,<b>
+      --pattern <globA>,<globB> [--sample-subdir] [--sort-by name|mtime] [--split-half <tagKey>]`
+      加 `--samples-jsonl-out`。按帧目录名里的 `dd-MM-yyyy-HH-mm-ss` 排序，读不出退字典序
+- [x] MCP `eval` 的 `compact` 返回（默认开，一组一行）；`--csv` 在 `eval` / `perturb` 上都有了
+      对应字段，`mcp.md` 与 `agent-tuning.md` §7 把每条 CLI 选项逐条对齐（含「MCP 不提供」）
+- [x] 文档补「`--after` 插在被 `camera` 选中的那一路相机之后、`camera=both` 时两路各跑一次」
+      与 region / axis 的位移是米（同一句也写进 `edit.translate_region` 的 `doc` 与 `perturb` 的 USAGE）
+
+**仍未做的**：
+- `--region` 允许 `pointFrom: <node>:<port>` 让刀口逐帧跟锚点（平台级引用，不违背 G7）
+- `list_metrics(graphPath)`
+- `outputsAvailable` 的业务侧 harvest 与 `devbridge.ts` 快照透出（留给阶段 B）
+
+## M5 之后 — 外延（只列方向，动工前再写计划）
 
 - 第二种数据域 **Image**：`Data::Kind::Image`、2D 视图、OpenCV 算子按 PCL 同样的边界规则接入。
   `Tensor` 与 `ml.onnx_run` 已经就位，图像推理不用再造一遍。

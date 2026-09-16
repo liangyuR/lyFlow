@@ -16,6 +16,9 @@ v8 加的两个取数入口见 [ADR-0019](adr/0019-output-tensor-and-indices-ove
   真正大的那一样（点云）走二进制。
 
 参考实现：[`packages/editor/test-server/`](../packages/editor/test-server/)（Node，零依赖，起 `lyflow` CLI）。
+客户端这一侧除了 `@lyflow/editor`，还有 [`packages/mcp`](../packages/mcp/) —— 给 Agent 用的 MCP 服务，
+按这一份独立实现了一遍（[mcp.md](mcp.md)、[ADR-0021](adr/0021-mcp-as-transport-consumer.md)）。
+所以这份契约有两个互不依赖的消费方盯着，写歪了会有人先撞上。
 
 ---
 

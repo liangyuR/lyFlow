@@ -15,6 +15,13 @@ C++ 侧算子注册表导出的机器可读描述。前端据此生成节点搜�
   "keywords": ["downsample", "降采样", "体素"],
   "doc": "用体素栅格对点云降采样，每个体素保留质心。",
 
+  // 本算子成立的前提与明确不适用的情形。给使用者与 Agent 看，Inspector 在 doc 下方
+  // 以「适用前提」列出。没什么可写的就不出现这一项。写法见 docs/op-packs.md。
+  "preconditions": [
+    "每个体素只留质心，原始点被丢弃；后续要逐点强度或法线的算子得接在它前面。",
+    "叶子尺寸接近点间距时等于没降采样，远大于特征尺度时会把特征一起抹平。"
+  ],
+
   "inputs": [
     { "name": "cloud", "type": "PointCloud", "label": "Cloud", "required": true }
   ],

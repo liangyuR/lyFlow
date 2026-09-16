@@ -169,6 +169,7 @@ struct OperatorDesc {
   std::string category;                   // 用 / 分层，决定搜索面板树形结构
   std::vector<std::string> keywords;
   std::string doc;
+  std::vector<std::string> preconditions;
 
   std::vector<Port> inputs;
   std::vector<Port> outputs;

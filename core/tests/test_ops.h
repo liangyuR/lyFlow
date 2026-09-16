@@ -40,6 +40,10 @@ inline Status anyPassCompute(const Inputs& inputs, const ParamView&, Outputs& ou
   return Status::Ok();
 }
 
+inline Status noOutputCompute(const Inputs&, const ParamView&, Outputs&, ExecContext&) {
+  return Status::Ok();
+}
+
 // ------------------------------------------------------------ test.sleep
 inline Status sleepCompute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                            ExecContext& ctx) {
@@ -234,6 +238,19 @@ inline void ensureTestOps() {
       op.outputs = {Port{"out", "Any", "Out", "", true}};
       op.capabilities = {true, false, true};
       op.compute = &ops::anyPassCompute;
+      r.addOperator(std::move(op));
+    }
+    {
+      OperatorDesc op;
+      op.id = "test.no_output";
+      op.version = "1.0.0";
+      op.label = "No Output";
+      op.category = "Test";
+      op.doc = "只在测试里注册：声明了输出端口却一个都不写。";
+      op.inputs = {cloudIn};
+      op.outputs = {cloudOut};
+      op.capabilities = {false, false, true};
+      op.compute = &ops::noOutputCompute;
       r.addOperator(std::move(op));
     }
     {  // 并行验收要的是墙钟时间这一个可观测量，真算子的耗时随机器浮动

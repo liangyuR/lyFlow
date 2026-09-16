@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -867,7 +868,6 @@ TEST_CASE("gap.notch_width 对面翼面拟不出来时面差无效、开口照�
   REQUIRE(call.run("gap.notch_width", {{"refNear", Value::number(20.0)}, {"refFar", Value::number(25.0)}}).ok);
   CHECK(call.out("gap").asMeasurement()->ok);
   CHECK_FALSE(call.out("flush").asMeasurement()->ok);
-  // 声明过的输出端口一个都不能少，否则执行器报 internal（点 3 的合成位移上踩到过）。
   CHECK(call.out("refLine").asLine2D() != nullptr);
   CHECK(call.out("flushSegment").asLine2D() != nullptr);
   CHECK(call.out("qualityRef").asRecord() != nullptr);
@@ -895,6 +895,26 @@ PointCloud flatCloud(double yMm) {
   PointCloud c;
   for (int i = 0; i <= 100; ++i) c.push(mmf(0.1 * i), mmf(yMm), 0.0f);
   return c;
+}
+
+struct Uh {
+  float u;
+  float h;
+};
+
+const Uh kProfileSamples[4] = {{0.001f, 0.010f}, {0.002f, 0.012f}, {0.003f, 0.009f},
+                               {0.004f, 0.011f}};
+
+void writeAsciiPcd(const std::filesystem::path& file, bool profileLayout) {
+  std::ofstream out(file);
+  out << "# .PCD v0.7 - Point Cloud Data file format\n"
+      << "VERSION 0.7\nFIELDS x y z rgb\nSIZE 4 4 4 4\nTYPE F F F F\nCOUNT 1 1 1 1\n"
+      << "WIDTH 4\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\nPOINTS 4\nDATA ascii\n";
+  for (const Uh& s : kProfileSamples) {
+    const float y = profileLayout ? s.h : 0.0f;
+    const float z = profileLayout ? 0.0f : s.h;
+    out << s.u << " " << y << " " << z << " 0\n";
+  }
 }
 
 }  // namespace
@@ -959,4 +979,51 @@ TEST_CASE("gap.camera_consistency mode=off 不算，也不拦") {
   REQUIRE(q != nullptr);
   CHECK_FALSE(q->data["evaluated"].get<bool>());
   CHECK_FALSE(q->data["exceeded"].get<bool>());
+}
+
+TEST_CASE("gap.load_profile_pair 的 layout=profile 读出来与 sensor 布局逐点一致") {
+  const std::filesystem::path dir =
+      std::filesystem::temp_directory_path() / "lyflow-gap-layout-test";
+  std::filesystem::create_directories(dir);
+  const std::filesystem::path sensorPcd = dir / "sensor.pcd";
+  const std::filesystem::path profilePcd = dir / "profile.pcd";
+  writeAsciiPcd(sensorPcd, /*profileLayout=*/false);
+  writeAsciiPcd(profilePcd, /*profileLayout=*/true);
+
+  const auto load = [](const std::filesystem::path& file, const char* layout) {
+    Call call;
+    REQUIRE(call.run("gap.load_profile_pair",
+                     {
+                         {"source", Value::text("files")},
+                         {"primaryFile", Value::text(file.string())},
+                         {"secondaryFile", Value::text(file.string())},
+                         {"layout", Value::text(layout)},
+                     })
+                .ok);
+    return call;
+  };
+
+  Call sensor = load(sensorPcd, "sensor");
+  Call profile = load(profilePcd, "profile");
+
+  for (const char* port : {"primary", "secondary"}) {
+    CAPTURE(port);
+    const PointCloud* a = sensor.out(port).asCloud();
+    const PointCloud* b = profile.out(port).asCloud();
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+    REQUIRE(a->pointCount() == 4);
+    REQUIRE(b->pointCount() == a->pointCount());
+    for (std::size_t i = 0; i < a->pointCount(); ++i) {
+      CAPTURE(i);
+      CHECK(b->xyz[i * 3] == doctest::Approx(a->xyz[i * 3]));
+      CHECK(b->xyz[i * 3 + 1] == doctest::Approx(a->xyz[i * 3 + 1]));
+      CHECK(b->xyz[i * 3 + 2] == doctest::Approx(a->xyz[i * 3 + 2]));
+    }
+    CHECK(a->xyz[1] == doctest::Approx(0.0f));
+    CHECK(b->xyz[2] == doctest::Approx(kProfileSamples[0].h));
+  }
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
 }

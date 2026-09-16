@@ -205,6 +205,13 @@ void registerMeasureReference(Registry& r) {
   op.doc =
       "整条主路径的黑盒实现：直接调 MeasurementEngine::measure。"
       "与拆分算子并存，用来在同一张图里 A/B（G5）。日志里带一份 quality JSON。";
+  op.preconditions = {
+      "黑盒参考实现：整条主路径在 MeasurementEngine 里跑完，图上改任何上游算子都不影响"
+      "它，只有 configPath 与两片输入云算数。",
+      "输入必须是传感器 XZ 帧的原始剖面，不要接 gap.to_measurement_frame 之后的云。",
+      "只用来 A/B 对照：save_template 与 save_result 被强制关掉，它不会写模板也不会存对"
+      "齐结果。",
+  };
   op.inputs = {
       Port{"primary", "PointCloud", "Primary", "Master 剖面，传感器 XZ 帧。", true},
       Port{"secondary", "PointCloud", "Secondary", "Slave 剖面，传感器 XZ 帧。", true},

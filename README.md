@@ -60,6 +60,8 @@ C++ 生成的 `OperatorManifest`，Rust 转发给前端。**加新算子只改 C
 | [docs/m3-acceptance.md](docs/m3-acceptance.md) | M3 逐条验收记录（含未验证项与偏离决策） |
 | [docs/m4-plan.md](docs/m4-plan.md) | M4 实施计划：子图、live preview、headless CLI、大图性能 |
 | [docs/m4-acceptance.md](docs/m4-acceptance.md) | M4 逐条验收记录（含未验证项与偏离决策） |
+| [docs/agent-tuning.md](docs/agent-tuning.md) | 只拿得到 CLI/MCP 时，给一组测点调稳参数的工作法 |
+| [docs/mcp.md](docs/mcp.md) | MCP 服务：怎么起、工具一览、`.mcp.json` 片段、明确不做的事 |
 | [docs/adr/](docs/adr/) | 架构决策记录 |
 | [schema/](schema/) | GraphDoc / OperatorManifest / ExecutionEvent 的 JSON Schema + 已校验的示例 |
 
@@ -76,6 +78,7 @@ C++ 生成的 `OperatorManifest`，Rust 转发给前端。**加新算子只改 C
 core/     C++ 核心：算子注册表 + manifest 导出 + 校验/展开/编译/执行 + 结果仓。编成 DLL
 bridge/   Rust 桥接层：Tauri 壳（lyflow-app）与 headless CLI（lyflow），共用 core_ffi
 packages/editor/  @lyflow/editor：节点编辑器 + 3D 预览，一个可嵌进任意 React 宿主的组件
+packages/mcp/     @lyflow/mcp：给 Agent 用的 MCP 服务（stdio），消费同一份 HTTP 契约 + 本地 CLI
 app/      Tauri 壳：入口、文件对话框、窗口标题、验收窗口桥
 examples/host-react/  最小 Vite + React 宿主，经 HttpTransport 连后端
 schema/   三份 JSON Schema —— 跨语言契约的真实来源
@@ -113,7 +116,7 @@ pnpm app:dev      # 浏览器模式，状态栏会标「静态快照」提示数
 一条命令验完整条链路：
 
 ```bash
-pnpm check         # C++ 编译 + 自检 + core 测试 → schema 校验 → cargo test → CLI → 前端 build
+pnpm check         # C++ 编译 + 自检 + core 测试 → schema 校验 → cargo test → CLI → 前端 build → MCP
 pnpm e2e           # CDP 驱动真实 app 的端到端验收（自己起 tauri dev，跑完自己收尾）
 pnpm e2e:http      # 另一条线：Node 桩服务器 + 系统 Chrome + examples/host-react
 pnpm e2e:packaged  # 同一套断言，但跑的是 tauri build 的产物在一个干净目录里的拷贝
@@ -143,8 +146,27 @@ lyflow manifest [--check]
 lyflow dump     graph.lyflow.json nodeId:port out.pcd [--format binary|ascii|binary_compressed]
 lyflow sweep    graph.lyflow.json --param nodeId.param=start:end:steps [--param ...]
                                   --metric nodeId:port.elementCount [--csv out.csv]
+lyflow eval     graph.lyflow.json <样本集>
+                                  [--params sets.json] [--param n.p=start:end:steps]...
+                                  --metric <值路径> [--metric ...] [--holdout tag=value]
+                                  [--group-by tag] [--csv out.csv]
+lyflow perturb  graph.lyflow.json --after nodeId:port --region <选区 JSON>
+                                  --axis x|y|z=start:end:steps --metric <值路径>
+                                  <样本集> [--expect slope] [--tolerance v]
 lyflow diff     a.lyflow.json b.lyflow.json [--json]
+
+<样本集> 三选一，eval 与 perturb 共用：
+  --samples samples.jsonl
+  --samples-glob pat --bind n.p
+  --samples-dir root --bind-pair n.pA,n.pB --pattern globA,globB
+                [--sample-subdir name] [--sort-by name|mtime] [--split-half tagKey]
 ```
+
+`eval` 与 `perturb` 的 `--metric` 是**值路径**：`outputs.gap`、`nodes.n_fit.quality.rmsResidualMm`、
+`nodes.v.elementCount`、`run.durationMs`。路径拼错时 stderr 会列出这张图上所有可用的标量路径
+（[ADR-0020](docs/adr/0020-eval-and-perturb-as-cli.md)）。
+样本集的目录模式（`--samples-dir`）把「双相机配对 + 按时间前后各半打 tag」也内建了，
+不用再为每个测点写生成脚本。用法见 [docs/agent-tuning.md](docs/agent-tuning.md)。
 
 几个例子：
 
@@ -160,9 +182,35 @@ lyflow run demo.lyflow.json --set n_voxel.leafSize='[0.02,0.02,0.02]'
 lyflow sweep demo.lyflow.json --param n_voxel.minPointsPerVoxel=1:5:5 \
              --metric n_voxel:cloud.elementCount --csv sweep.csv
 
+# 一组样本 × 一组参数 → 指标 → 内建统计，按时间前后各半留出
+# 样本集直接指采集目录：一帧一个子目录，两个 glob 配成双相机一帧
+lyflow eval demo.lyflow.json --samples-dir kun10/sensor --sample-subdir 4 \
+            --bind-pair n_load.primaryFile,n_load.secondaryFile \
+            --pattern "*Master*.pcd,*Slave*.pcd" --split-half half \
+            --param n_fit.distThresh=0.2:0.8:4 --metric outputs.gap --holdout half=b
+
+# 合成位移：在源头之后插一个 edit.translate_region，看读数跟不跟得上
+lyflow perturb demo.lyflow.json --after n_frame_s:cloud \
+            --region '{"kind":"halfspace","point":[0.0134,0,0],"normal":[1,0,0]}' \
+            --axis x=0:0.0006:5 --samples frames.jsonl --metric outputs.gap --expect 1000
+
 # 只移动了节点位置的两份图，diff 输出为空（ui 不算）
 lyflow diff before.lyflow.json after.lyflow.json
 ```
+
+## 给 Agent 用（MCP）
+
+`@lyflow/mcp`（[packages/mcp/](packages/mcp/)）是一个 stdio 的 MCP 服务：
+**描述、校验、执行走 [HTTP 契约](docs/http-transport.md)，`eval` / `perturb` / `diff` 起本地 `lyflow`**。
+它是那份契约的又一个消费方，不是第四种传输（[ADR-0021](docs/adr/0021-mcp-as-transport-consumer.md)），
+所以同一个二进制既能接仓库里的桩服务器，也能接阶段 B 的业务服务 —— 换后端只改一个环境变量。
+
+11 个工具：`list_operators` / `get_operator` / `list_port_types` / `validate_graph` /
+`plan_graph` / `run_graph` / `get_node_outputs` / `summarize_output` / `eval` / `perturb` / `diff_graphs`。
+输出一律裁过（Agent 每次调用都在花上下文）：点云只给点数、包围盒、每通道 min/max/mean 与前几个点，
+`eval` 的统计默认压成一行一组（`compact`）、`eval_row` 与 `perturb_sample` 落盘给路径。
+起法、`.mcp.json` 片段与每个工具的返回形状见 [docs/mcp.md](docs/mcp.md)，
+CLI 选项与 MCP 字段的逐条对照见 [docs/agent-tuning.md](docs/agent-tuning.md) §7。
 
 ## 库算子（可复用的子图）
 
@@ -201,7 +249,7 @@ app 盯着这个目录，工具栏的「库」按钮也能手动重扫。
 - **live preview。** 拖参数时发一次抽稀过的 run，3D 视图跟手；松手补一次正式运行。
   预览结果进独立的缓存命名空间，绝不会被当成正式结果
   （[ADR-0011](docs/adr/0011-preview-as-decimated-run.md)）。
-- **headless CLI。** `lyflow run/validate/plan/migrate/manifest/dump/sweep/diff`，
+- **headless CLI。** `lyflow run/validate/plan/migrate/manifest/dump/sweep/eval/perturb/diff`，
   JSON Lines 事件流，与桌面同一条代码路径（[ADR-0012](docs/adr/0012-headless-cli.md)）。
 - **大图能用。** 300 节点的图打开 < 1 s，拖动 ≥ 30 fps；执行事件按 16 ms 合并。
 

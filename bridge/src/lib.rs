@@ -3,7 +3,9 @@
 
 pub mod cli;
 pub mod core_ffi;
+mod eval;
 pub mod graph;
+mod perturb;
 pub mod ulid;
 
 #[cfg(feature = "desktop")]

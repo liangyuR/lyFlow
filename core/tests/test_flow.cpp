@@ -56,6 +56,8 @@ TEST_CASE("主路径成功时备用闭包一次 compute 都不调") {
   CHECK(log.finalState("n_b2") == "skipped");
   CHECK(log.nodeEvent("n_b", "skipped")["stats"]["reason"] == "not_demanded");
   CHECK(log.nodeEvent("n_b2", "skipped")["stats"]["reason"] == "not_demanded");
+  CHECK(log.nodeEvent("n_b", "skipped")["stats"]["outputsAvailable"] == false);
+  CHECK(log.nodeEvent("n_fb", "done")["stats"]["outputsAvailable"] == true);
   CHECK(log.ofKind("plan_extended").empty());
 
   // run_started 只列非 deferred 节点

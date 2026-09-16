@@ -12,7 +12,7 @@
 using namespace lyflow;
 using namespace lyflow::test;
 
-TEST_CASE("包里的 18 个算子都注册了，且都带 pack 标记") {
+TEST_CASE("包里的 19 个算子都注册了，且都带 pack 标记") {
   const auto problems = ensureRegistry().validate();
   for (const auto& p : problems) MESSAGE(p);
   CHECK(problems.empty());
@@ -27,6 +27,7 @@ TEST_CASE("包里的 18 个算子都注册了，且都带 pack 标记") {
       "transform.apply",       "util.merge",
       "filter.crop_box2d",     "fit.line_2d",
       "fit.circle_2d",         "register.icp_2d",
+      "edit.translate_region",
   };
   for (const auto& id : expected) {
     CAPTURE(id);
@@ -224,4 +225,116 @@ TEST_CASE("迁移链：v1 的 random_sample 图产出 migration 诊断") {
   CHECK(migration["params"].contains("count") == false);
   CHECK(migration["params"]["seed"] == 9);
   CHECK(migration["notes"].size() >= 1);
+}
+
+TEST_CASE("edit.translate_region：半空间只推选中那一侧，通道与点序不动") {
+  const Json doc = makeGraph(
+      {
+          {"g", "gen.synthetic", Json{{"pointCount", 5000}, {"seed", 4101}}},
+          {"n", "features.normals"},
+          {"t", "edit.translate_region",
+           Json{{"regionKind", "halfspace"},
+                {"point", {0.0, 0.0, 0.0}},
+                {"normal", {1.0, 0.0, 0.0}},
+                {"translation", {0.25, -0.125, 0.5}}}},
+      },
+      {{"g.cloud", "n.cloud"}, {"n.cloud", "t.cloud"}});
+
+  Session session(doc);
+  RunLog& log = session.wait();
+  REQUIRE(log.runStatus() == "ok");
+
+  auto& store = exec::ResultStore::instance();
+  Data before, after;
+  REQUIRE(store.get(session.runId(), "n", "cloud", before));
+  REQUIRE(store.get(session.runId(), "t", "cloud", after));
+  const PointCloud& a = *before.asCloud();
+  const PointCloud& b = *after.asCloud();
+
+  REQUIRE(b.pointCount() == a.pointCount());
+  REQUIRE(b.hasIntensity());
+  REQUIRE(b.hasNormals());
+  CHECK(b.intensity == a.intensity);
+  CHECK(b.normals == a.normals);
+
+  std::size_t moved = 0, kept = 0;
+  for (std::size_t i = 0; i < a.pointCount(); ++i) {
+    const float x = a.xyz[i * 3], y = a.xyz[i * 3 + 1], z = a.xyz[i * 3 + 2];
+    if (x > 0.0f) {
+      ++moved;
+      CHECK(b.xyz[i * 3] == doctest::Approx(x + 0.25f));
+      CHECK(b.xyz[i * 3 + 1] == doctest::Approx(y - 0.125f));
+      CHECK(b.xyz[i * 3 + 2] == doctest::Approx(z + 0.5f));
+    } else {
+      ++kept;
+      CHECK(b.xyz[i * 3] == x);
+      CHECK(b.xyz[i * 3 + 1] == y);
+      CHECK(b.xyz[i * 3 + 2] == z);
+    }
+  }
+  CHECK(moved > 0);
+  CHECK(kept > 0);
+}
+
+TEST_CASE("edit.translate_region：盒选区是闭区间，盒外的点一动不动") {
+  const Json doc = makeGraph(
+      {
+          {"g", "gen.synthetic", Json{{"pointCount", 5000}, {"seed", 4102}}},
+          {"t", "edit.translate_region",
+           Json{{"regionKind", "box"},
+                {"boxMin", {-0.2, -0.2, -0.2}},
+                {"boxMax", {0.2, 0.2, 0.2}},
+                {"translation", {1.5, 0.0, 0.0}}}},
+      },
+      {{"g.cloud", "t.cloud"}});
+
+  Session session(doc);
+  RunLog& log = session.wait();
+  REQUIRE(log.runStatus() == "ok");
+
+  auto& store = exec::ResultStore::instance();
+  Data before, after;
+  REQUIRE(store.get(session.runId(), "g", "cloud", before));
+  REQUIRE(store.get(session.runId(), "t", "cloud", after));
+  const PointCloud& a = *before.asCloud();
+  const PointCloud& b = *after.asCloud();
+
+  REQUIRE(b.pointCount() == a.pointCount());
+  CHECK(b.intensity == a.intensity);
+
+  std::size_t moved = 0, kept = 0;
+  for (std::size_t i = 0; i < a.pointCount(); ++i) {
+    const float x = a.xyz[i * 3], y = a.xyz[i * 3 + 1], z = a.xyz[i * 3 + 2];
+    const bool inside = x >= -0.2f && x <= 0.2f && y >= -0.2f && y <= 0.2f && z >= -0.2f &&
+                        z <= 0.2f;
+    if (inside) {
+      ++moved;
+      CHECK(b.xyz[i * 3] == doctest::Approx(x + 1.5f));
+    } else {
+      ++kept;
+      CHECK(b.xyz[i * 3] == x);
+    }
+    CHECK(b.xyz[i * 3 + 1] == y);
+    CHECK(b.xyz[i * 3 + 2] == z);
+  }
+  CHECK(moved > 0);
+  CHECK(kept > 0);
+}
+
+TEST_CASE("edit.translate_region：零法向是 bad_param") {
+  const Json doc = makeGraph(
+      {
+          {"g", "gen.synthetic", Json{{"pointCount", 1000}, {"seed", 4103}}},
+          {"t", "edit.translate_region",
+           Json{{"regionKind", "halfspace"}, {"normal", {0.0, 0.0, 0.0}}}},
+      },
+      {{"g.cloud", "t.cloud"}});
+
+  Session session(doc);
+  RunLog& log = session.wait();
+  CHECK(log.runStatus() == "error");
+  const Json e = log.nodeEvent("t", "error");
+  REQUIRE_FALSE(e.empty());
+  CHECK(e["error"]["code"] == "bad_param");
+  CHECK(e["error"]["paramPath"] == "normal");
 }

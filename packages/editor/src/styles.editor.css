@@ -289,6 +289,28 @@
   font-size: 12px;
 }
 
+.insp__precond {
+  margin: 8px 0 0;
+  color: var(--lyflow-fg-1);
+  font-size: 12px;
+}
+
+.insp__precond-title {
+  margin: 0 0 4px;
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.insp__precond ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.insp__precond li {
+  margin-bottom: 3px;
+}
+
 .insp__warn {
   margin: 8px 0 0;
   padding: 6px 8px;

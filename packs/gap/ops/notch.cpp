@@ -625,6 +625,13 @@ void registerNotchWidth(Registry& r) {
       "缝闭合时读数是两侧圆边在该深度的固有宽度（点 1 约 1.4 mm），用 gapOffset 归零；"
       "缝张开 g，读数就加 g。levelDepth 要小于闭合时缝角到基准线的深度（quality 里的 "
       "cornerDepthMm），否则报 notch_too_shallow。";
+  op.preconditions = {
+      "levelDepth 必须落在立边高度内：要小于闭合时缝角到基准翼面线的深度（quality 的 "
+      "cornerDepthMm），否则报 notch_too_shallow。",
+      "缓坡末端没有圆边下凹的缝不适用 —— 那里的最深点不是缝角，切一刀也穿不出去。",
+      "读数是「两侧圆边在该深度的固有宽度 + 张开量」，不是绝对间隙；要先在闭合件上用 "
+      "gapOffset 归零才有意义。",
+  };
   op.inputs = {
       Port{"primary", "PointCloud", "Primary", "整体 ROI 裁过的 Master 云（测量帧）。", true},
       Port{"secondary", "PointCloud", "Secondary", "整体 ROI 裁过的 Slave 云（测量帧）。", true},

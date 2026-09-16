@@ -125,6 +125,7 @@ export interface NodeStats {
   bypassed?: boolean;
   /** 输出由宿主注入，compute 没有被调用（ADR-0017）。 */
   provided?: boolean;
+  outputsAvailable?: boolean;
   /** state=skipped 的机器可读原因。目前只有 `not_demanded`（ADR-0016）：
    *  这个节点只被惰性端口依赖，而那条端口没被 demand。前端画成半透明。 */
   reason?: string;

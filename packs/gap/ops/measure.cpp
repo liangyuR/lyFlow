@@ -296,6 +296,13 @@ void registerFlush(Registry& r) {
   op.category = "间隙/测量";
   op.keywords = {"flush", "段差", "面差"};
   op.doc = "段差 = 参考点到基准线的距离，取绝对值再加 offset。符号在原算法里是死代码（§3.7）。";
+  op.preconditions = {
+      "signed=false（默认）取绝对值，会把张开与收紧折成同一个方向；参考点几乎落在基准线"
+      "上的闭合缝必须打开 signed。",
+      "量的是参考点到基准线的垂距。要的是别的方向（比如水平开口）就用 scale 折算，算子"
+      "本身不知道该往哪个方向折。",
+      "基准线的方向完全来自上游拟合：基准面拟歪了，垂距连带 scale 一起错。",
+  };
   op.inputs = {
       Port{"baseLine", "Line2D", "Base Line", "基准面拟合出的直线。", true},
       Port{"refPoint", "Point2D", "Ref Point", "参考面那一侧取到的点。", true},
@@ -342,6 +349,13 @@ void registerGap(Registry& r) {
   op.doc =
       "间隙。definition B 是两圆的圆心连线距离；definition A 是沿基准面方向的两条切线之间的"
       "距离，需要基准线的两个端点定方向。";
+  op.preconditions = {
+      "definition A 需要带两个端点的基准线来定方向 u，缺端点直接报 bad_input；"
+      "definition B 不用基准线，量的是两圆之间沿圆心连线的净距。",
+      "两侧交叉时不给负值：definition B 输出 NaN，definition A 报 invalid_geometry。要"
+      "带符号的量取用 gap.flush 的 signed 或 gap.point_offset。",
+      "假定 left 是 x 小的那一侧；两侧接反读数会直接交叉失效。",
+  };
   op.inputs = {
       Port{"left", "Circle2D", "Left", "左圆。", true},
       Port{"right", "Circle2D", "Right", "右圆。", true},
@@ -379,6 +393,14 @@ void registerCornerVertex(Registry& r) {
       "直线拟合决定，不依赖缝边那几个受遮挡影响最大的点。\n"
       "夹角接近 90° 时 V 只能沿基准线滑动，flush 与 gap 成定比、不可分辨 —— 这一路请用 "
       "gap.judge 的 patrol 模式只出值不判定。";
+  op.preconditions = {
+      "假定两件软装各有一段拟得出直线的平直翼面；两条线近平行（|det| < 1e-6）或夹角越出"
+      " [minAngle, maxAngle] 直接判失败。",
+      "夹角接近 90° 时顶点只能沿基准线滑动，flush 与 gap 成定比、不可分辨 —— 这一路请"
+      "用 gap.judge 的 patrol 模式只出值不判定。",
+      "顶点位移比真实间隙大一个与夹角有关的倍数；scale 没有用金件加已知位移标定过，gap "
+      "就只是相对量。",
+  };
   op.inputs = {
       Port{"lineLeft", "Line2D", "Left Flank", "基准件翼面拟合出的直线。", true},
       Port{"lineRight", "Line2D", "Right Flank", "另一件翼面拟合出的直线。", true},
@@ -441,6 +463,11 @@ void registerJudge(Registry& r) {
   op.doc =
       "按标称值与上下偏差判定。margin 是「接近边界」的宽度，"
       "patrol 是巡检模式：超差只标 margin，不判 NG。";
+  op.preconditions = {
+      "只按标称值与上下偏差比大小，不做任何统计；上游 ok=false 或值非有限一律判 fail。",
+      "patrol=true 时超差只标 margin、不出 high/low，verdict 里分不出「接近边界」和「已"
+      "经超差」。",
+  };
   op.inputs = {Port{"value", "Measurement", "Value", "待判定的测量值。", true}};
   op.outputs = {Port{"value", "Measurement", "Value", "带判定字段的测量值。", true}};
 

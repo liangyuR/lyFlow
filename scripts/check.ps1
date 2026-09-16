@@ -96,4 +96,17 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "examples/host-react 构建失败" }
 } finally { Pop-Location }
 
+Step "MCP 服务"
+# 集成冒烟自己起 test-server，用的是前面刚构建好的 debug lyflow.exe；
+# 那个 exe 不在时冒烟 skip 并打出原因，其余用例照跑。
+Push-Location $root
+try {
+  pnpm --filter "@lyflow/mcp" typecheck
+  if ($LASTEXITCODE -ne 0) { throw "@lyflow/mcp 类型检查失败" }
+  pnpm --filter "@lyflow/mcp" build
+  if ($LASTEXITCODE -ne 0) { throw "@lyflow/mcp 构建失败" }
+  pnpm --filter "@lyflow/mcp" test
+  if ($LASTEXITCODE -ne 0) { throw "@lyflow/mcp 测试失败" }
+} finally { Pop-Location }
+
 Write-Host "`n全链路绿" -ForegroundColor Green

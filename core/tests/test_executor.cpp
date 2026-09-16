@@ -169,6 +169,23 @@ TEST_CASE("算子内部异常被兜住，转成 internal 而不是穿过 ABI") {
   CHECK(e["errors"][0]["portName"] == "indices");
 }
 
+TEST_CASE("声明了输出端口却不写：output_not_written，消息带端口名") {
+  ensureTestOps();
+  const Json doc = makeGraph(
+      {
+          {"g", "gen.synthetic", kSmall},
+          {"n", "test.no_output"},
+      },
+      {{"g.cloud", "n.cloud"}});
+
+  const RunLog log = runGraph(doc);
+  CHECK(log.finalState("n") == "error");
+  const Json e = log.nodeEvent("n", "error");
+  CHECK(e["errors"][0]["code"] == "output_not_written");
+  CHECK(e["errors"][0]["portName"] == "cloud");
+  CHECK(e["errors"][0]["message"].get<std::string>().find("cloud") != std::string::npos);
+}
+
 TEST_CASE("取消：在第 k 个节点生效，join 在 1 秒内返回") {
   ensureTestOps();
   ops::blockEntered().store(false);

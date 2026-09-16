@@ -181,6 +181,63 @@ clamp**，否则一个一亿元素的张量会一次性 400 MB 过 IPC。上限�
   再改名成 `mainBinaryName`。包名叫 `lyflow` 的话，它会把 CLI 改名盖到桌面壳头上，
   而且只在打包路径上暴露（`pnpm e2e` 走 `cargo run`，永远碰不到）。
 
+## 批量评估（`lyflow eval`）
+
+`src/eval.rs`。一条命令把「一组样本 × 一组参数 → 任意标量指标 → 内建统计」跑完，
+不用再写解析器、批跑器和统计脚本（[ADR-0020](../docs/adr/0020-eval-and-perturb-as-cli.md)）。
+
+```
+lyflow eval <graph> <样本集>
+                    [--params <paramsets.json>] [--param <node>.<param>=<start>:<end>:<steps>]...
+                    --metric <path> [--metric <path>]...
+                    [--holdout <tag>=<value>] [--group-by <tag>]
+                    [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--no-cache] [--set ...]
+
+<样本集> 三选一（perturb 共用同一组）：
+    --samples <samples.jsonl>
+    --samples-glob <pat> --bind <node>.<param>
+    --samples-dir <root> --bind-pair <node>.<pA>,<node>.<pB> --pattern <globA>,<globB>
+                  [--sample-subdir <name>] [--sort-by name|mtime] [--split-half <tagKey>]
+另有 [--samples-jsonl-out <path>]：把生成的样本集写出来，可核对可复用
+```
+
+```bash
+# 51 帧同一张图，指标是图级命名输出 gap，后半段留出
+lyflow eval 4.lyflow.json --samples kun10-p4.jsonl --metric outputs.gap --holdout half=b
+
+# 扫两个 distThresh，顺便看看 bundle 里的点数
+lyflow eval 4.lyflow.json --samples kun10-p4.jsonl \
+  --param n_fit_l.distThresh=0.2:0.8:4 --param n_fit_r.distThresh=0.2:0.8:4 \
+  --metric outputs.gap --metric outputs.bundle.point_counts.input_primary --csv p4.csv
+
+# glob 一步生成样本：每个文件一个样本，绝对路径写进 --bind 指的参数
+lyflow eval load.lyflow.json --samples-glob "clouds/*.pcd" --bind r.path \
+  --metric nodes.r.elementCount
+
+# 目录模式：一帧一个目录，两个 glob 配成双相机一帧，按时间前后各半打 tag
+lyflow eval 4.lyflow.json --samples-dir kun10/sensor --sample-subdir 4 \
+  --bind-pair n_load.primaryFile,n_load.secondaryFile \
+  --pattern "*Master*.pcd,*Slave*.pcd" --split-half half \
+  --set n_load.source=files --metric outputs.gap --holdout half=b
+```
+
+- **指标是值路径**：`outputs.<名字>[.a.b]`、`nodes.<节点>.<端口>[.a.b]`、
+  `nodes.<节点>.durationMs|elementCount|byteSize`、`run.durationMs`。
+  Measurement 自动拆包（`outputs.gap` 直接是个数），Record 的 `data` 一层透明，bool 按 0/1。
+  拼错是 `EXIT_USAGE`，stderr 会把这张图上所有可用的标量路径列出来 —— 第一次总会拼错。
+- **样本**每行 `{ id, set: { "<node>.<param>": <json> }, tags? }`。`scene` 字段留给将来的注入，
+  这一版遇到就报用法错。覆盖顺序：全局 `--set` → 参数组 → 样本的 `set`。
+- **目录模式**（`--samples-dir`）：`<root>` 下每个直接子目录是一帧，样本 id 取帧目录名；
+  `--sample-subdir` 再往下一层。每个 glob 在一帧里要**恰好匹配到一个**文件，
+  0 个或多个是 `EXIT_USAGE` 并报出是哪一帧。`--sort-by name`（默认）先读帧目录名里的
+  `dd-MM-yyyy-HH-mm-ss` 时间戳，有一帧读不出就整体退回字典序并在 stderr 说一句；
+  `--split-half` 排序后前一半 `a`、后一半 `b`（奇数时前半多一个），配 `--holdout <key>=b`。
+- stdout 每行一个 `eval_row`，末尾每个（参数组 × 指标）一行 `eval_summary`
+  （`n / ok / failCodes / mean / std / min / max / p2p`；`std` 是样本标准差，`n<2` 给 `null`）。
+- 样本之间**顺序跑**，`--parallel` 是传给 core 的节点并行度，与 `run` 同义。缓存默认开。
+- `sweep` 现在是这套引擎上的一层壳，只负责轴展开与 `sweep_row` 的老形状；
+  它的 `--metric nodeId:port.field` 老写法两个子命令都还认。
+
 ## 库算子目录
 
 `commands::library_dirs` 给出扫描列表：app data 下的 `library/`，

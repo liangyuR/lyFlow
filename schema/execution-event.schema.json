@@ -309,6 +309,10 @@
           "type": "boolean",
           "description": "该节点的输出由宿主经 lyflow_run_options.inputs 注入，compute 没有被调用（ADR-0017）。"
         },
+        "outputsAvailable": {
+          "type": "boolean",
+          "description": "该节点的输出此刻可取。done / cached / bypassed / provided 为 true；skipped 且 reason=not_demanded 为 false。消费方应认它而不是认 state==done。"
+        },
         "reason": {
           "type": "string",
           "description": "state=skipped 的机器可读原因。目前只有 not_demanded：这个节点只被惰性端口依赖，而那条端口没被 demand（ADR-0016）。前端把它画成半透明。"
@@ -367,7 +371,7 @@
         },
         "code": {
           "type": "string",
-          "description": "机器可读短码。当前取值集合：unknown_op | unknown_port | type_mismatch | missing_input | multi_input | unknown_param | bad_param | bad_input | unknown_node | duplicate_id | version_mismatch | migration | bypassed_no_source | recursive_subgraph | cycle | io | cancelled | upstream_failed | internal。前端不得穷举它做逻辑分支——未知 code 一律按通用错误显示。"
+          "description": "机器可读短码。当前取值集合：unknown_op | unknown_port | type_mismatch | missing_input | multi_input | unknown_param | bad_param | bad_input | unknown_node | duplicate_id | version_mismatch | migration | bypassed_no_source | output_not_written | recursive_subgraph | cycle | io | cancelled | upstream_failed | internal。前端不得穷举它做逻辑分支——未知 code 一律按通用错误显示。"
         },
         "message": {
           "type": "string"

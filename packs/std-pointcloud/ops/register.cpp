@@ -33,6 +33,8 @@ void registerPackOps(Registry& r) {
   ops::registerFitCircle2D(r);
   ops::registerRegisterIcp2D(r);
 
+  ops::registerEditTranslateRegion(r);
+
   // 写盘格式的知识只有本包有，core 的 C ABI 经这个钩子转交（ADR-0014）。
   setCloudWriter(&ops::saveCloudToFile);
 }

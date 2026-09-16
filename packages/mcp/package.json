@@ -1,0 +1,32 @@
+{
+  "name": "@lyflow/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "LyFlow 的 MCP 服务：把 /lyflow/* HTTP 契约与本地 lyflow CLI 包成 Agent 能用的工具",
+  "main": "./dist/index.js",
+  "bin": {
+    "lyflow-mcp": "./bin/lyflow-mcp"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.test.json && node --test build-test/test/*.test.js",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

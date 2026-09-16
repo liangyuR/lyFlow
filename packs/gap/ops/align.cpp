@@ -324,6 +324,14 @@ void registerAlignTemplate(Registry& r) {
   op.doc =
       "把一对模板配到当前样本上（复刻 evaluate_pair）：全局粗配 → 左右两侧 ICP、"
       "信赖域钳制、退化方向锁定；模板两侧内容相同时右侧复用左侧的结果。";
+  op.preconditions = {
+      "刚体 2D 配准：假定样本与模板之间只差一个小的平移加旋转，超出信赖域的部分被钳掉而"
+      "不是报错（quality 里记 trustClamped）。",
+      "沿长直边滑动这类退化方向被显式锁定；模板上只有一条直边时，那个方向的位置本来就不"
+      "可观测。",
+      "分数低本算子不判失败，它照样输出 GapAlignment —— 丢弃低分候选是 "
+      "gap.select_alignment 的事。",
+  };
   op.inputs = {
       Port{"cloud", "PointCloud", "Cloud", "合并并滤波之后的测量帧点云。", true},
       Port{"tplLeft", "PointCloud", "Template Left", "左模板。", true},
@@ -384,6 +392,12 @@ void registerSelectAlignment(Registry& r) {
   op.doc =
       "在候选模板里挑一个：先过滤左右都 ≥ minScore 的，"
       "再按 min(l,r) 降、mean 降、配置顺序升、id 升排序取第一个（§3.4）。";
+  op.preconditions = {
+      "只在给定候选里挑，不做配准；全部候选都低于 minScore 时报 icp_score_low，不会退而"
+      "求其次。",
+      "排序键是 min(左,右) 降、mean 降、配置顺序升、id 升；各项全打平时由 templateId 定"
+      "胜负，与接在哪个端口无关。",
+  };
   op.inputs = {
       Port{"a", "Record", "A", "第一个候选。", true},
       Port{"b", "Record", "B", "第二个候选。", false},

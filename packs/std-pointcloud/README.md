@@ -18,7 +18,7 @@ pnpm check            # core 只剩 gen.synthetic 与 util.reroute，DLL 里没�
 
 ## 算子
 
-18 个。前 14 个的 id / 版本 / 参数 / 分类与它们还在 `core/src/ops/` 时逐字相同。
+19 个。前 14 个的 id / 版本 / 参数 / 分类与它们还在 `core/src/ops/` 时逐字相同。
 
 | id | 分类 | 名字 | 端口 |
 |---|---|---|---|
@@ -45,6 +45,13 @@ pnpm check            # core 只剩 gen.synthetic 与 util.reroute，DLL 里没�
 | `fit.line_2d` | Fit/Line | Fit Line 2D | cloud, [clipTo] → line, inliers |
 | `fit.circle_2d` | Fit/Circle | Fit Circle 2D | cloud → circle, inliers |
 | `register.icp_2d` | Register/ICP | ICP 2D | source, target, [init] → transform, result |
+
+编辑域一个（M5，给 `lyflow perturb` 用，见
+[ADR-0020](../../docs/adr/0020-eval-and-perturb-as-cli.md)）：
+
+| id | 分类 | 名字 | 端口 |
+|---|---|---|---|
+| `edit.translate_region` | 编辑 | 平移选区 | cloud → cloud |
 
 长度参数一律是**米**，与点云同单位。
 
