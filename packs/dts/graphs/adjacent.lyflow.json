@@ -1,0 +1,358 @@
+{
+  "schemaVersion": 1,
+  "id": "01JDTS0000000000000000000B",
+  "name": "车门胶条面差 · 基准取紧邻面",
+  "meta": {
+    "app": "lyflow/0.1.0"
+  },
+  "nodes": [
+    {
+      "id": "n_in",
+      "op": "dts.profile_in",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "n_clean",
+      "op": "dts.profile_clean",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "n_faces",
+      "op": "dts.split_faces",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 480,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "n_dome",
+      "op": "dts.seal_dome",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 720,
+          "y": 60
+        }
+      }
+    },
+    {
+      "id": "n_metal",
+      "op": "dts.pick_metal",
+      "opVersion": "1.0.0",
+      "params": {
+        "angleToApexDeg": -120.0
+      },
+      "ui": {
+        "position": {
+          "x": 980,
+          "y": -40
+        }
+      }
+    },
+    {
+      "id": "n_root",
+      "op": "dts.seal_root",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 1240,
+          "y": 60
+        }
+      }
+    },
+    {
+      "id": "n_flush",
+      "op": "dts.flush",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 1500,
+          "y": 0
+        }
+      }
+    },
+    {
+      "id": "n_bundle",
+      "op": "dts.profile_bundle",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 1760,
+          "y": 80
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0",
+      "from": {
+        "node": "n_in",
+        "port": "profile"
+      },
+      "to": {
+        "node": "n_clean",
+        "port": "profile"
+      }
+    },
+    {
+      "id": "e1",
+      "from": {
+        "node": "n_clean",
+        "port": "clean"
+      },
+      "to": {
+        "node": "n_faces",
+        "port": "clean"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "n_clean",
+        "port": "clean"
+      },
+      "to": {
+        "node": "n_dome",
+        "port": "clean"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "n_faces",
+        "port": "faces"
+      },
+      "to": {
+        "node": "n_dome",
+        "port": "faces"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "n_clean",
+        "port": "clean"
+      },
+      "to": {
+        "node": "n_metal",
+        "port": "clean"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "n_faces",
+        "port": "faces"
+      },
+      "to": {
+        "node": "n_metal",
+        "port": "faces"
+      }
+    },
+    {
+      "id": "e6",
+      "from": {
+        "node": "n_dome",
+        "port": "dome"
+      },
+      "to": {
+        "node": "n_metal",
+        "port": "dome"
+      }
+    },
+    {
+      "id": "e7",
+      "from": {
+        "node": "n_clean",
+        "port": "clean"
+      },
+      "to": {
+        "node": "n_root",
+        "port": "clean"
+      }
+    },
+    {
+      "id": "e8",
+      "from": {
+        "node": "n_faces",
+        "port": "faces"
+      },
+      "to": {
+        "node": "n_root",
+        "port": "faces"
+      }
+    },
+    {
+      "id": "e9",
+      "from": {
+        "node": "n_dome",
+        "port": "dome"
+      },
+      "to": {
+        "node": "n_root",
+        "port": "dome"
+      }
+    },
+    {
+      "id": "e10",
+      "from": {
+        "node": "n_metal",
+        "port": "pick"
+      },
+      "to": {
+        "node": "n_root",
+        "port": "pick"
+      }
+    },
+    {
+      "id": "e11",
+      "from": {
+        "node": "n_root",
+        "port": "root"
+      },
+      "to": {
+        "node": "n_flush",
+        "port": "root"
+      }
+    },
+    {
+      "id": "e12",
+      "from": {
+        "node": "n_metal",
+        "port": "metal"
+      },
+      "to": {
+        "node": "n_flush",
+        "port": "metal"
+      }
+    },
+    {
+      "id": "e13",
+      "from": {
+        "node": "n_faces",
+        "port": "faces"
+      },
+      "to": {
+        "node": "n_bundle",
+        "port": "faces"
+      }
+    },
+    {
+      "id": "e14",
+      "from": {
+        "node": "n_dome",
+        "port": "dome"
+      },
+      "to": {
+        "node": "n_bundle",
+        "port": "dome"
+      }
+    },
+    {
+      "id": "e15",
+      "from": {
+        "node": "n_metal",
+        "port": "pick"
+      },
+      "to": {
+        "node": "n_bundle",
+        "port": "pick"
+      }
+    },
+    {
+      "id": "e16",
+      "from": {
+        "node": "n_root",
+        "port": "root"
+      },
+      "to": {
+        "node": "n_bundle",
+        "port": "root"
+      }
+    },
+    {
+      "id": "e17",
+      "from": {
+        "node": "n_metal",
+        "port": "metal"
+      },
+      "to": {
+        "node": "n_bundle",
+        "port": "metal"
+      }
+    },
+    {
+      "id": "e18",
+      "from": {
+        "node": "n_flush",
+        "port": "flush"
+      },
+      "to": {
+        "node": "n_bundle",
+        "port": "flush"
+      }
+    },
+    {
+      "id": "e19",
+      "from": {
+        "node": "n_flush",
+        "port": "foot"
+      },
+      "to": {
+        "node": "n_bundle",
+        "port": "foot"
+      }
+    }
+  ],
+  "groups": [],
+  "subgraphs": {},
+  "outputs": {
+    "flush": {
+      "node": "n_flush",
+      "port": "flush"
+    },
+    "metal": {
+      "node": "n_metal",
+      "port": "metal"
+    },
+    "root": {
+      "node": "n_root",
+      "port": "root"
+    },
+    "bundle": {
+      "node": "n_bundle",
+      "port": "bundle"
+    },
+    "faces": {
+      "node": "n_faces",
+      "port": "faces"
+    },
+    "dome": {
+      "node": "n_dome",
+      "port": "dome"
+    }
+  }
+}
