@@ -1,7 +1,7 @@
 # `@lyflow/editor`
 
 LyFlow 的节点图编辑器，一个 React 组件。画布、参数表单、Inspector、3D 视图、
-撤销重做、快捷键、类型校验都在里面；**怎么和 C++ 说话不在里面** ——
+连线内容查看器、撤销重做、快捷键、类型校验都在里面；**怎么和 C++ 说话不在里面** ——
 那是宿主给的 `Transport`。
 
 ```tsx
@@ -72,8 +72,9 @@ interface LyFlowEditorProps {
 | `new StaticTransport(manifestUrl?)` | 只读：读一份 dump 出来的 manifest，什么都跑不了。没有后端时也能把界面渲染出来 |
 
 要接自己的后端就实现 `Transport` 接口（`src/transport/types.ts`）。
-它的每个方法都对着 C ABI v7 的一个入口，清单见
-[`docs/phase-a1-acceptance.md`](../../docs/phase-a1-acceptance.md#c-abi-v7-的最终签名清单)。
+它的每个方法都对着 C ABI v8 的一个入口。v7 那一版的完整清单见
+[`docs/phase-a1-acceptance.md`](../../docs/phase-a1-acceptance.md#c-abi-v7-的最终签名清单)，
+v8 增补的张量与下标两个入口见 [ADR-0019](../../docs/adr/0019-output-tensor-and-indices-over-abi.md)。
 
 点云走二进制，绝不 JSON（ADR-0006）：`getOutputCloud` 返回的 `ArrayBuffer`
 布局见 [http 契约](../../docs/http-transport.md)的「结果」一节，
@@ -147,8 +148,8 @@ CSS 由组件自己 `import`，宿主不用单独引样式文件。
 ```
 src/
   LyFlowEditor.tsx   组件本体：布局、文件流程、执行事件订阅
-  components/        画布、节点、参数控件、Inspector、3D 视图、工具栏
-  store/             graph / ui / manifest / execution / cache
+  components/        画布、节点、参数控件、Inspector、3D 视图、工具栏、连线查看器（peek/）
+  store/             graph / ui / manifest / execution / cache / peek
   lib/               类型校验、布局、映射、子图、参数、keymap、对话框注入
   transport/         Transport 契约 + tauri / http / static 三个实现
   types/             GraphDoc、manifest、ExecutionEvent 的 TS 镜像

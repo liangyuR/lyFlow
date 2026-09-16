@@ -20,6 +20,7 @@ import {
 import { gapSuites } from "./gap.mjs";
 import { m3Suites } from "./m3.mjs";
 import { m4Suites } from "./m4.mjs";
+import { peekSuites } from "./peek.mjs";
 import { phaseASuites } from "./phase_a.mjs";
 
 // ------------------------------------------------------------------- 各分组
@@ -463,10 +464,14 @@ async function main() {
     await suiteStale(cdp, report);
     await suiteRunToNode(cdp, report);
 
-    for (const suite of m3Suites) await suite(cdp, report, ws);
-    for (const suite of m4Suites) await suite(cdp, report, ws);
-    for (const suite of phaseASuites) await suite(cdp, report, ws);
-    for (const suite of gapSuites) await suite(cdp, report, ws);
+    const grouped =[...m3Suites, ...m4Suites, ...phaseASuites, ...gapSuites, ...peekSuites];
+    for (const suite of grouped) {
+      try {
+        await suite(cdp, report, ws);
+      } catch (e) {
+        report.fail(`分组 ${suite.name || "匿名"} 中断`, e.stack ?? String(e));
+      }
+    }
 
     report.section("控制台");
     // React 的 StrictMode 在 dev 下会重复挂载并打一些 warning，

@@ -37,6 +37,20 @@ export function ShortcutPanel() {
               </ul>
             </section>
           ))}
+          <section className="sheet__group">
+            <h3>连线查看器</h3>
+            <ul>
+              <li data-testid="shortcut-peekEscape">
+                <span className="sheet__label">
+                  有浮窗且没有运行在跑时，关掉最前面的那一个（否则 Esc 仍是「取消运行」）
+                </span>
+                <span className="sheet__scope">{SCOPE_LABEL.global}</span>
+                <span className="sheet__keys">
+                  <kbd>Escape</kbd>
+                </span>
+              </li>
+            </ul>
+          </section>
         </div>
       </div>
     </div>

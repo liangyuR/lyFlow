@@ -51,7 +51,7 @@
 | 21 | 拖节点到已有连线上 → 自动插入到中间 | ✅ M3 | 拖动结束时对单个选中节点做边命中（12 px）；**有且仅有一对**兼容端口才插 |
 | 22 | 对齐参考线 / 网格吸附 | ✅ M3 | `snapGrid=[8,8]`，Shift 临时关掉；参考线自绘在 `ViewportPortal` 里 |
 | 23 | 上游参数改动 → 下游节点标 stale（虚线框） | ✅ M2 → M3 精确化 | M3 起精确到节点：`plan_graph` 的 cacheKey 与 `run_started` 对比（[ADR-0007](adr/0007-cache-authority.md)） |
-| 24 | Reroute 节点（连线整理） | ✅ M3 | `util.reroute` 是 `Any → Any` 的**普通算子**；双击连线中点插入 |
+| 24 | Reroute 节点（连线整理） | ✅ M3 | `util.reroute` 是 `Any → Any` 的**普通算子**；在**边的右键菜单**里「在此插入 Reroute」。原来的双击连线中点已让给 #39 的查看器（edge-peek-plan P1） |
 | 25 | 节点折叠 / 重命名 / 静音（bypass） | ✅ M3 | Ctrl+E / 双击标题 / Ctrl+M。bypass 是执行语义，进 doc 也进撤销栈 |
 | 26 | 参数右键：重置为默认 / 复制值 / 粘贴值 | ✅ M3 | 外加「复制路径名」，给 M4 的 CLI `--set` 用；粘贴按参数类型校验形态 |
 | 27 | Run to node（只跑上游闭包） | ✅ M2 | 右键节点 → 运行到此节点；Shift+F5 跑到选中节点 |
@@ -61,8 +61,8 @@
 
 ## P2 — 可以先不做
 
-**状态：#31 #33 #34 #36 #37 于 M4 完成，#32 以子图取代（见备注）。**
-每一项在 `scripts/e2e/m4.mjs` 或 `bridge/src/cli.rs` 的测试里至少有一条断言。
+**状态：#31 #33 #34 #36 #37 于 M4 完成，#32 以子图取代（见备注），#39 于连线查看器计划完成。**
+每一项在 `scripts/e2e/m4.mjs`、`scripts/e2e/peek.mjs` 或 `bridge/src/cli.rs` 的测试里至少有一条断言。
 
 | # | 项 | 状态 | 备注 |
 |---|---|---|---|
@@ -74,6 +74,7 @@
 | 36 | 图的 diff / 版本对比 | ✅ M4 | `lyflow diff`：合并默认值后比较，忽略 `ui`；只移动节点时输出为空 |
 | 37 | 大图性能（数百节点） | ✅ M4 | `onlyRenderVisibleElements`（> 80 节点才开）+ 执行事件 16 ms 合并；300 节点打开 < 1 s、拖动 ≥ 30 fps |
 | 38 | 协作 / 多人编辑 | ⬜ 不计划 | |
+| 39 | 双击连线查看内容（Edge Peek） | ✅ S1–S7 | 四种视图：3D 点云 / 正交 2D（剖面 + 2D 几何）/ 张量图像 / 键值表 + 原始 JSON。可多开、可拖动、可锁定快照；上限 **6 窗，其中带 WebGL 的 4 个**。没有运行在跑时 `Esc` 关最前面的一个。计划见 [edge-peek-plan.md](edge-peek-plan.md)，张量 / 下标的 ABI 见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)；验收在 `scripts/e2e/peek.mjs` |
 
 ---
 

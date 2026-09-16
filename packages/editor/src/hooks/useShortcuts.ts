@@ -8,6 +8,7 @@ import { subgraphIdOf } from "../types/graph";
 import { levelOf } from "../lib/subgraph";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
+import { usePeekStore, type PeekWindow } from "../store/peek";
 import { useUiStore } from "../store/ui";
 
 function inTextField(target: EventTarget | null): boolean {
@@ -54,6 +55,18 @@ export function useShortcuts(
       if (ui.helpOpen && e.key === "Escape") {
         ui.setHelpOpen(false);
         return;
+      }
+      if (e.key === "Escape" && useExecutionStore.getState().runStatus !== "running") {
+        const peek = usePeekStore.getState();
+        const top = peek.windows.reduce<PeekWindow | null>(
+          (best, w) => (best === null || w.z > best.z ? w : best),
+          null,
+        );
+        if (top) {
+          e.preventDefault();
+          peek.close(top.id);
+          return;
+        }
       }
 
       const hit = matchShortcut(e);

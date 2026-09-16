@@ -12,6 +12,7 @@ run.mjs      M2 的分组 + main
 m3.mjs       M3 的分组（缓存、静音、迁移、连线手感、布局、面板、3D）
 m4.mjs       M4 的分组（子图、库算子、live preview、大图性能）
 gap.mjs      gap 领域包的分组（量测输出、真实 gap 图、模型 gap 图）
+peek.mjs     连线内容查看器的分组（双击开窗、四种视图、快照锁、生命周期、边的右键菜单）
 phase_a.mjs  阶段 A 的分组（惰性分支半透明、plan_extended、图级输出与「标为输出」UI）
 http.mjs     e2e:http —— Node 桩服务器 + 系统 Chrome + examples/host-react
 ```

@@ -266,7 +266,8 @@ async function suiteBypassReroute(cdp, report) {
     )),
   );
 
-  // #24：双击连线中点插入 reroute。摆成一条水平线，路径包围盒的中心才落在线上；
+  // #24：在边的右键菜单里插入 reroute（双击已让给连线查看器，见 edge-peek-plan P1）。
+  // 摆成一条水平线，路径包围盒的中心才落在线上；
   // 命中要用 edge-interaction 那条粗路径，edge-path 的 pointer-events 是关的。
   await normalizeZoom(cdp, 0.6);
   const rerouteBox = await canvasBox(cdp);
@@ -282,17 +283,24 @@ async function suiteBypassReroute(cdp, report) {
   );
   report.ok("拿到了连线中点", Boolean(point), JSON.stringify(point));
   if (point) {
-    await cdp.send("Input.dispatchMouseEvent", {
-      type: "mousePressed", x: point.x, y: point.y, button: "left", clickCount: 2, buttons: 1,
-    });
-    await cdp.send("Input.dispatchMouseEvent", {
-      type: "mouseReleased", x: point.x, y: point.y, button: "left", clickCount: 2, buttons: 1,
-    });
+    const menu = await cdp.eval(`
+      const el = document.elementFromPoint(${point.x}, ${point.y});
+      if (!el) return 'no-element';
+      el.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true, cancelable: true, clientX: ${point.x}, clientY: ${point.y},
+      }));
+      await new Promise((done) => setTimeout(done, 200));
+      const btn = document.querySelector('[data-testid="edge-ctx-reroute"]');
+      if (!btn) return 'no-menu';
+      btn.click();
+      return 'ok';
+    `);
+    report.eq("边的右键菜单里有「在此插入 Reroute」", menu, "ok");
     await sleep(250);
   }
   const doc = await cdp.eval(`return window.__lyflow.snapshot().doc;`);
   const reroutes = doc.nodes.filter((n) => n.op === "util.reroute");
-  report.ok("双击连线插入了一个 reroute", reroutes.length === 2, `${reroutes.length} 个 reroute 节点`);
+  report.ok("右键菜单插入了一个 reroute", reroutes.length === 2, `${reroutes.length} 个 reroute 节点`);
   report.ok(
     "原来那条边被拆成了两条",
     doc.edges.length === 3 && !doc.edges.some((e) => e.id === edgeId),
