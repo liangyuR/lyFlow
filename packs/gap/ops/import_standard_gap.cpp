@@ -844,6 +844,12 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   circleParams["preferredCamera"] = textOr(gap, "camera_separated_preferred_camera", "Both");
   circleParams["leftCamera"] = textOr(gap, "left_circle_camera", "Both");
   circleParams["rightCamera"] = textOr(gap, "right_circle_camera", "Both");
+  // 弱拟合的地板。钉了单相机时先退回合并云重拟，两边都弱才算这一侧没拟出来。
+  const YAML::Node weak = child(gap, "weak_fit");
+  circleParams["leftMinInliers"] = intOr(weak, "left_min_inliers", 0);
+  circleParams["rightMinInliers"] = intOr(weak, "right_min_inliers", 0);
+  circleParams["leftMinArcDeg"] = numberOr(weak, "left_min_arc_deg", 0.0);
+  circleParams["rightMinArcDeg"] = numberOr(weak, "right_min_arc_deg", 0.0);
   circleParams["leftCenterAbove"] = numberOr(band, "left_above", 0.0);
   circleParams["leftCenterTol"] = bandTol[0];
   circleParams["rightCenterAbove"] = numberOr(band, "right_above", 0.0);

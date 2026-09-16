@@ -1271,3 +1271,55 @@ TEST_CASE("圆心高度带的 guard：带内逐位不变，出带才重拟") {
                       {"rightCenterMode", Value::text("guard")}});
   CHECK(moved->out("right").asCircle2D()->center[1] == doctest::Approx(0.0005).epsilon(0.05));
 }
+
+TEST_CASE("圆拟合的弱地板：钉死的那台弧太短就退回合并云") {
+  // Slave 在右 ROI 里只有一小段弧（短弧上圆心定不住），Master 有完整的一段。
+  const auto build = [](const std::unordered_map<std::string, Value>& over) {
+    PointCloud primary, secondary, merged;
+    pushLeftArc(primary);
+    pushLeftArc(secondary);
+    pushLeftArc(merged);
+    pushArc(primary, 0.0035, -0.0005, 0.0009, 200, 340, 60);
+    pushArc(secondary, 0.0035, -0.0005, 0.0009, 330, 340, 6);   // 只有 10°
+    pushArc(merged, 0.0035, -0.0005, 0.0009, 200, 340, 60);
+    auto call = std::make_unique<Call>();
+    call->inputs["merged"] = Data::cloud(merged);
+    call->inputs["primary"] = Data::cloud(primary);
+    call->inputs["secondary"] = Data::cloud(secondary);
+    call->inputs["boxLeft"] = Data::box2d(box(-0.006f, -0.004f, -0.001f, 0.002f));
+    call->inputs["boxRight"] = Data::box2d(box(0.001f, -0.004f, 0.006f, 0.002f));
+    return call;
+  };
+  // 不设地板：钉死 Secondary，就拿那段 10° 的弧去拟
+  auto loose = build({});
+  REQUIRE(loose->run("gap.fit_gap_circles", {{"rightCamera", Value::text("Secondary")}}).ok);
+  const float looseR = loose->out("right").asCircle2D()->radius;
+
+  // 设了地板：退回合并云，拟出来的和 Both 一致
+  auto floored = build({});
+  REQUIRE(floored
+              ->run("gap.fit_gap_circles", {{"rightCamera", Value::text("Secondary")},
+                                            {"rightMinArcDeg", Value::number(60.0)}})
+              .ok);
+  auto both = build({});
+  REQUIRE(both->run("gap.fit_gap_circles").ok);
+  CHECK(floored->out("right").asCircle2D()->radius == both->out("right").asCircle2D()->radius);
+  CHECK(floored->out("right").asCircle2D()->center[0] == both->out("right").asCircle2D()->center[0]);
+  CHECK(looseR != both->out("right").asCircle2D()->radius);
+}
+
+TEST_CASE("圆拟合的弱地板：合并云也弱就报失败，不给一个错的数") {
+  PointCloud cloud;
+  pushLeftArc(cloud);
+  pushArc(cloud, 0.0035, -0.0005, 0.0009, 330, 340, 6);   // 两边都只有 10°
+  Call call;
+  call.inputs["merged"] = Data::cloud(cloud);
+  call.inputs["primary"] = Data::cloud(cloud);
+  call.inputs["secondary"] = Data::cloud(cloud);
+  call.inputs["boxLeft"] = Data::box2d(box(-0.006f, -0.004f, -0.001f, 0.002f));
+  call.inputs["boxRight"] = Data::box2d(box(0.001f, -0.004f, 0.006f, 0.002f));
+  const Status s = call.run("gap.fit_gap_circles", {{"rightMinArcDeg", Value::number(60.0)},
+                                                    {"cameraFallback", Value::boolean(false)}});
+  CHECK_FALSE(s.ok);
+  CHECK(s.code == "circle_fit_failed");
+}

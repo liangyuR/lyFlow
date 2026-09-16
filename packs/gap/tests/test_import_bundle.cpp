@@ -559,3 +559,15 @@ TEST_CASE("圆心高度带的 mode 从 YAML 落到参数上，写错就报错") 
              &s);
   CHECK_FALSE(s.ok);
 }
+
+TEST_CASE("weak_fit 的地板从 YAML 落到 n_circles 上，不写就是 0") {
+  CHECK(nodeById(importText("StandardGap.yml:template", kConfig, nullptr), "n_circles")
+            ["params"]["rightMinArcDeg"] == 0.0);
+  const nlohmann::json doc = importText(
+      "StandardGap.yml:template",
+      withGapKeys("  weak_fit: {right_min_arc_deg: 55, right_min_inliers: 10}\n"), nullptr);
+  const auto& p = nodeById(doc, "n_circles")["params"];
+  CHECK(p["rightMinArcDeg"] == 55.0);
+  CHECK(p["rightMinInliers"] == 10);
+  CHECK(p["leftMinArcDeg"] == 0.0);
+}

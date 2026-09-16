@@ -379,6 +379,28 @@ struct SideResult {
   bool separatedFixedFree = false;
 };
 
+/// 内点覆盖的圆弧角度（度）。和 circleQualityJson 里报的是同一个量 —— 那边只是顺手
+/// 算出来写进 quality，这里要拿它当判据，所以单独抽一份。
+double arcCoverageDeg(const GapCloud& cloud, const Eigen::VectorXf& circle,
+                      const pcl::Indices& inliers) {
+  if (circle.size() < 3 || inliers.empty()) return 0.0;
+  std::vector<double> angles;
+  angles.reserve(inliers.size());
+  for (const auto index : inliers) {
+    if (index < 0 || static_cast<std::size_t>(index) >= cloud.size()) continue;
+    double angle = std::atan2(cloud[index].y - circle[1], cloud[index].x - circle[0]);
+    if (angle < 0) angle += 2 * M_PI;
+    angles.push_back(angle);
+  }
+  if (angles.empty()) return 0.0;
+  std::sort(angles.begin(), angles.end());
+  double largestGap = angles.front() + 2 * M_PI - angles.back();
+  for (std::size_t i = 1; i < angles.size(); ++i) {
+    largestGap = std::max(largestGap, angles[i] - angles[i - 1]);
+  }
+  return (2 * M_PI - largestGap) * 180.0 / M_PI;
+}
+
 /// 圆心相对参考线的高度（米）。正 = 圆心在线**上方**（测量帧里 y 越小越高）。
 double centerAboveLine(const Eigen::VectorXf& circle, const lyflow::Line2D& line) {
   const double dx = line.dir[0];
@@ -511,6 +533,11 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
                                params.number("rightCenterTol") / kScale};
   const std::string centerMode[2] = {params.choice("leftCenterMode"),
                                      params.choice("rightCenterMode")};
+  // 弱拟合的地板。圆拟合本身只要 3 个内点就算成功，短弧上拟出来的圆心可以跑到点云外面去，
+  // 而残差照样很小 —— 这两个量是唯一看得出来的。
+  const std::size_t minInliers[2] = {static_cast<std::size_t>(params.integer("leftMinInliers")),
+                                     static_cast<std::size_t>(params.integer("rightMinInliers"))};
+  const double minArc[2] = {params.number("leftMinArcDeg"), params.number("rightMinArcDeg")};
   const lyflow::Line2D* refLine = inputs.has("refLine") ? inputs.get("refLine").asLine2D() : nullptr;
   for (int i = 0; i < 2; ++i) {
     if (centerTol[i] > 0 && refLine == nullptr) {
@@ -524,32 +551,10 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
   const double maxRadiusDifference = 0.25 / kScale;
   const double maxCenterDifference = 0.75 / kScale;
 
-  SideResult sides[2];
-  for (int i = 0; i < 2; ++i) {
-    SideResult& side = sides[i];
-    const Eigen::Matrix2f roi = toRoiMatrix(boxes[i]);
-    const GapCloud& source = sideCamera[i] == "Primary"     ? primary
-                             : sideCamera[i] == "Secondary" ? secondary
-                                                            : merged;
-    side.cloud = cropStrict(source, roi);
-    if (side.cloud.empty()) {
-      return Status::Error(Phase::Execute, "roi_empty",
-                           std::string(i == 0 ? "左" : "右") + "间隙 ROI 里没有点", {},
-                           i == 0 ? "boxLeft" : "boxRight");
-    }
-    if (!(cfg[i].rMax > cfg[i].rMin)) {
-      return Status::Error(Phase::Execute, "bad_param", "半径上限必须大于下限",
-                           i == 0 ? "leftRadiusMax" : "rightRadiusMax");
-    }
-    if (cfg[i].rFixed > 0 &&
-        !(cfg[i].rMax > cfg[i].rFixed && cfg[i].rMin < cfg[i].rFixed)) {
-      return Status::Error(Phase::Execute, "bad_param", "固定半径必须落在上下限之间",
-                           i == 0 ? "leftRadiusValue" : "rightRadiusValue");
-    }
-
-    // guard 先按原样拟，只有圆心落到带外才换约束那条路 —— 带内的帧逐位不变，
-    // 所以给「本来就拟得对」的点位挂一条宽带纯属保险，不改读数。
-    // always 一律走约束（L4/R4 的玻璃侧是这么标定的）。
+  // 一侧的拟合：guard 先按原样拟、只有圆心落到带外才换约束那条路（带内的帧逐位不变，
+  // 所以给「本来就拟得对」的点位挂一条宽带纯属保险）；always 一律走约束。
+  // 抽成 lambda 是为了「弱了就换合并云再来一次」能原样重跑。
+  const auto fitOneSide = [&](SideResult& side, int i) {
     const bool guardOnly = centerTol[i] > 0 && centerMode[i] == "guard";
     if (centerTol[i] <= 0 || guardOnly) {
       side.fitted = gap_std::circleFit2D(side.cloud, &side.circle, &side.indices, distThresh,
@@ -580,6 +585,54 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
       }
       if (side.fitted) side.model = "circle-center-band";
     }
+    return side.fitted;
+  };
+
+  SideResult sides[2];
+  for (int i = 0; i < 2; ++i) {
+    SideResult& side = sides[i];
+    const Eigen::Matrix2f roi = toRoiMatrix(boxes[i]);
+    const GapCloud& source = sideCamera[i] == "Primary"     ? primary
+                             : sideCamera[i] == "Secondary" ? secondary
+                                                            : merged;
+    side.cloud = cropStrict(source, roi);
+    if (side.cloud.empty()) {
+      return Status::Error(Phase::Execute, "roi_empty",
+                           std::string(i == 0 ? "左" : "右") + "间隙 ROI 里没有点", {},
+                           i == 0 ? "boxLeft" : "boxRight");
+    }
+    if (!(cfg[i].rMax > cfg[i].rMin)) {
+      return Status::Error(Phase::Execute, "bad_param", "半径上限必须大于下限",
+                           i == 0 ? "leftRadiusMax" : "rightRadiusMax");
+    }
+    if (cfg[i].rFixed > 0 &&
+        !(cfg[i].rMax > cfg[i].rFixed && cfg[i].rMin < cfg[i].rFixed)) {
+      return Status::Error(Phase::Execute, "bad_param", "固定半径必须落在上下限之间",
+                           i == 0 ? "leftRadiusValue" : "rightRadiusValue");
+    }
+
+    fitOneSide(side, i);
+    // 弱就重来：钉死单相机时先退回合并云（那台被挡住的时候另一台往往是好的），
+    // 合并云也弱就当没拟出来，交给下面既有的回退，最后报失败 —— 宁可没有也别给个错的。
+    const auto weak = [&](const SideResult& s2) {
+      if (!s2.fitted) return true;
+      if (minInliers[i] > 0 && s2.indices.size() < minInliers[i]) return true;
+      return minArc[i] > 0 && arcCoverageDeg(s2.cloud, s2.circle, s2.indices) < minArc[i];
+    };
+    if (weak(side) && sideCamera[i] != "Both") {
+      SideResult retry;
+      retry.cloud = cropStrict(merged, roi);
+      retry.fitted = fitOneSide(retry, i);
+      if (!weak(retry)) {
+        retry.model += "-merged-retry";
+        side = std::move(retry);
+      }
+    }
+    if (weak(side)) {
+      side.fitted = false;
+      side.indices.clear();
+    }
+
     if (side.fitted || !fallback || sideCamera[i] != "Both") continue;
 
     // 相机分开拟合的回退：两台相机各自的 ROI 点各拟合一个圆。
@@ -746,6 +799,35 @@ Param boolParam(const char* name, const char* label, bool def, const char* group
   p.label = label;
   p.doc = doc;
   p.def = Value::boolean(def);
+  p.group = group;
+  return p;
+}
+
+Param minInliersParam(const char* name, const char* label, const char* group) {
+  Param p;
+  p.name = name;
+  p.type = ParamType::Int;
+  p.label = label;
+  p.doc =
+      "这一侧内点少于它就算没拟出来。0 = 不检查（默认）。圆拟合本身 3 个内点就算成功，"
+      "而短弧上拟出来的圆心能跑到点云外面去、残差照样很小 —— 这是看得出来的量之一。";
+  p.def = Value::integer(0);
+  p.advanced = true;
+  p.group = group;
+  return p;
+}
+
+Param minArcParam(const char* name, const char* label, const char* group) {
+  Param p;
+  p.name = name;
+  p.type = ParamType::Float;
+  p.label = label;
+  p.doc =
+      "内点覆盖的圆弧角度小于它就算没拟出来。0 = 不检查（默认）。比内点数更直接："
+      "弧太短时三个参数的圆本来就定不住，圆心往哪边跑全看噪声。";
+  p.def = Value::number(0.0);
+  p.unit = "°";
+  p.advanced = true;
   p.group = group;
   return p;
 }
@@ -944,8 +1026,10 @@ void registerFitGapCircles(Registry& r) {
       "圆。",
       "centerTol 只是在 RANSAC 里筛候选，不是把圆心焊到那个高度；带给得比真实散布还窄"
       "时，合格候选被筛光，这一侧直接拟不出。先量一批正常帧的圆心高度再定带宽。",
-      "leftCamera/rightCamera 钉到单台之后，那一侧只剩一台的点 —— 那台被遮挡时不再有另"
-      "一台兜底。",
+      "leftCamera/rightCamera 钉到单台之后，那一侧只剩一台的点；那台被遮挡时会自动退回"
+      "合并云重拟一次（判据是 minInliers / minArcDeg），两边都弱才算这一侧没拟出来。",
+      "minInliers 与 minArcDeg 不填就是不检查，行为和以前一样 —— 但那样「短弧上拟出一个"
+      "跑到点云外面的圆心」是查不出来的：它的残差和内点率都正常。",
   };
   op.inputs = {
       Port{"merged", "PointCloud", "Merged", "合并并滤波之后的云。", true},
@@ -1008,6 +1092,10 @@ void registerFitGapCircles(Registry& r) {
       numParam("rightCenterTol", "Right Center Tol", 0.0, "mm", "Right Radius",
                "圆心高度的容差，<= 0 表示不加这个约束。"),
       centerModeParam("rightCenterMode", "Right Center Mode", "Right Radius"),
+      minInliersParam("leftMinInliers", "Left Min Inliers", "Left Radius"),
+      minArcParam("leftMinArcDeg", "Left Min Arc", "Left Radius"),
+      minInliersParam("rightMinInliers", "Right Min Inliers", "Right Radius"),
+      minArcParam("rightMinArcDeg", "Right Min Arc", "Right Radius"),
   };
   op.capabilities = {false, false, true};
   op.compute = &fitGapCircles;
