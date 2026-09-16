@@ -509,6 +509,8 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
                                  params.number("rightCenterAbove") / kScale};
   const double centerTol[2] = {params.number("leftCenterTol") / kScale,
                                params.number("rightCenterTol") / kScale};
+  const std::string centerMode[2] = {params.choice("leftCenterMode"),
+                                     params.choice("rightCenterMode")};
   const lyflow::Line2D* refLine = inputs.has("refLine") ? inputs.get("refLine").asLine2D() : nullptr;
   for (int i = 0; i < 2; ++i) {
     if (centerTol[i] > 0 && refLine == nullptr) {
@@ -545,7 +547,28 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
                            i == 0 ? "leftRadiusValue" : "rightRadiusValue");
     }
 
-    if (centerTol[i] > 0) {
+    // guard 先按原样拟，只有圆心落到带外才换约束那条路 —— 带内的帧逐位不变，
+    // 所以给「本来就拟得对」的点位挂一条宽带纯属保险，不改读数。
+    // always 一律走约束（L4/R4 的玻璃侧是这么标定的）。
+    const bool guardOnly = centerTol[i] > 0 && centerMode[i] == "guard";
+    if (centerTol[i] <= 0 || guardOnly) {
+      side.fitted = gap_std::circleFit2D(side.cloud, &side.circle, &side.indices, distThresh,
+                                     cfg[i].rMin, cfg[i].rMax, cfg[i].rFixed);
+      if (!side.fitted && retryDistanceMm > 0) {
+        side.indices.clear();
+        side.fitted = gap_std::circleFit2D(side.cloud, &side.circle, &side.indices,
+                                       mmToM(retryDistanceMm), cfg[i].rMin, cfg[i].rMax,
+                                       cfg[i].rFixed);
+      }
+    }
+    bool needBand = centerTol[i] > 0 && !guardOnly;
+    if (guardOnly) {
+      const double above = side.fitted ? centerAboveLine(side.circle, *refLine) : 0.0;
+      needBand = !side.fitted || !std::isfinite(above) ||
+                 std::fabs(above - centerAbove[i]) > centerTol[i];
+    }
+    if (needBand) {
+      side.indices.clear();
       side.fitted = circleFitCenterBand(side.cloud, *refLine, centerAbove[i], centerTol[i],
                                         distThresh, cfg[i].rMin, cfg[i].rMax, &side.circle,
                                         &side.indices);
@@ -556,15 +579,6 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
                                           &side.circle, &side.indices);
       }
       if (side.fitted) side.model = "circle-center-band";
-    } else {
-      side.fitted = gap_std::circleFit2D(side.cloud, &side.circle, &side.indices, distThresh,
-                                     cfg[i].rMin, cfg[i].rMax, cfg[i].rFixed);
-      if (!side.fitted && retryDistanceMm > 0) {
-        side.indices.clear();
-        side.fitted = gap_std::circleFit2D(side.cloud, &side.circle, &side.indices,
-                                       mmToM(retryDistanceMm), cfg[i].rMin, cfg[i].rMax,
-                                       cfg[i].rFixed);
-      }
     }
     if (side.fitted || !fallback || sideCamera[i] != "Both") continue;
 
@@ -733,6 +747,22 @@ Param boolParam(const char* name, const char* label, bool def, const char* group
   p.doc = doc;
   p.def = Value::boolean(def);
   p.group = group;
+  return p;
+}
+
+Param centerModeParam(const char* name, const char* label, const char* group) {
+  Param p;
+  p.name = name;
+  p.type = ParamType::Enum;
+  p.label = label;
+  p.doc =
+      "圆心高度带怎么用。always 一律走带约束的拟合；guard 先按原样拟，只有圆心落到带外"
+      "才重来 —— 带内的帧逐位不变，所以「本来就拟得对、只是想上个保险」的点位该用 guard。";
+  p.def = Value::text("always");
+  p.group = group;
+  p.advanced = true;
+  p.options = {EnumOption{"always", "Always", "一律走带约束的拟合。"},
+               EnumOption{"guard", "Guard", "只在出带时才重拟，带内逐位不变。"}};
   return p;
 }
 
@@ -972,10 +1002,12 @@ void registerFitGapCircles(Registry& r) {
                "左圆圆心应当高出 refLine 多少。配合 leftCenterTol 使用。"),
       numParam("leftCenterTol", "Left Center Tol", 0.0, "mm", "Left Radius",
                "圆心高度的容差，<= 0 表示不加这个约束。"),
+      centerModeParam("leftCenterMode", "Left Center Mode", "Left Radius"),
       numParam("rightCenterAbove", "Right Center Above", 0.0, "mm", "Right Radius",
                "右圆圆心应当高出 refLine 多少。配合 rightCenterTol 使用。"),
       numParam("rightCenterTol", "Right Center Tol", 0.0, "mm", "Right Radius",
                "圆心高度的容差，<= 0 表示不加这个约束。"),
+      centerModeParam("rightCenterMode", "Right Center Mode", "Right Radius"),
   };
   op.capabilities = {false, false, true};
   op.compute = &fitGapCircles;

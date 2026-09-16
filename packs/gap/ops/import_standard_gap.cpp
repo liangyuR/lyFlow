@@ -619,18 +619,33 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   // x 锚在缝的框上（模型对缝的定位最稳），y 锚在基准面框上（长面就在它上下几毫米内）。
   // 早先把两者都锚在基准面上，结果有几帧基准面框整个跑偏十来毫米，窗口跟着飞到没点的
   // 地方，拟出一条没意义的线还被当成基准 —— 所以既分了锚，也配了 min_inliers。
-  const char* datumAnchorPort = baseIsLeft ? kRoiPorts[2] : kRoiPorts[3];  // gapLeft / gapRight
+  // 默认：x 锚挂在基准面那一侧的缝框上。但基准面落在长边时（R4），要保护的那条线在缝的
+  // 另一侧，锚和高度锚都得跟着换 —— 所以两个都可以显式写。
+  const std::string anchorKind =
+      textOr(baseDirCfg, "anchor", baseIsLeft ? "gap_left" : "gap_right");
+  const std::string heightKind = textOr(baseDirCfg, "height_anchor", "flush_base");
+  if (wantDatum && anchorKind != "gap_left" && anchorKind != "gap_right") {
+    return badInput("flush.base_direction.anchor 只能是 gap_left 或 gap_right，这份写的是 '" +
+                    anchorKind + "'");
+  }
+  if (wantDatum && heightKind != "flush_base" && heightKind != "flush_ref") {
+    return badInput(
+        "flush.base_direction.height_anchor 只能是 flush_base 或 flush_ref，这份写的是 '" +
+        heightKind + "'");
+  }
+  const char* datumAnchorPort = anchorKind == "gap_left" ? kRoiPorts[2] : kRoiPorts[3];
+  const char* datumHeightPort = heightKind == "flush_base" ? kRoiPorts[0] : kRoiPorts[1];
   const auto buildDatum = [&](const std::string& prefix, const std::string& rois,
                               const std::string& cloud, const char* cloudPort, int row) {
     nlohmann::json winParams;
-    winParams["side"] = textOr(baseDirCfg, "side", baseIsLeft ? "left" : "right");
+    winParams["side"] = textOr(baseDirCfg, "side", anchorKind == "gap_left" ? "left" : "right");
     winParams["startMm"] = numberOr(baseDirCfg, "start_mm", 0.6);
     winParams["lengthMm"] = numberOr(baseDirCfg, "length_mm", 13.4);
     winParams["heightMm"] = numberOr(baseDirCfg, "height_mm", 2.5);
     const std::string win =
         g.node(prefix + "n_datum_box", "gap.datum_window", winParams, 8, row, "方向基准窗");
     g.edge(rois, datumAnchorPort, win, "anchor");
-    g.edge(rois, kRoiPorts[0], win, "heightAnchor");
+    g.edge(rois, datumHeightPort, win, "heightAnchor");
     const std::string crop = g.node(prefix + "n_crop_datum", "filter.crop_box2d", cropOpen, 9, row,
                                     "裁方向基准窗");
     g.edge(cloud, cloudPort, crop, "cloud");
@@ -833,6 +848,15 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   circleParams["leftCenterTol"] = bandTol[0];
   circleParams["rightCenterAbove"] = numberOr(band, "right_above", 0.0);
   circleParams["rightCenterTol"] = bandTol[1];
+  for (int i = 0; i < 2; ++i) {
+    const char* key = i == 0 ? "left_mode" : "right_mode";
+    const std::string mode = textOr(band, key, "always");
+    if (bandTol[i] > 0 && mode != "always" && mode != "guard") {
+      return badInput(std::string("gap.center_band.") + key +
+                      " 只能是 always 或 guard，这份写的是 '" + mode + "'");
+    }
+    circleParams[i == 0 ? "leftCenterMode" : "rightCenterMode"] = mode;
+  }
   const std::string circles =
       g.node("n_circles", "gap.fit_gap_circles", circleParams, 10, 2, "两侧圆拟合");
   g.edge(merged, mergedPort, circles, "merged");

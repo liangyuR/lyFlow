@@ -1229,3 +1229,45 @@ TEST_CASE("gap.fit_line 的 dirMode 不是 free 却没接 refLine 就报错") {
   CHECK_FALSE(s.ok);
   CHECK(s.code == "bad_param");
 }
+
+TEST_CASE("圆心高度带的 guard：带内逐位不变，出带才重拟") {
+  // 右 ROI 里两段弧：点多的在参考线上方 0.5 mm，点少的在下方 0.5 mm。
+  // 不加约束时 RANSAC 选点多的那段。
+  const auto build = [](const std::unordered_map<std::string, Value>& over) {
+    PointCloud primary, secondary, merged;
+    pushLeftArc(primary);
+    pushLeftArc(secondary);
+    pushLeftArc(merged);
+    for (PointCloud* c : {&primary, &secondary, &merged}) {
+      pushArc(*c, 0.0035, -0.0005, 0.0009, 200, 340, 90);
+      pushArc(*c, 0.0035, 0.0005, 0.0009, 200, 340, 40);
+    }
+    auto call = std::make_unique<Call>();
+    call->inputs["merged"] = Data::cloud(merged);
+    call->inputs["primary"] = Data::cloud(primary);
+    call->inputs["secondary"] = Data::cloud(secondary);
+    call->inputs["boxLeft"] = Data::box2d(box(-0.006f, -0.004f, -0.001f, 0.002f));
+    call->inputs["boxRight"] = Data::box2d(box(0.001f, -0.004f, 0.006f, 0.002f));
+    call->inputs["refLine"] = Data::line2d(flatLine());
+    REQUIRE(call->run("gap.fit_gap_circles", over).ok);
+    return call;
+  };
+  auto plain = build({});
+  const Circle2D& a = *plain->out("right").asCircle2D();
+  REQUIRE(a.center[1] == doctest::Approx(-0.0005).epsilon(0.05));
+
+  // 带套在它身上 —— guard 不该动它，逐位一致
+  auto guarded = build({{"rightCenterAbove", Value::number(0.5)},
+                        {"rightCenterTol", Value::number(0.4)},
+                        {"rightCenterMode", Value::text("guard")}});
+  const Circle2D& b = *guarded->out("right").asCircle2D();
+  CHECK(a.center[0] == b.center[0]);
+  CHECK(a.center[1] == b.center[1]);
+  CHECK(a.radius == b.radius);
+
+  // 带套在另一段弧上 —— 出带了，guard 必须重拟，换到那一段
+  auto moved = build({{"rightCenterAbove", Value::number(-0.5)},
+                      {"rightCenterTol", Value::number(0.3)},
+                      {"rightCenterMode", Value::text("guard")}});
+  CHECK(moved->out("right").asCircle2D()->center[1] == doctest::Approx(0.0005).epsilon(0.05));
+}

@@ -527,3 +527,35 @@ TEST_CASE("datum 与 mode 写错了导入就报错") {
     CHECK_FALSE(s.ok);
   }
 }
+
+TEST_CASE("方向基准的锚和高度锚可以分别指定") {
+  const nlohmann::json doc = importText(
+      "StandardGap.yml:template",
+      withFlushKeys("  base_direction: {datum: long_plane, anchor: gap_right,"
+                    " height_anchor: flush_ref, mode: band, nominal_deg: 1.0}\n"),
+      nullptr);
+  for (const auto& e : doc["edges"]) {
+    if (e["to"]["node"] != "n_datum_box") continue;
+    if (e["to"]["port"] == "anchor") CHECK(e["from"]["port"] == "gapRight");
+    if (e["to"]["port"] == "heightAnchor") CHECK(e["from"]["port"] == "flushRef");
+  }
+  // side 跟着 anchor 走：锚在右边的缝框上，窗口就往右推
+  CHECK(nodeById(doc, "n_datum_box")["params"]["side"] == "right");
+  CHECK(nodeById(doc, "n_fit_base")["params"]["dirMode"] == "band");
+}
+
+TEST_CASE("圆心高度带的 mode 从 YAML 落到参数上，写错就报错") {
+  const nlohmann::json doc = importText(
+      "StandardGap.yml:template",
+      withGapKeys("  center_band: {left_above: 0.5, left_tolerance: 0.4, left_mode: guard}\n"),
+      nullptr);
+  const auto& p = nodeById(doc, "n_circles")["params"];
+  CHECK(p["leftCenterMode"] == "guard");
+  CHECK(p["rightCenterMode"] == "always");
+  Status s;
+  importText("StandardGap.yml:template",
+             withGapKeys("  center_band: {left_above: 0.5, left_tolerance: 0.4,"
+                         " left_mode: whatever}\n"),
+             &s);
+  CHECK_FALSE(s.ok);
+}
