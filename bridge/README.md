@@ -4,6 +4,22 @@ Tauri 桌面壳。职责：IPC、序列化、文件读写、进程生命周期�
 
 **不理解算子语义，不改写图结构。** 见 [docs/architecture.md](../docs/architecture.md)。
 
+## 模块
+
+| 模块 | feature | 说明 |
+|---|---|---|
+| `core_ffi.rs` | — | C ABI 边界：加载 DLL、调用、把 C 的堆内存拷成 Rust 的（ADR-0004/0009）。 |
+| `graph.rs` | — | GraphDoc 的 Rust 表示与结构校验（三层校验的中间那层）。 |
+| `cli.rs` / `eval.rs` / `perturb.rs` | — | headless CLI（ADR-0012/0020）。一行 Tauri 都不碰。 |
+| `commands.rs` | `host` | 26 条 `#[tauri::command]`。每条都对 `R: tauri::Runtime` 泛型 —— 外部宿主与测试里的 `MockRuntime` 都不是 `Wry`。 |
+| `execution.rs` | `host` | `RunManager`：运行的生命周期、事件推流、二进制编码。 |
+| `watcher.rs` | `host` | 开发期热重载与库目录监视（ADR-0009/0010）。 |
+| `host.rs` | `host` | `attach()` / `lyflow_handler!` / `SceneProvider` / `resolve_path` —— 外部 Rust 宿主复用上面三个模块的入口（[docs/embedding.md](../docs/embedding.md#rusttauri-宿主)）。 |
+| `lib.rs::run()` | `desktop` | LyFlow 自己的桌面壳。只比宿主多一个窗口、一个 dialog 插件和 `generate_context!`，其余走同一份 `host::attach`。 |
+
+`desktop = ["host", …]`，所以 `--no-default-features --features host` 编出来的 lib
+有完整 IPC 层，却不依赖 `tauri-build` 与 dialog 插件。
+
 ## C++ 怎么进来的
 
 M2 起改成了 **CMake 构建的 DLL + libloading 运行时加载**
@@ -68,7 +84,7 @@ CMake + Ninja + vcpkg（PCL）。Ninja 通常不在 PATH 上，`build.rs` 会依
 | `validate_graph` | 前端 → C++ | 权威校验，返回**全部**诊断（D5）。 |
 | `plan_graph` | 前端 → C++ | 编译但不执行，报每节点的 cacheKey 与是否已缓存（ADR-0007）。 |
 | `clear_cache` / `cache_stats` | 前端 → C++ | 结果仓的清空与统计，给菜单和状态栏用。`clear_cache` 是**进程级**的，别的 run 的结果也会没；只想让一次运行不吃缓存用 `no_reuse`（CLI `--no-cache`）。 |
-| `run_graph` | 前端 → C++ | 启动一次运行，立刻返回 runId。 |
+| `run_graph` | 前端 → C++ | 启动一次运行，立刻返回 runId。带 `sceneId` 时先问宿主的 `SceneProvider` 要注入的点云（ADR-0017）。 |
 | `cancel_run` | 前端 → C++ | 协作式取消。id 对不上就无操作。 |
 | `get_output_info` | C++ → 前端 | 某节点全部输出的 type/elementCount。 |
 | `get_output_cloud` | C++ → 前端 | **二进制**点云（见下）。 |
