@@ -165,6 +165,7 @@ endmacro()
 # 和 std-ml 的 onnxruntime 检查写在 lyflow_op_pack() 调用之外，光 include 就会在
 # configure 期失败 —— 跳过必须发生在这里，而不是靠宏里的 LYFLOW_PACK_ENABLED。
 set(LYFLOW_STD_PACK_DIRS "")
+set(_std_pack_names "")
 file(GLOB _std_candidates "${CMAKE_CURRENT_SOURCE_DIR}/../packs/*")
 list(SORT _std_candidates)
 foreach(d IN LISTS _std_candidates)
@@ -174,6 +175,7 @@ foreach(d IN LISTS _std_candidates)
     continue()
   endif()
   get_filename_component(_n "${d}" NAME)
+  list(APPEND _std_pack_names "${_n}")
   if(LYFLOW_STD_PACKS)
     # 默认模式：全部 include，DEFAULT OFF 的包由 lyflow_op_pack() 宏按 LYFLOW_PACKS 裁决
     # （它自己会打印跳过的原因），这里不多嘴，免得默认构建的 STATUS 输出变吵。
@@ -183,6 +185,15 @@ foreach(d IN LISTS _std_candidates)
     list(APPEND LYFLOW_STD_PACK_DIRS "${d}")
   else()
     message(STATUS "lyflow: 纯平台构建，跳过 packs/${_n}（LYFLOW_STD_PACKS=0 且不在 LYFLOW_PACKS 里）")
+  endif()
+endforeach()
+
+# LYFLOW_PACKS 里写错一个名字（拼错、写成外部包的名字）在默认模式下是**静默**的：
+# 宏那边只问「我在不在名单里」，从没人问过「名单里的都存在吗」。表现是编出来的
+# DLL 少了一整包算子，而 configure 一条警告都没有。
+foreach(_want IN LISTS LYFLOW_PACKS)
+  if(NOT "${_want}" IN_LIST _std_pack_names)
+    message(WARNING "lyflow: LYFLOW_PACKS 里的 ${_want} 不是 packs/ 下的包")
   endif()
 endforeach()
 # 提供公共设施的包排在前面：std-pointcloud 定义 lyflow_pcl_support 与 lyflow_std_algo，
