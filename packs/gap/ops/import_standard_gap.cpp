@@ -284,6 +284,25 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   if (useModel) loadParams["dropNonFinite"] = false;
   const std::string load = g.node("n_load", "gap.load_profile_pair", loadParams, 0, 1, "读一对剖面");
 
+  // 双相机闸：两台看到的不是同一个面时（玻璃二次反射、标定漂），模型的两行输入和合并云
+  // 会一起被带偏，而拟合残差照样很小，从别的质量指标上看不出来。闸站在这里 —— load 之后、
+  // 模型之前 —— 才来得及把不可信的那台换掉。默认不生成，配置里开了才有这个节点。
+  std::string clouds = load;
+  const YAML::Node guardCfg = child(common, "camera_guard");
+  if (boolOr(guardCfg, "enabled", false)) {
+    nlohmann::json guardParams;
+    guardParams["onDisagree"] = textOr(guardCfg, "on_disagree", "record");
+    guardParams["maxDeltaMm"] = numberOr(guardCfg, "max_delta_mm", 0.5);
+    guardParams["sampleStep"] = numberOr(guardCfg, "sample_step_mm", 0.5);
+    guardParams["halfWindow"] = numberOr(guardCfg, "half_window_mm", 0.25);
+    guardParams["minSamples"] = intOr(guardCfg, "min_samples", 20);
+    const std::string guard =
+        g.node("n_camera_guard", "gap.camera_guard", guardParams, 0, 3, "双相机闸");
+    g.edge(load, "primary", guard, "primary");
+    g.edge(load, "secondary", guard, "secondary");
+    clouds = guard;
+  }
+
   const auto radiusOutlier = [&](const std::string& id, const std::string& source,
                                  const char* sourcePort, int column,
                                  int row) -> std::pair<std::string, const char*> {
@@ -414,14 +433,14 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
       g.node("n_frame_p", "gap.to_measurement_frame", nullptr, 1, 0, "换轴 primary");
   const std::string frameS =
       g.node("n_frame_s", "gap.to_measurement_frame", nullptr, 1, 2, "换轴 secondary");
-  g.edge(load, "primary", frameP, "cloud");
-  g.edge(load, "secondary", frameS, "cloud");
+  g.edge(clouds, "primary", frameP, "cloud");
+  g.edge(clouds, "secondary", frameS, "cloud");
 
   if (useModel) {
     const std::string tensor =
         g.node("n_tensor", "gap.profile_tensor", nullptr, 1, 4, "剖面张量");
-    g.edge(load, "primary", tensor, "primary");
-    g.edge(load, "secondary", tensor, "secondary");
+    g.edge(clouds, "primary", tensor, "primary");
+    g.edge(clouds, "secondary", tensor, "secondary");
     nlohmann::json inferParams;
     inferParams["modelPath"] = modelPath;
     const std::string infer = g.node("n_infer", "ml.onnx_run", inferParams, 1, 5, "ONNX 推理");
@@ -441,8 +460,8 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
     roiParams["baseSide"] = baseSide;
     const std::string modelRois =
         g.node("n_rois", "gap.roi_from_labels", roiParams, 3, 4, "模型四框");
-    g.edge(load, "primary", modelRois, "primary");
-    g.edge(load, "secondary", modelRois, "secondary");
+    g.edge(clouds, "primary", modelRois, "primary");
+    g.edge(clouds, "secondary", modelRois, "secondary");
     g.edge(seg, "labels", modelRois, "labels");
     g.edge(colored, "cloud", modelRois, "backdrop");
 
@@ -785,8 +804,8 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
     refParams["modelPath"] = modelPath;
   }
   const std::string ref = g.node("n_ref", "gap.measure_reference", refParams, 2, 8, "黑盒对照");
-  g.edge(load, "primary", ref, "primary");
-  g.edge(load, "secondary", ref, "secondary");
+  g.edge(clouds, "primary", ref, "primary");
+  g.edge(clouds, "secondary", ref, "secondary");
 
   nlohmann::json doc;
   doc["schemaVersion"] = 1;

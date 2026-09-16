@@ -28,7 +28,7 @@ void registerPackOps(Registry& r) {
   registerGrooveJoint(r);
   registerNotchWidth(r);
   registerPointOffset(r);
-  registerCameraConsistency(r);
+  registerCameraGuard(r);
   registerJudge(r);
   registerResultBundle(r);
   registerMeasureReference(r);

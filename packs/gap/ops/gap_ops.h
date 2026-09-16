@@ -103,7 +103,7 @@ void registerCornerVertex(Registry& r);
 void registerGrooveJoint(Registry& r);
 void registerNotchWidth(Registry& r);
 void registerPointOffset(Registry& r);
-void registerCameraConsistency(Registry& r);
+void registerCameraGuard(Registry& r);
 void registerJudge(Registry& r);
 void registerMeasureReference(Registry& r);
 void registerProfileTensor(Registry& r);

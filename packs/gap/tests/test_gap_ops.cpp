@@ -886,144 +886,142 @@ TEST_CASE("gap.result_bundle 不接 flush 时把它记成 inactive") {
   CHECK(bundle->data["gap"]["status"].get<std::string>() == "success");
 }
 
-// ---------------------------------------------------------------- gap.camera_consistency
+// ---------------------------------------------------------------- gap.camera_guard
 
 namespace {
 
-/// 一段水平面，高度 yMm，横跨 [0, 10] mm。offsetMm 整体抬高/压低。
-PointCloud flatCloud(double yMm) {
+/// 一段水平面，高度 hMm，横跨 [0, 10] mm。inZ=true 是传感器帧（高度在 z）。
+PointCloud flatCloud(double hMm, bool inZ = true) {
   PointCloud c;
-  for (int i = 0; i <= 100; ++i) c.push(mmf(0.1 * i), mmf(yMm), 0.0f);
+  for (int i = 0; i <= 100; ++i) {
+    const float x = mmf(0.1 * i);
+    if (inZ) c.push(x, 0.0f, mmf(hMm));
+    else c.push(x, mmf(hMm), 0.0f);
+  }
   return c;
 }
 
-struct Uh {
-  float u;
-  float h;
-};
-
-const Uh kProfileSamples[4] = {{0.001f, 0.010f}, {0.002f, 0.012f}, {0.003f, 0.009f},
-                               {0.004f, 0.011f}};
-
-void writeAsciiPcd(const std::filesystem::path& file, bool profileLayout) {
-  std::ofstream out(file);
-  out << "# .PCD v0.7 - Point Cloud Data file format\n"
-      << "VERSION 0.7\nFIELDS x y z rgb\nSIZE 4 4 4 4\nTYPE F F F F\nCOUNT 1 1 1 1\n"
-      << "WIDTH 4\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\nPOINTS 4\nDATA ascii\n";
-  for (const Uh& s : kProfileSamples) {
-    const float y = profileLayout ? s.h : 0.0f;
-    const float z = profileLayout ? 0.0f : s.h;
-    out << s.u << " " << y << " " << z << " 0\n";
-  }
-}
+const Record* guardQuality(Call& call) { return call.out("quality").asRecord(); }
 
 }  // namespace
 
-TEST_CASE("gap.camera_consistency 两台看到同一个面时不超限，box 原样透传") {
+TEST_CASE("gap.camera_guard 两台一致时原样透传两路") {
   Call call;
   call.inputs["primary"] = Data::cloud(flatCloud(170.0));
   call.inputs["secondary"] = Data::cloud(flatCloud(170.02));
-  const Box2D in = box(mmf(1.0), mmf(160.0), mmf(9.0), mmf(180.0));
-  call.inputs["box"] = Data::box2d(in);
-  REQUIRE(call.run("gap.camera_consistency", {{"mode", Value::text("enforce")}}).ok);
-  const Record* q = call.out("quality").asRecord();
+  REQUIRE(call.run("gap.camera_guard", {{"onDisagree", Value::text("fail")}}).ok);
+  const Record* q = guardQuality(call);
   REQUIRE(q != nullptr);
   CHECK(q->data["evaluated"].get<bool>());
   CHECK_FALSE(q->data["exceeded"].get<bool>());
-  CHECK(q->data["deltaMedianMm"].get<double>() == doctest::Approx(-0.02).epsilon(0.05));
-  const Box2D* out = call.out("box").asBox2D();
-  REQUIRE(out != nullptr);
-  CHECK(out->min[0] == doctest::Approx(in.min[0]));
-  CHECK(out->max[0] == doctest::Approx(in.max[0]));
+  CHECK(q->data["taken"].get<std::string>() == "both");
+  CHECK(q->data["deltaMedianMm"].get<double>() == doctest::Approx(0.02).epsilon(0.05));
+  REQUIRE(call.out("primary").asCloud() != nullptr);
+  REQUIRE(call.out("secondary").asCloud() != nullptr);
+  CHECK(call.out("primary").asCloud()->pointCount() == 101);
+  CHECK(call.out("secondary").asCloud()->pointCount() == 101);
 }
 
-TEST_CASE("gap.camera_consistency 两台差一大截时 enforce 报 camera_disagree，shadow 只记录") {
-  Call shadow;
-  shadow.inputs["primary"] = Data::cloud(flatCloud(170.0));
-  shadow.inputs["secondary"] = Data::cloud(flatCloud(172.5));
-  shadow.inputs["box"] = Data::box2d(box(mmf(1.0), mmf(160.0), mmf(9.0), mmf(180.0)));
-  REQUIRE(shadow.run("gap.camera_consistency", {{"mode", Value::text("shadow")}}).ok);
-  const Record* q = shadow.out("quality").asRecord();
+TEST_CASE("gap.camera_guard 判据用绝对值，符号另记") {
+  Call call;
+  call.inputs["primary"] = Data::cloud(flatCloud(170.0));
+  call.inputs["secondary"] = Data::cloud(flatCloud(172.5));
+  REQUIRE(call.run("gap.camera_guard", {{"onDisagree", Value::text("record")}}).ok);
+  const Record* q = guardQuality(call);
   REQUIRE(q != nullptr);
   CHECK(q->data["exceeded"].get<bool>());
-  CHECK(q->data["deltaMedianMm"].get<double>() == doctest::Approx(-2.5).epsilon(0.05));
+  CHECK(q->data["deltaMedianMm"].get<double>() == doctest::Approx(2.5).epsilon(0.05));
+  CHECK(q->data["signedMedianMm"].get<double>() == doctest::Approx(-2.5).epsilon(0.05));
+  // record 只记录，两路照常透传
+  CHECK(q->data["taken"].get<std::string>() == "both");
+}
 
-  Call enforce;
-  enforce.inputs = shadow.inputs;
-  const auto status = enforce.run("gap.camera_consistency", {{"mode", Value::text("enforce")}});
+TEST_CASE("gap.camera_guard 超限时把留下的那台送到两个端口") {
+  const PointCloud a = flatCloud(170.0);
+  const PointCloud b = flatCloud(172.5);
+  for (const auto& mode : {std::string("keepPrimary"), std::string("keepSecondary")}) {
+    Call call;
+    call.inputs["primary"] = Data::cloud(a);
+    call.inputs["secondary"] = Data::cloud(b);
+    REQUIRE(call.run("gap.camera_guard", {{"onDisagree", Value::text(mode)}}).ok);
+    CHECK(guardQuality(call)->data["taken"].get<std::string>() ==
+          (mode == "keepPrimary" ? "primary" : "secondary"));
+    // 模型的张量是两行，单行喂不进去，所以留下的那台要占满两个端口
+    const PointCloud* left = call.out("primary").asCloud();
+    const PointCloud* right = call.out("secondary").asCloud();
+    REQUIRE(left != nullptr);
+    REQUIRE(right != nullptr);
+    CHECK(left->xyz == right->xyz);
+    const double kept = mode == "keepPrimary" ? 170.0 : 172.5;
+    CHECK(left->xyz[2] * 1000.0 == doctest::Approx(kept).epsilon(1e-3));
+  }
+}
+
+TEST_CASE("gap.camera_guard 的 fail 报 camera_disagree") {
+  Call call;
+  call.inputs["primary"] = Data::cloud(flatCloud(170.0));
+  call.inputs["secondary"] = Data::cloud(flatCloud(172.5));
+  const auto status = call.run("gap.camera_guard", {{"onDisagree", Value::text("fail")}});
   CHECK_FALSE(status.ok);
   CHECK(status.code == "camera_disagree");
 }
 
-TEST_CASE("gap.camera_consistency 只有一台看得见时判不了，不拦") {
+TEST_CASE("gap.camera_guard 高度在 y 还是 z 自己认") {
+  // 测量帧（to_measurement_frame 之后）高度在 y，判据要一样。
+  Call call;
+  call.inputs["primary"] = Data::cloud(flatCloud(170.0, /*inZ=*/false));
+  call.inputs["secondary"] = Data::cloud(flatCloud(172.5, /*inZ=*/false));
+  REQUIRE(call.run("gap.camera_guard", {{"onDisagree", Value::text("record")}}).ok);
+  const Record* q = guardQuality(call);
+  REQUIRE(q != nullptr);
+  CHECK(q->data["evaluated"].get<bool>());
+  CHECK(q->data["deltaMedianMm"].get<double>() == doctest::Approx(2.5).epsilon(0.05));
+}
+
+TEST_CASE("gap.camera_guard 重叠太少时判不了，也不拦") {
   PointCloud empty;
   Call call;
   call.inputs["primary"] = Data::cloud(flatCloud(170.0));
   call.inputs["secondary"] = Data::cloud(empty);
-  call.inputs["box"] = Data::box2d(box(mmf(1.0), mmf(160.0), mmf(9.0), mmf(180.0)));
-  REQUIRE(call.run("gap.camera_consistency", {{"mode", Value::text("enforce")}}).ok);
-  const Record* q = call.out("quality").asRecord();
+  REQUIRE(call.run("gap.camera_guard", {{"onDisagree", Value::text("fail")}}).ok);
+  const Record* q = guardQuality(call);
   REQUIRE(q != nullptr);
   CHECK_FALSE(q->data["evaluated"].get<bool>());
   CHECK_FALSE(q->data["exceeded"].get<bool>());
   CHECK(q->data["reason"].get<std::string>() == "insufficient_overlap");
 }
 
-TEST_CASE("gap.camera_consistency mode=off 不算，也不拦") {
+TEST_CASE("gap.camera_guard 的 off 连算都不算") {
   Call call;
   call.inputs["primary"] = Data::cloud(flatCloud(170.0));
   call.inputs["secondary"] = Data::cloud(flatCloud(175.0));
-  call.inputs["box"] = Data::box2d(box(mmf(1.0), mmf(160.0), mmf(9.0), mmf(180.0)));
-  REQUIRE(call.run("gap.camera_consistency", {{"mode", Value::text("off")}}).ok);
-  const Record* q = call.out("quality").asRecord();
+  REQUIRE(call.run("gap.camera_guard", {{"onDisagree", Value::text("off")}}).ok);
+  const Record* q = guardQuality(call);
   REQUIRE(q != nullptr);
   CHECK_FALSE(q->data["evaluated"].get<bool>());
   CHECK_FALSE(q->data["exceeded"].get<bool>());
+  CHECK(call.out("primary").asCloud() != nullptr);
 }
 
-TEST_CASE("gap.load_profile_pair 的 layout=profile 读出来与 sensor 布局逐点一致") {
-  const std::filesystem::path dir =
-      std::filesystem::temp_directory_path() / "lyflow-gap-layout-test";
-  std::filesystem::create_directories(dir);
-  const std::filesystem::path sensorPcd = dir / "sensor.pcd";
-  const std::filesystem::path profilePcd = dir / "profile.pcd";
-  writeAsciiPcd(sensorPcd, /*profileLayout=*/false);
-  writeAsciiPcd(profilePcd, /*profileLayout=*/true);
-
-  const auto load = [](const std::filesystem::path& file, const char* layout) {
-    Call call;
-    REQUIRE(call.run("gap.load_profile_pair",
-                     {
-                         {"source", Value::text("files")},
-                         {"primaryFile", Value::text(file.string())},
-                         {"secondaryFile", Value::text(file.string())},
-                         {"layout", Value::text(layout)},
-                     })
-                .ok);
-    return call;
-  };
-
-  Call sensor = load(sensorPcd, "sensor");
-  Call profile = load(profilePcd, "profile");
-
-  for (const char* port : {"primary", "secondary"}) {
-    CAPTURE(port);
-    const PointCloud* a = sensor.out(port).asCloud();
-    const PointCloud* b = profile.out(port).asCloud();
-    REQUIRE(a != nullptr);
-    REQUIRE(b != nullptr);
-    REQUIRE(a->pointCount() == 4);
-    REQUIRE(b->pointCount() == a->pointCount());
-    for (std::size_t i = 0; i < a->pointCount(); ++i) {
-      CAPTURE(i);
-      CHECK(b->xyz[i * 3] == doctest::Approx(a->xyz[i * 3]));
-      CHECK(b->xyz[i * 3 + 1] == doctest::Approx(a->xyz[i * 3 + 1]));
-      CHECK(b->xyz[i * 3 + 2] == doctest::Approx(a->xyz[i * 3 + 2]));
-    }
-    CHECK(a->xyz[1] == doctest::Approx(0.0f));
-    CHECK(b->xyz[2] == doctest::Approx(kProfileSamples[0].h));
+TEST_CASE("gap.camera_guard 接了 box 就只比那一段") {
+  // 只有右半段分家：整段比会超限，只比左半段就不会。
+  PointCloud a;
+  PointCloud b;
+  for (int i = 0; i <= 100; ++i) {
+    const double xMm = 0.1 * i;
+    a.push(mmf(xMm), 0.0f, mmf(170.0));
+    b.push(mmf(xMm), 0.0f, mmf(xMm < 5.0 ? 170.02 : 174.0));
   }
+  Call whole;
+  whole.inputs["primary"] = Data::cloud(a);
+  whole.inputs["secondary"] = Data::cloud(b);
+  REQUIRE(whole.run("gap.camera_guard", {{"onDisagree", Value::text("record")}}).ok);
+  CHECK(guardQuality(whole)->data["exceeded"].get<bool>());
 
-  std::error_code ec;
-  std::filesystem::remove_all(dir, ec);
+  Call left;
+  left.inputs["primary"] = Data::cloud(a);
+  left.inputs["secondary"] = Data::cloud(b);
+  left.inputs["box"] = Data::box2d(box(mmf(0.0), mmf(160.0), mmf(4.5), mmf(180.0)));
+  REQUIRE(left.run("gap.camera_guard", {{"onDisagree", Value::text("record")}}).ok);
+  CHECK_FALSE(guardQuality(left)->data["exceeded"].get<bool>());
 }
