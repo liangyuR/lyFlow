@@ -285,9 +285,9 @@ gap 领域包从 `xyz-gap-inspector/lyflow/` 搬进本仓库的 `packs/gap/`，�
 - `list_metrics(graphPath)`
 - `outputsAvailable` 的业务侧 harvest 与 `devbridge.ts` 快照透出（留给阶段 B）
 
-## M6 — 能被读懂（进行中）
+## M6 — 能被读懂 ✅
 
-计划见 [m6-plan.md](m6-plan.md)，决定见 [ADR-0022](adr/0022-run-summary-as-core-output.md)
+计划见 [m6-plan.md](m6-plan.md)，验收见 [m6-acceptance.md](m6-acceptance.md)，决定见 [ADR-0022](adr/0022-run-summary-as-core-output.md)
 （run summary）、[ADR-0023](adr/0023-patch-as-idempotent-structural-edit.md)（`lyflow patch`）、
 [ADR-0024](adr/0024-port-contracts-four-kinds.md)（端口契约）。目标：**靠读 JSON 干活的人和
 Agent，不用自己重建「这次 run 到底发生了什么」，也不用手改 JSON 做结构实验。** 范围来自第二次
