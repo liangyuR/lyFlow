@@ -83,17 +83,30 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 | `list_port_types` | — | 同上 | `{types:[…]}` |
 | `validate_graph` | `graph \| graphPath` `baseDir?` | `POST /lyflow/validate` | `{diagnostics:[…], ok}` |
 | `plan_graph` | 同上 + `targets?` | `POST /lyflow/plan` | `{plan:[{nodeId,cacheKey,cached,level,upstreamMissing,bypass}]}` |
-| `run_graph` | 同上 + `targets?` `set?` `mode?` `timeoutMs?` | `POST /lyflow/run` + WS 等该 `runId` 的 `run_finished` | `{runId,status,durationMs,outputs,nodes,diagnostics}` |
+| `run_graph` | 同上 + `targets?` `set?` `mode?` `timeoutMs?` | `POST /lyflow/run` + WS 等该 `runId` 的 `run_finished` | core 的 run summary + `runId` / `runStatus` / `diagnostics`（见下） |
 | `get_node_outputs` | `runId` `nodeId` | `GET /lyflow/runs/:id/nodes/:node/outputs` | `{outputs:[OutputInfo]}` 原样 |
 | `summarize_output` | `runId` `nodeId` `port` `maxPoints?` `head?` | 点云走 `GET …/clouds/:node/:port`，其余用 `OutputInfo.value` | 见下 |
 | `eval` | `graphPath` 样本 参数 `metric[]` … | `LYFLOW_CLI eval …` | 压紧的统计（`compact`，默认开）+ 失败样本清单 + `rowsPath` |
 | `perturb` | `graphPath` `after` `region` `axis` `metric[]` … | `LYFLOW_CLI perturb …` | `perturb_summary` 数组 + 不通过样本 + `samplesPath` + `rowsPath` |
 | `diff_graphs` | `a` `b` | `LYFLOW_CLI diff a b --json` | `{exitCode, diff}` 原样 |
+| `patch_graph` | `graphPath` `removeNode[]?` `addNode[]?` `rewire[]?` `set[]?` `dryRun?` `out?` | `LYFLOW_CLI patch … --json` | `patch_result` 摊平：`{exitCode, argv, applied, noops, wrote, diff, stderrTail}` |
 
 ### 图怎么给
 
 `graph`（内联 GraphDoc）与 `graphPath`（本地图文件，MCP 进程读它）二选一。
-**MCP 不写图文件** —— 改完的图由 Agent 自己用文件系统存。
+**MCP 不写图文件** —— 改完的图由 Agent 自己用文件系统存，
+唯一的例外是 `patch_graph` 且显式给了 `dryRun: false`（见下）。
+
+### `patch_graph`：`dryRun` 默认 **true**
+
+改图结构的四个动作（[ADR-0023](adr/0023-patch-as-idempotent-structural-edit.md)），
+顺序定死 remove → add → rewire → set，与传参顺序无关。默认只算差异不写文件；
+要真写就给 `dryRun: false`，写到别的路径再加 `out`（`out` 必须配 `dryRun: false`，
+否则当场报错 ——「我以为它写了」是这套工具里最贵的误解）。
+
+幂等：删不存在的 id、左端口没有出边的 rewire、同值的 set 都进 `noops[]`
+（`{action, spec, reason, message}`），这时 `applied` 全空、`diff.empty` 为 true、`wrote` 是 `null`。
+改完不合法时整体不写，返回 `{error, exitCode: 1, diagnostics: […]}`，诊断是 core 的原话。
 
 `graphPath` 是给 MCP 进程读的本地路径；`baseDir` 是给**后端**解析相对路径参数的目录，
 相对后端工作区根。给了 `baseDir` 就以它为准；没给而 `graphPath` 是相对路径时拿它当基准；
@@ -104,20 +117,48 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 
 ### `run_graph` 的返回
 
+返回值**就是 core 的 run summary**（[ADR-0022](adr/0022-run-summary-as-core-output.md)），
+MCP 只在外面套了 `runId` / `runStatus` / `diagnostics`。
+`status` / `nodes` / `outputs` / `decisions` / `contractViolations` 原样来自 core ——
+这一层一个字都不重建。
+
 ```jsonc
-{"runId":"01M2K43FJE4C9NJ7QEYHXP89WW","status":"ok","durationMs":2.03,
- "outputs":{"thinned":{"node":"voxel","port":"cloud","type":"PointCloud","elementCount":5779}},
- "nodes":[{"id":"gen","state":"done","outputsAvailable":true,
-           "durationMs":0.46,"elementCount":8000,"errors":[]}],
+{"runId":"01M2K43FJE4C9NJ7QEYHXP89WW",
+ "status":"degraded", "runStatus":"ok", "durationMs":2.03,
+ "outputs":{
+   "gap":   {"state":"value","node":"n_gap","port":"gap","type":"Measurement",
+             "elementCount":1,"value":{"kind":"Measurement","value":3.52,"ok":true,"unit":"mm"}},
+   "flush": {"state":"inactive","node":"b_n_flush","port":"flush","reason":"not_demanded"},
+   "bundle":{"state":"failed","node":"n_bundle","port":"bundle",
+             "from":"n_fit_datum","code":"insufficient_points"}},
+ "nodes":{"n_fit_datum":{"state":"error","code":"insufficient_points",
+                         "durationMs":2.1,"outputsAvailable":false},
+          "n_gap":{"state":"done","durationMs":0.46,"cached":true,"outputsAvailable":true}},
+ "decisions":{"n_fb_line":{"choice":"b","reason":"io: 主路径没有产出",
+                           "port":"choice","type":"FallbackChoice"}},
+ "contractViolations":[],
  "diagnostics":[]}
 ```
 
-- `status` 是 `ok` / `error` / `cancelled`，另有两个只属于这一层的值：
-  校验没过（后端 400）时是 `invalid`，`runId` 为 `null`、`diagnostics` 里是诊断；
-  等不到 `run_finished` 时是 `timeout`（默认等 300 s，`timeoutMs` 可改）。
-- `nodes[].state=skipped` **不代表没有输出**，看 `outputsAvailable`。
-- `outputs` 里给了 `node` / `port`，就是为了能直接拿去喂 `summarize_output`。
+- **`status` 三态**：`ok`（零个节点出错）/ `degraded`（有节点坏了，但每一维声明输出
+  要么拿到了值、要么本来就不要）/ `failed`（有一维本该有却崩了）。
+  另有两个只属于这一层的值：校验没过（后端 400）时是 `invalid`，`runId` 为 `null`、
+  `diagnostics` 里是诊断；等不到 `run_finished` 时是 `timeout`（默认等 300 s，`timeoutMs` 可改）。
+- **`runStatus`** 是 `run_finished` 那个 `ok` / `error` / `cancelled`，与 `status` 不是一回事，
+  所以两个都留着：带 fallback 的图「主路径炸了、备用接住了」是
+  `runStatus: ok` + `status: degraded`。**判成败读 `status`。**
+- **`outputs` 每一维三态**：`value` / `inactive`（这一维本来就没有，`reason` 说明为什么）/
+  `failed`（本该有、崩了，`from` 是沿边回溯到的最近的出错节点）。
+  别把 `inactive` 当失败 —— 它就是「这个点位不量这一维」。
+  `node` / `port` 照旧给着，直接拿去喂 `summarize_output`。
+- **`decisions`** 是全图每一个 `FallbackChoice`，条数等于图里 `flow.fallback` + `flow.select`
+  的节点数。按 Record 的类型收，不按算子 id。
+- `nodes` 是 `id → 收尾状态` 的**对象**（M5 那一版是数组）。`state=skipped` 不代表没有输出，
+  看 `outputsAvailable`；`reason=not_demanded` 才是真的什么都没有。
+  节点的完整诊断列表仍在事件流里，summary 每个节点只给一个 `code`。
 - 图级输出是点云时不带 `value`，**这里永远不返回点云本身**。
+- 接的是老 core（ABI < v9）时没有 summary，返回退回 M5 那套形状：`nodes` 是数组、
+  没有 `decisions` / `contractViolations`、`status` 等于 `runStatus`。
 - `set` 的语义与 CLI `--set` 完全一样：键是 `<节点>.<参数>`，在发给后端之前改 doc。
   与 `--set` 的差别只有一处：值是已经解析好的 JSON 值，不用再写成字符串。
 
@@ -186,7 +227,12 @@ CLI 的 `--samples-jsonl-out` 与 `--parallel` **MCP 不提供**，逐条对照�
   51 帧 × 8 组参数就是 408 行，那是给 `jq` 看的，不是给上下文窗口看的。
 - `csv` 给了路径就原样透给 CLI 的 `--csv`，返回里回一个 `csvPath`。
 - `failures` 是状态不是 `ok` 的样本，最多 `failuresLimit` 条（默认 20，`0` 表示一条都不回、
-  只给 `rowsPath`），超了 `failuresTruncated` 为 `true`。
+  只给 `rowsPath`），超了 `failuresTruncated` 为 `true`。每条带
+  `{sample, paramSet, status, errors, summaryStatus, outputs}` ——
+  后两个来自那次运行的 run summary（[ADR-0022](adr/0022-run-summary-as-core-output.md)），
+  `outputs` 是每一维的三态。**没有它就得回头翻 `rowsPath` 才分得清
+  「这一维本来就没有」和「本该有、崩了」。** `rowsPath` 里每行也带完整的 `summary`
+  （CLI 的 `--no-summary` 可以关掉，MCP 这边不提供这个开关 —— 落盘不占上下文）。
 - **读 summary 的顺序是先 `ok/n` 与 `failCodes`，再 `std`**，理由见
   [agent-tuning.md](agent-tuning.md) §3。
 - 退出码 4（用法错，比如指标路径拼错）或者根本起不来时，额外带一个 `stderr` 字段放**全文** ——

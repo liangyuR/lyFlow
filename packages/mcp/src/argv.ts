@@ -102,6 +102,47 @@ export function evalArgv(input: EvalInput, paramsFile: string | null): string[] 
   return argv;
 }
 
+export interface PatchInput {
+  graphPath: string;
+  removeNode?: string[] | undefined;
+  addNode?: Record<string, unknown>[] | undefined;
+  rewire?: string[] | undefined;
+  set?: string[] | undefined;
+  dryRun?: boolean | undefined;
+  out?: string | undefined;
+  baseDir?: string | undefined;
+}
+
+export function patchArgv(input: PatchInput): string[] {
+  const removeNode = input.removeNode ?? [];
+  const addNode = input.addNode ?? [];
+  const rewire = input.rewire ?? [];
+  const set = input.set ?? [];
+  if (removeNode.length + addNode.length + rewire.length + set.length === 0) {
+    throw new Error("至少给一个动作：removeNode / addNode / rewire / set");
+  }
+  for (const r of rewire) {
+    if (!/^[^:=]+:[^:=]+=[^:=]+:[^:=]+$/.test(r)) {
+      throw new Error(`rewire 的写法是 <节点>:<端口>=<节点>:<端口>，收到 ${r}`);
+    }
+  }
+  // dryRun 默认 true：一个能原地覆写图的工具，默认必须是「先给我看差异」
+  const dryRun = input.dryRun ?? true;
+  if (input.out && dryRun) {
+    throw new Error("out 要配 dryRun:false —— dryRun 下什么都不写，给了 out 也一样");
+  }
+  const argv = ["patch", input.graphPath];
+  if (input.baseDir) argv.push("--base-dir", input.baseDir);
+  for (const id of removeNode) argv.push("--remove-node", id);
+  for (const node of addNode) argv.push("--add-node", JSON.stringify(node));
+  for (const r of rewire) argv.push("--rewire", r);
+  for (const s of set) argv.push("--set", s);
+  if (dryRun) argv.push("--dry-run");
+  if (input.out) argv.push("-o", input.out);
+  argv.push("--json");
+  return argv;
+}
+
 export function perturbArgv(input: PerturbInput): string[] {
   if (!input.metric || input.metric.length === 0) {
     throw new Error("至少给一个 metric，例如 outputs.gap");

@@ -34,6 +34,112 @@ lyflow validate graph.lyflow.json && lyflow run graph.lyflow.json --outputs
 看 `stats.outputsAvailable`：缓存命中、静音透传、外部注入都是 `skipped` 但输出照样在，
 只有 `reason=not_demanded`（这一支根本没被需要）才是真的什么都没有。
 
+## 先看 summary，不要自己数节点
+
+```bash
+lyflow run graph.lyflow.json --summary | tail -1
+```
+
+最后一行就是这一轮的结论（[ADR-0022](adr/0022-run-summary-as-core-output.md)）。
+**别再从 `node_state` 事件里重建成败判定** —— 那要同时处理缓存命中、惰性分支没被 demand、
+失败被 `acceptsError` 端口接住三种情况，业务侧做错过两次。
+
+读的顺序是三步。
+
+**① `status`。** 三态，一行定性：
+
+| 值 | 意思 | 该做什么 |
+|---|---|---|
+| `ok` | 零个节点出错 | 往下走 |
+| `degraded` | 有节点坏了，但每一维声明输出要么拿到了值、要么本来就不要 | **结果可用**，但去看是谁坏了 |
+| `failed` | 有一维声明输出本该有却崩了（或图没声明输出且有节点出错） | 结果不可用 |
+
+`run_finished.status` 是另一回事，别拿它当成败判定。带 fallback 的图里
+「模型路径炸了 → 模板路径接住 → 量出来了」是 `run_finished: ok` + `summary: degraded`：
+退出码 0，但确实有东西坏了，值得去看日志。
+
+**② `outputs` 的每一维。** 也是三态，`inactive` 与 `failed` 千万别混：
+
+```jsonc
+"outputs": {
+  "gap":    { "state": "value",    "value": { "kind": "Measurement", "value": 3.52 } },
+  "flush":  { "state": "inactive", "reason": "not_demanded" },  // 这个点位本来就不量 flush
+  "bundle": { "state": "failed", "from": "n_fit_datum", "code": "insufficient_points" }
+}
+```
+
+`inactive` 是「这一维本来就没有」，`failed` 是「本该有、崩了」。判 NG 只看 `failed`。
+`from` 已经沿边回溯到最近的那个出错节点了 —— 不用自己顺着边找根因。
+
+**③ `decisions`。** 全图每一个 fallback / select 选了哪一路，一次给全：
+
+```bash
+lyflow run graph.lyflow.json --summary | tail -1 | python -c "
+import json, sys
+for node, d in json.load(sys.stdin)['decisions'].items():
+    print(node, d['choice'], d.get('reason', ''))"
+```
+
+条数应当等于图里 `flow.fallback` + `flow.select` 节点的个数。少了就是有节点这一轮没跑到，
+去 `nodes` 里查它的 `state`。**别再拿某个下游算子的 `roi_source` 之类的字段去猜
+「模板路径用没用过」** —— 那个字段回答的是别的问题，猜错过两次。
+
+批量跑时同一份东西在每行 `eval_row` 里（`--no-summary` 可以关掉以省体积）：
+
+```bash
+lyflow eval graph.lyflow.json --samples s.jsonl --metric outputs.gap \
+  | grep eval_row | python -c "
+import json, sys
+for line in sys.stdin:
+    r = json.loads(line)
+    s = r.get('summary', {})
+    if s.get('status') != 'ok':
+        print(r['sample'], s.get('status'),
+              {k: v['state'] for k, v in s.get('outputs', {}).items()})"
+```
+
+## 改图结构用 `patch`，不手改 JSON
+
+`--set` 只改参数。**删节点、加节点、改接线走 `lyflow patch`**，不要复制一份 JSON 手改 ——
+手改的两个代价是漏删边（悬空边的报错出现在别处）和「不知道自己到底改了什么」。
+
+```bash
+# 1. 先看差异。输出与 lyflow diff 逐字相同，不写任何文件
+lyflow patch graph.lyflow.json --remove-node 'b_*' \
+       --rewire n_fb_line:out=n_fit_base:line --dry-run
+
+# 2. 认了再写。省略 -o 就原地覆写；--json 给一行回执
+lyflow patch graph.lyflow.json --rewire n_fb_line:out=n_fit_base:line -o short.lyflow.json --json
+```
+
+- **动作顺序定死 remove → add → rewire → set**，与你打字的先后无关。所以「先改接线、再删被短接掉
+  的那条分支」是**两条命令**：第一条只 `--rewire`，第二条才 `--remove-node`。
+  反过来写（一条命令里又删又接）会报「图里没有节点 X」，因为删在前。
+- `--remove-node` 连带删它的所有边；glob 只对 id（`b_*` 这种）。
+  **图级 `outputs` 还指着的节点不给删** —— 报错、整体不写，而不是静默把那个读数删掉。
+- `--rewire <节点>:<端口>=<节点>:<端口>` 把**所有**从左端口出发的边改为从右端口出发，
+  这是「短接掉一段」的写法。
+- `--add-node '{"id":…,"op":…}'` 只加节点，加不了边；新节点要么是不需要输入的源算子，
+  要么配 `--rewire` 把已有的边挪到它身上。
+- **可以重跑。** 删不存在的 id、左端口已经没有出边的 rewire、同值的 set 都是 no-op 并在 stderr 说一句，
+  所以同一条命令跑两遍第二遍什么都不做，`lyflow diff` 为空。这正是「改一处 → 全量重跑 →
+  证明只有该动的那几格动了」这条工作法的前提。
+- 每一步之后过形状校验，最后过 `validate`；**任一步不过就整体不写**，退出 1 并把全部诊断打在 stdout。
+  所以「dry-run 说能改」等于「写下去一定合法」。
+
+一个真实例子（带 12 个 `flow.fallback` 的模型路径图，要的是「关掉备用分支，只走主路径」）：
+
+```bash
+# 第一步：12 个 fallback 各自短接到它的 a 源
+lyflow patch g.lyflow.json --rewire n_fb_line:out=n_fit_base:line \
+                           --rewire n_fb_merged:out=n_merge:cloud ... -o g.short.json
+# 第二步：这时 n_fb_* 与整条 b 分支都没人要了，一起删
+lyflow patch g.short.json --remove-node 'n_fb_*' --remove-node 'b_*'
+```
+
+只做第一步里的 `--remove-node 'b_*'` 会被拦下来：12 个 `flow.fallback` 的 `b` 口是必填输入，
+删掉 b 分支之后它们全悬空，`patch` 报 12 条 `missing_input` 并且一个字节都不写。
+
 ## 3. `eval`：一组样本 × 一组参数 → 一个标量 → 一组统计
 
 样本集是一份 JSON Lines，一行一帧：
@@ -261,12 +367,13 @@ lyflow eval g.lyflow.json \
 | `lyflow manifest` 里的 `types` | `list_port_types` | — |
 | `lyflow validate <g>` | `validate_graph` | 图可以给路径，也可以内联 |
 | `lyflow plan <g>` | `plan_graph` | — |
-| `lyflow run <g> --outputs --set …` | `run_graph` | `set` 是对象不是字符串；返回里没有点云 |
+| `lyflow run <g> --summary --set …` | `run_graph` | `set` 是对象不是字符串；返回**就是** summary（`status` / `outputs` / `decisions`），没有点云 |
 | `run` 之后看 `stats.outputs` | `get_node_outputs` | — |
 | `lyflow dump <g> n:port out.pcd` 再自己统计 | `summarize_output` | 不落 PCD，直接给包围盒、每通道 min/max/mean 与前几个点 |
 | `lyflow eval …` | `eval` | 默认 `compact`：一组一行，只回 `paramSet/params/metric/group/n/ok/failCodes?/mean/std`；逐行 `eval_row` 落盘给 `rowsPath` |
 | `lyflow perturb …` | `perturb` | 只回 `perturb_summary` 与不通过的样本；**全部** `perturb_sample` 落盘给 `samplesPath` |
 | `lyflow diff a b --json` | `diff_graphs` | 原样 |
+| `lyflow patch <g> --remove-node … --rewire … --dry-run` | `patch_graph` | 四个动作是四个数组（`removeNode` / `addNode` / `rewire` / `set`）；**`dryRun` 默认 true**，要真写得显式给 `dryRun: false`，`out` 必须配着它给 |
 
 ### `eval` / `perturb` 的选项逐条对照
 

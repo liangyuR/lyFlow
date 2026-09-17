@@ -257,6 +257,16 @@ async function startRun(body) {
   return { runId: id };
 }
 
+/** run summary（ADR-0022）就挂在最后一条 run_finished 上，不必再起一次 CLI。 */
+function summaryOf(state) {
+  for (let i = state.events.length - 1; i >= 0; i -= 1) {
+    const e = state.events[i];
+    if (e.kind !== "run_finished") continue;
+    return e.summary && typeof e.summary === "object" ? e.summary : null;
+  }
+  return null;
+}
+
 function outputInfoOf(state, nodeId) {
   let latest = null;
   for (const e of state.events) {
@@ -363,6 +373,19 @@ async function route(req, res, url) {
     const state = runOf(decodeURIComponent(m[1]));
     await state.done;
     return send(res, 200, state.outputs ?? {});
+  }
+
+  // ADR-0022：与 run_finished 事件里那个 summary 是同一个对象。
+  // 还没有（run 没结束，或者接的是老 core）就是 404 —— 不能压成 {}。
+  m = /^\/lyflow\/runs\/([^/]+)\/summary$/.exec(p);
+  if (req.method === "GET" && m) {
+    const state = runOf(decodeURIComponent(m[1]));
+    await state.done;
+    const summary = summaryOf(state);
+    if (!summary) {
+      return send(res, 404, { error: "这次运行没有 run summary（core 的 ABI < v9？）" });
+    }
+    return send(res, 200, summary);
   }
 
   m = /^\/lyflow\/runs\/([^/]+)\/nodes\/([^/]+)\/outputs$/.exec(p);

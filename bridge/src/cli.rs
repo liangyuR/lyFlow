@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 
 use crate::core_ffi::{self, Core, RunHandle, RunSpec};
 use crate::eval;
+use crate::patch;
 use crate::perturb;
 use crate::graph::GraphDoc;
 use crate::ulid;
@@ -45,7 +46,10 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
 
   lyflow run      <graph> [--to <nodeId>]... [--set <nodeId>.<param>=<json>]...
                           [--base-dir <dir>] [--parallel <n>] [--no-cache]
-                          [--preview] [--preview-points <n>] [--outputs]
+                          [--preview] [--preview-points <n>] [--outputs] [--summary]
+        --summary：JSON Lines 末尾多一行 {\"kind\":\"run_summary\", ...}，
+                   status 三态 ok|degraded|failed，每个图级输出三态 value|inactive|failed，
+                   外加 decisions（全部 FallbackChoice）。ADR-0022。
   lyflow import   <file> --kind <kind> [-o <out.lyflow.json>] [--base-dir <dir>]
   lyflow validate <graph> [--base-dir <dir>] [--set ...]
   lyflow plan     <graph> [--to <nodeId>]... [--base-dir <dir>] [--set ...]
@@ -60,7 +64,8 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                           --metric <path> [--metric <path>]...
                           [--holdout <tag>=<value>] [--group-by <tag>]
                           [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--no-cache]
-                          [--set <nodeId>.<param>=<json>]...
+                          [--set <nodeId>.<param>=<json>]... [--no-summary]
+        每行 eval_row 默认带 summary（ADR-0022）；--no-summary 关掉以省体积。
         指标路径：outputs.<名字>[.字段...] / nodes.<节点>.<端口>[.字段...]
                   nodes.<节点>.durationMs|elementCount|byteSize / run.durationMs
         样本集三选一：
@@ -84,6 +89,16 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
               （传感器帧与测量帧都是米）；outputs.* 这类 Measurement 是「毫米」。
               所以「张开 1 mm 读数加 1 mm」是 --expect 1000，不是 1。
   lyflow diff     <a> <b> [--json]
+  lyflow patch    <graph> [--remove-node <id|glob>]... [--add-node <json>]...
+                          [--rewire <节点>:<端口>=<节点>:<端口>]...
+                          [--set <nodeId>.<param>=<json>]...
+                          [--dry-run] [-o <out>] [--json] [--base-dir <dir>]
+        动作顺序定死 remove → add → rewire → set；每步之后过形状校验，最后过 validate，
+        任一步不过就整体不写（退出码 1）。幂等：删不存在的 id、没有出边的 rewire、
+        同值的 set 都是 no-op 并在 stderr 说一句，所以同一条命令跑两遍第二遍 diff 为空
+        （这一遍不落盘，免得白白动 mtime；给了 -o 就照写）。
+        --dry-run 不写文件，stdout 是与 `lyflow diff` 逐字相同的差异。
+        -o 省略时原地覆写（先写临时文件再改名）。
 
 退出码：0 成功，1 校验失败，2 执行失败，3 被取消（Ctrl+C），4 参数错。";
 
@@ -296,6 +311,18 @@ pub(crate) struct RunResult {
 impl RunResult {
     pub(crate) fn run_id(&self) -> &str {
         self._handle.run_id()
+    }
+
+    /// 本次运行的 run summary（ADR-0022）。事件里那份与 `lyflow_run_summary`
+    /// 拿到的是同一个对象，所以直接从 run_finished 上取 —— 不必再过一次 FFI。
+    /// 老 core 没有这个字段时返回 None。
+    pub(crate) fn summary(&self) -> Option<&Value> {
+        self.events
+            .iter()
+            .rev()
+            .find(|e| e["kind"] == "run_finished")
+            .map(|e| &e["summary"])
+            .filter(|s| s.is_object())
     }
 
     pub(crate) fn exit_code(&self) -> i32 {
@@ -644,9 +671,34 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             Err(e) => return fail(err, &e.to_string(), EXIT_FAILED),
         }
     }
+    // --summary：JSON Lines 末尾多一行（ADR-0022）。放在 --outputs 之后，
+    // 「最后一行就是这一轮的结论」对读脚本最省事。
+    if parsed.has("summary") {
+        match result.summary() {
+            Some(s) => {
+                let mut wrapped = s.clone();
+                if let Some(obj) = wrapped.as_object_mut() {
+                    obj.insert("kind".to_string(), json!("run_summary"));
+                }
+                json_line(out, &wrapped);
+            }
+            None => {
+                return fail(err, "这份 core 不产出 run summary（ABI < v9）", EXIT_FAILED);
+            }
+        }
+    }
     line(
         err,
-        &format!("run {} in {:.0} ms", result.status, result.duration_ms()),
+        &format!(
+            "run {} in {:.0} ms{}",
+            result.status,
+            result.duration_ms(),
+            result
+                .summary()
+                .and_then(|s| s["status"].as_str())
+                .map(|s| format!("（summary {s}）"))
+                .unwrap_or_default()
+        ),
     );
     result.exit_code()
 }
@@ -912,6 +964,8 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         samples: &samples,
         parallel: 0,
         no_cache: false,
+        // sweep 的每一行只报一个标量，summary 在这里是纯体积
+        summary: false,
     };
 
     let mut csv_rows: Vec<String> = Vec::new();
@@ -1038,13 +1092,32 @@ fn cmd_diff(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Err(e) => return fail(err, &e, EXIT_INVALID),
     };
 
+    let diff = diff_docs(&defaults, &a.doc, &b.doc);
+    if parsed.has("json") {
+        json_line(out, &diff);
+        return EXIT_OK;
+    }
+    if diff["empty"] == true {
+        line(err, "两份图在语义上完全一样（ui 不算）");
+        return EXIT_OK;
+    }
+    render_diff(out, &diff);
+    EXIT_OK
+}
+
+/// 两份图的结构差异。`patch --dry-run` 用的是同一份实现 —— 「差异长什么样」只该有一处定义。
+pub(crate) fn diff_docs(
+    defaults: &BTreeMap<String, BTreeMap<String, Value>>,
+    a: &GraphDoc,
+    b: &GraphDoc,
+) -> Value {
     let mut added = Vec::new();
     let mut removed = Vec::new();
     let mut changed = Vec::new();
     let no_defaults = BTreeMap::new();
 
-    for node in &b.doc.nodes {
-        match a.doc.nodes.iter().find(|n| n.id == node.id) {
+    for node in &b.nodes {
+        match a.nodes.iter().find(|n| n.id == node.id) {
             None => added.push(json!({ "id": node.id, "op": node.op })),
             Some(old) => {
                 let mut fields = serde_json::Map::new();
@@ -1074,29 +1147,29 @@ fn cmd_diff(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             }
         }
     }
-    for node in &a.doc.nodes {
-        if !b.doc.nodes.iter().any(|n| n.id == node.id) {
+    for node in &a.nodes {
+        if !b.nodes.iter().any(|n| n.id == node.id) {
             removed.push(json!({ "id": node.id, "op": node.op }));
         }
     }
 
-    let keys_a: HashSet<String> = a.doc.edges.iter().map(edge_key).collect();
-    let keys_b: HashSet<String> = b.doc.edges.iter().map(edge_key).collect();
+    let keys_a: HashSet<String> = a.edges.iter().map(edge_key).collect();
+    let keys_b: HashSet<String> = b.edges.iter().map(edge_key).collect();
     let mut edges_added: Vec<String> = keys_b.difference(&keys_a).cloned().collect();
     let mut edges_removed: Vec<String> = keys_a.difference(&keys_b).cloned().collect();
     edges_added.sort();
     edges_removed.sort();
 
     let mut subgraphs = Vec::new();
-    for (id, def) in &b.doc.subgraphs {
-        match a.doc.subgraphs.get(id) {
+    for (id, def) in &b.subgraphs {
+        match a.subgraphs.get(id) {
             None => subgraphs.push(json!({ "id": id, "change": "added" })),
             Some(old) if old != def => subgraphs.push(json!({ "id": id, "change": "modified" })),
             _ => {}
         }
     }
-    for id in a.doc.subgraphs.keys() {
-        if !b.doc.subgraphs.contains_key(id) {
+    for id in a.subgraphs.keys() {
+        if !b.subgraphs.contains_key(id) {
             subgraphs.push(json!({ "id": id, "change": "removed" }));
         }
     }
@@ -1108,26 +1181,26 @@ fn cmd_diff(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         && edges_removed.is_empty()
         && subgraphs.is_empty();
 
-    if parsed.has("json") {
-        json_line(
-            out,
-            &json!({
-                "nodesAdded": added,
-                "nodesRemoved": removed,
-                "nodesChanged": changed,
-                "edgesAdded": edges_added,
-                "edgesRemoved": edges_removed,
-                "subgraphs": subgraphs,
-                "empty": empty_diff,
-            }),
-        );
-        return EXIT_OK;
-    }
+    json!({
+        "nodesAdded": added,
+        "nodesRemoved": removed,
+        "nodesChanged": changed,
+        "edgesAdded": edges_added,
+        "edgesRemoved": edges_removed,
+        "subgraphs": subgraphs,
+        "empty": empty_diff,
+    })
+}
 
-    if empty_diff {
-        line(err, "两份图在语义上完全一样（ui 不算）");
-        return EXIT_OK;
-    }
+/// 人读的那一份。`diff` 与 `patch --dry-run` 的 stdout 逐字相同。
+pub(crate) fn render_diff(out: &Sink, diff: &Value) {
+    let list = |key: &str| diff[key].as_array().cloned().unwrap_or_default();
+    let added = list("nodesAdded");
+    let removed = list("nodesRemoved");
+    let changed = list("nodesChanged");
+    let edges_added = list("edgesAdded");
+    let edges_removed = list("edgesRemoved");
+    let subgraphs = list("subgraphs");
     for n in &added {
         line(out, &format!("+ 节点 {} ({})", n["id"], n["op"]));
     }
@@ -1149,15 +1222,14 @@ fn cmd_diff(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         }
     }
     for e in &edges_added {
-        line(out, &format!("+ 边 {e}"));
+        line(out, &format!("+ 边 {}", e.as_str().unwrap_or_default()));
     }
     for e in &edges_removed {
-        line(out, &format!("- 边 {e}"));
+        line(out, &format!("- 边 {}", e.as_str().unwrap_or_default()));
     }
     for s in &subgraphs {
         line(out, &format!("~ 子图 {} {}", s["id"], s["change"]));
     }
-    EXIT_OK
 }
 
 // ---------------------------------------------------------------------- 入口
@@ -1172,8 +1244,12 @@ const VALUE_OPTS: &[&str] = &[
     "kind", "output", "samples", "samples-glob", "bind", "params", "holdout", "group-by",
     "after", "region", "axis", "expect", "tolerance", "samples-dir", "bind-pair", "pattern",
     "sample-subdir", "sort-by", "split-half", "samples-jsonl-out",
+    "remove-node", "add-node", "rewire",
 ];
-const BOOL_OPTS: &[&str] = &["no-cache", "preview", "write", "check", "json", "help", "outputs"];
+const BOOL_OPTS: &[&str] = &[
+    "no-cache", "preview", "write", "check", "json", "help", "outputs", "dry-run",
+    "summary", "no-summary",
+];
 
 pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
     let Some(command) = args.first().cloned() else {
@@ -1208,6 +1284,7 @@ pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
         "eval" => eval::cmd_eval(&parsed, out, err),
         "perturb" => perturb::cmd_perturb(&parsed, out, err),
         "diff" => cmd_diff(&parsed, out, err),
+        "patch" => patch::cmd_patch(&parsed, out, err),
         other => {
             line(err, &format!("不认识的子命令 {other}"));
             line(err, USAGE);
@@ -1300,12 +1377,16 @@ mod tests {
     }
 
     fn cli(args: &[&str]) -> Ran {
+        let owned: Vec<String> = args.iter().map(|s| (*s).to_string()).collect();
+        cli_owned(&owned)
+    }
+
+    fn cli_owned(owned: &[String]) -> Ran {
         let obuf = Arc::new(Mutex::new(Vec::new()));
         let ebuf = Arc::new(Mutex::new(Vec::new()));
         let out = sink_of(SharedBuf(Arc::clone(&obuf)));
         let err = sink_of(SharedBuf(Arc::clone(&ebuf)));
-        let owned: Vec<String> = args.iter().map(|s| (*s).to_string()).collect();
-        let code = run_cli(&owned, &out, &err);
+        let code = run_cli(owned, &out, &err);
         let out_text = String::from_utf8_lossy(&obuf.lock().unwrap()).into_owned();
         let err_text = String::from_utf8_lossy(&ebuf.lock().unwrap()).into_owned();
         Ran {
@@ -1465,6 +1546,129 @@ mod tests {
         let r = cli(&["run", &file.to_string_lossy()]);
         assert_eq!(r.code, EXIT_FAILED, "{} / {}", r.out, r.err);
         assert_eq!(r.lines().last().unwrap()["status"], "error");
+    }
+
+    /// ADR-0022：带 fallback 的图里，主路径炸了但结果量出来了 —— run_finished 是
+    /// ok，summary 必须说 degraded，并把那次回退记进 decisions。
+    fn fallback_graph(dir: &Path, seed: i64, outputs: Value) -> String {
+        let doc = json!({
+            "schemaVersion": 1, "id": "01J8XQZ4K7N3M2R5V8W1YB6TCF",
+            "nodes": [
+                {"id": "n_bad", "op": "io.load_pcd", "params": {"path": "没有这个文件.pcd"}},
+                {"id": "n_b", "op": "gen.synthetic",
+                 "params": {"pointCount": 100, "seed": seed}},
+                {"id": "n_fb", "op": "flow.fallback"}
+            ],
+            "edges": [
+                {"id": "e1", "from": {"node": "n_bad", "port": "cloud"},
+                             "to": {"node": "n_fb", "port": "a"}},
+                {"id": "e2", "from": {"node": "n_b", "port": "cloud"},
+                             "to": {"node": "n_fb", "port": "b"}}
+            ],
+            "outputs": outputs
+        });
+        let file = dir.join(format!("fb{seed}.lyflow.json"));
+        std::fs::write(&file, doc.to_string()).unwrap();
+        file.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn run_summary_says_degraded_when_a_fallback_saved_the_run() {
+        let dir = workspace("summary-degraded");
+        let graph = fallback_graph(
+            &dir,
+            3401,
+            json!({ "result": {"node": "n_fb", "port": "out"} }),
+        );
+        let r = cli(&["run", &graph, "--summary", "--no-cache"]);
+        assert_eq!(r.code, EXIT_OK, "{} / {}", r.out, r.err);
+
+        let lines = r.lines();
+        let last = lines.last().unwrap();
+        assert_eq!(last["kind"], "run_summary");
+        // run_finished 是 ok（失败被 acceptsError 接住了），summary 却是 degraded
+        let finished = lines.iter().find(|e| e["kind"] == "run_finished").unwrap();
+        assert_eq!(finished["status"], "ok");
+        assert_eq!(last["status"], "degraded", "{last}");
+        // 事件里那份与末尾这行是同一个对象（H1）
+        let mut from_event = finished["summary"].clone();
+        from_event["kind"] = json!("run_summary");
+        assert_eq!(&from_event, last);
+
+        assert_eq!(last["nodes"]["n_bad"]["state"], "error");
+        assert_eq!(last["outputs"]["result"]["state"], "value");
+        assert_eq!(last["outputs"]["result"]["node"], "n_fb");
+        assert_eq!(last["outputs"]["result"]["elementCount"], 100);
+        assert_eq!(last["decisions"]["n_fb"]["choice"], "b");
+        assert_eq!(last["decisions"]["n_fb"]["type"], "FallbackChoice");
+        assert!(last["contractViolations"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn run_summary_separates_a_missing_dimension_from_a_broken_one() {
+        let dir = workspace("summary-three-state");
+        // flush 挂在没被 demand 的备用分支上 → inactive；crash 挂在炸了的节点上 → failed
+        let graph = fallback_graph(
+            &dir,
+            3402,
+            json!({
+                "result": {"node": "n_fb", "port": "out"},
+                "crash": {"node": "n_bad", "port": "cloud"}
+            }),
+        );
+        let r = cli(&["run", &graph, "--summary", "--no-cache"]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        let lines = r.lines();
+        let s = lines.last().unwrap();
+        assert_eq!(s["status"], "failed", "声明输出里有一维崩了（H2）: {s}");
+        assert_eq!(s["outputs"]["crash"]["state"], "failed");
+        assert_eq!(s["outputs"]["crash"]["from"], "n_bad");
+        assert_eq!(s["outputs"]["crash"]["code"], "io");
+        assert_eq!(s["outputs"]["result"]["state"], "value");
+
+        // 主路径成功的那张图上，挂在惰性备用分支的那一维是 inactive 而不是 failed
+        let doc = json!({
+            "schemaVersion": 1, "id": "01J8XQZ4K7N3M2R5V8W1YB6TCG",
+            "nodes": [
+                {"id": "n_a", "op": "gen.synthetic", "params": {"pointCount": 40, "seed": 3403}},
+                {"id": "n_b", "op": "gen.synthetic", "params": {"pointCount": 70, "seed": 3404}},
+                {"id": "n_fb", "op": "flow.fallback"}
+            ],
+            "edges": [
+                {"id": "e1", "from": {"node": "n_a", "port": "cloud"},
+                             "to": {"node": "n_fb", "port": "a"}},
+                {"id": "e2", "from": {"node": "n_b", "port": "cloud"},
+                             "to": {"node": "n_fb", "port": "b"}}
+            ],
+            "outputs": {
+                "gap": {"node": "n_fb", "port": "out"},
+                "flush": {"node": "n_b", "port": "cloud"}
+            }
+        });
+        let file = dir.join("happy.lyflow.json");
+        std::fs::write(&file, doc.to_string()).unwrap();
+        let r = cli(&["run", &file.to_string_lossy(), "--summary", "--no-cache"]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        let lines = r.lines();
+        let s = lines.last().unwrap();
+        assert_eq!(s["status"], "ok");
+        assert_eq!(s["outputs"]["gap"]["state"], "value");
+        assert_eq!(s["outputs"]["gap"]["elementCount"], 40);
+        assert_eq!(s["outputs"]["flush"]["state"], "inactive");
+        assert_eq!(s["outputs"]["flush"]["reason"], "not_demanded");
+    }
+
+    #[test]
+    fn run_without_summary_flag_keeps_the_old_json_lines() {
+        let dir = workspace("summary-off");
+        let graph = chain(&dir, 3405);
+        let r = cli(&["run", &graph, "--no-cache"]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        let lines = r.lines();
+        assert_eq!(lines.last().unwrap()["kind"], "run_finished");
+        assert!(lines.iter().all(|l| l["kind"] != "run_summary"));
+        // 事件里那份照旧有 —— --summary 只管末尾那一行
+        assert!(lines.last().unwrap()["summary"].is_object());
     }
 
     #[test]
@@ -1795,6 +1999,53 @@ mod tests {
             "{text}"
         );
         assert_eq!(text.lines().count(), 4);
+    }
+
+    /// ADR-0022：每个 eval_row 自带这一次运行的结论，`--no-summary` 关掉以省体积。
+    #[test]
+    fn eval_rows_carry_the_run_summary_unless_told_otherwise() {
+        let dir = workspace("eval-summary");
+        let graph = chain(&dir, 3410);
+        let samples = samples_file(
+            &dir,
+            "s.jsonl",
+            &[
+                r#"{"id":"a","set":{"g.seed":34101}}"#,
+                r#"{"id":"b","set":{"g.seed":34102}}"#,
+            ],
+        );
+        let args = |extra: &[&str]| {
+            let mut v = vec![
+                "eval".to_string(),
+                graph.clone(),
+                "--samples".to_string(),
+                samples.clone(),
+                "--metric".to_string(),
+                "nodes.v.elementCount".to_string(),
+            ];
+            v.extend(extra.iter().map(|s| (*s).to_string()));
+            v
+        };
+
+        let r = cli_owned(&args(&[]));
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        let rows: Vec<Value> = r
+            .lines()
+            .into_iter()
+            .filter(|l| l["kind"] == "eval_row")
+            .collect();
+        assert_eq!(rows.len(), 2);
+        for row in &rows {
+            assert_eq!(row["summary"]["status"], "ok", "{row}");
+            assert_eq!(row["summary"]["nodes"]["v"]["state"], "done");
+            assert!(row["summary"]["contractViolations"].is_array());
+        }
+
+        let off = cli_owned(&args(&["--no-summary"]));
+        assert_eq!(off.code, EXIT_OK, "{}", off.err);
+        for row in off.lines().iter().filter(|l| l["kind"] == "eval_row") {
+            assert!(row["summary"].is_null(), "--no-summary 应当把它去掉: {row}");
+        }
     }
 
     #[test]

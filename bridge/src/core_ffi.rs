@@ -14,7 +14,7 @@ use libloading::{Library, Symbol};
 pub type EventCb = unsafe extern "C" fn(*const c_char, *mut c_void);
 
 /// C ABI 的版本号。与 core/include/lyflow/c_api.h 的 LYFLOW_ABI_VERSION 必须一致。
-pub const ABI_VERSION: u32 = 8;
+pub const ABI_VERSION: u32 = 9;
 
 /// 运行时注入一个源节点的输出（v7）。缓冲由调用方持有到 `lyflow_run_start` 返回。
 #[repr(C)]
@@ -209,6 +209,7 @@ type FnOutputIndices = unsafe extern "C" fn(
 type FnIndicesViewFree = unsafe extern "C" fn(*mut IndicesViewRaw);
 type FnOutputInfo = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
 type FnRunOutputs = unsafe extern "C" fn(*const c_char) -> *mut c_char;
+type FnRunSummary = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type FnImport =
     unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> *mut c_char;
 type FnSetLibraryDirs = unsafe extern "C" fn(*const *const c_char, usize) -> *mut c_char;
@@ -245,6 +246,7 @@ pub struct Core {
     indices_view_free: FnIndicesViewFree,
     output_info: FnOutputInfo,
     run_outputs: FnRunOutputs,
+    run_summary: FnRunSummary,
     import: FnImport,
     output_save: FnOutputSave,
     set_library_dirs: FnSetLibraryDirs,
@@ -310,6 +312,7 @@ impl Core {
             indices_view_free: sym!(lib, "lyflow_indices_view_free", FnIndicesViewFree),
             output_info: sym!(lib, "lyflow_output_info", FnOutputInfo),
             run_outputs: sym!(lib, "lyflow_run_outputs", FnRunOutputs),
+            run_summary: sym!(lib, "lyflow_run_summary", FnRunSummary),
             import: sym!(lib, "lyflow_import", FnImport),
             output_save: sym!(lib, "lyflow_output_save", FnOutputSave),
             set_library_dirs: sym!(lib, "lyflow_set_library_dirs", FnSetLibraryDirs),
@@ -463,6 +466,18 @@ impl Core {
     pub fn run_outputs(&self, run_id: &str) -> Result<String, CoreError> {
         let r = CString::new(run_id)?;
         unsafe { self.take_owned((self.run_outputs)(r.as_ptr())) }
+    }
+
+    /// 一次运行的 run summary（ADR-0022）。返回
+    /// `{ runId, status, durationMs, nodes, outputs, decisions, contractViolations }`。
+    /// run 结束之前 core 返回 NULL，这里变成 `Ok(None)` —— 不是错误，只是还没有。
+    pub fn run_summary(&self, run_id: &str) -> Result<Option<String>, CoreError> {
+        let r = CString::new(run_id)?;
+        let raw = unsafe { (self.run_summary)(r.as_ptr()) };
+        if raw.is_null() {
+            return Ok(None);
+        }
+        unsafe { self.take_owned(raw) }.map(Some)
     }
 
     /// 走注册好的导入器把一段文本变成图。Err 里是诊断数组的文本（'[' 开头）。

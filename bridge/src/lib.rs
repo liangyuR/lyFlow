@@ -5,6 +5,7 @@ pub mod cli;
 pub mod core_ffi;
 mod eval;
 pub mod graph;
+mod patch;
 mod perturb;
 pub mod ulid;
 

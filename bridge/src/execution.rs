@@ -408,6 +408,36 @@ mod tests {
         assert_eq!(f.events.last().unwrap()["kind"], "run_finished");
     }
 
+    /// ADR-0022：同一份 summary 有两个出口 —— run_finished 事件里那一份，
+    /// 和按 runId 从 C ABI 取回来的那一份。它们必须逐字段相等。
+    #[test]
+    fn run_summary_comes_back_over_the_abi_and_in_the_event() {
+        let f = run(two_node_graph(104), "");
+        assert_eq!(f.run_status(), "ok");
+
+        let finished = *f.kind("run_finished").last().expect("没有 run_finished");
+        let in_event = finished["summary"].clone();
+        assert!(in_event.is_object(), "run_finished 没带 summary: {finished}");
+        assert_eq!(in_event["status"], "ok");
+        assert_eq!(in_event["runId"], f.run_id.as_str());
+        assert_eq!(in_event["nodes"]["g"]["state"], "done");
+        assert_eq!(in_event["nodes"]["v"]["outputsAvailable"], true);
+        // 这张图没声明 outputs，三态表就是空的 —— 不是 null
+        assert!(in_event["outputs"].as_object().unwrap().is_empty());
+        assert!(in_event["decisions"].as_object().unwrap().is_empty());
+
+        let raw = f
+            .core
+            .run_summary(&f.run_id)
+            .expect("run_summary 调用失败")
+            .expect("run 已经结束了，不该是 None");
+        let over_abi: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(over_abi, in_event);
+
+        // 不存在的 run 返回 None 而不是 "{}"：「没有」与「跑完了、什么都没有」是两件事
+        assert!(f.core.run_summary("no-such-run").unwrap().is_none());
+    }
+
     #[test]
     fn output_cloud_binary_header_is_correct() {
         let f = run(two_node_graph(102), "");

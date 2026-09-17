@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { evalArgv, perturbArgv } from "../src/argv.js";
+import { evalArgv, patchArgv, perturbArgv } from "../src/argv.js";
 
 test("eval 把多个 metric 与多个 param 都展成重复选项", () => {
   const argv = evalArgv(
@@ -219,6 +219,53 @@ test("samplesDir 缺 pattern / 缺绑定 / 与别的样本源同时给都报错"
     () => evalArgv({ graphPath: "g", metric: ["m"], samplesPath: "s.jsonl", splitHalf: "half" }, null),
     /samplesDir/,
   );
+});
+
+test("patch 把四个动作按 remove → add → rewire → set 的顺序展开，dryRun 默认开", () => {
+  const argv = patchArgv({
+    graphPath: "4.lyflow.json",
+    baseDir: "configs/R1",
+    removeNode: ["b_*", "n_dead"],
+    addNode: [{ id: "g2", op: "gen.synthetic", params: { seed: 3 } }],
+    rewire: ["n_fb_line:out=n_fit_base:line"],
+    set: ["n_fit_l.distThresh=0.8"],
+  });
+  assert.deepEqual(argv, [
+    "patch",
+    "4.lyflow.json",
+    "--base-dir",
+    "configs/R1",
+    "--remove-node",
+    "b_*",
+    "--remove-node",
+    "n_dead",
+    "--add-node",
+    '{"id":"g2","op":"gen.synthetic","params":{"seed":3}}',
+    "--rewire",
+    "n_fb_line:out=n_fit_base:line",
+    "--set",
+    "n_fit_l.distThresh=0.8",
+    "--dry-run",
+    "--json",
+  ]);
+});
+
+test("patch 的 dryRun:false 才真写，out 要配着它给", () => {
+  assert.deepEqual(
+    patchArgv({ graphPath: "g.json", removeNode: ["b_*"], dryRun: false, out: "out.json" }),
+    ["patch", "g.json", "--remove-node", "b_*", "-o", "out.json", "--json"],
+  );
+  assert.ok(!patchArgv({ graphPath: "g.json", set: ["a.b=1"], dryRun: false }).includes("--dry-run"));
+  assert.throws(
+    () => patchArgv({ graphPath: "g.json", removeNode: ["b_*"], out: "out.json" }),
+    /dryRun:false/,
+  );
+});
+
+test("patch 至少要一个动作，rewire 两端都要写成 节点:端口", () => {
+  assert.throws(() => patchArgv({ graphPath: "g.json" }), /至少给一个动作/);
+  assert.throws(() => patchArgv({ graphPath: "g.json", rewire: ["n_fb_line=n_fit"] }), /端口/);
+  assert.throws(() => patchArgv({ graphPath: "g.json", rewire: ["a:out=b"] }), /端口/);
 });
 
 test("perturb 也认 samplesDir 那一组，csv 与 noCache 一并透传", () => {

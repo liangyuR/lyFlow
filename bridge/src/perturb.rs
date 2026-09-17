@@ -487,6 +487,8 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         samples: &samples,
         parallel,
         no_cache: parsed.has("no-cache"),
+        // perturb 报的是斜率，逐样本行不带 summary（要看收尾状态用 eval）
+        summary: false,
     };
 
     let mut rows: Vec<Row> = Vec::new();

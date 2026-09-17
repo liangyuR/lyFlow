@@ -4,13 +4,13 @@ import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { evalArgv, perturbArgv } from "./argv.js";
+import { evalArgv, patchArgv, perturbArgv } from "./argv.js";
 import { DEFAULT_CLI_TIMEOUT_MS, runCli, stderrTail } from "./cli.js";
 import { decodeCloud, summarizeCloud } from "./cloud.js";
 import type { Config } from "./config.js";
 import { resolveGraph } from "./graph.js";
 import { HttpError, LyFlowHttp } from "./http.js";
-import { parseDiagnostics, summarizeOutputs, summarizeRun } from "./run.js";
+import { coreSummary, parseDiagnostics, summarizeOutputs, summarizeRun } from "./run.js";
 import { firstSentence, matches, nearest } from "./text.js";
 import type { OutputInfo } from "./types.js";
 
@@ -270,7 +270,11 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
     {
       title: "跑一次图",
       description:
-        "跑完整张图并等 run_finished。返回图级命名输出、每个节点的状态与耗时、诊断。" +
+        "跑完整张图并等 run_finished，返回 core 产出的 run summary（ADR-0022）。" +
+        "先看 status：ok / degraded（有节点坏了但每一维都拿到了）/ failed。" +
+        "再看 outputs：每一维三态 value / inactive（本来就没有）/ failed（本该有、崩了，带 from）。" +
+        "decisions 是全图每一个 fallback 选了哪一路。" +
+        "不要自己从 nodes 重建成败判定 —— 那正是这个工具存在的理由。" +
         "不返回点云 —— 要看点云走 summarize_output。",
       inputSchema: {
         ...graphInput,
@@ -303,7 +307,25 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           },
           args.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
         );
-        const summary = summarizeRun(result.events);
+        const events = summarizeRun(result.events);
+        const summary = coreSummary(result.events);
+        if (summary) {
+          return ok({
+            runId: result.runId,
+            // 三态来自 core（H2）。超时是 MCP 这一侧的事，core 那边还没收尾。
+            status: result.timedOut ? "timeout" : summary.status,
+            // run_finished 的 ok/error/cancelled。与 status 不是一回事，
+            // 两个都留着，宿主想对照「为什么 ok 却 degraded」时有得看。
+            runStatus: events.status,
+            durationMs: summary.durationMs ?? events.durationMs,
+            outputs: summary.outputs,
+            nodes: summary.nodes,
+            decisions: summary.decisions,
+            contractViolations: summary.contractViolations,
+            diagnostics: events.diagnostics,
+          });
+        }
+        // 老 core（ABI < v9）没有 summary：退回 M5 那套形状，字段名不变。
         let outputs: unknown = {};
         try {
           outputs = summarizeOutputs(await http.runOutputs(result.runId));
@@ -312,11 +334,12 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         }
         return ok({
           runId: result.runId,
-          status: result.timedOut ? "timeout" : summary.status,
-          durationMs: summary.durationMs,
+          status: result.timedOut ? "timeout" : events.status,
+          runStatus: events.status,
+          durationMs: events.durationMs,
           outputs,
-          nodes: summary.nodes,
-          diagnostics: summary.diagnostics,
+          nodes: events.nodes,
+          diagnostics: events.diagnostics,
         });
       } catch (e) {
         if (e instanceof HttpError && e.status === 400) {
@@ -324,9 +347,12 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           return ok({
             runId: null,
             status: "invalid",
+            runStatus: "invalid",
             durationMs: null,
             outputs: {},
-            nodes: [],
+            nodes: {},
+            decisions: {},
+            contractViolations: [],
             diagnostics: diagnostics ?? [{ message: e.message }],
           });
         }
@@ -411,6 +437,8 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
       description:
         "起本地 lyflow eval。只回统计与失败清单，逐行的 eval_row 落盘给路径。" +
         "读 summary 先看 ok/n 与 failCodes，再看 std。" +
+        "失败清单每项带那次运行的 summaryStatus 与 outputs 三态（ADR-0022），" +
+        "分得清「这一维本来就没有」和「本该有、崩了」。" +
         "样本集可以给 samplesPath，也可以用 samplesDir + bindPair + pattern 让它自己配对与打 tag。",
       inputSchema: {
         graphPath: z.string().describe("图文件路径，CLI 直接读它"),
@@ -466,12 +494,19 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
       const compact = args.compact ?? true;
       const failures = rows
         .filter((l) => l.value["status"] !== "ok")
-        .map((l) => ({
-          sample: l.value["sample"],
-          paramSet: l.value["paramSet"],
-          status: l.value["status"],
-          errors: l.value["errors"],
-        }));
+        .map((l) => {
+          // summary.outputs 直接跟着失败样本走（ADR-0022）：没有它就得回头翻
+          // rows.jsonl 才能分清「这一维本来就没有」和「本该有、崩了」。
+          const summary = l.value["summary"] as { outputs?: unknown; status?: unknown } | undefined;
+          return {
+            sample: l.value["sample"],
+            paramSet: l.value["paramSet"],
+            status: l.value["status"],
+            errors: l.value["errors"],
+            ...(summary?.status === undefined ? {} : { summaryStatus: summary.status }),
+            ...(summary?.outputs === undefined ? {} : { outputs: summary.outputs }),
+          };
+        });
       const shown = limited(failures, args.failuresLimit ?? MAX_FAILURES);
 
       return ok({
@@ -582,10 +617,81 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
       return ok({ exitCode: result.code, diff: last.value });
     },
   );
+
+  server.registerTool(
+    "patch_graph",
+    {
+      title: "改图结构",
+      description:
+        "起本地 lyflow patch：删节点、加节点、改接线、改参数，顺序定死 remove → add → rewire → set。" +
+        "**dryRun 默认 true**，先看 diff 再写。幂等：删不存在的 id、没有出边的 rewire、同值的 set 都是 no-op，" +
+        "所以同一条调用跑两遍第二遍 diff 为空。每步过形状校验、最后过 validate，任一步不过整体不写。",
+      inputSchema: {
+        graphPath: z.string().describe("图文件路径，CLI 直接读它；不给 out 时就地覆写的也是它"),
+        removeNode: z
+          .array(z.string())
+          .optional()
+          .describe("节点 id 或 glob（只对 id），例如 b_*；删节点连带它的所有边"),
+        addNode: z
+          .array(z.record(z.unknown()))
+          .optional()
+          .describe(
+            '节点对象 {"id","op","params"?,"ui"?,"opVersion"?,"bypass"?}；id 撞了报错，没给 ui 就放在右下角空白处',
+          ),
+        rewire: z
+          .array(z.string())
+          .optional()
+          .describe("<节点>:<端口>=<节点>:<端口>，所有从左端口出发的边改为从右端口出发"),
+        set: z.array(z.string()).optional().describe("<节点>.<参数>=<json>，与 CLI --set 相同"),
+        dryRun: z.boolean().optional().describe("默认 true：只算差异不写文件"),
+        out: z.string().optional().describe("写到别的路径（要配 dryRun:false）；不给就原地覆写"),
+        baseDir: z.string().optional(),
+      },
+    },
+    async (args) => {
+      if (!config.cli) return bad(CLI_MISSING);
+      let argv: string[];
+      try {
+        argv = patchArgv(args);
+      } catch (e) {
+        return failed(e);
+      }
+      const result = await runCli(config, argv, {
+        timeoutMs: Math.min(DEFAULT_CLI_TIMEOUT_MS, 120000),
+      });
+      const patch = result.lines.find((l) => l.value["kind"] === "patch_result");
+      if (!patch) {
+        // 不过校验时 stdout 上是一行诊断**数组**，它比退出码有用；
+        // parseJsonLines 只收对象，所以数组在 skipped 里。
+        const diagnostics: unknown[] = [];
+        for (const text of result.skipped) {
+          if (text[0] !== "[") continue;
+          try {
+            const parsed: unknown = JSON.parse(text);
+            if (Array.isArray(parsed)) diagnostics.push(...parsed);
+          } catch {
+            /* 不是 JSON 就当它是给人看的一行 */
+          }
+        }
+        return bad(`lyflow patch 没有写出 patch_result（退出码 ${result.code}）`, {
+          exitCode: result.code,
+          argv,
+          diagnostics,
+          stderr: result.stderr,
+        });
+      }
+      return ok({
+        exitCode: result.code,
+        argv,
+        ...patch.value,
+        stderrTail: stderrTail(result.stderr),
+      });
+    },
+  );
 }
 
 const CLI_MISSING =
-  "没有配置 LYFLOW_CLI。eval / perturb / diff_graphs 起的是本地 lyflow 可执行文件，" +
+  "没有配置 LYFLOW_CLI。eval / perturb / diff_graphs / patch_graph 起的是本地 lyflow 可执行文件，" +
   "把它的路径放进 MCP 服务的环境变量 LYFLOW_CLI 再试。";
 
 function nonCloudSummary(info: OutputInfo): Record<string, unknown> {

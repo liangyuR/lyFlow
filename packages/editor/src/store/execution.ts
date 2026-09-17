@@ -14,6 +14,7 @@ import type {
   NodeState,
   NodeStats,
   RunStatus,
+  RunSummary,
 } from "../types/execution";
 import type { GraphDoc } from "../types/graph";
 
@@ -59,6 +60,9 @@ interface ExecutionState {
   targets: string[];
   /** 图级命名输出的声明（ADR-0017）。run_started 带过来，前端不再自己解析图。 */
   outputs: GraphOutputRef[];
+  /** core 产出的运行收尾（ADR-0022）。run_finished 带过来，前端只显示不重建。
+   *  老 core（ABI < v9）不带它，诊断抽屉顶部那一段就不显示。 */
+  summary: RunSummary | null;
   /** 事件里的 nodeId 是**路径**，键就是路径原样。按层聚合见 useNodeExecution。 */
   nodes: Map<string, NodeExecution>;
   logs: LogEntry[];
@@ -143,6 +147,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   durationMs: null,
   targets: [],
   outputs: [],
+  summary: null,
   nodes: new Map(),
   logs: [],
   stale: false,
@@ -163,6 +168,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       durationMs: null,
       targets,
       outputs: [],
+      summary: null,
       nodes: new Map(),
       logs: [],
       stale: false,
@@ -260,6 +266,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
           runStatus: event.status as RunStatus,
           durationMs: event.durationMs ?? null,
           lastSeq: event.seq,
+          // ADR-0022：成败判定的权威在这一份上，前端只显示不重建。
+          summary: event.summary ?? null,
         });
         // 预览时不刷缓存统计：那是「事件到渲染」这条热路径上白多出来的一次 IPC
         if (!s.preview) void refreshCacheStats();
@@ -294,6 +302,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       durationMs: null,
       targets: [],
       outputs: [],
+      summary: null,
       nodes: new Map(),
       logs: [],
       stale: false,

@@ -72,9 +72,11 @@ interface LyFlowEditorProps {
 | `new StaticTransport(manifestUrl?)` | 只读：读一份 dump 出来的 manifest，什么都跑不了。没有后端时也能把界面渲染出来 |
 
 要接自己的后端就实现 `Transport` 接口（`src/transport/types.ts`）。
-它的每个方法都对着 C ABI v8 的一个入口。v7 那一版的完整清单见
+它的每个方法都对着 C ABI v9 的一个入口。v7 那一版的完整清单见
 [`docs/phase-a1-acceptance.md`](../../docs/phase-a1-acceptance.md#c-abi-v7-的最终签名清单)，
-v8 增补的张量与下标两个入口见 [ADR-0019](../../docs/adr/0019-output-tensor-and-indices-over-abi.md)。
+v8 增补的张量与下标两个入口见 [ADR-0019](../../docs/adr/0019-output-tensor-and-indices-over-abi.md)，
+v9 增补的 `lyflow_run_summary` 见 [ADR-0022](../../docs/adr/0022-run-summary-as-core-output.md)
+（编辑器不额外调它 —— 那份 summary 就挂在 `run_finished` 事件上）。
 
 点云走二进制，绝不 JSON（ADR-0006）：`getOutputCloud` 返回的 `ArrayBuffer`
 布局见 [http 契约](../../docs/http-transport.md)的「结果」一节，

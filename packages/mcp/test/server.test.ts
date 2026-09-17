@@ -21,6 +21,7 @@ const TOOLS = [
   "eval",
   "perturb",
   "diff_graphs",
+  "patch_graph",
 ];
 
 async function connect(env: NodeJS.ProcessEnv): Promise<Client> {
@@ -50,7 +51,7 @@ test("配置项默认值", () => {
   assert.equal(config.workDir, path.join(os.tmpdir(), "lyflow-mcp"));
 });
 
-test("工具面就是这 11 个，输入 schema 的必填项对得上", async () => {
+test("工具面就是这 12 个，输入 schema 的必填项对得上", async () => {
   const client = await connect({ LYFLOW_HTTP_BASE: "http://127.0.0.1:1" });
   const listed = await client.listTools();
   assert.deepEqual(
@@ -85,6 +86,17 @@ test("工具面就是这 11 个，输入 schema 的必填项对得上", async ()
   assert.deepEqual(required("eval"), ["graphPath", "metric"]);
   assert.deepEqual(required("perturb"), ["after", "axis", "graphPath", "metric", "region"]);
   assert.deepEqual(required("diff_graphs"), ["a", "b"]);
+  assert.deepEqual(required("patch_graph"), ["graphPath"]);
+  assert.deepEqual(props("patch_graph"), [
+    "addNode",
+    "baseDir",
+    "dryRun",
+    "graphPath",
+    "out",
+    "removeNode",
+    "rewire",
+    "set",
+  ]);
   await client.close();
 });
 

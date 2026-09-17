@@ -224,6 +224,10 @@
         },
         "error": {
           "$ref": "#/$defs/error"
+        },
+        "summary": {
+          "$ref": "#/$defs/summary",
+          "description": "结构化的运行收尾（ADR-0022）。与 lyflow_run_summary(runId) 返回的是同一个对象。宿主的成败判定读 summary.status，不要自己从 node_state 重建。"
         }
       },
       "required": [
@@ -260,6 +264,163 @@
     }
   ],
   "$defs": {
+    "summary": {
+      "type": "object",
+      "description": "一次运行的结构化收尾（ADR-0022）。由执行器产出——只有它同时握着全部节点状态、声明输出与结果仓。消费方不得从 node_state 事件重建这份对象。",
+      "required": [
+        "runId",
+        "status",
+        "nodes",
+        "outputs",
+        "decisions",
+        "contractViolations"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "degraded",
+            "failed"
+          ],
+          "description": "ok = 零个节点 error/cancelled；degraded = 有节点坏了但每个声明输出都是 value 或 inactive；failed = 任一声明输出是 failed，或图没声明 outputs 且有节点 error，或整轮被取消/图没编译过。与 run_finished.status 不是一回事：带 fallback 的图可以 run_finished=ok 而 summary=degraded。"
+        },
+        "durationMs": {
+          "type": "number"
+        },
+        "nodes": {
+          "type": "object",
+          "description": "节点 id（展开后的路径）-> 它的收尾状态。",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "enum": [
+                  "done",
+                  "error",
+                  "cancelled",
+                  "skipped"
+                ]
+              },
+              "code": {
+                "type": "string",
+                "description": "state=error/cancelled 时 errors[0].code。"
+              },
+              "reason": {
+                "type": "string",
+                "description": "state=skipped 的机器可读原因，目前只有 not_demanded。"
+              },
+              "durationMs": {
+                "type": "number"
+              },
+              "cached": {
+                "type": "boolean"
+              },
+              "bypassed": {
+                "type": "boolean"
+              },
+              "provided": {
+                "type": "boolean"
+              },
+              "outputsAvailable": {
+                "type": "boolean",
+                "description": "这个节点的输出此刻可取。消费方应认它而不是认 state==done。"
+              }
+            }
+          }
+        },
+        "outputs": {
+          "type": "object",
+          "description": "图级命名输出（ADR-0017）的三态。名字 -> 状态。",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "state",
+              "node",
+              "port"
+            ],
+            "properties": {
+              "state": {
+                "enum": [
+                  "value",
+                  "inactive",
+                  "failed"
+                ],
+                "description": "value = 有结果；inactive = 这一维本来就没有（上游没被 demand，或静音节点找不到可透传的源）；failed = 本该有、崩了。「没有」和「崩了」是两件事。"
+              },
+              "node": {
+                "type": "string"
+              },
+              "port": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "description": "state=value 时的端口类型名。"
+              },
+              "elementCount": {
+                "type": "integer"
+              },
+              "value": {
+                "type": "object",
+                "description": "非点云输出的可读值，与 node_state.stats.outputs[].value 同一份（Data::valueJson）。带 kind 字段，等于端口类型名。",
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  }
+                }
+              },
+              "reason": {
+                "type": "string",
+                "description": "state=inactive 的原因：not_demanded | bypassed_no_source | not_run。"
+              },
+              "from": {
+                "type": "string",
+                "description": "state=failed 时沿边回溯到的最近的出错节点；同一跳距多个候选时取拓扑序最早的那个。"
+              },
+              "code": {
+                "type": "string",
+                "description": "state=failed 时 from 那个节点的错误码。"
+              }
+            }
+          }
+        },
+        "decisions": {
+          "type": "object",
+          "description": "全图每一个类型为 FallbackChoice 的 Record 输出（ADR-0022 H4）。按 Record 的 type 收，不按算子 id——任何包的决策算子照这个类型声明就自动进来。键是节点 id（同一节点有第二个时退成 <node>:<port>），值是那份 Record 的字段外加 port 与 type。",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "type",
+              "port"
+            ],
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "port": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "contractViolations": {
+          "type": "array",
+          "description": "端口契约违反（m6-plan §3）。契约还没做，这一版永远是空数组——字段先留着，消费方不必分「老 core 没有」和「这一轮没有违反」。",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
     "planNode": {
       "type": "object",
       "required": [

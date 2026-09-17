@@ -222,6 +222,19 @@ std::vector<NamedOutput> ResultStore::namedOutputs(const std::string& runId) con
   return it == namedOutputs_.end() ? std::vector<NamedOutput>{} : it->second;
 }
 
+void ResultStore::setSummary(const std::string& runId, std::string json) {
+  std::lock_guard<std::mutex> lock(mu_);
+  summaries_[runId] = std::move(json);
+}
+
+bool ResultStore::summary(const std::string& runId, std::string& out) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto it = summaries_.find(runId);
+  if (it == summaries_.end()) return false;
+  out = it->second;
+  return true;
+}
+
 bool ResultStore::previewCloud(const std::string& runId, const std::string& nodeId,
                                const std::string& port, std::uint32_t maxPoints,
                                CloudPreview& out) const {
@@ -276,6 +289,7 @@ void ResultStore::freeRun(const std::string& runId) {
   // 只丢索引。Data 留着等下一次运行按 cacheKey 复用，超预算时由 LRU 淘汰。
   index_.erase(runId);
   namedOutputs_.erase(runId);
+  summaries_.erase(runId);
   evictLocked();
 }
 
@@ -283,6 +297,7 @@ void ResultStore::clear() {
   std::lock_guard<std::mutex> lock(mu_);
   index_.clear();
   namedOutputs_.clear();
+  summaries_.clear();
   byKey_.clear();
   lru_.clear();
   bytes_ = 0;

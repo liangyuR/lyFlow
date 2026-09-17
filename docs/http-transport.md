@@ -2,9 +2,10 @@
 
 `@lyflow/editor` 的 `HttpTransport` 与后端之间的协议。**阶段 B 的业务服务照这一份实现。**
 
-一句话：`Transport` 接口的每个方法对着 C ABI v8 的一个入口，这里再对着一个 REST 端点。
+一句话：`Transport` 接口的每个方法对着 C ABI v9 的一个入口，这里再对着一个 REST 端点。
 三方一一对应，见下面的对照表。v7 的 ABI 清单在 [phase-a1-acceptance.md](phase-a1-acceptance.md#c-abi-v7-的最终签名清单)，
-v8 加的两个取数入口见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)。
+v8 加的两个取数入口见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)，
+v9 加的 `lyflow_run_summary` 见 [ADR-0022](adr/0022-run-summary-as-core-output.md)。
 
 - **基址**：构造时给的 `baseUrl`，例如 `http://127.0.0.1:8787`。所有路径都挂在 `/lyflow/` 下。
 - **编码**：请求体与响应体都是 `application/json; charset=utf-8`，
@@ -33,6 +34,7 @@ v8 加的两个取数入口见 [ADR-0019](adr/0019-output-tensor-and-indices-ove
 | POST | `/lyflow/run` | `runGraph` | `lyflow_run_start` |
 | POST | `/lyflow/cancel` | `cancelRun` | `lyflow_run_cancel` |
 | GET | `/lyflow/runs/:runId/outputs` | `getRunOutputs` | `lyflow_run_outputs` |
+| GET | `/lyflow/runs/:runId/summary` | —（编辑器从 `run_finished` 事件里读） | `lyflow_run_summary` |
 | GET | `/lyflow/runs/:runId/nodes/:nodeId/outputs` | `getOutputInfo` | `lyflow_output_info` |
 | GET | `/lyflow/runs/:runId/clouds/:nodeId/:port` | `getOutputCloud` | `lyflow_output_cloud` |
 | GET | `/lyflow/runs/:runId/tensors/:nodeId/:port?offset=&count=` | `getOutputTensor` | `lyflow_output_tensor` |
@@ -148,6 +150,33 @@ v8 加的两个取数入口见 [ADR-0019](adr/0019-output-tensor-and-indices-ove
 ```
 
 图没声明 `outputs` 时是 `{}`；端口没有结果时那一项带 `"missing": true`。
+**`missing` 分不开「本来就没有」与「本该有、崩了」** —— 要分开读下面那个端点。
+
+### `GET /lyflow/runs/:runId/summary` → `RunSummary`
+
+`lyflow_run_summary` 的原样转发（[ADR-0022](adr/0022-run-summary-as-core-output.md)）。
+与 `run_finished` 事件里那个 `summary` 字段是同一个对象。
+
+```json
+{ "runId": "01M2…", "status": "degraded", "durationMs": 31.2,
+  "nodes": { "n_fit_datum": { "state": "error", "code": "insufficient_points",
+                              "durationMs": 2.1, "outputsAvailable": false } },
+  "outputs": { "gap": { "state": "value", "node": "n_gap", "port": "gap",
+                        "type": "Measurement", "elementCount": 1,
+                        "value": { "kind": "Measurement", "value": 3.52, "unit": "mm" } },
+               "flush": { "state": "inactive", "node": "b_n_flush", "port": "flush",
+                          "reason": "not_demanded" } },
+  "decisions": { "n_fb_line": { "choice": "b", "reason": "io: 主路径没有产出",
+                                "port": "choice", "type": "FallbackChoice" } },
+  "contractViolations": [] }
+```
+
+`status` 三态 `ok | degraded | failed`，`outputs` 每一维三态 `value | inactive | failed`。
+**run 还没结束（或者已经被 free）时返回 404** —— `lyflow_run_summary` 那一层返回 `NULL`，
+「还没有」与「跑完了、什么都没有」是两件事，不能都压成 `{}`。
+
+编辑器不走这个端点：它从 WebSocket 上的 `run_finished` 事件里直接读，少一次往返。
+端点留着是给不订事件流的消费方（脚本、业务服务的健康检查）用的。
 
 ### `GET /lyflow/runs/:runId/nodes/:nodeId/outputs` → `OutputInfo[]`
 

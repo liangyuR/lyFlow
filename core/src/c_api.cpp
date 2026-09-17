@@ -375,6 +375,18 @@ char* lyflow_run_outputs(const char* run_id) {
   }
 }
 
+char* lyflow_run_summary(const char* run_id) {
+  try {
+    std::string summary;
+    // run 还没结束（或者已经被 free）时没有这一份：返回 NULL 而不是空对象 ——
+    // "{}" 会被消费方当成「跑完了、什么都没有」，那是另一件事。
+    if (!lyflow::exec::runSummaryJson(fromC(run_id), summary)) return nullptr;
+    return dup(summary);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
 char* lyflow_import(const char* kind, const char* text, const char* base_dir) {
   try {
     registry();

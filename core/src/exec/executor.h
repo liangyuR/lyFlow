@@ -100,6 +100,10 @@ std::string planGraphJson(const std::string& graphJson, const std::filesystem::p
 /// `{ name: { node, port, type, elementCount, byteSize, value? } }`。
 std::string runOutputsJson(const std::string& runId);
 
+/// 某次运行的 run summary（ADR-0022）。执行器在发 run_finished 之前登记，
+/// 所以 run 结束之前返回 false（out 不动）；run 被 free 之后也取不到了。
+bool runSummaryJson(const std::string& runId, std::string& out);
+
 /// 走注册好的导入器把一段文本变成图。失败时返回诊断 JSON 数组（以 '[' 开头），
 /// 成功时返回 GraphDoc 对象（以 '{' 开头）。
 std::string importGraphJson(const std::string& kind, const std::string& text,

@@ -4,9 +4,16 @@
 只依赖同目录的 `lyflow/c_api.h`，不 include 任何 core 内部头，也不链接任何库 ——
 core 是运行时加载的 DLL（[ADR-0004](adr/0004-core-as-dll.md)）。
 
-契约版本是 **C ABI v8**（[ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)）。
+契约版本是 **C ABI v9**（[ADR-0022](adr/0022-run-summary-as-core-output.md)；
+v8 的张量与下标入口见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)）。
 `lyflow::kClientAbiVersion` 与 core 的 `LYFLOW_ABI_VERSION` 必须一致；对不上时
 `Client` 的构造函数会抛 `ClientError`，而不是等到某次调用才崩。
+
+v9 加的那一个入口是 `lyflow_run_summary(runId)`：一次运行的结构化收尾。
+`RunResult::summary` 就是它的原文，`RunHandle::runSummary()` 也能单独取。
+**宿主的成败判定读 `summary.status`（`ok` / `degraded` / `failed`），
+不要自己从事件流重建** —— 那要同时处理缓存命中、惰性分支没被 demand、
+失败被 `acceptsError` 端口接住三种情况。
 
 ## 安装布局
 

@@ -193,11 +193,68 @@ export interface NodeProgressEvent extends EventBase {
   message?: string;
 }
 
+/** summary 里 status 的三态（ADR-0022 H2）。与 `RunStatus` 不是一回事：
+ *  带 fallback 的图可以 run_finished=ok 而 summary=degraded。 */
+export type SummaryStatus = "ok" | "degraded" | "failed";
+
+/** 图级输出的三态（H3）。`inactive` 是「这一维本来就没有」，
+ *  `failed` 是「本该有、崩了」—— 把它们混成一个 missing 是 M5 踩过的坑。 */
+export type OutputState = "value" | "inactive" | "failed";
+
+export interface SummaryNode {
+  state: NodeState;
+  /** state=error/cancelled 时的错误码。 */
+  code?: string;
+  /** state=skipped 的机器可读原因，目前只有 not_demanded。 */
+  reason?: string;
+  durationMs?: number;
+  cached?: boolean;
+  bypassed?: boolean;
+  provided?: boolean;
+  outputsAvailable?: boolean;
+}
+
+export interface SummaryOutput {
+  state: OutputState;
+  node: string;
+  port: string;
+  type?: string;
+  elementCount?: number;
+  value?: OutputValue;
+  /** state=inactive 的原因：not_demanded | bypassed_no_source | not_run。 */
+  reason?: string;
+  /** state=failed 时沿边回溯到的最近的出错节点。 */
+  from?: string;
+  code?: string;
+}
+
+/** 一次决策（H4）：类型为 FallbackChoice 的 Record，外加它来自哪个端口。 */
+export interface SummaryDecision {
+  type: string;
+  port: string;
+  choice?: string;
+  reason?: string;
+  [key: string]: unknown;
+}
+
+/** core 产出的 run summary（ADR-0022）。前端不重建它，只显示。 */
+export interface RunSummary {
+  runId: string;
+  status: SummaryStatus;
+  durationMs?: number;
+  nodes: Record<string, SummaryNode>;
+  outputs: Record<string, SummaryOutput>;
+  decisions: Record<string, SummaryDecision>;
+  contractViolations: unknown[];
+}
+
 export interface RunFinishedEvent extends EventBase {
   kind: "run_finished";
   status: RunStatus;
   durationMs?: number;
   error?: Diagnostic;
+  /** ADR-0022。老 core（ABI < v9）没有它。 */
+  summary?: RunSummary;
 }
 
 export interface LogEvent extends EventBase {

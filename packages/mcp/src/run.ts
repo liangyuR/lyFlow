@@ -1,4 +1,57 @@
-import type { Diagnostic, ExecutionEvent, RunOutputs } from "./types.js";
+import type { Diagnostic, ExecutionEvent, OutputValue, RunOutputs } from "./types.js";
+
+/** core 产出的 run summary（ADR-0022）。这一份不是 MCP 算出来的 ——
+ *  它整个来自 run_finished 事件，与 `lyflow_run_summary(runId)` 是同一个对象。
+ *  消费方不得从 node_state 重建它。 */
+export interface CoreNodeSummary {
+  state: string;
+  /** state=error/cancelled 时的错误码。 */
+  code?: string;
+  /** state=skipped 的机器可读原因，目前只有 not_demanded。 */
+  reason?: string;
+  durationMs?: number;
+  cached?: boolean;
+  bypassed?: boolean;
+  provided?: boolean;
+  outputsAvailable?: boolean;
+}
+
+/** 图级输出的三态（ADR-0022 H3）：有值 / 本来就没有 / 本该有但崩了。 */
+export interface CoreOutputSummary {
+  state: string;
+  node: string;
+  port: string;
+  type?: string;
+  elementCount?: number;
+  value?: OutputValue;
+  /** state=inactive 的原因。 */
+  reason?: string;
+  /** state=failed 时回溯到的最近的出错节点。 */
+  from?: string;
+  code?: string;
+}
+
+export interface CoreRunSummary {
+  runId?: string;
+  /** ok | degraded | failed（H2）。与 run_finished.status 不是一回事。 */
+  status: string;
+  durationMs?: number;
+  nodes: Record<string, CoreNodeSummary>;
+  outputs: Record<string, CoreOutputSummary>;
+  /** 全图每一个 FallbackChoice（H4）。 */
+  decisions: Record<string, Record<string, unknown>>;
+  contractViolations: unknown[];
+}
+
+/** 从事件流里把 core 那份 summary 取出来。老 core（ABI < v9）没有它，返回 null。 */
+export function coreSummary(events: ExecutionEvent[]): CoreRunSummary | null {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    if (events[i]?.kind !== "run_finished") continue;
+    const s = events[i]?.["summary"];
+    return s && typeof s === "object" ? (s as CoreRunSummary) : null;
+  }
+  return null;
+}
 
 export interface NodeSummary {
   id: string;

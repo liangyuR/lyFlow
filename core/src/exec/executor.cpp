@@ -55,6 +55,20 @@ void writeError(JsonWriter& w, const Status& s) {
   w.endObject();
 }
 
+/// 一个节点的收尾状态（ADR-0022）。EventSink 在发终态事件时顺手记一份 ——
+/// 那三处（nodeFinished / nodeFailed / nodeNotDemanded）正是「这个节点最终
+/// 怎么样了」唯一被决定的地方，从事件流反推只会漏。
+struct NodeOutcome {
+  std::string state;   ///< done / skipped / error / cancelled
+  std::string code;    ///< 失败时 errors[0].code
+  std::string reason;  ///< skipped 的机器可读原因，目前只有 not_demanded
+  double durationMs = -1;
+  bool cached = false;
+  bool bypassed = false;
+  bool provided = false;
+  bool outputsAvailable = false;
+};
+
 /// 事件序列化 + 回调。seq 全局单调，多个 worker 同时发事件所以整个入口加锁（E2）。
 class EventSink {
  public:
@@ -128,6 +142,10 @@ class EventSink {
   void nodeNotDemanded(const std::string& nodeId) {
     JsonWriter w;
     std::lock_guard<std::mutex> lock(mu_);
+    NodeOutcome& outcome = outcomes_[nodeId];
+    outcome = NodeOutcome{};
+    outcome.state = "skipped";
+    outcome.reason = "not_demanded";
     begin(w, "node_state");
     w.field("nodeId", nodeId);
     w.field("state", std::string("skipped"));
@@ -158,6 +176,14 @@ class EventSink {
                     bool provided = false) {
     JsonWriter w;
     std::lock_guard<std::mutex> lock(mu_);
+    NodeOutcome& outcome = outcomes_[nodeId];
+    outcome = NodeOutcome{};
+    outcome.state = state;
+    outcome.durationMs = durationMs;
+    outcome.cached = cached;
+    outcome.bypassed = bypassed;
+    outcome.provided = provided;
+    outcome.outputsAvailable = true;
     begin(w, "node_state");
     w.field("nodeId", nodeId);
     w.field("state", std::string(state));
@@ -194,6 +220,11 @@ class EventSink {
                   const std::vector<Status>& errors, double durationMs) {
     JsonWriter w;
     std::lock_guard<std::mutex> lock(mu_);
+    NodeOutcome& outcome = outcomes_[nodeId];
+    outcome = NodeOutcome{};
+    outcome.state = state;
+    outcome.durationMs = durationMs;
+    if (!errors.empty()) outcome.code = errors.front().code;
     begin(w, "node_state");
     w.field("nodeId", nodeId);
     w.field("state", std::string(state));
@@ -229,7 +260,10 @@ class EventSink {
     end(w);
   }
 
-  void runFinished(const char* status, double durationMs, const Status* error) {
+  /// summaryJson 非空时原样嵌进 `summary` 字段（H1：事件里那份与
+  /// `lyflow_run_summary` 拿到的是同一个对象）。
+  void runFinished(const char* status, double durationMs, const Status* error,
+                   const std::string& summaryJson = {}) {
     JsonWriter w;
     std::lock_guard<std::mutex> lock(mu_);
     begin(w, "run_finished");
@@ -239,8 +273,15 @@ class EventSink {
       w.key("error");
       writeError(w, *error);
     }
+    if (!summaryJson.empty()) {
+      w.key("summary");
+      w.raw(summaryJson);
+    }
     end(w);
   }
+
+  /// 全部节点的收尾状态。scheduler.run() 返回之后（worker 都 join 了）才可以读。
+  const std::map<std::string, NodeOutcome>& outcomes() const { return outcomes_; }
 
  private:
   static void writePlanNode(JsonWriter& w, const PlanNode& n) {
@@ -273,6 +314,9 @@ class EventSink {
   lyflow_event_cb cb_ = nullptr;
   void* user_ = nullptr;
   std::int64_t seq_ = 0;
+  /// 节点 id -> 收尾状态（ADR-0022）。map 而不是 unordered_map：summary 里
+  /// 计划外的节点按 id 排序输出，两次跑同一张图的 JSON 才逐字节一样。
+  std::map<std::string, NodeOutcome> outcomes_;
 };
 
 /// 算子看到的 ExecContext。每个节点一份，所以本身不用加锁。
@@ -889,6 +933,226 @@ class Scheduler {
   std::size_t failed_ = 0;
 };
 
+// ------------------------------------------------------------------ summary
+
+/// `failed` 输出的 `from`：从产出节点沿边逆着走，找**最近**的出错节点（ADR-0022）。
+/// 同一跳距上有多个候选时取拓扑序最早的那个 —— Plan::nodes 本身是拓扑序，
+/// 所以就是下标最小的那个。先找 state=error，一个都没有再退而找 cancelled
+/// （整轮被取消时全图都是 cancelled，没有「真正出错」的那一个）。
+std::string traceBackToError(const Plan& plan, std::size_t start,
+                             const std::map<std::string, NodeOutcome>& outcomes,
+                             std::string& codeOut) {
+  const auto n = plan.nodes.size();
+  for (const char* want : {"error", "cancelled"}) {
+    std::vector<char> seen(n, 0);
+    std::vector<std::size_t> frontier{start};
+    seen[start] = 1;
+    while (!frontier.empty()) {
+      // 同一跳距的候选先收齐，再按拓扑序（下标）挑最早的
+      std::size_t best = n;
+      for (std::size_t i : frontier) {
+        auto it = outcomes.find(plan.nodes[i].id);
+        if (it == outcomes.end() || it->second.state != want) continue;
+        if (i < best) best = i;
+      }
+      if (best < n) {
+        codeOut = outcomes.at(plan.nodes[best].id).code;
+        return plan.nodes[best].id;
+      }
+      std::vector<std::size_t> next;
+      for (std::size_t i : frontier) {
+        for (int u : plan.nodes[i].upstream) {
+          const auto ui = static_cast<std::size_t>(u);
+          if (seen[ui]) continue;
+          seen[ui] = 1;
+          next.push_back(ui);
+        }
+      }
+      frontier.swap(next);
+    }
+  }
+  codeOut.clear();
+  return {};
+}
+
+/// 类型为 FallbackChoice 的 Record 输出全收上来（H4）。按 Record 的 `type` 判断，
+/// 不按算子 id —— 任何包的决策算子照这个类型声明就自动进 summary。
+nlohmann::json collectDecisions(const Plan& plan,
+                                const std::map<std::string, NodeOutcome>& outcomes,
+                                const std::string& runId, ResultStore& store) {
+  nlohmann::json out = nlohmann::json::object();
+  for (const PlanNode& n : plan.nodes) {
+    auto it = outcomes.find(n.id);
+    if (it == outcomes.end() || !it->second.outputsAvailable || !n.op) continue;
+    for (const Port& p : n.op->outputs) {
+      Data d;
+      if (!store.get(runId, n.id, p.name, d)) continue;
+      const Record* r = d.asRecord();
+      if (!r || r->type != "FallbackChoice") continue;
+      nlohmann::json item = r->data.is_object() ? r->data : nlohmann::json::object();
+      item["port"] = p.name;
+      item["type"] = r->type;
+      // 一个节点通常只产出一个 choice，键就是节点 id（读起来像 §1 的样子）；
+      // 真有第二个时退成 node:port，免得后一个把前一个顶掉。
+      const std::string key = out.contains(n.id) ? n.id + ":" + p.name : n.id;
+      out[key] = std::move(item);
+    }
+  }
+  return out;
+}
+
+/// 整个 run summary（ADR-0022 / m6-plan §1）。执行器手上有全部节点状态、
+/// 声明输出与结果仓，所以只能在这一层拼 —— 消费者从事件流重建必错。
+std::string buildSummaryJson(const std::string& runId, const Plan& plan,
+                             const std::map<std::string, NodeOutcome>& outcomes,
+                             double durationMs, bool forceFailed, ResultStore* store) {
+  std::unordered_map<std::string, std::size_t> indexOf;
+  for (std::size_t i = 0; i < plan.nodes.size(); ++i) indexOf[plan.nodes[i].id] = i;
+
+  bool anyError = false;
+  bool anyCancelled = false;
+  for (const auto& kv : outcomes) {
+    if (kv.second.state == "error") anyError = true;
+    if (kv.second.state == "cancelled") anyCancelled = true;
+  }
+
+  // 先把每个声明输出定成三态（H3），status 要靠它们（H2）。
+  struct OutputState {
+    const PlanOutput* decl = nullptr;
+    std::string state;   ///< value / inactive / failed
+    std::string reason;  ///< inactive 的原因
+    std::string from;    ///< failed 时回溯到的出错节点
+    std::string code;
+    bool hasInfo = false;
+    OutputInfo info;
+  };
+  std::vector<OutputState> outputs;
+  outputs.reserve(plan.outputs.size());
+  for (const auto& o : plan.outputs) {
+    OutputState s;
+    s.decl = &o;
+    if (store && store->outputInfo(runId, o.nodeId, o.port, s.info)) {
+      s.state = "value";
+      s.hasInfo = true;
+      outputs.push_back(std::move(s));
+      continue;
+    }
+    auto oc = outcomes.find(o.nodeId);
+    if (oc == outcomes.end()) {
+      // 节点一条终态事件都没发过：它根本没进这一轮（比如 --to 把它裁掉了）。
+      s.state = "inactive";
+      s.reason = "not_run";
+    } else if (oc->second.reason == "not_demanded") {
+      s.state = "inactive";
+      s.reason = "not_demanded";
+    } else if (oc->second.bypassed) {
+      // 静音节点没找到类型兼容的源可以透传（E5）：这一维「本来就没有」。
+      s.state = "inactive";
+      s.reason = "bypassed_no_source";
+    } else {
+      s.state = "failed";
+      auto at = indexOf.find(o.nodeId);
+      if (at != indexOf.end()) s.from = traceBackToError(plan, at->second, outcomes, s.code);
+      if (s.from.empty()) {
+        s.from = o.nodeId;
+        s.code = oc->second.code.empty() ? std::string("no_result") : oc->second.code;
+      }
+    }
+    outputs.push_back(std::move(s));
+  }
+
+  bool anyOutputFailed = false;
+  for (const auto& s : outputs) {
+    if (s.state == "failed") anyOutputFailed = true;
+  }
+
+  // H2 的三态。forceFailed 是额外一条：整轮被取消、或图根本没编译过 ——
+  // 这两种情况下什么都不能信，直接 failed。
+  const char* status = "ok";
+  if (forceFailed || anyOutputFailed || (plan.outputs.empty() && anyError)) {
+    status = "failed";
+  } else if (anyError || anyCancelled) {
+    status = "degraded";
+  }
+
+  JsonWriter w;
+  w.setIndent(0);
+  w.beginObject();
+  w.field("runId", runId);
+  w.field("status", std::string(status));
+  w.field("durationMs", durationMs);
+
+  w.key("nodes");
+  w.beginObject();
+  auto writeNode = [&w](const std::string& id, const NodeOutcome& o) {
+    w.key(id);
+    w.beginObject();
+    w.field("state", o.state);
+    w.fieldIfSet("code", o.code);
+    w.fieldIfSet("reason", o.reason);
+    if (o.durationMs >= 0) w.field("durationMs", o.durationMs);
+    if (o.state == "done" || o.state == "skipped") w.field("cached", o.cached);
+    if (o.bypassed) w.field("bypassed", true);
+    if (o.provided) w.field("provided", true);
+    w.field("outputsAvailable", o.outputsAvailable);
+    w.endObject();
+  };
+  // 先按计划的拓扑序，再补上计划之外的（整图编译失败时只有后者）
+  std::set<std::string> written;
+  for (const PlanNode& n : plan.nodes) {
+    auto it = outcomes.find(n.id);
+    if (it == outcomes.end()) continue;
+    writeNode(n.id, it->second);
+    written.insert(n.id);
+  }
+  for (const auto& kv : outcomes) {
+    if (written.count(kv.first)) continue;
+    writeNode(kv.first, kv.second);
+  }
+  w.endObject();
+
+  w.key("outputs");
+  w.beginObject();
+  for (const OutputState& s : outputs) {
+    w.key(s.decl->name);
+    w.beginObject();
+    w.field("state", s.state);
+    w.field("node", s.decl->nodeId);
+    w.field("port", s.decl->port);
+    if (s.hasInfo) {
+      w.field("type", s.info.type);
+      w.field("elementCount", static_cast<std::int64_t>(s.info.elementCount));
+      // 点云只给元信息，二进制仍走 lyflow_output_cloud（D4）。
+      if (!s.info.valueJson.empty()) {
+        w.key("value");
+        w.raw(s.info.valueJson);
+      }
+    }
+    w.fieldIfSet("reason", s.reason);
+    w.fieldIfSet("from", s.from);
+    w.fieldIfSet("code", s.code);
+    w.endObject();
+  }
+  w.endObject();
+
+  w.key("decisions");
+  if (store) {
+    w.raw(collectDecisions(plan, outcomes, runId, *store).dump());
+  } else {
+    w.beginObject();
+    w.endObject();
+  }
+
+  // 契约检查是 m6-plan §3 的活。字段现在就留着，消费者不必分「老 core 没有」
+  // 和「这一轮没有违反」。
+  w.key("contractViolations");
+  w.beginArray();
+  w.endArray();
+
+  w.endObject();
+  return w.str();
+}
+
 }  // namespace
 
 // ------------------------------------------------------------------ 并行度
@@ -1012,7 +1276,12 @@ void Run::workImpl() {
     for (const auto& d : diags.items()) {
       if (d.severity == Severity::Error) { first = d.status; break; }
     }
-    sink.runFinished("error", msSince(t0), &first);
+    // 编译就没过也给一份 summary：宿主的「这次到底成没成」只读这一个对象（H1）。
+    const double failedAt = msSince(t0);
+    const std::string summary = buildSummaryJson(options_.runId, plan, sink.outcomes(), failedAt,
+                                                 /*forceFailed=*/true, /*store=*/nullptr);
+    ResultStore::instance().setSummary(options_.runId, summary);
+    sink.runFinished("error", failedAt, &first, summary);
     return;
   }
 
@@ -1049,15 +1318,22 @@ void Run::workImpl() {
                    std::to_string(budget) + " ms；建议降低预览点数");
     }
   }
-  if (scheduler.sawCancel() || cancelled_.load(std::memory_order_relaxed)) {
+  const bool cancelled = scheduler.sawCancel() || cancelled_.load(std::memory_order_relaxed);
+  // summary 在发 run_finished 之前登记：宿主 join 返回时 lyflow_run_summary
+  // 一定拿得到，事件里那份与它是同一个对象（H1）。
+  const std::string summary =
+      buildSummaryJson(options_.runId, plan, sink.outcomes(), total, cancelled, &store);
+  store.setSummary(options_.runId, summary);
+
+  if (cancelled) {
     Status s = Status::Error(Phase::Execute, "cancelled", "运行已取消");
-    sink.runFinished("cancelled", total, &s);
+    sink.runFinished("cancelled", total, &s, summary);
   } else if (scheduler.anyError()) {
     Status s = Status::Error(Phase::Execute, "internal",
                              std::to_string(scheduler.failedCount()) + " 个节点未能完成");
-    sink.runFinished("error", total, &s);
+    sink.runFinished("error", total, &s, summary);
   } else {
-    sink.runFinished("ok", total, nullptr);
+    sink.runFinished("ok", total, nullptr, summary);
   }
 }
 
@@ -1162,6 +1438,12 @@ std::string runOutputsJson(const std::string& runId) {
   }
   w.endObject();
   return w.str();
+}
+
+// ------------------------------------------------------------------ run summary
+
+bool runSummaryJson(const std::string& runId, std::string& out) {
+  return ResultStore::instance().summary(runId, out);
 }
 
 // --------------------------------------------------------------------- 导入器

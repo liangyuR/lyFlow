@@ -138,7 +138,7 @@ lyflow patch <graph> [--remove-node <id|glob>]... [--add-node <json>]... [--rewi
 - [ ] 人为让 `n_fit_datum` 失败（`--set` 一个不可能的阈值）：`status = degraded` 当 gap 仍有值且 flush 是 inactive；`status = failed` 当 flush 有要求
 - [ ] `gap.profile_tensor` 喂 1230 点：第一帧报 `contract_violation`，消息含 1280 与 1230，summary 的 `contractViolations` 有它；51 帧正常数据 0 条违反
 - [ ] `lyflow params` 对点 4：`n_fit_l.distThresh` 显示 `explicit 0.8`，未改过的参数显示 `default` 与 manifest 默认值一致
-- [ ] `lyflow patch --remove-node 'b_*' --rewire … --dry-run` 对模型路径图输出的差异与手改 JSON 的 `lyflow diff` 一致；连跑两次第二次 diff 为空；删掉被图级输出引用的节点报错不写
+- [ ] `lyflow patch` 对带 12 个 fallback 的导入图：先 `--rewire` 12 处把主路径直连（dry-run 差异与真写后 `lyflow diff` 逐字相同），再 `--remove-node 'n_fb_*' --remove-node 'b_*'`；两条各连跑两次，第二次全 no-op、diff 为空；一步到位地删 `b_*` 必须被拒（`flow.fallback` 的 `b` 是必填输入，12 条 `missing_input`）；删掉被图级输出引用的节点报错不写
 - [ ] `plan` 对模型路径图标出 lazy 节点数 = `b_*` 节点数；编辑器里对应边为虚线
 - [ ] 26 个 gap 算子的 Record 输出端口都有 `example`，schema 校验过
 - [ ] `pnpm check`、`pnpm e2e`（带 `LYFLOW_PACKS=gap`，输出落盘再 grep）全绿；`e2e:http` 绿
@@ -156,3 +156,7 @@ lyflow patch <graph> [--remove-node <id|glob>]... [--add-node <json>]... [--rewi
 1. 端口契约只做等值、上下界、finite、shape 四种，不做表达式。
 2. `patch` 第一版四个动作：remove-node、add-node、rewire、set。
 3. 业务侧「未知参数静默」已查清：LyFlow 侧硬失败成立，静默在业务仓库的 `ApplyParameterPatches` 丢弃不匹配的 `node_id`，列入 §6。
+4. `failed` 输出保留 `from`（最近的 error 节点）并**加 `root`**（沿 error/cancelled 链向上游追到的拓扑序最早的 error 节点）。实测里 `from` 是 fallback 自己（1 跳），根因在 2 跳外；两个都给，消费者按需取。
+5. `eval_row` 的 `summary` **默认关**，`--summary` 打开；`run --summary` 不变。gap 图一维 bundle 就 6 KB，51 帧 × 8 组参数 2.5 MB 不该是默认。
+6. `patch` 的节点 id 通配改为**大小写敏感**；文件名那份 `wildcard_match` 保持不敏感，两者分开。
+7. 本仓库的 `lyflow_graph_from_config.py --model` 不产 fallback；带 fallback 的图走 `lyflow import --kind StandardGap.yml:model`。验收数据据此改。

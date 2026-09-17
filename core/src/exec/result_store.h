@@ -91,6 +91,11 @@ class ResultStore {
   void setNamedOutputs(const std::string& runId, std::vector<NamedOutput> outputs);
   std::vector<NamedOutput> namedOutputs(const std::string& runId) const;
 
+  /// run summary（ADR-0022）。执行器在发 run_finished 之前登记，
+  /// `lyflow_run_summary` 按 runId 取；run 结束之前取不到，返回 false。
+  void setSummary(const std::string& runId, std::string json);
+  bool summary(const std::string& runId, std::string& out) const;
+
   /// 单个端口的元信息（类型、元素数、字节数、可读值）。没有该结果时返回 false。
   bool outputInfo(const std::string& runId, const std::string& nodeId, const std::string& port,
                   OutputInfo& out) const;
@@ -137,6 +142,8 @@ class ResultStore {
   std::unordered_map<std::string, Entry> byKey_;
   std::unordered_map<std::string, NodeMap> index_;
   std::unordered_map<std::string, std::vector<NamedOutput>> namedOutputs_;
+  /// runId -> run summary 的 JSON 文本（ADR-0022）。与索引同生共死。
+  std::unordered_map<std::string, std::string> summaries_;
   /// 前 = 最久没用，后 = 刚用过
   std::list<std::string> lru_;
   /// cacheKey（不带端口）-> 钉住它的运行数

@@ -16,7 +16,7 @@
 `TauriTransport` 走 `#[tauri::command]`，`HttpTransport` 走
 [docs/http-transport.md](http-transport.md) 的 REST + WebSocket，
 `StaticTransport` 只读一份 dump 出来的 manifest。三者的方法一一对应，
-再一一对应到 C ABI v8 —— 换传输不换语义。
+再一一对应到 C ABI v9 —— 换传输不换语义。
 
 核心编译成一个只导出 C ABI 的 DLL，桥接层在运行时加载它（[ADR-0004](adr/0004-core-as-dll.md)）。
 这条边界同时是崩溃隔离面和 M3 热重载的接缝。
@@ -60,7 +60,7 @@ C++ 不能信任传进来的 GraphDoc。
 
                                  ③ ExecutionEvent (流)
    C++ ──────────────────────────► Rust ──────────────► 前端
-   (每个节点状态变化)               转发                 节点高亮 / 进度 / 错误
+   (每个节点状态变化 + 收尾 summary) 转发                节点高亮 / 进度 / 错误 / 成败判定
 ```
 
 ### ① OperatorManifest — 算子描述下行
@@ -102,6 +102,10 @@ NodeState: idle → pending → running → (done | error | cancelled | skipped)
 - 因上游失败而没跑的节点是 `cancelled` + `errors[0].code = upstream_failed`，
   **不是** `skipped`。`skipped` 严格留给缓存命中 —— 两者混用的话，
   用户永远分不清「没跑」和「不用跑」。
+- 最后一条 `run_finished` 带一个 `summary` 对象（[ADR-0022](adr/0022-run-summary-as-core-output.md)）。
+  **成败判定读它，不要自己从 `node_state` 重建** —— 这条流是给「一步步看着跑」用的，
+  重建一次收尾结论要同时处理缓存命中、惰性未 demand、被 acceptsError 接住的失败，
+  业务侧做错过两次。
 
 ## 运行模式
 
@@ -110,6 +114,32 @@ NodeState: idle → pending → running → (done | error | cancelled | skipped)
 | Run | 用户点运行 | 跑整图到所有终端节点 |
 | Run to node | 右键节点 | 只跑该节点的上游闭包 |
 | Live preview | 参数拖动中 | 降采样 / 限时预览，可被后续输入抢占取消 |
+
+三种模式收尾时都产出同一个 **run summary**（[ADR-0022](adr/0022-run-summary-as-core-output.md)）：
+执行器在发 `run_finished` 之前把它登记进结果仓，事件里带一份，
+`lyflow_run_summary(runId)` 取到的是同一份。形状是
+
+```jsonc
+{ "runId": …, "status": "ok|degraded|failed", "durationMs": …,
+  "nodes":   { "<节点>": { "state": …, "code"?, "reason"?, "durationMs"?, "cached"?, "outputsAvailable" } },
+  "outputs": { "<名字>": { "state": "value|inactive|failed", "node", "port", … } },
+  "decisions": { "<节点>": { "choice": "a|b", "reason", "port", "type": "FallbackChoice" } },
+  "contractViolations": [] }
+```
+
+三件事值得单独记住：
+
+- `status` 与 `run_finished.status` **不是一回事**。带 fallback 的图里，模型路径失败、
+  模板路径接住、结果量出来了 —— `run_finished` 是 `ok`（失败被 `acceptsError` 端口吃掉了），
+  而 summary 是 `degraded`。宿主想知道「这一轮能不能信」读 summary。
+- `outputs` 每一维三态。`inactive`（这一维本来就没有，比如它挂在没被 demand 的惰性分支上）
+  与 `failed`（本该有、崩了）是两件事；`lyflow_run_outputs` 的 `missing: true` 把它们混成了一个，
+  业务侧据此误判过。
+- `decisions` 收全图**每一个** `FallbackChoice`，按 Record 的 `type` 收而不是按算子 id。
+  十一个 fallback 的图不必再逐个去翻 `gap.result_bundle` 接了哪一个。
+
+CLI：`lyflow run --summary` 在 JSON Lines 末尾多一行 `{"kind":"run_summary", …}`；
+`lyflow eval` 的每行 `eval_row` 默认带一份（`--no-summary` 关掉）。
 
 Live preview 是体验的分水岭，但也是最容易做错的一块：需要 C++ 侧支持**可取消**和**降级质量**。
 建议 M2 之后再做，不要在早期把接口锁死成不可取消的同步调用。

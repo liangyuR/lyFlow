@@ -238,6 +238,53 @@ lyflow eval 4.lyflow.json --samples-dir kun10/sensor --sample-subdir 4 \
 - `sweep` 现在是这套引擎上的一层壳，只负责轴展开与 `sweep_row` 的老形状；
   它的 `--metric nodeId:port.field` 老写法两个子命令都还认。
 
+## 改图结构（`lyflow patch`）
+
+`src/patch.rs`。四个动作、顺序定死、幂等、每步之后过形状校验，最后过 core 的 `validate`，
+任一步不过就整体不写（[ADR-0023](../docs/adr/0023-patch-as-idempotent-structural-edit.md)）。
+
+```
+lyflow patch <graph> [--remove-node <id|glob>]... [--add-node <json>]... [--rewire <from>=<to>]...
+                     [--set <node>.<param>=<json>]... [--dry-run] [-o <out>] [--json] [--base-dir <dir>]
+```
+
+```bash
+# 先看差异：输出与 lyflow diff 逐字相同
+lyflow patch 4.lyflow.json --remove-node 'b_*' --rewire n_fb_line:out=n_fit_base:line --dry-run
+
+# 真写一份到别的路径，回执走 --json
+lyflow patch 4.lyflow.json --rewire n_fb_line:out=n_fit_base:line -o short.lyflow.json --json
+```
+
+- **顺序是 remove → add → rewire → set**，与命令行上的先后无关 —— 同一组动作换个写法得到同一张图。
+  「先改接线再删节点」要写成两条命令，中间那一步本来就该被看一眼。
+- `--remove-node` 删节点连带它的所有边；glob（`*` / `?`，大小写不敏感）只对 id。
+  **图级 `outputs` 还指着的节点不给删**：报错、整体不写、退出 1。
+- `--add-node '{"id":…,"op":…,"params":…?,"ui":…?}'`：id 撞了报错；不认识的字段报错（拼错不静默）；
+  没给 `ui` 就放在图里现有坐标的右下角外面一格。没有 `--connect`，所以新节点要么是不需要输入的源算子，
+  要么配 `--rewire` 把已有的边挪过去。
+- `--rewire n_fb_line:out=n_fit_base:line`：所有从左端口出发的边改为从右端口出发。
+  只改边，不动图级 `outputs`（左端口上挂着图输出时 stderr 说一句）。两端的节点不存在是错，不是 no-op。
+- `--set` 与 `run --set` 同义（解析不出 JSON 就当字符串）。
+- **幂等**：删不存在的 id、左端口没有出边的 rewire、同值的 set 都是 no-op，走 stderr 与 `--json` 的
+  `noops[]`。同一条命令跑两遍，第二遍 `applied` 全空、`diff.empty` 为 true；全是 no-op 的**原地**
+  覆写干脆不落盘（免得白白动 mtime），给了 `-o` 就照写。
+- `--dry-run` 不写文件，stdout 是 `lyflow diff` 的那份渲染（`cli::diff_docs` / `cli::render_diff`
+  两个子命令共用一份实现）。`--json` 时同一份差异在 `patch_result.diff` 里。
+- `-o` 省略时原地覆写。落盘先写同目录的临时文件再改名。
+- `--json` 一行：
+
+  ```jsonc
+  {"kind":"patch_result",
+   "applied":{"removed":["b_alt"],"added":[],"rewired":["a:cloud=g:cloud"],"set":["a.leafSize"]},
+   "noops":[{"action":"set","spec":"a.leafSize=[0.05,0.05,0.05]","reason":"same_value","message":"…"}],
+   "wrote":"g.lyflow.json",     // --dry-run 或「全 no-op 的原地覆写」时是 null
+   "diff":{ /* 与 lyflow diff --json 同一个对象 */ }}
+  ```
+
+- 退出码：0 成功；1 = 动作对不上这张图（没有那个节点、id 撞了、图输出还指着被删节点）
+  或者改完之后不合法（诊断照旧一行 JSON 打在 stdout）；4 = 用法错（一个动作都没给、写法不对）。
+
 ## 库算子目录
 
 `commands::library_dirs` 给出扫描列表：app data 下的 `library/`，

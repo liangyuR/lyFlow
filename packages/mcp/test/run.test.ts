@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseDiagnostics, summarizeOutputs, summarizeRun } from "../src/run.js";
+import { coreSummary, parseDiagnostics, summarizeOutputs, summarizeRun } from "../src/run.js";
 import type { ExecutionEvent } from "../src/types.js";
 
 const events: ExecutionEvent[] = [
@@ -82,6 +82,44 @@ test("图级输出只留名字、端口与值，不留字节", () => {
   });
   assert.equal(outputs["thinned"]?.value, undefined);
   assert.equal(outputs["missing"]?.missing, true);
+});
+
+test("core 的 run summary 原样透出，不从 node_state 重建", () => {
+  assert.equal(coreSummary(events), null, "老 core 没有 summary 字段");
+
+  const withSummary: ExecutionEvent[] = [
+    ...events.slice(0, -1),
+    {
+      kind: "run_finished",
+      runId: "r1",
+      seq: 5,
+      status: "ok",
+      durationMs: 40,
+      summary: {
+        runId: "r1",
+        status: "degraded",
+        durationMs: 40,
+        nodes: { fit: { state: "error", code: "not_enough_points" } },
+        outputs: {
+          gap: { state: "value", node: "n_gap", port: "gap", type: "Measurement", elementCount: 1 },
+          flush: { state: "inactive", node: "lazy", port: "cloud", reason: "not_demanded" },
+          bundle: { state: "failed", node: "n_b", port: "b", from: "fit", code: "not_enough_points" },
+        },
+        decisions: { n_fb: { choice: "b", reason: "a 失败", port: "choice", type: "FallbackChoice" } },
+        contractViolations: [],
+      },
+    },
+  ];
+  const s = coreSummary(withSummary);
+  // run_finished 说 ok，summary 说 degraded —— 两件事，都要留着
+  assert.equal(summarizeRun(withSummary).status, "ok");
+  assert.equal(s?.status, "degraded");
+  assert.equal(s?.outputs["flush"]?.state, "inactive");
+  assert.equal(s?.outputs["flush"]?.reason, "not_demanded");
+  assert.equal(s?.outputs["bundle"]?.state, "failed");
+  assert.equal(s?.outputs["bundle"]?.from, "fit");
+  assert.equal(s?.decisions["n_fb"]?.["choice"], "b");
+  assert.deepEqual(s?.contractViolations, []);
 });
 
 test("校验失败的 400 正文能还原成诊断数组", () => {

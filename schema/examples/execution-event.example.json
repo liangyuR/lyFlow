@@ -353,5 +353,75 @@
       "outputsAvailable": true,
       "outputs": [{ "port": "primary", "type": "PointCloud", "elementCount": 1280 }]
     }
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000002",
+    "seq": 4,
+    "at": "2026-09-05T12:02:00.190Z",
+    "kind": "run_finished",
+    "status": "ok",
+    "durationMs": 190.3,
+    "summary": {
+      "runId": "01J8XRUN000000000000000002",
+      "status": "degraded",
+      "durationMs": 190.3,
+      "nodes": {
+        "n_load": {
+          "state": "done",
+          "durationMs": 0.4,
+          "cached": false,
+          "provided": true,
+          "outputsAvailable": true
+        },
+        "n_model": {
+          "state": "error",
+          "code": "insufficient_points",
+          "durationMs": 2.1,
+          "outputsAvailable": false
+        },
+        "n_tpl": { "state": "done", "durationMs": 1.2, "cached": true, "outputsAvailable": true },
+        "n_icp": { "state": "done", "durationMs": 31.5, "cached": false, "outputsAvailable": true },
+        "n_spare": {
+          "state": "skipped",
+          "reason": "not_demanded",
+          "cached": false,
+          "outputsAvailable": false
+        },
+        "n_fb": { "state": "done", "durationMs": 0.1, "cached": false, "outputsAvailable": true }
+      },
+      "outputs": {
+        "gap": {
+          "state": "value",
+          "node": "n_fb",
+          "port": "out",
+          "type": "Measurement",
+          "elementCount": 1,
+          "value": { "kind": "Measurement", "value": 3.52, "ok": true, "unit": "mm" }
+        },
+        "flush": {
+          "state": "inactive",
+          "node": "n_spare",
+          "port": "flush",
+          "reason": "not_demanded"
+        },
+        "bundle": {
+          "state": "failed",
+          "node": "n_bundle",
+          "port": "bundle",
+          "from": "n_model",
+          "code": "insufficient_points"
+        }
+      },
+      "decisions": {
+        "n_fb": {
+          "choice": "b",
+          "reason": "io: 模型路径没有产出",
+          "port": "choice",
+          "type": "FallbackChoice"
+        }
+      },
+      "contractViolations": []
+    }
   }
 ]

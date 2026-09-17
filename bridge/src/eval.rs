@@ -779,6 +779,8 @@ pub(crate) struct Row {
     pub errors: Vec<String>,
     pub duration_ms: f64,
     pub skipped: Vec<String>,
+    /// 这一次运行的 run summary（ADR-0022）。`--no-summary` 或校验就没过时是 None。
+    pub summary: Option<Value>,
 }
 
 pub(crate) enum EngineError {
@@ -794,6 +796,8 @@ pub(crate) struct Engine<'a> {
     pub samples: &'a [Sample],
     pub parallel: i32,
     pub no_cache: bool,
+    /// 每行带一份 run summary（ADR-0022）。`--no-summary` 关掉以省体积。
+    pub summary: bool,
 }
 
 struct Attempt {
@@ -862,6 +866,7 @@ impl<'a> Engine<'a> {
                     errors,
                     duration_ms: 0.0,
                     skipped: Vec::new(),
+                    summary: None,
                 },
                 available: Vec::new(),
                 resolved: vec![false; self.metrics.len()],
@@ -935,6 +940,11 @@ impl<'a> Engine<'a> {
                 errors,
                 duration_ms: result.duration_ms(),
                 skipped: result.skipped_nodes(),
+                summary: if self.summary {
+                    result.summary().cloned()
+                } else {
+                    None
+                },
             },
             available,
             resolved,
@@ -1194,6 +1204,7 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         samples: &samples,
         parallel,
         no_cache: parsed.has("no-cache"),
+        summary: !parsed.has("no-summary"),
     };
 
     let mut rows: Vec<Row> = Vec::new();
@@ -1207,21 +1218,24 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
                     value.map(|v| json!(v)).unwrap_or(Value::Null),
                 );
             }
-            json_line(
-                out,
-                &json!({
-                    "kind": "eval_row",
-                    "paramSet": row.param_set,
-                    "params": Value::Object(param_sets[row.param_set].display.clone()),
-                    "sample": sample.id,
-                    "tags": sample.tags_json(),
-                    "holdout": grouping.is_holdout(sample),
-                    "status": row.status,
-                    "metrics": Value::Object(m),
-                    "errors": row.errors,
-                    "durationMs": row.duration_ms,
-                }),
-            );
+            let mut line_json = json!({
+                "kind": "eval_row",
+                "paramSet": row.param_set,
+                "params": Value::Object(param_sets[row.param_set].display.clone()),
+                "sample": sample.id,
+                "tags": sample.tags_json(),
+                "holdout": grouping.is_holdout(sample),
+                "status": row.status,
+                "metrics": Value::Object(m),
+                "errors": row.errors,
+                "durationMs": row.duration_ms,
+            });
+            // summary 是这一行的结论（ADR-0022）：status 三态与每个图输出的三态。
+            // 缺席只有两种可能 —— --no-summary，或者根本没跑到执行期。
+            if let (Some(s), Some(obj)) = (row.summary.as_ref(), line_json.as_object_mut()) {
+                obj.insert("summary".to_string(), s.clone());
+            }
+            json_line(out, &line_json);
             rows.push(row.clone());
         };
         match engine.run(&mut on_row) {
@@ -1866,6 +1880,7 @@ mod tests {
             errors: errors.iter().map(|s| (*s).to_string()).collect(),
             duration_ms: 1.0,
             skipped: Vec::new(),
+            summary: None,
         }
     }
 

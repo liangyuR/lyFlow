@@ -8,6 +8,7 @@ import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore, type DrawerTab } from "../store/ui";
+import type { OutputState, SummaryStatus } from "../types/execution";
 
 const TABS: { id: DrawerTab; label: string }[] = [
   { id: "log", label: "日志" },
@@ -43,15 +44,101 @@ function LogTab() {
   );
 }
 
+const SUMMARY_STATUS_LABEL: Record<SummaryStatus, string> = {
+  ok: "全部拿到",
+  degraded: "有降级",
+  failed: "失败",
+};
+
+const OUTPUT_STATE_LABEL: Record<OutputState, string> = {
+  value: "有值",
+  inactive: "本来就没有",
+  failed: "本该有、崩了",
+};
+
+/** 诊断抽屉顶部的运行收尾（ADR-0022）。一行结论 + 每个图级输出的三态 + 全部决策。
+ *  这一段整个来自 core 的 summary —— 前端一个字都不重建。 */
+function SummaryHeader() {
+  const summary = useExecutionStore((s) => s.summary);
+  if (!summary) return null;
+
+  const outputs = Object.entries(summary.outputs);
+  const decisions = Object.entries(summary.decisions);
+
+  return (
+    <div className="drawer__summary" data-testid="drawer-summary" data-status={summary.status}>
+      <p className={`drawer__summary-status drawer__summary-status--${summary.status}`}>
+        <span data-testid="summary-status">
+          {SUMMARY_STATUS_LABEL[summary.status] ?? summary.status}
+        </span>
+        <code>{summary.status}</code>
+        {typeof summary.durationMs === "number" && (
+          <span className="drawer__summary-duration">{summary.durationMs.toFixed(0)} ms</span>
+        )}
+      </p>
+
+      {outputs.length > 0 && (
+        <ul className="drawer__summary-outputs" data-testid="summary-outputs">
+          {outputs.map(([name, o]) => (
+            <li key={name} data-testid={`summary-output-${name}`} data-state={o.state}>
+              <span className="drawer__summary-name">{name}</span>
+              <code className={`drawer__summary-state drawer__summary-state--${o.state}`}>
+                {OUTPUT_STATE_LABEL[o.state] ?? o.state}
+              </code>
+              <span className="drawer__summary-where">
+                {o.node}.{o.port}
+              </span>
+              {/* failed 的那一维带着回溯出来的源头：不必再去事件流里找 */}
+              {o.state === "failed" && (
+                <span className="drawer__summary-from">
+                  来自 {o.from} · {o.code}
+                </span>
+              )}
+              {o.state === "inactive" && o.reason && (
+                <span className="drawer__summary-from">{o.reason}</span>
+              )}
+              {o.state === "value" && typeof o.elementCount === "number" && (
+                <span className="drawer__summary-from">{o.elementCount} 个</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {decisions.length > 0 && (
+        <ul className="drawer__summary-decisions" data-testid="summary-decisions">
+          {decisions.map(([nodeId, d]) => (
+            <li key={nodeId} data-testid={`summary-decision-${nodeId}`}>
+              <span className="drawer__summary-name">{nodeId}</span>
+              <code className="drawer__summary-choice">{d.choice ?? "?"}</code>
+              {d.reason && <span className="drawer__summary-from">{d.reason}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function DiagnosticsTab() {
   const items = useDiagnostics();
   const label = useManifestStore((s) => s.operatorsById);
   const doc = useGraphStore((s) => s.doc);
+  const summary = useExecutionStore((s) => s.summary);
 
   if (items.length === 0) {
-    return <p className="drawer__empty">没有诊断。上一次运行是干净的。</p>;
+    return (
+      <>
+        <SummaryHeader />
+        <p className="drawer__empty">
+          {summary ? "没有节点级诊断。" : "没有诊断。上一次运行是干净的。"}
+        </p>
+      </>
+    );
   }
   return (
+    <>
+    <SummaryHeader />
     <ul className="drawer__diags" data-testid="drawer-diagnostics">
       {items.map((d, i) => {
         const node = doc.nodes.find((n) => n.id === d.nodeId);
@@ -72,6 +159,7 @@ function DiagnosticsTab() {
         );
       })}
     </ul>
+    </>
   );
 }
 

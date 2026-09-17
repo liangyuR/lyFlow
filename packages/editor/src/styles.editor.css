@@ -1127,6 +1127,38 @@
 .drawer__log-node { color: var(--lyflow-accent-dim); }
 .drawer__log-text { color: var(--lyflow-fg-1); }
 
+/* 运行收尾（ADR-0022）。三态各有自己的颜色：绿=拿到，黄=降级，红=失败 —— 用户
+   扫一眼就知道这一轮能不能信，而不是去数红框。 */
+.drawer__summary {
+  margin: 0 0 10px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--lyflow-fg-2);
+  background: var(--lyflow-bg-2);
+}
+.drawer__summary[data-status="ok"] { border-left-color: var(--lyflow-ok, #5ac27a); }
+.drawer__summary[data-status="degraded"] { border-left-color: var(--lyflow-warn); }
+.drawer__summary[data-status="failed"] { border-left-color: #ff8b8b; }
+.drawer__summary-status { display: flex; gap: 8px; align-items: baseline; margin: 0 0 4px; }
+.drawer__summary-status code { color: var(--lyflow-fg-2); font-family: var(--lyflow-mono); font-size: 11px; }
+.drawer__summary-status--ok { color: var(--lyflow-ok, #5ac27a); }
+.drawer__summary-status--degraded { color: var(--lyflow-warn); }
+.drawer__summary-status--failed { color: #ff8b8b; }
+.drawer__summary-duration { margin-left: auto; color: var(--lyflow-fg-2); font-variant-numeric: tabular-nums; }
+.drawer__summary-outputs,
+.drawer__summary-decisions { margin: 0; padding: 0; list-style: none; }
+.drawer__summary-decisions { margin-top: 4px; border-top: 1px solid var(--lyflow-bg-1); padding-top: 4px; }
+.drawer__summary-outputs li,
+.drawer__summary-decisions li { display: flex; gap: 8px; align-items: baseline; padding: 1px 0; }
+.drawer__summary-name { min-width: 84px; color: var(--lyflow-fg-0); }
+.drawer__summary-state,
+.drawer__summary-choice { font-family: var(--lyflow-mono); font-size: 11px; }
+.drawer__summary-state--value { color: var(--lyflow-ok, #5ac27a); }
+.drawer__summary-state--inactive { color: var(--lyflow-fg-2); }
+.drawer__summary-state--failed { color: #ff8b8b; }
+.drawer__summary-choice { color: var(--lyflow-accent-dim); }
+.drawer__summary-where,
+.drawer__summary-from { color: var(--lyflow-fg-2); font-size: 11px; }
+
 .drawer__diags { margin: 0; padding: 0; list-style: none; }
 .drawer__diags button {
   display: flex;

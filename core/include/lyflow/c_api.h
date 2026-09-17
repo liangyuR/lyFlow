@@ -1,8 +1,8 @@
 #ifndef LYFLOW_C_API_H
 #define LYFLOW_C_API_H
-// C ABI v8。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
+// C ABI v9。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
 // 三条约定（char* 归属、异常不跨 ABI、只导出 C 函数）见 core/README.md「C ABI 约定」。
-#define LYFLOW_ABI_VERSION 8
+#define LYFLOW_ABI_VERSION 9
 #include <stddef.h>
 #include <stdint.h>
 
@@ -187,6 +187,13 @@ LYFLOW_API char* lyflow_output_info(const char* run_id, const char* node_id);
 // { 名字: { node, port, type, elementCount, byteSize, value?, missing? } }。
 // 点云只给元信息，二进制仍走 lyflow_output_cloud。图没声明 outputs 时返回 "{}"。
 LYFLOW_API char* lyflow_run_outputs(const char* run_id);
+
+// v9：一次运行的结构化收尾（ADR-0022）。返回
+// { runId, status, durationMs, nodes, outputs, decisions, contractViolations }。
+// status 三态 ok | degraded | failed；outputs 每一维三态 value | inactive | failed。
+// **run 结束之前返回 NULL** —— summary 由执行器在发 run_finished 之前登记，
+// 所以调用方应当先 lyflow_run_join。lyflow_run_free 之后同样返回 NULL。
+LYFLOW_API char* lyflow_run_summary(const char* run_id);
 
 // v7：走注册好的导入器把一段文本变成图（比如 gap 包的 "StandardGap.yml"）。
 // 成功返回 GraphDoc 对象（'{' 开头），失败返回诊断数组（'[' 开头），

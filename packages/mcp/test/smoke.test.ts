@@ -141,13 +141,20 @@ test(
       const run = payload(
         await client.callTool({ name: "run_graph", arguments: { graphPath: graphFile } }),
       );
+      // ADR-0022：status 三态来自 core 的 summary，nodes 是 id -> 收尾状态的对象
       assert.equal(run["status"], "ok", JSON.stringify(run));
-      const nodes = run["nodes"] as { id: string; state: string; elementCount: number | null }[];
-      const gen = nodes.find((n) => n.id === "gen");
-      assert.equal(gen?.state, "done");
-      assert.equal(gen?.elementCount, 5000);
-      const outputs = run["outputs"] as Record<string, { node: string; port: string }>;
+      assert.equal(run["runStatus"], "ok", JSON.stringify(run));
+      const nodes = run["nodes"] as Record<string, { state: string; outputsAvailable: boolean }>;
+      assert.equal(nodes["gen"]?.state, "done", JSON.stringify(nodes));
+      assert.equal(nodes["gen"]?.outputsAvailable, true);
+      const outputs = run["outputs"] as Record<
+        string,
+        { state: string; node: string; port: string; elementCount?: number }
+      >;
+      assert.equal(outputs["thinned"]?.state, "value", JSON.stringify(outputs));
       assert.equal(outputs["thinned"]?.node, "voxel");
+      assert.deepEqual(run["decisions"], {});
+      assert.deepEqual(run["contractViolations"], []);
 
       const runId = run["runId"] as string;
       const ports = payload(

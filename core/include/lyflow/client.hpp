@@ -63,6 +63,10 @@ struct RunResult {
   std::string status;
   /// lyflow_run_outputs 的原始 JSON 文本。
   std::string outputs;
+  /// lyflow_run_summary 的原始 JSON 文本（ADR-0022）。
+  /// `status` 三态 ok | degraded | failed，比 `status`（run_finished 那个）细。
+  /// 取不到时是空串 —— 老 core 没有这个入口，宿主据此退回读事件。
+  std::string summary;
   /// 每条 ExecutionEvent 的原始 JSON 文本，按 seq 顺序。
   std::vector<std::string> events;
   /// run_finished 之前 kind=log 且 level=warn/error 的那些消息。
@@ -263,6 +267,9 @@ class RunHandle {
 
   std::string outputs() const;
 
+  /// 本次运行的 run summary（ADR-0022）。join 之前是空串。
+  std::string runSummary() const;
+
   CloudView cloud(const std::string& nodeId, const std::string& port,
                   std::uint32_t maxPoints = 0) const;
 
@@ -442,6 +449,7 @@ class Client {
     void (*run_join)(lyflow_run*) = nullptr;
     void (*run_free)(lyflow_run*) = nullptr;
     char* (*run_outputs)(const char*) = nullptr;
+    char* (*run_summary)(const char*) = nullptr;
     char* (*import)(const char*, const char*, const char*) = nullptr;
     int (*output_cloud)(const char*, const char*, const char*, uint32_t,
                         lyflow_cloud_view*) = nullptr;
@@ -550,6 +558,7 @@ inline void Client::bind(const std::string& where) {
   need(fn_.run_join, "lyflow_run_join", where);
   need(fn_.run_free, "lyflow_run_free", where);
   need(fn_.run_outputs, "lyflow_run_outputs", where);
+  need(fn_.run_summary, "lyflow_run_summary", where);
   need(fn_.import, "lyflow_import", where);
   need(fn_.output_cloud, "lyflow_output_cloud", where);
   need(fn_.cloud_view_free, "lyflow_cloud_view_free", where);
@@ -588,6 +597,12 @@ inline std::string RunHandle::outputs() const {
   return client_->owned(client_->fn_.run_outputs(runId_.c_str()));
 }
 
+inline std::string RunHandle::runSummary() const {
+  if (!client_) return {};
+  // run 结束之前 core 返回 NULL，owned() 把它变成空串（ADR-0022）。
+  return client_->owned(client_->fn_.run_summary(runId_.c_str()));
+}
+
 inline CloudView RunHandle::cloud(const std::string& nodeId, const std::string& port,
                                   std::uint32_t maxPoints) const {
   if (!client_) return CloudView();
@@ -617,6 +632,7 @@ inline RunResult RunHandle::result() {
     out.diagnostics = state_->diagnostics;
   }
   out.outputs = outputs();
+  out.summary = runSummary();
   return out;
 }
 
