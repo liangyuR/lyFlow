@@ -74,6 +74,38 @@ nlohmann::json lineQualityJson(const GapCloud& cloud, const Eigen::VectorXf& lin
   return q;
 }
 
+/// 内点相对圆心的**方位角**（度，圆周均值）。0° = +x，90° = 正上方（测量帧里 y 越小越高），
+/// 所以「点云贴在圆的左上半边」≈ 135°。折进 (−180, 180]。
+///
+/// 这是弧长覆盖看不出来的那一维：arcCoverageDeg 只说内点张开多少度，不说它们落在圆的哪
+/// 一侧。同一段点云贴在圆的左上（对）和贴在圆的顶部加底部（歪了），弧长可以一模一样。
+/// 用圆周均值而不是算术平均，免得在 ±180° 首尾相接处算出中间那个相反的方向。
+double inlierBearingDeg(const GapCloud& cloud, const Eigen::VectorXf& circle,
+                        const pcl::Indices& inliers) {
+  if (circle.size() < 3 || inliers.empty()) return std::numeric_limits<double>::quiet_NaN();
+  double sumSin = 0;
+  double sumCos = 0;
+  std::size_t used = 0;
+  for (const auto index : inliers) {
+    if (index < 0 || static_cast<std::size_t>(index) >= cloud.size()) continue;
+    const double angle = std::atan2(-(cloud[index].y - circle[1]), cloud[index].x - circle[0]);
+    sumSin += std::sin(angle);
+    sumCos += std::cos(angle);
+    ++used;
+  }
+  // 内点绕圆心均匀分布时合矢量退化成 0，方位角没有意义 —— 报 NaN，调用方当作「不满足」。
+  if (used == 0 || std::hypot(sumSin, sumCos) < 1e-9) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  return std::atan2(sumSin, sumCos) * 180.0 / M_PI;
+}
+
+/// 两个方位角之间的最短夹角（度），恒为 [0, 180]。
+double bearingDeltaDeg(double a, double b) {
+  const double delta = std::fmod(std::fabs(a - b), 360.0);
+  return delta > 180.0 ? 360.0 - delta : delta;
+}
+
 nlohmann::json circleQualityJson(const GapCloud& cloud, const Eigen::VectorXf& circle,
                                  const pcl::Indices& inliers, const std::string& model,
                                  const std::string& radiusMode) {
@@ -131,6 +163,8 @@ nlohmann::json circleQualityJson(const GapCloud& cloud, const Eigen::VectorXf& c
   q["rmsResidualMm"] = numberOrNull(rms);
   q["maxResidualMm"] = numberOrNull(maximum);
   q["arcCoverageDeg"] = numberOrNull(arcCoverage);
+  // 内点落在圆的哪一侧。和 arcCoverageDeg 是两回事：那个说张开多少度，这个说朝哪边。
+  q["inlierBearingDeg"] = numberOrNull(inlierBearingDeg(cloud, circle, inliers));
   return q;
 }
 
@@ -410,21 +444,35 @@ double centerAboveLine(const Eigen::VectorXf& circle, const lyflow::Line2D& line
   return at - circle[1];
 }
 
-/// 圆心高度带约束下的圆拟合。共用的 gap_std::circleFit2D 同时服务 A/B 对照实现，
-/// 不能给它加判据，所以这里自己跑一遍 RANSAC —— **只在配了约束时才走这条路**，
-/// 没配时调用方走原来的 circleFit2D，行为逐位不变。
+/// 带约束的圆拟合：圆心高度带（要 line）和内点方位角带，两条都可以单独开。
+/// 共用的 gap_std::circleFit2D 同时服务 A/B 对照实现，不能给它加判据，所以这里自己跑一遍
+/// RANSAC —— **只在配了约束时才走这条路**，没配时调用方走原来的 circleFit2D，行为逐位不变。
 /// 采样用固定种子，同样的输入永远给同样的输出（算子声明了 deterministic）。
-bool circleFitCenterBand(const GapCloud& cloud, const lyflow::Line2D& line, double aboveM,
-                         double tolM, double distThresh, double rMin, double rMax,
-                         Eigen::VectorXf* circle, pcl::Indices* inliers) {
+///
+/// `line` 为空表示不查圆心高度；`bearingTolDeg <= 0` 表示不查方位角。
+bool circleFitConstrained(const GapCloud& cloud, const lyflow::Line2D* line, double aboveM,
+                          double tolM, double bearingDeg, double bearingTolDeg, double distThresh,
+                          double rMin, double rMax, Eigen::VectorXf* circle,
+                          pcl::Indices* inliers) {
   const std::size_t n = cloud.size();
   if (n < 3) return false;
+  const bool checkCenter = line != nullptr && tolM > 0;
+  const bool checkBearing = bearingTolDeg > 0;
+  // 方位角要先有内点才能算，所以它在下面按候选的内点集单独查；这里只查半径和圆心高度。
   const auto ok = [&](double cx, double cy, double r) {
     if (!(r >= rMin && r <= rMax)) return false;
+    if (!checkCenter) return true;
     Eigen::VectorXf probe(3);
     probe << static_cast<float>(cx), static_cast<float>(cy), static_cast<float>(r);
-    const double above = centerAboveLine(probe, line);
+    const double above = centerAboveLine(probe, *line);
     return std::isfinite(above) && std::fabs(above - aboveM) <= tolM;
+  };
+  const auto bearingOk = [&](const Eigen::Vector3d& c, const pcl::Indices& idx) {
+    if (!checkBearing) return true;
+    Eigen::VectorXf probe(3);
+    probe << static_cast<float>(c[0]), static_cast<float>(c[1]), static_cast<float>(c[2]);
+    const double bearing = inlierBearingDeg(cloud, probe, idx);
+    return std::isfinite(bearing) && bearingDeltaDeg(bearing, bearingDeg) <= bearingTolDeg;
   };
   std::mt19937 rng(20260916U);
   std::uniform_int_distribution<std::size_t> pick(0, n - 1);
@@ -449,13 +497,17 @@ bool circleFitCenterBand(const GapCloud& cloud, const lyflow::Line2D& line, doub
     const double r = std::hypot(ax - ux, ay - uy);
     if (!ok(ux, uy, r)) continue;
     std::size_t count = 0;
-    for (const auto& q : cloud) {
-      if (std::fabs(std::hypot(q.x - ux, q.y - uy) - r) < distThresh) ++count;
+    pcl::Indices candidate;
+    for (std::size_t q = 0; q < n; ++q) {
+      if (std::fabs(std::hypot(cloud[q].x - ux, cloud[q].y - uy) - r) < distThresh) {
+        ++count;
+        if (checkBearing) candidate.push_back(static_cast<int>(q));
+      }
     }
-    if (count > bestCount) {
-      bestCount = count;
-      best = Eigen::Vector3d(ux, uy, r);
-    }
+    if (count <= bestCount) continue;
+    if (!bearingOk(Eigen::Vector3d(ux, uy, r), candidate)) continue;
+    bestCount = count;
+    best = Eigen::Vector3d(ux, uy, r);
   }
   if (bestCount < 3) return false;
   // 用内点做一次代数重拟；重拟后仍要满足约束，否则退回粗解。
@@ -478,7 +530,9 @@ bool circleFitCenterBand(const GapCloud& cloud, const lyflow::Line2D& line, doub
     }
     const Eigen::Vector3d sol = A.colPivHouseholderQr().solve(rhs);
     const double rr = std::sqrt(std::max(sol[2] + sol[0] * sol[0] + sol[1] * sol[1], 0.0));
-    if (ok(sol[0], sol[1], rr)) refined = Eigen::Vector3d(sol[0], sol[1], rr);
+    // 重拟后两条约束都要仍然成立，否则退回粗解。
+    const Eigen::Vector3d candidate(sol[0], sol[1], rr);
+    if (ok(sol[0], sol[1], rr) && bearingOk(candidate, keep)) refined = candidate;
   }
   circle->resize(3);
   (*circle)[0] = static_cast<float>(refined[0]);
@@ -538,6 +592,11 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
   const std::size_t minInliers[2] = {static_cast<std::size_t>(params.integer("leftMinInliers")),
                                      static_cast<std::size_t>(params.integer("rightMinInliers"))};
   const double minArc[2] = {params.number("leftMinArcDeg"), params.number("rightMinArcDeg")};
+  // 内点方位角带：点云应当贴在圆的哪一侧。tol <= 0 = 不检查。不需要 refLine。
+  const double bearing[2] = {params.number("leftArcBearingDeg"),
+                             params.number("rightArcBearingDeg")};
+  const double bearingTol[2] = {params.number("leftArcBearingTolDeg"),
+                                params.number("rightArcBearingTolDeg")};
   const lyflow::Line2D* refLine = inputs.has("refLine") ? inputs.get("refLine").asLine2D() : nullptr;
   for (int i = 0; i < 2; ++i) {
     if (centerTol[i] > 0 && refLine == nullptr) {
@@ -555,8 +614,9 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
   // 所以给「本来就拟得对」的点位挂一条宽带纯属保险）；always 一律走约束。
   // 抽成 lambda 是为了「弱了就换合并云再来一次」能原样重跑。
   const auto fitOneSide = [&](SideResult& side, int i) {
-    const bool guardOnly = centerTol[i] > 0 && centerMode[i] == "guard";
-    if (centerTol[i] <= 0 || guardOnly) {
+    const bool constrained = centerTol[i] > 0 || bearingTol[i] > 0;
+    const bool guardOnly = constrained && centerMode[i] == "guard";
+    if (!constrained || guardOnly) {
       side.fitted = gap_std::circleFit2D(side.cloud, &side.circle, &side.indices, distThresh,
                                      cfg[i].rMin, cfg[i].rMax, cfg[i].rFixed);
       if (!side.fitted && retryDistanceMm > 0) {
@@ -566,24 +626,35 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
                                        cfg[i].rFixed);
       }
     }
-    bool needBand = centerTol[i] > 0 && !guardOnly;
+    bool needBand = constrained && !guardOnly;
     if (guardOnly) {
-      const double above = side.fitted ? centerAboveLine(side.circle, *refLine) : 0.0;
-      needBand = !side.fitted || !std::isfinite(above) ||
-                 std::fabs(above - centerAbove[i]) > centerTol[i];
+      // 任何一条约束落空都要重来。
+      needBand = !side.fitted;
+      if (!needBand && centerTol[i] > 0) {
+        const double above = centerAboveLine(side.circle, *refLine);
+        needBand = !std::isfinite(above) || std::fabs(above - centerAbove[i]) > centerTol[i];
+      }
+      if (!needBand && bearingTol[i] > 0) {
+        const double b = inlierBearingDeg(side.cloud, side.circle, side.indices);
+        needBand = !std::isfinite(b) || bearingDeltaDeg(b, bearing[i]) > bearingTol[i];
+      }
     }
     if (needBand) {
       side.indices.clear();
-      side.fitted = circleFitCenterBand(side.cloud, *refLine, centerAbove[i], centerTol[i],
-                                        distThresh, cfg[i].rMin, cfg[i].rMax, &side.circle,
-                                        &side.indices);
+      side.fitted = circleFitConstrained(side.cloud, refLine, centerAbove[i], centerTol[i],
+                                         bearing[i], bearingTol[i], distThresh, cfg[i].rMin,
+                                         cfg[i].rMax, &side.circle, &side.indices);
       if (!side.fitted && retryDistanceMm > 0) {
         side.indices.clear();
-        side.fitted = circleFitCenterBand(side.cloud, *refLine, centerAbove[i], centerTol[i],
-                                          mmToM(retryDistanceMm), cfg[i].rMin, cfg[i].rMax,
-                                          &side.circle, &side.indices);
+        side.fitted = circleFitConstrained(side.cloud, refLine, centerAbove[i], centerTol[i],
+                                           bearing[i], bearingTol[i], mmToM(retryDistanceMm),
+                                           cfg[i].rMin, cfg[i].rMax, &side.circle, &side.indices);
       }
-      if (side.fitted) side.model = "circle-center-band";
+      if (side.fitted) {
+        side.model = centerTol[i] > 0 ? (bearingTol[i] > 0 ? "circle-center-bearing-band"
+                                                           : "circle-center-band")
+                                      : "circle-bearing-band";
+      }
     }
     return side.fitted;
   };
@@ -825,6 +896,37 @@ Param minArcParam(const char* name, const char* label, const char* group) {
   p.doc =
       "内点覆盖的圆弧角度小于它就算没拟出来。0 = 不检查（默认）。比内点数更直接："
       "弧太短时三个参数的圆本来就定不住，圆心往哪边跑全看噪声。";
+  p.def = Value::number(0.0);
+  p.unit = "°";
+  p.advanced = true;
+  p.group = group;
+  return p;
+}
+
+Param bearingParam(const char* name, const char* label, const char* group) {
+  Param p;
+  p.name = name;
+  p.type = ParamType::Float;
+  p.label = label;
+  p.doc =
+      "内点应当落在圆的哪一侧，用相对圆心的方位角表示：0° = 正右，90° = 正上"
+      "（测量帧里 y 越小越高），135° = 左上。配合同侧的 ArcBearingTolDeg 使用。";
+  p.def = Value::number(0.0);
+  p.unit = "°";
+  p.advanced = true;
+  p.group = group;
+  return p;
+}
+
+Param bearingTolParam(const char* name, const char* label, const char* group) {
+  Param p;
+  p.name = name;
+  p.type = ParamType::Float;
+  p.label = label;
+  p.doc =
+      "方位角的容差，<= 0 表示不加这个约束（默认）。弧长覆盖只说内点张开多少度，不说它们"
+      "落在圆的哪一侧 —— 点云贴在圆的左上（对）和贴在顶部加底部（歪了）弧长可以一模一样，"
+      "这一条是唯一分得开的。";
   p.def = Value::number(0.0);
   p.unit = "°";
   p.advanced = true;
@@ -1092,6 +1194,10 @@ void registerFitGapCircles(Registry& r) {
       numParam("rightCenterTol", "Right Center Tol", 0.0, "mm", "Right Radius",
                "圆心高度的容差，<= 0 表示不加这个约束。"),
       centerModeParam("rightCenterMode", "Right Center Mode", "Right Radius"),
+      bearingParam("leftArcBearingDeg", "Left Arc Bearing", "Left Radius"),
+      bearingTolParam("leftArcBearingTolDeg", "Left Arc Bearing Tol", "Left Radius"),
+      bearingParam("rightArcBearingDeg", "Right Arc Bearing", "Right Radius"),
+      bearingTolParam("rightArcBearingTolDeg", "Right Arc Bearing Tol", "Right Radius"),
       minInliersParam("leftMinInliers", "Left Min Inliers", "Left Radius"),
       minArcParam("leftMinArcDeg", "Left Min Arc", "Left Radius"),
       minInliersParam("rightMinInliers", "Right Min Inliers", "Right Radius"),

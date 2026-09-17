@@ -1308,6 +1308,65 @@ TEST_CASE("圆拟合的弱地板：钉死的那台弧太短就退回合并云") 
   CHECK(looseR != both->out("right").asCircle2D()->radius);
 }
 
+TEST_CASE("gap.fit_gap_circles 的方位角带挑内点落在圆左上的那一个") {
+  // 右 ROI 里两段弧，半径一样：真实的那段内点落在圆的左上（方位角约 140°），点少；
+  // 另一段的内点落在圆的左下（约 -140°），点多一倍 —— 不加约束时 RANSAC 选点多的那段。
+  // 两段的弧长覆盖也一样，所以 minArcDeg 分不开它们，只有方位角分得开。
+  const auto build = [] {
+    PointCloud cloud;
+    pushLeftArc(cloud);
+    pushArc(cloud, 0.0035, -0.0005, 0.0009, 180, 260, 40);   // 内点在左上
+    pushArc(cloud, 0.0035, 0.0015, 0.0009, 100, 180, 90);    // 内点在左下，点更多
+    auto call = std::make_unique<Call>();
+    call->inputs["merged"] = Data::cloud(cloud);
+    call->inputs["primary"] = Data::cloud(cloud);
+    call->inputs["secondary"] = Data::cloud(cloud);
+    call->inputs["boxLeft"] = Data::box2d(box(-0.006f, -0.004f, -0.001f, 0.002f));
+    call->inputs["boxRight"] = Data::box2d(box(0.001f, -0.004f, 0.006f, 0.003f));
+    return call;
+  };
+  auto loose = build();
+  REQUIRE(loose->run("gap.fit_gap_circles").ok);
+  CHECK(rightCenterY(*loose) == doctest::Approx(0.0015).epsilon(0.05));
+
+  // 方位角带不需要 refLine —— 这是它和圆心高度带的区别。
+  auto banded = build();
+  REQUIRE(banded->run("gap.fit_gap_circles", {{"rightArcBearingDeg", Value::number(140.0)},
+                                              {"rightArcBearingTolDeg", Value::number(40.0)}})
+              .ok);
+  CHECK(rightCenterY(*banded) == doctest::Approx(-0.0005).epsilon(0.05));
+}
+
+TEST_CASE("方位角带的 guard：带内逐位不变，出带才重拟") {
+  const auto build = [](std::initializer_list<std::pair<const std::string, Value>> params) {
+    PointCloud cloud;
+    pushLeftArc(cloud);
+    pushArc(cloud, 0.0035, -0.0005, 0.0009, 180, 260, 40);
+    pushArc(cloud, 0.0035, 0.0015, 0.0009, 100, 180, 90);
+    auto call = std::make_unique<Call>();
+    call->inputs["merged"] = Data::cloud(cloud);
+    call->inputs["primary"] = Data::cloud(cloud);
+    call->inputs["secondary"] = Data::cloud(cloud);
+    call->inputs["boxLeft"] = Data::box2d(box(-0.006f, -0.004f, -0.001f, 0.002f));
+    call->inputs["boxRight"] = Data::box2d(box(0.001f, -0.004f, 0.006f, 0.003f));
+    REQUIRE(call->run("gap.fit_gap_circles", params).ok);
+    return call;
+  };
+  auto plain = build({});
+  // 带子把自由拟合的结果包住：guard 不重拟，逐位一致。
+  auto guarded = build({{"rightArcBearingDeg", Value::number(-140.0)},
+                        {"rightArcBearingTolDeg", Value::number(60.0)},
+                        {"rightCenterMode", Value::text("guard")}});
+  CHECK(guarded->out("right").asCircle2D()->center[1] ==
+        plain->out("right").asCircle2D()->center[1]);
+  CHECK(guarded->out("right").asCircle2D()->radius == plain->out("right").asCircle2D()->radius);
+  // 带子挪到另一侧：出带了才重拟，换到左上那段。
+  auto moved = build({{"rightArcBearingDeg", Value::number(140.0)},
+                      {"rightArcBearingTolDeg", Value::number(40.0)},
+                      {"rightCenterMode", Value::text("guard")}});
+  CHECK(rightCenterY(*moved) == doctest::Approx(-0.0005).epsilon(0.05));
+}
+
 TEST_CASE("圆拟合的弱地板：合并云也弱就报失败，不给一个错的数") {
   PointCloud cloud;
   pushLeftArc(cloud);
