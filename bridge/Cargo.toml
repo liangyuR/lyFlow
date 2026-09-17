@@ -26,6 +26,11 @@ required-features = ["desktop"]
 name = "lyflow"
 path = "src/bin/lyflow.rs"
 
+# execution.rs 的测试要 `TensorView::borrowed` 借内存造视图；features 在 cargo test
+# 时并集，cargo build 不编 dev-deps，所以生产构建里它仍然不存在。
+[dev-dependencies]
+lyflow-client = { path = "../crates/lyflow-client", features = ["test-util"] }
+
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
 cmake = "0.1.58"
@@ -37,6 +42,9 @@ serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"
 tauri-plugin-dialog = { version = "2", optional = true }
 libloading = "0.8.9"
+# C ABI 边界那一层（`lyflow/client.hpp` 的 Rust 对应物）。桥接层只在它上面加
+# 路径解析、进程单例与热重载 —— 见 core_ffi.rs。
+lyflow-client = { path = "../crates/lyflow-client" }
 notify = { version = "8.2.0", default-features = false }
 
 [features]

@@ -1819,12 +1819,22 @@ version = "0.1.0"
 dependencies = [
  "cmake",
  "libloading 0.8.9",
+ "lyflow-client",
  "notify",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "lyflow-client"
+version = "0.1.0"
+dependencies = [
+ "libloading 0.8.9",
+ "serde_json",
  "thiserror 2.0.20",
 ]
 

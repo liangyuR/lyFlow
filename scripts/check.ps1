@@ -38,6 +38,15 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "cargo test 失败" }
 } finally { Pop-Location }
 
+Step "Rust 客户端：脱开 bridge 单独构建"
+# 这个 crate 的卖点是宿主不必参与 core 的构建（docs/embedding.md「Rust 客户端」）。
+# 单独编一遍是那句话的最低证据：它要是又依赖回 bridge 或 core 的构建产物，这一步就断了。
+Push-Location (Join-Path $root "crates\lyflow-client")
+try {
+  cargo build --quiet
+  if ($LASTEXITCODE -ne 0) { throw "lyflow-client 单独构建失败" }
+} finally { Pop-Location }
+
 Step "headless CLI（不带 Tauri）"
 # --no-default-features 是 F6 的证据：关掉 desktop 之后 tauri 一行都不该被编到。
 Push-Location (Join-Path $root "bridge")

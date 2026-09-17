@@ -76,7 +76,9 @@ C++ 生成的 `OperatorManifest`，Rust 转发给前端。**加新算子只改 C
 
 ```
 core/     C++ 核心：算子注册表 + manifest 导出 + 校验/展开/编译/执行 + 结果仓。编成 DLL
-bridge/   Rust 桥接层：Tauri 壳（lyflow-app）与 headless CLI（lyflow），共用 core_ffi
+crates/lyflow-client/  C ABI 的 Rust 客户端：加载 core DLL、跑图、取结果。`client.hpp` 的对应物
+bridge/   Rust 桥接层：Tauri 壳（lyflow-app）与 headless CLI（lyflow）。在客户端之上加
+          路径解析、进程单例、热重载
 packages/editor/  @lyflow/editor：节点编辑器 + 3D 预览，一个可嵌进任意 React 宿主的组件
 packages/mcp/     @lyflow/mcp：给 Agent 用的 MCP 服务（stdio），消费同一份 HTTP 契约 + 本地 CLI
 app/      Tauri 壳：入口、文件对话框、窗口标题、验收窗口桥

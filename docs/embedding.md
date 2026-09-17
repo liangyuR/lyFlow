@@ -1,4 +1,7 @@
-# 把 LyFlow 嵌进自己的 C++ 进程
+# 把 LyFlow 嵌进自己的进程
+
+**Rust 宿主看文末的 [Rust 客户端](#rust-客户端)**，同一套 ABI、同一份安装布局，
+只是换成一个 crate。以下是 C++ 宿主。
 
 宿主只 include 一个头：`lyflow/client.hpp`。它是 header-only 的，
 只依赖同目录的 `lyflow/c_api.h`，不 include 任何 core 内部头，也不链接任何库 ——
@@ -207,3 +210,31 @@ core 的 DLL 里所有路径都按 UTF-8 处理。宿主 **exe** 要内嵌
 `activeCodePage=UTF-8` 的 manifest（仓库里那份是 `core/lyflow-utf8.manifest`），
 否则 PCL 的窄字符串文件 IO 会把 UTF-8 路径按本地代码页解释，
 表现是「文件存在但报不存在」。DLL 上贴这个 manifest 无效。
+
+## Rust 客户端
+
+Rust 宿主用 crate `lyflow-client`（`crates/lyflow-client`），它是 `client.hpp` 的对应物：
+**没有 build.rs**（不构建 core，也就不要求宿主装 CMake / Ninja / vcpkg），只依赖
+`libloading`，core 同样是运行时按给定路径加载的 DLL。
+
+```toml
+[dependencies]
+lyflow-client = { path = "…/LyFlow/crates/lyflow-client" }
+```
+
+```rust
+use lyflow_client::{Core, RunSpec};
+
+// 路径由宿主给 —— 安装布局里的 bin/，或自己构建的产物
+let core = Core::load_from(Path::new("D:/lyflow-runtime/bin/lyflow_core.dll"))?;
+core.self_check().map_err(|e| /* 算子描述不干净，拒绝启动 */ e)?;
+
+assert_eq!(lyflow_client::ABI_VERSION, 9); // 与 core 的 LYFLOW_ABI_VERSION 对齐
+```
+
+`ABI_VERSION` 与 C++ 侧的 `lyflow::kClientAbiVersion` 是同一个数。轮廓 / 点云的运行时注入、
+不阻塞的 `RunHandle`、三种 View 的取数，与上面 C++ 各节一一对应。
+
+**进程级单例、DLL 路径解析与热重载不在这个 crate 里** —— 那三样是宿主自己的策略。
+桥接层的那一份在 [`bridge/src/core_ffi.rs`](../bridge/src/core_ffi.rs)，它就是
+`pub use lyflow_client::*` 再加上这三样，可以照抄。

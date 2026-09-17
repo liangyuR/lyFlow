@@ -1,0 +1,21 @@
+[package]
+name = "lyflow-client"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+description = "LyFlow C ABI 的 Rust 客户端：加载 core DLL、跑图、取结果。`lyflow/client.hpp` 的对应物"
+publish = false
+
+[lib]
+name = "lyflow_client"
+
+# 没有 build.rs：这个 crate 不构建 core，只在运行时按给定路径加载它。
+# 宿主自己决定 DLL 从哪来（install-lyflow.ps1 产出的 bin/，或自己的构建产物）。
+[features]
+# 测试用的借用构造器（`TensorView::borrowed`）。宿主在 dev-dependencies 里打开它。
+test-util = []
+
+[dependencies]
+libloading = "0.8.9"
+thiserror = "2"
+serde_json = { version = "1", features = ["preserve_order"] }
