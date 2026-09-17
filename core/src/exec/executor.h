@@ -96,6 +96,13 @@ bool prepareGraph(const std::string& graphJson, RawGraph& out, Diagnostics& diag
 std::string planGraphJson(const std::string& graphJson, const std::filesystem::path& baseDir,
                           const std::vector<std::string>& targets);
 
+/// 每节点每参数的生效值与来源（m6-plan §2）。返回
+/// `{ nodes: [ { node, op, params: [ { param, value, source, label?, unit?, min?, max? } ] } ] }`；
+/// 校验有错时返回诊断数组（以 '[' 开头），与 planGraphJson 同一套区分办法。
+/// source 三种：`default`（图里没写）/ `explicit`（图里写了）/ `bound`（子图提升参数灌进来的）。
+std::string effectiveParamsJson(const std::string& graphJson,
+                                const std::filesystem::path& baseDir);
+
 /// 某次运行的图级命名输出（ADR-0017）。返回
 /// `{ name: { node, port, type, elementCount, byteSize, value? } }`。
 std::string runOutputsJson(const std::string& runId);

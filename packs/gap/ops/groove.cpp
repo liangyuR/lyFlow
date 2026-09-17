@@ -474,12 +474,15 @@ void registerGrooveJoint(Registry& r) {
       Port{"gapSegment", "Line2D", "Gap Segment", "两个槽边点之间的那一段。", true},
       Port{"flushSegment", "Line2D", "Flush Segment", "槽心处基准面到参考面的那一段。", true},
       Port{"groove", "Point2D", "Groove", "槽心：x 取中位数，y 取最深点。", true},
-      Port{"quality", "Record", "Quality", "GapGrooveQuality：槽心、深度、两侧边、逐相机拟合。",
-           true},
-      Port{"qualityBase", "Record", "Quality Base", "GapFitQuality：基准面窗口对平均线的残差。",
-           true},
-      Port{"qualityRef", "Record", "Quality Ref", "GapFitQuality：参考面窗口对平均线的残差。",
-           true},
+      withExample(Port{"quality", "Record", "Quality",
+                       "GapGrooveQuality：槽心、深度、两侧边、逐相机拟合。", true},
+                  examples::grooveQuality()),
+      withExample(Port{"qualityBase", "Record", "Quality Base",
+                       "GapFitQuality：基准面窗口对平均线的残差。", true},
+                  examples::fitQuality()),
+      withExample(Port{"qualityRef", "Record", "Quality Ref",
+                       "GapFitQuality：参考面窗口对平均线的残差。", true},
+                  examples::fitQuality()),
   };
 
   Param baseSide;

@@ -134,6 +134,23 @@ char* lyflow_plan(const char* graph_json, const char* base_dir, const char* cons
   }
 }
 
+char* lyflow_effective_params(const char* graph_json, const char* base_dir) {
+  try {
+    registry();
+    const std::string base = fromC(base_dir);
+    return dup(lyflow::exec::effectiveParamsJson(
+        fromC(graph_json),
+        base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base)));
+  } catch (const std::exception& e) {
+    lyflow::Diagnostics d;
+    d.error("", lyflow::Phase::Compile, "internal",
+            std::string("求生效参数时内部异常: ") + e.what());
+    return dup(d.toJson());
+  } catch (...) {
+    return dup(std::string("[]"));
+  }
+}
+
 void lyflow_cache_clear(void) {
   try {
     lyflow::exec::ResultStore::instance().clear();

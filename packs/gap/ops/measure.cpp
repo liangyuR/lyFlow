@@ -405,8 +405,10 @@ void registerCornerVertex(Registry& r) {
       Port{"lineLeft", "Line2D", "Left Flank", "基准件翼面拟合出的直线。", true},
       Port{"lineRight", "Line2D", "Right Flank", "另一件翼面拟合出的直线。", true},
       Port{"baseLine", "Line2D", "Base Line", "基准面直线，只取方向定 u。缺省用左翼面。", false},
-      Port{"alignment", "Record", "Alignment",
-           "GapAlignment：把模板坐标系里的金件顶点搬到当前样本上。不接就当单位变换。", false},
+      withContract(
+          Port{"alignment", "Record", "Alignment",
+               "GapAlignment：把模板坐标系里的金件顶点搬到当前样本上。不接就当单位变换。", false},
+          {{"recordType", "GapAlignment"}}),
   };
   op.outputs = {
       Port{"vertex", "Point2D", "Vertex", "两条翼面线的交点。", true},
@@ -414,7 +416,9 @@ void registerCornerVertex(Registry& r) {
       Port{"flush", "Measurement", "Flush", "段差，毫米。近 90° 夹角下不可观测。", true},
       Port{"angle", "Measurement", "Angle", "两条翼面的夹角，度。", true},
       Port{"segment", "Line2D", "Segment", "金件顶点到当前顶点的位移段。", true},
-      Port{"quality", "Record", "Quality", "GapCornerQuality：顶点、位移分量、夹角。", true},
+      withExample(
+          Port{"quality", "Record", "Quality", "GapCornerQuality：顶点、位移分量、夹角。", true},
+          examples::cornerQuality()),
   };
 
   Param scale;

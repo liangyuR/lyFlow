@@ -53,6 +53,14 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
   lyflow import   <file> --kind <kind> [-o <out.lyflow.json>] [--base-dir <dir>]
   lyflow validate <graph> [--base-dir <dir>] [--set ...]
   lyflow plan     <graph> [--to <nodeId>]... [--base-dir <dir>] [--set ...]
+        每个节点一行：cacheKey、cached、level、upstreamMissing、bypass，
+        外加 lazy（只被惰性端口依赖，主路径成功时不跑）与 demandedBy（谁的哪个惰性端口管着它）。
+  lyflow params   <graph> [--node <id>]... [--only explicit|default|bound]
+                          [--set <nodeId>.<param>=<json>]... [--base-dir <dir>] [--json]
+        每节点每参数一行 { node, op, param, value, source, unit?, min?, max? }。
+        source 三种：default（图里没写）/ explicit（图里写了）/ bound（子图提升参数灌进来的）。
+        --set 先应用再解析，所以「这组 --set 之后生效值是什么」一条命令。
+        未知节点 / 未知参数按 unknown_node / unknown_param 报，退出码 4。
   lyflow migrate  <graph> [--write]
   lyflow manifest [--check]
   lyflow dump     <graph> <nodeId>:<port> <out.pcd> [--format <binary|ascii|binary_compressed>]
@@ -64,8 +72,10 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                           --metric <path> [--metric <path>]...
                           [--holdout <tag>=<value>] [--group-by <tag>]
                           [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--no-cache]
-                          [--set <nodeId>.<param>=<json>]... [--no-summary]
-        每行 eval_row 默认带 summary（ADR-0022）；--no-summary 关掉以省体积。
+                          [--set <nodeId>.<param>=<json>]... [--summary]
+        每行 eval_row **默认不带** summary（ADR-0022）；--summary 打开。
+        一维 bundle 就 6 KB，51 帧 × 8 组参数 2.5 MB，那不该是默认值。
+        （--no-summary 还认，但已经是 no-op。）
         指标路径：outputs.<名字>[.字段...] / nodes.<节点>.<端口>[.字段...]
                   nodes.<节点>.durationMs|elementCount|byteSize / run.durationMs
         样本集三选一：
@@ -514,6 +524,217 @@ fn cmd_plan(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     }
     let recompute = items.iter().filter(|n| n["cached"] != true).count();
     line(err, &format!("{} 个节点，其中 {recompute} 个要重算", items.len()));
+    EXIT_OK
+}
+
+// --------------------------------------------------------------------- params
+
+const PARAM_SOURCES: &[&str] = &["explicit", "default", "bound"];
+
+/// 一行的宽度按**字符数**算。中文在等宽终端里占两格，但按字符数对齐已经够看，
+/// 而按显示宽度对齐要背一张 East Asian Width 表 —— 那不是这个命令该扛的复杂度。
+fn pad(s: &str, width: usize) -> String {
+    let n = s.chars().count();
+    if n >= width {
+        return s.to_string();
+    }
+    format!("{s}{}", " ".repeat(width - n))
+}
+
+/// `lyflow params <graph>` —— 每节点每参数的生效值与来源（m6-plan §2 / H6）。
+///
+/// 稀疏存储是对的（GraphDoc 只存改过的键），但「这组 `--set` 之后到底跑的是什么值」
+/// 要有一条命令能问，否则每次都得拿 manifest 的默认值去和图 join 一遍。
+/// **生效值一律由 core 给**（`lyflow_effective_params`）：在这里重算一遍默认值合并、
+/// 类型规整与参数迁移，迟早会与执行器真正用的那份漂开，而漂开的表现是
+/// 「参数明明改了，结果没变」—— 最难查的一类。
+fn cmd_params(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
+    let Some(path) = parsed.positional.first().cloned() else {
+        line(
+            err,
+            "用法：lyflow params <graph> [--node <id>]... [--only explicit|default|bound] \
+             [--set <节点>.<参数>=<json>]... [--base-dir <dir>] [--json]",
+        );
+        return EXIT_USAGE;
+    };
+    let only = parsed.one("only").map(str::to_string);
+    if let Some(o) = &only {
+        if !PARAM_SOURCES.contains(&o.as_str()) {
+            return fail(
+                err,
+                &format!("--only 只认 {}，收到 {o}", PARAM_SOURCES.join(" / ")),
+                EXIT_USAGE,
+            );
+        }
+    }
+    let core = match core() {
+        Ok(c) => c,
+        Err(e) => return fail(err, &e, EXIT_FAILED),
+    };
+
+    // 先不带 --set 读一遍：`--set` 指到不存在的节点上时要报 `unknown_node` + 退出码 4，
+    // 而 load_graph 那条路会把它算成校验失败（退出码 1）。两者不是一回事。
+    let mut bare = Parsed {
+        positional: Vec::new(),
+        values: BTreeMap::new(),
+        flags: HashSet::new(),
+    };
+    if let Some(dir) = parsed.one("base-dir") {
+        bare.values.insert("base-dir".to_string(), vec![dir.to_string()]);
+    }
+    let probe = match load_graph(&bare, &path) {
+        Ok(l) => l,
+        Err(e) => return fail(err, &e, EXIT_INVALID),
+    };
+    for spec in parsed.many("set") {
+        let Some(node_id) = spec.split_once('=').and_then(|(l, _)| l.rsplit_once('.')).map(|(n, _)| n)
+        else {
+            return fail(
+                err,
+                &format!("--set 的写法是 <节点>.<参数>=<json>，收到 {spec}"),
+                EXIT_USAGE,
+            );
+        };
+        if !probe.doc.nodes.iter().any(|n| n.id == node_id) {
+            return fail(
+                err,
+                &format!("unknown_node: --set {spec} 指向图里没有的节点 {node_id}"),
+                EXIT_USAGE,
+            );
+        }
+    }
+
+    let loaded = match load_graph(parsed, &path) {
+        Ok(l) => l,
+        Err(e) => return fail(err, &e, EXIT_INVALID),
+    };
+    let raw = match core.effective_params(&loaded.json, &loaded.base_dir) {
+        Ok(r) => r,
+        Err(e) => return fail(err, &e.to_string(), EXIT_FAILED),
+    };
+    // 校验没过时 core 返回的是诊断**数组**，与 plan 同一套区分办法（'[' vs '{'）。
+    if raw.trim_start().starts_with('[') {
+        let diags: Vec<Value> = serde_json::from_str(&raw).unwrap_or_default();
+        json_line(out, &Value::Array(diags.clone()));
+        let usage = diags
+            .iter()
+            .any(|d| d["code"] == "unknown_node" || d["code"] == "unknown_param");
+        for d in &diags {
+            if d["severity"] != "error" {
+                continue;
+            }
+            line(
+                err,
+                &format!(
+                    "{}: {} {}",
+                    d["code"].as_str().unwrap_or("error"),
+                    d["nodeId"].as_str().unwrap_or(""),
+                    d["message"].as_str().unwrap_or("")
+                ),
+            );
+        }
+        return if usage { EXIT_USAGE } else { EXIT_INVALID };
+    }
+    let view: Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => return fail(err, &format!("core 返回的参数视图不是合法 JSON: {e}"), EXIT_FAILED),
+    };
+
+    let wanted: Vec<String> = parsed.many("node").to_vec();
+    let mut hit: HashSet<String> = HashSet::new();
+    let mut rows: Vec<Value> = Vec::new();
+    for node in view["nodes"].as_array().cloned().unwrap_or_default() {
+        let node_id = node["node"].as_str().unwrap_or_default().to_string();
+        // --node 精确匹配；子图展开后的内部节点也认「父/子」的整段前缀（与 --to 一致）。
+        if !wanted.is_empty() {
+            let Some(matched) = wanted
+                .iter()
+                .find(|t| node_id == **t || node_id.starts_with(&format!("{t}/")))
+            else {
+                continue;
+            };
+            hit.insert(matched.clone());
+        }
+        let op = node["op"].as_str().unwrap_or_default().to_string();
+        for p in node["params"].as_array().cloned().unwrap_or_default() {
+            let source = p["source"].as_str().unwrap_or_default();
+            if let Some(o) = &only {
+                if source != o {
+                    continue;
+                }
+            }
+            let mut row = serde_json::Map::new();
+            row.insert("node".into(), json!(node_id));
+            row.insert("op".into(), json!(op));
+            row.insert("param".into(), p["param"].clone());
+            row.insert("value".into(), p["value"].clone());
+            row.insert("source".into(), json!(source));
+            for key in ["unit", "min", "max"] {
+                if !p[key].is_null() {
+                    row.insert(key.into(), p[key].clone());
+                }
+            }
+            rows.push(Value::Object(row));
+        }
+    }
+    let missing: Vec<&String> = wanted.iter().filter(|t| !hit.contains(*t)).collect();
+    if !missing.is_empty() {
+        for t in &missing {
+            line(err, &format!("unknown_node: 图里没有节点 {t}"));
+        }
+        return EXIT_USAGE;
+    }
+
+    if parsed.has("json") {
+        for row in &rows {
+            json_line(out, row);
+        }
+    } else {
+        let width = |key: &str, head: &str| {
+            rows.iter()
+                .map(|r| r[key].as_str().unwrap_or_default().chars().count())
+                .chain(std::iter::once(head.chars().count()))
+                .max()
+                .unwrap_or(0)
+        };
+        let (wn, wo, wp) = (width("node", "节点"), width("op", "算子"), width("param", "参数"));
+        line(
+            out,
+            &format!(
+                "{}  {}  {}  {}  {}",
+                pad("节点", wn),
+                pad("算子", wo),
+                pad("参数", wp),
+                pad("来源", 8),
+                "值"
+            ),
+        );
+        for r in &rows {
+            let unit = r["unit"].as_str().unwrap_or_default();
+            line(
+                out,
+                &format!(
+                    "{}  {}  {}  {}  {}{}",
+                    pad(r["node"].as_str().unwrap_or_default(), wn),
+                    pad(r["op"].as_str().unwrap_or_default(), wo),
+                    pad(r["param"].as_str().unwrap_or_default(), wp),
+                    pad(r["source"].as_str().unwrap_or_default(), 8),
+                    r["value"],
+                    if unit.is_empty() { String::new() } else { format!(" {unit}") },
+                ),
+            );
+        }
+    }
+    let explicit = rows.iter().filter(|r| r["source"] == "explicit").count();
+    let bound = rows.iter().filter(|r| r["source"] == "bound").count();
+    line(
+        err,
+        &format!(
+            "{} 个参数：{explicit} 个显式、{bound} 个来自子图提升、{} 个默认值",
+            rows.len(),
+            rows.len() - explicit - bound
+        ),
+    );
     EXIT_OK
 }
 
@@ -1244,7 +1465,7 @@ const VALUE_OPTS: &[&str] = &[
     "kind", "output", "samples", "samples-glob", "bind", "params", "holdout", "group-by",
     "after", "region", "axis", "expect", "tolerance", "samples-dir", "bind-pair", "pattern",
     "sample-subdir", "sort-by", "split-half", "samples-jsonl-out",
-    "remove-node", "add-node", "rewire",
+    "remove-node", "add-node", "rewire", "node", "only",
 ];
 const BOOL_OPTS: &[&str] = &[
     "no-cache", "preview", "write", "check", "json", "help", "outputs", "dry-run",
@@ -1276,6 +1497,7 @@ pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
         "run" => cmd_run(&parsed, out, err),
         "validate" => cmd_validate(&parsed, out, err),
         "plan" => cmd_plan(&parsed, out, err),
+        "params" => cmd_params(&parsed, out, err),
         "migrate" => cmd_migrate(&parsed, out, err),
         "manifest" => cmd_manifest(&parsed, out, err),
         "import" => cmd_import(&parsed, out, err),
@@ -1468,6 +1690,115 @@ mod tests {
         assert_eq!(nodes[0]["nodeId"], "g");
         assert_eq!(nodes[0]["cacheKey"].as_str().unwrap().len(), 32);
         assert_eq!(nodes[1]["level"], 1);
+    }
+
+    /// `plan` 的惰性标记（m6-plan §5 / H9）。这张链上一个惰性端口都没有，
+    /// 所以 lazy 全是 false、demandedBy 全空 —— 「默认什么都不标」是它该有的样子。
+    #[test]
+    fn plan_marks_lazy_nodes_and_who_demands_them() {
+        let dir = workspace("plan-lazy");
+        let graph = chain(&dir, 312);
+        let r = cli(&["plan", &graph]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        for n in r.first().as_array().unwrap() {
+            assert_eq!(n["lazy"], false, "{n}");
+            assert_eq!(n["demandedBy"], json!([]), "{n}");
+        }
+    }
+
+    /// `lyflow params`（m6-plan §2 / H6）：生效值来自 core，来源分得开
+    /// 「图里写了」与「合进来的默认值」。
+    #[test]
+    fn params_joins_defaults_and_marks_the_source() {
+        let dir = workspace("params");
+        let graph = chain(&dir, 313);
+        let r = cli(&["params", &graph, "--json"]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        let rows = r.lines();
+        assert!(!rows.is_empty(), "{}", r.out);
+
+        let find = |node: &str, param: &str| {
+            rows.iter()
+                .find(|x| x["node"] == node && x["param"] == param)
+                .unwrap_or_else(|| panic!("没有 {node}.{param}：{}", r.out))
+                .clone()
+        };
+        // 图里写了的那三个
+        let seed = find("g", "seed");
+        assert_eq!(seed["source"], "explicit");
+        assert_eq!(seed["value"], json!(313));
+        assert_eq!(find("v", "leafSize")["source"], "explicit");
+        assert_eq!(find("v", "leafSize")["value"], json!([0.02, 0.02, 0.02]));
+        // 图里没写的：值必须与 manifest 的默认值逐字相同
+        let defaults = defaults_by_op(&core().unwrap()).unwrap();
+        for (node, op) in [("g", "gen.synthetic"), ("v", "filter.voxel_grid")] {
+            for (name, def) in &defaults[op] {
+                let row = find(node, name);
+                if row["source"] == "default" {
+                    assert_eq!(&row["value"], def, "{node}.{name} 的默认值对不上");
+                }
+            }
+        }
+        assert!(rows.iter().any(|x| x["source"] == "default"), "{}", r.out);
+        assert!(rows.iter().all(|x| x["source"] != "bound"), "这张图没有子图");
+
+        // --set 先应用再解析：问的是「这组 --set 之后生效值是什么」
+        let after = cli(&["params", &graph, "--json", "--set", "g.seed=999"]);
+        assert_eq!(after.code, EXIT_OK, "{}", after.err);
+        let seed = after
+            .lines()
+            .into_iter()
+            .find(|x| x["node"] == "g" && x["param"] == "seed")
+            .unwrap();
+        assert_eq!(seed["value"], json!(999));
+        assert_eq!(seed["source"], "explicit");
+    }
+
+    #[test]
+    fn params_filters_by_node_and_by_source() {
+        let dir = workspace("params-filter");
+        let graph = chain(&dir, 314);
+        let one = cli(&["params", &graph, "--json", "--node", "v"]);
+        assert_eq!(one.code, EXIT_OK, "{}", one.err);
+        assert!(one.lines().iter().all(|x| x["node"] == "v"), "{}", one.out);
+
+        let explicit = cli(&["params", &graph, "--json", "--only", "explicit"]);
+        assert_eq!(explicit.code, EXIT_OK, "{}", explicit.err);
+        let names: Vec<String> = explicit
+            .lines()
+            .iter()
+            .map(|x| format!("{}.{}", x["node"].as_str().unwrap(), x["param"].as_str().unwrap()))
+            .collect();
+        assert_eq!(names, vec!["g.pointCount", "g.seed", "v.leafSize"]);
+
+        // 人读的那一份：表头 + 每个参数一行
+        let human = cli(&["params", &graph, "--node", "v", "--only", "explicit"]);
+        assert_eq!(human.code, EXIT_OK, "{}", human.err);
+        assert!(human.out.contains("leafSize"), "{}", human.out);
+        assert!(human.out.contains("explicit"), "{}", human.out);
+    }
+
+    /// 未知节点 / 未知参数按 unknown_node / unknown_param 报，退出码 4（用法错），
+    /// 而不是与「图本身不合法」混成同一个 1。
+    #[test]
+    fn params_rejects_unknown_nodes_and_params_with_the_usage_code() {
+        let dir = workspace("params-unknown");
+        let graph = chain(&dir, 315);
+
+        let node = cli(&["params", &graph, "--node", "nope"]);
+        assert_eq!(node.code, EXIT_USAGE, "{}", node.err);
+        assert!(node.err.contains("unknown_node"), "{}", node.err);
+
+        let set_node = cli(&["params", &graph, "--set", "nope.seed=1"]);
+        assert_eq!(set_node.code, EXIT_USAGE, "{}", set_node.err);
+        assert!(set_node.err.contains("unknown_node"), "{}", set_node.err);
+
+        let param = cli(&["params", &graph, "--set", "g.nope=1"]);
+        assert_eq!(param.code, EXIT_USAGE, "{}", param.err);
+        assert_eq!(param.first()[0]["code"], "unknown_param");
+
+        assert_eq!(cli(&["params", &graph, "--only", "nope"]).code, EXIT_USAGE);
+        assert_eq!(cli(&["params"]).code, EXIT_USAGE);
     }
 
     #[test]
@@ -2001,9 +2332,10 @@ mod tests {
         assert_eq!(text.lines().count(), 4);
     }
 
-    /// ADR-0022：每个 eval_row 自带这一次运行的结论，`--no-summary` 关掉以省体积。
+    /// ADR-0022：`--summary` 时每个 eval_row 带这一次运行的结论。
+    /// **默认关**（m6-plan §10 第 5 条）：体积是逐行的，一维 bundle 就 6 KB。
     #[test]
-    fn eval_rows_carry_the_run_summary_unless_told_otherwise() {
+    fn eval_rows_carry_the_run_summary_only_when_asked() {
         let dir = workspace("eval-summary");
         let graph = chain(&dir, 3410);
         let samples = samples_file(
@@ -2027,7 +2359,7 @@ mod tests {
             v
         };
 
-        let r = cli_owned(&args(&[]));
+        let r = cli_owned(&args(&["--summary"]));
         assert_eq!(r.code, EXIT_OK, "{}", r.err);
         let rows: Vec<Value> = r
             .lines()
@@ -2041,10 +2373,18 @@ mod tests {
             assert!(row["summary"]["contractViolations"].is_array());
         }
 
-        let off = cli_owned(&args(&["--no-summary"]));
-        assert_eq!(off.code, EXIT_OK, "{}", off.err);
-        for row in off.lines().iter().filter(|l| l["kind"] == "eval_row") {
-            assert!(row["summary"].is_null(), "--no-summary 应当把它去掉: {row}");
+        for extra in [&[][..], &["--no-summary"][..]] {
+            let off = cli_owned(&args(extra));
+            assert_eq!(off.code, EXIT_OK, "{}", off.err);
+            let rows: Vec<Value> = off
+                .lines()
+                .into_iter()
+                .filter(|l| l["kind"] == "eval_row")
+                .collect();
+            assert_eq!(rows.len(), 2);
+            for row in &rows {
+                assert!(row["summary"].is_null(), "默认不该带 summary（{extra:?}）: {row}");
+            }
         }
     }
 

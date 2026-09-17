@@ -280,6 +280,8 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
   struct Prepared {
     const OperatorDesc* op = nullptr;
     ParamMap params;
+    /// 图里显式写了的键，**迁移之后**的那一份（`lyflow params` 的 source 用它）。
+    std::set<std::string> explicitParams;
     bool valid = true;
     std::vector<Diagnostic> errors;
   };
@@ -366,7 +368,9 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     for (auto it = params.begin(); it != params.end(); ++it) {
       if (!findParam(*op, it.key())) {
         fail(i, "unknown_param", "算子没有参数 '" + it.key() + "'", it.key());
+        continue;
       }
+      prepared[i].explicitParams.insert(it.key());
     }
     for (const Param& p : op->params) {
       Value v = p.def;
@@ -603,6 +607,12 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     pn.provided = options.providedDigest.count(pn.id) != 0;
     pn.errors = prepared[id].errors;
     pn.params = std::move(prepared[id].params);
+    pn.explicitParams = std::move(prepared[id].explicitParams);
+    // 子图提升参数灌进来的那些。只留下确实还在的键 —— 迁移改过名的那一个，
+    // 「它是不是外参绑的」已经没有可靠答案，宁可报 explicit 也不要报错的 bound。
+    for (const std::string& b : graph.nodes[id].boundParams) {
+      if (pn.explicitParams.count(b)) pn.boundParams.insert(b);
+    }
     if (pn.op) {
       for (const Port& p : pn.op->inputs) {
         const std::string& t = concreteType(id, &p);

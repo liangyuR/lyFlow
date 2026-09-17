@@ -212,6 +212,8 @@ class Expander {
         auto n = byId.find(bind.first);
         if (n == byId.end()) continue;
         nodes[n->second].params[bind.second] = value;
+        // 记一笔「这个值是外层表单灌进来的」，`lyflow params` 的 source=bound 靠它。
+        nodes[n->second].boundParams.insert(bind.second);
       }
     }
     for (auto it = host.params.begin(); it != host.params.end(); ++it) {

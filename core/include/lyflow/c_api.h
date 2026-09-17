@@ -195,6 +195,14 @@ LYFLOW_API char* lyflow_run_outputs(const char* run_id);
 // 所以调用方应当先 lyflow_run_join。lyflow_run_free 之后同样返回 NULL。
 LYFLOW_API char* lyflow_run_summary(const char* run_id);
 
+// v9（本轮加在 v9 里，ABI 号不变）：每节点每参数的生效值与来源（m6-plan §2）。返回
+// { nodes: [ { node, op, params: [ { param, value, source, label?, unit?, min?, max? } ] } ] }，
+// source 是 "default" | "explicit" | "bound"（子图提升参数灌进来的，ADR-0010）。
+// 稀疏存储是对的，但「现在到底跑的是什么值」必须由合并默认值、跑完迁移的那一层说，
+// 在桥接层重算一遍迟早与执行器漂开。
+// 校验有错时返回**诊断数组**（'[' 开头），与 lyflow_plan 同一套区分办法。base_dir 可为 NULL。
+LYFLOW_API char* lyflow_effective_params(const char* graph_json, const char* base_dir);
+
 // v7：走注册好的导入器把一段文本变成图（比如 gap 包的 "StandardGap.yml"）。
 // 成功返回 GraphDoc 对象（'{' 开头），失败返回诊断数组（'[' 开头），
 // 与 lyflow_plan 的两种返回值同一套区分办法（ADR-0007）。

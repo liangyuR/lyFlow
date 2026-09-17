@@ -154,7 +154,34 @@ V1 的规则刻意简单：
 - `lazy`：这个端口的上游闭包不进初始计划，算子返回 `Status::Demand` 时才被调度。
 
 两条都只对 `inputs` 有意义；写在 `outputs` 上会被 `Registry::validate()` 拦下。
-前端只需把它们画成角标，语义全在 C++ 侧。
+前端只需把它们画成角标（`lazy` 的边画成虚线），语义全在 C++ 侧。
+
+## 端口契约与端口样例（M6）
+
+端口还可以多带两项，两者是两件不同的事：
+
+```jsonc
+"inputs": [
+  { "name": "primary", "type": "PointCloud",
+    "contract": { "elementCount": { "eq": 1280 } } },
+  { "name": "logits", "type": "Tensor", "contract": { "shape": [2, -1, 1280] } }
+],
+"outputs": [
+  { "name": "quality", "type": "Record",
+    "example": { "kind": "Record", "type": "GapFitQuality",
+                 "data": { "inlierCount": 113, "rmsResidualMm": 0.0257 } } }
+]
+```
+
+- **`contract`**（[ADR-0024](adr/0024-port-contracts-four-kinds.md)）**只有四种键**：
+  `elementCount: { eq | min | max }`、`finite: true`、`shape: [..]`（-1 = 任意）、
+  `recordType: "<type>"`。执行器在**输入绑定时**检查，违反报 `contract_violation`
+  并进 run summary 的 `contractViolations`。四种之外的键让 `lyflow manifest --check` 失败。
+  刻意不做表达式：与参数的 `visibleWhen` 同一条原则 —— 需要更复杂判断的时候，
+  通常说明这个算子该拆了。
+- **`example`** 是一份样例值（任意 JSON），**不参与任何校验**。Record 端口只有一个
+  `type` 字串的话，「`data.inlierCount` 到底存不存在」得翻算子实现才知道。
+  前端在端口详情里把它做成可展开的一块。
 
 ## 导入器（阶段 A）
 

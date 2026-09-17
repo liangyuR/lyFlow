@@ -74,6 +74,44 @@
         "lazy": {
           "type": "boolean", "default": false,
           "description": "仅对 inputs 有意义（ADR-0016）。这个端口的上游闭包不进初始计划，算子 compute 返回 Demand 时才被调度。"
+        },
+        "contract": { "$ref": "#/$defs/portContract" },
+        "example": {
+          "description": "一份样例值（m6-plan H8），任意 JSON。Record 端口尤其需要：只有 type 字串的话，「data.inlierCount 到底存不存在」得翻算子实现才知道。不是 JSON Schema，也不参与任何校验 —— 它只回答「这里长什么样」。"
+        }
+      }
+    },
+    "portContract": {
+      "type": "object",
+      "description": "端口契约（ADR-0024）。**只有四种键**，刻意不做表达式语言 —— 与 condition 同一条原则：需要更复杂的判断通常说明这个算子该拆了。执行器在**输入绑定时**检查（bypass 透传与 Error 值不检查），违反报 contract_violation 并进 run summary 的 contractViolations。没声明契约的端口一行检查都不跑。",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "elementCount": {
+          "type": "object",
+          "description": "元素数：点云 = 点数，Indices = 下标个数，Tensor = 元素总数，其余 = 1。eq 与 min/max 只能选一种写法。",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "eq": { "type": "integer", "minimum": 0 },
+            "min": { "type": "integer", "minimum": 0 },
+            "max": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "finite": {
+          "const": true,
+          "description": "PointCloud 的坐标 / Tensor 的元素 / Measurement 的值必须全是有限的。只能写 true —— `false` 读起来像「这里允许 NaN」，而那是**没有契约**。O(n) 一遍，只在声明了它的端口上跑。"
+        },
+        "shape": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": -1 },
+          "description": "张量形状，-1 表示这一维随便。只对 Tensor 端口有意义。"
+        },
+        "recordType": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Record 的 type 字串。只对 Record 端口有意义。"
         }
       }
     },

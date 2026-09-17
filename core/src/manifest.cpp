@@ -61,4 +61,14 @@ bool parseParamType(const std::string& name, ParamType& out) {
   return false;
 }
 
+Port withContract(Port p, nlohmann::json contract) {
+  p.contract = std::move(contract);
+  return p;
+}
+
+Port withExample(Port p, nlohmann::json example) {
+  p.example = std::move(example);
+  return p;
+}
+
 }  // namespace lyflow

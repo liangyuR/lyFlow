@@ -15,6 +15,7 @@
 #include "exec/plan.h"
 #include "exec/result_store.h"
 #include "exec/subgraph.h"
+#include "lyflow/contract.h"
 #include "lyflow/json_writer.h"
 #include "lyflow/operator.h"
 #include "lyflow/registry.h"
@@ -43,6 +44,22 @@ std::string isoNow() {
   char frac[8];
   std::snprintf(frac, sizeof(frac), ".%03dZ", static_cast<int>(ms.count()));
   return std::string(buf) + frac;
+}
+
+/// 参数的生效值。与 canonicalParamsJson 同一套形态，只是这里带缩进控制权在外面。
+void writeParamValue(JsonWriter& w, const Value& v) {
+  switch (v.kind()) {
+    case Value::Kind::Null:   w.valueNull(); break;
+    case Value::Kind::Bool:   w.value(v.boolValue()); break;
+    case Value::Kind::Int:    w.value(v.intValue()); break;
+    case Value::Kind::Float:  w.value(v.floatValue()); break;
+    case Value::Kind::String: w.value(v.stringValue()); break;
+    case Value::Kind::FloatVec:
+      w.beginArray();
+      for (double d : v.vecValue()) w.value(d);
+      w.endArray();
+      break;
+  }
 }
 
 void writeError(JsonWriter& w, const Status& s) {
@@ -283,6 +300,17 @@ class EventSink {
   /// 全部节点的收尾状态。scheduler.run() 返回之后（worker 都 join 了）才可以读。
   const std::map<std::string, NodeOutcome>& outcomes() const { return outcomes_; }
 
+  /// 一条端口契约违反（ADR-0024）。与 outcomes_ 同一个锁 —— 多个 worker 可能同时撞上。
+  void contractViolation(std::string node, std::string port, nlohmann::json expected,
+                         nlohmann::json actual) {
+    std::lock_guard<std::mutex> lock(mu_);
+    violations_.push_back(
+        ContractViolation{std::move(node), std::move(port), std::move(expected), std::move(actual)});
+  }
+
+  /// 本轮全部契约违反。顺序是撞上的先后，进 summary 之前会按拓扑序重排。
+  const std::vector<ContractViolation>& contractViolations() const { return violations_; }
+
  private:
   static void writePlanNode(JsonWriter& w, const PlanNode& n) {
     w.beginObject();
@@ -317,6 +345,9 @@ class EventSink {
   /// 节点 id -> 收尾状态（ADR-0022）。map 而不是 unordered_map：summary 里
   /// 计划外的节点按 id 排序输出，两次跑同一张图的 JSON 才逐字节一样。
   std::map<std::string, NodeOutcome> outcomes_;
+  /// 端口契约违反（ADR-0024）。节点会因此 error，但 summary 要的是「期望 vs 实际」
+  /// 这一对，而 Status 只留得下一句话。
+  std::vector<ContractViolation> violations_;
 };
 
 /// 算子看到的 ExecContext。每个节点一份，所以本身不用加锁。
@@ -839,6 +870,19 @@ class Scheduler {
                                    "，实际收到 " + d.typeName(),
                                {}, b.port);
         }
+        // 端口契约（ADR-0024）：值刚到端口上就查，第一帧就报，不等算子自己发现。
+        // 静音节点的透传不查（它只是搬运，不声称自己算得对），Error 值也不查
+        // （那条端口上流的是失败本身）。没声明契约的端口一行都不跑。
+        if (!node.bypass && !d.isError()) {
+          nlohmann::json contractWant;
+          nlohmann::json contractGot;
+          std::string message;
+          if (!checkPortContract(declared->contract, d, contractWant, contractGot, message)) {
+            sink_.contractViolation(node.id, b.port, std::move(contractWant),
+                                    std::move(contractGot));
+            return Status::Error(Phase::Execute, "contract_violation", message, {}, b.port);
+          }
+        }
       }
       values[b.port] = std::move(d);
     }
@@ -975,6 +1019,56 @@ std::string traceBackToError(const Plan& plan, std::size_t start,
   return {};
 }
 
+/// `failed` 输出的 `root`：从 `from` 继续沿**失败链**往上游走，取拓扑序最早的 error
+/// 节点（m6-plan §10 第 4 条）。`from` 是最近的那一个，实测里它常常就是 fallback 自己，
+/// 而真正要看的根因在两跳外；两个都给，消费者按需取。
+///
+/// 只穿过 error / cancelled 的节点：一个跑成功了的上游不可能是这条失败链的一环，
+/// 从它继续往上会追到另一处无关的失败上去。
+std::string traceRootError(const Plan& plan, const std::string& fromId,
+                           const std::map<std::string, NodeOutcome>& outcomes,
+                           std::string& codeOut) {
+  std::unordered_map<std::string, std::size_t> indexOf;
+  for (std::size_t i = 0; i < plan.nodes.size(); ++i) indexOf[plan.nodes[i].id] = i;
+  auto at = indexOf.find(fromId);
+  if (at == indexOf.end()) return {};
+
+  auto stateOf = [&](std::size_t i) -> const std::string* {
+    auto it = outcomes.find(plan.nodes[i].id);
+    return it == outcomes.end() ? nullptr : &it->second.state;
+  };
+
+  const auto n = plan.nodes.size();
+  std::vector<char> seen(n, 0);
+  std::vector<std::size_t> stack{at->second};
+  seen[at->second] = 1;
+  std::size_t bestError = n;
+  std::size_t bestCancelled = n;
+  while (!stack.empty()) {
+    const std::size_t i = stack.back();
+    stack.pop_back();
+    const std::string* state = stateOf(i);
+    if (state == nullptr) continue;
+    if (*state == "error") {
+      if (i < bestError) bestError = i;
+    } else if (*state == "cancelled") {
+      if (i < bestCancelled) bestCancelled = i;
+    } else {
+      continue;  // 跑成功的节点不是这条失败链的一环
+    }
+    for (int u : plan.nodes[i].upstream) {
+      const auto ui = static_cast<std::size_t>(u);
+      if (seen[ui]) continue;
+      seen[ui] = 1;
+      stack.push_back(ui);
+    }
+  }
+  const std::size_t best = bestError < n ? bestError : bestCancelled;
+  if (best >= n) return {};
+  codeOut = outcomes.at(plan.nodes[best].id).code;
+  return plan.nodes[best].id;
+}
+
 /// 类型为 FallbackChoice 的 Record 输出全收上来（H4）。按 Record 的 `type` 判断，
 /// 不按算子 id —— 任何包的决策算子照这个类型声明就自动进 summary。
 nlohmann::json collectDecisions(const Plan& plan,
@@ -1005,7 +1099,8 @@ nlohmann::json collectDecisions(const Plan& plan,
 /// 声明输出与结果仓，所以只能在这一层拼 —— 消费者从事件流重建必错。
 std::string buildSummaryJson(const std::string& runId, const Plan& plan,
                              const std::map<std::string, NodeOutcome>& outcomes,
-                             double durationMs, bool forceFailed, ResultStore* store) {
+                             double durationMs, bool forceFailed, ResultStore* store,
+                             const std::vector<ContractViolation>& violations) {
   std::unordered_map<std::string, std::size_t> indexOf;
   for (std::size_t i = 0; i < plan.nodes.size(); ++i) indexOf[plan.nodes[i].id] = i;
 
@@ -1021,8 +1116,10 @@ std::string buildSummaryJson(const std::string& runId, const Plan& plan,
     const PlanOutput* decl = nullptr;
     std::string state;   ///< value / inactive / failed
     std::string reason;  ///< inactive 的原因
-    std::string from;    ///< failed 时回溯到的出错节点
-    std::string code;
+    std::string from;    ///< failed 时回溯到的**最近**出错节点
+    std::string code;    ///< from 的错误码
+    std::string root;    ///< 沿失败链继续追到的、拓扑序最早的出错节点
+    std::string rootCode;
     bool hasInfo = false;
     OutputInfo info;
   };
@@ -1056,6 +1153,13 @@ std::string buildSummaryJson(const std::string& runId, const Plan& plan,
       if (s.from.empty()) {
         s.from = o.nodeId;
         s.code = oc->second.code.empty() ? std::string("no_result") : oc->second.code;
+      }
+      // 根因（m6-plan §10 第 4 条）。from 常常是 fallback 自己，而这一维之所以没有
+      // 是因为两跳外那个 fit 崩了 —— 两个都给，消费者按需取。
+      s.root = traceRootError(plan, s.from, outcomes, s.rootCode);
+      if (s.root.empty()) {
+        s.root = s.from;
+        s.rootCode = s.code;
       }
     }
     outputs.push_back(std::move(s));
@@ -1131,6 +1235,8 @@ std::string buildSummaryJson(const std::string& runId, const Plan& plan,
     w.fieldIfSet("reason", s.reason);
     w.fieldIfSet("from", s.from);
     w.fieldIfSet("code", s.code);
+    w.fieldIfSet("root", s.root);
+    w.fieldIfSet("rootCode", s.rootCode);
     w.endObject();
   }
   w.endObject();
@@ -1143,10 +1249,37 @@ std::string buildSummaryJson(const std::string& runId, const Plan& plan,
     w.endObject();
   }
 
-  // 契约检查是 m6-plan §3 的活。字段现在就留着，消费者不必分「老 core 没有」
-  // 和「这一轮没有违反」。
+  // 端口契约违反（ADR-0024）。按拓扑序（再按端口名）排，同一张图同一份数据两次运行
+  // 必须给出逐字节一样的 JSON。没有违反时是空数组，而不是这一项不出现。
   w.key("contractViolations");
   w.beginArray();
+  {
+    std::vector<const ContractViolation*> sorted;
+    sorted.reserve(violations.size());
+    for (const auto& v : violations) sorted.push_back(&v);
+    const std::size_t end = plan.nodes.size();
+    auto rank = [&](const ContractViolation* v) {
+      auto it = indexOf.find(v->node);
+      return it == indexOf.end() ? end : it->second;
+    };
+    std::sort(sorted.begin(), sorted.end(),
+              [&](const ContractViolation* a, const ContractViolation* b) {
+                const auto ra = rank(a), rb = rank(b);
+                if (ra != rb) return ra < rb;
+                if (a->node != b->node) return a->node < b->node;
+                return a->port < b->port;
+              });
+    for (const ContractViolation* v : sorted) {
+      w.beginObject();
+      w.field("node", v->node);
+      w.field("port", v->port);
+      w.key("expected");
+      w.raw(v->expected.dump());
+      w.key("actual");
+      w.raw(v->actual.dump());
+      w.endObject();
+    }
+  }
   w.endArray();
 
   w.endObject();
@@ -1279,7 +1412,8 @@ void Run::workImpl() {
     // 编译就没过也给一份 summary：宿主的「这次到底成没成」只读这一个对象（H1）。
     const double failedAt = msSince(t0);
     const std::string summary = buildSummaryJson(options_.runId, plan, sink.outcomes(), failedAt,
-                                                 /*forceFailed=*/true, /*store=*/nullptr);
+                                                 /*forceFailed=*/true, /*store=*/nullptr,
+                                                 sink.contractViolations());
     ResultStore::instance().setSummary(options_.runId, summary);
     sink.runFinished("error", failedAt, &first, summary);
     return;
@@ -1321,8 +1455,8 @@ void Run::workImpl() {
   const bool cancelled = scheduler.sawCancel() || cancelled_.load(std::memory_order_relaxed);
   // summary 在发 run_finished 之前登记：宿主 join 返回时 lyflow_run_summary
   // 一定拿得到，事件里那份与它是同一个对象（H1）。
-  const std::string summary =
-      buildSummaryJson(options_.runId, plan, sink.outcomes(), total, cancelled, &store);
+  const std::string summary = buildSummaryJson(options_.runId, plan, sink.outcomes(), total,
+                                               cancelled, &store, sink.contractViolations());
   store.setSummary(options_.runId, summary);
 
   if (cancelled) {
@@ -1384,6 +1518,34 @@ std::string planGraphJson(const std::string& graphJson, const std::filesystem::p
     cached[i] = store.peek(n.cacheKey, outputPortNames(*n.op)) ? 1 : 0;
   }
 
+  // 惰性标记（m6-plan §5 / H9）。manifest 早就有端口的 `lazy`，缺的只是「这张图上
+  // 到底哪些节点因此不跑」—— 真实任务里有人翻了源码才发现整条 b 分支是惰性的。
+  // `demandedBy` 给的是「谁的哪个惰性端口在管着它」：直接的写那一条，闭包深处的
+  // 沿着惰性节点往下继承，所以一条链上的每个节点都指得回那个真正的闸门。
+  const std::size_t nodeCount = plan.nodes.size();
+  struct Consumer {
+    std::size_t node;
+    std::string port;
+    bool lazy;
+  };
+  std::vector<std::vector<Consumer>> consumersOf(nodeCount);
+  for (std::size_t i = 0; i < nodeCount; ++i) {
+    for (const InputBinding& b : plan.nodes[i].inputs) {
+      if (b.fromNode < 0) continue;
+      consumersOf[static_cast<std::size_t>(b.fromNode)].push_back(Consumer{i, b.port, b.lazy});
+    }
+  }
+  std::vector<std::set<std::string>> gates(nodeCount);
+  for (std::size_t k = nodeCount; k-- > 0;) {
+    for (const Consumer& c : consumersOf[k]) {
+      if (c.lazy) {
+        gates[k].insert(plan.nodes[c.node].id + ":" + c.port);
+      } else if (plan.nodes[c.node].deferred) {
+        gates[k].insert(gates[c.node].begin(), gates[c.node].end());
+      }
+    }
+  }
+
   JsonWriter w;
   w.setIndent(0);
   w.beginArray();
@@ -1400,9 +1562,72 @@ std::string planGraphJson(const std::string& graphJson, const std::filesystem::p
     w.field("level", static_cast<std::int64_t>(n.level));
     w.field("upstreamMissing", upstreamMissing);
     w.field("bypass", n.bypass);
+    // 只被惰性端口依赖：主路径成功时它一次都不跑（ADR-0016）。
+    w.field("lazy", n.deferred);
+    w.key("demandedBy");
+    w.beginArray();
+    for (const std::string& g : gates[i]) w.value(g);
+    w.endArray();
     w.endObject();
   }
   w.endArray();
+  return w.str();
+}
+
+// --------------------------------------------------------------- 生效参数视图
+
+std::string effectiveParamsJson(const std::string& graphJson,
+                                const std::filesystem::path& baseDir) {
+  Diagnostics diags;
+  RawGraph raw;
+  Plan plan;
+  if (!prepareGraph(graphJson, raw, diags)) return diags.toJson();
+
+  BuildOptions build;
+  build.runId = "params";
+  build.baseDir = baseDir;
+  buildPlan(ensureRegistry(), raw, build, plan, diags);
+  if (diags.hasErrors() || !plan.ok) return diags.toJson();
+
+  JsonWriter w;
+  w.setIndent(0);
+  w.beginObject();
+  w.key("nodes");
+  w.beginArray();
+  for (const PlanNode& n : plan.nodes) {
+    if (!n.op) continue;
+    w.beginObject();
+    w.field("node", n.id);
+    w.field("op", n.op->id);
+    w.key("params");
+    w.beginArray();
+    for (const Param& p : n.op->params) {
+      // 生效值来自 Plan：合并默认值、规整类型、跑完迁移之后的那一份。
+      // 在 Rust 里重算一遍必然与执行器漂开，那正是 `params` 要消掉的问题。
+      auto it = n.params.find(p.name);
+      if (it == n.params.end()) continue;
+      const char* source = "default";
+      if (n.boundParams.count(p.name)) {
+        source = "bound";
+      } else if (n.explicitParams.count(p.name)) {
+        source = "explicit";
+      }
+      w.beginObject();
+      w.field("param", p.name);
+      w.key("value");
+      writeParamValue(w, it->second);
+      w.field("source", std::string(source));
+      w.fieldIfSet("label", p.label);
+      w.fieldIfSet("unit", p.unit);
+      if (p.min) w.field("min", *p.min);
+      if (p.max) w.field("max", *p.max);
+      w.endObject();
+    }
+    w.endArray();
+    w.endObject();
+  }
+  w.endArray();
+  w.endObject();
   return w.str();
 }
 

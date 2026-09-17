@@ -649,12 +649,15 @@ void registerNotchWidth(Registry& r) {
       Port{"flushSegment", "Line2D", "Flush Segment", "缝心处基准线到对面线的那一段。面差无效时不输出。",
            false},
       Port{"anchor", "Point2D", "Anchor", "锚点：最深的那几个点里靠中间的一个。", true},
-      Port{"quality", "Record", "Quality", "GapNotchQuality：逐相机的锚点、基准线、穿出点与宽度。",
-           true},
-      Port{"qualityBase", "Record", "Quality Base", "GapFitQuality：基准翼面窗口的拟合残差。",
-           true},
-      Port{"qualityRef", "Record", "Quality Ref", "GapFitQuality：对面翼面窗口的拟合残差。面差无效时不输出。",
-           false},
+      withExample(Port{"quality", "Record", "Quality",
+                       "GapNotchQuality：逐相机的锚点、基准线、穿出点与宽度。", true},
+                  examples::notchQuality()),
+      withExample(Port{"qualityBase", "Record", "Quality Base",
+                       "GapFitQuality：基准翼面窗口的拟合残差。", true},
+                  examples::fitQuality()),
+      withExample(Port{"qualityRef", "Record", "Quality Ref",
+                       "GapFitQuality：对面翼面窗口的拟合残差。面差无效时不输出。", false},
+                  examples::fitQuality()),
   };
 
   Param flushBase;

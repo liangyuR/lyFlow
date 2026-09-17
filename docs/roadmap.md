@@ -285,6 +285,49 @@ gap 领域包从 `xyz-gap-inspector/lyflow/` 搬进本仓库的 `packs/gap/`，�
 - `list_metrics(graphPath)`
 - `outputsAvailable` 的业务侧 harvest 与 `devbridge.ts` 快照透出（留给阶段 B）
 
+## M6 — 能被读懂（进行中）
+
+计划见 [m6-plan.md](m6-plan.md)，决定见 [ADR-0022](adr/0022-run-summary-as-core-output.md)
+（run summary）、[ADR-0023](adr/0023-patch-as-idempotent-structural-edit.md)（`lyflow patch`）、
+[ADR-0024](adr/0024-port-contracts-four-kinds.md)（端口契约）。目标：**靠读 JSON 干活的人和
+Agent，不用自己重建「这次 run 到底发生了什么」，也不用手改 JSON 做结构实验。** 范围来自第二次
+真实任务的复盘（xyz-gap-inspector 上一段带 11 个 fallback 的多点位调参）。
+
+- [x] **run summary 是 core 产出的一个对象**（ADR-0022，C ABI v9）：`lyflow_run_summary(runId)`、
+      `run_finished.summary`、`lyflow run --summary`、`lyflow eval --summary`（默认关，
+      `--summary` 打开）、MCP `run_graph` 以它为主体返回；`status` 三态、输出三态、
+      `decisions`（全部 `FallbackChoice` Record）、`failed` 输出的 `from` 与 `root` 双回溯
+- [x] **`lyflow patch`**（ADR-0023）：`--remove-node` / `--add-node` / `--rewire` / `--set`
+      四个动作，顺序定死；幂等、`--dry-run` 输出与 `lyflow diff` 同格式；节点 id 通配大小写
+      敏感（文件名那份保持不敏感）；MCP `patch_graph`（`dryRun` 默认 true）
+- [x] **`lyflow params`**：GraphDoc 稀疏存储与 manifest 默认值的 join，由 core 做
+      （`lyflow_effective_params`），`source` 标 `default` / `explicit` / `bound`，未知节点
+      / 参数退出码 4
+- [x] **端口契约的机制**（ADR-0024）：manifest 加 `contract`（`elementCount` /`finite` /
+      `shape` / `recordType` 四种键），`Registry::validate()` 拒掉四种之外的键，执行器在输入
+      绑定时检查、违反报 `contract_violation` 并进 `summary.contractViolations`，编辑器
+      Inspector 在端口 doc 旁显示
+- [x] `plan` 的惰性标记：每节点加 `lazy` 与 `demandedBy`
+- [x] 端口 `example` 的机制：manifest 加可选 `example`，`withExample` 辅助函数，编辑器可展开
+- [x] **gap 包用上了这两样**：20 个输入端口声明了契约（`gap.profile_tensor` 的「原始 1280 槽」
+      就是空槽 bug 那条不变量；`gap.result_bundle` 的六个 Record 入口各声明了 `recordType`，
+      那个算子原本是 duck typing 的，接错一份 Record 只会让 bundle 里对应的几格悄悄空着），
+      27 个算子的 16 个 Record 输出端口各带一份 `example`
+- [x] MCP `get_params`（对应 `lyflow params`）与 `eval` 的 `summary?: boolean`（默认 false）
+
+**没做到的：**
+
+- [ ] **`gap.profile_tensor` 只声明了槽数，没有声明 `finite`。** m6-plan §3 原本写的是这两条
+      都要，但源码与 doc 都说它要的恰恰是**保留了 NaN 空槽**的原始剖面（`load` 时把
+      `dropNonFinite` 关掉）—— 声明 `finite: true` 会把它唯一正确的输入判成违反。
+- [ ] **三份端口样例不是从真实 run 裁出来的**（`gap.corner_vertex` / `gap.groove_joint` /
+      `gap.camera_consistency` 的 quality）：手上的验收图里没有这三个算子。它们照着各自
+      `compute` 里写 Record 的那几行逐字段构造，字段名与类型对得上，数值是合理量级而不是实测值。
+- [ ] **盲测未跑。** M5 那一轮「子代理盲测」的做法（只给 MCP 服务、`agent-tuning.md` 与数据路径，
+      在仓库外独立复现任务）这次还没有针对 M6 的新功能重做一遍。
+- [ ] **业务仓库（xyz-gap-inspector）那一侧没有动**（m6-plan §6：`ApplyParameterPatches` 改成
+      硬失败、`LyFlowMeasurer` 改读 summary），按计划是单独一个 PR。
+
 ## M5 之后 — 外延（只列方向，动工前再写计划）
 
 - 第二种数据域 **Image**：`Data::Kind::Image`、2D 视图、OpenCV 算子按 PCL 同样的边界规则接入。

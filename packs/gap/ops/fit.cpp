@@ -515,7 +515,9 @@ void registerFitLine(Registry& r) {
       Port{"line", "Line2D", "Line", "拟合出的直线（带端点）。", true},
       Port{"inliers", "Indices", "Inliers", "内点下标，指向输入点云。", true},
       Port{"innerEnd", "Point2D", "Inner End", "内点里靠缝隙那一端的真实云点。", true},
-      Port{"quality", "Record", "Quality", "GapFitQuality：点数、内点、残差、直线方程。", true},
+      withExample(
+          Port{"quality", "Record", "Quality", "GapFitQuality：点数、内点、残差、直线方程。", true},
+          examples::fitQuality()),
   };
 
   Param side;
@@ -601,7 +603,9 @@ void registerFitGapCircles(Registry& r) {
       Port{"rightCloud", "PointCloud", "Right Cloud", "右圆真正拟合用的那片点。", true},
       Port{"leftInliers", "Indices", "Left Inliers", "左圆内点，指向 leftCloud。", true},
       Port{"rightInliers", "Indices", "Right Inliers", "右圆内点，指向 rightCloud。", true},
-      Port{"quality", "Record", "Quality", "GapFitQualityPair：两侧各一份 GapFitQuality。", true},
+      withExample(Port{"quality", "Record", "Quality",
+                       "GapFitQualityPair：两侧各一份 GapFitQuality。", true},
+                  examples::fitQualityPair()),
   };
 
   Param preferred;

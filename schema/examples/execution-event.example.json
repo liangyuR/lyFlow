@@ -410,7 +410,9 @@
           "node": "n_bundle",
           "port": "bundle",
           "from": "n_model",
-          "code": "insufficient_points"
+          "code": "insufficient_points",
+          "root": "n_tensor",
+          "rootCode": "contract_violation"
         }
       },
       "decisions": {
@@ -421,7 +423,14 @@
           "type": "FallbackChoice"
         }
       },
-      "contractViolations": []
+      "contractViolations": [
+        {
+          "node": "n_tensor",
+          "port": "primary",
+          "expected": { "elementCount": { "eq": 1280 } },
+          "actual": { "elementCount": 1230 }
+        }
+      ]
     }
   }
 ]

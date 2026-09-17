@@ -122,9 +122,10 @@ NodeState: idle → pending → running → (done | error | cancelled | skipped)
 ```jsonc
 { "runId": …, "status": "ok|degraded|failed", "durationMs": …,
   "nodes":   { "<节点>": { "state": …, "code"?, "reason"?, "durationMs"?, "cached"?, "outputsAvailable" } },
-  "outputs": { "<名字>": { "state": "value|inactive|failed", "node", "port", … } },
+  "outputs": { "<名字>": { "state": "value|inactive|failed", "node", "port",
+                           "from"?, "code"?, "root"?, "rootCode"?, … } },
   "decisions": { "<节点>": { "choice": "a|b", "reason", "port", "type": "FallbackChoice" } },
-  "contractViolations": [] }
+  "contractViolations": [ { "node", "port", "expected", "actual" } ] }
 ```
 
 三件事值得单独记住：
@@ -137,9 +138,13 @@ NodeState: idle → pending → running → (done | error | cancelled | skipped)
   业务侧据此误判过。
 - `decisions` 收全图**每一个** `FallbackChoice`，按 Record 的 `type` 收而不是按算子 id。
   十一个 fallback 的图不必再逐个去翻 `gap.result_bundle` 接了哪一个。
+- `failed` 的输出给两个入口：`from` 是最近的出错节点，`root` 是沿失败链继续往上追到的、
+  拓扑序最早的那个。带 fallback 的图里 `from` 常常就是 fallback 自己，根因在两跳外。
+- `contractViolations` 是端口契约（[ADR-0024](adr/0024-port-contracts-four-kinds.md)）的违反，
+  带「期望 vs 实际」这一对 —— 节点的 `Status` 只留得下一句话。
 
 CLI：`lyflow run --summary` 在 JSON Lines 末尾多一行 `{"kind":"run_summary", …}`；
-`lyflow eval` 的每行 `eval_row` 默认带一份（`--no-summary` 关掉）。
+`lyflow eval` 的每行 `eval_row` **默认不带**，`--summary` 打开（体积是逐行的）。
 
 Live preview 是体验的分水岭，但也是最容易做错的一块：需要 C++ 侧支持**可取消**和**降级质量**。
 建议 M2 之后再做，不要在早期把接口锁死成不可取消的同步调用。

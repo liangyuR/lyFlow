@@ -1,6 +1,8 @@
 // A1 的四条新执行语义：Error 作为值、惰性端口、图级命名输出、运行时注入。
 #include <doctest/doctest.h>
 
+#include <algorithm>
+#include <map>
 #include <thread>
 
 #include "exec/executor.h"
@@ -67,6 +69,41 @@ TEST_CASE("主路径成功时备用闭包一次 compute 都不调") {
   for (const auto& id : started["plan"]) planned.push_back(id.get<std::string>());
   CHECK(std::find(planned.begin(), planned.end(), "n_b") == planned.end());
   CHECK(std::find(planned.begin(), planned.end(), "n_a") != planned.end());
+}
+
+TEST_CASE("plan 标出惰性节点与「谁的哪个惰性端口在管着它」") {
+  ensureTestOps();
+  // manifest 早就有端口的 lazy（ADR-0016），缺的是「这张图上到底哪些节点因此不跑」——
+  // 真实任务里有人翻了源码才发现整条备用分支是惰性的（m6-plan §5 / H9）。
+  exec::ResultStore::instance().clear();
+  const Json plan =
+      Json::parse(exec::planGraphJson(fallbackGraph(/*primaryFails=*/false).dump(), {}, {}));
+  REQUIRE(plan.is_array());
+  std::map<std::string, Json> byId;
+  for (const Json& n : plan) byId[n["nodeId"].get<std::string>()] = n;
+  REQUIRE(byId.size() == 4);
+
+  CHECK(byId["n_a"]["lazy"] == false);
+  CHECK(byId["n_a"]["demandedBy"] == Json::array());
+  CHECK(byId["n_fb"]["lazy"] == false);
+
+  // 直接挂在惰性端口上的那个
+  CHECK(byId["n_b2"]["lazy"] == true);
+  CHECK(byId["n_b2"]["demandedBy"] == Json::array({"n_fb:b"}));
+  // 闭包深处的：沿着惰性节点往下继承，指得回那个真正的闸门
+  CHECK(byId["n_b"]["lazy"] == true);
+  CHECK(byId["n_b"]["demandedBy"] == Json::array({"n_fb:b"}));
+
+  // 与执行期对得上：lazy 的那两个正是 not_demanded 的那两个
+  Session s(fallbackGraph(/*primaryFails=*/false));
+  RunLog& log = s.wait();
+  for (const auto& kv : byId) {
+    const bool lazy = kv.second["lazy"].get<bool>();
+    const Json skipped = log.nodeEvent(kv.first, "skipped");
+    const bool notDemanded = skipped.contains("stats") &&
+                             skipped["stats"].value("reason", "") == "not_demanded";
+    CHECK(lazy == notDemanded);
+  }
 }
 
 TEST_CASE("主路径失败时 demand 备用闭包，plan_extended 与 run_started.nodes 同构") {

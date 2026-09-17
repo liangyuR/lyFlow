@@ -95,8 +95,13 @@ v9 加的 `lyflow_run_summary` 见 [ADR-0022](adr/0022-run-summary-as-core-outpu
 
 ```json
 [{ "nodeId": "n1", "cacheKey": "976b7c…", "cached": false,
-   "level": 0, "upstreamMissing": false, "bypass": false }]
+   "level": 0, "upstreamMissing": false, "bypass": false,
+   "lazy": false, "demandedBy": [] }]
 ```
+
+`lazy` 为 true 表示这个节点只被惰性端口依赖（ADR-0016），主路径成功时它一次都不跑；
+`demandedBy` 是管着它的那些惰性端口，写成 `<节点>:<端口>`。闭包深处的节点沿着惰性节点
+往下继承，所以一条链上的每一个都指得回那个真正的闸门。
 
 与 `lyflow_plan` 一样：**校验没过时返回的是诊断数组而不是计划数组**，
 靠有没有 `cacheKey` 区分（ADR-0007）。`HttpTransport` 认出诊断数组时给 UI 返回 `[]`。
@@ -165,10 +170,15 @@ v9 加的 `lyflow_run_summary` 见 [ADR-0022](adr/0022-run-summary-as-core-outpu
                         "type": "Measurement", "elementCount": 1,
                         "value": { "kind": "Measurement", "value": 3.52, "unit": "mm" } },
                "flush": { "state": "inactive", "node": "b_n_flush", "port": "flush",
-                          "reason": "not_demanded" } },
+                          "reason": "not_demanded" },
+               "bundle": { "state": "failed", "node": "n_bundle", "port": "bundle",
+                           "from": "n_fb_line", "code": "insufficient_points",
+                           "root": "n_fit_datum", "rootCode": "insufficient_points" } },
   "decisions": { "n_fb_line": { "choice": "b", "reason": "io: 主路径没有产出",
                                 "port": "choice", "type": "FallbackChoice" } },
-  "contractViolations": [] }
+  "contractViolations": [ { "node": "n_tensor", "port": "primary",
+                            "expected": { "elementCount": { "eq": 1280 } },
+                            "actual": { "elementCount": 1230 } } ] }
 ```
 
 `status` 三态 `ok | degraded | failed`，`outputs` 每一维三态 `value | inactive | failed`。

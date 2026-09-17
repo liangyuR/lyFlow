@@ -438,6 +438,39 @@ body.is-resizing .app__viewer {
   font-size: 12px;
 }
 
+/* Inspector 的端口小节挤在参数表单上方，行距收紧一些（M6 §3）。 */
+.port--compact {
+  padding: 3px 0;
+}
+
+.port__contract {
+  flex-basis: 100%;
+  padding-left: 16px;
+  color: var(--lyflow-accent-dim, var(--lyflow-fg-2));
+  font-size: 11px;
+}
+
+.port__example {
+  flex-basis: 100%;
+  padding-left: 16px;
+}
+
+.port__example summary {
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.port__example pre {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  background: var(--lyflow-bg-0);
+  border: 1px solid var(--lyflow-border);
+  border-radius: var(--lyflow-radius);
+  font-size: 11px;
+  overflow-x: auto;
+}
+
 /* ---------------------------------------------------------------- params */
 
 .param {

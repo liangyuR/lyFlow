@@ -141,6 +141,8 @@ lyflow run      graph.lyflow.json [--to nodeId]... [--set nodeId.param=<json>]..
                                   [--preview] [--preview-points n]
 lyflow validate graph.lyflow.json
 lyflow plan     graph.lyflow.json [--to nodeId]...
+lyflow params   graph.lyflow.json [--node nodeId]... [--only explicit|default|bound]
+                                  [--set nodeId.param=<json>]... [--json]
 lyflow migrate  graph.lyflow.json [--write]
 lyflow manifest [--check]
 lyflow dump     graph.lyflow.json nodeId:port out.pcd [--format binary|ascii|binary_compressed]
@@ -178,6 +180,10 @@ lyflow run demo.lyflow.json | jq -r 'select(.kind=="node_state" and .state=="don
 # 覆盖一个参数再跑（路径与界面里参数右键的「复制路径名」一致）
 lyflow run demo.lyflow.json --set n_voxel.leafSize='[0.02,0.02,0.02]'
 
+# 这张图相对默认值改了哪些参数（GraphDoc 是稀疏存储，join 由 core 做）
+lyflow params demo.lyflow.json --only explicit --json \
+              | jq -r '"\(.node).\(.param)=\(.value)"'
+
 # 扫 5 组 leafSize，源头只加载一次（其余 4 次是 skipped）
 lyflow sweep demo.lyflow.json --param n_voxel.minPointsPerVoxel=1:5:5 \
              --metric n_voxel:cloud.elementCount --csv sweep.csv
@@ -205,8 +211,12 @@ lyflow diff before.lyflow.json after.lyflow.json
 它是那份契约的又一个消费方，不是第四种传输（[ADR-0021](docs/adr/0021-mcp-as-transport-consumer.md)），
 所以同一个二进制既能接仓库里的桩服务器，也能接阶段 B 的业务服务 —— 换后端只改一个环境变量。
 
-11 个工具：`list_operators` / `get_operator` / `list_port_types` / `validate_graph` /
-`plan_graph` / `run_graph` / `get_node_outputs` / `summarize_output` / `eval` / `perturb` / `diff_graphs`。
+13 个工具：`list_operators` / `get_operator` / `list_port_types` / `validate_graph` /
+`plan_graph` / `run_graph` / `get_node_outputs` / `summarize_output` / `eval` / `perturb` /
+`diff_graphs` / `get_params` / `patch_graph`。`run_graph` 现在以 run summary 为主体返回
+（[ADR-0022](docs/adr/0022-run-summary-as-core-output.md)）；`patch_graph` 对应 CLI
+`lyflow patch`，`dryRun` 默认 true（[ADR-0023](docs/adr/0023-patch-as-idempotent-structural-edit.md)）；
+`get_params` 对应 `lyflow params`，回的是每节点每参数的生效值与来源。
 输出一律裁过（Agent 每次调用都在花上下文）：点云只给点数、包围盒、每通道 min/max/mean 与前几个点，
 `eval` 的统计默认压成一行一组（`compact`）、`eval_row` 与 `perturb_sample` 落盘给路径。
 起法、`.mcp.json` 片段与每个工具的返回形状见 [docs/mcp.md](docs/mcp.md)，

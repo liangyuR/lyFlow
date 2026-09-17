@@ -4,7 +4,7 @@ import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { evalArgv, patchArgv, perturbArgv } from "./argv.js";
+import { evalArgv, paramsArgv, patchArgv, perturbArgv } from "./argv.js";
 import { DEFAULT_CLI_TIMEOUT_MS, runCli, stderrTail } from "./cli.js";
 import { decodeCloud, summarizeCloud } from "./cloud.js";
 import type { Config } from "./config.js";
@@ -465,6 +465,13 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         baseDir: z.string().optional(),
         set: z.array(z.string()).optional().describe("<节点>.<参数>=<json>，与 CLI --set 相同"),
         noCache: z.boolean().optional(),
+        summary: z
+          .boolean()
+          .optional()
+          .describe(
+            "默认 false：每行 eval_row 带一份 run summary（ADR-0022）。体积是逐行的，" +
+              "一维 bundle 就 6 KB，51 帧 × 8 组参数 2.5 MB —— 要逐样本的三态判定时才打开",
+          ),
       },
     },
     async (args) => {
@@ -619,6 +626,67 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
   );
 
   server.registerTool(
+    "get_params",
+    {
+      title: "看一张图现在生效的参数",
+      description:
+        "起本地 lyflow params：每节点每参数一行 { node, op, param, value, source, unit?, min?, max? }。" +
+        "GraphDoc 是稀疏存储（只存改过的键），所以「现在跑的到底是什么值」要拿 manifest 的默认值去 join —— " +
+        "这个工具把 join 做好了，而且是 core 做的（合并默认值、类型规整、参数迁移都在那一层）。" +
+        "source 三种：default（图里没写）/ explicit（图里写了）/ bound（子图提升参数灌进来的）。" +
+        "set 先应用再解析，所以「这组 set 之后生效值是什么」一次调用就能问。" +
+        "只想看改过的就用 only:\"explicit\"。",
+      inputSchema: {
+        graphPath: z.string().describe("图文件路径，CLI 直接读它"),
+        node: z
+          .array(z.string())
+          .optional()
+          .describe("只看这些节点；子图展开后的内部节点也认「父/子」的整段前缀"),
+        only: z
+          .enum(["explicit", "default", "bound"])
+          .optional()
+          .describe("只要这一种来源的行"),
+        set: z.array(z.string()).optional().describe("<节点>.<参数>=<json>，与 CLI --set 相同"),
+        baseDir: z.string().optional(),
+      },
+    },
+    async (args) => {
+      if (!config.cli) return bad(CLI_MISSING);
+      const argv = paramsArgv(args);
+      const result = await runCli(config, argv, {
+        timeoutMs: Math.min(DEFAULT_CLI_TIMEOUT_MS, 120000),
+      });
+      // 退出码 4 = 未知节点 / 未知参数（用法错），与「图本身不合法」的 1 分开。
+      if (result.code !== 0) {
+        const diagnostics: unknown[] = [];
+        for (const text of result.skipped) {
+          if (text[0] !== "[") continue;
+          try {
+            const parsed: unknown = JSON.parse(text);
+            if (Array.isArray(parsed)) diagnostics.push(...parsed);
+          } catch {
+            /* 不是 JSON 就当它是给人看的一行 */
+          }
+        }
+        return bad(`lyflow params 退出码 ${result.code}`, {
+          exitCode: result.code,
+          argv,
+          diagnostics,
+          stderr: result.stderr,
+        });
+      }
+      const params = result.lines.map((l) => l.value);
+      return ok({
+        exitCode: result.code,
+        argv,
+        count: params.length,
+        params,
+        stderrTail: stderrTail(result.stderr),
+      });
+    },
+  );
+
+  server.registerTool(
     "patch_graph",
     {
       title: "改图结构",
@@ -691,8 +759,8 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
 }
 
 const CLI_MISSING =
-  "没有配置 LYFLOW_CLI。eval / perturb / diff_graphs / patch_graph 起的是本地 lyflow 可执行文件，" +
-  "把它的路径放进 MCP 服务的环境变量 LYFLOW_CLI 再试。";
+  "没有配置 LYFLOW_CLI。eval / perturb / diff_graphs / patch_graph / get_params 起的是本地 " +
+  "lyflow 可执行文件，把它的路径放进 MCP 服务的环境变量 LYFLOW_CLI 再试。";
 
 function nonCloudSummary(info: OutputInfo): Record<string, unknown> {
   const value = info.value;

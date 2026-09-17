@@ -388,9 +388,29 @@ pub(crate) fn load_samples(path: &str) -> Result<Vec<Sample>, String> {
     parse_samples(&text, path)
 }
 
+/// 文件名通配。**大小写不敏感**：`*Master*.pcd` 要能配上 `..._master_0.pcd`，
+/// 采集端在不同版本里两种写法都出现过，而那不是用户能控制的。
 pub(crate) fn wildcard_match(pattern: &str, name: &str) -> bool {
-    let p: Vec<char> = pattern.chars().flat_map(char::to_lowercase).collect();
-    let n: Vec<char> = name.chars().flat_map(char::to_lowercase).collect();
+    glob_match(pattern, name, /*case_sensitive=*/ false)
+}
+
+/// 节点 id 通配。**大小写敏感**（m6-plan §10 第 6 条）：节点 id 是图里写死的标识符，
+/// `N_FB_*` 与 `n_fb_*` 是两个不同的选择，让它们互相匹配只会让
+/// `--remove-node` 悄悄多删一批。文件名那份刻意保持不敏感，两者分开。
+pub(crate) fn wildcard_match_cs(pattern: &str, name: &str) -> bool {
+    glob_match(pattern, name, /*case_sensitive=*/ true)
+}
+
+fn glob_match(pattern: &str, name: &str, case_sensitive: bool) -> bool {
+    let fold = |s: &str| -> Vec<char> {
+        if case_sensitive {
+            s.chars().collect()
+        } else {
+            s.chars().flat_map(char::to_lowercase).collect()
+        }
+    };
+    let p: Vec<char> = fold(pattern);
+    let n: Vec<char> = fold(name);
     let (mut pi, mut ni) = (0usize, 0usize);
     let (mut star, mut mark) = (usize::MAX, 0usize);
     while ni < n.len() {
@@ -779,7 +799,7 @@ pub(crate) struct Row {
     pub errors: Vec<String>,
     pub duration_ms: f64,
     pub skipped: Vec<String>,
-    /// 这一次运行的 run summary（ADR-0022）。`--no-summary` 或校验就没过时是 None。
+    /// 这一次运行的 run summary（ADR-0022）。没给 `--summary`、或校验就没过时是 None。
     pub summary: Option<Value>,
 }
 
@@ -796,7 +816,8 @@ pub(crate) struct Engine<'a> {
     pub samples: &'a [Sample],
     pub parallel: i32,
     pub no_cache: bool,
-    /// 每行带一份 run summary（ADR-0022）。`--no-summary` 关掉以省体积。
+    /// 每行带一份 run summary（ADR-0022）。**默认关**，`--summary` 打开 ——
+    /// 体积是逐行的，一维 bundle 就 6 KB（m6-plan §10 第 5 条）。
     pub summary: bool,
 }
 
@@ -1204,7 +1225,10 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         samples: &samples,
         parallel,
         no_cache: parsed.has("no-cache"),
-        summary: !parsed.has("no-summary"),
+        // 默认关（m6-plan §10 第 5 条）：gap 图一维 bundle 就 6 KB，51 帧 × 8 组
+        // 参数 2.5 MB —— 一个「每行都带上」的默认值会把 eval 的输出撑成不可读。
+        // `--no-summary` 留着当 no-op：老脚本照样跑得过。
+        summary: parsed.has("summary"),
     };
 
     let mut rows: Vec<Row> = Vec::new();
@@ -1231,7 +1255,7 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
                 "durationMs": row.duration_ms,
             });
             // summary 是这一行的结论（ADR-0022）：status 三态与每个图输出的三态。
-            // 缺席只有两种可能 —— --no-summary，或者根本没跑到执行期。
+            // 默认不带，`--summary` 才有；没跑到执行期时也没有。
             if let (Some(s), Some(obj)) = (row.summary.as_ref(), line_json.as_object_mut()) {
                 obj.insert("summary".to_string(), s.clone());
             }
@@ -1853,6 +1877,20 @@ mod tests {
         assert!(wildcard_match("*master*.pcd", "f1_master_0.pcd"));
         assert!(!wildcard_match("*master*.pcd", "f1_slave_0.pcd"));
         assert!(wildcard_match("a?c", "abc"));
+        // 文件名那份刻意不敏感：采集端写过 Master 也写过 master
+        assert!(wildcard_match("*Master*.pcd", "f1_master_0.pcd"));
+    }
+
+    /// 两份通配是两件事（m6-plan §10 第 6 条）：文件名不敏感、节点 id 敏感。
+    #[test]
+    fn node_id_globs_are_case_sensitive_but_file_globs_are_not() {
+        assert!(wildcard_match_cs("n_fb_*", "n_fb_line"));
+        assert!(!wildcard_match_cs("N_FB_*", "n_fb_line"));
+        assert!(!wildcard_match_cs("n_fb_*", "N_FB_LINE"));
+        assert!(wildcard_match_cs("b_*", "b_alt"));
+        assert!(!wildcard_match_cs("B_*", "b_alt"));
+        // 同一对输入在文件名那份上是匹配的 —— 差别只在这一条规则上
+        assert!(wildcard_match("N_FB_*", "n_fb_line"));
     }
 
     #[test]

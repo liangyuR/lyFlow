@@ -257,7 +257,8 @@ void registerBusinessRois(Registry& r) {
       "只变换对角两个角点、之后仍按轴对齐解释，所以模板转角明显时框会被拉大或缩小 —— "
       "这是原算法行为，不是可以「修正」的。",
   };
-  op.inputs = {Port{"alignment", "Record", "Alignment", "GapAlignment。", true}};
+  op.inputs = {withContract(Port{"alignment", "Record", "Alignment", "GapAlignment。", true},
+                            {{"recordType", "GapAlignment"}})};
   op.outputs = {
       Port{"flushBase", "Box2D", "Flush Base", "段差基准面 ROI。", true},
       Port{"gapLeft", "Box2D", "Gap Left", "间隙左侧 ROI。", true},

@@ -222,8 +222,11 @@ cacheKey 混入 `preview:<maxPoints>`，所以预览与正式的结果互不命�
   跳过它的表现是「跑成功了但文件没写出来」。
 - `bypass` 进 cacheKey：静音改变结果本身，不进键的话取消静音会拿到旧结果。
 
-`lyflow_plan` 把每节点的 `{ cacheKey, cached, level, upstreamMissing, bypass }` 报给前端，
+`lyflow_plan` 把每节点的
+`{ cacheKey, cached, level, upstreamMissing, bypass, lazy, demandedBy }` 报给前端，
 `lyflow_cache_stats` / `lyflow_cache_clear` 给状态栏和菜单用。
+`lazy` / `demandedBy` 是惰性闭包的可见化（m6-plan §5）：manifest 早就有端口的 `lazy`，
+缺的只是「这张图上到底哪些节点因此不跑、被谁管着」。
 预览的那一份用的是另一组键，两边在同一个 LRU 里但永远不会互相命中。
 
 ## 算子改版本

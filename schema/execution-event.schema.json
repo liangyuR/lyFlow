@@ -389,6 +389,14 @@
               "code": {
                 "type": "string",
                 "description": "state=failed 时 from 那个节点的错误码。"
+              },
+              "root": {
+                "type": "string",
+                "description": "根因（m6-plan §10 第 4 条）。从 from 继续沿**失败链**（只穿过 error/cancelled 的节点）往上游走，取拓扑序最早的那个 error 节点。实测里 from 常常是 fallback 自己（1 跳），根因在 2 跳外；两个都给，消费者按需取。整条链只有一个节点时 root == from。"
+              },
+              "rootCode": {
+                "type": "string",
+                "description": "root 那个节点的错误码。"
               }
             }
           }
@@ -414,9 +422,32 @@
         },
         "contractViolations": {
           "type": "array",
-          "description": "端口契约违反（m6-plan §3）。契约还没做，这一版永远是空数组——字段先留着，消费方不必分「老 core 没有」和「这一轮没有违反」。",
+          "description": "端口契约违反（ADR-0024）。执行器在输入绑定时检查 manifest 端口上的 contract，违反时该节点 error、code 是 contract_violation，同时在这里留一条「期望 vs 实际」——Status 只留得下一句话。按拓扑序排，两次运行逐字节一样。没有违反时是空数组，而不是这一项不出现。",
           "items": {
-            "type": "object"
+            "type": "object",
+            "required": [
+              "node",
+              "port",
+              "expected",
+              "actual"
+            ],
+            "properties": {
+              "node": {
+                "type": "string"
+              },
+              "port": {
+                "type": "string",
+                "description": "违反发生在哪个**输入**端口上。同一个 node_state 事件的 error.portName 指向同一个它。"
+              },
+              "expected": {
+                "type": "object",
+                "description": "被违反的那一条契约，原样来自 manifest，例如 {\"elementCount\":{\"eq\":1280}}。"
+              },
+              "actual": {
+                "type": "object",
+                "description": "实际收到的那一面，例如 {\"elementCount\":1230}、{\"shape\":[2,8,640]}、{\"nonFiniteCoords\":12}。"
+              }
+            }
           }
         }
       }

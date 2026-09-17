@@ -2,7 +2,7 @@
 // 它同时证明 manifest 的每个字段都真的走通了三层。
 
 import { usePortColor } from "../store/manifest";
-import type { OperatorDesc, Param, Port } from "../types/manifest";
+import type { OperatorDesc, Param, Port, PortContract } from "../types/manifest";
 
 function formatDefault(value: unknown): string {
   if (value === null || value === undefined) return "—";
@@ -37,12 +37,44 @@ function conditionText(p: Param): string | null {
   return null;
 }
 
-function PortRow({ port, isInput }: { port: Port; isInput: boolean }) {
+/** 元素数一条契约的人话版。eq 与 min/max 互斥，见 schema 里的说明。 */
+function formatElementCount(c: NonNullable<PortContract["elementCount"]>): string | null {
+  if (c.eq !== undefined) return `元素数 = ${c.eq}`;
+  if (c.min !== undefined && c.max !== undefined) return `元素数 ${c.min} … ${c.max}`;
+  if (c.min !== undefined) return `元素数 ≥ ${c.min}`;
+  if (c.max !== undefined) return `元素数 ≤ ${c.max}`;
+  return null;
+}
+
+/** 契约的四种键各翻一句人话，不直接 dump JSON —— 原始 JSON 留在 title 里排查用。 */
+function describeContract(contract: PortContract): string[] {
+  const parts: string[] = [];
+  if (contract.elementCount) {
+    const s = formatElementCount(contract.elementCount);
+    if (s) parts.push(s);
+  }
+  if (contract.finite) parts.push("全部有限");
+  if (contract.shape) parts.push(`形状 [${contract.shape.map((d) => (d === -1 ? "*" : d)).join(", ")}]`);
+  if (contract.recordType) parts.push(`Record 类型 ${contract.recordType}`);
+  return parts;
+}
+
+/** 导出给 Inspector 的节点端口小节复用（M6 §3），不重复实现一份契约/样例渲染。 */
+export function PortRow({
+  port,
+  isInput,
+  compact,
+}: {
+  port: Port;
+  isInput: boolean;
+  compact?: boolean;
+}) {
   const color = usePortColor(port.type);
   const optional = isInput && port.required === false;
+  const contractParts = port.contract ? describeContract(port.contract) : [];
 
   return (
-    <li className="port">
+    <li className={compact ? "port port--compact" : "port"}>
       <span className="port__dot" style={{ background: color }} aria-hidden />
       <span className="port__name">{port.label || port.name}</span>
       <code className="port__type" style={{ color }}>
@@ -50,6 +82,21 @@ function PortRow({ port, isInput }: { port: Port; isInput: boolean }) {
       </code>
       {optional && <span className="port__optional">可选</span>}
       {port.doc && <span className="port__doc">{port.doc}</span>}
+      {contractParts.length > 0 && (
+        <span
+          className="port__contract"
+          data-testid="port-contract"
+          title={JSON.stringify(port.contract)}
+        >
+          {contractParts.join(" · ")}
+        </span>
+      )}
+      {port.example !== undefined && (
+        <details className="port__example" data-testid="port-example">
+          <summary>样例</summary>
+          <pre>{JSON.stringify(port.example, null, 2)}</pre>
+        </details>
+      )}
     </li>
   );
 }

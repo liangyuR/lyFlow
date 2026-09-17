@@ -16,6 +16,20 @@ export interface PortType {
   doc?: string;
 }
 
+/** 端口契约（ADR-0024）。刻意**只有四种键**，不是表达式引擎 —— 与 Condition 同一条
+ *  原则：需要更复杂的判断通常说明这个算子该拆了。执行器在输入绑定时检查，
+ *  违反报 contract_violation，前端这里只负责把它显示出来。 */
+export interface PortContract {
+  /** 元素数：点云 = 点数，Indices = 下标个数，Tensor = 元素总数，其余 = 1。eq 与 min/max 二选一。 */
+  elementCount?: { eq?: number; min?: number; max?: number };
+  /** 只可能是 true —— false 读起来像「允许 NaN」，而那是没有契约。 */
+  finite?: true;
+  /** 张量形状，-1 = 任意。只对 Tensor 端口有意义。 */
+  shape?: number[];
+  /** Record 的 type 字串。只对 Record 端口有意义。 */
+  recordType?: string;
+}
+
 export interface Port {
   name: string;
   type: string;
@@ -27,6 +41,9 @@ export interface Port {
   acceptsError?: boolean;
   /** 仅对 inputs 有意义（ADR-0016）。这条边的上游闭包只有被 demand 时才调度。 */
   lazy?: boolean;
+  contract?: PortContract;
+  /** 一份样例值（m6-plan H8），任意 JSON。不参与任何校验，只回答「这里长什么样」。 */
+  example?: unknown;
 }
 
 /** 一种可导入的外部格式（ADR-0017）。`kind` 是传给 import 的第一个参数。 */

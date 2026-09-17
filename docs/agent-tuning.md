@@ -58,6 +58,12 @@ lyflow run graph.lyflow.json --summary | tail -1
 「模型路径炸了 → 模板路径接住 → 量出来了」是 `run_finished: ok` + `summary: degraded`：
 退出码 0，但确实有东西坏了，值得去看日志。
 
+`nodes` 里某个节点的 `code` 是 `contract_violation` 时，说明它某个输入端口声明了
+`contract`（[ADR-0024](adr/0024-port-contracts-four-kinds.md)），而这一帧的数据违反了
+一条数值不变量（比如「点数应当是 1280，实际是 1230」）—— 第一帧就报，`message` 里带着期望
+与实际，不用等一大批样本都跑完、结果不对了才回头 grep 是谁定的这条规矩。同一条违反也在
+`contractViolations` 里，格式是 `{ node, port, expected, actual }`。
+
 **② `outputs` 的每一维。** 也是三态，`inactive` 与 `failed` 千万别混：
 
 ```jsonc
@@ -84,10 +90,12 @@ for node, d in json.load(sys.stdin)['decisions'].items():
 去 `nodes` 里查它的 `state`。**别再拿某个下游算子的 `roi_source` 之类的字段去猜
 「模板路径用没用过」** —— 那个字段回答的是别的问题，猜错过两次。
 
-批量跑时同一份东西在每行 `eval_row` 里（`--no-summary` 可以关掉以省体积）：
+批量跑时同一份东西可以进每行 `eval_row`，但**默认不带**，要加 `--summary` 才打开
+（`--no-summary` 还认，但已经是 no-op）：一维 bundle 就 6 KB，51 帧 × 8 组参数 2.5 MB
+不该是默认值。
 
 ```bash
-lyflow eval graph.lyflow.json --samples s.jsonl --metric outputs.gap \
+lyflow eval graph.lyflow.json --samples s.jsonl --metric outputs.gap --summary \
   | grep eval_row | python -c "
 import json, sys
 for line in sys.stdin:
@@ -139,6 +147,44 @@ lyflow patch g.short.json --remove-node 'n_fb_*' --remove-node 'b_*'
 
 只做第一步里的 `--remove-node 'b_*'` 会被拦下来：12 个 `flow.fallback` 的 `b` 口是必填输入，
 删掉 b 分支之后它们全悬空，`patch` 报 12 条 `missing_input` 并且一个字节都不写。
+
+## 改参数先问 `lyflow params`：现在生效的值是多少
+
+GraphDoc 是稀疏存储，只存改过的键（`docs/graph-doc.md`）。所以「这张图现在这个参数生效值是
+多少」这个问题，答案不在文件里，要拿 manifest 的默认值去跟图 join 一遍才知道 —— 手动做这件
+事的人通常是打开图文件肉眼找那个键在不在。`lyflow params` 把这个 join 做好了：
+
+```bash
+lyflow params g.lyflow.json [--node <id>]... [--only explicit|default|bound] \
+              [--set <节点>.<参数>=<json>]... [--base-dir <dir>] [--json]
+```
+
+每行 `{ node, op, param, value, source, unit?, min?, max? }`；不带 `--json` 是对齐过的表格，
+带 `--json` 是一行一个对象。`source` 三种：
+
+- `default`：图里没写这个键，值来自 manifest 的默认值。
+- `explicit`：图里写了。
+- `bound`：子图提升参数灌进来的（ADR-0010）。
+
+**这个 join 由 core 做**（`lyflow_effective_params`），不是 CLI 自己重算一遍默认值合并、类型
+规整、参数迁移 —— 桥接层若自己重算，迟早会和执行器真正用的那份漂开，漂开的表现是「参数明明
+改了，结果没变」，比「join 错了直接报错」难查得多。
+
+`--set` 先应用再解析，所以「这组 `--set` 之后生效值是什么」一条命令就能问完，不用先写文件
+再跑第二条命令去读：
+
+```bash
+lyflow params g.lyflow.json --set n_notch.lineDistThresh=0.3 --only explicit --json
+```
+
+未知节点 / 未知参数按 `unknown_node` / `unknown_param` 报，**退出码 4**（用法错），与
+「图本身不合法」（退出码 1）分开 —— 拼错节点 id 不该混进 `validate` 那条错误路径。
+
+一条真实用法：「这张图相对默认值改了哪些参数」：
+
+```bash
+lyflow params g.lyflow.json --only explicit --json | jq -r '"\(.node).\(.param)=\(.value)"'
+```
 
 ## 3. `eval`：一组样本 × 一组参数 → 一个标量 → 一组统计
 
@@ -374,6 +420,7 @@ lyflow eval g.lyflow.json \
 | `lyflow perturb …` | `perturb` | 只回 `perturb_summary` 与不通过的样本；**全部** `perturb_sample` 落盘给 `samplesPath` |
 | `lyflow diff a b --json` | `diff_graphs` | 原样 |
 | `lyflow patch <g> --remove-node … --rewire … --dry-run` | `patch_graph` | 四个动作是四个数组（`removeNode` / `addNode` / `rewire` / `set`）；**`dryRun` 默认 true**，要真写得显式给 `dryRun: false`，`out` 必须配着它给 |
+| `lyflow params <g> --only … --set …` | `get_params` | 字段同名（`node` / `only` / `set` / `baseDir`），`--json` 由工具自己加；回 `{ count, params: [...] }`，一行一个参数。未知节点 / 未知参数在 CLI 那边是退出码 4，工具据此报错并把诊断带回来 |
 
 ### `eval` / `perturb` 的选项逐条对照
 

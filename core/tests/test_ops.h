@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <thread>
 
@@ -185,12 +186,72 @@ inline Status failCompute(const Inputs&, const ParamView& params, Outputs&, Exec
   return Status::Error(Phase::Execute, params.text("code"), params.text("message"));
 }
 
+// ---------------------------------------------- 端口契约（ADR-0024）用的几个源
+/// 带一个可选 NaN 的点云。契约的 finite 一条只有它喂得出反例。
+inline Status nanCloudCompute(const Inputs&, const ParamView& params, Outputs& outputs,
+                              ExecContext&) {
+  PointCloud cloud;
+  const auto n = static_cast<std::size_t>(params.integer("pointCount"));
+  const auto badAt = params.integer("badAt");
+  cloud.reserve(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    const auto f = static_cast<float>(i);
+    if (badAt >= 0 && static_cast<std::size_t>(badAt) == i) {
+      cloud.push(std::numeric_limits<float>::quiet_NaN(), f, f);
+    } else {
+      cloud.push(f, f, f);
+    }
+  }
+  outputs.set("cloud", Data::cloud(std::move(cloud)));
+  return Status::Ok();
+}
+
+inline Status makeTensorCompute(const Inputs&, const ParamView& params, Outputs& outputs,
+                                ExecContext&) {
+  Tensor t;
+  for (const char* key : {"dim0", "dim1", "dim2"}) {
+    const auto d = params.integer(key);
+    if (d > 0) t.shape.push_back(d);
+  }
+  t.data.assign(t.elementCount(), 1.0F);
+  if (params.flag("injectNaN") && !t.data.empty()) {
+    t.data.front() = std::numeric_limits<float>::quiet_NaN();
+  }
+  outputs.set("tensor", Data::tensor(std::move(t)));
+  return Status::Ok();
+}
+
+inline Status makeRecordCompute(const Inputs&, const ParamView& params, Outputs& outputs,
+                                ExecContext&) {
+  Record rec;
+  rec.type = params.text("type");
+  rec.data["n"] = 1;
+  outputs.set("rec", Data::record(std::move(rec)));
+  return Status::Ok();
+}
+
+/// 四种契约各一个端口。只有 count 是必填，其余按用例接不接。
+inline Status contractedCompute(const Inputs& inputs, const ParamView&, Outputs& outputs,
+                                ExecContext&) {
+  outputs.set("cloud", inputs.get("count"));
+  return Status::Ok();
+}
+
 inline Param textParam(const char* name, const char* def) {
   Param p;
   p.name = name;
   p.type = ParamType::String;
   p.label = name;
   p.def = Value::text(def);
+  return p;
+}
+
+inline Param boolParam(const char* name, bool def) {
+  Param p;
+  p.name = name;
+  p.type = ParamType::Bool;
+  p.label = name;
+  p.def = Value::boolean(def);
   return p;
 }
 
@@ -381,6 +442,77 @@ inline void ensureTestOps() {
       op.capabilities = {false, false, true};
       op.compute = &ops::countedCompute;
       r.addOperator(std::move(op));
+    }
+    // -------------------------------------------- 端口契约（ADR-0024）
+    {  // 带一个可选 NaN 的源：finite 那一条只有它喂得出反例
+      OperatorDesc op;
+      op.id = "test.nonfinite_cloud";
+      op.version = "1.0.0";
+      op.label = "NaN Cloud";
+      op.category = "Test";
+      op.doc = "只在测试里注册：产一片点云，badAt >= 0 时把那一个点的 x 写成 NaN。";
+      op.outputs = {cloudOut};
+      op.params = {ops::intParam("pointCount", 6, 0.0), ops::intParam("badAt", -1, -1.0)};
+      op.capabilities = {false, false, true};
+      op.compute = &ops::nanCloudCompute;
+      r.addOperator(std::move(op));
+    }
+    {
+      OperatorDesc op;
+      op.id = "test.make_tensor";
+      op.version = "1.0.0";
+      op.label = "Make Tensor";
+      op.category = "Test";
+      op.doc = "只在测试里注册：按 dim0/dim1/dim2 产一个全 1 的张量，dim<=0 的那一维不要。";
+      op.outputs = {Port{"tensor", "Tensor", "Tensor", "", true}};
+      op.params = {ops::intParam("dim0", 2, 0.0), ops::intParam("dim1", 3, 0.0),
+                   // 参数名里不能出现小写的 n-a-n：manifest 序列化用例是子串匹配
+                   // （test_executor.cpp:270）
+                   ops::intParam("dim2", 4, 0.0), ops::boolParam("injectNaN", false)};
+      op.capabilities = {false, false, true};
+      op.compute = &ops::makeTensorCompute;
+      r.addOperator(std::move(op));
+    }
+    {
+      OperatorDesc op;
+      op.id = "test.make_record";
+      op.version = "1.0.0";
+      op.label = "Make Record";
+      op.category = "Test";
+      op.doc = "只在测试里注册：产一个指定 type 的 Record。";
+      op.outputs = {Port{"rec", "Record", "Record", "", true}};
+      op.params = {ops::textParam("type", "Wanted")};
+      op.capabilities = {false, false, true};
+      op.compute = &ops::makeRecordCompute;
+      r.addOperator(std::move(op));
+    }
+    {  // 四种契约各一个端口。uncontracted 是同一组端口去掉 contract 的对照组：
+       // 「没声明就一行检查都不跑」这条只能靠一个对照组钉住。
+      const Port count{"count", "PointCloud", "Count", "", true};
+      const Port finite{"finite", "PointCloud", "Finite", "", false};
+      const Port tensor{"tensor", "Tensor", "Tensor", "", false};
+      const Port rec{"rec", "Record", "Record", "", false};
+      auto make = [&](const char* id, const char* doc, std::vector<Port> inputs) {
+        OperatorDesc op;
+        op.id = id;
+        op.version = "1.0.0";
+        op.label = "Contracted Inputs";
+        op.category = "Test";
+        op.doc = doc;
+        op.inputs = std::move(inputs);
+        op.outputs = {cloudOut};
+        op.capabilities = {false, false, true};
+        op.compute = &ops::contractedCompute;
+        r.addOperator(std::move(op));
+      };
+      make("test.contracted", "只在测试里注册：四种端口契约各一条。",
+           {withContract(count, {{"elementCount", {{"eq", 6}}}}),
+            withContract(finite, {{"finite", true}}),
+            withContract(tensor, {{"shape", {2, -1, 4}}}),
+            withContract(rec, {{"recordType", "Wanted"}})});
+      make("test.uncontracted",
+           "只在测试里注册：与 test.contracted 同一组端口，但一条契约都不声明。",
+           {count, finite, tensor, rec});
     }
     {  // 一定失败：acceptsError 与 upstream_failed 两条路都要它
       OperatorDesc op;

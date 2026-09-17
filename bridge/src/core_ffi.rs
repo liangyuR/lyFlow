@@ -232,6 +232,7 @@ pub struct Core {
     string_free: FnStringFree,
     validate: FnValidate,
     plan: FnPlan,
+    effective_params: FnValidate,
     cache_clear: FnVoid,
     cache_stats: FnJson,
     run_start: FnRunStart,
@@ -298,6 +299,8 @@ impl Core {
             string_free: sym!(lib, "lyflow_string_free", FnStringFree),
             validate: sym!(lib, "lyflow_validate", FnValidate),
             plan: sym!(lib, "lyflow_plan", FnPlan),
+            // 与 validate 同签名（graph_json, base_dir）→ JSON 文本。
+            effective_params: sym!(lib, "lyflow_effective_params", FnValidate),
             cache_clear: sym!(lib, "lyflow_cache_clear", FnVoid),
             cache_stats: sym!(lib, "lyflow_cache_stats", FnJson),
             run_start: sym!(lib, "lyflow_run_start", FnRunStart),
@@ -379,6 +382,14 @@ impl Core {
             ptrs.as_ptr()
         };
         unsafe { self.take_owned((self.plan)(g.as_ptr(), b.as_ptr(), head, ptrs.len())) }
+    }
+
+    /// 每节点每参数的生效值与来源（m6-plan §2）。合并默认值这件事只在 core 做一次 ——
+    /// 在这里重算一遍，迟早与执行器真正用的那份漂开。
+    pub fn effective_params(&self, graph_json: &str, base_dir: &str) -> Result<String, CoreError> {
+        let g = CString::new(graph_json)?;
+        let b = CString::new(base_dir)?;
+        unsafe { self.take_owned((self.effective_params)(g.as_ptr(), b.as_ptr())) }
     }
 
     pub fn cache_clear(&self) {

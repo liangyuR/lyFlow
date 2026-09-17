@@ -65,8 +65,10 @@ M5 之后的第二次真实任务（xyz-gap-inspector 上一段带 11 个 fallba
 }
 ```
 
-`contractViolations` 这一版永远是空数组（端口契约是 m6-plan §3 的活）。
-字段先留着，消费方不必分「老 core 没这个字段」与「这一轮没有违反」。
+`contractViolations` 已经会真的填东西（端口契约见 [ADR-0024](0024-port-contracts-four-kinds.md)）：
+执行器在输入绑定时检查 manifest 端口上的 `contract`，违反时该节点 `error`、`code` 是
+`contract_violation`，同时在这里留一条 `{ node, port, expected, actual }`。没有违反时是空数组，
+而不是这一项不出现 —— 消费方不必分「老 core 没这个字段」与「这一轮没有违反」。
 
 ### H2　`status` 三态
 
@@ -125,6 +127,26 @@ M5 之后的第二次真实任务（xyz-gap-inspector 上一段带 11 个 fallba
 **`nodes` 里保留全部 `error`，一个都不丢。** 回溯只是给「这一维为什么没有」一个入口，
 不是在挑一个「主要错误」；想看全部失败去读 `nodes`。
 
+### `root`：`from` 之外再给一个根因（m6-plan §10 第 4 条）
+
+`failed` 输出**同时**给 `from` 与 `root`：
+
+- `from` 还是上面那条规则算出来的最近出错节点，不变。
+- `root` 从 `from` 继续沿**失败链**往上游走，取拓扑序最早的那个 `error` 节点
+  （`traceRootError`，`core/src/exec/executor.cpp`）。「沿失败链」的意思是只穿过
+  `state` 是 `error` 或 `cancelled` 的节点 —— 一个跑成功了的上游不可能是这条失败链
+  的一环，从它继续往上会追到另一处无关的失败上去，一遇到 `done`/`skipped` 就停止
+  沿那条边继续走。整条链上只有一个节点（`from` 自己）时 `root == from`。
+  整棵上游都没有 `error` 时（比如整轮被取消）按同一套规则退而找 `cancelled`；
+  两者都没有就退回 `from` 自己，`rootCode` 用 `from` 的 `code`。
+- `rootCode` 是 `root` 那个节点的错误码。
+
+**为什么两个都给**：实测里 `from` 常常是 fallback 自己（1 跳）—— 它的 `a` 和 `b` 两路
+都失败了，所以它自己也 `error`；而真正要查的根因在 2 跳外的那个拟合节点上。只给 `from`
+的话消费者每次都要自己再往上翻一遍（等于自己重实现这条回溯规则）；只给 `root` 的话
+「哪个环节把这一维掐断的、离这个输出最近的那一层是谁」又丢了。两个都给，消费者按需取，
+`nodes` 里仍然是全部 `error` 一个不丢。
+
 ### H4　`decisions` 按 Record 的类型收，不按算子 id
 
 凡是某个节点的某个输出端口产出了一个 `Record` 且 `record.type == "FallbackChoice"`，
@@ -145,8 +167,10 @@ M5 之后的第二次真实任务（xyz-gap-inspector 上一段带 11 个 fallba
   这是设计：宿主必须知道自己在跟哪一版说话。
 - **schema**：`execution-event.schema.json` 加 `$defs.summary` 并挂到 `run_finished`。
 - **CLI**：`lyflow run --summary` 在 JSON Lines 末尾多一行 `{"kind":"run_summary", …}`；
-  `lyflow eval` 每行 `eval_row` 默认带一份，`--no-summary` 关掉以省体积。
-  `sweep` / `perturb` 不带 —— 它们每行只报一个标量，summary 在那里是纯体积。
+  `lyflow eval` 每行 `eval_row` **默认不带**这一份，`--summary` 打开（`--no-summary` 还认，
+  但已经是 no-op）。一维 bundle 就 6 KB，51 帧 × 8 组参数 2.5 MB 不该是默认值
+  （m6-plan §10 第 5 条）。`sweep` / `perturb` 不带 —— 它们每行只报一个标量，summary
+  在那里是纯体积。`run --summary` 不受这条影响，一次 run 只多一行，体积不是问题。
 - **MCP**：`run_graph` 的返回值以 summary 为主体，`status` / `nodes` / `outputs` /
   `decisions` 直接来自它。`nodes` 因此从数组变成 `id → 状态` 的对象（M5 那一版是数组）。
   `runStatus` 保留 `run_finished` 那个三值，两者不互相顶替。

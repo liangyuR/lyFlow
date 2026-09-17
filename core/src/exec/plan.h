@@ -2,6 +2,7 @@
 // 校验 + 编译。D5：一次返回全部诊断，不在第一个错误处早退。
 // 校验错误是节点级的 —— 只有有环或 JSON 读不了才是整图级失败。
 #include <filesystem>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -33,6 +34,13 @@ struct PlanNode {
   bool provided = false;
   std::vector<Diagnostic> errors;     ///< 该节点的全部阻塞性诊断（D5）
   ParamMap params;                    ///< 已合并默认值（迁移之后的）
+  /// 图里**显式写了**的参数键，**跑完迁移之后**的那一份。`lyflow params` 的
+  /// source 靠它分开「用户填的」与「合进来的默认值」。不能回头去看 RawNode：
+  /// 迁移会改名（v1 的 count 在 v2 叫 keepCount），那时两边对不上。
+  std::set<std::string> explicitParams;
+  /// explicitParams 里由子图提升参数灌进来的那些（ADR-0010 F4）。展开之后
+  /// 「用户在这个节点上填的」和「外层子图表单灌进来的」在 params 里长得一模一样。
+  std::set<std::string> boundParams;
   std::vector<InputBinding> inputs;
   /// 输出端口 -> 下游消费者数。
   std::unordered_map<std::string, int> consumers;

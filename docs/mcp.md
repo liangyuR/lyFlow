@@ -6,12 +6,14 @@
 
 一句话：**它是 [HTTP 传输契约](http-transport.md) 的又一个消费方，不是第四种传输。**
 描述、校验、执行这些走 `/lyflow/*`（test-server 或阶段 B 的业务服务都行）；
-`eval` / `perturb` / `diff_graphs` 起本地 `lyflow` 可执行文件（ADR-0020：它们是 CLI 子命令，
-MCP 只是另一张皮）。理由见 [ADR-0021](adr/0021-mcp-as-transport-consumer.md)。
+`eval` / `perturb` / `diff_graphs` / `get_params` / `patch_graph` 起本地 `lyflow` 可执行文件
+（ADR-0020：它们是 CLI 子命令，MCP 只是另一张皮）。
+理由见 [ADR-0021](adr/0021-mcp-as-transport-consumer.md)。
 
 ```
 Agent ── stdio ── @lyflow/mcp ──┬── HTTP + WS ── /lyflow/*（test-server 或业务服务）── core
-                                └── spawn ────── lyflow.exe eval / perturb / diff ── core
+                                └── spawn ────── lyflow.exe eval / perturb / diff /
+                                                            params / patch ───────── core
 ```
 
 ---
@@ -43,7 +45,7 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 |---|---|---|
 | `LYFLOW_HTTP_BASE` | 是 | `/lyflow/*` 的基址，例如 `http://127.0.0.1:8787`。缺了进程直接退出并说明 |
 | `LYFLOW_HTTP_TOKEN` | 否 | 有它就每个请求带 `Authorization: Bearer`，WebSocket 走 `lyflow-token.<token>` 子协议 |
-| `LYFLOW_CLI` | 否 | 本地 `lyflow.exe` 路径。`eval` / `perturb` / `diff_graphs` 用它；缺了这三个工具返回一句说得清的错，其余工具不受影响 |
+| `LYFLOW_CLI` | 否 | 本地 `lyflow.exe` 路径。`eval` / `perturb` / `diff_graphs` / `get_params` / `patch_graph` 用它；缺了这五个工具返回一句说得清的错，其余工具不受影响 |
 | `LYFLOW_PACKS` | 否 | 透传给 CLI 子进程。注意它在当前实现里是**构建期**变量（`scripts/build-core.ps1` 用它选算子包），运行期的 exe 已经带着自己那份算子表 |
 | `LYFLOW_WORK_DIR` | 否 | `eval` / `perturb` 的逐行结果落盘目录，默认 `os.tmpdir()/lyflow-mcp` |
 
@@ -82,13 +84,14 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 | `get_operator` | `id` | 同上 | 全量 `OperatorDesc`，**含 `preconditions`**；找不到时 `{error, nearest:[三个最接近的 id]}` |
 | `list_port_types` | — | 同上 | `{types:[…]}` |
 | `validate_graph` | `graph \| graphPath` `baseDir?` | `POST /lyflow/validate` | `{diagnostics:[…], ok}` |
-| `plan_graph` | 同上 + `targets?` | `POST /lyflow/plan` | `{plan:[{nodeId,cacheKey,cached,level,upstreamMissing,bypass}]}` |
+| `plan_graph` | 同上 + `targets?` | `POST /lyflow/plan` | `{plan:[{nodeId,cacheKey,cached,level,upstreamMissing,bypass,lazy,demandedBy}]}`，`lazy` = 只被惰性端口依赖、主路径成功时不跑 |
 | `run_graph` | 同上 + `targets?` `set?` `mode?` `timeoutMs?` | `POST /lyflow/run` + WS 等该 `runId` 的 `run_finished` | core 的 run summary + `runId` / `runStatus` / `diagnostics`（见下） |
 | `get_node_outputs` | `runId` `nodeId` | `GET /lyflow/runs/:id/nodes/:node/outputs` | `{outputs:[OutputInfo]}` 原样 |
 | `summarize_output` | `runId` `nodeId` `port` `maxPoints?` `head?` | 点云走 `GET …/clouds/:node/:port`，其余用 `OutputInfo.value` | 见下 |
 | `eval` | `graphPath` 样本 参数 `metric[]` … | `LYFLOW_CLI eval …` | 压紧的统计（`compact`，默认开）+ 失败样本清单 + `rowsPath` |
 | `perturb` | `graphPath` `after` `region` `axis` `metric[]` … | `LYFLOW_CLI perturb …` | `perturb_summary` 数组 + 不通过样本 + `samplesPath` + `rowsPath` |
 | `diff_graphs` | `a` `b` | `LYFLOW_CLI diff a b --json` | `{exitCode, diff}` 原样 |
+| `get_params` | `graphPath` `node[]?` `only?` `set[]?` `baseDir?` | `LYFLOW_CLI params … --json` | `{exitCode, argv, count, params:[{node,op,param,value,source,unit?,min?,max?}], stderrTail}` |
 | `patch_graph` | `graphPath` `removeNode[]?` `addNode[]?` `rewire[]?` `set[]?` `dryRun?` `out?` | `LYFLOW_CLI patch … --json` | `patch_result` 摊平：`{exitCode, argv, applied, noops, wrote, diff, stderrTail}` |
 
 ### 图怎么给
@@ -130,7 +133,8 @@ MCP 只在外面套了 `runId` / `runStatus` / `diagnostics`。
              "elementCount":1,"value":{"kind":"Measurement","value":3.52,"ok":true,"unit":"mm"}},
    "flush": {"state":"inactive","node":"b_n_flush","port":"flush","reason":"not_demanded"},
    "bundle":{"state":"failed","node":"n_bundle","port":"bundle",
-             "from":"n_fit_datum","code":"insufficient_points"}},
+             "from":"n_fb_line","code":"insufficient_points",
+             "root":"n_fit_datum","rootCode":"insufficient_points"}},
  "nodes":{"n_fit_datum":{"state":"error","code":"insufficient_points",
                          "durationMs":2.1,"outputsAvailable":false},
           "n_gap":{"state":"done","durationMs":0.46,"cached":true,"outputsAvailable":true}},
@@ -148,8 +152,9 @@ MCP 只在外面套了 `runId` / `runStatus` / `diagnostics`。
   所以两个都留着：带 fallback 的图「主路径炸了、备用接住了」是
   `runStatus: ok` + `status: degraded`。**判成败读 `status`。**
 - **`outputs` 每一维三态**：`value` / `inactive`（这一维本来就没有，`reason` 说明为什么）/
-  `failed`（本该有、崩了，`from` 是沿边回溯到的最近的出错节点）。
-  别把 `inactive` 当失败 —— 它就是「这个点位不量这一维」。
+  `failed`（本该有、崩了，`from` 是沿边回溯到的**最近**的出错节点，`root` 是沿失败链继续
+  往上追到的、拓扑序最早的那个）。带 fallback 的图里 `from` 常常是 fallback 自己，
+  要查的根因看 `root`。别把 `inactive` 当失败 —— 它就是「这个点位不量这一维」。
   `node` / `port` 照旧给着，直接拿去喂 `summarize_output`。
 - **`decisions`** 是全图每一个 `FallbackChoice`，条数等于图里 `flow.fallback` + `flow.select`
   的节点数。按 Record 的类型收，不按算子 id。

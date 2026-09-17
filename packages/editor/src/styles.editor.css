@@ -339,6 +339,32 @@
   font-size: 12px;
 }
 
+/* 节点端口小节（M6 §3）：<details> 本身给了折叠，summary 复用参数分组标题的样式。 */
+.insp__ports summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.insp__ports summary::-webkit-details-marker {
+  display: none;
+}
+
+.insp__ports-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 6px;
+}
+
+.insp__ports-label {
+  margin: 0 0 2px;
+  color: var(--lyflow-fg-2);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .insp--empty,
 .insp--multi,
 .insp--missing {

@@ -164,8 +164,9 @@ void registerCameraConsistency(Registry& r) {
   };
   op.outputs = {
       Port{"box", "Box2D", "Box", "原样透传的 box。", true},
-      Port{"quality", "Record", "Quality",
-           "GapCameraConsistency：中位/最小/最大高度差、采样数、是否超限。", true},
+      withExample(Port{"quality", "Record", "Quality",
+                       "GapCameraConsistency：中位/最小/最大高度差、采样数、是否超限。", true},
+                  examples::cameraConsistency()),
   };
 
   Param mode;

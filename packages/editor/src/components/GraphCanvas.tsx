@@ -4,7 +4,9 @@
 import {
   Background,
   BackgroundVariant,
+  BaseEdge,
   Controls,
+  getBezierPath,
   MiniMap,
   ReactFlow,
   useReactFlow,
@@ -12,6 +14,7 @@ import {
   type Connection,
   type Edge,
   type EdgeChange,
+  type EdgeProps,
   type FinalConnectionState,
   type NodeChange,
   type OnNodeDrag,
@@ -53,6 +56,48 @@ import { OperatorNode } from "./OperatorNode";
 import "@xyflow/react/dist/style.css";
 
 const nodeTypes = { operator: OperatorNode };
+
+/** 惰性边（ADR-0016，M6 §5）：虚线由 mapping.ts 的 style.strokeDasharray 决定，
+ *  这里只补一个原生 tooltip —— React Flow 的默认边不吃 `title`，SVG 里 <title>
+ *  作为 <g> 的子元素时，hover 到可见描边或旁边的透明命中路径（BaseEdge 自带的
+ *  interactionWidth）都能触发，不用另起一层 DOM。 */
+function LazyEdge({
+  sourceX,
+  sourceY,
+  sourcePosition,
+  targetX,
+  targetY,
+  targetPosition,
+  style,
+  markerStart,
+  markerEnd,
+  interactionWidth,
+}: EdgeProps) {
+  const [path] = getBezierPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  });
+  // exactOptionalPropertyTypes 下 BaseEdge 的这几个 prop 不接受显式 undefined，
+  // 只能按「有没有」决定要不要展开这个 key，不能直接传可能是 undefined 的值。
+  return (
+    <g>
+      <title>惰性：主路径成功时不跑</title>
+      <BaseEdge
+        path={path}
+        {...(style !== undefined ? { style } : {})}
+        {...(markerStart !== undefined ? { markerStart } : {})}
+        {...(markerEnd !== undefined ? { markerEnd } : {})}
+        {...(interactionWidth !== undefined ? { interactionWidth } : {})}
+      />
+    </g>
+  );
+}
+
+const edgeTypes = { lazy: LazyEdge };
 
 /** 吸附半径。24 px 是「靠近就吸上」和「误吸到隔壁端口」之间的平衡点（P1 #17）。 */
 const CONNECTION_RADIUS = 24;
@@ -769,6 +814,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeDragStart={onNodeDragStart}

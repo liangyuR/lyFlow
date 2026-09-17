@@ -337,7 +337,8 @@ void registerAlignTemplate(Registry& r) {
       Port{"tplLeft", "PointCloud", "Template Left", "左模板。", true},
       Port{"tplRight", "PointCloud", "Template Right", "右模板。", true},
   };
-  op.outputs = {Port{"alignment", "Record", "Alignment", "GapAlignment。", true}};
+  op.outputs = {withExample(Port{"alignment", "Record", "Alignment", "GapAlignment。", true},
+                            examples::alignment())};
 
   Param templateId;
   templateId.name = "templateId";
@@ -398,13 +399,17 @@ void registerSelectAlignment(Registry& r) {
       "排序键是 min(左,右) 降、mean 降、配置顺序升、id 升；各项全打平时由 templateId 定"
       "胜负，与接在哪个端口无关。",
   };
+  // 四个候选端口都只吃 GapAlignment（compute 里本来就查，写成契约之后第一帧就报，
+  // 而且带得出「实际是什么类型」——Status 的那句话带不出来）。
+  const nlohmann::json isAlignment = {{"recordType", "GapAlignment"}};
   op.inputs = {
-      Port{"a", "Record", "A", "第一个候选。", true},
-      Port{"b", "Record", "B", "第二个候选。", false},
-      Port{"c", "Record", "C", "第三个候选。", false},
-      Port{"d", "Record", "D", "第四个候选。", false},
+      withContract(Port{"a", "Record", "A", "第一个候选。", true}, isAlignment),
+      withContract(Port{"b", "Record", "B", "第二个候选。", false}, isAlignment),
+      withContract(Port{"c", "Record", "C", "第三个候选。", false}, isAlignment),
+      withContract(Port{"d", "Record", "D", "第四个候选。", false}, isAlignment),
   };
-  op.outputs = {Port{"alignment", "Record", "Alignment", "选中的那一份。", true}};
+  op.outputs = {withExample(Port{"alignment", "Record", "Alignment", "选中的那一份。", true},
+                            examples::alignment())};
   op.params = {intParam("minScore", "Min Score", 60, "低于它的候选一律不要。")};
   op.capabilities = {false, true, true};
   op.compute = &selectAlignment;

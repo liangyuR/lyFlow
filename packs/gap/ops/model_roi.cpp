@@ -463,9 +463,17 @@ void registerProfileTensor(Registry& r) {
       "六个通道的口径与训练侧 ml_handoff 的 build_channels 逐条对应；训练那边改了通道定"
       "义，这里也要跟着改，否则模型吃到的是另一份特征。",
   };
+  // 空槽 bug 的那条不变量（ADR-0024）：槽数必须正好 1280，值一到端口上就查。
+  // **刻意不写 finite** —— 这个算子要的恰恰是**保留了 NaN 空槽**的原始剖面，
+  // 声明 finite:true 会把它唯一正确的输入判成违反。
+  const nlohmann::json slots = {{"elementCount", {{"eq", ml::kProfileSlots}}}};
   op.inputs = {
-      Port{"primary", "PointCloud", "Primary", "Master 剖面，传感器 XZ 帧、1280 槽。", true},
-      Port{"secondary", "PointCloud", "Secondary", "Slave 剖面，传感器 XZ 帧、1280 槽。", true},
+      withContract(
+          Port{"primary", "PointCloud", "Primary", "Master 剖面，传感器 XZ 帧、1280 槽。", true},
+          slots),
+      withContract(
+          Port{"secondary", "PointCloud", "Secondary", "Slave 剖面，传感器 XZ 帧、1280 槽。", true},
+          slots),
   };
   op.outputs = {Port{"tensor", "Tensor", "Tensor", "[2, 6, 1280] 的 float32 张量。", true}};
   op.capabilities = {false, false, true};
@@ -488,8 +496,13 @@ void registerLabelsFromLogits(Registry& r) {
       "了四个框会整体对调。",
       "只做 argmax，不看置信度：模型对整帧都没把握时照样给出满满一行标签。",
   };
-  op.inputs = {Port{"tensor", "Tensor", "Logits", "ml.onnx_run 的输出。", true}};
-  op.outputs = {Port{"labels", "Record", "Labels", "GapLabels：两行各 1280 个类 id。", true}};
+  // [2, 类别数, 1280]：批与槽是定死的，类别数随模型走，所以中间那一维是 -1。
+  op.inputs = {withContract(
+      Port{"tensor", "Tensor", "Logits", "ml.onnx_run 的输出。", true},
+      {{"shape", {2, -1, static_cast<std::int64_t>(ml::kProfileSlots)}}})};
+  op.outputs = {withExample(
+      Port{"labels", "Record", "Labels", "GapLabels：两行各 1280 个类 id。", true},
+      examples::labels())};
   op.capabilities = {false, false, true};
   op.compute = &labelsFromLogits;
   r.addOperator(std::move(op));
@@ -513,10 +526,15 @@ void registerRoiFromLabels(Registry& r) {
       "labels 的槽号与两片输入剖面一一对应，所以两片剖面必须是没删过点的原始 1280 槽。",
       "backdrop 只是叠画底图，原样透传，不参与推框。",
   };
+  // 槽号与标签一一对应 —— 上游删过点就全错位了，所以两片剖面都查槽数（ADR-0024）。
+  const nlohmann::json slots = {{"elementCount", {{"eq", ml::kProfileSlots}}}};
   op.inputs = {
-      Port{"primary", "PointCloud", "Primary", "原始 1280 槽的 Master 剖面。", true},
-      Port{"secondary", "PointCloud", "Secondary", "原始 1280 槽的 Slave 剖面。", true},
-      Port{"labels", "Record", "Labels", "gap.onnx_segment 的输出。", true},
+      withContract(Port{"primary", "PointCloud", "Primary", "原始 1280 槽的 Master 剖面。", true},
+                   slots),
+      withContract(Port{"secondary", "PointCloud", "Secondary", "原始 1280 槽的 Slave 剖面。", true},
+                   slots),
+      withContract(Port{"labels", "Record", "Labels", "gap.onnx_segment 的输出。", true},
+                   {{"recordType", "GapLabels"}}),
       Port{"backdrop", "PointCloud", "Backdrop",
            "可选：叠画用的同帧底图云（测量帧）。原样透传，不参与推框。", false},
   };
@@ -525,7 +543,8 @@ void registerRoiFromLabels(Registry& r) {
       Port{"gapLeft", "Box2D", "Gap Left", "间隙左侧 ROI（模型的 left_roll）。", true},
       Port{"flushRef", "Box2D", "Flush Ref", "段差参考面 ROI。", true},
       Port{"gapRight", "Box2D", "Gap Right", "间隙右侧 ROI（模型的 right_roll）。", true},
-      Port{"refinements", "Record", "Refinements", "掩膜精修的诊断。", true},
+      withExample(Port{"refinements", "Record", "Refinements", "掩膜精修的诊断。", true},
+                  examples::refinements()),
       Port{"backdrop", "PointCloud", "Backdrop", "backdrop 输入的原样透传；没接就是空云。", true},
   };
 
@@ -577,9 +596,11 @@ void registerLabelsToCloud(Registry& r) {
       " 1280 报 bad_input。",
   };
   op.inputs = {
-      Port{"cloud", "PointCloud", "Cloud",
-           "与标签同序的 1280 槽剖面，通常是 gap.to_measurement_frame 的输出。", true},
-      Port{"labels", "Record", "Labels", "gap.onnx_segment 的输出。", true},
+      withContract(Port{"cloud", "PointCloud", "Cloud",
+                        "与标签同序的 1280 槽剖面，通常是 gap.to_measurement_frame 的输出。", true},
+                   {{"elementCount", {{"eq", ml::kProfileSlots}}}}),
+      withContract(Port{"labels", "Record", "Labels", "gap.onnx_segment 的输出。", true},
+                   {{"recordType", "GapLabels"}}),
   };
   op.outputs = {Port{"cloud", "PointCloud", "Cloud",
                      "按类着色的剖面。可以接进 gap.roi_from_labels.backdrop 当底图。", true}};
@@ -649,7 +670,8 @@ void registerRollAnchoredCrop(Registry& r) {
       Port{"primary", "PointCloud", "Primary", "裁过（或原样透传）的 Master 云。", true},
       Port{"secondary", "PointCloud", "Secondary", "裁过（或原样透传）的 Slave 云。", true},
       Port{"window", "Box2D", "Window", "真正生效的窗；没生效时是剩余点的包围盒。", true},
-      Port{"status", "Record", "Status", "GapRollCrop：状态与前后点数。", true},
+      withExample(Port{"status", "Record", "Status", "GapRollCrop：状态与前后点数。", true},
+                  examples::rollCrop()),
   };
 
   Param camera;

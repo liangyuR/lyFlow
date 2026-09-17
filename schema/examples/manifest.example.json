@@ -6,7 +6,9 @@
     { "name": "PointCloud", "color": "#4a9eff", "doc": "强度/法线/颜色是可选通道，不是另一个类型。" },
     { "name": "Indices", "color": "#c586c0" },
     { "name": "Transform", "color": "#a0d030" },
-    { "name": "Plane", "color": "#e0a030" }
+    { "name": "Plane", "color": "#e0a030" },
+    { "name": "Tensor", "color": "#d16ba5" },
+    { "name": "Record", "color": "#7fd1b9", "doc": "带类型标签的 JSON，算子包用它定义领域结构。" }
   ],
   "operators": [
     {
@@ -115,6 +117,65 @@
         }
       ],
       "capabilities": { "cancellable": true, "previewable": true, "deterministic": false }
+    },
+    {
+      "id": "ml.segment_profile",
+      "version": "1.0.0",
+      "label": "Segment Profile",
+      "category": "ML/Segment",
+      "keywords": ["contract", "example", "端口契约", "样例"],
+      "doc": "端口契约（ADR-0024）与端口样例（m6-plan H8）的样板：四种契约各一例，Record 输出带一份样例。",
+      "preconditions": [
+        "契约不是文档，是检查：违反时该节点 error、code 是 contract_violation，第一帧就报。",
+        "没声明 contract 的端口一行检查都不跑 —— 默认零开销。"
+      ],
+      "inputs": [
+        {
+          "name": "profile",
+          "type": "PointCloud",
+          "label": "Profile",
+          "doc": "原始剖面，一槽一点。",
+          "contract": { "elementCount": { "eq": 1280 }, "finite": true }
+        },
+        {
+          "name": "logits",
+          "type": "Tensor",
+          "label": "Logits",
+          "doc": "[2, 类别数, 1280]，类别数随模型变。",
+          "contract": { "shape": [2, -1, 1280] }
+        },
+        {
+          "name": "labels",
+          "type": "Record",
+          "label": "Labels",
+          "required": false,
+          "contract": { "recordType": "GapLabels" }
+        },
+        {
+          "name": "support",
+          "type": "PointCloud",
+          "label": "Support",
+          "required": false,
+          "lazy": true,
+          "doc": "主路径失败时才取：惰性端口（ADR-0016）。",
+          "contract": { "elementCount": { "min": 3, "max": 100000 } }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "quality",
+          "type": "Record",
+          "label": "Quality",
+          "doc": "GapQuality：这一帧的拟合质量。",
+          "example": {
+            "kind": "Record",
+            "type": "GapQuality",
+            "data": { "inlierCount": 812, "rmsResidualMm": 0.043, "ok": true }
+          }
+        }
+      ],
+      "params": [],
+      "capabilities": { "cancellable": false, "previewable": false, "deterministic": true }
     }
   ]
 }

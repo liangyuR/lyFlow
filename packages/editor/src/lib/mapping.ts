@@ -24,7 +24,8 @@ export interface OperatorNodeData extends Record<string, unknown> {
 }
 
 export type LyNode = Node<OperatorNodeData, "operator">;
-export type LyEdge = Edge;
+/** `data.lazy` 供自定义边组件挂 tooltip 用（见 GraphCanvas 的 LazyEdge）。 */
+export type LyEdge = Edge<{ lazy: boolean }>;
 
 export interface Selection {
   nodes: ReadonlySet<string>;
@@ -93,6 +94,9 @@ export function toReactFlow(
 
   const edges: LyEdge[] = doc.edges.map((e) => {
     const color = edgeColor(doc, ctx, e.from.node, e.from.port, anyTypes);
+    // 惰性边（ADR-0016）：目标输入端口 lazy===true，上游闭包不进初始计划，
+    // 主路径成功时不跑。画成虚线，配合自定义边类型挂 tooltip（见 GraphCanvas）。
+    const lazy = isLazyInput(doc, ctx, e.to.node, e.to.port);
     return {
       id: e.id,
       source: e.from.node,
@@ -102,8 +106,12 @@ export function toReactFlow(
       selected: selection.edges.has(e.id),
       // 拖离输入端时另一端跟着鼠标走，而不是直接删掉（交互清单 P1 #19）
       reconnectable: "target",
+      ...(lazy ? { type: "lazy" as const } : {}),
       // 连线按源端口类型着色 —— 让类型系统「看得见」（交互清单 P0 #8）
-      style: { stroke: color, strokeWidth: 2 },
+      style: lazy
+        ? { stroke: color, strokeWidth: 2, strokeDasharray: "6 4" }
+        : { stroke: color, strokeWidth: 2 },
+      data: { lazy },
     };
   });
 
@@ -157,7 +165,9 @@ function sameNode(a: LyNode, b: LyNode): boolean {
   );
 }
 
-/** 连线上只有 style.stroke 是算出来的，其余都是常量或直接来自 doc。 */
+/** 连线上 style.stroke 与 lazy（决定 type/dasharray/tooltip）是算出来的，其余都是
+ *  常量或直接来自 doc。lazy 只由目标端口的 manifest 声明决定，几乎不会变，但既然
+ *  它能改变渲染就必须比进来，否则改了 manifest 之后连线不会跟着重画。 */
 function sameEdge(a: LyEdge, b: LyEdge): boolean {
   return (
     a.id === b.id &&
@@ -166,7 +176,8 @@ function sameEdge(a: LyEdge, b: LyEdge): boolean {
     a.target === b.target &&
     a.targetHandle === b.targetHandle &&
     a.selected === b.selected &&
-    a.style?.stroke === b.style?.stroke
+    a.style?.stroke === b.style?.stroke &&
+    a.data?.lazy === b.data?.lazy
   );
 }
 
@@ -184,6 +195,19 @@ function edgeColor(
   if (!port) return "#6b7280";
   const type = port.type === ANY ? (anyTypes.get(nodeId) ?? ANY) : port.type;
   return ctx.typesByName.get(type)?.color ?? "#6b7280";
+}
+
+/** 一条边是不是惰性的，只看目标节点的目标输入端口（ADR-0016）：
+ *  这个端口的上游闭包不进初始计划，算子 compute 返回 Demand 时才被调度。 */
+function isLazyInput(
+  doc: GraphDoc,
+  ctx: GraphContext,
+  nodeId: string,
+  portName: string,
+): boolean {
+  const node = doc.nodes.find((n) => n.id === nodeId);
+  const op = node ? ctx.operatorsById.get(node.op) : undefined;
+  return findPort(op, portName, "input")?.lazy === true;
 }
 
 /** 点到线段的距离。拖节点到连线上要用（交互清单 P1 #21）。 */

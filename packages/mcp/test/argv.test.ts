@@ -1,7 +1,46 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { evalArgv, patchArgv, perturbArgv } from "../src/argv.js";
+import { evalArgv, paramsArgv, patchArgv, perturbArgv } from "../src/argv.js";
+
+test("eval 的 summary 默认不给 —— 体积是逐行的（ADR-0022 / m6-plan §10 第 5 条）", () => {
+  const off = evalArgv({ graphPath: "g", metric: ["outputs.gap"] }, null);
+  assert.equal(off.includes("--summary"), false);
+  const on = evalArgv({ graphPath: "g", metric: ["outputs.gap"], summary: true }, null);
+  assert.equal(on.includes("--summary"), true);
+});
+
+test("params 永远带 --json，过滤项照给", () => {
+  assert.deepEqual(paramsArgv({ graphPath: "g.lyflow.json" }), [
+    "params",
+    "g.lyflow.json",
+    "--json",
+  ]);
+  assert.deepEqual(
+    paramsArgv({
+      graphPath: "g.lyflow.json",
+      baseDir: "configs/R1",
+      node: ["n_fit_l", "n_fit_r"],
+      only: "explicit",
+      set: ["n_fit_l.distThresh=0.8"],
+    }),
+    [
+      "params",
+      "g.lyflow.json",
+      "--base-dir",
+      "configs/R1",
+      "--node",
+      "n_fit_l",
+      "--node",
+      "n_fit_r",
+      "--only",
+      "explicit",
+      "--set",
+      "n_fit_l.distThresh=0.8",
+      "--json",
+    ],
+  );
+});
 
 test("eval 把多个 metric 与多个 param 都展成重复选项", () => {
   const argv = evalArgv(

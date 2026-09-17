@@ -4,11 +4,15 @@
 #include <mutex>
 #include <set>
 
+#include "lyflow/contract.h"
 #include "lyflow/json_writer.h"
 #include "lyflow/version.h"
 
 namespace lyflow {
 namespace {
+
+/// 「什么类型都可能」的端口上不查契约与类型的搭配：具体类型要等编译期沿边推导。
+constexpr const char* kAnyTypeName = "Any";
 
 // param.type -> default 值应有的 Value::Kind，validate() 的依据。
 // 默认值与声明类型不符应当在启动自检时炸掉，而不是让前端渲染出空控件。
@@ -84,6 +88,16 @@ void writePort(JsonWriter& w, const Port& p, bool isInput) {
   if (isInput && !p.required) w.field("required", false);
   if (isInput && p.acceptsError) w.field("acceptsError", true);
   if (isInput && p.lazy) w.field("lazy", true);
+  // 契约（ADR-0024）与样例（m6-plan H8）两端口都可以有：契约在输入端被执行器检查，
+  // 写在输出端上是给读图的人看「这一维保证是什么」。空的一律不出现。
+  if (p.contract.is_object() && !p.contract.empty()) {
+    w.key("contract");
+    w.raw(p.contract.dump());
+  }
+  if (!p.example.is_null()) {
+    w.key("example");
+    w.raw(p.example.dump());
+  }
   w.endObject();
 }
 
@@ -263,6 +277,28 @@ std::vector<std::string> Registry::validate() const {
         }
         if (!isInput && (p.acceptsError || p.lazy)) {
           fail(where + " output port '" + p.name + "' sets acceptsError/lazy (inputs only)");
+        }
+        // 端口契约（ADR-0024）。四种键之外的任何东西都在这里被拒 ——
+        // `lyflow manifest --check` 与 startup 自检走的是同一个 validate()。
+        const std::string portWhere = where + " " + kind + " port '" + p.name + "'";
+        for (const std::string& problem : validatePortContract(p.contract, portWhere)) {
+          fail(problem);
+        }
+        if (p.contract.is_object()) {
+          // 契约与端口类型对不对得上。声明了 shape 却接在 PointCloud 上，
+          // 只会在第一次真跑的时候变成一个莫名其妙的 contract_violation。
+          if (p.contract.contains("shape") && p.type != "Tensor" && p.type != kAnyTypeName) {
+            fail(portWhere + " contract: shape 只对 Tensor 端口有意义，这个端口是 " + p.type);
+          }
+          if (p.contract.contains("recordType") && p.type != "Record" && p.type != kAnyTypeName) {
+            fail(portWhere + " contract: recordType 只对 Record 端口有意义，这个端口是 " + p.type);
+          }
+          if (p.contract.contains("finite") && p.type != "PointCloud" && p.type != "Tensor" &&
+              p.type != "Measurement" && p.type != kAnyTypeName) {
+            fail(portWhere +
+                 " contract: finite 只对 PointCloud / Tensor / Measurement 端口有意义，"
+                 "这个端口是 " + p.type);
+          }
         }
       }
     };

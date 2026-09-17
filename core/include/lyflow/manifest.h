@@ -90,6 +90,32 @@ struct Port {
   /// 同一节点上、同一组的 Any 端口共用一个类型变量。默认全在 0 组（历史语义）。
   /// flow.select 的 cond 与 a/b/out 不是一回事，靠它分开。不进 manifest。
   int anyGroup = 0;
+  /// 端口契约（ADR-0024）。**只有四种键**：
+  /// `elementCount: {eq|min|max}`、`finite: true`、`shape: [..]`（-1 = 任意）、
+  /// `recordType: "<type>"`。别的键一律让 Registry::validate() 拒掉 ——
+  /// 表达式语言的诱惑在这里被刻意挡住，与 visibleWhen 同一条原则。
+  /// 空对象 = 没有契约，执行器在那种端口上一行检查都不做（零开销）。
+  nlohmann::json contract = nlohmann::json::object();
+  /// 一份样例值（m6-plan H8）。Record 端口尤其需要：只有 `type` 字串的话，
+  /// 「`data.inlierCount` 到底存不存在」得翻算子实现才知道。null = 没给。
+  nlohmann::json example;
+};
+
+/// 端口契约的四种键。Registry::validate() 与 schema 都照着它。
+inline constexpr const char* kPortContractKeys[] = {"elementCount", "finite", "shape",
+                                                    "recordType"};
+
+/// 给一个端口挂契约 / 样例。写成函数是因为 Port 用聚合初始化，
+/// 尾部字段要么全填要么一个都不填，中间那几个 false/0 没人想在每个算子里重写一遍。
+Port withContract(Port p, nlohmann::json contract);
+Port withExample(Port p, nlohmann::json example);
+
+/// 一条契约违反。执行器在输入绑定时产出，进 summary 的 contractViolations。
+struct ContractViolation {
+  std::string node;
+  std::string port;
+  nlohmann::json expected;
+  nlohmann::json actual;
 };
 
 // --------------------------------------------------------------------------- 参数

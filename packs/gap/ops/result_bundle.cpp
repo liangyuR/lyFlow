@@ -249,6 +249,14 @@ Port optional(const char* name, const char* type, const char* label, const char*
   return p;
 }
 
+/// 同上，再挂一条「这个端口只吃这种 Record」的契约（ADR-0024）。
+/// 这个算子是 duck typing 的：接错一份 Record 不会报错，只会让 bundle 里对应的
+/// 那几格悄悄空着 —— 而 bundle 正是业务侧写 results.csv 的唯一来源。
+/// acceptsError 端口上的 Error 值不走契约检查，所以 fallback 接住的失败照样透得过去。
+Port optionalRecord(const char* name, const char* label, const char* doc, const char* recordType) {
+  return withContract(optional(name, "Record", label, doc), {{"recordType", recordType}});
+}
+
 }  // namespace
 
 void registerResultBundle(Registry& r) {
@@ -276,17 +284,21 @@ void registerResultBundle(Registry& r) {
       optional("roiGapLeft", "Box2D", "ROI Gap Left", "生效的间隙左框。"),
       optional("roiGapRight", "Box2D", "ROI Gap Right", "生效的间隙右框。"),
       optional("roiOverall", "Box2D", "ROI Overall", "生效的整体框：整体 ROI 或跟随零件的裁剪窗。"),
-      optional("fits", "Record", "Fits", "gap.fit_gap_circles 的 quality（两侧圆）。"),
-      optional("fitBase", "Record", "Fit Base", "基准线 gap.fit_line 的 quality。"),
-      optional("fitRef", "Record", "Fit Ref", "参考线 gap.fit_line 的 quality。"),
-      optional("cropStatus", "Record", "Crop Status", "gap.roll_anchored_crop 的 status。"),
-      optional("alignment", "Record", "Alignment", "gap.select_alignment 选中的 GapAlignment。"),
-      optional("fallback", "Record", "Fallback", "flow.fallback 的 choice。"),
+      optionalRecord("fits", "Fits", "gap.fit_gap_circles 的 quality（两侧圆）。",
+                     "GapFitQualityPair"),
+      optionalRecord("fitBase", "Fit Base", "基准线 gap.fit_line 的 quality。", "GapFitQuality"),
+      optionalRecord("fitRef", "Fit Ref", "参考线 gap.fit_line 的 quality。", "GapFitQuality"),
+      optionalRecord("cropStatus", "Crop Status", "gap.roll_anchored_crop 的 status。",
+                     "GapRollCrop"),
+      optionalRecord("alignment", "Alignment", "gap.select_alignment 选中的 GapAlignment。",
+                     "GapAlignment"),
+      optionalRecord("fallback", "Fallback", "flow.fallback 的 choice。", "FallbackChoice"),
       optional("cloudPrimary", "PointCloud", "Cloud Primary", "剔过 NaN 的 Master 云，用来数点。"),
       optional("cloudSecondary", "PointCloud", "Cloud Secondary", "剔过 NaN 的 Slave 云。"),
       optional("cloudMerged", "PointCloud", "Cloud Merged", "合并并滤波之后的云。"),
   };
-  op.outputs = {Port{"bundle", "Record", "Bundle", "GapResultBundle。", true}};
+  op.outputs = {withExample(Port{"bundle", "Record", "Bundle", "GapResultBundle。", true},
+                            examples::resultBundle())};
   op.params = {
       textParam("roiSource", "ROI Source", "",
                 "留空时按接上的输入推断：有 alignment 是 template，有 cropStatus 是 model。"),

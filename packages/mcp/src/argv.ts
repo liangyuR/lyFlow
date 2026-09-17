@@ -21,6 +21,8 @@ export interface EvalInput extends SampleSelector {
   baseDir?: string | undefined;
   set?: string[] | undefined;
   noCache?: boolean | undefined;
+  /// 每行 eval_row 带一份 run summary（ADR-0022）。默认关：体积是逐行的。
+  summary?: boolean | undefined;
 }
 
 export interface PerturbInput extends SampleSelector {
@@ -99,6 +101,25 @@ export function evalArgv(input: EvalInput, paramsFile: string | null): string[] 
   if (input.csv) argv.push("--csv", input.csv);
   for (const s of input.set ?? []) argv.push("--set", s);
   if (input.noCache) argv.push("--no-cache");
+  if (input.summary) argv.push("--summary");
+  return argv;
+}
+
+export interface ParamsInput {
+  graphPath: string;
+  node?: string[] | undefined;
+  only?: "explicit" | "default" | "bound" | undefined;
+  set?: string[] | undefined;
+  baseDir?: string | undefined;
+}
+
+export function paramsArgv(input: ParamsInput): string[] {
+  const argv = ["params", input.graphPath];
+  if (input.baseDir) argv.push("--base-dir", input.baseDir);
+  for (const n of input.node ?? []) argv.push("--node", n);
+  if (input.only) argv.push("--only", input.only);
+  for (const s of input.set ?? []) argv.push("--set", s);
+  argv.push("--json");
   return argv;
 }
 

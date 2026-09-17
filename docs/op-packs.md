@@ -240,6 +240,69 @@ op.preconditions = {
 - 不写参数的取值范围、不写实现细节、不重复 `doc` 里已有的一整段。
 - 实在没有可写的就不填，这一项在 manifest 里不出现。
 
+## 端口契约
+
+`preconditions` 是给人读的字串，运行时不拦任何东西。有一类前提不一样：它是一个能在**数据到达
+端口的那一刻**就核对的数值不变量 —— 「这必须是 1280 个点」「这个张量必须全是有限值」。这类前提
+写进端口的 `contract`（[ADR-0024](adr/0024-port-contracts-four-kinds.md)），第一帧违反就报，
+不用等到下游某个算子因为形状不对而拟合失败，再倒回来 grep 是谁定的这条规矩。
+
+只有四种键，四行例子：
+
+```jsonc
+"contract": { "elementCount": { "eq": 1280 } }       // 点云恰好 1280 个点；Indices 是下标个数
+"contract": { "finite": true }                        // 坐标 / 张量元素 / 测量值不能有 NaN、Inf
+"contract": { "shape": [2, -1, 1280] }                // 张量形状，-1 = 这一维随便
+"contract": { "recordType": "GapLabels" }             // Record 的 type 字串必须是这个
+```
+
+`elementCount` 可以写 `{ "min": n }` / `{ "max": n }` / 两者都写，但不能跟 `eq` 混用。
+
+什么时候该写：**能写成这四种之一的数值不变量就写**（点数、有限性、张量形状、Record 类型）；
+写不成的留在 `preconditions` 里 —— 那是「什么场景下这个算子的假设不成立」这类判断性的前提，
+两者互补，不是谁取代谁。判断标准很直接：这条前提能不能在值到达端口的那一刻，不看语义地、
+只用一个数字或一个布尔值核对完？能就是契约，不能就还是 `preconditions`。
+
+C++ 侧的写法（`core/include/lyflow/manifest.h` 里的辅助函数，因为 `Port` 是聚合初始化、
+尾部字段要么全填要么不填，这两个函数省得每个算子都重写前面几个 `false`/`0`）：
+
+```cpp
+op.inputs = {
+    withContract(Port{"primary", "PointCloud", "Primary", "Master 剖面，1280 槽。", true},
+                 {{"elementCount", {{"eq", 1280}}}}),
+};
+op.outputs = {
+    withExample(Port{"quality", "Record", "Quality", "GapQuality。", true},
+                {{"kind", "Record"}, {"type", "GapQuality"},
+                 {"data", {{"inlierCount", 812}, {"ok", true}}}}),
+};
+```
+
+违反时长什么样：该节点 `error`，`code` 是 `contract_violation`，`message` 带期望与实际
+（例如「元素数应当是 1280，实际是 1230」），`portName` 指向那个输入端口；同一条违反同时进
+run summary 的 `contractViolations`（`{ node, port, expected, actual }`，见
+[ADR-0022](adr/0022-run-summary-as-core-output.md)）。静音节点的透传与流过 `acceptsError`
+端口的 Error 值不检查 —— 前者只是搬运，后者流的是失败本身。没声明契约的端口一次遍历都不做，
+默认零开销。
+
+gap 包是第一个用上它的：20 个输入端口声明了契约。第一条就是空槽 bug 那个真实案例 ——
+`gap.profile_tensor` 的两片输入剖面 `elementCount.eq = 1280`。**它刻意没有声明 `finite`**，
+虽然 m6-plan §3 原本是这么写的：这个算子要的恰恰是**保留了 NaN 空槽**的原始剖面
+（`load` 时把 `dropNonFinite` 关掉），声明 `finite: true` 会把它唯一正确的输入判成违反。
+契约照源码写，不照计划写。
+
+另一批值得看的是 `gap.result_bundle`：六个 Record 入口（`fits` / `fitBase` / `fitRef` /
+`cropStatus` / `alignment` / `fallback`）各声明了 `recordType`。那个算子原本是 duck typing 的
+—— 接错一份 Record 不报错，只会让 bundle 里对应的那几格悄悄空着，而 bundle 正是业务侧写
+`results.csv` 的唯一来源。这类「静默的空格」正是契约最该拦的东西。
+
+核对当前状态：`lyflow manifest | jq '[.operators[].inputs[] | select(.contract)] | length'`。
+
+顺带一提端口 `example`（上面 `withExample` 那半段）：它跟 `contract` 是两件不同的事 ——
+`example` 不参与任何校验，只回答「这里长什么样」。Record 端口只有一个 `type` 字串的话，
+「`data.inlierCount` 到底存不存在」得翻算子实现才知道；一份从真实 run 裁出来的样例就够消掉
+这一次试错。不上 JSON Schema 是因为那份 schema 的维护成本现在不值。
+
 ## 端口类型
 
 包**不能**往类型表里加类型 —— 前端要在不知道任何包的前提下给端口着色、

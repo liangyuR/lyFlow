@@ -115,6 +115,57 @@ TEST_CASE("summary：声明输出崩了 → failed，from 沿边回溯到最近�
   CHECK(summary["nodes"]["n_t2"]["state"] == "cancelled");
 }
 
+TEST_CASE("summary：from 是最近的出错节点，root 是失败链上拓扑序最早的那个") {
+  ensureTestOps();
+  // 真实那张图的形状（m6-plan §10 第 4 条）：两路都炸了，fallback 自己也 error。
+  //   n_a(fail) → n_t1(cancelled) ┐
+  //                               ├→ n_fb(error) → 输出
+  //   n_b(fail) → n_t2(cancelled) ┘
+  // `from` 是 n_fb（0 跳，它自己就是 error），而真正要查的根因在两跳外。
+  const Json doc = withOutputs(
+      {N{"n_a", "test.fail", Json{{"code", "insufficient_points"}, {"message", "主路径点太少"}}},
+       N{"n_b", "test.fail", Json{{"code", "icp_score_low"}, {"message", "模板配不上"}}},
+       N{"n_t1", "test.thin", Json::object()},
+       N{"n_t2", "test.thin", Json::object()},
+       N{"n_fb", "flow.fallback", Json::object()}},
+      {E{"n_a.cloud", "n_t1.cloud"}, E{"n_b.cloud", "n_t2.cloud"},
+       E{"n_t1.cloud", "n_fb.a"}, E{"n_t2.cloud", "n_fb.b"}},
+      Json{{"gap", Json{{"node", "n_fb"}, {"port", "out"}}}});
+  Session s(doc);
+  RunLog& log = s.wait();
+
+  const Json summary = summaryOf(s, log);
+  CHECK(summary["status"] == "failed");
+  const Json gap = summary["outputs"]["gap"];
+  CHECK(gap["state"] == "failed");
+  // 最近的：fallback 自己
+  CHECK(gap["from"] == "n_fb");
+  // 根因：沿失败链（只穿 error/cancelled）往上走，取拓扑序最早的 error。
+  // n_a 与 n_b 都是 error，n_a 的下标更小。
+  CHECK(gap["root"] == "n_a");
+  CHECK(gap["rootCode"] == "insufficient_points");
+  CHECK(gap["from"] != gap["root"]);
+  // 中间那两个是 cancelled：回溯穿过它们，但不会挑中它们当 root
+  CHECK(summary["nodes"]["n_t1"]["state"] == "cancelled");
+  CHECK(summary["nodes"]["n_t2"]["state"] == "cancelled");
+  CHECK(summary["nodes"]["n_b"]["state"] == "error");
+}
+
+TEST_CASE("summary：整条链只有一个错时 root 就是 from") {
+  ensureTestOps();
+  const Json doc = withOutputs(
+      {N{"n_a", "test.fail", Json{{"code", "insufficient_points"}, {"message", "点太少"}}},
+       N{"n_t", "test.thin", Json::object()}},
+      {E{"n_a.cloud", "n_t.cloud"}},
+      Json{{"flush", Json{{"node", "n_t"}, {"port", "cloud"}}}});
+  Session s(doc);
+  RunLog& log = s.wait();
+  const Json flush = summaryOf(s, log)["outputs"]["flush"];
+  CHECK(flush["from"] == "n_a");
+  CHECK(flush["root"] == "n_a");
+  CHECK(flush["rootCode"] == "insufficient_points");
+}
+
 TEST_CASE("summary：没被 demand 的惰性分支上的输出是 inactive，不是 failed") {
   ensureTestOps();
   // 主路径成功 → b 的闭包一次都不跑。挂在 b 上的那一维「本来就没有」，

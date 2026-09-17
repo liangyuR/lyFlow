@@ -11,7 +11,7 @@ import type { OutputStat, OutputValue } from "../types/execution";
 import type { OperatorDesc, Param } from "../types/manifest";
 import type { GraphNode, SubgraphDef } from "../types/graph";
 
-import { OperatorDetail } from "./OperatorDetail";
+import { OperatorDetail, PortRow } from "./OperatorDetail";
 import { ParamControl } from "./ParamControls";
 
 /** 六位有效数字。2D 几何的坐标是米，原样打印会拖一串浮点噪声。 */
@@ -124,6 +124,42 @@ function GraphOutputs() {
         );
       })}
     </section>
+  );
+}
+
+/** 节点的端口小节（M6 §3）：类型、契约、样例。折叠成 <details>，默认展开 ——
+ *  没声明契约的算子照样列出来，type 和 doc 本来就有用，但收起来时不占地方。 */
+function NodePorts({ op }: { op: OperatorDesc }) {
+  return (
+    <details className="insp__group insp__ports" data-testid="inspector-ports" open>
+      <summary className="insp__group-title">端口</summary>
+      <div className="insp__ports-body">
+        <div>
+          <h5 className="insp__ports-label">输入</h5>
+          {op.inputs.length === 0 ? (
+            <p className="insp__none">无（源节点）</p>
+          ) : (
+            <ul className="port-list">
+              {op.inputs.map((p) => (
+                <PortRow key={p.name} port={p} isInput compact />
+              ))}
+            </ul>
+          )}
+        </div>
+        <div>
+          <h5 className="insp__ports-label">输出</h5>
+          {op.outputs.length === 0 ? (
+            <p className="insp__none">无（终端节点）</p>
+          ) : (
+            <ul className="port-list">
+              {op.outputs.map((p) => (
+                <PortRow key={p.name} port={p} isInput={false} compact />
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </details>
   );
 }
 
@@ -258,6 +294,8 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
       )}
 
       {exec?.stats?.outputs && <OutputValues outputs={exec.stats.outputs} />}
+
+      <NodePorts op={op} />
 
       {op.params.length === 0 ? (
         <p className="insp__none">此算子没有参数</p>

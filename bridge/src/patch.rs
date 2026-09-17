@@ -13,7 +13,7 @@ use crate::cli::{
     core, defaults_by_op, diagnostics_of, diff_docs, fail, has_errors, json_line, line, load_graph,
     render_diff, Loaded, Parsed, Sink, EXIT_FAILED, EXIT_INVALID, EXIT_OK, EXIT_USAGE,
 };
-use crate::eval::wildcard_match;
+use crate::eval::wildcard_match_cs;
 use crate::graph::{GraphDoc, Node, PortRef};
 
 /// 新节点没给坐标时放在图的右下角空白处。UI 字段，不影响执行。
@@ -67,7 +67,8 @@ type Step = fn(&mut GraphDoc, &[String], &mut Applied) -> Result<(), String>;
 
 // ------------------------------------------------------------------ 四个动作
 
-/// `--remove-node <id|glob>`：删节点与它的所有边。glob 只对 id。
+/// `--remove-node <id|glob>`：删节点与它的所有边。glob 只对 id，**大小写敏感**
+/// （m6-plan §10 第 6 条）：`N_FB_*` 不该配上 `n_fb_*`，多删一批比少删一个更难发现。
 /// 图级 `outputs` 还指着被删节点时报错 —— 静默删掉一个图输出是宿主端最难查的一类改动。
 pub(crate) fn apply_removes(
     doc: &mut GraphDoc,
@@ -78,7 +79,7 @@ pub(crate) fn apply_removes(
         let hits: HashSet<String> = doc
             .nodes
             .iter()
-            .filter(|n| wildcard_match(spec, &n.id))
+            .filter(|n| wildcard_match_cs(spec, &n.id))
             .map(|n| n.id.clone())
             .collect();
         if hits.is_empty() {
@@ -868,6 +869,31 @@ mod tests {
         assert_eq!(bad.lines()[0][0]["code"], "bad_param");
         assert!(bad.err.contains("没有写任何文件"), "{}", bad.err);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before, "不该写盘");
+    }
+
+    /// 节点 id 的通配是大小写敏感的（m6-plan §10 第 6 条）：`N_FB_*` 配不上 `n_fb_*`，
+    /// 于是这条命令是 no-op 而不是「悄悄把那个节点删了」。
+    #[test]
+    fn node_globs_are_case_sensitive() {
+        let dir = workspace("case");
+        let path = graph(&dir, false);
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        let upper = cli(&["patch", &path, "--remove-node", "B_*", "--json"]);
+        assert_eq!(upper.code, EXIT_OK, "{}", upper.err);
+        let res = upper.result();
+        assert!(
+            res["applied"]["removed"].as_array().unwrap().is_empty(),
+            "B_* 不该配上 b_alt：{}",
+            upper.out
+        );
+        assert_eq!(res["noops"][0]["reason"], "no_match");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before, "不该写盘");
+
+        // 同一条命令换成小写就真删掉了 —— 证明差别只在大小写上
+        let lower = cli(&["patch", &path, "--remove-node", "b_*", "--json"]);
+        assert_eq!(lower.code, EXIT_OK, "{}", lower.err);
+        assert_eq!(ids(&lower.result()["applied"]["removed"]), vec!["b_alt"]);
     }
 
     #[test]

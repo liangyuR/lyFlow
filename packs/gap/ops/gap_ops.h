@@ -66,6 +66,25 @@ const ::gap::ml::OnnxRoiPredictor* predictorFor(const std::filesystem::path& mod
 /// 原始 1280 槽的传感器帧点云 → 模型输入行。点数不对返回 false。
 bool profileRowOf(const lyflow::PointCloud& cloud, ::gap::ml::ProfileRow* out);
 
+/// 端口样例（m6-plan H8）。每一份都是从一次**真实 run** 的输出裁出来的：
+/// R1 那张带 12 个 fallback 的导入图（KUN10 的一帧）与点 1 的 notch 图。
+/// 只有 `type` 字串的 Record 端口，「`data.inlierCount` 到底存不存在」得翻算子实现
+/// 才知道 —— 一份样例就够消掉这一次试错。样例不参与任何校验。
+/// 值都圆过（真实浮点尾巴对读者没有信息），数组过长的截过，见 port_examples.cpp。
+namespace examples {
+nlohmann::json fitQuality();
+nlohmann::json fitQualityPair();
+nlohmann::json labels();
+nlohmann::json refinements();
+nlohmann::json rollCrop();
+nlohmann::json alignment();
+nlohmann::json cornerQuality();
+nlohmann::json grooveQuality();
+nlohmann::json notchQuality();
+nlohmann::json cameraConsistency();
+nlohmann::json resultBundle();
+}  // namespace examples
+
 // ------------------------------------------------------------------ 注册函数
 void registerLoadProfilePair(Registry& r);
 void registerToMeasurementFrame(Registry& r);
