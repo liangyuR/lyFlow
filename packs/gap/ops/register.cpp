@@ -39,6 +39,8 @@ void registerPackOps(Registry& r) {
   // 积木算子拷细粒度算子的参数声明（paramOf），所以排在它们后面。
   registerBlockOps(r);
   registerStandardGapImporter(r);
+  // 片段引用上面的算子；自检在注册表填满之后才跑，顺序只影响面板里的排列。
+  registerSnippets(r);
 }
 
 }  // namespace lyflow::packs::gap

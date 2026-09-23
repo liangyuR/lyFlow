@@ -1,6 +1,7 @@
 #include "lyflow/registry.h"
 
 #include <algorithm>
+#include <map>
 #include <mutex>
 #include <set>
 
@@ -157,7 +158,107 @@ void writeParam(JsonWriter& w, const Param& p) {
 
   writeCondition(w, "visibleWhen", p.visibleWhen);
   writeCondition(w, "enabledWhen", p.enabledWhen);
+  w.fieldIfSet("semantic", p.semantic);
+  if (p.roiBackdrop.isSet()) {
+    w.key("roiBackdrop");
+    w.beginObject();
+    w.field("dir", p.roiBackdrop.dirParam);
+    w.fieldIfSet("files", p.roiBackdrop.fileParams);
+    w.endObject();
+  }
   w.endObject();
+}
+
+bool typesCompatibleIn(const Registry& r, const std::string& from, const std::string& to) {
+  if (from == to || from == kAnyTypeName || to == kAnyTypeName) return true;
+  const PortType* t = r.findType(from);
+  return t && std::find(t->castableTo.begin(), t->castableTo.end(), to) != t->castableTo.end();
+}
+
+const Port* portNamed(const std::vector<Port>& ports, const std::string& name) {
+  for (const auto& p : ports) {
+    if (p.name == name) return &p;
+  }
+  return nullptr;
+}
+
+/// 片段文件的自检（m8-plan L14）：算子都注册了、参数名都认得、边两端的端口存在且类型接得上、
+/// 对外端口提示指到真实的端口上。坏片段在启动时就报，而不是等人插进画布才发现一半节点缺失。
+std::vector<std::string> checkSnippet(const Registry& r, const nlohmann::json& b) {
+  using nlohmann::json;
+  std::vector<std::string> out;
+  auto str = [](const json& j, const char* key) {
+    auto it = j.find(key);
+    return it != j.end() && it->is_string() ? it->get<std::string>() : std::string();
+  };
+  if (b.value("schemaVersion", 0) != 1) out.push_back("schemaVersion 必须是 1");
+  if (str(b, "id").empty()) out.push_back("没有 id");
+  if (str(b, "label").empty()) out.push_back("没有 label");
+  const json nodes = b.value("nodes", json::array());
+  if (!nodes.is_array() || nodes.empty()) {
+    out.push_back("nodes 为空");
+    return out;
+  }
+  std::map<std::string, const OperatorDesc*> ops;
+  for (const json& n : nodes) {
+    const std::string id = str(n, "id");
+    const std::string opId = str(n, "op");
+    if (id.empty()) {
+      out.push_back("有一个节点没有 id");
+      continue;
+    }
+    if (ops.count(id)) out.push_back("节点 id 重复: " + id);
+    const OperatorDesc* op = r.find(opId);
+    if (!op) out.push_back("节点 " + id + " 的算子 '" + opId + "' 没有注册");
+    ops[id] = op;
+    if (op && n.contains("params")) {
+      if (!n["params"].is_object()) {
+        out.push_back("节点 " + id + " 的 params 不是对象");
+      } else {
+        for (auto it = n["params"].begin(); it != n["params"].end(); ++it) {
+          if (!findParam(*op, it.key())) {
+            out.push_back("节点 " + id + " 的算子 " + opId + " 没有参数 '" + it.key() + "'");
+          }
+        }
+      }
+    }
+  }
+  auto endpoint = [&](const json& ref, bool input, const std::string& what) -> const Port* {
+    const std::string node = str(ref, "node");
+    const std::string port = str(ref, "port");
+    auto it = ops.find(node);
+    if (it == ops.end()) {
+      out.push_back(what + " 指向片段里没有的节点 '" + node + "'");
+      return nullptr;
+    }
+    if (!it->second) return nullptr;  // 算子缺失已经报过
+    const Port* p = portNamed(input ? it->second->inputs : it->second->outputs, port);
+    if (!p) {
+      out.push_back(what + " 指向 " + node + " 没有的" + (input ? "输入" : "输出") + "端口 '" +
+                    port + "'");
+    }
+    return p;
+  };
+  std::set<std::string> fed;
+  for (const json& e : b.value("edges", json::array())) {
+    const Port* from = endpoint(e.value("from", json::object()), false, "边");
+    const Port* to = endpoint(e.value("to", json::object()), true, "边");
+    const std::string target = str(e.value("to", json::object()), "node") + "." +
+                               str(e.value("to", json::object()), "port");
+    if (!fed.insert(target).second) out.push_back("输入端口 " + target + " 接了不止一条边");
+    if (from && to && !typesCompatibleIn(r, from->type, to->type)) {
+      out.push_back("边 → " + target + " 类型接不上：" + from->type + " → " + to->type);
+    }
+  }
+  const json ports = b.value("ports", json::object());
+  for (const json& p : ports.value("inputs", json::array())) {
+    if (endpoint(p, true, "对外输入") &&
+        fed.count(str(p, "node") + "." + str(p, "port"))) {
+      out.push_back("对外输入 " + str(p, "node") + "." + str(p, "port") + " 在片段里已经接了边");
+    }
+  }
+  for (const json& p : ports.value("outputs", json::array())) endpoint(p, false, "对外输出");
+  return out;
 }
 
 }  // namespace
@@ -211,11 +312,23 @@ void Registry::addImporter(ImporterDesc importer) {
   importers_.push_back(std::move(importer));
 }
 
+void Registry::addSnippet(SnippetDesc snippet) {
+  if (snippet.pack.empty()) snippet.pack = currentPack_;
+  for (auto& existing : snippets_) {
+    if (!snippet.id.empty() && existing.id == snippet.id) {
+      existing = std::move(snippet);
+      return;
+    }
+  }
+  snippets_.push_back(std::move(snippet));
+}
+
 void Registry::clear() {
   types_.clear();
   bundles_.clear();
   operators_.clear();
   importers_.clear();
+  snippets_.clear();
   builtinCount_ = 0;
 }
 
@@ -436,6 +549,36 @@ std::vector<std::string> Registry::validate() const {
       }
     }
 
+    // 语义标记（m8-plan L15）：只认 kParamSemantics 里的名字，roi 只能标在 vec4f 上，
+    // roiBackdrop 指的必须是本算子自己的参数。
+    for (const auto& p : op.params) {
+      const std::string pwhere = where + " param '" + p.name + "'";
+      if (p.semantic.empty()) {
+        if (p.roiBackdrop.isSet()) fail(pwhere + " 给了 roiBackdrop 却没有 semantic=roi");
+        continue;
+      }
+      bool known = false;
+      for (const char* s : kParamSemantics) known = known || p.semantic == s;
+      if (!known) {
+        fail(pwhere + " semantic '" + p.semantic + "' 不认识");
+        continue;
+      }
+      if (p.semantic == "roi" && p.type != ParamType::Vec4f) {
+        fail(pwhere + " semantic=roi 只能标在 vec4f 参数上");
+      }
+      if (!p.roiBackdrop.isSet()) continue;
+      const Param* dir = findParam(op, p.roiBackdrop.dirParam);
+      if (!dir || dir->type != ParamType::Path) {
+        fail(pwhere + " roiBackdrop.dir '" + p.roiBackdrop.dirParam + "' 要指向本算子的一个 path 参数");
+      }
+      for (const std::string& f : p.roiBackdrop.fileParams) {
+        const Param* fp = findParam(op, f);
+        if (!fp || (fp->type != ParamType::String && fp->type != ParamType::Path)) {
+          fail(pwhere + " roiBackdrop.files 里的 '" + f + "' 要指向本算子的一个 string / path 参数");
+        }
+      }
+    }
+
     // 迁移链必须覆盖 1..currentMajor-1 且无断档（ADR-0008）。半条链比没有链更糟：
     // 老图能打开一半、参数改了一半，最后表现成「算法结果莫名其妙」。
     const int major = majorOf(op.version);
@@ -464,6 +607,21 @@ std::vector<std::string> Registry::validate() const {
     if (i.kind.empty()) fail("importer with empty kind");
     if (!i.fn) fail("importer '" + i.kind + "' has no function");
     if (!importerKinds.insert(i.kind).second) fail("duplicate importer kind: " + i.kind);
+  }
+
+  for (const auto& s : snippets_) {
+    const std::string where = "snippet '" + (s.id.empty() ? s.source : s.id) + "'" +
+                              (s.source.empty() ? std::string() : "（" + s.source + "）");
+    if (!s.parseError.empty()) {
+      fail(where + ": " + s.parseError);
+      continue;
+    }
+    try {
+      for (const std::string& problem : checkSnippet(*this, s.body)) fail(where + ": " + problem);
+    } catch (const std::exception& e) {
+      // 字段类型写错（比如 ports 写成数组）时 nlohmann 的 value() 会抛
+      fail(where + ": 结构不对（" + e.what() + "）");
+    }
   }
   return problems;
 }
@@ -561,6 +719,31 @@ std::string Registry::toManifestJson() const {
       w.field("label", i.label.empty() ? i.kind : i.label);
       w.fieldIfSet("doc", i.doc);
       w.fieldIfSet("pack", i.pack);
+      w.endObject();
+    }
+    w.endArray();
+  }
+
+  // 片段（m8-plan L14）。坏的那几份（解析失败）不进 manifest，自检另报。没有就整段不出现。
+  bool anySnippet = false;
+  for (const auto& s : snippets_) anySnippet = anySnippet || s.parseError.empty();
+  if (anySnippet) {
+    w.key("snippets");
+    w.beginArray();
+    for (const auto& s : snippets_) {
+      if (!s.parseError.empty()) continue;
+      w.beginObject();
+      w.field("id", s.id);
+      w.field("label", s.label.empty() ? s.id : s.label);
+      w.fieldIfSet("category", s.category);
+      w.fieldIfSet("doc", s.doc);
+      w.fieldIfSet("pack", s.pack);
+      for (const char* key : {"nodes", "edges", "ports"}) {
+        auto it = s.body.find(key);
+        if (it == s.body.end()) continue;
+        w.key(key);
+        w.raw(it->dump());
+      }
       w.endObject();
     }
     w.endArray();

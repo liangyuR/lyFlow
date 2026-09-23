@@ -491,6 +491,46 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     consumersOf[w.fi][e.fromPort] += 1;
   }
 
+  // -- 宿主注入：端口名是输出 → 整节点注入（provided，ADR-0017）；只是输入 → 输入注入，
+  // compute 照常调（m8-plan L18）。同名的输入输出按输出算，老宿主的行为不变。
+  // 注入到图里没有的节点保持老行为：不报错，只是不起作用。
+  std::vector<char> providedNode(n, 0);
+  std::vector<std::set<std::string>> injectedInputsOf(n);
+  for (const auto& [nodeId, ports] : options.injectedPorts) {
+    auto it = indexById.find(nodeId);
+    if (it == indexById.end()) continue;
+    const std::size_t i = it->second;
+    const OperatorDesc* op = prepared[i].op;
+    if (!op) continue;
+    bool outputs = false;
+    for (const std::string& port : ports) {
+      if (findPort(op->outputs, port)) {
+        outputs = true;
+      } else if (findPort(op->inputs, port)) {
+        injectedInputsOf[i].insert(port);
+      } else {
+        fail(i, "unknown_port", "注入的端口 '" + port + "' 既不是这个算子的输出，也不是它的输入", {},
+             port);
+      }
+    }
+    if (outputs) {
+      providedNode[i] = 1;
+      if (!injectedInputsOf[i].empty()) {
+        fail(i, "bad_input",
+             "同一个节点不能既注入输出又注入输入（输入 '" + *injectedInputsOf[i].begin() +
+                 "'）：注入输出时 compute 整个不跑，注入的输入没有人用",
+             {}, *injectedInputsOf[i].begin());
+      }
+      injectedInputsOf[i].clear();
+    }
+    for (const std::string& port : injectedInputsOf[i]) {
+      // 连线与注入同时给是两个来源抢一个端口，谁赢都说不清楚
+      if (!connectedInputs[i].insert(port).second) {
+        fail(i, "bad_input", "输入端口 '" + port + "' 已有连线，不能再注入", {}, port);
+      }
+    }
+  }
+
   for (std::size_t i = 0; i < n; ++i) {
     if (!prepared[i].op) continue;
     for (const Port& p : prepared[i].op->inputs) {
@@ -646,7 +686,8 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     pn.valid = prepared[id].valid;
     pn.bypass = graph.nodes[id].bypass;
     pn.deferred = demandedEagerly[id] == 0;
-    pn.provided = options.providedDigest.count(pn.id) != 0;
+    pn.provided = providedNode[id] != 0;
+    pn.injectedInputs = std::move(injectedInputsOf[id]);
     pn.errors = prepared[id].errors;
     pn.params = std::move(prepared[id].params);
     pn.explicitParams = std::move(prepared[id].explicitParams);

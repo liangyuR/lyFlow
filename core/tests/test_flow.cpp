@@ -297,6 +297,96 @@ TEST_CASE("注入的数据进 cacheKey：换一片云就不会命中旧结果") 
   CHECK(keyOf(1.0F) == keyOf(1.0F));
 }
 
+namespace {
+
+PointCloud lineCloud(int n, float y) {
+  PointCloud c;
+  for (int i = 0; i < n; ++i) c.push(static_cast<float>(i), y, 0.0F);
+  return c;
+}
+
+}  // namespace
+
+TEST_CASE("输入注入（m8-plan L18）：port 只是输入端口时 compute 照常跑，端口值取注入数据") {
+  ensureTestOps();
+  const Json doc = graphWithOutputs({N{"m", "test.merge2", Json::object()}}, {},
+                                    Json{{"merged", Json{{"node", "m"}, {"port", "cloud"}}}});
+  std::vector<exec::InjectedInput> inputs{
+      exec::InjectedInput{"m", "a", Data::cloud(lineCloud(3, 0.0F))},
+      exec::InjectedInput{"m", "b", Data::cloud(lineCloud(2, 1.0F))}};
+  Session s(doc, {}, {}, /*keepCache=*/false, /*maxParallel=*/0, /*noReuse=*/false,
+            std::move(inputs));
+  RunLog& log = s.wait();
+
+  CHECK(log.runStatus() == "ok");
+  const Json done = log.nodeEvent("m", "done");
+  REQUIRE_FALSE(done.empty());
+  // 不是整节点注入：compute 真的跑了，事件上没有 provided
+  CHECK_FALSE(done["stats"].contains("provided"));
+  const Json outputs = Json::parse(exec::runOutputsJson(s.runId()));
+  CHECK(outputs["merged"]["elementCount"] == 5);
+
+  // 必填输入没有连线也不报 missing_input —— 注入就是它的来源
+  CHECK(log.ofKind("node_state").size() > 0);
+  for (const Json& e : log.ofKind("node_state")) CHECK(e.value("state", "") != "error");
+}
+
+TEST_CASE("输入注入：端口上已有连线、端口名不存在、与输出注入混用都在校验期报错") {
+  ensureTestOps();
+  {
+    const Json doc = makeGraph({N{"g", "gen.synthetic", Json{{"pointCount", 10}}},
+                                N{"m", "test.merge2", Json::object()}},
+                               {E{"g.cloud", "m.a"}});
+    std::vector<exec::InjectedInput> inputs{
+        exec::InjectedInput{"m", "a", Data::cloud(lineCloud(3, 0.0F))},
+        exec::InjectedInput{"m", "b", Data::cloud(lineCloud(2, 1.0F))}};
+    Session s(doc, {}, {}, false, 0, false, std::move(inputs));
+    RunLog& log = s.wait();
+    const Json failed = log.nodeEvent("m", "error");
+    REQUIRE_FALSE(failed.empty());
+    CHECK(failed["errors"][0]["code"] == "bad_input");
+    CHECK(failed["errors"][0]["portName"] == "a");
+  }
+  {
+    const Json doc = makeGraph({N{"m", "test.merge2", Json::object()}}, {});
+    std::vector<exec::InjectedInput> inputs{
+        exec::InjectedInput{"m", "a", Data::cloud(lineCloud(3, 0.0F))},
+        exec::InjectedInput{"m", "b", Data::cloud(lineCloud(2, 1.0F))},
+        exec::InjectedInput{"m", "nope", Data::cloud(lineCloud(1, 0.0F))}};
+    Session s(doc, {}, {}, false, 0, false, std::move(inputs));
+    RunLog& log = s.wait();
+    const Json failed = log.nodeEvent("m", "error");
+    REQUIRE_FALSE(failed.empty());
+    CHECK(failed["errors"][0]["code"] == "unknown_port");
+  }
+  {
+    const Json doc = makeGraph({N{"m", "test.merge2", Json::object()}}, {});
+    std::vector<exec::InjectedInput> inputs{
+        exec::InjectedInput{"m", "cloud", Data::cloud(lineCloud(3, 0.0F))},
+        exec::InjectedInput{"m", "a", Data::cloud(lineCloud(2, 1.0F))}};
+    Session s(doc, {}, {}, false, 0, false, std::move(inputs));
+    RunLog& log = s.wait();
+    const Json failed = log.nodeEvent("m", "error");
+    REQUIRE_FALSE(failed.empty());
+    CHECK(failed["errors"][0]["code"] == "bad_input");
+  }
+}
+
+TEST_CASE("输入注入的数据也进 cacheKey") {
+  ensureTestOps();
+  const Json doc = makeGraph({N{"m", "test.merge2", Json::object()}}, {});
+  auto keyOf = [&](int n) {
+    std::vector<exec::InjectedInput> inputs{
+        exec::InjectedInput{"m", "a", Data::cloud(lineCloud(n, 0.0F))},
+        exec::InjectedInput{"m", "b", Data::cloud(lineCloud(2, 1.0F))}};
+    Session s(doc, {}, {}, /*keepCache=*/true, 0, false, std::move(inputs));
+    RunLog& log = s.wait();
+    return log.ofKind("run_started").front()["nodes"][0]["cacheKey"].get<std::string>();
+  };
+  CHECK(keyOf(3) != keyOf(4));
+  CHECK(keyOf(3) == keyOf(3));
+}
+
 TEST_CASE("并发：八个 run 同时跑，事件按 runId 隔离，结果与串行一致") {
   ensureTestOps();
   ResultStore::instance().clear();

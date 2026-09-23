@@ -176,6 +176,21 @@ struct FileFilter {
   std::vector<std::string> extensions;
 };
 
+/// 参数的语义标记（m8-plan L15）。只有编辑器读它，执行器与校验一概不看。
+/// 目前只有一种："roi" = Vec4f 的 [xMin, yMin, xMax, yMax]，XY 平面上的一个框，
+/// 单位按 unit（mm 或米）。编辑器在 2D 剖面视图里把它画成可拖、可拉伸的框。
+inline constexpr const char* kParamSemantics[] = {"roi"};
+
+/// roi 框画在哪片云上。空 = 画在节点在视图里显示的那片数据云上（数据坐标系）；
+/// 给了 = 画在 `<dirParam 的目录>/<fileParams 的每个文件名>` 拼起来的云上
+/// （例如 gap.locate_template 的四个角色框在模板坐标系里，底图是那个槽的左右模板）。
+struct RoiBackdrop {
+  std::string dirParam;                   // Path 参数（mode=dir）
+  std::vector<std::string> fileParams;    // String / Path 参数
+
+  bool isSet() const { return !dirParam.empty() || !fileParams.empty(); }
+};
+
 struct Param {
   std::string name;
   ParamType type = ParamType::Float;
@@ -203,6 +218,11 @@ struct Param {
 
   Condition visibleWhen;
   Condition enabledWhen;
+
+  /// 语义标记（见 kParamSemantics）。空 = 没有。
+  std::string semantic;
+  /// 只对 semantic == "roi" 有意义。
+  RoiBackdrop roiBackdrop;
 };
 
 struct Capabilities {
@@ -236,6 +256,26 @@ struct OperatorDesc {
   /// 参数迁移链，按 fromMajor 任意顺序给都行。空 = 该算子从没破坏性升级过。
   std::vector<Migration> migrations;
 };
+
+/// 片段（m8-plan L14）：一组节点 + 边 + 对外端口提示，文件格式是 `*.lyflow-snippet.json`
+/// （schema/snippet.schema.json）。插入就是带自动连线的粘贴，插完是普通节点，没有展开 / 收回。
+/// 算子包随附的片段在包目录的 snippets/ 下，构建时编进包里、经 manifest 的 snippets 段给出。
+struct SnippetDesc {
+  std::string id;
+  std::string label;
+  std::string category;
+  std::string doc;
+  std::string pack;
+  /// 整份片段文件。nodes / edges / ports 原样进 manifest，编辑器按它粘贴。
+  nlohmann::json body;
+  /// 来自哪个文件（只用于自检报错时指路）。
+  std::string source;
+  /// 解析失败时的原因。非空 = 这一份是坏的，Registry::validate() 报出来。
+  std::string parseError;
+};
+
+/// 把一份片段文件的文本读成 SnippetDesc。解析失败不抛，写进 parseError。
+SnippetDesc parseSnippet(const std::string& text, const std::string& source);
 
 /// 按名字找参数描述。执行器和算子都要用，放这里免得各写一遍线性查找。
 const Param* findParam(const OperatorDesc& op, const std::string& name);

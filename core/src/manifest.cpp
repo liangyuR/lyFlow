@@ -71,4 +71,25 @@ Port withExample(Port p, nlohmann::json example) {
   return p;
 }
 
+SnippetDesc parseSnippet(const std::string& text, const std::string& source) {
+  SnippetDesc s;
+  s.source = source;
+  nlohmann::json j = nlohmann::json::parse(text, nullptr, /*allow_exceptions=*/false);
+  if (j.is_discarded() || !j.is_object()) {
+    s.parseError = "不是合法的 JSON 对象";
+    s.id = source;
+    return s;
+  }
+  auto text_of = [&](const char* key) {
+    auto it = j.find(key);
+    return it != j.end() && it->is_string() ? it->get<std::string>() : std::string();
+  };
+  s.id = text_of("id");
+  s.label = text_of("label");
+  s.category = text_of("category");
+  s.doc = text_of("doc");
+  s.body = std::move(j);
+  return s;
+}
+
 }  // namespace lyflow

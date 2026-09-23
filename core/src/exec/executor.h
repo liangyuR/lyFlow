@@ -20,6 +20,8 @@ enum class RunMode { Full = 0, Preview = 1 };
 
 /// 运行时注入（ADR-0017）：这个节点的这个输出端口不由 compute 产出，由宿主直接给。
 /// 一个节点只要被注入一次，它的**全部**输出端口都得给 —— compute 整个被跳过。
+/// port 只是该算子的**输入**端口时是输入注入（m8-plan L18）：compute 照常跑，
+/// 那个端口的值取注入数据；端口上不能同时有连线。
 struct InjectedInput {
   std::string nodeId;
   std::string port;

@@ -61,8 +61,9 @@ Param textParam(const char* name, const char* label, const std::string& def, con
   return p;
 }
 
+/// 模板坐标系里的一个角色框。slot 是它画在哪个模板槽的左右模板上（m8-plan L15 的 2D 拖框）。
 Param roiParam(const std::string& name, const char* label, const char* doc, const char* group,
-               bool advanced) {
+               bool advanced, int slot) {
   Param p;
   p.name = name;
   p.type = ParamType::Vec4f;
@@ -73,6 +74,10 @@ Param roiParam(const std::string& name, const char* label, const char* doc, cons
   p.group = group;
   p.advanced = advanced;
   p.componentLabels = {"X Min", "Y Min", "X Max", "Y Max"};
+  p.semantic = "roi";
+  const std::string prefix = "template" + std::to_string(slot);
+  p.roiBackdrop.dirParam = "templateDir";
+  p.roiBackdrop.fileParams = {prefix + "Left", prefix + "Right"};
   return p;
 }
 
@@ -103,9 +108,15 @@ Status readScan(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                 ExecContext& ctx) {
   Data primary;
   Data secondary;
-  if (params.choice("source") == "inputs") {
+  // L18：两个输入接上了（或被宿主注入了）就直接用它们，不读目录 —— source 只决定
+  // 「没给输入时去哪读」。只给一个在加载期就被 validate 拦下了。
+  if (inputs.has("primary") && inputs.has("secondary")) {
     primary = inputs.get("primary");
     secondary = inputs.get("secondary");
+  } else if (params.choice("source") == "inputs") {
+    return Status::Error(Phase::Execute, "missing_input",
+                         "source=inputs，但 primary / secondary 既没有接线也没有被宿主注入", {},
+                         "primary");
   } else {
     // 1280 个槽原样留着（NaN 槽不剔）：模型定位靠槽号与标签对齐，模板定位的裁剪与
     // 整体框的中位数本来就跳过非有限点，所以两条路都吃这一份。
@@ -152,20 +163,19 @@ std::string readScanKey(const ParamView& params) {
   return fine::profilePairKey(params);
 }
 
-std::vector<Issue> validateReadScan(const ParamView& params, const std::set<std::string>& connected) {
+/// L18 之后只剩一条：两个输入要么都给、要么都不给。宿主注入也算「给了」（执行器把注入的
+/// 输入端口算进 connected）；lyflow validate 看不见注入，所以 source=inputs 而两个都没接
+/// 在这里不报，留到执行期报 missing_input。
+std::vector<Issue> validateReadScan(const ParamView&, const std::set<std::string>& connected) {
   std::vector<Issue> issues;
   const bool p = connected.count("primary") != 0;
   const bool s = connected.count("secondary") != 0;
-  if (params.choice("source") == "inputs") {
-    if (!p || !s) {
-      issues.push_back(Issue::error("missing_input", "source=inputs 时 primary 与 secondary 都要接",
-                                    "source", p ? "secondary" : "primary"));
-    }
-  } else if (p || s) {
-    issues.push_back(Issue::error("bad_param",
-                                  "接了 primary / secondary 就把 source 改成 inputs —— 否则接上的云"
-                                  "不会被用到",
-                                  "source", p ? "primary" : "secondary"));
+  if (p != s) {
+    issues.push_back(Issue::error("missing_input",
+                                  std::string("primary 与 secondary 要么都接（或都注入），要么都不接；"
+                                              "现在只有 ") +
+                                      (p ? "primary" : "secondary"),
+                                  "source", p ? "secondary" : "primary"));
   }
   return issues;
 }
@@ -624,7 +634,8 @@ void registerBlockOps(Registry& r) {
   {
     OperatorDesc op;
     op.id = "gap.read_scan";
-    op.version = "1.0.0";
+    // 1.1.0：接上 / 注入的两个输入压过 source（L18），validate 只查「成对给」
+    op.version = "1.1.0";
     op.label = "读剖面";
     op.category = "间隙/积木";
     op.keywords = {"read", "scan", "pcd", "剖面", "测点", "积木"};
@@ -632,19 +643,22 @@ void registerBlockOps(Registry& r) {
         "读一个测点的双头线扫剖面，换到测量帧，出一个 ScanPair。primary / secondary 保留原始"
         "1280 个槽（NaN 槽不剔，模型定位要靠槽号）；merged 是两片有限点合并（secondary 在前）"
         "之后、按需做过半径离群剔除的云。\n"
-        "宿主要注入内存里的点云时，把 source 改成 inputs，在 primary / secondary 上接一个"
-        "gap.load_profile_pair（或 gap.camera_guard）并注入那一个节点。";
+        "primary / secondary 两个输入接上了（或被宿主注入了）就直接用它们、不读目录；"
+        "宿主注入内存里的两片云就注入这个节点的这两个输入端口（C ABI 的 run inputs、"
+        "CLI 的 --input n_scan.primary=<pcd>）。不想配目录时把 source 设成 inputs。";
     op.inputs = {
         Port{"primary", "PointCloud", "Primary",
-             "source=inputs 时用：传感器帧的 Master 云（gap.load_profile_pair 的输出）。", false},
-        Port{"secondary", "PointCloud", "Secondary", "source=inputs 时用：传感器帧的 Slave 云。",
+             "传感器帧的 Master 云（原始槽，NaN 可留着）。接上或被注入时压过 source。", false},
+        Port{"secondary", "PointCloud", "Secondary", "传感器帧的 Slave 云。与 primary 成对给。",
              false},
     };
     op.outputs = {Port{"scan", "Bundle<gap.ScanPair>", "Scan", "测量帧的剖面对。", true}};
 
     Param source = paramOf(r, "gap.load_profile_pair", "source");
-    source.doc = "在目录里按前缀配对、直接指两个文件，还是用 primary / secondary 两个输入。";
-    source.options.push_back(EnumOption{"inputs", "用两个输入", "宿主注入或上游已经读好的两片云。"});
+    source.doc =
+        "没给 primary / secondary 时去哪读：目录里按前缀配对，或直接指两个文件。"
+        "inputs = 不读盘，两片云只从输入来（接线或宿主注入）。";
+    source.options.push_back(EnumOption{"inputs", "只用两个输入", "宿主注入或上游已经读好的两片云。"});
     Param removeOutliers =
         boolParam("removeOutliers", "Remove Outliers", false,
                   "在合并云上做一次半径离群剔除（common_settings.filter.using_removal）。");
@@ -719,13 +733,18 @@ void registerBlockOps(Registry& r) {
 
     std::vector<Param> params = {
         dir,
-        roiParam("datumRoi", "Datum ROI", "段差基准面的框（模板坐标系，毫米）。", "ROI", false),
-        roiParam("targetRoi", "Target ROI", "段差参考面的框。", "ROI", false),
-        roiParam("seamLeftRoi", "Seam Left ROI", "缝左侧的框（左圆）。", "ROI", false),
-        roiParam("seamRightRoi", "Seam Right ROI", "缝右侧的框（右圆）。", "ROI", false),
+        roiParam("datumRoi", "Datum ROI", "段差基准面的框（模板坐标系，毫米）。", "ROI", false, 1),
+        roiParam("targetRoi", "Target ROI", "段差参考面的框。", "ROI", false, 1),
+        roiParam("seamLeftRoi", "Seam Left ROI", "缝左侧的框（左圆）。", "ROI", false, 1),
+        roiParam("seamRightRoi", "Seam Right ROI", "缝右侧的框（右圆）。", "ROI", false, 1),
         paramOf(r, "gap.align_template", "minScore", 0),
     };
-    Param overallRoi = renamed(paramOf(r, "gap.overall_roi", "roi", 1, "整体框"), "overallRoi");
+    // 默认值是一个大到不裁的框：空白画布上拼出来的图不填高级参数也得能跑（细粒度算子的默认
+    // [-1, -1, 1, 1] 会把整片剖面裁没）。导入器总是显式写这一项，导入的图不受影响。
+    Param overallRoi = withDefault(
+        renamed(paramOf(r, "gap.overall_roi", "roi", 1, "整体框"), "overallRoi"),
+        Value::vec({-1000.0, -1000.0, 1000.0, 1000.0}));
+    overallRoi.doc = "整体 ROI（测量帧，毫米）。默认大到不裁；配置里的 overall_roi 由导入器写进来。";
     Param overallMode = renamed(paramOf(r, "gap.overall_roi", "mode", 1, "整体框"), "overallMode");
     Param overallCamera =
         renamed(paramOf(r, "gap.overall_roi", "usingCamera", 1, "整体框"), "overallCamera");
@@ -768,7 +787,7 @@ void registerBlockOps(Registry& r) {
       static const char* kRoles[4] = {"Datum", "Target", "SeamLeft", "SeamRight"};
       for (const char* role : kRoles) {
         Param roi = roiParam(prefix + role + "Roi", role, "覆盖的框（模板坐标系，毫米）。",
-                             group.c_str(), true);
+                             group.c_str(), true, k);
         roi.visibleWhen.param = prefix + "Override";
         roi.visibleWhen.eq = Value::boolean(true);
         params.push_back(roi);

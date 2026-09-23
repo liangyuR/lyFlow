@@ -569,17 +569,202 @@ TEST_CASE("方向基准：写得成积木就是一个 gap.datum_direction，写�
   }
 }
 
-TEST_CASE("read_scan：source=inputs 要两个输入都接，接了输入又不是 inputs 也报") {
+TEST_CASE("随包的六个片段都注册了、自检干净，并进了 manifest（m8-plan L14）") {
+  const Registry& r = ensureRegistry();
+  std::set<std::string> ids;
+  for (const SnippetDesc& s : r.snippets()) {
+    CHECK(s.parseError.empty());
+    ids.insert(s.id);
+  }
+  for (const char* want : {"gap.flush_line_end", "gap.flush_selected_point", "gap.gap_circles",
+                           "gap.locate_model_template_fallback", "gap.backup_camera",
+                           "gap.measure_skeleton"}) {
+    CAPTURE(want);
+    CHECK(ids.count(want) == 1);
+  }
+  CHECK(r.validate().empty());
+  const Json manifest = Json::parse(r.toManifestJson());
+  REQUIRE(manifest.contains("snippets"));
+  bool skeleton = false;
+  for (const Json& s : manifest["snippets"]) {
+    if (s["id"] != "gap.measure_skeleton") continue;
+    skeleton = true;
+    CHECK(s["label"] == "测点骨架");
+    CHECK(s["pack"].get<std::string>().rfind("gap", 0) == 0);
+    CHECK(s["nodes"].size() == 8);
+    CHECK(s["ports"]["inputs"].size() == 8);
+  }
+  CHECK(skeleton);
+
+  // 坏片段在自检里报出来：算子不存在、端口不存在、对外输入其实已经接了边
+  Registry bad;
+  packs::gap::registerPackOps(bad);
+  bad.addSnippet(parseSnippet(R"({"schemaVersion": 1, "id": "x.bad", "label": "坏",
+    "nodes": [{"id": "a", "op": "gap.nope"}, {"id": "b", "op": "gap.flush"}],
+    "edges": [{"from": {"node": "b", "port": "nope"}, "to": {"node": "b", "port": "baseLine"}}],
+    "ports": {"inputs": [{"node": "b", "port": "baseLine"}]}})",
+                              "bad.lyflow-snippet.json"));
+  bad.addSnippet(parseSnippet("{ not json", "broken.lyflow-snippet.json"));
+  std::string all;
+  for (const std::string& p : bad.validate()) {
+    if (p.find("snippet") != std::string::npos) all += p + "\n";
+  }
+  MESSAGE(all);
+  CHECK(all.find("gap.nope") != std::string::npos);
+  CHECK(all.find("'nope'") != std::string::npos);
+  CHECK(all.find("已经接了边") != std::string::npos);
+  CHECK(all.find("broken.lyflow-snippet.json") != std::string::npos);
+}
+
+TEST_CASE("roi 语义标记（m8-plan L15）：locate_template 的四个角色框画在所在模板槽的左右模板上") {
+  const OperatorDesc* op = ensureRegistry().find("gap.locate_template");
+  REQUIRE(op != nullptr);
+  const Param* datum = findParam(*op, "datumRoi");
+  REQUIRE(datum != nullptr);
+  CHECK(datum->semantic == "roi");
+  CHECK(datum->roiBackdrop.dirParam == "templateDir");
+  CHECK(datum->roiBackdrop.fileParams ==
+        std::vector<std::string>{"template1Left", "template1Right"});
+  const Param* slot3 = findParam(*op, "template3SeamLeftRoi");
+  REQUIRE(slot3 != nullptr);
+  CHECK(slot3->roiBackdrop.fileParams ==
+        std::vector<std::string>{"template3Left", "template3Right"});
+  // 数据坐标系里的框：没有 backdrop
+  const Param* overall = findParam(*op, "overallRoi");
+  REQUIRE(overall != nullptr);
+  CHECK(overall->semantic == "roi");
+  CHECK_FALSE(overall->roiBackdrop.isSet());
+
+  const Json manifest = Json::parse(ensureRegistry().toManifestJson());
+  for (const Json& o : manifest["operators"]) {
+    if (o["id"] != "gap.locate_template") continue;
+    for (const Json& p : o["params"]) {
+      if (p["name"] != "targetRoi") continue;
+      CHECK(p["semantic"] == "roi");
+      CHECK(p["roiBackdrop"]["dir"] == "templateDir");
+      CHECK(p["roiBackdrop"]["files"].size() == 2);
+    }
+  }
+}
+
+TEST_CASE("read_scan（L18）：两个输入要么都给要么都不给；给了就用它们，与 source 无关") {
   const OperatorDesc* op = packRegistry().find("gap.read_scan");
   REQUIRE(op != nullptr);
   REQUIRE(op->validate != nullptr);
   ParamMap params;
   for (const Param& p : op->params) params[p.name] = p.def;
   const fs::path base;
-  params["source"] = Value::text("inputs");
-  CHECK(op->validate(ParamView(params, base), {"primary"}).size() == 1);
-  CHECK(op->validate(ParamView(params, base), {"primary", "secondary"}).empty());
-  params["source"] = Value::text("dir");
-  CHECK(op->validate(ParamView(params, base), {"primary", "secondary"}).size() == 1);
-  CHECK(op->validate(ParamView(params, base), {}).empty());
+  for (const char* source : {"inputs", "dir", "files"}) {
+    CAPTURE(source);
+    params["source"] = Value::text(source);
+    CHECK(op->validate(ParamView(params, base), {"primary"}).size() == 1);
+    CHECK(op->validate(ParamView(params, base), {"secondary"}).size() == 1);
+    CHECK(op->validate(ParamView(params, base), {"primary", "secondary"}).empty());
+    // 两个都没接：source=inputs 时可能由宿主注入，lyflow validate 看不见注入，不在这里报
+    CHECK(op->validate(ParamView(params, base), {}).empty());
+  }
+}
+
+namespace {
+
+void collectEvent(const char* json, void* user) {
+  static_cast<std::vector<Json>*>(user)->push_back(Json::parse(json));
+}
+
+/// 经 C ABI 跑一遍、把两片云注入 n_scan 的 primary / secondary（宿主的那条路）。
+Reading runInjected(const Json& doc, const fs::path& baseDir, const lyflow::PointCloud& primary,
+                    const lyflow::PointCloud& secondary, const std::string& runId) {
+  lyflow_run_input in[2]{};
+  in[0].node_id = "n_scan";
+  in[0].port = "primary";
+  in[0].kind = LYFLOW_INPUT_POINT_CLOUD;
+  // rgb 也带上：gap 的强度在 R 上（模型定位的特征），宿主给的是整片云
+  in[0].count = static_cast<std::uint32_t>(primary.pointCount());
+  in[0].xyz = primary.xyz.data();
+  in[0].rgb = primary.rgb.empty() ? nullptr : primary.rgb.data();
+  in[1] = in[0];
+  in[1].port = "secondary";
+  in[1].count = static_cast<std::uint32_t>(secondary.pointCount());
+  in[1].xyz = secondary.xyz.data();
+  in[1].rgb = secondary.rgb.empty() ? nullptr : secondary.rgb.data();
+
+  const std::string base = baseDir.u8string();
+  lyflow_run_options opts{};
+  opts.run_id = runId.c_str();
+  opts.base_dir = base.c_str();
+  opts.no_reuse = 1;
+  opts.inputs = in;
+  opts.input_count = 2;
+  std::vector<Json> events;
+  const std::string graph = doc.dump();
+  lyflow_run* handle = lyflow_run_start(graph.c_str(), &opts, &collectEvent, &events);
+  REQUIRE(handle != nullptr);
+  lyflow_run_join(handle);
+
+  Reading r;
+  for (const Json& e : events) {
+    if (e.value("kind", "") == "run_finished") r.status = e.value("status", "");
+    if (e.value("kind", "") == "node_state" && e.value("state", "") == "error") MESSAGE(e.dump());
+    // 注入落在 read_scan 本身：它是真跑的（不是 provided），前面没有别的读盘节点
+    if (e.value("kind", "") == "node_state" && e.value("nodeId", "") == "n_scan" &&
+        e.value("state", "") == "done") {
+      CHECK_FALSE(e["stats"].contains("provided"));
+    }
+  }
+  char* raw = lyflow_run_outputs(runId.c_str());
+  const Json outputs = Json::parse(raw);
+  lyflow_string_free(raw);
+  lyflow_run_free(handle);
+  const Json& flush = outputs["flush"]["value"];
+  const Json& gap = outputs["gap"]["value"];
+  if (flush.value("ok", false) && gap.value("ok", false)) {
+    r.flush = flush["value"].get<double>();
+    r.gap = gap["value"].get<double>();
+    r.ok = true;
+  }
+  return r;
+}
+
+}  // namespace
+
+TEST_CASE("宿主把两片云直接注入 read_scan 的 primary / secondary：与从目录读取逐位相同（L18）") {
+  Scene scene("inject");
+  const Json doc = importAs("StandardGap.yml:template", kSyntheticConfig, scene.root);
+  const Reading fromDir = run(doc, scene.root);
+  REQUIRE(fromDir.ok);
+
+  // 宿主手里的两片云：与 read_scan 自己读到的是同一份（传感器帧、NaN 槽原样留着）
+  const Json loader = test::makeGraph(
+      {test::N{"load", "gap.load_profile_pair",
+               Json{{"dir", scene.root.u8string()}, {"dropNonFinite", false}}}},
+      {});
+  test::Session ls(loader, scene.root);
+  REQUIRE(ls.wait().runStatus() == "ok");
+  Data primary, secondary;
+  REQUIRE(exec::ResultStore::instance().get(ls.runId(), "load", "primary", primary));
+  REQUIRE(exec::ResultStore::instance().get(ls.runId(), "load", "secondary", secondary));
+  const lyflow::PointCloud& p = *primary.asCloud();
+  const lyflow::PointCloud& s = *secondary.asCloud();
+
+  SUBCASE("图原样（source=dir、目录也在）：注入的两片云压过目录") {
+    const Reading injected = runInjected(doc, scene.root, p, s, "inject-dir");
+    REQUIRE(injected.ok);
+    CHECK(injected.flush == fromDir.flush);
+    CHECK(injected.gap == fromDir.gap);
+  }
+  SUBCASE("source=inputs、不给目录：lyflow validate 照样干净，跑出来一样") {
+    Json bare = doc;
+    Json& params = nodeOf(bare, "n_scan")["params"];
+    params["source"] = "inputs";
+    params.erase("dir");
+    CHECK(errorsOf(bare).empty());
+    const Reading injected = runInjected(bare, scene.root, p, s, "inject-inputs");
+    REQUIRE(injected.ok);
+    CHECK(injected.flush == fromDir.flush);
+    CHECK(injected.gap == fromDir.gap);
+    // 不注入就跑：执行期报 missing_input，不会悄悄去读一个空目录
+    test::Session none(bare, scene.root);
+    test::RunLog& log = none.wait();
+    CHECK(log.nodeEvent("n_scan", "error")["errors"][0]["code"] == "missing_input");
+  }
 }

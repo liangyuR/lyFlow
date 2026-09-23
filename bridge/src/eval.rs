@@ -905,6 +905,7 @@ impl<'a> Engine<'a> {
                 no_cache: self.no_cache,
                 stream: None,
                 params_json: None,
+                inputs: &[],
             },
         )?;
         let wants_outputs = enumerate || self.metrics.iter().any(MetricPath::needs_outputs);

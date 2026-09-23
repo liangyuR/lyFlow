@@ -49,6 +49,8 @@ void registerBundles(Registry& r);
 /// make / split 两对细粒度算子（bundle_ops.cpp）与七个积木算子（blocks.cpp）。
 void registerBundleOps(Registry& r);
 void registerBlockOps(Registry& r);
+/// 随包的片段（snippets/*.lyflow-snippet.json，m8-plan L14）。
+void registerSnippets(Registry& r);
 
 /// ScanPair = primary / secondary / merged 三片测量帧的云。
 Data scanPairOf(Data primary, Data secondary, Data merged);

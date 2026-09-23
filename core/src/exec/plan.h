@@ -33,6 +33,8 @@ struct PlanNode {
   bool deferred = false;
   /// 该节点的输出由 RunOptions::inputs 注入：不调 compute（ADR-0017）。
   bool provided = false;
+  /// 由宿主注入的**输入**端口（m8-plan L18）：compute 照常调，这些端口的值取注入数据。
+  std::set<std::string> injectedInputs;
   std::vector<Diagnostic> errors;     ///< 该节点的全部阻塞性诊断（D5）
   ParamMap params;                    ///< 已合并默认值（迁移之后的）
   /// 图里**显式写了**的参数键，**跑完迁移之后**的那一份。`lyflow params` 的
@@ -81,8 +83,11 @@ struct BuildOptions {
   std::vector<std::string> targets;
   /// 非空时混进每个 cacheKey，把预览结果关进独立的缓存命名空间（F5）。
   std::string cacheNamespace;
-  /// 被注入的节点 id → 注入数据的摘要。进 cacheKey，也让编译期知道该节点是 provided。
+  /// 被注入的节点 id → 注入数据的摘要。进 cacheKey（输出注入与输入注入都进）。
   std::unordered_map<std::string, std::string> providedDigest;
+  /// 被注入的节点 id → 注入的端口名。编译期按算子声明分两种：名字是输出端口就是
+  /// 整节点注入（provided，ADR-0017），只是输入端口就是输入注入（m8-plan L18）。
+  std::unordered_map<std::string, std::set<std::string>> injectedPorts;
 };
 
 /// 校验 + 编译。诊断（含 warning 与迁移）全部写进 diags；节点级诊断同时挂在 PlanNode 上。

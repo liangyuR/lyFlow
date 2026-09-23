@@ -889,6 +889,36 @@ class Scheduler {
       }
       values[b.port] = std::move(d);
     }
+    // 宿主注入的输入端口（m8-plan L18）：这些端口没有连线，值直接取注入数据。
+    // 与连线来的值过同一道门：Kind 对不上报 type_mismatch，契约照查。
+    if (!node.injectedInputs.empty()) {
+      auto byNode = injected_.find(node.id);
+      for (const std::string& port : node.injectedInputs) {
+        if (byNode == injected_.end()) break;
+        auto hit = byNode->second.find(port);
+        if (hit == byNode->second.end()) continue;
+        const Data& d = hit->second;
+        const Port* declared = findPortByName(node.op->inputs, port);
+        if (!declared) continue;
+        const Data::Kind expected = kindFromTypeName(declared->type);
+        if (expected != Data::Kind::None && d.kind() != expected) {
+          return Status::Error(Phase::Execute, "type_mismatch",
+                               "注入的输入端口 '" + port + "' 需要 " + declared->type +
+                                   "，实际收到 " + d.typeName(),
+                               {}, port);
+        }
+        if (!node.bypass) {
+          nlohmann::json contractWant;
+          nlohmann::json contractGot;
+          std::string message;
+          if (!checkPortContract(declared->contract, d, contractWant, contractGot, message)) {
+            sink_.contractViolation(node.id, port, std::move(contractWant), std::move(contractGot));
+            return Status::Error(Phase::Execute, "contract_violation", message, {}, port);
+          }
+        }
+        values[port] = d;
+      }
+    }
     return Status::Ok();
   }
 
@@ -1372,11 +1402,13 @@ void Run::workImpl() {
   // 注入的数据按节点归拢，顺手算出进 cacheKey 的摘要（ADR-0017）。
   std::unordered_map<std::string, std::unordered_map<std::string, Data>> injected;
   std::unordered_map<std::string, std::string> providedDigest;
+  std::unordered_map<std::string, std::set<std::string>> injectedPorts;
   {
     std::map<std::string, Hasher> digests;
     for (const InjectedInput& in : options_.inputs) {
       if (in.nodeId.empty() || in.port.empty()) continue;
       injected[in.nodeId][in.port] = in.data;
+      injectedPorts[in.nodeId].insert(in.port);
       Hasher& h = digests[in.nodeId];
       h.add(in.port);
       h.add(std::string(in.data.typeName()));
@@ -1396,6 +1428,7 @@ void Run::workImpl() {
     build.targets = options_.targets;
     build.cacheNamespace = previewNamespace(options_);
     build.providedDigest = providedDigest;
+    build.injectedPorts = injectedPorts;
     buildPlan(ensureRegistry(), raw, build, plan, diags);
   }
 

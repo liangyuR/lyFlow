@@ -73,6 +73,9 @@ typedef struct lyflow_run lyflow_run;
 
 /* 运行时注入一个源节点的输出（v7）。被注入的节点整个 compute 都不会被调用，
    所以它声明的**每个**输出端口都要给一项，否则执行器报 output_not_written。
+   port 只是该算子的**输入**端口（不是输出端口）时是输入注入（m8-plan L18，加在 v10 里）：
+   compute 照常调用，这个输入端口的值就是注入的数据；端口上不能同时有连线（bad_input），
+   同一个节点也不能既注入输出又注入输入。例如 gap.read_scan 的 primary / secondary。
    缓冲由调用方持有，必须活到 lyflow_run_start 返回为止（core 内部会拷一份）。 */
 typedef struct {
   const char* node_id;

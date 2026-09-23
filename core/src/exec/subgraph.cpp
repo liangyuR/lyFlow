@@ -69,6 +69,11 @@ Param paramFromJson(const SubParam& sp) {
   p.unit = j.value("unit", std::string());
   p.placeholder = j.value("placeholder", std::string());
   p.mode = j.value("mode", std::string());
+  // 语义标记跟着提升走（框拖动照样可用）；roiBackdrop 指的是内部算子的参数名，
+  // 到了子图这一层对不上，不带过来。
+  if (j.value("semantic", std::string()) == "roi" && p.type == ParamType::Vec4f) {
+    p.semantic = "roi";
+  }
   readOptional(j, "min", p.min);
   readOptional(j, "max", p.max);
   readOptional(j, "softMin", p.softMin);

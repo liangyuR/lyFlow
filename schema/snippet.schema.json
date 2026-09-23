@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/liangyuR/lyFlow/schema/snippet.schema.json",
+  "title": "LyFlowSnippet",
+  "description": "片段文件 *.lyflow-snippet.json（m8-plan L14）：一组节点 + 边 + 对外端口提示。插入就是带自动连线的粘贴，插完是普通节点，没有展开 / 收回。节点与边的写法与 GraphDoc 相同，只是 id 在片段内唯一即可（插入时重新分配）。",
+  "type": "object",
+  "required": ["schemaVersion", "id", "label", "nodes"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "id": { "type": "string", "minLength": 1, "description": "全局唯一，用 . 分命名空间，例如 gap.measure_skeleton。" },
+    "label": { "type": "string", "minLength": 1, "description": "面板上显示的名字。" },
+    "category": { "type": "string", "description": "面板里的分组。" },
+    "doc": { "type": "string" },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "op"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "op": { "type": "string", "minLength": 1 },
+          "params": { "type": "object", "description": "稀疏参数，与 GraphDoc 相同。" },
+          "ui": {
+            "type": "object",
+            "properties": {
+              "position": {
+                "type": "object",
+                "required": ["x", "y"],
+                "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+              },
+              "title": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from", "to"],
+        "additionalProperties": false,
+        "properties": {
+          "from": { "$ref": "#/$defs/portRef" },
+          "to": { "$ref": "#/$defs/portRef" }
+        }
+      }
+    },
+    "ports": {
+      "type": "object",
+      "description": "对外端口提示。inputs = 插入时要自动连线的输入（片段里没接边的那些）；outputs = 片段对外给出的输出，只作说明。",
+      "additionalProperties": false,
+      "properties": {
+        "inputs": { "type": "array", "items": { "$ref": "#/$defs/hint" } },
+        "outputs": { "type": "array", "items": { "$ref": "#/$defs/hint" } }
+      }
+    }
+  },
+  "$defs": {
+    "portRef": {
+      "type": "object",
+      "required": ["node", "port"],
+      "additionalProperties": false,
+      "properties": { "node": { "type": "string" }, "port": { "type": "string" } }
+    },
+    "hint": {
+      "type": "object",
+      "required": ["node", "port"],
+      "additionalProperties": false,
+      "properties": {
+        "node": { "type": "string" },
+        "port": { "type": "string" },
+        "hint": { "type": "string", "description": "给人看的一句话。" }
+      }
+    }
+  }
+}

@@ -6,6 +6,7 @@ pub mod core_ffi;
 mod eval;
 pub mod graph;
 mod patch;
+pub mod pcd;
 mod perturb;
 pub mod ulid;
 
@@ -84,6 +85,8 @@ pub fn run() {
             commands::get_output_cloud,
             commands::get_output_tensor,
             commands::get_output_indices,
+            commands::load_cloud_file,
+            commands::list_snippets,
             commands::get_recent_files,
             commands::push_recent_file,
             commands::write_backup,

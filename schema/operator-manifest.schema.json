@@ -24,6 +24,11 @@
       "type": "array",
       "description": "注册了的「文本 → 图」导入器（ADR-0017）。前端据此列出「导入…」，不硬编码格式名。没有任何导入器时这一项不出现。",
       "items": { "$ref": "#/$defs/importer" }
+    },
+    "snippets": {
+      "type": "array",
+      "description": "算子包随附的片段（m8-plan L14）：一组节点 + 边 + 对外端口提示，插入就是带自动连线的粘贴。节点与边的写法与 GraphDoc 相同，文件格式见 schema/snippet.schema.json。没有任何片段时这一项不出现。",
+      "items": { "$ref": "#/$defs/snippet" }
     }
   },
   "$defs": {
@@ -208,7 +213,37 @@
         "mode": { "enum": ["open", "save", "dir"], "description": "path 的选择模式。" },
         "alpha": { "type": "boolean", "description": "color 是否带 alpha 通道。" },
         "visibleWhen": { "$ref": "#/$defs/condition" },
-        "enabledWhen": { "$ref": "#/$defs/condition" }
+        "enabledWhen": { "$ref": "#/$defs/condition" },
+        "semantic": {
+          "enum": ["roi"],
+          "description": "语义标记（m8-plan L15），只有编辑器读。roi = vec4f 的 [xMin, yMin, xMax, yMax]，XY 平面上的一个框，单位按 unit；编辑器在 2D 剖面视图里把它画成可拖、可拉伸的框。"
+        },
+        "roiBackdrop": {
+          "type": "object",
+          "description": "只对 semantic=roi 有意义：框画在 <dir 参数的目录>/<files 参数的每个文件名> 拼起来的云上（框在那片云的坐标系里，例如模板坐标系）。不给 = 画在节点显示的那片数据云上。",
+          "required": ["dir"],
+          "additionalProperties": false,
+          "properties": {
+            "dir": { "type": "string", "description": "本算子一个 path 参数的名字。" },
+            "files": { "type": "array", "items": { "type": "string" }, "description": "本算子 string / path 参数的名字。" }
+          }
+        }
+      }
+    },
+    "snippet": {
+      "type": "object",
+      "description": "算子包随附的片段（m8-plan L14），即包目录 snippets/ 下的 *.lyflow-snippet.json（schema/snippet.schema.json），构建时编进包里。",
+      "required": ["id", "label", "nodes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "category": { "type": "string" },
+        "doc": { "type": "string" },
+        "pack": { "type": "string" },
+        "nodes": { "type": "array", "minItems": 1, "items": { "type": "object" } },
+        "edges": { "type": "array", "items": { "type": "object" } },
+        "ports": { "type": "object" }
       }
     },
     "condition": {

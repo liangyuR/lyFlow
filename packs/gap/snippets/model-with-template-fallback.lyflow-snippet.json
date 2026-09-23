@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "gap.locate_model_template_fallback",
+  "label": "模型定位 + 模板回退",
+  "category": "间隙",
+  "doc": "模型定位与模板定位并联：模型成功就用模型的角色框与剖面对，失败才去跑模板定位（flow.fallback 的 b 是惰性的）。接在 gap.read_scan 后面；modelPath 通常绑到顶层参数。",
+  "nodes": [
+    { "id": "model", "op": "gap.locate_model",
+      "ui": { "position": { "x": 0, "y": 0 }, "title": "模型定位" } },
+    { "id": "template", "op": "gap.locate_template",
+      "ui": { "position": { "x": 0, "y": 200 }, "title": "模板定位（备用）" } },
+    { "id": "rois", "op": "flow.fallback",
+      "ui": { "position": { "x": 260, "y": 0 }, "title": "回退角色框" } },
+    { "id": "scan", "op": "flow.fallback",
+      "ui": { "position": { "x": 260, "y": 170 }, "title": "回退剖面对" } }
+  ],
+  "edges": [
+    { "from": { "node": "model", "port": "rois" }, "to": { "node": "rois", "port": "a" } },
+    { "from": { "node": "template", "port": "rois" }, "to": { "node": "rois", "port": "b" } },
+    { "from": { "node": "model", "port": "scan" }, "to": { "node": "scan", "port": "a" } },
+    { "from": { "node": "template", "port": "scan" }, "to": { "node": "scan", "port": "b" } }
+  ],
+  "ports": {
+    "inputs": [
+      { "node": "model", "port": "scan", "hint": "gap.read_scan 的剖面对（原始槽）" },
+      { "node": "template", "port": "scan", "hint": "gap.read_scan 的剖面对" }
+    ],
+    "outputs": [
+      { "node": "rois", "port": "out", "hint": "角色框（RoiSet）" },
+      { "node": "scan", "port": "out", "hint": "定位之后的剖面对（ScanPair）" },
+      { "node": "rois", "port": "choice", "hint": "走了哪一支，接 gap.result_bundle 的 fallback" }
+    ]
+  }
+}

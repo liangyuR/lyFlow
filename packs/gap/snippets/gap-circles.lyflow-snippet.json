@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "gap.gap_circles",
+  "label": "间隙 · 圆",
+  "category": "间隙",
+  "doc": "在缝两侧的框里各拟一个圆，量两圆之间的间隙并判定。接在定位节点的 rois 与 scan 后面。",
+  "nodes": [
+    { "id": "circles", "op": "gap.seam_circles",
+      "ui": { "position": { "x": 0, "y": 0 }, "title": "缝两侧圆" } },
+    { "id": "gap", "op": "gap.gap",
+      "ui": { "position": { "x": 260, "y": 0 }, "title": "间隙" } },
+    { "id": "judge", "op": "gap.judge",
+      "ui": { "position": { "x": 500, "y": 0 }, "title": "判定间隙" } }
+  ],
+  "edges": [
+    { "from": { "node": "circles", "port": "left" }, "to": { "node": "gap", "port": "left" } },
+    { "from": { "node": "circles", "port": "right" }, "to": { "node": "gap", "port": "right" } },
+    { "from": { "node": "gap", "port": "value" }, "to": { "node": "judge", "port": "value" } }
+  ],
+  "ports": {
+    "inputs": [
+      { "node": "circles", "port": "scan", "hint": "定位之后的剖面对" },
+      { "node": "circles", "port": "rois", "hint": "定位给出的角色框" }
+    ],
+    "outputs": [
+      { "node": "gap", "port": "value", "hint": "间隙读数（毫米）" },
+      { "node": "judge", "port": "value", "hint": "带判定的间隙" }
+    ]
+  }
+}

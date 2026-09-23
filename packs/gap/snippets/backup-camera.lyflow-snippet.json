@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "gap.backup_camera",
+  "label": "备用相机回退",
+  "category": "间隙",
+  "doc": "主相机与备用相机各一个读剖面节点并联：主相机读成功就用它，失败才去读备用相机（flow.fallback 的 b 是惰性的）。两个节点的目录分别指向两台相机的测点目录。",
+  "nodes": [
+    { "id": "main", "op": "gap.read_scan",
+      "ui": { "position": { "x": 0, "y": 0 }, "title": "读剖面（主相机）" } },
+    { "id": "backup", "op": "gap.read_scan",
+      "ui": { "position": { "x": 0, "y": 190 }, "title": "读剖面（备用相机）" } },
+    { "id": "scan", "op": "flow.fallback",
+      "ui": { "position": { "x": 260, "y": 90 }, "title": "回退剖面对" } }
+  ],
+  "edges": [
+    { "from": { "node": "main", "port": "scan" }, "to": { "node": "scan", "port": "a" } },
+    { "from": { "node": "backup", "port": "scan" }, "to": { "node": "scan", "port": "b" } }
+  ],
+  "ports": {
+    "inputs": [],
+    "outputs": [
+      { "node": "scan", "port": "out", "hint": "剖面对（ScanPair），接定位节点" }
+    ]
+  }
+}

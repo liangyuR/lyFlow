@@ -18,6 +18,8 @@ class Registry {
   void addOperator(OperatorDesc op);
   /// 注册一种「文本 → 图」的导入器（ADR-0017）。同 kind 重复注册时后者覆盖前者。
   void addImporter(ImporterDesc importer);
+  /// 注册一份片段（m8-plan L14）。同 id 重复注册时后者覆盖前者。
+  void addSnippet(SnippetDesc snippet);
   void clear();
 
   /// 之后 addOperator 进来的算子归属哪个包（S7）。生成的注册入口在调包之前设、
@@ -32,6 +34,7 @@ class Registry {
   const std::vector<BundleDesc>& bundles() const { return bundles_; }
   const std::vector<OperatorDesc>& operators() const { return operators_; }
   const std::vector<ImporterDesc>& importers() const { return importers_; }
+  const std::vector<SnippetDesc>& snippets() const { return snippets_; }
 
   const OperatorDesc* find(const std::string& id) const;
   const PortType* findType(const std::string& name) const;
@@ -64,6 +67,7 @@ class Registry {
   std::vector<BundleDesc> bundles_;
   std::vector<OperatorDesc> operators_;
   std::vector<ImporterDesc> importers_;
+  std::vector<SnippetDesc> snippets_;
   /// operators_ 里前多少个是内置的。setLibraryOperators 从这里往后重写。
   std::size_t builtinCount_ = 0;
   std::string currentPack_;

@@ -34,6 +34,8 @@ class ClientError : public std::runtime_error {
   explicit ClientError(const std::string& what) : std::runtime_error(what) {}
 };
 
+/// 注入一片点云。port 是输出端口时整节点注入（compute 不跑）；只是输入端口时是输入注入，
+/// compute 照常跑（m8-plan L18，例如 gap.read_scan 的 primary / secondary）。见 c_api.h。
 struct InputCloud {
   std::string nodeId;
   std::string port;

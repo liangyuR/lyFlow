@@ -5,6 +5,28 @@ file(GLOB GAP_TESTS CONFIGURE_DEPENDS "${LYFLOW_PACK_DIR}/tests/*.cpp")
 # onnxruntime 与 std-ml 用同一份（那个包已经把根目录解析好了）。
 find_package(yaml-cpp CONFIG QUIET)
 
+# 随包的片段（m8-plan L14）：snippets/*.lyflow-snippet.json 编进包里，经 manifest 的 snippets 段
+# 给出（ops/snippets.cpp 注册）。按字节写成十六进制数组：不受 MSVC 字符串字面量长度的限制，
+# 也不经过源文件编码。内容一改就重新 configure。
+file(GLOB GAP_SNIPPETS CONFIGURE_DEPENDS "${LYFLOW_PACK_DIR}/snippets/*.lyflow-snippet.json")
+list(SORT GAP_SNIPPETS)
+set(GAP_GENERATED "${CMAKE_BINARY_DIR}/generated/gap")
+set(_gap_inc "// 由 packs/gap/lyflow_op_pack.cmake 从 snippets/*.lyflow-snippet.json 生成，勿手改。\n")
+set(_gap_table "")
+set(_gap_i 0)
+foreach(_f IN LISTS GAP_SNIPPETS)
+  file(READ "${_f}" _hex HEX)
+  string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _hex "${_hex}")
+  get_filename_component(_name "${_f}" NAME)
+  string(APPEND _gap_inc "static const unsigned char kSnippet${_gap_i}[] = {${_hex}};\n")
+  string(APPEND _gap_table "    {\"${_name}\", kSnippet${_gap_i}, sizeof(kSnippet${_gap_i})},\n")
+  math(EXPR _gap_i "${_gap_i} + 1")
+endforeach()
+string(APPEND _gap_inc "static const SnippetBlob kSnippetBlobs[] = {\n${_gap_table}    {nullptr, nullptr, 0},\n};\n")
+file(WRITE "${GAP_GENERATED}/gap_snippets.inc.in" "${_gap_inc}")
+configure_file("${GAP_GENERATED}/gap_snippets.inc.in" "${GAP_GENERATED}/gap_snippets.inc" COPYONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${GAP_SNIPPETS})
+
 lyflow_op_pack(
   NAME     gap
   VERSION  0.2.0
@@ -12,7 +34,7 @@ lyflow_op_pack(
   SOURCES  ${GAP_OP_SOURCES} ${GAP_ALGO_SOURCES}
   TEST_SOURCES ${GAP_TESTS}
   PCH      "${LYFLOW_PACK_DIR}/ops/gap_pch.h"
-  INCLUDES "${LYFLOW_PACK_DIR}/algo" "${LYFLOW_ONNXRUNTIME_ROOT}/include"
+  INCLUDES "${LYFLOW_PACK_DIR}/algo" "${LYFLOW_ONNXRUNTIME_ROOT}/include" "${GAP_GENERATED}"
   LINK     lyflow_pcl_support lyflow_std_algo yaml-cpp::yaml-cpp
            "${LYFLOW_ONNXRUNTIME_ROOT}/lib/onnxruntime.lib"
   DEFINES  _USE_MATH_DEFINES

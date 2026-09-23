@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::{json, Value};
 
-use crate::core_ffi::{self, Core, RunHandle, RunSpec};
+use crate::core_ffi::{self, Core, RunHandle, RunInput, RunSpec};
 use crate::eval;
 use crate::patch;
 use crate::perturb;
@@ -48,6 +48,10 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                           [--param <名字>=<json>]...
                           [--base-dir <dir>] [--parallel <n>] [--no-cache]
                           [--preview] [--preview-points <n>] [--outputs] [--summary]
+                          [--input <nodeId>.<port>=<file.pcd>]...
+        --input：把一片点云注入这个端口（与宿主经 C ABI 的 run inputs 同一条路）。端口是输出时
+                 整节点注入、compute 不跑；只是输入时是输入注入，例如 --input n_scan.primary=a.pcd
+                 --input n_scan.secondary=b.pcd 直接喂 gap.read_scan（m8-plan L18）。
         --summary：JSON Lines 末尾多一行 {\"kind\":\"run_summary\", ...}，
                    status 三态 ok|degraded|failed，每个图级输出三态 value|inactive|failed，
                    外加 decisions（全部 FallbackChoice）。ADR-0022。
@@ -501,6 +505,105 @@ pub(crate) struct RunRequest<'a> {
     /// 顶层图参数的取值，经 C ABI 的 `params_json` 交给 core（宿主的那条路）。
     /// CLI 自己的 `--param` 走 load_graph 改 default，两条路给出同一个结果。
     pub params_json: Option<&'a str>,
+    /// 运行时注入的点云（`--input`），经 C ABI 的 run inputs 交给 core（ADR-0017 / m8-plan L18）。
+    pub inputs: &'a [RunInput],
+}
+
+/// 用 core 自己的 `io.load_pcd` 读一个点云文件：跑一个单节点的图，按 `max_points`（0 = 全量）
+/// 取回。编辑器的 2D 拖框底图（模板云，Tauri 的 load_cloud_file）走它，PCD / PLY 都认；
+/// 取回的视图没有 rgb 通道，所以 CLI 的 `--input` 读 PCD 时不用它（见 load_inputs）。
+pub(crate) fn read_cloud_file(
+    core: &Arc<Core>,
+    path: &Path,
+    max_points: u32,
+) -> Result<core_ffi::CloudView, String> {
+    if !path.is_file() {
+        return Err(format!("文件不存在 {}", path.display()));
+    }
+    let graph = json!({
+        "schemaVersion": 1,
+        "id": ulid::new(),
+        "name": "read_cloud_file",
+        "nodes": [{ "id": "load", "op": "io.load_pcd",
+                    "params": { "path": path.to_string_lossy() } }],
+        "edges": [],
+    })
+    .to_string();
+    let result = execute(
+        core,
+        RunRequest {
+            graph_json: &graph,
+            base_dir: "",
+            targets: &[],
+            parallel: 1,
+            preview_points: 0,
+            preview: false,
+            no_cache: true,
+            stream: None,
+            params_json: None,
+            inputs: &[],
+        },
+    )?;
+    if result.status != "ok" {
+        let why = result
+            .events
+            .iter()
+            .find_map(|e| e["error"]["message"].as_str().map(str::to_owned))
+            .unwrap_or_else(|| result.status.clone());
+        return Err(format!("读不了 {}：{why}", path.display()));
+    }
+    // 取回的那一份是拷贝，RunResult 在这里释放掉结果仓的索引也不影响它
+    core.output_cloud(result.run_id(), "load", "cloud", max_points)
+        .map_err(|e| e.to_string())
+}
+
+/// `--input <节点>.<端口>=<file.pcd>`：CLI 这边的注入，与宿主经 C ABI 的 `lyflow_run_options.inputs`
+/// 是同一条路。端口是输出时整节点注入，只是输入（例如 `n_scan.primary`）时是输入注入。
+///
+/// PCD 由 `crate::pcd` 原样读出（点序、NaN 槽、intensity、rgb 都在）：core 的取数视图没有 rgb，
+/// 而 gap 的模型定位靠 rgb 的 R 当强度特征。别的格式借 core 的 `io.load_pcd`（见 read_cloud_file）。
+fn load_inputs(core: &Arc<Core>, parsed: &Parsed) -> Result<Vec<RunInput>, String> {
+    let mut out = Vec::new();
+    for spec in parsed.many("input") {
+        let bad = || format!("--input 的写法是 <节点>.<端口>=<file.pcd>，收到 {spec}");
+        let (left, file) = spec.split_once('=').ok_or_else(bad)?;
+        let (node, port) = left.rsplit_once('.').ok_or_else(bad)?;
+        if node.is_empty() || port.is_empty() || file.is_empty() {
+            return Err(bad());
+        }
+        let path = std::path::absolute(file).map_err(|e| format!("--input {spec}: {e}"))?;
+        if !path.is_file() {
+            return Err(format!("--input {spec}: 文件不存在 {}", path.display()));
+        }
+        let is_pcd = path
+            .extension()
+            .is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case("pcd"));
+        let input = if is_pcd {
+            // PCD 自己读：要带上 rgb（gap 的强度在 R 上），core 的取数视图没有这个通道
+            let c = crate::pcd::read_pcd(&path).map_err(|e| format!("--input {spec}: {e}"))?;
+            RunInput {
+                node_id: node.to_string(),
+                port: port.to_string(),
+                xyz: c.xyz,
+                intensity: c.intensity,
+                normals: c.normals,
+                rgb: c.rgb,
+            }
+        } else {
+            // 其余格式（PLY）借 core 的 io.load_pcd：没有 rgb 通道
+            let view = read_cloud_file(core, &path, 0).map_err(|e| format!("--input {spec}: {e}"))?;
+            RunInput {
+                node_id: node.to_string(),
+                port: port.to_string(),
+                xyz: view.xyz().to_vec(),
+                intensity: if view.has_intensity() { view.intensity().to_vec() } else { Vec::new() },
+                normals: if view.has_normals() { view.normals().to_vec() } else { Vec::new() },
+                rgb: Vec::new(),
+            }
+        };
+        out.push(input);
+    }
+    Ok(out)
 }
 
 pub(crate) fn execute(core: &Arc<Core>, req: RunRequest<'_>) -> Result<RunResult, String> {
@@ -515,6 +618,7 @@ pub(crate) fn execute(core: &Arc<Core>, req: RunRequest<'_>) -> Result<RunResult
     spec.max_parallel = req.parallel;
     spec.no_reuse = req.no_cache;
     spec.params_json = req.params_json;
+    spec.inputs = req.inputs;
     if req.preview {
         spec.mode = 1;
         spec.preview_max_points = req.preview_points;
@@ -934,16 +1038,28 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(l) => l,
         Err(e) => return fail(err, &e, load_exit(&e)),
     };
-    // 先单独校验一遍：校验失败与执行失败是两个不同的退出码，混在一次 run 里分不开
+    let inputs = match load_inputs(&core, parsed) {
+        Ok(i) => i,
+        Err(e) => return fail(err, &e, EXIT_USAGE),
+    };
+    // 先单独校验一遍：校验失败与执行失败是两个不同的退出码，混在一次 run 里分不开。
+    // lyflow_validate 看不见注入：被 --input 喂了的必填输入不算 missing_input（执行期
+    // 的校验知道注入，会把它当成已接）。
     match diagnostics_of(&core, &loaded) {
-        Ok(diags) if has_errors(&diags) => {
-            for d in &diags {
-                json_line(out, d);
+        Ok(diags) => {
+            let fed = |d: &Value| {
+                d["code"] == "missing_input"
+                    && inputs.iter().any(|i| d["nodeId"] == i.node_id.as_str() && d["portName"] == i.port.as_str())
+            };
+            let remaining: Vec<Value> = diags.into_iter().filter(|d| !fed(d)).collect();
+            if has_errors(&remaining) {
+                for d in &remaining {
+                    json_line(out, d);
+                }
+                line(err, "校验失败，没有执行");
+                return EXIT_INVALID;
             }
-            line(err, "校验失败，没有执行");
-            return EXIT_INVALID;
         }
-        Ok(_) => {}
         Err(e) => return fail(err, &e, EXIT_FAILED),
     }
     let parallel = parsed
@@ -968,6 +1084,7 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             no_cache: parsed.has("no-cache"),
             stream: Some(Arc::clone(out)),
             params_json: None,
+            inputs: &inputs,
         },
     ) {
         Ok(r) => r,
@@ -1133,6 +1250,7 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             no_cache: parsed.has("no-cache"),
             stream: Some(Arc::clone(out)),
             params_json: None,
+            inputs: &[],
         },
     ) {
         Ok(r) => r,
@@ -1595,7 +1713,7 @@ const VALUE_OPTS: &[&str] = &[
     "kind", "output", "samples", "samples-glob", "bind", "params", "holdout", "group-by",
     "after", "region", "axis", "expect", "tolerance", "samples-dir", "bind-pair", "pattern",
     "sample-subdir", "sort-by", "split-half", "samples-jsonl-out",
-    "remove-node", "add-node", "rewire", "node", "only",
+    "remove-node", "add-node", "rewire", "node", "only", "input",
 ];
 const BOOL_OPTS: &[&str] = &[
     "no-cache", "preview", "write", "check", "json", "help", "outputs", "dry-run",
@@ -1777,6 +1895,95 @@ mod tests {
         let file = dir.join("g.lyflow.json");
         std::fs::write(&file, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
         file.to_string_lossy().into_owned()
+    }
+
+    /// ASCII PCD，y 恒为 row。只有 x y z 三个字段。
+    fn write_pcd(file: &Path, n: usize, row: f32) {
+        let mut text = format!(
+            "# .PCD v0.7\nVERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nCOUNT 1 1 1\n\
+             WIDTH {n}\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\nPOINTS {n}\nDATA ascii\n"
+        );
+        for i in 0..n {
+            text.push_str(&format!("{} {row} 0\n", i as f32 * 0.01));
+        }
+        std::fs::write(file, text).unwrap();
+    }
+
+    /// `--input` 自己读 PCD（为了带上 rgb）：三种 DATA 格式都要与 core 的 io.load_pcd 读出同一批点。
+    #[test]
+    fn pcd_reader_agrees_with_io_load_pcd_on_all_three_formats() {
+        let dir = workspace("pcdformats");
+        let core = core().unwrap();
+        for format in ["ascii", "binary", "binary_compressed"] {
+            let file = dir.join(format!("c_{format}.pcd"));
+            let doc = json!({
+                "schemaVersion": 1, "id": "01J8XQZ4K7N3M2R5V8W1YB6TCF", "name": "save",
+                "nodes": [
+                    {"id": "g", "op": "gen.synthetic", "params": {"pointCount": 777, "seed": 11}},
+                    {"id": "s", "op": "io.save_pcd",
+                     "params": {"path": file.to_string_lossy(), "format": format}}
+                ],
+                "edges": [{"id": "e", "from": {"node": "g", "port": "cloud"}, "to": {"node": "s", "port": "cloud"}}]
+            });
+            let graph = dir.join(format!("save_{format}.lyflow.json"));
+            std::fs::write(&graph, doc.to_string()).unwrap();
+            let r = cli(&["run", &graph.to_string_lossy(), "--no-cache"]);
+            assert_eq!(r.code, EXIT_OK, "{format}: {}", r.err);
+
+            let ours = crate::pcd::read_pcd(&file).unwrap();
+            let view = read_cloud_file(&core, &file, 0).unwrap();
+            assert_eq!(ours.xyz.len(), 777 * 3, "{format}");
+            assert_eq!(ours.xyz.as_slice(), view.xyz(), "{format}: xyz");
+            if view.has_intensity() {
+                assert_eq!(ours.intensity.as_slice(), view.intensity(), "{format}: intensity");
+            }
+        }
+    }
+
+    #[test]
+    fn input_injects_a_cloud_into_an_input_port() {
+        let dir = workspace("input");
+        let a = dir.join("a.pcd");
+        let b = dir.join("b.pcd");
+        write_pcd(&a, 3, 0.0);
+        write_pcd(&b, 2, 1.0);
+        let doc = json!({
+            "schemaVersion": 1,
+            "id": "01J8XQZ4K7N3M2R5V8W1YB6TCE",
+            "name": "input",
+            "nodes": [{"id": "m", "op": "util.merge"}],
+            "edges": [],
+            "outputs": {"merged": {"node": "m", "port": "cloud"}}
+        });
+        let file = dir.join("m.lyflow.json");
+        std::fs::write(&file, doc.to_string()).unwrap();
+        let graph = file.to_string_lossy().into_owned();
+
+        // 没有 --input：两个必填输入都没接，校验期就拦下
+        assert_eq!(cli(&["run", &graph, "--no-cache"]).code, EXIT_INVALID);
+
+        let fa = format!("m.a={}", a.to_string_lossy());
+        let fb = format!("m.b={}", b.to_string_lossy());
+        let r = cli(&["run", &graph, "--input", &fa, "--input", &fb, "--outputs", "--no-cache"]);
+        assert_eq!(r.code, EXIT_OK, "{}\n{}", r.err, r.out);
+        let lines = r.lines();
+        let done = lines
+            .iter()
+            .find(|e| e["kind"] == "node_state" && e["nodeId"] == "m" && e["state"] == "done")
+            .expect("m 没有 done");
+        // 输入注入：compute 真的跑了（不是 provided）
+        assert!(done["stats"].get("provided").is_none(), "{done}");
+        let outputs = lines.iter().find(|e| e.get("merged").is_some()).expect("没有 --outputs 那一行");
+        assert_eq!(outputs["merged"]["elementCount"], 5);
+
+        // 端口名写错：执行期校验报 unknown_port，退出码 2；写法不对是参数错
+        let wrong = format!("m.nope={}", a.to_string_lossy());
+        let r = cli(&["run", &graph, "--input", &fa, "--input", &fb, "--input", &wrong, "--no-cache"]);
+        assert_eq!(r.code, EXIT_FAILED, "{}", r.out);
+        assert!(r.out.contains("unknown_port"), "{}", r.out);
+        assert_eq!(cli(&["run", &graph, "--input", "m.a"]).code, EXIT_USAGE);
+        let missing = format!("m.a={}", dir.join("nope.pcd").to_string_lossy());
+        assert_eq!(cli(&["run", &graph, "--input", &missing]).code, EXIT_USAGE);
     }
 
     #[test]
@@ -3040,6 +3247,7 @@ mod tests {
                 no_cache: true,
                 stream: None,
                 params_json: Some(r#"{"count": 1234}"#),
+                inputs: &[],
             },
         )
         .unwrap();
@@ -3061,6 +3269,7 @@ mod tests {
                 no_cache: true,
                 stream: None,
                 params_json: Some(r#"{"nope": 1}"#),
+                inputs: &[],
             },
         )
         .unwrap();

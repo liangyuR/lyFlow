@@ -346,7 +346,11 @@ void registerOverallRoi(Registry& r) {
   camera.visibleWhen.param = "mode";
   camera.visibleWhen.eq = Value::text("auto_center");
 
-  op.params = {vec4Mm("roi", "ROI", "配置里的整体 ROI，毫米。"), mode, camera};
+  // 数据坐标系里的框（测量帧）：编辑器在 2D 剖面视图里直接拖（m8-plan L15）。
+  // auto_center 模式下框会在运行时挪到云的中心，拖的是它的大小与相对偏移。
+  Param roi = vec4Mm("roi", "ROI", "配置里的整体 ROI，毫米。");
+  roi.semantic = "roi";
+  op.params = {roi, mode, camera};
   op.capabilities = {false, true, true};
   op.compute = &fine::overallRoi;
   r.addOperator(std::move(op));

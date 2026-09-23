@@ -259,6 +259,95 @@ pub fn get_output_cloud(
     Ok(tauri::ipc::Response::new(encode_cloud(&view)))
 }
 
+/// 读一个磁盘上的点云文件（不属于任何一次运行）。编辑器的 2D 拖框要把模板云画在框底下
+/// （m8-plan L15），而那时 locate_template 多半还没跑过 —— 框没填好它根本过不了校验。
+/// 相对路径按图文件所在目录解析，与图里的 path 参数同一口径。布局同 `get_output_cloud`。
+#[tauri::command]
+pub fn load_cloud_file(
+    path: String,
+    #[allow(non_snake_case)] graphPath: Option<String>,
+    #[allow(non_snake_case)] maxPoints: Option<u32>,
+) -> Result<tauri::ipc::Response, String> {
+    let raw = PathBuf::from(&path);
+    let file = if raw.is_absolute() {
+        raw
+    } else {
+        let base = base_dir_of(graphPath);
+        if base.is_empty() {
+            return Err(format!("{path} 是相对路径，图还没保存，不知道相对哪个目录"));
+        }
+        Path::new(&base).join(raw)
+    };
+    let core = core_ffi::core()?;
+    let view = crate::cli::read_cloud_file(&core, &file, maxPoints.unwrap_or(500_000))?;
+    Ok(tauri::ipc::Response::new(encode_cloud(&view)))
+}
+
+/// 片段库里用户自己的那一部分（m8-plan L14）：app data 下的 `snippets/` 与 `LYFLOW_SNIPPET_DIRS`
+/// （分号分隔）里的每个 `*.lyflow-snippet.json`。算子包随附的片段在 manifest 的 snippets 段，不在这里。
+#[derive(Serialize)]
+pub struct SnippetScan {
+    pub dirs: Vec<String>,
+    pub snippets: Vec<serde_json::Value>,
+    pub problems: Vec<String>,
+}
+
+pub fn snippet_dirs(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("拿不到 app data 目录: {e}"))?
+        .join("snippets");
+    let mut dirs = vec![dir.to_string_lossy().into_owned()];
+    if let Ok(extra) = std::env::var("LYFLOW_SNIPPET_DIRS") {
+        for d in extra.split(';').filter(|d| !d.is_empty()) {
+            dirs.push(d.to_string());
+        }
+    }
+    Ok(dirs)
+}
+
+/// 扫一组目录。只查文件形状的最低要求（是 JSON 对象、有 id / label / nodes）；
+/// 算子缺失这类问题由编辑器在插入时按当前 manifest 说清楚。
+pub fn scan_snippets(dirs: &[String]) -> SnippetScan {
+    let mut snippets = Vec::new();
+    let mut problems = Vec::new();
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else { continue };
+        let mut files: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.to_string_lossy().ends_with(".lyflow-snippet.json"))
+            .collect();
+        files.sort();
+        for file in files {
+            let parsed = std::fs::read_to_string(&file)
+                .map_err(|e| e.to_string())
+                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).map_err(|e| e.to_string()));
+            match parsed {
+                Ok(mut v)
+                    if v["id"].is_string() && v["label"].is_string() && v["nodes"].is_array() =>
+                {
+                    v["source"] = serde_json::json!(file.to_string_lossy());
+                    snippets.push(v);
+                }
+                Ok(_) => problems.push(format!("{}：缺 id / label / nodes", file.display())),
+                Err(e) => problems.push(format!("{}：{e}", file.display())),
+            }
+        }
+    }
+    SnippetScan {
+        dirs: dirs.to_vec(),
+        snippets,
+        problems,
+    }
+}
+
+#[tauri::command]
+pub fn list_snippets(app: tauri::AppHandle) -> Result<SnippetScan, String> {
+    Ok(scan_snippets(&snippet_dirs(&app)?))
+}
+
 const SLICE_LIMIT: u32 = 4_194_304;
 
 fn clamp_slice(count: Option<u32>) -> u32 {

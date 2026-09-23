@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "id": "gap.measure_skeleton",
+  "label": "测点骨架",
+  "category": "间隙",
+  "doc": "一个测点在定位之后的全部步骤：段差（基准线 + 线端点参考点）、间隙（缝两侧圆）、两个判定与结果汇总。插在定位节点后面，scan 与 rois 自动接到它唯一的那一对输出上。",
+  "nodes": [
+    { "id": "line", "op": "gap.role_line", "params": { "role": "datum" },
+      "ui": { "position": { "x": 0, "y": 0 }, "title": "基准线" } },
+    { "id": "ref", "op": "gap.ref_point", "params": { "method": "line_end", "role": "target" },
+      "ui": { "position": { "x": 0, "y": 190 }, "title": "参考点" } },
+    { "id": "flush", "op": "gap.flush",
+      "ui": { "position": { "x": 260, "y": 90 }, "title": "段差" } },
+    { "id": "judgeFlush", "op": "gap.judge",
+      "ui": { "position": { "x": 500, "y": 0 }, "title": "判定段差" } },
+    { "id": "circles", "op": "gap.seam_circles",
+      "ui": { "position": { "x": 0, "y": 380 }, "title": "缝两侧圆" } },
+    { "id": "gap", "op": "gap.gap",
+      "ui": { "position": { "x": 260, "y": 380 }, "title": "间隙" } },
+    { "id": "judgeGap", "op": "gap.judge",
+      "ui": { "position": { "x": 500, "y": 380 }, "title": "判定间隙" } },
+    { "id": "bundle", "op": "gap.result_bundle",
+      "ui": { "position": { "x": 500, "y": 170 }, "title": "结果汇总" } }
+  ],
+  "edges": [
+    { "from": { "node": "line", "port": "line" }, "to": { "node": "flush", "port": "baseLine" } },
+    { "from": { "node": "ref", "port": "point" }, "to": { "node": "flush", "port": "refPoint" } },
+    { "from": { "node": "flush", "port": "value" }, "to": { "node": "judgeFlush", "port": "value" } },
+    { "from": { "node": "circles", "port": "left" }, "to": { "node": "gap", "port": "left" } },
+    { "from": { "node": "circles", "port": "right" }, "to": { "node": "gap", "port": "right" } },
+    { "from": { "node": "gap", "port": "value" }, "to": { "node": "judgeGap", "port": "value" } },
+    { "from": { "node": "gap", "port": "value" }, "to": { "node": "bundle", "port": "gap" } },
+    { "from": { "node": "flush", "port": "value" }, "to": { "node": "bundle", "port": "flush" } },
+    { "from": { "node": "circles", "port": "quality" }, "to": { "node": "bundle", "port": "fits" } },
+    { "from": { "node": "line", "port": "quality" }, "to": { "node": "bundle", "port": "fitBase" } },
+    { "from": { "node": "ref", "port": "quality" }, "to": { "node": "bundle", "port": "fitRef" } }
+  ],
+  "ports": {
+    "inputs": [
+      { "node": "line", "port": "scan", "hint": "定位之后的剖面对" },
+      { "node": "line", "port": "rois", "hint": "定位给出的角色框" },
+      { "node": "ref", "port": "scan", "hint": "定位之后的剖面对" },
+      { "node": "ref", "port": "rois", "hint": "定位给出的角色框" },
+      { "node": "circles", "port": "scan", "hint": "定位之后的剖面对" },
+      { "node": "circles", "port": "rois", "hint": "定位给出的角色框" },
+      { "node": "bundle", "port": "rois", "hint": "定位给出的角色框（进结果汇总）" },
+      { "node": "bundle", "port": "scan", "hint": "定位之后的剖面对（进结果汇总）" }
+    ],
+    "outputs": [
+      { "node": "flush", "port": "value", "hint": "段差读数（毫米）" },
+      { "node": "gap", "port": "value", "hint": "间隙读数（毫米）" },
+      { "node": "bundle", "port": "bundle", "hint": "结果汇总" }
+    ]
+  }
+}
