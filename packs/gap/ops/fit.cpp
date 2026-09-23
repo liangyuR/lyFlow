@@ -598,10 +598,15 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
   const double bearingTol[2] = {params.number("leftArcBearingTolDeg"),
                                 params.number("rightArcBearingTolDeg")};
   const lyflow::Line2D* refLine = inputs.has("refLine") ? inputs.get("refLine").asLine2D() : nullptr;
+  const lyflow::Line2D* refLineRight =
+      inputs.has("refLineRight") ? inputs.get("refLineRight").asLine2D() : nullptr;
+  // 两侧各比各的线。右侧不接 refLineRight 就退回 refLine —— 只接一条线的老图逐位不变。
+  // 缝两侧贴的是不同的面时（左圆贴基准面、右圆贴玻璃面）才需要分开，同一条线也能服务两侧。
+  const lyflow::Line2D* sideRefLine[2] = {refLine, refLineRight != nullptr ? refLineRight : refLine};
   for (int i = 0; i < 2; ++i) {
-    if (centerTol[i] > 0 && refLine == nullptr) {
+    if (centerTol[i] > 0 && sideRefLine[i] == nullptr) {
       return Status::Error(Phase::Execute, "bad_param",
-                           "配了圆心高度带就必须接 refLine（参考线）",
+                           "配了圆心高度带就必须接 refLine（参考线）；右侧可以单独接 refLineRight",
                            i == 0 ? "leftCenterTol" : "rightCenterTol", "refLine");
     }
   }
@@ -631,7 +636,7 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
       // 任何一条约束落空都要重来。
       needBand = !side.fitted;
       if (!needBand && centerTol[i] > 0) {
-        const double above = centerAboveLine(side.circle, *refLine);
+        const double above = centerAboveLine(side.circle, *sideRefLine[i]);
         needBand = !std::isfinite(above) || std::fabs(above - centerAbove[i]) > centerTol[i];
       }
       if (!needBand && bearingTol[i] > 0) {
@@ -641,12 +646,12 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
     }
     if (needBand) {
       side.indices.clear();
-      side.fitted = circleFitConstrained(side.cloud, refLine, centerAbove[i], centerTol[i],
+      side.fitted = circleFitConstrained(side.cloud, sideRefLine[i], centerAbove[i], centerTol[i],
                                          bearing[i], bearingTol[i], distThresh, cfg[i].rMin,
                                          cfg[i].rMax, &side.circle, &side.indices);
       if (!side.fitted && retryDistanceMm > 0) {
         side.indices.clear();
-        side.fitted = circleFitConstrained(side.cloud, refLine, centerAbove[i], centerTol[i],
+        side.fitted = circleFitConstrained(side.cloud, sideRefLine[i], centerAbove[i], centerTol[i],
                                            bearing[i], bearingTol[i], mmToM(retryDistanceMm),
                                            cfg[i].rMin, cfg[i].rMax, &side.circle, &side.indices);
       }
@@ -1110,7 +1115,7 @@ void registerFitLine(Registry& r) {
 void registerFitGapCircles(Registry& r) {
   OperatorDesc op;
   op.id = "gap.fit_gap_circles";
-  op.version = "1.0.0";
+  op.version = "1.1.0";
   op.label = "拟合间隙圆";
   op.category = "间隙/拟合";
   op.keywords = {"circle", "ransac", "圆", "拟合", "间隙"};
@@ -1118,7 +1123,8 @@ void registerFitGapCircles(Registry& r) {
       "间隙两侧的圆拟合。先在合并云的 ROI 里拟合；失败按 retryDistance 再试一次；"
       "还失败就退到「两台相机各拟合一个」，两台都合格时按 |gap − nominal| 二选一（§3.9）。"
       "另有两个逐侧的收紧手段：leftCamera/rightCamera 把某一侧钉到单台相机；"
-      "centerAbove/centerTol 要求圆心落在 refLine 上方的一条窄带里。";
+      "centerAbove/centerTol 要求圆心落在 refLine 上方的一条窄带里 —— 右侧要比另一条面时"
+      "单独接 refLineRight。";
   op.preconditions = {
       "假定缝两侧各有一段看得见的圆边、半径落在 [radiusMin, radiusMax] 内；缝闭合到两圆"
       "边相碰时 ROI 里凑不出圆弧，那种缝用 gap.notch_width。",
@@ -1141,6 +1147,10 @@ void registerFitGapCircles(Registry& r) {
       Port{"boxRight", "Box2D", "Box Right", "右侧业务 ROI。", true},
       Port{"refLine", "Line2D", "Ref Line",
            "圆心高度带的参考线，通常接 flush 的基准线。只有配了 centerTol 时才需要。", false},
+      Port{"refLineRight", "Line2D", "Ref Line Right",
+           "右侧圆心高度带单独的参考线。不接就沿用 refLine。缝两侧贴在不同的面上时"
+           "（左圆贴基准面、右圆贴玻璃面）才需要分开接。",
+           false},
   };
   op.outputs = {
       Port{"left", "Circle2D", "Left", "左圆。", true},

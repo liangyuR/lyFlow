@@ -1050,6 +1050,14 @@ Line2D flatLine() {
   return l;  // 过原点、水平
 }
 
+/// 水平线，过 (0, y)。y 越大越深（测量帧里 y 越小越高）。
+Line2D flatLineAt(double y) {
+  Line2D l;
+  l.dir[0] = 1.0f;
+  l.point[1] = static_cast<float>(y);
+  return l;
+}
+
 /// 右圆的圆心 y（米）。测量帧里 y 越小越高。
 double rightCenterY(Call& call) { return call.out("right").asCircle2D()->center[1]; }
 
@@ -1111,6 +1119,55 @@ TEST_CASE("gap.fit_gap_circles 的圆心高度带把圆心按到参考线上方"
                                               {"rightCenterTol", Value::number(0.3)}})
               .ok);
   CHECK(rightCenterY(*banded) == doctest::Approx(-0.0005).epsilon(0.05));
+}
+
+TEST_CASE("gap.fit_gap_circles 的 refLineRight 让右侧比另一条参考线") {
+  // 右 ROI 里两段弧：y=-0.0005 点少、y=+0.0005 点多，不加约束时 RANSAC 选点多的那段。
+  // refLine 过原点，refLineRight 在原点下方 1 mm，所以同一段弧相对两条线的高度差 1 mm ——
+  // 要选中同一段弧，两种接法需要填不同的 rightCenterAbove。
+  const auto build = [](bool withRight) {
+    PointCloud primary, secondary, merged;
+    pushLeftArc(primary);
+    pushLeftArc(secondary);
+    pushLeftArc(merged);
+    pushArc(merged, 0.0035, -0.0005, 0.0009, 200, 340, 40);
+    pushArc(merged, 0.0035, 0.0005, 0.0009, 200, 340, 90);
+    pushArc(primary, 0.0035, -0.0005, 0.0009, 200, 340, 40);
+    pushArc(secondary, 0.0035, 0.0005, 0.0009, 200, 340, 90);
+    auto call = std::make_unique<Call>();
+    call->inputs["merged"] = Data::cloud(merged);
+    call->inputs["primary"] = Data::cloud(primary);
+    call->inputs["secondary"] = Data::cloud(secondary);
+    call->inputs["boxLeft"] = Data::box2d(box(-0.006f, -0.004f, -0.001f, 0.002f));
+    call->inputs["boxRight"] = Data::box2d(box(0.001f, -0.004f, 0.006f, 0.002f));
+    call->inputs["refLine"] = Data::line2d(flatLine());
+    if (withRight) call->inputs["refLineRight"] = Data::line2d(flatLineAt(0.001));
+    return call;
+  };
+
+  // 接了 refLineRight：那段弧相对它高 1.5 mm。
+  auto split = build(true);
+  REQUIRE(split
+              ->run("gap.fit_gap_circles",
+                    {{"rightCenterAbove", Value::number(1.5)}, {"rightCenterTol", Value::number(0.3)}})
+              .ok);
+  CHECK(rightCenterY(*split) == doctest::Approx(-0.0005).epsilon(0.05));
+
+  // 不接就退回 refLine：同一段弧相对原点只高 0.5 mm，老图行为不变。
+  auto shared = build(false);
+  REQUIRE(shared
+              ->run("gap.fit_gap_circles",
+                    {{"rightCenterAbove", Value::number(0.5)}, {"rightCenterTol", Value::number(0.3)}})
+              .ok);
+  CHECK(rightCenterY(*shared) == doctest::Approx(-0.0005).epsilon(0.05));
+
+  // 左侧的带仍然比 refLine —— 右侧那条线不该影响左侧。
+  auto leftBand = build(true);
+  REQUIRE(leftBand
+              ->run("gap.fit_gap_circles",
+                    {{"leftCenterAbove", Value::number(0.5)}, {"leftCenterTol", Value::number(0.3)}})
+              .ok);
+  CHECK(leftBand->out("left").asCircle2D()->center[1] == doctest::Approx(-0.0005).epsilon(0.05));
 }
 
 TEST_CASE("gap.fit_gap_circles 配了圆心高度带却没接 refLine 就报错") {
