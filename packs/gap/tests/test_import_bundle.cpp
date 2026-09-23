@@ -167,6 +167,31 @@ TEST_CASE("StandardGap.yml 导入器注册了六种 kind：三种模式 × 积�
   }
 }
 
+TEST_CASE("导入的图每个节点都写了 opVersion，等于 manifest 里该算子的版本（积木 / 细粒度、带回退）") {
+  // 与编辑器新建节点（store/graph.ts 写 opVersion: op.version）一致：算子以后升主版本时导入的图能自动迁移
+  std::unordered_map<std::string, std::string> versions;
+  const nlohmann::json manifest = nlohmann::json::parse(ensureRegistry().toManifestJson());
+  for (const auto& o : manifest["operators"]) {
+    versions[o["id"].get<std::string>()] = o["version"].get<std::string>();
+  }
+  REQUIRE(versions.at("gap.locate_template") == "2.0.0");
+  Fixture f("opversion", "model_roi:\n  enabled: true\n  model_path: X:/m.onnx\n");
+  for (const char* kind : {"StandardGap.yml:template", "StandardGap.yml:template:fine",
+                           "StandardGap.yml:model", "StandardGap.yml:model:fine"}) {
+    CAPTURE(kind);
+    const nlohmann::json doc = import(kind, f.point);
+    REQUIRE(doc.contains("nodes"));
+    CHECK(doc["nodes"].size() >= 10);
+    for (const auto& n : doc["nodes"]) {
+      const std::string op = n["op"].get<std::string>();
+      CAPTURE(op);
+      REQUIRE(n.contains("opVersion"));
+      REQUIRE(versions.count(op) == 1);
+      CHECK(n["opVersion"] == versions.at(op));
+    }
+  }
+}
+
 TEST_CASE("auto 的模式推导只看 setting.yml 的 model_roi.enabled") {
   SUBCASE("找不到 setting.yml 就退回模板路径") {
     Fixture f("nosetting");

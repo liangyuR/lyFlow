@@ -78,6 +78,14 @@ bool roiList(const YAML::Node& node, Roi* out, std::string* problem) {
 
 bool allZero(const Roi& r) { return r[0] == 0 && r[1] == 0 && r[2] == 0 && r[3] == 0; }
 
+/// 节点存于哪个算子版本：当前注册表里那个算子的 version，与编辑器新建节点写 op.version 一致。
+/// 以后算子升主版本时，导入的图也能按 opVersion 自动迁移（ADR-0008；M8c 取舍 1 暴露了缺它的后果）。
+/// 导入总在注册完成之后发生，此时 ensureRegistry() 里已经有全部算子包（含别的包的 flow / filter 算子）。
+std::string opVersionOf(const char* op) {
+  const OperatorDesc* desc = ensureRegistry().find(op);
+  return desc ? desc->version : std::string();
+}
+
 class Builder {
  public:
   std::string node(const std::string& id, const char* op, nlohmann::json params, int column,
@@ -85,6 +93,7 @@ class Builder {
     nlohmann::json entry;
     entry["id"] = id;
     entry["op"] = op;
+    if (const std::string version = opVersionOf(op); !version.empty()) entry["opVersion"] = version;
     nlohmann::json ui;
     ui["position"] = nlohmann::json{{"x", column * 280}, {"y", row * 130}};
     if (!title.empty()) ui["title"] = title;

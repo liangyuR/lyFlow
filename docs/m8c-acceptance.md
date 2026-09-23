@@ -238,3 +238,18 @@ manifest 的 `roiBackdrop` 多两个可选字段 `label`、`labelParam`（schema
 见 `git log`：gap 的 locate_template v2（每槽四框、按槽校验、v1 迁移）+ 导入器 + manifest 的 `roiBackdrop.label` +
 编辑器（模板切换条、复制到其它槽、Inspector 手风琴、标签避让）+ e2e 与本验收记录，一个 commit。
 `docs/m7-plan.md`、`docs/m8-plan.md`、`.claude/launch.json` 未改动。
+
+## 补：导入器写 opVersion（验收后的小改，fix(m8c)）
+
+取舍 1 的限制（导入的图没有 `opVersion`，算子升主版本后不会自动迁移）在导入器里补上：`import_standard_gap.cpp` 的
+`Builder::node` 给每个节点写 `opVersion` = 当前注册表（`ensureRegistry()`）里该算子的 `version`，积木图与 `--fine`
+细粒度图、模型路径的回退闭包都一样 —— 与编辑器新建节点（`packages/editor/src/store/graph.ts` 写 `opVersion: op.version`）一致。
+以后算子升主版本，M8c 起导入的图打开时按 ADR-0008 走迁移；M8c 之前导入的图仍然没有 `opVersion`，照取舍 1 的办法处理。
+
+- 测试：`test_import_bundle.cpp`「导入的图每个节点都写了 opVersion，等于 manifest 里该算子的版本」——
+  `StandardGap.yml:template` / `:template:fine` / `:model` / `:model:fine`（带 `setting.yml`，含 `flow.fallback` 回退）四种导入，
+  每个节点都有 `opVersion`，且等于 `toManifestJson()` 里同一算子的 `version`（`gap.locate_template` 是 2.0.0）。
+- 门禁：`$env:LYFLOW_PACKS="gap;dts"; pnpm check > $env:TEMP\m8c-check3.log 2>&1` 退出码 0、「全链路绿」；
+  core doctest **274/274**（+1），`cargo test` 136/136，编辑器单测 15/15，MCP 45/45。e2e 按要求没有重跑。
+- 旁证：CLI 导入一份 tianmu_0904 的 StandardGap.yml，10 个节点都带 `opVersion`（`gap.locate_template` 2.0.0、
+  `gap.read_scan` 1.1.0 ……），`lyflow validate` 零诊断（版本与当前一致，不出 `version_mismatch`）。
