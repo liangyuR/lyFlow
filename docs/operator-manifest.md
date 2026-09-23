@@ -91,6 +91,55 @@ JSON Schema： [`schema/operator-manifest.schema.json`](../schema/operator-manif
 
 分组用 `group` 字段，`advanced: true` 的参数默认收进折叠区。
 
+## 参数的语义标记（`semantic`，M8b）
+
+参数可以带一个只给编辑器看的语义标记，执行器与校验一概不看。目前只有一种：
+
+```jsonc
+{
+  "name": "datumRoi", "type": "vec4f", "unit": "mm",
+  "semantic": "roi",                       // [xMin, yMin, xMax, yMax]，XY 平面上的一个框
+  "roiBackdrop": {                         // 可选：框画在哪片云上
+    "dir": "templateDir",                  // 本算子的一个 path 参数
+    "files": ["template1Left", "template1Right"]   // 本算子的 string / path 参数
+  }
+}
+```
+
+- `semantic: "roi"` 只能标在 `vec4f` 上（`lyflow manifest --check` 查）；单位按 `unit`，`mm` 按 0.001 换成米。
+- 编辑器在 2D 剖面视图里把选中节点**当前可见**的 roi 参数画成可拖、可拉伸的框（拖框身平移、拖四角拉伸，
+  吸附 0.1 mm，整段拖动一条撤销），与数字框是同一个参数的两种编辑方式。
+- 没有 `roiBackdrop`：框在数据坐标系里，画在节点显示的那片云上（例如 `gap.overall_roi.roi`）。
+  有：框在 `<dir>/<file>` 那几个文件的坐标系里（例如 `gap.locate_template` 的四个角色框在模板坐标系里，
+  底图是那个槽的左右模板），编辑器经宿主读这几个文件（Tauri 的 `load_cloud_file`），**不需要先跑图**。
+  坐标系不同的框不会画在同一片底图上：只取与第一个可见 roi 参数同一底图的那一组。
+- 子图提升参数时 `semantic` 跟着走，`roiBackdrop` 不带（它指的是内部算子的参数名）。
+
+## 片段（`snippets`，M8b）
+
+manifest 顶层可能多一段 `snippets`：算子包随附的片段（一组节点 + 边 + 对外端口提示），
+文件格式是 `*.lyflow-snippet.json`（[schema/snippet.schema.json](../schema/snippet.schema.json)），
+放在包目录的 `snippets/` 下、构建时编进包里，写法见 [op-packs.md](op-packs.md)「随包的片段」。
+
+```jsonc
+"snippets": [
+  { "id": "gap.measure_skeleton", "label": "测点骨架", "category": "间隙", "pack": "gap@0.2.0",
+    "nodes": [ { "id": "line", "op": "gap.role_line", "params": { "role": "datum" },
+                 "ui": { "position": { "x": 0, "y": 0 }, "title": "基准线" } }, … ],
+    "edges": [ { "from": { "node": "line", "port": "line" }, "to": { "node": "flush", "port": "baseLine" } }, … ],
+    "ports": { "inputs":  [ { "node": "line", "port": "scan", "hint": "定位之后的剖面对" }, … ],
+               "outputs": [ { "node": "flush", "port": "value" }, … ] } }
+]
+```
+
+- 插入就是**带自动连线的粘贴**：节点与内部边照搬（id 重新分配），`ports.inputs` 列的那些输入
+  （没给这一项时是片段里所有没接的必需输入）按「恰好一个类型兼容的输出」接到插入之前就在图里的节点上。
+  插完是普通节点，**没有展开 / 收回**。
+- 启动自检（`Registry::validate`）查：算子都注册了、参数名都认得、边两端的端口存在且类型接得上、
+  对外输入在片段里没接边。坏片段让 `lyflow manifest --check` 失败，而不是等人插进画布才发现。
+- 用户自己的片段不进 manifest：桌面宿主扫 app data 下的 `snippets/` 与环境变量 `LYFLOW_SNIPPET_DIRS`
+  （分号分隔），经 `list_snippets` 给编辑器；同 id 时用户的那份覆盖包里的。
+
 ## 端口类型系统
 
 V1 的规则刻意简单：

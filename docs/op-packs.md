@@ -139,6 +139,29 @@ lyflow_op_pack(
 外加一组针对第三方头的告警屏蔽（PCL/Eigen 的噪声不是包作者能修的）。
 **PCL 的 include 不再自动有** —— 要它就 `LINK lyflow_pcl_support`。
 
+### 随包的片段（M8b）
+
+片段（m8-plan L14）是一组节点 + 边 + 对外端口提示，编辑器里拖到画布或双击就插进来（带自动连线的粘贴，
+插完是普通节点）。包随附的片段放在包目录下：
+
+```
+mypack/
+  snippets/
+    measure-skeleton.lyflow-snippet.json   # 一份一个文件，格式见 schema/snippet.schema.json
+```
+
+- **文件格式**：`*.lyflow-snippet.json`，`{ schemaVersion: 1, id, label, category?, doc?, nodes, edges, ports? }`。
+  节点与边的写法与 GraphDoc 相同（`params` 稀疏、`ui.position` / `ui.title`），id 只在片段内唯一；
+  `ports.inputs` 列插入时要自动连线的输入（可以是可选输入，例如结果汇总的 `rois`），`ports.outputs` 只作说明。
+- **扫描**：构建时由包自己的 `lyflow_op_pack.cmake` 把 `snippets/*.lyflow-snippet.json` 按字节编进包
+  （写成十六进制数组，不受 MSVC 字符串字面量长度限制，也不经过源文件编码；文件一改就重新 configure），
+  注册时逐份 `Registry::addSnippet(parseSnippet(text, source))`。写法照抄 `packs/gap/lyflow_op_pack.cmake`
+  与 `packs/gap/ops/snippets.cpp`。这样片段跟着包走：包没编进来，它的片段也不会出现在面板里。
+- **自检**：启动自检与 `lyflow manifest --check` 查片段里的算子都注册了、参数名认得、边两端的端口存在
+  且类型接得上、对外输入没在片段里接边；`pnpm check` 另把每个片段文件对着 schema 校验一遍。
+- **用户片段**不在包里：桌面宿主扫 app data 下的 `snippets/` 与 `LYFLOW_SNIPPET_DIRS`（分号分隔），
+  同 id 时用户的覆盖包里的。
+
 ### 包之间的顺序
 
 `packs/*` 按字母序 include，但**提供公共设施的包排在前面**（core 的 CMakeLists 里

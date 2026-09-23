@@ -7,6 +7,7 @@
 | [`operator-manifest.schema.json`](operator-manifest.schema.json) | C++ → 前端 | 算子描述全量包。启动时下发，热重载时重发。 |
 | [`graph-doc.schema.json`](graph-doc.schema.json) | 前端 → C++ | 图文档。也是磁盘文件格式（`.lyflow.json`）。 |
 | [`execution-event.schema.json`](execution-event.schema.json) | C++ → 前端 | 执行状态流。 |
+| [`snippet.schema.json`](snippet.schema.json) | 包 / 用户 → 编辑器 | 片段文件 `*.lyflow-snippet.json`（M8b）。包随附的编进包、经 manifest 的 `snippets` 段下发；`pnpm check` 对着它校验 `packs/*/snippets/` 下的每一份。 |
 
 示例见 [`examples/`](examples/)，三个示例都已通过对应 schema 校验，
 `pnpm check` 每次都会重跑一遍。

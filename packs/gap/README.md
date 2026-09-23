@@ -20,6 +20,7 @@ packs/gap/
   algo/    算法源码，从 xyz-gap-inspector 的 src/ 复制而来，命名空间不改
   tools/   历史对拍工具：Python 图生成器、两条 A/B、回退图 A/B 与导入器等价性脚本
   tests/   随包走的 doctest
+  snippets/ 随包的片段（*.lyflow-snippet.json，M8b）
 ```
 
 `algo/` 里**只有领域逻辑**：双迹线截取、端点与最近点、距离与求值、roll 裁剪窗、
@@ -129,7 +130,7 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 
 | id | 输入 → 输出 | 干什么 |
 |---|---|---|
-| `gap.read_scan` | [primary, secondary] → scan | 读剖面：目录 + 前缀（或两个文件，或 `source=inputs` 用两个输入），换到测量帧，合并（secondary 在前）并按需半径去噪。primary / secondary 保留原始 1280 槽（NaN 槽还在） |
+| `gap.read_scan` | [primary, secondary] → scan | 读剖面：目录 + 前缀（或两个文件），换到测量帧，合并（secondary 在前）并按需半径去噪。primary / secondary 保留原始 1280 槽（NaN 槽还在）。**两个输入接上或被宿主注入时直接用它们、不读目录**（M8b / L18）；`source=inputs` 是「不配目录」的写法 |
 | `gap.locate_template` | scan → rois, alignment, scan | 模板定位：整体框 → 裁 → 模板 → ICP → 选模板 → 业务框。四个角色框写在模板坐标系里；四个固定模板槽，每槽可覆盖四框 |
 | `gap.locate_model` | scan → rois, scan | 模型定位：剖面张量 → ONNX → argmax → 推框（精修）→ 剔 NaN → 跟随裁剪窗（合并云跟着裁） |
 | `gap.role_line` | scan, rois, [refLine] → line, innerEnd, quality | 按角色（datum / target）拟合直线，「靠缝那一端」取两个缝框中心的中点 |
@@ -162,6 +163,28 @@ M8a 的两处行为变化（两种图一致）：
   （`gap.read_scan` 的 `removeOutliers`）。框边上的点不再因为被裁掉邻居而被当成离群点。
 - **基准件在哪一侧按框的几何推**，`flush.base_side` 不再参与；配置与几何不符时导入器在
   `meta.importNotes` 里记一笔（天幕 L5 / L6：base 框在缝右侧而配置写 left）。
+
+## 在编辑器里拼一个测点（M8b）
+
+- **片段**（`snippets/*.lyflow-snippet.json`，构建时编进包、经 manifest 的 `snippets` 段给出，
+  格式见 [schema/snippet.schema.json](../../schema/snippet.schema.json)，机制见
+  [docs/op-packs.md](../../docs/op-packs.md)「随包的片段」）：
+
+  | id | 名字 | 内容 | 对外输入 |
+  |---|---|---|---|
+  | `gap.measure_skeleton` | 测点骨架 | 基准线 + 线端点参考点 + 段差、缝两侧圆 + 间隙、两个判定、结果汇总（8 个节点） | 各节点的 `scan` / `rois`（含结果汇总的两个可选输入） |
+  | `gap.flush_line_end` | 段差 · 线端点 | role_line(datum) + ref_point(line_end) + flush + judge | `scan` / `rois` |
+  | `gap.flush_selected_point` | 段差 · 选点 | 同上，ref_point(selected_point) | `scan` / `rois` |
+  | `gap.gap_circles` | 间隙 · 圆 | seam_circles + gap + judge | `scan` / `rois` |
+  | `gap.locate_model_template_fallback` | 模型定位 + 模板回退 | locate_model ∥ locate_template，rois 与 scan 各一个 `flow.fallback` | 两个定位的 `scan` |
+  | `gap.backup_camera` | 备用相机回退 | 两个 read_scan（主 / 备用相机）+ 一个 `flow.fallback` | 无 |
+
+  典型拼法：拖入 `gap.read_scan`、`gap.locate_template`（scan 自动接上），插入「测点骨架」
+  （八个对外输入自动接到 locate_template 那唯一的一对输出上），填目录、拖四个框、跑。
+- **2D 拖框**：`gap.locate_template` 的四个角色框（以及各槽的覆盖框）带 `semantic: "roi"` 与
+  `roiBackdrop`（那个槽的左右模板），选中它、把视图切到「2D 剖面」就能直接拖；`gap.overall_roi.roi`
+  也带 roi 标记（数据坐标系）。`locate_template.overallRoi` 的默认值是一个大到不裁的框：空白画布上
+  拼出来的图不填高级参数也能跑（导入器总是显式写这一项）。
 
 ## 模型 ROI 路径
 

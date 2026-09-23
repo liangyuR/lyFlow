@@ -142,22 +142,34 @@ if (view.valid()) {
 
 ```cpp
 lyflow::InputCloud primary;
-primary.nodeId = "n_load";
+primary.nodeId = "n_scan";                 // 导入器产出的积木图里的 gap.read_scan
 primary.port = "primary";
-primary.xyz = std::move(interleavedXyz);   // x0,y0,z0,x1,y1,z1,...
+primary.xyz = std::move(interleavedXyz);   // x0,y0,z0,x1,y1,z1,...（传感器帧，NaN 槽可以留着）
 lyflow::InputCloud secondary = /* 同上，port = "secondary" */;
 options.inputs = { std::move(primary), std::move(secondary) };
 ```
 
-三条约定：
+`port` 有两种意思，按算子声明区分：
 
-1. 被注入的节点**整个 compute 都不会被调用**，所以它声明的每个输出端口都要给一项。
-   `gap.load_profile_pair` 有 `primary` 与 `secondary` 两个，就要给两项。
-   导入器默认产出的积木图（M8a）用 `gap.read_scan` 读剖面，它只有一个 Bundle 输出，
-   不能直接注入：把它的 `source` 改成 `inputs`，在 `primary` / `secondary` 上接一个
-   `gap.load_profile_pair`，注入那一个节点。
-2. 缓冲只需活到 `run()` 返回，core 在内部拷一份。
-3. 注入数据的摘要进 cacheKey，换一片云一定重算。
+- **是这个算子的输出端口**：整节点注入（v7 起）。被注入的节点**整个 compute 都不会被调用**，
+  所以它声明的每个输出端口都要给一项 —— `gap.load_profile_pair` 有 `primary` 与 `secondary` 两个，就要给两项。
+- **只是它的输入端口**：输入注入（M8b，m8-plan L18，加在 v10 里）。compute 照常调，这个输入端口的值就是
+  注入的数据。`gap.read_scan` 的 `primary` / `secondary` 就是这样喂的：两个都给了就直接用它们，不读目录
+  （图里原来的 `source` / `dir` 不用改；不想配目录时把 `source` 设成 `inputs`），宿主只看见一个「读剖面」节点，
+  前面不必再接 `gap.load_profile_pair`。端口上不能同时有连线（`bad_input`），同一个节点也不能既注入输出又注入输入；
+  名字既不是输入也不是输出报 `unknown_port`。同名的输入输出（例如 `gap.locate_template` 的 `scan`）按输出算。
+
+两条共同的约定：
+
+1. 缓冲只需活到 `run()` 返回，core 在内部拷一份。
+2. 注入数据的摘要进 cacheKey，换一片云一定重算。
+
+**gap 的强度在 rgb 的 R 上**（模型定位把它当特征）：注入 gap 的剖面时把 `rgb` 一起给，只给 xyz 的话
+模板路径读数不变、模型路径会变。
+
+命令行的等价物是 `lyflow run <graph> --input n_scan.primary=<a.pcd> --input n_scan.secondary=<b.pcd>`：
+CLI 把 PCD 原样读出（`bridge/src/pcd.rs`，ascii / binary / binary_compressed；点序、NaN 槽、intensity、rgb 都在），
+再经同一个 `lyflow_run_options.inputs` 交给 core。被 `--input` 喂了的必填输入在运行前的校验里不算 `missing_input`。
 
 ## 回调版
 
