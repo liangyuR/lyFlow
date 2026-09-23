@@ -49,6 +49,7 @@
 | L15 | **2D 拖框**：选中 `locate_template` 时，2D 剖面视图显示槽 1 的模板云与四个角色框（四种颜色、标角色名），拖动与拉伸直接写回参数；同时在样本云上叠画变换后的框（只读）。普通 `Vec4f` 的 ROI 参数（带 `roi` 语义标记的）同样可拖 | 手填毫米坐标是人建图最慢、最容易错的一步 |
 | L16 | **实时校验**：编辑时调用 validate，诊断直接标在节点与参数上（M7 钩子的 error / warning） | 错误在拼的时候就看见，而不是跑完才发现 |
 | L17 | Edge Peek 支持 Bundle：浮窗先列字段，点进字段按字段类型复用现有视图（点云 / 框 / 下标） | 数据成组流动之后仍然看得见每一样 |
+| L18 | `gap.read_scan` 加两个可选输入 `primary`、`secondary`：接上（或被宿主注入）时直接用它们，不读目录。宿主注入落在 `read_scan` 本身，不必在前面再接一个 `load_profile_pair`（M8a 验收取舍 8 暴露） | 宿主接入也只看见一个「读剖面」节点 |
 
 ### 不做
 
@@ -66,7 +67,7 @@
 | `gap.seam_circles` 拟合缝两侧圆 | `scan`、`rois`、`refLine?`、`refLineRight?` → `left`、`right`、`quality` | 拟合距离；左右半径上下限；`nominal`；高级：固定半径、逐侧相机、中心带、弱地板 |
 | `gap.datum_direction` 方向基准 | `scan`、`rois` → `line` | 窗口起点、长度、高度；拟合距离 |
 
-一个模板路径的测点：`read_scan → locate_template → role_line(datum) → ref_point → flush → judge` 与 `seam_circles → gap → judge`，再加 `result_bundle`，共 9 个节点。
+一个模板路径的测点：`read_scan → locate_template → role_line(datum) → ref_point → flush → judge` 与 `seam_circles → gap → judge`，再加 `result_bundle`，共 10 个节点（两个判定各一个）。
 
 ## 4. 验收
 
