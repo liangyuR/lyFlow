@@ -169,13 +169,14 @@ nlohmann::json circleQualityJson(const GapCloud& cloud, const Eigen::VectorXf& c
   return q;
 }
 
+/// 系数 → Line2D。方向按 canonicalLineDir 统一朝向，与拟合给出的正反无关。
 lyflow::Line2D lineFromCoefficients(const Eigen::VectorXf& c) {
   lyflow::Line2D line;
   line.point[0] = c[0];
   line.point[1] = c[1];
-  const float nx = std::hypot(c[3], c[4]);
-  line.dir[0] = nx > 0 ? c[3] / nx : 1.0f;
-  line.dir[1] = nx > 0 ? c[4] / nx : 0.0f;
+  const Eigen::Vector2d u = canonicalLineDir(c[3], c[4]);
+  line.dir[0] = static_cast<float>(u.x());
+  line.dir[1] = static_cast<float>(u.y());
   return line;
 }
 
@@ -195,10 +196,12 @@ bool fitFixedDirection(const GapCloud& cloud, double dirX, double dirY, float di
                        Eigen::VectorXf* coefficients, pcl::Indices* indices) {
   const std::size_t n = cloud.size();
   if (n < 2) return false;
-  const double len = std::hypot(dirX, dirY);
-  if (!(len > 0)) return false;
-  const double ux = dirX / len;
-  const double uy = dirY / len;
+  if (!(std::hypot(dirX, dirY) > 0)) return false;
+  // 先统一朝向：法向跟着 dir 的正反翻，而偶数个点的中位取的是「上中位」，
+  // 不统一的话 refLine 的 dir 取反会让位置差出一个点距。
+  const Eigen::Vector2d canon = canonicalLineDir(dirX, dirY);
+  const double ux = canon.x();
+  const double uy = canon.y();
   const double nx = -uy;  // 法向
   const double ny = ux;
   std::vector<double> proj;
@@ -251,14 +254,9 @@ bool fitFixedDirection(const GapCloud& cloud, double dirX, double dirY, float di
   return true;
 }
 
-/// 沿直线方向的单位向量，朝 +x（竖直时朝 +y）。首尾端点与 toward 投影都按它算。
+/// 沿直线方向的单位向量，与输出 Line2D.dir 同一约定。首尾端点与 toward 投影都按它算。
 Eigen::Vector2d lineAxis(const Eigen::VectorXf& coefficients) {
-  Eigen::Vector2d u(coefficients[3], coefficients[4]);
-  const double len = u.norm();
-  if (!(len > 0)) return Eigen::Vector2d(1, 0);
-  u /= len;
-  if (u.x() < 0 || (u.x() == 0 && u.y() < 0)) u = -u;
-  return u;
+  return canonicalLineDir(coefficients[3], coefficients[4]);
 }
 
 double projectOnAxis(const GapPoint& p, const Eigen::Vector2d& u) {

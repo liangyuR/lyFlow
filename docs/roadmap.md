@@ -335,7 +335,7 @@ Agent，不用自己重建「这次 run 到底发生了什么」，也不用手�
 
 - [ ] manifest 删除 `preconditions`；`OperatorDesc` 加可选 `validate` 钩子（加载期、纯参数与连接关系）
 - [ ] 顶层图参数：GraphDoc `params`，CLI `--param`，C ABI v10 `params_json`，`lyflow params` 的 `source: graph`
-- [ ] gap 算子修正：`business_rois.datumSide` 与四角点变换、`fit_line.toward`、固定半径全路径生效、
+- [ ] gap 算子修正：`business_rois.datumSide` 与只搬框中心的变换、`fit_line.toward`、固定半径全路径生效、
       `flush.signed` 默认 true；导入器跟着改并生成 `gapOffset` / `modelPath`
 
 ## M5 之后 — 外延（只列方向，动工前再写计划）

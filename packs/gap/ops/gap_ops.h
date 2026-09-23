@@ -1,6 +1,7 @@
 #pragma once
 // gap 算子包的公共部分：注册函数声明、LyFlow ↔ PCL 点云互转、mm/m 换算。
 // 端口上的坐标一律是米；参数一律是毫米（G4，与 StandardGap.yml 一致）。
+#include <cmath>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -29,6 +30,17 @@ inline double mToMm(double m) { return m * kScale; }
 /// 与 mmToM 差最后一个 ULP，而严格开区间的裁剪正好卡在这一位上 —— 框一律走这一条，
 /// 同一个配置值在不同算子里才落在同一个 float 上。
 inline float mmToMRoi(double mm) { return static_cast<float>(mm) / 1000.0F; }
+
+/// Line2D 方向的统一朝向：朝 +x，竖直（x 分量为 0）时朝 +y；零向量退成 (1, 0)。
+/// 直线本身没有正反，但下游拿 dir 定法线（gap.flush 的符号），所以每条出端口的线都要
+/// 走这里 —— RANSAC 给出的系数方向是随机的。
+inline Eigen::Vector2d canonicalLineDir(double dx, double dy) {
+  const double len = std::hypot(dx, dy);
+  if (!(len > 0)) return Eigen::Vector2d(1.0, 0.0);
+  Eigen::Vector2d u(dx / len, dy / len);
+  if (u.x() < 0 || (u.x() == 0 && u.y() < 0)) u = -u;
+  return u;
+}
 
 /// LyFlow 点云 → PCL PointXYZRGB。rgb 通道按原算法的约定进 r/g/b（强度在 r 上）。
 GapCloud toPcl(const lyflow::PointCloud& cloud);

@@ -60,7 +60,7 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 | `gap.align_template` | cloud, tplLeft, tplRight → alignment | 全局粗配 + 左右两侧 ICP + 信赖域 + 退化锁定 |
 | `gap.select_alignment` | a,[b],[c],[d] → alignment | 按 `min(l,r)` ↓、`mean` ↓、配置顺序 ↑、id ↑ 选模板 |
 | `gap.result_bundle` | gap, flush, 五个框, 三份 quality, cropStatus, alignment, fallback, 三片云 → bundle | 汇成一个 `GapResultBundle`，字段对齐旧 `QualityMetrics` |
-| `gap.business_rois` | alignment → 四个 Box2D | 业务 ROI 按 ICP 变换搬到当前样本上：四个角点全部变换后取轴对齐包围盒。`datumSide` 决定 base ROI 用哪一侧的变换 |
+| `gap.business_rois` | alignment → 四个 Box2D | 业务 ROI 按 ICP 变换搬到当前样本上：只搬框中心，宽高保持配置里的原值。`datumSide` 决定 base ROI 用哪一侧的变换 |
 | `gap.fit_line` | cloud, box, toward, refLine? → line, inliers, innerEnd | 直线拟合 + 靠 `toward` 一端的截取重拟合（`toward` 接缝那一侧的 ROI）。`dirMode` 可把方向锚到 `refLine` 上（`band` 只兜底，`fixed` 一律钉死、只拟法向偏移）—— ROI 只有两三毫米宽时它自己拟出来的方向基本是噪声，还会偶尔整条歪几十度而残差很小。`minInliers` 是唯一拦得住「ROI 跑偏、照样拟出一条没意义的线」的地方 |
 | `gap.selected_point` | cloud, box → point | 离 ROI min 角最近的点（取自整片云） |
 | `gap.nearest_to_line` | cloud, line → point | 离基准线垂距最小的云点（`ref_type: nearest point`） |
@@ -102,7 +102,8 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 
 - **`gap.business_rois`**：参数 `datumSide`（`left` / `right`，默认 `left`）——
   基准件在缝的哪一侧。决定 base ROI 用哪一侧的 ICP 变换；**不改变哪个框是 `flushBase`**。
-  ROI 变换是四个角点全部变换后取轴对齐包围盒，带旋转的对齐变换下框会变大而不是变形。
+  ROI 变换只把框中心按 ICP 变换搬过去，宽高保持配置里的原值，仍是轴对齐框 ——
+  人调好的 ROI 尺寸不随转角撑大或压扁。
 - **`gap.roi_from_labels`**：没有 `baseSide` 参数。四个框按标签语义直接出到同名端口。
 - **`gap.fit_line`**：没有 `side` 参数，改为必接输入 `toward: Box2D`（缝那一侧的 ROI，用其中心）。
   `innerEnd` 是内点中沿直线方向投影最靠近 `toward` 中心的那一个；截取按同一投影保留最靠近
@@ -111,7 +112,9 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
   `segmentPoints: 0` 表示有意不截（方向基准线就是这样），不发。
 - **`gap.fit_gap_circles`**：`leftRadiusFixed` / `rightRadiusFixed` 在所有路径上都生效，
   包括圆心高度带约束的拟合与相机分开的回退。
-- **`gap.flush`**：`signed` 默认 true，输出带符号垂距（参考点在基准线下方为负）；
+- **`gap.flush`**：`signed` 默认 true，输出带符号垂距：参考点在基准线**上方**（测量帧里 y 更小）
+  为正，基准线竖直时在右侧（x 更大）为正。符号只看参考点在哪一侧，与拟合给出的方向正反无关
+  （本包出端口的 `Line2D.dir` 一律朝 +x、竖直时朝 +y，`gap.flush` 自己也再统一一次）。
   要绝对值显式写 `signed: false`。
 
 只依赖参数与连接关系的检查（例如 `fit_line` 的 `dirMode` 不是 `free` 却没接 `refLine`、

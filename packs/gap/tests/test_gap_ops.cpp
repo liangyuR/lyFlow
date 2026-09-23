@@ -316,24 +316,20 @@ Record alignmentRecord(const nlohmann::json& left, const nlohmann::json& right) 
   return rec;
 }
 
-/// 毫米框 [x0,y0,x1,y1] 的四个角点经 t 变换后的轴对齐包围盒（米）。
-Box2D expectedAabb(const nlohmann::json& t, double x0, double y0, double x1, double y1) {
-  Box2D b;
-  b.min[0] = b.min[1] = 1e9f;
-  b.max[0] = b.max[1] = -1e9f;
-  for (double x : {x0 / 1000.0, x1 / 1000.0}) {
-    for (double y : {y0 / 1000.0, y1 / 1000.0}) {
-      const float qx = static_cast<float>(t[0].get<double>() * x + t[1].get<double>() * y +
-                                          t[2].get<double>());
-      const float qy = static_cast<float>(t[3].get<double>() * x + t[4].get<double>() * y +
-                                          t[5].get<double>());
-      b.min[0] = std::min(b.min[0], qx);
-      b.min[1] = std::min(b.min[1], qy);
-      b.max[0] = std::max(b.max[0], qx);
-      b.max[1] = std::max(b.max[1], qy);
-    }
-  }
-  return b;
+/// 毫米框 [x0,y0,x1,y1] 的中心经 t 变换、宽高不变的轴对齐框（米）。
+Box2D expectedMoved(const nlohmann::json& t, double x0, double y0, double x1, double y1) {
+  const double cx = 0.5 * (x0 + x1) / 1000.0;
+  const double cy = 0.5 * (y0 + y1) / 1000.0;
+  const double qx = t[0].get<double>() * cx + t[1].get<double>() * cy + t[2].get<double>();
+  const double qy = t[3].get<double>() * cx + t[4].get<double>() * cy + t[5].get<double>();
+  const double hw = 0.5 * (x1 - x0) / 1000.0;
+  const double hh = 0.5 * (y1 - y0) / 1000.0;
+  Box2D box;
+  box.min[0] = static_cast<float>(qx - hw);
+  box.min[1] = static_cast<float>(qy - hh);
+  box.max[0] = static_cast<float>(qx + hw);
+  box.max[1] = static_cast<float>(qy + hh);
+  return box;
 }
 
 void checkBox(const Box2D& got, const Box2D& want) {
@@ -360,7 +356,7 @@ TEST_CASE("gap.business_rois 单位变换下四个端口各出各的框") {
   }
 }
 
-TEST_CASE("gap.business_rois 四个角点全变换取包围盒，datumSide 决定 base ROI 用哪侧变换") {
+TEST_CASE("gap.business_rois 只搬框中心、宽高不变，datumSide 决定 base ROI 用哪侧变换") {
   // 左侧单位变换，右侧转 30° 再平移：只看右侧变换的那些框。
   const nlohmann::json identity = {1, 0, 0, 0, 1, 0, 0, 0, 1};
   const nlohmann::json turned = rigid(30.0, 0.0005, -0.0002);
@@ -370,21 +366,27 @@ TEST_CASE("gap.business_rois 四个角点全变换取包围盒，datumSide 决�
   right.inputs["alignment"] = Data::record(rec);
   REQUIRE(right.run("gap.business_rois", {{"datumSide", Value::text("right")}}).ok);
   // datumSide=right：flushBase 用右侧变换、flushRef 用左侧变换
-  checkBox(*right.out("flushBase").asBox2D(), expectedAabb(turned, 0.0, 0.0, 1.0, 1.0));
-  checkBox(*right.out("flushRef").asBox2D(), expectedAabb(identity, 4.0, 0.0, 5.0, 1.0));
+  checkBox(*right.out("flushBase").asBox2D(), expectedMoved(turned, 0.0, 0.0, 1.0, 1.0));
+  checkBox(*right.out("flushRef").asBox2D(), expectedMoved(identity, 4.0, 0.0, 5.0, 1.0));
   // 间隙两侧各归各侧
-  checkBox(*right.out("gapLeft").asBox2D(), expectedAabb(identity, 2.0, 0.0, 3.0, 1.0));
-  checkBox(*right.out("gapRight").asBox2D(), expectedAabb(turned, 6.0, 0.0, 7.0, 1.0));
-  // 转过之后的包围盒比原框宽：只变换对角两点时 (0,0)、(1,1) 两个角转完 x 跨度是
-  // cos30 − sin30 ≈ 0.37 mm，四角包围盒是 cos30 + sin30 ≈ 1.37 mm。
+  checkBox(*right.out("gapLeft").asBox2D(), expectedMoved(identity, 2.0, 0.0, 3.0, 1.0));
+  checkBox(*right.out("gapRight").asBox2D(), expectedMoved(turned, 6.0, 0.0, 7.0, 1.0));
+  // 转了 30° 宽高仍是 1 mm × 1 mm，中心确实被转过去了：(0.5, 0.5) mm 转 30° 再平移
   const Box2D& base = *right.out("flushBase").asBox2D();
-  CHECK((base.max[0] - base.min[0]) == doctest::Approx(0.001366).epsilon(1e-3));
+  CHECK((base.max[0] - base.min[0]) == doctest::Approx(0.001).epsilon(1e-4));
+  CHECK((base.max[1] - base.min[1]) == doctest::Approx(0.001).epsilon(1e-4));
+  const double c30 = std::cos(3.14159265358979323846 / 6.0);
+  const double s30 = std::sin(3.14159265358979323846 / 6.0);
+  CHECK(0.5 * (base.min[0] + base.max[0]) ==
+        doctest::Approx(0.0005 * c30 - 0.0005 * s30 + 0.0005).epsilon(1e-5));
+  CHECK(0.5 * (base.min[1] + base.max[1]) ==
+        doctest::Approx(0.0005 * s30 + 0.0005 * c30 - 0.0002).epsilon(1e-5));
 
   Call left;
   left.inputs["alignment"] = Data::record(rec);
   REQUIRE(left.run("gap.business_rois", {{"datumSide", Value::text("left")}}).ok);
-  checkBox(*left.out("flushBase").asBox2D(), expectedAabb(identity, 0.0, 0.0, 1.0, 1.0));
-  checkBox(*left.out("flushRef").asBox2D(), expectedAabb(turned, 4.0, 0.0, 5.0, 1.0));
+  checkBox(*left.out("flushBase").asBox2D(), expectedMoved(identity, 0.0, 0.0, 1.0, 1.0));
+  checkBox(*left.out("flushRef").asBox2D(), expectedMoved(turned, 4.0, 0.0, 5.0, 1.0));
 }
 
 TEST_CASE("gap.overall_roi 的 auto_center 保留宽高、中心取两片云中位数的中点") {
@@ -798,6 +800,84 @@ TEST_CASE("gap.flush 的 scale 与 offset 是线性的") {
   REQUIRE(call.run("gap.flush", {{"scale", Value::number(2.06)}, {"offset", Value::number(-0.1)}}).ok);
   CHECK(call.out("value").asMeasurement()->value ==
         doctest::Approx(-2.0 * 2.06 - 0.1).epsilon(1e-6));
+}
+
+TEST_CASE("gap.flush 的符号只看参考点在哪一侧，基准线方向取反结果不变") {
+  // 同一条直线的两种 dir（RANSAC 给哪一种是随机的）。参考点在上方（y 更小）为正。
+  for (double deg : {0.0, 29.0, -40.0, 90.0}) {
+    CAPTURE(deg);
+    const double a = deg * 3.14159265358979323846 / 180.0;
+    Line2D base;
+    base.point[0] = 0.01f;
+    base.point[1] = 0.17f;
+    base.dir[0] = static_cast<float>(std::cos(a));
+    base.dir[1] = static_cast<float>(std::sin(a));
+    Line2D flipped = base;
+    flipped.dir[0] = -base.dir[0];
+    flipped.dir[1] = -base.dir[1];
+    // 沿法线往「上方」（竖直线时往右）挪 0.8 mm 的点
+    // 朝 +x（竖直时朝 +y）的那个方向 u，「上方 / 右侧」就是法线 (u.y, -u.x)
+    double ux = base.dir[0], uy = base.dir[1];
+    if (ux < 0 || (ux == 0 && uy < 0)) { ux = -ux; uy = -uy; }
+    Point2D ref;
+    ref.p[0] = static_cast<float>(0.01 + 0.0008 * uy + 0.002 * ux);
+    ref.p[1] = static_cast<float>(0.17 - 0.0008 * ux + 0.002 * uy);
+
+    Call one;
+    one.inputs["baseLine"] = Data::line2d(base);
+    one.inputs["refPoint"] = Data::point2d(ref);
+    REQUIRE(one.run("gap.flush").ok);
+    Call two;
+    two.inputs["baseLine"] = Data::line2d(flipped);
+    two.inputs["refPoint"] = Data::point2d(ref);
+    REQUIRE(two.run("gap.flush").ok);
+    CHECK(one.out("value").asMeasurement()->value == doctest::Approx(0.8).epsilon(1e-4));
+    CHECK(two.out("value").asMeasurement()->value == one.out("value").asMeasurement()->value);
+  }
+}
+
+TEST_CASE("gap.fit_line 输出的方向统一朝 +x，与拟合给的正反无关") {
+  // dirMode=fixed 的方向来自 refLine：refLine 取 0° 与 180° 是同一条线、相反的 dir，
+  // 相当于把拟合方向人为取反。输出的 Line2D 与下游 flush 都必须完全相同。
+  const auto fit = [](double refDeg) {
+    auto call = std::make_unique<Call>();
+    PointCloud cloud;
+    for (int i = 0; i < 40; ++i) cloud.push(0.0001f * static_cast<float>(i), 0.17f, 0.0f);
+    call->inputs["cloud"] = Data::cloud(cloud);
+    call->inputs["box"] = Data::box2d(box(-0.001f, 0.16f, 0.005f, 0.18f));
+    call->inputs["toward"] = Data::box2d(box(0.006f, 0.16f, 0.007f, 0.18f));
+    Line2D ref;
+    ref.dir[0] = static_cast<float>(std::cos(refDeg * 3.14159265358979323846 / 180.0));
+    ref.dir[1] = static_cast<float>(std::sin(refDeg * 3.14159265358979323846 / 180.0));
+    call->inputs["refLine"] = Data::line2d(ref);
+    REQUIRE(call->run("gap.fit_line", {{"dirMode", Value::text("fixed")},
+                                       {"dirNominalDeg", Value::number(5.0)},
+                                       {"distThresh", Value::number(5.0)}})
+                .ok);
+    return call;
+  };
+  auto a = fit(0.0);
+  auto b = fit(180.0);
+  const Line2D& la = *a->out("line").asLine2D();
+  const Line2D& lb = *b->out("line").asLine2D();
+  CHECK(la.dir[0] > 0);
+  CHECK(la.dir[0] == doctest::Approx(lb.dir[0]).epsilon(1e-6));
+  CHECK(la.dir[1] == doctest::Approx(lb.dir[1]).epsilon(1e-6));
+
+  Point2D ref;
+  ref.p[0] = 0.002f;
+  ref.p[1] = 0.169f;  // 基准线上方约 1 mm
+  double values[2];
+  int k = 0;
+  for (const Line2D* line : {&la, &lb}) {
+    Call flush;
+    flush.inputs["baseLine"] = Data::line2d(*line);
+    flush.inputs["refPoint"] = Data::point2d(ref);
+    REQUIRE(flush.run("gap.flush").ok);
+    values[k++] = flush.out("value").asMeasurement()->value;
+  }
+  CHECK(values[0] > 0);
+  CHECK(values[0] == doctest::Approx(values[1]).epsilon(1e-9));
 }
 
 TEST_CASE("gap.flush 的 signed 给带符号垂距，关掉才折回同一方向") {

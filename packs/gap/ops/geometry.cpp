@@ -111,21 +111,18 @@ Status businessRois(const Inputs& inputs, const ParamView& params, Outputs& outp
   for (int i = 0; i < 4; ++i) {
     const auto& r = roiMm[static_cast<std::size_t>(i)];
     const Eigen::Matrix3f& t = *kTransforms[i];
-    // 四个角点全部变换，再取轴对齐包围盒：模板有转角时框不会被拉扁或压没。
-    const float xs[2] = {mmToMRoi(r[0]), mmToMRoi(r[2])};
-    const float ys[2] = {mmToMRoi(r[1]), mmToMRoi(r[3])};
+    // 只把框中心用 ICP 变换搬过去，宽高保持配置里的原值，仍是轴对齐框：
+    // 人调好的 ROI 尺寸不该随转角被撑大（撑大的框会吃进别的特征）或压扁。
+    const float x0 = mmToMRoi(r[0]), x1 = mmToMRoi(r[2]);
+    const float y0 = mmToMRoi(r[1]), y1 = mmToMRoi(r[3]);
+    const float halfW = 0.5F * (x1 - x0);
+    const float halfH = 0.5F * (y1 - y0);
+    const Eigen::Vector3f c = t * Eigen::Vector3f(0.5F * (x0 + x1), 0.5F * (y0 + y1), 1.0F);
     lyflow::Box2D box;
-    box.min[0] = box.min[1] = std::numeric_limits<float>::infinity();
-    box.max[0] = box.max[1] = -std::numeric_limits<float>::infinity();
-    for (float x : xs) {
-      for (float y : ys) {
-        const Eigen::Vector3f q = t * Eigen::Vector3f(x, y, 1.0F);
-        box.min[0] = std::min(box.min[0], q.x());
-        box.min[1] = std::min(box.min[1], q.y());
-        box.max[0] = std::max(box.max[0], q.x());
-        box.max[1] = std::max(box.max[1], q.y());
-      }
-    }
+    box.min[0] = c.x() - halfW;
+    box.min[1] = c.y() - halfH;
+    box.max[0] = c.x() + halfW;
+    box.max[1] = c.y() + halfH;
     outputs.set(kPorts[i], Data::box2d(box));
   }
   return Status::Ok();
@@ -333,10 +330,10 @@ void registerBusinessRois(Registry& r) {
   op.category = "间隙/配准";
   op.keywords = {"roi", "business", "业务框"};
   op.doc =
-      "把选中模板的四个业务 ROI 按 ICP 变换搬到当前样本上：框的四个角点全部变换，"
-      "再取轴对齐包围盒。\n"
+      "把选中模板的四个业务 ROI 按 ICP 变换搬到当前样本上：框中心按变换搬过去，"
+      "宽高保持配置里的原值，仍是轴对齐框。\n"
       "假定四个框是模板坐标系里的常数、样本与模板之间的差异能被一次刚体变换吃掉；"
-      "模板转角越大，包围盒比原框越宽。";
+      "转角只影响框中心的位置，不改变框的尺寸 —— 零件转得厉害时框里的特征会相对框转动。";
   op.inputs = {withContract(Port{"alignment", "Record", "Alignment", "GapAlignment。", true},
                             {{"recordType", "GapAlignment"}})};
   op.outputs = {

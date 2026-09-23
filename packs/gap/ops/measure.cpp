@@ -42,16 +42,15 @@ Status flush(const Inputs& inputs, const ParamView& params, Outputs& outputs, Ex
   const Eigen::Vector2f end(ref.p[0], ref.p[1]);
   Eigen::Vector2f start;
   utils::pointLineDistance(toLineCoefficients(base), end, &start);
-  // signed（默认）给带符号垂距：法线取 (dir.y, -dir.x)，点在基准线下方（y 更大）为负。
+  // signed（默认）给带符号垂距：参考点在基准线**上方**（测量帧里 y 更小）为正；
+  // 竖直基准线时在**右侧**（x 更大）为正。方向先按 canonicalLineDir 统一朝向再取法线
+  // (dir.y, -dir.x)，所以符号只看参考点在哪一侧，与上游拟合给出的方向正反无关。
   // 关掉才取绝对值 —— 闭合缝上参考点几乎落在基准线上，绝对值会把响应折回去。
   double distanceMm = static_cast<double>((end - start).norm()) * kScale;
   if (params.flag("signed")) {
-    Eigen::Vector2f normal(base.dir[1], -base.dir[0]);
-    const float norm = normal.norm();
-    if (norm > 0) {
-      normal /= norm;
-      distanceMm = static_cast<double>(normal.dot(end - start)) * kScale;
-    }
+    const Eigen::Vector2d u = canonicalLineDir(base.dir[0], base.dir[1]);
+    const Eigen::Vector2f normal(static_cast<float>(u.y()), static_cast<float>(-u.x()));
+    distanceMm = static_cast<double>(normal.dot(end - start)) * kScale;
   }
   const double valueMm = distanceMm * params.number("scale") + params.number("offset");
 
@@ -301,7 +300,8 @@ void registerFlush(Registry& r) {
   op.category = "间隙/测量";
   op.keywords = {"flush", "段差", "面差"};
   op.doc =
-      "段差 = 参考点到基准线的带符号垂距 × scale + offset（signed 关掉时取绝对值）。"
+      "段差 = 参考点到基准线的带符号垂距 × scale + offset（参考点在基准线上方为正；"
+      "signed 关掉时取绝对值）。"
       "基准线的方向完全来自上游拟合：基准面拟歪了，垂距连带 scale 一起错。";
   op.inputs = {
       Port{"baseLine", "Line2D", "Base Line", "基准面拟合出的直线。", true},
@@ -328,7 +328,8 @@ void registerFlush(Registry& r) {
   flushSigned.type = ParamType::Bool;
   flushSigned.label = "Signed";
   flushSigned.doc =
-      "输出带符号的垂距（法线 (dir.y, -dir.x)，参考点在基准线下方为负）。默认打开；"
+      "输出带符号的垂距：参考点在基准线上方（测量帧里 y 更小）为正、下方为负；基准线竖直时"
+      "右侧（x 更大）为正。符号只看参考点在哪一侧，与基准线拟合出来的方向正反无关。默认打开；"
       "关掉取绝对值，会把「缝张开」和「缝收紧」折成同一个方向 —— 参考点几乎落在基准线上的"
       "闭合缝尤其不能关。";
   flushSigned.def = Value::boolean(true);

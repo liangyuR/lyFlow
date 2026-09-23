@@ -79,7 +79,7 @@ DEFAULT 在 `lyflow_op_pack()` 里声明，而包的 cmake 往往要先找依赖
 ## 与原算法的关系
 
 算法源码迁入 `std-pointcloud` 之后，gap 包的正确性**不再以与原算法数值相同为标准**：
-M7 起一批算子的行为已有意偏离原算法（ROI 四角点变换、`fit_line` 的截取方向、
+M7 起一批算子的行为已有意偏离原算法（ROI 只搬中心、`fit_line` 的截取方向、
 固定半径在所有路径上生效、flush 默认带符号等，见 `packs/gap/README.md`）。
 正确性由包内 doctest 与样本集上的读数评审来定，不由对拍来定。
 

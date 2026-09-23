@@ -79,7 +79,7 @@ docs 里剩的提及都是「M7 J4 已撤销」的注记或历史验收记录。
 | J8 ABI `params_json` 与 CLI `--param` 一致 | `abi_params_json_and_cli_param_agree`：同一张图，CLI `--param count=1234` 与 `RunSpec.params_json={"count":1234}` 两次运行 g 都是 1234 点、下游 v 点数相同、`run_started.nodes` 的 cacheKey **逐个相等**；ABI 传未声明名字 → `run_finished.error.code=unknown_param` | `cli.rs` |
 | J8 `lyflow params` source=graph | `params_reports_the_graph_source_and_which_graph_param`：`source=graph`、`graphParam=count`、`--only graph` | `cli.rs` |
 | J8 eval / patch | `eval_takes_graph_params_next_to_sweep_axes`（顶层参数与扫描轴混用）、`patch_param_rewrites_the_default_and_is_idempotent` | `cli.rs` |
-| J9a 四角点包围盒、datumSide=right 用右侧变换 | 「gap.business_rois 四个角点全变换取包围盒，datumSide 决定 base ROI 用哪侧变换」：右侧转 30°+平移，逐框对四角 AABB；包围盒宽 1.366 mm（对角两点只有 0.37 mm） | `test_gap_ops.cpp` |
+| J9a 框变换、datumSide=right 用右侧变换 | 首轮是四角点包围盒；**返工后**改为「gap.business_rois 只搬框中心、宽高不变，datumSide 决定 base ROI 用哪侧变换」，见文末「返工」 | `test_gap_ops.cpp` |
 | J9c toward 左/右 → innerEnd 两端；segmentPoints 过大 → segmentApplied=false | 「gap.fit_line 按 toward 截取与取 innerEnd，与点序无关」（两种点序 × 两个 toward）、「…内点不多于 segmentPoints 时不截取，quality 说出来」 | 同上 |
 | J9d 带约束路径固定半径 | 「gap.fit_gap_circles 的固定半径在圆心高度带那条路上也生效」（`rightCenterTol>0` always + `rightRadiusFixed` → 半径 = 1.0 mm，model=`circle-center-band`）；另加相机分开回退那条：「…在相机分开的回退里也生效」 | 同上 |
 | J9e 不写 signed 出带符号值 | 「gap.flush 默认给带符号垂距，signed=false 才取绝对值」 | 同上 |
@@ -195,7 +195,7 @@ std 包不在 J6 范围，其中只依赖参数的检查（如 `fit.circle_2d` �
 17. **宿主切换计划**：`docs/phase-b-plan.md`、`docs/gap-inspector-integration-design.md` 以 39 样本 A/B「逐值一致」为门槛，M7 之后必然不成立；但那是宿主仓库的验收（J11），只在两份文档开头加了一段现状注记，没有改写它们的门槛。
 18. 顺手修了 `core/README.md` 里 `C:\vcpkg` 被存成控制字符的三处老问题，以及文档子代理引入的 `packs\gap\tools` 路径被转义成制表符的五处。
 
-## 读数变化（给验收者的提醒）
+## 读数变化（首轮，已被「返工」一节取代）
 
 用 main `20cd35e` 构建的 `bridge/target/release/lyflow.exe`（带 gap 包、M7 之前）与本轮的 debug CLI，对 `tianmu_0904` 数据集前 39 个样本各自导入模板路径图、跑同一帧：
 
@@ -215,3 +215,100 @@ std 包不在 J6 范围，其中只依赖参数的检查（如 `fit.circle_2d` �
 
 见 `git log`：代码（core / ABI v10 / CLI / 客户端 / 编辑器 / MCP / schema / gap 包 / 测试 / 脚本）一个，文档一个。
 `docs/m7-plan.md`、`docs/m8-plan.md` 未提交。
+
+## 返工（验收者打回的两处）
+
+### 1. flush 的符号与拟合方向无关（bug）
+
+- 源头：`packs/gap/ops/gap_ops.h` 新增 `canonicalLineDir`（朝 +x，x 分量为 0 时朝 +y，零向量退成 (1,0)）。
+  `fit.cpp` 的 `lineFromCoefficients`、`lineAxis` 都走它，`gap.fit_line` 输出的 `Line2D.dir` 从此确定。
+- `fitFixedDirection`（dirMode=fixed/band 钉方向那条路）入口也先统一朝向：法向跟着 dir 翻，而偶数个点的中位取「上中位」，
+  不统一的话 refLine 的 dir 取反会让位置差出一个点距 —— 新测试就是在这里第一次失败的（1.0049 vs 0.9962 mm）。
+- `gap.flush` 取法线前**自己再统一一次**，约定写死：**参考点在基准线上方（测量帧里 y 更小）为正**，
+  基准线竖直时右侧（x 更大）为正。所以接别的包（例如 `fit.line_2d`）拟出的线也不受方向正反影响。op.doc 与 `signed` 的 doc 写实。
+- 下游排查（依赖 `Line2D.dir` 符号的地方）：
+
+| 位置 | 结论 |
+|---|---|
+| `gap.flush` 法线 | 改为按统一朝向取法线（上面） |
+| `gap.gap` definition A 的 u | 取自基准线端点，且强制 `u.x ≥ 0`，与 dir 符号无关 |
+| `gap.corner_vertex` | u 强制 `u.x ≥ 0`；夹角用「从顶点出发的远端」，已与 dir 符号无关 |
+| `centerAboveLine`（圆心高度带） | 只用斜率 dy/dx，与符号无关 |
+| `lineAngleDeltaDeg`（band 判据） | 折进 (−90, 90]，与符号无关 |
+| 方向钉死的 pin = refLine.dir + nominal | 方向差 180° 是同一条线；位置由 `fitFixedDirection` 统一朝向后与符号无关（上面） |
+| `gap.nearest_to_line` | 取垂距绝对值，与符号无关 |
+| `gap.datum_window` | 不读 Line2D |
+| groove / notch / offset / dts 自己构造的 Line2D | 不进 gap.flush，本轮不动 |
+
+- 新测试（`test_gap_ops.cpp`）：
+  - 「gap.flush 的符号只看参考点在哪一侧，基准线方向取反结果不变」：0° / 29° / −40° / 90° 四条基准线，dir 与 −dir 两次读数逐位相等，都是 +0.8 mm（参考点在上方 / 竖直时在右侧）。
+  - 「gap.fit_line 输出的方向统一朝 +x，与拟合给的正反无关」：dirMode=fixed，refLine 取 0° 与 180°（即把拟合方向人为取反），两条输出线 dir 相同、`dir.x > 0`，接下游 flush 的读数相同且为正。
+
+**39 样本对照**（模板路径，同一帧，旧 = main `20cd35e` 构建的 `bridge/target/release/lyflow.exe`，新 = 返工后）：
+
+| 样本 | gap 旧 | gap 新 | flush 旧 | flush 新 | 备注 |
+|---|---|---|---|---|---|
+| R4_2 | 5.703 | 5.700 | 0.565 | 0.713 | |
+| R4_3 | 6.097 | 6.088 | 1.082 | 1.038 | |
+| R5_4 | 6.040 | 6.143 | 4.411 | **−6.719** | |
+| R2_5 | 9.222 | 9.249 | 4.153 | **−6.014** | |
+| R3_6 | 10.166 | 9.617 | 2.603 | **−5.203** | 见下 |
+| L3_8 | 7.843 | 7.843 | 3.508 | 3.470 | |
+| L3_9 | 7.786 | 7.813 | 5.706 | 5.521 | |
+| R1_10 | 拟不出 | 拟不出 | 2.374 | **−2.374** | 新旧都 `circle_fit_failed` |
+| R5_11 | 6.414 | 6.499 | 3.875 | **−6.475** | |
+| R3_13 | 7.896 | 7.906 | 3.565 | **−6.421** | |
+| R1_14 | 3.712 | 3.755 | 2.612 | **−2.762** | |
+| R4_15 | 5.358 | 5.345 | 0.787 | 0.787 | |
+| R4_16 | 4.070 | 3.617 | 0.544 | 0.469 | 首轮四角包围盒时拟不出，返工后拟得出，见下 |
+| R4_17 | 5.582 | 5.541 | 0.722 | 0.701 | |
+| L1_18 | 4.475 | 4.381 | 0.784 | 0.539 | |
+| R1_19 | 0.875 | 1.049 | 2.421 | **−2.399** | |
+| R2_22 | 9.430 | 9.430 | 2.968 | **−4.968** | |
+| R2_24 | 4.870 | 4.870 | 3.076 | **−5.076** | |
+| R1_25 | 3.053 | 3.054 | 2.374 | **−2.423** | |
+| R4_26 | 5.399 | 5.401 | 0.908 | 0.947 | |
+| R1_27 | 3.510 | 3.510 | 2.466 | **−2.465** | |
+| L4_29 | 5.315 | 5.319 | 1.042 | 0.073 | |
+| R6_30 | 6.122 | 6.118 | 4.860 | **−5.894** | |
+| L3_31 | 7.544 | 7.555 | 5.188 | 5.265 | |
+| R4_33 | 5.456 | 5.484 | 1.304 | 1.240 | |
+| R4_35 | 5.304 | 5.304 | 1.237 | 1.199 | |
+| R1_36 | 3.318 | 3.312 | 2.664 | **−2.406** | |
+| L5_37 | 8.241 | 8.236 | 5.309 | **−4.589** | |
+| R4_38 | 5.290 | 5.217 | 0.925 | 0.893 | |
+| R1_39 | 拟不出 | 拟不出 | 2.144 | **−2.131** | 新旧都 `circle_fit_failed` |
+
+另 9 个样本新旧都在上游失败（`icp_score_low` ×6、`roi_empty` ×3，与本轮改动无关）。完整表在 `%TEMP%\m7r-ab\compare.csv`。
+
+**读数为负的测点：R1、R2、R3、R5、R6、L5**（16 个样本），与首轮是**同一批**，而且每个测点的所有帧同号 —— 不是随机翻转。
+为了确认，用旧构建把 39 个样本的 `n_fit_base` / `n_fit_ref` 各跑一遍：**52 条输出线里 dir.x < 0 的 0 条**。
+也就是说「方向不统一」这个 bug 是真的（fixed/band 路径与别的包的线都能触发，新测试钉住了），
+但在这批数据上没有发作；这些负值是几何上的：参考点确实在基准线**下方**（y 更大）。旁证：框没变的样本上
+新旧 |d| 相等，例如 R1（offset 0）2.374 / −2.374、R2_22（offset −1）|d| 都是 3.968。
+这几个点的 `flush.offset`（R2 −1、R3 −1.3、R5 −1.3、R6 −0.5、L5 +0.3）是按 |d| 标定的，
+现在加在带符号值上 —— **要么重标 offset，要么这些点的客户约定本来就是「参考面低为正」、需要一个翻符号的开关（例如 scale=−1）**。
+这是标定 / 约定问题，不是算法问题，本轮不动配置。
+
+### 2. business_rois 只搬框中心（设计修订）
+
+- `geometry.cpp`：框中心按 ICP 变换搬过去，宽高保持配置原值，仍是轴对齐框。op.doc、`packs/gap/README.md`、ADR-0015、roadmap、两个对拍脚本的说明跟着改。
+- 测试改为「gap.business_rois 只搬框中心、宽高不变，datumSide 决定 base ROI 用哪侧变换」：右侧转 30° 再平移，
+  断言宽高仍是 1 mm × 1 mm、中心等于 (0.5, 0.5) mm 经变换后的位置；datumSide=right 时 flushBase 用右侧变换、flushRef 用左侧。
+- 39 样本上（见上表）：
+  - **R4_16**：首轮四角包围盒时 `circle_fit_failed`；返工后拟得出，gap 3.617（旧 4.070）。右圆从合并云的普通拟合
+    （旧：R 1.108 mm、12 内点）变成了相机分开回退（新：`camera-separated-circle-primary`，R 1.516 mm、9 内点）——
+    右 ROI 与旧版只差几个 µm（右侧转角 0.71°），却落到了回退那条路上，这个点位的右圆本身就在边缘。
+  - **R1_14**：gap 3.755（旧 3.712，首轮 3.02）。框与旧版差 ≤ 0.02 mm，右圆 R 1.635 → 1.590。
+  - **R3_6**：gap 9.617（旧 10.166）。右 ROI 在 5 位小数上与旧版完全相同（转角 −0.02°），但严格开区间裁剪
+    少了一个贴边的点（134 → 133），RANSAC 就换了一个圆（R 1.765 → 0.984 mm，内点都是 16）——
+    是这个点位右圆拟合本身不稳，不是框的设计问题。
+  - 其余测点 gap 与旧版差在 ±0.1 mm 内，大多 ±0.03 mm。
+
+### 返工后的门禁
+
+| 命令 | 结果 |
+|---|---|
+| `$env:LYFLOW_PACKS="gap;dts"; pnpm check > $env:TEMP\m7r-check.log 2>&1` | 退出码 0，「全链路绿」。core doctest **247/247**（34469 断言，多了两条新用例）、`cargo test` 130/130、编辑器 4/4、MCP 45/45 |
+| `$env:LYFLOW_PACKS="gap;dts"; pnpm e2e > $env:TEMP\m7r-e2e.log 2>&1` | 退出码 0，**424/424** |
+| grep「跳过/未验」 | check：只有 CMake 探测的「skipped」、doctest 的「0 skipped」、MCP 老用例标题三类，与首轮相同；e2e：零命中 |
