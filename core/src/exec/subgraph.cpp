@@ -150,7 +150,9 @@ class Expander {
 
   bool run() {
     std::vector<std::string> stack;
-    expandLevel(in_.nodes, in_.edges, std::string(), false, stack);
+    std::vector<RawNode> nodes = in_.nodes;
+    applyGraphParams(nodes);
+    expandLevel(nodes, in_.edges, std::string(), false, stack);
     return ok_;
   }
 
@@ -159,6 +161,69 @@ class Expander {
             const std::string& paramPath = {}, const std::string& portName = {}) {
     diags_.error(nodeId, Phase::Validate, code, message, paramPath, portName);
     ok_ = false;
+  }
+
+  /// 一个提升参数的值写进它绑定的每个节点。子图外参（F4）与顶层图参数（J7）共用这一段：
+  /// graphParam 非空 = 来自顶层参数，记进 graphParams；否则记进 boundParams。
+  /// 找不到的目标节点在这里静默跳过 —— 子图定义解析时已经挡过，顶层参数由调用方先查。
+  static void writeBinds(std::vector<RawNode>& nodes, const std::map<std::string, std::size_t>& byId,
+                         const std::vector<std::pair<std::string, std::string>>& binds,
+                         const nlohmann::json& value, const std::string* graphParam) {
+    for (const auto& bind : binds) {
+      auto n = byId.find(bind.first);
+      if (n == byId.end()) continue;
+      RawNode& target = nodes[n->second];
+      target.params[bind.second] = value;
+      if (graphParam) {
+        target.graphParams[bind.second] = *graphParam;
+        target.boundParams.erase(bind.second);
+      } else {
+        // 记一笔「这个值是外层表单灌进来的」，`lyflow params` 的 source=bound 靠它。
+        target.boundParams.insert(bind.second);
+        target.graphParams.erase(bind.second);
+      }
+    }
+  }
+
+  /// 顶层图参数（J7）。与子图外参唯一的不同是「一处定义」：目标节点里又显式写了
+  /// 同一个参数、或者两个顶层参数绑同一个目标，都是 param_conflict，而不是悄悄覆盖。
+  /// 目标参数在算子上存不存在要 manifest 才知道，留给 buildPlan（那里报 unknown_bind）。
+  void applyGraphParams(std::vector<RawNode>& nodes) {
+    std::map<std::string, std::size_t> byId;
+    for (std::size_t i = 0; i < nodes.size(); ++i) byId[nodes[i].id] = i;
+    std::map<std::pair<std::string, std::string>, std::string> owner;
+    bool clean = true;
+    for (const GraphParam& gp : in_.params) {
+      for (const auto& bind : gp.binds) {
+        auto n = byId.find(bind.first);
+        if (n == byId.end()) {
+          fail("", "unknown_bind",
+               "顶层参数 '" + gp.name + "' 绑到不存在的节点 '" + bind.first + "'", gp.name);
+          clean = false;
+          continue;
+        }
+        auto taken = owner.emplace(bind, gp.name);
+        if (!taken.second) {
+          fail(bind.first, "param_conflict",
+               "参数 '" + bind.second + "' 同时被顶层参数 '" + taken.first->second + "' 与 '" +
+                   gp.name + "' 绑定",
+               bind.second);
+          clean = false;
+          continue;
+        }
+        if (nodes[n->second].params.contains(bind.second)) {
+          fail(bind.first, "param_conflict",
+               "参数 '" + bind.second + "' 由顶层参数 '" + gp.name +
+                   "' 绑定，节点里不能再显式写值（一处定义）",
+               bind.second);
+          clean = false;
+        }
+      }
+    }
+    if (!clean) return;
+    for (const GraphParam& gp : in_.params) {
+      writeBinds(nodes, byId, gp.binds, gp.decl.at("default"), &gp.name);
+    }
   }
 
   static bool resolveSource(const std::map<std::string, Boundary>& boundaries,
@@ -208,16 +273,21 @@ class Expander {
         if (def2 == p.decl.end()) continue;
         value = *def2;
       }
-      for (const auto& bind : p.binds) {
-        auto n = byId.find(bind.first);
-        if (n == byId.end()) continue;
-        nodes[n->second].params[bind.second] = value;
-        // 记一笔「这个值是外层表单灌进来的」，`lyflow params` 的 source=bound 靠它。
-        nodes[n->second].boundParams.insert(bind.second);
-      }
+      // 宿主节点的这个外参本身由顶层参数灌进来时，来源一路传下去：
+      // 里面的节点报 source=graph，而不是只报到子图这一层。
+      auto viaGraph = host.graphParams.find(p.name);
+      writeBinds(nodes, byId, p.binds, value,
+                 viaGraph == host.graphParams.end() ? nullptr : &viaGraph->second);
     }
     for (auto it = host.params.begin(); it != host.params.end(); ++it) {
-      if (!declared.count(it.key())) {
+      if (declared.count(it.key())) continue;
+      auto viaGraph = host.graphParams.find(it.key());
+      if (viaGraph != host.graphParams.end()) {
+        fail(hostId, "unknown_bind",
+             "顶层参数 '" + viaGraph->second + "' 绑到子图 '" + def.id + "' 没有的参数 '" +
+                 it.key() + "'",
+             it.key());
+      } else {
         fail(hostId, "unknown_param", "子图 '" + def.id + "' 没有参数 '" + it.key() + "'",
              it.key());
       }

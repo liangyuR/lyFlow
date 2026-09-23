@@ -1,6 +1,9 @@
 #include "exec/graph.h"
 
+#include <algorithm>
 #include <set>
+
+#include "lyflow/manifest.h"
 
 namespace lyflow::exec {
 namespace {
@@ -62,7 +65,71 @@ void readStringList(const nlohmann::json& j, const char* key, std::vector<std::s
   }
 }
 
+/// 一个顶层参数的声明。binds 写成 "节点.参数"，按最后一个 '.' 切：参数名里没有点。
+bool parseGraphParam(const std::string& name, const nlohmann::json& j, GraphParam& out,
+                     std::string& error) {
+  if (name.empty()) {
+    error = "params 里有一个空名字";
+    return false;
+  }
+  if (!j.is_object()) {
+    error = "顶层参数 '" + name + "' 不是 { default, binds } 对象";
+    return false;
+  }
+  if (!j.contains("default")) {
+    error = "顶层参数 '" + name + "' 缺少 default";
+    return false;
+  }
+  auto typeIt = j.find("type");
+  if (typeIt != j.end()) {
+    ParamType ignored;
+    if (!typeIt->is_string() || !parseParamType(typeIt->get<std::string>(), ignored)) {
+      error = "顶层参数 '" + name + "' 的 type 不是 manifest 的参数类型名";
+      return false;
+    }
+  }
+  auto bindsIt = j.find("binds");
+  if (bindsIt == j.end() || !bindsIt->is_array()) {
+    error = "顶层参数 '" + name + "' 缺少 binds 数组";
+    return false;
+  }
+  out.name = name;
+  out.decl = j;
+  for (const auto& b : *bindsIt) {
+    const std::string spec = b.is_string() ? b.get<std::string>() : std::string();
+    const auto dot = spec.rfind('.');
+    if (dot == std::string::npos || dot == 0 || dot + 1 == spec.size()) {
+      error = "顶层参数 '" + name + "' 的绑定写法是 \"节点.参数\"，收到 " +
+              (b.is_string() ? spec : b.dump());
+      return false;
+    }
+    out.binds.push_back({spec.substr(0, dot), spec.substr(dot + 1)});
+  }
+  return true;
+}
+
 }  // namespace
+
+bool applyGraphParamValues(const nlohmann::json& values, RawGraph& graph, Diagnostics& diags) {
+  if (values.is_null()) return true;
+  if (!values.is_object()) {
+    diags.error("", Phase::Validate, "bad_input", "顶层参数的取值必须是 JSON 对象 { 名字: 值 }");
+    return false;
+  }
+  bool ok = true;
+  for (auto it = values.begin(); it != values.end(); ++it) {
+    auto gp = std::find_if(graph.params.begin(), graph.params.end(),
+                           [&](const GraphParam& p) { return p.name == it.key(); });
+    if (gp == graph.params.end()) {
+      diags.error("", Phase::Validate, "unknown_param", "图没有声明顶层参数 '" + it.key() + "'",
+                  it.key());
+      ok = false;
+      continue;
+    }
+    gp->decl["default"] = it.value();
+  }
+  return ok;
+}
 
 bool parseSubgraphDef(const nlohmann::json& j, const std::string& id, SubgraphDef& out,
                       std::string& error) {
@@ -307,6 +374,25 @@ bool parseGraph(const std::string& json, RawGraph& out, Diagnostics& diags) {
           continue;
         }
         out.outputs.push_back(std::move(o));
+      }
+    }
+  }
+
+  // -- 顶层图参数（m7-plan J7）。绑定目标存不存在留给展开阶段：那里才分得清子图实例。
+  auto paramsIt = doc.find("params");
+  if (paramsIt != doc.end()) {
+    if (!paramsIt->is_object()) {
+      diags.error("", Phase::Validate, "bad_input",
+                  "params 必须是对象 { 名字: { default, binds, ... } }");
+    } else {
+      for (auto it = paramsIt->begin(); it != paramsIt->end(); ++it) {
+        std::string error;
+        GraphParam gp;
+        if (!parseGraphParam(it.key(), it.value(), gp, error)) {
+          diags.error("", Phase::Validate, "bad_input", error);
+          continue;
+        }
+        out.params.push_back(std::move(gp));
       }
     }
   }

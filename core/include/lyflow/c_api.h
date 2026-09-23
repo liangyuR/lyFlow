@@ -1,8 +1,8 @@
 #ifndef LYFLOW_C_API_H
 #define LYFLOW_C_API_H
-// C ABI v9。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
+// C ABI v10。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
 // 三条约定（char* 归属、异常不跨 ABI、只导出 C 函数）见 core/README.md「C ABI 约定」。
-#define LYFLOW_ABI_VERSION 9
+#define LYFLOW_ABI_VERSION 10
 #include <stddef.h>
 #include <stdint.h>
 
@@ -100,6 +100,9 @@ typedef struct {
   int32_t no_reuse;                /* 非 0 = 本次运行不复用结果仓里的旧结果 */
   const lyflow_run_input* inputs;  /* v7：运行时注入的源数据，NULL/0 表示没有 */
   size_t input_count;
+  /* v10：顶层图参数的取值，JSON 对象 { 名字: 值 }（GraphDoc 顶层 params）。
+     NULL/空串 = 全用图里的 default。图没声明的名字在校验阶段报 unknown_param。 */
+  const char* params_json;
 } lyflow_run_options;
 
 #define LYFLOW_RUN_MODE_FULL 0
@@ -197,7 +200,8 @@ LYFLOW_API char* lyflow_run_summary(const char* run_id);
 
 // v9（本轮加在 v9 里，ABI 号不变）：每节点每参数的生效值与来源（m6-plan §2）。返回
 // { nodes: [ { node, op, params: [ { param, value, source, label?, unit?, min?, max? } ] } ] }，
-// source 是 "default" | "explicit" | "bound"（子图提升参数灌进来的，ADR-0010）。
+// source 是 "default" | "explicit" | "bound"（子图提升参数灌进来的，ADR-0010）|
+// "graph"（v10：顶层图参数灌进来的，该项另带 graphParam: "<名字>"）。
 // 稀疏存储是对的，但「现在到底跑的是什么值」必须由合并默认值、跑完迁移的那一层说，
 // 在桥接层重算一遍迟早与执行器漂开。
 // 校验有错时返回**诊断数组**（'[' 开头），与 lyflow_plan 同一套区分办法。base_dir 可为 NULL。

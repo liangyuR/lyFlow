@@ -99,6 +99,8 @@ try {
   # 漏掉的文件（比如只有宿主才用的入口）在这里才会暴露。
   pnpm --filter "@lyflow/editor" typecheck
   if ($LASTEXITCODE -ne 0) { throw "@lyflow/editor 类型检查失败" }
+  pnpm --filter "@lyflow/editor" test
+  if ($LASTEXITCODE -ne 0) { throw "@lyflow/editor 单测失败" }
   pnpm --filter lyflow-app build
   if ($LASTEXITCODE -ne 0) { throw "前端构建失败" }
   pnpm --filter lyflow-host-react build

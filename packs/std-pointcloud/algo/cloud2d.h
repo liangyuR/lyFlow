@@ -1,6 +1,6 @@
 #pragma once
 // lyflow_std_algo 的公共点类型。用 PointXYZRGB 而不是 PointXYZ：2D 量测域的算法
-// 全部从 gap-inspector 迁来，换点类型就要重新证明逐位一致（ADR-0015）。
+// 全部从 gap-inspector 迁来（ADR-0015），强度就放在 r 通道上跟着点走。
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 

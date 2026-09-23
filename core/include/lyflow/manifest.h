@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -26,6 +27,12 @@ using ComputeFn = Status (*)(const Inputs&, const ParamView&, Outputs&, ExecCont
 /// 可选钩子：把「文件内容变了」这类外部状态揉进 cacheKey。
 /// IO 算子返回 "size:mtime"，读不到文件时返回空串（当作没有外部状态）。
 using ExternalKeyFn = std::string (*)(const ParamView&);
+
+/// 可选钩子：加载期校验（m7-plan J5）。纯函数，只看两样东西 —— 解析后的参数
+/// （已合并默认值与绑定值）和已连上的输入端口名；**不给任何数据**，给了数据就成了第二个 compute。
+/// 返回的每一条 error 让节点在 validate 阶段失效，warning 只进诊断与 warn 日志。
+using ValidateFn = std::vector<Issue> (*)(const ParamView&,
+                                          const std::set<std::string>& connectedInputs);
 
 /// 主版本升级时的参数改写：拿旧参数对象，还一份新的（ADR-0008）。
 /// 只碰参数 —— 端口改名要靠新算子 + aliases，因为连线不归算子管。
@@ -195,7 +202,6 @@ struct OperatorDesc {
   std::string category;                   // 用 / 分层，决定搜索面板树形结构
   std::vector<std::string> keywords;
   std::string doc;
-  std::vector<std::string> preconditions;
 
   std::vector<Port> inputs;
   std::vector<Port> outputs;
@@ -206,6 +212,8 @@ struct OperatorDesc {
   /// 会在用户点运行时才暴露，那时已经画完整张图了。
   ComputeFn compute = nullptr;
   ExternalKeyFn externalKey = nullptr;
+  /// 只依赖参数与连接关系的检查写在这里，compute 里不再留一份副本（J6）。
+  ValidateFn validate = nullptr;
 
   /// 参数迁移链，按 fromMajor 任意顺序给都行。空 = 该算子从没破坏性升级过。
   std::vector<Migration> migrations;

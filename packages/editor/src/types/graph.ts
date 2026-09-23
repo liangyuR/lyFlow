@@ -102,8 +102,19 @@ export interface GraphDoc {
   /** 图级命名输出（ADR-0017）。宿主按名字取值，不认节点 id；
    *  子图内部的端口写展开后的路径 id（`outer/inner`）。 */
   outputs?: Record<string, GraphOutput>;
+  /** 顶层图参数（m7-plan J7/J8）。编辑器不解释、不改写，只原样往返；
+   *  取值在展开期由 core 写进被绑定的节点参数，编辑界面留给 M8。 */
+  params?: Record<string, GraphParam>;
   /** 未知字段容器：老客户端打开新版本写的图时不丢数据。 */
   x?: Record<string, unknown>;
+}
+
+/** 一个顶层图参数。`binds` 每项是 `<节点>.<参数>`，以最后一个 `.` 分隔。 */
+export interface GraphParam {
+  type?: string;
+  default: unknown;
+  binds: string[];
+  doc?: string;
 }
 
 export interface GraphOutput {

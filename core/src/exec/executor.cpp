@@ -1371,7 +1371,7 @@ void Run::workImpl() {
     for (auto& kv : digests) providedDigest[kv.first] = kv.second.hex();
   }
 
-  const bool parsed = prepareGraph(graphJson_, raw, diags);
+  const bool parsed = prepareGraph(graphJson_, raw, diags, options_.paramsJson);
   if (parsed) {
     BuildOptions build;
     build.runId = options_.runId;
@@ -1473,18 +1473,31 @@ void Run::workImpl() {
 
 // ------------------------------------------------------------------ validate
 
-bool prepareGraph(const std::string& graphJson, RawGraph& out, Diagnostics& diags) {
+bool prepareGraph(const std::string& graphJson, RawGraph& out, Diagnostics& diags,
+                  const std::string& paramsJson) {
   RawGraph parsed;
   if (!parseGraph(graphJson, parsed, diags)) return false;
+  if (!paramsJson.empty()) {
+    nlohmann::json values;
+    try {
+      values = nlohmann::json::parse(paramsJson);
+    } catch (const std::exception& e) {
+      diags.error("", Phase::Validate, "bad_input",
+                  std::string("顶层参数的取值不是合法 JSON: ") + e.what());
+      return false;
+    }
+    if (!applyGraphParamValues(values, parsed, diags)) return false;
+  }
   if (!expandGraph(parsed, out, diags)) return false;
   return true;
 }
 
 std::string validateGraphJson(const std::string& graphJson,
-                              const std::filesystem::path& baseDir) {
+                              const std::filesystem::path& baseDir,
+                              const std::string& paramsJson) {
   Diagnostics diags;
   RawGraph raw;
-  if (prepareGraph(graphJson, raw, diags)) {
+  if (prepareGraph(graphJson, raw, diags, paramsJson)) {
     Plan plan;
     BuildOptions build;
     build.runId = "validate";
@@ -1497,11 +1510,12 @@ std::string validateGraphJson(const std::string& graphJson,
 // ---------------------------------------------------------------------- plan
 
 std::string planGraphJson(const std::string& graphJson, const std::filesystem::path& baseDir,
-                          const std::vector<std::string>& targets) {
+                          const std::vector<std::string>& targets,
+                          const std::string& paramsJson) {
   Diagnostics diags;
   RawGraph raw;
   Plan plan;
-  if (!prepareGraph(graphJson, raw, diags)) return diags.toJson();
+  if (!prepareGraph(graphJson, raw, diags, paramsJson)) return diags.toJson();
 
   BuildOptions build;
   build.runId = "plan";
@@ -1577,11 +1591,12 @@ std::string planGraphJson(const std::string& graphJson, const std::filesystem::p
 // --------------------------------------------------------------- 生效参数视图
 
 std::string effectiveParamsJson(const std::string& graphJson,
-                                const std::filesystem::path& baseDir) {
+                                const std::filesystem::path& baseDir,
+                                const std::string& paramsJson) {
   Diagnostics diags;
   RawGraph raw;
   Plan plan;
-  if (!prepareGraph(graphJson, raw, diags)) return diags.toJson();
+  if (!prepareGraph(graphJson, raw, diags, paramsJson)) return diags.toJson();
 
   BuildOptions build;
   build.runId = "params";
@@ -1607,7 +1622,10 @@ std::string effectiveParamsJson(const std::string& graphJson,
       auto it = n.params.find(p.name);
       if (it == n.params.end()) continue;
       const char* source = "default";
-      if (n.boundParams.count(p.name)) {
+      auto viaGraph = n.graphParams.find(p.name);
+      if (viaGraph != n.graphParams.end()) {
+        source = "graph";
+      } else if (n.boundParams.count(p.name)) {
         source = "bound";
       } else if (n.explicitParams.count(p.name)) {
         source = "explicit";
@@ -1617,6 +1635,7 @@ std::string effectiveParamsJson(const std::string& graphJson,
       w.key("value");
       writeParamValue(w, it->second);
       w.field("source", std::string(source));
+      if (viaGraph != n.graphParams.end()) w.field("graphParam", viaGraph->second);
       w.fieldIfSet("label", p.label);
       w.fieldIfSet("unit", p.unit);
       if (p.min) w.field("min", *p.min);

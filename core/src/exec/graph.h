@@ -24,6 +24,9 @@ struct RawNode {
   /// 「用户在这个节点上填的」和「外层子图表单灌进来的」长得一模一样，
   /// 而 `lyflow params` 的 source 要分得开这两件事，所以记一笔。
   std::set<std::string> boundParams;
+  /// 由顶层图参数（m7-plan J7）写进来的键 → 是哪个顶层参数。与 boundParams 同一个用途，
+  /// 另记名字是因为 `lyflow params` 要说出「这个值归哪个顶层参数管」。
+  std::map<std::string, std::string> graphParams;
 };
 
 struct RawEdge {
@@ -64,6 +67,15 @@ struct SubgraphDef {
   std::vector<SubParam> params;
 };
 
+/// 顶层图参数（m7-plan J7）。语义与子图的提升参数相同：展开期把值写进被绑定的节点参数。
+/// 宿主运行期给的值（CLI `--param`、C ABI `params_json`）取代 default。
+struct GraphParam {
+  std::string name;
+  /// 原始声明 { type?, default, binds, doc? }。
+  nlohmann::json decl = nlohmann::json::object();
+  std::vector<std::pair<std::string, std::string>> binds;
+};
+
 /// 图级命名输出（ADR-0017）。宿主只认名字，不认节点 id。
 struct GraphOutput {
   std::string name;
@@ -79,10 +91,16 @@ struct RawGraph {
   std::map<std::string, SubgraphDef> subgraphs;
   /// 按名字升序（JSON 对象键的顺序），展开后仍用路径 id 指节点。
   std::vector<GraphOutput> outputs;
+  /// 按名字升序。
+  std::vector<GraphParam> params;
 };
 
 /// 解析并做结构校验。返回 false 表示图不可用（诊断已写进 diags）。
 bool parseGraph(const std::string& json, RawGraph& out, Diagnostics& diags);
+
+/// 把宿主给的顶层参数值（JSON 对象 名字→值）盖到 default 上。未声明的名字报
+/// unknown_param。values 为 null 或空对象时什么都不做。
+bool applyGraphParamValues(const nlohmann::json& values, RawGraph& graph, Diagnostics& diags);
 
 /// 从一份 JSON 对象读一个子图定义。失败时填 error 并返回 false。
 bool parseSubgraphDef(const nlohmann::json& j, const std::string& id, SubgraphDef& out,

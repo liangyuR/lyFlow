@@ -195,6 +195,7 @@ lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* o
       options.previewMaxPoints = opts->preview_max_points;
       options.previewBudgetMs = opts->preview_budget_ms;
       options.noReuse = opts->no_reuse != 0;
+      options.paramsJson = fromC(opts->params_json);
       for (std::size_t i = 0; opts->inputs && i < opts->input_count; ++i) {
         const lyflow_run_input& in = opts->inputs[i];
         if (in.kind != LYFLOW_INPUT_POINT_CLOUD) continue;

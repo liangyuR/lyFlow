@@ -55,6 +55,13 @@ struct RunOptions {
   std::uint32_t previewBudgetMs = 0;
   bool noReuse = false;
   std::vector<InputCloud> inputs;
+  /// 顶层图参数的取值（ABI v10），JSON 对象 { 名字: 值 }。空串 = 全用图里的 default。
+  std::string paramsJson;
+
+  RunOptions& setParamsJson(std::string json) {
+    paramsJson = std::move(json);
+    return *this;
+  }
 };
 
 struct RunResult {
@@ -679,6 +686,7 @@ inline RunHandle Client::startRun(const std::string& graphJson, const RunOptions
   opts.no_reuse = options.noReuse ? 1 : 0;
   opts.inputs = inputs.empty() ? nullptr : inputs.data();
   opts.input_count = inputs.size();
+  opts.params_json = options.paramsJson.empty() ? nullptr : options.paramsJson.c_str();
 
   lyflow_run* run =
       fn_.run_start(graphJson.c_str(), &opts, &detail::dispatchEvent, &state->sink);

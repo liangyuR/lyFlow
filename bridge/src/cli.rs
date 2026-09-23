@@ -45,20 +45,23 @@ const USAGE: &str = "\
 lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给人看）
 
   lyflow run      <graph> [--to <nodeId>]... [--set <nodeId>.<param>=<json>]...
+                          [--param <名字>=<json>]...
                           [--base-dir <dir>] [--parallel <n>] [--no-cache]
                           [--preview] [--preview-points <n>] [--outputs] [--summary]
         --summary：JSON Lines 末尾多一行 {\"kind\":\"run_summary\", ...}，
                    status 三态 ok|degraded|failed，每个图级输出三态 value|inactive|failed，
                    外加 decisions（全部 FallbackChoice）。ADR-0022。
   lyflow import   <file> --kind <kind> [-o <out.lyflow.json>] [--base-dir <dir>]
-  lyflow validate <graph> [--base-dir <dir>] [--set ...]
-  lyflow plan     <graph> [--to <nodeId>]... [--base-dir <dir>] [--set ...]
+  lyflow validate <graph> [--base-dir <dir>] [--set ...] [--param ...]
+  lyflow plan     <graph> [--to <nodeId>]... [--base-dir <dir>] [--set ...] [--param ...]
         每个节点一行：cacheKey、cached、level、upstreamMissing、bypass，
         外加 lazy（只被惰性端口依赖，主路径成功时不跑）与 demandedBy（谁的哪个惰性端口管着它）。
-  lyflow params   <graph> [--node <id>]... [--only explicit|default|bound]
-                          [--set <nodeId>.<param>=<json>]... [--base-dir <dir>] [--json]
-        每节点每参数一行 { node, op, param, value, source, unit?, min?, max? }。
-        source 三种：default（图里没写）/ explicit（图里写了）/ bound（子图提升参数灌进来的）。
+  lyflow params   <graph> [--node <id>]... [--only explicit|default|bound|graph]
+                          [--set <nodeId>.<param>=<json>]... [--param <名字>=<json>]...
+                          [--base-dir <dir>] [--json]
+        每节点每参数一行 { node, op, param, value, source, graphParam?, unit?, min?, max? }。
+        source 四种：default（图里没写）/ explicit（图里写了）/ bound（子图提升参数灌进来的）/
+                     graph（顶层图参数灌进来的，graphParam 说是哪一个）。
         --set 先应用再解析，所以「这组 --set 之后生效值是什么」一条命令。
         未知节点 / 未知参数按 unknown_node / unknown_param 报，退出码 4。
   lyflow migrate  <graph> [--write]
@@ -72,7 +75,8 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                           --metric <path> [--metric <path>]...
                           [--holdout <tag>=<value>] [--group-by <tag>]
                           [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--no-cache]
-                          [--set <nodeId>.<param>=<json>]... [--summary]
+                          [--set <nodeId>.<param>=<json>]... [--param <名字>=<json>]...
+                          [--summary]
         每行 eval_row **默认不带** summary（ADR-0022）；--summary 打开。
         一维 bundle 就 6 KB，51 帧 × 8 组参数 2.5 MB，那不该是默认值。
         （--no-summary 还认，但已经是 no-op。）
@@ -101,14 +105,19 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
   lyflow diff     <a> <b> [--json]
   lyflow patch    <graph> [--remove-node <id|glob>]... [--add-node <json>]...
                           [--rewire <节点>:<端口>=<节点>:<端口>]...
-                          [--set <nodeId>.<param>=<json>]...
+                          [--set <nodeId>.<param>=<json>]... [--param <名字>=<json>]...
                           [--dry-run] [-o <out>] [--json] [--base-dir <dir>]
-        动作顺序定死 remove → add → rewire → set；每步之后过形状校验，最后过 validate，
+        动作顺序定死 remove → add → rewire → set → param（改顶层参数的 default）；每步之后过形状校验，最后过 validate，
         任一步不过就整体不写（退出码 1）。幂等：删不存在的 id、没有出边的 rewire、
         同值的 set 都是 no-op 并在 stderr 说一句，所以同一条命令跑两遍第二遍 diff 为空
         （这一遍不落盘，免得白白动 mtime；给了 -o 就照写）。
         --dry-run 不写文件，stdout 是与 `lyflow diff` 逐字相同的差异。
         -o 省略时原地覆写（先写临时文件再改名）。
+
+顶层图参数（GraphDoc 顶层 params）：--param <名字>=<json> 给它传值，值的写法同 --set。
+  eval / sweep 的 --param 另有扫描轴写法 <节点>.<参数>=<start>:<end>:<steps>：
+  「=」左边含「.」的是扫描轴，不含的是顶层参数。图没声明的名字报 unknown_param；
+  --set 命中被顶层参数绑定的参数报 param_conflict（一处定义，改用 --param）。两者退出码 4。
 
 退出码：0 成功，1 校验失败，2 执行失败，3 被取消（Ctrl+C），4 参数错。";
 
@@ -191,6 +200,75 @@ pub(crate) struct Loaded {
     pub path: PathBuf,
 }
 
+/// 哪个顶层图参数绑着 `节点.参数`。没有返回 None。
+pub(crate) fn binding_graph_param<'a>(doc: &'a GraphDoc, node: &str, param: &str) -> Option<&'a str> {
+    let target = format!("{node}.{param}");
+    doc.params.iter().find_map(|(name, decl)| {
+        decl["binds"]
+            .as_array()
+            .filter(|binds| binds.iter().any(|b| b.as_str() == Some(target.as_str())))
+            .map(|_| name.as_str())
+    })
+}
+
+/// `--set` 命中被顶层参数绑定的参数：一处定义（J7），报错并指向 `--param`。
+pub(crate) fn set_conflict(doc: &GraphDoc, node: &str, param: &str, spec: &str) -> Option<String> {
+    binding_graph_param(doc, node, param).map(|name| {
+        format!(
+            "param_conflict: --set {spec} 命中的参数由顶层参数 '{name}' 绑定；\
+             改用 --param {name}=<json>"
+        )
+    })
+}
+
+/// `--param` 里属于顶层图参数的那些：`=` 左边不含 `.`。含 `.` 的是 eval / sweep 的扫描轴。
+pub(crate) fn graph_param_specs(parsed: &Parsed) -> Vec<&String> {
+    parsed
+        .many("param")
+        .iter()
+        .filter(|s| s.split_once('=').is_some_and(|(l, _)| !l.contains('.')))
+        .collect()
+}
+
+/// `--param` 里的扫描轴（`<节点>.<参数>=<start>:<end>:<steps>`）。
+pub(crate) fn axis_param_specs(parsed: &Parsed) -> Vec<String> {
+    parsed
+        .many("param")
+        .iter()
+        .filter(|s| !s.split_once('=').is_some_and(|(l, _)| !l.contains('.')))
+        .cloned()
+        .collect()
+}
+
+/// `--param <名字>=<json>`：把值写成该顶层参数的 default。core 的语义就是「给了值用值，
+/// 没给用 default」，所以校验、计划、生效参数与运行看到的是同一个值。
+pub(crate) fn apply_graph_param(doc: &mut GraphDoc, spec: &str) -> Result<bool, String> {
+    let (name, raw) = spec
+        .split_once('=')
+        .ok_or_else(|| format!("--param 的写法是 <名字>=<json>，收到 {spec}"))?;
+    let value: Value = serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.to_string()));
+    let Some(decl) = doc.params.get_mut(name).and_then(Value::as_object_mut) else {
+        let known: Vec<&String> = doc.params.keys().collect();
+        return Err(format!(
+            "unknown_param: 图没有声明顶层参数 '{name}'（有的是 {known:?}）"
+        ));
+    };
+    if decl.get("default") == Some(&value) {
+        return Ok(false);
+    }
+    decl.insert("default".to_string(), value);
+    Ok(true)
+}
+
+/// load_graph 失败时的退出码：`--param` / `--set` 本身写错了是参数错（4），其余是图不合法（1）。
+pub(crate) fn load_exit(message: &str) -> i32 {
+    if message.starts_with("unknown_param:") || message.starts_with("param_conflict:") {
+        EXIT_USAGE
+    } else {
+        EXIT_INVALID
+    }
+}
+
 /// `--set nodeId.param=<json>`。值先按 JSON 解析，解析不了就当字符串 ——
 /// `--set n.path=cloud.pcd` 是最常见的一条，不该逼用户写引号里的引号。
 fn apply_set(doc: &mut GraphDoc, spec: &str) -> Result<(), String> {
@@ -200,6 +278,9 @@ fn apply_set(doc: &mut GraphDoc, spec: &str) -> Result<(), String> {
     let (node_id, param) = left
         .rsplit_once('.')
         .ok_or_else(|| format!("--set 的写法是 nodeId.param=<json>，收到 {spec}"))?;
+    if let Some(conflict) = set_conflict(doc, node_id, param, spec) {
+        return Err(conflict);
+    }
     let value: Value = serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.to_string()));
     let node = doc
         .nodes
@@ -216,6 +297,9 @@ pub(crate) fn load_graph(parsed: &Parsed, path: &str) -> Result<Loaded, String> 
     let mut doc: GraphDoc =
         serde_json::from_str(&text).map_err(|e| format!("{path} 不是合法的 GraphDoc: {e}"))?;
     doc.validate_structure().map_err(|e| e.to_string())?;
+    for spec in graph_param_specs(parsed) {
+        apply_graph_param(&mut doc, spec)?;
+    }
     for spec in parsed.many("set") {
         apply_set(&mut doc, spec)?;
     }
@@ -412,6 +496,9 @@ pub(crate) struct RunRequest<'a> {
     /// `--no-cache`：本次运行不吃缓存。不清进程级结果仓 —— 那会连累别的 run。
     pub no_cache: bool,
     pub stream: Option<Sink>,
+    /// 顶层图参数的取值，经 C ABI 的 `params_json` 交给 core（宿主的那条路）。
+    /// CLI 自己的 `--param` 走 load_graph 改 default，两条路给出同一个结果。
+    pub params_json: Option<&'a str>,
 }
 
 pub(crate) fn execute(core: &Arc<Core>, req: RunRequest<'_>) -> Result<RunResult, String> {
@@ -425,6 +512,7 @@ pub(crate) fn execute(core: &Arc<Core>, req: RunRequest<'_>) -> Result<RunResult
     let mut spec = RunSpec::new(req.graph_json, &run_id, req.base_dir, req.targets);
     spec.max_parallel = req.parallel;
     spec.no_reuse = req.no_cache;
+    spec.params_json = req.params_json;
     if req.preview {
         spec.mode = 1;
         spec.preview_max_points = req.preview_points;
@@ -479,7 +567,7 @@ fn cmd_validate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
     let loaded = match load_graph(parsed, &path) {
         Ok(l) => l,
-        Err(e) => return fail(err, &e, EXIT_INVALID),
+        Err(e) => return fail(err, &e, load_exit(&e)),
     };
     let diags = match diagnostics_of(&core, &loaded) {
         Ok(d) => d,
@@ -505,7 +593,7 @@ fn cmd_plan(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
     let loaded = match load_graph(parsed, &path) {
         Ok(l) => l,
-        Err(e) => return fail(err, &e, EXIT_INVALID),
+        Err(e) => return fail(err, &e, load_exit(&e)),
     };
     let targets: Vec<String> = parsed.many("to").to_vec();
     let raw = match core.plan(&loaded.json, &loaded.base_dir, &targets) {
@@ -529,7 +617,7 @@ fn cmd_plan(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
 
 // --------------------------------------------------------------------- params
 
-const PARAM_SOURCES: &[&str] = &["explicit", "default", "bound"];
+const PARAM_SOURCES: &[&str] = &["explicit", "default", "bound", "graph"];
 
 /// 一行的宽度按**字符数**算。中文在等宽终端里占两格，但按字符数对齐已经够看，
 /// 而按显示宽度对齐要背一张 East Asian Width 表 —— 那不是这个命令该扛的复杂度。
@@ -552,8 +640,8 @@ fn cmd_params(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let Some(path) = parsed.positional.first().cloned() else {
         line(
             err,
-            "用法：lyflow params <graph> [--node <id>]... [--only explicit|default|bound] \
-             [--set <节点>.<参数>=<json>]... [--base-dir <dir>] [--json]",
+            "用法：lyflow params <graph> [--node <id>]... [--only explicit|default|bound|graph] \
+             [--set <节点>.<参数>=<json>]... [--param <名字>=<json>]... [--base-dir <dir>] [--json]",
         );
         return EXIT_USAGE;
     };
@@ -606,7 +694,7 @@ fn cmd_params(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
 
     let loaded = match load_graph(parsed, &path) {
         Ok(l) => l,
-        Err(e) => return fail(err, &e, EXIT_INVALID),
+        Err(e) => return fail(err, &e, load_exit(&e)),
     };
     let raw = match core.effective_params(&loaded.json, &loaded.base_dir) {
         Ok(r) => r,
@@ -669,7 +757,7 @@ fn cmd_params(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             row.insert("param".into(), p["param"].clone());
             row.insert("value".into(), p["value"].clone());
             row.insert("source".into(), json!(source));
-            for key in ["unit", "min", "max"] {
+            for key in ["graphParam", "unit", "min", "max"] {
                 if !p[key].is_null() {
                     row.insert(key.into(), p[key].clone());
                 }
@@ -727,12 +815,13 @@ fn cmd_params(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     }
     let explicit = rows.iter().filter(|r| r["source"] == "explicit").count();
     let bound = rows.iter().filter(|r| r["source"] == "bound").count();
+    let graph = rows.iter().filter(|r| r["source"] == "graph").count();
     line(
         err,
         &format!(
-            "{} 个参数：{explicit} 个显式、{bound} 个来自子图提升、{} 个默认值",
+            "{} 个参数：{explicit} 个显式、{bound} 个来自子图提升、{graph} 个来自顶层参数、{} 个默认值",
             rows.len(),
-            rows.len() - explicit - bound
+            rows.len() - explicit - bound - graph
         ),
     );
     EXIT_OK
@@ -749,7 +838,7 @@ fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
     let mut loaded = match load_graph(parsed, &path) {
         Ok(l) => l,
-        Err(e) => return fail(err, &e, EXIT_INVALID),
+        Err(e) => return fail(err, &e, load_exit(&e)),
     };
     let diags = match diagnostics_of(&core, &loaded) {
         Ok(d) => d,
@@ -841,7 +930,7 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
     let loaded = match load_graph(parsed, &path) {
         Ok(l) => l,
-        Err(e) => return fail(err, &e, EXIT_INVALID),
+        Err(e) => return fail(err, &e, load_exit(&e)),
     };
     // 先单独校验一遍：校验失败与执行失败是两个不同的退出码，混在一次 run 里分不开
     match diagnostics_of(&core, &loaded) {
@@ -876,6 +965,7 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             preview: parsed.has("preview"),
             no_cache: parsed.has("no-cache"),
             stream: Some(Arc::clone(out)),
+            params_json: None,
         },
     ) {
         Ok(r) => r,
@@ -1018,7 +1108,7 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
     let loaded = match load_graph(parsed, &path) {
         Ok(l) => l,
-        Err(e) => return fail(err, &e, EXIT_INVALID),
+        Err(e) => return fail(err, &e, load_exit(&e)),
     };
     let targets = vec![node_id.to_string()];
     let result = match execute(
@@ -1032,6 +1122,7 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             preview: false,
             no_cache: parsed.has("no-cache"),
             stream: Some(Arc::clone(out)),
+            params_json: None,
         },
     ) {
         Ok(r) => r,
@@ -1145,7 +1236,7 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         line(err, "用法：lyflow sweep <graph> --param ... --metric ...");
         return EXIT_USAGE;
     };
-    if parsed.many("param").is_empty() {
+    if axis_param_specs(parsed).is_empty() {
         line(err, "至少给一个 --param nodeId.param=start:end:steps");
         return EXIT_USAGE;
     }
@@ -1164,13 +1255,13 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
     let loaded = match load_graph(parsed, &path) {
         Ok(l) => l,
-        Err(e) => return fail(err, &e, EXIT_INVALID),
+        Err(e) => return fail(err, &e, load_exit(&e)),
     };
     let defaults = match defaults_by_op(&core) {
         Ok(d) => d,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
-    let param_sets = match eval::axis_param_sets(&loaded.doc, &defaults, parsed.many("param")) {
+    let param_sets = match eval::axis_param_sets(&loaded.doc, &defaults, &axis_param_specs(parsed)) {
         Ok(v) => v,
         Err(e) => return fail(err, &e, EXIT_USAGE),
     };
@@ -1395,12 +1486,33 @@ pub(crate) fn diff_docs(
         }
     }
 
+    // 顶层图参数：名字对名字比整份声明（default 与 binds 都算语义）。
+    let mut graph_params = Vec::new();
+    for (name, decl) in &b.params {
+        match a.params.get(name) {
+            None => graph_params.push(json!({ "name": name, "change": "added" })),
+            Some(old) if old != decl => graph_params.push(json!({
+                "name": name,
+                "change": "modified",
+                "from": old.get("default"),
+                "to": decl.get("default"),
+            })),
+            _ => {}
+        }
+    }
+    for name in a.params.keys() {
+        if !b.params.contains_key(name) {
+            graph_params.push(json!({ "name": name, "change": "removed" }));
+        }
+    }
+
     let empty_diff = added.is_empty()
         && removed.is_empty()
         && changed.is_empty()
         && edges_added.is_empty()
         && edges_removed.is_empty()
-        && subgraphs.is_empty();
+        && subgraphs.is_empty()
+        && graph_params.is_empty();
 
     json!({
         "nodesAdded": added,
@@ -1409,6 +1521,7 @@ pub(crate) fn diff_docs(
         "edgesAdded": edges_added,
         "edgesRemoved": edges_removed,
         "subgraphs": subgraphs,
+        "graphParams": graph_params,
         "empty": empty_diff,
     })
 }
@@ -1450,6 +1563,13 @@ pub(crate) fn render_diff(out: &Sink, diff: &Value) {
     }
     for s in &subgraphs {
         line(out, &format!("~ 子图 {} {}", s["id"], s["change"]));
+    }
+    for p in &list("graphParams") {
+        if p["change"] == "modified" {
+            line(out, &format!("~ 顶层参数 {}: {} -> {}", p["name"], p["from"], p["to"]));
+        } else {
+            line(out, &format!("~ 顶层参数 {} {}", p["name"], p["change"]));
+        }
     }
 }
 
@@ -2783,4 +2903,283 @@ mod tests {
         assert!(ghost.err.contains("没有节点"), "{}", ghost.err);
     }
 
+    // ------------------------------------------------------------ 顶层图参数（M7 J7/J8）
+
+    /// g → v 的直链外加一支不相干的 h。顶层参数 count 绑 g.pointCount（g 上不再显式写它）。
+    fn param_chain(dir: &Path, seed: i64) -> String {
+        let doc = json!({
+            "schemaVersion": 1,
+            "id": "01J8XQZ4K7N3M2R5V8W1YB6TCD",
+            "name": "cli-params",
+            "params": {
+                "count": {"type": "int", "default": 20000, "binds": ["g.pointCount"],
+                          "doc": "g 的点数"}
+            },
+            "nodes": [
+                {"id": "g", "op": "gen.synthetic", "params": {"seed": seed}},
+                {"id": "v", "op": "filter.voxel_grid",
+                 "params": {"leafSize": [0.02, 0.02, 0.02]}},
+                {"id": "h", "op": "gen.synthetic", "params": {"pointCount": 500, "seed": seed + 1}}
+            ],
+            "edges": [
+                {"id": "e1", "from": {"node": "g", "port": "cloud"},
+                             "to": {"node": "v", "port": "cloud"}}
+            ]
+        });
+        let file = dir.join("p.lyflow.json");
+        std::fs::write(&file, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+        file.to_string_lossy().into_owned()
+    }
+
+    fn plan_keys(r: &Ran) -> BTreeMap<String, String> {
+        r.first()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| {
+                (
+                    n["nodeId"].as_str().unwrap().to_string(),
+                    n["cacheKey"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    }
+
+    fn run_started_keys(events: &[Value]) -> BTreeMap<String, String> {
+        let started = events.iter().find(|e| e["kind"] == "run_started").expect("没有 run_started");
+        started["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| {
+                (
+                    n["id"].as_str().unwrap().to_string(),
+                    n["cacheKey"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    }
+
+    fn done_count(events: &[Value], node: &str) -> Option<i64> {
+        events
+            .iter()
+            .filter(|e| e["kind"] == "node_state" && e["nodeId"] == node)
+            .filter(|e| e["state"] == "done" || e["state"] == "skipped")
+            .last()
+            .and_then(|e| e["stats"]["elementCount"].as_i64())
+    }
+
+    #[test]
+    fn params_reports_the_graph_source_and_which_graph_param() {
+        let dir = workspace("gparam-params");
+        let graph = param_chain(&dir, 7101);
+        let r = cli(&["params", &graph, "--json", "--param", "count=1234"]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        let row = r
+            .lines()
+            .into_iter()
+            .find(|x| x["node"] == "g" && x["param"] == "pointCount")
+            .expect("没有 g.pointCount");
+        assert_eq!(row["value"], 1234);
+        assert_eq!(row["source"], "graph");
+        assert_eq!(row["graphParam"], "count");
+        // 不传值就是 default，来源仍是 graph
+        let d = cli(&["params", &graph, "--json", "--only", "graph"]);
+        assert_eq!(d.code, EXIT_OK, "{}", d.err);
+        let rows = d.lines();
+        assert_eq!(rows.len(), 1, "{}", d.out);
+        assert_eq!(rows[0]["value"], 20000);
+    }
+
+    #[test]
+    fn param_only_moves_the_bound_node_and_its_downstream() {
+        let dir = workspace("gparam-plan");
+        let graph = param_chain(&dir, 7102);
+        let a = cli(&["plan", &graph]);
+        let b = cli(&["plan", &graph, "--param", "count=1234"]);
+        assert_eq!(a.code, EXIT_OK, "{}", a.err);
+        assert_eq!(b.code, EXIT_OK, "{}", b.err);
+        let (ka, kb) = (plan_keys(&a), plan_keys(&b));
+        assert_ne!(ka["g"], kb["g"]);
+        assert_ne!(ka["v"], kb["v"]);
+        assert_eq!(ka["h"], kb["h"]);
+        assert_eq!(cli(&["validate", &graph, "--param", "count=1234"]).code, EXIT_OK);
+    }
+
+    /// J8：宿主走 C ABI 的 params_json，CLI 走 --param —— 两条路算出同一个东西。
+    #[test]
+    fn abi_params_json_and_cli_param_agree() {
+        let dir = workspace("gparam-abi");
+        let graph = param_chain(&dir, 7103);
+        let r = cli(&["run", &graph, "--param", "count=1234", "--no-cache"]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        let cli_events = r.lines();
+        assert_eq!(done_count(&cli_events, "g"), Some(1234));
+
+        let core = core().unwrap();
+        let text = std::fs::read_to_string(&graph).unwrap();
+        let abi = execute(
+            &core,
+            RunRequest {
+                graph_json: &text,
+                base_dir: &dir.to_string_lossy(),
+                targets: &[],
+                parallel: 0,
+                preview_points: 0,
+                preview: false,
+                no_cache: true,
+                stream: None,
+                params_json: Some(r#"{"count": 1234}"#),
+            },
+        )
+        .unwrap();
+        assert_eq!(abi.status, "ok");
+        assert_eq!(done_count(&abi.events, "g"), Some(1234));
+        assert_eq!(done_count(&abi.events, "v"), done_count(&cli_events, "v"));
+        assert_eq!(run_started_keys(&abi.events), run_started_keys(&cli_events));
+
+        // ABI 上传了图没声明的名字：校验阶段就失败
+        let bad = execute(
+            &core,
+            RunRequest {
+                graph_json: &text,
+                base_dir: &dir.to_string_lossy(),
+                targets: &[],
+                parallel: 0,
+                preview_points: 0,
+                preview: false,
+                no_cache: true,
+                stream: None,
+                params_json: Some(r#"{"nope": 1}"#),
+            },
+        )
+        .unwrap();
+        assert_eq!(bad.status, "error");
+        let finished = bad.events.iter().find(|e| e["kind"] == "run_finished").unwrap();
+        assert_eq!(finished["error"]["code"], "unknown_param", "{finished}");
+    }
+
+    #[test]
+    fn set_on_a_bound_param_and_unknown_param_are_usage_errors() {
+        let dir = workspace("gparam-conflict");
+        let graph = param_chain(&dir, 7104);
+        let set = cli(&["run", &graph, "--set", "g.pointCount=5"]);
+        assert_eq!(set.code, EXIT_USAGE, "{}", set.err);
+        assert!(set.err.contains("param_conflict"), "{}", set.err);
+        assert!(set.err.contains("--param count="), "{}", set.err);
+        assert_eq!(cli(&["params", &graph, "--set", "g.pointCount=5"]).code, EXIT_USAGE);
+
+        let unknown = cli(&["validate", &graph, "--param", "nope=1"]);
+        assert_eq!(unknown.code, EXIT_USAGE, "{}", unknown.err);
+        assert!(unknown.err.contains("unknown_param"), "{}", unknown.err);
+
+        // 图里自己写了被绑定的参数：core 的 validate 报 param_conflict
+        let mut doc: Value = serde_json::from_str(&std::fs::read_to_string(&graph).unwrap()).unwrap();
+        doc["nodes"][0]["params"]["pointCount"] = json!(5);
+        let file = dir.join("conflict.lyflow.json");
+        std::fs::write(&file, doc.to_string()).unwrap();
+        let v = cli(&["validate", &file.to_string_lossy()]);
+        assert_eq!(v.code, EXIT_INVALID, "{}", v.err);
+        assert!(v.first().as_array().unwrap().iter().any(|d| d["code"] == "param_conflict"));
+    }
+
+    #[test]
+    fn patch_param_rewrites_the_default_and_is_idempotent() {
+        let dir = workspace("gparam-patch");
+        let graph = param_chain(&dir, 7105);
+        let out = dir.join("patched.lyflow.json");
+        let r = cli(&["patch", &graph, "--param", "count=777", "-o", &out.to_string_lossy(), "--json"]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        let result = r.first();
+        assert_eq!(result["applied"]["param"], json!(["count"]));
+        assert_eq!(result["diff"]["graphParams"][0]["to"], 777);
+        let written: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        assert_eq!(written["params"]["count"]["default"], 777);
+        // 同值再来一遍：no-op，diff 为空
+        let again = cli(&["patch", &out.to_string_lossy(), "--param", "count=777", "--dry-run", "--json"]);
+        assert_eq!(again.code, EXIT_OK, "{}", again.err);
+        assert_eq!(again.first()["diff"]["empty"], true);
+    }
+
+    #[test]
+    fn eval_takes_graph_params_next_to_sweep_axes() {
+        let dir = workspace("gparam-eval");
+        let graph = param_chain(&dir, 7106);
+        // count=3000 是顶层参数；v.leafSize=... 是扫描轴（左边带点）
+        let r = cli(&[
+            "eval",
+            &graph,
+            "--param",
+            "count=3000",
+            "--param",
+            "v.leafSize=0.02:0.04:2",
+            "--metric",
+            "nodes.g.elementCount",
+        ]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        let rows: Vec<Value> = r.lines().into_iter().filter(|l| l["kind"] == "eval_row").collect();
+        assert_eq!(rows.len(), 2, "{}", r.out);
+        for row in &rows {
+            assert_eq!(row["metrics"]["nodes.g.elementCount"].as_f64(), Some(3000.0), "{row}");
+        }
+    }
+
+    /// J5/J6：dirMode=band 却没接 refLine。检查在 validate 里，所以 `run` 在执行任何节点
+    /// 之前就停下（没有一条 node_state）。gap 包没编进来时 gap.fit_line 是 unknown_op，
+    /// 同样校验失败 —— 所以前半句在任何构建里都成立，诊断码只在带 gap 包时才断言。
+    #[test]
+    fn fit_line_band_without_ref_line_fails_at_validate() {
+        let dir = workspace("m7-fit-line");
+        let doc = json!({
+            "schemaVersion": 1,
+            "id": "01J8XQZ4K7N3M2R5V8W1YB6TCD",
+            "nodes": [
+                {"id": "g", "op": "gen.synthetic", "params": {"pointCount": 2000, "seed": 7107}},
+                {"id": "roi", "op": "gap.overall_roi"},
+                {"id": "fit", "op": "gap.fit_line", "params": {"dirMode": "band"}}
+            ],
+            "edges": [
+                {"id": "e1", "from": {"node": "g", "port": "cloud"}, "to": {"node": "roi", "port": "primary"}},
+                {"id": "e2", "from": {"node": "g", "port": "cloud"}, "to": {"node": "roi", "port": "secondary"}},
+                {"id": "e3", "from": {"node": "g", "port": "cloud"}, "to": {"node": "fit", "port": "cloud"}},
+                {"id": "e4", "from": {"node": "roi", "port": "box"}, "to": {"node": "fit", "port": "box"}},
+                {"id": "e5", "from": {"node": "roi", "port": "box"}, "to": {"node": "fit", "port": "toward"}}
+            ]
+        });
+        let file = dir.join("band.lyflow.json");
+        std::fs::write(&file, doc.to_string()).unwrap();
+        let path = file.to_string_lossy().into_owned();
+
+        let v = cli(&["validate", &path]);
+        assert_eq!(v.code, EXIT_INVALID, "{}", v.err);
+        let run = cli(&["run", &path]);
+        assert_eq!(run.code, EXIT_INVALID, "{}", run.err);
+        assert!(
+            !run.lines().iter().any(|e| e["kind"] == "node_state" || e["kind"] == "run_started"),
+            "校验没过就不该起跑：{}",
+            run.out
+        );
+
+        let gap_built = std::env::var("LYFLOW_PACKS").unwrap_or_default().contains("gap");
+        let manifest = cli(&["manifest"]).first();
+        let has_fit_line = manifest["operators"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|o| o["id"] == "gap.fit_line");
+        assert!(!gap_built || has_fit_line, "LYFLOW_PACKS 带了 gap，manifest 里却没有 gap.fit_line");
+        if has_fit_line {
+            let diags = v.first();
+            let d = diags
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|d| d["severity"] == "error")
+                .unwrap()
+                .clone();
+            assert_eq!(d["code"], "bad_param", "{diags}");
+            assert_eq!(d["phase"], "validate", "{diags}");
+            assert_eq!(d["nodeId"], "fit", "{diags}");
+        }
+    }
 }

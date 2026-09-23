@@ -127,10 +127,8 @@ void emit(Outputs& outputs, const char* port, const ::gap::core::MeasurementValu
 }
 
 Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
+  // configPath 是 path 参数，空值已经在 validate 阶段挡掉了。
   const fs::path config = params.path("configPath");
-  if (config.empty()) {
-    return Status::Error(Phase::Execute, "bad_param", "没有给配置文件", "configPath");
-  }
   std::error_code ec;
   if (!fs::is_regular_file(config, ec)) {
     return Status::Error(Phase::Execute, "io", "配置文件不存在: " + config.string(), "configPath");
@@ -203,15 +201,10 @@ void registerMeasureReference(Registry& r) {
   op.category = "间隙/参考";
   op.keywords = {"reference", "blackbox", "对照", "基线"};
   op.doc =
-      "整条主路径的黑盒实现：直接调 MeasurementEngine::measure。"
-      "与拆分算子并存，用来在同一张图里 A/B（G5）。日志里带一份 quality JSON。";
-  op.preconditions = {
-      "黑盒参考实现：整条主路径在 MeasurementEngine 里跑完，图上改任何上游算子都不影响"
-      "它，只有 configPath 与两片输入云算数。",
-      "输入必须是传感器 XZ 帧的原始剖面，不要接 gap.to_measurement_frame 之后的云。",
-      "只用来 A/B 对照：save_template 与 save_result 被强制关掉，它不会写模板也不会存对"
-      "齐结果。",
-  };
+      "整条主路径的黑盒实现：直接调 MeasurementEngine::measure，日志里带一份 quality JSON。"
+      "历史对拍用：拆分算子的行为已有意偏离它，图上改任何上游算子都不影响它，只有 "
+      "configPath 与两片输入云算数。输入必须是传感器 XZ 帧的原始剖面；save_template 与 "
+      "save_result 被强制关掉，它不写模板也不存对齐结果。";
   op.inputs = {
       Port{"primary", "PointCloud", "Primary", "Master 剖面，传感器 XZ 帧。", true},
       Port{"secondary", "PointCloud", "Secondary", "Slave 剖面，传感器 XZ 帧。", true},

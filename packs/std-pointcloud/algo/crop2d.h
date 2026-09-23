@@ -1,6 +1,6 @@
 #pragma once
 // XY 平面上的盒裁剪。open 是 gap 的 filterCloudByRoi 语义（四边严格不等），
-// 非有限点因为比较恒假而一并丢掉 —— 这一条是逐位一致的前提，不要"修正"。
+// 非有限点因为比较恒假而一并丢掉 —— 下游的拟合因此不必再防 NaN。
 #include <Eigen/Core>
 
 #include "algo/cloud2d.h"

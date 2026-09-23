@@ -400,7 +400,6 @@ std::string Registry::toManifestJson() const {
     w.field("category", op.category);
     w.fieldIfSet("keywords", op.keywords);
     w.fieldIfSet("doc", op.doc);
-    w.fieldIfSet("preconditions", op.preconditions);
 
     w.key("inputs");
     w.beginArray();

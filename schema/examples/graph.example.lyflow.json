@@ -45,7 +45,6 @@
       "op": "segment.plane",
       "opVersion": "1.0.0",
       "params": {
-        "distanceThreshold": 0.006,
         "constraint": "axis"
       },
       "ui": {
@@ -203,6 +202,16 @@
           ]
         }
       ]
+    }
+  },
+  "params": {
+    "planeTol": {
+      "type": "float",
+      "default": 0.006,
+      "binds": [
+        "n_plane.distanceThreshold"
+      ],
+      "doc": "料箱底面的平面距离阈值，单位 m。现场按料箱平整度调。"
     }
   },
   "outputs": {

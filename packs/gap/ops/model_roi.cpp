@@ -205,17 +205,11 @@ Status roiFromLabels(const Inputs& inputs, const ParamView& params, Outputs& out
     return Status::Error(Phase::Execute, "model_roi_failed", "模型没标出这些段: " + joined);
   }
 
-  // base_side 互换与模板路径同一个 apply_business_rois（GapDetection.cpp:234），
-  // 只是这里的四框直接来自模型而不是模板。
+  // 四框直接来自模型的语义段，哪个是 flushBase 由模型的类别定。
   std::array<std::array<double, 4>, 4> boxes{
       result.rois.flush_base.values, result.rois.gap_left.values, result.rois.flush_ref.values,
       result.rois.gap_right.values};
   const char* outPorts[4] = {"flushBase", "gapLeft", "flushRef", "gapRight"};
-  if (params.choice("baseSide") == "right") {
-    std::swap(boxes[0], boxes[2]);
-    outPorts[0] = "flushRef";
-    outPorts[2] = "flushBase";
-  }
   for (int i = 0; i < 4; ++i) {
     const auto& b = boxes[static_cast<std::size_t>(i)];
     outputs.set(outPorts[i], Data::box2d(boxFromMm(b[0], b[1], b[2], b[3])));
@@ -454,15 +448,9 @@ void registerProfileTensor(Registry& r) {
   op.doc =
       "把两片**原始 1280 槽**剖面拼成模型输入张量 [2, 6, 1280]。"
       "六个通道是 z_norm / x_diff / normal_angle / curvature / intensity_norm / valid，"
-      "逐条对着 ml_handoff 的 build_channels 契约。\n"
+      "逐条对着 ml_handoff 的 build_channels 契约 —— 训练侧改了通道定义，这里要跟着改。\n"
       "输入必须保留 NaN 槽（load 时把 dropNonFinite 关掉），点数不是 1280 直接报错。"
       "推理本身是通用的，接 ml.onnx_run（T6）。";
-  op.preconditions = {
-      "输入必须是**原始 1280 槽**、保留了空槽的传感器帧剖面（load 时 dropNonFinite 关掉），"
-      "槽数不是 1280 直接报错。",
-      "六个通道的口径与训练侧 ml_handoff 的 build_channels 逐条对应；训练那边改了通道定"
-      "义，这里也要跟着改，否则模型吃到的是另一份特征。",
-  };
   // 空槽 bug 的那条不变量（ADR-0024）：槽数必须正好 1280，值一到端口上就查。
   // **刻意不写 finite** —— 这个算子要的恰恰是**保留了 NaN 空槽**的原始剖面，
   // 声明 finite:true 会把它唯一正确的输入判成违反。
@@ -490,12 +478,8 @@ void registerLabelsFromLogits(Registry& r) {
   op.keywords = {"argmax", "labels", "logits", "分割", "类别"};
   op.doc =
       "逐槽 argmax：[2, 类别数, 1280] 的 logits -> 两行各 1280 个类 id。"
-      "并列时留最小的类 id（与 np.argmax 一致）。";
-  op.preconditions = {
-      "假定 logits 形状是 [2, 类别数, 1280]，行 0 是 primary、行 1 是 secondary；行序错"
-      "了四个框会整体对调。",
-      "只做 argmax，不看置信度：模型对整帧都没把握时照样给出满满一行标签。",
-  };
+      "并列时留最小的类 id（与 np.argmax 一致）。行 0 是 primary、行 1 是 secondary。"
+      "只做 argmax、不看置信度：模型对整帧都没把握时照样给出满满一行标签。";
   // [2, 类别数, 1280]：批与槽是定死的，类别数随模型走，所以中间那一维是 -1。
   op.inputs = {withContract(
       Port{"tensor", "Tensor", "Logits", "ml.onnx_run 的输出。", true},
@@ -511,7 +495,7 @@ void registerLabelsFromLogits(Registry& r) {
 void registerRoiFromLabels(Registry& r) {
   OperatorDesc op;
   op.id = "gap.roi_from_labels";
-  op.version = "1.0.0";
+  op.version = "1.1.0";
   op.label = "由标签得到 ROI";
   op.category = "间隙/模型";
   op.keywords = {"roi", "boxes", "refine", "模型框"};
@@ -521,11 +505,6 @@ void registerRoiFromLabels(Registry& r) {
       "可选的 backdrop 接一片**测量帧**的同帧云（通常是 gap.labels_to_cloud 的输出），"
       "原样透传到同名输出：这样选中本节点时四个框就叠在自己的剖面底图上，"
       "而不是靠底图规则去上游借一片传感器帧的云（那一片在 2D 剖面里退化成一条线）。";
-  op.preconditions = {
-      "假定模型给出的四个语义段都在；缺段就报 model_roi_failed，不会自动退回模板路径。",
-      "labels 的槽号与两片输入剖面一一对应，所以两片剖面必须是没删过点的原始 1280 槽。",
-      "backdrop 只是叠画底图，原样透传，不参与推框。",
-  };
   // 槽号与标签一一对应 —— 上游删过点就全错位了，所以两片剖面都查槽数（ADR-0024）。
   const nlohmann::json slots = {{"elementCount", {{"eq", ml::kProfileSlots}}}};
   op.inputs = {
@@ -548,23 +527,14 @@ void registerRoiFromLabels(Registry& r) {
       Port{"backdrop", "PointCloud", "Backdrop", "backdrop 输入的原样透传；没接就是空云。", true},
   };
 
-  Param baseSide;
-  baseSide.name = "baseSide";
-  baseSide.type = ParamType::Enum;
-  baseSide.label = "Base Side";
-  baseSide.doc = "基准面在左还是右。right 时 flush_base 与 flush_ref 互换（与模板路径同一条）。";
-  baseSide.def = Value::text("left");
-  baseSide.options = {EnumOption{"left", "Left", ""}, EnumOption{"right", "Right", ""}};
-
   auto onlyWhenRefine = [](Param p) {
     p.visibleWhen.param = "refine";
     p.visibleWhen.eq = Value::boolean(true);
     return p;
   };
   op.params = {
-      baseSide,
       boolParam("refine", "Refine Masks", true,
-                "掩膜精修 refine-v1。关掉就是 boxesFromLabels 的逐位契约行为。"),
+                "掩膜精修 refine-v1。关掉就直接用 boxesFromLabels 推出的框。"),
       onlyWhenRefine(mmParam("splitStepMm", "Split Step", 1.0, "相邻槽的欧氏步长超过它就断开。")),
       onlyWhenRefine(intParam("splitSlotGap", "Split Slot Gap", 16, "槽号间隔超过它就断开。")),
       onlyWhenRefine(mmParam("linkMm", "Link Distance", 3.0, "包围盒相距小于它的连通块重新合并。")),
@@ -590,11 +560,6 @@ void registerLabelsToCloud(Registry& r) {
       "接**测量帧**的云（gap.to_measurement_frame 之后、gap.drop_non_finite 之前）："
       "换轴只换轴不删点，槽位与标签仍一一对应，而 2D 剖面俯视 XY 才看得出形状；"
       "删过点的云槽位会错位，所以槽数不是 1280 直接报 bad_input。";
-  op.preconditions = {
-      "只为了看分割结果，不参与测量：它改的是 rgb 与 intensity，几何一个点都不动。",
-      "要接**测量帧**、且**没删过点**的 1280 槽云（换轴之后、剔非有限点之前）；槽数不是"
-      " 1280 报 bad_input。",
-  };
   op.inputs = {
       withContract(Port{"cloud", "PointCloud", "Cloud",
                         "与标签同序的 1280 槽剖面，通常是 gap.to_measurement_frame 的输出。", true},
@@ -628,13 +593,10 @@ void registerDropNonFinite(Registry& r) {
   // 关键词不能出现小写的 n-a-n：core 的 manifest 序列化用例是子串匹配（test_executor.cpp:419）
   op.keywords = {"NaN", "finite", "剔除", "无效槽"};
   op.doc =
-      "剔除非有限点，对应 NonFinitePointPolicy::kRemove。"
-      "模型路径里 load 必须保留 NaN 槽，所以这一步单独拿出来。";
-  op.preconditions = {
-      "删点会打乱槽号：凡是按槽号与标签或张量对齐的算子（gap.profile_tensor、"
-      "gap.labels_to_cloud、gap.roi_from_labels）都要接在它之前。",
-      "只看坐标是否有限，不做任何离群点剔除。",
-  };
+      "剔除非有限点，对应 NonFinitePointPolicy::kRemove。只看坐标是否有限，不做离群点剔除。"
+      "模型路径里 load 必须保留 NaN 槽，所以这一步单独拿出来。\n"
+      "删点会打乱槽号：按槽号与标签或张量对齐的算子（gap.profile_tensor、"
+      "gap.labels_to_cloud、gap.roi_from_labels）都要接在它之前 —— 它们的输入契约会查槽数。";
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "可能带 NaN 槽的点云。", true}};
   op.outputs = {Port{"cloud", "PointCloud", "Cloud", "只剩有限点。", true}};
   op.capabilities = {false, true, true};
@@ -651,15 +613,10 @@ void registerRollAnchoredCrop(Registry& r) {
   op.keywords = {"crop", "roll", "window", "跟随零件"};
   op.doc =
       "跟随零件的整体裁剪窗：中心取两个 roll 框中心的中点，半宽半高来自参数。"
-      "五种失效保护（disabled / bad_config / degenerate_roll_box / roll_box_height / span）"
-      "与裁后点数不足时回退无界框，全部复刻（H4）。";
-  op.preconditions = {
-      "假定两个 roll 框来自同一帧的模型推理且都可信；单框高度超过 maxRollBoxHeight 就整"
-      "帧拒绝裁剪，两片云原样透传。",
-      "裁后点数不足 minPointsKept 时丢掉窗、回退无界框 —— 下游拿到的是没裁过的云，不"
-      "是空云。",
-      "窗恒为轴对齐，半宽半高是固定参数，不随零件姿态旋转。",
-  };
+      "窗恒为轴对齐，不随零件姿态旋转。五种失效保护（disabled / bad_config / "
+      "degenerate_roll_box / roll_box_height / span）都让两片云原样透传；裁后点数不足 "
+      "minPointsKept 时丢掉窗、回退无界框 —— 下游拿到的是没裁过的云，不是空云。"
+      "走了哪一支看 status。";
   op.inputs = {
       Port{"primary", "PointCloud", "Primary", "测量帧的 Master 云（已剔非有限点）。", true},
       Port{"secondary", "PointCloud", "Secondary", "测量帧的 Slave 云。", true},
@@ -678,7 +635,7 @@ void registerRollAnchoredCrop(Registry& r) {
   camera.name = "usingCamera";
   camera.type = ParamType::Enum;
   camera.label = "Using Camera";
-  camera.doc = "点数保护看哪几片。Both 看两片之和（seg_mode: ROI 下的原行为）。";
+  camera.doc = "点数保护看哪几片。Both 看两片之和。";
   camera.def = Value::text("Both");
   camera.options = {EnumOption{"Both", "Both", "两片之和。"},
                     EnumOption{"Left", "Left", "只看 primary。"},

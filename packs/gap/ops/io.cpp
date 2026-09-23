@@ -98,10 +98,8 @@ std::string templateKey(const ParamView& params) {
 }
 
 Status loadTemplate(const Inputs&, const ParamView& params, Outputs& outputs, ExecContext&) {
+  // dir 是 path 参数，空值已经在 validate 阶段挡掉了。
   const fs::path dir = params.path("dir");
-  if (dir.empty()) {
-    return Status::Error(Phase::Execute, "bad_param", "没有给模板目录", "dir");
-  }
   const struct {
     const char* param;
     const char* port;
@@ -159,15 +157,11 @@ void registerLoadProfilePair(Registry& r) {
   op.doc =
       "读一个测点目录下的双头线扫剖面：Master 是 primary，Slave 是 secondary。"
       "输出恒为传感器 XZ 帧的米（x=u, y=0, z=h）；归档成剖面布局（x=u, y=h, z=0）的 PCD "
-      "用 layout=profile 声明，读入时把 y 搬到 z、y 置 0，其他通道原样。";
-  op.preconditions = {
-      "输入 PCD 必须是传感器布局（x=u, y=0, z=h）的米；归档成剖面布局（x=u, y=h, z=0）"
-      "的要用 layout=profile 声明，否则下游整条链的高度方向是错的。",
-      "目录模式下同一目录有多次采集时，按文件名排序取第一个；要指定某一次采集用 source="
-      "files。",
-      "dropNonFinite 默认开。模型路径靠槽号与标签对齐，必须把它关掉，改在换轴之后接 "
-      "gap.drop_non_finite。",
-  };
+      "用 layout=profile 声明，读入时把 y 搬到 z、y 置 0，其他通道原样 —— 不声明的话下游"
+      "整条链的高度方向是错的。\n"
+      "目录模式下同一目录有多次采集时按文件名排序取第一个，要指定某一次用 source=files。"
+      "dropNonFinite 默认开；模型路径靠槽号与标签对齐，必须关掉，改在换轴之后接 "
+      "gap.drop_non_finite。";
   op.outputs = {
       Port{"primary", "PointCloud", "Primary", "Master（L0）那一片。", true},
       Port{"secondary", "PointCloud", "Secondary", "Slave（R1）那一片。", true},
@@ -234,12 +228,9 @@ void registerToMeasurementFrame(Registry& r) {
   op.label = "转换到测量帧";
   op.category = "间隙/预处理";
   op.keywords = {"axis", "swap", "frame", "换轴", "测量帧"};
-  op.doc = "传感器 XZ 帧 → 测量 XY 帧：交换 y 与 z。这是反射不是旋转（复刻 swapCloudAxis）。";
-  op.preconditions = {
-      "只交换 y 与 z，这是反射不是旋转，手性会翻 —— 不要拿它当刚体变换用。",
-      "假定输入是传感器 XZ 帧（y 恒为 0）；对已经在测量帧里的云（比如 gap.load_template"
-      " 的模板）再走一遍会把高度搬回 z。",
-  };
+  op.doc =
+      "传感器 XZ 帧 → 测量 XY 帧：交换 y 与 z（swapCloudAxis）。这是反射不是旋转，手性会翻，"
+      "不要拿它当刚体变换用；已经在测量帧里的云（比如模板）再走一遍会把高度搬回 z。";
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "传感器帧的点云。", true}};
   op.outputs = {Port{"cloud", "PointCloud", "Cloud", "测量帧的点云。", true}};
   op.capabilities = {false, true, true};
@@ -254,12 +245,9 @@ void registerLoadTemplate(Registry& r) {
   op.label = "加载模板";
   op.category = "间隙/输入输出";
   op.keywords = {"template", "模板", "pcd"};
-  op.doc = "读一对模板 PCD。模板已经在测量 XY 帧里（z=0），不需要换轴。";
-  op.preconditions = {
-      "模板 PCD 已经在测量 XY 帧里（z=0），不要再接 gap.to_measurement_frame。",
-      "模板必须与当前样本出自同一个配置：模板对不上时 ICP 照样给分，只是配到了别的形状"
-      "上。",
-  };
+  op.doc =
+      "读一对模板 PCD。模板已经在测量 XY 帧里（z=0），不要再接 gap.to_measurement_frame。"
+      "模板必须与当前样本出自同一个配置：对不上时 ICP 照样给分，只是配到了别的形状上。";
   op.outputs = {
       Port{"left", "PointCloud", "Left", "左模板。", true},
       Port{"right", "PointCloud", "Right", "右模板。", true},

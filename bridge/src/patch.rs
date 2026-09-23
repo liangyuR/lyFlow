@@ -1,6 +1,6 @@
 //! `lyflow patch` —— 图的结构编辑（ADR-0023）。
 //!
-//! 四个动作、固定顺序（remove → add → rewire → set）、幂等、每步之后过一遍形状校验，
+//! 五个动作、固定顺序（remove → add → rewire → set → param）、幂等、每步之后过一遍形状校验，
 //! 最后过 core 的 `validate`；任一步不过就整体不写。图手术的那几件事（找空位、
 //! 改边的源端口）与 `perturb::insert_after` 是同一套写法，只是这里由命令行指定。
 
@@ -30,6 +30,8 @@ pub(crate) struct Applied {
     pub added: Vec<String>,
     pub rewired: Vec<String>,
     pub set: Vec<String>,
+    /// `--param` 改了 default 的顶层参数名。
+    pub params: Vec<String>,
     /// 什么都没做的那些动作。幂等的形态是「第二遍全进这里」。
     pub noops: Vec<Value>,
     /// 给人看的旁注，走 stderr。
@@ -51,6 +53,7 @@ impl Applied {
             && self.added.is_empty()
             && self.rewired.is_empty()
             && self.set.is_empty()
+            && self.params.is_empty()
     }
 
     fn value(&self) -> Value {
@@ -59,6 +62,7 @@ impl Applied {
             "added": self.added,
             "rewired": self.rewired,
             "set": self.set,
+            "param": self.params,
         })
     }
 }
@@ -229,6 +233,9 @@ pub(crate) fn apply_sets(
         if param.is_empty() {
             return Err(format!("--set 的参数名是空的，收到 {spec}"));
         }
+        if let Some(conflict) = crate::cli::set_conflict(doc, node_id, param, spec) {
+            return Err(conflict);
+        }
         let value: Value =
             serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.to_string()));
         let node = doc
@@ -247,6 +254,27 @@ pub(crate) fn apply_sets(
         }
         node.params.insert(param.to_string(), value);
         applied.set.push(left.to_string());
+    }
+    Ok(())
+}
+
+/// `--param <名字>=<json>`：改顶层图参数的 default 并落盘。同值是 no-op。
+pub(crate) fn apply_params(
+    doc: &mut GraphDoc,
+    specs: &[String],
+    applied: &mut Applied,
+) -> Result<(), String> {
+    for spec in specs {
+        if crate::cli::apply_graph_param(doc, spec)? {
+            applied.params.push(spec.split_once('=').map(|(n, _)| n).unwrap_or(spec).to_string());
+        } else {
+            applied.noop(
+                "param",
+                spec,
+                "same_value",
+                &format!("--param {spec}：顶层参数已经是这个值，跳过"),
+            );
+        }
     }
     Ok(())
 }
@@ -320,20 +348,22 @@ pub(crate) fn cmd_patch(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         line(
             err,
             "用法：lyflow patch <graph> [--remove-node <id|glob>]... [--add-node <json>]... \
-             [--rewire <from>=<to>]... [--set <node>.<param>=<json>]... [--dry-run] [-o <out>] [--json]",
+             [--rewire <from>=<to>]... [--set <node>.<param>=<json>]... [--param <名字>=<json>]... \
+             [--dry-run] [-o <out>] [--json]",
         );
         return EXIT_USAGE;
     };
-    let actions: [(&str, Step, &[String]); 4] = [
+    let actions: [(&str, Step, &[String]); 5] = [
         ("remove-node", apply_removes, parsed.many("remove-node")),
         ("add-node", apply_adds, parsed.many("add-node")),
         ("rewire", apply_rewires, parsed.many("rewire")),
         ("set", apply_sets, parsed.many("set")),
+        ("param", apply_params, parsed.many("param")),
     ];
     if actions.iter().all(|(_, _, specs)| specs.is_empty()) {
         line(
             err,
-            "至少给一个动作：--remove-node / --add-node / --rewire / --set",
+            "至少给一个动作：--remove-node / --add-node / --rewire / --set / --param",
         );
         return EXIT_USAGE;
     }
@@ -364,7 +394,7 @@ pub(crate) fn cmd_patch(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             continue;
         }
         if let Err(e) = step(&mut doc, specs, &mut applied) {
-            return fail(err, &e, EXIT_INVALID);
+            return fail(err, &e, crate::cli::load_exit(&e));
         }
         // 每一步之后过一遍形状校验：坏在哪一个动作上，比「最后整张图不合法」有用得多
         if let Err(e) = doc.validate_structure() {
@@ -445,11 +475,12 @@ pub(crate) fn cmd_patch(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     }
 
     let done = format!(
-        "删 {} 个节点、加 {} 个、改接 {} 处、改参数 {} 处；{} 条无操作",
+        "删 {} 个节点、加 {} 个、改接 {} 处、改参数 {} 处、改顶层参数 {} 个；{} 条无操作",
         applied.removed.len(),
         applied.added.len(),
         applied.rewired.len(),
         applied.set.len(),
+        applied.params.len(),
         applied.noops.len()
     );
     let tail = match (dry_run, wrote.as_str()) {

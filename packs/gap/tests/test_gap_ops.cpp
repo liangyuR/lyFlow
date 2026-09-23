@@ -1,11 +1,12 @@
 // gap 算子包的单测。跟 LyFlow core 共用同一个 doctest 目标（ADR-0013）。
-// 这里只测「必须逐条复刻」的那几条语义（计划 §3），拟合本身是复用的库函数，不重测。
+// 这里测算子自己定下的语义（截取方向、ROI 变换、固定半径、符号……），拟合本身是复用的库函数，不重测。
 #include <doctest/doctest.h>
 
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -65,7 +66,31 @@ struct Call {
   }
 
   const Data& out(const std::string& port) { return outputs[port]; }
+
+  /// 调算子的 validate 钩子（J5）：参数同样先铺默认值，connected 是「已连上的输入端口」。
+  std::vector<Issue> validate(const std::string& opId,
+                              const std::unordered_map<std::string, Value>& overrides,
+                              const std::set<std::string>& connected) {
+    const OperatorDesc* op = packRegistry().find(opId);
+    REQUIRE(op != nullptr);
+    REQUIRE(op->validate != nullptr);
+    for (const Param& p : op->params) params[p.name] = p.def;
+    for (const auto& [k, v] : overrides) params[k] = v;
+    const std::filesystem::path base;
+    ParamView view(params, base);
+    return op->validate(view, connected);
+  }
 };
+
+/// 某个输入端口集合下的 validate 结果里有没有这条 error。
+bool hasError(const std::vector<Issue>& issues, const std::string& code, const std::string& param) {
+  for (const Issue& i : issues) {
+    if (i.severity == Severity::Error && i.status.code == code && i.status.paramPath == param) {
+      return true;
+    }
+  }
+  return false;
+}
 
 Box2D box(float xMin, float yMin, float xMax, float yMax) {
   Box2D b;
@@ -76,7 +101,7 @@ Box2D box(float xMin, float yMin, float xMax, float yMax) {
   return b;
 }
 
-/// n 个共线的点。ascend=false 时 x 递减，用来翻转 §3.5 的截取方向。
+/// n 个共线的点。ascend=false 时 x 递减：点序反过来，截取方向不该跟着变。
 PointCloud lineCloud(std::size_t n, bool ascend) {
   PointCloud c;
   for (std::size_t i = 0; i < n; ++i) {
@@ -91,28 +116,23 @@ PointCloud lineCloud(std::size_t n, bool ascend) {
 // gap.crop_box 已删除：生成的图改用 filter.crop_box2d(bounds=open)，
 // 开闭区间的断言随之搬到 packs/std-pointcloud/tests/test_2d_ops.cpp。
 
-TEST_CASE("gap.fit_line 的截取方向：ascend × side 四种组合") {
-  // 100 个共线点、segmentPoints=10：留下的必是靠缝隙那一端的十个。
-  // ascend == isLeft 留尾巴，否则留头（§3.5）。
+TEST_CASE("gap.fit_line 按 toward 截取与取 innerEnd，与点序无关") {
+  // 100 个共线点（x 从 0 到 99 mm）、segmentPoints=10：留下的是沿直线方向离 toward
+  // 中心最近的那十个，innerEnd 取离它最近的那一个。两种点序 × 两个 toward 位置。
   struct Case {
     bool ascend;
-    const char* side;
-    bool expectTail;
+    bool towardLeft;
   };
-  const Case cases[4] = {
-      {true, "left", true},
-      {false, "left", false},
-      {true, "right", false},
-      {false, "right", true},
-  };
+  const Case cases[4] = {{true, true}, {false, true}, {true, false}, {false, false}};
   for (const Case& c : cases) {
     CAPTURE(c.ascend);
-    CAPTURE(c.side);
+    CAPTURE(c.towardLeft);
     Call call;
     call.inputs["cloud"] = Data::cloud(lineCloud(100, c.ascend));
     call.inputs["box"] = Data::box2d(box(-1.0f, 0.0f, 1.0f, 1.0f));
+    call.inputs["toward"] = Data::box2d(c.towardLeft ? box(-0.010f, 0.4f, -0.005f, 0.6f)
+                                                     : box(0.105f, 0.4f, 0.110f, 0.6f));
     REQUIRE(call.run("gap.fit_line", {
-                                         {"side", Value::text(c.side)},
                                          {"distThresh", Value::number(0.5)},
                                          {"segmentPoints", Value::integer(10)},
                                      })
@@ -120,36 +140,33 @@ TEST_CASE("gap.fit_line 的截取方向：ascend × side 四种组合") {
     const Indices* inliers = call.out("inliers").asIndices();
     REQUIRE(inliers != nullptr);
     REQUIRE(inliers->values.size() == 10);
-    const std::int32_t lo = inliers->values.front();
-    const std::int32_t hi = inliers->values.back();
-    if (c.expectTail) {
-      CHECK(lo == 90);
-      CHECK(hi == 99);
-    } else {
-      CHECK(lo == 0);
-      CHECK(hi == 9);
-    }
+    // 点 i 的 x = (ascend ? i : 99 - i) mm。靠左那头是 x 小的十个。
+    const bool keepLowIndex = c.ascend == c.towardLeft;
+    CHECK(inliers->values.front() == (keepLowIndex ? 0 : 90));
+    CHECK(inliers->values.back() == (keepLowIndex ? 9 : 99));
 
-    // innerEnd 是内点里靠缝隙那一端的真实云点（§3.6）：左侧板子永远取 x 最大的
-    // 那头、右侧取 x 最小的那头，与点在文件里的存放顺序（ascend）无关。
     const Point2D* inner = call.out("innerEnd").asPoint2D();
     REQUIRE(inner != nullptr);
-    CHECK(inner->p[0] ==
-          doctest::Approx(std::string(c.side) == "left" ? 0.099f : 0.0f).epsilon(0.01));
+    CHECK(inner->p[0] == doctest::Approx(c.towardLeft ? 0.0f : 0.099f).epsilon(0.01));
+    CHECK(call.out("quality").asRecord()->data["segmentApplied"] == true);
   }
 }
 
-TEST_CASE("gap.fit_line 内点少于 segmentPoints 时不截取") {
+TEST_CASE("gap.fit_line 内点不多于 segmentPoints 时不截取，quality 说出来") {
   Call call;
   call.inputs["cloud"] = Data::cloud(lineCloud(20, true));
   call.inputs["box"] = Data::box2d(box(-1.0f, 0.0f, 1.0f, 1.0f));
+  call.inputs["toward"] = Data::box2d(box(0.05f, 0.4f, 0.06f, 0.6f));
   REQUIRE(call.run("gap.fit_line", {{"distThresh", Value::number(0.5)},
                                     {"segmentPoints", Value::integer(500)}})
               .ok);
   CHECK(call.out("inliers").asIndices()->values.size() == 20);
+  CHECK(call.out("quality").asRecord()->data["segmentApplied"] == false);
+  // innerEnd 仍然朝 toward：这片云在它左边，取 x 最大的那头
+  CHECK(call.out("innerEnd").asPoint2D()->p[0] == doctest::Approx(0.019f).epsilon(0.01));
 }
 
-TEST_CASE("gap.flush 取绝对值并加 offset，符号不参与") {
+TEST_CASE("gap.flush 默认给带符号垂距，signed=false 才取绝对值") {
   Line2D base;           // y = 0 那条线
   base.point[0] = 0.0f;
   base.point[1] = 0.0f;
@@ -157,8 +174,9 @@ TEST_CASE("gap.flush 取绝对值并加 offset，符号不参与") {
   base.dir[1] = 0.0f;
   Point2D ref;
   ref.p[0] = 0.5f;
-  ref.p[1] = 0.002f;     // 线上方 2 mm
+  ref.p[1] = -0.002f;    // 线上方 2 mm（测量帧里 y 越小越高）
 
+  // 不写 signed：带符号
   Call above;
   above.inputs["baseLine"] = Data::line2d(base);
   above.inputs["refPoint"] = Data::point2d(ref);
@@ -167,12 +185,21 @@ TEST_CASE("gap.flush 取绝对值并加 offset，符号不参与") {
   REQUIRE(m != nullptr);
   CHECK(m->value == doctest::Approx(2.4));
 
-  ref.p[1] = -0.002f;    // 线下方 2 mm：绝对值一样
+  ref.p[1] = 0.002f;     // 线下方 2 mm：符号翻过来
   Call below;
   below.inputs["baseLine"] = Data::line2d(base);
   below.inputs["refPoint"] = Data::point2d(ref);
   REQUIRE(below.run("gap.flush", {{"offset", Value::number(0.4)}}).ok);
-  CHECK(below.out("value").asMeasurement()->value == doctest::Approx(2.4));
+  CHECK(below.out("value").asMeasurement()->value == doctest::Approx(-2.0 + 0.4));
+
+  // signed=false：两侧都是绝对值
+  Call folded;
+  folded.inputs["baseLine"] = Data::line2d(base);
+  folded.inputs["refPoint"] = Data::point2d(ref);
+  REQUIRE(folded.run("gap.flush", {{"offset", Value::number(0.4)},
+                                   {"signed", Value::boolean(false)}})
+              .ok);
+  CHECK(folded.out("value").asMeasurement()->value == doctest::Approx(2.4));
 }
 
 TEST_CASE("gap.gap definition A 沿基准线方向量切线距离") {
@@ -266,36 +293,98 @@ TEST_CASE("gap.judge 的判定字段") {
   CHECK(call.out("value").asMeasurement()->verdict == "fail");
 }
 
-TEST_CASE("gap.business_rois 只变换对角两角点，base_side=right 时端口互换") {
-  // 单位变换 + 四个互不相同的 ROI，直接看端口对上了没有
-  nlohmann::json identity = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+namespace {
+
+/// 行主序 3x3：先绕原点转 deg 度，再平移 (tx, ty) 米。
+nlohmann::json rigid(double deg, double tx, double ty) {
+  const double a = deg * 3.14159265358979323846 / 180.0;
+  return {std::cos(a), -std::sin(a), tx, std::sin(a), std::cos(a), ty, 0, 0, 1};
+}
+
+Record alignmentRecord(const nlohmann::json& left, const nlohmann::json& right) {
   Record rec;
   rec.type = "GapAlignment";
   rec.data = nlohmann::json{
-      {"left", {{"transform", identity}}},
-      {"right", {{"transform", identity}}},
+      {"left", {{"transform", left}}},
+      {"right", {{"transform", right}}},
       {"rois",
        {{"flushBase", {0.0, 0.0, 1.0, 1.0}},
         {"gapLeft", {2.0, 0.0, 3.0, 1.0}},
         {"flushRef", {4.0, 0.0, 5.0, 1.0}},
         {"gapRight", {6.0, 0.0, 7.0, 1.0}}}},
   };
+  return rec;
+}
 
-  Call left;
-  left.inputs["alignment"] = Data::record(rec);
-  REQUIRE(left.run("gap.business_rois", {{"baseSide", Value::text("left")}}).ok);
-  CHECK(left.out("flushBase").asBox2D()->min[0] == doctest::Approx(0.0));
-  CHECK(left.out("flushRef").asBox2D()->min[0] == doctest::Approx(0.004));
+/// 毫米框 [x0,y0,x1,y1] 的四个角点经 t 变换后的轴对齐包围盒（米）。
+Box2D expectedAabb(const nlohmann::json& t, double x0, double y0, double x1, double y1) {
+  Box2D b;
+  b.min[0] = b.min[1] = 1e9f;
+  b.max[0] = b.max[1] = -1e9f;
+  for (double x : {x0 / 1000.0, x1 / 1000.0}) {
+    for (double y : {y0 / 1000.0, y1 / 1000.0}) {
+      const float qx = static_cast<float>(t[0].get<double>() * x + t[1].get<double>() * y +
+                                          t[2].get<double>());
+      const float qy = static_cast<float>(t[3].get<double>() * x + t[4].get<double>() * y +
+                                          t[5].get<double>());
+      b.min[0] = std::min(b.min[0], qx);
+      b.min[1] = std::min(b.min[1], qy);
+      b.max[0] = std::max(b.max[0], qx);
+      b.max[1] = std::max(b.max[1], qy);
+    }
+  }
+  return b;
+}
+
+void checkBox(const Box2D& got, const Box2D& want) {
+  CHECK(got.min[0] == doctest::Approx(want.min[0]).epsilon(1e-5));
+  CHECK(got.min[1] == doctest::Approx(want.min[1]).epsilon(1e-5));
+  CHECK(got.max[0] == doctest::Approx(want.max[0]).epsilon(1e-5));
+  CHECK(got.max[1] == doctest::Approx(want.max[1]).epsilon(1e-5));
+}
+
+}  // namespace
+
+TEST_CASE("gap.business_rois 单位变换下四个端口各出各的框") {
+  const nlohmann::json identity = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+  for (const char* side : {"left", "right"}) {
+    CAPTURE(side);
+    Call call;
+    call.inputs["alignment"] = Data::record(alignmentRecord(identity, identity));
+    REQUIRE(call.run("gap.business_rois", {{"datumSide", Value::text(side)}}).ok);
+    // datumSide 不改变哪个框是 flushBase
+    CHECK(call.out("flushBase").asBox2D()->min[0] == doctest::Approx(0.0));
+    CHECK(call.out("flushRef").asBox2D()->min[0] == doctest::Approx(0.004));
+    CHECK(call.out("gapLeft").asBox2D()->min[0] == doctest::Approx(0.002));
+    CHECK(call.out("gapRight").asBox2D()->min[0] == doctest::Approx(0.006));
+  }
+}
+
+TEST_CASE("gap.business_rois 四个角点全变换取包围盒，datumSide 决定 base ROI 用哪侧变换") {
+  // 左侧单位变换，右侧转 30° 再平移：只看右侧变换的那些框。
+  const nlohmann::json identity = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+  const nlohmann::json turned = rigid(30.0, 0.0005, -0.0002);
+  const Record rec = alignmentRecord(identity, turned);
 
   Call right;
   right.inputs["alignment"] = Data::record(rec);
-  REQUIRE(right.run("gap.business_rois", {{"baseSide", Value::text("right")}}).ok);
-  // 互换之后基准面那一格拿的是配置里的 flush_base，仍然从 flushBase 端口出来
-  CHECK(right.out("flushBase").asBox2D()->min[0] == doctest::Approx(0.0));
-  CHECK(right.out("flushRef").asBox2D()->min[0] == doctest::Approx(0.004));
-  // 间隙两侧不受 base_side 影响
-  CHECK(right.out("gapLeft").asBox2D()->min[0] == doctest::Approx(0.002));
-  CHECK(right.out("gapRight").asBox2D()->min[0] == doctest::Approx(0.006));
+  REQUIRE(right.run("gap.business_rois", {{"datumSide", Value::text("right")}}).ok);
+  // datumSide=right：flushBase 用右侧变换、flushRef 用左侧变换
+  checkBox(*right.out("flushBase").asBox2D(), expectedAabb(turned, 0.0, 0.0, 1.0, 1.0));
+  checkBox(*right.out("flushRef").asBox2D(), expectedAabb(identity, 4.0, 0.0, 5.0, 1.0));
+  // 间隙两侧各归各侧
+  checkBox(*right.out("gapLeft").asBox2D(), expectedAabb(identity, 2.0, 0.0, 3.0, 1.0));
+  checkBox(*right.out("gapRight").asBox2D(), expectedAabb(turned, 6.0, 0.0, 7.0, 1.0));
+  // 转过之后的包围盒比原框宽：只变换对角两点时 (0,0)、(1,1) 两个角转完 x 跨度是
+  // cos30 − sin30 ≈ 0.37 mm，四角包围盒是 cos30 + sin30 ≈ 1.37 mm。
+  const Box2D& base = *right.out("flushBase").asBox2D();
+  CHECK((base.max[0] - base.min[0]) == doctest::Approx(0.001366).epsilon(1e-3));
+
+  Call left;
+  left.inputs["alignment"] = Data::record(rec);
+  REQUIRE(left.run("gap.business_rois", {{"datumSide", Value::text("left")}}).ok);
+  checkBox(*left.out("flushBase").asBox2D(), expectedAabb(identity, 0.0, 0.0, 1.0, 1.0));
+  checkBox(*left.out("flushRef").asBox2D(), expectedAabb(turned, 4.0, 0.0, 5.0, 1.0));
 }
 
 TEST_CASE("gap.overall_roi 的 auto_center 保留宽高、中心取两片云中位数的中点") {
@@ -705,13 +794,13 @@ TEST_CASE("gap.flush 的 scale 与 offset 是线性的") {
   call.inputs["baseLine"] = Data::line2d(base);
   call.inputs["refPoint"] = Data::point2d(ref);
   REQUIRE(call.run("gap.flush").ok);
-  CHECK(call.out("value").asMeasurement()->value == doctest::Approx(2.0).epsilon(1e-6));
+  CHECK(call.out("value").asMeasurement()->value == doctest::Approx(-2.0).epsilon(1e-6));
   REQUIRE(call.run("gap.flush", {{"scale", Value::number(2.06)}, {"offset", Value::number(-0.1)}}).ok);
   CHECK(call.out("value").asMeasurement()->value ==
-        doctest::Approx(2.0 * 2.06 - 0.1).epsilon(1e-6));
+        doctest::Approx(-2.0 * 2.06 - 0.1).epsilon(1e-6));
 }
 
-TEST_CASE("gap.flush 的 signed 模式给带符号垂距，两侧不再折回同一方向") {
+TEST_CASE("gap.flush 的 signed 给带符号垂距，关掉才折回同一方向") {
   Line2D base;
   base.point[0] = 0.0f;
   base.point[1] = 0.0f;
@@ -733,9 +822,13 @@ TEST_CASE("gap.flush 的 signed 模式给带符号垂距，两侧不再折回同
   const double d2 = call.out("value").asMeasurement()->value;
   CHECK(d1 == doctest::Approx(-2.0).epsilon(1e-5));
   CHECK(d2 == doctest::Approx(2.0).epsilon(1e-5));
-  // 默认仍是绝对值：两侧读数相同
+  // 默认就是带符号的
   call.inputs["refPoint"] = Data::point2d(below);
   REQUIRE(call.run("gap.flush").ok);
+  CHECK(call.out("value").asMeasurement()->value == doctest::Approx(-2.0).epsilon(1e-5));
+  // 关掉：两侧读数相同
+  call.inputs["refPoint"] = Data::point2d(below);
+  REQUIRE(call.run("gap.flush", {{"signed", Value::boolean(false)}}).ok);
   CHECK(call.out("value").asMeasurement()->value == doctest::Approx(2.0).epsilon(1e-5));
 }
 
@@ -1153,7 +1246,7 @@ TEST_CASE("gap.fit_gap_circles 的 refLineRight 让右侧比另一条参考线")
               .ok);
   CHECK(rightCenterY(*split) == doctest::Approx(-0.0005).epsilon(0.05));
 
-  // 不接就退回 refLine：同一段弧相对原点只高 0.5 mm，老图行为不变。
+  // 不接就退回 refLine：同一段弧相对原点只高 0.5 mm。
   auto shared = build(false);
   REQUIRE(shared
               ->run("gap.fit_gap_circles",
@@ -1170,7 +1263,37 @@ TEST_CASE("gap.fit_gap_circles 的 refLineRight 让右侧比另一条参考线")
   CHECK(leftBand->out("left").asCircle2D()->center[1] == doctest::Approx(-0.0005).epsilon(0.05));
 }
 
-TEST_CASE("gap.fit_gap_circles 配了圆心高度带却没接 refLine 就报错") {
+TEST_CASE("gap.fit_gap_circles 的参数与连线检查在 validate 里") {
+  const std::set<std::string> plain = {"merged", "primary", "secondary", "boxLeft", "boxRight"};
+  Call call;
+  // 配了右侧高度带却没接任何参考线
+  CHECK(hasError(call.validate("gap.fit_gap_circles", {{"rightCenterTol", Value::number(0.3)}}, plain),
+                 "bad_param", "rightCenterTol"));
+  // 接了 refLineRight 就够右侧用；左侧仍然要 refLine
+  std::set<std::string> withRight = plain;
+  withRight.insert("refLineRight");
+  CHECK(call.validate("gap.fit_gap_circles", {{"rightCenterTol", Value::number(0.3)}}, withRight)
+            .empty());
+  CHECK(hasError(call.validate("gap.fit_gap_circles", {{"leftCenterTol", Value::number(0.3)}}, withRight),
+                 "bad_param", "leftCenterTol"));
+  // 半径上下限倒置
+  CHECK(hasError(call.validate("gap.fit_gap_circles",
+                               {{"leftRadiusMin", Value::number(2.0)},
+                                {"leftRadiusMax", Value::number(1.0)}},
+                               plain),
+                 "bad_param", "leftRadiusMax"));
+  // 固定半径不在上下限之间
+  CHECK(hasError(call.validate("gap.fit_gap_circles",
+                               {{"rightRadiusFixed", Value::boolean(true)},
+                                {"rightRadiusValue", Value::number(5.0)}},
+                               plain),
+                 "bad_param", "rightRadiusValue"));
+  // 默认参数干净
+  CHECK(call.validate("gap.fit_gap_circles", {}, plain).empty());
+}
+
+TEST_CASE("gap.fit_gap_circles 的固定半径在圆心高度带那条路上也生效") {
+  // 右侧真实圆半径 0.9 mm；固定成 1.0 mm，并配 always 的高度带（走 circleFitConstrained）。
   PointCloud cloud;
   pushLeftArc(cloud);
   pushArc(cloud, 0.0035, -0.0005, 0.0009, 200, 340, 60);
@@ -1180,9 +1303,48 @@ TEST_CASE("gap.fit_gap_circles 配了圆心高度带却没接 refLine 就报错"
   call.inputs["secondary"] = Data::cloud(cloud);
   call.inputs["boxLeft"] = Data::box2d(box(-0.006f, -0.004f, -0.001f, 0.002f));
   call.inputs["boxRight"] = Data::box2d(box(0.001f, -0.004f, 0.006f, 0.002f));
-  const Status s = call.run("gap.fit_gap_circles", {{"rightCenterTol", Value::number(0.3)}});
-  CHECK_FALSE(s.ok);
-  CHECK(s.code == "bad_param");
+  call.inputs["refLine"] = Data::line2d(flatLine());
+  REQUIRE(call.run("gap.fit_gap_circles", {{"rightRadiusFixed", Value::boolean(true)},
+                                           {"rightRadiusValue", Value::number(1.0)},
+                                           {"rightCenterAbove", Value::number(0.5)},
+                                           {"rightCenterTol", Value::number(0.4)},
+                                           {"rightCenterMode", Value::text("always")},
+                                           {"distThresh", Value::number(0.2)}})
+              .ok);
+  const Circle2D& right = *call.out("right").asCircle2D();
+  CHECK(right.radius == doctest::Approx(0.001).epsilon(1e-6));
+  CHECK(call.out("quality").asRecord()->data["right"]["model"] == "circle-center-band");
+  // 圆心仍在带里：参考线上方 0.5 ± 0.4 mm
+  CHECK(-right.center[1] == doctest::Approx(0.0005).epsilon(0.8));
+}
+
+TEST_CASE("gap.fit_gap_circles 的固定半径在相机分开的回退里也生效") {
+  // 合并云里右侧是两层错开 1 mm 的弧，合并拟合拟不出来；两台各自干净 —— 走相机分开的回退。
+  PointCloud primary, secondary, merged;
+  pushLeftArc(primary);
+  pushLeftArc(secondary);
+  pushLeftArc(merged);
+  pushArc(primary, 0.0035, -0.0005, 0.0009, 200, 340, 60);
+  pushArc(secondary, 0.0035, -0.0005, 0.0009, 200, 340, 60);
+  Call call;
+  call.inputs["merged"] = Data::cloud(merged);   // 右侧没有点：合并云这条路必然失败
+  call.inputs["primary"] = Data::cloud(primary);
+  call.inputs["secondary"] = Data::cloud(secondary);
+  call.inputs["boxLeft"] = Data::box2d(box(-0.006f, -0.004f, -0.001f, 0.002f));
+  call.inputs["boxRight"] = Data::box2d(box(0.001f, -0.004f, 0.006f, 0.002f));
+  // merged 在右 ROI 里没点会直接 roi_empty —— 给它一个离群点让它进拟合、再失败
+  PointCloud stray = merged;
+  stray.push(0.0035f, 0.0f, 0.0f);
+  call.inputs["merged"] = Data::cloud(stray);
+  REQUIRE(call.run("gap.fit_gap_circles", {{"rightRadiusFixed", Value::boolean(true)},
+                                           {"rightRadiusValue", Value::number(1.0)},
+                                           {"selectClosestNominal", Value::boolean(true)},
+                                           {"distThresh", Value::number(0.2)}})
+              .ok);
+  const Circle2D& right = *call.out("right").asCircle2D();
+  CHECK(right.radius == doctest::Approx(0.001).epsilon(1e-6));
+  const std::string model = call.out("quality").asRecord()->data["right"]["model"];
+  CHECK(model.rfind("camera-separated-circle-", 0) == 0);
 }
 
 namespace {
@@ -1242,6 +1404,7 @@ TEST_CASE("gap.fit_line 的 dirMode=fixed 把方向钉在 refLine + 标称上") 
   call.inputs["cloud"] = Data::cloud(slopedLine(40, 25.0));   // 点本身是 25°
   call.inputs["box"] = Data::box2d(box(-0.001f, -0.001f, 0.005f, 0.004f));
   call.inputs["refLine"] = Data::line2d(lineAt(0.0));
+  call.inputs["toward"] = Data::box2d(box(0.006f, -0.001f, 0.007f, 0.001f));
   REQUIRE(call.run("gap.fit_line", {{"dirMode", Value::text("fixed")},
                                     {"dirNominalDeg", Value::number(3.0)},
                                     {"distThresh", Value::number(5.0)}})
@@ -1249,12 +1412,13 @@ TEST_CASE("gap.fit_line 的 dirMode=fixed 把方向钉在 refLine + 标称上") 
   CHECK(dirDeg(*call.out("line").asLine2D()) == doctest::Approx(3.0).epsilon(0.02));
 }
 
-TEST_CASE("gap.fit_line 的 dirMode=band 只在方向出界时才钉，合规时逐位不变") {
+TEST_CASE("gap.fit_line 的 dirMode=band 只在方向出界时才钉，合规时与 free 相同") {
   const auto fit = [](double cloudDeg, const char* mode) {
     auto call = std::make_unique<Call>();
     call->inputs["cloud"] = Data::cloud(slopedLine(40, cloudDeg));
     call->inputs["box"] = Data::box2d(box(-0.001f, -0.002f, 0.005f, 0.004f));
     call->inputs["refLine"] = Data::line2d(lineAt(0.0));
+    call->inputs["toward"] = Data::box2d(box(0.006f, -0.001f, 0.007f, 0.001f));
     REQUIRE(call->run("gap.fit_line", {{"dirMode", Value::text(mode)},
                                        {"dirNominalDeg", Value::number(0.0)},
                                        {"dirTolDeg", Value::number(10.0)},
@@ -1262,7 +1426,7 @@ TEST_CASE("gap.fit_line 的 dirMode=band 只在方向出界时才钉，合规时
                 .ok);
     return call;
   };
-  // 带内：和 free 逐位一致
+  // 带内：和 free 完全相同
   auto banded = fit(2.0, "band");
   auto freeFit = fit(2.0, "free");
   const Line2D& a = *banded->out("line").asLine2D();
@@ -1278,16 +1442,31 @@ TEST_CASE("gap.fit_line 的 dirMode=band 只在方向出界时才钉，合规时
   CHECK(dirDeg(*fit(30.0, "free")->out("line").asLine2D()) == doctest::Approx(30.0).epsilon(0.05));
 }
 
-TEST_CASE("gap.fit_line 的 dirMode 不是 free 却没接 refLine 就报错") {
+TEST_CASE("gap.fit_line 的 dirMode 不是 free 却没接 refLine：validate 报 bad_param") {
   Call call;
-  call.inputs["cloud"] = Data::cloud(slopedLine(20, 1.0));
-  call.inputs["box"] = Data::box2d(box(-0.001f, -0.001f, 0.005f, 0.002f));
-  const Status s = call.run("gap.fit_line", {{"dirMode", Value::text("fixed")}});
-  CHECK_FALSE(s.ok);
-  CHECK(s.code == "bad_param");
+  const std::set<std::string> ports = {"cloud", "box", "toward"};
+  CHECK(hasError(call.validate("gap.fit_line", {{"dirMode", Value::text("fixed")}}, ports),
+                 "bad_param", "dirMode"));
+  CHECK(hasError(call.validate("gap.fit_line", {{"dirMode", Value::text("band")}}, ports),
+                 "bad_param", "dirMode"));
+  std::set<std::string> withRef = ports;
+  withRef.insert("refLine");
+  CHECK(call.validate("gap.fit_line", {{"dirMode", Value::text("band")}}, withRef).empty());
+  CHECK(call.validate("gap.fit_line", {}, ports).empty());
 }
 
-TEST_CASE("圆心高度带的 guard：带内逐位不变，出带才重拟") {
+TEST_CASE("gap.datum_window 的 lengthMm 与 gap.gap 的 definition A 在 validate 里查") {
+  Call call;
+  CHECK(hasError(call.validate("gap.datum_window", {{"lengthMm", Value::number(0.0)}}, {"anchor"}),
+                 "bad_param", "lengthMm"));
+  CHECK(call.validate("gap.datum_window", {}, {"anchor"}).empty());
+  CHECK(hasError(call.validate("gap.gap", {{"definition", Value::text("A")}}, {"left", "right"}),
+                 "bad_param", "definition"));
+  CHECK(call.validate("gap.gap", {{"definition", Value::text("A")}}, {"left", "right", "baseLine"})
+            .empty());
+}
+
+TEST_CASE("圆心高度带的 guard：带内结果不变，出带才重拟") {
   // 右 ROI 里两段弧：点多的在参考线上方 0.5 mm，点少的在下方 0.5 mm。
   // 不加约束时 RANSAC 选点多的那段。
   const auto build = [](const std::unordered_map<std::string, Value>& over) {
@@ -1313,7 +1492,7 @@ TEST_CASE("圆心高度带的 guard：带内逐位不变，出带才重拟") {
   const Circle2D& a = *plain->out("right").asCircle2D();
   REQUIRE(a.center[1] == doctest::Approx(-0.0005).epsilon(0.05));
 
-  // 带套在它身上 —— guard 不该动它，逐位一致
+  // 带套在它身上 —— guard 不该动它
   auto guarded = build({{"rightCenterAbove", Value::number(0.5)},
                         {"rightCenterTol", Value::number(0.4)},
                         {"rightCenterMode", Value::text("guard")}});
@@ -1394,7 +1573,7 @@ TEST_CASE("gap.fit_gap_circles 的方位角带挑内点落在圆左上的那一�
   CHECK(rightCenterY(*banded) == doctest::Approx(-0.0005).epsilon(0.05));
 }
 
-TEST_CASE("方位角带的 guard：带内逐位不变，出带才重拟") {
+TEST_CASE("方位角带的 guard：带内结果不变，出带才重拟") {
   const auto build = [](std::initializer_list<std::pair<const std::string, Value>> params) {
     PointCloud cloud;
     pushLeftArc(cloud);
@@ -1410,7 +1589,7 @@ TEST_CASE("方位角带的 guard：带内逐位不变，出带才重拟") {
     return call;
   };
   auto plain = build({});
-  // 带子把自由拟合的结果包住：guard 不重拟，逐位一致。
+  // 带子把自由拟合的结果包住：guard 不重拟，结果完全相同。
   auto guarded = build({{"rightArcBearingDeg", Value::number(-140.0)},
                         {"rightArcBearingTolDeg", Value::number(60.0)},
                         {"rightCenterMode", Value::text("guard")}});

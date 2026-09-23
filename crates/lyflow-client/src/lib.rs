@@ -20,7 +20,7 @@ use libloading::{Library, Symbol};
 pub type EventCb = unsafe extern "C" fn(*const c_char, *mut c_void);
 
 /// C ABI 的版本号。与 core/include/lyflow/c_api.h 的 LYFLOW_ABI_VERSION 必须一致。
-pub const ABI_VERSION: u32 = 9;
+pub const ABI_VERSION: u32 = 10;
 
 /// 运行时注入一个源节点的输出（v7）。缓冲由调用方持有到 `lyflow_run_start` 返回。
 #[repr(C)]
@@ -51,6 +51,8 @@ pub struct RunOptionsRaw {
     pub no_reuse: i32,
     pub inputs: *const RunInputRaw,
     pub input_count: usize,
+    /// v10：顶层图参数的取值，JSON 对象；NULL = 全用 default。
+    pub params_json: *const c_char,
 }
 
 #[repr(C)]
@@ -121,6 +123,8 @@ pub struct RunSpec<'a> {
     pub no_reuse: bool,
     /// 运行时注入的源数据（ADR-0017）。
     pub inputs: &'a [RunInput],
+    /// 顶层图参数的取值（v10），JSON 对象 `{ 名字: 值 }`。None = 全用图里的 default。
+    pub params_json: Option<&'a str>,
 }
 
 impl<'a> RunSpec<'a> {
@@ -141,7 +145,14 @@ impl<'a> RunSpec<'a> {
             preview_budget_ms: 0,
             no_reuse: false,
             inputs: &[],
+            params_json: None,
         }
+    }
+
+    /// 给顶层图参数传值：宿主从此传值，而不是改图 JSON（m7-plan J8）。
+    pub fn with_params_json(mut self, json: &'a str) -> Self {
+        self.params_json = Some(json);
+        self
     }
 }
 
@@ -829,6 +840,7 @@ impl RunHandle {
             })
             .collect();
 
+        let params_c = spec.params_json.map(CString::new).transpose()?;
         let options = RunOptionsRaw {
             run_id: rid.as_ptr(),
             base_dir: base.as_ptr(),
@@ -850,6 +862,7 @@ impl RunHandle {
                 input_raw.as_ptr()
             },
             input_count: input_raw.len(),
+            params_json: params_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
         };
 
         let user_ptr = Box::into_raw(user) as *mut c_void;

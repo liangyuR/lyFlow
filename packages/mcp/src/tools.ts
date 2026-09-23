@@ -180,7 +180,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
     {
       title: "看一个算子",
       description:
-        "算子的全量描述，含 preconditions（什么时候它整个不该用）。找不到时给最接近的几个 id。",
+        "算子的全量描述（端口、参数、doc）。找不到时给最接近的几个 id。",
       inputSchema: { id: z.string().describe("算子 id，例如 gap.notch_width") },
     },
     async (args) => {

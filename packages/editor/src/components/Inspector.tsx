@@ -263,16 +263,6 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
           </p>
         )}
         {op.doc && <p className="insp__doc">{op.doc}</p>}
-        {op.preconditions && op.preconditions.length > 0 && (
-          <div className="insp__precond" data-testid="inspector-preconditions">
-            <h4 className="insp__precond-title">适用前提</h4>
-            <ul>
-              {op.preconditions.map((p, i) => (
-                <li key={i}>{p}</li>
-              ))}
-            </ul>
-          </div>
-        )}
       </header>
 
       {/* 该节点这次运行的全部诊断（D5）。带 paramPath 的会同时在下面标红框，

@@ -400,12 +400,16 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
       g.edge(alignNodes[i], "alignment", b.select, kPorts[i]);
     }
 
+    // 基准件在哪一侧，决定 base ROI 用哪一侧的 ICP 变换；哪个框是 flushBase 由配置定。
     nlohmann::json roiParams;
-    roiParams["baseSide"] = baseSide;
+    roiParams["datumSide"] = baseSide;
     b.rois = g.node(prefix + "n_rois", "gap.business_rois", roiParams, column + 6, 3, "业务 ROI");
     g.edge(b.select, "alignment", b.rois, "alignment");
     return b;
   };
+
+  // 顶层参数 modelPath 的绑定目标，逐个列出（不按算子类型通配）。
+  std::vector<std::string> modelPathBinds;
 
   std::string rois;
   std::string cropP, cropS;
@@ -441,9 +445,9 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
         g.node("n_tensor", "gap.profile_tensor", nullptr, 1, 4, "剖面张量");
     g.edge(clouds, "primary", tensor, "primary");
     g.edge(clouds, "secondary", tensor, "secondary");
-    nlohmann::json inferParams;
-    inferParams["modelPath"] = modelPath;
-    const std::string infer = g.node("n_infer", "ml.onnx_run", inferParams, 1, 5, "ONNX 推理");
+    // modelPath 不写在节点上：它由顶层参数 modelPath 绑定，宿主换模型只传一个值。
+    const std::string infer = g.node("n_infer", "ml.onnx_run", nullptr, 1, 5, "ONNX 推理");
+    modelPathBinds.push_back(infer + ".modelPath");
     g.edge(tensor, "tensor", infer, "input");
     const std::string seg =
         g.node("n_seg", "gap.labels_from_logits", nullptr, 1, 6, "逐槽 argmax");
@@ -456,10 +460,8 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
     g.edge(frameP, "cloud", colored, "cloud");
     g.edge(seg, "labels", colored, "labels");
 
-    nlohmann::json roiParams;
-    roiParams["baseSide"] = baseSide;
     const std::string modelRois =
-        g.node("n_rois", "gap.roi_from_labels", roiParams, 3, 4, "模型四框");
+        g.node("n_rois", "gap.roi_from_labels", nullptr, 3, 4, "模型四框");
     g.edge(clouds, "primary", modelRois, "primary");
     g.edge(clouds, "secondary", modelRois, "secondary");
     g.edge(seg, "labels", modelRois, "labels");
@@ -597,12 +599,20 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   const char* flushCloudPort = splitFlush ? modelFlushCloudPort : mergedPort;
 
   const bool baseIsLeft = baseSide == "left";
+  // fit_line 的 toward：基准线/参考线接**同侧**的 gap 框（紧挨着缝的那一个），
+  // 截取与 innerEnd 都朝它。gap 框在 roiSource[2]（左）/ roiSource[3]（右）。
+  const int baseGapSlot = baseIsLeft ? 2 : 3;
+  const int refGapSlot = baseIsLeft ? 3 : 2;
+  const std::string gapBoxSource[2] = {splitFlush ? modelFlushRois : roiSource[2],
+                                       splitFlush ? modelFlushRois : roiSource[3]};
+  const char* gapBoxPort[2] = {splitFlush ? kRoiPorts[2] : roiSourcePort[2],
+                               splitFlush ? kRoiPorts[3] : roiSourcePort[3]};
   const double lineDist = numberOr(common, "line_fit_distance", 0.1);
   const auto segmentPoints = intOr(flush, "segment_points", 0);
   const char* endpoints = useModel ? "inlier_ends" : "roi_intersection";
 
   // 方向基准（可选）：基准面很窄时它自己拟出来的方向不可信，改锚到旁边那张长面上。
-  // datum: off（默认）时下面一个节点都不生成，图与以前逐节点相同。
+  // datum: off（默认）时下面一个节点都不生成。
   const YAML::Node baseDirCfg = child(flush, "base_direction");
   const std::string datumKind = textOr(baseDirCfg, "datum", "off");
   const bool wantDatum = datumKind != "off";
@@ -651,20 +661,20 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
     g.edge(cloud, cloudPort, crop, "cloud");
     g.edge(win, "box", crop, "box");
     nlohmann::json fitParams;
-    fitParams["side"] = baseIsLeft ? "left" : "right";
     fitParams["distThresh"] = numberOr(baseDirCfg, "fit_distance", 0.35);
-    fitParams["segmentPoints"] = 100000;   // 长面整条都要，不截
+    fitParams["segmentPoints"] = 0;   // 长面整条都要，不截
     fitParams["endpoints"] = "inlier_ends";
     fitParams["minInliers"] = intOr(baseDirCfg, "min_inliers", 60);
     const std::string fit =
         g.node(prefix + "n_fit_datum", "gap.fit_line", fitParams, 10, row, "拟合方向基准线");
     g.edge(crop, "cloud", fit, "cloud");
     g.edge(win, "box", fit, "box");
+    // 方向基准线的 toward 接它的锚框：长窗是从锚框推出去的，靠锚框那一头就是靠缝那一头。
+    g.edge(rois, datumAnchorPort, fit, "toward");
     return fit;
   };
 
   nlohmann::json fitBaseParams;
-  fitBaseParams["side"] = baseIsLeft ? "left" : "right";
   fitBaseParams["distThresh"] = lineDist;
   fitBaseParams["segmentPoints"] = segmentPoints;
   fitBaseParams["endpoints"] = endpoints;
@@ -677,6 +687,7 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
       g.node("n_fit_base", "gap.fit_line", fitBaseParams, 10, 0, "拟合基准线");
   g.edge(crops[0], "cloud", fitBase, "cloud");
   g.edge(flushBox[0], flushBoxPort[0], fitBase, "box");
+  g.edge(gapBoxSource[baseGapSlot - 2], gapBoxPort[baseGapSlot - 2], fitBase, "toward");
   if (wantDatum) {
     const std::string datum = buildDatum(
         "", splitFlush ? modelFlushRois : roiSource[0], flushCloud, flushCloudPort, 11);
@@ -688,13 +699,13 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   std::string fitRef;
   if (refType == "line end") {
     nlohmann::json p;
-    p["side"] = baseIsLeft ? "right" : "left";
     p["distThresh"] = lineDist;
     p["segmentPoints"] = segmentPoints;
     p["endpoints"] = endpoints;
     fitRef = g.node("n_fit_ref", "gap.fit_line", p, 10, 1, "拟合参考线");
     g.edge(crops[1], "cloud", fitRef, "cloud");
     g.edge(flushBox[1], flushBoxPort[1], fitRef, "box");
+    g.edge(gapBoxSource[refGapSlot - 2], gapBoxPort[refGapSlot - 2], fitRef, "toward");
     refNode = fitRef;
     refPort = "innerEnd";
   } else if (refType == "selected point") {
@@ -707,7 +718,7 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
     g.edge(fitBase, "line", refNode, "line");
   }
 
-  // 圆心高度带（可选）：容差 <= 0 就是不启用，这时连 refLine 都不接，图和以前一样。
+  // 圆心高度带（可选）：容差 <= 0 就是不启用，这时连 refLine 都不接。
   const YAML::Node band = child(gap, "center_band");
   const double bandTol[2] = {numberOr(band, "left_tolerance", 0.0),
                              numberOr(band, "right_tolerance", 0.0)};
@@ -752,6 +763,7 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
         g.node("b_n_fit_base", "gap.fit_line", bBaseParams, 10, 9, "拟合基准线（备用）");
     g.edge(bCropBase, "cloud", bFitBase, "cloud");
     g.edge(backupFlushRois, kRoiPorts[0], bFitBase, "box");
+    g.edge(backupFlushRois, kRoiPorts[baseGapSlot], bFitBase, "toward");
     if (wantDatum) {
       const std::string bDatum =
           buildDatum("b_", backupFlushRois, backupFlushCloud, backupFlushCloudPort, 12);
@@ -763,13 +775,13 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
     std::string bFitRef;
     if (refType == "line end") {
       nlohmann::json p;
-      p["side"] = baseIsLeft ? "right" : "left";
       p["distThresh"] = lineDist;
       p["segmentPoints"] = segmentPoints;
       p["endpoints"] = "roi_intersection";
       bFitRef = g.node("b_n_fit_ref", "gap.fit_line", p, 10, 10, "拟合参考线（备用）");
       g.edge(bCropRef, "cloud", bFitRef, "cloud");
       g.edge(backupFlushRois, kRoiPorts[1], bFitRef, "box");
+      g.edge(backupFlushRois, kRoiPorts[refGapSlot], bFitRef, "toward");
       bRefNode = bFitRef;
       bRefPort = "innerEnd";
     } else if (refType == "selected point") {
@@ -830,7 +842,6 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   circleParams["distThresh"] = numberOr(common, "circle_fit_distance", 0.03);
   circleParams["retryDistance"] = numberOr(gap, "circle_fit_retry_distance", 0.0);
   circleParams["nominal"] = numberOr(child(gap, "tolerances"), "nominal", 0.0);
-  circleParams["offset"] = numberOr(gap, "offset", 0.0);
   circleParams["leftRadiusFixed"] = boolOr(radius, "fixed_left_circle_radius", false);
   circleParams["leftRadiusValue"] = numberOr(radius, "left_circle_radius", 0.0);
   circleParams["leftRadiusMin"] = numberOr(radius, "left_circle_radius_min", 0.0);
@@ -881,7 +892,6 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   const std::string definition = textOr(gap, "definition", "B");
   nlohmann::json gapParams;
   gapParams["definition"] = definition;
-  gapParams["offset"] = numberOr(gap, "offset", 0.0);
   const std::string gapNode = g.node("n_gap", "gap.gap", gapParams, 11, 2, "间隙");
   g.edge(circles, "left", gapNode, "left");
   g.edge(circles, "right", gapNode, "right");
@@ -928,11 +938,9 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   refParams["deriveTemplateDir"] = false;
   refParams["templateDir"] = templateDir;
   refParams["sampleId"] = sampleId;
-  if (useModel) {
-    refParams["useModel"] = true;
-    refParams["modelPath"] = modelPath;
-  }
+  if (useModel) refParams["useModel"] = true;
   const std::string ref = g.node("n_ref", "gap.measure_reference", refParams, 2, 8, "黑盒对照");
+  if (useModel) modelPathBinds.push_back(ref + ".modelPath");
   g.edge(clouds, "primary", ref, "primary");
   g.edge(clouds, "secondary", ref, "secondary");
 
@@ -949,6 +957,23 @@ Status buildGraph(const std::string& text, const fs::path& baseDir, Mode mode,
   outputs["bundle"] =
       nlohmann::json{{"node", bundle}, {"port", "bundle"}, {"label", "结果汇总"}};
   doc["outputs"] = std::move(outputs);
+
+  // 顶层参数（m7-plan J10）：「本来就是全局」的值只有一处定义，宿主用 --param / params_json
+  // 传值而不是改节点。绑定逐个列出节点，不按算子类型通配 —— 新加的节点得有人想到它。
+  nlohmann::json graphParams = nlohmann::json::object();
+  graphParams["gapOffset"] = nlohmann::json{
+      {"type", "float"},
+      {"default", numberOr(gap, "offset", 0.0)},
+      {"binds", nlohmann::json::array({gapNode + ".offset", circles + ".offset"})},
+      {"doc", "间隙偏置（毫米），同时进间隙读数与相机候选的打分（gap.offset）。"}};
+  if (useModel) {
+    graphParams["modelPath"] = nlohmann::json{
+        {"type", "path"},
+        {"default", modelPath},
+        {"binds", modelPathBinds},
+        {"doc", "模型 ROI 用的 ONNX（setting.yml 的 model_roi.model_path）。"}};
+  }
+  doc["params"] = std::move(graphParams);
   graphJson = doc.dump(2);
   return Status::Ok();
 }

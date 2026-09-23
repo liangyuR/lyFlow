@@ -64,6 +64,26 @@ struct Status {
   explicit operator bool() const { return ok; }
 };
 
+/// 算子 validate 钩子产出的一条问题。code/message/paramPath/portName 放在 status 里，
+/// phase 由 buildPlan 统一改写成 Validate —— 钩子自己写什么都不算数。
+struct Issue {
+  Severity severity = Severity::Error;
+  Status status;
+
+  static Issue error(std::string code, std::string message, std::string paramPath = {},
+                     std::string portName = {}) {
+    return Issue{Severity::Error, Status::Error(Phase::Validate, std::move(code),
+                                                std::move(message), std::move(paramPath),
+                                                std::move(portName))};
+  }
+  static Issue warning(std::string code, std::string message, std::string paramPath = {},
+                       std::string portName = {}) {
+    return Issue{Severity::Warning, Status::Error(Phase::Validate, std::move(code),
+                                                  std::move(message), std::move(paramPath),
+                                                  std::move(portName))};
+  }
+};
+
 /// 迁移诊断的载荷（ADR-0008）。C++ 只说「该改成什么」，写回 GraphDoc 是前端的事。
 /// paramsJson 是完整的参数对象文本，不是补丁 —— 改名参数没法用补丁表达。
 struct MigrationPlan {

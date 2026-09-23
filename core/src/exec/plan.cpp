@@ -283,6 +283,9 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     /// 图里显式写了的键，**迁移之后**的那一份（`lyflow params` 的 source 用它）。
     std::set<std::string> explicitParams;
     bool valid = true;
+    /// 参数这一段全部通过。validate 钩子只在它为真时调：拿默认值占位的参数去跑
+    /// 钩子，只会多报几条由第一条错误派生出来的假问题。
+    bool paramsOk = false;
     std::vector<Diagnostic> errors;
   };
   std::vector<Prepared> prepared(n);
@@ -367,7 +370,15 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     // 参数：先查未知键，再逐个规整 + 查范围。
     for (auto it = params.begin(); it != params.end(); ++it) {
       if (!findParam(*op, it.key())) {
-        fail(i, "unknown_param", "算子没有参数 '" + it.key() + "'", it.key());
+        auto viaGraph = rn.graphParams.find(it.key());
+        if (viaGraph != rn.graphParams.end()) {
+          fail(i, "unknown_bind",
+               "顶层参数 '" + viaGraph->second + "' 绑到算子 " + op->id + " 没有的参数 '" +
+                   it.key() + "'",
+               it.key());
+        } else {
+          fail(i, "unknown_param", "算子没有参数 '" + it.key() + "'", it.key());
+        }
         continue;
       }
       prepared[i].explicitParams.insert(it.key());
@@ -398,6 +409,7 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
         fail(i, "bad_param", (p.label.empty() ? p.name : p.label) + "：还没有选择文件", p.name);
       }
     }
+    prepared[i].paramsOk = prepared[i].valid;
   }
 
   // -- 边：端口存在性 -------------------------------------------------------
@@ -483,6 +495,34 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
       if (p.required && !connectedInputs[i].count(p.name)) {
         fail(i, "missing_input", "必填输入端口 '" + (p.label.empty() ? p.name : p.label) +
                                      "' 没有连线", {}, p.name);
+      }
+    }
+  }
+
+  // -- 算子的加载期校验（J5）：参数已解析、连线已知，数据一概不给。----------
+  for (std::size_t i = 0; i < n; ++i) {
+    const OperatorDesc* op = prepared[i].op;
+    if (!op || !op->validate || !prepared[i].paramsOk) continue;
+    std::vector<Issue> issues;
+    try {
+      ParamView view(prepared[i].params, options.baseDir);
+      issues = op->validate(view, connectedInputs[i]);
+    } catch (const std::exception& e) {
+      fail(i, "internal", std::string("validate 钩子抛了异常: ") + e.what());
+      continue;
+    } catch (...) {
+      fail(i, "internal", "validate 钩子抛了异常（未知类型）");
+      continue;
+    }
+    for (Issue& issue : issues) {
+      Status s = std::move(issue.status);
+      s.ok = false;
+      s.phase = Phase::Validate;
+      if (s.code.empty()) s.code = "bad_param";
+      if (issue.severity == Severity::Error) {
+        fail(i, s.code, s.message, s.paramPath, s.portName);
+      } else {
+        diags.add(graph.nodes[i].id, std::move(s), Severity::Warning);
       }
     }
   }
@@ -612,6 +652,9 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     // 「它是不是外参绑的」已经没有可靠答案，宁可报 explicit 也不要报错的 bound。
     for (const std::string& b : graph.nodes[id].boundParams) {
       if (pn.explicitParams.count(b)) pn.boundParams.insert(b);
+    }
+    for (const auto& g : graph.nodes[id].graphParams) {
+      if (pn.explicitParams.count(g.first)) pn.graphParams.insert(g);
     }
     if (pn.op) {
       for (const Port& p : pn.op->inputs) {

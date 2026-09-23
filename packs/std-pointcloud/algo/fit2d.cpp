@@ -1,5 +1,5 @@
 // 迁自 xyz-gap-inspector 的 GapUtils::fitLine / fitCircle / fitCircleFixedRadius。
-// PCL 调用、常数、比较方向一律照抄 —— gap 的两条 A/B 逐位一致靠的就是这份对应。
+// PCL 调用、常数、比较方向照原实现写；改其中任何一处都会改变 gap 包的读数。
 #include "algo/fit2d.h"
 
 #include <pcl/ModelCoefficients.h>

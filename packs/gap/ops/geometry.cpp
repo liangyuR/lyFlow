@@ -1,7 +1,9 @@
 // 整体 ROI、裁剪、业务 ROI、选点。坐标一律是米，参数一律是毫米。
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <optional>
+#include <set>
 
 #include "gap_detection/GapUtils.hpp"
 #include "gap_ops.h"
@@ -97,39 +99,33 @@ Status businessRois(const Inputs& inputs, const ParamView& params, Outputs& outp
     return Status::Error(Phase::Execute, "bad_input", "对齐结果里没有四个业务 ROI", {},
                          "alignment");
   }
-  // base_side 互换：索引 0 与 2 换位，之后 0/1 归左变换、2/3 归右变换（G8）。
-  const bool baseRight = params.choice("baseSide") == "right";
-  if (baseRight) std::swap(roiMm[0], roiMm[2]);
-
   const Eigen::Matrix3f tLeft = transformFromJson(record->data["left"]["transform"]);
   const Eigen::Matrix3f tRight = transformFromJson(record->data["right"]["transform"]);
 
-  // 端口按**语义**给：base_side=right 时基准面那一格是槽 2，参考面是槽 0。
-  // 原算法在互换 ROI 之后又把两片云换了回来，等价于这里换端口。
+  // 哪个框是 flushBase 由配置定，datumSide 只决定两块段差框各用哪一侧的 ICP 变换：
+  // 基准件在右侧时，base ROI 跟着右侧那片模板走，ref ROI 跟着左侧走。两块间隙框各归各侧。
+  const bool datumRight = params.choice("datumSide") == "right";
+  const Eigen::Matrix3f* kTransforms[4] = {datumRight ? &tRight : &tLeft, &tLeft,
+                                           datumRight ? &tLeft : &tRight, &tRight};
   const char* kPorts[4] = {"flushBase", "gapLeft", "flushRef", "gapRight"};
-  if (baseRight) {
-    kPorts[0] = "flushRef";
-    kPorts[2] = "flushBase";
-  }
   for (int i = 0; i < 4; ++i) {
     const auto& r = roiMm[static_cast<std::size_t>(i)];
-    // rois_[i] << r[0], r[2], r[1], r[3] —— col(0) 是 min 角，col(1) 是 max 角
-    Eigen::Vector2f lo(mmToMRoi(r[0]), mmToMRoi(r[1]));
-    Eigen::Vector2f hi(mmToMRoi(r[2]), mmToMRoi(r[3]));
-    const Eigen::Matrix3f& t = i < 2 ? tLeft : tRight;
-    // 只变换对角两个角点，之后仍按轴对齐解释 —— 这是原算法的行为，不要「修正」（G8）
-    const auto apply = [&t](const Eigen::Vector2f& p) {
-      const Eigen::Vector3f h(p.x(), p.y(), 1.0F);
-      const Eigen::Vector3f q = t * h;
-      return Eigen::Vector2f(q.x(), q.y());
-    };
-    lo = apply(lo);
-    hi = apply(hi);
+    const Eigen::Matrix3f& t = *kTransforms[i];
+    // 四个角点全部变换，再取轴对齐包围盒：模板有转角时框不会被拉扁或压没。
+    const float xs[2] = {mmToMRoi(r[0]), mmToMRoi(r[2])};
+    const float ys[2] = {mmToMRoi(r[1]), mmToMRoi(r[3])};
     lyflow::Box2D box;
-    box.min[0] = lo.x();
-    box.min[1] = lo.y();
-    box.max[0] = hi.x();
-    box.max[1] = hi.y();
+    box.min[0] = box.min[1] = std::numeric_limits<float>::infinity();
+    box.max[0] = box.max[1] = -std::numeric_limits<float>::infinity();
+    for (float x : xs) {
+      for (float y : ys) {
+        const Eigen::Vector3f q = t * Eigen::Vector3f(x, y, 1.0F);
+        box.min[0] = std::min(box.min[0], q.x());
+        box.min[1] = std::min(box.min[1], q.y());
+        box.max[0] = std::max(box.max[0], q.x());
+        box.max[1] = std::max(box.max[1], q.y());
+      }
+    }
     outputs.set(kPorts[i], Data::box2d(box));
   }
   return Status::Ok();
@@ -193,9 +189,6 @@ Status datumWindow(const Inputs& inputs, const ParamView& params, Outputs& outpu
   const double start = mmToM(params.number("startMm"));
   const double length = mmToM(params.number("lengthMm"));
   const double height = mmToM(params.number("heightMm"));
-  if (!(length > 0)) {
-    return Status::Error(Phase::Execute, "bad_param", "窗口长度必须大于 0", "lengthMm");
-  }
   const bool toLeft = params.choice("side") == "left";
   lyflow::Box2D box;
   if (toLeft) {
@@ -209,6 +202,14 @@ Status datumWindow(const Inputs& inputs, const ParamView& params, Outputs& outpu
   box.max[1] = static_cast<float>(heightAnchor.max[1] + height);
   outputs.set("box", Data::box2d(box));
   return Status::Ok();
+}
+
+std::vector<Issue> validateDatumWindow(const ParamView& params, const std::set<std::string>&) {
+  std::vector<Issue> issues;
+  if (!(params.number("lengthMm") > 0)) {
+    issues.push_back(Issue::error("bad_param", "窗口长度必须大于 0", "lengthMm"));
+  }
+  return issues;
 }
 
 Param numMm(const char* name, const char* label, double def, const char* doc) {
@@ -248,15 +249,10 @@ void registerDatumWindow(Registry& r) {
       "由一个锚框推出一条长窗，用来在**旁边那张长面**上拟一条方向基准线。\n"
       "基准面是一道很窄的台肩时（天幕 L4 只有 2 mm），它自己拟出来的方向基本是噪声；"
       "而台肩外面那张面往往有十几毫米长、几百个点，方向稳得多。两张面之间有固定的相对"
-      "倾角，量一次写进 dirNominalDeg 就行 —— 见 gap.fit_line 的方向约束。";
-  op.preconditions = {
-      "窗口整个挪到锚框外面，不含锚框本身 —— 台肩与长面之间通常有台阶，混在一起拟就是"
-      "横跨台阶。startMm 是留给台阶过渡带的让开量。",
-      "假定窗口范围内只有那一张面。长度给过头会吃进别的特征，先量一批帧的内点率再定。",
-      "窗口恒为轴对齐，位置完全由锚框决定 —— 锚框跑偏，窗口就跟着跑到没有点的地方，"
-      "而下游的拟合不一定会失败，可能只是拟出一条没意义的线。给拟合配上最少内点数。",
-      "框恒为轴对齐；零件姿态转得厉害时 heightMm 要跟着放宽，否则面会跑出窗口。",
-  };
+      "倾角，量一次写进 dirNominalDeg 就行 —— 见 gap.fit_line 的方向约束。\n"
+      "窗口整个挪到锚框外面、不含锚框本身（startMm 是给台阶过渡带的让开量），恒为轴对齐，"
+      "位置完全由锚框决定：锚框跑偏时窗口跟着跑到没有点的地方，下游拟合不一定失败，"
+      "所以给它配上最少内点数。";
   op.inputs = {
       Port{"anchor", "Box2D", "Anchor",
            "定 x 的锚框。取模型定位最稳的那个 —— 通常是缝的 ROI，而不是基准面 ROI："
@@ -283,6 +279,7 @@ void registerDatumWindow(Registry& r) {
   };
   op.capabilities = {false, true, true};
   op.compute = &datumWindow;
+  op.validate = &validateDatumWindow;
   r.addOperator(std::move(op));
 }
 
@@ -294,13 +291,8 @@ void registerOverallRoi(Registry& r) {
   op.category = "间隙/预处理";
   op.keywords = {"roi", "auto center", "整体", "裁剪框"};
   op.doc =
-      "整体 ROI 框。auto_center 保留配置的宽高，中心跟着两片云各自的稳健中心"
-      "（逐坐标中位数）的中点走。";
-  op.preconditions = {
-      "auto_center 假定两片云的稳健中心（逐坐标中位数）落在待测特征附近；视野里有大片背"
-      "景或另一件零件时中心会被拖走。",
-      "框恒为轴对齐，宽高来自配置，不随零件姿态旋转。",
-  };
+      "整体 ROI 框（轴对齐，宽高来自配置）。auto_center 保留配置的宽高，中心跟着两片云"
+      "各自的稳健中心（逐坐标中位数）的中点走 —— 视野里有大片背景或另一件零件时中心会被拖走。";
   op.inputs = {
       Port{"primary", "PointCloud", "Primary", "测量帧的 Master 云。", true},
       Port{"secondary", "PointCloud", "Secondary", "测量帧的 Slave 云。", true},
@@ -336,35 +328,35 @@ void registerOverallRoi(Registry& r) {
 void registerBusinessRois(Registry& r) {
   OperatorDesc op;
   op.id = "gap.business_rois";
-  op.version = "1.0.0";
+  op.version = "1.1.0";
   op.label = "业务 ROI";
   op.category = "间隙/配准";
   op.keywords = {"roi", "business", "业务框"};
   op.doc =
-      "把选中模板的四个业务 ROI 按 ICP 变换搬到当前样本上。"
-      "只变换对角两个角点，之后仍按轴对齐解释 —— 这是原算法的行为（G8）。";
-  op.preconditions = {
-      "假定四个业务 ROI 是模板坐标系里的常数，样本与模板之间的差异能被一次刚体变换吃掉。",
-      "只变换对角两个角点、之后仍按轴对齐解释，所以模板转角明显时框会被拉大或缩小 —— "
-      "这是原算法行为，不是可以「修正」的。",
-  };
+      "把选中模板的四个业务 ROI 按 ICP 变换搬到当前样本上：框的四个角点全部变换，"
+      "再取轴对齐包围盒。\n"
+      "假定四个框是模板坐标系里的常数、样本与模板之间的差异能被一次刚体变换吃掉；"
+      "模板转角越大，包围盒比原框越宽。";
   op.inputs = {withContract(Port{"alignment", "Record", "Alignment", "GapAlignment。", true},
                             {{"recordType", "GapAlignment"}})};
   op.outputs = {
       Port{"flushBase", "Box2D", "Flush Base", "段差基准面 ROI。", true},
-      Port{"gapLeft", "Box2D", "Gap Left", "间隙左侧 ROI。", true},
+      Port{"gapLeft", "Box2D", "Gap Left", "间隙左侧 ROI（左侧变换）。", true},
       Port{"flushRef", "Box2D", "Flush Ref", "段差参考面 ROI。", true},
-      Port{"gapRight", "Box2D", "Gap Right", "间隙右侧 ROI。", true},
+      Port{"gapRight", "Box2D", "Gap Right", "间隙右侧 ROI（右侧变换）。", true},
   };
 
-  Param baseSide;
-  baseSide.name = "baseSide";
-  baseSide.type = ParamType::Enum;
-  baseSide.label = "Base Side";
-  baseSide.doc = "基准面在左还是右。right 时 flush_base 与 flush_ref 互换。";
-  baseSide.def = Value::text("left");
-  baseSide.options = {EnumOption{"left", "Left", ""}, EnumOption{"right", "Right", ""}};
-  op.params = {baseSide};
+  Param datumSide;
+  datumSide.name = "datumSide";
+  datumSide.type = ParamType::Enum;
+  datumSide.label = "Datum Side";
+  datumSide.doc =
+      "基准件在缝的哪一侧。决定 base ROI 用哪一侧的 ICP 变换（ref ROI 用另一侧）；"
+      "不改变哪个框是 flushBase —— 那由配置里的四个框定。";
+  datumSide.def = Value::text("left");
+  datumSide.options = {EnumOption{"left", "Left", "base ROI 用左侧变换，ref ROI 用右侧。"},
+                       EnumOption{"right", "Right", "base ROI 用右侧变换，ref ROI 用左侧。"}};
+  op.params = {datumSide};
   op.capabilities = {false, true, true};
   op.compute = &businessRois;
   r.addOperator(std::move(op));
@@ -377,11 +369,9 @@ void registerSelectedPoint(Registry& r) {
   op.label = "选点";
   op.category = "间隙/拟合";
   op.keywords = {"selected point", "选点"};
-  op.doc = "取离 ROI 的 min 角最近的点。注意取自**整片云**，不裁 ROI（§3.6）。";
-  op.preconditions = {
-      "在**整片输入云**上选离 ROI min 角最近的点，不裁 ROI：框外更近的点照样会被选中。",
-      "ROI 只用到 min 角，框的大小不影响结果。",
-  };
+  op.doc =
+      "取离 ROI 的 min 角最近的点。取自**整片云**、不裁 ROI：框外更近的点照样会被选中；"
+      "框的大小不影响结果。";
   op.inputs = {
       Port{"cloud", "PointCloud", "Cloud", "整片云（合并后的那一份）。", true},
       Port{"box", "Box2D", "Box", "业务 ROI，只用它的 min 角。", true},
@@ -400,13 +390,8 @@ void registerNearestToLine(Registry& r) {
   op.category = "间隙/拟合";
   op.keywords = {"nearest point", "最近点"};
   op.doc =
-      "取离给定直线垂距最小的那个云点（复刻 lineCloudDistance 的选点），"
-      "对应配置里的 ref_type: nearest point。";
-  op.preconditions = {
-      "判据是到直线的垂距最小，不要求点落在线段两端之间；输入云必须先按业务 ROI 裁过，"
-      "否则远处同样贴线的点会被选中。",
-      "只比垂距，垂距相同时取点序靠前的那个（点序就是文件里的槽序）。",
-  };
+      "取离给定直线垂距最小的那个云点，对应配置里的 ref_type: nearest point。"
+      "不要求点落在线段两端之间，所以输入云要先按业务 ROI 裁过；垂距相同时取点序靠前的。";
   op.inputs = {
       Port{"cloud", "PointCloud", "Cloud", "已经按业务 ROI 裁过的点云。", true},
       Port{"line", "Line2D", "Line", "基准线。", true},

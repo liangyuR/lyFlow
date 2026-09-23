@@ -85,6 +85,16 @@
         }
       }
     },
+    "params": {
+      "type": "object",
+      "description": "顶层图参数（m7-plan J7）。键是参数名，宿主运行时用 --param <名字>=<json> 或 C ABI 的 params_json 按名字传值；不传就用 default。绑定语义与子图 params[].binds 相同：展开期把取值写进被绑定的节点参数，被绑定的参数不得在节点里再显式写值（param_conflict）。",
+      "propertyNames": {
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/graphParam"
+      }
+    },
     "subgraphs": {
       "type": "object",
       "description": "复合算子定义（ADR-0010）。键是 subgraphId，节点用 op: \"sub:<subgraphId>\" 引用。compile 之前由 C++ 递归展开成平图，执行器/缓存/事件对子图一无所知。",
@@ -373,6 +383,35 @@
         "from": {
           "$ref": "#/$defs/portRef",
           "description": "只能来自一个内部端口。"
+        }
+      }
+    },
+    "graphParam": {
+      "type": "object",
+      "required": [
+        "default",
+        "binds"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "参数类型名，与 manifest param 的 type 同一套。省略时由被绑定的节点参数决定。"
+        },
+        "default": {
+          "description": "未传值时写进被绑定参数的值，任意 JSON。"
+        },
+        "binds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^.+\\.[^.]+$",
+            "description": "<节点>.<参数>，以最后一个 . 分隔（节点 id 本身可以含 .）。"
+          },
+          "description": "被绑定的节点参数。同一目标不能被两个顶层参数绑定（param_conflict）。"
+        },
+        "doc": {
+          "type": "string"
         }
       }
     },

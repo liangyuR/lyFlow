@@ -2,6 +2,7 @@
 // 校验 + 编译。D5：一次返回全部诊断，不在第一个错误处早退。
 // 校验错误是节点级的 —— 只有有环或 JSON 读不了才是整图级失败。
 #include <filesystem>
+#include <map>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -41,6 +42,8 @@ struct PlanNode {
   /// explicitParams 里由子图提升参数灌进来的那些（ADR-0010 F4）。展开之后
   /// 「用户在这个节点上填的」和「外层子图表单灌进来的」在 params 里长得一模一样。
   std::set<std::string> boundParams;
+  /// explicitParams 里由顶层图参数（J7）灌进来的那些 → 顶层参数名。
+  std::map<std::string, std::string> graphParams;
   std::vector<InputBinding> inputs;
   /// 输出端口 -> 下游消费者数。
   std::unordered_map<std::string, int> consumers;

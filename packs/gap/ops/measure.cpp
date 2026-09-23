@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <set>
 #include <string>
 
 #include "gap_detection/GapUtils.hpp"
@@ -40,11 +41,9 @@ Status flush(const Inputs& inputs, const ParamView& params, Outputs& outputs, Ex
   const lyflow::Point2D& ref = *inputs.get("refPoint").asPoint2D();
   const Eigen::Vector2f end(ref.p[0], ref.p[1]);
   Eigen::Vector2f start;
-  // 法线强制朝 −y，返回的是带符号距离；最终值取绝对值再加 offset（§3.7）
   utils::pointLineDistance(toLineCoefficients(base), end, &start);
-  // 默认取绝对值（§3.7 的历史行为）。signed 模式给带符号垂距：法线取 (dir.y, -dir.x)，
-  // 点在基准线下方（y 更大）为负。闭合缝上参考点几乎落在基准线上，绝对值会把响应折回去
-  // —— 罗石 点 7 必须用带符号的那一支。
+  // signed（默认）给带符号垂距：法线取 (dir.y, -dir.x)，点在基准线下方（y 更大）为负。
+  // 关掉才取绝对值 —— 闭合缝上参考点几乎落在基准线上，绝对值会把响应折回去。
   double distanceMm = static_cast<double>((end - start).norm()) * kScale;
   if (params.flag("signed")) {
     Eigen::Vector2f normal(base.dir[1], -base.dir[0]);
@@ -84,9 +83,6 @@ Status gapValue(const Inputs& inputs, const ParamView& params, Outputs& outputs,
   Eigen::Vector2f start;
   Eigen::Vector2f end;
   if (definitionA) {
-    if (!inputs.has("baseLine")) {
-      return Status::Error(Phase::Execute, "bad_input", "definition A 需要基准线", {}, "baseLine");
-    }
     const lyflow::Line2D& base = *inputs.get("baseLine").asLine2D();
     if (!base.hasSegment) {
       return Status::Error(Phase::Execute, "bad_input",
@@ -286,23 +282,27 @@ Param numParam(const char* name, const char* label, double def, const char* doc)
   return p;
 }
 
+std::vector<Issue> validateGap(const ParamView& params, const std::set<std::string>& connected) {
+  std::vector<Issue> issues;
+  if (params.choice("definition") == "A" && !connected.count("baseLine")) {
+    issues.push_back(Issue::error("bad_param", "definition A 需要接基准线（baseLine）",
+                                  "definition", "baseLine"));
+  }
+  return issues;
+}
+
 }  // namespace
 
 void registerFlush(Registry& r) {
   OperatorDesc op;
   op.id = "gap.flush";
-  op.version = "1.0.0";
+  op.version = "1.1.0";
   op.label = "面差";
   op.category = "间隙/测量";
   op.keywords = {"flush", "段差", "面差"};
-  op.doc = "段差 = 参考点到基准线的距离，取绝对值再加 offset。符号在原算法里是死代码（§3.7）。";
-  op.preconditions = {
-      "signed=false（默认）取绝对值，会把张开与收紧折成同一个方向；参考点几乎落在基准线"
-      "上的闭合缝必须打开 signed。",
-      "量的是参考点到基准线的垂距。要的是别的方向（比如水平开口）就用 scale 折算，算子"
-      "本身不知道该往哪个方向折。",
-      "基准线的方向完全来自上游拟合：基准面拟歪了，垂距连带 scale 一起错。",
-  };
+  op.doc =
+      "段差 = 参考点到基准线的带符号垂距 × scale + offset（signed 关掉时取绝对值）。"
+      "基准线的方向完全来自上游拟合：基准面拟歪了，垂距连带 scale 一起错。";
   op.inputs = {
       Port{"baseLine", "Line2D", "Base Line", "基准面拟合出的直线。", true},
       Port{"refPoint", "Point2D", "Ref Point", "参考面那一侧取到的点。", true},
@@ -318,9 +318,9 @@ void registerFlush(Registry& r) {
   flushScale.type = ParamType::Float;
   flushScale.label = "Scale";
   flushScale.doc =
-      "读数增益：value = |垂距| × scale + offset。默认 1.0 就是原来的行为。"
-      "把垂距折算到别的方向时用它 —— 罗石 点 7 要的是水平开口，而基准线倾斜 29°，"
-      "水平量 = 垂距 / |n_x| = 垂距 × 2.06。";
+      "读数增益：value = 垂距 × scale + offset。量的是垂距，要别的方向（比如水平开口）"
+      "就用它折算，算子本身不知道该往哪个方向折 —— 罗石 点 7 要的是水平开口，而基准线"
+      "倾斜 29°，水平量 = 垂距 / |n_x| = 垂距 × 2.06。";
   flushScale.def = Value::number(1.0);
 
   Param flushSigned;
@@ -328,10 +328,10 @@ void registerFlush(Registry& r) {
   flushSigned.type = ParamType::Bool;
   flushSigned.label = "Signed";
   flushSigned.doc =
-      "输出带符号的垂距（法线 (dir.y, -dir.x)，参考点在基准线下方为负），而不是绝对值。"
-      "默认 false 就是原来的行为。闭合缝上参考点几乎落在基准线上时必须打开，"
-      "否则绝对值会把「缝张开」和「缝收紧」折成同一个方向。";
-  flushSigned.def = Value::boolean(false);
+      "输出带符号的垂距（法线 (dir.y, -dir.x)，参考点在基准线下方为负）。默认打开；"
+      "关掉取绝对值，会把「缝张开」和「缝收紧」折成同一个方向 —— 参考点几乎落在基准线上的"
+      "闭合缝尤其不能关。";
+  flushSigned.def = Value::boolean(true);
 
   op.params = {numParam("offset", "Offset", 0.0, "加在距离上的偏置。"), flushScale, flushSigned};
   op.capabilities = {false, true, true};
@@ -348,14 +348,9 @@ void registerGap(Registry& r) {
   op.keywords = {"gap", "间隙"};
   op.doc =
       "间隙。definition B 是两圆的圆心连线距离；definition A 是沿基准面方向的两条切线之间的"
-      "距离，需要基准线的两个端点定方向。";
-  op.preconditions = {
-      "definition A 需要带两个端点的基准线来定方向 u，缺端点直接报 bad_input；"
-      "definition B 不用基准线，量的是两圆之间沿圆心连线的净距。",
-      "两侧交叉时不给负值：definition B 输出 NaN，definition A 报 invalid_geometry。要"
-      "带符号的量取用 gap.flush 的 signed 或 gap.point_offset。",
-      "假定 left 是 x 小的那一侧；两侧接反读数会直接交叉失效。",
-  };
+      "距离，需要接带两个端点的基准线定方向。\n"
+      "两侧交叉时不给负值：definition B 输出 NaN，definition A 报 invalid_geometry；要带符号的量"
+      "用 gap.flush 或 gap.point_offset。left 必须是 x 小的那一侧，接反读数直接交叉失效。";
   op.inputs = {
       Port{"left", "Circle2D", "Left", "左圆。", true},
       Port{"right", "Circle2D", "Right", "右圆。", true},
@@ -377,6 +372,7 @@ void registerGap(Registry& r) {
   op.params = {definition, numParam("offset", "Offset", 0.0, "加在绝对值上的偏置。")};
   op.capabilities = {false, true, true};
   op.compute = &gapValue;
+  op.validate = &validateGap;
   r.addOperator(std::move(op));
 }
 
@@ -393,14 +389,6 @@ void registerCornerVertex(Registry& r) {
       "直线拟合决定，不依赖缝边那几个受遮挡影响最大的点。\n"
       "夹角接近 90° 时 V 只能沿基准线滑动，flush 与 gap 成定比、不可分辨 —— 这一路请用 "
       "gap.judge 的 patrol 模式只出值不判定。";
-  op.preconditions = {
-      "假定两件软装各有一段拟得出直线的平直翼面；两条线近平行（|det| < 1e-6）或夹角越出"
-      " [minAngle, maxAngle] 直接判失败。",
-      "夹角接近 90° 时顶点只能沿基准线滑动，flush 与 gap 成定比、不可分辨 —— 这一路请"
-      "用 gap.judge 的 patrol 模式只出值不判定。",
-      "顶点位移比真实间隙大一个与夹角有关的倍数；scale 没有用金件加已知位移标定过，gap "
-      "就只是相对量。",
-  };
   op.inputs = {
       Port{"lineLeft", "Line2D", "Left Flank", "基准件翼面拟合出的直线。", true},
       Port{"lineRight", "Line2D", "Right Flank", "另一件翼面拟合出的直线。", true},
@@ -426,14 +414,16 @@ void registerCornerVertex(Registry& r) {
   scale.type = ParamType::Float;
   scale.label = "Scale";
   scale.doc =
-      "读数增益：gap = Δ·u × scale + offset。顶点位移比真实间隙大，用金件加已知位移标定。";
+      "读数增益：gap = Δ·u × scale + offset。顶点位移比真实间隙大一个与夹角有关的倍数，"
+      "用金件加已知位移标定；没标定过的 gap 只是相对量。";
   scale.def = Value::number(1.0);
 
   Param minAngle;
   minAngle.name = "minAngle";
   minAngle.type = ParamType::Float;
   minAngle.label = "Min Angle";
-  minAngle.doc = "夹角下限，超出即判失败。挡住近平行导致交点乱飞。";
+  minAngle.doc =
+      "夹角下限，超出即判失败。挡住近平行导致交点乱飞（两条线 |det| < 1e-6 也直接判失败）。";
   minAngle.def = Value::number(20.0);
   minAngle.unit = "deg";
 
@@ -465,13 +455,9 @@ void registerJudge(Registry& r) {
   op.category = "间隙/测量";
   op.keywords = {"judge", "tolerance", "判定", "公差"};
   op.doc =
-      "按标称值与上下偏差判定。margin 是「接近边界」的宽度，"
-      "patrol 是巡检模式：超差只标 margin，不判 NG。";
-  op.preconditions = {
-      "只按标称值与上下偏差比大小，不做任何统计；上游 ok=false 或值非有限一律判 fail。",
-      "patrol=true 时超差只标 margin、不出 high/low，verdict 里分不出「接近边界」和「已"
-      "经超差」。",
-  };
+      "按标称值与上下偏差判定，不做任何统计；上游 ok=false 或值非有限一律判 fail。"
+      "margin 是「接近边界」的宽度，patrol 是巡检模式：超差只标 margin，不判 NG —— "
+      "那时 verdict 里分不出「接近边界」和「已经超差」。";
   op.inputs = {Port{"value", "Measurement", "Value", "待判定的测量值。", true}};
   op.outputs = {Port{"value", "Measurement", "Value", "带判定字段的测量值。", true}};
 

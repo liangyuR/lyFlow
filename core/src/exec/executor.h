@@ -43,6 +43,8 @@ struct RunOptions {
   bool noReuse = false;
   /// 运行时注入的源数据。摘要进 cacheKey。
   std::vector<InjectedInput> inputs;
+  /// 顶层图参数的取值（J8），JSON 对象 名字→值；空串 = 全用 default。
+  std::string paramsJson;
 };
 
 /// preview 的两个默认值。C ABI 传 0 表示「用默认」，两侧因此不必同步常量。
@@ -85,23 +87,29 @@ class Run {
 };
 
 /// 只校验不执行，同步。返回诊断 JSON 数组（含迁移动作）。
+/// paramsJson 与 RunOptions::paramsJson 同义：顶层图参数的取值，空串 = 全用 default。
 std::string validateGraphJson(const std::string& graphJson,
-                              const std::filesystem::path& baseDir);
+                              const std::filesystem::path& baseDir,
+                              const std::string& paramsJson = {});
 
-/// parse + expand 一步到位。任一步失败都返回 false，诊断已写进 diags。
-bool prepareGraph(const std::string& graphJson, RawGraph& out, Diagnostics& diags);
+/// parse + 盖上顶层参数取值 + expand 一步到位。任一步失败都返回 false，诊断已写进 diags。
+bool prepareGraph(const std::string& graphJson, RawGraph& out, Diagnostics& diags,
+                  const std::string& paramsJson = {});
 
 /// 编译一次并报告每个节点的 cacheKey / 是否已缓存（ADR-0007）。
 /// 校验有错时返回诊断数组而不是计划数组，两者靠 kind 字段区分。
 std::string planGraphJson(const std::string& graphJson, const std::filesystem::path& baseDir,
-                          const std::vector<std::string>& targets);
+                          const std::vector<std::string>& targets,
+                          const std::string& paramsJson = {});
 
 /// 每节点每参数的生效值与来源（m6-plan §2）。返回
 /// `{ nodes: [ { node, op, params: [ { param, value, source, label?, unit?, min?, max? } ] } ] }`；
 /// 校验有错时返回诊断数组（以 '[' 开头），与 planGraphJson 同一套区分办法。
-/// source 三种：`default`（图里没写）/ `explicit`（图里写了）/ `bound`（子图提升参数灌进来的）。
+/// source 四种：`default`（图里没写）/ `explicit`（图里写了）/ `bound`（子图提升参数灌进来的）/
+/// `graph`（顶层图参数灌进来的，另带 graphParam 说是哪一个）。
 std::string effectiveParamsJson(const std::string& graphJson,
-                                const std::filesystem::path& baseDir);
+                                const std::filesystem::path& baseDir,
+                                const std::string& paramsJson = {});
 
 /// 某次运行的图级命名输出（ADR-0017）。返回
 /// `{ name: { node, port, type, elementCount, byteSize, value? } }`。

@@ -420,6 +420,23 @@ async function suiteMigration(cdp, report, ws) {
   `);
   report.eq("保存后再打开不再提示迁移", again.length, 0);
 
+  // 顶层图参数（M7 J7）：编辑器只原样保留，经 Tauri 后端保存再打开也不能丢。
+  // 绑定目标 s.seed 从节点上拿掉 —— 同一个参数两处定义是 param_conflict。
+  const graphParams = { seedAll: { type: "int", default: 4, binds: ["s.seed"], doc: "抽样种子" } };
+  const kept = await cdp.eval(`
+    const b = window.__lyflow;
+    const doc = structuredClone(b.stores.graph.getState().doc);
+    doc.params = ${lit(graphParams)};
+    delete doc.nodes.find(x => x.id === 's').params.seed;
+    await b.transport.saveGraph(${lit(fixture)}, doc);
+    const out = await b.transport.loadGraph(${lit(fixture)});
+    b.stores.graph.getState().loadDoc(out.doc, ${lit(fixture)});
+    await b.transport.saveGraph(${lit(fixture)}, b.stores.graph.getState().doc);
+    const back = await b.transport.loadGraph(${lit(fixture)});
+    return JSON.stringify(back.doc.params);
+  `);
+  report.eq("顶层 params 经后端保存、打开、再保存原样保留", kept, JSON.stringify(graphParams));
+
   const run = await runAndWait(cdp, () => pressF5(cdp));
   report.eq("迁移后的图跑得通", run.status, "ok");
   report.eq("抽样点数就是迁移过来的那个值", run.nodes["s"]?.elementCount, 777);

@@ -268,14 +268,10 @@ void registerResultBundle(Registry& r) {
   op.keywords = {"bundle", "quality", "diagnostics", "汇总", "质量"};
   op.doc =
       "把一次测量的所有结果与质量指标汇聚成一个 GapResultBundle Record，"
-      "字段与旧 QualityMetrics 一一对应，业务侧的 results.csv 与 metadata.json 由它填。";
-  op.preconditions = {
-      "只汇总不计算：字段值全部来自接上的端口，没接的端口记 inactive 或缺省，不代表那一"
-      "项真的合格。",
-      "left_point_count / right_point_count 填的都是合并云的点数（沿用旧 QualityMetrics"
-      " 的口径），不是两台相机各自的点数。",
-      "graphSha256 由调用方填，执行器不注入；留空的 bundle 没法溯源到具体哪张图。",
-  };
+      "字段与旧 QualityMetrics 一一对应，业务侧的 results.csv 与 metadata.json 由它填。\n"
+      "只汇总不计算：没接的端口记 inactive 或缺省，不代表那一项真的合格。"
+      "left_point_count / right_point_count 填的都是合并云的点数；graphSha256 由调用方填，"
+      "留空的 bundle 没法溯源到具体哪张图。";
   op.inputs = {
       Port{"gap", "Measurement", "Gap", "间隙测量值。", true},
       optional("flush", "Measurement", "Flush", "段差测量值。没有面差需求的测点可以不接，记 inactive。"),

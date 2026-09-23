@@ -119,7 +119,6 @@ export interface OperatorDesc {
   category: string;
   keywords?: string[];
   doc?: string;
-  preconditions?: string[];
   inputs: Port[];
   outputs: Port[];
   params: Param[];

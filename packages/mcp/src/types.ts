@@ -14,7 +14,6 @@ export interface OperatorDesc {
   category: string;
   keywords?: string[];
   doc?: string;
-  preconditions?: string[];
   inputs?: unknown[];
   outputs?: unknown[];
   params?: unknown[];

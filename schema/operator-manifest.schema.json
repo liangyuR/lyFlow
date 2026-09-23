@@ -46,11 +46,6 @@
         "category": { "type": "string", "description": "用 / 分层，决定搜索面板的树形结构。" },
         "keywords": { "type": "array", "items": { "type": "string" } },
         "doc": { "type": "string" },
-        "preconditions": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "本算子成立的前提与明确不适用的情形；给使用者与 Agent 看。每条一句话，说清它默认了什么、或什么时候它不成立，不重复参数说明。没什么可写的就不出现这一项。"
-        },
         "inputs": { "type": "array", "items": { "$ref": "#/$defs/port" } },
         "outputs": { "type": "array", "items": { "$ref": "#/$defs/port" } },
         "params": { "type": "array", "items": { "$ref": "#/$defs/param" } },

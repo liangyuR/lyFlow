@@ -450,7 +450,7 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(l) => l,
         Err(e) => {
             line(err, &e);
-            return EXIT_INVALID;
+            return crate::cli::load_exit(&e);
         }
     };
     let perturb_id = match insert_after(&mut loaded.doc, &src_node, &src_port, &region) {
@@ -639,6 +639,7 @@ mod tests {
             id: "t".into(),
             name: None,
             meta: None,
+            params: Default::default(),
             nodes: nodes
                 .iter()
                 .map(|(id, op)| Node {

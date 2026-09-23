@@ -161,8 +161,8 @@ Status alignTemplate(const Inputs& inputs, const ParamView& params, Outputs& out
   if (globalCoarse) {
     GapCloud mergedTemplate(tplLeft);
     mergedTemplate += tplRight;
-    // seg_mode ROI 下 left_cloud_ 与 right_cloud_ 是同一片云，原算法把它加了两遍。
-    // 照做（G8）—— 这会让全局粗配的目标点数翻倍。
+    // seg_mode ROI 下左右两片目标云是同一片，这里把它加了两遍：
+    // 全局粗配的目标点数因此翻倍，与模板那一侧（左右各一片）的点数量级对齐。
     GapCloud mergedTarget(target);
     mergedTarget += target;
     PackAlignment globalAligner;
@@ -322,16 +322,11 @@ void registerAlignTemplate(Registry& r) {
   op.category = "间隙/配准";
   op.keywords = {"icp", "template", "align", "配准", "模板"};
   op.doc =
-      "把一对模板配到当前样本上（复刻 evaluate_pair）：全局粗配 → 左右两侧 ICP、"
-      "信赖域钳制、退化方向锁定；模板两侧内容相同时右侧复用左侧的结果。";
-  op.preconditions = {
-      "刚体 2D 配准：假定样本与模板之间只差一个小的平移加旋转，超出信赖域的部分被钳掉而"
-      "不是报错（quality 里记 trustClamped）。",
-      "沿长直边滑动这类退化方向被显式锁定；模板上只有一条直边时，那个方向的位置本来就不"
-      "可观测。",
-      "分数低本算子不判失败，它照样输出 GapAlignment —— 丢弃低分候选是 "
-      "gap.select_alignment 的事。",
-  };
+      "把一对模板配到当前样本上（evaluate_pair）：全局粗配 → 左右两侧 ICP、"
+      "信赖域钳制、退化方向锁定；模板两侧内容相同时右侧复用左侧的结果。\n"
+      "刚体 2D 配准，假定样本与模板之间只差一个小的平移加旋转：超出信赖域的部分被钳掉而不是"
+      "报错（quality 里记 trustClamped）；沿长直边滑动这类退化方向被锁定。分数低不判失败，"
+      "照样输出 GapAlignment —— 丢弃低分候选是 gap.select_alignment 的事。";
   op.inputs = {
       Port{"cloud", "PointCloud", "Cloud", "合并并滤波之后的测量帧点云。", true},
       Port{"tplLeft", "PointCloud", "Template Left", "左模板。", true},
@@ -392,13 +387,8 @@ void registerSelectAlignment(Registry& r) {
   op.keywords = {"template", "select", "best icp", "模板选择"};
   op.doc =
       "在候选模板里挑一个：先过滤左右都 ≥ minScore 的，"
-      "再按 min(l,r) 降、mean 降、配置顺序升、id 升排序取第一个（§3.4）。";
-  op.preconditions = {
-      "只在给定候选里挑，不做配准；全部候选都低于 minScore 时报 icp_score_low，不会退而"
-      "求其次。",
-      "排序键是 min(左,右) 降、mean 降、配置顺序升、id 升；各项全打平时由 templateId 定"
-      "胜负，与接在哪个端口无关。",
-  };
+      "再按 min(l,r) 降、mean 降、配置顺序升、id 升排序取第一个；全打平时由 templateId 定，"
+      "与接在哪个端口无关。只挑不配；全部低于 minScore 时报 icp_score_low，不退而求其次。";
   // 四个候选端口都只吃 GapAlignment（compute 里本来就查，写成契约之后第一帧就报，
   // 而且带得出「实际是什么类型」——Status 的那句话带不出来）。
   const nlohmann::json isAlignment = {{"recordType", "GapAlignment"}};

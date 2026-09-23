@@ -9,6 +9,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "exec/executor.h"
+#include "exec/result_store.h"
 #include "lyflow/operator.h"
 #include "lyflow/registry.h"
 
@@ -180,8 +182,10 @@ TEST_CASE("auto 的模式推导只看 setting.yml 的 model_roi.enabled") {
     Fixture f("on", "model_roi:\n  enabled: true\n  model_path: X:/m.onnx\n");
     const nlohmann::json doc = import("StandardGap.yml", f.point);
     REQUIRE(hasOp(doc, "gap.roi_from_labels"));
+    // modelPath 由顶层参数给，节点上不再写
+    CHECK(doc["params"]["modelPath"]["default"] == "X:/m.onnx");
     for (const auto& n : doc["nodes"]) {
-      if (n["op"] == "ml.onnx_run") CHECK(n["params"]["modelPath"] == "X:/m.onnx");
+      if (n["op"] == "ml.onnx_run") CHECK_FALSE(n["params"].contains("modelPath"));
     }
   }
   SUBCASE("setting.yml 在测点目录里也认") {
@@ -475,7 +479,7 @@ TEST_CASE("方向基准默认不生成任何节点") {
   const nlohmann::json doc = importText("StandardGap.yml:template", kConfig, nullptr);
   CHECK_FALSE(hasOp(doc, "gap.datum_window"));
   CHECK_FALSE(hasEdge(doc, "n_fit_base", "refLine"));
-  // 一个方向相关的参数都不写进图，留给算子默认的 free —— 老图逐位不变
+  // 一个方向相关的参数都不写进图，留给算子默认的 free
   CHECK_FALSE(nodeById(doc, "n_fit_base")["params"].contains("dirMode"));
 }
 
@@ -570,4 +574,173 @@ TEST_CASE("weak_fit 的地板从 YAML 落到 n_circles 上，不写就是 0") {
   CHECK(p["rightMinArcDeg"] == 55.0);
   CHECK(p["rightMinInliers"] == 10);
   CHECK(p["leftMinArcDeg"] == 0.0);
+}
+
+namespace {
+
+std::vector<std::string> stringList(const nlohmann::json& a) {
+  std::vector<std::string> out;
+  for (const auto& e : a) out.push_back(e.get<std::string>());
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+/// 用进程内的全量注册表校验一张图（std 包 + gap 包都在），只留 error。
+std::vector<nlohmann::json> validationErrors(const nlohmann::json& doc) {
+  const nlohmann::json diags =
+      nlohmann::json::parse(exec::validateGraphJson(doc.dump(), std::filesystem::path()));
+  std::vector<nlohmann::json> errors;
+  for (const auto& d : diags) {
+    if (d["severity"] == "error") errors.push_back(d);
+  }
+  return errors;
+}
+
+}  // namespace
+
+TEST_CASE("导入的图：fit_line 接 toward、不写 side，business_rois 写 datumSide") {
+  for (const char* kind : {"StandardGap.yml:template", "StandardGap.yml:model"}) {
+    CAPTURE(kind);
+    Fixture f(std::string("m7-") + (std::strcmp(kind, "StandardGap.yml:model") == 0 ? "model" : "tpl"),
+              "model_roi:\n  enabled: true\n  model_path: X:/m.onnx\n");
+    const nlohmann::json doc = import(kind, f.point);
+    REQUIRE(doc.is_object());
+    for (const auto& n : doc["nodes"]) {
+      const std::string id = n["id"].get<std::string>();
+      CAPTURE(id);
+      if (n["op"] == "gap.fit_line") {
+        CHECK_FALSE(n.value("params", nlohmann::json::object()).contains("side"));
+        CHECK(hasEdge(doc, id.c_str(), "toward"));
+      }
+      if (n["op"] == "gap.business_rois") {
+        CHECK_FALSE(n["params"].contains("baseSide"));
+        CHECK(n["params"]["datumSide"] == "left");
+      }
+      if (n["op"] == "gap.roi_from_labels") {
+        CHECK_FALSE(n.value("params", nlohmann::json::object()).contains("baseSide"));
+      }
+    }
+  }
+}
+
+TEST_CASE("导入的图：基准线与参考线的 toward 各接同侧的 gap 框") {
+  const nlohmann::json doc = importText("StandardGap.yml:template", kConfig, nullptr);
+  // base_side: left —— 基准线在缝左边，接 gapLeft；参考线在右边，接 gapRight
+  for (const auto& e : doc["edges"]) {
+    if (e["to"]["port"] != "toward") continue;
+    if (e["to"]["node"] == "n_fit_base") CHECK(e["from"]["port"] == "gapLeft");
+    if (e["to"]["node"] == "n_fit_ref") CHECK(e["from"]["port"] == "gapRight");
+  }
+  // 方向基准线接它的锚框
+  const nlohmann::json datum = importText(
+      "StandardGap.yml:template",
+      withFlushKeys("  base_direction: {datum: long_plane, anchor: gap_right, mode: band}\n"),
+      nullptr);
+  bool saw = false;
+  for (const auto& e : datum["edges"]) {
+    if (e["to"]["node"] == "n_fit_datum" && e["to"]["port"] == "toward") {
+      saw = true;
+      CHECK(e["from"]["port"] == "gapRight");
+    }
+  }
+  CHECK(saw);
+}
+
+TEST_CASE("导入的图带顶层参数：gapOffset 绑两处，模型模式的 modelPath 逐个列出节点") {
+  Fixture f("m7-params", "model_roi:\n  enabled: true\n  model_path: X:/m.onnx\n");
+  const nlohmann::json tpl = import("StandardGap.yml:template", f.point);
+  REQUIRE(tpl["params"].contains("gapOffset"));
+  CHECK(stringList(tpl["params"]["gapOffset"]["binds"]) ==
+        std::vector<std::string>{"n_circles.offset", "n_gap.offset"});
+  CHECK(tpl["params"]["gapOffset"]["default"] == 0.0);
+  CHECK_FALSE(tpl["params"].contains("modelPath"));
+  // 被绑定的参数不能再显式写在节点上（一处定义）
+  CHECK_FALSE(nodeById(tpl, "n_gap")["params"].contains("offset"));
+  CHECK_FALSE(nodeById(tpl, "n_circles")["params"].contains("offset"));
+
+  const nlohmann::json model = import("StandardGap.yml:model", f.point);
+  REQUIRE(model["params"].contains("modelPath"));
+  CHECK(model["params"]["modelPath"]["default"] == "X:/m.onnx");
+  CHECK(stringList(model["params"]["modelPath"]["binds"]) ==
+        std::vector<std::string>{"n_infer.modelPath", "n_ref.modelPath"});
+  for (const auto& b : model["params"]["modelPath"]["binds"]) {
+    CHECK(b.get<std::string>().find('*') == std::string::npos);
+  }
+  CHECK(stringList(model["params"]["gapOffset"]["binds"]) ==
+        std::vector<std::string>{"n_circles.offset", "n_gap.offset"});
+}
+
+TEST_CASE("导入的图过 core 的 validate：模板、模型、带 fallback 三种") {
+  Fixture withFallback("m7-validate", "model_roi:\n  enabled: true\n  model_path: X:/m.onnx\n");
+  Fixture plain("m7-validate-plain");
+  std::ofstream(plain.point / "only.onnx") << "x";
+  const struct {
+    const char* kind;
+    const Fixture* fixture;
+  } cases[3] = {{"StandardGap.yml:template", &plain},
+                {"StandardGap.yml:model", &plain},
+                {"StandardGap.yml:model", &withFallback}};
+  for (const auto& c : cases) {
+    CAPTURE(c.kind);
+    const nlohmann::json doc = import(c.kind, c.fixture->point);
+    REQUIRE(doc.is_object());
+    const auto errors = validationErrors(doc);
+    for (const auto& e : errors) CAPTURE(e.dump());
+    CHECK(errors.empty());
+    if (!errors.empty()) MESSAGE(errors.front().dump());
+  }
+}
+
+TEST_CASE("gap.fit_line dirMode=band 没接 refLine：validate 就报 bad_param，节点不执行") {
+  nlohmann::json doc;
+  doc["schemaVersion"] = 1;
+  doc["id"] = "01M7FITLINEBAND";
+  doc["nodes"] = nlohmann::json::array({
+      {{"id", "g"}, {"op", "gen.synthetic"}, {"params", {{"pointCount", 2000}}}},
+      {{"id", "roi"}, {"op", "gap.overall_roi"}},
+      {{"id", "fit"}, {"op", "gap.fit_line"}, {"params", {{"dirMode", "band"}}}},
+  });
+  const auto edge = [](const char* id, const char* fn, const char* fp, const char* tn,
+                       const char* tp) {
+    return nlohmann::json{{"id", id},
+                          {"from", {{"node", fn}, {"port", fp}}},
+                          {"to", {{"node", tn}, {"port", tp}}}};
+  };
+  doc["edges"] = nlohmann::json::array({
+      edge("e1", "g", "cloud", "roi", "primary"),
+      edge("e2", "g", "cloud", "roi", "secondary"),
+      edge("e3", "g", "cloud", "fit", "cloud"),
+      edge("e4", "roi", "box", "fit", "box"),
+      edge("e5", "roi", "box", "fit", "toward"),
+  });
+  const auto errors = validationErrors(doc);
+  REQUIRE(errors.size() == 1);
+  CHECK(errors[0]["nodeId"] == "fit");
+  CHECK(errors[0]["code"] == "bad_param");
+  CHECK(errors[0]["phase"] == "validate");
+  CHECK(errors[0]["paramPath"] == "dirMode");
+
+  // compute 里不再有这一条：执行器根本不会调到它
+  exec::ResultStore::instance().clear();
+  struct Log {
+    std::vector<nlohmann::json> events;
+  } log;
+  exec::RunOptions options;
+  options.runId = "m7-fit-line-band";
+  {
+    exec::Run run(doc.dump(), options,
+                  [](const char* json, void* user) {
+                    static_cast<Log*>(user)->events.push_back(nlohmann::json::parse(json));
+                  },
+                  &log);
+    run.join();
+  }
+  bool fitRan = false;
+  for (const auto& e : log.events) {
+    if (e.value("kind", "") == "node_state" && e.value("nodeId", "") == "fit" &&
+        e.value("state", "") == "running") {
+      fitRan = true;
+    }
+  }
+  CHECK_FALSE(fitRan);
 }

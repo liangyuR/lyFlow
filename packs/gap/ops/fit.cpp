@@ -1,8 +1,9 @@
-// 直线拟合与间隙两侧的圆拟合。两者都直接调 detection::utils 里的拟合函数（G2）。
+// 直线拟合与间隙两侧的圆拟合。两者都直接调 detection::utils 里的拟合函数。
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <random>
+#include <set>
 
 #include "gap_detection/GapUtils.hpp"
 #include "gap_ops.h"
@@ -250,9 +251,24 @@ bool fitFixedDirection(const GapCloud& cloud, double dirX, double dirY, float di
   return true;
 }
 
+/// 沿直线方向的单位向量，朝 +x（竖直时朝 +y）。首尾端点与 toward 投影都按它算。
+Eigen::Vector2d lineAxis(const Eigen::VectorXf& coefficients) {
+  Eigen::Vector2d u(coefficients[3], coefficients[4]);
+  const double len = u.norm();
+  if (!(len > 0)) return Eigen::Vector2d(1, 0);
+  u /= len;
+  if (u.x() < 0 || (u.x() == 0 && u.y() < 0)) u = -u;
+  return u;
+}
+
+double projectOnAxis(const GapPoint& p, const Eigen::Vector2d& u) {
+  return p.x * u.x() + p.y * u.y();
+}
+
 Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   const lyflow::PointCloud& in = *inputs.get("cloud").asCloud();
   const lyflow::Box2D& box = *inputs.get("box").asBox2D();
+  const lyflow::Box2D& toward = *inputs.get("toward").asBox2D();
   const GapCloud cloud = toPcl(in);
   if (cloud.size() < 2) {
     return Status::Error(Phase::Execute, "insufficient_points", "点太少，拟合不了直线", {},
@@ -260,17 +276,15 @@ Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   }
   const float dist = mmToM(params.number("distThresh"));
   const auto segmentPoints = static_cast<std::size_t>(params.integer("segmentPoints"));
-  const bool isLeft = params.choice("side") == "left";
   const std::string lineType = params.choice("lineType");
+  // 「靠缝那一头」由 toward 框的中心定：内点沿直线方向投影，离它的投影近的那一头就是。
+  const double towardX = 0.5 * (static_cast<double>(toward.min[0]) + toward.max[0]);
+  const double towardY = 0.5 * (static_cast<double>(toward.min[1]) + toward.max[1]);
 
   // 方向约束：把方向锚到另一条线上（通常是 gap.datum_window 在旁边长面上拟的基准线）。
-  // free 时下面每一行都和以前一样，逐位不变。
+  // dirMode 不是 free 时 refLine 一定接着 —— validate 已经挡过。
   const std::string dirMode = params.choice("dirMode");
   const lyflow::Line2D* refLine = inputs.has("refLine") ? inputs.get("refLine").asLine2D() : nullptr;
-  if (dirMode != "free" && refLine == nullptr) {
-    return Status::Error(Phase::Execute, "bad_param", "dirMode 不是 free 时必须接 refLine",
-                         "dirMode", "refLine");
-  }
   const double nominal = params.number("dirNominalDeg");
   const double tol = params.number("dirTolDeg");
   double pinX = 1.0;
@@ -293,14 +307,19 @@ Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     return Status::Error(Phase::Execute, "line_fit_failed", "直线拟合失败", {}, "cloud");
   }
 
-  // 截取靠缝隙那一端再拟合一次。方向判据见 §3.5：ascend == isLeft 留尾巴，否则留头。
-  if (fitted && segmentPoints < indices.size()) {
-    const bool ascend = cloud[0].x <= cloud.back().x;
-    if (ascend == isLeft) {
-      indices.erase(indices.begin(), indices.end() - static_cast<std::ptrdiff_t>(segmentPoints));
-    } else {
-      indices.resize(segmentPoints);
-    }
+  // 截取靠缝那一端再拟合一次：按沿直线方向的投影，留下离 toward 最近的 segmentPoints 个内点。
+  // 不看点序 —— 点在文件里朝哪个方向排，与缝在哪一侧无关。
+  bool segmentApplied = false;
+  if (fitted && segmentPoints > 0 && segmentPoints < indices.size()) {
+    const Eigen::Vector2d u = lineAxis(coefficients);
+    const double target = towardX * u.x() + towardY * u.y();
+    std::stable_sort(indices.begin(), indices.end(), [&](int a, int b) {
+      return std::fabs(projectOnAxis(cloud[a], u) - target) <
+             std::fabs(projectOnAxis(cloud[b], u) - target);
+    });
+    indices.resize(segmentPoints);
+    std::sort(indices.begin(), indices.end());
+    segmentApplied = true;
     const GapCloud segment(cloud, indices);
     pcl::Indices second;
     if (!gap_std::lineFit2D(segment, &coefficients, &second, dist / 3)) {
@@ -314,6 +333,9 @@ Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
       for (auto i : second) indices[j++] = indices[static_cast<std::size_t>(i)];
       indices.resize(second.size());
     }
+  } else if (fitted && segmentPoints > 0) {
+    ctx.log(LogLevel::Warn, "内点 " + std::to_string(indices.size()) + " 个，不多于 segmentPoints " +
+                                std::to_string(segmentPoints) + "，没有截取靠缝那一端");
   }
   if (fitted && indices.empty()) {
     if (dirMode == "free") {
@@ -345,13 +367,27 @@ Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
                              std::to_string(minInliers),
                          "minInliers", "cloud");
   }
+  std::sort(indices.begin(), indices.end());
+
+  // 端点、innerEnd 都按最终那条线的方向投影来挑，与点序无关。
+  const Eigen::Vector2d u = lineAxis(coefficients);
+  const double target = towardX * u.x() + towardY * u.y();
+  std::size_t first = 0, last = 0, inner = 0;
+  for (std::size_t k = 1; k < indices.size(); ++k) {
+    const double sk = projectOnAxis(cloud[indices[k]], u);
+    if (sk < projectOnAxis(cloud[indices[first]], u)) first = k;
+    if (sk > projectOnAxis(cloud[indices[last]], u)) last = k;
+    if (std::fabs(sk - target) < std::fabs(projectOnAxis(cloud[indices[inner]], u) - target)) {
+      inner = k;
+    }
+  }
 
   lyflow::Line2D line = lineFromCoefficients(coefficients);
-  // 端点两种口径，对应 align_cloud_ 的两支（GapDetection.cpp:861）：真取与 ROI 框的交点，
-  // 假取首尾内点的真实云点。模型路径恒为假，而 definition A 的 u 就取自这两个端点。
+  // 端点两种口径：ROI 框交点，或内点里沿直线方向最靠两头的那两个真实云点。
+  // gap definition A 的方向 u 就取自这两个端点。
   if (params.choice("endpoints") == "inlier_ends") {
-    const GapPoint& a = cloud[indices.front()];
-    const GapPoint& b = cloud[indices.back()];
+    const GapPoint& a = cloud[indices[first]];
+    const GapPoint& b = cloud[indices[last]];
     line.hasSegment = true;
     line.start[0] = a.x;
     line.start[1] = a.y;
@@ -371,11 +407,10 @@ Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   }
   outputs.set("line", Data::line2d(line));
 
-  // getEndPointofCloud 会就地排序 indices，所以内点输出也用排序后的那一份
-  const GapPoint inner = utils::getEndPointofCloud(cloud, !isLeft, &indices);
+  const GapPoint& innerPoint = cloud[indices[inner]];
   lyflow::Point2D end;
-  end.p[0] = inner.x;
-  end.p[1] = inner.y;
+  end.p[0] = innerPoint.x;
+  end.p[1] = innerPoint.y;
   outputs.set("innerEnd", Data::point2d(end));
 
   lyflow::Indices out;
@@ -387,8 +422,19 @@ Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   lyflow::Record quality;
   quality.type = "GapFitQuality";
   quality.data = lineQualityJson(cloud, coefficients, indices);
+  quality.data["segmentApplied"] = segmentApplied;
   outputs.set("quality", Data::record(std::move(quality)));
   return Status::Ok();
+}
+
+std::vector<Issue> validateFitLine(const ParamView& params,
+                                   const std::set<std::string>& connected) {
+  std::vector<Issue> issues;
+  if (params.choice("dirMode") != "free" && !connected.count("refLine")) {
+    issues.push_back(
+        Issue::error("bad_param", "dirMode 不是 free 时必须接 refLine", "dirMode", "refLine"));
+  }
+  return issues;
 }
 
 // ---------------------------------------------------------------- 圆拟合
@@ -410,7 +456,6 @@ struct SideResult {
   std::array<pcl::Indices, 2> candidateIndices;
   std::array<GapCloud, 2> candidateClouds;
   std::string model = "circle";
-  bool separatedFixedFree = false;
 };
 
 /// 内点覆盖的圆弧角度（度）。和 circleQualityJson 里报的是同一个量 —— 那边只是顺手
@@ -444,18 +489,42 @@ double centerAboveLine(const Eigen::VectorXf& circle, const lyflow::Line2D& line
   return at - circle[1];
 }
 
+/// 定半径下的圆心细化：对内点做几步 Gauss-Newton，只动圆心。
+Eigen::Vector2d refineCenterFixedRadius(const GapCloud& cloud, const pcl::Indices& idx,
+                                        Eigen::Vector2d center, double radius) {
+  for (int it = 0; it < 50; ++it) {
+    Eigen::Matrix2d jtj = Eigen::Matrix2d::Zero();
+    Eigen::Vector2d jtr = Eigen::Vector2d::Zero();
+    for (const auto k : idx) {
+      const Eigen::Vector2d v(cloud[static_cast<std::size_t>(k)].x - center.x(),
+                              cloud[static_cast<std::size_t>(k)].y - center.y());
+      const double d = v.norm();
+      if (!(d > 0)) continue;
+      const Eigen::Vector2d g = -v / d;  // ∂(d − r)/∂c
+      jtj += g * g.transpose();
+      jtr += g * (d - radius);
+    }
+    const Eigen::Vector2d step = jtj.ldlt().solve(-jtr);
+    if (!step.allFinite()) break;
+    center += step;
+    if (step.norm() < 1e-10) break;
+  }
+  return center;
+}
+
 /// 带约束的圆拟合：圆心高度带（要 line）和内点方位角带，两条都可以单独开。
-/// 共用的 gap_std::circleFit2D 同时服务 A/B 对照实现，不能给它加判据，所以这里自己跑一遍
-/// RANSAC —— **只在配了约束时才走这条路**，没配时调用方走原来的 circleFit2D，行为逐位不变。
+/// 共用的 gap_std::circleFit2D 不带这些判据，所以这里自己跑一遍 RANSAC，只在配了约束时走。
 /// 采样用固定种子，同样的输入永远给同样的输出（算子声明了 deterministic）。
 ///
 /// `line` 为空表示不查圆心高度；`bearingTolDeg <= 0` 表示不查方位角。
+/// `rFixed > 0` 时半径钉死：两点加半径定圆心（每对点两个解），细化也只动圆心。
 bool circleFitConstrained(const GapCloud& cloud, const lyflow::Line2D* line, double aboveM,
                           double tolM, double bearingDeg, double bearingTolDeg, double distThresh,
-                          double rMin, double rMax, Eigen::VectorXf* circle,
+                          double rMin, double rMax, double rFixed, Eigen::VectorXf* circle,
                           pcl::Indices* inliers) {
   const std::size_t n = cloud.size();
   if (n < 3) return false;
+  const bool fixedRadius = rFixed > 0;
   const bool checkCenter = line != nullptr && tolM > 0;
   const bool checkBearing = bearingTolDeg > 0;
   // 方位角要先有内点才能算，所以它在下面按候选的内点集单独查；这里只查半径和圆心高度。
@@ -478,24 +547,8 @@ bool circleFitConstrained(const GapCloud& cloud, const lyflow::Line2D* line, dou
   std::uniform_int_distribution<std::size_t> pick(0, n - 1);
   std::size_t bestCount = 0;
   Eigen::Vector3d best(0, 0, 0);
-  // 迭代数与 PCL 那条路（Circle2DFitOptions::maxIterations）取齐，免得「加了约束反而
-  // 更容易拟出来」只是因为采样次数不同。
-  for (int iter = 0; iter < 10000; ++iter) {
-    const std::size_t a = pick(rng);
-    const std::size_t b = pick(rng);
-    const std::size_t c = pick(rng);
-    if (a == b || b == c || a == c) continue;
-    const double ax = cloud[a].x, ay = cloud[a].y;
-    const double bx = cloud[b].x, by = cloud[b].y;
-    const double cx = cloud[c].x, cy = cloud[c].y;
-    const double d = 2.0 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
-    if (std::fabs(d) < 1e-15) continue;
-    const double ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) +
-                       (cx * cx + cy * cy) * (ay - by)) / d;
-    const double uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) +
-                       (cx * cx + cy * cy) * (bx - ax)) / d;
-    const double r = std::hypot(ax - ux, ay - uy);
-    if (!ok(ux, uy, r)) continue;
+  const auto consider = [&](double ux, double uy, double r) {
+    if (!ok(ux, uy, r)) return;
     std::size_t count = 0;
     pcl::Indices candidate;
     for (std::size_t q = 0; q < n; ++q) {
@@ -504,10 +557,39 @@ bool circleFitConstrained(const GapCloud& cloud, const lyflow::Line2D* line, dou
         if (checkBearing) candidate.push_back(static_cast<int>(q));
       }
     }
-    if (count <= bestCount) continue;
-    if (!bearingOk(Eigen::Vector3d(ux, uy, r), candidate)) continue;
+    if (count <= bestCount) return;
+    if (!bearingOk(Eigen::Vector3d(ux, uy, r), candidate)) return;
     bestCount = count;
     best = Eigen::Vector3d(ux, uy, r);
+  };
+  // 迭代数与 PCL 那条路（Circle2DFitOptions::maxIterations）取齐，免得「加了约束反而
+  // 更容易拟出来」只是因为采样次数不同。
+  for (int iter = 0; iter < 10000; ++iter) {
+    const std::size_t a = pick(rng);
+    const std::size_t b = pick(rng);
+    if (a == b) continue;
+    const double ax = cloud[a].x, ay = cloud[a].y;
+    const double bx = cloud[b].x, by = cloud[b].y;
+    if (fixedRadius) {
+      const double half = 0.5 * std::hypot(bx - ax, by - ay);
+      if (!(half > 1e-12) || half > rFixed) continue;
+      const double h = std::sqrt(rFixed * rFixed - half * half);
+      const double mx = 0.5 * (ax + bx), my = 0.5 * (ay + by);
+      const double nx = -(by - ay) / (2 * half), ny = (bx - ax) / (2 * half);
+      consider(mx + h * nx, my + h * ny, rFixed);
+      consider(mx - h * nx, my - h * ny, rFixed);
+      continue;
+    }
+    const std::size_t c = pick(rng);
+    if (b == c || a == c) continue;
+    const double cx = cloud[c].x, cy = cloud[c].y;
+    const double d = 2.0 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+    if (std::fabs(d) < 1e-15) continue;
+    const double ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) +
+                       (cx * cx + cy * cy) * (ay - by)) / d;
+    const double uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) +
+                       (cx * cx + cy * cy) * (bx - ax)) / d;
+    consider(ux, uy, std::hypot(ax - ux, ay - uy));
   }
   if (bestCount < 3) return false;
   // 用内点做一次代数重拟；重拟后仍要满足约束，否则退回粗解。
@@ -518,7 +600,14 @@ bool circleFitConstrained(const GapCloud& cloud, const lyflow::Line2D* line, dou
     }
   }
   Eigen::Vector3d refined = best;
-  if (keep.size() >= 3) {
+  if (keep.size() >= 3 && fixedRadius) {
+    const Eigen::Vector2d c =
+        refineCenterFixedRadius(cloud, keep, Eigen::Vector2d(best[0], best[1]), rFixed);
+    const Eigen::Vector3d candidate(c.x(), c.y(), rFixed);
+    if (c.allFinite() && ok(c.x(), c.y(), rFixed) && bearingOk(candidate, keep)) {
+      refined = candidate;
+    }
+  } else if (keep.size() >= 3) {
     Eigen::MatrixXd A(keep.size(), 3);
     Eigen::VectorXd rhs(keep.size());
     for (std::size_t k = 0; k < keep.size(); ++k) {
@@ -577,10 +666,10 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
   cfg[1] = {params.number("rightRadiusMin") / kScale, params.number("rightRadiusMax") / kScale,
             params.flag("rightRadiusFixed") ? params.number("rightRadiusValue") / kScale : 0.0};
 
-  // 逐侧选相机。默认 Both = 用合并云，和以前一样。两台锁在不同界面上时（夹胶玻璃），
+  // 逐侧选相机。默认 Both = 用合并云。两台锁在不同界面上时（夹胶玻璃），
   // 合并云里是相距一两毫米的两层点，拟出来的圆没有意义 —— 那种点位把这一侧钉到一台上。
   const std::string sideCamera[2] = {params.choice("leftCamera"), params.choice("rightCamera")};
-  // 圆心高度带：tol <= 0 表示不启用，那时走原来的 circleFit2D，行为逐位不变。
+  // 圆心高度带：tol <= 0 表示不启用，那时走 circleFit2D。
   const double centerAbove[2] = {params.number("leftCenterAbove") / kScale,
                                  params.number("rightCenterAbove") / kScale};
   const double centerTol[2] = {params.number("leftCenterTol") / kScale,
@@ -600,23 +689,17 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
   const lyflow::Line2D* refLine = inputs.has("refLine") ? inputs.get("refLine").asLine2D() : nullptr;
   const lyflow::Line2D* refLineRight =
       inputs.has("refLineRight") ? inputs.get("refLineRight").asLine2D() : nullptr;
-  // 两侧各比各的线。右侧不接 refLineRight 就退回 refLine —— 只接一条线的老图逐位不变。
-  // 缝两侧贴的是不同的面时（左圆贴基准面、右圆贴玻璃面）才需要分开，同一条线也能服务两侧。
+  // 两侧各比各的线。右侧不接 refLineRight 就退回 refLine。缝两侧贴的是不同的面时
+  // （左圆贴基准面、右圆贴玻璃面）才需要分开，同一条线也能服务两侧。
+  // 配了高度带却没接线的组合 validate 已经挡过。
   const lyflow::Line2D* sideRefLine[2] = {refLine, refLineRight != nullptr ? refLineRight : refLine};
-  for (int i = 0; i < 2; ++i) {
-    if (centerTol[i] > 0 && sideRefLine[i] == nullptr) {
-      return Status::Error(Phase::Execute, "bad_param",
-                           "配了圆心高度带就必须接 refLine（参考线）；右侧可以单独接 refLineRight",
-                           i == 0 ? "leftCenterTol" : "rightCenterTol", "refLine");
-    }
-  }
 
   constexpr std::size_t kMinimumCameraInliers = 8;
   const double maxRadiusDifference = 0.25 / kScale;
   const double maxCenterDifference = 0.75 / kScale;
 
-  // 一侧的拟合：guard 先按原样拟、只有圆心落到带外才换约束那条路（带内的帧逐位不变，
-  // 所以给「本来就拟得对」的点位挂一条宽带纯属保险）；always 一律走约束。
+  // 一侧的拟合：guard 先按原样拟、只有圆心落到带外才换约束那条路（带内的帧结果与不加带
+  // 相同，所以给「本来就拟得对」的点位挂一条宽带纯属保险）；always 一律走约束。
   // 抽成 lambda 是为了「弱了就换合并云再来一次」能原样重跑。
   const auto fitOneSide = [&](SideResult& side, int i) {
     const bool constrained = centerTol[i] > 0 || bearingTol[i] > 0;
@@ -648,12 +731,13 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
       side.indices.clear();
       side.fitted = circleFitConstrained(side.cloud, sideRefLine[i], centerAbove[i], centerTol[i],
                                          bearing[i], bearingTol[i], distThresh, cfg[i].rMin,
-                                         cfg[i].rMax, &side.circle, &side.indices);
+                                         cfg[i].rMax, cfg[i].rFixed, &side.circle, &side.indices);
       if (!side.fitted && retryDistanceMm > 0) {
         side.indices.clear();
         side.fitted = circleFitConstrained(side.cloud, sideRefLine[i], centerAbove[i], centerTol[i],
                                            bearing[i], bearingTol[i], mmToM(retryDistanceMm),
-                                           cfg[i].rMin, cfg[i].rMax, &side.circle, &side.indices);
+                                           cfg[i].rMin, cfg[i].rMax, cfg[i].rFixed, &side.circle,
+                                           &side.indices);
       }
       if (side.fitted) {
         side.model = centerTol[i] > 0 ? (bearingTol[i] > 0 ? "circle-center-bearing-band"
@@ -677,16 +761,6 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
                            std::string(i == 0 ? "左" : "右") + "间隙 ROI 里没有点", {},
                            i == 0 ? "boxLeft" : "boxRight");
     }
-    if (!(cfg[i].rMax > cfg[i].rMin)) {
-      return Status::Error(Phase::Execute, "bad_param", "半径上限必须大于下限",
-                           i == 0 ? "leftRadiusMax" : "rightRadiusMax");
-    }
-    if (cfg[i].rFixed > 0 &&
-        !(cfg[i].rMax > cfg[i].rFixed && cfg[i].rMin < cfg[i].rFixed)) {
-      return Status::Error(Phase::Execute, "bad_param", "固定半径必须落在上下限之间",
-                           i == 0 ? "leftRadiusValue" : "rightRadiusValue");
-    }
-
     fitOneSide(side, i);
     // 弱就重来：钉死单相机时先退回合并云（那台被挡住的时候另一台往往是好的），
     // 合并云也弱就当没拟出来，交给下面既有的回退，最后报失败 —— 宁可没有也别给个错的。
@@ -711,11 +785,10 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
 
     if (side.fitted || !fallback || sideCamera[i] != "Both") continue;
 
-    // 相机分开拟合的回退：两台相机各自的 ROI 点各拟合一个圆。
+    // 相机分开拟合的回退：两台相机各自的 ROI 点各拟合一个圆，固定半径照样生效。
     GapCloud primaryRoi = cropStrict(primary, roi);
     GapCloud secondaryRoi = cropStrict(secondary, roi);
-    // select_closest_nominal 打开时强制自由半径（§3.9）
-    const double separatedFixed = selectClosestNominal ? 0.0 : cfg[i].rFixed;
+    const double separatedFixed = cfg[i].rFixed;
     Eigen::VectorXf primaryCircle, secondaryCircle;
     pcl::Indices primaryIndices, secondaryIndices;
     const bool primaryOk = gap_std::circleFit2D(primaryRoi, &primaryCircle, &primaryIndices,
@@ -737,7 +810,6 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
       side.fitted = true;
       side.model = takePrimary ? "camera-separated-circle-primary"
                                : "camera-separated-circle-secondary";
-      side.separatedFixedFree = separatedFixed <= 0;
     };
     if (selectClosestNominal && primaryEligible && secondaryEligible) {
       side.deferred = true;
@@ -786,7 +858,7 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
       for (int rr = 0; rr < rightCount; ++rr) {
         const Eigen::VectorXf& c2 = sides[1].deferred ? sides[1].candidates[rr] : sides[1].circle;
         Eigen::Vector2f start, end;
-        // 候选打分永远用 definition B 的圆心距，即使最终按 definition A 算（G8）
+        // 候选打分用 definition B 的圆心距：挑的是哪台相机，与下游按哪种定义出值无关
         const double d = utils::circleCircleDistance(c1, c2, &start, &end);
         const double gapMm = std::fabs(d * kScale) + offset;
         if (!std::isfinite(gapMm) || start.x() > end.x()) continue;
@@ -815,7 +887,6 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
       sides[i].cloud = sides[i].candidateClouds[picked[i]];
       sides[i].model = std::string("camera-separated-circle-") +
                        (picked[i] == 0 ? "primary" : "secondary") + "-closest-gap-nominal";
-      sides[i].separatedFixedFree = true;
     }
   }
 
@@ -842,7 +913,7 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
   quality.type = "GapFitQualityPair";
   static const char* kSides[2] = {"left", "right"};
   for (int i = 0; i < 2; ++i) {
-    const bool isFixed = !sides[i].separatedFixedFree && cfg[i].rFixed > 0;
+    const bool isFixed = cfg[i].rFixed > 0;
     const std::string radiusMode =
         sides[i].circle.size() >= 3
             ? utils::classifyRadiusMode(sides[i].circle[2], cfg[i].rMin, cfg[i].rMax, isFixed)
@@ -853,6 +924,38 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
   }
   outputs.set("quality", Data::record(std::move(quality)));
   return Status::Ok();
+}
+
+std::vector<Issue> validateFitGapCircles(const ParamView& params,
+                                         const std::set<std::string>& connected) {
+  std::vector<Issue> issues;
+  const bool refLeft = connected.count("refLine") != 0;
+  const bool refRight = refLeft || connected.count("refLineRight") != 0;
+  if (params.number("leftCenterTol") > 0 && !refLeft) {
+    issues.push_back(Issue::error("bad_param", "配了左侧圆心高度带就必须接 refLine（参考线）",
+                                  "leftCenterTol", "refLine"));
+  }
+  if (params.number("rightCenterTol") > 0 && !refRight) {
+    issues.push_back(Issue::error(
+        "bad_param", "配了右侧圆心高度带就必须接 refLineRight 或 refLine（参考线）",
+        "rightCenterTol", "refLineRight"));
+  }
+  for (const char* side : {"left", "right"}) {
+    const std::string s(side);
+    const double rMin = params.number(s + "RadiusMin");
+    const double rMax = params.number(s + "RadiusMax");
+    if (!(rMax > rMin)) {
+      issues.push_back(Issue::error("bad_param", "半径上限必须大于下限", s + "RadiusMax"));
+      continue;
+    }
+    if (params.flag(s + "RadiusFixed")) {
+      const double r = params.number(s + "RadiusValue");
+      if (!(r > rMin && r < rMax)) {
+        issues.push_back(Issue::error("bad_param", "固定半径必须落在上下限之间", s + "RadiusValue"));
+      }
+    }
+  }
+  return issues;
 }
 
 Param numParam(const char* name, const char* label, double def, const char* unit, const char* group,
@@ -946,12 +1049,12 @@ Param centerModeParam(const char* name, const char* label, const char* group) {
   p.label = label;
   p.doc =
       "圆心高度带怎么用。always 一律走带约束的拟合；guard 先按原样拟，只有圆心落到带外"
-      "才重来 —— 带内的帧逐位不变，所以「本来就拟得对、只是想上个保险」的点位该用 guard。";
+      "才重来 —— 带内的帧结果与不加带相同，所以「本来就拟得对、只是想上个保险」的点位该用 guard。";
   p.def = Value::text("always");
   p.group = group;
   p.advanced = true;
   p.options = {EnumOption{"always", "Always", "一律走带约束的拟合。"},
-               EnumOption{"guard", "Guard", "只在出带时才重拟，带内逐位不变。"}};
+               EnumOption{"guard", "Guard", "只在出带时才重拟，带内结果与不加带相同。"}};
   return p;
 }
 
@@ -963,7 +1066,8 @@ Param sideCameraParam(const char* name, const char* label, const char* group) {
   p.doc =
       "这一侧的圆用哪台相机的点。Both = 合并云（默认）。两台锁在不同界面上时（例如夹胶"
       "玻璃，一台看表面一台看夹胶层），合并云里是相距一两毫米的两层点，拟出来的圆没有"
-      "意义 —— 那种点位把这一侧钉到一台上。钉死之后这一侧不再走相机分开的回退。";
+      "意义 —— 那种点位把这一侧钉到一台上。钉死之后这一侧不再走相机分开的回退；"
+      "那台被遮挡、拟得太弱（minInliers / minArcDeg）时自动退回合并云重拟一次。";
   p.def = Value::text("Both");
   p.group = group;
   p.advanced = true;
@@ -978,26 +1082,21 @@ Param sideCameraParam(const char* name, const char* label, const char* group) {
 void registerFitLine(Registry& r) {
   OperatorDesc op;
   op.id = "gap.fit_line";
-  op.version = "1.0.0";
+  op.version = "1.1.0";
   op.label = "拟合直线";
   op.category = "间隙/拟合";
   op.keywords = {"line", "ransac", "直线", "拟合"};
   op.doc =
       "在 ROI 里拟合一条直线：先整体拟合，再截取靠缝隙那一端的 segmentPoints 个内点、"
-      "用 1/3 的阈值重拟合一次（§3.5）。line 带与 ROI 框的两个交点作端点。";
-  op.preconditions = {
-      "innerEnd 取靠缝的那一端，由 side 决定；side 填反时截取的窗口与 innerEnd 都跑到背"
-      "离缝的那一头。",
-      "distThresh 过紧时第二次拟合（阈值 1/3）的内点集会在弯曲的棱边上跳，逐帧结果不稳；"
-      "收紧之前先看 quality 的 inlierRatio 与 rmsResidualMm。",
-      "假定 ROI 里那条边确实近似一条直线；圆角或台阶进了 ROI，拟合会咬住它们。",
-      "dirMode 不是 free 时，refLine 与这条线之间的相对倾角被当成常数（dirNominalDeg）。"
-      "两张面之间真有随件变化的相对转动时，钉死方向就是把那部分变化抹掉 —— 先量一批正常帧"
-      "的相对倾角散布，再决定钉死（fixed）还是只兜底（band）。",
-  };
+      "用 1/3 的阈值重拟合一次。「靠缝那一端」由 toward 框的中心定：内点沿直线方向投影，"
+      "离它最近的那些留下，innerEnd 也取离它最近的那一个。line 带与 ROI 框的两个交点作端点。\n"
+      "假定 ROI 里那条边确实近似一条直线；圆角或台阶进了 ROI，拟合会咬住它们。";
   op.inputs = {
       Port{"cloud", "PointCloud", "Cloud", "已经按业务 ROI 裁过的点云。", true},
       Port{"box", "Box2D", "Box", "同一个业务 ROI，用来求端点。", true},
+      Port{"toward", "Box2D", "Toward",
+           "缝那一侧的 ROI（只用它的中心）。决定截取哪一头、innerEnd 取哪一端。"
+           "基准线/参考线接同侧的 gap 框；方向基准线接它的锚框。", true},
       Port{"refLine", "Line2D", "Ref Line",
            "方向约束的参考线，通常是 gap.datum_window 推出来的长面上拟的那条。"
            "只有 dirMode 不是 free 时才需要。", false},
@@ -1005,19 +1104,14 @@ void registerFitLine(Registry& r) {
   op.outputs = {
       Port{"line", "Line2D", "Line", "拟合出的直线（带端点）。", true},
       Port{"inliers", "Indices", "Inliers", "内点下标，指向输入点云。", true},
-      Port{"innerEnd", "Point2D", "Inner End", "内点里靠缝隙那一端的真实云点。", true},
+      Port{"innerEnd", "Point2D", "Inner End",
+           "内点里沿直线方向离 toward 中心最近的那个真实云点。", true},
       withExample(
-          Port{"quality", "Record", "Quality", "GapFitQuality：点数、内点、残差、直线方程。", true},
+          Port{"quality", "Record", "Quality",
+               "GapFitQuality：点数、内点、残差、直线方程，以及 segmentApplied（这一帧截取了没有）。",
+               true},
           examples::fitQuality()),
   };
-
-  Param side;
-  side.name = "side";
-  side.type = ParamType::Enum;
-  side.label = "Side";
-  side.doc = "这条线在缝隙的哪一侧。决定截取哪一头，以及 innerEnd 取哪一端。";
-  side.def = Value::text("left");
-  side.options = {EnumOption{"left", "Left", ""}, EnumOption{"right", "Right", ""}};
 
   Param lineType;
   lineType.name = "lineType";
@@ -1034,7 +1128,9 @@ void registerFitLine(Registry& r) {
   distThresh.name = "distThresh";
   distThresh.type = ParamType::Float;
   distThresh.label = "Dist Thresh";
-  distThresh.doc = "内点判定距离（line_fit_distance）。";
+  distThresh.doc =
+      "内点判定距离（line_fit_distance）。过紧时第二次拟合（阈值 1/3）的内点集会在弯曲的"
+      "棱边上跳、逐帧不稳 —— 收紧之前先看 quality 的 inlierRatio 与 rmsResidualMm。";
   distThresh.def = Value::number(0.1);
   distThresh.unit = "mm";
 
@@ -1042,19 +1138,23 @@ void registerFitLine(Registry& r) {
   segmentPoints.name = "segmentPoints";
   segmentPoints.type = ParamType::Int;
   segmentPoints.label = "Segment Points";
-  segmentPoints.doc = "截取多少个内点做第二次拟合。比内点还多就不截。";
+  segmentPoints.doc =
+      "截取多少个内点做第二次拟合。0 = 有意不截（整条都要，比如方向基准线）；"
+      "不少于内点数时也不截，但那多半不是本意：quality.segmentApplied=false，并发一条 warn 日志。";
   segmentPoints.def = Value::integer(500);
+  segmentPoints.min = 0.0;
 
   Param endpoints;
   endpoints.name = "endpoints";
   endpoints.type = ParamType::Enum;
   endpoints.label = "Endpoints";
   endpoints.doc =
-      "line 的两个端点怎么取。模板路径是 ROI 交点，模型路径是首尾内点 —— "
-      "原算法按 align_cloud_ 分这两支，gap definition A 的方向 u 就取自它们。";
+      "line 的两个端点怎么取。模板路径是 ROI 交点，模型路径是首尾内点；"
+      "gap definition A 的方向 u 就取自它们。";
   endpoints.def = Value::text("roi_intersection");
   endpoints.options = {EnumOption{"roi_intersection", "ROI 交点", "直线与 ROI 框的两个交点。"},
-                       EnumOption{"inlier_ends", "首尾内点", "第一个与最后一个内点的真实云点。"}};
+                       EnumOption{"inlier_ends", "首尾内点",
+                                  "内点里沿直线方向最靠两头的两个真实云点。"}};
 
   Param dirMode;
   dirMode.name = "dirMode";
@@ -1068,7 +1168,7 @@ void registerFitLine(Registry& r) {
   dirMode.advanced = true;
   dirMode.options = {
       EnumOption{"free", "Free", "照旧，方向由这片点自己定。"},
-      EnumOption{"band", "Band", "方向出了带宽（或自由拟合失败）才钉死，合规帧逐位不变。"},
+      EnumOption{"band", "Band", "方向出了带宽（或自由拟合失败）才钉死，合规帧与 free 相同。"},
       EnumOption{"fixed", "Fixed", "方向一律钉死成 refLine + 标称偏置，只拟法向偏移。"}};
 
   Param dirNominal;
@@ -1077,7 +1177,8 @@ void registerFitLine(Registry& r) {
   dirNominal.label = "Dir Nominal";
   dirNominal.doc =
       "这条线相对 refLine 的标称倾角。两张面之间的相对倾角是零件的固有量，量一批正常帧"
-      "定下来 —— 填 0 等于假设两张面平行，多半不对。";
+      "定下来 —— 填 0 等于假设两张面平行，多半不对。它被当成常数：两张面之间真有随件变化的"
+      "相对转动时，钉死方向就是把那部分变化抹掉，先看一批帧的倾角散布再选 fixed 还是 band。";
   dirNominal.def = Value::number(0.0);
   dirNominal.unit = "°";
   dirNominal.advanced = true;
@@ -1100,22 +1201,23 @@ void registerFitLine(Registry& r) {
   minInliers.type = ParamType::Int;
   minInliers.label = "Min Inliers";
   minInliers.doc =
-      "内点少于它就报 insufficient_points。0 = 不检查（默认，老行为）。"
+      "内点少于它就报 insufficient_points。0 = 不检查（默认）。"
       "ROI 偶尔整个跑偏时拟合不会失败，只会给一条没意义的线 —— 这是唯一拦得住的地方。";
   minInliers.def = Value::integer(0);
   minInliers.advanced = true;
 
-  op.params = {side,    lineType,   distThresh, segmentPoints,
-               endpoints, dirMode, dirNominal, dirTol, minInliers};
+  op.params = {lineType, distThresh, segmentPoints, endpoints,
+               dirMode,  dirNominal, dirTol,       minInliers};
   op.capabilities = {false, false, true};
   op.compute = &fitLine;
+  op.validate = &validateFitLine;
   r.addOperator(std::move(op));
 }
 
 void registerFitGapCircles(Registry& r) {
   OperatorDesc op;
   op.id = "gap.fit_gap_circles";
-  op.version = "1.1.0";
+  op.version = "1.2.0";
   op.label = "拟合间隙圆";
   op.category = "间隙/拟合";
   op.keywords = {"circle", "ransac", "圆", "拟合", "间隙"};
@@ -1124,21 +1226,9 @@ void registerFitGapCircles(Registry& r) {
       "还失败就退到「两台相机各拟合一个」，两台都合格时按 |gap − nominal| 二选一（§3.9）。"
       "另有两个逐侧的收紧手段：leftCamera/rightCamera 把某一侧钉到单台相机；"
       "centerAbove/centerTol 要求圆心落在 refLine 上方的一条窄带里 —— 右侧要比另一条面时"
-      "单独接 refLineRight。";
-  op.preconditions = {
-      "假定缝两侧各有一段看得见的圆边、半径落在 [radiusMin, radiusMax] 内；缝闭合到两圆"
-      "边相碰时 ROI 里凑不出圆弧，那种缝用 gap.notch_width。",
-      "相机分开拟合的回退只在合并云拟合失败后触发；被遮挡的那台若先给出合格圆，读到的是"
-      "它自己的阴影。",
-      "selectClosestNominal 按 |gap − nominal| 挑候选，nominal 填错会稳定地挑错一侧的"
-      "圆。",
-      "centerTol 只是在 RANSAC 里筛候选，不是把圆心焊到那个高度；带给得比真实散布还窄"
-      "时，合格候选被筛光，这一侧直接拟不出。先量一批正常帧的圆心高度再定带宽。",
-      "leftCamera/rightCamera 钉到单台之后，那一侧只剩一台的点；那台被遮挡时会自动退回"
-      "合并云重拟一次（判据是 minInliers / minArcDeg），两边都弱才算这一侧没拟出来。",
-      "minInliers 与 minArcDeg 不填就是不检查，行为和以前一样 —— 但那样「短弧上拟出一个"
-      "跑到点云外面的圆心」是查不出来的：它的残差和内点率都正常。",
-  };
+      "单独接 refLineRight。固定半径（*RadiusFixed）在每一条路径上都生效。\n"
+      "假定缝两侧各有一段看得见的圆边、半径落在上下限之内；缝闭合到两圆边相碰时 ROI 里凑不出"
+      "圆弧，那种缝用 gap.notch_width。";
   op.inputs = {
       Port{"merged", "PointCloud", "Merged", "合并并滤波之后的云。", true},
       Port{"primary", "PointCloud", "Primary", "整体 ROI 裁过、**未**滤波的 Master 云。", true},
@@ -1177,7 +1267,8 @@ void registerFitGapCircles(Registry& r) {
       numParam("distThresh", "Dist Thresh", 0.03, "mm", "", "圆内点判定距离。"),
       numParam("retryDistance", "Retry Distance", 0.0, "mm", "",
                "第一次失败后用它再试一次。0 = 不重试。"),
-      numParam("nominal", "Nominal", 0.0, "mm", "", "间隙标称值，挑相机候选时用。"),
+      numParam("nominal", "Nominal", 0.0, "mm", "",
+               "间隙标称值，挑相机候选时用。填错会稳定地挑错一侧的圆。"),
       numParam("offset", "Offset", 0.0, "mm", "", "间隙偏置，挑相机候选时要算进去。"),
       boolParam("leftRadiusFixed", "Left Fixed", false, "Left Radius", "固定左圆半径。"),
       numParam("leftRadiusValue", "Left Radius", 1.0, "mm", "Left Radius", "固定的左圆半径。"),
@@ -1188,21 +1279,23 @@ void registerFitGapCircles(Registry& r) {
       numParam("rightRadiusMin", "Right Min", 0.3, "mm", "Right Radius", "右圆半径下限。"),
       numParam("rightRadiusMax", "Right Max", 1.8, "mm", "Right Radius", "右圆半径上限。"),
       boolParam("cameraFallback", "Camera Fallback", true, "Camera Fallback",
-                "合并云拟合失败时按相机分开再试。"),
+                "合并云拟合失败时按相机分开再试。只在合并云失败后触发；被遮挡的那台若先给出"
+                "合格圆，读到的是它自己的阴影。"),
       boolParam("selectClosestNominal", "Select Closest Nominal", true, "Camera Fallback",
-                "两台相机都合格时按 |gap − nominal| 挑；打开时强制自由半径。"),
+                "两台相机都合格时按 |gap − nominal| 挑。"),
       preferred,
       sideCameraParam("leftCamera", "Left Camera", "Left Radius"),
       sideCameraParam("rightCamera", "Right Camera", "Right Radius"),
       numParam("leftCenterAbove", "Left Center Above", 0.0, "mm", "Left Radius",
                "左圆圆心应当高出 refLine 多少。配合 leftCenterTol 使用。"),
       numParam("leftCenterTol", "Left Center Tol", 0.0, "mm", "Left Radius",
-               "圆心高度的容差，<= 0 表示不加这个约束。"),
+               "圆心高度的容差，<= 0 表示不加这个约束。它只在 RANSAC 里筛候选、不把圆心焊到"
+               "那个高度：带比真实散布还窄时合格候选被筛光，这一侧直接拟不出 —— 先量一批正常帧。"),
       centerModeParam("leftCenterMode", "Left Center Mode", "Left Radius"),
       numParam("rightCenterAbove", "Right Center Above", 0.0, "mm", "Right Radius",
                "右圆圆心应当高出 refLine 多少。配合 rightCenterTol 使用。"),
       numParam("rightCenterTol", "Right Center Tol", 0.0, "mm", "Right Radius",
-               "圆心高度的容差，<= 0 表示不加这个约束。"),
+               "圆心高度的容差，<= 0 表示不加这个约束。含义同 leftCenterTol。"),
       centerModeParam("rightCenterMode", "Right Center Mode", "Right Radius"),
       bearingParam("leftArcBearingDeg", "Left Arc Bearing", "Left Radius"),
       bearingTolParam("leftArcBearingTolDeg", "Left Arc Bearing Tol", "Left Radius"),
@@ -1215,6 +1308,7 @@ void registerFitGapCircles(Registry& r) {
   };
   op.capabilities = {false, false, true};
   op.compute = &fitGapCircles;
+  op.validate = &validateFitGapCircles;
   r.addOperator(std::move(op));
 }
 

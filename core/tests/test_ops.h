@@ -2,6 +2,7 @@
 // core 测试专用的算子（S6 / ADR-0014）。core 只自带 gen.synthetic 与 util.reroute，
 // 执行器/缓存/子图要的那些「形状」由这里的 test.* 提供，不依赖任何算子包。
 #include <atomic>
+#include <set>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -179,6 +180,26 @@ inline Status countedCompute(const Inputs&, const ParamView& params, Outputs& ou
   }
   outputs.set("cloud", Data::cloud(std::move(cloud)));
   return Status::Ok();
+}
+
+// ------------------------------------------------------------ test.validated
+/// 加载期校验（m7-plan J5）的样板：mode=pinned 却没接 ref 是 error，loud=true 给一条 warning。
+inline Status validatedCompute(const Inputs& inputs, const ParamView&, Outputs& outputs,
+                               ExecContext&) {
+  outputs.set("cloud", inputs.get("cloud"));
+  return Status::Ok();
+}
+
+inline std::vector<Issue> validatedCheck(const ParamView& params,
+                                         const std::set<std::string>& connected) {
+  std::vector<Issue> issues;
+  if (params.text("mode") == "pinned" && !connected.count("ref")) {
+    issues.push_back(Issue::error("bad_param", "pinned 必须接 ref", "mode", "ref"));
+  }
+  if (params.flag("loud")) {
+    issues.push_back(Issue::warning("loud", "loud 打开了", "loud"));
+  }
+  return issues;
 }
 
 // ------------------------------------------------------------ test.fail
@@ -513,6 +534,21 @@ inline void ensureTestOps() {
       make("test.uncontracted",
            "只在测试里注册：与 test.contracted 同一组端口，但一条契约都不声明。",
            {count, finite, tensor, rec});
+    }
+    {  // 加载期校验的钩子（J5）
+      OperatorDesc op;
+      op.id = "test.validated";
+      op.version = "1.0.0";
+      op.label = "Validated";
+      op.category = "Test";
+      op.doc = "只在测试里注册：带一个 validate 钩子的透传节点。";
+      op.inputs = {cloudIn, Port{"ref", "PointCloud", "Ref", "", false}};
+      op.outputs = {cloudOut};
+      op.params = {ops::textParam("mode", "free"), ops::boolParam("loud", false)};
+      op.capabilities = {false, false, true};
+      op.compute = &ops::validatedCompute;
+      op.validate = &ops::validatedCheck;
+      r.addOperator(std::move(op));
     }
     {  // 一定失败：acceptsError 与 upstream_failed 两条路都要它
       OperatorDesc op;

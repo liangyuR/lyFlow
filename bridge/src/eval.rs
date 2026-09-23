@@ -904,6 +904,7 @@ impl<'a> Engine<'a> {
                 preview: false,
                 no_cache: self.no_cache,
                 stream: None,
+                params_json: None,
             },
         )?;
         let wants_outputs = enumerate || self.metrics.iter().any(MetricPath::needs_outputs);
@@ -1179,7 +1180,7 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(l) => l,
         Err(e) => {
             line(err, &e);
-            return EXIT_INVALID;
+            return crate::cli::load_exit(&e);
         }
     };
     let defaults = match defaults_by_op(&core) {
@@ -1203,7 +1204,8 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         },
         None => Vec::new(),
     };
-    let axes = match axis_param_sets(&loaded.doc, &defaults, parsed.many("param")) {
+    // --param 里左边带「.」的才是扫描轴；不带的是顶层图参数，load_graph 已经应用过。
+    let axes = match axis_param_sets(&loaded.doc, &defaults, &crate::cli::axis_param_specs(parsed)) {
         Ok(v) => v,
         Err(e) => {
             line(err, &e);

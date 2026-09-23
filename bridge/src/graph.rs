@@ -24,6 +24,10 @@ pub struct GraphDoc {
     /// 图级命名输出（ADR-0017）。宿主按名字取值，不认节点 id。
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub outputs: std::collections::BTreeMap<String, GraphOutput>,
+    /// 顶层图参数（m7-plan J7）：`{ 名字: { type?, default, binds: ["节点.参数"], doc? } }`。
+    /// 语义归 core 管，这里原样保留，只在 CLI 的 `--param` 上改它的 default。
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub params: serde_json::Map<String, serde_json::Value>,
     /// 未知字段容器。老客户端打开新版本写的图时不该丢数据。
     #[serde(default)]
     pub x: serde_json::Map<String, serde_json::Value>,
@@ -157,6 +161,7 @@ mod tests {
             id: "test".into(),
             name: None,
             meta: None,
+            params: Default::default(),
             nodes: nodes
                 .iter()
                 .map(|(id, op)| Node {

@@ -25,8 +25,9 @@ constexpr double kScale = 1000.0;
 inline float mmToM(double mm) { return static_cast<float>(mm / kScale); }
 inline double mToMm(double m) { return m * kScale; }
 
-/// ROI 框专用：**先窄化成 float 再除**，复刻 `Matrix2f << 双精度…; matrix /= scale_`。
-/// 与 mmToM 差最后一个 ULP，而严格开区间的裁剪正好卡在这一位上（gap-acceptance 偏离 23）。
+/// ROI 框专用：**先窄化成 float 再除**（`Matrix2f << 双精度…; matrix /= scale_` 的写法）。
+/// 与 mmToM 差最后一个 ULP，而严格开区间的裁剪正好卡在这一位上 —— 框一律走这一条，
+/// 同一个配置值在不同算子里才落在同一个 float 上。
 inline float mmToMRoi(double mm) { return static_cast<float>(mm) / 1000.0F; }
 
 /// LyFlow 点云 → PCL PointXYZRGB。rgb 通道按原算法的约定进 r/g/b（强度在 r 上）。
