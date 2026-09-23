@@ -6,7 +6,7 @@
 #include <set>
 
 #include "gap_detection/GapUtils.hpp"
-#include "gap_ops.h"
+#include "gap_fine.h"
 #include "std_bridge.hpp"
 
 namespace lyflow::packs::gap {
@@ -263,6 +263,10 @@ double projectOnAxis(const GapPoint& p, const Eigen::Vector2d& u) {
   return p.x * u.x() + p.y * u.y();
 }
 
+}  // namespace
+
+namespace fine {
+
 Status fitLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   const lyflow::PointCloud& in = *inputs.get("cloud").asCloud();
   const lyflow::Box2D& box = *inputs.get("box").asBox2D();
@@ -434,6 +438,10 @@ std::vector<Issue> validateFitLine(const ParamView& params,
   }
   return issues;
 }
+
+}  // namespace fine
+
+namespace {
 
 // ---------------------------------------------------------------- 圆拟合
 
@@ -640,6 +648,10 @@ GapCloud cropStrict(const GapCloud& src, const Eigen::Matrix2f& roi) {
   gap_std::roiCrop2D(src, &out, roi);
   return out;
 }
+
+}  // namespace
+
+namespace fine {
 
 Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                      ExecContext& ctx) {
@@ -956,6 +968,10 @@ std::vector<Issue> validateFitGapCircles(const ParamView& params,
   return issues;
 }
 
+}  // namespace fine
+
+namespace {
+
 Param numParam(const char* name, const char* label, double def, const char* unit, const char* group,
                const char* doc) {
   Param p;
@@ -1207,8 +1223,8 @@ void registerFitLine(Registry& r) {
   op.params = {lineType, distThresh, segmentPoints, endpoints,
                dirMode,  dirNominal, dirTol,       minInliers};
   op.capabilities = {false, false, true};
-  op.compute = &fitLine;
-  op.validate = &validateFitLine;
+  op.compute = &fine::fitLine;
+  op.validate = &fine::validateFitLine;
   r.addOperator(std::move(op));
 }
 
@@ -1305,8 +1321,8 @@ void registerFitGapCircles(Registry& r) {
       minArcParam("rightMinArcDeg", "Right Min Arc", "Right Radius"),
   };
   op.capabilities = {false, false, true};
-  op.compute = &fitGapCircles;
-  op.validate = &validateFitGapCircles;
+  op.compute = &fine::fitGapCircles;
+  op.validate = &fine::validateFitGapCircles;
   r.addOperator(std::move(op));
 }
 

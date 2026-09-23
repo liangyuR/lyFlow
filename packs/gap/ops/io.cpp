@@ -4,7 +4,7 @@
 #include <utility>
 
 #include "gap_detection/Converter.hpp"
-#include "gap_ops.h"
+#include "gap_fine.h"
 
 namespace lyflow::packs::gap {
 namespace {
@@ -36,6 +36,9 @@ fs::path resolveProfile(const ParamView& params, const char* fileParam, const ch
   return findByPrefix(dir, params.text(prefixParam));
 }
 
+}  // namespace
+
+namespace fine {
 std::string profilePairKey(const ParamView& params) {
   const fs::path a = resolveProfile(params, "primaryFile", "primaryPrefix");
   const fs::path b = resolveProfile(params, "secondaryFile", "secondaryPrefix");
@@ -91,11 +94,19 @@ Status toMeasurementFrame(const Inputs& inputs, const ParamView&, Outputs& outpu
   return Status::Ok();
 }
 
+}  // namespace fine
+
+namespace {
+
 std::string templateKey(const ParamView& params) {
   const fs::path dir = params.path("dir");
   if (dir.empty()) return {};
   return fileStamp(dir / params.text("left")) + "|" + fileStamp(dir / params.text("right"));
 }
+
+}  // namespace
+
+namespace fine {
 
 Status loadTemplate(const Inputs&, const ParamView& params, Outputs& outputs, ExecContext&) {
   // dir 是 path 参数，空值已经在 validate 阶段挡掉了。
@@ -123,6 +134,10 @@ Status loadTemplate(const Inputs&, const ParamView& params, Outputs& outputs, Ex
   }
   return Status::Ok();
 }
+
+}  // namespace fine
+
+namespace {
 
 Param pathParam(const char* name, const char* label, const char* mode, const char* doc) {
   Param p;
@@ -216,8 +231,8 @@ void registerLoadProfilePair(Registry& r) {
       drop,
   };
   op.capabilities = {false, false, true};
-  op.compute = &loadPair;
-  op.externalKey = &profilePairKey;
+  op.compute = &fine::loadPair;
+  op.externalKey = &fine::profilePairKey;
   r.addOperator(std::move(op));
 }
 
@@ -234,7 +249,7 @@ void registerToMeasurementFrame(Registry& r) {
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "传感器帧的点云。", true}};
   op.outputs = {Port{"cloud", "PointCloud", "Cloud", "测量帧的点云。", true}};
   op.capabilities = {false, true, true};
-  op.compute = &toMeasurementFrame;
+  op.compute = &fine::toMeasurementFrame;
   r.addOperator(std::move(op));
 }
 
@@ -258,7 +273,7 @@ void registerLoadTemplate(Registry& r) {
       textParam("right", "Right File", "f1_right.pcd", "右模板文件名。"),
   };
   op.capabilities = {false, false, true};
-  op.compute = &loadTemplate;
+  op.compute = &fine::loadTemplate;
   op.externalKey = &templateKey;
   r.addOperator(std::move(op));
 }

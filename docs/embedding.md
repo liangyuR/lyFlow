@@ -125,6 +125,10 @@ if (view.valid()) {
 
 `CloudView` 是 RAII，析构时把缓冲还给 core。
 
+端口是 Bundle（`Bundle<kind>`，例如 gap 包的 `gap.read_scan` 输出的 `scan`）时，按字段取：
+`client.cloud(runId, "n_scan", "scan.merged", 0)`。`lyflow_output_cloud / tensor / indices / save`
+都认 `<port>.<field>`，签名不变；`lyflow_output_info` 对 Bundle 端口在它后面逐个列出字段。
+
 **`RunResult` 必须还活着。** 它持有这次运行在结果仓里的索引
 （`RunResult::retain`），一析构就等于 `lyflow_run_free`，之后 `cloud()` 取不到东西。
 `Client` 也必须比 `RunResult` 活得久 —— 索引的释放要调回 DLL。
@@ -149,6 +153,9 @@ options.inputs = { std::move(primary), std::move(secondary) };
 
 1. 被注入的节点**整个 compute 都不会被调用**，所以它声明的每个输出端口都要给一项。
    `gap.load_profile_pair` 有 `primary` 与 `secondary` 两个，就要给两项。
+   导入器默认产出的积木图（M8a）用 `gap.read_scan` 读剖面，它只有一个 Bundle 输出，
+   不能直接注入：把它的 `source` 改成 `inputs`，在 `primary` / `secondary` 上接一个
+   `gap.load_profile_pair`，注入那一个节点。
 2. 缓冲只需活到 `run()` 返回，core 在内部拷一份。
 3. 注入数据的摘要进 cacheKey，换一片云一定重算。
 

@@ -221,7 +221,8 @@ async function suiteMeasurementOutputs(cdp, report) {
 }
 
 /** 可选：打开一张真实的 gap 图跑一遍，看 ROI 框有没有画出来。图用
- *  `lyflow import` 生成（packs/gap/README.md「导入器」）；不设 LYFLOW_GAP_GRAPH 时整组跳过。 */
+ *  `lyflow import --fine` 生成（细粒度图：这一组看的是 business_rois 这类单步节点；
+ *  packs/gap/README.md「导入器」）；不设 LYFLOW_GAP_GRAPH 时整组跳过。 */
 async function suiteRealGapGraph(cdp, report) {
   const graphPath = process.env.LYFLOW_GAP_GRAPH;
   if (!graphPath) return;
@@ -317,8 +318,8 @@ function nodeOfOp(cdp, op) {
   `);
 }
 
-/** §10：模型 ROI 路径的图。`LYFLOW_GAP_GRAPH_MODEL` 指向 R1 的模型图；未设时整组跳过。
- *  怎么生成那张图见 packs/gap/README.md「模型 ROI 路径」。 */
+/** §10：模型 ROI 路径的图。`LYFLOW_GAP_GRAPH_MODEL` 指向 R1 的模型图（`--fine` 导入）；
+ *  未设时整组跳过。怎么生成那张图见 packs/gap/README.md「模型 ROI 路径」。 */
 async function suiteModelGapGraph(cdp, report) {
   const graphPath = process.env.LYFLOW_GAP_GRAPH_MODEL;
   if (!graphPath) return;
@@ -429,14 +430,12 @@ async function suiteModelGapGraph(cdp, report) {
       const o = n ? (n.stats?.outputs ?? []).find((x) => x.port === port) : null;
       return o && o.value ? o.value.value : null;
     };
-    return { gap: read('n_gap', 'value'), flush: read('n_flush', 'value'),
-             ref: [read('n_ref', 'gap'), read('n_ref', 'flush')] };
+    return { gap: read('n_gap', 'value'), flush: read('n_flush', 'value') };
   `);
+  // 黑盒对照 gap.measure_reference 导入器不再生成（m8-plan L12），只看两个读数都在
   report.ok(
-    "拆分算子与黑盒对照给出同一对数（差 ≤ 0.002 mm）",
-    values.gap !== null && values.flush !== null &&
-      Math.abs(values.gap - values.ref[0]) <= 0.002 &&
-      Math.abs(values.flush - values.ref[1]) <= 0.002,
+    "gap 与 flush 都出了数",
+    Number.isFinite(values.gap) && Number.isFinite(values.flush),
     JSON.stringify(values),
   );
 }

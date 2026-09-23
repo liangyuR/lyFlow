@@ -5,7 +5,7 @@
 
 #include "gap_detection/Alignment.hpp"
 #include "gap_detection/GapUtils.hpp"
-#include "gap_ops.h"
+#include "gap_fine.h"
 
 namespace lyflow::packs::gap {
 namespace {
@@ -123,6 +123,10 @@ nlohmann::json sideJson(const SideOutcome& s) {
       {"trustClamped", s.trustClamped},
   };
 }
+
+}  // namespace
+
+namespace fine {
 
 Status alignTemplate(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                      ExecContext& ctx) {
@@ -267,6 +271,10 @@ Status selectAlignment(const Inputs& inputs, const ParamView& params, Outputs& o
   return Status::Ok();
 }
 
+}  // namespace fine
+
+namespace {
+
 Param intParam(const char* name, const char* label, std::int64_t def, const char* doc) {
   Param p;
   p.name = name;
@@ -374,7 +382,7 @@ void registerAlignTemplate(Registry& r) {
       roiParam("roiGapRight", "Gap Right ROI"),
   };
   op.capabilities = {false, false, true};
-  op.compute = &alignTemplate;
+  op.compute = &fine::alignTemplate;
   r.addOperator(std::move(op));
 }
 
@@ -402,7 +410,7 @@ void registerSelectAlignment(Registry& r) {
                             examples::alignment())};
   op.params = {intParam("minScore", "Min Score", 60, "低于它的候选一律不要。")};
   op.capabilities = {false, true, true};
-  op.compute = &selectAlignment;
+  op.compute = &fine::selectAlignment;
   r.addOperator(std::move(op));
 }
 

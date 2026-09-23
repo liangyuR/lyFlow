@@ -10,7 +10,7 @@
 #include "gap_detection/GapUtils.hpp"
 #include "gap_ml/RoiBoxes.hpp"
 #include "gap_ml/RoiFeatures.hpp"
-#include "gap_ops.h"
+#include "gap_fine.h"
 #include "lyflow/json_writer.h"
 
 namespace lyflow::packs::gap {
@@ -46,6 +46,10 @@ bool readLabelRow(const lyflow::Record& record, const char* key, std::vector<int
 // --------------------------------------------------- profile_tensor / labels_from_logits
 
 /// 两片原始剖面 -> 模型输入张量 [2, 6, 1280]。通道构造是领域约定（T6）。
+}  // namespace
+
+namespace fine {
+
 Status profileTensor(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecContext& ctx) {
   const char* ports[2] = {"primary", "secondary"};
   ml::ProfileRow rows[2];
@@ -78,7 +82,15 @@ Status profileTensor(const Inputs& inputs, const ParamView&, Outputs& outputs, E
   return Status::Ok();
 }
 
+}  // namespace fine
+
+namespace {
+
 /// 逐槽 argmax。严格的 > 让并列时留下最小的类 id，与 np.argmax 一致。
+}  // namespace
+
+namespace fine {
+
 Status labelsFromLogits(const Inputs& inputs, const ParamView&, Outputs& outputs,
                         ExecContext& ctx) {
   const lyflow::Tensor* tensor = inputs.get("tensor").asTensor();
@@ -131,7 +143,15 @@ Status labelsFromLogits(const Inputs& inputs, const ParamView&, Outputs& outputs
   return Status::Ok();
 }
 
+}  // namespace fine
+
+namespace {
+
 // ------------------------------------------------------------------ roi_from_labels
+
+}  // namespace
+
+namespace fine {
 
 Status roiFromLabels(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                      ExecContext& ctx) {
@@ -210,14 +230,21 @@ Status roiFromLabels(const Inputs& inputs, const ParamView& params, Outputs& out
       result.rois.flush_base.values, result.rois.gap_left.values, result.rois.flush_ref.values,
       result.rois.gap_right.values};
   const char* outPorts[4] = {"flushBase", "gapLeft", "flushRef", "gapRight"};
+  lyflow::Box2D made[4];
   for (int i = 0; i < 4; ++i) {
     const auto& b = boxes[static_cast<std::size_t>(i)];
-    outputs.set(outPorts[i], Data::box2d(boxFromMm(b[0], b[1], b[2], b[3])));
+    made[i] = boxFromMm(b[0], b[1], b[2], b[3]);
+    outputs.set(outPorts[i], Data::box2d(made[i]));
   }
+  outputs.set("seam", Data::box2d(seamTowardBox(made[1], made[3])));
   const std::string text = ml::describeRefinements(result.refinements);
   if (!text.empty()) ctx.log(LogLevel::Info, "refine: " + text);
   return Status::Ok();
 }
+
+}  // namespace fine
+
+namespace {
 
 // ------------------------------------------------------------------ labels_to_cloud
 
@@ -258,6 +285,10 @@ Status labelsToCloud(const Inputs& inputs, const ParamView& params, Outputs& out
 
 // ------------------------------------------------------------------ drop_non_finite
 
+}  // namespace
+
+namespace fine {
+
 Status dropNonFinite(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecContext&) {
   const lyflow::PointCloud& in = *inputs.get("cloud").asCloud();
   std::vector<std::int32_t> keep;
@@ -271,6 +302,10 @@ Status dropNonFinite(const Inputs& inputs, const ParamView&, Outputs& outputs, E
   outputs.set("cloud", Data::cloud(in.select(keep)));
   return Status::Ok();
 }
+
+}  // namespace fine
+
+namespace {
 
 // ------------------------------------------------------------------ roll_anchored_crop
 
@@ -316,10 +351,18 @@ lyflow::Box2D boundsOf(const lyflow::PointCloud& a, const lyflow::PointCloud& b)
   return box;
 }
 
+}  // namespace
+
+namespace fine {
+
 Status rollAnchoredCrop(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                         ExecContext& ctx) {
   const lyflow::PointCloud& primary = *inputs.get("primary").asCloud();
   const lyflow::PointCloud& secondary = *inputs.get("secondary").asCloud();
+  // 合并云跟着同一个窗裁（m8-plan：去噪挪到了 gap.read_scan，合并云在裁剪之前就有了）。
+  // 没接就出一片空云 —— 声明过的输出端口必须写。
+  const lyflow::PointCloud* merged = inputs.has("merged") ? inputs.get("merged").asCloud() : nullptr;
+  if (!merged) outputs.set("merged", Data::cloud(lyflow::PointCloud{}));
 
   ::detection::domain::RollAnchoredCropConfiguration config;
   config.enabled = params.flag("enabled");
@@ -365,6 +408,7 @@ Status rollAnchoredCrop(const Inputs& inputs, const ParamView& params, Outputs& 
       window = candidate;
       outputs.set("primary", Data::cloud(primary.select(keepP)));
       outputs.set("secondary", Data::cloud(secondary.select(keepS)));
+      if (merged) outputs.set("merged", Data::cloud(merged->select(insideStrict(*merged, candidate))));
       keptPrimary = keepP.size();
       keptSecondary = keepS.size();
     }
@@ -376,6 +420,7 @@ Status rollAnchoredCrop(const Inputs& inputs, const ParamView& params, Outputs& 
     // 原样透传，窗退成两片云真正的包围盒 —— 无界框画在视图里没有意义。
     outputs.set("primary", Data::cloud(primary));
     outputs.set("secondary", Data::cloud(secondary));
+    if (merged) outputs.set("merged", inputs.get("merged"));
     window = boundsOf(primary, secondary);
     keptPrimary = primary.pointCount();
     keptSecondary = secondary.pointCount();
@@ -400,6 +445,10 @@ Status rollAnchoredCrop(const Inputs& inputs, const ParamView& params, Outputs& 
                               std::to_string(keptPrimary) + "+" + std::to_string(keptSecondary));
   return Status::Ok();
 }
+
+}  // namespace fine
+
+namespace {
 
 // ---------------------------------------------------------------------- 参数小工具
 
@@ -465,7 +514,7 @@ void registerProfileTensor(Registry& r) {
   };
   op.outputs = {Port{"tensor", "Tensor", "Tensor", "[2, 6, 1280] 的 float32 张量。", true}};
   op.capabilities = {false, false, true};
-  op.compute = &profileTensor;
+  op.compute = &fine::profileTensor;
   r.addOperator(std::move(op));
 }
 
@@ -488,14 +537,14 @@ void registerLabelsFromLogits(Registry& r) {
       Port{"labels", "Record", "Labels", "GapLabels：两行各 1280 个类 id。", true},
       examples::labels())};
   op.capabilities = {false, false, true};
-  op.compute = &labelsFromLogits;
+  op.compute = &fine::labelsFromLogits;
   r.addOperator(std::move(op));
 }
 
 void registerRoiFromLabels(Registry& r) {
   OperatorDesc op;
   op.id = "gap.roi_from_labels";
-  op.version = "1.1.0";
+  op.version = "1.2.0";
   op.label = "由标签得到 ROI";
   op.category = "间隙/模型";
   op.keywords = {"roi", "boxes", "refine", "模型框"};
@@ -522,6 +571,9 @@ void registerRoiFromLabels(Registry& r) {
       Port{"gapLeft", "Box2D", "Gap Left", "间隙左侧 ROI（模型的 left_roll）。", true},
       Port{"flushRef", "Box2D", "Flush Ref", "段差参考面 ROI。", true},
       Port{"gapRight", "Box2D", "Gap Right", "间隙右侧 ROI（模型的 right_roll）。", true},
+      Port{"seam", "Box2D", "Seam",
+           "两个间隙框中心连线的中点（零尺寸框），「靠缝那一端」的朝向：接 gap.fit_line 的 toward。",
+           true},
       withExample(Port{"refinements", "Record", "Refinements", "掩膜精修的诊断。", true},
                   examples::refinements()),
       Port{"backdrop", "PointCloud", "Backdrop", "backdrop 输入的原样透传；没接就是空云。", true},
@@ -543,7 +595,7 @@ void registerRoiFromLabels(Registry& r) {
       onlyWhenRefine(mmParam("anchorGapMm", "Anchor Gap", 5.0, "面段离 roll 锚框多近才算数。")),
   };
   op.capabilities = {false, true, true};
-  op.compute = &roiFromLabels;
+  op.compute = &fine::roiFromLabels;
   r.addOperator(std::move(op));
 }
 
@@ -600,14 +652,14 @@ void registerDropNonFinite(Registry& r) {
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "可能带 NaN 槽的点云。", true}};
   op.outputs = {Port{"cloud", "PointCloud", "Cloud", "只剩有限点。", true}};
   op.capabilities = {false, true, true};
-  op.compute = &dropNonFinite;
+  op.compute = &fine::dropNonFinite;
   r.addOperator(std::move(op));
 }
 
 void registerRollAnchoredCrop(Registry& r) {
   OperatorDesc op;
   op.id = "gap.roll_anchored_crop";
-  op.version = "1.0.0";
+  op.version = "1.1.0";
   op.label = "随动裁剪";
   op.category = "间隙/模型";
   op.keywords = {"crop", "roll", "window", "跟随零件"};
@@ -622,10 +674,15 @@ void registerRollAnchoredCrop(Registry& r) {
       Port{"secondary", "PointCloud", "Secondary", "测量帧的 Slave 云。", true},
       Port{"gapLeft", "Box2D", "Gap Left", "模型的 left_roll 框。", true},
       Port{"gapRight", "Box2D", "Gap Right", "模型的 right_roll 框。", true},
+      Port{"merged", "PointCloud", "Merged",
+           "可选：两片合并（并去噪）之后的云，跟着同一个窗裁。不接时 merged 输出是一片空云。",
+           false},
   };
   op.outputs = {
       Port{"primary", "PointCloud", "Primary", "裁过（或原样透传）的 Master 云。", true},
       Port{"secondary", "PointCloud", "Secondary", "裁过（或原样透传）的 Slave 云。", true},
+      Port{"merged", "PointCloud", "Merged", "裁过（或原样透传）的合并云；merged 没接时是空云。",
+           true},
       Port{"window", "Box2D", "Window", "真正生效的窗；没生效时是剩余点的包围盒。", true},
       withExample(Port{"status", "Record", "Status", "GapRollCrop：状态与前后点数。", true},
                   examples::rollCrop()),
@@ -651,7 +708,7 @@ void registerRollAnchoredCrop(Registry& r) {
       camera,
   };
   op.capabilities = {false, true, true};
-  op.compute = &rollAnchoredCrop;
+  op.compute = &fine::rollAnchoredCrop;
   r.addOperator(std::move(op));
 }
 

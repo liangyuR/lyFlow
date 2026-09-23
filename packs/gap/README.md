@@ -59,8 +59,8 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 | `gap.load_template` | → left, right | 读一对模板 PCD |
 | `gap.align_template` | cloud, tplLeft, tplRight → alignment | 全局粗配 + 左右两侧 ICP + 信赖域 + 退化锁定 |
 | `gap.select_alignment` | a,[b],[c],[d] → alignment | 按 `min(l,r)` ↓、`mean` ↓、配置顺序 ↑、id ↑ 选模板 |
-| `gap.result_bundle` | gap, flush, 五个框, 三份 quality, cropStatus, alignment, fallback, 三片云 → bundle | 汇成一个 `GapResultBundle`，字段对齐旧 `QualityMetrics` |
-| `gap.business_rois` | alignment → 四个 Box2D | 业务 ROI 按 ICP 变换搬到当前样本上：只搬框中心，宽高保持配置里的原值。`datumSide` 决定 base ROI 用哪一侧的变换 |
+| `gap.result_bundle` | gap, flush, rois (RoiSet), scan (ScanPair), roiOverall?, 三份 quality, cropStatus?, alignment?, fallback → bundle | 汇成一个 `GapResultBundle`，字段对齐旧 `QualityMetrics`。四个框与 roi_source 取自 `rois`，整体框 / 对齐结果 / 裁剪状态不接端口时取 `rois.info`，点数取自 `scan`（定位之后的那一对云） |
+| `gap.business_rois` | alignment → 四个 Box2D, seam | 业务 ROI 按 ICP 变换搬到当前样本上：只搬框中心，宽高保持配置里的原值。`datumSide` 决定 base ROI 用哪一侧的变换，默认 `auto` 由模板坐标系里的框推出（M8a）；`seam` 是两个缝框中心连线的中点，接 `gap.fit_line.toward` |
 | `gap.fit_line` | cloud, box, toward, refLine? → line, inliers, innerEnd | 直线拟合 + 靠 `toward` 一端的截取重拟合（`toward` 接缝那一侧的 ROI）。`dirMode` 可把方向锚到 `refLine` 上（`band` 只兜底，`fixed` 一律钉死、只拟法向偏移）—— ROI 只有两三毫米宽时它自己拟出来的方向基本是噪声，还会偶尔整条歪几十度而残差很小。`minInliers` 是唯一拦得住「ROI 跑偏、照样拟出一条没意义的线」的地方 |
 | `gap.selected_point` | cloud, box → point | 离 ROI min 角最近的点（取自整片云） |
 | `gap.nearest_to_line` | cloud, line → point | 离基准线垂距最小的云点（`ref_type: nearest point`） |
@@ -84,10 +84,10 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 |---|---|---|
 | `gap.profile_tensor` | primary, secondary → tensor | 两片**原始 1280 槽**剖面 → `[2, 6, 1280]` 模型输入张量 |
 | `gap.labels_from_logits` | tensor → labels | `[2, 类别数, 1280]` 的 logits 逐槽 argmax |
-| `gap.roi_from_labels` | primary, secondary, labels, [backdrop] → 四个 Box2D + refinements + backdrop | 标签 → 四个业务 ROI（带掩膜精修 refine-v1）；`backdrop` 原样透传，给四框叠一片同帧底图 |
+| `gap.roi_from_labels` | primary, secondary, labels, [backdrop] → 四个 Box2D + seam + refinements + backdrop | 标签 → 四个业务 ROI（带掩膜精修 refine-v1）；`seam` 同 `gap.business_rois`；`backdrop` 原样透传，给四框叠一片同帧底图 |
 | `gap.labels_to_cloud` | cloud, labels → cloud | 按类上色，只为了在 3D 视图里看分割结果；接**测量帧**的云 |
 | `gap.drop_non_finite` | cloud → cloud | 剔除无效槽 —— 模型路径的 load 必须保留它们，所以单独一步 |
-| `gap.roll_anchored_crop` | primary, secondary, gapLeft, gapRight → 两片云, window, status | 跟随零件的整体裁剪窗，五种失效保护 + 点数回退 |
+| `gap.roll_anchored_crop` | primary, secondary, gapLeft, gapRight, [merged] → 三片云, window, status | 跟随零件的整体裁剪窗，五种失效保护 + 点数回退；接了 `merged`（合并并去噪之后的云）就跟着同一个窗一起裁 |
 
 中间那一步推理是**通用算子** `ml.onnx_run`（`packs/std-ml`）：
 `gap.profile_tensor` → `ml.onnx_run` → `gap.labels_from_logits`。
@@ -121,6 +121,47 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 `fit_gap_circles` 配了 `*CenterTol` 却没接对应参考线、半径上下限倒置）在加载期的 `validate`
 里报 `bad_param`，图根本跑不起来；依赖数据的约束看 quality 字段与 warn 日志。
 合并顺序 secondary 在前、`filter.crop_box2d` 的 `bounds: open` 仍是现状。
+
+## 积木算子与 Bundle（M8a）
+
+人在空白画布上拼一个测点，用的是七个**积木算子**（`间隙/积木` 分类）。每个对应一个人会说出口的
+步骤，复杂度消化在两种 Bundle 与算子本身里；图始终是平的，每个节点都看得见、改得动。
+
+| id | 输入 → 输出 | 干什么 |
+|---|---|---|
+| `gap.read_scan` | [primary, secondary] → scan | 读剖面：目录 + 前缀（或两个文件，或 `source=inputs` 用两个输入），换到测量帧，合并（secondary 在前）并按需半径去噪。primary / secondary 保留原始 1280 槽（NaN 槽还在） |
+| `gap.locate_template` | scan → rois, alignment, scan | 模板定位：整体框 → 裁 → 模板 → ICP → 选模板 → 业务框。四个角色框写在模板坐标系里；四个固定模板槽，每槽可覆盖四框 |
+| `gap.locate_model` | scan → rois, scan | 模型定位：剖面张量 → ONNX → argmax → 推框（精修）→ 剔 NaN → 跟随裁剪窗（合并云跟着裁） |
+| `gap.role_line` | scan, rois, [refLine] → line, innerEnd, quality | 按角色（datum / target）拟合直线，「靠缝那一端」取两个缝框中心的中点 |
+| `gap.ref_point` | scan, rois, [baseLine] → point, line, quality | 取参考点：`line_end` / `selected_point` / `nearest_point` |
+| `gap.seam_circles` | scan, rois, [refLine], [refLineRight] → left, right, quality | 拟合缝两侧圆（`gap.fit_gap_circles` 的全部参数，常用的六个露在外面） |
+| `gap.datum_direction` | scan, rois → line, quality | 方向基准：角色框背离缝的那一侧推长窗、在长面上拟线，接 `role_line.refLine` |
+
+两种 Bundle（manifest 的 `bundles` 段）：
+
+- **`gap.ScanPair`** = `primary`、`secondary`、`merged`（PointCloud，测量帧）。
+- **`gap.RoiSet`** = `datum`（段差基准面）、`target`（参考面）、`seamLeft`、`seamRight`（缝两侧）
+  + `info`（`GapRoiInfo`：`datumSide`、`source: template|model`、`alignment`、`overallMm`、`cropStatus`）。
+  四个框按**角色**命名，不再有 base / ref。
+
+**方向全部由 RoiSet 推出**（m8-plan L7）：积木算子上一个 `side` / `toward` / `baseSide` / `datumSide`
+都没有。基准件在哪一侧 = datum 框中心在两个缝框中心连线中点的哪一边（模板定位在模板坐标系里推，
+模型定位在样本上推）；「靠缝那一端」= 两个缝框中心的中点。`locate_template` 的加载期校验拦住：
+框退化、缝框左右颠倒或重叠、datum 与 target 落在缝的同一侧、各模板槽的基准件不同侧。
+
+**积木算子不写第二份算法**（L6）：每一步都用 `Step` 原样调一个细粒度算子的 compute —— 包内的
+在 `ops/gap_fine.h` 的 `namespace fine` 里导出，别的包的（`filter.crop_box2d`、`util.merge`、
+`filter.radius_outlier`、`ml.onnx_run`）取注册表里那个函数指针。参数与细粒度算子**同名同义**，
+声明也从那边拷（`paramOf`）。细粒度算子全部保留，两种可以在一张图里混用：细粒度链末端用
+`gap.make_scan_pair` / `gap.make_roi_set` 收成 Bundle，积木链中途用 `gap.split_scan_pair` /
+`gap.split_roi_set` 拆成散线（后者另出 `seam`）。
+
+M8a 的两处行为变化（两种图一致）：
+
+- **去噪挪到合并云上、裁剪之前**：以前是「整体框裁 → 合并 → 去噪」，现在是「合并 → 去噪 → 裁」
+  （`gap.read_scan` 的 `removeOutliers`）。框边上的点不再因为被裁掉邻居而被当成离群点。
+- **基准件在哪一侧按框的几何推**，`flush.base_side` 不再参与；配置与几何不符时导入器在
+  `meta.importNotes` 里记一笔（天幕 L5 / L6：base 框在缝右侧而配置写 left）。
 
 ## 模型 ROI 路径
 
@@ -162,17 +203,27 @@ python packs\gap\tools\lyflow_ab.py --dataset <dataset.yml> `
 
 `lyflow import` 直接把一份 `StandardGap.yml` 转成图，不必装 Python
 （A1-7，实现在 `ops/import_standard_gap.cpp`）。`tools/lyflow_graph_from_config.py` 只为历史对拍保留，
-不跟着算子参数改动同步，生成图一律用导入器。三个 kind 共用同一份实现：
+不跟着算子参数改动同步，生成图一律用导入器。**默认产出积木图**（M8a，m8-plan L12）；
+`--fine`（等价于 kind 后面加 `:fine`）产出细粒度图，每一步一个节点。六个 kind 共用同一份实现：
 
 | kind | 走哪条路径 |
 |---|---|
-| `StandardGap.yml` | auto：看 `setting.yml` 的 `model_roi.enabled` |
-| `StandardGap.yml:template` | 强制模板 / ICP 路径 |
-| `StandardGap.yml:model` | 强制模型 ROI 路径 |
+| `StandardGap.yml` / `StandardGap.yml:fine` | auto：看 `setting.yml` 的 `model_roi.enabled` |
+| `StandardGap.yml:template` / `…:template:fine` | 强制模板 / ICP 路径 |
+| `StandardGap.yml:model` / `…:model:fine` | 强制模型 ROI 路径 |
 
 ```powershell
-lyflow import <StandardGap.yml> --kind StandardGap.yml -o graph.lyflow.json
+lyflow import <StandardGap.yml> --kind StandardGap.yml -o graph.lyflow.json          # 积木图
+lyflow import <StandardGap.yml> --kind StandardGap.yml --fine -o fine.lyflow.json    # 细粒度图
 ```
+
+模板路径的积木图是 10 个节点：`n_scan`（read_scan）→ `n_locate`（locate_template）→ `n_line`
+（role_line）/ `n_ref_point`（ref_point）→ `n_flush`，`n_circles`（seam_circles）→ `n_gap`，两个判定、
+`n_bundle`；配了方向基准多一个 `n_datum`（写不成积木的锚配置退回细粒度的「窗 → 裁 → 拟」，经
+`gap.split_*` 混用）；配了双相机闸，读剖面前面是 `n_load` → `n_camera_guard`、`n_scan` 用
+`source=inputs`。模型 + 回退是 `n_model` 与 `b_n_locate` 并联，`n_fb_rois` / `n_fb_scan` 两个
+fallback，段差那一支与细粒度图一样整条备一份、在拟合结果上回退。两种图都**不再生成**黑盒对照
+`gap.measure_reference`；四框全 0 的模板候选（没配框）两种图都跳过并记进 `meta.importNotes`。
 
 导入器只拿得到 (文本, baseDir) 两样东西，所以模式与路径都从**约定**推导：
 
@@ -191,14 +242,14 @@ lyflow import <StandardGap.yml> --kind StandardGap.yml -o graph.lyflow.json
 
 导入器按 M7 的算子参数写图：
 
-- 每个 `gap.fit_line` 都接 `toward`：基准线与参考线接**同侧的 gap 框**，
-  方向基准线（`n_fit_datum`）接它的锚框。
-- `gap.business_rois` 写 `datumSide`（取自 `flush.base_side`）。
+- 细粒度图的每个 `gap.fit_line` 都接 `toward`：基准线与参考线接业务框节点的 **`seam`**
+  （两个缝框中心的中点，与 `gap.role_line` 同一个判据），方向基准线（`n_fit_datum`）接它的锚框。
+- `gap.business_rois` 不写 `datumSide`（默认 `auto`，由框推出）。
 - 顶层图参数（见 [graph-doc.md](../../docs/graph-doc.md)「顶层图参数」）：
   `gapOffset` 绑定 `n_gap.offset` 与 `n_circles.offset`（备用分支只备份到基准线/参考点，
   间隙与圆拟合节点只有这一份）；模型模式另有 `modelPath`，binds 逐个列出每个用到模型的节点
-  —— `n_infer`（`ml.onnx_run`）与黑盒对照 `n_ref`（`gap.measure_reference`）—— 不用按算子类型的通配。
-  宿主用 `--param gapOffset=0.1` 或 C ABI 的 `params_json` 传值，不再改图里的节点参数。
+  —— 积木图是 `n_model`（`gap.locate_model`），细粒度图是 `n_infer`（`ml.onnx_run`）——
+  不用按算子类型的通配。宿主用 `--param gapOffset=0.1` 或 C ABI 的 `params_json` 传值。
 
 ### `flush.base_direction`：方向锚到旁边那张长面上
 
@@ -287,6 +338,11 @@ gap 跟着 0.648 → 0.637（超差 7 不变）。
 是 0.648 / 7（单钉 Secondary 不加窄带会丢 8 帧）。
 
 ### 带 `flow.fallback` 的完整图
+
+> 这一节讲的是 `--fine` 的细粒度图。M8a 起：备用闭包不再自己读一遍文件（`b_n_load` / `b_n_frame_*`
+> 没了），与模型那一支共用剔过 NaN 的两片云与去噪之后的合并云；`n_fb_overall` 换成了
+> `n_fb_roi_set` / `n_fb_scan_set`（整体窗随 RoiSet 的 info 走），`n_fb_roi_set.choice` 接
+> `gap.result_bundle.fallback`。积木图的回退见上面「导入器」一段。
 
 `model_roi.enabled` 为真时，模型路径与模板路径同在一张图里，十二个 `flow.fallback`
 选择（`ref_type` 不是 `line end` 时十一个）。备用闭包的节点 id 一律带 `b_` 前缀，

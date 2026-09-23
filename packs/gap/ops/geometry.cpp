@@ -6,7 +6,7 @@
 #include <set>
 
 #include "gap_detection/GapUtils.hpp"
-#include "gap_ops.h"
+#include "gap_fine.h"
 
 namespace lyflow::packs::gap {
 namespace {
@@ -38,6 +38,10 @@ std::optional<Eigen::Vector2f> robustCloudCenter(const lyflow::PointCloud& cloud
   };
   return Eigen::Vector2f{median(&xs), median(&ys)};
 }
+
+}  // namespace
+
+namespace fine {
 
 Status overallRoi(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                   ExecContext& ctx) {
@@ -73,6 +77,10 @@ Status overallRoi(const Inputs& inputs, const ParamView& params, Outputs& output
   return Status::Ok();
 }
 
+}  // namespace fine
+
+namespace {
+
 /// Record 里那四个 ROI（毫米）。缺字段时返回 false。
 bool readRois(const nlohmann::json& data, std::array<std::array<double, 4>, 4>& out) {
   static const char* kKeys[4] = {"flushBase", "gapLeft", "flushRef", "gapRight"};
@@ -87,6 +95,10 @@ bool readRois(const nlohmann::json& data, std::array<std::array<double, 4>, 4>& 
   }
   return true;
 }
+
+}  // namespace
+
+namespace fine {
 
 Status businessRois(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                     ExecContext&) {
@@ -104,10 +116,15 @@ Status businessRois(const Inputs& inputs, const ParamView& params, Outputs& outp
 
   // 哪个框是 flushBase 由配置定，datumSide 只决定两块段差框各用哪一侧的 ICP 变换：
   // 基准件在右侧时，base ROI 跟着右侧那片模板走，ref ROI 跟着左侧走。两块间隙框各归各侧。
-  const bool datumRight = params.choice("datumSide") == "right";
+  // auto（默认）按模板坐标系里 base 框相对两个缝框的位置推（m8-plan L7），与 gap.locate_template
+  // 是同一个判据。
+  const std::string side = params.choice("datumSide");
+  bool datumRight = side == "right";
+  if (side == "auto") datumOnRightInRecord(record->data, &datumRight);
   const Eigen::Matrix3f* kTransforms[4] = {datumRight ? &tRight : &tLeft, &tLeft,
                                            datumRight ? &tLeft : &tRight, &tRight};
   const char* kPorts[4] = {"flushBase", "gapLeft", "flushRef", "gapRight"};
+  lyflow::Box2D moved[4];
   for (int i = 0; i < 4; ++i) {
     const auto& r = roiMm[static_cast<std::size_t>(i)];
     const Eigen::Matrix3f& t = *kTransforms[i];
@@ -124,7 +141,9 @@ Status businessRois(const Inputs& inputs, const ParamView& params, Outputs& outp
     box.max[0] = c.x() + halfW;
     box.max[1] = c.y() + halfH;
     outputs.set(kPorts[i], Data::box2d(box));
+    moved[i] = box;
   }
+  outputs.set("seam", Data::box2d(seamTowardBox(moved[1], moved[3])));
   return Status::Ok();
 }
 
@@ -174,10 +193,17 @@ Status nearestToLine(const Inputs& inputs, const ParamView&, Outputs& outputs, E
   return Status::Ok();
 }
 
+}  // namespace fine
+
+namespace {
 
 /// 方向基准窗：把一个锚框沿 side 的方向推出去一条长窗，高度以锚框的 y 范围为中心撑开。
 /// 之所以不是「把锚框加宽」：基准面常常是一道很窄的台肩，它和外面那张长面之间有台阶，
 /// 加宽会让拟合横跨台阶；这里要的是**另一张面**，所以窗口整个挪出去。
+}  // namespace
+
+namespace fine {
+
 Status datumWindow(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
   const lyflow::Box2D& anchor = *inputs.get("anchor").asBox2D();
   // 高度单独找一个锚：x 要贴着缝（模型对缝的定位最稳），y 要贴着基准面。
@@ -208,6 +234,10 @@ std::vector<Issue> validateDatumWindow(const ParamView& params, const std::set<s
   }
   return issues;
 }
+
+}  // namespace fine
+
+namespace {
 
 Param numMm(const char* name, const char* label, double def, const char* doc) {
   Param p;
@@ -275,8 +305,8 @@ void registerDatumWindow(Registry& r) {
       numMm("heightMm", "Height", 2.5, "以锚框的 y 范围为中心，上下各撑开多少。"),
   };
   op.capabilities = {false, true, true};
-  op.compute = &datumWindow;
-  op.validate = &validateDatumWindow;
+  op.compute = &fine::datumWindow;
+  op.validate = &fine::validateDatumWindow;
   r.addOperator(std::move(op));
 }
 
@@ -318,14 +348,14 @@ void registerOverallRoi(Registry& r) {
 
   op.params = {vec4Mm("roi", "ROI", "配置里的整体 ROI，毫米。"), mode, camera};
   op.capabilities = {false, true, true};
-  op.compute = &overallRoi;
+  op.compute = &fine::overallRoi;
   r.addOperator(std::move(op));
 }
 
 void registerBusinessRois(Registry& r) {
   OperatorDesc op;
   op.id = "gap.business_rois";
-  op.version = "1.1.0";
+  op.version = "1.2.0";
   op.label = "业务 ROI";
   op.category = "间隙/配准";
   op.keywords = {"roi", "business", "业务框"};
@@ -341,6 +371,9 @@ void registerBusinessRois(Registry& r) {
       Port{"gapLeft", "Box2D", "Gap Left", "间隙左侧 ROI（左侧变换）。", true},
       Port{"flushRef", "Box2D", "Flush Ref", "段差参考面 ROI。", true},
       Port{"gapRight", "Box2D", "Gap Right", "间隙右侧 ROI（右侧变换）。", true},
+      Port{"seam", "Box2D", "Seam",
+           "两个间隙框中心连线的中点（零尺寸框），「靠缝那一端」的朝向：接 gap.fit_line 的 toward。",
+           true},
   };
 
   Param datumSide;
@@ -349,13 +382,16 @@ void registerBusinessRois(Registry& r) {
   datumSide.label = "Datum Side";
   datumSide.doc =
       "基准件在缝的哪一侧。决定 base ROI 用哪一侧的 ICP 变换（ref ROI 用另一侧）；"
-      "不改变哪个框是 flushBase —— 那由配置里的四个框定。";
-  datumSide.def = Value::text("left");
-  datumSide.options = {EnumOption{"left", "Left", "base ROI 用左侧变换，ref ROI 用右侧。"},
+      "不改变哪个框是 flushBase —— 那由配置里的四个框定。auto（默认）按模板坐标系里 base 框"
+      "中心相对两个间隙框中心的位置推，与 gap.locate_template 同一个判据；只有要故意偏离几何时"
+      "才手填 left / right。";
+  datumSide.def = Value::text("auto");
+  datumSide.options = {EnumOption{"auto", "Auto", "由模板坐标系里的框推出。"},
+                       EnumOption{"left", "Left", "base ROI 用左侧变换，ref ROI 用右侧。"},
                        EnumOption{"right", "Right", "base ROI 用右侧变换，ref ROI 用左侧。"}};
   op.params = {datumSide};
   op.capabilities = {false, true, true};
-  op.compute = &businessRois;
+  op.compute = &fine::businessRois;
   r.addOperator(std::move(op));
 }
 
@@ -375,7 +411,7 @@ void registerSelectedPoint(Registry& r) {
   };
   op.outputs = {Port{"point", "Point2D", "Point", "最近的那个点。", true}};
   op.capabilities = {false, true, true};
-  op.compute = &selectedPoint;
+  op.compute = &fine::selectedPoint;
   r.addOperator(std::move(op));
 }
 
@@ -395,7 +431,7 @@ void registerNearestToLine(Registry& r) {
   };
   op.outputs = {Port{"point", "Point2D", "Point", "垂距最小的那个云点。", true}};
   op.capabilities = {false, true, true};
-  op.compute = &nearestToLine;
+  op.compute = &fine::nearestToLine;
   r.addOperator(std::move(op));
 }
 

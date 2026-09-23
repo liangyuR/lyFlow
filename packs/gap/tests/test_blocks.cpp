@@ -1,0 +1,585 @@
+// 积木算子（m8-plan M8a）：两种建图方式同源、逐帧相同；方向由 RoiSet 推出；加载期拦住填反的框；
+// 积木与细粒度算子在同一张图里混用。数据是合成的一对剖面（左高右低、缝两侧各一段圆角），
+// 仓库不进二进制数据，PCD 在临时目录里现写。
+#include <doctest/doctest.h>
+
+#include <cmath>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <limits>
+#include <set>
+#include <string>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+
+#include "../ops/gap_fine.h"
+#include "exec/executor.h"
+#include "exec/result_store.h"
+#include "helpers.h"
+#include "lyflow/c_api.h"
+#include "lyflow/registry.h"
+
+namespace lyflow::packs::gap {
+void registerPackOps(Registry& r);
+}  // namespace lyflow::packs::gap
+
+namespace {
+
+using namespace lyflow;
+using Json = nlohmann::json;
+namespace fs = std::filesystem;
+
+const Registry& packRegistry() {
+  static Registry r = [] {
+    Registry reg;
+    packs::gap::registerPackOps(reg);
+    return reg;
+  }();
+  return r;
+}
+
+// ------------------------------------------------------------ 合成剖面（毫米）
+// 左板顶面 y=165（测量帧里 y 越小越高），缝边是圆心 (-3, 166)、半径 1 的四分之一圆；
+// 右板顶面 y=164（比左板高 1 mm），缝边圆心 (3, 165)。x 步长 0.05 mm。
+
+struct P2 {
+  double x, y;
+};
+
+std::vector<P2> profile(double shiftMm) {
+  std::vector<P2> pts;
+  for (double x = -20.0 + shiftMm; x < -3.0; x += 0.05) pts.push_back({x, 165.0});
+  for (int k = 0; k <= 30; ++k) {
+    const double t = (M_PI / 2) * k / 30.0 + shiftMm * 0.3;
+    if (t > M_PI / 2) break;
+    pts.push_back({-3.0 + std::sin(t), 166.0 - std::cos(t)});
+  }
+  for (int k = 30; k >= 0; --k) {
+    const double t = (M_PI / 2) * k / 30.0 + shiftMm * 0.3;
+    if (t > M_PI / 2) continue;
+    pts.push_back({3.0 - std::sin(t), 165.0 - std::cos(t)});
+  }
+  for (double x = 3.0 + 0.05 - shiftMm; x < 20.0; x += 0.05) pts.push_back({x, 164.0});
+  return pts;
+}
+
+/// 传感器帧（x=u, y=0, z=h）的 ASCII PCD，米。nanEvery>0 时每隔几个点插一个 NaN 槽。
+void writeSensorPcd(const fs::path& file, const std::vector<P2>& pts, int nanEvery) {
+  std::vector<std::array<double, 3>> rows;
+  for (std::size_t i = 0; i < pts.size(); ++i) {
+    if (nanEvery > 0 && i % static_cast<std::size_t>(nanEvery) == 0) {
+      rows.push_back({std::numeric_limits<double>::quiet_NaN(), 0.0,
+                      std::numeric_limits<double>::quiet_NaN()});
+    }
+    rows.push_back({pts[i].x / 1000.0, 0.0, pts[i].y / 1000.0});
+  }
+  std::ofstream out(file);
+  out << "# .PCD v0.7\nVERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nCOUNT 1 1 1\n"
+      << "WIDTH " << rows.size() << "\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\nPOINTS " << rows.size()
+      << "\nDATA ascii\n";
+  for (const auto& r : rows) {
+    for (int k = 0; k < 3; ++k) {
+      if (k) out << ' ';
+      if (std::isnan(r[k])) {
+        out << "nan";
+      } else {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.7f", r[k]);
+        out << buf;
+      }
+    }
+    out << '\n';
+  }
+}
+
+/// 模板是测量帧（x, y, 0）。
+void writeTemplatePcd(const fs::path& file, const std::vector<P2>& pts, bool left) {
+  std::vector<P2> side;
+  for (const P2& p : pts) {
+    if ((p.x < 0) == left) side.push_back(p);
+  }
+  std::ofstream out(file);
+  out << "# .PCD v0.7\nVERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nCOUNT 1 1 1\n"
+      << "WIDTH " << side.size() << "\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\nPOINTS " << side.size()
+      << "\nDATA ascii\n";
+  for (const P2& p : side) {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%.7f %.7f 0", p.x / 1000.0, p.y / 1000.0);
+    out << buf << '\n';
+  }
+}
+
+constexpr const char* kSyntheticConfig = R"(
+template_dir: StandardGap
+common_settings:
+  seg_mode: ROI
+  overall_roi: [-18, 150, 18, 180]
+  overall_roi_mode: auto_center
+  line_fit_distance: 0.1
+  circle_fit_distance: 0.03
+  using_camera: Both
+  filter: {using_removal: true, filter_radius: 0.4, filter_neighbors: 3}
+flush:
+  base_side: left
+  base_type: fit line
+  ref_type: line end
+  base_roi: [-15, 163, -5, 167]
+  ref_roi: [5, 162, 15, 166]
+  segment_points: 60
+  offset: 0
+  tolerances: {nominal: 1, up_deviation: 1, low_deviation: -1}
+gap:
+  left_type: circle
+  right_type: circle
+  definition: B
+  left_roi: [-4.5, 164, -1.5, 167]
+  right_roi: [1.5, 163, 4.5, 166]
+  radius: {left_circle_radius_min: 0.5, left_circle_radius_max: 2.0,
+           right_circle_radius_min: 0.5, right_circle_radius_max: 2.0}
+  tolerances: {nominal: 4, up_deviation: 1, low_deviation: -1}
+align:
+  align_cloud: true
+  ICP: {num_neighbor: 10, min_score: 30, max_matching_dist: 2, max_fitness_dist: 0.5,
+        max_iteration_num: 50, bidirection_align: false}
+  template_candidates:
+    - {id: f1, left: left.pcd, right: right.pcd}
+)";
+
+struct Scene {
+  explicit Scene(const std::string& tag) {
+    root = fs::temp_directory_path() / ("lyflow-blocks-" + tag);
+    fs::remove_all(root);
+    fs::create_directories(root / "StandardGap");
+    const std::vector<P2> master = profile(0.0);
+    const std::vector<P2> slave = profile(0.025);
+    writeSensorPcd(root / "LaserProfile_L0_Master_x.pcd", master, 97);
+    writeSensorPcd(root / "LaserProfile_R1_Slave_x.pcd", slave, 0);
+    writeTemplatePcd(root / "StandardGap" / "left.pcd", master, true);
+    writeTemplatePcd(root / "StandardGap" / "right.pcd", master, false);
+  }
+  ~Scene() {
+    std::error_code ec;
+    fs::remove_all(root, ec);
+  }
+  fs::path root;
+};
+
+Json importAs(const char* kind, const std::string& yaml, const fs::path& baseDir) {
+  const ImporterDesc* desc = packRegistry().findImporter(kind);
+  REQUIRE(desc != nullptr);
+  std::string out;
+  const Status s = desc->fn(yaml, baseDir, out);
+  REQUIRE_MESSAGE(s.ok, s.message);
+  return Json::parse(out);
+}
+
+struct Reading {
+  double flush = std::numeric_limits<double>::quiet_NaN();
+  double gap = std::numeric_limits<double>::quiet_NaN();
+  bool ok = false;
+  std::string status;
+};
+
+Reading run(const Json& doc, const fs::path& baseDir) {
+  test::Session s(doc, baseDir);
+  test::RunLog& log = s.wait();
+  Reading r;
+  r.status = log.runStatus();
+  Data flush, gap;
+  exec::ResultStore& store = exec::ResultStore::instance();
+  if (store.get(s.runId(), "n_flush", "value", flush) && store.get(s.runId(), "n_gap", "value", gap)) {
+    r.flush = flush.asMeasurement()->value;
+    r.gap = gap.asMeasurement()->value;
+    r.ok = flush.asMeasurement()->ok && gap.asMeasurement()->ok;
+  }
+  if (!r.ok) {
+    for (const auto& e : log.ofKind("node_state")) {
+      if (e.value("state", "") == "error") MESSAGE(e.dump());
+    }
+  }
+  return r;
+}
+
+std::vector<Json> errorsOf(const Json& doc) {
+  std::vector<Json> out;
+  for (const Json& d : Json::parse(exec::validateGraphJson(doc.dump(), {}))) {
+    if (d.value("severity", "") == "error") {
+      MESSAGE(d.dump());
+      out.push_back(d);
+    }
+  }
+  return out;
+}
+
+Json& nodeOf(Json& doc, const char* id) {
+  for (Json& n : doc["nodes"]) {
+    if (n["id"] == id) return n;
+  }
+  FAIL("图里没有节点 " << id);
+  static Json none;
+  return none;
+}
+
+void addEdge(Json& doc, const std::string& from, const char* fromPort, const std::string& to,
+             const char* toPort) {
+  static int counter = 0;
+  doc["edges"].push_back({{"id", "x" + std::to_string(counter++)},
+                          {"from", {{"node", from}, {"port", fromPort}}},
+                          {"to", {{"node", to}, {"port", toPort}}}});
+}
+
+void dropEdgesInto(Json& doc, const char* node, const char* port) {
+  Json kept = Json::array();
+  for (const Json& e : doc["edges"]) {
+    if (e["to"]["node"] == node && e["to"]["port"] == port) continue;
+    kept.push_back(e);
+  }
+  doc["edges"] = std::move(kept);
+}
+
+const std::set<std::string>& blockOps() {
+  static const std::set<std::string> ops = {"gap.read_scan",     "gap.locate_template",
+                                            "gap.locate_model",  "gap.role_line",
+                                            "gap.ref_point",     "gap.seam_circles",
+                                            "gap.datum_direction"};
+  return ops;
+}
+
+}  // namespace
+
+TEST_CASE("积木算子与细粒度算子同源：细粒度算子注册的 compute 就是积木算子调的那个包内函数") {
+  namespace fine = packs::gap::fine;
+  const std::pair<const char*, ComputeFn> pairs[] = {
+      {"gap.load_profile_pair", &fine::loadPair},
+      {"gap.to_measurement_frame", &fine::toMeasurementFrame},
+      {"gap.load_template", &fine::loadTemplate},
+      {"gap.overall_roi", &fine::overallRoi},
+      {"gap.align_template", &fine::alignTemplate},
+      {"gap.select_alignment", &fine::selectAlignment},
+      {"gap.business_rois", &fine::businessRois},
+      {"gap.fit_line", &fine::fitLine},
+      {"gap.selected_point", &fine::selectedPoint},
+      {"gap.nearest_to_line", &fine::nearestToLine},
+      {"gap.fit_gap_circles", &fine::fitGapCircles},
+      {"gap.datum_window", &fine::datumWindow},
+      {"gap.profile_tensor", &fine::profileTensor},
+      {"gap.labels_from_logits", &fine::labelsFromLogits},
+      {"gap.roi_from_labels", &fine::roiFromLabels},
+      {"gap.drop_non_finite", &fine::dropNonFinite},
+      {"gap.roll_anchored_crop", &fine::rollAnchoredCrop},
+  };
+  for (const auto& [id, fn] : pairs) {
+    CAPTURE(id);
+    const OperatorDesc* op = packRegistry().find(id);
+    REQUIRE(op != nullptr);
+    CHECK(op->compute == fn);
+  }
+  // 校验钩子也是同一个：role_line / seam_circles / datum_direction 直接挂细粒度算子的
+  CHECK(packRegistry().find("gap.role_line")->validate == packRegistry().find("gap.fit_line")->validate);
+  CHECK(packRegistry().find("gap.seam_circles")->validate ==
+        packRegistry().find("gap.fit_gap_circles")->validate);
+  CHECK(packRegistry().find("gap.datum_direction")->validate ==
+        packRegistry().find("gap.datum_window")->validate);
+}
+
+TEST_CASE("积木算子的参数里没有 side / toward / baseSide / datumSide（m8-plan L7）") {
+  for (const std::string& id : blockOps()) {
+    CAPTURE(id);
+    const OperatorDesc* op = packRegistry().find(id);
+    REQUIRE(op != nullptr);
+    for (const Param& p : op->params) {
+      CAPTURE(p.name);
+      for (const char* banned : {"side", "toward", "baseSide", "datumSide"}) {
+        CHECK(p.name != banned);
+      }
+    }
+  }
+  // 两种 Bundle 都声明了，字段按角色命名、不再有 base / ref
+  const BundleDesc* rois = packRegistry().findBundle("gap.RoiSet");
+  REQUIRE(rois != nullptr);
+  std::vector<std::string> names;
+  for (const BundleField& f : rois->fields) names.push_back(f.name);
+  CHECK(names == std::vector<std::string>{"datum", "target", "seamLeft", "seamRight", "info"});
+  const BundleDesc* scan = packRegistry().findBundle("gap.ScanPair");
+  REQUIRE(scan != nullptr);
+  CHECK(scan->fields.size() == 3);
+  // 只装了 gap 的注册表没有 core 的类型表，自检用进程内那份全量的
+  CHECK(ensureRegistry().validate().empty());
+}
+
+TEST_CASE("导入的模板路径积木图：10 个节点，只用积木算子与 flush / gap / judge / result_bundle") {
+  Scene scene("count");
+  const Json doc = importAs("StandardGap.yml:template", kSyntheticConfig, scene.root);
+  CHECK(doc["nodes"].size() == 10);
+  CHECK(doc["nodes"].size() <= 12);
+  const std::set<std::string> allowed = {"gap.flush", "gap.gap", "gap.judge", "gap.result_bundle"};
+  for (const Json& n : doc["nodes"]) {
+    const std::string op = n["op"];
+    CAPTURE(op);
+    CHECK((blockOps().count(op) || allowed.count(op)));
+    for (const char* banned : {"side", "toward", "baseSide", "datumSide"}) {
+      CHECK_FALSE(n.value("params", Json::object()).contains(banned));
+    }
+  }
+  // 「同一个框接两次」的边一条都没有：每个节点的每个输入端口只从一个上游来，而积木图里
+  // 没有任何 Box2D 边（框都在 RoiSet 里走）
+  for (const Json& e : doc["edges"]) {
+    CHECK(e["from"]["port"] != "flushBase");
+    CHECK(e["from"]["port"] != "gapLeft");
+  }
+  CHECK(errorsOf(doc).empty());
+}
+
+TEST_CASE("夹具上积木图与 --fine 细粒度图的 flush、gap 逐位相同（M8a 验收 1）") {
+  Scene scene("same");
+  const Json blocks = importAs("StandardGap.yml:template", kSyntheticConfig, scene.root);
+  const Json fine = importAs("StandardGap.yml:template:fine", kSyntheticConfig, scene.root);
+  CHECK(errorsOf(blocks).empty());
+  CHECK(errorsOf(fine).empty());
+  const Reading a = run(blocks, scene.root);
+  const Reading b = run(fine, scene.root);
+  REQUIRE(a.ok);
+  REQUIRE(b.ok);
+  CHECK(a.flush == b.flush);
+  CHECK(a.gap == b.gap);
+  // 合成剖面：参考面比基准面高 1 mm（y 小 = 高 = 正），两圆心距 √37、各减一个半径
+  CHECK(a.flush == doctest::Approx(1.0).epsilon(0.05));
+  CHECK(a.gap == doctest::Approx(std::sqrt(37.0) - 2.0).epsilon(0.05));
+  MESSAGE("flush=" << a.flush << " gap=" << a.gap);
+}
+
+TEST_CASE("gap 的两种 Bundle：scan.merged 取得到点云、图输出指向字段、ScanPair 接 RoiSet 报错（M8a 验收 3）") {
+  Scene scene("bundle");
+  Json doc = importAs("StandardGap.yml:template", kSyntheticConfig, scene.root);
+  doc["outputs"]["datum"] = {{"node", "n_locate"}, {"port", "rois.datum"}};
+  doc["outputs"]["side"] = {{"node", "n_locate"}, {"port", "rois.info"}};
+  CHECK(errorsOf(doc).empty());
+  test::Session s(doc, scene.root);
+  test::RunLog& log = s.wait();
+  REQUIRE(log.finalState("n_flush") == "done");
+
+  lyflow_cloud_view view{};
+  REQUIRE(lyflow_output_cloud(s.runId().c_str(), "n_scan", "scan.merged", 0, &view) == 0);
+  const std::uint32_t full = view.total_points;
+  CHECK(full > 1000u);
+  lyflow_cloud_view_free(&view);
+  // 定位之后的合并云是整体框裁过的：点不会比读剖面的那一份多
+  REQUIRE(lyflow_output_cloud(s.runId().c_str(), "n_locate", "scan.merged", 0, &view) == 0);
+  CHECK(view.total_points <= full);
+  lyflow_cloud_view_free(&view);
+
+  const Json outputs = Json::parse(exec::runOutputsJson(s.runId()));
+  CHECK(outputs["datum"]["type"] == "Box2D");
+  CHECK(outputs["datum"]["value"]["min"][0].get<double>() == doctest::Approx(-0.015).epsilon(0.01));
+  CHECK(outputs["side"]["value"]["data"]["datumSide"] == "left");
+  CHECK(outputs["side"]["value"]["data"]["source"] == "template");
+
+  Json wrong = importAs("StandardGap.yml:template", kSyntheticConfig, scene.root);
+  dropEdgesInto(wrong, "n_line", "rois");
+  addEdge(wrong, "n_scan", "scan", "n_line", "rois");
+  bool mismatch = false;
+  for (const Json& e : errorsOf(wrong)) {
+    if (e["code"] == "type_mismatch" && e["nodeId"] == "n_line") {
+      mismatch = true;
+      CHECK(e["message"].get<std::string>().find("Bundle<gap.ScanPair> → Bundle<gap.RoiSet>") !=
+            std::string::npos);
+    }
+  }
+  CHECK(mismatch);
+}
+
+TEST_CASE("同一张图里混用积木与细粒度算子能跑，结果与纯积木图相同（M8a 验收 5）") {
+  Scene scene("mixed");
+  const Json blocks = importAs("StandardGap.yml:template", kSyntheticConfig, scene.root);
+  const Reading pure = run(blocks, scene.root);
+  REQUIRE(pure.ok);
+
+  SUBCASE("积木定位 → split_* → 细粒度的裁剪 + 拟合 → gap.flush") {
+    Json doc = blocks;
+    doc["nodes"].push_back({{"id", "x_rois"}, {"op", "gap.split_roi_set"}});
+    doc["nodes"].push_back({{"id", "x_scan"}, {"op", "gap.split_scan_pair"}});
+    doc["nodes"].push_back({{"id", "x_crop"}, {"op", "filter.crop_box2d"}, {"params", {{"bounds", "open"}}}});
+    doc["nodes"].push_back(
+        {{"id", "x_fit"}, {"op", "gap.fit_line"},
+         {"params", {{"distThresh", 0.1}, {"segmentPoints", 60}, {"endpoints", "roi_intersection"}}}});
+    addEdge(doc, "n_locate", "rois", "x_rois", "rois");
+    addEdge(doc, "n_locate", "scan", "x_scan", "scan");
+    addEdge(doc, "x_scan", "merged", "x_crop", "cloud");
+    addEdge(doc, "x_rois", "datum", "x_crop", "box");
+    addEdge(doc, "x_crop", "cloud", "x_fit", "cloud");
+    addEdge(doc, "x_rois", "datum", "x_fit", "box");
+    addEdge(doc, "x_rois", "seam", "x_fit", "toward");
+    dropEdgesInto(doc, "n_flush", "baseLine");
+    addEdge(doc, "x_fit", "line", "n_flush", "baseLine");
+    CHECK(errorsOf(doc).empty());
+    const Reading mixed = run(doc, scene.root);
+    REQUIRE(mixed.ok);
+    CHECK(mixed.flush == pure.flush);
+    CHECK(mixed.gap == pure.gap);
+  }
+  SUBCASE("细粒度的 business_rois → make_roi_set → 积木的 role_line") {
+    Json fine = importAs("StandardGap.yml:template:fine", kSyntheticConfig, scene.root);
+    fine["nodes"].push_back({{"id", "x_line"}, {"op", "gap.role_line"},
+                             {"params", {{"distThresh", 0.1}, {"segmentPoints", 60}}}});
+    addEdge(fine, "n_scan_set", "scan", "x_line", "scan");
+    addEdge(fine, "n_roi_set", "rois", "x_line", "rois");
+    dropEdgesInto(fine, "n_flush", "baseLine");
+    addEdge(fine, "x_line", "line", "n_flush", "baseLine");
+    CHECK(errorsOf(fine).empty());
+    const Reading mixed = run(fine, scene.root);
+    REQUIRE(mixed.ok);
+    CHECK(mixed.flush == pure.flush);
+    CHECK(mixed.gap == pure.gap);
+  }
+}
+
+TEST_CASE("locate_template 把 datum 框拖到 target 那一侧：validate 在执行前就报错（M8a 验收 4）") {
+  Scene scene("dragged");
+  Json doc = importAs("StandardGap.yml:template", kSyntheticConfig, scene.root);
+  // 模板槽 1 用的是基础的四个框（与顶层一致），把 datum 挪到缝右边、target 旁边
+  nodeOf(doc, "n_locate")["params"]["datumRoi"] = Json::array({16, 162, 17.5, 166});
+  const std::vector<Json> errors = errorsOf(doc);
+  REQUIRE(errors.size() == 1);
+  CHECK(errors[0]["nodeId"] == "n_locate");
+  CHECK(errors[0]["code"] == "bad_param");
+  CHECK(errors[0]["phase"] == "validate");
+  CHECK(errors[0]["paramPath"] == "datumRoi");
+  CHECK(errors[0]["message"].get<std::string>().find("同一侧") != std::string::npos);
+
+  test::Session s(doc, scene.root);
+  test::RunLog& log = s.wait();
+  CHECK(log.finalState("n_locate") == "error");
+  bool ran = false;
+  for (const auto& e : log.ofKind("node_state")) {
+    if (e.value("nodeId", "") == "n_locate" && e.value("state", "") == "running") ran = true;
+  }
+  CHECK_FALSE(ran);
+
+  SUBCASE("其余几条：框退化、缝框颠倒、槽之间基准件不同侧") {
+    Json bad = importAs("StandardGap.yml:template", kSyntheticConfig, scene.root);
+    Json& p = nodeOf(bad, "n_locate")["params"];
+    p["seamLeftRoi"] = Json::array({1.5, 163, 4.5, 166});
+    p["seamRightRoi"] = Json::array({-4.5, 164, -1.5, 167});
+    CHECK(errorsOf(bad).at(0)["message"].get<std::string>().find("颠倒") != std::string::npos);
+    p["seamRightRoi"] = Json::array({4.5, 163, 1.5, 166});
+    CHECK(errorsOf(bad).at(0)["message"].get<std::string>().find("退化") != std::string::npos);
+
+    Json slots = importAs("StandardGap.yml:template", kSyntheticConfig, scene.root);
+    Json& q = nodeOf(slots, "n_locate")["params"];
+    q["template2Enabled"] = true;
+    q["template2Override"] = true;
+    q["template2DatumRoi"] = Json::array({5, 162, 15, 166});
+    q["template2TargetRoi"] = Json::array({-15, 163, -5, 167});
+    q["template2SeamLeftRoi"] = Json::array({-4.5, 164, -1.5, 167});
+    q["template2SeamRightRoi"] = Json::array({1.5, 163, 4.5, 166});
+    const auto e = errorsOf(slots);
+    REQUIRE(e.size() == 1);
+    CHECK(e[0]["paramPath"] == "template2DatumRoi");
+    CHECK(e[0]["message"].get<std::string>().find("不一致") != std::string::npos);
+  }
+}
+
+TEST_CASE("基准件的侧由框推出：base_side 与几何不符时两种图都按几何，meta 里记一笔") {
+  Scene scene("side");
+  std::string yaml = kSyntheticConfig;
+  const std::string from = "base_side: left";
+  yaml.replace(yaml.find(from), from.size(), "base_side: right");
+  const Json blocks = importAs("StandardGap.yml:template", yaml, scene.root);
+  const Json fine = importAs("StandardGap.yml:template:fine", yaml, scene.root);
+  for (const Json* doc : {&blocks, &fine}) {
+    REQUIRE((*doc)["meta"].contains("importNotes"));
+    CHECK((*doc)["meta"]["importNotes"][0].get<std::string>().find("base_side=right") !=
+          std::string::npos);
+  }
+  const Reading a = run(blocks, scene.root);
+  const Reading b = run(fine, scene.root);
+  REQUIRE(a.ok);
+  CHECK(a.flush == b.flush);
+  CHECK(a.gap == b.gap);
+}
+
+TEST_CASE("四框全 0 的模板候选两种图都跳过；候选之间基准件不同侧就不导入") {
+  std::string yaml = kSyntheticConfig;
+  const std::string from = "    - {id: f1, left: left.pcd, right: right.pcd}\n";
+  std::string zero = yaml;
+  zero.replace(zero.find(from), from.size(),
+               "    - {id: f0, left: a.pcd, right: b.pcd, rois: {flush: {base_roi: [0, 0, 0, 0],"
+               " ref_roi: [0, 0, 0, 0]}, gap: {left_roi: [0, 0, 0, 0], right_roi: [0, 0, 0, 0]}}}\n" +
+                   from);
+  const Json blocks = importAs("StandardGap.yml:template", zero, fs::path());
+  const Json fine = importAs("StandardGap.yml:template:fine", zero, fs::path());
+  CHECK(nodeOf(const_cast<Json&>(blocks), "n_locate")["params"]["template1Id"] == "f1");
+  CHECK_FALSE(nodeOf(const_cast<Json&>(blocks), "n_locate")["params"].contains("template2Enabled"));
+  for (const Json& n : fine["nodes"]) CHECK(n["id"] != "n_tpl_f0");
+  CHECK(blocks["meta"]["importNotes"][0].get<std::string>().find("f0") != std::string::npos);
+
+  std::string flipped = yaml;
+  flipped.replace(flipped.find(from), from.size(),
+                  from + "    - {id: f2, left: a.pcd, right: b.pcd, rois: {flush: {base_roi: [5, 162,"
+                         " 15, 166], ref_roi: [-15, 163, -5, 167]}}}\n");
+  const ImporterDesc* desc = packRegistry().findImporter("StandardGap.yml:template");
+  std::string out;
+  const Status s = desc->fn(flipped, fs::path(), out);
+  CHECK_FALSE(s.ok);
+  CHECK(s.message.find("不一致") != std::string::npos);
+}
+
+TEST_CASE("方向基准：写得成积木就是一个 gap.datum_direction，写不成就退回细粒度、经 split_* 混用") {
+  auto with = [](const std::string& line) {
+    std::string yaml = kSyntheticConfig;
+    const std::size_t at = yaml.find("gap:\n");
+    yaml.insert(at, line);
+    return yaml;
+  };
+  auto edgeFrom = [](const Json& doc, const char* to, const char* port) -> std::string {
+    for (const Json& e : doc["edges"]) {
+      if (e["to"]["node"] == to && e["to"]["port"] == port) return e["from"]["node"];
+    }
+    return {};
+  };
+  {
+    const Json doc = importAs("StandardGap.yml:template",
+                              with("  base_direction: {datum: long_plane, mode: band}\n"), fs::path());
+    CHECK(edgeFrom(doc, "n_line", "refLine") == "n_datum");
+    const Json& p = nodeOf(const_cast<Json&>(doc), "n_datum")["params"];
+    CHECK_FALSE(p.contains("role"));
+    CHECK(nodeOf(const_cast<Json&>(doc), "n_line")["params"]["dirMode"] == "band");
+    CHECK(doc["nodes"].size() == 11);
+  }
+  {
+    // R4 那种：锚在缝的另一侧、高度锚在参考面 —— 就是 role=target
+    const Json doc = importAs(
+        "StandardGap.yml:template",
+        with("  base_direction: {datum: long_plane, anchor: gap_right, height_anchor: flush_ref}\n"),
+        fs::path());
+    CHECK(nodeOf(const_cast<Json&>(doc), "n_datum")["params"]["role"] == "target");
+  }
+  {
+    // 锚在左缝框、高度锚在右边的参考面：不是任何一个角色的「背离缝的那一侧」，积木写不出来
+    const Json doc = importAs(
+        "StandardGap.yml:template",
+        with("  base_direction: {datum: long_plane, anchor: gap_left, height_anchor: flush_ref}\n"),
+        fs::path());
+    CHECK(edgeFrom(doc, "n_line", "refLine") == "n_fit_datum");
+    CHECK(edgeFrom(doc, "n_datum_box", "anchor") == "n_split_rois");
+    CHECK(edgeFrom(doc, "n_crop_datum", "cloud") == "n_split_scan");
+    CHECK(errorsOf(doc).empty());
+  }
+}
+
+TEST_CASE("read_scan：source=inputs 要两个输入都接，接了输入又不是 inputs 也报") {
+  const OperatorDesc* op = packRegistry().find("gap.read_scan");
+  REQUIRE(op != nullptr);
+  REQUIRE(op->validate != nullptr);
+  ParamMap params;
+  for (const Param& p : op->params) params[p.name] = p.def;
+  const fs::path base;
+  params["source"] = Value::text("inputs");
+  CHECK(op->validate(ParamView(params, base), {"primary"}).size() == 1);
+  CHECK(op->validate(ParamView(params, base), {"primary", "secondary"}).empty());
+  params["source"] = Value::text("dir");
+  CHECK(op->validate(ParamView(params, base), {"primary", "secondary"}).size() == 1);
+  CHECK(op->validate(ParamView(params, base), {}).empty());
+}

@@ -51,7 +51,9 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
         --summary：JSON Lines 末尾多一行 {\"kind\":\"run_summary\", ...}，
                    status 三态 ok|degraded|failed，每个图级输出三态 value|inactive|failed，
                    外加 decisions（全部 FallbackChoice）。ADR-0022。
-  lyflow import   <file> --kind <kind> [-o <out.lyflow.json>] [--base-dir <dir>]
+  lyflow import   <file> --kind <kind> [--fine] [-o <out.lyflow.json>] [--base-dir <dir>]
+        --fine：产出细粒度图（每一步一个节点）而不是默认的积木图（m8-plan L12），
+        等价于 --kind <kind>:fine；导入器没注册那种 kind 时报错。
   lyflow validate <graph> [--base-dir <dir>] [--set ...] [--param ...]
   lyflow plan     <graph> [--to <nodeId>]... [--base-dir <dir>] [--set ...] [--param ...]
         每个节点一行：cacheKey、cached、level、upstreamMissing、bypass，
@@ -1024,6 +1026,14 @@ fn cmd_import(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         line(err, "缺 --kind。可用的 kind 见 `lyflow manifest` 的 importers 段");
         return EXIT_USAGE;
     };
+    // --fine 是「同一种格式的细粒度那一版」：导入器把它注册成 `<kind>:fine`（m8-plan L12）。
+    let fine_kind;
+    let kind = if parsed.has("fine") && !kind.ends_with(":fine") {
+        fine_kind = format!("{kind}:fine");
+        fine_kind.as_str()
+    } else {
+        kind
+    };
     let core = match core() {
         Ok(c) => c,
         Err(e) => return fail(err, &e, EXIT_FAILED),
@@ -1589,7 +1599,7 @@ const VALUE_OPTS: &[&str] = &[
 ];
 const BOOL_OPTS: &[&str] = &[
     "no-cache", "preview", "write", "check", "json", "help", "outputs", "dry-run",
-    "summary", "no-summary",
+    "summary", "no-summary", "fine",
 ];
 
 pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
@@ -3181,5 +3191,94 @@ mod tests {
             assert_eq!(d["phase"], "validate", "{diags}");
             assert_eq!(d["nodeId"], "fit", "{diags}");
         }
+    }
+
+    /// m8-plan L12 与 M8a 验收 4：`import` 默认产出积木图，`--fine` 产出细粒度图；
+    /// 积木图里把 datum 框拖到 target 那一侧，`lyflow validate` 在执行前就报错。
+    /// 导入器属于 gap 包，没编进来时整条跳过（manifest 里没有这个 kind）。
+    #[test]
+    fn import_defaults_to_blocks_and_fine_flag_gives_the_fine_graph() {
+        let manifest = cli(&["manifest"]).first();
+        let has_importer = manifest["importers"]
+            .as_array()
+            .map(|a| a.iter().any(|i| i["kind"] == "StandardGap.yml:template:fine"))
+            .unwrap_or(false);
+        let gap_built = std::env::var("LYFLOW_PACKS").unwrap_or_default().contains("gap");
+        assert!(!gap_built || has_importer, "LYFLOW_PACKS 带了 gap，却没有细粒度导入器");
+        if !has_importer {
+            return;
+        }
+        let dir = workspace("m8a-import");
+        let config = dir.join("StandardGap.yml");
+        std::fs::write(
+            &config,
+            "common_settings: {seg_mode: ROI, overall_roi: [-18, 150, 18, 180]}\n\
+             flush: {base_type: fit line, ref_type: line end, base_roi: [-15, 163, -5, 167],\
+               ref_roi: [5, 162, 15, 166]}\n\
+             gap: {left_type: circle, right_type: circle, left_roi: [-4.5, 164, -1.5, 167],\
+               right_roi: [1.5, 163, 4.5, 166], radius: {left_circle_radius_min: 0.5,\
+               left_circle_radius_max: 2, right_circle_radius_min: 0.5, right_circle_radius_max: 2}}\n\
+             align: {align_cloud: true}\n",
+        )
+        .unwrap();
+        let config = config.to_string_lossy().into_owned();
+        let blocks_path = dir.join("blocks.lyflow.json").to_string_lossy().into_owned();
+        let fine_path = dir.join("fine.lyflow.json").to_string_lossy().into_owned();
+
+        let r = cli(&["import", &config, "--kind", "StandardGap.yml:template", "-o", &blocks_path]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        let r = cli(&["import", &config, "--kind", "StandardGap.yml:template", "--fine", "-o", &fine_path]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+
+        let read = |p: &str| -> Value { serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap() };
+        let ops = |doc: &Value| -> Vec<String> {
+            doc["nodes"].as_array().unwrap().iter().map(|n| n["op"].as_str().unwrap().to_string()).collect()
+        };
+        let blocks = read(&blocks_path);
+        let fine = read(&fine_path);
+        assert!(ops(&blocks).contains(&"gap.locate_template".to_string()), "{blocks}");
+        assert!(!ops(&blocks).contains(&"gap.fit_line".to_string()), "{blocks}");
+        assert!(ops(&blocks).len() <= 12, "{blocks}");
+        assert!(ops(&fine).contains(&"gap.fit_line".to_string()), "{fine}");
+        assert!(ops(&fine).contains(&"gap.business_rois".to_string()), "{fine}");
+        for doc in [&blocks, &fine] {
+            assert!(!ops(doc).contains(&"gap.measure_reference".to_string()), "{doc}");
+        }
+        for p in [&blocks_path, &fine_path] {
+            let v = cli(&["validate", p]);
+            assert_eq!(v.code, EXIT_OK, "{p}: {}", v.out);
+        }
+
+        // 把 datum 框拖到缝右边、target 旁边
+        let mut dragged = blocks.clone();
+        for n in dragged["nodes"].as_array_mut().unwrap() {
+            if n["op"] == "gap.locate_template" {
+                n["params"]["datumRoi"] = json!([16, 162, 17.5, 166]);
+            }
+        }
+        let dragged_path = dir.join("dragged.lyflow.json");
+        std::fs::write(&dragged_path, dragged.to_string()).unwrap();
+        let dragged_path = dragged_path.to_string_lossy().into_owned();
+        let v = cli(&["validate", &dragged_path]);
+        assert_eq!(v.code, EXIT_INVALID, "{}", v.out);
+        let diags = v.first();
+        let d = diags
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["severity"] == "error")
+            .unwrap()
+            .clone();
+        assert_eq!(d["code"], "bad_param", "{diags}");
+        assert_eq!(d["phase"], "validate", "{diags}");
+        assert_eq!(d["nodeId"], "n_locate", "{diags}");
+        assert_eq!(d["paramPath"], "datumRoi", "{diags}");
+        let run = cli(&["run", &dragged_path]);
+        assert_eq!(run.code, EXIT_INVALID, "{}", run.err);
+        assert!(
+            !run.lines().iter().any(|e| e["kind"] == "node_state" || e["kind"] == "run_started"),
+            "校验没过就不该起跑：{}",
+            run.out
+        );
     }
 }
