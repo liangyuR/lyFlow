@@ -100,6 +100,11 @@ JSON Schema： [`schema/graph-doc.schema.json`](../schema/graph-doc.schema.json)
 
 指子图内部的端口时写**展开后**的路径 id（`outer/inner`），与 `run_started.plan` 同一套 id。
 
+`port` 也可以写成 `<port>.<field>`，指向一个 Bundle 端口（`Bundle<kind>`）里的字段，例如
+`{ "node": "n_locate", "port": "rois.datum" }`（M8a，m8-plan L3）。校验期查那个端口确实是
+Bundle、kind 里确实声明了这个字段，否则报 `unknown_port`；`lyflow_run_outputs` 与 summary
+给的是那个字段自己的类型和值。
+
 ### 子图（M4，[ADR-0010](adr/0010-subgraph-by-expansion.md)）
 
 `subgraphs` 的键是 subgraphId，节点用 `op: "sub:<subgraphId>"` 引用它：

@@ -77,7 +77,7 @@
           },
           "port": {
             "type": "string",
-            "description": "该节点的输出端口名。"
+            "description": "该节点的输出端口名；Bundle 端口可以写成 <port>.<field> 指向其中一个字段（m8-plan L3）。"
           },
           "label": {
             "type": "string"

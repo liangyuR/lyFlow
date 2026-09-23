@@ -138,12 +138,16 @@ struct Record {
   nlohmann::json data = nlohmann::json::object();
 };
 
+struct Bundle;
+
 /// 端口上流动的值。类型标签必须和 manifest 的端口类型对得上。
 class Data {
  public:
   enum class Kind {
     None, PointCloud, Indices, Transform, Plane,
     Box2D, Line2D, Circle2D, Point2D, Measurement, Record, Tensor, Error,
+    /// 一组有名字的字段（m8-plan L1）。端口类型写作 `Bundle<kind>`，追加在末尾不打乱既有序号。
+    Bundle,
   };
 
   Data() = default;
@@ -167,6 +171,7 @@ class Data {
     return tensor(std::make_shared<const lyflow::Tensor>(std::move(t)));
   }
   static Data error(lyflow::Status s);
+  static Data bundle(lyflow::Bundle b);
 
   Kind kind() const { return kind_; }
   bool empty() const { return kind_ == Kind::None; }
@@ -185,18 +190,20 @@ class Data {
   const lyflow::Record* asRecord() const;
   const lyflow::Tensor* asTensor() const;
   const lyflow::Status* asError() const;
+  const lyflow::Bundle* asBundle() const;
   bool isError() const { return kind_ == Kind::Error; }
 
   std::shared_ptr<const PointCloud> cloudPtr() const { return cloud_; }
   std::shared_ptr<const lyflow::Tensor> tensorPtr() const { return tensor_; }
 
   /// 对应 manifest 里的端口类型名，用于错误信息与事件里的 stats。
+  /// Bundle 是 `Bundle<kind>`，指针活到这份 Data 析构为止 —— 调用方要留着就拷成 string。
   const char* typeName() const;
 
   /// 粗略的内存占用，给事件里的统计用。所有通道都算进去。
   std::size_t byteSize() const;
 
-  /// 点数 / 元素数。点云 = 点数，Indices = 下标个数，其余 = 1。
+  /// 点数 / 元素数。点云 = 点数，Indices = 下标个数，Bundle = 字段数，其余 = 1。
   std::size_t elementCount() const;
 
   /// 给 Inspector / 3D 叠画看的可读 JSON。点云与 Indices 返回空串（太大，走二进制）。
@@ -216,10 +223,35 @@ class Data {
   std::shared_ptr<const lyflow::Record> record_;
   std::shared_ptr<const lyflow::Tensor> tensor_;
   std::shared_ptr<const lyflow::Status> error_;
+  std::shared_ptr<const lyflow::Bundle> bundle_;
 };
 
-/// manifest 端口类型名 -> Data::Kind。未知类型（含 "Any"）返回 None。
+/// 一根线带一组有关系的数据（m8-plan L1）：`{ kind, 有序的 名字 → Data }`。
+/// 字段可以是任何已有类型，但不嵌套 Bundle；字段表由算子包在 manifest 里声明（L2），
+/// 执行器在算子写出端口之后按声明查字段齐不齐、类型对不对。
+struct Bundle {
+  std::string kind;
+  std::vector<std::pair<std::string, Data>> fields;
+  /// `Bundle<kind>`。Data::typeName 返回它的 c_str，所以随 Bundle 一起存着。
+  std::string typeName;
+
+  Bundle() = default;
+  explicit Bundle(std::string k) : kind(std::move(k)), typeName("Bundle<" + kind + ">") {}
+
+  /// 追加一个字段。同名字段后写的覆盖先写的，顺序保持第一次出现的位置。
+  Bundle& set(const std::string& name, Data value);
+  /// 没有这个字段返回 nullptr。
+  const Data* field(const std::string& name) const;
+};
+
+/// manifest 端口类型名 -> Data::Kind。未知类型（含 "Any"）返回 None；`Bundle<k>` 返回 Bundle。
 Data::Kind kindFromTypeName(const std::string& typeName);
+
+/// `Bundle<k>` -> k。不是这种写法（含裸的 "Bundle"）返回 false，out 不动。
+bool parseBundleType(const std::string& typeName, std::string* bundleKind);
+
+/// k -> `Bundle<k>`。
+std::string bundleTypeName(const std::string& bundleKind);
 
 /// Data::Kind -> manifest 端口类型名。
 const char* typeNameFromKind(Data::Kind kind);

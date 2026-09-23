@@ -131,6 +131,35 @@ V1 的规则刻意简单：
 **不做泛型。** `PointCloud<T>` 这类参数化类型会把校验器复杂度抬一个量级。
 真需要时，做法是让 C++ 侧针对具体实例化导出多个算子条目，而不是让前端做类型推导。
 
+### Bundle（M8a）
+
+一根线带一组有关系的数据（m8-plan L1–L3）。端口类型写作 `Bundle<kind>`，kind 由算子包在
+manifest 的 `bundles` 段里**声明**字段表：
+
+```jsonc
+{
+  "bundles": [
+    { "kind": "gap.ScanPair", "label": "剖面对", "pack": "gap",
+      "fields": [ { "name": "primary", "type": "PointCloud" },
+                  { "name": "secondary", "type": "PointCloud" },
+                  { "name": "merged", "type": "PointCloud" } ] }
+  ]
+}
+```
+
+- **类型检查只认 kind 相等**：`Bundle<gap.ScanPair>` 接 `Bundle<gap.RoiSet>` 报 `type_mismatch`，
+  Bundle 与普通类型之间也不隐式转换；`Any` 照常兼容（`flow.fallback` 的 `Any` 端口推导成
+  `Bundle<kind>`）。类型表里的 `Bundle` 一项只给所有 Bundle 端口一个共同的颜色，
+  裸的 `"Bundle"` 不能当端口类型。
+- **字段**是类型表里的具体类型，不能是 `Any`、`Error`，也**不嵌套** Bundle；字段名不含 `.`。
+- **执行期按声明查**：算子写出一个 Bundle 端口之后，执行器查字段齐不齐、类型对不对、有没有多出来的，
+  不符报 `contract_violation`（portName 是那个输出端口），summary 的 `contractViolations`
+  记一条 `expected: {bundle, fields}` / `actual`。
+- **按字段寻址**：`<port>.<field>`（如 `scan.merged`）在结果仓、C ABI（`lyflow_output_cloud` 等
+  取数函数不改签名）、事件的 `stats.outputs`、`lyflow_output_info`、summary 与图输出上都认。
+  边**不**按字段接 —— 想把一个字段接给普通端口，用包里的拆分算子（gap 包的 `gap.split_*`）。
+- `Registry::validate()` 拒掉：字段类型未知或非法、端口引用了没声明的 kind、裸 `Bundle`。
+
 ## 端口上的两条执行语义（阶段 A）
 
 输入端口可以多带两个布尔标志（[ADR-0016](adr/0016-error-as-value-and-lazy-ports.md)）：

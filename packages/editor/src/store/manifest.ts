@@ -38,6 +38,18 @@ function index(bundle: OperatorManifestBundle) {
   }
   const typesByName = new Map<string, PortType>();
   for (const t of bundle.types) typesByName.set(t.name, t);
+  // 每个声明了的 Bundle kind 也登记成一个类型名（`Bundle<kind>`），颜色取类型表里的 Bundle：
+  // 端口着色、连线校验都按类型名查表，这样不必在每个查表的地方另认一遍这种写法。
+  const bundleType = typesByName.get("Bundle");
+  for (const b of bundle.bundles ?? []) {
+    const name = `Bundle<${b.kind}>`;
+    const doc = b.label ?? b.doc;
+    typesByName.set(name, {
+      name,
+      color: bundleType?.color ?? "#c8a86b",
+      ...(doc !== undefined ? { doc } : {}),
+    });
+  }
   return { operatorsById, typesByName };
 }
 

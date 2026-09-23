@@ -218,6 +218,32 @@ Data Data::error(lyflow::Status s) {
   return d;
 }
 
+Data Data::bundle(lyflow::Bundle b) {
+  if (b.typeName.empty()) b.typeName = bundleTypeName(b.kind);
+  Data d;
+  d.kind_ = Kind::Bundle;
+  d.bundle_ = std::make_shared<const lyflow::Bundle>(std::move(b));
+  return d;
+}
+
+Bundle& Bundle::set(const std::string& name, Data value) {
+  for (auto& f : fields) {
+    if (f.first == name) {
+      f.second = std::move(value);
+      return *this;
+    }
+  }
+  fields.emplace_back(name, std::move(value));
+  return *this;
+}
+
+const Data* Bundle::field(const std::string& name) const {
+  for (const auto& f : fields) {
+    if (f.first == name) return &f.second;
+  }
+  return nullptr;
+}
+
 const PointCloud* Data::asCloud() const { return kind_ == Kind::PointCloud ? cloud_.get() : nullptr; }
 const Indices* Data::asIndices() const { return kind_ == Kind::Indices ? indices_.get() : nullptr; }
 const Transform* Data::asTransform() const {
@@ -236,8 +262,12 @@ const Measurement* Data::asMeasurement() const {
 const Record* Data::asRecord() const { return kind_ == Kind::Record ? record_.get() : nullptr; }
 const Tensor* Data::asTensor() const { return kind_ == Kind::Tensor ? tensor_.get() : nullptr; }
 const Status* Data::asError() const { return kind_ == Kind::Error ? error_.get() : nullptr; }
+const Bundle* Data::asBundle() const { return kind_ == Kind::Bundle ? bundle_.get() : nullptr; }
 
-const char* Data::typeName() const { return typeNameFromKind(kind_); }
+const char* Data::typeName() const {
+  if (kind_ == Kind::Bundle && bundle_) return bundle_->typeName.c_str();
+  return typeNameFromKind(kind_);
+}
 
 std::size_t Data::byteSize() const {
   switch (kind_) {
@@ -273,6 +303,13 @@ std::size_t Data::byteSize() const {
                      : 0;
     case Kind::Error:
       return error_ ? sizeof(Status) + error_->code.size() + error_->message.size() : 0;
+    case Kind::Bundle: {
+      // 字段各算各的：一片点云装进 Bundle 不该让 LRU 预算以为它没了
+      if (!bundle_) return 0;
+      std::size_t total = sizeof(Bundle) + bundle_->kind.size();
+      for (const auto& f : bundle_->fields) total += f.first.size() + f.second.byteSize();
+      return total;
+    }
   }
   return 0;
 }
@@ -297,6 +334,8 @@ std::size_t Data::elementCount() const {
       return 1;
     case Kind::Tensor:
       return tensor_ ? tensor_->data.size() : 0;
+    case Kind::Bundle:
+      return bundle_ ? bundle_->fields.size() : 0;
   }
   return 0;
 }
@@ -396,6 +435,27 @@ std::string Data::valueJson() const {
       w.fieldIfSet("portName", s.portName);
       break;
     }
+    case Kind::Bundle: {
+      // 字段按声明顺序列出，每项是那个字段自己的类型与元素数；非点云字段带 value。
+      // 点云字段仍走二进制（`<port>.<field>` 寻址，m8-plan L3）。
+      w.field("bundleKind", bundle_->kind);
+      w.key("fields");
+      w.beginArray();
+      for (const auto& f : bundle_->fields) {
+        w.beginObject();
+        w.field("name", f.first);
+        w.field("type", std::string(f.second.typeName()));
+        w.field("elementCount", static_cast<std::int64_t>(f.second.elementCount()));
+        const std::string inner = f.second.valueJson();
+        if (!inner.empty()) {
+          w.key("value");
+          w.raw(inner);
+        }
+        w.endObject();
+      }
+      w.endArray();
+      break;
+    }
     default:
       break;
   }
@@ -416,8 +476,21 @@ Data::Kind kindFromTypeName(const std::string& typeName) {
   if (typeName == "Record") return Data::Kind::Record;
   if (typeName == "Tensor") return Data::Kind::Tensor;
   if (typeName == "Error") return Data::Kind::Error;
+  if (parseBundleType(typeName, nullptr)) return Data::Kind::Bundle;
   return Data::Kind::None;  // 含 "Any"：不约束具体载荷
 }
+
+bool parseBundleType(const std::string& typeName, std::string* bundleKind) {
+  static const std::string kPrefix = "Bundle<";
+  if (typeName.size() <= kPrefix.size() + 1) return false;
+  if (typeName.compare(0, kPrefix.size(), kPrefix) != 0 || typeName.back() != '>') return false;
+  const std::string inner = typeName.substr(kPrefix.size(), typeName.size() - kPrefix.size() - 1);
+  if (inner.empty() || inner.find_first_of("<> ") != std::string::npos) return false;
+  if (bundleKind) *bundleKind = inner;
+  return true;
+}
+
+std::string bundleTypeName(const std::string& bundleKind) { return "Bundle<" + bundleKind + ">"; }
 
 const char* typeNameFromKind(Data::Kind kind) {
   switch (kind) {
@@ -434,6 +507,7 @@ const char* typeNameFromKind(Data::Kind kind) {
     case Data::Kind::Record:      return "Record";
     case Data::Kind::Tensor:      return "Tensor";
     case Data::Kind::Error:       return "Error";
+    case Data::Kind::Bundle:      return "Bundle";
   }
   return "None";
 }

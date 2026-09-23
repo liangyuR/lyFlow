@@ -34,6 +34,15 @@ struct OutputInfo {
   std::string valueJson;
 };
 
+/// Bundle 端口按字段展开（m8-plan L3）：在 out 末尾追加 `<port>.<field>` 各一项。
+/// 不是 Bundle 就什么都不做。事件、lyflow_output_info、缓存复用三处共用它。
+void appendBundleFieldInfos(const std::string& port, const Data& data,
+                            std::vector<OutputInfo>& out);
+
+/// `<port>.<field>` 拆成两半。没有点返回 false。字段名里不许有点（Registry::validate），
+/// 端口名里可以没有限制，所以按**最后**一个点拆。
+bool splitFieldAddress(const std::string& address, std::string* port, std::string* field);
+
 /// 一条图级命名输出的登记（ADR-0017）。执行器编译完就登记，宿主按名字取。
 struct NamedOutput {
   std::string name;
@@ -75,6 +84,8 @@ class ResultStore {
   void put(const std::string& runId, const std::string& nodeId, const std::string& port,
            const std::string& cacheKey, Data data);
 
+  /// port 也可以写成 `<port>.<field>`：取 Bundle 端口里的那个字段（m8-plan L3）。
+  /// lyflow_output_cloud / tensor / indices / save 都经这里，所以签名不变就认这种写法。
   bool get(const std::string& runId, const std::string& nodeId, const std::string& port,
            Data& out) const;
 
@@ -86,6 +97,7 @@ class ResultStore {
   /// 不改动命中计数的只读探测，lyflow_plan 用它预测 cached。
   bool peek(const std::string& cacheKey, const std::vector<std::string>& ports) const;
 
+  /// 某节点的全部输出。Bundle 端口后面紧跟它的每个字段（`<port>.<field>`）。
   std::vector<OutputInfo> outputsOf(const std::string& runId, const std::string& nodeId) const;
 
   void setNamedOutputs(const std::string& runId, std::vector<NamedOutput> outputs);
@@ -132,6 +144,9 @@ class ResultStore {
   };
 
   void touchLocked(const std::string& key);
+  /// get 的无锁版本，只认端口名本身（不拆字段）。
+  bool getLocked(const std::string& runId, const std::string& nodeId, const std::string& port,
+                 Data& out) const;
   void evictLocked();
 
   /// port -> cacheKey（带端口名的键：同一节点不同端口是不同的内容）

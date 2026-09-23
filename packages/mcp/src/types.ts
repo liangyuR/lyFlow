@@ -20,10 +20,20 @@ export interface OperatorDesc {
   capabilities?: Record<string, unknown>;
 }
 
+export interface BundleDesc {
+  kind: string;
+  label?: string;
+  doc?: string;
+  pack?: string;
+  fields: { name: string; type: string; doc?: string }[];
+}
+
 export interface ManifestBundle {
   schemaVersion: number;
   generatedBy?: string;
   types: PortType[];
+  /** Bundle 声明（m8-plan L2）：端口类型 `Bundle<kind>` 的字段表。 */
+  bundles?: BundleDesc[];
   operators: OperatorDesc[];
   importers?: unknown[];
 }

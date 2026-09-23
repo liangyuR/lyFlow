@@ -127,6 +127,10 @@ LYFLOW_API void lyflow_run_free(lyflow_run* run);
 
 // D4：结果留在 C++，点云走二进制，绝不 JSON。
 // 一百万个点的 JSON 数组是 30MB 文本 + 前端一次全量解析，这条路走不通。
+//
+// 下面凡是带 port 参数的取数函数（output_cloud / tensor / indices / save）都认
+// `<port>.<field>`：取 Bundle 端口里的一个字段，例如 "scan.merged"（m8-plan L3，
+// 加在 v10 里，签名不变、ABI 号不变）。字段本身又是什么类型，就按那个类型的规矩取。
 typedef struct {
   uint32_t point_count;   /* 抽样后的点数 */
   uint32_t total_points;  /* 抽样前的点数 */
@@ -183,11 +187,13 @@ LYFLOW_API int lyflow_output_indices(const char* run_id, const char* node_id, co
 
 LYFLOW_API void lyflow_indices_view_free(lyflow_indices_view* view);
 
-// 某节点全部输出的 { port, type, elementCount, byteSize } JSON 数组。
+// 某节点全部输出的 { port, type, elementCount, byteSize, value? } JSON 数组。
+// Bundle 端口（type 是 "Bundle<kind>"）那一项之后紧跟它的每个字段，port 写成 <port>.<field>。
 LYFLOW_API char* lyflow_output_info(const char* run_id, const char* node_id);
 
 // v7：图级命名输出（GraphDoc 顶层 outputs）。返回
 // { 名字: { node, port, type, elementCount, byteSize, value?, missing? } }。
+// 图输出的 port 可以是 <port>.<field>（指向 Bundle 的一个字段），这里照样给那个字段的值。
 // 点云只给元信息，二进制仍走 lyflow_output_cloud。图没声明 outputs 时返回 "{}"。
 LYFLOW_API char* lyflow_run_outputs(const char* run_id);
 

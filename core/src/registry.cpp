@@ -176,6 +176,17 @@ Registry& ensureRegistry() {
 
 void Registry::addType(PortType type) { types_.push_back(std::move(type)); }
 
+void Registry::addBundle(BundleDesc bundle) {
+  if (bundle.pack.empty()) bundle.pack = currentPack_;
+  for (auto& existing : bundles_) {
+    if (existing.kind == bundle.kind) {
+      existing = std::move(bundle);
+      return;
+    }
+  }
+  bundles_.push_back(std::move(bundle));
+}
+
 void Registry::setCurrentPack(std::string pack) { currentPack_ = std::move(pack); }
 
 void Registry::addOperator(OperatorDesc op) {
@@ -202,6 +213,7 @@ void Registry::addImporter(ImporterDesc importer) {
 
 void Registry::clear() {
   types_.clear();
+  bundles_.clear();
   operators_.clear();
   importers_.clear();
   builtinCount_ = 0;
@@ -229,6 +241,62 @@ const PortType* Registry::findType(const std::string& name) const {
   return nullptr;
 }
 
+const BundleDesc* Registry::findBundle(const std::string& kind) const {
+  for (const auto& b : bundles_) {
+    if (b.kind == kind) return &b;
+  }
+  return nullptr;
+}
+
+bool Registry::knowsType(const std::string& typeName) const {
+  std::string kind;
+  if (parseBundleType(typeName, &kind)) return findBundle(kind) != nullptr;
+  return findType(typeName) != nullptr;
+}
+
+std::string Registry::checkBundle(const std::string& declaredType, const Data& value,
+                                  nlohmann::json* expected, nlohmann::json* actual) const {
+  std::string kind;
+  if (!parseBundleType(declaredType, &kind)) return "端口类型 '" + declaredType + "' 不是 Bundle<kind>";
+  const BundleDesc* desc = findBundle(kind);
+  const Bundle* got = value.asBundle();
+  if (expected) {
+    nlohmann::json want = nlohmann::json::object();
+    if (desc) {
+      for (const BundleField& f : desc->fields) want[f.name] = f.type;
+    }
+    *expected = {{"bundle", kind}, {"fields", want}};
+  }
+  if (actual) {
+    nlohmann::json have = nlohmann::json::object();
+    if (got) {
+      for (const auto& f : got->fields) have[f.first] = f.second.typeName();
+    }
+    *actual = got ? nlohmann::json{{"bundle", got->kind}, {"fields", have}}
+                  : nlohmann::json{{"type", value.typeName()}};
+  }
+  if (!desc) return "Bundle kind '" + kind + "' 没有在 manifest 里声明";
+  if (!got) return std::string("应当是 ") + declaredType + "，实际是 " + value.typeName();
+  if (got->kind != kind) return "应当是 " + declaredType + "，实际是 " + got->typeName;
+  for (const BundleField& f : desc->fields) {
+    const Data* d = got->field(f.name);
+    if (!d || d->empty()) return declaredType + " 缺字段 '" + f.name + "'";
+    const Data::Kind want = kindFromTypeName(f.type);
+    if (want != Data::Kind::None && d->kind() != want) {
+      return declaredType + " 的字段 '" + f.name + "' 应当是 " + f.type + "，实际是 " +
+             d->typeName();
+    }
+  }
+  for (const auto& f : got->fields) {
+    bool declared = false;
+    for (const BundleField& df : desc->fields) {
+      if (df.name == f.first) { declared = true; break; }
+    }
+    if (!declared) return declaredType + " 多了一个没声明的字段 '" + f.first + "'";
+  }
+  return {};
+}
+
 std::vector<std::string> Registry::validate() const {
   std::vector<std::string> problems;
   auto fail = [&](const std::string& msg) { problems.push_back(msg); };
@@ -247,6 +315,35 @@ std::vector<std::string> Registry::validate() const {
       }
     }
   }
+
+  // Bundle 表（m8-plan L2）。字段只能是类型表里的具体类型：Any 没法校验，
+  // Error 只该出现在 acceptsError 端口上，Bundle 套 Bundle 被 L1 明确排除。
+  std::set<std::string> bundleKinds;
+  for (const auto& b : bundles_) {
+    const std::string where = "bundle '" + b.kind + "'";
+    if (b.kind.empty() || b.kind.find_first_of("<> ") != std::string::npos) {
+      fail("bundle with bad kind '" + b.kind + "'（不能为空，不能含 < > 空格）");
+    }
+    if (!bundleKinds.insert(b.kind).second) fail("duplicate bundle kind: " + b.kind);
+    if (b.fields.empty()) fail(where + " declares no fields");
+    std::set<std::string> names;
+    for (const auto& f : b.fields) {
+      if (f.name.empty() || f.name.find('.') != std::string::npos) {
+        fail(where + " field '" + f.name + "' 名字不能为空也不能含 '.'（`<port>.<field>` 靠它分隔）");
+      }
+      if (!names.insert(f.name).second) fail(where + " has duplicate field '" + f.name + "'");
+      if (f.type == kAnyTypeName || f.type == "Error" || parseBundleType(f.type, nullptr)) {
+        fail(where + " field '" + f.name + "' 的类型不能是 " + f.type);
+      } else if (!typeNames.count(f.type)) {
+        fail(where + " field '" + f.name + "' uses unknown type '" + f.type + "'");
+      }
+    }
+  }
+  auto portTypeKnown = [&](const std::string& type) {
+    std::string kind;
+    if (parseBundleType(type, &kind)) return bundleKinds.count(kind) != 0;
+    return typeNames.count(type) != 0;
+  };
 
   std::set<std::string> opIds;
   for (const auto& op : operators_) {
@@ -271,7 +368,9 @@ std::vector<std::string> Registry::validate() const {
         if (!seen.insert(p.name).second) {
           fail(where + " has duplicate " + kind + " port '" + p.name + "'");
         }
-        if (!typeNames.count(p.type)) {
+        if (p.type == "Bundle") {
+          fail(where + " " + kind + " port '" + p.name + "' 写的是裸的 Bundle，应当写成 Bundle<kind>");
+        } else if (!portTypeKnown(p.type)) {
           fail(where + " " + kind + " port '" + p.name +
                "' uses unknown type '" + p.type + "'");
         }
@@ -386,6 +485,31 @@ std::string Registry::toManifestJson() const {
     w.endObject();
   }
   w.endArray();
+
+  // Bundle 表（m8-plan L2）。没有包声明时整段不出现，不带 gap 的构建 manifest 字节不变。
+  if (!bundles_.empty()) {
+    w.key("bundles");
+    w.beginArray();
+    for (const auto& b : bundles_) {
+      w.beginObject();
+      w.field("kind", b.kind);
+      w.fieldIfSet("label", b.label);
+      w.fieldIfSet("doc", b.doc);
+      w.fieldIfSet("pack", b.pack);
+      w.key("fields");
+      w.beginArray();
+      for (const auto& f : b.fields) {
+        w.beginObject();
+        w.field("name", f.name);
+        w.field("type", f.type);
+        w.fieldIfSet("doc", f.doc);
+        w.endObject();
+      }
+      w.endArray();
+      w.endObject();
+    }
+    w.endArray();
+  }
 
   w.key("operators");
   w.beginArray();

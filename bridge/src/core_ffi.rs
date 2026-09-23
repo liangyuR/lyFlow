@@ -171,11 +171,26 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
+        // Bundle<kind>（m8-plan L1）：kind 必须在 bundles 段里声明，字段类型必须在类型表里
+        let bundles: Vec<&str> = v["bundles"]
+            .as_array()
+            .map(|a| a.iter().map(|b| b["kind"].as_str().unwrap()).collect())
+            .unwrap_or_default();
+        for b in v["bundles"].as_array().into_iter().flatten() {
+            for f in b["fields"].as_array().unwrap() {
+                let ty = f["type"].as_str().unwrap();
+                assert!(types.contains(&ty), "bundle {} 的字段类型 {ty} 不在类型表里", b["kind"]);
+            }
+        }
         for op in ops {
             for side in ["inputs", "outputs"] {
                 for port in op[side].as_array().unwrap() {
                     let ty = port["type"].as_str().unwrap();
-                    assert!(types.contains(&ty), "{} 的端口类型 {ty} 不在类型表里", op["id"]);
+                    let known = match ty.strip_prefix("Bundle<").and_then(|t| t.strip_suffix('>')) {
+                        Some(kind) => bundles.contains(&kind),
+                        None => types.contains(&ty),
+                    };
+                    assert!(known, "{} 的端口类型 {ty} 不在类型表里", op["id"]);
                 }
             }
         }

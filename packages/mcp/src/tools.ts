@@ -209,13 +209,15 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
     "list_port_types",
     {
       title: "列出端口类型",
-      description: "端口类型表：名字、颜色、可隐式转换到哪些类型、一句说明。",
+      description:
+        "端口类型表：名字、颜色、可隐式转换到哪些类型、一句说明；另附 bundles —— " +
+        "端口类型 Bundle<kind> 的字段表（取字段时写 <port>.<field>）。",
       inputSchema: {},
     },
     async () => {
       try {
         const bundle = await http.manifest();
-        return ok({ types: bundle.types });
+        return ok({ types: bundle.types, bundles: bundle.bundles ?? [] });
       } catch (e) {
         return failed(e);
       }

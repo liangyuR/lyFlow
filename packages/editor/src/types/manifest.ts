@@ -16,6 +16,29 @@ export interface PortType {
   doc?: string;
 }
 
+/** Bundle 的一个字段（m8-plan L2）。type 是 types 表里的具体类型，不嵌套 Bundle。 */
+export interface BundleField {
+  name: string;
+  type: string;
+  doc?: string;
+}
+
+/** 一种 Bundle 的声明（m8-plan L1/L2）。端口类型写作 `Bundle<kind>`，类型检查只认 kind 相等；
+ *  结果仓、事件、summary 与图输出按 `<port>.<field>` 寻址。 */
+export interface BundleDesc {
+  kind: string;
+  label?: string;
+  doc?: string;
+  pack?: string;
+  fields: BundleField[];
+}
+
+/** `Bundle<k>` → k；不是这种写法返回 null。 */
+export function bundleKindOf(type: string): string | null {
+  const m = /^Bundle<([^<> ]+)>$/.exec(type);
+  return m?.[1] ?? null;
+}
+
 /** 端口契约（ADR-0024）。刻意**只有四种键**，不是表达式引擎 —— 与 Condition 同一条
  *  原则：需要更复杂的判断通常说明这个算子该拆了。执行器在输入绑定时检查，
  *  违反报 contract_violation，前端这里只负责把它显示出来。 */
@@ -129,6 +152,8 @@ export interface OperatorManifestBundle {
   schemaVersion: number;
   generatedBy?: string;
   types: PortType[];
+  /** Bundle 声明（m8-plan L2）。没有包声明时这一项不出现。 */
+  bundles?: BundleDesc[];
   operators: OperatorDesc[];
   /** 注册了的「文本 → 图」导入器（ADR-0017）。没有任何导入器时这一项不出现。 */
   importers?: Importer[];

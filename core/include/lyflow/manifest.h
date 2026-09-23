@@ -108,6 +108,24 @@ struct Port {
   nlohmann::json example;
 };
 
+/// Bundle 的一个字段（m8-plan L2）。type 是类型表里的名字，不能是 Any、Error 或另一个 Bundle。
+struct BundleField {
+  std::string name;
+  std::string type;
+  std::string doc;
+};
+
+/// 一种 Bundle 的声明：算子包在 manifest 里写字段表，端口类型写作 `Bundle<kind>`。
+/// 执行器在算子写出这种端口之后按它查字段齐不齐、类型对不对（不符报 contract_violation）；
+/// 编辑器与 MCP 读同一份字段表。
+struct BundleDesc {
+  std::string kind;                       // 全局唯一，用 . 分命名空间，例如 gap.ScanPair
+  std::string label;
+  std::string doc;
+  std::string pack;                       // 与 OperatorDesc::pack 同一口径
+  std::vector<BundleField> fields;        // 有序：Edge Peek 与 valueJson 按这个顺序列
+};
+
 /// 端口契约的四种键。Registry::validate() 与 schema 都照着它。
 inline constexpr const char* kPortContractKeys[] = {"elementCount", "finite", "shape",
                                                     "recordType"};

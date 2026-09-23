@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "lyflow/data.h"
 #include "lyflow/manifest.h"
 
 namespace lyflow {
@@ -12,6 +13,8 @@ class Registry {
   static Registry& instance();
 
   void addType(PortType type);
+  /// 声明一种 Bundle（m8-plan L2）。同 kind 重复声明时后者覆盖前者。
+  void addBundle(BundleDesc bundle);
   void addOperator(OperatorDesc op);
   /// 注册一种「文本 → 图」的导入器（ADR-0017）。同 kind 重复注册时后者覆盖前者。
   void addImporter(ImporterDesc importer);
@@ -26,11 +29,23 @@ class Registry {
   void setLibraryOperators(std::vector<OperatorDesc> ops);
 
   const std::vector<PortType>& types() const { return types_; }
+  const std::vector<BundleDesc>& bundles() const { return bundles_; }
   const std::vector<OperatorDesc>& operators() const { return operators_; }
   const std::vector<ImporterDesc>& importers() const { return importers_; }
 
   const OperatorDesc* find(const std::string& id) const;
   const PortType* findType(const std::string& name) const;
+  const BundleDesc* findBundle(const std::string& kind) const;
+
+  /// 端口类型名在这张注册表里认不认：类型表里的名字，或已声明 kind 的 `Bundle<kind>`。
+  bool knowsType(const std::string& typeName) const;
+
+  /// 按声明查一个 Bundle 值（m8-plan L2）。declaredType 是端口声明的 `Bundle<kind>`；
+  /// 通过返回空串，否则返回一句人话（执行器把它报成 contract_violation）。
+  /// expected / actual 填成契约违反要的「期望 vs 实际」。
+  std::string checkBundle(const std::string& declaredType, const Data& value,
+                          nlohmann::json* expected = nullptr,
+                          nlohmann::json* actual = nullptr) const;
   const ImporterDesc* findImporter(const std::string& kind) const;
 
   // 自检。导出 manifest 前跑，把算子作者的笔误挡在这里。
@@ -46,6 +61,7 @@ class Registry {
 
  private:
   std::vector<PortType> types_;
+  std::vector<BundleDesc> bundles_;
   std::vector<OperatorDesc> operators_;
   std::vector<ImporterDesc> importers_;
   /// operators_ 里前多少个是内置的。setLibraryOperators 从这里往后重写。

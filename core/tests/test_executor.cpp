@@ -2,6 +2,8 @@
 // 算子一律用 gen.synthetic 与 test.*（S6）—— 点云算法的测试在 packs/std-pointcloud/tests。
 #include <doctest/doctest.h>
 
+#include <cctype>
+
 #include <chrono>
 #include <thread>
 
@@ -265,9 +267,20 @@ TEST_CASE("溢出的数字字面量在解析期就被挡住，不会变成 inf �
 
   // 另一半防线在序列化侧：万一有算子作者把 min 写成 infinity，
   // 导出的 manifest 也必须是合法 JSON（见 test_data.cpp 的 jsonNumber 用例）。
+  // 查的是「值的位置上出现了非有限数字」，不是子串：m8-plan L4 定死了 RoiSet 有个
+  // 叫 info 的字段，按子串查就会把合法的名字当成 inf。
   const std::string manifest = ensureRegistry().toManifestJson();
-  CHECK(manifest.find("inf") == std::string::npos);
-  CHECK(manifest.find("nan") == std::string::npos);
+  for (const char* bad : {"inf", "-inf", "nan", "-nan", "Infinity", "-Infinity", "NaN"}) {
+    for (const char* lead : {": ", ":", ", ", ",", "[ ", "["}) {
+      const std::string token = std::string(lead) + bad;
+      const std::size_t at = manifest.find(token);
+      // 后面紧跟字母/数字的是某个名字的前缀（比如 "info"），不是数字字面量
+      const bool isLiteral = at != std::string::npos &&
+                             (at + token.size() >= manifest.size() ||
+                              !std::isalnum(static_cast<unsigned char>(manifest[at + token.size()])));
+      CHECK_MESSAGE(!isLiteral, "manifest 里有非有限数字: " << token);
+    }
+  }
 }
 
 TEST_CASE("输入端口的实际类型对不上时报 type_mismatch，而不是解引用空指针") {

@@ -59,6 +59,12 @@ void registerBuiltinTypes(Registry& r) {
   r.addType(PortType{
       "Error", "#e5484d", {},
       "一条失败的 Status。只出现在声明了 acceptsError 的输入端口上（ADR-0016）。"});
+
+  // m8-plan L1。端口上一律写成 `Bundle<kind>`，kind 由算子包在 manifest 的 bundles 段声明；
+  // 这一项只给所有 Bundle 端口一个共同的颜色，裸的 "Bundle" 不能当端口类型用。
+  r.addType(PortType{
+      "Bundle", "#c8a86b", {},
+      "一组有名字的字段（Bundle<kind>）：一根线带一组有关系的数据，字段表见 manifest 的 bundles。"});
 }
 
 }  // namespace

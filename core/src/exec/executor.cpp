@@ -767,6 +767,7 @@ class Scheduler {
       }
       infos.push_back(
           OutputInfo{p.name, d.typeName(), d.elementCount(), d.byteSize(), d.valueJson()});
+      appendBundleFieldInfos(p.name, d, infos);
       store_.put(options_.runId, node.id, p.name, node.cacheKey, d);
     }
 
@@ -864,7 +865,9 @@ class Scheduler {
       if (declared) {
         const std::string& want = effectiveType(node.inputTypes, b.port, declared->type);
         const Data::Kind expected = kindFromTypeName(want);
-        if (expected != Data::Kind::None && d.kind() != expected) {
+        // Bundle 还要 kind 对得上：Any 端口（flow.fallback 这类）会把两种 Bundle 都放过来。
+        if ((expected != Data::Kind::None && d.kind() != expected) ||
+            (expected == Data::Kind::Bundle && want != d.typeName())) {
           return Status::Error(Phase::Execute, "type_mismatch",
                                std::string("输入端口 '") + b.port + "' 需要 " + want +
                                    "，实际收到 " + d.typeName(),
@@ -899,6 +902,7 @@ class Scheduler {
         auto it = inputs.find(b.port);
         if (it == inputs.end() || it->second.empty()) continue;
         if (wantKind != Data::Kind::None && it->second.kind() != wantKind) continue;
+        if (wantKind == Data::Kind::Bundle && want != it->second.typeName()) continue;
         outputs[out.name] = it->second;
         break;
       }
@@ -921,6 +925,19 @@ class Scheduler {
       }
       const std::string& want = effectiveType(node.outputTypes, p.name, p.type);
       const Data::Kind expected = kindFromTypeName(want);
+      if (expected == Data::Kind::Bundle) {
+        // 按 manifest 的字段表查（m8-plan L2）：字段缺了或类型不对，下游按 `<port>.<field>`
+        // 取到的就是空的 —— 在写出端口的这一刻报，而不是等消费方撞上。
+        nlohmann::json want2;
+        nlohmann::json got;
+        const std::string problem = ensureRegistry().checkBundle(want, it->second, &want2, &got);
+        if (!problem.empty()) {
+          sink_.contractViolation(node.id, p.name, std::move(want2), std::move(got));
+          return Status::Error(Phase::Execute, "contract_violation",
+                               "输出端口 '" + p.name + "'：" + problem, {}, p.name);
+        }
+        continue;
+      }
       if (expected != Data::Kind::None && it->second.kind() != expected) {
         return Status::Error(Phase::Execute, "internal",
                              std::string("输出端口 '") + p.name + "' 声明为 " + want +

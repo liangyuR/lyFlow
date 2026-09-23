@@ -437,7 +437,7 @@
               },
               "port": {
                 "type": "string",
-                "description": "违反发生在哪个**输入**端口上。同一个 node_state 事件的 error.portName 指向同一个它。"
+                "description": "违反发生在哪个端口上：输入端口（端口契约，ADR-0024），或 Bundle 输出端口（字段缺失 / 类型不符，m8-plan L2）。同一个 node_state 事件的 error.portName 指向同一个它。"
               },
               "expected": {
                 "type": "object",
@@ -520,18 +520,19 @@
             ],
             "properties": {
               "port": {
-                "type": "string"
+                "type": "string",
+                "description": "端口名。Bundle 端口的那一项之后紧跟它的每个字段，port 写成 <port>.<field>（m8-plan L3）。"
               },
               "type": {
                 "type": "string",
-                "description": "端口类型名，与 manifest 的 types 表一致。"
+                "description": "端口类型名，与 manifest 的 types 表一致；Bundle 是 Bundle<kind>，它的字段项是字段自己的类型。"
               },
               "elementCount": {
                 "type": "integer"
               },
               "value": {
                 "type": "object",
-                "description": "非点云输出的可读值（几何参数、Measurement 数值）。点云与 Indices 走二进制通道，没有这个字段。带 kind 字段，等于端口类型名。",
+                "description": "非点云输出的可读值（几何参数、Measurement 数值）。点云与 Indices 走二进制通道，没有这个字段。带 kind 字段，等于端口类型名（Bundle 是 \"Bundle\"，另带 bundleKind 与 fields：每个字段的 name / type / elementCount / value?）。",
                 "required": [
                   "kind"
                 ],
@@ -563,7 +564,7 @@
         },
         "code": {
           "type": "string",
-          "description": "机器可读短码。当前取值集合：unknown_op | unknown_port | type_mismatch | missing_input | multi_input | unknown_param | bad_param | bad_input | unknown_node | duplicate_id | version_mismatch | migration | bypassed_no_source | output_not_written | recursive_subgraph | cycle | io | cancelled | upstream_failed | internal。前端不得穷举它做逻辑分支——未知 code 一律按通用错误显示。"
+          "description": "机器可读短码。当前取值集合：unknown_op | unknown_port | type_mismatch | missing_input | multi_input | unknown_param | bad_param | bad_input | unknown_node | duplicate_id | version_mismatch | migration | bypassed_no_source | output_not_written | contract_violation | recursive_subgraph | cycle | io | cancelled | upstream_failed | internal。前端不得穷举它做逻辑分支——未知 code 一律按通用错误显示。"
         },
         "message": {
           "type": "string"

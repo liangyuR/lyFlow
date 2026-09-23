@@ -286,6 +286,49 @@ inline Param intParam(const char* name, std::int64_t def, double min) {
   return p;
 }
 
+// ------------------------------------------------------------ Bundle（m8-plan L1–L3）
+/// mode: ok = 字段齐全；missing = 少 box；wrongType = box 写成点云；wrongKind = kind 写成 test.Other；
+/// extra = 多一个没声明的字段。点数由 pointCount 定。
+inline Status makePairCompute(const Inputs&, const ParamView& params, Outputs& outputs,
+                              ExecContext&) {
+  const std::string mode = params.text("mode");
+  PointCloud cloud;
+  for (std::int64_t i = 0; i < params.integer("pointCount"); ++i) {
+    cloud.push(static_cast<float>(i), 0.0f, 0.0f);
+  }
+  Box2D box;
+  box.max[0] = 1.0f;
+  box.max[1] = 2.0f;
+  Bundle b(mode == "wrongKind" ? "test.Other" : "test.Pair");
+  b.set("cloud", Data::cloud(cloud));
+  if (mode == "wrongType") {
+    b.set("box", Data::cloud(cloud));
+  } else if (mode != "missing") {
+    b.set("box", Data::box2d(box));
+  }
+  if (mode == "extra") b.set("surplus", Data::box2d(box));
+  outputs.set("pair", Data::bundle(std::move(b)));
+  return Status::Ok();
+}
+
+inline Status makeOtherCompute(const Inputs&, const ParamView&, Outputs& outputs, ExecContext&) {
+  Bundle b("test.Other");
+  Point2D p;
+  p.p[0] = 3.0f;
+  b.set("point", Data::point2d(p));
+  outputs.set("other", Data::bundle(std::move(b)));
+  return Status::Ok();
+}
+
+inline Status takePairCompute(const Inputs& inputs, const ParamView&, Outputs& outputs,
+                              ExecContext&) {
+  const Bundle* b = inputs.get("pair").asBundle();
+  const Data* cloud = b ? b->field("cloud") : nullptr;
+  if (!cloud) return Status::Error(Phase::Execute, "bad_input", "没有 cloud 字段", {}, "pair");
+  outputs.set("cloud", *cloud);
+  return Status::Ok();
+}
+
 }  // namespace ops
 
 /// 把 test.* 全部注册进进程内那份注册表。多次调用只生效一次。
@@ -548,6 +591,49 @@ inline void ensureTestOps() {
       op.capabilities = {false, false, true};
       op.compute = &ops::validatedCompute;
       op.validate = &ops::validatedCheck;
+      r.addOperator(std::move(op));
+    }
+    // -------------------------------------------- Bundle（m8-plan L1–L3）
+    r.addBundle(BundleDesc{"test.Pair", "Test Pair", "只在测试里声明：一片云 + 一个框。", "",
+                           {BundleField{"cloud", "PointCloud", ""}, BundleField{"box", "Box2D", ""}}});
+    r.addBundle(BundleDesc{"test.Other", "Test Other", "只在测试里声明：一个点。", "",
+                           {BundleField{"point", "Point2D", ""}}});
+    {
+      OperatorDesc op;
+      op.id = "test.make_pair";
+      op.version = "1.0.0";
+      op.label = "Make Pair";
+      op.category = "Test";
+      op.doc = "只在测试里注册：产一个 Bundle<test.Pair>，mode 控制它合不合声明。";
+      op.outputs = {Port{"pair", "Bundle<test.Pair>", "Pair", "", true}};
+      op.params = {ops::textParam("mode", "ok"), ops::intParam("pointCount", 3, 0.0)};
+      op.capabilities = {false, false, true};
+      op.compute = &ops::makePairCompute;
+      r.addOperator(std::move(op));
+    }
+    {
+      OperatorDesc op;
+      op.id = "test.make_other";
+      op.version = "1.0.0";
+      op.label = "Make Other";
+      op.category = "Test";
+      op.doc = "只在测试里注册：产一个 Bundle<test.Other>。";
+      op.outputs = {Port{"other", "Bundle<test.Other>", "Other", "", true}};
+      op.capabilities = {false, false, true};
+      op.compute = &ops::makeOtherCompute;
+      r.addOperator(std::move(op));
+    }
+    {
+      OperatorDesc op;
+      op.id = "test.take_pair";
+      op.version = "1.0.0";
+      op.label = "Take Pair";
+      op.category = "Test";
+      op.doc = "只在测试里注册：吃一个 Bundle<test.Pair>，把 cloud 字段原样送出。";
+      op.inputs = {Port{"pair", "Bundle<test.Pair>", "Pair", "", true}};
+      op.outputs = {cloudOut};
+      op.capabilities = {false, false, true};
+      op.compute = &ops::takePairCompute;
       r.addOperator(std::move(op));
     }
     {  // 一定失败：acceptsError 与 upstream_failed 两条路都要它

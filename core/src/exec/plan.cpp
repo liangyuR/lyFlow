@@ -169,6 +169,8 @@ constexpr const char* kAnyType = "Any";
 bool typesCompatible(const Registry& r, const std::string& from, const std::string& to) {
   if (from == to) return true;
   if (from == "Any" || to == "Any") return true;
+  // Bundle<kind> 只认 kind 相等（m8-plan L1）：两种 Bundle 之间、Bundle 与普通类型之间都不隐式转换。
+  if (parseBundleType(from, nullptr) || parseBundleType(to, nullptr)) return false;
   const PortType* t = r.findType(from);
   if (!t) return false;
   return std::find(t->castableTo.begin(), t->castableTo.end(), to) != t->castableTo.end();
@@ -741,9 +743,32 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     }
     const OperatorDesc* op = prepared[it->second].op;
     if (op && !findPort(op->outputs, g.port)) {
-      diags.error(g.node, Phase::Validate, "unknown_port",
-                  "图输出 '" + g.name + "' 指向的节点没有输出端口 '" + g.port + "'", {}, g.port);
-      continue;
+      // `<port>.<field>`：指向 Bundle 端口里的一个字段（m8-plan L3）。
+      std::string problem;
+      const std::size_t dot = g.port.find('.');
+      const Port* bundlePort = dot == std::string::npos ? nullptr
+                                                        : findPort(op->outputs, g.port.substr(0, dot));
+      std::string bundleKind;
+      if (!bundlePort) {
+        problem = "图输出 '" + g.name + "' 指向的节点没有输出端口 '" + g.port + "'";
+      } else if (!parseBundleType(bundlePort->type, &bundleKind)) {
+        problem = "图输出 '" + g.name + "' 写成了 <port>.<field>，但端口 '" + bundlePort->name +
+                  "' 是 " + bundlePort->type + " 不是 Bundle";
+      } else {
+        const BundleDesc* desc = registry.findBundle(bundleKind);
+        const std::string field = g.port.substr(dot + 1);
+        bool found = false;
+        for (const BundleField& f : desc ? desc->fields : std::vector<BundleField>{}) {
+          if (f.name == field) found = true;
+        }
+        if (!found) {
+          problem = "图输出 '" + g.name + "' 指向的 " + bundlePort->type + " 没有字段 '" + field + "'";
+        }
+      }
+      if (!problem.empty()) {
+        diags.error(g.node, Phase::Validate, "unknown_port", problem, {}, g.port);
+        continue;
+      }
     }
     out.outputs.push_back(PlanOutput{g.name, g.node, g.port, planIndex[it->second]});
   }

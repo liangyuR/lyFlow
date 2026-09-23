@@ -18,6 +18,24 @@ std::string entryKey(const std::string& cacheKey, const std::string& port) {
 
 }  // namespace
 
+bool splitFieldAddress(const std::string& address, std::string* port, std::string* field) {
+  const std::size_t dot = address.rfind('.');
+  if (dot == std::string::npos || dot == 0 || dot + 1 >= address.size()) return false;
+  *port = address.substr(0, dot);
+  *field = address.substr(dot + 1);
+  return true;
+}
+
+void appendBundleFieldInfos(const std::string& port, const Data& data,
+                            std::vector<OutputInfo>& out) {
+  const Bundle* b = data.asBundle();
+  if (!b) return;
+  for (const auto& f : b->fields) {
+    out.push_back(OutputInfo{port + "." + f.first, f.second.typeName(), f.second.elementCount(),
+                             f.second.byteSize(), f.second.valueJson()});
+  }
+}
+
 std::uint64_t defaultCacheBudget() {
 #if defined(_WIN32)
   MEMORYSTATUSEX status{};
@@ -127,6 +145,20 @@ void ResultStore::put(const std::string& runId, const std::string& nodeId, const
 bool ResultStore::get(const std::string& runId, const std::string& nodeId, const std::string& port,
                       Data& out) const {
   std::lock_guard<std::mutex> lock(mu_);
+  if (getLocked(runId, nodeId, port, out)) return true;
+  std::string bundlePort, field;
+  if (!splitFieldAddress(port, &bundlePort, &field)) return false;
+  Data whole;
+  if (!getLocked(runId, nodeId, bundlePort, whole)) return false;
+  const Bundle* b = whole.asBundle();
+  const Data* d = b ? b->field(field) : nullptr;
+  if (!d) return false;
+  out = *d;
+  return true;
+}
+
+bool ResultStore::getLocked(const std::string& runId, const std::string& nodeId,
+                            const std::string& port, Data& out) const {
   auto run = index_.find(runId);
   if (run == index_.end()) return false;
   auto node = run->second.find(nodeId);
@@ -170,6 +202,7 @@ bool ResultStore::reuse(const std::string& runId, const std::string& nodeId,
     const Entry& e = byKey_.at(key);
     infos.push_back(
         OutputInfo{port, e.data.typeName(), e.data.elementCount(), e.bytes, e.data.valueJson()});
+    appendBundleFieldInfos(port, e.data, infos);
     touchLocked(key);
     index_[runId][nodeId][port] = key;
   }
@@ -191,23 +224,33 @@ std::vector<OutputInfo> ResultStore::outputsOf(const std::string& runId,
     out.push_back(OutputInfo{kv.first, data->second.data.typeName(),
                              data->second.data.elementCount(), data->second.bytes,
                              data->second.data.valueJson()});
+    appendBundleFieldInfos(kv.first, data->second.data, out);
   }
   return out;
 }
 
 bool ResultStore::outputInfo(const std::string& runId, const std::string& nodeId,
                              const std::string& port, OutputInfo& out) const {
-  std::lock_guard<std::mutex> lock(mu_);
-  auto run = index_.find(runId);
-  if (run == index_.end()) return false;
-  auto node = run->second.find(nodeId);
-  if (node == run->second.end()) return false;
-  auto entry = node->second.find(port);
-  if (entry == node->second.end()) return false;
-  auto data = byKey_.find(entry->second);
-  if (data == byKey_.end()) return false;
-  out = OutputInfo{port, data->second.data.typeName(), data->second.data.elementCount(),
-                   data->second.bytes, data->second.data.valueJson()};
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto run = index_.find(runId);
+    if (run == index_.end()) return false;
+    auto node = run->second.find(nodeId);
+    if (node == run->second.end()) return false;
+    auto entry = node->second.find(port);
+    if (entry != node->second.end()) {
+      auto data = byKey_.find(entry->second);
+      if (data == byKey_.end()) return false;
+      out = OutputInfo{port, data->second.data.typeName(), data->second.data.elementCount(),
+                       data->second.bytes, data->second.data.valueJson()};
+      return true;
+    }
+  }
+  // `<port>.<field>`：图输出与 summary 指向 Bundle 字段时走这里（m8-plan L3）。
+  Data field;
+  if (port.find('.') == std::string::npos || !get(runId, nodeId, port, field)) return false;
+  out = OutputInfo{port, field.typeName(), field.elementCount(), field.byteSize(),
+                   field.valueJson()};
   return true;
 }
 
