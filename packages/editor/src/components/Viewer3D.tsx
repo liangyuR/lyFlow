@@ -7,8 +7,9 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import { findBaseCloud, firstCloudPort, type BaseCloud } from "../lib/basecloud";
 import { cacheKey, cloudCache, dropOtherRuns, putCache } from "../lib/cloudCache";
-import { effectiveParams, isVisible } from "../lib/params";
+import { effectiveParams } from "../lib/params";
 import { RAMPS, type RampName } from "../lib/ramps";
+import { copyFrameWrites, pickFrame, roiFramesOf } from "../lib/roiFrames";
 import { disposeOverlay, extentOf, shapesOf } from "../lib/shapes2d";
 import { augmentOperators, levelOf, resolveOutput } from "../lib/subgraph";
 import { exportCanvasPng } from "../lib/exportPng";
@@ -18,8 +19,6 @@ import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
 import { decodeCloud, type CloudPayload } from "../types/execution";
-import type { GraphNode } from "../types/graph";
-import type { OperatorDesc, Param } from "../types/manifest";
 import { RoiLayer, type RoiItem } from "./RoiLayer";
 import "../styles.viewer.css";
 
@@ -305,49 +304,6 @@ const ROI_COLORS = ["#34d399", "#f472b6", "#60a5fa", "#fbbf24", "#a78bfa", "#f87
 
 const NO_BACKDROP = { key: "", bounds: null, count: 0, error: null };
 
-interface RoiSpec {
-  params: { param: Param; value: number[] }[];
-  /** 底图文件（已拼好目录）。空 = 画在数据云上。 */
-  files: string[];
-}
-
-function joinPath(dir: string, file: string): string {
-  if (/^[a-zA-Z]:[\\/]/.test(file) || file.startsWith("/") || file.startsWith("\\\\")) return file;
-  return /[\\/]$/.test(dir) ? dir + file : `${dir}/${file}`;
-}
-
-/** 选中节点可拖的框：带 roi 语义标记、当前可见的 vec4f 参数。坐标系不同的框不能画在同一片
- *  底图上，所以只取与第一个可见框同一底图的那一组（locate_template：基础四框与槽 1 的覆盖框
- *  都在槽 1 的模板上；整体框在数据坐标系里，不混进来）。 */
-function roiSpecOf(op: OperatorDesc | undefined, node: GraphNode | undefined): RoiSpec | null {
-  if (!op || !node) return null;
-  const eff = effectiveParams(op, node);
-  const rois = op.params.filter((p) => p.semantic === "roi" && p.type === "vec4f" && isVisible(p, eff));
-  if (rois.length === 0) return null;
-  const frameOf = (p: Param) => (p.roiBackdrop ? JSON.stringify(p.roiBackdrop) : "data");
-  const frame = frameOf(rois[0]!);
-  const same = rois.filter((p) => frameOf(p) === frame);
-  const backdrop = same[0]!.roiBackdrop;
-  let files: string[] = [];
-  if (backdrop) {
-    const dir = String(eff[backdrop.dir] ?? "");
-    if (dir) {
-      files = (backdrop.files ?? [])
-        .map((f) => String(eff[f] ?? ""))
-        .filter(Boolean)
-        .map((f) => joinPath(dir, f));
-    }
-  }
-  return {
-    params: same.map((param) => {
-      const raw = eff[param.name];
-      const value = Array.isArray(raw) && raw.length === 4 ? raw.map(Number) : [0, 0, 0, 0];
-      return { param, value };
-    }),
-    files,
-  };
-}
-
 /** 没填过的框画在哪：底图（或数据云）的包围盒里一字排开，拖一下就落成真值。 */
 function placeholderOf(
   i: number,
@@ -429,11 +385,13 @@ export function Viewer3D() {
   );
   const bundles = useManifestStore((s) => s.bundle?.bundles);
   const graphPath = useGraphStore((s) => s.filePath);
-  // 2D 拖框（m8-plan L15）：选中节点带 roi 语义标记的参数、以及它们画在哪片底图上
-  const roi = useMemo(
-    () => roiSpecOf(activeNode ? ops.get(activeNode.op) : undefined, activeNode),
-    [activeNode, ops],
-  );
+  // 2D 拖框（m8-plan L15）：选中节点带 roi 语义标记的参数按底图分组；一次只画选中的那一组
+  // （L20：locate_template 的一个模板槽），切换条列出全部组
+  const activeOp = activeNode ? ops.get(activeNode.op) : undefined;
+  const roiFrames = useMemo(() => roiFramesOf(activeOp, activeNode), [activeOp, activeNode]);
+  const selectedFrame = useUiStore((s) => (activeId ? s.roiFrame[activeId] : undefined));
+  const setRoiFrame = useUiStore((s) => s.setRoiFrame);
+  const roi = useMemo(() => pickFrame(roiFrames, selectedFrame), [roiFrames, selectedFrame]);
   const [sceneHost, setSceneHost] = useState<Scene | null>(null);
   const [backdrop, setBackdrop] = useState<{
     key: string;
@@ -777,20 +735,39 @@ export function Viewer3D() {
   }, [backdropKey]);
 
   const roiItems = useMemo<RoiItem[]>(() => {
-    if (!roi) return [];
+    if (!roi || !activeOp || !activeNode) return [];
+    const eff = effectiveParams(activeOp, activeNode);
     const bounds =
       backdrop.bounds ?? (roi.files.length === 0 && cloud && cloud.pointCount > 0 ? cloud.bounds : null);
     const n = roi.params.length;
-    return roi.params.map(({ param, value }, i) => ({
-      param: param.name,
-      label: param.label ?? param.name,
-      color: ROI_COLORS[i % ROI_COLORS.length]!,
-      value: [value[0]!, value[1]!, value[2]!, value[3]!],
-      scale: param.unit === "mm" ? 0.001 : 1,
-      placeholder: placeholderOf(i, n, bounds),
-    }));
-  }, [roi, backdrop.bounds, cloud]);
+    return roi.params.map((param, i) => {
+      const raw = eff[param.name];
+      const value = Array.isArray(raw) && raw.length === 4 ? raw.map(Number) : [0, 0, 0, 0];
+      return {
+        param: param.name,
+        label: param.label ?? param.name,
+        // 颜色按组内位置取：每个槽的 datum 都是同一种颜色，切槽时不换色
+        color: ROI_COLORS[i % ROI_COLORS.length]!,
+        value: [value[0]!, value[1]!, value[2]!, value[3]!],
+        scale: param.unit === "mm" ? 0.001 : 1,
+        placeholder: placeholderOf(i, n, bounds),
+      };
+    });
+  }, [roi, activeOp, activeNode, backdrop.bounds, cloud]);
   const roiEditing = cameraMode === "2d" && roiItems.length > 0 && activeNode !== undefined;
+  // 切换条只给带底图的组（有名字的）；数据坐标系那一组只有一组，不需要切
+  const roiTabs = roiEditing && roiFrames.some((f) => f.label) ? roiFrames : [];
+
+  /** 把当前这组框原样写进其它启用的组（L20「复制到其它槽」），整个算一条撤销。 */
+  const copyFrameToOthers = () => {
+    if (!roi || !activeOp || !activeNode) return;
+    const writes = copyFrameWrites(activeOp, activeNode, roi, roiFrames);
+    if (writes.length === 0) return;
+    const g = useGraphStore.getState();
+    g.begin();
+    for (const w of writes) useGraphStore.getState().setParam(activeNode.id, w.param, w.value);
+    useGraphStore.getState().commit(`把${roi.label || "当前"}的框复制到其它槽`);
+  };
 
   // 换了云或换了几何就自动取景一次；同一份内容里调参数不该把视角拉回去。
   // 必须排在上面那个 effect 之后：取景要量的是它刚建好的那一组线。
@@ -839,6 +816,7 @@ export function Viewer3D() {
       data-cloud-bounds={boundsAttr(cloud && cloud.pointCount > 0 ? cloud.bounds : null)}
       data-overlay-bounds={boundsAttr(overlayBounds)}
       data-roi-edit={roiEditing ? roiItems.length : 0}
+      data-roi-frame={roiEditing && roi ? roi.key : undefined}
       data-backdrop={backdrop.count}
       data-backdrop-bounds={boundsAttr(backdrop.bounds)}
       data-backdrop-error={backdrop.error ?? undefined}
@@ -1004,6 +982,38 @@ export function Viewer3D() {
           PNG
         </button>
       </div>
+
+      {roiTabs.length > 0 && roi && activeNode && (
+        <div className="viewer__bar viewer__bar--roi" data-testid="roi-frames" role="tablist">
+          {roiTabs.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              role="tab"
+              className={`viewer__tab${f.key === roi.key ? " is-active" : ""}`}
+              data-testid="roi-frame-tab"
+              data-frame={f.key}
+              data-active={f.key === roi.key ? "1" : "0"}
+              aria-selected={f.key === roi.key}
+              onClick={() => setRoiFrame(activeNode.id, f.key)}
+              title={`只显示${f.label}的模板与它的 ${f.params.length} 个框`}
+            >
+              {f.label}
+            </button>
+          ))}
+          <span className="viewer__spacer" />
+          <button
+            type="button"
+            className="viewer__btn"
+            data-testid="roi-copy-frame"
+            disabled={roiTabs.length < 2}
+            onClick={copyFrameToOthers}
+            title={`把${roi.label}的 ${roi.params.length} 个框原样复制到其它启用的槽（按角色一一对应）`}
+          >
+            复制到其它槽
+          </button>
+        </div>
+      )}
 
       <div className="viewer__stage">
         <div className="viewer__canvas" ref={hostRef} data-testid="viewer3d-canvas" />

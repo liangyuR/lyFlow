@@ -137,6 +137,10 @@ export interface RoiBackdrop {
   dir: string;
   /** 本算子 string / path 参数的名字。 */
   files?: string[];
+  /** 同一底图的这组框在 2D 视图切换条上的名字（m8-plan L20），例如「模板 2」。 */
+  label?: string;
+  /** 本算子一个 string 参数的名字：切换条上的名字后面接上它的当前值（「模板 2 · f2」）。 */
+  labelParam?: string;
 }
 
 /** 片段里的一个节点（m8-plan L14）。写法与 GraphDoc 的节点相同，id 只在片段内唯一。 */

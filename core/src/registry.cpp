@@ -164,6 +164,8 @@ void writeParam(JsonWriter& w, const Param& p) {
     w.beginObject();
     w.field("dir", p.roiBackdrop.dirParam);
     w.fieldIfSet("files", p.roiBackdrop.fileParams);
+    w.fieldIfSet("label", p.roiBackdrop.label);
+    w.fieldIfSet("labelParam", p.roiBackdrop.labelParam);
     w.endObject();
   }
   w.endObject();
@@ -575,6 +577,13 @@ std::vector<std::string> Registry::validate() const {
         const Param* fp = findParam(op, f);
         if (!fp || (fp->type != ParamType::String && fp->type != ParamType::Path)) {
           fail(pwhere + " roiBackdrop.files 里的 '" + f + "' 要指向本算子的一个 string / path 参数");
+        }
+      }
+      if (!p.roiBackdrop.labelParam.empty()) {
+        const Param* lp = findParam(op, p.roiBackdrop.labelParam);
+        if (!lp || lp->type != ParamType::String) {
+          fail(pwhere + " roiBackdrop.labelParam '" + p.roiBackdrop.labelParam +
+               "' 要指向本算子的一个 string 参数");
         }
       }
     }

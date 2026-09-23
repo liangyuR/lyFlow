@@ -70,6 +70,11 @@ interface UiState {
   setAutoHint(ambiguous: readonly { to: PortRef; candidates: readonly PortRef[] }[]): void;
   clearAutoHint(): void;
 
+  /** 每个节点在 2D 视图里选的那一组框（m8-plan L20，键是 lib/roiFrames 的 frame key）。
+   *  切换条与 Inspector 的槽参数组共用它；不进 doc、不进撤销。没选过 = 第一组。 */
+  roiFrame: Readonly<Record<string, string>>;
+  setRoiFrame(nodeId: string, key: string): void;
+
   setSelection(nodes: readonly string[], edges: readonly string[]): void;
   clearSelection(): void;
   openSearch(popup: SearchPopup): void;
@@ -123,6 +128,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   helpOpen: false,
   focusedDiagnostic: null,
   autoHint: null,
+  roiFrame: {},
+
+  setRoiFrame(nodeId, key) {
+    if (get().roiFrame[nodeId] === key) return;
+    set({ roiFrame: { ...get().roiFrame, [nodeId]: key } });
+  },
 
   setAutoHint(ambiguous) {
     if (ambiguous.length === 0) {

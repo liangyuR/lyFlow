@@ -3458,11 +3458,11 @@ mod tests {
             assert_eq!(v.code, EXIT_OK, "{p}: {}", v.out);
         }
 
-        // 把 datum 框拖到缝右边、target 旁边
+        // 把槽 1 的 datum 框拖到缝右边、target 旁边
         let mut dragged = blocks.clone();
         for n in dragged["nodes"].as_array_mut().unwrap() {
             if n["op"] == "gap.locate_template" {
-                n["params"]["datumRoi"] = json!([16, 162, 17.5, 166]);
+                n["params"]["template1DatumRoi"] = json!([16, 162, 17.5, 166]);
             }
         }
         let dragged_path = dir.join("dragged.lyflow.json");
@@ -3481,7 +3481,7 @@ mod tests {
         assert_eq!(d["code"], "bad_param", "{diags}");
         assert_eq!(d["phase"], "validate", "{diags}");
         assert_eq!(d["nodeId"], "n_locate", "{diags}");
-        assert_eq!(d["paramPath"], "datumRoi", "{diags}");
+        assert_eq!(d["paramPath"], "template1DatumRoi", "{diags}");
         let run = cli(&["run", &dragged_path]);
         assert_eq!(run.code, EXIT_INVALID, "{}", run.err);
         assert!(

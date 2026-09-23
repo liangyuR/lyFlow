@@ -225,7 +225,9 @@
           "additionalProperties": false,
           "properties": {
             "dir": { "type": "string", "description": "本算子一个 path 参数的名字。" },
-            "files": { "type": "array", "items": { "type": "string" }, "description": "本算子 string / path 参数的名字。" }
+            "files": { "type": "array", "items": { "type": "string" }, "description": "本算子 string / path 参数的名字。" },
+            "label": { "type": "string", "description": "同一底图的这组框在编辑器切换条上的名字（m8-plan L20），例如「模板 2」。" },
+            "labelParam": { "type": "string", "description": "本算子一个 string 参数的名字：切换条上的名字后面接上它的当前值（「模板 2 · f2」）。" }
           }
         }
       }

@@ -97,11 +97,13 @@ JSON Schema： [`schema/operator-manifest.schema.json`](../schema/operator-manif
 
 ```jsonc
 {
-  "name": "datumRoi", "type": "vec4f", "unit": "mm",
+  "name": "template1DatumRoi", "type": "vec4f", "unit": "mm",
   "semantic": "roi",                       // [xMin, yMin, xMax, yMax]，XY 平面上的一个框
   "roiBackdrop": {                         // 可选：框画在哪片云上
     "dir": "templateDir",                  // 本算子的一个 path 参数
-    "files": ["template1Left", "template1Right"]   // 本算子的 string / path 参数
+    "files": ["template1Left", "template1Right"],  // 本算子的 string / path 参数
+    "label": "模板 1",                     // 可选：这组框在切换条上的名字
+    "labelParam": "template1Id"            // 可选：名字后面接上这个 string 参数的当前值 →「模板 1 · f1」
   }
 }
 ```
@@ -112,7 +114,10 @@ JSON Schema： [`schema/operator-manifest.schema.json`](../schema/operator-manif
 - 没有 `roiBackdrop`：框在数据坐标系里，画在节点显示的那片云上（例如 `gap.overall_roi.roi`）。
   有：框在 `<dir>/<file>` 那几个文件的坐标系里（例如 `gap.locate_template` 的四个角色框在模板坐标系里，
   底图是那个槽的左右模板），编辑器经宿主读这几个文件（Tauri 的 `load_cloud_file`），**不需要先跑图**。
-  坐标系不同的框不会画在同一片底图上：只取与第一个可见 roi 参数同一底图的那一组。
+  坐标系不同的框不会画在同一片底图上：可见的 roi 参数按 `roiBackdrop` 分组（`dir` + `files` 相同 = 同一组），
+  视图**一次只画一组**，组不止一个时顶上有切换条（名字取 `label` + `labelParam` 的值），还有「复制到其它槽」
+  （按组内声明顺序一一对应写过去）；Inspector 里各组所在的参数组变成手风琴，与切换条联动（M8c / L20）。
+  有带底图的组时，数据坐标系里的框（例如 `locate_template.overallRoi`）不进 2D 拖框。
 - 子图提升参数时 `semantic` 跟着走，`roiBackdrop` 不带（它指的是内部算子的参数名）。
 
 ## 片段（`snippets`，M8b）

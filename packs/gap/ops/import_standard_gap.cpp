@@ -123,7 +123,6 @@ struct Candidate {
   Roi flushRef{};
   Roi gapLeft{};
   Roi gapRight{};
-  bool sameAsTop = true;
 };
 
 enum class Mode { Template, Model, Auto };
@@ -298,8 +297,6 @@ Status parseConfig(const YAML::Node& cfg, const fs::path& baseDir, Mode mode, Co
         c.notes.push_back("模板候选 " + cand.id + " 的四个框全是 0（没配），导入时跳过");
         continue;
       }
-      cand.sameAsTop = cand.flushBase == c.top[0] && cand.flushRef == c.top[1] &&
-                       cand.gapLeft == c.top[2] && cand.gapRight == c.top[3];
       c.candidates.push_back(std::move(cand));
     }
     if (c.candidates.empty()) return badInput("模板候选的框全是 0，没有一个能用");
@@ -569,31 +566,22 @@ std::string blockLocateTemplate(Builder& g, const Config& c, const std::string& 
                                 const Ref& scan, int column, int row, const char* title) {
   nlohmann::json p = icpParams(c);
   p["templateDir"] = c.templateDir;
-  p["datumRoi"] = c.top[0];
-  p["targetRoi"] = c.top[1];
-  p["seamLeftRoi"] = c.top[2];
-  p["seamRightRoi"] = c.top[3];
   p["overallRoi"] = overallRoiOf(c);
   p["overallMode"] = textOr(c.common, "overall_roi_mode", "fixed");
   p["overallCamera"] = c.usingCamera;
-  for (std::size_t i = 0; i < 4; ++i) {
+  // 每个槽各写自己的四框（m8-plan L19）：候选自带 rois 的用自己的，没带的在解析时已经用
+  // 配置里的全局 rois 填好（Candidate 的四个框总是齐的）。槽 1 恒启用，不写 Enabled。
+  for (std::size_t i = 0; i < 4 && i < c.candidates.size(); ++i) {
     const std::string prefix = "template" + std::to_string(i + 1);
-    if (i >= c.candidates.size()) {
-      if (i == 0) p[prefix + "Enabled"] = false;
-      continue;
-    }
     const Candidate& cand = c.candidates[i];
     if (i > 0) p[prefix + "Enabled"] = true;
     p[prefix + "Id"] = cand.id;
     p[prefix + "Left"] = cand.left;
     p[prefix + "Right"] = cand.right;
-    if (!cand.sameAsTop) {
-      p[prefix + "Override"] = true;
-      p[prefix + "DatumRoi"] = cand.flushBase;
-      p[prefix + "TargetRoi"] = cand.flushRef;
-      p[prefix + "SeamLeftRoi"] = cand.gapLeft;
-      p[prefix + "SeamRightRoi"] = cand.gapRight;
-    }
+    p[prefix + "DatumRoi"] = cand.flushBase;
+    p[prefix + "TargetRoi"] = cand.flushRef;
+    p[prefix + "SeamLeftRoi"] = cand.gapLeft;
+    p[prefix + "SeamRightRoi"] = cand.gapRight;
   }
   const std::string node = g.node(id, "gap.locate_template", p, column, row, title);
   g.edge(scan.node, scan.port, node, "scan");

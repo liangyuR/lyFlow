@@ -438,14 +438,14 @@ TEST_CASE("同一张图里混用积木与细粒度算子能跑，结果与纯积
 TEST_CASE("locate_template 把 datum 框拖到 target 那一侧：validate 在执行前就报错（M8a 验收 4）") {
   Scene scene("dragged");
   Json doc = importAs("StandardGap.yml:template", kSyntheticConfig, scene.root);
-  // 模板槽 1 用的是基础的四个框（与顶层一致），把 datum 挪到缝右边、target 旁边
-  nodeOf(doc, "n_locate")["params"]["datumRoi"] = Json::array({16, 162, 17.5, 166});
+  // 把槽 1 的 datum 挪到缝右边、target 旁边
+  nodeOf(doc, "n_locate")["params"]["template1DatumRoi"] = Json::array({16, 162, 17.5, 166});
   const std::vector<Json> errors = errorsOf(doc);
   REQUIRE(errors.size() == 1);
   CHECK(errors[0]["nodeId"] == "n_locate");
   CHECK(errors[0]["code"] == "bad_param");
   CHECK(errors[0]["phase"] == "validate");
-  CHECK(errors[0]["paramPath"] == "datumRoi");
+  CHECK(errors[0]["paramPath"] == "template1DatumRoi");
   CHECK(errors[0]["message"].get<std::string>().find("同一侧") != std::string::npos);
 
   test::Session s(doc, scene.root);
@@ -460,16 +460,15 @@ TEST_CASE("locate_template 把 datum 框拖到 target 那一侧：validate 在�
   SUBCASE("其余几条：框退化、缝框颠倒、槽之间基准件不同侧") {
     Json bad = importAs("StandardGap.yml:template", kSyntheticConfig, scene.root);
     Json& p = nodeOf(bad, "n_locate")["params"];
-    p["seamLeftRoi"] = Json::array({1.5, 163, 4.5, 166});
-    p["seamRightRoi"] = Json::array({-4.5, 164, -1.5, 167});
+    p["template1SeamLeftRoi"] = Json::array({1.5, 163, 4.5, 166});
+    p["template1SeamRightRoi"] = Json::array({-4.5, 164, -1.5, 167});
     CHECK(errorsOf(bad).at(0)["message"].get<std::string>().find("颠倒") != std::string::npos);
-    p["seamRightRoi"] = Json::array({4.5, 163, 1.5, 166});
+    p["template1SeamRightRoi"] = Json::array({4.5, 163, 1.5, 166});
     CHECK(errorsOf(bad).at(0)["message"].get<std::string>().find("退化") != std::string::npos);
 
     Json slots = importAs("StandardGap.yml:template", kSyntheticConfig, scene.root);
     Json& q = nodeOf(slots, "n_locate")["params"];
     q["template2Enabled"] = true;
-    q["template2Override"] = true;
     q["template2DatumRoi"] = Json::array({5, 162, 15, 166});
     q["template2TargetRoi"] = Json::array({-15, 163, -5, 167});
     q["template2SeamLeftRoi"] = Json::array({-4.5, 164, -1.5, 167});
@@ -478,6 +477,162 @@ TEST_CASE("locate_template 把 datum 框拖到 target 那一侧：validate 在�
     REQUIRE(e.size() == 1);
     CHECK(e[0]["paramPath"] == "template2DatumRoi");
     CHECK(e[0]["message"].get<std::string>().find("不一致") != std::string::npos);
+  }
+}
+
+TEST_CASE("每个模板槽各有自己的四框（m8-plan L19）：没有公共四框、没有 Override，槽 1 恒启用") {
+  const OperatorDesc* op = packRegistry().find("gap.locate_template");
+  REQUIRE(op != nullptr);
+  CHECK(op->version == "2.0.0");
+  for (const Param& p : op->params) {
+    CAPTURE(p.name);
+    for (const char* gone : {"datumRoi", "targetRoi", "seamLeftRoi", "seamRightRoi"}) {
+      CHECK(p.name != gone);
+    }
+    CHECK(p.name.find("Override") == std::string::npos);
+    CHECK(p.name != "template1Enabled");
+  }
+  for (int k = 1; k <= 4; ++k) {
+    const std::string prefix = "template" + std::to_string(k);
+    for (const char* role : {"Datum", "Target", "SeamLeft", "SeamRight"}) {
+      const Param* roi = findParam(*op, prefix + role + "Roi");
+      REQUIRE(roi != nullptr);
+      // 槽 1 的四框是「人要填的」；槽 2–4 在高级里、跟着自己的 Enabled 显示
+      CHECK(roi->advanced == (k > 1));
+      CHECK(roi->group == "模板槽 " + std::to_string(k));
+      if (k > 1) CHECK(roi->visibleWhen.param == prefix + "Enabled");
+    }
+  }
+
+  // 导入器：候选自带 rois 的用自己的，没带的用配置里的全局 rois 填进该槽
+  std::string yaml = kSyntheticConfig;
+  const std::string from = "    - {id: f1, left: left.pcd, right: right.pcd}\n";
+  yaml.replace(yaml.find(from), from.size(),
+               from +
+                   "    - {id: f2, left: left.pcd, right: right.pcd, rois: {flush: {base_roi: [-14, 163,"
+                   " -6, 167]}, gap: {right_roi: [1.6, 163, 4.4, 166]}}}\n"
+                   "    - {id: f3, left: left.pcd, right: right.pcd}\n");
+  Scene scene("slots");
+  Json doc = importAs("StandardGap.yml:template", yaml, scene.root);
+  const Json& p = nodeOf(doc, "n_locate")["params"];
+  for (auto it = p.begin(); it != p.end(); ++it) {
+    CAPTURE(it.key());
+    CHECK(it.key().find("Override") == std::string::npos);
+    CHECK((it.key() != "datumRoi" && it.key() != "targetRoi" && it.key() != "seamLeftRoi" &&
+           it.key() != "seamRightRoi"));
+  }
+  CHECK_FALSE(p.contains("template1Enabled"));
+  CHECK(p["template2Enabled"] == true);
+  CHECK(p["template3Enabled"] == true);
+  CHECK_FALSE(p.contains("template4Enabled"));
+  CHECK(p["template1DatumRoi"] == Json::array({-15, 163, -5, 167}));
+  CHECK(p["template2DatumRoi"] == Json::array({-14, 163, -6, 167}));          // 自己的
+  CHECK(p["template2TargetRoi"] == Json::array({5, 162, 15, 166}));           // 没带 → 全局
+  CHECK(p["template2SeamRightRoi"] == Json::array({1.6, 163, 4.4, 166}));     // 自己的
+  CHECK(p["template3SeamLeftRoi"] == Json::array({-4.5, 164, -1.5, 167}));    // 全局
+  CHECK(errorsOf(doc).empty());
+  const Reading three = run(doc, scene.root);
+  REQUIRE(three.ok);
+
+  // L22：槽 3 的 datum 拖到 target 同侧，诊断标明「模板 3」、指到槽 3 自己的框
+  nodeOf(doc, "n_locate")["params"]["template3DatumRoi"] = Json::array({6, 162, 9, 166});
+  const std::vector<Json> errors = errorsOf(doc);
+  REQUIRE(errors.size() == 1);
+  CHECK(errors[0]["paramPath"] == "template3DatumRoi");
+  const std::string message = errors[0]["message"].get<std::string>();
+  CHECK(message.rfind("模板 3 · f3：", 0) == 0);
+  CHECK(message.find("同一侧") != std::string::npos);
+  // 关掉的槽不查
+  nodeOf(doc, "n_locate")["params"]["template3Enabled"] = false;
+  CHECK(errorsOf(doc).empty());
+}
+
+TEST_CASE("locate_template v1 → v2 迁移：公共四框抄进没开覆盖的槽，覆盖框留给自己的槽") {
+  const OperatorDesc* op = packRegistry().find("gap.locate_template");
+  REQUIRE(op != nullptr);
+  REQUIRE(op->migrations.size() == 1);
+  const MigrateFn migrate = op->migrations[0].apply;
+  const Json global = Json::array({-15, 163, -5, 167});
+  const Json own = Json::array({-14, 163, -6, 167});
+
+  SUBCASE("槽 1 用公共框，槽 2 开了覆盖（试用反馈里那张图的形状）") {
+    const Json v1 = {{"templateDir", "StandardGap"},
+                     {"datumRoi", global},
+                     {"targetRoi", Json::array({5, 162, 15, 166})},
+                     {"seamLeftRoi", Json::array({-4.5, 164, -1.5, 167})},
+                     {"seamRightRoi", Json::array({1.5, 163, 4.5, 166})},
+                     {"template1Id", "f1"},
+                     {"template2Enabled", true},
+                     {"template2Override", true},
+                     {"template2DatumRoi", own},
+                     {"template3Id", "f3"},
+                     {"minScore", 30}};
+    const Json v2 = migrate(v1);
+    CHECK(v2["templateDir"] == "StandardGap");
+    CHECK(v2["minScore"] == 30);
+    CHECK(v2["template1DatumRoi"] == global);
+    CHECK(v2["template1SeamRightRoi"] == Json::array({1.5, 163, 4.5, 166}));
+    CHECK(v2["template2Enabled"] == true);
+    CHECK(v2["template2DatumRoi"] == own);
+    CHECK_FALSE(v2.contains("template2TargetRoi"));   // 覆盖框没写 = 默认（v1 也是这个值）
+    CHECK(v2["template3DatumRoi"] == global);          // 关着的槽也抄一份，打开就能用
+    CHECK_FALSE(v2.contains("template3Enabled"));
+    for (const char* gone : {"datumRoi", "targetRoi", "seamLeftRoi", "seamRightRoi",
+                             "template2Override", "template1Enabled"}) {
+      CHECK_FALSE(v2.contains(gone));
+    }
+  }
+  SUBCASE("v1 槽 1 关着：第一个启用的槽换到槽 1，启用槽的先后不变") {
+    const Json v1 = {{"datumRoi", global},
+                     {"template1Enabled", false},
+                     {"template3Enabled", true},
+                     {"template3Id", "c"},
+                     {"template4Enabled", true},
+                     {"template4Id", "d"},
+                     {"template4Left", "d_l.pcd"}};
+    const Json v2 = migrate(v1);
+    CHECK(v2["template1Id"] == "c");
+    CHECK(v2["template1Left"] == "f3_left.pcd");      // 旧槽 3 的默认值显式写出来
+    CHECK(v2["template1DatumRoi"] == global);
+    CHECK(v2["template3Id"] == "f1");                  // 原槽 1 挪到槽 3、关着
+    CHECK(v2["template3Left"] == "left_template.pcd");
+    CHECK_FALSE(v2.contains("template3Enabled"));
+    CHECK(v2["template4Enabled"] == true);
+    CHECK(v2["template4Id"] == "d");
+    CHECK(v2["template4Left"] == "d_l.pcd");
+  }
+  SUBCASE("已经是 v2 写法的参数原样返回（opVersion 标旧了也不会把各槽的框抹掉）") {
+    const Json v2 = {{"template1DatumRoi", own}, {"template2Enabled", true}, {"template2Id", "x"}};
+    CHECK(migrate(v2) == v2);
+  }
+  SUBCASE("存于 v1.0.0 的节点经 validate 走迁移，迁移后的图校验干净、跑出同一个读数") {
+    Scene scene("migrate");
+    Json doc = importAs("StandardGap.yml:template", kSyntheticConfig, scene.root);
+    const Reading fresh = run(doc, scene.root);
+    REQUIRE(fresh.ok);
+    Json& node = nodeOf(doc, "n_locate");
+    Json& p = node["params"];
+    // 改回 v1 的写法：公共四框 + 槽 1 不覆盖
+    for (const auto& [v1Name, v2Name] :
+         {std::pair<const char*, const char*>{"datumRoi", "template1DatumRoi"},
+          {"targetRoi", "template1TargetRoi"},
+          {"seamLeftRoi", "template1SeamLeftRoi"},
+          {"seamRightRoi", "template1SeamRightRoi"}}) {
+      p[v1Name] = p[v2Name];
+      p.erase(v2Name);
+    }
+    p["template1Enabled"] = true;
+    node["opVersion"] = "1.0.0";
+    bool migrated = false;
+    for (const Json& d : Json::parse(exec::validateGraphJson(doc.dump(), {}))) {
+      if (d.value("kind", "") == "migration" && d.value("nodeId", "") == "n_locate") migrated = true;
+      CHECK(d.value("severity", "") != "error");
+    }
+    CHECK(migrated);
+    const Reading old = run(doc, scene.root);
+    REQUIRE(old.ok);
+    CHECK(old.flush == fresh.flush);
+    CHECK(old.gap == fresh.gap);
   }
 }
 
@@ -619,16 +774,20 @@ TEST_CASE("随包的六个片段都注册了、自检干净，并进了 manifest
 TEST_CASE("roi 语义标记（m8-plan L15）：locate_template 的四个角色框画在所在模板槽的左右模板上") {
   const OperatorDesc* op = ensureRegistry().find("gap.locate_template");
   REQUIRE(op != nullptr);
-  const Param* datum = findParam(*op, "datumRoi");
+  const Param* datum = findParam(*op, "template1DatumRoi");
   REQUIRE(datum != nullptr);
   CHECK(datum->semantic == "roi");
   CHECK(datum->roiBackdrop.dirParam == "templateDir");
   CHECK(datum->roiBackdrop.fileParams ==
         std::vector<std::string>{"template1Left", "template1Right"});
+  // 切换条上的名字（L20）：「模板 k」+ 那个槽的 Id
+  CHECK(datum->roiBackdrop.label == "模板 1");
+  CHECK(datum->roiBackdrop.labelParam == "template1Id");
   const Param* slot3 = findParam(*op, "template3SeamLeftRoi");
   REQUIRE(slot3 != nullptr);
   CHECK(slot3->roiBackdrop.fileParams ==
         std::vector<std::string>{"template3Left", "template3Right"});
+  CHECK(slot3->roiBackdrop.label == "模板 3");
   // 数据坐标系里的框：没有 backdrop
   const Param* overall = findParam(*op, "overallRoi");
   REQUIRE(overall != nullptr);
@@ -639,10 +798,12 @@ TEST_CASE("roi 语义标记（m8-plan L15）：locate_template 的四个角色�
   for (const Json& o : manifest["operators"]) {
     if (o["id"] != "gap.locate_template") continue;
     for (const Json& p : o["params"]) {
-      if (p["name"] != "targetRoi") continue;
+      if (p["name"] != "template2TargetRoi") continue;
       CHECK(p["semantic"] == "roi");
       CHECK(p["roiBackdrop"]["dir"] == "templateDir");
       CHECK(p["roiBackdrop"]["files"].size() == 2);
+      CHECK(p["roiBackdrop"]["label"] == "模板 2");
+      CHECK(p["roiBackdrop"]["labelParam"] == "template2Id");
     }
   }
 }

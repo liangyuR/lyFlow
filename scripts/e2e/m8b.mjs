@@ -13,7 +13,7 @@ import { dragMouse, lit, newDoc, pressEscape, pressF5, runAndWait, select } from
 // 与 packs/gap/tests/test_blocks.cpp 的夹具同一个形状：左板顶面 y=165，右板 y=164（高 1 mm），
 // 缝两侧各一段 R1 的圆角。x 步长 0.05 mm。
 
-function profile(shiftMm) {
+export function profile(shiftMm) {
   const pts = [];
   for (let x = -20 + shiftMm; x < -3; x += 0.05) pts.push([x, 165]);
   for (let k = 0; k <= 30; k += 1) {
@@ -30,7 +30,7 @@ function profile(shiftMm) {
   return pts;
 }
 
-function writePcd(file, rows) {
+export function writePcd(file, rows) {
   const head =
     "# .PCD v0.7\nVERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\nCOUNT 1 1 1\n" +
     `WIDTH ${rows.length}\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\nPOINTS ${rows.length}\nDATA ascii\n`;
@@ -66,13 +66,13 @@ function makeScene(ws) {
   return { root, point, templates };
 }
 
-/** 模板坐标系里的四个角色框（毫米），与夹具的 StandardGap 配置一致。按这个顺序拖：
- *  先把两个小的缝框挪到中间，大框落位时就不会盖住还没拖的占位框。 */
+/** 模板坐标系里的四个角色框（毫米），与夹具的 StandardGap 配置一致；槽 1 的那四个参数（M8c L19
+ *  起每个槽各有自己的四框）。按这个顺序拖：先把两个小的缝框挪到中间，大框落位时就不会盖住还没拖的占位框。 */
 const ROLE_BOXES = {
-  seamLeftRoi: [-4.5, 164, -1.5, 167],
-  seamRightRoi: [1.5, 163, 4.5, 166],
-  targetRoi: [5, 162, 15, 166],
-  datumRoi: [-15, 163, -5, 167],
+  template1SeamLeftRoi: [-4.5, 164, -1.5, 167],
+  template1SeamRightRoi: [1.5, 163, 4.5, 166],
+  template1TargetRoi: [5, 162, 15, 166],
+  template1DatumRoi: [-15, 163, -5, 167],
 };
 
 // ------------------------------------------------------------------ 页面动作
@@ -138,7 +138,7 @@ function restoreManualEdges(cdp) {
   `);
 }
 
-async function setCamera(cdp, mode) {
+export async function setCamera(cdp, mode) {
   await cdp.eval(`
     const sel = document.querySelector('[data-testid="viewer-camera"]');
     const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
@@ -153,7 +153,7 @@ async function setCamera(cdp, mode) {
 }
 
 /** 拖框层当前的「米 → 屏幕像素」映射，与每个框、每个把手的屏幕位置。 */
-async function roiGeometry(cdp) {
+export async function roiGeometry(cdp) {
   return cdp.eval(`
     const layer = document.querySelector('[data-testid="roi-layer"]');
     if (!layer || !layer.getAttribute('data-map')) return null;
@@ -199,7 +199,7 @@ async function roiGeometry(cdp) {
 }
 
 /** 模板坐标（毫米）→ 屏幕像素。 */
-const screenOf = (map, xMm, yMm) => ({
+export const screenOf = (map, xMm, yMm) => ({
   x: Math.round(map.ox + map.sx * (xMm / 1000)),
   y: Math.round(map.oy + map.sy * (yMm / 1000)),
 });
@@ -221,7 +221,7 @@ async function dragBoxTo(cdp, name, target) {
   return g.boxes[name].value;
 }
 
-async function waitValidated(cdp, nodeId, wantInvalid, timeoutMs = 5000) {
+export async function waitValidated(cdp, nodeId, wantInvalid, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   while (Date.now() < deadline) {
@@ -320,7 +320,7 @@ async function suiteBuildFromBlank(cdp, report, ws) {
   // 四个框还没画：实时校验在拼的时候就标红
   const before = await waitValidated(cdp, locate, true);
   report.eq("四个框都没填时 locate_template 立即标红", before?.invalid, "1");
-  report.ok("诊断指到框参数上", (before?.diags ?? []).some((d) => d.paramPath === "datumRoi"),
+  report.ok("诊断指到框参数上", (before?.diags ?? []).some((d) => d.paramPath === "template1DatumRoi"),
     JSON.stringify(before?.diags));
 
   // 5. 2D 视图拖四个框
@@ -492,21 +492,22 @@ async function suiteDragWrongSide(cdp, report) {
   const g = await roiGeometry(cdp);
   const t0 = Date.now();
   // 挪到 target 旁边（缝的右侧）
-  await dragMouse(cdp, g.boxes.datumRoi.center, screenOf(g.map, 12, 160.5), { steps: 10 });
+  await dragMouse(cdp, g.boxes.template1DatumRoi.center, screenOf(g.map, 12, 160.5), { steps: 10 });
   const bad = await waitValidated(cdp, built.locate, true, 3000);
   const ms = Date.now() - t0;
   report.eq("松手后 locate_template 标红", bad?.invalid, "1");
   report.ok("节点上显示诊断：datum 与 target 落在缝的同一侧", /同一侧/.test(bad?.text ?? ""), JSON.stringify(bad));
-  report.ok("诊断指到 datumRoi", (bad?.diags ?? []).some((d) => d.paramPath === "datumRoi" && d.code === "bad_param"),
+  report.ok("诊断指到 template1DatumRoi",
+    (bad?.diags ?? []).some((d) => d.paramPath === "template1DatumRoi" && d.code === "bad_param"),
     JSON.stringify(bad?.diags));
   report.ok(`从松手到标红在 3 秒内（${ms} ms，含拖动本身）`, ms < 3000 + 2000);
   const inspector = await cdp.eval(`
-    const row = document.querySelector('[data-testid="param-datumRoi"]');
+    const row = document.querySelector('[data-testid="param-template1DatumRoi"]');
     return { error: row?.getAttribute('data-param-error') ?? null,
              message: row?.querySelector('.insp-param__error')?.textContent ?? null,
              list: !!document.querySelector('[data-testid="inspector-validation"]') };
   `);
-  report.eq("Inspector 里 datumRoi 那一行标红", inspector.error, "1");
+  report.eq("Inspector 里 template1DatumRoi 那一行标红", inspector.error, "1");
   report.ok("错误消息贴在控件下面", /同一侧/.test(inspector.message ?? ""), JSON.stringify(inspector));
   report.ok("Inspector 顶部列出校验诊断", inspector.list);
 

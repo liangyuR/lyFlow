@@ -131,7 +131,7 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 | id | 输入 → 输出 | 干什么 |
 |---|---|---|
 | `gap.read_scan` | [primary, secondary] → scan | 读剖面：目录 + 前缀（或两个文件），换到测量帧，合并（secondary 在前）并按需半径去噪。primary / secondary 保留原始 1280 槽（NaN 槽还在）。**两个输入接上或被宿主注入时直接用它们、不读目录**（M8b / L18）；`source=inputs` 是「不配目录」的写法 |
-| `gap.locate_template` | scan → rois, alignment, scan | 模板定位：整体框 → 裁 → 模板 → ICP → 选模板 → 业务框。四个角色框写在模板坐标系里；四个固定模板槽，每槽可覆盖四框 |
+| `gap.locate_template` | scan → rois, alignment, scan | 模板定位：整体框 → 裁 → 模板 → ICP → 选模板 → 业务框。四个固定模板槽，槽 1 恒启用、2–4 按需打开；**每个槽有自己的左右模板和四个角色框**（`template<k>DatumRoi` 等，该模板的坐标系，M8c / L19） |
 | `gap.locate_model` | scan → rois, scan | 模型定位：剖面张量 → ONNX → argmax → 推框（精修）→ 剔 NaN → 跟随裁剪窗（合并云跟着裁） |
 | `gap.role_line` | scan, rois, [refLine] → line, innerEnd, quality | 按角色（datum / target）拟合直线，「靠缝那一端」取两个缝框中心的中点 |
 | `gap.ref_point` | scan, rois, [baseLine] → point, line, quality | 取参考点：`line_end` / `selected_point` / `nearest_point` |
@@ -148,7 +148,8 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 **方向全部由 RoiSet 推出**（m8-plan L7）：积木算子上一个 `side` / `toward` / `baseSide` / `datumSide`
 都没有。基准件在哪一侧 = datum 框中心在两个缝框中心连线中点的哪一边（模板定位在模板坐标系里推，
 模型定位在样本上推）；「靠缝那一端」= 两个缝框中心的中点。`locate_template` 的加载期校验拦住：
-框退化、缝框左右颠倒或重叠、datum 与 target 落在缝的同一侧、各模板槽的基准件不同侧。
+框退化、缝框左右颠倒或重叠、datum 与 target 落在缝的同一侧、各模板槽的基准件不同侧 —— 每个启用的槽
+分别查，诊断以「模板 k · <Id>：」开头、指到那个槽自己的框（L22）。
 
 **积木算子不写第二份算法**（L6）：每一步都用 `Step` 原样调一个细粒度算子的 compute —— 包内的
 在 `ops/gap_fine.h` 的 `namespace fine` 里导出，别的包的（`filter.crop_box2d`、`util.merge`、
@@ -181,9 +182,11 @@ M8a 的两处行为变化（两种图一致）：
 
   典型拼法：拖入 `gap.read_scan`、`gap.locate_template`（scan 自动接上），插入「测点骨架」
   （八个对外输入自动接到 locate_template 那唯一的一对输出上），填目录、拖四个框、跑。
-- **2D 拖框**：`gap.locate_template` 的四个角色框（以及各槽的覆盖框）带 `semantic: "roi"` 与
-  `roiBackdrop`（那个槽的左右模板），选中它、把视图切到「2D 剖面」就能直接拖；`gap.overall_roi.roi`
-  也带 roi 标记（数据坐标系）。`locate_template.overallRoi` 的默认值是一个大到不裁的框：空白画布上
+- **2D 拖框**：`gap.locate_template` 每个槽的四个角色框带 `semantic: "roi"` 与
+  `roiBackdrop`（那个槽的左右模板），选中它、把视图切到「2D 剖面」就能直接拖。视图顶上的**模板切换条**
+  （`模板 1 · f1`、`模板 2 · f2` …，只列启用的槽）一次只显示一个槽的模板云与它的四个框，Inspector 里
+  那个槽的参数组同步展开；「复制到其它槽」把当前四框原样写进其它启用的槽（M8c / L20）。相邻框的角色
+  标签自动错开，不互相遮挡（L21）。`gap.overall_roi.roi` 也带 roi 标记（数据坐标系）。`locate_template.overallRoi` 的默认值是一个大到不裁的框：空白画布上
   拼出来的图不填高级参数也能跑（导入器总是显式写这一项）。
 
 ## 模型 ROI 路径

@@ -104,10 +104,12 @@
   background: color-mix(in srgb, var(--roi-color) 6%, transparent);
 }
 
+/* 位置由 RoiLayer 按「互不遮挡」逐帧摆（m8-plan L21）；这里只是第一帧之前的默认（框上方） */
 .roi-box__label {
   position: absolute;
   left: -1px;
-  bottom: 100%;
+  top: -14px;
+  z-index: 4;
   padding: 0 4px;
   font-size: 10px;
   line-height: 14px;
@@ -116,6 +118,12 @@
   background: var(--roi-color);
   border-radius: 3px 3px 0 0;
   pointer-events: none;
+}
+
+.roi-box__label[data-pos="inside"],
+.roi-box__label[data-pos="stack"],
+.roi-box__label[data-pos="below"] {
+  border-radius: 3px;
 }
 
 .roi-box__handle {

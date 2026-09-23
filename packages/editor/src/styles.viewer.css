@@ -57,3 +57,27 @@
 }
 
 .viewer__stage .viewer__empty { inset: 0; }
+
+/* 2D 拖框的模板切换条（m8-plan L20）：一次只处理一个模板槽的框。 */
+.viewer__bar--roi {
+  border-bottom: 1px solid var(--lyflow-border);
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.viewer__tab {
+  border: 1px solid var(--lyflow-border);
+  border-radius: 4px;
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+
+.viewer__tab.is-active {
+  border-color: #8fb8ff;
+  color: #8fb8ff;
+  background: color-mix(in srgb, #8fb8ff 14%, var(--lyflow-bg-2));
+}

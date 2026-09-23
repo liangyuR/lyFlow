@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 
+import { placeLabels, type LabelBox } from "../lib/roiFrames";
 import { useGraphStore } from "../store/graph";
 
 /** Viewer3D 的场景里 RoiLayer 用得到的那几样。 */
@@ -97,17 +98,34 @@ export function RoiLayer({
         "data-map",
         [p1.x - p0.x, p0.x, p1.y - p0.y, p0.y].map((v) => v.toFixed(3)).join(","),
       );
+      const boxes: LabelBox[] = [];
+      const labels: HTMLElement[] = [];
       for (const item of itemsRef.current) {
         const el = boxRefs.current.get(item.param);
         if (!el) continue;
         const r = rectMeters(item);
         const a = toScreen(host, r[0], r[3]);
         const b = toScreen(host, r[2], r[1]);
-        el.style.left = `${Math.min(a.x, b.x)}px`;
-        el.style.top = `${Math.min(a.y, b.y)}px`;
-        el.style.width = `${Math.max(Math.abs(b.x - a.x), 2)}px`;
-        el.style.height = `${Math.max(Math.abs(b.y - a.y), 2)}px`;
+        const left = Math.min(a.x, b.x);
+        const top = Math.min(a.y, b.y);
+        const width = Math.max(Math.abs(b.x - a.x), 2);
+        const height = Math.max(Math.abs(b.y - a.y), 2);
+        el.style.left = `${left}px`;
+        el.style.top = `${top}px`;
+        el.style.width = `${width}px`;
+        el.style.height = `${height}px`;
+        const label = el.querySelector<HTMLElement>(".roi-box__label");
+        if (!label) continue;
+        boxes.push({ left, top, width, height, labelWidth: label.offsetWidth, labelHeight: label.offsetHeight });
+        labels.push(label);
       }
+      // L21：相邻框的标签互不遮挡 —— 默认放在框上方，撞上别的标签就挪到框内侧或上下错开
+      placeLabels(boxes).forEach((spot, i) => {
+        const label = labels[i]!;
+        label.style.left = `${spot.dx}px`;
+        label.style.top = `${spot.dy}px`;
+        if (label.dataset.pos !== spot.where) label.dataset.pos = spot.where;
+      });
     };
     host.frameListeners.add(layout);
     layout();
@@ -212,7 +230,7 @@ export function RoiLayer({
             onPointerCancel={endDrag}
             title={`${item.label}：拖框身平移，拖四角拉伸`}
           >
-            <span className="roi-box__label">
+            <span className="roi-box__label" data-testid={`roi-label-${item.param}`}>
               {item.label}
               {unset ? "（未设置）" : ""}
             </span>

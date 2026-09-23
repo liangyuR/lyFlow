@@ -317,6 +317,20 @@
   font-size: 12px;
 }
 
+/* 一组框一节（m8-plan L20）：模板槽的参数组是手风琴，与 2D 视图的切换条联动。 */
+.insp__group--frame summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.insp__group--frame summary::-webkit-details-marker {
+  display: none;
+}
+
+.insp__group--frame summary.is-invalid {
+  color: #ff9a9a;
+}
+
 /* 节点端口小节（M6 §3）：<details> 本身给了折叠，summary 复用参数分组标题的样式。 */
 .insp__ports summary {
   cursor: pointer;

@@ -61,8 +61,9 @@ Param textParam(const char* name, const char* label, const std::string& def, con
   return p;
 }
 
-/// 模板坐标系里的一个角色框。slot 是它画在哪个模板槽的左右模板上（m8-plan L15 的 2D 拖框）。
-Param roiParam(const std::string& name, const char* label, const char* doc, const char* group,
+/// 模板坐标系里的一个角色框。slot 是它画在哪个模板槽的左右模板上（m8-plan L15 的 2D 拖框），
+/// 同一槽的四个框在编辑器的切换条上叫「模板 k · <Id>」（L20）。
+Param roiParam(const std::string& name, const char* label, const char* doc, const std::string& group,
                bool advanced, int slot) {
   Param p;
   p.name = name;
@@ -78,6 +79,8 @@ Param roiParam(const std::string& name, const char* label, const char* doc, cons
   const std::string prefix = "template" + std::to_string(slot);
   p.roiBackdrop.dirParam = "templateDir";
   p.roiBackdrop.fileParams = {prefix + "Left", prefix + "Right"};
+  p.roiBackdrop.label = "模板 " + std::to_string(slot);
+  p.roiBackdrop.labelParam = prefix + "Id";
   return p;
 }
 
@@ -182,35 +185,39 @@ std::vector<Issue> validateReadScan(const ParamView&, const std::set<std::string
 
 // ============================================================ gap.locate_template
 
+/// 四个角色框在参数名里的写法（template<k><Role>Roi）。
+constexpr const char* kSlotRoles[4] = {"Datum", "Target", "SeamLeft", "SeamRight"};
+
 struct Slot {
   int index = 0;  // 1..4
   std::string prefix;
-  bool enabled = false;
-  bool override_ = false;
 };
 
+/// 启用的槽，按槽号排。槽 1 恒启用，槽 2–4 看 template<k>Enabled（m8-plan L19）。
 std::vector<Slot> slotsOf(const ParamView& params) {
   std::vector<Slot> slots;
   for (int k = 1; k <= kTemplateSlots; ++k) {
     Slot s;
     s.index = k;
     s.prefix = "template" + std::to_string(k);
-    s.enabled = params.flag(s.prefix + "Enabled");
-    s.override_ = params.flag(s.prefix + "Override");
-    if (s.enabled) slots.push_back(s);
+    if (k == 1 || params.flag(s.prefix + "Enabled")) slots.push_back(s);
   }
   return slots;
 }
 
-/// 槽里四个角色框的参数名（覆盖了就是槽自己的，否则是基础的那四个）。
+/// 槽里四个角色框的参数名：每个槽各有自己的四个，没有「公共值被谁覆盖」这一层（L19）。
 struct SlotRois {
   std::string datum, target, seamLeft, seamRight;
 };
 
 SlotRois roisOf(const Slot& s) {
-  if (!s.override_) return {"datumRoi", "targetRoi", "seamLeftRoi", "seamRightRoi"};
   return {s.prefix + "DatumRoi", s.prefix + "TargetRoi", s.prefix + "SeamLeftRoi",
           s.prefix + "SeamRightRoi"};
+}
+
+/// 诊断里的槽名，与编辑器切换条上的写法一致：「模板 3 · f3」（L22）。
+std::string slotName(const ParamView& params, const Slot& s) {
+  return "模板 " + std::to_string(s.index) + " · " + params.text(s.prefix + "Id");
 }
 
 Status locateTemplate(const Inputs& inputs, const ParamView& params, Outputs& outputs,
@@ -300,19 +307,15 @@ std::string locateTemplateKey(const ParamView& params) {
   return key;
 }
 
-/// L11：ROI 在模板坐标系里是常数，「方向填反」在加载期就拦得住。
+/// L11：ROI 在模板坐标系里是常数，「方向填反」在加载期就拦得住。每个启用的槽分别查，
+/// 诊断以「模板 k · <Id>：」开头、paramPath 指到那个槽自己的框（L22）。
 std::vector<Issue> validateLocateTemplate(const ParamView& params, const std::set<std::string>&) {
   std::vector<Issue> issues;
-  const std::vector<Slot> slots = slotsOf(params);
-  if (slots.empty()) {
-    issues.push_back(Issue::error("bad_param", "四个模板槽一个都没启用", "template1Enabled"));
-    return issues;
-  }
   int firstSide = -1;
   std::string firstSlot;
-  for (const Slot& slot : slots) {
+  for (const Slot& slot : slotsOf(params)) {
     const SlotRois names = roisOf(slot);
-    const std::string where = "模板槽 " + std::to_string(slot.index) + "：";
+    const std::string where = slotName(params, slot) + "：";
     const std::pair<const std::string*, const char*> all[4] = {
         {&names.datum, "datum"}, {&names.target, "target"},
         {&names.seamLeft, "seamLeft"}, {&names.seamRight, "seamRight"}};
@@ -349,14 +352,78 @@ std::vector<Issue> validateLocateTemplate(const ParamView& params, const std::se
     }
     if (firstSide < 0) {
       firstSide = datumRight ? 1 : 0;
-      firstSlot = std::to_string(slot.index);
+      firstSlot = slotName(params, slot);
     } else if (firstSide != (datumRight ? 1 : 0)) {
       issues.push_back(Issue::error(
-          "bad_param", where + "datum 在缝的另一侧，与模板槽 " + firstSlot + " 不一致",
-          names.datum));
+          "bad_param", where + "datum 在缝的另一侧，与" + firstSlot + " 不一致", names.datum));
     }
   }
   return issues;
+}
+
+/// v1 → v2（m8-plan L19）：v1 是「公共四框 datumRoi… + 每槽 Override 开关与覆盖框」，槽 1 也能关；
+/// v2 每个槽各有自己的四框、槽 1 恒启用。没开覆盖的槽把公共四框抄进自己的四框，开了的保留
+/// 自己的；v1 槽 1 关着时把第一个启用的槽换到槽 1（原槽 1 挪到它的位置、关着），启用槽的
+/// 先后不变 —— 选模板打平时的次序（order）因此不变。参数是稀疏的：没写 = 默认值。
+nlohmann::json migrateLocateTemplateFromV1(const nlohmann::json& params) {
+  static const char* kGlobal[4] = {"datumRoi", "targetRoi", "seamLeftRoi", "seamRightRoi"};
+  // 没有任何 v1 才有的参数（节点其实已经是 v2 的写法，只是 opVersion 标旧了）就原样返回：
+  // 下面的改写对 v2 参数不是幂等的（会把各槽自己的框换成不存在的公共框）。
+  bool v1Shape = params.contains("template1Enabled");
+  for (const char* g : kGlobal) v1Shape = v1Shape || params.contains(g);
+  for (int k = 1; k <= kTemplateSlots; ++k) {
+    v1Shape = v1Shape || params.contains("template" + std::to_string(k) + "Override");
+  }
+  if (!v1Shape) return params;
+  auto v1Enabled = [&](int k) {
+    const std::string key = "template" + std::to_string(k) + "Enabled";
+    return params.contains(key) && params[key].is_boolean() ? params[key].get<bool>() : k == 1;
+  };
+  // 新槽号 → 旧槽号
+  int from[kTemplateSlots + 1] = {0, 1, 2, 3, 4};
+  if (!v1Enabled(1)) {
+    for (int k = 2; k <= kTemplateSlots; ++k) {
+      if (!v1Enabled(k)) continue;
+      from[1] = k;
+      from[k] = 1;
+      break;
+    }
+  }
+  nlohmann::json out = nlohmann::json::object();
+  for (auto it = params.begin(); it != params.end(); ++it) {
+    const std::string& key = it.key();
+    if (key.rfind("template", 0) == 0 && key != "templateDir") continue;
+    bool global = false;
+    for (const char* g : kGlobal) global = global || key == g;
+    if (!global) out[key] = it.value();
+  }
+  for (int k = 1; k <= kTemplateSlots; ++k) {
+    const int old = from[k];
+    const std::string was = "template" + std::to_string(old);
+    const std::string now = "template" + std::to_string(k);
+    // 默认值随槽号变（f<k>、f<k>_left.pcd），换了槽就把旧槽的实际值显式写出来
+    const std::string defLeft =
+        old == 1 ? "left_template.pcd" : "f" + std::to_string(old) + "_left.pcd";
+    const std::string defRight =
+        old == 1 ? "right_template.pcd" : "f" + std::to_string(old) + "_right.pcd";
+    const std::pair<const char*, std::string> named[3] = {
+        {"Id", "f" + std::to_string(old)}, {"Left", defLeft}, {"Right", defRight}};
+    for (const auto& [field, def] : named) {
+      if (params.contains(was + field)) {
+        out[now + field] = params[was + field];
+      } else if (old != k) {
+        out[now + field] = def;
+      }
+    }
+    if (k > 1 && v1Enabled(old)) out[now + "Enabled"] = true;
+    const std::string over = was + "Override";
+    const bool own = params.contains(over) && params[over].is_boolean() && params[over].get<bool>();
+    for (int r = 0; r < 4; ++r) {
+      const std::string src = own ? was + kSlotRoles[r] + "Roi" : std::string(kGlobal[r]);
+      if (params.contains(src)) out[now + kSlotRoles[r] + "Roi"] = params[src];
+    }
+  }
+  return out;
 }
 
 // =============================================================== gap.locate_model
@@ -705,16 +772,18 @@ void registerBlockOps(Registry& r) {
   {
     OperatorDesc op;
     op.id = "gap.locate_template";
-    op.version = "1.0.0";
+    op.version = "2.0.0";
     op.label = "模板定位";
     op.category = "间隙/积木";
     op.keywords = {"template", "icp", "locate", "模板", "定位", "积木"};
     op.doc =
         "整体框 → 裁剪 → 加载模板 → ICP 对齐 → 选模板 → 业务框，一步给出 RoiSet。"
-        "四个角色框写在模板坐标系里（毫米）：datum 基准面、target 参考面、seamLeft / seamRight "
-        "缝的两侧；基准件在哪一侧由它们推出，不另填。多模板用四个固定槽位，每槽可以覆盖四个框。\n"
+        "多模板用四个固定槽位：槽 1 恒启用，槽 2–4 按需打开；每个槽有自己的左右模板和四个角色框，"
+        "写在该模板的坐标系里（毫米）：datum 基准面、target 参考面、seamLeft / seamRight 缝的两侧。"
+        "基准件在哪一侧由框推出，不另填。\n"
         "scan 输出是整体框裁过的那一对云（merged 是去噪之后再裁），下游量测接它。"
-        "加载期会查：框不退化、缝框左右有序不重叠、datum 与 target 落在缝的两侧、各槽的基准件同侧。";
+        "加载期对每个启用的槽分别查：框不退化、缝框左右有序不重叠、datum 与 target 落在缝的两侧，"
+        "以及各槽的基准件同侧；诊断写明是哪个槽。";
     op.inputs = {scanIn("gap.read_scan 的剖面对。")};
     op.outputs = {
         Port{"rois", "Bundle<gap.RoiSet>", "ROIs", "搬到当前样本上的四个角色框。", true},
@@ -731,14 +800,7 @@ void registerBlockOps(Registry& r) {
     dir.def = Value::text("");
     dir.mode = "dir";
 
-    std::vector<Param> params = {
-        dir,
-        roiParam("datumRoi", "Datum ROI", "段差基准面的框（模板坐标系，毫米）。", "ROI", false, 1),
-        roiParam("targetRoi", "Target ROI", "段差参考面的框。", "ROI", false, 1),
-        roiParam("seamLeftRoi", "Seam Left ROI", "缝左侧的框（左圆）。", "ROI", false, 1),
-        roiParam("seamRightRoi", "Seam Right ROI", "缝右侧的框（右圆）。", "ROI", false, 1),
-        paramOf(r, "gap.align_template", "minScore", 0),
-    };
+    std::vector<Param> params = {dir, paramOf(r, "gap.align_template", "minScore", 0)};
     // 默认值是一个大到不裁的框：空白画布上拼出来的图不填高级参数也得能跑（细粒度算子的默认
     // [-1, -1, 1, 1] 会把整片剖面裁没）。导入器总是显式写这一项，导入的图不受影响。
     Param overallRoi = withDefault(
@@ -752,24 +814,35 @@ void registerBlockOps(Registry& r) {
     params.push_back(overallRoi);
     params.push_back(overallMode);
     params.push_back(overallCamera);
+    // 每个槽一组参数（m8-plan L19）：槽 1 恒启用、整组是「人要填的」；槽 2–4 在高级里，
+    // 由 Enabled 打开，打开之后它的四框必填（validate 按槽查）。
+    static const char* kRoleLabels[4] = {"Datum ROI", "Target ROI", "Seam Left ROI",
+                                         "Seam Right ROI"};
+    static const char* kRoleDocs[4] = {"段差基准面的框（这个槽的模板坐标系，毫米）。",
+                                       "段差参考面的框。", "缝左侧的框（左圆）。",
+                                       "缝右侧的框（右圆）。"};
     for (int k = 1; k <= kTemplateSlots; ++k) {
       const std::string prefix = "template" + std::to_string(k);
       const std::string group = "模板槽 " + std::to_string(k);
+      const bool advanced = k > 1;
       auto slotted = [&](Param p) {
         p.group = group;
-        p.advanced = true;
-        if (p.name != prefix + "Enabled") {
+        p.advanced = advanced;
+        if (k > 1 && p.name != prefix + "Enabled") {
           p.visibleWhen.param = prefix + "Enabled";
           p.visibleWhen.eq = Value::boolean(true);
         }
         return p;
       };
-      const std::string defLeft = k == 1 ? "left_template.pcd" : "f" + std::to_string(k) + "_left.pcd";
+      const std::string defLeft =
+          k == 1 ? "left_template.pcd" : "f" + std::to_string(k) + "_left.pcd";
       const std::string defRight =
           k == 1 ? "right_template.pcd" : "f" + std::to_string(k) + "_right.pcd";
-      Param enabled = boolParam("", "Enabled", k == 1, "启用这个模板槽。");
-      enabled.name = prefix + "Enabled";
-      params.push_back(slotted(enabled));
+      if (k > 1) {
+        Param enabled = boolParam("", "Enabled", false, "启用这个模板槽；启用后它的四个框必填。");
+        enabled.name = prefix + "Enabled";
+        params.push_back(slotted(enabled));
+      }
       Param id = textParam("", "Template Id", "f" + std::to_string(k),
                            "模板的名字，进 GapAlignment.templateId 与结果汇总；打平时按它排。");
       id.name = prefix + "Id";
@@ -780,17 +853,9 @@ void registerBlockOps(Registry& r) {
       Param right = textParam("", "Right File", defRight, "右模板文件名。");
       right.name = prefix + "Right";
       params.push_back(slotted(right));
-      Param over = boolParam("", "Override ROIs", false,
-                             "这个模板自带一套四框（模板坐标系），不用上面基础的那四个。");
-      over.name = prefix + "Override";
-      params.push_back(slotted(over));
-      static const char* kRoles[4] = {"Datum", "Target", "SeamLeft", "SeamRight"};
-      for (const char* role : kRoles) {
-        Param roi = roiParam(prefix + role + "Roi", role, "覆盖的框（模板坐标系，毫米）。",
-                             group.c_str(), true, k);
-        roi.visibleWhen.param = prefix + "Override";
-        roi.visibleWhen.eq = Value::boolean(true);
-        params.push_back(roi);
+      for (int role = 0; role < 4; ++role) {
+        params.push_back(slotted(roiParam(prefix + kSlotRoles[role] + "Roi", kRoleLabels[role],
+                                          kRoleDocs[role], group, advanced, k)));
       }
     }
     for (const char* name :
@@ -804,6 +869,7 @@ void registerBlockOps(Registry& r) {
     op.compute = &locateTemplate;
     op.externalKey = &locateTemplateKey;
     op.validate = &validateLocateTemplate;
+    op.migrations = {Migration{1, &migrateLocateTemplateFromV1}};
     r.addOperator(std::move(op));
   }
 

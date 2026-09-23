@@ -1,9 +1,10 @@
 // 右侧检查器：选中节点的参数表单。字段、控件、范围、单位、分组、联动条件
 // 全部由 manifest 生成（ADR-0003），这个文件里没有任何算子的名字。
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { groupParams, effectiveParams, isEnabled, isVisible, valueEquals } from "../lib/params";
+import { frameKeyOfGroup, pickFrame, roiFramesOf } from "../lib/roiFrames";
 import { augmentOperators, levelOf, promotedBy } from "../lib/subgraph";
 import { useExecutionStore, useNodeExecution, useParamErrors } from "../store/execution";
 import { currentSubgraph, useGraphStore } from "../store/graph";
@@ -251,7 +252,27 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
   const path = useUiStore((s) => s.path);
   const def = currentSubgraph(doc, path);
   const effective = effectiveParams(op, node);
-  const groups = groupParams(op.params);
+  const groups = useMemo(() => groupParams(op.params), [op.params]);
+
+  // 一组框一节（m8-plan L20）：带底图的 roi 参数分属几节时（locate_template 的四个模板槽），
+  // 这几节是手风琴 —— 2D 视图切换条选中的那一组所在的一节展开，其余收起；展开另一节也就切了
+  // 视图里的组。没启用的槽那一节照样能展开（去勾 Enabled），视图这时仍画第一组。
+  const frameOfGroup = useMemo(() => groups.map((g) => frameKeyOfGroup(g.params)), [groups]);
+  const accordion = frameOfGroup.filter(Boolean).length >= 2;
+  const selectedFrame = useUiStore((s) => s.roiFrame[node.id]);
+  const setRoiFrame = useUiStore((s) => s.setRoiFrame);
+  const openFrame = selectedFrame ?? pickFrame(roiFramesOf(op, node), undefined)?.key ?? null;
+  // 手动收起的那一节（再点一下标题）。换了组就作废。
+  const [collapsed, setCollapsed] = useState<string | null>(null);
+  useEffect(() => setCollapsed(null), [openFrame]);
+  // 抽屉里点了指向某个槽参数的诊断：切到那个槽，参数行才看得见
+  const focused = useUiStore((s) => s.focusedDiagnostic);
+  useEffect(() => {
+    if (!accordion || focused?.nodeId !== node.id || !focused.paramPath) return;
+    const i = groups.findIndex((g) => g.params.some((p) => p.name === focused.paramPath));
+    const key = i >= 0 ? frameOfGroup[i] : null;
+    if (key) setRoiFrame(node.id, key);
+  }, [accordion, focused, node.id, groups, frameOfGroup, setRoiFrame]);
 
   const staleVersion = node.opVersion && node.opVersion !== op.version;
 
@@ -317,23 +338,57 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
       {op.params.length === 0 ? (
         <p className="insp__none">此算子没有参数</p>
       ) : (
-        groups.map((g) => {
+        groups.map((g, gi) => {
           const visible = g.params.filter((p) => isVisible(p, effective));
           if (visible.length === 0) return null;
+          const rows = visible.map((p) => (
+            <ParamRow
+              key={p.name}
+              param={p}
+              node={node}
+              effective={effective}
+              error={errors.get(p.name)}
+              def={def}
+            />
+          ));
+          const frame = accordion ? frameOfGroup[gi] : null;
+          if (!frame) {
+            return (
+              <section key={`${g.name}-${g.advanced}`} className="insp__group">
+                {g.name && <h4 className="insp__group-title">{g.name}</h4>}
+                {rows}
+              </section>
+            );
+          }
+          const open = frame === openFrame && collapsed !== frame;
+          const invalid = visible.some((p) => errors.has(p.name));
           return (
-            <section key={`${g.name}-${g.advanced}`} className="insp__group">
-              {g.name && <h4 className="insp__group-title">{g.name}</h4>}
-              {visible.map((p) => (
-                <ParamRow
-                  key={p.name}
-                  param={p}
-                  node={node}
-                  effective={effective}
-                  error={errors.get(p.name)}
-                  def={def}
-                />
-              ))}
-            </section>
+            <details
+              key={`${g.name}-${g.advanced}`}
+              className="insp__group insp__group--frame"
+              data-testid={`inspector-frame-${g.name}`}
+              data-frame={frame}
+              data-open={open ? "1" : "0"}
+              open={open}
+            >
+              <summary
+                className={`insp__group-title${invalid ? " is-invalid" : ""}`}
+                onClick={(e) => {
+                  // 开合由 roiFrame 决定，不让 <details> 自己切
+                  e.preventDefault();
+                  if (open) {
+                    setCollapsed(frame);
+                  } else {
+                    setCollapsed(null);
+                    setRoiFrame(node.id, frame);
+                  }
+                }}
+              >
+                {open ? "▾ " : "▸ "}
+                {g.name}
+              </summary>
+              {rows}
+            </details>
           );
         })
       )}

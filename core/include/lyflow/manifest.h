@@ -187,6 +187,10 @@ inline constexpr const char* kParamSemantics[] = {"roi"};
 struct RoiBackdrop {
   std::string dirParam;                   // Path 参数（mode=dir）
   std::vector<std::string> fileParams;    // String / Path 参数
+  /// 同一底图的一组框在编辑器切换条上的名字（m8-plan L20），例如「模板 2」；
+  /// labelParam 给了就在后面接上那个参数的当前值（「模板 2 · f2」）。都是可选的。
+  std::string label;
+  std::string labelParam;                 // String 参数
 
   bool isSet() const { return !dirParam.empty() || !fileParams.empty(); }
 };
