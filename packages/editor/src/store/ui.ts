@@ -64,6 +64,12 @@ interface UiState {
   /** 抽屉里点了某条诊断 → 定位到这个节点/参数。 */
   focusedDiagnostic: { nodeId: string; paramPath?: string | undefined } | null;
 
+  /** 自动连线没能唯一确定的那些输入与它们的候选输出（m8-plan L13），键都是 `nodeId:portName`。
+   *  端口据此高亮；手动连上、点空白处或下一次自动连线时清掉。null = 没有。 */
+  autoHint: { targets: ReadonlySet<string>; candidates: ReadonlySet<string> } | null;
+  setAutoHint(ambiguous: readonly { to: PortRef; candidates: readonly PortRef[] }[]): void;
+  clearAutoHint(): void;
+
   setSelection(nodes: readonly string[], edges: readonly string[]): void;
   clearSelection(): void;
   openSearch(popup: SearchPopup): void;
@@ -116,6 +122,24 @@ export const useUiStore = create<UiState>((set, get) => ({
   drawer: null,
   helpOpen: false,
   focusedDiagnostic: null,
+  autoHint: null,
+
+  setAutoHint(ambiguous) {
+    if (ambiguous.length === 0) {
+      if (get().autoHint) set({ autoHint: null });
+      return;
+    }
+    const targets = new Set<string>();
+    const candidates = new Set<string>();
+    for (const a of ambiguous) {
+      targets.add(`${a.to.node}:${a.to.port}`);
+      for (const c of a.candidates) candidates.add(`${c.node}:${c.port}`);
+    }
+    set({ autoHint: { targets, candidates } });
+  },
+  clearAutoHint() {
+    if (get().autoHint) set({ autoHint: null });
+  },
 
   setSelection(nodes, edges) {
     // 必须比对后再写：选中会流回画布、画布又回调 onSelectionChange，无条件

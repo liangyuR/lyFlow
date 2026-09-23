@@ -4,6 +4,7 @@
 import { enablePatches, produce } from "immer";
 import { create } from "zustand";
 
+import { planAutoConnect, unconnectedRequiredInputs, type AutoAmbiguity } from "../lib/autoconnect";
 import { newDocId, newLocalId } from "../lib/ids";
 import { pruneUnknownParams, sparseSet } from "../lib/params";
 import {
@@ -16,6 +17,7 @@ import {
 } from "../lib/subgraph";
 import { canConnect, type ConnectVerdict, type GraphContext } from "../lib/typecheck";
 import type { MigrationAction } from "../types/execution";
+import type { SnippetDesc } from "../types/manifest";
 import {
   GRAPH_SCHEMA_VERSION,
   subgraphIdOf,
@@ -87,6 +89,17 @@ export interface PasteResult {
   nodeIds: string[];
 }
 
+/** 拖入节点 / 插入片段之后自动连线的结果（m8-plan L13 / L14）。 */
+export interface AutoConnectResult {
+  nodeIds: string[];
+  /** 自动连上的边数。 */
+  wired: number;
+  /** 有多个候选、没有连的那些输入。 */
+  ambiguous: AutoAmbiguity[];
+  /** 片段里引用了、当前 core 没有的算子（这些节点没插进来）。 */
+  missing: string[];
+}
+
 interface GraphState {
   doc: GraphDoc;
   filePath: string | null;
@@ -108,6 +121,11 @@ interface GraphState {
 
   // -- 语义化动作 ---------------------------------------------------------
   addNode(opId: string, position: { x: number; y: number }): string | null;
+  /** 拖入节点：加节点 + 按类型自动连线（L13），整个算一条撤销。界面的三种加节点方式都走它；
+   *  addNode 保持「只加节点」，脚本与验收用它精确搭图。 */
+  addNodeAuto(opId: string, position: { x: number; y: number }): AutoConnectResult;
+  /** 插入片段：带自动连线的粘贴（L14）。插完是普通节点，没有展开 / 收回。 */
+  insertSnippet(snippet: SnippetDesc, at: { x: number; y: number }): AutoConnectResult;
   deleteNodes(ids: readonly string[]): void;
   moveNodes(moves: readonly { id: string; position: { x: number; y: number } }[]): void;
   setParam(nodeId: string, name: string, value: unknown): void;
@@ -231,6 +249,108 @@ export const useGraphStore = create<GraphState>((set, get) => {
         });
       });
       return id;
+    },
+
+    addNodeAuto(opId, position) {
+      const { doc } = get();
+      const c = ctx(doc);
+      const op = c.operatorsById.get(opId);
+      if (!op) {
+        set({ lastRejection: `算子未注册：${opId}` });
+        return { nodeIds: [], wired: 0, ambiguous: [], missing: [opId] };
+      }
+      const taken = allIds(doc);
+      const id = newLocalId("n", taken);
+      taken.add(id);
+      const node: GraphNode = { id, op: op.id, opVersion: op.version, params: {}, ui: { position } };
+      const view = levelDoc(doc);
+      const withNode: GraphDoc = { ...view, nodes: [...view.nodes, node] };
+      const plan = planAutoConnect(c, withNode, unconnectedRequiredInputs(c, withNode, id));
+      const edges = plan.wires.map((w) => {
+        const eid = newLocalId("e", taken);
+        taken.add(eid);
+        return { id: eid, from: { ...w.from }, to: { ...w.to } };
+      });
+      const label = edges.length > 0 ? `添加 ${op.label}（自动连 ${edges.length} 条）` : `添加 ${op.label}`;
+      transact(label, (d) => {
+        const lvl = level(d);
+        lvl.nodes.push(node);
+        lvl.edges.push(...edges);
+      });
+      useUiStore.getState().setAutoHint(plan.ambiguous);
+      return { nodeIds: [id], wired: edges.length, ambiguous: plan.ambiguous, missing: [] };
+    },
+
+    insertSnippet(snippet, at) {
+      const { doc } = get();
+      const c = ctx(doc);
+      const taken = allIds(doc);
+      const idMap = new Map<string, string>();
+      const missing: string[] = [];
+      const origin = snippet.nodes.reduce(
+        (acc, n) => ({
+          x: Math.min(acc.x, n.ui?.position?.x ?? 0),
+          y: Math.min(acc.y, n.ui?.position?.y ?? 0),
+        }),
+        { x: Infinity, y: Infinity },
+      );
+      const dx = Number.isFinite(origin.x) ? at.x - origin.x : at.x;
+      const dy = Number.isFinite(origin.y) ? at.y - origin.y : at.y;
+
+      const nodes: GraphNode[] = [];
+      for (const n of snippet.nodes) {
+        const op = c.operatorsById.get(n.op);
+        if (!op) {
+          missing.push(n.op);
+          continue;
+        }
+        const id = newLocalId("n", taken);
+        taken.add(id);
+        idMap.set(n.id, id);
+        const ui: NodeUi = {
+          position: { x: (n.ui?.position?.x ?? 0) + dx, y: (n.ui?.position?.y ?? 0) + dy },
+        };
+        if (n.ui?.title) ui.title = n.ui.title;
+        nodes.push({ id, op: op.id, opVersion: op.version, params: pruneUnknownParams(op, n.params), ui });
+      }
+      if (nodes.length === 0) {
+        set({ lastRejection: `片段 ${snippet.label} 里的算子当前 core 一个都没有` });
+        return { nodeIds: [], wired: 0, ambiguous: [], missing };
+      }
+      const inner = (snippet.edges ?? [])
+        .filter((e) => idMap.has(e.from.node) && idMap.has(e.to.node))
+        .map((e) => {
+          const eid = newLocalId("e", taken);
+          taken.add(eid);
+          return {
+            id: eid,
+            from: { node: idMap.get(e.from.node)!, port: e.from.port },
+            to: { node: idMap.get(e.to.node)!, port: e.to.port },
+          };
+        });
+
+      const view = levelDoc(doc);
+      const merged: GraphDoc = { ...view, nodes: [...view.nodes, ...nodes], edges: [...view.edges, ...inner] };
+      // 对外端口提示给了就按它接（可选输入也接，比如 result_bundle 的 rois / scan），没给就接
+      // 片段里所有没连上的必需输入。候选只在插入之前就在图里的那些节点里找。
+      const hinted = snippet.ports?.inputs;
+      const targets = hinted
+        ? hinted.filter((h) => idMap.has(h.node)).map((h) => ({ node: idMap.get(h.node)!, port: h.port }))
+        : nodes.flatMap((n) => unconnectedRequiredInputs(c, merged, n.id));
+      const plan = planAutoConnect(c, merged, targets, new Set(nodes.map((n) => n.id)));
+      const wires = plan.wires.map((w) => {
+        const eid = newLocalId("e", taken);
+        taken.add(eid);
+        return { id: eid, from: { ...w.from }, to: { ...w.to } };
+      });
+
+      transact(`插入片段 ${snippet.label}`, (d) => {
+        const lvl = level(d);
+        lvl.nodes.push(...nodes);
+        lvl.edges.push(...inner, ...wires);
+      });
+      useUiStore.getState().setAutoHint(plan.ambiguous);
+      return { nodeIds: nodes.map((n) => n.id), wired: wires.length, ambiguous: plan.ambiguous, missing };
     },
 
     deleteNodes(ids) {
@@ -543,8 +663,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
       transact(`提升参数 ${name}`, (d) => {
         const target = d.subgraphs?.[last.subgraphId];
         if (!target) return;
+        // roiBackdrop 指的是内部算子的参数名，到了子图这一层对不上，不带出去（semantic 照带）
+        const decl = { ...param };
+        delete decl.roiBackdrop;
         const promoted: SubParam = {
-          ...param,
+          ...decl,
           name,
           default: current !== undefined ? current : param.default,
           binds: [{ node: nodeId, param: paramName }],

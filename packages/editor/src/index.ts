@@ -20,7 +20,16 @@ export { useGraphStore, currentSubgraph, emptyDoc } from "./store/graph";
 export { useUiStore } from "./store/ui";
 export { usePeekStore, type PeekWindow, type PeekView } from "./store/peek";
 export { peekSourceOf, type PeekSource } from "./lib/peekSource";
-export { useManifestStore, missingOperators, useOperator } from "./store/manifest";
+export {
+  useManifestStore,
+  missingOperators,
+  useOperator,
+  allSnippets,
+  findSnippet,
+} from "./store/manifest";
+export { useValidationStore, requestValidate, scheduleValidate } from "./store/validation";
+export { planAutoConnect, type AutoConnectPlan } from "./lib/autoconnect";
+export { addNodeWithAutoConnect, insertSnippet, insertSnippetById } from "./lib/insert";
 export {
   useExecutionStore,
   onNodeTransition,

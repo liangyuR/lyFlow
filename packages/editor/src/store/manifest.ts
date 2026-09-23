@@ -9,6 +9,7 @@ import type {
   OperatorDesc,
   OperatorManifestBundle,
   PortType,
+  SnippetDesc,
 } from "../types/manifest";
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
@@ -24,9 +25,15 @@ interface ManifestState {
   operatorsById: Map<string, OperatorDesc>;
   typesByName: Map<string, PortType>;
 
+  /** 用户目录里的片段（m8-plan L14），宿主扫描出来的。算子包随附的在 bundle.snippets。 */
+  userSnippets: SnippetDesc[];
+  snippetProblems: string[];
+
   load: () => Promise<void>;
   /** 热重载换代（ADR-0009）：整份替换，当前 doc 一个字都不动。 */
   replaceBundle: (bundle: OperatorManifestBundle, generation: number) => void;
+  /** 重扫用户片段目录。宿主不支持时什么都不做。 */
+  loadUserSnippets: () => Promise<void>;
 }
 
 function index(bundle: OperatorManifestBundle) {
@@ -53,7 +60,7 @@ function index(bundle: OperatorManifestBundle) {
   return { operatorsById, typesByName };
 }
 
-export const useManifestStore = create<ManifestState>((set) => ({
+export const useManifestStore = create<ManifestState>((set, get) => ({
   status: "idle",
   error: null,
   bundle: null,
@@ -62,6 +69,8 @@ export const useManifestStore = create<ManifestState>((set) => ({
   transportKind: "static",
   operatorsById: new Map(),
   typesByName: new Map(),
+  userSnippets: [],
+  snippetProblems: [],
 
   load: async () => {
     set({ status: "loading", error: null, transportKind: transport.kind });
@@ -73,6 +82,18 @@ export const useManifestStore = create<ManifestState>((set) => ({
       set({ status: "ready", bundle, coreInfo, ...index(bundle) });
     } catch (e) {
       set({ status: "error", error: e instanceof Error ? e.message : String(e) });
+      return;
+    }
+    await get().loadUserSnippets();
+  },
+
+  loadUserSnippets: async () => {
+    if (typeof transport.listSnippets !== "function") return;
+    try {
+      const scan = await transport.listSnippets();
+      set({ userSnippets: scan.snippets, snippetProblems: scan.problems });
+    } catch (e) {
+      set({ userSnippets: [], snippetProblems: [e instanceof Error ? e.message : String(e)] });
     }
   },
 
@@ -103,6 +124,37 @@ export function missingOperators(ops: readonly string[]): Set<string> {
     if (!known.has(id)) out.add(id);
   }
   return out;
+}
+
+const NO_SNIPPETS: SnippetDesc[] = [];
+let snippetCache: { pack: SnippetDesc[] | undefined; user: SnippetDesc[]; all: SnippetDesc[] } | null =
+  null;
+
+/** 片段库的全部条目：算子包随附的在前，用户目录的在后；同 id 时用户的那份覆盖包里的。 */
+export function allSnippets(
+  pack: SnippetDesc[] | undefined,
+  user: SnippetDesc[],
+): SnippetDesc[] {
+  if (snippetCache && snippetCache.pack === pack && snippetCache.user === user) {
+    return snippetCache.all;
+  }
+  const byId = new Map<string, SnippetDesc>();
+  for (const s of pack ?? NO_SNIPPETS) byId.set(s.id, s);
+  for (const s of user) byId.set(s.id, s);
+  const all = [...byId.values()];
+  snippetCache = { pack, user, all };
+  return all;
+}
+
+export function useSnippets(): SnippetDesc[] {
+  const pack = useManifestStore((s) => s.bundle?.snippets);
+  const user = useManifestStore((s) => s.userSnippets);
+  return allSnippets(pack, user);
+}
+
+export function findSnippet(id: string): SnippetDesc | undefined {
+  const s = useManifestStore.getState();
+  return allSnippets(s.bundle?.snippets, s.userSnippets).find((x) => x.id === id);
 }
 
 /** 按 op id 现查算子描述。节点渲染必须走这里，不要缓存结果。 */

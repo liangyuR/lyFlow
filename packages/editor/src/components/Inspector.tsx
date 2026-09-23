@@ -1,12 +1,15 @@
 // 右侧检查器：选中节点的参数表单。字段、控件、范围、单位、分组、联动条件
 // 全部由 manifest 生成（ADR-0003），这个文件里没有任何算子的名字。
 
+import { useMemo } from "react";
+
 import { groupParams, effectiveParams, isEnabled, isVisible, valueEquals } from "../lib/params";
 import { augmentOperators, levelOf, promotedBy } from "../lib/subgraph";
 import { useExecutionStore, useNodeExecution, useParamErrors } from "../store/execution";
 import { currentSubgraph, useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
+import { useNodeValidation } from "../store/validation";
 import type { OutputStat, OutputValue } from "../types/execution";
 import type { OperatorDesc, Param } from "../types/manifest";
 import type { GraphNode, SubgraphDef } from "../types/graph";
@@ -232,7 +235,17 @@ function ParamRow({
 
 function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
   const setNodeUi = useGraphStore((s) => s.setNodeUi);
-  const errors = useParamErrors(node.id);
+  const runErrors = useParamErrors(node.id);
+  // 编辑期的校验诊断（m8-plan L16）与上次运行的错误一起标到参数上；同一个参数两边都有时
+  // 取校验的那一条 —— 它是对着当前的值说的，运行的那条可能已经过时了。
+  const validation = useNodeValidation(node.id);
+  const errors = useMemo(() => {
+    const merged = new Map(runErrors);
+    for (const d of validation) {
+      if (d.severity === "error" && d.paramPath) merged.set(d.paramPath, d.message);
+    }
+    return merged;
+  }, [runErrors, validation]);
   const exec = useNodeExecution(node.id);
   const doc = useGraphStore((s) => s.doc);
   const path = useUiStore((s) => s.path);
@@ -277,6 +290,20 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
               <li key={i}>
                 <code className="insp__errcode">{e.code}</code>
                 <span>{e.message}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {validation.length > 0 && (
+        <section className="insp__errors insp__errors--validate" data-testid="inspector-validation">
+          <h4 className="insp__errors-title">校验</h4>
+          <ul>
+            {validation.map((d, i) => (
+              <li key={i} data-severity={d.severity} data-param={d.paramPath ?? undefined}>
+                <code className="insp__errcode">{d.code}</code>
+                <span>{d.message}</span>
               </li>
             ))}
           </ul>

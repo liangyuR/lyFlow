@@ -123,6 +123,49 @@ export interface Param {
 
   visibleWhen?: Condition;
   enabledWhen?: Condition;
+
+  /** 语义标记（m8-plan L15），只有编辑器读。roi = vec4f 的 [xMin, yMin, xMax, yMax]，
+   *  XY 平面上的一个框，单位按 unit；2D 剖面视图里画成可拖、可拉伸的框。 */
+  semantic?: "roi";
+  /** 只对 semantic=roi 有意义：框画在 `<dir 参数>/<files 参数的每个文件名>` 拼起来的云上
+   *  （那片云自己的坐标系，例如模板坐标系）。不给 = 画在节点显示的那片数据云上。 */
+  roiBackdrop?: RoiBackdrop;
+}
+
+export interface RoiBackdrop {
+  /** 本算子一个 path 参数的名字。 */
+  dir: string;
+  /** 本算子 string / path 参数的名字。 */
+  files?: string[];
+}
+
+/** 片段里的一个节点（m8-plan L14）。写法与 GraphDoc 的节点相同，id 只在片段内唯一。 */
+export interface SnippetNode {
+  id: string;
+  op: string;
+  params?: Record<string, unknown>;
+  ui?: { position?: { x: number; y: number }; title?: string };
+}
+
+export interface SnippetPortHint {
+  node: string;
+  port: string;
+  hint?: string;
+}
+
+/** 片段（`*.lyflow-snippet.json`，schema/snippet.schema.json）。插入就是带自动连线的粘贴，
+ *  插完是普通节点。来源两处：manifest 的 snippets（算子包随附）与宿主扫描的用户目录。 */
+export interface SnippetDesc {
+  id: string;
+  label: string;
+  category?: string;
+  doc?: string;
+  pack?: string;
+  nodes: SnippetNode[];
+  edges?: { from: { node: string; port: string }; to: { node: string; port: string } }[];
+  ports?: { inputs?: SnippetPortHint[]; outputs?: SnippetPortHint[] };
+  /** 用户目录里的那些：从哪个文件读来的。 */
+  source?: string;
 }
 
 export interface Capabilities {
@@ -157,6 +200,8 @@ export interface OperatorManifestBundle {
   operators: OperatorDesc[];
   /** 注册了的「文本 → 图」导入器（ADR-0017）。没有任何导入器时这一项不出现。 */
   importers?: Importer[];
+  /** 算子包随附的片段（m8-plan L14）。没有任何片段时这一项不出现。 */
+  snippets?: SnippetDesc[];
 }
 
 export interface CoreInfo {

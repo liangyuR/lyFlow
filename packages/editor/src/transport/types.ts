@@ -1,7 +1,7 @@
 // 传输层抽象：让 UI 代码不知道自己跑在 Tauri 里、浏览器里还是 HTTP 后端上。
 // 三个实现（tauri / http / static）各自一个文件，这里只有契约。
 
-import type { CoreInfo, OperatorManifestBundle } from "../types/manifest";
+import type { CoreInfo, OperatorManifestBundle, SnippetDesc } from "../types/manifest";
 import type { GraphDoc } from "../types/graph";
 import type {
   CacheStats,
@@ -138,4 +138,17 @@ export interface Transport {
   saveAsLibrary(doc: GraphDoc, subgraphId: string, meta: LibraryMeta): Promise<LibraryStatus>;
   /** 把一份外部配置导入成 GraphDoc（ADR-0017 的 `lyflow_import`）。 */
   importGraph(kind: string, text: string, baseDir: string | null): Promise<GraphDoc>;
+
+  /** 读一个磁盘上的点云文件，不属于任何一次运行（m8-plan L15：2D 拖框的模板底图）。
+   *  相对路径按图文件所在目录解析。可选：宿主不给时编辑器只画框、不画底图。 */
+  loadCloudFile?(path: string, graphPath: string | null, maxPoints: number): Promise<ArrayBuffer>;
+  /** 用户目录里的片段（m8-plan L14）。算子包随附的在 manifest 里，不走这里。可选。 */
+  listSnippets?(): Promise<SnippetScan>;
+}
+
+/** `list_snippets` 的回包。snippets 是原样的片段 JSON，编辑器按当前 manifest 过滤。 */
+export interface SnippetScan {
+  dirs: string[];
+  snippets: SnippetDesc[];
+  problems: string[];
 }

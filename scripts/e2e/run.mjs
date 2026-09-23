@@ -20,6 +20,7 @@ import {
 import { gapSuites } from "./gap.mjs";
 import { m3Suites } from "./m3.mjs";
 import { m4Suites } from "./m4.mjs";
+import { m8bSuites } from "./m8b.mjs";
 import { peekSuites } from "./peek.mjs";
 import { phaseASuites } from "./phase_a.mjs";
 
@@ -464,7 +465,9 @@ async function main() {
     await suiteStale(cdp, report);
     await suiteRunToNode(cdp, report);
 
-    const grouped =[...m3Suites, ...m4Suites, ...phaseASuites, ...gapSuites, ...peekSuites];
+    const grouped = [
+      ...m3Suites, ...m4Suites, ...phaseASuites, ...gapSuites, ...peekSuites, ...m8bSuites,
+    ];
     for (const suite of grouped) {
       try {
         await suite(cdp, report, ws);

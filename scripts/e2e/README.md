@@ -14,6 +14,7 @@ m4.mjs       M4 的分组（子图、库算子、live preview、大图性能）
 gap.mjs      gap 领域包的分组（量测输出、真实 gap 图、模型 gap 图）
 peek.mjs     连线内容查看器的分组（双击开窗、四种视图、快照锁、生命周期、边的右键菜单）
 phase_a.mjs  阶段 A 的分组（惰性分支半透明、plan_extended、图级输出与「标为输出」UI）
+m8b.mjs      M8b 的分组（空白画布拼测点：自动连线、片段、2D 拖框、实时校验、Bundle 的 Edge Peek）
 http.mjs     e2e:http —— Node 桩服务器 + 系统 Chrome + examples/host-react
 ```
 
@@ -114,5 +115,11 @@ WiX 的 `INSTALLDIR`）。目的是验证「DLL 随包」和「从 exe 同目录
   「点数 > 0」的假绿。
 - **`cdp.eval` 的 `awaitPromise` 默认开着。** 忘了开拿到的是 `{}`
   （一个 Promise 的 JSON 形态），断言会以一种极其费解的方式失败。
+- **HTML5 拖放（面板 → 画布）用 DragEvent + 一个真的 `DataTransfer` 驱动**（`m8b.mjs` 的
+  `dropFromPalette`）：CDP 的鼠标事件不会触发 HTML5 拖放。面板行自己的 `dragstart` 把 MIME 写进去，
+  落点处 `elementFromPoint` 拿到的元素收 `dragover` / `drop`，走的是画布真实的 onDrop。
+  2D 拖框、连线拖拽这类指针手势照旧用真实鼠标（`dragMouse`）。
+- **M8b 的最终画布截图**：设 `LYFLOW_E2E_SCREENSHOT=docs/m8b-canvas.png`（相对仓库根）时，
+  验收 7 那一组跑完用 `Page.captureScreenshot` 截整个窗口写到那里；不设就不写，免得每跑一遍都改动仓库文件。
 - **搭图走 store 的语义化动作，不直接塞 doc。** 塞一份构造好的 doc 会跳过
   `addNode` / `connect` 里的校验与 id 分配，验的就不是真实代码路径了。

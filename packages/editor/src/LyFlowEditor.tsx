@@ -38,6 +38,7 @@ import {
 import { useGraphStore } from "./store/graph";
 import { useManifestStore } from "./store/manifest";
 import { useUiStore } from "./store/ui";
+import { scheduleValidate } from "./store/validation";
 import { setTransport, transport, type Transport } from "./transport";
 import { setDialogs, type EditorDialogs } from "./lib/dialogs";
 import { hasRelativePathParam } from "./lib/params";
@@ -47,6 +48,7 @@ import type { GraphDoc } from "./types/graph";
 import "./styles.css";
 import "./styles.editor.css";
 import "./styles.peek.css";
+import "./styles.blocks.css";
 
 const kMinCanvasWidth = 320;
 
@@ -234,6 +236,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       useUiStore.getState().showToast(`core 已热重载（${e.operatorCount} 个算子）`);
       // 算子可能被删掉了：重新编译一次，缺算子的节点会在画布上变成「算子缺失」
       void schedulePlan(graph.doc, graph.filePath);
+      scheduleValidate(graph.doc, graph.filePath);
     });
     const failed = transport.onCoreReloadFailed((e) => {
       useUiStore.getState().showToast(
@@ -254,13 +257,16 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   }, []);
 
   // -- 精确 stale（ADR-0007）：doc 每次变就 debounce 重编一次 ------------------
+  // 实时校验（m8-plan L16）跟着同一个信号走：错误在拼的时候就标出来，不必等跑完。
   useEffect(() => {
     const graph = useGraphStore.getState();
     void schedulePlan(graph.doc, graph.filePath);
+    scheduleValidate(graph.doc, graph.filePath);
     return useGraphStore.subscribe((state, prev) => {
-      if (state.doc === prev.doc) return;
-      useExecutionStore.getState().markStale();
+      if (state.doc === prev.doc && state.filePath === prev.filePath) return;
+      if (state.doc !== prev.doc) useExecutionStore.getState().markStale();
       schedulePlan(state.doc, state.filePath);
+      scheduleValidate(state.doc, state.filePath);
     });
   }, []);
 

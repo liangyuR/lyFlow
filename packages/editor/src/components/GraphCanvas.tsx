@@ -49,8 +49,9 @@ import { useUiStore } from "../store/ui";
 import { transport } from "../transport";
 import { subgraphIdOf, type GraphDoc } from "../types/graph";
 
+import { addNodeWithAutoConnect, insertSnippetById } from "../lib/insert";
 import { EdgePeekLayer } from "./EdgePeekLayer";
-import { OPERATOR_DND_MIME } from "./NodePalette";
+import { OPERATOR_DND_MIME, SNIPPET_DND_MIME } from "./NodePalette";
 import { OperatorNode } from "./OperatorNode";
 
 import "@xyflow/react/dist/style.css";
@@ -525,6 +526,9 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     );
     if (!verdict.ok) {
       useUiStore.getState().showToast(verdict.reason, "warn");
+    } else {
+      // 人自己接了一条：自动连线留下的候选高亮就完成了使命
+      useUiStore.getState().clearAutoHint();
     }
   }, []);
 
@@ -729,6 +733,11 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     setEdgeMenu(null);
   }, []);
 
+  const onPaneClick = useCallback(() => {
+    closeMenu();
+    useUiStore.getState().clearAutoHint();
+  }, [closeMenu]);
+
   const menuTargets = useCallback((): string[] => {
     const ui = useUiStore.getState();
     return ui.selectedNodes.size > 0 ? [...ui.selectedNodes] : menu ? [menu.nodeId] : [];
@@ -776,21 +785,27 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     setMenu(null);
   }, [menu]);
 
-  // -- 从面板拖算子进来 -----------------------------------------------------
+  // -- 从面板拖算子 / 片段进来 ------------------------------------------------
   const onDragOver = useCallback((e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes(OPERATOR_DND_MIME)) return;
+    const types = e.dataTransfer.types;
+    if (!types.includes(OPERATOR_DND_MIME) && !types.includes(SNIPPET_DND_MIME)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
   }, []);
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
+      const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const snippetId = e.dataTransfer.getData(SNIPPET_DND_MIME);
+      if (snippetId) {
+        e.preventDefault();
+        insertSnippetById(snippetId, position);
+        return;
+      }
       const opId = e.dataTransfer.getData(OPERATOR_DND_MIME);
       if (!opId) return;
       e.preventDefault();
-      const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      const id = useGraphStore.getState().addNode(opId, position);
-      if (id) useUiStore.getState().setSelection([id], []);
+      addNodeWithAutoConnect(opId, position);
     },
     [screenToFlowPosition],
   );
@@ -835,7 +850,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         onNodeDoubleClick={onNodeDoubleClick}
         onEdgeDoubleClick={onEdgeDoubleClick}
         onEdgeContextMenu={onEdgeContextMenu}
-        onPaneClick={closeMenu}
+        onPaneClick={onPaneClick}
         // 大图只画视野里的节点（§4）。小图不开：开了之后平移会有一帧空窗。
         onlyRenderVisibleElements={nodes.length > VIRTUALIZE_ABOVE}
         // zoomOnDoubleClick 必须关：d3-zoom 会 stopImmediatePropagation 把双击拦死。

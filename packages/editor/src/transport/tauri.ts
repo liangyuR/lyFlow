@@ -18,6 +18,7 @@ import type {
   ManifestUpdated,
   RecentEntry,
   RunOptions,
+  SnippetScan,
   Transport,
   TransportKind,
   Unlisten,
@@ -217,5 +218,24 @@ export class TauriTransport implements Transport {
   async importGraph(kind: string, text: string, baseDir: string | null): Promise<GraphDoc> {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<GraphDoc>("import_graph", { kind, text, baseDir });
+  }
+  async loadCloudFile(
+    path: string,
+    graphPath: string | null,
+    maxPoints: number,
+  ): Promise<ArrayBuffer> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const raw = await invoke<ArrayBuffer | Uint8Array>("load_cloud_file", {
+      path,
+      graphPath,
+      maxPoints,
+    });
+    if (raw instanceof ArrayBuffer) return raw;
+    const view = raw as Uint8Array;
+    return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
+  }
+  async listSnippets(): Promise<SnippetScan> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<SnippetScan>("list_snippets");
   }
 }

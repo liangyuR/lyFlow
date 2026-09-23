@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { addNodeWithAutoConnect } from "../lib/insert";
 import { searchOperators, FIELD_LABELS } from "../lib/search";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
@@ -54,6 +55,12 @@ export function NodeSearch() {
   if (!popup) return null;
 
   const pick = (opId: string) => {
+    // 双击空白处唤起的：与拖入同一条路，按类型自动连线（m8-plan L13）
+    if (!popup.pendingFrom) {
+      addNodeWithAutoConnect(opId, popup.flow);
+      closeSearch();
+      return;
+    }
     const graph = useGraphStore.getState();
     const nodeId = graph.addNode(opId, popup.flow);
     if (nodeId) {

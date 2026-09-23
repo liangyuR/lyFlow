@@ -379,14 +379,18 @@ export function resolveOutput(
   localId: string,
   port: string,
 ): { nodeId: string; port: string } | null {
+  // `<port>.<field>`（Bundle 的一个字段，m8-plan L3）：端口名里不会有点，先把字段拆下来，
+  // 按端口走完子图边界再接回去 —— 子图对外输出只认端口名。
+  const dot = port.indexOf(".");
+  const field = dot < 0 ? "" : port.slice(dot);
   let prefix = pathPrefix(path);
   let level = levelOf(doc, path);
   let node = level.nodes.find((n) => n.id === localId);
-  let cursor = { id: localId, port };
+  let cursor = { id: localId, port: dot < 0 ? port : port.slice(0, dot) };
   for (let depth = 0; depth < 32; depth += 1) {
     if (!node) return null;
     const subgraphId = subgraphIdOf(node.op);
-    if (!subgraphId) return { nodeId: prefix + cursor.id, port: cursor.port };
+    if (!subgraphId) return { nodeId: prefix + cursor.id, port: cursor.port + field };
     const def = doc.subgraphs?.[subgraphId];
     const out = def?.outputs.find((o) => o.name === cursor.port);
     if (!def || !out) return null;

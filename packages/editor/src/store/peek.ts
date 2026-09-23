@@ -7,7 +7,8 @@ import type { RampName } from "../lib/ramps";
 import type { ShadingMode } from "../components/Viewer3D";
 import type { GraphDoc, PortRef } from "../types/graph";
 
-export type PeekView = "cloud3d" | "cloud2d" | "tensor" | "value" | "indices";
+/** fields = Bundle 的字段表（m8-plan L17）：先列字段，点进字段再按字段类型换视图。 */
+export type PeekView = "cloud3d" | "cloud2d" | "tensor" | "value" | "indices" | "fields";
 
 export type TensorLayout = "auto" | "HWC" | "CHW" | "NHWC" | "NCHW";
 
@@ -33,13 +34,15 @@ export interface PeekWindow {
   view: PeekView;
   viewAuto: boolean;
   opts: PeekOpts;
+  /** 看的是 Bundle 端口里的哪个字段（`<port>.<field>` 寻址，m8-plan L3 / L17）。null = 整个端口。 */
+  field: string | null;
 }
 
 export type PeekOpenRequest = Omit<
   PeekWindow,
-  "id" | "z" | "locked" | "size" | "opts" | "viewAuto"
+  "id" | "z" | "locked" | "size" | "opts" | "viewAuto" | "field"
 > &
-  Partial<Pick<PeekWindow, "size" | "opts" | "locked" | "viewAuto">>;
+  Partial<Pick<PeekWindow, "size" | "opts" | "locked" | "viewAuto" | "field">>;
 
 export const PEEK_FROZEN = "快照已冻结：这次运行的结果已被后端回收（见 ADR-0019）";
 
@@ -83,6 +86,8 @@ interface PeekState {
   syncView(id: string, view: PeekView): void;
   setOpts(id: string, partial: Partial<PeekOpts>): void;
   setLocked(id: string, locked: { runId: string } | null): void;
+  /** 进 / 出 Bundle 的一个字段。视图回到自动，跟着字段类型换。 */
+  setField(id: string, field: string | null): void;
   prune(doc: GraphDoc, path: SubPath): void;
 }
 
@@ -167,6 +172,7 @@ export const usePeekStore = create<PeekState>((set, get) => ({
       view,
       viewAuto,
       opts: { ...PEEK_DEFAULT_OPTS, ...win.opts },
+      field: win.field ?? null,
     };
     set({ windows: windows.concat(created), topZ: z });
     return id;
@@ -255,6 +261,14 @@ export const usePeekStore = create<PeekState>((set, get) => ({
   setLocked(id, locked) {
     set({
       windows: get().windows.map((w) => (w.id === id ? { ...w, locked } : w)),
+    });
+  },
+
+  setField(id, field) {
+    set({
+      windows: get().windows.map((w) =>
+        w.id === id && w.field !== field ? { ...w, field, viewAuto: true } : w,
+      ),
     });
   },
 

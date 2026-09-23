@@ -12,6 +12,7 @@ import { useNodeExecution } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
+import { errorsOf, useNodeValidation } from "../store/validation";
 import type { Port } from "../types/manifest";
 
 /** 「12.3 万点」比「123456」好读得多，而节点上的空间只有一行。 */
@@ -45,6 +46,15 @@ function PortHandle({ nodeId, port, side, index, anyType }: PortHandleProps) {
     if (s.pendingFrom.side === side) return "";
     return s.compatiblePorts.has(key) ? "compatible" : "incompatible";
   });
+  // 自动连线没能唯一确定（m8-plan L13）：没连上的输入与它的每个候选输出都亮出来
+  const auto = useUiStore((s) => {
+    const hint = s.autoHint;
+    if (!hint) return "";
+    const key = `${nodeId}:${port.name}`;
+    if (side === "input" && hint.targets.has(key)) return "target";
+    if (side === "output" && hint.candidates.has(key)) return "candidate";
+    return "";
+  });
   const isInput = side === "input";
   const optional = isInput && port.required === false;
   // 两条端口级执行语义（ADR-0016）。用角标而不是换颜色：颜色是类型的语言。
@@ -56,9 +66,12 @@ function PortHandle({ nodeId, port, side, index, anyType }: PortHandleProps) {
 
   return (
     <div
-      className={`node-port node-port--${side}${verdict ? ` node-port--${verdict}` : ""}`}
+      className={`node-port node-port--${side}${verdict ? ` node-port--${verdict}` : ""}${
+        auto ? ` node-port--auto-${auto}` : ""
+      }`}
       style={{ ["--i" as string]: index }}
       data-port-verdict={verdict || undefined}
+      data-auto-hint={auto || undefined}
       data-port-accepts-error={acceptsError ? "1" : undefined}
       data-port-lazy={lazy ? "1" : undefined}
       data-testid={`port-${nodeId}-${port.name}`}
@@ -128,6 +141,8 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   const exec = useNodeExecution(id);
   // 精确到节点的 stale（交互清单 P1 #23）：判定在 C++，这里只读结论（ADR-0007）
   const stale = useNodeStale(id);
+  // 实时校验（m8-plan L16）：拼的时候就标红，不等运行。只看 error，warning 进 Inspector。
+  const invalid = errorsOf(useNodeValidation(id));
   const [renaming, setRenaming] = useState(false);
 
   // 算子在当前 core 里不存在：可能是打开了别人存的图，也可能是热重载删掉了它。
@@ -163,6 +178,7 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
     bypass ? "is-bypassed" : "",
     notDemanded ? "is-not-demanded" : "",
     subgraphId || library ? "node--sub" : "",
+    invalid.length > 0 ? "is-invalid" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -189,6 +205,7 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
       data-not-demanded={notDemanded ? "1" : "0"}
       data-subgraph={subgraphId ?? undefined}
       data-library={library ? "1" : undefined}
+      data-invalid={invalid.length > 0 ? "1" : "0"}
       data-testid={`node-${id}`}
     >
       <div
@@ -245,6 +262,21 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
               />
             ))}
           </div>
+        </div>
+      )}
+
+      {/* 编辑期诊断：第一条贴在节点上，全部在 title 里；参数上的红框在 Inspector。 */}
+      {invalid.length > 0 && (
+        <div
+          className="node__invalid"
+          data-testid={`node-invalid-${id}`}
+          data-codes={invalid.map((d) => d.code).join(",")}
+          data-params={invalid.map((d) => d.paramPath ?? "").join(",")}
+          title={invalid.map((d) => d.message).join("\n")}
+        >
+          <span className="node__invalid-mark">!</span>
+          <span className="node__invalid-text">{invalid[0]!.message}</span>
+          {invalid.length > 1 && <span className="node__invalid-more">+{invalid.length - 1}</span>}
         </div>
       )}
 

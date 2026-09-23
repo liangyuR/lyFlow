@@ -7,6 +7,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import { findBaseCloud, firstCloudPort, type BaseCloud } from "../lib/basecloud";
 import { cacheKey, cloudCache, dropOtherRuns, putCache } from "../lib/cloudCache";
+import { effectiveParams, isVisible } from "../lib/params";
 import { RAMPS, type RampName } from "../lib/ramps";
 import { disposeOverlay, extentOf, shapesOf } from "../lib/shapes2d";
 import { augmentOperators, levelOf, resolveOutput } from "../lib/subgraph";
@@ -17,6 +18,9 @@ import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
 import { decodeCloud, type CloudPayload } from "../types/execution";
+import type { GraphNode } from "../types/graph";
+import type { OperatorDesc, Param } from "../types/manifest";
+import { RoiLayer, type RoiItem } from "./RoiLayer";
 import "../styles.viewer.css";
 
 export type ShadingMode = "intensity" | "height" | "normal" | "flat";
@@ -48,6 +52,10 @@ interface Scene {
   points: THREE.Points | null;
   /** 叠画的 2D 几何（G7）。整组一起换，不逐个增删。 */
   overlay: THREE.Group;
+  /** 拖框的底图（m8-plan L15）：roiBackdrop 指的那几个文件拼起来的云，例如模板。 */
+  backdrop: THREE.Group;
+  /** 每帧渲染前调一遍。RoiLayer 靠它把 DOM 框跟着相机摆位。 */
+  frameListeners: Set<() => void>;
   /** 正交相机的可视半宽，随 fit 改变；aspect 变了要重算上下边。 */
   halfWidth: number;
   aspect: number;
@@ -84,11 +92,15 @@ function createScene(host: HTMLDivElement): Scene {
   scene.add(axes);
   const overlay = new THREE.Group();
   scene.add(overlay);
+  const backdrop = new THREE.Group();
+  scene.add(backdrop);
+  const frameListeners = new Set<() => void>();
 
   let raf = 0;
   const tick = () => {
     raf = requestAnimationFrame(tick);
     controls.update();
+    for (const fn of frameListeners) fn();
     renderer.render(scene, state.active());
   };
 
@@ -101,6 +113,8 @@ function createScene(host: HTMLDivElement): Scene {
     mode: "3d",
     points: null,
     overlay,
+    backdrop,
+    frameListeners,
     halfWidth: 2,
     aspect: 1,
     active() {
@@ -137,6 +151,8 @@ function createScene(host: HTMLDivElement): Scene {
         (state.points.material as THREE.Material).dispose();
       }
       disposeOverlay(overlay);
+      disposeOverlay(backdrop);
+      frameListeners.clear();
       // helper 自己也有 geometry 和 material。不放的话每次挂载都漏一份。
       for (const helper of [grid, axes]) {
         helper.geometry.dispose();
@@ -216,7 +232,7 @@ function round3(v: number) {
 
 /** 「底图云 + 叠画几何」的联合包围盒。取并集而不是二选一：几何再小也挤不掉云，
  *  云再大也不会把 ROI 框推出画面。两者都空时返回 null。 */
-function unionBounds(cloud: CloudPayload | null, overlay: THREE.Group): Float32Array | null {
+function unionBounds(cloud: CloudPayload | null, ...groups: THREE.Group[]): Float32Array | null {
   const min = [Infinity, Infinity, Infinity];
   const max = [-Infinity, -Infinity, -Infinity];
   if (cloud && cloud.pointCount > 0) {
@@ -225,7 +241,8 @@ function unionBounds(cloud: CloudPayload | null, overlay: THREE.Group): Float32A
       max[i] = Math.max(max[i]!, cloud.bounds[i + 3]!);
     }
   }
-  if (overlay.children.length > 0) {
+  for (const overlay of groups) {
+    if (overlay.children.length === 0) continue;
     const box = new THREE.Box3().setFromObject(overlay);
     if (!box.isEmpty()) {
       const lo = [box.min.x, box.min.y, box.min.z];
@@ -279,6 +296,76 @@ function fitToBounds(scene: Scene, bounds: Float32Array) {
   scene.ortho.zoom = 1;
   scene.applyOrtho();
   scene.controls.update();
+}
+
+// ------------------------------------------------------------ 2D 拖框（L15）
+
+/** 四个角色框各一种颜色；多于四个时轮着用。 */
+const ROI_COLORS = ["#34d399", "#f472b6", "#60a5fa", "#fbbf24", "#a78bfa", "#f87171"];
+
+const NO_BACKDROP = { key: "", bounds: null, count: 0, error: null };
+
+interface RoiSpec {
+  params: { param: Param; value: number[] }[];
+  /** 底图文件（已拼好目录）。空 = 画在数据云上。 */
+  files: string[];
+}
+
+function joinPath(dir: string, file: string): string {
+  if (/^[a-zA-Z]:[\\/]/.test(file) || file.startsWith("/") || file.startsWith("\\\\")) return file;
+  return /[\\/]$/.test(dir) ? dir + file : `${dir}/${file}`;
+}
+
+/** 选中节点可拖的框：带 roi 语义标记、当前可见的 vec4f 参数。坐标系不同的框不能画在同一片
+ *  底图上，所以只取与第一个可见框同一底图的那一组（locate_template：基础四框与槽 1 的覆盖框
+ *  都在槽 1 的模板上；整体框在数据坐标系里，不混进来）。 */
+function roiSpecOf(op: OperatorDesc | undefined, node: GraphNode | undefined): RoiSpec | null {
+  if (!op || !node) return null;
+  const eff = effectiveParams(op, node);
+  const rois = op.params.filter((p) => p.semantic === "roi" && p.type === "vec4f" && isVisible(p, eff));
+  if (rois.length === 0) return null;
+  const frameOf = (p: Param) => (p.roiBackdrop ? JSON.stringify(p.roiBackdrop) : "data");
+  const frame = frameOf(rois[0]!);
+  const same = rois.filter((p) => frameOf(p) === frame);
+  const backdrop = same[0]!.roiBackdrop;
+  let files: string[] = [];
+  if (backdrop) {
+    const dir = String(eff[backdrop.dir] ?? "");
+    if (dir) {
+      files = (backdrop.files ?? [])
+        .map((f) => String(eff[f] ?? ""))
+        .filter(Boolean)
+        .map((f) => joinPath(dir, f));
+    }
+  }
+  return {
+    params: same.map((param) => {
+      const raw = eff[param.name];
+      const value = Array.isArray(raw) && raw.length === 4 ? raw.map(Number) : [0, 0, 0, 0];
+      return { param, value };
+    }),
+    files,
+  };
+}
+
+/** 没填过的框画在哪：底图（或数据云）的包围盒里一字排开，拖一下就落成真值。 */
+function placeholderOf(
+  i: number,
+  n: number,
+  bounds: ArrayLike<number> | null,
+): [number, number, number, number] {
+  if (!bounds) {
+    const s = 0.005;
+    const cx = (i - (n - 1) / 2) * s * 2.5;
+    return [cx - s / 2, -s / 2, cx + s / 2, s / 2];
+  }
+  const w = bounds[3]! - bounds[0]!;
+  const h = bounds[4]! - bounds[1]!;
+  const cx = bounds[0]! + (w * (i + 0.5)) / n;
+  const cy = (bounds[1]! + bounds[4]!) / 2;
+  const hw = w / (n * 4);
+  const hh = Math.max(h * 0.25, hw);
+  return [cx - hw, cy - hh, cx + hw, cy + hh];
 }
 
 export function Viewer3D() {
@@ -340,6 +427,22 @@ export function Viewer3D() {
     () => augmentOperators(operatorsById, doc.subgraphs),
     [operatorsById, doc.subgraphs],
   );
+  const bundles = useManifestStore((s) => s.bundle?.bundles);
+  const graphPath = useGraphStore((s) => s.filePath);
+  // 2D 拖框（m8-plan L15）：选中节点带 roi 语义标记的参数、以及它们画在哪片底图上
+  const roi = useMemo(
+    () => roiSpecOf(activeNode ? ops.get(activeNode.op) : undefined, activeNode),
+    [activeNode, ops],
+  );
+  const [sceneHost, setSceneHost] = useState<Scene | null>(null);
+  const [backdrop, setBackdrop] = useState<{
+    key: string;
+    bounds: Float32Array | null;
+    count: number;
+    error: string | null;
+  }>(NO_BACKDROP);
+  const backdropKey =
+    roi && roi.files.length > 0 ? JSON.stringify({ files: roi.files, graphPath }) : "";
 
   const hasIntensity = cloud?.intensity != null;
   const hasNormals = cloud?.normals != null;
@@ -374,6 +477,7 @@ export function Viewer3D() {
     if (!host) return;
     const scene = createScene(host);
     sceneRef.current = scene;
+    setSceneHost(scene);
 
     const resize = () => {
       const w = host.clientWidth || 1;
@@ -392,6 +496,7 @@ export function Viewer3D() {
       observer.disconnect();
       scene.dispose();
       sceneRef.current = null;
+      setSceneHost(null);
     };
   }, []);
 
@@ -429,7 +534,8 @@ export function Viewer3D() {
     }
     // 自己有云就用自己的；没有就沿输入边往上游借最近的一片当底图，几何叠在它上面 ——
     // 只输出 Box2D/Line2D 的节点若显示成空白，用户就看不出框压在剖面的哪里。
-    const port = firstCloudPort(ops, activeNode.op);
+    // Bundle 里的点云字段也算「自己的云」（`<port>.<field>`，m8-plan L3）。
+    const port = firstCloudPort(ops, activeNode.op, bundles, activeOutputs);
     let base: BaseCloud | null = null;
     // 子图节点的结果在内部那个叶子上，按路径查结果仓（F2）
     let resolved = port ? resolveOutput(doc, path, activeNode.id, port) : null;
@@ -439,7 +545,7 @@ export function Viewer3D() {
       return;
     }
     if (!port) {
-      base = findBaseCloud(doc, path, activeNode.id, ops);
+      base = findBaseCloud(doc, path, activeNode.id, ops, bundles);
       resolved = base?.resolved ?? null;
     }
     if (!resolved) {
@@ -487,7 +593,7 @@ export function Viewer3D() {
       cancelled = true;
     };
   }, [activeNode, activeId, selected.size, runId, runStatus, activeState, maxPoints, doc, path,
-      isPreview, previewMaxPoints, ops]);
+      isPreview, previewMaxPoints, ops, bundles, activeOutputs]);
 
   // -- 几何体：只随点云重建，着色参数一律不进这个 effect ---------------------
   useEffect(() => {
@@ -600,15 +706,101 @@ export function Viewer3D() {
     }
   }, [overlayShapes, cloud, typesByName]);
 
+  // -- 拖框的底图（L15）：roiBackdrop 指的文件（例如槽 1 的左右模板）。不属于任何一次运行 ——
+  // 框没填好时 locate_template 过不了校验，根本不会跑，底图却必须先看得见。
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    disposeOverlay(scene.backdrop);
+    if (!backdropKey || typeof transport.loadCloudFile !== "function") {
+      setBackdrop(NO_BACKDROP);
+      return;
+    }
+    const { files, graphPath: base } = JSON.parse(backdropKey) as {
+      files: string[];
+      graphPath: string | null;
+    };
+    let cancelled = false;
+    void (async () => {
+      try {
+        const payloads = await Promise.all(
+          files.map((f) => transport.loadCloudFile!(f, base, 200_000).then(decodeCloud)),
+        );
+        if (cancelled) return;
+        // 几片拼成一片；NaN 槽不画（包围盒会被它毒成 NaN）
+        const xyz: number[] = [];
+        for (const p of payloads) {
+          for (let i = 0; i < p.pointCount; i += 1) {
+            const x = p.xyz[i * 3]!;
+            const y = p.xyz[i * 3 + 1]!;
+            if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+            xyz.push(x, y, 0);
+          }
+        }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(xyz), 3));
+        geometry.computeBoundingBox();
+        geometry.computeBoundingSphere();
+        const material = new THREE.PointsMaterial({
+          size: pointSizeRef.current + 0.6,
+          sizeAttenuation: false,
+          color: 0xd1d5db,
+          transparent: true,
+          opacity: 0.85,
+        });
+        const points = new THREE.Points(geometry, material);
+        points.renderOrder = 5;
+        scene.backdrop.add(points);
+        const bb = geometry.boundingBox;
+        setBackdrop({
+          key: backdropKey,
+          bounds:
+            xyz.length > 0 && bb
+              ? new Float32Array([bb.min.x, bb.min.y, 0, bb.max.x, bb.max.y, 0])
+              : null,
+          count: xyz.length / 3,
+          error: null,
+        });
+      } catch (e) {
+        if (cancelled) return;
+        setBackdrop({
+          key: backdropKey,
+          bounds: null,
+          count: 0,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [backdropKey]);
+
+  const roiItems = useMemo<RoiItem[]>(() => {
+    if (!roi) return [];
+    const bounds =
+      backdrop.bounds ?? (roi.files.length === 0 && cloud && cloud.pointCount > 0 ? cloud.bounds : null);
+    const n = roi.params.length;
+    return roi.params.map(({ param, value }, i) => ({
+      param: param.name,
+      label: param.label ?? param.name,
+      color: ROI_COLORS[i % ROI_COLORS.length]!,
+      value: [value[0]!, value[1]!, value[2]!, value[3]!],
+      scale: param.unit === "mm" ? 0.001 : 1,
+      placeholder: placeholderOf(i, n, bounds),
+    }));
+  }, [roi, backdrop.bounds, cloud]);
+  const roiEditing = cameraMode === "2d" && roiItems.length > 0 && activeNode !== undefined;
+
   // 换了云或换了几何就自动取景一次；同一份内容里调参数不该把视角拉回去。
   // 必须排在上面那个 effect 之后：取景要量的是它刚建好的那一组线。
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
     setOverlayBounds(overlayBoundsOf(scene.overlay));
-    const bounds = unionBounds(cloud, scene.overlay);
+    const bounds = unionBounds(cloud, scene.overlay, scene.backdrop);
     if (bounds) fitToBounds(scene, bounds);
-  }, [cloud, overlayShapes]);
+  }, [cloud, overlayShapes, backdrop.bounds]);
 
   // 相机模式（G7）。只换 controls 挂的那台相机，场景与几何原封不动。
   useEffect(() => {
@@ -646,6 +838,10 @@ export function Viewer3D() {
       data-base={display.base?.localId ?? ""}
       data-cloud-bounds={boundsAttr(cloud && cloud.pointCount > 0 ? cloud.bounds : null)}
       data-overlay-bounds={boundsAttr(overlayBounds)}
+      data-roi-edit={roiEditing ? roiItems.length : 0}
+      data-backdrop={backdrop.count}
+      data-backdrop-bounds={boundsAttr(backdrop.bounds)}
+      data-backdrop-error={backdrop.error ?? undefined}
     >
       <div className="viewer__bar">
         <span className="viewer__title">3D 预览</span>
@@ -707,10 +903,10 @@ export function Viewer3D() {
           className="viewer__fit"
           onClick={() => {
             const scene = sceneRef.current;
-            const bounds = scene ? unionBounds(cloud, scene.overlay) : null;
+            const bounds = scene ? unionBounds(cloud, scene.overlay, scene.backdrop) : null;
             if (scene && bounds) fitToBounds(scene, bounds);
           }}
-          disabled={!cloud && overlayCount === 0}
+          disabled={!cloud && overlayCount === 0 && backdrop.count === 0}
           title="缩放到全部（底图云 + 叠画几何）"
         >
           ⤢
@@ -811,8 +1007,15 @@ export function Viewer3D() {
 
       <div className="viewer__stage">
         <div className="viewer__canvas" ref={hostRef} data-testid="viewer3d-canvas" />
+        {roiEditing && activeNode && (
+          <RoiLayer host={sceneHost} nodeId={activeNode.id} items={roiItems} />
+        )}
         {(display.status || loading) && (
-          <div className="viewer__empty" data-testid="viewer3d-status">
+          // 拖框时底图（模板）已经画出来了，状态只缩在角上，不盖住画面
+          <div
+            className={`viewer__empty${roiEditing ? " viewer__empty--corner" : ""}`}
+            data-testid="viewer3d-status"
+          >
             {loading ? "正在取点云…" : display.status}
           </div>
         )}

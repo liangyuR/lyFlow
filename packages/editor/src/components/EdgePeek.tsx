@@ -15,6 +15,7 @@ import {
 import { useUiStore } from "../store/ui";
 
 import { CloudView } from "./peek/CloudView";
+import { FieldsView } from "./peek/FieldsView";
 import { IndicesView } from "./peek/IndicesView";
 import { TensorView } from "./peek/TensorView";
 import { ValueView } from "./peek/ValueView";
@@ -27,6 +28,7 @@ const VIEW_LABEL: Record<PeekView, string> = {
   tensor: "图像",
   value: "文本",
   indices: "列表",
+  fields: "字段",
 };
 
 const VIEW_TITLE: Record<PeekView, string> = {
@@ -35,6 +37,7 @@ const VIEW_TITLE: Record<PeekView, string> = {
   tensor: "张量图像",
   value: "键值表 + 原始 JSON",
   indices: "下标列表",
+  fields: "Bundle 的字段表，点进字段看它的内容",
 };
 
 function boundsOf(el: HTMLElement | null) {
@@ -65,7 +68,7 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
   const dragRef = useRef<{ dx: number; dy: number; pos: { x: number; y: number } } | null>(null);
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
 
-  const live = usePeekSource(win.path, win.from);
+  const live = usePeekSource(win.path, win.from, win.field);
   const frozenRef = useRef<PeekSource | null>(null);
   useEffect(() => {
     if (win.locked) return;
@@ -86,6 +89,7 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
   const setLocked = usePeekStore((s) => s.setLocked);
   const setView = usePeekStore((s) => s.setView);
   const syncView = usePeekStore((s) => s.syncView);
+  const setField = usePeekStore((s) => s.setField);
 
   const views = useMemo(() => viewsFor(src.type), [src.type]);
   const wanted = defaultViewFor(src.type);
@@ -220,6 +224,7 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
       data-view={win.view}
       data-locked={win.locked ? "1" : "0"}
       data-type={src.type ?? undefined}
+      data-field={src.field ?? undefined}
       style={{
         left: pos.x,
         top: pos.y,
@@ -244,7 +249,10 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
           {src.label}
         </span>
         <span className="peek__sep">·</span>
-        <span className="peek__port">{win.from.port}</span>
+        <span className="peek__port">
+          {win.from.port}
+          {src.field && <span className="peek__field">.{src.field}</span>}
+        </span>
         <span
           className="peek__type"
           style={{ borderColor: typeColor, color: typeColor }}
@@ -285,6 +293,17 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
       </header>
 
       <div className="peek__tools">
+        {src.field && (
+          <button
+            type="button"
+            className="peek__tool"
+            data-testid="peek-field-back"
+            title={`回到 ${src.bundle?.label ?? src.bundle?.kind ?? "Bundle"} 的字段表`}
+            onClick={() => setField(win.id, null)}
+          >
+            ‹ 字段
+          </button>
+        )}
         {views.length > 1 && (
           <div className="peek__views" role="group" aria-label="视图">
             {views.map((v) => (
@@ -358,6 +377,8 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
           <TensorView win={win} src={src} />
         ) : win.view === "indices" ? (
           <IndicesView win={win} src={src} />
+        ) : win.view === "fields" ? (
+          <FieldsView src={src} onPick={(f) => setField(win.id, f)} />
         ) : src.stat ? (
           <ValueView stat={src.stat} />
         ) : (

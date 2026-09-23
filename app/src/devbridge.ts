@@ -14,6 +14,8 @@ import {
   useManifestStore,
   usePeekStore,
   useUiStore,
+  useValidationStore,
+  requestValidate,
   type RunRequest,
   type StateTransition,
   type Transport,
@@ -29,9 +31,12 @@ interface DevBridge {
     execution: typeof useExecutionStore;
     cache: typeof useCacheStore;
     peek: typeof usePeekStore;
+    validation: typeof useValidationStore;
   };
   /** 立刻编译一次，不等 debounce。验收脚本不想为 150ms 睡一觉。 */
   plan(): Promise<void>;
+  /** 立刻校验一次（m8-plan L16 的实时校验走 debounce）。 */
+  validate(): Promise<void>;
   /** 发起一次运行。走的是界面用的那条 startRun —— 直接调 transport 的话
    *  execution store 认不出 runId，事件会全进 orphans。 */
   run(request?: RunRequest): Promise<void>;
@@ -83,10 +88,15 @@ export function installDevBridge(transport: Transport): void {
       execution: useExecutionStore,
       cache: useCacheStore,
       peek: usePeekStore,
+      validation: useValidationStore,
     },
     async plan() {
       const g = useGraphStore.getState();
       await requestPlan(g.doc, g.filePath);
+    },
+    async validate() {
+      const g = useGraphStore.getState();
+      await requestValidate(g.doc, g.filePath);
     },
     async run(request) {
       const g = useGraphStore.getState();
@@ -142,7 +152,7 @@ export function installDevBridge(transport: Transport): void {
           ]),
         ),
         peek: p.windows.map((w) => {
-          const src = peekSourceOf(g.doc, w.path, w.from);
+          const src = peekSourceOf(g.doc, w.path, w.from, w.field);
           return {
             id: w.id,
             edgeId: w.edgeId,
@@ -150,10 +160,16 @@ export function installDevBridge(transport: Transport): void {
             locked: !!w.locked,
             node: w.from.node,
             port: w.from.port,
+            field: src.field,
             type: src.type,
             status: src.status,
           };
         }),
+        // 自动连线没能唯一确定的端口（m8-plan L13）与编辑期校验（L16）
+        autoHint: u.autoHint
+          ? { targets: [...u.autoHint.targets], candidates: [...u.autoHint.candidates] }
+          : null,
+        validation: Object.fromEntries(useValidationStore.getState().byNode),
         preview: {
           active: u.previewing,
           autoRun: u.autoRun,

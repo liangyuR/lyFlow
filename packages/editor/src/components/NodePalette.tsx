@@ -4,14 +4,86 @@
 import { useReactFlow } from "@xyflow/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { addNodeWithAutoConnect, insertSnippet } from "../lib/insert";
 import { FIELD_LABELS, searchOperators, type OperatorHit } from "../lib/search";
-import { useGraphStore } from "../store/graph";
-import { useManifestStore } from "../store/manifest";
+import { useManifestStore, useSnippets } from "../store/manifest";
 import { useUiStore } from "../store/ui";
-import type { OperatorDesc } from "../types/manifest";
+import type { OperatorDesc, SnippetDesc } from "../types/manifest";
 
 /** 拖到画布时用的 MIME。GraphCanvas 的 onDrop 读它。 */
 export const OPERATOR_DND_MIME = "application/lyflow-operator";
+/** 片段（m8-plan L14）拖到画布时用的 MIME，值是片段 id。 */
+export const SNIPPET_DND_MIME = "application/lyflow-snippet";
+
+/** 画布可视区中心的画布坐标。双击添加时落在这里，比写死原点合理。 */
+function useViewportCenter() {
+  const { screenToFlowPosition } = useReactFlow();
+  return () => {
+    const pane = document.querySelector(".react-flow__pane");
+    const rect = pane?.getBoundingClientRect();
+    if (!rect) return { x: 0, y: 0 };
+    return screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+  };
+}
+
+function SnippetRow({ snippet }: { snippet: SnippetDesc }) {
+  const viewportCenter = useViewportCenter();
+  const missing = useManifestStore((s) => snippet.nodes.filter((n) => !s.operatorsById.has(n.op)).length);
+  return (
+    <button
+      type="button"
+      className={`op-row op-row--snippet${missing > 0 ? " is-missing" : ""}`}
+      data-snippet-id={snippet.id}
+      data-testid={`snippet-${snippet.id}`}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(SNIPPET_DND_MIME, snippet.id);
+        e.dataTransfer.effectAllowed = "copy";
+      }}
+      onDoubleClick={() => insertSnippet(snippet, viewportCenter())}
+      title={`${snippet.doc ?? ""}${missing > 0 ? `\n（${missing} 个节点的算子当前 core 没有）` : ""}`}
+    >
+      <span className="op-row__label">
+        <span className="op-row__glyph" aria-hidden>
+          ⧉
+        </span>
+        {snippet.label}
+      </span>
+      <span className="op-row__id">
+        {snippet.nodes.length} 节点{snippet.source ? " · 用户" : snippet.pack ? ` · ${snippet.pack}` : ""}
+      </span>
+    </button>
+  );
+}
+
+/** 片段库（m8-plan L14）：拖到画布或双击插入，插入就是带自动连线的粘贴。 */
+function SnippetBranch({ query }: { query: string }) {
+  const snippets = useSnippets();
+  const [open, setOpen] = useState(true);
+  const q = query.trim().toLowerCase();
+  const shown = q
+    ? snippets.filter((s) => `${s.label} ${s.id} ${s.category ?? ""}`.toLowerCase().includes(q))
+    : snippets;
+  if (shown.length === 0) return null;
+  return (
+    <div className="tree-branch tree-branch--snippets" data-testid="snippet-library" style={{ ["--depth" as string]: 0 }}>
+      <button type="button" className="tree-branch__head" onClick={() => setOpen((v) => !v)}>
+        <span className={`tree-branch__caret${open ? " is-open" : ""}`} aria-hidden>
+          ▸
+        </span>
+        片段
+        <span className="tree-branch__count">{shown.length}</span>
+      </button>
+      {open && (
+        <div className="tree-branch__body">
+          {shown.map((s) => (
+            <SnippetRow key={s.id} snippet={s} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface TreeNode {
   name: string;
@@ -79,16 +151,8 @@ function OperatorRow({
   hit?: OperatorHit;
 }) {
   const setInspected = useUiStore((s) => s.setInspectedOperator);
-  const { screenToFlowPosition } = useReactFlow();
+  const viewportCenter = useViewportCenter();
   const highlightLabel = hit?.fieldIndex === 0 ? hit.indices : [];
-
-  /** 画布可视区中心的画布坐标。双击添加时落在这里，比写死原点合理。 */
-  const viewportCenter = () => {
-    const pane = document.querySelector(".react-flow__pane");
-    const rect = pane?.getBoundingClientRect();
-    if (!rect) return { x: 0, y: 0 };
-    return screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
-  };
 
   return (
     <button
@@ -102,9 +166,8 @@ function OperatorRow({
       }}
       onClick={() => setInspected(op.id)}
       onDoubleClick={() => {
-        // 拖拽是精确落点的方式，双击是图省事的方式，都得有。
-        const id = useGraphStore.getState().addNode(op.id, viewportCenter());
-        if (id) useUiStore.getState().setSelection([id], []);
+        // 拖拽是精确落点的方式，双击是图省事的方式，都得有；两者都按类型自动连线（L13）。
+        addNodeWithAutoConnect(op.id, viewportCenter());
       }}
       title={op.doc}
     >
@@ -202,6 +265,7 @@ export function NodePalette() {
       </div>
 
       <div className="palette__list" ref={listRef}>
+        <SnippetBranch query={query} />
         {searching ? (
           hits.length === 0 ? (
             <p className="palette__empty">没有匹配的算子</p>
