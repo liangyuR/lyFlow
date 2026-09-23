@@ -1,78 +1,87 @@
-# M8 设计 —— 高层测点算子，让人也能建图
+# M8 计划 —— 让人也能建图：自带常识的积木
 
-状态：**设计稿，待确认**（§4 的开放问题定下来之后再拆实施计划）。前提：M7 已落地（复刻约束已去掉、
-`fit_line.side` 已换成 `toward`、顶层图参数、加载期校验钩子）。
+目标：**人在空白画布上，用约九个叫得出名字的节点拼出一个测点，不接任何「同一个框接两次」的线，不填任何「左右」。**
+图始终是平的，每个节点都看得见、改得动；复杂度被消化进数据类型和算子本身，而不是藏进一个大节点。
 
-目标：**一个懂业务、不懂算法的人，十分钟内从空白建出一个测点的图，只填二十来个业务参数，不接任何一条内部边，
-不填任何一个「左右」。** 需要深调时，再把它一键展开成今天这种细粒度图。
+前提：M7 已落地（复刻约束去掉、`fit_line.toward`、Line2D 统一朝向、顶层图参数、加载期校验钩子）。
+
+**已否决的方案**：`gap.station` 展开式大节点（上一版设计稿）。它把复杂度藏进黑盒，简单但封闭；用户要的是灵活、简洁、自由的 Flow。
+
+分两个实施包：**M8a** core 的 Bundle 类型 + gap 积木算子 + 导入器；**M8b** 编辑器（自动连线、片段库、2D 拖框、实时校验）。M8a 先做，M8b 对着 M8a 冻结的接口做。
 
 ---
 
-## 1. 现状：为什么人建不了图
+## 1. 现状：人为什么拼不动
 
-一个测点的图由导入器生成，模板路径约 30 个节点，模型路径加回退约 45 个。人手建图要面对三类负担，
-每一类在 KUN10 都真实出过事：
+模板路径的一个测点约 25 个节点。难的不是数量，是三件事：
 
-| 负担 | 例子 | M7 之后还剩多少 |
-|---|---|---|
-| 拓扑 | 裁剪→拟合→选点→段差，每条线都要接对端口；`definition A` 还要多接一条 baseLine | 全部还在 |
-| 方向 | `side`、`baseSide`、`datum_window.side`、中心带参考线接哪条 | `fit_line.side` 没了；其余还在 |
-| 同步 | `n_circles.offset` 与 `n_gap.offset`、nominal 两处、modelPath 多处 | 靠顶层参数能解决，但要人自己声明 binds |
+| 负担 | 例子 |
+|---|---|
+| 一步拆成几个节点 | 「拟合基准线」= `crop_box2d` + `fit_line`，同一个框接两次；三片云逐个接给 `fit_gap_circles` |
+| 连线里藏着方向 | 哪个框是缝、线朝哪边，全靠人接对端口 |
+| 边上是裸数据 | 一个 Box2D 不知道自己是「基准面」还是「缝左」，下游只能靠参数猜 |
 
-这三类负担**都不是业务决定**，都能从少数几个业务事实推出来。导入器（`import_standard_gap.cpp`）今天
-就在做这种推导，只是推导的输入是 YAML，而不是图里的一个节点。
+## 2. 定死的决定
 
-## 2. 方案：展开式算子 `gap.station`
-
-### 2.1 核心决定
+### M8a：core 与 gap 包
 
 | # | 决定 | 理由 |
 |---|---|---|
-| K1 | core 新增**展开式算子**：`OperatorDesc` 加可选 `ExpandFn expand`，签名 = (解析后的参数, 已连接的输入端口) → 一份 `SubgraphDef`（JSON，复用 `parseSubgraphDef`）。它在 `expandGraph` 阶段与子图、库算子走同一条路：展开成 `station/<内部 id>` 路径节点，执行器、缓存键、事件流、结果仓对它一无所知（ADR-0010 的四条后果原样成立） | 展开后是平图，并行、缓存、Edge Peek、`lyflow eval` 全部白拿；诊断落在 `station/n_fit_base` 这种路径上，编辑器已有按前缀聚合 |
-| K2 | `gap.station` 是一个展开式算子：输入 `primary`、`secondary` 两片云；输出 `flush`、`gap`（Measurement）、`bundle`（GapResult Record）以及四个角色 ROI（Box2D，给 3D 视图叠画）。**展开逻辑与导入器共用一份代码**：把导入器拆成「YAML → `StationSpec`」和「`StationSpec` → 子图」两半，`gap.station` 走「参数 → `StationSpec` → 子图」 | 推导规则只有一份，导入器和测点算子不会各自漂移 |
-| K3 | **ROI 按角色命名**：`datumRoi`（基准件的面）、`targetRoi`（被测件的面）、`seamLeftRoi`、`seamRightRoi`。参数里没有 base/ref、没有任何 `side` | 「基准」一词在四个参数里指四样东西，是评审里的问题 5 |
-| K4 | **方向全部推导，不给参数**：① 所有 `fit_line` 的 `toward` 接一个内部节点 `gap.box_between(seamLeft, seamRight)`（两框之间的那段，M8 新增的小算子），与哪一侧无关；② 模板模式下 `business_rois.datumSide` 在展开时由模板坐标系里的 ROI 推出：`datumRoi` 中心 x 小于两个缝框中心的平均 x 即 `left`；③ 中心带参考线用角色枚举 `centerBandRef: datum \| target` | 人能填反的参数，一个都不留 |
-| K5 | **同步全部内化**：`gap.offset`、`gap.nominal` 各只出现一次，展开时写进 `fit_gap_circles` 与 `gap.gap`/`gap.judge` 的所有副本；`modelPath` 只在 station 上出现一次，宿主通过 M7 的顶层参数绑定它 | 一处定义，两处生效，不一致就不可能发生 |
-| K6 | station 自带 `validate`（M7 钩子），加载期静态检查：四个框非退化；两个缝框左右有序且不重叠；`datumRoi` 与 `targetRoi` 落在缝的两侧；nominal 落在上下限之间；半径上下限有序、固定半径在区间内；模型模式缺 `modelPath` | ROI 在模板坐标系里是常数，所以「side 填反」这一整类错误在加载期就能拦住，这正是 M7 之前做不到的 |
-| K7 | **展开为细图**：`lyflow patch --explode <节点>` 把展开结果原样写回图里（节点 id 去掉路径前缀、边接好、station 节点删掉），编辑器右键「展开为细图」调同一条命令。**单向**，不支持收回 | 深调时需要直接改内部参数、插节点；做成双向要维护「细图能否还原成参数」的判定，不值 |
-| K8 | 导入器默认产出**一张只含 `load_profile_pair → gap.station` 的图**；`--expanded` 产出今天的细图。黑盒对照节点 `gap.measure_reference` 不再默认生成 | 人打开导入的图，看到的就应该是他能改的那一层 |
-| K9 | 编辑器：Inspector 按 §2.2 的分组显示，`高级` 组默认折叠；3D 视图的 2D 剖面模式里**直接拖拽四个角色框**（四种颜色、带角色名），拖完写回 station 的 ROI 参数；「新建测点图」模板一键生成 `load_profile_pair → gap.station → 图输出` | 手填毫米坐标是人建图最慢、最容易错的一步 |
-| K10 | **v1 覆盖面 = 导入器今天支持的全部**（2026-09-23 确认：与现有算法一致即够用）：圆缝 + 线段差、三种参考点、模板或模型定位与模型→模板回退、备用相机分支、方向基准、中心带、弱地板。多模板候选用**固定四个槽位**表达（`template1`…`template4`，每槽 `enabled` + 左右模板文件 + 可选的四个角色 ROI 覆盖），上限与 `gap.select_alignment` 的四个候选一致，不新增列表参数类型；槽位放进 `高级` 组。**不做**：notch / groove 两种缝型 | 导入器能生成的图，station 都必须能表达，否则人建的图和导入的图就是两套能力 |
+| L1 | core 新增通用数据类型 **Bundle**：`{ kind, fields: 有序的 名字 → Data }`，字段可以是任何已有类型（不嵌套 Bundle）。端口类型写作 `Bundle<kind>`，类型检查要求 kind 相等；`Any` 照常兼容 | 一根线带一组有关系的数据；kind 让类型检查和自动连线都能精确匹配 |
+| L2 | Bundle 的 kind 由算子包在 manifest 里**声明**：`bundles: [{ kind, label, fields: [{ name, type, doc }] }]`。运行时 `outputs.set` 一个 Bundle 时按声明校验字段齐全、类型对得上，不符报 `contract_violation` | 字段表在 manifest 里，编辑器、MCP、校验都读同一份 |
+| L3 | 结果仓、C ABI、事件、summary 按字段可寻址：端口名写成 `<port>.<field>`（如 `scan.merged`），`lyflow_output_cloud` 等现有取数函数不改签名，直接认这种写法；`lyflow_output_list` 对 Bundle 端口列出每个字段。图输出（`outputs`）也可以指向字段 | 宿主、Edge Peek、eval 的 metric 路径都不必理解新结构 |
+| L4 | gap 包声明两个 kind：**`gap.ScanPair`** = `primary`、`secondary`、`merged`（PointCloud）；**`gap.RoiSet`** = `datum`、`target`、`seamLeft`、`seamRight`（Box2D）+ `info`（Record：`datumSide`、`source: template\|model`、对齐结果）。RoiSet 里的四个框**按角色命名**，不再有 base/ref | 「基准」一词在四个参数里指四样东西（评审问题 5）；角色随数据走，下游不用猜 |
+| L5 | 新增六个**积木算子**，每个对应一个人会说出口的步骤（§3 列参数）：`gap.read_scan`（读剖面）、`gap.locate_template`（模板定位）、`gap.locate_model`（模型定位）、`gap.role_line`（按角色拟合直线）、`gap.ref_point`（取参考点）、`gap.seam_circles`（拟合缝两侧圆）。`gap.flush`、`gap.gap`、`gap.judge` 不变；`gap.result_bundle` 改接 `RoiSet` 与 `ScanPair`，原来的七个散端口去掉 | 一个测点从约 25 个节点降到约 9 个 |
+| L6 | 积木算子**复用现有实现，不写第二份算法**：把 `fit_line`、`fit_gap_circles`、`business_rois`、`align_template`、`select_alignment` 等的 compute 主体抽成包内函数，细粒度算子与积木算子都调它。**细粒度算子全部保留**，想精细控制时照样可用，两种可以在同一张图里混用 | 同源才能保证两种建图方式结果一致，也保住现有的调参手段 |
+| L7 | **方向全部由 RoiSet 推出**：`role_line`、`ref_point` 的「靠缝那一端」取 `seamLeft` 与 `seamRight` 两框之间的中点；`locate_template` 的 `datumSide` 由模板坐标系里 `datum` 框中心与两个缝框中心的相对位置推出，写进 `info`。积木算子上**没有任何 side / toward / baseSide 参数** | 人能填反的参数一个都不留 |
+| L8 | `locate_template` 合并「整体框 → 裁剪 → 加载模板 → 对齐 → 选模板 → 业务框」；多模板候选用**固定四个槽位**（`template1`…`template4`，每槽 `enabled` + 左右模板文件 + 可选的四框覆盖），上限与 `select_alignment` 一致。四个角色框是它的参数（模板坐标系，mm） | 2026-09-23 确认：「读剖面」「定位」各合成一个节点的粒度合适 |
+| L9 | `locate_model` 输出 `rois: RoiSet` 与 `scan: ScanPair`（模型路径会剔 NaN、做跟随零件的裁剪，下游应当用处理过的云）。**模型→模板回退、备用相机**不做成算子参数，而是用现有 `flow.fallback` 在平图上并联两个节点表达，片段库提供现成组合 | 回退是结构，放在图上看得见；不在算子里埋分支 |
+| L10 | 方向基准（长面）做成独立积木 `gap.datum_direction`（`scan`、`rois` → `Line2D`），接到 `role_line.refLine`。中心带参考线仍是一条普通的边 | 可选步骤保持可选，不在别的算子里加开关 |
+| L11 | 积木算子都实现 M7 的 `validate`：`locate_template` 静态检查四框非退化、缝框左右有序不重叠、`datum` 与 `target` 落在缝的两侧；`role_line` 等检查必要输入已接 | ROI 在模板坐标系里是常数，「方向填反」在加载期就拦得住 |
+| L12 | 导入器默认产出**积木图**；`--fine` 产出今天的细粒度图。两种都不再默认生成黑盒对照 `gap.measure_reference` | 人打开导入的图，看到的就是他自己也拼得出来的东西 |
 
-### 2.2 人要填的参数
+### M8b：编辑器
 
-基础组约 20 个，都是业务配置里本来就有的量：
+| # | 决定 | 理由 |
+|---|---|---|
+| L13 | **按类型自动连线**：拖入节点时，每个未连接的必需输入若在图里**恰好有一个**类型兼容的输出（含 Bundle kind），就自动连上，写成普通的边；有多个候选时不连，高亮候选端口。从输出拖线时只高亮兼容的输入。自动连线是编辑动作，不是运行时的隐式上下文，执行语义不变 | 省掉最机械的那部分连线，同时不引入全局 context |
+| L14 | **片段库**：`*.lyflow-snippet.json` = 一组节点 + 边 + 对外端口提示；插入就是带自动连线的粘贴，插完是普通节点，**没有展开/收回**。gap 包随附：「段差 · 线端点」「段差 · 选点」「间隙 · 圆」「模型定位 + 模板回退」「备用相机回退」「测点骨架」 | 常用组合一键拼好，又不变成黑盒 |
+| L15 | **2D 拖框**：选中 `locate_template` 时，2D 剖面视图显示槽 1 的模板云与四个角色框（四种颜色、标角色名），拖动与拉伸直接写回参数；同时在样本云上叠画变换后的框（只读）。普通 `Vec4f` 的 ROI 参数（带 `roi` 语义标记的）同样可拖 | 手填毫米坐标是人建图最慢、最容易错的一步 |
+| L16 | **实时校验**：编辑时调用 validate，诊断直接标在节点与参数上（M7 钩子的 error / warning） | 错误在拼的时候就看见，而不是跑完才发现 |
+| L17 | Edge Peek 支持 Bundle：浮窗先列字段，点进字段按字段类型复用现有视图（点云 / 框 / 下标） | 数据成组流动之后仍然看得见每一样 |
 
-| 组 | 参数 |
-|---|---|
-| 定位 | `locate: template \| model`；`templateDir`、`icpMinScore`（模板模式）；`modelPath`（模型模式） |
-| 角色 ROI（mm，模板坐标系） | `datumRoi`、`targetRoi`、`seamLeftRoi`、`seamRightRoi`（Vec4f，可在 3D 视图拖拽） |
-| 段差 | `flushRef: line_end \| selected_point \| nearest_point`；`lineFitDistance`；`segmentPoints`；`flushOffset`；`flushNominal` / `flushUpper` / `flushLower` |
-| 间隙 | `gapDefinition: A \| B`；`circleFitDistance`；左右半径上下限；`gapOffset`；`gapNominal` / `gapUpper` / `gapLower` |
-| 高级（折叠） | 固定半径、逐侧相机、中心带（`centerBandRef` + 左右 above/tol/mode）、弱地板（minInliers / minArcDeg）、方向基准（长面）、离群滤波 |
+### 不做
 
-### 2.3 展开时推导出的内部值（人不再填）
+`gap.station` 或任何展开式大节点；运行时全局 context；notch / groove 的积木版（细粒度算子照常可用）；Bundle 嵌套 Bundle；片段的「收回」。
 
-| 内部参数或连线 | 推导自 |
-|---|---|
-| 各 `fit_line.toward` | `box_between(seamLeft, seamRight)` |
-| `business_rois.datumSide` | 模板坐标系里 `datumRoi` 与缝框的相对位置 |
-| `fit_gap_circles.offset` / `nominal` | `gapOffset` / `gapNominal` |
-| `fit_line.endpoints` | `locate`（模型模式 `inlier_ends`，模板模式 `roi_intersection`） |
-| 中心带的 `refLine` / `refLineRight` 连线 | `centerBandRef` |
-| `gap.gap` 是否接 `baseLine` | `gapDefinition == A` |
-| `gap.flush.signed` | 恒为 true |
-| 各裁剪节点的 `bounds` | 恒为 `open` |
+## 3. 积木算子一览
 
-## 3. 实施拆分（确认后再写成实施计划）
+| 算子 | 输入 → 输出 | 人要填的参数（其余在「高级」组折叠） |
+|---|---|---|
+| `gap.read_scan` 读剖面 | （目录参数，或宿主注入两片云）→ `scan: ScanPair` | 目录与文件前缀；离群滤波开关与半径 |
+| `gap.locate_template` 模板定位 | `scan` → `rois: RoiSet`、`alignment: Record` | 模板目录；四个角色框；ICP 最低分；高级：整体框模式、四个模板槽、ICP 细节 |
+| `gap.locate_model` 模型定位 | `scan` → `rois: RoiSet`、`scan: ScanPair` | `modelPath`（通常绑到顶层参数）；高级：细化、跟随裁剪 |
+| `gap.role_line` 按角色拟合直线 | `scan`、`rois`、`refLine?` → `line`、`innerEnd`、`quality` | `role: datum \| target`；拟合距离；截取点数；高级：取哪片云、方向约束、最少内点 |
+| `gap.ref_point` 取参考点 | `scan`、`rois`、`baseLine?` → `point`、`line?`、`quality` | `method: line_end \| selected_point \| nearest_point`；`role`（默认 target） |
+| `gap.seam_circles` 拟合缝两侧圆 | `scan`、`rois`、`refLine?`、`refLineRight?` → `left`、`right`、`quality` | 拟合距离；左右半径上下限；`nominal`；高级：固定半径、逐侧相机、中心带、弱地板 |
+| `gap.datum_direction` 方向基准 | `scan`、`rois` → `line` | 窗口起点、长度、高度；拟合距离 |
 
-1. **core**：`ExpandFn` 与展开阶段接入；`lyflow plan` / `params` 对展开式算子的显示（station 的参数 source 照常，内部参数 source = `derived`）；`patch --explode`。
-2. **gap 包**：`gap.box_between`；导入器拆成 `StationSpec` 两半；`gap.station` 的展开与 `validate`；导入器 `--expanded`。
-3. **编辑器**：Inspector 分组与折叠；2D 剖面视图里拖拽角色框；「新建测点图」模板；右键「展开为细图」。
-4. **验收的核心断言**：对同一份 StandardGap 夹具，`导入 → station 图` 与 `导入 --expanded → 细图` 在全部样本上**逐帧输出相同**（这是 station 与导入器同源的证据，不是在对齐旧算法）；故意把 `datumRoi` 拖到缝的另一侧，`lyflow validate` 在加载期报错；从空白按「新建测点图」建图、只改基础组参数，e2e 跑通出数。
+一个模板路径的测点：`read_scan → locate_template → role_line(datum) → ref_point → flush → judge` 与 `seam_circles → gap → judge`，再加 `result_bundle`，共 9 个节点。
 
-## 4. 开放问题（需要你来定）
+## 4. 验收
 
-1. ~~v1 覆盖面~~ —— 已定（2026-09-23）：与现有算法一致即可，见 K10。
-2. ~~2D 拖框放在 M8 还是往后放~~ —— 已定（2026-09-23）：放在 M8，见 K9。
-3. **展开为细图是否一定单向**（待定，先把含义讲清楚再改 K7）：如果现场常见的流程是「先用 station 建、深调后又想回到简单视图」，就要考虑可收回，成本会明显上升。
+**M8a**（子代理写进 `docs/m8a-acceptance.md`）
+
+1. 对仓库内的 StandardGap 夹具与 M7 用过的 39 个样本，分别导入成**积木图**与 `--fine` **细粒度图**，所有样本上 flush、gap 的输出**逐帧相同**（两者同源的证据，见 L6）。
+2. 导入的模板路径积木图节点数 ≤ 12；积木算子的参数里没有 `side`、`toward`、`baseSide`、`datumSide`。
+3. Bundle：字段缺失或类型不符报 `contract_violation`；`lyflow_output_cloud(run, node, "scan.merged")` 取得到点云；图输出可以指向字段；`Bundle<gap.ScanPair>` 接 `Bundle<gap.RoiSet>` 报 `type_mismatch`。
+4. `locate_template` 把 `datum` 框拖到与 `target` 同一侧，`lyflow validate` 在执行前报错。
+5. 细粒度算子的既有测试全部照过；同一张图里混用积木与细粒度算子能跑。
+6. `LYFLOW_PACKS="gap;dts"` 下 `pnpm check`、`pnpm e2e` 全绿，日志落盘 grep 无「跳过 / 未验」。
+
+**M8b**
+
+7. e2e：从空白画布，只靠拖入节点（自动连线）、插入「测点骨架」片段、在 2D 视图拖四个框、改基础组参数，建出模板路径测点并跑出 flush 与 gap 数值，**全程不手连一条边**。
+8. 自动连线：唯一候选自动连上；两个候选时不连、候选端口高亮。
+9. Edge Peek 在 `ScanPair` 边上列出三个字段，点进 `merged` 显示点云。
+10. 编辑时把 `datum` 框拖到错误一侧，节点立即标红并显示诊断。
