@@ -115,9 +115,9 @@ lyflow_op_pack(NAME mypack LINK lyflow_std_algo ...)
 #include "algo/crop2d.h"  // lyflow::std_pc::insideBox2D / cropBox2D
 ```
 
-`algo/` 里的 2D 算法一律吃 `pcl::PointCloud<pcl::PointXYZRGB>`，
-与它们迁出来的那份（xyz-gap-inspector 的 `GapUtils` / `Icp2D`）同一个点类型 ——
-换点类型就要重新证明一遍逐位一致，而 `packs/gap` 的两条 A/B 正压在这上面。
+`algo/` 里的 2D 算法一律吃 `pcl::PointCloud<pcl::PointXYZRGB>`（迁移时沿用的点类型）。
+RANSAC 等参数外露，默认值取自迁出来的那份（xyz-gap-inspector 的 `GapUtils` / `Icp2D`）；
+它们不承诺与那份数值相同，改算法以本包与 `packs/gap` 的 doctest 为准。
 
 ## 写盘钩子
 

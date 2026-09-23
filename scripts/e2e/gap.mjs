@@ -1,4 +1,4 @@
-// 非点云输出的展示：3D 叠画 2D 几何、2D 剖面相机、Inspector 里的数值（G7）。
+// 非点云输出的展示：3D 叠画 2D 几何、2D 剖面相机、Inspector 里的数值。
 // 值从**执行事件**灌进去而不是靠某个算子：前端不该知道算子的名字（ADR-0003）。
 
 import { sleep } from "./cdp.mjs";
@@ -220,8 +220,8 @@ async function suiteMeasurementOutputs(cdp, report) {
   report.eq("几何仍然叠在底图上", Number(planeOverlay), 4);
 }
 
-/** 可选：打开一张真实的 gap 图跑一遍，看 ROI 框有没有画出来。跑法见
- *  docs/gap-acceptance.md；不设 LYFLOW_GAP_GRAPH 时整组跳过。 */
+/** 可选：打开一张真实的 gap 图跑一遍，看 ROI 框有没有画出来。图用
+ *  `lyflow import` 生成（packs/gap/README.md「导入器」）；不设 LYFLOW_GAP_GRAPH 时整组跳过。 */
 async function suiteRealGapGraph(cdp, report) {
   const graphPath = process.env.LYFLOW_GAP_GRAPH;
   if (!graphPath) return;
@@ -318,7 +318,7 @@ function nodeOfOp(cdp, op) {
 }
 
 /** §10：模型 ROI 路径的图。`LYFLOW_GAP_GRAPH_MODEL` 指向 R1 的模型图；未设时整组跳过。
- *  怎么生成那张图见 docs/gap-acceptance.md「第二部分」。 */
+ *  怎么生成那张图见 packs/gap/README.md「模型 ROI 路径」。 */
 async function suiteModelGapGraph(cdp, report) {
   const graphPath = process.env.LYFLOW_GAP_GRAPH_MODEL;
   if (!graphPath) return;
@@ -370,7 +370,7 @@ async function suiteModelGapGraph(cdp, report) {
       JSON.stringify(shape.cloud),
     );
     // 3D 视图没有 rgb 着色模式，所以算子把类 id 也写进 intensity：
-    // 「强度」这一项没被禁用，就说明逐点的类别通道确实到了前端（见 gap-acceptance.md 偏离 20）
+    // 「强度」这一项没被禁用，就说明逐点的类别通道确实到了前端
     const shading = await cdp.eval(`
       const sel = document.querySelector('[data-testid="viewer-shading"]');
       if (!sel) return null;

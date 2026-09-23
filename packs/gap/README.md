@@ -9,8 +9,8 @@
 - **模型 ROI**：现场真正在用的那条，ONNX 逐槽分割 → 四框 → 跟随零件的裁剪窗，无模板无 ICP。
 
 算子包机制本身见 [docs/op-packs.md](../../docs/op-packs.md) 与 ADR-0013 / ADR-0014；
-算法为什么住在这里见 [ADR-0015](../../docs/adr/0015-algorithms-live-in-lyflow-packs.md)；
-接进去的来龙去脉见 `docs/gap-integration-plan.md` 与 `docs/gap-acceptance.md`。
+算法为什么住在这里见 [ADR-0015](../../docs/adr/0015-algorithms-live-in-lyflow-packs.md)。
+算子的正确性由本包 doctest 与样本集上的读数评审来定，**不以与 `gap_batch_runner` 基线数值相同为标准**。
 
 ## 目录
 
@@ -18,7 +18,7 @@
 packs/gap/
   ops/     26 个 gap.* 算子 + StandardGap.yml 导入器
   algo/    算法源码，从 xyz-gap-inspector 的 src/ 复制而来，命名空间不改
-  tools/   图生成器、两条 A/B、回退图 A/B 与导入器等价性脚本
+  tools/   历史对拍工具：Python 图生成器、两条 A/B、回退图 A/B 与导入器等价性脚本
   tests/   随包走的 doctest
 ```
 
@@ -36,7 +36,7 @@ powershell -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1
 
 $env:LYFLOW_PACKS = "gap"
 pnpm check          # 或 pnpm core:build / pnpm dev
-pnpm check:gap      # 门禁 + 两条 A/B
+pnpm check:gap      # LYFLOW_PACKS=gap 下的门禁
 ```
 
 依赖：PCL 与 `lyflow_std_algo` 来自 `packs/std-pointcloud`（本包不自己 `find_package(PCL)`），
@@ -60,12 +60,12 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 | `gap.align_template` | cloud, tplLeft, tplRight → alignment | 全局粗配 + 左右两侧 ICP + 信赖域 + 退化锁定 |
 | `gap.select_alignment` | a,[b],[c],[d] → alignment | 按 `min(l,r)` ↓、`mean` ↓、配置顺序 ↑、id ↑ 选模板 |
 | `gap.result_bundle` | gap, flush, 五个框, 三份 quality, cropStatus, alignment, fallback, 三片云 → bundle | 汇成一个 `GapResultBundle`，字段对齐旧 `QualityMetrics` |
-| `gap.business_rois` | alignment → 四个 Box2D | 业务 ROI 按 ICP 变换搬到当前样本上 |
-| `gap.fit_line` | cloud, box, refLine? → line, inliers, innerEnd | 直线拟合 + 靠缝隙一端的截取重拟合。`dirMode` 可把方向锚到 `refLine` 上（`band` 只兜底，`fixed` 一律钉死、只拟法向偏移）—— ROI 只有两三毫米宽时它自己拟出来的方向基本是噪声，还会偶尔整条歪几十度而残差很小。`minInliers` 是唯一拦得住「ROI 跑偏、照样拟出一条没意义的线」的地方 |
+| `gap.business_rois` | alignment → 四个 Box2D | 业务 ROI 按 ICP 变换搬到当前样本上：四个角点全部变换后取轴对齐包围盒。`datumSide` 决定 base ROI 用哪一侧的变换 |
+| `gap.fit_line` | cloud, box, toward, refLine? → line, inliers, innerEnd | 直线拟合 + 靠 `toward` 一端的截取重拟合（`toward` 接缝那一侧的 ROI）。`dirMode` 可把方向锚到 `refLine` 上（`band` 只兜底，`fixed` 一律钉死、只拟法向偏移）—— ROI 只有两三毫米宽时它自己拟出来的方向基本是噪声，还会偶尔整条歪几十度而残差很小。`minInliers` 是唯一拦得住「ROI 跑偏、照样拟出一条没意义的线」的地方 |
 | `gap.selected_point` | cloud, box → point | 离 ROI min 角最近的点（取自整片云） |
 | `gap.nearest_to_line` | cloud, line → point | 离基准线垂距最小的云点（`ref_type: nearest point`） |
 | `gap.fit_gap_circles` | merged, primary, secondary, boxLeft, boxRight, refLine? → 两个圆 | 圆拟合 + 重试 + 相机分开回退 + 按标称值挑候选。另有两个**逐侧**的收紧手段：`leftCamera`/`rightCamera` 把某一侧钉到单台相机（两台锁在不同界面上时，合并云里是相距一两毫米的两层点），`centerAbove`/`centerTol` 要求圆心落在 `refLine` 上方的一条窄带里（夹胶玻璃：玻璃面不成像，圆心该在 flush 线上方）|
-| `gap.flush` | baseLine, refPoint → value, segment | 段差 |
+| `gap.flush` | baseLine, refPoint → value, segment | 段差，默认带符号（`signed` 默认 true） |
 | `gap.gap` | left, right, [baseLine] → value, segment | 间隙（definition A / B） |
 | `gap.corner_vertex` | lineLeft, lineRight, [baseLine], [alignment] → vertex, gap, flush, angle | 软装夹角：两翼面直线求交，顶点相对金件顶点沿基准面分解 |
 | `gap.groove_joint` | primary, secondary → gap, flush, 四条线, groove, 三份 quality | 软装对接缝：最深点定槽心，两侧面逐相机拟合再平均，槽宽在低面下方 `gapDepth` 处量 |
@@ -94,11 +94,30 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 通道构造与 argmax 是领域约定，推理本身不是（ADR-0015）。
 
 **单位**：算子参数一律**毫米**，与 `StandardGap.yml` 一模一样；端口上流动的坐标一律是**米**，
-与点云同单位。换算在算子内部做（LyFlow 的 G4）。
+与点云同单位。换算在算子内部做。
 
-**复刻而不是修正**：ROI 只变换对角两角点仍按轴对齐解释、flush 恒为 `|d| + offset`、
-合并顺序 secondary 在前、盒裁剪四边严格开区间 —— 这些都照原样保留。
-正确性标准是与 `gap_batch_runner` 的基线逐值一致，不是「更合理」。
+### M7 起的行为
+
+这几条与 `gap_batch_runner` 的原算法有意不同，读数会跟着变：
+
+- **`gap.business_rois`**：参数 `datumSide`（`left` / `right`，默认 `left`）——
+  基准件在缝的哪一侧。决定 base ROI 用哪一侧的 ICP 变换；**不改变哪个框是 `flushBase`**。
+  ROI 变换是四个角点全部变换后取轴对齐包围盒，带旋转的对齐变换下框会变大而不是变形。
+- **`gap.roi_from_labels`**：没有 `baseSide` 参数。四个框按标签语义直接出到同名端口。
+- **`gap.fit_line`**：没有 `side` 参数，改为必接输入 `toward: Box2D`（缝那一侧的 ROI，用其中心）。
+  `innerEnd` 是内点中沿直线方向投影最靠近 `toward` 中心的那一个；截取按同一投影保留最靠近
+  `toward` 的 `segmentPoints` 个内点，与点序无关。quality 带 `segmentApplied: bool`，
+  没截取时为 false；`segmentPoints` 不小于内点数（多半不是本意）时另发一条 warn 日志，
+  `segmentPoints: 0` 表示有意不截（方向基准线就是这样），不发。
+- **`gap.fit_gap_circles`**：`leftRadiusFixed` / `rightRadiusFixed` 在所有路径上都生效，
+  包括圆心高度带约束的拟合与相机分开的回退。
+- **`gap.flush`**：`signed` 默认 true，输出带符号垂距（参考点在基准线下方为负）；
+  要绝对值显式写 `signed: false`。
+
+只依赖参数与连接关系的检查（例如 `fit_line` 的 `dirMode` 不是 `free` 却没接 `refLine`、
+`fit_gap_circles` 配了 `*CenterTol` 却没接对应参考线、半径上下限倒置）在加载期的 `validate`
+里报 `bad_param`，图根本跑不起来；依赖数据的约束看 quality 字段与 warn 日志。
+合并顺序 secondary 在前、`filter.crop_box2d` 的 `bounds: open` 仍是现状。
 
 ## 模型 ROI 路径
 
@@ -108,12 +127,10 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 `gap.roll_anchored_crop` 用两个 roll 框重新框住零件。之后与模板路径完全相同。
 
 ```powershell
-# 生成一张模型路径的图
-python packs\gap\tools\lyflow_graph_from_config.py `
-    <StandardGap.yml> --primary <Master.pcd> --secondary <Slave.pcd> `
-    --model C:\...\v12s0.onnx -o graph.lyflow.json
+# 生成一张模型路径的图（ONNX 路径按「导入器」一节的约定推导）
+lyflow import <StandardGap.yml> --kind StandardGap.yml:model -o graph.lyflow.json
 
-# 39 个样本的模型 A/B（基线是 gap_batch_runner --roi-model 那一份）
+# 历史对拍：39 个样本对 gap_batch_runner --roi-model 基线（行为已有意偏离，不一致是预期的）
 python packs\gap\tools\lyflow_ab.py --dataset <dataset.yml> `
     --baseline "$env:TEMP\lyflow-gap-baseline-model" --model C:\...\v12s0.onnx
 ```
@@ -135,14 +152,14 @@ python packs\gap\tools\lyflow_ab.py --dataset <dataset.yml> `
   这样选中四框那个节点时，框叠的是自己那片按类着色的测量帧剖面 ——
   不接的话 LyFlow 的底图规则会往上游借一片**传感器帧**的云（y≡0），
   2D 剖面俯视 XY 时它退化成一条线，框飘在别处，两者对不上。
-- 模型失败在**算子层面**不回退模板路径：一张图一条路径，失败就红框（H6）。
+- 模型失败在**算子层面**不回退模板路径：一张图一条路径，失败就红框。
   回退是调度策略不是算法 —— 它由导入器生成的 `flow.fallback` 节点表达（见下一节）。
 
 ## 导入器：StandardGap.yml → 图
 
 `lyflow import` 直接把一份 `StandardGap.yml` 转成图，不必装 Python
-（A1-7，实现在 `ops/import_standard_gap.cpp`，是 `tools/lyflow_graph_from_config.py`
-的 `build()` 的逐字移植）。三个 kind 共用同一份实现：
+（A1-7，实现在 `ops/import_standard_gap.cpp`）。`tools/lyflow_graph_from_config.py` 只为历史对拍保留，
+不跟着算子参数改动同步，生成图一律用导入器。三个 kind 共用同一份实现：
 
 | kind | 走哪条路径 |
 |---|---|
@@ -169,6 +186,17 @@ lyflow import <StandardGap.yml> --kind StandardGap.yml -o graph.lyflow.json
 
 三种 kind 产出的图都声明 `outputs: {gap, flush, bundle}`。
 
+导入器按 M7 的算子参数写图：
+
+- 每个 `gap.fit_line` 都接 `toward`：基准线与参考线接**同侧的 gap 框**，
+  方向基准线（`n_fit_datum`）接它的锚框。
+- `gap.business_rois` 写 `datumSide`（取自 `flush.base_side`）。
+- 顶层图参数（见 [graph-doc.md](../../docs/graph-doc.md)「顶层图参数」）：
+  `gapOffset` 绑定 `n_gap.offset` 与 `n_circles.offset`（备用分支只备份到基准线/参考点，
+  间隙与圆拟合节点只有这一份）；模型模式另有 `modelPath`，binds 逐个列出每个用到模型的节点
+  —— `n_infer`（`ml.onnx_run`）与黑盒对照 `n_ref`（`gap.measure_reference`）—— 不用按算子类型的通配。
+  宿主用 `--param gapOffset=0.1` 或 C ABI 的 `params_json` 传值，不再改图里的节点参数。
+
 ### `flush.base_direction`：方向锚到旁边那张长面上
 
 基准面是一道很窄的台肩时，它自己拟出来的方向基本是噪声 —— 而且会偶尔整条歪几十度，
@@ -177,7 +205,7 @@ lyflow import <StandardGap.yml> --kind StandardGap.yml -o graph.lyflow.json
 台肩外面那张长面通常有十几毫米、两百个点，方向稳得多，两张面之间的相对倾角是零件的
 固有量，量一次定下来就行。
 
-不写这一段就是不启用，`n_fit_base` 上一个方向相关的参数都不生成，图与以前逐节点相同。
+不写这一段就是不启用，`n_fit_base` 上一个方向相关的参数都不生成，取算子默认的 `free`。
 
 ```yaml
 flush:
@@ -197,7 +225,7 @@ flush:
 ```
 
 导入器由此生成三个节点：`n_datum_box`（`gap.datum_window`）→ `n_crop_datum` →
-`n_fit_datum`（`gap.fit_line`），把 `line` 接到 `n_fit_base.refLine`；模板备用分支
+`n_fit_datum`（`gap.fit_line`，`toward` 接锚框），把 `line` 接到 `n_fit_base.refLine`；模板备用分支
 有自己的一份（`b_` 前缀）。
 
 **x 锚在缝的 ROI 上，不是基准面 ROI 上。** 一开始两个都锚在基准面上，结果有几帧
@@ -227,7 +255,7 @@ gap 跟着 0.648 → 0.637（超差 7 不变）。
 ### `gap:` 下的几个非原版键
 
 原版 `StandardGap.yml` 没有这几个键，是这边为难点位加的；**不写就是不启用**，
-图与参数和以前逐位一致。
+导入器不生成对应参数，算子取默认值。
 
 | 键 | 作用 |
 |---|---|
@@ -237,7 +265,7 @@ gap 跟着 0.648 → 0.637（超差 7 不变）。
 | `gap.center_band.left_tolerance` / `right_tolerance` | 容差，**<= 0 就是不启用**。启用时只接受圆心落在这条窄带里的候选 |
 | `gap.weak_fit.left_min_arc_deg` / `right_min_arc_deg` | 这一侧内点覆盖的**圆弧角度**低于它就算没拟出来。0（默认）= 不检查。**钉了单相机时先退回合并云重拟一次**，两边都弱才算失败 |
 | `gap.weak_fit.left_min_inliers` / `right_min_inliers` | 同上，按内点数。比弧长钝：合并云重拟不一定凑得够内点，天幕 L4 上用它会掉帧，用弧长不会 |
-| `gap.center_band.left_mode` / `right_mode` | `always`（默认，一律走带约束的拟合）或 `guard`（先按原样拟，只有圆心落到带外才重来）。**「本来就拟得对、只是想上个保险」的点位该用 guard** —— 带内的帧逐位不变，挂上去不改读数 |
+| `gap.center_band.left_mode` / `right_mode` | `always`（默认，一律走带约束的拟合）或 `guard`（先按原样拟，只有圆心落到带外才重来）。**「本来就拟得对、只是想上个保险」的点位该用 guard** —— 带内的帧不重拟，读数与不挂带时相同 |
 
 窄带是在 RANSAC 里**筛候选**，不是把圆心焊到那个高度；带比真实散布还窄时合格候选
 被筛光，那一侧直接拟不出。先量一批正常帧的圆心高度再定带宽。
@@ -310,20 +338,22 @@ n_fb_quality_ref   n_fit_ref.quality         b_n_fit_ref.quality
 `n_fb_flushBase.choice` 接进 `gap.result_bundle.fallback`，回退与否与原因因此进 bundle。
 `n_bundle` 不直接接任何 `b_` 节点 —— 接了那条闭包就不再是惰性的。
 
-## 脚本
+## 历史对拍工具（`tools/`）
+
+这些脚本是把算法从 gap-inspector 迁进来时用的对拍工具。**行为已有意偏离基线**
+（见上文「M7 起的行为」），出现不一致是预期的；它们**不再是验收门槛**，
+只在想看「偏离落在哪些样本上、偏了多少」时手动跑。
 
 ```powershell
-# 从一份 StandardGap.yml 生成一张图（加 --model 就是模型路径）
+# Python 版图生成器（不跟算子参数改动同步；生成图请用 lyflow import）
 python packs\gap\tools\lyflow_graph_from_config.py `
     <StandardGap.yml> --primary <Master.pcd> --secondary <Slave.pcd> -o graph.lyflow.json
 
 # 39 个样本的 A/B：生成图 → lyflow run → 与基线 results.csv 比对
 python packs\gap\tools\lyflow_ab.py `
     --dataset <dataset.yml> --baseline <放 results.csv 的目录> [--model <onnx>]
-```
 
-```powershell
-# 逐节点等价：C++ 导入器 vs Python 生成器（六种组合，全部一致退出 0）
+# C++ 导入器 vs Python 生成器的逐节点对比
 python packs\gap\tools\compare_importer.py [--dataset <dataset.yml>]
 
 # 回退图的 A/B：lyflow import 产回退图 -> lyflow run -> 与模型基线比 gap/flush
@@ -336,28 +366,16 @@ python packs\gap\tools\ab_fallback.py `
     --break-model --only <sample_id>
 ```
 
-`compare_importer.py` 比节点集合（id + op + 参数值）与边集合，忽略 ui 坐标与 meta；
-路径参数两边形态不同是预期的（Python 写绝对路径，导入器写相对路径），比之前统一规范化成绝对路径。
-数据集里的配置目录没有 `setting.yml`，所以模型与回退两种形态用一份暂存夹具造出来 ——
-auto 的推导规则因此与 Python 生成器完全无关地被单独测到。
-
-`ab_fallback.py` 跑的是**导入器产的回退图**（`lyflow_ab.py` 跑的是 Python 生成器的图）。
-它同样为每份配置暂存一份带 `model_roi.enabled: true` 的夹具，点云不进夹具 ——
-`n_load` 与 `b_n_load` 两个读盘节点都用 `--set` 覆盖成 `source=files` 加两个绝对路径。
-它顺带统计**回退真的触发了**的样本（`n_fb_flushBase.choice == "b"` 或出现 `plan_extended`），
-与批测器基线 `diagnostics.jsonl` 里 `fallback_reason` 非空的那一份比对。
-`--break-model` 把 `n_infer.modelPath` 指到一个不存在的文件，主路径必失败，
-这时基线要换成**模板基线** —— 那是唯一能验到备用闭包数值的跑法。
-
-`lyflow_ab.py` 全部一致时退出 0，否则 1 并列出不一致的样本。
-它默认挑 `bridge/target/{release,debug}` 里**最新**的那个 `lyflow.exe` ——
-按固定顺序挑会在 release 留着旧产物时静默地把整份 A/B 跑成「算子不存在」。
-它还会顺手对一次数据目录的 `manifest.csv`（现场值，两位小数，容差 0.006 mm），
-只报不判 —— 那是另一套口径，用来回答「这条路径是不是现场跑的那条」。
-
-两条 A/B 都在 `pnpm check:gap` 里，数据与基线的位置用
-`LYFLOW_GAP_DATASET` / `LYFLOW_GAP_MODEL` / `LYFLOW_GAP_BASELINE` /
-`LYFLOW_GAP_BASELINE_MODEL` 覆盖；数据集不在就跳过 A/B 只跑门禁。
+- `compare_importer.py` 比节点集合（id + op + 参数值）与边集合，忽略 ui 坐标与 meta。
+  导入器按 M7 的参数写图而 Python 生成器没有，两边不再逐节点相同。
+- `ab_fallback.py` 跑的是**导入器产的回退图**，为每份配置暂存一份带
+  `model_roi.enabled: true` 的夹具，`n_load` / `b_n_load` 用 `--set` 覆盖成 `source=files`
+  加两个绝对路径；它顺带统计回退真的触发了的样本（`n_fb_flushBase.choice == "b"`
+  或出现 `plan_extended`）。`--break-model` 是唯一能跑到备用闭包数值的跑法，这时基线要换成模板基线。
+- `lyflow_ab.py` 默认挑 `bridge/target/{release,debug}` 里**最新**的那个 `lyflow.exe`，
+  并顺手对一次数据目录的 `manifest.csv`（现场值，两位小数），只报不判。
+- 数据与基线的位置用 `LYFLOW_GAP_DATASET` / `LYFLOW_GAP_MODEL` / `LYFLOW_GAP_BASELINE` /
+  `LYFLOW_GAP_BASELINE_MODEL` 给。
 
 ## 不做
 

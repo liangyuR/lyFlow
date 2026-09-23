@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""从 StandardGap.yml 生成一张 LyFlow 图（G6）。
+"""从 StandardGap.yml 生成一张 LyFlow 图。
 
 用法：
   python lyflow_graph_from_config.py <StandardGap.yml> <point_dir> -o graph.lyflow.json
@@ -7,9 +7,12 @@
   python lyflow_graph_from_config.py <StandardGap.yml> ... --model v12s0.onnx -o g.json
 
 不带 --model 是配置/模板 + ICP 路径；带 --model 是现场在用的模型 ROI 路径
-（无模板、无 ICP，多一个跟随零件的裁剪窗，H5）。
+（无模板、无 ICP，多一个跟随零件的裁剪窗）。
 六十多个参数手填必错，所以图是生成的；生成之后照样能在 LyFlow 里改。
-参数一律毫米（G4），与 YAML 里一模一样，不用心算。
+参数一律毫米，与 YAML 里一模一样，不用心算。
+
+现行的生成方式是 `lyflow import`（C++ 导入器）。这份脚本只为历史对拍工具
+（lyflow_ab.py / compare_importer.py）保留，没有跟 M7 的算子参数改动同步。
 """
 from __future__ import annotations
 
@@ -24,8 +27,8 @@ import yaml
 # LyFlow 的 localId 允许的字符（见 schema/graph-doc.schema.json）
 SAFE = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
 
-# 这条路径上不支持的几何类型。计划 §6 明确不做。
-# nearest point 不在这一行里：数据集里有 5 个样本用它，见 docs/gap-acceptance.md「偏离与决策」。
+# 这条路径上不支持的几何类型，见 packs/gap/README.md「不做」。
+# nearest point 不在这一行里：数据集里有 5 个样本用它（gap.nearest_to_line）。
 UNSUPPORTED_TYPES = {"2-points line", "circle tangent"}
 
 # 裁剪一律走标准算子的开区间（原 gap.crop_box 的语义，已删）
@@ -161,7 +164,7 @@ def build(config_path: Path, args) -> dict:
         if not filter_cfg.get("using_removal", False):
             return source, source_port
         flt = g.node("n_filter", "filter.radius_outlier", {
-            # LyFlow 内置算子用米，这里替用户换算（G4）
+            # LyFlow 内置算子用米，这里替用户换算
             "radius": float(filter_cfg.get("filter_radius", 0.0)) / 1000.0,
             "minNeighbors": int(filter_cfg.get("filter_neighbors", 0)),
         }, column, row, "半径离群")
@@ -248,7 +251,7 @@ def build(config_path: Path, args) -> dict:
             g.edge(overall, "box", crop, "box")
         crop_p_port = crop_s_port = "cloud"
 
-        # 合并（secondary 在前，G8）+ 半径离群
+        # 合并（secondary 在前）+ 半径离群
         merge = g.node("n_merge", "util.merge", None, 4, 1, "合并（secondary 在前）")
         g.edge(crop_s, "cloud", merge, "a")
         g.edge(crop_p, "cloud", merge, "b")
@@ -436,7 +439,7 @@ def build(config_path: Path, args) -> dict:
     g.edge(cloud_s, "cloud", bundle, "cloudSecondary")
     g.edge(merged, merged_port, bundle, "cloudMerged")
 
-    # -- 旁路：黑盒对照（G5）---------------------------------------------------
+    # -- 旁路：黑盒对照 ---------------------------------------------------
     ref_params = {
         "configPath": str(config_path),
         "deriveTemplateDir": False,

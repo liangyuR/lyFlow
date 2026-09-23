@@ -81,7 +81,7 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 | 工具 | 输入 | 底下是什么 | 返回 |
 |---|---|---|---|
 | `list_operators` | `pack?` `category?` `query?` | `GET /lyflow/manifest`（进程内缓存，`core-info.generation` 变了才重拉） | `{count, total, operators:[{id,label,category,pack?,doc}]}`，`doc` 只有第一句 |
-| `get_operator` | `id` | 同上 | 全量 `OperatorDesc`，**含 `preconditions`**；找不到时 `{error, nearest:[三个最接近的 id]}` |
+| `get_operator` | `id` | 同上 | 全量 `OperatorDesc`（含每个参数的 `doc` 与端口契约）；找不到时 `{error, nearest:[三个最接近的 id]}` |
 | `list_port_types` | — | 同上 | `{types:[…]}` |
 | `validate_graph` | `graph \| graphPath` `baseDir?` | `POST /lyflow/validate` | `{diagnostics:[…], ok}` |
 | `plan_graph` | 同上 + `targets?` | `POST /lyflow/plan` | `{plan:[{nodeId,cacheKey,cached,level,upstreamMissing,bypass,lazy,demandedBy}]}`，`lazy` = 只被惰性端口依赖、主路径成功时不跑 |

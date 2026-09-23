@@ -9,7 +9,7 @@ include/lyflow/       公共头。零 PCL（ADR-0005），算子作者只需要�
   operator.h          ParamView / Inputs / Outputs / ExecContext / ComputeFn
   manifest.h          算子描述的数据结构，序列化成 operator-manifest.json
   status.h            结构化诊断（paramPath / portName）+ Status::Demand（ADR-0016）
-  c_api.h             C ABI v9 —— DLL 只导出这里的东西
+  c_api.h             C ABI v10 —— DLL 只导出这里的东西
   client.hpp          嵌入宿主用的 header-only 封装，只依赖 c_api.h（docs/embedding.md）
 src/exec/             parse → expand → validate → compile(Plan) → execute + ResultStore
   subgraph.cpp        子图展开成平图（ADR-0010）；library.cpp 扫描库目录
@@ -37,15 +37,15 @@ M2 以来完全一致；它同时导出 `lyflow_pcl_support`，别的包要 PCL 
 （[ADR-0015](../docs/adr/0015-algorithms-live-in-lyflow-packs.md)）。前者不在 vcpkg 里，
 构建前跑一次 `scripts/fetch-onnxruntime.ps1` 备到 `third_party/onnxruntime/`（已 gitignore），
 或者设 `LYFLOW_ONNXRUNTIME_ROOT` 指向已有的一份；缺了 CMake 会直接 FATAL 并打印这条命令。
-后者一条 `C:cpkgcpkg.exe install yaml-cpp:x64-windows` 就够，而且只有
+后者一条 `C:\vcpkg\vcpkg.exe install yaml-cpp:x64-windows` 就够，而且只有
 `LYFLOW_PACKS=gap` 时才需要。
 
 依赖准备（一台新机器上从零开始）：
 
 ```powershell
-C:cpkgcpkg.exe install pcl:x64-windows                  # 标准点云包
+C:\vcpkg\vcpkg.exe install pcl:x64-windows                  # 标准点云包
 powershell -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1  # std-ml
-C:cpkgcpkg.exe install yaml-cpp:x64-windows             # 只有 gap 包要
+C:\vcpkg\vcpkg.exe install yaml-cpp:x64-windows             # 只有 gap 包要
 ```
 
 M0/M1 时期这里写着「零第三方依赖是有意的」。M2 引入 PCL 之后那句话失效了三个

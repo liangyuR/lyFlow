@@ -1,5 +1,7 @@
 # 阶段 B：xyz-gap-inspector 切换到 LyFlow
 
+> **M7 起的现状**：gap 包的正确性不再以「复现原算法的每一位输出」为标准（`docs/m7-plan.md` J1/J3），行为已有意偏离基线。下文以 39 样本 A/B、194 车回放「逐值一致」、导入器与 Python 生成器「逐节点等价」为门槛的条目不再成立；业务侧切换的验收口径要另定（M7 不涉及宿主仓库，J11）。
+
 上游设计：[gap-inspector-integration-design.md](gap-inspector-integration-design.md) §3、§4；依赖阶段 A 的产物：
 C ABI v7 与 `client.hpp`（[phase-a1-acceptance.md](phase-a1-acceptance.md)）、`@lyflow/editor` 与 HTTP 传输契约（[http-transport.md](http-transport.md)）。
 工作在 `D:\project\xyz-gap-inspector` 的新分支 `lyflow-integration`（从 `release/2.1.0` 切出，`lyflow-ops` 已合入其中）。**不双轨**：同一分支上完成切换与删除，完成后以 PR 合入 `release/2.1.0`。用户已确认：标定 `calibrateWithCylinder` 保留在业务仓库。

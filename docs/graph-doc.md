@@ -60,6 +60,7 @@ React Flow 的 `Node` / `Edge` 只是渲染时的派生产物。
     "cloud": { "node": "n_voxel", "port": "cloud" }
   },
 
+  "params": {},        // 顶层图参数，见下面「顶层图参数」
   "groups": [],        // 预留：节点分组框
   "subgraphs": {},     // 复合算子定义，见下面「子图」
   "x": {}              // 扩展位：未知字段容器，保证向前兼容
@@ -135,6 +136,48 @@ JSON Schema： [`schema/graph-doc.schema.json`](../schema/graph-doc.schema.json)
 **Esc** 或面包屑出来；内部节点的参数右键可以「提升为子图参数」；
 子图节点右键可以「保存到库」。
 
+### 顶层图参数（M7）
+
+「本来就是全局」的值（间隙补偿量、模型路径）要有唯一的定义处，宿主按名字传值，而不是改 JSON 里某几个节点的参数。
+GraphDoc 顶层可选 `params`：
+
+```jsonc
+"params": {
+  "gapOffset": {
+    "type": "float",                               // 可选，manifest 参数类型名
+    "default": 0.0,                                // 必填，不传值时用它
+    "binds": ["n_gap.offset", "n_circles.offset"], // 必填，<节点id>.<参数名>
+    "doc": "间隙读数补偿，mm"                        // 可选
+  },
+  "modelPath": { "default": "models/v12s0.onnx", "binds": ["n_infer.modelPath"] }
+}
+```
+
+- `binds` 的每一项是 `节点id.参数名`，按**最后一个** `.` 切（节点 id 本身可以含 `.`）。
+  目标是顶层节点；可以是子图实例节点，这时参数名是该子图声明的提升参数。
+- 语义与子图的 `params[].binds` 相同：**展开期**把取值写进被绑定的节点参数。
+  所以 cacheKey、`lyflow plan`、`lyflow params` 自动反映它 —— 改一个顶层参数，
+  只有被绑定的节点及其下游的 cacheKey 会变。
+- 运行期取值：CLI `run` / `validate` / `plan` / `params` / `eval` / `patch` 用
+  `--param <名字>=<json>`（值先按 JSON 解析，解析不了当字符串，与 `--set` 同一条规则）；
+  C ABI 用 `lyflow_run_options.params_json`（见 [embedding.md](embedding.md)）。不传就用 `default`。
+- `lyflow params` 里被顶层参数写入的那一行 `source` 是 `graph`，另带 `graphParam: "<名字>"`。
+
+规则（前三条是 validate 诊断，图跑不起来）：
+
+| 情形 | 报什么 |
+|---|---|
+| bind 指向不存在的节点或参数 | `unknown_bind` |
+| 被绑定的参数在节点的 `params` 里又显式写了值 | `param_conflict`（一处定义） |
+| 同一个目标被两个顶层参数绑定 | `param_conflict` |
+| `--param` 给了未声明的名字 | `unknown_param`，CLI 退出码 4 |
+| `--set` 命中被绑定的参数 | 报错，CLI 退出码 4，提示改用 `--param` |
+
+`eval` 原本就有 `--param <节点>.<参数>=<start>:<end>:<steps>` 扫描轴，两者按 `=` 左边**是否含 `.`**
+区分：含 `.` 是扫描轴，不含是顶层参数。
+
+编辑器目前只**原样保留**顶层 `params`（读写往返不丢），编辑界面留给 M8。
+
 ### `ui` 可以整体丢弃
 
 后端处理时直接忽略 `ui`。反过来，一个没有 `ui` 的 GraphDoc（比如脚本生成的）也必须能被前端打开——
@@ -165,6 +208,6 @@ M4 起还有 `composeSubgraph`、`dissolveSubgraph`、`promoteParam`），
 |---|---|---|
 | 前端 | 连线时 / 输入时 | 手感。挡掉明显错误，即时反馈 |
 | Rust | 反序列化时 | 结构完整性。字段类型、引用存在性、无悬空边 |
-| C++ | 执行前 | 权威。类型系统、参数范围、环检测、资源可行性 |
+| C++ | 执行前 | 权威。类型系统、参数范围、环检测、资源可行性、顶层参数绑定、算子的 `validate` 钩子 |
 
 三层都要做。前端那层可以被绕过，后两层不能省。

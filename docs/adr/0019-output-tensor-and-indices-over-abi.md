@@ -11,7 +11,7 @@
 
 剩下两个**根本取不出来**：
 
-- `Tensor`：`Data::valueJson` 只写 shape、count、min/max/mean，张量本身从不进 IPC（ADR-0015 的 T7）。
+- `Tensor`：`Data::valueJson` 只写 shape、count、min/max/mean，张量本身从不进 IPC（ADR-0015）。
 - `Indices`：声明上走二进制通道，但 `ResultStore::previewCloud` 一上来就 `data.asCloud()`，
   对 Indices 返回 false —— 通道从来没接上过。
 

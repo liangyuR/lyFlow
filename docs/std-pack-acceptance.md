@@ -48,7 +48,7 @@ pnpm check; pnpm e2e; pnpm tauri build; pnpm e2e:packaged
 # 4. 带 gap 包
 $env:LYFLOW_OP_PACKS = "D:\project\xyz-gap-inspector\lyflow"
 pnpm check
-# 两条 A/B 见 docs/gap-acceptance.md「复现命令（第二部分）」第 2、3 步
+# 两条 A/B 的复现命令见当时的 gap 集成验收记录（M7 已删除）
 ```
 
 ---
@@ -195,8 +195,8 @@ gap 的 ops 里没有一处 `#include "ops/pcl/..."`，所以没有 include 要�
 最大 |Δ| = 2.75261 mm（KUN10_HXMK2A128TA237796_L3_8 gap）
 ```
 
-两条都与 [gap-acceptance.md](gap-acceptance.md) §8「最终数字」逐字相同 ——
-模板路径的现场值 0/31 是既有结论（现场跑的不是模板路径，见那份文档的 §7），
+两条都与当时的 gap 集成验收记录（M7 已删除）里「最终数字」逐字相同 ——
+模板路径的现场值 0/31 是既有结论（现场跑的不是模板路径，见同一份记录），
 不是本次改动引入的。
 
 **通过。**
@@ -353,6 +353,6 @@ filter_random_sample.cpp   （外加 core 自己的 16 个 TU）
   纯重命名（`R`），只有 6 个 PCL 算子 + adapter + pcl_path 有内容改动，
   且都只是 include 路径（`ops/pcl/xxx.h` → `lyflow_pcl/xxx.h`、`ops/ops.h` → `ops.h`）。
 - 没有改 `scripts/e2e`、CLI 测试、schema 样例、图生成器 —— S5 成立的直接证据。
-- `cargo test` 的已知并发不稳定（gap-acceptance.md 偏离第 8 条）本轮没有复现，
+- `cargo test` 的已知并发不稳定（当时 gap 集成验收记录的偏离第 8 条，该记录 M7 已删除）本轮没有复现，
   也没有去动它。**其后已修**：`--no-cache` 与那个 `plan_graph` 测试都不再调
   进程级的 `lyflow_cache_clear()`，改用 run 级的 `no_reuse`（C ABI v6）。

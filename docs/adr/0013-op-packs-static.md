@@ -4,7 +4,7 @@
 
 ## 背景
 
-要把 `xyz-gap-inspector` 的间隙/段差测量主路径接进 LyFlow（[gap-integration-plan.md](../gap-integration-plan.md)）。
+要把 `xyz-gap-inspector` 的间隙/段差测量主路径接进 LyFlow。
 那些算子要直接调用领域仓库的 `xyz_gap_core.lib` / `xyz_gap_io.lib`，参数与语义都属于那个领域，
 放进 LyFlow 的 `core/src/ops/` 只会把一个通用工具变成某个产线的专用件。
 
@@ -57,7 +57,7 @@ $env:LYFLOW_OP_PACKS="D:\project\xyz-gap-inspector\lyflow"; pnpm check   # 带�
 
 **六种 2D 载荷进了 core 而不是包里。** `Box2D` / `Line2D` / `Circle2D` / `Point2D` /
 `Measurement` / `Record` 是通用的（任何量测领域都要画 ROI 框、报一个带判定的数值），
-放进包里的话前端就没法在不知道包的前提下叠画它们（G7）。
+放进包里的话前端就没法在不知道包的前提下叠画它们。
 真正属于领域的结构（比如 `GapAlignment`）走 `Record`：带类型标签的 JSON，
 加一个领域结构不用改 core。
 

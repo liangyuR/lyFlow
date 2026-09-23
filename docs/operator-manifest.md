@@ -15,13 +15,6 @@ C++ 侧算子注册表导出的机器可读描述。前端据此生成节点搜�
   "keywords": ["downsample", "降采样", "体素"],
   "doc": "用体素栅格对点云降采样，每个体素保留质心。",
 
-  // 本算子成立的前提与明确不适用的情形。给使用者与 Agent 看，Inspector 在 doc 下方
-  // 以「适用前提」列出。没什么可写的就不出现这一项。写法见 docs/op-packs.md。
-  "preconditions": [
-    "每个体素只留质心，原始点被丢弃；后续要逐点强度或法线的算子得接在它前面。",
-    "叶子尺寸接近点间距时等于没降采样，远大于特征尺度时会把特征一起抹平。"
-  ],
-
   "inputs": [
     { "name": "cloud", "type": "PointCloud", "label": "Cloud", "required": true }
   ],
@@ -182,6 +175,24 @@ V1 的规则刻意简单：
 - **`example`** 是一份样例值（任意 JSON），**不参与任何校验**。Record 端口只有一个
   `type` 字串的话，「`data.inlierCount` 到底存不存在」得翻算子实现才知道。
   前端在端口详情里把它做成可展开的一块。
+
+## 加载期校验（`validate`，M7）
+
+manifest 里**没有**这一项：它是 `OperatorDesc` 上可选的 C++ 函数指针，前端与 Agent 看到的是它产出的诊断。
+
+```cpp
+using ValidateFn = std::vector<lyflow::Issue> (*)(const lyflow::ParamView& params,
+                                                  const std::set<std::string>& connectedInputs);
+// Issue = { Severity severity; Status status; }，status.code 通常是 bad_param，
+// paramPath / portName 用来定位
+```
+
+- **纯函数**：只看解析后的参数（已合并默认值与绑定值）和已连接的输入端口名集合，**不给任何数据**。
+- `buildPlan` 在参数解析与连边之后对每个节点调用。**error** 进 `Phase::Validate` 诊断并使该节点无效
+  （plan 被阻断，`lyflow validate` 非零退出）；**warning** 出现在 `lyflow validate` 的诊断数组里
+  （`severity: "warning"`），运行时走 warn 日志通道。
+- 只依赖参数与连接关系的检查写在这里，`compute` 里不再保留副本；依赖数据的约束用运行期信号
+  （quality 字段 / warn 日志 / 错误值）；用法说明写进 `doc` 或参数的 `doc`。写法见 [op-packs.md](op-packs.md)「约束写在哪里」。
 
 ## 导入器（阶段 A）
 

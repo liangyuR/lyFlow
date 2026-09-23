@@ -20,7 +20,7 @@ fallback 的多点位调参，见 §来源）。
 | 「模板分支每帧白跑 3 次 ICP」判断错误，翻源码才知 `b` 是 lazy | manifest 端口**已有** `lazy` 字段；`plan` 输出与编辑器没显示 | `plan` 标惰性、编辑器虚线 |
 | Record 端口按 `data.inlierCount` 取到 None，翻实现才知形状 | Record 只有 `type` 字串 | 端口 `example` |
 | 「同一张图跑 N 组输入」循环写了六遍 | **M5 `eval` 已做**，缺的是每样本吐 P0 对象 | 并进 P0 |
-| 空槽 bug：「1280 槽」不变量散在三处散文里，2327 项失败后才 grep 到 | `preconditions` 是给人读的字串 | **端口契约**，第一帧报错 |
+| 空槽 bug：「1280 槽」不变量散在三处散文里，2327 项失败后才 grep 到 | `preconditions` 是给人读的字串（该字段已由 M7 J4 撤销） | **端口契约**，第一帧报错 |
 
 ---
 
@@ -89,7 +89,7 @@ manifest 端口：`"contract": { "elementCount": { "eq": 1280 }, "finite": true 
 执行器在输入绑定时检查（bypass 与 Error 值透传不检查），违反 → 该节点 `error`，code `contract_violation`，
 `message` 带期望与实际，`portName` 指向端口。summary 的 `contractViolations` 汇总。
 gap 包：`gap.profile_tensor.primary` 声明 `elementCount.eq = 1280` 与 `finite: true`（空槽 bug 的不变量）；
-其余算子读 `preconditions` 里已有的数值不变量，能写成四种之一的都写上。
+其余算子读 `preconditions` 里已有的数值不变量，能写成四种之一的都写上。（`preconditions` 字段已由 M7 J4 撤销：约束改为加载期 validate 或运行期信号。）
 编辑器：Inspector 在端口 doc 旁显示契约。
 
 ## 4. `lyflow patch`

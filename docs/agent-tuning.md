@@ -5,20 +5,19 @@
 Python 脚本，其中解析器、批跑器、统计各一份，合成位移验证三版里两版给出错误结论且不报错。
 这份文档把那些脚本换成六条命令，并且把两个最容易踩空的判断写在前面。
 
-## 1. 先读 `preconditions`，再看图
+## 1. 先读算子，再看图
 
 ```bash
 lyflow manifest | jq '.operators[] | select(.id=="gap.notch_width")
-                      | {doc, preconditions, params: [.params[].name]}'
+                      | {doc, params: [.params[] | {name, doc}]}'
 ```
 
-`doc` 回答「这个算子干什么」，`params[].doc` 回答「这个旋钮是什么」，
-**`preconditions` 回答「什么时候它整个不该用」** —— 后者才是改图时真正要的东西，
-它不在自由文本里，是一个结构化数组，可以直接过滤。
+`doc` 回答「这个算子干什么、什么时候不该用它」，`params[].doc` 回答「这个旋钮是什么、什么时候该动它」。
+图里的参数值只告诉你「上一个人选了什么」，这两处才告诉你「他为什么不能选别的」。
 
-先读算子、再读图。图里的参数值只告诉你「上一个人选了什么」，
-`preconditions` 才告诉你「他为什么不能选别的」。
-遇到读数不对，第一件事是逐条核对这张图有没有踩到某条前提，而不是先去扫参数。
+算子的约束不靠你去读：只依赖参数与连接关系的，`lyflow validate` 直接报 `bad_param`（带 `paramPath`
+与 `portName`）；依赖数据的，看节点 quality 里的字段与 warn 日志。遇到读数不对，先看这两处，
+而不是先去扫参数。
 
 ## 2. `validate` 先于 `run`
 
@@ -156,15 +155,20 @@ GraphDoc 是稀疏存储，只存改过的键（`docs/graph-doc.md`）。所以�
 
 ```bash
 lyflow params g.lyflow.json [--node <id>]... [--only explicit|default|bound] \
-              [--set <节点>.<参数>=<json>]... [--base-dir <dir>] [--json]
+              [--set <节点>.<参数>=<json>]... [--param <名字>=<json>]... [--base-dir <dir>] [--json]
 ```
 
 每行 `{ node, op, param, value, source, unit?, min?, max? }`；不带 `--json` 是对齐过的表格，
-带 `--json` 是一行一个对象。`source` 三种：
+带 `--json` 是一行一个对象。`source` 四种：
 
 - `default`：图里没写这个键，值来自 manifest 的默认值。
 - `explicit`：图里写了。
 - `bound`：子图提升参数灌进来的（ADR-0010）。
+- `graph`：顶层图参数灌进来的（[graph-doc.md](graph-doc.md)「顶层图参数」），该行另带
+  `graphParam: "<名字>"`。
+
+被顶层参数绑定的节点参数不能用 `--set` 改（报错，退出码 4，提示改用 `--param`）——
+改 `--param <名字>=<json>`，一处取值同时写进它绑定的所有节点。
 
 **这个 join 由 core 做**（`lyflow_effective_params`），不是 CLI 自己重算一遍默认值合并、类型
 规整、参数迁移 —— 桥接层若自己重算，迟早会和执行器真正用的那份漂开，漂开的表现是「参数明明
@@ -257,7 +261,7 @@ Measurement 自动拆包（`outputs.gap` 直接是个数），bool 按 0/1（`ou
 **先看 `ok/n` 与 `failCodes`，再看 `std`。**
 `std` 只统计成功的那些样本：一组参数把 7 帧算失败了，剩下 19 帧当然更整齐 ——
 成功率低的组 std 好看是**陷阱**，不是优势。比较两组参数前先确认它们的 `ok` 数相当；
-不相当就先解释那几个 `failCodes`，它们通常在告诉你这组参数踩到了某条 `preconditions`。
+不相当就先解释那几个 `failCodes`，它们通常在告诉你这组参数让某个算子的假设不成立了。
 
 ## 4. `perturb`：std 小不等于测对了缝
 
@@ -366,8 +370,8 @@ MCP 落在返回值的 `samplesPath`（**全量**，不受 `failuresLimit` 影�
 ## 6. 最短命令序列
 
 ```bash
-# 1. 这个算子什么时候不成立
-lyflow manifest | jq '.operators[] | select(.id=="gap.notch_width") | .preconditions'
+# 1. 这个算子干什么、什么时候不成立
+lyflow manifest | jq '.operators[] | select(.id=="gap.notch_width") | .doc'
 
 # 2. 图能不能跑，一帧长什么样
 lyflow validate g.lyflow.json && lyflow run g.lyflow.json --outputs --set n_load.source=files \
@@ -409,7 +413,7 @@ lyflow eval g.lyflow.json \
 
 | 上面用的命令 | MCP 工具 | 差别 |
 |---|---|---|
-| `lyflow manifest` + `jq '.operators[] \| select(…)'` | `list_operators` → `get_operator` | 列表一行一个算子，详情含 `preconditions` |
+| `lyflow manifest` + `jq '.operators[] \| select(…)'` | `list_operators` → `get_operator` | 列表一行一个算子，详情含参数 `doc` 与端口契约 |
 | `lyflow manifest` 里的 `types` | `list_port_types` | — |
 | `lyflow validate <g>` | `validate_graph` | 图可以给路径，也可以内联 |
 | `lyflow plan <g>` | `plan_graph` | — |

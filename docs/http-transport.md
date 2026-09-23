@@ -2,10 +2,11 @@
 
 `@lyflow/editor` 的 `HttpTransport` 与后端之间的协议。**阶段 B 的业务服务照这一份实现。**
 
-一句话：`Transport` 接口的每个方法对着 C ABI v9 的一个入口，这里再对着一个 REST 端点。
+一句话：`Transport` 接口的每个方法对着 C ABI v10 的一个入口，这里再对着一个 REST 端点。
 三方一一对应，见下面的对照表。v7 的 ABI 清单在 [phase-a1-acceptance.md](phase-a1-acceptance.md#c-abi-v7-的最终签名清单)，
 v8 加的两个取数入口见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)，
 v9 加的 `lyflow_run_summary` 见 [ADR-0022](adr/0022-run-summary-as-core-output.md)。
+v10 在 `lyflow_run_options` 末尾加的 `params_json`（顶层图参数取值）见 [embedding.md](embedding.md#顶层图参数)。
 
 - **基址**：构造时给的 `baseUrl`，例如 `http://127.0.0.1:8787`。所有路径都挂在 `/lyflow/` 下。
 - **编码**：请求体与响应体都是 `application/json; charset=utf-8`，

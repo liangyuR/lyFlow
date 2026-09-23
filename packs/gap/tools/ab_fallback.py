@@ -8,6 +8,10 @@
 与 `lyflow_ab.py` 的区别：图不是 Python 生成器产的，而是 C++ 导入器产的**回退图**
 （模型 ROI 主路径 + `b_` 前缀的模板备用闭包，见 packs/gap/README.md）。
 
+**历史对拍工具。** M7 起 gap 包的行为已有意偏离基线（ROI 四角点变换、fit_line 的 toward、
+固定半径全路径生效、flush 默认带符号等），出现不一致是预期的；它不再是验收门槛，
+只用来看偏离落在哪些样本上、偏了多少。
+
 `lyflow import` 只拿 (文本, baseDir)，所以每份配置先暂存一份夹具：
 `<out>/stage/<key>/` 里放 StandardGap.yml、模板目录，以及一份
 `model_roi.enabled: true` 的 setting.yml。点云不进夹具 —— 两个 load 节点

@@ -139,12 +139,13 @@ stderr 给人看。退出码：`0` 成功、`1` 校验失败、`2` 执行失败�
 
 ```bash
 lyflow run      graph.lyflow.json [--to nodeId]... [--set nodeId.param=<json>]...
+                                  [--param name=<json>]...
                                   [--base-dir d] [--parallel n] [--no-cache]
                                   [--preview] [--preview-points n]
 lyflow validate graph.lyflow.json
 lyflow plan     graph.lyflow.json [--to nodeId]...
 lyflow params   graph.lyflow.json [--node nodeId]... [--only explicit|default|bound]
-                                  [--set nodeId.param=<json>]... [--json]
+                                  [--set nodeId.param=<json>]... [--param name=<json>]... [--json]
 lyflow migrate  graph.lyflow.json [--write]
 lyflow manifest [--check]
 lyflow dump     graph.lyflow.json nodeId:port out.pcd [--format binary|ascii|binary_compressed]
@@ -181,6 +182,9 @@ lyflow run demo.lyflow.json | jq -r 'select(.kind=="node_state" and .state=="don
 
 # 覆盖一个参数再跑（路径与界面里参数右键的「复制路径名」一致）
 lyflow run demo.lyflow.json --set n_voxel.leafSize='[0.02,0.02,0.02]'
+
+# 给顶层图参数取值（图顶层 params 里声明的名字；run/validate/plan/params/eval/patch 都认）
+lyflow run gap.lyflow.json --param gapOffset=0.12
 
 # 这张图相对默认值改了哪些参数（GraphDoc 是稀疏存储，join 由 core 做）
 lyflow params demo.lyflow.json --only explicit --json \

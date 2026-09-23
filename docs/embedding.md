@@ -7,10 +7,13 @@
 只依赖同目录的 `lyflow/c_api.h`，不 include 任何 core 内部头，也不链接任何库 ——
 core 是运行时加载的 DLL（[ADR-0004](adr/0004-core-as-dll.md)）。
 
-契约版本是 **C ABI v9**（[ADR-0022](adr/0022-run-summary-as-core-output.md)；
+契约版本是 **C ABI v10**（v9 的 run summary 见 [ADR-0022](adr/0022-run-summary-as-core-output.md)；
 v8 的张量与下标入口见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)）。
 `lyflow::kClientAbiVersion` 与 core 的 `LYFLOW_ABI_VERSION` 必须一致；对不上时
 `Client` 的构造函数会抛 `ClientError`，而不是等到某次调用才崩。
+
+v10 在 `lyflow_run_options` 末尾加了 `const char* params_json`：顶层图参数的取值，
+见下面「[顶层图参数](#顶层图参数)」。
 
 v9 加的那一个入口是 `lyflow_run_summary(runId)`：一次运行的结构化收尾。
 `RunResult::summary` 就是它的原文，`RunHandle::runSummary()` 也能单独取。
@@ -91,6 +94,24 @@ if (!result.ok()) { /* result.diagnostics 里是 warn/error 级别的日志 */ }
 
 `Client` 不解析 JSON。SDK 里引一个 JSON 库会和宿主自己那份撞版本，
 而宿主必然已经有一个。事件与输出都以原始文本交出去。
+
+## 顶层图参数
+
+图在顶层声明了 `params`（[graph-doc.md](graph-doc.md)「顶层图参数」）时，宿主按名字传值，
+不改图 JSON 里的节点参数：
+
+```cpp
+lyflow::RunOptions options;
+options.setParamsJson(R"({"gapOffset": 0.12, "modelPath": "D:/models/v12s0.onnx"})");
+lyflow::RunResult result = client.run(graphJson, options);
+```
+
+- C ABI：`lyflow_run_options.params_json`，一个 JSON 对象 `{名字: 值}`；NULL 或空串 = 不覆盖，全用图里的 `default`。
+- C++：`lyflow::RunOptions`（`client.hpp`）的字段 `std::string paramsJson`，
+  或链式的 `RunOptions& setParamsJson(std::string json)`。
+- 图没声明的名字 → 这次运行的校验阶段报 `unknown_param`，一个节点都不跑。
+- 值在展开期写进被绑定的节点参数，所以缓存键跟着变：改一个顶层参数，只有它绑定的节点及其下游会重算。
+- CLI 的对应物是 `--param <名字>=<json>`，同一张图、同一组值，两边结果一致。
 
 ## 取点云
 
@@ -229,7 +250,11 @@ use lyflow_client::{Core, RunSpec};
 let core = Core::load_from(Path::new("D:/lyflow-runtime/bin/lyflow_core.dll"))?;
 core.self_check().map_err(|e| /* 算子描述不干净，拒绝启动 */ e)?;
 
-assert_eq!(lyflow_client::ABI_VERSION, 9); // 与 core 的 LYFLOW_ABI_VERSION 对齐
+assert_eq!(lyflow_client::ABI_VERSION, 10); // 与 core 的 LYFLOW_ABI_VERSION 对齐
+
+// 顶层图参数：RunSpec 的 params_json: Option<&str>，或链式的 with_params_json
+let spec = RunSpec::new(&graph_json, &run_id, &base_dir, &[])
+    .with_params_json(r#"{"gapOffset": 0.12}"#);
 ```
 
 `ABI_VERSION` 与 C++ 侧的 `lyflow::kClientAbiVersion` 是同一个数。轮廓 / 点云的运行时注入、

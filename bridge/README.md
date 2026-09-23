@@ -181,6 +181,22 @@ clamp**，否则一个一亿元素的张量会一次性 400 MB 过 IPC。上限�
   再改名成 `mainBinaryName`。包名叫 `lyflow` 的话，它会把 CLI 改名盖到桌面壳头上，
   而且只在打包路径上暴露（`pnpm e2e` 走 `cargo run`，永远碰不到）。
 
+## 顶层图参数（`--param`）
+
+`run` / `validate` / `plan` / `params` / `eval` / `patch` 都认 `--param <名字>=<json>`，
+给图顶层 `params` 里声明的参数取值（[graph-doc.md](../docs/graph-doc.md)「顶层图参数」）。
+值先按 JSON 解析，解析不了当字符串，与 `--set` 同一条规则；与 C ABI 的 `params_json` 结果一致。
+
+```bash
+lyflow run g.lyflow.json --param gapOffset=0.12 --param modelPath=D:/models/v12s0.onnx --summary
+```
+
+- 图没声明的名字 → `unknown_param`，退出码 4。
+- `--set` 命中被顶层参数绑定的节点参数 → 报错，退出码 4，提示改用 `--param`。
+- `lyflow params` 里这类参数的 `source` 是 `graph`，另带 `graphParam: "<名字>"`。
+- `eval` 另有 `--param <node>.<param>=<start>:<end>:<steps>` 扫描轴：按 `=` 左边**是否含 `.`**
+  区分，含 `.` 是扫描轴，不含是顶层参数。
+
 ## 批量评估（`lyflow eval`）
 
 `src/eval.rs`。一条命令把「一组样本 × 一组参数 → 任意标量指标 → 内建统计」跑完，
@@ -189,6 +205,7 @@ clamp**，否则一个一亿元素的张量会一次性 400 MB 过 IPC。上限�
 ```
 lyflow eval <graph> <样本集>
                     [--params <paramsets.json>] [--param <node>.<param>=<start>:<end>:<steps>]...
+                    [--param <名字>=<json>]...
                     --metric <path> [--metric <path>]...
                     [--holdout <tag>=<value>] [--group-by <tag>]
                     [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--no-cache] [--set ...]
@@ -245,7 +262,8 @@ lyflow eval 4.lyflow.json --samples-dir kun10/sensor --sample-subdir 4 \
 
 ```
 lyflow patch <graph> [--remove-node <id|glob>]... [--add-node <json>]... [--rewire <from>=<to>]...
-                     [--set <node>.<param>=<json>]... [--dry-run] [-o <out>] [--json] [--base-dir <dir>]
+                     [--set <node>.<param>=<json>]... [--param <名字>=<json>]...
+                     [--dry-run] [-o <out>] [--json] [--base-dir <dir>]
 ```
 
 ```bash

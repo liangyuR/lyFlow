@@ -76,16 +76,21 @@ DEFAULT 在 `lyflow_op_pack()` 里声明，而包的 cmake 往往要先找依赖
 缺 onnxruntime 时 CMake 直接 FATAL 并打印那条命令。**不静默跳过** ——
 一个「悄悄少了一个算子」的构建比一个报错的构建贵得多。
 
-## 逐位一致怎么保住
+## 与原算法的关系
 
-gap 的两条 A/B（模板路径、模型路径）39/39 且 |Δ| = 0 是硬约束。三条做法：
+算法源码迁入 `std-pointcloud` 之后，gap 包的正确性**不再以与原算法数值相同为标准**：
+M7 起一批算子的行为已有意偏离原算法（ROI 四角点变换、`fit_line` 的截取方向、
+固定半径在所有路径上生效、flush 默认带符号等，见 `packs/gap/README.md`）。
+正确性由包内 doctest 与样本集上的读数评审来定，不由对拍来定。
 
-- **点类型不换。** `lyflow_std_algo` 的 2D 算法一律吃 `pcl::PointCloud<pcl::PointXYZRGB>`，
-  与 gap 原来那份同一个类型；换成 `PointXYZ` 就要重新证明一遍。
-- **PCL 调用逐字对应。** `fitLine2D` / `fitCircle2D` 里的 RANSAC 迭代次数、
-  `random=false`、`setOptimizeCoefficients`、双迹线的伴线搜索、定半径最小二乘重定圆心，
-  全部照抄；参数外露，但默认值就是原值。
-- **推理线程数默认 1**（intra 与 inter 都是），归约顺序固定。
+迁移时留下的几条做法仍然是现状，但不再是约束：
+
+- `lyflow_std_algo` 的 2D 算法吃 `pcl::PointCloud<pcl::PointXYZRGB>`。
+- `fitLine2D` / `fitCircle2D` 的 RANSAC 参数外露，默认值取自原算法（`random=false` 等）。
+- 推理线程数默认 1（intra 与 inter 都是），归约顺序固定，同输入可复现。
+
+`packs/gap/tools/` 下的 A/B 对拍脚本保留，作为**历史对拍工具**：用来看偏离了多少、
+偏在哪几个样本上，不是验收门槛。
 
 ## 后果
 
@@ -93,8 +98,8 @@ gap 的两条 A/B（模板路径、模型路径）39/39 且 |Δ| = 0 是硬约�
 - ✅ `packs/gap/algo/` 里没有直线/圆拟合、ICP、盒裁剪的实现，只有领域逻辑
   （双迹线截取、端点、距离与求值、roll 裁剪窗、掩膜精修、框推导、`MeasurementEngine`）。
 - ✅ 纯平台开发者（`LYFLOW_STD_PACKS=0`）与只要点云的开发者都不受影响。
-- ❌ **同一份算法暂时有两份拷贝**：LyFlow 的 `packs/gap/algo/` 与 gap-inspector 的
-  `src/`。业务仓库接入 LyFlow 之前不能删那一份，这段时间要靠 A/B 兜住漂移。
+- ❌ **同一份算法有两份拷贝**：LyFlow 的 `packs/gap/algo/` 与 gap-inspector 的
+  `src/`。两边已各自演进，行为不再相同；业务仓库接入 LyFlow 之后那一份才能删。
 - ❌ 图上多了两个节点（ONNX 三步），生成器与 e2e 断言跟着改了一处。
 - ❌ `packs/` 之间有了顺序依赖（谁定义 `lyflow_std_algo`、谁解析
   `LYFLOW_ONNXRUNTIME_ROOT`），core 的 CMake 里因此有一小段显式的优先级列表。

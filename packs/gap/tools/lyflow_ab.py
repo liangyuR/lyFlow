@@ -4,9 +4,13 @@
   python lyflow_ab.py --dataset <dataset.yml> --baseline <baseline_dir> [--lyflow lyflow.exe]
   python lyflow_ab.py --dataset <...> --baseline <...\\lyflow-gap-baseline-model> --model v12s0.onnx
 
-不带 --model 比的是配置/模板路径，带 --model 比的是现场在用的模型 ROI 路径（H5）。
+不带 --model 比的是配置/模板路径，带 --model 比的是现场在用的模型 ROI 路径。
 
-比三件事（计划 §5 / §10）：
+**历史对拍工具。** M7 起 gap 包的行为已有意偏离基线（ROI 四角点变换、fit_line 的 toward、
+固定半径全路径生效、flush 默认带符号等），出现不一致是预期的；它不再是验收门槛，
+只用来看偏离落在哪些样本上、偏了多少。
+
+比三件事：
   1. 成功/失败状态一致
   2. 成功样本的 gap、flush 与基线 |Δ| ≤ 0.002 mm
   3. 同一张图里 gap.measure_reference 与拆分算子之差 ≤ 0.002 mm

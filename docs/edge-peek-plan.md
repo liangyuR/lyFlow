@@ -236,7 +236,7 @@ interface PeekWindow {
 | `Any` | 按运行时类型走；没跑过 → 「未运行」 | — |
 
 2D 几何视图必须带底图云：只画一个 `Box2D` 的空白框，看不出它压在剖面的哪里 —— 这正是
-Viewer3D 接 gap 时踩过的那条（`docs/gap-acceptance.md §7`）。
+Viewer3D 接 gap 时踩过的那条（底图规则见 [interaction-checklist.md](interaction-checklist.md) 第 30 项）。
 
 ### 4.4 张量布局推断
 

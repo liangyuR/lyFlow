@@ -30,7 +30,7 @@ core 本身只有 `gen.synthetic` 与 `util.reroute` 两个算子，不链接任
 
 ```powershell
 $env:LYFLOW_PACKS = "gap"
-pnpm check          # 或 pnpm check:gap，它还会跑两条 A/B
+pnpm check          # 或 pnpm check:gap
 ```
 
 领域包默认关，是因为纯平台开发者不该为一个领域包装 yaml-cpp
@@ -218,33 +218,64 @@ op.outputs = {
 
 （静音节点是唯一的例外：`bypass` 的节点找不到可透传的源时输出是空的，报错留给下游。）
 
-## 适用前提（`preconditions`）
+## 约束写在哪里
 
-`OperatorDesc::preconditions` 是一串一句话的短句，写**本算子成立的前提与明确不适用的情形**。
-它不是参数说明的第二遍 —— 参数说明回答「这个旋钮是什么」，`preconditions` 回答
-「什么时候这个算子整个不该用」。它出现在 manifest 里，Inspector 在 doc 下方以「适用前提」列出，
-Agent 可以按它过滤算子，而不必在自由文本的 doc 里找关键词。
+算子的约束只有三个去处，**不写成给人读的散文**：
+
+| 约束依赖什么 | 写在哪 | 什么时候报 |
+|---|---|---|
+| 只依赖参数与连接关系（「`dirMode` 不是 `free` 就必须接 `refLine`」「半径上限不能小于下限」） | `OperatorDesc::validate` | 加载期，`buildPlan` 里，图根本跑不起来 |
+| 数据到达端口时就能核对的数值不变量（点数、有限性、张量形状、Record 类型） | 端口 `contract`（下一节） | 输入绑定时，第一帧 |
+| 依赖数据内容的（弧太短、内点太少、截取没生效） | 运行期信号：quality 字段、warn 日志、错误值 | 运行期，每帧 |
+
+用法说明（「这个旋钮什么时候该开」「有哪个更合适的替代算子」）写进 `op.doc` 或对应参数的 `doc`。
+
+### 加载期校验（`validate`）
+
+`OperatorDesc` 上可选的 C++ 函数指针，不进 manifest JSON：
 
 ```cpp
-op.preconditions = {
-    "假定缝底有一条比两侧面都深的槽；缝闭合、两圆边直接相碰时不适用（用 gap.notch_width）。",
-    "gapDepth 必须落在两侧圆角之下、槽底之上：太浅会咬到圆角把槽读宽，太深会把槽读窄。",
+using ValidateFn = std::vector<lyflow::Issue> (*)(const lyflow::ParamView& params,
+                                                  const std::set<std::string>& connectedInputs);
+
+struct Issue {            // lyflow/status.h
+  Severity severity;      // Error / Warning
+  Status status;          // code 通常是 bad_param；paramPath / portName 用来定位
 };
 ```
 
-写法：
+它是**纯函数**，只看两样东西：解析后的参数（已合并默认值与绑定值，包括子图提升参数与顶层图参数
+写进来的值）和已连接的输入端口名集合。**不给任何数据** —— 点云、上游输出一概拿不到；
+需要看数据才能判断的，就不属于这里。
 
-- 每个算子 1~3 条，每条一句话，能据源码核实。
-- 写「它默认了什么」（假定两侧各有一段可拟合的直线）、「什么时候它不成立」
-  （缝闭合时没有那条槽）、「有哪个更合适的替代算子」。
-- 不写参数的取值范围、不写实现细节、不重复 `doc` 里已有的一整段。
-- 实在没有可写的就不填，这一项在 manifest 里不出现。
+```cpp
+std::vector<lyflow::Issue> validateFitLine(const lyflow::ParamView& params,
+                                           const std::set<std::string>& connected) {
+  std::vector<lyflow::Issue> issues;
+  if (params.choice("dirMode") != "free" && connected.count("refLine") == 0) {
+    issues.push_back(lyflow::Issue::error("bad_param", "dirMode 不是 free 时必须接 refLine",
+                                          "dirMode", "refLine"));
+  }
+  return issues;
+}
+
+op.validate = &validateFitLine;
+```
+
+`buildPlan` 在参数解析与连边之后对每个节点调用它：
+
+- **error** 进 `Phase::Validate` 的诊断，该节点无效，plan 被阻断 —— `lyflow validate` 非零退出，
+  `lyflow run` 在任何节点开始执行之前就失败。`phase` 由 `buildPlan` 统一写成 `validate`，钩子里写什么都不算数。
+- **warning** 出现在 `lyflow validate` 的诊断数组里（`severity: "warning"`），运行时走 warn 日志通道，
+  不阻断执行。
+
+规矩：**只依赖参数与连接关系的检查写在 `validate` 里，`compute` 里不再保留一份副本。**
+两处判断同一个错误，迟早会不一致。
 
 ## 端口契约
 
-`preconditions` 是给人读的字串，运行时不拦任何东西。有一类前提不一样：它是一个能在**数据到达
-端口的那一刻**就核对的数值不变量 —— 「这必须是 1280 个点」「这个张量必须全是有限值」。这类前提
-写进端口的 `contract`（[ADR-0024](adr/0024-port-contracts-four-kinds.md)），第一帧违反就报，
+有一类约束是一个能在**数据到达端口的那一刻**就核对的数值不变量 ——
+「这必须是 1280 个点」「这个张量必须全是有限值」。这类约束写进端口的 `contract`（[ADR-0024](adr/0024-port-contracts-four-kinds.md)），第一帧违反就报，
 不用等到下游某个算子因为形状不对而拟合失败，再倒回来 grep 是谁定的这条规矩。
 
 只有四种键，四行例子：
@@ -258,10 +289,10 @@ op.preconditions = {
 
 `elementCount` 可以写 `{ "min": n }` / `{ "max": n }` / 两者都写，但不能跟 `eq` 混用。
 
-什么时候该写：**能写成这四种之一的数值不变量就写**（点数、有限性、张量形状、Record 类型）；
-写不成的留在 `preconditions` 里 —— 那是「什么场景下这个算子的假设不成立」这类判断性的前提，
-两者互补，不是谁取代谁。判断标准很直接：这条前提能不能在值到达端口的那一刻，不看语义地、
-只用一个数字或一个布尔值核对完？能就是契约，不能就还是 `preconditions`。
+什么时候该写：**能写成这四种之一的数值不变量就写**（点数、有限性、张量形状、Record 类型）。
+判断标准很直接：这条约束能不能在值到达端口的那一刻，不看语义地、只用一个数字或一个布尔值核对完？
+能就是契约；只看参数与连接关系就能判的是 `validate`；都不是的，做成运行期信号（quality 字段、
+warn 日志或错误值）。
 
 C++ 侧的写法（`core/include/lyflow/manifest.h` 里的辅助函数，因为 `Port` 是聚合初始化、
 尾部字段要么全填要么不填，这两个函数省得每个算子都重写前面几个 `false`/`0`）：
@@ -341,8 +372,8 @@ $env:LYFLOW_PACKS="gap"; pnpm check             # 带仓库内默认关闭的包
 $env:LYFLOW_OP_PACKS="…\mypack"; pnpm check     # 带外部包
 ```
 
-`pnpm check:gap` 是 gap 包的完整门禁：`LYFLOW_PACKS=gap` 的 `pnpm check`
-外加两条 A/B（模板路径、模型路径），见 `packs/gap/README.md`。
+`pnpm check:gap` 是 gap 包的门禁：`LYFLOW_PACKS=gap` 的 `pnpm check`。
+`packs/gap/tools/` 下的 A/B 是历史对拍工具，不是门禁，见 `packs/gap/README.md`。
 
 不带外部包那一遍是「包机制没有改变通用侧行为」的唯一证据。
 另有一条更强的，改了包机制本身时值得跑：

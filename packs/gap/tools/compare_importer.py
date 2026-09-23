@@ -6,6 +6,10 @@
 比节点集合（id + op + 参数值）与边集合（from/to 的节点与端口），
 忽略 ui 坐标、meta、图的 id / name。
 
+**历史对拍工具。** M7 起 C++ 导入器按新的算子参数生成图（fit_line 接 toward、
+business_rois 写 datumSide、顶层参数 gapOffset / modelPath），Python 生成器没有跟着改，
+两边不再逐节点相同；它不再是验收门槛。
+
 路径参数两边形态不同是预期的（Python 写绝对路径，导入器写相对 baseDir 的相对路径），
 比较时统一规范化成绝对路径再比。
 

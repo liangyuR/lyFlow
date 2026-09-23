@@ -42,7 +42,7 @@
 | G5 | 统计内建：n、成功数、失败码直方图、mean、std、min、max、p2p、按 `tags` 分组；**`--holdout <tag>` 把带该 tag 的样本排除在参数选择之外但照样报数** | 留出是方法论底线；切法由人定，工具只负责把两组数分开报 |
 | G6 | 扰动 = **图手术 + eval**：新标准算子 `edit.translate_region`（cloud, 半空间或盒选区, 平移量）插在源节点之后，`lyflow perturb` 对平移量做轴扫描并报 `d(指标)/d(位移)` 与预期对照 | 不写 900 个 PCD；算子本身在编辑器里可单独用来「模拟缝张开」 |
 | G7 | 选区只做**几何选区**（半空间 `{point, normal}` 与盒）；「最深点 + 偏置」这类领域规则不进平台，由调用方或 gap 包算出选区后传入 | 问卷里两版切错都出在领域判断，平台把「切在哪」显式化、可审计，而不是替人猜 |
-| G8 | manifest 加可选 `preconditions: string[]`；gap 包 26 个算子**全部填**，Inspector 在 doc 下方列出 | 「什么时候它不成立」比参数列表值钱；结构化字段让 Agent 能过滤，而不是在 doc 里找关键词 |
+| G8 | manifest 加可选 `preconditions: string[]`；gap 包 26 个算子**全部填**，Inspector 在 doc 下方列出（**M7 J4 已撤销**：preconditions 字段删除，约束改为加载期 validate 或运行期信号） | 「什么时候它不成立」比参数列表值钱；结构化字段让 Agent 能过滤，而不是在 doc 里找关键词 |
 | G9 | `stats` 加 `outputsAvailable: bool`；`skipped` 不改名 | cached/bypassed/provided 为 true，not_demanded 为 false；改名是破坏性变更，收益不够 |
 | G10 | 算子没写声明过的输出端口：错误码从 `internal` 改为 `output_not_written`，消息带端口名与「`Port.required` 只对输入有效」；写进 `docs/op-packs.md` | 一次编译往返换十行 |
 | G11 | `gap.load_profile_pair` 加 `layout: sensor \| profile` 参数，默认 `sensor` | 1938 个文件的手工转换是产品历史债，在读入口解决一次 |
@@ -87,7 +87,7 @@ lyflow perturb <graph> --after <node>:<port> --region <json> --axis <x|y|z>=<sta
 
 ## 3. manifest 与事件的小改
 
-- schema：`OperatorDesc.preconditions?: string[]`；`stats.outputsAvailable: boolean`。两份 example 与 `scripts/validate_schema.py` 跟着改。
+- schema：`OperatorDesc.preconditions?: string[]`（M7 J4 已撤销）；`stats.outputsAvailable: boolean`。两份 example 与 `scripts/validate_schema.py` 跟着改。
 - core：填 `outputsAvailable`；`output_not_written` 错误码。
 - gap 包：26 个算子填 `preconditions`（`groove_joint`：「假定缝底有一条比两侧面都深的槽；缝闭合、两圆边直接相碰时不适用」；
   `selected_point`：「在整片输入云上选点，不裁 ROI」；`fit_line`：「`innerEnd` 取靠缝一端」……以问卷第 7、10 题为清单起点）；

@@ -213,7 +213,7 @@ C ABI 升到 v5：加了 `lyflow_set_library_dirs` / `lyflow_library_count` / `l
   `LYFLOW_STD_PACKS=0` 与默认之间来回切时咬人。
 - `lyflow_output_save` / CLI `lyflow dump` 依赖标准包装进来的写盘钩子。
   纯平台构建里它们返回 `unsupported` —— 这是设计，但错误信息是运行期才看到的。
-- ~~`cargo test` 偶发 `NoSuchOutput`（gap-acceptance.md 偏离第 8 条）~~ **已修**：
+- ~~`cargo test` 偶发 `NoSuchOutput`~~ **已修**：
   「不吃缓存」从进程级的 `lyflow_cache_clear()` 降成 run 级的
   `lyflow_run_options.no_reuse`（C ABI 升 v6），不再连累并行跑着的别的测试。
   同批修掉第二个同族根因：换代 DLL 的落地名加了 pid，
@@ -225,14 +225,13 @@ gap 领域包从 `xyz-gap-inspector/lyflow/` 搬进本仓库的 `packs/gap/`，�
 其中通用的那部分（直线/圆拟合、2D ICP、盒裁剪）进 `packs/std-pointcloud/algo/`，
 经新的 INTERFACE 目标 `lyflow_std_algo` 导出；ONNX 推理拆出独立的
 `packs/std-ml`（`ml.onnx_run`），core 新增端口类型 `Tensor`。
-见 [ADR-0015](adr/0015-algorithms-live-in-lyflow-packs.md) 与
-[gap-pack-migration-acceptance.md](gap-pack-migration-acceptance.md)。
+见 [ADR-0015](adr/0015-algorithms-live-in-lyflow-packs.md)。
 
 包因此有了 `DEFAULT ON|OFF`：领域包默认不编，`LYFLOW_PACKS=gap` 打开。
 
 **已知毛刺**：
-- **同一份算法暂时有两份拷贝**：`packs/gap/algo/` 与 `xyz-gap-inspector/src/`。
-  业务仓库接入 LyFlow 之前不能删那一份，这段时间靠两条 A/B 兜住漂移。
+- **同一份算法有两份拷贝**：`packs/gap/algo/` 与 `xyz-gap-inspector/src/`。
+  两边已各自演进（M7 起 gap 包有意偏离原算法），业务仓库接入 LyFlow 之后那一份才能删。
 - `packs/*` 之间有了顺序依赖（谁定义 `lyflow_std_algo`、谁解析
   `LYFLOW_ONNXRUNTIME_ROOT`），core 的 CMakeLists 里因此有一小段显式的优先级列表。
   再加一个提供公共目标的包时要记得改它。
@@ -248,7 +247,8 @@ gap 领域包从 `xyz-gap-inspector/lyflow/` 搬进本仓库的 `packs/gap/`，�
 过程中不用自己写解析器、批跑器或评估脚本。范围来自一次真实任务的复盘（12 个 Python 脚本里
 至少一半是重复劳动，两版合成位移脚本给出错误结论还不报错）。
 
-- [x] manifest 加 `preconditions`，gap 包 26 个算子全部填；事件加 `outputsAvailable`；
+- [x] ~~manifest 加 `preconditions`，gap 包 26 个算子全部填~~（M7 J4 已撤销：字段删除，
+      约束改为加载期 `validate` 或运行期信号）；事件加 `outputsAvailable`；
       新错误码 `output_not_written`
 - [x] `lyflow eval`：样本集 × 参数组 → **值路径**指标 → 内建统计（含 `--holdout` / `--group-by`）；
       `sweep` 改成它的一层壳
@@ -327,6 +327,16 @@ Agent，不用自己重建「这次 run 到底发生了什么」，也不用手�
       在仓库外独立复现任务）这次还没有针对 M6 的新功能重做一遍。
 - [ ] **业务仓库（xyz-gap-inspector）那一侧没有动**（m6-plan §6：`ApplyParameterPatches` 改成
       硬失败、`LyFlowMeasurer` 改读 summary），按计划是单独一个 PR。
+
+## M7 — 去掉复刻约束，把散文变成校验
+
+计划见 [m7-plan.md](m7-plan.md)。目标：**gap 包不再以「与原算法数值相同」为正确性标准；
+算子的约束要么是加载期校验，要么是运行期信号。**
+
+- [ ] manifest 删除 `preconditions`；`OperatorDesc` 加可选 `validate` 钩子（加载期、纯参数与连接关系）
+- [ ] 顶层图参数：GraphDoc `params`，CLI `--param`，C ABI v10 `params_json`，`lyflow params` 的 `source: graph`
+- [ ] gap 算子修正：`business_rois.datumSide` 与四角点变换、`fit_line.toward`、固定半径全路径生效、
+      `flush.signed` 默认 true；导入器跟着改并生成 `gapOffset` / `modelPath`
 
 ## M5 之后 — 外延（只列方向，动工前再写计划）
 
