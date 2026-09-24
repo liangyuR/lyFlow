@@ -10,14 +10,25 @@
     },
     "extra.lyflow-recipe.json": {
       "schemaValid": true,
-      "blocking": 1,
+      "blocking": 2,
       "items": [
+        {
+          "kind": "extra",
+          "param": "constructor",
+          "fix": {
+            "action": "delete"
+          },
+          "message": "图里没有图参数 constructor（改名或删掉了？）",
+          "fixLabel": "删除这个值"
+        },
         {
           "kind": "extra",
           "param": "voxelSize",
           "fix": {
             "action": "delete"
-          }
+          },
+          "message": "图里没有图参数 voxelSize（改名或删掉了？）",
+          "fixLabel": "删除这个值"
         }
       ]
     },
@@ -30,7 +41,9 @@
           "param": "cutField",
           "fix": {
             "action": "delete"
-          }
+          },
+          "message": "应当是选项里的字符串，实际是 2",
+          "fixLabel": "删除这个值（用基础）"
         },
         {
           "kind": "type",
@@ -38,14 +51,18 @@
           "fix": {
             "action": "set",
             "value": 5
-          }
+          },
+          "message": "应当是数字，实际是 \"7\"",
+          "fixLabel": "改为 5"
         },
         {
           "kind": "type",
           "param": "gain",
           "fix": {
             "action": "delete"
-          }
+          },
+          "message": "应当是数字，实际是 \"abc\"",
+          "fixLabel": "删除这个值（用基础）"
         },
         {
           "kind": "type",
@@ -57,7 +74,9 @@
               0.05,
               0.05
             ]
-          }
+          },
+          "message": "应当是 3 个数的数组，实际是 0.05",
+          "fixLabel": "改为 [0.05,0.05,0.05]"
         },
         {
           "kind": "type",
@@ -65,21 +84,27 @@
           "fix": {
             "action": "set",
             "value": 30000
-          }
+          },
+          "message": "应当是整数，实际是 \"30000\"",
+          "fixLabel": "改为 30000"
         },
         {
           "kind": "type",
           "param": "pose",
           "fix": {
             "action": "delete"
-          }
+          },
+          "message": "应当是 16 个数的数组，实际是 [1,2,3]",
+          "fixLabel": "删除这个值（用基础）"
         },
         {
           "kind": "type",
           "param": "response",
           "fix": {
             "action": "delete"
-          }
+          },
+          "message": "曲线的格式不对：应当是 {\"points\": [[x, y], …], \"interp\": …} 这样的对象",
+          "fixLabel": "删除这个值（用基础）"
         },
         {
           "kind": "type",
@@ -87,7 +112,9 @@
           "fix": {
             "action": "set",
             "value": "42"
-          }
+          },
+          "message": "应当是字符串，实际是 42",
+          "fixLabel": "改为 \"42\""
         },
         {
           "kind": "type",
@@ -99,7 +126,9 @@
               0.5019607843137255,
               0
             ]
-          }
+          },
+          "message": "应当是 3 或 4 个数（RGB / RGBA）的数组，实际是 \"#ff8000\"",
+          "fixLabel": "改为 [1,0.5019607843137255,0]"
         },
         {
           "kind": "type",
@@ -107,7 +136,9 @@
           "fix": {
             "action": "set",
             "value": true
-          }
+          },
+          "message": "应当是 true / false，实际是 1",
+          "fixLabel": "改为 true"
         }
       ]
     },
@@ -120,7 +151,9 @@
           "param": "cutField",
           "fix": {
             "action": "delete"
-          }
+          },
+          "message": "'w' 不在选项里（x / y / z / intensity）",
+          "fixLabel": "改为默认（删除这条覆盖）"
         },
         {
           "kind": "range",
@@ -128,7 +161,9 @@
           "fix": {
             "action": "set",
             "value": 5
-          }
+          },
+          "message": "不能大于 5",
+          "fixLabel": "夹到限位：5"
         },
         {
           "kind": "range",
@@ -140,7 +175,9 @@
               10,
               0.0001
             ]
-          }
+          },
+          "message": "第 2 个分量不能大于 10",
+          "fixLabel": "夹到限位：[0.02,10,0.0001]"
         },
         {
           "kind": "range",
@@ -148,7 +185,9 @@
           "fix": {
             "action": "set",
             "value": 1
-          }
+          },
+          "message": "不能小于 1",
+          "fixLabel": "夹到限位：1"
         },
         {
           "kind": "range",
@@ -172,7 +211,9 @@
               ],
               "interp": "smooth"
             }
-          }
+          },
+          "message": "第 2 个控制点的 y 不能大于 1",
+          "fixLabel": "夹到限位：{\"points\":[[0,0],[0.5,1],[1,1]],\"interp\":\"smo…"
         },
         {
           "kind": "range",
@@ -184,7 +225,9 @@
               0.5,
               0
             ]
-          }
+          },
+          "message": "第 1 个分量不能大于 1",
+          "fixLabel": "夹到限位：[1,0.5,0]"
         }
       ]
     },
@@ -197,7 +240,9 @@
           "param": null,
           "fix": {
             "action": "rebase"
-          }
+          },
+          "message": "图 id 不同（配方记的是 01JSOMEOTHERGRAPH000000000）；图参数的规格（名字、类型、限位、options）与写配方时不同。不阻止运行，值照常逐个检查",
+          "fixLabel": "按当前图更新记录"
         }
       ]
     },
@@ -210,7 +255,9 @@
           "param": null,
           "fix": {
             "action": "rebase"
-          }
+          },
+          "message": "文件里没有记录图的 id 与规格摘要，不知道它是对着哪张图写的",
+          "fixLabel": "记成当前图"
         }
       ]
     }

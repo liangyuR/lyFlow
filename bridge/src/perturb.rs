@@ -202,6 +202,7 @@ pub(crate) fn displacement_param_sets(node: &str, index: usize, values: &[f64]) 
                     "translation".to_string(),
                     json!([t[0], t[1], t[2]]),
                 )],
+                graph: Vec::new(),
             }
         })
         .collect()
@@ -446,7 +447,7 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             return EXIT_FAILED;
         }
     };
-    let mut loaded = match load_graph(parsed, &path) {
+    let mut loaded = match load_graph(parsed, &path, err) {
         Ok(l) => l,
         Err(e) => {
             line(err, &e);
@@ -482,6 +483,7 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let engine = Engine {
         core: &core,
         base: &loaded,
+        pinned: &[],
         metrics: &metrics,
         param_sets: &param_sets,
         samples: &samples,

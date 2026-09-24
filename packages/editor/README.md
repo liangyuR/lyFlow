@@ -448,6 +448,20 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
 - **窗口桥**：`window.__lyflow.recipes`（`loaded` / `importFrom` / `exportTo` / `specDigest` / `autosave` / `restoreAutosave`）
   与 `snapshot().recipe`（当前配方、取值、配方集合、合并后的脏标记）。
 
+## 配方的 CLI / MCP / 宿主一侧（param-recipe P4）
+
+编辑器之外按配方跑的三条路（CLI `--recipe`、MCP 的 `recipe` 与 `list_recipes`、宿主按名字切换）见
+[docs/recipe.md](../../docs/recipe.md) §8–§10 与 [docs/embedding.md](../../docs/embedding.md)「按名字切换配方」，验收记录在
+[docs/param-recipe-p4-acceptance.md](../../docs/param-recipe-p4-acceptance.md)。编辑器这边的改动：
+
+- **`lib/recipes.ts` 与 Rust 的 `bridge/src/recipe.rs` 是同一套规则的两份实现**，共享夹具 `schema/fixtures/recipes/expected.json`
+  现在连每一条的 `message` / `fixLabel` 都钉住（`test/recipes.test.mjs` 与 `cargo test recipe` 逐字比）。改文案要两边一起改、
+  重算夹具。P4 对着 docs/recipe.md 修了一处：`recipeReport` 只认 `doc.params` 自己的键（原来 `constructor`、`toString` 这类名字
+  会从原型链上摸到一个「图参数」而不报多出），`withValue` 取基础时同样。另把「应当是 3 个数 的数组」多出来的空格去掉。
+- **工具栏在 1280–1440 宽下不再截断图名**：`styles.editor.css` 末尾的 1440 断点收窄间距与按钮内边距、撤销 / 重做只留箭头
+  （`.toolbar__label` 里的字隐藏，按钮有 `aria-label`）、文件名收起（图名框的 `title` 是路径）；图名框 `data-testid="doc-name"`，
+  至少放下 8 个汉字、有富余长到 180 px；再挤先收运行区右侧的状态字。DOM 与既有选择器都没变。
+
 ## 层级（子图）
 
 `ui.path` 是当前所在的子图栈（`{ nodeId, subgraphId }[]`），**纯导航状态**：

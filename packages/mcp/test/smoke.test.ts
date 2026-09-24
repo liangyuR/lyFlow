@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -189,6 +189,194 @@ test(
         assert.ok(stat && Number.isFinite(stat.mean), `${axis} 的统计不对：${JSON.stringify(stat)}`);
       }
       assert.equal((summary["head"] as unknown[]).length, Math.min(3, pointCount));
+    } finally {
+      await client?.close().catch(() => undefined);
+      server?.kill();
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
+  },
+);
+
+/** 配方（param-recipe P4.2 / 验收 28）用的图：count 绑 gen.pointCount，leaf 绑 voxel.leafSize。 */
+const RECIPE_DOC = {
+  schemaVersion: 1,
+  id: "mcp-recipe-smoke",
+  name: "mcp 配方冒烟",
+  params: {
+    count: { type: "int", default: 5000, binds: ["gen.pointCount"], min: 1, max: 100000 },
+    leaf: { type: "vec3f", default: [0.02, 0.02, 0.02], binds: ["voxel.leafSize"], min: 0.001, max: 1 },
+  },
+  nodes: [
+    { id: "gen", op: "gen.synthetic", params: { seed: 11 } },
+    { id: "voxel", op: "filter.voxel_grid" },
+  ],
+  edges: [{ id: "e1", from: { node: "gen", port: "cloud" }, to: { node: "voxel", port: "cloud" } }],
+  outputs: { thinned: { node: "voxel", port: "cloud" } },
+};
+
+function cliJsonLines(args: string[]): { code: number; lines: Record<string, unknown>[] } {
+  const r = spawnSync(CLI, args, { encoding: "utf8" });
+  const lines = (r.stdout ?? "")
+    .split(/\r?\n/)
+    .filter((l) => l.startsWith("{"))
+    .map((l) => JSON.parse(l) as Record<string, unknown>);
+  return { code: r.status ?? -1, lines };
+}
+
+test(
+  "配方：list_recipes → run_graph recipe（与 lyflow run --recipe 结果一致）→ 失配的配方被拦 → get_params recipe",
+  { skip: reason, timeout: 180000 },
+  async () => {
+    const port = await freePort();
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "lyflow-mcp-recipe-"));
+    const graphFile = path.join(workspace, "配方冒烟.lyflow.json");
+    fs.writeFileSync(graphFile, JSON.stringify(RECIPE_DOC, null, 2), "utf8");
+    // 图的规格摘要问 CLI 要（算法只有 Rust 与编辑器两份，这里不写第三份）
+    const probe = cliJsonLines(["recipes", graphFile, "--json"]);
+    const digest = probe.lines.find((l) => l["kind"] === "recipe_dir")?.["specDigest"];
+    assert.match(String(digest), /^sha256:[0-9a-f]{64}$/);
+    const dir = path.join(workspace, "配方冒烟.recipes");
+    fs.mkdirSync(dir);
+    const writeRecipe = (name: string, values: Record<string, unknown>): string => {
+      const file = path.join(dir, `${name}.lyflow-recipe.json`);
+      const body = {
+        schemaVersion: 1,
+        name,
+        graph: { id: RECIPE_DOC.id, specDigest: digest },
+        values,
+        updatedAt: "2026-09-25T00:00:00.000Z",
+      };
+      fs.writeFileSync(file, JSON.stringify(body, null, 2), "utf8");
+      return file;
+    };
+    const fileA = writeRecipe("车型A", { count: 3000, leaf: [0.05, 0.05, 0.05] });
+    writeRecipe("坏", { count: 0, nope: 1 });
+    fs.writeFileSync(
+      path.join(dir, "index.json"),
+      JSON.stringify({ default: "车型A", order: ["车型A", "坏"] }),
+      "utf8",
+    );
+
+    let server: ChildProcess | null = null;
+    let client: Client | null = null;
+    try {
+      server = spawn(
+        process.execPath,
+        [TEST_SERVER, "--port", String(port), "--root", workspace, "--cli", CLI],
+        { stdio: ["ignore", "pipe", "pipe"] },
+      );
+      server.stderr?.setEncoding("utf8");
+      server.stderr?.on("data", (c: string) => process.stderr.write(`[test-server] ${c}`));
+      await waitFor(`http://127.0.0.1:${port}/lyflow/manifest`, 90000);
+      const transport = new StdioClientTransport({
+        command: process.execPath,
+        args: [ENTRY as string],
+        env: {
+          ...(process.env as Record<string, string>),
+          LYFLOW_HTTP_BASE: `http://127.0.0.1:${port}`,
+          LYFLOW_CLI: CLI,
+        },
+        stderr: "inherit",
+      });
+      client = new Client({ name: "smoke-recipe", version: "0.0.0" });
+      await client.connect(transport);
+
+      const listed = payload(
+        await client.callTool({ name: "list_recipes", arguments: { graphPath: graphFile } }),
+      );
+      assert.equal(listed["count"], 2, JSON.stringify(listed));
+      assert.equal(listed["default"], "车型A");
+      const recipes = listed["recipes"] as {
+        name: string;
+        file: string;
+        default: boolean;
+        values: number;
+        runnable: boolean;
+        mismatches: Record<string, number>;
+        items: { kind: string; param: string | null; fixLabel: string }[];
+      }[];
+      assert.deepEqual(
+        recipes.map((r) => r.name),
+        ["车型A", "坏"],
+      );
+      assert.equal(recipes[0]?.runnable, true);
+      assert.equal(recipes[0]?.default, true);
+      assert.deepEqual(recipes[0]?.items, []);
+      assert.equal(recipes[1]?.runnable, false);
+      assert.deepEqual(recipes[1]?.mismatches, { extra: 1, type: 0, range: 1, spec: 0 });
+      assert.deepEqual(
+        recipes[1]?.items.map((m) => [m.kind, m.param, m.fixLabel]),
+        [
+          ["range", "count", "夹到限位：1"],
+          ["extra", "nope", "删除这个值"],
+        ],
+      );
+
+      // 按配方 A 跑：取值经信封的 params 交给后端；与 CLI 的 run --recipe 是同一个结果
+      const run = payload(
+        await client.callTool({
+          name: "run_graph",
+          arguments: { graphPath: graphFile, recipe: recipes[0]?.file },
+        }),
+      );
+      assert.equal(run["status"], "ok", JSON.stringify(run));
+      assert.deepEqual(run["recipe"], { name: "车型A", file: fileA, values: 2 });
+      const outputsOf = async (nodeId: string) =>
+        payload(
+          await client!.callTool({
+            name: "get_node_outputs",
+            arguments: { runId: run["runId"], nodeId },
+          }),
+        )["outputs"] as { port: string; elementCount?: number }[];
+      const genPorts = await outputsOf("gen");
+      assert.equal(genPorts.find((p) => p.port === "cloud")?.elementCount, 3000, JSON.stringify(genPorts));
+      const viaMcp = (await outputsOf("voxel")).find((p) => p.port === "cloud")?.elementCount;
+
+      const direct = cliJsonLines(["run", graphFile, "--recipe", fileA, "--outputs"]);
+      assert.equal(direct.code, 0);
+      const cliOutputs = direct.lines[direct.lines.length - 1] as Record<string, { elementCount?: number }>;
+      assert.equal(viaMcp, cliOutputs["thinned"]?.elementCount, JSON.stringify(cliOutputs));
+      // 基础下点数不同：真的是配方在起作用
+      const base = cliJsonLines(["run", graphFile, "--outputs"]);
+      const baseOutputs = base.lines[base.lines.length - 1] as Record<string, { elementCount?: number }>;
+      assert.notEqual(baseOutputs["thinned"]?.elementCount, viaMcp);
+
+      // 失配的配方：不碰后端，报错里带条目
+      const blocked = await client.callTool({
+        name: "run_graph",
+        arguments: { graphPath: graphFile, recipe: recipes[1]?.file },
+      });
+      assert.equal(blocked.isError, true);
+      const why = payload(blocked);
+      assert.match(String(why["error"]), /配方「坏」有 2 处失配，不能运行/);
+      assert.equal((why["recipe"] as { blocking: number }).blocking, 2);
+
+      // 内联的图同样认 recipe（MCP 把它落成临时文件交给 CLI）
+      const inline = payload(
+        await client.callTool({ name: "run_graph", arguments: { graph: RECIPE_DOC, recipe: fileA } }),
+      );
+      assert.equal(inline["status"], "ok", JSON.stringify(inline));
+
+      const params = payload(
+        await client.callTool({
+          name: "get_params",
+          arguments: { graphPath: graphFile, recipe: fileA, only: "graph" },
+        }),
+      );
+      const rows = params["params"] as { node: string; param: string; value: unknown; graphParam?: string }[];
+      assert.deepEqual(
+        rows.map((r) => [r.node, r.param, r.value, r.graphParam]),
+        [
+          ["gen", "pointCount", 3000, "count"],
+          ["voxel", "leafSize", [0.05, 0.05, 0.05], "leaf"],
+        ],
+      );
+      const badParams = await client.callTool({
+        name: "get_params",
+        arguments: { graphPath: graphFile, recipe: recipes[1]?.file },
+      });
+      assert.equal(badParams.isError, true);
+      assert.match(payload(badParams)["stderr"] as string, /\[越界\] count/);
     } finally {
       await client?.close().catch(() => undefined);
       server?.kill();

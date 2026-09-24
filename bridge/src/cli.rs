@@ -14,6 +14,7 @@ use crate::core_ffi::{self, Core, RunHandle, RunInput, RunSpec};
 use crate::eval;
 use crate::patch;
 use crate::perturb;
+use crate::recipe;
 use crate::graph::GraphDoc;
 use crate::ulid;
 
@@ -45,7 +46,7 @@ const USAGE: &str = "\
 lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给人看）
 
   lyflow run      <graph> [--to <nodeId>]... [--set <nodeId>.<param>=<json>]...
-                          [--param <名字>=<json>]...
+                          [--recipe <配方文件>] [--param <名字>=<json>]...
                           [--base-dir <dir>] [--parallel <n>] [--no-cache]
                           [--preview] [--preview-points <n>] [--outputs] [--summary]
                           [--input <nodeId>.<port>=<file.pcd>]...
@@ -58,12 +59,12 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
   lyflow import   <file> --kind <kind> [--fine] [-o <out.lyflow.json>] [--base-dir <dir>]
         --fine：产出细粒度图（每一步一个节点）而不是默认的积木图（m8-plan L12），
         等价于 --kind <kind>:fine；导入器没注册那种 kind 时报错。
-  lyflow validate <graph> [--base-dir <dir>] [--set ...] [--param ...]
-  lyflow plan     <graph> [--to <nodeId>]... [--base-dir <dir>] [--set ...] [--param ...]
+  lyflow validate <graph> [--base-dir <dir>] [--set ...] [--recipe <配方文件>] [--param ...]
+  lyflow plan     <graph> [--to <nodeId>]... [--base-dir <dir>] [--set ...] [--recipe ...] [--param ...]
         每个节点一行：cacheKey、cached、level、upstreamMissing、bypass，
         外加 lazy（只被惰性端口依赖，主路径成功时不跑）与 demandedBy（谁的哪个惰性端口管着它）。
   lyflow params   <graph> [--node <id>]... [--only explicit|default|bound|graph]
-                          [--set <nodeId>.<param>=<json>]... [--param <名字>=<json>]...
+                          [--set <nodeId>.<param>=<json>]... [--recipe <配方文件>] [--param <名字>=<json>]...
                           [--base-dir <dir>] [--json]
         每节点每参数一行 { node, op, param, value, source, graphParam?, unit?, min?, max? }。
         source 四种：default（图里没写）/ explicit（图里写了）/ bound（子图提升参数灌进来的）/
@@ -81,8 +82,10 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                           --metric <path> [--metric <path>]...
                           [--holdout <tag>=<value>] [--group-by <tag>]
                           [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--no-cache]
-                          [--set <nodeId>.<param>=<json>]... [--param <名字>=<json>]...
+                          [--set <nodeId>.<param>=<json>]... [--recipe <配方文件>] [--param <名字>=<json>]...
                           [--summary]
+        --recipe 作用于所有样本；--params 的参数组里不含「.」的键写顶层图参数。
+        叠加顺序：基础（default）→ --recipe → 参数组 → --param。
         每行 eval_row **默认不带** summary（ADR-0022）；--summary 打开。
         一维 bundle 就 6 KB，51 帧 × 8 组参数 2.5 MB，那不该是默认值。
         （--no-summary 还认，但已经是 no-op。）
@@ -109,11 +112,15 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
               （传感器帧与测量帧都是米）；outputs.* 这类 Measurement 是「毫米」。
               所以「张开 1 mm 读数加 1 mm」是 --expect 1000，不是 1。
   lyflow diff     <a> <b> [--json]
+  lyflow recipes  <graph> [--recipe <配方文件>]... [--json]
+        图旁配方目录（<图名>.recipes/）里的配方：名字、值个数、四类失配与建议、默认配方。只读，退出码 0。
+        给了 --recipe 就只看这几个文件，每个另带 params（合成好的图参数取值，给宿主 / MCP 用）。
   lyflow patch    <graph> [--remove-node <id|glob>]... [--add-node <json>]...
                           [--rewire <节点>:<端口>=<节点>:<端口>]...
-                          [--set <nodeId>.<param>=<json>]... [--param <名字>=<json>]...
+                          [--set <nodeId>.<param>=<json>]... [--recipe <配方文件>] [--param <名字>=<json>]...
                           [--dry-run] [-o <out>] [--json] [--base-dir <dir>]
-        动作顺序定死 remove → add → rewire → set → param（改顶层参数的 default）；每步之后过形状校验，最后过 validate，
+        动作顺序定死 remove → add → rewire → set → recipe（把配方的值写回基础）→ param（改顶层参数的 default）；
+        每步之后过形状校验，最后过 validate，
         任一步不过就整体不写（退出码 1）。幂等：删不存在的 id、没有出边的 rewire、
         同值的 set 都是 no-op 并在 stderr 说一句，所以同一条命令跑两遍第二遍 diff 为空
         （这一遍不落盘，免得白白动 mtime；给了 -o 就照写）。
@@ -124,6 +131,10 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
   eval / sweep 的 --param 另有扫描轴写法 <节点>.<参数>=<start>:<end>:<steps>：
   「=」左边含「.」的是扫描轴，不含的是顶层参数。图没声明的名字报 unknown_param；
   --set 命中被顶层参数绑定的参数报 param_conflict（一处定义，改用 --param）。两者退出码 4。
+
+配方（docs/recipe.md）：--recipe <文件> 读一个 .lyflow-recipe.json，把它的值当作图参数的取值；
+  与 --param 叠加时 --param 优先。失配 ①多出 ②类型不符 ③越界 时不跑、退出码 4，stderr 列出每一条与建议；
+  ④规格变了 只在 stderr 提示，不改退出码。
 
 退出码：0 成功，1 校验失败，2 执行失败，3 被取消（Ctrl+C），4 参数错。";
 
@@ -266,9 +277,11 @@ pub(crate) fn apply_graph_param(doc: &mut GraphDoc, spec: &str) -> Result<bool, 
     Ok(true)
 }
 
-/// load_graph 失败时的退出码：`--param` / `--set` 本身写错了是参数错（4），其余是图不合法（1）。
+/// load_graph 失败时的退出码：`--param` / `--set` / `--recipe` 本身有问题是参数错（4），其余是图不合法（1）。
+/// 配方的失配 ①–③ 也归 4（`recipe_mismatch:`）：图没错，是这份取值不能用。
 pub(crate) fn load_exit(message: &str) -> i32 {
-    if message.starts_with("unknown_param:") || message.starts_with("param_conflict:") {
+    const USAGE_CODES: &[&str] = &["unknown_param:", "param_conflict:", "recipe_mismatch:", "bad_recipe:"];
+    if USAGE_CODES.iter().any(|c| message.starts_with(c)) {
         EXIT_USAGE
     } else {
         EXIT_INVALID
@@ -297,12 +310,16 @@ fn apply_set(doc: &mut GraphDoc, spec: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn load_graph(parsed: &Parsed, path: &str) -> Result<Loaded, String> {
+/// 读图并应用取值选项，顺序定死：基础（图里的 default）→ `--recipe` → `--param` → `--set`。
+/// `--recipe` 与 `--param` 都落成图参数的 default，后写的赢，所以 `--param` 覆盖配方里的同名值
+/// （param-recipe P4.1）。配方的失配 ①–③ 在这里就拦下（退出码 4），④ 只在 err 上提示。
+pub(crate) fn load_graph(parsed: &Parsed, path: &str, err: &Sink) -> Result<Loaded, String> {
     let file = PathBuf::from(path);
     let text = std::fs::read_to_string(&file).map_err(|e| format!("读取 {path} 失败: {e}"))?;
     let mut doc: GraphDoc =
         serde_json::from_str(&text).map_err(|e| format!("{path} 不是合法的 GraphDoc: {e}"))?;
     doc.validate_structure().map_err(|e| e.to_string())?;
+    recipe::apply_recipe_option(&mut doc, parsed, err)?;
     for spec in graph_param_specs(parsed) {
         apply_graph_param(&mut doc, spec)?;
     }
@@ -671,7 +688,7 @@ fn cmd_validate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(c) => c,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
-    let loaded = match load_graph(parsed, &path) {
+    let loaded = match load_graph(parsed, &path, err) {
         Ok(l) => l,
         Err(e) => return fail(err, &e, load_exit(&e)),
     };
@@ -697,7 +714,7 @@ fn cmd_plan(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(c) => c,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
-    let loaded = match load_graph(parsed, &path) {
+    let loaded = match load_graph(parsed, &path, err) {
         Ok(l) => l,
         Err(e) => return fail(err, &e, load_exit(&e)),
     };
@@ -776,7 +793,7 @@ fn cmd_params(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     if let Some(dir) = parsed.one("base-dir") {
         bare.values.insert("base-dir".to_string(), vec![dir.to_string()]);
     }
-    let probe = match load_graph(&bare, &path) {
+    let probe = match load_graph(&bare, &path, err) {
         Ok(l) => l,
         Err(e) => return fail(err, &e, EXIT_INVALID),
     };
@@ -798,7 +815,7 @@ fn cmd_params(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         }
     }
 
-    let loaded = match load_graph(parsed, &path) {
+    let loaded = match load_graph(parsed, &path, err) {
         Ok(l) => l,
         Err(e) => return fail(err, &e, load_exit(&e)),
     };
@@ -938,11 +955,15 @@ fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         line(err, "用法：lyflow migrate <graph> [--write]");
         return EXIT_USAGE;
     };
+    // migrate --write 写回的是读进来的整份 doc：带着配方读，就会把配方的值烙成基础
+    if !parsed.many("recipe").is_empty() {
+        return fail(err, "migrate 不认 --recipe：迁移改的是图本身，与配方无关", EXIT_USAGE);
+    }
     let core = match core() {
         Ok(c) => c,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
-    let mut loaded = match load_graph(parsed, &path) {
+    let mut loaded = match load_graph(parsed, &path, err) {
         Ok(l) => l,
         Err(e) => return fail(err, &e, load_exit(&e)),
     };
@@ -1034,7 +1055,7 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(c) => c,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
-    let loaded = match load_graph(parsed, &path) {
+    let loaded = match load_graph(parsed, &path, err) {
         Ok(l) => l,
         Err(e) => return fail(err, &e, load_exit(&e)),
     };
@@ -1233,7 +1254,7 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(c) => c,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
-    let loaded = match load_graph(parsed, &path) {
+    let loaded = match load_graph(parsed, &path, err) {
         Ok(l) => l,
         Err(e) => return fail(err, &e, load_exit(&e)),
     };
@@ -1381,7 +1402,7 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(c) => c,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
-    let loaded = match load_graph(parsed, &path) {
+    let loaded = match load_graph(parsed, &path, err) {
         Ok(l) => l,
         Err(e) => return fail(err, &e, load_exit(&e)),
     };
@@ -1399,6 +1420,7 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let engine = eval::Engine {
         core: &core,
         base: &loaded,
+        pinned: &[],
         metrics: &metrics,
         param_sets: &param_sets,
         samples: &samples,
@@ -1523,11 +1545,11 @@ fn cmd_diff(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         values: BTreeMap::new(),
         flags: HashSet::new(),
     };
-    let a = match load_graph(&empty, &parsed.positional[0]) {
+    let a = match load_graph(&empty, &parsed.positional[0], err) {
         Ok(l) => l,
         Err(e) => return fail(err, &e, EXIT_INVALID),
     };
-    let b = match load_graph(&empty, &parsed.positional[1]) {
+    let b = match load_graph(&empty, &parsed.positional[1], err) {
         Ok(l) => l,
         Err(e) => return fail(err, &e, EXIT_INVALID),
     };
@@ -1713,7 +1735,7 @@ const VALUE_OPTS: &[&str] = &[
     "kind", "output", "samples", "samples-glob", "bind", "params", "holdout", "group-by",
     "after", "region", "axis", "expect", "tolerance", "samples-dir", "bind-pair", "pattern",
     "sample-subdir", "sort-by", "split-half", "samples-jsonl-out",
-    "remove-node", "add-node", "rewire", "node", "only", "input",
+    "remove-node", "add-node", "rewire", "node", "only", "input", "recipe",
 ];
 const BOOL_OPTS: &[&str] = &[
     "no-cache", "preview", "write", "check", "json", "help", "outputs", "dry-run",
@@ -1755,6 +1777,7 @@ pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
         "perturb" => perturb::cmd_perturb(&parsed, out, err),
         "diff" => cmd_diff(&parsed, out, err),
         "patch" => patch::cmd_patch(&parsed, out, err),
+        "recipes" => recipe::cmd_recipes(&parsed, out, err),
         other => {
             line(err, &format!("不认识的子命令 {other}"));
             line(err, USAGE);
@@ -3341,6 +3364,291 @@ mod tests {
         for row in &rows {
             assert_eq!(row["metrics"]["nodes.g.elementCount"].as_f64(), Some(3000.0), "{row}");
         }
+    }
+
+    // ------------------------------------------------------------ 配方（param-recipe P4.1）
+
+    /// g → v 的直链外加 h；count 绑 g.pointCount，leaf 绑 v.leafSize，都有完整规格。
+    /// 返回图路径；配方写进旁边的 `r.recipes/`（目录约定，`lyflow recipes` 列它）。
+    fn recipe_chain(dir: &Path, seed: i64) -> String {
+        let doc = json!({
+            "schemaVersion": 1,
+            "id": "01J8XQZ4K7N3M2R5V8W1YB6RCP",
+            "name": "cli-recipe",
+            "params": {
+                "count": {"type": "int", "default": 20000, "binds": ["g.pointCount"], "min": 1, "max": 100000},
+                "leaf": {"type": "vec3f", "default": [0.02, 0.02, 0.02], "binds": ["v.leafSize"],
+                         "min": 0.001, "max": 1}
+            },
+            "nodes": [
+                {"id": "g", "op": "gen.synthetic", "params": {"seed": seed}},
+                {"id": "v", "op": "filter.voxel_grid"},
+                {"id": "h", "op": "gen.synthetic", "params": {"pointCount": 500, "seed": seed + 1}}
+            ],
+            "edges": [
+                {"id": "e1", "from": {"node": "g", "port": "cloud"}, "to": {"node": "v", "port": "cloud"}}
+            ]
+        });
+        let file = dir.join("r.lyflow.json");
+        std::fs::write(&file, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+        file.to_string_lossy().into_owned()
+    }
+
+    /// 在图旁的配方目录里写一个配方文件。graph_ref = None 时记成当前图（id 与摘要都对）。
+    fn write_recipe(graph: &str, name: &str, values: Value, graph_ref: Option<Value>) -> String {
+        let doc: GraphDoc = serde_json::from_str(&std::fs::read_to_string(graph).unwrap()).unwrap();
+        let dir = recipe::recipe_dir_of(Path::new(graph));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join(format!("{name}.lyflow-recipe.json"));
+        let g = graph_ref.unwrap_or_else(|| json!({"id": doc.id, "specDigest": recipe::spec_digest(&doc.params)}));
+        let body = json!({"schemaVersion": 1, "name": name, "graph": g, "values": values,
+                          "updatedAt": "2026-09-25T00:00:00.000Z"});
+        std::fs::write(&file, serde_json::to_string_pretty(&body).unwrap()).unwrap();
+        file.to_string_lossy().into_owned()
+    }
+
+    /// P4 验收 26 的 CLI 这一半：`--recipe` 与把同一组值写成 `--param` 是同一个结果（cacheKey 与点数），
+    /// 同名的 `--param` 覆盖配方。编辑器那一半在 scripts/e2e/params_p4.mjs（真实 gap 图逐位比）。
+    #[test]
+    fn recipe_runs_like_the_same_values_given_as_param_and_param_wins() {
+        let dir = workspace("recipe-run");
+        let graph = recipe_chain(&dir, 7201);
+        let a = write_recipe(&graph, "车型A", json!({"count": 1234, "leaf": [0.05, 0.05, 0.05]}), None);
+
+        let r = cli(&["run", &graph, "--recipe", &a, "--no-cache"]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        assert!(r.err.contains("配方「车型A」：2 个值，2 个与基础不同"), "{}", r.err);
+        let via_recipe = r.lines();
+        assert_eq!(done_count(&via_recipe, "g"), Some(1234));
+
+        let p = cli(&["run", &graph, "--param", "count=1234", "--param", "leaf=[0.05,0.05,0.05]", "--no-cache"]);
+        assert_eq!(p.code, EXIT_OK, "{}", p.err);
+        let via_param = p.lines();
+        assert_eq!(run_started_keys(&via_recipe), run_started_keys(&via_param));
+        assert_eq!(done_count(&via_recipe, "v"), done_count(&via_param, "v"));
+
+        // --param 优先：配方里的 count 被盖掉，leaf 仍是配方的
+        let both = cli(&["run", &graph, "--recipe", &a, "--param", "count=777", "--no-cache"]);
+        assert_eq!(both.code, EXIT_OK, "{}", both.err);
+        assert_eq!(done_count(&both.lines(), "g"), Some(777));
+        let plan_both = cli(&["plan", &graph, "--recipe", &a, "--param", "count=777"]);
+        let plan_param = cli(&["plan", &graph, "--param", "count=777", "--param", "leaf=[0.05,0.05,0.05]"]);
+        assert_eq!(plan_keys(&plan_both), plan_keys(&plan_param));
+        // 没绑到配方参数的 h 不受影响
+        assert_eq!(plan_keys(&plan_both)["h"], plan_keys(&cli(&["plan", &graph]))["h"]);
+
+        let v = cli(&["validate", &graph, "--recipe", &a]);
+        assert_eq!(v.code, EXIT_OK, "{}", v.err);
+        let params = cli(&["params", &graph, "--json", "--only", "graph", "--recipe", &a]);
+        assert_eq!(params.code, EXIT_OK, "{}", params.err);
+        let row = params.lines().into_iter().find(|x| x["node"] == "v").expect("没有 v.leafSize");
+        assert_eq!(row["value"], json!([0.05, 0.05, 0.05]));
+        assert_eq!(row["graphParam"], "leaf");
+
+        assert_eq!(cli(&["run", &graph, "--recipe", &a, "--recipe", &a]).code, EXIT_USAGE);
+        let nowhere = dir.join("没有.lyflow-recipe.json").to_string_lossy().into_owned();
+        let missing = cli(&["run", &graph, "--recipe", &nowhere]);
+        assert_eq!(missing.code, EXIT_USAGE, "{}", missing.err);
+        assert!(missing.err.contains("bad_recipe"), "{}", missing.err);
+    }
+
+    /// P4 验收 27：失配 ①–③ → 退出码 4、stderr 逐条列出（与编辑器同一套用语），一个节点都不跑；
+    /// run / validate / plan / params / eval 都一样。
+    #[test]
+    fn a_mismatched_recipe_stops_every_command_with_exit_4_and_the_report() {
+        let dir = workspace("recipe-mismatch");
+        let graph = recipe_chain(&dir, 7202);
+        let bad = write_recipe(&graph, "坏", json!({"count": 0, "leaf": "abc", "nope": 1}), None);
+        for args in [
+            vec!["run", graph.as_str(), "--recipe", bad.as_str()],
+            vec!["validate", graph.as_str(), "--recipe", bad.as_str()],
+            vec!["plan", graph.as_str(), "--recipe", bad.as_str()],
+            vec!["params", graph.as_str(), "--recipe", bad.as_str()],
+            vec!["eval", graph.as_str(), "--recipe", bad.as_str(), "--metric", "nodes.g.elementCount"],
+        ] {
+            let r = cli(&args);
+            assert_eq!(r.code, EXIT_USAGE, "{args:?}: {}", r.err);
+            assert!(r.out.trim().is_empty(), "{args:?} 不该有 stdout：{}", r.out);
+            for want in [
+                "配方「坏」有 3 处失配，不能运行",
+                "[越界] count：不能小于 1 → 夹到限位：1",
+                "[类型不符] leaf：应当是 3 个数的数组，实际是 \"abc\" → 删除这个值（用基础）",
+                "[多出] nope：图里没有图参数 nope（改名或删掉了？） → 删除这个值",
+            ] {
+                assert!(r.err.contains(want), "{args:?} 缺「{want}」：\n{}", r.err);
+            }
+        }
+        // 共享夹具：每一条都照 expected.json 的文案出现在 stderr 上
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../schema/fixtures/recipes");
+        let expected: Value =
+            serde_json::from_str(&std::fs::read_to_string(fixtures.join("expected.json")).unwrap()).unwrap();
+        let fixture_graph = fixtures.join("graph.lyflow.json").to_string_lossy().into_owned();
+        for (file, want) in expected["recipes"].as_object().unwrap() {
+            let path = fixtures.join("graph.recipes").join(file).to_string_lossy().into_owned();
+            let r = cli(&["validate", &fixture_graph, "--recipe", &path]);
+            if want["blocking"].as_u64().unwrap() == 0 {
+                // 没失配时交给 core 校验（夹具图的 test.param_showcase 只在 LYFLOW_TEST_OPS=1 时注册），退出码不是 4
+                assert_ne!(r.code, EXIT_USAGE, "{file}: {}", r.err);
+                continue;
+            }
+            assert_eq!(r.code, EXIT_USAGE, "{file}: {}", r.err);
+            for item in want["items"].as_array().unwrap() {
+                let label = match item["kind"].as_str().unwrap() {
+                    "extra" => "多出",
+                    "type" => "类型不符",
+                    "range" => "越界",
+                    _ => "规格变了",
+                };
+                let (message, fix) = (item["message"].as_str().unwrap(), item["fixLabel"].as_str().unwrap());
+                let line = match item["param"].as_str() {
+                    Some(p) => format!("[{label}] {p}：{message} → {fix}"),
+                    None => format!("[{label}] {message} → {fix}"),
+                };
+                assert!(r.err.contains(&line), "{file} 缺「{line}」：\n{}", r.err);
+            }
+        }
+    }
+
+    /// ④ 规格变了只提示：退出码照旧，stderr 一行「提示：…」，值照常用上。
+    #[test]
+    fn a_recipe_written_for_another_graph_only_warns() {
+        let dir = workspace("recipe-spec");
+        let graph = recipe_chain(&dir, 7203);
+        let other = write_recipe(
+            &graph,
+            "别的图",
+            json!({"count": 4321}),
+            Some(json!({"id": "01JSOMEOTHERGRAPH000000000", "specDigest": format!("sha256:{}", "0".repeat(64))})),
+        );
+        let r = cli(&["run", &graph, "--recipe", &other, "--no-cache"]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        assert!(
+            r.err.contains("提示：配方「别的图」[规格变了] 图 id 不同（配方记的是 01JSOMEOTHERGRAPH000000000）"),
+            "{}",
+            r.err
+        );
+        assert_eq!(done_count(&r.lines(), "g"), Some(4321));
+    }
+
+    /// eval：配方作用于所有样本；参数组里不含「.」的键写图参数，叠在配方上面；--param 最后说了算。
+    #[test]
+    fn eval_layers_base_recipe_paramsets_then_param() {
+        let dir = workspace("recipe-eval");
+        let graph = recipe_chain(&dir, 7204);
+        let a = write_recipe(&graph, "A", json!({"count": 1234}), None);
+        let samples = dir.join("samples.jsonl");
+        std::fs::write(&samples, "{\"id\":\"s1\",\"set\":{\"h.seed\":1}}\n{\"id\":\"s2\",\"set\":{\"h.seed\":2}}\n").unwrap();
+        let sets = dir.join("sets.json");
+        std::fs::write(&sets, r#"[{"count": 3000}, {"h.pointCount": 600}]"#).unwrap();
+        let (samples, sets) = (samples.to_string_lossy().into_owned(), sets.to_string_lossy().into_owned());
+        let rows = |r: &Ran| -> Vec<(u64, String, f64)> {
+            r.lines()
+                .into_iter()
+                .filter(|l| l["kind"] == "eval_row")
+                .map(|l| {
+                    (
+                        l["paramSet"].as_u64().unwrap(),
+                        l["sample"].as_str().unwrap().to_string(),
+                        l["metrics"]["nodes.g.elementCount"].as_f64().unwrap_or(-1.0),
+                    )
+                })
+                .collect()
+        };
+        let base = ["eval", graph.as_str(), "--samples", samples.as_str(), "--metric", "nodes.g.elementCount"];
+
+        let only = cli(&[&base[..], &["--recipe", a.as_str()]].concat());
+        assert_eq!(only.code, EXIT_OK, "{}", only.err);
+        assert_eq!(rows(&only), [(0, "s1".into(), 1234.0), (0, "s2".into(), 1234.0)]);
+
+        let layered = cli(&[&base[..], &["--recipe", a.as_str(), "--params", sets.as_str()]].concat());
+        assert_eq!(layered.code, EXIT_OK, "{}", layered.err);
+        assert_eq!(
+            rows(&layered),
+            [(0, "s1".into(), 3000.0), (0, "s2".into(), 3000.0), (1, "s1".into(), 1234.0), (1, "s2".into(), 1234.0)]
+        );
+
+        let pinned =
+            cli(&[&base[..], &["--recipe", a.as_str(), "--params", sets.as_str(), "--param", "count=500"]].concat());
+        assert_eq!(pinned.code, EXIT_OK, "{}", pinned.err);
+        assert!(rows(&pinned).iter().all(|(_, _, n)| *n == 500.0), "{:?}", rows(&pinned));
+
+        let typo = dir.join("typo.json");
+        std::fs::write(&typo, r#"[{"cuont": 1}]"#).unwrap();
+        let typo = typo.to_string_lossy().into_owned();
+        let t = cli(&[&base[..], &["--params", typo.as_str()]].concat());
+        assert_eq!(t.code, EXIT_USAGE, "{}", t.err);
+        assert!(t.err.contains("unknown_param"), "{}", t.err);
+    }
+
+    /// patch --recipe：配方的值写回基础（等于对每一行「写回基础」），--param 排在后面；失配整体不写。
+    #[test]
+    fn patch_recipe_writes_the_values_back_as_defaults() {
+        let dir = workspace("recipe-patch");
+        let graph = recipe_chain(&dir, 7205);
+        let a = write_recipe(&graph, "A", json!({"count": 1234, "leaf": [0.05, 0.05, 0.05]}), None);
+        let out = dir.join("baked.lyflow.json").to_string_lossy().into_owned();
+        let r = cli(&["patch", &graph, "--recipe", &a, "--param", "count=999", "-o", &out, "--json"]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        assert_eq!(r.first()["applied"]["recipe"], json!(["count", "leaf"]));
+        assert_eq!(r.first()["applied"]["param"], json!(["count"]));
+        let written: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+        assert_eq!(written["params"]["count"]["default"], 999);
+        assert_eq!(written["params"]["leaf"]["default"], json!([0.05, 0.05, 0.05]));
+
+        let again = cli(&["patch", &out, "--recipe", &a, "--param", "count=999", "--dry-run", "--json"]);
+        assert_eq!(again.code, EXIT_OK, "{}", again.err);
+        assert_eq!(again.first()["diff"]["empty"], true);
+
+        let bad = write_recipe(&graph, "坏", json!({"count": 0}), None);
+        let before = std::fs::read_to_string(&graph).unwrap();
+        let b = cli(&["patch", &graph, "--recipe", &bad]);
+        assert_eq!(b.code, EXIT_USAGE, "{}", b.err);
+        assert!(b.err.contains("[越界] count"), "{}", b.err);
+        assert_eq!(std::fs::read_to_string(&graph).unwrap(), before, "失配时不该写图");
+    }
+
+    /// `lyflow recipes`：列配方目录（index.json 的顺序与默认），每个配方的失配与夹具一致；
+    /// 给 --recipe 时带上合成好的 params。不需要 core。
+    #[test]
+    fn recipes_lists_the_dir_with_reports_and_params() {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../schema/fixtures/recipes");
+        let graph = fixtures.join("graph.lyflow.json").to_string_lossy().into_owned();
+        let expected: Value =
+            serde_json::from_str(&std::fs::read_to_string(fixtures.join("expected.json")).unwrap()).unwrap();
+        let r = cli(&["recipes", &graph, "--json"]);
+        assert_eq!(r.code, EXIT_OK, "{}", r.err);
+        let lines = r.lines();
+        let (rows, tail) = lines.split_at(lines.len() - 1);
+        let names: Vec<&str> = rows.iter().map(|x| x["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["ok", "extra", "type", "range", "spec", "nograph"]);
+        for row in rows {
+            let file = format!("{}.lyflow-recipe.json", row["name"].as_str().unwrap());
+            let want = &expected["recipes"][&file];
+            assert_eq!(row["blocking"], want["blocking"], "{file}");
+            assert_eq!(row["items"].as_array().unwrap().len(), want["items"].as_array().unwrap().len(), "{file}");
+            assert_eq!(row["default"], row["name"] == "ok");
+            assert!(row.get("params").is_none());
+        }
+        assert_eq!(tail[0]["kind"], "recipe_dir");
+        assert_eq!(tail[0]["default"], "ok");
+        assert_eq!(tail[0]["count"], 6);
+        assert_eq!(tail[0]["specDigest"], expected["specDigest"]);
+
+        let ok = fixtures.join("graph.recipes/ok.lyflow-recipe.json").to_string_lossy().into_owned();
+        let one = cli(&["recipes", &graph, "--recipe", &ok, "--json"]);
+        assert_eq!(one.code, EXIT_OK, "{}", one.err);
+        let row = one.first();
+        assert_eq!(row["params"]["cutMax"], json!(2.5));
+        assert_eq!(row["params"]["pointCount"], json!(20000));
+        assert_eq!(row["params"]["legacyMin"], json!("随便什么都不查"));
+
+        // 没有配方目录的图：0 个配方，exists=false
+        let dir = workspace("recipe-none");
+        let lonely = recipe_chain(&dir, 7206);
+        let none = cli(&["recipes", &lonely, "--json"]);
+        assert_eq!(none.code, EXIT_OK, "{}", none.err);
+        assert_eq!(none.first()["exists"], false);
+        assert_eq!(none.first()["count"], 0);
     }
 
     /// J5/J6：dirMode=band 却没接 refLine。检查在 validate 里，所以 `run` 在执行任何节点

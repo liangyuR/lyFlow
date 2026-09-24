@@ -22,6 +22,7 @@ const TOOLS = [
   "perturb",
   "diff_graphs",
   "get_params",
+  "list_recipes",
   "patch_graph",
 ];
 
@@ -52,7 +53,7 @@ test("配置项默认值", () => {
   assert.equal(config.workDir, path.join(os.tmpdir(), "lyflow-mcp"));
 });
 
-test("工具面就是这 13 个，输入 schema 的必填项对得上", async () => {
+test("工具面就是这 14 个，输入 schema 的必填项对得上", async () => {
   const client = await connect({ LYFLOW_HTTP_BASE: "http://127.0.0.1:1" });
   const listed = await client.listTools();
   assert.deepEqual(
@@ -80,6 +81,7 @@ test("工具面就是这 13 个，输入 schema 的必填项对得上", async ()
     "graph",
     "graphPath",
     "mode",
+    "recipe",
     "set",
     "targets",
     "timeoutMs",
@@ -88,7 +90,10 @@ test("工具面就是这 13 个，输入 schema 的必填项对得上", async ()
   assert.deepEqual(required("perturb"), ["after", "axis", "graphPath", "metric", "region"]);
   assert.deepEqual(required("diff_graphs"), ["a", "b"]);
   assert.deepEqual(required("get_params"), ["graphPath"]);
-  assert.deepEqual(props("get_params"), ["baseDir", "graphPath", "node", "only", "set"]);
+  assert.deepEqual(props("get_params"), ["baseDir", "graphPath", "node", "only", "recipe", "set"]);
+  assert.deepEqual(required("list_recipes"), ["graphPath"]);
+  assert.deepEqual(props("list_recipes"), ["graphPath"]);
+  assert.ok(props("eval").includes("recipe"));
   assert.deepEqual(required("patch_graph"), ["graphPath"]);
   assert.deepEqual(props("patch_graph"), [
     "addNode",
@@ -121,7 +126,7 @@ test("resource 清单里有 manifest、三份 schema、两篇文档与图样例"
   await client.close();
 });
 
-test("没配 LYFLOW_CLI 时 eval / perturb / diff_graphs 给一句说得清的错", async () => {
+test("没配 LYFLOW_CLI 时 eval / perturb / diff_graphs / list_recipes / 带 recipe 的 run_graph 给一句说得清的错", async () => {
   const client = await connect({ LYFLOW_HTTP_BASE: "http://127.0.0.1:1" });
   for (const [name, args] of [
     ["eval", { graphPath: "g.json", metric: ["outputs.gap"] }],
@@ -130,6 +135,12 @@ test("没配 LYFLOW_CLI 时 eval / perturb / diff_graphs 给一句说得清的�
       { graphPath: "g.json", after: "n:cloud", region: {}, axis: "x=0:1:2", metric: ["outputs.gap"] },
     ],
     ["diff_graphs", { a: "a.json", b: "b.json" }],
+    ["list_recipes", { graphPath: "g.json" }],
+    // 带 recipe 的 run_graph 要 CLI 查失配：没配 CLI 时在碰后端之前就说清楚
+    [
+      "run_graph",
+      { graph: { schemaVersion: 1, id: "g", nodes: [], edges: [] }, recipe: "A.lyflow-recipe.json" },
+    ],
   ] as const) {
     const result = await client.callTool({ name, arguments: args });
     assert.equal(result.isError, true, name);

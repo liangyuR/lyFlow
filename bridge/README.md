@@ -201,6 +201,27 @@ lyflow run g.lyflow.json --param gapOffset=0.12 --param modelPath=D:/models/v12s
 - `eval` 另有 `--param <node>.<param>=<start>:<end>:<steps>` 扫描轴：按 `=` 左边**是否含 `.`**
   区分，含 `.` 是扫描轴，不含是顶层参数。
 
+## 配方（`--recipe` 与 `lyflow recipes`，param-recipe P4）
+
+配方是顶层图参数的一组取值，存在图旁的 `<图名>.recipes/<名字>.lyflow-recipe.json`（格式与四类失配见
+[docs/recipe.md](../docs/recipe.md)）。实现在 `src/recipe.rs`：读文件、目录约定、specDigest、四类失配与修复建议 ——
+编辑器的 `packages/editor/src/lib/recipes.ts` 是另一份，两边对着 `schema/fixtures/recipes/` 的同一组夹具断言（摘要逐字节、
+每一条的类别 / 参数 / 建议 / 文案），`cargo test recipe` 就是这组断言。数字与 JSON 文本按 ECMAScript 的格式写（`js_number` /
+`js_json`），SHA-256 用 `sha2`。
+
+```bash
+lyflow run      g.lyflow.json --recipe g.recipes/车型A.lyflow-recipe.json --param cutMax=2 --summary
+lyflow validate g.lyflow.json --recipe g.recipes/坏.lyflow-recipe.json        # 失配 → 退出码 4，stderr 逐条列出
+lyflow recipes  g.lyflow.json --json                                          # 列目录：值个数、失配、默认配方
+```
+
+- `run` / `validate` / `plan` / `params` / `eval` / `patch` 都认（`dump` / `sweep` / `perturb` 经同一个 `load_graph`，也认；
+  `migrate` 拒绝）。叠加顺序：基础 → `--recipe` → `--param`；配方的值与 `--param` 一样写成图参数的 `default` 再交给 core。
+- `eval`：配方作用于所有样本；`--params` 的参数组里不含 `.` 的键写图参数，夹在配方与 `--param` 之间。
+- `patch --recipe`：把配方的值写回基础（落盘），动作顺序 remove → add → rewire → set → recipe → param。
+- 失配 ①–③：`recipe_mismatch:`，退出码 4，一个节点都不跑、什么都不写；④ 只在 stderr 提示。读不出配方是 `bad_recipe:`（4）。
+- `lyflow recipes`：只读，不需要 core；给 `--recipe` 时每行带合成好的 `params`（MCP 的 `run_graph` 拿它交给后端）。
+
 ## 批量评估（`lyflow eval`）
 
 `src/eval.rs`。一条命令把「一组样本 × 一组参数 → 任意标量指标 → 内建统计」跑完，

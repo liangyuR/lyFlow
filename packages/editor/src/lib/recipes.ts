@@ -318,7 +318,7 @@ export function touch(entry: RecipeEntry, doc: GraphDoc, now: string): RecipeEnt
 
 /** 写一个值（稀疏：等于基础就删掉这条覆盖）。返回原对象 = 什么都没变。 */
 export function withValue(entry: RecipeEntry, doc: GraphDoc, param: string, value: unknown): RecipeEntry {
-  const base = doc.params?.[param]?.default;
+  const base = doc.params && has(doc.params, param) ? doc.params[param]?.default : undefined;
   const had = has(entry.values, param);
   if (base !== undefined && valueEquals(value, base)) return had ? withoutValue(entry, param) : entry;
   if (had && valueEquals(entry.values[param], value)) return entry;
@@ -406,7 +406,8 @@ export function recipeReport(doc: GraphDoc, entry: Pick<RecipeEntry, "values" | 
   const byParam = new Map<string, Mismatch>();
   const names = Object.keys(entry.values).sort(compareCodePoints);
   for (const name of names) {
-    const gp = doc.params?.[name];
+    // 只认 doc.params 自己的键：`constructor`、`toString` 这类名字不能从原型链上摸到一个「图参数」
+    const gp = doc.params && has(doc.params, name) ? doc.params[name] : undefined;
     const value = entry.values[name];
     let m: Mismatch | null = null;
     if (!gp) {
@@ -538,7 +539,7 @@ export function checkValue(gp: GraphParam, v: unknown): Check | null {
       else if (color && typeof v === "string") conv = hexColor(v);
       const want = color ? "3 或 4 个数（RGB / RGBA）" : `${n} 个数`;
       return typeCheck(
-        `应当是 ${want} 的数组，实际是 ${short(v)}`,
+        `应当是 ${want}的数组，实际是 ${short(v)}`,
         conv?.map((x) => clampNum(x, min, max, false)),
       );
     }

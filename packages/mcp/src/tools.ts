@@ -4,11 +4,11 @@ import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { evalArgv, paramsArgv, patchArgv, perturbArgv } from "./argv.js";
+import { evalArgv, paramsArgv, patchArgv, perturbArgv, recipesArgv } from "./argv.js";
 import { DEFAULT_CLI_TIMEOUT_MS, runCli, stderrTail } from "./cli.js";
 import { decodeCloud, summarizeCloud } from "./cloud.js";
 import type { Config } from "./config.js";
-import { resolveGraph } from "./graph.js";
+import { resolveGraph, type ResolvedGraph } from "./graph.js";
 import { HttpError, LyFlowHttp } from "./http.js";
 import { coreSummary, parseDiagnostics, summarizeOutputs, summarizeRun } from "./run.js";
 import { firstSentence, matches, nearest } from "./text.js";
@@ -123,6 +123,65 @@ function compactSummaries(summaries: Record<string, unknown>[]): Record<string, 
 
 function writeLines(file: string, lines: { text: string }[]): void {
   fs.writeFileSync(file, lines.map((l) => l.text).join("\n") + (lines.length ? "\n" : ""), "utf8");
+}
+
+/** `lyflow recipes --json` 的一行配方（bridge/src/recipe.rs 的 recipe_json）。 */
+interface RecipeRow {
+  name: string;
+  file: string;
+  default: boolean;
+  values: number;
+  blocking: number;
+  items: { kind: string; param: string | null; message: string; fix: unknown; fixLabel: string }[];
+  note?: string;
+  updatedAt?: string;
+  notes?: string[];
+  params?: Record<string, unknown>;
+}
+
+const RECIPE_FIELD = z
+  .string()
+  .optional()
+  .describe(
+    "配方文件路径（<名字>.lyflow-recipe.json，list_recipes 给的 file）。图参数取「default ← 配方」；" +
+      "失配 ①多出 ②类型不符 ③越界 时不跑并报错，④规格变了只在返回里提示。需要 LYFLOW_CLI",
+  );
+
+/** 失配条目给 Agent 看的那几个字段（fix 的机器形式留在 CLI 那边）。 */
+function recipeItems(row: RecipeRow): Record<string, unknown>[] {
+  return row.items.map((m) => ({ kind: m.kind, param: m.param, message: m.message, fixLabel: m.fixLabel }));
+}
+
+/** 带 recipe 的 run_graph：失配判定与取值合成交给 `lyflow recipes --recipe`（判定只有 bridge/src/recipe.rs
+ *  一份，编辑器那份对着同一组夹具）。内联的图先落成工作目录里的临时文件 —— CLI 只认路径。
+ *  返回合成好的那一行（带 params），或者一个已经写好的错误结果。 */
+async function recipeParams(
+  config: Config,
+  graph: ResolvedGraph,
+  graphPath: string | undefined,
+  recipe: string,
+): Promise<{ row: RecipeRow } | { error: ToolResult }> {
+  if (!config.cli) return { error: bad(CLI_MISSING) };
+  let file = graphPath;
+  if (!file) {
+    file = path.join(workRun(config, "recipe"), "graph.lyflow.json");
+    fs.writeFileSync(file, JSON.stringify(graph.doc), "utf8");
+  }
+  const argv = recipesArgv(file, recipe);
+  const result = await runCli(config, argv, { timeoutMs: Math.min(DEFAULT_CLI_TIMEOUT_MS, 120000) });
+  const row = result.lines.find((l) => l.value["kind"] === "recipe")?.value as RecipeRow | undefined;
+  if (result.code !== 0 || !row) {
+    return { error: bad(`lyflow recipes 退出码 ${result.code}，读不出配方 ${recipe}`, { argv, stderr: result.stderr }) };
+  }
+  if (row.blocking > 0) {
+    // 与 CLI 的退出码 4、编辑器「有失配的配方不能运行」同一条规则：一个节点都不跑
+    return {
+      error: bad(`配方「${row.name}」有 ${row.blocking} 处失配，不能运行`, {
+        recipe: { name: row.name, file: row.file, blocking: row.blocking, items: recipeItems(row) },
+      }),
+    };
+  }
+  return { row };
 }
 
 function workRun(config: Config, prefix: string): string {
@@ -276,6 +335,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         "先看 status：ok / degraded（有节点坏了但每一维都拿到了）/ failed。" +
         "再看 outputs：每一维三态 value / inactive（本来就没有）/ failed（本该有、崩了，带 from）。" +
         "decisions 是全图每一个 fallback 选了哪一路。" +
+        "给了 recipe 就按那个配方跑（与 lyflow run --recipe 同一个结果），返回里多一个 recipe。" +
         "不要自己从 nodes 重建成败判定 —— 那正是这个工具存在的理由。" +
         "不返回点云 —— 要看点云走 summarize_output。",
       inputSchema: {
@@ -285,6 +345,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           .record(z.unknown())
           .optional()
           .describe('发送前改节点参数，键是 "<节点>.<参数>"，语义与 CLI --set 相同'),
+        recipe: RECIPE_FIELD,
         mode: z.enum(["full", "preview"]).optional().describe("preview 下源算子先抽稀"),
         timeoutMs: z.number().int().positive().optional().describe(`等 run_finished 的上限，默认 ${DEFAULT_RUN_TIMEOUT_MS}`),
       },
@@ -296,6 +357,23 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
       } catch (e) {
         return failed(e);
       }
+      // 配方（param-recipe P4.2）：失配先拦，取值经信封的 params 交给后端（K3：core 不知道配方）
+      let recipe: RecipeRow | null = null;
+      if (args.recipe) {
+        const checked = await recipeParams(config, graph, args.graphPath, args.recipe);
+        if ("error" in checked) return checked.error;
+        recipe = checked.row;
+      }
+      const recipeInfo = recipe
+        ? {
+            recipe: {
+              name: recipe.name,
+              file: recipe.file,
+              values: recipe.values,
+              ...(recipe.items.length > 0 ? { warnings: recipeItems(recipe) } : {}),
+            },
+          }
+        : {};
       try {
         const result = await http.runAndWait(
           {
@@ -306,6 +384,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
             previewMaxPoints: null,
             previewBudgetMs: null,
             sceneId: null,
+            ...(recipe?.params ? { params: recipe.params } : {}),
           },
           args.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
         );
@@ -325,6 +404,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
             decisions: summary.decisions,
             contractViolations: summary.contractViolations,
             diagnostics: events.diagnostics,
+            ...recipeInfo,
           });
         }
         // 老 core（ABI < v9）没有 summary：退回 M5 那套形状，字段名不变。
@@ -342,6 +422,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           outputs,
           nodes: events.nodes,
           diagnostics: events.diagnostics,
+          ...recipeInfo,
         });
       } catch (e) {
         if (e instanceof HttpError && e.status === 400) {
@@ -356,6 +437,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
             decisions: {},
             contractViolations: [],
             diagnostics: diagnostics ?? [{ message: e.message }],
+            ...recipeInfo,
           });
         }
         return failed(e);
@@ -466,6 +548,12 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         failuresLimit: failuresLimitField,
         baseDir: z.string().optional(),
         set: z.array(z.string()).optional().describe("<节点>.<参数>=<json>，与 CLI --set 相同"),
+        recipe: z
+          .string()
+          .optional()
+          .describe(
+            "配方文件路径，作用于所有样本；叠加顺序 基础 → 配方 → params 里的参数组 → param。失配 ①–③ 时退出码 4",
+          ),
         noCache: z.boolean().optional(),
         summary: z
           .boolean()
@@ -635,8 +723,9 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         "起本地 lyflow params：每节点每参数一行 { node, op, param, value, source, unit?, min?, max? }。" +
         "GraphDoc 是稀疏存储（只存改过的键），所以「现在跑的到底是什么值」要拿 manifest 的默认值去 join —— " +
         "这个工具把 join 做好了，而且是 core 做的（合并默认值、类型规整、参数迁移都在那一层）。" +
-        "source 三种：default（图里没写）/ explicit（图里写了）/ bound（子图提升参数灌进来的）。" +
-        "set 先应用再解析，所以「这组 set 之后生效值是什么」一次调用就能问。" +
+        "source 四种：default（图里没写）/ explicit（图里写了）/ bound（子图提升参数灌进来的）/ " +
+        "graph（顶层图参数灌进来的，另带 graphParam）。" +
+        "set 先应用再解析，所以「这组 set 之后生效值是什么」一次调用就能问；给 recipe 就是「按这个配方跑时的值」。" +
         "只想看改过的就用 only:\"explicit\"。",
       inputSchema: {
         graphPath: z.string().describe("图文件路径，CLI 直接读它"),
@@ -645,10 +734,11 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           .optional()
           .describe("只看这些节点；子图展开后的内部节点也认「父/子」的整段前缀"),
         only: z
-          .enum(["explicit", "default", "bound"])
+          .enum(["explicit", "default", "bound", "graph"])
           .optional()
           .describe("只要这一种来源的行"),
         set: z.array(z.string()).optional().describe("<节点>.<参数>=<json>，与 CLI --set 相同"),
+        recipe: RECIPE_FIELD,
         baseDir: z.string().optional(),
       },
     },
@@ -658,7 +748,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
       const result = await runCli(config, argv, {
         timeoutMs: Math.min(DEFAULT_CLI_TIMEOUT_MS, 120000),
       });
-      // 退出码 4 = 未知节点 / 未知参数（用法错），与「图本身不合法」的 1 分开。
+      // 退出码 4 = 未知节点 / 未知参数 / 配方失配（用法错），与「图本身不合法」的 1 分开。
       if (result.code !== 0) {
         const diagnostics: unknown[] = [];
         for (const text of result.skipped) {
@@ -684,6 +774,61 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         count: params.length,
         params,
         stderrTail: stderrTail(result.stderr),
+      });
+    },
+  );
+
+  server.registerTool(
+    "list_recipes",
+    {
+      title: "列出图旁的配方",
+      description:
+        "起本地 lyflow recipes：图文件旁 <图名>.recipes/ 目录里的每个配方 —— 名字、存了几个值、" +
+        "失配摘要与修复建议、哪个是默认配方（index.json）。失配四类：extra 多出 / type 类型不符 / range 越界 " +
+        "三类阻止运行（runnable:false），spec 规格变了只提示。只读，MCP 不提供写配方的工具。" +
+        "按某个配方跑：把它的 file 交给 run_graph / get_params 的 recipe。",
+      inputSchema: {
+        graphPath: z.string().describe("图文件路径，CLI 直接读它；配方目录按它的文件名找"),
+      },
+    },
+    async (args) => {
+      if (!config.cli) return bad(CLI_MISSING);
+      const argv = recipesArgv(args.graphPath);
+      const result = await runCli(config, argv, {
+        timeoutMs: Math.min(DEFAULT_CLI_TIMEOUT_MS, 120000),
+      });
+      const dir = result.lines.find((l) => l.value["kind"] === "recipe_dir")?.value;
+      if (result.code !== 0 || !dir) {
+        return bad(`lyflow recipes 退出码 ${result.code}`, { exitCode: result.code, argv, stderr: result.stderr });
+      }
+      const recipes = result.lines
+        .filter((l) => l.value["kind"] === "recipe")
+        .map((l) => {
+          const row = l.value as unknown as RecipeRow;
+          const mismatches: Record<string, number> = { extra: 0, type: 0, range: 0, spec: 0 };
+          for (const m of row.items) mismatches[m.kind] = (mismatches[m.kind] ?? 0) + 1;
+          return {
+            name: row.name,
+            file: row.file,
+            default: row.default,
+            values: row.values,
+            runnable: row.blocking === 0,
+            blocking: row.blocking,
+            mismatches,
+            items: recipeItems(row),
+            ...(row.note ? { note: row.note } : {}),
+          };
+        });
+      return ok({
+        exitCode: result.code,
+        dir: dir["dir"],
+        exists: dir["exists"],
+        default: dir["default"],
+        count: recipes.length,
+        recipes,
+        problems: dir["problems"],
+        graphId: dir["graphId"],
+        specDigest: dir["specDigest"],
       });
     },
   );
@@ -761,7 +906,8 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
 }
 
 const CLI_MISSING =
-  "没有配置 LYFLOW_CLI。eval / perturb / diff_graphs / patch_graph / get_params 起的是本地 " +
+  "没有配置 LYFLOW_CLI。eval / perturb / diff_graphs / patch_graph / get_params / list_recipes " +
+  "（以及带 recipe 的 run_graph）起的是本地 " +
   "lyflow 可执行文件，把它的路径放进 MCP 服务的环境变量 LYFLOW_CLI 再试。";
 
 function nonCloudSummary(info: OutputInfo): Record<string, unknown> {

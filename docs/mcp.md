@@ -6,14 +6,14 @@
 
 一句话：**它是 [HTTP 传输契约](http-transport.md) 的又一个消费方，不是第四种传输。**
 描述、校验、执行这些走 `/lyflow/*`（test-server 或阶段 B 的业务服务都行）；
-`eval` / `perturb` / `diff_graphs` / `get_params` / `patch_graph` 起本地 `lyflow` 可执行文件
+`eval` / `perturb` / `diff_graphs` / `get_params` / `patch_graph` / `list_recipes` 起本地 `lyflow` 可执行文件
 （ADR-0020：它们是 CLI 子命令，MCP 只是另一张皮）。
 理由见 [ADR-0021](adr/0021-mcp-as-transport-consumer.md)。
 
 ```
 Agent ── stdio ── @lyflow/mcp ──┬── HTTP + WS ── /lyflow/*（test-server 或业务服务）── core
                                 └── spawn ────── lyflow.exe eval / perturb / diff /
-                                                            params / patch ───────── core
+                                                            params / patch / recipes ─ core
 ```
 
 ---
@@ -85,13 +85,14 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 | `list_port_types` | — | 同上 | `{types:[…]}` |
 | `validate_graph` | `graph \| graphPath` `baseDir?` | `POST /lyflow/validate` | `{diagnostics:[…], ok}` |
 | `plan_graph` | 同上 + `targets?` | `POST /lyflow/plan` | `{plan:[{nodeId,cacheKey,cached,level,upstreamMissing,bypass,lazy,demandedBy}]}`，`lazy` = 只被惰性端口依赖、主路径成功时不跑 |
-| `run_graph` | 同上 + `targets?` `set?` `mode?` `timeoutMs?` | `POST /lyflow/run` + WS 等该 `runId` 的 `run_finished` | core 的 run summary + `runId` / `runStatus` / `diagnostics`（见下） |
+| `run_graph` | 同上 + `targets?` `set?` `recipe?` `mode?` `timeoutMs?` | `POST /lyflow/run` + WS 等该 `runId` 的 `run_finished`；给了 `recipe` 先 `LYFLOW_CLI recipes --recipe` | core 的 run summary + `runId` / `runStatus` / `diagnostics`（见下），带 `recipe` 时另有 `recipe` |
 | `get_node_outputs` | `runId` `nodeId` | `GET /lyflow/runs/:id/nodes/:node/outputs` | `{outputs:[OutputInfo]}` 原样 |
 | `summarize_output` | `runId` `nodeId` `port` `maxPoints?` `head?` | 点云走 `GET …/clouds/:node/:port`，其余用 `OutputInfo.value` | 见下 |
-| `eval` | `graphPath` 样本 参数 `metric[]` … | `LYFLOW_CLI eval …` | 压紧的统计（`compact`，默认开）+ 失败样本清单 + `rowsPath` |
+| `eval` | `graphPath` 样本 参数 `metric[]` `recipe?` … | `LYFLOW_CLI eval …` | 压紧的统计（`compact`，默认开）+ 失败样本清单 + `rowsPath` |
 | `perturb` | `graphPath` `after` `region` `axis` `metric[]` … | `LYFLOW_CLI perturb …` | `perturb_summary` 数组 + 不通过样本 + `samplesPath` + `rowsPath` |
 | `diff_graphs` | `a` `b` | `LYFLOW_CLI diff a b --json` | `{exitCode, diff}` 原样 |
-| `get_params` | `graphPath` `node[]?` `only?` `set[]?` `baseDir?` | `LYFLOW_CLI params … --json` | `{exitCode, argv, count, params:[{node,op,param,value,source,unit?,min?,max?}], stderrTail}` |
+| `get_params` | `graphPath` `node[]?` `only?` `set[]?` `recipe?` `baseDir?` | `LYFLOW_CLI params … --json` | `{exitCode, argv, count, params:[{node,op,param,value,source,graphParam?,unit?,min?,max?}], stderrTail}` |
+| `list_recipes` | `graphPath` | `LYFLOW_CLI recipes <graph> --json` | `{dir, exists, default, count, recipes:[{name,file,default,values,runnable,blocking,mismatches,items}], problems}`（见下） |
 | `patch_graph` | `graphPath` `removeNode[]?` `addNode[]?` `rewire[]?` `set[]?` `dryRun?` `out?` | `LYFLOW_CLI patch … --json` | `patch_result` 摊平：`{exitCode, argv, applied, noops, wrote, diff, stderrTail}` |
 
 ### 图怎么给
@@ -166,6 +167,36 @@ MCP 只在外面套了 `runId` / `runStatus` / `diagnostics`。
   没有 `decisions` / `contractViolations`、`status` 等于 `runStatus`。
 - `set` 的语义与 CLI `--set` 完全一样：键是 `<节点>.<参数>`，在发给后端之前改 doc。
   与 `--set` 的差别只有一处：值是已经解析好的 JSON 值，不用再写成字符串。
+
+### 配方：`recipe` 与 `list_recipes`
+
+配方是顶层图参数的一组取值，存在图旁的 `<图名>.recipes/<名字>.lyflow-recipe.json`（[recipe.md](recipe.md)）。
+MCP 只读配方，**不提供写配方的工具**（param-recipe P4.2）—— 配方由工程师在编辑器里维护。
+
+- **`list_recipes { graphPath }`**：图旁目录里的每个配方。`runnable: false` 表示有 ①–③ 失配、不能跑；`mismatches` 是四类
+  各几条（`extra` 多出 / `type` 类型不符 / `range` 越界 / `spec` 规格变了，最后一类只提示）；`items` 每条
+  `{kind, param, message, fixLabel}`，与编辑器「配方管理」页、CLI 的 stderr 同一套用语；`default` 是 `index.json` 的默认配方。
+
+  ```jsonc
+  {"dir":"D:/work/车门缝隙.recipes","exists":true,"default":"车型A","count":2,
+   "recipes":[
+     {"name":"车型A","file":"D:/work/车门缝隙.recipes/车型A.lyflow-recipe.json","default":true,"values":2,
+      "runnable":true,"blocking":0,"mismatches":{"extra":0,"type":0,"range":0,"spec":0},"items":[]},
+     {"name":"坏","file":"…/坏.lyflow-recipe.json","default":false,"values":2,"runnable":false,"blocking":2,
+      "mismatches":{"extra":1,"type":0,"range":1,"spec":0},
+      "items":[{"kind":"range","param":"count","message":"不能小于 1","fixLabel":"夹到限位：1"},
+               {"kind":"extra","param":"nope","message":"图里没有图参数 nope（改名或删掉了？）","fixLabel":"删除这个值"}]}],
+   "problems":[], "graphId":"…", "specDigest":"sha256:…"}
+  ```
+
+- **`run_graph { …, recipe }`**：按这个配方跑，与 `lyflow run --recipe` 是同一个结果（验收 28 在冒烟测试里对过点数）。
+  MCP 先起 `lyflow recipes <图> --recipe <文件> --json` 查失配、取合成好的图参数取值，再经 HTTP 信封的 `params` 交给后端
+  （判定只有 `bridge/src/recipe.rs` 一份）。内联的 `graph` 也行，MCP 把它落成工作目录里的临时文件给 CLI。
+  有 ①–③ 时**不碰后端**，返回错误 `{error: "配方「坏」有 2 处失配，不能运行", recipe: {name, file, blocking, items}}`；
+  跑成了返回里多一个 `recipe: {name, file, values, warnings?}`，`warnings` 是 ④ 的提示。需要 `LYFLOW_CLI`。
+- **`get_params { …, recipe }`**：「按这个配方跑时每个参数的生效值」，被图参数写入的行 `source: "graph"`、另带 `graphParam`；
+  失配时 CLI 退出码 4，工具报错并带回 stderr（条目在里面）。`only` 多了 `"graph"`。
+- **`eval { …, recipe }`**：透传 `--recipe`，作用于所有样本；叠加顺序 基础 → 配方 → `params` 里的参数组 → `param`。
 
 ### `summarize_output` 的返回
 
@@ -310,4 +341,5 @@ pnpm --filter @lyflow/mcp test
 `node:test`。不需要后端的那些（输入 schema、`set` 应用到 doc、eval/perturb 的 argv 映射、
 点云统计、JSON Lines 解析容错）总是跑；集成冒烟自己起 test-server 与 MCP 子进程，跑
 `list_operators → get_operator → validate_graph → run_graph → get_node_outputs → summarize_output`，
-没有 `bridge/target/debug/lyflow.exe` 时它 skip 并打出原因。`pnpm check` 里带着这一步。
+另一条走配方：`list_recipes → run_graph recipe`（点数与 `lyflow run --recipe --outputs` 相同）→ 失配的配方被拦 → 内联图带 recipe →
+`get_params recipe`。没有 `bridge/target/debug/lyflow.exe` 时它们 skip 并打出原因。`pnpm check` 里带着这一步。

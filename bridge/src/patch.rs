@@ -1,6 +1,6 @@
 //! `lyflow patch` —— 图的结构编辑（ADR-0023）。
 //!
-//! 五个动作、固定顺序（remove → add → rewire → set → param）、幂等、每步之后过一遍形状校验，
+//! 六个动作、固定顺序（remove → add → rewire → set → recipe → param）、幂等、每步之后过一遍形状校验，
 //! 最后过 core 的 `validate`；任一步不过就整体不写。图手术的那几件事（找空位、
 //! 改边的源端口）与 `perturb::insert_after` 是同一套写法，只是这里由命令行指定。
 
@@ -30,6 +30,8 @@ pub(crate) struct Applied {
     pub added: Vec<String>,
     pub rewired: Vec<String>,
     pub set: Vec<String>,
+    /// `--recipe` 改了 default 的顶层参数名（配方里的值写成了基础）。
+    pub recipe: Vec<String>,
     /// `--param` 改了 default 的顶层参数名。
     pub params: Vec<String>,
     /// 什么都没做的那些动作。幂等的形态是「第二遍全进这里」。
@@ -53,6 +55,7 @@ impl Applied {
             && self.added.is_empty()
             && self.rewired.is_empty()
             && self.set.is_empty()
+            && self.recipe.is_empty()
             && self.params.is_empty()
     }
 
@@ -62,6 +65,7 @@ impl Applied {
             "added": self.added,
             "rewired": self.rewired,
             "set": self.set,
+            "recipe": self.recipe,
             "param": self.params,
         })
     }
@@ -258,6 +262,36 @@ pub(crate) fn apply_sets(
     Ok(())
 }
 
+/// `--recipe <文件>`：把配方里的值写成对应图参数的 default 并落盘 —— 等于在编辑器里对这个配方的
+/// 每一行「写回基础」（param-recipe P4.1）。失配 ①–③ 整体不写（退出码 4），④ 在 stderr 提示；
+/// 排在 `--param` 之前，所以同名的 `--param` 覆盖配方。全部同值是 no-op。
+pub(crate) fn apply_recipes(
+    doc: &mut GraphDoc,
+    specs: &[String],
+    applied: &mut Applied,
+) -> Result<(), String> {
+    if specs.len() > 1 {
+        return Err(format!("bad_recipe: --recipe 只能给一个（收到 {} 个）", specs.len()));
+    }
+    for spec in specs {
+        let recipe = crate::recipe::load_checked(doc, Path::new(spec))?;
+        if let Some(m) = crate::recipe::report_of(doc, &recipe).spec() {
+            applied.hints.push(crate::recipe::spec_hint(&recipe, m));
+        }
+        let changed = crate::recipe::write_as_defaults(doc, &recipe.values);
+        if changed.is_empty() {
+            applied.noop(
+                "recipe",
+                spec,
+                "same_value",
+                &format!("--recipe {spec}：顶层参数已经是配方里的值，跳过"),
+            );
+        }
+        applied.recipe.extend(changed);
+    }
+    Ok(())
+}
+
 /// `--param <名字>=<json>`：改顶层图参数的 default 并落盘。同值是 no-op。
 pub(crate) fn apply_params(
     doc: &mut GraphDoc,
@@ -348,22 +382,23 @@ pub(crate) fn cmd_patch(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         line(
             err,
             "用法：lyflow patch <graph> [--remove-node <id|glob>]... [--add-node <json>]... \
-             [--rewire <from>=<to>]... [--set <node>.<param>=<json>]... [--param <名字>=<json>]... \
+             [--rewire <from>=<to>]... [--set <node>.<param>=<json>]... [--recipe <文件>] [--param <名字>=<json>]... \
              [--dry-run] [-o <out>] [--json]",
         );
         return EXIT_USAGE;
     };
-    let actions: [(&str, Step, &[String]); 5] = [
+    let actions: [(&str, Step, &[String]); 6] = [
         ("remove-node", apply_removes, parsed.many("remove-node")),
         ("add-node", apply_adds, parsed.many("add-node")),
         ("rewire", apply_rewires, parsed.many("rewire")),
         ("set", apply_sets, parsed.many("set")),
+        ("recipe", apply_recipes, parsed.many("recipe")),
         ("param", apply_params, parsed.many("param")),
     ];
     if actions.iter().all(|(_, _, specs)| specs.is_empty()) {
         line(
             err,
-            "至少给一个动作：--remove-node / --add-node / --rewire / --set / --param",
+            "至少给一个动作：--remove-node / --add-node / --rewire / --set / --recipe / --param",
         );
         return EXIT_USAGE;
     }
@@ -382,7 +417,7 @@ pub(crate) fn cmd_patch(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     if let Some(dir) = parsed.one("base-dir") {
         bare.values.insert("base-dir".to_string(), vec![dir.to_string()]);
     }
-    let before = match load_graph(&bare, &path) {
+    let before = match load_graph(&bare, &path, err) {
         Ok(l) => l,
         Err(e) => return fail(err, &e, EXIT_INVALID),
     };
@@ -475,11 +510,12 @@ pub(crate) fn cmd_patch(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     }
 
     let done = format!(
-        "删 {} 个节点、加 {} 个、改接 {} 处、改参数 {} 处、改顶层参数 {} 个；{} 条无操作",
+        "删 {} 个节点、加 {} 个、改接 {} 处、改参数 {} 处、配方写回基础 {} 个、改顶层参数 {} 个；{} 条无操作",
         applied.removed.len(),
         applied.added.len(),
         applied.rewired.len(),
         applied.set.len(),
+        applied.recipe.len(),
         applied.params.len(),
         applied.noops.len()
     );

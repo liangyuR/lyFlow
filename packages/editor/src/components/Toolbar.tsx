@@ -298,21 +298,24 @@ export function Toolbar({
       </div>
 
       <div className="toolbar__group">
+        {/* 窄窗口下只留箭头（styles.editor.css 的 1440 断点），字收进 title 与 aria-label */}
         <button
           type="button"
           disabled={pastLen === 0}
           onClick={undo}
+          aria-label="撤销"
           title={nextUndo ? `撤销：${nextUndo} (Ctrl+Z)` : "撤销 (Ctrl+Z)"}
         >
-          ↶ 撤销
+          ↶<span className="toolbar__label"> 撤销</span>
         </button>
         <button
           type="button"
           disabled={futureLen === 0}
           onClick={redo}
+          aria-label="重做"
           title={nextRedo ? `重做：${nextRedo} (Ctrl+Shift+Z)` : "重做 (Ctrl+Shift+Z)"}
         >
-          ↷ 重做
+          ↷<span className="toolbar__label"> 重做</span>
         </button>
       </div>
 
@@ -346,11 +349,14 @@ export function Toolbar({
       </div>
 
       <div className="toolbar__doc">
+        {/* 窄窗口下文件名收起，悬停图名看路径 */}
         <input
           className="toolbar__name"
+          data-testid="doc-name"
           value={name ?? ""}
           spellCheck={false}
           placeholder="未命名"
+          title={filePath ?? undefined}
           onChange={(e) => setName(e.target.value)}
         />
         {/* 脏标记：没有它用户不知道自己有没有存过（交互清单 P0 #13） */}

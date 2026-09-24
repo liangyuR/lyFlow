@@ -593,6 +593,9 @@ pub(crate) fn samples_from_files(files: &[PathBuf], bind: &str) -> Vec<Sample> {
 pub(crate) struct ParamSet {
     pub display: Map<String, Value>,
     pub writes: Vec<(String, String, Value)>,
+    /// 写顶层图参数的那些（`--params` 里不含「.」的键，与 `--param` 同一条区分规则）：
+    /// 落成图参数的 default，叠在 `--recipe` 之上、`--param` 之下（param-recipe P4.1）。
+    pub graph: Vec<(String, Value)>,
 }
 
 fn split_target(key: &str, what: &str) -> Result<(String, String), String> {
@@ -614,9 +617,13 @@ pub(crate) fn parse_param_file(text: &str, origin: &str) -> Result<Vec<ParamSet>
         };
         let mut ps = ParamSet::default();
         for (k, v) in obj {
-            let (node, param) = split_target(k, origin)?;
             ps.display.insert(k.clone(), v.clone());
-            ps.writes.push((node, param, v.clone()));
+            if k.contains('.') {
+                let (node, param) = split_target(k, origin)?;
+                ps.writes.push((node, param, v.clone()));
+            } else {
+                ps.graph.push((k.clone(), v.clone()));
+            }
         }
         out.push(ps);
     }
@@ -810,7 +817,10 @@ pub(crate) enum EngineError {
 
 pub(crate) struct Engine<'a> {
     pub core: &'a Arc<Core>,
+    /// 已经叠好「基础 → --recipe → --param」的图（load_graph）。
     pub base: &'a Loaded,
+    /// 命令行上的 `--param <名字>=<json>`：参数组写完图参数之后再写一遍，`--param` 永远最后说了算。
+    pub pinned: &'a [String],
     pub metrics: &'a [MetricPath],
     pub param_sets: &'a [ParamSet],
     pub samples: &'a [Sample],
@@ -830,6 +840,20 @@ struct Attempt {
 impl<'a> Engine<'a> {
     fn variant(&self, ps: &ParamSet, sample: &Sample) -> Result<GraphDoc, String> {
         let mut doc = self.base.doc.clone();
+        // 叠加顺序：基础 → 配方（已在 base 里）→ 参数组里的图参数 → --param
+        for (name, value) in &ps.graph {
+            let decl = doc
+                .params
+                .get_mut(name)
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| format!("unknown_param: 参数组里的 {name} 不是图声明的顶层参数"))?;
+            decl.insert("default".to_string(), value.clone());
+        }
+        if !ps.graph.is_empty() {
+            for spec in self.pinned {
+                crate::cli::apply_graph_param(&mut doc, spec)?;
+            }
+        }
         let mut write = |node_id: &str, param: &str, value: &Value| -> Result<(), String> {
             let node = doc
                 .nodes
@@ -1177,7 +1201,7 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             return EXIT_FAILED;
         }
     };
-    let loaded = match load_graph(parsed, &path) {
+    let loaded = match load_graph(parsed, &path, err) {
         Ok(l) => l,
         Err(e) => {
             line(err, &e);
@@ -1213,7 +1237,19 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             return EXIT_USAGE;
         }
     };
+    // 参数组里写图参数的名字要是图声明过的：写错了是参数错（退出码 4），不是跑出来一排 validation_failed
+    for (i, ps) in explicit.iter().enumerate() {
+        if let Some((name, _)) = ps.graph.iter().find(|(n, _)| !loaded.doc.params.contains_key(n)) {
+            let known: Vec<&String> = loaded.doc.params.keys().collect();
+            line(
+                err,
+                &format!("unknown_param: --params 第 {i} 组的 {name} 不是图声明的顶层参数（有的是 {known:?}）"),
+            );
+            return EXIT_USAGE;
+        }
+    }
     let param_sets = combine_param_sets(explicit, axes);
+    let pinned: Vec<String> = crate::cli::graph_param_specs(parsed).into_iter().cloned().collect();
 
     let parallel = parsed
         .one("parallel")
@@ -1223,6 +1259,7 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let engine = Engine {
         core: &core,
         base: &loaded,
+        pinned: &pinned,
         metrics: &metrics,
         param_sets: &param_sets,
         samples: &samples,
@@ -2005,6 +2042,7 @@ mod tests {
         let axis = |v: f64| ParamSet {
             display: [("b.y".to_string(), json!(v))].into_iter().collect(),
             writes: vec![("b".to_string(), "y".to_string(), json!(v))],
+            graph: Vec::new(),
         };
         let merged = combine_param_sets(explicit, vec![axis(10.0), axis(20.0)]);
         assert_eq!(merged.len(), 4);

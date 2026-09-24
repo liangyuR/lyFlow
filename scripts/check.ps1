@@ -56,7 +56,8 @@ if ($LASTEXITCODE -ne 0) { throw "examples/param-showcase.lyflow.json 不符合 
 Step "配方文件 vs schema"
 # 配方的共享夹具（param-recipe P3，schema/fixtures/recipes/）：每个配方文件按 expected.json 的 schemaValid
 # 该过的过、该拒的拒（缺 graph 的那份 schema 不认，编辑器照样读、报失配 ④）；index.json 与夹具图也各查一遍。
-# 失配报告本身由 @lyflow/editor 的单测对着 expected.json 断言（下面 frontend 那一步），P4 的 CLI 用同一份夹具。
+# 失配报告本身两边各断言一遍：Rust（bridge/src/recipe.rs，下面 cargo test 那一步）与 @lyflow/editor 的单测（frontend 那一步），
+# 对着同一份 expected.json（摘要、条目、建议与文案逐字）。
 $fixtures = Join-Path $root "schema\fixtures\recipes"
 $expected = Get-Content (Join-Path $fixtures "expected.json") -Raw -Encoding UTF8 | ConvertFrom-Json
 foreach ($prop in $expected.recipes.PSObject.Properties) {

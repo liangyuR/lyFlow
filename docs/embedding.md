@@ -118,6 +118,7 @@ lyflow::RunResult result = client.run(graphJson, options);
 - 图没声明的名字 → 这次运行的校验阶段报 `unknown_param`，一个节点都不跑。
 - 值在展开期写进被绑定的节点参数，所以缓存键跟着变：改一个顶层参数，只有它绑定的节点及其下游会重算。
 - CLI 的对应物是 `--param <名字>=<json>`，同一张图、同一组值，两边结果一致。
+- 一组取值存成文件就是配方，按名字切换见下一节「[按名字切换配方](#按名字切换配方)」。
 - 图参数声明了 `type`（完整规格，param-recipe P1.1）时，`default` 与传进来的值都先按这份规格查：
   类型、硬限位 `min`/`max`、`options`。不合法报 `bad_param`，`paramPath` 是图参数名、`nodeId` 为空，
   整次运行不执行任何节点；之后照旧走被绑定节点自己的参数规整。没有 `type` 的老图参数跳过第一步。
@@ -125,6 +126,61 @@ lyflow::RunResult result = client.run(graphJson, options);
   params_json)` 与 `lyflow_plan_params(graph, baseDir, targets, n, params_json)`（v11 里追加，ABI 号不变）
   与 `lyflow_validate` / `lyflow_plan` 同义，只多一个 `params_json`。`client.hpp` 的 `validate` / `plan`
   与 `lyflow-client` 的 `validate_with_params` / `plan_with_params` 各多一个可选参数。
+
+## 按名字切换配方
+
+配方（[recipe.md](recipe.md)）是顶层图参数的一组取值，存在图文件旁边：`<图文件名去扩展名>.recipes/<名字>.lyflow-recipe.json`，
+`车门缝隙.lyflow.json` 的配方在 `车门缝隙.recipes/` 里，目录里可选的 `index.json` 记着默认配方 `{ "default": "名字" }`。
+**C ABI 不认识配方**（param-recipe K3）：宿主读文件、做失配检查、把值当 `params_json` 交给 core。编辑器、CLI 的 `--recipe`
+与 MCP 走的都是这一条路，同一张图、同一个配方、同一帧数据，三处结果逐位相同（P4 验收 26）。
+
+### 三步：读文件 → 失配检查 → 合成 params_json
+
+```cpp
+// 宿主自己的 JSON 库（这里写成 nlohmann::json 的样子）。Client 不解析 JSON。
+std::string recipeFile = recipeDir + "/" + name + ".lyflow-recipe.json";
+auto recipe = json::parse(readUtf8(recipeFile));                 // 读不出来 → 拒绝切换
+if (recipe.value("schemaVersion", 1) > 1) reject("配方格式比这个宿主新");
+std::string paramsJson = recipe.value("values", json::object()).dump();
+
+// ①–③：拿这组取值校验一次。多出的名字 → unknown_param；类型 / 限位 / options → bad_param（nodeId 为空，paramPath 是图参数名）
+auto diags = json::parse(client.validate(graphJson, baseDir, paramsJson));
+for (auto& d : diags) if (d["severity"] == "error") reject(d["paramPath"], d["message"]);   // 留在上一个配方
+
+// ④：配方是不是对着这张图写的。只记日志、不拦（编辑器里这一条是「规格变了」，给「按当前图更新记录」）
+if (recipe["graph"].value("id", "") != graphId) warn("配方写的时候对着的不是这张图");
+
+current = paramsJson;                                            // 下一次触发起生效
+client.run(graphJson, lyflow::RunOptions().setParamsJson(current));
+```
+
+- **`params_json` 就是配方的 `values` 原样**：没写的名字 core 用 `default`，不要把基础抄一遍，更不要在上一个配方的取值上再叠
+  （K4：总是从基础重新算。只覆盖新配方里写了的那几项、其余留着上一个配方的值，是 MERLIC 的反例，结果取决于切换顺序）。
+- 失配判据与编辑器、CLI 同一套：编辑器与 CLI 各有一份实现（`packages/editor/src/lib/recipes.ts`、`bridge/src/recipe.rs`，对着同一组
+  夹具），core 的 `bad_param` / `unknown_param` 是权威，三者对共享夹具的每一条都一致。宿主要与编辑器**一模一样的报告与修复建议**
+  （「夹到限位：5」「改为 30000」）时，交给 `lyflow recipes <图> --recipe <文件> --json`。
+- ④ 要比 `specDigest` 的话，算法在 [recipe.md](recipe.md) §3（SHA-256 + 一段规范化 JSON）；不想实现就只比 `graph.id`，
+  或者上线前用 `lyflow recipes <图> --json` 把整个目录体检一遍。④ 从来不阻止运行。
+- Rust 宿主：`lyflow-client` 的 `validate_with_params` 与 `RunSpec::with_params_json`，同一回事。
+
+### 推荐的产线切换流程
+
+照工业视觉里成熟的做法（[param-recipe-research.md](param-recipe-research.md) §2：Keyence 的「按编号切程序 + ACK/NACK」、
+MERLIC 的默认配方）：
+
+1. **开机**：载入图一次；读 `index.json` 的 `default` 作为当前配方（没有就是「基础」= 不传 `params_json`）。把目录里所有配方各
+   `validate` 一遍，不能用的列给上位机 —— 坏配方在开班前暴露，而不是换型那一刻。
+2. **收到切换命令**（PLC 给名字，或者给编号、由宿主维护「编号 → 名字」的对照表）：只在两次检测之间切，正在跑的那一次用旧取值
+   跑完。按上面三步检查新配方：
+   - 通过 → 替换「当前 `params_json`」，回 **ACK**；
+   - 文件不存在、读不出来、有 ①–③ → 回 **NACK** 并带上原因（哪个配方、哪个参数、为什么），**留在上一个配方**，不回退到基础；
+   - 只有 ④ → ACK，同时记一条警告。
+3. **每次触发**：`run(graph, RunOptions().setParamsJson(current))`。结果仓按内容寻址，切回之前用过的配方，上游没变的节点直接命中缓存。
+4. **运行时的 `bad_param`**（理论上第 2 步已经挡住，除非图被换过）当作配方错误上报，并保持当前配方不变，等人处理。
+5. **离线复现**：现场用的是哪个配方，就 `lyflow run <图> --recipe <那个文件> --summary` 在工位外复现；
+   `lyflow validate --recipe` 与宿主的第 2 步是同一个判定（失配退出码 4）。
+
+不做：配方的权限、审批、版本、继承（计划「不做」）；配方由工程师在编辑器里维护，宿主只读。
 
 ## 部分运行：targets、isolate、force
 

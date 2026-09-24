@@ -102,7 +102,7 @@ test("specDigest：名字按码点序排（BMP 外的字符也与 Rust 的字节
 
 // ------------------------------------------------------------ 四类失配：共享夹具
 
-test("失配报告：graph.recipes/ 里每个文件的条目（类别、参数、建议）与 expected.json 逐条相同", () => {
+test("失配报告：graph.recipes/ 里每个文件的条目（类别、参数、建议、文案）与 expected.json 逐条相同", () => {
   const files = readdirSync(new URL(`${FIX}graph.recipes/`, root)).filter((f) => f.endsWith(".lyflow-recipe.json"));
   assert.deepEqual(files.sort(), Object.keys(expected.recipes).sort(), "夹具目录与 expected.json 列的文件对不上");
   for (const file of files) {
@@ -111,13 +111,24 @@ test("失配报告：graph.recipes/ 里每个文件的条目（类别、参数�
     const report = recipeReport(fixtureDoc, parsed);
     const want = expected.recipes[file];
     assert.equal(report.blocking, want.blocking, `${file} 的 blocking`);
+    // message / fixLabel 也在夹具里：P4 的 Rust 实现（bridge/src/recipe.rs）对着同一份逐字比，CLI 的 stderr 与编辑器同一套用语
     assert.deepEqual(
-      report.items.map((m) => ({ kind: m.kind, param: m.param, fix: m.fix })),
+      report.items.map((m) => ({ kind: m.kind, param: m.param, fix: m.fix, message: m.message, fixLabel: m.fixLabel })),
       want.items,
       `${file} 的条目`,
     );
     for (const m of report.items) assert.ok(m.message && m.fixLabel, `${file} ${m.param} 缺文案`);
   }
+});
+
+test("失配：constructor、toString、__proto__ 这类名字也是「多出」（只认 doc.params 自己的键，docs/recipe.md ①）", () => {
+  const values = JSON.parse('{"constructor": 1, "toString": 2, "__proto__": 3}');
+  const r = recipeReport(fixtureDoc, { values, graph: graphRefOf(fixtureDoc) });
+  assert.deepEqual(
+    r.items.map((m) => [m.kind, m.param]),
+    [["extra", "__proto__"], ["extra", "constructor"], ["extra", "toString"]],
+  );
+  assert.equal(r.blocking, 3);
 });
 
 test("失配修复：按建议全部修完后 ①–③ 清零、④ 也消失（记成当前图），并且只改了报告里那几个值", () => {

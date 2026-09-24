@@ -46,6 +46,8 @@ libloading = "0.8.9"
 # 路径解析、进程单例与热重载 —— 见 core_ffi.rs。
 lyflow-client = { path = "../crates/lyflow-client" }
 notify = { version = "8.2.0", default-features = false }
+# 配方的规格摘要（specDigest，docs/recipe.md §3）。Tauri 本来就间接依赖它，锁文件里的同一个版本。
+sha2 = "0.10"
 
 [features]
 default = ["desktop"]

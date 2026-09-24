@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { evalArgv, paramsArgv, patchArgv, perturbArgv } from "../src/argv.js";
+import { evalArgv, paramsArgv, patchArgv, perturbArgv, recipesArgv } from "../src/argv.js";
 
 test("eval 的 summary 默认不给 —— 体积是逐行的（ADR-0022 / m6-plan §10 第 5 条）", () => {
   const off = evalArgv({ graphPath: "g", metric: ["outputs.gap"] }, null);
@@ -40,6 +40,29 @@ test("params 永远带 --json，过滤项照给", () => {
       "--json",
     ],
   );
+});
+
+test("recipe（param-recipe P4.2）：params / eval 透传成 --recipe，list_recipes 与 run_graph 用 recipes --json", () => {
+  assert.deepEqual(paramsArgv({ graphPath: "g.lyflow.json", recipe: "g.recipes/A.lyflow-recipe.json", only: "graph" }), [
+    "params",
+    "g.lyflow.json",
+    "--only",
+    "graph",
+    "--recipe",
+    "g.recipes/A.lyflow-recipe.json",
+    "--json",
+  ]);
+  const e = evalArgv({ graphPath: "g", metric: ["outputs.gap"], recipe: "A.lyflow-recipe.json" }, null);
+  assert.deepEqual(e.slice(e.indexOf("--recipe"), e.indexOf("--recipe") + 2), ["--recipe", "A.lyflow-recipe.json"]);
+  assert.equal(evalArgv({ graphPath: "g", metric: ["outputs.gap"] }, null).includes("--recipe"), false);
+  assert.deepEqual(recipesArgv("g.lyflow.json"), ["recipes", "g.lyflow.json", "--json"]);
+  assert.deepEqual(recipesArgv("g.lyflow.json", "B.lyflow-recipe.json"), [
+    "recipes",
+    "g.lyflow.json",
+    "--recipe",
+    "B.lyflow-recipe.json",
+    "--json",
+  ]);
 });
 
 test("eval 把多个 metric 与多个 param 都展成重复选项", () => {

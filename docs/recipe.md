@@ -2,11 +2,11 @@
 
 同一张 flow，不同的产品、车型、工位用不同的一组参数值：这一组值就是一个**配方**，存在独立的文件里。
 设计与分期见 [param-recipe-plan.md](param-recipe-plan.md)（K1–K8、P3），调研见 [param-recipe-research.md](param-recipe-research.md)。
-这一份是 P3 定下来的格式与规则；CLI（`--recipe`）、MCP、宿主怎么按名字切配方是 P4 的事，届时补在后面。
+格式与规则是 P3 定下来的（§1–§7）；CLI 的 `--recipe`、MCP 的 `recipe` 与 `list_recipes`、宿主怎么按名字切配方是 P4（§8–§10）。
 
 - **配方 = 顶层图参数的稀疏覆盖**，只有一层，配方之间不继承（K1）。没写的图参数用它的 `default`，叫「基础」。
 - **有效值 = default ← 当前配方**，总是从基础重新叠，不叠在上一个配方上（K4）。
-- core 不知道配方的存在：编辑器（以后是 CLI、宿主）把有效值合成 `{名字: 值}`，经 `RunOptions.params` / C ABI 的
+- core 不知道配方的存在：编辑器、CLI、宿主各自把有效值合成 `{名字: 值}`，经 `RunOptions.params` / C ABI 的
   `params_json` 交给它（K3）。结果仓按内容寻址，切回原来的配方就是命中缓存。
 - 任何节点参数都可以一键「纳入配方」= 提升为图参数（K2，见 [graph-doc.md](graph-doc.md)「顶层图参数」）。
 
@@ -76,17 +76,18 @@ label、单位、group、softMin/softMax、step、default、binds、doc 都**不
 
 ## 4. 四类失配
 
-加载时（以及之后 doc 或配方每变一次）对每个配方算一份报告。实现是编辑器的纯函数 `recipeReport`
-（`packages/editor/src/lib/recipes.ts`）；P4 的 CLI 在 Rust 里再实现一遍，**两边对着同一组夹具**：
-[`schema/fixtures/recipes/`](../schema/fixtures/recipes/)（`graph.lyflow.json` + `graph.recipes/` 里每类一个配方文件 +
-`expected.json` 里期望的条目）。规则改了，两边与夹具一起改。
+加载时（以及之后 doc 或配方每变一次）对每个配方算一份报告。实现有两份：编辑器的纯函数 `recipeReport`
+（`packages/editor/src/lib/recipes.ts`）与 CLI 的 `recipe_report`（`bridge/src/recipe.rs`，MCP 经 CLI 用它），
+**两边对着同一组夹具**：[`schema/fixtures/recipes/`](../schema/fixtures/recipes/)（`graph.lyflow.json` + `graph.recipes/`
+里每类一个配方文件 + `expected.json` 里期望的条目，连 `message` / `fixLabel` 的文案一起，`@lyflow/editor` 的单测与
+`cargo test` 逐字比）。规则改了，两边与夹具一起改。
 
 报告的顺序：④ 在前（整个配方的事），然后按参数名的码点序；**每个参数至多一条**，取第一个不满足的：① → ② → ③。
 一条 = `{ kind, param, fix }`，`fix` 是 `{action: "delete"}`、`{action: "set", value}` 或 `{action: "rebase"}`。
 
 | # | 类别 | 判据 | 建议 |
 |---|---|---|---|
-| ① | 多出（`extra`） | `values` 里的名字在图参数里不存在（改名或删掉了） | 删除这个值 |
+| ① | 多出（`extra`） | `values` 里的名字在图参数里不存在（改名或删掉了）。只认 doc `params` 自己的键：`constructor`、`toString` 这类名字也是多出 | 删除这个值 |
 | ② | 类型不符（`type`） | 值不符合图参数的 `type`（下表） | 能转换就转换（**转换后再夹进限位**），否则删除 |
 | ③ | 越界 / 非法（`range`） | 不满足 min/max，或 enum 不在 options 里 | 数夹到限位（向量、颜色、transform 逐分量，曲线逐个 y）；enum 改为默认（删除这条覆盖） |
 | ④ | 规格变了（`spec`） | 文件里的 `graph.id` 或 `specDigest` 与当前图不同，或文件里没记 | 提示，不阻止；建议「按当前图更新记录」（`rebase`） |
@@ -159,7 +160,62 @@ Tauri（`bridge/src/commands.rs`「配方文件」）与 HTTP（[http-transport.
 - 路径里不许有 `..`；Tauri 要绝对路径；HTTP 只认工作区里的路径（逃出去 403）；
 - 写的内容必须是一个 JSON 对象的文本，先写临时文件再改名覆盖。
 
-## 8. 待 P4 补充
+## 8. CLI：`--recipe`
 
-CLI `--recipe <文件>`（与 `--param` 叠加，`--param` 优先；失配 ①–③ 退出码 4、stderr 打印报告）、MCP 的 `recipe` 参数与
-`list_recipes`、宿主按名字切配方的推荐流程（读配方文件 → 失配检查 → 合成 `params_json`）写在这里与 [embedding.md](embedding.md)。
+`lyflow run` / `validate` / `plan` / `params` / `eval` / `patch` 认 `--recipe <配方文件>`（同样经图装载的 `dump` / `sweep` /
+`perturb` 也认；`migrate` 拒绝它，免得 `--write` 把配方烙进图）。一次只能给一个配方（配方之间不叠加，K4）。
+
+```bash
+lyflow run   车门缝隙.lyflow.json --recipe 车门缝隙.recipes/车型A·左前门.lyflow-recipe.json --summary
+lyflow run   车门缝隙.lyflow.json --recipe 车门缝隙.recipes/车型A·左前门.lyflow-recipe.json --param cutMax=2   # --param 优先
+lyflow eval  车门缝隙.lyflow.json --recipe …/车型A·左前门.lyflow-recipe.json --samples s.jsonl --metric outputs.gap
+lyflow recipes 车门缝隙.lyflow.json --json        # 列配方目录：名字、值个数、失配、默认配方
+```
+
+- **取值的叠法**：基础（图里的 `default`）→ `--recipe` → `--param`，后写的赢。实现上配方的值与 `--param` 一样写成图参数的
+  `default` 再交给 core（与 `params_json` 同一个结果，cargo test 对着 cacheKey 与点数比过）；`--set` 照旧只能改没被绑定的节点参数。
+- **`eval`**：配方作用于所有样本。`--params <paramsets.json>` 的参数组里**不含 `.` 的键是顶层图参数**（与 `--param` 同一条区分
+  规则），写在配方之上；命令行的 `--param` 最后写，永远说了算。完整顺序：基础 → 配方 → 参数组 → `--param`。参数组里写了图没声明
+  的名字是 `unknown_param`，退出码 4。
+- **`patch --recipe`**：把配方的值**写回基础**（落盘改图参数的 `default`，等于在编辑器里对每一行点「写回基础」）。动作顺序
+  remove → add → rewire → set → recipe → param，回执 `applied.recipe` 列出改了的名字；全部同值是 no-op。
+- **失配 ①–③**：不跑、不写，**退出码 4**，stderr 逐条列出（与编辑器同一套用语，`[类别] 参数：原因 → 建议`）：
+
+  ```
+  recipe_mismatch: 配方「range」有 6 处失配，不能运行（…/graph.recipes/range.lyflow-recipe.json）：
+    [越界] cutField：'w' 不在选项里（x / y / z / intensity） → 改为默认（删除这条覆盖）
+    [越界] cutMax：不能大于 5 → 夹到限位：5
+    [越界] leafSize：第 2 个分量不能大于 10 → 夹到限位：[0.02,10,0.0001]
+    …
+    有失配时这个配方不能运行；其余配方不受影响。到编辑器的「配方管理」按建议修复，或者改配方文件
+  ```
+
+  判定对着配方文件本身，不看 `--param`：同名的 `--param` 盖掉一个越界值也仍然退出码 4 —— 该修的是配方文件。
+- **失配 ④**：stderr 一行「提示：配方「X」[规格变了] …」，退出码不变，值照常用上。CLI 不改配方文件（不重盖章，§5 的 touch
+  只在编辑器里发生）。
+- 配方文件读不出来（不存在、不是 JSON、`schemaVersion` 太新）：`bad_recipe:`，退出码 4。
+- **`lyflow recipes <graph> [--recipe <文件>]... [--json]`**：只读。按目录约定（§2）找 `<图名>.recipes/`，每个配方一行
+  `{kind: "recipe", name, file, default, values, blocking, items: [{kind, param, message, fix, fixLabel}], note?, notes?}`，
+  最后一行 `{kind: "recipe_dir", dir, exists, default, order, count, problems, graphId, specDigest}`；给了 `--recipe` 就只看那几个
+  文件（可以在目录外），每行另带 `params`（合成好的取值，给宿主与 MCP 用）。失配是报告的内容，退出码 0。
+
+## 9. MCP
+
+- `run_graph` 与 `get_params` 多一个 `recipe`（配方文件路径，`list_recipes` 给的 `file`）；`eval` 同样有 `recipe`（透传 `--recipe`）。
+  `run_graph` 带 `recipe` 时先经 `lyflow recipes --recipe` 查失配、取合成好的 `params`，再经 HTTP 信封的 `params` 交给后端
+  （判定只有 Rust 一份，MCP 不写第三份）；①–③ 时不碰后端、报错里带条目，④ 放在返回的 `recipe.warnings`。需要 `LYFLOW_CLI`。
+- `list_recipes { graphPath }`：图旁配方目录里的每个配方（名字、`file`、值个数、`runnable`、四类各几条、条目与建议、默认星标）。
+  只读；**不提供写配方的工具**（P4.2）。形状见 [mcp.md](mcp.md)。
+
+## 10. 宿主按名字切换配方
+
+C ABI 不认识配方：宿主读配方文件、查失配、合成 `params_json`，完整流程与失败处理见
+[embedding.md](embedding.md)「按名字切换配方」。要点：
+
+1. 配方文件在 `<图文件名去扩展名>.recipes/<名字>.lyflow-recipe.json`；名字是文件名（§2）。
+2. 失配检查：把配方的 `values` **原样**当 `params_json` 交给 `lyflow_validate_params`。①多出的名字 core 报 `unknown_param`，
+   ②③ 报 `bad_param`（`nodeId` 为空、`paramPath` 是图参数名），判据与编辑器、CLI 同一套（core 本来就是权威，P1.2；共享夹具的
+   `type` / `range` 两份配方逐条对过）。有 error 就拒绝切换。④ 由宿主自己比文件里的 `graph.id` 与 `specDigest`（算法 §3），或者
+   交给 `lyflow recipes`，它给出与编辑器同一份报告与修复建议。
+3. 校验通过的那份 `params_json` 就是运行用的：没写的名字 core 用 `default`，不必把基础抄一遍。
+4. 切换在两次检测之间做，失败就留在上一个配方，并把原因报给 PLC / 上位机。

@@ -8,6 +8,7 @@ pub mod graph;
 mod patch;
 pub mod pcd;
 mod perturb;
+pub mod recipe;
 pub mod ulid;
 
 #[cfg(feature = "desktop")]

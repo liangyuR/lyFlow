@@ -154,8 +154,8 @@ GraphDoc 是稀疏存储，只存改过的键（`docs/graph-doc.md`）。所以�
 事的人通常是打开图文件肉眼找那个键在不在。`lyflow params` 把这个 join 做好了：
 
 ```bash
-lyflow params g.lyflow.json [--node <id>]... [--only explicit|default|bound] \
-              [--set <节点>.<参数>=<json>]... [--param <名字>=<json>]... [--base-dir <dir>] [--json]
+lyflow params g.lyflow.json [--node <id>]... [--only explicit|default|bound|graph] \
+              [--set <节点>.<参数>=<json>]... [--recipe <配方文件>] [--param <名字>=<json>]... [--base-dir <dir>] [--json]
 ```
 
 每行 `{ node, op, param, value, source, unit?, min?, max? }`；不带 `--json` 是对齐过的表格，
@@ -169,6 +169,12 @@ lyflow params g.lyflow.json [--node <id>]... [--only explicit|default|bound] \
 
 被顶层参数绑定的节点参数不能用 `--set` 改（报错，退出码 4，提示改用 `--param`）——
 改 `--param <名字>=<json>`，一处取值同时写进它绑定的所有节点。
+
+图旁有配方（`<图名>.recipes/`，[recipe.md](recipe.md)）时，先 `lyflow recipes <图>` 看有哪几个、哪个是默认、有没有失配；
+按某个配方问生效值、跑、评估，都是加一个 `--recipe <配方文件>`（叠加顺序 基础 → 配方 → `--param`，所以 `--param` 还能在配方
+之上再改一项）。配方有失配 ①多出 ②类型不符 ③越界 时命令直接退出码 4，stderr 逐条写着哪个参数、为什么、建议改成什么 ——
+**修配方文件，不要用 `--param` 盖过去**（盖了也照样退出码 4，判定只看文件）。工具链不写配方：调出来的一组值要进配方，交给
+工程师在编辑器里改，或者 `lyflow patch --recipe` 把整个配方写回基础。
 
 **这个 join 由 core 做**（`lyflow_effective_params`），不是 CLI 自己重算一遍默认值合并、类型
 规整、参数迁移 —— 桥接层若自己重算，迟早会和执行器真正用的那份漂开，漂开的表现是「参数明明
@@ -424,7 +430,9 @@ lyflow eval g.lyflow.json \
 | `lyflow perturb …` | `perturb` | 只回 `perturb_summary` 与不通过的样本；**全部** `perturb_sample` 落盘给 `samplesPath` |
 | `lyflow diff a b --json` | `diff_graphs` | 原样 |
 | `lyflow patch <g> --remove-node … --rewire … --dry-run` | `patch_graph` | 四个动作是四个数组（`removeNode` / `addNode` / `rewire` / `set`）；**`dryRun` 默认 true**，要真写得显式给 `dryRun: false`，`out` 必须配着它给 |
-| `lyflow params <g> --only … --set …` | `get_params` | 字段同名（`node` / `only` / `set` / `baseDir`），`--json` 由工具自己加；回 `{ count, params: [...] }`，一行一个参数。未知节点 / 未知参数在 CLI 那边是退出码 4，工具据此报错并把诊断带回来 |
+| `lyflow params <g> --only … --set …` | `get_params` | 字段同名（`node` / `only` / `set` / `recipe` / `baseDir`），`--json` 由工具自己加；回 `{ count, params: [...] }`，一行一个参数。未知节点 / 未知参数 / 配方失配在 CLI 那边是退出码 4，工具据此报错并把诊断或 stderr 带回来 |
+| `lyflow recipes <g> --json` | `list_recipes` | 每个配方一项：`runnable`、四类失配各几条、`items`（`kind/param/message/fixLabel`）、默认星标；只读，没有写配方的工具 |
+| `lyflow run <g> --recipe <文件>` | `run_graph` 的 `recipe` | 失配 ①–③ 时不跑、报错带条目（CLI 是退出码 4）；跑成了返回里多一个 `recipe` |
 
 ### `eval` / `perturb` 的选项逐条对照
 
@@ -450,6 +458,7 @@ CLI 上有的，MCP 上要么有同名字段，要么在这里写明不提供 �
 | `--csv` | `csv` | `csv` | 路径原样透传，返回里回 `csvPath` |
 | `--base-dir` | `baseDir` | `baseDir` | — |
 | `--set` | `set` | `set` | 字符串数组，写法与 CLI 完全一样 |
+| `--recipe` | `recipe` | **MCP 不提供** | 配方文件路径，作用于所有样本；`perturb` 测的是灵敏度，不按配方跑 |
 | `--no-cache` | `noCache` | `noCache` | 布尔 |
 | `--parallel` | **MCP 不提供** | **MCP 不提供** | 它是传给 core 的节点并行度，不在判断的关键路径上 |
 | `--after` | — | `after` | — |

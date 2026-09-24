@@ -46,16 +46,20 @@
 .toolbar__doc {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
   margin-left: auto;
-  min-width: 0;
-  flex-shrink: 1;
+  /* 不写 min-width: 0：它最窄就是图名框的下限 + 配方下拉框，再挤就轮到运行区的状态文字（那里 min-width 是 0）。
+     有富余时它长，长出来的给图名框（到 180px 为止） */
+  flex: 1 0 auto;
 }
 
 .toolbar__name {
-  width: 180px;
-  min-width: 72px;
-  flex-shrink: 1;
+  /* 至少完整放下 8 个汉字（12px 字 = 1em 一个，另加左右内边距与边框），有富余再长到 180px：工具栏挤的时候
+     先让运行区的状态文字与文件名让位（下面的 1440 断点），图名不再被截成「车门缝隙检」 */
+  flex: 1 0 auto;
+  width: calc(8em + 22px);
+  max-width: 180px;
   padding: 3px 8px;
   background: var(--lyflow-bg-0);
   border: 1px solid var(--lyflow-border);
@@ -803,6 +807,10 @@
 .toolbar__group--run {
   align-items: center;
   gap: 8px;
+  /* 运行区右半边是状态文字（耗时、done/error、将重算、错误）：地方不够时它先收，按钮在最左边不受影响 */
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
 }
 
 .toolbar__run:not(:disabled) { color: #9ce6ad; }
@@ -829,6 +837,8 @@
 .toolbar__runerror {
   color: #ff9a9a;
   font-size: 12px;
+  flex: 0 1 auto;
+  min-width: 40px;
   max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1500,3 +1510,17 @@
 }
 .insp-gparam__head { display: flex; align-items: center; gap: 6px; }
 .insp-gparam__name { font-family: var(--lyflow-mono); font-size: 10px; color: var(--lyflow-fg-2); }
+
+/* ------------------------------------------------ 窄窗口下的工具栏（放在文件末尾：要压过上面各处的同名规则） */
+
+/* 1280–1440 宽的窗口（param-recipe P4 顺手修）：间距与按钮内边距收窄、撤销 / 重做只留箭头、文件名收起
+   （图名框的 title 是路径），省出来的给图名 —— 1280 宽时图名框仍能完整放下 8 个汉字。
+   选择器与 DOM 都不变（e2e 按 data-testid 与按钮文字找它们，隐藏的只是 .toolbar__label 里的字）。 */
+@media (max-width: 1440px) {
+  .toolbar { gap: 8px; padding: 0 6px; }
+  .toolbar button { padding: 4px 6px; }
+  .toolbar__label,
+  .toolbar__path { display: none; }
+  .toolbar__group--run { gap: 6px; }
+  .toolbar__elapsed { min-width: 0; }
+}

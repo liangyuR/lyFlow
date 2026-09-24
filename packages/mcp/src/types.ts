@@ -142,4 +142,6 @@ export interface RunEnvelope {
   previewMaxPoints?: number | null;
   previewBudgetMs?: number | null;
   sceneId?: string | null;
+  /** 顶层图参数的取值 `{名字: 值}`（http-transport.md「params」）。带 recipe 的 run_graph 由配方合成。 */
+  params?: Record<string, unknown> | null;
 }

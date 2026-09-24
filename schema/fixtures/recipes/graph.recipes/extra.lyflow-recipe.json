@@ -11,8 +11,9 @@
       0.05,
       0.05
     ],
+    "constructor": 1,
     "cutMax": 1.5
   },
-  "note": "① 多出：voxelSize 在图里不存在（改名或删掉了）",
+  "note": "① 多出：voxelSize 在图里不存在（改名或删掉了）；constructor 也不是图参数（不能从 JS 对象的原型链上摸到）",
   "updatedAt": "2026-09-24T08:00:00.000Z"
 }

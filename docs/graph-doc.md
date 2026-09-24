@@ -185,6 +185,11 @@ Bundle、kind 里确实声明了这个字段，否则报 `unknown_port`；`lyflo
 - 运行期取值：CLI `run` / `validate` / `plan` / `params` / `eval` / `patch` 用
   `--param <名字>=<json>`（值先按 JSON 解析，解析不了当字符串，与 `--set` 同一条规则）；
   C ABI 用 `lyflow_run_options.params_json`（见 [embedding.md](embedding.md)）。不传就用 `default`。
+- 一组取值存成文件就是**配方**（`<图名>.recipes/<名字>.lyflow-recipe.json`，[recipe.md](recipe.md)）。CLI 的
+  `run` / `validate` / `plan` / `params` / `eval` / `patch` 认 `--recipe <文件>`：叠加顺序 `default` → `--recipe` → `--param`
+  （`--param` 覆盖配方里的同名值；`eval` 的参数组夹在配方与 `--param` 之间，`patch --recipe` 把配方的值写回 `default`）。
+  配方有失配 ①多出 ②类型不符 ③越界 时不跑、退出码 4，stderr 逐条列出与建议；④规格变了只提示。宿主按名字切换配方见
+  [embedding.md](embedding.md)「按名字切换配方」，列一张图的配方用 `lyflow recipes <图>`。
 - `lyflow params` 里被顶层参数写入的那一行 `source` 是 `graph`，另带 `graphParam: "<名字>"`。
 
 规则（前三条是 validate 诊断，图跑不起来）：

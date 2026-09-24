@@ -20,6 +20,8 @@ export interface EvalInput extends SampleSelector {
   csv?: string | undefined;
   baseDir?: string | undefined;
   set?: string[] | undefined;
+  /// 配方文件路径（param-recipe P4）：作用于所有样本，叠在基础之上、参数组与 param 之下。
+  recipe?: string | undefined;
   noCache?: boolean | undefined;
   /// 每行 eval_row 带一份 run summary（ADR-0022）。默认关：体积是逐行的。
   summary?: boolean | undefined;
@@ -100,6 +102,7 @@ export function evalArgv(input: EvalInput, paramsFile: string | null): string[] 
   if (input.groupBy) argv.push("--group-by", input.groupBy);
   if (input.csv) argv.push("--csv", input.csv);
   for (const s of input.set ?? []) argv.push("--set", s);
+  if (input.recipe) argv.push("--recipe", input.recipe);
   if (input.noCache) argv.push("--no-cache");
   if (input.summary) argv.push("--summary");
   return argv;
@@ -108,8 +111,10 @@ export function evalArgv(input: EvalInput, paramsFile: string | null): string[] 
 export interface ParamsInput {
   graphPath: string;
   node?: string[] | undefined;
-  only?: "explicit" | "default" | "bound" | undefined;
+  only?: "explicit" | "default" | "bound" | "graph" | undefined;
   set?: string[] | undefined;
+  /// 配方文件路径（param-recipe P4）：图参数取「default ← 配方」之后的值。
+  recipe?: string | undefined;
   baseDir?: string | undefined;
 }
 
@@ -119,6 +124,16 @@ export function paramsArgv(input: ParamsInput): string[] {
   for (const n of input.node ?? []) argv.push("--node", n);
   if (input.only) argv.push("--only", input.only);
   for (const s of input.set ?? []) argv.push("--set", s);
+  if (input.recipe) argv.push("--recipe", input.recipe);
+  argv.push("--json");
+  return argv;
+}
+
+/** `lyflow recipes <graph> [--recipe <文件>] --json`：list_recipes 列目录，run_graph 带 recipe 时
+ *  拿它查失配、取合成好的图参数（一份实现在 bridge/src/recipe.rs，MCP 不再写第三份）。 */
+export function recipesArgv(graphPath: string, recipe?: string | undefined): string[] {
+  const argv = ["recipes", graphPath];
+  if (recipe) argv.push("--recipe", recipe);
   argv.push("--json");
   return argv;
 }
