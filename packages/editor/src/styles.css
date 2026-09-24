@@ -1,6 +1,9 @@
 /* 设计变量与基础样式，只在这里定义、别处只消费；编辑器样式在 styles.editor.css。
    暗色是节点编辑器的默认预期（ComfyUI / Blender / Houdini），点云在暗底上也更好看。 */
 
+/* 全部动效（时长变量、keyframes、hover）集中在一个文件里（docs/motion-plan.md A2） */
+@import "./styles.motion.css";
+
 /* 定义在编辑器根元素上而不是 :root：宿主页面的其余部分不该被我们改色。
    宿主想换皮就在更外层或 `theme` prop 里覆盖同名变量。 */
 .app {
@@ -236,7 +239,6 @@ body.is-resizing .app__viewer {
 
 .tree-branch__caret {
   display: inline-block;
-  transition: transform 0.12s ease;
   color: var(--lyflow-fg-2);
   font-size: 10px;
 }

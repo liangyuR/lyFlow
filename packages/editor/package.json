@@ -21,17 +21,19 @@
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",
-    "immer": "^11.1.18"
+    "immer": "^11.1.18",
+    "motion": "^12.43.0"
   },
   "peerDependencies": {
+    "@tauri-apps/api": "^2",
     "@xyflow/react": "^12.11.6",
     "react": "^18.3.1 || ^19.0.0",
     "react-dom": "^18.3.1 || ^19.0.0",
     "three": ">=0.160.0 <1",
-    "zustand": "^5.0.2",
-    "@tauri-apps/api": "^2"
+    "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@tauri-apps/api": "^2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@types/three": "^0.169.0",
@@ -40,8 +42,7 @@
     "react-dom": "^18.3.1",
     "three": "^0.169.0",
     "typescript": "^5.7.2",
-    "zustand": "^5.0.2",
-    "@tauri-apps/api": "^2"
+    "zustand": "^5.0.2"
   },
   "peerDependenciesMeta": {
     "@tauri-apps/api": {

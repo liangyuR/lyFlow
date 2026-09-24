@@ -32,6 +32,13 @@ export interface PendingConnection {
 
 export type DrawerTab = "log" | "diagnostics" | "cache";
 
+/** 鼠标指着的那条连线的两端（docs/motion-plan.md H3）。 */
+export interface HoverEdge {
+  id: string;
+  from: PortRef;
+  to: PortRef;
+}
+
 interface UiState {
   /** 当前所在的子图栈（F2）。空 = 顶层。纯导航状态，不进 doc 也不进撤销栈。 */
   path: SubPath;
@@ -56,6 +63,17 @@ interface UiState {
   pendingFrom: PendingConnection | null;
   /** 与 pendingFrom 兼容的端口集合，键是 `nodeId:portName`。 */
   compatiblePorts: ReadonlySet<string>;
+
+  /** 鼠标指着的节点（H2）：与它相连的边加亮、其余的淡下去。纯 UI 状态，不进 doc 也不进撤销（H5）。 */
+  hoverNodeId: string | null;
+  /** 鼠标指着的连线（H3）：两端的端口与节点跟着亮。 */
+  hoverEdge: HoverEdge | null;
+  /** 拖节点、框选期间暂停 hover 高亮（H2）：那时满屏淡化只会干扰，而且拖动的每一帧
+   *  都会穿过别的节点，没必要让几百条边跟着来回切。拖连线看的是 pendingFrom。 */
+  hoverPaused: boolean;
+  setHoverNode(id: string | null): void;
+  setHoverEdge(edge: HoverEdge | null): void;
+  setHoverPaused(paused: boolean): void;
 
   /** 底部抽屉。null = 收起。 */
   drawer: DrawerTab | null;
@@ -124,11 +142,31 @@ export const useUiStore = create<UiState>((set, get) => ({
   pinnedNode: null,
   pendingFrom: null,
   compatiblePorts: NO_PORTS,
+  hoverNodeId: null,
+  hoverEdge: null,
+  hoverPaused: false,
   drawer: null,
   helpOpen: false,
   focusedDiagnostic: null,
   autoHint: null,
   roiFrame: {},
+
+  // 三个 hover setter 都先比对再写：mouseenter 会连发，而每次写入都会让所有连线的
+  // selector 跑一遍（与 setSelection 同一个道理）。
+  setHoverNode(id) {
+    if (get().hoverNodeId === id) return;
+    set({ hoverNodeId: id });
+  },
+  setHoverEdge(edge) {
+    const cur = get().hoverEdge;
+    if (cur === edge || (cur && edge && cur.id === edge.id)) return;
+    set({ hoverEdge: edge });
+  },
+  setHoverPaused(paused) {
+    if (get().hoverPaused === paused) return;
+    // 暂停时顺手清掉：拖完松手时鼠标多半已经不在原来那个节点上了
+    set(paused ? { hoverPaused: true, hoverNodeId: null, hoverEdge: null } : { hoverPaused: false });
+  },
 
   setRoiFrame(nodeId, key) {
     if (get().roiFrame[nodeId] === key) return;
@@ -210,6 +248,9 @@ export const useUiStore = create<UiState>((set, get) => ({
       path: [...get().path, segment],
       selectedNodes: new Set(),
       selectedEdges: new Set(),
+      // 换了一层：指着的那个节点/连线不在这一层了，mouseleave 也不会再来
+      hoverNodeId: null,
+      hoverEdge: null,
     });
   },
   exitTo(depth) {
@@ -219,10 +260,12 @@ export const useUiStore = create<UiState>((set, get) => ({
       path: path.slice(0, depth),
       selectedNodes: new Set(),
       selectedEdges: new Set(),
+      hoverNodeId: null,
+      hoverEdge: null,
     });
   },
   setPath(path) {
-    set({ path, selectedNodes: new Set(), selectedEdges: new Set() });
+    set({ path, selectedNodes: new Set(), selectedEdges: new Set(), hoverNodeId: null, hoverEdge: null });
   },
   setAutoRun(on) {
     set({ autoRun: on });

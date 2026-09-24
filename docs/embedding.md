@@ -1,7 +1,8 @@
 # 把 LyFlow 嵌进自己的进程
 
 **Rust 宿主看文末的 [Rust 客户端](#rust-客户端)**，同一套 ABI、同一份安装布局，
-只是换成一个 crate。以下是 C++ 宿主。
+只是换成一个 crate。**要把编辑器界面嵌进自己的 React 页面**看文末的
+[前端编辑器](#前端编辑器lyfloweditor)。以下是 C++ 宿主。
 
 宿主只 include 一个头：`lyflow/client.hpp`。它是 header-only 的，
 只依赖同目录的 `lyflow/c_api.h`，不 include 任何 core 内部头，也不链接任何库 ——
@@ -282,3 +283,28 @@ let spec = RunSpec::new(&graph_json, &run_id, &base_dir, &[])
 **进程级单例、DLL 路径解析与热重载不在这个 crate 里** —— 那三样是宿主自己的策略。
 桥接层的那一份在 [`bridge/src/core_ffi.rs`](../bridge/src/core_ffi.rs)，它就是
 `pub use lyflow_client::*` 再加上这三样，可以照抄。
+
+## 前端编辑器（`@lyflow/editor`）
+
+节点图编辑器本身是一个 React 组件，装法、peer 依赖、`Transport`、对话框注入、主题变量
+见 [`packages/editor/README.md`](../packages/editor/README.md)，最小宿主是 `examples/host-react/`。
+这里只记宿主最常要调的那几个 prop：
+
+```tsx
+<LyFlowEditor
+  transport={transport}          // 必填：TauriTransport / HttpTransport / StaticTransport / 自己的实现
+  dialogs={dialogs}              // 可选：打开/另存/确认对话框
+  graphPath="D:/工作区/流程.lyflow.json"
+  onDocChange={(doc, dirty) => …}
+  theme={{ "--lyflow-accent": "#ff8a3d" }}
+  animations={false}             // 可选：关掉画布动效，默认 true
+/>
+```
+
+`animations`（默认 `true`）管画布上的全部动效（[docs/motion-plan.md](motion-plan.md)）：节点进出场、
+完成/出错的闪光与抖动、连线生长、运行时边上的数据流动、hover 反馈的过渡、自动布局的位置过渡。
+设成 `false` 时这些一律直接落到终态，CSS 的循环与过渡也停掉；编辑与执行的语义不受任何影响。
+用户系统里设了「减少动态效果」（`prefers-reduced-motion: reduce`）时编辑器自己按 `false` 处理，
+宿主不用判断。关掉之后信息不丢：正在流数据的边仍是一条静态高亮，running 的节点仍是蓝框加光。
+适合的场景：录屏/截图要稳定的画面、远程桌面这类重绘很贵的环境、宿主页面自己有一套动效规范。
+`examples/host-react/` 的宿主栏上有一个「动效」开关，就是这个 prop。

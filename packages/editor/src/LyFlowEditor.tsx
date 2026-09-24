@@ -1,4 +1,5 @@
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
+import { MotionConfig } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BottomDrawer } from "./components/BottomDrawer";
@@ -26,6 +27,12 @@ import {
   writeBackup,
 } from "./lib/files";
 import { layoutGraph, needsInitialLayout } from "./lib/layout";
+import {
+  MotionEnabledContext,
+  useMotionEnabled,
+  usePrefersReducedMotion,
+  withLayoutTransition,
+} from "./lib/motion";
 import { fullId, levelOf } from "./lib/subgraph";
 import { formatBytes, refreshCacheStats, schedulePlan, useCacheStore } from "./store/cache";
 import {
@@ -426,7 +433,8 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     const level = levelOf(graph.doc, ui.path);
     const view = { ...graph.doc, nodes: level.nodes, edges: level.edges };
     const moves = layoutGraph(view, ui.selectedNodes.size > 1 ? { only: ui.selectedNodes } : {});
-    graph.applyLayout(moves);
+    // 用户触发的整理才过渡（docs/motion-plan.md N4）；打开文件时的初始布局照旧一步到位
+    withLayoutTransition(() => graph.applyLayout(moves));
     setTimeout(() => void fitView({ duration: 200 }), 50);
   }, [fitView]);
 
@@ -497,12 +505,19 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     });
   }, [onDocChange]);
 
+  // 关动效时 CSS 那一半靠根上的 lyflow-motion-off（系统设置另有 @media 兜底，见 styles.motion.css）
+  const motionOn = useMotionEnabled();
+  const rootClass = ["app", motionOn ? "" : "lyflow-motion-off", className ?? ""]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <div
-      className={className ? `app ${className}` : "app"}
+      className={rootClass}
       ref={root}
       tabIndex={-1}
       data-lyflow-editor="1"
+      data-motion={motionOn ? "on" : "off"}
       style={theme as React.CSSProperties | undefined}
       onMouseMove={onMouseMove}
     >
@@ -586,19 +601,38 @@ export interface LyFlowEditorProps extends WorkspaceProps {
    * 的办法。不给就是老行为。
    */
   sceneId?: string | null | undefined;
+  /** 画布动效（docs/motion-plan.md）。默认开；false 时进出场、闪光、生长、布局过渡全部
+   *  跳到终态，CSS 的循环与过渡一并停掉。系统设了「减少动态效果」时等同于 false。
+   *  流动的边关了动画仍以静态高亮表示「正在流」。 */
+  animations?: boolean | undefined;
 }
 
-export function LyFlowEditor({ transport: t, dialogs: d, sceneId, ...rest }: LyFlowEditorProps) {
+export function LyFlowEditor({
+  transport: t,
+  dialogs: d,
+  sceneId,
+  animations,
+  ...rest
+}: LyFlowEditorProps) {
   // 装在 render 里而不是 effect 里：子树的 store 一挂载就会去调传输层。
   setTransport(t);
   setDialogs(d);
   setRunSceneId(sceneId ?? null);
 
+  // 动效开关（A4）：宿主关掉，或系统要求减少动效。算好经 context 往下传给节点、连线、画布；
+  // motion 自己的组件经 MotionConfig 跳到终态（命令式的 animate 不看它，各处自己查开关）。
+  const reducedMotion = usePrefersReducedMotion();
+  const motionOn = animations !== false && !reducedMotion;
+
   // GraphCanvas 和快捷键都要用 useReactFlow（screenToFlowPosition），
   // 所以 Provider 必须包在整个工作区外面，不能只包画布。
   return (
-    <ReactFlowProvider>
-      <Workspace {...rest} />
-    </ReactFlowProvider>
+    <MotionEnabledContext.Provider value={motionOn}>
+      <MotionConfig reducedMotion={motionOn ? "never" : "always"}>
+        <ReactFlowProvider>
+          <Workspace {...rest} />
+        </ReactFlowProvider>
+      </MotionConfig>
+    </MotionEnabledContext.Provider>
   );
 }

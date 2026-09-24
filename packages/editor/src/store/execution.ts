@@ -409,6 +409,13 @@ export function useNodeExecution(nodeId: string): NodeExecution | undefined {
   return useExecutionStore((s) => aggregatedNodes(path, s.nodes).get(nodeId));
 }
 
+/** 只取状态字符串。连线判断「数据在不在流」（docs/motion-plan.md E3）靠它：订阅整个
+ *  NodeExecution 的话，每 50 ms 一条的进度都会让几百条边一起重渲。 */
+export function useNodeState(nodeId: string): NodeState | undefined {
+  const path = useUiStore((s) => s.path);
+  return useExecutionStore((s) => aggregatedNodes(path, s.nodes).get(nodeId)?.state);
+}
+
 const NO_ERRORS: ReadonlyMap<string, string> = new Map();
 
 /** 某节点的 paramPath → 错误消息，ParamControls 据此画红框（交互清单 P0 #15）。 */

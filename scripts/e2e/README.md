@@ -16,6 +16,7 @@ peek.mjs     连线内容查看器的分组（双击开窗、四种视图、快�
 phase_a.mjs  阶段 A 的分组（惰性分支半透明、plan_extended、图级输出与「标为输出」UI）
 m8b.mjs      M8b 的分组（空白画布拼测点：自动连线、片段、2D 拖框、实时校验、Bundle 的 Edge Peek）
 m8c.mjs      M8c 的分组（三模板的图：2D 视图按槽切换、拖一个槽只改它、复制到其它槽、标签不遮挡、按槽的诊断）
+motion.mjs   动效的分组（docs/motion-plan.md §3 验收 2–9：进场、删除残影、端点对齐、连线生长、流动、状态闪光、hover、关动效）
 http.mjs     e2e:http —— Node 桩服务器 + 系统 Chrome + examples/host-react
 ```
 
@@ -123,5 +124,16 @@ WiX 的 `INSTALLDIR`）。目的是验证「DLL 随包」和「从 exe 同目录
 - **M8b 的最终画布截图**：设 `LYFLOW_E2E_SCREENSHOT=docs/m8b-canvas.png`（相对仓库根）时，
   验收 7 那一组跑完用 `Page.captureScreenshot` 截整个窗口写到那里；不设就不写，免得每跑一遍都改动仓库文件。
   M8c 同理：`LYFLOW_E2E_M8C_SHOT=docs/m8c-slot2.png` 时，验收 12 切到槽 2 那一刻只截 3D 视图那一块（`clip`）。
+- **动效会让「刚改完就读」读到半路上的值**（`motion.mjs`、docs/motion-plan.md）。节点刚加上时在播
+  200 ms 的进场淡入，stale / 静音 / 未被需要的透明度变化也有过渡：读计算后的 `opacity` 之前先等
+  `el.getAnimations()` 里有限的那些播完再过两帧（`phase_a.mjs` 的 `opacityOf`；running 的呼吸光是
+  无限循环，别等它）。位置不受影响 —— 进场只动 opacity，自动布局的过渡只在按 Ctrl+L / 右键「整理」
+  时才有，`placeAtScreen` 直调 `applyLayout` 一步到位。
+- **动效的断言靠标记属性 + MutationObserver。** `data-entering`（节点进场）、`data-growing`（连线生长）、
+  `data-flash`（done / error 闪光）只在动画期间挂着，事后查 DOM 什么都看不到；`motion.mjs` 在页面里
+  装一个观察器，记下它们出现过几次。关动效用 `Emulation.setEmulatedMedia` 设 `prefers-reduced-motion`，
+  宿主的 `animations={false}` 在 `e2e:http` 里点宿主栏上的「动效」开关。
+- **同名的输入、输出端口 testid 相同**（voxel 的 `cloud` 进 `cloud` 出都是 `port-<id>-cloud`）。按侧别挑要加
+  `.node-port--input` / `.node-port--output`，否则 `querySelector` 拿到的永远是输入那一个。
 - **搭图走 store 的语义化动作，不直接塞 doc。** 塞一份构造好的 doc 会跳过
   `addNode` / `connect` 里的校验与 id 分配，验的就不是真实代码路径了。

@@ -114,6 +114,8 @@
   font-size: 9px;
 }
 
+/* 选中加粗。线宽不写在连线的 inline style 上（lib/mapping.ts），这条才压得住默认的 2px；
+   过渡时长在 styles.motion.css */
 .react-flow__edge.selected .react-flow__edge-path {
   stroke-width: 3.5;
 }
@@ -195,7 +197,9 @@
   color: var(--lyflow-fg-2);
 }
 
-/* React Flow 的 Handle 默认贴节点边缘，这里把它对齐到各自的端口行上 */
+/* React Flow 的 Handle 默认贴节点边缘，这里把它对齐到各自的端口行上。
+   放大一律经 --lyflow-handle-scale：直接写 transform: scale() 会把 translateY(-50%)
+   顶掉，圆点往下掉半个身位（docs/motion-plan.md A6） */
 .node-port .react-flow__handle {
   position: absolute;
   top: 50%;
@@ -203,7 +207,7 @@
   height: 10px;
   border: 2px solid;
   border-radius: 50%;
-  transform: translateY(-50%);
+  transform: translateY(-50%) scale(var(--lyflow-handle-scale, 1));
 }
 
 .node-port--input .react-flow__handle {
@@ -686,14 +690,9 @@
 .node--cancelled{ border-color: #e0a030; }
 .node--skipped  { border-color: #46a758; border-style: dashed; }
 
+/* 呼吸光（node-pulse）在 styles.motion.css；关动效时停在这一档静态光上 */
 .node--running {
   box-shadow: 0 0 0 1px var(--lyflow-accent), 0 2px 14px rgba(74, 158, 255, 0.35);
-  animation: node-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes node-pulse {
-  0%, 100% { box-shadow: 0 0 0 1px var(--lyflow-accent), 0 2px 10px rgba(74, 158, 255, 0.25); }
-  50%      { box-shadow: 0 0 0 2px var(--lyflow-accent), 0 2px 18px rgba(74, 158, 255, 0.55); }
 }
 
 /* stale = 整体变虚，不换颜色。颜色已经被状态占满了（P1 #23）。 */
@@ -714,7 +713,6 @@
   height: 2px;
   width: calc(var(--p, 0) * 100%);
   background: var(--lyflow-accent);
-  transition: width 0.15s linear;
 }
 
 .node__stats {
@@ -1004,7 +1002,7 @@
 
 /* 拖线中的兼容性可视化（P1 #20）：能落的放大高亮，不能落的整体压暗 */
 .node-port--compatible .node-port__handle {
-  transform: scale(1.45);
+  --lyflow-handle-scale: 1.45;
   box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.35);
 }
 .node-port--compatible .node-port__label {

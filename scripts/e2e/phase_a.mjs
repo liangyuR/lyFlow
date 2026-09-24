@@ -20,6 +20,14 @@ const opacityOf = (cdp, nodeId) =>
   cdp.eval(`
     const el = document.querySelector('[data-testid=${lit(`node-${nodeId}`)}]');
     if (!el) return null;
+    // 透明度会动（docs/motion-plan.md）：刚加的节点还在播进场，类名一变还有一段 S3 过渡，
+    // 刚跑完就读会读到半路上的值。等有限的动画都播完、再过两帧（进场播完才擦 inline 值），
+    // 直到节点上不再有动画。running 的呼吸光是无限循环，不等它。
+    const finite = () => el.getAnimations().filter((a) => a.effect?.getTiming().iterations !== Infinity);
+    for (let i = 0; i < 10 && (i === 0 || finite().length > 0); i += 1) {
+      await Promise.all(finite().map((a) => a.finished.catch(() => {})));
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    }
     return {
       notDemanded: el.getAttribute('data-not-demanded'),
       opacity: getComputedStyle(el).opacity,

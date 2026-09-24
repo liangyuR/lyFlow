@@ -104,6 +104,9 @@ interface GraphState {
   doc: GraphDoc;
   filePath: string | null;
   dirty: boolean;
+  /** 「换了一整张图」的计数：newDoc / loadDoc 各加一。画布的动效差分（docs/motion-plan.md N1）
+   *  靠它区分「编辑」与「打开文件」—— 打开一张图不该满屏播进场。不进撤销栈、不进文件。 */
+  epoch: number;
 
   past: HistoryEntry[];
   future: HistoryEntry[];
@@ -206,6 +209,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     doc: emptyDoc(),
     filePath: null,
     dirty: false,
+    epoch: 0,
     past: [],
     future: [],
     pendingSnapshot: null,
@@ -771,6 +775,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         doc: emptyDoc(),
         filePath: null,
         dirty: false,
+        epoch: get().epoch + 1,
         past: [],
         future: [],
         pendingSnapshot: null,
@@ -783,6 +788,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         doc,
         filePath: path,
         dirty: false,
+        epoch: get().epoch + 1,
         past: [],
         future: [],
         pendingSnapshot: null,

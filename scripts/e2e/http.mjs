@@ -241,6 +241,66 @@ async function suiteBuildAndShortcut(cdp, report) {
   report.eq("诊断带 nodeId", bad[0]?.nodeId, ids.gen);
 }
 
+/** 宿主关动效（docs/motion-plan.md A4、§3 验收 9 的 animations={false}）：真鼠标点宿主栏上的
+ *  「动效」开关，编辑器根上挂 lyflow-motion-off，新节点不播进场、新连线不长；再点回来恢复。 */
+async function suiteAnimationsProp(cdp, report) {
+  report.section("宿主 animations={false}：关掉之后进场与生长都不播，打开恢复");
+
+  const toggle = async () => {
+    const p = await cdp.eval(`
+      const r = document.querySelector('[data-testid="host-animations"]').getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    `);
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y, buttons: 0 });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: p.x, y: p.y, button: "left", buttons: 1, clickCount: 1 });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: p.x, y: p.y, button: "left", buttons: 1, clickCount: 1 });
+    await sleep(200);
+  };
+  /** 加两个节点、连一条线，记下进场/生长标记出现过几次，以及新节点两帧后的透明度。 */
+  const probe = () => cdp.eval(`
+    const hits = { entering: 0, growing: 0 };
+    const obs = new MutationObserver((list) => {
+      for (const m of list) {
+        const els = m.type === 'attributes' ? [m.target]
+          : [...m.addedNodes].filter((n) => n.nodeType === 1).flatMap((n) => [n, ...n.querySelectorAll('*')]);
+        for (const el of els) {
+          if (el.getAttribute('data-entering') !== null) hits.entering += 1;
+          if (el.getAttribute('data-growing') !== null) hits.growing += 1;
+        }
+      }
+    });
+    obs.observe(document.querySelector('.react-flow'), { subtree: true, childList: true, attributes: true,
+      attributeFilter: ['data-entering', 'data-growing'] });
+    const g = () => window.__lyflow.stores.graph.getState();
+    const a = g().addNode('gen.synthetic', { x: 40, y: 40 });
+    const b = g().addNode('filter.passthrough', { x: 320, y: 40 });
+    // 用 setTimeout 不用 rAF：浏览器窗口被挡住时页面是 hidden，rAF 根本不来，会一直等下去
+    await new Promise((r) => setTimeout(r, 40));
+    const opacity = Number(getComputedStyle(document.querySelector('[data-testid="node-' + a + '"]')).opacity);
+    g().connect({ node: a, port: 'cloud' }, { node: b, port: 'cloud' });
+    await new Promise((r) => setTimeout(r, 500));
+    obs.disconnect();
+    const root = document.querySelector('[data-lyflow-editor="1"]');
+    return { ...hits, opacity, motion: root.getAttribute('data-motion'), off: root.classList.contains('lyflow-motion-off') };
+  `);
+
+  await newDoc(cdp);
+  await sleep(500);
+  await toggle();
+  const off = await probe();
+  report.ok("开关关掉：编辑器根上是 lyflow-motion-off", off.motion === "off" && off.off, JSON.stringify(off));
+  report.eq("关动效时新节点 40 ms 后就是不透明的", off.opacity, 1);
+  report.eq("关动效时没有进场标记", off.entering, 0);
+  report.eq("关动效时新连线没有生长标记", off.growing, 0);
+
+  await newDoc(cdp);
+  await sleep(500);
+  await toggle();
+  const on = await probe();
+  report.ok("开关打开：动效恢复", on.motion === "on" && !on.off, JSON.stringify(on));
+  report.ok("恢复之后新节点又播进场、新连线又会长", on.entering > 0 && on.growing > 0, JSON.stringify(on));
+}
+
 // ------------------------------------------------------------------- main
 
 async function main() {
@@ -339,6 +399,7 @@ async function main() {
     await suiteHost(cdp, report);
     await suiteEditAndRun(cdp, report, ws);
     await suiteBuildAndShortcut(cdp, report);
+    await suiteAnimationsProp(cdp, report);
 
     report.section("控制台");
     report.ok(

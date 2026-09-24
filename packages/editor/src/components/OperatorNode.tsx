@@ -14,6 +14,7 @@ import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
 import { errorsOf, useNodeValidation } from "../store/validation";
 import type { Port } from "../types/manifest";
+import { useNodeMotion } from "./useNodeMotion";
 
 /** 「12.3 万点」比「123456」好读得多，而节点上的空间只有一行。 */
 function formatCount(n: number): string {
@@ -55,6 +56,13 @@ function PortHandle({ nodeId, port, side, index, anyType }: PortHandleProps) {
     if (side === "output" && hint.candidates.has(key)) return "candidate";
     return "";
   });
+  // 鼠标指着的连线的一端（docs/motion-plan.md H3）
+  const edgeEnd = useUiStore((s) => {
+    const e = s.hoverEdge;
+    if (!e) return false;
+    const end = side === "input" ? e.to : e.from;
+    return end.node === nodeId && end.port === port.name;
+  });
   const isInput = side === "input";
   const optional = isInput && port.required === false;
   // 两条端口级执行语义（ADR-0016）。用角标而不是换颜色：颜色是类型的语言。
@@ -68,7 +76,7 @@ function PortHandle({ nodeId, port, side, index, anyType }: PortHandleProps) {
     <div
       className={`node-port node-port--${side}${verdict ? ` node-port--${verdict}` : ""}${
         auto ? ` node-port--auto-${auto}` : ""
-      }`}
+      }${edgeEnd ? " node-port--edge-end" : ""}`}
       style={{ ["--i" as string]: index }}
       data-port-verdict={verdict || undefined}
       data-auto-hint={auto || undefined}
@@ -81,7 +89,8 @@ function PortHandle({ nodeId, port, side, index, anyType }: PortHandleProps) {
         type={isInput ? "target" : "source"}
         position={isInput ? Position.Left : Position.Right}
         className="node-port__handle"
-        style={{ background: color, borderColor: color }}
+        // --lyflow-port-color 给 hover 光晕用（H4）：box-shadow 要用端口自己的类型色
+        style={{ background: color, borderColor: color, ["--lyflow-port-color" as string]: color }}
       />
       <span
         className="node-port__label"
@@ -144,6 +153,15 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   // 实时校验（m8-plan L16）：拼的时候就标红，不等运行。只看 error，warning 进 Inspector。
   const invalid = errorsOf(useNodeValidation(id));
   const [renaming, setRenaming] = useState(false);
+  // 鼠标指着的连线从这里出发或到这里（docs/motion-plan.md H3）
+  const edgeEnd = useUiStore(
+    (s) => s.hoverEdge !== null && (s.hoverEdge.from.node === id || s.hoverEdge.to.node === id),
+  );
+  // 进场、完成闪光、错误抖动（N2 / S1 / S2）。放在「算子缺失」的早退之前：hook 的个数不能变
+  const root = useRef<HTMLDivElement>(null);
+  const fx = useRef<HTMLSpanElement>(null);
+  const head = useRef<HTMLDivElement>(null);
+  useNodeMotion(id, exec?.state ?? "idle", { root, fx, head });
 
   // 算子在当前 core 里不存在：可能是打开了别人存的图，也可能是热重载删掉了它。
   // 必须显式画出来 —— 静默渲染成空节点会让人以为图坏了（1.5）。
@@ -179,6 +197,7 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
     notDemanded ? "is-not-demanded" : "",
     subgraphId || library ? "node--sub" : "",
     invalid.length > 0 ? "is-invalid" : "",
+    edgeEnd ? "is-edge-end" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -198,6 +217,7 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
 
   return (
     <div
+      ref={root}
       className={classes}
       data-node-state={state}
       data-stale={stale ? "1" : "0"}
@@ -208,7 +228,10 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
       data-invalid={invalid.length > 0 ? "1" : "0"}
       data-testid={`node-${id}`}
     >
+      {/* 光晕层：进场与状态闪光都画在它身上，不去动 .node 自己的 box-shadow（那是选中/状态的） */}
+      <span ref={fx} className="node__fx" aria-hidden="true" />
       <div
+        ref={head}
         className="node__head"
         title={errorText ?? op.doc}
         onDoubleClick={(e) => {

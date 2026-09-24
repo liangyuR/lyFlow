@@ -56,10 +56,16 @@ interface LyFlowEditorProps {
   onDocChange?: (doc: GraphDoc, dirty: boolean) => void;
   theme?: Record<string, string>;    // --lyflow-* 变量覆盖
   className?: string;
+  animations?: boolean;              // 画布动效，默认 true
 }
 ```
 
 `onDocChange` 在文档或 dirty 状态变化时回调，宿主拿它做自己的标题栏、保存提示。
+
+`animations={false}` 关掉画布动效：节点进出场、完成/出错的闪光、连线生长、自动布局的过渡
+全部直接落到终态，CSS 的循环与过渡一并停掉。系统设了「减少动态效果」
+（`prefers-reduced-motion: reduce`）时等同于 false，不用宿主自己判断。信息不会跟着丢：
+正在流数据的边关了动画仍是一条静态高亮。
 
 ## Transport
 
@@ -149,13 +155,13 @@ CSS 由组件自己 `import`，宿主不用单独引样式文件。
 
 ```
 src/
-  LyFlowEditor.tsx   组件本体：布局、文件流程、执行事件订阅
+  LyFlowEditor.tsx   组件本体：布局、文件流程、执行事件订阅、动效开关
   components/        画布、节点、参数控件、Inspector、3D 视图、工具栏、连线查看器（peek/）
   store/             graph / ui / manifest / execution / cache / peek
-  lib/               类型校验、布局、映射、子图、参数、keymap、对话框注入
+  lib/               类型校验、布局、映射、子图、参数、keymap、对话框注入、动效（motion.ts）
   transport/         Transport 契约 + tauri / http / static 三个实现
   types/             GraphDoc、manifest、ExecutionEvent 的 TS 镜像
-  styles*.css        全部走 --lyflow-* 变量
+  styles*.css        全部走 --lyflow-* 变量；动效的全部 CSS 在 styles.motion.css
 test-server/         docs/http-transport.md 的最小 Node 实现，给 e2e:http 用
 ```
 
@@ -231,6 +237,41 @@ pnpm e2e:http                             # 桩 + Chrome + 宿主，一条龙
 
 不静默改写，是因为那是**用户的文档被改了**。撤销栈里必须有这一步，标题栏必须有那个 `*`。
 
+## 动效
+
+[docs/motion-plan.md](../../docs/motion-plan.md) 是设计，验收记录在 [docs/motion-acceptance.md](../../docs/motion-acceptance.md)。
+动画库是 `motion`（只从 `motion/react` 导入），和 dagre、immer 一样是编辑器自带的依赖，宿主不用管。
+
+**分工。** 一次性、有进出场的动效用 motion：节点进场、删除残影、连线生长、完成/出错闪光、
+错误抖动、自动布局过渡。持续循环与 hover 用 CSS：running 的呼吸光、边上的数据流动、
+节点/边/端口的 hover。几百条边的 hover 判定和流动循环放在 JS 里每帧跑不划算。
+
+**只改两处。** 时长（fast 120 / base 200 / slow 320 ms）、缓动、motion 的预设和「现在要不要动」
+都在 `src/lib/motion.ts`；CSS 变量 `--lyflow-motion-*`、全部 keyframes 与 hover 规则都在
+`src/styles.motion.css`。别处不写时长、不写 `@keyframes`（`git grep @keyframes` 只该命中那一个文件）。
+要不要动由根组件算好经 context 往下传（`useMotionEnabled()`）；关掉时根上挂 `lyflow-motion-off`。
+
+**谁算「新出现」由 doc 的差分决定，不由挂载决定。** 画布同步订阅 graph store，同一张图
+（`epoch`，`loadDoc` / `newDoc` 各加一）、同一层里比较前后的 id，新 id 记进一个短命集合
+（`markEntering`，按到期时刻记），节点与连线组件挂载时问一句 `isEntering`。按挂载判定的话，
+大图虚拟化下节点平移进视口就会重新挂载，满屏乱闪；打开文件也不该闪。
+
+**动效状态不进 GraphDoc、不进 `data`。** 流动看目标节点的状态（`useNodeState`，只订阅状态串），
+hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 store 现查。塞进节点或边的
+`data` 就得同步进 `lib/mapping.ts` 的 `sameNode` / `sameEdge`，而且每条事件都要重建整批对象。
+
+**删除不等动画。** doc 立即改（撤销栈、e2e、store 都是即时的），画布在订阅回调里 —— 那时 React
+还没重渲、DOM 还在 —— 克隆被删节点的 DOM 放进残影层淡出。克隆体剥掉全部 `id` 与 `data-*`，
+`aria-hidden`、不接鼠标，免得被 e2e 或无障碍树当成真节点。
+
+**自动布局只在用户触发时过渡。** 工具栏、Ctrl+L、右键「整理」经 `withLayoutTransition()` 调
+`applyLayout`；doc 一次提交（一个撤销步），画布把临时位置逐帧喂给 React Flow，连线跟着走。
+打开文件时的初始布局、脚本直调 `applyLayout` 都一步到位。
+
+**元素动画用 `animateMini`，不用完整版的 `animate(element)`。** 后者给元素建一个 VisualElement，
+终值在下一帧的渲染批次里才写回：`then` 里刚擦掉的 inline `opacity` 会被它重新写成 1，
+静音、未被需要这些类的半透明就永久失效了（e2e 抓到过）。
+
 ## 踩过的坑
 
 这些全部来自 CDP 验收（`scripts/e2e`）抓到的真 bug，没有一个是单元测试能发现的。
@@ -265,6 +306,22 @@ pnpm e2e:http                             # 桩 + Chrome + 宿主，一条龙
 - **拖节点到连线上：容差不能只看中心距离。** 12 px 是**画布坐标**，画布缩到 50%
   时只剩 6 个屏幕像素，用户根本够不着。判据改成「连线穿过节点矩形」，
   中心距离只作为擦边时的余量。
+- **含端口的元素不许位移、缩放，hover 也不行**（docs/motion-plan.md A5）。React Flow 在节点挂载、
+  尺寸变化、`updateNodeInternals` 时用 `getBoundingClientRect` 量端口相对节点的位置；作用在
+  `.node`、`.node__body`、`.node-port` 上的 transform 只要赶上一次量测，连线端点就**永久**错位，
+  直到下一次量测。所以节点进场只动 `opacity`、hover「抬起」只加阴影；允许 transform 的只有
+  不含端口的 `.node__head`（错误抖动）、端口圆点本身、删除残影。圆点的放大一律经
+  `--lyflow-handle-scale` 乘在 `translateY(-50%)` 后面 —— 直接写 `transform: scale()` 会把居中的那半个
+  身位顶掉（拖线时兼容端口、自动连线的候选端口原来就是这么往下掉的）。
+- **圆点放大并不是「量测不受影响」。** React Flow 取端口的 `x/y` 用 `getBoundingClientRect`，
+  宽高却用 `offsetWidth/Height`（不含 transform），连线端点在圆点**外缘**（源在右缘、目标在左缘）
+  而不在圆心。放大 1.35 倍的那一刻要是赶上量测，端点会偏 1.75 px 左右。现在只有端口 hover 会放大，
+  hover 不改变节点尺寸，一般赶不上；但别再给圆点加更大的缩放，也别在节点尺寸会变的时机放大它。
+- **inline 的 `strokeWidth` 压过一切 CSS。** 连线的线宽原来写在映射层的 `style` 里，于是
+  `.selected` 的加粗从来没生效过。现在 `style` 只放颜色和虚线，线宽在 `styles.motion.css`。
+- **自定义边要自己画命中路径。** React Flow 的 `BaseEdge` 在 `interactionWidth` 缺省时按 20 画
+  `.react-flow__edge-interaction`；自定义边拿到的 prop 是 undefined，照抄 `interactionWidth ? … : null`
+  就一条命中路径都没有了 —— 双击开 Peek、右键菜单、e2e 找线全靠它。
 - **React Flow 的 `nodeDragThreshold` 会吞掉第一段位移。** 拖拽类的 CDP 断言必须先
   发一个 2 px 的「唤醒」移动，否则落点永远差第一步那么多，位移越大差得越多。
 

@@ -30,6 +30,8 @@ function ReactInstanceProbe() {
 function Host() {
   const [dirty, setDirty] = useState(false);
   const [name, setName] = useState("未命名");
+  // 宿主可以关掉画布动效（animations prop）。放一个开关在这里，既是示范也是 e2e:http 的入口
+  const [animations, setAnimations] = useState(true);
 
   return (
     <div className="host">
@@ -41,10 +43,20 @@ function Host() {
         </span>
         <span data-testid="host-api">{API}</span>
         <ReactInstanceProbe />
+        <label className="host__toggle">
+          <input
+            type="checkbox"
+            data-testid="host-animations"
+            checked={animations}
+            onChange={(e) => setAnimations(e.target.checked)}
+          />
+          动效
+        </label>
       </header>
       <div className="host__editor">
         <LyFlowEditor
           transport={transport}
+          animations={animations}
           onDocChange={(doc, isDirty) => {
             setDirty(isDirty);
             setName(doc.name ?? "未命名");

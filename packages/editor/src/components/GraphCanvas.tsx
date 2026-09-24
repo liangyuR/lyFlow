@@ -4,9 +4,7 @@
 import {
   Background,
   BackgroundVariant,
-  BaseEdge,
   Controls,
-  getBezierPath,
   MiniMap,
   ReactFlow,
   useReactFlow,
@@ -14,7 +12,6 @@ import {
   type Connection,
   type Edge,
   type EdgeChange,
-  type EdgeProps,
   type FinalConnectionState,
   type NodeChange,
   type OnNodeDrag,
@@ -23,6 +20,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { layoutGraph } from "../lib/layout";
+import { useMotionEnabled, withLayoutTransition } from "../lib/motion";
 import {
   createMappingCache,
   distanceToSegment,
@@ -51,54 +49,18 @@ import { subgraphIdOf, type GraphDoc } from "../types/graph";
 
 import { addNodeWithAutoConnect, insertSnippetById } from "../lib/insert";
 import { EdgePeekLayer } from "./EdgePeekLayer";
+import { FlowEdge } from "./FlowEdge";
 import { OPERATOR_DND_MIME, SNIPPET_DND_MIME } from "./NodePalette";
 import { OperatorNode } from "./OperatorNode";
+import { useCanvasMotion } from "./useCanvasMotion";
 
 import "@xyflow/react/dist/style.css";
 
 const nodeTypes = { operator: OperatorNode };
 
-/** 惰性边（ADR-0016，M6 §5）：虚线由 mapping.ts 的 style.strokeDasharray 决定，
- *  这里只补一个原生 tooltip —— React Flow 的默认边不吃 `title`，SVG 里 <title>
- *  作为 <g> 的子元素时，hover 到可见描边或旁边的透明命中路径（BaseEdge 自带的
- *  interactionWidth）都能触发，不用另起一层 DOM。 */
-function LazyEdge({
-  sourceX,
-  sourceY,
-  sourcePosition,
-  targetX,
-  targetY,
-  targetPosition,
-  style,
-  markerStart,
-  markerEnd,
-  interactionWidth,
-}: EdgeProps) {
-  const [path] = getBezierPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY,
-    targetPosition,
-  });
-  // exactOptionalPropertyTypes 下 BaseEdge 的这几个 prop 不接受显式 undefined，
-  // 只能按「有没有」决定要不要展开这个 key，不能直接传可能是 undefined 的值。
-  return (
-    <g>
-      <title>惰性：主路径成功时不跑</title>
-      <BaseEdge
-        path={path}
-        {...(style !== undefined ? { style } : {})}
-        {...(markerStart !== undefined ? { markerStart } : {})}
-        {...(markerEnd !== undefined ? { markerEnd } : {})}
-        {...(interactionWidth !== undefined ? { interactionWidth } : {})}
-      />
-    </g>
-  );
-}
-
-const edgeTypes = { lazy: LazyEdge };
+/** 所有连线都走同一个组件（docs/motion-plan.md E1）：惰性边的虚线与 tooltip、hover、
+ *  流动、生长都在里面。替换的是 default 类型，所以 mapping 不用给边写 type。 */
+const edgeTypes = { default: FlowEdge };
 
 /** 吸附半径。24 px 是「靠近就吸上」和「误吸到隔壁端口」之间的平衡点（P1 #17）。 */
 const CONNECTION_RADIUS = 24;
@@ -288,6 +250,10 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
 
   const { screenToFlowPosition, fitView } = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
+  // 删除残影挂在这一层（N3）。它在 ViewportPortal 里，坐标就是画布坐标
+  const ghostLayer = useRef<HTMLDivElement>(null);
+  const motionOn = useMotionEnabled();
+  const { override, cancelLayout } = useCanvasMotion(wrapper, ghostLayer, motionOn);
 
   /**
    * 节点量测尺寸的旁路缓存。不进 GraphDoc，但 MiniMap 靠它才肯画节点：React Flow 的
@@ -339,7 +305,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
 
   const anyTypes = useMemo(() => inferAnyTypes(ctx, view), [ctx, view]);
 
-  const { nodes, edges } = useMemo(
+  const { nodes: docNodes, edges } = useMemo(
     () =>
       toReactFlow(
         view,
@@ -352,6 +318,19 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     // measuredTick 是 measured.current 的变更信号，故意作为依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [view, ctx, selectedNodes, selectedEdges, measuredTick, anyTypes],
+  );
+
+  // 自动布局过渡（N4）：只把这一帧的临时位置叠在映射结果上，映射缓存里仍是 doc 的位置 ——
+  // 过渡一结束 override 变回 null，节点对象原样复用，不会白重建一轮。
+  const nodes = useMemo(
+    () =>
+      override
+        ? docNodes.map((n) => {
+            const p = override.get(n.id);
+            return p ? { ...n, position: p } : n;
+          })
+        : docNodes,
+    [docNodes, override],
   );
 
   // -- 节点变更 ------------------------------------------------------------
@@ -420,10 +399,16 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
   }, []);
 
   // -- 拖动：整段拖动只记一条撤销 + 对齐参考线（交互清单 P1 #22）-------------
-  const onNodeDragStart: OnNodeDrag<LyNode> = useCallback((_e, node) => {
-    dragged.current = node.id;
-    useGraphStore.getState().begin();
-  }, []);
+  const onNodeDragStart: OnNodeDrag<LyNode> = useCallback(
+    (_e, node) => {
+      dragged.current = node.id;
+      // 拖动以 doc 的位置为准，布局过渡还没走完就直接落到终点
+      cancelLayout();
+      useUiStore.getState().setHoverPaused(true);
+      useGraphStore.getState().begin();
+    },
+    [cancelLayout],
+  );
 
   const onNodeDrag: OnNodeDrag<LyNode> = useCallback((e, node) => {
     // Shift 临时关掉吸附与参考线：需要摆一个「差一点」的位置时总得有出路
@@ -504,6 +489,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     (_e, node) => {
       setGuides([]);
       setSnapping(true);
+      useUiStore.getState().setHoverPaused(false);
       const graph = useGraphStore.getState();
       graph.commit("移动节点");
       const selection = useUiStore.getState().selectedNodes;
@@ -635,6 +621,32 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       params.nodes.map((n) => n.id),
       params.edges.map((e) => e.id),
     );
+  }, []);
+
+  // -- hover（docs/motion-plan.md H2 / H3）。纯 UI 状态，进 ui store 不进 doc -------
+  const onNodeMouseEnter = useCallback((_e: React.MouseEvent, node: { id: string }) => {
+    useUiStore.getState().setHoverNode(node.id);
+  }, []);
+  const onNodeMouseLeave = useCallback(() => {
+    useUiStore.getState().setHoverNode(null);
+  }, []);
+  const onEdgeMouseEnter = useCallback((_e: React.MouseEvent, edge: Edge) => {
+    if (!edge.sourceHandle || !edge.targetHandle) return;
+    useUiStore.getState().setHoverEdge({
+      id: edge.id,
+      from: { node: edge.source, port: edge.sourceHandle },
+      to: { node: edge.target, port: edge.targetHandle },
+    });
+  }, []);
+  const onEdgeMouseLeave = useCallback(() => {
+    useUiStore.getState().setHoverEdge(null);
+  }, []);
+  // 框选期间不淡化（H2）：拖出来的框会扫过一大片节点
+  const onSelectionStart = useCallback(() => {
+    useUiStore.getState().setHoverPaused(true);
+  }, []);
+  const onSelectionEnd = useCallback(() => {
+    useUiStore.getState().setHoverPaused(false);
   }, []);
 
   // -- 双击：空白处开搜索面板，连线中点插一个 reroute，子图节点进去 ----------
@@ -823,6 +835,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       }}
       data-snapping={snapping ? "1" : "0"}
       data-depth={path.length}
+      data-layout-moving={override ? "1" : undefined}
     >
       <Breadcrumb />
       <ReactFlow
@@ -851,6 +864,12 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         onEdgeDoubleClick={onEdgeDoubleClick}
         onEdgeContextMenu={onEdgeContextMenu}
         onPaneClick={onPaneClick}
+        onNodeMouseEnter={onNodeMouseEnter}
+        onNodeMouseLeave={onNodeMouseLeave}
+        onEdgeMouseEnter={onEdgeMouseEnter}
+        onEdgeMouseLeave={onEdgeMouseLeave}
+        onSelectionStart={onSelectionStart}
+        onSelectionEnd={onSelectionEnd}
         // 大图只画视野里的节点（§4）。小图不开：开了之后平移会有一帧空窗。
         onlyRenderVisibleElements={nodes.length > VIRTUALIZE_ABOVE}
         // zoomOnDoubleClick 必须关：d3-zoom 会 stopImmediatePropagation 把双击拦死。
@@ -901,6 +920,8 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
               />
             ))}
           </div>
+          {/* 删除残影（N3）。React 不往里放任何子节点，全由 useCanvasMotion 命令式地挂/摘 */}
+          <div className="canvas__ghosts" ref={ghostLayer} />
         </ViewportPortal>
       </ReactFlow>
 
@@ -1067,7 +1088,8 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
                 only: ids,
                 measured: measured.current,
               });
-              useGraphStore.getState().applyLayout(moves);
+              // 用户触发的整理才过渡（N4），见 lib/motion.ts 的 withLayoutTransition
+              withLayoutTransition(() => useGraphStore.getState().applyLayout(moves));
               setMenu(null);
             }}
           >
