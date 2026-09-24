@@ -169,6 +169,29 @@ const runs = new Map();
 const recent = [];
 let manifestCache = null;
 
+/** 跑出过输出的 cacheKey。桩服务器不常驻 core、没有结果仓，单节点运行（docs/node-run-plan.md R6）
+ *  的「上游有没有结果」只能照事件记账：run_started 给出 id → cacheKey，节点 done / skipped 且
+ *  输出可取就记一笔。 */
+const produced = new Set();
+
+function notePlanNodes(state, nodes) {
+  for (const n of nodes ?? []) state.keys.set(n.id, n.cacheKey);
+}
+
+function noteEvent(state, value) {
+  if (value.kind === "run_started" || value.kind === "plan_extended") notePlanNodes(state, value.nodes);
+  if (value.kind !== "node_state") return;
+  if (value.state !== "done" && value.state !== "skipped") return;
+  if (value.stats?.outputsAvailable === false) return;
+  const key = state.keys.get(value.nodeId);
+  if (key) produced.add(key);
+}
+
+/** isolate 的 id 语义与 targets 相同：精确命中，或落在某个子图节点之下。 */
+const inIsolate = (isolate, id) => isolate.some((t) => id === t || id.startsWith(`${t}/`));
+
+let stubSeq = 0;
+
 async function manifest() {
   if (manifestCache) return manifestCache;
   const r = await runCli(["manifest"]);
@@ -189,10 +212,70 @@ async function coreInfo() {
   };
 }
 
+/** 单节点运行的最小语义（R6）：上游有没有当前 cacheKey 的结果，照 produced 记账判；缺就不起 CLI，
+ *  直接回一对 run_started / run_finished(upstream_not_ready)，与 core 开跑前失败时的事件同形。
+ *  齐了就按 --to 跑 —— CLI 没有 isolate 开关（R6 不扩到 CLI），进程之间也不共享缓存，所以
+ *  上游会被桩重算一遍；编辑器只认 isolate 里节点的事件，界面上看不出差别。 */
+async function isolateVerdict(body, file, baseDir) {
+  const isolate = body.isolate;
+  const argv = ["plan", file, "--base-dir", baseDir];
+  for (const t of isolate) argv.push("--to", t);
+  const r = await runCli(argv);
+  const plan = lastJson(r.lines);
+  // 编不出计划（图有错）：交给真正的运行去报诊断
+  if (!Array.isArray(plan) || plan.some((n) => typeof n.cacheKey !== "string")) return null;
+  const missing = plan.filter(
+    (n) => !inIsolate(isolate, n.nodeId) && !n.lazy && !n.bypass && !produced.has(n.cacheKey),
+  );
+  return { plan, missing };
+}
+
+function rejectNotReady(body, verdict) {
+  stubSeq += 1;
+  const runId = `stub-isolate-${Date.now()}-${stubSeq}`;
+  const eager = verdict.plan.filter((n) => !n.lazy);
+  const diagnostics = verdict.missing.map((n) => ({
+    nodeId: n.nodeId,
+    severity: "error",
+    phase: "execute",
+    code: "upstream_not_ready",
+    message: `上游 ${n.nodeId} 还没有可用结果，先运行它或运行到此`,
+  }));
+  const at = new Date().toISOString();
+  const started = {
+    schemaVersion: 1, runId, seq: 0, at, kind: "run_started",
+    nodeCount: eager.length, maxParallel: 1, mode: "full",
+    plan: eager.map((n) => n.nodeId), targets: body.isolate, isolate: body.isolate,
+    nodes: eager.map((n) => ({ id: n.nodeId, cacheKey: n.cacheKey, level: n.level })),
+  };
+  const first = diagnostics[0];
+  const finished = {
+    schemaVersion: 1, runId, seq: 1, at, kind: "run_finished", status: "error", durationMs: 0,
+    error: { phase: first.phase, code: first.code, message: first.message },
+    diagnostics,
+  };
+  const state = {
+    id: runId, events: [started, finished], outputs: {}, cancelled: false, lastSeq: 1,
+    keys: new Map(), done: Promise.resolve({ code: 1 }),
+  };
+  runs.set(runId, state);
+  hub.broadcast(started);
+  hub.broadcast(finished);
+  return { runId };
+}
+
 async function startRun(body) {
   const { file, baseDir } = materialize(body.doc, body.graphPath ?? null);
+  const isolate = Array.isArray(body.isolate) && body.isolate.length > 0 ? body.isolate : null;
+  if (isolate && body.mode === "preview") {
+    throw Object.assign(new Error("预览模式不能与「只运行此节点」（isolate）同时使用"), { status: 400 });
+  }
+  if (isolate) {
+    const verdict = await isolateVerdict(body, file, baseDir);
+    if (verdict && verdict.missing.length > 0) return rejectNotReady(body, verdict);
+  }
   const argv = ["run", file, "--base-dir", baseDir, "--outputs"];
-  for (const t of body.targets ?? []) argv.push("--to", t);
+  for (const t of isolate ?? body.targets ?? []) argv.push("--to", t);
   if (body.mode === "preview") {
     argv.push("--preview");
     if (body.previewMaxPoints) argv.push("--preview-points", String(body.previewMaxPoints));
@@ -201,11 +284,12 @@ async function startRun(body) {
   const state = {
     graphFile: file,
     baseDir,
-    targets: body.targets ?? [],
+    targets: isolate ?? body.targets ?? [],
     events: [],
     outputs: {},
     cancelled: false,
     lastSeq: -1,
+    keys: new Map(),
   };
 
   let resolveId;
@@ -222,6 +306,12 @@ async function startRun(body) {
         runs.set(state.id, state);
         resolveId(state.id);
       }
+      // CLI 不认 isolate：把这次的范围补回 run_started，编辑器靠它认出单节点运行
+      if (isolate && value.kind === "run_started") {
+        value.isolate = isolate;
+        value.targets = isolate;
+      }
+      noteEvent(state, value);
       state.events.push(value);
       state.lastSeq = value.seq;
       hub.broadcast(value);

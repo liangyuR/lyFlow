@@ -94,8 +94,9 @@ class EventSink {
 
   /// deferred 节点不进 run_started：它们要么被 demand 时经 plan_extended 追加，
   /// 要么在 run_finished 前以 skipped/not_demanded 收场（ADR-0016）。
-  void runStarted(const Plan& plan, const std::vector<std::string>& targets, int maxParallel,
-                  bool preview, std::uint32_t previewMaxPoints) {
+  void runStarted(const Plan& plan, const std::vector<std::string>& targets,
+                  const std::vector<std::string>& isolate, int maxParallel, bool preview,
+                  std::uint32_t previewMaxPoints) {
     JsonWriter w;
     std::lock_guard<std::mutex> lock(mu_);
     std::size_t eager = 0;
@@ -116,6 +117,11 @@ class EventSink {
     w.key("targets");
     w.beginArray();
     for (const auto& t : targets) w.value(t);
+    w.endArray();
+    // 单节点运行（node-run R5）：编辑器与 MCP 靠它认出「这次只跑了这几个」。空 = 普通运行。
+    w.key("isolate");
+    w.beginArray();
+    for (const auto& t : isolate) w.value(t);
     w.endArray();
     // 前端的精确 stale 标记与「将重算 N 个节点」全靠这一段（ADR-0007）。
     w.key("nodes");
@@ -279,8 +285,11 @@ class EventSink {
 
   /// summaryJson 非空时原样嵌进 `summary` 字段（H1：事件里那份与
   /// `lyflow_run_summary` 拿到的是同一个对象）。
+  /// diagnostics 是 run 级、但各自指着一个节点的诊断（node-run R2 的 upstream_not_ready：
+  /// 每个缺结果的上游一条）。它们不是那些节点自己的失败，所以不走 node_state。
   void runFinished(const char* status, double durationMs, const Status* error,
-                   const std::string& summaryJson = {}) {
+                   const std::string& summaryJson = {},
+                   const std::vector<Diagnostic>* diagnostics = nullptr) {
     JsonWriter w;
     std::lock_guard<std::mutex> lock(mu_);
     begin(w, "run_finished");
@@ -289,6 +298,20 @@ class EventSink {
     if (error) {
       w.key("error");
       writeError(w, *error);
+    }
+    if (diagnostics && !diagnostics->empty()) {
+      w.key("diagnostics");
+      w.beginArray();
+      for (const Diagnostic& d : *diagnostics) {
+        w.beginObject();
+        w.field("nodeId", d.nodeId);
+        w.field("severity", std::string(toString(d.severity)));
+        w.field("phase", std::string(toString(d.status.phase)));
+        w.field("code", d.status.code);
+        w.field("message", d.status.message);
+        w.endObject();
+      }
+      w.endArray();
     }
     if (!summaryJson.empty()) {
       w.key("summary");
@@ -420,6 +443,35 @@ std::string previewNamespace(const RunOptions& o) {
   if (o.mode != RunMode::Preview) return {};
   const std::uint32_t cap = o.previewMaxPoints ? o.previewMaxPoints : kDefaultPreviewMaxPoints;
   return "preview:" + std::to_string(cap);
+}
+
+// ------------------------------------------------------------ 单节点运行
+
+/// node-run R2 的那条诊断。编辑器的 toast 原样显示这句话。
+Status upstreamNotReady(const std::string& nodeId) {
+  return Status::Error(Phase::Execute, "upstream_not_ready",
+                       "上游 " + nodeId + " 还没有可用结果，先运行它或运行到此");
+}
+
+/// 单节点运行开跑前的探测（R2）：不在 isolate 里、又会进初始就绪队列的节点，结果仓里必须
+/// 已有当前 cacheKey 的全部输出。缺一个就整次失败、一个算子都不调 —— 边跑边发现的话，
+/// 前面几个节点已经跑完，留下的是半截状态。
+/// 惰性闭包（deferred）不在这里查：开跑前不知道它会不会被 demand，到时由 execute 拦。
+/// 静音、注入的节点不调 compute，本来就不算「重跑上游」，放行；校验没过的交给执行期的
+/// 老规则报它自己的错（报成「还没有结果」会让人去点一个根本跑不起来的节点）。
+std::vector<Diagnostic> missingUpstream(const Plan& plan, const RunOptions& options,
+                                        const ResultStore& store) {
+  std::vector<Diagnostic> out;
+  for (const PlanNode& n : plan.nodes) {
+    if (n.isolated || n.deferred || !n.valid || !n.op || n.bypass || n.provided) continue;
+    const bool reusable = !options.noReuse && n.op->capabilities.deterministic &&
+                          !n.op->outputs.empty() &&
+                          store.peek(n.cacheKey, outputPortNames(*n.op));
+    if (!reusable) {
+      out.push_back(Diagnostic{n.id, Severity::Error, upstreamNotReady(n.id), nullptr});
+    }
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------- 调度器
@@ -636,7 +688,8 @@ class Scheduler {
     // 缓存命中：直接把仓里那份挂到本次运行，不调 compute（ADR-0007）。
     // 没有输出端口的算子（io.save_pcd 这类纯副作用）永远不复用。
     // provided 节点不复用：注入摘要已经进了 cacheKey，但直接装配比查仓更省事。
-    if (!options_.noReuse && !node.bypass && !node.provided &&
+    // 单独运行的节点不查仓（node-run R3）：点了就真跑一遍，读外部文件的算子与调试都靠这一条。
+    if (!options_.noReuse && !node.bypass && !node.provided && !node.isolated &&
         node.op->capabilities.deterministic && !node.op->outputs.empty()) {
       std::vector<OutputInfo> infos;
       if (store_.reuse(options_.runId, node.id, node.cacheKey, outputPortNames(*node.op), infos)) {
@@ -647,6 +700,16 @@ class Scheduler {
                            /*cached=*/true, /*bypassed=*/false);
         return Verdict::Ok;
       }
+    }
+
+    // 单节点运行时，不在 isolate 里的节点只许命中缓存（node-run R2）。开跑前已经探过一遍，
+    // 走到这里的只有两种：被 demand 的惰性上游（开跑前不知道用不用），以及探完之后才被
+    // LRU 挤掉的那一份。都按「上游还没有可用结果」收场，绝不替用户把上游重跑一遍。
+    if (!options_.isolate.empty() && !node.isolated && !node.bypass && !node.provided) {
+      const Status s = upstreamNotReady(node.id);
+      recordFailure(i, s);
+      sink_.nodeFailed(node.id, "error", {s}, msSince(nodeStart));
+      return Verdict::Failed;
     }
 
     sink_.nodeState(node.id, "running");
@@ -768,7 +831,9 @@ class Scheduler {
       infos.push_back(
           OutputInfo{p.name, d.typeName(), d.elementCount(), d.byteSize(), d.valueJson()});
       appendBundleFieldInfos(p.name, d, infos);
-      store_.put(options_.runId, node.id, p.name, node.cacheKey, d);
+      // 单独运行的结果覆盖同 cacheKey 的旧结果（R3）：键没变而内容变了的只有外部输入，
+      // 那正是用户点这个按钮想看到的新东西。
+      store_.put(options_.runId, node.id, p.name, node.cacheKey, d, /*replace=*/node.isolated);
     }
 
     sink_.nodeFinished(node.id, bypassed ? "skipped" : "done", durationMs, primaryElements,
@@ -1353,6 +1418,9 @@ int threadBudgetFor(int maxParallel) {
 
 Run::Run(std::string graphJson, RunOptions options, lyflow_event_cb cb, void* user)
     : graphJson_(std::move(graphJson)), options_(std::move(options)), cb_(cb), user_(user) {
+  // 给了 isolate 就用同一组 id 当 targets（node-run R1）：编译要它们的上游闭包来算 cacheKey，
+  // 下游一概不进计划（R4）。调用方不必重复传，传了别的也以 isolate 为准。
+  if (!options_.isolate.empty()) options_.targets = options_.isolate;
   thread_ = std::thread([this] { work(); });
 }
 
@@ -1420,12 +1488,20 @@ void Run::workImpl() {
     for (auto& kv : digests) providedDigest[kv.first] = kv.second.hex();
   }
 
-  const bool parsed = prepareGraph(graphJson_, raw, diags, options_.paramsJson);
+  // 预览与单节点运行不组合（node-run R5）：预览结果在另一个缓存命名空间里，拿它去探
+  // 「上游有没有结果」只会把刚跑过正式运行的上游误判成缺。参数错误，整图级失败。
+  const bool conflicting = !options_.isolate.empty() && options_.mode == RunMode::Preview;
+  if (conflicting) {
+    diags.error("", Phase::Validate, "bad_input",
+                "预览模式不能与「只运行此节点」（isolate）同时使用");
+  }
+  const bool parsed = !conflicting && prepareGraph(graphJson_, raw, diags, options_.paramsJson);
   if (parsed) {
     BuildOptions build;
     build.runId = options_.runId;
     build.baseDir = options_.baseDir;
     build.targets = options_.targets;
+    build.isolate = options_.isolate;
     build.cacheNamespace = previewNamespace(options_);
     build.providedDigest = providedDigest;
     build.injectedPorts = injectedPorts;
@@ -1434,7 +1510,7 @@ void Run::workImpl() {
 
   const int workers = resolveMaxParallel(options_.maxParallel);
   const bool preview = options_.mode == RunMode::Preview;
-  sink.runStarted(plan, options_.targets, workers, preview,
+  sink.runStarted(plan, options_.targets, options_.isolate, workers, preview,
                   options_.previewMaxPoints ? options_.previewMaxPoints
                                             : kDefaultPreviewMaxPoints);
 
@@ -1467,6 +1543,23 @@ void Run::workImpl() {
     ResultStore::instance().setSummary(options_.runId, summary);
     sink.runFinished("error", failedAt, &first, summary);
     return;
+  }
+
+  // 单节点运行：上游不齐就不跑（node-run R2）。一个节点事件都不发 —— 缺结果的上游并没有
+  // 失败，把它们标红是在撒谎；诊断挂在 run_finished 上，每个缺的上游一条。
+  if (!options_.isolate.empty()) {
+    const std::vector<Diagnostic> missing =
+        missingUpstream(plan, options_, ResultStore::instance());
+    if (!missing.empty()) {
+      const double failedAt = msSince(t0);
+      const std::string summary = buildSummaryJson(options_.runId, plan, sink.outcomes(), failedAt,
+                                                   /*forceFailed=*/true, /*store=*/nullptr,
+                                                   sink.contractViolations());
+      ResultStore::instance().setSummary(options_.runId, summary);
+      const Status first = missing.front().status;
+      sink.runFinished("error", failedAt, &first, summary, &missing);
+      return;
+    }
   }
 
   ResultStore& store = ResultStore::instance();

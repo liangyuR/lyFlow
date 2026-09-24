@@ -308,7 +308,7 @@ add_test(NAME lyflow-core-tests COMMAND lyflow-core-tests)
 include(CMakePackageConfigHelpers)
 
 set(LYFLOW_INSTALL_VERSION "${PROJECT_VERSION}")
-set(LYFLOW_INSTALL_ABI_VERSION 9)
+set(LYFLOW_INSTALL_ABI_VERSION 11)
 set(LYFLOW_INSTALL_DLL_NAME "$<TARGET_FILE_NAME:lyflow_core>")
 
 execute_process(

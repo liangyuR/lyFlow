@@ -14,6 +14,7 @@ import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
 import { errorsOf, useNodeValidation } from "../store/validation";
 import type { Port } from "../types/manifest";
+import { NodeRunButton } from "./NodeRunButton";
 import { useNodeMotion } from "./useNodeMotion";
 
 /** 「12.3 万点」比「123456」好读得多，而节点上的空间只有一行。 */
@@ -254,6 +255,8 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
           </span>
         )}
         {bypass && <span className="node__badge node__badge--mute" title="已静音 (Ctrl+M)">M</span>}
+        {/* 只运行此节点（docs/node-run-plan.md U1）：排在徽标之后，折叠了也在；缺失算子的节点没有 */}
+        <NodeRunButton id={id} op={op} exec={exec} />
         {state === "running" && exec?.progress != null && (
           <span className="node__progress" style={{ ["--p" as string]: exec.progress }} />
         )}

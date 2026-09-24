@@ -22,6 +22,7 @@ import {
   HEAD_SHAKE_MS,
   isEntering,
   NODE_ENTER,
+  onNodeLocateFlash,
   TRANSITION,
   useMotionEnabled,
 } from "../lib/motion";
@@ -100,6 +101,26 @@ export function useNodeMotion(id: string, state: NodeState, refs: NodeMotionRefs
     // refs 是三个 useRef，身份不变；只跟着状态走
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, motionOn]);
+
+  // 定位闪光（node-run U5）：复用 error 的红光，但不抖 —— 这个节点自己没有失败，只是被指认出来。
+  // 关动效时不播：toast 里已经写明是哪几个上游，信息不丢
+  useEffect(() => {
+    if (!motionOn) return;
+    return onNodeLocateFlash(id, () => {
+      const root = refs.root.current;
+      const fx = refs.fx.current;
+      if (!root || !fx) return;
+      stopAll(running.current, refs);
+      root.dataset.flash = "locate";
+      const flash = glowOnce(fx, "error", GLOW_FLASH, { ...TRANSITION.slow, times: GLOW_FLASH_TIMES });
+      running.current.push(flash);
+      void flash.then(() => {
+        if (root.dataset.flash === "locate") delete root.dataset.flash;
+      });
+    });
+    // refs 身份不变
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, motionOn]);
 
   useEffect(
     () => () => stopAll(running.current, refs),

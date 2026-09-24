@@ -83,6 +83,7 @@ export class TauriTransport implements Transport {
       doc,
       graphPath,
       targets: options?.targets ?? null,
+      isolate: options?.isolate ?? null,
       mode: options?.mode ?? "full",
       previewMaxPoints: options?.previewMaxPoints ?? null,
       previewBudgetMs: options?.previewBudgetMs ?? null,

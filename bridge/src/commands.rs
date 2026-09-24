@@ -7,7 +7,9 @@ use std::sync::RwLock;
 use tauri::Manager;
 
 use crate::core_ffi;
-use crate::execution::{encode_cloud, encode_indices, encode_tensor, PreviewOptions, RunManager};
+use crate::execution::{
+    encode_cloud, encode_indices, encode_tensor, PreviewOptions, RunManager, StartOptions,
+};
 use crate::graph::GraphDoc;
 
 /// 解析过的 manifest，连同它属于第几代 core。热重载换代后这份要作废（ADR-0009）。
@@ -139,6 +141,7 @@ pub fn validate_graph(
 
 /// 启动一次运行。立刻返回 run id，状态通过 `execution-event` 事件流推。
 /// `mode = "preview"` 时源算子的输出先抽稀，结果进独立的缓存命名空间（ADR-0011）。
+/// `isolate` 非空是单节点运行（docs/node-run-plan.md R1–R3）：只重算这几个，上游只取缓存。
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn run_graph(
@@ -147,6 +150,7 @@ pub fn run_graph(
     doc: GraphDoc,
     #[allow(non_snake_case)] graphPath: Option<String>,
     targets: Option<Vec<String>>,
+    isolate: Option<Vec<String>>,
     mode: Option<String>,
     #[allow(non_snake_case)] previewMaxPoints: Option<u32>,
     #[allow(non_snake_case)] previewBudgetMs: Option<u32>,
@@ -164,13 +168,18 @@ pub fn run_graph(
     } else {
         None
     };
+    let targets = targets.unwrap_or_default();
+    let isolate = isolate.unwrap_or_default();
     runs.start(
         &app,
         core,
         &json,
         &base_dir_of(graphPath),
-        &targets.unwrap_or_default(),
-        preview,
+        StartOptions {
+            targets: &targets,
+            isolate: &isolate,
+            preview,
+        },
     )
 }
 

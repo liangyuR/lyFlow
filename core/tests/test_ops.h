@@ -7,6 +7,7 @@
 #include <cmath>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <thread>
 
@@ -174,6 +175,46 @@ inline Status countedCompute(const Inputs&, const ParamView& params, Outputs& ou
   PointCloud cloud;
   const auto n = static_cast<std::size_t>(params.integer("pointCount"));
   cloud.reserve(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    const auto f = static_cast<float>(i);
+    cloud.push(f, f, f);
+  }
+  outputs.set("cloud", Data::cloud(std::move(cloud)));
+  return Status::Ok();
+}
+
+// ------------------------------------------------------------ test.tally
+/// 单节点运行（node-run）的计数器：按 tag 分开数，一张图里每个节点各记各的。
+/// 与 test.counted 不同，它是确定性的 —— 要命中缓存才测得出「上游没被重跑」。
+inline std::mutex& tallyMutex() {
+  static std::mutex mu;
+  return mu;
+}
+
+inline std::map<std::string, int>& tallies() {
+  static std::map<std::string, int> counts;
+  return counts;
+}
+
+inline int tallyOf(const std::string& tag) {
+  std::lock_guard<std::mutex> lock(tallyMutex());
+  auto it = tallies().find(tag);
+  return it == tallies().end() ? 0 : it->second;
+}
+
+inline Status tallyCompute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
+                           ExecContext&) {
+  {
+    std::lock_guard<std::mutex> lock(tallyMutex());
+    tallies()[params.text("tag")] += 1;
+  }
+  // 接了输入就原样传下去；没接就是源头，现产一小片
+  if (inputs.has("cloud")) {
+    outputs.set("cloud", inputs.get("cloud"));
+    return Status::Ok();
+  }
+  PointCloud cloud;
+  const auto n = static_cast<std::size_t>(params.integer("pointCount"));
   for (std::size_t i = 0; i < n; ++i) {
     const auto f = static_cast<float>(i);
     cloud.push(f, f, f);
@@ -505,6 +546,20 @@ inline void ensureTestOps() {
       op.params = {ops::intParam("pointCount", 8, 0.0), ops::intParam("seed", 0, 0.0)};
       op.capabilities = {false, false, true};
       op.compute = &ops::countedCompute;
+      r.addOperator(std::move(op));
+    }
+    {  // 按 tag 数自己被调了几次、而且确定性（能命中缓存）：单节点运行的执行计数断言靠它
+      OperatorDesc op;
+      op.id = "test.tally";
+      op.version = "1.0.0";
+      op.label = "Tally";
+      op.category = "Test";
+      op.doc = "只在测试里注册：按 tag 记调用次数；接了输入就透传，没接就产一小片点云。";
+      op.inputs = {Port{"cloud", "PointCloud", "Cloud", "", false}};
+      op.outputs = {cloudOut};
+      op.params = {ops::textParam("tag", ""), ops::intParam("pointCount", 4, 0.0)};
+      op.capabilities = {false, false, true};
+      op.compute = &ops::tallyCompute;
       r.addOperator(std::move(op));
     }
     // -------------------------------------------- 端口契约（ADR-0024）

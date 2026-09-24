@@ -16,6 +16,7 @@ import type {
   LoadedGraph,
   ManifestUpdated,
   RecentEntry,
+  RunOptions,
   Transport,
   TransportKind,
   Unlisten,
@@ -74,8 +75,9 @@ export class StaticTransport implements Transport {
   async cacheStats(): Promise<CacheStats> {
     return browserOnly("看缓存统计");
   }
-  async runGraph(): Promise<string> {
-    return browserOnly("运行");
+  async runGraph(_doc: GraphDoc, _graphPath: string | null, options?: RunOptions): Promise<string> {
+    // 单节点运行（docs/node-run-plan.md）同样要 core：说清楚是哪个入口被拦下的
+    return browserOnly(options?.isolate?.length ? "只运行单个节点" : "运行");
   }
   async cancelRun(): Promise<void> {
     return browserOnly("运行");

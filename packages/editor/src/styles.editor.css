@@ -137,12 +137,22 @@
 }
 
 .node__head {
+  /* flex：标题吃掉剩余宽度并在这里省略，徽标与运行按钮排在右端（docs/node-run-plan.md U1） */
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--lyflow-border);
   border-radius: 6px 6px 0 0;
   background: var(--lyflow-bg-3);
   font-weight: 500;
   white-space: nowrap;
+  overflow: hidden;
+}
+
+.node__title {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -976,8 +986,35 @@
   color: var(--lyflow-fg-1);
 }
 
+/* 只运行此节点（docs/node-run-plan.md §3）：视觉 14 px，命中区 20×20 由 padding 补齐。
+   负外边距让它不把标题栏撑高，视觉上的右缘仍落在标题栏原来的 padding-right 上。
+   颜色、hover 与进度环在 styles.motion.css */
+.node-run {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin: -3px -3px -3px 0;
+  padding: 3px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+.node-run:focus-visible {
+  outline: 1px solid var(--lyflow-accent);
+}
+.node-run__svg {
+  display: block;
+  overflow: visible;
+}
+
 /* 就地改名：输入框撑满标题栏，视觉上和标题同一个位置 */
 .node__rename {
+  flex: 1 1 0;
+  min-width: 0;
   width: 100%;
   padding: 0;
   border: 0;

@@ -432,5 +432,155 @@
         }
       ]
     }
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000003",
+    "seq": 0,
+    "at": "2026-09-24T09:00:00.000Z",
+    "kind": "run_started",
+    "nodeCount": 2,
+    "maxParallel": 4,
+    "mode": "full",
+    "plan": [
+      "n_gen",
+      "n_voxel"
+    ],
+    "targets": [
+      "n_voxel"
+    ],
+    "isolate": [
+      "n_voxel"
+    ],
+    "nodes": [
+      {
+        "id": "n_gen",
+        "cacheKey": "3b1f0c8e2a6d4f7091c5e8a2b4d6f801",
+        "level": 0
+      },
+      {
+        "id": "n_voxel",
+        "cacheKey": "9d2e4f6a8c0b1d3e5f7a9c1e3b5d7f90",
+        "level": 1
+      }
+    ]
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000003",
+    "seq": 1,
+    "at": "2026-09-24T09:00:00.001Z",
+    "kind": "node_state",
+    "nodeId": "n_gen",
+    "state": "skipped",
+    "durationMs": 0.02,
+    "stats": {
+      "elementCount": 20000,
+      "byteSize": 320000,
+      "cached": true,
+      "outputsAvailable": true,
+      "outputs": [
+        {
+          "port": "cloud",
+          "type": "PointCloud",
+          "elementCount": 20000
+        }
+      ]
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000003",
+    "seq": 2,
+    "at": "2026-09-24T09:00:00.002Z",
+    "kind": "node_state",
+    "nodeId": "n_voxel",
+    "state": "running"
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000003",
+    "seq": 3,
+    "at": "2026-09-24T09:00:00.040Z",
+    "kind": "node_state",
+    "nodeId": "n_voxel",
+    "state": "done",
+    "durationMs": 37.5,
+    "stats": {
+      "elementCount": 6120,
+      "byteSize": 97920,
+      "outputsAvailable": true,
+      "outputs": [
+        {
+          "port": "cloud",
+          "type": "PointCloud",
+          "elementCount": 6120
+        }
+      ]
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000003",
+    "seq": 4,
+    "at": "2026-09-24T09:00:00.041Z",
+    "kind": "run_finished",
+    "status": "ok",
+    "durationMs": 40.1
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000004",
+    "seq": 0,
+    "at": "2026-09-24T09:01:00.000Z",
+    "kind": "run_started",
+    "nodeCount": 2,
+    "maxParallel": 4,
+    "mode": "full",
+    "plan": [
+      "n_gen",
+      "n_voxel"
+    ],
+    "targets": [
+      "n_voxel"
+    ],
+    "isolate": [
+      "n_voxel"
+    ],
+    "nodes": [
+      {
+        "id": "n_gen",
+        "cacheKey": "5c7e9a1b3d5f7092b4d6f8a0c2e4a6b8",
+        "level": 0
+      },
+      {
+        "id": "n_voxel",
+        "cacheKey": "7e9a1c3e5a7c9e1b3d5f7a9c1e3a5c7e",
+        "level": 1
+      }
+    ]
+  },
+  {
+    "schemaVersion": 1,
+    "runId": "01J8XRUN000000000000000004",
+    "seq": 1,
+    "at": "2026-09-24T09:01:00.001Z",
+    "kind": "run_finished",
+    "status": "error",
+    "durationMs": 0.6,
+    "error": {
+      "phase": "execute",
+      "code": "upstream_not_ready",
+      "message": "上游 n_gen 还没有可用结果，先运行它或运行到此"
+    },
+    "diagnostics": [
+      {
+        "nodeId": "n_gen",
+        "severity": "error",
+        "phase": "execute",
+        "code": "upstream_not_ready",
+        "message": "上游 n_gen 还没有可用结果，先运行它或运行到此"
+      }
+    ]
   }
 ]

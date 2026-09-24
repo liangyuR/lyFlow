@@ -605,27 +605,32 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     return false;
   }
 
+  // 目标 id → 节点下标。精确匹配优先；匹配不到时按路径前缀收编整棵子图（F2）。
+  // targets 与 isolate 共用这一套，「点子图节点」在两处才是同一个意思（node-run R1）。
+  auto resolveTarget = [&](const std::string& t, std::vector<std::size_t>& into) {
+    auto it = indexById.find(t);
+    if (it != indexById.end()) {
+      into.push_back(it->second);
+      return true;
+    }
+    const std::string prefix = t + "/";
+    bool matched = false;
+    for (std::size_t i = 0; i < n; ++i) {
+      if (graph.nodes[i].id.compare(0, prefix.size(), prefix) == 0) {
+        into.push_back(i);
+        matched = true;
+      }
+    }
+    return matched;
+  };
+
   // -- Run to node：只保留目标的上游闭包 -----------------------------------
   std::vector<bool> keep(n, true);
   if (!options.targets.empty()) {
     keep.assign(n, false);
     std::vector<std::size_t> stack;
     for (const std::string& t : options.targets) {
-      // 精确匹配优先；匹配不到时按路径前缀收编整棵子图（F2）。
-      auto it = indexById.find(t);
-      if (it != indexById.end()) {
-        stack.push_back(it->second);
-        continue;
-      }
-      const std::string prefix = t + "/";
-      std::size_t matched = 0;
-      for (std::size_t i = 0; i < n; ++i) {
-        if (graph.nodes[i].id.compare(0, prefix.size(), prefix) == 0) {
-          stack.push_back(i);
-          matched += 1;
-        }
-      }
-      if (matched == 0) {
+      if (!resolveTarget(t, stack)) {
         diags.error("", Phase::Compile, "unknown_node", "Run to node 的目标不存在: " + t);
         return false;
       }
@@ -641,6 +646,17 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
       keep[id] = true;
       for (std::size_t up : upstream[id]) stack.push_back(up);
     }
+  }
+
+  // -- 只运行这些节点（node-run R1）。执行器保证 targets 就是这一组，所以它们一定都在 keep 里。
+  std::vector<char> isolatedNode(n, 0);
+  for (const std::string& t : options.isolate) {
+    std::vector<std::size_t> hit;
+    if (!resolveTarget(t, hit)) {
+      diags.error("", Phase::Compile, "unknown_node", "要单独运行的节点不存在: " + t);
+      return false;
+    }
+    for (std::size_t i : hit) isolatedNode[i] = 1;
   }
 
   // -- 惰性闭包（ADR-0016）：只被惰性端口依赖的节点标 deferred，不进初始拓扑序。
@@ -687,6 +703,7 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     pn.bypass = graph.nodes[id].bypass;
     pn.deferred = demandedEagerly[id] == 0;
     pn.provided = providedNode[id] != 0;
+    pn.isolated = isolatedNode[id] != 0;
     pn.injectedInputs = std::move(injectedInputsOf[id]);
     pn.errors = prepared[id].errors;
     pn.params = std::move(prepared[id].params);

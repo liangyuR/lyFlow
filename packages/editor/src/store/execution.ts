@@ -3,13 +3,15 @@
 
 import { create } from "zustand";
 
-import { pathPrefix, type SubPath } from "../lib/subgraph";
+import { flashNodesLocate } from "../lib/motion";
+import { localIdOf, pathPrefix, type SubPath } from "../lib/subgraph";
 import { transport } from "../transport";
 import { refreshCacheStats, useCacheStore } from "./cache";
 import { useUiStore } from "./ui";
 import type {
   Diagnostic,
   ExecutionEvent,
+  GraphDiagnostic,
   GraphOutputRef,
   NodeState,
   NodeStats,
@@ -58,6 +60,10 @@ interface ExecutionState {
   durationMs: number | null;
   /** 本次运行是「只跑到某个节点」还是全图。空 = 全图。 */
   targets: string[];
+  /** 单节点运行（docs/node-run-plan.md）只重算的那几个，展开后的路径 id。空 = 普通运行。
+   *  这时计划里其余的节点只是去结果仓取了一趟缓存：它们的状态与耗时照旧显示上一次的，
+   *  下游不进计划、也照旧 —— 所以这种运行不清空节点表（验收 8）。 */
+  isolate: string[];
   /** 图级命名输出的声明（ADR-0017）。run_started 带过来，前端不再自己解析图。 */
   outputs: GraphOutputRef[];
   /** core 产出的运行收尾（ADR-0022）。run_finished 带过来，前端只显示不重建。
@@ -76,7 +82,7 @@ interface ExecutionState {
    *  的返回值先到。直接丢会让小图整场跑完而界面毫无反应，所以先攒着认领。 */
   orphans: ExecutionEvent[];
 
-  beginRun(runId: string, targets: string[], preview: boolean): void;
+  beginRun(runId: string, targets: string[], preview: boolean, isolate?: string[]): void;
   failRun(message: string): void;
   apply(event: ExecutionEvent): void;
   markStale(): void;
@@ -84,6 +90,16 @@ interface ExecutionState {
 }
 
 const emptyNode = (): NodeExecution => ({ state: "idle", errors: [] });
+
+/** 事件里的 nodeId 在不在 isolate 里：精确命中，或落在某个子图节点之下（R1 的前缀展开）。 */
+export function inIsolate(isolate: readonly string[], nodeId: string): boolean {
+  return isolate.some((t) => nodeId === t || nodeId.startsWith(`${t}/`));
+}
+
+/** 本次单节点运行里撞上 upstream_not_ready 的上游（展开后的 id）。开跑前的那批在
+ *  run_finished.diagnostics 里；被 demand 的惰性上游是执行期才发现的，走 node_state，
+ *  这里先攒着，run_finished 时一起提示（U5）。 */
+let notReady: string[] = [];
 
 // -------------------------------------------------------------- 事件合并
 
@@ -146,6 +162,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   startedAt: null,
   durationMs: null,
   targets: [],
+  isolate: [],
   outputs: [],
   summary: null,
   nodes: new Map(),
@@ -155,11 +172,13 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   error: null,
   orphans: [],
 
-  beginRun(runId, targets, preview) {
+  beginRun(runId, targets, preview, isolate = []) {
     const claimed = get()
       .orphans.filter((e) => e.runId === runId)
       .sort((a, b) => a.seq - b.seq);
     dropStaged();
+    notReady = [];
+    const only = isolate.length > 0;
     set({
       runId,
       runStatus: "running",
@@ -167,11 +186,14 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       startedAt: Date.now(),
       durationMs: null,
       targets,
+      isolate,
       outputs: [],
       summary: null,
-      nodes: new Map(),
+      // 单节点运行不清节点表：其余节点的状态与耗时照旧（验收 8），「过时」标记也照旧 ——
+      // 图的其余部分没有因为这次运行而变新
+      nodes: only ? get().nodes : new Map(),
       logs: [],
-      stale: false,
+      stale: only ? get().stale : false,
       lastSeq: -1,
       error: null,
       orphans: [],
@@ -206,6 +228,13 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
 
     switch (event.kind) {
       case "run_started": {
+        if (s.isolate.length > 0) {
+          // 单节点运行：节点表原样留着，只有 isolate 里的节点会在后面的 node_state 里变。
+          // cacheKey 用追加而不是替换：计划外的下游还按它们上一次运行的键判 stale
+          useCacheStore.getState().extendRanWith(event.nodes ?? []);
+          set({ outputs: event.outputs ?? s.outputs });
+          break;
+        }
         const nodes = new Map<string, NodeExecution>();
         const at = Date.now();
         for (const id of event.plan ?? []) {
@@ -235,6 +264,15 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         break;
       }
       case "node_state": {
+        if (s.isolate.length > 0 && !inIsolate(s.isolate, event.nodeId)) {
+          // 单节点运行里其余节点只是去取了一趟缓存（R2）：它们的显示不跟着这次运行走，
+          // 否则一次「只跑 b」会把 a 刷成「已缓存」、耗时清零。唯一要看的是执行期才发现的
+          // upstream_not_ready（被 demand 的惰性上游），攒着留给 run_finished 提示
+          if (event.state === "error" && event.errors?.[0]?.code === "upstream_not_ready") {
+            notReady.push(event.nodeId);
+          }
+          break;
+        }
         const nodes = stage();
         const prev = nodes.get(event.nodeId) ?? emptyNode();
         nodes.set(event.nodeId, {
@@ -271,6 +309,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         });
         // 预览时不刷缓存统计：那是「事件到渲染」这条热路径上白多出来的一次 IPC
         if (!s.preview) void refreshCacheStats();
+        if (s.isolate.length > 0) reportNotReady(event.diagnostics);
         break;
       }
       case "log": {
@@ -294,6 +333,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
 
   reset() {
     dropStaged();
+    notReady = [];
     set({
       runId: null,
       runStatus: "idle",
@@ -301,6 +341,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       startedAt: null,
       durationMs: null,
       targets: [],
+      isolate: [],
       outputs: [],
       summary: null,
       nodes: new Map(),
@@ -312,6 +353,28 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     });
   },
 }));
+
+/** 单节点运行撞上「上游还没有可用结果」（U5）：不弹对话框，warn 级 toast，文案同 core 的那句；
+ *  缺结果的上游在当前层各闪一下红光（不抖）。 */
+function reportNotReady(diagnostics: readonly GraphDiagnostic[] | undefined): void {
+  const ids = [
+    ...(diagnostics ?? []).filter((d) => d.code === "upstream_not_ready").map((d) => d.nodeId),
+    ...notReady,
+  ].filter((id, i, all) => id !== "" && all.indexOf(id) === i);
+  notReady = [];
+  if (ids.length === 0) return;
+  // 与 core 那句同一个模板（R2）。不直接用 run_finished.error：执行期才发现的那种，
+  // error 是「N 个节点未能完成」
+  const text =
+    ids.length === 1
+      ? `上游 ${ids[0]} 还没有可用结果，先运行它或运行到此`
+      : `上游 ${ids.join("、")} 还没有可用结果，先运行它们或运行到此`;
+  const ui = useUiStore.getState();
+  ui.showToast(text, "warn");
+  const path = ui.path;
+  const local = ids.map((id) => localIdOf(path, id)).filter((id): id is string => id !== null);
+  flashNodesLocate([...new Set(local)]);
+}
 
 // ------------------------------------------------------- 按层聚合（F2）
 
@@ -481,6 +544,8 @@ export function runSceneId(): string | null {
 
 export interface RunRequest {
   targets?: string[] | undefined;
+  /** 只运行这些节点（docs/node-run-plan.md R1），展开后的路径 id。给了它 targets 就不用再传。 */
+  isolate?: string[] | undefined;
   /** 预览模式：源算子输出先抽稀，结果进独立缓存命名空间（ADR-0011）。 */
   preview?: boolean | undefined;
   previewMaxPoints?: number | undefined;
@@ -494,15 +559,18 @@ export async function startRun(
   const store = useExecutionStore.getState();
   const ticket = ++runTicket;
   const preview = request.preview === true;
+  const isolate = request.isolate ?? [];
   try {
     const runId = await transport.runGraph(doc, graphPath, {
       targets: request.targets,
+      isolate: isolate.length > 0 ? isolate : undefined,
       mode: preview ? "preview" : "full",
       previewMaxPoints: request.previewMaxPoints,
       sceneId,
     });
     if (ticket !== runTicket) return; // 已经有更晚的一次运行发起了，这次的回复作废
-    store.beginRun(runId, request.targets ?? [], preview);
+    // 给了 isolate 时 core 的 targets 就是同一组（R1），这边也照这个记
+    store.beginRun(runId, isolate.length > 0 ? isolate : (request.targets ?? []), preview, isolate);
   } catch (e) {
     if (ticket !== runTicket) throw e;
     store.failRun(e instanceof Error ? e.message : String(e));

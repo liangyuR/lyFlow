@@ -8,13 +8,17 @@
 只依赖同目录的 `lyflow/c_api.h`，不 include 任何 core 内部头，也不链接任何库 ——
 core 是运行时加载的 DLL（[ADR-0004](adr/0004-core-as-dll.md)）。
 
-契约版本是 **C ABI v10**（v9 的 run summary 见 [ADR-0022](adr/0022-run-summary-as-core-output.md)；
+契约版本是 **C ABI v11**（v9 的 run summary 见 [ADR-0022](adr/0022-run-summary-as-core-output.md)；
 v8 的张量与下标入口见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)）。
 `lyflow::kClientAbiVersion` 与 core 的 `LYFLOW_ABI_VERSION` 必须一致；对不上时
 `Client` 的构造函数会抛 `ClientError`，而不是等到某次调用才崩。
 
 v10 在 `lyflow_run_options` 末尾加了 `const char* params_json`：顶层图参数的取值，
 见下面「[顶层图参数](#顶层图参数)」。
+
+v11 在它后面又加了 `const char* const* isolate` + `size_t isolate_count`：只运行这几个节点，
+见下面「[只运行某几个节点](#只运行某几个节点isolate)」。结构体变长了，所以 ABI 号跟着加一 ——
+`client.hpp` 与 `lyflow-client` 都是零初始化整个结构体再填，不用 isolate 的宿主什么都不用改。
 
 v9 加的那一个入口是 `lyflow_run_summary(runId)`：一次运行的结构化收尾。
 `RunResult::summary` 就是它的原文，`RunHandle::runSummary()` 也能单独取。
@@ -113,6 +117,25 @@ lyflow::RunResult result = client.run(graphJson, options);
 - 图没声明的名字 → 这次运行的校验阶段报 `unknown_param`，一个节点都不跑。
 - 值在展开期写进被绑定的节点参数，所以缓存键跟着变：改一个顶层参数，只有它绑定的节点及其下游会重算。
 - CLI 的对应物是 `--param <名字>=<json>`，同一张图、同一组值，两边结果一致。
+
+## 只运行某几个节点（isolate）
+
+编辑器节点标题栏上那个「只运行此节点」按钮走的就是它（[docs/node-run-plan.md](node-run-plan.md)）：
+只重算给出的节点，上游用结果仓里已有的结果，下游不进计划。
+
+- C ABI：`lyflow_run_options.isolate` / `isolate_count`，id 语义与 `targets` 相同（展开后的路径，
+  给一个子图节点等于给它内部的全部节点）。给了它 core 就忽略 `targets`、改用同一组 id。
+- **上游只许命中缓存。** 任何一个需要的上游在结果仓里没有当前 cacheKey 的结果，开跑前整次失败，
+  一个算子都不调：`run_finished` 为 `error`，`error.code` 是 `upstream_not_ready`，
+  `run_finished.diagnostics[]` 每个缺结果的上游一条（`nodeId` 指它）。那些上游没有失败，
+  所以不会有它们的 `node_state`。被 demand 的惰性上游开跑前判不了，执行期撞上时那个节点以
+  `upstream_not_ready` 报 error。
+- **isolate 里的节点跳过缓存、强制执行**，结果覆盖结果仓里同 cacheKey 的旧结果（读外部文件的算子
+  靠这一条拿到新内容），`stats.cached` 不出现。静音节点照静音语义透传。
+- `run_started.isolate` 原样带出这组 id（普通运行是空数组），`mode` 仍是 `full`。
+  与 `mode = preview` 同时给是参数错误（`bad_input`）：预览结果在另一个缓存命名空间里。
+- `client.hpp` 的 `RunOptions` 没有加这个字段（这次只接编辑器用得到的那几条路，CLI 与 MCP 也没加）；
+  C++ 宿主要用就直接填 `lyflow_run_options`。Rust 是 `RunSpec::isolate: &[String]`。
 
 ## 取点云
 
@@ -270,7 +293,7 @@ use lyflow_client::{Core, RunSpec};
 let core = Core::load_from(Path::new("D:/lyflow-runtime/bin/lyflow_core.dll"))?;
 core.self_check().map_err(|e| /* 算子描述不干净，拒绝启动 */ e)?;
 
-assert_eq!(lyflow_client::ABI_VERSION, 10); // 与 core 的 LYFLOW_ABI_VERSION 对齐
+assert_eq!(lyflow_client::ABI_VERSION, 11); // 与 core 的 LYFLOW_ABI_VERSION 对齐
 
 // 顶层图参数：RunSpec 的 params_json: Option<&str>，或链式的 with_params_json
 let spec = RunSpec::new(&graph_json, &run_id, &base_dir, &[])
@@ -308,3 +331,11 @@ let spec = RunSpec::new(&graph_json, &run_id, &base_dir, &[])
 宿主不用判断。关掉之后信息不丢：正在流数据的边仍是一条静态高亮，running 的节点仍是蓝框加光。
 适合的场景：录屏/截图要稳定的画面、远程桌面这类重绘很贵的环境、宿主页面自己有一套动效规范。
 `examples/host-react/` 的宿主栏上有一个「动效」开关，就是这个 prop。
+
+**自己实现 `Transport` 时**，`runGraph(doc, graphPath, options)` 的 `options` 里多了一个
+`isolate?: string[]`（展开后的路径 id）：节点标题栏的「只运行此节点」按钮与右键同名菜单项发的就是它，
+语义见上面「[只运行某几个节点](#只运行某几个节点isolate)」。后端要做到的最小一条：上游没有可用结果时
+发一对 `run_started`（带 `isolate`）/ `run_finished`（`error.code = upstream_not_ready`、
+`diagnostics[]` 每个缺结果的上游一条），不执行任何算子 —— 编辑器据此弹 warn 级 toast、把缺结果的上游
+闪一下。不认识这个字段的老后端会把它当成普通的全图运行，所以宿主换 core 时要一起换。
+HTTP 契约里对应 `POST /lyflow/run` 信封的 `isolate` 字段（[http-transport.md](http-transport.md)）。

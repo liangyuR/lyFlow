@@ -61,8 +61,8 @@
 
 ## P2 — 可以先不做
 
-**状态：#31 #33 #34 #36 #37 于 M4 完成，#32 以子图取代（见备注），#39 于连线查看器计划完成。**
-每一项在 `scripts/e2e/m4.mjs`、`scripts/e2e/peek.mjs` 或 `bridge/src/cli.rs` 的测试里至少有一条断言。
+**状态：#31 #33 #34 #36 #37 于 M4 完成，#32 以子图取代（见备注），#39 于连线查看器计划完成，#40 于节点运行按钮计划完成。**
+每一项在 `scripts/e2e/m4.mjs`、`scripts/e2e/peek.mjs`、`scripts/e2e/noderun.mjs` 或 `bridge/src/cli.rs` 的测试里至少有一条断言。
 
 | # | 项 | 状态 | 备注 |
 |---|---|---|---|
@@ -75,6 +75,7 @@
 | 37 | 大图性能（数百节点） | ✅ M4 | `onlyRenderVisibleElements`（> 80 节点才开）+ 执行事件 16 ms 合并；300 节点打开 < 1 s、拖动 ≥ 30 fps |
 | 38 | 协作 / 多人编辑 | ⬜ 不计划 | |
 | 39 | 双击连线查看内容（Edge Peek） | ✅ S1–S7 | 四种视图：3D 点云 / 正交 2D（剖面 + 2D 几何）/ 张量图像 / 键值表 + 原始 JSON。可多开、可拖动、可锁定快照；上限 **6 窗，其中带 WebGL 的 4 个**。没有运行在跑时 `Esc` 关最前面的一个。计划见 [edge-peek-plan.md](edge-peek-plan.md)，张量 / 下标的 ABI 见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)；验收在 `scripts/e2e/peek.mjs` |
+| 40 | 只运行此节点（标题栏右端的小圆圈） | ✅ node-run | 上游用已有结果、自己强制重算、下游不动（core 的 `isolate`，C ABI v11）。上游没有可用结果时按钮置灰并写明缺谁，绕过去由 core 在开跑前整次拒绝（`upstream_not_ready`，toast + 缺结果的上游闪一下）；自己发起的那次运行中点它是停止，别的运行中点它是抢占。右键同名菜单项同一动作、同一可用性。计划见 [node-run-plan.md](node-run-plan.md)，验收在 `scripts/e2e/noderun.mjs` |
 
 ---
 

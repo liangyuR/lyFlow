@@ -90,7 +90,14 @@
           "items": {
             "type": "string"
           },
-          "description": "Run to node 的目标集。全图运行时为空数组。"
+          "description": "Run to node 的目标集。全图运行时为空数组。给了 isolate 时与 isolate 相同。"
+        },
+        "isolate": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "单节点运行（docs/node-run-plan.md R1–R5）：只重算这些节点（子图节点按路径前缀展开），不在里面的上游只取缓存，下游不进计划。普通运行时为空数组；老 core 不带这个字段。mode 仍是 full —— 预览与它不组合。"
         },
         "nodes": {
           "type": "array",
@@ -224,6 +231,42 @@
         },
         "error": {
           "$ref": "#/$defs/error"
+        },
+        "diagnostics": {
+          "type": "array",
+          "description": "run 级、但各自指着一个节点的诊断。目前只有单节点运行的 upstream_not_ready（node-run R2）：每个缺当前 cacheKey 结果的上游一条，nodeId 指它。这些节点并没有失败，所以不发 node_state；error 是第一条的快捷方式。",
+          "items": {
+            "type": "object",
+            "required": [
+              "nodeId",
+              "code",
+              "message"
+            ],
+            "properties": {
+              "nodeId": {
+                "type": "string"
+              },
+              "severity": {
+                "enum": [
+                  "error",
+                  "warning"
+                ]
+              },
+              "phase": {
+                "enum": [
+                  "validate",
+                  "compile",
+                  "execute"
+                ]
+              },
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
         },
         "summary": {
           "$ref": "#/$defs/summary",
@@ -564,7 +607,7 @@
         },
         "code": {
           "type": "string",
-          "description": "机器可读短码。当前取值集合：unknown_op | unknown_port | type_mismatch | missing_input | multi_input | unknown_param | bad_param | bad_input | unknown_node | duplicate_id | version_mismatch | migration | bypassed_no_source | output_not_written | contract_violation | recursive_subgraph | cycle | io | cancelled | upstream_failed | internal。前端不得穷举它做逻辑分支——未知 code 一律按通用错误显示。"
+          "description": "机器可读短码。当前取值集合：unknown_op | unknown_port | type_mismatch | missing_input | multi_input | unknown_param | bad_param | bad_input | unknown_node | duplicate_id | version_mismatch | migration | bypassed_no_source | output_not_written | contract_violation | recursive_subgraph | cycle | io | cancelled | upstream_failed | upstream_not_ready | internal。upstream_not_ready 只出现在单节点运行里（node-run R2）：上游还没有当前 cacheKey 的结果。前端不得穷举它做逻辑分支——未知 code 一律按通用错误显示。"
         },
         "message": {
           "type": "string"

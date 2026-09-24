@@ -78,6 +78,80 @@
   transition: width var(--lyflow-motion-fast) linear;
 }
 
+/* ------------------------------------------------ 只运行此节点（node-run U2） */
+
+/* 按钮在 .node__head 里，不含端口：hover 的放大只作用在它自己的 SVG 上（A5 / A6 允许的范围）。
+   默认空心灰圈；hover 变 accent 实心 + 白 ▶；运行中是进度环（有进度画弧长，没有就转 3/4 弧），
+   自己发起的那次中心一个 ■；完成绿圈、出错红圈；不可用时描边降到 40%。 */
+.node-run__svg {
+  transition: transform var(--lyflow-motion-fast) var(--lyflow-ease-out);
+}
+.node-run__ring {
+  fill: transparent;
+  stroke: var(--lyflow-fg-2);
+  stroke-width: 1.5;
+  transition:
+    fill var(--lyflow-motion-fast) var(--lyflow-ease-out),
+    stroke var(--lyflow-motion-fast) var(--lyflow-ease-out),
+    stroke-opacity var(--lyflow-motion-fast) var(--lyflow-ease-out);
+}
+.node-run__play,
+.node-run__stop {
+  fill: #fff;
+  opacity: 0;
+  transition: opacity var(--lyflow-motion-fast) var(--lyflow-ease-out);
+}
+.node-run:not([data-run-state="disabled"]):hover .node-run__svg {
+  transform: scale(1.12);
+}
+.node-run:not([data-run-state="disabled"]):hover .node-run__ring {
+  fill: var(--lyflow-accent);
+  stroke: var(--lyflow-accent);
+}
+.node-run:not([data-run-state="disabled"]):not([data-run-own="1"]):hover .node-run__play {
+  opacity: 1;
+}
+.node-run[data-run-state="done"] .node-run__ring {
+  stroke: #46a758;
+}
+.node-run[data-run-state="error"] .node-run__ring {
+  stroke: #e5484d;
+}
+.node-run[data-run-state="disabled"] {
+  cursor: not-allowed;
+}
+.node-run[data-run-state="disabled"] .node-run__ring {
+  stroke-opacity: 0.4;
+}
+.node-run[data-run-state="running"] .node-run__ring {
+  stroke: color-mix(in srgb, var(--lyflow-fg-2) 45%, transparent);
+}
+/* 进度弧从 12 点钟方向起笔。关动效时转圈停住，3/4 弧仍画着 —— 信息不丢（A4） */
+.node-run__arc {
+  fill: none;
+  stroke: var(--lyflow-accent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 7px 7px;
+  transition: stroke-dasharray var(--lyflow-motion-fast) linear;
+}
+.node-run__arc--spin {
+  animation: lyflow-node-run-spin 0.9s linear infinite;
+}
+@keyframes lyflow-node-run-spin {
+  from { transform: rotate(-90deg); }
+  to   { transform: rotate(270deg); }
+}
+/* 自己发起的那次（U3）：中心一个 ■，点了是停止 */
+.node-run[data-run-own="1"] .node-run__stop {
+  opacity: 1;
+  fill: var(--lyflow-accent);
+}
+.node-run[data-run-own="1"]:hover .node-run__stop {
+  fill: #fff;
+}
+
 /* ------------------------------------------------------------------ 端口 */
 
 /* 拖线期间兼容端口的放大（老行为）走 --lyflow-handle-scale，接在 styles.editor.css 的

@@ -795,6 +795,9 @@ async function suiteReducedMotion(cdp, report) {
   report.eq("撤掉模拟之后动效恢复", back, "on");
 }
 
+/** 端点对齐与真鼠标这几样别的分组也要（docs/node-run-plan.md 验收 11 复用对齐断言）。 */
+export { install as installMotionProbe, alignOf, worst, moveMouse, emptySpot };
+
 export const motionSuites = [
   suiteEnter,
   suiteDelete,

@@ -161,6 +161,9 @@ export interface RunStartedEvent extends EventBase {
   maxParallel?: number;
   plan?: string[];
   targets?: string[];
+  /** 单节点运行（docs/node-run-plan.md R1）：只重算这几个，上游只取缓存。普通运行是空数组，
+   *  老 core 不带这个字段。 */
+  isolate?: string[];
   /** 编译结果。精确 stale 与「将重算 N 个节点」提示靠它（ADR-0007）。
    *  只被惰性端口依赖的节点不在这里，被 demand 时经 plan_extended 追加（ADR-0016）。 */
   nodes?: RunPlanNode[];
@@ -253,6 +256,9 @@ export interface RunFinishedEvent extends EventBase {
   status: RunStatus;
   durationMs?: number;
   error?: Diagnostic;
+  /** run 级、但各自指着一个节点的诊断。目前只有单节点运行的 upstream_not_ready（node-run R2）：
+   *  每个缺结果的上游一条。那些节点没有失败，所以不会有它们的 node_state。 */
+  diagnostics?: GraphDiagnostic[];
   /** ADR-0022。老 core（ABI < v9）没有它。 */
   summary?: RunSummary;
 }

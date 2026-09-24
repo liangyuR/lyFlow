@@ -301,6 +301,37 @@ async function suiteAnimationsProp(cdp, report) {
   report.ok("恢复之后新节点又播进场、新连线又会长", on.entering > 0 && on.growing > 0, JSON.stringify(on));
 }
 
+/** 单节点运行经 HTTP（docs/node-run-plan.md R6）：桩服务器按 cacheKey 记账实现最小语义 ——
+ *  上游没跑过回 upstream_not_ready，跑过就照常跑、run_started 带上 isolate。 */
+async function suiteNodeRunOverHttp(cdp, report) {
+  report.section("HttpTransport：只运行此节点 —— 上游没跑过回 upstream_not_ready，跑过之后照常跑");
+
+  await newDoc(cdp);
+  const ids = await buildGraph(
+    cdp,
+    [
+      { key: "gen", op: "gen.synthetic", params: { pointCount: 6000, seed: (Date.now() % 9973) + 3 } },
+      { key: "pass", op: "filter.passthrough" },
+    ],
+    [{ from: ["gen", "cloud"], to: ["pass", "cloud"] }],
+  );
+  const button = await cdp.eval(`return !!document.querySelector('[data-testid="node-run-${ids.pass}"]');`);
+  report.eq("节点标题栏有运行按钮", button, true);
+
+  const early = await runAndWait(cdp, () => cdp.eval(`await window.__lyflow.run({ isolate: [${lit(ids.pass)}] }); return true;`));
+  const toast = await cdp.eval(`return document.querySelector('[data-testid="toast"]')?.textContent ?? null;`);
+  report.eq("上游没跑过：运行 error", early.status, "error");
+  report.ok("toast 写明上游还没有可用结果", String(toast).includes("还没有可用结果") && String(toast).includes(ids.gen), String(toast));
+
+  const full = await runAndWait(cdp, () => cdp.eval(`await window.__lyflow.run(); return true;`));
+  report.eq("（前提）全图运行 ok", full.status, "ok");
+  const only = await runAndWait(cdp, () => cdp.eval(`await window.__lyflow.run({ isolate: [${lit(ids.pass)}] }); return true;`));
+  const isolate = await cdp.eval(`return window.__lyflow.stores.execution.getState().isolate;`);
+  report.eq("上游跑过之后：单节点运行 ok", only.status, "ok");
+  report.eq("执行 store 记下了 isolate", isolate, [ids.pass]);
+  report.eq("pass 重新 done", only.nodes[ids.pass]?.state, "done");
+}
+
 // ------------------------------------------------------------------- main
 
 async function main() {
@@ -400,6 +431,7 @@ async function main() {
     await suiteEditAndRun(cdp, report, ws);
     await suiteBuildAndShortcut(cdp, report);
     await suiteAnimationsProp(cdp, report);
+    await suiteNodeRunOverHttp(cdp, report);
 
     report.section("控制台");
     report.ok(

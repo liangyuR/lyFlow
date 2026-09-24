@@ -1,8 +1,8 @@
 #ifndef LYFLOW_C_API_H
 #define LYFLOW_C_API_H
-// C ABI v10。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
+// C ABI v11。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
 // 三条约定（char* 归属、异常不跨 ABI、只导出 C 函数）见 core/README.md「C ABI 约定」。
-#define LYFLOW_ABI_VERSION 10
+#define LYFLOW_ABI_VERSION 11
 #include <stddef.h>
 #include <stdint.h>
 
@@ -106,6 +106,14 @@ typedef struct {
   /* v10：顶层图参数的取值，JSON 对象 { 名字: 值 }（GraphDoc 顶层 params）。
      NULL/空串 = 全用图里的 default。图没声明的名字在校验阶段报 unknown_param。 */
   const char* params_json;
+  /* v11：只运行这些节点（docs/node-run-plan.md R1–R3），NULL/0 表示普通运行。id 语义与
+     targets 相同（子图节点按路径前缀展开为全部内部节点）；给了它就忽略 targets、改用同一组 id。
+     不在里面的上游只许命中缓存，任何一个缺当前 cacheKey 的结果就在开跑前整次失败：
+     run_finished 为 error，error.code 与 diagnostics[].code 是 upstream_not_ready，
+     每个缺结果的上游一条（nodeId 指它），不执行任何算子。在里面的节点跳过缓存强制执行，
+     结果覆盖同 cacheKey 的旧结果。与 mode = preview 同时给是参数错误（bad_input）。 */
+  const char* const* isolate;
+  size_t isolate_count;
 } lyflow_run_options;
 
 #define LYFLOW_RUN_MODE_FULL 0

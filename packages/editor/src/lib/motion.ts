@@ -128,3 +128,27 @@ export function withLayoutTransition(apply: () => void): void {
 export function layoutTransitionRequested(): boolean {
   return layoutIntent;
 }
+
+// ------------------------------------------------ 定位闪光（node-run U5）
+
+/** 「这几个节点有问题，看这里」：单节点运行撞上 upstream_not_ready 时，缺结果的上游各闪一下
+ *  红光（S2 的 error 闪光，不抖动 —— 它们自己并没有失败）。执行 store 喊，节点组件听；
+ *  键是**本层**的节点 id，不在当前层的喊了也没人应，正好。 */
+const flashListeners = new Map<string, Set<() => void>>();
+
+export function onNodeLocateFlash(id: string, fn: () => void): () => void {
+  let set = flashListeners.get(id);
+  if (!set) {
+    set = new Set();
+    flashListeners.set(id, set);
+  }
+  set.add(fn);
+  return () => {
+    set.delete(fn);
+    if (set.size === 0) flashListeners.delete(id);
+  };
+}
+
+export function flashNodesLocate(ids: readonly string[]): void {
+  for (const id of ids) for (const fn of flashListeners.get(id) ?? []) fn();
+}

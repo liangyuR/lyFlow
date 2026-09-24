@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { layoutGraph } from "../lib/layout";
 import { useMotionEnabled, viewportMs, withLayoutTransition } from "../lib/motion";
+import { nodeRunAvailability, nodeRunTitle, toggleNodeRun } from "../lib/nodeRun";
 import {
   createMappingCache,
   distanceToSegment,
@@ -756,6 +757,8 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
   }, [menu]);
 
   const menuNode = menu ? view.nodes.find((n) => n.id === menu.nodeId) : undefined;
+  // 「只运行此节点」与标题栏按钮同一可用性（node-run U7）：菜单打开时判一次
+  const menuRunOnly = menu ? nodeRunAvailability(menu.nodeId) : null;
   const menuSubgraphId = menuNode ? subgraphIdOf(menuNode.op) : null;
   const menuIsLibrary = menuNode?.op.startsWith("lib.") === true;
 
@@ -984,6 +987,25 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
             }}
           >
             运行到此节点 <kbd>{keyHint("runToNode")}</kbd>
+          </button>
+          <button
+            type="button"
+            data-testid="ctx-run-node-only"
+            disabled={!menuRunOnly?.available}
+            data-run-reason={menuRunOnly?.missing.join(",") || undefined}
+            title={
+              menuRunOnly?.available
+                ? nodeRunTitle("idle", [], false)
+                : menuRunOnly && menuRunOnly.missing.length > 0
+                  ? nodeRunTitle("disabled", menuRunOnly.names, false)
+                  : undefined
+            }
+            onClick={() => {
+              void toggleNodeRun(menu.nodeId);
+              setMenu(null);
+            }}
+          >
+            只运行此节点
           </button>
           <button
             type="button"

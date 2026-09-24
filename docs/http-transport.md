@@ -2,11 +2,12 @@
 
 `@lyflow/editor` 的 `HttpTransport` 与后端之间的协议。**阶段 B 的业务服务照这一份实现。**
 
-一句话：`Transport` 接口的每个方法对着 C ABI v10 的一个入口，这里再对着一个 REST 端点。
+一句话：`Transport` 接口的每个方法对着 C ABI v11 的一个入口，这里再对着一个 REST 端点。
 三方一一对应，见下面的对照表。v7 的 ABI 清单在 [phase-a1-acceptance.md](phase-a1-acceptance.md#c-abi-v7-的最终签名清单)，
 v8 加的两个取数入口见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)，
 v9 加的 `lyflow_run_summary` 见 [ADR-0022](adr/0022-run-summary-as-core-output.md)。
 v10 在 `lyflow_run_options` 末尾加的 `params_json`（顶层图参数取值）见 [embedding.md](embedding.md#顶层图参数)。
+v11 再加的 `isolate`（只运行某几个节点）见 [embedding.md](embedding.md#只运行某几个节点isolate)，对应下面 `/lyflow/run` 信封的同名字段。
 
 - **基址**：构造时给的 `baseUrl`，例如 `http://127.0.0.1:8787`。所有路径都挂在 `/lyflow/` 下。
 - **编码**：请求体与响应体都是 `application/json; charset=utf-8`，
@@ -112,12 +113,19 @@ v10 在 `lyflow_run_options` 末尾加的 `params_json`（顶层图参数取值�
 信封：
 
 ```json
-{ "doc": {}, "graphPath": null, "targets": ["n1"] ,
+{ "doc": {}, "graphPath": null, "targets": ["n1"] , "isolate": null,
   "mode": "full", "previewMaxPoints": null, "previewBudgetMs": null,
   "sceneId": null }
 ```
 
 `mode` 是 `"full"` 或 `"preview"`（ADR-0011：预览模式下源算子先抽稀）。
+
+`isolate` 非空是单节点运行（[node-run-plan.md](node-run-plan.md) R1–R3）：只重算这几个节点，
+`targets` 被忽略、取同一组 id；上游只许命中缓存，缺结果时这次运行照常返回 `runId`，事件流里是
+`run_started`（带 `isolate`）紧跟 `run_finished`（`error.code = upstream_not_ready`，
+`diagnostics[]` 每个缺结果的上游一条）。与 `mode: "preview"` 同时给是参数错误。
+桩服务器（`test-server/`）没有常驻结果仓，按事件里的 cacheKey 记账实现这条最小语义；
+上游齐了就按 `--to` 跑一遍 CLI（CLI 没有 isolate 开关），所以桩里的上游其实会被重算。
 
 `sceneId` 是**可选**的宿主扩展：宿主页面上已经加载好一对点云时，把它的会话 id 带上，
 后端就把那对云注入到起始算子的输入端口，而不是让图自己按参数去读盘。不带（或 `null`）

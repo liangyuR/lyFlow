@@ -122,7 +122,7 @@ void ResultStore::evictLocked() {
 }
 
 void ResultStore::put(const std::string& runId, const std::string& nodeId, const std::string& port,
-                      const std::string& cacheKey, Data data) {
+                      const std::string& cacheKey, Data data, bool replace) {
   std::lock_guard<std::mutex> lock(mu_);
   const std::string key = entryKey(cacheKey, port);
   auto it = byKey_.find(key);
@@ -135,6 +135,14 @@ void ResultStore::put(const std::string& runId, const std::string& nodeId, const
     e.lru = std::prev(lru_.end());
     bytes_ += e.bytes;
     byKey_.emplace(key, std::move(e));
+    evictLocked();
+  } else if (replace) {
+    // 就地换掉 Data：别的 run 的索引存的是键不是指针，它们下次取到的也是这一份新的
+    bytes_ -= it->second.bytes;
+    it->second.bytes = data.byteSize();
+    it->second.data = std::move(data);
+    bytes_ += it->second.bytes;
+    touchLocked(key);
     evictLocked();
   } else {
     touchLocked(key);  // 已经在仓里就是同一份内容，保留原来那个 shared_ptr

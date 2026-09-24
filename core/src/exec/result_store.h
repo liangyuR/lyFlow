@@ -81,8 +81,11 @@ class ResultStore {
  public:
   static ResultStore& instance();
 
+  /// replace=false 时同一个键已经在仓里就保留原来那份（内容寻址：键相同即内容相同）。
+  /// replace=true 是单节点运行的强制重算（node-run R3）：键没变而内容可能变了（外部文件），
+  /// 用新的一份顶掉旧的。
   void put(const std::string& runId, const std::string& nodeId, const std::string& port,
-           const std::string& cacheKey, Data data);
+           const std::string& cacheKey, Data data, bool replace = false);
 
   /// port 也可以写成 `<port>.<field>`：取 Bundle 端口里的那个字段（m8-plan L3）。
   /// lyflow_output_cloud / tensor / indices / save 都经这里，所以签名不变就认这种写法。

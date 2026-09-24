@@ -81,6 +81,9 @@ CMake + Ninja + vcpkg（PCL）。Ninja 通常不在 PATH 上，`build.rs` 会依
 `run_graph` 多了 `mode` / `previewMaxPoints` / `previewBudgetMs`
 （[ADR-0011](../docs/adr/0011-preview-as-decimated-run.md)）。`mode: "preview"` 时
 源算子的输出先抽稀，结果进独立的缓存命名空间。
+还有 `isolate: string[] | null`（C ABI v11，[docs/node-run-plan.md](../docs/node-run-plan.md)）：
+只重算这几个节点，上游只取缓存，缺结果时 core 在开跑前以 `upstream_not_ready` 整次失败。
+它经 `RunManager::start` 的 `StartOptions` 原样交给 `RunSpec::isolate`，抢占规则不变。
 
 三条事件流：`execution-event`（符合
 [`schema/execution-event.schema.json`](../schema/execution-event.schema.json)）、

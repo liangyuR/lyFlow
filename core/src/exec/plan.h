@@ -35,6 +35,8 @@ struct PlanNode {
   bool provided = false;
   /// 由宿主注入的**输入**端口（m8-plan L18）：compute 照常调，这些端口的值取注入数据。
   std::set<std::string> injectedInputs;
+  /// 在 BuildOptions::isolate 里（按路径前缀展开后）：跳过缓存查找、强制执行（node-run R3）。
+  bool isolated = false;
   std::vector<Diagnostic> errors;     ///< 该节点的全部阻塞性诊断（D5）
   ParamMap params;                    ///< 已合并默认值（迁移之后的）
   /// 图里**显式写了**的参数键，**跑完迁移之后**的那一份。`lyflow params` 的
@@ -81,6 +83,10 @@ struct BuildOptions {
   /// Run to node：只保留这些节点的上游闭包。空 = 跑全图。
   /// 目标按路径前缀匹配：给一个子图节点的 id 等于给它展开后的全部内部节点（F2）。
   std::vector<std::string> targets;
+  /// 只运行这些节点（node-run R1）：id 语义与 targets 相同，子图节点按路径前缀展开。
+  /// 编译照常保留 targets 的上游闭包（cacheKey 要靠它算），这里只负责给命中的节点标 isolated；
+  /// 「targets 取同一组 id」由调用方保证（执行器在 Run 的构造里做）。
+  std::vector<std::string> isolate;
   /// 非空时混进每个 cacheKey，把预览结果关进独立的缓存命名空间（F5）。
   std::string cacheNamespace;
   /// 被注入的节点 id → 注入数据的摘要。进 cacheKey（输出注入与输入注入都进）。

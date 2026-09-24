@@ -32,6 +32,10 @@ struct RunOptions {
   std::string runId;
   std::filesystem::path baseDir;
   std::vector<std::string> targets;
+  /// 只运行这些节点（node-run R1–R3）：给了它就忽略 targets、改用同一组 id；不在里面的
+  /// 上游只许命中缓存，缺一个就在开跑前整次失败（upstream_not_ready），在里面的跳过缓存强制执行。
+  /// 与 preview 模式互斥（R5）。
+  std::vector<std::string> isolate;
   /// 并行度。0 = min(4, 硬件线程数)。1 = 退回顺序执行。
   int maxParallel = 0;
   /// 结果仓字节预算。0 = 用默认值（min(8 GB, 物理内存 40%)）。

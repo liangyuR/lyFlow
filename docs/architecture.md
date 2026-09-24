@@ -16,7 +16,7 @@
 `TauriTransport` 走 `#[tauri::command]`，`HttpTransport` 走
 [docs/http-transport.md](http-transport.md) 的 REST + WebSocket，
 `StaticTransport` 只读一份 dump 出来的 manifest。三者的方法一一对应，
-再一一对应到 C ABI v10 —— 换传输不换语义。
+再一一对应到 C ABI v11 —— 换传输不换语义。
 
 核心编译成一个只导出 C ABI 的 DLL，桥接层在运行时加载它（[ADR-0004](adr/0004-core-as-dll.md)）。
 这条边界同时是崩溃隔离面和 M3 热重载的接缝。

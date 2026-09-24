@@ -17,6 +17,7 @@ phase_a.mjs  阶段 A 的分组（惰性分支半透明、plan_extended、图级
 m8b.mjs      M8b 的分组（空白画布拼测点：自动连线、片段、2D 拖框、实时校验、Bundle 的 Edge Peek）
 m8c.mjs      M8c 的分组（三模板的图：2D 视图按槽切换、拖一个槽只改它、复制到其它槽、标签不遮挡、按槽的诊断）
 motion.mjs   动效的分组（docs/motion-plan.md §3 验收 2–9：进场、删除残影、端点对齐、连线生长、流动、状态闪光、hover、关动效）
+noderun.mjs  「只运行此节点」的分组（docs/node-run-plan.md §4 验收 7–12：按钮位置与真鼠标、只重算一个节点、上游不齐的预判与兜底、停止与抢占、hover / 关动效 / 端点对齐、右键菜单）
 http.mjs     e2e:http —— Node 桩服务器 + 系统 Chrome + examples/host-react
 ```
 
@@ -133,6 +134,12 @@ WiX 的 `INSTALLDIR`）。目的是验证「DLL 随包」和「从 exe 同目录
   `data-flash`（done / error 闪光）只在动画期间挂着，事后查 DOM 什么都看不到；`motion.mjs` 在页面里
   装一个观察器，记下它们出现过几次。关动效用 `Emulation.setEmulatedMedia` 设 `prefers-reduced-motion`，
   宿主的 `animations={false}` 在 `e2e:http` 里点宿主栏上的「动效」开关。
+- **单节点运行的断言要看事件，不看节点表**（`noderun.mjs`）。这种运行不清空节点表、计划里其余节点的
+  node_state 也不落进 store（验收 8：它们的状态与耗时不变），所以「计划里有谁、isolate 是什么」只能从
+  `run_started` 读：分组在页面里另挂一个 `transport.onExecutionEvent` 记下 run_started / run_finished。
+  「只有 b 变了」看 `window.__lyflow.transitions` —— 它来自事件，被忽略的那些节点一条都不会有。
+- **要一个跑得够久的节点**（验收 10 / 11 的停止、抢占、进度环）：三百万点过一道 0.0006 的体素栅格，
+  本机约 1.7 s。等「按钮进入 running」要在页面里逐帧看（`waitButton`），从 Node 侧轮询会错过。
 - **同名的输入、输出端口 testid 相同**（voxel 的 `cloud` 进 `cloud` 出都是 `port-<id>-cloud`）。按侧别挑要加
   `.node-port--input` / `.node-port--output`，否则 `querySelector` 拿到的永远是输入那一个。
 - **搭图走 store 的语义化动作，不直接塞 doc。** 塞一份构造好的 doc 会跳过
