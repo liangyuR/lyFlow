@@ -26,6 +26,7 @@
 | R3 | `isolate` 里的节点**跳过缓存查找，强制执行**，结果照常写回结果仓（覆盖同 cacheKey 的旧结果），`stats.cached` 为 false | 点了就真跑一遍：调试、读外部文件的算子都需要 |
 | R4 | 下游一概不进本次计划（`targets` 已经保证）。静音（bypass）的 isolate 节点照静音语义透传；缺失算子、校验不过的节点照现有规则报错 | 不引入新的执行分支 |
 | R5 | `run_started` 事件带上 `isolate`（schema 同步），`mode` 仍是 full；预览模式与 `isolate` 不组合（同时给时 core 报参数错误） | 编辑器与 MCP 能看出这次是单节点运行；预览缓存是另一个命名空间，混用会误判「上游不齐」 |
+| R7 | **计划外节点挂结果，不执行**（2026-09-24 验收后补）：给了 `isolate` 时，core 仍对全图算 cacheKey；不在本次计划里的节点（下游、兄弟支路）若结果仓里有它**当前 cacheKey** 的结果，就挂进这次 run（输出可按新 runId 取，`getOutputInfo` / `getOutputCloud` / Edge Peek / 3D 视图照常），但不执行、不发 running；`run_finished` 带 `attached: string[]` 列出挂上的节点。结果仓里没有的节点不挂，编辑器把它们退回 idle（不能显示「完成」却取不到输出）。挂结果不改变它们的 stale 判定 | isolate 节点的强制重算不改变它的 cacheKey，下游与兄弟节点的旧结果在语义上仍然有效；内容寻址本来就允许按 key 复用。否则单节点运行后，计划外节点显示「完成」却取不到输出（验收时在 a→b→c 上实测复现） |
 | R6 | 贯穿所有层：C ABI 的 run spec、`bridge`（Tauri 命令与 HTTP）、`Transport` 接口的 `runGraph` 选项、三个 transport 实现、`packages/editor/test-server` 桩服务器（桩里实现最小语义：上游没跑过就回 `upstream_not_ready`）。CLI 与 MCP **不加**这个开关 | 编辑器用得到的路径都要通；CLI/MCP 的需求没提，不扩面 |
 
 ### 编辑器
@@ -61,6 +62,7 @@
 4. b 连续两次 `isolate: [b]`，两次都真执行（计数 +2）。
 5. 子图节点 id 作 `isolate`：内部节点全部强制执行，子图外的上游只取缓存。
 6. `isolate` + preview 同时给：参数错误。`run_started.isolate` 存在且符合 schema。
+6b. （R7）`a → b → c` 与兄弟支路 `a → d` 全跑后 `isolate: [b]`：c、d 不执行（计数不变），但按新 runId 取得到 c、d 的输出，`run_finished.attached` 含 c、d；把 c 的结果从结果仓逐出（或 c 从没跑过）后再 isolate b，c 不在 `attached` 里。
 
 **编辑器**（新 e2e 分组 `scripts/e2e/noderun.mjs`，接进 `run.mjs`、登记进 README；带 `LYFLOW_PACKS=gap;dts` 跑）
 
@@ -69,6 +71,7 @@
 9. 改上游参数后，中间节点按钮 `data-run-state="disabled"`、`data-run-reason` 含该上游 id；绕过预判直接调用 isolate 运行，得到 `upstream_not_ready` toast，且没有节点进入 running。
 10. 运行中（找一个耗时可控的算子）按钮 `data-run-state="running"`，点击后运行被取消；由全图运行导致的 running 节点上点按钮，不是停止而是发起新运行（抢占）。
 11. hover 按钮时计算样式为实心 accent；关动效（`prefers-reduced-motion`）时进度环不转但仍显示；端口连线端点对齐（复用 motion 分组的对齐断言工具，误差 ≤ 1px）。
+11b. （R7）全图跑过后只运行中间节点：下游节点仍是 done，双击其入边能打开 Edge Peek 并看到数据，选中它 3D 视图有点云；从没跑过的下游节点保持 idle。
 12. 右键菜单「只运行此节点」与按钮行为一致（至少验证一次成功路径、一次 disabled）。
 13. **不回归**：`pnpm check` 全过；带 `LYFLOW_PACKS=gap;dts` 的 `pnpm e2e` 全绿，输出落盘、grep「未验」「跳过」；`pnpm e2e:http`（headless）全绿。
 

@@ -295,6 +295,9 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
   cacheKey（`extendRanWith`，计划外的下游还要按它们自己上次的键判 stale），不在 isolate 里的节点的
   `node_state` 一律不落库 —— 否则「只跑 b」会把 a 刷成「已缓存」、耗时归零。流水账
   （`onNodeTransition`）同样只记 isolate 里的节点。
+- **计划外节点的输出靠 core 挂上**（R7）。`run_finished.attached` 列出按新 runId 还取得到输出的节点；
+  收场时节点表里既不在 isolate、这次没命中缓存（`served`）、又不在 attached 里的，一律退回 idle ——
+  否则它们显示「完成」，点开 3D 视图或 Edge Peek 却是空的。stale 判定不变。老 core 不带 attached，就全部照旧。
 - **上游不齐：不弹框。** `run_finished.diagnostics` 里的 `upstream_not_ready`（外加执行期才撞上的惰性上游）
   拼成一条 warn toast，缺结果的上游在当前层各闪一下红光（`lib/motion.ts` 的 `flashNodesLocate`，
   复用 S2 的 error 光晕但不抖，节点上挂 `data-flash="locate"`）。它们没有失败，不标红。

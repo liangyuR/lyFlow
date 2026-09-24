@@ -268,6 +268,13 @@
             }
           }
         },
+        "attached": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "只在单节点运行（run_started.isolate 非空）时出现（node-run R7）：这次没有执行、也没有任何事件，但结果仓里有它们当前 cacheKey 的结果、已挂进这次运行的节点（下游、兄弟支路；开跑前就失败时是整张图里有结果的那些）。它们的输出可以按这次的 runId 取。不在这里、这次也没有收场事件的节点，按这次的 runId 取不到输出。"
+        },
         "summary": {
           "$ref": "#/$defs/summary",
           "description": "结构化的运行收尾（ADR-0022）。与 lyflow_run_summary(runId) 返回的是同一个对象。宿主的成败判定读 summary.status，不要自己从 node_state 重建。"

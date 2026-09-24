@@ -97,6 +97,12 @@ class ResultStore {
   bool reuse(const std::string& runId, const std::string& nodeId, const std::string& cacheKey,
              const std::vector<std::string>& ports, std::vector<OutputInfo>& infos);
 
+  /// 单节点运行的「挂结果」（node-run R7）：cacheKey 下这些端口全在仓里就挂进本次运行的索引，
+  /// 让计划外的节点按新 runId 也取得到输出。与 reuse 的区别只在记账：它不是一次缓存命中
+  /// （节点根本不在计划里），不动 hits / misses。
+  bool attach(const std::string& runId, const std::string& nodeId, const std::string& cacheKey,
+              const std::vector<std::string>& ports);
+
   /// 不改动命中计数的只读探测，lyflow_plan 用它预测 cached。
   bool peek(const std::string& cacheKey, const std::vector<std::string>& ports) const;
 

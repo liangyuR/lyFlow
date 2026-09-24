@@ -173,6 +173,8 @@ let manifestCache = null;
  *  的「上游有没有结果」只能照事件记账：run_started 给出 id → cacheKey，节点 done / skipped 且
  *  输出可取就记一笔。 */
 const produced = new Set();
+/** cacheKey → 那一次的 stats.outputs。R7 挂上的节点这次没有事件，getOutputInfo 就从这里取。 */
+const producedInfo = new Map();
 
 function notePlanNodes(state, nodes) {
   for (const n of nodes ?? []) state.keys.set(n.id, n.cacheKey);
@@ -181,10 +183,25 @@ function notePlanNodes(state, nodes) {
 function noteEvent(state, value) {
   if (value.kind === "run_started" || value.kind === "plan_extended") notePlanNodes(state, value.nodes);
   if (value.kind !== "node_state") return;
+  if (["done", "skipped", "error", "cancelled"].includes(value.state)) state.touched.add(value.nodeId);
   if (value.state !== "done" && value.state !== "skipped") return;
   if (value.stats?.outputsAvailable === false) return;
   const key = state.keys.get(value.nodeId);
-  if (key) produced.add(key);
+  if (!key) return;
+  produced.add(key);
+  if (value.stats?.outputs) producedInfo.set(key, value.stats.outputs);
+}
+
+/** R7 的最小语义：全图计划里这次没有收场事件、但 cacheKey 跑出过结果的节点算「挂上」。
+ *  桩取点云本来就是按图重跑一遍 CLI，不看 runId，所以挂不挂只影响 attached 与 getOutputInfo。 */
+function attachUnplanned(state) {
+  const attached = [];
+  for (const [id, key] of state.fullKeys ?? []) {
+    if (state.touched.has(id) || !produced.has(key)) continue;
+    attached.push(id);
+    state.attachedInfo.set(id, producedInfo.get(key) ?? []);
+  }
+  return attached;
 }
 
 /** isolate 的 id 语义与 targets 相同：精确命中，或落在某个子图节点之下。 */
@@ -227,7 +244,12 @@ async function isolateVerdict(body, file, baseDir) {
   const missing = plan.filter(
     (n) => !inIsolate(isolate, n.nodeId) && !n.lazy && !n.bypass && !produced.has(n.cacheKey),
   );
-  return { plan, missing };
+  // 全图的 cacheKey（R7）：计划外节点「现在该有的键」
+  const whole = lastJson((await runCli(["plan", file, "--base-dir", baseDir])).lines);
+  const fullKeys = new Map(
+    Array.isArray(whole) ? whole.filter((n) => typeof n.cacheKey === "string").map((n) => [n.nodeId, n.cacheKey]) : [],
+  );
+  return { plan, missing, fullKeys };
 }
 
 function rejectNotReady(body, verdict) {
@@ -257,7 +279,9 @@ function rejectNotReady(body, verdict) {
   const state = {
     id: runId, events: [started, finished], outputs: {}, cancelled: false, lastSeq: 1,
     keys: new Map(), done: Promise.resolve({ code: 1 }),
+    touched: new Set(), fullKeys: verdict.fullKeys, attachedInfo: new Map(),
   };
+  finished.attached = attachUnplanned(state);
   runs.set(runId, state);
   hub.broadcast(started);
   hub.broadcast(finished);
@@ -270,8 +294,9 @@ async function startRun(body) {
   if (isolate && body.mode === "preview") {
     throw Object.assign(new Error("预览模式不能与「只运行此节点」（isolate）同时使用"), { status: 400 });
   }
+  let verdict = null;
   if (isolate) {
-    const verdict = await isolateVerdict(body, file, baseDir);
+    verdict = await isolateVerdict(body, file, baseDir);
     if (verdict && verdict.missing.length > 0) return rejectNotReady(body, verdict);
   }
   const argv = ["run", file, "--base-dir", baseDir, "--outputs"];
@@ -290,6 +315,9 @@ async function startRun(body) {
     cancelled: false,
     lastSeq: -1,
     keys: new Map(),
+    touched: new Set(),
+    fullKeys: verdict?.fullKeys ?? null,
+    attachedInfo: new Map(),
   };
 
   let resolveId;
@@ -312,6 +340,7 @@ async function startRun(body) {
         value.targets = isolate;
       }
       noteEvent(state, value);
+      if (isolate && value.kind === "run_finished") value.attached = attachUnplanned(state);
       state.events.push(value);
       state.lastSeq = value.seq;
       hub.broadcast(value);
@@ -358,7 +387,7 @@ function summaryOf(state) {
 }
 
 function outputInfoOf(state, nodeId) {
-  let latest = null;
+  let latest = state.attachedInfo?.get(nodeId) ?? null;
   for (const e of state.events) {
     if (e.kind === "node_state" && e.nodeId === nodeId && e.stats?.outputs) latest = e.stats.outputs;
   }

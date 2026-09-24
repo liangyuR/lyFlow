@@ -8,6 +8,9 @@
 - `pnpm e2e`：退出码 0，**672/672 项通过**，其中新分组 `scripts/e2e/noderun.mjs` **69 项**。完整输出落盘后
   grep「未验」「跳过」「FAIL」「✗」均为 0 行；gap 的张量组、M8b / M8c 的分组都真的跑了。
 - `pnpm e2e:http`：`LYFLOW_E2E_HEADLESS=1` 下退出码 0，**42/42**，其中新增「只运行此节点」一组 7 项（验桩服务器的 R6 最小语义）。
+- **R7（计划外节点挂结果，验收后补，第二个 commit）落地后重跑**：`pnpm check` 退出码 0、全链路绿，doctest **285/285**
+  （`test_noderun.cpp` 11 个用例、130 条断言），`cargo test` 139/139，事件样例 28 条；`pnpm e2e` 退出码 0，**688/688**，
+  `noderun.mjs` **85 项**（新增 11b 一组 16 项），grep「未验」「跳过」「FAIL」「✗」0 行；`pnpm e2e:http` headless 退出码 0，**44/44**。
 
 | # | 验收项 | 结果 |
 |---|---|---|
@@ -17,13 +20,15 @@
 | 4 | 连续两次 `isolate: [b]`，计数 +2 | ✅ 通过 |
 | 5 | 子图节点作 isolate：内部全部强制执行，子图外上游只取缓存 | ✅ 通过 |
 | 6 | isolate + preview 参数错误；`run_started.isolate` 存在且符合 schema | ✅ 通过 |
+| 6b | （R7）全跑后 isolate b：c、d 不执行但按新 runId 取得到，`attached` 含 c、d；c 没有当前结果时不挂 | ✅ 通过（口径见下） |
 | 7 | 按钮位置、折叠仍在、真鼠标点击不选中/不拖动/不改名、不遮挡标题 | ✅ 通过 |
 | 8 | 全图跑过后点中间节点：只有它 running → done，其余状态与耗时不变，下游不进计划 | ✅ 通过 |
 | 9 | 改上游参数 → disabled + reason；绕过预判 → `upstream_not_ready` toast、零 running | ✅ 通过 |
 | 10 | 运行中 running、点击取消；全图运行里点 running 节点的按钮是抢占 | ✅ 通过 |
 | 11 | hover 实心 accent；关动效时进度环不转但显示；端点对齐 ≤ 1 px | ✅ 通过 |
+| 11b | （R7）只运行中间节点后下游仍 done，Edge Peek 与 3D 视图取得到数据；从没跑过的下游保持 idle | ✅ 通过 |
 | 12 | 右键「只运行此节点」与按钮一致（成功一次、disabled 一次） | ✅ 通过 |
-| 13 | 不回归：`pnpm check`、带包的 `pnpm e2e`、headless `pnpm e2e:http` 全绿 | ✅ 通过 |
+| 13 | 不回归：`pnpm check`、带包的 `pnpm e2e`、headless `pnpm e2e:http` 全绿（R7 之后重跑同样全绿） | ✅ 通过 |
 
 ## 1–6. core（doctest）与 bridge（cargo test）
 
@@ -67,6 +72,28 @@ test execution::tests::isolate_without_upstream_results_fails_before_running_any
 test execution::tests::isolate_reruns_only_that_node_over_the_abi ... ok
 test result: ok. 139 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
+
+## 6b. R7：计划外节点挂结果（doctest + cargo test）
+
+```
+$ build/core/bin/lyflow-core-tests.exe -tc="*isolate*,验收*,R7*" -s
+TEST CASE:  验收 6b：计划外的 c、d 不执行，但按新 runId 取得到输出，run_finished.attached 列出它们
+TEST CASE:  验收 6b：结果仓里没有 c 当前 cacheKey 的结果（改了 c 的参数 / c 从没跑过）→ 不挂
+TEST CASE:  R7：上游不齐、开跑前就失败时，已有的结果照样挂上
+[doctest] test cases:  11 |  11 passed | 0 failed | 274 skipped
+[doctest] assertions: 130 | 130 passed | 0 failed |
+```
+
+- `a → b → c`、`a → d` 全跑后 `isolate [b]`：`tally(c) == tally(d) == 1`（不执行），c、d 一条节点事件都没有、不在计划里；
+  `run_finished.attached` 含 c、d、不含 a、b；Run 活着时 `ResultStore::get(新 runId, c/d, "cloud")` 取得到、点数 4，
+  `outputsOf` 非空。普通运行的 `run_finished` 不带 `attached`。
+- 「c 没有当前结果」用了两种办法：改 c 自己的参数（键变了，仓里那份对不上）→ c 不挂、d 照挂、按新 runId 取 c 失败；
+  只跑到 b（`targets [b]`，c、d 从没跑过）再 isolate b → c、d 都不挂。**没有用「逐出」**：结果仓的 LRU 预算是进程级的，
+  在测试里逼它恰好逐出 c 一个会牵连别的用例；键对不上与逐出在 `attach` 看来是同一件事（仓里没有那个键）。
+- 开跑前就失败（只跑过 d 那一支，再 isolate c，上游 b 缺）：`attached` 含 a、d，不含 b、c；按新 runId 取得到 d。
+  isolate 一个不存在的 id（整图编译失败）不带 `attached`。
+- `cargo test`：`isolate_reruns_only_that_node_over_the_abi` 追加断言 `run_finished.attached == ["p"]`、
+  `output_cloud(新 runId, "p")` 取得到点。
 
 ## 7–12. `scripts/e2e/noderun.mjs` 的实际输出
 
@@ -141,6 +168,24 @@ test result: ok. 139 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
   ✓ 关动效：进度环仍显示（有弧、有描边）
   ✓ 关动效：进度环不转（animation-name 为 none）
 
+── 单节点运行 验收 11b：只运行中间节点后，下游仍是 done、Edge Peek 与 3D 视图照样取得到数据；从没跑过的下游保持 idle
+  ✓ （前提）全图运行 ok
+  ✓ （前提）只运行 b 的那次 ok
+  ✓ run_finished.attached 含计划外的 c、d，不含从没跑过的 e
+  ✓ c、d 没有执行（没有任何状态迁移，更没有 running）
+  ✓ 下游 c、d 仍是 done
+  ✓ 从没跑过的 e 保持 idle
+  ✓ getOutputInfo(新 runId, c) 有 cloud 输出
+  ✓ 选中 c：3D 视图画出了点云（11230/11230）
+  ✓ d 的入边（源是 c）：在这条边上找到了真能点中的落点
+  ✓ 双击 d 的入边开出了 Edge Peek
+  ✓ Edge Peek 里是 c 的点云，总点数与 c 报的一致
+  ✓ Edge Peek 没有「未运行 / 取不到」之类的占位
+  ✓ （前提）这次只运行 b 也 ok
+  ✓ c、d 的键变了、仓里没有 → 不在 attached 里
+  ✓ 编辑器把 c、d 退回 idle
+  ✓ a、b 不受影响（a 命中缓存、b 刚跑完）
+
 ── 单节点运行 验收 12：右键「只运行此节点」—— 与按钮同一动作、同一可用性
   ✓ （前提）全图运行 ok
   ✓ 右键菜单里有「只运行此节点」且可点
@@ -161,16 +206,27 @@ test result: ok. 139 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
   记下 run_started / run_finished —— 单节点运行不清节点表，从 store 读不出计划。
 - 「绕过预判」是 `window.__lyflow.run({ isolate: [b] })`：同一条 `startRun`，只是跳过了按钮上的 disabled 判定。
 - 停止 / 抢占用的慢节点是三百万点过一道 0.0006 的体素栅格，本机约 1.7 s。
+- 11b 用 `a → b → c → d` 只运行 b：c、d 都在计划外。Edge Peek 双击的是 **d 的入边**（c→d），它显示的是源 c 的输出 ——
+  c 正是被挂上的那一个；c 的入边 b→c 显示的是刚重算的 b，验不出 R7。3D 视图选的也是 c。双击与读浮窗复用
+  `peek.mjs` 的 `openByDoubleClick` / `waitPeek`（从那里导出），3D 视图用 `page.mjs` 的 `selectAndReadViewer`。
+  「从没跑过的下游」e 是全图跑完之后才接到 c 上的节点。
 - 端点对齐复用 `motion.mjs` 的 `align()`（从那里导出 `installMotionProbe` / `alignOf` / `worst`），口径同 motion 验收 4：
   路径起止点与 React Flow 锚点（圆点外缘）的距离，画布坐标。
 
 ## 13. 不回归
 
 ```
+第一个 commit：
 $ pnpm check            → 全链路绿（CHECK-EXIT=0）
 $ pnpm e2e              → 672/672 项通过，全绿（E2E-EXIT=0）
 $ grep 未验|跳过|FAIL|✗  → 0 行
 $ LYFLOW_E2E_HEADLESS=1 pnpm e2e:http → 42/42 项通过，全绿（exit=0）
+
+R7 之后（第二个 commit）：
+$ pnpm check            → 全链路绿（CHECK-EXIT=0），doctest 285/285
+$ pnpm e2e              → 688/688 项通过，全绿（E2E-EXIT=0）
+$ grep 未验|跳过|FAIL|✗  → 0 行
+$ LYFLOW_E2E_HEADLESS=1 pnpm e2e:http → 44/44 项通过，全绿（exit=0）
 ```
 
 ## 实现上的取舍（计划没写死、我自己定的纯实现细节）
@@ -198,7 +254,25 @@ $ LYFLOW_E2E_HEADLESS=1 pnpm e2e:http → 42/42 项通过，全绿（exit=0）
   齐了就按 `--to` 跑 CLI（CLI 没有 isolate，进程之间也不共享缓存，所以上游在桩里其实会被重算），并把 `isolate` 补回 run_started。
   isolate + preview 在桩里直接回 400。
 
-## 未决问题（影响方向，没有自行改设计）
+## R7 的实现取舍
+
+- **全图 cacheKey 怎么来**：isolate 运行另编一份不带 targets 的全图计划，只取它的 cacheKey（诊断丢弃、不执行）。cacheKey
+  只依赖上游，所以计划里的节点两份键逐字相同。
+- **挂谁**：全图里这次**没有收场事件**的节点，只要结果仓里有它当前 cacheKey 的**全部**输出端口（与缓存复用同一条「全有才算」）。
+  跳过注入的节点（输出来自宿主这一次的数据）与不确定性算子（键带 runId，本来就挂不上）。静音节点照挂 —— 它透传的结果本来就存在自己的键下。
+- **挂法**：`ResultStore::attach` 只写这次运行的索引、刷一下 LRU，不记 hits / misses（这不是一次缓存命中）。挂在 summary 之前，
+  挂上的节点声明了图级输出的话 summary 里是 value。
+- **范围比 R7 字面上宽一点（计划只说「计划外节点」）**：开跑前就因 `upstream_not_ready` 失败时，一个节点都没跑，
+  这时把**整张图**里有当前结果的节点都挂上（包括计划里的上游）。理由同 R7：这次运行接替了上一次，桌面端会放掉上一次的索引，
+  不挂的话整张图的输出都取不到。执行中途失败 / 取消时同样照挂（只挂没有收场事件的）。`isolate` 了不存在的 id、与 preview
+  同时给这两种整图级失败（编译都没过）不挂，也不带 `attached` 字段。
+- **编辑器**：isolate 运行收场时，带了 `attached` 字段才处理 —— 节点表里既不在 isolate、这次也没命中缓存、又不在 attached 里
+  的节点退回 idle（并记一条 idle 迁移进流水账）。副作用：上游不齐失败后，键已经变了的那些节点（比如验收 9 里改过参数的 a 及其下游）
+  也会退回 idle，而不是保持上一次的 done —— 那些结果本来就对不上当前的图、按新 runId 也取不到，这正是 R7 要的。stale 判定不变。
+- **桩服务器**：按记账算 attached（全图 `plan` 的 cacheKey 跑出过结果、这次又没有事件的节点），把它补进 run_finished；
+  挂上的节点 `getOutputInfo` 回那一次记下的输出信息。桩取点云本来就按图重跑 CLI、不看 runId。桩合成的「取消」run_finished 不带 attached。
+
+## 未决问题（第一个 commit 时提出，已由 R7 解决）
 
 **单节点运行之后，计划外节点（下游、兄弟分支）的输出取不到了。** 编辑器按验收 8 保留它们的状态（仍显示 done），
 但 3D 视图、Edge Peek、`getOutputInfo` 都按**当前** runId 取数：新一次运行的索引里没有它们（R4：下游不进计划），
@@ -213,3 +287,5 @@ getOutputCloud(新 runId, c) 与 getOutputCloud(旧 runId, c) 都是「core 没�
 可选方向（需要拍板，都超出本计划）：① 编辑器按节点记「它的结果属于哪次运行」，`RunManager` 为单节点运行多留一份基准运行；
 ② core 在单节点运行时把计划外、cacheKey 未变且仍在结果仓里的节点也挂进本次索引（不执行、不发事件）；
 ③ 接受现状，但把计划外节点显示成「结果需重新运行」而不是 done。
+
+2026-09-24 选了方案 ②，写进 [node-run-plan.md](node-run-plan.md) 的 R7；实现与验收见上面 6b、11b 与「R7 的实现取舍」。

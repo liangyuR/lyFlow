@@ -218,6 +218,22 @@ bool ResultStore::reuse(const std::string& runId, const std::string& nodeId,
   return true;
 }
 
+bool ResultStore::attach(const std::string& runId, const std::string& nodeId,
+                         const std::string& cacheKey, const std::vector<std::string>& ports) {
+  if (cacheKey.empty() || ports.empty()) return false;
+  std::lock_guard<std::mutex> lock(mu_);
+  // 全有才挂：半份结果比没有更糟（与 reuse 同一条理由）
+  for (const auto& port : ports) {
+    if (!byKey_.count(entryKey(cacheKey, port))) return false;
+  }
+  for (const auto& port : ports) {
+    const std::string key = entryKey(cacheKey, port);
+    touchLocked(key);
+    index_[runId][nodeId][port] = key;
+  }
+  return true;
+}
+
 std::vector<OutputInfo> ResultStore::outputsOf(const std::string& runId,
                                                const std::string& nodeId) const {
   std::lock_guard<std::mutex> lock(mu_);

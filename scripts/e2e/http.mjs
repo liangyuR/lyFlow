@@ -312,8 +312,12 @@ async function suiteNodeRunOverHttp(cdp, report) {
     [
       { key: "gen", op: "gen.synthetic", params: { pointCount: 6000, seed: (Date.now() % 9973) + 3 } },
       { key: "pass", op: "filter.passthrough" },
+      { key: "tail", op: "util.reroute" },
     ],
-    [{ from: ["gen", "cloud"], to: ["pass", "cloud"] }],
+    [
+      { from: ["gen", "cloud"], to: ["pass", "cloud"] },
+      { from: ["pass", "cloud"], to: ["tail", "in"] },
+    ],
   );
   const button = await cdp.eval(`return !!document.querySelector('[data-testid="node-run-${ids.pass}"]');`);
   report.eq("节点标题栏有运行按钮", button, true);
@@ -330,6 +334,14 @@ async function suiteNodeRunOverHttp(cdp, report) {
   report.eq("上游跑过之后：单节点运行 ok", only.status, "ok");
   report.eq("执行 store 记下了 isolate", isolate, [ids.pass]);
   report.eq("pass 重新 done", only.nodes[ids.pass]?.state, "done");
+
+  // R7：计划外的下游 tail 不执行，但挂进了这次运行 —— 按新 runId 取得到输出信息，编辑器里仍是 done
+  const tail = await cdp.eval(`
+    const { runId } = window.__lyflow.stores.execution.getState();
+    return (await window.__lyflow.transport.getOutputInfo(runId, ${lit(ids.tail)})).map((o) => o.port);
+  `);
+  report.eq("下游 tail 仍是 done", only.nodes[ids.tail]?.state, "done");
+  report.ok("按新 runId 取得到 tail 的输出信息", tail.includes("out"), JSON.stringify(tail));
 }
 
 // ------------------------------------------------------------------- main

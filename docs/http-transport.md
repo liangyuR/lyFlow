@@ -124,8 +124,12 @@ v11 再加的 `isolate`（只运行某几个节点）见 [embedding.md](embeddin
 `targets` 被忽略、取同一组 id；上游只许命中缓存，缺结果时这次运行照常返回 `runId`，事件流里是
 `run_started`（带 `isolate`）紧跟 `run_finished`（`error.code = upstream_not_ready`，
 `diagnostics[]` 每个缺结果的上游一条）。与 `mode: "preview"` 同时给是参数错误。
+计划外的节点（下游、兄弟支路）只要有当前 cacheKey 的结果就挂进这次运行（R7）：`run_finished.attached[]`
+列出它们，`/runs/:runId/...` 下的取数端点按这次的 runId 照样取得到。
 桩服务器（`test-server/`）没有常驻结果仓，按事件里的 cacheKey 记账实现这条最小语义；
 上游齐了就按 `--to` 跑一遍 CLI（CLI 没有 isolate 开关），所以桩里的上游其实会被重算。
+`attached` 在桩里同样按记账算（全图 `plan` 的 cacheKey 跑出过结果、这次又没有事件的节点），
+挂上的节点 `getOutputInfo` 回的是那一次记下的输出信息；桩取点云本来就是按图重跑 CLI，不看 runId。
 
 `sceneId` 是**可选**的宿主扩展：宿主页面上已经加载好一对点云时，把它的会话 id 带上，
 后端就把那对云注入到起始算子的输入端口，而不是让图自己按参数去读盘。不带（或 `null`）

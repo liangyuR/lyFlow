@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <memory>
 #include <set>
 
 #include "exec/executor.h"
@@ -18,19 +19,44 @@ namespace {
 
 /// 跑一次，Run 在返回前析构（freeRun 只丢索引，内容寻址层留着给下一次命中）。
 RunLog runWith(const Json& doc, std::vector<std::string> isolate,
-               exec::RunMode mode = exec::RunMode::Full) {
+               exec::RunMode mode = exec::RunMode::Full, std::vector<std::string> targets = {}) {
   static int counter = 0;
   RunLog log;
   log.runId = "noderun-" + std::to_string(counter++);
   exec::RunOptions options;
   options.runId = log.runId;
   options.isolate = std::move(isolate);
+  options.targets = std::move(targets);
   options.mode = mode;
   {
     exec::Run run(doc.dump(), options, &detail::collect, &log);
     run.join();
   }
   return log;
+}
+
+/// 同上，但 Run 活到调用方放手为止：R7 要在运行结束之后按这次的 runId 取输出。
+struct HeldRun {
+  RunLog log;
+  std::unique_ptr<exec::Run> run;
+};
+
+std::unique_ptr<HeldRun> holdRun(const Json& doc, std::vector<std::string> isolate) {
+  static int counter = 0;
+  auto held = std::make_unique<HeldRun>();
+  held->log.runId = "noderun-held-" + std::to_string(counter++);
+  exec::RunOptions options;
+  options.runId = held->log.runId;
+  options.isolate = std::move(isolate);
+  held->run = std::make_unique<exec::Run>(doc.dump(), options, &detail::collect, &held->log);
+  held->run->join();
+  return held;
+}
+
+std::vector<std::string> attachedOf(const RunLog& log) {
+  const std::vector<Json> f = log.ofKind("run_finished");
+  if (f.empty() || !f.back().contains("attached")) return {};
+  return f.back()["attached"].get<std::vector<std::string>>();
 }
 
 /// a → b → c，三个 tally 各带自己的 tag。prefix 让每个用例的计数互不干扰。
@@ -287,4 +313,111 @@ TEST_CASE("isolate 节点静音：照静音语义透传，上游仍只取缓存"
   CHECK(tallyOf("v8a") == 1);
   CHECK(tallyOf("v8b") == 1);  // 静音不调 compute
   CHECK(log.nodeEvent("b", "skipped")["stats"].value("bypassed", false) == true);
+}
+
+// ------------------------------------------------------------- R7：计划外节点挂结果
+
+/// a → b → c，外加兄弟支路 a → d。
+Json forked(const std::string& prefix, const std::string& cTag = "c") {
+  return makeGraph(
+      {
+          {"a", "test.tally", Json{{"tag", prefix + "a"}}},
+          {"b", "test.tally", Json{{"tag", prefix + "b"}}},
+          {"c", "test.tally", Json{{"tag", prefix + cTag}}},
+          {"d", "test.tally", Json{{"tag", prefix + "d"}}},
+      },
+      {{"a.cloud", "b.cloud"}, {"b.cloud", "c.cloud"}, {"a.cloud", "d.cloud"}});
+}
+
+TEST_CASE("验收 6b：计划外的 c、d 不执行，但按新 runId 取得到输出，run_finished.attached 列出它们") {
+  ensureTestOps();
+  exec::ResultStore::instance().clear();
+  const Json doc = forked("r7");
+  REQUIRE(runWith(doc, {}).runStatus() == "ok");
+
+  auto held = holdRun(doc, {"b"});
+  const RunLog& log = held->log;
+  REQUIRE(log.runStatus() == "ok");
+  CHECK(tallyOf("r7b") == 2);
+  CHECK(tallyOf("r7c") == 1);  // 挂结果不执行
+  CHECK(tallyOf("r7d") == 1);
+  CHECK(statesOf(log, "c").empty());  // 不发任何节点事件，更没有 running
+  CHECK(statesOf(log, "d").empty());
+  const auto plan = planOf(log);
+  CHECK_FALSE(contains(plan, "c"));
+  CHECK_FALSE(contains(plan, "d"));
+
+  const auto attached = attachedOf(log);
+  CHECK(contains(attached, "c"));
+  CHECK(contains(attached, "d"));
+  // 在计划里、这次有过收场事件的不算「挂上」
+  CHECK_FALSE(contains(attached, "a"));
+  CHECK_FALSE(contains(attached, "b"));
+
+  // 按这次的 runId 真取得到：结果仓的索引里有它们，点数与源头一致
+  exec::ResultStore& store = exec::ResultStore::instance();
+  for (const char* id : {"c", "d"}) {
+    Data data;
+    REQUIRE(store.get(log.runId, id, "cloud", data));
+    REQUIRE(data.asCloud() != nullptr);
+    CHECK(data.asCloud()->pointCount() == 4);
+    CHECK_FALSE(store.outputsOf(log.runId, id).empty());
+  }
+  // 普通运行不带这个字段
+  const RunLog plain = runWith(doc, {});
+  CHECK_FALSE(plain.ofKind("run_finished").back().contains("attached"));
+}
+
+TEST_CASE("验收 6b：结果仓里没有 c 当前 cacheKey 的结果（改了 c 的参数 / c 从没跑过）→ 不挂") {
+  ensureTestOps();
+  exec::ResultStore::instance().clear();
+  REQUIRE(runWith(forked("r7x"), {}).runStatus() == "ok");
+
+  // c 的参数一改，它的键就变了：旧结果对不上，不挂；d 照挂
+  auto changed = holdRun(forked("r7x", "c2"), {"b"});
+  REQUIRE(changed->log.runStatus() == "ok");
+  const auto a1 = attachedOf(changed->log);
+  CHECK_FALSE(contains(a1, "c"));
+  CHECK(contains(a1, "d"));
+  Data data;
+  CHECK_FALSE(exec::ResultStore::instance().get(changed->log.runId, "c", "cloud", data));
+  CHECK(tallyOf("r7xc2") == 0);
+
+  // c 从没跑过：只跑到 b（targets），再单独跑 b
+  exec::ResultStore::instance().clear();
+  const Json fresh = forked("r7y");
+  REQUIRE(runWith(fresh, {}, exec::RunMode::Full, {"b"}).runStatus() == "ok");
+  auto never = holdRun(fresh, {"b"});
+  REQUIRE(never->log.runStatus() == "ok");
+  const auto a2 = attachedOf(never->log);
+  CHECK_FALSE(contains(a2, "c"));
+  CHECK_FALSE(contains(a2, "d"));
+  CHECK(tallyOf("r7yc") == 0);
+}
+
+TEST_CASE("R7：上游不齐、开跑前就失败时，已有的结果照样挂上") {
+  ensureTestOps();
+  exec::ResultStore::instance().clear();
+  const Json doc = forked("r7z");
+  // 只跑过 d 那一支：a、d 有结果，b、c 没有
+  REQUIRE(runWith(doc, {}, exec::RunMode::Full, {"d"}).runStatus() == "ok");
+
+  // isolate c：它的上游 b 没有结果 → 开跑前失败；但这次运行接替了上一次，a、d 的结果要挂上
+  auto failed = holdRun(doc, {"c"});
+  CHECK(failed->log.runStatus() == "error");
+  CHECK(missingNodes(failed->log) == std::set<std::string>{"b"});
+  const auto attached = attachedOf(failed->log);
+  CHECK(contains(attached, "a"));
+  CHECK(contains(attached, "d"));
+  CHECK_FALSE(contains(attached, "b"));
+  CHECK_FALSE(contains(attached, "c"));
+  Data data;
+  CHECK(exec::ResultStore::instance().get(failed->log.runId, "d", "cloud", data));
+  CHECK(tallyOf("r7za") == 1);
+  CHECK(tallyOf("r7zd") == 1);
+
+  // isolate 一个不存在的 id 是整图级失败（编译都没过），不在 R7 的范围里：不挂、不带这个字段
+  auto bad = holdRun(doc, {"nosuch"});
+  CHECK(bad->log.runStatus() == "error");
+  CHECK_FALSE(bad->log.ofKind("run_finished").back().contains("attached"));
 }

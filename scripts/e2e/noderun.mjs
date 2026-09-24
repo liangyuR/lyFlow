@@ -7,6 +7,7 @@
 
 import { sleep } from "./cdp.mjs";
 import { alignOf, emptySpot, installMotionProbe, moveMouse, worst } from "./motion.mjs";
+import { countsOf, openByDoubleClick, park, resetPeek, waitPeek } from "./peek.mjs";
 import {
   buildGraph,
   canvasBox,
@@ -18,6 +19,7 @@ import {
   pressF5,
   replan,
   runAndWait,
+  selectAndReadViewer,
 } from "./page.mjs";
 
 // ------------------------------------------------------------ 页面侧的小工具
@@ -481,6 +483,99 @@ async function suiteLook(cdp, report) {
   }
 }
 
+// ------------------------------------ 验收 11b：计划外节点挂结果（R7）
+
+async function suiteAttached(cdp, report) {
+  report.section("单节点运行 验收 11b：只运行中间节点后，下游仍是 done、Edge Peek 与 3D 视图照样取得到数据；从没跑过的下游保持 idle");
+  await installRecorder(cdp);
+  await newDoc(cdp);
+  await resetPeek(cdp);
+  // a → b → c → d：只运行 b，c、d 都在计划外。d 的入边 c→d 的源是 c —— 挂结果挂的就是它
+  const ids = await buildGraph(cdp, [
+    { key: "a", op: "gen.synthetic", params: { pointCount: 20000, seed: (Date.now() % 9973) + 5 } },
+    { key: "b", op: "filter.voxel_grid" },
+    { key: "c", op: "filter.passthrough" },
+    { key: "d", op: "util.reroute" },
+  ], [
+    { from: ["a", "cloud"], to: ["b", "cloud"] },
+    { from: ["b", "cloud"], to: ["c", "cloud"] },
+    { from: ["c", "cloud"], to: ["d", "in"] },
+  ]);
+  await normalizeZoom(cdp, 0.7);
+  const box = await canvasBox(cdp);
+  await placeAtScreen(cdp, {
+    [ids.a]: { x: 20, y: 40 },
+    [ids.b]: { x: Math.round(box.w * 0.26), y: 40 },
+    [ids.c]: { x: Math.round(box.w * 0.52), y: 40 },
+    [ids.d]: { x: Math.round(box.w * 0.78), y: 40 },
+  });
+  await sleep(400);
+  const full = await runAndWait(cdp, () => pressF5(cdp));
+  report.eq("（前提）全图运行 ok", full.status, "ok");
+  const cCount = full.nodes[ids.c]?.elementCount ?? null;
+
+  // 全图跑完之后才加的下游 e：它从没跑过
+  const e = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    const id = g.addNode('filter.passthrough', { x: 0, y: 0 });
+    window.__lyflow.stores.graph.getState().connect({ node: ${lit(ids.c)}, port: 'cloud' }, { node: id, port: 'cloud' });
+    return id;
+  `);
+  await placeAtScreen(cdp, { [e]: { x: Math.round(box.w * 0.52), y: Math.round(box.h * 0.45) } });
+  await sleep(300);
+
+  const run = await runAndWait(cdp, async () => click(cdp, await centerOf(cdp, btnSel(ids.b))));
+  await sleep(200);
+  const finished = await cdp.eval(`return window.__lyNodeRun.events.find((x) => x.kind === 'run_finished' && x.runId === ${lit(run.runId)}) ?? null;`);
+  const trans = await transitionsBy(cdp);
+  report.eq("（前提）只运行 b 的那次 ok", run.status, "ok");
+  report.ok("run_finished.attached 含计划外的 c、d，不含从没跑过的 e",
+    finished && [ids.c, ids.d].every((id) => finished.attached?.includes(id)) && !finished.attached.includes(e),
+    JSON.stringify(finished?.attached));
+  report.ok("c、d 没有执行（没有任何状态迁移，更没有 running）", !trans[ids.c] && !trans[ids.d], JSON.stringify(trans));
+  report.eq("下游 c、d 仍是 done", [run.nodes[ids.c]?.state, run.nodes[ids.d]?.state], ["done", "done"]);
+  report.eq("从没跑过的 e 保持 idle", run.nodes[e]?.state ?? "idle", "idle");
+
+  // 按新 runId 真的取得到：先问 transport，再走真实的 3D 视图与 Edge Peek
+  const info = await cdp.eval(`
+    const { runId } = window.__lyflow.stores.execution.getState();
+    return (await window.__lyflow.transport.getOutputInfo(runId, ${lit(ids.c)})).map((o) => [o.port, o.elementCount]);
+  `);
+  report.ok("getOutputInfo(新 runId, c) 有 cloud 输出", info.some(([p, n]) => p === "cloud" && n === cCount), JSON.stringify({ info, cCount }));
+
+  const viewer = await selectAndReadViewer(cdp, ids.c);
+  report.ok(`选中 c：3D 视图画出了点云（${viewer.count}/${viewer.total}）`, viewer.hasCanvas && viewer.count > 0 && viewer.total === cCount,
+    JSON.stringify(viewer));
+  await cdp.eval(`window.__lyflow.stores.ui.getState().clearSelection(); return true;`);
+
+  const edge = await cdp.eval(`
+    const doc = window.__lyflow.stores.graph.getState().doc;
+    return doc.edges.find((x) => x.from.node === ${lit(ids.c)} && x.to.node === ${lit(ids.d)})?.id ?? null;
+  `);
+  const opened = await openByDoubleClick(cdp, report, edge, "d 的入边（源是 c）");
+  report.ok("双击 d 的入边开出了 Edge Peek", Boolean(opened?.win), JSON.stringify(opened?.after));
+  if (opened?.win) {
+    await park(cdp);
+    const dom = await waitPeek(cdp, opened.win.id, (x) => x.cloudCanvas && countsOf(x.countText));
+    const counts = countsOf(dom?.countText);
+    report.ok("Edge Peek 里是 c 的点云，总点数与 c 报的一致", dom?.cloudCanvas === true && counts?.total === cCount,
+      JSON.stringify({ dom: dom && { status: dom.status, countText: dom.countText, cloudStatus: dom.cloudStatus }, cCount }));
+    report.ok("Edge Peek 没有「未运行 / 取不到」之类的占位", dom?.status === null, String(dom?.status));
+  }
+  await resetPeek(cdp);
+
+  // 结果仓里没有当前 cacheKey 的结果就不挂：改 c 的参数（c、d 的键都变了）再只运行 b，
+  // c、d 退回 idle —— 不能显示「完成」却取不到输出
+  await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.c)}, 'max', 50); return true;`);
+  const again = await runAndWait(cdp, async () => click(cdp, await centerOf(cdp, btnSel(ids.b))));
+  const fin2 = await cdp.eval(`return window.__lyNodeRun.events.find((x) => x.kind === 'run_finished' && x.runId === ${lit(again.runId)}) ?? null;`);
+  report.eq("（前提）这次只运行 b 也 ok", again.status, "ok");
+  report.ok("c、d 的键变了、仓里没有 → 不在 attached 里", fin2 && !fin2.attached.includes(ids.c) && !fin2.attached.includes(ids.d),
+    JSON.stringify(fin2?.attached));
+  report.eq("编辑器把 c、d 退回 idle", [again.nodes[ids.c]?.state ?? "idle", again.nodes[ids.d]?.state ?? "idle"], ["idle", "idle"]);
+  report.eq("a、b 不受影响（a 命中缓存、b 刚跑完）", [again.nodes[ids.a]?.state, again.nodes[ids.b]?.state], ["done", "done"]);
+}
+
 // ------------------------------------------------------ 验收 12：右键菜单
 
 async function openMenu(cdp, id) {
@@ -537,5 +632,6 @@ export const nodeRunSuites = [
   suiteNotReady,
   suiteStopAndPreempt,
   suiteLook,
+  suiteAttached,
   suiteMenu,
 ];

@@ -526,7 +526,10 @@
     "at": "2026-09-24T09:00:00.041Z",
     "kind": "run_finished",
     "status": "ok",
-    "durationMs": 40.1
+    "durationMs": 40.1,
+    "attached": [
+      "n_save"
+    ]
   },
   {
     "schemaVersion": 1,
@@ -581,6 +584,7 @@
         "code": "upstream_not_ready",
         "message": "上游 n_gen 还没有可用结果，先运行它或运行到此"
       }
-    ]
+    ],
+    "attached": []
   }
 ]

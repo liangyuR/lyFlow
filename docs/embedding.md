@@ -132,6 +132,12 @@ lyflow::RunResult result = client.run(graphJson, options);
   `upstream_not_ready` 报 error。
 - **isolate 里的节点跳过缓存、强制执行**，结果覆盖结果仓里同 cacheKey 的旧结果（读外部文件的算子
   靠这一条拿到新内容），`stats.cached` 不出现。静音节点照静音语义透传。
+- **计划外的节点挂结果、不执行**（R7）。下游、兄弟支路这些不在本次计划里的节点，结果仓里要是有它们
+  **当前** cacheKey 的全部输出，就挂进这次运行：按这次的 runId 照样取得到（`lyflow_output_info` /
+  `lyflow_output_cloud` / 张量 / 下标 / `lyflow_run_outputs`），但不执行、不发任何事件。
+  `run_finished.attached[]` 列出挂上的节点（只在单节点运行里出现；开跑前就失败时，挂的是整张图里
+  有结果的那些）。没挂上的、这次也没有事件的节点，按这次的 runId 取不到输出。这是为只留最近一次运行
+  索引的宿主（桌面端的 RunManager 就是）准备的：不挂的话，上一次的结果在这次运行结束时就跟着没了。
 - `run_started.isolate` 原样带出这组 id（普通运行是空数组），`mode` 仍是 `full`。
   与 `mode = preview` 同时给是参数错误（`bad_input`）：预览结果在另一个缓存命名空间里。
 - `client.hpp` 的 `RunOptions` 没有加这个字段（这次只接编辑器用得到的那几条路，CLI 与 MCP 也没加）；
@@ -337,5 +343,7 @@ let spec = RunSpec::new(&graph_json, &run_id, &base_dir, &[])
 语义见上面「[只运行某几个节点](#只运行某几个节点isolate)」。后端要做到的最小一条：上游没有可用结果时
 发一对 `run_started`（带 `isolate`）/ `run_finished`（`error.code = upstream_not_ready`、
 `diagnostics[]` 每个缺结果的上游一条），不执行任何算子 —— 编辑器据此弹 warn 级 toast、把缺结果的上游
-闪一下。不认识这个字段的老后端会把它当成普通的全图运行，所以宿主换 core 时要一起换。
+闪一下。`run_finished.attached[]`（R7）告诉编辑器哪些计划外节点的输出按新 runId 还取得到：带了这个字段，
+编辑器就把节点表里既不在 isolate、这次也没命中缓存、又不在 attached 里的节点退回 idle；不带（老后端）就
+全部照旧。不认识这个字段的老后端会把它当成普通的全图运行，所以宿主换 core 时要一起换。
 HTTP 契约里对应 `POST /lyflow/run` 信封的 `isolate` 字段（[http-transport.md](http-transport.md)）。

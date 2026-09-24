@@ -259,6 +259,9 @@ export interface RunFinishedEvent extends EventBase {
   /** run 级、但各自指着一个节点的诊断。目前只有单节点运行的 upstream_not_ready（node-run R2）：
    *  每个缺结果的上游一条。那些节点没有失败，所以不会有它们的 node_state。 */
   diagnostics?: GraphDiagnostic[];
+  /** 单节点运行才有（node-run R7）：没执行、但结果仓里有它们当前 cacheKey 的结果、已挂进这次
+   *  运行的节点 —— 按这次的 runId 取得到输出。 */
+  attached?: string[];
   /** ADR-0022。老 core（ABI < v9）没有它。 */
   summary?: RunSummary;
 }

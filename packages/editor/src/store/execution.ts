@@ -101,6 +101,10 @@ export function inIsolate(isolate: readonly string[], nodeId: string): boolean {
  *  这里先攒着，run_finished 时一起提示（U5）。 */
 let notReady: string[] = [];
 
+/** 本次单节点运行里「在计划里、没重算、但输出照样可取」的节点（上游命中缓存的那些）。
+ *  它们的 node_state 不落库，run_finished 时要靠它和 attached 一起判谁的输出还取得到（R7）。 */
+let served = new Set<string>();
+
 // -------------------------------------------------------------- 事件合并
 
 /** 攒着还没落库的节点状态。null = 没有待落库的改动。 */
@@ -178,6 +182,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       .sort((a, b) => a.seq - b.seq);
     dropStaged();
     notReady = [];
+    served = new Set();
     const only = isolate.length > 0;
     set({
       runId,
@@ -271,6 +276,12 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
           if (event.state === "error" && event.errors?.[0]?.code === "upstream_not_ready") {
             notReady.push(event.nodeId);
           }
+          if (
+            (event.state === "done" || event.state === "skipped") &&
+            event.stats?.outputsAvailable !== false
+          ) {
+            served.add(event.nodeId);
+          }
           break;
         }
         const nodes = stage();
@@ -300,6 +311,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       }
       case "run_finished": {
         flushNow();
+        if (s.isolate.length > 0 && Array.isArray(event.attached)) {
+          dropUnreachable(s.isolate, event.attached);
+        }
         set({
           runStatus: event.status as RunStatus,
           durationMs: event.durationMs ?? null,
@@ -353,6 +367,24 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     });
   },
 }));
+
+/** 单节点运行收场（R7）：节点表里留着的那些，这次既没重算、没命中缓存、也没被 core 挂进来的，
+ *  按新 runId 已经取不到输出了 —— 退回 idle，不能显示「完成」却点开是空的。stale 不动（那是
+ *  cache store 的事）。老 core 不带 attached，调用方不会走到这里。 */
+function dropUnreachable(isolate: readonly string[], attached: readonly string[]): void {
+  const keep = new Set(attached);
+  const current = useExecutionStore.getState().nodes;
+  let next: Map<string, NodeExecution> | null = null;
+  const at = Date.now();
+  for (const [id, exec] of current) {
+    if (exec.state === "idle" || inIsolate(isolate, id) || served.has(id) || keep.has(id)) continue;
+    next ??= new Map(current);
+    next.set(id, emptyNode());
+    for (const fn of transitionListeners) fn({ nodeId: id, state: "idle", at });
+  }
+  served = new Set();
+  if (next) useExecutionStore.setState({ nodes: next });
+}
 
 /** 单节点运行撞上「上游还没有可用结果」（U5）：不弹对话框，warn 级 toast，文案同 core 的那句；
  *  缺结果的上游在当前层各闪一下红光（不抖）。 */

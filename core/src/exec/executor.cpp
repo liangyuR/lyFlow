@@ -287,9 +287,11 @@ class EventSink {
   /// `lyflow_run_summary` 拿到的是同一个对象）。
   /// diagnostics 是 run 级、但各自指着一个节点的诊断（node-run R2 的 upstream_not_ready：
   /// 每个缺结果的上游一条）。它们不是那些节点自己的失败，所以不走 node_state。
+  /// attached 是单节点运行挂进来的节点（node-run R7）；普通运行传 nullptr，字段不出现。
   void runFinished(const char* status, double durationMs, const Status* error,
                    const std::string& summaryJson = {},
-                   const std::vector<Diagnostic>* diagnostics = nullptr) {
+                   const std::vector<Diagnostic>* diagnostics = nullptr,
+                   const std::vector<std::string>* attached = nullptr) {
     JsonWriter w;
     std::lock_guard<std::mutex> lock(mu_);
     begin(w, "run_finished");
@@ -311,6 +313,12 @@ class EventSink {
         w.field("message", d.status.message);
         w.endObject();
       }
+      w.endArray();
+    }
+    if (attached) {
+      w.key("attached");
+      w.beginArray();
+      for (const std::string& id : *attached) w.value(id);
       w.endArray();
     }
     if (!summaryJson.empty()) {
@@ -470,6 +478,25 @@ std::vector<Diagnostic> missingUpstream(const Plan& plan, const RunOptions& opti
     if (!reusable) {
       out.push_back(Diagnostic{n.id, Severity::Error, upstreamNotReady(n.id), nullptr});
     }
+  }
+  return out;
+}
+
+/// 单节点运行的「挂结果」（R7）：这次运行里没有收场事件的节点（下游、兄弟支路，以及开跑前
+/// 就失败时的整张图），结果仓里要是有它**当前** cacheKey 的全部输出，就挂进这次运行的索引 ——
+/// 不执行、不发事件，只是让它们按新 runId 也取得到输出。宿主（桌面端的 RunManager）一次只留
+/// 最近一次运行的索引，不挂的话它们的结果在这次运行结束时就取不到了。
+/// full 是不带 targets 编出来的全图计划：cacheKey 只依赖上游，所以与本次计划里的那份逐字相同，
+/// 计划外节点的键也就是「它现在该有的键」。不确定性算子的键带 runId，天然挂不上；注入的节点
+/// 输出来自宿主这一次给的数据，不挂。
+std::vector<std::string> attachUnplanned(const Plan& full, const std::string& runId,
+                                         const std::map<std::string, NodeOutcome>& outcomes,
+                                         ResultStore& store) {
+  std::vector<std::string> out;
+  for (const PlanNode& n : full.nodes) {
+    if (!n.op || !n.valid || n.provided || n.op->outputs.empty()) continue;
+    if (!n.op->capabilities.deterministic || outcomes.count(n.id)) continue;
+    if (store.attach(runId, n.id, n.cacheKey, outputPortNames(*n.op))) out.push_back(n.id);
   }
   return out;
 }
@@ -1466,6 +1493,8 @@ void Run::workImpl() {
   RawGraph raw;
   Plan plan;
   plan.runId = options_.runId;
+  // 单节点运行时的全图计划（R7），只用它的 cacheKey。
+  Plan fullPlan;
 
   // 注入的数据按节点归拢，顺手算出进 cacheKey 的摘要（ADR-0017）。
   std::unordered_map<std::string, std::unordered_map<std::string, Data>> injected;
@@ -1506,6 +1535,15 @@ void Run::workImpl() {
     build.providedDigest = providedDigest;
     build.injectedPorts = injectedPorts;
     buildPlan(ensureRegistry(), raw, build, plan, diags);
+    // R7：单节点运行另编一份全图计划，只为拿到计划外节点的当前 cacheKey。诊断丢掉 ——
+    // 该报的都在上面那份里报过了，这份不执行
+    if (!options_.isolate.empty() && plan.ok) {
+      BuildOptions whole = build;
+      whole.targets.clear();
+      whole.isolate.clear();
+      Diagnostics ignored;
+      buildPlan(ensureRegistry(), raw, whole, fullPlan, ignored);
+    }
   }
 
   const int workers = resolveMaxParallel(options_.maxParallel);
@@ -1551,13 +1589,18 @@ void Run::workImpl() {
     const std::vector<Diagnostic> missing =
         missingUpstream(plan, options_, ResultStore::instance());
     if (!missing.empty()) {
+      // 一个都没跑，但已有的结果照样挂上（R7）：这次运行接替了上一次，不挂的话整张图的
+      // 输出都跟着上一次的索引一起没了
+      ResultStore& shelf = ResultStore::instance();
+      const std::vector<std::string> attached =
+          attachUnplanned(fullPlan, options_.runId, sink.outcomes(), shelf);
       const double failedAt = msSince(t0);
       const std::string summary = buildSummaryJson(options_.runId, plan, sink.outcomes(), failedAt,
-                                                   /*forceFailed=*/true, /*store=*/nullptr,
+                                                   /*forceFailed=*/true, &shelf,
                                                    sink.contractViolations());
-      ResultStore::instance().setSummary(options_.runId, summary);
+      shelf.setSummary(options_.runId, summary);
       const Status first = missing.front().status;
-      sink.runFinished("error", failedAt, &first, summary, &missing);
+      sink.runFinished("error", failedAt, &first, summary, &missing, &attached);
       return;
     }
   }
@@ -1595,6 +1638,11 @@ void Run::workImpl() {
                    std::to_string(budget) + " ms；建议降低预览点数");
     }
   }
+  // 挂结果放在 summary 之前（R7）：挂上的节点要是声明了图级输出，summary 里就是 value
+  std::vector<std::string> attached;
+  const bool isolating = !options_.isolate.empty();
+  if (isolating) attached = attachUnplanned(fullPlan, options_.runId, sink.outcomes(), store);
+  const std::vector<std::string>* attachedOut = isolating ? &attached : nullptr;
   const bool cancelled = scheduler.sawCancel() || cancelled_.load(std::memory_order_relaxed);
   // summary 在发 run_finished 之前登记：宿主 join 返回时 lyflow_run_summary
   // 一定拿得到，事件里那份与它是同一个对象（H1）。
@@ -1604,13 +1652,13 @@ void Run::workImpl() {
 
   if (cancelled) {
     Status s = Status::Error(Phase::Execute, "cancelled", "运行已取消");
-    sink.runFinished("cancelled", total, &s, summary);
+    sink.runFinished("cancelled", total, &s, summary, nullptr, attachedOut);
   } else if (scheduler.anyError()) {
     Status s = Status::Error(Phase::Execute, "internal",
                              std::to_string(scheduler.failedCount()) + " 个节点未能完成");
-    sink.runFinished("error", total, &s, summary);
+    sink.runFinished("error", total, &s, summary, nullptr, attachedOut);
   } else {
-    sink.runFinished("ok", total, nullptr, summary);
+    sink.runFinished("ok", total, nullptr, summary, nullptr, attachedOut);
   }
 }
 

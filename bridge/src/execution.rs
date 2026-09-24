@@ -813,6 +813,15 @@ mod tests {
             "下游不进计划: {started}"
         );
         assert_eq!(f.final_state("p"), "", "下游一条事件都不该有");
+
+        // R7：下游 p 不执行，但它上一次的结果挂进了这次运行，按新 runId 取得到
+        let finished = f.kind("run_finished")[0].clone();
+        assert_eq!(finished["attached"], serde_json::json!(["p"]), "{finished}");
+        let view = f
+            .core
+            .output_cloud(&f.run_id, "p", "cloud", 0)
+            .expect("挂上的下游按新 runId 应当取得到点云");
+        assert!(view.total_points() > 0);
     }
 
     /// R2：上游没有当前 cacheKey 的结果 —— 开跑前整次失败，诊断指向缺结果的上游，零执行。
