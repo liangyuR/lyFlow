@@ -51,7 +51,9 @@ const INSTALL = `
       return { hits, stop: () => obs.disconnect() };
     },
     /** 当前层每条边：路径起止点与 React Flow 锚点（源在圆点右缘、目标在左缘，
-     *  纵向取圆心）的距离，以及与圆点中心的距离。单位是画布坐标。 */
+     *  纵向取圆心）的距离，以及与圆点中心的距离。单位是画布坐标。
+     *  锚点由圆心 ± 半个 offsetWidth 算，不直接用包围盒的左右缘：圆点要是被缩放了，
+     *  包围盒跟着变大，拿它当基准会和 React Flow 量歪的端点「一起歪」，假绿。 */
     align() {
       const vp = document.querySelector('.react-flow__viewport');
       const k = new DOMMatrixReadOnly(getComputedStyle(vp).transform).a;
@@ -65,14 +67,16 @@ const INSTALL = `
       const edges = s.doc.edges.filter((e) => s.level.edges.includes(e.id));
       return edges.map((e) => {
         const path = document.querySelector('.react-flow__edge[data-id="' + e.id + '"] .react-flow__edge-path');
-        const hs = handle(e.from, 'output')?.getBoundingClientRect();
-        const ht = handle(e.to, 'input')?.getBoundingClientRect();
+        const src = handle(e.from, 'output');
+        const tgt = handle(e.to, 'input');
+        const hs = src?.getBoundingClientRect();
+        const ht = tgt?.getBoundingClientRect();
         if (!path || !hs || !ht) return { id: e.id, missing: true };
         const n = path.getAttribute('d').match(/-?\\d+(?:\\.\\d+)?(?:e-?\\d+)?/g).map(Number);
         const start = { x: n[0], y: n[1] };
         const end = { x: n[n.length - 2], y: n[n.length - 1] };
-        const srcAnchor = flow(hs.right, hs.top + hs.height / 2);
-        const tgtAnchor = flow(ht.left, ht.top + ht.height / 2);
+        const srcAnchor = flow(hs.left + hs.width / 2 + (src.offsetWidth * k) / 2, hs.top + hs.height / 2);
+        const tgtAnchor = flow(ht.left + ht.width / 2 - (tgt.offsetWidth * k) / 2, ht.top + ht.height / 2);
         const srcCenter = flow(hs.left + hs.width / 2, hs.top + hs.height / 2);
         const tgtCenter = flow(ht.left + ht.width / 2, ht.top + ht.height / 2);
         return {
@@ -496,6 +500,17 @@ async function suiteStateFeedback(cdp, report) {
   report.eq("（前提）voxel 这次是真算的 done", ok.nodes[ids.voxel]?.state, "done");
   report.eq("running → done 恰有一次 done 闪光标记", doneHits.map((h) => h.value), ["done"]);
 
+  // 实时预览不闪绿（S2）：换个 seed 让预览真的算一遍，结束时 voxel 上不该出现 data-flash="done"
+  await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.gen)}, 'seed', ${(Date.now() % 7919) + 11}); return true;`);
+  await startRecord(cdp, "preview", "data-flash");
+  const preview = await runAndWait(cdp, () =>
+    cdp.eval(`await window.__lyflow.run({ preview: true, previewMaxPoints: 20000 }); return true;`));
+  await sleep(450);
+  const previewHits = (await stopRecord(cdp, "preview")).filter((h) => h.key === `node-${ids.voxel}`);
+  report.ok("（前提）这是一次预览运行，voxel 真算了（done 不是 skipped）",
+    preview.preview === true && preview.nodes[ids.voxel]?.state === "done", JSON.stringify({ preview: preview.preview, voxel: preview.nodes[ids.voxel] }));
+  report.eq("预览运行结束后节点没有 data-flash=\"done\"", previewHits.filter((h) => h.value === "done"), []);
+
   // → error：整场每一帧都记 .node 与 .node__head 的 transform
   await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.voxel)}, 'leafSize', [0, 0.01, 0.01]); return true;`);
   await startRecord(cdp, "error", "data-flash");
@@ -638,18 +653,38 @@ async function suiteHover(cdp, report) {
     ends.fromPort && ends.toPort && ends.fromNode && ends.toNode && ends.others === 2, JSON.stringify(ends));
   report.ok("边本身加粗了", parseFloat(ends.width) > 2, ends.width);
 
-  // 端口 hover：voxel 的输出圆点
-  const handleSel = `[data-testid="port-${ids.voxel}-cloud"].node-port--output .react-flow__handle`;
+  // 端口 hover：voxel 的输入圆点。放大画在 ::before 上，圆点自己的盒子不动（A6）
+  const handleSel = `[data-testid="port-${ids.voxel}-cloud"].node-port--input .react-flow__handle`;
   await moveMouse(cdp, await centerOf(cdp, handleSel));
   await sleep(250);
-  const dot = await cdp.eval(`
+  const readDot = () => cdp.eval(`
     const h = document.querySelector(${lit(handleSel)});
-    const cs = getComputedStyle(h);
-    const m = new DOMMatrixReadOnly(cs.transform);
-    return { scale: Math.hypot(m.a, m.b), shadow: cs.boxShadow, transform: cs.transform };
+    const own = new DOMMatrixReadOnly(getComputedStyle(h).transform);
+    const pseudo = getComputedStyle(h, '::before');
+    const m = pseudo.transform === 'none' ? new DOMMatrixReadOnly() : new DOMMatrixReadOnly(pseudo.transform);
+    return { scale: Math.hypot(m.a, m.b), ownScale: Math.hypot(own.a, own.b), shadow: pseudo.boxShadow,
+             opacity: pseudo.opacity, pseudoTransform: pseudo.transform };
   `);
-  report.ok(`移到端口：圆点计算后的缩放 ${dot.scale.toFixed(2)} > 1`, dot.scale > 1.05, JSON.stringify(dot));
-  report.ok("端口 box-shadow 非 none", dot.shadow && dot.shadow !== "none", dot.shadow);
+  const dot = await readDot();
+  report.ok(`移到端口：圆点 ::before 计算后的缩放 ${dot.scale.toFixed(2)} > 1`, dot.scale > 1.05 && dot.opacity === "1", JSON.stringify(dot));
+  report.ok("圆点本身没有缩放（量测拿到的盒子不变）", Math.abs(dot.ownScale - 1) < 1e-6, JSON.stringify(dot));
+  report.ok("端口的光晕（::before 的 box-shadow）非 none", dot.shadow && dot.shadow !== "none", dot.shadow);
+
+  // hover 着端口时逼 React Flow 重量一次：改个长标题把节点撑宽，ResizeObserver → updateNodeInternals。
+  // 鼠标停在输入圆点上，节点往右长，它不挪；输出那条边的端点要跟到新的右缘，才说明真的重量过了
+  const widthOf = () => cdp.eval(`return document.querySelector('[data-testid="node-${ids.voxel}"]').getBoundingClientRect().width;`);
+  const w0 = await widthOf();
+  await cdp.eval(`window.__lyflow.stores.graph.getState().renameNode(${lit(ids.voxel)}, '一个很长很长很长很长的标题，把节点撑宽'); return true;`);
+  await sleep(350);
+  const w1 = await widthOf();
+  const still = await readDot();
+  const remeasured = (await alignOf(cdp)).filter((r) => r.id === edgeId.a || r.id === edgeId.b);
+  report.ok(`（前提）节点被撑宽了（${Math.round(w0)} → ${Math.round(w1)} px），鼠标仍在端口上`,
+    w1 > w0 + 20 && still.scale > 1.05, JSON.stringify({ w0, w1, still }));
+  report.ok(`hover 端口期间重新量测之后，它的两条边端点与锚点最大偏差 ${worst(remeasured)} px ≤ 1`,
+    remeasured.length === 2 && worst(remeasured) <= 1, JSON.stringify(remeasured));
+  await cdp.eval(`window.__lyflow.stores.graph.getState().undo(); return true;`);
+  await sleep(200);
 
   // 拖连线途中经过节点：不出现 is-dimmed
   const src = await centerOf(cdp, `[data-testid="port-${ids.g2}-cloud"] .react-flow__handle`);
@@ -689,9 +724,34 @@ async function suiteReducedMotion(cdp, report) {
   report.section("动效 验收 9：prefers-reduced-motion: reduce —— 标记全不出现，流动的边静态高亮");
   await install(cdp);
   await clearDoc(cdp);
+  await buildGraph(cdp, [
+    { key: "a", op: "gen.synthetic", params: { pointCount: 1000 } },
+    { key: "b", op: "filter.voxel_grid" },
+  ], [{ from: ["a", "cloud"], to: ["b", "cloud"] }]);
+  await sleep(450);
+  /** 先缩远，再按 Ctrl+Shift+F 适配视图，读 60 ms 与 400 ms 时的缩放：还在变 = 视口在动画。 */
+  const fitProbe = async () => {
+    await normalizeZoom(cdp, 0.35);
+    const scale = `new DOMMatrixReadOnly(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a`;
+    const before = await cdp.eval(`return ${scale};`);
+    await pressCtrl(cdp, "F", ["shift"]);
+    return cdp.eval(`
+      await new Promise((r) => setTimeout(r, 60));
+      const early = ${scale};
+      await new Promise((r) => setTimeout(r, 340));
+      return { before: ${before}, early, late: ${scale} };
+    `);
+  };
+  const animated = await fitProbe();
+  report.ok("（对照）动效开着时适配视图有过渡：60 ms 时缩放还没到终值",
+    animated.late !== animated.before && Math.abs(animated.early - animated.late) > 1e-3, JSON.stringify(animated));
+
   await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   try {
     await sleep(150);
+    const instant = await fitProbe();
+    report.ok("关动效时适配视图一步到位：60 ms 时已经是终值（fitView 的 duration 为 0）",
+      instant.late !== instant.before && Math.abs(instant.early - instant.late) < 1e-6, JSON.stringify(instant));
     const root = await cdp.eval(`const a = document.querySelector('.app'); return { motion: a.getAttribute('data-motion'), off: a.classList.contains('lyflow-motion-off') };`);
     report.ok("编辑器认出了系统设置（data-motion=off、根上 lyflow-motion-off）", root.motion === "off" && root.off, JSON.stringify(root));
 

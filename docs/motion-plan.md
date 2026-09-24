@@ -26,7 +26,7 @@
 | A1 | `@lyflow/editor` 的 `dependencies` 加 `motion`（^12）。只从 `motion/react` 导入 | 用户指定；和 dagre、immer 一样是编辑器自带依赖，宿主不用管 |
 | A2 | 新增 **`lib/motion.ts`** 作为编辑器的动效库：集中时长（`fast 120ms` / `base 200ms` / `slow 320ms`）、缓动、motion 的 variants/transition 预设，以及「当前是否启用动效」的判定。新增 **`styles.motion.css`**（由 `styles.css` 引入）放全部动效 CSS：CSS 变量 `--lyflow-motion-fast/base/slow`、keyframes、hover 规则。别处**不再散写**时长与 keyframes，现有 `node-pulse` 与进度条过渡迁进来 | 一处调手感；换库或关动效只改这里 |
 | A3 | **分工**：一次性、有进出场的动效（节点进场、删除残影、连线生长、状态切换闪光/抖动、布局过渡）用 motion；**持续循环与 hover** 用 CSS（keyframes / transition） | 几百条边同时 hover 判定、流动循环放在 JS 里每帧跑不划算；CSS 由合成线程处理 |
-| A4 | 开关：`LyFlowEditorProps` 新增 `animations?: boolean`（默认 `true`）。关掉或系统 `prefers-reduced-motion: reduce` 时：motion 全部跳到终态（`MotionConfig reducedMotion`），CSS 由 `.lyflow-motion-off` 根类与 `@media (prefers-reduced-motion: reduce)` 同时禁掉 keyframes 与 transition。**信息不能丢**：流动的边关了动画后仍以静态高亮表示「正在流动」 | 嵌入宿主要能关；无障碍 |
+| A4 | 开关：`LyFlowEditorProps` 新增 `animations?: boolean`（默认 `true`）。关掉或系统 `prefers-reduced-motion: reduce` 时：motion 全部跳到终态（`MotionConfig reducedMotion`），CSS 由 `.lyflow-motion-off` 根类与 `@media (prefers-reduced-motion: reduce)` 同时禁掉 keyframes 与 transition。**信息不能丢**：流动的边关了动画后仍以静态高亮表示「正在流动」。编辑器自己发起的带 `duration` 的视口动画（`fitView` 等）此时一律传 0（2026-09-24 验收后补） | 嵌入宿主要能关；无障碍 |
 
 ### 不能踩的坑：React Flow 的端口量测
 
@@ -36,7 +36,7 @@ React Flow 用 `getBoundingClientRect` 量端口相对节点包装层的位置�
 | # | 决定 |
 |---|---|
 | A5 | 含端口的元素（`.node`、`.node__body`、`.node-port`）**不做位移、缩放动画**，hover 也不行。节点进场只用 `opacity` + 光晕（`box-shadow`/`outline`）；hover「抬起」只用阴影表达，不 `translateY` |
-| A6 | 允许 transform 的只有：不含端口的 `.node__head`（错误抖动）、端口圆点 `.react-flow__handle` 本身（以圆心为原点缩放，量测取的是中心，缩放不改变中心；注意与现有 `translateY(-50%)` 组合），以及删除残影（它不是 React Flow 节点） |
+| A6 | 允许 transform 的只有：不含端口的 `.node__head`（错误抖动）、端口圆点上的 `::before` 伪元素（hover 放大的纯视觉层，圆点 `.react-flow__handle` 本身不变换），以及删除残影（它不是 React Flow 节点）。**2026-09-24 验收后修正**：原先写的是缩放圆点本身、理由是「量测取中心」，实际不成立 —— React Flow 量端口时位置取 `getBoundingClientRect`（含 transform）、尺寸取 `offsetWidth/Height`（不含），圆点放大 1.35 倍时赶上一次量测，端点会偏约 1.75px；伪元素不进 `getBoundingClientRect`，任何时刻量测都不受影响。拖线期间既有的 `.react-flow__handle-connecting/-valid` 与 compatible 的放大是老行为，保持不动 |
 
 ### 节点进出场
 
@@ -52,7 +52,7 @@ React Flow 用 `getBoundingClientRect` 量端口相对节点包装层的位置�
 | # | 决定 |
 |---|---|
 | S1 | 只对**本次挂载期间发生的迁移**播放：首次渲染时已经是 done/error 的节点不闪（节点组件用 ref 记上一个 state，或用 `onNodeTransition`）|
-| S2 | `→ done`：整个节点一次绿色光环闪（`box-shadow`，`slow`）。`→ error`：红色光环闪 + `.node__head` 水平抖动（±4px 衰减，约 300ms）。`→ running` 保持现有呼吸光（迁到 `styles.motion.css`）|
+| S2 | `→ done`：整个节点一次绿色光环闪（`box-shadow`，`slow`）。`→ error`：红色光环闪 + `.node__head` 水平抖动（±4px 衰减，约 300ms）。`→ running` 保持现有呼吸光（迁到 `styles.motion.css`）。实时预览（拖参数触发的 preview run）结束时不播 done 闪光 —— 一秒能跑好几轮，连着闪只是噪音；error 的闪光与抖动照播（2026-09-24 验收后补）|
 | S3 | stale、bypass、not-demanded 的透明度变化加 `base` 时长的 `opacity` 过渡 |
 
 ### 连线
@@ -76,7 +76,7 @@ React Flow 用 `getBoundingClientRect` 量端口相对节点包装层的位置�
 
 ### 不做
 
-节点拖动的惯性/弹簧；画布平移缩放的动画（React Flow 自带的 `fitView` 过渡除外）；边的路由变化动画；主题切换动画。
+节点拖动的惯性/弹簧；新增画布平移缩放的动画（编辑器原有的 `fitView` 过渡保留，但受 A4 的开关管，关掉时时长为 0）；边的路由变化动画；主题切换动画。
 
 ## 3. 验收
 

@@ -5,6 +5,8 @@
 - `pnpm check`：退出码 0，「全链路绿」（C++ / schema / cargo test / 前端 typecheck + 单测 15/15 + 两个前端构建 / MCP 45/45）。
 - `pnpm e2e`：退出码 0，**596/596 项通过**，其中新分组 `scripts/e2e/motion.mjs` 69 项。完整输出 grep
   「未验」「跳过」「FAIL」「✗」均为 0 行（gap / M8b / M8c 的分组都真的跑了）。
+- **验收后的四项决定落地之后（第二个 commit，见文末）重跑**：`pnpm check` 退出码 0、全链路绿；
+  `pnpm e2e` 退出码 0，**603/603**，动效分组 76 项，grep「未验」「跳过」「FAIL」「✗」仍为 0 行。
 - `pnpm e2e:http`：`LYFLOW_E2E_HEADLESS=1` 下退出码 0，**35/35**，其中新增的 animations 开关一组 6 项。
   有头模式见文末「环境问题」。
 
@@ -167,7 +169,7 @@ $ grep -n '"motion"' packages/editor/package.json
    不在圆心：源端口取圆点**右缘**、目标取**左缘**（`getHandlePosition`），和圆心差半个圆点宽。按字面断言
    「≤ 1 px 到圆心」在没有任何动效时也必然失败（实测约 5 px）。脚本断言的是端点对锚点 ≤ 1 px，另外把到圆心的
    距离作为对照记下来（全部 > 3 px，确认锚点口径没选错）。验的仍然是计划要的那件事：没有错位。
-2. **A6 的前提不完全对：圆点放大并非「不改变量测」。** React Flow 量端口时 `x/y` 用 `getBoundingClientRect`
+2. **（已按决定改掉，见文末第 1 项）A6 的前提不完全对：圆点放大并非「不改变量测」。** React Flow 量端口时 `x/y` 用 `getBoundingClientRect`
    （含 transform），宽高却用 `offsetWidth/Height`（不含）。圆点以圆心放大 1.35 倍的那一刻要是赶上量测，端点会
    偏约 1.75 px，直到下一次量测。照计划实现了（H4 放大的是圆点本身），目前只有端口 hover 会放大、hover 不改变
    节点尺寸，e2e 也没抓到错位；但「hover 着某个端口时这个节点的尺寸恰好变了」（比如运行结束多出状态行）理论上
@@ -179,9 +181,9 @@ $ grep -n '"motion"' packages/editor/package.json
    「`applyLayout`（自动布局）」，我按「自动布局这个用户动作」理解；如果要所有 `applyLayout` 都过渡请说。
 4. **一次冒出来超过 80 个节点（或 160 条边）不播进场**，与虚拟化阈值、布局过渡的上限同一个数。计划只给删除残影
    定了上限（30）；大粘贴时几百个节点同时淡入没有信息量，还拖慢那一帧。逐个加的不受影响。
-5. **live preview 的每一次预览运行结束都会闪一次绿**（S2 对 → done 一视同仁）。拖滑块时预览一秒可能跑好几次，
+5. **（已按决定改掉，见文末第 2 项）live preview 的每一次预览运行结束都会闪一次绿**（S2 对 → done 一视同仁）。拖滑块时预览一秒可能跑好几次，
    节点会连着闪。计划没覆盖预览运行，我没加例外；要不要在 `preview` 运行里不闪，请定。
-6. **graph store 加了一个 `epoch` 字段**（`newDoc` / `loadDoc` 各加一），画布差分靠它区分「编辑」与「换一整张图」。
+6. **（决定：保留）graph store 加了一个 `epoch` 字段**（`newDoc` / `loadDoc` 各加一），画布差分靠它区分「编辑」与「换一整张图」。
    不进 doc、不进撤销栈，但 `useGraphStore` 是导出的，宿主能看到这个新字段。
 7. **顺手修掉的三个老问题**（都是这次要动的规则，不修动效就叠不上去）：
    - 拖线时兼容端口的 `transform: scale(1.45)`、自动连线候选端口的 `scale(1.35)` 会把 `translateY(-50%)` 顶掉，
@@ -196,7 +198,7 @@ $ grep -n '"motion"' packages/editor/package.json
    布局过渡是 `animate(0, 1, { onUpdate })` 逐帧写一个经 `useSyncExternalStore` 读的位置覆盖（和 graph store 的
    更新落进同一次渲染，不会先闪一帧终点）。hover 状态在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），
    流动看 `useNodeState(target)`，都不进节点/边的 `data`，`sameNode` / `sameEdge` 没有改。
-9. **没做**：`animations={false}` 不管 React Flow 自己的 `fitView({ duration: 200 })`（计划 §2「不做」把它排除在外）。
+9. **（已按决定改掉，见文末第 4 项）** 原先 `animations={false}` 不管编辑器自己调的 `fitView({ duration: 200 })`。
 
 ## 环境问题（与这次改动无关）
 
@@ -204,3 +206,57 @@ $ grep -n '"motion"' packages/editor/package.json
 查下来是本机这次拉起的 Chrome 窗口 `document.visibilityState === "hidden"`：CDP 的键鼠事件送不进去，rAF 也不来。
 `git stash` 掉全部改动后同样失败，所以不是回归。`LYFLOW_E2E_HEADLESS=1` 下 35/35 全过。新加的那一组
 等待用 `setTimeout` 而不是 rAF，窗口被挡住时不会卡死。
+
+## 验收后的四项决定（2026-09-24，第二个 commit）
+
+1. **A6 修正：端口 hover 的放大画在圆点的 `::before` 上，圆点本身不变换。** 原因写进了 plan 的 A6 行：
+   React Flow 量端口时位置取 `getBoundingClientRect`（含 transform）、尺寸取 `offsetWidth/Height`（不含），
+   缩放赶上一次量测端点就偏约 1.75 px；伪元素不进 `getBoundingClientRect`。拖线期间的
+   `.react-flow__handle-connecting/-valid` 与 compatible 的放大是老行为，没动。`styles.motion.css` 顶部注释、
+   `packages/editor/README.md` 的坑同步改了。
+
+   e2e 验收 8 改为读 `getComputedStyle(handle, '::before')`，另加「圆点本身缩放为 1」，以及一条重新量测的断言：
+   鼠标停在 voxel 的**输入**圆点上时把它改一个长标题、节点被撑宽（ResizeObserver → `updateNodeInternals`，
+   与强制重量等价；输入圆点在左侧不挪，鼠标仍在上面），然后断言它两条边的端点。锚点改为「圆心 ± 半个
+   `offsetWidth`」算，不再直接取包围盒的左右缘 —— 否则圆点被缩放时基准和端点一起歪，假绿。
+
+   ```
+     ✓ 移到端口：圆点 ::before 计算后的缩放 1.35 > 1
+     ✓ 圆点本身没有缩放（量测拿到的盒子不变）
+     ✓ 端口的光晕（::before 的 box-shadow）非 none
+     ✓ （前提）节点被撑宽了（118 → 177 px），鼠标仍在端口上
+     ✓ hover 端口期间重新量测之后，它的两条边端点与锚点最大偏差 0 px ≤ 1
+   ```
+
+   **对照**（证明这条断言不是白给的）：在运行中的 app 里注入一条旧写法
+   `.node-port:hover .react-flow__handle { --lyflow-handle-scale: 1.35 }`（缩放圆点本身）再跑同一组：
+
+   ```
+     ✗ 圆点本身没有缩放（量测拿到的盒子不变） — {"scale":1.35,"ownScale":1.35,…}
+     ✗ hover 端口期间重新量测之后，它的两条边端点与锚点最大偏差 1.75 px ≤ 1
+         [{"id":"e_8pf5y2","start":0,"end":1.75,…},{"id":"e_bdmp9e","start":0,"end":0,…}]
+   ```
+
+   偏的正好是被 hover 的那一端、正好 1.75 px（10 px 圆点 × 0.35 ÷ 2），与分析一致。
+
+2. **实时预览结束时不播 done 闪光**，error 的闪光与抖动照播（plan 的 S2 补了一句）。判据是状态变成 done 那一刻
+   `execution.preview` 为真。e2e 验收 7 加了一次 `run({ preview: true })`（换了 seed，保证 voxel 真算）：
+
+   ```
+     ✓ （前提）这是一次预览运行，voxel 真算了（done 不是 skipped）
+     ✓ 预览运行结束后节点没有 data-flash="done"
+   ```
+
+3. **`epoch` 保留**，未改。
+
+4. **关动效时视口动画也为 0**：编辑器自己调的五处 `fitView`（适配视图的快捷键与右键菜单、整理之后、
+   进子图、打开缺坐标的文件）时长改由 `lib/motion.ts` 的 `viewportMs()` 取，开时 200 ms、关时 0。编辑器里没有
+   调 `setCenter` / `setViewport` / `zoomTo` 的地方。plan 的 A4 补了一句，「不做」里的 fitView 例外改成
+   「原有的 fitView 过渡保留，但受 A4 的开关管」。e2e 验收 9 先缩远、再按 Ctrl+Shift+F，读 60 ms 与 400 ms 时的缩放：
+
+   ```
+     ✓ （对照）动效开着时适配视图有过渡：60 ms 时缩放还没到终值
+     ✓ 关动效时适配视图一步到位：60 ms 时已经是终值（fitView 的 duration 为 0）
+   ```
+
+大图性能组这一轮的数：打开 300 节点 126 ms（< 1000）、拖动 57 fps（≥ 30）、事件到渲染 60 ms（< 100）。

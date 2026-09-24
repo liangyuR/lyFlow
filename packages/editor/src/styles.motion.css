@@ -3,9 +3,12 @@
    lib/motion.ts；持续循环与 hover 归这里 —— 几百条边的 hover 判定和流动循环放在 JS 里
    每帧跑不划算，CSS 由合成线程处理。别处不再散写时长与 keyframes。
 
-   不能踩的坑（A5）：含端口的元素（.node、.node__body、.node-port）不做位移、缩放，hover 也不行。
-   React Flow 用 getBoundingClientRect 量端口，赶上一次量测，连线端点就永久错位。
-   允许 transform 的只有：.node__head（不含端口）、端口圆点本身、删除残影。 */
+   不能踩的坑（A5 / A6）：含端口的元素（.node、.node__body、.node-port）不做位移、缩放，hover 也不行；
+   端口圆点本身也不在 hover 时变换。React Flow 量端口时位置取 getBoundingClientRect（含 transform）、
+   尺寸取 offsetWidth/Height（不含），缩放只要赶上一次量测，连线端点就永久偏开（圆点放大 1.35 倍时约
+   1.75 px）。所以端口 hover 的放大画在圆点的 ::before 上 —— 伪元素不进 getBoundingClientRect。
+   允许 transform 的只有：.node__head（不含端口）、圆点的 ::before、删除残影；拖线期间兼容端口的
+   放大是老行为，保持不动。 */
 
 /* 三档时长，与 lib/motion.ts 的 MOTION_MS 一致 */
 .app {
@@ -77,19 +80,38 @@
 
 /* ------------------------------------------------------------------ 端口 */
 
-/* 圆点以圆心缩放（A6）。变量在 styles.editor.css 的 translateY(-50%) 后面接着乘 */
+/* 拖线期间兼容端口的放大（老行为）走 --lyflow-handle-scale，接在 styles.editor.css 的
+   translateY(-50%) 后面乘；这里只给它一个过渡 */
 .node-port .react-flow__handle {
   transition:
     transform var(--lyflow-motion-fast) var(--lyflow-ease-out),
+    box-shadow var(--lyflow-motion-fast) var(--lyflow-ease-out);
+}
+
+/* hover 放大的视觉层（A6）：盖在圆点上、同色、以圆心缩放。圆点自己的盒子一动不动，
+   React Flow 任何时刻量测都拿到同一个位置。inset 取负的边框宽，正好罩住整个圆点 */
+.node-port .react-flow__handle::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  background: var(--lyflow-port-color, var(--lyflow-accent));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--lyflow-motion-fast) var(--lyflow-ease-out),
+    opacity var(--lyflow-motion-fast) var(--lyflow-ease-out),
     box-shadow var(--lyflow-motion-fast) var(--lyflow-ease-out);
 }
 .node-port__label {
   transition: color var(--lyflow-motion-fast) var(--lyflow-ease-out);
 }
 
-/* 端口 hover（H4）：放大 + 类型色光晕，标签提亮。拖线期间 compatible / incompatible 优先 */
-.node-port:not(.node-port--compatible):not(.node-port--incompatible):hover .react-flow__handle {
-  --lyflow-handle-scale: 1.35;
+/* 端口 hover（H4）：放大 + 类型色光晕，标签提亮。放大与光晕都在 ::before 上（A6）。
+   拖线期间 compatible / incompatible 优先 */
+.node-port:not(.node-port--compatible):not(.node-port--incompatible):hover .react-flow__handle::before {
+  opacity: 1;
+  transform: scale(1.35);
   box-shadow:
     0 0 0 3px color-mix(in srgb, var(--lyflow-port-color, var(--lyflow-accent)) 45%, transparent),
     0 0 8px var(--lyflow-port-color, var(--lyflow-accent));

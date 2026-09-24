@@ -77,6 +77,11 @@ export function useMotionEnabled(): boolean {
   return useContext(MotionEnabledContext);
 }
 
+/** 编辑器自己发起的视口动画（fitView 之类）的时长，毫秒。关动效时是 0：一步到位（A4）。 */
+export function viewportMs(motionOn: boolean): number {
+  return motionOn ? MOTION_MS.base : 0;
+}
+
 // ------------------------------------------------ 进场的短命集合（N1）
 
 /** 「谁算新出现」由画布对 doc 的差分决定（N1），节点/连线组件挂载时来这里问一句。

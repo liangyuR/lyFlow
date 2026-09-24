@@ -31,6 +31,7 @@ import {
   MotionEnabledContext,
   useMotionEnabled,
   usePrefersReducedMotion,
+  viewportMs,
   withLayoutTransition,
 } from "./lib/motion";
 import { fullId, levelOf } from "./lib/subgraph";
@@ -203,6 +204,9 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   const { screenToFlowPosition, fitView } = useReactFlow();
   const root = useRef<HTMLDivElement>(null);
   const [paletteWidth] = useState(280);
+  // 关动效时视口也一步到位（A4）：适配视图、整理之后的 fitView 都不带过渡
+  const motionOn = useMotionEnabled();
+  const fitMs = viewportMs(motionOn);
   const rightPane = useDragSplit(380, 260, 900, root, paletteWidth + kMinCanvasWidth);
 
   // 粘贴和搜索面板要知道往哪儿放。跟着鼠标走比总是放在画布中心自然得多。
@@ -306,12 +310,12 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       if (needsInitialLayout(useGraphStore.getState().doc)) {
         const moves = layoutGraph(useGraphStore.getState().doc);
         useGraphStore.getState().applyLayout(moves);
-        setTimeout(() => void fitView({ duration: 200 }), 50);
+        setTimeout(() => void fitView({ duration: fitMs }), 50);
       }
       await rememberFile(path);
       ui.showToast(`已打开 ${doc.nodes.length} 个节点`);
     },
-    [fitView],
+    [fitView, fitMs],
   );
 
   const openPath = useCallback(
@@ -435,8 +439,8 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     const moves = layoutGraph(view, ui.selectedNodes.size > 1 ? { only: ui.selectedNodes } : {});
     // 用户触发的整理才过渡（docs/motion-plan.md N4）；打开文件时的初始布局照旧一步到位
     withLayoutTransition(() => graph.applyLayout(moves));
-    setTimeout(() => void fitView({ duration: 200 }), 50);
-  }, [fitView]);
+    setTimeout(() => void fitView({ duration: fitMs }), 50);
+  }, [fitView, fitMs]);
 
   const handlers = useMemo(
     () => ({
@@ -456,11 +460,11 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         void doRun(ids);
       },
       onLayout: doLayout,
-      onFitView: () => void fitView({ duration: 200 }),
+      onFitView: () => void fitView({ duration: fitMs }),
       cursorFlowPosition: () => screenToFlowPosition(cursor.current),
       cursorScreenPosition: () => cursor.current,
     }),
-    [doSave, doOpen, doNew, doRun, doCancel, doLayout, fitView, screenToFlowPosition],
+    [doSave, doOpen, doNew, doRun, doCancel, doLayout, fitView, fitMs, screenToFlowPosition],
   );
 
   useShortcuts(handlers, root);
@@ -506,7 +510,6 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   }, [onDocChange]);
 
   // 关动效时 CSS 那一半靠根上的 lyflow-motion-off（系统设置另有 @media 兜底，见 styles.motion.css）
-  const motionOn = useMotionEnabled();
   const rootClass = ["app", motionOn ? "" : "lyflow-motion-off", className ?? ""]
     .filter(Boolean)
     .join(" ");

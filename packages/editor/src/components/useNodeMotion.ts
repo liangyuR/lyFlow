@@ -25,6 +25,7 @@ import {
   TRANSITION,
   useMotionEnabled,
 } from "../lib/motion";
+import { useExecutionStore } from "../store/execution";
 import type { NodeState } from "../types/execution";
 
 export interface NodeMotionRefs {
@@ -75,6 +76,9 @@ export function useNodeMotion(id: string, state: NodeState, refs: NodeMotionRefs
     previous.current = state;
     if (!motionOn || before === state) return;
     if (state !== "done" && state !== "error") return;
+    // 实时预览（拖参数触发的 preview run）一秒能跑好几轮，每轮都闪一次绿只是噪音（S2）。
+    // 出错照闪照抖：那是要人看的。读当下的值就够，不必订阅
+    if (state === "done" && useExecutionStore.getState().preview) return;
     const root = refs.root.current;
     const fx = refs.fx.current;
     if (!root || !fx) return;

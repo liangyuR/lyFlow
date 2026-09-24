@@ -272,6 +272,12 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
 终值在下一帧的渲染批次里才写回：`then` 里刚擦掉的 inline `opacity` 会被它重新写成 1，
 静音、未被需要这些类的半透明就永久失效了（e2e 抓到过）。
 
+**实时预览不闪绿。** 拖参数触发的 preview run 一秒能跑好几轮，结束时不播 done 闪光（看的是
+`execution.preview`）；error 的闪光与抖动照播。
+
+**关动效时视口也不动。** 编辑器自己调的 `fitView`（适配视图、整理之后、进子图、打开缺坐标的文件）
+时长经 `viewportMs()` 取，关掉时是 0。
+
 ## 踩过的坑
 
 这些全部来自 CDP 验收（`scripts/e2e`）抓到的真 bug，没有一个是单元测试能发现的。
@@ -310,13 +316,16 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
   尺寸变化、`updateNodeInternals` 时用 `getBoundingClientRect` 量端口相对节点的位置；作用在
   `.node`、`.node__body`、`.node-port` 上的 transform 只要赶上一次量测，连线端点就**永久**错位，
   直到下一次量测。所以节点进场只动 `opacity`、hover「抬起」只加阴影；允许 transform 的只有
-  不含端口的 `.node__head`（错误抖动）、端口圆点本身、删除残影。圆点的放大一律经
-  `--lyflow-handle-scale` 乘在 `translateY(-50%)` 后面 —— 直接写 `transform: scale()` 会把居中的那半个
-  身位顶掉（拖线时兼容端口、自动连线的候选端口原来就是这么往下掉的）。
-- **圆点放大并不是「量测不受影响」。** React Flow 取端口的 `x/y` 用 `getBoundingClientRect`，
-  宽高却用 `offsetWidth/Height`（不含 transform），连线端点在圆点**外缘**（源在右缘、目标在左缘）
-  而不在圆心。放大 1.35 倍的那一刻要是赶上量测，端点会偏 1.75 px 左右。现在只有端口 hover 会放大，
-  hover 不改变节点尺寸，一般赶不上；但别再给圆点加更大的缩放，也别在节点尺寸会变的时机放大它。
+  不含端口的 `.node__head`（错误抖动）、端口圆点的 `::before`、删除残影。
+- **圆点本身也不能缩放 —— 「以圆心缩放不改变量测」是错的**（A6，验收后修正）。React Flow 取端口的
+  `x/y` 用 `getBoundingClientRect`（含 transform），宽高却用 `offsetWidth/Height`（不含），连线端点在圆点
+  **外缘**（源在右缘、目标在左缘）而不在圆心。圆点放大 1.35 倍的那一刻要是赶上量测（比如 hover 着端口时
+  运行结束、节点多出一行状态条），端点会偏 1.75 px 左右，直到下一次量测。所以端口 hover 的放大与光晕画在
+  圆点的 `::before` 上：伪元素不进 `getBoundingClientRect`，圆点的盒子一动不动。e2e 验收 8 专门在 hover
+  端口期间把节点撑宽、逼 React Flow 重量一次，再断言端点。
+- **拖线期间兼容端口的放大是老行为**，仍然缩放圆点本身，一律经 `--lyflow-handle-scale` 乘在
+  `translateY(-50%)` 后面 —— 直接写 `transform: scale()` 会把居中的那半个身位顶掉（兼容端口、自动连线的
+  候选端口原来就是这么往下掉的）。
 - **inline 的 `strokeWidth` 压过一切 CSS。** 连线的线宽原来写在映射层的 `style` 里，于是
   `.selected` 的加粗从来没生效过。现在 `style` 只放颜色和虚线，线宽在 `styles.motion.css`。
 - **自定义边要自己画命中路径。** React Flow 的 `BaseEdge` 在 `interactionWidth` 缺省时按 20 画

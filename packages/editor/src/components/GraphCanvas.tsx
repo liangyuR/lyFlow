@@ -20,7 +20,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { layoutGraph } from "../lib/layout";
-import { useMotionEnabled, withLayoutTransition } from "../lib/motion";
+import { useMotionEnabled, viewportMs, withLayoutTransition } from "../lib/motion";
 import {
   createMappingCache,
   distanceToSegment,
@@ -668,10 +668,10 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     const subgraphId = node ? subgraphIdOf(node.op) : null;
     if (!subgraphId) return false;
     useUiStore.getState().enterSubgraph({ nodeId, subgraphId });
-    setTimeout(() => void fitView({ duration: 200 }), 60);
+    setTimeout(() => void fitView({ duration: viewportMs(motionOn) }), 60);
     return true;
     // fitView 的引用是稳定的（useReactFlow 返回的都是），列进依赖只是为了 lint
-  }, [fitView]);
+  }, [fitView, motionOn]);
 
   const onNodeDoubleClick = useCallback(
     (e: React.MouseEvent, node: { id: string }) => {
@@ -1099,7 +1099,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
             type="button"
             data-testid="ctx-fit"
             onClick={() => {
-              void fitView({ duration: 200 });
+              void fitView({ duration: viewportMs(motionOn) });
               setMenu(null);
             }}
           >

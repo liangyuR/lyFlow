@@ -198,8 +198,9 @@
 }
 
 /* React Flow 的 Handle 默认贴节点边缘，这里把它对齐到各自的端口行上。
-   放大一律经 --lyflow-handle-scale：直接写 transform: scale() 会把 translateY(-50%)
-   顶掉，圆点往下掉半个身位（docs/motion-plan.md A6） */
+   拖线期间兼容端口的放大经 --lyflow-handle-scale：直接写 transform: scale() 会把
+   translateY(-50%) 顶掉，圆点往下掉半个身位。hover 的放大不动圆点本身，画在它的
+   ::before 上（docs/motion-plan.md A6，styles.motion.css） */
 .node-port .react-flow__handle {
   position: absolute;
   top: 50%;
