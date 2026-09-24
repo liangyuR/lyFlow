@@ -152,6 +152,7 @@ export class HttpTransport implements Transport {
       graphPath,
       targets: options?.targets ?? null,
       isolate: options?.isolate ?? null,
+      force: options?.force ?? null,
       mode: options?.mode ?? "full",
       previewMaxPoints: options?.previewMaxPoints ?? null,
       previewBudgetMs: options?.previewBudgetMs ?? null,

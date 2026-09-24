@@ -1,5 +1,6 @@
-// 标题栏右端的「只运行此节点」小圆圈（docs/node-run-plan.md A 方案）。只重算这一个节点：
-// 上游用已有结果，下游不动。判据、状态与动作都在 lib/nodeRun.ts，右键菜单用的是同一套。
+// 标题栏右端的运行小圆圈（docs/node-run-plan.md A 方案，§6 修订一）。单击 = 智能运行：本节点 +
+// 缺结果或过时的上游，有缓存的复用，下游不动；Shift+单击 = 强制重算此节点。判据、状态与动作都在
+// lib/nodeRun.ts，右键菜单用的是同一套。
 //
 // 按钮在 .node__head 里，不含端口（motion-plan A5 / A6）：hover 的放大画在它自己的 SVG 上，
 // 碰不到 React Flow 的端口量测。
@@ -7,56 +8,67 @@
 import { memo, useMemo, type SyntheticEvent } from "react";
 
 import {
+  ancestorsOf,
   isOwnRun,
-  missingUpstream,
   nodeLabel,
   nodeRunState,
   nodeRunTitle,
-  runUpstreamOf,
   toggleNodeRun,
+  upstreamToRun,
+  willCompute,
+  type RunForecastInput,
 } from "../lib/nodeRun";
 import { augmentOperators, fullId, levelOf } from "../lib/subgraph";
-import { useStaleNodeIds } from "../store/cache";
+import { useCacheStore, useStaleNodeIds } from "../store/cache";
 import { aggregatedNodes, useExecutionStore, type NodeExecution } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
-import type { OperatorDesc } from "../types/manifest";
 
 /** 进度环的几何：视觉 14 px，描边 1.5 px 画在圆周内侧（U2）。 */
 const R = 6.25;
 
 interface NodeRunButtonProps {
   id: string;
-  op: OperatorDesc;
   exec: NodeExecution | undefined;
+  /** 本节点有编辑期校验 error（V3：唯一会让按钮置灰的情况）。 */
+  invalid: boolean;
 }
 
 /** 按下、点击、双击都不许冒泡（U1）：否则会选中节点、开始拖动、或进入改名。 */
 const swallow = (e: SyntheticEvent) => e.stopPropagation();
 
-function NodeRunButtonImpl({ id, op, exec }: NodeRunButtonProps) {
+const splitKey = (key: string) => (key ? key.split("\n") : []);
+
+function NodeRunButtonImpl({ id, exec, invalid }: NodeRunButtonProps) {
   const path = useUiStore((s) => s.path);
   const full = fullId(path, id);
-  // 上游清单按字符串订阅：doc 的别处变了（拖别的节点、改参数）不让这个按钮重渲
-  const upstreamKey = useGraphStore((s) => runUpstreamOf(levelOf(s.doc, path), id, op).join("\n"));
-  const upstream = useMemo(() => (upstreamKey ? upstreamKey.split("\n") : []), [upstreamKey]);
+  // 祖先清单按字符串订阅：doc 的别处变了（拖别的节点、改参数）不让这个按钮重渲
+  const ancestorsKey = useGraphStore((s) => ancestorsOf(levelOf(s.doc, path), id).join("\n"));
+  const ancestors = useMemo(() => splitKey(ancestorsKey), [ancestorsKey]);
   const stale = useStaleNodeIds();
-  const missingKey = useExecutionStore((s) =>
-    missingUpstream(upstream, aggregatedNodes(path, s.nodes), stale).join("\n"),
-  );
-  const missing = useMemo(() => (missingKey ? missingKey.split("\n") : []), [missingKey]);
-  const own = useExecutionStore((s) => s.runStatus === "running" && isOwnRun(s.isolate, full));
+  const plan = useCacheStore((s) => s.plan);
+  const planUsable = useCacheStore((s) => !s.unavailable && s.plan.size > 0);
+  // 预判（V5）同样按字符串订阅：每 50 ms 一条的进度不让它重算出新引用
+  const forecastKey = useExecutionStore((s) => {
+    const input: RunForecastInput = { path, plan, planUsable, execs: aggregatedNodes(path, s.nodes), stale };
+    const up = upstreamToRun(input, ancestors);
+    return `${willCompute(input, id) ? "1" : "0"}|${up.join("\n")}`;
+  });
+  const [selfKey, upstreamKey = ""] = forecastKey.split("|");
+  const upstream = useMemo(() => splitKey(upstreamKey), [upstreamKey]);
+  const upToDate = selfKey === "0" && upstream.length === 0;
+  const own = useExecutionStore((s) => s.runStatus === "running" && isOwnRun(s.targets, full));
   const baseOps = useManifestStore((s) => s.operatorsById);
   const namesKey = useGraphStore((s) => {
-    if (missing.length === 0) return "";
+    if (upstream.length === 0) return "";
     const ops = augmentOperators(baseOps, s.doc.subgraphs);
     const level = levelOf(s.doc, path);
-    return missing.map((m) => nodeLabel(level, m, ops)).join("\n");
+    return upstream.map((u) => nodeLabel(level, u, ops)).join("\n");
   });
 
-  const state = nodeRunState(exec, missing, own);
-  const title = nodeRunTitle(state, namesKey ? namesKey.split("\n") : [], own);
+  const state = nodeRunState(exec, invalid, own);
+  const title = nodeRunTitle({ state, own, upstream: splitKey(namesKey), upToDate });
   // 有进度就画弧长 = progress；算子不报进度（或刚进 running 还是 0）时是转圈的 3/4 弧
   const progress = state === "running" && exec?.progress != null && exec.progress > 0 ? exec.progress : null;
 
@@ -67,7 +79,8 @@ function NodeRunButtonImpl({ id, op, exec }: NodeRunButtonProps) {
       data-testid={`node-run-${id}`}
       data-run-state={state}
       data-run-own={own ? "1" : undefined}
-      data-run-reason={state === "disabled" ? missing.join(",") : undefined}
+      data-run-upstream={upstream.length > 0 ? upstream.join(",") : undefined}
+      data-run-uptodate={upToDate ? "1" : undefined}
       data-run-progress={progress ?? undefined}
       aria-label={title}
       aria-disabled={state === "disabled" ? true : undefined}
@@ -78,7 +91,7 @@ function NodeRunButtonImpl({ id, op, exec }: NodeRunButtonProps) {
       onClick={(e) => {
         e.stopPropagation();
         if (state === "disabled") return;
-        void toggleNodeRun(id);
+        void toggleNodeRun(id, e.shiftKey);
       }}
     >
       <svg className="node-run__svg" viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">

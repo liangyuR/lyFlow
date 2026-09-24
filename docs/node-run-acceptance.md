@@ -97,6 +97,8 @@ TEST CASE:  R7：上游不齐、开跑前就失败时，已有的结果照样挂
 
 ## 7–12. `scripts/e2e/noderun.mjs` 的实际输出
 
+> 这一节是第二个 commit（R7）时的输出。§6 修订一把 8、9、10、12 按新语义改写了，改写后的输出见文末「修订一」。
+
 ```
 ── 单节点运行 验收 7：按钮在标题与徽标之后、折叠仍在；真鼠标点它不选中、不拖动、不改名
   ✓ 每个节点的 .node__head 里都有自己的 node-run-<id>
@@ -289,3 +291,235 @@ getOutputCloud(新 runId, c) 与 getOutputCloud(旧 runId, c) 都是「core 没�
 ③ 接受现状，但把计划外节点显示成「结果需重新运行」而不是 done。
 
 2026-09-24 选了方案 ②，写进 [node-run-plan.md](node-run-plan.md) 的 R7；实现与验收见上面 6b、11b 与「R7 的实现取舍」。
+
+---
+
+## 修订一（§6，V1–V7，验收 14–21）
+
+2026-09-24。单击改为智能运行，`force` 从 `isolate` 里拆出来，R7 推广到所有带 targets 的运行，右键三项。
+
+- `pnpm check`：退出码 0、全链路绿。doctest **289/289**（`test_noderun.cpp` 15 个用例、186 条断言），
+  `cargo test`（bridge）**140/140**（新增 `run_to_node_attaches_unplanned_downstream`），事件样例 28 条符合 schema，
+  编辑器单测 15/15，MCP 45/45。
+- `pnpm e2e`：退出码 0，**705/705**；`noderun.mjs` **102 项**。grep「未验」「跳过」「FAIL」「✗」0 行。
+  **第一次跑卡住了**：停在 M8b 验收 7 分组的开头（画布已清空、`window.__lyflow` 仍能响应），二十多分钟没有新输出，
+  我手动结束了进程树，原样重跑一遍得到上面的 705/705。卡住的位置在 M8b 分组里、我没有改那一组，
+  重跑没有复现，原因没有查到，记在这里。
+- `pnpm e2e:http`：headless 退出码 0，**46/46**（「只运行此节点」一组 9 项：isolate 的 upstream_not_ready、
+  挂结果、智能运行 + force 之后下游仍取得到）。
+- 演示截图：`scripts/e2e/record-noderun.mjs`，见下面「录屏」。
+
+| # | 验收项 | 结果 |
+|---|---|---|
+| 14 | `targets:[b]` 全就绪零执行；加 `force:[b]` 只有 b +1、a 命中缓存；改 a 后 a、b 执行、c 不执行 | ✅ 通过 |
+| 15 | `isolate:[b]` 不带 force 命中缓存、计数不变；带 force 执行；上游不齐仍 `upstream_not_ready`（原 2、3 照旧，原 4 改写） | ✅ 通过 |
+| 16 | 运行到此之后 c、d 在 `attached`、按新 runId 取得到；`force` + preview 可组合、进预览命名空间 | ✅ 通过 |
+| 17 | 改上游 a 后 b 可点、title 含 a、`data-run-upstream` 含 a；单击后 a、b 依次运行，c 不进计划 | ⚠️ 通过（c 的最终状态与字面不同，见下） |
+| 18 | 全就绪单击 b：「已缓存」、没真执行、title 为「已是最新」；Shift+单击 b 真执行、a 不执行 | ✅ 通过 |
+| 19 | 右键三项：运行到此 = 单击、强制重算 = Shift+单击、仅此节点过时时置灰写明缺谁、绕过得 `upstream_not_ready` | ✅ 通过 |
+| 20 | 本节点有校验 error 时按钮置灰；运行中点自己停止、全图运行中点它抢占 | ✅ 通过 |
+| 21 | 不回归：check、带包 e2e、e2e:http headless 全绿 | ✅ 通过 |
+
+### 14–16（doctest）
+
+```
+$ build/core/bin/lyflow-core-tests.exe -tc="验收*,isolate*,R7*,force*" -s
+TEST CASE:  验收 1 / 15：全跑一遍后 isolate [b]（不带 force）—— b 命中缓存；再加 force [b] 才只有 b 执行
+TEST CASE:  验收 2：改 a 的参数后 isolate [b] —— 开跑前失败，upstream_not_ready 指向 a，零执行
+TEST CASE:  验收 3：从没跑过时 isolate [b] 同样失败；isolate [a]（源节点）照常执行
+TEST CASE:  验收 4 / 15（按修订一改写）：isolate [b] 两次都命中缓存；isolate + force [b] 两次都真执行
+TEST CASE:  验收 5：子图节点作 isolate + force —— 内部节点全部强制执行，子图外的上游只取缓存
+TEST CASE:  验收 6：isolate + preview 是参数错误；run_started.isolate 按原样带出
+TEST CASE:  isolate 的节点不存在：整图级失败，零执行
+TEST CASE:  isolate 节点静音：照静音语义透传，上游仍只取缓存
+TEST CASE:  验收 6b：计划外的 c、d 不执行，但按新 runId 取得到输出，run_finished.attached 列出它们
+TEST CASE:  验收 6b：结果仓里没有 c 当前 cacheKey 的结果（改了 c 的参数 / c 从没跑过）→ 不挂
+TEST CASE:  R7：上游不齐、开跑前就失败时，已有的结果照样挂上
+TEST CASE:  验收 14：targets [b]（智能运行）—— 全就绪时零执行；加 force 只有 b 执行；改 a 参数后 a、b 执行、c 不执行
+TEST CASE:  验收 15：isolate 上游不齐时仍是 upstream_not_ready，带 force 也一样（force 只管本节点）
+TEST CASE:  验收 16：运行到此 targets [b] 之后 c、d 在 attached 里、按新 runId 取得到；force + preview 进预览命名空间
+TEST CASE:  force 给了不存在的 id：整图级失败
+[doctest] test cases:  15 |  15 passed | 0 failed | 274 skipped
+[doctest] assertions: 186 | 186 passed | 0 failed |
+```
+
+- 14：全跑后 `targets:[b]` → a、b 计数不变、没有 running、b `skipped/cached`；`targets:[b], force:[b]` → b +1、a cached、
+  b 的 done 与 summary 都是 `cached:false`、`run_started.force == ["b"]`；改 a 的 pointCount 后 `targets:[b]` → a、b 各
+  `pending → running → done`、c 计数不变且不在计划里。
+- 15：原验收 1、4、5 按 V1 改写 —— 不带 force 的 isolate 一律命中缓存（计数不变），带 force 才执行（原 4 的「两次 +2」
+  改成 isolate+force 两次 +2）；上游不齐时 isolate + force 仍是 `upstream_not_ready`（force 只管本节点，不替 isolate 补上游）。
+  原 2、3 一字未改照过。
+- 16：`targets:[b]`（Run 活着时）→ `attached` 含 c、d 不含 a、b，`ResultStore::get(新 runId, c/d)` 取得到；全图运行不带 `attached`；
+  `preview + targets:[b] + force:[b]` → b 真跑一次，之后不带 force 的预览运行命中它（预览命名空间），正式运行仍命中正式那一份，计数不再变。
+- cargo test 追加：`isolate_reruns_only_that_node_over_the_abi` 改为 isolate + force（并断言 `run_started.force`），
+  新增 `run_to_node_attaches_unplanned_downstream`（只给 targets 的运行 `attached == ["p"]`、按新 runId 取得到 p 的点云）。
+
+### 17–20（`scripts/e2e/noderun.mjs` 改写后的实际输出）
+
+```
+── 单节点运行 验收 7：按钮在标题与徽标之后、折叠仍在；真鼠标点它不选中、不拖动、不改名
+  ✓ 每个节点的 .node__head 里都有自己的 node-run-<id>
+  ✓ 标题的右边界 ≤ 按钮左边界（不遮挡标题文字）
+  ✓ 命中区 20 px、视觉圆 14 px（画布缩放下按比例）
+  ✓ 顺序是 标题 → 徽标 → 按钮
+  ✓ 折叠之后按钮仍在标题栏里
+  ✓ 缺失算子的节点没有运行按钮
+  ✓ （前提）单击按钮发起了智能运行 targets=[a]（不是 isolate）
+  ✓ 那次运行 ok
+  ✓ 单击按钮：节点没有被选中
+  ✓ 单击按钮：没有进入改名
+  ✓ 单击按钮：节点位置没动
+  ✓ （20）b 有校验错误：按钮 data-run-state="disabled"，title 说明原因
+  ✓ （20）不可用时光标 not-allowed
+  ✓ （20）上游不齐不再让按钮置灰：c 的上游 b 从没跑过，c 的按钮仍可点
+  ✓ 按住按钮拖动：节点不跟着走、也没被选中
+  ✓ 双击按钮：没有进入改名、节点没被选中
+  ✓ （20）点置灰的按钮（双击）：没有发起运行
+  ✓ （20）改回合法参数：按钮恢复可点
+
+── 修订一 验收 18：全部就绪时单击 = 已缓存、不真跑；Shift+单击 = 只有本节点真跑
+  ✓ （前提）全图运行 ok
+  ✓ 全部就绪：b 的 title 是「已是最新」那条
+  ✓ 全部就绪：没有要一并运行的上游、按钮可点
+  ✓ 单击：运行 ok
+  ✓ 单击：是智能运行 targets=[b]、没有 force
+  ✓ 单击：b 显示「已缓存」（stats.cached=true），没有真执行
+  ✓ 单击：节点上的标签是「已缓存」
+  ✓ 单击：没有任何节点进入 running
+  ✓ Shift+单击：运行 ok
+  ✓ Shift+单击：targets=[b]、force=[b]
+  ✓ Shift+单击：b 真执行（running → done，cached=false）
+  ✓ Shift+单击：a 不执行（命中缓存，没有 running）
+  ✓ Shift+单击：节点没有被加进选区（Shift 是多选键，按钮吞掉了它）
+  ✓ 下游 c 两次都不进计划，仍是 done
+
+── 修订一 验收 17：改上游参数后 b 仍可点，hover 提示预告「将一并运行上游」，单击后 a、b 依次运行
+  ✓ （前提）全图运行 ok
+  ✓ b 的按钮可点（不再因上游过时置灰）
+  ✓ data-run-upstream 含 a
+  ✓ title 预告「将一并运行上游 合成点云」
+  ✓ 运行 ok
+  ✓ a、b 都经历了 running → done
+  ✓ 依次：a 的 done 早于 b 的 running
+  ✓ c 不进计划
+  ✓ c 的键变了、不在 attached 里 → 退回 idle（不显示「完成」却取不到输出）
+  ✓ 不受影响的 d 挂上了、仍是 done、按新 runId 取得到输出
+  ✓ getOutputInfo(新 runId, d) 有 cloud
+  ✓ 跑完之后 b 回到「已是最新」
+
+── 修订一 验收 19：「仅此节点」—— 上游过时时置灰写明缺谁；绕过预判 → upstream_not_ready toast、零 running
+  ✓ （前提）全图运行 ok
+  ✓ （前提）a 被标为 stale
+  ✓ 「仅此节点」置灰，data-run-reason 含 a，title 写明缺谁
+  ✓ 同一时刻按钮本身仍可点（智能运行会把 a 一起跑）
+  ✓ 运行状态 error
+  ✓ run_finished.diagnostics 指向 a、code 是 upstream_not_ready
+  ✓ warn 级 toast，文案是「上游 … 还没有可用结果」
+  ✓ 没有任何节点进入 running
+  ✓ 缺结果的上游 a 闪了一下定位光（data-flash="locate"）
+  ✓ a 没有被标红（它没有失败）
+  ✓ 定位闪光不抖动（标题栏没有位移）
+
+── 单节点运行 验收 10 / 修订一 20：Shift+单击发起的运行中按钮 running、点它取消；全图运行里 running 的节点上点按钮是抢占，不是停止
+  ✓ （前提）全图运行 ok
+  ✓ （前提）slow 节点够慢（1684 ms ≥ 300）
+  ✓ 点了之后按钮 data-run-state="running"、带 ■（data-run-own=1）
+  ✓ 运行中 title 是「停止」
+  ✓ （前提）这时跑的是按钮发起的 targets=[slow] 那一次
+  ✓ 再点一下：这次运行被取消（cancelled），没有发起新的
+  ✓ 取消后按钮不再是 running
+  ✓ （前提）slow 在全图运行里 running，按钮也显示 running 但没有 ■
+  ✓ 点击发起了新的智能运行（targets=[slow]）
+  ✓ 被抢占的全图运行以 cancelled 收场
+  ✓ 抢占它的那次跑完了（ok），而不是被当成「停止」
+
+── 单节点运行 验收 11：hover 实心 accent、关动效时进度环不转但仍显示、端点对齐 ≤ 1 px
+  ✓ （前提）全图运行 ok
+  ✓ （对照）没 hover 时是空心圈
+  ✓ hover 按钮：圆的计算后 fill 是 accent（实心）
+  ✓ hover 按钮：白色 ▶ 显出来、SVG 放大（按钮不含端口，A6 允许）
+  ✓ hover 按钮期间：2 条边端点与锚点最大偏差 0 px ≤ 1
+  ✓ （前提）慢图全图运行 ok
+  ✓ （对照）动效开着时进度环在转（animation-name）
+  ✓ 运行中（进度环在画）：端点与锚点最大偏差 0 px ≤ 1
+  ✓ 关动效：进度环仍显示（有弧、有描边）
+  ✓ 关动效：进度环不转（animation-name 为 none）
+
+── 单节点运行 验收 11b：单击中间节点后，下游仍是 done、Edge Peek 与 3D 视图照样取得到数据；从没跑过的下游保持 idle
+  ✓ （前提）全图运行 ok
+  ✓ （前提）只运行 b 的那次 ok
+  ✓ run_finished.attached 含计划外的 c、d，不含从没跑过的 e
+  ✓ c、d 没有执行（没有任何状态迁移，更没有 running）
+  ✓ 下游 c、d 仍是 done
+  ✓ 从没跑过的 e 保持 idle
+  ✓ getOutputInfo(新 runId, c) 有 cloud 输出
+  ✓ 选中 c：3D 视图画出了点云（11302/11302）
+  ✓ d 的入边（源是 c）：在这条边上找到了真能点中的落点
+  ✓ 双击 d 的入边开出了 Edge Peek
+  ✓ Edge Peek 里是 c 的点云，总点数与 c 报的一致
+  ✓ Edge Peek 没有「未运行 / 取不到」之类的占位
+  ✓ （前提）这次只运行 b 也 ok
+  ✓ c、d 的键变了、仓里没有 → 不在 attached 里
+  ✓ 编辑器把 c、d 退回 idle
+  ✓ a、b 命中缓存（skipped/cached），不受 c 的改动影响
+
+── 修订一 验收 19：右键三项 —— 运行到此 = 单击、强制重算此节点 = Shift+单击、仅此节点（用现有上游）
+  ✓ （前提）全图运行 ok
+  ✓ 三项都在、文案对
+  ✓ 三项放在一起、依次排列
+  ✓ 全部就绪时三项都可点
+  ✓ 「运行到此」：targets=[b]、不带 force、b 命中缓存（与单击一致）
+  ✓ 「强制重算此节点」：targets=[b]、force=[b]，b 真跑、a 命中缓存（与 Shift+单击一致）
+  ✓ 「仅此节点」：isolate=[b]、运行 ok
+  ✓ 「仅此节点」：只有 b 的显示变了
+  ✓ 「仅此节点」：a、c 的状态与耗时不变
+```
+
+### 与计划字面不同、需要知会的地方
+
+- **验收 17「c 不进计划且仍 done、取得到输出」与 V2 冲突，我按 V2 做了。** c 是 b 的下游，a 的参数一改，c 的 cacheKey
+  跟着变，结果仓里没有 c 的当前结果 —— 按 V2（R7 推广）的定死决定它「没挂上 → 退回 idle」。要让 c 仍显示 done 并取得到输出，
+  只能挂 c 的**旧键**结果，那与 R7「当前 cacheKey」相矛盾（旧结果对不上改过的 a）。e2e 里对 c 断言的是「不在 attached、退回 idle」，
+  「仍 done、取得到输出」改由一个与这条链无关的源节点 d 验（它挂上了、按新 runId 取得到）。验收 11b（改的是下游自己之外的东西、
+  键不变）里下游仍 done、取得到，照计划字面过。演示录屏第 3 步同理：改了源头之后，下游 d、e 在第 3 步结束时退回 idle。
+  如果用户要的是「过时但可看旧结果」，那是 V2 之外的新语义（显示旧键结果并标过时），需要重新决定。
+- **「运行到此」菜单项运行中仍是灰的**（既有行为 `disabled={running}`），而按钮与新加的两项运行中都可点（抢占）。V6 说它「与单击同一动作」，
+  动作确实相同（都是 `targets:[id]`），只是这条既有的可用性没改。
+- **按钮的「自己的运行」按 `targets` 恰好是 `[本节点]` 判**：所以从右键「运行到此」「强制重算此节点」「仅此节点」、Shift+F5 选中单个节点发起的运行，
+  按钮上也显示 ■、点了是停止。V7 只说「由按钮发起」；编辑器不单独记来源，同义动作一并算。
+- **预判的祖先只看当前层**（子图里从子图输入口进来的上游不在这一层的边上），判「会不会真算」优先用 `plan_graph` 的 `cached`（排除惰性、静音节点），
+  拿不到时（HTTP 桩、图编不过）退回执行状态。每次正式运行收场立刻重编一次计划（不等 150 ms debounce），否则刚跑完的节点仍被当成「没缓存」。
+- **C ABI 仍是 v11**：`force` / `force_count` 与 `isolate` 同一版加（v11 尚未发布，只在本地这几个 commit 里）。
+- **V2 覆盖了预览**：live preview 发的是 `targets:[拖动的节点]` + preview，按 V2 也挂结果、不清节点表 —— 计划外、预览命名空间里没有结果的节点
+  收场时退回 idle，与以前「预览运行清空整张节点表」的最终效果一致。`m4.mjs` 的 live preview 组（含 < 100 ms 的跟手延迟）照过。
+- **既有分组里依赖「运行到此会清空节点表」的断言**：逐个查了带 targets 的三处 ——
+  `run.mjs` 的「Run to node」（`run.nodes[tail] === undefined`）、`m3.mjs` 的「Shift+F5 跑到选中节点」（`run.nodes[tail] === undefined`）、
+  `m4.mjs` 的 preview run（`targets:[sample]` 之后读源头点数）。前两处在同一组里先 `newDoc`（节点表清空）再做第一次运行，下游从来没跑过，
+  按 V2 也不在表里，断言原样成立；第三处只读计划内节点。**三处都不用改，已随 705/705 跑过。** 真正按 V2 / V1 改写的是本分组自己：
+  原验收 8（isolate 只重算 b）→ 18（单击命中缓存、Shift 真跑）；原 9（按钮因上游过时置灰）→ 17（按钮可点、预告上游）+ 19 的「仅此节点」置灰；
+  原 10 的「单击发起、再点停止」→ Shift+单击发起（全图刚跑过，单击只会命中缓存、根本进不了 running）；原 12（右键一项）→ 19（三项）；
+  11b 的「a、b 不受影响」由 `done` 改为 `skipped/cached`（智能运行复用缓存）；11 的进度环采样改用 `targets + force`。
+- 桩服务器：`force` 天然成立（每次都是新进程，没有跨运行缓存），只补回 `run_started.force`；`attached` 对所有带 targets 的运行按 cacheKey 记账覆盖
+  （进程里的 core 自己也会算，但那个进程的结果仓永远是空的）。
+
+### 录屏
+
+本机没有 ffmpeg，按约定输出每步一张 PNG（没有 mp4 / gif）。脚本 `scripts/e2e/record-noderun.mjs`（复用 harness / page.mjs，
+CDP 驱动真实 Tauri app，带 gap;dts 包；不接进 run.mjs），5 节点链（合成点云 → 体素网格 → 直通滤波 → 体素网格 → 路由，排成两行），
+画布缩放 1、只截画布那一块、1.5 倍像素：
+
+| 步 | 文件 | 大小 |
+|---|---|---|
+| 1 全图运行 | `docs/noderun-step-1.png` | 64 KB |
+| 2 改上游参数、hover 下游按钮 | `docs/noderun-step-2.png` | 83 KB |
+| 3 单击：上游与本节点依次运行（截在体素网格 running 的那一刻） | `docs/noderun-step-3.png` | 77 KB |
+| 4 再单击：已是最新、命中缓存 | `docs/noderun-step-4.png` | 76 KB |
+| 5 Shift+单击强制重算 | `docs/noderun-step-5.png` | 70 KB |
+| 6 右键菜单三项 | `docs/noderun-step-6.png` | 103 KB |
+| 7a 运行中：进度环 + ■ | `docs/noderun-step-7a.png` | 66 KB |
+| 7b 点 ■ 之后：cancelled | `docs/noderun-step-7b.png` | 69 KB |
+
+合计约 620 KB。hover 提示用的是**画面顶部的一行字幕**（二选一里的字幕方案）：原生 title 气泡与系统鼠标指针都截不到，
+脚本在页面上临时叠了字幕（写当前步骤，第 2、4 步把按钮 title 的原文抄进去）和一个跟着 CDP 真鼠标走的黄色指针标记，演示结束就撤掉。
+第 7 步拆成 7a / 7b 两张（停止之前、之后）。
+

@@ -35,7 +35,13 @@ import {
   withLayoutTransition,
 } from "./lib/motion";
 import { fullId, levelOf } from "./lib/subgraph";
-import { formatBytes, refreshCacheStats, schedulePlan, useCacheStore } from "./store/cache";
+import {
+  formatBytes,
+  refreshCacheStats,
+  requestPlan,
+  schedulePlan,
+  useCacheStore,
+} from "./store/cache";
 import {
   cancelCurrentRun,
   setRunSceneId,
@@ -280,6 +286,18 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       scheduleValidate(state.doc, state.filePath);
     });
   }, []);
+
+  // 一次正式运行收场就立刻重编一次（修订一 V5）：plan 的 cached 是「现在点下去会不会真算」的
+  // 依据，只随 doc 变化重编的话，刚跑完的节点仍被当成「没缓存」，按钮上的预告就是错的
+  useEffect(
+    () =>
+      useExecutionStore.subscribe((state, prev) => {
+        if (prev.runStatus !== "running" || state.runStatus === "running" || state.preview) return;
+        const graph = useGraphStore.getState();
+        void requestPlan(graph.doc, graph.filePath);
+      }),
+    [],
+  );
 
   // -- 每 30 秒写一次 `<file>~` 备份 -----------------------------------------
   useEffect(() => {

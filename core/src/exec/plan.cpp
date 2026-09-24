@@ -658,6 +658,15 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     }
     for (std::size_t i : hit) isolatedNode[i] = 1;
   }
+  std::vector<char> forcedNode(n, 0);
+  for (const std::string& t : options.force) {
+    std::vector<std::size_t> hit;
+    if (!resolveTarget(t, hit)) {
+      diags.error("", Phase::Compile, "unknown_node", "要强制重算的节点不存在: " + t);
+      return false;
+    }
+    for (std::size_t i : hit) forcedNode[i] = 1;
+  }
 
   // -- 惰性闭包（ADR-0016）：只被惰性端口依赖的节点标 deferred，不进初始拓扑序。
   // 逆拓扑序一遍即可：叶子必须跑；其余看有没有一条落在非惰性端口上的、通向要跑的节点的边。
@@ -704,6 +713,7 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     pn.deferred = demandedEagerly[id] == 0;
     pn.provided = providedNode[id] != 0;
     pn.isolated = isolatedNode[id] != 0;
+    pn.forced = forcedNode[id] != 0;
     pn.injectedInputs = std::move(injectedInputsOf[id]);
     pn.errors = prepared[id].errors;
     pn.params = std::move(prepared[id].params);

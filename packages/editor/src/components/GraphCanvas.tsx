@@ -21,7 +21,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { layoutGraph } from "../lib/layout";
 import { useMotionEnabled, viewportMs, withLayoutTransition } from "../lib/motion";
-import { nodeRunAvailability, nodeRunTitle, toggleNodeRun } from "../lib/nodeRun";
+import {
+  isolateUnavailableTitle,
+  nodeRunAvailability,
+  runNodeOnly,
+  runNodeSmart,
+} from "../lib/nodeRun";
 import {
   createMappingCache,
   distanceToSegment,
@@ -757,7 +762,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
   }, [menu]);
 
   const menuNode = menu ? view.nodes.find((n) => n.id === menu.nodeId) : undefined;
-  // 「只运行此节点」与标题栏按钮同一可用性（node-run U7）：菜单打开时判一次
+  // 「仅此节点」的可用性（修订一 V6：上游不齐时置灰、写明缺谁）：菜单打开时判一次
   const menuRunOnly = menu ? nodeRunAvailability(menu.nodeId) : null;
   const menuSubgraphId = menuNode ? subgraphIdOf(menuNode.op) : null;
   const menuIsLibrary = menuNode?.op.startsWith("lib.") === true;
@@ -988,6 +993,18 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
           >
             运行到此节点 <kbd>{keyHint("runToNode")}</kbd>
           </button>
+          {/* 与标题栏按钮同一组动作（修订一 V6）：运行到此 = 单击，强制重算 = Shift+单击 */}
+          <button
+            type="button"
+            data-testid="ctx-force-node"
+            title="跳过缓存真跑一遍此节点；上游照常只补缺的（= Shift+点击运行按钮）"
+            onClick={() => {
+              void runNodeSmart(menu.nodeId, true);
+              setMenu(null);
+            }}
+          >
+            强制重算此节点
+          </button>
           <button
             type="button"
             data-testid="ctx-run-node-only"
@@ -995,17 +1012,17 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
             data-run-reason={menuRunOnly?.missing.join(",") || undefined}
             title={
               menuRunOnly?.available
-                ? nodeRunTitle("idle", [], false)
+                ? "只跑此节点，上游一律用已有结果（不补跑）"
                 : menuRunOnly && menuRunOnly.missing.length > 0
-                  ? nodeRunTitle("disabled", menuRunOnly.names, false)
+                  ? isolateUnavailableTitle(menuRunOnly.names)
                   : undefined
             }
             onClick={() => {
-              void toggleNodeRun(menu.nodeId);
+              void runNodeOnly(menu.nodeId);
               setMenu(null);
             }}
           >
-            只运行此节点
+            仅此节点（用现有上游）
           </button>
           <button
             type="button"

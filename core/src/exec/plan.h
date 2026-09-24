@@ -35,8 +35,11 @@ struct PlanNode {
   bool provided = false;
   /// 由宿主注入的**输入**端口（m8-plan L18）：compute 照常调，这些端口的值取注入数据。
   std::set<std::string> injectedInputs;
-  /// 在 BuildOptions::isolate 里（按路径前缀展开后）：跳过缓存查找、强制执行（node-run R3）。
+  /// 在 BuildOptions::isolate 里（按路径前缀展开后）：它的上游只许命中缓存（node-run R2）。
+  /// 它自己照常查缓存 —— 修订一 V1 起 isolate 不再隐含强制重算。
   bool isolated = false;
+  /// 在 BuildOptions::force 里（按路径前缀展开后）：跳过缓存查找、强制执行、结果覆盖写回（修订一 V1）。
+  bool forced = false;
   std::vector<Diagnostic> errors;     ///< 该节点的全部阻塞性诊断（D5）
   ParamMap params;                    ///< 已合并默认值（迁移之后的）
   /// 图里**显式写了**的参数键，**跑完迁移之后**的那一份。`lyflow params` 的
@@ -87,6 +90,9 @@ struct BuildOptions {
   /// 编译照常保留 targets 的上游闭包（cacheKey 要靠它算），这里只负责给命中的节点标 isolated；
   /// 「targets 取同一组 id」由调用方保证（执行器在 Run 的构造里做）。
   std::vector<std::string> isolate;
+  /// 强制重算这些节点（修订一 V1），id 语义同 targets。可与 targets / isolate / preview 任意组合；
+  /// 不在本次计划里的 id 没有效果（它根本不跑）。
+  std::vector<std::string> force;
   /// 非空时混进每个 cacheKey，把预览结果关进独立的缓存命名空间（F5）。
   std::string cacheNamespace;
   /// 被注入的节点 id → 注入数据的摘要。进 cacheKey（输出注入与输入注入都进）。

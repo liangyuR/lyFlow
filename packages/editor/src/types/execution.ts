@@ -56,6 +56,8 @@ export interface PlanNode {
   /** 至少一个直接上游没有缓存 —— 这个节点这次一定得重算。 */
   upstreamMissing: boolean;
   bypass: boolean;
+  /** 只被惰性端口依赖（ADR-0016）：主路径成功时它一次都不跑。老 core 不带。 */
+  lazy?: boolean;
 }
 
 /** `cache_stats` 的返回。 */
@@ -164,6 +166,8 @@ export interface RunStartedEvent extends EventBase {
   /** 单节点运行（docs/node-run-plan.md R1）：只重算这几个，上游只取缓存。普通运行是空数组，
    *  老 core 不带这个字段。 */
   isolate?: string[];
+  /** 强制重算的节点（修订一 V1）。普通运行是空数组，老 core 不带。 */
+  force?: string[];
   /** 编译结果。精确 stale 与「将重算 N 个节点」提示靠它（ADR-0007）。
    *  只被惰性端口依赖的节点不在这里，被 demand 时经 plan_extended 追加（ADR-0016）。 */
   nodes?: RunPlanNode[];
@@ -259,8 +263,8 @@ export interface RunFinishedEvent extends EventBase {
   /** run 级、但各自指着一个节点的诊断。目前只有单节点运行的 upstream_not_ready（node-run R2）：
    *  每个缺结果的上游一条。那些节点没有失败，所以不会有它们的 node_state。 */
   diagnostics?: GraphDiagnostic[];
-  /** 单节点运行才有（node-run R7）：没执行、但结果仓里有它们当前 cacheKey 的结果、已挂进这次
-   *  运行的节点 —— 按这次的 runId 取得到输出。 */
+  /** 带 targets 的运行才有（node-run R7，修订一 V2 推广到「运行到此」与智能运行）：没执行、
+   *  但结果仓里有它们当前 cacheKey 的结果、已挂进这次运行的节点 —— 按这次的 runId 取得到输出。 */
   attached?: string[];
   /** ADR-0022。老 core（ABI < v9）没有它。 */
   summary?: RunSummary;

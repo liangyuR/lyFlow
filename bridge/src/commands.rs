@@ -141,7 +141,8 @@ pub fn validate_graph(
 
 /// 启动一次运行。立刻返回 run id，状态通过 `execution-event` 事件流推。
 /// `mode = "preview"` 时源算子的输出先抽稀，结果进独立的缓存命名空间（ADR-0011）。
-/// `isolate` 非空是单节点运行（docs/node-run-plan.md R1–R3）：只重算这几个，上游只取缓存。
+/// `isolate` 非空是单节点运行（docs/node-run-plan.md R1–R2）：上游只取缓存。
+/// `force` 里的节点跳过缓存强制重算（修订一 V1），可与 targets / isolate / preview 组合。
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn run_graph(
@@ -151,6 +152,7 @@ pub fn run_graph(
     #[allow(non_snake_case)] graphPath: Option<String>,
     targets: Option<Vec<String>>,
     isolate: Option<Vec<String>>,
+    force: Option<Vec<String>>,
     mode: Option<String>,
     #[allow(non_snake_case)] previewMaxPoints: Option<u32>,
     #[allow(non_snake_case)] previewBudgetMs: Option<u32>,
@@ -170,6 +172,7 @@ pub fn run_graph(
     };
     let targets = targets.unwrap_or_default();
     let isolate = isolate.unwrap_or_default();
+    let force = force.unwrap_or_default();
     runs.start(
         &app,
         core,
@@ -178,6 +181,7 @@ pub fn run_graph(
         StartOptions {
             targets: &targets,
             isolate: &isolate,
+            force: &force,
             preview,
         },
     )

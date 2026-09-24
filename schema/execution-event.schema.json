@@ -97,7 +97,14 @@
           "items": {
             "type": "string"
           },
-          "description": "单节点运行（docs/node-run-plan.md R1–R5）：只重算这些节点（子图节点按路径前缀展开），不在里面的上游只取缓存，下游不进计划。普通运行时为空数组；老 core 不带这个字段。mode 仍是 full —— 预览与它不组合。"
+          "description": "单节点运行（docs/node-run-plan.md R1–R5）：只运行这些节点（子图节点按路径前缀展开），不在里面的上游只取缓存，下游不进计划。它们自己照常查缓存（修订一 V1），要真跑一遍看 force。普通运行时为空数组；老 core 不带这个字段。mode 仍是 full —— 预览与它不组合。"
+        },
+        "force": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "强制重算的节点（修订一 V1）：跳过缓存查找、真跑、结果覆盖同 cacheKey 的旧结果。可与 targets、isolate、preview 组合。空数组 = 都照常查缓存；老 core 不带这个字段。"
         },
         "nodes": {
           "type": "array",
@@ -273,7 +280,7 @@
           "items": {
             "type": "string"
           },
-          "description": "只在单节点运行（run_started.isolate 非空）时出现（node-run R7）：这次没有执行、也没有任何事件，但结果仓里有它们当前 cacheKey 的结果、已挂进这次运行的节点（下游、兄弟支路；开跑前就失败时是整张图里有结果的那些）。它们的输出可以按这次的 runId 取。不在这里、这次也没有收场事件的节点，按这次的 runId 取不到输出。"
+          "description": "只在带 targets 的运行（运行到此、智能运行、isolate；run_started.targets 非空）时出现（node-run R7，修订一 V2）：这次没有执行、也没有任何事件，但结果仓里有它们当前 cacheKey 的结果、已挂进这次运行的节点（下游、兄弟支路；开跑前就失败时是整张图里有结果的那些）。它们的输出可以按这次的 runId 取。不在这里、这次也没有收场事件的节点，按这次的 runId 取不到输出。"
         },
         "summary": {
           "$ref": "#/$defs/summary",

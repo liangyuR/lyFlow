@@ -106,14 +106,20 @@ typedef struct {
   /* v10：顶层图参数的取值，JSON 对象 { 名字: 值 }（GraphDoc 顶层 params）。
      NULL/空串 = 全用图里的 default。图没声明的名字在校验阶段报 unknown_param。 */
   const char* params_json;
-  /* v11：只运行这些节点（docs/node-run-plan.md R1–R3），NULL/0 表示普通运行。id 语义与
+  /* v11：只运行这些节点（docs/node-run-plan.md R1–R2），NULL/0 表示普通运行。id 语义与
      targets 相同（子图节点按路径前缀展开为全部内部节点）；给了它就忽略 targets、改用同一组 id。
      不在里面的上游只许命中缓存，任何一个缺当前 cacheKey 的结果就在开跑前整次失败：
      run_finished 为 error，error.code 与 diagnostics[].code 是 upstream_not_ready，
-     每个缺结果的上游一条（nodeId 指它），不执行任何算子。在里面的节点跳过缓存强制执行，
-     结果覆盖同 cacheKey 的旧结果。与 mode = preview 同时给是参数错误（bad_input）。 */
+     每个缺结果的上游一条（nodeId 指它），不执行任何算子。在里面的节点自己照常查缓存（要真跑
+     一遍另给 force）。与 mode = preview 同时给是参数错误（bad_input）。 */
   const char* const* isolate;
   size_t isolate_count;
+  /* v11：强制重算这些节点（修订一 V1），NULL/0 表示没有。id 语义同 targets；跳过缓存、真跑、
+     结果覆盖同 cacheKey 的旧结果。可与 targets、isolate、preview 组合。
+     带 targets（或 isolate）的运行，计划外、结果仓里有当前 cacheKey 结果的节点挂进这次运行，
+     run_finished.attached 列出它们，输出按这次的 run_id 照样取得到（R7 / V2）。 */
+  const char* const* force;
+  size_t force_count;
 } lyflow_run_options;
 
 #define LYFLOW_RUN_MODE_FULL 0

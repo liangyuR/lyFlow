@@ -60,9 +60,10 @@ interface ExecutionState {
   durationMs: number | null;
   /** 本次运行是「只跑到某个节点」还是全图。空 = 全图。 */
   targets: string[];
-  /** 单节点运行（docs/node-run-plan.md）只重算的那几个，展开后的路径 id。空 = 普通运行。
+  /** 单节点运行（docs/node-run-plan.md）的那几个，展开后的路径 id。空 = 普通运行。
    *  这时计划里其余的节点只是去结果仓取了一趟缓存：它们的状态与耗时照旧显示上一次的，
-   *  下游不进计划、也照旧 —— 所以这种运行不清空节点表（验收 8）。 */
+   *  下游不进计划、也照旧 —— 所以这种运行不清空节点表（验收 8）。
+   *  修订一 V2：只要带 targets（运行到此、智能运行）都不清空节点表，只是计划里的节点照常更新。 */
   isolate: string[];
   /** 图级命名输出的声明（ADR-0017）。run_started 带过来，前端不再自己解析图。 */
   outputs: GraphOutputRef[];
@@ -104,6 +105,10 @@ let notReady: string[] = [];
 /** 本次单节点运行里「在计划里、没重算、但输出照样可取」的节点（上游命中缓存的那些）。
  *  它们的 node_state 不落库，run_finished 时要靠它和 attached 一起判谁的输出还取得到（R7）。 */
 let served = new Set<string>();
+
+/** 本次部分运行（带 targets、非 isolate）里发过 node_state 的节点。收场时它们的显示都是这次的，
+ *  不用再问 attached（V2）。 */
+let touched = new Set<string>();
 
 // -------------------------------------------------------------- 事件合并
 
@@ -183,7 +188,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     dropStaged();
     notReady = [];
     served = new Set();
-    const only = isolate.length > 0;
+    touched = new Set();
+    // 带 targets 的运行都是「部分运行」：节点表留着（修订一 V2）
+    const only = isolate.length > 0 || targets.length > 0;
     set({
       runId,
       runStatus: "running",
@@ -233,6 +240,21 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
 
     switch (event.kind) {
       case "run_started": {
+        if (s.isolate.length === 0 && s.targets.length > 0) {
+          // 部分运行（运行到此、智能运行，V2）：计划里的节点照常先亮成「排队中」，
+          // 计划外的留着上一次的样子，收场时再按 attached 决定留不留
+          const nodes = new Map(useExecutionStore.getState().nodes);
+          const at = Date.now();
+          for (const id of event.plan ?? []) {
+            nodes.set(id, emptyNode());
+            for (const fn of transitionListeners) fn({ nodeId: id, state: "idle", at });
+          }
+          staged = nodes;
+          useCacheStore.getState().extendRanWith(event.nodes ?? []);
+          flushNow();
+          set({ outputs: event.outputs ?? [] });
+          break;
+        }
         if (s.isolate.length > 0) {
           // 单节点运行：节点表原样留着，只有 isolate 里的节点会在后面的 node_state 里变。
           // cacheKey 用追加而不是替换：计划外的下游还按它们上一次运行的键判 stale
@@ -286,6 +308,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         }
         const nodes = stage();
         const prev = nodes.get(event.nodeId) ?? emptyNode();
+        touched.add(event.nodeId);
         nodes.set(event.nodeId, {
           ...prev,
           state: event.state,
@@ -311,7 +334,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       }
       case "run_finished": {
         flushNow();
-        if (s.isolate.length > 0 && Array.isArray(event.attached)) {
+        if (s.targets.length > 0 && Array.isArray(event.attached)) {
           dropUnreachable(s.isolate, event.attached);
         }
         set({
@@ -368,7 +391,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   },
 }));
 
-/** 单节点运行收场（R7）：节点表里留着的那些，这次既没重算、没命中缓存、也没被 core 挂进来的，
+/** 部分运行收场（R7 / V2）：节点表里留着的那些，这次既没重算、没命中缓存、也没被 core 挂进来的，
  *  按新 runId 已经取不到输出了 —— 退回 idle，不能显示「完成」却点开是空的。stale 不动（那是
  *  cache store 的事）。老 core 不带 attached，调用方不会走到这里。 */
 function dropUnreachable(isolate: readonly string[], attached: readonly string[]): void {
@@ -377,12 +400,14 @@ function dropUnreachable(isolate: readonly string[], attached: readonly string[]
   let next: Map<string, NodeExecution> | null = null;
   const at = Date.now();
   for (const [id, exec] of current) {
-    if (exec.state === "idle" || inIsolate(isolate, id) || served.has(id) || keep.has(id)) continue;
+    if (exec.state === "idle" || inIsolate(isolate, id) || served.has(id) || touched.has(id)) continue;
+    if (keep.has(id)) continue;
     next ??= new Map(current);
     next.set(id, emptyNode());
     for (const fn of transitionListeners) fn({ nodeId: id, state: "idle", at });
   }
   served = new Set();
+  touched = new Set();
   if (next) useExecutionStore.setState({ nodes: next });
 }
 
@@ -578,6 +603,8 @@ export interface RunRequest {
   targets?: string[] | undefined;
   /** 只运行这些节点（docs/node-run-plan.md R1），展开后的路径 id。给了它 targets 就不用再传。 */
   isolate?: string[] | undefined;
+  /** 强制重算这些节点（修订一 V1），展开后的路径 id。 */
+  force?: string[] | undefined;
   /** 预览模式：源算子输出先抽稀，结果进独立缓存命名空间（ADR-0011）。 */
   preview?: boolean | undefined;
   previewMaxPoints?: number | undefined;
@@ -596,6 +623,7 @@ export async function startRun(
     const runId = await transport.runGraph(doc, graphPath, {
       targets: request.targets,
       isolate: isolate.length > 0 ? isolate : undefined,
+      force: request.force && request.force.length > 0 ? request.force : undefined,
       mode: preview ? "preview" : "full",
       previewMaxPoints: request.previewMaxPoints,
       sceneId,

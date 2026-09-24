@@ -16,9 +16,10 @@ v8 的张量与下标入口见 [ADR-0019](adr/0019-output-tensor-and-indices-ove
 v10 在 `lyflow_run_options` 末尾加了 `const char* params_json`：顶层图参数的取值，
 见下面「[顶层图参数](#顶层图参数)」。
 
-v11 在它后面又加了 `const char* const* isolate` + `size_t isolate_count`：只运行这几个节点，
-见下面「[只运行某几个节点](#只运行某几个节点isolate)」。结构体变长了，所以 ABI 号跟着加一 ——
-`client.hpp` 与 `lyflow-client` 都是零初始化整个结构体再填，不用 isolate 的宿主什么都不用改。
+v11 在它后面又加了两对：`isolate` / `isolate_count`（只运行这几个节点）与 `force` / `force_count`
+（强制重算这几个节点），见下面「[部分运行：targets、isolate、force](#部分运行targetsisolateforce)」。
+结构体变长了，所以 ABI 号跟着加一 —— `client.hpp` 与 `lyflow-client` 都是零初始化整个结构体再填，
+不用这两项的宿主什么都不用改。
 
 v9 加的那一个入口是 `lyflow_run_summary(runId)`：一次运行的结构化收尾。
 `RunResult::summary` 就是它的原文，`RunHandle::runSummary()` 也能单独取。
@@ -118,30 +119,33 @@ lyflow::RunResult result = client.run(graphJson, options);
 - 值在展开期写进被绑定的节点参数，所以缓存键跟着变：改一个顶层参数，只有它绑定的节点及其下游会重算。
 - CLI 的对应物是 `--param <名字>=<json>`，同一张图、同一组值，两边结果一致。
 
-## 只运行某几个节点（isolate）
+## 部分运行：targets、isolate、force
 
-编辑器节点标题栏上那个「只运行此节点」按钮走的就是它（[docs/node-run-plan.md](node-run-plan.md)）：
-只重算给出的节点，上游用结果仓里已有的结果，下游不进计划。
+三个字段 id 语义相同（展开后的路径，给一个子图节点等于给它内部的全部节点），可以组合
+（[docs/node-run-plan.md](node-run-plan.md)，§6 修订一）。编辑器节点标题栏上的运行按钮：
+单击 = `targets: [id]`（智能运行），Shift+单击 = 再加 `force: [id]`；右键「仅此节点」= `isolate: [id]`。
 
-- C ABI：`lyflow_run_options.isolate` / `isolate_count`，id 语义与 `targets` 相同（展开后的路径，
-  给一个子图节点等于给它内部的全部节点）。给了它 core 就忽略 `targets`、改用同一组 id。
-- **上游只许命中缓存。** 任何一个需要的上游在结果仓里没有当前 cacheKey 的结果，开跑前整次失败，
+- **`targets`（运行到此 / 智能运行）**：只保留目标的上游闭包，有缓存的复用、缺的或过时的照跑，下游不进计划。
+- **`force`（v11，修订一 V1）**：这些节点跳过缓存查找、真跑一遍，结果覆盖结果仓里同 cacheKey 的旧结果
+  （读外部文件、带隐藏随机性的算子靠这一条拿到新内容），`stats.cached` 不出现。可与 `targets`、`isolate`、
+  preview 任意组合；preview 下写进预览命名空间。不在本次计划里的 id 没有效果。
+- **`isolate`（v11）**：只运行这几个节点，给了它 core 就忽略 `targets`、改用同一组 id。它们自己照常查缓存
+  （修订一起 isolate 不再隐含强制重算，要真跑一遍另给 `force`），区别在上游 ——
+  **上游只许命中缓存。** 任何一个需要的上游在结果仓里没有当前 cacheKey 的结果，开跑前整次失败，
   一个算子都不调：`run_finished` 为 `error`，`error.code` 是 `upstream_not_ready`，
   `run_finished.diagnostics[]` 每个缺结果的上游一条（`nodeId` 指它）。那些上游没有失败，
   所以不会有它们的 `node_state`。被 demand 的惰性上游开跑前判不了，执行期撞上时那个节点以
-  `upstream_not_ready` 报 error。
-- **isolate 里的节点跳过缓存、强制执行**，结果覆盖结果仓里同 cacheKey 的旧结果（读外部文件的算子
-  靠这一条拿到新内容），`stats.cached` 不出现。静音节点照静音语义透传。
-- **计划外的节点挂结果、不执行**（R7）。下游、兄弟支路这些不在本次计划里的节点，结果仓里要是有它们
+  `upstream_not_ready` 报 error。isolate 里的静音节点照静音语义透传。
+- **计划外的节点挂结果、不执行**（R7，修订一 V2 推广到所有带 `targets` 的运行，包括「运行到此」）。下游、兄弟支路这些不在本次计划里的节点，结果仓里要是有它们
   **当前** cacheKey 的全部输出，就挂进这次运行：按这次的 runId 照样取得到（`lyflow_output_info` /
   `lyflow_output_cloud` / 张量 / 下标 / `lyflow_run_outputs`），但不执行、不发任何事件。
-  `run_finished.attached[]` 列出挂上的节点（只在单节点运行里出现；开跑前就失败时，挂的是整张图里
-  有结果的那些）。没挂上的、这次也没有事件的节点，按这次的 runId 取不到输出。这是为只留最近一次运行
+  `run_finished.attached[]` 列出挂上的节点（只在带 targets / isolate 的运行里出现，全图运行不带；
+  isolate 开跑前就失败时，挂的是整张图里有结果的那些）。没挂上的、这次也没有事件的节点，按这次的 runId 取不到输出。这是为只留最近一次运行
   索引的宿主（桌面端的 RunManager 就是）准备的：不挂的话，上一次的结果在这次运行结束时就跟着没了。
-- `run_started.isolate` 原样带出这组 id（普通运行是空数组），`mode` 仍是 `full`。
-  与 `mode = preview` 同时给是参数错误（`bad_input`）：预览结果在另一个缓存命名空间里。
-- `client.hpp` 的 `RunOptions` 没有加这个字段（这次只接编辑器用得到的那几条路，CLI 与 MCP 也没加）；
-  C++ 宿主要用就直接填 `lyflow_run_options`。Rust 是 `RunSpec::isolate: &[String]`。
+- `run_started.isolate` / `run_started.force` 原样带出这两组 id（没给是空数组），`mode` 照实写。
+  isolate 与 `mode = preview` 同时给是参数错误（`bad_input`）：预览结果在另一个缓存命名空间里；force 与 preview 可以组合。
+- `client.hpp` 的 `RunOptions` 没有加这两个字段（这次只接编辑器用得到的那几条路，CLI 与 MCP 也没加）；
+  C++ 宿主要用就直接填 `lyflow_run_options`。Rust 是 `RunSpec::isolate` / `RunSpec::force: &[String]`。
 
 ## 取点云
 
@@ -338,12 +342,13 @@ let spec = RunSpec::new(&graph_json, &run_id, &base_dir, &[])
 适合的场景：录屏/截图要稳定的画面、远程桌面这类重绘很贵的环境、宿主页面自己有一套动效规范。
 `examples/host-react/` 的宿主栏上有一个「动效」开关，就是这个 prop。
 
-**自己实现 `Transport` 时**，`runGraph(doc, graphPath, options)` 的 `options` 里多了一个
-`isolate?: string[]`（展开后的路径 id）：节点标题栏的「只运行此节点」按钮与右键同名菜单项发的就是它，
-语义见上面「[只运行某几个节点](#只运行某几个节点isolate)」。后端要做到的最小一条：上游没有可用结果时
+**自己实现 `Transport` 时**，`runGraph(doc, graphPath, options)` 的 `options` 里多了
+`isolate?: string[]` 与 `force?: string[]`（展开后的路径 id）：节点标题栏的运行按钮（单击 `targets`、
+Shift+单击再加 `force`）与右键三项（运行到此 / 强制重算此节点 / 仅此节点）发的就是它们，语义见上面
+「[部分运行](#部分运行targetsisolateforce)」。后端要做到的最小一条：isolate 的上游没有可用结果时
 发一对 `run_started`（带 `isolate`）/ `run_finished`（`error.code = upstream_not_ready`、
 `diagnostics[]` 每个缺结果的上游一条），不执行任何算子 —— 编辑器据此弹 warn 级 toast、把缺结果的上游
-闪一下。`run_finished.attached[]`（R7）告诉编辑器哪些计划外节点的输出按新 runId 还取得到：带了这个字段，
-编辑器就把节点表里既不在 isolate、这次也没命中缓存、又不在 attached 里的节点退回 idle；不带（老后端）就
-全部照旧。不认识这个字段的老后端会把它当成普通的全图运行，所以宿主换 core 时要一起换。
-HTTP 契约里对应 `POST /lyflow/run` 信封的 `isolate` 字段（[http-transport.md](http-transport.md)）。
+闪一下。`run_finished.attached[]`（R7 / V2）告诉编辑器哪些计划外节点的输出按新 runId 还取得到：带 targets
+的运行收场时，带了这个字段，编辑器就把节点表里这次没有事件、又不在 attached 里的节点退回 idle；
+不带（老后端）就全部照旧。不认识这个字段的老后端会把它当成普通的全图运行，所以宿主换 core 时要一起换。
+HTTP 契约里对应 `POST /lyflow/run` 信封的 `isolate` / `force` 字段（[http-transport.md](http-transport.md)）。

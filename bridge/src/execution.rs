@@ -55,8 +55,10 @@ pub struct PreviewOptions {
 pub struct StartOptions<'a> {
     /// Run to node 的目标。空 = 全图。
     pub targets: &'a [String],
-    /// 只运行这些节点（docs/node-run-plan.md R1–R3）。非空时 core 忽略 targets、改用同一组 id。
+    /// 只运行这些节点（docs/node-run-plan.md R1–R2）。非空时 core 忽略 targets、改用同一组 id。
     pub isolate: &'a [String],
+    /// 强制重算这些节点（修订一 V1）：跳过缓存真跑一遍。
+    pub force: &'a [String],
     /// Some = live preview（ADR-0011）。与 isolate 同时给是参数错误，由 core 判（R5）。
     pub preview: Option<PreviewOptions>,
 }
@@ -105,6 +107,7 @@ impl RunManager {
         });
         let mut spec = RunSpec::new(graph_json, &run_id, base_dir, options.targets);
         spec.isolate = options.isolate;
+        spec.force = options.force;
         if let Some(p) = options.preview {
             spec.mode = 1;
             spec.preview_max_points = p.max_points;
@@ -356,7 +359,7 @@ mod tests {
         base_dir: &str,
         during: impl FnOnce(&RunHandle),
     ) -> Fixture {
-        run_spec(doc, base_dir, &[], 0, during)
+        run_spec(doc, base_dir, &[], &[], 0, during)
     }
 
     /// isolate / mode 是单节点运行那几条用例要的（docs/node-run-plan.md）。
@@ -364,6 +367,7 @@ mod tests {
         doc: serde_json::Value,
         base_dir: &str,
         isolate: &[String],
+        force: &[String],
         mode: i32,
         during: impl FnOnce(&RunHandle),
     ) -> Fixture {
@@ -376,6 +380,7 @@ mod tests {
         let graph = doc.to_string();
         let mut spec = RunSpec::new(&graph, &run_id, base_dir, &[]);
         spec.isolate = isolate;
+        spec.force = force;
         spec.mode = mode;
         let handle = unsafe { RunHandle::start(Arc::clone(&core), spec, collect, ctx) }
             .expect("启动运行失败");
@@ -795,13 +800,15 @@ mod tests {
         let full = run(doc.clone(), "");
         assert_eq!(full.run_status(), "ok", "{:#?}", full.events);
 
+        // 修订一 V1：isolate 不再隐含强制重算，要 v 真跑一遍得另给 force
         let isolate = vec!["v".to_string()];
-        let f = run_spec(doc, "", &isolate, 0, |_| {});
+        let f = run_spec(doc, "", &isolate, &isolate, 0, |_| {});
         assert_eq!(f.run_status(), "ok", "{:#?}", f.events);
         let started = f.kind("run_started")[0].clone();
         assert_eq!(started["isolate"], serde_json::json!(["v"]));
         assert_eq!(started["targets"], serde_json::json!(["v"]), "给了 isolate，targets 取同一组 id");
         assert_eq!(started["mode"], "full");
+        assert_eq!(started["force"], serde_json::json!(["v"]));
 
         let g = f.node_event("g", "skipped");
         assert_eq!(g["stats"]["cached"], true, "上游只取缓存: {g}");
@@ -828,7 +835,7 @@ mod tests {
     #[test]
     fn isolate_without_upstream_results_fails_before_running_anything() {
         let isolate = vec!["v".to_string()];
-        let f = run_spec(two_node_graph(7302), "", &isolate, 0, |_| {});
+        let f = run_spec(two_node_graph(7302), "", &isolate, &[], 0, |_| {});
         assert_eq!(f.run_status(), "error");
         let finished = f.kind("run_finished")[0].clone();
         assert_eq!(finished["error"]["code"], "upstream_not_ready", "{finished}");
@@ -839,11 +846,48 @@ mod tests {
         assert!(f.kind("node_state").is_empty(), "一个节点都不该动: {:#?}", f.events);
     }
 
+    /// 修订一 V2：「运行到此」（只给 targets）也把计划外、仍有当前结果的下游挂进来。
+    #[test]
+    fn run_to_node_attaches_unplanned_downstream() {
+        let doc = serde_json::json!({
+            "schemaVersion": 1, "id": "t",
+            "nodes": [
+                {"id": "g", "op": "gen.synthetic", "params": {"pointCount": 3000, "seed": 7304}},
+                {"id": "v", "op": "filter.voxel_grid", "params": {"leafSize": [0.02, 0.02, 0.02]}},
+                {"id": "p", "op": "filter.passthrough"}
+            ],
+            "edges": [
+                {"id": "e1", "from": {"node": "g", "port": "cloud"}, "to": {"node": "v", "port": "cloud"}},
+                {"id": "e2", "from": {"node": "v", "port": "cloud"}, "to": {"node": "p", "port": "cloud"}}
+            ]
+        });
+        let full = run(doc.clone(), "");
+        assert_eq!(full.run_status(), "ok");
+        assert!(full.kind("run_finished")[0].get("attached").is_none(), "全图运行不带 attached");
+
+        let core = crate::core_ffi::core().expect("加载 core 失败");
+        let run_id = ulid::new();
+        let ctx = Box::new(Collector { events: Mutex::new(Vec::new()) });
+        let ptr = &*ctx as *const Collector;
+        let graph = doc.to_string();
+        let targets = vec!["v".to_string()];
+        let spec = RunSpec::new(&graph, &run_id, "", &targets);
+        let handle = unsafe { RunHandle::start(Arc::clone(&core), spec, collect, ctx) }.unwrap();
+        handle.join();
+        let events = unsafe { (*ptr).events.lock().unwrap().clone() };
+        let finished = events.iter().find(|e| e["kind"] == "run_finished").unwrap();
+        assert_eq!(finished["status"], "ok");
+        assert_eq!(finished["attached"], serde_json::json!(["p"]), "{finished}");
+        let view = core.output_cloud(&run_id, "p", "cloud", 0).expect("挂上的 p 按新 runId 取得到");
+        assert!(view.total_points() > 0);
+        drop(handle);
+    }
+
     /// R5：预览与 isolate 不组合，core 报参数错误。
     #[test]
     fn isolate_with_preview_is_a_bad_input() {
         let isolate = vec!["v".to_string()];
-        let f = run_spec(two_node_graph(7303), "", &isolate, 1, |_| {});
+        let f = run_spec(two_node_graph(7303), "", &isolate, &[], 1, |_| {});
         assert_eq!(f.run_status(), "error");
         assert_eq!(f.kind("run_finished")[0]["error"]["code"], "bad_input");
         assert!(f.kind("node_state").is_empty());

@@ -78,3 +78,36 @@
 ## 5. 实施顺序建议
 
 core（BuildOptions / executor / C ABI / 事件 schema + doctest）→ bridge（Tauri、HTTP、`cargo test`）→ Transport 接口与三个实现、test-server 桩 → 编辑器按钮与可用性预判 → toast 与右键菜单 → e2e → 文档（`docs/embedding.md` 的 Transport 选项、`docs/interaction-checklist.md` 登记、`packages/editor/README.md`）。
+
+---
+
+## 6. 修订一（2026-09-24）：单击改为「智能运行」
+
+用户看过业界对比后确认：**主操作是「让这个节点的结果变成最新」，由系统算出最少要跑哪些节点**（KNIME 的 Execute、Dataiku 的智能构建、Houdini/Nuke 的按需拉取）。
+「严格只跑本节点」「强制重算」降为次级操作。本节**覆盖** §2 里与之冲突的条目（R1 的「isolate 隐含 targets」保留；R3、U3、U4、U6、U7 按下表改；R7 推广）。
+
+| # | 决定 | 理由 |
+|---|---|---|
+| V1 | core 把「强制重算」从 `isolate` 里拆出来，成为独立的 **`force: string[]`**（id 语义同 `targets`，子图按前缀展开）：`force` 里的节点跳过缓存查找、强制执行、结果覆盖写回（原 R3 的行为）。`force` 可与 `targets`、`isolate` 组合，也可与 preview 组合。**`isolate` 不再隐含 force**：只保留 R2 的「上游只许取缓存，不齐就 `upstream_not_ready`」，本节点命中缓存就是命中 | 强制重算只对非确定、读外部文件的算子有意义，不该每次点击都付代价；两个语义正交，拆开才能自由组合 |
+| V2 | **R7 推广到所有带 `targets` 的运行**（包括既有的「运行到此」、智能运行、isolate）：计划外、结果仓里有当前 cacheKey 结果的节点挂进这次 run，`run_finished.attached` 列出；编辑器对这类运行保留节点表，被挂上的保持原状态，没挂上的退回 idle。全图运行（无 targets）行为不变 | 部分运行后，下游显示「完成」就必须取得到输出 —— 这条对「运行到此」同样成立 |
+| V3 | 按钮**单击 = 智能运行**：`startRun(doc, path, { targets: [id] })`，即「运行到此」的语义：本节点 + 缺结果或过时的上游，有缓存的复用，下游不进计划。**按钮不再因为上游不齐而置灰**；只在本节点算子缺失（本来就没有按钮）或本节点有编辑期校验 error 时置灰 | 用户不必自己做依赖分析；改完上游参数直接点下游就能看结果 |
+| V4 | **Shift+单击 = 强制重算此节点**：`{ targets: [id], force: [id] }`，上游仍走智能判断 | 给非确定、读外部文件的算子一个显式入口 |
+| V5 | hover 提示（`title`）按预判写三种之一：「运行此节点」+ 需要一起跑的上游时「（将一并运行上游 A、B）」；全部就绪且本节点命中缓存时「已是最新（命中缓存）—— Shift+点击强制重算」；其余「运行此节点」。预判复用编辑器已有的精确 stale / 执行状态（ADR-0007 的那套），是提示不是权威。`data-run-state` 去掉因上游产生的 `disabled`，新增 `data-run-upstream`（将一并运行的上游 id，逗号分隔） | 点之前就知道会跑多少 |
+| V6 | 右键菜单三项，同一组放在一起：「运行到此」（既有项，与单击同一动作）、「强制重算此节点」（= Shift+单击）、「仅此节点（用现有上游）」（= `{ isolate: [id] }`，上游不齐时置灰并写明缺谁，core 回 `upstream_not_ready` 时照 U5 提示）。原 U7 的「只运行此节点」由后两项取代 | 严格模式留给要精确控制的人，不占主操作 |
+| V7 | 停止语义照 U3：由按钮（单击或 Shift+单击）发起的运行，运行中点它自己 = 停止；别的运行进行中点它 = 抢占 | 不变 |
+
+**不做**（修订一）：KNIME 式的「改参数后下游显示待运行」另立名目 —— 现有 stale 虚线框已覆盖，只在文案里统一叫「已过时」。
+
+### 修订一的验收（覆盖 §4 中冲突的条目，其余照旧）
+
+core / bridge：
+14. `a → b → c` 全跑后 `targets:[b]`：b 命中缓存、没有算子执行；`targets:[b], force:[b]`：只有 b 执行（计数 +1），a 命中缓存；改 a 的参数后 `targets:[b]`：a、b 执行，c 不执行。
+15. `isolate:[b]`（不带 force）在 b 已缓存时命中缓存、计数不变；`isolate:[b], force:[b]` 执行。原验收 4 按此改写。上游不齐时 `isolate:[b]` 仍 `upstream_not_ready`（原验收 2、3 照旧）。
+16. 「运行到此」`targets:[b]` 之后，c、兄弟支路 d 在 `attached` 里、按新 runId 取得到输出；`force` + preview 可组合并进预览命名空间。
+
+编辑器（改写 noderun.mjs，并检查既有分组里依赖「运行到此清空节点表」的断言，按 V2 改并在验收记录里逐条说明）：
+17. 改上游 a 的参数后，b 的按钮可点，`title` 含 a、`data-run-upstream` 含 a；单击后 a、b 依次 running → done，c 不进计划且仍 done、取得到输出。
+18. 全部就绪时单击 b：b 显示「已缓存」、没有真执行（stats.cached 为 true）；`title` 为「已是最新」那条。真鼠标 Shift+单击 b：b 真执行（cached 为 false），a 不执行。
+19. 右键三项：「运行到此」与单击一致；「强制重算此节点」与 Shift+单击一致；「仅此节点」在上游过时时置灰且写明缺谁，绕过预判调用得到 `upstream_not_ready` toast、没有节点 running。
+20. 本节点有编辑期校验 error 时按钮置灰；运行中点自己停止、全图运行中点它抢占（原验收 10 照旧）。
+21. 不回归：`pnpm check`、带 `LYFLOW_PACKS=gap;dts` 的 `pnpm e2e`（落盘、grep 未验/跳过）、`pnpm e2e:http` headless 全绿。

@@ -244,12 +244,17 @@ async function isolateVerdict(body, file, baseDir) {
   const missing = plan.filter(
     (n) => !inIsolate(isolate, n.nodeId) && !n.lazy && !n.bypass && !produced.has(n.cacheKey),
   );
-  // 全图的 cacheKey（R7）：计划外节点「现在该有的键」
+  return { plan, missing, fullKeys: await fullKeysOf(file, baseDir) };
+}
+
+/** 全图的 cacheKey（R7 / 修订一 V2）：计划外节点「现在该有的键」。 */
+async function fullKeysOf(file, baseDir) {
   const whole = lastJson((await runCli(["plan", file, "--base-dir", baseDir])).lines);
-  const fullKeys = new Map(
-    Array.isArray(whole) ? whole.filter((n) => typeof n.cacheKey === "string").map((n) => [n.nodeId, n.cacheKey]) : [],
+  return new Map(
+    Array.isArray(whole)
+      ? whole.filter((n) => typeof n.cacheKey === "string").map((n) => [n.nodeId, n.cacheKey])
+      : [],
   );
-  return { plan, missing, fullKeys };
 }
 
 function rejectNotReady(body, verdict) {
@@ -267,7 +272,7 @@ function rejectNotReady(body, verdict) {
   const started = {
     schemaVersion: 1, runId, seq: 0, at, kind: "run_started",
     nodeCount: eager.length, maxParallel: 1, mode: "full",
-    plan: eager.map((n) => n.nodeId), targets: body.isolate, isolate: body.isolate,
+    plan: eager.map((n) => n.nodeId), targets: body.isolate, isolate: body.isolate, force: body.force ?? [],
     nodes: eager.map((n) => ({ id: n.nodeId, cacheKey: n.cacheKey, level: n.level })),
   };
   const first = diagnostics[0];
@@ -300,7 +305,11 @@ async function startRun(body) {
     if (verdict && verdict.missing.length > 0) return rejectNotReady(body, verdict);
   }
   const argv = ["run", file, "--base-dir", baseDir, "--outputs"];
-  for (const t of isolate ?? body.targets ?? []) argv.push("--to", t);
+  const scope = isolate ?? body.targets ?? [];
+  for (const t of scope) argv.push("--to", t);
+  // 带 targets 的运行都要挂结果（修订一 V2），先把全图的键拿到
+  const fullKeys = verdict?.fullKeys ?? (scope.length > 0 ? await fullKeysOf(file, baseDir) : null);
+  // force（V1）不用管：桩每次都是新进程、没有跨运行的缓存，本来就是真算
   if (body.mode === "preview") {
     argv.push("--preview");
     if (body.previewMaxPoints) argv.push("--preview-points", String(body.previewMaxPoints));
@@ -316,7 +325,7 @@ async function startRun(body) {
     lastSeq: -1,
     keys: new Map(),
     touched: new Set(),
-    fullKeys: verdict?.fullKeys ?? null,
+    fullKeys,
     attachedInfo: new Map(),
   };
 
@@ -334,13 +343,15 @@ async function startRun(body) {
         runs.set(state.id, state);
         resolveId(state.id);
       }
-      // CLI 不认 isolate：把这次的范围补回 run_started，编辑器靠它认出单节点运行
+      // CLI 不认 isolate / force：把这次的范围补回 run_started，编辑器靠它认出单节点运行
       if (isolate && value.kind === "run_started") {
         value.isolate = isolate;
         value.targets = isolate;
       }
+      if (value.kind === "run_started") value.force = body.force ?? [];
       noteEvent(state, value);
-      if (isolate && value.kind === "run_finished") value.attached = attachUnplanned(state);
+      // 进程里的 core 也会算 attached，但它的结果仓是这一个进程的、永远是空的：按记账覆盖
+      if (fullKeys && value.kind === "run_finished") value.attached = attachUnplanned(state);
       state.events.push(value);
       state.lastSeq = value.seq;
       hub.broadcast(value);

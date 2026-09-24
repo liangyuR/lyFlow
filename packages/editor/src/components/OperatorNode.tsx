@@ -255,8 +255,8 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
           </span>
         )}
         {bypass && <span className="node__badge node__badge--mute" title="已静音 (Ctrl+M)">M</span>}
-        {/* 只运行此节点（docs/node-run-plan.md U1）：排在徽标之后，折叠了也在；缺失算子的节点没有 */}
-        <NodeRunButton id={id} op={op} exec={exec} />
+        {/* 运行此节点（docs/node-run-plan.md U1 / 修订一 V3）：排在徽标之后，折叠了也在；缺失算子的节点没有 */}
+        <NodeRunButton id={id} exec={exec} invalid={invalid.length > 0} />
         {state === "running" && exec?.progress != null && (
           <span className="node__progress" style={{ ["--p" as string]: exec.progress }} />
         )}

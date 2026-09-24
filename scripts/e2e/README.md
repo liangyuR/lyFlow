@@ -17,7 +17,8 @@ phase_a.mjs  阶段 A 的分组（惰性分支半透明、plan_extended、图级
 m8b.mjs      M8b 的分组（空白画布拼测点：自动连线、片段、2D 拖框、实时校验、Bundle 的 Edge Peek）
 m8c.mjs      M8c 的分组（三模板的图：2D 视图按槽切换、拖一个槽只改它、复制到其它槽、标签不遮挡、按槽的诊断）
 motion.mjs   动效的分组（docs/motion-plan.md §3 验收 2–9：进场、删除残影、端点对齐、连线生长、流动、状态闪光、hover、关动效）
-noderun.mjs  「只运行此节点」的分组（docs/node-run-plan.md §4 验收 7–12：按钮位置与真鼠标、只重算一个节点、上游不齐的预判与兜底、停止与抢占、hover / 关动效 / 端点对齐、右键菜单）
+noderun.mjs  节点运行按钮的分组（docs/node-run-plan.md §4 验收 7–12、11b 与 §6 修订一 17–20：按钮位置与真鼠标、单击智能运行 / Shift 强制、hover 预告、「仅此节点」的兜底、停止与抢占、hover / 关动效 / 端点对齐、计划外节点挂结果、右键三项）
+record-noderun.mjs  节点运行按钮的演示截图（不接进 run.mjs）：七步各截一张到 docs/noderun-step-N.png
 http.mjs     e2e:http —— Node 桩服务器 + 系统 Chrome + examples/host-react
 ```
 

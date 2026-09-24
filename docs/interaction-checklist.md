@@ -75,7 +75,7 @@
 | 37 | 大图性能（数百节点） | ✅ M4 | `onlyRenderVisibleElements`（> 80 节点才开）+ 执行事件 16 ms 合并；300 节点打开 < 1 s、拖动 ≥ 30 fps |
 | 38 | 协作 / 多人编辑 | ⬜ 不计划 | |
 | 39 | 双击连线查看内容（Edge Peek） | ✅ S1–S7 | 四种视图：3D 点云 / 正交 2D（剖面 + 2D 几何）/ 张量图像 / 键值表 + 原始 JSON。可多开、可拖动、可锁定快照；上限 **6 窗，其中带 WebGL 的 4 个**。没有运行在跑时 `Esc` 关最前面的一个。计划见 [edge-peek-plan.md](edge-peek-plan.md)，张量 / 下标的 ABI 见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)；验收在 `scripts/e2e/peek.mjs` |
-| 40 | 只运行此节点（标题栏右端的小圆圈） | ✅ node-run | 上游用已有结果、自己强制重算、下游不动（core 的 `isolate`，C ABI v11）。上游没有可用结果时按钮置灰并写明缺谁，绕过去由 core 在开跑前整次拒绝（`upstream_not_ready`，toast + 缺结果的上游闪一下）；自己发起的那次运行中点它是停止，别的运行中点它是抢占。右键同名菜单项同一动作、同一可用性。计划见 [node-run-plan.md](node-run-plan.md)，验收在 `scripts/e2e/noderun.mjs` |
+| 40 | 节点运行按钮（标题栏右端的小圆圈） | ✅ node-run | 修订一起单击 = 智能运行（`targets`：本节点 + 缺结果或过时的上游，下游不动，计划外节点的结果照样挂着可取），hover 预告会一并跑哪些上游或「已是最新」；Shift+单击 = 强制重算（core 的 `force`，C ABI v11）。右键三项：运行到此 / 强制重算此节点 / 仅此节点（`isolate`：上游只用已有结果，不齐时置灰；绕过去由 core 在开跑前拒绝，`upstream_not_ready` toast + 缺结果的上游闪一下）。自己发起的那次运行中点它是停止，别的运行中点它是抢占。计划见 [node-run-plan.md](node-run-plan.md)，验收在 `scripts/e2e/noderun.mjs` |
 
 ---
 

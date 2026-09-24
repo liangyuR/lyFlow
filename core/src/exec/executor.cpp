@@ -95,8 +95,8 @@ class EventSink {
   /// deferred 节点不进 run_started：它们要么被 demand 时经 plan_extended 追加，
   /// 要么在 run_finished 前以 skipped/not_demanded 收场（ADR-0016）。
   void runStarted(const Plan& plan, const std::vector<std::string>& targets,
-                  const std::vector<std::string>& isolate, int maxParallel, bool preview,
-                  std::uint32_t previewMaxPoints) {
+                  const std::vector<std::string>& isolate, const std::vector<std::string>& force,
+                  int maxParallel, bool preview, std::uint32_t previewMaxPoints) {
     JsonWriter w;
     std::lock_guard<std::mutex> lock(mu_);
     std::size_t eager = 0;
@@ -122,6 +122,11 @@ class EventSink {
     w.key("isolate");
     w.beginArray();
     for (const auto& t : isolate) w.value(t);
+    w.endArray();
+    // 强制重算的那几个（修订一 V1）。空 = 都照常查缓存。
+    w.key("force");
+    w.beginArray();
+    for (const auto& t : force) w.value(t);
     w.endArray();
     // 前端的精确 stale 标记与「将重算 N 个节点」全靠这一段（ADR-0007）。
     w.key("nodes");
@@ -287,7 +292,8 @@ class EventSink {
   /// `lyflow_run_summary` 拿到的是同一个对象）。
   /// diagnostics 是 run 级、但各自指着一个节点的诊断（node-run R2 的 upstream_not_ready：
   /// 每个缺结果的上游一条）。它们不是那些节点自己的失败，所以不走 node_state。
-  /// attached 是单节点运行挂进来的节点（node-run R7）；普通运行传 nullptr，字段不出现。
+  /// attached 是部分运行（带 targets）挂进来的计划外节点（node-run R7 / 修订一 V2）；
+  /// 全图运行传 nullptr，字段不出现。
   void runFinished(const char* status, double durationMs, const Status* error,
                    const std::string& summaryJson = {},
                    const std::vector<Diagnostic>* diagnostics = nullptr,
@@ -471,7 +477,8 @@ std::vector<Diagnostic> missingUpstream(const Plan& plan, const RunOptions& opti
                                         const ResultStore& store) {
   std::vector<Diagnostic> out;
   for (const PlanNode& n : plan.nodes) {
-    if (n.isolated || n.deferred || !n.valid || !n.op || n.bypass || n.provided) continue;
+    // 强制重算的上游本来就要跑（修订一 V1：force 与 isolate 组合时 force 说了算）
+    if (n.isolated || n.forced || n.deferred || !n.valid || !n.op || n.bypass || n.provided) continue;
     const bool reusable = !options.noReuse && n.op->capabilities.deterministic &&
                           !n.op->outputs.empty() &&
                           store.peek(n.cacheKey, outputPortNames(*n.op));
@@ -482,8 +489,9 @@ std::vector<Diagnostic> missingUpstream(const Plan& plan, const RunOptions& opti
   return out;
 }
 
-/// 单节点运行的「挂结果」（R7）：这次运行里没有收场事件的节点（下游、兄弟支路，以及开跑前
-/// 就失败时的整张图），结果仓里要是有它**当前** cacheKey 的全部输出，就挂进这次运行的索引 ——
+/// 部分运行的「挂结果」（R7，修订一 V2 推广到所有带 targets 的运行）：这次运行里没有收场事件的
+/// 节点（下游、兄弟支路，以及单节点运行开跑前就失败时的整张图），结果仓里要是有它**当前**
+/// cacheKey 的全部输出，就挂进这次运行的索引 ——
 /// 不执行、不发事件，只是让它们按新 runId 也取得到输出。宿主（桌面端的 RunManager）一次只留
 /// 最近一次运行的索引，不挂的话它们的结果在这次运行结束时就取不到了。
 /// full 是不带 targets 编出来的全图计划：cacheKey 只依赖上游，所以与本次计划里的那份逐字相同，
@@ -715,8 +723,8 @@ class Scheduler {
     // 缓存命中：直接把仓里那份挂到本次运行，不调 compute（ADR-0007）。
     // 没有输出端口的算子（io.save_pcd 这类纯副作用）永远不复用。
     // provided 节点不复用：注入摘要已经进了 cacheKey，但直接装配比查仓更省事。
-    // 单独运行的节点不查仓（node-run R3）：点了就真跑一遍，读外部文件的算子与调试都靠这一条。
-    if (!options_.noReuse && !node.bypass && !node.provided && !node.isolated &&
+    // 强制重算的节点不查仓（修订一 V1）：读外部文件、带隐藏随机性的算子要一个「真跑一遍」的入口。
+    if (!options_.noReuse && !node.bypass && !node.provided && !node.forced &&
         node.op->capabilities.deterministic && !node.op->outputs.empty()) {
       std::vector<OutputInfo> infos;
       if (store_.reuse(options_.runId, node.id, node.cacheKey, outputPortNames(*node.op), infos)) {
@@ -732,7 +740,8 @@ class Scheduler {
     // 单节点运行时，不在 isolate 里的节点只许命中缓存（node-run R2）。开跑前已经探过一遍，
     // 走到这里的只有两种：被 demand 的惰性上游（开跑前不知道用不用），以及探完之后才被
     // LRU 挤掉的那一份。都按「上游还没有可用结果」收场，绝不替用户把上游重跑一遍。
-    if (!options_.isolate.empty() && !node.isolated && !node.bypass && !node.provided) {
+    if (!options_.isolate.empty() && !node.isolated && !node.forced && !node.bypass &&
+        !node.provided) {
       const Status s = upstreamNotReady(node.id);
       recordFailure(i, s);
       sink_.nodeFailed(node.id, "error", {s}, msSince(nodeStart));
@@ -858,9 +867,9 @@ class Scheduler {
       infos.push_back(
           OutputInfo{p.name, d.typeName(), d.elementCount(), d.byteSize(), d.valueJson()});
       appendBundleFieldInfos(p.name, d, infos);
-      // 单独运行的结果覆盖同 cacheKey 的旧结果（R3）：键没变而内容变了的只有外部输入，
-      // 那正是用户点这个按钮想看到的新东西。
-      store_.put(options_.runId, node.id, p.name, node.cacheKey, d, /*replace=*/node.isolated);
+      // 强制重算的结果覆盖同 cacheKey 的旧结果（修订一 V1）：键没变而内容变了的只有外部输入，
+      // 那正是用户点「强制重算」想看到的新东西。
+      store_.put(options_.runId, node.id, p.name, node.cacheKey, d, /*replace=*/node.forced);
     }
 
     sink_.nodeFinished(node.id, bypassed ? "skipped" : "done", durationMs, primaryElements,
@@ -1531,16 +1540,18 @@ void Run::workImpl() {
     build.baseDir = options_.baseDir;
     build.targets = options_.targets;
     build.isolate = options_.isolate;
+    build.force = options_.force;
     build.cacheNamespace = previewNamespace(options_);
     build.providedDigest = providedDigest;
     build.injectedPorts = injectedPorts;
     buildPlan(ensureRegistry(), raw, build, plan, diags);
-    // R7：单节点运行另编一份全图计划，只为拿到计划外节点的当前 cacheKey。诊断丢掉 ——
+    // R7 / V2：部分运行另编一份全图计划，只为拿到计划外节点的当前 cacheKey。诊断丢掉 ——
     // 该报的都在上面那份里报过了，这份不执行
-    if (!options_.isolate.empty() && plan.ok) {
+    if (!options_.targets.empty() && plan.ok) {
       BuildOptions whole = build;
       whole.targets.clear();
       whole.isolate.clear();
+      whole.force.clear();
       Diagnostics ignored;
       buildPlan(ensureRegistry(), raw, whole, fullPlan, ignored);
     }
@@ -1548,7 +1559,7 @@ void Run::workImpl() {
 
   const int workers = resolveMaxParallel(options_.maxParallel);
   const bool preview = options_.mode == RunMode::Preview;
-  sink.runStarted(plan, options_.targets, options_.isolate, workers, preview,
+  sink.runStarted(plan, options_.targets, options_.isolate, options_.force, workers, preview,
                   options_.previewMaxPoints ? options_.previewMaxPoints
                                             : kDefaultPreviewMaxPoints);
 
@@ -1638,11 +1649,12 @@ void Run::workImpl() {
                    std::to_string(budget) + " ms；建议降低预览点数");
     }
   }
-  // 挂结果放在 summary 之前（R7）：挂上的节点要是声明了图级输出，summary 里就是 value
+  // 挂结果放在 summary 之前（R7）：挂上的节点要是声明了图级输出，summary 里就是 value。
+  // 修订一 V2：凡是带 targets 的运行（运行到此、智能运行、isolate）都挂
   std::vector<std::string> attached;
-  const bool isolating = !options_.isolate.empty();
-  if (isolating) attached = attachUnplanned(fullPlan, options_.runId, sink.outcomes(), store);
-  const std::vector<std::string>* attachedOut = isolating ? &attached : nullptr;
+  const bool partial = !options_.targets.empty();
+  if (partial) attached = attachUnplanned(fullPlan, options_.runId, sink.outcomes(), store);
+  const std::vector<std::string>* attachedOut = partial ? &attached : nullptr;
   const bool cancelled = scheduler.sawCancel() || cancelled_.load(std::memory_order_relaxed);
   // summary 在发 run_finished 之前登记：宿主 join 返回时 lyflow_run_summary
   // 一定拿得到，事件里那份与它是同一个对象（H1）。

@@ -56,6 +56,9 @@ pub struct RunOptionsRaw {
     /// v11：只运行这些节点（docs/node-run-plan.md R1）；NULL/0 = 普通运行。
     pub isolate: *const *const c_char,
     pub isolate_count: usize,
+    /// v11：强制重算这些节点（修订一 V1）；NULL/0 = 没有。
+    pub force: *const *const c_char,
+    pub force_count: usize,
 }
 
 #[repr(C)]
@@ -128,9 +131,12 @@ pub struct RunSpec<'a> {
     pub inputs: &'a [RunInput],
     /// 顶层图参数的取值（v10），JSON 对象 `{ 名字: 值 }`。None = 全用图里的 default。
     pub params_json: Option<&'a str>,
-    /// 只运行这些节点（v11，docs/node-run-plan.md R1–R3）。空 = 普通运行。给了它 core 就忽略
+    /// 只运行这些节点（v11，docs/node-run-plan.md R1–R2）。空 = 普通运行。给了它 core 就忽略
     /// `targets`、改用同一组 id；上游只许命中缓存，缺结果时整次运行以 upstream_not_ready 失败。
+    /// 它们自己照常查缓存，要真跑一遍另给 `force`。
     pub isolate: &'a [String],
+    /// 强制重算这些节点（v11，修订一 V1）：跳过缓存、真跑、结果覆盖写回。可与 targets / isolate / preview 组合。
+    pub force: &'a [String],
 }
 
 impl<'a> RunSpec<'a> {
@@ -153,6 +159,7 @@ impl<'a> RunSpec<'a> {
             inputs: &[],
             params_json: None,
             isolate: &[],
+            force: &[],
         }
     }
 
@@ -819,6 +826,12 @@ impl RunHandle {
             .collect::<Result<_, _>>()?;
         let isolate_ptrs: Vec<*const c_char> =
             isolate_cstrings.iter().map(|c| c.as_ptr()).collect();
+        let force_cstrings: Vec<CString> = spec
+            .force
+            .iter()
+            .map(|t| CString::new(t.as_str()))
+            .collect::<Result<_, _>>()?;
+        let force_ptrs: Vec<*const c_char> = force_cstrings.iter().map(|c| c.as_ptr()).collect();
 
         // node_id / port 的 CString 与点云缓冲都必须活到 run_start 返回：core 在里面拷贝。
         let input_names: Vec<(CString, CString)> = spec
@@ -883,6 +896,12 @@ impl RunHandle {
                 isolate_ptrs.as_ptr()
             },
             isolate_count: isolate_ptrs.len(),
+            force: if force_ptrs.is_empty() {
+                std::ptr::null()
+            } else {
+                force_ptrs.as_ptr()
+            },
+            force_count: force_ptrs.len(),
         };
 
         let user_ptr = Box::into_raw(user) as *mut c_void;

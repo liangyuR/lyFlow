@@ -44,9 +44,12 @@ export interface RunOptions {
   targets?: string[] | undefined;
   /** 只运行这些节点（docs/node-run-plan.md R1–R3）：id 语义与 targets 相同（展开后的路径，
    *  子图节点收编整棵子树）。给了它后端就忽略 targets；不在里面的上游只许命中缓存，缺一个
-   *  就整次失败（run_finished 的 upstream_not_ready），在里面的跳过缓存强制执行。
-   *  与 `mode: "preview"` 不组合。 */
+   *  就整次失败（run_finished 的 upstream_not_ready）。
+   *  它们自己照常查缓存（修订一 V1），要真跑一遍另给 force。与 `mode: "preview"` 不组合。 */
   isolate?: string[] | undefined;
+  /** 强制重算这些节点（修订一 V1）：跳过缓存、真跑、结果覆盖写回。id 语义同 targets，
+   *  可与 targets、isolate、preview 组合。 */
+  force?: string[] | undefined;
   mode?: "full" | "preview" | undefined;
   previewMaxPoints?: number | undefined;
   previewBudgetMs?: number | undefined;

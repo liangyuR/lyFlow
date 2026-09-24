@@ -83,8 +83,8 @@ interface LyFlowEditorProps {
 v8 增补的张量与下标两个入口见 [ADR-0019](../../docs/adr/0019-output-tensor-and-indices-over-abi.md)，
 v9 增补的 `lyflow_run_summary` 见 [ADR-0022](../../docs/adr/0022-run-summary-as-core-output.md)
 （编辑器不额外调它 —— 那份 summary 就挂在 `run_finished` 事件上）。
-v11 给 `runGraph` 的选项加了 `isolate?: string[]`（只运行这几个节点，下面「只运行此节点」一节），
-自己实现 `Transport` 的要把它透传到后端，语义见 [`docs/embedding.md`](../../docs/embedding.md#只运行某几个节点isolate)。
+v11 给 `runGraph` 的选项加了 `isolate?: string[]` 与 `force?: string[]`（下面「节点运行按钮」一节），
+自己实现 `Transport` 的要把它们透传到后端，语义见 [`docs/embedding.md`](../../docs/embedding.md#部分运行targetsisolateforce)。
 
 点云走二进制，绝不 JSON（ADR-0006）：`getOutputCloud` 返回的 `ArrayBuffer`
 布局见 [http 契约](../../docs/http-transport.md)的「结果」一节，
@@ -280,28 +280,34 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
 **关动效时视口也不动。** 编辑器自己调的 `fitView`（适配视图、整理之后、进子图、打开缺坐标的文件）
 时长经 `viewportMs()` 取，关掉时是 0。
 
-## 只运行此节点
+## 节点运行按钮
 
-[docs/node-run-plan.md](../../docs/node-run-plan.md) 是设计，验收记录在 [docs/node-run-acceptance.md](../../docs/node-run-acceptance.md)。
-每个节点标题栏右端一个 14 px 的小圆圈（`components/NodeRunButton.tsx`），右键菜单里有同名的一项；
-两处的判据、状态与动作都在 `src/lib/nodeRun.ts`，不许各写一份。
+[docs/node-run-plan.md](../../docs/node-run-plan.md) 是设计（§6 修订一改了主操作），验收记录在
+[docs/node-run-acceptance.md](../../docs/node-run-acceptance.md)。每个节点标题栏右端一个 14 px 的小圆圈
+（`components/NodeRunButton.tsx`），右键菜单里有同一组的三项；两处的判据、状态与动作都在
+`src/lib/nodeRun.ts`，不许各写一份。
 
-- **发的是 `startRun(doc, path, { isolate: [展开后的 id] })`。** 上游只取缓存、自己强制重算、下游不进计划，
-  权威在 core（R1–R3）。编辑器这边的「上游有没有结果」只是预判：当前层里每个必需、非惰性输入所连的
-  上游都「本会话跑过、`outputsAvailable` 不为 false、不 stale」才可点，否则 `data-run-state="disabled"`、
-  `data-run-reason` 写缺的上游 id。stale 只有 Tauri 那条路有（`plan_graph` 只在 tauri 下调），
-  HTTP 下预判只看执行状态，由后端兜底。
-- **单节点运行不清空节点表。** `beginRun` 带着 isolate 时留着上一次的 `nodes`，`run_started` 只追加
+- **单击 = 智能运行**：`startRun(doc, path, { targets: [展开后的 id] })`，即「运行到此」—— 本节点 + 缺结果或
+  过时的上游，有缓存的复用，下游不进计划。**Shift+单击** 再加 `force: [id]`：本节点跳过缓存真跑一遍。
+  右键三项：运行到此节点（= 单击）/ 强制重算此节点（= Shift+单击）/ 仅此节点（用现有上游）（= `isolate`，
+  上游不齐时置灰写明缺谁）。按钮只在本节点有编辑期校验 error 时置灰。
+- **hover 预告**（`title` 与 `data-run-upstream`）：将一并运行的上游 = 当前层里的祖先中「下次会真算」的那些；
+  判据优先用 `plan_graph` 的 `cached`（ADR-0007，只有 Tauri 那条路有），拿不到时退回执行状态。全部就绪且本节点
+  命中缓存时写「已是最新（命中缓存）—— Shift+点击强制重算」。每次正式运行收场 `LyFlowEditor` 立刻重编一次计划
+  （不等 debounce），否则刚跑完的节点仍被当成「没缓存」。
+- **带 targets 的运行都不清空节点表**（修订一 V2）：计划里的节点照常先亮成排队中、跟着事件更新；计划外的留着，
+  收场时按 `run_finished.attached` 决定留不留。
+- **单节点运行（isolate）另有一条**：`beginRun` 带着 isolate 时留着上一次的 `nodes`，`run_started` 只追加
   cacheKey（`extendRanWith`，计划外的下游还要按它们自己上次的键判 stale），不在 isolate 里的节点的
   `node_state` 一律不落库 —— 否则「只跑 b」会把 a 刷成「已缓存」、耗时归零。流水账
   （`onNodeTransition`）同样只记 isolate 里的节点。
 - **计划外节点的输出靠 core 挂上**（R7）。`run_finished.attached` 列出按新 runId 还取得到输出的节点；
-  收场时节点表里既不在 isolate、这次没命中缓存（`served`）、又不在 attached 里的，一律退回 idle ——
+  收场时节点表里这次没有事件（isolate 下是没命中缓存，`served`）、又不在 attached 里的，一律退回 idle ——
   否则它们显示「完成」，点开 3D 视图或 Edge Peek 却是空的。stale 判定不变。老 core 不带 attached，就全部照旧。
 - **上游不齐：不弹框。** `run_finished.diagnostics` 里的 `upstream_not_ready`（外加执行期才撞上的惰性上游）
   拼成一条 warn toast，缺结果的上游在当前层各闪一下红光（`lib/motion.ts` 的 `flashNodesLocate`，
   复用 S2 的 error 光晕但不抖，节点上挂 `data-flash="locate"`）。它们没有失败，不标红。
-- **停与抢占。** 只有这次运行是这个节点自己发起的（`execution.isolate` 恰好是它）才显示 ■、点了是
+- **停与抢占。** 只有这次运行是这个节点自己的按钮（或同义的「运行到此」）发起的（`execution.targets` 恰好是它）才显示 ■、点了是
   `cancelCurrentRun`；别的运行在跑时它照常显示状态（包括 running 的进度环），点了是发起新运行抢占旧的。
 - **标题栏改成了 flex。** 标题 `flex: 1; min-width: 0` 并在自己身上省略，徽标与按钮排在右端；按钮的命中区
   20×20 用负外边距收回，标题栏不因此变高。按钮不含端口，hover 的放大画在它自己的 SVG 上（motion-plan A6）。

@@ -342,6 +342,17 @@ async function suiteNodeRunOverHttp(cdp, report) {
   `);
   report.eq("下游 tail 仍是 done", only.nodes[ids.tail]?.state, "done");
   report.ok("按新 runId 取得到 tail 的输出信息", tail.includes("out"), JSON.stringify(tail));
+
+  // 修订一：按钮单击 = 智能运行 targets=[id]，Shift = 再加 force。桩里也照样挂结果（V2）
+  const smart = await runAndWait(cdp, () =>
+    cdp.eval(`await window.__lyflow.run({ targets: [${lit(ids.pass)}], force: [${lit(ids.pass)}] }); return true;`));
+  const smartTail = await cdp.eval(`
+    const { runId } = window.__lyflow.stores.execution.getState();
+    return (await window.__lyflow.transport.getOutputInfo(runId, ${lit(ids.tail)})).map((o) => o.port);
+  `);
+  report.eq("智能运行 + force：运行 ok", smart.status, "ok");
+  report.ok("智能运行之后下游 tail 仍是 done、按新 runId 取得到", smart.nodes[ids.tail]?.state === "done" && smartTail.includes("out"),
+    JSON.stringify({ tail: smart.nodes[ids.tail], smartTail }));
 }
 
 // ------------------------------------------------------------------- main

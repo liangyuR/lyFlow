@@ -7,7 +7,7 @@
 v8 加的两个取数入口见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)，
 v9 加的 `lyflow_run_summary` 见 [ADR-0022](adr/0022-run-summary-as-core-output.md)。
 v10 在 `lyflow_run_options` 末尾加的 `params_json`（顶层图参数取值）见 [embedding.md](embedding.md#顶层图参数)。
-v11 再加的 `isolate`（只运行某几个节点）见 [embedding.md](embedding.md#只运行某几个节点isolate)，对应下面 `/lyflow/run` 信封的同名字段。
+v11 再加的 `isolate`（只运行某几个节点）与 `force`（强制重算）见 [embedding.md](embedding.md#部分运行targetsisolateforce)，对应下面 `/lyflow/run` 信封的同名字段。
 
 - **基址**：构造时给的 `baseUrl`，例如 `http://127.0.0.1:8787`。所有路径都挂在 `/lyflow/` 下。
 - **编码**：请求体与响应体都是 `application/json; charset=utf-8`，
@@ -113,21 +113,26 @@ v11 再加的 `isolate`（只运行某几个节点）见 [embedding.md](embeddin
 信封：
 
 ```json
-{ "doc": {}, "graphPath": null, "targets": ["n1"] , "isolate": null,
+{ "doc": {}, "graphPath": null, "targets": ["n1"] , "isolate": null, "force": null,
   "mode": "full", "previewMaxPoints": null, "previewBudgetMs": null,
   "sceneId": null }
 ```
 
 `mode` 是 `"full"` 或 `"preview"`（ADR-0011：预览模式下源算子先抽稀）。
 
-`isolate` 非空是单节点运行（[node-run-plan.md](node-run-plan.md) R1–R3）：只重算这几个节点，
-`targets` 被忽略、取同一组 id；上游只许命中缓存，缺结果时这次运行照常返回 `runId`，事件流里是
+`force` 非空：这些节点跳过缓存、真跑一遍、结果覆盖写回（[node-run-plan.md](node-run-plan.md) §6 修订一 V1），
+可与 `targets`、`isolate`、preview 组合。
+
+`isolate` 非空是单节点运行（R1–R2）：`targets` 被忽略、取同一组 id；它们自己照常查缓存（真跑要另给 `force`），
+上游只许命中缓存，缺结果时这次运行照常返回 `runId`，事件流里是
 `run_started`（带 `isolate`）紧跟 `run_finished`（`error.code = upstream_not_ready`，
 `diagnostics[]` 每个缺结果的上游一条）。与 `mode: "preview"` 同时给是参数错误。
-计划外的节点（下游、兄弟支路）只要有当前 cacheKey 的结果就挂进这次运行（R7）：`run_finished.attached[]`
-列出它们，`/runs/:runId/...` 下的取数端点按这次的 runId 照样取得到。
+凡是带 `targets` 或 `isolate` 的运行，计划外的节点（下游、兄弟支路）只要有当前 cacheKey 的结果就挂进
+这次运行（R7，修订一 V2）：`run_finished.attached[]` 列出它们，`/runs/:runId/...` 下的取数端点按这次的 runId
+照样取得到。全图运行不带 `attached`。
 桩服务器（`test-server/`）没有常驻结果仓，按事件里的 cacheKey 记账实现这条最小语义；
-上游齐了就按 `--to` 跑一遍 CLI（CLI 没有 isolate 开关），所以桩里的上游其实会被重算。
+上游齐了就按 `--to` 跑一遍 CLI（CLI 没有 isolate / force 开关），所以桩里的上游其实会被重算；
+`force` 在桩里天然成立（每次都是新进程，没有跨运行的缓存），桩只把它补回 `run_started`。
 `attached` 在桩里同样按记账算（全图 `plan` 的 cacheKey 跑出过结果、这次又没有事件的节点），
 挂上的节点 `getOutputInfo` 回的是那一次记下的输出信息；桩取点云本来就是按图重跑 CLI，不看 runId。
 

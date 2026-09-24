@@ -452,6 +452,9 @@
     "isolate": [
       "n_voxel"
     ],
+    "force": [
+      "n_voxel"
+    ],
     "nodes": [
       {
         "id": "n_gen",
@@ -550,6 +553,7 @@
     "isolate": [
       "n_voxel"
     ],
+    "force": [],
     "nodes": [
       {
         "id": "n_gen",

@@ -191,6 +191,9 @@ lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* o
       for (std::size_t i = 0; opts->isolate && i < opts->isolate_count; ++i) {
         options.isolate.push_back(fromC(opts->isolate[i]));
       }
+      for (std::size_t i = 0; opts->force && i < opts->force_count; ++i) {
+        options.force.push_back(fromC(opts->force[i]));
+      }
       options.maxParallel = opts->max_parallel;
       options.cacheBudgetBytes = opts->cache_budget_bytes;
       options.mode = opts->mode == LYFLOW_RUN_MODE_PREVIEW ? lyflow::exec::RunMode::Preview

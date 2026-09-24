@@ -1,5 +1,6 @@
-// 单节点运行（docs/node-run-plan.md R1–R5，验收 1–6）：只重算 isolate 里的节点，上游只许命中缓存，
-// 上游不齐就在开跑前整次失败，下游一概不进计划。执行计数全靠 test.tally 的按 tag 计数。
+// 节点运行（docs/node-run-plan.md）：R1–R7 与修订一 V1–V2（验收 1–6、6b、14–16）。
+// isolate = 上游只许命中缓存、不齐就在开跑前整次失败；force = 跳过缓存强制重算（V1 起两者正交）；
+// 带 targets 的运行把计划外、仍有当前结果的节点挂进来（R7 / V2）。执行计数全靠 test.tally 的按 tag 计数。
 #include <doctest/doctest.h>
 
 #include <algorithm>
@@ -19,7 +20,8 @@ namespace {
 
 /// 跑一次，Run 在返回前析构（freeRun 只丢索引，内容寻址层留着给下一次命中）。
 RunLog runWith(const Json& doc, std::vector<std::string> isolate,
-               exec::RunMode mode = exec::RunMode::Full, std::vector<std::string> targets = {}) {
+               exec::RunMode mode = exec::RunMode::Full, std::vector<std::string> targets = {},
+               std::vector<std::string> force = {}) {
   static int counter = 0;
   RunLog log;
   log.runId = "noderun-" + std::to_string(counter++);
@@ -27,6 +29,7 @@ RunLog runWith(const Json& doc, std::vector<std::string> isolate,
   options.runId = log.runId;
   options.isolate = std::move(isolate);
   options.targets = std::move(targets);
+  options.force = std::move(force);
   options.mode = mode;
   {
     exec::Run run(doc.dump(), options, &detail::collect, &log);
@@ -41,13 +44,15 @@ struct HeldRun {
   std::unique_ptr<exec::Run> run;
 };
 
-std::unique_ptr<HeldRun> holdRun(const Json& doc, std::vector<std::string> isolate) {
+std::unique_ptr<HeldRun> holdRun(const Json& doc, std::vector<std::string> isolate,
+                                 std::vector<std::string> targets = {}) {
   static int counter = 0;
   auto held = std::make_unique<HeldRun>();
   held->log.runId = "noderun-held-" + std::to_string(counter++);
   exec::RunOptions options;
   options.runId = held->log.runId;
   options.isolate = std::move(isolate);
+  options.targets = std::move(targets);
   held->run = std::make_unique<exec::Run>(doc.dump(), options, &detail::collect, &held->log);
   held->run->join();
   return held;
@@ -114,7 +119,7 @@ std::set<std::string> missingNodes(const RunLog& log) {
 
 }  // namespace
 
-TEST_CASE("验收 1：全跑一遍后 isolate [b] —— 只有 b 执行，a 命中缓存，c 不在计划里") {
+TEST_CASE("验收 1 / 15：全跑一遍后 isolate [b]（不带 force）—— b 命中缓存；再加 force [b] 才只有 b 执行") {
   ensureTestOps();
   exec::ResultStore::instance().clear();
   const Json doc = chain("v1");
@@ -123,10 +128,18 @@ TEST_CASE("验收 1：全跑一遍后 isolate [b] —— 只有 b 执行，a 命
   REQUIRE(tallyOf("v1b") == 1);
   REQUIRE(tallyOf("v1c") == 1);
 
-  const RunLog log = runWith(doc, {"b"});
+  // 修订一 V1：isolate 不再隐含强制重算 —— b 自己也命中缓存，一个算子都不调
+  const RunLog cached = runWith(doc, {"b"});
+  REQUIRE(cached.runStatus() == "ok");
+  CHECK(tallyOf("v1a") == 1);
+  CHECK(tallyOf("v1b") == 1);
+  CHECK(cached.nodeEvent("b", "skipped")["stats"].value("cached", false) == true);
+  CHECK_FALSE(anyRunning(cached));
+
+  const RunLog log = runWith(doc, {"b"}, exec::RunMode::Full, {}, {"b"});
   REQUIRE(log.runStatus() == "ok");
   CHECK(tallyOf("v1a") == 1);  // 上游用已有结果，没被重跑
-  CHECK(tallyOf("v1b") == 2);  // 自己真跑了一遍
+  CHECK(tallyOf("v1b") == 2);  // force：自己真跑了一遍
   CHECK(tallyOf("v1c") == 1);  // 下游不动
 
   const Json b = log.nodeEvent("b", "done");
@@ -188,25 +201,29 @@ TEST_CASE("验收 3：从没跑过时 isolate [b] 同样失败；isolate [a]（�
   CHECK(planOf(source) == std::vector<std::string>{"a"});
   CHECK(statesOf(source, "a") == std::vector<std::string>{"pending", "running", "done"});
 
-  // 源节点跑过之后，b 的上游就齐了
+  // 源节点跑过之后，b 的上游就齐了（b 自己从没跑过，没缓存可取，照常执行）
   const RunLog then = runWith(doc, {"b"});
   CHECK(then.runStatus() == "ok");
   CHECK(tallyOf("v3a") == 1);
   CHECK(tallyOf("v3b") == 1);
 }
 
-TEST_CASE("验收 4：b 连续两次 isolate [b]，两次都真执行") {
+TEST_CASE("验收 4 / 15（按修订一改写）：isolate [b] 两次都命中缓存；isolate + force [b] 两次都真执行") {
   ensureTestOps();
   exec::ResultStore::instance().clear();
   const Json doc = chain("v4");
   REQUIRE(runWith(doc, {}).runStatus() == "ok");
   REQUIRE(tallyOf("v4b") == 1);
 
-  const RunLog first = runWith(doc, {"b"});
-  const RunLog second = runWith(doc, {"b"});
+  CHECK(runWith(doc, {"b"}).runStatus() == "ok");
+  CHECK(runWith(doc, {"b"}).runStatus() == "ok");
+  CHECK(tallyOf("v4b") == 1);  // 不带 force：计数不变
+
+  const RunLog first = runWith(doc, {"b"}, exec::RunMode::Full, {}, {"b"});
+  const RunLog second = runWith(doc, {"b"}, exec::RunMode::Full, {}, {"b"});
   CHECK(first.runStatus() == "ok");
   CHECK(second.runStatus() == "ok");
-  CHECK(tallyOf("v4b") == 3);  // 全图 1 次 + 单独 2 次：命中缓存也照跑
+  CHECK(tallyOf("v4b") == 3);  // 全图 1 次 + 强制 2 次：命中缓存也照跑
   CHECK(tallyOf("v4a") == 1);
   CHECK(statesOf(second, "b") == std::vector<std::string>{"pending", "running", "done"});
 
@@ -217,7 +234,7 @@ TEST_CASE("验收 4：b 连续两次 isolate [b]，两次都真执行") {
   CHECK(full.nodeEvent("b", "skipped")["stats"].value("cached", false) == true);
 }
 
-TEST_CASE("验收 5：子图节点作 isolate —— 内部节点全部强制执行，子图外的上游只取缓存") {
+TEST_CASE("验收 5：子图节点作 isolate + force —— 内部节点全部强制执行，子图外的上游只取缓存") {
   ensureTestOps();
   exec::ResultStore::instance().clear();
   // g → s(x → y) → t
@@ -247,7 +264,8 @@ TEST_CASE("验收 5：子图节点作 isolate —— 内部节点全部强制执
   REQUIRE(runWith(doc, {}).runStatus() == "ok");
   REQUIRE(tallyOf("v5x") == 1);
 
-  const RunLog log = runWith(doc, {"s"});
+  // force 的 id 语义同 targets：给子图节点等于给它全部内部节点（V1）
+  const RunLog log = runWith(doc, {"s"}, exec::RunMode::Full, {}, {"s"});
   REQUIRE(log.runStatus() == "ok");
   CHECK(tallyOf("v5x") == 2);
   CHECK(tallyOf("v5y") == 2);
@@ -285,6 +303,8 @@ TEST_CASE("验收 6：isolate + preview 是参数错误；run_started.isolate �
   CHECK(s["isolate"] == Json::array({"b"}));
   CHECK(s["targets"] == Json::array({"b"}));
   CHECK(s.value("mode", "") == "full");
+  REQUIRE(s.contains("force"));
+  CHECK(s["force"] == Json::array());
 
   // 普通运行也带这个字段，只是空数组 —— 与 targets 同一个约定
   const RunLog plain = runWith(doc, {});
@@ -338,7 +358,7 @@ TEST_CASE("验收 6b：计划外的 c、d 不执行，但按新 runId 取得到�
   auto held = holdRun(doc, {"b"});
   const RunLog& log = held->log;
   REQUIRE(log.runStatus() == "ok");
-  CHECK(tallyOf("r7b") == 2);
+  CHECK(tallyOf("r7b") == 1);  // 修订一 V1：isolate 不带 force，b 也只是命中缓存
   CHECK(tallyOf("r7c") == 1);  // 挂结果不执行
   CHECK(tallyOf("r7d") == 1);
   CHECK(statesOf(log, "c").empty());  // 不发任何节点事件，更没有 running
@@ -421,3 +441,98 @@ TEST_CASE("R7：上游不齐、开跑前就失败时，已有的结果照样挂�
   CHECK(bad->log.runStatus() == "error");
   CHECK_FALSE(bad->log.ofKind("run_finished").back().contains("attached"));
 }
+
+// ---------------------------------------------------------------- 修订一 V1 / V2
+
+TEST_CASE("验收 14：targets [b]（智能运行）—— 全就绪时零执行；加 force 只有 b 执行；改 a 参数后 a、b 执行、c 不执行") {
+  ensureTestOps();
+  exec::ResultStore::instance().clear();
+  REQUIRE(runWith(chain("v14"), {}).runStatus() == "ok");
+
+  const RunLog ready = runWith(chain("v14"), {}, exec::RunMode::Full, {"b"});
+  CHECK(ready.runStatus() == "ok");
+  CHECK(tallyOf("v14a") == 1);
+  CHECK(tallyOf("v14b") == 1);
+  CHECK_FALSE(anyRunning(ready));
+  CHECK(ready.nodeEvent("b", "skipped")["stats"].value("cached", false) == true);
+
+  const RunLog forced = runWith(chain("v14"), {}, exec::RunMode::Full, {"b"}, {"b"});
+  CHECK(forced.runStatus() == "ok");
+  CHECK(tallyOf("v14a") == 1);
+  CHECK(tallyOf("v14b") == 2);
+  CHECK(forced.nodeEvent("a", "skipped")["stats"].value("cached", false) == true);
+  const Json b = forced.nodeEvent("b", "done");
+  REQUIRE(b.contains("stats"));
+  CHECK(b["stats"].value("cached", false) == false);
+  CHECK(finished(forced)["summary"]["nodes"]["b"].value("cached", true) == false);
+  CHECK(forced.ofKind("run_started").front()["force"] == Json::array({"b"}));
+
+  // 改 a 的参数：a、b 的键都变了，智能运行把它们一起跑；c 不在计划里
+  const RunLog changed = runWith(chain("v14", 9), {}, exec::RunMode::Full, {"b"});
+  CHECK(changed.runStatus() == "ok");
+  CHECK(tallyOf("v14a") == 2);
+  CHECK(tallyOf("v14b") == 3);
+  CHECK(tallyOf("v14c") == 1);
+  CHECK(statesOf(changed, "a") == std::vector<std::string>{"pending", "running", "done"});
+  CHECK(statesOf(changed, "b") == std::vector<std::string>{"pending", "running", "done"});
+  CHECK_FALSE(contains(planOf(changed), "c"));
+}
+
+TEST_CASE("验收 15：isolate 上游不齐时仍是 upstream_not_ready，带 force 也一样（force 只管本节点）") {
+  ensureTestOps();
+  exec::ResultStore::instance().clear();
+  REQUIRE(runWith(chain("v15"), {}).runStatus() == "ok");
+  const RunLog log = runWith(chain("v15", 9), {"b"}, exec::RunMode::Full, {}, {"b"});
+  CHECK(log.runStatus() == "error");
+  CHECK(missingNodes(log) == std::set<std::string>{"a"});
+  CHECK(tallyOf("v15b") == 1);
+  CHECK_FALSE(anyRunning(log));
+}
+
+TEST_CASE("验收 16：运行到此 targets [b] 之后 c、d 在 attached 里、按新 runId 取得到；force + preview 进预览命名空间") {
+  ensureTestOps();
+  exec::ResultStore::instance().clear();
+  const Json doc = forked("v16");
+  REQUIRE(runWith(doc, {}).runStatus() == "ok");
+
+  auto held = holdRun(doc, {}, {"b"});
+  REQUIRE(held->log.runStatus() == "ok");
+  const auto attached = attachedOf(held->log);
+  CHECK(contains(attached, "c"));
+  CHECK(contains(attached, "d"));
+  CHECK_FALSE(contains(attached, "a"));
+  CHECK_FALSE(contains(attached, "b"));
+  CHECK(tallyOf("v16c") == 1);
+  CHECK(tallyOf("v16d") == 1);
+  for (const char* id : {"c", "d"}) {
+    Data data;
+    CHECK(exec::ResultStore::instance().get(held->log.runId, id, "cloud", data));
+  }
+  held.reset();
+
+  // 全图运行（没有 targets）不带 attached
+  CHECK_FALSE(finished(runWith(doc, {}))["attached"].is_array());
+
+  // force + preview：可以组合，b 真跑一遍，结果写进预览命名空间 ——
+  // 之后不带 force 的预览运行命中它，正式运行仍命中正式那一份，计数都不再变
+  const RunLog preview = runWith(doc, {}, exec::RunMode::Preview, {"b"}, {"b"});
+  CHECK(preview.runStatus() == "ok");
+  CHECK(preview.ofKind("run_started").front().value("mode", "") == "preview");
+  const int afterForce = tallyOf("v16b");
+  CHECK(afterForce == 2);
+  const RunLog previewAgain = runWith(doc, {}, exec::RunMode::Preview, {"b"});
+  CHECK(previewAgain.nodeEvent("b", "skipped")["stats"].value("cached", false) == true);
+  const RunLog fullAgain = runWith(doc, {}, exec::RunMode::Full, {"b"});
+  CHECK(fullAgain.nodeEvent("b", "skipped")["stats"].value("cached", false) == true);
+  CHECK(tallyOf("v16b") == afterForce);
+}
+
+TEST_CASE("force 给了不存在的 id：整图级失败") {
+  ensureTestOps();
+  exec::ResultStore::instance().clear();
+  const RunLog log = runWith(chain("v17"), {}, exec::RunMode::Full, {}, {"nosuch"});
+  CHECK(log.runStatus() == "error");
+  CHECK(finished(log)["error"].value("code", "") == "unknown_node");
+  CHECK(tallyOf("v17a") == 0);
+}
+
