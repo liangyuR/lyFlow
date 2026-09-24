@@ -71,7 +71,7 @@ React Flow 用 `getBoundingClientRect` 量端口相对节点包装层的位置�
 | H1 | **节点 hover**：阴影加深 + 边框提亮（CSS transition，不位移，见 A5）|
 | H2 | **节点 hover 高亮关联边**：`ui` store 加 `hoverNodeId`（经 React Flow 的 `onNodeMouseEnter/Leave`）。与它相连的边 `is-related`（加粗、提亮），其余边 `is-dimmed`（降低不透明度）。拖连线（`pendingFrom`）、拖节点、框选期间不做淡化 |
 | H3 | **边 hover**：边加粗 + 同色光晕；`ui` store 加 `hoverEdge`（两端的 node/port），两端端口加 `node-port--edge-end`、两端节点加 `is-edge-end`，都用 CSS 高亮 |
-| H4 | **端口 hover**：圆点以圆心放大到 1.35 倍 + 类型色光晕（`box-shadow` 用端口自己的颜色，经 CSS 变量传入），标签文字提亮。与拖线期间的 `compatible/incompatible` 样式共存，后者优先 |
+| H4 | **端口 hover**：圆点的 `::before` 视觉层以圆心放大到 1.35 倍（圆点本身不变换，见 A6）+ 类型色光晕（`box-shadow` 用端口自己的颜色，经 CSS 变量传入），标签文字提亮。与拖线期间的 `compatible/incompatible` 样式共存，后者优先 |
 | H5 | hover 状态是纯 UI 状态，不进 GraphDoc、不进撤销栈 |
 
 ### 不做
