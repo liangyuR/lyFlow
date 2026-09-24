@@ -18,6 +18,7 @@ m8b.mjs      M8b 的分组（空白画布拼测点：自动连线、片段、2D 
 m8c.mjs      M8c 的分组（三模板的图：2D 视图按槽切换、拖一个槽只改它、复制到其它槽、标签不遮挡、按槽的诊断）
 motion.mjs   动效的分组（docs/motion-plan.md §3 验收 2–9：进场、删除残影、端点对齐、连线生长、流动、状态闪光、hover、关动效）
 noderun.mjs  节点运行按钮的分组（docs/node-run-plan.md §4 验收 7–12、11b 与 §6 修订一 17–20：按钮位置与真鼠标、单击智能运行 / Shift 强制、hover 预告、「仅此节点」的兜底、停止与抢占、hover / 关动效 / 端点对齐、计划外节点挂结果、右键三项）
+params_p1.mjs 图参数成形的分组（docs/param-recipe-plan.md P1 验收 1–7：完整规格的往返与 core 校验、右键「纳入配方」、子图里的逐层提升链、被绑定行上编辑、RunOptions.params、P1.6 三项）
 record-noderun.mjs  节点运行按钮的演示截图（不接进 run.mjs）：七步各截一张到 docs/noderun-step-N.png
 http.mjs     e2e:http —— Node 桩服务器 + 系统 Chrome + examples/host-react
 ```
@@ -143,5 +144,11 @@ WiX 的 `INSTALLDIR`）。目的是验证「DLL 随包」和「从 exe 同目录
   本机约 1.7 s。等「按钮进入 running」要在页面里逐帧看（`waitButton`），从 Node 侧轮询会错过。
 - **同名的输入、输出端口 testid 相同**（voxel 的 `cloud` 进 `cloud` 出都是 `port-<id>-cloud`）。按侧别挑要加
   `.node-port--input` / `.node-port--output`，否则 `querySelector` 拿到的永远是输入那一个。
+- **图参数的「运行结果逐位相同」看 cacheKey**（`params_p1.mjs`）。结果仓按内容寻址，cacheKey 相同就是同一份结果；
+  所以纳入配方前后比的是 `run_started` 的键与 plan 的键，再跑一遍断言全部 `skipped`（命中缓存）。
+  换一组 `RunOptions.params` 走 `window.__lyflow.run({ params })`，它整份替换编辑器合成的那一组。
+- **在 Inspector 的输入框里「打字」**：用原生 value setter + `input` 事件 + `blur()`（NumberInput 失焦才提交），
+  直接改 `value` 属性 React 看不见。复制路径名断言前把 `navigator.clipboard.writeText` 换成记录器 ——
+  WebView2 里剪贴板未必授权，菜单自己的兜底路径（execCommand）读不回来。
 - **搭图走 store 的语义化动作，不直接塞 doc。** 塞一份构造好的 doc 会跳过
   `addNode` / `connect` 里的校验与 id 分配，验的就不是真实代码路径了。

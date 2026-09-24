@@ -1,7 +1,7 @@
 // GraphDoc 的 TypeScript 镜像，契约在 schema/graph-doc.schema.json。
 // ADR-0002：这是**唯一数据模型**，React Flow 的 Node/Edge 只是渲染派生产物。
 
-import type { Param } from "./manifest";
+import type { Param, ParamType } from "./manifest";
 
 export const GRAPH_SCHEMA_VERSION = 1;
 
@@ -102,19 +102,25 @@ export interface GraphDoc {
   /** 图级命名输出（ADR-0017）。宿主按名字取值，不认节点 id；
    *  子图内部的端口写展开后的路径 id（`outer/inner`）。 */
   outputs?: Record<string, GraphOutput>;
-  /** 顶层图参数（m7-plan J7/J8）。编辑器不解释、不改写，只原样往返；
-   *  取值在展开期由 core 写进被绑定的节点参数，编辑界面留给 M8。 */
+  /** 顶层图参数（m7-plan J7/J8，param-recipe P1）。取值在展开期由 core 写进被绑定的节点参数；
+   *  编辑器只经 graph store 的图参数动作改它（promoteToGraphParam 等），运行时由编辑器合成
+   *  「default + 当前配方覆盖」经 RunOptions.params 传给 core（K3）。 */
   params?: Record<string, GraphParam>;
   /** 未知字段容器：老客户端打开新版本写的图时不丢数据。 */
   x?: Record<string, unknown>;
 }
 
-/** 一个顶层图参数。`binds` 每项是 `<节点>.<参数>`，以最后一个 `.` 分隔。 */
-export interface GraphParam {
-  type?: string;
+/** 参数规格：manifest 的 param 去掉 name（图参数的名字是它在 `params` 里的键）。
+ *  schema 里同一份定义（operator-manifest.schema.json 的 paramSpec），不抄第二份。 */
+export type ParamSpec = Omit<Param, "name" | "type" | "default">;
+
+/** 一个顶层图参数 = 完整参数规格 + binds（param-recipe P1.1）。老格式 `{type?, default, binds, doc?}`
+ *  是它的子集。`binds` 每项是 `<节点>.<参数>`，以最后一个 `.` 分隔。`default` 就是配方的「基础」值。 */
+export interface GraphParam extends ParamSpec {
+  /** 省略 = 老格式：core 不做图参数这一层的校验，规格就是被绑定的那个节点参数。 */
+  type?: ParamType;
   default: unknown;
   binds: string[];
-  doc?: string;
 }
 
 export interface GraphOutput {

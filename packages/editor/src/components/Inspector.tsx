@@ -3,17 +3,25 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import {
+  graphParamValue,
+  resolveGraphBinding,
+  splitBind,
+  withBoundValues,
+  type GraphBinding,
+} from "../lib/graphParams";
 import { groupParams, effectiveParams, isEnabled, isVisible, valueEquals } from "../lib/params";
 import { frameKeyOfGroup, pickFrame, roiFramesOf } from "../lib/roiFrames";
 import { augmentOperators, levelOf, promotedBy } from "../lib/subgraph";
 import { useExecutionStore, useNodeExecution, useParamErrors } from "../store/execution";
 import { currentSubgraph, useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
+import { useGraphParamOverrides } from "../store/recipe";
 import { useUiStore } from "../store/ui";
-import { useNodeValidation } from "../store/validation";
+import { useGraphParamValidation, useNodeValidation, useValidationStore } from "../store/validation";
 import type { OutputStat, OutputValue } from "../types/execution";
 import type { OperatorDesc, Param } from "../types/manifest";
-import type { GraphNode, SubgraphDef } from "../types/graph";
+import type { GraphDoc, GraphNode, GraphParam, SubgraphDef } from "../types/graph";
 
 import { OperatorDetail, PortRow } from "./OperatorDetail";
 import { ParamControl } from "./ParamControls";
@@ -131,6 +139,124 @@ function GraphOutputs() {
   );
 }
 
+/** 一个图参数用什么控件画。给了 type 的用它自己的规格（P1.1）；老格式没有 type，
+ *  就借第一个被绑定目标的声明（规格本来就是它），label 换成图参数自己的。 */
+function graphParamControlSpec(
+  doc: GraphDoc,
+  name: string,
+  gp: GraphParam,
+  ops: ReadonlyMap<string, OperatorDesc>,
+): Param | null {
+  if (gp.type) {
+    const { binds: _binds, ...spec } = gp;
+    return { ...spec, name, type: gp.type } as Param;
+  }
+  for (const bind of gp.binds) {
+    const t = splitBind(bind);
+    const node = t ? doc.nodes.find((n) => n.id === t.node) : undefined;
+    const decl = t && node ? ops.get(node.op)?.params.find((p) => p.name === t.param) : undefined;
+    if (decl) return { ...decl, name, label: gp.label ?? decl.label ?? name, default: gp.default };
+  }
+  return null;
+}
+
+/** 顶层图参数的简表（param-recipe P1）。它不属于任何一个选中节点，所以和图级输出一样钉在上面。
+ *  完整的「图参数」分组（改规格、搜索过滤）是 P2 的参数面板；这里只让它看得见、改得动、删得掉。 */
+/** 多于这么多个图参数时简表默认收起：导入器生成的图可能带一长串，不该把选中节点的表单挤到屏幕外。 */
+const GRAPH_PARAMS_OPEN_MAX = 4;
+
+function GraphParams() {
+  const doc = useGraphStore((s) => s.doc);
+  const invalid = useValidationStore((s) => s.graphLevel.filter((d) => d.severity === "error").length);
+  const names = Object.keys(doc.params ?? {});
+  if (names.length === 0) return null;
+  return (
+    <details
+      className="insp__group insp__graph-params"
+      data-testid="graph-params"
+      open={names.length <= GRAPH_PARAMS_OPEN_MAX}
+    >
+      <summary className={`insp__group-title${invalid > 0 ? " is-invalid" : ""}`}>
+        图参数 {names.length}
+        {invalid > 0 && ` · ${invalid} 处有错`}
+      </summary>
+      {names.map((name) => (
+        <GraphParamRow key={name} name={name} />
+      ))}
+    </details>
+  );
+}
+
+function GraphParamRow({ name }: { name: string }) {
+  const doc = useGraphStore((s) => s.doc);
+  const base = useManifestStore((s) => s.operatorsById);
+  const overrides = useGraphParamOverrides();
+  // 图参数自己的诊断（P1.2：nodeId 为空、paramPath 是名字）贴在这一行下
+  const diags = useGraphParamValidation(name);
+  const gp = doc.params?.[name];
+  if (!gp) return null;
+  const ops = augmentOperators(base, doc.subgraphs);
+  const g = useGraphStore.getState();
+  const spec = graphParamControlSpec(doc, name, gp, ops);
+  const value = graphParamValue(doc, name, overrides);
+  const error = diags.find((d) => d.severity === "error")?.message;
+
+  return (
+    <div
+      className={`insp-param${error ? " has-error" : ""}`}
+      data-testid={`graph-param-${name}`}
+      data-graph-param={name}
+      data-param-error={error ? "1" : undefined}
+    >
+      <div className="insp-param__label insp-gparam__head">
+        <span title={gp.doc}>{gp.label || name}</span>
+        <span className="insp-gparam__name">{name}</span>
+        <button
+          type="button"
+          className="ctl-btn"
+          data-testid={`remove-graph-param-${name}`}
+          title="删除这个图参数：当前值写回它绑定的每一个参数，行为不变"
+          onClick={() => g.removeGraphParam(name)}
+        >
+          ✕
+        </button>
+      </div>
+      <div className="insp-param__control">
+        {spec ? (
+          <ParamControl
+            param={spec}
+            value={value}
+            disabled={false}
+            onChange={(v) => {
+              if (!valueEquals(v, value)) useGraphStore.getState().editGraphParamValue(name, v);
+            }}
+          />
+        ) : (
+          <code>{JSON.stringify(value)}</code>
+        )}
+        {error && <p className="insp-param__error">{error}</p>}
+        <div className="insp-gparam__binds">
+          {gp.binds.length === 0 && <span>（没有绑定任何参数）</span>}
+          {gp.binds.map((b) => (
+            <span className="insp-gparam__bind" key={b} data-bind={b}>
+              {b}
+              <button
+                type="button"
+                className="ctl-btn"
+                data-testid={`unbind-graph-param-${name}-${b}`}
+                title="解除这一条绑定：当前值写回这个参数，行为不变"
+                onClick={() => g.unbindFromGraphParam(name, b)}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** 节点的端口小节（M6 §3）：类型、契约、样例。折叠成 <details>，默认展开 ——
  *  没声明契约的算子照样列出来，type 和 doc 本来就有用，但收起来时不占地方。 */
 function NodePorts({ op }: { op: OperatorDesc }) {
@@ -173,20 +299,27 @@ function ParamRow({
   effective,
   error,
   def,
+  binding,
 }: {
   param: Param;
   node: GraphNode;
   effective: Record<string, unknown>;
   error?: string | undefined;
   def?: SubgraphDef | undefined;
+  /** 这个参数最终由哪个图参数提供（P1.4）。给了就显示图参数的有效值，编辑路由到图参数。 */
+  binding: GraphBinding | null;
 }) {
   const setParam = useGraphStore((s) => s.setParam);
   const value = effective[param.name];
-  // 已提升的内参在内部只读：真正的值来自外层表单，两处都能改就没人知道谁赢（F4）
+  // 已提升的内参在内部只读：真正的值来自外层表单，两处都能改就没人知道谁赢（F4）。
+  // 例外是整条链一直通到图参数的（纳入配方）：那时「外层」就是图参数，改这一行 = 改它，
+  // 与顶层被绑定的行同一个语义（setParam 在 store 里路由），没有第二个写入处
   const promoted = promotedBy(def, node.id, param.name);
-  const disabled = !isEnabled(param, effective) || promoted !== undefined;
-  // 稀疏存储的直接可视化：params 里有这个键 = 用户改过它。
-  const overridden = node.params?.[param.name] !== undefined;
+  const disabled = !isEnabled(param, effective) || (promoted !== undefined && !binding);
+  // 稀疏存储的直接可视化：params 里有这个键 = 用户改过它。被图参数提供的行看值本身。
+  const overridden = binding
+    ? !valueEquals(value, param.default)
+    : node.params?.[param.name] !== undefined;
 
   return (
     <div
@@ -194,6 +327,7 @@ function ParamRow({
       data-testid={`param-${param.name}`}
       data-param-error={error ? "1" : undefined}
       data-promoted={promoted ? promoted.name : undefined}
+      data-graph-param={binding ? binding.graphParam : undefined}
     >
       <div className="insp-param__label">
         <span className={overridden ? "is-overridden" : ""} title={param.doc}>
@@ -204,7 +338,16 @@ function ParamRow({
             ↑{promoted.name}
           </span>
         )}
-        {overridden && !promoted && (
+        {binding && (
+          <span
+            className="insp-param__graph"
+            data-testid={`param-graph-${param.name}`}
+            title={`值来自顶层图参数 ${binding.graphParam}；在这一行改的是它（选着「基础」时改它的默认值）`}
+          >
+            由图参数 {binding.graphParam} 提供
+          </span>
+        )}
+        {overridden && (!promoted || binding) && (
           <button
             type="button"
             className="insp-param__reset"
@@ -222,6 +365,7 @@ function ParamRow({
           disabled={disabled}
           nodeId={node.id}
           promotedAs={promoted?.name}
+          graphBinding={binding}
           onChange={(v) => {
             if (!valueEquals(v, value)) setParam(node.id, param.name, v);
           }}
@@ -250,8 +394,14 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
   const exec = useNodeExecution(node.id);
   const doc = useGraphStore((s) => s.doc);
   const path = useUiStore((s) => s.path);
+  const overrides = useGraphParamOverrides();
   const def = currentSubgraph(doc, path);
-  const effective = effectiveParams(op, node);
+  // 被图参数绑定的参数显示图参数的有效值（P1.4）：显示、联动条件、2D 拖框的分组都看这一份
+  const shown = useMemo(
+    () => withBoundValues(doc, path, node, op.params.map((p) => p.name), overrides),
+    [doc, path, node, op.params, overrides],
+  );
+  const effective = effectiveParams(op, shown);
   const groups = useMemo(() => groupParams(op.params), [op.params]);
 
   // 一组框一节（m8-plan L20）：带底图的 roi 参数分属几节时（locate_template 的四个模板槽），
@@ -261,7 +411,7 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
   const accordion = frameOfGroup.filter(Boolean).length >= 2;
   const selectedFrame = useUiStore((s) => s.roiFrame[node.id]);
   const setRoiFrame = useUiStore((s) => s.setRoiFrame);
-  const openFrame = selectedFrame ?? pickFrame(roiFramesOf(op, node), undefined)?.key ?? null;
+  const openFrame = selectedFrame ?? pickFrame(roiFramesOf(op, shown), undefined)?.key ?? null;
   // 手动收起的那一节（再点一下标题）。换了组就作废。
   const [collapsed, setCollapsed] = useState<string | null>(null);
   useEffect(() => setCollapsed(null), [openFrame]);
@@ -349,6 +499,7 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
               effective={effective}
               error={errors.get(p.name)}
               def={def}
+              binding={resolveGraphBinding(doc, path, node.id, p.name)}
             />
           ));
           const frame = accordion ? frameOfGroup[gi] : null;
@@ -451,6 +602,7 @@ export function Inspector() {
   return (
     <>
       <GraphOutputs />
+      <GraphParams />
       <InspectorBody />
     </>
   );

@@ -7,6 +7,7 @@ import { flashNodesLocate } from "../lib/motion";
 import { localIdOf, pathPrefix, type SubPath } from "../lib/subgraph";
 import { transport } from "../transport";
 import { refreshCacheStats, useCacheStore } from "./cache";
+import { runParamsOf } from "./recipe";
 import { useUiStore } from "./ui";
 import type {
   Diagnostic,
@@ -608,6 +609,9 @@ export interface RunRequest {
   /** 预览模式：源算子输出先抽稀，结果进独立缓存命名空间（ADR-0011）。 */
   preview?: boolean | undefined;
   previewMaxPoints?: number | undefined;
+  /** 顶层图参数的取值（param-recipe K3）。不给就用编辑器合成的「default + 当前配方覆盖」——
+   *  界面上的每一次运行都是这样；给了就整份替换它（宿主或验收脚本要试一组别的值时用）。 */
+  params?: Record<string, unknown> | undefined;
 }
 
 export async function startRun(
@@ -626,6 +630,7 @@ export async function startRun(
       force: request.force && request.force.length > 0 ? request.force : undefined,
       mode: preview ? "preview" : "full",
       previewMaxPoints: request.previewMaxPoints,
+      params: request.params ?? runParamsOf(doc),
       sceneId,
     });
     if (ticket !== runTicket) return; // 已经有更晚的一次运行发起了，这次的回复作废

@@ -1,23 +1,34 @@
 // 图 store —— GraphDoc 是唯一真实数据源（ADR-0002）：改图只能走这里的语义化动作。
 // M4 起动作作用于**当前层级**（ui.path），撤销栈仍然是整份 doc 快照（ADR-0010）。
 
-import { enablePatches, produce } from "immer";
+import { current, enablePatches, isDraft, produce } from "immer";
 import { create } from "zustand";
 
 import { planAutoConnect, unconnectedRequiredInputs, type AutoAmbiguity } from "../lib/autoconnect";
+import {
+  graphParamNameProblem,
+  graphParamValue,
+  joinBind,
+  resolveGraphBinding,
+  specFromParam,
+  splitBind,
+  uniqueGraphParamName,
+} from "../lib/graphParams";
 import { newDocId, newLocalId } from "../lib/ids";
-import { pruneUnknownParams, sparseSet } from "../lib/params";
+import { effectiveValue, pruneUnknownParams, sparseSet, valueEquals } from "../lib/params";
 import {
   augmentOperators,
   composeSubgraph as composeInto,
   dissolveSubgraph as dissolveFrom,
   levelOf,
+  pathIsValid,
   promotedBy,
   type ComposeResult,
+  type SubPath,
 } from "../lib/subgraph";
 import { canConnect, type ConnectVerdict, type GraphContext } from "../lib/typecheck";
 import type { MigrationAction } from "../types/execution";
-import type { SnippetDesc } from "../types/manifest";
+import type { OperatorDesc, Param, SnippetDesc } from "../types/manifest";
 import {
   GRAPH_SCHEMA_VERSION,
   subgraphIdOf,
@@ -25,10 +36,12 @@ import {
   type GraphLevel,
   type GraphNode,
   type NodeUi,
+  type ParamSpec,
   type PortRef,
   type SubParam,
 } from "../types/graph";
 import { useManifestStore } from "./manifest";
+import { currentOverrides, useRecipeStore } from "./recipe";
 import { useUiStore } from "./ui";
 
 enablePatches();
@@ -85,6 +98,95 @@ function allIds(doc: GraphDoc): Set<string> {
   return s;
 }
 
+/** immer 的 draft 在 recipe 结束后就失效，抄进新对象之前先取出一份普通数据。
+ *  manifest 里的声明也深拷一份：不拷的话 autoFreeze 会把 manifest store 里那份一起冻上。 */
+function plain<T>(x: T): T {
+  return structuredClone(isDraft(x) ? (current(x as never) as T) : x);
+}
+
+/** 节点在界面上叫什么：用户起的标题，其次算子 label。 */
+function titleOf(node: GraphNode | undefined, ops: ReadonlyMap<string, OperatorDesc>): string {
+  if (!node) return "?";
+  return node.ui?.title || ops.get(node.op)?.label || node.id;
+}
+
+/** 图参数的默认 label（P1.1）：「节点标题 · 参数 label」。在子图里纳入时把路径上的实例标题
+ *  也带上（「实例 / 内部节点 · 参数」）—— 同一个子图的两个实例各纳入一次，label 得分得开。 */
+function graphParamLabel(
+  doc: GraphDoc,
+  path: SubPath,
+  nodeId: string,
+  decl: Param,
+  ops: ReadonlyMap<string, OperatorDesc>,
+): string {
+  const titles: string[] = [];
+  let lvl: GraphLevel = doc;
+  for (const seg of path) {
+    titles.push(titleOf(lvl.nodes.find((n) => n.id === seg.nodeId), ops));
+    lvl = doc.subgraphs?.[seg.subgraphId] ?? lvl;
+  }
+  titles.push(titleOf(lvl.nodes.find((n) => n.id === nodeId), ops));
+  return `${titles.join(" / ")} · ${decl.label || decl.name}`;
+}
+
+/** K2 的逐层提升链，在 draft 上做：从当前层的 `nodeId.<decl.name>` 往外，哪一层还没提升就在
+ *  那个子图定义里提升成子图参数（默认值 = 这一层的当前值，所以同一子图的其它实例行为不变），
+ *  一直走到顶层。返回顶层要绑的目标、它的声明与当前值。顶层（path 为空）原样返回。 */
+function liftToTop(
+  d: GraphDoc,
+  path: SubPath,
+  nodeId: string,
+  decl: Param,
+  value: unknown,
+): { node: string; param: string; decl: Param; value: unknown } | null {
+  let node = nodeId;
+  let param = decl.name;
+  let curDecl: Param = decl;
+  let cur = value;
+  for (let i = path.length - 1; i >= 0; i -= 1) {
+    const seg = path[i]!;
+    const def = d.subgraphs?.[seg.subgraphId];
+    if (!def) return null;
+    let sp = def.params?.find((p) => p.binds?.some((b) => b.node === node && b.param === param));
+    if (!sp) {
+      const taken = new Set((def.params ?? []).map((p) => p.name));
+      let name = param;
+      for (let k = 2; taken.has(name); k += 1) name = `${param}_${k}`;
+      // 与 promoteParam 同一个抄法：roiBackdrop 指的是内部算子的参数名，不带出去（semantic 照带）
+      const copy = plain(curDecl) as Param & { binds?: unknown };
+      delete copy.roiBackdrop;
+      delete copy.binds;
+      sp = { ...copy, name, default: plain(cur), binds: [{ node, param }] } as SubParam;
+      def.params = [...(def.params ?? []), sp];
+    }
+    const parent: GraphLevel | undefined = i === 0 ? d : d.subgraphs?.[path[i - 1]!.subgraphId];
+    const inst = parent?.nodes.find((n) => n.id === seg.nodeId);
+    if (!inst) return null;
+    // 往外一层的「当前值」= 这个实例上外参的值（显式写了用它，没写用外参默认值）
+    cur = inst.params?.[sp.name] !== undefined ? inst.params[sp.name] : sp.default;
+    curDecl = sp;
+    node = seg.nodeId;
+    param = sp.name;
+  }
+  return { node, param, decl: curDecl, value: cur };
+}
+
+/** 解除绑定 / 删图参数时把当前值写回节点（行为不变）。仍走稀疏存储：值回到算子默认就删键。 */
+function writeBack(
+  d: GraphDoc,
+  ops: ReadonlyMap<string, OperatorDesc>,
+  bind: string,
+  value: unknown,
+): void {
+  const target = splitBind(bind);
+  const node = target ? d.nodes.find((n) => n.id === target.node) : undefined;
+  if (!target || !node) return;
+  const op = ops.get(node.op);
+  node.params = op
+    ? sparseSet(op, node.params, target.param, plain(value))
+    : { ...(node.params ?? {}), [target.param]: plain(value) };
+}
+
 export interface PasteResult {
   nodeIds: string[];
 }
@@ -104,6 +206,9 @@ interface GraphState {
   doc: GraphDoc;
   filePath: string | null;
   dirty: boolean;
+  /** 最近一次存盘（或打开）时的那份 doc。dirty = doc 不是它：撤销回到保存点时 dirty 复原（P1.6）。
+   *  比的是对象身份 —— 撤销栈存的就是整份快照，回到保存点拿回来的正是同一个对象。 */
+  savedDoc: GraphDoc | null;
   /** 「换了一整张图」的计数：newDoc / loadDoc 各加一。画布的动效差分（docs/motion-plan.md N1）
    *  靠它区分「编辑」与「打开文件」—— 打开一张图不该满屏播进场。不进撤销栈、不进文件。 */
   epoch: number;
@@ -158,6 +263,27 @@ interface GraphState {
   composeSubgraph(ids: readonly string[]): ComposeResult | null;
   /** 解散一个子图节点，内容内联回本层。返回内联出来的节点 id。 */
   dissolveSubgraph(nodeId: string): string[];
+  // -- 顶层图参数（param-recipe P1.3）：每个都是一次撤销 ---------------------
+  /** 「纳入配方」= 提升为图参数（K2）：当前有效值成为 default，节点上的显式值删除，加一条 bind；
+   *  规格从被绑定目标的声明抄（P1.1）。在子图里调就做整条提升链（内参 → 子图参数 → 这个实例上
+   *  绑成图参数），同一子图的其它实例以当前值作默认值、行为不变。返回图参数名。 */
+  promoteToGraphParam(nodeId: string, paramName: string): string | null;
+  /** 把当前层的一个参数也绑到已有的图参数上（子图里同样走提升链）。它的值从此取图参数的值。 */
+  bindToGraphParam(name: string, nodeId: string, paramName: string): boolean;
+  /** 解除一条绑定（bind 是 `节点.参数`）：把图参数当前的有效值写回节点，行为不变。 */
+  unbindFromGraphParam(name: string, bind: string): void;
+  /** 删掉图参数：当前有效值写回它绑定的每一个目标，行为不变。 */
+  removeGraphParam(name: string): void;
+  /** 改名。名字规则见 graphParamNameProblem；不合法时返回 false 并写 lastRejection。 */
+  renameGraphParam(name: string, next: string): boolean;
+  /** 改「基础」值（default）。滑块拖动时在 begin/commit 里合成一条撤销。 */
+  setGraphParamDefault(name: string, value: unknown): void;
+  /** 改规格（label、限位、单位、group……）。patch 里值为 undefined 的键删掉。 */
+  setGraphParamSpec(name: string, patch: Partial<ParamSpec>): void;
+  /** 在被图参数绑定的那一行上编辑（P1.4 / K6）：选着配方写进配方，选着「基础」写 default。
+   *  P1 当前配方恒为「基础」。setParam 命中被绑定的参数时也走这里 —— 不再写成节点上的显式值。 */
+  editGraphParamValue(name: string, value: unknown): void;
+
   /** 把当前子图里某个内参提升成对外参数（F4）。返回外参名。 */
   promoteParam(nodeId: string, paramName: string): string | null;
   /** 取消提升。内参回到可编辑，值保持提升时的那个。 */
@@ -178,7 +304,8 @@ interface GraphState {
   // -- 文档 ---------------------------------------------------------------
   newDoc(): void;
   loadDoc(doc: GraphDoc, path: string | null): void;
-  markSaved(path: string): void;
+  /** 存盘成功。doc 是真正写下去的那一份（存盘是异步的，期间用户可能又改了）；不给就是当前的。 */
+  markSaved(path: string, doc?: GraphDoc): void;
   setName(name: string): void;
   clearRejection(): void;
 }
@@ -193,7 +320,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       doc: next,
       past: [...past, { label, doc }].slice(-MAX_HISTORY),
       future: [],
-      dirty: true,
+      dirty: next !== get().savedDoc,
     });
   };
 
@@ -202,13 +329,33 @@ export const useGraphStore = create<GraphState>((set, get) => {
     const { doc } = get();
     const next = produce(doc, recipe);
     if (next === doc) return;
-    set({ doc: next, dirty: true });
+    set({ doc: next, dirty: next !== get().savedDoc });
+  };
+
+  /** 当前层级（ui.path）的一个参数：节点、它的算子（含 sub: 合成的）、声明。找不到返回 null。 */
+  const lookupParam = (nodeId: string, paramName: string) => {
+    const { doc } = get();
+    const path = useUiStore.getState().path;
+    if (!pathIsValid(doc, path)) {
+      set({ lastRejection: "当前层级已失效，回到顶层再试" });
+      return null;
+    }
+    const ops = ctx(doc).operatorsById;
+    const node = level(doc).nodes.find((n) => n.id === nodeId);
+    const op = node ? ops.get(node.op) : undefined;
+    const decl = op?.params.find((p) => p.name === paramName);
+    if (!node || !op || !decl) {
+      set({ lastRejection: `找不到参数 ${nodeId}.${paramName}` });
+      return null;
+    }
+    return { doc, path, ops, node, op, decl };
   };
 
   return {
     doc: emptyDoc(),
     filePath: null,
     dirty: false,
+    savedDoc: null,
     epoch: 0,
     past: [],
     future: [],
@@ -232,7 +379,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         past: [...past, { label, doc: pendingSnapshot }].slice(-MAX_HISTORY),
         future: [],
         pendingSnapshot: null,
-        dirty: true,
+        dirty: doc !== get().savedDoc,
       });
     },
 
@@ -366,6 +513,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
         lvl.nodes = lvl.nodes.filter((n) => !kill.has(n.id));
         // 删节点自动清理相连边（交互清单 P0 #5）
         lvl.edges = lvl.edges.filter((e) => !kill.has(e.from.node) && !kill.has(e.to.node));
+        // 顶层图参数指着被删节点的 bind 一并摘掉，否则存下来就是一条 unknown_bind。
+        // 图参数本身留着（可能还绑着别人，也可能用户马上要重新绑）
+        if (lvl === d && d.params) {
+          for (const gp of Object.values(d.params)) {
+            const kept = gp.binds.filter((b) => !kill.has(splitBind(b)?.node ?? ""));
+            if (kept.length !== gp.binds.length) gp.binds = kept;
+          }
+        }
       });
     },
 
@@ -385,6 +540,13 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     setParam(nodeId, name, value) {
       const { doc } = get();
+      // 被图参数绑定的参数（P1.4）：改的是图参数，不写成节点上的显式值 —— 那正是 param_conflict
+      // 的来路。Inspector、2D 拖框、粘贴、重置都经这里，所以在这一处路由而不是各处各判一遍。
+      const binding = resolveGraphBinding(doc, useUiStore.getState().path, nodeId, name);
+      if (binding) {
+        get().editGraphParamValue(binding.graphParam, value);
+        return;
+      }
       const node = level(doc).nodes.find((n) => n.id === nodeId);
       if (!node) return;
       const op = ctx(doc).operatorsById.get(node.op);
@@ -704,7 +866,174 @@ export const useGraphStore = create<GraphState>((set, get) => {
         };
         strip(d.nodes);
         for (const other of Object.values(d.subgraphs ?? {})) strip(other.nodes);
+        // 顶层实例上这个外参要是绑着图参数（纳入配方的提升链），那条 bind 也跟着走 ——
+        // 外参没了，留着它就是一条 unknown_bind
+        const instances = new Set(
+          d.nodes.filter((n) => subgraphIdOf(n.op) === last.subgraphId).map((n) => n.id),
+        );
+        for (const gp of Object.values(d.params ?? {})) {
+          const kept = gp.binds.filter((b) => {
+            const t = splitBind(b);
+            return !(t && t.param === paramName && instances.has(t.node));
+          });
+          if (kept.length !== gp.binds.length) gp.binds = kept;
+        }
       });
+    },
+
+    promoteToGraphParam(nodeId, paramName) {
+      const found = lookupParam(nodeId, paramName);
+      if (!found) return null;
+      const { doc, path, ops, node, op, decl } = found;
+      const already = resolveGraphBinding(doc, path, nodeId, paramName);
+      if (already) {
+        set({ lastRejection: `已经由图参数 ${already.graphParam} 提供` });
+        return null;
+      }
+      const name = uniqueGraphParamName(doc, paramName);
+      const label = graphParamLabel(doc, path, nodeId, decl, ops);
+      // 当前有效值成为 default：纳入前后界面上的数字不跳、运行结果逐位相同（验收 3）
+      const value = effectiveValue(op, node, paramName);
+      let done = false;
+      transact(`纳入配方 ${name}`, (d) => {
+        const top = liftToTop(d, path, nodeId, decl, value);
+        const target = top ? d.nodes.find((n) => n.id === top.node) : undefined;
+        if (!top || !target) return;
+        d.params = {
+          ...(d.params ?? {}),
+          [name]: {
+            ...specFromParam(plain(top.decl), label),
+            default: plain(top.value),
+            binds: [joinBind(top.node, top.param)],
+          },
+        };
+        // 一处定义：被绑定的参数不能再在节点上写值（param_conflict）
+        if (target.params && top.param in target.params) {
+          const next = { ...target.params };
+          delete next[top.param];
+          target.params = next;
+        }
+        done = true;
+      });
+      return done ? name : null;
+    },
+
+    bindToGraphParam(name, nodeId, paramName) {
+      const found = lookupParam(nodeId, paramName);
+      if (!found) return false;
+      const { doc, path, op, node, decl } = found;
+      const gp = doc.params?.[name];
+      if (!gp) {
+        set({ lastRejection: `没有图参数 ${name}` });
+        return false;
+      }
+      const already = resolveGraphBinding(doc, path, nodeId, paramName);
+      if (already) {
+        if (already.graphParam === name) return true;
+        set({ lastRejection: `已经由图参数 ${already.graphParam} 提供` });
+        return false;
+      }
+      // 规格以图参数为准（控件、第一道校验），被绑定目标自己的规格 core 照样查（P1.2）：
+      // 类型都对不上的话两道校验必有一道永远不过，不如在这里就拦下
+      if (gp.type && gp.type !== decl.type) {
+        set({ lastRejection: `类型不同：图参数 ${name} 是 ${gp.type}，${paramName} 是 ${decl.type}` });
+        return false;
+      }
+      let done = false;
+      transact(`绑定到图参数 ${name}`, (d) => {
+        const top = liftToTop(d, path, nodeId, decl, effectiveValue(op, node, paramName));
+        const target = top ? d.nodes.find((n) => n.id === top.node) : undefined;
+        const into = d.params?.[name];
+        if (!top || !target || !into) return;
+        into.binds = [...into.binds, joinBind(top.node, top.param)];
+        if (target.params && top.param in target.params) {
+          const next = { ...target.params };
+          delete next[top.param];
+          target.params = next;
+        }
+        done = true;
+      });
+      return done;
+    },
+
+    unbindFromGraphParam(name, bind) {
+      const { doc } = get();
+      const gp = doc.params?.[name];
+      if (!gp || !gp.binds.includes(bind)) return;
+      // 「当前值」= 当前配方下的有效值（P1 = default）：解除之后这个节点跑出来的还是刚才那样
+      const value = graphParamValue(doc, name, currentOverrides());
+      const ops = ctx(doc).operatorsById;
+      transact(`解除绑定 ${bind}`, (d) => {
+        writeBack(d, ops, bind, value);
+        const into = d.params?.[name];
+        if (into) into.binds = into.binds.filter((b) => b !== bind);
+      });
+    },
+
+    removeGraphParam(name) {
+      const { doc } = get();
+      const gp = doc.params?.[name];
+      if (!gp) return;
+      const value = graphParamValue(doc, name, currentOverrides());
+      const ops = ctx(doc).operatorsById;
+      transact(`删除图参数 ${name}`, (d) => {
+        for (const bind of gp.binds) writeBack(d, ops, bind, value);
+        const next = { ...(d.params ?? {}) };
+        delete next[name];
+        // 最后一个也删了就连键一起拿掉：老图原本就没有 params，存盘不该多出一个空对象
+        if (Object.keys(next).length === 0) delete d.params;
+        else d.params = next;
+      });
+    },
+
+    renameGraphParam(name, next) {
+      const { doc } = get();
+      if (!doc.params?.[name]) return false;
+      if (next === name) return true;
+      const problem = graphParamNameProblem(doc, next, name);
+      if (problem) {
+        set({ lastRejection: problem });
+        return false;
+      }
+      transact(`重命名图参数 ${name} → ${next}`, (d) => {
+        // 保持键的位置：存盘是给人 diff 的，改个名不该让这一段挪到末尾
+        d.params = Object.fromEntries(
+          Object.entries(d.params ?? {}).map(([k, v]) => [k === name ? next : k, v]),
+        );
+      });
+      return true;
+    },
+
+    setGraphParamDefault(name, value) {
+      const gp = get().doc.params?.[name];
+      if (!gp || valueEquals(gp.default, value)) return;
+      const apply = (d: GraphDoc) => {
+        const into = d.params?.[name];
+        if (into) into.default = plain(value);
+      };
+      // 滑块与数字框拖动时每帧都来，靠外层 begin/commit 合成一条撤销（同 setParam）
+      if (get().pendingSnapshot) mutate(apply);
+      else transact(`修改图参数 ${name}`, apply);
+    },
+
+    setGraphParamSpec(name, patch) {
+      if (!get().doc.params?.[name]) return;
+      transact(`修改图参数 ${name} 的规格`, (d) => {
+        const into = d.params?.[name] as Record<string, unknown> | undefined;
+        if (!into) return;
+        for (const [k, v] of Object.entries(patch)) {
+          // binds / default / type 各有各的动作，规格补丁不许顺手改它们
+          if (k === "binds" || k === "default" || k === "type") continue;
+          if (v === undefined) delete into[k];
+          else into[k] = plain(v);
+        }
+      });
+    },
+
+    editGraphParamValue(name, value) {
+      // K6 ①：选着某个配方时写进那个配方（P3 接在这里），选着「基础」时写 default。
+      // P1 没有配方，当前恒为「基础」。
+      if (useRecipeStore.getState().current === null) get().setGraphParamDefault(name, value);
     },
 
     renameSubgraph(subgraphId, name) {
@@ -748,7 +1077,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
         doc: entry.doc,
         past: past.slice(0, -1),
         future: [...future, { label: entry.label, doc }],
-        dirty: true,
+        // 撤销回到保存点 = 文件里就是这一份，标题栏的 ● 该消失（P1.6）
+        dirty: entry.doc !== get().savedDoc,
         pendingSnapshot: null,
       });
     },
@@ -761,7 +1091,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         doc: entry.doc,
         future: future.slice(0, -1),
         past: [...past, { label: entry.label, doc }],
-        dirty: true,
+        dirty: entry.doc !== get().savedDoc,
         pendingSnapshot: null,
       });
     },
@@ -771,8 +1101,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     newDoc() {
       useUiStore.getState().setPath([]);
+      const doc = emptyDoc();
       set({
-        doc: emptyDoc(),
+        doc,
+        savedDoc: doc,
         filePath: null,
         dirty: false,
         epoch: get().epoch + 1,
@@ -786,6 +1118,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       useUiStore.getState().setPath([]);
       set({
         doc,
+        savedDoc: doc,
         filePath: path,
         dirty: false,
         epoch: get().epoch + 1,
@@ -795,8 +1128,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
       });
     },
 
-    markSaved(path) {
-      set({ filePath: path, dirty: false });
+    markSaved(path, saved) {
+      const doc = saved ?? get().doc;
+      set({ filePath: path, savedDoc: doc, dirty: get().doc !== doc });
     },
 
     setName(name) {

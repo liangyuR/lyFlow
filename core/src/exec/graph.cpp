@@ -126,7 +126,8 @@ bool applyGraphParamValues(const nlohmann::json& values, RawGraph& graph, Diagno
       ok = false;
       continue;
     }
-    gp->decl["default"] = it.value();
+    // 不覆盖 decl 的 default：图里写的那个同样要按规格查（P1.2），报错时也分得清是谁的错
+    gp->given = it.value();
   }
   return ok;
 }

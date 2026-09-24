@@ -161,11 +161,13 @@ struct EnumOption {
   std::string doc;
 };
 
-// 参数联动条件。有意做得很弱：只支持对同节点其他参数的等值/包含判断。
-// 需要更复杂的逻辑通常说明这个算子该拆了。
+// 参数联动条件。有意做得很弱：只支持对同节点其他参数的等值/不等/包含判断。
+// 需要更复杂的逻辑通常说明这个算子该拆了。三个判据同时给时按 eq → ne → in 的顺序取第一个，
+// 与 schema、编辑器的 isConditionMet 一致（param-recipe P1.6）。
 struct Condition {
   std::string param;             // 空 = 未设置条件
   Value eq;                      // Kind::Null = 未设置
+  Value ne;                      // Kind::Null = 未设置
   std::vector<Value> in;
 
   bool isSet() const { return !param.empty(); }

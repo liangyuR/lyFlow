@@ -49,12 +49,25 @@ LYFLOW_API size_t lyflow_library_count(void);
 // 每一项带 kind："diagnostic" 是普通诊断，"migration" 另带 op/opVersion/params/notes。
 LYFLOW_API char* lyflow_validate(const char* graph_json, const char* base_dir);
 
+// 同 lyflow_validate，另带顶层图参数的取值（与 lyflow_run_options.params_json 同义：
+// JSON 对象 { 名字: 值 }，NULL/空串 = 全用 default）。校验的是这组取值下的图 ——
+// 编辑器拿「default + 当前配方」校验（param-recipe K5），宿主拿它在切换配方前先问一句。
+// v11 里追加，ABI 号不变。
+LYFLOW_API char* lyflow_validate_params(const char* graph_json, const char* base_dir,
+                                        const char* params_json);
+
 // -------------------------------------------------------------- 计划与缓存
 
 // 编译一次，报告每节点 { nodeId, cacheKey, cached, level, upstreamMissing, bypass }。
 // 校验失败时返回的是 lyflow_validate 那种诊断数组，靠 kind 字段区分（ADR-0007）。
 LYFLOW_API char* lyflow_plan(const char* graph_json, const char* base_dir,
                              const char* const* targets, size_t n);
+
+// 同 lyflow_plan，另带顶层图参数的取值（同 lyflow_validate_params）。cacheKey 与 cached
+// 反映的是这组取值：切配方之后「哪些节点会重算」靠它（v11 里追加）。
+LYFLOW_API char* lyflow_plan_params(const char* graph_json, const char* base_dir,
+                                    const char* const* targets, size_t n,
+                                    const char* params_json);
 
 // 进程级地丢掉全部缓存结果，别的 run 的结果也一并丢，所以调用方应当先取消。
 // 只想让某一次运行不吃缓存的，用 lyflow_run_options.no_reuse。

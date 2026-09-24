@@ -118,6 +118,13 @@ lyflow::RunResult result = client.run(graphJson, options);
 - 图没声明的名字 → 这次运行的校验阶段报 `unknown_param`，一个节点都不跑。
 - 值在展开期写进被绑定的节点参数，所以缓存键跟着变：改一个顶层参数，只有它绑定的节点及其下游会重算。
 - CLI 的对应物是 `--param <名字>=<json>`，同一张图、同一组值，两边结果一致。
+- 图参数声明了 `type`（完整规格，param-recipe P1.1）时，`default` 与传进来的值都先按这份规格查：
+  类型、硬限位 `min`/`max`、`options`。不合法报 `bad_param`，`paramPath` 是图参数名、`nodeId` 为空，
+  整次运行不执行任何节点；之后照旧走被绑定节点自己的参数规整。没有 `type` 的老图参数跳过第一步。
+- 切换一组取值之前想先问一句「这组值合不合法、哪些节点会重算」：`lyflow_validate_params(graph, baseDir,
+  params_json)` 与 `lyflow_plan_params(graph, baseDir, targets, n, params_json)`（v11 里追加，ABI 号不变）
+  与 `lyflow_validate` / `lyflow_plan` 同义，只多一个 `params_json`。`client.hpp` 的 `validate` / `plan`
+  与 `lyflow-client` 的 `validate_with_params` / `plan_with_params` 各多一个可选参数。
 
 ## 部分运行：targets、isolate、force
 

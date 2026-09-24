@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "id": "01JGRAPHPARAMSEXAMPLE0001",
+  "name": "graph params full spec",
+  "nodes": [
+    { "id": "n_gen", "op": "gen.synthetic", "opVersion": "1.0.0", "params": { "seed": 7 } },
+    { "id": "n_voxel", "op": "filter.voxel_grid", "opVersion": "1.0.0", "params": {} },
+    { "id": "n_cut", "op": "filter.passthrough", "opVersion": "1.0.0", "params": {} }
+  ],
+  "edges": [
+    { "id": "e1", "from": { "node": "n_gen", "port": "cloud" }, "to": { "node": "n_voxel", "port": "cloud" } },
+    { "id": "e2", "from": { "node": "n_voxel", "port": "cloud" }, "to": { "node": "n_cut", "port": "cloud" } }
+  ],
+  "params": {
+    "leafSize": {
+      "type": "vec3f",
+      "label": "Voxel Grid · Leaf Size",
+      "doc": "体素边长。完整规格：从被绑定参数的 manifest 声明复制过来（param-recipe P1.1）。",
+      "default": [0.02, 0.02, 0.02],
+      "binds": ["n_voxel.leafSize"],
+      "group": "降采样",
+      "min": 0.0001,
+      "max": 10,
+      "softMin": 0.001,
+      "softMax": 0.1,
+      "step": 0.001,
+      "unit": "m",
+      "componentLabels": ["X", "Y", "Z"]
+    },
+    "cutField": {
+      "type": "enum",
+      "label": "Passthrough · Field",
+      "default": "z",
+      "binds": ["n_cut.field"],
+      "options": [
+        { "value": "x", "label": "X" },
+        { "value": "y", "label": "Y" },
+        { "value": "z", "label": "Z", "doc": "竖直方向" }
+      ],
+      "advanced": true
+    },
+    "pointCount": {
+      "type": "int",
+      "label": "Synthetic · Point Count",
+      "default": 20000,
+      "binds": ["n_gen.pointCount"],
+      "min": 1,
+      "max": 20000000,
+      "softMax": 500000,
+      "placeholder": "点数"
+    },
+    "cutMax": {
+      "default": 1.5,
+      "binds": ["n_cut.max"],
+      "doc": "老格式：没有 type，也没有规格字段，照常运行"
+    }
+  },
+  "subgraphs": {},
+  "x": {}
+}

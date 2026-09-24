@@ -5,6 +5,7 @@
 #include <set>
 
 #include "exec/library.h"
+#include "exec/plan.h"
 
 namespace lyflow::exec {
 namespace {
@@ -55,23 +56,33 @@ void readOptional(const nlohmann::json& j, const char* key, std::optional<double
   if (it != j.end() && it->is_number()) out = it->get<double>();
 }
 
-/// 子图参数声明（一份 JSON）→ manifest 的 Param。声明是数据，坏了就退回 float。
-Param paramFromJson(const SubParam& sp) {
+Status subgraphStub(const Inputs&, const ParamView&, Outputs&, ExecContext&) {
+  return Status::Error(Phase::Execute, "internal",
+                       "子图算子应当在 compile 之前被展开掉，执行器不该看见它");
+}
+
+}  // namespace
+
+Param paramFromDecl(const std::string& name, const nlohmann::json& j) {
   Param p;
-  p.name = sp.name;
-  const nlohmann::json& j = sp.decl;
-  std::string type = j.value("type", std::string("float"));
-  if (!parseParamType(type, p.type)) p.type = ParamType::Float;
-  p.label = j.value("label", std::string());
-  p.doc = j.value("doc", std::string());
-  p.group = j.value("group", std::string());
-  p.advanced = j.value("advanced", false);
-  p.unit = j.value("unit", std::string());
-  p.placeholder = j.value("placeholder", std::string());
-  p.mode = j.value("mode", std::string());
+  p.name = name;
+  // json::value 碰到类型不符的字段会抛：手写的声明里 label 写成数字不该让整张图展开失败
+  auto text = [&](const char* key) {
+    auto it = j.find(key);
+    return it != j.end() && it->is_string() ? it->get<std::string>() : std::string();
+  };
+  if (!parseParamType(text("type"), p.type)) p.type = ParamType::Float;
+  p.label = text("label");
+  p.doc = text("doc");
+  p.group = text("group");
+  auto advanced = j.find("advanced");
+  p.advanced = advanced != j.end() && advanced->is_boolean() && advanced->get<bool>();
+  p.unit = text("unit");
+  p.placeholder = text("placeholder");
+  p.mode = text("mode");
   // 语义标记跟着提升走（框拖动照样可用）；roiBackdrop 指的是内部算子的参数名，
   // 到了子图这一层对不上，不带过来。
-  if (j.value("semantic", std::string()) == "roi" && p.type == ParamType::Vec4f) {
+  if (text("semantic") == "roi" && p.type == ParamType::Vec4f) {
     p.semantic = "roi";
   }
   readOptional(j, "min", p.min);
@@ -91,9 +102,13 @@ Param paramFromJson(const SubParam& sp) {
     for (const auto& o : *options) {
       if (!o.is_object()) continue;
       EnumOption e;
-      e.value = o.value("value", std::string());
-      e.label = o.value("label", e.value);
-      e.doc = o.value("doc", std::string());
+      // schema 允许整数的选项值（flags 的位）：json::value 碰到类型不符会抛，这里自己取
+      auto v = o.find("value");
+      if (v != o.end()) e.value = v->is_string() ? v->get<std::string>() : v->dump();
+      auto label = o.find("label");
+      e.label = label != o.end() && label->is_string() ? label->get<std::string>() : e.value;
+      auto doc = o.find("doc");
+      if (doc != o.end() && doc->is_string()) e.doc = doc->get<std::string>();
       p.options.push_back(std::move(e));
     }
   }
@@ -110,13 +125,6 @@ Param paramFromJson(const SubParam& sp) {
   return p;
 }
 
-Status subgraphStub(const Inputs&, const ParamView&, Outputs&, ExecContext&) {
-  return Status::Error(Phase::Execute, "internal",
-                       "子图算子应当在 compile 之前被展开掉，执行器不该看见它");
-}
-
-}  // namespace
-
 OperatorDesc synthesizeOperator(const SubgraphDef& def, const std::string& opId) {
   OperatorDesc op;
   op.id = opId;
@@ -131,7 +139,7 @@ OperatorDesc synthesizeOperator(const SubgraphDef& def, const std::string& opId)
   for (const SubOutput& o : def.outputs) {
     op.outputs.push_back(Port{o.name, o.type, o.label, o.doc, true});
   }
-  for (const SubParam& p : def.params) op.params.push_back(paramFromJson(p));
+  for (const SubParam& p : def.params) op.params.push_back(paramFromDecl(p.name, p.decl));
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &subgraphStub;
   return op;
@@ -190,10 +198,37 @@ class Expander {
     }
   }
 
+  /// 一个顶层参数的取值按它自己的规格查（P1.2）：类型、硬限位、options。老格式没写 type
+  /// 的跳过这一步 —— 它的规格就是被绑定的那个节点参数，照旧由 buildPlan 规整。
+  /// 不合法只报诊断、记 paramValuesOk，不打断展开：绑定照常写下去，节点那一层的规整与
+  /// 其余诊断照常出来（编辑期校验要一次看到全部问题），buildPlan 最后不给可运行的计划。
+  void checkGraphParamValues() {
+    for (const GraphParam& gp : in_.params) {
+      auto typeIt = gp.decl.find("type");
+      if (typeIt == gp.decl.end()) continue;
+      Param spec = paramFromDecl(gp.name, gp.decl);
+      // enum 没给 options（手写的半份规格）：只能查「是字符串」，查选项会把每个值都判成非法
+      if (spec.type == ParamType::Enum && spec.options.empty()) spec.type = ParamType::String;
+      const std::string who =
+          "图参数 '" + gp.name + "'" + (spec.label.empty() ? std::string(" ") : "（" + spec.label + "）");
+      auto check = [&](const nlohmann::json& value, const char* which) {
+        Value v;
+        std::string message;
+        if (!coerceParam(spec, value, v, message) || !checkRange(spec, v, message)) {
+          diags_.error("", Phase::Validate, "bad_param", who + which + "：" + message, gp.name);
+          out_.paramValuesOk = false;
+        }
+      };
+      check(gp.decl.at("default"), "的 default");
+      if (gp.given) check(*gp.given, "传入的值");
+    }
+  }
+
   /// 顶层图参数（J7）。与子图外参唯一的不同是「一处定义」：目标节点里又显式写了
   /// 同一个参数、或者两个顶层参数绑同一个目标，都是 param_conflict，而不是悄悄覆盖。
   /// 目标参数在算子上存不存在要 manifest 才知道，留给 buildPlan（那里报 unknown_bind）。
   void applyGraphParams(std::vector<RawNode>& nodes) {
+    checkGraphParamValues();
     std::map<std::string, std::size_t> byId;
     for (std::size_t i = 0; i < nodes.size(); ++i) byId[nodes[i].id] = i;
     std::map<std::pair<std::string, std::string>, std::string> owner;
@@ -227,7 +262,7 @@ class Expander {
     }
     if (!clean) return;
     for (const GraphParam& gp : in_.params) {
-      writeBinds(nodes, byId, gp.binds, gp.decl.at("default"), &gp.name);
+      writeBinds(nodes, byId, gp.binds, gp.value(), &gp.name);
     }
   }
 

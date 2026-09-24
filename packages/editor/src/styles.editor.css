@@ -342,7 +342,8 @@
   display: none;
 }
 
-.insp__group--frame summary.is-invalid {
+.insp__group--frame summary.is-invalid,
+.insp__graph-params summary.is-invalid {
   color: #ff9a9a;
 }
 
@@ -1451,3 +1452,45 @@
   padding: 0 6px;
   line-height: 18px;
 }
+
+/* 被图参数绑定的那一行（param-recipe P1.4）：值来自图参数，在这里改的是图参数。 */
+.insp-param__graph {
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--lyflow-warn) 22%, transparent);
+  color: var(--lyflow-fg-1);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* 顶层图参数的简表。完整的参数面板是 P2，这里只让人看得见、改得动、删得掉。 */
+.insp__graph-params {
+  margin: 0;
+  padding: 6px 12px 10px;
+  border-bottom: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-2);
+}
+.insp__graph-params > summary { cursor: pointer; }
+.insp-gparam__binds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--lyflow-fg-2);
+}
+.insp-gparam__bind {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--lyflow-mono);
+}
+.insp-gparam__bind .ctl-btn,
+.insp-gparam__head .ctl-btn {
+  padding: 0 4px;
+  line-height: 14px;
+  font-size: 10px;
+}
+.insp-gparam__head { display: flex; align-items: center; gap: 6px; }
+.insp-gparam__name { font-family: var(--lyflow-mono); font-size: 10px; color: var(--lyflow-fg-2); }

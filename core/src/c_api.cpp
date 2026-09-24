@@ -101,11 +101,17 @@ size_t lyflow_library_count(void) {
 }
 
 char* lyflow_validate(const char* graph_json, const char* base_dir) {
+  return lyflow_validate_params(graph_json, base_dir, nullptr);
+}
+
+char* lyflow_validate_params(const char* graph_json, const char* base_dir,
+                             const char* params_json) {
   try {
     registry();  // 确保注册表已填充
     const std::string base = fromC(base_dir);
     return dup(lyflow::exec::validateGraphJson(
-        fromC(graph_json), base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base)));
+        fromC(graph_json), base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base),
+        fromC(params_json)));
   } catch (const std::exception& e) {
     lyflow::Diagnostics d;
     d.error("", lyflow::Phase::Validate, "internal", std::string("校验时内部异常: ") + e.what());
@@ -117,6 +123,11 @@ char* lyflow_validate(const char* graph_json, const char* base_dir) {
 
 char* lyflow_plan(const char* graph_json, const char* base_dir, const char* const* targets,
                   size_t n) {
+  return lyflow_plan_params(graph_json, base_dir, targets, n, nullptr);
+}
+
+char* lyflow_plan_params(const char* graph_json, const char* base_dir, const char* const* targets,
+                         size_t n, const char* params_json) {
   try {
     registry();
     const std::string base = fromC(base_dir);
@@ -124,7 +135,8 @@ char* lyflow_plan(const char* graph_json, const char* base_dir, const char* cons
     for (std::size_t i = 0; targets && i < n; ++i) ts.push_back(fromC(targets[i]));
     return dup(lyflow::exec::planGraphJson(
         fromC(graph_json),
-        base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base), ts));
+        base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base), ts,
+        fromC(params_json)));
   } catch (const std::exception& e) {
     lyflow::Diagnostics d;
     d.error("", lyflow::Phase::Compile, "internal", std::string("编译时内部异常: ") + e.what());

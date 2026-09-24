@@ -85,6 +85,8 @@ v9 增补的 `lyflow_run_summary` 见 [ADR-0022](../../docs/adr/0022-run-summary
 （编辑器不额外调它 —— 那份 summary 就挂在 `run_finished` 事件上）。
 v11 给 `runGraph` 的选项加了 `isolate?: string[]` 与 `force?: string[]`（下面「节点运行按钮」一节），
 自己实现 `Transport` 的要把它们透传到后端，语义见 [`docs/embedding.md`](../../docs/embedding.md#部分运行targetsisolateforce)。
+param-recipe P1 又给 `runGraph` 的选项、`validateGraph` 与 `planGraph` 各加了一个可选的 `params`（顶层图参数的取值
+`{名字: 值}`），同样要透传：Tauri 到 C ABI 的 `params_json`，HTTP 到信封的 `params`（[http 契约](../../docs/http-transport.md)）。
 
 点云走二进制，绝不 JSON（ADR-0006）：`getOutputCloud` 返回的 `ArrayBuffer`
 布局见 [http 契约](../../docs/http-transport.md)的「结果」一节，
@@ -367,6 +369,22 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
   就一条命中路径都没有了 —— 双击开 Peek、右键菜单、e2e 找线全靠它。
 - **React Flow 的 `nodeDragThreshold` 会吞掉第一段位移。** 拖拽类的 CDP 断言必须先
   发一个 2 px 的「唤醒」移动，否则落点永远差第一步那么多，位移越大差得越多。
+
+## 图参数（param-recipe P1）
+
+设计在 [docs/param-recipe-plan.md](../../docs/param-recipe-plan.md)，数据格式与编辑器行为见
+[docs/graph-doc.md](../../docs/graph-doc.md)「顶层图参数」，验收记录在 [docs/param-recipe-p1-acceptance.md](../../docs/param-recipe-p1-acceptance.md)。
+
+- **纳入配方 = 提升为图参数**：参数行右键「纳入配方（提升为图参数）」→ `promoteToGraphParam`。在子图里做就是整条
+  逐层提升链，一个动作一次撤销。其余动作（绑定、解除、删除、改名、改 default、改规格）都在 graph store。
+- **被绑定的参数只有一个写入处**：`setParam` 命中被图参数提供的参数（`lib/graphParams.ts` 的 `resolveGraphBinding`）
+  时转给 `editGraphParamValue`，按当前配方写进配方或 default（K6）。Inspector、2D 拖框、粘贴、重置都经 `setParam`，
+  所以不必各判一遍；显示走 `withBoundValues`（节点的浅拷贝，被绑定的键换成图参数的有效值）。
+- **有效值 = default ← 当前配方覆盖**：读值一律经 `store/recipe.ts`（`runParamsOf`、`useGraphParamOverrides`）。
+  P1 当前配方恒为「基础」、覆盖恒为空；运行、实时预览、实时校验、编计划都把合成结果经 `RunOptions.params`
+  （validate / plan 的同名参数）交给后端 —— P3 接上配方时调用方不用改。
+- **dirty 是「doc 不是存盘时那一份」**：graph store 记着 `savedDoc`（对象身份），撤销回到保存点时 dirty 复原。
+  存盘是异步的，`markSaved(path, doc)` 记下真正写下去的那一份。
 
 ## 层级（子图）
 

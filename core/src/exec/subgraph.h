@@ -17,6 +17,10 @@ constexpr int kMaxSubgraphDepth = 32;
 /// 路径分隔符（F2）。localId 的字符集里没有它，所以拼出来的路径可以反解。
 constexpr char kPathSeparator = '/';
 
+/// 一份参数声明（JSON：manifest 的 param 形态，不含 name）→ Param。子图提升参数与
+/// 顶层图参数的规格（P1.1）共用。声明是数据不是代码：认不出的 type 退回 float，坏字段忽略。
+Param paramFromDecl(const std::string& name, const nlohmann::json& decl);
+
 /// 子图定义 → 临时 OperatorDesc。端口与参数来自 inputs/outputs/params，
 /// compute 是一个只会在「展开漏了」时才被调到的桩。
 OperatorDesc synthesizeOperator(const SubgraphDef& def, const std::string& opId);

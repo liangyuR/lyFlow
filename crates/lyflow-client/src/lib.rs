@@ -198,11 +198,20 @@ type FnVersion = unsafe extern "C" fn() -> *const c_char;
 type FnJson = unsafe extern "C" fn() -> *mut c_char;
 type FnStringFree = unsafe extern "C" fn(*mut c_char);
 type FnValidate = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
+type FnValidateParams =
+    unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> *mut c_char;
 type FnPlan = unsafe extern "C" fn(
     *const c_char,
     *const c_char,
     *const *const c_char,
     usize,
+) -> *mut c_char;
+type FnPlanParams = unsafe extern "C" fn(
+    *const c_char,
+    *const c_char,
+    *const *const c_char,
+    usize,
+    *const c_char,
 ) -> *mut c_char;
 type FnVoid = unsafe extern "C" fn();
 type FnRunStart = unsafe extern "C" fn(
@@ -262,7 +271,9 @@ pub struct Core {
     manifest_problems: FnJson,
     string_free: FnStringFree,
     validate: FnValidate,
+    validate_params: FnValidateParams,
     plan: FnPlan,
+    plan_params: FnPlanParams,
     effective_params: FnValidate,
     cache_clear: FnVoid,
     cache_stats: FnJson,
@@ -330,7 +341,9 @@ impl Core {
             manifest_problems: sym!(lib, "lyflow_manifest_problems", FnJson),
             string_free: sym!(lib, "lyflow_string_free", FnStringFree),
             validate: sym!(lib, "lyflow_validate", FnValidate),
+            validate_params: sym!(lib, "lyflow_validate_params", FnValidateParams),
             plan: sym!(lib, "lyflow_plan", FnPlan),
+            plan_params: sym!(lib, "lyflow_plan_params", FnPlanParams),
             // 与 validate 同签名（graph_json, base_dir）→ JSON 文本。
             effective_params: sym!(lib, "lyflow_effective_params", FnValidate),
             cache_clear: sym!(lib, "lyflow_cache_clear", FnVoid),
@@ -394,6 +407,21 @@ impl Core {
         unsafe { self.take_owned((self.validate)(g.as_ptr(), b.as_ptr())) }
     }
 
+    /// 同 [`Core::validate`]，另带顶层图参数的取值（`params_json`，与 [`RunSpec::params_json`]
+    /// 同义；None = 全用 default）。编辑器校验的是「default + 当前配方」合成的那一组（K5）。
+    pub fn validate_with_params(
+        &self,
+        graph_json: &str,
+        base_dir: &str,
+        params_json: Option<&str>,
+    ) -> Result<String, CoreError> {
+        let g = CString::new(graph_json)?;
+        let b = CString::new(base_dir)?;
+        let p = params_json.map(CString::new).transpose()?;
+        let pp = p.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+        unsafe { self.take_owned((self.validate_params)(g.as_ptr(), b.as_ptr(), pp)) }
+    }
+
     /// 编译一次，报告每节点的 cacheKey 与是否已缓存（ADR-0007）。
     pub fn plan(
         &self,
@@ -401,8 +429,21 @@ impl Core {
         base_dir: &str,
         targets: &[String],
     ) -> Result<String, CoreError> {
+        self.plan_with_params(graph_json, base_dir, targets, None)
+    }
+
+    /// 同 [`Core::plan`]，另带顶层图参数的取值：cacheKey 与 cached 反映的是这一组。
+    pub fn plan_with_params(
+        &self,
+        graph_json: &str,
+        base_dir: &str,
+        targets: &[String],
+        params_json: Option<&str>,
+    ) -> Result<String, CoreError> {
         let g = CString::new(graph_json)?;
         let b = CString::new(base_dir)?;
+        let p = params_json.map(CString::new).transpose()?;
+        let pp = p.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
         let owned: Vec<CString> = targets
             .iter()
             .map(|t| CString::new(t.as_str()))
@@ -413,7 +454,19 @@ impl Core {
         } else {
             ptrs.as_ptr()
         };
-        unsafe { self.take_owned((self.plan)(g.as_ptr(), b.as_ptr(), head, ptrs.len())) }
+        unsafe {
+            match p {
+                // 不带取值就是老入口的语义，直接调它
+                None => self.take_owned((self.plan)(g.as_ptr(), b.as_ptr(), head, ptrs.len())),
+                Some(_) => self.take_owned((self.plan_params)(
+                    g.as_ptr(),
+                    b.as_ptr(),
+                    head,
+                    ptrs.len(),
+                    pp,
+                )),
+            }
+        }
     }
 
     /// 每节点每参数的生效值与来源（m6-plan §2）。合并默认值这件事只在 core 做一次 ——

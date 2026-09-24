@@ -57,6 +57,9 @@ export interface RunOptions {
    *  `gap.load_profile_pair` 的端口，图里的路径参数一个字不用改（见
    *  `LyFlowEditorProps.sceneId`）。 */
   sceneId?: string | null | undefined;
+  /** 顶层图参数的取值 { 名字: 值 }（param-recipe K3）：编辑器合成的「default + 当前配方覆盖」，
+   *  后端原样交给 C ABI 的 `params_json`（HTTP 桩转成 CLI 的 `--param`）。不给 = 全用 default。 */
+  params?: Record<string, unknown> | undefined;
 }
 
 /** 库算子目录的状态（ADR-0010）。 */
@@ -93,10 +96,19 @@ export interface Transport {
   saveGraph(path: string, doc: GraphDoc): Promise<void>;
   loadGraph(path: string): Promise<LoadedGraph>;
 
-  /** 权威校验（C++ 侧），返回全部诊断。 */
-  validateGraph(doc: GraphDoc, graphPath: string | null): Promise<GraphDiagnostic[]>;
-  /** 编译一次但不执行。stale 标记的唯一权威（ADR-0007）。 */
-  planGraph(doc: GraphDoc, graphPath: string | null, targets?: string[]): Promise<PlanNode[]>;
+  /** 权威校验（C++ 侧），返回全部诊断。params 同 RunOptions.params：校验的是这组取值下的图（K5）。 */
+  validateGraph(
+    doc: GraphDoc,
+    graphPath: string | null,
+    params?: Record<string, unknown>,
+  ): Promise<GraphDiagnostic[]>;
+  /** 编译一次但不执行。stale 标记的唯一权威（ADR-0007）。params 同 RunOptions.params。 */
+  planGraph(
+    doc: GraphDoc,
+    graphPath: string | null,
+    targets?: string[],
+    params?: Record<string, unknown>,
+  ): Promise<PlanNode[]>;
   clearCache(): Promise<void>;
   cacheStats(): Promise<CacheStats>;
   /** 启动一次运行，返回 runId。状态走 `onExecutionEvent`。 */

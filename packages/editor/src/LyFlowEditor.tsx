@@ -51,6 +51,7 @@ import {
 } from "./store/execution";
 import { useGraphStore } from "./store/graph";
 import { useManifestStore } from "./store/manifest";
+import { useRecipeStore } from "./store/recipe";
 import { useUiStore } from "./store/ui";
 import { scheduleValidate } from "./store/validation";
 import { setTransport, transport, type Transport } from "./transport";
@@ -279,12 +280,23 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     const graph = useGraphStore.getState();
     void schedulePlan(graph.doc, graph.filePath);
     scheduleValidate(graph.doc, graph.filePath);
-    return useGraphStore.subscribe((state, prev) => {
+    const stopGraph = useGraphStore.subscribe((state, prev) => {
       if (state.doc === prev.doc && state.filePath === prev.filePath) return;
       if (state.doc !== prev.doc) useExecutionStore.getState().markStale();
       schedulePlan(state.doc, state.filePath);
       scheduleValidate(state.doc, state.filePath);
     });
+    // 当前配方的覆盖变了（P3 切配方）：doc 没动，但交给 core 的取值变了，计划与诊断跟着重算（K5）
+    const stopRecipe = useRecipeStore.subscribe((state, prev) => {
+      if (state.overrides === prev.overrides) return;
+      const g = useGraphStore.getState();
+      schedulePlan(g.doc, g.filePath);
+      scheduleValidate(g.doc, g.filePath);
+    });
+    return () => {
+      stopGraph();
+      stopRecipe();
+    };
   }, []);
 
   // 一次正式运行收场就立刻重编一次（修订一 V5）：plan 的 cached 是「现在点下去会不会真算」的
@@ -375,7 +387,8 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         if (!path) return; // 用户取消
       }
       await saveDocTo(path, graph.doc);
-      graph.markSaved(path);
+      // 记下的是真正写下去的那一份：撤销回到它时 dirty 复原（P1.6）
+      graph.markSaved(path, graph.doc);
       await rememberFile(path);
       // 存过盘就没有「未保存的改动」了，备份留着只会在下次开图时误报
       await discardBackup(path);

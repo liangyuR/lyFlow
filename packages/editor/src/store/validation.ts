@@ -2,10 +2,12 @@
 // 钩子在里面），诊断按节点挂到画布与 Inspector 上。判定全在 C++，这里只存结论 —— 与 stale 同一条路
 // （ADR-0007），前端不重新实现任何一条校验。
 
+import { useMemo } from "react";
 import { create } from "zustand";
 
 import { pathPrefix, type SubPath } from "../lib/subgraph";
 import { transport } from "../transport";
+import { runParamsOf } from "./recipe";
 import { useUiStore } from "./ui";
 import type { GraphDiagnostic } from "../types/execution";
 import type { GraphDoc } from "../types/graph";
@@ -16,6 +18,9 @@ const DEBOUNCE_MS = 200;
 interface ValidationState {
   /** 事件里的 nodeId 是**路径**（子图内部是 `outer/inner`），键原样。只收 error / warning，不收迁移。 */
   byNode: ReadonlyMap<string, GraphDiagnostic[]>;
+  /** 不属于任何节点的那些（nodeId 为空）：图参数的取值不合它自己的规格（param-recipe P1.2，
+   *  paramPath 是图参数名）、图级结构问题。Inspector 的图参数简表按 paramPath 挂到对应那一行。 */
+  graphLevel: readonly GraphDiagnostic[];
   /** 最近一次校验的时刻（performance.now）。验收脚本拿它量「拖完到标红」的延迟。 */
   at: number;
   set(diags: GraphDiagnostic[]): void;
@@ -23,22 +28,33 @@ interface ValidationState {
 }
 
 const EMPTY: ReadonlyMap<string, GraphDiagnostic[]> = new Map();
+const NO_DIAGS: readonly GraphDiagnostic[] = [];
 
 export const useValidationStore = create<ValidationState>((set) => ({
   byNode: EMPTY,
+  graphLevel: NO_DIAGS,
   at: 0,
   set(diags) {
     const byNode = new Map<string, GraphDiagnostic[]>();
+    const graphLevel: GraphDiagnostic[] = [];
     for (const d of diags) {
-      if (d.kind === "migration" || !d.nodeId) continue;
+      if (d.kind === "migration") continue;
+      if (!d.nodeId) {
+        graphLevel.push(d);
+        continue;
+      }
       const list = byNode.get(d.nodeId);
       if (list) list.push(d);
       else byNode.set(d.nodeId, [d]);
     }
-    set({ byNode: byNode.size === 0 ? EMPTY : byNode, at: performance.now() });
+    set({
+      byNode: byNode.size === 0 ? EMPTY : byNode,
+      graphLevel: graphLevel.length === 0 ? NO_DIAGS : graphLevel,
+      at: performance.now(),
+    });
   },
   reset() {
-    set({ byNode: EMPTY, at: 0 });
+    set({ byNode: EMPTY, graphLevel: NO_DIAGS, at: 0 });
   },
 }));
 
@@ -59,7 +75,8 @@ export async function requestValidate(doc: GraphDoc, graphPath: string | null): 
   if (transport.kind === "static") return;
   const mine = ++ticket;
   try {
-    const diags = await transport.validateGraph(doc, graphPath);
+    // 校验合并后的有效值（K5）：诊断说的是当前配方下的这张图，不是 doc 里的 default
+    const diags = await transport.validateGraph(doc, graphPath, runParamsOf(doc));
     if (mine !== ticket) return;
     useValidationStore.getState().set(diags);
   } catch {
@@ -106,4 +123,10 @@ export function useNodeValidation(localId: string): GraphDiagnostic[] {
 
 export function errorsOf(diags: readonly GraphDiagnostic[]): GraphDiagnostic[] {
   return diags.filter((d) => d.severity === "error");
+}
+
+/** 某个顶层图参数身上的校验诊断（nodeId 为空、paramPath 是它的名字）。 */
+export function useGraphParamValidation(name: string): GraphDiagnostic[] {
+  const all = useValidationStore((s) => s.graphLevel);
+  return useMemo(() => all.filter((d) => d.paramPath === name), [all, name]);
 }

@@ -624,3 +624,71 @@ TEST_CASE("被 visibleWhen 藏起来的参数只查形态不查必填") {
   REQUIRE(wrongShape.size() == 1);
   CHECK(wrongShape[0]["code"] == "bad_param");
 }
+
+TEST_CASE("visibleWhen 的 ne：不等于时才可见，与 schema、编辑器同一套判据（param-recipe P1.6）") {
+  ensureTestOps();
+  Registry r;
+  r.addType(PortType{"Transform", "#a0d030", {}, ""});
+
+  OperatorDesc op;
+  op.id = "test.ne_path";
+  op.version = "1.0.0";
+  op.label = "Ne Path";
+  op.category = "Test";
+  op.outputs = {Port{"out", "Transform", "Out", "", true}};
+  op.compute = [](const Inputs&, const ParamView&, Outputs& o, ExecContext&) {
+    o.set("out", Data::transform(Transform{}));
+    return Status::Ok();
+  };
+
+  Param source;
+  source.name = "source";
+  source.type = ParamType::Enum;
+  source.label = "Source";
+  source.def = Value::text("identity");
+  source.options = {EnumOption{"identity", "Identity", ""}, EnumOption{"file", "File", ""}};
+
+  // 与 hidden_path 相反的写法：source 不是 identity 时路径才露出来
+  Param path;
+  path.name = "path";
+  path.type = ParamType::Path;
+  path.label = "Path";
+  path.def = Value::text("");
+  path.visibleWhen.param = "source";
+  path.visibleWhen.ne = Value::text("identity");
+
+  op.params = {source, path};
+  r.addOperator(std::move(op));
+  REQUIRE(r.validate().empty());
+
+  // manifest 里写得出 ne（以前 writeCondition 只认 eq / in，ne 在导出时静默丢掉）
+  const Json manifest = Json::parse(r.toManifestJson());
+  const Json* declared = nullptr;
+  for (const Json& o : manifest["operators"]) {
+    if (o["id"] != "test.ne_path") continue;
+    for (const Json& p : o["params"]) {
+      if (p["name"] == "path") declared = &p;
+    }
+  }
+  REQUIRE(declared != nullptr);
+  CHECK((*declared)["visibleWhen"] == Json{{"param", "source"}, {"ne", "identity"}});
+
+  auto diagnose = [&](const Json& params) {
+    Json doc = makeGraph({{"n", "test.ne_path", params}}, {});
+    exec::RawGraph raw;
+    Diagnostics diags;
+    REQUIRE(exec::parseGraph(doc.dump(), raw, diags));
+    exec::Plan plan;
+    exec::BuildOptions options;
+    options.runId = "ne";
+    exec::buildPlan(r, raw, options, plan, diags);
+    return Json::parse(diags.toJson());
+  };
+
+  // source = identity：条件不成立，路径藏着，不报必填
+  CHECK(diagnose(Json::object()).empty());
+  // source = file：≠ identity，路径露出来，照常报「还没有选择文件」
+  const Json shown = diagnose(Json{{"source", "file"}});
+  REQUIRE(shown.size() == 1);
+  CHECK(shown[0]["paramPath"] == "path");
+}

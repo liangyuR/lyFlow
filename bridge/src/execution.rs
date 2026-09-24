@@ -61,6 +61,8 @@ pub struct StartOptions<'a> {
     pub force: &'a [String],
     /// Some = live preview（ADR-0011）。与 isolate 同时给是参数错误，由 core 判（R5）。
     pub preview: Option<PreviewOptions>,
+    /// 顶层图参数的取值（C ABI 的 `params_json`，param-recipe K3）。None = 全用 default。
+    pub params_json: Option<&'a str>,
 }
 
 #[derive(Default)]
@@ -108,6 +110,7 @@ impl RunManager {
         let mut spec = RunSpec::new(graph_json, &run_id, base_dir, options.targets);
         spec.isolate = options.isolate;
         spec.force = options.force;
+        spec.params_json = options.params_json;
         if let Some(p) = options.preview {
             spec.mode = 1;
             spec.preview_max_points = p.max_points;
@@ -891,6 +894,56 @@ mod tests {
         assert_eq!(f.run_status(), "error");
         assert_eq!(f.kind("run_finished")[0]["error"]["code"], "bad_input");
         assert!(f.kind("node_state").is_empty());
+    }
+
+    /// param-recipe P1.5：运行走 C ABI 的 params_json（编辑器合成的「default + 配方覆盖」）。
+    /// 与 default 不同的值真的进了 compute；越过图参数自己硬限位的值整次失败、一个节点都不跑。
+    #[test]
+    fn graph_param_values_reach_the_core_through_params_json() {
+        let doc = serde_json::json!({
+            "schemaVersion": 1, "id": "t",
+            "nodes": [{"id": "g", "op": "gen.synthetic", "params": {"seed": 7305}}],
+            "edges": [],
+            "params": {"count": {"type": "int", "min": 10, "max": 5000, "default": 3000,
+                                 "binds": ["g.pointCount"]}}
+        });
+        let run = |params: &str| {
+            let core = crate::core_ffi::core().expect("加载 core 失败");
+            let run_id = ulid::new();
+            let ctx = Box::new(Collector {
+                events: Mutex::new(Vec::new()),
+            });
+            let ptr = &*ctx as *const Collector;
+            let graph = doc.to_string();
+            let mut spec = RunSpec::new(&graph, &run_id, "", &[]);
+            spec.params_json = Some(params);
+            let handle = unsafe { RunHandle::start(Arc::clone(&core), spec, collect, ctx) }
+                .expect("启动运行失败");
+            handle.join();
+            let events = unsafe { (*ptr).events.lock().unwrap().clone() };
+            Fixture {
+                events,
+                run_id,
+                _handle: handle,
+                core,
+            }
+        };
+        let ok = run(r#"{"count": 1234}"#);
+        assert_eq!(ok.run_status(), "ok");
+        let done = ok
+            .kind("node_state")
+            .into_iter()
+            .find(|e| e["nodeId"] == "g" && e["state"] == "done")
+            .expect("g 没有 done");
+        assert_eq!(done["stats"]["outputs"][0]["elementCount"], 1234);
+
+        let bad = run(r#"{"count": 9}"#);
+        assert_eq!(bad.run_status(), "error");
+        assert_eq!(bad.kind("run_finished")[0]["error"]["code"], "bad_param");
+        assert!(
+            !bad.kind("node_state").iter().any(|e| e["state"] == "running"),
+            "越界的图参数值不该让任何节点开跑"
+        );
     }
 
     #[test]

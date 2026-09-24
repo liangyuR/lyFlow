@@ -388,18 +388,23 @@
     },
     "graphParam": {
       "type": "object",
+      "description": "一个顶层图参数 = 一份参数规格（与 manifest 的 param 同一套字段，复用 operator-manifest.schema.json 的 paramSpec，param-recipe P1.1）+ binds。老格式 { type?, default, binds, doc? } 是它的子集。给了 type 时 core 先按这份规格校验取值（类型、硬限位 min/max、options），不合法报 bad_param，paramPath 为图参数名；再照旧走被绑定节点的参数规整。",
       "required": [
         "default",
         "binds"
       ],
-      "additionalProperties": false,
+      "allOf": [
+        {
+          "$ref": "operator-manifest.schema.json#/$defs/paramSpec"
+        }
+      ],
+      "unevaluatedProperties": false,
       "properties": {
         "type": {
-          "type": "string",
-          "description": "参数类型名，与 manifest param 的 type 同一套。省略时由被绑定的节点参数决定。"
+          "description": "参数类型名，与 manifest param 的 type 同一套。省略时不做图参数这一层的校验，值由被绑定的节点参数规整。"
         },
         "default": {
-          "description": "未传值时写进被绑定参数的值，任意 JSON。"
+          "description": "未传值时写进被绑定参数的值（配方的「基础」值），任意 JSON。"
         },
         "binds": {
           "type": "array",

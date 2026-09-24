@@ -44,20 +44,26 @@ export class TauriTransport implements Transport {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<LoadedGraph>("load_graph", { path });
   }
-  async validateGraph(doc: GraphDoc, graphPath: string | null): Promise<GraphDiagnostic[]> {
+  async validateGraph(
+    doc: GraphDoc,
+    graphPath: string | null,
+    params?: Record<string, unknown>,
+  ): Promise<GraphDiagnostic[]> {
     const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<GraphDiagnostic[]>("validate_graph", { doc, graphPath });
+    return invoke<GraphDiagnostic[]>("validate_graph", { doc, graphPath, params: params ?? null });
   }
   async planGraph(
     doc: GraphDoc,
     graphPath: string | null,
     targets?: string[],
+    params?: Record<string, unknown>,
   ): Promise<PlanNode[]> {
     const { invoke } = await import("@tauri-apps/api/core");
     const out = await invoke<PlanNode[] | GraphDiagnostic[]>("plan_graph", {
       doc,
       graphPath,
       targets: targets ?? null,
+      params: params ?? null,
     });
     // 校验没过时 core 返回的是诊断数组而不是计划数组（ADR-0007）。
     // 两者靠 cacheKey 字段区分：诊断里永远没有它。
@@ -89,6 +95,7 @@ export class TauriTransport implements Transport {
       previewMaxPoints: options?.previewMaxPoints ?? null,
       previewBudgetMs: options?.previewBudgetMs ?? null,
       sceneId: options?.sceneId ?? null,
+      params: options?.params ?? null,
     });
   }
   async cancelRun(runId: string): Promise<void> {

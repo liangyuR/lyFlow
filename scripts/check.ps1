@@ -30,6 +30,16 @@ python "$PSScriptRoot\validate_schema.py" `
     (Join-Path $root "schema\examples\graph.example.lyflow.json") `
     (Join-Path $root "schema\graph-doc.schema.json")
 if ($LASTEXITCODE -ne 0) { throw "图样例不符合 schema" }
+# 图参数的完整规格（param-recipe P1.1）：规格字段复用 manifest 的 paramSpec（跨文件 $ref），
+# 老格式 { type?, default, binds, doc? } 同一份样例里也有一条；负例是拼错的字段名，必须被拒。
+python "$PSScriptRoot\validate_schema.py" `
+    (Join-Path $root "schema\examples\graph-params.example.lyflow.json") `
+    (Join-Path $root "schema\graph-doc.schema.json")
+if ($LASTEXITCODE -ne 0) { throw "图参数样例不符合 schema" }
+python "$PSScriptRoot\validate_schema.py" `
+    (Join-Path $root "schema\examples\graph-params.invalid.lyflow.json") `
+    (Join-Path $root "schema\graph-doc.schema.json") --expect-fail
+if ($LASTEXITCODE -ne 0) { throw "图参数负例居然通过了 schema" }
 
 Step "片段文件 vs schema"
 # 包随附的片段（m8-plan L14）。算子与端口对不对由 core 的启动自检查（manifest --check），

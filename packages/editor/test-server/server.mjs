@@ -152,6 +152,13 @@ function materialize(doc, graphPath) {
   return { file, baseDir };
 }
 
+/** 信封里的 params（编辑器合成的「default + 当前配方覆盖」，param-recipe K3）→ CLI 的
+ *  `--param <名字>=<json>`。CLI 按 JSON 解析值，与 C ABI 的 params_json 给出同一个结果。 */
+function paramArgs(params) {
+  if (!params || typeof params !== "object") return [];
+  return Object.entries(params).flatMap(([name, value]) => ["--param", `${name}=${JSON.stringify(value)}`]);
+}
+
 /** 工作区外的路径一律拒绝：桩服务器也是服务器，不该被当成任意文件读写口。 */
 function resolveWorkspace(p) {
   const full = path.resolve(ROOT, p);
@@ -235,7 +242,7 @@ async function coreInfo() {
  *  上游会被桩重算一遍；编辑器只认 isolate 里节点的事件，界面上看不出差别。 */
 async function isolateVerdict(body, file, baseDir) {
   const isolate = body.isolate;
-  const argv = ["plan", file, "--base-dir", baseDir];
+  const argv = ["plan", file, "--base-dir", baseDir, ...paramArgs(body.params)];
   for (const t of isolate) argv.push("--to", t);
   const r = await runCli(argv);
   const plan = lastJson(r.lines);
@@ -244,12 +251,12 @@ async function isolateVerdict(body, file, baseDir) {
   const missing = plan.filter(
     (n) => !inIsolate(isolate, n.nodeId) && !n.lazy && !n.bypass && !produced.has(n.cacheKey),
   );
-  return { plan, missing, fullKeys: await fullKeysOf(file, baseDir) };
+  return { plan, missing, fullKeys: await fullKeysOf(file, baseDir, body.params) };
 }
 
 /** 全图的 cacheKey（R7 / 修订一 V2）：计划外节点「现在该有的键」。 */
-async function fullKeysOf(file, baseDir) {
-  const whole = lastJson((await runCli(["plan", file, "--base-dir", baseDir])).lines);
+async function fullKeysOf(file, baseDir, params) {
+  const whole = lastJson((await runCli(["plan", file, "--base-dir", baseDir, ...paramArgs(params)])).lines);
   return new Map(
     Array.isArray(whole)
       ? whole.filter((n) => typeof n.cacheKey === "string").map((n) => [n.nodeId, n.cacheKey])
@@ -304,11 +311,12 @@ async function startRun(body) {
     verdict = await isolateVerdict(body, file, baseDir);
     if (verdict && verdict.missing.length > 0) return rejectNotReady(body, verdict);
   }
-  const argv = ["run", file, "--base-dir", baseDir, "--outputs"];
+  const argv = ["run", file, "--base-dir", baseDir, "--outputs", ...paramArgs(body.params)];
   const scope = isolate ?? body.targets ?? [];
   for (const t of scope) argv.push("--to", t);
   // 带 targets 的运行都要挂结果（修订一 V2），先把全图的键拿到
-  const fullKeys = verdict?.fullKeys ?? (scope.length > 0 ? await fullKeysOf(file, baseDir) : null);
+  const fullKeys =
+    verdict?.fullKeys ?? (scope.length > 0 ? await fullKeysOf(file, baseDir, body.params) : null);
   // force（V1）不用管：桩每次都是新进程、没有跨运行的缓存，本来就是真算
   if (body.mode === "preview") {
     argv.push("--preview");
@@ -318,6 +326,8 @@ async function startRun(body) {
   const state = {
     graphFile: file,
     baseDir,
+    // 取点云是按图重跑一遍 CLI（cloudOf）：这次的图参数取值得跟着，否则重跑的是 default
+    params: body.params ?? null,
     targets: isolate ?? body.targets ?? [],
     events: [],
     outputs: {},
@@ -416,6 +426,7 @@ async function cloudOf(state, nodeId, port, maxPoints) {
     state.baseDir,
     "--format",
     "ascii",
+    ...paramArgs(state.params),
   ]);
   if (!fs.existsSync(pcd)) {
     throw Object.assign(new Error(`取不到 ${nodeId}:${port} 的点云：${r.stderr.trim()}`), {
@@ -473,14 +484,14 @@ async function route(req, res, url) {
   if (req.method === "POST" && p === "/lyflow/validate") {
     const body = await json();
     const { file, baseDir } = materialize(body.doc, body.graphPath ?? null);
-    const r = await runCli(["validate", file, "--base-dir", baseDir]);
+    const r = await runCli(["validate", file, "--base-dir", baseDir, ...paramArgs(body.params)]);
     return send(res, 200, lastJson(r.lines) ?? []);
   }
 
   if (req.method === "POST" && p === "/lyflow/plan") {
     const body = await json();
     const { file, baseDir } = materialize(body.doc, body.graphPath ?? null);
-    const argv = ["plan", file, "--base-dir", baseDir];
+    const argv = ["plan", file, "--base-dir", baseDir, ...paramArgs(body.params)];
     for (const t of body.targets ?? []) argv.push("--to", t);
     const r = await runCli(argv);
     return send(res, 200, lastJson(r.lines) ?? []);

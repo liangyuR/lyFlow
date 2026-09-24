@@ -28,6 +28,15 @@ export {
   findSnippet,
 } from "./store/manifest";
 export { useValidationStore, requestValidate, scheduleValidate } from "./store/validation";
+export { useRecipeStore, runParamsOf, currentOverrides } from "./store/recipe";
+export {
+  effectiveGraphValues,
+  graphParamBoundTo,
+  joinBind,
+  resolveGraphBinding,
+  splitBind,
+  type GraphBinding,
+} from "./lib/graphParams";
 export { planAutoConnect, type AutoConnectPlan } from "./lib/autoconnect";
 export { addNodeWithAutoConnect, insertSnippet, insertSnippetById } from "./lib/insert";
 export {

@@ -122,19 +122,29 @@ export class HttpTransport implements Transport {
 
   // ---- 校验、计划、执行 -----------------------------------------------------
 
-  validateGraph(doc: GraphDoc, graphPath: string | null): Promise<GraphDiagnostic[]> {
-    return this.#send<GraphDiagnostic[]>("POST", "/lyflow/validate", { doc, graphPath });
+  validateGraph(
+    doc: GraphDoc,
+    graphPath: string | null,
+    params?: Record<string, unknown>,
+  ): Promise<GraphDiagnostic[]> {
+    return this.#send<GraphDiagnostic[]>("POST", "/lyflow/validate", {
+      doc,
+      graphPath,
+      params: params ?? null,
+    });
   }
 
   async planGraph(
     doc: GraphDoc,
     graphPath: string | null,
     targets?: string[],
+    params?: Record<string, unknown>,
   ): Promise<PlanNode[]> {
     const out = await this.#send<PlanNode[] | GraphDiagnostic[]>("POST", "/lyflow/plan", {
       doc,
       graphPath,
       targets: targets ?? null,
+      params: params ?? null,
     });
     // 与 Tauri 一致：校验没过时后端返回诊断数组，靠 cacheKey 区分（ADR-0007）
     const items = out as { cacheKey?: unknown }[];
@@ -157,6 +167,7 @@ export class HttpTransport implements Transport {
       previewMaxPoints: options?.previewMaxPoints ?? null,
       previewBudgetMs: options?.previewBudgetMs ?? null,
       sceneId: options?.sceneId ?? null,
+      params: options?.params ?? null,
     });
     return out.runId;
   }

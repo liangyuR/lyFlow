@@ -4,7 +4,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { dialogs } from "../lib/dialogs";
+import { joinBind, type GraphBinding } from "../lib/graphParams";
 import { beginPreview, endPreview, schedulePreview } from "../lib/preview";
+import { fullId } from "../lib/subgraph";
 import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
 import type { EnumOption, Param } from "../types/manifest";
@@ -20,6 +22,8 @@ export interface ControlProps {
   nodeId?: string | undefined;
   /** 这个内参已经被提升成哪个子图参数了（F4）。 */
   promotedAs?: string | undefined;
+  /** 这个参数最终由哪个顶层图参数提供（param-recipe P1.4）。右键菜单据此给「纳入配方」或「解除绑定」。 */
+  graphBinding?: GraphBinding | null | undefined;
 }
 
 // ---------------------------------------------------------------- 数值输入
@@ -628,6 +632,7 @@ function ParamMenu({
   y,
   nodeId,
   promotedAs,
+  graphBinding,
   onChange,
   onClose,
 }: {
@@ -637,10 +642,12 @@ function ParamMenu({
   y: number;
   nodeId?: string | undefined;
   promotedAs?: string | undefined;
+  graphBinding?: GraphBinding | null | undefined;
   onChange: (v: unknown) => void;
   onClose: () => void;
 }) {
-  const inSubgraph = useUiStore((s) => s.path.length > 0);
+  const path = useUiStore((s) => s.path);
+  const inSubgraph = path.length > 0;
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -724,11 +731,51 @@ function ParamMenu({
       <button
         type="button"
         data-testid="param-menu-path"
-        title="给 CLI 的 --set <name>=<value> 用"
-        onClick={() => copy(param.name, `参数名 ${param.name}`)}
+        title="节点.参数 —— 顶层节点的这一串就是 CLI 的 --set <节点>.<参数>=<json>；子图里是展开后的路径"
+        onClick={() => {
+          // P1.6：带上节点 id。子图里给展开后的路径 id（与 lyflow params、事件里的 nodeId 同一套）
+          const text = nodeId ? `${fullId(path, nodeId)}.${param.name}` : param.name;
+          copy(text, ` ${text}`);
+        }}
       >
         复制路径名
       </button>
+      {nodeId && !graphBinding && (
+        <button
+          type="button"
+          data-testid="param-menu-include"
+          title={
+            inSubgraph
+              ? "逐层提升：内参 → 子图参数 → 这个实例上绑成图参数；同一子图的其它实例行为不变"
+              : "提升为顶层图参数：当前值成为它的默认值，这一行此后改的是图参数"
+          }
+          onClick={() => {
+            const name = useGraphStore.getState().promoteToGraphParam(nodeId, param.name);
+            onClose();
+            if (name) useUiStore.getState().showToast(`已纳入配方：图参数 ${name}`);
+          }}
+        >
+          纳入配方（提升为图参数）
+        </button>
+      )}
+      {graphBinding && (
+        <button
+          type="button"
+          data-testid="param-menu-unbind"
+          title="把图参数当前的值写回这个参数，行为不变"
+          onClick={() => {
+            useGraphStore
+              .getState()
+              .unbindFromGraphParam(
+                graphBinding.graphParam,
+                joinBind(graphBinding.top.node, graphBinding.top.param),
+              );
+            onClose();
+          }}
+        >
+          解除图参数 {graphBinding.graphParam} 的绑定
+        </button>
+      )}
       {inSubgraph && nodeId && !promotedAs && (
         <button
           type="button"
@@ -822,6 +869,7 @@ export function ParamControl(props: ControlProps) {
           y={menu.y}
           nodeId={props.nodeId}
           promotedAs={props.promotedAs}
+          graphBinding={props.graphBinding}
           onChange={props.onChange}
           onClose={close}
         />

@@ -5,6 +5,7 @@ import { create } from "zustand";
 
 import { localIdOf, type SubPath } from "../lib/subgraph";
 import { transport } from "../transport";
+import { runParamsOf } from "./recipe";
 import { useUiStore } from "./ui";
 import type { CacheStats, PlanNode } from "../types/execution";
 import type { GraphDoc } from "../types/graph";
@@ -150,7 +151,8 @@ export async function requestPlan(doc: GraphDoc, graphPath: string | null): Prom
   if (transport.kind !== "tauri") return;
   const mine = ++ticket;
   try {
-    const nodes = await transport.planGraph(doc, graphPath);
+    // cacheKey 按这次真正会用的图参数取值算：切配方之后哪些节点会重算，看的就是它（P3.8）
+    const nodes = await transport.planGraph(doc, graphPath, undefined, runParamsOf(doc));
     if (mine !== ticket) return;
     useCacheStore.getState().setPlan(nodes);
   } catch {

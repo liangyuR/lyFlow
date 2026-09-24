@@ -136,6 +136,133 @@ TEST_CASE("顶层参数：unknown_bind、param_conflict、未声明的名字") {
   }
 }
 
+// ---------------------------------------------------- 图参数自己的规格（param-recipe P1.2）
+
+/// 找一条诊断：code 相同、nodeId 相同（空串 = 图级）、paramPath 相同。
+const Json* findDiag(const Json& diags, const std::string& code, const std::string& node,
+                     const std::string& paramPath) {
+  for (const Json& d : diags) {
+    if (d.value("code", "") == code && d.value("nodeId", "") == node &&
+        d.value("paramPath", "") == paramPath) {
+      return &d;
+    }
+  }
+  return nullptr;
+}
+
+/// count 带完整规格：int，硬限位 [10, 100]。
+Json specGraph(const Json& value = 40) {
+  return paramGraph(Json{{"count",
+                          {{"type", "int"},
+                           {"label", "源 · 点数"},
+                           {"min", 10},
+                           {"max", 100},
+                           {"softMax", 80},
+                           {"unit", "点"},
+                           {"group", "采样"},
+                           {"default", value},
+                           {"binds", {"src.pointCount"}}}}});
+}
+
+TEST_CASE("图参数规格：default 越过硬限位报 bad_param，paramPath 是名字、nodeId 为空") {
+  ensureTestOps();
+  CHECK(Json::parse(exec::validateGraphJson(specGraph().dump(), {})).empty());
+
+  const Json diags = Json::parse(exec::validateGraphJson(specGraph(500).dump(), {}));
+  const Json* d = findDiag(diags, "bad_param", "", "count");
+  REQUIRE_MESSAGE(d != nullptr, diags.dump());
+  CHECK((*d)["severity"] == "error");
+  CHECK((*d)["phase"] == "validate");
+  CHECK((*d)["message"].get<std::string>().find("default") != std::string::npos);
+  CHECK((*d)["message"].get<std::string>().find("100") != std::string::npos);
+  // 被绑定的节点那一层照旧规整：pointCount 的下限 0 不受影响，节点上没有别的错
+  CHECK(findDiag(diags, "bad_param", "src", "pointCount") == nullptr);
+
+  // plan 被阻断，run 不执行任何节点
+  const Json plan = Json::parse(exec::planGraphJson(specGraph(500).dump(), {}, {}));
+  CHECK_FALSE(plan[0].contains("cacheKey"));
+  const RunLog log = runGraph(specGraph(500));
+  CHECK(log.runStatus() == "error");
+  CHECK(log.nodeEvent("src", "running").empty());
+}
+
+TEST_CASE("图参数规格：params_json 传入越界值同样报错，合法值照常") {
+  ensureTestOps();
+  const std::string doc = specGraph().dump();
+  const Json low = Json::parse(exec::validateGraphJson(doc, {}, R"({"count": 3})"));
+  const Json* d = findDiag(low, "bad_param", "", "count");
+  REQUIRE_MESSAGE(d != nullptr, low.dump());
+  CHECK((*d)["message"].get<std::string>().find("传入") != std::string::npos);
+  CHECK((*d)["message"].get<std::string>().find("源 · 点数") != std::string::npos);
+  CHECK(Json::parse(exec::validateGraphJson(doc, {}, R"({"count": 55})")).empty());
+
+  // 运行路径（C ABI 的 params_json 就走这里）
+  exec::RunOptions options;
+  RunLog log;
+  log.runId = "graph-param-spec-bad-run";
+  options.runId = log.runId;
+  options.paramsJson = R"({"count": 101})";
+  {
+    exec::Run run(doc, options, &detail::collect, &log);
+    run.join();
+  }
+  CHECK(log.runStatus() == "error");
+  CHECK(log.nodeEvent("src", "running").empty());
+}
+
+TEST_CASE("图参数规格：类型与 options 也按图参数自己的规格查") {
+  ensureTestOps();
+  SUBCASE("类型不符") {
+    const Json diags =
+        Json::parse(exec::validateGraphJson(specGraph(Json("forty")).dump(), {}));
+    CHECK(findDiag(diags, "bad_param", "", "count") != nullptr);
+  }
+  SUBCASE("整数写成小数") {
+    const Json diags = Json::parse(exec::validateGraphJson(specGraph(40.5).dump(), {}));
+    CHECK(findDiag(diags, "bad_param", "", "count") != nullptr);
+  }
+  SUBCASE("enum 不在 options 里") {
+    Json doc = makeGraph({N{"src", "test.counted", Json::object()},
+                          N{"chk", "test.validated", Json::object()}},
+                         {E{"src.cloud", "chk.cloud"}, E{"src.cloud", "chk.ref"}});
+    doc["params"] = Json{{"mode",
+                          {{"type", "enum"},
+                           {"options", Json::array({Json{{"value", "ok"}, {"label", "OK"}},
+                                                    Json{{"value", "pinned"}, {"label", "钉住"}}})},
+                           {"default", "ok"},
+                           {"binds", {"chk.mode"}}}}};
+    CHECK(Json::parse(exec::validateGraphJson(doc.dump(), {})).empty());
+    const Json diags = Json::parse(exec::validateGraphJson(doc.dump(), {}, R"({"mode": "nope"})"));
+    CHECK(findDiag(diags, "bad_param", "", "mode") != nullptr);
+    // enum 没给 options（半份规格）：只查是字符串，不把每个值都判成非法
+    doc["params"]["mode"].erase("options");
+    CHECK(Json::parse(exec::validateGraphJson(doc.dump(), {})).empty());
+  }
+}
+
+TEST_CASE("图参数规格：没有 type 的老图参数跳过第一步，照常运行") {
+  ensureTestOps();
+  // 老格式里写 min/max 也不算数：没有 type 就不是一份规格
+  Json doc = paramGraph(Json{{"count", {{"default", 500}, {"max", 100}, {"binds", {"src.pointCount"}}}}});
+  CHECK(Json::parse(exec::validateGraphJson(doc.dump(), {})).empty());
+  const RunLog log = runGraph(doc);
+  CHECK(log.runStatus() == "ok");
+  CHECK(log.nodeEvent("src", "done")["stats"]["outputs"][0]["elementCount"] == 500);
+  // 被绑定节点自己的规整照旧：负数仍是 src.pointCount 的 bad_param
+  const Json neg = Json::parse(exec::validateGraphJson(doc.dump(), {}, R"({"count": -1})"));
+  CHECK(findDiag(neg, "bad_param", "src", "pointCount") != nullptr);
+  CHECK(findDiag(neg, "bad_param", "", "count") == nullptr);
+}
+
+TEST_CASE("图参数规格：图参数的错与节点的错一次报全") {
+  ensureTestOps();
+  Json doc = specGraph(500);
+  doc["nodes"][3]["params"]["pointCount"] = -3;  // side 自己也错
+  const Json diags = Json::parse(exec::validateGraphJson(doc.dump(), {}));
+  CHECK(findDiag(diags, "bad_param", "", "count") != nullptr);
+  CHECK(findDiag(diags, "bad_param", "side", "pointCount") != nullptr);
+}
+
 TEST_CASE("顶层参数绑到子图实例：里面的节点也报 source=graph") {
   ensureTestOps();
   Json doc;

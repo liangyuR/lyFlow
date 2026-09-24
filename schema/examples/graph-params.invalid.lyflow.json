@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "01JGRAPHPARAMSINVALID0001",
+  "nodes": [{ "id": "n_gen", "op": "gen.synthetic" }],
+  "edges": [],
+  "params": {
+    "pointCount": {
+      "type": "int",
+      "default": 100,
+      "binds": ["n_gen.pointCount"],
+      "lable": "拼错的字段名：图参数的规格与 manifest 的 param 同一套字段，多出来的一律拒绝"
+    }
+  }
+}

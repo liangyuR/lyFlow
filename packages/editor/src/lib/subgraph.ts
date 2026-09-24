@@ -1,6 +1,7 @@
 // 子图在前端的三件事（ADR-0010）：把定义合成成 OperatorDesc 让节点画得出来、
 // 按当前路径取出该渲染的那一层、以及合成/解散两个 change 动作。
 
+import { graphParamBoundTo, joinBind } from "./graphParams";
 import { newLocalId } from "./ids";
 import { ANY, findPort, inferAnyTypes, type GraphContext } from "./typecheck";
 import type { OperatorDesc, Param, Port } from "../types/manifest";
@@ -247,6 +248,31 @@ export function composeSubgraph(
     params: [],
   };
 
+  // 被收进去的节点上有参数绑着顶层图参数（纳入配方）：在子图里把它提升成外参，绑定改指到新的
+  // 实例上 —— 与「在子图里纳入配方」走出来的是同一种形状（K2），图参数的值照样管着它。
+  // 不改的话 bind 指着一个已经不在顶层的节点，存下来就是 unknown_bind
+  if (path.length === 0) {
+    for (const gp of Object.values(doc.params ?? {})) {
+      gp.binds = gp.binds.map((bind) => {
+        const dot = bind.lastIndexOf(".");
+        const target = { node: bind.slice(0, dot), param: bind.slice(dot + 1) };
+        if (dot <= 0 || !picked.has(target.node)) return bind;
+        const node = inner.find((n) => n.id === target.node);
+        const decl = node ? ctx.operatorsById.get(node.op)?.params.find((p) => p.name === target.param) : undefined;
+        const name = uniqueName(new Set(def.params.map((p) => p.name)), target.param);
+        const copy = JSON.parse(JSON.stringify(decl ?? { type: gp.type ?? "float" })) as Partial<Param>;
+        delete copy.roiBackdrop;
+        def.params.push({
+          ...(copy as Param),
+          name,
+          default: JSON.parse(JSON.stringify(gp.default)) as unknown,
+          binds: [{ node: target.node, param: target.param }],
+        });
+        return joinBind(nodeId, name);
+      });
+    }
+  }
+
   doc.subgraphs = { ...(doc.subgraphs ?? {}), [subgraphId]: def };
 
   const newEdges: GraphEdge[] = [];
@@ -314,6 +340,17 @@ export function dissolveSubgraph(
   });
   // 提升参数在解散时要落回内参，否则外面调过的值会凭空消失
   for (const p of def.params ?? []) {
+    // 这个外参在顶层实例上绑着图参数（纳入配方）：绑定改指到内联出来的内参上，图参数的值照样
+    // 管着它们；不改的话 bind 指着一个已经不存在的节点，内参上写的显式值又会撞 param_conflict
+    const graphParam = path.length === 0 ? graphParamBoundTo(doc, nodeId, p.name) : undefined;
+    const gp = graphParam ? doc.params?.[graphParam] : undefined;
+    if (gp) {
+      const moved = (p.binds ?? [])
+        .filter((b) => rename.has(b.node))
+        .map((b) => joinBind(rename.get(b.node)!, b.param));
+      gp.binds = [...gp.binds.filter((b) => b !== joinBind(nodeId, p.name)), ...moved];
+      continue;
+    }
     const value = params[p.name] ?? p.default;
     for (const bind of p.binds ?? []) {
       const target = inlined.find((n) => n.id === rename.get(bind.node));

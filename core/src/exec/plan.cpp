@@ -43,7 +43,11 @@ Semver parseSemver(const std::string& s) {
   return v;
 }
 
+}  // namespace
+
 // -------------------------------------------------------------- 参数规整
+// 这两个不在匿名命名空间里：顶层图参数的取值在展开期要按图参数自己的规格先查一遍
+// （param-recipe P1.2），用的是同一套规则 —— 各写一份的话两边迟早说出不同的话。
 
 /// 把 GraphDoc 里的原始 JSON 值按声明类型规整成 Value。
 /// 失败时返回 false 并给出人话原因 —— 这句话会原样出现在参数框的悬浮提示里。
@@ -162,6 +166,8 @@ bool checkRange(const Param& p, const Value& v, std::string& message) {
   }
 }
 
+namespace {
+
 // ------------------------------------------------------------------ 类型兼容
 
 constexpr const char* kAnyType = "Any";
@@ -212,6 +218,7 @@ bool conditionHolds(const Condition& c, const ParamMap& params) {
   auto it = params.find(c.param);
   if (it == params.end()) return true;
   if (!c.eq.isNull()) return valueEquals(it->second, c.eq);
+  if (!c.ne.isNull()) return !valueEquals(it->second, c.ne);
   if (!c.in.empty()) {
     for (const Value& v : c.in) {
       if (valueEquals(it->second, v)) return true;
@@ -840,6 +847,10 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     }
     out.outputs.push_back(PlanOutput{g.name, g.node, g.port, planIndex[it->second]});
   }
+
+  // 顶层图参数的取值不合它自己的规格（P1.2）：诊断在展开期已经报过（nodeId 为空）。
+  // 节点照常规整、诊断照常收齐 —— 编辑期校验要一次看到全部问题 —— 但这份计划不能跑。
+  if (!graph.paramValuesOk) return false;
 
   out.ok = true;
   return true;

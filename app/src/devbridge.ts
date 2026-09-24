@@ -13,9 +13,11 @@ import {
   useGraphStore,
   useManifestStore,
   usePeekStore,
+  useRecipeStore,
   useUiStore,
   useValidationStore,
   requestValidate,
+  runParamsOf,
   type RunRequest,
   type StateTransition,
   type Transport,
@@ -32,6 +34,8 @@ interface DevBridge {
     cache: typeof useCacheStore;
     peek: typeof usePeekStore;
     validation: typeof useValidationStore;
+    /** 当前配方（param-recipe K3）。P1 恒为「基础」、覆盖恒为空。 */
+    recipe: typeof useRecipeStore;
   };
   /** 立刻编译一次，不等 debounce。验收脚本不想为 150ms 睡一觉。 */
   plan(): Promise<void>;
@@ -89,6 +93,7 @@ export function installDevBridge(transport: Transport): void {
       cache: useCacheStore,
       peek: usePeekStore,
       validation: useValidationStore,
+      recipe: useRecipeStore,
     },
     async plan() {
       const g = useGraphStore.getState();
@@ -170,6 +175,10 @@ export function installDevBridge(transport: Transport): void {
           ? { targets: [...u.autoHint.targets], candidates: [...u.autoHint.candidates] }
           : null,
         validation: Object.fromEntries(useValidationStore.getState().byNode),
+        // 不属于任何节点的校验诊断（图参数的取值不合规格，param-recipe P1.2）
+        validationGraph: [...useValidationStore.getState().graphLevel],
+        // 当前配方（P1 恒为「基础」）与这次会交给 core 的图参数取值（K3）
+        recipe: { current: useRecipeStore.getState().current, params: runParamsOf(g.doc) ?? null },
         preview: {
           active: u.previewing,
           autoRun: u.autoRun,

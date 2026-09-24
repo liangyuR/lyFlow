@@ -355,6 +355,43 @@ async function suiteNodeRunOverHttp(cdp, report) {
     JSON.stringify({ tail: smart.nodes[ids.tail], smartTail }));
 }
 
+/** 图参数的取值经 HTTP 信封的 params 走到桩服务器、再变成 CLI 的 --param（param-recipe P1.5）：
+ *  运行、校验、取点云三处用的是同一组值。 */
+async function suiteGraphParamsOverHttp(cdp, report) {
+  report.section("HttpTransport：图参数取值经信封 params → CLI --param（param-recipe P1.5）");
+
+  await newDoc(cdp);
+  const ids = await buildGraph(
+    cdp,
+    [
+      { key: "gen", op: "gen.synthetic", params: { pointCount: 7000, seed: (Date.now() % 9973) + 11 } },
+      { key: "pass", op: "filter.passthrough" },
+    ],
+    [{ from: ["gen", "cloud"], to: ["pass", "cloud"] }],
+  );
+  const name = await cdp.eval(`return window.__lyflow.stores.graph.getState().promoteToGraphParam(${lit(ids.gen)}, 'pointCount');`);
+  report.eq("纳入配方：gen.pointCount 成为图参数", name, "pointCount");
+
+  const base = await runAndWait(cdp, () => cdp.eval(`await window.__lyflow.run(); return true;`));
+  report.eq("按 default 运行：gen 7000 点", base.nodes[ids.gen]?.elementCount, 7000);
+  const given = await runAndWait(cdp, () =>
+    cdp.eval(`await window.__lyflow.run({ params: { pointCount: 4321 } }); return true;`));
+  report.eq("run 带 params：桩转成 --param，gen 4321 点", given.nodes[ids.gen]?.elementCount, 4321);
+  const cloud = await selectAndReadViewer(cdp, ids.gen);
+  report.eq("取点云时重跑 CLI 也带着这组值", cloud.count, 4321);
+
+  const diags = await cdp.eval(`
+    const b = window.__lyflow;
+    const g = b.stores.graph.getState();
+    return await b.transport.validateGraph(g.doc, null, { pointCount: 0 });
+  `);
+  report.ok(
+    "validate 带 params：越过图参数的硬限位报 bad_param（paramPath 是名字）",
+    Array.isArray(diags) && diags.some((d) => d.code === "bad_param" && d.paramPath === "pointCount"),
+    JSON.stringify(diags),
+  );
+}
+
 // ------------------------------------------------------------------- main
 
 async function main() {
@@ -455,6 +492,7 @@ async function main() {
     await suiteBuildAndShortcut(cdp, report);
     await suiteAnimationsProp(cdp, report);
     await suiteNodeRunOverHttp(cdp, report);
+    await suiteGraphParamsOverHttp(cdp, report);
 
     report.section("控制台");
     report.ok(

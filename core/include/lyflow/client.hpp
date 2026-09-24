@@ -344,16 +344,21 @@ class Client {
   std::string problems() const { return owned(fn_.manifest_problems()); }
 
   /// 只校验不执行。返回诊断 JSON 数组文本（"[]" = 干净）。
-  std::string validate(const std::string& graphJson, const std::string& baseDir = {}) const {
-    return owned(fn_.validate(graphJson.c_str(), baseDir.c_str()));
+  /// paramsJson 是顶层图参数的取值（与 RunOptions::paramsJson 同义），空 = 全用 default。
+  std::string validate(const std::string& graphJson, const std::string& baseDir = {},
+                       const std::string& paramsJson = {}) const {
+    return owned(fn_.validate_params(graphJson.c_str(), baseDir.c_str(),
+                                     paramsJson.empty() ? nullptr : paramsJson.c_str()));
   }
 
   std::string plan(const std::string& graphJson, const std::string& baseDir = {},
-                   const std::vector<std::string>& targets = {}) const {
+                   const std::vector<std::string>& targets = {},
+                   const std::string& paramsJson = {}) const {
     std::vector<const char*> ptrs;
     for (const std::string& t : targets) ptrs.push_back(t.c_str());
-    return owned(fn_.plan(graphJson.c_str(), baseDir.c_str(),
-                          ptrs.empty() ? nullptr : ptrs.data(), ptrs.size()));
+    return owned(fn_.plan_params(graphJson.c_str(), baseDir.c_str(),
+                                 ptrs.empty() ? nullptr : ptrs.data(), ptrs.size(),
+                                 paramsJson.empty() ? nullptr : paramsJson.c_str()));
   }
 
   /// 文本 → 图。成功返回 GraphDoc 对象文本（'{' 开头），失败返回诊断数组（'[' 开头）。
@@ -449,7 +454,10 @@ class Client {
     char* (*manifest_problems)() = nullptr;
     void (*string_free)(char*) = nullptr;
     char* (*validate)(const char*, const char*) = nullptr;
+    char* (*validate_params)(const char*, const char*, const char*) = nullptr;
     char* (*plan)(const char*, const char*, const char* const*, size_t) = nullptr;
+    char* (*plan_params)(const char*, const char*, const char* const*, size_t,
+                         const char*) = nullptr;
     void (*cache_clear)() = nullptr;
     char* (*cache_stats)() = nullptr;
     lyflow_run* (*run_start)(const char*, const lyflow_run_options*, lyflow_event_cb,
@@ -559,7 +567,9 @@ inline void Client::bind(const std::string& where) {
   need(fn_.manifest_problems, "lyflow_manifest_problems", where);
   need(fn_.string_free, "lyflow_string_free", where);
   need(fn_.validate, "lyflow_validate", where);
+  need(fn_.validate_params, "lyflow_validate_params", where);
   need(fn_.plan, "lyflow_plan", where);
+  need(fn_.plan_params, "lyflow_plan_params", where);
   need(fn_.cache_clear, "lyflow_cache_clear", where);
   need(fn_.cache_stats, "lyflow_cache_stats", where);
   need(fn_.run_start, "lyflow_run_start", where);

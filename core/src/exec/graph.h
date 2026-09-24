@@ -2,6 +2,7 @@
 // GraphDoc 的 C++ 侧解析结果：graph_json →parse→ RawGraph →expand→ 平图 →validate→ 诊断 →compile→ Plan。
 // 解析阶段不抛异常，结构性问题也是诊断（C++ 不能信任传进来的 GraphDoc）。
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -71,9 +72,15 @@ struct SubgraphDef {
 /// 宿主运行期给的值（CLI `--param`、C ABI `params_json`）取代 default。
 struct GraphParam {
   std::string name;
-  /// 原始声明 { type?, default, binds, doc? }。
+  /// 原始声明：完整参数规格（与 manifest 的 param 同一套字段，P1.1）+ binds。
+  /// 老格式 { type?, default, binds, doc? } 是它的子集。decl["default"] 始终是图里写的那个。
   nlohmann::json decl = nlohmann::json::object();
   std::vector<std::pair<std::string, std::string>> binds;
+  /// 宿主这次运行给的值（`params_json`）。给了就取代 default；两者都按规格校验（P1.2）。
+  std::optional<nlohmann::json> given;
+
+  /// 这次运行真正写进被绑定参数的值。
+  const nlohmann::json& value() const { return given ? *given : decl.at("default"); }
 };
 
 /// 图级命名输出（ADR-0017）。宿主只认名字，不认节点 id。
@@ -93,13 +100,17 @@ struct RawGraph {
   std::vector<GraphOutput> outputs;
   /// 按名字升序。
   std::vector<GraphParam> params;
+  /// 展开期查过顶层图参数的取值（P1.2）。false = 至少一个不合它自己的规格：
+  /// 诊断照常收集，但 buildPlan 不给出可运行的计划。
+  bool paramValuesOk = true;
 };
 
 /// 解析并做结构校验。返回 false 表示图不可用（诊断已写进 diags）。
 bool parseGraph(const std::string& json, RawGraph& out, Diagnostics& diags);
 
-/// 把宿主给的顶层参数值（JSON 对象 名字→值）盖到 default 上。未声明的名字报
-/// unknown_param。values 为 null 或空对象时什么都不做。
+/// 记下宿主给的顶层参数值（JSON 对象 名字→值，写进 GraphParam::given，取代 default）。
+/// 未声明的名字报 unknown_param。values 为 null 或空对象时什么都不做。
+/// 值合不合规格不在这里查，展开期连同 default 一起查（P1.2）。
 bool applyGraphParamValues(const nlohmann::json& values, RawGraph& graph, Diagnostics& diags);
 
 /// 从一份 JSON 对象读一个子图定义。失败时填 error 并返回 false。

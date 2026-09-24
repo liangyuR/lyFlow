@@ -81,10 +81,17 @@ v11 再加的 `isolate`（只运行某几个节点）与 `force`（强制重算�
 三个都收同一个信封：
 
 ```json
-{ "doc": { /* GraphDoc */ }, "graphPath": "sub/dir/graph.lyflow.json" }
+{ "doc": { /* GraphDoc */ }, "graphPath": "sub/dir/graph.lyflow.json",
+  "params": { "leafSize": [0.02, 0.02, 0.02] } }
 ```
 
 `graphPath` 可以是 `null`。它**只**决定相对路径参数的基准目录，不表示后端要去读那个文件。
+
+`params` 可选（`null` / 不给 = 全用图里的 `default`）：顶层图参数的取值 `{ 名字: 值 }`，编辑器合成的
+「default ← 当前配方覆盖」（[param-recipe-plan.md](param-recipe-plan.md) K3）。后端原样交给 core：
+run 走 `lyflow_run_options.params_json`，validate / plan 走 `lyflow_validate_params` / `lyflow_plan_params`
+（v11 里追加）。于是诊断、cacheKey、运行结果说的都是这组取值下的图（K5）。
+桩服务器把它转成 CLI 的 `--param <名字>=<json>`（每个名字一条），取点云时重跑 CLI 也带着同一组。
 
 ### `POST /lyflow/validate` → `GraphDiagnostic[]`
 
@@ -115,7 +122,7 @@ v11 再加的 `isolate`（只运行某几个节点）与 `force`（强制重算�
 ```json
 { "doc": {}, "graphPath": null, "targets": ["n1"] , "isolate": null, "force": null,
   "mode": "full", "previewMaxPoints": null, "previewBudgetMs": null,
-  "sceneId": null }
+  "sceneId": null, "params": null }
 ```
 
 `mode` 是 `"full"` 或 `"preview"`（ADR-0011：预览模式下源算子先抽稀）。

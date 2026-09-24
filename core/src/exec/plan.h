@@ -106,6 +106,13 @@ struct BuildOptions {
 bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptions& options,
                Plan& out, Diagnostics& diags);
 
+/// 把一个原始 JSON 值按参数声明的类型规整成 Value（enum 查 options）。失败时 message
+/// 是给人看的原因，会原样出现在参数框的悬浮提示里。节点参数与顶层图参数共用（P1.2）。
+bool coerceParam(const Param& p, const nlohmann::json& j, Value& out, std::string& message);
+
+/// 硬边界 min/max（逐分量）。softMin/softMax 只是滑块范围，不查。
+bool checkRange(const Param& p, const Value& v, std::string& message);
+
 /// 参数规范化后的 JSON（键排序、浮点稳定）。cacheKey 与测试都用它。
 std::string canonicalParamsJson(const ParamMap& params);
 

@@ -70,6 +70,7 @@ void writeCondition(JsonWriter& w, const std::string& key, const Condition& c) {
   w.beginObject();
   w.field("param", c.param);
   if (!c.eq.isNull()) { w.key("eq"); writeValue(w, c.eq); }
+  if (!c.ne.isNull()) { w.key("ne"); writeValue(w, c.ne); }
   if (!c.in.empty()) {
     w.key("in");
     w.beginArray();

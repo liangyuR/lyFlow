@@ -7,6 +7,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import { findBaseCloud, firstCloudPort, type BaseCloud } from "../lib/basecloud";
 import { cacheKey, cloudCache, dropOtherRuns, putCache } from "../lib/cloudCache";
+import { withBoundValues } from "../lib/graphParams";
 import { effectiveParams } from "../lib/params";
 import { RAMPS, type RampName } from "../lib/ramps";
 import { copyFrameWrites, pickFrame, roiFramesOf } from "../lib/roiFrames";
@@ -17,6 +18,7 @@ import { transport } from "../transport";
 import { aggregatedNodes, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
+import { useGraphParamOverrides } from "../store/recipe";
 import { useUiStore } from "../store/ui";
 import { decodeCloud, type CloudPayload } from "../types/execution";
 import { RoiLayer, type RoiItem } from "./RoiLayer";
@@ -388,7 +390,17 @@ export function Viewer3D() {
   // 2D 拖框（m8-plan L15）：选中节点带 roi 语义标记的参数按底图分组；一次只画选中的那一组
   // （L20：locate_template 的一个模板槽），切换条列出全部组
   const activeOp = activeNode ? ops.get(activeNode.op) : undefined;
-  const roiFrames = useMemo(() => roiFramesOf(activeOp, activeNode), [activeOp, activeNode]);
+  // 框的位置按有效值画（param-recipe P1.4）：被图参数绑定的 roi 参数取图参数的值，
+  // 拖动写回照旧走 setParam —— 它在 store 里自己路由到图参数
+  const overrides = useGraphParamOverrides();
+  const roiNode = useMemo(
+    () =>
+      activeNode && activeOp
+        ? withBoundValues(doc, path, activeNode, activeOp.params.map((p) => p.name), overrides)
+        : activeNode,
+    [doc, path, activeNode, activeOp, overrides],
+  );
+  const roiFrames = useMemo(() => roiFramesOf(activeOp, roiNode), [activeOp, roiNode]);
   const selectedFrame = useUiStore((s) => (activeId ? s.roiFrame[activeId] : undefined));
   const setRoiFrame = useUiStore((s) => s.setRoiFrame);
   const roi = useMemo(() => pickFrame(roiFrames, selectedFrame), [roiFrames, selectedFrame]);
@@ -735,8 +747,8 @@ export function Viewer3D() {
   }, [backdropKey]);
 
   const roiItems = useMemo<RoiItem[]>(() => {
-    if (!roi || !activeOp || !activeNode) return [];
-    const eff = effectiveParams(activeOp, activeNode);
+    if (!roi || !activeOp || !roiNode) return [];
+    const eff = effectiveParams(activeOp, roiNode);
     const bounds =
       backdrop.bounds ?? (roi.files.length === 0 && cloud && cloud.pointCount > 0 ? cloud.bounds : null);
     const n = roi.params.length;
@@ -753,15 +765,15 @@ export function Viewer3D() {
         placeholder: placeholderOf(i, n, bounds),
       };
     });
-  }, [roi, activeOp, activeNode, backdrop.bounds, cloud]);
+  }, [roi, activeOp, roiNode, backdrop.bounds, cloud]);
   const roiEditing = cameraMode === "2d" && roiItems.length > 0 && activeNode !== undefined;
   // 切换条只给带底图的组（有名字的）；数据坐标系那一组只有一组，不需要切
   const roiTabs = roiEditing && roiFrames.some((f) => f.label) ? roiFrames : [];
 
   /** 把当前这组框原样写进其它启用的组（L20「复制到其它槽」），整个算一条撤销。 */
   const copyFrameToOthers = () => {
-    if (!roi || !activeOp || !activeNode) return;
-    const writes = copyFrameWrites(activeOp, activeNode, roi, roiFrames);
+    if (!roi || !activeOp || !activeNode || !roiNode) return;
+    const writes = copyFrameWrites(activeOp, roiNode, roi, roiFrames);
     if (writes.length === 0) return;
     const g = useGraphStore.getState();
     g.begin();

@@ -1,4 +1,5 @@
-// m7-plan J7/J8、§1 验收 7：顶层图参数 `params` 编辑器不解释，只原样往返。
+// m7-plan J7/J8、§1 验收 7：顶层图参数 `params` 读写往返不丢字段。P1 起编辑器会经图参数动作改它
+// （graph-params-actions.test.mjs），但不碰图参数的编辑一律不许动它：
 // 打开（loadDoc）→ 做几步普通编辑 → 取出要存盘的 doc，`params` 必须逐字不变
 // （含键顺序，所以比的是 JSON 文本而不只是深相等）。
 import assert from "node:assert/strict";
@@ -90,4 +91,24 @@ test("没有顶层 params 的图不会凭空多出这个键", () => {
   useGraphStore.getState().loadDoc(doc, null);
   useGraphStore.getState().setName("x");
   assert.equal("params" in saved(), false);
+});
+
+test("带完整规格的图参数（param-recipe P1.1）：打开、编辑、撤销重做之后一个字段都不丢", () => {
+  useManifestStore.getState().replaceBundle(manifest, 1);
+  const full = readJson("schema/examples/graph-params.example.lyflow.json");
+  const before = JSON.stringify(full.params);
+  const g = useGraphStore.getState();
+  g.loadDoc(structuredClone(full), "g.lyflow.json");
+  assert.equal(JSON.stringify(saved().params), before, "打开即保存");
+  g.setName("改个名");
+  g.moveNodes([{ id: "n_gen", position: { x: 5, y: 5 } }]);
+  g.setBypass(["n_cut"], true);
+  g.undo();
+  g.redo();
+  assert.equal(JSON.stringify(saved().params), before, "别的编辑不碰图参数");
+  // 规格字段逐个在（与 schema 样例同一份）
+  const leaf = saved().params.leafSize;
+  for (const k of ["label", "doc", "group", "min", "max", "softMin", "softMax", "step", "unit", "componentLabels"]) {
+    assert.ok(k in leaf, k);
+  }
 });

@@ -141,22 +141,41 @@ Bundle、kind 里确实声明了这个字段，否则报 `unknown_port`；`lyflo
 **Esc** 或面包屑出来；内部节点的参数右键可以「提升为子图参数」；
 子图节点右键可以「保存到库」。
 
-### 顶层图参数（M7）
+### 顶层图参数（M7，P1 起是完整参数规格）
 
 「本来就是全局」的值（间隙补偿量、模型路径）要有唯一的定义处，宿主按名字传值，而不是改 JSON 里某几个节点的参数。
-GraphDoc 顶层可选 `params`：
+它也是**参数配方的结构**（[param-recipe-plan.md](param-recipe-plan.md) K1）：配方 = `{ 图参数名: 值 }` 的稀疏覆盖，
+没写的用 `default`（称为「基础」）。GraphDoc 顶层可选 `params`：
 
 ```jsonc
 "params": {
   "gapOffset": {
-    "type": "float",                               // 可选，manifest 参数类型名
-    "default": 0.0,                                // 必填，不传值时用它
+    "type": "float",                               // 可选，manifest 参数类型名；给了就是一份完整规格
+    "label": "间隙测点 · 补偿量",                    // 以下都是可选的规格字段，与 manifest 的 param 同一套
+    "min": -2, "max": 2, "softMin": -0.5, "softMax": 0.5, "step": 0.01, "unit": "mm",
+    "group": "补偿",
+    "default": 0.0,                                // 必填，不传值时用它（配方的「基础」值）
     "binds": ["n_gap.offset", "n_circles.offset"], // 必填，<节点id>.<参数名>
     "doc": "间隙读数补偿，mm"                        // 可选
   },
-  "modelPath": { "default": "models/v12s0.onnx", "binds": ["n_infer.modelPath"] }
+  "modelPath": { "default": "models/v12s0.onnx", "binds": ["n_infer.modelPath"] }   // 老格式照样合法
 }
 ```
+
+**规格（P1.1）。** 每一项在 `{type?, default, binds, doc?}` 之外允许 manifest 参数声明的全部字段：
+`label`、`min`/`max`（硬限位）、`softMin`/`softMax`（滑条范围）、`step`、`unit`、`componentLabels`、`options`、
+`group`、`advanced`、`placeholder`、`pattern`、`rows`、`filters`/`mode`、`alpha`、`visibleWhen`/`enabledWhen`、
+`semantic`/`roiBackdrop`。schema 里是 `$ref` 到 `operator-manifest.schema.json` 的 `paramSpec`（manifest 的
+`param` = `name` + 同一份 `paramSpec`），不抄第二份；多出来的字段（包括拼错的）一律拒绝。老文件完全兼容。
+样例见 [`schema/examples/graph-params.example.lyflow.json`](../schema/examples/graph-params.example.lyflow.json)。
+
+**取值的校验（P1.2）。** 声明了 `type` 的图参数，core 在展开期先按它自己的规格查 `default` 与宿主传进来的值
+（类型、硬限位、`options`；`enum` 没给 `options` 时只查是字符串），不合法报 `bad_param`，`paramPath` 是图参数名、
+`nodeId` 为空，消息里说清是「default」还是「传入的值」；然后照旧写进被绑定的节点、走节点自己的参数规整
+（节点那一层的错照常报，`nodeId` 是节点）。两层**都要**满足：图参数的规格决定控件与第一道校验，被绑定算子的
+声明是它自己的硬契约，core 不会因为图参数放宽了限位就放行一个算子不认的值。有这一类错时 `validate` 照样收齐
+全部诊断，但 `plan` / `run` 不给可运行的计划（运行整次失败、一个节点都不跑）。没有 `type` 的老图参数跳过第一步。
+`visibleWhen`/`enabledWhen`/`roiBackdrop` 只给编辑器看，core 不据此判定。
 
 - `binds` 的每一项是 `节点id.参数名`，按**最后一个** `.` 切（节点 id 本身可以含 `.`）。
   目标是顶层节点；可以是子图实例节点，这时参数名是该子图声明的提升参数。
@@ -181,7 +200,35 @@ GraphDoc 顶层可选 `params`：
 `eval` 原本就有 `--param <节点>.<参数>=<start>:<end>:<steps>` 扫描轴，两者按 `=` 左边**是否含 `.`**
 区分：含 `.` 是扫描轴，不含是顶层参数。
 
-编辑器目前只**原样保留**顶层 `params`（读写往返不丢），编辑界面留给 M8。
+#### 编辑器里的图参数（param-recipe P1）
+
+- **纳入配方 = 提升为图参数**（K2）。Inspector 里参数行右键「纳入配方（提升为图参数）」：
+  这个参数当前的有效值成为 `default`，节点上的显式值删掉（一处定义，不会有 `param_conflict`），加一条 bind；
+  规格从被绑定目标的声明复制，`label` 写成「节点标题 · 参数 label」。同一算子内的 `visibleWhen`/`enabledWhen`、
+  `roiBackdrop` 不复制（它们指的是那个算子自己的其它参数名，到图这一层对不上），`semantic` 照抄。
+  名字取参数名，重了加 `_2`、`_3`（与子图提升参数同一条规则）；名字不能空、不能含 `.`（CLI 靠它区分
+  图参数与 `<节点>.<参数>`）、不能含 `=`。整个动作一条撤销。
+- **子图里纳入 = 逐层提升链**。在子图内部的参数上做同一个动作：从这一层往外，哪一层还没提升就在那个子图定义里
+  提升成子图参数（默认值 = 这一层的当前值，所以**同一子图的其它实例行为不变**），一直到顶层，再在「当前路径上
+  的那个实例」上绑成图参数。嵌套多层时每一层各起各的名字（参数名，重了加后缀），label 带上路径上的实例标题
+  （「实例 / 内部节点 · 参数」）。已经提升过的层直接沿用，往外一层的当前值取那个实例上外参的值。
+  一个动作、一次撤销。库算子（`lib.`）进不去，内部参数没有这个动作。
+- **被绑定参数的显示与编辑**（P1.4）。被图参数提供的行（顶层节点上直接被绑定的，或子图里整条提升链通到图参数的）
+  显示图参数的**有效值**，标「由图参数 X 提供」；在这一行编辑（包括 2D 拖框、粘贴、重置）路由到图参数：
+  选着「基础」时改 `default`，P3 起选着配方时写进当前配方（K6）。判定只在 graph store 的 `setParam` 一处。
+- **动作**（graph store，每个一条撤销）：`promoteToGraphParam`、`bindToGraphParam`（类型不同的拒绝）、
+  `unbindFromGraphParam`（把当前有效值写回节点，仍按稀疏存储，行为不变）、`removeGraphParam`（同上，写回所有
+  绑定目标；最后一个删掉时 `params` 键也不留）、`renameGraphParam`（键的位置不变）、`setGraphParamDefault`、
+  `setGraphParamSpec`（改不了 `binds`/`default`/`type`）、`editGraphParamValue`（按 K6 路由）。
+  「当前有效值」= `default` ← 当前配方覆盖，P1 里就是 `default`。删节点会摘掉指着它的 bind；
+  合成子图时被绑定的参数自动提升成外参、bind 改指到新实例；解散时 bind 改指回内联出来的内参；取消子图提升会摘掉
+  指着那个外参的 bind —— 这几处都不留 `unknown_bind`。
+- **运行传参**（K3）。每次运行、实时预览、实时校验、编计划，编辑器都合成 `default ← 当前配方覆盖` 得到
+  `{名字: 值}`，经 `RunOptions.params`（validate / plan 的同名参数）交给后端：Tauri 走 C ABI 的 `params_json`
+  （validate / plan 用 `lyflow_validate_params` / `lyflow_plan_params`），HTTP 走信封的 `params`，桩服务器转成
+  CLI 的 `--param`。切配方不改 GraphDoc；结果缓存按内容寻址，值换回来就命中缓存。
+- 图参数自己的诊断（`nodeId` 为空、`paramPath` 是名字）在 Inspector 顶上「图参数」简表的对应行下标红；
+  完整的参数面板（改规格、搜索过滤、全类型控件）是 P2。
 
 ### `ui` 可以整体丢弃
 

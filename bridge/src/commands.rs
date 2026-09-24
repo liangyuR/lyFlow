@@ -125,16 +125,30 @@ fn base_dir_of(graph_path: Option<String>) -> String {
         .unwrap_or_default()
 }
 
+/// 顶层图参数的取值（编辑器合成的「default + 当前配方覆盖」，param-recipe K3）→ C ABI 的
+/// `params_json`。没给或是空对象都当作「全用 default」，与老调用方逐字节同一条路。
+pub(crate) fn params_json_of(
+    params: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Result<Option<String>, String> {
+    match params {
+        Some(p) if !p.is_empty() => serde_json::to_string(p).map(Some).map_err(|e| e.to_string()),
+        _ => Ok(None),
+    }
+}
+
 /// 权威校验（C++ 侧）。返回全部诊断，不是第一条（D5）。
+/// `params` 是这次要校验的图参数取值（K5：诊断反映的是当前配方的值）。
 #[tauri::command]
 pub fn validate_graph(
     doc: GraphDoc,
     #[allow(non_snake_case)] graphPath: Option<String>,
+    params: Option<serde_json::Map<String, serde_json::Value>>,
 ) -> Result<serde_json::Value, String> {
     let core = core_ffi::core()?;
     let json = serde_json::to_string(&doc).map_err(|e| e.to_string())?;
+    let params_json = params_json_of(params.as_ref())?;
     let raw = core
-        .validate(&json, &base_dir_of(graphPath))
+        .validate_with_params(&json, &base_dir_of(graphPath), params_json.as_deref())
         .map_err(|e| e.to_string())?;
     serde_json::from_str(&raw).map_err(|e| format!("core 返回的诊断不是合法 JSON: {e}"))
 }
@@ -156,6 +170,7 @@ pub fn run_graph(
     mode: Option<String>,
     #[allow(non_snake_case)] previewMaxPoints: Option<u32>,
     #[allow(non_snake_case)] previewBudgetMs: Option<u32>,
+    params: Option<serde_json::Map<String, serde_json::Value>>,
 ) -> Result<String, String> {
     // 结构校验挡在前面：C++ 也会查一遍，但那要等到事件流里才看得见，
     // 而一个悬空的边根本不该走到执行器。
@@ -173,6 +188,7 @@ pub fn run_graph(
     let targets = targets.unwrap_or_default();
     let isolate = isolate.unwrap_or_default();
     let force = force.unwrap_or_default();
+    let params_json = params_json_of(params.as_ref())?;
     runs.start(
         &app,
         core,
@@ -183,6 +199,7 @@ pub fn run_graph(
             isolate: &isolate,
             force: &force,
             preview,
+            params_json: params_json.as_deref(),
         },
     )
 }
@@ -199,11 +216,18 @@ pub fn plan_graph(
     doc: GraphDoc,
     #[allow(non_snake_case)] graphPath: Option<String>,
     targets: Option<Vec<String>>,
+    params: Option<serde_json::Map<String, serde_json::Value>>,
 ) -> Result<serde_json::Value, String> {
     let core = core_ffi::core()?;
     let json = serde_json::to_string(&doc).map_err(|e| e.to_string())?;
+    let params_json = params_json_of(params.as_ref())?;
     let raw = core
-        .plan(&json, &base_dir_of(graphPath), &targets.unwrap_or_default())
+        .plan_with_params(
+            &json,
+            &base_dir_of(graphPath),
+            &targets.unwrap_or_default(),
+            params_json.as_deref(),
+        )
         .map_err(|e| e.to_string())?;
     serde_json::from_str(&raw).map_err(|e| format!("core 返回的计划不是合法 JSON: {e}"))
 }
@@ -762,7 +786,7 @@ mod tests {
             ]),
         );
 
-        let plan = plan_graph(doc.clone(), None, None).expect("plan_graph 失败");
+        let plan = plan_graph(doc.clone(), None, None, None).expect("plan_graph 失败");
         let nodes = plan.as_array().expect("计划不是数组");
         assert_eq!(nodes.len(), 2);
         assert_eq!(nodes[0]["nodeId"], "g");
@@ -771,7 +795,7 @@ mod tests {
         assert_eq!(nodes[0]["cached"], false);
         assert_eq!(nodes[0]["cacheKey"].as_str().unwrap().len(), 32);
         // 同一张图两次编译必须给出同一批 cacheKey，否则 stale 标记会自己闪
-        let again = plan_graph(doc, None, None).unwrap();
+        let again = plan_graph(doc, None, None, None).unwrap();
         assert_eq!(again, plan);
     }
 
@@ -781,10 +805,105 @@ mod tests {
             serde_json::json!([{"id": "a", "op": "no.such.op"}]),
             serde_json::json!([]),
         );
-        let out = plan_graph(doc, None, None).unwrap();
+        let out = plan_graph(doc, None, None, None).unwrap();
         let items = out.as_array().unwrap();
         assert_eq!(items[0]["kind"], "diagnostic");
         assert_eq!(items[0]["code"], "unknown_op");
+    }
+
+    /// param-recipe P1 验收 1：带完整规格的图参数、老格式的图参数，存盘再读回一个字段都不丢，
+    /// 键顺序也不变（存盘是给人 diff 的）。夹具就是 pnpm check 对着 schema 校验的那一份。
+    #[test]
+    fn graph_params_full_spec_survives_a_save_load_roundtrip() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../schema/examples/graph-params.example.lyflow.json");
+        let raw = std::fs::read_to_string(&fixture).expect("读不到图参数样例");
+        let original: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let doc: GraphDoc = serde_json::from_str(&raw).unwrap();
+
+        let dir = std::env::temp_dir().join(format!("lyflow-test-graph-params-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("g.lyflow.json");
+        save_graph(path.to_string_lossy().into_owned(), doc).expect("save_graph 失败");
+        let loaded = load_graph(path.to_string_lossy().into_owned()).expect("load_graph 失败");
+        let back = serde_json::to_value(&loaded.doc).unwrap();
+
+        assert_eq!(back["params"], original["params"], "图参数有字段丢了或变了");
+        let keys = |v: &serde_json::Value| -> Vec<String> {
+            v.as_object().unwrap().keys().cloned().collect()
+        };
+        assert_eq!(keys(&back["params"]), keys(&original["params"]));
+        assert_eq!(keys(&back["params"]["leafSize"]), keys(&original["params"]["leafSize"]));
+        // 规格字段逐个在：label、限位、单位、分组、分量名、options、placeholder
+        let leaf = &back["params"]["leafSize"];
+        for key in ["label", "min", "max", "softMin", "softMax", "step", "unit", "group", "componentLabels"] {
+            assert!(leaf.get(key).is_some(), "leafSize 丢了 {key}");
+        }
+        assert_eq!(back["params"]["cutField"]["options"][2]["doc"], "竖直方向");
+        assert_eq!(back["params"]["pointCount"]["placeholder"], "点数");
+        // 老格式那一条仍是老样子
+        assert!(back["params"]["cutMax"].get("type").is_none());
+
+        // core 认这份图：完整规格与老格式都能过校验
+        let diags = validate_graph(loaded.doc, None, None).unwrap();
+        assert_eq!(diags, serde_json::json!([]), "{diags}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// param-recipe P1.5 / K5：validate 与 plan 带上编辑器合成的图参数取值，经 C ABI 的
+    /// params_json 交给 core —— 诊断与 cacheKey 反映的是这组值，不是 doc 里的 default。
+    #[test]
+    fn validate_and_plan_carry_graph_param_values() {
+        let mut doc = graph_with(
+            serde_json::json!([
+                {"id": "g", "op": "gen.synthetic", "params": {"seed": 7711}},
+                {"id": "v", "op": "filter.voxel_grid"}
+            ]),
+            serde_json::json!([
+                {"id": "e", "from": {"node": "g", "port": "cloud"},
+                            "to": {"node": "v", "port": "cloud"}}
+            ]),
+        );
+        doc.params = serde_json::from_value(serde_json::json!({
+            "count": {"type": "int", "label": "点数", "min": 10, "max": 5000,
+                      "default": 3000, "binds": ["g.pointCount"]}
+        }))
+        .unwrap();
+        let values = |v: serde_json::Value| -> serde_json::Map<String, serde_json::Value> {
+            serde_json::from_value(v).unwrap()
+        };
+
+        assert_eq!(validate_graph(doc.clone(), None, None).unwrap(), serde_json::json!([]));
+        let bad = validate_graph(doc.clone(), None, Some(values(serde_json::json!({"count": 9000}))))
+            .unwrap();
+        let d = &bad.as_array().unwrap()[0];
+        assert_eq!(d["code"], "bad_param", "{bad}");
+        assert_eq!(d["paramPath"], "count");
+        assert!(d.get("nodeId").map_or(true, |n| n == "" || n.is_null()), "{d}");
+        // 空对象 = 全用 default，与不给一样
+        assert_eq!(
+            validate_graph(doc.clone(), None, Some(values(serde_json::json!({})))).unwrap(),
+            serde_json::json!([])
+        );
+
+        let key_of = |plan: &serde_json::Value, id: &str| -> String {
+            plan.as_array().unwrap().iter().find(|n| n["nodeId"] == id).unwrap()["cacheKey"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let base = plan_graph(doc.clone(), None, None, None).unwrap();
+        let same = plan_graph(doc.clone(), None, None, Some(values(serde_json::json!({"count": 3000}))))
+            .unwrap();
+        let other = plan_graph(doc.clone(), None, None, Some(values(serde_json::json!({"count": 2500}))))
+            .unwrap();
+        assert_eq!(key_of(&base, "g"), key_of(&same, "g"), "传回 default 键不变");
+        assert_ne!(key_of(&base, "g"), key_of(&other, "g"), "被绑定节点的键跟着值变");
+        assert_ne!(key_of(&base, "v"), key_of(&other, "v"), "下游跟着变");
+        // 越界值连计划都编不出来：返回诊断数组
+        let blocked = plan_graph(doc, None, None, Some(values(serde_json::json!({"count": 1}))))
+            .unwrap();
+        assert_eq!(blocked[0]["code"], "bad_param");
     }
 
     #[test]

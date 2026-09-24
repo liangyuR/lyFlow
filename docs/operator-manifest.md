@@ -86,8 +86,9 @@ JSON Schema： [`schema/operator-manifest.schema.json`](../schema/operator-manif
 }
 ```
 
-`visibleWhen` 有意做得很弱（只支持对同节点其他参数的等值/包含判断），不是通用表达式引擎。
-需要复杂逻辑说明算子该拆了。
+`visibleWhen` 有意做得很弱（只支持对同节点其他参数的等值 `eq` / 不等 `ne` / 包含 `in` 判断），不是通用表达式引擎。
+需要复杂逻辑说明算子该拆了。三个判据同时给时按 `eq` → `ne` → `in` 取第一个；schema、core（`Condition`、
+`conditionHolds`、manifest 导出）、编辑器（`lib/params.ts` 的 `isConditionMet`）三方同一套（param-recipe P1.6）。
 
 分组用 `group` 字段，`advanced: true` 的参数默认收进折叠区。
 

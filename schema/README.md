@@ -32,3 +32,16 @@ python scripts/validate_schema.py schema/examples/execution-event.example.json \
 
 manifest 那一条在 `pnpm check` 里校验的是 **C++ 现场导出的真实产物**，
 不是这份样例 —— 样例只负责让格式说明和实现不脱节。
+
+**跨文件引用。** GraphDoc 顶层图参数的规格（param-recipe P1.1）`$ref` 到
+`operator-manifest.schema.json#/$defs/paramSpec`（manifest 的 `param` = `name` + 同一份 `paramSpec`），不抄第二份。
+`scripts/validate_schema.py` 把同目录下的 `*.schema.json` 按各自的 `$id` 登记进同一个 registry，引用在本地解析、不联网；
+别的校验器要做同样的事（按 `$id` 预载 manifest 的 schema）。
+
+`graph-params.example.lyflow.json` 是带完整规格的图参数（外加一条老格式），`graph-params.invalid.lyflow.json`
+是负例（拼错的字段名），`pnpm check` 用 `--expect-fail` 断言它**不**通过：
+
+```bash
+python scripts/validate_schema.py schema/examples/graph-params.invalid.lyflow.json \
+                                  schema/graph-doc.schema.json --expect-fail
+```

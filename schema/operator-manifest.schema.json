@@ -159,10 +159,18 @@
     },
     "param": {
       "type": "object",
+      "description": "算子的一个参数：名字 + 一份参数规格。规格那一半（paramSpec）也是 GraphDoc 顶层图参数的声明格式（param-recipe P1.1），两处共用一份定义。",
       "required": ["name", "type", "default"],
-      "additionalProperties": false,
+      "allOf": [{ "$ref": "#/$defs/paramSpec" }],
       "properties": {
-        "name": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "unevaluatedProperties": false
+    },
+    "paramSpec": {
+      "type": "object",
+      "description": "参数规格（不含 name，全部字段可选）。算子参数与顶层图参数共用；哪些字段必填由引用方决定。",
+      "properties": {
         "type": {
           "enum": ["bool", "int", "float", "vec2f", "vec3f", "vec4f", "enum", "flags",
                    "string", "text", "path", "color", "transform", "curve"],
