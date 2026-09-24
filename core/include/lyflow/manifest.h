@@ -286,6 +286,19 @@ SnippetDesc parseSnippet(const std::string& text, const std::string& source);
 /// 按名字找参数描述。执行器和算子都要用，放这里免得各写一遍线性查找。
 const Param* findParam(const OperatorDesc& op, const std::string& name);
 
+// ------------------------------------------------------------ curve 的值
+// docs/operator-manifest.md「transform 与 curve 的值」：`{"points": [[x, y], …], "interp": "linear"|"smooth"}`。
+// x 在 [0, 1] 内严格递增、至少两个点；y 是有限数，声明了 min/max 时也要落在里面；interp 缺省 linear。
+// 参数值在 core 里存成这份 JSON 的文本（Value::Kind::String），算子用 evaluateCurve 取值。
+
+/// j 是不是合法的 curve 值（按 p 的 min/max 查 y）。不合法时返回 false，message 是给人看的原因。
+bool checkCurveValue(const nlohmann::json& j, const Param& p, std::string& message);
+
+/// 在 x 处取曲线的值。x 落在首尾控制点之外时取端点的 y；interp = smooth 是单调三次 Hermite
+/// （Fritsch–Carlson，不会冲出相邻两点的 y 范围），与编辑器画出来的那条线同一套算法。
+/// curve 不合法时返回 0。
+double evaluateCurve(const nlohmann::json& curve, double x);
+
 /// 「一段文本 → 一张图」。text 是原文，baseDir 是它所在目录（相对路径参数据此写）。
 /// 成功时把 GraphDoc JSON 写进 graphJson；失败时返回 Status（ADR-0017）。
 using ImportFn = Status (*)(const std::string& text, const std::filesystem::path& baseDir,

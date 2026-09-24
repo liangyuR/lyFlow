@@ -11,8 +11,9 @@ import { withBoundValues } from "../lib/graphParams";
 import { effectiveParams } from "../lib/params";
 import { RAMPS, type RampName } from "../lib/ramps";
 import { copyFrameWrites, pickFrame, roiFramesOf } from "../lib/roiFrames";
+import { rememberRoiBounds } from "../lib/roiThumbs";
 import { disposeOverlay, extentOf, shapesOf } from "../lib/shapes2d";
-import { augmentOperators, levelOf, resolveOutput } from "../lib/subgraph";
+import { augmentOperators, fullId, levelOf, resolveOutput } from "../lib/subgraph";
 import { exportCanvasPng } from "../lib/exportPng";
 import { transport } from "../transport";
 import { aggregatedNodes, useExecutionStore } from "../store/execution";
@@ -336,7 +337,9 @@ export function Viewer3D() {
   const [manualRange, setManualRange] = useState<[number, number]>([0, 1]);
   const [pointSize, setPointSize] = useState(1.6);
   const pointSizeRef = useRef(1.6);
-  const [cameraMode, setCameraMode] = useState<CameraMode>("3d");
+  // 相机模式在 ui store：参数面板的 ROI 行「进入拖框」要能把它切到 2D（param-recipe P2.7）
+  const cameraMode = useUiStore((s) => s.viewerMode);
+  const setCameraMode = useUiStore((s) => s.setViewerMode);
   const [maxPoints, setMaxPoints] = useState(2_000_000);
   // 云、状态、以及**它属于哪个节点**必须一起换：拆成三个 useState 的话，切换节点时会出现
   // 「标题是新节点、点云还是旧节点」的中间态 —— 肉眼看不见，但验收脚本会稳定读到它。
@@ -351,6 +354,12 @@ export function Viewer3D() {
   // 只读地暴露给验收脚本：底图云与叠画几何各自的包围盒，用来断言两者在同一个平面上。
   const [overlayBounds, setOverlayBounds] = useState<Float32Array | null>(null);
   const { cloud } = display;
+  // 参数面板的 ROI 缩略图拿这片云的范围当底图（param-recipe P2.7）
+  useEffect(() => {
+    if (display.nodeId && cloud && cloud.pointCount > 0) {
+      rememberRoiBounds(fullId(useUiStore.getState().path, display.nodeId), cloud.bounds);
+    }
+  }, [display.nodeId, cloud]);
 
   const selected = useUiStore((s) => s.selectedNodes);
   const path = useUiStore((s) => s.path);

@@ -258,8 +258,13 @@ configure_file("${LYFLOW_PACK_REGISTRAR}.in" "${LYFLOW_PACK_REGISTRAR}" COPYONLY
 file(GLOB LYFLOW_CORE_SOURCES CONFIGURE_DEPENDS
   "${LYFLOW_SRC}/*.cpp" "${LYFLOW_SRC}/exec/*.cpp" "${LYFLOW_SRC}/ops/*.cpp")
 
-add_library(lyflow_core_obj OBJECT ${LYFLOW_CORE_SOURCES} "${LYFLOW_PACK_REGISTRAR}")
+# 编辑器 e2e 用的测试算子（param-recipe P2.10）：编进 core，只在 LYFLOW_TEST_OPS=1 时注册。
+# 在 tests/ 的子目录里，不会被下面 doctest 的 tests/*.cpp 通配再编一份。
+set(LYFLOW_E2E_OPS "${LYFLOW_TESTS}/e2e/register_e2e_ops.cpp")
+
+add_library(lyflow_core_obj OBJECT ${LYFLOW_CORE_SOURCES} "${LYFLOW_PACK_REGISTRAR}" "${LYFLOW_E2E_OPS}")
 lyflow_apply_common(lyflow_core_obj)
+target_include_directories(lyflow_core_obj PRIVATE "${LYFLOW_TESTS}")
 
 # D1：core 是 DLL，只导出 C ABI。Rust 用 libloading 运行时加载。
 add_library(lyflow_core SHARED

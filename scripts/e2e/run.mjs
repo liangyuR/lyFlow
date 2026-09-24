@@ -25,6 +25,7 @@ import { m8cSuites } from "./m8c.mjs";
 import { motionSuites } from "./motion.mjs";
 import { nodeRunSuites } from "./noderun.mjs";
 import { paramsP1Suites } from "./params_p1.mjs";
+import { paramsP2Suites } from "./params_p2.mjs";
 import { peekSuites } from "./peek.mjs";
 import { phaseASuites } from "./phase_a.mjs";
 
@@ -471,7 +472,7 @@ async function main() {
 
     const grouped = [
       ...m3Suites, ...m4Suites, ...phaseASuites, ...gapSuites, ...peekSuites, ...m8bSuites, ...m8cSuites,
-      ...motionSuites, ...nodeRunSuites, ...paramsP1Suites,
+      ...motionSuites, ...nodeRunSuites, ...paramsP1Suites, ...paramsP2Suites,
     ];
     for (const suite of grouped) {
       try {

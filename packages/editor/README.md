@@ -178,7 +178,8 @@ pnpm test-server -- --root <工作区> --cli <lyflow.exe>
 pnpm e2e:http                             # 桩 + Chrome + 宿主，一条龙
 ```
 
-不写 UI 单元测试（CLAUDE.md）：这一层的正确性由 `pnpm e2e` 与 `pnpm e2e:http` 端到端保证。
+纯逻辑（`lib/` 下的图参数、参数面板模型、transform / curve 的值）有 `node --test` 单测（`test/`）；界面这一层的正确性由
+`pnpm e2e` 与 `pnpm e2e:http` 端到端保证。
 
 ---
 
@@ -385,6 +386,30 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
   （validate / plan 的同名参数）交给后端 —— P3 接上配方时调用方不用改。
 - **dirty 是「doc 不是存盘时那一份」**：graph store 记着 `savedDoc`（对象身份），撤销回到保存点时 dirty 复原。
   存盘是异步的，`markSaved(path, doc)` 记下真正写下去的那一份。
+
+## 参数面板（param-recipe P2）
+
+设计在 [docs/param-recipe-plan.md](../../docs/param-recipe-plan.md) P2，验收记录在
+[docs/param-recipe-p2-acceptance.md](../../docs/param-recipe-p2-acceptance.md)。
+
+- **开关与布局**：工具栏「参数」或 `Ctrl+Shift+P`（键表里的 `paramPanel`）。状态在 ui store 的 `paramPanel`
+  （`open / maximized / tab / viewerOpen`），纯 UI、不进 doc 不进撤销。开着时右侧那一列换成面板、**Inspector 不渲染**；
+  3D 视图还在那一列顶上，收成一条「3D 预览」标题栏（ROI 行「拖框」会展开它）—— Viewer3D 始终是同一个实例，切换不重建
+  WebGL。面板宽度与 Inspector 宽度各记各的，面板那份记在 `localStorage["lyflow.paramPanel.width"]`。最大化把画布压成
+  0 宽（不卸载：节点尺寸与端口量测都还在）。面板关着时 Inspector 顶上的图参数简表照旧（P1 加的）。
+- **数据模型在 `lib/paramPanel.ts`**（纯函数、有单测）：行的全集 = 图参数 + 当前层每个节点的**可见**参数 + 子图实例展开进
+  定义的节点（按实例各一份，因为绑定链按实例不同）。chip 的判据：已改动 = 与算子默认不同（图参数行比第一个绑定目标的
+  默认）；配方 = 图参数本身与被它提供的行；诊断 = 带 paramPath 的校验诊断或上次运行的错误；类型 = param.type。
+  搜索按空白切词、每个词都要出现在「参数名 label 节点标题 展开后的节点 id 值的文本」里。过滤生效时折叠一概不算。
+- **虚拟化**：`components/VirtualList.tsx`，按类型估行高、ResizeObserver 量真值、视口上方的行变高时补 scrollTop。
+  行组件 `memo`；诊断里「上次运行的错误」拍成一个字符串键再订阅，运行时每 16 ms 一批的事件不会重建模型。
+- **编辑走的还是 store 的动作**：`setParam(nodeId, name, value, at?)` 多了一个可选的层级 `at`（展开进子图定义的那几行在
+  更深一层）；`promoteToGraphParam` / `promoteParam` / `unpromoteParam` 同样。`ParamControl` 的 `path` prop 把层级带给
+  右键菜单与 live preview（预览目标按「相对当前层」的 id 拼）。
+- **行结构给 P3 留了位置**：最左一条 `.prow__stripe`（`.prow.is-recipe-override` 时画橙色竖条）、label 后的 `.prow__tags`。
+- **transform / curve**：`components/TransformControl.tsx`、`components/CurveControl.tsx`，纯逻辑在 `lib/transform.ts`、
+  `lib/curve.ts`（与 core 的 `checkCurveValue` / `evaluateCurve` 同一套判据与插值）。数字框抽成了 `components/NumberInput.tsx`。
+  `valueEquals` 现在也比普通对象（curve 的值），与键顺序无关 —— 稀疏存储删不删键靠它。
 
 ## 层级（子图）
 

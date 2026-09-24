@@ -1,0 +1,581 @@
+/* 参数面板（param-recipe P2）。配色全部沿用 --lyflow-* 变量；过渡写在 styles.motion.css（motion-plan A2）。 */
+
+.ppanel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  background: var(--lyflow-bg-1);
+}
+
+.ppanel__head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px 0 8px;
+  height: 34px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-2);
+}
+
+.ppanel__tabs {
+  display: flex;
+  gap: 2px;
+  height: 100%;
+}
+
+.ppanel__tab {
+  padding: 0 12px;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--lyflow-fg-1);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ppanel__tab:hover {
+  color: var(--lyflow-fg-0);
+}
+
+.ppanel__tab.is-active {
+  color: var(--lyflow-fg-0);
+  border-bottom-color: var(--lyflow-accent);
+}
+
+.ppanel__spacer {
+  flex: 1;
+}
+
+.ppanel__icon {
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--lyflow-radius);
+  color: var(--lyflow-fg-1);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ppanel__icon:hover,
+.ppanel__icon[aria-pressed="true"] {
+  border-color: var(--lyflow-border-strong);
+  color: var(--lyflow-fg-0);
+}
+
+.ppanel__placeholder {
+  padding: 28px 18px;
+  color: var(--lyflow-fg-1);
+}
+
+.ppanel__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* -------------------------------------------------------------- 搜索与过滤 */
+
+.pp-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--lyflow-border);
+  flex-shrink: 0;
+}
+
+.pp-search {
+  width: 100%;
+}
+
+.pp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.pp-count {
+  margin-left: 4px;
+  color: var(--lyflow-fg-2);
+  font-family: var(--lyflow-mono);
+  font-size: 10px;
+}
+
+.ctl-chip.is-on .pp-count {
+  color: inherit;
+}
+
+.pp-type {
+  padding: 1px 6px;
+  font-size: 11px;
+}
+
+.pp-type.is-on {
+  border-color: var(--lyflow-accent);
+  color: var(--lyflow-accent);
+}
+
+/* ------------------------------------------------------------------- 列表 */
+
+.pp-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* 虚拟化的行是绝对定位的：浏览器的滚动锚定会和 VirtualList 自己的补偿打架 */
+  overflow-anchor: none;
+}
+
+.pp-empty {
+  margin: 0;
+  padding: 12px 14px;
+  color: var(--lyflow-fg-2);
+  font-size: 12px;
+}
+
+.pp-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 6px 12px 4px calc(12px + var(--pp-depth, 0) * 14px);
+  background: none;
+  border: 0;
+  color: var(--lyflow-fg-2);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pp-title:hover {
+  color: var(--lyflow-fg-1);
+}
+
+.pp-title__chev {
+  display: inline-block;
+  width: 12px;
+  color: var(--lyflow-fg-2);
+  font-size: 10px;
+}
+
+.pp-title.is-invalid {
+  color: #ff9a9a;
+}
+
+.pp-gp-head {
+  padding-top: 10px;
+  color: var(--lyflow-fg-1);
+  font-size: 11px;
+}
+
+.pp-gp-head__err {
+  text-transform: none;
+}
+
+.pp-group__adv {
+  padding: 0 5px;
+  border: 1px solid var(--lyflow-border-strong);
+  border-radius: 8px;
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
+.pp-def {
+  margin: 4px 0 2px;
+  color: var(--lyflow-accent);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+}
+
+/* 节点那一节的标题栏 */
+.pp-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 8px 10px 6px calc(6px + var(--pp-depth, 0) * 14px);
+  border-top: 1px solid var(--lyflow-border);
+  border-left: 2px solid transparent;
+}
+
+.pp-node.is-focused {
+  background: rgba(74, 158, 255, 0.08);
+  border-left-color: var(--lyflow-accent);
+}
+
+.pp-node__chev {
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.pp-node__title {
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--lyflow-fg-0);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.pp-node__title:hover {
+  color: var(--lyflow-accent);
+  text-decoration: underline;
+}
+
+.pp-node__op {
+  color: var(--lyflow-fg-2);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.pp-node__count {
+  margin-left: auto;
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.pp-badge {
+  padding: 0 6px;
+  border: 1px solid var(--lyflow-border-strong);
+  border-radius: 8px;
+  color: var(--lyflow-fg-1);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.pp-badge--shared {
+  border-color: var(--lyflow-accent-dim);
+  color: var(--lyflow-accent);
+}
+
+/* -------------------------------------------------------------------- 行 */
+
+.prow {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(92px, 30%) minmax(0, 1fr) max-content;
+  gap: 8px;
+  align-items: start;
+  padding: 5px 8px 5px calc(14px + var(--pp-depth, 0) * 14px);
+}
+
+.prow:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.prow.is-focused {
+  background: rgba(74, 158, 255, 0.05);
+}
+
+.prow.is-disabled .prow__control {
+  opacity: 0.4;
+}
+
+/* P3 的「被当前配方覆盖」橙色竖条挂在这里（.prow.is-recipe-override .prow__stripe）；P2 不画 */
+.prow__stripe {
+  position: absolute;
+  left: calc(4px + var(--pp-depth, 0) * 14px);
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: transparent;
+}
+
+.prow.is-recipe-override .prow__stripe {
+  background: var(--lyflow-warn);
+}
+
+.prow__label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+  padding-top: 4px;
+  color: var(--lyflow-fg-1);
+  font-size: 12px;
+}
+
+.prow__dot {
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.prow__dot.is-on {
+  background: var(--lyflow-accent);
+}
+
+.prow__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prow[data-modified="1"] .prow__name {
+  color: var(--lyflow-fg-0);
+}
+
+.prow__tags {
+  display: contents;
+}
+
+.prow__tag {
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--lyflow-bg-3);
+  color: var(--lyflow-fg-2);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.prow__tag--graph {
+  background: rgba(74, 158, 255, 0.12);
+  color: var(--lyflow-accent);
+}
+
+.prow__gpname {
+  flex-basis: 100%;
+  padding-left: 10px;
+  color: var(--lyflow-fg-2);
+  font-size: 10px;
+}
+
+.prow__control {
+  min-width: 0;
+}
+
+.prow__icons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-top: 2px;
+  min-width: 42px;
+  justify-content: flex-end;
+}
+
+.prow__icon {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--lyflow-radius);
+  color: var(--lyflow-fg-2);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.prow__icon:hover {
+  color: var(--lyflow-accent);
+  border-color: var(--lyflow-border);
+}
+
+.prow__icon.is-on,
+.prow__bookmark.is-on {
+  color: var(--lyflow-accent);
+}
+
+.prow.has-error input,
+.prow.has-error select,
+.prow.has-error textarea {
+  border-color: #c84040;
+}
+
+.pp-diags {
+  margin: 3px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pp-diag {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.pp-diag.is-error {
+  color: #ff9a9a;
+}
+
+.pp-diag.is-warning {
+  color: var(--lyflow-warn);
+}
+
+.pp-diag code {
+  margin-right: 4px;
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.prow__binds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+/* ROI 行的缩略图（P2.7）：框在底图上的位置示意 */
+.prow__roi {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.prow__thumb {
+  flex-shrink: 0;
+  border: 1px solid var(--lyflow-border);
+  border-radius: 3px;
+  background: var(--lyflow-bg-0);
+  cursor: pointer;
+}
+
+.prow__thumb:hover {
+  border-color: var(--lyflow-accent-dim);
+}
+
+.prow__thumb-bg {
+  fill: rgba(209, 213, 219, 0.06);
+}
+
+.prow__thumb-box {
+  fill: none;
+  stroke: var(--lyflow-fg-2);
+  stroke-width: 1;
+}
+
+.prow__thumb-box.is-current {
+  fill: rgba(52, 211, 153, 0.18);
+  stroke: #34d399;
+  stroke-width: 1.5;
+}
+
+/* 图参数的规格编辑 */
+.pp-spec {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 4px 8px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--lyflow-border);
+  border-radius: var(--lyflow-radius);
+  background: var(--lyflow-bg-0);
+}
+
+.pp-spec__field {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  color: var(--lyflow-fg-2);
+  font-size: 10px;
+}
+
+/* ------------------------------------------------------- 面板开着时的布局 */
+
+/* 3D 视图在面板上面收成一条标题栏（P2.1：面板要竖向的地方），点开才展开 */
+.app__viewer-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 10px;
+  flex-shrink: 0;
+  background: var(--lyflow-bg-2);
+  border: 0;
+  border-bottom: 1px solid var(--lyflow-border);
+  color: var(--lyflow-fg-1);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.app__viewer-toggle:hover {
+  color: var(--lyflow-fg-0);
+}
+
+.app__viewer.is-collapsed {
+  display: none;
+}
+
+.app__right--panel .app__viewer {
+  flex-basis: 38%;
+}
+
+/* 最大化：画布与算子面板收起，面板占满。画布只是被压成 0 宽，不卸载 —— 节点尺寸与端口量测都还在 */
+.app__body.is-panel-max .app__sidebar,
+.app__body.is-panel-max .app__splitter {
+  display: none;
+}
+
+.app__body.is-panel-max .app__canvas {
+  flex: 0 0 0;
+  width: 0;
+  overflow: hidden;
+}
+
+.app__body.is-panel-max .app__right {
+  flex: 1;
+  width: auto !important;
+}
+
+/* 工具栏「参数」按钮开着时 */
+.toolbar button.is-on {
+  border-color: var(--lyflow-accent-dim);
+  color: var(--lyflow-accent);
+}
+
+/* 面板里向量的分量排成一行（Inspector 里是一列）：一千个参数的时候行越矮越好 */
+.prow .ctl-vec {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 3px 6px;
+}
+
+.prow .ctl-vec__item {
+  flex: 1 1 64px;
+  min-width: 64px;
+}
+
+/* 最大化时控件列不无限拉宽：数字框拉到一千多像素只会更难读 */
+.app__body.is-panel-max .prow {
+  grid-template-columns: minmax(120px, 280px) minmax(0, 720px) max-content;
+}
+
+.prow .ctl-vec .ctl--num {
+  min-width: 0;
+  width: 100%;
+}

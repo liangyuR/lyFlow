@@ -5,7 +5,7 @@
 // P1 里覆盖恒为空，但每个读值的地方都经 effectiveGraphValues 拿，P3 接上配方时不用改调用方。
 
 import type { GraphDoc, GraphNode, GraphParam, ParamSpec } from "../types/graph";
-import type { Param } from "../types/manifest";
+import type { OperatorDesc, Param } from "../types/manifest";
 import type { SubPath } from "./subgraph";
 
 /** `<节点>.<参数>`，按**最后一个** `.` 切：节点 id 可以含 `.`，参数名不含。 */
@@ -142,4 +142,36 @@ export function withBoundValues(
     params[name] = graphParamValue(doc, binding.graphParam, overrides);
   }
   return params ? { ...node, params } : node;
+}
+
+/** 第一个被绑定目标在 manifest 里的声明。老格式的图参数没有 type，规格就借它；
+ *  参数面板「已改动」的判据（与算子默认不同）也拿它的 default 比。 */
+export function boundDecl(
+  doc: GraphDoc,
+  gp: GraphParam,
+  ops: ReadonlyMap<string, OperatorDesc>,
+): Param | null {
+  for (const bind of gp.binds) {
+    const t = splitBind(bind);
+    const node = t ? doc.nodes.find((n) => n.id === t.node) : undefined;
+    const decl = t && node ? ops.get(node.op)?.params.find((p) => p.name === t.param) : undefined;
+    if (decl) return decl;
+  }
+  return null;
+}
+
+/** 一个图参数用什么控件画（Inspector 的简表与参数面板的「图参数」分组共用）。给了 type 的用它自己的
+ *  规格（P1.1）；老格式没有 type，就借第一个被绑定目标的声明，label 换成图参数自己的。 */
+export function graphParamSpecOf(
+  doc: GraphDoc,
+  name: string,
+  gp: GraphParam,
+  ops: ReadonlyMap<string, OperatorDesc>,
+): Param | null {
+  if (gp.type) {
+    const { binds: _binds, ...spec } = gp;
+    return { ...spec, name, type: gp.type } as Param;
+  }
+  const decl = boundDecl(doc, gp, ops);
+  return decl ? { ...decl, name, label: gp.label ?? decl.label ?? name, default: gp.default } : null;
 }

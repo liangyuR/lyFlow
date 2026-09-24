@@ -19,7 +19,9 @@ m8c.mjs      M8c 的分组（三模板的图：2D 视图按槽切换、拖一个
 motion.mjs   动效的分组（docs/motion-plan.md §3 验收 2–9：进场、删除残影、端点对齐、连线生长、流动、状态闪光、hover、关动效）
 noderun.mjs  节点运行按钮的分组（docs/node-run-plan.md §4 验收 7–12、11b 与 §6 修订一 17–20：按钮位置与真鼠标、单击智能运行 / Shift 强制、hover 预告、「仅此节点」的兜底、停止与抢占、hover / 关动效 / 端点对齐、计划外节点挂结果、右键三项）
 params_p1.mjs 图参数成形的分组（docs/param-recipe-plan.md P1 验收 1–7：完整规格的往返与 core 校验、右键「纳入配方」、子图里的逐层提升链、被绑定行上编辑、RunOptions.params、P1.6 三项）
+params_p2.mjs 参数面板的分组（docs/param-recipe-plan.md P2 验收 9–15：开关 / 拖宽 / 最大化 / 宽度记忆与双向定位、14 种类型控件与 transform / curve 往返、advanced 折叠与联动条件、搜索与过滤 chip、子图定义共享与库算子只读、ROI 缩略图进拖框、1000 参数的性能）
 record-noderun.mjs  节点运行按钮的演示截图（不接进 run.mjs）：七步各截一张到 docs/noderun-step-N.png
+record-params-p2.mjs 参数面板的验收截图（不接进 run.mjs）：docs/params-p2-panel.png 与 docs/params-p2-types.png
 http.mjs     e2e:http —— Node 桩服务器 + 系统 Chrome + examples/host-react
 ```
 
@@ -150,5 +152,14 @@ WiX 的 `INSTALLDIR`）。目的是验证「DLL 随包」和「从 exe 同目录
 - **在 Inspector 的输入框里「打字」**：用原生 value setter + `input` 事件 + `blur()`（NumberInput 失焦才提交），
   直接改 `value` 属性 React 看不见。复制路径名断言前把 `navigator.clipboard.writeText` 换成记录器 ——
   WebView2 里剪贴板未必授权，菜单自己的兜底路径（execCommand）读不回来。
+- **测试算子要 `LYFLOW_TEST_OPS=1`**（param-recipe P2.10）。`test.param_showcase`（14 种参数类型各一个）编进了 core，
+  但只在进程环境里有这个变量时才注册：`launchApp` 起 app 时自己设；`LYFLOW_E2E_ATTACH=1` 连的那个实例要自己带着它启动，
+  否则 `params_p2` 第一条就报「没注册」。
+- **参数面板的行是虚拟化的**（`params_p2.mjs`）：只有视口附近的行在 DOM 里。操作某一行之前先 `reveal`（把列表一屏一屏往下翻，
+  直到它挂上、再滚进视口中间）；要「全部的行」就从头滚到尾把 `.prow` 的键收齐（`listedKeys`，顺路把收起的 advanced 组点开）。
+- **`placeAtScreen` 的坐标是相对画布容器的**，不是窗口坐标 —— 参数面板开着时画布只剩几百像素宽，传窗口坐标会把节点摆到面板底下，
+  真鼠标点下去点中的是面板的行。
+- **不带移动的一次点击，React Flow 的选中会慢一拍**：它点选节点时只改内部的 nodeLookup、不发 store 更新，`onSelectionChange`
+  要等下一次更新才来。画布在 `onNodesChange` 里把 select 变更直接写进 ui store（P2 补上），CDP 的真鼠标点一下就能选中。
 - **搭图走 store 的语义化动作，不直接塞 doc。** 塞一份构造好的 doc 会跳过
   `addNode` / `connect` 里的校验与 id 分配，验的就不是真实代码路径了。

@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "id": "01JPARAMSHOWCASE000000000A",
+  "name": "参数全类型示例",
+  "meta": {
+    "app": "lyflow/0.1.0",
+    "note": "param-recipe P2 / P3 的验收素材：test.param_showcase 声明了 14 种参数类型；两个「预处理」实例共享同一份子图定义；gain 已纳入配方。test.* 算子只在 LYFLOW_TEST_OPS=1 时注册（scripts/e2e 起 app 时会设）。"
+  },
+  "nodes": [
+    {
+      "id": "n_gen",
+      "op": "gen.synthetic",
+      "opVersion": "1.0.0",
+      "params": { "pointCount": 20000, "seed": 7 },
+      "ui": { "position": { "x": 0, "y": 120 }, "title": "合成点云" }
+    },
+    {
+      "id": "n_pre_a",
+      "op": "sub:sg_pre",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": { "position": { "x": 260, "y": 40 }, "title": "预处理 A" }
+    },
+    {
+      "id": "n_pre_b",
+      "op": "sub:sg_pre",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": { "position": { "x": 260, "y": 240 }, "title": "预处理 B" }
+    },
+    {
+      "id": "n_show",
+      "op": "test.param_showcase",
+      "opVersion": "1.0.0",
+      "params": {
+        "mode": "precise",
+        "iterations": 25,
+        "offset": [0.01, -0.02],
+        "roi": [-0.35, -0.25, 0.25, 0.3],
+        "pose": [0.9659258263, -0.2588190451, 0, 0.1, 0.2588190451, 0.9659258263, 0, 0, 0, 0, 1, 0.05, 0, 0, 0, 1],
+        "tint": [0.95, 0.45, 0.2],
+        "response": { "interp": "smooth", "points": [[0, 0], [0.3, 0.12], [0.7, 0.8], [1, 1]] },
+        "tag": "demo",
+        "features": 7
+      },
+      "ui": { "position": { "x": 540, "y": 40 }, "title": "全类型示例" }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "from": { "node": "n_gen", "port": "cloud" }, "to": { "node": "n_pre_a", "port": "cloud" } },
+    { "id": "e2", "from": { "node": "n_gen", "port": "cloud" }, "to": { "node": "n_pre_b", "port": "cloud" } },
+    { "id": "e3", "from": { "node": "n_pre_a", "port": "cloud" }, "to": { "node": "n_show", "port": "cloud" } }
+  ],
+  "groups": [],
+  "subgraphs": {
+    "sg_pre": {
+      "name": "预处理",
+      "doc": "体素降采样。两个实例共享这一份定义：在参数面板里改定义里的参数，两个实例都跟着变。",
+      "category": "Subgraph",
+      "version": "1.0.0",
+      "nodes": [
+        {
+          "id": "s_voxel",
+          "op": "filter.voxel_grid",
+          "opVersion": "1.0.0",
+          "params": { "leafSize": [0.01, 0.01, 0.01] },
+          "ui": { "position": { "x": 0, "y": 0 } }
+        }
+      ],
+      "edges": [],
+      "inputs": [
+        { "name": "cloud", "type": "PointCloud", "label": "Cloud", "to": [{ "node": "s_voxel", "port": "cloud" }] }
+      ],
+      "outputs": [
+        { "name": "cloud", "type": "PointCloud", "label": "Cloud", "from": { "node": "s_voxel", "port": "cloud" } }
+      ],
+      "params": []
+    }
+  },
+  "params": {
+    "gain": {
+      "type": "float",
+      "label": "全类型示例 · Gain",
+      "default": 1.25,
+      "binds": ["n_show.gain"],
+      "min": 0,
+      "max": 10,
+      "softMin": 0,
+      "softMax": 2,
+      "step": 0.01,
+      "unit": "×",
+      "group": "基础"
+    }
+  },
+  "x": {}
+}

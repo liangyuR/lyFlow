@@ -3,13 +3,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { curveProblem } from "../lib/curve";
 import { dialogs } from "../lib/dialogs";
 import { joinBind, type GraphBinding } from "../lib/graphParams";
-import { beginPreview, endPreview, schedulePreview } from "../lib/preview";
-import { fullId } from "../lib/subgraph";
+import { fullId, type SubPath } from "../lib/subgraph";
 import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
 import type { EnumOption, Param } from "../types/manifest";
+
+import { CurveControl } from "./CurveControl";
+import { dragStepOf, NumberInput, Slider } from "./NumberInput";
+import { TransformControl } from "./TransformControl";
 
 import "../styles.params.css";
 
@@ -20,232 +24,16 @@ export interface ControlProps {
   onChange: (value: unknown) => void;
   /** 所在节点。live preview 要用它当 run 的目标，参数右键要用它做提升。 */
   nodeId?: string | undefined;
+  /** 节点所在的层级。不给 = 当前层级（ui.path）；参数面板展开进子图定义的那几行给的是更深一层
+   *  （param-recipe P2.3）。live preview 的目标、右键里的提升 / 复制路径都按它算。 */
+  path?: SubPath | undefined;
   /** 这个内参已经被提升成哪个子图参数了（F4）。 */
   promotedAs?: string | undefined;
   /** 这个参数最终由哪个顶层图参数提供（param-recipe P1.4）。右键菜单据此给「纳入配方」或「解除绑定」。 */
   graphBinding?: GraphBinding | null | undefined;
 }
 
-// ---------------------------------------------------------------- 数值输入
-
-/** 拖过这么多像素才算一格。太小手抖就改值，太大又拖不动。 */
-const DRAG_PX_PER_STEP = 4;
-/** 先动这么多像素才进入拖动，否则普通点击就没法聚焦输入框打字了。 */
-const DRAG_THRESHOLD_PX = 3;
-
-interface DragState {
-  id: number;
-  startX: number;
-  lastX: number;
-  /** 未量化的累计值。量化只作用于写出去的那一份，否则慢拖会永远走不动。 */
-  acc: number;
-  active: boolean;
-}
-
-/** 一格的大小：manifest 的 step 优先，其次整数 1、soft 范围的 1/200，最后 0.01。 */
-function dragStepOf(param: Param, integer: boolean): number {
-  if (param.step !== undefined && param.step > 0) return param.step;
-  if (integer) return 1;
-  const lo = param.softMin ?? param.min;
-  const hi = param.softMax ?? param.max;
-  if (lo !== undefined && hi !== undefined && Number.isFinite(lo) && Number.isFinite(hi) && hi > lo) {
-    return (hi - lo) / 200;
-  }
-  return 0.01;
-}
-
-/** 吸到 step 的整数倍，并抹掉二进制浮点的尾巴（0.30000000000000004）。 */
-function quantize(v: number, q: number): number {
-  if (!(q > 0)) return v;
-  return Number.parseFloat((Math.round(v / q) * q).toPrecision(12));
-}
-
-/** 收尾一次拖动。卸载路径也要走这里，否则事务悬着、body 上的类留着。 */
-function finishDrag(d: DragState | null, nodeId?: string): void {
-  if (!d?.active) return;
-  d.active = false;
-  document.body.classList.remove("param-dragging");
-  useGraphStore.getState().commit("拖动参数");
-  endPreview(nodeId);
-}
-
-interface NumberInputProps {
-  value: number;
-  disabled: boolean;
-  integer: boolean;
-  min?: number | undefined;
-  max?: number | undefined;
-  step?: number | undefined;
-  dragStep: number;
-  dragName?: string | undefined;
-  nodeId?: string | undefined;
-  onCommit: (v: number) => void;
-}
-
-function NumberInput({
-  value,
-  disabled,
-  integer,
-  min,
-  max,
-  step,
-  dragStep,
-  dragName,
-  nodeId,
-  onCommit,
-}: NumberInputProps) {
-  const [text, setText] = useState(String(value));
-  const [dragging, setDragging] = useState(false);
-  const editing = useRef(false);
-  const drag = useRef<DragState | null>(null);
-
-  // 外部值变了（撤销、切换节点）且用户没在编辑时才同步，
-  // 否则会在用户打字的中途把输入框内容抢走。
-  useEffect(() => {
-    if (!editing.current) setText(String(value));
-  }, [value]);
-
-  useEffect(() => () => finishDrag(drag.current, nodeId), [nodeId]);
-
-  const clamp = (v: number) => {
-    let n = v;
-    if (min !== undefined) n = Math.max(n, min);
-    if (max !== undefined) n = Math.min(n, max);
-    return n;
-  };
-
-  const commit = () => {
-    editing.current = false;
-    const parsed = integer ? parseInt(text, 10) : parseFloat(text);
-    if (Number.isNaN(parsed)) {
-      setText(String(value)); // 输入非法，恢复原值而不是写入 NaN
-      return;
-    }
-    const next = clamp(parsed);
-    setText(String(next));
-    if (next !== value) onCommit(next);
-  };
-
-  // 先抓住指针再判阈值：拖出输入框之外的那一段也要收得到
-  const onPointerDown = (e: React.PointerEvent<HTMLInputElement>) => {
-    if (disabled || e.button !== 0) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    drag.current = { id: e.pointerId, startX: e.clientX, lastX: e.clientX, acc: value, active: false };
-  };
-
-  const onPointerMove = (e: React.PointerEvent<HTMLInputElement>) => {
-    const d = drag.current;
-    if (!d || d.id !== e.pointerId) return;
-    if (!d.active) {
-      if (Math.abs(e.clientX - d.startX) < DRAG_THRESHOLD_PX) return;
-      d.active = true;
-      d.lastX = e.clientX;
-      d.acc = value;
-      editing.current = false; // 拖动压过打字，接下来由它接管显示
-      document.body.classList.add("param-dragging");
-      setDragging(true);
-      useGraphStore.getState().begin();
-      if (nodeId) beginPreview(nodeId);
-    }
-    const mult = (e.shiftKey ? 10 : 1) * (e.altKey ? 0.1 : 1);
-    d.acc = clamp(d.acc + ((e.clientX - d.lastX) / DRAG_PX_PER_STEP) * dragStep * mult);
-    d.lastX = e.clientX;
-    let next = clamp(quantize(d.acc, dragStep));
-    if (integer) next = clamp(Math.round(next));
-    setText(String(next));
-    if (next !== value) {
-      onCommit(next);
-      if (nodeId) schedulePreview(nodeId);
-    }
-  };
-
-  const onPointerEnd = (e: React.PointerEvent<HTMLInputElement>) => {
-    const d = drag.current;
-    if (!d || d.id !== e.pointerId) return;
-    drag.current = null;
-    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
-    if (!d.active) return;
-    finishDrag(d, nodeId);
-    setDragging(false);
-  };
-
-  return (
-    <input
-      className={`ctl ctl--num${disabled ? "" : " is-draggable"}`}
-      type="number"
-      disabled={disabled}
-      value={text}
-      step={step ?? (integer ? 1 : "any")}
-      data-testid={dragName ? `param-drag-${dragName}` : undefined}
-      data-dragging={dragging ? "1" : undefined}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerEnd}
-      onPointerCancel={onPointerEnd}
-      onFocus={() => (editing.current = true)}
-      onChange={(e) => {
-        editing.current = true;
-        setText(e.target.value);
-      }}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.currentTarget.blur();
-        } else if (e.key === "Escape") {
-          editing.current = false;
-          setText(String(value));
-          e.currentTarget.blur();
-        }
-      }}
-    />
-  );
-}
-
-/** 有 soft 范围时额外给一个滑块。拖动整段只记一条撤销。 */
-function Slider({
-  value,
-  min,
-  max,
-  step,
-  disabled,
-  nodeId,
-  testId,
-  onDrag,
-}: {
-  value: number;
-  min: number;
-  max: number;
-  step: number | undefined;
-  disabled: boolean;
-  nodeId?: string | undefined;
-  testId?: string | undefined;
-  onDrag: (v: number) => void;
-}) {
-  return (
-    <input
-      className="ctl ctl--slider"
-      type="range"
-      data-testid={testId}
-      disabled={disabled}
-      min={min}
-      max={max}
-      step={step ?? (max - min) / 200}
-      value={Math.min(Math.max(value, min), max)}
-      onPointerDown={() => {
-        useGraphStore.getState().begin();
-        if (nodeId) beginPreview(nodeId);
-      }}
-      onPointerUp={() => {
-        useGraphStore.getState().commit("拖动参数");
-        endPreview(nodeId);
-      }}
-      onChange={(e) => {
-        onDrag(parseFloat(e.target.value));
-        if (nodeId) schedulePreview(nodeId);
-      }}
-    />
-  );
-}
+// ---------------------------------------------------------------- 数值
 
 function NumberControl({ param, value, disabled, onChange, nodeId }: ControlProps) {
   const integer = param.type === "int";
@@ -386,7 +174,8 @@ function FlagsControl({ param, value, disabled, onChange }: ControlProps) {
   return (
     <div className="ctl-flags">
       {options.map((o) => {
-        const bit = typeof o.value === "number" ? o.value : 0;
+        // 老的 manifest 把位写成了字符串（"4"），按数认，否则按位与永远是 0
+        const bit = typeof o.value === "number" ? o.value : Number(o.value) || 0;
         const on = (bits & bit) !== 0;
         return (
           <button
@@ -489,29 +278,45 @@ function toHex(v: unknown): string {
   return `#${c(r)}${c(g)}${c(b)}`;
 }
 
-function ColorControl({ value, disabled, onChange }: ControlProps) {
+function ColorControl({ param, value, disabled, onChange, nodeId }: ControlProps) {
   const arr = Array.isArray(value) ? (value as number[]) : [0, 0, 0];
+  const hex = toHex(value);
+  const alpha = arr.length === 4 ? (arr[3] ?? 1) : null;
   return (
-    <input
-      className="ctl ctl--color"
-      type="color"
-      disabled={disabled}
-      value={toHex(value)}
-      onChange={(e) => {
-        const hex = e.target.value;
-        const rgb = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
-        // 保留原有 alpha 分量，取色器只给 RGB
-        onChange(arr.length === 4 ? [...rgb, arr[3] ?? 1] : rgb);
-      }}
-    />
-  );
-}
-
-function UnsupportedControl({ param }: ControlProps) {
-  return (
-    <span className="ctl-unsupported">
-      <code>{param.type}</code> 控件尚未实现
-    </span>
+    <div className="ctl-row ctl-color">
+      {/* 色块本身就是取色器；旁边写出十六进制，面板里扫一眼就对得上数 */}
+      <input
+        className="ctl ctl--color"
+        type="color"
+        disabled={disabled}
+        value={hex}
+        data-testid={`color-${param.name}`}
+        onChange={(e) => {
+          const next = e.target.value;
+          const rgb = [1, 3, 5].map((i) => parseInt(next.slice(i, i + 2), 16) / 255);
+          // 保留原有 alpha 分量，取色器只给 RGB
+          onChange(alpha !== null ? [...rgb, alpha] : rgb);
+        }}
+      />
+      <code className="ctl-color__hex">{hex}</code>
+      {alpha !== null && (
+        <label className="ctl-vec__item" title="不透明度 0–1">
+          <span className="ctl-vec__axis">A</span>
+          <NumberInput
+            value={alpha}
+            disabled={disabled}
+            integer={false}
+            min={0}
+            max={1}
+            step={0.01}
+            dragStep={0.01}
+            dragName={`${param.name}-a`}
+            nodeId={nodeId}
+            onCommit={(a) => onChange([arr[0] ?? 0, arr[1] ?? 0, arr[2] ?? 0, a])}
+          />
+        </label>
+      )}
+    </div>
   );
 }
 
@@ -531,7 +336,7 @@ function arrayLengths(param: Param): number[] {
     case "color":
       return [3, 4];
     case "transform":
-      return [Array.isArray(param.default) ? param.default.length : 16];
+      return [16];
     default:
       return [];
   }
@@ -587,8 +392,12 @@ function coerceValue(param: Param, raw: unknown): Coerced {
         ? { ok: true, value: raw }
         : { ok: false, msg: `粘贴失败：${param.name} 需要长度 ${want.join(" 或 ")} 的数字数组` };
     }
-    case "curve":
-      return { ok: false, msg: `粘贴失败：${param.name} 是 curve，暂不支持` };
+    case "curve": {
+      const problem = curveProblem(raw, param.min, param.max);
+      return problem === null
+        ? { ok: true, value: raw }
+        : { ok: false, msg: `粘贴失败：${param.name} 的曲线不合法 —— ${problem}` };
+    }
   }
 }
 
@@ -631,6 +440,7 @@ function ParamMenu({
   x,
   y,
   nodeId,
+  at,
   promotedAs,
   graphBinding,
   onChange,
@@ -641,12 +451,14 @@ function ParamMenu({
   x: number;
   y: number;
   nodeId?: string | undefined;
+  at?: SubPath | undefined;
   promotedAs?: string | undefined;
   graphBinding?: GraphBinding | null | undefined;
   onChange: (v: unknown) => void;
   onClose: () => void;
 }) {
-  const path = useUiStore((s) => s.path);
+  const uiPath = useUiStore((s) => s.path);
+  const path = at ?? uiPath;
   const inSubgraph = path.length > 0;
   const ref = useRef<HTMLDivElement>(null);
 
@@ -750,7 +562,7 @@ function ParamMenu({
               : "提升为顶层图参数：当前值成为它的默认值，这一行此后改的是图参数"
           }
           onClick={() => {
-            const name = useGraphStore.getState().promoteToGraphParam(nodeId, param.name);
+            const name = useGraphStore.getState().promoteToGraphParam(nodeId, param.name, at);
             onClose();
             if (name) useUiStore.getState().showToast(`已纳入配方：图参数 ${name}`);
           }}
@@ -782,7 +594,7 @@ function ParamMenu({
           data-testid="param-menu-promote"
           title="提升成子图的对外参数，外层表单上就能改（F4）"
           onClick={() => {
-            const name = useGraphStore.getState().promoteParam(nodeId, param.name);
+            const name = useGraphStore.getState().promoteParam(nodeId, param.name, at);
             onClose();
             if (name) useUiStore.getState().showToast(`已提升为子图参数 ${name}`);
           }}
@@ -795,7 +607,7 @@ function ParamMenu({
           type="button"
           data-testid="param-menu-unpromote"
           onClick={() => {
-            useGraphStore.getState().unpromoteParam(promotedAs);
+            useGraphStore.getState().unpromoteParam(promotedAs, at);
             onClose();
           }}
         >
@@ -830,22 +642,29 @@ function ParamWidget(props: ControlProps) {
       return <PathControl {...props} />;
     case "color":
       return <ColorControl {...props} />;
-    // transform / curve 需要专门的编辑器，是 P2。
-    // 显式列出来而不是落到 default，这样 manifest 新增类型时 TS 会报错提醒。
+    // 显式列全 14 种而不是落到 default，这样 manifest 新增类型时 TS 会报错提醒。
     case "transform":
+      return <TransformControl {...props} />;
     case "curve":
-      return <UnsupportedControl {...props} />;
+      return <CurveControl {...props} />;
   }
 }
 
 export function ParamControl(props: ControlProps) {
   const wrap = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const uiPath = useUiStore((s) => s.path);
+  // live preview 的目标是「相对当前层级」的 id：fire() 会再拼上 ui.path 的前缀。
+  // 参数面板展开进子图定义的那几行在更深一层，这里把中间那几段实例补上
+  const previewId =
+    props.nodeId && props.path && props.path.length > uiPath.length
+      ? [...props.path.slice(uiPath.length).map((seg) => seg.nodeId), props.nodeId].join("/")
+      : props.nodeId;
 
-  // 右键挂到整行（.insp-param）上而不是控件上：标签那一片也要能唤出菜单，
-  // 而那一行由 Inspector 渲染，这里只能顺着 DOM 往上找。
+  // 右键挂到整行（Inspector 的 .insp-param、参数面板的 .prow）上而不是控件上：标签那一片也要能
+  // 唤出菜单，而那一行由外面渲染，这里只能顺着 DOM 往上找。
   useEffect(() => {
-    const host = wrap.current?.closest(".insp-param") ?? wrap.current;
+    const host = wrap.current?.closest(".insp-param, .prow") ?? wrap.current;
     if (!host) return;
     const onCtx = (e: Event) => {
       e.preventDefault();
@@ -860,7 +679,7 @@ export function ParamControl(props: ControlProps) {
 
   return (
     <div className="ctl-wrap" ref={wrap}>
-      <ParamWidget {...props} />
+      <ParamWidget {...props} nodeId={previewId} />
       {menu && (
         <ParamMenu
           param={props.param}
@@ -868,6 +687,7 @@ export function ParamControl(props: ControlProps) {
           x={menu.x}
           y={menu.y}
           nodeId={props.nodeId}
+          at={props.path}
           promotedAs={props.promotedAs}
           graphBinding={props.graphBinding}
           onChange={props.onChange}

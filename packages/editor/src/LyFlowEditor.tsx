@@ -7,6 +7,7 @@ import { GraphCanvas } from "./components/GraphCanvas";
 import { Inspector } from "./components/Inspector";
 import { NodePalette } from "./components/NodePalette";
 import { NodeSearch } from "./components/NodeSearch";
+import { ParamPanel } from "./components/ParamPanel";
 import { ShortcutPanel } from "./components/ShortcutPanel";
 import { Toolbar } from "./components/Toolbar";
 import { Viewer3D } from "./components/Viewer3D";
@@ -66,6 +67,8 @@ import "./styles.peek.css";
 import "./styles.blocks.css";
 
 const kMinCanvasWidth = 320;
+/** 参数面板宽度记在 localStorage 的这个键下（P2.1「记住宽度」）。 */
+const PANEL_WIDTH_KEY = "lyflow.paramPanel.width";
 
 const TRANSPORT_LABEL: Record<string, string> = {
   tauri: "Tauri · 实时",
@@ -166,17 +169,32 @@ function Toast() {
   );
 }
 
+/** 记住的宽度（localStorage）。读不到、被禁用、存的不是数都退回默认 —— 这只是个方便，不是状态。 */
+function storedWidth(key: string | undefined, fallback: number): number {
+  if (!key) return fallback;
+  try {
+    const v = Number(window.localStorage.getItem(key));
+    return Number.isFinite(v) && v > 0 ? v : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 /** 右侧的可拖分栏。一条 4px 把手 + 全局 pointermove，
- *  不引分栏库 —— 一个库的成本是十几 KB 加一套 API，这里只要一个数字。 */
+ *  不引分栏库 —— 一个库的成本是十几 KB 加一套 API，这里只要一个数字。
+ *  给了 persistKey 就在松手时把宽度记进 localStorage，下次打开还是这个宽（参数面板，P2.1）。 */
 function useDragSplit(
   initial: number,
   min: number,
   max: number,
   container: React.RefObject<HTMLElement | null>,
   reserve: number,
+  persistKey?: string,
 ) {
-  const [width, setWidth] = useState(initial);
+  const [width, setWidth] = useState(() => Math.max(min, Math.min(max, storedWidth(persistKey, initial))));
   const dragging = useRef(false);
+  const latest = useRef(width);
+  latest.current = width;
 
   useEffect(() => {
     const move = (e: PointerEvent) => {
@@ -188,6 +206,13 @@ function useDragSplit(
       setWidth(Math.max(min, Math.min(limit, next)));
     };
     const up = () => {
+      if (dragging.current && persistKey) {
+        try {
+          window.localStorage.setItem(persistKey, String(Math.round(latest.current)));
+        } catch {
+          // 隐私模式、存储被禁：记不住就记不住，宽度这一次照样生效
+        }
+      }
       dragging.current = false;
       document.body.classList.remove("is-resizing");
     };
@@ -197,7 +222,7 @@ function useDragSplit(
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
-  }, [container, min, max, reserve]);
+  }, [container, min, max, reserve, persistKey]);
 
   const onPointerDown = useCallback(() => {
     dragging.current = true;
@@ -215,6 +240,9 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   const motionOn = useMotionEnabled();
   const fitMs = viewportMs(motionOn);
   const rightPane = useDragSplit(380, 260, 900, root, paletteWidth + kMinCanvasWidth);
+  // 参数面板（param-recipe P2.1）另有一份宽度：它比 Inspector 宽得多，两者来回切时各记各的
+  const panelPane = useDragSplit(640, 360, 1800, root, paletteWidth + kMinCanvasWidth, PANEL_WIDTH_KEY);
+  const panel = useUiStore((s) => s.paramPanel);
 
   // 粘贴和搜索面板要知道往哪儿放。跟着鼠标走比总是放在画布中心自然得多。
   const cursor = useRef({ x: 0, y: 0 });
@@ -566,7 +594,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         onLayout={handlers.onLayout}
       />
 
-      <main className="app__body">
+      <main className={`app__body${panel.open && panel.maximized ? " is-panel-max" : ""}`}>
         <aside className="app__sidebar" style={{ width: paletteWidth }}>
           {manifestStatus === "loading" && <p className="app__hint">正在读取算子描述…</p>}
           {manifestStatus === "error" && (
@@ -587,21 +615,42 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
 
         <div
           className="app__splitter"
-          onPointerDown={rightPane.onPointerDown}
+          onPointerDown={panel.open ? panelPane.onPointerDown : rightPane.onPointerDown}
           role="separator"
           aria-orientation="vertical"
           data-testid="right-splitter"
         />
 
-        <aside className="app__right" style={{ width: rightPane.width }}>
+        <aside
+          className={`app__right${panel.open ? " app__right--panel" : ""}`}
+          style={{ width: panel.open ? panelPane.width : rightPane.width }}
+          data-testid="right-pane"
+        >
           {/* 3D 视图在上、参数在下：视觉项目的核心闭环是「改参数 → 看结果」，
-              两者离得越近越好（交互清单 P1 #30）。 */}
-          <div className="app__viewer">
+              两者离得越近越好（交互清单 P1 #30）。参数面板开着时视图收成一条标题栏
+              （面板要竖向的地方），ROI 行「拖框」会把它展开。Viewer3D 始终是同一个实例，
+              切换时不重建 WebGL 场景。 */}
+          {panel.open && (
+            <button
+              type="button"
+              className="app__viewer-toggle"
+              data-testid="pp-viewer-toggle"
+              aria-expanded={panel.viewerOpen}
+              onClick={() => useUiStore.getState().setPanelViewerOpen(!panel.viewerOpen)}
+            >
+              {panel.viewerOpen ? "▾" : "▸"} 3D 预览
+            </button>
+          )}
+          <div className={`app__viewer${panel.open && !panel.viewerOpen ? " is-collapsed" : ""}`}>
             <Viewer3D />
           </div>
-          <div className="app__inspector">
-            <Inspector />
-          </div>
+          {panel.open ? (
+            <ParamPanel />
+          ) : (
+            <div className="app__inspector">
+              <Inspector />
+            </div>
+          )}
         </aside>
       </main>
 

@@ -246,6 +246,22 @@ function LibraryDialog({
   );
 }
 
+/** React Flow 的 select 变更（增量：只列状态变了的那些）合进 ui store 的选中。setSelection 自己先比对再写。 */
+function applySelectChanges(changes: readonly { type: string; id?: string; selected?: boolean }[], kind: "nodes" | "edges") {
+  let touched = false;
+  const ui = useUiStore.getState();
+  const next = new Set(kind === "nodes" ? ui.selectedNodes : ui.selectedEdges);
+  for (const c of changes) {
+    if (c.type !== "select" || c.id === undefined) continue;
+    touched = true;
+    if (c.selected) next.add(c.id);
+    else next.delete(c.id);
+  }
+  if (!touched) return;
+  if (kind === "nodes") ui.setSelection([...next], [...ui.selectedEdges]);
+  else ui.setSelection([...ui.selectedNodes], [...next]);
+}
+
 export function GraphCanvas({ onRunToNode }: CanvasActions) {
   const doc = useGraphStore((s) => s.doc);
   const path = useUiStore((s) => s.path);
@@ -395,13 +411,18 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       }
     }
 
-    // select / dragging 是 UI 运行时状态，不进 GraphDoc。
-    // 选中由 onSelectionChange 统一处理，这里忽略。
+    // select / dragging 是 UI 运行时状态，不进 GraphDoc。选中照旧由 onSelectionChange 兜底，
+    // 但点击产生的 select 变更要在这里就写进 ui store：React Flow 点选节点时只改它内部的
+    // nodeLookup、不触发 store 更新，onSelectionChange 要等下一次 store 更新（通常是下一次点击）
+    // 才发出来 —— 一次不带移动的点击（触控板轻点、CDP 的真鼠标）选中会慢一拍，参数面板的
+    // 「画布选中 → 定位」跟着慢一拍（param-recipe P2.1）。
+    applySelectChanges(changes, "nodes");
   }, []);
 
   const onEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => {
     const removed = changes.filter((c) => c.type === "remove").map((c) => c.id);
     if (removed.length > 0) useGraphStore.getState().disconnect(removed);
+    applySelectChanges(changes, "edges");
   }, []);
 
   // -- 拖动：整段拖动只记一条撤销 + 对齐参考线（交互清单 P1 #22）-------------

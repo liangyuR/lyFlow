@@ -80,6 +80,11 @@ function level(doc: GraphDoc): GraphLevel {
   return levelOf(doc, useUiStore.getState().path);
 }
 
+/** 指定层级（参数面板里展开进子图定义的那几行，param-recipe P2.3）；不给就是当前层级。 */
+function levelAt(doc: GraphDoc, at: SubPath | undefined): GraphLevel {
+  return at ? levelOf(doc, at) : level(doc);
+}
+
 /** 当前层级的「像一份 doc」的视图，喂给只认 GraphDoc 的校验函数。 */
 function levelDoc(doc: GraphDoc): GraphDoc {
   const lvl = level(doc);
@@ -236,7 +241,8 @@ interface GraphState {
   insertSnippet(snippet: SnippetDesc, at: { x: number; y: number }): AutoConnectResult;
   deleteNodes(ids: readonly string[]): void;
   moveNodes(moves: readonly { id: string; position: { x: number; y: number } }[]): void;
-  setParam(nodeId: string, name: string, value: unknown): void;
+  /** at：节点所在的层级，不给 = 当前层级（ui.path）。参数面板展开进子图定义时给的是那一层的路径。 */
+  setParam(nodeId: string, name: string, value: unknown, at?: SubPath): void;
   setNodeUi(nodeId: string, patch: Partial<NodeUi>): void;
   connect(from: PortRef, to: PortRef): ConnectVerdict;
   disconnect(edgeIds: readonly string[]): void;
@@ -267,7 +273,7 @@ interface GraphState {
   /** 「纳入配方」= 提升为图参数（K2）：当前有效值成为 default，节点上的显式值删除，加一条 bind；
    *  规格从被绑定目标的声明抄（P1.1）。在子图里调就做整条提升链（内参 → 子图参数 → 这个实例上
    *  绑成图参数），同一子图的其它实例以当前值作默认值、行为不变。返回图参数名。 */
-  promoteToGraphParam(nodeId: string, paramName: string): string | null;
+  promoteToGraphParam(nodeId: string, paramName: string, at?: SubPath): string | null;
   /** 把当前层的一个参数也绑到已有的图参数上（子图里同样走提升链）。它的值从此取图参数的值。 */
   bindToGraphParam(name: string, nodeId: string, paramName: string): boolean;
   /** 解除一条绑定（bind 是 `节点.参数`）：把图参数当前的有效值写回节点，行为不变。 */
@@ -285,9 +291,9 @@ interface GraphState {
   editGraphParamValue(name: string, value: unknown): void;
 
   /** 把当前子图里某个内参提升成对外参数（F4）。返回外参名。 */
-  promoteParam(nodeId: string, paramName: string): string | null;
-  /** 取消提升。内参回到可编辑，值保持提升时的那个。 */
-  unpromoteParam(paramName: string): void;
+  promoteParam(nodeId: string, paramName: string, at?: SubPath): string | null;
+  /** 取消提升。内参回到可编辑，值保持提升时的那个。at 同 setParam。 */
+  unpromoteParam(paramName: string, at?: SubPath): void;
   renameSubgraph(subgraphId: string, name: string): void;
 
   // -- 图级输出（ADR-0017）-------------------------------------------------
@@ -333,15 +339,15 @@ export const useGraphStore = create<GraphState>((set, get) => {
   };
 
   /** 当前层级（ui.path）的一个参数：节点、它的算子（含 sub: 合成的）、声明。找不到返回 null。 */
-  const lookupParam = (nodeId: string, paramName: string) => {
+  const lookupParam = (nodeId: string, paramName: string, at?: SubPath) => {
     const { doc } = get();
-    const path = useUiStore.getState().path;
+    const path = at ?? useUiStore.getState().path;
     if (!pathIsValid(doc, path)) {
       set({ lastRejection: "当前层级已失效，回到顶层再试" });
       return null;
     }
     const ops = ctx(doc).operatorsById;
-    const node = level(doc).nodes.find((n) => n.id === nodeId);
+    const node = levelOf(doc, path).nodes.find((n) => n.id === nodeId);
     const op = node ? ops.get(node.op) : undefined;
     const decl = op?.params.find((p) => p.name === paramName);
     if (!node || !op || !decl) {
@@ -538,23 +544,23 @@ export const useGraphStore = create<GraphState>((set, get) => {
       });
     },
 
-    setParam(nodeId, name, value) {
+    setParam(nodeId, name, value, at) {
       const { doc } = get();
       // 被图参数绑定的参数（P1.4）：改的是图参数，不写成节点上的显式值 —— 那正是 param_conflict
-      // 的来路。Inspector、2D 拖框、粘贴、重置都经这里，所以在这一处路由而不是各处各判一遍。
-      const binding = resolveGraphBinding(doc, useUiStore.getState().path, nodeId, name);
+      // 的来路。Inspector、参数面板、2D 拖框、粘贴、重置都经这里，所以在这一处路由而不是各处各判一遍。
+      const binding = resolveGraphBinding(doc, at ?? useUiStore.getState().path, nodeId, name);
       if (binding) {
         get().editGraphParamValue(binding.graphParam, value);
         return;
       }
-      const node = level(doc).nodes.find((n) => n.id === nodeId);
+      const node = levelAt(doc, at).nodes.find((n) => n.id === nodeId);
       if (!node) return;
       const op = ctx(doc).operatorsById.get(node.op);
       if (!op) return;
 
-      const nextParams = sparseSet(op, node.params, name, value);
+      const nextParams = sparseSet(op, node.params, name, plain(value));
       const apply = (d: GraphDoc) => {
-        const target = level(d).nodes.find((n) => n.id === nodeId);
+        const target = levelAt(d, at).nodes.find((n) => n.id === nodeId);
         if (target) target.params = nextParams;
       };
 
@@ -804,9 +810,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
       return inlined;
     },
 
-    promoteParam(nodeId, paramName) {
+    promoteParam(nodeId, paramName, at) {
       const { doc } = get();
-      const path = useUiStore.getState().path;
+      const path = at ?? useUiStore.getState().path;
       const last = path[path.length - 1];
       if (!last) {
         set({ lastRejection: "只有在子图里才能提升参数" });
@@ -843,8 +849,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
       return name;
     },
 
-    unpromoteParam(paramName) {
-      const path = useUiStore.getState().path;
+    unpromoteParam(paramName, at) {
+      const path = at ?? useUiStore.getState().path;
       const last = path[path.length - 1];
       if (!last) return;
       transact(`取消提升 ${paramName}`, (d) => {
@@ -881,8 +887,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
       });
     },
 
-    promoteToGraphParam(nodeId, paramName) {
-      const found = lookupParam(nodeId, paramName);
+    promoteToGraphParam(nodeId, paramName, at) {
+      const found = lookupParam(nodeId, paramName, at);
       if (!found) return null;
       const { doc, path, ops, node, op, decl } = found;
       const already = resolveGraphBinding(doc, path, nodeId, paramName);

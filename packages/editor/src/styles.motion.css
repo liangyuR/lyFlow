@@ -262,6 +262,13 @@
   transition: transform var(--lyflow-motion-fast) ease;
 }
 
+/* 参数面板（param-recipe P2.1）：画布选中节点后，面板里那一节的高亮淡入 */
+.pp-node {
+  transition:
+    background var(--lyflow-motion-base) ease,
+    border-color var(--lyflow-motion-base) ease;
+}
+
 /* ----------------------------------------------------------- 关动效（A4） */
 
 /* 宿主 animations={false}（根上挂 lyflow-motion-off）或系统要求减少动态效果：

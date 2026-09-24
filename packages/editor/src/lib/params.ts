@@ -4,13 +4,23 @@
 import type { GraphDoc, GraphNode } from "../types/graph";
 import type { Condition, OperatorDesc, Param } from "../types/manifest";
 
-/** 深比较。参数值只可能是标量、字符串或数字数组（vec/color/transform）。 */
+/** 深比较。参数值是标量、字符串、数字数组（vec/color/transform），或 curve 那样的普通对象
+ *  （{points, interp}）—— 对象按键比，与键的书写顺序无关（core 的 cacheKey 也不看顺序）。 */
 export function valueEquals(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (Array.isArray(a) && Array.isArray(b)) {
     return a.length === b.length && a.every((v, i) => valueEquals(v, b[i]));
   }
+  if (isPlainObject(a) && isPlainObject(b)) {
+    const ka = Object.keys(a);
+    if (ka.length !== Object.keys(b).length) return false;
+    return ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && valueEquals(a[k], b[k]));
+  }
   return false;
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
 export function defaultParams(op: OperatorDesc): Record<string, unknown> {

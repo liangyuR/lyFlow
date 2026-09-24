@@ -85,7 +85,8 @@ export async function confirmRestore(path: string): Promise<boolean> {
 }
 
 export function baseName(path: string): string {
-  const parts = path.split(/[\/]/);
+  // Windows 的路径是反斜杠（对话框给的就是）：两种都认，否则工具栏上显示的是整条路径
+  const parts = path.split(/[\\/]/);
   return parts[parts.length - 1] ?? path;
 }
 

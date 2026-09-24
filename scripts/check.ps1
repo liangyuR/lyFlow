@@ -17,6 +17,13 @@ $tmp = Join-Path $env:TEMP "lyflow-manifest-check.json"
 [System.IO.File]::WriteAllText($tmp, ((& $exe) -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
 python "$PSScriptRoot\validate_schema.py" $tmp (Join-Path $root "schema\operator-manifest.schema.json")
 if ($LASTEXITCODE -ne 0) { throw "manifest 不符合 schema" }
+# 带上测试算子再导一份（test.param_showcase：14 种参数类型，含 transform / curve 的默认值，param-recipe P2.10）
+$env:LYFLOW_TEST_OPS = "1"
+try {
+  [System.IO.File]::WriteAllText($tmp, ((& $exe) -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
+} finally { Remove-Item Env:\LYFLOW_TEST_OPS }
+python "$PSScriptRoot\validate_schema.py" $tmp (Join-Path $root "schema\operator-manifest.schema.json")
+if ($LASTEXITCODE -ne 0) { throw "带测试算子的 manifest 不符合 schema" }
 
 Step "execution-event vs schema"
 # 事件流没有「真实产物文件」可校验，所以校验的是手写样例（理由见 schema/README.md）。
@@ -40,6 +47,11 @@ python "$PSScriptRoot\validate_schema.py" `
     (Join-Path $root "schema\examples\graph-params.invalid.lyflow.json") `
     (Join-Path $root "schema\graph-doc.schema.json") --expect-fail
 if ($LASTEXITCODE -ne 0) { throw "图参数负例居然通过了 schema" }
+# 参数面板的全类型示例图（param-recipe P2.10）：transform / curve 的值、子图、完整规格的图参数都在里面
+python "$PSScriptRoot\validate_schema.py" `
+    (Join-Path $root "examples\param-showcase.lyflow.json") `
+    (Join-Path $root "schema\graph-doc.schema.json")
+if ($LASTEXITCODE -ne 0) { throw "examples/param-showcase.lyflow.json 不符合 schema" }
 
 Step "片段文件 vs schema"
 # 包随附的片段（m8-plan L14）。算子与端口对不对由 core 的启动自检查（manifest --check），

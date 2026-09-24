@@ -99,6 +99,8 @@ export async function launchApp({ verbose = false, packagedExe = null } = {}) {
       env: {
         ...process.env,
         WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT} --remote-allow-origins=*`,
+        // 测试算子（test.param_showcase，param-recipe P2.10）只在这个变量为 1 时注册进 core
+        LYFLOW_TEST_OPS: "1",
       },
       stdio: verbose ? "inherit" : ["ignore", "pipe", "pipe"],
     });
@@ -112,6 +114,8 @@ export async function launchApp({ verbose = false, packagedExe = null } = {}) {
       env: {
         ...process.env,
         WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT} --remote-allow-origins=*`,
+        // 测试算子（test.param_showcase，param-recipe P2.10）只在这个变量为 1 时注册进 core
+        LYFLOW_TEST_OPS: "1",
       },
       stdio: verbose ? "inherit" : ["ignore", "pipe", "pipe"],
     });

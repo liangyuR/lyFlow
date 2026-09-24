@@ -170,6 +170,16 @@
     "paramSpec": {
       "type": "object",
       "description": "参数规格（不含 name，全部字段可选）。算子参数与顶层图参数共用；哪些字段必填由引用方决定。",
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "transform" } }, "required": ["type"] },
+          "then": { "properties": { "default": { "$ref": "#/$defs/transformValue" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "curve" } }, "required": ["type"] },
+          "then": { "properties": { "default": { "$ref": "#/$defs/curveValue" } } }
+        }
+      ],
       "properties": {
         "type": {
           "enum": ["bool", "int", "float", "vec2f", "vec3f", "vec4f", "enum", "flags",
@@ -238,6 +248,35 @@
             "labelParam": { "type": "string", "description": "本算子一个 string 参数的名字：切换条上的名字后面接上它的当前值（「模板 2 · f2」）。" }
           }
         }
+      }
+    },
+    "transformValue": {
+      "type": "array",
+      "description": "transform 参数的值（docs/operator-manifest.md「transform 与 curve 的值」）：4×4 刚体变换的 16 个数，行主序，与 core 的 Transform 数据类型同一布局 —— 平移在第 4、8、12 个（m[3]、m[7]、m[11]），最后一行 0 0 0 1。编辑器显示成平移 xyz + 旋转 xyz（度，内旋 X→Y→Z，R = Rz·Ry·Rx），可切成 4×4 矩阵。",
+      "minItems": 16,
+      "maxItems": 16,
+      "items": { "type": "number" }
+    },
+    "curveValue": {
+      "type": "object",
+      "description": "curve 参数的值：控制点 + 插值方式。x 在 [0, 1] 内严格递增、至少两个点（严格递增这一条 schema 表达不了，core 的 checkCurveValue 查）；y 是有限数，声明了 min/max 时 y 也要落在里面。linear = 折线，smooth = 单调三次 Hermite（Fritsch–Carlson）；x 落在首尾控制点之外取端点的 y。取值用 core 的 evaluateCurve（lyflow/manifest.h），编辑器画的是同一条线。",
+      "required": ["points"],
+      "additionalProperties": false,
+      "properties": {
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "array",
+            "prefixItems": [
+              { "type": "number", "minimum": 0, "maximum": 1 },
+              { "type": "number" }
+            ],
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "interp": { "enum": ["linear", "smooth"], "default": "linear" }
       }
     },
     "snippet": {

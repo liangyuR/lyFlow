@@ -46,7 +46,10 @@ Value valueFromJson(ParamType type, const nlohmann::json& j) {
     case ParamType::String:
     case ParamType::Text:
     case ParamType::Path:      return Value::text(j.is_string() ? j.get<std::string>() : std::string());
-    case ParamType::Curve:     return Value::text(j.is_null() ? std::string("{}") : j.dump());
+    // 没给默认值时退回恒等曲线：一份形状不对的默认值会让注册表自检拒掉整个库算子
+    case ParamType::Curve:
+      return Value::text(j.is_object() ? j.dump()
+                                       : std::string(R"({"interp":"linear","points":[[0,0],[1,1]]})"));
   }
   return Value::number(0.0);
 }

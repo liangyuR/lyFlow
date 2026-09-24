@@ -24,3 +24,139 @@ body.param-dragging * {
   cursor: ew-resize !important;
   user-select: none !important;
 }
+
+/* color：色块 + 十六进制 + （带 alpha 时）不透明度 */
+.ctl-color__hex {
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
+
+.ctl-color .ctl--num {
+  width: 60px;
+}
+
+/* transform（param-recipe P2.6）：摘要一行，下面是 T / R 两行三个数，或 4×4 矩阵 */
+.ctl-tf__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.ctl-tf__summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--lyflow-fg-1);
+  font-size: 11px;
+}
+
+.ctl-tf__tr {
+  display: grid;
+  grid-template-columns: auto repeat(3, minmax(0, 1fr));
+  gap: 3px 6px;
+  align-items: center;
+}
+
+.ctl-tf__label {
+  color: var(--lyflow-fg-2);
+  font-family: var(--lyflow-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ctl-tf__tr .ctl--num,
+.ctl-tf__matrix .ctl--num {
+  width: 100%;
+  min-width: 0;
+}
+
+.ctl-tf__matrix {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+}
+
+/* curve（P2.6）：小画布拖控制点，下面是插值方式与控制点列表 */
+.ctl-curve__canvas {
+  display: block;
+  width: 100%;
+  background: var(--lyflow-bg-0);
+  border: 1px solid var(--lyflow-border);
+  border-radius: var(--lyflow-radius);
+  touch-action: none;
+}
+
+.ctl-curve__canvas.is-disabled {
+  opacity: 0.5;
+}
+
+.ctl-curve__frame {
+  fill: none;
+  stroke: var(--lyflow-border-strong);
+}
+
+.ctl-curve__grid {
+  stroke: var(--lyflow-border);
+  stroke-dasharray: 2 3;
+}
+
+.ctl-curve__line {
+  fill: none;
+  stroke: var(--lyflow-accent);
+  stroke-width: 1.8;
+}
+
+.ctl-curve__pt {
+  fill: var(--lyflow-bg-1);
+  stroke: var(--lyflow-accent);
+  stroke-width: 1.8;
+  cursor: grab;
+}
+
+.ctl-curve__pt:hover,
+.ctl-curve__pt.is-selected {
+  fill: var(--lyflow-accent);
+}
+
+.ctl-curve__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.ctl-curve__interp {
+  min-width: 0;
+  flex: 1;
+}
+
+.ctl-curve__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ctl-curve__row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 4px;
+  align-items: center;
+}
+
+.ctl-curve__row .ctl--num {
+  width: 100%;
+  min-width: 0;
+}
+
+.ctl-curve__row.is-selected .ctl-vec__axis {
+  color: var(--lyflow-accent);
+}
+
+.ctl-curve__row--head {
+  color: var(--lyflow-fg-2);
+  font-family: var(--lyflow-mono);
+  font-size: 10px;
+}

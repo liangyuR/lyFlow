@@ -2,6 +2,11 @@
 #include "ops/ops.h"
 
 namespace lyflow {
+namespace test {
+// core/tests/e2e/register_e2e_ops.cpp：只在 LYFLOW_TEST_OPS=1 时注册编辑器 e2e 用的测试算子。
+void registerE2eOps(Registry& r);
+}  // namespace test
+
 namespace {
 
 // 端口类型表。color 供前端给端口与连线着色。
@@ -79,6 +84,8 @@ void registerBuiltinOps(Registry& r) {
   ops::registerUtilReroute(r);
   ops::registerFlowOps(r);
   registerExternalPacks(r);
+  // 排在最后：不设 LYFLOW_TEST_OPS 时什么都不注册，manifest 与之前逐字节相同
+  test::registerE2eOps(r);
 }
 
 }  // namespace lyflow

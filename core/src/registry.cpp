@@ -34,9 +34,20 @@ bool defaultKindMatches(ParamType t, const Value& v) {
     case ParamType::String:
     case ParamType::Text:
     case ParamType::Path:      return v.kind() == K::String;
-    case ParamType::Curve:     return true;  // M0 未定形，先不校验
+    // 存的是 JSON 文本；形状（checkCurveValue）在 validate() 里另查，那里有 Param 的限位
+    case ParamType::Curve:     return v.kind() == K::String;
   }
   return false;
+}
+
+/// flags 选项的位：一串十进制数字。认不出来返回 false，原样按字符串导出。
+bool parseBit(const std::string& text, std::int64_t& out) {
+  if (text.empty() || text.size() > 18) return false;
+  for (char c : text) {
+    if (c < '0' || c > '9') return false;
+  }
+  out = std::stoll(text);
+  return true;
 }
 
 /// semver 的主版本。解析不出来当作 1 —— 版本号本身的格式由别处报错。
@@ -110,7 +121,16 @@ void writeParam(JsonWriter& w, const Param& p) {
   w.fieldIfSet("label", p.label);
   w.fieldIfSet("doc", p.doc);
   w.key("default");
-  writeValue(w, p.def);
+  // curve 在 core 里存成 JSON 文本，导出时还原成对象：编辑器与 GraphDoc 里它就是个对象，
+  // 写成字符串的话稀疏存储拿它比默认值永远不等
+  const nlohmann::json curve = p.type == ParamType::Curve && p.def.kind() == Value::Kind::String
+                                   ? nlohmann::json::parse(p.def.stringValue(), nullptr, false)
+                                   : nlohmann::json();
+  if (curve.is_object()) {
+    w.raw(curve.dump());
+  } else {
+    writeValue(w, p.def);
+  }
   w.fieldIfSet("group", p.group);
   if (p.advanced) w.field("advanced", true);
 
@@ -127,7 +147,14 @@ void writeParam(JsonWriter& w, const Param& p) {
     w.beginArray();
     for (const auto& o : p.options) {
       w.beginObject();
-      w.field("value", o.value);
+      // flags 的选项是位，schema 里是整数；EnumOption 统一存字符串，这里还原回去
+      // （写成 "4" 的话编辑器按位与永远是 0）
+      std::int64_t bit = 0;
+      if (p.type == ParamType::Flags && parseBit(o.value, bit)) {
+        w.field("value", bit);
+      } else {
+        w.field("value", o.value);
+      }
       w.field("label", o.label);
       w.fieldIfSet("doc", o.doc);
       w.endObject();
@@ -541,6 +568,15 @@ std::vector<std::string> Registry::validate() const {
         if (!found) fail(pwhere + " default '" + p.def.stringValue() + "' is not among its options");
       }
       if (p.min && p.max && *p.min > *p.max) fail(pwhere + " has min > max");
+      if (p.type == ParamType::Curve && p.def.kind() == Value::Kind::String) {
+        const nlohmann::json j = nlohmann::json::parse(p.def.stringValue(), nullptr, false);
+        std::string message;
+        if (j.is_discarded()) {
+          fail(pwhere + " curve default is not JSON text");
+        } else if (!checkCurveValue(j, p, message)) {
+          fail(pwhere + " curve default: " + message);
+        }
+      }
     }
 
     // 参数联动只允许引用同一算子内的其他参数

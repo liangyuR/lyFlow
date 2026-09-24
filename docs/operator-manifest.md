@@ -64,15 +64,52 @@ JSON Schema： [`schema/operator-manifest.schema.json`](../schema/operator-manif
 | `int` / `float` | 拖动数字框（drag-to-change） | `min` `max` `step` `unit` `softMin` `softMax` |
 | `vec2f` / `vec3f` / `vec4f` | 分量数字框 + 锁定联动 | 同上，`componentLabels` |
 | `enum` | Select | `options: [{value, label, doc?}]` |
-| `flags` | 多选 chips | `options` |
+| `flags` | 多选 chips | `options`（`value` 是整数位：1、2、4…） |
 | `string` | 单行输入 | `placeholder` `pattern` |
 | `text` | 多行输入 | `rows` |
 | `path` | 输入框 + 文件选择 | `filters: [{name, extensions}]` `mode: 'open'\|'save'\|'dir'` |
-| `color` | 取色器 | `alpha: bool` |
-| `transform` | 平移/旋转/缩放分组 | — |
-| `curve` | 曲线编辑器（P2） | — |
+| `color` | 色块（取色器）+ 十六进制；带 alpha 时多一个 0–1 的数字框 | `alpha: bool` |
+| `transform` | 平移 xyz + 旋转 xyz（度），可切成 4×4 矩阵 | `unit`（平移的单位）`step` |
+| `curve` | 小画布拖控制点 + 控制点列表 + 插值方式 | `min` `max`（y 的硬限位）`softMin` `softMax`（画布的 y 范围）`step` |
 
 新增控件类型的成本是**前端加一个 case**，不是改架构。这是可以接受的。
+
+### transform 与 curve 的值
+
+这两种类型的值格式在 param-recipe P2 之前没有写明（core 对 curve 一直「原样存成字符串、不校验」），
+P2 定下来如下，schema（`$defs.transformValue` / `$defs.curveValue`）、core（`coerceParam`、注册表自检、
+manifest 导出）、编辑器（`lib/transform.ts`、`lib/curve.ts`）三方同一套：
+
+**transform** —— 16 个数，4×4 刚体变换，**行主序**，与 core 的 `Transform` 数据类型同一布局：
+
+```jsonc
+"default": [1, 0, 0, 0.25,    // m00 m01 m02 tx
+            0, 1, 0, 0,       // m10 m11 m12 ty
+            0, 0, 1, 0,       // m20 m21 m22 tz
+            0, 0, 0, 1]
+```
+
+- 编辑器显示成平移 `T[x, y, z]` 与欧拉角 `R[rx, ry, rz]°`。旋转是**内旋 X→Y→Z，即 R = Rz·Ry·Rx**，
+  与 `transform.make` 同一约定；万向锁（ry = ±90°）时 rx 取 0。只改平移不会动旋转那 9 个数。
+- 左上 3×3 不是正交阵（带缩放或切变）、或最后一行不是 `0 0 0 1` 的矩阵拆不成 T·R，编辑器只给矩阵视图。
+- `min` / `max` 会按 vec 的规则套到全部 16 个数上（core 的 `checkRange`），一般不要给。
+- 长度不是 16 报 `bad_param`（「数组长度应当是 16」）。
+
+**curve** —— 一个对象：
+
+```jsonc
+"default": { "points": [[0, 0], [0.5, 0.35], [1, 1]], "interp": "smooth" }
+```
+
+- `points`：`[x, y]` 数对，**至少两个**；x 在 **[0, 1]** 内**严格递增**；y 是有限数，参数声明了
+  `min` / `max` 时 y 也要落在里面（x 的范围固定是 0–1，算子自己把输入归一化）。
+- `interp`：`"linear"`（折线，缺省）或 `"smooth"`（单调三次 Hermite，Fritsch–Carlson：过每个控制点、
+  在每一段上单调、不冲过相邻两点的 y）。x 落在首尾控制点之外时取端点的 y。
+- 只有这两个键，多写一个报 `bad_param`（「不认识的字段 'tension'」）。
+- C++ 里参数值是这份 JSON 的**文本**（`Value::Kind::String`，`params.text(name)` 拿到），取值用
+  `lyflow::evaluateCurve(json, x)`（`lyflow/manifest.h`）—— 编辑器画的是同一条线。声明默认值写
+  `Value::text(R"({"points":[[0,0],[1,1]]})")`，注册表自检会按上面的规则查它；manifest 导出时还原成对象。
+- cacheKey 与对象里键的书写顺序无关（core 按排好序的 JSON 文本算）。
 
 ## 参数联动
 
@@ -90,7 +127,7 @@ JSON Schema： [`schema/operator-manifest.schema.json`](../schema/operator-manif
 需要复杂逻辑说明算子该拆了。三个判据同时给时按 `eq` → `ne` → `in` 取第一个；schema、core（`Condition`、
 `conditionHolds`、manifest 导出）、编辑器（`lib/params.ts` 的 `isConditionMet`）三方同一套（param-recipe P1.6）。
 
-分组用 `group` 字段，`advanced: true` 的参数默认收进折叠区。
+分组用 `group` 字段，`advanced: true` 的参数默认收进折叠区（参数面板里默认收起，param-recipe P2.3）。
 
 ## 参数的语义标记（`semantic`，M8b）
 

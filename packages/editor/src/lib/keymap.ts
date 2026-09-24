@@ -61,6 +61,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: "layout", keys: ["Ctrl+L"], label: "整理布局", scope: "canvas", group: "视图" },
   { id: "fitView", keys: ["Ctrl+Shift+F"], label: "适配视图", scope: "canvas", group: "视图" },
   { id: "toggleDrawer", keys: ["Ctrl+`"], label: "日志与诊断抽屉", scope: "global", group: "视图" },
+  { id: "paramPanel", keys: ["Ctrl+Shift+P"], label: "参数面板", scope: "global", group: "视图" },
   { id: "help", keys: ["?"], label: "快捷键面板", scope: "global", group: "视图" },
 ];
 

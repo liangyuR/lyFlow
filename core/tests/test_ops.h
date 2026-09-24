@@ -15,6 +15,7 @@
 
 #include "lyflow/operator.h"
 #include "lyflow/registry.h"
+#include "param_showcase_op.h"
 
 namespace lyflow::test {
 namespace ops {
@@ -704,6 +705,8 @@ inline void ensureTestOps() {
       op.compute = &ops::failCompute;
       r.addOperator(std::move(op));
     }
+    // 参数面板的全类型示例（param-recipe P2.10）。编辑器 e2e 经 LYFLOW_TEST_OPS 注册同一份
+    registerParamShowcase(r);
   });
 }
 

@@ -32,6 +32,12 @@ export interface PendingConnection {
 
 export type DrawerTab = "log" | "diagnostics" | "cache";
 
+/** 参数面板的三个页签（param-recipe P2.2）。配方矩阵与配方管理在 P3 填内容。 */
+export type ParamPanelTab = "nodes" | "matrix" | "recipes";
+
+/** 3D 视图的相机（G7）。放在 store 里是因为参数面板的 ROI 行要能把它切到 2D 拖框（P2.7）。 */
+export type ViewerMode = "3d" | "2d";
+
 /** 鼠标指着的那条连线的两端（docs/motion-plan.md H3）。 */
 export interface HoverEdge {
   id: string;
@@ -77,6 +83,18 @@ interface UiState {
 
   /** 底部抽屉。null = 收起。 */
   drawer: DrawerTab | null;
+
+  /** 参数面板（param-recipe P2.1）：开着时替代 Inspector；最大化时画布收起。宽度在 LyFlowEditor 里
+   *  （拖分栏、记在 localStorage），不在这里。纯 UI 状态，不进 doc、不进撤销。 */
+  paramPanel: { open: boolean; maximized: boolean; tab: ParamPanelTab; viewerOpen: boolean };
+  /** open 不给就是开 ↔ 关。关掉时顺手还原最大化，下次打开不会一上来就看不见画布。 */
+  toggleParamPanel(open?: boolean): void;
+  setParamPanelMaximized(on: boolean): void;
+  setParamPanelTab(tab: ParamPanelTab): void;
+  /** 面板开着时 3D 视图收成一条标题栏，点开才展开（面板要竖向的地方）。 */
+  setPanelViewerOpen(open: boolean): void;
+  viewerMode: ViewerMode;
+  setViewerMode(mode: ViewerMode): void;
   /** 快捷键面板开着没有（`?`）。 */
   helpOpen: boolean;
   /** 抽屉里点了某条诊断 → 定位到这个节点/参数。 */
@@ -146,6 +164,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   hoverEdge: null,
   hoverPaused: false,
   drawer: null,
+  paramPanel: { open: false, maximized: false, tab: "nodes", viewerOpen: false },
+  viewerMode: "3d",
   helpOpen: false,
   focusedDiagnostic: null,
   autoHint: null,
@@ -238,6 +258,31 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   setHelpOpen(open) {
     set({ helpOpen: open });
+  },
+  toggleParamPanel(open) {
+    const cur = get().paramPanel;
+    const next = open ?? !cur.open;
+    if (next === cur.open) return;
+    set({ paramPanel: { ...cur, open: next, maximized: next ? cur.maximized : false } });
+  },
+  setParamPanelMaximized(on) {
+    const cur = get().paramPanel;
+    if (cur.maximized === on) return;
+    set({ paramPanel: { ...cur, maximized: on } });
+  },
+  setParamPanelTab(tab) {
+    const cur = get().paramPanel;
+    if (cur.tab === tab) return;
+    set({ paramPanel: { ...cur, tab } });
+  },
+  setPanelViewerOpen(open) {
+    const cur = get().paramPanel;
+    if (cur.viewerOpen === open) return;
+    set({ paramPanel: { ...cur, viewerOpen: open } });
+  },
+  setViewerMode(mode) {
+    if (get().viewerMode === mode) return;
+    set({ viewerMode: mode });
   },
   focusDiagnostic(nodeId, paramPath) {
     set({ focusedDiagnostic: { nodeId, paramPath }, selectedNodes: new Set([nodeId]) });

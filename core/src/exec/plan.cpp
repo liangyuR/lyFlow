@@ -132,7 +132,9 @@ bool coerceParam(const Param& p, const nlohmann::json& j, Value& out, std::strin
       return true;
 
     case ParamType::Curve:
-      // 曲线编辑器是 P2，形态未定。原样存成字符串，至少不丢数据。
+      // 值格式见 manifest.h 的 checkCurveValue（param-recipe P2.6）。y 的限位也在那里查：
+      // 存下来的是 JSON 文本，checkRange 看不见里面的数。dump 的键是排好序的，cacheKey 与书写顺序无关
+      if (!checkCurveValue(j, p, message)) return false;
       out = Value::text(j.dump());
       return true;
   }

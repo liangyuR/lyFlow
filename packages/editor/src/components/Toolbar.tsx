@@ -153,6 +153,23 @@ function LibraryButton() {
   );
 }
 
+/** 参数面板的开关（param-recipe P2.1）。开着时替代 Inspector。 */
+function ParamPanelButton() {
+  const open = useUiStore((s) => s.paramPanel.open);
+  return (
+    <button
+      type="button"
+      className={open ? "is-on" : undefined}
+      data-testid="param-panel-toggle"
+      aria-pressed={open}
+      onClick={() => useUiStore.getState().toggleParamPanel()}
+      title={`参数面板 (${keyHint("paramPanel")})`}
+    >
+      参数
+    </button>
+  );
+}
+
 function formatDuration(ms: number): string {
   if (ms >= 1000) return `${(ms / 1000).toFixed(2)} s`;
   return `${Math.round(ms)} ms`;
@@ -297,6 +314,7 @@ export function Toolbar({
         <button type="button" onClick={onLayout} title={`整理布局 (${keyHint("layout")})`}>
           整理
         </button>
+        <ParamPanelButton />
         <button
           type="button"
           data-testid="drawer-toggle"

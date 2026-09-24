@@ -61,7 +61,7 @@
 
 ## P2 — 可以先不做
 
-**状态：#31 #33 #34 #36 #37 于 M4 完成，#32 以子图取代（见备注），#39 于连线查看器计划完成，#40 于节点运行按钮计划完成。**
+**状态：#31 #33 #34 #36 #37 于 M4 完成，#32 以子图取代（见备注），#39 于连线查看器计划完成，#40 于节点运行按钮计划完成，#41 #42 于参数配方计划 P2 完成。**
 每一项在 `scripts/e2e/m4.mjs`、`scripts/e2e/peek.mjs`、`scripts/e2e/noderun.mjs` 或 `bridge/src/cli.rs` 的测试里至少有一条断言。
 
 | # | 项 | 状态 | 备注 |
@@ -76,6 +76,8 @@
 | 38 | 协作 / 多人编辑 | ⬜ 不计划 | |
 | 39 | 双击连线查看内容（Edge Peek） | ✅ S1–S7 | 四种视图：3D 点云 / 正交 2D（剖面 + 2D 几何）/ 张量图像 / 键值表 + 原始 JSON。可多开、可拖动、可锁定快照；上限 **6 窗，其中带 WebGL 的 4 个**。没有运行在跑时 `Esc` 关最前面的一个。计划见 [edge-peek-plan.md](edge-peek-plan.md)，张量 / 下标的 ABI 见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)；验收在 `scripts/e2e/peek.mjs` |
 | 40 | 节点运行按钮（标题栏右端的小圆圈） | ✅ node-run | 修订一起单击 = 智能运行（`targets`：本节点 + 缺结果或过时的上游，下游不动，计划外节点的结果照样挂着可取），hover 预告会一并跑哪些上游或「已是最新」；Shift+单击 = 强制重算（core 的 `force`，C ABI v11）。右键三项：运行到此 / 强制重算此节点 / 仅此节点（`isolate`：上游只用已有结果，不齐时置灰；绕过去由 core 在开跑前拒绝，`upstream_not_ready` toast + 缺结果的上游闪一下）。自己发起的那次运行中点它是停止，别的运行中点它是抢占。计划见 [node-run-plan.md](node-run-plan.md)，验收在 `scripts/e2e/noderun.mjs` |
+| 41 | 参数面板（一张图的全部参数在一处看、改） | ✅ param-recipe P2 | 工具栏「参数」或 **Ctrl+Shift+P** 开关；画布右侧与画布并排，开着时替代 Inspector；拖分栏改宽（记在 localStorage），「□」最大化（画布收起）。页签：按节点 / 配方矩阵 / 配方管理（后两个 P3）。按节点页：顶部「图参数」分组（改值、改规格、解除绑定、删除），然后按节点 → group 列出全部参数，advanced 默认收起，子图实例可展开进定义（标「子图定义 · N 个实例共享」），库算子只读。每行 label（改过有蓝点）/ 控件 / 恢复与「纳入配方」书签；搜索（参数名、label、节点、值）+ chip（全部 / 已改动 / 配方 / 诊断 / 类型）。画布选中 ↔ 面板定位双向联动；ROI 行有缩略图、点「拖框」进 2D 拖框视图。1000 参数打开 < 300 ms（虚拟化）。计划见 [param-recipe-plan.md](param-recipe-plan.md) P2，验收在 `scripts/e2e/params_p2.mjs` |
+| 42 | transform / curve 参数控件 | ✅ param-recipe P2 | transform：平移 xyz + 旋转 xyz（度，R = Rz·Ry·Rx），可切 4×4 矩阵；curve：小画布拖控制点（双击加点、双击点删除）+ 控制点列表 + 线性 / 平滑。值格式见 [operator-manifest.md](operator-manifest.md)「transform 与 curve 的值」。面板与 Inspector 同一份控件 |
 
 ---
 

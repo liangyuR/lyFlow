@@ -4,9 +4,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  graphParamSpecOf,
   graphParamValue,
   resolveGraphBinding,
-  splitBind,
   withBoundValues,
   type GraphBinding,
 } from "../lib/graphParams";
@@ -21,7 +21,7 @@ import { useUiStore } from "../store/ui";
 import { useGraphParamValidation, useNodeValidation, useValidationStore } from "../store/validation";
 import type { OutputStat, OutputValue } from "../types/execution";
 import type { OperatorDesc, Param } from "../types/manifest";
-import type { GraphDoc, GraphNode, GraphParam, SubgraphDef } from "../types/graph";
+import type { GraphNode, SubgraphDef } from "../types/graph";
 
 import { OperatorDetail, PortRow } from "./OperatorDetail";
 import { ParamControl } from "./ParamControls";
@@ -139,29 +139,9 @@ function GraphOutputs() {
   );
 }
 
-/** 一个图参数用什么控件画。给了 type 的用它自己的规格（P1.1）；老格式没有 type，
- *  就借第一个被绑定目标的声明（规格本来就是它），label 换成图参数自己的。 */
-function graphParamControlSpec(
-  doc: GraphDoc,
-  name: string,
-  gp: GraphParam,
-  ops: ReadonlyMap<string, OperatorDesc>,
-): Param | null {
-  if (gp.type) {
-    const { binds: _binds, ...spec } = gp;
-    return { ...spec, name, type: gp.type } as Param;
-  }
-  for (const bind of gp.binds) {
-    const t = splitBind(bind);
-    const node = t ? doc.nodes.find((n) => n.id === t.node) : undefined;
-    const decl = t && node ? ops.get(node.op)?.params.find((p) => p.name === t.param) : undefined;
-    if (decl) return { ...decl, name, label: gp.label ?? decl.label ?? name, default: gp.default };
-  }
-  return null;
-}
-
 /** 顶层图参数的简表（param-recipe P1）。它不属于任何一个选中节点，所以和图级输出一样钉在上面。
- *  完整的「图参数」分组（改规格、搜索过滤）是 P2 的参数面板；这里只让它看得见、改得动、删得掉。 */
+ *  完整的「图参数」分组（改规格、搜索过滤）在参数面板里（P2.3）；面板开着时 Inspector 整个不显示，
+ *  面板关着时这张简表留着 —— 不开面板也看得见、改得动、删得掉。 */
 /** 多于这么多个图参数时简表默认收起：导入器生成的图可能带一长串，不该把选中节点的表单挤到屏幕外。 */
 const GRAPH_PARAMS_OPEN_MAX = 4;
 
@@ -197,7 +177,7 @@ function GraphParamRow({ name }: { name: string }) {
   if (!gp) return null;
   const ops = augmentOperators(base, doc.subgraphs);
   const g = useGraphStore.getState();
-  const spec = graphParamControlSpec(doc, name, gp, ops);
+  const spec = graphParamSpecOf(doc, name, gp, ops);
   const value = graphParamValue(doc, name, overrides);
   const error = diags.find((d) => d.severity === "error")?.message;
 

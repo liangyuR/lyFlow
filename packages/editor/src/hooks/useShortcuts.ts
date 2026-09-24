@@ -244,6 +244,10 @@ export function useShortcuts(
           e.preventDefault();
           ui.toggleDrawer();
           return;
+        case "paramPanel":
+          e.preventDefault();
+          ui.toggleParamPanel();
+          return;
         case "help":
           e.preventDefault();
           ui.setHelpOpen(!ui.helpOpen);
