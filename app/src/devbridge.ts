@@ -18,6 +18,12 @@ import {
   useValidationStore,
   requestValidate,
   runParamsOf,
+  recipesLoaded,
+  importRecipeFrom,
+  exportRecipeTo,
+  specDigest,
+  writeRecipeAutosave,
+  restoreRecipeAutosave,
   type RunRequest,
   type StateTransition,
   type Transport,
@@ -34,8 +40,18 @@ interface DevBridge {
     cache: typeof useCacheStore;
     peek: typeof usePeekStore;
     validation: typeof useValidationStore;
-    /** 当前配方（param-recipe K3）。P1 恒为「基础」、覆盖恒为空。 */
+    /** 配方（param-recipe P3）：配方集合、当前配方、存盘簿记。改配方走 graph store 的动作（K7）。 */
     recipe: typeof useRecipeStore;
+  };
+  /** 配方的文件操作（只读转发）：等配方目录读完、导入 / 导出（界面上这两个要弹文件对话框，脚本直接给路径）。 */
+  recipes: {
+    loaded(): Promise<void>;
+    importFrom(path: string, name?: string): Promise<string | null>;
+    exportTo(name: string, path: string): Promise<void>;
+    specDigest(): string;
+    /** 立刻写一次 30 s 自动备份里的那份配方集合 / 从它恢复（界面上恢复要经宿主的确认对话框）。 */
+    autosave(): Promise<void>;
+    restoreAutosave(): Promise<boolean>;
   };
   /** 立刻编译一次，不等 debounce。验收脚本不想为 150ms 睡一觉。 */
   plan(): Promise<void>;
@@ -94,6 +110,14 @@ export function installDevBridge(transport: Transport): void {
       peek: usePeekStore,
       validation: useValidationStore,
       recipe: useRecipeStore,
+    },
+    recipes: {
+      loaded: () => recipesLoaded(),
+      importFrom: (path, name) => importRecipeFrom(path, name),
+      exportTo: (name, path) => exportRecipeTo(name, path),
+      specDigest: () => specDigest(useGraphStore.getState().doc),
+      autosave: () => writeRecipeAutosave(),
+      restoreAutosave: () => restoreRecipeAutosave(),
     },
     async plan() {
       const g = useGraphStore.getState();
@@ -177,8 +201,20 @@ export function installDevBridge(transport: Transport): void {
         validation: Object.fromEntries(useValidationStore.getState().byNode),
         // 不属于任何节点的校验诊断（图参数的取值不合规格，param-recipe P1.2）
         validationGraph: [...useValidationStore.getState().graphLevel],
-        // 当前配方（P1 恒为「基础」）与这次会交给 core 的图参数取值（K3）
+        // 当前配方与这次会交给 core 的图参数取值（K3）
         recipe: { current: useRecipeStore.getState().current, params: runParamsOf(g.doc) ?? null },
+        // 配方集合（名字、值、默认）、配方目录与配方自己的脏标记（param-recipe P3；与图的合并显示见 K6 ③）
+        recipes: (() => {
+          const r = useRecipeStore.getState();
+          return {
+            dir: r.dir,
+            status: r.status,
+            dirty: r.set !== r.saved,
+            defaultName: r.set.defaultName,
+            recipes: r.set.recipes.map((e) => ({ name: e.name, values: e.values, graph: e.graph })),
+            problems: r.problems,
+          };
+        })(),
         preview: {
           active: u.previewing,
           autoRun: u.autoRun,

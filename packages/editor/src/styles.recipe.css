@@ -1,0 +1,774 @@
+/* 配方（param-recipe P3）：工具栏下拉框、按节点页的覆盖标记、配方矩阵、配方管理、编辑器自己的对话框。
+   配色：橙 = 配方覆盖（--lyflow-recipe），红 = 失配 / 越界（--lyflow-danger），蓝 = 选中（--lyflow-accent）。 */
+
+/* ------------------------------------------------------------ 通用按钮 */
+
+.lf-btn {
+  padding: 3px 10px;
+  background: var(--lyflow-bg-2);
+  border: 1px solid var(--lyflow-border);
+  border-radius: var(--lyflow-radius);
+  color: var(--lyflow-fg-1);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.lf-btn:hover:not(:disabled) {
+  border-color: var(--lyflow-border-strong);
+  color: var(--lyflow-fg-0);
+}
+
+.lf-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.lf-btn--primary {
+  background: color-mix(in srgb, var(--lyflow-accent) 18%, var(--lyflow-bg-2));
+  border-color: var(--lyflow-accent-dim);
+  color: var(--lyflow-fg-0);
+}
+
+.lf-btn--danger {
+  border-color: color-mix(in srgb, var(--lyflow-danger) 55%, transparent);
+  color: var(--lyflow-danger);
+}
+
+.recipe-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-family: var(--lyflow-mono);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.recipe-badge--bad {
+  background: var(--lyflow-danger);
+  color: #fff;
+}
+
+.recipe-badge--spec {
+  background: var(--lyflow-bg-3);
+  color: var(--lyflow-fg-1);
+}
+
+/* ------------------------------------------------------------ 工具栏下拉框 */
+
+.recipe-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.toolbar .recipe-menu__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 3px 8px;
+  border: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-2);
+}
+
+.toolbar .recipe-menu__toggle.is-recipe {
+  border-color: color-mix(in srgb, var(--lyflow-recipe) 55%, var(--lyflow-border));
+}
+
+.recipe-menu__label {
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
+
+.recipe-menu__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--lyflow-fg-0);
+}
+
+.recipe-menu__toggle.is-recipe .recipe-menu__name {
+  color: var(--lyflow-recipe);
+}
+
+.recipe-menu__chev {
+  color: var(--lyflow-fg-2);
+  font-size: 10px;
+}
+
+.recipe-menu__dirty {
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--lyflow-recipe);
+}
+
+.recipe-menu__list {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 240px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 4px;
+  background: var(--lyflow-bg-2);
+  border: 1px solid var(--lyflow-border-strong);
+  border-radius: var(--lyflow-radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.recipe-menu__list .recipe-menu__item,
+.toolbar .recipe-menu__list .recipe-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  color: var(--lyflow-fg-1);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recipe-menu__item:hover:not(:disabled) {
+  background: var(--lyflow-bg-3);
+  color: var(--lyflow-fg-0);
+}
+
+.recipe-menu__item.is-current {
+  color: var(--lyflow-fg-0);
+}
+
+.recipe-menu__check {
+  flex: 0 0 12px;
+  color: var(--lyflow-recipe);
+  font-size: 10px;
+}
+
+.recipe-menu__itemname {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recipe-menu__star {
+  color: var(--lyflow-recipe);
+  font-size: 11px;
+}
+
+.recipe-menu__hint {
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
+
+.recipe-menu__sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--lyflow-border);
+}
+
+.recipe-menu__action {
+  color: var(--lyflow-accent) !important;
+}
+
+.recipe-menu__note {
+  margin: 4px 8px;
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------------ 按节点页：被当前配方覆盖的行 */
+
+.prow.is-recipe-override {
+  background: color-mix(in srgb, var(--lyflow-recipe) 7%, transparent);
+}
+
+.prow.is-recipe-override .prow__stripe {
+  background: var(--lyflow-recipe);
+}
+
+.insp-param.is-recipe-override {
+  box-shadow: inset 3px 0 0 var(--lyflow-recipe);
+  background: color-mix(in srgb, var(--lyflow-recipe) 7%, transparent);
+}
+
+.prow__tag--recipe {
+  background: color-mix(in srgb, var(--lyflow-recipe) 16%, transparent);
+  color: var(--lyflow-recipe);
+}
+
+.prow__recipe-actions {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  margin-right: 2px;
+}
+
+.prow__textbtn {
+  padding: 0 4px;
+  background: none;
+  border: 0;
+  border-radius: 3px;
+  color: var(--lyflow-recipe);
+  font: inherit;
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.prow__textbtn:hover {
+  background: color-mix(in srgb, var(--lyflow-recipe) 14%, transparent);
+}
+
+.prow__basehint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  color: var(--lyflow-warn);
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------------ 配方矩阵 */
+
+/* 与 .ppanel__body 同级的类选择器会被 styles.panel.css 的同名规则压住（加载顺序），这里加一级 */
+.ppanel__body.mx {
+  gap: 0;
+}
+
+.mx-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--lyflow-border);
+  flex-shrink: 0;
+}
+
+.mx-copy {
+  position: relative;
+}
+
+.mx-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.mx-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 100%;
+  font-size: 12px;
+}
+
+.mx-th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 6px 8px;
+  background: var(--lyflow-bg-2);
+  border-bottom: 1px solid var(--lyflow-border);
+  color: var(--lyflow-fg-1);
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.mx-th--param {
+  left: 0;
+  z-index: 3;
+  min-width: 180px;
+}
+
+.mx-th.is-current {
+  color: var(--lyflow-fg-0);
+}
+
+.mx-th__name {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.mx-th__dot {
+  margin-right: 4px;
+  color: var(--lyflow-recipe);
+}
+
+.mx-th__hide {
+  margin-left: 4px;
+  padding: 0 3px;
+  background: none;
+  border: 0;
+  color: var(--lyflow-fg-2);
+  font: inherit;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.mx-th:hover .mx-th__hide {
+  opacity: 1;
+}
+
+.mx-group td {
+  padding: 8px 10px 3px;
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--lyflow-border);
+}
+
+.mx-td {
+  padding: 5px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--lyflow-border) 60%, transparent);
+  vertical-align: middle;
+}
+
+.mx-td--param {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--lyflow-bg-1);
+  font-weight: 400;
+  text-align: left;
+}
+
+.mx-param__label {
+  display: block;
+  color: var(--lyflow-fg-0);
+  white-space: nowrap;
+}
+
+.mx-param__name {
+  color: var(--lyflow-fg-2);
+  font-size: 10px;
+}
+
+.mx-cell {
+  position: relative;
+  min-width: 110px;
+  font-family: var(--lyflow-mono);
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+}
+
+.mx-cell.is-base {
+  color: var(--lyflow-fg-0);
+}
+
+.mx-cell.is-inherit {
+  color: var(--lyflow-fg-2);
+}
+
+.mx-cell.is-override {
+  background: color-mix(in srgb, var(--lyflow-recipe) 13%, transparent);
+  color: var(--lyflow-recipe);
+}
+
+.mx-cell.is-invalid {
+  background: color-mix(in srgb, var(--lyflow-danger) 15%, transparent);
+  color: var(--lyflow-danger);
+}
+
+.mx-cell.is-selected {
+  box-shadow: inset 0 0 0 2px var(--lyflow-accent);
+}
+
+.mx-edit--inline {
+  min-width: 140px;
+}
+
+.mx-edit--pop {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% - 2px);
+  left: 0;
+  min-width: 320px;
+  padding: 10px;
+  background: var(--lyflow-bg-2);
+  border: 1px solid var(--lyflow-border-strong);
+  border-radius: var(--lyflow-radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font-family: inherit;
+  white-space: normal;
+  user-select: text;
+}
+
+.mx-edit__buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.mx-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 6px 10px;
+  border-top: 1px solid var(--lyflow-border);
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
+
+.mx-legend__item {
+  padding: 0 5px;
+  border-radius: 3px;
+}
+
+.mx-legend__item.is-inherit {
+  color: var(--lyflow-fg-2);
+  border: 1px solid var(--lyflow-border);
+}
+
+.mx-legend__item.is-override {
+  background: color-mix(in srgb, var(--lyflow-recipe) 13%, transparent);
+  color: var(--lyflow-recipe);
+}
+
+.mx-legend__item.is-invalid {
+  background: color-mix(in srgb, var(--lyflow-danger) 15%, transparent);
+  color: var(--lyflow-danger);
+}
+
+/* ------------------------------------------------------------ 配方管理 */
+
+.ppanel__body.mg {
+  flex-direction: row;
+  gap: 0;
+  min-height: 0;
+}
+
+.mg-side {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 34%;
+  min-width: 200px;
+  max-width: 320px;
+  border-right: 1px solid var(--lyflow-border);
+}
+
+.mg-tools {
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid var(--lyflow-border);
+}
+
+.mg-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+}
+
+.mg-empty {
+  padding: 10px 8px;
+  color: var(--lyflow-fg-2);
+  font-size: 12px;
+}
+
+.mg-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--lyflow-radius);
+  color: var(--lyflow-fg-1);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mg-item:hover {
+  background: var(--lyflow-bg-2);
+}
+
+.mg-item.is-picked {
+  background: var(--lyflow-bg-3);
+  border-color: var(--lyflow-border-strong);
+  color: var(--lyflow-fg-0);
+}
+
+.mg-item.is-current .mg-item__name {
+  color: var(--lyflow-recipe);
+}
+
+.mg-item__star {
+  color: transparent;
+  -webkit-text-stroke: 1px var(--lyflow-fg-2);
+  font-size: 12px;
+}
+
+.mg-item__star.is-on {
+  color: var(--lyflow-recipe);
+  -webkit-text-stroke: 0;
+}
+
+.mg-item__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mg-item__count {
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
+
+.mg-dir {
+  padding: 8px 10px;
+  border-top: 1px solid var(--lyflow-border);
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mg-problems {
+  margin: 4px 0 0;
+  padding-left: 14px;
+  color: var(--lyflow-danger);
+}
+
+.mg-main {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 12px 16px;
+}
+
+.mg-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--lyflow-border);
+}
+
+.mg-head__title h3 {
+  margin: 0;
+  color: var(--lyflow-fg-0);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.mg-head__meta {
+  margin: 3px 0 0;
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
+
+.mg-head__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mg-tag {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--lyflow-bg-3);
+  color: var(--lyflow-fg-1);
+  font-size: 10px;
+  font-weight: 400;
+  vertical-align: middle;
+}
+
+.mg-tag--dirty {
+  background: color-mix(in srgb, var(--lyflow-recipe) 18%, transparent);
+  color: var(--lyflow-recipe);
+}
+
+.mg-section {
+  margin: 14px 0 6px;
+  color: var(--lyflow-fg-1);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.mg-ok {
+  margin: 0;
+  color: var(--lyflow-fg-2);
+  font-size: 12px;
+}
+
+.mg-report {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mg-mm {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--lyflow-border) 60%, transparent);
+}
+
+.mg-kind {
+  flex: 0 0 auto;
+  min-width: 56px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  text-align: center;
+}
+
+.mg-kind--extra {
+  background: color-mix(in srgb, #a78bfa 20%, transparent);
+  color: #c4b5fd;
+}
+
+.mg-kind--type {
+  background: color-mix(in srgb, var(--lyflow-danger) 20%, transparent);
+  color: #ff8a8d;
+}
+
+.mg-kind--range {
+  background: color-mix(in srgb, var(--lyflow-recipe) 20%, transparent);
+  color: var(--lyflow-recipe);
+}
+
+.mg-kind--spec {
+  background: color-mix(in srgb, var(--lyflow-accent) 18%, transparent);
+  color: var(--lyflow-accent);
+}
+
+.mg-mm__body {
+  flex: 1;
+  min-width: 0;
+  color: var(--lyflow-fg-1);
+  font-size: 12px;
+}
+
+.mg-mm__param {
+  margin-right: 6px;
+  color: var(--lyflow-fg-0);
+}
+
+.mg-mm__fix {
+  flex: 0 0 auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mg-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.mg-foot__note {
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------------ 对话框（lib/modal.ts） */
+
+.lf-modal__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14vh;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.lf-modal {
+  width: min(460px, calc(100% - 32px));
+  padding: 16px 18px 14px;
+  background: var(--lyflow-bg-2);
+  border: 1px solid var(--lyflow-border-strong);
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  color: var(--lyflow-fg-0);
+}
+
+.lf-modal__title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.lf-modal__msg {
+  margin: 0 0 10px;
+  color: var(--lyflow-fg-1);
+  font-size: 12px;
+}
+
+.lf-modal__items {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  color: var(--lyflow-fg-1);
+  font-family: var(--lyflow-mono);
+  font-size: 11.5px;
+}
+
+.lf-modal__input {
+  width: 100%;
+}
+
+.lf-modal__problem {
+  min-height: 16px;
+  margin: 4px 0 6px;
+  color: var(--lyflow-danger);
+  font-size: 11px;
+}
+
+.lf-modal__check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: var(--lyflow-fg-1);
+  font-size: 12px;
+}
+
+.lf-modal__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+}

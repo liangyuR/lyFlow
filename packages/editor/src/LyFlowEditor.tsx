@@ -6,6 +6,7 @@ import { BottomDrawer } from "./components/BottomDrawer";
 import { GraphCanvas } from "./components/GraphCanvas";
 import { Inspector } from "./components/Inspector";
 import { NodePalette } from "./components/NodePalette";
+import { Modal } from "./components/Modal";
 import { NodeSearch } from "./components/NodeSearch";
 import { ParamPanel } from "./components/ParamPanel";
 import { ShortcutPanel } from "./components/ShortcutPanel";
@@ -52,7 +53,16 @@ import {
 } from "./store/execution";
 import { useGraphStore } from "./store/graph";
 import { useManifestStore } from "./store/manifest";
-import { useRecipeStore } from "./store/recipe";
+import { recipesDirty, useRecipeStore } from "./store/recipe";
+import {
+  commitRecipeSave,
+  discardRecipeAutosave,
+  followGraphPath,
+  loadRecipesFor,
+  prepareRecipeSave,
+  restoreRecipeAutosave,
+  writeRecipeAutosave,
+} from "./store/recipeFiles";
 import { useUiStore } from "./store/ui";
 import { scheduleValidate } from "./store/validation";
 import { setTransport, transport, type Transport } from "./transport";
@@ -314,16 +324,34 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       schedulePlan(state.doc, state.filePath);
       scheduleValidate(state.doc, state.filePath);
     });
-    // 当前配方的覆盖变了（P3 切配方）：doc 没动，但交给 core 的取值变了，计划与诊断跟着重算（K5）
+    // 当前配方的覆盖变了（切配方，或改了当前配方里的值）：doc 没动，但交给 core 的取值变了 ——
+    // 计划（stale 与「将重算 N 个」）与诊断跟着重算（K5、P3.8）。切换配方时开着「自动运行」就照常补一次运行
     const stopRecipe = useRecipeStore.subscribe((state, prev) => {
       if (state.overrides === prev.overrides) return;
       const g = useGraphStore.getState();
+      useExecutionStore.getState().markStale();
       schedulePlan(g.doc, g.filePath);
       scheduleValidate(g.doc, g.filePath);
+      // 只跟着人切的那一下跑：打开图时选中默认配方、撤销把当前配方撤没了，都不该自己跑起来
+      if (state.current === prev.current || state.switchedBy !== "user") return;
+      const ui = useUiStore.getState();
+      const exec = useExecutionStore.getState();
+      if (!ui.autoRun || exec.runStatus === "idle" || exec.preview || g.doc.nodes.length === 0) return;
+      void startRun(g.doc, g.filePath, {}).catch((e: unknown) => {
+        ui.showToast(e instanceof Error ? e.message : String(e), "warn");
+      });
+    });
+    // 配方跟着图走（P3.1）：换了一张图（打开、新建）就读它旁边的 <图名>.recipes/；同一张图只是换了路径
+    // （第一次存盘）就只换目录。放在订阅里而不是 openPath 里：宿主与脚本直接 loadDoc 也一样生效
+    void loadRecipesFor(graph.filePath);
+    const stopFiles = useGraphStore.subscribe((state, prev) => {
+      if (state.epoch !== prev.epoch) void loadRecipesFor(state.filePath);
+      else if (state.filePath !== prev.filePath) followGraphPath(state.filePath);
     });
     return () => {
       stopGraph();
       stopRecipe();
+      stopFiles();
     };
   }, []);
 
@@ -340,12 +368,16 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   );
 
   // -- 每 30 秒写一次 `<file>~` 备份 -----------------------------------------
+  // 配方有没存的改动时同一拍写 `<配方目录>/autosave~.json`（整个内存里的配方集合），并照样写一份
+  // `<file>~` —— 下次开图时「恢复备份」只问一次，图与配方一起回来（docs/recipe.md「自动备份」）
   useEffect(() => {
     const t = setInterval(() => {
       const graph = useGraphStore.getState();
+      const recipes = recipesDirty();
       // 没存过盘的图没有 `<file>~` 可写；没改过的也不用写
-      if (!graph.filePath || !graph.dirty) return;
+      if (!graph.filePath || (!graph.dirty && !recipes)) return;
       void writeBackup(graph.filePath, graph.doc);
+      if (recipes) void writeRecipeAutosave();
     }, BACKUP_INTERVAL_MS);
     return () => clearInterval(t);
   }, []);
@@ -390,10 +422,14 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
             restored.migrations.filter(isMigration),
           );
           useGraphStore.getState().markSaved(path);
-          useUiStore.getState().showToast("已从自动备份恢复，记得保存");
+          const recipes = await restoreRecipeAutosave();
+          useUiStore.getState().showToast(recipes ? "已从自动备份恢复图与配方，记得保存" : "已从自动备份恢复，记得保存");
           return;
         }
-        if (status.exists) await discardBackup(path);
+        if (status.exists) {
+          await discardBackup(path);
+          await discardRecipeAutosave(path);
+        }
 
         const loaded = await loadDocFrom(path);
         await afterOpen(loaded.doc, path, loaded.migrations.filter(isMigration));
@@ -414,9 +450,17 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         path = await pickSavePath(path ?? suggestFileName(graph.doc));
         if (!path) return; // 用户取消
       }
-      await saveDocTo(path, graph.doc);
+      // 一次保存图与所有有改动的配方文件（K6 ③）。配方先查外部修改：用户选了取消，图也不存
+      const doc = graph.doc;
+      const recipes = await prepareRecipeSave(doc, path);
+      if (recipes === "cancelled") {
+        ui.showToast("已取消保存", "warn");
+        return;
+      }
+      await saveDocTo(path, doc);
       // 记下的是真正写下去的那一份：撤销回到它时 dirty 复原（P1.6）
-      graph.markSaved(path, graph.doc);
+      useGraphStore.getState().markSaved(path, doc);
+      if (recipes) await commitRecipeSave(recipes);
       await rememberFile(path);
       // 存过盘就没有「未保存的改动」了，备份留着只会在下次开图时误报
       await discardBackup(path);
@@ -430,7 +474,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     const graph = useGraphStore.getState();
     const ui = useUiStore.getState();
     try {
-      if (!(await confirmDiscard(graph.dirty))) return;
+      if (!(await confirmDiscard(graph.dirty || recipesDirty()))) return;
       const path = await pickOpenPath();
       if (!path) return;
       await openPath(path);
@@ -441,7 +485,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
 
   const doOpenRecent = useCallback(
     async (path: string) => {
-      if (!(await confirmDiscard(useGraphStore.getState().dirty))) return;
+      if (!(await confirmDiscard(useGraphStore.getState().dirty || recipesDirty()))) return;
       await openPath(path);
     },
     [openPath],
@@ -449,7 +493,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
 
   const doNew = useCallback(async () => {
     const graph = useGraphStore.getState();
-    if (!(await confirmDiscard(graph.dirty))) return;
+    if (!(await confirmDiscard(graph.dirty || recipesDirty()))) return;
     graph.newDoc();
     useUiStore.getState().clearSelection();
     useCacheStore.getState().reset();
@@ -559,13 +603,22 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     void openPath(graphPath);
   }, [graphPath, openPath]);
 
-  // doc 变化推给宿主
+  // doc 变化推给宿主。dirty 是图与配方合并的（K6 ③）：只改了配方也算有没存的改动
   useEffect(() => {
     if (!onDocChange) return;
-    return useGraphStore.subscribe((state, prev) => {
+    const stopGraph = useGraphStore.subscribe((state, prev) => {
       if (state.doc === prev.doc && state.dirty === prev.dirty) return;
-      onDocChange(state.doc, state.dirty);
+      onDocChange(state.doc, state.dirty || recipesDirty());
     });
+    const stopRecipes = useRecipeStore.subscribe((state, prev) => {
+      if ((state.set !== state.saved) === (prev.set !== prev.saved)) return;
+      const g = useGraphStore.getState();
+      onDocChange(g.doc, g.dirty || state.set !== state.saved);
+    });
+    return () => {
+      stopGraph();
+      stopRecipes();
+    };
   }, [onDocChange]);
 
   // 关动效时 CSS 那一半靠根上的 lyflow-motion-off（系统设置另有 @media 兜底，见 styles.motion.css）
@@ -658,6 +711,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       <StatusBar />
       <NodeSearch />
       <ShortcutPanel />
+      <Modal />
       <Toast />
     </div>
   );

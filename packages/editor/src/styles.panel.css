@@ -295,7 +295,7 @@
   opacity: 0.4;
 }
 
-/* P3 的「被当前配方覆盖」橙色竖条挂在这里（.prow.is-recipe-override .prow__stripe）；P2 不画 */
+/* 「被当前配方覆盖」的橙色竖条挂在这里（.prow.is-recipe-override .prow__stripe，见 styles.recipe.css） */
 .prow__stripe {
   position: absolute;
   left: calc(4px + var(--pp-depth, 0) * 14px);
@@ -304,10 +304,6 @@
   width: 3px;
   border-radius: 2px;
   background: transparent;
-}
-
-.prow.is-recipe-override .prow__stripe {
-  background: var(--lyflow-warn);
 }
 
 .prow__label {

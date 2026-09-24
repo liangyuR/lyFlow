@@ -1,0 +1,11 @@
+{
+  "default": "ok",
+  "order": [
+    "ok",
+    "extra",
+    "type",
+    "range",
+    "spec",
+    "nograph"
+  ]
+}

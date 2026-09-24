@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "name": "extra",
+  "graph": {
+    "id": "01JRECIPEFIXTURE0000000000",
+    "specDigest": "sha256:4dfbd22b3f0487a10474d3c21500824b0706314a057738d803d8c09a852059ad"
+  },
+  "values": {
+    "voxelSize": [
+      0.05,
+      0.05,
+      0.05
+    ],
+    "cutMax": 1.5
+  },
+  "note": "① 多出：voxelSize 在图里不存在（改名或删掉了）",
+  "updatedAt": "2026-09-24T08:00:00.000Z"
+}

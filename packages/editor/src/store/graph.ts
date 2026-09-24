@@ -15,12 +15,28 @@ import {
   uniqueGraphParamName,
 } from "../lib/graphParams";
 import { newDocId, newLocalId } from "../lib/ids";
+import {
+  applyFixes,
+  findRecipe,
+  graphRefOf,
+  newRecipeId,
+  recipeNameProblem,
+  renameParamInSet,
+  replaceRecipe,
+  touch,
+  withoutValue,
+  withValue,
+  type Mismatch,
+  type RecipeEntry,
+  type RecipeSet,
+} from "../lib/recipes";
 import { effectiveValue, pruneUnknownParams, sparseSet, valueEquals } from "../lib/params";
 import {
   augmentOperators,
   composeSubgraph as composeInto,
   dissolveSubgraph as dissolveFrom,
   levelOf,
+  fullId,
   pathIsValid,
   promotedBy,
   type ComposeResult,
@@ -41,17 +57,29 @@ import {
   type SubParam,
 } from "../types/graph";
 import { useManifestStore } from "./manifest";
-import { currentOverrides, useRecipeStore } from "./recipe";
+import {
+  applyRecipeSet,
+  clearBaseEdit,
+  currentOverrides,
+  noteBaseEdit,
+  recipeSet,
+  useRecipeStore,
+} from "./recipe";
 import { useUiStore } from "./ui";
 
 enablePatches();
 
 const MAX_HISTORY = 100;
 
+/** 一条撤销记录：doc 与内存里的配方集合一起快照（param-recipe K7）—— 改配方值、新建删除配方与改图
+ *  进同一个撤销栈，Ctrl+Z 只有一种直觉。当前选着哪个配方不在这里（切换配方不算一步撤销）。 */
 export interface HistoryEntry {
   label: string;
   doc: GraphDoc;
+  recipes: RecipeSet;
 }
+
+const nowIso = () => new Date().toISOString();
 
 export function emptyDoc(): GraphDoc {
   return {
@@ -192,6 +220,37 @@ function writeBack(
     : { ...(node.params ?? {}), [target.param]: plain(value) };
 }
 
+/** 「纳入配方」在 draft 上的那一步（promoteToGraphParam 与 K6 ② 的「改为只在本配方生效」共用）：
+ *  逐层提升到顶层、在顶层加图参数（规格从声明抄，default = value）、删掉顶层节点上的显式值。 */
+function promoteInDraft(
+  d: GraphDoc,
+  path: SubPath,
+  nodeId: string,
+  decl: Param,
+  value: unknown,
+  name: string,
+  label: string,
+): boolean {
+  const top = liftToTop(d, path, nodeId, decl, value);
+  const target = top ? d.nodes.find((n) => n.id === top.node) : undefined;
+  if (!top || !target) return false;
+  d.params = {
+    ...(d.params ?? {}),
+    [name]: {
+      ...specFromParam(plain(top.decl), label),
+      default: plain(top.value),
+      binds: [joinBind(top.node, top.param)],
+    },
+  };
+  // 一处定义：被绑定的参数不能再在节点上写值（param_conflict）
+  if (target.params && top.param in target.params) {
+    const next = { ...target.params };
+    delete next[top.param];
+    target.params = next;
+  }
+  return true;
+}
+
 export interface PasteResult {
   nodeIds: string[];
 }
@@ -223,6 +282,8 @@ interface GraphState {
 
   /** 事务开始时的快照。null 表示当前没有进行中的事务。 */
   pendingSnapshot: GraphDoc | null;
+  /** 同一个事务开始时的配方集合（K7：拖着滑块改的可能是配方里的值）。 */
+  pendingRecipes: RecipeSet | null;
 
   /** 最近一次被拒绝的操作原因，给 UI 弹提示用。 */
   lastRejection: string | null;
@@ -290,6 +351,31 @@ interface GraphState {
    *  P1 当前配方恒为「基础」。setParam 命中被绑定的参数时也走这里 —— 不再写成节点上的显式值。 */
   editGraphParamValue(name: string, value: unknown): void;
 
+  // -- 配方（param-recipe P3）：改配方集合的动作都在这里，因为撤销栈在这里（K7）-------------
+  /** 在某个配方里写一个值（稀疏：等于基础就删掉这条覆盖）。滑块拖动时在 begin/commit 里合成一条撤销。 */
+  setRecipeValue(recipe: string, param: string, value: unknown): void;
+  /** 「恢复基础」：删掉这条覆盖（P3.4）。 */
+  clearRecipeValue(recipe: string, param: string): void;
+  /** 「写回基础」：把这个配方的值写进 default，再删掉这条覆盖（P3.4）。一次撤销。 */
+  writeRecipeValueToBase(recipe: string, param: string): void;
+  /** 矩阵的「复制选中 → 配方」（P3.5）：目标配方里这些参数的有效值变成给定的值。返回真正改了几格。 */
+  copyRecipeCells(cells: readonly { param: string; value: unknown }[], target: string): number;
+  /** 新建配方：空的，或复制 copyFrom 的值（P3.6）。名字不合法返回 false 并写 lastRejection。 */
+  createRecipe(name: string, copyFrom?: string | null): boolean;
+  renameRecipe(name: string, next: string): boolean;
+  deleteRecipe(name: string): void;
+  /** 设为默认（index.json 的 default；打开图时选它）。null = 取消默认。 */
+  setDefaultRecipe(name: string | null): void;
+  /** 导入一个外部配方（已经读好、名字已经定好）。存盘时写进配方目录。 */
+  addImportedRecipe(entry: RecipeEntry): boolean;
+  /** 按失配报告的建议修（单条或整份，P3.7）。一次撤销。 */
+  fixRecipe(name: string, items: readonly Mismatch[]): void;
+  /** 用磁盘上的版本替换这几个配方（存盘前发现文件被外部修改、用户选「重新载入」）。一次撤销。 */
+  replaceRecipes(label: string, next: RecipeSet): void;
+  /** K6 ② 的「改为只在本配方生效」：刚才在基础上的那次改动撤回、这个参数纳入配方（default = 改之前的值）、
+   *  新值写进当前配方。整个是一次撤销。返回新图参数名。 */
+  moveBaseEditToRecipe(key: string): string | null;
+
   /** 把当前子图里某个内参提升成对外参数（F4）。返回外参名。 */
   promoteParam(nodeId: string, paramName: string, at?: SubPath): string | null;
   /** 取消提升。内参回到可编辑，值保持提升时的那个。at 同 setParam。 */
@@ -316,26 +402,44 @@ interface GraphState {
   clearRejection(): void;
 }
 
+/** 改配方集合的一步：拿到改完的 doc（有的动作先改图再改配方，比如「写回基础」要新的 default 判稀疏）。 */
+type RecipeStep = (recipes: RecipeSet, doc: GraphDoc) => RecipeSet;
+
 export const useGraphStore = create<GraphState>((set, get) => {
-  /** 记一条撤销，然后应用变更。用于单步操作。 */
-  const transact = (label: string, recipe: (draft: GraphDoc) => void) => {
+  /** 记一条撤销，然后应用变更。用于单步操作。recipes 给了就在同一步里改配方集合（K7）。 */
+  const transact = (label: string, recipe: (draft: GraphDoc) => void, recipes?: RecipeStep) => {
     const { doc, past } = get();
+    const before = recipeSet();
     const next = produce(doc, recipe);
-    if (next === doc) return; // recipe 什么都没改，不要污染撤销栈
+    const nextRecipes = recipes ? recipes(before, next) : before;
+    if (next === doc && nextRecipes === before) return; // 什么都没改，不要污染撤销栈
     set({
       doc: next,
-      past: [...past, { label, doc }].slice(-MAX_HISTORY),
+      past: [...past, { label, doc, recipes: before }].slice(-MAX_HISTORY),
       future: [],
       dirty: next !== get().savedDoc,
     });
+    applyRecipeSet(nextRecipes);
   };
 
   /** 应用变更但不记撤销。用于事务进行中的中间状态（拖动的每一帧）。 */
-  const mutate = (recipe: (draft: GraphDoc) => void) => {
+  const mutate = (recipe: (draft: GraphDoc) => void, recipes?: RecipeStep) => {
     const { doc } = get();
     const next = produce(doc, recipe);
-    if (next === doc) return;
-    set({ doc: next, dirty: next !== get().savedDoc });
+    if (next !== doc) set({ doc: next, dirty: next !== get().savedDoc });
+    if (recipes) applyRecipeSet(recipes(recipeSet(), next));
+  };
+
+  /** 只改一个配方的一步（改值、恢复基础、修失配）。配方不存在时什么都不做。 */
+  const editRecipe = (label: string, name: string, fn: (e: RecipeEntry, doc: GraphDoc) => RecipeEntry) => {
+    const step: RecipeStep = (recipes, doc) => {
+      const entry = findRecipe(recipes, name);
+      if (!entry) return recipes;
+      const next = fn(entry, doc);
+      return next === entry ? recipes : replaceRecipe(recipes, name, touch(next, doc, nowIso()));
+    };
+    if (get().pendingSnapshot) mutate(() => {}, step);
+    else transact(label, () => {}, step);
   };
 
   /** 当前层级（ui.path）的一个参数：节点、它的算子（含 sub: 合成的）、声明。找不到返回 null。 */
@@ -366,25 +470,28 @@ export const useGraphStore = create<GraphState>((set, get) => {
     past: [],
     future: [],
     pendingSnapshot: null,
+    pendingRecipes: null,
     lastRejection: null,
 
     begin() {
       // 已经在事务里就不要覆盖起点 —— 嵌套 begin 应当是幂等的
       if (get().pendingSnapshot) return;
-      set({ pendingSnapshot: get().doc });
+      set({ pendingSnapshot: get().doc, pendingRecipes: recipeSet() });
     },
 
     commit(label) {
-      const { pendingSnapshot, doc, past } = get();
+      const { pendingSnapshot, pendingRecipes, doc, past } = get();
       if (!pendingSnapshot) return;
-      if (pendingSnapshot === doc) {
-        set({ pendingSnapshot: null }); // 拖了但没动，不记
+      const recipesBefore = pendingRecipes ?? recipeSet();
+      if (pendingSnapshot === doc && recipesBefore === recipeSet()) {
+        set({ pendingSnapshot: null, pendingRecipes: null }); // 拖了但没动，不记
         return;
       }
       set({
-        past: [...past, { label, doc: pendingSnapshot }].slice(-MAX_HISTORY),
+        past: [...past, { label, doc: pendingSnapshot, recipes: recipesBefore }].slice(-MAX_HISTORY),
         future: [],
         pendingSnapshot: null,
+        pendingRecipes: null,
         dirty: doc !== get().savedDoc,
       });
     },
@@ -546,9 +653,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     setParam(nodeId, name, value, at) {
       const { doc } = get();
+      const path = at ?? useUiStore.getState().path;
       // 被图参数绑定的参数（P1.4）：改的是图参数，不写成节点上的显式值 —— 那正是 param_conflict
       // 的来路。Inspector、参数面板、2D 拖框、粘贴、重置都经这里，所以在这一处路由而不是各处各判一遍。
-      const binding = resolveGraphBinding(doc, at ?? useUiStore.getState().path, nodeId, name);
+      const binding = resolveGraphBinding(doc, path, nodeId, name);
       if (binding) {
         get().editGraphParamValue(binding.graphParam, value);
         return;
@@ -557,6 +665,21 @@ export const useGraphStore = create<GraphState>((set, get) => {
       if (!node) return;
       const op = ctx(doc).operatorsById.get(node.op);
       if (!op) return;
+
+      // K6 ②：选着配方时改一个没纳入配方的参数 —— 照常改图（影响所有配方），行上记一笔，
+      // 给「改为只在本配方生效」用（它要知道改之前的值）
+      const recipe = useRecipeStore.getState().current;
+      const before = effectiveValue(op, node, name);
+      if (recipe !== null && !valueEquals(before, value)) {
+        noteBaseEdit(`${fullId(path, nodeId)}.${name}`, {
+          nodeId,
+          param: name,
+          path,
+          before: plain(before),
+          after: plain(value),
+          recipe,
+        });
+      }
 
       const nextParams = sparseSet(op, node.params, name, plain(value));
       const apply = (d: GraphDoc) => {
@@ -902,25 +1025,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const value = effectiveValue(op, node, paramName);
       let done = false;
       transact(`纳入配方 ${name}`, (d) => {
-        const top = liftToTop(d, path, nodeId, decl, value);
-        const target = top ? d.nodes.find((n) => n.id === top.node) : undefined;
-        if (!top || !target) return;
-        d.params = {
-          ...(d.params ?? {}),
-          [name]: {
-            ...specFromParam(plain(top.decl), label),
-            default: plain(top.value),
-            binds: [joinBind(top.node, top.param)],
-          },
-        };
-        // 一处定义：被绑定的参数不能再在节点上写值（param_conflict）
-        if (target.params && top.param in target.params) {
-          const next = { ...target.params };
-          delete next[top.param];
-          target.params = next;
-        }
-        done = true;
+        done = promoteInDraft(d, path, nodeId, decl, value, name, label);
       });
+      if (done) clearBaseEdit(`${fullId(path, nodeId)}.${paramName}`);
       return done ? name : null;
     },
 
@@ -1001,12 +1108,17 @@ export const useGraphStore = create<GraphState>((set, get) => {
         set({ lastRejection: problem });
         return false;
       }
-      transact(`重命名图参数 ${name} → ${next}`, (d) => {
-        // 保持键的位置：存盘是给人 diff 的，改个名不该让这一段挪到末尾
-        d.params = Object.fromEntries(
-          Object.entries(d.params ?? {}).map(([k, v]) => [k === name ? next : k, v]),
-        );
-      });
+      transact(
+        `重命名图参数 ${name} → ${next}`,
+        (d) => {
+          // 保持键的位置：存盘是给人 diff 的，改个名不该让这一段挪到末尾
+          d.params = Object.fromEntries(
+            Object.entries(d.params ?? {}).map(([k, v]) => [k === name ? next : k, v]),
+          );
+        },
+        // 内存里每个配方的那个键跟着改名（同一步撤销）：不然改完名所有配方都是一条失配 ①
+        (recipes, d) => renameParamInSet(recipes, d, name, next, nowIso()),
+      );
       return true;
     },
 
@@ -1037,9 +1149,178 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     editGraphParamValue(name, value) {
-      // K6 ①：选着某个配方时写进那个配方（P3 接在这里），选着「基础」时写 default。
-      // P1 没有配方，当前恒为「基础」。
-      if (useRecipeStore.getState().current === null) get().setGraphParamDefault(name, value);
+      // K6 ①：选着某个配方时写进那个配方，选着「基础」时写 default。想改基础就切到「基础」，
+      // 或者在这一行点「写回基础」
+      const current = useRecipeStore.getState().current;
+      if (current === null) get().setGraphParamDefault(name, value);
+      else get().setRecipeValue(current, name, value);
+    },
+
+    setRecipeValue(recipe, param, value) {
+      if (!get().doc.params?.[param]) return;
+      editRecipe(`配方 ${recipe}：修改 ${param}`, recipe, (e, doc) => withValue(e, doc, param, value));
+    },
+
+    clearRecipeValue(recipe, param) {
+      editRecipe(`配方 ${recipe}：${param} 恢复基础`, recipe, (e) => withoutValue(e, param));
+    },
+
+    writeRecipeValueToBase(recipe, param) {
+      const entry = findRecipe(recipeSet(), recipe);
+      if (!entry || !Object.prototype.hasOwnProperty.call(entry.values, param) || !get().doc.params?.[param]) return;
+      const value = entry.values[param];
+      transact(
+        `写回基础 ${param}（来自配方 ${recipe}）`,
+        (d) => {
+          const into = d.params?.[param];
+          if (into) into.default = plain(value);
+        },
+        (recipes, doc) => {
+          const e = findRecipe(recipes, recipe);
+          return e ? replaceRecipe(recipes, recipe, touch(withoutValue(e, param), doc, nowIso())) : recipes;
+        },
+      );
+    },
+
+    copyRecipeCells(cells, target) {
+      const entry = findRecipe(recipeSet(), target);
+      const { doc } = get();
+      if (!entry) return 0;
+      let next = entry;
+      let changed = 0;
+      for (const c of cells) {
+        if (!doc.params?.[c.param]) continue;
+        const after = withValue(next, doc, c.param, c.value);
+        if (after !== next) changed += 1;
+        next = after;
+      }
+      if (changed === 0) return 0;
+      transact(`复制 ${changed} 格到配方 ${target}`, () => {}, (recipes, d) =>
+        replaceRecipe(recipes, target, touch(next, d, nowIso())),
+      );
+      return changed;
+    },
+
+    createRecipe(name, copyFrom) {
+      const recipes = recipeSet();
+      if (useRecipeStore.getState().dir === null) {
+        set({ lastRejection: "图还没存过盘：先保存图，配方存在图文件旁边的 <图名>.recipes/ 里" });
+        return false;
+      }
+      const problem = recipeNameProblem(recipes, name);
+      if (problem) {
+        set({ lastRejection: problem });
+        return false;
+      }
+      const source = copyFrom ? findRecipe(recipes, copyFrom) : undefined;
+      const { doc } = get();
+      const entry: RecipeEntry = {
+        id: newRecipeId(),
+        name,
+        values: source ? structuredClone(source.values) : {},
+        note: source?.note,
+        graph: graphRefOf(doc),
+        updatedAt: nowIso(),
+      };
+      transact(source ? `复制配方 ${source.name} → ${name}` : `新建配方 ${name}`, () => {}, (r) => ({
+        ...r,
+        recipes: [...r.recipes, entry],
+      }));
+      return true;
+    },
+
+    renameRecipe(name, next) {
+      const recipes = recipeSet();
+      const entry = findRecipe(recipes, name);
+      if (!entry) return false;
+      if (next === name) return true;
+      const problem = recipeNameProblem(recipes, next, name);
+      if (problem) {
+        set({ lastRejection: problem });
+        return false;
+      }
+      // 当前配方改了名照样是当前配方：recipe store 按内存 id 认它
+      transact(`重命名配方 ${name} → ${next}`, () => {}, (r, doc) =>
+        replaceRecipe(r, name, touch({ ...entry, name: next }, doc, nowIso())),
+      );
+      return true;
+    },
+
+    deleteRecipe(name) {
+      if (!findRecipe(recipeSet(), name)) return;
+      transact(`删除配方 ${name}`, () => {}, (r) => ({
+        recipes: r.recipes.filter((e) => e.name !== name),
+        defaultName: r.defaultName === name ? null : r.defaultName,
+      }));
+    },
+
+    setDefaultRecipe(name) {
+      const recipes = recipeSet();
+      if (name !== null && !findRecipe(recipes, name)) return;
+      if (recipes.defaultName === name) return;
+      transact(name ? `设 ${name} 为默认配方` : "取消默认配方", () => {}, (r) => ({ ...r, defaultName: name }));
+    },
+
+    addImportedRecipe(entry) {
+      const recipes = recipeSet();
+      if (useRecipeStore.getState().dir === null) {
+        set({ lastRejection: "图还没存过盘：先保存图，配方存在图文件旁边的 <图名>.recipes/ 里" });
+        return false;
+      }
+      const problem = recipeNameProblem(recipes, entry.name);
+      if (problem) {
+        set({ lastRejection: problem });
+        return false;
+      }
+      transact(`导入配方 ${entry.name}`, () => {}, (r) => ({ ...r, recipes: [...r.recipes, entry] }));
+      return true;
+    },
+
+    fixRecipe(name, items) {
+      if (items.length === 0) return;
+      if (!findRecipe(recipeSet(), name)) return;
+      const label = items.length === 1 ? `修复配方 ${name} 的失配` : `修复配方 ${name} 的 ${items.length} 处失配`;
+      transact(label, () => {}, (recipes, doc) => {
+        const e = findRecipe(recipes, name);
+        if (!e) return recipes;
+        const next = applyFixes(e, items, doc, nowIso());
+        return next === e ? recipes : replaceRecipe(recipes, name, next);
+      });
+    },
+
+    replaceRecipes(label, next) {
+      transact(label, () => {}, () => next);
+    },
+
+    moveBaseEditToRecipe(key) {
+      const edit = useRecipeStore.getState().baseEdits[key];
+      const current = useRecipeStore.getState().current;
+      if (!edit || current === null || edit.recipe !== current) return null;
+      const found = lookupParam(edit.nodeId, edit.param, edit.path);
+      if (!found) return null;
+      const { doc, path, ops, op, decl } = found;
+      if (resolveGraphBinding(doc, path, edit.nodeId, edit.param)) return null;
+      const name = uniqueGraphParamName(doc, edit.param);
+      const label = graphParamLabel(doc, path, edit.nodeId, decl, ops);
+      let done = false;
+      transact(
+        `改为只在配方 ${current} 生效：${name}`,
+        (d) => {
+          // 节点上的值回到改之前 —— 它成为新图参数的 default，别的配方看到的还是原来那样
+          const target = levelOf(d, path).nodes.find((n) => n.id === edit.nodeId);
+          if (!target) return;
+          target.params = sparseSet(op, target.params, edit.param, plain(edit.before));
+          done = promoteInDraft(d, path, edit.nodeId, decl, edit.before, name, label);
+        },
+        (recipes, next) => {
+          const e = findRecipe(recipes, current);
+          if (!e || !next.params?.[name]) return recipes;
+          return replaceRecipe(recipes, current, touch(withValue(e, next, name, edit.after), next, nowIso()));
+        },
+      );
+      if (!done) return null;
+      clearBaseEdit(key);
+      return name;
     },
 
     renameSubgraph(subgraphId, name) {
@@ -1082,11 +1363,13 @@ export const useGraphStore = create<GraphState>((set, get) => {
       set({
         doc: entry.doc,
         past: past.slice(0, -1),
-        future: [...future, { label: entry.label, doc }],
+        future: [...future, { label: entry.label, doc, recipes: recipeSet() }],
         // 撤销回到保存点 = 文件里就是这一份，标题栏的 ● 该消失（P1.6）
         dirty: entry.doc !== get().savedDoc,
         pendingSnapshot: null,
+        pendingRecipes: null,
       });
+      applyRecipeSet(entry.recipes);
     },
 
     redo() {
@@ -1096,10 +1379,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
       set({
         doc: entry.doc,
         future: future.slice(0, -1),
-        past: [...past, { label: entry.label, doc }],
+        past: [...past, { label: entry.label, doc, recipes: recipeSet() }],
         dirty: entry.doc !== get().savedDoc,
         pendingSnapshot: null,
+        pendingRecipes: null,
       });
+      applyRecipeSet(entry.recipes);
     },
 
     canUndo: () => get().past.length > 0,
@@ -1117,6 +1402,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         past: [],
         future: [],
         pendingSnapshot: null,
+        pendingRecipes: null,
       });
     },
 
@@ -1131,6 +1417,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         past: [],
         future: [],
         pendingSnapshot: null,
+        pendingRecipes: null,
       });
     },
 
@@ -1150,6 +1437,17 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
   };
 });
+
+/** 配方集合的异步载入落地时，把历史里还指着「载入前那份空集合」的快照换成载入的结果 ——
+ *  否则打开图之后、配方读完之前做的那一步，撤销时会把配方集合一起撤成空的。 */
+export function rebaseHistoryRecipes(from: RecipeSet, to: RecipeSet): void {
+  const s = useGraphStore.getState();
+  const fix = (list: HistoryEntry[]) =>
+    list.some((e) => e.recipes === from) ? list.map((e) => (e.recipes === from ? { ...e, recipes: to } : e)) : list;
+  const past = fix(s.past);
+  const future = fix(s.future);
+  if (past !== s.past || future !== s.future) useGraphStore.setState({ past, future });
+}
 
 /** 当前层级的子图定义。Inspector 与画布都要读它。 */
 export function currentSubgraph(doc: GraphDoc, path: readonly { subgraphId: string }[]) {

@@ -28,7 +28,38 @@ export {
   findSnippet,
 } from "./store/manifest";
 export { useValidationStore, requestValidate, scheduleValidate } from "./store/validation";
-export { useRecipeStore, runParamsOf, currentOverrides } from "./store/recipe";
+export {
+  useRecipeStore,
+  runParamsOf,
+  currentOverrides,
+  selectRecipe,
+  recipeSet,
+  recipesDirty,
+  useRecipesDirty,
+} from "./store/recipe";
+export {
+  loadRecipesFor,
+  recipesLoaded,
+  importRecipeFrom,
+  exportRecipeTo,
+  writeRecipeAutosave,
+  restoreRecipeAutosave,
+} from "./store/recipeFiles";
+// 配方（param-recipe P3）的纯函数：文件格式、目录约定、规格摘要、四类失配。P4 的 CLI 在 Rust 里照同一份规则再实现
+export {
+  recipeDirOf,
+  recipeFileName,
+  specDigest,
+  specCanonical,
+  recipeReport,
+  serializeRecipe,
+  parseRecipeText,
+  type RecipeEntry,
+  type RecipeSet,
+  type RecipeReport,
+  type Mismatch,
+  type MismatchKind,
+} from "./lib/recipes";
 export {
   effectiveGraphValues,
   graphParamBoundTo,

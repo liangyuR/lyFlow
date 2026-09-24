@@ -4,6 +4,7 @@
 import type { EditorDialogs } from "@lyflow/editor";
 
 const FILTERS = [{ name: "LyFlow Graph", extensions: ["lyflow.json", "json"] }];
+const RECIPE_FILTERS = [{ name: "LyFlow 配方", extensions: ["lyflow-recipe.json", "json"] }];
 
 function inTauri(): boolean {
   return "__TAURI_INTERNALS__" in window;
@@ -42,5 +43,17 @@ export const tauriDialogs: EditorDialogs = {
     if (!inTauri()) return window.confirm(message);
     const { ask } = await import("@tauri-apps/plugin-dialog");
     return ask(message, { title: "LyFlow", kind: "warning" });
+  },
+
+  // 配方的导入 / 导出（param-recipe P3.6）。只给配方用：通用的 pickPath 一给，参数表单与 3D 导出也会换成
+  // 原生对话框，那是另一件事
+  async pickRecipePath(mode: "open" | "save", suggested?: string) {
+    if (!inTauri()) throw new NoDialogError();
+    const { open, save } = await import("@tauri-apps/plugin-dialog");
+    const picked =
+      mode === "open"
+        ? await open({ multiple: false, filters: RECIPE_FILTERS })
+        : await save({ ...(suggested ? { defaultPath: suggested } : {}), filters: RECIPE_FILTERS });
+    return typeof picked === "string" ? picked : null;
   },
 };

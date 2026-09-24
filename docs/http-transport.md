@@ -51,6 +51,9 @@ v11 再加的 `isolate`（只运行某几个节点）与 `force`（强制重算�
 | GET / PUT / DELETE | `/lyflow/files/backup?path=` | `readBackup` / `writeBackup` / `discardBackup` | 桥接层 |
 | GET | `/lyflow/files/backup/status?path=` | `backupStatus` | 桥接层 |
 | PUT | `/lyflow/files/bytes?path=` | `writeFileBytes` | 桥接层 |
+| GET | `/lyflow/files/recipes?dir=` | `listRecipeDir` | 桥接层（param-recipe P3.2） |
+| GET / PUT / DELETE | `/lyflow/files/recipe?path=` | `readRecipeFile` / `writeRecipeFile` / `deleteRecipeFile` | 桥接层 |
+| POST | `/lyflow/files/recipe/rename` | `renameRecipeFile` | 桥接层 |
 | GET / POST | `/lyflow/recent` | `getRecentFiles` / `pushRecentFile` | 桥接层 |
 | WS | `/lyflow/events` | `onExecutionEvent` 等三个 | `lyflow_event_cb` |
 
@@ -340,6 +343,26 @@ magic 对不上时编辑器会当成「响应不是点云」直接报错，所�
 
 `PUT /lyflow/files/bytes?path=…`：请求体是**裸二进制**（`application/octet-stream`），
 3D 视图导出 PNG 用它。
+
+### 配方文件（param-recipe P3.2）
+
+配方是图文件旁边 `<图名>.recipes/` 目录里的 `*.lyflow-recipe.json`（格式与目录约定见 [recipe.md](recipe.md)）。
+后端只管读写与路径约束，**文本进、文本出**：格式、失配判定都在编辑器。
+
+| 请求 | 回包 |
+|---|---|
+| `GET /lyflow/files/recipes?dir=a/车门.recipes` | `{ "exists": bool, "files": [{ "name": "A.lyflow-recipe.json", "modified": 毫秒 \| null }] }`。目录不存在不是错误（`exists: false`）；只列 `*.lyflow-recipe.json`、`index.json`、`autosave~.json` |
+| `GET /lyflow/files/recipe?path=…` | `{ "text": "…文件原文…" }` |
+| `PUT /lyflow/files/recipe?path=…`，体 `{ "text": "…" }` | `{}`。`text` 必须是一个 JSON 对象（400 否则）；父目录不在就建；先写临时文件再改名覆盖 |
+| `DELETE /lyflow/files/recipe?path=…` | `{}`。文件不在不算错 |
+| `POST /lyflow/files/recipe/rename`，体 `{ "from", "to" }` | `{}`。同一个配方目录里；目标已存在 409（只差大小写的改名除外） |
+
+路径约束（与 Tauri 的五个命令一致，外加「只在工作区里」，违反一律 **403**）：
+
+- `dir` 的最后一段以 `.recipes` 结尾；
+- 读、写：配方目录里的 `*.lyflow-recipe.json`、`index.json`、`autosave~.json`，或工作区里任意位置的 `*.lyflow-recipe.json`（导入时读、导出时写）；
+- 删、改名：只在配方目录里；改名只在 `*.lyflow-recipe.json` 之间、同一个目录里；
+- 路径里不许有 `..`，解析后不许逃出工作区根。
 
 `GET /lyflow/recent` → `[{ "path": "…", "openedAt": 1730000000000 }]`；
 `POST /lyflow/recent` 收 `{ "path": "…" }`，返回更新后的整张表。

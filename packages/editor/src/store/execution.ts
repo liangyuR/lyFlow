@@ -7,7 +7,7 @@ import { flashNodesLocate } from "../lib/motion";
 import { localIdOf, pathPrefix, type SubPath } from "../lib/subgraph";
 import { transport } from "../transport";
 import { refreshCacheStats, useCacheStore } from "./cache";
-import { runParamsOf } from "./recipe";
+import { currentRecipeBlocker, runParamsOf } from "./recipe";
 import { useUiStore } from "./ui";
 import type {
   Diagnostic,
@@ -624,6 +624,13 @@ export async function startRun(
   const preview = request.preview === true;
   const isolate = request.isolate ?? [];
   try {
+    // 当前配方有 ①–③ 失配时不能运行（P3.7）：配方里多出来的名字 core 根本看不见（只交声明着的），
+    // 类型不符、越界的 core 会报 bad_param，但原因在配方文件里，这里先说清楚是哪个配方的哪几处。
+    // 显式给了 params 的（验收脚本整份替换取值）不受当前配方约束
+    if (!request.params) {
+      const blocker = currentRecipeBlocker(doc);
+      if (blocker) throw new Error(blocker);
+    }
     const runId = await transport.runGraph(doc, graphPath, {
       targets: request.targets,
       isolate: isolate.length > 0 ? isolate : undefined,

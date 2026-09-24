@@ -53,6 +53,26 @@ python "$PSScriptRoot\validate_schema.py" `
     (Join-Path $root "schema\graph-doc.schema.json")
 if ($LASTEXITCODE -ne 0) { throw "examples/param-showcase.lyflow.json 不符合 schema" }
 
+Step "配方文件 vs schema"
+# 配方的共享夹具（param-recipe P3，schema/fixtures/recipes/）：每个配方文件按 expected.json 的 schemaValid
+# 该过的过、该拒的拒（缺 graph 的那份 schema 不认，编辑器照样读、报失配 ④）；index.json 与夹具图也各查一遍。
+# 失配报告本身由 @lyflow/editor 的单测对着 expected.json 断言（下面 frontend 那一步），P4 的 CLI 用同一份夹具。
+$fixtures = Join-Path $root "schema\fixtures\recipes"
+$expected = Get-Content (Join-Path $fixtures "expected.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+foreach ($prop in $expected.recipes.PSObject.Properties) {
+  $file = Join-Path $fixtures "graph.recipes\$($prop.Name)"
+  if ($prop.Value.schemaValid) {
+    python "$PSScriptRoot\validate_schema.py" $file (Join-Path $root "schema\recipe.schema.json")
+  } else {
+    python "$PSScriptRoot\validate_schema.py" $file (Join-Path $root "schema\recipe.schema.json") --expect-fail
+  }
+  if ($LASTEXITCODE -ne 0) { throw "配方夹具 $($prop.Name) 与 schema 的预期不符" }
+}
+python "$PSScriptRoot\validate_schema.py" (Join-Path $fixtures "graph.recipes\index.json") (Join-Path $root "schema\recipe-index.schema.json")
+if ($LASTEXITCODE -ne 0) { throw "配方夹具 index.json 不符合 schema" }
+python "$PSScriptRoot\validate_schema.py" (Join-Path $fixtures "graph.lyflow.json") (Join-Path $root "schema\graph-doc.schema.json")
+if ($LASTEXITCODE -ne 0) { throw "配方夹具的图不符合 graph-doc schema" }
+
 Step "片段文件 vs schema"
 # 包随附的片段（m8-plan L14）。算子与端口对不对由 core 的启动自检查（manifest --check），
 # 这里只查文件形状 —— 没编进本次构建的包，它的片段也照样要合格。

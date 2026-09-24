@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "name": "ok",
+  "graph": {
+    "id": "01JRECIPEFIXTURE0000000000",
+    "specDigest": "sha256:4dfbd22b3f0487a10474d3c21500824b0706314a057738d803d8c09a852059ad"
+  },
+  "values": {
+    "leafSize": [
+      0.03,
+      0.03,
+      0.03
+    ],
+    "cutField": "x",
+    "cutMax": 2.5,
+    "legacyMin": "随便什么都不查"
+  },
+  "note": "车型A·左前门：全部合法，没有失配（legacyMin 是老格式图参数，值不查）",
+  "updatedAt": "2026-09-24T08:00:00.000Z"
+}

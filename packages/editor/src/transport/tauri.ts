@@ -17,6 +17,7 @@ import type {
   LoadedGraph,
   ManifestUpdated,
   RecentEntry,
+  RecipeDirListing,
   RunOptions,
   SnippetScan,
   Transport,
@@ -202,6 +203,26 @@ export class TauriTransport implements Transport {
   async discardBackup(path: string): Promise<void> {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<void>("discard_backup", { path });
+  }
+  async listRecipeDir(dir: string): Promise<RecipeDirListing> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<RecipeDirListing>("list_recipe_dir", { dir });
+  }
+  async readRecipeFile(path: string): Promise<string> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<string>("read_recipe_file", { path });
+  }
+  async writeRecipeFile(path: string, text: string): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<void>("write_recipe_file", { path, text });
+  }
+  async deleteRecipeFile(path: string): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<void>("delete_recipe_file", { path });
+  }
+  async renameRecipeFile(from: string, to: string): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<void>("rename_recipe_file", { from, to });
   }
   async writeFileBytes(path: string, contents: Uint8Array): Promise<void> {
     const { invoke } = await import("@tauri-apps/api/core");

@@ -169,6 +169,34 @@ function resolveWorkspace(p) {
   return full;
 }
 
+// ---------------------------------------------------------------- 配方文件
+// param-recipe P3.2，与 Tauri 的五个命令（bridge/src/commands.rs「配方文件」）同一套约束，外加「只在工作区里」：
+// 配方目录（名字以 .recipes 结尾）里的 *.lyflow-recipe.json、index.json、autosave~.json 可读写删，
+// *.lyflow-recipe.json 之间可改名；任意位置（工作区内）的 *.lyflow-recipe.json 可读写（导入 / 导出）。
+
+const RECIPE_EXT = ".lyflow-recipe.json";
+const RECIPE_AUX = ["index.json", "autosave~.json"];
+
+const endsWithCi = (s, suffix) => s.length > suffix.length && s.toLowerCase().endsWith(suffix);
+const isRecipeFile = (name) => endsWithCi(name, RECIPE_EXT);
+const isRecipeAux = (name) => RECIPE_AUX.includes(name.toLowerCase());
+const isRecipeDir = (dir) => endsWithCi(path.basename(dir), ".recipes");
+
+function refuse(message) {
+  return Object.assign(new Error(message), { status: 403 });
+}
+
+/** access = "rw"（读写：配方目录里的三种，或任意位置的配方文件）| "dir"（删、改名：只在配方目录里）。 */
+function recipePath(p, access) {
+  if (String(p).split(/[\\/]/).includes("..")) throw refuse(`路径里不能有 ..：${p}`);
+  const full = resolveWorkspace(p);
+  const name = path.basename(full);
+  const inDir = isRecipeDir(path.dirname(full));
+  const ok = access === "rw" ? isRecipeFile(name) || (inDir && isRecipeAux(name)) : inDir && (isRecipeFile(name) || isRecipeAux(name));
+  if (!ok) throw refuse(`这里只能读写配方文件（*${RECIPE_EXT}，或 *.recipes/ 里的 index.json、autosave~.json）：${p}`);
+  return full;
+}
+
 // -------------------------------------------------------------------- 状态
 
 const hub = new WsHub();
@@ -651,6 +679,64 @@ async function route(req, res, url) {
       fs.rmSync(file, { force: true });
       return send(res, 200, {});
     }
+  }
+
+  if (req.method === "GET" && p === "/lyflow/files/recipes") {
+    const raw = q.get("dir") ?? "";
+    if (raw.split(/[\\/]/).includes("..")) throw refuse(`路径里不能有 ..：${raw}`);
+    const dir = resolveWorkspace(raw);
+    if (!isRecipeDir(dir)) throw refuse(`不是配方目录（名字要以 .recipes 结尾）：${raw}`);
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return send(res, 200, { exists: false, files: [] });
+    const files = fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile() && (isRecipeFile(e.name) || isRecipeAux(e.name)))
+      .map((e) => ({ name: e.name, modified: Math.round(fs.statSync(path.join(dir, e.name)).mtimeMs) }))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return send(res, 200, { exists: true, files });
+  }
+
+  if (p === "/lyflow/files/recipe") {
+    if (req.method === "GET") {
+      const file = recipePath(q.get("path") ?? "", "rw");
+      return send(res, 200, { text: fs.readFileSync(file, "utf8") });
+    }
+    if (req.method === "PUT") {
+      const file = recipePath(q.get("path") ?? "", "rw");
+      const { text } = await json();
+      let value;
+      try {
+        value = JSON.parse(text);
+      } catch (e) {
+        throw Object.assign(new Error(`内容不是合法 JSON：${e.message}`), { status: 400 });
+      }
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw Object.assign(new Error("内容应当是一个 JSON 对象"), { status: 400 });
+      }
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const tmp = `${file}.tmp~`;
+      fs.writeFileSync(tmp, text, "utf8");
+      fs.renameSync(tmp, file);
+      return send(res, 200, {});
+    }
+    if (req.method === "DELETE") {
+      fs.rmSync(recipePath(q.get("path") ?? "", "dir"), { force: true });
+      return send(res, 200, {});
+    }
+  }
+
+  if (req.method === "POST" && p === "/lyflow/files/recipe/rename") {
+    const body = await json();
+    const from = recipePath(body.from ?? "", "dir");
+    const to = recipePath(body.to ?? "", "dir");
+    if (!isRecipeFile(path.basename(from)) || !isRecipeFile(path.basename(to))) {
+      throw refuse("只有配方文件（*.lyflow-recipe.json）能改名");
+    }
+    if (path.dirname(from) !== path.dirname(to)) throw refuse("改名只能在同一个配方目录里");
+    if (fs.existsSync(to) && from.toLowerCase() !== to.toLowerCase()) {
+      throw Object.assign(new Error(`${body.to} 已经存在`), { status: 409 });
+    }
+    fs.renameSync(from, to);
+    return send(res, 200, {});
   }
 
   if (req.method === "PUT" && p === "/lyflow/files/bytes") {

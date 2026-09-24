@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "name": "nograph",
+  "values": {
+    "cutMax": 3
+  },
+  "note": "④：文件里没记图 id 与摘要（schema 不认这份，编辑器照样读）",
+  "updatedAt": "2026-09-24T08:00:00.000Z"
+}

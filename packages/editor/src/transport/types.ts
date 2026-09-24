@@ -89,6 +89,19 @@ export interface BackupStatus {
   fileModified: number | null;
 }
 
+/** 配方目录里的一个文件（param-recipe P3.2）。modified 是毫秒时间戳，拿不到是 null。 */
+export interface RecipeDirEntry {
+  name: string;
+  modified: number | null;
+}
+
+/** 列配方目录的回包。目录还不存在（图旁边从没建过配方）时 exists = false、files 为空，不是错误。 */
+export interface RecipeDirListing {
+  exists: boolean;
+  /** 只列配方相关的文件：`*.lyflow-recipe.json`、`index.json`、`autosave~.json`。 */
+  files: RecipeDirEntry[];
+}
+
 export interface Transport {
   readonly kind: TransportKind;
   getManifest(): Promise<OperatorManifestBundle>;
@@ -148,6 +161,19 @@ export interface Transport {
   backupStatus(path: string): Promise<BackupStatus>;
   readBackup(path: string): Promise<LoadedGraph>;
   discardBackup(path: string): Promise<void>;
+
+  // ---- 配方文件（param-recipe P3.2）。文本进、文本出：格式与校验在编辑器（lib/recipes.ts），
+  // 后端只管读写与路径约束（docs/recipe.md「路径安全」）：配方目录（`*.recipes/`）里的 `*.lyflow-recipe.json`、
+  // `index.json`、`autosave~.json`，外加任意位置的 `*.lyflow-recipe.json`（导入时读、导出时写）。
+  // HTTP 后端另外只认工作区里的路径。Static transport 只读。
+  listRecipeDir(dir: string): Promise<RecipeDirListing>;
+  readRecipeFile(path: string): Promise<string>;
+  /** 父目录不在就建。text 必须是一个 JSON 对象的文本（后端解析一遍确认，原样写下）。 */
+  writeRecipeFile(path: string, text: string): Promise<void>;
+  /** 文件不在不算错。 */
+  deleteRecipeFile(path: string): Promise<void>;
+  /** 同一个配方目录里改名。目标已经存在时报错（只差大小写的改名除外）。 */
+  renameRecipeFile(from: string, to: string): Promise<void>;
 
   /** 写一段二进制到磁盘。3D 视图导出 PNG 用它（M3 尾巴 b）。 */
   writeFileBytes(path: string, contents: Uint8Array): Promise<void>;

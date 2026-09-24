@@ -10,6 +10,7 @@ import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { usePeekStore, type PeekWindow } from "../store/peek";
 import { useUiStore } from "../store/ui";
+import { useModalStore } from "../lib/modal";
 
 function inTextField(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -47,6 +48,8 @@ export function useShortcuts(
       const graph = useGraphStore.getState();
       const ui = useUiStore.getState();
 
+      // 编辑器自己的对话框开着（起配方名、确认删除……）：按键全归它，快捷键一个都不响
+      if (useModalStore.getState().current) return;
       // 搜索弹层和快捷键面板自己处理按键，别在这里抢
       if (ui.searchPopup) {
         if (e.key === "Escape") ui.closeSearch();

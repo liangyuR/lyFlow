@@ -1,0 +1,218 @@
+{
+  "graph": "graph.lyflow.json",
+  "specCanonical": "[[\"cutField\",\"enum\",null,null,[\"intensity\",\"x\",\"y\",\"z\"]],[\"cutMax\",\"float\",0,5,null],[\"gain\",\"float\",0,10,null],[\"leafSize\",\"vec3f\",0.0001,10,null],[\"legacyMin\",null,null,null,null],[\"pointCount\",\"int\",1,20000000,null],[\"pose\",\"transform\",null,null,null],[\"response\",\"curve\",0,1,null],[\"tag\",\"string\",null,null,null],[\"tint\",\"color\",0,1,null],[\"withIntensity\",\"bool\",null,null,null]]",
+  "specDigest": "sha256:4dfbd22b3f0487a10474d3c21500824b0706314a057738d803d8c09a852059ad",
+  "recipes": {
+    "ok.lyflow-recipe.json": {
+      "schemaValid": true,
+      "blocking": 0,
+      "items": []
+    },
+    "extra.lyflow-recipe.json": {
+      "schemaValid": true,
+      "blocking": 1,
+      "items": [
+        {
+          "kind": "extra",
+          "param": "voxelSize",
+          "fix": {
+            "action": "delete"
+          }
+        }
+      ]
+    },
+    "type.lyflow-recipe.json": {
+      "schemaValid": true,
+      "blocking": 10,
+      "items": [
+        {
+          "kind": "type",
+          "param": "cutField",
+          "fix": {
+            "action": "delete"
+          }
+        },
+        {
+          "kind": "type",
+          "param": "cutMax",
+          "fix": {
+            "action": "set",
+            "value": 5
+          }
+        },
+        {
+          "kind": "type",
+          "param": "gain",
+          "fix": {
+            "action": "delete"
+          }
+        },
+        {
+          "kind": "type",
+          "param": "leafSize",
+          "fix": {
+            "action": "set",
+            "value": [
+              0.05,
+              0.05,
+              0.05
+            ]
+          }
+        },
+        {
+          "kind": "type",
+          "param": "pointCount",
+          "fix": {
+            "action": "set",
+            "value": 30000
+          }
+        },
+        {
+          "kind": "type",
+          "param": "pose",
+          "fix": {
+            "action": "delete"
+          }
+        },
+        {
+          "kind": "type",
+          "param": "response",
+          "fix": {
+            "action": "delete"
+          }
+        },
+        {
+          "kind": "type",
+          "param": "tag",
+          "fix": {
+            "action": "set",
+            "value": "42"
+          }
+        },
+        {
+          "kind": "type",
+          "param": "tint",
+          "fix": {
+            "action": "set",
+            "value": [
+              1,
+              0.5019607843137255,
+              0
+            ]
+          }
+        },
+        {
+          "kind": "type",
+          "param": "withIntensity",
+          "fix": {
+            "action": "set",
+            "value": true
+          }
+        }
+      ]
+    },
+    "range.lyflow-recipe.json": {
+      "schemaValid": true,
+      "blocking": 6,
+      "items": [
+        {
+          "kind": "range",
+          "param": "cutField",
+          "fix": {
+            "action": "delete"
+          }
+        },
+        {
+          "kind": "range",
+          "param": "cutMax",
+          "fix": {
+            "action": "set",
+            "value": 5
+          }
+        },
+        {
+          "kind": "range",
+          "param": "leafSize",
+          "fix": {
+            "action": "set",
+            "value": [
+              0.02,
+              10,
+              0.0001
+            ]
+          }
+        },
+        {
+          "kind": "range",
+          "param": "pointCount",
+          "fix": {
+            "action": "set",
+            "value": 1
+          }
+        },
+        {
+          "kind": "range",
+          "param": "response",
+          "fix": {
+            "action": "set",
+            "value": {
+              "points": [
+                [
+                  0,
+                  0
+                ],
+                [
+                  0.5,
+                  1
+                ],
+                [
+                  1,
+                  1
+                ]
+              ],
+              "interp": "smooth"
+            }
+          }
+        },
+        {
+          "kind": "range",
+          "param": "tint",
+          "fix": {
+            "action": "set",
+            "value": [
+              1,
+              0.5,
+              0
+            ]
+          }
+        }
+      ]
+    },
+    "spec.lyflow-recipe.json": {
+      "schemaValid": true,
+      "blocking": 0,
+      "items": [
+        {
+          "kind": "spec",
+          "param": null,
+          "fix": {
+            "action": "rebase"
+          }
+        }
+      ]
+    },
+    "nograph.lyflow-recipe.json": {
+      "schemaValid": false,
+      "blocking": 0,
+      "items": [
+        {
+          "kind": "spec",
+          "param": null,
+          "fix": {
+            "action": "rebase"
+          }
+        }
+      ]
+    }
+  }
+}

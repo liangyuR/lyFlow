@@ -87,6 +87,9 @@ v11 给 `runGraph` 的选项加了 `isolate?: string[]` 与 `force?: string[]`�
 自己实现 `Transport` 的要把它们透传到后端，语义见 [`docs/embedding.md`](../../docs/embedding.md#部分运行targetsisolateforce)。
 param-recipe P1 又给 `runGraph` 的选项、`validateGraph` 与 `planGraph` 各加了一个可选的 `params`（顶层图参数的取值
 `{名字: 值}`），同样要透传：Tauri 到 C ABI 的 `params_json`，HTTP 到信封的 `params`（[http 契约](../../docs/http-transport.md)）。
+param-recipe P3 加了配方文件的五个方法（`listRecipeDir` / `readRecipeFile` / `writeRecipeFile` / `deleteRecipeFile` /
+`renameRecipeFile`）：文本进、文本出，后端只管读写与路径约束（[recipe.md](../../docs/recipe.md)「传输层与路径安全」），
+Static transport 只读。
 
 点云走二进制，绝不 JSON（ADR-0006）：`getOutputCloud` 返回的 `ArrayBuffer`
 布局见 [http 契约](../../docs/http-transport.md)的「结果」一节，
@@ -106,8 +109,12 @@ const dialogs: EditorDialogs = {
   confirmDiscard: (dirty) => …,
   confirmRestore: (path, message) => …,
   pickPath: (req) => …,           // 可选：参数表单的路径选择、3D 导出 PNG
+  pickRecipePath: (mode, name) => …, // 可选：配方的导入（open）/ 导出（save）
 };
 ```
+
+配方的导入导出先找 `pickRecipePath`，其次 `pickPath`，都没有就在编辑器里让人输一个路径（HTTP 宿主填工作区里的相对路径）。
+起配方名、确认删除、「文件已被外部修改」这几个对话框是编辑器自己画的（`lib/modal.ts`），不经宿主。
 
 不给 `dialogs` 时：确认类退回 `window.confirm`，路径选择类给一条提示，
 3D 导出退回浏览器自己的下载。`app/src/dialogs.ts` 是 Tauri 版的实现。
@@ -125,6 +132,8 @@ const dialogs: EditorDialogs = {
 | `--lyflow-fg-0` … `--lyflow-fg-2` | `#e6e9ef` … `#6f7887` | 由亮到暗的三级文字 |
 | `--lyflow-accent` / `--lyflow-accent-dim` | `#4a9eff` / `#2d6099` | 选中、连线、焦点 |
 | `--lyflow-warn` | `#f0a020` | 警告 |
+| `--lyflow-recipe` | `#e0a030` | 被当前配方覆盖（橙色竖条、矩阵里配方存的值） |
+| `--lyflow-danger` | `#e5484d` | 配方失配、越界的单元格 |
 | `--lyflow-radius` | `6px` | 圆角 |
 | `--lyflow-mono` | 一串等宽字体 | 代码与 id |
 
@@ -147,7 +156,9 @@ CSS 由组件自己 `import`，宿主不用单独引样式文件。
 
 宿主要自己搭工具栏、状态栏或验收桥时用得上：
 
-- stores：`useGraphStore`、`useUiStore`、`useManifestStore`、`useExecutionStore`、`useCacheStore`
+- stores：`useGraphStore`、`useUiStore`、`useManifestStore`、`useExecutionStore`、`useCacheStore`、`useRecipeStore`
+- 配方：`selectRecipe`、`recipesDirty`、`loadRecipesFor`、`recipesLoaded`、`importRecipeFrom`、`exportRecipeTo`，
+  纯函数 `specDigest`、`recipeReport`、`recipeDirOf`、`serializeRecipe`、`parseRecipeText`（改配方仍走 graph store 的动作）
 - 动作：`startRun`、`cancelCurrentRun`、`requestPlan`、`schedulePlan`、`onNodeTransition`
 - 工具：`levelOf`、`fullId`、`pathPrefix`、`layoutGraph`、`needsInitialLayout`、`decodeCloud`
 - 类型：`GraphDoc`、`GraphNode`、`ExecutionEvent`、`OperatorDesc`、`RunOutputs` 等
@@ -178,7 +189,7 @@ pnpm test-server -- --root <工作区> --cli <lyflow.exe>
 pnpm e2e:http                             # 桩 + Chrome + 宿主，一条龙
 ```
 
-纯逻辑（`lib/` 下的图参数、参数面板模型、transform / curve 的值）有 `node --test` 单测（`test/`）；界面这一层的正确性由
+纯逻辑（`lib/` 下的图参数、参数面板模型、transform / curve 的值、配方的格式与失配）有 `node --test` 单测（`test/`）；界面这一层的正确性由
 `pnpm e2e` 与 `pnpm e2e:http` 端到端保证。
 
 ---
@@ -410,6 +421,32 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
 - **transform / curve**：`components/TransformControl.tsx`、`components/CurveControl.tsx`，纯逻辑在 `lib/transform.ts`、
   `lib/curve.ts`（与 core 的 `checkCurveValue` / `evaluateCurve` 同一套判据与插值）。数字框抽成了 `components/NumberInput.tsx`。
   `valueEquals` 现在也比普通对象（curve 的值），与键顺序无关 —— 稀疏存储删不删键靠它。
+
+## 配方（param-recipe P3）
+
+设计在 [docs/param-recipe-plan.md](../../docs/param-recipe-plan.md) P3，格式与规则在 [docs/recipe.md](../../docs/recipe.md)，
+验收记录在 [docs/param-recipe-p3-acceptance.md](../../docs/param-recipe-p3-acceptance.md)。
+
+- **三层**：`lib/recipes.ts` 是纯函数（文件格式、目录约定、配方名、specDigest、四类失配与修复建议；有单测，并对着
+  `schema/fixtures/recipes/` 的共享夹具 —— P4 的 Rust 实现用同一份）；`store/recipe.ts` 存配方集合、当前配方与存盘簿记；
+  `store/recipeFiles.ts` 是 I/O（打开图时读 `<图名>.recipes/`、Ctrl+S 写回、外部修改检测、自动备份、导入导出）。
+- **撤销（K7）**：改配方集合的动作都在 **graph store** 里（它握着撤销栈），`HistoryEntry` 同时快照 `doc` 与 `recipes`；
+  `transact(label, docRecipe, recipesStep)` 一步里可以同时改两样（「写回基础」「改为只在本配方生效」）。`begin/commit` 也快照配方，
+  拖滑块改配方里的值合成一条。**当前配方不进撤销栈**，按配方的内存 id 跟随（改名、撤销改名时它还是当前配方）。
+- **dirty 与 graph store 同一个判法**：`set !== saved`（对象身份），撤销回到保存点就不脏。工具栏的 ● 与宿主的 `onDocChange`
+  是图与配方合并的；存盘簿记 `savedFiles`（配方 id → 文件名）让「改名」存成 rename、「删掉」存成 delete；`diskText`（文件名 →
+  上次读 / 写的文本）是外部修改检测的依据。
+- **配方跟着图走**：LyFlowEditor 订阅 graph store，`epoch` 变了（打开、新建）就 `loadRecipesFor(filePath)`，同一张图只是换了路径
+  （第一次存盘）就 `followGraphPath`。所以宿主与脚本直接 `loadDoc(doc, path)` 也会读配方目录。异步读完时把历史里还指着
+  「载入前那份空集合」的快照换成读到的（`rebaseHistoryRecipes`）。
+- **写值的唯一入口**仍是 `editGraphParamValue`（P1 留的口子）：选着配方写配方、选着基础写 default；`setParam` 命中被绑定的参数时
+  转给它。选着配方改没纳入的参数时，`setParam` 顺手记一笔 `baseEdits`（K6 ② 的提示与「改为只在本配方生效」要改之前的值）。
+- **失配阻止运行**在 `startRun` 里：当前配方有 ①–③ 就 failRun 并写明哪个配方的哪几处；显式给了 `params` 的运行不受约束。
+- **界面**：`components/RecipeMenu.tsx`（工具栏下拉框）、`RecipeMatrix.tsx`（矩阵）、`RecipeManager.tsx`（管理与失配报告）、
+  `recipeActions.ts`（问名字、确认、选文件，然后调 store 动作）、`Modal.tsx`；样式在 `styles.recipe.css`。
+  按节点页的行（`ParamPanel.tsx`）用 P2 留的 `.prow__stripe` 与 `.prow__tags` 画覆盖标记。
+- **窗口桥**：`window.__lyflow.recipes`（`loaded` / `importFrom` / `exportTo` / `specDigest` / `autosave` / `restoreAutosave`）
+  与 `snapshot().recipe`（当前配方、取值、配方集合、合并后的脏标记）。
 
 ## 层级（子图）
 

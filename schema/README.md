@@ -8,6 +8,8 @@
 | [`graph-doc.schema.json`](graph-doc.schema.json) | 前端 → C++ | 图文档。也是磁盘文件格式（`.lyflow.json`）。 |
 | [`execution-event.schema.json`](execution-event.schema.json) | C++ → 前端 | 执行状态流。 |
 | [`snippet.schema.json`](snippet.schema.json) | 包 / 用户 → 编辑器 | 片段文件 `*.lyflow-snippet.json`（M8b）。包随附的编进包、经 manifest 的 `snippets` 段下发；`pnpm check` 对着它校验 `packs/*/snippets/` 下的每一份。 |
+| [`recipe.schema.json`](recipe.schema.json) | 编辑器 / CLI ↔ 磁盘 | 参数配方 `<名字>.lyflow-recipe.json`（param-recipe P3）：顶层图参数的稀疏覆盖。格式、目录约定、specDigest 与四类失配见 [docs/recipe.md](../docs/recipe.md)。 |
+| [`recipe-index.schema.json`](recipe-index.schema.json) | 同上 | 配方目录里可选的 `index.json`：`{ default?, order? }`。 |
 
 示例见 [`examples/`](examples/)，三个示例都已通过对应 schema 校验，
 `pnpm check` 每次都会重跑一遍。
@@ -45,3 +47,9 @@ manifest 那一条在 `pnpm check` 里校验的是 **C++ 现场导出的真实�
 python scripts/validate_schema.py schema/examples/graph-params.invalid.lyflow.json \
                                   schema/graph-doc.schema.json --expect-fail
 ```
+
+**配方的共享夹具**（`fixtures/recipes/`，param-recipe P3）：`graph.lyflow.json` 是一张带各种类型图参数的图，
+`graph.recipes/` 里每个配方文件触发一类失配（`ok` 没有、`extra` ①、`type` ②、`range` ③、`spec` / `nograph` ④），
+`expected.json` 记着这张图的 specDigest 规范形与摘要，以及每个文件期望的失配条目（类别、参数、建议）。
+编辑器的单测（`packages/editor/test/recipes.test.mjs`）逐条对着它断言，P4 的 CLI（Rust）用同一份；`pnpm check` 另外按
+`schemaValid` 把每个配方文件对着 `recipe.schema.json` 过一遍（`nograph` 缺 `graph` 字段，按预期不通过，编辑器照样读）。

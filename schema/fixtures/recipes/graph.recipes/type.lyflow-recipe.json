@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "name": "type",
+  "graph": {
+    "id": "01JRECIPEFIXTURE0000000000",
+    "specDigest": "sha256:4dfbd22b3f0487a10474d3c21500824b0706314a057738d803d8c09a852059ad"
+  },
+  "values": {
+    "pointCount": "30000",
+    "withIntensity": 1,
+    "leafSize": 0.05,
+    "cutField": 2,
+    "cutMax": "7",
+    "gain": "abc",
+    "tag": 42,
+    "tint": "#ff8000",
+    "response": "linear",
+    "pose": [
+      1,
+      2,
+      3
+    ]
+  },
+  "note": "② 类型不符：能转换的给转换建议（转换后再夹进限位），不能的删",
+  "updatedAt": "2026-09-24T08:00:00.000Z"
+}

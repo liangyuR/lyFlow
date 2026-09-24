@@ -21,6 +21,9 @@
   --lyflow-accent: #4a9eff;
   --lyflow-accent-dim: #2d6099;
   --lyflow-warn: #f0a020;
+  /* 配方（param-recipe P3）：橙 = 被当前配方覆盖，红 = 失配 / 越界。与节点的 cancelled / error 同一对颜色 */
+  --lyflow-recipe: #e0a030;
+  --lyflow-danger: #e5484d;
 
   --lyflow-radius: 6px;
   --lyflow-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;

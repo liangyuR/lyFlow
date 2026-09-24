@@ -21,18 +21,21 @@ import {
   type RowDiag,
 } from "../lib/paramPanel";
 import { valueEquals } from "../lib/params";
+import { formatValue } from "../lib/recipes";
 import { roiBoundsVersion, roiThumb, subscribeRoiBounds } from "../lib/roiThumbs";
 import { augmentOperators } from "../lib/subgraph";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
-import { useGraphParamOverrides } from "../store/recipe";
+import { useGraphParamOverrides, useRecipeStore } from "../store/recipe";
 import { useUiStore, type ParamPanelTab } from "../store/ui";
 import { useValidationStore } from "../store/validation";
 import type { ParamSpec } from "../types/graph";
-import type { ParamType } from "../types/manifest";
+import type { Param, ParamType } from "../types/manifest";
 
 import { ParamControl } from "./ParamControls";
+import { RecipeManager } from "./RecipeManager";
+import { RecipeMatrix } from "./RecipeMatrix";
 import { VirtualList, type VirtualListHandle } from "./VirtualList";
 
 import "../styles.panel.css";
@@ -102,18 +105,7 @@ export function ParamPanel() {
           ✕
         </button>
       </header>
-      {panel.tab === "nodes" ? (
-        <NodesTab />
-      ) : (
-        <div className="ppanel__placeholder" data-testid={`pp-placeholder-${panel.tab}`}>
-          <p>{panel.tab === "matrix" ? "配方矩阵" : "配方管理"}在 P3 提供。</p>
-          <p className="insp__hint">
-            {panel.tab === "matrix"
-              ? "行是图参数、列是「基础」与各个配方，单元格直接编辑、只看差异、多选复制。"
-              : "新建、复制、重命名、删除、设为默认、导入导出配方文件，以及失配报告。"}
-          </p>
-        </div>
-      )}
+      {panel.tab === "nodes" ? <NodesTab /> : panel.tab === "matrix" ? <RecipeMatrix /> : <RecipeManager />}
     </section>
   );
 }
@@ -523,9 +515,80 @@ function Diags({ diags }: { diags: readonly RowDiag[] }) {
 
 // ------------------------------------------------------------ 一行节点参数
 
+/** 被当前配方覆盖的行（P3.4）：左侧橙色竖条、「配方 · 基础 X」标签、行尾「恢复基础」（删掉这条覆盖）
+ *  与「写回基础」（把值写进 default、删掉覆盖）。图参数行与由它提供的节点参数行都这么画。 */
+function useRecipeOverride(graphParam: string | undefined): string | null {
+  const current = useRecipeStore((s) => s.current);
+  const overrides = useGraphParamOverrides();
+  if (!graphParam || current === null) return null;
+  return Object.prototype.hasOwnProperty.call(overrides, graphParam) ? current : null;
+}
+
+function RecipeTag({ testId, base, spec }: { testId: string; base: unknown; spec: Param | null }) {
+  return (
+    <span
+      className="prow__tag prow__tag--recipe"
+      data-testid={testId}
+      title="这个值来自当前配方；基础（default）是后面那个"
+    >
+      配方 · 基础 {formatValue(base, spec ?? undefined)}
+    </span>
+  );
+}
+
+function RecipeActions({ recipe, graphParam, testKey }: { recipe: string; graphParam: string; testKey: string }) {
+  const g = useGraphStore.getState;
+  return (
+    <span className="prow__recipe-actions">
+      <button
+        type="button"
+        className="prow__textbtn"
+        data-testid={`pp-recipe-reset-${testKey}`}
+        title={`删掉配方「${recipe}」里的这条覆盖，回到基础值`}
+        onClick={() => g().clearRecipeValue(recipe, graphParam)}
+      >
+        恢复基础
+      </button>
+      <button
+        type="button"
+        className="prow__textbtn"
+        data-testid={`pp-recipe-tobase-${testKey}`}
+        title={`把这个值写进基础（default，影响所有沿用基础的配方），再删掉配方「${recipe}」里的覆盖`}
+        onClick={() => g().writeRecipeValueToBase(recipe, graphParam)}
+      >
+        写回基础
+      </button>
+    </span>
+  );
+}
+
+/** K6 ②：选着配方时改了一个没纳入配方的参数 —— 改的是图，行上提示，并给「改为只在本配方生效」。 */
+function BaseEditHint({ row }: { row: NodeParamRow }) {
+  const current = useRecipeStore((s) => s.current);
+  const edit = useRecipeStore((s) => s.baseEdits[row.key]);
+  if (current === null || !edit || edit.recipe !== current || row.binding) return null;
+  if (!valueEquals(row.value, edit.after)) return null;
+  return (
+    <div className="prow__basehint" data-testid={`pp-basehint-${row.key}`}>
+      <span>此改动影响所有配方</span>
+      <button
+        type="button"
+        className="prow__textbtn"
+        data-testid={`pp-only-recipe-${row.key}`}
+        title={`纳入配方：这个参数变成图参数、默认值是改之前的 ${formatValue(edit.before, row.param)}，新值只写进配方「${current}」`}
+        onClick={() => {
+          const name = useGraphStore.getState().moveBaseEditToRecipe(row.key);
+          if (name) useUiStore.getState().showToast(`已改为只在配方 ${current} 生效（图参数 ${name}）`);
+        }}
+      >
+        改为只在本配方生效
+      </button>
+    </div>
+  );
+}
+
 /** 行的结构（P2.4）：左 label（改过的有蓝点），中控件，右图标（恢复、纳入配方书签）。
- *  最左一条 stripe 与 label 后的 tags 是给 P3 留的位置：被当前配方覆盖的行挂橙色竖条与
- *  「配方 · 基础 X」标签。 */
+ *  最左一条 stripe 与 label 后的 tags：被当前配方覆盖的行挂橙色竖条与「配方 · 基础 X」标签（P3.4）。 */
 const PanelParamRow = memo(function PanelParamRow({
   row,
   focused,
@@ -538,6 +601,8 @@ const PanelParamRow = memo(function PanelParamRow({
   const { param, node, path, binding } = row;
   const disabled = !row.enabled || row.readOnly !== null;
   const error = row.diags.find((d) => d.severity === "error");
+  const recipe = useRecipeOverride(binding?.graphParam);
+  const base = useGraphStore((s) => (binding ? s.doc.params?.[binding.graphParam]?.default : undefined));
   const onChange = useCallback(
     (v: unknown) => {
       if (!valueEquals(v, row.value)) useGraphStore.getState().setParam(node.id, param.name, v, path);
@@ -546,8 +611,9 @@ const PanelParamRow = memo(function PanelParamRow({
   );
   return (
     <div
-      className={`prow${disabled ? " is-disabled" : ""}${error ? " has-error" : ""}${focused ? " is-focused" : ""}`}
+      className={`prow${disabled ? " is-disabled" : ""}${error ? " has-error" : ""}${focused ? " is-focused" : ""}${recipe ? " is-recipe-override" : ""}`}
       data-testid={`prow-${row.key}`}
+      data-recipe-override={recipe ? "1" : undefined}
       data-node={row.fullNodeId}
       data-param={param.name}
       data-type={param.type}
@@ -576,6 +642,7 @@ const PanelParamRow = memo(function PanelParamRow({
               ↑{row.promoted}
             </span>
           )}
+          {recipe && <RecipeTag testId={`pp-recipe-tag-${row.key}`} base={base} spec={param} />}
         </span>
       </div>
       <div className="prow__control">
@@ -591,8 +658,10 @@ const PanelParamRow = memo(function PanelParamRow({
           onChange={onChange}
         />
         <Diags diags={row.diags} />
+        <BaseEditHint row={row} />
       </div>
       <div className="prow__icons">
+        {recipe && binding && <RecipeActions recipe={recipe} graphParam={binding.graphParam} testKey={row.key} />}
         {row.modified && row.readOnly === null && row.enabled && (
           <button
             type="button"
@@ -728,11 +797,13 @@ const GraphParamPanelRow = memo(function GraphParamPanelRow({
   const { name, gp, spec } = row;
   const error = row.diags.find((d) => d.severity === "error");
   const g = useGraphStore.getState;
+  const recipe = useRecipeOverride(name);
   return (
     <div
-      className={`prow prow--gp${error ? " has-error" : ""}${focused ? " is-focused" : ""}`}
+      className={`prow prow--gp${error ? " has-error" : ""}${focused ? " is-focused" : ""}${recipe ? " is-recipe-override" : ""}`}
       data-testid={`pp-gp-${name}`}
       data-graph-param={name}
+      data-recipe-override={recipe ? "1" : undefined}
       data-type={row.type ?? undefined}
       data-modified={row.modified ? "1" : undefined}
       data-diag={row.diags.length > 0 ? row.diags.length : undefined}
@@ -743,6 +814,7 @@ const GraphParamPanelRow = memo(function GraphParamPanelRow({
         <span className="prow__name" title={gp.doc ?? name}>
           {gp.label || name}
         </span>
+        {recipe && <RecipeTag testId={`pp-recipe-tag-gp-${name}`} base={gp.default} spec={spec} />}
         <code className="prow__gpname">{name}</code>
       </div>
       <div className="prow__control">
@@ -779,6 +851,7 @@ const GraphParamPanelRow = memo(function GraphParamPanelRow({
         {specOpen && <SpecEditor name={name} spec={gp} />}
       </div>
       <div className="prow__icons">
+        {recipe && <RecipeActions recipe={recipe} graphParam={name} testKey={`gp-${name}`} />}
         <button
           type="button"
           className={`prow__icon${specOpen ? " is-on" : ""}`}

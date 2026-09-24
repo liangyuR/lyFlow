@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "name": "range",
+  "graph": {
+    "id": "01JRECIPEFIXTURE0000000000",
+    "specDigest": "sha256:4dfbd22b3f0487a10474d3c21500824b0706314a057738d803d8c09a852059ad"
+  },
+  "values": {
+    "pointCount": 0,
+    "leafSize": [
+      0.02,
+      20,
+      0.00001
+    ],
+    "cutField": "w",
+    "cutMax": 9,
+    "tint": [
+      1.2,
+      0.5,
+      -0.1
+    ],
+    "response": {
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          0.5,
+          1.5
+        ],
+        [
+          1,
+          1
+        ]
+      ],
+      "interp": "smooth"
+    }
+  },
+  "note": "③ 越界 / 非法：数夹到限位（向量逐分量、曲线逐个 y），不在 options 里的改为默认",
+  "updatedAt": "2026-09-24T08:00:00.000Z"
+}

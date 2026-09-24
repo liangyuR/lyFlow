@@ -6,8 +6,11 @@ import { useCacheStore } from "../store/cache";
 import { summarize, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
+import { useRecipesDirty } from "../store/recipe";
 import { useUiStore } from "../store/ui";
 import { transport, type RecentEntry } from "../transport";
+
+import { RecipeMenu } from "./RecipeMenu";
 
 export interface ToolbarActions {
   onNew: () => void;
@@ -276,7 +279,10 @@ export function Toolbar({
   const futureLen = useGraphStore((s) => s.future.length);
   const nextUndo = useGraphStore((s) => s.past[s.past.length - 1]?.label);
   const nextRedo = useGraphStore((s) => s.future[s.future.length - 1]?.label);
-  const dirty = useGraphStore((s) => s.dirty);
+  // 脏标记合并显示（K6 ③）：图或任何一个配方有没存的改动都算，Ctrl+S 一次存全
+  const graphDirty = useGraphStore((s) => s.dirty);
+  const recipesDirty = useRecipesDirty();
+  const dirty = graphDirty || recipesDirty;
   const filePath = useGraphStore((s) => s.filePath);
   const name = useGraphStore((s) => s.doc.name);
   const setName = useGraphStore((s) => s.setName);
@@ -348,12 +354,21 @@ export function Toolbar({
           onChange={(e) => setName(e.target.value)}
         />
         {/* 脏标记：没有它用户不知道自己有没有存过（交互清单 P0 #13） */}
-        {dirty && <span className="toolbar__dirty" title="有未保存的改动">●</span>}
+        {dirty && (
+          <span
+            className="toolbar__dirty"
+            data-testid="toolbar-dirty"
+            title={graphDirty && recipesDirty ? "图与配方都有未保存的改动" : recipesDirty ? "配方有未保存的改动" : "有未保存的改动"}
+          >
+            ●
+          </span>
+        )}
         {filePath && (
           <span className="toolbar__path" title={filePath}>
             {baseName(filePath)}
           </span>
         )}
+        <RecipeMenu />
       </div>
     </header>
   );

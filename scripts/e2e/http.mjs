@@ -9,7 +9,7 @@ import path from "node:path";
 
 import { Cdp, sleep, waitForTarget } from "./cdp.mjs";
 import { ROOT, Report } from "./harness.mjs";
-import { buildGraph, lit, newDoc, runAndWait, selectAndReadViewer } from "./page.mjs";
+import { buildGraph, lit, newDoc, pressCtrl, runAndWait, selectAndReadViewer } from "./page.mjs";
 
 const API_PORT = Number(process.env.LYFLOW_HTTP_PORT ?? 8788);
 const HOST_PORT = Number(process.env.LYFLOW_HOST_PORT ?? 5174);
@@ -392,6 +392,82 @@ async function suiteGraphParamsOverHttp(cdp, report) {
   );
 }
 
+/** 配方文件的五个端点（param-recipe P3.2）与路径约束，再走一遍界面上的 Ctrl+S：配方经 HTTP 写进工作区。 */
+async function suiteRecipesOverHttp(cdp, report, ws) {
+  report.section("HttpTransport：配方文件（param-recipe P3.2）—— 列、写、读、改名、删只在工作区里；Ctrl+S 经 HTTP 落盘");
+
+  const api = await cdp.eval(`
+    const t = window.__lyflow.transport;
+    const d = 'rc/车门.recipes';
+    const names = async () => (await t.listRecipeDir(d)).files.map((f) => f.name);
+    const out = {};
+    out.empty = await t.listRecipeDir(d);
+    await t.writeRecipeFile(d + '/A.lyflow-recipe.json', '{"schemaVersion":1,"name":"A"}');
+    out.written = await names();
+    out.read = await t.readRecipeFile(d + '/A.lyflow-recipe.json');
+    await t.renameRecipeFile(d + '/A.lyflow-recipe.json', d + '/B.lyflow-recipe.json');
+    out.renamed = await names();
+    await t.deleteRecipeFile(d + '/B.lyflow-recipe.json');
+    out.deleted = await names();
+    const refused = async (fn) => { try { await fn(); return 'no-error'; } catch (e) { return 'refused'; } };
+    out.guards = {
+      outside: await refused(() => t.readRecipeFile('../外面.lyflow-recipe.json')),
+      absolute: await refused(() => t.writeRecipeFile('C:/Windows/Temp/x.lyflow-recipe.json', '{}')),
+      notRecipe: await refused(() => t.writeRecipeFile(d + '/evil.json', '{}')),
+      indexOutsideDir: await refused(() => t.writeRecipeFile('rc/index.json', '{}')),
+      notJson: await refused(() => t.writeRecipeFile(d + '/x.lyflow-recipe.json', 'nope')),
+      listNotRecipeDir: await refused(() => t.listRecipeDir('rc')),
+      deleteOutsideDir: await refused(() => t.deleteRecipeFile('rc/x.lyflow-recipe.json')),
+    };
+    return out;
+  `);
+  report.eq("目录还不存在：exists=false、空列表", api.empty, { exists: false, files: [] });
+  report.eq("写、列、读、改名、删", [api.written, JSON.parse(api.read).name, api.renamed, api.deleted],
+    [["A.lyflow-recipe.json"], "A", ["B.lyflow-recipe.json"], []]);
+  report.eq("工作区外、不是配方文件、目录外的 index.json、坏 JSON、不是配方目录：一律拒绝", api.guards, {
+    outside: "refused", absolute: "refused", notRecipe: "refused", indexOutsideDir: "refused",
+    notJson: "refused", listNotRecipeDir: "refused", deleteOutsideDir: "refused",
+  });
+  report.ok("被拒的路径没在工作区外留下文件", !fs.existsSync(path.join(ws, "..", "外面.lyflow-recipe.json")));
+
+  // 界面：有路径的图 → 新建配方、写值 → Ctrl+S → 工作区里出现配方文件与 index.json
+  await newDoc(cdp);
+  const ids = await buildGraph(cdp, [{ key: "gen", op: "gen.synthetic", params: { pointCount: 5000 } }], []);
+  const rel = "rc/车门.lyflow.json";
+  await cdp.eval(`
+    const b = window.__lyflow;
+    const g = () => b.stores.graph.getState();
+    g().promoteToGraphParam(${lit(ids.gen)}, 'pointCount');
+    await b.transport.saveGraph(${lit(rel)}, g().doc);
+    g().markSaved(${lit(rel)});
+    if (!g().createRecipe('车型A·左前门')) throw new Error(g().lastRejection ?? '建配方失败');
+    g().setRecipeValue('车型A·左前门', 'pointCount', 8000);
+    return true;
+  `);
+  await cdp.eval(`if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); return true;`);
+  await pressCtrl(cdp, "S");
+  await cdp.waitFor(`window.__lyflow.stores.recipe.getState().set === window.__lyflow.stores.recipe.getState().saved`, {
+    what: "Ctrl+S 把配方存完",
+    timeoutMs: 20_000,
+  });
+  const dir = path.join(ws, "rc", "车门.recipes");
+  const file = path.join(dir, "车型A·左前门.lyflow-recipe.json");
+  const saved = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
+  report.eq("Ctrl+S：配方文件经 HTTP 写进工作区（只存与基础不同的值）", saved?.values ?? null, { pointCount: 8000 });
+  report.ok("Ctrl+S：index.json 也写了", fs.existsSync(path.join(dir, "index.json")));
+  // 重开：配方目录经 HTTP 读回
+  await cdp.eval(`
+    const b = window.__lyflow;
+    b.stores.graph.getState().newDoc();
+    const loaded = await b.transport.loadGraph(${lit(rel)});
+    b.stores.graph.getState().loadDoc(loaded.doc, ${lit(rel)});
+    return true;
+  `);
+  await cdp.waitFor(`window.__lyflow.stores.recipe.getState().status === 'ready'`, { what: "配方目录读完" });
+  const back = await cdp.eval(`return window.__lyflow.stores.recipe.getState().set.recipes.map((r) => [r.name, r.values]);`);
+  report.eq("重开：配方经 HTTP 读回", back, [["车型A·左前门", { pointCount: 8000 }]]);
+}
+
 // ------------------------------------------------------------------- main
 
 async function main() {
@@ -493,6 +569,7 @@ async function main() {
     await suiteAnimationsProp(cdp, report);
     await suiteNodeRunOverHttp(cdp, report);
     await suiteGraphParamsOverHttp(cdp, report);
+    await suiteRecipesOverHttp(cdp, report, ws);
 
     report.section("控制台");
     report.ok(

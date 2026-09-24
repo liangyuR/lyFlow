@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/liangyuR/lyFlow/schema/recipe-index.schema.json",
+  "title": "LyFlowRecipeIndex",
+  "description": "配方目录（<图名>.recipes/）下可选的 index.json（param-recipe P3.1）：default = 打开图时选中的配方；order = 下拉框、矩阵、管理页里的顺序，没列到的配方按名字接在后面。",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "default": { "type": "string", "minLength": 1 },
+    "order": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+  }
+}

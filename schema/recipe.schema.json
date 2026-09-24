@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/liangyuR/lyFlow/schema/recipe.schema.json",
+  "title": "LyFlowRecipe",
+  "description": "参数配方文件 <名字>.lyflow-recipe.json（param-recipe P3.1）：顶层图参数的稀疏覆盖，只有一层。没写的图参数用它的 default（「基础」）。文件放在图文件同目录的 <图文件名去扩展名>.recipes/ 里；格式、目录约定与四类失配的规则见 docs/recipe.md。values 里的值不在这里约束：它们按图里对应图参数的规格检查（失配 ② ③），图里没有的名字是失配 ①。",
+  "type": "object",
+  "required": ["schemaVersion", "name", "graph", "values", "updatedAt"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[^\\\\/:*?\"<>|\\u0000-\\u001f]+$",
+      "description": "配方名，也就是文件名去掉 .lyflow-recipe.json。两者不一致时以文件名为准。"
+    },
+    "graph": {
+      "type": "object",
+      "required": ["id", "specDigest"],
+      "additionalProperties": false,
+      "description": "写这个配方时对着的那张图：失配 ④（规格变了）拿它与当前图比，只提示、不阻止运行。",
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "description": "GraphDoc 的 id。" },
+        "specDigest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "图参数规格（名字、类型、min、max、options）的规范化摘要，算法见 docs/recipe.md「specDigest」。"
+        }
+      }
+    },
+    "values": {
+      "type": "object",
+      "description": "{ 图参数名: 值 }，只存与基础不同的那些。",
+      "propertyNames": { "minLength": 1, "pattern": "^[^.=]+$" }
+    },
+    "note": { "type": "string" },
+    "updatedAt": { "type": "string", "format": "date-time", "description": "最后一次改这个配方的时刻（ISO 8601）。" }
+  }
+}

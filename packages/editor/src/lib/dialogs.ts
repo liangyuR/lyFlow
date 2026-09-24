@@ -23,6 +23,9 @@ export interface EditorDialogs {
   confirmDiscard(dirty: boolean): Promise<boolean>;
   /** 备份比正文新时问一句。返回 true 表示用户要恢复。 */
   confirmRestore(path: string, message: string): Promise<boolean>;
+  /** 可选：配方的导入（open）与导出（save）选文件（param-recipe P3.6）。不给就退回 pickPath，
+   *  再没有就在编辑器里让人输一个路径。suggested 是导出时建议的文件名。 */
+  pickRecipePath?: ((mode: "open" | "save", suggested?: string) => Promise<string | null>) | undefined;
 }
 
 export const browserDialogs: EditorDialogs = {

@@ -16,6 +16,7 @@ import type {
   LoadedGraph,
   ManifestUpdated,
   RecentEntry,
+  RecipeDirListing,
   RunOptions,
   Transport,
   TransportKind,
@@ -128,6 +129,24 @@ export class StaticTransport implements Transport {
   }
   async discardBackup(): Promise<void> {
     /* 同上 */
+  }
+  // 配方文件（param-recipe P3.2）：静态模式只读。没有盘就没有目录可列；读按 URL 取（宿主把配方文件放在静态资源里时能看）
+  async listRecipeDir(): Promise<RecipeDirListing> {
+    return { exists: false, files: [] };
+  }
+  async readRecipeFile(path: string): Promise<string> {
+    const res = await fetch(path);
+    if (!res.ok) throw new Error(`读不到 ${path} (${res.status})`);
+    return res.text();
+  }
+  async writeRecipeFile(): Promise<void> {
+    throw new Error("静态模式只读：配方文件不能写，请用 Tauri 壳或 HttpTransport");
+  }
+  async deleteRecipeFile(): Promise<void> {
+    throw new Error("静态模式只读：配方文件不能删，请用 Tauri 壳或 HttpTransport");
+  }
+  async renameRecipeFile(): Promise<void> {
+    throw new Error("静态模式只读：配方文件不能改名，请用 Tauri 壳或 HttpTransport");
   }
   async writeFileBytes(): Promise<void> {
     throw new Error("静态模式不能写盘，请用 Tauri 壳或 HttpTransport");

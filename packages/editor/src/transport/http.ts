@@ -17,6 +17,7 @@ import type {
   LoadedGraph,
   ManifestUpdated,
   RecentEntry,
+  RecipeDirListing,
   RunOptions,
   Transport,
   TransportKind,
@@ -335,6 +336,23 @@ export class HttpTransport implements Transport {
       headers: { "Content-Type": "application/octet-stream" },
       body: contents as unknown as BodyInit,
     });
+  }
+  // 配方文件（param-recipe P3.2）：path / dir 同样是相对工作区根的路径，逃出工作区一律 403
+  listRecipeDir(dir: string): Promise<RecipeDirListing> {
+    return this.#get<RecipeDirListing>(`/lyflow/files/recipes?dir=${encodeURIComponent(dir)}`);
+  }
+  async readRecipeFile(path: string): Promise<string> {
+    const out = await this.#get<{ text: string }>(`/lyflow/files/recipe?path=${encodeURIComponent(path)}`);
+    return out.text;
+  }
+  async writeRecipeFile(path: string, text: string): Promise<void> {
+    await this.#send<void>("PUT", `/lyflow/files/recipe?path=${encodeURIComponent(path)}`, { text });
+  }
+  async deleteRecipeFile(path: string): Promise<void> {
+    await this.#send<void>("DELETE", `/lyflow/files/recipe?path=${encodeURIComponent(path)}`);
+  }
+  async renameRecipeFile(from: string, to: string): Promise<void> {
+    await this.#send<void>("POST", "/lyflow/files/recipe/rename", { from, to });
   }
   getRecentFiles(): Promise<RecentEntry[]> {
     return this.#get<RecentEntry[]>("/lyflow/recent");

@@ -697,6 +697,173 @@ pub fn discard_backup(path: String) -> Result<(), String> {
     }
 }
 
+// ---- 配方文件（param-recipe P3.2）
+//
+// 文本进、文本出：配方的格式、失配判定都在编辑器（P4 的 CLI 再在 Rust 里实现一遍），桥接层只管读写
+// 与路径约束 —— 前端能调到的只有这几种文件，任意路径读写口不开：
+// - 配方目录（名字以 `.recipes` 结尾的目录，图文件旁边的 `<图名>.recipes/`）里的
+//   `*.lyflow-recipe.json`、`index.json`、`autosave~.json`：读、写、删；`*.lyflow-recipe.json` 之间改名；
+// - 任意位置的 `*.lyflow-recipe.json`：读（导入）、写（导出，路径是用户在对话框里选的）。
+// 路径一律要绝对路径、不许有 `..`。
+
+const RECIPE_EXT: &str = ".lyflow-recipe.json";
+const RECIPE_INDEX: &str = "index.json";
+const RECIPE_AUTOSAVE: &str = "autosave~.json";
+const RECIPE_DIR_SUFFIX: &str = ".recipes";
+
+#[derive(Serialize, Debug)]
+pub struct RecipeDirEntry {
+    pub name: String,
+    pub modified: Option<u64>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct RecipeDirListing {
+    pub exists: bool,
+    pub files: Vec<RecipeDirEntry>,
+}
+
+fn ends_with_ci(s: &str, suffix: &str) -> bool {
+    s.len() > suffix.len() && s.to_lowercase().ends_with(suffix)
+}
+
+fn is_recipe_file_name(name: &str) -> bool {
+    ends_with_ci(name, RECIPE_EXT)
+}
+
+/// 目录里除了配方文件之外认的两个：索引与自动备份。
+fn is_recipe_aux_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case(RECIPE_INDEX) || name.eq_ignore_ascii_case(RECIPE_AUTOSAVE)
+}
+
+fn is_recipe_dir(dir: &Path) -> bool {
+    dir.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| ends_with_ci(n, RECIPE_DIR_SUFFIX))
+}
+
+fn plain_absolute(raw: &str) -> Result<PathBuf, String> {
+    let p = PathBuf::from(raw);
+    if !p.is_absolute() {
+        return Err(format!("配方文件要给绝对路径：{raw}"));
+    }
+    if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err(format!("路径里不能有 ..：{raw}"));
+    }
+    Ok(p)
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum RecipeAccess {
+    /// 读、写：配方目录里的三种文件，或任意位置的配方文件（导入 / 导出）。
+    ReadWrite,
+    /// 删、改名：只在配方目录里。
+    InDir,
+}
+
+fn check_recipe_path(raw: &str, access: RecipeAccess) -> Result<PathBuf, String> {
+    let p = plain_absolute(raw)?;
+    let name = p
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("不是文件路径：{raw}"))?;
+    let in_dir = p.parent().is_some_and(is_recipe_dir);
+    let ok = match access {
+        RecipeAccess::ReadWrite => is_recipe_file_name(name) || (in_dir && is_recipe_aux_name(name)),
+        RecipeAccess::InDir => in_dir && (is_recipe_file_name(name) || is_recipe_aux_name(name)),
+    };
+    if ok {
+        Ok(p)
+    } else {
+        Err(format!(
+            "这里只能读写配方文件（*{RECIPE_EXT}，或 *{RECIPE_DIR_SUFFIX}/ 里的 {RECIPE_INDEX}、{RECIPE_AUTOSAVE}）：{raw}"
+        ))
+    }
+}
+
+/// 列配方目录。目录还不存在不是错误（图旁边从没建过配方）。
+#[tauri::command]
+pub fn list_recipe_dir(dir: String) -> Result<RecipeDirListing, String> {
+    let p = plain_absolute(&dir)?;
+    if !is_recipe_dir(&p) {
+        return Err(format!("不是配方目录（名字要以 {RECIPE_DIR_SUFFIX} 结尾）：{dir}"));
+    }
+    if !p.is_dir() {
+        return Ok(RecipeDirListing { exists: false, files: Vec::new() });
+    }
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(&p).map_err(|e| format!("读目录 {dir} 失败: {e}"))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else { continue };
+        if !(is_recipe_file_name(&name) || is_recipe_aux_name(&name)) {
+            continue;
+        }
+        if !entry.file_type().is_ok_and(|t| t.is_file()) {
+            continue;
+        }
+        files.push(RecipeDirEntry { modified: modified_ms(&entry.path()), name });
+    }
+    files.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(RecipeDirListing { exists: true, files })
+}
+
+#[tauri::command]
+pub fn read_recipe_file(path: String) -> Result<String, String> {
+    let p = check_recipe_path(&path, RecipeAccess::ReadWrite)?;
+    std::fs::read_to_string(&p).map_err(|e| format!("读取 {path} 失败: {e}"))
+}
+
+/// 写配方文件。先确认是一个 JSON 对象（格式由编辑器定，这里只挡住明显写坏的），
+/// 再写到同目录的临时文件、改名覆盖 —— 写到一半断电不会留下半截配方。
+#[tauri::command]
+pub fn write_recipe_file(path: String, text: String) -> Result<(), String> {
+    let p = check_recipe_path(&path, RecipeAccess::ReadWrite)?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("{path} 的内容不是合法 JSON: {e}"))?;
+    if !value.is_object() {
+        return Err(format!("{path} 的内容应当是一个 JSON 对象"));
+    }
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
+    }
+    let tmp = PathBuf::from(format!("{}.tmp~", p.to_string_lossy()));
+    std::fs::write(&tmp, text).map_err(|e| format!("写入 {} 失败: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &p).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("写入 {path} 失败: {e}")
+    })
+}
+
+#[tauri::command]
+pub fn delete_recipe_file(path: String) -> Result<(), String> {
+    let p = check_recipe_path(&path, RecipeAccess::InDir)?;
+    match std::fs::remove_file(&p) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("删除 {path} 失败: {e}")),
+    }
+}
+
+/// 同一个配方目录里改名。目标已经存在时拒绝（只差大小写的改名除外：Windows 上那是同一个文件）。
+#[tauri::command]
+pub fn rename_recipe_file(from: String, to: String) -> Result<(), String> {
+    let a = check_recipe_path(&from, RecipeAccess::InDir)?;
+    let b = check_recipe_path(&to, RecipeAccess::InDir)?;
+    let names_ok = a.file_name().and_then(|n| n.to_str()).is_some_and(is_recipe_file_name)
+        && b.file_name().and_then(|n| n.to_str()).is_some_and(is_recipe_file_name);
+    if !names_ok {
+        return Err("只有配方文件（*.lyflow-recipe.json）能改名".into());
+    }
+    if a.parent() != b.parent() {
+        return Err(format!("改名只能在同一个配方目录里：{from} → {to}"));
+    }
+    let case_only = from.to_lowercase() == to.to_lowercase();
+    if b.exists() && !case_only {
+        return Err(format!("{to} 已经存在"));
+    }
+    std::fs::rename(&a, &b).map_err(|e| format!("改名 {from} → {to} 失败: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -971,5 +1138,71 @@ mod tests {
         let err = save_graph(path.to_string_lossy().into_owned(), doc).unwrap_err();
         assert!(err.contains("目标节点不存在"), "{err}");
         assert!(!path.exists(), "校验失败却还是写盘了");
+    }
+
+    /// 配方文件的五个命令（param-recipe P3.2）：在中文路径的配方目录里走一遍列、写、读、改名、删。
+    #[test]
+    fn recipe_files_list_write_read_rename_delete() {
+        let root = std::env::temp_dir().join(format!("lyflow 配方 {}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("车门.recipes");
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+
+        // 目录还不存在：不是错误
+        let listing = list_recipe_dir(s(&dir)).unwrap();
+        assert!(!listing.exists && listing.files.is_empty());
+
+        let a = dir.join("车型A·左前门.lyflow-recipe.json");
+        write_recipe_file(s(&a), "{\"schemaVersion\":1,\"name\":\"车型A·左前门\",\"values\":{}}\n".into())
+            .expect("写配方失败");
+        write_recipe_file(s(&dir.join("index.json")), "{\"order\":[\"车型A·左前门\"]}\n".into()).unwrap();
+        std::fs::write(dir.join("别的文件.txt"), "x").unwrap();
+        let names: Vec<String> = list_recipe_dir(s(&dir)).unwrap().files.into_iter().map(|f| f.name).collect();
+        assert_eq!(names, vec!["index.json".to_string(), "车型A·左前门.lyflow-recipe.json".to_string()]);
+        assert!(read_recipe_file(s(&a)).unwrap().contains("车型A·左前门"));
+        // 没留下临时文件
+        assert!(!dir.join("车型A·左前门.lyflow-recipe.json.tmp~").exists());
+
+        let b = dir.join("车型B.lyflow-recipe.json");
+        rename_recipe_file(s(&a), s(&b)).expect("改名失败");
+        assert!(!a.exists() && b.exists());
+        // 目标已存在：拒绝
+        write_recipe_file(s(&a), "{}".into()).unwrap();
+        assert!(rename_recipe_file(s(&a), s(&b)).unwrap_err().contains("已经存在"));
+        // 只差大小写的改名放行
+        let upper = dir.join("车型b.lyflow-recipe.json");
+        rename_recipe_file(s(&b), s(&upper)).expect("大小写改名失败");
+
+        delete_recipe_file(s(&a)).unwrap();
+        delete_recipe_file(s(&a)).expect("删一个不存在的文件不算错");
+        assert!(!a.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn recipe_paths_outside_the_rules_are_refused() {
+        let root = std::env::temp_dir().join(format!("lyflow-recipe-guard-{}", std::process::id()));
+        let dir = root.join("g.recipes");
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+        // 不是配方文件
+        assert!(write_recipe_file(s(&dir.join("evil.json")), "{}".into()).is_err());
+        assert!(read_recipe_file(s(&root.join("secret.txt"))).is_err());
+        // index.json 只认配方目录里的
+        assert!(write_recipe_file(s(&root.join("index.json")), "{}".into()).is_err());
+        // 相对路径与 ..
+        assert!(read_recipe_file("a.lyflow-recipe.json".into()).is_err());
+        assert!(write_recipe_file(s(&dir.join("..").join("x.lyflow-recipe.json")), "{}".into()).is_err());
+        // 删与改名只在配方目录里
+        assert!(delete_recipe_file(s(&root.join("x.lyflow-recipe.json"))).is_err());
+        assert!(rename_recipe_file(s(&dir.join("a.lyflow-recipe.json")), s(&root.join("b.lyflow-recipe.json"))).is_err());
+        assert!(list_recipe_dir(s(&root)).is_err());
+        // 内容不是 JSON 对象
+        assert!(write_recipe_file(s(&dir.join("a.lyflow-recipe.json")), "[1,2]".into()).is_err());
+        assert!(write_recipe_file(s(&dir.join("a.lyflow-recipe.json")), "not json".into()).is_err());
+        // 导出：任意位置的配方文件能写
+        let out = root.join("导出").join("x.lyflow-recipe.json");
+        write_recipe_file(s(&out), "{}".into()).expect("导出失败");
+        assert!(out.exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

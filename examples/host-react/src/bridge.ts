@@ -11,6 +11,7 @@ import {
   useGraphStore,
   useManifestStore,
   usePeekStore,
+  useRecipeStore,
   useUiStore,
   type RunRequest,
   type StateTransition,
@@ -27,6 +28,8 @@ interface HostBridge {
     execution: typeof useExecutionStore;
     cache: typeof useCacheStore;
     peek: typeof usePeekStore;
+    /** 配方（param-recipe P3）：e2e:http 验配方文件经 HTTP 落盘。 */
+    recipe: typeof useRecipeStore;
   };
   plan(): Promise<void>;
   run(request?: RunRequest): Promise<void>;
@@ -58,6 +61,7 @@ export function installHostBridge(transport: Transport): void {
       execution: useExecutionStore,
       cache: useCacheStore,
       peek: usePeekStore,
+      recipe: useRecipeStore,
     },
     async plan() {
       const g = useGraphStore.getState();

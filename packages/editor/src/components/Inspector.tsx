@@ -16,7 +16,8 @@ import { augmentOperators, levelOf, promotedBy } from "../lib/subgraph";
 import { useExecutionStore, useNodeExecution, useParamErrors } from "../store/execution";
 import { currentSubgraph, useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
-import { useGraphParamOverrides } from "../store/recipe";
+import { useGraphParamOverrides, useRecipeStore } from "../store/recipe";
+import { formatValue } from "../lib/recipes";
 import { useUiStore } from "../store/ui";
 import { useGraphParamValidation, useNodeValidation, useValidationStore } from "../store/validation";
 import type { OutputStat, OutputValue } from "../types/execution";
@@ -171,6 +172,7 @@ function GraphParamRow({ name }: { name: string }) {
   const doc = useGraphStore((s) => s.doc);
   const base = useManifestStore((s) => s.operatorsById);
   const overrides = useGraphParamOverrides();
+  const recipe = useRecipeStore((s) => s.current);
   // 图参数自己的诊断（P1.2：nodeId 为空、paramPath 是名字）贴在这一行下
   const diags = useGraphParamValidation(name);
   const gp = doc.params?.[name];
@@ -180,17 +182,25 @@ function GraphParamRow({ name }: { name: string }) {
   const spec = graphParamSpecOf(doc, name, gp, ops);
   const value = graphParamValue(doc, name, overrides);
   const error = diags.find((d) => d.severity === "error")?.message;
+  // 被当前配方覆盖（param-recipe P3.4）：与参数面板同一个橙色标记；恢复 / 写回基础在面板里
+  const overridden = recipe !== null && Object.prototype.hasOwnProperty.call(overrides, name);
 
   return (
     <div
-      className={`insp-param${error ? " has-error" : ""}`}
+      className={`insp-param${error ? " has-error" : ""}${overridden ? " is-recipe-override" : ""}`}
       data-testid={`graph-param-${name}`}
       data-graph-param={name}
       data-param-error={error ? "1" : undefined}
+      data-recipe-override={overridden ? "1" : undefined}
     >
       <div className="insp-param__label insp-gparam__head">
         <span title={gp.doc}>{gp.label || name}</span>
         <span className="insp-gparam__name">{name}</span>
+        {overridden && (
+          <span className="prow__tag prow__tag--recipe" title={`值来自配方「${recipe}」；基础是后面那个`}>
+            配方 · 基础 {formatValue(gp.default, spec ?? undefined)}
+          </span>
+        )}
         <button
           type="button"
           className="ctl-btn"

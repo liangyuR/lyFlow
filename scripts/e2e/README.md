@@ -20,8 +20,10 @@ motion.mjs   动效的分组（docs/motion-plan.md §3 验收 2–9：进场、�
 noderun.mjs  节点运行按钮的分组（docs/node-run-plan.md §4 验收 7–12、11b 与 §6 修订一 17–20：按钮位置与真鼠标、单击智能运行 / Shift 强制、hover 预告、「仅此节点」的兜底、停止与抢占、hover / 关动效 / 端点对齐、计划外节点挂结果、右键三项）
 params_p1.mjs 图参数成形的分组（docs/param-recipe-plan.md P1 验收 1–7：完整规格的往返与 core 校验、右键「纳入配方」、子图里的逐层提升链、被绑定行上编辑、RunOptions.params、P1.6 三项）
 params_p2.mjs 参数面板的分组（docs/param-recipe-plan.md P2 验收 9–15：开关 / 拖宽 / 最大化 / 宽度记忆与双向定位、14 种类型控件与 transform / curve 往返、advanced 折叠与联动条件、搜索与过滤 chip、子图定义共享与库算子只读、ROI 缩略图进拖框、1000 参数的性能）
+params_p3.mjs 配方的分组（docs/param-recipe-plan.md P3 验收 17–24：新建两个配方 Ctrl+S 落盘与重开还原、K6 ① ② ③ 与外部修改检测、K4 从基础重算、切配方后的缓存命中与自动运行、K7 撤销、矩阵三态 / 只看差异 / 单元格编辑 / 多选复制 / 越界阻止运行、四类失配与按建议修复、管理动作的磁盘结果与自动备份）
 record-noderun.mjs  节点运行按钮的演示截图（不接进 run.mjs）：七步各截一张到 docs/noderun-step-N.png
 record-params-p2.mjs 参数面板的验收截图（不接进 run.mjs）：docs/params-p2-panel.png 与 docs/params-p2-types.png
+record-params-p3.mjs 配方的验收截图（不接进 run.mjs）：docs/params-p3-toolbar-row.png、params-p3-matrix.png、params-p3-manage.png
 http.mjs     e2e:http —— Node 桩服务器 + 系统 Chrome + examples/host-react
 ```
 
@@ -161,5 +163,14 @@ WiX 的 `INSTALLDIR`）。目的是验证「DLL 随包」和「从 exe 同目录
   真鼠标点下去点中的是面板的行。
 - **不带移动的一次点击，React Flow 的选中会慢一拍**：它点选节点时只改内部的 nodeLookup、不发 store 更新，`onSelectionChange`
   要等下一次更新才来。画布在 `onNodesChange` 里把 select 变更直接写进 ui store（P2 补上），CDP 的真鼠标点一下就能选中。
+- **配方的分组要一张有路径的图**（`params_p3.mjs`）：配方目录是图文件旁边的 `<图名>.recipes/`，没存过盘的图不能建配方；
+  而 Ctrl+S 在没有路径时会弹系统的另存为对话框（CDP 点不到）。所以先 `saveGraphTo`（transport 写盘 + markSaved），之后的
+  Ctrl+S 都是真按键。起名、确认删除、「文件已被外部修改」是编辑器自己画的对话框（`lib/modal.ts`），照常点；导入导出在界面上
+  弹系统文件对话框，脚本经窗口桥 `window.__lyflow.recipes.importFrom / exportTo` 直接给路径。打开图走 `loadDoc(doc, path)`
+  就会跟着读配方目录（订阅在 LyFlowEditor 里），读完用 `recipes.loaded()` 等。
+- **结果仓按内容寻址，跨分组也记得**：验「切配方后受影响的节点重算」时换一个没用过的种子，否则同一个 app 里早先跑过的那一组
+  值会让「该重算的」也命中缓存。
+- **被拦下的运行没有 runId**（配方有失配时 `startRun` 直接 failRun）：`runAndWait` 靠 runId 变化判断结束，新图上第一次运行
+  就被拦下时它会一直等。先 reset 执行 store、等 `runStatus === 'error'`（`params_p3.mjs` 的 `f5Blocked`）。
 - **搭图走 store 的语义化动作，不直接塞 doc。** 塞一份构造好的 doc 会跳过
   `addNode` / `connect` 里的校验与 id 分配，验的就不是真实代码路径了。

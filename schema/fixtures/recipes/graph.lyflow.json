@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "id": "01JRECIPEFIXTURE0000000000",
+  "name": "配方失配夹具",
+  "meta": {
+    "app": "lyflow/0.1.0",
+    "note": "param-recipe P3 的共享夹具：graph.recipes/ 里每个配方文件触发一类失配，期望的报告在 expected.json。编辑器单测（packages/editor/test/recipes.test.mjs）与 P4 的 CLI（Rust）都对着它验。n_show 是 test.param_showcase，只在 LYFLOW_TEST_OPS=1 时注册；夹具只用来判失配，不需要能跑。"
+  },
+  "nodes": [
+    { "id": "n_gen", "op": "gen.synthetic", "opVersion": "1.0.0", "params": {}, "ui": { "position": { "x": 0, "y": 0 } } },
+    { "id": "n_voxel", "op": "filter.voxel_grid", "opVersion": "1.0.0", "params": {}, "ui": { "position": { "x": 260, "y": 0 } } },
+    { "id": "n_cut", "op": "filter.passthrough", "opVersion": "1.0.0", "params": {}, "ui": { "position": { "x": 520, "y": 0 } } },
+    { "id": "n_show", "op": "test.param_showcase", "opVersion": "1.0.0", "params": {}, "ui": { "position": { "x": 260, "y": 200 } } }
+  ],
+  "edges": [
+    { "id": "e1", "from": { "node": "n_gen", "port": "cloud" }, "to": { "node": "n_voxel", "port": "cloud" } },
+    { "id": "e2", "from": { "node": "n_voxel", "port": "cloud" }, "to": { "node": "n_cut", "port": "cloud" } },
+    { "id": "e3", "from": { "node": "n_gen", "port": "cloud" }, "to": { "node": "n_show", "port": "cloud" } }
+  ],
+  "groups": [],
+  "subgraphs": {},
+  "params": {
+    "pointCount": {
+      "type": "int", "label": "Synthetic · Point Count", "default": 20000, "binds": ["n_gen.pointCount"],
+      "min": 1, "max": 20000000, "group": "采样"
+    },
+    "withIntensity": {
+      "type": "bool", "label": "Synthetic · With Intensity", "default": true, "binds": ["n_gen.withIntensity"], "group": "采样"
+    },
+    "leafSize": {
+      "type": "vec3f", "label": "体素网格 · Leaf Size", "default": [0.02, 0.02, 0.02], "binds": ["n_voxel.leafSize"],
+      "min": 0.0001, "max": 10, "step": 0.001, "unit": "m", "group": "滤波"
+    },
+    "cutField": {
+      "type": "enum", "label": "直通 · Field", "default": "z", "binds": ["n_cut.field"],
+      "options": [
+        { "value": "x", "label": "X" }, { "value": "y", "label": "Y" },
+        { "value": "z", "label": "Z" }, { "value": "intensity", "label": "Intensity" }
+      ],
+      "group": "滤波"
+    },
+    "cutMax": {
+      "type": "float", "label": "直通 · Max", "default": 1.2, "binds": ["n_cut.max"], "min": 0, "max": 5, "unit": "m", "group": "滤波"
+    },
+    "gain": {
+      "type": "float", "label": "全类型示例 · Gain", "default": 1, "binds": ["n_show.gain"], "min": 0, "max": 10, "group": "外观"
+    },
+    "tag": { "type": "string", "label": "全类型示例 · Tag", "default": "", "binds": ["n_show.tag"], "group": "外观" },
+    "tint": {
+      "type": "color", "label": "全类型示例 · Tint", "default": [0.29, 0.62, 1], "binds": ["n_show.tint"], "min": 0, "max": 1, "group": "外观"
+    },
+    "response": {
+      "type": "curve", "label": "全类型示例 · Response",
+      "default": { "points": [[0, 0], [1, 1]], "interp": "linear" }, "binds": ["n_show.response"], "min": 0, "max": 1, "group": "外观"
+    },
+    "pose": {
+      "type": "transform", "label": "全类型示例 · Pose",
+      "default": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], "binds": ["n_show.pose"], "group": "外观"
+    },
+    "legacyMin": { "default": 0.1, "binds": ["n_cut.min"], "doc": "老格式（没有 type）：只查 ①，不查类型与限位（core 也不按它校验，P1.2）" }
+  },
+  "x": {}
+}
