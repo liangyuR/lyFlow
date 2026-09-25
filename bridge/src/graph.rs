@@ -149,6 +149,90 @@ impl GraphDoc {
             Err(GraphError::Invalid(problems))
         }
     }
+
+    /// 把一条迁移诊断写回顶层节点（ADR-0008 / ADR-0025），与前端 applyMigrations 同一套语义：
+    /// op / opVersion / params 整份替换；edits 里删边、插节点、加边。插进来的节点摆在被迁移
+    /// 节点的左下方，标题写进 ui.title。nodeId 不是顶层节点（子图里的路径）时什么都不做，返回 false。
+    pub fn apply_migration(&mut self, m: &serde_json::Value) -> bool {
+        let Some(node_id) = m["nodeId"].as_str() else { return false };
+        let Some(node) = self.nodes.iter_mut().find(|n| n.id == node_id) else {
+            return false;
+        };
+        if let Some(op) = m["op"].as_str() {
+            node.op = op.to_string();
+        }
+        if let Some(v) = m["opVersion"].as_str() {
+            node.op_version = Some(v.to_string());
+        }
+        if let Some(params) = m["params"].as_object() {
+            node.params = params.clone();
+        }
+        let near = node
+            .ui
+            .as_ref()
+            .and_then(|ui| ui.get("position"))
+            .map(|p| (p["x"].as_f64().unwrap_or(0.0), p["y"].as_f64().unwrap_or(0.0)));
+
+        let edits = &m["edits"];
+        if !edits.is_object() {
+            return true;
+        }
+        let same = |a: &PortRef, b: &serde_json::Value| {
+            b["node"].as_str() == Some(a.node.as_str()) && b["port"].as_str() == Some(a.port.as_str())
+        };
+        if let Some(remove) = edits["removeEdges"].as_array() {
+            self.edges
+                .retain(|e| !remove.iter().any(|r| same(&e.from, &r["from"]) && same(&e.to, &r["to"])));
+        }
+        if let Some(add) = edits["addNodes"].as_array() {
+            for (k, n) in add.iter().enumerate() {
+                let (Some(id), Some(op)) = (n["id"].as_str(), n["op"].as_str()) else { continue };
+                if self.nodes.iter().any(|x| x.id == id) {
+                    continue;
+                }
+                let mut ui = serde_json::Map::new();
+                if let Some((x, y)) = near {
+                    ui.insert(
+                        "position".into(),
+                        serde_json::json!({ "x": x - 220.0, "y": y + 140.0 * (k as f64 + 1.0) }),
+                    );
+                }
+                if let Some(title) = n["title"].as_str().filter(|t| !t.is_empty()) {
+                    ui.insert("title".into(), title.into());
+                }
+                self.nodes.push(Node {
+                    id: id.to_string(),
+                    op: op.to_string(),
+                    op_version: n["opVersion"].as_str().filter(|v| !v.is_empty()).map(String::from),
+                    bypass: false,
+                    params: n["params"].as_object().cloned().unwrap_or_default(),
+                    ui: (!ui.is_empty()).then(|| ui.into()),
+                });
+            }
+        }
+        if let Some(add) = edits["addEdges"].as_array() {
+            for e in add {
+                let port_ref = |v: &serde_json::Value| -> Option<PortRef> {
+                    Some(PortRef {
+                        node: v["node"].as_str()?.to_string(),
+                        port: v["port"].as_str()?.to_string(),
+                    })
+                };
+                let (Some(from), Some(to)) = (port_ref(&e["from"]), port_ref(&e["to"])) else {
+                    continue;
+                };
+                let base = e["id"].as_str().unwrap_or("m").to_string();
+                let mut id = base.clone();
+                let mut k = 2;
+                while self.edges.iter().any(|x| x.id == id) {
+                    id = format!("{base}_{k}");
+                    k += 1;
+                }
+                self.edges.push(Edge { id, from, to });
+            }
+        }
+        true
+    }
 }
 
 #[cfg(test)]
@@ -289,5 +373,52 @@ mod tests {
         bad.outputs.get_mut("cloud").unwrap().node = "ghost".into();
         let err = bad.validate_structure().unwrap_err().to_string();
         assert!(err.contains("指向不存在的节点"), "{err}");
+    }
+
+    /// ADR-0025：迁移诊断里的 edits 删边、插节点、加边；插进来的节点摆在被迁移节点旁边。
+    #[test]
+    fn apply_migration_rewires_edges_and_inserts_nodes() {
+        let mut d = doc(
+            &[("a", "t.src"), ("b", "t.src"), ("s", "t.sink")],
+            &[("e1", "a", "out", "s", "old1"), ("e2", "b", "out", "s", "old2")],
+        );
+        d.nodes[2].ui = Some(serde_json::json!({ "position": { "x": 500, "y": 100 } }));
+        let m = serde_json::json!({
+            "kind": "migration", "nodeId": "s", "op": "t.sink", "opVersion": "2.0.0",
+            "params": { "k": 1 },
+            "edits": {
+                "removeEdges": [
+                    { "id": "e1", "from": { "node": "a", "port": "out" }, "to": { "node": "s", "port": "old1" } },
+                    { "id": "e2", "from": { "node": "b", "port": "out" }, "to": { "node": "s", "port": "old2" } }
+                ],
+                "addNodes": [
+                    { "id": "s_pack", "op": "t.pack", "opVersion": "1.0.0", "params": {}, "title": "打包", "near": "s" }
+                ],
+                "addEdges": [
+                    { "id": "e1", "from": { "node": "a", "port": "out" }, "to": { "node": "s_pack", "port": "x" } },
+                    { "id": "m_s_pack_y", "from": { "node": "b", "port": "out" }, "to": { "node": "s_pack", "port": "y" } },
+                    { "id": "m_s_in", "from": { "node": "s_pack", "port": "out" }, "to": { "node": "s", "port": "in" } }
+                ]
+            }
+        });
+        assert!(d.apply_migration(&m));
+        assert_eq!(d.nodes[2].op_version.as_deref(), Some("2.0.0"));
+        assert_eq!(d.nodes[2].params["k"], 1);
+        let pack = d.nodes.iter().find(|n| n.id == "s_pack").expect("插入的节点");
+        assert_eq!(pack.op_version.as_deref(), Some("1.0.0"));
+        let ui = pack.ui.as_ref().unwrap();
+        assert_eq!(ui["position"]["x"], 280.0);
+        assert_eq!(ui["title"], "打包");
+        let wires: Vec<_> = d
+            .edges
+            .iter()
+            .map(|e| format!("{}:{}.{}>{}.{}", e.id, e.from.node, e.from.port, e.to.node, e.to.port))
+            .collect();
+        assert_eq!(wires, ["e1:a.out>s_pack.x", "m_s_pack_y:b.out>s_pack.y", "m_s_in:s_pack.out>s.in"]);
+        assert!(d.validate_structure().is_ok());
+
+        // 子图里的路径 id 不写回
+        let nested = serde_json::json!({ "nodeId": "sg/s", "op": "t.sink", "params": {} });
+        assert!(!d.apply_migration(&nested));
     }
 }

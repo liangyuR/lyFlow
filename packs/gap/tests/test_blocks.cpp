@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -928,4 +929,162 @@ TEST_CASE("宿主把两片云直接注入 read_scan 的 primary / secondary：�
     test::RunLog& log = none.wait();
     CHECK(log.nodeEvent("n_scan", "error")["errors"][0]["code"] == "missing_input");
   }
+}
+
+// ------------------------------------------------ gap.result_bundle v1 → v2（ADR-0025）
+
+namespace {
+
+/// 把迁移诊断的 edits 按 applyMigrations 的语义写回一份 doc（前端与 lyflow migrate 各有一份同样的实现）。
+Json applyMigration(Json doc, const Json& m) {
+  for (Json& n : doc["nodes"]) {
+    if (n["id"] != m["nodeId"]) continue;
+    n["op"] = m["op"];
+    n["opVersion"] = m["opVersion"];
+    n["params"] = m["params"];
+  }
+  if (!m.contains("edits")) return doc;
+  const Json& edits = m["edits"];
+  Json kept = Json::array();
+  for (const Json& e : doc["edges"]) {
+    bool drop = false;
+    for (const Json& r : edits["removeEdges"]) {
+      drop = drop || (e["from"] == r["from"] && e["to"] == r["to"]);
+    }
+    if (!drop) kept.push_back(e);
+  }
+  for (const Json& n : edits["addNodes"]) {
+    doc["nodes"].push_back(
+        {{"id", n["id"]}, {"op", n["op"]}, {"opVersion", n["opVersion"]}, {"params", n["params"]}});
+  }
+  for (const Json& e : edits["addEdges"]) kept.push_back(e);
+  doc["edges"] = std::move(kept);
+  return doc;
+}
+
+std::vector<Json> migrationsOf(const Json& doc) {
+  std::vector<Json> out;
+  for (const Json& d : Json::parse(exec::validateGraphJson(doc.dump(), {}))) {
+    if (d.value("kind", "") == "migration") out.push_back(d);
+  }
+  return out;
+}
+
+/// m8a 之前的细粒度图：make_roi_set / make_scan_pair 不存在，七根散线直接接到 result_bundle。
+/// 从 --fine 导出的图反推：两个 make_* 节点的每条入边改接到 bundle 上对应的 v1 端口。
+Json asV1(Json doc) {
+  const std::map<std::string, std::string> roiPorts = {
+      {"datum", "roiFlushBase"}, {"target", "roiFlushRef"},   {"seamLeft", "roiGapLeft"},
+      {"seamRight", "roiGapRight"}, {"alignment", "alignment"}, {"overall", "roiOverall"},
+      {"cropStatus", "cropStatus"}};
+  const std::map<std::string, std::string> scanPorts = {
+      {"primary", "cloudPrimary"}, {"secondary", "cloudSecondary"}, {"merged", "cloudMerged"}};
+  Json edges = Json::array();
+  for (const Json& e : doc["edges"]) {
+    const std::string to = e["to"]["node"];
+    const std::string port = e["to"]["port"];
+    if (to == "n_bundle" && (port == "rois" || port == "scan")) continue;
+    const auto* table = to == "n_roi_set" ? &roiPorts : to == "n_scan_set" ? &scanPorts : nullptr;
+    if (!table) {
+      edges.push_back(e);
+      continue;
+    }
+    Json moved = e;
+    moved["to"] = {{"node", "n_bundle"}, {"port", table->at(port)}};
+    edges.push_back(moved);
+  }
+  Json nodes = Json::array();
+  for (Json n : doc["nodes"]) {
+    if (n["id"] == "n_roi_set" || n["id"] == "n_scan_set") continue;
+    if (n["id"] == "n_bundle") n["opVersion"] = "1.1.0";
+    nodes.push_back(n);
+  }
+  doc["nodes"] = std::move(nodes);
+  doc["edges"] = std::move(edges);
+  return doc;
+}
+
+Json bundleOf(const Json& doc, const fs::path& baseDir) {
+  test::Session s(doc, baseDir);
+  test::RunLog& log = s.wait();
+  REQUIRE(log.runStatus() == "ok");
+  Data bundle;
+  REQUIRE(exec::ResultStore::instance().get(s.runId(), "n_bundle", "bundle", bundle));
+  return bundle.asRecord()->data;
+}
+
+}  // namespace
+
+TEST_CASE("result_bundle v1 → v2：七个散端口收进新插的 make_scan_pair / make_roi_set，汇总逐字段相同") {
+  Scene scene("bundle-v1");
+  const Json fine = importAs("StandardGap.yml:template:fine", kSyntheticConfig, scene.root);
+  const Json v1 = asV1(fine);
+
+  const std::vector<Json> migrations = migrationsOf(v1);
+  REQUIRE(migrations.size() == 1);
+  const Json& m = migrations[0];
+  CHECK(m["nodeId"] == "n_bundle");
+  CHECK(m["opVersion"] == "2.0.0");
+  REQUIRE(m.contains("edits"));
+  // alignment / roiOverall 在 v2 仍是 bundle 的端口，那两条边原样留着
+  CHECK(m["edits"]["removeEdges"].size() == 7);
+  REQUIRE(m["edits"]["addNodes"].size() == 2);
+  std::set<std::string> added;
+  for (const Json& n : m["edits"]["addNodes"]) added.insert(n["op"].get<std::string>());
+  CHECK(added == std::set<std::string>{"gap.make_roi_set", "gap.make_scan_pair"});
+  CHECK(m["edits"]["addEdges"].size() == 9);
+  CHECK(errorsOf(v1).empty());
+
+  // 老图当场就能跑（执行器在内存里用迁移后的拓扑），汇总与 m8a 的细粒度图逐字段相同
+  const Json expected = bundleOf(fine, scene.root);
+  CHECK(bundleOf(v1, scene.root) == expected);
+
+  // 写回之后再校验：不再有迁移诊断，汇总仍相同
+  const Json written = applyMigration(v1, m);
+  CHECK(migrationsOf(written).empty());
+  CHECK(errorsOf(written).empty());
+  CHECK(bundleOf(written, scene.root) == expected);
+}
+
+TEST_CASE("result_bundle v1 → v2：凑不齐一个 Bundle 的散端口只能删边，notes 写明丢了哪几项") {
+  Scene scene("bundle-partial");
+  Json doc = asV1(importAs("StandardGap.yml:template:fine", kSyntheticConfig, scene.root));
+  // 只留 cloudPrimary / cloudSecondary 与 roiFlushBase / roiFlushRef（KUN10 点 4 的接法），并去掉 opVersion
+  Json edges = Json::array();
+  for (const Json& e : doc["edges"]) {
+    const std::string port = e["to"]["port"];
+    if (e["to"]["node"] == "n_bundle" &&
+        (port == "cloudMerged" || port == "roiGapLeft" || port == "roiGapRight")) {
+      continue;
+    }
+    edges.push_back(e);
+  }
+  doc["edges"] = std::move(edges);
+  nodeOf(doc, "n_bundle").erase("opVersion");
+
+  const std::vector<Json> migrations = migrationsOf(doc);
+  REQUIRE(migrations.size() == 1);
+  const Json& m = migrations[0];
+  CHECK(m["edits"]["removeEdges"].size() == 4);
+  CHECK(m["edits"]["addNodes"].empty());
+  CHECK(m["edits"]["addEdges"].empty());
+  std::string notes;
+  for (const Json& n : m["notes"]) notes += n.get<std::string>() + "\n";
+  MESSAGE(notes);
+  CHECK(notes.find("没有记 opVersion") != std::string::npos);
+  CHECK(notes.find("cloudPrimary、cloudSecondary 已删，没有等价接法") != std::string::npos);
+  CHECK(notes.find("roiFlushBase、roiFlushRef 已删，没有等价接法") != std::string::npos);
+  CHECK(errorsOf(doc).empty());
+
+  const Json written = applyMigration(doc, m);
+  CHECK(migrationsOf(written).empty());
+  CHECK(errorsOf(written).empty());
+}
+
+TEST_CASE("没打 opVersion 的 v2 接法不算迁移：迁移函数对新写法是幂等的") {
+  Scene scene("bundle-v2-unversioned");
+  Json doc = importAs("StandardGap.yml:template:fine", kSyntheticConfig, scene.root);
+  for (Json& n : doc["nodes"]) n.erase("opVersion");
+  CHECK(migrationsOf(doc).empty());
+  CHECK(errorsOf(doc).empty());
 }

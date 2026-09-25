@@ -91,6 +91,9 @@ struct MigrationPlan {
   std::string opVersion;
   std::string paramsJson = "{}";
   std::vector<std::string> notes;
+  /// 拓扑改动（ADR-0025），节点 id 已解析好：`{removeEdges, addNodes, addEdges}` 的 JSON 文本。
+  /// 空串 = 这次迁移没动连线。
+  std::string editsJson;
 };
 
 /// 一条挂在某个节点上的诊断。nodeId 为空表示是整张图级别的问题。

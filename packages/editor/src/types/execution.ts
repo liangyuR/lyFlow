@@ -1,6 +1,8 @@
 // ExecutionEvent 的 TypeScript 镜像，契约在 schema/execution-event.schema.json。
 // 与 manifest 一样，这里只是给编辑器用的视图；改动顺序永远是 schema → C++ → 这里。
 
+import type { PortRef } from "./graph";
+
 export type NodeState =
   | "idle"
   | "pending"
@@ -41,6 +43,22 @@ export interface MigrationAction extends GraphDiagnostic {
   opVersion: string;
   params: Record<string, unknown>;
   notes?: string[];
+  /** 端口增删时的连线改写（ADR-0025）。节点 id 已由 core 分配好，照做即可。 */
+  edits?: MigrationEdits;
+}
+
+export interface MigrationEdits {
+  removeEdges: { id?: string; from: PortRef; to: PortRef }[];
+  addNodes: {
+    id: string;
+    op: string;
+    opVersion?: string;
+    params: Record<string, unknown>;
+    title?: string;
+    /** 插进来的节点摆在它旁边。 */
+    near?: string;
+  }[];
+  addEdges: { id?: string; from: PortRef; to: PortRef }[];
 }
 
 export function isMigration(d: GraphDiagnostic): d is MigrationAction {

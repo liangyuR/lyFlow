@@ -162,3 +162,5 @@ P3 截图（1440 宽）里图名框被挤到 72 px，「车门缝隙检测」只
 
 - KUN10 的 19 张线上图（`luoshi/database/KUN10/device_0/*/`）在当前 core 里都校验不过：`gap.result_bundle` 的 `cloudPrimary` /
   `cloudSecondary` / `cloudMerged` 输入端口 m8a 起没有了，图里还连着。要么给这个算子加一条迁移（把三条边丢掉），要么重导这批图。
+  **2026-09-25 已修**：`gap.result_bundle` 升 2.0.0、带拓扑迁移（ADR-0025），19 张图迁移写回并改 `layout=profile`，
+  见 [kun10-graphs-migration-acceptance.md](kun10-graphs-migration-acceptance.md)；26 节的 e2e 不再替线上图改东西。

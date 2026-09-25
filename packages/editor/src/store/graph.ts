@@ -43,7 +43,7 @@ import {
   type SubPath,
 } from "../lib/subgraph";
 import { canConnect, type ConnectVerdict, type GraphContext } from "../lib/typecheck";
-import type { MigrationAction } from "../types/execution";
+import type { MigrationAction, MigrationEdits } from "../types/execution";
 import type { OperatorDesc, Param, SnippetDesc } from "../types/manifest";
 import {
   GRAPH_SCHEMA_VERSION,
@@ -129,6 +129,35 @@ function allIds(doc: GraphDoc): Set<string> {
   add(doc);
   for (const def of Object.values(doc.subgraphs ?? {})) add(def);
   return s;
+}
+
+/** 迁移诊断里的连线改写（ADR-0025），与 bridge 的 GraphDoc::apply_migration 同一套语义：
+ *  删边、插节点（摆在被迁移节点的左下方）、加边。id 撞了就加 _2、_3…… */
+function applyMigrationEdits(d: GraphDoc, nodeId: string, edits: MigrationEdits): void {
+  const same = (a: PortRef, b: PortRef) => a.node === b.node && a.port === b.port;
+  d.edges = d.edges.filter(
+    (e) => !edits.removeEdges.some((r) => same(e.from, r.from) && same(e.to, r.to)),
+  );
+  const near = d.nodes.find((n) => n.id === nodeId)?.ui?.position;
+  edits.addNodes.forEach((n, k) => {
+    if (d.nodes.some((x) => x.id === n.id)) return;
+    const ui: NodeUi = {};
+    if (near) ui.position = { x: near.x - 220, y: near.y + 140 * (k + 1) };
+    if (n.title) ui.title = n.title;
+    d.nodes.push({
+      id: n.id,
+      op: n.op,
+      ...(n.opVersion ? { opVersion: n.opVersion } : {}),
+      params: { ...n.params },
+      ...(Object.keys(ui).length > 0 ? { ui } : {}),
+    });
+  });
+  for (const e of edits.addEdges) {
+    const base = e.id ?? "m";
+    let id = base;
+    for (let k = 2; d.edges.some((x) => x.id === id); k += 1) id = `${base}_${k}`;
+    d.edges.push({ id, from: { ...e.from }, to: { ...e.to } });
+  }
 }
 
 /** immer 的 draft 在 recipe 结束后就失效，抄进新对象之前先取出一份普通数据。
@@ -909,6 +938,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
           };
           apply(d.nodes);
           for (const def of Object.values(d.subgraphs ?? {})) apply(def.nodes);
+          // 连线改写只落在顶层（ADR-0025）：与 lyflow migrate --write 同一套语义
+          for (const action of actions) {
+            if (action.edits && d.nodes.some((n) => n.id === action.nodeId)) {
+              applyMigrationEdits(d, action.nodeId, action.edits);
+            }
+          }
         },
       );
       return changed;

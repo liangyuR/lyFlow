@@ -50,6 +50,10 @@ std::string Diagnostics::toJson() const {
       w.key("params");
       w.raw(d.migration->paramsJson);
       w.fieldIfSet("notes", d.migration->notes);
+      if (!d.migration->editsJson.empty()) {
+        w.key("edits");
+        w.raw(d.migration->editsJson);
+      }
     }
     w.endObject();
   }

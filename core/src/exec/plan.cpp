@@ -193,9 +193,175 @@ const Port* findPort(const std::vector<Port>& ports, const std::string& name) {
 
 const Migration* findMigration(const OperatorDesc& op, int fromMajor) {
   for (const Migration& m : op.migrations) {
-    if (m.fromMajor == fromMajor && m.apply) return &m;
+    if (m.fromMajor == fromMajor && (m.apply || m.topology)) return &m;
   }
   return nullptr;
+}
+
+// ------------------------------------------------------------------ 迁移（E3 / ADR-0025）
+
+/// 一个节点跑完迁移链的结果。buildPlan 的逐节点校验拿 params 接着查。
+struct NodeMigration {
+  nlohmann::json params;
+  std::vector<std::string> notes;
+  /// 要出迁移诊断：主版本升了、算子改了名，或者没打 opVersion 的节点真的被改了。
+  bool migrated = false;
+  /// 链断了或迁移函数抛了：报 version_mismatch。
+  bool broken = false;
+  TopologyEdit edits;
+};
+
+bool chainComplete(const OperatorDesc& op, int fromMajor, int toMajor) {
+  for (int m = fromMajor; m < toMajor; ++m) {
+    if (!findMigration(op, m)) return false;
+  }
+  return true;
+}
+
+std::vector<MigrationInput> inputsOf(const Registry& registry, const RawGraph& graph,
+                                     const std::string& nodeId) {
+  std::unordered_map<std::string, const RawNode*> byId;
+  for (const RawNode& n : graph.nodes) byId[n.id] = &n;
+  std::vector<MigrationInput> out;
+  for (const RawEdge& e : graph.edges) {
+    if (e.toNode != nodeId) continue;
+    MigrationInput in{e.toPort, e.fromNode, e.fromPort, {}};
+    auto it = byId.find(e.fromNode);
+    if (it != byId.end()) {
+      const OperatorDesc* src = registry.find(it->second->op);
+      in.fromOp = src ? src->id : it->second->op;
+    }
+    out.push_back(std::move(in));
+  }
+  return out;
+}
+
+/// 按 saved → current 跑一个节点的迁移链。没打 opVersion 的节点当作最老的 v1 写法去试：
+/// 迁移函数对新写法是幂等的，只有真改动了才算迁移（老图多是手写或早期导出的，恰好都没这个字段）。
+NodeMigration migrateNode(const Registry& registry, const RawGraph& graph, const RawNode& rn,
+                          const OperatorDesc& op) {
+  NodeMigration m;
+  m.params = rn.params;
+  if (op.id != rn.op) {
+    m.notes.push_back("算子 '" + rn.op + "' 已重命名为 '" + op.id + "'");
+    m.migrated = true;
+  }
+  const Semver current = parseSemver(op.version);
+  if (!current.valid) return m;
+  int from = 0;
+  const bool unversioned = rn.opVersion.empty();
+  if (unversioned) {
+    if (current.major > 1 && chainComplete(op, 1, current.major)) from = 1;
+  } else {
+    const Semver saved = parseSemver(rn.opVersion);
+    if (saved.valid && saved.major < current.major) from = saved.major;
+  }
+  if (from == 0) return m;
+
+  std::vector<std::string> notes;
+  for (int major = from; major < current.major; ++major) {
+    const Migration* step = findMigration(op, major);
+    if (!step) {
+      m.broken = true;
+      return m;
+    }
+    try {
+      if (step->topology) {
+        TopologyEdit e = step->topology(m.params, inputsOf(registry, graph, rn.id));
+        for (auto& p : e.dropInputs) m.edits.dropInputs.push_back(std::move(p));
+        for (auto& n : e.addNodes) m.edits.addNodes.push_back(std::move(n));
+        for (auto& x : e.addEdges) m.edits.addEdges.push_back(std::move(x));
+        for (auto& note : e.notes) notes.push_back(std::move(note));
+      }
+      if (step->apply) {
+        nlohmann::json next = step->apply(m.params);
+        if (!next.is_object()) {
+          m.broken = true;
+          return m;
+        }
+        m.params = std::move(next);
+      }
+    } catch (...) {
+      m.broken = true;
+      return m;
+    }
+    notes.push_back("v" + std::to_string(major) + " → v" + std::to_string(major + 1) +
+                    (step->apply ? "：参数已按迁移规则改写" : "：连线已按迁移规则改写"));
+  }
+  if (unversioned && m.params == rn.params && m.edits.empty()) return m;
+  if (unversioned) m.notes.push_back("节点没有记 opVersion，按 v1 的写法迁移");
+  for (auto& note : notes) m.notes.push_back(std::move(note));
+  m.migrated = true;
+  return m;
+}
+
+/// 把各节点的拓扑改动落到图的副本上，并写出诊断里的 edits（id 已解析）。
+/// 插入的节点 id = <节点 id>_<key>，撞了就加 _2、_3……
+void applyTopology(const Registry& registry, RawGraph& graph, const std::string& nodeId,
+                   const TopologyEdit& edits, std::set<std::string>& ids, std::string& editsJson) {
+  std::map<std::string, std::string> newIds;
+  for (const auto& n : edits.addNodes) {
+    std::string id = nodeId + "_" + n.key;
+    for (int k = 2; ids.count(id); ++k) id = nodeId + "_" + n.key + "_" + std::to_string(k);
+    ids.insert(id);
+    newIds[n.key] = id;
+  }
+  auto resolve = [&](const std::string& ref) {
+    if (ref == "@self") return nodeId;
+    if (ref.rfind("@new:", 0) == 0) {
+      auto it = newIds.find(ref.substr(5));
+      return it == newIds.end() ? ref : it->second;
+    }
+    return ref;
+  };
+  auto portRef = [](const std::string& node, const std::string& port) {
+    return nlohmann::json{{"node", node}, {"port", port}};
+  };
+
+  nlohmann::json out = {{"removeEdges", nlohmann::json::array()},
+                        {"addNodes", nlohmann::json::array()},
+                        {"addEdges", nlohmann::json::array()}};
+  std::set<std::string> drop(edits.dropInputs.begin(), edits.dropInputs.end());
+  std::vector<RawEdge> kept;
+  for (RawEdge& e : graph.edges) {
+    if (e.toNode == nodeId && drop.count(e.toPort)) {
+      out["removeEdges"].push_back({{"id", e.id},
+                                    {"from", portRef(e.fromNode, e.fromPort)},
+                                    {"to", portRef(e.toNode, e.toPort)}});
+      continue;
+    }
+    kept.push_back(std::move(e));
+  }
+  graph.edges = std::move(kept);
+
+  for (const auto& n : edits.addNodes) {
+    RawNode node;
+    node.id = newIds[n.key];
+    node.op = n.op;
+    const OperatorDesc* op = registry.find(n.op);
+    node.opVersion = op ? op->version : std::string();
+    node.params = n.params.is_object() ? n.params : nlohmann::json::object();
+    out["addNodes"].push_back({{"id", node.id},
+                               {"op", node.op},
+                               {"opVersion", node.opVersion},
+                               {"params", node.params},
+                               {"title", n.title},
+                               {"near", nodeId}});
+    graph.nodes.push_back(std::move(node));
+  }
+  for (const auto& x : edits.addEdges) {
+    RawEdge e;
+    e.fromNode = resolve(x.fromNode);
+    e.fromPort = x.fromPort;
+    e.toNode = resolve(x.toNode);
+    e.toPort = x.toPort;
+    e.id = "m_" + e.toNode + "_" + e.toPort;
+    out["addEdges"].push_back({{"id", e.id},
+                               {"from", portRef(e.fromNode, e.fromPort)},
+                               {"to", portRef(e.toNode, e.toPort)}});
+    graph.edges.push_back(std::move(e));
+  }
+  editsJson = out.dump();
 }
 
 // ------------------------------------------------------------------ 参数联动
@@ -276,12 +442,40 @@ std::string canonicalParamsJson(const ParamMap& params) {
 
 // ------------------------------------------------------------------ buildPlan
 
-bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptions& options,
+bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptions& options,
                Plan& out, Diagnostics& diags) {
   out.runId = options.runId;
   out.nodes.clear();
   out.outputs.clear();
   out.ok = false;
+
+  // -- 迁移链先整体跑一遍（ADR-0025）：拓扑改动落在副本上，插进来的节点和其他节点一样
+  //    走下面的逐节点校验。拓扑迁移只看原图的入边，节点之间互不影响。
+  std::unordered_map<std::string, NodeMigration> migrations;
+  bool anyTopology = false;
+  for (const RawNode& rn : input.nodes) {
+    const OperatorDesc* op = registry.find(rn.op);
+    if (!op) continue;
+    NodeMigration m = migrateNode(registry, input, rn, *op);
+    anyTopology = anyTopology || (m.migrated && !m.broken && !m.edits.empty());
+    migrations.emplace(rn.id, std::move(m));
+  }
+  RawGraph migratedGraph;
+  std::unordered_map<std::string, std::string> editsJsonOf;
+  if (anyTopology) {
+    migratedGraph = input;
+    std::set<std::string> ids;
+    for (const RawNode& rn : input.nodes) ids.insert(rn.id);
+    for (const RawNode& rn : input.nodes) {
+      auto it = migrations.find(rn.id);
+      if (it == migrations.end() || !it->second.migrated || it->second.broken ||
+          it->second.edits.empty()) {
+        continue;
+      }
+      applyTopology(registry, migratedGraph, rn.id, it->second.edits, ids, editsJsonOf[rn.id]);
+    }
+  }
+  const RawGraph& graph = anyTopology ? migratedGraph : input;
 
   const std::size_t n = graph.nodes.size();
   std::unordered_map<std::string, std::size_t> indexById;
@@ -319,15 +513,9 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
     }
     prepared[i].op = op;
 
-    // -- 别名重定向与迁移（E3）。先算出「该用哪份参数」，再拿它去做常规校验。
+    // -- 别名重定向与迁移（E3）。迁移链在开头跑过了，这里只取结果、报版本问题。
     nlohmann::json params = rn.params;
-    std::vector<std::string> notes;
-    bool migrated = false;
-    if (op->id != rn.op) {
-      notes.push_back("算子 '" + rn.op + "' 已重命名为 '" + op->id + "'");
-      migrated = true;
-    }
-
+    const auto mig = migrations.find(rn.id);
     const Semver current = parseSemver(op->version);
     if (!rn.opVersion.empty()) {
       const Semver saved = parseSemver(rn.opVersion);
@@ -337,27 +525,10 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
                "此节点存于 " + op->id + " v" + rn.opVersion + "，比当前的 v" + op->version +
                    " 还新，无法降级");
         } else if (saved.major < current.major) {
-          bool chainOk = true;
-          for (int m = saved.major; m < current.major && chainOk; ++m) {
-            const Migration* step = findMigration(*op, m);
-            if (!step) { chainOk = false; break; }
-            try {
-              nlohmann::json next = step->apply(params);
-              if (!next.is_object()) { chainOk = false; break; }
-              params = std::move(next);
-            } catch (...) {
-              chainOk = false;
-              break;
-            }
-            notes.push_back("v" + std::to_string(m) + " → v" + std::to_string(m + 1) +
-                            "：参数已按迁移规则改写");
-          }
-          if (!chainOk) {
+          if (mig == migrations.end() || mig->second.broken) {
             fail(i, "version_mismatch",
                  "此节点存于 " + op->id + " v" + rn.opVersion + "，当前是 v" + op->version +
                      "（主版本不同，而算子没有提供完整的迁移链）");
-          } else {
-            migrated = true;
           }
         } else if (saved.minor != current.minor) {
           diags.warn(rn.id, Phase::Validate, "version_mismatch",
@@ -366,12 +537,16 @@ bool buildPlan(const Registry& registry, const RawGraph& graph, const BuildOptio
         }
       }
     }
-    if (migrated && prepared[i].valid) {
+    if (mig != migrations.end() && !mig->second.broken) params = mig->second.params;
+    if (mig != migrations.end() && mig->second.migrated && !mig->second.broken &&
+        prepared[i].valid) {
       MigrationPlan plan;
       plan.op = op->id;
       plan.opVersion = op->version;
       plan.paramsJson = params.dump();
-      plan.notes = notes;
+      plan.notes = mig->second.notes;
+      auto edits = editsJsonOf.find(rn.id);
+      if (edits != editsJsonOf.end()) plan.editsJson = edits->second;
       diags.migration(rn.id, "节点已从 " + rn.op + " v" +
                                  (rn.opVersion.empty() ? std::string("?") : rn.opVersion) +
                                  " 迁移到 " + op->id + " v" + op->version,

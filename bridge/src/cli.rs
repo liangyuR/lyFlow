@@ -978,21 +978,10 @@ fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
 
     let mut written = Value::Null;
     if parsed.has("write") && !migrations.is_empty() {
-        // 与前端 applyMigrations 同一套语义：params 是完整对象而不是补丁（ADR-0008）
+        // 与前端 applyMigrations 同一套语义：params 是完整对象而不是补丁（ADR-0008），
+        // edits 里的连线改动一并写回（ADR-0025）
         for m in &migrations {
-            let Some(node_id) = m["nodeId"].as_str() else { continue };
-            let Some(node) = loaded.doc.nodes.iter_mut().find(|n| n.id == node_id) else {
-                continue;
-            };
-            if let Some(op) = m["op"].as_str() {
-                node.op = op.to_string();
-            }
-            if let Some(v) = m["opVersion"].as_str() {
-                node.op_version = Some(v.to_string());
-            }
-            if let Some(params) = m["params"].as_object() {
-                node.params = params.clone();
-            }
+            loaded.doc.apply_migration(m);
         }
         let mut text = match serde_json::to_string_pretty(&loaded.doc) {
             Ok(t) => t,
@@ -1010,6 +999,13 @@ fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         &json!({ "migrations": migrations, "written": written }),
     );
     line(err, &format!("{} 个节点需要迁移", migrations.len()));
+    for m in &migrations {
+        for note in m["notes"].as_array().into_iter().flatten() {
+            if let Some(note) = note.as_str() {
+                line(err, &format!("  {}：{note}", m["nodeId"].as_str().unwrap_or("?")));
+            }
+        }
+    }
     EXIT_OK
 }
 

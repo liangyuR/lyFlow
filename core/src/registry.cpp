@@ -630,8 +630,8 @@ std::vector<std::string> Registry::validate() const {
     const int major = majorOf(op.version);
     std::set<int> steps;
     for (const auto& m : op.migrations) {
-      if (!m.apply) fail(where + " migration from major " + std::to_string(m.fromMajor) +
-                         " has no function");
+      if (!m.apply && !m.topology) fail(where + " migration from major " +
+                                        std::to_string(m.fromMajor) + " has no function");
       if (m.fromMajor < 1 || m.fromMajor >= major) {
         fail(where + " migration fromMajor " + std::to_string(m.fromMajor) +
              " is outside 1.." + std::to_string(major - 1));
