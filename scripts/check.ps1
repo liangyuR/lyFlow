@@ -7,7 +7,8 @@ function Step($name) { Write-Host "`n=== $name ===" -ForegroundColor Cyan }
 
 Step "C++ core"
 # 标准算子包（ADR-0014）：默认开，LYFLOW_STD_PACKS=0 跑纯平台构建
-if ($env:LYFLOW_STD_PACKS -eq "0") { Write-Host "标准包已关：纯平台构建" -ForegroundColor Yellow }
+$pureStd = $env:LYFLOW_STD_PACKS -eq "0"
+if ($pureStd) { Write-Host "标准包已关：纯平台构建" -ForegroundColor Yellow }
 & "$PSScriptRoot\build-core.ps1"
 
 Step "manifest vs schema"
@@ -171,4 +172,9 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "@lyflow/mcp 测试失败" }
 } finally { Pop-Location }
 
+# 纯平台构建里要标准包算子的用例不算通过，只是没跑：cargo 记 ignored、node --test 记 skip。
+if ($pureStd) {
+  Write-Host ("`n纯平台构建：要标准包算子的 Rust 测试记为 ignored、MCP 集成冒烟记为 skip（数目见上面两处汇总行）。" +
+              "这一趟只证明 core 零依赖，不替代默认的 pnpm check") -ForegroundColor Yellow
+}
 Write-Host "`n全链路绿" -ForegroundColor Green

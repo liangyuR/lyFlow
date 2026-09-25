@@ -14,8 +14,8 @@
 | 注册顺序 | 紧跟 `gen.synthetic` | 紧跟 `util.reroute` |
 | 例子 | `packs/std-pointcloud`、`packs/std-ml`、`packs/gap` | 任何自己写的包 |
 
-core 本身只有 `gen.synthetic` 与 `util.reroute` 两个算子，不链接任何第三方库
-（[ADR-0014](adr/0014-std-as-pack-core-zero-dep.md)）。
+core 本身只有 `gen.synthetic`、`util.reroute` 与两个流程算子（`flow.fallback`、`flow.select`），
+不链接任何第三方库（[ADR-0014](adr/0014-std-as-pack-core-zero-dep.md)）。
 
 仓库内的包不一定默认编：每个包在 `lyflow_op_pack()` 里声明 `DEFAULT ON|OFF`。
 
@@ -63,11 +63,26 @@ $env:LYFLOW_STD_PACKS = "0"
 pnpm check
 ```
 
-`packs/*` 一个都不编。manifest 里只剩 `gen.synthetic` 与 `util.reroute`，
-`lyflow_core.dll` 的导入表里只有 KERNEL32 与 CRT。
+`packs/*` 一个都不编。manifest 里只剩 core 自己的四个算子（`gen.synthetic`、`util.reroute`、
+`flow.fallback`、`flow.select`），`lyflow_core.dll` 的导入表里只有 KERNEL32 与 CRT。
 这一趟是「core 真的零依赖」的唯一证据，也是不装 PCL 就能开发平台本身的路子。
 依赖 `lyflow_pcl_support` 的包（gap、以及任何用 PCL 的包）在这一模式下会在
 configure 期直接报错 —— 那个目标由标准包提供。
+
+门禁的其余各步照跑，只有**要标准包算子的用例不跑，而且看得出没跑**：
+
+- Rust：`bridge/build.rs` 在 `LYFLOW_STD_PACKS=0` 时发 `--cfg std_packs_off`，这些测试标了
+  `#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]`，cargo 的汇总行写着「N ignored」。
+  默认构建不发这个 cfg，它们照跑；`core_ffi::tests::std_packs_are_built_unless_switched_off`
+  兜底 —— 开关没关却没有标准包的算子、或者关了却还有，都直接挂。
+- MCP：两条集成冒烟的图用 `filter.voxel_grid`，只有开关是 `0` 且 CLI 里确实没有它时才 skip 并打出原因。
+- `check.ps1` 收尾前再打一行黄字，说明上面的 ignored / skip 是这个模式有意为之。
+
+新写的测试用到标准包的算子（图里的节点、manifest 的算子个数、标准包注册的迁移），
+在 `#[test]` 下面加同一行。之所以按用例标 ignore，而不是在 `check.ps1` 里把 `cargo test` 与 MCP 冒烟整步跳过：
+整步跳过会把 bridge 里不靠标准包的那一大半（C ABI 加载与热重载、执行事件、配方、诊断……）一起丢掉，
+而它们恰好是「bridge 对着零依赖的 core 也能用」的证据。也没照 gap 测试那样查 manifest、没有就提前 `return`：
+Rust 的测试框架没有运行时 skip，提前 `return` 记成 passed，纯平台构建里几十条一条没跑，汇总行还是全绿。
 
 ### 带包和不带包混着跑
 

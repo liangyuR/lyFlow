@@ -154,7 +154,33 @@ mod tests {
         assert!(problems.is_empty(), "算子描述自检有问题: {problems:#?}");
     }
 
+    /// 标准包（ADR-0014）编没编进来只看 LYFLOW_STD_PACKS：纯平台构建里一个都不该有，
+    /// 默认构建里两个都得在。标了 `cfg_attr(std_packs_off, ignore)` 的测试靠这一条兜底 ——
+    /// ignored 只能是开关关了，不会是包悄悄没编进来。
     #[test]
+    fn std_packs_are_built_unless_switched_off() {
+        let v: serde_json::Value = serde_json::from_str(&manifest_json().unwrap()).unwrap();
+        let packs: std::collections::BTreeSet<&str> = v["operators"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|o| o["pack"].as_str())
+            .map(|p| p.split('@').next().unwrap())
+            .collect();
+        for pack in ["std-pointcloud", "std-ml"] {
+            if cfg!(std_packs_off) {
+                assert!(!packs.contains(pack), "LYFLOW_STD_PACKS=0，manifest 里却有 {pack} 的算子");
+            } else {
+                assert!(
+                    packs.contains(pack),
+                    "LYFLOW_STD_PACKS 没关，manifest 里却没有 {pack} 的算子: {packs:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn manifest_is_valid_json_with_expected_shape() {
         let raw = manifest_json().expect("读不到 manifest");
         let v: serde_json::Value = serde_json::from_str(&raw).expect("manifest 不是合法 JSON");
@@ -224,6 +250,7 @@ mod tests {
     /// /utf-8 编译开关掉了的话，中文 doc 会变成乱码 —— 而且只在前端才看得出来。
     /// 这条测试把它挡在 Rust 层。
     #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn chinese_doc_strings_survive_the_ffi_boundary() {
         let raw = manifest_json().unwrap();
         assert!(
@@ -320,6 +347,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn validate_accepts_a_good_graph() {
         let core = core().unwrap();
         let doc = serde_json::json!({

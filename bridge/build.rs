@@ -146,6 +146,12 @@ fn main() {
         _ => "1".to_string(),
     };
     println!("cargo:rerun-if-env-changed=LYFLOW_STD_PACKS");
+    // 纯平台构建里要标准包算子的测试记 ignored（cargo 汇总行里有数），默认构建照跑。
+    // Rust 的测试没有运行时 skip，提前 return 会记成 passed（docs/op-packs.md「纯平台构建」）
+    println!("cargo:rustc-check-cfg=cfg(std_packs_off)");
+    if std_packs == "0" {
+        println!("cargo:rustc-cfg=std_packs_off");
+    }
     let packs_root = core.parent().expect("core 应当有父目录").join("packs");
     if std_packs != "0" && packs_root.is_dir() {
         let (mut pf, mut pd) = (Vec::new(), Vec::new());

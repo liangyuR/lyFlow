@@ -1010,6 +1010,7 @@ mod tests {
 
     /// ADR-0007：stale 标记的权威在 C++。前端只对 cacheKey，不自己推。
     #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn plan_graph_reports_cache_keys_and_levels() {
         // seed 77 是本测试专属：靠它拿到 cached=false，不能清进程级缓存 ——
         // 那会把并行跑着的别的测试刚放进结果仓的结果一并清掉。
@@ -1052,6 +1053,7 @@ mod tests {
     /// param-recipe P1 验收 1：带完整规格的图参数、老格式的图参数，存盘再读回一个字段都不丢，
     /// 键顺序也不变（存盘是给人 diff 的）。夹具就是 pnpm check 对着 schema 校验的那一份。
     #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn graph_params_full_spec_survives_a_save_load_roundtrip() {
         let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../schema/examples/graph-params.example.lyflow.json");
@@ -1091,6 +1093,7 @@ mod tests {
     /// param-recipe P1.5 / K5：validate 与 plan 带上编辑器合成的图参数取值，经 C ABI 的
     /// params_json 交给 core —— 诊断与 cacheKey 反映的是这组值，不是 doc 里的 default。
     #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn validate_and_plan_carry_graph_param_values() {
         let mut doc = graph_with(
             serde_json::json!([
@@ -1155,6 +1158,7 @@ mod tests {
 
     /// ADR-0008：C++ 出诊断，前端写回。桥接层只负责把迁移动作从诊断里挑出来。
     #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn load_graph_returns_migrations_for_an_old_document() {
         let dir = std::env::temp_dir().join("lyflow-test-migration");
         std::fs::create_dir_all(&dir).unwrap();
