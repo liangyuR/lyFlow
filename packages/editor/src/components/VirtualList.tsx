@@ -76,6 +76,9 @@ export function VirtualList<T>({ items, keyOf, estimate, render, overscan = 400,
               const node = e.target as HTMLElement;
               const key = node.dataset.vkey;
               if (!key) continue;
+              // 不在排版里的行（刚滚出视口被卸掉、下面摘观察的 effect 还没跑；或祖先 display:none）
+              // 会先报一次 0×0。那不是它的高度：记成 0 会把它之后的偏移全压扁，scrollToKey 与补偿一起跑偏
+              if (node.offsetParent === null) continue;
               const h = node.offsetHeight;
               const old = heights.current.get(key);
               if (old === h) continue;

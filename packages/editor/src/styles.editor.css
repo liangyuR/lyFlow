@@ -953,7 +953,15 @@
   overflow: hidden;
 }
 
-.viewer__canvas canvas { display: block; }
+/* CSS 尺寸必须写死成铺满宿主：renderer.setSize(w, h, false) 只设绘图缓冲（w·DPR 像素）不写 style，
+   不定宽高时画布按缓冲的像素数当 CSS 尺寸摊开 —— 150% 缩放下比宿主大一半、右下被裁掉，拖框层也跟着错位 */
+.viewer__canvas canvas {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
 
 /* 空态文案压在画布上而不是替换它：换来换去会让 WebGL 上下文反复销毁重建 */
 .viewer__empty {

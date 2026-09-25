@@ -381,6 +381,14 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
   就一条命中路径都没有了 —— 双击开 Peek、右键菜单、e2e 找线全靠它。
 - **React Flow 的 `nodeDragThreshold` 会吞掉第一段位移。** 拖拽类的 CDP 断言必须先
   发一个 2 px 的「唤醒」移动，否则落点永远差第一步那么多，位移越大差得越多。
+- **3D 视图的画布要在 CSS 里显式铺满宿主。** `renderer.setSize(w, h, false)` 只设绘图缓冲（w·DPR 像素）、
+  不写 style；画布没定宽高时按缓冲的像素数当 CSS 尺寸摊开。100% 缩放下两者相等看不出来，150% 下画布比宿主
+  大一半、右下三分之一被裁掉：画面中心跑到可见区右下角，2D 拖框层按画布尺寸摆的框有的落在可见区外、拖不到。
+  `.viewer__canvas canvas` 现在与 peek 的 CloudView 一样绝对定位、宽高 100%。
+- **ResizeObserver 会给刚卸掉的元素报一次 0×0。** 虚拟列表的行滚出视口被卸掉后，摘观察的 effect 跑之前
+  观察回调可能先到；把这个 0 当行高记下，后面的偏移整体塌缩，`scrollToKey` 与视口补偿一起跑偏（P2 验收 9：
+  画布上选中节点，面板没滚到那一节）。回调里跳过 `offsetParent === null`（不在排版里）的行。谁先到是时序竞争，
+  这台机器 150% 缩放下每次都是回调先到。
 
 ## 图参数（param-recipe P1）
 
