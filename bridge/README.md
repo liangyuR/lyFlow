@@ -335,7 +335,11 @@ lyflow patch 4.lyflow.json --rewire n_fb_line:out=n_fit_base:line -o short.lyflo
 `watcher::spawn_library` 盯着它们，`*.lyflow-op.json` 变了就重扫并推一条
 `manifest-updated` —— 与热重载同一条通路，前端零改动。
 
-重扫会重建注册表，所以必须先 `RunManager::drop_all()`，理由与热重载完全一样。
+重扫会重建注册表，所以必须先 `RunManager::stop_active()`：正在跑的 run 握着 `OperatorDesc` 指针。
+上一次跑完的那个**留着** —— 重扫不换 DLL，它在结果仓里的数据照样有效；以前这里用的是 `drop_all()`，
+存库后 400 ms watcher 再扫一遍时放掉了刚跑完的 run，界面显示「完成」、按它的 runId 却取不到输出。
+`drop_all()` 只给热重载用（换 DLL，要连结果仓一起清空，ADR-0009）。
+watcher 扫之前先比一遍库文件的（路径, 大小, 修改时间）：存库、手动重扫已经扫过的那次写盘不再扫第二遍。
 
 ## 启动自检
 

@@ -154,8 +154,26 @@ impl RunManager {
         }
     }
 
+    /// 停掉正在跑的那个，上一次跑完的留着。重扫库目录前调（ADR-0010）：注册表要重建，
+    /// 正在跑的 run 手里握着 OperatorDesc 指针；跑完的只剩结果仓里的索引，DLL 也没换代，
+    /// 它的数据照样安全。放掉它的话，界面上显示「完成」的节点按这个 runId 就取不到输出了。
+    /// 被停掉的那个与被抢占同理，不进 finished 槽。
+    pub fn stop_active(&self) {
+        let active = self
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .active
+            .take();
+        if let Some(run) = active {
+            run.cancel();
+            run.join();
+        }
+    }
+
     /// 放掉全部 run。热重载前必须调 —— 只要还有一个 RunHandle 活着，
     /// 旧 DLL 的引用计数就归不了零，新一代加载了也顶不掉它（ADR-0009）。
+    /// 重扫库目录不换 DLL，用不着它，见 `stop_active`。
     pub fn drop_all(&self) {
         let (active, finished) = {
             let mut st = self.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -167,6 +185,13 @@ impl RunManager {
         }
         drop(active);
         drop(finished);
+    }
+
+    /// 把一个跑完的 run 放进 finished 槽。`start` 要 AppHandle 推事件，测试里没有 ——
+    /// 测试自己起 run、收事件，再交给这里，模拟「上一次跑完、留着给 3D 视图取」的状态。
+    #[cfg(test)]
+    pub fn adopt_finished(&self, handle: RunHandle) {
+        self.inner.lock().unwrap().finished = Some(Arc::new(handle));
     }
 
     /// 当前是否还有活跃的运行。
@@ -944,6 +969,57 @@ mod tests {
             !bad.kind("node_state").iter().any(|e| e["state"] == "running"),
             "越界的图参数值不该让任何节点开跑"
         );
+    }
+
+    /// 重扫库目录不能放掉上一次跑完的 run（param-recipe-p2-acceptance「P2 之外发现的问题」）。
+    /// 存库之后 400 ms，库目录 watcher 会再扫一遍；那时刚跑完的 run 已经进了 finished 槽，
+    /// 以前这里 drop_all → lyflow_run_free → 索引没了、数据还在：界面显示「完成」，按这个 runId
+    /// 取点云却是「core 没有该结果」，下一次运行又全部命中缓存。
+    #[test]
+    fn library_rescan_keeps_the_finished_run_readable() {
+        let core = crate::core_ffi::core().expect("加载 core 失败");
+        let manager = RunManager::new();
+        let run_once = || {
+            let run_id = ulid::new();
+            let ctx = Box::new(Collector {
+                events: Mutex::new(Vec::new()),
+            });
+            let ptr = &*ctx as *const Collector;
+            let graph = two_node_graph(7401).to_string();
+            let spec = RunSpec::new(&graph, &run_id, "", &[]);
+            let handle =
+                unsafe { RunHandle::start(Arc::clone(&core), spec, collect, ctx) }.unwrap();
+            handle.join();
+            let events = unsafe { (*ptr).events.lock().unwrap().clone() };
+            (run_id, handle, events)
+        };
+
+        let (first, handle, _) = run_once();
+        manager.adopt_finished(handle);
+        assert!(core.output_cloud(&first, "v", "cloud", 0).is_ok());
+
+        // 空目录：注册表不增不减。往进程级注册表里真加一个库算子会让并行跑着的
+        // 别的测试手里的 OperatorDesc* 失效 —— 要验的是 RunManager 这一侧，与库里有什么无关
+        let dir = std::env::temp_dir().join(format!("lyflow-lib-rescan-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::commands::rescan_library_dirs(&manager, vec![dir.to_string_lossy().into_owned()])
+            .expect("重扫失败");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let view = core
+            .output_cloud(&first, "v", "cloud", 0)
+            .expect("重扫之后，上一次跑完的 run 按它的 runId 仍应取得到点云");
+        assert!(view.total_points() > 0);
+
+        // 下一次运行命中缓存，按新 runId 同样取得到
+        let (second, handle, events) = run_once();
+        let skipped = events
+            .iter()
+            .filter(|e| e["kind"] == "node_state" && e["state"] == "skipped")
+            .count();
+        assert_eq!(skipped, 2, "两个节点都应命中缓存: {events:#?}");
+        assert!(core.output_cloud(&second, "v", "cloud", 0).is_ok());
+        drop(handle);
     }
 
     #[test]

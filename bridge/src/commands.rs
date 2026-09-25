@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 use tauri::Manager;
 
 use crate::core_ffi;
@@ -462,11 +462,57 @@ pub fn library_dirs(app: &tauri::AppHandle) -> Result<Vec<String>, String> {
     Ok(dirs)
 }
 
-/// 重扫一遍库目录。调用方必须保证没有活跃 run —— 它会重建注册表。
-pub fn rescan_library(app: &tauri::AppHandle) -> Result<LibraryStatus, String> {
-    let dirs = library_dirs(app)?;
+/// 库目录里每个 `*.lyflow-op.json` 的（路径, 大小, 修改时间），排好序。
+type LibraryFingerprint = Vec<(PathBuf, u64, Option<std::time::SystemTime>)>;
+
+/// 上一次重扫时库目录的样子。watcher 拿它认出「这次变动已经扫过了」。
+static LAST_SCAN: Mutex<Option<LibraryFingerprint>> = Mutex::new(None);
+
+fn library_fingerprint(dirs: &[String]) -> LibraryFingerprint {
+    let mut out = Vec::new();
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.to_string_lossy().ends_with(".lyflow-op.json") {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            if meta.is_file() {
+                out.push((path, meta.len(), meta.modified().ok()));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// 库目录自上一次重扫以来有没有变过。存库、手动重扫都是先写盘再扫，
+/// 400 ms 之后 watcher 还会为同一次写盘再来一遍 —— 那一遍什么都换不来，
+/// 却会把这 400 ms 里刚开跑的 run 停掉。
+pub fn library_changed_since_scan(dirs: &[String]) -> bool {
+    let now = library_fingerprint(dirs);
+    LAST_SCAN.lock().unwrap_or_else(|e| e.into_inner()).as_ref() != Some(&now)
+}
+
+/// 重扫一遍库目录。
+pub fn rescan_library(app: &tauri::AppHandle, runs: &RunManager) -> Result<LibraryStatus, String> {
+    rescan_library_dirs(runs, library_dirs(app)?)
+}
+
+/// 重建注册表之前只停活跃的 run，上一次跑完的留着（`RunManager::stop_active`）：
+/// 不换 DLL，结果仓里的数据照样有效；drop_all 是热重载的事（ADR-0009）。
+pub fn rescan_library_dirs(runs: &RunManager, dirs: Vec<String>) -> Result<LibraryStatus, String> {
+    runs.stop_active();
+    // 扫之前取：扫的途中文件又变了的话，记下的是旧样子，watcher 会再扫一遍
+    let seen = library_fingerprint(&dirs);
     let core = core_ffi::core()?;
     let problems = core.set_library_dirs(&dirs).map_err(|e| e.to_string())?;
+    *LAST_SCAN.lock().unwrap_or_else(|e| e.into_inner()) = Some(seen);
     // 算子集合变了，缓存的 manifest 立刻作废
     *MANIFEST.write().unwrap_or_else(|e| e.into_inner()) = None;
     Ok(LibraryStatus {
@@ -498,8 +544,7 @@ pub fn refresh_library(
     app: tauri::AppHandle,
     runs: tauri::State<'_, RunManager>,
 ) -> Result<LibraryRefresh, String> {
-    runs.drop_all();
-    let status = rescan_library(&app)?;
+    let status = rescan_library(&app, &runs)?;
     Ok(LibraryRefresh {
         status,
         manifest: manifest_value()?,
@@ -576,8 +621,7 @@ pub fn save_as_library(
     text.push('\n');
     std::fs::write(&file, text).map_err(|e| format!("写入 {} 失败: {e}", file.display()))?;
 
-    runs.drop_all();
-    rescan_library(&app)
+    rescan_library(&app, &runs)
 }
 
 // ---- 最近文件与备份
@@ -867,6 +911,33 @@ pub fn rename_recipe_file(from: String, to: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// watcher 跳过「已经扫过的那次写盘」全靠它：只认库文件，增、删、改都看得出来。
+    #[test]
+    fn library_fingerprint_sees_add_change_and_delete() {
+        let dir = std::env::temp_dir().join(format!("lyflow-lib-fp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dirs = vec![dir.to_string_lossy().into_owned()];
+        let empty = library_fingerprint(&dirs);
+        assert!(empty.is_empty());
+
+        std::fs::write(dir.join("notes.txt"), "x").unwrap();
+        assert_eq!(library_fingerprint(&dirs), empty, "不是库文件的不算");
+
+        let file = dir.join("a.lyflow-op.json");
+        std::fs::write(&file, "{}").unwrap();
+        let one = library_fingerprint(&dirs);
+        assert_eq!(one.len(), 1);
+        assert_eq!(library_fingerprint(&dirs), one, "没动就一样");
+
+        std::fs::write(&file, "{ }").unwrap();
+        assert_ne!(library_fingerprint(&dirs), one, "内容变了");
+
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(library_fingerprint(&dirs), empty, "删掉了");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn manifest_command_returns_parsed_json() {

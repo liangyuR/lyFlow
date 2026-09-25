@@ -57,7 +57,9 @@ pub fn run() {
         .setup(|app| {
             watcher::spawn(app.handle().clone());
             // 库算子目录（ADR-0010）。扫不出来只是少几个算子，不该拦住启动。
-            match commands::rescan_library(app.handle()) {
+            use tauri::Manager;
+            let runs = app.state::<execution::RunManager>();
+            match commands::rescan_library(app.handle(), &runs) {
                 Ok(status) if !status.problems.is_empty() => {
                     for p in &status.problems {
                         eprintln!("库算子: {p}");

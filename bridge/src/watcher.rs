@@ -175,11 +175,19 @@ fn is_library_file(p: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// 只在库目录真的变了时重扫：save_as_library / refresh_library 已经扫过的那次写盘，
+/// 这里再扫一遍只会停掉用户刚开跑的 run。
 fn reload_library(app: &AppHandle) {
-    if let Some(runs) = app.try_state::<RunManager>() {
-        runs.drop_all();
+    let Some(runs) = app.try_state::<RunManager>() else {
+        return;
+    };
+    let Ok(dirs) = crate::commands::library_dirs(app) else {
+        return;
+    };
+    if !crate::commands::library_changed_since_scan(&dirs) {
+        return;
     }
-    match crate::commands::rescan_library(app) {
+    match crate::commands::rescan_library_dirs(&runs, dirs) {
         Ok(status) => {
             let payload = core_ffi::core()
                 .and_then(|c| c.manifest_json().map_err(|e| e.to_string()))

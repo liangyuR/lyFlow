@@ -1037,15 +1037,12 @@ async function suitePerf(cdp, report, ws) {
   await newDoc(cdp);
 }
 
-// 顺序有意义：suiteSubgraphShared 里存库、重扫库目录（refresh_library 会 drop 掉全部运行）；那之后的第一次运行
-// 全部命中缓存却取不到点云（「core 没有该结果」，见 docs/param-recipe-p2-acceptance.md「P2 之外发现的问题」），
-// 要 2D 视图底图的 ROI 一组排在它前面。
 export const paramsP2Suites = [
   suiteLayout,
   suiteAllTypes,
   suiteConditions,
   suiteSearchFilter,
-  suiteRoi,
   suiteSubgraphShared,
+  suiteRoi,
   suitePerf,
 ];

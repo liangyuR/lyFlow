@@ -56,8 +56,10 @@
 既满足自检，又能在「展开漏了」时立刻炸出来而不是静默产出空结果。
 
 **注册表会在运行时变。** `lyflow_set_library_dirs` 重建注册表的后半段，
-这会让已有的 `OperatorDesc*` 失效。约定与热重载（ADR-0009）完全一致：
-调用前调用方必须放掉所有 `RunHandle`。
+这会让已有的 `OperatorDesc*` 失效。调用前调用方必须停掉所有**活跃**的 run
+（`RunManager::stop_active`）。跑完的 run 已经 join，手里只剩 runId 与结果仓里的索引，
+不持有 `OperatorDesc*`；重扫又不换 DLL，所以它留着 —— 与热重载（ADR-0009）不同，
+那边换 DLL，要连同结果仓放掉全部 `RunHandle`。
 
 ## 备选方案
 
