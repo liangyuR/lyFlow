@@ -279,12 +279,89 @@ Port optionalRecord(const char* name, const char* label, const char* doc, const 
   return withContract(optional(name, "Record", label, doc), {{"recordType", recordType}});
 }
 
+const MigrationInput* inputOn(const std::vector<MigrationInput>& inputs, const char* port) {
+  for (const MigrationInput& in : inputs) {
+    if (in.port == port) return &in;
+  }
+  return nullptr;
+}
+
+std::string joinNames(const std::vector<std::string>& names) {
+  std::string out;
+  for (const std::string& n : names) out += (out.empty() ? "" : "、") + n;
+  return out;
+}
+
+/// v1 → v2（m8a 删掉的七个散端口，ADR-0025）。三片云齐全就收进一个新插的 make_scan_pair 接到 scan，
+/// 四个框齐全就收进 make_roi_set 接到 rois —— 汇总出来的点数与框和 v1 逐项相同。
+/// 不齐全的没法拼成 Bundle（两种 Bundle 的字段都是必填），只能删边，notes 写明哪几项从此不再记录。
+TopologyEdit migrateResultBundleFromV1(const nlohmann::json&,
+                                       const std::vector<MigrationInput>& inputs) {
+  TopologyEdit edit;
+  struct Group {
+    const char* key;
+    const char* op;
+    const char* target;
+    std::array<const char*, 4> oldPorts;
+    std::array<const char*, 4> fields;
+    std::size_t size;
+    const char* lost;
+  };
+  static const Group kGroups[2] = {
+      {"scan", "gap.make_scan_pair", "scan", {"cloudPrimary", "cloudSecondary", "cloudMerged", ""},
+       {"primary", "secondary", "merged", ""}, 3,
+       "point_counts 的 input_* / preprocess_* / filter_after_*、input_point_count、"
+       "preprocessed_point_count、left_point_count / right_point_count 从此记 0 或缺省"},
+      {"rois", "gap.make_roi_set", "rois", {"roiFlushBase", "roiFlushRef", "roiGapLeft", "roiGapRight"},
+       {"datum", "target", "seamLeft", "seamRight"}, 4,
+       "effective_roi 里对应的框从此不再记录"},
+  };
+  const bool cropStatus = inputOn(inputs, "cropStatus") != nullptr;
+  for (const Group& g : kGroups) {
+    std::vector<std::string> present;
+    for (std::size_t k = 0; k < g.size; ++k) {
+      if (inputOn(inputs, g.oldPorts[k])) present.push_back(g.oldPorts[k]);
+    }
+    if (present.empty()) continue;
+    for (const std::string& p : present) edit.dropInputs.push_back(p);
+    const bool complete = present.size() == g.size;
+    if (complete && !inputOn(inputs, g.target)) {
+      TopologyEdit::NewNode node;
+      node.key = g.key;
+      node.op = g.op;
+      if (std::string(g.key) == "rois") {
+        // v1 的 roi_source 按接了 cropStatus（model）还是 alignment（template）推断；
+        // v2 取 rois.info.source，所以把推断的结果写成 make_roi_set 的 source
+        node.params = {{"source", cropStatus ? "model" : "template"}};
+        node.title = "组角色框（迁移）";
+      } else {
+        node.title = "组剖面对（迁移）";
+      }
+      edit.addNodes.push_back(std::move(node));
+      for (std::size_t k = 0; k < g.size; ++k) {
+        const MigrationInput* in = inputOn(inputs, g.oldPorts[k]);
+        edit.addEdges.push_back({in->fromNode, in->fromPort, std::string("@new:") + g.key, g.fields[k]});
+      }
+      edit.addEdges.push_back({std::string("@new:") + g.key, g.target, "@self", g.target});
+      edit.notes.push_back(joinNames(present) + " 收进新插的 " + g.op + "，接到 " + g.target +
+                           "：汇总结果与 v1 相同");
+    } else if (complete) {
+      edit.notes.push_back(joinNames(present) + " 已删：" + g.target + " 已经接了，以它为准");
+    } else {
+      edit.notes.push_back(joinNames(present) + " 已删，没有等价接法：" + g.target + " 要 " +
+                           std::to_string(g.size) + " 项齐全，这张图只接了 " +
+                           std::to_string(present.size()) + " 项；" + g.lost);
+    }
+  }
+  return edit;
+}
+
 }  // namespace
 
 void registerResultBundle(Registry& r) {
   OperatorDesc op;
   op.id = "gap.result_bundle";
-  op.version = "1.1.0";
+  op.version = "2.0.0";
   op.label = "结果汇总";
   op.category = "间隙/测量";
   op.keywords = {"bundle", "quality", "diagnostics", "汇总", "质量"};
@@ -330,6 +407,7 @@ void registerResultBundle(Registry& r) {
   };
   op.capabilities = {false, true, true};
   op.compute = &resultBundle;
+  op.migrations = {Migration{1, nullptr, &migrateResultBundleFromV1}};
   r.addOperator(std::move(op));
 }
 

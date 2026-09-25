@@ -355,11 +355,24 @@ op.migrations = { Migration{1, &migrateFromV1} };   // json(const json&)
 迁移逻辑不能在前端，否则脚本生成的图和 headless 执行走不到迁移；
 写回不能在 C++，因为它不拥有文档（ADR-0002）。
 
-迁移只碰参数。端口改名、增删要靠新算子 id + `aliases` —— 连线不归算子管，
-它没法在自己的迁移函数里改边。
+端口增删时连线也要跟着改：迁移步骤另给一个拓扑函数（[ADR-0025](adr/0025-topology-migration.md)），
+拿该节点的全部入边，还一份「删哪些入边、插哪些节点、加哪些边」：
+
+```cpp
+op.version = "2.0.0";
+op.migrations = { Migration{1, nullptr, &migrateTopologyFromV1} };  // 只动连线时 apply 可以空着
+```
+
+core 在内存里照做，迁移诊断多一个 `edits`（`removeEdges` / `addNodes` / `addEdges`，id 都已分配好），
+编辑器的 `applyMigrations` 与 `lyflow migrate --write` 照着写回。凑不成等价接法的就删边，
+notes 写明哪几项从此不再记录。
+
+没打 `opVersion` 的节点按 v1 的写法去试迁移，只有真改动了才出迁移诊断 ——
+所以迁移函数（参数的与拓扑的）都必须对新写法幂等。
 
 现成的例子：`filter.random_sample` 1.0.0 → 2.0.0，`count`/`ratio` 改名成
-`keepCount`/`keepRatio`。
+`keepCount`/`keepRatio`；`gap.result_bundle` 1.x → 2.0.0，七个散端口的边收进新插的
+`gap.make_scan_pair` / `gap.make_roi_set`（凑不齐就删边）。
 
 ## 热重载
 

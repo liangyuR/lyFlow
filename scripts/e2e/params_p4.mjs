@@ -123,13 +123,15 @@ async function suiteCliMatchesEditor(cdp, report, ws) {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
   const graphFile = path.join(dir, "点2 开口与面差.lyflow.json");
-  // 线上那张图原样拷来，只动两处不碰量测参数的地方：① 三条连到 gap.result_bundle 的 cloudPrimary / cloudSecondary /
-  // cloudMerged 的边（这三个端口 m8a 起已经没有了，现在的 core 校验不过）；② n_load.layout = profile（cloud/KUN10 里
-  // 归档的是剖面拍平的布局，当时调参用的是另转成传感器布局的一份，那一份已经不在了）
+  // 线上那张图原样拷来。09-25 起它自己就是 result_bundle v2 的接法、n_load.layout = profile
+  // （docs/kun10-graphs-migration-acceptance.md），这里不再替它改任何东西
   const src = JSON.parse(fs.readFileSync(graphSrc, "utf8"));
-  const stale = new Set(["cloudPrimary", "cloudSecondary", "cloudMerged"]);
-  src.edges = src.edges.filter((e) => !(e.to.node === "n_bundle" && stale.has(e.to.port)));
-  src.nodes.find((n) => n.id === "n_load").params.layout = "profile";
+  report.eq("线上图的 n_load.layout 是 profile", src.nodes.find((n) => n.id === "n_load").params.layout, "profile");
+  report.eq(
+    "线上图的 result_bundle 已是 v2",
+    src.nodes.find((n) => n.id === "n_bundle").opVersion,
+    "2.0.0",
+  );
   fs.writeFileSync(graphFile, JSON.stringify(src, null, 2), "utf8");
   const recipeFile = path.join(dir, "点2 开口与面差.recipes", `${RECIPE}.lyflow-recipe.json`);
 

@@ -35,14 +35,52 @@ using ValidateFn = std::vector<Issue> (*)(const ParamView&,
                                           const std::set<std::string>& connectedInputs);
 
 /// 主版本升级时的参数改写：拿旧参数对象，还一份新的（ADR-0008）。
-/// 只碰参数 —— 端口改名要靠新算子 + aliases，因为连线不归算子管。
+/// 连线的改写另走 MigrateTopologyFn（ADR-0025）。
 using MigrateFn = nlohmann::json (*)(const nlohmann::json&);
+
+/// 拓扑迁移看得见的一条入边：上游 fromNode.fromPort 连到本节点的 port（ADR-0025）。
+struct MigrationInput {
+  std::string port;
+  std::string fromNode;
+  std::string fromPort;
+  std::string fromOp;
+};
+
+/// 拓扑迁移要做的改动。节点引用写 "@self"（被迁移的节点）、"@new:<key>"（本次插入的节点）
+/// 或已有节点的 id；插入节点的真实 id 由 core 分配，保证不与图里已有的撞。
+struct TopologyEdit {
+  struct NewNode {
+    std::string key;
+    std::string op;
+    nlohmann::json params = nlohmann::json::object();
+    std::string title;
+  };
+  struct NewEdge {
+    std::string fromNode, fromPort;
+    std::string toNode, toPort;
+  };
+  /// 删掉连到本节点这些输入端口的边。
+  std::vector<std::string> dropInputs;
+  std::vector<NewNode> addNodes;
+  std::vector<NewEdge> addEdges;
+  /// 逐条说明做了什么、丢了什么 —— 进迁移诊断的 notes。
+  std::vector<std::string> notes;
+
+  bool empty() const { return dropInputs.empty() && addNodes.empty() && addEdges.empty(); }
+};
+
+/// 端口增删时的连线改写（ADR-0025）。拿该步迁移之前的参数与本节点的全部入边，
+/// 还一份改动。纯函数；对已经是新接法的节点必须返回空改动（没打 opVersion 的节点也会走到这里）。
+using MigrateTopologyFn = TopologyEdit (*)(const nlohmann::json& params,
+                                           const std::vector<MigrationInput>& inputs);
 
 /// 从 fromMajor 升到 fromMajor+1 的一步。链条必须覆盖 1..current-1，
 /// 缺一环 Registry::validate() 就报 —— 半条链比没有链更难查。
+/// apply 与 topology 至少给一个：只动连线的一步不必写一个原样返回参数的 apply。
 struct Migration {
   int fromMajor = 1;
   MigrateFn apply = nullptr;
+  MigrateTopologyFn topology = nullptr;
 };
 
 // ------------------------------- Value —— 参数默认值（只覆盖 param.default 的形态）

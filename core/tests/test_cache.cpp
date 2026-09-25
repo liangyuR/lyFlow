@@ -543,6 +543,153 @@ TEST_CASE("注册表自检：迁移链断档会被挡在启动时") {
   whole.addType(PortType{"Transform", "#a0d030", {}, ""});
   whole.addOperator(makeOp("3.0.0", {Migration{1, identity}, Migration{2, identity}}));
   CHECK(whole.validate().empty());
+
+  // 只动连线的一步（ADR-0025）不必写 apply；两样都没有才算断档
+  auto noEdits = [](const nlohmann::json&, const std::vector<MigrationInput>&) {
+    return TopologyEdit{};
+  };
+  Registry topologyOnly;
+  topologyOnly.addType(PortType{"Transform", "#a0d030", {}, ""});
+  topologyOnly.addOperator(makeOp("2.0.0", {Migration{1, nullptr, noEdits}}));
+  CHECK(topologyOnly.validate().empty());
+  Registry empty;
+  empty.addType(PortType{"Transform", "#a0d030", {}, ""});
+  empty.addOperator(makeOp("2.0.0", {Migration{1, nullptr, nullptr}}));
+  CHECK_FALSE(empty.validate().empty());
+}
+
+TEST_CASE("拓扑迁移（ADR-0025）：删掉旧端口的边、插一个节点接到新端口，插进来的节点进计划") {
+  ensureTestOps();
+  Registry r;
+  r.addType(PortType{"Transform", "#a0d030", {}, ""});
+  auto pass = [](const Inputs& in, const ParamView&, Outputs& o, ExecContext&) {
+    o.set("out", in.has("x") ? in.get("x") : in.get("in"));
+    return Status::Ok();
+  };
+  {
+    OperatorDesc op;
+    op.id = "test.t_src";
+    op.version = "1.0.0";
+    op.label = "Src";
+    op.category = "Test";
+    op.outputs = {Port{"out", "Transform", "Out", "", true}};
+    op.compute = [](const Inputs&, const ParamView&, Outputs& o, ExecContext&) {
+      o.set("out", Data::transform(Transform{}));
+      return Status::Ok();
+    };
+    r.addOperator(std::move(op));
+  }
+  {
+    OperatorDesc op;
+    op.id = "test.t_pack";
+    op.version = "1.0.0";
+    op.label = "Pack";
+    op.category = "Test";
+    op.inputs = {Port{"x", "Transform", "X", "", true}};
+    op.outputs = {Port{"out", "Transform", "Out", "", true}};
+    op.compute = pass;
+    r.addOperator(std::move(op));
+  }
+  {
+    OperatorDesc op;
+    op.id = "test.t_sink";
+    op.version = "2.0.0";
+    op.label = "Sink";
+    op.category = "Test";
+    op.inputs = {Port{"in", "Transform", "In", "", false}};
+    op.outputs = {Port{"out", "Transform", "Out", "", true}};
+    op.compute = [](const Inputs&, const ParamView&, Outputs& o, ExecContext&) {
+      o.set("out", Data::transform(Transform{}));
+      return Status::Ok();
+    };
+    op.migrations = {Migration{
+        1, nullptr, [](const nlohmann::json&, const std::vector<MigrationInput>& inputs) {
+          TopologyEdit e;
+          for (const MigrationInput& in : inputs) {
+            if (in.port != "old") continue;
+            CHECK(in.fromOp == "test.t_src");
+            e.dropInputs.push_back("old");
+            e.addNodes.push_back({"pack", "test.t_pack", nlohmann::json::object(), "打包"});
+            e.addEdges.push_back({in.fromNode, in.fromPort, "@new:pack", "x"});
+            e.addEdges.push_back({"@new:pack", "out", "@self", "in"});
+            e.notes.push_back("old 收进 t_pack，接到 in");
+          }
+          return e;
+        }}};
+    r.addOperator(std::move(op));
+  }
+  REQUIRE(r.validate().empty());
+
+  // s_pack 这个 id 已被占：插进来的节点得换一个
+  Json doc = makeGraph({{"a", "test.t_src"}, {"s", "test.t_sink"}, {"s_pack", "test.t_src"}},
+                       {{"a.out", "s.old"}});
+  doc["nodes"][1]["opVersion"] = "1.0.0";
+  exec::RawGraph raw;
+  Diagnostics diags;
+  REQUIRE(exec::parseGraph(doc.dump(), raw, diags));
+  exec::Plan plan;
+  exec::BuildOptions options;
+  options.runId = "topology";
+  REQUIRE(exec::buildPlan(r, raw, options, plan, diags));
+
+  const Json out = Json::parse(diags.toJson());
+  REQUIRE(out.size() == 1);
+  const Json& m = out[0];
+  CHECK(m["kind"] == "migration");
+  REQUIRE(m.contains("edits"));
+  CHECK(m["edits"]["removeEdges"].size() == 1);
+  CHECK(m["edits"]["removeEdges"][0]["to"]["port"] == "old");
+  REQUIRE(m["edits"]["addNodes"].size() == 1);
+  CHECK(m["edits"]["addNodes"][0]["id"] == "s_pack_2");
+  CHECK(m["edits"]["addNodes"][0]["op"] == "test.t_pack");
+  CHECK(m["edits"]["addNodes"][0]["title"] == "打包");
+  REQUIRE(m["edits"]["addEdges"].size() == 2);
+  CHECK(m["edits"]["addEdges"][0]["to"] == Json{{"node", "s_pack_2"}, {"port", "x"}});
+  CHECK(m["edits"]["addEdges"][1]["from"] == Json{{"node", "s_pack_2"}, {"port", "out"}});
+  CHECK(m["edits"]["addEdges"][1]["to"] == Json{{"node", "s"}, {"port", "in"}});
+  bool noted = false;
+  for (const Json& n : m["notes"]) noted = noted || n == "old 收进 t_pack，接到 in";
+  CHECK(noted);
+
+  std::set<std::string> planned;
+  for (const auto& n : plan.nodes) {
+    planned.insert(n.id);
+    CHECK(n.valid);
+  }
+  CHECK(planned.count("s_pack_2") == 1);
+}
+
+TEST_CASE("没打 opVersion 的节点按 v1 的写法试迁移：真改了才出迁移诊断（ADR-0025）") {
+  ensureTestOps();
+  // v1 的写法：count 迁成 keepCount，老图当场能跑
+  const Json old = makeGraph(
+      {
+          {"g", "gen.synthetic", kSmall},
+          {"s", "test.migrated", Json{{"count", 100}}},
+      },
+      {{"g.cloud", "s.cloud"}});
+  const Json diags = Json::parse(exec::validateGraphJson(old.dump(), {}));
+  Json migration;
+  for (const Json& d : diags) {
+    CHECK(d.value("severity", "") != "error");
+    if (d.value("kind", "") == "migration") migration = d;
+  }
+  REQUIRE_FALSE(migration.is_null());
+  CHECK(migration["params"]["keepCount"] == 100);
+  CHECK(migration["opVersion"] == "2.0.0");
+  CHECK_FALSE(migration.contains("edits"));
+  CHECK(runGraph(old).nodeEvent("s", "done")["stats"]["elementCount"] == 100);
+
+  // 已经是 v2 的写法：迁移函数原样返回，不算迁移
+  const Json fresh = makeGraph(
+      {
+          {"g", "gen.synthetic", kSmall},
+          {"s", "test.migrated", Json{{"keepCount", 100}}},
+      },
+      {{"g.cloud", "s.cloud"}});
+  for (const Json& d : Json::parse(exec::validateGraphJson(fresh.dump(), {}))) {
+    CHECK(d.value("kind", "") != "migration");
+  }
 }
 
 // ------------------------------------------------------------- 1.6 参数联动
