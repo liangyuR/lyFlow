@@ -47,7 +47,7 @@ CMake + Ninja + vcpkg（PCL）。Ninja 通常不在 PATH 上，`build.rs` 会依
 `LYFLOW_NINJA` 环境变量 → PATH → VS 自带的那份（cmake.exe 旁边的 `../Ninja/`）
 → vswhere。都找不到就退回 CMake 默认生成器，慢但能用。
 
-### 两个踩过的坑
+### 三个踩过的坑
 
 - **别 `canonicalize()` core 的路径。** Windows 上它返回 `\\?\D:\...`，
   CMake 的 `file(GLOB)` 在这种扩展长度路径下一个文件都匹配不到，
@@ -56,6 +56,9 @@ CMake + Ninja + vcpkg（PCL）。Ninja 通常不在 PATH 上，`build.rs` 会依
   （tauri-build 2.6.3 的 `res.set_manifest`）。所以 `lyflow-app.manifest` 里
   必须自带 Tauri 原来的 Common-Controls v6 依赖，否则文件对话框会掉回旧样式，
   而且不报错。
+- **窗口必须 `"dragDropEnabled": false`**（`tauri.conf.json`）。缺省是开的：Tauri 在 Windows 上给窗口
+  注册自己的拖放目标，WebView2 里的 HTML5 拖放整个被吞掉 —— 算子面板拖不进画布，也不报错。e2e 的拖入用的是
+  合成的 DragEvent，看不见这一层；`m8b.mjs` 里有一条断言盯着这个配置。app 自己不收系统文件拖放，关掉没有代价。
 
 ## 暴露给前端的 command
 

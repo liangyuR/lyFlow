@@ -132,6 +132,16 @@
   background: var(--lyflow-accent);
 }
 
+/* 算子面板右缘的那一条：压在面板的边框上，不再多占宽度 */
+.app__splitter--left {
+  margin-left: -4px;
+  margin-right: -3px;
+}
+
+.app__splitter--left::after {
+  background: transparent;
+}
+
 /* 拖动分栏时禁掉选中与 iframe/canvas 的指针事件，否则鼠标一进画布就丢事件 */
 body.is-resizing {
   cursor: col-resize;

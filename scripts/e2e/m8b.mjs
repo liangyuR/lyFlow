@@ -600,4 +600,31 @@ async function suiteAutoConnect(cdp, report) {
   await cdp.eval(`window.__lyflow.stores.ui.getState().closeSearch(); window.__lyflow.stores.ui.getState().clearAutoHint(); return true;`);
 }
 
-export const m8bSuites = [suiteBuildFromBlank, suiteBundlePeek, suiteDragWrongSide, suiteAutoConnect];
+/** 算子面板：Tauri 不接管拖放（真窗口里拖得进画布的前提）；右缘分栏可拖宽并记住。
+ *  分栏的上下限、松手记宽与右侧分栏是同一个 useDragSplit，P2 验收 9 已经验过，这里不重复。 */
+async function suitePalette(cdp, report) {
+  report.section("算子面板：Tauri 不接管拖放；右缘分栏可拖宽");
+  // 合成 DragEvent 绕过了系统那一层，验不出窗口的拖放目标被 Tauri 占着（bridge/README「踩过的坑」）
+  const conf = JSON.parse(fs.readFileSync(path.join(ROOT, "bridge", "tauri.conf.json"), "utf8"));
+  report.eq("tauri.conf.json 的窗口 dragDropEnabled = false", conf.app?.windows?.[0]?.dragDropEnabled, false);
+
+  const KEY = "lyflow.palette.width";
+  const dom = () =>
+    cdp.eval(`
+      const side = document.querySelector('.app__sidebar').getBoundingClientRect();
+      const h = document.querySelector('[data-testid="left-splitter"]')?.getBoundingClientRect();
+      return { side: Math.round(side.width), left: Math.round(side.left), stored: localStorage.getItem(${lit(KEY)}),
+               handle: h ? { x: Math.round(h.left + h.width / 2), y: Math.round(h.top + h.height / 2) } : null };
+    `);
+  const d0 = await dom();
+  if (!d0.handle) return report.fail("面板右缘有分栏把手", JSON.stringify(d0));
+  await dragMouse(cdp, d0.handle, { x: d0.left + d0.side + 120, y: d0.handle.y }, { steps: 10 });
+  const d1 = await dom();
+  report.ok("真鼠标拖分栏：面板宽了约 120 px 并记进 localStorage",
+    Math.abs(d1.side - d0.side - 120) <= 3 && Math.abs(Number(d1.stored) - d1.side) <= 2, `${d0.side} → ${JSON.stringify(d1)}`);
+  // 还原：后面的分组按 280 的面板算坐标
+  await dragMouse(cdp, d1.handle, { x: d0.left + d0.side, y: d1.handle.y }, { steps: 10 });
+  await cdp.eval(`localStorage.removeItem(${lit(KEY)}); return true;`);
+}
+
+export const m8bSuites = [suiteBuildFromBlank, suiteBundlePeek, suiteDragWrongSide, suiteAutoConnect, suitePalette];
