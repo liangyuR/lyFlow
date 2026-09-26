@@ -21,7 +21,7 @@ noderun.mjs  节点运行按钮的分组（docs/node-run-plan.md §4 验收 7–
 params_p1.mjs 图参数成形的分组（docs/param-recipe-plan.md P1 验收 1–7：完整规格的往返与 core 校验、右键「纳入配方」、子图里的逐层提升链、被绑定行上编辑、RunOptions.params、P1.6 三项）
 params_p2.mjs 参数面板的分组（docs/param-recipe-plan.md P2 验收 9–15：开关 / 拖宽 / 最大化 / 宽度记忆与双向定位、14 种类型控件与 transform / curve 往返、advanced 折叠与联动条件、搜索与过滤 chip、子图定义共享与库算子只读、ROI 缩略图进拖框、1000 参数的性能）
 params_p3.mjs 配方的分组（docs/param-recipe-plan.md P3 验收 17–24：新建两个配方 Ctrl+S 落盘与重开还原、K6 ① ② ③ 与外部修改检测、K4 从基础重算、切配方后的缓存命中与自动运行、K7 撤销、矩阵三态 / 只看差异 / 单元格编辑 / 多选复制 / 越界阻止运行、四类失配与按建议修复、管理动作的磁盘结果与自动备份）
-params_p4.mjs 配方 P4 的分组（docs/param-recipe-plan.md P4 验收 26：真实 gap 图（KUN10 点 2）× 3 帧，编辑器选配方运行与 lyflow run --recipe 的 gap / flush 逐位相同、--param 覆盖配方；顺手修：1280 / 1366 / 1440 宽下工具栏图名框放下 8 个汉字）。数据在 LYFLOW_GAP_KUN10（缺省是本机的 luoshi 目录），CLI 用 bridge/target/debug/lyflow.exe（没带 gap 包时按当前 LYFLOW_PACKS 重编）
+params_p4.mjs 配方 P4 的分组（docs/param-recipe-plan.md P4 验收 26：真实 gap 图（KUN10 点 2）× 3 帧，编辑器选配方运行与 lyflow run --recipe 的 gap / flush 逐位相同、--param 覆盖配方；顺手修：1280 / 1366 / 1440 宽下工具栏图名框放下 8 个汉字）。数据在 LYFLOW_GAP_KUN10（缺省是本机的 luoshi 目录），CLI 用 bridge/target/debug/lyflow.exe（没带 gap 包时报失败并给出重编命令，不在 e2e 里现场编）
 record-noderun.mjs  节点运行按钮的演示截图（不接进 run.mjs）：七步各截一张到 docs/noderun-step-N.png
 record-params-p2.mjs 参数面板的验收截图（不接进 run.mjs）：docs/params-p2-panel.png 与 docs/params-p2-types.png
 record-params-p3.mjs 配方的验收截图（不接进 run.mjs）：docs/params-p3-toolbar-row.png、params-p3-matrix.png、params-p3-manage.png

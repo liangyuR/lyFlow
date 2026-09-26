@@ -498,7 +498,7 @@ TEST CASE:  force 给了不存在的 id：整图级失败
 - **V2 覆盖了预览**：live preview 发的是 `targets:[拖动的节点]` + preview，按 V2 也挂结果、不清节点表 —— 计划外、预览命名空间里没有结果的节点
   收场时退回 idle，与以前「预览运行清空整张节点表」的最终效果一致。`m4.mjs` 的 live preview 组（含 < 100 ms 的跟手延迟）照过。
 - **既有分组里依赖「运行到此会清空节点表」的断言**：逐个查了带 targets 的三处 ——
-  `run.mjs` 的「Run to node」（`run.nodes[tail] === undefined`）、`m3.mjs` 的「Shift+F5 跑到选中节点」（`run.nodes[tail] === undefined`）、
+  `run.mjs` 的「Run to node」（`run.nodes[tail] === undefined`；2026-09-26 精简时整组删掉，右键「运行到此节点」由本分组、Shift+F5 由 m3 覆盖）、`m3.mjs` 的「Shift+F5 跑到选中节点」（`run.nodes[tail] === undefined`）、
   `m4.mjs` 的 preview run（`targets:[sample]` 之后读源头点数）。前两处在同一组里先 `newDoc`（节点表清空）再做第一次运行，下游从来没跑过，
   按 V2 也不在表里，断言原样成立；第三处只读计划内节点。**三处都不用改，已随 705/705 跑过。** 真正按 V2 / V1 改写的是本分组自己：
   原验收 8（isolate 只重算 b）→ 18（单击命中缓存、Shift 真跑）；原 9（按钮因上游过时置灰）→ 17（按钮可点、预告上游）+ 19 的「仅此节点」置灰；
