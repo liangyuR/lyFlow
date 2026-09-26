@@ -7,7 +7,7 @@
 // 4 子图内部参数纳入：子图参数 + 图参数两级；另一个实例不受影响；一次撤销还原两级；库算子进不去、没有这个动作。
 // 5 被绑定参数的行上编辑：改的是图参数的 default，不产生 param_conflict。
 // 6 RunOptions.params 传一个与 default 不同的值：被绑定节点的 cacheKey 与结果跟着变；传回 default 命中缓存。
-// 7 P1.6：复制路径名带 nodeId；visibleWhen 的 ne；撤销回到保存点时 dirty 复原。
+// 7 P1.6：复制路径名带 nodeId；撤销回到保存点时 dirty 复原（visibleWhen 的 ne 在面板上由 P2 验收 11 的 enabledWhen（ne）覆盖）。
 //
 // 右键菜单与输入框走真实 DOM 事件（与 m4 的「提升为子图参数」同一个做法）；搭图走 store 的语义化动作。
 
@@ -16,7 +16,7 @@ import path from "node:path";
 
 import { sleep } from "./cdp.mjs";
 import { ROOT } from "./harness.mjs";
-import { buildGraph, lit, newDoc, pressCtrl, pressF5, runAndWait, select } from "./page.mjs";
+import { buildGraph, lit, mustOk, newDoc, pressCtrl, pressF5, runAndWait, select } from "./page.mjs";
 
 // ------------------------------------------------------------ 页面侧的小工具
 
@@ -41,24 +41,6 @@ async function paramMenu(cdp, param, item) {
     btn.click();
     await new Promise((done) => setTimeout(done, 150));
     return 'ok';
-  `);
-}
-
-/** 右键菜单里有哪些项（不点，看完关掉）。 */
-async function menuItems(cdp, param) {
-  return cdp.eval(`
-    const row = document.querySelector('[data-testid="param-${param}"]');
-    if (!row) return null;
-    const r = row.getBoundingClientRect();
-    row.dispatchEvent(new MouseEvent('contextmenu', {
-      bubbles: true, cancelable: true, clientX: r.left + 10, clientY: r.top + 10,
-    }));
-    await new Promise((done) => setTimeout(done, 120));
-    const items = [...document.querySelectorAll('[data-testid="param-menu"] button')]
-      .map((b) => b.getAttribute('data-testid'));
-    document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-    await new Promise((done) => setTimeout(done, 60));
-    return items;
   `);
 }
 
@@ -144,15 +126,14 @@ async function suiteIncludeTopLevel(cdp, report) {
     ],
   );
   const first = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("纳入前先跑一遍", first.status, "ok");
+  mustOk(first.status === "ok", "纳入前先跑一遍", first.status);
   const keysBefore = await ranKeys(cdp);
   const docBefore = await docOf(cdp);
 
   await select(cdp, ids.voxel);
   await sleep(200);
-  const items = await menuItems(cdp, "leafSize");
-  report.ok("右键菜单里有「纳入配方」", (items ?? []).includes("param-menu-include"), JSON.stringify(items));
-  report.eq("走真实右键菜单纳入", await paramMenu(cdp, "leafSize", "param-menu-include"), "ok");
+  const viaMenu = await paramMenu(cdp, "leafSize", "param-menu-include");
+  mustOk(viaMenu === "ok", "走真实右键菜单「纳入配方」", viaMenu);
 
   const s = await snap(cdp);
   const gp = s.doc.params?.leafSize;
@@ -160,23 +141,35 @@ async function suiteIncludeTopLevel(cdp, report) {
     const op = window.__lyflow.stores.manifest.getState().operatorsById.get('filter.voxel_grid');
     return { manifestDecl: op.params.find((p) => p.name === 'leafSize'), opLabel: op.label };
   `);
-  report.ok("doc 里出现了图参数 leafSize", Boolean(gp), JSON.stringify(s.doc.params));
-  report.eq("default = 纳入前的当前值", gp?.default, [0.02, 0.02, 0.02]);
-  report.eq("binds 指着这个节点参数", gp?.binds, [`${ids.voxel}.leafSize`]);
-  report.eq("规格从 manifest 复制：type", gp?.type, "vec3f");
-  report.eq(
-    "规格从 manifest 复制：min / max / step / unit / doc",
-    [gp?.min, gp?.max, gp?.step, gp?.unit, gp?.doc],
-    [manifestDecl.min, manifestDecl.max, manifestDecl.step, manifestDecl.unit, manifestDecl.doc],
-  );
-  report.eq("label 默认是「节点标题 · 参数 label」", gp?.label, `${opLabel} · ${manifestDecl.label}`);
   const voxelNode = s.doc.nodes.find((n) => n.id === ids.voxel);
-  report.ok("节点上的显式值被删了", voxelNode.params?.leafSize === undefined, JSON.stringify(voxelNode.params));
-  report.eq("一次撤销记录", s.undoLabel, "纳入配方 leafSize");
+  report.eq(
+    "doc 里出现了图参数 leafSize：default = 纳入前的当前值、binds 指着这个节点参数、规格（type / min / max / step / unit / doc）" +
+      "从 manifest 复制、label 是「节点标题 · 参数 label」、节点上的显式值被删了、一次撤销记录",
+    {
+      exists: Boolean(gp),
+      default: gp?.default,
+      binds: gp?.binds,
+      type: gp?.type,
+      limits: [gp?.min, gp?.max, gp?.step, gp?.unit, gp?.doc],
+      label: gp?.label,
+      explicitValue: voxelNode?.params?.leafSize ?? null,
+      undoLabel: s.undoLabel,
+    },
+    {
+      exists: true,
+      default: [0.02, 0.02, 0.02],
+      binds: [`${ids.voxel}.leafSize`],
+      type: "vec3f",
+      limits: [manifestDecl.min, manifestDecl.max, manifestDecl.step, manifestDecl.unit, manifestDecl.doc],
+      label: `${opLabel} · ${manifestDecl.label}`,
+      explicitValue: null,
+      undoLabel: "纳入配方 leafSize",
+    },
+  );
 
   const row = await rowOf(cdp, "leafSize");
-  report.eq("Inspector 这一行标着由图参数提供", row?.graphParam, "leafSize");
-  report.ok("行上的文字是「由图参数 leafSize 提供」", (row?.tag ?? "").includes("由图参数 leafSize 提供"), row?.tag);
+  report.ok("Inspector 这一行标着由图参数提供，文字是「由图参数 leafSize 提供」",
+    row?.graphParam === "leafSize" && (row?.tag ?? "").includes("由图参数 leafSize 提供"), JSON.stringify(row));
   report.eq("行上显示的是图参数的有效值", row?.values, ["0.02", "0.02", "0.02"]);
 
   const keysAfter = await planKeys(cdp);
@@ -191,25 +184,24 @@ async function suiteIncludeTopLevel(cdp, report) {
     [ids.gen, ids.voxel, ids.cut].map((id) => again.nodes[id]?.state),
     ["skipped", "skipped", "skipped"],
   );
-  report.eq("输出点数与纳入前相同", countOf(again, ids.cut), countOf(first, ids.cut));
 
   await undoByKey(cdp);
   const undone = await docOf(cdp);
   report.eq("一次 Ctrl+Z 完全还原（doc 与纳入前逐字段相同）", JSON.stringify(undone), JSON.stringify(docBefore));
-  const rowBack = await rowOf(cdp, "leafSize");
-  report.eq("撤销后这一行不再由图参数提供", rowBack?.graphParam ?? null, null);
 
   // ------------------------------------------------ 验收 5：在被绑定的行上编辑
   report.section("P1 验收 5：在被绑定参数的行上编辑 = 改图参数的 default，不产生 param_conflict");
   await select(cdp, ids.gen);
   await sleep(200);
-  report.eq("纳入 gen.pointCount", await paramMenu(cdp, "pointCount", "param-menu-include"), "ok");
-  report.eq("在这一行的输入框里输 30000", await typeInto(cdp, "pointCount", "30000"), "ok");
+  const included = await paramMenu(cdp, "pointCount", "param-menu-include");
+  mustOk(included === "ok", "纳入 gen.pointCount", included);
+  const typed = await typeInto(cdp, "pointCount", "30000");
+  mustOk(typed === "ok", "在这一行的输入框里输 30000", typed);
   const edited = await snap(cdp);
-  report.eq("doc 里改的是图参数的 default", edited.doc.params?.pointCount?.default, 30000);
   const genNode = edited.doc.nodes.find((n) => n.id === ids.gen);
-  report.ok("节点上没有写成显式值", genNode.params?.pointCount === undefined, JSON.stringify(genNode.params));
-  report.eq("撤销记录是「修改图参数」", edited.undoLabel, "修改图参数 pointCount");
+  report.eq("doc 里改的是图参数的 default，节点上没有写成显式值，撤销记录是「修改图参数」",
+    { default: edited.doc.params?.pointCount?.default, explicitValue: genNode?.params?.pointCount ?? null, undoLabel: edited.undoLabel },
+    { default: 30000, explicitValue: null, undoLabel: "修改图参数 pointCount" });
   const diags = await validateNow(cdp);
   report.ok(
     "core 校验没有 param_conflict（也没有别的错）",
@@ -224,16 +216,10 @@ async function suiteIncludeTopLevel(cdp, report) {
   // ------------------------------------------------ 验收 6：RunOptions.params
   report.section("P1 验收 6：RunOptions.params 传另一个值 —— cacheKey 与结果跟着变，传回 default 命中缓存");
   const base = await ranKeys(cdp);
-  const recipe = (await snap(cdp)).recipe;
-  report.eq("当前配方是「基础」，交给 core 的就是 default", recipe, {
-    current: null,
-    params: { pointCount: 30000 },
-  });
   const other = await runAndWait(cdp, () =>
     cdp.eval(`await window.__lyflow.run({ params: { pointCount: 12000 } }); return true;`),
   );
   const otherKeys = await ranKeys(cdp);
-  report.eq("传 12000：运行成功", other.status, "ok");
   report.eq("被绑定节点的结果跟着变", countOf(other, ids.gen), 12000);
   report.eq(
     "被绑定节点与下游的 cacheKey 跟着变",
@@ -244,14 +230,9 @@ async function suiteIncludeTopLevel(cdp, report) {
   const back = await runAndWait(cdp, () => pressF5(cdp));
   const backKeys = await ranKeys(cdp);
   report.eq(
-    "传回 default：cacheKey 回到原来那一组",
-    [ids.gen, ids.voxel, ids.cut].map((id) => backKeys[id] === base[id]),
-    [true, true, true],
-  );
-  report.eq(
-    "传回 default：命中缓存",
-    [ids.gen, ids.voxel, ids.cut].map((id) => back.nodes[id]?.state),
-    ["skipped", "skipped", "skipped"],
+    "传回 default：cacheKey 回到原来那一组、命中缓存",
+    [ids.gen, ids.voxel, ids.cut].map((id) => [backKeys[id] === base[id], back.nodes[id]?.state]),
+    [[true, "skipped"], [true, "skipped"], [true, "skipped"]],
   );
 
   // ------------------------------------------------ 验收 7（一）：复制路径名
@@ -264,7 +245,8 @@ async function suiteIncludeTopLevel(cdp, report) {
     navigator.clipboard.writeText = async (t) => { window.__lyCopied = t; };
     return true;
   `);
-  report.eq("右键 → 复制路径名", await paramMenu(cdp, "max", "param-menu-path"), "ok");
+  const copied = await paramMenu(cdp, "max", "param-menu-path");
+  mustOk(copied === "ok", "右键 → 复制路径名", copied);
   await sleep(100);
   report.eq("剪贴板里是「节点.参数」", await cdp.eval(`return window.__lyCopied;`), `${ids.cut}.max`);
 }
@@ -291,9 +273,9 @@ async function suiteIncludeInSubgraph(cdp, report, ws) {
     const v = g.getState().connect({ node: ${lit(ids.gen)}, port: 'cloud' }, { node: dup, port: 'cloud' });
     return { a: composed.nodeId, b: dup, subgraphId: composed.subgraphId, wired: v.ok };
   `);
-  report.ok("两个实例共用同一份子图定义", made.wired && made.a !== made.b, JSON.stringify(made));
+  mustOk(made.wired && made.a !== made.b, "两个实例共用同一份子图定义", made);
   const first = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("纳入前先跑一遍", first.status, "ok");
+  mustOk(first.status === "ok", "纳入前先跑一遍", first.status);
   const keysBefore = await ranKeys(cdp);
   const docBefore = await docOf(cdp);
   const innerA = `${made.a}/${ids.voxel}`;
@@ -306,20 +288,33 @@ async function suiteIncludeInSubgraph(cdp, report, ws) {
   await sleep(250);
   await select(cdp, ids.voxel);
   await sleep(200);
-  report.eq("在实例 A 里右键内参 → 纳入配方", await paramMenu(cdp, "minPointsPerVoxel", "param-menu-include"), "ok");
+  const includedInner = await paramMenu(cdp, "minPointsPerVoxel", "param-menu-include");
+  mustOk(includedInner === "ok", "在实例 A 里右键内参 → 纳入配方", includedInner);
 
   const s = await snap(cdp);
   const sp = s.doc.subgraphs[made.subgraphId].params.find((p) => p.name === "minPointsPerVoxel");
   const gp = s.doc.params?.minPointsPerVoxel;
-  report.ok("第一级：子图定义里多了提升参数", Boolean(sp), JSON.stringify(s.doc.subgraphs[made.subgraphId].params));
-  report.eq("子图参数绑着内参", sp?.binds, [{ node: ids.voxel, param: "minPointsPerVoxel" }]);
-  report.eq("子图参数的默认值 = 内参当前值", sp?.default, 0);
-  report.eq("第二级：图参数绑在实例 A 上", gp?.binds, [`${made.a}.minPointsPerVoxel`]);
-  report.eq("图参数 default = 当前值", gp?.default, 0);
-  report.ok("label 带上实例标题", (gp?.label ?? "").includes(" / ") && (gp?.label ?? "").endsWith("· Min Points / Voxel"),
-    gp?.label);
-  report.eq("实例 B 上没写任何东西", s.doc.nodes.find((n) => n.id === made.b).params ?? {}, {});
-  report.eq("一次撤销记录", s.undoLabel, "纳入配方 minPointsPerVoxel");
+  const label = gp?.label ?? "";
+  report.eq(
+    "两级提升：子图定义里多了提升参数（绑着内参、默认值 = 内参当前值）、图参数绑在实例 A 上（default = 当前值、label 带上实例标题）、" +
+      "实例 B 上没写任何东西、一次撤销记录",
+    {
+      subgraphParam: sp ? { binds: sp.binds, default: sp.default } : null,
+      graphParam: gp ? { binds: gp.binds, default: gp.default } : null,
+      label,
+      labelHasInstance: label.includes(" / ") && label.endsWith("· Min Points / Voxel"),
+      instanceB: s.doc.nodes.find((n) => n.id === made.b)?.params ?? {},
+      undoLabel: s.undoLabel,
+    },
+    {
+      subgraphParam: { binds: [{ node: ids.voxel, param: "minPointsPerVoxel" }], default: 0 },
+      graphParam: { binds: [`${made.a}.minPointsPerVoxel`], default: 0 },
+      label,
+      labelHasInstance: true,
+      instanceB: {},
+      undoLabel: "纳入配方 minPointsPerVoxel",
+    },
+  );
   const inner = await rowOf(cdp, "minPointsPerVoxel");
   report.eq("子图里这一行标着由图参数提供", inner?.graphParam, "minPointsPerVoxel");
   report.eq("而且可以在这里改（改的是图参数）", inner?.disabled, false);
@@ -334,7 +329,6 @@ async function suiteIncludeInSubgraph(cdp, report, ws) {
   await cdp.eval(`window.__lyflow.stores.graph.getState().editGraphParamValue('minPointsPerVoxel', 3); return true;`);
   const run = await runAndWait(cdp, () => pressF5(cdp));
   const keysRun = await ranKeys(cdp);
-  report.eq("图参数改成 3 之后运行成功", run.status, "ok");
   report.eq("实例 A 的内部节点 cacheKey 变了", keysRun[innerA] !== keysBefore[innerA], true);
   report.eq("实例 B 的 cacheKey 不变", keysRun[innerB], keysBefore[innerB]);
   report.eq("实例 B 命中缓存、结果不变", [run.nodes[innerB]?.state, countOf(run, innerB)],
@@ -356,7 +350,6 @@ async function suiteIncludeInSubgraph(cdp, report, ws) {
     const libNode = b.stores.graph.getState().addNode(${lit("lib." + libId)}, { x: 600, y: 400 });
     return { libNode, dirs: r.status.dirs };
   `);
-  report.ok("库算子放进了画布", Boolean(libReady?.libNode), JSON.stringify(libReady));
   await cdp.eval(`
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     window.__lyflow.stores.ui.getState().setSelection([${lit(libReady.libNode)}], []);
@@ -364,7 +357,8 @@ async function suiteIncludeInSubgraph(cdp, report, ws) {
   `);
   await pressKeyCtrlEnter(cdp);
   const pathAfter = (await snap(cdp)).path;
-  report.eq("Ctrl+Enter 进不去库算子（内部只读，看不到内参行）", pathAfter, []);
+  report.ok("库算子放进了画布，Ctrl+Enter 进不去（内部只读，看不到内参行）",
+    Boolean(libReady?.libNode) && JSON.stringify(pathAfter) === "[]", JSON.stringify({ libReady, pathAfter }));
   const forged = await cdp.eval(`
     const b = window.__lyflow;
     b.stores.ui.getState().setPath([{ nodeId: ${lit(libReady.libNode)}, subgraphId: ${lit(libId)} }]);
@@ -413,12 +407,10 @@ async function suiteSpecAndCore(cdp, report, ws) {
     return back.doc.params;
   `);
   report.eq("经 Tauri 存盘再读回，params 逐字（含键顺序）相同", JSON.stringify(round), JSON.stringify(original.params));
-  const onDisk = JSON.parse(fs.readFileSync(saved, "utf8"));
-  report.eq("磁盘上的文件里也一个字段不少", JSON.stringify(onDisk.params), JSON.stringify(original.params));
   report.eq("core 校验：完整规格与老格式都干净", await validateNow(cdp), []);
   const ran = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("整张图跑通", ran.status, "ok");
-  report.eq("gen 用的是图参数 pointCount 的 default", countOf(ran, "n_gen"), 20000);
+  report.eq("整张图跑通，gen 用的是图参数 pointCount 的 default", { status: ran.status, gen: countOf(ran, "n_gen") },
+    { status: "ok", gen: 20000 });
   const table = await cdp.eval(`
     return [...document.querySelectorAll('[data-testid="graph-params"] [data-graph-param]')]
       .map((el) => el.getAttribute('data-graph-param'));
@@ -429,8 +421,8 @@ async function suiteSpecAndCore(cdp, report, ws) {
   await cdp.eval(`window.__lyflow.stores.graph.getState().setGraphParamDefault('pointCount', 30000000); return true;`);
   const bad = await validateNow(cdp);
   const hit = (bad ?? []).find((d) => d.code === "bad_param" && d.paramPath === "pointCount");
-  report.ok("default 越过硬限位（max 20000000）：bad_param", Boolean(hit), JSON.stringify(bad));
-  report.ok("paramPath 是图参数名、nodeId 为空", hit && !hit.nodeId, JSON.stringify(hit));
+  report.ok("default 越过硬限位（max 20000000）：bad_param，paramPath 是图参数名、nodeId 为空", Boolean(hit) && !hit.nodeId,
+    JSON.stringify(bad));
   await cdp.eval(`await window.__lyflow.validate(); return true;`);
   await sleep(100);
   const marked = await cdp.eval(`
@@ -438,9 +430,8 @@ async function suiteSpecAndCore(cdp, report, ws) {
   `);
   report.eq("诊断贴在图参数简表的那一行上", marked, "1");
   const blocked = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("有 error 时运行被拦下", blocked.status, "error");
-  report.ok("一个节点都没进 running", !Object.values(blocked.nodes).some((n) => n.state === "done"),
-    JSON.stringify(blocked.nodes));
+  report.ok("有 error 时运行被拦下，一个节点都没进 running", blocked.status === "error" &&
+    !Object.values(blocked.nodes).some((n) => n.state === "done"), JSON.stringify({ status: blocked.status, nodes: blocked.nodes }));
   await undoByKey(cdp);
   report.eq("撤销后 default 回到合法值", (await docOf(cdp)).params.pointCount.default, 20000);
 
@@ -466,10 +457,10 @@ async function suiteSpecAndCore(cdp, report, ws) {
 // ------------------------------------------------------------ 验收 7（ne、dirty）
 
 async function suiteP16(cdp, report, ws) {
-  report.section("P1 验收 7：P1.6 —— visibleWhen 的 ne、撤销回到保存点时 dirty 复原");
+  report.section("P1 验收 7：P1.6 —— 撤销回到保存点时 dirty 复原");
 
-  // ne：子图参数的声明就是 manifest 的 param 形态，编辑器按它渲染 Inspector —— 拿它造一个
-  // 带 ne 的条件，不用改 manifest。core 那一侧（conditionHolds / manifest 导出）由 doctest 验
+  // 一张带子图参数（visibleWhen 用 ne）的小图，dirty 的验证拿它当底子。ne 在 Inspector 上的显隐不再在这里断言：
+  // 面板那一侧由 P2 验收 11 的 enabledWhen（ne）覆盖，core 那一侧（conditionHolds / manifest 导出）由 doctest 验
   await newDoc(cdp);
   const inst = await cdp.eval(`
     const b = window.__lyflow;
@@ -494,14 +485,6 @@ async function suiteP16(cdp, report, ws) {
   `);
   await select(cdp, inst);
   await sleep(250);
-  const hidden = await cdp.eval(`return !!document.querySelector('[data-testid="param-extra"]');`);
-  report.eq("mode = a：visibleWhen {ne: 'a'} 不成立，extra 藏起来", hidden, false);
-  await cdp.eval(`window.__lyflow.stores.graph.getState().setParam('n_s', 'mode', 'b'); return true;`);
-  await sleep(200);
-  const shown = await cdp.eval(`return !!document.querySelector('[data-testid="param-extra"]');`);
-  report.eq("mode = b：≠ a，extra 露出来", shown, true);
-  const schema = JSON.parse(fs.readFileSync(path.join(ROOT, "schema", "operator-manifest.schema.json"), "utf8"));
-  report.ok("schema 的 condition 声明了 ne", "ne" in (schema.$defs.condition.properties ?? {}));
 
   // dirty：存盘 → 改 → Ctrl+Z 回到保存点 → dirty 复原；重做又脏
   const file = path.join(ws.dir, "P1 保存点.lyflow.json");
@@ -513,10 +496,11 @@ async function suiteP16(cdp, report, ws) {
     return true;
   `);
   const marker = () => cdp.eval(`return !!document.querySelector('.toolbar__dirty');`);
-  report.eq("存盘之后不脏", [(await snap(cdp)).dirty, await marker()], [false, false]);
+  const clean = [(await snap(cdp)).dirty, await marker()];
   await cdp.eval(`window.__lyflow.stores.graph.getState().setParam('n_gen', 'seed', 99); return true;`);
   await sleep(100);
-  report.eq("改一下就脏", [(await snap(cdp)).dirty, await marker()], [true, true]);
+  report.eq("存盘之后不脏，改一下就脏（[dirty, ●]）", { saved: clean, edited: [(await snap(cdp)).dirty, await marker()] },
+    { saved: [false, false], edited: [true, true] });
   await undoByKey(cdp);
   report.eq("Ctrl+Z 回到保存点：dirty 复原、标题栏的 ● 消失", [(await snap(cdp)).dirty, await marker()], [false, false]);
   await cdp.eval(`

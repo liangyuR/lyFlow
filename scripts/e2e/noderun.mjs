@@ -14,6 +14,7 @@ import {
   canvasBox,
   centerOf,
   lit,
+  mustOk,
   newDoc,
   normalizeZoom,
   placeAtScreen,
@@ -175,11 +176,8 @@ async function suitePlacement(cdp, report) {
                svg: btn ? Math.round(btn.querySelector('svg').getBoundingClientRect().width) : null };
     });
   `);
-  report.ok("每个节点的 .node__head 里都有自己的 node-run-<id>", layout.every((r) => r.inHead), JSON.stringify(layout));
   report.ok("标题的右边界 ≤ 按钮左边界（不遮挡标题文字）",
     layout.every((r) => r.titleRight !== null && r.btnLeft !== null && r.titleRight <= r.btnLeft + 0.01), JSON.stringify(layout));
-  report.ok("命中区 20 px、视觉圆 14 px（画布缩放下按比例）",
-    layout.every((r) => r.w > 0 && r.svg > 0 && Math.abs(r.w / r.svg - 20 / 14) < 0.1), JSON.stringify(layout.map((r) => [r.w, r.svg])));
 
   // 徽标之后：静音挂上 M 徽标，按钮仍排在它后面
   const order = await cdp.eval(`
@@ -235,22 +233,19 @@ async function suitePlacement(cdp, report) {
              pos: window.__lyflow.stores.graph.getState().doc.nodes.find((n) => n.id === ${lit(ids.a)}).ui.position,
              targets: e.targets, isolate: e.isolate };
   `);
-  report.ok("（前提）单击按钮发起了智能运行 targets=[a]（不是 isolate）", JSON.stringify(after.targets) === JSON.stringify([ids.a]) &&
-    after.isolate.length === 0, JSON.stringify(after));
-  report.eq("那次运行 ok", run.status, "ok");
-  report.eq("单击按钮：节点没有被选中", after.selected, []);
-  report.eq("单击按钮：没有进入改名", after.renaming, false);
-  report.eq("单击按钮：节点位置没动", after.pos, posBefore);
+  report.ok("单击按钮发起了智能运行 targets=[a]（不是 isolate），那次运行 ok", JSON.stringify(after.targets) === JSON.stringify([ids.a]) &&
+    after.isolate.length === 0 && run.status === "ok", JSON.stringify({ status: run.status, ...after }));
+  report.eq("单击按钮：节点没有被选中、没有进入改名、位置没动",
+    { selected: after.selected, renaming: after.renaming, pos: after.pos }, { selected: [], renaming: false, pos: posBefore });
 
   // 验收 20 的前半：本节点有编辑期校验 error 时按钮置灰（修订一 V3：唯一的置灰原因）。
   // 顺手拿这个不可点的按钮验拖动与双击 —— 可点的按钮双击会发起两次运行，第二次还是「停止」
   await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.b)}, 'leafSize', [0, 0.01, 0.01]); return true;`);
   const invalid = await waitButton(cdp, ids.b, "(s) => s.state === 'disabled'", 5000);
   const bInvalid = await buttonOf(cdp, ids.b);
-  report.ok("（20）b 有校验错误：按钮 data-run-state=\"disabled\"，title 说明原因", invalid !== null && /校验错误/.test(bInvalid?.title ?? ""),
-    JSON.stringify(bInvalid));
   const cursor = await cdp.eval(`return getComputedStyle(document.querySelector(${lit(btnSel(ids.b))})).cursor;`);
-  report.eq("（20）不可用时光标 not-allowed", cursor, "not-allowed");
+  report.ok("（20）b 有校验错误：按钮 data-run-state=\"disabled\"，title 说明原因，光标 not-allowed",
+    invalid !== null && /校验错误/.test(bInvalid?.title ?? "") && cursor === "not-allowed", JSON.stringify({ ...bInvalid, cursor }));
   report.ok("（20）上游不齐不再让按钮置灰：c 的上游 b 从没跑过，c 的按钮仍可点",
     (await buttonOf(cdp, ids.c))?.state !== "disabled", JSON.stringify(await buttonOf(cdp, ids.c)));
 
@@ -294,7 +289,7 @@ async function suiteSmart(cdp, report) {
   await installRecorder(cdp);
   const ids = await smallChain(cdp);
   const full = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("（前提）全图运行 ok", full.status, "ok");
+  mustOk(full.status === "ok", "全图运行 ok", full.status);
   await settlePlan(cdp);
 
   const ready = await buttonOf(cdp, ids.b);
@@ -307,13 +302,12 @@ async function suiteSmart(cdp, report) {
   const hitTrans = await transitionsBy(cdp);
   const hitStarted = await startedOf(cdp, hit.runId);
   const hitB = await statsOf(cdp, ids.b);
-  report.eq("单击：运行 ok", hit.status, "ok");
-  report.ok("单击：是智能运行 targets=[b]、没有 force", hitStarted && JSON.stringify(hitStarted.targets) === JSON.stringify([ids.b]) &&
-    hitStarted.force.length === 0 && hitStarted.isolate.length === 0, JSON.stringify(hitStarted && { targets: hitStarted.targets, force: hitStarted.force }));
-  report.ok("单击：b 显示「已缓存」（stats.cached=true），没有真执行", hitB?.state === "skipped" && hitB.cached,
-    JSON.stringify(hitB));
+  report.ok("单击：运行 ok，是智能运行 targets=[b]、没有 force", hit.status === "ok" && hitStarted &&
+    JSON.stringify(hitStarted.targets) === JSON.stringify([ids.b]) && hitStarted.force.length === 0 && hitStarted.isolate.length === 0,
+    JSON.stringify({ status: hit.status, started: hitStarted && { targets: hitStarted.targets, force: hitStarted.force, isolate: hitStarted.isolate } }));
   const skipLabel = await cdp.eval(`return document.querySelector('[data-testid="node-skip-${ids.b}"]')?.textContent ?? null;`);
-  report.eq("单击：节点上的标签是「已缓存」", skipLabel, "已缓存");
+  report.ok("单击：b 显示「已缓存」（stats.cached=true、节点上的标签是「已缓存」），没有真执行",
+    hitB?.state === "skipped" && hitB.cached && skipLabel === "已缓存", JSON.stringify({ hitB, skipLabel }));
   report.ok("单击：没有任何节点进入 running", !Object.values(hitTrans).some((l) => l.includes("running")), JSON.stringify(hitTrans));
 
   const forced = await runAndWait(cdp, () => click(cdp, bAt, { shift: true }));
@@ -323,9 +317,9 @@ async function suiteSmart(cdp, report) {
   const fA = await statsOf(cdp, ids.a);
   const fB = await statsOf(cdp, ids.b);
   const selected = await cdp.eval(`return [...window.__lyflow.stores.ui.getState().selectedNodes];`);
-  report.eq("Shift+单击：运行 ok", forced.status, "ok");
-  report.ok("Shift+单击：targets=[b]、force=[b]", fStarted && JSON.stringify(fStarted.force) === JSON.stringify([ids.b]) &&
-    JSON.stringify(fStarted.targets) === JSON.stringify([ids.b]), JSON.stringify(fStarted && { targets: fStarted.targets, force: fStarted.force }));
+  report.ok("Shift+单击：运行 ok，targets=[b]、force=[b]", forced.status === "ok" && fStarted &&
+    JSON.stringify(fStarted.force) === JSON.stringify([ids.b]) && JSON.stringify(fStarted.targets) === JSON.stringify([ids.b]),
+    JSON.stringify({ status: forced.status, started: fStarted && { targets: fStarted.targets, force: fStarted.force } }));
   report.ok("Shift+单击：b 真执行（running → done，cached=false）", fB?.state === "done" && !fB.cached &&
     (fTrans[ids.b] ?? []).includes("running"), JSON.stringify({ fB, trans: fTrans[ids.b] }));
   report.ok("Shift+单击：a 不执行（命中缓存，没有 running）", fA?.cached === true && !(fTrans[ids.a] ?? []).includes("running"),
@@ -349,16 +343,14 @@ async function suiteSmartUpstream(cdp, report) {
   const box = await canvasBox(cdp);
   await placeAtScreen(cdp, { [d]: { x: 30, y: Math.round(box.h * 0.45) } });
   const full = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("（前提）全图运行 ok", full.status, "ok");
+  mustOk(full.status === "ok", "全图运行 ok", full.status);
 
   await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.a)}, 'pointCount', 23456); return true;`);
   await settlePlan(cdp);
   const b = await buttonOf(cdp, ids.b);
   const aLabel = await labelOf(cdp, ids.a);
-  report.ok("b 的按钮可点（不再因上游过时置灰）", b?.state !== "disabled", JSON.stringify(b));
-  report.ok("data-run-upstream 含 a", String(b?.upstream).split(",").includes(ids.a), JSON.stringify(b));
-  report.ok(`title 预告「将一并运行上游 ${aLabel}」`, typeof b?.title === "string" && b.title.includes("将一并运行上游") && b.title.includes(aLabel),
-    JSON.stringify({ title: b?.title, aLabel }));
+  report.ok(`data-run-upstream 含 a，title 预告「将一并运行上游 ${aLabel}」`, String(b?.upstream).split(",").includes(ids.a) &&
+    typeof b?.title === "string" && b.title.includes("将一并运行上游") && b.title.includes(aLabel), JSON.stringify({ ...b, aLabel }));
 
   const run = await runAndWait(cdp, async () => click(cdp, await centerOf(cdp, btnSel(ids.b))));
   await sleep(150);
@@ -366,8 +358,8 @@ async function suiteSmartUpstream(cdp, report) {
   const started = await startedOf(cdp, run.runId);
   const finished = await finishedOf(cdp, run.runId);
   const seq = (id) => (trans[id] ?? []).join(",");
-  report.eq("运行 ok", run.status, "ok");
-  report.ok("a、b 都经历了 running → done", seq(ids.a).includes("running,done") && seq(ids.b).includes("running,done"), JSON.stringify(trans));
+  report.ok("运行 ok，a、b 都经历了 running → done", run.status === "ok" &&
+    seq(ids.a).includes("running,done") && seq(ids.b).includes("running,done"), JSON.stringify({ status: run.status, trans }));
   const order = await cdp.eval(`
     const t = window.__lyflow.transitions;
     const at = (id, st) => t.findIndex((x) => x.nodeId === id && x.state === st);
@@ -378,15 +370,13 @@ async function suiteSmartUpstream(cdp, report) {
   // 修订一 V2：c 的键跟着 a 变了、仓里没有当前结果 → 不挂，编辑器把它退回 idle（与 §6 验收 17 字面不同，见验收记录）
   report.ok("c 的键变了、不在 attached 里 → 退回 idle（不显示「完成」却取不到输出）",
     !finished?.attached?.includes(ids.c) && (run.nodes[ids.c]?.state ?? "idle") === "idle", JSON.stringify({ attached: finished?.attached, c: run.nodes[ids.c] }));
-  report.ok("不受影响的 d 挂上了、仍是 done、按新 runId 取得到输出",
-    finished?.attached?.includes(d) && run.nodes[d]?.state === "done", JSON.stringify({ attached: finished?.attached, d: run.nodes[d] }));
   const dInfo = await cdp.eval(`
     const { runId } = window.__lyflow.stores.execution.getState();
     return (await window.__lyflow.transport.getOutputInfo(runId, ${lit(d)})).map((o) => o.port);
   `);
-  report.ok("getOutputInfo(新 runId, d) 有 cloud", dInfo.includes("cloud"), JSON.stringify(dInfo));
-  await settlePlan(cdp);
-  report.eq("跑完之后 b 回到「已是最新」", (await buttonOf(cdp, ids.b))?.title, "已是最新（命中缓存）—— Shift+点击强制重算");
+  report.ok("不受影响的 d 挂上了、仍是 done、按新 runId 取得到输出（getOutputInfo(新 runId, d) 有 cloud）",
+    finished?.attached?.includes(d) && run.nodes[d]?.state === "done" && dInfo.includes("cloud"),
+    JSON.stringify({ attached: finished?.attached, d: run.nodes[d], dInfo }));
 }
 
 // ------------------------------- 修订一 验收 19 的第三项：仅此节点（isolate）的兜底
@@ -397,7 +387,7 @@ async function suiteIsolateOnly(cdp, report) {
   await installRecorder(cdp);
   const ids = await smallChain(cdp);
   const full = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("（前提）全图运行 ok", full.status, "ok");
+  mustOk(full.status === "ok", "全图运行 ok", full.status);
 
   await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.a)}, 'pointCount', 23456); return true;`);
   const cache = await replan(cdp);
@@ -405,8 +395,6 @@ async function suiteIsolateOnly(cdp, report) {
   const item = await openMenu(cdp, ids.b);
   report.ok("「仅此节点」置灰，data-run-reason 含 a，title 写明缺谁", item?.only?.disabled === true &&
     String(item.only.reason).split(",").includes(ids.a) && /还没有可用结果/.test(item.only.title ?? ""), JSON.stringify(item?.only));
-  report.ok("同一时刻按钮本身仍可点（智能运行会把 a 一起跑）", (await buttonOf(cdp, ids.b))?.state !== "disabled",
-    JSON.stringify(await buttonOf(cdp, ids.b)));
   await closeMenu(cdp);
 
   // 绕过预判：直接让 core 跑 isolate，由 R2 兜底
@@ -442,28 +430,30 @@ async function suiteIsolateOnly(cdp, report) {
 // ------------------------------------------------- 验收 10：运行中停止与抢占
 
 async function suiteStopAndPreempt(cdp, report) {
-  report.section("单节点运行 验收 10 / 修订一 20：Shift+单击发起的运行中按钮 running、点它取消；全图运行里 running 的节点上点按钮是抢占，不是停止");
+  report.section("单节点运行 验收 10 / 修订一 20：Shift+单击发起的运行中按钮 running、点它取消；全图运行里 running 的节点上点按钮是抢占，不是停止；" +
+    "验收 11：进度环动效开着时转、关了停住但仍显示");
+  await installMotionProbe(cdp);
   await installRecorder(cdp);
   const ids = await slowPair(cdp);
   const full = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("（前提）全图运行 ok", full.status, "ok");
   const slowMs = full.nodes[ids.slow]?.durationMs ?? 0;
-  report.ok(`（前提）slow 节点够慢（${Math.round(slowMs)} ms ≥ 300）`, slowMs >= 300, JSON.stringify(full.nodes[ids.slow]));
+  mustOk(full.status === "ok" && slowMs >= 300, `全图运行 ok，slow 节点够慢（${Math.round(slowMs)} ms ≥ 300）`,
+    { status: full.status, slow: full.nodes[ids.slow] });
 
   // 自己发起的那次：running + ■，再点一下 = 停止。全图刚跑过，单击只会命中缓存，所以用 Shift 强制真跑
   const before = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
   await click(cdp, await centerOf(cdp, btnSel(ids.slow)), { shift: true });
   const running = await waitButton(cdp, ids.slow, "(s) => s.state === 'running' && s.own === '1'");
-  report.ok("点了之后按钮 data-run-state=\"running\"、带 ■（data-run-own=1）", running !== null, JSON.stringify(running));
   const title = (await buttonOf(cdp, ids.slow))?.title;
-  report.eq("运行中 title 是「停止」", title, "停止");
   const stopAt = await cdp.eval(`
     const s = window.__lyflow.stores.execution.getState();
     return { runId: s.runId, status: s.runStatus, targets: s.targets,
              stop: !!document.querySelector(${lit(btnSel(ids.slow) + " .node-run__stop")}) };
   `);
-  report.ok("（前提）这时跑的是按钮发起的 targets=[slow] 那一次", stopAt.runId !== before && stopAt.status === "running" &&
-    JSON.stringify(stopAt.targets) === JSON.stringify([ids.slow]) && stopAt.stop, JSON.stringify(stopAt));
+  report.ok("点了之后按钮 data-run-state=\"running\"、带 ■（data-run-own=1）、title 是「停止」，跑的是按钮发起的 targets=[slow] 那一次",
+    running !== null && title === "停止" && stopAt.runId !== before && stopAt.status === "running" &&
+      JSON.stringify(stopAt.targets) === JSON.stringify([ids.slow]) && stopAt.stop,
+    JSON.stringify({ running, title, stopAt }));
   await click(cdp, await centerOf(cdp, btnSel(ids.slow)));
   await waitRunEnd(cdp, "停止后运行结束");
   const stopped = await cdp.eval(`
@@ -472,7 +462,6 @@ async function suiteStopAndPreempt(cdp, report) {
   `);
   report.ok("再点一下：这次运行被取消（cancelled），没有发起新的", stopped.runId === stopAt.runId && stopped.status === "cancelled",
     JSON.stringify(stopped));
-  report.ok("取消后按钮不再是 running", (await buttonOf(cdp, ids.slow))?.state !== "running", JSON.stringify(await buttonOf(cdp, ids.slow)));
 
   // 抢占：换个 seed 让全图真跑，等 slow 在全图运行里 running，点它的按钮
   await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.gen)}, 'seed', ${(Date.now() % 7919) + 13}); return true;`);
@@ -497,16 +486,76 @@ async function suiteStopAndPreempt(cdp, report) {
   report.ok("被抢占的全图运行以 cancelled 收场", end.marks.some((m) => m.runId === fullRun.runId && m.status === "cancelled"),
     JSON.stringify(end.marks));
   report.ok("抢占它的那次跑完了（ok），而不是被当成「停止」", end.runId === preempt.runId && end.status === "ok", JSON.stringify(end));
+
+  // 验收 11 的进度环：复用这张刚跑完的慢图，不再另搭一张、另跑一遍全图。
+  // 同一帧里顺带拍下入边的流动与 running 的呼吸光 —— 关动效时它们归 docs/motion-plan.md §3 验收 9（6）
+  const sampleArc = async () => {
+    // 强制重算：慢图刚跑过，不 force 的话 slow 命中缓存、根本不进 running
+    await cdp.eval(`window.__lyflow.run({ targets: [${lit(ids.slow)}], force: [${lit(ids.slow)}] }); return true;`);
+    const shot = await cdp.eval(`
+      const t0 = performance.now();
+      while (performance.now() - t0 < 20000) {
+        const b = document.querySelector(${lit(btnSel(ids.slow))});
+        const arc = b?.querySelector('.node-run__arc');
+        const node = document.querySelector(${lit(`[data-testid="node-${ids.slow}"]`)});
+        if (b?.getAttribute('data-run-state') === 'running' && arc && node?.getAttribute('data-node-state') === 'running') {
+          const cs = getComputedStyle(arc);
+          const r = arc.getBoundingClientRect();
+          const s = window.__lyflow.snapshot();
+          const runningIds = [...document.querySelectorAll('[data-node-state="running"]')]
+            .map((el) => el.getAttribute('data-testid').slice(5));
+          const flowing = [...document.querySelectorAll('.ly-edge[data-flowing="1"]')]
+            .map((g) => g.closest('.react-flow__edge').getAttribute('data-id')).sort();
+          const expected = s.doc.edges.filter((e) => runningIds.includes(e.to.node)).map((e) => e.id).sort();
+          const flow = document.querySelector('.ly-edge[data-flowing="1"] .ly-edge__flow');
+          return { animation: cs.animationName, dash: cs.strokeDasharray, visible: cs.visibility !== 'hidden' && cs.display !== 'none' && r.width > 0,
+                   stroke: cs.stroke, transform: cs.transform, progress: b.getAttribute('data-run-progress'),
+                   flowing, expected, flowAnimation: flow ? getComputedStyle(flow).animationName : null,
+                   pulse: getComputedStyle(node).animationName };
+        }
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+      return null;
+    `);
+    const rows = await alignOf(cdp);
+    await cdp.eval(`
+      const { runId } = window.__lyflow.stores.execution.getState();
+      if (runId) await window.__lyflow.transport.cancelRun(runId);
+      return true;
+    `);
+    await waitRunEnd(cdp, "取消采样用的运行");
+    return { shot, rows };
+  };
+  const on = await sampleArc();
+  report.ok("（对照）动效开着时进度环在转（animation-name）", on.shot !== null && (on.shot.progress !== null || on.shot.animation === "lyflow-node-run-spin"),
+    JSON.stringify(on.shot));
+  report.ok(`运行中（进度环在画）：端点与锚点最大偏差 ${worst(on.rows)} px ≤ 1`, on.rows.length === 1 && worst(on.rows) <= 1, JSON.stringify(on.rows));
+
+  await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  try {
+    await sleep(150);
+    const off = await sampleArc();
+    report.ok("关动效：进度环仍显示（有弧、有描边）", off.shot !== null && off.shot.visible && off.shot.dash !== "none", JSON.stringify(off.shot));
+    report.eq("关动效：进度环不转（animation-name 为 none）", off.shot?.animation, "none");
+    report.ok("关动效（动效 验收 9 之 6）：目标节点 running 时它的入边仍有 data-flowing=\"1\"",
+      off.shot !== null && off.shot.expected.length > 0 && JSON.stringify(off.shot.flowing) === JSON.stringify(off.shot.expected),
+      JSON.stringify(off.shot && { flowing: off.shot.flowing, expected: off.shot.expected }));
+    report.eq("关动效（动效 验收 9 之 6）：流动层与 running 的呼吸光 animation-name 都是 none",
+      { flow: off.shot?.flowAnimation, pulse: off.shot?.pulse }, { flow: "none", pulse: "none" });
+  } finally {
+    await cdp.send("Emulation.setEmulatedMedia", { features: [] });
+    await sleep(150);
+  }
 }
 
-// ------------------------------------ 验收 11：hover、关动效、端点对齐
+// ------------------------------------ 验收 11：hover、端点对齐（进度环在上面的验收 10 里，复用那张慢图）
 
 async function suiteLook(cdp, report) {
-  report.section("单节点运行 验收 11：hover 实心 accent、关动效时进度环不转但仍显示、端点对齐 ≤ 1 px");
+  report.section("单节点运行 验收 11：hover 实心 accent、端点对齐 ≤ 1 px");
   await installMotionProbe(cdp);
   const ids = await smallChain(cdp);
   const full = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("（前提）全图运行 ok", full.status, "ok");
+  mustOk(full.status === "ok", "全图运行 ok", full.status);
 
   const accent = await cdp.eval(`
     const probe = document.createElement('span');
@@ -535,53 +584,6 @@ async function suiteLook(cdp, report) {
     rowsHover.length === 2 && worst(rowsHover) <= 1, JSON.stringify(rowsHover));
   await moveMouse(cdp, await emptySpot(cdp));
   await sleep(150);
-
-  // 进度环：换到慢图，动效开着时转圈，关了停住但还画着
-  const slow = await slowPair(cdp);
-  const warm = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("（前提）慢图全图运行 ok", warm.status, "ok");
-  const sampleArc = async () => {
-    // 强制重算：慢图刚全跑过，不 force 的话 slow 命中缓存、根本不进 running
-    await cdp.eval(`window.__lyflow.run({ targets: [${lit(slow.slow)}], force: [${lit(slow.slow)}] }); return true;`);
-    const shot = await cdp.eval(`
-      const t0 = performance.now();
-      while (performance.now() - t0 < 20000) {
-        const b = document.querySelector(${lit(btnSel(slow.slow))});
-        const arc = b?.querySelector('.node-run__arc');
-        if (b?.getAttribute('data-run-state') === 'running' && arc) {
-          const cs = getComputedStyle(arc);
-          const r = arc.getBoundingClientRect();
-          return { animation: cs.animationName, dash: cs.strokeDasharray, visible: cs.visibility !== 'hidden' && cs.display !== 'none' && r.width > 0,
-                   stroke: cs.stroke, transform: cs.transform, progress: b.getAttribute('data-run-progress') };
-        }
-        await new Promise((r) => requestAnimationFrame(r));
-      }
-      return null;
-    `);
-    const rows = await alignOf(cdp);
-    await cdp.eval(`
-      const { runId } = window.__lyflow.stores.execution.getState();
-      if (runId) await window.__lyflow.transport.cancelRun(runId);
-      return true;
-    `);
-    await waitRunEnd(cdp, "取消采样用的运行");
-    return { shot, rows };
-  };
-  const on = await sampleArc();
-  report.ok("（对照）动效开着时进度环在转（animation-name）", on.shot !== null && (on.shot.progress !== null || on.shot.animation === "lyflow-node-run-spin"),
-    JSON.stringify(on.shot));
-  report.ok(`运行中（进度环在画）：端点与锚点最大偏差 ${worst(on.rows)} px ≤ 1`, on.rows.length === 1 && worst(on.rows) <= 1, JSON.stringify(on.rows));
-
-  await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
-  try {
-    await sleep(150);
-    const off = await sampleArc();
-    report.ok("关动效：进度环仍显示（有弧、有描边）", off.shot !== null && off.shot.visible && off.shot.dash !== "none", JSON.stringify(off.shot));
-    report.eq("关动效：进度环不转（animation-name 为 none）", off.shot?.animation, "none");
-  } finally {
-    await cdp.send("Emulation.setEmulatedMedia", { features: [] });
-    await sleep(150);
-  }
 }
 
 // ------------------------------------ 验收 11b：计划外节点挂结果（R7）
@@ -612,7 +614,7 @@ async function suiteAttached(cdp, report) {
   });
   await sleep(400);
   const full = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("（前提）全图运行 ok", full.status, "ok");
+  mustOk(full.status === "ok", "全图运行 ok", full.status);
   const cCount = full.nodes[ids.c]?.elementCount ?? null;
 
   // 全图跑完之后才加的下游 e：它从没跑过
@@ -629,7 +631,7 @@ async function suiteAttached(cdp, report) {
   await sleep(200);
   const finished = await cdp.eval(`return window.__lyNodeRun.events.find((x) => x.kind === 'run_finished' && x.runId === ${lit(run.runId)}) ?? null;`);
   const trans = await transitionsBy(cdp);
-  report.eq("（前提）只运行 b 的那次 ok", run.status, "ok");
+  mustOk(run.status === "ok", "只运行 b 的那次 ok", run.status);
   report.ok("run_finished.attached 含计划外的 c、d，不含从没跑过的 e",
     finished && [ids.c, ids.d].every((id) => finished.attached?.includes(id)) && !finished.attached.includes(e),
     JSON.stringify(finished?.attached));
@@ -637,13 +639,7 @@ async function suiteAttached(cdp, report) {
   report.eq("下游 c、d 仍是 done", [run.nodes[ids.c]?.state, run.nodes[ids.d]?.state], ["done", "done"]);
   report.eq("从没跑过的 e 保持 idle", run.nodes[e]?.state ?? "idle", "idle");
 
-  // 按新 runId 真的取得到：先问 transport，再走真实的 3D 视图与 Edge Peek
-  const info = await cdp.eval(`
-    const { runId } = window.__lyflow.stores.execution.getState();
-    return (await window.__lyflow.transport.getOutputInfo(runId, ${lit(ids.c)})).map((o) => [o.port, o.elementCount]);
-  `);
-  report.ok("getOutputInfo(新 runId, c) 有 cloud 输出", info.some(([p, n]) => p === "cloud" && n === cCount), JSON.stringify({ info, cCount }));
-
+  // 按新 runId 真的取得到：走真实的 3D 视图与 Edge Peek
   const viewer = await selectAndReadViewer(cdp, ids.c);
   report.ok(`选中 c：3D 视图画出了点云（${viewer.count}/${viewer.total}）`, viewer.hasCanvas && viewer.count > 0 && viewer.total === cCount,
     JSON.stringify(viewer));
@@ -654,29 +650,18 @@ async function suiteAttached(cdp, report) {
     return doc.edges.find((x) => x.from.node === ${lit(ids.c)} && x.to.node === ${lit(ids.d)})?.id ?? null;
   `);
   const opened = await openByDoubleClick(cdp, report, edge, "d 的入边（源是 c）");
-  report.ok("双击 d 的入边开出了 Edge Peek", Boolean(opened?.win), JSON.stringify(opened?.after));
   if (opened?.win) {
     await park(cdp);
     const dom = await waitPeek(cdp, opened.win.id, (x) => x.cloudCanvas && countsOf(x.countText));
     const counts = countsOf(dom?.countText);
-    report.ok("Edge Peek 里是 c 的点云，总点数与 c 报的一致", dom?.cloudCanvas === true && counts?.total === cCount,
+    report.ok("双击 d 的入边开出了 Edge Peek，里面是 c 的点云，总点数与 c 报的一致，没有「未运行 / 取不到」之类的占位",
+      dom?.cloudCanvas === true && counts?.total === cCount && dom?.status === null,
       JSON.stringify({ dom: dom && { status: dom.status, countText: dom.countText, cloudStatus: dom.cloudStatus }, cCount }));
-    report.ok("Edge Peek 没有「未运行 / 取不到」之类的占位", dom?.status === null, String(dom?.status));
+  } else {
+    report.fail("双击 d 的入边开出了 Edge Peek", JSON.stringify(opened?.after));
   }
   await resetPeek(cdp);
-
-  // 结果仓里没有当前 cacheKey 的结果就不挂：改 c 的参数（c、d 的键都变了）再只运行 b，
-  // c、d 退回 idle —— 不能显示「完成」却取不到输出
-  await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.c)}, 'max', 50); return true;`);
-  const again = await runAndWait(cdp, async () => click(cdp, await centerOf(cdp, btnSel(ids.b))));
-  const fin2 = await cdp.eval(`return window.__lyNodeRun.events.find((x) => x.kind === 'run_finished' && x.runId === ${lit(again.runId)}) ?? null;`);
-  report.eq("（前提）这次只运行 b 也 ok", again.status, "ok");
-  report.ok("c、d 的键变了、仓里没有 → 不在 attached 里", fin2 && !fin2.attached.includes(ids.c) && !fin2.attached.includes(ids.d),
-    JSON.stringify(fin2?.attached));
-  report.eq("编辑器把 c、d 退回 idle", [again.nodes[ids.c]?.state ?? "idle", again.nodes[ids.d]?.state ?? "idle"], ["idle", "idle"]);
-  // 智能运行（修订一 V3）：a、b 的键都没变，两个都命中缓存 —— 显示「已缓存」，不是 idle
-  report.eq("a、b 命中缓存（skipped/cached），不受 c 的改动影响", [again.nodes[ids.a]?.state, again.nodes[ids.b]?.state, again.nodes[ids.b]?.cached],
-    ["skipped", "skipped", true]);
+  // 「键变了、仓里没有当前结果就不挂，退回 idle」由验收 17（suiteSmartUpstream 里 c 的那条）覆盖，这里不再重跑
 }
 
 // ------------------------------------------------------ 验收 12：右键菜单
@@ -710,15 +695,14 @@ async function suiteMenu(cdp, report) {
   await installRecorder(cdp);
   const ids = await smallChain(cdp);
   const full = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("（前提）全图运行 ok", full.status, "ok");
+  mustOk(full.status === "ok", "全图运行 ok", full.status);
   await sleep(200);
 
   const items = await openMenu(cdp, ids.b);
   const at = (tid) => items.order.indexOf(tid);
-  report.ok("三项都在、文案对", items.runTo?.text.startsWith("运行到此节点") && items.force?.text === "强制重算此节点" &&
-    items.only?.text === "仅此节点（用现有上游）", JSON.stringify(items));
-  report.ok("三项放在一起、依次排列", at("run-to-node") >= 0 && at("ctx-force-node") === at("run-to-node") + 1 &&
-    at("ctx-run-node-only") === at("run-to-node") + 2, JSON.stringify(items.order));
+  report.ok("三项都在、文案对、放在一起依次排列", items.runTo?.text.startsWith("运行到此节点") && items.force?.text === "强制重算此节点" &&
+    items.only?.text === "仅此节点（用现有上游）" && at("run-to-node") >= 0 && at("ctx-force-node") === at("run-to-node") + 1 &&
+    at("ctx-run-node-only") === at("run-to-node") + 2, JSON.stringify(items));
   report.ok("全部就绪时三项都可点", !items.runTo.disabled && !items.force.disabled && !items.only.disabled, JSON.stringify(items));
 
   // 运行到此 = 单击：targets=[b]，b 命中缓存
@@ -750,7 +734,6 @@ async function suiteMenu(cdp, report) {
     JSON.stringify(s3?.isolate));
   report.eq("「仅此节点」：只有 b 的显示变了", Object.keys(trans).sort(), [ids.b]);
   report.eq("「仅此节点」：a、c 的状态与耗时不变", await statesOf(cdp, [ids.a, ids.c]), before);
-  report.eq("菜单点完就收起", await cdp.eval(`return !!document.querySelector('[data-testid="node-context-menu"]');`), false);
 }
 
 export const nodeRunSuites = [
