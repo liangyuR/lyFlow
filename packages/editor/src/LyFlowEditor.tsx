@@ -79,6 +79,8 @@ import "./styles.blocks.css";
 const kMinCanvasWidth = 320;
 /** 参数面板宽度记在 localStorage 的这个键下（P2.1「记住宽度」）。 */
 const PANEL_WIDTH_KEY = "lyflow.paramPanel.width";
+/** 左侧算子面板的宽度，同样拖了就记住。 */
+const PALETTE_WIDTH_KEY = "lyflow.palette.width";
 
 const TRANSPORT_LABEL: Record<string, string> = {
   tauri: "Tauri · 实时",
@@ -190,16 +192,18 @@ function storedWidth(key: string | undefined, fallback: number): number {
   }
 }
 
-/** 右侧的可拖分栏。一条 4px 把手 + 全局 pointermove，
+/** 可拖分栏（右侧面板、左侧算子面板）。一条 4px 把手 + 全局 pointermove，
  *  不引分栏库 —— 一个库的成本是十几 KB 加一套 API，这里只要一个数字。
- *  给了 persistKey 就在松手时把宽度记进 localStorage，下次打开还是这个宽（参数面板，P2.1）。 */
+ *  给了 persistKey 就在松手时把宽度记进 localStorage，下次打开还是这个宽（参数面板，P2.1）。
+ *  reserve 是拖动时要给其余部分留的宽度：左右两栏互相限制，所以在拖的那一刻才取。 */
 function useDragSplit(
   initial: number,
   min: number,
   max: number,
   container: React.RefObject<HTMLElement | null>,
-  reserve: number,
+  reserve: () => number,
   persistKey?: string,
+  side: "left" | "right" = "right",
 ) {
   const [width, setWidth] = useState(() => Math.max(min, Math.min(max, storedWidth(persistKey, initial))));
   const dragging = useRef(false);
@@ -210,9 +214,8 @@ function useDragSplit(
     const move = (e: PointerEvent) => {
       if (!dragging.current) return;
       const rect = container.current?.getBoundingClientRect();
-      const right = rect ? rect.right : window.innerWidth;
-      const limit = rect ? Math.max(min, Math.min(max, rect.width - reserve)) : max;
-      const next = right - e.clientX;
+      const limit = rect ? Math.max(min, Math.min(max, rect.width - reserve())) : max;
+      const next = side === "left" ? e.clientX - (rect ? rect.left : 0) : (rect ? rect.right : window.innerWidth) - e.clientX;
       setWidth(Math.max(min, Math.min(limit, next)));
     };
     const up = () => {
@@ -232,7 +235,7 @@ function useDragSplit(
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
-  }, [container, min, max, reserve, persistKey]);
+  }, [container, min, max, reserve, persistKey, side]);
 
   const onPointerDown = useCallback(() => {
     dragging.current = true;
@@ -245,14 +248,20 @@ function useDragSplit(
 function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps) {
   const { screenToFlowPosition, fitView } = useReactFlow();
   const root = useRef<HTMLDivElement>(null);
-  const [paletteWidth] = useState(280);
   // 关动效时视口也一步到位（A4）：适配视图、整理之后的 fitView 都不带过渡
   const motionOn = useMotionEnabled();
   const fitMs = viewportMs(motionOn);
-  const rightPane = useDragSplit(380, 260, 900, root, paletteWidth + kMinCanvasWidth);
-  // 参数面板（param-recipe P2.1）另有一份宽度：它比 Inspector 宽得多，两者来回切时各记各的
-  const panelPane = useDragSplit(640, 360, 1800, root, paletteWidth + kMinCanvasWidth, PANEL_WIDTH_KEY);
   const panel = useUiStore((s) => s.paramPanel);
+  // 三栏互相限制：拖哪一栏都给另外两栏（画布至少 kMinCanvasWidth）留够地方。宽度在拖的那一刻从 ref 取
+  const widths = useRef({ palette: 0, right: 0 });
+  const reserveForPalette = useCallback(() => widths.current.right + kMinCanvasWidth, []);
+  const reserveForRight = useCallback(() => widths.current.palette + kMinCanvasWidth, []);
+  const palettePane = useDragSplit(280, 180, 640, root, reserveForPalette, PALETTE_WIDTH_KEY, "left");
+  const rightPane = useDragSplit(380, 260, 900, root, reserveForRight);
+  // 参数面板（param-recipe P2.1）另有一份宽度：它比 Inspector 宽得多，两者来回切时各记各的
+  const panelPane = useDragSplit(640, 360, 1800, root, reserveForRight, PANEL_WIDTH_KEY);
+  const paletteWidth = palettePane.width;
+  widths.current = { palette: paletteWidth, right: panel.open ? panelPane.width : rightPane.width };
 
   // 粘贴和搜索面板要知道往哪儿放。跟着鼠标走比总是放在画布中心自然得多。
   const cursor = useRef({ x: 0, y: 0 });
@@ -661,6 +670,15 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
           )}
           {manifestStatus === "ready" && <NodePalette />}
         </aside>
+
+        <div
+          className="app__splitter app__splitter--left"
+          onPointerDown={palettePane.onPointerDown}
+          role="separator"
+          aria-orientation="vertical"
+          title="拖动调整算子面板宽度"
+          data-testid="left-splitter"
+        />
 
         <section className="app__canvas">
           <GraphCanvas onRunToNode={handlers.onRunToNode} />
