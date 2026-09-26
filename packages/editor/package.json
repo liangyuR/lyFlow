@@ -1,6 +1,6 @@
 {
   "name": "@lyflow/editor",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "LyFlow 节点图编辑器，可嵌进任意 React 宿主",

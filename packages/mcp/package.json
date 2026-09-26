@@ -1,6 +1,6 @@
 {
   "name": "@lyflow/mcp",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "LyFlow 的 MCP 服务：把 /lyflow/* HTTP 契约与本地 lyflow CLI 包成 Agent 能用的工具",

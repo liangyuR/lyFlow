@@ -1,6 +1,6 @@
 [package]
 name = "lyflow-client"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.77"
 description = "LyFlow C ABI 的 Rust 客户端：加载 core DLL、跑图、取结果。`lyflow/client.hpp` 的对应物"
