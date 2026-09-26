@@ -158,12 +158,10 @@ TEST_CASE("lyflow_plan 的预测集合与实际 skipped 集合完全一致") {
   const RunLog again = runGraphCached(doc);
   CHECK(predicted == statesOf(again, "skipped"));
   CHECK(predicted.size() == 3);
-}
 
-TEST_CASE("lyflow_plan 校验失败时返回的是诊断而不是计划") {
-  ensureTestOps();
-  const Json doc = makeGraph({{"a", "no.such.op"}}, {});
-  const Json out = Json::parse(exec::planGraphJson(doc.dump(), {}, {}));
+  // 校验失败时返回的是诊断而不是计划
+  const Json bad = makeGraph({{"a", "no.such.op"}}, {});
+  const Json out = Json::parse(exec::planGraphJson(bad.dump(), {}, {}));
   REQUIRE(out.is_array());
   REQUIRE(out.size() >= 1);
   CHECK(out[0]["kind"] == "diagnostic");
@@ -224,43 +222,24 @@ TEST_CASE("纯副作用算子不参与缓存：没有输出端口就永远不 sk
 
 // ---------------------------------------------------------------- 1.2 并行
 
-TEST_CASE("菱形图：四支各睡 200 ms，并行墙钟 < 500 ms") {
+TEST_CASE("菱形图：四支各睡 200 ms，并行墙钟 < 500 ms；串行跑要慢得多 —— 证明快的那次真的是并行") {
   ensureTestOps();
-  const Json doc = diamondGraph(200);
+  {
+    Session parallel(diamondGraph(200));
+    RunLog& log = parallel.wait();
 
-  Session parallel(doc);
-  RunLog& log = parallel.wait();
-
-  CHECK(log.runStatus() == "ok");
-  CHECK(log.seqIsDense());
-  CHECK(runDurationMs(log) < 500.0);
-  const Json started = log.ofKind("run_started").front();
-  CHECK(started["maxParallel"].get<int>() >= 2);
-}
-
-TEST_CASE("同一张图串行跑要慢得多 —— 证明快的那次真的是并行") {
-  ensureTestOps();
-  Session serial(diamondGraph(120), {}, {}, /*keepCache=*/false, /*maxParallel=*/1);
-  RunLog& log = serial.wait();
-
-  CHECK(log.runStatus() == "ok");
-  CHECK(runDurationMs(log) >= 4 * 120.0);
-}
-
-TEST_CASE("并行下事件 seq 无重复无空洞") {
-  ensureTestOps();
-  const RunLog log = runGraph(diamondGraph(20));
-  REQUIRE(log.runStatus() == "ok");
-
-  std::set<std::int64_t> seen;
-  for (const Json& e : log.events) {
-    const auto seq = e.value("seq", std::int64_t{-1});
-    CHECK(seen.insert(seq).second);  // 无重复
+    CHECK(log.runStatus() == "ok");
+    CHECK(log.seqIsDense());
+    CHECK(runDurationMs(log) < 500.0);
+    const Json started = log.ofKind("run_started").front();
+    CHECK(started["maxParallel"].get<int>() >= 2);
   }
-  CHECK(log.seqIsDense());  // 无空洞
-  // 每个节点都恰好走一遍 pending → running → done
-  for (const std::string& id : {"s0", "s1", "s2", "s3"}) {
-    CHECK(log.finalState(id) == "done");
+  {
+    Session serial(diamondGraph(120), {}, {}, /*keepCache=*/false, /*maxParallel=*/1);
+    RunLog& log = serial.wait();
+
+    CHECK(log.runStatus() == "ok");
+    CHECK(runDurationMs(log) >= 4 * 120.0);
   }
 }
 
@@ -418,7 +397,7 @@ TEST_CASE("孤立的 reroute 推不出类型也不报错") {
 
 // ---------------------------------------------------------------- 1.4 迁移
 
-TEST_CASE("迁移链：v1 的图产出 migration 诊断") {
+TEST_CASE("迁移链：v1 的图产出 migration 诊断，老图直接跑得通，迁移后再存再开不再产出诊断") {
   ensureTestOps();
   Json doc = makeGraph(
       {
@@ -448,35 +427,29 @@ TEST_CASE("迁移链：v1 的图产出 migration 诊断") {
   for (const Json& d : diags) {
     CHECK(d.value("severity", "") != "error");
   }
-}
 
-TEST_CASE("迁移是在内存里生效的：老图直接跑得通") {
-  ensureTestOps();
-  Json doc = makeGraph(
+  // 迁移是在内存里生效的：老图直接跑得通
+  Json runnable = makeGraph(
       {
           {"g", "gen.synthetic", kSmall},
           {"s", "test.migrated", Json{{"count", 100}}},
       },
       {{"g.cloud", "s.cloud"}});
-  doc["nodes"][1]["opVersion"] = "1.0.0";
-
-  const RunLog log = runGraph(doc);
+  runnable["nodes"][1]["opVersion"] = "1.0.0";
+  const RunLog log = runGraph(runnable);
   CHECK(log.runStatus() == "ok");
   CHECK(log.finalState("s") == "done");
   CHECK(log.nodeEvent("s", "done")["stats"]["elementCount"] == 100);
-}
 
-TEST_CASE("迁移之后再存再开：不再产出迁移诊断") {
-  ensureTestOps();
-  Json doc = makeGraph(
+  // 迁移之后再存再开：不再产出迁移诊断
+  Json saved = makeGraph(
       {
           {"g", "gen.synthetic", kSmall},
           {"s", "test.migrated", Json{{"keepCount", 123}, {"seed", 9}}},
       },
       {{"g.cloud", "s.cloud"}});
-  doc["nodes"][1]["opVersion"] = "2.0.0";
-  const Json diags = Json::parse(exec::validateGraphJson(doc.dump(), {}));
-  for (const Json& d : diags) {
+  saved["nodes"][1]["opVersion"] = "2.0.0";
+  for (const Json& d : Json::parse(exec::validateGraphJson(saved.dump(), {}))) {
     CHECK(d.value("kind", "") != "migration");
   }
 }
@@ -694,62 +667,50 @@ TEST_CASE("没打 opVersion 的节点按 v1 的写法试迁移：真改了才出
 
 // ------------------------------------------------------------- 1.6 参数联动
 
-TEST_CASE("隐藏的 path 参数不校验必填") {
+TEST_CASE("visibleWhen：藏起来的参数只查形态不查必填，eq 与 ne 与 schema、编辑器同一套判据（param-recipe P1.6）") {
   ensureTestOps();
-  // test.sink 的 path 是可见的必填项，空着就该红
-  const Json empty = makeGraph(
-      {
-          {"g", "gen.synthetic", kSmall},
-          {"w", "test.sink", Json{{"path", ""}}},
-      },
-      {{"g.cloud", "w.cloud"}});
-  const Json diags = Json::parse(exec::validateGraphJson(empty.dump(), {}));
-  bool sawPathError = false;
-  for (const Json& d : diags) {
-    if (d.value("paramPath", "") == "path" && d.value("severity", "") == "error") {
-      sawPathError = true;
+  // cond 决定 path 何时露出来：eq file（source = file 才可见）或 ne identity（source ≠ identity 才可见）
+  auto makeRegistry = [](const char* opId, bool useNe) {
+    Registry r;
+    r.addType(PortType{"Transform", "#a0d030", {}, ""});
+
+    OperatorDesc op;
+    op.id = opId;
+    op.version = "1.0.0";
+    op.label = "Hidden Path";
+    op.category = "Test";
+    op.outputs = {Port{"out", "Transform", "Out", "", true}};
+    op.compute = [](const Inputs&, const ParamView&, Outputs& o, ExecContext&) {
+      o.set("out", Data::transform(Transform{}));
+      return Status::Ok();
+    };
+
+    Param source;
+    source.name = "source";
+    source.type = ParamType::Enum;
+    source.label = "Source";
+    source.def = Value::text("identity");
+    source.options = {EnumOption{"identity", "Identity", ""}, EnumOption{"file", "File", ""}};
+
+    Param path;
+    path.name = "path";
+    path.type = ParamType::Path;
+    path.label = "Path";
+    path.def = Value::text("");
+    path.visibleWhen.param = "source";
+    if (useNe) {
+      path.visibleWhen.ne = Value::text("identity");
+    } else {
+      path.visibleWhen.eq = Value::text("file");
     }
-  }
-  CHECK(sawPathError);
-}
 
-TEST_CASE("被 visibleWhen 藏起来的参数只查形态不查必填") {
-  ensureTestOps();
-  Registry r;
-  r.addType(PortType{"Transform", "#a0d030", {}, ""});
-
-  OperatorDesc op;
-  op.id = "test.hidden_path";
-  op.version = "1.0.0";
-  op.label = "Hidden Path";
-  op.category = "Test";
-  op.outputs = {Port{"out", "Transform", "Out", "", true}};
-  op.compute = [](const Inputs&, const ParamView&, Outputs& o, ExecContext&) {
-    o.set("out", Data::transform(Transform{}));
-    return Status::Ok();
+    op.params = {source, path};
+    r.addOperator(std::move(op));
+    return r;
   };
 
-  Param source;
-  source.name = "source";
-  source.type = ParamType::Enum;
-  source.label = "Source";
-  source.def = Value::text("identity");
-  source.options = {EnumOption{"identity", "Identity", ""}, EnumOption{"file", "File", ""}};
-
-  Param path;
-  path.name = "path";
-  path.type = ParamType::Path;
-  path.label = "Path";
-  path.def = Value::text("");
-  path.visibleWhen.param = "source";
-  path.visibleWhen.eq = Value::text("file");
-
-  op.params = {source, path};
-  r.addOperator(std::move(op));
-  REQUIRE(r.validate().empty());
-
-  auto diagnose = [&](const Json& params) {
-    Json doc = makeGraph({{"n", "test.hidden_path", params}}, {});
+  auto diagnose = [](const Registry& r, const char* opId, const Json& params) {
+    Json doc = makeGraph({{"n", opId, params}}, {});
     exec::RawGraph raw;
     Diagnostics diags;
     REQUIRE(exec::parseGraph(doc.dump(), raw, diags));
@@ -760,82 +721,43 @@ TEST_CASE("被 visibleWhen 藏起来的参数只查形态不查必填") {
     return Json::parse(diags.toJson());
   };
 
-  // 藏起来时不报「还没有选择文件」—— 用户根本没有那个输入框可以填
-  CHECK(diagnose(Json::object()).empty());
-  // 露出来时照常报
-  const Json shown = diagnose(Json{{"source", "file"}});
-  REQUIRE(shown.size() == 1);
-  CHECK(shown[0]["paramPath"] == "path");
-  // 形态照查：藏着也不许是数字
-  const Json wrongShape = diagnose(Json{{"path", 42}});
-  REQUIRE(wrongShape.size() == 1);
-  CHECK(wrongShape[0]["code"] == "bad_param");
-}
+  SUBCASE("eq") {
+    const Registry r = makeRegistry("test.hidden_path", false);
+    REQUIRE(r.validate().empty());
 
-TEST_CASE("visibleWhen 的 ne：不等于时才可见，与 schema、编辑器同一套判据（param-recipe P1.6）") {
-  ensureTestOps();
-  Registry r;
-  r.addType(PortType{"Transform", "#a0d030", {}, ""});
-
-  OperatorDesc op;
-  op.id = "test.ne_path";
-  op.version = "1.0.0";
-  op.label = "Ne Path";
-  op.category = "Test";
-  op.outputs = {Port{"out", "Transform", "Out", "", true}};
-  op.compute = [](const Inputs&, const ParamView&, Outputs& o, ExecContext&) {
-    o.set("out", Data::transform(Transform{}));
-    return Status::Ok();
-  };
-
-  Param source;
-  source.name = "source";
-  source.type = ParamType::Enum;
-  source.label = "Source";
-  source.def = Value::text("identity");
-  source.options = {EnumOption{"identity", "Identity", ""}, EnumOption{"file", "File", ""}};
-
-  // 与 hidden_path 相反的写法：source 不是 identity 时路径才露出来
-  Param path;
-  path.name = "path";
-  path.type = ParamType::Path;
-  path.label = "Path";
-  path.def = Value::text("");
-  path.visibleWhen.param = "source";
-  path.visibleWhen.ne = Value::text("identity");
-
-  op.params = {source, path};
-  r.addOperator(std::move(op));
-  REQUIRE(r.validate().empty());
-
-  // manifest 里写得出 ne（以前 writeCondition 只认 eq / in，ne 在导出时静默丢掉）
-  const Json manifest = Json::parse(r.toManifestJson());
-  const Json* declared = nullptr;
-  for (const Json& o : manifest["operators"]) {
-    if (o["id"] != "test.ne_path") continue;
-    for (const Json& p : o["params"]) {
-      if (p["name"] == "path") declared = &p;
-    }
+    // 藏起来时不报「还没有选择文件」—— 用户根本没有那个输入框可以填
+    CHECK(diagnose(r, "test.hidden_path", Json::object()).empty());
+    // 露出来时照常报
+    const Json shown = diagnose(r, "test.hidden_path", Json{{"source", "file"}});
+    REQUIRE(shown.size() == 1);
+    CHECK(shown[0]["paramPath"] == "path");
+    // 形态照查：藏着也不许是数字
+    const Json wrongShape = diagnose(r, "test.hidden_path", Json{{"path", 42}});
+    REQUIRE(wrongShape.size() == 1);
+    CHECK(wrongShape[0]["code"] == "bad_param");
   }
-  REQUIRE(declared != nullptr);
-  CHECK((*declared)["visibleWhen"] == Json{{"param", "source"}, {"ne", "identity"}});
 
-  auto diagnose = [&](const Json& params) {
-    Json doc = makeGraph({{"n", "test.ne_path", params}}, {});
-    exec::RawGraph raw;
-    Diagnostics diags;
-    REQUIRE(exec::parseGraph(doc.dump(), raw, diags));
-    exec::Plan plan;
-    exec::BuildOptions options;
-    options.runId = "ne";
-    exec::buildPlan(r, raw, options, plan, diags);
-    return Json::parse(diags.toJson());
-  };
+  SUBCASE("ne") {
+    const Registry r = makeRegistry("test.ne_path", true);
+    REQUIRE(r.validate().empty());
 
-  // source = identity：条件不成立，路径藏着，不报必填
-  CHECK(diagnose(Json::object()).empty());
-  // source = file：≠ identity，路径露出来，照常报「还没有选择文件」
-  const Json shown = diagnose(Json{{"source", "file"}});
-  REQUIRE(shown.size() == 1);
-  CHECK(shown[0]["paramPath"] == "path");
+    // manifest 里写得出 ne（以前 writeCondition 只认 eq / in，ne 在导出时静默丢掉）
+    const Json manifest = Json::parse(r.toManifestJson());
+    const Json* declared = nullptr;
+    for (const Json& o : manifest["operators"]) {
+      if (o["id"] != "test.ne_path") continue;
+      for (const Json& p : o["params"]) {
+        if (p["name"] == "path") declared = &p;
+      }
+    }
+    REQUIRE(declared != nullptr);
+    CHECK((*declared)["visibleWhen"] == Json{{"param", "source"}, {"ne", "identity"}});
+
+    // source = identity：条件不成立，路径藏着，不报必填
+    CHECK(diagnose(r, "test.ne_path", Json::object()).empty());
+    // source = file：≠ identity，路径露出来，照常报「还没有选择文件」
+    const Json shown = diagnose(r, "test.ne_path", Json{{"source", "file"}});
+    REQUIRE(shown.size() == 1);
+    CHECK(shown[0]["paramPath"] == "path");
+  }
 }

@@ -90,7 +90,7 @@ TEST_CASE("summary：有节点失败但声明输出都拿到了值 → degraded"
         std::string::npos);
 }
 
-TEST_CASE("summary：声明输出崩了 → failed，from 沿边回溯到最近的 error 节点") {
+TEST_CASE("summary：声明输出崩了 → failed，from 沿边回溯到最近的 error 节点；只有一个错时 root 就是 from") {
   ensureTestOps();
   // n_a 失败 → n_t1 → n_t2 连坐（cancelled/upstream_failed）。
   // 输出挂在 n_t2 上，from 必须指回真正出错的 n_a 而不是它自己。
@@ -109,6 +109,9 @@ TEST_CASE("summary：声明输出崩了 → failed，from 沿边回溯到最近�
   CHECK(summary["outputs"]["flush"]["state"] == "failed");
   CHECK(summary["outputs"]["flush"]["from"] == "n_a");
   CHECK(summary["outputs"]["flush"]["code"] == "insufficient_points");
+  // 整条链只有一个错时 root 就是 from
+  CHECK(summary["outputs"]["flush"]["root"] == "n_a");
+  CHECK(summary["outputs"]["flush"]["rootCode"] == "insufficient_points");
   CHECK_FALSE(summary["outputs"]["flush"].contains("value"));
   // nodes 里全部 error 都留着，不因为回溯只取一个就丢信息（§9）
   CHECK(summary["nodes"]["n_t1"]["state"] == "cancelled");
@@ -149,21 +152,6 @@ TEST_CASE("summary：from 是最近的出错节点，root 是失败链上拓扑�
   CHECK(summary["nodes"]["n_t1"]["state"] == "cancelled");
   CHECK(summary["nodes"]["n_t2"]["state"] == "cancelled");
   CHECK(summary["nodes"]["n_b"]["state"] == "error");
-}
-
-TEST_CASE("summary：整条链只有一个错时 root 就是 from") {
-  ensureTestOps();
-  const Json doc = withOutputs(
-      {N{"n_a", "test.fail", Json{{"code", "insufficient_points"}, {"message", "点太少"}}},
-       N{"n_t", "test.thin", Json::object()}},
-      {E{"n_a.cloud", "n_t.cloud"}},
-      Json{{"flush", Json{{"node", "n_t"}, {"port", "cloud"}}}});
-  Session s(doc);
-  RunLog& log = s.wait();
-  const Json flush = summaryOf(s, log)["outputs"]["flush"];
-  CHECK(flush["from"] == "n_a");
-  CHECK(flush["root"] == "n_a");
-  CHECK(flush["rootCode"] == "insufficient_points");
 }
 
 TEST_CASE("summary：没被 demand 的惰性分支上的输出是 inactive，不是 failed") {
@@ -240,9 +228,12 @@ TEST_CASE("summary：run 结束之前取不到，free 之后也取不到") {
   {
     Session s(doc);
     runId = s.runId();
-    while (!ops::blockEntered().load()) {
+    // 5 秒兜底：执行没进 b 就直接判失败，而不是整个测试进程挂在这里
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!ops::blockEntered().load() && std::chrono::steady_clock::now() < deadline) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+    REQUIRE(ops::blockEntered().load());
     CHECK_FALSE(exec::runSummaryJson(runId, raw));
     s.run().cancel();
     s.wait();

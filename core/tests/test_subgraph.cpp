@@ -184,38 +184,44 @@ TEST_CASE("子图嵌套两层：cacheKey 稳定，重跑全部 skipped") {
   CHECK(a == b);
 }
 
-TEST_CASE("子图递归引用被拒") {
+TEST_CASE("prepareGraph 挡下的子图错误：递归引用、不存在的定义、未知参数") {
   ensureTestOps();
-  Json doc = subgraphGraph(15);
-  doc["subgraphs"]["clean"]["nodes"].push_back(Json{{"id", "self"}, {"op", "sub:clean"}});
-
-  Diagnostics diags;
-  exec::RawGraph raw;
-  const bool ok = exec::prepareGraph(doc.dump(), raw, diags);
-  CHECK_FALSE(ok);
-  bool found = false;
-  for (const auto& d : diags.items()) {
-    if (d.status.code == "recursive_subgraph") found = true;
+  struct Case {
+    const char* name;
+    Json doc;
+    const char* code;
+    const char* nodeId;     // 空 = 不看
+    const char* paramPath;  // 空 = 不看
+  };
+  Json recursive = subgraphGraph(15);
+  recursive["subgraphs"]["clean"]["nodes"].push_back(Json{{"id", "self"}, {"op", "sub:clean"}});
+  Json missingDef = flatGraph(16);
+  missingDef["nodes"].push_back(Json{{"id", "x"}, {"op", "sub:nope"}});
+  Json unknownParam = subgraphGraph(19);
+  unknownParam["nodes"][1]["params"]["nosuch"] = 1;
+  const std::vector<Case> cases = {
+      {"子图递归引用被拒", recursive, "recursive_subgraph", "", ""},
+      {"子图引用了不存在的定义 → unknown_op", missingDef, "unknown_op", "x", ""},
+      {"子图的未知参数会被报出来", unknownParam, "unknown_param", "", "nosuch"},
+  };
+  for (const Case& c : cases) {
+    CAPTURE(c.name);
+    Diagnostics diags;
+    exec::RawGraph raw;
+    CHECK_FALSE(exec::prepareGraph(c.doc.dump(), raw, diags));
+    bool found = false;
+    for (const auto& d : diags.items()) {
+      if (d.status.code != c.code) continue;
+      if (*c.nodeId && d.nodeId != c.nodeId) continue;
+      if (*c.paramPath && d.status.paramPath != c.paramPath) continue;
+      found = true;
+    }
+    CHECK(found);
   }
-  CHECK(found);
 
-  // 走完整条运行路径也一样：整图级失败，不是崩溃
-  const RunLog log = runGraph(doc);
+  // 递归引用走完整条运行路径也一样：整图级失败，不是崩溃
+  const RunLog log = runGraph(recursive);
   CHECK(log.runStatus() == "error");
-}
-
-TEST_CASE("子图引用了不存在的定义 → unknown_op") {
-  ensureTestOps();
-  Json doc = flatGraph(16);
-  doc["nodes"].push_back(Json{{"id", "x"}, {"op", "sub:nope"}});
-  Diagnostics diags;
-  exec::RawGraph raw;
-  CHECK_FALSE(exec::prepareGraph(doc.dump(), raw, diags));
-  bool found = false;
-  for (const auto& d : diags.items()) {
-    if (d.status.code == "unknown_op" && d.nodeId == "x") found = true;
-  }
-  CHECK(found);
 }
 
 TEST_CASE("子图节点静音：整棵子树透传") {
@@ -242,41 +248,6 @@ TEST_CASE("Run to node 的目标可以是子图节点：按路径前缀收编整
   CHECK(std::find(ids.begin(), ids.end(), "g") != ids.end());
 }
 
-TEST_CASE("子图的未知参数会被报出来") {
-  ensureTestOps();
-  Json doc = subgraphGraph(19);
-  doc["nodes"][1]["params"]["nosuch"] = 1;
-  Diagnostics diags;
-  exec::RawGraph raw;
-  CHECK_FALSE(exec::prepareGraph(doc.dump(), raw, diags));
-  bool found = false;
-  for (const auto& d : diags.items()) {
-    if (d.status.code == "unknown_param" && d.status.paramPath == "nosuch") found = true;
-  }
-  CHECK(found);
-}
-
-TEST_CASE("子图合成出来的 OperatorDesc 通得过注册表自检") {
-  ensureTestOps();
-  Json doc = subgraphGraph(20);
-  exec::SubgraphDef def;
-  std::string error;
-  REQUIRE(exec::parseSubgraphDef(doc["subgraphs"]["clean"], "clean", def, error));
-  CHECK(error.empty());
-  const OperatorDesc op = exec::synthesizeOperator(def, "lib.clean");
-  CHECK(op.inputs.size() == 1);
-  CHECK(op.outputs.size() == 1);
-  CHECK(op.params.size() == 1);
-  CHECK(op.params[0].name == "leaf");
-  CHECK(std::string(toString(op.params[0].type)) == "vec3f");
-  CHECK(op.compute != nullptr);
-
-  Registry probe;
-  for (const auto& t : ensureRegistry().types()) probe.addType(t);
-  probe.addOperator(op);
-  CHECK(probe.validate().empty());
-}
-
 TEST_CASE("库目录：*.lyflow-op.json 注册成 lib.<id>，和内置算子无差别") {
   ensureTestOps();
   const auto dir = std::filesystem::temp_directory_path() / "lyflow-lib-test";
@@ -299,6 +270,12 @@ TEST_CASE("库目录：*.lyflow-op.json 注册成 lib.<id>，和内置算子无�
   const OperatorDesc* op = ensureRegistry().find("lib.clean");
   REQUIRE(op != nullptr);
   CHECK(op->category == "Library/Cleanup");
+  // 合成出来的 OperatorDesc 通得过注册表自检，外参形状照子图定义
+  CHECK(op->inputs.size() == 1);
+  CHECK(op->outputs.size() == 1);
+  REQUIRE(op->params.size() == 1);
+  CHECK(op->params[0].name == "leaf");
+  CHECK(std::string(toString(op->params[0].type)) == "vec3f");
   CHECK(ensureRegistry().validate().empty());
 
   Json doc = flatGraph(21);

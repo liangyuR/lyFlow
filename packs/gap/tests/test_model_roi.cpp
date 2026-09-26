@@ -232,64 +232,66 @@ TEST_CASE("gap.roll_anchored_crop 的点数保护按 usingCamera 分") {
   CHECK(cropStatus(left) == "applied");
 }
 
-TEST_CASE("gap.roi_from_labels 把框换成测量帧的米，段缺失时报 model_roi_failed") {
-  // 两片剖面：x 每槽 0.1 mm，z 分别在 168 / 175 mm。标签只标 row0。
-  PointCloud primary = profile(-64.0, 0.1, 168.0);
-  PointCloud secondary = profile(-64.0, 0.1, 175.0);
-  std::vector<int> row0(kSlots, 0);
-  std::vector<int> row1(kSlots, 0);
-  // 类 id：2=left_surface 3=left_roll 5=right_roll 6=right_surface（契约固定）
-  paint(row0, 100, 200, 2);
-  paint(row0, 300, 340, 3);
-  paint(row0, 400, 440, 5);
-  paint(row0, 600, 700, 6);
+TEST_CASE("gap.roi_from_labels 把框换成测量帧的米，段缺失时报 model_roi_failed，输入点数必须是 1280") {
+  SUBCASE("换成测量帧的米，段缺失时报 model_roi_failed") {
+    // 两片剖面：x 每槽 0.1 mm，z 分别在 168 / 175 mm。标签只标 row0。
+    PointCloud primary = profile(-64.0, 0.1, 168.0);
+    PointCloud secondary = profile(-64.0, 0.1, 175.0);
+    std::vector<int> row0(kSlots, 0);
+    std::vector<int> row1(kSlots, 0);
+    // 类 id：2=left_surface 3=left_roll 5=right_roll 6=right_surface（契约固定）
+    paint(row0, 100, 200, 2);
+    paint(row0, 300, 340, 3);
+    paint(row0, 400, 440, 5);
+    paint(row0, 600, 700, 6);
 
-  Call call;
-  call.inputs["primary"] = Data::cloud(primary);
-  call.inputs["secondary"] = Data::cloud(secondary);
-  call.inputs["labels"] = Data::record(labelsRecord(row0, row1));
-  REQUIRE(call.run("gap.roi_from_labels", {{"refine", Value::boolean(false)}}).ok);
+    Call call;
+    call.inputs["primary"] = Data::cloud(primary);
+    call.inputs["secondary"] = Data::cloud(secondary);
+    call.inputs["labels"] = Data::record(labelsRecord(row0, row1));
+    REQUIRE(call.run("gap.roi_from_labels", {{"refine", Value::boolean(false)}}).ok);
 
-  // left_surface -> flushBase：槽 100..199 -> x = -54.0 .. -44.1 mm，z 恒 168 mm
-  const Box2D* base = call.out("flushBase").asBox2D();
-  REQUIRE(base != nullptr);
-  CHECK(base->min[0] == doctest::Approx(-0.054).epsilon(1e-4));
-  CHECK(base->max[0] == doctest::Approx(-0.0441).epsilon(1e-4));
-  CHECK(base->min[1] == doctest::Approx(0.168).epsilon(1e-5));
-  CHECK(base->max[1] == doctest::Approx(0.168).epsilon(1e-5));
-  // left_roll -> gapLeft，right_roll -> gapRight，right_surface -> flushRef
-  CHECK(call.out("gapLeft").asBox2D()->min[0] == doctest::Approx(-0.034).epsilon(1e-4));
-  CHECK(call.out("gapRight").asBox2D()->min[0] == doctest::Approx(-0.024).epsilon(1e-4));
-  CHECK(call.out("flushRef").asBox2D()->min[0] == doctest::Approx(-0.004).epsilon(1e-3));
+    // left_surface -> flushBase：槽 100..199 -> x = -54.0 .. -44.1 mm，z 恒 168 mm
+    const Box2D* base = call.out("flushBase").asBox2D();
+    REQUIRE(base != nullptr);
+    CHECK(base->min[0] == doctest::Approx(-0.054).epsilon(1e-4));
+    CHECK(base->max[0] == doctest::Approx(-0.0441).epsilon(1e-4));
+    CHECK(base->min[1] == doctest::Approx(0.168).epsilon(1e-5));
+    CHECK(base->max[1] == doctest::Approx(0.168).epsilon(1e-5));
+    // left_roll -> gapLeft，right_roll -> gapRight，right_surface -> flushRef
+    CHECK(call.out("gapLeft").asBox2D()->min[0] == doctest::Approx(-0.034).epsilon(1e-4));
+    CHECK(call.out("gapRight").asBox2D()->min[0] == doctest::Approx(-0.024).epsilon(1e-4));
+    CHECK(call.out("flushRef").asBox2D()->min[0] == doctest::Approx(-0.004).epsilon(1e-3));
 
-  // 少标一段：missing_segments 非空 -> model_roi_failed，消息里点名缺的那段
-  std::vector<int> missing(kSlots, 0);
-  paint(missing, 100, 200, 2);
-  paint(missing, 300, 340, 3);
-  paint(missing, 400, 440, 5);
-  Call bad;
-  bad.inputs["primary"] = Data::cloud(primary);
-  bad.inputs["secondary"] = Data::cloud(secondary);
-  bad.inputs["labels"] = Data::record(labelsRecord(missing, row1));
-  const Status s = bad.run("gap.roi_from_labels", {{"refine", Value::boolean(false)}});
-  CHECK_FALSE(s.ok);
-  CHECK(s.code == "model_roi_failed");
-  CHECK(s.message.find("right_surface") != std::string::npos);
-  // 诊断照样出来，图上点开那个节点看得到
-  REQUIRE(bad.out("refinements").asRecord() != nullptr);
-}
+    // 少标一段：missing_segments 非空 -> model_roi_failed，消息里点名缺的那段
+    std::vector<int> missing(kSlots, 0);
+    paint(missing, 100, 200, 2);
+    paint(missing, 300, 340, 3);
+    paint(missing, 400, 440, 5);
+    Call bad;
+    bad.inputs["primary"] = Data::cloud(primary);
+    bad.inputs["secondary"] = Data::cloud(secondary);
+    bad.inputs["labels"] = Data::record(labelsRecord(missing, row1));
+    const Status s = bad.run("gap.roi_from_labels", {{"refine", Value::boolean(false)}});
+    CHECK_FALSE(s.ok);
+    CHECK(s.code == "model_roi_failed");
+    CHECK(s.message.find("right_surface") != std::string::npos);
+    // 诊断照样出来，图上点开那个节点看得到
+    REQUIRE(bad.out("refinements").asRecord() != nullptr);
+  }
 
-TEST_CASE("gap.roi_from_labels 的输入点数必须是 1280") {
-  std::vector<int> row(kSlots, 0);
-  paint(row, 100, 200, 2);
-  Call call;
-  call.inputs["primary"] = Data::cloud(rowCloud(10, 0.0F, 168.0F));
-  call.inputs["secondary"] = Data::cloud(profile(-64.0, 0.1, 175.0));
-  call.inputs["labels"] = Data::record(labelsRecord(row, row));
-  const Status s = call.run("gap.roi_from_labels");
-  CHECK_FALSE(s.ok);
-  CHECK(s.code == "bad_input");
-  CHECK(s.portName == "primary");
+  SUBCASE("输入点数必须是 1280") {
+    std::vector<int> row(kSlots, 0);
+    paint(row, 100, 200, 2);
+    Call call;
+    call.inputs["primary"] = Data::cloud(rowCloud(10, 0.0F, 168.0F));
+    call.inputs["secondary"] = Data::cloud(profile(-64.0, 0.1, 175.0));
+    call.inputs["labels"] = Data::record(labelsRecord(row, row));
+    const Status s = call.run("gap.roi_from_labels");
+    CHECK_FALSE(s.ok);
+    CHECK(s.code == "bad_input");
+    CHECK(s.portName == "primary");
+  }
 }
 
 TEST_CASE("gap.roi_from_labels 的 backdrop 零拷贝透传，没接就是空云") {
@@ -382,69 +384,74 @@ TEST_CASE("gap.drop_non_finite 只丢非有限点，其余通道跟着搬") {
 
 // -------------------------------------------------- ONNX 三步的头尾两步（T6）
 
-TEST_CASE("gap.profile_tensor 出 [2, 6, 1280]，valid 通道认得出 NaN 槽") {
-  PointCloud primary = profile(-30.0, 0.05, 100.0);
-  PointCloud secondary = profile(-30.0, 0.05, 101.0);
-  primary.xyz[0] = std::nanf("");  // 第 0 槽无效
+TEST_CASE("gap.profile_tensor 出 [2, 6, 1280]，valid 通道认得出 NaN 槽；点数不是 1280 时报 bad_input") {
+  SUBCASE("出 [2, 6, 1280]，valid 通道认得出 NaN 槽") {
+    PointCloud primary = profile(-30.0, 0.05, 100.0);
+    PointCloud secondary = profile(-30.0, 0.05, 101.0);
+    primary.xyz[0] = std::nanf("");  // 第 0 槽无效
 
-  Call call;
-  call.inputs["primary"] = Data::cloud(primary);
-  call.inputs["secondary"] = Data::cloud(secondary);
-  const Status s = call.run("gap.profile_tensor");
-  CAPTURE(s.message);
-  REQUIRE(s.ok);
+    Call call;
+    call.inputs["primary"] = Data::cloud(primary);
+    call.inputs["secondary"] = Data::cloud(secondary);
+    const Status s = call.run("gap.profile_tensor");
+    CAPTURE(s.message);
+    REQUIRE(s.ok);
 
-  const Tensor* t = call.out("tensor").asTensor();
-  REQUIRE(t != nullptr);
-  CHECK(t->shape == std::vector<std::int64_t>{2, 6, 1280});
-  CHECK(t->consistent());
-  // 通道 5 是 valid：primary 的第 0 槽是 0，第 1 槽是 1
-  CHECK(t->data[5 * kSlots + 0] == 0.0F);
-  CHECK(t->data[5 * kSlots + 1] == 1.0F);
+    const Tensor* t = call.out("tensor").asTensor();
+    REQUIRE(t != nullptr);
+    CHECK(t->shape == std::vector<std::int64_t>{2, 6, 1280});
+    CHECK(t->consistent());
+    // 通道 5 是 valid：primary 的第 0 槽是 0，第 1 槽是 1
+    CHECK(t->data[5 * kSlots + 0] == 0.0F);
+    CHECK(t->data[5 * kSlots + 1] == 1.0F);
+  }
+
+  SUBCASE("点数不是 1280 时报 bad_input 并指出端口") {
+    Call call;
+    call.inputs["primary"] = Data::cloud(rowCloud(10, 0.0F, 0.0F));
+    call.inputs["secondary"] = Data::cloud(profile(-30.0, 0.05, 101.0));
+    const Status s = call.run("gap.profile_tensor");
+    CHECK_FALSE(s.ok);
+    CHECK(s.code == "bad_input");
+    CHECK(s.portName == "primary");
+  }
 }
 
-TEST_CASE("gap.profile_tensor 点数不是 1280 时报 bad_input 并指出端口") {
-  Call call;
-  call.inputs["primary"] = Data::cloud(rowCloud(10, 0.0F, 0.0F));
-  call.inputs["secondary"] = Data::cloud(profile(-30.0, 0.05, 101.0));
-  const Status s = call.run("gap.profile_tensor");
-  CHECK_FALSE(s.ok);
-  CHECK(s.code == "bad_input");
-  CHECK(s.portName == "primary");
+TEST_CASE("gap.labels_from_logits 逐槽 argmax，并列时留最小的类 id；形状不对时报 bad_input") {
+  SUBCASE("逐槽 argmax，并列时留最小的类 id") {
+    Tensor logits;
+    const std::int64_t classes = 8;
+    logits.shape = {2, classes, static_cast<std::int64_t>(kSlots)};
+    logits.data.assign(2 * classes * kSlots, 0.0F);
+    // row0 的第 7 槽让类 3 赢；row1 的第 9 槽让类 5 赢；其余全 0 -> 并列取 0
+    logits.data[3 * kSlots + 7] = 1.0F;
+    logits.data[classes * kSlots + 5 * kSlots + 9] = 2.0F;
+
+    Call call;
+    call.inputs["tensor"] = Data::tensor(logits);
+    const Status s = call.run("gap.labels_from_logits");
+    CAPTURE(s.message);
+    REQUIRE(s.ok);
+
+    const Record* record = call.out("labels").asRecord();
+    REQUIRE(record != nullptr);
+    CHECK(record->type == "GapLabels");
+    CHECK(record->data["row0"].size() == kSlots);
+    CHECK(record->data["row0"][7].get<int>() == 3);
+    CHECK(record->data["row0"][6].get<int>() == 0);
+    CHECK(record->data["row1"][9].get<int>() == 5);
+  }
+
+  SUBCASE("形状不对时报 bad_input") {
+    Tensor bad;
+    bad.shape = {2, 8, 16};
+    bad.data.assign(2 * 8 * 16, 0.0F);
+    Call call;
+    call.inputs["tensor"] = Data::tensor(bad);
+    const Status s = call.run("gap.labels_from_logits");
+    CHECK_FALSE(s.ok);
+    CHECK(s.code == "bad_input");
+    CHECK(s.portName == "tensor");
+  }
 }
 
-TEST_CASE("gap.labels_from_logits 逐槽 argmax，并列时留最小的类 id") {
-  Tensor logits;
-  const std::int64_t classes = 8;
-  logits.shape = {2, classes, static_cast<std::int64_t>(kSlots)};
-  logits.data.assign(2 * classes * kSlots, 0.0F);
-  // row0 的第 7 槽让类 3 赢；row1 的第 9 槽让类 5 赢；其余全 0 -> 并列取 0
-  logits.data[3 * kSlots + 7] = 1.0F;
-  logits.data[classes * kSlots + 5 * kSlots + 9] = 2.0F;
-
-  Call call;
-  call.inputs["tensor"] = Data::tensor(logits);
-  const Status s = call.run("gap.labels_from_logits");
-  CAPTURE(s.message);
-  REQUIRE(s.ok);
-
-  const Record* record = call.out("labels").asRecord();
-  REQUIRE(record != nullptr);
-  CHECK(record->type == "GapLabels");
-  CHECK(record->data["row0"].size() == kSlots);
-  CHECK(record->data["row0"][7].get<int>() == 3);
-  CHECK(record->data["row0"][6].get<int>() == 0);
-  CHECK(record->data["row1"][9].get<int>() == 5);
-}
-
-TEST_CASE("gap.labels_from_logits 形状不对时报 bad_input") {
-  Tensor bad;
-  bad.shape = {2, 8, 16};
-  bad.data.assign(2 * 8 * 16, 0.0F);
-  Call call;
-  call.inputs["tensor"] = Data::tensor(bad);
-  const Status s = call.run("gap.labels_from_logits");
-  CHECK_FALSE(s.ok);
-  CHECK(s.code == "bad_input");
-  CHECK(s.portName == "tensor");
-}

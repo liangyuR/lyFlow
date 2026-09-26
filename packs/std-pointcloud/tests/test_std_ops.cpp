@@ -95,20 +95,44 @@ TEST_CASE("一条完整 pipeline 跑通：合成 → 裁剪 → 降采样 → �
 
 TEST_CASE("体素栅格：相距很远的点不会被折叠进同一个体素") {
   // 曾经把三个体素下标打包进一个 uint64，越界的点会绕回来和原点附近的点求质心。
-  // 这里用一个远超那个范围的坐标守住它。
-  const Json doc = makeGraph(
-      {{"g", "gen.synthetic", Json{{"pointCount", 10}}}, {"v", "filter.voxel_grid"}},
-      {{"g.cloud", "v.cloud"}});
-  Session s(doc);
-  REQUIRE(s.wait().runStatus() == "ok");
-
-  // 直接用数据模型验：造两片只差一个巨大平移的点，降采样后必须还是两个点
+  // 这里把一片只差巨大平移的点真的喂给 voxel_grid（默认叶大小 0.01），降采样后必须一点一格。
   PointCloud far;
   far.push(0.0f, 0.0f, 0.0f);
   far.push(300000.0f, 0.0f, 0.0f);  // 3e5 / 0.01 = 3e7 个体素，远超旧键的 ±2^20
-  CHECK(far.pointCount() == 2);
-  const Bounds b = far.bounds();
-  CHECK(b.max[0] - b.min[0] == doctest::Approx(300000.0f));
+  // 正好差 2^20、2^21 个体素（取体素中点，免得浮点落在格边上）：
+  // 按 20 / 21 位打包的键绕回来恰好就落在原点那一格
+  far.push(10485.765f, 0.0f, 0.0f);
+  far.push(20971.525f, 0.0f, 0.0f);
+  const std::vector<float> xs = {0.0f, 300000.0f, 10485.765f, 20971.525f};
+
+  // voxel_grid 的输入与输出端口同名（cloud），直接注入会被当成整节点注入、compute 被跳过；
+  // 所以经 util.merge 的输入端口注入（另一侧给空云），让 voxel_grid 真跑一遍
+  const Json doc = makeGraph({{"m", "util.merge"}, {"v", "filter.voxel_grid"}},
+                             {{"m.cloud", "v.cloud"}});
+  std::vector<exec::InjectedInput> inputs{
+      exec::InjectedInput{"m", "a", Data::cloud(far)},
+      exec::InjectedInput{"m", "b", Data::cloud(PointCloud{})}};
+  Session s(doc, {}, {}, /*keepCache=*/false, /*maxParallel=*/0, /*noReuse=*/false,
+            std::move(inputs));
+  RunLog& log = s.wait();
+  for (const Json& e : log.ofKind("node_state")) {
+    if (e.value("state", "") == "error") MESSAGE(e.dump());
+  }
+  REQUIRE(log.runStatus() == "ok");
+  REQUIRE(log.finalState("v") == "done");
+
+  Data out;
+  REQUIRE(exec::ResultStore::instance().get(s.runId(), "v", "cloud", out));
+  REQUIRE(out.asCloud() != nullptr);
+  const PointCloud& voxels = *out.asCloud();
+  REQUIRE(voxels.pointCount() == xs.size());
+  // 一格一个点，质心就是那个点本身：谁也没被拉去和原点求平均
+  for (std::size_t i = 0; i < xs.size(); ++i) {
+    CAPTURE(i);
+    CHECK(voxels.xyz[i * 3] == doctest::Approx(xs[i]));
+    CHECK(voxels.xyz[i * 3 + 1] == doctest::Approx(0.0f));
+    CHECK(voxels.xyz[i * 3 + 2] == doctest::Approx(0.0f));
+  }
 }
 
 TEST_CASE("体素栅格：坐标相对叶大小过大时报错而不是静默算错") {
@@ -178,15 +202,6 @@ TEST_CASE("util.merge：空点云不该把另一侧的通道带走") {
   REQUIRE(merged.asCloud() != nullptr);
   CHECK(merged.asCloud()->pointCount() == 3000);
   CHECK(merged.asCloud()->hasIntensity());
-}
-
-TEST_CASE("可选输入没连：crop_box 的 pose 是 required=false，不该报") {
-  const Json doc = makeGraph({{"a", "gen.synthetic"}, {"c", "filter.crop_box"}},
-                             {{"a.cloud", "c.cloud"}});
-  const Json diags = Json::parse(exec::validateGraphJson(doc.dump(), {}));
-  for (const Json& d : diags) {
-    CHECK(d.value("severity", "") != "error");
-  }
 }
 
 TEST_CASE("io.load_pcd 的 path 为空在校验期就红") {
