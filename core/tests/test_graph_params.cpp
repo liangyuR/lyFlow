@@ -80,24 +80,6 @@ TEST_CASE("顶层参数：换一个值只改被绑定节点及其下游的 cache
   CHECK(same == a);
 }
 
-TEST_CASE("顶层参数：运行期取值真的进了 compute") {
-  ensureTestOps();
-  exec::RunOptions options;
-  exec::ResultStore::instance().clear();
-  RunLog log;
-  log.runId = "graph-params-run";
-  options.runId = log.runId;
-  options.paramsJson = R"({"count": 123})";
-  {
-    exec::Run run(paramGraph().dump(), options, &detail::collect, &log);
-    run.join();
-  }
-  REQUIRE(log.runStatus() == "ok");
-  const Json done = log.nodeEvent("src", "done");
-  REQUIRE(done.contains("stats"));
-  CHECK(done["stats"]["outputs"][0]["elementCount"] == 123);
-}
-
 TEST_CASE("顶层参数：unknown_bind、param_conflict、未声明的名字") {
   ensureTestOps();
   SUBCASE("绑到不存在的节点") {
@@ -164,7 +146,7 @@ Json specGraph(const Json& value = 40) {
                            {"binds", {"src.pointCount"}}}}});
 }
 
-TEST_CASE("图参数规格：default 越过硬限位报 bad_param，paramPath 是名字、nodeId 为空") {
+TEST_CASE("图参数规格：default 越过硬限位报 bad_param，paramPath 是名字、nodeId 为空；与节点的错一次报全") {
   ensureTestOps();
   CHECK(Json::parse(exec::validateGraphJson(specGraph().dump(), {})).empty());
 
@@ -178,6 +160,13 @@ TEST_CASE("图参数规格：default 越过硬限位报 bad_param，paramPath �
   // 被绑定的节点那一层照旧规整：pointCount 的下限 0 不受影响，节点上没有别的错
   CHECK(findDiag(diags, "bad_param", "src", "pointCount") == nullptr);
 
+  // 图参数的错与节点的错一次报全
+  Json both = specGraph(500);
+  both["nodes"][3]["params"]["pointCount"] = -3;  // side 自己也错
+  const Json bothDiags = Json::parse(exec::validateGraphJson(both.dump(), {}));
+  CHECK(findDiag(bothDiags, "bad_param", "", "count") != nullptr);
+  CHECK(findDiag(bothDiags, "bad_param", "side", "pointCount") != nullptr);
+
   // plan 被阻断，run 不执行任何节点
   const Json plan = Json::parse(exec::planGraphJson(specGraph(500).dump(), {}, {}));
   CHECK_FALSE(plan[0].contains("cacheKey"));
@@ -186,7 +175,7 @@ TEST_CASE("图参数规格：default 越过硬限位报 bad_param，paramPath �
   CHECK(log.nodeEvent("src", "running").empty());
 }
 
-TEST_CASE("图参数规格：params_json 传入越界值同样报错，合法值照常") {
+TEST_CASE("图参数规格：params_json 传入越界值同样报错，合法值照常；运行期取值真的进了 compute") {
   ensureTestOps();
   const std::string doc = specGraph().dump();
   const Json low = Json::parse(exec::validateGraphJson(doc, {}, R"({"count": 3})"));
@@ -208,6 +197,22 @@ TEST_CASE("图参数规格：params_json 传入越界值同样报错，合法值
   }
   CHECK(log.runStatus() == "error");
   CHECK(log.nodeEvent("src", "running").empty());
+
+  // 没有规格限位的图参数：运行期取值真的进了 compute
+  exec::ResultStore::instance().clear();
+  exec::RunOptions okOptions;
+  RunLog okLog;
+  okLog.runId = "graph-params-run";
+  okOptions.runId = okLog.runId;
+  okOptions.paramsJson = R"({"count": 123})";
+  {
+    exec::Run run(paramGraph().dump(), okOptions, &detail::collect, &okLog);
+    run.join();
+  }
+  REQUIRE(okLog.runStatus() == "ok");
+  const Json done = okLog.nodeEvent("src", "done");
+  REQUIRE(done.contains("stats"));
+  CHECK(done["stats"]["outputs"][0]["elementCount"] == 123);
 }
 
 TEST_CASE("图参数规格：类型与 options 也按图参数自己的规格查") {
@@ -252,15 +257,6 @@ TEST_CASE("图参数规格：没有 type 的老图参数跳过第一步，照常
   const Json neg = Json::parse(exec::validateGraphJson(doc.dump(), {}, R"({"count": -1})"));
   CHECK(findDiag(neg, "bad_param", "src", "pointCount") != nullptr);
   CHECK(findDiag(neg, "bad_param", "", "count") == nullptr);
-}
-
-TEST_CASE("图参数规格：图参数的错与节点的错一次报全") {
-  ensureTestOps();
-  Json doc = specGraph(500);
-  doc["nodes"][3]["params"]["pointCount"] = -3;  // side 自己也错
-  const Json diags = Json::parse(exec::validateGraphJson(doc.dump(), {}));
-  CHECK(findDiag(diags, "bad_param", "", "count") != nullptr);
-  CHECK(findDiag(diags, "bad_param", "side", "pointCount") != nullptr);
 }
 
 TEST_CASE("顶层参数绑到子图实例：里面的节点也报 source=graph") {

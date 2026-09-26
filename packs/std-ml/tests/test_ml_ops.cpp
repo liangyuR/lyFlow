@@ -1,4 +1,4 @@
-// std-ml 包的算子测试。真跑一次推理要模型文件，所以那一条按环境变量跳过。
+// std-ml 包的算子测试。真跑一次推理要模型文件，所以那两条按环境变量 LYFLOW_TEST_ONNX_MODEL 跳过。
 #include <doctest/doctest.h>
 
 #include <cstdlib>
@@ -58,11 +58,20 @@ struct Call {
   }
 };
 
-/// 测试模型的位置。没设环境变量时用本机 gap 数据集里的那一个。
-std::filesystem::path testModel() {
-  if (const char* env = std::getenv("LYFLOW_TEST_ONNX_MODEL")) return std::filesystem::path(env);
-  return std::filesystem::path(
-      "C:/Users/11601/OneDrive/Documents/DTS/models/v12s0.onnx");
+/// 测试模型只认环境变量 LYFLOW_TEST_ONNX_MODEL。没设或文件不在时返回 false，
+/// 并打一条 MESSAGE 说明这条用例跳过了 —— 不静默 return，免得「全绿」里藏着没跑的用例。
+bool testModel(std::filesystem::path& model) {
+  const char* env = std::getenv("LYFLOW_TEST_ONNX_MODEL");
+  if (env == nullptr || *env == '\0') {
+    MESSAGE("跳过：没设 LYFLOW_TEST_ONNX_MODEL（指向一个 [N,6,1280] → [N,8,1280] 的 onnx 模型）");
+    return false;
+  }
+  model = std::filesystem::u8path(env);
+  if (!std::filesystem::is_regular_file(model)) {
+    MESSAGE("跳过：LYFLOW_TEST_ONNX_MODEL 指向的文件不存在: " << env);
+    return false;
+  }
+  return true;
 }
 
 }  // namespace
@@ -94,11 +103,8 @@ TEST_CASE("ml.onnx_run 没给模型时报 bad_param 而不是崩") {
 }
 
 TEST_CASE("ml.onnx_run 对 [2,6,1280] 零张量给出 [2,8,1280]") {
-  const std::filesystem::path model = testModel();
-  if (!std::filesystem::is_regular_file(model)) {
-    MESSAGE("跳过：没有测试模型 " << model.string() << "（设 LYFLOW_TEST_ONNX_MODEL）");
-    return;
-  }
+  std::filesystem::path model;
+  if (!testModel(model)) return;
   Call c;
   Tensor t;
   t.shape = {2, 6, 1280};
@@ -114,8 +120,8 @@ TEST_CASE("ml.onnx_run 对 [2,6,1280] 零张量给出 [2,8,1280]") {
 }
 
 TEST_CASE("ml.onnx_run 形状不符时报 bad_input 并指回输入端口") {
-  const std::filesystem::path model = testModel();
-  if (!std::filesystem::is_regular_file(model)) return;
+  std::filesystem::path model;
+  if (!testModel(model)) return;
   Call c;
   Tensor t;
   t.shape = {2, 3, 7};

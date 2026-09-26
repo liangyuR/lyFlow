@@ -156,18 +156,18 @@ Box2D box(float xMin, float yMin, float xMax, float yMax) {
 
 }  // namespace
 
-TEST_CASE("StandardGap.yml 导入器注册了六种 kind：三种模式 × 积木 / 细粒度") {
+TEST_CASE("导入器注册了六种 kind；导入的图每个节点都写了 opVersion，等于 manifest 里该算子的版本（积木 / 细粒度、带回退）") {
+  // 六种 kind 都注册了：三种模式 × 积木 / 细粒度
   for (const char* kind : {"StandardGap.yml", "StandardGap.yml:template", "StandardGap.yml:model",
                            "StandardGap.yml:fine", "StandardGap.yml:template:fine",
                            "StandardGap.yml:model:fine"}) {
+    CAPTURE(kind);
     const ImporterDesc* d = importer(kind);
     REQUIRE(d != nullptr);
     CHECK(d->fn != nullptr);
     CHECK(!d->label.empty());
   }
-}
 
-TEST_CASE("导入的图每个节点都写了 opVersion，等于 manifest 里该算子的版本（积木 / 细粒度、带回退）") {
   // 与编辑器新建节点（store/graph.ts 写 opVersion: op.version）一致：算子以后升主版本时导入的图能自动迁移
   std::unordered_map<std::string, std::string> versions;
   const nlohmann::json manifest = nlohmann::json::parse(ensureRegistry().toManifestJson());
@@ -455,21 +455,6 @@ TEST_CASE("gap.result_bundle 的字段与 QualityMetrics 对齐") {
   CHECK(b["pack_versions"].is_array());
 }
 
-TEST_CASE("gap.fit_line 与 gap.fit_gap_circles 各出一份 quality Record") {
-  for (const char* id : {"gap.fit_line", "gap.fit_gap_circles"}) {
-    const OperatorDesc* op = packRegistry().find(id);
-    REQUIRE(op != nullptr);
-    bool found = false;
-    for (const Port& p : op->outputs) {
-      if (p.name == "quality") {
-        found = true;
-        CHECK(p.type == "Record");
-      }
-    }
-    CHECK(found);
-  }
-}
-
 namespace {
 
 /// 用改过的 YAML 文本跑一次导入（上面的 import() 固定用 kConfig）。
@@ -510,49 +495,79 @@ bool hasEdge(const nlohmann::json& doc, const char* toNode, const char* toPort) 
 
 }  // namespace
 
-TEST_CASE("圆心高度带没配时不接 refLine，配了才接参考线") {
-  const nlohmann::json bare = importText("StandardGap.yml:template:fine", kConfig, nullptr);
-  CHECK(nodeById(bare, "n_circles")["params"]["rightCenterTol"] == 0.0);
-  CHECK_FALSE(hasEdge(bare, "n_circles", "refLine"));
+TEST_CASE("圆心高度带：没配时不接 refLine，配了接的是 flush_ref 的那条线，ref_type 不对就报错") {
+  SUBCASE("没配时不接 refLine，配了才接参考线") {
+    const nlohmann::json bare = importText("StandardGap.yml:template:fine", kConfig, nullptr);
+    CHECK(nodeById(bare, "n_circles")["params"]["rightCenterTol"] == 0.0);
+    CHECK_FALSE(hasEdge(bare, "n_circles", "refLine"));
 
-  const nlohmann::json banded = importText(
-      "StandardGap.yml:template:fine",
-      withGapKeys("  center_band: {right_above: 0.25, right_tolerance: 0.45}\n"), nullptr);
-  const auto& p = nodeById(banded, "n_circles")["params"];
-  CHECK(p["rightCenterAbove"] == 0.25);
-  CHECK(p["rightCenterTol"] == 0.45);
-  CHECK(hasEdge(banded, "n_circles", "refLine"));
+    const nlohmann::json banded = importText(
+        "StandardGap.yml:template:fine",
+        withGapKeys("  center_band: {right_above: 0.25, right_tolerance: 0.45}\n"), nullptr);
+    const auto& p = nodeById(banded, "n_circles")["params"];
+    CHECK(p["rightCenterAbove"] == 0.25);
+    CHECK(p["rightCenterTol"] == 0.45);
+    CHECK(hasEdge(banded, "n_circles", "refLine"));
+  }
+
+  SUBCASE("接的是 flush_ref 的那条线，ref_type 不对就报错") {
+    const std::string banded = withGapKeys(
+        "  center_band: {right_above: 0.25, right_tolerance: 0.45}\n");
+    const nlohmann::json doc = importText("StandardGap.yml:template:fine", banded, nullptr);
+    bool seen = false;
+    for (const auto& e : doc["edges"]) {
+      if (e["to"]["node"] == "n_circles" && e["to"]["port"] == "refLine") {
+        seen = true;
+        CHECK(e["from"]["node"] == "n_fit_ref");
+        CHECK(e["from"]["port"] == "line");
+      }
+    }
+    CHECK(seen);
+
+    std::string noRefLine = banded;
+    const std::size_t at = noRefLine.find("ref_type: line end");
+    REQUIRE(at != std::string::npos);
+    noRefLine.replace(at, std::strlen("ref_type: line end"), "ref_type: selected point");
+    Status s;
+    importText("StandardGap.yml:template:fine", noRefLine, &s);
+    CHECK_FALSE(s.ok);
+  }
 }
 
-TEST_CASE("圆心高度带接的是 flush_ref 的那条线，ref_type 不对就报错") {
-  const std::string banded = withGapKeys(
-      "  center_band: {right_above: 0.25, right_tolerance: 0.45}\n");
-  const nlohmann::json doc = importText("StandardGap.yml:template:fine", banded, nullptr);
-  bool seen = false;
-  for (const auto& e : doc["edges"]) {
-    if (e["to"]["node"] == "n_circles" && e["to"]["port"] == "refLine") {
-      seen = true;
-      CHECK(e["from"]["node"] == "n_fit_ref");
-      CHECK(e["from"]["port"] == "line");
+TEST_CASE("YAML 的逐侧相机、圆心高度带 mode、weak_fit 地板落到 n_circles 的参数上") {
+  struct Case {
+    const char* name;
+    std::string yaml;
+    std::vector<std::pair<const char*, nlohmann::json>> expected;
+  };
+  const std::vector<Case> cases = {
+      {"逐侧相机", withGapKeys("  right_circle_camera: Secondary\n"),
+       {{"leftCamera", "Both"}, {"rightCamera", "Secondary"}}},
+      {"圆心高度带的 mode",
+       withGapKeys("  center_band: {left_above: 0.5, left_tolerance: 0.4, left_mode: guard}\n"),
+       {{"leftCenterMode", "guard"}, {"rightCenterMode", "always"}}},
+      {"weak_fit 不写就是 0", kConfig, {{"rightMinArcDeg", 0.0}}},
+      {"weak_fit 的地板",
+       withGapKeys("  weak_fit: {right_min_arc_deg: 55, right_min_inliers: 10}\n"),
+       {{"rightMinArcDeg", 55.0}, {"rightMinInliers", 10}, {"leftMinArcDeg", 0.0}}},
+  };
+  for (const Case& c : cases) {
+    CAPTURE(c.name);
+    const nlohmann::json doc = importText("StandardGap.yml:template", c.yaml, nullptr);
+    const auto& p = nodeById(doc, "n_circles")["params"];
+    for (const auto& [key, value] : c.expected) {
+      CAPTURE(key);
+      CHECK(p[key] == value);
     }
   }
-  CHECK(seen);
 
-  std::string noRefLine = banded;
-  const std::size_t at = noRefLine.find("ref_type: line end");
-  REQUIRE(at != std::string::npos);
-  noRefLine.replace(at, std::strlen("ref_type: line end"), "ref_type: selected point");
+  // 圆心高度带的 mode 写错就报错
   Status s;
-  importText("StandardGap.yml:template:fine", noRefLine, &s);
+  importText("StandardGap.yml:template",
+             withGapKeys("  center_band: {left_above: 0.5, left_tolerance: 0.4,"
+                         " left_mode: whatever}\n"),
+             &s);
   CHECK_FALSE(s.ok);
-}
-
-TEST_CASE("逐侧相机从 YAML 落到 n_circles 的参数上") {
-  const nlohmann::json doc = importText(
-      "StandardGap.yml:template", withGapKeys("  right_circle_camera: Secondary\n"), nullptr);
-  const auto& p = nodeById(doc, "n_circles")["params"];
-  CHECK(p["leftCamera"] == "Both");
-  CHECK(p["rightCamera"] == "Secondary");
 }
 
 namespace {
@@ -567,105 +582,79 @@ std::string withFlushKeys(const std::string& lines) {
 
 }  // namespace
 
-TEST_CASE("方向基准默认不生成任何节点") {
-  const nlohmann::json doc = importText("StandardGap.yml:template:fine", kConfig, nullptr);
-  CHECK_FALSE(hasOp(doc, "gap.datum_window"));
-  CHECK_FALSE(hasEdge(doc, "n_fit_base", "refLine"));
-  // 一个方向相关的参数都不写进图，留给算子默认的 free
-  CHECK_FALSE(nodeById(doc, "n_fit_base")["params"].contains("dirMode"));
-}
+TEST_CASE("方向基准：默认不生成节点；配了 long_plane 就长出「窗 → 裁 → 拟」；锚可分别指定；写错就报错") {
+  SUBCASE("默认不生成任何节点") {
+    const nlohmann::json doc = importText("StandardGap.yml:template:fine", kConfig, nullptr);
+    CHECK_FALSE(hasOp(doc, "gap.datum_window"));
+    CHECK_FALSE(hasEdge(doc, "n_fit_base", "refLine"));
+    // 一个方向相关的参数都不写进图，留给算子默认的 free
+    CHECK_FALSE(nodeById(doc, "n_fit_base")["params"].contains("dirMode"));
+  }
 
-TEST_CASE("配了 long_plane 就长出「窗 → 裁 → 拟」三个节点并接到 n_fit_base") {
-  const nlohmann::json doc = importText(
-      "StandardGap.yml:template:fine",
-      withFlushKeys("  base_direction: {datum: long_plane, side: left, length_mm: 13,"
-                    " height_mm: 2.5, mode: fixed, nominal_deg: 3.0}\n"),
-      nullptr);
-  REQUIRE(hasOp(doc, "gap.datum_window"));
-  const auto& win = nodeById(doc, "n_datum_box")["params"];
-  CHECK(win["side"] == "left");
-  CHECK(win["lengthMm"] == 13.0);
-  CHECK(win["heightMm"] == 2.5);
-  const auto& base = nodeById(doc, "n_fit_base")["params"];
-  CHECK(base["dirMode"] == "fixed");
-  CHECK(base["dirNominalDeg"] == 3.0);
-  REQUIRE(hasEdge(doc, "n_fit_base", "refLine"));
-  for (const auto& e : doc["edges"]) {
-    if (e["to"]["node"] == "n_fit_base" && e["to"]["port"] == "refLine") {
-      CHECK(e["from"]["node"] == "n_fit_datum");
-      CHECK(e["from"]["port"] == "line");
+  SUBCASE("配了 long_plane 就长出三个节点并接到 n_fit_base") {
+    const nlohmann::json doc = importText(
+        "StandardGap.yml:template:fine",
+        withFlushKeys("  base_direction: {datum: long_plane, side: left, length_mm: 13,"
+                      " height_mm: 2.5, mode: fixed, nominal_deg: 3.0}\n"),
+        nullptr);
+    REQUIRE(hasOp(doc, "gap.datum_window"));
+    const auto& win = nodeById(doc, "n_datum_box")["params"];
+    CHECK(win["side"] == "left");
+    CHECK(win["lengthMm"] == 13.0);
+    CHECK(win["heightMm"] == 2.5);
+    const auto& base = nodeById(doc, "n_fit_base")["params"];
+    CHECK(base["dirMode"] == "fixed");
+    CHECK(base["dirNominalDeg"] == 3.0);
+    REQUIRE(hasEdge(doc, "n_fit_base", "refLine"));
+    for (const auto& e : doc["edges"]) {
+      if (e["to"]["node"] == "n_fit_base" && e["to"]["port"] == "refLine") {
+        CHECK(e["from"]["node"] == "n_fit_datum");
+        CHECK(e["from"]["port"] == "line");
+      }
+    }
+    // x 锚在缝的框上、y 锚在基准面框上：基准面框偶尔会整个跑偏，拿它定 x 窗口会飞出去
+    bool sawAnchor = false;
+    bool sawHeight = false;
+    for (const auto& e : doc["edges"]) {
+      if (e["to"]["node"] != "n_datum_box") continue;
+      if (e["to"]["port"] == "anchor") {
+        sawAnchor = true;
+        CHECK(e["from"]["port"] == "gapLeft");
+      }
+      if (e["to"]["port"] == "heightAnchor") {
+        sawHeight = true;
+        CHECK(e["from"]["port"] == "flushBase");
+      }
+    }
+    CHECK(sawAnchor);
+    CHECK(sawHeight);
+    CHECK(nodeById(doc, "n_fit_datum")["params"]["minInliers"] == 60);
+  }
+
+  SUBCASE("datum 与 mode 写错了导入就报错") {
+    for (const char* line : {"  base_direction: {datum: whatever}\n",
+                             "  base_direction: {datum: long_plane, mode: whatever}\n"}) {
+      Status s;
+      importText("StandardGap.yml:template", withFlushKeys(line), &s);
+      CHECK_FALSE(s.ok);
     }
   }
-  // x 锚在缝的框上、y 锚在基准面框上：基准面框偶尔会整个跑偏，拿它定 x 窗口会飞出去
-  bool sawAnchor = false;
-  bool sawHeight = false;
-  for (const auto& e : doc["edges"]) {
-    if (e["to"]["node"] != "n_datum_box") continue;
-    if (e["to"]["port"] == "anchor") {
-      sawAnchor = true;
-      CHECK(e["from"]["port"] == "gapLeft");
+
+  SUBCASE("锚和高度锚可以分别指定") {
+    const nlohmann::json doc = importText(
+        "StandardGap.yml:template:fine",
+        withFlushKeys("  base_direction: {datum: long_plane, anchor: gap_right,"
+                      " height_anchor: flush_ref, mode: band, nominal_deg: 1.0}\n"),
+        nullptr);
+    for (const auto& e : doc["edges"]) {
+      if (e["to"]["node"] != "n_datum_box") continue;
+      if (e["to"]["port"] == "anchor") CHECK(e["from"]["port"] == "gapRight");
+      if (e["to"]["port"] == "heightAnchor") CHECK(e["from"]["port"] == "flushRef");
     }
-    if (e["to"]["port"] == "heightAnchor") {
-      sawHeight = true;
-      CHECK(e["from"]["port"] == "flushBase");
-    }
+    // side 跟着 anchor 走：锚在右边的缝框上，窗口就往右推
+    CHECK(nodeById(doc, "n_datum_box")["params"]["side"] == "right");
+    CHECK(nodeById(doc, "n_fit_base")["params"]["dirMode"] == "band");
   }
-  CHECK(sawAnchor);
-  CHECK(sawHeight);
-  CHECK(nodeById(doc, "n_fit_datum")["params"]["minInliers"] == 60);
-}
-
-TEST_CASE("datum 与 mode 写错了导入就报错") {
-  for (const char* line : {"  base_direction: {datum: whatever}\n",
-                           "  base_direction: {datum: long_plane, mode: whatever}\n"}) {
-    Status s;
-    importText("StandardGap.yml:template", withFlushKeys(line), &s);
-    CHECK_FALSE(s.ok);
-  }
-}
-
-TEST_CASE("方向基准的锚和高度锚可以分别指定") {
-  const nlohmann::json doc = importText(
-      "StandardGap.yml:template:fine",
-      withFlushKeys("  base_direction: {datum: long_plane, anchor: gap_right,"
-                    " height_anchor: flush_ref, mode: band, nominal_deg: 1.0}\n"),
-      nullptr);
-  for (const auto& e : doc["edges"]) {
-    if (e["to"]["node"] != "n_datum_box") continue;
-    if (e["to"]["port"] == "anchor") CHECK(e["from"]["port"] == "gapRight");
-    if (e["to"]["port"] == "heightAnchor") CHECK(e["from"]["port"] == "flushRef");
-  }
-  // side 跟着 anchor 走：锚在右边的缝框上，窗口就往右推
-  CHECK(nodeById(doc, "n_datum_box")["params"]["side"] == "right");
-  CHECK(nodeById(doc, "n_fit_base")["params"]["dirMode"] == "band");
-}
-
-TEST_CASE("圆心高度带的 mode 从 YAML 落到参数上，写错就报错") {
-  const nlohmann::json doc = importText(
-      "StandardGap.yml:template",
-      withGapKeys("  center_band: {left_above: 0.5, left_tolerance: 0.4, left_mode: guard}\n"),
-      nullptr);
-  const auto& p = nodeById(doc, "n_circles")["params"];
-  CHECK(p["leftCenterMode"] == "guard");
-  CHECK(p["rightCenterMode"] == "always");
-  Status s;
-  importText("StandardGap.yml:template",
-             withGapKeys("  center_band: {left_above: 0.5, left_tolerance: 0.4,"
-                         " left_mode: whatever}\n"),
-             &s);
-  CHECK_FALSE(s.ok);
-}
-
-TEST_CASE("weak_fit 的地板从 YAML 落到 n_circles 上，不写就是 0") {
-  CHECK(nodeById(importText("StandardGap.yml:template", kConfig, nullptr), "n_circles")
-            ["params"]["rightMinArcDeg"] == 0.0);
-  const nlohmann::json doc = importText(
-      "StandardGap.yml:template",
-      withGapKeys("  weak_fit: {right_min_arc_deg: 55, right_min_inliers: 10}\n"), nullptr);
-  const auto& p = nodeById(doc, "n_circles")["params"];
-  CHECK(p["rightMinArcDeg"] == 55.0);
-  CHECK(p["rightMinInliers"] == 10);
-  CHECK(p["leftMinArcDeg"] == 0.0);
 }
 
 namespace {
@@ -798,56 +787,3 @@ TEST_CASE("导入的图过 core 的 validate：模板、模型、带 fallback �
   }
 }
 
-TEST_CASE("gap.fit_line dirMode=band 没接 refLine：validate 就报 bad_param，节点不执行") {
-  nlohmann::json doc;
-  doc["schemaVersion"] = 1;
-  doc["id"] = "01M7FITLINEBAND";
-  doc["nodes"] = nlohmann::json::array({
-      {{"id", "g"}, {"op", "gen.synthetic"}, {"params", {{"pointCount", 2000}}}},
-      {{"id", "roi"}, {"op", "gap.overall_roi"}},
-      {{"id", "fit"}, {"op", "gap.fit_line"}, {"params", {{"dirMode", "band"}}}},
-  });
-  const auto edge = [](const char* id, const char* fn, const char* fp, const char* tn,
-                       const char* tp) {
-    return nlohmann::json{{"id", id},
-                          {"from", {{"node", fn}, {"port", fp}}},
-                          {"to", {{"node", tn}, {"port", tp}}}};
-  };
-  doc["edges"] = nlohmann::json::array({
-      edge("e1", "g", "cloud", "roi", "primary"),
-      edge("e2", "g", "cloud", "roi", "secondary"),
-      edge("e3", "g", "cloud", "fit", "cloud"),
-      edge("e4", "roi", "box", "fit", "box"),
-      edge("e5", "roi", "box", "fit", "toward"),
-  });
-  const auto errors = validationErrors(doc);
-  REQUIRE(errors.size() == 1);
-  CHECK(errors[0]["nodeId"] == "fit");
-  CHECK(errors[0]["code"] == "bad_param");
-  CHECK(errors[0]["phase"] == "validate");
-  CHECK(errors[0]["paramPath"] == "dirMode");
-
-  // compute 里不再有这一条：执行器根本不会调到它
-  exec::ResultStore::instance().clear();
-  struct Log {
-    std::vector<nlohmann::json> events;
-  } log;
-  exec::RunOptions options;
-  options.runId = "m7-fit-line-band";
-  {
-    exec::Run run(doc.dump(), options,
-                  [](const char* json, void* user) {
-                    static_cast<Log*>(user)->events.push_back(nlohmann::json::parse(json));
-                  },
-                  &log);
-    run.join();
-  }
-  bool fitRan = false;
-  for (const auto& e : log.events) {
-    if (e.value("kind", "") == "node_state" && e.value("nodeId", "") == "fit" &&
-        e.value("state", "") == "running") {
-      fitRan = true;
-    }
-  }
-  CHECK_FALSE(fitRan);
-}

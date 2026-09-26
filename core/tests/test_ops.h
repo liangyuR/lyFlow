@@ -9,6 +9,7 @@
 #include <limits>
 #include <map>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 
 #include <nlohmann/json.hpp>
@@ -247,6 +248,14 @@ inline std::vector<Issue> validatedCheck(const ParamView& params,
 // ------------------------------------------------------------ test.fail
 inline Status failCompute(const Inputs&, const ParamView& params, Outputs&, ExecContext&) {
   return Status::Error(Phase::Execute, params.text("code"), params.text("message"));
+}
+
+// ------------------------------------------------------------ test.throw
+/// 算子自己抛异常：执行器 compute 外那层 catch 转成 internal 的唯一入口。
+/// kind=std 抛 std::runtime_error(message)，别的值抛一个 int（走 catch(...)）。
+inline Status throwCompute(const Inputs&, const ParamView& params, Outputs&, ExecContext&) {
+  if (params.text("kind") == "std") throw std::runtime_error(params.text("message"));
+  throw 42;
 }
 
 // ---------------------------------------------- 端口契约（ADR-0024）用的几个源
@@ -703,6 +712,19 @@ inline void ensureTestOps() {
       op.params = {ops::textParam("code", "io"), ops::textParam("message", "测试用的失败")};
       op.capabilities = {false, false, true};
       op.compute = &ops::failCompute;
+      r.addOperator(std::move(op));
+    }
+    {  // 一定抛异常：执行器把它兜成 internal，而不是让异常穿过 ABI
+      OperatorDesc op;
+      op.id = "test.throw";
+      op.version = "1.0.0";
+      op.label = "Always Throws";
+      op.category = "Test";
+      op.doc = "只在测试里注册：compute 直接抛异常。";
+      op.outputs = {cloudOut};
+      op.params = {ops::textParam("kind", "std"), ops::textParam("message", "测试用的异常")};
+      op.capabilities = {false, false, true};
+      op.compute = &ops::throwCompute;
       r.addOperator(std::move(op));
     }
     // 参数面板的全类型示例（param-recipe P2.10）。编辑器 e2e 经 LYFLOW_TEST_OPS 注册同一份

@@ -89,7 +89,7 @@ TEST_CASE("manifest 导出：curve 的默认值是对象，flags 的选项值是
   CHECK((*pose)["default"].size() == 16);
 }
 
-TEST_CASE("curve 的值：合法的通过，形状不对的报 bad_param 并说清楚哪里不对") {
+TEST_CASE("curve / transform 的值：合法的通过，形状不对的报 bad_param 并说清楚哪里不对") {
   ensureTestOps();
   CHECK(validate(showcaseGraph()).empty());
   const Json threePoints =
@@ -110,10 +110,8 @@ TEST_CASE("curve 的值：合法的通过，形状不对的报 bad_param 并说�
   CHECK(bad(Json{{"points", {{0, 0}, {1, 1}}}, {"interp", "cubic"}}).find("interp") != std::string::npos);
   CHECK(bad(Json{{"points", {{0, 0}, {1, 1}}}, {"tension", 1}}).find("tension") != std::string::npos);
   CHECK(bad(Json{{"points", {{0, 0}, {1, "a"}}}}).find("[x, y]") != std::string::npos);
-}
 
-TEST_CASE("transform 的值：16 个数的行主序矩阵，长度不对报 bad_param") {
-  ensureTestOps();
+  // transform 的值：16 个数的行主序矩阵，长度不对报 bad_param
   Json pose = Json::array();
   for (int i = 0; i < 16; ++i) pose.push_back(i % 5 == 0 ? 1.0 : 0.0);
   pose[3] = 0.25;  // 平移 x

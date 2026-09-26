@@ -1015,35 +1015,45 @@ Json bundleOf(const Json& doc, const fs::path& baseDir) {
 
 }  // namespace
 
-TEST_CASE("result_bundle v1 → v2：七个散端口收进新插的 make_scan_pair / make_roi_set，汇总逐字段相同") {
-  Scene scene("bundle-v1");
-  const Json fine = importAs("StandardGap.yml:template:fine", kSyntheticConfig, scene.root);
-  const Json v1 = asV1(fine);
+TEST_CASE("result_bundle v1 → v2：七个散端口收进新插的 make_scan_pair / make_roi_set，汇总逐字段相同；迁移函数对新写法幂等") {
+  SUBCASE("七个散端口收进新插的 make_scan_pair / make_roi_set，汇总逐字段相同") {
+    Scene scene("bundle-v1");
+    const Json fine = importAs("StandardGap.yml:template:fine", kSyntheticConfig, scene.root);
+    const Json v1 = asV1(fine);
 
-  const std::vector<Json> migrations = migrationsOf(v1);
-  REQUIRE(migrations.size() == 1);
-  const Json& m = migrations[0];
-  CHECK(m["nodeId"] == "n_bundle");
-  CHECK(m["opVersion"] == "2.0.0");
-  REQUIRE(m.contains("edits"));
-  // alignment / roiOverall 在 v2 仍是 bundle 的端口，那两条边原样留着
-  CHECK(m["edits"]["removeEdges"].size() == 7);
-  REQUIRE(m["edits"]["addNodes"].size() == 2);
-  std::set<std::string> added;
-  for (const Json& n : m["edits"]["addNodes"]) added.insert(n["op"].get<std::string>());
-  CHECK(added == std::set<std::string>{"gap.make_roi_set", "gap.make_scan_pair"});
-  CHECK(m["edits"]["addEdges"].size() == 9);
-  CHECK(errorsOf(v1).empty());
+    const std::vector<Json> migrations = migrationsOf(v1);
+    REQUIRE(migrations.size() == 1);
+    const Json& m = migrations[0];
+    CHECK(m["nodeId"] == "n_bundle");
+    CHECK(m["opVersion"] == "2.0.0");
+    REQUIRE(m.contains("edits"));
+    // alignment / roiOverall 在 v2 仍是 bundle 的端口，那两条边原样留着
+    CHECK(m["edits"]["removeEdges"].size() == 7);
+    REQUIRE(m["edits"]["addNodes"].size() == 2);
+    std::set<std::string> added;
+    for (const Json& n : m["edits"]["addNodes"]) added.insert(n["op"].get<std::string>());
+    CHECK(added == std::set<std::string>{"gap.make_roi_set", "gap.make_scan_pair"});
+    CHECK(m["edits"]["addEdges"].size() == 9);
+    CHECK(errorsOf(v1).empty());
 
-  // 老图当场就能跑（执行器在内存里用迁移后的拓扑），汇总与 m8a 的细粒度图逐字段相同
-  const Json expected = bundleOf(fine, scene.root);
-  CHECK(bundleOf(v1, scene.root) == expected);
+    // 老图当场就能跑（执行器在内存里用迁移后的拓扑），汇总与 m8a 的细粒度图逐字段相同
+    const Json expected = bundleOf(fine, scene.root);
+    CHECK(bundleOf(v1, scene.root) == expected);
 
-  // 写回之后再校验：不再有迁移诊断，汇总仍相同
-  const Json written = applyMigration(v1, m);
-  CHECK(migrationsOf(written).empty());
-  CHECK(errorsOf(written).empty());
-  CHECK(bundleOf(written, scene.root) == expected);
+    // 写回之后再校验：不再有迁移诊断，汇总仍相同
+    const Json written = applyMigration(v1, m);
+    CHECK(migrationsOf(written).empty());
+    CHECK(errorsOf(written).empty());
+    CHECK(bundleOf(written, scene.root) == expected);
+  }
+
+  SUBCASE("没打 opVersion 的 v2 接法不算迁移：迁移函数对新写法是幂等的") {
+    Scene scene("bundle-v2-unversioned");
+    Json doc = importAs("StandardGap.yml:template:fine", kSyntheticConfig, scene.root);
+    for (Json& n : doc["nodes"]) n.erase("opVersion");
+    CHECK(migrationsOf(doc).empty());
+    CHECK(errorsOf(doc).empty());
+  }
 }
 
 TEST_CASE("result_bundle v1 → v2：凑不齐一个 Bundle 的散端口只能删边，notes 写明丢了哪几项") {
@@ -1081,10 +1091,3 @@ TEST_CASE("result_bundle v1 → v2：凑不齐一个 Bundle 的散端口只能�
   CHECK(errorsOf(written).empty());
 }
 
-TEST_CASE("没打 opVersion 的 v2 接法不算迁移：迁移函数对新写法是幂等的") {
-  Scene scene("bundle-v2-unversioned");
-  Json doc = importAs("StandardGap.yml:template:fine", kSyntheticConfig, scene.root);
-  for (Json& n : doc["nodes"]) n.erase("opVersion");
-  CHECK(migrationsOf(doc).empty());
-  CHECK(errorsOf(doc).empty());
-}

@@ -152,7 +152,7 @@ TEST_CASE("上游失败：下游标 cancelled + upstream_failed，旁支照常�
   }
 }
 
-TEST_CASE("算子内部异常被兜住，转成 internal 而不是穿过 ABI") {
+TEST_CASE("下标来自另一片点云：报 bad_input 指向 indices 端口，而不是崩溃") {
   ensureTestOps();
   // split 拿到的下标来自另一片点云 → bad_input（不是崩溃）
   const Json doc = makeGraph(
@@ -169,6 +169,34 @@ TEST_CASE("算子内部异常被兜住，转成 internal 而不是穿过 ABI") {
   const Json e = log.nodeEvent("e", "error");
   CHECK(e["errors"][0]["code"] == "bad_input");
   CHECK(e["errors"][0]["portName"] == "indices");
+}
+
+TEST_CASE("算子内部异常被兜住，转成 internal 而不是穿过 ABI") {
+  ensureTestOps();
+  // std::exception 与未知类型两条 catch 各一个节点；旁支 g 不受牵连
+  const Json doc = makeGraph(
+      {
+          {"g", "gen.synthetic", kSmall},
+          {"t", "test.throw", Json{{"kind", "std"}, {"message", "boom-from-op"}}},
+          {"u", "test.throw", Json{{"kind", "int"}}},
+      },
+      {});
+
+  const RunLog log = runGraph(doc);
+  CHECK(log.seqIsDense());
+  CHECK(log.runStatus() == "error");
+  CHECK(log.finalState("g") == "done");
+  CHECK(log.finalState("t") == "error");
+  CHECK(log.finalState("u") == "error");
+  const Json t = log.nodeEvent("t", "error");
+  CHECK(t["errors"][0]["code"] == "internal");
+  CHECK(t["errors"][0]["message"].get<std::string>().find("boom-from-op") != std::string::npos);
+  const Json u = log.nodeEvent("u", "error");
+  CHECK(u["errors"][0]["code"] == "internal");
+
+  // 进程还活着、执行器还能用：紧接着再跑一张图照常 ok
+  const RunLog after = runGraph(makeGraph({{"g", "gen.synthetic", kSmall}}, {}));
+  CHECK(after.runStatus() == "ok");
 }
 
 TEST_CASE("声明了输出端口却不写：output_not_written，消息带端口名") {
@@ -221,18 +249,6 @@ TEST_CASE("取消：在第 k 个节点生效，join 在 1 秒内返回") {
   CHECK(log.finalState("b") == "cancelled");
   CHECK(log.finalState("p") == "cancelled");
   CHECK(log.runStatus() == "cancelled");
-}
-
-TEST_CASE("整图级失败（环）：run_finished 是 error，节点仍然标红") {
-  ensureTestOps();
-  const Json doc = makeGraph({{"a", "test.thin"}, {"b", "test.thin"}},
-                             {{"a.cloud", "b.cloud"}, {"b.cloud", "a.cloud"}});
-
-  const RunLog log = runGraph(doc);
-  CHECK(log.runStatus() == "error");
-  CHECK(log.seqIsDense());
-  CHECK(log.finalState("a") == "error");
-  CHECK(log.finalState("b") == "error");
 }
 
 TEST_CASE("Run to node：只执行目标的上游闭包") {

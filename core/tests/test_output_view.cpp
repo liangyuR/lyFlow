@@ -65,64 +65,81 @@ TEST_CASE("lyflow_output_tensor 切出第二片，shape 仍是完整的 (2,3,4)"
   CHECK(view.count == 0u);
 }
 
-TEST_CASE("lyflow_output_tensor 的 count=0 取到末尾，超出剩余元素数时截断") {
-  const std::string run = "tensor-tail";
-  seedOutputs(run);
+TEST_CASE("lyflow_output_tensor 的尾部：count=0 取到末尾、超出剩余元素数时截断，offset 越界是空切片而不是错误") {
+  SUBCASE("count=0 取到末尾，超出剩余元素数时截断") {
+    const std::string run = "tensor-tail";
+    seedOutputs(run);
 
-  lyflow_tensor_view whole{};
-  REQUIRE(lyflow_output_tensor(run.c_str(), "n", "tensor", 0, 0, &whole) == 0);
-  CHECK(whole.count == 24u);
-  CHECK(whole.total == 24u);
-  CHECK(whole.data[23] == doctest::Approx(23.0f));
-  lyflow_tensor_view_free(&whole);
+    lyflow_tensor_view whole{};
+    REQUIRE(lyflow_output_tensor(run.c_str(), "n", "tensor", 0, 0, &whole) == 0);
+    CHECK(whole.count == 24u);
+    CHECK(whole.total == 24u);
+    CHECK(whole.data[23] == doctest::Approx(23.0f));
+    lyflow_tensor_view_free(&whole);
 
-  lyflow_tensor_view tail{};
-  REQUIRE(lyflow_output_tensor(run.c_str(), "n", "tensor", 20, 0, &tail) == 0);
-  CHECK(tail.count == 4u);
-  CHECK(tail.offset == 20u);
-  CHECK(tail.rank == 3u);
-  CHECK(tail.data[0] == doctest::Approx(20.0f));
-  lyflow_tensor_view_free(&tail);
+    lyflow_tensor_view tail{};
+    REQUIRE(lyflow_output_tensor(run.c_str(), "n", "tensor", 20, 0, &tail) == 0);
+    CHECK(tail.count == 4u);
+    CHECK(tail.offset == 20u);
+    CHECK(tail.rank == 3u);
+    CHECK(tail.data[0] == doctest::Approx(20.0f));
+    lyflow_tensor_view_free(&tail);
 
-  lyflow_tensor_view clipped{};
-  REQUIRE(lyflow_output_tensor(run.c_str(), "n", "tensor", 20, 999, &clipped) == 0);
-  CHECK(clipped.count == 4u);
-  CHECK(clipped.data[3] == doctest::Approx(23.0f));
-  lyflow_tensor_view_free(&clipped);
+    lyflow_tensor_view clipped{};
+    REQUIRE(lyflow_output_tensor(run.c_str(), "n", "tensor", 20, 999, &clipped) == 0);
+    CHECK(clipped.count == 4u);
+    CHECK(clipped.data[3] == doctest::Approx(23.0f));
+    lyflow_tensor_view_free(&clipped);
+  }
+
+  SUBCASE("offset 越界是空切片而不是错误") {
+    const std::string run = "tensor-past-end";
+    seedOutputs(run);
+
+    lyflow_tensor_view view{};
+    CHECK(lyflow_output_tensor(run.c_str(), "n", "tensor", 1000, 4, &view) == 0);
+    CHECK(view.count == 0u);
+    CHECK(view.data == nullptr);
+    CHECK(view.total == 24u);
+    CHECK(view.rank == 3u);
+    REQUIRE(view.shape != nullptr);
+    CHECK(view.shape[2] == 4);
+    lyflow_tensor_view_free(&view);
+
+    lyflow_tensor_view edge{};
+    CHECK(lyflow_output_tensor(run.c_str(), "n", "tensor", 24, 0, &edge) == 0);
+    CHECK(edge.count == 0u);
+    CHECK(edge.data == nullptr);
+    lyflow_tensor_view_free(&edge);
+  }
 }
 
-TEST_CASE("lyflow_output_tensor 的 offset 越界是空切片而不是错误") {
-  const std::string run = "tensor-past-end";
-  seedOutputs(run);
+TEST_CASE("lyflow_output_tensor / lyflow_output_indices 的返回码：没有结果与类型不对都是 1，out 为空是 2") {
+  SUBCASE("tensor") {
+    const std::string run = "tensor-codes";
+    seedOutputs(run);
 
-  lyflow_tensor_view view{};
-  CHECK(lyflow_output_tensor(run.c_str(), "n", "tensor", 1000, 4, &view) == 0);
-  CHECK(view.count == 0u);
-  CHECK(view.data == nullptr);
-  CHECK(view.total == 24u);
-  CHECK(view.rank == 3u);
-  REQUIRE(view.shape != nullptr);
-  CHECK(view.shape[2] == 4);
-  lyflow_tensor_view_free(&view);
+    lyflow_tensor_view view{};
+    CHECK(lyflow_output_tensor(run.c_str(), "n", "cloud", 0, 0, &view) == 1);
+    CHECK(view.handle == nullptr);
+    CHECK(lyflow_output_tensor(run.c_str(), "n", "indices", 0, 0, &view) == 1);
+    CHECK(lyflow_output_tensor(run.c_str(), "n", "nope", 0, 0, &view) == 1);
+    CHECK(lyflow_output_tensor("no-such-run", "n", "tensor", 0, 0, &view) == 1);
+    CHECK(lyflow_output_tensor(run.c_str(), "n", "tensor", 0, 0, nullptr) == 2);
+  }
 
-  lyflow_tensor_view edge{};
-  CHECK(lyflow_output_tensor(run.c_str(), "n", "tensor", 24, 0, &edge) == 0);
-  CHECK(edge.count == 0u);
-  CHECK(edge.data == nullptr);
-  lyflow_tensor_view_free(&edge);
-}
+  SUBCASE("indices") {
+    const std::string run = "indices-codes";
+    seedOutputs(run);
 
-TEST_CASE("lyflow_output_tensor 的返回码：没有结果与类型不对都是 1，out 为空是 2") {
-  const std::string run = "tensor-codes";
-  seedOutputs(run);
-
-  lyflow_tensor_view view{};
-  CHECK(lyflow_output_tensor(run.c_str(), "n", "cloud", 0, 0, &view) == 1);
-  CHECK(view.handle == nullptr);
-  CHECK(lyflow_output_tensor(run.c_str(), "n", "indices", 0, 0, &view) == 1);
-  CHECK(lyflow_output_tensor(run.c_str(), "n", "nope", 0, 0, &view) == 1);
-  CHECK(lyflow_output_tensor("no-such-run", "n", "tensor", 0, 0, &view) == 1);
-  CHECK(lyflow_output_tensor(run.c_str(), "n", "tensor", 0, 0, nullptr) == 2);
+    lyflow_indices_view view{};
+    CHECK(lyflow_output_indices(run.c_str(), "n", "tensor", 0, 0, &view) == 1);
+    CHECK(view.handle == nullptr);
+    CHECK(lyflow_output_indices(run.c_str(), "n", "cloud", 0, 0, &view) == 1);
+    CHECK(lyflow_output_indices(run.c_str(), "n", "nope", 0, 0, &view) == 1);
+    CHECK(lyflow_output_indices("no-such-run", "n", "indices", 0, 0, &view) == 1);
+    CHECK(lyflow_output_indices(run.c_str(), "n", "indices", 0, 0, nullptr) == 2);
+  }
 }
 
 TEST_CASE("lyflow_output_indices：sourceCloudId 原样带出，offset/count 分页") {
@@ -160,19 +177,6 @@ TEST_CASE("lyflow_output_indices：sourceCloudId 原样带出，offset/count 分
   CHECK(past.total == 10u);
   CHECK(past.source_cloud_id == 4242u);
   lyflow_indices_view_free(&past);
-}
-
-TEST_CASE("lyflow_output_indices 对非 Indices 端口返回 1") {
-  const std::string run = "indices-codes";
-  seedOutputs(run);
-
-  lyflow_indices_view view{};
-  CHECK(lyflow_output_indices(run.c_str(), "n", "tensor", 0, 0, &view) == 1);
-  CHECK(view.handle == nullptr);
-  CHECK(lyflow_output_indices(run.c_str(), "n", "cloud", 0, 0, &view) == 1);
-  CHECK(lyflow_output_indices(run.c_str(), "n", "nope", 0, 0, &view) == 1);
-  CHECK(lyflow_output_indices("no-such-run", "n", "indices", 0, 0, &view) == 1);
-  CHECK(lyflow_output_indices(run.c_str(), "n", "indices", 0, 0, nullptr) == 2);
 }
 
 TEST_CASE("视图的 handle 让借来的数据活过结果仓的清空") {
