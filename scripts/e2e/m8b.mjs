@@ -7,7 +7,7 @@ import path from "node:path";
 
 import { sleep } from "./cdp.mjs";
 import { ROOT } from "./harness.mjs";
-import { dragMouse, lit, newDoc, pressEscape, pressF5, runAndWait, select } from "./page.mjs";
+import { dragMouse, lit, mustOk, newDoc, pressEscape, pressF5, runAndWait, select } from "./page.mjs";
 
 // ------------------------------------------------------------ 合成剖面（毫米）
 // 与 packs/gap/tests/test_blocks.cpp 的夹具同一个形状：左板顶面 y=165，右板 y=164（高 1 mm），
@@ -272,15 +272,17 @@ async function suiteBuildFromBlank(cdp, report, ws) {
   const canvas = await canvasRect(cdp);
 
   // 1. 拖入读剖面：图里什么都没有，没有可连的
-  report.eq("拖入 gap.read_scan", await dropFromPalette(cdp, '.palette [data-op-id="gap.read_scan"]',
-    { x: canvas.x + 60, y: canvas.y + 80 }), "ok");
+  const droppedRead = await dropFromPalette(cdp, '.palette [data-op-id="gap.read_scan"]',
+    { x: canvas.x + 60, y: canvas.y + 80 });
+  mustOk(droppedRead === "ok", "拖入 gap.read_scan", droppedRead);
   // 2. 拖入模板定位：scan 唯一候选，自动连上
-  report.eq("拖入 gap.locate_template", await dropFromPalette(cdp, '.palette [data-op-id="gap.locate_template"]',
-    { x: canvas.x + 290, y: canvas.y + 80 }), "ok");
+  const droppedLocate = await dropFromPalette(cdp, '.palette [data-op-id="gap.locate_template"]',
+    { x: canvas.x + 290, y: canvas.y + 80 });
+  mustOk(droppedLocate === "ok", "拖入 gap.locate_template", droppedLocate);
   let doc = await docOf(cdp);
   const read = nodeByOp(doc, "gap.read_scan")[0]?.id;
   const locate = nodeByOp(doc, "gap.locate_template")[0]?.id;
-  report.ok("两个节点都落下了", Boolean(read && locate), JSON.stringify(doc.nodes.map((n) => n.op)));
+  mustOk(Boolean(read && locate), "两个节点都落下了", JSON.stringify(doc.nodes.map((n) => n.op)));
   report.ok(
     "locate_template.scan 自动接到 read_scan.scan",
     doc.edges.length === 1 && doc.edges[0].from.node === read && doc.edges[0].to.node === locate &&
@@ -289,8 +291,9 @@ async function suiteBuildFromBlank(cdp, report, ws) {
   );
 
   // 3. 插入「测点骨架」片段：8 个节点，对外的 8 个输入全都接到 locate_template 那唯一的一对输出上
-  report.eq("插入「测点骨架」", await dropFromPalette(cdp, '[data-testid="snippet-gap.measure_skeleton"]',
-    { x: canvas.x + 520, y: canvas.y + 40 }), "ok");
+  const droppedSkeleton = await dropFromPalette(cdp, '[data-testid="snippet-gap.measure_skeleton"]',
+    { x: canvas.x + 520, y: canvas.y + 40 });
+  mustOk(droppedSkeleton === "ok", "插入「测点骨架」", droppedSkeleton);
   doc = await docOf(cdp);
   report.eq("一共 10 个节点（计划 §3 的模板路径测点）", doc.nodes.length, 10);
   report.eq("一共 20 条边：1 条拖入时自动连的 + 11 条片段内部的 + 8 条插入时自动连的", doc.edges.length, 20);
@@ -416,8 +419,7 @@ async function suiteBundlePeek(cdp, report) {
     const doc = window.__lyflow.stores.graph.getState().doc;
     return doc.edges.find((e) => e.from.node === ${lit(built.read)} && e.to.node === ${lit(built.locate)})?.id ?? null;
   `);
-  report.ok("找得到 read_scan → locate_template 那条 ScanPair 边", typeof edge === "string", String(edge));
-  if (!edge) return;
+  mustOk(typeof edge === "string", "找得到 read_scan → locate_template 那条 ScanPair 边", String(edge));
   // 走边的右键菜单「查看内容」（与双击同一个 openPeek），免得双击落点被节点挡住
   const opened = await cdp.eval(`
     const group = document.querySelector('.react-flow__edge[data-id="${edge}"]');
@@ -434,13 +436,12 @@ async function suiteBundlePeek(cdp, report) {
     await new Promise((r) => setTimeout(r, 250));
     return 'ok';
   `);
-  report.eq("边的右键菜单打开了查看器", opened, "ok");
+  mustOk(opened === "ok", "边的右键菜单打开了查看器", opened);
   const win = await cdp.waitFor(
     `(() => { const w = window.__lyflow.snapshot().peek.find((x) => x.edgeId === ${lit(edge)}); return w ?? null; })()`,
     { timeoutMs: 5000, what: "Peek 窗" },
   ).catch(() => null);
-  report.ok("开出了一个 Peek 窗", win !== null);
-  if (!win) return;
+  mustOk(win !== null, "开出了一个 Peek 窗");
   report.eq("端口类型是 Bundle<gap.ScanPair>", win.type, "Bundle<gap.ScanPair>");
   report.eq("默认视图是字段表", win.view, "fields");
   const fields = await cdp.waitFor(
@@ -490,17 +491,18 @@ async function suiteDragWrongSide(cdp, report) {
     timeoutMs: 10_000, what: "拖框层",
   });
   const g = await roiGeometry(cdp);
-  const t0 = Date.now();
-  // 挪到 target 旁边（缝的右侧）
+  // 挪到 target 旁边（缝的右侧）。dragMouse 在 mouseReleased 之后还睡了 120 ms 才返回，
+  // 计时从松手那一刻算，所以把这 120 ms 补回去
   await dragMouse(cdp, g.boxes.template1DatumRoi.center, screenOf(g.map, 12, 160.5), { steps: 10 });
+  const released = Date.now() - 120;
   const bad = await waitValidated(cdp, built.locate, true, 3000);
-  const ms = Date.now() - t0;
+  const ms = Date.now() - released;
   report.eq("松手后 locate_template 标红", bad?.invalid, "1");
   report.ok("节点上显示诊断：datum 与 target 落在缝的同一侧", /同一侧/.test(bad?.text ?? ""), JSON.stringify(bad));
   report.ok("诊断指到 template1DatumRoi",
     (bad?.diags ?? []).some((d) => d.paramPath === "template1DatumRoi" && d.code === "bad_param"),
     JSON.stringify(bad?.diags));
-  report.ok(`从松手到标红在 3 秒内（${ms} ms，含拖动本身）`, ms < 3000 + 2000);
+  report.ok("从松手到标红 < 3 s", bad?.invalid === "1" && ms < 3000, `${ms} ms`);
   const inspector = await cdp.eval(`
     const row = document.querySelector('[data-testid="param-template1DatumRoi"]');
     return { error: row?.getAttribute('data-param-error') ?? null,
@@ -535,9 +537,7 @@ async function suiteAutoConnect(cdp, report) {
   let doc = await docOf(cdp);
   const [read1] = nodeByOp(doc, "gap.read_scan").map((n) => n.id);
   const [locate1] = nodeByOp(doc, "gap.locate_template").map((n) => n.id);
-  report.ok("唯一候选：locate_template.scan 自动接到 read_scan.scan",
-    doc.edges.length === 1 && doc.edges[0].from.node === read1 && doc.edges[0].to.node === locate1,
-    JSON.stringify(doc.edges));
+  // 唯一候选自动连上由验收 7 的「locate_template.scan 自动接到 read_scan.scan」验过，这里只是垫场
 
   await dropFromPalette(cdp, '.palette [data-op-id="gap.read_scan"]', at(0.08, 0.55));
   await dropFromPalette(cdp, '.palette [data-op-id="gap.locate_template"]', at(0.38, 0.55));
@@ -574,29 +574,27 @@ async function suiteAutoConnect(cdp, report) {
     const r = h.getBoundingClientRect();
     return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
   `);
-  report.ok("找得到 read_scan#2 的输出端口", handle !== null);
-  if (handle) {
-    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: handle.x, y: handle.y, buttons: 0 });
-    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: handle.x, y: handle.y, button: "left", buttons: 1, clickCount: 1 });
-    for (let i = 1; i <= 6; i += 1) {
-      await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: handle.x + i * 12, y: handle.y + i * 9, button: "left", buttons: 1 });
-      await sleep(15);
-    }
-    await sleep(120);
-    const verdicts = await cdp.eval(`
-      const v = (node, port) => document.querySelector(
-        '[data-testid="port-' + node + '-' + port + '"].node-port--input')?.getAttribute('data-port-verdict') ?? null;
-      return { scan: v(${lit(line)}, 'scan'), rois: v(${lit(line)}, 'rois'), refLine: v(${lit(line)}, 'refLine'),
-               locate2: v(${lit(locate2)}, 'scan') };
-    `);
-    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: handle.x + 72, y: handle.y + 54, button: "left", buttons: 1, clickCount: 1 });
-    await sleep(200);
-    await pressEscape(cdp);
-    report.eq("从 ScanPair 输出拖线：role_line.scan 可落", verdicts.scan, "compatible");
-    report.eq("RoiSet 输入置灰", verdicts.rois, "incompatible");
-    report.eq("Line2D 输入置灰", verdicts.refLine, "incompatible");
-    report.eq("另一个 locate_template.scan 可落", verdicts.locate2, "compatible");
+  mustOk(handle !== null, "找得到 read_scan#2 的输出端口");
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: handle.x, y: handle.y, buttons: 0 });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: handle.x, y: handle.y, button: "left", buttons: 1, clickCount: 1 });
+  for (let i = 1; i <= 6; i += 1) {
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: handle.x + i * 12, y: handle.y + i * 9, button: "left", buttons: 1 });
+    await sleep(15);
   }
+  await sleep(120);
+  const verdicts = await cdp.eval(`
+    const v = (node, port) => document.querySelector(
+      '[data-testid="port-' + node + '-' + port + '"].node-port--input')?.getAttribute('data-port-verdict') ?? null;
+    return { scan: v(${lit(line)}, 'scan'), rois: v(${lit(line)}, 'rois'), refLine: v(${lit(line)}, 'refLine'),
+             locate2: v(${lit(locate2)}, 'scan') };
+  `);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: handle.x + 72, y: handle.y + 54, button: "left", buttons: 1, clickCount: 1 });
+  await sleep(200);
+  await pressEscape(cdp);
+  report.eq("从 ScanPair 输出拖线：role_line.scan 可落", verdicts.scan, "compatible");
+  report.eq("RoiSet 输入置灰", verdicts.rois, "incompatible");
+  report.eq("Line2D 输入置灰", verdicts.refLine, "incompatible");
+  report.eq("另一个 locate_template.scan 可落", verdicts.locate2, "compatible");
   await cdp.eval(`window.__lyflow.stores.ui.getState().closeSearch(); window.__lyflow.stores.ui.getState().clearAutoHint(); return true;`);
 }
 

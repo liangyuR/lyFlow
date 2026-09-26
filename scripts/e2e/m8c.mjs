@@ -8,7 +8,7 @@ import path from "node:path";
 import { sleep } from "./cdp.mjs";
 import { ROOT } from "./harness.mjs";
 import { profile, roiGeometry, screenOf, setCamera, waitValidated, writePcd } from "./m8b.mjs";
-import { buildGraph, dragMouse, lit, newDoc, select } from "./page.mjs";
+import { buildGraph, dragMouse, lit, mustOk, newDoc, select } from "./page.mjs";
 
 /** 三个槽的模板文件（槽 1 用默认文件名，槽 2 / 3 也是各自槽的默认值）与各自在 x 上的错位（毫米）。
  *  错开是为了让三片底图的包围盒不同 —— 切槽之后能断言底图真的换了。 */
@@ -117,7 +117,6 @@ async function suiteSlotSwitch(cdp, report, ws) {
     return;
   }
   report.section("M8c 验收 12：三模板的图 —— 切槽各 4 个框、拖槽 2 只改槽 2、复制到其它槽");
-  report.eq("gap.locate_template 是 v2（每槽各自四框）", has, "2.0.0");
 
   const scene = makeScene(ws);
   await newDoc(cdp);
@@ -151,13 +150,19 @@ async function suiteSlotSwitch(cdp, report, ws) {
     const s = SLOTS[i];
     await clickTab(cdp, i);
     st = await frameState(cdp);
-    report.eq(`切到模板 ${s.k}：恰好 4 个框`, st.boxes.length, 4);
-    report.ok(`切到模板 ${s.k}：拖框层与视图都记 4`, st.layerCount === 4 && st.edit === 4, `${st.layerCount}/${st.edit}`);
-    report.eq(`切到模板 ${s.k}：画的是它自己的四个参数`, st.boxes.map((b) => b.param).sort(), expectedParams(s.k));
+    // 恰好 4 个框（DOM / 拖框层 / 视图三处计数）、是它自己的四个参数、值就是这个槽的值：并成一条，
+    // detail 写明哪一部分不对
     const want = slotBoxes(s.shift);
-    report.ok(`切到模板 ${s.k}：框的值就是这个槽的值`,
-      st.boxes.every((b) => JSON.stringify(b.value) === JSON.stringify(want[ROLES.find((r) => b.param === `template${s.k}${r}Roi`)])),
-      JSON.stringify(st.boxes));
+    const params = st.boxes.map((b) => b.param).sort();
+    const wrong = [];
+    if (!(st.boxes.length === 4 && st.layerCount === 4 && st.edit === 4)) {
+      wrong.push(`框数 boxes=${st.boxes.length} layer=${st.layerCount} edit=${st.edit}`);
+    }
+    if (JSON.stringify(params) !== JSON.stringify(expectedParams(s.k))) wrong.push(`参数 ${JSON.stringify(params)}`);
+    if (!st.boxes.every((b) => JSON.stringify(b.value) === JSON.stringify(want[ROLES.find((r) => b.param === `template${s.k}${r}Roi`)]))) {
+      wrong.push(`值 ${JSON.stringify(st.boxes.map((b) => [b.param, b.value]))}`);
+    }
+    report.ok(`切到模板 ${s.k}：恰好 4 个框，画的是这个槽自己的四个参数和值`, wrong.length === 0, wrong.join("; "));
     report.ok(`切到模板 ${s.k}：标签页高亮在它上面`, st.tabs[i]?.active === true && st.tabs.filter((t) => t.active).length === 1);
     report.ok(`切到模板 ${s.k}：Inspector 里只有「模板槽 ${s.k}」这一节展开`,
       st.groups.filter((g) => g.open).map((g) => g.name).join() === `模板槽 ${s.k}`, JSON.stringify(st.groups));
@@ -204,13 +209,11 @@ async function suiteSlotSwitch(cdp, report, ws) {
     const r = b.getBoundingClientRect();
     return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
   `);
-  report.ok("切换条上有「复制到其它槽」且可点", copyAt !== null);
-  if (copyAt) {
-    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: copyAt.x, y: copyAt.y, buttons: 0 });
-    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: copyAt.x, y: copyAt.y, button: "left", buttons: 1, clickCount: 1 });
-    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: copyAt.x, y: copyAt.y, button: "left", buttons: 1, clickCount: 1 });
-    await sleep(200);
-  }
+  mustOk(copyAt !== null, "切换条上有「复制到其它槽」且可点");
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: copyAt.x, y: copyAt.y, buttons: 0 });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: copyAt.x, y: copyAt.y, button: "left", buttons: 1, clickCount: 1 });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: copyAt.x, y: copyAt.y, button: "left", buttons: 1, clickCount: 1 });
+  await sleep(200);
   const copied = await paramsOf(cdp, locate);
   for (const k of [1, 3]) {
     report.ok(`复制之后模板 ${k} 的四框与模板 2 相同`,
@@ -269,8 +272,7 @@ async function suiteLabelsApart(cdp, report) {
     }
     return out;
   `);
-  report.ok("四个框和它们的标签都在", m !== null);
-  if (!m) return;
+  mustOk(m !== null, "四个框和它们的标签都在");
   const sr = m.template1SeamRightRoi;
   const tg = m.template1TargetRoi;
   report.ok("Seam Right 与 Target 两个框是相邻的（屏幕上间隔 < 4 px）",
@@ -279,8 +281,7 @@ async function suiteLabelsApart(cdp, report) {
   const naive = (b, l) => ({ left: b.left - 1, right: b.left - 1 + (l.right - l.left), top: b.top - (l.bottom - l.top), bottom: b.top });
   report.ok("对照：两个标签都放在框上方的话会相交", intersects(naive(sr.box, sr.label), naive(tg.box, tg.label)),
     JSON.stringify([naive(sr.box, sr.label), naive(tg.box, tg.label)]));
-  report.ok("Seam Right 与 Target 的标签包围盒不相交", !intersects(sr.label, tg.label),
-    JSON.stringify({ seamRight: [sr.pos, sr.label], target: [tg.pos, tg.label] }));
+  // Seam Right 与 Target 这一对也在下面的两两检查里
   const names = Object.keys(m);
   const pairs = [];
   for (let i = 0; i < names.length; i += 1) {
@@ -299,25 +300,25 @@ async function suiteSlot3WrongSide(cdp, report) {
   await select(cdp, built.locate);
   await setCamera(cdp, "2d");
   const clean = await waitValidated(cdp, built.locate, false);
-  report.eq("开始时校验干净", clean?.invalid, "0");
+  mustOk(clean?.invalid === "0", "开始时校验干净", JSON.stringify(clean));
   await clickTab(cdp, 2);
   const g = await roiGeometry(cdp);
   const shift = SLOTS[2].shift;
   await dragMouse(cdp, g.boxes.template3DatumRoi.center, screenOf(g.map, 12 + shift, 160.5), { steps: 10 });
+  // 标红与「同一侧」的措辞由 M8b 验收 10 验过；这里要的是诊断落在槽 3 上并写明「模板 3」
   const bad = await waitValidated(cdp, built.locate, true, 3000);
-  report.eq("松手后 locate_template 标红", bad?.invalid, "1");
   const diag = (bad?.diags ?? []).find((d) => d.paramPath === "template3DatumRoi");
   report.ok("诊断指到 template3DatumRoi", diag !== undefined, JSON.stringify(bad?.diags));
-  report.ok("诊断标明「模板 3」", /模板 3/.test(diag?.message ?? ""), diag?.message ?? "");
-  report.ok("诊断说的是同一侧", /同一侧/.test(diag?.message ?? ""), diag?.message ?? "");
-  report.ok("节点上贴的诊断也标明「模板 3」", /模板 3/.test(bad?.text ?? ""), bad?.text ?? "");
+  report.ok("诊断与节点上贴的诊断都标明「模板 3」",
+    /模板 3/.test(diag?.message ?? "") && /模板 3/.test(bad?.text ?? ""),
+    `诊断=${diag?.message ?? ""} 节点=${bad?.text ?? ""}`);
   report.ok("其它槽没被牵连（诊断只有这一条）", (bad?.diags ?? []).length === 1, JSON.stringify(bad?.diags));
   const st = await frameState(cdp);
   report.ok("Inspector 里「模板槽 3」这一节标红", st.groups.some((x) => x.name === "模板槽 3" && x.invalid),
     JSON.stringify(st.groups));
   await cdp.eval(`window.__lyflow.stores.graph.getState().undo(); return true;`);
-  const fixed = await waitValidated(cdp, built.locate, false, 3000);
-  report.eq("撤销之后回到干净", fixed?.invalid, "0");
+  // 等撤销后的校验落定再切回 3D（撤销回到干净由 M8b 验收 10 验过）
+  await waitValidated(cdp, built.locate, false, 3000);
   await setCamera(cdp, "3d");
 }
 
