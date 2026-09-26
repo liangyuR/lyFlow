@@ -102,7 +102,7 @@
 **M1–M4 的实际做法**：不写前端单元测试（CLAUDE.md），改为用 CDP 驱动真实运行的
 Tauri app 断言。脚本在 [`scripts/e2e/`](../scripts/e2e/)，`pnpm e2e` 一条命令跑完：
 M2 的分组在 `run.mjs`，M3 的在 `m3.mjs`，M4 的在 `m4.mjs`，页面侧动作共用 `page.mjs`。
-覆盖演示 pipeline、错误定位、取消、stale、Run to node、中文路径，M3 的
+覆盖演示 pipeline、错误定位、取消、中文路径（stale 与 Run to node 两组 2026-09-26 精简时并入 m3 / noderun），M3 的
 缓存复用、静音透传、迁移、连线手感与布局，以及 M4 的子图、库算子、live preview、大图性能。
 headless CLI 没有界面，它的验收在 `bridge/src/cli.rs` 的 `cargo test` 里。
 

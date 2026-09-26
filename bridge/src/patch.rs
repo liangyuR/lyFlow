@@ -534,64 +534,7 @@ pub(crate) fn cmd_patch(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::{run_cli, sink_of};
-    use std::io::Write;
-    use std::sync::{Arc, Mutex};
-
-    #[derive(Clone)]
-    struct SharedBuf(Arc<Mutex<Vec<u8>>>);
-
-    impl Write for SharedBuf {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .extend_from_slice(buf);
-            Ok(buf.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    struct Ran {
-        code: i32,
-        out: String,
-        err: String,
-    }
-
-    impl Ran {
-        fn lines(&self) -> Vec<Value> {
-            self.out
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .filter_map(|l| serde_json::from_str(l).ok())
-                .collect()
-        }
-        /// `--json` 那一行。
-        fn result(&self) -> Value {
-            self.lines()
-                .into_iter()
-                .find(|v| v["kind"] == "patch_result")
-                .unwrap_or_else(|| panic!("stdout 里没有 patch_result：{}\n{}", self.out, self.err))
-        }
-    }
-
-    fn cli(args: &[&str]) -> Ran {
-        let obuf = Arc::new(Mutex::new(Vec::new()));
-        let ebuf = Arc::new(Mutex::new(Vec::new()));
-        let out = sink_of(SharedBuf(Arc::clone(&obuf)));
-        let err = sink_of(SharedBuf(Arc::clone(&ebuf)));
-        let owned: Vec<String> = args.iter().map(|s| (*s).to_string()).collect();
-        let code = run_cli(&owned, &out, &err);
-        let out_text = String::from_utf8_lossy(&obuf.lock().unwrap()).into_owned();
-        let err_text = String::from_utf8_lossy(&ebuf.lock().unwrap()).into_owned();
-        Ran {
-            code,
-            out: out_text,
-            err: err_text,
-        }
-    }
+    use crate::cli::test_support::cli;
 
     fn workspace(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("lyflow-patch-{name}"));
@@ -600,8 +543,8 @@ mod tests {
         dir
     }
 
-    /// 一张有「主路径 + 一个 b_ 开头的旁支」的图。b_alt 谁也不喂，
-    /// 删掉它之后图仍然合法 —— 这样测的是 patch 自己，不是算子的输入要求。
+    /// 一张有「主路径 + 一个 b_ 开头的旁支」的图。b_alt 挂在 g 上（边 e3）、谁也不喂，
+    /// 删掉它连同 e3 之后图仍然合法 —— 这样测的是 patch 自己，不是算子的输入要求。
     fn graph(dir: &Path, outputs: bool) -> String {
         let mut doc = json!({
             "schemaVersion": 1,
@@ -611,8 +554,7 @@ mod tests {
                 {"id": "g", "op": "gen.synthetic",
                  "params": {"pointCount": 500, "seed": 11},
                  "ui": {"position": {"x": 0, "y": 0}}},
-                {"id": "b_alt", "op": "gen.synthetic",
-                 "params": {"pointCount": 500, "seed": 12},
+                {"id": "b_alt", "op": "filter.passthrough",
                  "ui": {"position": {"x": 0, "y": 200}}},
                 {"id": "a", "op": "filter.voxel_grid",
                  "params": {"leafSize": [0.02, 0.02, 0.02]},
@@ -624,7 +566,9 @@ mod tests {
                 {"id": "e1", "from": {"node": "g", "port": "cloud"},
                              "to": {"node": "a", "port": "cloud"}},
                 {"id": "e2", "from": {"node": "a", "port": "cloud"},
-                             "to": {"node": "sink", "port": "cloud"}}
+                             "to": {"node": "sink", "port": "cloud"}},
+                {"id": "e3", "from": {"node": "g", "port": "cloud"},
+                             "to": {"node": "b_alt", "port": "cloud"}}
             ]
         });
         if outputs {
@@ -645,26 +589,6 @@ mod tests {
             .iter()
             .map(|x| x.as_str().unwrap().to_string())
             .collect()
-    }
-
-    #[test]
-    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
-    fn remove_takes_the_node_and_all_of_its_edges() {
-        let dir = workspace("remove");
-        let path = graph(&dir, false);
-        let r = cli(&["patch", &path, "--remove-node", "b_*", "--json"]);
-        assert_eq!(r.code, EXIT_OK, "{}", r.err);
-        let res = r.result();
-        assert_eq!(ids(&res["applied"]["removed"]), vec!["b_alt"]);
-        assert_eq!(res["wrote"].as_str().unwrap(), path);
-        let doc = read(&path);
-        assert_eq!(doc["nodes"].as_array().unwrap().len(), 3);
-        assert!(doc["nodes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|n| n["id"] != "b_alt"));
-        assert_eq!(res["diff"]["nodesRemoved"][0]["id"], "b_alt");
     }
 
     #[test]
@@ -965,18 +889,20 @@ mod tests {
         assert_eq!(res["noops"][0]["reason"], "no_match");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before, "不该写盘");
 
-        // 同一条命令换成小写就真删掉了 —— 证明差别只在大小写上
+        // 同一条命令换成小写就真删掉了 —— 证明差别只在大小写上。
+        // 删的是节点连同它的全部边：b_alt 的入边 e3 也得跟着走，主路径的 e1 / e2 不动
         let lower = cli(&["patch", &path, "--remove-node", "b_*", "--json"]);
         assert_eq!(lower.code, EXIT_OK, "{}", lower.err);
-        assert_eq!(ids(&lower.result()["applied"]["removed"]), vec!["b_alt"]);
-    }
-
-    #[test]
-    fn a_patch_with_no_action_is_a_usage_error() {
-        let dir = workspace("usage");
-        let path = graph(&dir, false);
-        assert_eq!(cli(&["patch", &path]).code, EXIT_USAGE);
-        assert_eq!(cli(&["patch"]).code, EXIT_USAGE);
+        let res = lower.result();
+        assert_eq!(ids(&res["applied"]["removed"]), vec!["b_alt"]);
+        assert_eq!(res["wrote"].as_str().unwrap(), path);
+        assert_eq!(res["diff"]["nodesRemoved"][0]["id"], "b_alt");
+        assert_eq!(res["diff"]["edgesRemoved"], json!(["g.cloud -> b_alt.cloud"]), "{}", lower.out);
+        let doc = read(&path);
+        let node_ids: Vec<&str> = doc["nodes"].as_array().unwrap().iter().map(|n| n["id"].as_str().unwrap()).collect();
+        assert_eq!(node_ids, ["g", "a", "sink"]);
+        let edge_ids: Vec<&str> = doc["edges"].as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
+        assert_eq!(edge_ids, ["e1", "e2"]);
     }
 
     #[test]

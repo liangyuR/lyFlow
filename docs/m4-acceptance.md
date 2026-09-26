@@ -31,7 +31,7 @@ powershell -ExecutionPolicy Bypass -File scripts\headless-demo.ps1  # §6 第二
 
 | 章节 | 自动化在哪 | 结果 |
 |---|---|---|
-| §1 子图 | `core/tests/test_subgraph.cpp`（12 个 TEST_CASE）+ `scripts/e2e/m4.mjs` 的八个分组 | 通过 |
+| §1 子图 | `core/tests/test_subgraph.cpp`（12 个 TEST_CASE）+ `scripts/e2e/m4.mjs` 的七个分组 | 通过 |
 | §2 live preview | `test_subgraph.cpp` 的两个 preview TEST_CASE + `bridge/src/cli.rs` 的 `preview_decimates_the_source` + `m4.mjs` 的「§2 live preview」 | 通过 |
 | §3 headless CLI | `bridge/src/cli.rs` 的 `mod tests`（20 个）+ `scripts/headless-demo.ps1` | 通过 |
 | §4 大图性能 | `m4.mjs` 的「§4 大图性能」 | 通过 |
@@ -209,16 +209,16 @@ CDP：`validate_graph` 报 `recursive_subgraph`，诊断挂在 `n_a/inner`（展
 ### ✅ 解散子图与快捷键
 
 ```
-── §1 解散子图：内容内联回来，提升的参数落回内参
-✓ 内联出两个节点   ✓ 顶层回到四个节点   ✓ 子图定义已经删掉了
-✓ 提升参数的值落回了内参（外层改成 [0.07,0.07,0.07] → 内参就是它）
-✓ 解散之后照样跑通
-
-── §1 快捷键：Ctrl+G 合成、Ctrl+Shift+G 解散
+── §1 快捷键：Ctrl+G 合成、Ctrl+Shift+G 解散，提升的参数落回内参
 ✓ Ctrl+G 之后顶层剩三个节点   ✓ 多了一份子图定义
 ✓ Ctrl+Shift+G 之后回到四个节点   ✓ 子图定义也一并清掉
+✓ 提升参数的值落回了内参（外层改成 [0.07,0.07,0.07] → 内参就是它）
 ✓ 撤销回到子图状态   ✓ 再撤销回到四个节点
 ```
+
+原先单独的「§1 解散子图」分组（直接调 store 的 `dissolveSubgraph`）2026-09-26 并进了快捷键这一组：
+Ctrl+G 之后先提升 `leafSize`、在外层改成 `[0.07,0.07,0.07]`，再 Ctrl+Shift+G 解散；
+提升与改值各是一条撤销，所以「再撤销回到四个节点」前面多撤两下。
 
 另有 doctest 覆盖「子图节点静音 → 整棵子树透传」「Run to node 的目标可以是子图节点」
 「子图的未知参数会被报出来」「合成出来的 OperatorDesc 通得过注册表自检」。
@@ -367,6 +367,8 @@ schema 样例也跟着补了：图样例里加了一份带提升参数的子图�
 ### ✅ `pnpm e2e` 全绿
 
 M2 分组 + M3 分组 + M4 分组一起跑，**286/286 全绿**（M3 是 188 项）。
+
+（2026-09-26 起 e2e 断言做过合并精简，这里的输出与条数是当时的快照；见 test/prune 精简提交）
 M4 新增的分组：子图合成/导航/提升/解散/快捷键/嵌套/递归/库算子、live preview、大图性能，
 以及「M3 尾巴」那一组。
 
@@ -467,7 +469,7 @@ PROBE-DONE
   `gen.synthetic` 的输出 `has_normals() == false`，接一个 `features.normals` 之后是 true，
   载荷长度是 `16 + 24 + 12n + 4n + 12n`，法线段的第一个 float 与 `view.normals()[0]` 相等。
 - `pnpm e2e` 的「M3 尾巴」分组：源头的点云上「法线」选项是禁用的且写着「（无）」，
-  换到 `features.normals` 的输出之后选项可用、文字不再带「无」，
+  换到 `features.normals` 的输出之后选项可用，
   切过去之后 `.viewer[data-shading] == "normal"`。
 
 **结论：通过。** 法线着色用分量绝对值当 RGB（色带对法线没有意义，所以走单独一条路）。

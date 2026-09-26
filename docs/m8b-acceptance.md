@@ -24,6 +24,8 @@
 | `pnpm e2e:http`（顺手跑的，不是门槛） | 29/29：HTTP 宿主上实时校验每次改图都会走一次 `validate`，没有把老断言带坏 |
 | `pnpm core:dump`（带 `LYFLOW_PACKS`） | 重新生成 `app/public/manifest.dev.json`：71 个算子、14 个端口类型、`snippets` 段 6 项（文件被 `app/.gitignore` 忽略） |
 
+（2026-09-26 起 e2e 断言做过合并精简，这里的输出与条数是当时的快照；见 test/prune 精简提交）
+
 grep 落盘日志：
 
 ```
@@ -128,7 +130,9 @@ NaN 槽），模板文件名就是 `locate_template` 槽 1 的默认值，人只
 ✓ 松手后 locate_template 标红
 ✓ 节点上显示诊断：datum 与 target 落在缝的同一侧
 ✓ 诊断指到 datumRoi
-✓ 从松手到标红在 3 秒内（619 ms，含拖动本身）      （门禁那一次 e2e 的数；debounce 200 ms + 一次 validate IPC）
+✓ 从松手到标红在 3 秒内（619 ms，含拖动本身）      （门禁那一次 e2e 的数；debounce 200 ms + 一次 validate IPC；
+                                                     2026-09-26 起改成从 mouseReleased 起算、门限就是 3 s，
+                                                     原先含拖动本身、放宽到 5 s）
 ✓ Inspector 里 datumRoi 那一行标红
 ✓ 错误消息贴在控件下面
 ✓ Inspector 顶部列出校验诊断

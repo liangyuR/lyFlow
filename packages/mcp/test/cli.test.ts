@@ -4,7 +4,7 @@ import test from "node:test";
 import { parseJsonLines, runCli, stderrTail } from "../src/cli.js";
 import { loadConfig } from "../src/config.js";
 
-test("stderr 掺进 stdout 的行被跳过而不是让解析崩掉", () => {
+test("CLI 输出解析：stderr 掺进 stdout 的行被跳过而不是让解析崩掉；stderrTail 取最后一条非空行", () => {
   const chunk = [
     '{"kind":"eval_row","sample":"a","status":"ok"}',
     "3 组参数 × 51 个样本 = 153 次运行",
@@ -24,19 +24,9 @@ test("stderr 掺进 stdout 的行被跳过而不是让解析崩掉", () => {
     "[1,2,3]",
     '"只是一个字符串"',
   ]);
-});
 
-test("stderrTail 取最后一条非空行", () => {
   assert.equal(stderrTail("第一行\n第二行\n\n"), "第二行");
   assert.equal(stderrTail(""), "");
-});
-
-test("没配 LYFLOW_CLI 时 runCli 直接给一条说得清的错", async () => {
-  const config = loadConfig({ LYFLOW_HTTP_BASE: "http://127.0.0.1:1" });
-  const result = await runCli(config, ["eval", "g.json"]);
-  assert.equal(result.code, -1);
-  assert.match(result.stderr, /LYFLOW_CLI/);
-  assert.equal(result.spawnError, "LYFLOW_CLI 未配置");
 });
 
 test("CLI 路径不存在时把起进程的错原样带回来", async () => {

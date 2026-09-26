@@ -940,16 +940,11 @@ mod tests {
     }
 
     #[test]
-    fn manifest_command_returns_parsed_json() {
-        let v = get_manifest().expect("get_manifest 失败");
-        assert_eq!(v["schemaVersion"], 1);
-        assert!(!v["operators"].as_array().unwrap().is_empty());
-    }
-
-    #[test]
     fn core_info_counts_match_the_manifest() {
         let info = get_core_info().expect("get_core_info 失败");
-        let m = get_manifest().unwrap();
+        let m = get_manifest().expect("get_manifest 失败");
+        assert_eq!(m["schemaVersion"], 1);
+        assert!(!m["operators"].as_array().unwrap().is_empty());
         assert_eq!(info.operator_count, m["operators"].as_array().unwrap().len());
         assert_eq!(info.type_count, m["types"].as_array().unwrap().len());
         assert!(!info.version.is_empty());

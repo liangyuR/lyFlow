@@ -100,7 +100,7 @@ TEST_CASE("拓扑序：上游一定排在下游之前") {
   CHECK(r.plan.nodes[2].level == 2);
 }
 
-TEST_CASE("环：环上每个节点各一条 cycle 诊断，整图级失败") {
+TEST_CASE("环：环上每个节点各一条 cycle 诊断，整图级失败；真跑时 run_finished 是 error、节点仍然标红") {
   ensureTestOps();
   // b 用 test.merge2（两个输入端口）：换成单输入算子的话，「a 和 c 都连到
   // b.cloud」会先被单连接规则挡下来，测到的就不是环检测了。
@@ -118,6 +118,15 @@ TEST_CASE("环：环上每个节点各一条 cycle 诊断，整图级失败") {
   CHECK(r.hasCode("c", "cycle"));
   // a 不在环上，不该被牵连
   CHECK_FALSE(r.hasCode("a", "cycle"));
+
+  // 真去跑：run_finished 是 error，环上节点仍然标红
+  const Json ring = makeGraph({{"a", "test.thin"}, {"b", "test.thin"}},
+                              {{"a.cloud", "b.cloud"}, {"b.cloud", "a.cloud"}});
+  const RunLog log = runGraph(ring);
+  CHECK(log.runStatus() == "error");
+  CHECK(log.seqIsDense());
+  CHECK(log.finalState("a") == "error");
+  CHECK(log.finalState("b") == "error");
 }
 
 TEST_CASE("D5：一次返回全部诊断，不在第一个错误处早退") {
@@ -160,13 +169,11 @@ TEST_CASE("D5：一次返回全部诊断，不在第一个错误处早退") {
   // 三个节点各自被标成无效，但计划照样排得出来 —— 其余节点还要跑
   CHECK(nodeOf(r.plan, "a")->valid == false);
   CHECK(nodeOf(r.plan, "b")->valid == false);
-}
 
-TEST_CASE("paramPath 精确指向出错的参数框") {
-  ensureTestOps();
-  const Json doc = makeGraph({{"v", "test.thin", Json{{"leaf", {0.0, 0.01, 0.01}}}}}, {});
-  const Built r = build(doc);
-  const Diagnostic* d = r.find("v", "bad_param");
+  // paramPath 精确指向出错的参数框，阶段是 validate
+  const Json zeroLeaf = makeGraph({{"v", "test.thin", Json{{"leaf", {0.0, 0.01, 0.01}}}}}, {});
+  const Built z = build(zeroLeaf);
+  const Diagnostic* d = z.find("v", "bad_param");
   REQUIRE(d != nullptr);
   CHECK(d->status.paramPath == "leaf");
   CHECK(std::string(toString(d->status.phase)) == "validate");
@@ -237,38 +244,44 @@ TEST_CASE("path 参数为空在校验期就红，而不是等到执行时报打�
   CHECK(d->status.paramPath == "path");
 }
 
-TEST_CASE("结构性问题也是诊断，不是异常") {
+TEST_CASE("结构性问题也是诊断，不是异常：边指向不存在的节点、输入端口多连") {
   ensureTestOps();
-  Diagnostics diags;
-  exec::RawGraph raw;
+  struct Case {
+    const char* name;
+    Json doc;
+    const char* code;
+    const char* portName;  // 空 = 不看端口
+  };
   // 边指向不存在的节点
-  Json doc = makeGraph({{"a", "gen.synthetic"}}, {});
-  doc["edges"].push_back(Json{{"id", "e9"},
-                              {"from", {{"node", "a"}, {"port", "cloud"}}},
-                              {"to", {{"node", "ghost"}, {"port", "cloud"}}}});
-  CHECK_FALSE(exec::parseGraph(doc.dump(), raw, diags));
-  bool found = false;
-  for (const auto& d : diags.items()) {
-    if (d.status.code == "unknown_node") found = true;
+  Json ghost = makeGraph({{"a", "gen.synthetic"}}, {});
+  ghost["edges"].push_back(Json{{"id", "e9"},
+                                {"from", {{"node", "a"}, {"port", "cloud"}}},
+                                {"to", {{"node", "ghost"}, {"port", "cloud"}}}});
+  const std::vector<Case> cases = {
+      {"unknown_node", ghost, "unknown_node", ""},
+      // 输入端口是单连接
+      {"multi_input",
+       makeGraph({{"a", "gen.synthetic"}, {"b", "gen.synthetic"}, {"m", "test.merge2"}},
+                 {{"a.cloud", "m.a"}, {"b.cloud", "m.a"}}),
+       "multi_input", "a"},
+  };
+  for (const Case& c : cases) {
+    CAPTURE(c.name);
+    Diagnostics diags;
+    exec::RawGraph raw;
+    CHECK_FALSE(exec::parseGraph(c.doc.dump(), raw, diags));
+    bool found = false;
+    for (const auto& d : diags.items()) {
+      if (d.status.code == c.code &&
+          (std::string(c.portName).empty() || d.status.portName == c.portName)) {
+        found = true;
+      }
+    }
+    CHECK(found);
   }
-  CHECK(found);
 }
 
-TEST_CASE("输入端口是单连接") {
-  ensureTestOps();
-  Json doc = makeGraph({{"a", "gen.synthetic"}, {"b", "gen.synthetic"}, {"m", "test.merge2"}},
-                       {{"a.cloud", "m.a"}, {"b.cloud", "m.a"}});
-  Diagnostics diags;
-  exec::RawGraph raw;
-  CHECK_FALSE(exec::parseGraph(doc.dump(), raw, diags));
-  bool found = false;
-  for (const auto& d : diags.items()) {
-    if (d.status.code == "multi_input" && d.status.portName == "a") found = true;
-  }
-  CHECK(found);
-}
-
-TEST_CASE("cacheKey：参数变则键变，书写顺序变则键不变") {
+TEST_CASE("cacheKey：参数变则键变，书写顺序变则键不变，并沿着依赖链传播") {
   ensureTestOps();
   const Json a = makeGraph({{"g", "gen.synthetic", Json{{"seed", 1}, {"pointCount", 100}}}}, {});
   const Json b = makeGraph({{"g", "gen.synthetic", Json{{"pointCount", 100}, {"seed", 1}}}}, {});
@@ -281,10 +294,8 @@ TEST_CASE("cacheKey：参数变则键变，书写顺序变则键不变") {
   CHECK(ka.size() == 32);
   CHECK(ka == kb);
   CHECK(ka != kc);
-}
 
-TEST_CASE("cacheKey 沿着依赖链传播") {
-  ensureTestOps();
+  // 沿着依赖链传播
   auto keyOf = [](int seed) {
     const Json doc = makeGraph(
         {{"g", "gen.synthetic", Json{{"seed", seed}}}, {"v", "test.thin"}},
@@ -293,23 +304,6 @@ TEST_CASE("cacheKey 沿着依赖链传播") {
   };
   CHECK(keyOf(1) != keyOf(2));  // 上游参数变了，下游的键必须跟着变
   CHECK(keyOf(1) == keyOf(1));
-}
-
-TEST_CASE("Run to node 只保留目标的上游闭包") {
-  ensureTestOps();
-  const Json doc = makeGraph(
-      {
-          {"g", "gen.synthetic"},
-          {"v", "test.thin"},
-          {"p", "test.thin", Json{{"leaf", {0.05, 0.05, 0.05}}}},
-      },
-      {{"g.cloud", "v.cloud"}, {"v.cloud", "p.cloud"}});
-
-  const Built r = build(doc, {"v"});
-  REQUIRE(r.built);
-  CHECK(r.plan.nodes.size() == 2);
-  CHECK(nodeOf(r.plan, "p") == nullptr);
-  CHECK(nodeOf(r.plan, "g") != nullptr);
 }
 
 TEST_CASE("canonicalParamsJson 键排序且数字稳定") {

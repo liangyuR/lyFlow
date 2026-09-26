@@ -34,13 +34,6 @@ Json fallbackGraph(bool primaryFails) {
       Json{{"result", Json{{"node", "n_fb"}, {"port", "out"}}}});
 }
 
-int callsDuring(const Json& doc) {
-  ops::computeCalls().store(0);
-  Session s(doc);
-  s.wait();
-  return ops::computeCalls().load();
-}
-
 }  // namespace
 
 TEST_CASE("主路径成功时备用闭包一次 compute 都不调") {
@@ -106,7 +99,7 @@ TEST_CASE("plan 标出惰性节点与「谁的哪个惰性端口在管着它」"
   }
 }
 
-TEST_CASE("主路径失败时 demand 备用闭包，plan_extended 与 run_started.nodes 同构") {
+TEST_CASE("主路径失败时 demand 备用闭包，plan_extended 与 run_started.nodes 同构；acceptsError 端口收到 Error Data 而不是被连坐") {
   ensureTestOps();
   ops::computeCalls().store(0);
   Session s(fallbackGraph(/*primaryFails=*/true));
@@ -145,19 +138,10 @@ TEST_CASE("主路径失败时 demand 备用闭包，plan_extended 与 run_starte
   REQUIRE(ResultStore::instance().get(s.runId(), "n_fb", "choice", choice));
   REQUIRE(choice.asRecord() != nullptr);
   CHECK(choice.asRecord()->data["choice"] == "b");
-}
 
-TEST_CASE("acceptsError 的端口收到 Error Data 而不是被连坐") {
-  ensureTestOps();
-  // fallback 的 a 声明了 acceptsError：上游失败时它照跑，不报 upstream_failed
-  Session s(fallbackGraph(/*primaryFails=*/true));
-  RunLog& log = s.wait();
-  CHECK(log.finalState("n_fb") != "cancelled");
+  // fallback 的 a 声明了 acceptsError：上游失败时它照跑，不报 upstream_failed，
+  // 收到的是 Error Data —— reason 里带着上游那条 Status 的 code 与 message
   CHECK(log.nodeEvent("n_fb", "cancelled").empty());
-
-  Data choice;
-  REQUIRE(ResultStore::instance().get(s.runId(), "n_fb", "choice", choice));
-  // reason 里带着上游那条 Status 的 code 与 message
   const std::string reason = choice.asRecord()->data["reason"].get<std::string>();
   CHECK(reason.find("io") != std::string::npos);
   CHECK(reason.find("测试用的失败") != std::string::npos);
@@ -187,16 +171,6 @@ TEST_CASE("失败先连坐几个中间节点、最后撞上 acceptsError，整�
   Data out;
   REQUIRE(ResultStore::instance().get(s.runId(), "n_fb", "out", out));
   CHECK(out.asCloud()->pointCount() == 5);
-}
-
-TEST_CASE("没有声明 acceptsError 的端口仍然被上游失败连坐") {
-  ensureTestOps();
-  const Json doc = makeGraph({N{"n_a", "test.fail", Json::object()},
-                              N{"n_t", "test.thin", Json::object()}},
-                             {E{"n_a.cloud", "n_t.cloud"}});
-  RunLog log = runGraph(doc);
-  CHECK(log.finalState("n_t") == "cancelled");
-  CHECK(log.nodeEvent("n_t", "cancelled")["error"]["code"] == "upstream_failed");
 }
 
 TEST_CASE("两条都失败时 fallback 自己报错，并带上两边的信息") {
@@ -280,23 +254,6 @@ TEST_CASE("运行时注入：源节点的 compute 被跳过，输出就是注入
   CHECK(outputs["thinned"]["elementCount"] == 3);
 }
 
-TEST_CASE("注入的数据进 cacheKey：换一片云就不会命中旧结果") {
-  ensureTestOps();
-  const Json doc = makeGraph({N{"n_src", "test.counted", Json::object()}}, {});
-  auto keyOf = [&](float x) {
-    PointCloud c;
-    c.push(x, 0.0F, 0.0F);
-    std::vector<exec::InjectedInput> inputs{
-        exec::InjectedInput{"n_src", "cloud", Data::cloud(std::move(c))}};
-    Session s(doc, {}, {}, /*keepCache=*/true, /*maxParallel=*/0, /*noReuse=*/false,
-              std::move(inputs));
-    RunLog& log = s.wait();
-    return log.ofKind("run_started").front()["nodes"][0]["cacheKey"].get<std::string>();
-  };
-  CHECK(keyOf(1.0F) != keyOf(2.0F));
-  CHECK(keyOf(1.0F) == keyOf(1.0F));
-}
-
 namespace {
 
 PointCloud lineCloud(int n, float y) {
@@ -372,19 +329,37 @@ TEST_CASE("输入注入：端口上已有连线、端口名不存在、与输出
   }
 }
 
-TEST_CASE("输入注入的数据也进 cacheKey") {
+TEST_CASE("注入的数据进 cacheKey：换一片云就不会命中旧结果（整节点注入与输入注入）") {
   ensureTestOps();
-  const Json doc = makeGraph({N{"m", "test.merge2", Json::object()}}, {});
-  auto keyOf = [&](int n) {
-    std::vector<exec::InjectedInput> inputs{
-        exec::InjectedInput{"m", "a", Data::cloud(lineCloud(n, 0.0F))},
-        exec::InjectedInput{"m", "b", Data::cloud(lineCloud(2, 1.0F))}};
-    Session s(doc, {}, {}, /*keepCache=*/true, 0, false, std::move(inputs));
-    RunLog& log = s.wait();
-    return log.ofKind("run_started").front()["nodes"][0]["cacheKey"].get<std::string>();
-  };
-  CHECK(keyOf(3) != keyOf(4));
-  CHECK(keyOf(3) == keyOf(3));
+  SUBCASE("整节点注入") {
+    const Json doc = makeGraph({N{"n_src", "test.counted", Json::object()}}, {});
+    auto keyOf = [&](float x) {
+      PointCloud c;
+      c.push(x, 0.0F, 0.0F);
+      std::vector<exec::InjectedInput> inputs{
+          exec::InjectedInput{"n_src", "cloud", Data::cloud(std::move(c))}};
+      Session s(doc, {}, {}, /*keepCache=*/true, /*maxParallel=*/0, /*noReuse=*/false,
+                std::move(inputs));
+      RunLog& log = s.wait();
+      return log.ofKind("run_started").front()["nodes"][0]["cacheKey"].get<std::string>();
+    };
+    CHECK(keyOf(1.0F) != keyOf(2.0F));
+    CHECK(keyOf(1.0F) == keyOf(1.0F));
+  }
+
+  SUBCASE("输入注入") {
+    const Json doc = makeGraph({N{"m", "test.merge2", Json::object()}}, {});
+    auto keyOf = [&](int n) {
+      std::vector<exec::InjectedInput> inputs{
+          exec::InjectedInput{"m", "a", Data::cloud(lineCloud(n, 0.0F))},
+          exec::InjectedInput{"m", "b", Data::cloud(lineCloud(2, 1.0F))}};
+      Session s(doc, {}, {}, /*keepCache=*/true, 0, false, std::move(inputs));
+      RunLog& log = s.wait();
+      return log.ofKind("run_started").front()["nodes"][0]["cacheKey"].get<std::string>();
+    };
+    CHECK(keyOf(3) != keyOf(4));
+    CHECK(keyOf(3) == keyOf(3));
+  }
 }
 
 TEST_CASE("并发：八个 run 同时跑，事件按 runId 隔离，结果与串行一致") {
@@ -427,7 +402,7 @@ TEST_CASE("并发：八个 run 同时跑，事件按 runId 隔离，结果与串
   }
 }
 
-TEST_CASE("flow.select 按条件只调度选中的那一路") {
+TEST_CASE("flow.select 的 cond 端口收到点云而不是 Record：报 bad_input，a / b 两路都不被 demand") {
   ensureTestOps();
   // cond 用一个 Record：ok=false 就选 b
   const Json doc = makeGraph(

@@ -83,30 +83,43 @@ const labelRect = (box, spot) => ({
   x1: box.left + spot.dx + box.labelWidth, y1: box.top + spot.dy + box.labelHeight,
 });
 
-test("标签互不遮挡（L21）：两个挨着的框、标签比框宽时，第二个挪开", () => {
-  // 截图里的情形：Seam Right 窄、紧挨着右边的 Target，标签比框宽，默认都放在框上方就会压住
-  const boxes = [
-    { left: 100, top: 50, width: 30, height: 40, labelWidth: 80, labelHeight: 14 },
-    { left: 132, top: 60, width: 120, height: 40, labelWidth: 60, labelHeight: 14 },
-  ];
-  const spots = placeLabels(boxes);
-  assert.equal(spots[0].where, "above");
-  assert.notEqual(spots[1].where, "above");
-  assert.ok(!intersects(labelRect(boxes[0], spots[0]), labelRect(boxes[1], spots[1])));
-});
+// 每行都要求标签两两不相交；`where` 给出时再逐个核对位置（"!above" 表示「不在框上方」）。
+const LABEL_CASES = [
+  {
+    // 截图里的情形：Seam Right 窄、紧挨着右边的 Target，标签比框宽，默认都放在框上方就会压住
+    name: "L21 截图：两个挨着的框、标签比框宽时，第二个挪开",
+    boxes: [
+      { left: 100, top: 50, width: 30, height: 40, labelWidth: 80, labelHeight: 14 },
+      { left: 132, top: 60, width: 120, height: 40, labelWidth: 60, labelHeight: 14 },
+    ],
+    where: ["above", "!above"],
+  },
+  {
+    name: "四个框挤在一起",
+    boxes: [0, 1, 2, 3].map((i) => ({
+      left: 100 + i * 20, top: 80, width: 18, height: 12, labelWidth: 70, labelHeight: 14,
+    })),
+  },
+  {
+    name: "三个框离得远，都在框上方",
+    boxes: [0, 1, 2].map((i) => ({
+      left: i * 200, top: 80, width: 50, height: 30, labelWidth: 60, labelHeight: 14,
+    })),
+    where: ["above", "above", "above"],
+  },
+];
 
-test("标签互不遮挡：四个框挤在一起时两两都不相交；离得远的都在框上方", () => {
-  const crowded = [0, 1, 2, 3].map((i) => ({
-    left: 100 + i * 20, top: 80, width: 18, height: 12, labelWidth: 70, labelHeight: 14,
-  }));
-  const spots = placeLabels(crowded);
-  for (let i = 0; i < 4; i += 1) {
-    for (let j = i + 1; j < 4; j += 1) {
-      assert.ok(!intersects(labelRect(crowded[i], spots[i]), labelRect(crowded[j], spots[j])), `${i}-${j}`);
+test("标签互不遮挡（L21）", () => {
+  for (const { name, boxes, where } of LABEL_CASES) {
+    const spots = placeLabels(boxes);
+    for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        assert.ok(!intersects(labelRect(boxes[i], spots[i]), labelRect(boxes[j], spots[j])), `${name}：${i}-${j} 相交`);
+      }
     }
+    where?.forEach((w, i) => {
+      if (w.startsWith("!")) assert.notEqual(spots[i].where, w.slice(1), `${name}：第 ${i} 个`);
+      else assert.equal(spots[i].where, w, `${name}：第 ${i} 个`);
+    });
   }
-  const apart = [0, 1, 2].map((i) => ({
-    left: i * 200, top: 80, width: 50, height: 30, labelWidth: 60, labelHeight: 14,
-  }));
-  assert.ok(placeLabels(apart).every((s) => s.where === "above"));
 });

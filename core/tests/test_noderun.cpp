@@ -119,7 +119,7 @@ std::set<std::string> missingNodes(const RunLog& log) {
 
 }  // namespace
 
-TEST_CASE("验收 1 / 15：全跑一遍后 isolate [b]（不带 force）—— b 命中缓存；再加 force [b] 才只有 b 执行") {
+TEST_CASE("验收 1 / 4 / 15：全跑一遍后 isolate [b]（不带 force）—— b 命中缓存（两次都是）；再加 force [b] 才只有 b 执行（两次都真执行）") {
   ensureTestOps();
   exec::ResultStore::instance().clear();
   const Json doc = chain("v1");
@@ -155,9 +155,33 @@ TEST_CASE("验收 1 / 15：全跑一遍后 isolate [b]（不带 force）—— b
   CHECK_FALSE(contains(plan, "c"));
   CHECK(statesOf(log, "c").empty());
   CHECK(log.seqIsDense());
+
+  // 验收 4：isolate [b] 两次都命中缓存；isolate + force [b] 两次都真执行
+  exec::ResultStore::instance().clear();
+  const Json doc4 = chain("v4");
+  REQUIRE(runWith(doc4, {}).runStatus() == "ok");
+  REQUIRE(tallyOf("v4b") == 1);
+
+  CHECK(runWith(doc4, {"b"}).runStatus() == "ok");
+  CHECK(runWith(doc4, {"b"}).runStatus() == "ok");
+  CHECK(tallyOf("v4b") == 1);  // 不带 force：计数不变
+
+  const RunLog first = runWith(doc4, {"b"}, exec::RunMode::Full, {}, {"b"});
+  const RunLog second = runWith(doc4, {"b"}, exec::RunMode::Full, {}, {"b"});
+  CHECK(first.runStatus() == "ok");
+  CHECK(second.runStatus() == "ok");
+  CHECK(tallyOf("v4b") == 3);  // 全图 1 次 + 强制 2 次：命中缓存也照跑
+  CHECK(tallyOf("v4a") == 1);
+  CHECK(statesOf(second, "b") == std::vector<std::string>{"pending", "running", "done"});
+
+  // 强制重算的结果照常写回：之后的普通运行拿它命中缓存
+  const RunLog full = runWith(doc4, {});
+  CHECK(full.runStatus() == "ok");
+  CHECK(tallyOf("v4b") == 3);
+  CHECK(full.nodeEvent("b", "skipped")["stats"].value("cached", false) == true);
 }
 
-TEST_CASE("验收 2：改 a 的参数后 isolate [b] —— 开跑前失败，upstream_not_ready 指向 a，零执行") {
+TEST_CASE("验收 2 / 15：改 a 的参数后 isolate [b] —— 开跑前失败，upstream_not_ready 指向 a，零执行；带 force 也一样") {
   ensureTestOps();
   exec::ResultStore::instance().clear();
   REQUIRE(runWith(chain("v2"), {}).runStatus() == "ok");
@@ -180,6 +204,13 @@ TEST_CASE("验收 2：改 a 的参数后 isolate [b] —— 开跑前失败，up
   // 缺结果的上游不是「失败了」：一条节点事件都不该有，免得编辑器把它标红
   CHECK(log.ofKind("node_state").empty());
   CHECK(log.seqIsDense());
+
+  // 验收 15：带 force 也一样是 upstream_not_ready（force 只管本节点）
+  const RunLog forced = runWith(chain("v2", 9), {"b"}, exec::RunMode::Full, {}, {"b"});
+  CHECK(forced.runStatus() == "error");
+  CHECK(missingNodes(forced) == std::set<std::string>{"a"});
+  CHECK(tallyOf("v2b") == b0);
+  CHECK_FALSE(anyRunning(forced));
 }
 
 TEST_CASE("验收 3：从没跑过时 isolate [b] 同样失败；isolate [a]（源节点）照常执行") {
@@ -206,32 +237,6 @@ TEST_CASE("验收 3：从没跑过时 isolate [b] 同样失败；isolate [a]（�
   CHECK(then.runStatus() == "ok");
   CHECK(tallyOf("v3a") == 1);
   CHECK(tallyOf("v3b") == 1);
-}
-
-TEST_CASE("验收 4 / 15（按修订一改写）：isolate [b] 两次都命中缓存；isolate + force [b] 两次都真执行") {
-  ensureTestOps();
-  exec::ResultStore::instance().clear();
-  const Json doc = chain("v4");
-  REQUIRE(runWith(doc, {}).runStatus() == "ok");
-  REQUIRE(tallyOf("v4b") == 1);
-
-  CHECK(runWith(doc, {"b"}).runStatus() == "ok");
-  CHECK(runWith(doc, {"b"}).runStatus() == "ok");
-  CHECK(tallyOf("v4b") == 1);  // 不带 force：计数不变
-
-  const RunLog first = runWith(doc, {"b"}, exec::RunMode::Full, {}, {"b"});
-  const RunLog second = runWith(doc, {"b"}, exec::RunMode::Full, {}, {"b"});
-  CHECK(first.runStatus() == "ok");
-  CHECK(second.runStatus() == "ok");
-  CHECK(tallyOf("v4b") == 3);  // 全图 1 次 + 强制 2 次：命中缓存也照跑
-  CHECK(tallyOf("v4a") == 1);
-  CHECK(statesOf(second, "b") == std::vector<std::string>{"pending", "running", "done"});
-
-  // 强制重算的结果照常写回：之后的普通运行拿它命中缓存
-  const RunLog full = runWith(doc, {});
-  CHECK(full.runStatus() == "ok");
-  CHECK(tallyOf("v4b") == 3);
-  CHECK(full.nodeEvent("b", "skipped")["stats"].value("cached", false) == true);
 }
 
 TEST_CASE("验收 5：子图节点作 isolate + force —— 内部节点全部强制执行，子图外的上游只取缓存") {
@@ -313,13 +318,18 @@ TEST_CASE("验收 6：isolate + preview 是参数错误；run_started.isolate �
   CHECK(plainStarted.front()["isolate"] == Json::array());
 }
 
-TEST_CASE("isolate 的节点不存在：整图级失败，零执行") {
+TEST_CASE("isolate / force 给了不存在的节点：整图级失败，零执行") {
   ensureTestOps();
   exec::ResultStore::instance().clear();
   const RunLog log = runWith(chain("v7"), {"nosuch"});
   CHECK(log.runStatus() == "error");
   CHECK(finished(log)["error"].value("code", "") == "unknown_node");
   CHECK(tallyOf("v7a") == 0);
+
+  const RunLog forced = runWith(chain("v17"), {}, exec::RunMode::Full, {}, {"nosuch"});
+  CHECK(forced.runStatus() == "error");
+  CHECK(finished(forced)["error"].value("code", "") == "unknown_node");
+  CHECK(tallyOf("v17a") == 0);
 }
 
 TEST_CASE("isolate 节点静音：照静音语义透传，上游仍只取缓存") {
@@ -478,17 +488,6 @@ TEST_CASE("验收 14：targets [b]（智能运行）—— 全就绪时零执行
   CHECK_FALSE(contains(planOf(changed), "c"));
 }
 
-TEST_CASE("验收 15：isolate 上游不齐时仍是 upstream_not_ready，带 force 也一样（force 只管本节点）") {
-  ensureTestOps();
-  exec::ResultStore::instance().clear();
-  REQUIRE(runWith(chain("v15"), {}).runStatus() == "ok");
-  const RunLog log = runWith(chain("v15", 9), {"b"}, exec::RunMode::Full, {}, {"b"});
-  CHECK(log.runStatus() == "error");
-  CHECK(missingNodes(log) == std::set<std::string>{"a"});
-  CHECK(tallyOf("v15b") == 1);
-  CHECK_FALSE(anyRunning(log));
-}
-
 TEST_CASE("验收 16：运行到此 targets [b] 之后 c、d 在 attached 里、按新 runId 取得到；force + preview 进预览命名空间") {
   ensureTestOps();
   exec::ResultStore::instance().clear();
@@ -525,14 +524,5 @@ TEST_CASE("验收 16：运行到此 targets [b] 之后 c、d 在 attached 里、
   const RunLog fullAgain = runWith(doc, {}, exec::RunMode::Full, {"b"});
   CHECK(fullAgain.nodeEvent("b", "skipped")["stats"].value("cached", false) == true);
   CHECK(tallyOf("v16b") == afterForce);
-}
-
-TEST_CASE("force 给了不存在的 id：整图级失败") {
-  ensureTestOps();
-  exec::ResultStore::instance().clear();
-  const RunLog log = runWith(chain("v17"), {}, exec::RunMode::Full, {}, {"nosuch"});
-  CHECK(log.runStatus() == "error");
-  CHECK(finished(log)["error"].value("code", "") == "unknown_node");
-  CHECK(tallyOf("v17a") == 0);
 }
 

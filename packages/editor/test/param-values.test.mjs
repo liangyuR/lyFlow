@@ -19,7 +19,7 @@ import { asMatrix, compose, decompose, IDENTITY, isRigid, summarize } from "../s
 
 const close = (a, b, eps = 1e-9) => Math.abs(a - b) <= eps;
 
-test("transform：T·R 合成的是行主序刚体矩阵，平移在 m[3] m[7] m[11]", () => {
+test("transform compose 约定：T·R 合成行主序刚体矩阵（平移在 m[3] m[7] m[11]），R = Rz·Ry·Rx（与 transform.make 同一约定），decompose 是 compose 的逆", () => {
   const m = compose({ t: [0.1, -0.2, 0.3], r: [0, 0, 90] });
   assert.equal(m.length, 16);
   assert.deepEqual([m[3], m[7], m[11]], [0.1, -0.2, 0.3]);
@@ -27,9 +27,7 @@ test("transform：T·R 合成的是行主序刚体矩阵，平移在 m[3] m[7] m
   assert.deepEqual([m[0], m[4], m[8]], [0, 1, 0]);
   assert.deepEqual([m[12], m[13], m[14], m[15]], [0, 0, 0, 1]);
   assert.ok(isRigid(m));
-});
 
-test("transform：R = Rz·Ry·Rx（与 transform.make 同一约定），decompose 是 compose 的逆", () => {
   const cases = [
     [10, 20, 30],
     [-45, 5, 170],

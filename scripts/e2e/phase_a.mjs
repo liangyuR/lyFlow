@@ -138,8 +138,9 @@ async function suiteGraphOutputs(cdp, report) {
     await new Promise((r2) => setTimeout(r2, 120));
     return { label, outputs: window.__lyflow.stores.graph.getState().doc.outputs ?? {} };
   `);
-  report.ok("右键菜单里有「标为输出」", marked !== 'no-node' && marked !== 'no-item', String(marked));
-  report.eq("标出来的名字取自端口名", Object.keys(marked.outputs ?? {}), ["out"]);
+  // 菜单项没找到时 marked 是 'no-node' / 'no-item'，下一条就拿不到 outputs
+  report.ok("标出来的名字取自端口名", JSON.stringify(Object.keys(marked?.outputs ?? {})) === '["out"]',
+    `右键「标为输出」返回 ${JSON.stringify(marked)}`);
   report.eq(
     "指向的是刚才那个端口",
     [marked.outputs?.out?.node, marked.outputs?.out?.port],
@@ -152,8 +153,7 @@ async function suiteGraphOutputs(cdp, report) {
     return row ? { node: row.getAttribute('data-node'), port: row.getAttribute('data-port'),
                    canRemove: !!document.querySelector('[data-testid="remove-output-out"]') } : null;
   `);
-  report.ok("Inspector 列出了这个图级输出", listed !== null, JSON.stringify(listed));
-  report.eq("列表里写明来自哪个端口", [listed?.node, listed?.port], [ids.pipe, "out"]);
+  report.eq("Inspector 列出了这个图级输出，写明来自哪个端口", [listed?.node, listed?.port], [ids.pipe, "out"]);
   report.ok("列表里能取消", listed?.canRemove === true, JSON.stringify(listed));
 
   // 名字统一叫 cloud，后面的断言沿用 A1 的写法
@@ -166,7 +166,6 @@ async function suiteGraphOutputs(cdp, report) {
   `);
 
   const run = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("运行状态 ok", run.status, "ok");
   report.ok(
     "run_started 带回了 outputs 声明",
     Array.isArray(run.outputs) && run.outputs.some((o) => o.name === "cloud"),

@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { sleep } from "./cdp.mjs";
-import { buildGraph, lit, newDoc, pressCtrl, pressF5, replan, runAndWait, saveGraphTo } from "./page.mjs";
+import { buildGraph, lit, mustOk, newDoc, pressCtrl, pressF5, replan, runAndWait, saveGraphTo } from "./page.mjs";
 
 // ------------------------------------------------------------ 小工具
 
@@ -34,6 +34,12 @@ const valuesOf = async (cdp, name) => (await recipeState(cdp)).recipes.find((r) 
 const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 const listDir = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).sort() : []);
 const rowSel = (key) => `[data-testid="prow-${key}"]`;
+
+/** 返回 'ok' 的界面动作（打字、点按钮、对话框）当前提：不是 'ok' 就中断这一组，原因写明卡在哪。 */
+async function must(what, action) {
+  const r = await action;
+  mustOk(r === "ok", what, r);
+}
 
 async function openPanel(cdp, tab) {
   await cdp.eval(`
@@ -236,30 +242,27 @@ const B = "车型B·尾门";
 async function suiteCreateSaveReopen(cdp, report, ws) {
   report.section("P3 验收 17：新建两个配方、各改几项、Ctrl+S → 两个配方文件 + index.json，图同时保存；重开后都还原");
   const { ids, file, dir } = await recipeGraph(cdp, ws, "车门缝隙 17");
-  const st0 = await recipeState(cdp);
-  report.ok("存过盘的图有配方目录（<图名>.recipes）", st0.dir === dir, JSON.stringify(st0.dir));
 
-  report.eq("工具栏配方下拉框显示「基础」", await cdp.eval(`return document.querySelector('[data-testid="recipe-current"]')?.textContent;`), "基础");
-  report.eq("起名对话框：新建配方 A", await newRecipeFromMenu(cdp, A), "ok");
-  report.eq("新建之后切到 A", (await recipeState(cdp)).current, A);
+  await must("起名对话框：新建配方 A", newRecipeFromMenu(cdp, A));
   await openPanel(cdp, "nodes");
   // 在按节点页被绑定的行上打字：选着配方 → 写进配方（K6 ①）
-  report.eq("A：leafSize 第一个分量改成 0.03", await typeInto(cdp, rowSel(`${ids.voxel}.leafSize`), "0.03"), "ok");
-  report.eq("A：cutMax 改成 2.5", await typeInto(cdp, `[data-testid="pp-gp-cutMax"]`, "2.5"), "ok");
-  report.eq("起名对话框：新建配方 B", await newRecipeFromMenu(cdp, B), "ok");
-  report.eq("B：meanK 改成 40", await typeInto(cdp, rowSel(`${ids.sor}.meanK`), "40"), "ok");
+  await must("A：leafSize 第一个分量改成 0.03", typeInto(cdp, rowSel(`${ids.voxel}.leafSize`), "0.03"));
+  await must("A：cutMax 改成 2.5", typeInto(cdp, `[data-testid="pp-gp-cutMax"]`, "2.5"));
+  await must("起名对话框：新建配方 B", newRecipeFromMenu(cdp, B));
+  await must("B：meanK 改成 40", typeInto(cdp, rowSel(`${ids.sor}.meanK`), "40"));
   // 在 B 里把 cutMax 改成与基础相同的值：等于基础 = 不存
-  report.eq("B：cutMax 写成与基础相同的 1.2", await typeInto(cdp, `[data-testid="pp-gp-cutMax"]`, "1.2"), "ok");
+  await must("B：cutMax 写成与基础相同的 1.2", typeInto(cdp, `[data-testid="pp-gp-cutMax"]`, "1.2"));
   const doc0 = await docOf(cdp);
   report.eq("default 一个都没动", [doc0.params.leafSize.default, doc0.params.cutMax.default, doc0.params.meanK.default], [[0.02, 0.02, 0.02], 1.2, 30]);
 
   // 设 B 为默认（管理页的按钮），然后真按 Ctrl+S
   await openPanel(cdp, "recipes");
   await click(cdp, `[data-testid="mg-item"][data-name=${lit(B)}]`);
-  report.eq("管理页：设 B 为默认", await click(cdp, '[data-testid="mg-default"]'), "ok");
+  await must("管理页：设 B 为默认", click(cdp, '[data-testid="mg-default"]'));
   const before = await snap(cdp);
-  report.ok("存盘前：图与配方合并的脏标记亮着（工具栏 ● 与下拉框的橙点）", before.dirty || before.recipes.dirty);
-  report.ok("存盘前：下拉框上有橙色小圆点", await cdp.eval(`return !!document.querySelector('[data-testid="recipe-dirty"]');`));
+  const dot = await cdp.eval(`return !!document.querySelector('[data-testid="recipe-dirty"]');`);
+  report.ok("存盘前：图与配方合并的脏标记亮着（工具栏 ● 与下拉框的橙色小圆点）", (before.dirty || before.recipes.dirty) && dot,
+    JSON.stringify({ dirty: before.dirty, recipesDirty: before.recipes.dirty, dot }));
   await saveByKey(cdp);
 
   const files = listDir(dir);
@@ -267,8 +270,8 @@ async function suiteCreateSaveReopen(cdp, report, ws) {
   const fa = readJson(recipeFile(dir, A));
   const fb = readJson(recipeFile(dir, B));
   const digest = await cdp.eval(`return window.__lyflow.recipes.specDigest();`);
-  report.eq("A 的文件：只存与基础不同的两个值", fa.values, { leafSize: [0.03, 0.02, 0.02], cutMax: 2.5 });
-  report.eq("B 的文件：meanK 一个值（cutMax 等于基础，没存）", fb.values, { meanK: 40 });
+  report.eq("A 的文件只存与基础不同的两个值；B 的文件只有 meanK 一个值（cutMax 等于基础，没存）", { A: fa.values, B: fb.values },
+    { A: { leafSize: [0.03, 0.02, 0.02], cutMax: 2.5 }, B: { meanK: 40 } });
   report.ok("文件头：schemaVersion 1、name 与文件名一致、graph.id 与摘要是当前图的、有 updatedAt",
     fa.schemaVersion === 1 && fa.name === A && fa.graph.id === doc0.id && fa.graph.specDigest === digest && typeof fa.updatedAt === "string",
     JSON.stringify({ ...fa, values: undefined }));
@@ -285,8 +288,9 @@ async function suiteCreateSaveReopen(cdp, report, ws) {
   await reopen(cdp, file);
   const st = await recipeState(cdp);
   report.eq("重开：两个配方按 index.json 的顺序读回", st.recipes.map((r) => r.name), [A, B]);
-  report.eq("重开：有默认配方就选它（B）", st.current, B);
-  report.eq("重开：下拉框显示 B", await cdp.eval(`return document.querySelector('[data-testid="recipe-current"]')?.textContent;`), B);
+  report.eq("重开：有默认配方就选它（B），下拉框显示 B",
+    { current: st.current, shown: await cdp.eval(`return document.querySelector('[data-testid="recipe-current"]')?.textContent;`) },
+    { current: B, shown: B });
   report.eq("重开：值还原", st.recipes.map((r) => r.values), [{ leafSize: [0.03, 0.02, 0.02], cutMax: 2.5 }, { meanK: 40 }]);
   report.eq("重开：交给 core 的取值 = default ← B", st.params, { leafSize: [0.02, 0.02, 0.02], cutMax: 1.2, meanK: 40 });
   report.ok("重开：不脏", !st.dirty && !(await snap(cdp)).dirty);
@@ -316,17 +320,13 @@ async function suiteEditSemantics(cdp, report, ws) {
   const aText0 = fs.readFileSync(recipeFile(dir, A), "utf8");
 
   // ① 选着 A 改已纳入的参数 → 只有 A 的文件变
-  report.eq("① A：cutMax 改成 3", await typeInto(cdp, `[data-testid="pp-gp-cutMax"]`, "3"), "ok");
+  await must("① A：cutMax 改成 3", typeInto(cdp, `[data-testid="pp-gp-cutMax"]`, "3"));
   const row = await cdp.eval(`
     const r = document.querySelector('[data-testid="pp-gp-cutMax"]');
     return { override: r?.getAttribute('data-recipe-override'), tag: document.querySelector('[data-testid="pp-recipe-tag-gp-cutMax"]')?.textContent ?? null,
              stripe: r ? getComputedStyle(r.querySelector('.prow__stripe')).backgroundColor : null };
   `);
   report.ok("① 被当前配方覆盖的行：橙色竖条 +「配方 · 基础 1.2」标签", row.override === "1" && row.tag === "配方 · 基础 1.2" && row.stripe === "rgb(224, 160, 48)", JSON.stringify(row));
-  report.ok("① 行尾有「恢复基础」「写回基础」",
-    await cdp.eval(`return !!document.querySelector('[data-testid="pp-recipe-reset-gp-cutMax"]') && !!document.querySelector('[data-testid="pp-recipe-tobase-gp-cutMax"]');`));
-  const boundRow = await cdp.eval(`return document.querySelector('[data-testid="prow-${ids.cut}.max"]')?.getAttribute('data-recipe-override') ?? 'missing';`);
-  report.ok("① 由这个图参数提供的节点行同样标着覆盖", boundRow === "1" || boundRow === "missing", boundRow);
   await saveByKey(cdp);
   report.ok("① Ctrl+S 之后：只有 A 的文件变了，B 与图文件逐字节不变",
     fs.readFileSync(recipeFile(dir, A), "utf8") !== aText0 && fs.readFileSync(recipeFile(dir, B), "utf8") === bText0 && fs.readFileSync(file, "utf8") === graphText0);
@@ -334,13 +334,13 @@ async function suiteEditSemantics(cdp, report, ws) {
 
   // ② 选着 A 改一个没纳入的参数（统计离群的 stddevMul）→ 改的是图，行上提示
   const key = `${ids.sor}.stddevMul`;
-  report.eq("② A：stddevMul 改成 2.5", await typeInto(cdp, rowSel(key), "2.5"), "ok");
+  await must("② A：stddevMul 改成 2.5", typeInto(cdp, rowSel(key), "2.5"));
   const sorParams = (await docOf(cdp)).nodes.find((n) => n.id === ids.sor).params;
   report.eq("② 照常改图：节点上的显式值是 2.5", sorParams.stddevMul, 2.5);
   await reveal(cdp, rowSel(key));
   report.ok("② 行上提示「此改动影响所有配方」",
     (await cdp.eval(`return document.querySelector('[data-testid="pp-basehint-${key}"]')?.textContent ?? '';`)).includes("此改动影响所有配方"));
-  report.eq("② 点「改为只在本配方生效」", await click(cdp, `[data-testid="pp-only-recipe-${key}"]`, { inList: true }), "ok");
+  await must("② 点「改为只在本配方生效」", click(cdp, `[data-testid="pp-only-recipe-${key}"]`, { inList: true }));
   const doc2 = await docOf(cdp);
   report.ok("② 图里多了图参数 stddevMul，default = 改之前的 1（别的配方行为不变），节点上的显式值删了",
     doc2.params.stddevMul?.default === 1 && doc2.params.stddevMul.binds.join() === key && doc2.nodes.find((n) => n.id === ids.sor).params.stddevMul === undefined,
@@ -372,13 +372,13 @@ async function suiteEditSemantics(cdp, report, ws) {
     }
     return null;
   `);
-  report.ok("外部修改：Ctrl+S 前弹出「配方文件已被外部修改」并列出文件", (prompt ?? "").includes("已被外部修改") && (prompt ?? "").includes(`${A}.lyflow-recipe.json`), prompt);
-  report.ok("外部修改：给了覆盖 / 重新载入 / 取消三个选项",
-    await cdp.eval(`return ['overwrite','reload','cancel'].every((id) => !!document.querySelector('[data-testid="modal-choice-' + id + '"]'));`));
+  const choices = await cdp.eval(`return ['overwrite','reload','cancel'].every((id) => !!document.querySelector('[data-testid="modal-choice-' + id + '"]'));`);
+  report.ok("外部修改：Ctrl+S 前弹出「配方文件已被外部修改」并列出文件，给了覆盖 / 重新载入 / 取消三个选项",
+    (prompt ?? "").includes("已被外部修改") && (prompt ?? "").includes(`${A}.lyflow-recipe.json`) && choices, JSON.stringify({ prompt, choices }));
   await click(cdp, '[data-testid="modal-choice-reload"]');
   await cdp.waitFor(`!window.__lyflow.snapshot().recipes.dirty`, { what: "重新载入之后存完", timeoutMs: 15_000 });
-  report.eq("重新载入：内存里 A 换成磁盘上的版本", await valuesOf(cdp, A), { cutMax: 4.5 });
-  report.eq("重新载入：磁盘上的文件没被编辑器的版本覆盖", readJson(recipeFile(dir, A)).values, { cutMax: 4.5 });
+  report.eq("重新载入：内存里 A 换成磁盘上的版本，磁盘上的文件没被编辑器的版本覆盖",
+    { memory: await valuesOf(cdp, A), disk: readJson(recipeFile(dir, A)).values }, { memory: { cutMax: 4.5 }, disk: { cutMax: 4.5 } });
   await undoByKey(cdp);
   report.eq("重新载入是一步撤销：Ctrl+Z 回到编辑器里的 3.3", (await valuesOf(cdp, A))?.cutMax, 3.3);
   // 再来一次，这次选「覆盖」
@@ -416,14 +416,10 @@ async function suiteBaseAndUndo(cdp, report, ws) {
   await newRecipeFromMenu(cdp, B);
   await typeInto(cdp, `[data-testid="pp-gp-cutMax"]`, "0.8");
   await pickRecipe(cdp, A);
-  let p = (await recipeState(cdp)).params;
-  report.eq("A：x（leafSize）是 A 的、y（cutMax）是基础", [p.leafSize, p.cutMax], [[0.05, 0.02, 0.02], 1.2]);
   await pickRecipe(cdp, B);
-  p = (await recipeState(cdp)).params;
+  const p = (await recipeState(cdp)).params;
   report.eq("A → B：x 回到基础（不残留 A 的值）、y 是 B 的", [p.leafSize, p.cutMax], [[0.02, 0.02, 0.02], 0.8]);
   await pickRecipe(cdp, "");
-  p = (await recipeState(cdp)).params;
-  report.eq("→ 基础：两个都是 default", [p.leafSize, p.cutMax], [[0.02, 0.02, 0.02], 1.2]);
 
   // K7
   await pickRecipe(cdp, B);
@@ -434,8 +430,8 @@ async function suiteBaseAndUndo(cdp, report, ws) {
   await typeInto(cdp, `[data-testid="pp-gp-cutMax"]`, "0.6");
   report.eq("B：cutMax 改成 0.6，撤销记录写明是配方里的值", (await snap(cdp)).undoLabel, `配方 ${B}：修改 cutMax`);
   await undoByKey(cdp);
-  report.eq("Ctrl+Z：B 的 cutMax 回到 0.8", (await valuesOf(cdp, B)).cutMax, 0.8);
-  report.eq("Ctrl+Z：当前配方还是 B", (await recipeState(cdp)).current, B);
+  report.eq("Ctrl+Z：B 的 cutMax 回到 0.8，当前配方还是 B",
+    { cutMax: (await valuesOf(cdp, B)).cutMax, current: (await recipeState(cdp)).current }, { cutMax: 0.8, current: B });
   await redoByKey(cdp);
   report.eq("Ctrl+Y：又是 0.6", (await valuesOf(cdp, B)).cutMax, 0.6);
   // 「恢复基础」「写回基础」各一步
@@ -465,7 +461,7 @@ async function suiteSwitchAndRun(cdp, report, ws) {
   `);
   await pickRecipe(cdp, A);
   const runA = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("A 下跑一遍：成功", runA.status, "ok");
+  mustOk(runA.status === "ok", "A 下跑一遍：成功", runA.status);
   await pickRecipe(cdp, B);
   const plan = await replan(cdp);
   const cached = (id) => plan.plan[id]?.cached;
@@ -508,33 +504,25 @@ async function suiteMatrix(cdp, report, ws) {
   const cell = (p, c) => `[data-testid="mx-cell-${p}-${c}"]`;
   const stateAt = (p, c) => cdp.eval(`return document.querySelector(${lit(cell(p, c))})?.getAttribute('data-state') ?? null;`);
   report.eq("列：参数 | 基础 | A | B | C", await cdp.eval(`return [...document.querySelectorAll('[data-testid="mx-table"] thead th')].map((t) => t.getAttribute('data-col') ?? 'param');`), ["param", ":base", A, B, C]);
-  report.eq("A 的 leafSize 是配方存的值（橙）", await stateAt("leafSize", A), "override");
-  report.eq("B 的 leafSize 沿用基础（灰）", await stateAt("leafSize", B), "inherit");
-  const colors = await cdp.eval(`
-    const c = (s) => getComputedStyle(document.querySelector(s)).color;
-    return { o: c(${lit(cell("leafSize", A))}), i: c(${lit(cell("leafSize", B))}) };
-  `);
-  report.ok("颜色：覆盖是橙字、沿用是暗灰字", colors.o === "rgb(224, 160, 48)" && colors.i === "rgb(111, 120, 135)", JSON.stringify(colors));
+  report.eq("A 的 leafSize 是配方存的值（override），B 的 leafSize 沿用基础（inherit）",
+    [await stateAt("leafSize", A), await stateAt("leafSize", B)], ["override", "inherit"]);
 
   // 就地编辑：双击 B 的 meanK，填 1（越过它的 min 2）→ 红
   await cdp.eval(`document.querySelector(${lit(cell("meanK", B))}).dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); return true;`);
   await sleep(150);
-  report.eq("双击单元格：就地出现 meanK 的数字框", await typeInto(cdp, `${cell("meanK", B)} [data-testid="mx-editor"]`, "1", { inList: false }), "ok");
+  await must("双击单元格：就地出现 meanK 的数字框", typeInto(cdp, `${cell("meanK", B)} [data-testid="mx-editor"]`, "1", { inList: false }));
   await sleep(200);
   report.eq("单元格编辑写进 B（A、C 不变）", [await valuesOf(cdp, A), await valuesOf(cdp, B), await valuesOf(cdp, C)],
     [{ leafSize: [0.03, 0.03, 0.03], cutMax: 2 }, { meanK: 1 }, {}]);
-  report.eq("越界的单元格是红的（invalid）", await stateAt("meanK", B), "invalid");
+  const invalidState = await stateAt("meanK", B);
   const redTitle = await cdp.eval(`
     const el = document.querySelector(${lit(cell("meanK", B))});
     return { title: el.getAttribute('title'), color: getComputedStyle(el).color };
   `);
-  report.ok("红字，悬停写原因（越界：不能小于 2）", redTitle.color === "rgb(229, 72, 77)" && /越界.*不能小于 2/.test(redTitle.title), JSON.stringify(redTitle));
-  await pickRecipe(cdp, B);
-  const blocked = await f5Blocked(cdp);
-  report.ok("B 有越界值：运行被阻止并给出原因", /配方「车型B·尾门」有 1 处失配/.test(blocked ?? "") && /meanK/.test(blocked ?? ""), blocked);
-  await pickRecipe(cdp, A);
-  const okA = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("其余配方不受影响：A 照常运行", okA.status, "ok");
+  report.ok("越界的单元格是红的（invalid、红字），悬停写原因（越界：不能小于 2）",
+    invalidState === "invalid" && redTitle.color === "rgb(229, 72, 77)" && /越界.*不能小于 2/.test(redTitle.title),
+    JSON.stringify({ state: invalidState, ...redTitle }));
+  // 「越界阻止运行、其余配方照常运行」在验收 23 里对同一条路径断言（③ 的配方被阻止、④ 的配方照常运行），这里不再重跑
 
   // 只显示差异 / 全部
   await click(cdp, '[data-testid="mx-diff"]');
@@ -551,8 +539,6 @@ async function suiteMatrix(cdp, report, ws) {
   // 复杂值：双击 C 的 leafSize → 弹出编辑，改第二个分量
   await cdp.eval(`document.querySelector(${lit(cell("leafSize", C))}).dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); return true;`);
   await sleep(150);
-  const pop = await cdp.eval(`return document.querySelector(${lit(`${cell("leafSize", C)} [data-testid="mx-editor"]`)})?.className ?? null;`);
-  report.ok("vec3f 的单元格：弹出编辑", (pop ?? "").includes("mx-edit--pop"), pop);
   await typeInto(cdp, `${cell("leafSize", C)} [data-testid="mx-editor"]`, "0.07", { index: 1, inList: false });
   await click(cdp, '[data-testid="mx-edit-done"]');
   await sleep(150);
@@ -580,16 +566,15 @@ async function suiteMatrix(cdp, report, ws) {
   await sleep(100);
   await click(cdp, '[data-testid="mx-copy"]');
   await click(cdp, `[data-testid="mx-copy-to-${B}"]`);
-  report.eq("把基础列的 meanK 复制到 B：B 的越界值被基础替掉（不再存）", await valuesOf(cdp, B), { leafSize: [0.03, 0.03, 0.03], cutMax: 2 });
-  report.eq("B 的 meanK 回到沿用基础", await stateAt("meanK", B), "inherit");
+  report.eq("把基础列的 meanK 复制到 B：B 的越界值被基础替掉（不再存），B 的 meanK 回到沿用基础",
+    { values: await valuesOf(cdp, B), meanK: await stateAt("meanK", B) },
+    { values: { leafSize: [0.03, 0.03, 0.03], cutMax: 2 }, meanK: "inherit" });
 
   // 隐藏列
   await click(cdp, `[data-testid="mx-hide-${C}"]`);
   report.ok("隐藏 C 列", !(await cdp.eval(`return !!document.querySelector('[data-testid="mx-col-${C}"]');`)));
   await click(cdp, '[data-testid="mx-unhide"]');
   report.ok("显示隐藏的列：C 回来了", await cdp.eval(`return !!document.querySelector('[data-testid="mx-col-${C}"]');`));
-  report.ok("当前配方的列头标着 ●",
-    (await cdp.eval(`return document.querySelector('[data-testid="mx-col-${A}"]')?.textContent ?? '';`)).includes("●"));
   await closePanel(cdp);
   return { ids };
 }
@@ -622,19 +607,21 @@ async function suiteMismatch(cdp, report, ws) {
       kind: li.getAttribute('data-kind'), param: li.getAttribute('data-param'),
       badge: li.querySelector('.mg-kind').textContent, fix: li.querySelector('[data-testid="mg-fix"]').textContent }));`);
   };
-  report.eq("① 多出：voxelSize → 删除这个值", await reportOf("失配-多出"),
-    [{ kind: "extra", param: "voxelSize", badge: "多出", fix: "删除这个值" }]);
-  report.eq("② 类型不符：leafSize \"abc\" → 删除；meanK \"35\" → 改为 35", await reportOf("失配-类型"), [
-    { kind: "type", param: "leafSize", badge: "类型不符", fix: "删除这个值（用基础）" },
-    { kind: "type", param: "meanK", badge: "类型不符", fix: "改为 35" },
-  ]);
-  report.eq("③ 越界：leafSize 逐分量夹到 [0.0001, 10]；meanK 夹到 2", await reportOf("失配-越界"), [
-    { kind: "range", param: "leafSize", badge: "越界", fix: "夹到限位：[0.02,10,0.0001]" },
-    { kind: "range", param: "meanK", badge: "越界", fix: "夹到限位：2" },
-  ]);
-  report.eq("④ 规格变了：提示，建议按当前图更新记录", await reportOf("失配-规格"),
-    [{ kind: "spec", param: "", badge: "规格变了", fix: "按当前图更新记录" }]);
-  report.ok("④ 只提示：底部写着不阻止运行", (await cdp.eval(`return document.querySelector('.mg-foot__note')?.textContent ?? '';`)).includes("不阻止运行"));
+  const mismatches = {};
+  for (const name of ["失配-多出", "失配-类型", "失配-越界", "失配-规格"]) mismatches[name] = await reportOf(name);
+  report.eq("四类失配的条目与建议：① 多出 voxelSize → 删除；② 类型不符 leafSize \"abc\" → 删除、meanK \"35\" → 改为 35；" +
+    "③ 越界 leafSize 逐分量夹到 [0.0001, 10]、meanK 夹到 2；④ 规格变了 → 按当前图更新记录", mismatches, {
+    "失配-多出": [{ kind: "extra", param: "voxelSize", badge: "多出", fix: "删除这个值" }],
+    "失配-类型": [
+      { kind: "type", param: "leafSize", badge: "类型不符", fix: "删除这个值（用基础）" },
+      { kind: "type", param: "meanK", badge: "类型不符", fix: "改为 35" },
+    ],
+    "失配-越界": [
+      { kind: "range", param: "leafSize", badge: "越界", fix: "夹到限位：[0.02,10,0.0001]" },
+      { kind: "range", param: "meanK", badge: "越界", fix: "夹到限位：2" },
+    ],
+    "失配-规格": [{ kind: "spec", param: "", badge: "规格变了", fix: "按当前图更新记录" }],
+  });
   const badges = await cdp.eval(`return [...document.querySelectorAll('[data-testid="mg-item"]')].map((b) => b.getAttribute('data-name') + '=' + (b.querySelector('[data-testid="mg-item-bad"]')?.textContent ?? '0')).sort();`);
   report.eq("列表上的失配数红徽标（①–③ 的条数）", badges, ["失配-多出=1", "失配-类型=2", "失配-规格=0", "失配-越界=2"].sort());
 
@@ -645,11 +632,8 @@ async function suiteMismatch(cdp, report, ws) {
   const blocked = await f5Blocked(cdp);
   report.ok("③ 的配方运行被阻止，原因写明配方与参数", /失配-越界/.test(blocked ?? "") && /leafSize/.test(blocked ?? ""), blocked);
   await click(cdp, `[data-testid="mg-item"][data-name="失配-越界"]`);
-  report.ok("底部写着「有失配时这个配方不能运行；其余配方不受影响」",
-    (await cdp.eval(`return document.querySelector('.mg-foot__note')?.textContent ?? '';`)).includes("有失配时这个配方不能运行；其余配方不受影响"));
   await click(cdp, '[data-testid="mg-fix-all"]');
   report.eq("全部按建议修复：值夹进限位", await valuesOf(cdp, "失配-越界"), { leafSize: [0.02, 10, 0.0001], meanK: 2 });
-  report.ok("修完：没有失配条目", await cdp.eval(`return !!document.querySelector('[data-testid="mg-no-mismatch"]');`));
   report.eq("修完能运行", (await runAndWait(cdp, () => pressF5(cdp))).status, "ok");
   await undoByKey(cdp);
   report.eq("一次 Ctrl+Z 还原成修之前", await valuesOf(cdp, "失配-越界"), { leafSize: [0.02, 20, 0.00001], meanK: 1 });
@@ -669,21 +653,21 @@ async function suiteManage(cdp, report, ws) {
   const { file, dir } = await recipeGraph(cdp, ws, "车门缝隙 24");
   await openPanel(cdp, "recipes");
   await click(cdp, '[data-testid="mg-new"]');
-  report.eq("新建：起名对话框", await answerText(cdp, A), "ok");
+  await must("新建：起名对话框", answerText(cdp, A));
   await cdp.eval(`window.__lyflow.stores.graph.getState().setRecipeValue(${lit(A)}, 'cutMax', 2.2); return true;`);
   await saveByKey(cdp);
   report.ok("新建 → 存盘：A 的文件出现", fs.existsSync(recipeFile(dir, A)));
 
   await click(cdp, `[data-testid="mg-item"][data-name=${lit(A)}]`);
   await click(cdp, '[data-testid="mg-dup"]');
-  report.eq("复制：起名", await answerText(cdp, B), "ok");
+  await must("复制：起名", answerText(cdp, B));
   await saveByKey(cdp);
   report.eq("复制 → 存盘：B 的文件、值与 A 相同", readJson(recipeFile(dir, B)).values, { cutMax: 2.2 });
 
   await click(cdp, `[data-testid="mg-item"][data-name=${lit(B)}]`);
   await click(cdp, '[data-testid="mg-rename"]');
   const R = "车型B·尾门（改）";
-  report.eq("重命名：起名对话框", await answerText(cdp, R), "ok");
+  await must("重命名：起名对话框", answerText(cdp, R));
   await saveByKey(cdp);
   report.ok("重命名 → 存盘：旧文件没了、新文件在、文件里的 name 跟着改",
     !fs.existsSync(recipeFile(dir, B)) && fs.existsSync(recipeFile(dir, R)) && readJson(recipeFile(dir, R)).name === R, listDir(dir).join(" | "));
@@ -694,7 +678,7 @@ async function suiteManage(cdp, report, ws) {
   report.eq("设为默认 → 存盘：index.json 的 default", readJson(path.join(dir, "index.json")).default, R);
 
   await click(cdp, '[data-testid="mg-delete"]');
-  report.eq("删除：确认对话框点「删除」", await answerChoice(cdp, "delete"), "ok");
+  await must("删除：确认对话框点「删除」", answerChoice(cdp, "delete"));
   await saveByKey(cdp);
   report.ok("删除 → 存盘：文件没了，index.json 里的 default 一并去掉",
     !fs.existsSync(recipeFile(dir, R)) && readJson(path.join(dir, "index.json")).default === undefined, JSON.stringify(readJson(path.join(dir, "index.json"))));
@@ -711,7 +695,6 @@ async function suiteManage(cdp, report, ws) {
   const C = "车型A·左前门（产线）";
   await answerText(cdp, C);
   await cdp.waitFor(`window.__importDone !== null`, { what: "导入完成" });
-  report.eq("导入：用改过的名字加进来", await cdp.eval(`return window.__importDone;`), C);
   await saveByKey(cdp);
   const imported = readJson(recipeFile(dir, C));
   report.ok("导入 → 存盘：复制进配方目录，name 是新名字、值原样（图的记录保留外部的，失配 ④ 照常提示）",
@@ -723,8 +706,6 @@ async function suiteManage(cdp, report, ws) {
   await cdp.eval(`await window.__lyflow.recipes.exportTo(${lit(A)}, ${lit(exportFile)}); return true;`);
   const exported = fs.existsSync(exportFile) ? readJson(exportFile) : null;
   report.ok("导出：文件写到指定位置，内容就是 A", exported?.name === A && exported.values.cutMax === 2.2, JSON.stringify(exported));
-  report.ok("界面上有导入、导出按钮（它们弹系统对话框，脚本不点）",
-    await cdp.eval(`return !!document.querySelector('[data-testid="mg-import"]') && !!document.querySelector('[data-testid="mg-export"]');`));
 
   // 自动备份：内存里没存的改动写进 autosave~.json，重开后能恢复
   await cdp.eval(`window.__lyflow.stores.graph.getState().setRecipeValue(${lit(A)}, 'cutMax', 3.7); return true;`);

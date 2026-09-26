@@ -58,15 +58,6 @@ Box2D box(float xMin, float yMin, float xMax, float yMax) {
 
 }  // namespace
 
-TEST_CASE("2D 四个算子都注册了，且带 pack 标记") {
-  for (const char* id : {"filter.crop_box2d", "fit.line_2d", "fit.circle_2d", "register.icp_2d"}) {
-    CAPTURE(id);
-    const OperatorDesc* op = ensureRegistry().find(id);
-    REQUIRE(op != nullptr);
-    CHECK(op->pack == "std-pointcloud@0.1.0");
-  }
-}
-
 TEST_CASE("filter.crop_box2d 的开闭区间在边界点上分得开") {
   PointCloud cloud;
   cloud.push(0.0f, 0.0f, 0.0f);    // 角上

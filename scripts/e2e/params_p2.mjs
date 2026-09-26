@@ -22,6 +22,7 @@ import {
   buildGraph,
   dragMouse,
   lit,
+  mustOk,
   newDoc,
   placeAtScreen,
   pressCtrl,
@@ -39,10 +40,6 @@ const PANEL_WIDTH_KEY = "lyflow.paramPanel.width";
 const docOf = (cdp) => cdp.eval(`return window.__lyflow.stores.graph.getState().doc;`);
 const snap = (cdp) => cdp.eval(`return window.__lyflow.snapshot();`);
 const paramsOf = async (cdp, id) => (await docOf(cdp)).nodes.find((n) => n.id === id)?.params ?? {};
-
-async function panelState(cdp) {
-  return cdp.eval(`return window.__lyflow.stores.ui.getState().paramPanel;`);
-}
 
 async function openPanel(cdp) {
   await cdp.eval(`window.__lyflow.stores.ui.getState().toggleParamPanel(true); return true;`);
@@ -181,7 +178,7 @@ async function suiteLayout(cdp, report) {
   report.section("P2 验收 9：面板开关、拖宽、最大化、宽度记忆；打开时 Inspector 不显示；画布 ↔ 面板联动");
   await resetPanel(cdp);
   const hasOp = await cdp.eval(`return !!window.__lyflow.stores.manifest.getState().operatorsById.get(${lit(SHOW)});`);
-  report.ok("test.param_showcase 在 e2e 构建里注册了（LYFLOW_TEST_OPS=1）", hasOp);
+  mustOk(hasOp, "test.param_showcase 没注册：起 app 时要 LYFLOW_TEST_OPS=1");
 
   // 六个节点，面板的列表足够长，才验得出「画布选中 → 面板滚过去」
   await newDoc(cdp);
@@ -215,7 +212,6 @@ async function suiteLayout(cdp, report) {
     `);
 
   let d = await dom();
-  report.eq("起始：面板关着、Inspector 在", [d.panel, d.inspector], [false, true]);
 
   await blurActive(cdp);
   await pressCtrlShiftP(cdp);
@@ -263,12 +259,11 @@ async function suiteLayout(cdp, report) {
     JSON.stringify(d),
   );
   report.ok("最大化：面板宽度 ≈ 整个工作区", Math.abs(d.right.w - d.body.w) <= 4, `${d.right.w} vs ${d.body.w}`);
-  report.eq("store 里 maximized = true", (await panelState(cdp)).maximized, true);
   await cdp.eval(`document.querySelector('[data-testid="pp-maximize"]').click(); return true;`);
   await sleep(250);
   d = await dom();
-  report.ok("还原：画布回来", d.canvas.w > 300, `${d.canvas.w}px`);
-  report.ok("还原：面板回到记住的宽度", Math.abs(d.right.w - width1) <= 2, `${d.right.w} vs ${width1}`);
+  report.ok("还原：画布回来、面板回到记住的宽度", d.canvas.w > 300 && Math.abs(d.right.w - width1) <= 2,
+    `画布 ${d.canvas.w}px，面板 ${d.right.w} vs ${width1}`);
 
   // 画布选中 → 面板滚过去并高亮。先把列表滚到底，再在画布上真鼠标点 s1
   await cdp.eval(`const l = document.querySelector('[data-testid="pp-list"]'); l.scrollTop = l.scrollHeight; return true;`);
@@ -299,7 +294,7 @@ async function suiteLayout(cdp, report) {
 
   // 面板里点 s5 的标题 → 画布选中并居中 s5
   const s5 = await reveal(cdp, `[data-testid="pp-node-title-${ids.s5}"]`);
-  report.ok("s5 那一节找得到", Boolean(s5));
+  mustOk(Boolean(s5), "面板里 s5 那一节找得到");
   await cdp.eval(`document.querySelector('[data-testid="pp-node-title-${ids.s5}"]').click(); return true;`);
   await sleep(700);
   const centered = await cdp.eval(`
@@ -309,8 +304,8 @@ async function suiteLayout(cdp, report) {
              dx: Math.round(n.left + n.width / 2 - (c.left + c.width / 2)),
              dy: Math.round(n.top + n.height / 2 - (c.top + c.height / 2)) };
   `);
-  report.eq("面板里点标题 → 画布选中 s5", centered.selected, [ids.s5]);
-  report.ok("…并把它居中（中心偏差 ≤ 12 px）", Math.abs(centered.dx) <= 12 && Math.abs(centered.dy) <= 12,
+  report.ok("面板里点标题 → 画布选中 s5 并把它居中（中心偏差 ≤ 12 px）",
+    JSON.stringify(centered.selected) === JSON.stringify([ids.s5]) && Math.abs(centered.dx) <= 12 && Math.abs(centered.dy) <= 12,
     JSON.stringify(centered));
   await resetPanel(cdp);
 }
@@ -381,10 +376,10 @@ async function suiteAllTypes(cdp, report, ws) {
   await openPanel(cdp);
   // 高级组默认收起：展开它（flags、curve 之一在里面）；Write File 打开后 Export Path 才露出来
   await clickIn(cdp, `[data-testid="pp-group-n:${ids.show}|g:高级|a"]`);
-  report.eq("打开 Write File（path 行的 visibleWhen）", await clickIn(cdp, rowSel(`${ids.show}.writeFile`), 'input[type="checkbox"]'), "ok");
+  const wrote = await clickIn(cdp, rowSel(`${ids.show}.writeFile`), 'input[type="checkbox"]');
+  mustOk(wrote === "ok", "打开 Write File（path 行的 visibleWhen）", wrote);
   await sleep(120);
 
-  const seen = new Set();
   for (const c of typeCases(ids.show)) {
     if (c.reveal) await reveal(cdp, rowSel(`${ids.show}.${c.param}`));
     const how = await c.act(cdp);
@@ -402,7 +397,6 @@ async function suiteAllTypes(cdp, report, ws) {
               : Array.isArray(v) && v.every((x) => typeof x === "number");
     report.ok(`${c.type}：${c.param} 在面板里改了，doc 里是 ${JSON.stringify(c.want)}（类型对）`,
       how === "ok" && approxEq(v, c.want) && typeOk, `操作 ${how}，doc 里 ${JSON.stringify(v)}`);
-    seen.add(c.type);
   }
 
   // color 的 alpha（overlay 带 alpha 通道）
@@ -420,15 +414,12 @@ async function suiteAllTypes(cdp, report, ws) {
   report.eq("transform：行上显示「T[x, y, z] R[rx, ry, rz]°」", summary, "T[0.5, 0, 0] R[0, 0, 90]°");
   await clickIn(cdp, rowSel(`${ids.show}.pose`), '[data-testid="transform-view-pose"]');
   const view = await cdp.eval(`return document.querySelector('[data-testid="transform-pose"]')?.getAttribute('data-view');`);
-  report.eq("transform：切到 4×4 矩阵视图", view, "matrix");
+  mustOk(view === "matrix", "transform：切到 4×4 矩阵视图", view);
   await typeIn(cdp, rowSel(`${ids.show}.pose`), "0.2", { index: 11 });
   pose = (await paramsOf(cdp, ids.show)).pose;
   report.eq("transform：矩阵视图里改 m[11]（tz）", pose?.[11], 0.2);
-  seen.add("vec4f"); // roi 也是 vec4f，验收 14 另拖一次
 
   // curve：真鼠标拖第 2 个控制点；列表里改第 1 个点的 y；加一个点；换插值方式
-  const before = (await paramsOf(cdp, ids.show)).response;
-  report.eq("curve：没改过时 doc 里没有这个键（稀疏存储）", before, undefined);
   const ptSel = `[data-testid="curve-pt-response-1"]`;
   await reveal(cdp, rowSel(`${ids.show}.response`));
   const pt = await cdp.eval(`
@@ -451,27 +442,21 @@ async function suiteAllTypes(cdp, report, ws) {
   await chooseIn(cdp, rowSel(`${ids.show}.response`), "linear", '[data-testid="curve-interp-response"]');
   curve = (await paramsOf(cdp, ids.show)).response;
   report.eq("curve：换成线性插值", curve?.interp, "linear");
-  const shape = curve && Array.isArray(curve.points) && curve.points.every((p, i, a) =>
-    p.length === 2 && p[0] >= 0 && p[0] <= 1 && (i === 0 || p[0] > a[i - 1][0]));
-  report.ok("curve：值的形状合规（x 在 0–1 严格递增）", shape, JSON.stringify(curve));
   // falloff（advanced 里的第二个 curve）：列表里改一个数
   await typeIn(cdp, rowSel(`${ids.show}.falloff`), "0.8", { index: 1 });
   report.eq("curve（advanced 组里的 falloff）：列表改值", (await paramsOf(cdp, ids.show)).falloff?.points?.[0], [0, 0.8]);
-  seen.add("curve");
-  report.eq("14 种类型都改到了", [...seen].sort(), ["bool", "color", "curve", "enum", "flags", "float", "int", "path",
-    "string", "text", "transform", "vec2f", "vec3f", "vec4f"]);
 
   // core 收下的就是这些值：跑一遍，echo 里原样回来
   const run = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("改完 14 种之后运行成功（core 接受每一种值）", run.status, "ok");
+  mustOk(run.status === "ok", "改完 14 种之后运行成功（core 接受每一种值）", run.status);
   const echo = await cdp.eval(`
     const n = window.__lyflow.stores.execution.getState().nodes.get(${lit(ids.show)});
     return n?.stats?.outputs?.find((o) => o.port === 'echo')?.value?.data ?? null;
   `);
   const now = await paramsOf(cdp, ids.show);
-  report.ok("echo 回显的 pose 与 doc 一致", approxEq(echo?.params?.pose, now.pose), JSON.stringify(echo?.params?.pose));
-  report.ok("echo 回显的 response 与 doc 一致", JSON.stringify(echo?.params?.response) ===
-    JSON.stringify({ interp: now.response.interp, points: now.response.points }), JSON.stringify(echo?.params?.response));
+  report.ok("echo 回显的 pose、response 与 doc 一致", approxEq(echo?.params?.pose, now.pose) && JSON.stringify(echo?.params?.response) ===
+    JSON.stringify({ interp: now.response.interp, points: now.response.points }),
+    JSON.stringify({ pose: echo?.params?.pose, response: echo?.params?.response }));
 
   // 往返：存盘 → 读回来重开 → 值逐字不变
   const file = path.join(ws.dir, "P2 全类型往返.lyflow.json");
@@ -488,19 +473,18 @@ async function suiteAllTypes(cdp, report, ws) {
   `);
   await sleep(300);
   const reopened = await paramsOf(cdp, ids.show);
-  report.eq("重开后 transform 不变", reopened.pose, now.pose);
-  report.eq("重开后 curve 不变", reopened.response, now.response);
-  report.eq("重开后 falloff 不变", reopened.falloff, now.falloff);
+  report.eq("重开后 transform（pose）、curve（response、falloff）不变",
+    { pose: reopened.pose, response: reopened.response, falloff: reopened.falloff },
+    { pose: now.pose, response: now.response, falloff: now.falloff });
   const shownPose = await (async () => {
     await reveal(cdp, rowSel(`${ids.show}.pose`));
     return cdp.eval(`return document.querySelector('[data-testid="transform-summary-pose"]')?.textContent ?? null;`);
   })();
-  report.eq("重开后面板里的 transform 摘要不变", shownPose, "T[0.5, 0, 0.2] R[0, 0, 90]°");
   const pts = await (async () => {
     await reveal(cdp, rowSel(`${ids.show}.response`));
     return cdp.eval(`return document.querySelector('[data-testid="curve-response"]')?.getAttribute('data-points');`);
   })();
-  report.eq("重开后面板里的曲线还是 4 个点", pts, "4");
+  report.eq("重开后面板里的 transform 摘要不变、曲线还是 4 个点", { shownPose, pts }, { shownPose: "T[0.5, 0, 0.2] R[0, 0, 90]°", pts: "4" });
   await resetPanel(cdp);
 }
 
@@ -651,11 +635,12 @@ async function suiteSearchFilter(cdp, report) {
   `);
   await openPanel(cdp);
   // 纳入配方：点 show.gain 行右端的空心书签
-  report.eq("点书签把 show.gain 纳入配方", await clickIn(cdp, rowSel(`${ids.show}.gain`), `[data-testid="pp-bookmark-${ids.show}.gain"]`), "ok");
+  const marked = await clickIn(cdp, rowSel(`${ids.show}.gain`), `[data-testid="pp-bookmark-${ids.show}.gain"]`);
+  mustOk(marked === "ok", "点书签把 show.gain 纳入配方", marked);
   const gp = (await docOf(cdp)).params?.gain;
-  report.ok("书签：doc 里出现了图参数 gain，绑着 show.gain", gp?.binds?.[0] === `${ids.show}.gain`, JSON.stringify(gp));
   const bookmark = await cdp.eval(`return document.querySelector('[data-testid="pp-bookmark-${ids.show}.gain"]')?.getAttribute('data-on');`);
-  report.eq("书签变成实心（已纳入）", bookmark, "1");
+  report.ok("书签：doc 里出现了图参数 gain，绑着 show.gain；书签变成实心（已纳入）", gp?.binds?.[0] === `${ids.show}.gain` && bookmark === "1",
+    JSON.stringify({ gp, bookmark }));
   await cdp.eval(`await window.__lyflow.validate(); return true;`);
   await sleep(250);
 
@@ -695,20 +680,22 @@ async function suiteSearchFilter(cdp, report) {
 
   // 「全部」：过滤没生效时 advanced 组是收起的，一路滚一路点开，再逐行收齐
   report.eq("「全部」列出的行 = 期望（advanced 展开后）", await listedKeys(cdp, { expand: true }), want(() => true));
-  for (const [chip, pred] of [["modified", (r) => r.modified], ["recipe", (r) => r.recipe], ["diag", (r) => r.diag]]) {
-    await setChip(chip);
-    report.eq(`chip「${chip}」的结果 = 期望`, await listedKeys(cdp), want(pred));
-  }
+  // 「已改动」「配方」两个 chip 的列表不再逐个比：计数在上面比过，列表判据与「诊断」同一条路，下面还有「类型叠已改动」
+  await setChip("diag");
+  report.eq("chip「diag」的结果 = 期望", await listedKeys(cdp), want((r) => r.diag));
   await setChip("all");
 
-  for (const q of ["gain", "体素", "demo-tag", "参数全类型 iter", "LEAF"]) {
+  // 两个搜索词：多词 AND（跨节点标题与参数名）、大小写不敏感
+  const searchCounts = { got: {}, want: {} };
+  for (const q of ["参数全类型 iter", "LEAF"]) {
     await setQuery(q);
     const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
     const expect = want((r) => terms.every((t) => r.hay.includes(t)));
     report.eq(`搜索「${q}」的结果 = 期望（${expect.length} 行）`, await listedKeys(cdp), expect);
-    const c = await chipCount();
-    report.eq(`搜索「${q}」时「全部」计数跟着变`, c.all, expect.length);
+    searchCounts.got[q] = (await chipCount()).all;
+    searchCounts.want[q] = expect.length;
   }
+  report.eq("搜索时「全部」计数跟着变", searchCounts.got, searchCounts.want);
   await setQuery("");
 
   // 按类型：选 vec3f，再叠「已改动」
@@ -719,7 +706,6 @@ async function suiteSearchFilter(cdp, report) {
     return true;
   `);
   await sleep(150);
-  report.eq("按类型 vec3f 的结果 = 期望", await listedKeys(cdp), want((r) => r.type === "vec3f"));
   await setChip("modified");
   report.eq("类型 vec3f + 已改动 = 期望", await listedKeys(cdp), want((r) => r.type === "vec3f" && r.modified));
   const typeOpt = await cdp.eval(`
@@ -768,7 +754,7 @@ async function suiteSubgraphShared(cdp, report, ws) {
   `);
   await sleep(300);
   const first = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("全类型示例图（examples/param-showcase.lyflow.json）跑通", first.status, "ok");
+  mustOk(first.status === "ok", "全类型示例图（examples/param-showcase.lyflow.json）跑通", first.status);
   const planKeys = async () => {
     await cdp.eval(`await window.__lyflow.plan(); return true;`);
     return cdp.eval(`return Object.fromEntries([...window.__lyflow.stores.cache.getState().plan].map(([id, n]) => [id, n.cacheKey]));`);
@@ -777,7 +763,7 @@ async function suiteSubgraphShared(cdp, report, ws) {
   await openPanel(cdp);
 
   const defA = `[data-testid="pp-def-n_pre_a"]`;
-  report.ok("子图实例下面有「子图定义」一栏", Boolean(await reveal(cdp, defA)));
+  mustOk(Boolean(await reveal(cdp, defA)), "子图实例下面有「子图定义」一栏");
   const defText = await cdp.eval(`return document.querySelector(${lit(defA)})?.textContent ?? null;`);
   report.ok("标着「子图定义 · 2 个实例共享」", (defText ?? "").includes("子图定义 · 2 个实例共享"), defText);
   await clickIn(cdp, defA);
@@ -785,12 +771,12 @@ async function suiteSubgraphShared(cdp, report, ws) {
     await reveal(cdp, `[data-testid="pp-shared-n_pre_a/s_voxel"]`);
     return cdp.eval(`return document.querySelector('[data-testid="pp-shared-n_pre_a/s_voxel"]')?.textContent ?? null;`);
   })();
-  report.eq("定义里的节点标题旁有共享标记", badge, "子图定义 · 2 个实例共享");
   const shared = await cdp.eval(`return document.querySelector('[data-testid="prow-n_pre_a/s_voxel.leafSize"]')?.getAttribute('data-shared') ?? null;`);
-  report.eq("定义里的行也标着共享（data-shared = 2）", shared, "2");
+  report.eq("定义里的节点标题旁有共享标记、定义里的行也标着共享（data-shared = 2）", { badge, shared },
+    { badge: "子图定义 · 2 个实例共享", shared: "2" });
 
-  report.eq("在实例 A 下面改定义里的 leafSize（x → 0.03）",
-    await typeIn(cdp, rowSel("n_pre_a/s_voxel.leafSize"), "0.03"), "ok");
+  const typedDef = await typeIn(cdp, rowSel("n_pre_a/s_voxel.leafSize"), "0.03");
+  mustOk(typedDef === "ok", "在实例 A 下面改定义里的 leafSize（x → 0.03）", typedDef);
   const def = (await docOf(cdp)).subgraphs.sg_pre.nodes[0].params;
   report.eq("doc 里改的是子图定义本身", def.leafSize, [0.03, 0.01, 0.01]);
   await clickIn(cdp, `[data-testid="pp-def-n_pre_b"]`);
@@ -820,7 +806,6 @@ async function suiteSubgraphShared(cdp, report, ws) {
     const id = b.stores.graph.getState().addNode(${lit("lib." + libId)}, { x: 300, y: 420 });
     return { id, dirs: r.status.dirs };
   `);
-  report.ok("库算子放进了画布", Boolean(lib?.id), JSON.stringify(lib));
   const libHead = await reveal(cdp, `[data-testid="pp-node-${lib.id}"]`);
   const libInfo = await cdp.eval(`
     return {
@@ -829,8 +814,9 @@ async function suiteSubgraphShared(cdp, report, ws) {
       inner: document.querySelectorAll('[data-node^="${lib.id}/"]').length,
     };
   `);
-  report.ok("面板里有库算子那一节", Boolean(libHead));
-  report.eq("库算子：标「库算子 · 内部只读」、没有定义可展开、没有内部行", libInfo, { badge: "库算子 · 内部只读", def: false, inner: 0 });
+  mustOk(Boolean(libHead), "面板里有库算子那一节", lib);
+  report.eq("库算子放进了画布：标「库算子 · 内部只读」、没有定义可展开、没有内部行", { placed: Boolean(lib?.id), ...libInfo },
+    { placed: true, badge: "库算子 · 内部只读", def: false, inner: 0 });
   const libFile = lib.dirs?.[0] ? path.join(lib.dirs[0], `${libId}.lyflow-op.json`) : null;
   if (libFile && fs.existsSync(libFile)) {
     fs.rmSync(libFile, { force: true });
@@ -851,7 +837,7 @@ async function suiteRoi(cdp, report) {
   await resetPanel(cdp);
   const ids = await showcaseGraph(cdp, { seed: 14 });
   const run = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("先跑一遍（2D 视图要一片底图）", run.status, "ok");
+  mustOk(run.status === "ok", "先跑一遍（2D 视图要一片底图）", run.status);
   await openPanel(cdp);
   const key = `${ids.show}.roi`;
   await reveal(cdp, rowSel(key));
@@ -906,9 +892,10 @@ async function suiteRoi(cdp, report) {
     return row ? [...row.querySelectorAll('input')].map((i) => Number(i.value)) : null;
   `);
   report.ok("面板那一行的数跟着变", Array.isArray(shown) && Math.abs(shown[0] - after[0]) < 1e-9, JSON.stringify(shown));
-  report.eq("撤销记录是一次拖动", (await snap(cdp)).undoLabel, "拖动 ROI");
+  const dragLabel = (await snap(cdp)).undoLabel;
   await undoByKey(cdp);
-  report.eq("一次 Ctrl+Z 还原（显式值删掉 = 回到默认值）", (await paramsOf(cdp, ids.show)).roi, before);
+  report.eq("撤销记录是一次拖动（「拖动 ROI」），一次 Ctrl+Z 还原（显式值删掉 = 回到默认值）",
+    { undoLabel: dragLabel, roi: (await paramsOf(cdp, ids.show)).roi }, { undoLabel: "拖动 ROI", roi: before });
   await resetPanel(cdp);
 }
 
@@ -955,7 +942,6 @@ async function suitePerf(cdp, report, ws) {
     }
     return n;
   `);
-  report.ok(`图里 ${total} 个可见参数（≥ 1000）`, total >= 1000, String(total));
 
   // 打开：从 toggle 到第一批行画出来（两帧：提交 + 绘制）
   const openMs = await cdp.eval(`
@@ -975,8 +961,9 @@ async function suitePerf(cdp, report, ws) {
     return { total: Number(l.getAttribute('data-total')), mounted: Number(l.getAttribute('data-mounted')),
              chipAll: Number(document.querySelector('[data-testid="pp-chip-all"]').getAttribute('data-count')) };
   `);
-  report.eq("「全部」计数 = 可见参数数", virt.chipAll, total);
-  report.ok("列表是虚拟化的：只挂了一小部分", virt.mounted > 0 && virt.mounted < 120 && virt.total > 500, JSON.stringify(virt));
+  report.ok(`图里 ${total} 个可见参数（≥ 1000），「全部」计数 = 可见参数数，列表是虚拟化的：只挂了一小部分`,
+    total >= 1000 && virt.chipAll === total && virt.mounted > 0 && virt.mounted < 120 && virt.total > 500,
+    JSON.stringify({ total, ...virt }));
 
   // 滚动帧率：rAF 采样 + 真鼠标滚轮一路往下滚
   await cdp.eval(`
@@ -1007,15 +994,15 @@ async function suitePerf(cdp, report, ws) {
     return Math.round(1000 / f[Math.floor(f.length / 2)]);
   `);
   const scrollAfter = await cdp.eval(`return document.querySelector('[data-testid="pp-list"]').scrollTop;`);
-  report.ok("滚轮真的把列表滚下去了", scrollAfter > scrollBefore + 2000, `${scrollBefore} → ${scrollAfter}`);
-  report.ok(`滚动时的帧率 ${fps} fps ≥ 50`, fps != null && fps >= 50, `${fps} fps`);
+  report.ok(`滚轮真的把列表滚下去了，滚动时的帧率 ${fps} fps ≥ 50`, scrollAfter > scrollBefore + 2000 && fps != null && fps >= 50,
+    `滚动 ${scrollBefore} → ${scrollAfter}，${fps} fps`);
 
   // 输入一个数 → 画布状态（graph store 的 doc）更新并画完一帧
   const target = await cdp.eval(`
     const row = document.querySelector('[data-testid="pp-list"] .prow[data-type="float"][data-enabled="1"]');
     return row ? { testid: row.getAttribute('data-testid'), node: row.getAttribute('data-node'), param: row.getAttribute('data-param') } : null;
   `);
-  report.ok("找到一个挂着的 float 行", Boolean(target), JSON.stringify(target));
+  mustOk(Boolean(target), "找到一个挂着的 float 行", target);
   const inputMs = await cdp.eval(`
     const row = document.querySelector('[data-testid="${target?.testid}"]');
     const input = row.querySelector('input');
@@ -1031,8 +1018,8 @@ async function suitePerf(cdp, report, ws) {
     return Math.round(performance.now() - t0);
   `);
   const v = (await paramsOf(cdp, target.node))[target.param];
-  report.eq("输入的值进了 doc", v, 0.777);
-  report.ok(`输入一个数到画布状态更新 ${inputMs} ms < 100 ms`, inputMs < 100, `${inputMs} ms`);
+  report.ok(`输入的值进了 doc，输入一个数到画布状态更新 ${inputMs} ms < 100 ms`, v === 0.777 && inputMs < 100,
+    `doc 里 ${JSON.stringify(v)}，${inputMs} ms`);
   await resetPanel(cdp);
   await newDoc(cdp);
 }

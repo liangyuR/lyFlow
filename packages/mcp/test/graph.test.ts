@@ -19,22 +19,31 @@ function doc(): GraphDoc {
   };
 }
 
-test("set 按 <节点>.<参数> 改 doc，别的参数留着", () => {
-  const d = applySet(doc(), { "gen.pointCount": 24000, "voxel.leafSize": [0.01, 0.01, 0.01] });
-  assert.deepEqual(d.nodes[0]?.params, { pointCount: 24000, seed: 1 });
-  assert.deepEqual(d.nodes[1]?.params, { leafSize: [0.01, 0.01, 0.01] });
-});
+test("applySet：按 <节点>.<参数> 改 doc、别的参数留着；节点 id 带点时按最后一个点切；节点不存在或键写错就报错", () => {
+  const ok: { name: string; doc: GraphDoc; set: Record<string, unknown>; want: Record<string, unknown>[] }[] = [
+    {
+      name: "改两个节点，别的参数留着",
+      doc: doc(),
+      set: { "gen.pointCount": 24000, "voxel.leafSize": [0.01, 0.01, 0.01] },
+      want: [{ pointCount: 24000, seed: 1 }, { leafSize: [0.01, 0.01, 0.01] }],
+    },
+    {
+      name: "节点 id 里带点时按最后一个点切",
+      doc: { nodes: [{ id: "a.b", op: "x", params: {} }] },
+      set: { "a.b.leaf": 3 },
+      want: [{ leaf: 3 }],
+    },
+  ];
+  for (const { name, doc: d, set, want } of ok) {
+    assert.deepEqual(applySet(d, set).nodes.map((n) => n.params), want, name);
+  }
 
-test("set 的节点不存在就报错，键写错也报错", () => {
-  assert.throws(() => applySet(doc(), { "nope.x": 1 }), /没有节点 nope/);
-  assert.throws(() => applySet(doc(), { gen: 1 }), /<nodeId>\.<param>/);
-  assert.throws(() => applySet(doc(), { "gen.": 1 }), /<nodeId>\.<param>/);
-});
-
-test("节点 id 里带点时按最后一个点切", () => {
-  const d: GraphDoc = { nodes: [{ id: "a.b", op: "x", params: {} }] };
-  applySet(d, { "a.b.leaf": 3 });
-  assert.deepEqual(d.nodes[0]?.params, { leaf: 3 });
+  const bad: [set: Record<string, unknown>, error: RegExp][] = [
+    [{ "nope.x": 1 }, /没有节点 nope/],
+    [{ gen: 1 }, /<nodeId>\.<param>/],
+    [{ "gen.": 1 }, /<nodeId>\.<param>/],
+  ];
+  for (const [set, error] of bad) assert.throws(() => applySet(doc(), set), error, JSON.stringify(set));
 });
 
 test("resolveGraph 不改调用方给的内联图", () => {

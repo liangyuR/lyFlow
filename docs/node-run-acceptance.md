@@ -307,6 +307,7 @@ getOutputCloud(新 runId, c) 与 getOutputCloud(旧 runId, c) 都是「core 没�
   重跑没有复现，原因没有查到，记在这里。
 - `pnpm e2e:http`：headless 退出码 0，**46/46**（「只运行此节点」一组 9 项：isolate 的 upstream_not_ready、
   挂结果、智能运行 + force 之后下游仍取得到）。
+- （2026-09-26 起 e2e 断言做过合并精简，这里的日志与条数是当时的快照；见 test/prune 精简提交）
 - 演示截图：`scripts/e2e/record-noderun.mjs`，见下面「录屏」。
 
 | # | 验收项 | 结果 |
@@ -475,6 +476,10 @@ TEST CASE:  force 给了不存在的 id：整图级失败
   ✓ 「仅此节点」：a、c 的状态与耗时不变
 ```
 
+11b 末尾「改 c 的参数再只运行 b → c、d 不在 attached、退回 idle，a、b 命中缓存」那 4 条在 2026-09-26 的精简里删了：
+「键变了、仓里没有当前结果 → 不挂、退回 idle」由验收 17 覆盖（上面 c 的那条，以及「仍 done、取得到输出」的 d），上游命中缓存由验收 18 覆盖。
+验收 11 的进度环采样同时挪进了验收 10 那一组，复用它刚跑完的慢图（少搭一张三百万点的图、少跑一遍全图），关动效那一次顺带验动效 验收 9 的（6）。
+
 ### 与计划字面不同、需要知会的地方
 
 - **验收 17「c 不进计划且仍 done、取得到输出」与 V2 冲突，我按 V2 做了。** c 是 b 的下游，a 的参数一改，c 的 cacheKey
@@ -493,7 +498,7 @@ TEST CASE:  force 给了不存在的 id：整图级失败
 - **V2 覆盖了预览**：live preview 发的是 `targets:[拖动的节点]` + preview，按 V2 也挂结果、不清节点表 —— 计划外、预览命名空间里没有结果的节点
   收场时退回 idle，与以前「预览运行清空整张节点表」的最终效果一致。`m4.mjs` 的 live preview 组（含 < 100 ms 的跟手延迟）照过。
 - **既有分组里依赖「运行到此会清空节点表」的断言**：逐个查了带 targets 的三处 ——
-  `run.mjs` 的「Run to node」（`run.nodes[tail] === undefined`）、`m3.mjs` 的「Shift+F5 跑到选中节点」（`run.nodes[tail] === undefined`）、
+  `run.mjs` 的「Run to node」（`run.nodes[tail] === undefined`；2026-09-26 精简时整组删掉，右键「运行到此节点」由本分组、Shift+F5 由 m3 覆盖）、`m3.mjs` 的「Shift+F5 跑到选中节点」（`run.nodes[tail] === undefined`）、
   `m4.mjs` 的 preview run（`targets:[sample]` 之后读源头点数）。前两处在同一组里先 `newDoc`（节点表清空）再做第一次运行，下游从来没跑过，
   按 V2 也不在表里，断言原样成立；第三处只读计划内节点。**三处都不用改，已随 705/705 跑过。** 真正按 V2 / V1 改写的是本分组自己：
   原验收 8（isolate 只重算 b）→ 18（单击命中缓存、Shift 真跑）；原 9（按钮因上游过时置灰）→ 17（按钮可点、预告上游）+ 19 的「仅此节点」置灰；

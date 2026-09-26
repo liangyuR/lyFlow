@@ -21,6 +21,8 @@
 | `$env:LYFLOW_PACKS="gap;dts"; $env:LYFLOW_E2E_M8C_SHOT="docs/m8c-slot2.png"; pnpm e2e > $env:TEMP\m8c-e2e.log 2>&1` | 退出码 0，**527/527 项通过**（M8b 480；+47 是新的 `scripts/e2e/m8c.mjs` 三组；M8b 的四组只改了参数名，全过） |
 | `pnpm core:dump`（带 `LYFLOW_PACKS`） | 重新生成 `app/public/manifest.dev.json`：71 个算子、14 个端口类型；`gap.locate_template` v2.0.0、48 个参数（文件被 `app/.gitignore` 忽略） |
 
+（2026-09-26 起 e2e 断言做过合并精简，这里的输出与条数是当时的快照；见 test/prune 精简提交）
+
 grep 落盘日志：
 
 ```
@@ -159,15 +161,14 @@ v1 图（其中 32 张带 Override）：不补 opVersion 报 unknown_param 39/39
 `suiteSlot3WrongSide`：切到模板 3，真实鼠标把 `template3DatumRoi` 拖到缝的右边（target 旁边）：
 
 ```
-✓ 松手后 locate_template 标红
 ✓ 诊断指到 template3DatumRoi
-✓ 诊断标明「模板 3」          「模板 3 · f3：datum 与 target 落在缝的同一侧（都在右边）—— 段差要两侧各取一个面」
-✓ 诊断说的是同一侧
-✓ 节点上贴的诊断也标明「模板 3」
+✓ 诊断与节点上贴的诊断都标明「模板 3」   「模板 3 · f3：datum 与 target 落在缝的同一侧（都在右边）—— 段差要两侧各取一个面」
 ✓ 其它槽没被牵连（诊断只有这一条）
 ✓ Inspector 里「模板槽 3」这一节标红
-✓ 撤销之后回到干净
 ```
+
+（2026-09-26 精简后的样子。原先还有「松手后标红」「诊断说的是同一侧」「撤销之后回到干净」三条，与 M8b 验收 10
+重复，删了；「诊断标明模板 3」与「节点上贴的诊断也标明模板 3」并成一条。）
 
 core 侧 `test_blocks.cpp`「每个模板槽各有自己的四框」：导入的三槽图把槽 3 的 datum 挪到 target 一侧，唯一一条 error
 `paramPath=template3DatumRoi`、message 以 `模板 3 · f3：` 开头；把 `template3Enabled` 关掉之后校验干净（关着的槽不查）。

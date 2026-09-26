@@ -6,6 +6,12 @@ import { sleep } from "./cdp.mjs";
 /** JS 字符串字面量。路径里有反斜杠和中文，手工拼会出事。 */
 export const lit = (v) => JSON.stringify(v);
 
+/** 前提与动作结果（「图跑通了」「菜单点到了」「返回 'ok'」）：不成立就中断这一组 —— run.mjs 报「分组 X 中断」
+ *  并带上 what 与实际值 —— 但不单独算一条断言。真正要验的行为照旧用 report.ok / report.eq。 */
+export function mustOk(cond, what, detail = "") {
+  if (!cond) throw new Error(`前提不成立：${what}${detail === "" ? "" : ` —— ${typeof detail === "string" ? detail : JSON.stringify(detail)}`}`);
+}
+
 export async function newDoc(cdp) {
   await cdp.eval(`
     const b = window.__lyflow;

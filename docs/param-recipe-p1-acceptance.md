@@ -11,6 +11,7 @@
   grep「未验」「跳过」「FAIL」「✗」均为 0 行；gap 的张量组、M8b / M8c 的分组都真的跑了。M8b 验收 7 这次没有卡住。
 - `pnpm e2e:http`：`LYFLOW_E2E_HEADLESS=1` 下退出码 0，**51/51**，其中新增「图参数取值经信封 params → CLI --param」一组 5 项
   （run 带 params、取点云时重跑 CLI 也带着同一组值、validate 带 params 报图参数的 `bad_param`）。
+- （2026-09-26 起 e2e 断言做过合并精简，这里的日志与条数是当时的快照；见 test/prune 精简提交）
 
 | # | 验收项 | 结果 |
 |---|---|---|
@@ -131,7 +132,8 @@ gen 出 12000 点，gen、voxel、cut 的 cacheKey 全变，doc 的 default 仍�
   `lyflow params`、事件的 nodeId 同一套）。e2e 把 `navigator.clipboard.writeText` 换成记录器断言。
 - **`ne`**：core 的 `Condition` 补 `ne`，`conditionHolds` 按 eq → ne → in 取第一个（与编辑器 `isConditionMet`、schema
   一致），manifest 导出写得出 `ne`（以前 `writeCondition` 静默丢掉）。doctest 用一个 `visibleWhen {source ≠ identity}`
-  的 path 参数验藏/露与必填；e2e 用子图参数声明（编辑器按 manifest param 形态渲染）验 Inspector 藏/露。
+  的 path 参数验藏/露与必填；e2e 原先用子图参数声明（编辑器按 manifest param 形态渲染）验 Inspector 藏/露，
+  2026-09-26 精简时删了 —— 界面一侧由 P2 验收 11 的 enabledWhen（ne）覆盖。
 - **dirty 复原**：graph store 记 `savedDoc`（对象身份），dirty = `doc !== savedDoc`；`markSaved(path, doc)` 记真正写下去的
   那一份。e2e：存盘后不脏 → 改一下脏且标题栏有 ● → Ctrl+Z 回到保存点 dirty=false、● 消失 → Ctrl+Y 又脏。
 

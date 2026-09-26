@@ -12,6 +12,7 @@
   完整输出落盘后 grep「未验」「跳过」「FAIL」「✗」「中断」均为 0 行；gap 的张量组、M8b / M8c、P1–P3 分组都真的跑了。
 - `pnpm e2e:http`（`LYFLOW_E2E_HEADLESS=1`）：退出码 0，**58/58**，同样 grep 五个词均为 0 行。
 - 以上三项都是最后一次代码改动之后跑的（顺序：`pnpm check` → `pnpm e2e` → `pnpm e2e:http`）。
+- （2026-09-26 起 e2e 断言做过合并精简，这里的日志与条数是当时的快照；见 test/prune 精简提交）
 
 | # | 验收项 | 结果 |
 |---|---|---|
@@ -69,7 +70,8 @@
   比较的是 `outputs.gap` / `outputs.flush` 的整段 JSON（`{node, port, type:"Measurement", elementCount, byteSize, value:{kind,
   value, ok, unit:"mm"}}`），不是只比数值。
 
-  三帧 gap、flush 都逐位相同，并且都与基础下的结果不同（配方真的起了作用）。
+  三帧 gap、flush 都逐位相同，并且都与基础下的结果不同（配方真的起了作用）。2026-09-26 起 e2e 只在第 1 帧跑一次基础对比，
+  后两帧只比编辑器与 CLI。
 - `--param` 覆盖配方：`run --recipe A --param gapOffset=-0.42`（盖回基础）的 gap 等于 `run --param levelDepth=1 --param
   flushOffset=0.05`（只用配方另外两个值）的 gap，且与配方 A 的不同；stderr 报「配方「车型A·P4」：3 个值，3 个与基础不同」。
 - CLI 这一侧另有 cargo test `recipe_runs_like_the_same_values_given_as_param_and_param_wins`：`--recipe` 与把同样的值写成
@@ -156,7 +158,9 @@ P3 截图（1440 宽）里图名框被挤到 72 px，「车门缝隙检测」只
 8. **真实图的两处改动**（26 节）：线上图因 m8a 删掉的三个端口在当前 core 里校验不过，归档点云是 profile 布局。两处都不碰量测参数，
    只在 e2e 的工作区副本里改，线上文件不动。
 9. **e2e 里的 CLI**：`params_p4.mjs` 用 `bridge/target/debug/lyflow.exe`；它没带 gap 包（比如先跑了不带 `LYFLOW_PACKS` 的
-   `pnpm check`）时，分组按当前环境重编一次（只写 `target/`）。数据目录找不到或 app 没有 gap 包时分组标「未验」并记一条失败。
+   `pnpm check`）时，分组记一条失败，原因里给出重编命令（`LYFLOW_PACKS="gap;dts"` 下
+   `cargo build --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features`）。原先是在 e2e 里现编一次（超时 30 分钟），
+   2026-09-26 改掉：不在验收脚本里编，也不静默跳过（跳过的分组照样显示全绿）。数据目录找不到或 app 没有 gap 包时分组标「未验」并记一条失败。
 
 ## P4 之外发现的问题（没修）
 

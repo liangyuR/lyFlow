@@ -158,7 +158,7 @@ TEST_CASE("契约：不声明就零开销 —— 同一批坏数据在无契约�
   CHECK(message.empty());
 }
 
-TEST_CASE("契约：静音节点的透传与 Error 值不检查") {
+TEST_CASE("契约：静音节点的透传不检查（bypass 只搬运，不声称自己算得对）") {
   ensureTestOps();
   // bypass：这个节点只是搬运，不声称自己算得对（ADR-0024）。
   Json doc = makeGraph({N{"n_src", "test.counted", Json{{"pointCount", 5}}},
