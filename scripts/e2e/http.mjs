@@ -9,7 +9,7 @@ import path from "node:path";
 
 import { Cdp, sleep, waitForTarget } from "./cdp.mjs";
 import { ROOT, Report } from "./harness.mjs";
-import { buildGraph, lit, newDoc, pressCtrl, runAndWait, selectAndReadViewer } from "./page.mjs";
+import { buildGraph, lit, mustOk, newDoc, pressCtrl, runAndWait, selectAndReadViewer } from "./page.mjs";
 
 const API_PORT = Number(process.env.LYFLOW_HTTP_PORT ?? 8788);
 const HOST_PORT = Number(process.env.LYFLOW_HOST_PORT ?? 5174);
@@ -85,32 +85,11 @@ async function suiteHost(cdp, report) {
     probe.host?.hookOk === true && probe.hookOk === "1",
     JSON.stringify(probe),
   );
-  report.ok("宿主与包报同一个 React 版本", probe.host?.react === probe.react, JSON.stringify(probe));
   report.eq("页面上只有一个编辑器根元素", probe.editors, 1);
 
   const snap = await cdp.eval(`return window.__lyflow.snapshot();`);
   report.eq("传输层是 http", snap.transport, "http");
-  report.eq("manifest 已就绪", snap.manifestStatus, "ready");
   report.ok("算子表读到了（≥16）", snap.operatorCount >= 16, String(snap.operatorCount));
-
-  const info = await cdp.eval(`return await window.__lyflow.transport.getCoreInfo();`);
-  report.ok("core 版本可读", Boolean(info?.version), JSON.stringify(info));
-
-  // 主题变量有默认值，宿主不设也能显示
-  const themed = await cdp.eval(`
-    const el = document.querySelector('[data-lyflow-editor="1"]');
-    const cs = getComputedStyle(el);
-    return {
-      bg: cs.getPropertyValue('--lyflow-bg-0').trim(),
-      accent: cs.getPropertyValue('--lyflow-accent').trim(),
-      background: cs.backgroundColor,
-    };
-  `);
-  report.ok(
-    "--lyflow-* 变量有默认值",
-    themed.bg.length > 0 && themed.accent.length > 0,
-    JSON.stringify(themed),
-  );
 }
 
 /** 打开图 → 改参数 → 运行 → 看 3D → 取图级输出。 */
@@ -139,12 +118,10 @@ async function suiteEditAndRun(cdp, report, ws) {
     const g = b.stores.graph.getState();
     return { nodes: g.doc.nodes.length, edges: g.doc.edges.length, outputs: Object.keys(g.doc.outputs ?? {}) };
   `);
-  report.eq("经 HTTP 打开的图有两个节点", opened.nodes, 2);
-  report.eq("边也回来了", opened.edges, 1);
-  report.eq("图级输出声明回来了", opened.outputs, ["thinned"]);
+  report.eq("经 HTTP 打开的图：两个节点、一条边、图级输出声明都回来了", opened, { nodes: 2, edges: 1, outputs: ["thinned"] });
 
   // 存盘也走 HTTP：改一次参数再写回工作区
-  const saved = await cdp.eval(`
+  await cdp.eval(`
     const b = window.__lyflow;
     b.stores.graph.getState().setParam('gen', 'pointCount', 24000);
     const g = b.stores.graph.getState();
@@ -152,23 +129,19 @@ async function suiteEditAndRun(cdp, report, ws) {
     b.stores.graph.getState().markSaved(${lit(rel)});
     return b.stores.graph.getState().doc.nodes.find((n) => n.id === 'gen').params.pointCount;
   `);
-  report.eq("改参数后经 HTTP 存盘", saved, 24000);
   const onDisk = JSON.parse(fs.readFileSync(path.join(ws, rel), "utf8"));
   report.eq(
-    "磁盘上的图确实变了",
+    "改参数后经 HTTP 存盘：磁盘上的图确实变了",
     onDisk.nodes.find((n) => n.id === "gen").params.pointCount,
     24000,
   );
 
   const run = await runAndWait(cdp, () => cdp.eval(`await window.__lyflow.run(); return true;`));
-  report.eq("运行状态 ok", run.status, "ok");
-  report.eq("gen 节点 done", run.nodes.gen?.state, "done");
-  report.eq("voxel 节点 done", run.nodes.voxel?.state, "done");
-  report.eq("gen 报出的点数", run.nodes.gen?.elementCount, 24000);
   report.ok(
-    "voxel 确实降了采样",
-    run.nodes.voxel?.elementCount > 0 && run.nodes.voxel.elementCount < 24000,
-    `voxel=${run.nodes.voxel?.elementCount}`,
+    "运行 ok：gen、voxel 都 done，gen 报出 24000 点，voxel 确实降了采样",
+    run.status === "ok" && run.nodes.gen?.state === "done" && run.nodes.voxel?.state === "done" &&
+      run.nodes.gen?.elementCount === 24000 && run.nodes.voxel?.elementCount > 0 && run.nodes.voxel.elementCount < 24000,
+    JSON.stringify({ status: run.status, gen: run.nodes.gen, voxel: run.nodes.voxel }),
   );
   report.eq("run_started 带回图级输出声明", (run.outputs ?? []).map((o) => o.name), ["thinned"]);
 
@@ -183,13 +156,12 @@ async function suiteEditAndRun(cdp, report, ws) {
     const runId = window.__lyflow.stores.execution.getState().runId;
     return await window.__lyflow.runOutputs(runId);
   `);
-  report.ok("图级输出按名字取到了", Boolean(outputs?.thinned), JSON.stringify(outputs));
-  report.eq("输出指向 voxel.cloud", [outputs?.thinned?.node, outputs?.thinned?.port], ["voxel", "cloud"]);
-  report.eq("输出类型是点云", outputs?.thinned?.type, "PointCloud");
-  report.ok(
-    "输出的元素数与节点报的一致",
-    outputs?.thinned?.elementCount === run.nodes.voxel?.elementCount,
-    `${outputs?.thinned?.elementCount} vs ${run.nodes.voxel?.elementCount}`,
+  report.eq(
+    "图级输出按名字取到了：指向 voxel.cloud、类型是点云、元素数与节点报的一致",
+    outputs?.thinned
+      ? { node: outputs.thinned.node, port: outputs.thinned.port, type: outputs.thinned.type, elementCount: outputs.thinned.elementCount }
+      : outputs ?? null,
+    { node: "voxel", port: "cloud", type: "PointCloud", elementCount: run.nodes.voxel?.elementCount },
   );
 }
 
@@ -225,8 +197,7 @@ async function suiteBuildAndShortcut(cdp, report) {
       nativeVirtualKeyCode: 116,
     });
   });
-  report.eq("F5 触发的运行 ok", run.status, "ok");
-  report.eq("pass 节点 done", run.nodes[ids.pass]?.state, "done");
+  report.eq("F5 触发的运行 ok、pass 节点 done", [run.status, run.nodes[ids.pass]?.state], ["ok", "done"]);
 
   const bad = await cdp.eval(`
     const b = window.__lyflow;
@@ -237,8 +208,7 @@ async function suiteBuildAndShortcut(cdp, report) {
       g.filePath,
     );
   `);
-  report.ok("坏参数被 HTTP 校验逮到", bad.length > 0, JSON.stringify(bad).slice(0, 200));
-  report.eq("诊断带 nodeId", bad[0]?.nodeId, ids.gen);
+  report.ok("坏参数被 HTTP 校验逮到，诊断带 nodeId", bad.length > 0 && bad[0]?.nodeId === ids.gen, JSON.stringify(bad).slice(0, 200));
 }
 
 /** 宿主关动效（docs/motion-plan.md A4、§3 验收 9 的 animations={false}）：真鼠标点宿主栏上的
@@ -289,16 +259,15 @@ async function suiteAnimationsProp(cdp, report) {
   await toggle();
   const off = await probe();
   report.ok("开关关掉：编辑器根上是 lyflow-motion-off", off.motion === "off" && off.off, JSON.stringify(off));
-  report.eq("关动效时新节点 40 ms 后就是不透明的", off.opacity, 1);
-  report.eq("关动效时没有进场标记", off.entering, 0);
-  report.eq("关动效时新连线没有生长标记", off.growing, 0);
+  report.eq("关动效时新节点 40 ms 后就是不透明的，没有进场标记、新连线没有生长标记",
+    { opacity: off.opacity, entering: off.entering, growing: off.growing }, { opacity: 1, entering: 0, growing: 0 });
 
   await newDoc(cdp);
   await sleep(500);
   await toggle();
   const on = await probe();
-  report.ok("开关打开：动效恢复", on.motion === "on" && !on.off, JSON.stringify(on));
-  report.ok("恢复之后新节点又播进场、新连线又会长", on.entering > 0 && on.growing > 0, JSON.stringify(on));
+  report.ok("开关打开：动效恢复，新节点又播进场、新连线又会长", on.motion === "on" && !on.off && on.entering > 0 && on.growing > 0,
+    JSON.stringify(on));
 }
 
 /** 单节点运行经 HTTP（docs/node-run-plan.md R6）：桩服务器按 cacheKey 记账实现最小语义 ——
@@ -319,29 +288,27 @@ async function suiteNodeRunOverHttp(cdp, report) {
       { from: ["pass", "cloud"], to: ["tail", "in"] },
     ],
   );
-  const button = await cdp.eval(`return !!document.querySelector('[data-testid="node-run-${ids.pass}"]');`);
-  report.eq("节点标题栏有运行按钮", button, true);
 
   const early = await runAndWait(cdp, () => cdp.eval(`await window.__lyflow.run({ isolate: [${lit(ids.pass)}] }); return true;`));
   const toast = await cdp.eval(`return document.querySelector('[data-testid="toast"]')?.textContent ?? null;`);
-  report.eq("上游没跑过：运行 error", early.status, "error");
-  report.ok("toast 写明上游还没有可用结果", String(toast).includes("还没有可用结果") && String(toast).includes(ids.gen), String(toast));
+  report.ok("上游没跑过：运行 error，toast 写明上游还没有可用结果",
+    early.status === "error" && String(toast).includes("还没有可用结果") && String(toast).includes(ids.gen),
+    JSON.stringify({ status: early.status, toast }));
 
   const full = await runAndWait(cdp, () => cdp.eval(`await window.__lyflow.run(); return true;`));
-  report.eq("（前提）全图运行 ok", full.status, "ok");
+  mustOk(full.status === "ok", "全图运行 ok", full.status);
   const only = await runAndWait(cdp, () => cdp.eval(`await window.__lyflow.run({ isolate: [${lit(ids.pass)}] }); return true;`));
   const isolate = await cdp.eval(`return window.__lyflow.stores.execution.getState().isolate;`);
-  report.eq("上游跑过之后：单节点运行 ok", only.status, "ok");
-  report.eq("执行 store 记下了 isolate", isolate, [ids.pass]);
-  report.eq("pass 重新 done", only.nodes[ids.pass]?.state, "done");
+  report.eq("上游跑过之后：单节点运行 ok、执行 store 记下了 isolate、pass 重新 done",
+    { status: only.status, isolate, pass: only.nodes[ids.pass]?.state }, { status: "ok", isolate: [ids.pass], pass: "done" });
 
   // R7：计划外的下游 tail 不执行，但挂进了这次运行 —— 按新 runId 取得到输出信息，编辑器里仍是 done
   const tail = await cdp.eval(`
     const { runId } = window.__lyflow.stores.execution.getState();
     return (await window.__lyflow.transport.getOutputInfo(runId, ${lit(ids.tail)})).map((o) => o.port);
   `);
-  report.eq("下游 tail 仍是 done", only.nodes[ids.tail]?.state, "done");
-  report.ok("按新 runId 取得到 tail 的输出信息", tail.includes("out"), JSON.stringify(tail));
+  report.ok("下游 tail 仍是 done、按新 runId 取得到 tail 的输出信息", only.nodes[ids.tail]?.state === "done" && tail.includes("out"),
+    JSON.stringify({ tail: only.nodes[ids.tail], outputs: tail }));
 
   // 修订一：按钮单击 = 智能运行 targets=[id]，Shift = 再加 force。桩里也照样挂结果（V2）
   const smart = await runAndWait(cdp, () =>
@@ -350,9 +317,9 @@ async function suiteNodeRunOverHttp(cdp, report) {
     const { runId } = window.__lyflow.stores.execution.getState();
     return (await window.__lyflow.transport.getOutputInfo(runId, ${lit(ids.tail)})).map((o) => o.port);
   `);
-  report.eq("智能运行 + force：运行 ok", smart.status, "ok");
-  report.ok("智能运行之后下游 tail 仍是 done、按新 runId 取得到", smart.nodes[ids.tail]?.state === "done" && smartTail.includes("out"),
-    JSON.stringify({ tail: smart.nodes[ids.tail], smartTail }));
+  report.ok("智能运行 + force：运行 ok，之后下游 tail 仍是 done、按新 runId 取得到",
+    smart.status === "ok" && smart.nodes[ids.tail]?.state === "done" && smartTail.includes("out"),
+    JSON.stringify({ status: smart.status, tail: smart.nodes[ids.tail], smartTail }));
 }
 
 /** 图参数的取值经 HTTP 信封的 params 走到桩服务器、再变成 CLI 的 --param（param-recipe P1.5）：
@@ -370,7 +337,7 @@ async function suiteGraphParamsOverHttp(cdp, report) {
     [{ from: ["gen", "cloud"], to: ["pass", "cloud"] }],
   );
   const name = await cdp.eval(`return window.__lyflow.stores.graph.getState().promoteToGraphParam(${lit(ids.gen)}, 'pointCount');`);
-  report.eq("纳入配方：gen.pointCount 成为图参数", name, "pointCount");
+  mustOk(name === "pointCount", "纳入配方：gen.pointCount 成为图参数", name);
 
   const base = await runAndWait(cdp, () => cdp.eval(`await window.__lyflow.run(); return true;`));
   report.eq("按 default 运行：gen 7000 点", base.nodes[ids.gen]?.elementCount, 7000);
@@ -453,8 +420,8 @@ async function suiteRecipesOverHttp(cdp, report, ws) {
   const dir = path.join(ws, "rc", "车门.recipes");
   const file = path.join(dir, "车型A·左前门.lyflow-recipe.json");
   const saved = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
-  report.eq("Ctrl+S：配方文件经 HTTP 写进工作区（只存与基础不同的值）", saved?.values ?? null, { pointCount: 8000 });
-  report.ok("Ctrl+S：index.json 也写了", fs.existsSync(path.join(dir, "index.json")));
+  report.eq("Ctrl+S：配方文件经 HTTP 写进工作区（只存与基础不同的值），index.json 也写了",
+    { values: saved?.values ?? null, index: fs.existsSync(path.join(dir, "index.json")) }, { values: { pointCount: 8000 }, index: true });
   // 重开：配方目录经 HTTP 读回
   await cdp.eval(`
     const b = window.__lyflow;

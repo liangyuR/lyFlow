@@ -163,7 +163,7 @@ M7 有意改成与点序无关，本轮不改回去，**4_4 在当前算子下�
 | `packs/gap/tests/test_blocks.cpp` | 从 `--fine` 导出的图反推 v1 接法（七根散线直接接 bundle）：迁移出 2 个插入节点、7 删 9 加，执行器当场跑、写回后再跑，bundle **逐字段**等于 m8a 的细粒度图；凑不齐（点 4 的接法、无 opVersion）只删边、notes 写明；v2 接法去掉所有 opVersion 不出迁移 |
 | `bridge/src/graph.rs` | `apply_migration`：删边、插节点（摆在旁边、标题进 ui）、加边，子图路径不写回 |
 | `packages/editor/test/migrations.test.mjs` | `applyMigrations` 带 edits：一次撤销全部回去、边 id 撞了加后缀；不带 edits 照旧 |
-| `scripts/e2e/params_p4.mjs` | 不再替线上图删边、改 layout，改为断言线上图已是 `layout=profile`、`n_bundle` v2 |
+| `scripts/e2e/params_p4.mjs` | 不再替线上图删边、改 layout，改为断言线上图已是 `layout=profile`、`n_bundle` v2（这两条断言 2026-09-26 精简时删了，见 §6 末） |
 
 ## 6. 门禁
 
@@ -181,7 +181,10 @@ e2e 另有两处本地环境处理，同样不在提交里：主工作区的另�
 `WEBVIEW2_USER_DATA_FOLDER` 指到临时目录（否则会并进那边已开着的 WebView2 进程，调试端口不生效）。
 
 P4 验收 26 这组（真实 gap 图 2、KUN10 3 帧）两次都跑了，新加的两条断言「线上图的 n_load.layout 是 profile」「线上图的
-result_bundle 已是 v2」通过，3 帧编辑器与 CLI 逐位相同。
+result_bundle 已是 v2」通过，3 帧编辑器与 CLI 逐位相同。这两条 2026-09-26 的 e2e 精简里删了：它们只查线上图文件本身的两个字段，
+迁移结果以本文的 `lyflow validate`（结论表第 1 条）与 §3–§4 为准；图要是退回旧接法，验收 26 后面的运行与逐位比较照样会失败。
+
+（2026-09-26 起 e2e 断言做过合并精简，这里的日志与条数是当时的快照；见 test/prune 精简提交）
 
 ## 没修的
 

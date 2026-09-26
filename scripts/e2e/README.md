@@ -157,7 +157,7 @@ WiX 的 `INSTALLDIR`）。目的是验证「DLL 随包」和「从 exe 同目录
   WebView2 里剪贴板未必授权，菜单自己的兜底路径（execCommand）读不回来。
 - **测试算子要 `LYFLOW_TEST_OPS=1`**（param-recipe P2.10）。`test.param_showcase`（14 种参数类型各一个）编进了 core，
   但只在进程环境里有这个变量时才注册：`launchApp` 起 app 时自己设；`LYFLOW_E2E_ATTACH=1` 连的那个实例要自己带着它启动，
-  否则 `params_p2` 第一条就报「没注册」。
+  否则 `params_p2` 的第一组直接中断，原因写着「test.param_showcase 没注册：起 app 时要 LYFLOW_TEST_OPS=1」。
 - **参数面板的行是虚拟化的**（`params_p2.mjs`）：只有视口附近的行在 DOM 里。操作某一行之前先 `reveal`（把列表一屏一屏往下翻，
   直到它挂上、再滚进视口中间）；要「全部的行」就从头滚到尾把 `.prow` 的键收齐（`listedKeys`，顺路把收起的 advanced 组点开）。
 - **`placeAtScreen` 的坐标是相对画布容器的**，不是窗口坐标 —— 参数面板开着时画布只剩几百像素宽，传窗口坐标会把节点摆到面板底下，

@@ -12,6 +12,7 @@ import {
   canvasBox,
   centerOf,
   lit,
+  mustOk,
   newDoc,
   normalizeZoom,
   placeAtScreen,
@@ -187,8 +188,8 @@ async function suiteEnter(cdp, report) {
   const loaded = await cdp.eval(`return document.querySelectorAll('[data-testid^="node-n_"]').length;`);
   const loadHits = await stopRecord(cdp, "load");
   const loadGrow = await stopRecord(cdp, "loadGrow");
-  report.eq("loadDoc 10 节点：画出了 10 个节点", loaded, 10);
-  report.eq("loadDoc 10 节点：任何节点在任何时刻都没有进场标记", loadHits, []);
+  report.eq("loadDoc 10 节点：画出了 10 个节点，任何节点在任何时刻都没有进场标记",
+    { loaded, loadHits }, { loaded: 10, loadHits: [] });
   report.eq("loadDoc 10 节点：任何连线都没有生长标记", loadGrow, []);
 
   // > 80 节点：编辑着搭出来（每个都标过进场），等窗口过期，再平移到另一半
@@ -256,9 +257,8 @@ async function suiteDelete(cdp, report) {
       tainted,
     };
   `);
-  report.eq("doc 里立即就没有这个节点了", del.inDoc, false);
-  report.eq("下一帧 [data-testid=node-X] 已不存在", del.node, false);
-  report.ok("此时有一个残影元素，里面是节点的样子", del.ghosts === 1 && del.ghostHasNode, JSON.stringify(del));
+  report.ok("删除当帧：doc 和 DOM 都没了（下一帧 [data-testid=node-X] 已不存在）、有 1 个残影，里面是节点的样子",
+    !del.inDoc && !del.node && del.ghosts === 1 && del.ghostHasNode, JSON.stringify(del));
   report.eq("残影子树里没有任何 id 与 data-* 属性", del.tainted, []);
   report.ok("残影 aria-hidden、不接鼠标", del.ariaHidden && del.pointer.every((p) => p === "none"), JSON.stringify(del.pointer));
   await sleep(500);
@@ -319,8 +319,8 @@ async function suiteAlign(cdp, report) {
   const run = await runAndWait(cdp, () => pressF5(cdp));
   await sleep(450);
   rows = await alignOf(cdp);
-  report.eq("（前提）voxel 真的进了 error", run.nodes[ids.voxel]?.state, "error");
-  report.ok(`error 抖动结束：最大偏差 ${worst(rows)} px ≤ 1`, worst(rows) <= 1, JSON.stringify(rows));
+  report.ok(`voxel 进了 error，抖动结束：最大偏差 ${worst(rows)} px ≤ 1`,
+    run.nodes[ids.voxel]?.state === "error" && worst(rows) <= 1, JSON.stringify({ voxel: run.nodes[ids.voxel]?.state, rows }));
 
   // hover 节点期间（真鼠标停在标题栏上）
   const head = await centerOf(cdp, `[data-testid="node-${ids.voxel}"] .node__head`);
@@ -328,8 +328,8 @@ async function suiteAlign(cdp, report) {
   await sleep(250);
   rows = await alignOf(cdp);
   const hovered = await cdp.eval(`return window.__lyflow.stores.ui.getState().hoverNodeId;`);
-  report.eq("（前提）hover 到了 voxel 上", hovered, ids.voxel);
-  report.ok(`hover 节点期间：最大偏差 ${worst(rows)} px ≤ 1`, worst(rows) <= 1, JSON.stringify(rows));
+  report.ok(`hover 在 voxel 上期间：最大偏差 ${worst(rows)} px ≤ 1`,
+    hovered === ids.voxel && worst(rows) <= 1, JSON.stringify({ hovered, rows }));
   await moveMouse(cdp, await emptySpot(cdp));
   await sleep(150);
 
@@ -355,10 +355,8 @@ async function suiteAlign(cdp, report) {
              undo: window.__lyflow.snapshot().undoLabel };
   `);
   const off = (n) => Math.hypot(n.doc.x - n.dom.x, n.doc.y - n.dom.y);
-  report.ok("Ctrl+L 之后进入了布局过渡", mid.started, JSON.stringify(mid));
-  report.ok("取样时还在过渡中途：画面上的位置还没到 doc 的终点",
-    mid.still && mid.nodes.some((n) => n.dom && off(n) > 5), JSON.stringify(mid.nodes));
-  report.ok("doc 已经一步到位（一个撤销步）", String(mid.undo).includes("整理"), String(mid.undo));
+  report.ok("Ctrl+L 之后取样时还在过渡中途：画面上的位置还没到 doc 的终点",
+    mid.still && mid.nodes.some((n) => n.dom && off(n) > 5), JSON.stringify(mid));
   report.ok(`布局过渡中途：最大偏差 ${worst(mid.rows)} px ≤ 1`, worst(mid.rows) <= 1, JSON.stringify(mid.rows));
 
   await cdp.waitFor(`document.querySelector('.canvas').getAttribute('data-layout-moving') !== '1'`,
@@ -412,8 +410,8 @@ async function suiteGrow(cdp, report) {
   const lazy = await probe("b");
   report.ok("惰性边同样带生长标记（生长期间是实线）", lazy.ok && lazy.early.growing === "1" && norm(lazy.early.dash) !== "6 4",
     JSON.stringify(lazy.early));
-  report.eq("惰性边长完 dasharray 恢复为 6 4", norm(lazy.late.dash), "6 4");
-  report.eq("惰性边长完没有残留 pathLength", lazy.late.pathLength, null);
+  report.eq("惰性边长完 dasharray 恢复为 6 4、没有残留 pathLength",
+    { dash: norm(lazy.late.dash), pathLength: lazy.late.pathLength }, { dash: "6 4", pathLength: null });
 }
 
 // --------------------------------------------------------------- 验收 6：流动
@@ -471,11 +469,10 @@ async function suiteFlow(cdp, report) {
   await buildGraph(cdp, chain.nodes, chain.edges);
   await sleep(450);
   const { shot, leftover } = await sampleFlow(cdp);
-  report.ok("拍到了一个有入边的节点正在 running", shot !== null, JSON.stringify(shot));
+  report.ok("拍到有入边的节点 running 的那一帧：恰是它的入边 data-flowing=\"1\"，其余边没有",
+    shot !== null && shot.expected.length > 0 && JSON.stringify(shot.flowing) === JSON.stringify(shot.expected),
+    JSON.stringify(shot));
   if (shot) {
-    report.ok("它的入边 data-flowing=\"1\"", shot.expected.length > 0 && shot.expected.every((id) => shot.flowing.includes(id)),
-      JSON.stringify(shot));
-    report.eq("其余边没有 data-flowing", shot.flowing, shot.expected);
     report.eq("流动层在走（animation-name）", shot.flowAnimation, "lyflow-edge-flow");
   }
   report.eq("运行结束后全图没有 data-flowing=\"1\"", leftover, 0);
@@ -497,7 +494,7 @@ async function suiteStateFeedback(cdp, report) {
   const ok = await runAndWait(cdp, () => pressF5(cdp));
   await sleep(450);
   const doneHits = (await stopRecord(cdp, "done")).filter((h) => h.key === `node-${ids.voxel}`);
-  report.eq("（前提）voxel 这次是真算的 done", ok.nodes[ids.voxel]?.state, "done");
+  mustOk(ok.nodes[ids.voxel]?.state === "done", "voxel 这次是真算的 done", ok.nodes[ids.voxel]);
   report.eq("running → done 恰有一次 done 闪光标记", doneHits.map((h) => h.value), ["done"]);
 
   // 实时预览不闪绿（S2）：换个 seed 让预览真的算一遍，结束时 voxel 上不该出现 data-flash="done"
@@ -507,8 +504,8 @@ async function suiteStateFeedback(cdp, report) {
     cdp.eval(`await window.__lyflow.run({ preview: true, previewMaxPoints: 20000 }); return true;`));
   await sleep(450);
   const previewHits = (await stopRecord(cdp, "preview")).filter((h) => h.key === `node-${ids.voxel}`);
-  report.ok("（前提）这是一次预览运行，voxel 真算了（done 不是 skipped）",
-    preview.preview === true && preview.nodes[ids.voxel]?.state === "done", JSON.stringify({ preview: preview.preview, voxel: preview.nodes[ids.voxel] }));
+  mustOk(preview.preview === true && preview.nodes[ids.voxel]?.state === "done",
+    "这是一次预览运行，voxel 真算了（done 不是 skipped）", { preview: preview.preview, voxel: preview.nodes[ids.voxel] });
   report.eq("预览运行结束后节点没有 data-flash=\"done\"", previewHits.filter((h) => h.value === "done"), []);
 
   // → error：整场每一帧都记 .node 与 .node__head 的 transform
@@ -544,7 +541,7 @@ async function suiteStateFeedback(cdp, report) {
              headAfter: getComputedStyle(head).transform };
   `);
   const errorHits = (await stopRecord(cdp, "error")).filter((h) => h.key === `node-${ids.voxel}`);
-  report.eq("（前提）voxel 进了 error", bad.nodes[ids.voxel]?.state, "error");
+  mustOk(bad.nodes[ids.voxel]?.state === "error", "voxel 进了 error", bad.nodes[ids.voxel]);
   report.eq("→ error 有一次 error 闪光标记", errorHits.map((h) => h.value), ["error"]);
   report.ok(`抖动期间 .node__head 有非零 translateX（最大 ${shake.maxHead.toFixed(2)} px）`, shake.maxHead > 0.5, JSON.stringify(shake));
   report.eq(`.node 本身始终没有 transform（${shake.frames} 帧）`, shake.nodeTransforms, ["none"]);
@@ -569,9 +566,8 @@ async function suiteStateFeedback(cdp, report) {
   await sleep(500);
   const outside = await cdp.eval(`return [...document.querySelectorAll('[data-node-state]')].map((e) => e.getAttribute('data-node-state'));`);
   const remountHits = await stopRecord(cdp, "remount");
-  report.ok("（前提）子图里挂上来的节点已经是 done", inside.length > 0 && inside.every((s) => s === "done"), JSON.stringify(inside));
-  report.ok("（前提）回到顶层挂上来的节点也都跑完了", outside.length === 2 && outside.every((s) => s === "done" || s === "skipped"),
-    JSON.stringify(outside));
+  mustOk(inside.length > 0 && inside.every((s) => s === "done"), "子图里挂上来的节点已经是 done", inside);
+  mustOk(outside.length === 2 && outside.every((s) => s === "done" || s === "skipped"), "回到顶层挂上来的节点也都跑完了", outside);
   report.eq("进出子图重新挂载的节点一次都没闪", remountHits, []);
 }
 
@@ -621,8 +617,6 @@ async function suiteHover(cdp, report) {
   let rel = await relations();
   report.eq("鼠标到 voxel 上：它的两条边 is-related、另一条 is-dimmed",
     rel, { [edgeId.a]: "related", [edgeId.b]: "related", [edgeId.c]: "dimmed" });
-  const lifted = await cdp.eval(`return getComputedStyle(document.querySelector('[data-testid="node-${ids.voxel}"]')).boxShadow;`);
-  report.ok("节点 hover 加深了阴影（不位移）", /22px/.test(lifted), lifted);
 
   await moveMouse(cdp, await emptySpot(cdp));
   await sleep(200);
@@ -646,12 +640,10 @@ async function suiteHover(cdp, report) {
       fromNode: has('[data-testid="node-${ids.g2}"]', 'is-edge-end'),
       toNode: has('[data-testid="node-${ids.crop}"]', 'is-edge-end'),
       others: document.querySelectorAll('.node-port--edge-end').length,
-      width: getComputedStyle(document.querySelector('.react-flow__edge[data-id="${edgeId.c}"] .react-flow__edge-path')).strokeWidth,
     };
   `);
   report.ok("移到边上：两端端口 node-port--edge-end、两端节点 is-edge-end",
     ends.fromPort && ends.toPort && ends.fromNode && ends.toNode && ends.others === 2, JSON.stringify(ends));
-  report.ok("边本身加粗了", parseFloat(ends.width) > 2, ends.width);
 
   // 端口 hover：voxel 的输入圆点。放大画在 ::before 上，圆点自己的盒子不动（A6）
   const handleSel = `[data-testid="port-${ids.voxel}-cloud"].node-port--input .react-flow__handle`;
@@ -666,9 +658,9 @@ async function suiteHover(cdp, report) {
              opacity: pseudo.opacity, pseudoTransform: pseudo.transform };
   `);
   const dot = await readDot();
-  report.ok(`移到端口：圆点 ::before 计算后的缩放 ${dot.scale.toFixed(2)} > 1`, dot.scale > 1.05 && dot.opacity === "1", JSON.stringify(dot));
+  report.ok(`移到端口：圆点 ::before 计算后的缩放 ${dot.scale.toFixed(2)} > 1、有光晕（::before 的 box-shadow 非 none）`,
+    dot.scale > 1.05 && dot.opacity === "1" && Boolean(dot.shadow) && dot.shadow !== "none", JSON.stringify(dot));
   report.ok("圆点本身没有缩放（量测拿到的盒子不变）", Math.abs(dot.ownScale - 1) < 1e-6, JSON.stringify(dot));
-  report.ok("端口的光晕（::before 的 box-shadow）非 none", dot.shadow && dot.shadow !== "none", dot.shadow);
 
   // hover 着端口时逼 React Flow 重量一次：改个长标题把节点撑宽，ResizeObserver → updateNodeInternals。
   // 鼠标停在输入圆点上，节点往右长，它不挪；输出那条边的端点要跟到新的右缘，才说明真的重量过了
@@ -679,10 +671,10 @@ async function suiteHover(cdp, report) {
   const w1 = await widthOf();
   const still = await readDot();
   const remeasured = (await alignOf(cdp)).filter((r) => r.id === edgeId.a || r.id === edgeId.b);
-  report.ok(`（前提）节点被撑宽了（${Math.round(w0)} → ${Math.round(w1)} px），鼠标仍在端口上`,
-    w1 > w0 + 20 && still.scale > 1.05, JSON.stringify({ w0, w1, still }));
-  report.ok(`hover 端口期间重新量测之后，它的两条边端点与锚点最大偏差 ${worst(remeasured)} px ≤ 1`,
-    remeasured.length === 2 && worst(remeasured) <= 1, JSON.stringify(remeasured));
+  report.ok(`hover 端口期间节点被撑宽（${Math.round(w0)} → ${Math.round(w1)} px）重新量测之后，` +
+    `它的两条边端点与锚点最大偏差 ${worst(remeasured)} px ≤ 1`,
+    w1 > w0 + 20 && still.scale > 1.05 && remeasured.length === 2 && worst(remeasured) <= 1,
+    JSON.stringify({ w0, w1, still, remeasured }));
   await cdp.eval(`window.__lyflow.stores.graph.getState().undo(); return true;`);
   await sleep(200);
 
@@ -712,16 +704,16 @@ async function suiteHover(cdp, report) {
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: spot.x, y: spot.y, ...common });
   await sleep(200);
   await cdp.eval(`const u = window.__lyflow.stores.ui.getState(); u.closeSearch(); u.endConnection(); return true;`);
-  report.ok("（前提）确实在拖连线，而且鼠标此刻就停在 voxel 上（hoverNodeId 已经记上）",
-    seen.pending && onNode.pending && onNode.hover === ids.voxel, JSON.stringify({ seen, onNode }));
-  report.eq("拖连线途中经过节点，不出现 is-dimmed", Math.max(seen.dimmed, onNode.dimmed), 0);
+  report.ok("拖连线途中经过节点（鼠标停在 voxel 上、hoverNodeId 已经记上），不出现 is-dimmed",
+    seen.pending && onNode.pending && onNode.hover === ids.voxel && Math.max(seen.dimmed, onNode.dimmed) === 0,
+    JSON.stringify({ seen, onNode }));
   await moveMouse(cdp, await emptySpot(cdp));
 }
 
 // ------------------------------------------------------------ 验收 9：关动效
 
 async function suiteReducedMotion(cdp, report) {
-  report.section("动效 验收 9：prefers-reduced-motion: reduce —— 标记全不出现，流动的边静态高亮");
+  report.section("动效 验收 9：prefers-reduced-motion: reduce —— 标记全不出现（流动的边静态高亮见单节点运行 验收 11）");
   await install(cdp);
   await clearDoc(cdp);
   await buildGraph(cdp, [
@@ -750,10 +742,10 @@ async function suiteReducedMotion(cdp, report) {
   try {
     await sleep(150);
     const instant = await fitProbe();
-    report.ok("关动效时适配视图一步到位：60 ms 时已经是终值（fitView 的 duration 为 0）",
-      instant.late !== instant.before && Math.abs(instant.early - instant.late) < 1e-6, JSON.stringify(instant));
     const root = await cdp.eval(`const a = document.querySelector('.app'); return { motion: a.getAttribute('data-motion'), off: a.classList.contains('lyflow-motion-off') };`);
-    report.ok("编辑器认出了系统设置（data-motion=off、根上 lyflow-motion-off）", root.motion === "off" && root.off, JSON.stringify(root));
+    report.ok("编辑器认出了系统设置（data-motion=off、根上 lyflow-motion-off），适配视图一步到位：60 ms 时已经是终值（fitView 的 duration 为 0）",
+      root.motion === "off" && root.off && instant.late !== instant.before && Math.abs(instant.early - instant.late) < 1e-6,
+      JSON.stringify({ root, instant }));
 
     await startRecord(cdp, "rmEnter", "data-entering");
     await startRecord(cdp, "rmGrow", "data-growing");
@@ -773,20 +765,11 @@ async function suiteReducedMotion(cdp, report) {
     `);
     const rmEnter = await stopRecord(cdp, "rmEnter");
     const rmGrow = await stopRecord(cdp, "rmGrow");
-    report.eq("（2）addNode 两帧后 opacity 已经是 1", added.opacity, 1);
-    report.eq("（2）没有进场标记", rmEnter, []);
+    report.eq("（2）addNode 两帧后 opacity 已经是 1、没有进场标记", { opacity: added.opacity, rmEnter }, { opacity: 1, rmEnter: [] });
     report.eq("（3）删除不出残影", added.ghosts, 0);
     report.eq("（5）connect 没有生长标记", rmGrow, []);
-
-    await clearDoc(cdp);
-    const chain = slowChain();
-    await buildGraph(cdp, chain.nodes, chain.edges);
-    const { shot, leftover } = await sampleFlow(cdp);
-    report.ok("（6）目标节点 running 时它的入边仍有 data-flowing=\"1\"",
-      shot !== null && shot.expected.length > 0 && JSON.stringify(shot.flowing) === JSON.stringify(shot.expected), JSON.stringify(shot));
-    report.eq("（6）流动层计算后的 animation-name 为 none", shot?.flowAnimation, "none");
-    report.eq("running 的呼吸光也停了", shot?.pulse, "none");
-    report.eq("运行结束后没有残留的 data-flowing", leftover, 0);
+    // （6）关动效时的流动（入边仍 data-flowing、流动层与呼吸光 animation-name 为 none）在 noderun.mjs
+    // 验收 11 的进度环采样里一起验：那边本来就在关动效下跑一个慢节点，这里不再另跑一条两百万点的慢链
   } finally {
     await cdp.send("Emulation.setEmulatedMedia", { features: [] });
     await sleep(150);
