@@ -1,7 +1,7 @@
 {
   "name": "lyflow-host-react",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "最小 Vite + React 宿主：装 @lyflow/editor，经 HttpTransport 连后端",
   "scripts": {

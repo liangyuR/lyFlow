@@ -13,7 +13,7 @@ export const INSTRUCTIONS =
 export function createServer(config: Config): McpServer {
   const http = new LyFlowHttp(config.httpBase, config.token);
   const server = new McpServer(
-    { name: "lyflow", version: "0.1.0" },
+    { name: "lyflow", version: "1.1.0" },
     { instructions: INSTRUCTIONS },
   );
   registerTools(server, config, http);
