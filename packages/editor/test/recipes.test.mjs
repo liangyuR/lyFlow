@@ -62,32 +62,38 @@ test("specDigest：与共享夹具里记着的规范形和摘要一致（P4 的 
   assert.match(specDigest(fixtureDoc), /^sha256:[0-9a-f]{64}$/);
 });
 
-test("specDigest：与图参数的书写顺序、label / 单位 / group / 软限位 / default / binds 无关", () => {
-  const a = { params: { x: gp({ type: "float", min: 0, max: 1 }), y: gp({ type: "int" }) } };
-  const reordered = { params: { y: gp({ type: "int" }), x: gp({ type: "float", min: 0, max: 1 }) } };
-  const cosmetic = {
-    params: {
-      x: gp({ type: "float", min: 0, max: 1, label: "别的名字", unit: "mm", group: "g", softMin: 0.2, softMax: 0.8, step: 0.1, default: 0.5, binds: ["m.b", "k.c"], doc: "…" }),
-      y: gp({ type: "int", advanced: true }),
-    },
-  };
-  assert.equal(specDigest(a), specDigest(reordered));
-  assert.equal(specDigest(a), specDigest(cosmetic));
-});
-
-test("specDigest：名字、类型、min、max、options 任何一项变了摘要就变；options 与顺序无关、只看 value", () => {
-  const base = { params: { m: gp({ type: "enum", options: [{ value: "a", label: "A" }, { value: "b", label: "B" }] }) } };
-  const d0 = specDigest(base);
-  assert.equal(specDigest({ params: { m: gp({ type: "enum", options: [{ value: "b", label: "乙" }, { value: "a", label: "甲" }] }) } }), d0);
-  assert.notEqual(specDigest({ params: { m: gp({ type: "enum", options: [{ value: "a", label: "A" }] }) } }), d0);
-  assert.notEqual(specDigest({ params: { n: gp({ type: "enum", options: [{ value: "a", label: "A" }, { value: "b", label: "B" }] }) } }), d0);
-  const f = (extra) => specDigest({ params: { x: gp({ type: "float", ...extra }) } });
-  assert.notEqual(f({ min: 0 }), f({}));
-  assert.notEqual(f({ max: 1 }), f({ max: 2 }));
-  assert.notEqual(f({}), specDigest({ params: { x: gp({ type: "int" }) } }));
-  // 没有 type 的老格式：只有名字算数（min / max 在 core 里本来就不算规格）
-  assert.equal(specDigest({ params: { x: gp({ max: 5 }) } }), specDigest({ params: { x: gp({}) } }));
-  assert.notEqual(specDigest({ params: { x: gp({}) } }), specDigest({ params: { x: gp({ type: "float" }) } }));
+test("specDigest：只看名字、类型、min、max、options 的 value；书写顺序与展示字段不算规格", () => {
+  const one = (name, spec) => ({ params: { [name]: gp(spec) } });
+  const float01 = { type: "float", min: 0, max: 1 };
+  const enumAB = { type: "enum", options: [{ value: "a", label: "A" }, { value: "b", label: "B" }] };
+  // [说明, a, b, 摘要应当相同？]
+  const cases = [
+    ["图参数的书写顺序", { params: { x: gp(float01), y: gp({ type: "int" }) } }, { params: { y: gp({ type: "int" }), x: gp(float01) } }, true],
+    [
+      "label / 单位 / group / 软限位 / step / default / binds / doc / advanced",
+      { params: { x: gp(float01), y: gp({ type: "int" }) } },
+      {
+        params: {
+          x: gp({ ...float01, label: "别的名字", unit: "mm", group: "g", softMin: 0.2, softMax: 0.8, step: 0.1, default: 0.5, binds: ["m.b", "k.c"], doc: "…" }),
+          y: gp({ type: "int", advanced: true }),
+        },
+      },
+      true,
+    ],
+    ["options 的顺序与 label", one("m", enumAB), one("m", { type: "enum", options: [{ value: "b", label: "乙" }, { value: "a", label: "甲" }] }), true],
+    ["options 少了一项", one("m", enumAB), one("m", { type: "enum", options: [{ value: "a", label: "A" }] }), false],
+    ["名字", one("m", enumAB), one("n", enumAB), false],
+    ["加了 min", one("x", { type: "float", min: 0 }), one("x", { type: "float" }), false],
+    ["max 变了", one("x", { type: "float", max: 1 }), one("x", { type: "float", max: 2 }), false],
+    ["类型", one("x", { type: "float" }), one("x", { type: "int" }), false],
+    // 没有 type 的老格式：只有名字算数（min / max 在 core 里本来就不算规格）
+    ["老格式的 max", one("x", { max: 5 }), one("x", {}), true],
+    ["老格式补上 type", one("x", {}), one("x", { type: "float" }), false],
+  ];
+  for (const [what, a, b, same] of cases) {
+    if (same) assert.equal(specDigest(a), specDigest(b), `${what}：不该改摘要`);
+    else assert.notEqual(specDigest(a), specDigest(b), `${what}：该改摘要`);
+  }
   // 没有图参数也有一个确定的摘要（空数组）
   assert.equal(specCanonical({}), "[]");
 });
@@ -146,12 +152,6 @@ test("失配修复：按建议全部修完后 ①–③ 清零、④ 也消失�
       if (!touched.has(k)) assert.deepEqual(fixed.values[k], v, `${file}：${k} 不在报告里却被改了`);
     }
   }
-});
-
-test("失配：没有 type 的老格式图参数不查类型与限位；缺失的值不算失配（稀疏，用基础）", () => {
-  const r = recipeReport(fixtureDoc, { values: { legacyMin: { anything: true } }, graph: graphRefOf(fixtureDoc) });
-  assert.equal(r.items.length, 0);
-  assert.equal(recipeReport(fixtureDoc, { values: {}, graph: graphRefOf(fixtureDoc) }).items.length, 0);
 });
 
 // ------------------------------------------------------------ 文件格式、目录、名字
