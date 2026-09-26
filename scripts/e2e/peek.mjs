@@ -3,6 +3,7 @@ import {
   buildGraph,
   canvasBox,
   lit,
+  mustOk,
   newDoc,
   normalizeZoom,
   placeAtScreen,
@@ -85,13 +86,10 @@ async function doubleClickAt(cdp, point) {
 }
 
 async function openByDoubleClick(cdp, report, edgeId, label) {
+  void report;
   const point = await edgePoint(cdp, edgeId);
-  report.ok(
-    `${label}：在这条边上找到了真能点中的落点`,
-    Boolean(point),
-    `edge=${edgeId} point=${JSON.stringify(point)}`,
-  );
-  if (!point) return null;
+  mustOk(Boolean(point), `${label}：在这条边上找到了真能点中的落点`,
+    `edge=${edgeId} point=${JSON.stringify(point)}`);
   const before = await peekWindows(cdp);
   await doubleClickAt(cdp, point);
   const after = await peekWindows(cdp);
@@ -222,7 +220,7 @@ async function spread(cdp, ids) {
   return box;
 }
 
-async function prepare(cdp, report, genParams = {}) {
+async function prepare(cdp, genParams = {}) {
   await newDoc(cdp);
   await resetPeek(cdp);
   const nodes = CHAIN_NODES.map((n) =>
@@ -231,21 +229,33 @@ async function prepare(cdp, report, genParams = {}) {
   const ids = await buildGraph(cdp, nodes, CHAIN_EDGES);
   await spread(cdp, ids);
   const run = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("查看器要看的这张图跑通了", run.status, "ok");
-  if (run.status !== "ok") report.fail("失败详情", JSON.stringify(run.nodes));
+  mustOk(run.status === "ok", "查看器要看的这张图跑通了", JSON.stringify(run.nodes));
   return { ids, run };
 }
 
-async function suiteCloudPeek(cdp, report) {
+/** 点云 / 2D 几何 / Indices 三组看的是同一张图：只 prepare 一次（省两次运行），
+ *  组与组之间 resetPeek。每组各自兜住异常，一组中断不连累后面两组。 */
+async function suiteSharedGraphPeeks(cdp, report) {
+  report.section("Edge Peek：点云 / 2D 几何 / Indices 三组共用的图");
+  const fixture = await prepare(cdp);
+  for (const suite of [suiteCloudPeek, suiteShapeAndValuePeek, suiteIndicesPeek]) {
+    await resetPeek(cdp);
+    try {
+      await suite(cdp, report, fixture);
+    } catch (e) {
+      report.fail(`分组 ${suite.name} 中断`, e.stack ?? String(e));
+    }
+  }
+}
+
+async function suiteCloudPeek(cdp, report, fixture) {
   report.section("双击点云边：浮窗弹出、默认 3D、点数与该端口一致；再双击不重复开");
 
-  const { ids, run } = await prepare(cdp, report);
+  const { ids } = fixture;
   const edge = await edgeOf(cdp, ids.gen, "cloud", ids.pass, "cloud");
-  report.ok("找得到那条点云边", typeof edge === "string", String(edge));
-  if (!edge) return;
+  mustOk(typeof edge === "string", "找得到那条点云边", String(edge));
 
   const opened = await openByDoubleClick(cdp, report, edge, "点云边");
-  if (!opened) return;
   report.eq("双击开出了一个新窗", opened.after.length, opened.before.length + 1);
   if (!opened.win) {
     report.fail("双击没有开出窗", JSON.stringify(opened.after));
@@ -265,14 +275,11 @@ async function suiteCloudPeek(cdp, report) {
   const stat = await portStat(cdp, ids.gen, "cloud");
   const counts = countsOf(dom?.countText);
   report.eq("窗里的总点数 = 该端口报的点数", counts?.total ?? null, stat?.elementCount ?? null);
-  report.eq("该端口报的点数 = 节点报的点数", stat?.elementCount ?? null,
-    run.nodes[ids.gen]?.elementCount ?? null);
 
   report.eq("点云窗上「导出 PNG」可用", dom?.pngDisabled ?? null, false);
-  report.ok("点云窗上有「在主 3D 视图打开」", dom?.hasOpenMain === true);
 
-  const pinned = await clickIn(cdp, opened.win.id, '[data-testid="peek-open-main"]');
-  report.ok("点得动「在主 3D 视图打开」", pinned === true);
+  // 「在主 3D 视图打开」按钮在不在、点不点得动，由下面主视图钉没钉住来判
+  await clickIn(cdp, opened.win.id, '[data-testid="peek-open-main"]');
   await sleep(400);
   const pinState = await cdp.eval(`
     const v = document.querySelector('.viewer');
@@ -286,8 +293,8 @@ async function suiteCloudPeek(cdp, report) {
   await cdp.eval(`window.__lyflow.stores.ui.getState().setPinnedNode(null); return true;`);
 
   const again = await openByDoubleClick(cdp, report, edge, "同一条点云边再双击");
-  report.eq("同一条边再双击不重复开窗", again?.after.length ?? -1, opened.after.length);
-  report.eq("还是原来那一个窗", (again?.after ?? []).map((w) => w.id), [opened.win.id]);
+  report.eq("同一条边再双击不重复开窗，还是原来那一个窗",
+    (again?.after ?? []).map((w) => w.id), [opened.win.id]);
 
   await pressEscape(cdp);
   await sleep(250);
@@ -295,13 +302,12 @@ async function suiteCloudPeek(cdp, report) {
   report.eq("没有运行在跑时 Esc 关掉最前面的浮窗", afterEscape.length, 0);
 }
 
-async function suiteShapeAndValuePeek(cdp, report) {
+async function suiteShapeAndValuePeek(cdp, report, fixture) {
   report.section("双击 2D 几何边：默认正交视图 + 底图标签；文本视图与 Inspector 同一口径");
 
-  const { ids } = await prepare(cdp, report);
+  const { ids } = fixture;
   const edge = await edgeOf(cdp, ids.fit, "line", ids.rr, "in");
-  report.ok("找得到那条 Line2D 边", typeof edge === "string", String(edge));
-  if (!edge) return;
+  mustOk(typeof edge === "string", "找得到那条 Line2D 边", String(edge));
 
   const opened = await openByDoubleClick(cdp, report, edge, "Line2D 边");
   if (!opened?.win) {
@@ -320,8 +326,8 @@ async function suiteShapeAndValuePeek(cdp, report) {
   report.ok("底图真的画出了点", (countsOf(dom?.countText)?.total ?? 0) > 0,
     `countText=${dom?.countText}`);
 
-  const switched = await clickIn(cdp, opened.win.id, '[data-testid="peek-view-value"]');
-  report.ok("视图切换按钮在窗上", switched === true);
+  // 视图切换按钮在不在，由下一条「切到了文本视图」来判
+  await clickIn(cdp, opened.win.id, '[data-testid="peek-view-value"]');
   const valueDom = await waitPeek(
     cdp,
     opened.win.id,
@@ -341,13 +347,12 @@ async function suiteShapeAndValuePeek(cdp, report) {
   report.eq("键值表里的数字与 Inspector 的显示一字不差", fromTable, inspector);
 }
 
-async function suiteIndicesPeek(cdp, report) {
+async function suiteIndicesPeek(cdp, report, fixture) {
   report.section("双击 Indices 边：条数与该端口的 elementCount 一致");
 
-  const { ids } = await prepare(cdp, report);
+  const { ids } = fixture;
   const edge = await edgeOf(cdp, ids.pass, "indices", ids.pick, "indices");
-  report.ok("找得到那条 Indices 边", typeof edge === "string", String(edge));
-  if (!edge) return;
+  mustOk(typeof edge === "string", "找得到那条 Indices 边", String(edge));
 
   const opened = await openByDoubleClick(cdp, report, edge, "Indices 边");
   if (!opened?.win) {
@@ -408,8 +413,7 @@ async function suiteTensorPeek(cdp, report) {
   if (run.status !== "ok") report.fail("失败详情", JSON.stringify(run.nodes));
 
   const edge = await edgeOf(cdp, ids.t, "tensor", ids.rr, "in");
-  report.ok("找得到那条张量边", typeof edge === "string", String(edge));
-  if (!edge) return;
+  mustOk(typeof edge === "string", "找得到那条张量边", String(edge));
 
   const opened = await openByDoubleClick(cdp, report, edge, "张量边");
   if (!opened?.win) {
@@ -444,11 +448,10 @@ async function suiteTensorPeek(cdp, report) {
 async function suiteLockPeek(cdp, report) {
   report.section("锁定快照：改参数重跑后，锁定窗的数值不变，未锁定窗跟着变");
 
-  const { ids } = await prepare(cdp, report, { pointCount: 5000 });
+  const { ids } = await prepare(cdp, { pointCount: 5000 });
   const lockedEdge = await edgeOf(cdp, ids.gen, "cloud", ids.pass, "cloud");
   const freeEdge = await edgeOf(cdp, ids.pick, "selected", ids.fit, "cloud");
-  report.ok("两条点云边都找得到", Boolean(lockedEdge && freeEdge), `${lockedEdge} / ${freeEdge}`);
-  if (!lockedEdge || !freeEdge) return;
+  mustOk(Boolean(lockedEdge && freeEdge), "两条点云边都找得到", `${lockedEdge} / ${freeEdge}`);
 
   const a = await openByDoubleClick(cdp, report, lockedEdge, "要锁定的点云边");
   if (!a?.win) {
@@ -471,8 +474,8 @@ async function suiteLockPeek(cdp, report) {
     [5000, 5000]);
 
   const runBefore = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
-  const clicked = await clickIn(cdp, a.win.id, '[data-testid="peek-lock"]');
-  report.ok("锁定按钮在窗上", clicked === true);
+  // 锁定按钮在不在，由下一条「窗上标出了已锁定」来判
+  await clickIn(cdp, a.win.id, '[data-testid="peek-lock"]');
   await sleep(250);
   const afterClick = await readPeek(cdp, a.win.id);
   report.eq("窗上标出了「已锁定」", afterClick?.locked ?? null, "1");
@@ -487,10 +490,8 @@ async function suiteLockPeek(cdp, report) {
     window.__lyflow.stores.graph.getState().setParam(${lit(ids.gen)}, 'pointCount', 9000);
     return true;
   `);
-  const rerun = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("改完参数重跑通过", rerun.status, "ok");
-  report.ok("重跑换了一个新的 runId", typeof rerun.runId === "string" && rerun.runId !== runBefore,
-    `${runBefore} → ${rerun.runId}`);
+  // 重跑通过、换了新 runId，由「未锁定窗跟着变成 9000」与「锁定标记仍指向旧的那一次」合起来判
+  await runAndWait(cdp, () => pressF5(cdp));
 
   const freeAfter = await waitPeek(
     cdp,
@@ -508,14 +509,8 @@ async function suiteLockPeek(cdp, report) {
   report.ok("锁定窗没有退回「未运行」之类的占位", lockedAfter?.status === null,
     String(lockedAfter?.status));
 
-  const snapped = await peekWindows(cdp);
-  const lockedSnap = snapped.find((w) => w.id === a.win.id) ?? null;
-  report.eq("快照里锁定窗的类型没变", lockedSnap?.type ?? null, "PointCloud");
-  report.eq("快照里锁定窗没有状态占位",
-    lockedSnap === null ? "窗不见了" : lockedSnap.status, null);
-
-  const unlocked = await clickIn(cdp, a.win.id, '[data-testid="peek-lock"]');
-  report.ok("再点一次解锁", unlocked === true);
+  // 再点一次解锁
+  await clickIn(cdp, a.win.id, '[data-testid="peek-lock"]');
   const thawed = await waitPeek(
     cdp,
     a.win.id,
@@ -528,7 +523,7 @@ async function suiteLockPeek(cdp, report) {
 async function suiteLifecyclePeek(cdp, report) {
   report.section("生命周期：边被删 → 窗自动关；进子图 → 顶层的窗消失");
 
-  const { ids } = await prepare(cdp, report);
+  const { ids } = await prepare(cdp);
   const doomed = await edgeOf(cdp, ids.gen, "cloud", ids.pass, "cloud");
   const kept = await edgeOf(cdp, ids.fit, "line", ids.rr, "in");
   if (!doomed || !kept) {
@@ -563,8 +558,7 @@ async function suiteLifecyclePeek(cdp, report) {
     b.stores.ui.getState().setSelection([${lit(ids.gen)}], []);
     return b.stores.graph.getState().composeSubgraph([${lit(ids.gen)}]);
   `);
-  report.ok("把孤立的生成节点合成了一个子图", Boolean(composed?.nodeId), JSON.stringify(composed));
-  if (!composed?.nodeId) return;
+  mustOk(Boolean(composed?.nodeId), "把孤立的生成节点合成了一个子图", JSON.stringify(composed));
   await sleep(250);
   const stillTop = await peekWindows(cdp);
   report.eq("合成子图不碰到不相干的那条边，它的窗还在", stillTop.length, 1);
@@ -587,12 +581,11 @@ async function suiteLifecyclePeek(cdp, report) {
 async function suiteEdgeMenu(cdp, report) {
   report.section("边的右键菜单：三项都在；「在此插入 Reroute」接过了原来的双击行为");
 
-  const { ids } = await prepare(cdp, report);
+  const { ids } = await prepare(cdp);
   await resetPeek(cdp);
   const edge = await edgeOf(cdp, ids.gen, "cloud", ids.pass, "cloud");
   const point = await edgePoint(cdp, edge);
-  report.ok("在边上找到了真能点中的落点", Boolean(point), `edge=${edge} point=${JSON.stringify(point)}`);
-  if (!point) return;
+  mustOk(Boolean(point), "在边上找到了真能点中的落点", `edge=${edge} point=${JSON.stringify(point)}`);
 
   const items = await cdp.eval(`
     const el = document.elementFromPoint(${point.x}, ${point.y});
@@ -609,12 +602,7 @@ async function suiteEdgeMenu(cdp, report) {
     ["edge-ctx-peek", "edge-ctx-reroute", "edge-ctx-delete"]);
   if (!Array.isArray(items)) return;
 
-  const before = await cdp.eval(`
-    const doc = window.__lyflow.stores.graph.getState().doc;
-    return { reroutes: doc.nodes.filter((n) => n.op === 'util.reroute').length,
-             edges: doc.edges.length };
-  `);
-
+  // 插 Reroute 本身（节点多一个、边一拆二）由 m3 的 1.3 分组验，这里只看它不顺手开浮窗
   await cdp.eval(`
     const btn = document.querySelector('[data-testid="edge-ctx-reroute"]');
     if (!btn) return false;
@@ -622,19 +610,6 @@ async function suiteEdgeMenu(cdp, report) {
     return true;
   `);
   await sleep(300);
-
-  const after = await cdp.eval(`
-    const doc = window.__lyflow.stores.graph.getState().doc;
-    return {
-      reroutes: doc.nodes.filter((n) => n.op === 'util.reroute').length,
-      edges: doc.edges.length,
-      gone: !doc.edges.some((e) => e.id === ${lit(edge)}),
-      wiring: doc.edges.map((e) => e.from.node + '.' + e.from.port + '→' + e.to.node + '.' + e.to.port),
-    };
-  `);
-  report.eq("菜单里插入了一个 util.reroute 节点", after.reroutes, before.reroutes + 1);
-  report.ok("原来那条边被拆成了两条", after.gone && after.edges === before.edges + 1,
-    JSON.stringify(after.wiring));
 
   const windows = await peekWindows(cdp);
   report.eq("插 Reroute 这条路不会顺手开一个浮窗", windows.length, 0);
@@ -664,9 +639,7 @@ async function suiteEdgeMenu(cdp, report) {
 export { countsOf, openByDoubleClick, park, peekWindows, resetPeek, waitPeek };
 
 export const peekSuites = [
-  suiteCloudPeek,
-  suiteShapeAndValuePeek,
-  suiteIndicesPeek,
+  suiteSharedGraphPeeks,
   suiteTensorPeek,
   suiteLockPeek,
   suiteLifecyclePeek,

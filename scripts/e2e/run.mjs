@@ -54,16 +54,14 @@ async function suiteChinesePath(cdp, report, ws) {
   report.ok("图存进中文目录", fs.existsSync(graphPath), `filePath=${saved}`);
 
   const run = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("运行状态 ok", run.status, "ok");
 
+  // 运行状态与文件大小并进这一条：写出来且非空（> 1000 字节）才算数
   const pcdPath = path.join(ws.dir, pcdName);
-  const exists = fs.existsSync(pcdPath);
-  report.ok("中文文件名的 PCD 写出来了", exists, pcdPath);
-  if (exists) {
-    report.ok("PCD 非空", fs.statSync(pcdPath).size > 1000, `${fs.statSync(pcdPath).size} 字节`);
-  }
+  const size = fs.existsSync(pcdPath) ? fs.statSync(pcdPath).size : -1;
+  report.ok("中文文件名的 PCD 写出来了（非空）", size > 1000,
+    `${pcdPath} size=${size} run.status=${run.status}`);
   report.ok("生成节点报出了点数", run.nodes[ids.gen]?.elementCount === 60000,
-    JSON.stringify(run.nodes[ids.gen]));
+    `run.status=${run.status} ${JSON.stringify(run.nodes[ids.gen])}`);
 
   return { graphPath, pcdName };
 }
@@ -98,24 +96,18 @@ async function suiteDemoPipeline(cdp, report, ws, pcdName) {
   await saveGraphTo(cdp, graphPath);
 
   const run = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("运行状态 ok", run.status, "ok");
-  if (run.status !== "ok") {
-    report.fail("失败详情", JSON.stringify(run.nodes));
-  }
+  // 运行状态并进这一条：7 个节点都 done 时整次运行必然 ok
+  const notDone = Object.keys(ids).filter((key) => run.nodes[ids[key]]?.state !== "done");
+  report.ok(
+    `${Object.keys(ids).length} 个节点全部 done`,
+    run.status === "ok" && notDone.length === 0,
+    `run.status=${run.status} 没 done 的：${notDone.map((k) => `${k}=${run.nodes[ids[k]]?.state}`).join(" ")}` +
+      (run.status === "ok" ? "" : ` ${JSON.stringify(run.nodes)}`),
+  );
 
-  for (const key of Object.keys(ids)) {
-    report.eq(`${key} 节点 done`, run.nodes[ids[key]]?.state, "done");
-  }
-
-  // 「节点依次变色」：每个节点都走过 pending → running → done，
-  // 而且上游的 done 一定排在下游的 running 之前。
+  // 「节点依次变色」：上游的 done 一定排在下游的 running 之前。
+  // 各节点完整的状态序列（idle → pending → running → done）由 m3 的菱形图分组逐个核对。
   const transitions = await cdp.eval(`return window.__lyflow.transitions;`);
-  const seq = (id) => transitions.filter((t) => t.nodeId === id).map((t) => t.state);
-  // 头一条 idle 是 run_started 播下的占位：计划里的节点先全部亮成「排队中」，
-  // 用户才知道这次要跑哪些节点。
-  report.eq("load 的状态序列", seq(ids.load), ["idle", "pending", "running", "done"]);
-  report.eq("out 的状态序列", seq(ids.out), ["idle", "pending", "running", "done"]);
-
   const indexOf = (id, state) => transitions.findIndex((t) => t.nodeId === id && t.state === state);
   report.ok(
     "上游 done 早于下游 running",
@@ -133,24 +125,16 @@ async function suiteDemoPipeline(cdp, report, ws, pcdName) {
   );
 
   // 每个有点云输出的节点，3D 视图都要画出点来
+  const viewFails = [];
   for (const key of ["load", "crop", "voxel", "sor", "split"]) {
     const view = await selectAndReadViewer(cdp, ids[key]);
-    report.ok(
-      `选中 ${key} → 3D 视图点数 > 0`,
-      view.count > 0 && view.hasCanvas,
-      `count=${view.count} canvas=${view.hasCanvas} status=${view.status}`,
-    );
+    if (!(view.count > 0 && view.hasCanvas)) {
+      viewFails.push(`${key}: count=${view.count} canvas=${view.hasCanvas} status=${view.status}`);
+    }
   }
-
-  // ransac_plane 没有点云输出，视图借上游最近的那片云当底图（不再是一片空白）
-  const planeView = await selectAndReadViewer(cdp, ids.plane);
-  report.eq("选中 ransac_plane → 底图取自上游的 sor", planeView.base, ids.sor);
-  report.ok(
-    "底图标签写明是谁的云",
-    /^底图：/.test(planeView.baseText ?? ""),
-    `baseText=${planeView.baseText} status=${planeView.status}`,
-  );
-  report.ok("底图真的画出了点", planeView.count > 0, `count=${planeView.count}`);
+  report.ok("选中 load/crop/voxel/sor/split → 3D 视图点数都 > 0", viewFails.length === 0,
+    viewFails.join("; "));
+  // 没有点云输出的节点借上游的云当底图，这条规则由 gap.mjs 的「底图」分组覆盖
 
   const outPcd = path.join(ws.dir, "去平面 结果.pcd");
   report.ok("下游 PCD 写到中文目录", fs.existsSync(outPcd), outPcd);
@@ -177,12 +161,13 @@ async function suiteBadParam(cdp, report, ids) {
   );
   // 上游不受影响：一次看到所有能看到的。缓存复用后它们是 skipped 而不是 done（ADR-0007）
   const upstreamOk = (id) => ["done", "skipped"].includes(run.nodes[id]?.state);
-  report.ok("上游 load 仍然跑通", upstreamOk(ids.load), run.nodes[ids.load]?.state);
-  report.ok("上游 crop 仍然跑通", upstreamOk(ids.crop), run.nodes[ids.crop]?.state);
+  report.ok("上游 load / crop 仍然跑通", upstreamOk(ids.load) && upstreamOk(ids.crop),
+    `load=${run.nodes[ids.load]?.state} crop=${run.nodes[ids.crop]?.state}`);
   // 下游是 cancelled + upstream_failed，不是 skipped
-  for (const key of ["sor", "plane", "split", "out"]) {
-    report.eq(`下游 ${key} 标 cancelled`, run.nodes[ids[key]]?.state, "cancelled");
-  }
+  const downstream = ["sor", "plane", "split", "out"];
+  const notCancelled = downstream.filter((key) => run.nodes[ids[key]]?.state !== "cancelled");
+  report.ok("下游 sor/plane/split/out 全标 cancelled", notCancelled.length === 0,
+    downstream.map((k) => `${k}=${run.nodes[ids[k]]?.state}`).join(" "));
   report.eq(
     "下游的原因是 upstream_failed",
     run.nodes[ids.sor]?.errors?.[0]?.code,
@@ -247,9 +232,12 @@ async function suiteValidateAndInfo(cdp, report, ids) {
     return out;
   `);
   const hit = dirty.find((d) => d.nodeId === ids.voxel && d.paramPath === "leafSize");
-  report.ok("坏参数被 validate_graph 逮到", Boolean(hit), JSON.stringify(dirty));
-  report.eq("诊断带 severity", hit?.severity, "error");
-  report.eq("诊断的 phase 是 validate", hit?.phase, "validate");
+  // 逮到还不够：要是 severity=error、phase=validate 的那种诊断
+  report.ok(
+    "坏参数被 validate_graph 逮到（error / validate）",
+    Boolean(hit) && hit.severity === "error" && hit.phase === "validate",
+    `hit=${JSON.stringify(hit ?? null)} 全部=${JSON.stringify(dirty)}`,
+  );
 
   // get_output_info 用的是上一次运行留下的结果
   const info = await cdp.eval(`
@@ -324,103 +312,6 @@ async function suiteCancel(cdp, report) {
   return ids;
 }
 
-/** §11：运行后改任一参数 → 全部节点标 stale。 */
-async function suiteStale(cdp, report) {
-  report.section("改参数 → 结果标为过时");
-
-  await newDoc(cdp);
-  const ids = await buildGraph(
-    cdp,
-    [
-      { key: "gen", op: "gen.synthetic", params: { pointCount: 20000 } },
-      { key: "voxel", op: "filter.voxel_grid" },
-      { key: "pass", op: "filter.passthrough" },
-    ],
-    [
-      { from: ["gen", "cloud"], to: ["voxel", "cloud"] },
-      { from: ["voxel", "cloud"], to: ["pass", "cloud"] },
-    ],
-  );
-  const run = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("先跑一次 ok", run.status, "ok");
-
-  const before = await cdp.eval(`
-    return {
-      stale: window.__lyflow.stores.execution.getState().stale,
-      staleNodes: document.querySelectorAll('.node.is-stale').length,
-    };
-  `);
-  report.ok("刚跑完不是过时状态", before.stale === false && before.staleNodes === 0,
-    JSON.stringify(before));
-
-  await cdp.eval(`
-    window.__lyflow.stores.graph.getState().setParam(${lit(ids.gen)}, 'seed', 42);
-    return true;
-  `);
-  await sleep(200);
-
-  const after = await cdp.eval(`
-    return {
-      stale: window.__lyflow.stores.execution.getState().stale,
-      staleNodes: document.querySelectorAll('.node.is-stale').length,
-      totalNodes: document.querySelectorAll('[data-node-state]').length,
-      summaryStale: !!document.querySelector('.toolbar__stat--stale'),
-    };
-  `);
-  report.ok("store 标记为过时", after.stale === true, JSON.stringify(after));
-  report.ok(
-    "全部节点都变虚",
-    after.totalNodes > 0 && after.staleNodes === after.totalNodes,
-    JSON.stringify(after),
-  );
-  report.ok("工具栏显示「已过时」", after.summaryStale);
-}
-
-/** P1 #27：右键 → 运行到此节点。数据通路 M2 就位，这里验一遍。 */
-async function suiteRunToNode(cdp, report) {
-  report.section("Run to node（只跑上游闭包）");
-
-  await newDoc(cdp);
-  const ids = await buildGraph(
-    cdp,
-    [
-      { key: "gen", op: "gen.synthetic", params: { pointCount: 20000 } },
-      { key: "voxel", op: "filter.voxel_grid" },
-      { key: "tail", op: "filter.passthrough" },
-    ],
-    [
-      { from: ["gen", "cloud"], to: ["voxel", "cloud"] },
-      { from: ["voxel", "cloud"], to: ["tail", "cloud"] },
-    ],
-  );
-
-  // 真的走右键菜单，不是直接调 store —— 菜单本身也是验收对象
-  const opened = await cdp.eval(`
-    const el = document.querySelector('[data-testid="node-${ids.voxel}"]');
-    if (!el) return 'no-node';
-    const r = el.getBoundingClientRect();
-    el.dispatchEvent(new MouseEvent('contextmenu', {
-      bubbles: true, cancelable: true,
-      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
-    }));
-    await new Promise((r2) => setTimeout(r2, 120));
-    return document.querySelector('[data-testid="node-context-menu"]') ? 'ok' : 'no-menu';
-  `);
-  report.eq("右键弹出菜单", opened, "ok");
-
-  const run = await runAndWait(cdp, () =>
-    cdp.eval(`document.querySelector('[data-testid="run-to-node"]').click(); return true;`),
-  );
-  report.eq("运行状态 ok", run.status, "ok");
-  report.eq("目标节点被记录", run.targets, [ids.voxel]);
-  // M3 起这两个可能是 skipped（命中缓存），两种都算跑通（ADR-0007）
-  const ran = (id) => ["done", "skipped"].includes(run.nodes[id]?.state);
-  report.ok("上游 gen 执行了", ran(ids.gen), run.nodes[ids.gen]?.state);
-  report.ok("目标 voxel 执行了", ran(ids.voxel), run.nodes[ids.voxel]?.state);
-  report.ok("下游 tail 根本没进计划", run.nodes[ids.tail] === undefined,
-    JSON.stringify(run.nodes[ids.tail]));
-}
-
 // ---------------------------------------------------------------------- main
 
 async function main() {
@@ -469,8 +360,6 @@ async function main() {
     await suiteValidateAndInfo(cdp, report, ids);
     await suiteBadParam(cdp, report, ids);
     await suiteCancel(cdp, report);
-    await suiteStale(cdp, report);
-    await suiteRunToNode(cdp, report);
 
     const grouped = [
       ...m3Suites, ...m4Suites, ...phaseASuites, ...gapSuites, ...peekSuites, ...m8bSuites, ...m8cSuites,

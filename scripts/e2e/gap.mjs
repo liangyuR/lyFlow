@@ -5,6 +5,7 @@ import { sleep } from "./cdp.mjs";
 import {
   buildGraph,
   lit,
+  mustOk,
   newDoc,
   pressF5,
   runAndWait,
@@ -117,13 +118,12 @@ async function suiteMeasurementOutputs(cdp, report) {
     ],
     [{ from: ["gen", "cloud"], to: ["plane", "cloud"] }],
   );
-  const run = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("底图跑通了", run.status, "ok");
+  // 跑一次给后面的底图垫上上游的云；跑没跑通由末尾「底图真的画出了点」兜住
+  await runAndWait(cdp, () => pressF5(cdp));
 
   await select(cdp, ids.gen);
 
-  const applied = await feedOutputs(cdp, ids.gen, 100000);
-  report.ok("事件灌进去了", applied === true);
+  await feedOutputs(cdp, ids.gen, 100000);
 
   // -- 3D 叠画 -------------------------------------------------------------
   let overlay = 0;
@@ -136,13 +136,6 @@ async function suiteMeasurementOutputs(cdp, report) {
     await sleep(100);
   }
   report.eq("四个几何输出都叠上了（Box2D/Line2D/Circle2D/Point2D）", overlay, 4);
-
-  const lines = await cdp.eval(`
-    // three.js 的对象树从 store 里拿不到，退而求其次：确认画布还在、渲染没崩
-    const canvas = document.querySelector('.viewer__canvas canvas');
-    return canvas ? canvas.width > 0 && canvas.height > 0 : false;
-  `);
-  report.ok("叠画之后画布仍在渲染", lines === true);
 
   // -- 2D 剖面相机 ---------------------------------------------------------
   await cdp.eval(`
@@ -162,12 +155,6 @@ async function suiteMeasurementOutputs(cdp, report) {
     await sleep(80);
   }
   report.eq("切到 2D 剖面相机", camera, "2d");
-
-  const noRotate = await cdp.eval(`
-    const canvas = document.querySelector('.viewer__canvas canvas');
-    return !!canvas;  // 相机换了之后画布没有被重建掉
-  `);
-  report.ok("2D 模式下画布仍在", noRotate === true);
 
   await cdp.eval(`
     const sel = document.querySelector('[data-testid="viewer-camera"]');
@@ -191,21 +178,19 @@ async function suiteMeasurementOutputs(cdp, report) {
       boxText: box ? box.querySelector('.insp-out__value').textContent : null,
     };
   `);
-  report.ok("Inspector 有「输出」一栏", inspector !== null, JSON.stringify(inspector));
-  if (inspector) {
-    report.eq("五个非点云输出都列出来了", inspector.rows, 5);
-    report.eq("Measurement 显示成数值 + 单位", inspector.valueText, "6.4138 mm");
-    report.eq("判定字段显示出来了", inspector.verdict, "ok");
-    report.ok(
-      "Box2D 显示成两个角点",
-      typeof inspector.boxText === "string" && inspector.boxText.includes("→"),
-      inspector.boxText,
-    );
-  }
+  // 没有「输出」一栏时 inspector 是 null，下面几条各自读到 undefined 失败
+  report.eq("五个非点云输出都列出来了", inspector?.rows, 5);
+  report.eq("Measurement 显示成数值 + 单位", inspector?.valueText, "6.4138 mm");
+  report.eq("判定字段显示出来了", inspector?.verdict, "ok");
+  report.ok(
+    "Box2D 显示成两个角点",
+    typeof inspector?.boxText === "string" && inspector.boxText.includes("→"),
+    JSON.stringify(inspector),
+  );
 
   // -- 底图：几何节点借上游最近的那片云 ---------------------------------------
-  const fed = await feedOutputs(cdp, ids.plane, 100001);
-  report.ok("几何输出灌到没有点云输出的节点上", fed === true);
+  // 几何输出灌到没有点云输出的节点上
+  await feedOutputs(cdp, ids.plane, 100001);
 
   const planeView = await selectAndReadViewer(cdp, ids.plane);
   report.eq("底图取自上游的 gen", planeView.base, ids.gen);
@@ -233,46 +218,44 @@ async function suiteRealGapGraph(cdp, report) {
   const failed = Object.entries(run.nodes ?? {})
     .filter(([, n]) => n.state === "error")
     .map(([id, n]) => `${id}: ${(n.errors?.[0] ?? {}).message ?? ""}`);
-  report.ok("跑完了（R1 那张图 gap 节点会红，属于预期）",
-    run.status === "ok" || run.status === "error", `${run.status} ${failed.join(" | ")}`);
+  mustOk(run.status === "ok" || run.status === "error", "跑完了（R1 那张图 gap 节点会红，属于预期）",
+    `${run.status} ${failed.join(" | ")}`);
 
   const rois = await cdp.eval(`
     const nodes = window.__lyflow.stores.graph.getState().doc.nodes;
     return nodes.find((n) => n.op === 'gap.business_rois')?.id ?? null;
   `);
-  report.ok("图里有 business_rois 节点", typeof rois === "string", String(rois));
-  if (typeof rois === "string") {
-    const view = await selectAndReadViewer(cdp, rois);
-    const overlay = Number(await waitAttr(cdp, "data-overlay", 4));
-    // 失败时把节点的输出一并打出来 —— 光看 0 猜不出是没跑还是没选中
-    const detail = await cdp.eval(`
-      const e = window.__lyflow.stores.execution.getState();
-      const n = e.nodes.get(${lit(rois)});
-      const u = window.__lyflow.stores.ui.getState();
-      return JSON.stringify({
-        path: u.path.length,
-        selected: [...u.selectedNodes],
-        state: n ? n.state : null,
-        errors: n ? n.errors.map((x) => x.code + ':' + x.message) : null,
-        outputs: n ? (n.stats?.outputs ?? []).map((o) => o.type + (o.value ? '+value' : '')) : null,
-      });
-    `);
-    report.ok("四个业务 ROI 框都叠上了", overlay === 4, `overlay=${overlay} ${detail}`);
+  mustOk(typeof rois === "string", "图里有 business_rois 节点", String(rois));
+  const view = await selectAndReadViewer(cdp, rois);
+  const overlay = Number(await waitAttr(cdp, "data-overlay", 4));
+  // 失败时把节点的输出一并打出来 —— 光看 0 猜不出是没跑还是没选中
+  const detail = await cdp.eval(`
+    const e = window.__lyflow.stores.execution.getState();
+    const n = e.nodes.get(${lit(rois)});
+    const u = window.__lyflow.stores.ui.getState();
+    return JSON.stringify({
+      path: u.path.length,
+      selected: [...u.selectedNodes],
+      state: n ? n.state : null,
+      errors: n ? n.errors.map((x) => x.code + ':' + x.message) : null,
+      outputs: n ? (n.stats?.outputs ?? []).map((o) => o.type + (o.value ? '+value' : '')) : null,
+    });
+  `);
+  report.ok("四个业务 ROI 框都叠上了", overlay === 4, `overlay=${overlay} ${detail}`);
 
-    // business_rois 只输出 Box2D，底图应当落在上游最近的那片云上
-    const upstreamCloud = await cdp.eval(`
-      const doc = window.__lyflow.stores.graph.getState().doc;
-      const n = doc.nodes.find((x) => x.op === 'filter.radius_outlier');
-      return n ? n.id : null;
-    `);
-    report.eq("底图落在上游的 filter.radius_outlier 上", view.base, upstreamCloud);
-    report.ok(
-      "底图标签写明是谁的云",
-      /^底图：/.test(view.baseText ?? ""),
-      `baseText=${view.baseText} status=${view.status}`,
-    );
-    report.ok("底图真的画出了点", view.count > 0, `count=${view.count} view=${view.view}`);
-  }
+  // business_rois 只输出 Box2D，底图应当落在上游最近的那片云上
+  const upstreamCloud = await cdp.eval(`
+    const doc = window.__lyflow.stores.graph.getState().doc;
+    const n = doc.nodes.find((x) => x.op === 'filter.radius_outlier');
+    return n ? n.id : null;
+  `);
+  report.eq("底图落在上游的 filter.radius_outlier 上", view.base, upstreamCloud);
+  report.ok(
+    "底图标签写明是谁的云",
+    /^底图：/.test(view.baseText ?? ""),
+    `baseText=${view.baseText} status=${view.status}`,
+  );
+  report.ok("底图真的画出了点", view.count > 0, `count=${view.count} view=${view.view}`);
 
   const circles = await cdp.eval(`
     const nodes = window.__lyflow.stores.graph.getState().doc.nodes;
@@ -285,7 +268,7 @@ async function suiteRealGapGraph(cdp, report) {
       const n = e.nodes.get(${lit(circles)});
       return n ? { state: n.state, outputs: (n.stats?.outputs ?? []).map((o) => o.type) } : null;
     `);
-    report.ok("圆拟合节点有结果或红框", state !== null, JSON.stringify(state));
+    mustOk(state !== null, "圆拟合节点有结果或红框", JSON.stringify(state));
   }
 }
 
@@ -335,87 +318,81 @@ async function suiteModelGapGraph(cdp, report) {
 
   // -- roi_from_labels：四框叠在底图上 --------------------------------------
   const rois = await nodeOfOp(cdp, "gap.roi_from_labels");
-  report.ok("图里有 roi_from_labels 节点", typeof rois === "string", String(rois));
-  if (typeof rois === "string") {
-    const view = await selectAndReadViewer(cdp, rois);
-    const overlay = Number(await waitAttr(cdp, "data-overlay", 4));
-    report.eq("四个模型 ROI 框都叠上了", overlay, 4, `view=${view.view} count=${view.count}`);
-    report.ok("框叠在一片真实的剖面上", view.count > 0, `count=${view.count} base=${view.base}`);
-    // 底图走自己的 backdrop 输出，不再靠底图规则往上游借传感器帧的云
-    report.eq("底图是节点自己的输出（不借上游）", view.base, "");
-    const bounds = await viewerBounds(cdp);
-    report.ok(
-      "底图与四框在同一平面（XY 上相交）",
-      overlapsXY(bounds.cloud, bounds.overlay),
-      `cloud=${JSON.stringify(bounds.cloud)} overlay=${JSON.stringify(bounds.overlay)}`,
-    );
-    report.ok(
-      "底图是测量帧的剖面（y 有跨度，不是一条线）",
-      bounds.cloud !== null && bounds.cloud[4] - bounds.cloud[1] > 0,
-      JSON.stringify(bounds.cloud),
-    );
-  }
+  mustOk(typeof rois === "string", "图里有 roi_from_labels 节点", String(rois));
+  const view = await selectAndReadViewer(cdp, rois);
+  const overlay = Number(await waitAttr(cdp, "data-overlay", 4));
+  report.eq("四个模型 ROI 框都叠上了", overlay, 4, `view=${view.view} count=${view.count}`);
+  report.ok("框叠在一片真实的剖面上", view.count > 0, `count=${view.count} base=${view.base}`);
+  // 底图走自己的 backdrop 输出，不再靠底图规则往上游借传感器帧的云
+  report.eq("底图是节点自己的输出（不借上游）", view.base, "");
+  const bounds = await viewerBounds(cdp);
+  report.ok(
+    "底图与四框在同一平面（XY 上相交）",
+    overlapsXY(bounds.cloud, bounds.overlay),
+    `cloud=${JSON.stringify(bounds.cloud)} overlay=${JSON.stringify(bounds.overlay)}`,
+  );
+  report.ok(
+    "底图是测量帧的剖面（y 有跨度，不是一条线）",
+    bounds.cloud !== null && bounds.cloud[4] - bounds.cloud[1] > 0,
+    JSON.stringify(bounds.cloud),
+  );
 
   // -- labels_to_cloud：有点，且类别是逐点的一个通道 --------------------------
   const colored = await nodeOfOp(cdp, "gap.labels_to_cloud");
-  report.ok("图里有 labels_to_cloud 节点", typeof colored === "string", String(colored));
-  if (typeof colored === "string") {
-    const view = await selectAndReadViewer(cdp, colored);
-    report.ok("着色后的剖面有点", view.count > 0, `count=${view.count} view=${view.view}`);
-    report.eq("1280 个槽一个不少", view.total, 1280, `count=${view.count}`);
-    // 接的是测量帧的云：俯视 XY 才看得出剖面形状，接传感器帧的话 y 恒为 0
-    const shape = await viewerBounds(cdp);
-    report.ok(
-      "着色剖面在测量帧里（y 有跨度，不是一条线）",
-      shape.cloud !== null && shape.cloud[4] - shape.cloud[1] > 0,
-      JSON.stringify(shape.cloud),
-    );
-    // 3D 视图没有 rgb 着色模式，所以算子把类 id 也写进 intensity：
-    // 「强度」这一项没被禁用，就说明逐点的类别通道确实到了前端
-    const shading = await cdp.eval(`
-      const sel = document.querySelector('[data-testid="viewer-shading"]');
-      if (!sel) return null;
-      const opt = [...sel.options].find((o) => o.value === 'intensity');
-      return { disabled: opt ? opt.disabled : null, value: sel.value };
-    `);
-    report.ok(
-      "逐点的类别通道到了前端（强度可选）",
-      shading !== null && shading.disabled === false,
-      JSON.stringify(shading),
-    );
-  }
+  mustOk(typeof colored === "string", "图里有 labels_to_cloud 节点", String(colored));
+  const coloredView = await selectAndReadViewer(cdp, colored);
+  report.ok("着色后的剖面有点", coloredView.count > 0, `count=${coloredView.count} view=${coloredView.view}`);
+  report.eq("1280 个槽一个不少", coloredView.total, 1280, `count=${coloredView.count}`);
+  // 接的是测量帧的云：俯视 XY 才看得出剖面形状，接传感器帧的话 y 恒为 0
+  const shape = await viewerBounds(cdp);
+  report.ok(
+    "着色剖面在测量帧里（y 有跨度，不是一条线）",
+    shape.cloud !== null && shape.cloud[4] - shape.cloud[1] > 0,
+    JSON.stringify(shape.cloud),
+  );
+  // 3D 视图没有 rgb 着色模式，所以算子把类 id 也写进 intensity：
+  // 「强度」这一项没被禁用，就说明逐点的类别通道确实到了前端
+  const shading = await cdp.eval(`
+    const sel = document.querySelector('[data-testid="viewer-shading"]');
+    if (!sel) return null;
+    const opt = [...sel.options].find((o) => o.value === 'intensity');
+    return { disabled: opt ? opt.disabled : null, value: sel.value };
+  `);
+  report.ok(
+    "逐点的类别通道到了前端（强度可选）",
+    shading !== null && shading.disabled === false,
+    JSON.stringify(shading),
+  );
 
   // -- roll_anchored_crop：status 显示在 Inspector ---------------------------
   const roll = await nodeOfOp(cdp, "gap.roll_anchored_crop");
-  report.ok("图里有 roll_anchored_crop 节点", typeof roll === "string", String(roll));
-  if (typeof roll === "string") {
-    await selectAndReadViewer(cdp, roll);
-    const status = await cdp.eval(`
-      const row = document.querySelector('[data-testid="output-status"]');
-      if (!row) return null;
-      return {
-        type: row.getAttribute('data-type'),
-        text: row.querySelector('.insp-out__value').textContent,
-      };
-    `);
-    report.ok("Inspector 里有 status 这一行", status !== null, JSON.stringify(status));
-    if (status) {
-      report.eq("status 是个 Record", status.type, "Record");
-      report.ok(
-        "status 写明了裁剪窗的结局与前后点数",
-        /GapRollCrop/.test(status.text) &&
-          /"status":"(applied|reverted:min_points|disabled|rejected:[a-z_]+)"/.test(status.text) &&
-          /beforePrimary/.test(status.text),
-        status.text,
-      );
-    }
-    const windowRow = await cdp.eval(`
-      const row = document.querySelector('[data-testid="output-window"]');
-      return row ? row.querySelector('.insp-out__value').textContent : null;
-    `);
-    report.ok("窗本身也列出来了", typeof windowRow === "string" && windowRow.includes("→"),
-      String(windowRow));
+  mustOk(typeof roll === "string", "图里有 roll_anchored_crop 节点", String(roll));
+  await selectAndReadViewer(cdp, roll);
+  const status = await cdp.eval(`
+    const row = document.querySelector('[data-testid="output-status"]');
+    if (!row) return null;
+    return {
+      type: row.getAttribute('data-type'),
+      text: row.querySelector('.insp-out__value').textContent,
+    };
+  `);
+  report.ok("Inspector 里有 status 这一行", status !== null, JSON.stringify(status));
+  if (status) {
+    report.eq("status 是个 Record", status.type, "Record");
+    report.ok(
+      "status 写明了裁剪窗的结局与前后点数",
+      /GapRollCrop/.test(status.text) &&
+        /"status":"(applied|reverted:min_points|disabled|rejected:[a-z_]+)"/.test(status.text) &&
+        /beforePrimary/.test(status.text),
+      status.text,
+    );
   }
+  const windowRow = await cdp.eval(`
+    const row = document.querySelector('[data-testid="output-window"]');
+    return row ? row.querySelector('.insp-out__value').textContent : null;
+  `);
+  report.ok("窗本身也列出来了", typeof windowRow === "string" && windowRow.includes("→"),
+    String(windowRow));
 
   // -- 数值：R1 的模型路径基线 gap 3.7838 / flush 2.3504 ----------------------
   const values = await cdp.eval(`

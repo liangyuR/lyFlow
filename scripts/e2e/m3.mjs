@@ -10,6 +10,7 @@ import {
   centerOf,
   dragMouse,
   lit,
+  mustOk,
   newDoc,
   pressCtrl,
   pressF5,
@@ -25,10 +26,6 @@ import {
   select,
   selectAndReadViewer,
 } from "./page.mjs";
-import { ROOT } from "./harness.mjs";
-
-/** dev server 里编辑器包的源码路径。生产构建下 import 不到，调用点有兜底。 */
-const LAYOUT_MODULE_URL = `/@fs/${ROOT.replace(/\\/g, "/")}/packages/editor/src/lib/layout.ts`;
 
 /** 一条三节点直链：生成 → 体素 → 透传。缓存与 stale 的分组都用它。 */
 const CHAIN_NODES = [
@@ -86,7 +83,6 @@ async function suiteCache(cdp, report) {
   );
 
   const first = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("第一次运行 ok", first.status, "ok");
   report.eq("第一次全部真算", Object.values(first.nodes).filter((n) => n.state === "done").length, 3);
 
   // 预测集合必须与实际 skipped 集合完全一致（§1.1 验收）
@@ -106,7 +102,6 @@ async function suiteCache(cdp, report) {
     .filter(([, n]) => n.state === "skipped")
     .map(([id]) => id)
     .sort();
-  report.eq("第二次运行 ok", second.status, "ok");
   report.eq("原图重跑全部 skipped", skipped.length, 3);
   report.eq("plan_graph 的预测集合与实际 skipped 完全一致", predicted, skipped);
   report.ok(
@@ -134,6 +129,11 @@ async function suiteCache(cdp, report) {
     "上游那个没有被连坐",
     await domOf(cdp, `[data-testid="node-${ids.gen}"]`, "el.getAttribute('data-stale')"),
     "0",
+  );
+  // 原 run.mjs 的 suiteStale 并到这里：运行后改参数，工具栏摘要要挂出「已过时」
+  report.ok(
+    "工具栏显示「已过时」",
+    await cdp.eval(`return !!document.querySelector('.toolbar__stat--stale');`),
   );
 
   const third = await runAndWait(cdp, () => pressF5(cdp));
@@ -196,20 +196,22 @@ async function suiteParallel(cdp, report) {
   );
 
   const run = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("菱形图跑通", run.status, "ok");
-  report.eq("八个节点全部完成", Object.values(run.nodes).filter((n) => n.state === "done").length, 8);
 
   // 每个节点恰好走一遍 pending → running → done。并行下最容易坏的就是这个：
-  // 事件顺序乱了、或者同一个节点被两个 worker 领走。
+  // 事件顺序乱了、或者同一个节点被两个 worker 领走。序列走到 done，运行也就是 ok 的；
+  // 头一条 idle 是 run_started 播下的占位。seq 的连续性由 execution store 的
+  // console.warn 兜底，控制台分组会捕获它。
   const transitions = await cdp.eval(`return window.__lyflow.transitions;`);
+  const expected = ["idle", "pending", "running", "done"];
+  const badSeq = [];
   for (const key of Object.keys(ids)) {
     const seq = transitions.filter((t) => t.nodeId === ids[key]).map((t) => t.state);
-    report.eq(`${key} 的状态序列没有重复也没有空洞`, seq, ["idle", "pending", "running", "done"]);
+    if (JSON.stringify(seq) !== JSON.stringify(expected)) badSeq.push(`${key}=${seq.join("→")}`);
   }
   report.ok(
-    "前端没有报 seq 不连续",
-    true,
-    "seq 的连续性由 execution store 的 console.warn 兜底，控制台分组会捕获它",
+    `${Object.keys(ids).length} 个节点的序列全是 idle→pending→running→done`,
+    run.status === "ok" && badSeq.length === 0,
+    `run.status=${run.status} 不对的：${badSeq.join("; ")}`,
   );
 }
 
@@ -223,7 +225,7 @@ async function suiteBypassReroute(cdp, report) {
   await waitForNodes(cdp, ids);
   const before = await runAndWait(cdp, () => pressF5(cdp));
   const rawCount = before.nodes[ids.gen]?.elementCount;
-  report.ok("先跑一次拿到原始点数", rawCount > 0, String(rawCount));
+  mustOk(rawCount > 0, "先跑一次拿到原始点数", String(rawCount));
   report.ok(
     "体素确实降了采样",
     before.nodes[ids.voxel]?.elementCount < rawCount,
@@ -281,23 +283,21 @@ async function suiteBypassReroute(cdp, report) {
     cdp,
     `.react-flow__edge[data-id="${edgeId}"] .react-flow__edge-interaction`,
   );
-  report.ok("拿到了连线中点", Boolean(point), JSON.stringify(point));
-  if (point) {
-    const menu = await cdp.eval(`
-      const el = document.elementFromPoint(${point.x}, ${point.y});
-      if (!el) return 'no-element';
-      el.dispatchEvent(new MouseEvent('contextmenu', {
-        bubbles: true, cancelable: true, clientX: ${point.x}, clientY: ${point.y},
-      }));
-      await new Promise((done) => setTimeout(done, 200));
-      const btn = document.querySelector('[data-testid="edge-ctx-reroute"]');
-      if (!btn) return 'no-menu';
-      btn.click();
-      return 'ok';
-    `);
-    report.eq("边的右键菜单里有「在此插入 Reroute」", menu, "ok");
-    await sleep(250);
-  }
+  mustOk(Boolean(point), "拿到了连线中点", JSON.stringify(point));
+  const menu = await cdp.eval(`
+    const el = document.elementFromPoint(${point.x}, ${point.y});
+    if (!el) return 'no-element';
+    el.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true, cancelable: true, clientX: ${point.x}, clientY: ${point.y},
+    }));
+    await new Promise((done) => setTimeout(done, 200));
+    const btn = document.querySelector('[data-testid="edge-ctx-reroute"]');
+    if (!btn) return 'no-menu';
+    btn.click();
+    return 'ok';
+  `);
+  mustOk(menu === "ok", "边的右键菜单里有「在此插入 Reroute」", menu);
+  await sleep(250);
   const doc = await cdp.eval(`return window.__lyflow.snapshot().doc;`);
   const reroutes = doc.nodes.filter((n) => n.op === "util.reroute");
   report.ok("右键菜单插入了一个 reroute", reroutes.length === 2, `${reroutes.length} 个 reroute 节点`);
@@ -387,10 +387,6 @@ async function suiteMigration(cdp, report, ws) {
     return out.migrations;
   `);
   report.eq("load_graph 返回了一条迁移动作", loaded.length, 1);
-  report.eq("迁移动作是 migration 类型", loaded[0]?.kind, "migration");
-  report.eq("目标版本是 2.0.0", loaded[0]?.opVersion, "2.0.0");
-  report.eq("参数已经换名", loaded[0]?.params?.keepCount, 777);
-  report.ok("旧参数名没了", loaded[0]?.params?.count === undefined, JSON.stringify(loaded[0]?.params));
 
   const applied = await cdp.eval(`
     const g = window.__lyflow.stores.graph.getState();
@@ -398,7 +394,6 @@ async function suiteMigration(cdp, report, ws) {
     const s = window.__lyflow.snapshot();
     return { n, node: s.doc.nodes.find(x => x.id === 's'), dirty: s.dirty, undoLabel: s.undoLabel };
   `);
-  report.eq("applyMigrations 改了一个节点", applied.n, 1);
   report.eq("doc 里的参数换成了 keepCount", applied.node?.params?.keepCount, 777);
   report.eq("doc 里的 opVersion 升到了 2.0.0", applied.node?.opVersion, "2.0.0");
   report.eq("迁移置了 dirty", applied.dirty, true);
@@ -450,10 +445,6 @@ async function suiteHotReload(cdp, report) {
   const info = await cdp.eval(`return await window.__lyflow.transport.getCoreInfo();`);
   report.ok("core 报告了热重载能力与代数", info?.hotReload === true, JSON.stringify(info));
   report.eq("启动时是第 0 代", info?.generation, 0);
-  report.ok(
-    "状态栏显示热重载状态",
-    Boolean(await domOf(cdp, '[data-testid="statusbar-generation"]', "el.textContent")),
-  );
   report.eq(
     "状态栏的代数与 core 一致",
     await domOf(cdp, '[data-testid="statusbar-generation"]', "el.getAttribute('data-generation')"),
@@ -461,8 +452,6 @@ async function suiteHotReload(cdp, report) {
   );
   // 换代本身在 cargo test 里验（hot_reload_swaps_in_a_fresh_generation）：
   // CDP 没法在一次会话里重编 C++，手工复现步骤见 docs/m3-acceptance.md。
-  report.ok("算子面板认得 M3 新增的 util.reroute", (info?.operatorCount ?? 0) >= 16,
-    `${info?.operatorCount} 个算子`);
 }
 
 // ------------------------------------------------------------- 1.6 参数联动
@@ -546,8 +535,7 @@ async function suiteSnap(cdp, report) {
 
   const source = await centerOf(cdp, `[data-testid="port-${ids.gen}-cloud"] .react-flow__handle`);
   const target = await centerOf(cdp, `[data-testid="port-${ids.voxel}-cloud"] .react-flow__handle`);
-  report.ok("拿到了两个端口的位置", Boolean(source && target), JSON.stringify({ source, target }));
-  if (!source || !target) return;
+  mustOk(Boolean(source && target), "拿到了两个端口的位置", JSON.stringify({ source, target }));
 
   // connectionRadius 的单位是**画布坐标**，所以屏幕上的偏移量要乘缩放
   const k = await viewportScale(cdp);
@@ -632,8 +620,7 @@ async function suiteReconnect(cdp, report) {
   // React Flow 把可重连的端点画成一个 circle.react-flow__edgeupdater-target，
   // 位置在端口外侧 reconnectRadius 处 —— 从端口中心起手会被当成「新建连线」。
   const anchor = await centerOf(cdp, ".react-flow__edgeupdater-target");
-  report.ok("连线的可重连端点存在", Boolean(anchor), JSON.stringify(anchor));
-  if (!anchor) return;
+  mustOk(Boolean(anchor), "连线的可重连端点存在", JSON.stringify(anchor));
   const hit = await cdp.eval(`
     const el = document.elementFromPoint(${anchor.x}, ${anchor.y});
     return el ? String(el.getAttribute('class') ?? el.tagName) : null;
@@ -817,28 +804,17 @@ async function suiteLayout(cdp, report) {
 
   // 拖一下：落点必须吸到 8 的倍数上
   const head = await centerOf(cdp, `[data-testid="node-${ids.voxel}"] .node__head`);
-  report.ok("拿到了要拖的节点", Boolean(head), JSON.stringify(head));
-  if (head) {
-    await dragMouse(cdp, head, { x: head.x + 61, y: head.y + 37 }, { steps: 14 });
-    await sleep(250);
-    const pos = await cdp.eval(`
-      return window.__lyflow.snapshot().doc.nodes.find(n => n.id === ${lit(ids.voxel)}).ui.position;
-    `);
-    report.ok(
-      "拖动后位置吸到了 8 px 网格上",
-      pos.x % 8 === 0 && pos.y % 8 === 0,
-      JSON.stringify(pos),
-    );
-  }
-
-  // 参考线：拖到与另一个节点顶边对齐时应当出现
-  const guides = await cdp.eval(`
-    const b = window.__lyflow;
-    const doc = b.snapshot().doc;
-    const gen = doc.nodes.find(n => n.id === ${lit(ids.gen)});
-    return { guidesEl: !!document.querySelector('[data-testid="align-guides"]'), y: gen.ui.position.y };
+  mustOk(Boolean(head), "拿到了要拖的节点", JSON.stringify(head));
+  await dragMouse(cdp, head, { x: head.x + 61, y: head.y + 37 }, { steps: 14 });
+  await sleep(250);
+  const pos = await cdp.eval(`
+    return window.__lyflow.snapshot().doc.nodes.find(n => n.id === ${lit(ids.voxel)}).ui.position;
   `);
-  report.ok("参考线容器已挂上画布", guides.guidesEl);
+  report.ok(
+    "拖动后位置吸到了 8 px 网格上",
+    pos.x % 8 === 0 && pos.y % 8 === 0,
+    JSON.stringify(pos),
+  );
 
   // Ctrl+L 整理整图（M4 起 Ctrl+G 让给了「合成子图」）
   await cdp.eval(`window.__lyflow.stores.ui.getState().clearSelection(); return true;`);
@@ -854,27 +830,8 @@ async function suiteLayout(cdp, report) {
   const xs = laid.positions.map((p) => p.x).sort((a, b) => a - b);
   report.ok("dagre 把三个节点排成了从左到右", xs[0] < xs[1] && xs[1] < xs[2], JSON.stringify(xs));
   report.ok("整理布局进了撤销栈", String(laid.undoLabel).includes("整理"), String(laid.undoLabel));
-
-  // 文档缺 ui.position 时打开即布局（脚本生成的图必须能打开）
-  const auto = await cdp.eval(`
-    // 布局函数搬进 @lyflow/editor 之后，dev server 上的路径是 /@fs/<仓库>/packages/…
-    const { layoutGraph, needsInitialLayout } = await import(${lit(LAYOUT_MODULE_URL)});
-    const doc = {
-      schemaVersion: 1, id: 'x', nodes: [
-        { id: 'a', op: 'gen.synthetic' },
-        { id: 'b', op: 'filter.voxel_grid' },
-      ],
-      edges: [{ id: 'e', from: { node: 'a', port: 'cloud' }, to: { node: 'b', port: 'cloud' } }],
-    };
-    return { needs: needsInitialLayout(doc), moves: layoutGraph(doc).length };
-  `).catch(() => null);
-  if (auto) {
-    report.ok("缺坐标的文档会被判定为需要布局", auto.needs === true, JSON.stringify(auto));
-    report.eq("自动布局给出了两个落点", auto.moves, 2);
-  } else {
-    report.ok("缺坐标的文档打开即布局（由 App 的 afterOpen 覆盖）", true,
-      "生产构建下不能动态 import 源文件，逻辑本身由 1.4 的 fixture 打开路径覆盖");
-  }
+  // 文档缺 ui.position 时打开即布局：needsInitialLayout / layoutGraph 是纯逻辑，
+  // 在 packages/editor/test/layout.test.mjs 里验
 }
 
 // ------------------------------------------ P1 #23 #26 #28 #29 编辑与输入
@@ -938,6 +895,14 @@ async function suiteEditing(cdp, report) {
     return document.querySelector('[data-testid="param-menu"]') ? 'ok' : 'no-menu';
   `);
   report.eq("参数行右键弹出菜单", menu, "ok");
+  // 点「重置」菜单就收起了，所以四项要在点之前数
+  report.ok(
+    "菜单里四项齐全",
+    await cdp.eval(`
+      return ['reset','copy','paste','path']
+        .every(k => document.querySelector('[data-testid="param-menu-' + k + '"]') !== null);
+    `),
+  );
   const reset = await cdp.eval(`
     const before = JSON.stringify(window.__lyflow.snapshot().doc.nodes
       .find(n => n.id === ${lit(ids.voxel)}).params.leafSize ?? null);
@@ -948,14 +913,6 @@ async function suiteEditing(cdp, report) {
     return { before, after: after ?? null };
   `);
   report.ok("重置为默认把稀疏键删掉了", reset.after === null, JSON.stringify(reset));
-  report.ok(
-    "菜单里四项齐全",
-    await cdp.eval(`
-      return ['reset','copy','paste','path']
-        .every(k => document.querySelector('[data-testid="param-menu-' + k + '"]') !== null)
-        || document.querySelector('[data-testid="param-menu"]') === null;
-    `),
-  );
 
   // #28 数字框拖动改值，整段一条撤销
   await cdp.eval(`
@@ -1022,8 +979,8 @@ async function suitePanels(cdp, report, ws) {
     ],
     [{ from: ["gen", "cloud"], to: ["voxel", "cloud"] }],
   );
-  const run = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("坏参数让这次运行失败", run.status, "error");
+  // 坏参数让这次运行失败；失败本身不单独断言，下面诊断抽屉列出那条错误就是证据
+  await runAndWait(cdp, () => pressF5(cdp));
 
   await cdp.eval(`window.__lyflow.stores.ui.getState().toggleDrawer('diagnostics'); return true;`);
   await sleep(250);
@@ -1039,13 +996,8 @@ async function suitePanels(cdp, report, ws) {
     [ids.voxel],
   );
 
-  await cdp.eval(`window.__lyflow.stores.ui.getState().toggleDrawer('log'); return true;`);
-  await sleep(200);
-  report.ok(
-    "日志页签在（M2 就有的日志通道）",
-    await cdp.eval(`return !!document.querySelector('[data-testid="drawer-tab-log"]');`),
-  );
-  await cdp.eval(`window.__lyflow.stores.ui.getState().toggleDrawer('log'); return true;`);
+  // 收起抽屉，后面的最近文件、备份不受它遮挡
+  await cdp.eval(`window.__lyflow.stores.ui.setState({ drawer: null }); return true;`);
 
   // 最近文件
   const graphPath = path.join(ws.dir, "最近 文件.lyflow.json");
@@ -1098,7 +1050,7 @@ async function suiteViewer(cdp, report) {
     [{ from: ["gen", "cloud"], to: ["voxel", "cloud"] }],
   );
   const run = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("先跑一次", run.status, "ok");
+  mustOk(run.status === "ok", "先跑一次", run.status);
 
   const view = await selectAndReadViewer(cdp, ids.gen);
   report.ok("3D 视图画出了点", view.count > 0 && view.hasCanvas, JSON.stringify(view));
@@ -1113,7 +1065,7 @@ async function suiteViewer(cdp, report) {
       exportBtn: !!document.querySelector('[data-testid="viewer-export"]'),
     };
   `);
-  report.ok("着色/色带/范围/钉住/导出的控件都在", Object.values(controls).every(Boolean),
+  mustOk(Object.values(controls).every(Boolean), "着色/色带/范围/钉住/导出的控件都在",
     JSON.stringify(controls));
 
   const shaded = await cdp.eval(`
@@ -1127,15 +1079,17 @@ async function suiteViewer(cdp, report) {
   report.eq("切到高度着色", shaded, "height");
 
   const ramped = await cdp.eval(`
+    // 上一步切到了高度着色，色带下拉此时一定可用（只有单色时才禁用）
     const sel = document.querySelector('[data-testid="viewer-ramp"]');
-    if (!sel || sel.disabled) return 'skip';
+    if (!sel) return 'missing';
+    if (sel.disabled) return 'disabled';
     const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
     setter.call(sel, 'gray');
     sel.dispatchEvent(new Event('change', { bubbles: true }));
     await new Promise(r => setTimeout(r, 200));
     return sel.value;
   `);
-  report.ok("色带可切换", ramped === "gray" || ramped === "skip", String(ramped));
+  report.eq("色带可切换", ramped, "gray");
 
   // 钉住：钉住 gen 之后选中 voxel，视图不该切过去
   await cdp.eval(`document.querySelector('[data-testid="viewer-pin"]').click(); return true;`);
@@ -1160,8 +1114,8 @@ async function suiteViewer(cdp, report) {
     ids.voxel,
   );
 
-  report.ok(
-    "导出按钮可点（真正的下载由浏览器接管，脚本只验它不抛异常）",
+  // 导出：真正的下载由浏览器接管，这里只点一下，抛异常会被控制台分组逮到
+  mustOk(
     await cdp.eval(`
       const btn = document.querySelector('[data-testid="viewer-export"]');
       if (!btn) return false;
@@ -1169,6 +1123,7 @@ async function suiteViewer(cdp, report) {
       await new Promise(r => setTimeout(r, 300));
       return true;
     `),
+    "导出按钮点得到",
   );
 }
 

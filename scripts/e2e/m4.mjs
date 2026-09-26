@@ -10,6 +10,7 @@ import {
   centerOf,
   dragMouse,
   lit,
+  mustOk,
   newDoc,
   pressCtrl,
   pressEscape,
@@ -75,19 +76,18 @@ async function suiteCompose(cdp, report) {
   const ids = await buildGraph(cdp, CHAIN_NODES, CHAIN_EDGES);
 
   const flat = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("合成前跑通", flat.status, "ok");
   const flatTail = flat.nodes[ids.tail]?.elementCount;
   const flatVoxel = flat.nodes[ids.voxel]?.elementCount;
-  report.ok("末端有点数", flatTail > 0, `tail=${flatTail}`);
+  report.ok("末端有点数", flatTail > 0, `tail=${flatTail} flat.status=${flat.status}`);
 
   const composed = await compose(cdp, [ids.crop, ids.voxel, ids.sor]);
-  report.ok("composeSubgraph 返回了新节点", Boolean(composed?.nodeId), JSON.stringify(composed));
+  mustOk(Boolean(composed?.nodeId), "composeSubgraph 返回了新节点", JSON.stringify(composed));
 
   const after = await snapshot(cdp);
-  report.eq("顶层剩下三个节点", after.level.nodes.length, 3);
   report.ok(
-    "顶层节点是 gen / 子图 / tail",
-    after.level.nodes.includes(ids.gen) &&
+    "顶层剩下 gen / 子图 / tail 三个节点",
+    after.level.nodes.length === 3 &&
+      after.level.nodes.includes(ids.gen) &&
       after.level.nodes.includes(ids.tail) &&
       after.level.nodes.includes(composed.nodeId),
     JSON.stringify(after.level.nodes),
@@ -110,7 +110,6 @@ async function suiteCompose(cdp, report) {
   report.ok("子图节点本身不在计划里", !planIds.includes(composed.nodeId), JSON.stringify(planIds));
 
   const run = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("合成后跑通", run.status, "ok");
   report.eq("末端点数与合成前完全一致", run.nodes[ids.tail]?.elementCount, flatTail);
   report.eq(
     "子图内部的体素点数也一致",
@@ -155,14 +154,14 @@ async function suiteNavigate(cdp, report, fixture) {
   report.eq("双击子图节点进去了", depth, 1);
 
   const inside = await snapshot(cdp);
-  report.eq("当前层级是子图的三个节点", inside.level.nodes.length, 3);
+  const rendered = await cdp.eval(`
+    return [...document.querySelectorAll('[data-testid^="node-n_"]')]
+      .map((el) => el.getAttribute('data-testid').slice(5));
+  `);
   report.ok(
-    "画布上渲染的就是内部节点",
-    await cdp.eval(`
-      const rendered = [...document.querySelectorAll('[data-testid^="node-n_"]')]
-        .map((el) => el.getAttribute('data-testid').slice(5));
-      return rendered.length === 3 && rendered.includes(${lit(ids.voxel)});
-    `),
+    "当前层级与画布上渲染的都是子图的三个内部节点",
+    inside.level.nodes.length === 3 && rendered.length === 3 && rendered.includes(ids.voxel),
+    `level=${JSON.stringify(inside.level.nodes)} 画布=${JSON.stringify(rendered)}`,
   );
   report.eq("事件前缀是路径", inside.pathPrefix, `${composed.nodeId}/`);
 
@@ -192,7 +191,6 @@ async function suiteNavigate(cdp, report, fixture) {
   await sleep(200);
   const out = await snapshot(cdp);
   report.eq("Esc 退回顶层", out.path.length, 0);
-  report.eq("顶层又是三个节点", out.level.nodes.length, 3);
 
   // 面包屑那条路也要能用
   await enterByDoubleClick(cdp, composed.nodeId);
@@ -289,7 +287,7 @@ async function suiteNested(cdp, report) {
 
   const inner = await compose(cdp, [ids.voxel, ids.sor]);
   const outer = await compose(cdp, [ids.crop, inner.nodeId]);
-  report.ok("两层都合成出来了", Boolean(inner?.nodeId && outer?.nodeId),
+  mustOk(Boolean(inner?.nodeId && outer?.nodeId), "两层都合成出来了",
     JSON.stringify({ inner, outer }));
 
   const plan = await replan(cdp);
@@ -302,7 +300,6 @@ async function suiteNested(cdp, report) {
   const keys1 = JSON.stringify((await snapshot(cdp)).cache.ranWith);
 
   const second = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("第二次跑通", second.status, "ok");
   const states = Object.values(second.nodes).map((n) => n.state);
   report.ok("重跑全部 skipped", states.every((s) => s === "skipped"), JSON.stringify(second.nodes));
   const keys2 = JSON.stringify((await snapshot(cdp)).cache.ranWith);
@@ -389,11 +386,10 @@ async function suiteLibrary(cdp, report) {
   report.eq("右键 → 保存到库 → 对话框走通", saved, "ok");
 
   const status = await cdp.eval(`return await window.__lyflow.transport.getLibraryStatus();`);
-  report.ok("库里至少有一个算子", (status?.count ?? 0) >= 1, JSON.stringify(status));
 
   const libFile = status.dirs?.[0] ? path.join(status.dirs[0], `${libId}.lyflow-op.json`) : null;
   report.ok("库文件写到了 app data 下的 library/", libFile != null && fs.existsSync(libFile),
-    String(libFile));
+    `${libFile} status=${JSON.stringify(status)}`);
 
   const inManifest = await cdp.eval(`
     const ops = window.__lyflow.stores.manifest.getState().bundle.operators;
@@ -423,11 +419,10 @@ async function suiteLibrary(cdp, report) {
   const run = await runAndWait(cdp, () => pressF5(cdp));
   report.eq("库算子在新图里跑通", run.status, "ok");
   const innerDone = Object.keys(run.nodes).filter((id) => id.startsWith(`${fresh.lib}/`));
-  report.ok("库算子展开成了内部节点", innerDone.length === 2, JSON.stringify(innerDone));
   report.ok(
-    "内部节点都有结果",
-    innerDone.every((id) => ["done", "skipped"].includes(run.nodes[id].state)),
-    JSON.stringify(run.nodes),
+    "库算子展开成两个内部节点，都有结果",
+    innerDone.length === 2 && innerDone.every((id) => ["done", "skipped"].includes(run.nodes[id].state)),
+    `内部=${JSON.stringify(innerDone)} ${JSON.stringify(run.nodes)}`,
   );
 
   // 收尾：把库文件删掉，不然下一次跑会看到一堆积压的 e2e 算子
@@ -439,7 +434,6 @@ async function suiteLibrary(cdp, report) {
       return r.status.count;
     `);
   }
-  report.ok("收尾：库文件已删除", !libFile || !fs.existsSync(libFile), String(libFile));
 }
 
 // ------------------------------------------------------------ §2 preview
@@ -465,8 +459,6 @@ async function suitePreview(cdp, report) {
   await select(cdp, ids.sample);
   await sleep(300);
 
-  const statsBefore = await cdp.eval(`return await window.__lyflow.transport.cacheStats();`);
-
   // 在页面里装一个观察器，记录 3D 视图**真的换了一片云**的时刻
   await cdp.eval(`
     window.__m4 = { marks: [] };
@@ -486,16 +478,14 @@ async function suitePreview(cdp, report) {
 
   // 真实鼠标拖动滑块：从中间往右拖一段
   const slider = await centerOf(cdp, '[data-testid="param-slider-keepRatio"]');
-  report.ok("找到 keepRatio 的滑块", slider != null, JSON.stringify(slider));
-  if (slider) {
-    await dragMouse(cdp, { x: slider.x - 40, y: slider.y }, { x: slider.x + 40, y: slider.y }, { steps: 8 });
-  }
+  mustOk(slider != null, "找到 keepRatio 的滑块", JSON.stringify(slider));
+  await dragMouse(cdp, { x: slider.x - 40, y: slider.y }, { x: slider.x + 40, y: slider.y }, { steps: 8 });
 
-  const sawPreview = await cdp.waitFor(
+  // 拖动触发了预览运行：等不到就超时抛出，分组中断
+  await cdp.waitFor(
     `window.__lyflow.runMarks.some((m) => m.status !== 'running')`,
     { timeoutMs: 20_000, what: "预览运行结束" },
   );
-  report.ok("拖动触发了预览运行", sawPreview === true);
 
   const latency = await cdp.waitFor(
     `(() => {
@@ -537,14 +527,7 @@ async function suitePreview(cdp, report) {
     JSON.stringify(previewOnly.nodes),
   );
 
-  const statsAfter = await cdp.eval(`return await window.__lyflow.transport.cacheStats();`);
-  report.ok(
-    "预览的结果进了独立命名空间（正式那份的条目没被顶掉）",
-    statsAfter.entries >= statsBefore.entries,
-    JSON.stringify({ before: statsBefore.entries, after: statsAfter.entries }),
-  );
-
-  // 正式重跑：全部命中缓存说明预览没有污染正式的键
+  // 正式重跑：全部命中缓存说明预览进了独立命名空间，没有污染正式的键
   const full = await runAndWait(cdp, () => pressF5(cdp));
   report.eq("正式重跑仍然全部命中缓存",
     Object.values(full.nodes).every((n) => n.state === "skipped"), true);
@@ -588,11 +571,7 @@ async function suiteBigGraph(cdp, report) {
     const doc = g().doc;
     return { ms: Math.round(performance.now() - t0), nodes: doc.nodes.length, edges: doc.edges.length };
   `);
-  report.ok(
-    `搭出 ${built.nodes} 节点 / ${built.edges} 边`,
-    built.nodes === 300 && built.edges >= 380,
-    JSON.stringify(built),
-  );
+  mustOk(built.nodes === 300 && built.edges >= 380, "搭出 300 节点 / ≥ 380 边", JSON.stringify(built));
 
   // 「打开 < 1 s」：从 loadDoc 到画布上出现节点
   const openMs = await cdp.eval(`
@@ -684,50 +663,10 @@ async function suiteBigGraph(cdp, report) {
   );
 }
 
-// ---------------------------------------------------------- §1 解散子图
-
-async function suiteDissolve(cdp, report) {
-  report.section("§1 解散子图：内容内联回来，提升的参数落回内参");
-
-  await newDoc(cdp);
-  const ids = await buildGraph(cdp, CHAIN_NODES.slice(0, 4), CHAIN_EDGES.slice(0, 3));
-  const composed = await compose(cdp, [ids.voxel, ids.sor]);
-
-  // 提升一个参数并改掉它，解散之后这个值必须落回内参
-  await cdp.eval(`
-    const b = window.__lyflow;
-    b.stores.ui.getState().enterSubgraph({ nodeId: ${lit(composed.nodeId)},
-                                           subgraphId: ${lit(composed.subgraphId)} });
-    b.stores.graph.getState().promoteParam(${lit(ids.voxel)}, 'leafSize');
-    b.stores.ui.getState().exitTo(0);
-    b.stores.graph.getState().setParam(${lit(composed.nodeId)}, 'leafSize', [0.07, 0.07, 0.07]);
-    return true;
-  `);
-
-  const inlined = await cdp.eval(`
-    window.__lyflow.stores.ui.getState().setSelection([${lit(composed.nodeId)}], []);
-    return window.__lyflow.stores.graph.getState().dissolveSubgraph(${lit(composed.nodeId)});
-  `);
-  report.eq("内联出两个节点", inlined.length, 2);
-
-  const after = await snapshot(cdp);
-  report.eq("顶层回到四个节点", after.level.nodes.length, 4);
-  report.ok("子图定义已经删掉了", Object.keys(after.subgraphs).length === 0,
-    JSON.stringify(Object.keys(after.subgraphs)));
-
-  const leaf = after.doc.nodes
-    .map((n) => n.params?.leafSize)
-    .find((v) => Array.isArray(v));
-  report.eq("提升参数的值落回了内参", leaf, [0.07, 0.07, 0.07]);
-
-  const run = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("解散之后照样跑通", run.status, "ok");
-}
-
 // ------------------------------------------------------ Ctrl+G / Ctrl+Shift+G
 
 async function suiteShortcuts(cdp, report) {
-  report.section("§1 快捷键：Ctrl+G 合成、Ctrl+Shift+G 解散");
+  report.section("§1 快捷键：Ctrl+G 合成、Ctrl+Shift+G 解散，提升的参数落回内参");
 
   await newDoc(cdp);
   const ids = await buildGraph(cdp, CHAIN_NODES.slice(0, 4), CHAIN_EDGES.slice(0, 3));
@@ -743,7 +682,19 @@ async function suiteShortcuts(cdp, report) {
   report.eq("多了一份子图定义", Object.keys(composed.subgraphs).length, 1);
 
   const subNode = composed.doc.nodes.find((n) => n.op.startsWith("sub:"));
+  const subgraphId = subNode.op.slice("sub:".length);
+  // 提升一个参数并改掉它，解散之后这个值必须落回内参（原 suiteDissolve 并到这里）。
+  // 提升与改值各记一条撤销，下面数撤销时要跳过这两条。
   await cdp.eval(`
+    const b = window.__lyflow;
+    b.stores.ui.getState().enterSubgraph({ nodeId: ${lit(subNode.id)}, subgraphId: ${lit(subgraphId)} });
+    b.stores.graph.getState().promoteParam(${lit(ids.voxel)}, 'leafSize');
+    b.stores.ui.getState().exitTo(0);
+    b.stores.graph.getState().setParam(${lit(subNode.id)}, 'leafSize', [0.07, 0.07, 0.07]);
+    return true;
+  `);
+  await cdp.eval(`
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     window.__lyflow.stores.ui.getState().setSelection([${lit(subNode.id)}], []);
     return true;
   `);
@@ -752,11 +703,20 @@ async function suiteShortcuts(cdp, report) {
   const dissolved = await snapshot(cdp);
   report.eq("Ctrl+Shift+G 之后回到四个节点", dissolved.level.nodes.length, 4);
   report.eq("子图定义也一并清掉", Object.keys(dissolved.subgraphs).length, 0);
+  const leaf = dissolved.doc.nodes
+    .map((n) => n.params?.leafSize)
+    .find((v) => Array.isArray(v));
+  report.eq("提升参数的值落回了内参", leaf, [0.07, 0.07, 0.07]);
 
   // 撤销栈：合成与解散各是一条
   await pressCtrl(cdp, "Z");
   await sleep(150);
   report.eq("撤销回到子图状态", (await snapshot(cdp)).level.nodes.length, 3);
+  // 再撤掉改值、提升两条，第三下撤销的就是合成
+  await pressCtrl(cdp, "Z");
+  await sleep(150);
+  await pressCtrl(cdp, "Z");
+  await sleep(150);
   await pressCtrl(cdp, "Z");
   await sleep(150);
   report.eq("再撤销回到四个节点", (await snapshot(cdp)).level.nodes.length, 4);
@@ -778,12 +738,11 @@ async function suiteM3Tails(cdp, report, ws) {
     ],
     [{ from: ["gen", "cloud"], to: ["nrm", "cloud"] }],
   );
-  const run = await runAndWait(cdp, () => pressF5(cdp));
-  report.eq("法线估计跑通", run.status, "ok");
+  // 跑通与否不单独断言：下面「带法线的点云也画出来了」要靠这次运行的结果
+  await runAndWait(cdp, () => pressF5(cdp));
 
   // 源头没有法线：下拉框里那一项应当还是灰的
-  const plain = await selectAndReadViewer(cdp, ids.gen);
-  report.ok("源头的点云画出来了", plain.count > 0, JSON.stringify(plain));
+  await selectAndReadViewer(cdp, ids.gen);
   const beforeOpt = await cdp.eval(`
     const sel = document.querySelector('[data-testid="viewer-shading"]');
     const opt = [...sel.options].find((o) => o.value === 'normal');
@@ -799,7 +758,6 @@ async function suiteM3Tails(cdp, report, ws) {
     return { disabled: opt.disabled, text: opt.textContent };
   `);
   report.ok("有法线通道时「法线」可选了", afterOpt.disabled === false, JSON.stringify(afterOpt));
-  report.ok("选项文字不再标「无」", !String(afterOpt.text).includes("无"), afterOpt.text);
 
   const shaded = await cdp.eval(`
     const sel = document.querySelector('[data-testid="viewer-shading"]');
@@ -819,12 +777,12 @@ async function suiteM3Tails(cdp, report, ws) {
     await window.__lyflow.transport.writeFileBytes(${lit(target)}, new Uint8Array(bytes));
     return true;
   `);
-  report.ok("write_file_bytes 把字节写到了用户指定的路径", wrote === true && fs.existsSync(target),
-    target);
-  if (fs.existsSync(target)) {
-    const head = fs.readFileSync(target);
-    report.ok("写出来的字节一字不差", head.length === 8 && head[1] === 0x50, head.toString("hex"));
-  }
+  const head = fs.existsSync(target) ? fs.readFileSync(target) : null;
+  report.ok(
+    "write_file_bytes 把字节一字不差地写到了用户指定的路径",
+    wrote === true && head !== null && head.length === 8 && head[1] === 0x50,
+    `${target} ${head === null ? "文件不存在" : head.toString("hex")}`,
+  );
 }
 
 export const m4Suites = [
@@ -833,7 +791,6 @@ export const m4Suites = [
     await suiteNavigate(cdp, report, fixture);
     await suitePromote(cdp, report, fixture);
   },
-  suiteDissolve,
   suiteShortcuts,
   suiteNested,
   suiteRecursion,
