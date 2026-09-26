@@ -648,6 +648,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn remove_takes_the_node_and_all_of_its_edges() {
         let dir = workspace("remove");
         let path = graph(&dir, false);
@@ -667,6 +668,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn add_gives_a_new_node_a_corner_of_its_own() {
         let dir = workspace("add");
         let path = graph(&dir, false);
@@ -714,6 +716,7 @@ mod tests {
 
     /// 真实用途是「短接一段」：让 a 的下游改从 a 的上游取值，a 自己留在图里。
     #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn rewire_moves_every_edge_off_the_left_port() {
         let dir = workspace("rewire");
         let path = graph(&dir, false);
@@ -743,6 +746,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn set_writes_one_param_and_reports_it_in_the_diff() {
         let dir = workspace("set");
         let path = graph(&dir, false);
@@ -788,6 +792,7 @@ mod tests {
 
     /// 幂等：同一条命令跑两遍，第二遍三个动作全是 no-op，diff 为空。
     #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn running_the_same_patch_twice_changes_nothing_the_second_time() {
         let dir = workspace("idempotent");
         let path = graph(&dir, false);
@@ -849,6 +854,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn dry_run_prints_the_same_diff_and_touches_nothing() {
         let dir = workspace("dryrun");
         let path = graph(&dir, false);
@@ -920,6 +926,7 @@ mod tests {
 
     /// 两层校验各拦一次：形状（自环）在 Rust 这一层，参数范围在 core 那一层。
     #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn a_patch_that_breaks_the_shape_is_not_written() {
         let dir = workspace("invalid");
         let path = graph(&dir, false);
@@ -941,6 +948,7 @@ mod tests {
     /// 节点 id 的通配是大小写敏感的（m6-plan §10 第 6 条）：`N_FB_*` 配不上 `n_fb_*`，
     /// 于是这条命令是 no-op 而不是「悄悄把那个节点删了」。
     #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn node_globs_are_case_sensitive() {
         let dir = workspace("case");
         let path = graph(&dir, false);
