@@ -116,28 +116,36 @@ test("子图里已经提升过的内参：只补最外一级，默认值取这�
   assert.deepEqual(doc().params.leafSize.binds, []);
 });
 
-test("已经由图参数提供的参数不能再纳入一次；类型对不上的绑定被拒", () => {
+test("绑定：已由图参数提供的不能再纳入、类型对不上的被拒；bindToGraphParam 成功时显式值删掉、值从此取图参数", () => {
   reset();
   assert.equal(g().promoteToGraphParam("n_plane", "distanceThreshold"), null);
   assert.match(g().lastRejection, /planeTol/);
   assert.equal(g().bindToGraphParam("planeTol", "n_plane", "maxIterations"), false, "float 图参数绑 int 参数");
   assert.match(g().lastRejection, /类型不同/);
-});
 
-test("bindToGraphParam：显式值删掉、值从此取图参数", () => {
-  reset();
   const name = g().promoteToGraphParam("n_voxel", "leafSize");
-  assert.equal(g().bindToGraphParam(name, "n_clean2", "leafSize"), true);
-  assert.deepEqual(doc().params.leafSize.binds, ["n_voxel.leafSize", "n_clean2.leafSize"]);
+  assert.deepEqual(node("n_clean").params.leafSize, [0.01, 0.01, 0.01], "前提：n_clean 上写着显式值");
+  assert.equal(g().bindToGraphParam(name, "n_clean", "leafSize"), true);
+  assert.deepEqual(doc().params.leafSize.binds, ["n_voxel.leafSize", "n_clean.leafSize"]);
   assert.equal(g().past.at(-1).label, "绑定到图参数 leafSize");
+  assert.equal(node("n_clean").params.leafSize, undefined, "显式值删掉：不会有 param_conflict");
+  g().setParam("n_clean", "leafSize", [0.02, 0.02, 0.02]);
+  assert.deepEqual(doc().params.leafSize.default, [0.02, 0.02, 0.02], "值从此取图参数");
+  assert.equal(node("n_clean").params.leafSize, undefined);
 });
 
-test("解除绑定与删除：当前值写回节点（稀疏存储照旧），行为不变", () => {
+test("解除绑定、删节点与删除图参数：当前值写回节点（稀疏存储照旧），行为不变", () => {
   reset();
   g().unbindFromGraphParam("planeTol", "n_plane.distanceThreshold");
   assert.equal(node("n_plane").params.distanceThreshold, 0.006, "当前值写回节点");
   assert.deepEqual(doc().params.planeTol.binds, []);
   g().undo();
+
+  // 删节点：指着它的 bind 一并摘掉，图参数留着
+  g().deleteNodes(["n_plane"]);
+  assert.deepEqual(doc().params.planeTol.binds, []);
+  g().undo();
+  assert.deepEqual(doc().params.planeTol.binds, ["n_plane.distanceThreshold"]);
 
   const name = g().promoteToGraphParam("n_voxel", "leafSize");
   g().setParam("n_voxel", "leafSize", [0.01, 0.01, 0.01]); // 等于算子默认值
@@ -165,12 +173,6 @@ test("改名与改规格：名字规则、键的位置、undefined 删字段", (
   assert.equal("max" in gp, false);
   g().setGraphParamSpec("leafSize", { binds: [], default: 1 });
   assert.deepEqual(gp.binds, doc().params.leafSize.binds, "规格补丁改不了 binds / default");
-});
-
-test("删节点：指着它的 bind 一并摘掉，图参数留着", () => {
-  reset();
-  g().deleteNodes(["n_plane"]);
-  assert.deepEqual(doc().params.planeTol.binds, []);
 });
 
 test("运行传参：default ← 当前配方覆盖（P1 覆盖恒为空）；没有图参数时不传", () => {

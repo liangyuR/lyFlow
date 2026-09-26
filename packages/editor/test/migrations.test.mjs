@@ -47,7 +47,7 @@ const action = {
   },
 };
 
-test("edits：删两条旧边、插一个节点、加三条边，一次撤销全部回去", () => {
+test("edits：删两条旧边、插一个节点、加三条边，一次撤销全部回去；不带 edits 的只改版本与参数", () => {
   const g = useGraphStore.getState();
   const before = doc();
   g.loadDoc(structuredClone(before), "g.lyflow.json");
@@ -75,14 +75,14 @@ test("edits：删两条旧边、插一个节点、加三条边，一次撤销全
 
   useGraphStore.getState().undo();
   assert.deepEqual(JSON.parse(JSON.stringify(useGraphStore.getState().doc)), before);
-});
 
-test("不带 edits 的迁移照旧只改参数", () => {
-  const g = useGraphStore.getState();
-  g.loadDoc(doc(), "g.lyflow.json");
+  // 不带 edits 的迁移照旧只改版本与参数，节点和边都不动
   const { edits: _, ...plain } = action;
-  g.applyMigrations([plain]);
-  const after = useGraphStore.getState().doc;
-  assert.equal(after.nodes.length, 3);
-  assert.equal(after.edges.length, 3);
+  assert.equal(useGraphStore.getState().applyMigrations([{ ...plain, params: { level: 2 } }]), 1);
+  const migrated = JSON.parse(JSON.stringify(useGraphStore.getState().doc));
+  const s = migrated.nodes.find((n) => n.id === "s");
+  assert.equal(s.opVersion, "2.0.0");
+  assert.deepEqual(s.params, { level: 2 });
+  assert.deepEqual(migrated.nodes.map((n) => n.id), ["a", "b", "s"]);
+  assert.deepEqual(migrated.edges, before.edges);
 });

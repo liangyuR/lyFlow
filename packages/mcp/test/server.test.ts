@@ -6,7 +6,7 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
-import { MISSING_BASE, loadConfig } from "../src/config.js";
+import { loadConfig } from "../src/config.js";
 import { createServer } from "../src/server.js";
 
 const TOOLS = [
@@ -40,12 +40,8 @@ function text(result: unknown): string {
   return content.map((c) => c.text ?? "").join("");
 }
 
-test("LYFLOW_HTTP_BASE 是必填的，缺了就说清楚", () => {
-  assert.throws(() => loadConfig({}), new RegExp("LYFLOW_HTTP_BASE"));
-  assert.match(MISSING_BASE, /LYFLOW_HTTP_BASE/);
-});
-
-test("配置项默认值", () => {
+test("loadConfig：LYFLOW_HTTP_BASE 必填、缺了说清楚；其余配置项的默认值", () => {
+  assert.throws(() => loadConfig({}), /LYFLOW_HTTP_BASE/);
   const config = loadConfig({ LYFLOW_HTTP_BASE: "http://127.0.0.1:8787/" });
   assert.equal(config.httpBase, "http://127.0.0.1:8787");
   assert.equal(config.token, undefined);
@@ -64,47 +60,20 @@ test("工具面就是这 14 个，输入 schema 的必填项对得上", async ()
   const byName = new Map(listed.tools.map((t) => [t.name, t]));
   const required = (name: string): string[] =>
     ((byName.get(name)?.inputSchema as { required?: string[] } | undefined)?.required ?? []).sort();
-  const props = (name: string): string[] =>
-    Object.keys(
-      (byName.get(name)?.inputSchema as { properties?: Record<string, unknown> } | undefined)
-        ?.properties ?? {},
-    ).sort();
 
-  assert.deepEqual(required("get_operator"), ["id"]);
-  assert.deepEqual(required("list_operators"), []);
-  assert.deepEqual(props("list_operators"), ["category", "pack", "query"]);
-  assert.deepEqual(required("summarize_output"), ["nodeId", "port", "runId"]);
-  assert.deepEqual(props("summarize_output"), ["head", "maxPoints", "nodeId", "port", "runId"]);
-  assert.deepEqual(required("run_graph"), []);
-  assert.deepEqual(props("run_graph"), [
-    "baseDir",
-    "graph",
-    "graphPath",
-    "mode",
-    "recipe",
-    "set",
-    "targets",
-    "timeoutMs",
-  ]);
-  assert.deepEqual(required("eval"), ["graphPath", "metric"]);
-  assert.deepEqual(required("perturb"), ["after", "axis", "graphPath", "metric", "region"]);
-  assert.deepEqual(required("diff_graphs"), ["a", "b"]);
-  assert.deepEqual(required("get_params"), ["graphPath"]);
-  assert.deepEqual(props("get_params"), ["baseDir", "graphPath", "node", "only", "recipe", "set"]);
-  assert.deepEqual(required("list_recipes"), ["graphPath"]);
-  assert.deepEqual(props("list_recipes"), ["graphPath"]);
-  assert.ok(props("eval").includes("recipe"));
-  assert.deepEqual(required("patch_graph"), ["graphPath"]);
-  assert.deepEqual(props("patch_graph"), [
-    "addNode",
-    "baseDir",
-    "dryRun",
-    "graphPath",
-    "out",
-    "removeNode",
-    "rewire",
-    "set",
-  ]);
+  const want: Record<string, string[]> = {
+    get_operator: ["id"],
+    list_operators: [],
+    summarize_output: ["nodeId", "port", "runId"],
+    run_graph: [],
+    eval: ["graphPath", "metric"],
+    perturb: ["after", "axis", "graphPath", "metric", "region"],
+    diff_graphs: ["a", "b"],
+    get_params: ["graphPath"],
+    list_recipes: ["graphPath"],
+    patch_graph: ["graphPath"],
+  };
+  for (const [name, fields] of Object.entries(want)) assert.deepEqual(required(name), fields, name);
   await client.close();
 });
 

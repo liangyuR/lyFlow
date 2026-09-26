@@ -37,13 +37,10 @@ function saved() {
   return JSON.parse(JSON.stringify(useGraphStore.getState().doc));
 }
 
-test("样例图带顶层 params，fixture 里至少两个", () => {
-  assert.ok(example.params && Object.keys(example.params).length > 0);
-  assert.equal(Object.keys(fixture().params).length, 2);
-});
-
 test("打开即保存：params 原样保留", () => {
+  assert.ok(example.params && Object.keys(example.params).length > 0, "前提：样例图带顶层 params");
   const doc = fixture();
+  assert.equal(Object.keys(doc.params).length, 2, "前提：fixture 里有两个图参数");
   const before = JSON.stringify(doc.params);
   useGraphStore.getState().loadDoc(structuredClone(doc), "g.lyflow.json");
   const out = saved();
@@ -52,37 +49,68 @@ test("打开即保存：params 原样保留", () => {
   assert.deepEqual(out, doc);
 });
 
-test("编辑、迁移、撤销重做之后 params 仍原样保留", () => {
-  useManifestStore.getState().replaceBundle(manifest, 1);
-  const doc = fixture();
-  const before = JSON.stringify(doc.params);
-  const g = useGraphStore.getState();
-  g.loadDoc(structuredClone(doc), "g.lyflow.json");
-
-  g.setName("改个名");
-  g.setParam("n_plane", "maxIterations", 500);
-  g.moveNodes([{ id: "n_load", position: { x: 10, y: 20 } }]);
-  g.setBypass(["n_voxel"], true);
-  g.markGraphOutput({ node: "n_plane", port: "inliers" }, "floor");
-  g.applyMigrations([
-    {
-      kind: "migration",
-      nodeId: "n_load",
-      op: "io.load_pcd",
-      opVersion: "1.0.0",
-      params: { path: "samples/other.pcd" },
+/** 两份样例各走一串不碰图参数的编辑；`edit` 里顺带确认编辑确实生效，`check` 是该样例特有的收尾检查。 */
+const EDIT_SAMPLES = [
+  {
+    name: "样例图 + 多目标参数",
+    doc: fixture,
+    edit(g) {
+      g.setName("改个名");
+      g.setParam("n_plane", "maxIterations", 500);
+      g.moveNodes([{ id: "n_load", position: { x: 10, y: 20 } }]);
+      g.setBypass(["n_voxel"], true);
+      g.markGraphOutput({ node: "n_plane", port: "inliers" }, "floor");
+      g.applyMigrations([
+        {
+          kind: "migration",
+          nodeId: "n_load",
+          op: "io.load_pcd",
+          opVersion: "1.0.0",
+          params: { path: "samples/other.pcd" },
+        },
+      ]);
+      const edited = saved();
+      assert.equal(edited.name, "改个名", "编辑确实生效了");
+      assert.equal(edited.nodes.find((n) => n.id === "n_plane").params.maxIterations, 500);
     },
-  ]);
-  const edited = saved();
-  assert.equal(edited.name, "改个名", "编辑确实生效了");
-  assert.equal(edited.nodes.find((n) => n.id === "n_plane").params.maxIterations, 500);
-  assert.equal(JSON.stringify(edited.params), before);
+    undos: 2,
+  },
+  {
+    name: "带完整规格的图参数（param-recipe P1.1）",
+    doc: () => readJson("schema/examples/graph-params.example.lyflow.json"),
+    edit(g) {
+      g.setName("改个名");
+      g.moveNodes([{ id: "n_gen", position: { x: 5, y: 5 } }]);
+      g.setBypass(["n_cut"], true);
+    },
+    undos: 1,
+    check(params) {
+      // 规格字段逐个在（与 schema 样例同一份）
+      for (const k of ["label", "doc", "group", "min", "max", "softMin", "softMax", "step", "unit", "componentLabels"]) {
+        assert.ok(k in params.leafSize, k);
+      }
+    },
+  },
+];
 
-  g.undo();
-  g.undo();
-  assert.equal(JSON.stringify(saved().params), before);
-  g.redo();
-  assert.equal(JSON.stringify(saved().params), before);
+test("打开、编辑、迁移、撤销重做之后 params 一个字段都不丢（两份样例）", () => {
+  useManifestStore.getState().replaceBundle(manifest, 1);
+  for (const sample of EDIT_SAMPLES) {
+    const doc = sample.doc();
+    const before = JSON.stringify(doc.params);
+    const g = useGraphStore.getState();
+    g.loadDoc(structuredClone(doc), "g.lyflow.json");
+    assert.equal(JSON.stringify(saved().params), before, `${sample.name}：打开即保存`);
+
+    sample.edit(g);
+    assert.equal(JSON.stringify(saved().params), before, `${sample.name}：别的编辑不碰图参数`);
+
+    for (let i = 0; i < sample.undos; i++) g.undo();
+    assert.equal(JSON.stringify(saved().params), before, `${sample.name}：撤销之后`);
+    g.redo();
+    assert.equal(JSON.stringify(saved().params), before, `${sample.name}：重做之后`);
+    sample.check?.(saved().params);
+  }
 });
 
 test("没有顶层 params 的图不会凭空多出这个键", () => {
@@ -91,24 +119,4 @@ test("没有顶层 params 的图不会凭空多出这个键", () => {
   useGraphStore.getState().loadDoc(doc, null);
   useGraphStore.getState().setName("x");
   assert.equal("params" in saved(), false);
-});
-
-test("带完整规格的图参数（param-recipe P1.1）：打开、编辑、撤销重做之后一个字段都不丢", () => {
-  useManifestStore.getState().replaceBundle(manifest, 1);
-  const full = readJson("schema/examples/graph-params.example.lyflow.json");
-  const before = JSON.stringify(full.params);
-  const g = useGraphStore.getState();
-  g.loadDoc(structuredClone(full), "g.lyflow.json");
-  assert.equal(JSON.stringify(saved().params), before, "打开即保存");
-  g.setName("改个名");
-  g.moveNodes([{ id: "n_gen", position: { x: 5, y: 5 } }]);
-  g.setBypass(["n_cut"], true);
-  g.undo();
-  g.redo();
-  assert.equal(JSON.stringify(saved().params), before, "别的编辑不碰图参数");
-  // 规格字段逐个在（与 schema 样例同一份）
-  const leaf = saved().params.leafSize;
-  for (const k of ["label", "doc", "group", "min", "max", "softMin", "softMax", "step", "unit", "componentLabels"]) {
-    assert.ok(k in leaf, k);
-  }
 });
