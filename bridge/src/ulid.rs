@@ -61,19 +61,16 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    #[test]
-    fn is_26_crockford_chars() {
-        let id = new();
-        assert_eq!(id.len(), 26, "{id}");
-        assert!(id.bytes().all(|c| CROCKFORD.contains(&c)), "{id}");
-    }
-
     /// 同一毫秒内连续生成必须不重复 —— 这正是 run id 的实际用法
-    /// （抢占式运行时用户可能在一帧里连点两次）。
+    /// （抢占式运行时用户可能在一帧里连点两次）。每一个都是 26 个 Crockford 字符。
     #[test]
     fn ten_thousand_ids_are_unique() {
         let set: HashSet<String> = (0..10_000).map(|_| new()).collect();
         assert_eq!(set.len(), 10_000);
+        for id in &set {
+            assert_eq!(id.len(), 26, "{id}");
+            assert!(id.bytes().all(|c| CROCKFORD.contains(&c)), "{id}");
+        }
     }
 
     #[test]

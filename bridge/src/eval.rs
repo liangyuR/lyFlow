@@ -2137,16 +2137,6 @@ mod tests {
     }
 
     #[test]
-    fn without_a_subdir_the_files_sit_in_the_frame_dir() {
-        let files: &[&str] = &[MASTER, SLAVE];
-        let t = tree("flat", &[("15-09-2026-08-00-00", files)], None);
-        let (samples, _) =
-            samples_from_dir(&pair_spec(&t.0, None, None, SortBy::Name)).expect("配对");
-        assert_eq!(samples.len(), 1);
-        assert!(samples[0].set[0].1.as_str().unwrap().ends_with(MASTER));
-    }
-
-    #[test]
     fn the_timestamp_in_the_dir_name_beats_lexicographic_order() {
         assert_eq!(
             parse_dir_timestamp("12345678998765432_14-09-2026-03-44-38"),

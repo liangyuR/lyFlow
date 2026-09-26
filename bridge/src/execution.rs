@@ -195,7 +195,7 @@ impl RunManager {
     }
 
     /// 当前是否还有活跃的运行。
-    // 这个类型唯一的只读窗口。目前只有测试在用，但删掉再加回来只会让人重新想一遍锁的边界。
+    // 这个类型唯一的只读窗口。目前没有调用方，但删掉再加回来只会让人重新想一遍锁的边界。
     #[allow(dead_code)]
     pub fn active_run_id(&self) -> Option<String> {
         self.inner
@@ -440,18 +440,19 @@ mod tests {
         })
     }
 
+    /// 事件流：seq 稠密、每条带 runId，节点状态按序推进。
+    /// ADR-0022：同一份 summary 有两个出口 —— run_finished 事件里那一份，
+    /// 和按 runId 从 C ABI 取回来的那一份。它们必须逐字段相等。
     #[test]
     #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
-    fn two_node_run_emits_events_in_order_with_dense_seq() {
-        let f = run(two_node_graph(101), "");
-
+    fn run_summary_comes_back_over_the_abi_and_in_the_event() {
+        let f = run(two_node_graph(104), "");
         assert_eq!(f.run_status(), "ok");
         for (i, e) in f.events.iter().enumerate() {
             assert_eq!(e["seq"], i as i64, "seq 不连续：第 {i} 条是 {}", e["seq"]);
             assert_eq!(e["runId"], f.run_id.as_str());
             assert_eq!(e["schemaVersion"], 1);
         }
-
         let trace: Vec<String> = f
             .events
             .iter()
@@ -464,15 +465,6 @@ mod tests {
         );
         assert_eq!(f.events.first().unwrap()["kind"], "run_started");
         assert_eq!(f.events.last().unwrap()["kind"], "run_finished");
-    }
-
-    /// ADR-0022：同一份 summary 有两个出口 —— run_finished 事件里那一份，
-    /// 和按 runId 从 C ABI 取回来的那一份。它们必须逐字段相等。
-    #[test]
-    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
-    fn run_summary_comes_back_over_the_abi_and_in_the_event() {
-        let f = run(two_node_graph(104), "");
-        assert_eq!(f.run_status(), "ok");
 
         let finished = *f.kind("run_finished").last().expect("没有 run_finished");
         let in_event = finished["summary"].clone();
@@ -658,14 +650,8 @@ mod tests {
         let past_bytes = encode_indices(&past);
         assert_eq!(past_bytes.len(), 24, "空切片只有帧头");
         assert_eq!(u32_at(&past_bytes, 4), 0);
-    }
 
-    #[test]
-    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
-    fn tensor_and_indices_reject_ports_of_the_wrong_type() {
-        let f = run(passthrough_graph(4103, 800), "");
-        assert_eq!(f.run_status(), "ok", "{:#?}", f.events);
-
+        // 端口类型不对、端口不存在、run 不存在：都是错误，不是空切片
         assert!(f.core.output_tensor(&f.run_id, "p", "cloud", 0, 0).is_err());
         assert!(f.core.output_tensor(&f.run_id, "p", "indices", 0, 0).is_err());
         assert!(f.core.output_indices(&f.run_id, "p", "cloud", 0, 0).is_err());
@@ -714,38 +700,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
-    fn bad_param_marks_the_exact_input_box() {
-        let doc = serde_json::json!({
-            "schemaVersion": 1, "id": "t",
-            "nodes": [
-                {"id": "g", "op": "gen.synthetic", "params": {"pointCount": 1000}},
-                {"id": "v", "op": "filter.voxel_grid", "params": {"leafSize": [0, 0.01, 0.01]}},
-                {"id": "p", "op": "filter.passthrough"}
-            ],
-            "edges": [
-                {"id": "e1", "from": {"node": "g", "port": "cloud"}, "to": {"node": "v", "port": "cloud"}},
-                {"id": "e2", "from": {"node": "v", "port": "cloud"}, "to": {"node": "p", "port": "cloud"}}
-            ]
-        });
-        let f = run(doc, "");
-
-        assert_eq!(f.run_status(), "error");
-        assert_eq!(f.final_state("g"), "done");
-        assert_eq!(f.final_state("v"), "error");
-        // 下游是 cancelled + upstream_failed，不是 skipped（skipped 留给缓存命中）
-        assert_eq!(f.final_state("p"), "cancelled");
-
-        let v = f.node_event("v", "error");
-        assert_eq!(v["errors"][0]["paramPath"], "leafSize");
-        assert_eq!(v["errors"][0]["code"], "bad_param");
-        assert_eq!(v["error"], v["errors"][0]);
-
-        let p = f.node_event("p", "cancelled");
-        assert_eq!(p["errors"][0]["code"], "upstream_failed");
-    }
-
-    #[test]
     fn cancel_stops_a_heavy_run_and_joins_within_a_second() {
         // 20 个节点、每个都要处理三百万点：不取消的话要跑好几秒。
         let mut nodes = vec![serde_json::json!(
@@ -780,6 +734,9 @@ mod tests {
         for e in f.kind("node_state") {
             assert_ne!(e["state"], "error", "取消不该产生 error: {e}");
         }
+
+        // 取消一个不存在的 run 不该 panic —— 用户按 Esc 时那个 run 可能刚好跑完了
+        RunManager::new().cancel("no-such-run");
     }
 
     #[test]
@@ -869,9 +826,12 @@ mod tests {
         assert!(view.total_points() > 0);
     }
 
-    /// R2：上游没有当前 cacheKey 的结果 —— 开跑前整次失败，诊断指向缺结果的上游，零执行。
+    /// isolate 在开跑前就被拒的两种情形，都是一个节点都不动。纯平台构建里 ABI 的 isolate
+    /// 字段只有这一条在走，所以它不能挂 std_packs_off。
+    /// R2：上游没有当前 cacheKey 的结果 —— 整次失败，诊断指向缺结果的上游。
+    /// R5：预览与 isolate 不组合，core 报参数错误。
     #[test]
-    fn isolate_without_upstream_results_fails_before_running_anything() {
+    fn isolate_is_refused_before_running_anything() {
         let isolate = vec!["v".to_string()];
         let f = run_spec(two_node_graph(7302), "", &isolate, &[], 0, |_| {});
         assert_eq!(f.run_status(), "error");
@@ -882,6 +842,11 @@ mod tests {
         assert_eq!(diags[0]["nodeId"], "g");
         assert_eq!(diags[0]["code"], "upstream_not_ready");
         assert!(f.kind("node_state").is_empty(), "一个节点都不该动: {:#?}", f.events);
+
+        let preview = run_spec(two_node_graph(7303), "", &isolate, &[], 1, |_| {});
+        assert_eq!(preview.run_status(), "error");
+        assert_eq!(preview.kind("run_finished")[0]["error"]["code"], "bad_input");
+        assert!(preview.kind("node_state").is_empty(), "{:#?}", preview.events);
     }
 
     /// 修订一 V2：「运行到此」（只给 targets）也把计划外、仍有当前结果的下游挂进来。
@@ -920,16 +885,6 @@ mod tests {
         let view = core.output_cloud(&run_id, "p", "cloud", 0).expect("挂上的 p 按新 runId 取得到");
         assert!(view.total_points() > 0);
         drop(handle);
-    }
-
-    /// R5：预览与 isolate 不组合，core 报参数错误。
-    #[test]
-    fn isolate_with_preview_is_a_bad_input() {
-        let isolate = vec!["v".to_string()];
-        let f = run_spec(two_node_graph(7303), "", &isolate, &[], 1, |_| {});
-        assert_eq!(f.run_status(), "error");
-        assert_eq!(f.kind("run_finished")[0]["error"]["code"], "bad_input");
-        assert!(f.kind("node_state").is_empty());
     }
 
     /// param-recipe P1.5：运行走 C ABI 的 params_json（编辑器合成的「default + 配方覆盖」）。
@@ -1032,13 +987,5 @@ mod tests {
         assert_eq!(skipped, 2, "两个节点都应命中缓存: {events:#?}");
         assert!(core.output_cloud(&second, "v", "cloud", 0).is_ok());
         drop(handle);
-    }
-
-    #[test]
-    fn run_manager_reports_no_active_run_before_anything_starts() {
-        let manager = RunManager::new();
-        assert!(manager.active_run_id().is_none());
-        // 取消一个不存在的 run 不该 panic —— 用户按 Esc 时那个 run 可能刚好跑完了
-        manager.cancel("no-such-run");
     }
 }

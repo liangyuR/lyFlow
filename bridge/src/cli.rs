@@ -1828,8 +1828,9 @@ pub fn main() -> i32 {
     run_cli(&args, &out, &err)
 }
 
+/// 进程内跑一遍 `run_cli`、把 stdout / stderr 收进字符串。cli 与 patch 的测试共用这一份。
 #[cfg(test)]
-mod tests {
+pub(crate) mod test_support {
     use super::*;
 
     #[derive(Clone)]
@@ -1845,32 +1846,39 @@ mod tests {
         }
     }
 
-    struct Ran {
-        code: i32,
-        out: String,
-        err: String,
+    pub(crate) struct Ran {
+        pub(crate) code: i32,
+        pub(crate) out: String,
+        pub(crate) err: String,
     }
 
     impl Ran {
         /// stdout 是 JSON Lines：一行一个对象。
-        fn lines(&self) -> Vec<Value> {
+        pub(crate) fn lines(&self) -> Vec<Value> {
             self.out
                 .lines()
                 .filter(|l| !l.trim().is_empty())
                 .map(|l| serde_json::from_str(l).unwrap_or_else(|e| panic!("不是 JSON: {l} ({e})")))
                 .collect()
         }
-        fn first(&self) -> Value {
+        pub(crate) fn first(&self) -> Value {
             self.lines().into_iter().next().expect("stdout 是空的")
+        }
+        /// `patch --json` 的 patch_result 那一行。
+        pub(crate) fn result(&self) -> Value {
+            self.lines()
+                .into_iter()
+                .find(|v| v["kind"] == "patch_result")
+                .unwrap_or_else(|| panic!("stdout 里没有 patch_result：{}\n{}", self.out, self.err))
         }
     }
 
-    fn cli(args: &[&str]) -> Ran {
+    pub(crate) fn cli(args: &[&str]) -> Ran {
         let owned: Vec<String> = args.iter().map(|s| (*s).to_string()).collect();
         cli_owned(&owned)
     }
 
-    fn cli_owned(owned: &[String]) -> Ran {
+    pub(crate) fn cli_owned(owned: &[String]) -> Ran {
         let obuf = Arc::new(Mutex::new(Vec::new()));
         let ebuf = Arc::new(Mutex::new(Vec::new()));
         let out = sink_of(SharedBuf(Arc::clone(&obuf)));
@@ -1884,6 +1892,12 @@ mod tests {
             err: err_text,
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::*;
+    use super::*;
 
     /// 每个测试一个目录：cargo 默认并行跑，共用目录会互相覆盖。
     fn workspace(name: &str) -> PathBuf {
@@ -2016,16 +2030,6 @@ mod tests {
 
     #[test]
     #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
-    fn manifest_dumps_the_whole_bundle() {
-        let r = cli(&["manifest"]);
-        assert_eq!(r.code, EXIT_OK);
-        let m = r.first();
-        assert_eq!(m["schemaVersion"], 1);
-        assert!(m["operators"].as_array().unwrap().len() >= 16);
-    }
-
-    #[test]
-    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn validate_accepts_a_good_graph_and_rejects_a_bad_one() {
         let dir = workspace("validate");
         let good = chain(&dir, 301);
@@ -2040,21 +2044,8 @@ mod tests {
         assert_eq!(diags[0]["paramPath"], "leafSize");
     }
 
-    #[test]
-    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
-    fn plan_reports_cache_keys() {
-        let dir = workspace("plan");
-        let graph = chain(&dir, 302);
-        let r = cli(&["plan", &graph]);
-        assert_eq!(r.code, EXIT_OK, "{}", r.err);
-        let nodes = r.first();
-        assert_eq!(nodes[0]["nodeId"], "g");
-        assert_eq!(nodes[0]["cacheKey"].as_str().unwrap().len(), 32);
-        assert_eq!(nodes[1]["level"], 1);
-    }
-
-    /// `plan` 的惰性标记（m6-plan §5 / H9）。这张链上一个惰性端口都没有，
-    /// 所以 lazy 全是 false、demandedBy 全空 —— 「默认什么都不标」是它该有的样子。
+    /// `plan` 每个节点一行：cacheKey 与 level；外加惰性标记（m6-plan §5 / H9）。这张链上一个
+    /// 惰性端口都没有，所以 lazy 全是 false、demandedBy 全空 —— 「默认什么都不标」是它该有的样子。
     #[test]
     #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn plan_marks_lazy_nodes_and_who_demands_them() {
@@ -2062,7 +2053,11 @@ mod tests {
         let graph = chain(&dir, 312);
         let r = cli(&["plan", &graph]);
         assert_eq!(r.code, EXIT_OK, "{}", r.err);
-        for n in r.first().as_array().unwrap() {
+        let nodes = r.first();
+        assert_eq!(nodes[0]["nodeId"], "g");
+        assert_eq!(nodes[0]["cacheKey"].as_str().unwrap().len(), 32);
+        assert_eq!(nodes[1]["level"], 1);
+        for n in nodes.as_array().unwrap() {
             assert_eq!(n["lazy"], false, "{n}");
             assert_eq!(n["demandedBy"], json!([]), "{n}");
         }
@@ -2176,8 +2171,12 @@ mod tests {
 
         let lines = r.lines();
         assert_eq!(lines.first().unwrap()["kind"], "run_started");
+        // 没给 --summary：末尾仍是 run_finished，不多出 run_summary 那一行；
+        // 事件里那份 summary 照旧有 —— --summary 只管末尾那一行
         assert_eq!(lines.last().unwrap()["kind"], "run_finished");
         assert_eq!(lines.last().unwrap()["status"], "ok");
+        assert!(lines.last().unwrap()["summary"].is_object());
+        assert!(lines.iter().all(|l| l["kind"] != "run_summary"));
         // seq 连续：CI 消费的和前端消费的是同一条流（F7）
         for (i, e) in lines.iter().enumerate() {
             assert_eq!(e["seq"], i as i64, "seq 不连续：{e}");
@@ -2190,19 +2189,25 @@ mod tests {
         assert!(done["stats"]["elementCount"].as_i64().unwrap() > 0);
     }
 
+    /// 改源头点数的两条路：`--set` 覆盖参数、`--preview-points` 在预览里降采样源头。
     #[test]
     #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
-    fn run_set_overrides_a_param() {
-        let dir = workspace("set");
+    fn set_and_preview_change_the_source_point_count() {
+        let dir = workspace("set-preview");
         let graph = chain(&dir, 304);
-        let r = cli(&["run", &graph, "--set", "g.pointCount=1234", "--no-cache"]);
-        assert_eq!(r.code, EXIT_OK, "{}", r.err);
-        let done = r
-            .lines()
-            .into_iter()
-            .find(|e| e["kind"] == "node_state" && e["nodeId"] == "g" && e["state"] == "done")
-            .unwrap();
-        assert_eq!(done["stats"]["elementCount"], 1234);
+        for (extra, want) in [
+            (&["--set", "g.pointCount=1234"][..], 1234),
+            (&["--preview", "--preview-points", "2000"][..], 2000),
+        ] {
+            let r = cli(&[&["run", graph.as_str(), "--no-cache"][..], extra].concat());
+            assert_eq!(r.code, EXIT_OK, "{extra:?}: {}", r.err);
+            let done = r
+                .lines()
+                .into_iter()
+                .find(|e| e["kind"] == "node_state" && e["nodeId"] == "g" && e["state"] == "done")
+                .unwrap_or_else(|| panic!("{extra:?}: g 没有 done"));
+            assert_eq!(done["stats"]["elementCount"], want, "{extra:?}");
+        }
     }
 
     #[test]
@@ -2305,80 +2310,38 @@ mod tests {
         assert!(last["contractViolations"].as_array().unwrap().is_empty());
     }
 
+    /// 写法错一张表：参数、退出码、stderr 里该有的字。都在任何节点开跑之前拦下，
+    /// 不依赖标准包 —— 纯平台构建里照样跑。
     #[test]
-    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
-    fn run_summary_separates_a_missing_dimension_from_a_broken_one() {
-        let dir = workspace("summary-three-state");
-        // flush 挂在没被 demand 的备用分支上 → inactive；crash 挂在炸了的节点上 → failed
-        let graph = fallback_graph(
-            &dir,
-            3402,
-            json!({
-                "result": {"node": "n_fb", "port": "out"},
-                "crash": {"node": "n_bad", "port": "cloud"}
-            }),
-        );
-        let r = cli(&["run", &graph, "--summary", "--no-cache"]);
-        assert_eq!(r.code, EXIT_OK, "{}", r.err);
-        let lines = r.lines();
-        let s = lines.last().unwrap();
-        assert_eq!(s["status"], "failed", "声明输出里有一维崩了（H2）: {s}");
-        assert_eq!(s["outputs"]["crash"]["state"], "failed");
-        assert_eq!(s["outputs"]["crash"]["from"], "n_bad");
-        assert_eq!(s["outputs"]["crash"]["code"], "io");
-        assert_eq!(s["outputs"]["result"]["state"], "value");
-
-        // 主路径成功的那张图上，挂在惰性备用分支的那一维是 inactive 而不是 failed
-        let doc = json!({
-            "schemaVersion": 1, "id": "01J8XQZ4K7N3M2R5V8W1YB6TCG",
-            "nodes": [
-                {"id": "n_a", "op": "gen.synthetic", "params": {"pointCount": 40, "seed": 3403}},
-                {"id": "n_b", "op": "gen.synthetic", "params": {"pointCount": 70, "seed": 3404}},
-                {"id": "n_fb", "op": "flow.fallback"}
-            ],
-            "edges": [
-                {"id": "e1", "from": {"node": "n_a", "port": "cloud"},
-                             "to": {"node": "n_fb", "port": "a"}},
-                {"id": "e2", "from": {"node": "n_b", "port": "cloud"},
-                             "to": {"node": "n_fb", "port": "b"}}
-            ],
-            "outputs": {
-                "gap": {"node": "n_fb", "port": "out"},
-                "flush": {"node": "n_b", "port": "cloud"}
-            }
-        });
-        let file = dir.join("happy.lyflow.json");
-        std::fs::write(&file, doc.to_string()).unwrap();
-        let r = cli(&["run", &file.to_string_lossy(), "--summary", "--no-cache"]);
-        assert_eq!(r.code, EXIT_OK, "{}", r.err);
-        let lines = r.lines();
-        let s = lines.last().unwrap();
-        assert_eq!(s["status"], "ok");
-        assert_eq!(s["outputs"]["gap"]["state"], "value");
-        assert_eq!(s["outputs"]["gap"]["elementCount"], 40);
-        assert_eq!(s["outputs"]["flush"]["state"], "inactive");
-        assert_eq!(s["outputs"]["flush"]["reason"], "not_demanded");
-    }
-
-    #[test]
-    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
-    fn run_without_summary_flag_keeps_the_old_json_lines() {
-        let dir = workspace("summary-off");
-        let graph = chain(&dir, 3405);
-        let r = cli(&["run", &graph, "--no-cache"]);
-        assert_eq!(r.code, EXIT_OK, "{}", r.err);
-        let lines = r.lines();
-        assert_eq!(lines.last().unwrap()["kind"], "run_finished");
-        assert!(lines.iter().all(|l| l["kind"] != "run_summary"));
-        // 事件里那份照旧有 —— --summary 只管末尾那一行
-        assert!(lines.last().unwrap()["summary"].is_object());
-    }
-
-    #[test]
-    fn unknown_subcommand_and_option_are_usage_errors() {
-        assert_eq!(cli(&["nope"]).code, EXIT_USAGE);
-        assert_eq!(cli(&["run", "x.json", "--nope"]).code, EXIT_USAGE);
-        assert_eq!(cli(&[]).code, EXIT_USAGE);
+    fn wrong_usage_is_rejected_with_its_exit_code_and_message() {
+        let dir = workspace("usage");
+        let graph = chain(&dir, 309);
+        let crop = crop_chain(&dir, 3403, 17007);
+        let scene = samples_file(&dir, "scene.jsonl", &[r#"{"id":"a","scene":"sc_1"}"#]);
+        let perturb = |after: &'static str, region: &'static str| {
+            vec!["perturb", crop.as_str(), "--after", after, "--region", region, "--axis", "x=0:1:2",
+                 "--metric", "nodes.c.elementCount"]
+        };
+        let cases: Vec<(Vec<&str>, i32, &str)> = vec![
+            (vec![], EXIT_USAGE, "lyflow run"),
+            (vec!["nope"], EXIT_USAGE, "不认识的子命令 nope"),
+            (vec!["run", "x.json", "--nope"], EXIT_USAGE, "不认识的选项 --nope"),
+            (vec!["sweep", &graph, "--param", "v.x=1:2", "--metric", "v:cloud.elementCount"], EXIT_USAGE,
+             "start:end:steps"),
+            // 节点不存在是这张图套不上这条 --set，按「图不合法」报 1，不是写法错的 4
+            (vec!["run", &graph, "--set", "nope.x=1"], EXIT_INVALID, "没有节点"),
+            (vec!["eval", &graph, "--samples", &scene, "--metric", "nodes.v.elementCount"], EXIT_USAGE, "scene"),
+            (perturb("sub/g:cloud", HALFSPACE), EXIT_USAGE, "子图"),
+            (perturb("g:cloud", r#"{"kind":"sphere"}"#), EXIT_USAGE, "kind"),
+            (perturb("nope:cloud", HALFSPACE), EXIT_USAGE, "没有节点"),
+            (vec!["patch", &graph], EXIT_USAGE, "至少给一个动作"),
+            (vec!["patch"], EXIT_USAGE, "用法：lyflow patch"),
+        ];
+        for (args, code, want) in &cases {
+            let r = cli(args);
+            assert_eq!(r.code, *code, "{args:?}: {}", r.err);
+            assert!(r.err.contains(want), "{args:?} 的 stderr 缺「{want}」：{}", r.err);
+        }
     }
 
     #[test]
@@ -2396,46 +2359,6 @@ mod tests {
         assert!(last["elementCount"].as_f64().unwrap() > 0.0);
     }
 
-    /// §3 验收：sweep 5 组 leafSize，源头只加载一次（其余 4 次 skipped）。
-    #[test]
-    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
-    fn sweep_reuses_the_upstream_across_the_grid() {
-        let dir = workspace("sweep");
-        let graph = chain(&dir, 308);
-        let csv = dir.join("out.csv");
-        let r = cli(&[
-            "sweep",
-            &graph,
-            "--param",
-            "v.minPointsPerVoxel=1:5:5",
-            "--metric",
-            "v:cloud.elementCount",
-            "--csv",
-            &csv.to_string_lossy(),
-        ]);
-        assert_eq!(r.code, EXIT_OK, "{}", r.err);
-        let rows = r.lines();
-        assert_eq!(rows.len(), 5);
-        let with_skip = rows
-            .iter()
-            .filter(|row| {
-                row["skipped"]
-                    .as_array()
-                    .map(|s| s.iter().any(|v| v == "g"))
-                    .unwrap_or(false)
-            })
-            .count();
-        assert_eq!(with_skip, 4, "源头应当只算一次: {}", r.out);
-        // 指标随参数单调下降 —— 说明扫的是真参数而不是同一份结果
-        let first = rows[0]["value"].as_f64().unwrap();
-        let last = rows[4]["value"].as_f64().unwrap();
-        assert!(last < first, "{first} -> {last}");
-
-        let text = std::fs::read_to_string(&csv).unwrap();
-        assert!(text.starts_with("v.minPointsPerVoxel,v:cloud.elementCount"));
-        assert_eq!(text.lines().count(), 6);
-    }
-
     /// m4-plan §3 的验收原话是「sweep 5 组 leafSize」——而 leafSize 是 vec3f。
     /// 一个数要能广播到三个分量，否则那条验收根本写不出来。
     #[test]
@@ -2443,6 +2366,7 @@ mod tests {
     fn sweep_broadcasts_a_scalar_onto_a_vector_param() {
         let dir = workspace("sweepvec");
         let graph = chain(&dir, 315);
+        let csv = dir.join("out.csv");
         let r = cli(&[
             "sweep",
             &graph,
@@ -2450,6 +2374,8 @@ mod tests {
             "v.leafSize=0.01:0.05:5",
             "--metric",
             "v:cloud.elementCount",
+            "--csv",
+            &csv.to_string_lossy(),
         ]);
         assert_eq!(r.code, EXIT_OK, "{}", r.err);
         let rows = r.lines();
@@ -2466,14 +2392,10 @@ mod tests {
             .filter(|r| r["skipped"].as_array().unwrap().iter().any(|v| v == "g"))
             .count();
         assert_eq!(reused, 4, "{}", r.out);
-    }
 
-    #[test]
-    fn sweep_rejects_a_malformed_axis() {
-        let dir = workspace("sweepbad");
-        let graph = chain(&dir, 309);
-        let r = cli(&["sweep", &graph, "--param", "v.x=1:2", "--metric", "v:cloud.elementCount"]);
-        assert_eq!(r.code, EXIT_USAGE);
+        let text = std::fs::read_to_string(&csv).unwrap();
+        assert!(text.starts_with("v.leafSize,v:cloud.elementCount"), "{text}");
+        assert_eq!(text.lines().count(), 6);
     }
 
     /// §3 验收：只移动了节点的两份图，diff 输出为空。
@@ -2614,37 +2536,6 @@ mod tests {
             .map(|v| v.as_str().unwrap().to_string())
             .collect();
         assert_eq!(plan, vec!["g".to_string(), "s/v".to_string()]);
-    }
-
-    #[test]
-    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
-    fn preview_decimates_the_source() {
-        let dir = workspace("preview");
-        let graph = chain(&dir, 313);
-        let r = cli(&[
-            "run",
-            &graph,
-            "--preview",
-            "--preview-points",
-            "2000",
-            "--no-cache",
-        ]);
-        assert_eq!(r.code, EXIT_OK, "{}", r.err);
-        let done = r
-            .lines()
-            .into_iter()
-            .find(|e| e["kind"] == "node_state" && e["nodeId"] == "g" && e["state"] == "done")
-            .unwrap();
-        assert_eq!(done["stats"]["elementCount"], 2000);
-    }
-
-    #[test]
-    fn set_rejects_an_unknown_node() {
-        let dir = workspace("setbad");
-        let graph = chain(&dir, 314);
-        let r = cli(&["run", &graph, "--set", "nope.x=1"]);
-        assert_eq!(r.code, EXIT_INVALID);
-        assert!(r.err.contains("没有节点"), "{}", r.err);
     }
 
     fn samples_file(dir: &Path, name: &str, lines: &[&str]) -> String {
@@ -2866,23 +2757,6 @@ mod tests {
     }
 
     #[test]
-    fn eval_refuses_the_scene_field() {
-        let dir = workspace("evalscene");
-        let graph = chain(&dir, 324);
-        let samples = samples_file(&dir, "s.jsonl", &[r#"{"id":"a","scene":"sc_1"}"#]);
-        let r = cli(&[
-            "eval",
-            &graph,
-            "--samples",
-            &samples,
-            "--metric",
-            "nodes.v.elementCount",
-        ]);
-        assert_eq!(r.code, EXIT_USAGE);
-        assert!(r.err.contains("scene"), "{}", r.err);
-    }
-
-    #[test]
     #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn eval_builds_samples_from_a_glob() {
         let dir = workspace("evalglob");
@@ -2979,12 +2853,13 @@ mod tests {
         );
     }
 
+    /// 不给样本就跑一次图；指标用的是 sweep 那套老写法 `v:cloud.elementCount`，eval 也得认。
     #[test]
     #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
     fn eval_without_samples_runs_the_graph_once() {
         let dir = workspace("evalnosample");
         let graph = chain(&dir, 326);
-        let r = cli(&["eval", &graph, "--metric", "nodes.v.elementCount"]);
+        let r = cli(&["eval", &graph, "--metric", "v:cloud.elementCount"]);
         assert_eq!(r.code, EXIT_OK, "{}", r.err);
         let rows: Vec<Value> = r
             .lines()
@@ -2993,21 +2868,7 @@ mod tests {
             .collect();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0]["sample"], "-");
-    }
-
-    #[test]
-    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
-    fn eval_accepts_the_old_sweep_metric_spelling() {
-        let dir = workspace("evallegacy");
-        let graph = chain(&dir, 327);
-        let r = cli(&["eval", &graph, "--metric", "v:cloud.elementCount"]);
-        assert_eq!(r.code, EXIT_OK, "{}", r.err);
-        let row = r
-            .lines()
-            .into_iter()
-            .find(|l| l["kind"] == "eval_row")
-            .unwrap();
-        assert!(row["metrics"]["v:cloud.elementCount"].as_f64().unwrap() > 0.0);
+        assert!(rows[0]["metrics"]["v:cloud.elementCount"].as_f64().unwrap() > 0.0, "{}", rows[0]);
     }
 
 
@@ -3123,56 +2984,6 @@ mod tests {
         assert_eq!(sum["nonResponsive"], 1);
     }
 
-    #[test]
-    fn perturb_refuses_a_subgraph_internal_port() {
-        let dir = workspace("perturbsub");
-        let graph = crop_chain(&dir, 3403, 17007);
-        let r = cli(&[
-            "perturb",
-            &graph,
-            "--after",
-            "sub/g:cloud",
-            "--region",
-            HALFSPACE,
-            "--axis",
-            "x=0:1:2",
-            "--metric",
-            "nodes.c.elementCount",
-        ]);
-        assert_eq!(r.code, EXIT_USAGE);
-        assert!(r.err.contains("子图"), "{}", r.err);
-
-        let bad_region = cli(&[
-            "perturb",
-            &graph,
-            "--after",
-            "g:cloud",
-            "--region",
-            r#"{"kind":"sphere"}"#,
-            "--axis",
-            "x=0:1:2",
-            "--metric",
-            "nodes.c.elementCount",
-        ]);
-        assert_eq!(bad_region.code, EXIT_USAGE);
-        assert!(bad_region.err.contains("kind"), "{}", bad_region.err);
-
-        let ghost = cli(&[
-            "perturb",
-            &graph,
-            "--after",
-            "nope:cloud",
-            "--region",
-            HALFSPACE,
-            "--axis",
-            "x=0:1:2",
-            "--metric",
-            "nodes.c.elementCount",
-        ]);
-        assert_eq!(ghost.code, EXIT_USAGE);
-        assert!(ghost.err.contains("没有节点"), "{}", ghost.err);
-    }
-
     // ------------------------------------------------------------ 顶层图参数（M7 J7/J8）
 
     /// g → v 的直链外加一支不相干的 h。顶层参数 count 绑 g.pointCount（g 上不再显式写它）。
@@ -3262,22 +3073,6 @@ mod tests {
         assert_eq!(rows[0]["value"], 20000);
     }
 
-    #[test]
-    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
-    fn param_only_moves_the_bound_node_and_its_downstream() {
-        let dir = workspace("gparam-plan");
-        let graph = param_chain(&dir, 7102);
-        let a = cli(&["plan", &graph]);
-        let b = cli(&["plan", &graph, "--param", "count=1234"]);
-        assert_eq!(a.code, EXIT_OK, "{}", a.err);
-        assert_eq!(b.code, EXIT_OK, "{}", b.err);
-        let (ka, kb) = (plan_keys(&a), plan_keys(&b));
-        assert_ne!(ka["g"], kb["g"]);
-        assert_ne!(ka["v"], kb["v"]);
-        assert_eq!(ka["h"], kb["h"]);
-        assert_eq!(cli(&["validate", &graph, "--param", "count=1234"]).code, EXIT_OK);
-    }
-
     /// J8：宿主走 C ABI 的 params_json，CLI 走 --param —— 两条路算出同一个东西。
     #[test]
     #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
@@ -3356,25 +3151,6 @@ mod tests {
         let v = cli(&["validate", &file.to_string_lossy()]);
         assert_eq!(v.code, EXIT_INVALID, "{}", v.err);
         assert!(v.first().as_array().unwrap().iter().any(|d| d["code"] == "param_conflict"));
-    }
-
-    #[test]
-    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
-    fn patch_param_rewrites_the_default_and_is_idempotent() {
-        let dir = workspace("gparam-patch");
-        let graph = param_chain(&dir, 7105);
-        let out = dir.join("patched.lyflow.json");
-        let r = cli(&["patch", &graph, "--param", "count=777", "-o", &out.to_string_lossy(), "--json"]);
-        assert_eq!(r.code, EXIT_OK, "{}", r.err);
-        let result = r.first();
-        assert_eq!(result["applied"]["param"], json!(["count"]));
-        assert_eq!(result["diff"]["graphParams"][0]["to"], 777);
-        let written: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
-        assert_eq!(written["params"]["count"]["default"], 777);
-        // 同值再来一遍：no-op，diff 为空
-        let again = cli(&["patch", &out.to_string_lossy(), "--param", "count=777", "--dry-run", "--json"]);
-        assert_eq!(again.code, EXIT_OK, "{}", again.err);
-        assert_eq!(again.first()["diff"]["empty"], true);
     }
 
     #[test]
@@ -3630,6 +3406,10 @@ mod tests {
         assert_eq!(r.code, EXIT_OK, "{}", r.err);
         assert_eq!(r.first()["applied"]["recipe"], json!(["count", "leaf"]));
         assert_eq!(r.first()["applied"]["param"], json!(["count"]));
+        let changed = r.first()["diff"]["graphParams"].clone();
+        let count = changed.as_array().unwrap().iter().find(|p| p["name"] == "count").expect("diff 里没有 count");
+        assert_eq!(count["from"], 20000, "{changed}");
+        assert_eq!(count["to"], 999, "{changed}");
         let written: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
         assert_eq!(written["params"]["count"]["default"], 999);
         assert_eq!(written["params"]["leaf"]["default"], json!([0.05, 0.05, 0.05]));

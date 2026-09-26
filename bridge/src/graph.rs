@@ -272,49 +272,36 @@ mod tests {
         }
     }
 
-    #[test]
-    fn accepts_a_well_formed_graph() {
-        let g = doc(
-            &[("n1", "io.load_pcd"), ("n2", "filter.voxel_grid")],
-            &[("e1", "n1", "cloud", "n2", "cloud")],
-        );
-        assert!(g.validate_structure().is_ok());
-    }
+    type Nodes<'a> = &'a [(&'a str, &'a str)];
+    type Edges<'a> = &'a [(&'a str, &'a str, &'a str, &'a str, &'a str)];
 
+    /// 结构校验一张表：None 是该过，Some 是错误信息里该有的字。
     #[test]
-    fn rejects_dangling_edge() {
-        let g = doc(&[("n1", "io.load_pcd")], &[("e1", "n1", "cloud", "ghost", "cloud")]);
-        let err = g.validate_structure().unwrap_err().to_string();
-        assert!(err.contains("目标节点不存在"), "{err}");
-    }
-
-    #[test]
-    fn rejects_duplicate_node_ids() {
-        let g = doc(&[("n1", "io.load_pcd"), ("n1", "filter.voxel_grid")], &[]);
-        let err = g.validate_structure().unwrap_err().to_string();
-        assert!(err.contains("节点 id 重复"), "{err}");
-    }
-
-    /// 输入端口是单连接。多输入合并必须由算子显式声明多个端口来表达，
-    /// 否则求值顺序是隐式的（docs/graph-doc.md）。
-    #[test]
-    fn rejects_two_edges_into_one_input_port() {
-        let g = doc(
-            &[("a", "io.load_pcd"), ("b", "io.load_pcd"), ("c", "filter.voxel_grid")],
-            &[("e1", "a", "cloud", "c", "cloud"), ("e2", "b", "cloud", "c", "cloud")],
-        );
-        let err = g.validate_structure().unwrap_err().to_string();
-        assert!(err.contains("单连接"), "{err}");
-    }
-
-    /// 一个输出端口连多个输入是合法的。
-    #[test]
-    fn allows_fan_out_from_one_output_port() {
-        let g = doc(
-            &[("a", "io.load_pcd"), ("b", "filter.voxel_grid"), ("c", "filter.passthrough")],
-            &[("e1", "a", "cloud", "b", "cloud"), ("e2", "a", "cloud", "c", "cloud")],
-        );
-        assert!(g.validate_structure().is_ok());
+    fn validate_structure_accepts_and_rejects() {
+        let cases: &[(&str, Nodes, Edges, Option<&str>)] = &[
+            ("合法的链", &[("n1", "io.load_pcd"), ("n2", "filter.voxel_grid")],
+             &[("e1", "n1", "cloud", "n2", "cloud")], None),
+            ("悬空的边", &[("n1", "io.load_pcd")], &[("e1", "n1", "cloud", "ghost", "cloud")],
+             Some("目标节点不存在")),
+            ("重复的节点 id", &[("n1", "io.load_pcd"), ("n1", "filter.voxel_grid")], &[], Some("节点 id 重复")),
+            // 输入端口是单连接。多输入合并必须由算子显式声明多个端口来表达，
+            // 否则求值顺序是隐式的（docs/graph-doc.md）
+            ("两条边进同一个输入", &[("a", "io.load_pcd"), ("b", "io.load_pcd"), ("c", "filter.voxel_grid")],
+             &[("e1", "a", "cloud", "c", "cloud"), ("e2", "b", "cloud", "c", "cloud")], Some("单连接")),
+            // 一个输出端口连多个输入是合法的
+            ("一个输出扇出", &[("a", "io.load_pcd"), ("b", "filter.voxel_grid"), ("c", "filter.passthrough")],
+             &[("e1", "a", "cloud", "b", "cloud"), ("e2", "a", "cloud", "c", "cloud")], None),
+        ];
+        for (name, nodes, edges, want) in cases {
+            let got = doc(nodes, edges).validate_structure();
+            match want {
+                None => assert!(got.is_ok(), "{name}: {:?}", got.err()),
+                Some(want) => {
+                    let err = got.expect_err(name).to_string();
+                    assert!(err.contains(want), "{name}: {err}");
+                }
+            }
+        }
     }
 
     #[test]
