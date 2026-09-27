@@ -4,7 +4,6 @@ import { augmentOperators, levelOf, resolveOutput, type SubPath } from "./subgra
 import { useExecutionStore, type RunPhase } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
-import type { PeekView } from "../store/peek";
 import type { NodeState, OutputStat } from "../types/execution";
 import { bundleKindOf, type BundleDesc, type OperatorDesc } from "../types/manifest";
 import type { GraphDoc, PortRef } from "../types/graph";
@@ -24,51 +23,6 @@ export interface PeekSource {
   bundle: BundleDesc | null;
   /** 这个节点这次运行的全部输出统计。字段表要按 `<port>.<field>` 从里面挑。 */
   outputs: readonly OutputStat[] | undefined;
-}
-
-export function defaultViewFor(type: string | null): PeekView {
-  if (type && bundleKindOf(type)) return "fields";
-  switch (type) {
-    case "PointCloud":
-      return "cloud3d";
-    case "Box2D":
-    case "Line2D":
-    case "Circle2D":
-    case "Point2D":
-      return "cloud2d";
-    case "Tensor":
-      return "tensor";
-    case "Indices":
-      return "indices";
-    default:
-      return "value";
-  }
-}
-
-const VIEWS_POINT_CLOUD: PeekView[] = ["cloud3d", "cloud2d", "value"];
-const VIEWS_SHAPE_2D: PeekView[] = ["cloud2d", "value"];
-const VIEWS_TENSOR: PeekView[] = ["tensor", "value"];
-const VIEWS_INDICES: PeekView[] = ["indices"];
-const VIEWS_VALUE: PeekView[] = ["value"];
-const VIEWS_BUNDLE: PeekView[] = ["fields", "value"];
-
-export function viewsFor(type: string | null): PeekView[] {
-  if (type && bundleKindOf(type)) return VIEWS_BUNDLE;
-  switch (type) {
-    case "PointCloud":
-      return VIEWS_POINT_CLOUD;
-    case "Box2D":
-    case "Line2D":
-    case "Circle2D":
-    case "Point2D":
-      return VIEWS_SHAPE_2D;
-    case "Tensor":
-      return VIEWS_TENSOR;
-    case "Indices":
-      return VIEWS_INDICES;
-    default:
-      return VIEWS_VALUE;
-  }
 }
 
 function bundleOf(type: string | null | undefined, bundles: readonly BundleDesc[] | undefined) {

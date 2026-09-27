@@ -238,6 +238,12 @@ interface PeekWindow {
 2D 几何视图必须带底图云：只画一个 `Box2D` 的空白框，看不出它压在剖面的哪里 —— 这正是
 Viewer3D 接 gap 时踩过的那条（底图规则见 [interaction-checklist.md](interaction-checklist.md) 第 30 项）。
 
+这张表的实现在 `packages/editor/src/lib/viewRule.ts`（`defaultViewFor` / `viewsFor`），主预览也用它：
+节点的输出里有一个能在点云场景里画的端口（点云、2D 几何、Indices，或含这些字段的 Bundle）就显示
+点云场景，全是值（`Measurement` `Record` `Transform` `Plane` `Tensor`）才换成键值表
+（`viewerContentFor`，单测 `packages/editor/test/view-rule.test.mjs`）。类型先看这次运行的，
+没跑过看声明的。主预览的下拉框多一项「值」，手动选的只对当时那个节点有效，换节点就回到自动。
+
 ### 4.4 张量布局推断
 
 后端只给形状，前端按这套规则猜，猜的结果显示在下拉框里，可手动改：

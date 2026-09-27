@@ -3,7 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pinRun, unpinRun } from "../lib/cloudCache";
 import { exportCanvasPng } from "../lib/exportPng";
 import { takePeekCanvas } from "../lib/peekCanvas";
-import { defaultViewFor, usePeekSource, viewsFor, type PeekSource } from "../lib/peekSource";
+import { usePeekSource, type PeekSource } from "../lib/peekSource";
+import { defaultViewFor, viewsFor } from "../lib/viewRule";
 import { useManifestStore } from "../store/manifest";
 import {
   clampPeekScreen,

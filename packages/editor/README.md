@@ -418,7 +418,7 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
 
 - **开关与布局**：工具栏「参数」或 `Ctrl+Shift+P`（键表里的 `paramPanel`）。状态在 ui store 的 `paramPanel`
   （`open / maximized / tab / viewerOpen`），纯 UI、不进 doc 不进撤销。开着时右侧那一列换成面板、**Inspector 不渲染**；
-  3D 视图还在那一列顶上，收成一条「3D 预览」标题栏（ROI 行「拖框」会展开它）—— Viewer3D 始终是同一个实例，切换不重建
+  3D 视图还在那一列顶上，收成一条「预览」标题栏（ROI 行「拖框」会展开它）—— Viewer3D 始终是同一个实例，切换不重建
   WebGL。面板宽度与 Inspector 宽度各记各的，面板那份记在 `localStorage["lyflow.paramPanel.width"]`。最大化把画布压成
   0 宽（不卸载：节点尺寸与端口量测都还在）。面板关着时 Inspector 顶上的图参数简表照旧（P1 加的）。
 - **数据模型在 `lib/paramPanel.ts`**（纯函数、有单测）：行的全集 = 图参数 + 当前层每个节点的**可见**参数 + 子图实例展开进

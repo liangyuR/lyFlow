@@ -23,7 +23,7 @@ import {
 import { valueEquals } from "../lib/params";
 import { formatValue } from "../lib/recipes";
 import { roiBoundsVersion, roiThumb, subscribeRoiBounds } from "../lib/roiThumbs";
-import { augmentOperators } from "../lib/subgraph";
+import { augmentOperators, fullId } from "../lib/subgraph";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
@@ -767,6 +767,8 @@ function enterRoiEdit(row: NodeParamRow, frame: string | null) {
   ui.setPinnedNode(null);
   ui.setSelection([row.node.id], []);
   if (frame) ui.setRoiFrame(row.node.id, frame);
+  // 拖框要的是点云场景；节点的输出若只有值，自动规则会选表格
+  ui.setViewerContentPick({ nodeId: fullId(row.path, row.node.id), content: "cloud" });
   ui.setViewerMode("2d");
   ui.setPanelViewerOpen(true);
 }

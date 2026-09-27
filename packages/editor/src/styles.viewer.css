@@ -81,3 +81,31 @@
   color: #8fb8ff;
   background: color-mix(in srgb, #8fb8ff 14%, var(--lyflow-bg-2));
 }
+
+/* 「值」内容（lib/viewRule）：盖在画布上。画布本身不卸载 —— three.js 场景只建一次。 */
+.viewer__values {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: auto;
+  background: var(--lyflow-bg-0);
+}
+
+.viewer__value + .viewer__value { border-top: 1px solid var(--lyflow-border-strong); }
+
+.viewer__value-head {
+  display: flex;
+  gap: 8px;
+  padding: 4px 8px;
+  background: var(--lyflow-bg-1);
+  color: var(--lyflow-fg-1);
+  font-family: var(--lyflow-mono);
+  font-size: 12px;
+}
+
+.viewer__value-type { color: var(--lyflow-fg-2); }
+
+/* 连线查看器里值视图自己滚动、原始 JSON 限高；这里整块一起滚 */
+.viewer__values .peek-value { flex: none; }
+.viewer__values .peek-value__scroll { overflow: visible; }
+.viewer__values .peek-value__raw { max-height: none; }

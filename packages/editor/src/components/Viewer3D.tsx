@@ -14,6 +14,7 @@ import { copyFrameWrites, pickFrame, roiFramesOf } from "../lib/roiFrames";
 import { rememberRoiBounds } from "../lib/roiThumbs";
 import { disposeOverlay, extentOf, shapesOf } from "../lib/shapes2d";
 import { augmentOperators, fullId, levelOf, resolveOutput } from "../lib/subgraph";
+import { viewerContentFor, type ViewerContent } from "../lib/viewRule";
 import { exportCanvasPng } from "../lib/exportPng";
 import { transport } from "../transport";
 import { aggregatedNodes, useExecutionStore } from "../store/execution";
@@ -21,8 +22,9 @@ import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useGraphParamOverrides } from "../store/recipe";
 import { useUiStore } from "../store/ui";
-import { decodeCloud, type CloudPayload } from "../types/execution";
+import { decodeCloud, type CloudPayload, type OutputStat } from "../types/execution";
 import { RoiLayer, type RoiItem } from "./RoiLayer";
+import { ValueView } from "./peek/ValueView";
 import "../styles.viewer.css";
 
 export type ShadingMode = "intensity" | "height" | "normal" | "flat";
@@ -327,6 +329,25 @@ function placeholderOf(
   return [cx - hw, cy - hh, cx + hw, cy + hh];
 }
 
+/** 主预览的「值」内容：每个输出端口一张表，与连线查看器的值视图是同一个组件。
+ *  Bundle 字段展开出来的 `<port>.<field>` 不单列 —— 整个端口的值里已经有 fields。 */
+function ValuePane({ outputs }: { outputs: readonly OutputStat[] | undefined }) {
+  const shown = (outputs ?? []).filter((o) => !o.port.includes("."));
+  return (
+    <div className="viewer__values" data-testid="viewer-values">
+      {shown.map((o) => (
+        <section key={o.port} className="viewer__value" data-port={o.port}>
+          <header className="viewer__value-head">
+            <span>{o.port}</span>
+            <span className="viewer__value-type">{o.type}</span>
+          </header>
+          <ValueView stat={o} />
+        </section>
+      ))}
+    </div>
+  );
+}
+
 export function Viewer3D() {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<Scene | null>(null);
@@ -410,6 +431,27 @@ export function Viewer3D() {
     [doc, path, activeNode, activeOp, overrides],
   );
   const roiFrames = useMemo(() => roiFramesOf(activeOp, roiNode), [activeOp, roiNode]);
+  // 显示点云场景还是值的表格（lib/viewRule）。类型取这次运行的实际类型，没跑过就用声明的 ——
+  // 不必等运行结束才知道该显示什么。手动选的只对当时那个节点有效，换节点就回到自动。
+  const autoContent = useMemo<ViewerContent>(
+    () =>
+      activeOp
+        ? viewerContentFor(
+            activeOp.outputs.map((o) => activeOutputs?.find((st) => st.port === o.name)?.type ?? o.type),
+            bundles,
+          )
+        : "cloud",
+    [activeOp, activeOutputs, bundles],
+  );
+  const activeKey = activeId ? fullId(path, activeId) : null;
+  const contentPick = useUiStore((s) => s.viewerContentPick);
+  const setContentPick = useUiStore((s) => s.setViewerContentPick);
+  const content: ViewerContent =
+    contentPick && contentPick.nodeId === activeKey ? contentPick.content : autoContent;
+  // 离开那个节点就忘掉手动选的：换走再回来也回到自动，而不是悄悄停在上次选的值表格上
+  useEffect(() => {
+    if (contentPick && contentPick.nodeId !== activeKey) setContentPick(null);
+  }, [activeKey, contentPick]);
   const selectedFrame = useUiStore((s) => (activeId ? s.roiFrame[activeId] : undefined));
   const setRoiFrame = useUiStore((s) => s.setRoiFrame);
   const roi = useMemo(() => pickFrame(roiFrames, selectedFrame), [roiFrames, selectedFrame]);
@@ -511,6 +553,12 @@ export function Viewer3D() {
       show(activeState === "running" ? "正在计算…" : "该节点尚未产出结果");
       return;
     }
+    // 显示值时不取云：值就在事件里（stats.outputs），底图也用不上
+    if (content === "value") {
+      setLoading(false);
+      show(null);
+      return;
+    }
     // 自己有云就用自己的；没有就沿输入边往上游借最近的一片当底图，几何叠在它上面 ——
     // 只输出 Box2D/Line2D 的节点若显示成空白，用户就看不出框压在剖面的哪里。
     // Bundle 里的点云字段也算「自己的云」（`<port>.<field>`，m8-plan L3）。
@@ -572,7 +620,7 @@ export function Viewer3D() {
       cancelled = true;
     };
   }, [activeNode, activeId, selected.size, runId, runStatus, activeState, maxPoints, doc, path,
-      isPreview, previewMaxPoints, ops, bundles, activeOutputs]);
+      isPreview, previewMaxPoints, ops, bundles, activeOutputs, content]);
 
   // -- 几何体：只随点云重建，着色参数一律不进这个 effect ---------------------
   useEffect(() => {
@@ -775,7 +823,8 @@ export function Viewer3D() {
       };
     });
   }, [roi, activeOp, roiNode, backdrop.bounds, cloud]);
-  const roiEditing = cameraMode === "2d" && roiItems.length > 0 && activeNode !== undefined;
+  const roiEditing =
+    content === "cloud" && cameraMode === "2d" && roiItems.length > 0 && activeNode !== undefined;
   // 切换条只给带底图的组（有名字的）；数据坐标系那一组只有一组，不需要切
   const roiTabs = roiEditing && roiFrames.some((f) => f.label) ? roiFrames : [];
 
@@ -826,7 +875,10 @@ export function Viewer3D() {
       // 验收脚本靠这两个属性判断「视图已经切到这个节点了」，
       // 而不是去猜多久之后 React 会渲染完（scripts/e2e）。
       data-node={display.nodeId ?? ""}
-      data-view={loading ? "loading" : cloud ? "cloud" : "empty"}
+      data-view={
+        loading ? "loading" : content === "value" && !display.status ? "value" : cloud ? "cloud" : "empty"
+      }
+      data-content={content}
       data-shading={effectiveShading}
       data-pinned={pinnedId ? "1" : "0"}
       data-run={display.runId ?? ""}
@@ -843,7 +895,7 @@ export function Viewer3D() {
       data-backdrop-error={backdrop.error ?? undefined}
     >
       <div className="viewer__bar">
-        <span className="viewer__title">3D 预览</span>
+        <span className="viewer__title">预览</span>
         {isPreview && (
           <span className="viewer__preview" data-testid="viewer-preview-badge">
             预览 {Math.round(previewMaxPoints / 10000)} 万点
@@ -868,114 +920,133 @@ export function Viewer3D() {
         <select
           className="viewer__select"
           data-testid="viewer-camera"
-          value={cameraMode}
-          onChange={(e) => setCameraMode(e.target.value as CameraMode)}
-          title="相机：3D 自由视角 / 2D 正交俯视 XY（剖面）"
+          value={content === "value" ? "value" : cameraMode}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "value") {
+              if (activeKey) setContentPick({ nodeId: activeKey, content: "value" });
+              return;
+            }
+            setCameraMode(v as CameraMode);
+            if (activeKey && content === "value") setContentPick({ nodeId: activeKey, content: "cloud" });
+          }}
+          title="3D 自由视角 / 2D 正交俯视 XY（剖面）/ 输出值的表格。默认按节点的输出类型选，换节点就回到默认"
         >
           <option value="3d">3D</option>
           <option value="2d">2D 剖面</option>
+          <option value="value" disabled={!activeKey}>
+            值
+          </option>
         </select>
-        <select
-          className="viewer__select"
-          value={maxPoints}
-          onChange={(e) => setMaxPoints(Number(e.target.value))}
-          title="最多显示多少点（抽样在 C++ 侧做）"
-        >
-          {MAX_POINTS_CHOICES.map((n) => (
-            <option key={n} value={n}>
-              {n >= 1_000_000 ? `${n / 1_000_000}M` : `${n / 1000}K`}
-            </option>
-          ))}
-        </select>
-        <input
-          className="viewer__size"
-          type="range"
-          min={0.5}
-          max={6}
-          step={0.1}
-          value={pointSize}
-          onChange={(e) => setPointSize(Number(e.target.value))}
-          title="点大小"
-        />
-        <button
-          type="button"
-          className="viewer__fit"
-          onClick={() => {
-            const scene = sceneRef.current;
-            const bounds = scene ? unionBounds(cloud, scene.overlay, scene.backdrop) : null;
-            if (scene && bounds) fitToBounds(scene, bounds);
-          }}
-          disabled={!cloud && overlayCount === 0 && backdrop.count === 0}
-          title="缩放到全部（底图云 + 叠画几何）"
-        >
-          ⤢
-        </button>
+        {content === "cloud" && (
+          <>
+            <select
+              className="viewer__select"
+              value={maxPoints}
+              onChange={(e) => setMaxPoints(Number(e.target.value))}
+              title="最多显示多少点（抽样在 C++ 侧做）"
+            >
+              {MAX_POINTS_CHOICES.map((n) => (
+                <option key={n} value={n}>
+                  {n >= 1_000_000 ? `${n / 1_000_000}M` : `${n / 1000}K`}
+                </option>
+              ))}
+            </select>
+            <input
+              className="viewer__size"
+              type="range"
+              min={0.5}
+              max={6}
+              step={0.1}
+              value={pointSize}
+              onChange={(e) => setPointSize(Number(e.target.value))}
+              title="点大小"
+            />
+            <button
+              type="button"
+              className="viewer__fit"
+              onClick={() => {
+                const scene = sceneRef.current;
+                const bounds = scene ? unionBounds(cloud, scene.overlay, scene.backdrop) : null;
+                if (scene && bounds) fitToBounds(scene, bounds);
+              }}
+              disabled={!cloud && overlayCount === 0 && backdrop.count === 0}
+              title="缩放到全部（底图云 + 叠画几何）"
+            >
+              ⤢
+            </button>
+          </>
+        )}
       </div>
 
       <div className="viewer__bar viewer__bar--tools">
-        <span className="viewer__label">着色</span>
-        <select
-          className="viewer__select"
-          data-testid="viewer-shading"
-          value={effectiveShading}
-          onChange={(e) => setShading(e.target.value as ShadingMode)}
-          title={
-            shading === effectiveShading
-              ? "着色方式"
-              : "这片点云没有该通道，已退回高度着色"
-          }
-        >
-          <option value="intensity" disabled={!hasIntensity}>
-            强度{hasIntensity ? "" : "（无）"}
-          </option>
-          <option value="height">高度</option>
-          <option value="normal" disabled={!hasNormals} title="需要点云带法线通道">
-            法线{hasNormals ? "" : "（无）"}
-          </option>
-          <option value="flat">单色</option>
-        </select>
-        <select
-          className="viewer__select"
-          data-testid="viewer-ramp"
-          value={ramp}
-          onChange={(e) => setRamp(e.target.value as RampName)}
-          disabled={isFlat}
-          title="色带"
-        >
-          <option value="viridis">viridis</option>
-          <option value="gray">灰度</option>
-          <option value="jet">蓝→红</option>
-        </select>
-        <input
-          className="viewer__num"
-          data-testid="viewer-range-min"
-          type="number"
-          step="any"
-          value={rangeAuto ? round3(lo) : manualRange[0]}
-          onChange={(e) => setRangeEnd(0, e.target.value)}
-          disabled={isFlat}
-          title="着色范围下限"
-        />
-        <input
-          className="viewer__num"
-          data-testid="viewer-range-max"
-          type="number"
-          step="any"
-          value={rangeAuto ? round3(hi) : manualRange[1]}
-          onChange={(e) => setRangeEnd(1, e.target.value)}
-          disabled={isFlat}
-          title="着色范围上限"
-        />
-        <button
-          type="button"
-          className="viewer__btn"
-          data-testid="viewer-range-auto"
-          onClick={() => setRangeAuto(true)}
-          disabled={isFlat || rangeAuto}
-          title="范围回到数据实际的最小/最大"
-        >
-          自动
-        </button>
+        {content === "cloud" && (
+          <>
+            <span className="viewer__label">着色</span>
+            <select
+              className="viewer__select"
+              data-testid="viewer-shading"
+              value={effectiveShading}
+              onChange={(e) => setShading(e.target.value as ShadingMode)}
+              title={
+                shading === effectiveShading
+                  ? "着色方式"
+                  : "这片点云没有该通道，已退回高度着色"
+              }
+            >
+              <option value="intensity" disabled={!hasIntensity}>
+                强度{hasIntensity ? "" : "（无）"}
+              </option>
+              <option value="height">高度</option>
+              <option value="normal" disabled={!hasNormals} title="需要点云带法线通道">
+                法线{hasNormals ? "" : "（无）"}
+              </option>
+              <option value="flat">单色</option>
+            </select>
+            <select
+              className="viewer__select"
+              data-testid="viewer-ramp"
+              value={ramp}
+              onChange={(e) => setRamp(e.target.value as RampName)}
+              disabled={isFlat}
+              title="色带"
+            >
+              <option value="viridis">viridis</option>
+              <option value="gray">灰度</option>
+              <option value="jet">蓝→红</option>
+            </select>
+            <input
+              className="viewer__num"
+              data-testid="viewer-range-min"
+              type="number"
+              step="any"
+              value={rangeAuto ? round3(lo) : manualRange[0]}
+              onChange={(e) => setRangeEnd(0, e.target.value)}
+              disabled={isFlat}
+              title="着色范围下限"
+            />
+            <input
+              className="viewer__num"
+              data-testid="viewer-range-max"
+              type="number"
+              step="any"
+              value={rangeAuto ? round3(hi) : manualRange[1]}
+              onChange={(e) => setRangeEnd(1, e.target.value)}
+              disabled={isFlat}
+              title="着色范围上限"
+            />
+            <button
+              type="button"
+              className="viewer__btn"
+              data-testid="viewer-range-auto"
+              onClick={() => setRangeAuto(true)}
+              disabled={isFlat || rangeAuto}
+              title="范围回到数据实际的最小/最大"
+            >
+              自动
+            </button>
+          </>
+        )}
         <span className="viewer__spacer" />
         {pinnedId && (
           <span className="viewer__pinned" title={`已钉住 ${pinnedId}`}>
@@ -993,15 +1064,17 @@ export function Viewer3D() {
         >
           {pinnedId ? "已钉住" : "钉住"}
         </button>
-        <button
-          type="button"
-          className="viewer__btn"
-          data-testid="viewer-export"
-          onClick={() => void exportPng()}
-          title="把当前画面存成 PNG"
-        >
-          PNG
-        </button>
+        {content === "cloud" && (
+          <button
+            type="button"
+            className="viewer__btn"
+            data-testid="viewer-export"
+            onClick={() => void exportPng()}
+            title="把当前画面存成 PNG"
+          >
+            PNG
+          </button>
+        )}
       </div>
 
       {roiTabs.length > 0 && roi && activeNode && (
@@ -1038,6 +1111,7 @@ export function Viewer3D() {
 
       <div className="viewer__stage">
         <div className="viewer__canvas" ref={hostRef} data-testid="viewer3d-canvas" />
+        {content === "value" && !display.status && !loading && <ValuePane outputs={activeOutputs} />}
         {roiEditing && activeNode && (
           <RoiLayer host={sceneHost} nodeId={activeNode.id} items={roiItems} />
         )}

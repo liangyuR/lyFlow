@@ -52,6 +52,18 @@ async function waitAttr(cdp, name, want, tries = 50) {
   return got;
 }
 
+/** 主预览的视图下拉框：3d / 2d / value。不等结果 —— 各处等的属性不一样。 */
+function pickView(cdp, view) {
+  return cdp.eval(`
+    const sel = document.querySelector('[data-testid="viewer-camera"]');
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLSelectElement.prototype, 'value').set;
+    setter.call(sel, ${lit(view)});
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  `);
+}
+
 /** 造一条 node_state 事件，端口上挂四种几何 + 一个 Measurement。 */
 function fakeOutputs() {
   return [
@@ -115,6 +127,8 @@ async function suiteMeasurementOutputs(cdp, report) {
       { key: "gen", op: "gen.synthetic", params: { pointCount: 5000, seed: 3 } },
       // 只输出 Indices/Plane，没有点云 —— 底图规则的最小复现
       { key: "plane", op: "segment.ransac_plane", params: { distanceThreshold: 0.02 } },
+      // 只输出 Transform：主预览该直接换成值的表格（lib/viewRule）
+      { key: "pose", op: "transform.make" },
     ],
     [{ from: ["gen", "cloud"], to: ["plane", "cloud"] }],
   );
@@ -138,14 +152,7 @@ async function suiteMeasurementOutputs(cdp, report) {
   report.eq("四个几何输出都叠上了（Box2D/Line2D/Circle2D/Point2D）", overlay, 4);
 
   // -- 2D 剖面相机 ---------------------------------------------------------
-  await cdp.eval(`
-    const sel = document.querySelector('[data-testid="viewer-camera"]');
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLSelectElement.prototype, 'value').set;
-    setter.call(sel, '2d');
-    sel.dispatchEvent(new Event('change', { bubbles: true }));
-    return true;
-  `);
+  await pickView(cdp, "2d");
   let camera = "";
   for (let i = 0; i < 30; i += 1) {
     camera = await cdp.eval(
@@ -156,14 +163,7 @@ async function suiteMeasurementOutputs(cdp, report) {
   }
   report.eq("切到 2D 剖面相机", camera, "2d");
 
-  await cdp.eval(`
-    const sel = document.querySelector('[data-testid="viewer-camera"]');
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLSelectElement.prototype, 'value').set;
-    setter.call(sel, '3d');
-    sel.dispatchEvent(new Event('change', { bubbles: true }));
-    return true;
-  `);
+  await pickView(cdp, "3d");
 
   // -- Inspector 数值 -------------------------------------------------------
   const inspector = await cdp.eval(`
@@ -203,6 +203,29 @@ async function suiteMeasurementOutputs(cdp, report) {
 
   const planeOverlay = await waitAttr(cdp, "data-overlay", 4);
   report.eq("几何仍然叠在底图上", Number(planeOverlay), 4);
+
+  // -- 只有值的节点：主预览按输出类型换成表格；手动选的只对当时那个节点有效 --------------
+  const pose = await selectAndReadViewer(cdp, ids.pose);
+  const posePorts = await cdp.eval(`
+    return [...document.querySelectorAll('[data-testid="viewer-values"] [data-port]')]
+      .map((s) => s.getAttribute('data-port'));
+  `);
+  report.eq(
+    "只输出 Transform 的节点直接显示值的表格",
+    { view: pose.view, ports: posePorts },
+    { view: "value", ports: ["transform"] },
+  );
+
+  await selectAndReadViewer(cdp, ids.gen);
+  await pickView(cdp, "value");
+  const picked = await waitAttr(cdp, "data-content", "value");
+  await selectAndReadViewer(cdp, ids.plane);
+  const back = await selectAndReadViewer(cdp, ids.gen);
+  report.eq(
+    "手动选「值」只对当时的节点有效，换走再回来又按类型显示点云",
+    { picked, back: back.view },
+    { picked: "value", back: "cloud" },
+  );
 }
 
 /** 可选：打开一张真实的 gap 图跑一遍，看 ROI 框有没有画出来。图用

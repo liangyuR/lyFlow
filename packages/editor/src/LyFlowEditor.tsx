@@ -709,7 +709,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
               aria-expanded={panel.viewerOpen}
               onClick={() => useUiStore.getState().setPanelViewerOpen(!panel.viewerOpen)}
             >
-              {panel.viewerOpen ? "▾" : "▸"} 3D 预览
+              {panel.viewerOpen ? "▾" : "▸"} 预览
             </button>
           )}
           <div className={`app__viewer${panel.open && !panel.viewerOpen ? " is-collapsed" : ""}`}>

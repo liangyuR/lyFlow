@@ -36,7 +36,8 @@ import {
   toReactFlow,
   type LyNode,
 } from "../lib/mapping";
-import { defaultViewFor, peekSourceOf } from "../lib/peekSource";
+import { peekSourceOf } from "../lib/peekSource";
+import { defaultViewFor } from "../lib/viewRule";
 import { augmentOperators, fullId, levelOf, pathIsValid } from "../lib/subgraph";
 import { canConnect, compatibleSources, compatibleTargets, inferAnyTypes } from "../lib/typecheck";
 import { keyHint } from "../lib/keymap";

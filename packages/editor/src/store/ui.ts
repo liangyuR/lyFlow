@@ -4,6 +4,7 @@
 import { create } from "zustand";
 
 import type { PathSegment, SubPath } from "../lib/subgraph";
+import type { ViewerContent } from "../lib/viewRule";
 import type { GraphDoc, GraphNode, PortRef } from "../types/graph";
 
 export interface SearchPopup {
@@ -95,6 +96,10 @@ interface UiState {
   setPanelViewerOpen(open: boolean): void;
   viewerMode: ViewerMode;
   setViewerMode(mode: ViewerMode): void;
+  /** 主预览里手动选的内容（点云 / 值）。只对选它时的那个节点有效（键是 fullId）：
+   *  视图一换到别的节点就清掉，回到按输出类型自动选（lib/viewRule 的 viewerContentFor）。 */
+  viewerContentPick: { nodeId: string; content: ViewerContent } | null;
+  setViewerContentPick(pick: { nodeId: string; content: ViewerContent } | null): void;
   /** 快捷键面板开着没有（`?`）。 */
   helpOpen: boolean;
   /** 抽屉里点了某条诊断 → 定位到这个节点/参数。 */
@@ -166,6 +171,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   drawer: null,
   paramPanel: { open: false, maximized: false, tab: "nodes", viewerOpen: false },
   viewerMode: "3d",
+  viewerContentPick: null,
   helpOpen: false,
   focusedDiagnostic: null,
   autoHint: null,
@@ -283,6 +289,13 @@ export const useUiStore = create<UiState>((set, get) => ({
   setViewerMode(mode) {
     if (get().viewerMode === mode) return;
     set({ viewerMode: mode });
+  },
+  setViewerContentPick(pick) {
+    const cur = get().viewerContentPick;
+    if (cur === pick || (cur && pick && cur.nodeId === pick.nodeId && cur.content === pick.content)) {
+      return;
+    }
+    set({ viewerContentPick: pick });
   },
   focusDiagnostic(nodeId, paramPath) {
     set({ focusedDiagnostic: { nodeId, paramPath }, selectedNodes: new Set([nodeId]) });
