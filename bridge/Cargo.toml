@@ -30,6 +30,9 @@ path = "src/bin/lyflow.rs"
 # 时并集，cargo build 不编 dev-deps，所以生产构建里它仍然不存在。
 [dev-dependencies]
 lyflow-client = { path = "../crates/lyflow-client", features = ["test-util"] }
+# mock_builder / get_ipc_response 关在 tauri 的 test feature 后面。写成 dev-dependency
+# 而不是给 lib 加 feature：它只在编测试时生效，`--features host` 的产物里没有它。
+tauri = { version = "2", features = ["test"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
@@ -51,8 +54,11 @@ sha2 = "0.10"
 
 [features]
 default = ["desktop"]
+# IPC 层：commands / execution / watcher / host。外部 Rust 宿主（dts-check）只要这一份 ——
+# 它自己建 Builder、自己开窗，用不着 tauri-build 与 dialog 插件。
+host = ["dep:tauri"]
 # 桌面壳需要的一切。关掉它 `cargo build --bin lyflow` 就完全不碰 Tauri。
-desktop = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog"]
+desktop = ["host", "dep:tauri-build", "dep:tauri-plugin-dialog"]
 # Tauri 自定义协议，release 构建需要
 custom-protocol = ["tauri/custom-protocol"]
 

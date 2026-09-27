@@ -6,8 +6,8 @@
 
 | 层 | 命令 | 规模 | 跑一遍 |
 |---|---|---|---|
-| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 151 例；`LYFLOW_PACKS=gap;dts` 232 例 | 分钟级（含编译） |
-| Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | 134；纯平台构建 79 通过 / 55 ignored | < 1 分钟（已编译时） |
+| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 151 例；`LYFLOW_PACKS=dts` 159 例；`LYFLOW_PACKS=gap;dts` 240 例 | 分钟级（含编译） |
+| Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 134（纯平台构建 79 通过 / 55 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑） | < 1 分钟（已编译时） |
 | editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 60 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 27 | 秒级 |
 | 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`） | 707 条断言、92 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
@@ -16,7 +16,7 @@
 ## 放在哪一层
 
 - **算法、数值、执行语义、C ABI 契约** → C++ doctest。gap / dts 的测量数值只在这里钉，改动必须保留数值与容差。
-- **bridge 的封送、IPC 命令、CLI 的参数 / 退出码 / 输出形状、配方失配的 Rust 实现** → `cargo test`。与 C++ 同层重复的不要再写（C++ 已经测了语义，Rust 只测封送和命令层）。要标准包算子的测试加 `#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]`，与不带这个属性的不要合并。
+- **bridge 的封送、IPC 命令、CLI 的参数 / 退出码 / 输出形状、配方失配的 Rust 实现** → `cargo test`。与 C++ 同层重复的不要再写（C++ 已经测了语义，Rust 只测封送和命令层）。要标准包算子的测试加 `#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]`，要 dts 包的加 `#[cfg_attr(not(dts_pack), ignore = …)]`，与不带这个属性的不要合并。
 - **编辑器 store 动作与 lib 纯函数**（图参数、配方、迁移写回、自动连线、参数面板模型、transform / curve、布局、ROI 标签摆放）→ `packages/editor/test`。
 - **只有真界面才有的**（真鼠标 / 按键、DOM 标记、渲染、系统层行为、跨进程的完整链路）→ e2e。e2e 里**不要**再逐字段复查单测已经测过的 store 数据，只留界面那一半。
 
@@ -34,6 +34,7 @@
 | 数据类型、Bundle、输出视图 ABI | `core/tests/test_data.cpp`、`test_bundle.cpp`、`test_output_view.cpp`、`test_contract.cpp` |
 | 运行摘要（summary） | `core/tests/test_summary.cpp`；CLI 的 `--summary` 形状在 `bridge/src/cli.rs` |
 | 标准算子 / PCD 读写 / ONNX | `packs/std-pointcloud/tests/*`、`packs/std-ml/tests/test_ml_ops.cpp`（模型用例要 `LYFLOW_TEST_ONNX_MODEL`，不设会打出跳过） |
+| dts 面差（与宿主 Python 旧算法的对照、现场轮廓） | `packs/dts/tests/test_dts_ops.cpp`（夹具 `tests/data/*.h`） |
 | gap 测量、积木、导入、模型 ROI | `packs/gap/tests/*`；e2e `gap.mjs`、`m8b.mjs`、`m8c.mjs`、`params_p4.mjs`（编辑器 vs CLI 逐位相同） |
 | 2D 拖框、自动连线、片段 | `packages/editor/test/autoconnect.test.mjs`、`roiframes.test.mjs`；e2e `m8b.mjs`、`m8c.mjs` |
 | 连线查看器 Edge Peek | e2e `peek.mjs` |
@@ -42,6 +43,7 @@
 | 分栏、拖放配置（dragDropEnabled） | e2e `params_p2.mjs`（右侧分栏）、`m8b.mjs` 的算子面板组 |
 | MCP 工具、argv 拼装、CLI 解析 | `packages/mcp/test/*`（`smoke.test.ts` 是唯一跑通 MCP → CLI 的） |
 | HTTP 传输、宿主嵌入 | `scripts/e2e/http.mjs` |
+| 外部 Rust/Tauri 宿主（`attach`、`lyflow_handler!`、`sceneId` 注入、工作区路径） | `bridge/tests/host.rs`（`MockRuntime` 跑真 IPC） |
 
 ## 共用的夹具与辅助
 

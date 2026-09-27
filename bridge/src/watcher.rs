@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::core_ffi;
 use crate::execution::RunManager;
@@ -35,7 +35,7 @@ struct ReloadFailed {
 }
 
 /// 起一个后台线程盯着 DLL。源文件不存在（安装包里就是这样）时什么都不做。
-pub fn spawn(app: AppHandle) -> Option<PathBuf> {
+pub fn spawn<R: Runtime>(app: AppHandle<R>) -> Option<PathBuf> {
     let source = core_ffi::watch_source()?;
     let dir = source.parent()?.to_path_buf();
     let watched = source.clone();
@@ -87,7 +87,7 @@ fn same_file_name(a: &Path, b: &Path) -> bool {
 
 /// 一轮换代。顺序不能变：先停活跃 run，再放掉全部 RunHandle，最后才换 Core ——
 /// 旧 DLL 只要还有一个 Arc 就不会真的卸载，而缓存里的 Data 是旧 DLL 里的对象。
-fn reload(app: &AppHandle, source: &Path) {
+fn reload<R: Runtime>(app: &AppHandle<R>, source: &Path) {
     if let Some(runs) = app.try_state::<RunManager>() {
         runs.drop_all();
     }
@@ -126,7 +126,7 @@ fn reload(app: &AppHandle, source: &Path) {
 }
 
 /// 盯着库目录。库文件变了走的是和热重载同一条 `manifest-updated` 通路（ADR-0010）。
-pub fn spawn_library(app: AppHandle) {
+pub fn spawn_library<R: Runtime>(app: AppHandle<R>) {
     let Ok(dirs) = crate::commands::library_dirs(&app) else {
         return;
     };
@@ -177,7 +177,7 @@ fn is_library_file(p: &Path) -> bool {
 
 /// 只在库目录真的变了时重扫：save_as_library / refresh_library 已经扫过的那次写盘，
 /// 这里再扫一遍只会停掉用户刚开跑的 run。
-fn reload_library(app: &AppHandle) {
+fn reload_library<R: Runtime>(app: &AppHandle<R>) {
     let Some(runs) = app.try_state::<RunManager>() else {
         return;
     };
@@ -217,7 +217,7 @@ fn reload_library(app: &AppHandle) {
     }
 }
 
-fn emit_failed(app: &AppHandle, problems: Vec<String>) {
+fn emit_failed<R: Runtime>(app: &AppHandle<R>, problems: Vec<String>) {
     let _ = app.emit(
         EVENT_FAILED,
         ReloadFailed {

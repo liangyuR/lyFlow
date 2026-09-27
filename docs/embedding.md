@@ -1,10 +1,18 @@
 # 把 LyFlow 嵌进自己的进程
 
-**Rust 宿主看文末的 [Rust 客户端](#rust-客户端)**，同一套 ABI、同一份安装布局，
-只是换成一个 crate。**要把编辑器界面嵌进自己的 React 页面**看文末的
-[前端编辑器](#前端编辑器lyfloweditor)。以下是 C++ 宿主。
+几条路：
 
-宿主只 include 一个头：`lyflow/client.hpp`。它是 header-only 的，
+- **C++ 宿主**（本文大半篇幅）：`lyflow/client.hpp` + 运行时加载的 core DLL。
+  宿主自己管界面，LyFlow 只是一个算法库。
+- **Rust 宿主**（[Rust 客户端](#rust-客户端)）：同一套 ABI、同一份安装布局，
+  只是换成一个 crate。
+- **Rust/Tauri 宿主**（[下文](#rusttauri-宿主)）：宿主是 Tauri 2 的 app，
+  前端嵌 `@lyflow/editor`，Rust 侧直接复用 `lyflow_lib` 的整个 IPC 层 ——
+  33 条 command、`RunManager`、三条事件流、库算子扫描，一行都不用自己写。
+- **只要编辑器界面**，嵌进自己的 React 页面：看文末的
+  [前端编辑器](#前端编辑器lyfloweditor)。
+
+下面先说 C++ 那条。宿主只 include 一个头：`lyflow/client.hpp`。它是 header-only 的，
 只依赖同目录的 `lyflow/c_api.h`，不 include 任何 core 内部头，也不链接任何库 ——
 core 是运行时加载的 DLL（[ADR-0004](adr/0004-core-as-dll.md)）。
 
@@ -340,6 +348,120 @@ if (graph.front() == '[') { /* 诊断数组 */ }
 
 可用的 `kind` 见 manifest 的 `importers` 段（`client.manifest()`）。
 命令行等价物是 `lyflow import <file> --kind <kind> -o <out.lyflow.json>`。
+
+## Rust/Tauri 宿主
+
+宿主是自己的 Tauri 2 app（`dts-check` 就是这个形态：车门胶条面差，React 前端嵌
+`@lyflow/editor`），Rust 侧把 LyFlow 的 IPC 层整个挂到自己的 `Builder` 上。
+命令名与事件名**不带前缀**（LyFlow 没有做成 tauri 插件），所以前端那份
+`TauriTransport` 拿来就能用，一行都不用改。
+
+依赖上只要 `host` feature —— 它不带 `tauri-build`、不带 dialog 插件、不生成
+窗口：
+
+```toml
+[dependencies]
+lyflow-app = { git = "https://github.com/liangyuR/lyFlow", default-features = false, features = ["host"] }
+```
+
+crate 的 lib 名字是 `lyflow_lib`。`build.rs` 会用 CMake 编 core；外部宿主拿不到
+checkout 路径，所以用环境变量按名字点包：`LYFLOW_STD_PACKS=0 LYFLOW_PACKS=dts`
+得到 core + dts（一个 PCL 都不拖，见 [ADR-0015](adr/0015-algorithms-live-in-lyflow-packs.md)）。
+
+### 三段代码
+
+```rust
+use std::sync::Arc;
+use lyflow_lib::host::{self, HostConfig};
+
+fn main() {
+    // 自检不 fatal 也行 —— 宿主的界面上未必只有 LyFlow 一块。
+    if let Err(e) = host::startup_self_check() {
+        eprintln!("LyFlow 不可用：{e}");
+    }
+
+    let cfg = HostConfig {
+        workspace_root: Some(my_workspace()),   // 相对路径按它解析，逃逸就拒绝
+        library_dirs: Some(Vec::new()),         // 这个宿主不要库算子
+        scenes: Some(Arc::new(MyScenes::new())),
+        hot_reload: false,
+    };
+
+    host::attach(tauri::Builder::default(), cfg)
+        .invoke_handler(lyflow_lib::lyflow_handler![open_camera, close_camera])
+        .run(tauri::generate_context!())
+        .expect("启动失败");
+}
+```
+
+`attach()` 做三件事：`manage(RunManager)`、`manage(Arc<HostConfig>)`、
+一个 `setup`（库算子重扫 + 可选的热重载 watcher）。
+
+> **它占掉了 `Builder::setup`。** tauri 的 `setup` 是整份替换不是追加，所以宿主
+> 要有自己的 setup 就别再调 `.setup()`，改成在自己那个里面调
+> `lyflow_lib::host::setup(app.handle())`。
+
+`lyflow_handler!` 把 LyFlow 的 33 条命令和宿主自己的命令合成一个
+`invoke_handler`。它能跨 crate 是因为 `#[tauri::command]` 除了函数本身还发一对
+`#[macro_export]` 的 `macro_rules!`，并在同一个模块里 `pub use` 了它们 ——
+`lyflow_lib::commands::get_manifest` 这条路径对函数和对宏都解析得开，
+而 `tauri::generate_handler!` 要的正是这个。宿主开了
+`REMOVE_UNUSED_COMMANDS` 的话要把这些命令写进自己的 capability，
+否则它们会在宏展开时被悄悄裁掉。
+
+### 注入点云
+
+前端点「运行」时把一个 `sceneId` 交给 `run_graph`（`TauriTransport` 已经在传了）。
+Rust 侧据此找到宿主自己持有的那一片云，按 [ADR-0017](adr/0017-graph-outputs-injection-importers.md)
+组装成注入项：
+
+```rust
+use std::collections::BTreeMap;
+use lyflow_lib::host::{Cloud, SceneProvider};
+
+impl SceneProvider for MyScenes {
+    fn inputs(&self, scene_id: &str, graph: &lyflow_lib::GraphDoc, manifest: &serde_json::Value)
+        -> Result<Vec<lyflow_lib::core_ffi::RunInput>, String>
+    {
+        let frame = self.sessions.lock().unwrap()
+            .get(scene_id).cloned()
+            .ok_or("点云会话已失效，请重新读取一次")?;
+        let mut by_port = BTreeMap::new();
+        by_port.insert("profile".to_string(), Cloud { xyz: frame.xyz, intensity: frame.intensity });
+        host::inputs_for_source_op(graph, manifest, "dts.profile_in", &by_port)
+    }
+}
+```
+
+三条约定，和 C++ 那边是同一套：
+
+1. **注入是整节点级的。** 被注入的节点 compute 整个不跑，所以它声明的**每个**
+   输出端口都要给一项 —— `inputs_for_source_op` 会照着 manifest 逐个检查。
+2. **按 op 找源节点，不按节点 id。** 节点 id 是图作者随手起的名字，用户在编辑器里
+   重命名一个节点就该停产线的话，这个耦合太贵了。图里有 0 个或多个该 op 的节点都报错。
+3. **注入数据的摘要进 cacheKey。** 换一片云一定重算；不进键的现象是
+   「产线上两台车量出一模一样的值」。
+
+没配 `scenes` 的宿主收到带 `sceneId` 的 `run_graph` 会直接报错，而不是静默地跑一张
+没注入的图 —— 后者的表现是算子那句「这次运行没有注入轮廓」，离现场太远。
+
+### 路径与 workspace_root
+
+`workspace_root` 是 `None` 时一切照旧：`path` / `graphPath` 原样用。LyFlow 自己的壳
+走系统文件对话框，拿到的本来就是用户亲自选的绝对路径。
+
+给了 `Some(root)` 之后，所有收路径的命令（`save_graph`、`load_graph`、备份四件、
+`write_file_bytes`，以及 `graphPath` 推出来的 base dir）都走一遍解析：
+
+| 前端给的 | 结果 |
+|---|---|
+| `graphs/a.lyflow.json` | `<root>/graphs/a.lyflow.json` |
+| `./graphs/../a.json` | `<root>/a.json`（先消 `.` 与 `..`，没逃出去就放行） |
+| `../外面/a.json` | 报错「路径逃出了工作区」 |
+| `D:/别处/a.json` | 原样放行 —— 绝对路径是宿主自己的 webview 给的，可信 |
+
+消 `.` 与 `..` 是纯文本的，不碰文件系统：`canonicalize()` 要求路径已存在
+（`save_graph` 写的是还不存在的文件），而且在 Windows 上会带出 `\\?\` 前缀。
 
 ## 中文路径
 

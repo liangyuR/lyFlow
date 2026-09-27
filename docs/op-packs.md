@@ -10,11 +10,12 @@
 | | 仓库内的包 | 外部包 |
 |---|---|---|
 | 在哪 | 本仓库的 `packs/*` | 任意目录 |
-| 怎么加入 | `LYFLOW_STD_PACKS`（默认 ON）自动扫 | `LYFLOW_OP_PACKS` 显式列出 |
-| 注册顺序 | 紧跟 `gen.synthetic` | 紧跟 `util.reroute` |
-| 例子 | `packs/std-pointcloud`、`packs/std-ml`、`packs/gap` | 任何自己写的包 |
+| 怎么加入 | `LYFLOW_STD_PACKS`（默认 ON）自动扫，`LYFLOW_PACKS` 按**包名**点名 | `LYFLOW_OP_PACKS` 按**目录**显式列出 |
+| 注册顺序 | 紧跟 `gen.synthetic` | 排在 core 自带的算子全注册完之后（`flow.select` 之后） |
+| 例子 | `packs/std-pointcloud`、`packs/std-ml`、`packs/gap`、`packs/dts` | 任何自己写的包 |
 
-core 本身只有 `gen.synthetic`、`util.reroute` 与两个流程算子（`flow.fallback`、`flow.select`），
+core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fallback`、`flow.select`
+（后两个是 [ADR-0016](adr/0016-error-as-value-and-lazy-ports.md) 的调度原语）——
 不链接任何第三方库（[ADR-0014](adr/0014-std-as-pack-core-zero-dep.md)）。
 
 仓库内的包不一定默认编：每个包在 `lyflow_op_pack()` 里声明 `DEFAULT ON|OFF`。
@@ -24,6 +25,7 @@ core 本身只有 `gen.synthetic`、`util.reroute` 与两个流程算子（`flow
 | `std-pointcloud` | 0.1.0 | ON | 19 个点云 / 2D 量测 / 编辑算子 | PCL |
 | `std-ml` | 0.1.0 | ON | `ml.onnx_run` | onnxruntime |
 | `gap` | 0.2.0 | **OFF** | 21 个 `gap.*` | PCL、yaml-cpp、onnxruntime |
+| `dts` | 0.1.0 | **OFF** | 8 个 `dts.*` | 无（零第三方，不链 PCL） |
 
 `DEFAULT OFF` 的包用 **`LYFLOW_PACKS`** 按名字打开（分号分隔的**包名**，
 不是目录 —— 那是 `LYFLOW_OP_PACKS` 的事）：
@@ -48,9 +50,20 @@ pnpm check          # 或 pnpm core:build / pnpm dev
 不设这个变量就是默认构建：core + `packs/*`。
 `scripts/build-core.ps1`、`bridge/build.rs`、`scripts/core-watch.ps1` 都读同一个变量。
 
-三个开关（`LYFLOW_STD_PACKS`、`LYFLOW_PACKS`、`LYFLOW_OP_PACKS`）都按
-「CMake 缓存变量 → 同名环境变量 → 默认值」的顺序取值，**空串一律按「没设」处理** —— `-DLYFLOW_STD_PACKS=` 传了个空值，
+三个开关都按「CMake 缓存变量 → 同名环境变量 → 默认值」的顺序取值，
+**空串一律按「没设」处理** —— `-DLYFLOW_STD_PACKS=` 传了个空值，
 不该悄悄变成「关掉标准包」；要关就显式写 `0`。
+
+| 变量 | 值 | 默认 | 语义 |
+|---|---|---|---|
+| `LYFLOW_STD_PACKS` | `0` / `1` | `1` | `1`：自动扫 `packs/*`，`DEFAULT ON` 的全编。`0`：**纯平台构建**，`packs/*` 里只编被 `LYFLOW_PACKS` 点名的 |
+| `LYFLOW_PACKS` | 分号分隔的**包名** | 空 | 点名编 `packs/*` 里的包。`LYFLOW_STD_PACKS=1` 时用来打开 `DEFAULT OFF` 的包；`=0` 时是唯一的编包途径，点名了就编，`DEFAULT ON` 的标准包也一样要点名 |
+| `LYFLOW_OP_PACKS` | 分号分隔的**目录** | 空 | 仓库外的包，显式列出。不受上面两个开关影响 —— 列了就编 |
+
+`LYFLOW_STD_PACKS=0` 之下的取舍：被点名的包才会被 `include()`，没点名的**连 cmake 文件都不读**。
+`std-pointcloud` 的 `find_package(PCL REQUIRED)`、`std-ml` 的 onnxruntime 检查写在
+`lyflow_op_pack()` 调用之外，光 include 就会在 configure 期失败，所以跳过必须发生在扫描时。
+每个包编与不编的原因都有一行 `-- lyflow: 纯平台构建，……` 的 STATUS 输出。
 
 包目录进了 `build.rs` 的 rerun 列表与 `core-watch.ps1` 的源码指纹，
 所以改包里的算子会触发增量构建和热重载，和改 `core/src/` 一样；
@@ -63,11 +76,37 @@ $env:LYFLOW_STD_PACKS = "0"
 pnpm check
 ```
 
-`packs/*` 一个都不编。manifest 里只剩 core 自己的四个算子（`gen.synthetic`、`util.reroute`、
-`flow.fallback`、`flow.select`），`lyflow_core.dll` 的导入表里只有 KERNEL32 与 CRT。
+不点名就 `packs/*` 一个都不编。manifest 里只剩 `gen.synthetic`、`util.reroute`、
+`flow.fallback`、`flow.select` 四个，`lyflow_core.dll` 的导入表里只有 KERNEL32 与 CRT。
 这一趟是「core 真的零依赖」的唯一证据，也是不装 PCL 就能开发平台本身的路子。
-依赖 `lyflow_pcl_support` 的包（gap、以及任何用 PCL 的包）在这一模式下会在
-configure 期直接报错 —— 那个目标由标准包提供。
+
+### 只编某一个仓库内的包
+
+纯平台构建之上再点名，就得到「core + 这一个包」：
+
+```powershell
+cmake -S core -B build-dts -G Ninja `
+  -DLYFLOW_STD_PACKS=0 -DLYFLOW_PACKS=dts -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build-dts --target lyflow_core lyflow-core-tests
+```
+
+`packs/dts` 零第三方依赖，所以这一份 `lyflow_core.dll` 的导入表里同样只有
+KERNEL32 与 CRT —— 产线上带一个 DLL 就够，不用装 PCL、不用拷 onnxruntime。
+
+外部宿主（按 cargo **git 依赖**引 `bridge` crate 的那种）只能走这条路：
+git checkout 落在 `~/.cargo/git/checkouts/` 下且路径不可预知，宿主给不出
+`LYFLOW_OP_PACKS` 要的绝对路径，只能按名字点名。`bridge/build.rs` 把
+`LYFLOW_STD_PACKS` / `LYFLOW_PACKS` 原样 `-D` 转给 cmake：
+
+```powershell
+$env:LYFLOW_STD_PACKS = "0"; $env:LYFLOW_PACKS = "dts"
+cargo build -p lyflow-app --no-default-features --bin lyflow
+```
+
+点名是「就编这个」，不看 `DEFAULT`：`LYFLOW_PACKS="std-pointcloud;dts"` 配
+`LYFLOW_STD_PACKS=0` 同样合法，得到 core + 这两个包（而 `std-ml`、`gap` 仍然不编）。
+反过来，依赖 `lyflow_pcl_support` 的包（gap、以及任何用 PCL 的包）单独点名会在
+configure 期直接报错 —— 那个目标由 `std-pointcloud` 提供，得把它一起点上。
 
 门禁的其余各步照跑，只有**要标准包算子的用例不跑，而且看得出没跑**：
 
@@ -414,5 +453,7 @@ $env:LYFLOW_OP_PACKS="…\mypack"; pnpm check     # 带外部包
 `packs/gap/tools/` 下的 A/B 是历史对拍工具，不是门禁，见 `packs/gap/README.md`。
 
 不带外部包那一遍是「包机制没有改变通用侧行为」的唯一证据。
-另有一条更强的，改了包机制本身时值得跑：
-`$env:LYFLOW_STD_PACKS="0"; pnpm check` —— 连标准包都不编。
+另有两条更强的，改了包机制本身时值得跑：
+`$env:LYFLOW_STD_PACKS="0"; pnpm check` —— 连标准包都不编；
+再把 `$env:LYFLOW_PACKS="dts"` 加上 —— 纯平台之上只点名一个包，
+这是外部宿主实际用的那条路。

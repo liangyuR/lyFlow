@@ -5,7 +5,7 @@ use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
 use std::sync::{Arc, Mutex};
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 
 use crate::core_ffi::{self, Core, RunHandle, RunSpec};
 use crate::ulid;
@@ -15,19 +15,19 @@ pub const EVENT_NAME: &str = "execution-event";
 
 /// 回调里要用到的东西。裸指针传给 C++，生命期由 `RunHandle` 持有 ——
 /// C ABI 保证 join 返回后不再回调，所以 `RunHandle::drop` 里 join 完才释放它。
-struct EmitCtx {
-    app: AppHandle,
+struct EmitCtx<R: Runtime> {
+    app: AppHandle<R>,
     run_id: String,
 }
 
 /// C++ 工作线程调过来的回调。`catch_unwind` 不是摆设：panic 展开穿过 C++ 栈帧
 /// 是未定义行为，而丢一条事件只会让前端的 seq 检查 warn 一句。
-unsafe extern "C" fn trampoline(event_json: *const c_char, user: *mut c_void) {
+unsafe extern "C" fn trampoline<R: Runtime>(event_json: *const c_char, user: *mut c_void) {
     let _ = std::panic::catch_unwind(|| {
         if event_json.is_null() || user.is_null() {
             return;
         }
-        let ctx = &*(user as *const EmitCtx);
+        let ctx = &*(user as *const EmitCtx::<R>);
         let Ok(text) = CStr::from_ptr(event_json).to_str() else {
             eprintln!("execution event 不是合法 UTF-8，已丢弃");
             return;
@@ -63,6 +63,8 @@ pub struct StartOptions<'a> {
     pub preview: Option<PreviewOptions>,
     /// 顶层图参数的取值（C ABI 的 `params_json`，param-recipe K3）。None = 全用 default。
     pub params_json: Option<&'a str>,
+    /// 宿主注入的源数据（ADR-0017，`run_graph` 的 `sceneId`）。空 = 不注入。
+    pub inputs: &'a [core_ffi::RunInput],
 }
 
 #[derive(Default)]
@@ -86,9 +88,12 @@ impl RunManager {
 
     /// 启动一次运行，返回 run id。抢占是同步的：旧 run 的 cancel+join 在本函数里做完，
     /// 前端拿到新 runId 时旧 run 的 run_finished(cancelled) 一定已经发出去了。
-    pub fn start(
+    ///
+    /// `options.inputs` 是运行时注入的源数据（ADR-0017）。缓冲只需活到
+    /// `RunHandle::start` 返回 —— core 在里面拷一份，所以这里拿引用就够。
+    pub fn start<R: Runtime>(
         &self,
-        app: &AppHandle,
+        app: &AppHandle<R>,
         core: Arc<Core>,
         graph_json: &str,
         base_dir: &str,
@@ -111,12 +116,13 @@ impl RunManager {
         spec.isolate = options.isolate;
         spec.force = options.force;
         spec.params_json = options.params_json;
+        spec.inputs = options.inputs;
         if let Some(p) = options.preview {
             spec.mode = 1;
             spec.preview_max_points = p.max_points;
             spec.preview_budget_ms = p.budget_ms;
         }
-        let handle = unsafe { RunHandle::start(core, spec, trampoline, ctx) }
+        let handle = unsafe { RunHandle::start(core, spec, trampoline::<R>, ctx) }
             .map_err(|e| e.to_string())?;
         let handle = Arc::new(handle);
 

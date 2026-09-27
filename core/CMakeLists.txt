@@ -154,32 +154,63 @@ macro(lyflow_op_pack)
 endmacro()
 
 # 收集包目录：标准包在前，外部包追加在后（S4）。
+#
+# LYFLOW_STD_PACKS=0 不是「不看 packs/」，而是「只看被 LYFLOW_PACKS 点名的那些」：
+# 外部宿主（dts-check 那样按 cargo git 依赖引 bridge 的）拿不到 checkout 路径
+# —— 它在 ~/.cargo/git/checkouts/ 下且不可预知 —— 所以没法用 LYFLOW_OP_PACKS 给绝对路径，
+# 只剩按名字点名这一条路。点名的包不论 DEFAULT ON/OFF 都编，没点名的一律跳过，
+# 于是 LYFLOW_STD_PACKS=0 LYFLOW_PACKS=dts 得到的是 core + dts（一个 PCL 都不拖）。
+#
+# 没点名的包在这一模式下连 include 都不做：std-pointcloud 的 find_package(PCL REQUIRED)
+# 和 std-ml 的 onnxruntime 检查写在 lyflow_op_pack() 调用之外，光 include 就会在
+# configure 期失败 —— 跳过必须发生在这里，而不是靠宏里的 LYFLOW_PACK_ENABLED。
 set(LYFLOW_STD_PACK_DIRS "")
-if(LYFLOW_STD_PACKS)
-  file(GLOB _std_candidates "${CMAKE_CURRENT_SOURCE_DIR}/../packs/*")
-  list(SORT _std_candidates)
-  foreach(d IN LISTS _std_candidates)
-    # 路径要规范化：带 core/../ 的那一份会让 ninja 把同一个文件当成两条规则
-    get_filename_component(d "${d}" ABSOLUTE)
-    if(EXISTS "${d}/lyflow_op_pack.cmake")
-      list(APPEND LYFLOW_STD_PACK_DIRS "${d}")
+set(_std_pack_names "")
+file(GLOB _std_candidates "${CMAKE_CURRENT_SOURCE_DIR}/../packs/*")
+list(SORT _std_candidates)
+foreach(d IN LISTS _std_candidates)
+  # 路径要规范化：带 core/../ 的那一份会让 ninja 把同一个文件当成两条规则
+  get_filename_component(d "${d}" ABSOLUTE)
+  if(NOT EXISTS "${d}/lyflow_op_pack.cmake")
+    continue()
+  endif()
+  get_filename_component(_n "${d}" NAME)
+  list(APPEND _std_pack_names "${_n}")
+  if(LYFLOW_STD_PACKS)
+    # 默认模式：全部 include，DEFAULT OFF 的包由 lyflow_op_pack() 宏按 LYFLOW_PACKS 裁决
+    # （它自己会打印跳过的原因），这里不多嘴，免得默认构建的 STATUS 输出变吵。
+    list(APPEND LYFLOW_STD_PACK_DIRS "${d}")
+  elseif("${_n}" IN_LIST LYFLOW_PACKS)
+    message(STATUS "lyflow: 纯平台构建，按 LYFLOW_PACKS 点名编入 packs/${_n}")
+    list(APPEND LYFLOW_STD_PACK_DIRS "${d}")
+  else()
+    message(STATUS "lyflow: 纯平台构建，跳过 packs/${_n}（LYFLOW_STD_PACKS=0 且不在 LYFLOW_PACKS 里）")
+  endif()
+endforeach()
+
+# LYFLOW_PACKS 里写错一个名字（拼错、写成外部包的名字）在默认模式下是**静默**的：
+# 宏那边只问「我在不在名单里」，从没人问过「名单里的都存在吗」。表现是编出来的
+# DLL 少了一整包算子，而 configure 一条警告都没有。
+foreach(_want IN LISTS LYFLOW_PACKS)
+  if(NOT "${_want}" IN_LIST _std_pack_names)
+    message(WARNING "lyflow: LYFLOW_PACKS 里的 ${_want} 不是 packs/ 下的包")
+  endif()
+endforeach()
+# 提供公共设施的包排在前面：std-pointcloud 定义 lyflow_pcl_support 与 lyflow_std_algo，
+# std-ml 解析 LYFLOW_ONNXRUNTIME_ROOT。字母序会把 gap 排到它们前面，那时目标还不存在。
+# 点名构建（LYFLOW_STD_PACKS=0 LYFLOW_PACKS=std-pointcloud;dts）同样要这个顺序。
+set(_priority std-pointcloud std-ml)
+list(REVERSE _priority)
+foreach(_want IN LISTS _priority)
+  foreach(d IN LISTS LYFLOW_STD_PACK_DIRS)
+    get_filename_component(_n "${d}" NAME)
+    if(_n STREQUAL "${_want}")
+      list(REMOVE_ITEM LYFLOW_STD_PACK_DIRS "${d}")
+      list(INSERT LYFLOW_STD_PACK_DIRS 0 "${d}")
+      break()
     endif()
   endforeach()
-  # 提供公共设施的包排在前面：std-pointcloud 定义 lyflow_pcl_support 与 lyflow_std_algo，
-  # std-ml 解析 LYFLOW_ONNXRUNTIME_ROOT。字母序会把 gap 排到它们前面，那时目标还不存在。
-  set(_priority std-pointcloud std-ml)
-  list(REVERSE _priority)
-  foreach(_want IN LISTS _priority)
-    foreach(d IN LISTS LYFLOW_STD_PACK_DIRS)
-      get_filename_component(_n "${d}" NAME)
-      if(_n STREQUAL "${_want}")
-        list(REMOVE_ITEM LYFLOW_STD_PACK_DIRS "${d}")
-        list(INSERT LYFLOW_STD_PACK_DIRS 0 "${d}")
-        break()
-      endif()
-    endforeach()
-  endforeach()
-endif()
+endforeach()
 
 set(LYFLOW_EXT_PACK_DIRS "")
 foreach(_raw_pack IN LISTS LYFLOW_OP_PACKS)

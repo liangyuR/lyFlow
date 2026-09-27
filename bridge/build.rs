@@ -152,8 +152,21 @@ fn main() {
     if std_packs == "0" {
         println!("cargo:rustc-cfg=std_packs_off");
     }
+
+    // 仓库内默认关闭的包按名字打开（ADR-0015），分号分隔的包名。
+    let repo_packs = std::env::var("LYFLOW_PACKS").unwrap_or_default();
+    println!("cargo:rerun-if-env-changed=LYFLOW_PACKS");
+    // tests/host.rs 的注入测试要 dts 包（默认关，ADR-0015）。没点名时记 ignored，
+    // 与 std_packs_off 同一个道理：汇总行里看得见，不会静默地「全绿」。
+    println!("cargo:rustc-check-cfg=cfg(dts_pack)");
+    if repo_packs.split(';').any(|p| p.trim() == "dts") {
+        println!("cargo:rustc-cfg=dts_pack");
+    }
+
     let packs_root = core.parent().expect("core 应当有父目录").join("packs");
-    if std_packs != "0" && packs_root.is_dir() {
+    // LYFLOW_STD_PACKS=0 时也可能按 LYFLOW_PACKS 点名编仓库内的包，那一趟 packs/ 照样要监听，
+    // 否则改 packs/dts 里的算子不会触发 core 重编。
+    if (std_packs != "0" || !repo_packs.trim().is_empty()) && packs_root.is_dir() {
         let (mut pf, mut pd) = (Vec::new(), Vec::new());
         collect(&packs_root, &mut pf, &mut pd);
         for f in pf.iter().chain(pd.iter()) {
@@ -161,9 +174,6 @@ fn main() {
         }
     }
 
-    // 仓库内默认关闭的包按名字打开（ADR-0015），分号分隔的包名。
-    let repo_packs = std::env::var("LYFLOW_PACKS").unwrap_or_default();
-    println!("cargo:rerun-if-env-changed=LYFLOW_PACKS");
     // onnxruntime 的位置（T9）。缺省 third_party/onnxruntime/，由 std-ml 包自己兜底。
     let ort_root = std::env::var("LYFLOW_ONNXRUNTIME_ROOT").unwrap_or_default();
     println!("cargo:rerun-if-env-changed=LYFLOW_ONNXRUNTIME_ROOT");
@@ -240,12 +250,25 @@ fn main() {
 /// 它按 XML 自己的声明读文件，不经过 rc.exe 的代码页转码。`rustc-link-arg` 覆盖
 /// 所有链接目标 —— `rustc-link-arg-tests` 只管 tests/ 下的集成测试，lib 的单测管不到。
 /// cdylib 也会带上一份，DLL 的清单不影响 ACP，无害。
+///
+/// 集成测试（tests/host.rs）再合并 lyflow-app.manifest：它把 tao 的窗口代码链进来，
+/// 那里 import 的是 comctl32 **v6** 才有的入口；没有 Common-Controls v6 依赖的进程
+/// 拿到的是 system32 里的 v5.82，于是在 main 之前就 STATUS_ENTRYPOINT_NOT_FOUND
+/// （0xC0000139），一行输出都没有。
 fn utf8_manifest_step(manifest: &Path) {
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") {
         return;
     }
     println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
     println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
+    let app_manifest = app_manifest_path();
+    println!("cargo:rerun-if-changed={}", app_manifest.display());
+    println!("cargo:rustc-link-arg-tests=/MANIFESTINPUT:{}", app_manifest.display());
+}
+
+fn app_manifest_path() -> PathBuf {
+    PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
+        .join("lyflow-app.manifest")
 }
 
 /// lyflow-app 在 UTF-8 那份之外再合并 lyflow-app.manifest（Common-Controls v6）。
@@ -254,11 +277,8 @@ fn utf8_manifest_step(manifest: &Path) {
 /// rc.exe，按系统 ANSI 代码页转码，936 的机器上中文注释被转坏，exe 报 14001 起不来。
 #[cfg(feature = "desktop")]
 fn tauri_step() {
-    let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
-        .join("lyflow-app.manifest");
-    println!("cargo:rerun-if-changed={}", manifest.display());
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
-        println!("cargo:rustc-link-arg-bin=lyflow-app=/MANIFESTINPUT:{}", manifest.display());
+        println!("cargo:rustc-link-arg-bin=lyflow-app=/MANIFESTINPUT:{}", app_manifest_path().display());
     }
     let windows = tauri_build::WindowsAttributes::new_without_app_manifest();
     tauri_build::try_build(tauri_build::Attributes::new().windows_attributes(windows))
