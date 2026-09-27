@@ -7,7 +7,8 @@
   文件打不开而且报的是「文件不存在」，排查方向完全错。
 
   只有 exe 的 manifest 决定进程 ACP，DLL 上贴无效 —— 所以这份 manifest 要
-  同时进 lyflow-dump-manifest、lyflow-core-tests 和 Tauri 的 exe。
+  同时进 lyflow-dump-manifest、lyflow-core-tests（CMake），以及 bridge 链出的
+  所有 exe —— lyflow-app、CLI lyflow、cargo 的测试（bridge/build.rs）。
 -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <application xmlns="urn:schemas-microsoft-com:asm.v3">

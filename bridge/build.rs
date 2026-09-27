@@ -228,17 +228,39 @@ fn main() {
         }
     }
 
-    println!("cargo:rerun-if-changed=lyflow-app.manifest");
+    utf8_manifest_step(&core.join("lyflow-utf8.manifest"));
     tauri_step();
 }
 
-/// D9：给 exe 贴带 activeCodePage=UTF-8 的清单。app_manifest 是整份替换而非合并，
-/// 所以 lyflow-app.manifest 必须自带 Common-Controls v6 依赖（bridge/README.md）。
+/// D9：本包链出的所有 exe（lyflow-app、CLI、lib 与各 bin 的测试）都要
+/// activeCodePage=UTF-8。只有 exe 的清单决定进程 ACP；缺了它，ACP=936 的机器上
+/// PCL 走 CRT 窄字符串，UTF-8 的中文路径被当成 GBK，报的是「文件不存在」。
+///
+/// 走 link.exe 的 /MANIFESTINPUT（CMake 给 C++ 那两个 exe 贴清单也是这条路）：
+/// 它按 XML 自己的声明读文件，不经过 rc.exe 的代码页转码。`rustc-link-arg` 覆盖
+/// 所有链接目标 —— `rustc-link-arg-tests` 只管 tests/ 下的集成测试，lib 的单测管不到。
+/// cdylib 也会带上一份，DLL 的清单不影响 ACP，无害。
+fn utf8_manifest_step(manifest: &Path) {
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") {
+        return;
+    }
+    println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+    println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
+}
+
+/// lyflow-app 在 UTF-8 那份之外再合并 lyflow-app.manifest（Common-Controls v6）。
+/// Tauri 自己的资源清单必须关掉（new_without_app_manifest）：一是 link.exe 已经
+/// 生成了清单资源，再来一份会撞资源 ID；二是 tauri_build 把清单内联进 .rc 交给
+/// rc.exe，按系统 ANSI 代码页转码，936 的机器上中文注释被转坏，exe 报 14001 起不来。
 #[cfg(feature = "desktop")]
 fn tauri_step() {
-    let windows = tauri_build::WindowsAttributes::new().app_manifest(include_str!(
-        "lyflow-app.manifest"
-    ));
+    let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
+        .join("lyflow-app.manifest");
+    println!("cargo:rerun-if-changed={}", manifest.display());
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-arg-bin=lyflow-app=/MANIFESTINPUT:{}", manifest.display());
+    }
+    let windows = tauri_build::WindowsAttributes::new_without_app_manifest();
     tauri_build::try_build(tauri_build::Attributes::new().windows_attributes(windows))
         .expect("tauri_build 失败");
 }

@@ -20,7 +20,8 @@ M2 起改成了 **CMake 构建的 DLL + libloading 运行时加载**
 2. 发 `cargo:rustc-env=LYFLOW_CORE_BIN=<build>/bin`，并把该目录里的
    `.dll/.exe/.pdb` 拷到 `target/<profile>/` 和它的 `deps/`，给 `tauri build`
    与打包用。
-3. 给 exe 贴 `lyflow-app.manifest`（D9：`activeCodePage=UTF-8`）。
+3. 让 link.exe 给本包所有 exe（app、CLI、测试）贴 `core/lyflow-utf8.manifest`
+   （D9：`activeCodePage=UTF-8`），lyflow-app 再合并 `lyflow-app.manifest`（Common-Controls v6）。
 
 **不发任何 `rustc-link-lib`。** DLL 在运行时才加载：**开发构建**
 （`debug_assertions`）从**本配置自己的** `LYFLOW_CORE_BIN` 加载，其余情况从 exe
@@ -52,10 +53,15 @@ CMake + Ninja + vcpkg（PCL）。Ninja 通常不在 PATH 上，`build.rs` 会依
 - **别 `canonicalize()` core 的路径。** Windows 上它返回 `\\?\D:\...`，
   CMake 的 `file(GLOB)` 在这种扩展长度路径下一个文件都匹配不到，
   最后报的是「No SOURCES given to target」，离真正的原因十万八千里。
-- **`WindowsAttributes::app_manifest` 是整份替换，不是合并**
-  （tauri-build 2.6.3 的 `res.set_manifest`）。所以 `lyflow-app.manifest` 里
-  必须自带 Tauri 原来的 Common-Controls v6 依赖，否则文件对话框会掉回旧样式，
-  而且不报错。
+- **清单别走 tauri_build 的 `app_manifest`**，用 `new_without_app_manifest()` 关掉它，
+  由 link.exe 的 `/MANIFESTINPUT` 贴。那条路把清单内联进 .rc 交给 rc.exe，按系统
+  ANSI 代码页转码：ACP=936 的机器上中文注释变成 GBK、声明却是 UTF-8，exe 报
+  os error 14001（并行配置不正确）起不来；ACP=65001 的机器上看不出来。关掉以后
+  Tauri 原来的 Common-Controls v6 依赖也没了，所以 `lyflow-app.manifest` 里要自带，
+  否则文件对话框会掉回旧样式，而且不报错。
+- **CLI 和测试 exe 同样要 UTF-8 清单。** 只有 exe 的清单决定进程 ACP，没有它
+  PCL 在 936 的机器上打不开中文路径。`rustc-link-arg-tests` 只管 `tests/` 下的集成
+  测试，所以用的是覆盖所有链接目标的 `rustc-link-arg`。
 - **窗口必须 `"dragDropEnabled": false`**（`tauri.conf.json`）。缺省是开的：Tauri 在 Windows 上给窗口
   注册自己的拖放目标，WebView2 里的 HTML5 拖放整个被吞掉 —— 算子面板拖不进画布，也不报错。e2e 的拖入用的是
   合成的 DragEvent，看不见这一层；`m8b.mjs` 里有一条断言盯着这个配置。app 自己不收系统文件拖放，关掉没有代价。
