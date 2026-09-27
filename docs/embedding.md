@@ -361,8 +361,12 @@ if (graph.front() == '[') { /* 诊断数组 */ }
 
 ```toml
 [dependencies]
-lyflow-app = { git = "https://github.com/liangyuR/lyFlow", default-features = false, features = ["host"] }
+lyflow-app = { git = "https://github.com/liangyuR/lyFlow.git", branch = "main", default-features = false, features = ["host"] }
 ```
+
+跟 `main` 分支走，不锚定某个提交：cargo 实际用的是哪一个提交记在宿主的 `Cargo.lock` 里，
+要跟上 LyFlow 的新提交就 `cargo update -p lyflow-app`。URL 带不带 `.git` 要和宿主
+`[patch."…"]` 里写的逐字一致，否则 patch 对不上。
 
 crate 的 lib 名字是 `lyflow_lib`。`build.rs` 会用 CMake 编 core；外部宿主拿不到
 checkout 路径，所以用环境变量按名字点包：`LYFLOW_STD_PACKS=0 LYFLOW_PACKS=dts`
