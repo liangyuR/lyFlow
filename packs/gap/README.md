@@ -33,7 +33,7 @@ packs/gap/
 ```powershell
 cd D:\project\LyFlow
 C:\vcpkg\vcpkg.exe install yaml-cpp:x64-windows            # 一次就够
-powershell -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1
+pwsh -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1
 
 $env:LYFLOW_PACKS = "gap"
 pnpm check          # 或 pnpm core:build / pnpm dev

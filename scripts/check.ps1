@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # 门禁：一条命令验完整条链路 —— C++ 编译/算子自检/doctest -> 三份契约对着 schema 校验
 # -> cargo test（DLL 加载、执行事件、二进制输出、中文路径）-> 前端 strict typecheck + build。
 $ErrorActionPreference = "Stop"
@@ -15,14 +16,21 @@ Step "manifest vs schema"
 $bin = Join-Path $root "build\core\bin"
 $exe = Join-Path $bin "lyflow-dump-manifest.exe"
 $tmp = Join-Path $env:TEMP "lyflow-manifest-check.json"
-[System.IO.File]::WriteAllText($tmp, ((& $exe) -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
+# exe 输出的是 UTF-8；pwsh 按控制台代码页解码，ACP=936 的机器上中文会变乱码。
+# 只在抓输出的这几行切，C++ 编译那几步的输出照旧按原代码页显示
+$consoleEncoding = [Console]::OutputEncoding
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Set-Content -Path $tmp -Value ((& $exe) -join "`n") -NoNewline -Encoding utf8NoBOM
 python "$PSScriptRoot\validate_schema.py" $tmp (Join-Path $root "schema\operator-manifest.schema.json")
 if ($LASTEXITCODE -ne 0) { throw "manifest 不符合 schema" }
 # 带上测试算子再导一份（test.param_showcase：14 种参数类型，含 transform / curve 的默认值，param-recipe P2.10）
 $env:LYFLOW_TEST_OPS = "1"
 try {
-  [System.IO.File]::WriteAllText($tmp, ((& $exe) -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
-} finally { Remove-Item Env:\LYFLOW_TEST_OPS }
+  Set-Content -Path $tmp -Value ((& $exe) -join "`n") -NoNewline -Encoding utf8NoBOM
+} finally {
+  Remove-Item Env:\LYFLOW_TEST_OPS
+  [Console]::OutputEncoding = $consoleEncoding
+}
 python "$PSScriptRoot\validate_schema.py" $tmp (Join-Path $root "schema\operator-manifest.schema.json")
 if ($LASTEXITCODE -ne 0) { throw "带测试算子的 manifest 不符合 schema" }
 
@@ -60,7 +68,7 @@ Step "配方文件 vs schema"
 # 失配报告本身两边各断言一遍：Rust（bridge/src/recipe.rs，下面 cargo test 那一步）与 @lyflow/editor 的单测（frontend 那一步），
 # 对着同一份 expected.json（摘要、条目、建议与文案逐字）。
 $fixtures = Join-Path $root "schema\fixtures\recipes"
-$expected = Get-Content (Join-Path $fixtures "expected.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+$expected = Get-Content (Join-Path $fixtures "expected.json") -Raw | ConvertFrom-Json
 foreach ($prop in $expected.recipes.PSObject.Properties) {
   $file = Join-Path $fixtures "graph.recipes\$($prop.Name)"
   if ($prop.Value.schemaValid) {

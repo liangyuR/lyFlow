@@ -54,7 +54,7 @@ if(LYFLOW_PACK_ENABLED)
   if(NOT EXISTS "${LYFLOW_ONNXRUNTIME_ROOT}/lib/onnxruntime.lib")
     message(FATAL_ERROR
       "gap 包要 onnxruntime，而 ${LYFLOW_ONNXRUNTIME_ROOT} 里没有。\n"
-      "先跑：powershell -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1")
+      "先跑：pwsh -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1")
   endif()
   # yaml-cpp 的 DLL 在 vcpkg 里，applocal 会带；onnxruntime 的由 std-ml 包拷。
 endif()

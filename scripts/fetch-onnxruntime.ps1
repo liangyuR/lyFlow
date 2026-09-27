@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # 准备 packs/std-ml 要的 onnxruntime（T9）：优先从本机的 xyz-gap-inspector 复制，
 # 否则从 GitHub release 下载同一版本。落到 third_party/onnxruntime/（已 gitignore）。
 $ErrorActionPreference = "Stop"
@@ -24,7 +25,7 @@ if (Test-Path (Join-Path $local "lib\onnxruntime.lib")) {
 $url = "https://github.com/microsoft/onnxruntime/releases/download/v$version/$name.zip"
 $tmp = Join-Path $env:TEMP "$name.zip"
 Write-Host "下载 $url …" -ForegroundColor Cyan
-Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing
+Invoke-WebRequest -Uri $url -OutFile $tmp
 
 $stage = Join-Path $env:TEMP "lyflow-ort-stage"
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }

@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # 单独构建 C++ core，跑算子自检 + doctest 测试。与 bridge/build.rs 同一条 CMake 路径。
 # 用法：build-core.ps1 [RelWithDebInfo] [-NoTests]
 $ErrorActionPreference = "Stop"

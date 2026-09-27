@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # gap 领域包的门禁：LYFLOW_PACKS=gap 跑一遍全链路（pnpm check）。
 # gap 包的行为已有意偏离原算法（M7），A/B 与导入器对拍不再是门槛；设 LYFLOW_GAP_AB=1
 # 时作为历史对拍工具顺手跑一遍、只打印结果，不判通过或失败。

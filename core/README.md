@@ -44,7 +44,7 @@ M2 以来完全一致；它同时导出 `lyflow_pcl_support`，别的包要 PCL 
 
 ```powershell
 C:\vcpkg\vcpkg.exe install pcl:x64-windows                  # 标准点云包
-powershell -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1  # std-ml
+pwsh -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1  # std-ml
 C:\vcpkg\vcpkg.exe install yaml-cpp:x64-windows             # 只有 gap 包要
 ```
 
@@ -64,8 +64,8 @@ core 是 **CMake 构建的 DLL**（[ADR-0004](../docs/adr/0004-core-as-dll.md)�
 # 构建 + 算子自检 + 跑 doctest 测试
 pnpm core:build
 # 或者直接
-powershell -File scripts/build-core.ps1
-powershell -File scripts/build-core.ps1 RelWithDebInfo -NoTests   # 只构建
+pwsh -File scripts/build-core.ps1
+pwsh -File scripts/build-core.ps1 RelWithDebInfo -NoTests   # 只构建
 ```
 
 产物全部落在 `build/core/bin/`：

@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # 一键产出嵌入宿主用的安装目录（A1-11）。布局与用法见 docs/embedding.md。
 # 用法：install-lyflow.ps1 [-Prefix <dir>] [-SkipBuild]
 # 默认 prefix 是 LYFLOW_INSTALL_PREFIX，再缺省是 <repo>/build/install。

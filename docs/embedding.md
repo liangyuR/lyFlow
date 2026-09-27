@@ -43,8 +43,8 @@ v9 加的那一个入口是 `lyflow_run_summary(runId)`：一次运行的结构�
 
 ```powershell
 pnpm run core:build                                  # 先构建 core（含算子包）
-powershell -File scripts/install-lyflow.ps1          # 默认 build/install
-powershell -File scripts/install-lyflow.ps1 -Prefix D:\lyflow-runtime
+pwsh -File scripts/install-lyflow.ps1          # 默认 build/install
+pwsh -File scripts/install-lyflow.ps1 -Prefix D:\lyflow-runtime
 ```
 
 `LYFLOW_INSTALL_PREFIX` 环境变量等价于 `-Prefix`。脚本最后会自检布局，

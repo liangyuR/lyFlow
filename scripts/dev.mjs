@@ -20,7 +20,7 @@ function start(name, command, args, options = {}) {
 // core-watch 先起：它第一次可能要跑一次完整构建，而 tauri dev 那边 build.rs
 // 走的是另一个构建目录，两边互不阻塞。
 if (withCore) {
-  start("core-watch", "powershell", [
+  start("core-watch", "pwsh", [
     "-ExecutionPolicy", "Bypass", "-File", path.join("scripts", "core-watch.ps1"),
   ]);
 }

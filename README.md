@@ -89,7 +89,8 @@ scripts/  构建与门禁脚本；scripts/e2e 是 CDP 验收
 
 ## 快速开始
 
-需要 Visual Studio（含 C++ 工具集）、Rust、Node + pnpm，以及 **vcpkg 装的 PCL**。
+需要 Visual Studio（含 C++ 工具集）、Rust、Node + pnpm、**PowerShell 7**（`pwsh`，
+脚本不支持系统自带的 Windows PowerShell 5.1），以及 **vcpkg 装的 PCL**。
 CMake 与 Ninja 用 VS 自带的即可。
 
 ```powershell

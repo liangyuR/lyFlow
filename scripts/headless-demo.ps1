@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # M4 §6 的第二条：一条真实任务用「库算子 + CLI」跑完，全程没有 GUI。
 # 用法：headless-demo.ps1 [-Exe <lyflow.exe 的路径>]  —— 默认用 bridge/target/release/lyflow.exe
 $ErrorActionPreference = "Stop"
@@ -8,6 +9,8 @@ for ($i = 0; $i -lt $args.Count; $i++) {
   if ($args[$i] -eq "-Exe") { $exe = $args[$i + 1] }
 }
 if (-not (Test-Path $exe)) { throw "找不到 $exe —— 先跑 pnpm cli:build" }
+# lyflow.exe 输出的是 UTF-8；pwsh 按控制台代码页解码，ACP=936 的机器上中文会变乱码
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 $work = Join-Path ([System.IO.Path]::GetTempPath()) "lyflow 无界面 演示"
 $lib = Join-Path $work "library"
@@ -46,8 +49,7 @@ $op = @'
   ]
 }
 '@
-[System.IO.File]::WriteAllText((Join-Path $lib "denoise.lyflow-op.json"), $op,
-                               (New-Object System.Text.UTF8Encoding($false)))
+Set-Content -Path (Join-Path $lib "denoise.lyflow-op.json") -Value $op -NoNewline -Encoding utf8NoBOM
 
 # 2) 一张用它的图。gen.synthetic 当数据源，省掉往仓库里塞 pcd
 $graph = @'
@@ -68,7 +70,7 @@ $graph = @'
 }
 '@
 $graphPath = Join-Path $work "demo.lyflow.json"
-[System.IO.File]::WriteAllText($graphPath, $graph, (New-Object System.Text.UTF8Encoding($false)))
+Set-Content -Path $graphPath -Value $graph -NoNewline -Encoding utf8NoBOM
 
 $env:LYFLOW_LIBRARY_DIRS = $lib
 function Step($name) { Write-Host "`n=== $name ===" -ForegroundColor Cyan }
@@ -116,8 +118,7 @@ Step "diff：只挪了坐标的两份图没有语义差异"
 $moved = Join-Path $work "moved.lyflow.json"
 $doc = Get-Content $graphPath -Raw | ConvertFrom-Json
 $doc.nodes | ForEach-Object { $_ | Add-Member -NotePropertyName ui -NotePropertyValue @{ position = @{ x = 999; y = 42 } } -Force }
-[System.IO.File]::WriteAllText($moved, ($doc | ConvertTo-Json -Depth 20),
-                               (New-Object System.Text.UTF8Encoding($false)))
+Set-Content -Path $moved -Value ($doc | ConvertTo-Json -Depth 20) -NoNewline -Encoding utf8NoBOM
 $diff = & $exe diff $graphPath $moved --json | ConvertFrom-Json
 if (-not $diff.empty) { throw "diff 不该有内容: $($diff | ConvertTo-Json -Compress)" }
 Write-Host "  两份图在语义上完全一样"

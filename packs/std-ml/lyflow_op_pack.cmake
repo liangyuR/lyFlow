@@ -32,7 +32,7 @@ if(LYFLOW_PACK_ENABLED)
   if(NOT EXISTS "${LYFLOW_ONNXRUNTIME_ROOT}/lib/onnxruntime.lib")
     message(FATAL_ERROR
       "packs/std-ml 要 onnxruntime ${LYFLOW_ORT_VERSION}，而 ${LYFLOW_ONNXRUNTIME_ROOT} 里没有。\n"
-      "先跑：powershell -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1\n"
+      "先跑：pwsh -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1\n"
       "或设 LYFLOW_ONNXRUNTIME_ROOT 指向已有的一份。")
   endif()
   # 不在 C:\vcpkg 里，vcpkg 的 applocal 看不见它们；bridge/build.rs 整目录搬走 bin/。

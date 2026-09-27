@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 # 盯着 core/ 的源码，改了就增量构建到 build/core，app 那边的 watcher 随即热重载。
 # 用法：core-watch.ps1（`pnpm dev` 会自动带上它）
 $ErrorActionPreference = "Stop"

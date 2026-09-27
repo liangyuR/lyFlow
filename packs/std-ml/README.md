@@ -15,7 +15,7 @@ Inspector 只看得到形状与 min/max/mean。构造张量、解读张量都是
 onnxruntime 1.19.2（win-x64）。构建前准备一份：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1
+pwsh -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1
 ```
 
 它优先从本机的 `xyz-gap-inspector/3rdparty/` 复制，否则从 GitHub release 下载，
