@@ -8,9 +8,9 @@
 |---|---|---|---|
 | C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 153 例；`LYFLOW_PACKS=dts` 161 例；`LYFLOW_PACKS=gap;dts` 242 例 | 分钟级（含编译） |
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 136（纯平台构建 79 通过 / 57 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑） | < 1 分钟（已编译时） |
-| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 75 | 秒级 |
+| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 76 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 29 | 秒级 |
-| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`） | 730 条断言、98 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
+| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`） | 733 条断言、98 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 32 条断言（精简前 58） | 几分钟 |
 
 ## 放在哪一层
@@ -26,7 +26,7 @@
 |---|---|
 | 执行器、事件 seq、取消、并发、缓存复用 | `core/tests/test_executor.cpp`、`test_cache.cpp`、`test_flow.cpp`（并发 8 run、取消 100 次） |
 | 计划、cacheKey、Run to node / 选中 | `core/tests/test_plan.cpp`、`test_noderun.cpp`；e2e `m3.mjs`（Shift+F5）、`noderun.mjs`（右键「运行到此节点」） |
-| 子图、库算子 | `core/tests/test_subgraph.cpp`；e2e `m4.mjs` |
+| 子图、库算子（含展开为内联子图：定义去掉 id、内联后逐位相同） | `core/tests/test_subgraph.cpp`；`packages/editor/test/graph-params-actions.test.mjs`（合成 / 解散 / 展开库算子的 store 动作）；e2e `m4.mjs` |
 | 图参数（规格、校验、传参） | `core/tests/test_graph_params.cpp`、`test_params.cpp`；`packages/editor/test/graph-params*.test.mjs`；e2e `params_p1.mjs` |
 | 配方与四类失配 | 共享夹具 `schema/fixtures/recipes/`：`bridge/src/recipe.rs` 与 `packages/editor/test/recipes.test.mjs` 对着同一份 `expected.json`；e2e `params_p3.mjs` 只验界面、磁盘与对话框 |
 | 参数面板（虚拟列表、搜索、chip、14 种控件） | `packages/editor/test/param-panel.test.mjs`、`param-values.test.mjs`；e2e `params_p2.mjs` |

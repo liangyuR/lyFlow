@@ -35,6 +35,7 @@ import {
   augmentOperators,
   composeSubgraph as composeInto,
   dissolveSubgraph as dissolveFrom,
+  inlineLibraryNode,
   levelOf,
   fullId,
   pathIsValid,
@@ -47,6 +48,7 @@ import type { MigrationAction, MigrationEdits } from "../types/execution";
 import type { OperatorDesc, Param, SnippetDesc } from "../types/manifest";
 import {
   GRAPH_SCHEMA_VERSION,
+  LIBRARY_OP_PREFIX,
   subgraphIdOf,
   type GraphDoc,
   type GraphLevel,
@@ -54,6 +56,7 @@ import {
   type NodeUi,
   type ParamSpec,
   type PortRef,
+  type SubgraphDef,
   type SubParam,
 } from "../types/graph";
 import { useManifestStore } from "./manifest";
@@ -360,6 +363,9 @@ interface GraphState {
   composeSubgraph(ids: readonly string[]): ComposeResult | null;
   /** 解散一个子图节点，内容内联回本层。返回内联出来的节点 id。 */
   dissolveSubgraph(nodeId: string): string[];
+  /** 库算子「展开为内联子图」：def 是 core 给的库定义（transport.getLibraryDefinition）。
+   *  一条撤销。返回新子图的 id；不是库算子时 null、什么都不改。 */
+  inlineLibrary(nodeId: string, def: SubgraphDef): string | null;
   // -- 顶层图参数（param-recipe P1.3）：每个都是一次撤销 ---------------------
   /** 「纳入配方」= 提升为图参数（K2）：当前有效值成为 default，节点上的显式值删除，加一条 bind；
    *  规格从被绑定目标的声明抄（P1.1）。在子图里调就做整条提升链（内参 → 子图参数 → 这个实例上
@@ -967,6 +973,17 @@ export const useGraphStore = create<GraphState>((set, get) => {
         inlined = dissolveFrom(d, path, nodeId, allIds(d));
       });
       return inlined;
+    },
+
+    inlineLibrary(nodeId, def) {
+      const path = useUiStore.getState().path;
+      const node = levelOf(get().doc, path).nodes.find((n) => n.id === nodeId);
+      if (!node || !node.op.startsWith(LIBRARY_OP_PREFIX)) return null;
+      let subgraphId: string | null = null;
+      transact("展开库算子", (d) => {
+        subgraphId = inlineLibraryNode(d, path, nodeId, def);
+      });
+      return subgraphId;
     },
 
     promoteParam(nodeId, paramName, at) {

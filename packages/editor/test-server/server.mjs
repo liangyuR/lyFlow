@@ -716,6 +716,9 @@ async function route(req, res, url) {
   if (req.method === "POST" && p === "/lyflow/library/save") {
     throw Object.assign(new Error("桩服务器不支持保存到库"), { status: 501 });
   }
+  if (req.method === "GET" && p === "/lyflow/library/definition") {
+    throw Object.assign(new Error("桩服务器没有库目录，取不到库算子的定义"), { status: 501 });
+  }
 
   if (req.method === "POST" && p === "/lyflow/import") {
     const body = await json();

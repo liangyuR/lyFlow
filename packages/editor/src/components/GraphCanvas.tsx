@@ -1127,11 +1127,26 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
             <button
               type="button"
               data-testid="ctx-inline-library"
+              title="把库算子的定义拷进这张图、换成可编辑的子图；之后与库文件脱钩，改库文件不影响这张图"
               onClick={() => {
-                useUiStore
-                  .getState()
-                  .showToast("库算子要先在库目录里编辑，或从原图重新合成", "warn");
+                const nodeId = menu.nodeId;
+                const opId = menuNode?.op ?? "";
                 setMenu(null);
+                void transport
+                  .getLibraryDefinition(opId)
+                  .then((def) => {
+                    const ui = useUiStore.getState();
+                    if (!def) {
+                      ui.showToast(`取不到 ${opId} 的定义：库文件可能已经删了，刷新库后再试`, "warn");
+                      return;
+                    }
+                    if (!useGraphStore.getState().inlineLibrary(nodeId, def)) return;
+                    ui.setSelection([nodeId], []);
+                    ui.showToast("已展开为子图，双击进入编辑；库文件不受影响");
+                  })
+                  .catch((e: unknown) =>
+                    useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn"),
+                  );
               }}
             >
               展开为内联子图

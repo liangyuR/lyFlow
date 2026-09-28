@@ -1,5 +1,5 @@
 import type { CoreInfo, OperatorManifestBundle } from "../types/manifest";
-import type { GraphDoc } from "../types/graph";
+import type { GraphDoc, SubgraphDef } from "../types/graph";
 import type {
   CacheStats,
   EvictResult,
@@ -399,6 +399,9 @@ export class HttpTransport implements Transport {
 
   getLibraryStatus(): Promise<LibraryStatus> {
     return this.#get<LibraryStatus>("/lyflow/library");
+  }
+  getLibraryDefinition(opId: string): Promise<SubgraphDef | null> {
+    return this.#get<SubgraphDef | null>(`/lyflow/library/definition?op=${encodeURIComponent(opId)}`);
   }
   refreshLibrary(): Promise<LibraryRefresh> {
     return this.#send<LibraryRefresh>("POST", "/lyflow/library/refresh");

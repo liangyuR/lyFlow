@@ -6,6 +6,7 @@ import { newLocalId } from "./ids";
 import { ANY, findPort, inferAnyTypes, type GraphContext } from "./typecheck";
 import type { OperatorDesc, Param, Port } from "../types/manifest";
 import {
+  LIBRARY_OP_PREFIX,
   subgraphIdOf,
   SUBGRAPH_OP_PREFIX,
   type GraphDoc,
@@ -301,6 +302,30 @@ export function composeSubgraph(
   });
   host.edges.push(...newEdges);
   return { subgraphId, nodeId };
+}
+
+/** 库算子「展开为内联子图」（docs/library-inline-plan.md）：库定义（core 给的，形状同 `doc.subgraphs.<id>`）
+ *  以新 id 写进 doc，节点从 `lib.<id>` 换成 `sub:<新 id>`。节点 id、参数、连线原样不动 —— 子图的
+ *  外参与端口就是库算子的参数与端口，展开前后 compile 出同一张平图（ADR-0010）。只展开一层：
+ *  定义里还是 `lib.*` 的节点保持库算子。改的是传进来的 doc（store 在 immer draft 上调）。
+ *  返回新子图的 id；节点不存在、不是库算子时返回 null、doc 不动。 */
+export function inlineLibraryNode(
+  doc: GraphDoc,
+  path: SubPath,
+  nodeId: string,
+  def: SubgraphDef,
+): string | null {
+  const node = levelOf(doc, path).nodes.find((n) => n.id === nodeId);
+  if (!node || !node.op.startsWith(LIBRARY_OP_PREFIX)) return null;
+  const subgraphId = newLocalId("sg", new Set(Object.keys(doc.subgraphs ?? {})));
+  const copy = JSON.parse(JSON.stringify(def)) as SubgraphDef & { id?: unknown };
+  delete copy.id;
+  copy.name = copy.name ?? node.op.slice(LIBRARY_OP_PREFIX.length);
+  doc.subgraphs = { ...(doc.subgraphs ?? {}), [subgraphId]: copy };
+  node.op = SUBGRAPH_OP_PREFIX + subgraphId;
+  // 库算子的版本号属于库文件；内联之后与库文件脱钩，版本随定义（copy.version）走
+  delete node.opVersion;
+  return subgraphId;
 }
 
 /** 解散：把子图内容内联回本层。返回内联出来的节点 id。 */

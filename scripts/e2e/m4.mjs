@@ -425,6 +425,51 @@ async function suiteLibrary(cdp, report) {
     `内部=${JSON.stringify(innerDone)} ${JSON.stringify(run.nodes)}`,
   );
 
+  // 展开为内联子图（docs/library-inline-plan.md）：定义由 core 给，换成 sub: 之后跑出来的结果与库算子相同
+  const counts = () => cdp.eval(`
+    const nodes = window.__lyflow.stores.execution.getState().nodes;
+    const out = {};
+    for (const [id, n] of nodes) {
+      if (id.startsWith(${lit(fresh.lib + "/")})) out[id] = (n.stats?.outputs ?? []).map((o) => o.elementCount);
+    }
+    return out;
+  `);
+  const libCounts = await counts();
+  const menuHit = await cdp.eval(`
+    const el = document.querySelector('[data-testid="node-${fresh.lib}"]');
+    const r = el.getBoundingClientRect();
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true,
+      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }));
+    await new Promise((d) => setTimeout(d, 150));
+    const item = document.querySelector('[data-testid="ctx-inline-library"]');
+    if (!item) return false;
+    item.click();
+    return true;
+  `);
+  mustOk(menuHit, "库算子的右键菜单里有「展开为内联子图」");
+  await cdp.waitFor(
+    `window.__lyflow.stores.graph.getState().doc.nodes.find((n) => n.id === ${lit(fresh.lib)})?.op.startsWith('sub:')`,
+    { timeoutMs: 5000, what: "库算子节点换成 sub:" },
+  ).catch(() => {});
+  const inlined = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    const n = g.doc.nodes.find((x) => x.id === ${lit(fresh.lib)});
+    const sg = n.op.startsWith('sub:') ? g.doc.subgraphs?.[n.op.slice(4)] : null;
+    return { op: n.op, inner: sg ? sg.nodes.length : 0, undo: g.past[g.past.length - 1]?.label ?? null };
+  `);
+  report.ok("右键「展开为内联子图」：节点变成 sub:，定义（两个内部节点）拷进了图，是一条撤销「展开库算子」",
+    inlined.op.startsWith("sub:") && inlined.inner === 2 && inlined.undo === "展开库算子", JSON.stringify(inlined));
+  const rerun = await runAndWait(cdp, () => pressF5(cdp));
+  const subCounts = await counts();
+  report.ok("展开之后再跑：内部节点的输出点数与库算子时相同",
+    rerun.status === "ok" && Object.keys(libCounts).length === 2 && JSON.stringify(subCounts) === JSON.stringify(libCounts),
+    JSON.stringify({ libCounts, subCounts }));
+  await pressCtrl(cdp, "z");
+  await sleep(200);
+  report.eq("一次撤销回到库算子",
+    await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.find((n) => n.id === ${lit(fresh.lib)}).op;`),
+    `lib.${libId}`);
+
   // 收尾：把库文件删掉，不然下一次跑会看到一堆积压的 e2e 算子
   if (libFile && fs.existsSync(libFile)) {
     fs.rmSync(libFile, { force: true });

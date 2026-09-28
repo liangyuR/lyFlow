@@ -239,3 +239,33 @@ test("合成子图 / 解散子图：被绑定的参数跟着搬，bind 不悬空
   assert.equal(voxel.params.leafSize, undefined, "解散时不往被绑定的内参上写显式值");
   assert.equal(plane.params.distanceThreshold, undefined);
 });
+
+test("库算子展开为内联子图：定义换新 id 写进 doc，op 换成 sub:，参数与连线不动；不是库算子不改；一次撤销还原", () => {
+  // 拿样例图里 sg_clean 的定义当「core 给的库定义」，把第二个实例改成库算子
+  const lib = fixture();
+  const n2 = lib.nodes.find((n) => n.id === "n_clean2");
+  n2.op = "lib.clean";
+  n2.params = { leafSize: [0.02, 0.02, 0.02] };
+  reset(lib);
+  const def = { ...structuredClone(example.subgraphs.sg_clean), category: "Cleanup", version: "1.2.0" };
+  const before = structuredClone(doc());
+
+  assert.equal(g().inlineLibrary("n_clean", def), null, "sub: 节点不是库算子");
+  assert.equal(g().inlineLibrary("n_nope", def), null);
+  assert.deepEqual(doc(), before, "没展开就什么都不改");
+
+  const sgId = g().inlineLibrary("n_clean2", def);
+  assert.ok(sgId && sgId !== "sg_clean", `新子图 id 不撞已有的：${sgId}`);
+  const inlined = node("n_clean2");
+  assert.deepEqual(
+    [inlined.op, inlined.opVersion, inlined.params],
+    [`sub:${sgId}`, undefined, { leafSize: [0.02, 0.02, 0.02] }],
+    "op 换成 sub:、库的版本号不留、参数原样",
+  );
+  assert.deepEqual(doc().subgraphs[sgId], def, "定义原样写进去（version / category 跟着定义走）");
+  assert.deepEqual(doc().edges, before.edges, "连线不动");
+  assert.equal(g().past.at(-1)?.label, "展开库算子", "是一条撤销记录");
+
+  g().undo();
+  assert.deepEqual(doc(), before, "一次撤销回到库算子");
+});

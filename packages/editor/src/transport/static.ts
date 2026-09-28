@@ -1,5 +1,5 @@
 import type { CoreInfo, OperatorManifestBundle } from "../types/manifest";
-import type { GraphDoc } from "../types/graph";
+import type { GraphDoc, SubgraphDef } from "../types/graph";
 import type {
   CacheStats,
   EvictResult,
@@ -157,6 +157,10 @@ export class StaticTransport implements Transport {
   }
   async getLibraryStatus(): Promise<LibraryStatus> {
     return { dirs: [], count: 0, problems: [] };
+  }
+  async getLibraryDefinition(): Promise<SubgraphDef | null> {
+    // 静态宿主没有库目录，也就没有库算子
+    return null;
   }
   async refreshLibrary(): Promise<LibraryRefresh> {
     return browserOnly("刷新库算子");

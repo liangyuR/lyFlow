@@ -2,7 +2,7 @@
 // 三个实现（tauri / http / static）各自一个文件，这里只有契约。
 
 import type { CoreInfo, OperatorManifestBundle, SnippetDesc } from "../types/manifest";
-import type { GraphDoc } from "../types/graph";
+import type { GraphDoc, SubgraphDef } from "../types/graph";
 import type {
   CacheStats,
   EvictResult,
@@ -192,6 +192,9 @@ export interface Transport {
   refreshLibrary(): Promise<LibraryRefresh>;
   /** 把 doc 里的一个子图存成库文件。 */
   saveAsLibrary(doc: GraphDoc, subgraphId: string, meta: LibraryMeta): Promise<LibraryStatus>;
+  /** 库算子 `lib.<id>` 的定义（C ABI v13）：形状同 `doc.subgraphs.<id>`，「展开为内联子图」写进 doc。
+   *  找不到（库文件已删、没重扫）返回 null。 */
+  getLibraryDefinition(opId: string): Promise<SubgraphDef | null>;
   /** 把一份外部配置导入成 GraphDoc（ADR-0017 的 `lyflow_import`）。 */
   importGraph(kind: string, text: string, baseDir: string | null): Promise<GraphDoc>;
 

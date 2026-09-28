@@ -47,6 +47,7 @@ v11 再加的 `isolate`（只运行某几个节点）与 `force`（强制重算�
 | GET | `/lyflow/library` | `getLibraryStatus` | `lyflow_library_count` |
 | POST | `/lyflow/library/refresh` | `refreshLibrary` | `lyflow_set_library_dirs` |
 | POST | `/lyflow/library/save` | `saveAsLibrary` | 桥接层的事，core 不参与 |
+| GET | `/lyflow/library/definition?op=lib.<id>` | `getLibraryDefinition` | `lyflow_library_definition`（v13） |
 | POST | `/lyflow/import` | `importGraph` | `lyflow_import` |
 | GET / PUT | `/lyflow/files/graph?path=` | `loadGraph` / `saveGraph` | 桥接层 |
 | GET / PUT / DELETE | `/lyflow/files/backup?path=` | `readBackup` / `writeBackup` / `discardBackup` | 桥接层 |
@@ -321,6 +322,7 @@ magic 对不上时编辑器会当成「响应不是点云」直接报错，所�
 `GET /lyflow/library`：`{ "dirs": [], "count": 0, "problems": [] }`。
 `POST /lyflow/library/refresh`：`{ "status": {…}, "manifest": {…} }`（重扫之后连新 manifest 一起给）。
 `POST /lyflow/library/save`：`{ "doc": {}, "subgraphId": "s1", "meta": { "id": "lib.foo" } }` → `LibraryStatus`。
+`GET /lyflow/library/definition?op=lib.foo`：库定义（形状同 `doc.subgraphs.<id>`，去掉了 `id`），找不到回 `null`。桩服务器没有库目录，回 **501**。
 不支持的后端返回 501。
 
 ## 导入

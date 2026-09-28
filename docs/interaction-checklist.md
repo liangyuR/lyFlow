@@ -66,7 +66,7 @@
 
 | # | 项 | 状态 | 备注 |
 |---|---|---|---|
-| 31 | 子图 / 复合算子 | ✅ M4 | compile 期展开成平图，路径式节点 id，参数提升，库算子目录（[ADR-0010](adr/0010-subgraph-by-expansion.md)） |
+| 31 | 子图 / 复合算子 | ✅ M4 | compile 期展开成平图，路径式节点 id，参数提升，库算子目录（[ADR-0010](adr/0010-subgraph-by-expansion.md)）。库算子右键「展开为内联子图」：定义拷进图、换成可编辑的子图，与库文件脱钩（[library-inline-plan.md](library-inline-plan.md)） |
 | 32 | 节点分组框（Frame）+ 整组折叠 | ✅ M4（以子图取代） | 子图节点本身就是「一个可折叠的框」，而且它有语义：能提升参数、能存成库算子、能整体静音。再做一个纯 UI 的框是两套心智，见 m4-acceptance 的「偏离与决策」 |
 | 33 | Live preview（拖参数实时出结果） | ✅ M4 | 源头抽稀的 preview run，独立缓存命名空间（[ADR-0011](adr/0011-preview-as-decimated-run.md)）；拖动到渲染 < 100 ms |
 | 34 | 批量扫参 / 参数网格搜索 | ✅ M4 | `lyflow sweep`：笛卡尔积 + 进程内缓存让上游只算一次；可出 CSV |

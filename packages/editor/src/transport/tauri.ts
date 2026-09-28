@@ -1,5 +1,5 @@
 import type { CoreInfo, OperatorManifestBundle } from "../types/manifest";
-import type { GraphDoc } from "../types/graph";
+import type { GraphDoc, SubgraphDef } from "../types/graph";
 import type {
   CacheStats,
   EvictResult,
@@ -239,6 +239,10 @@ export class TauriTransport implements Transport {
     const { invoke } = await import("@tauri-apps/api/core");
     // Tauri 的 command 参数走 JSON，Uint8Array 要拍成普通数组
     return invoke<void>("write_file_bytes", { path, contents: Array.from(contents) });
+  }
+  async getLibraryDefinition(opId: string): Promise<SubgraphDef | null> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<SubgraphDef | null>("get_library_definition", { opId });
   }
   async getLibraryStatus(): Promise<LibraryStatus> {
     const { invoke } = await import("@tauri-apps/api/core");
