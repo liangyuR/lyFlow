@@ -213,6 +213,13 @@ Audio_1 的缝只有 0.04~0.15 mm 宽却游走 0.9 mm，**任何一条固定的�
 在那之前，`perturb` 在这类测点上给出的是「选区对不对」的信息，不是「读数准不准」的信息，
 `agent-tuning.md` 里写了怎么分辨。
 
+**修订（2026-09-29）：`pointFrom`。** 让选区跟着帧走不必等「输出 region 的 gap 算子」—— 那条路与给
+`edit.translate_region` 加锚点输入端口一样会成环（锚点多在 `--after` 的下游）。改成 CLI 两遍：
+halfspace 的 `pointFrom:{x|y|z:{path, scale?, offset?}}` 先在未扰动的图上（位移 0）逐样本按 G3 值路径读锚点，
+再把「值 × scale + offset」写进这一帧的刀口扫位移。选区仍然只是几何，锚点是平台级的值引用，没有领域规则进平台；
+每帧的刀口写在 `perturb_anchor` 行里，可审计。取不到锚点的样本判失败。值路径同时补上数字段取数组下标
+（Point2D 的 `p.0`）。设计见 [pointfrom-plan.md](../pointfrom-plan.md)。
+
 ## 后果
 
 **`sweep` 的 `--metric nodeId:port.field` 三个字段各自翻译成一条路径**，

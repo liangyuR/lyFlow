@@ -1,6 +1,6 @@
 # `perturb --region` 的 `pointFrom`：刀口逐帧跟着锚点走 —— 调研与实施计划
 
-> 状态：**已确认，实施中**（2026-09-29）。C 档「`perturb --region` 的 `pointFrom`」。
+> 状态：**已实施**（2026-09-29）。C 档「`perturb --region` 的 `pointFrom`」。
 > 行号是写这份计划时的位置，以符号名为准。
 
 ## 1. 现状

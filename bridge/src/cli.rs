@@ -110,6 +110,9 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                           [--base-dir <dir>] [--parallel <n>] [--no-cache] [--set ...]
         选区 JSON：{\"kind\":\"halfspace\",\"point\":[x,y,z],\"normal\":[x,y,z]}
                    {\"kind\":\"box\",\"min\":[x,y,z],\"max\":[x,y,z]}
+        刀口跟着锚点走（只 halfspace）：加 \"pointFrom\":{\"x\":{\"path\":<值路径>,\"scale\":s,\"offset\":o}}
+              先在未扰动的图上逐样本读锚点，刀口这个分量 = 值 × s + o（单位自己换算，毫米的锚点给 0.001）；
+              每个样本一行 perturb_anchor；取不到锚点的样本不跑、判失败
         单位：--region 的 point / min / max 与 --axis 的位移都是「米」，与点云同帧同单位
               （传感器帧与测量帧都是米）；outputs.* 这类 Measurement 是「毫米」。
               所以「张开 1 mm 读数加 1 mm」是 --expect 1000，不是 1。
@@ -2997,6 +3000,63 @@ mod tests {
             .unwrap();
         assert_eq!(sum["pass"], 0);
         assert_eq!(sum["nonResponsive"], 1);
+    }
+
+    #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
+    fn perturb_point_from_moves_the_cut_to_each_frames_anchor() {
+        let dir = workspace("perturbanchor");
+        let graph = crop_chain(&dir, 3403, 17003);
+        // f1 的锚点 = 17003 × 1e-5 ≈ 0.170 m：刀口挪过去之后 ±0.04 的位移再也够不到 0.05 处的裁剪边界，
+        // 读数不再响应（同一张图刀口在 0 时斜率 > 0，见 perturb_inserts_the_node_and_reports_a_slope）。
+        // bad 把 g.pointCount 写坏，第一遍就跑不通、取不到锚点
+        let samples = dir.join("s.jsonl");
+        std::fs::write(
+            &samples,
+            "{\"id\":\"f1\",\"set\":{}}
+{\"id\":\"bad\",\"set\":{\"g.pointCount\":-5}}
+",
+        )
+        .unwrap();
+        let region = r#"{"kind":"halfspace","point":[0,0,0],"normal":[1,0,0],
+                         "pointFrom":{"x":{"path":"nodes.g.elementCount","scale":0.00001}}}"#;
+        let r = cli(&[
+            "perturb",
+            &graph,
+            "--after",
+            "g:cloud",
+            "--region",
+            region,
+            "--axis",
+            "x=-0.04:0.04:5",
+            "--metric",
+            "nodes.c.elementCount",
+            "--samples",
+            &samples.to_string_lossy(),
+        ]);
+        assert_eq!(r.code, EXIT_FAILED, "取不到锚点的样本判失败：{} / {}", r.out, r.err);
+        let lines = r.lines();
+        let anchor = |id: &str| {
+            lines
+                .iter()
+                .find(|l| l["kind"] == "perturb_anchor" && l["sample"] == id)
+                .cloned()
+                .unwrap_or_else(|| panic!("没有 {id} 的 perturb_anchor：{}", r.out))
+        };
+        let f1 = anchor("f1");
+        assert_eq!(f1["status"], "ok");
+        let point: Vec<f64> = f1["point"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+        assert!((point[0] - 0.17003).abs() < 1e-9 && point[1] == 0.0 && point[2] == 0.0, "{point:?}");
+        assert_eq!(f1["paths"], json!(["nodes.g.elementCount"]));
+        let bad = anchor("bad");
+        assert_eq!([&bad["status"], &bad["point"]], [&json!("anchor_missing"), &Value::Null]);
+
+        let rows: Vec<&Value> = lines.iter().filter(|l| l["kind"] == "perturb_row").collect();
+        assert_eq!(rows.len(), 5, "只有取到锚点的 f1 跑第二遍");
+        assert!(rows.iter().all(|r| r["sample"] == "f1"));
+        let per = |id: &str| lines.iter().find(|l| l["kind"] == "perturb_sample" && l["sample"] == id).unwrap();
+        assert_eq!(per("f1")["slope"], 0.0, "刀口跟着锚点走到 0.17，读数不响应");
+        assert_eq!(per("bad")["n"], 0);
     }
 
     // ------------------------------------------------------------ 顶层图参数（M7 J7/J8）

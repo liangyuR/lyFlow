@@ -176,6 +176,7 @@ samples.jsonl；`work/` 下没有任何引用 `D:/project` 的东西。它主动
    `camera=both` 时怎么办没写。
 5. **选区跟着缝走**。`--region` 允许 `pointFrom: "<node>:<port>"` 引用某个节点输出的 2D/3D 点，
    刀口逐帧跟锚点。这是平台级的通用引用，不是领域规则，不违背 G7；有了它 Audio_1 是一条命令。
+   **（2026-09-29 已做**：写法是按分量给值路径与换算 `pointFrom:{x:{path,scale,offset}}`，见 [pointfrom-plan.md](pointfrom-plan.md)。）
 6. **`list_metrics(graphPath)`**：现在要靳 `eval` 拼错一次换可用路径清单。
 7. region / axis 的单位（米）只在正文里，参数 `unit` 里没有。
 

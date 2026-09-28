@@ -280,7 +280,7 @@ gap 领域包从 `xyz-gap-inspector/lyflow/` 搬进本仓库的 `packs/gap/`，�
       与 region / axis 的位移是米（同一句也写进 `edit.translate_region` 的 `doc` 与 `perturb` 的 USAGE）
 
 **仍未做的**：
-- `--region` 允许 `pointFrom: <node>:<port>` 让刀口逐帧跟锚点（平台级引用，不违背 G7）
+- ~~`--region` 允许 `pointFrom: <node>:<port>` 让刀口逐帧跟锚点~~（已做：halfspace 的 `pointFrom:{x|y|z:{path,scale,offset}}`，CLI 两遍，[pointfrom-plan.md](pointfrom-plan.md)）
 - ~~`list_metrics(graphPath)`~~（已做：CLI `eval --list-metrics` + MCP `list_metrics`）
 - `outputsAvailable` 的业务侧 harvest（留给阶段 B；`devbridge.ts` 快照透出已做）
 

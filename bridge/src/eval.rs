@@ -133,6 +133,11 @@ pub(crate) struct RunView<'a> {
 fn descend<'a>(start: &'a Value, rest: &[String]) -> Option<&'a Value> {
     let mut cur = start;
     for key in rest {
+        // 数组按数字段取下标：Point2D 的 `p.0`、Plane 的 `normal.2`（pointFrom 拿它们当锚点）
+        if let Some(items) = cur.as_array() {
+            cur = items.get(key.parse::<usize>().ok()?)?;
+            continue;
+        }
         let obj = cur.as_object()?;
         cur = match obj.get(key) {
             Some(v) => v,
@@ -1828,7 +1833,9 @@ mod tests {
                     "elementCount": 1, "byteSize": 8,
                     "outputs": [
                         {"port": "dx", "type": "Measurement", "elementCount": 1,
-                         "value": {"kind": "Measurement", "value": 1.25, "ok": true}}
+                         "value": {"kind": "Measurement", "value": 1.25, "ok": true}},
+                        {"port": "at", "type": "Point2D", "elementCount": 1,
+                         "value": {"kind": "Point2D", "p": [0.5, -2.0]}}
                     ]
                 }
             }),
@@ -1866,6 +1873,10 @@ mod tests {
         assert_eq!(view.resolve(&metric("outputs.cloud")), None);
         assert_eq!(view.resolve(&metric("outputs.nope")), None);
         assert_eq!(view.resolve(&metric("nodes.n_fit.nope.x")), None);
+        // 数组按数字段取下标（pointFrom 拿 Point2D 的分量当锚点）
+        assert_eq!(view.resolve(&metric("nodes.n_off.at.p.1")), Some(-2.0));
+        assert_eq!(view.resolve(&metric("nodes.n_off.at.p.2")), None);
+        assert_eq!(view.resolve(&metric("nodes.n_off.at.p.x")), None);
     }
 
     #[test]

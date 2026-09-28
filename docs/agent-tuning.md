@@ -336,6 +336,21 @@ lyflow perturb graph.lyflow.json --after n_frame_s:cloud \
 Audio_1 的缝 0.04~0.15 mm 宽、帧间游走 0.9 mm，任何固定的刀都切不对多数帧。
 分辨办法：看 `nonResponsive` 的样本是不是集中在缝位置偏离中位数最远的那些帧 ——
 是的话问题在选区，不在读数。
+
+**缝在帧间游走时用 `pointFrom` 让刀口跟着锚点走**（只 halfspace，[pointfrom-plan.md](pointfrom-plan.md)）：
+
+```jsonc
+--region '{"kind":"halfspace","point":[0,0,0],"normal":[1,0,0],
+           "pointFrom":{"x":{"path":"nodes.n_notch.quality.cameras.primary.midXMm","scale":0.001,"offset":0.0}}}'
+```
+
+- 先在**未扰动**的图上逐样本读锚点，再把这一帧的刀口写进去扫位移 —— 锚点不会被刀口带着动，
+  上面「切分面压在锚点上」的坑对锚点本身不成立（但刀口仍不能压在**别的**要用的点上）。
+- 刀口这个分量 = 值 × `scale` + `offset`，没写的分量用 `point` 里的。**单位与坐标系自己换算**：
+  `midXMm` 是毫米、刀口是米，`scale` 给 0.001；想把刀口放在锚点右边 0.2 mm 就 `offset: 0.0002`。
+  Point2D 这类输出取分量用数字段：`nodes.<节点>.<端口>.p.0`。
+- 每个样本一行 `perturb_anchor{sample, point, status, paths}` 写明这一帧实际用的刀口；取不到锚点的样本
+  `status: "anchor_missing"`、不跑扫描、判失败（退出码 2），不悄悄退回固定刀口。
 逐样本的 `perturb_sample` 每样本每指标一行，CLI 直接在 stdout 里，
 MCP 落在返回值的 `samplesPath`（**全量**，不受 `failuresLimit` 影响），
 拿它和 `eval` 取出来的逐帧缝位置（`nodes.<节点>.quality.…midXMm` 这类）对齐看就够了。

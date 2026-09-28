@@ -87,6 +87,69 @@ impl Region {
     }
 }
 
+/// `pointFrom` 的一个分量（docs/pointfrom-plan.md）：刀口这个分量 = 值 × scale + offset。
+/// 单位与坐标系显式换算、不猜 —— 锚点常是毫米的 Record 字段，刀口是米。
+#[derive(Clone, Debug)]
+pub(crate) struct Anchor {
+    pub axis: usize,
+    pub metric: MetricPath,
+    pub scale: f64,
+    pub offset: f64,
+}
+
+/// `--region` 里的 `pointFrom`：`{"x": {"path": …, "scale"?: …, "offset"?: …}, "y"?: …, "z"?: …}`。
+/// 没写返回空。只支持 halfspace：box 跟着锚点怎么动没有定义。
+pub(crate) fn parse_point_from(text: &str) -> Result<Vec<Anchor>, String> {
+    let value: Value =
+        serde_json::from_str(text).map_err(|e| format!("--region 不是合法 JSON: {e}"))?;
+    let Some(spec) = value.get("pointFrom") else {
+        return Ok(Vec::new());
+    };
+    if value.get("kind").and_then(Value::as_str) != Some("halfspace") {
+        return Err("--region 的 pointFrom 只支持 halfspace：box 跟着锚点怎么动没有定义".to_string());
+    }
+    let Some(obj) = spec.as_object().filter(|o| !o.is_empty()) else {
+        return Err("--region 的 pointFrom 要是一个对象，键是 x / y / z 里的一个或几个".to_string());
+    };
+    let mut out = Vec::new();
+    for (key, item) in obj {
+        let axis = match key.as_str() {
+            "x" => 0,
+            "y" => 1,
+            "z" => 2,
+            other => return Err(format!("--region 的 pointFrom 只认 x / y / z，收到 {other}")),
+        };
+        let Some(item) = item.as_object() else {
+            return Err(format!("--region 的 pointFrom.{key} 要是 {{path, scale?, offset?}}"));
+        };
+        if let Some(extra) = item
+            .keys()
+            .find(|k| !["path", "scale", "offset"].contains(&k.as_str()))
+        {
+            return Err(format!(
+                "--region 的 pointFrom.{key} 不认识 {extra}（只有 path / scale / offset）"
+            ));
+        }
+        let path = item.get("path").and_then(Value::as_str).ok_or_else(|| {
+            format!("--region 的 pointFrom.{key} 缺 path（一条值路径，与 --metric 同一套写法）")
+        })?;
+        let number = |name: &str, default: f64| match item.get(name) {
+            None => Ok(default),
+            Some(v) => v
+                .as_f64()
+                .ok_or_else(|| format!("--region 的 pointFrom.{key}.{name} 要是数字")),
+        };
+        out.push(Anchor {
+            axis,
+            metric: parse_metric(path)?,
+            scale: number("scale", 1.0)?,
+            offset: number("offset", 0.0)?,
+        });
+    }
+    out.sort_by_key(|a| a.axis);
+    Ok(out)
+}
+
 pub(crate) fn parse_after(spec: &str) -> Result<(String, String), String> {
     let (node, port) = spec
         .split_once(':')
@@ -343,6 +406,28 @@ pub(crate) fn summarize_fits(fits: &[SampleFit], tolerance: f64) -> Summary {
     }
 }
 
+/// Engine 的两种失败：内部错误退出 3；指标（或锚点）路径取不到就列出这张图上可用的路径、按用法错误退出。
+fn report_engine_error(e: EngineError, err: &Sink) -> i32 {
+    match e {
+        EngineError::Failed(e) => {
+            line(err, &e);
+            EXIT_FAILED
+        }
+        EngineError::Usage(message, available) => {
+            line(err, &message);
+            if available.is_empty() {
+                line(err, "这张图跑完一次后没有任何标量路径可取");
+            } else {
+                line(err, "这张图上可用的标量路径：");
+                for p in available.iter().take(MAX_LISTED_PATHS) {
+                    line(err, &format!("  {p}"));
+                }
+            }
+            EXIT_USAGE
+        }
+    }
+}
+
 fn num(v: Option<f64>) -> Value {
     v.map(|x| json!(x)).unwrap_or(Value::Null)
 }
@@ -376,6 +461,13 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
     let region = match parse_region(region_spec) {
         Ok(r) => r,
+        Err(e) => {
+            line(err, &e);
+            return EXIT_USAGE;
+        }
+    };
+    let anchors = match parse_point_from(region_spec) {
+        Ok(a) => a,
         Err(e) => {
             line(err, &e);
             return EXIT_USAGE;
@@ -475,13 +567,75 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         .and_then(|v| v.parse::<i32>().ok())
         .unwrap_or(0);
 
+    // pointFrom（docs/pointfrom-plan.md）：第一遍在未扰动的图上（位移 0，__perturb 恒等）逐样本读锚点，
+    // 第二遍把这一帧的刀口写进样本的 set。锚点取自未扰动的运行，不会被刀口带着动；上游结果留在进程内
+    // 缓存里给第二遍用。取不到锚点的样本不跑第二遍、判失败 —— 不悄悄退回固定刀口。
+    let (run_samples, index_of, anchor_missing) = if anchors.is_empty() {
+        (samples.clone(), (0..samples.len()).collect::<Vec<_>>(), 0usize)
+    } else {
+        let anchor_metrics: Vec<MetricPath> = anchors.iter().map(|a| a.metric.clone()).collect();
+        let zero = displacement_param_sets(&perturb_id, axis_index, &[0.0]);
+        let pre = Engine {
+            core: &core,
+            base: &loaded,
+            pinned: &[],
+            metrics: &anchor_metrics,
+            param_sets: &zero,
+            samples: &samples,
+            parallel,
+            no_cache: parsed.has("no-cache"),
+            summary: false,
+        };
+        let mut read: Vec<Vec<Option<f64>>> = vec![Vec::new(); samples.len()];
+        if let Err(e) = pre.run(&mut |row: &Row| read[row.sample] = row.metrics.clone()) {
+            return report_engine_error(e, err);
+        }
+        let base_point = match &region {
+            Region::Halfspace { point, .. } => *point,
+            Region::Box { .. } => [0.0; 3],
+        };
+        let paths: Vec<&str> = anchors.iter().map(|a| a.metric.raw.as_str()).collect();
+        let mut kept = Vec::new();
+        let mut index_of = Vec::new();
+        let mut missing = 0usize;
+        for (si, sample) in samples.iter().enumerate() {
+            let mut point = base_point;
+            let mut ok = read[si].len() == anchors.len();
+            for (anchor, value) in anchors.iter().zip(&read[si]) {
+                match value {
+                    Some(v) => point[anchor.axis] = v * anchor.scale + anchor.offset,
+                    None => ok = false,
+                }
+            }
+            json_line(
+                out,
+                &json!({
+                    "kind": "perturb_anchor",
+                    "sample": sample.id,
+                    "status": if ok { "ok" } else { "anchor_missing" },
+                    "point": if ok { json!(point) } else { Value::Null },
+                    "paths": paths,
+                }),
+            );
+            if ok {
+                let mut s = sample.clone();
+                s.set.push((format!("{perturb_id}.point"), json!(point)));
+                kept.push(s);
+                index_of.push(si);
+            } else {
+                missing += 1;
+            }
+        }
+        (kept, index_of, missing)
+    };
+
     let engine = Engine {
         core: &core,
         base: &loaded,
         pinned: &[],
         metrics: &metrics,
         param_sets: &param_sets,
-        samples: &samples,
+        samples: &run_samples,
         parallel,
         no_cache: parsed.has("no-cache"),
         // perturb 报的是斜率，逐样本行不带 summary（要看收尾状态用 eval）
@@ -491,7 +645,7 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let mut rows: Vec<Row> = Vec::new();
     let code = {
         let mut on_row = |row: &Row| {
-            let sample = &samples[row.sample];
+            let sample = &run_samples[row.sample];
             let mut m = Map::new();
             for (metric, value) in metrics.iter().zip(&row.metrics) {
                 m.insert(metric.raw.clone(), num(*value));
@@ -512,30 +666,21 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
                     "durationMs": row.duration_ms,
                 }),
             );
-            rows.push(row.clone());
+            // 后面的拟合与 CSV 按原样本的下标对账（取不到锚点的样本不在 run_samples 里）
+            let mut kept = row.clone();
+            kept.sample = index_of[row.sample];
+            rows.push(kept);
         };
         match engine.run(&mut on_row) {
             Ok(c) => c,
-            Err(EngineError::Failed(e)) => {
-                line(err, &e);
-                return EXIT_FAILED;
-            }
-            Err(EngineError::Usage(message, available)) => {
-                line(err, &message);
-                if available.is_empty() {
-                    line(err, "这张图跑完一次后没有任何标量路径可取");
-                } else {
-                    line(err, "这张图上可用的标量路径：");
-                    for p in available.iter().take(MAX_LISTED_PATHS) {
-                        line(err, &format!("  {p}"));
-                    }
-                }
-                return EXIT_USAGE;
-            }
+            Err(e) => return report_engine_error(e, err),
         }
     };
 
     let mut worst = code;
+    if anchor_missing > 0 {
+        worst = worst.max(EXIT_FAILED);
+    }
     for (mi, metric) in metrics.iter().enumerate() {
         let mut fits: Vec<SampleFit> = Vec::new();
         for (si, sample) in samples.iter().enumerate() {
@@ -789,6 +934,37 @@ mod tests {
         assert!(parse_region(r#"{"kind":"halfspace","point":[0,0],"normal":[1,0,0]}"#).is_err());
         assert!(parse_region(r#"{"kind":"box","min":[1,1,1],"max":[0,0,0]}"#).is_err());
         assert!(parse_region("not json").is_err());
+
+        // pointFrom：按分量给锚点，换算显式；没写就是固定刀口
+        assert!(parse_point_from(r#"{"kind":"halfspace","point":[0,0,0],"normal":[1,0,0]}"#)
+            .unwrap()
+            .is_empty());
+        let anchors = parse_point_from(
+            r#"{"kind":"halfspace","point":[0,0,0],"normal":[1,0,0],
+                "pointFrom":{"z":{"path":"nodes.g.point.p.1"},
+                             "x":{"path":"nodes.n.quality.midXMm","scale":0.001,"offset":0.5}}}"#,
+        )
+        .unwrap();
+        let got: Vec<(usize, &str, f64, f64)> = anchors
+            .iter()
+            .map(|a| (a.axis, a.metric.raw.as_str(), a.scale, a.offset))
+            .collect();
+        assert_eq!(
+            got,
+            vec![(0, "nodes.n.quality.midXMm", 0.001, 0.5), (2, "nodes.g.point.p.1", 1.0, 0.0)],
+            "按轴排好、scale / offset 默认 1 / 0"
+        );
+        for bad in [
+            r#"{"kind":"box","min":[0,0,0],"max":[1,1,1],"pointFrom":{"x":{"path":"run.durationMs"}}}"#,
+            r#"{"kind":"halfspace","point":[0,0,0],"normal":[1,0,0],"pointFrom":{}}"#,
+            r#"{"kind":"halfspace","point":[0,0,0],"normal":[1,0,0],"pointFrom":{"w":{"path":"run.durationMs"}}}"#,
+            r#"{"kind":"halfspace","point":[0,0,0],"normal":[1,0,0],"pointFrom":{"x":{}}}"#,
+            r#"{"kind":"halfspace","point":[0,0,0],"normal":[1,0,0],"pointFrom":{"x":{"path":"run.durationMs","scale":"mm"}}}"#,
+            r#"{"kind":"halfspace","point":[0,0,0],"normal":[1,0,0],"pointFrom":{"x":{"path":"run.durationMs","unit":"mm"}}}"#,
+            r#"{"kind":"halfspace","point":[0,0,0],"normal":[1,0,0],"pointFrom":{"x":{"path":"nope"}}}"#,
+        ] {
+            assert!(parse_point_from(bad).is_err(), "应当拒绝：{bad}");
+        }
     }
 
     #[test]

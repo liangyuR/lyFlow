@@ -643,7 +643,9 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         region: z
           .record(z.unknown())
           .describe(
-            '几何选区，{"kind":"halfspace","point":[..],"normal":[..]} 或 kind=box；point / min / max 都是米',
+            '几何选区，{"kind":"halfspace","point":[..],"normal":[..]} 或 kind=box；point / min / max 都是米。' +
+              'halfspace 可加 pointFrom:{x:{path,scale,offset}} 让刀口逐帧跟着锚点（先在未扰动的图上读值，' +
+              '刀口分量 = 值×scale+offset；毫米的锚点 scale 给 0.001）；取不到锚点的样本判失败',
           ),
         axis: z.string().describe("<x|y|z>=<起>:<止>:<档数>，单位是米；要跨过 0 才抓得到 signFold"),
         ...cliSamples,
