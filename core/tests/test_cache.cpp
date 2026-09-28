@@ -489,6 +489,24 @@ TEST_CASE("迁移链：v1 的图产出 migration 诊断，老图直接跑得通�
   for (const Json& d : Json::parse(exec::validateGraphJson(saved.dump(), {}))) {
     CHECK(d.value("kind", "") != "migration");
   }
+
+  // 被顶层图参数绑定的参数不进迁移后的 params：写回节点就是 param_conflict（一处定义）
+  Json bound = makeGraph(
+      {
+          {"g", "gen.synthetic", kSmall},
+          {"s", "test.migrated", Json{{"count", 123}}},
+      },
+      {{"g.cloud", "s.cloud"}});
+  bound["nodes"][1]["opVersion"] = "1.0.0";
+  bound["params"] = Json{{"seed", Json{{"default", 9}, {"binds", Json::array({"s.seed"})}}}};
+  Json boundMigration;
+  for (const Json& d : Json::parse(exec::validateGraphJson(bound.dump(), {}))) {
+    if (d.value("kind", "") == "migration") boundMigration = d;
+    CHECK(d.value("severity", "") != "error");
+  }
+  REQUIRE_FALSE(boundMigration.is_null());
+  CHECK(boundMigration["params"]["keepCount"] == 123);
+  CHECK_FALSE(boundMigration["params"].contains("seed"));
 }
 
 TEST_CASE("别名重定向也是一次迁移") {

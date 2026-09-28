@@ -543,7 +543,11 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
       MigrationPlan plan;
       plan.op = op->id;
       plan.opVersion = op->version;
-      plan.paramsJson = params.dump();
+      // 被顶层图参数绑定的参数不写回节点：那个值是图参数注入进来的，写回就成了节点上的显式值，
+      // 违反「一处定义」（param_conflict）。值照旧归图参数管。
+      nlohmann::json written = params;
+      for (const auto& bound : rn.graphParams) written.erase(bound.first);
+      plan.paramsJson = written.dump();
       plan.notes = mig->second.notes;
       auto edits = editsJsonOf.find(rn.id);
       if (edits != editsJsonOf.end()) plan.editsJson = edits->second;
