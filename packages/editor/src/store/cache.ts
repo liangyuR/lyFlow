@@ -149,6 +149,12 @@ export function schedulePlan(doc: GraphDoc, graphPath: string | null): void {
 
 export async function requestPlan(doc: GraphDoc, graphPath: string | null): Promise<void> {
   if (transport.kind !== "tauri") return;
+  // 显式的这一次顶替还没触发的 debounce：调用方给的都是当前的 doc，那次编的是同一份。不取消的话它
+  // 晚到一步拿走 ticket，这次的结果被丢掉，等这次的人（验收脚本的 replan、右键清缓存）读到的还是旧计划
+  if (timer) {
+    clearTimeout(timer);
+    timer = null;
+  }
   const mine = ++ticket;
   try {
     // cacheKey 按这次真正会用的图参数取值算：切配方之后哪些节点会重算，看的就是它（P3.8）
