@@ -146,6 +146,8 @@ cmake --build build/core
   加上 `ops::Ticker` 在循环里查 —— 所以取消的响应时间是「最慢的那个算子的一次轮询」。
 - **`ctx.threadBudget()` = max(1, cores / maxParallel)**。PCL 的 OMP 版本算子
   （`NormalEstimationOMP` 这类）应当把它传给 `setNumberOfThreads`。
+  **目前是预留的**：标准包里没有算子用它（`features.normals` 与两个离群点滤波都还是单线程的 PCL 实现），
+  等哪个算子在真实流程里成了瓶颈再换 OMP 版本并接上它。
 
 ## 子图与库算子
 

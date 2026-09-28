@@ -192,6 +192,7 @@ result_bundle 已是 v2」通过，3 帧编辑器与 CLI 逐位相同。这两�
   fengdang 54 张（`database*`、`review_20260921_anomaly/*` 等 9 个目录 × 点 1..6）、tianmu 8 张（`database_v5_2026-09-16_r10`）、
   luoshi `legacy_graphs_from_zip_2026-09-15` 3 张。M7 没留迁移，它们的正确 `toward`
   要看各自的框（导入器图接同侧 gap 框，手搭图各不相同），本轮按用户决定只手工改了 KUN10 的 3 张。
+  **后续决定（2026-09-28）：不做 `side` → `toward` 的自动迁移**，老图保持现在的做法 —— 用到时手工接上 `toward`。
 - **宿主** `xyz-gap-inspector` 的 `RoiDecisionNodes` 仍按 `roiFlushBase` 等 v1 端口名找 ROI 决策节点
   （`lyflow_measurer.cpp:492`）。KUN10 这批图不走 fallback，不受影响；积木图 / m8a 之后的细粒度图上它本来就找不到。另一个仓库，没动。
 - `packs/gap/tools/lyflow_graph_from_config.py` 还在产 v1 接法（`cloudPrimary` 等），现在会被自动迁移，但工具本身没改。

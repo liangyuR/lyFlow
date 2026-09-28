@@ -96,6 +96,7 @@ class ExecContext {
 
   /// 本节点可以自己开几个线程。执行器已经在跑 maxParallel 个节点，
   /// 算子内部再按核数开一遍就是超订（core/README.md「并行」）。
+  /// 预留：目前没有算子用它，自己开线程（或换 PCL 的 OMP 版本）的算子照这个数开。
   virtual int threadBudget() const = 0;
 };
 
