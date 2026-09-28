@@ -46,10 +46,13 @@ def main() -> int:
     data_path, schema_path = args
 
     try:
-        import jsonschema
+        import jsonschema  # noqa: F401
+        import referencing  # noqa: F401
     except ImportError:
-        print("跳过 schema 校验：未安装 jsonschema (pip install jsonschema)", file=sys.stderr)
-        return 0
+        # 不能「跳过」：跳过时退出码是 0，门禁照样全绿，而契约其实一条都没验（曾经在一台机器上
+        # 一直这样，21 次校验全被跳过）。缺依赖就是这一步没过
+        print("schema 校验跑不了：没装 jsonschema。先跑：python -m pip install jsonschema", file=sys.stderr)
+        return 3
 
     data = json.load(io.open(data_path, encoding="utf-8"))
     schema = json.load(io.open(schema_path, encoding="utf-8"))
