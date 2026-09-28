@@ -2,6 +2,7 @@ import type { CoreInfo, OperatorManifestBundle } from "../types/manifest";
 import type { GraphDoc } from "../types/graph";
 import type {
   CacheStats,
+  EvictResult,
   ExecutionEvent,
   GraphDiagnostic,
   OutputInfo,
@@ -75,6 +76,16 @@ export class TauriTransport implements Transport {
   async clearCache(): Promise<void> {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<void>("clear_cache");
+  }
+  async evictCache(
+    doc: GraphDoc,
+    graphPath: string | null,
+    nodeIds: string[],
+    downstream: boolean,
+    params?: Record<string, unknown>,
+  ): Promise<EvictResult> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<EvictResult>("evict_cache", { doc, graphPath, nodeIds, downstream, params });
   }
   async cacheStats(): Promise<CacheStats> {
     const { invoke } = await import("@tauri-apps/api/core");

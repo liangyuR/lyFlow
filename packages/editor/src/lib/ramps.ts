@@ -44,3 +44,9 @@ export const RAMPS: Record<RampName, (t: number, out: THREE.Color) => void> = {
   gray: grayRamp,
   jet: jetRamp,
 };
+
+/** 点云自带的颜色（0..255，C ABI v12）直接当顶点色。色带对它没有意义。 */
+export function writeRgbColors(out: Float32Array, rgb: Uint8Array | null, count: number): void {
+  if (!rgb) return;
+  for (let i = 0; i < count * 3; i += 1) out[i] = (rgb[i] ?? 0) / 255;
+}

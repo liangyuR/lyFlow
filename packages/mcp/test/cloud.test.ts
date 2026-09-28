@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   CLOUD_HAS_INTENSITY,
+  CLOUD_HAS_RGB,
   CLOUD_MAGIC,
   INDICES_MAGIC,
   TENSOR_MAGIC,
@@ -14,11 +15,12 @@ import {
 
 function encode(
   xyz: number[],
-  options?: { intensity?: number[]; totalPoints?: number; bounds?: number[] },
+  options?: { intensity?: number[]; rgb?: number[]; totalPoints?: number; bounds?: number[] },
 ): ArrayBuffer {
   const n = xyz.length / 3;
   const intensity = options?.intensity ?? null;
-  const flags = intensity ? CLOUD_HAS_INTENSITY : 0;
+  const rgb = options?.rgb ?? null;
+  const flags = (intensity ? CLOUD_HAS_INTENSITY : 0) | (rgb ? CLOUD_HAS_RGB : 0);
   const bounds = options?.bounds ?? [
     Math.min(...xyz.filter((_, i) => i % 3 === 0)),
     Math.min(...xyz.filter((_, i) => i % 3 === 1)),
@@ -27,7 +29,8 @@ function encode(
     Math.max(...xyz.filter((_, i) => i % 3 === 1)),
     Math.max(...xyz.filter((_, i) => i % 3 === 2)),
   ];
-  const buffer = new ArrayBuffer(40 + n * 12 + (intensity ? n * 4 : 0));
+  // rgb 块放最后、补齐到 4 字节（与 bridge 的 encode_cloud 一致）
+  const buffer = new ArrayBuffer(40 + n * 12 + (intensity ? n * 4 : 0) + (rgb ? (n * 3 + 3) & ~3 : 0));
   const view = new DataView(buffer);
   view.setUint32(0, CLOUD_MAGIC, true);
   view.setUint32(4, n, true);
@@ -43,8 +46,27 @@ function encode(
     view.setFloat32(off, v, true);
     off += 4;
   }
+  for (const v of rgb ?? []) {
+    view.setUint8(off, v);
+    off += 1;
+  }
   return buffer;
 }
+
+test("rgb 块（C ABI v12）排在强度之后：每点三个 0..255，统计进 r/g/b 通道、head 带 rgb", () => {
+  const summary = summarizeCloud(
+    decodeCloud(encode([0, 0, 0, 1, 1, 1], { intensity: [0.5, 1], rgb: [255, 0, 10, 0, 128, 20] })),
+    2,
+  );
+  assert.deepEqual(
+    {
+      r: summary.channels["r"],
+      intensity: summary.channels["intensity"]?.max,
+      head: summary.head.map((p) => p.rgb),
+    },
+    { r: { min: 0, max: 255, mean: 127.5 }, intensity: 1, head: [[255, 0, 10], [0, 128, 20]] },
+  );
+});
 
 test("解出点云并算出 bbox 与每通道统计", () => {
   const buffer = encode([0, 0, 0, 1, 2, 3, 2, 4, 6, 3, 6, 9], {

@@ -2,6 +2,7 @@ import type { CoreInfo, OperatorManifestBundle } from "../types/manifest";
 import type { GraphDoc } from "../types/graph";
 import type {
   CacheStats,
+  EvictResult,
   ExecutionEvent,
   GraphDiagnostic,
   OutputInfo,
@@ -72,6 +73,9 @@ export class StaticTransport implements Transport {
   }
   async clearCache(): Promise<void> {
     return browserOnly("清缓存");
+  }
+  async evictCache(): Promise<EvictResult> {
+    return browserOnly("清节点缓存");
   }
   async cacheStats(): Promise<CacheStats> {
     return browserOnly("看缓存统计");

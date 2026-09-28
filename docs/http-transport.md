@@ -2,7 +2,7 @@
 
 `@lyflow/editor` 的 `HttpTransport` 与后端之间的协议。**阶段 B 的业务服务照这一份实现。**
 
-一句话：`Transport` 接口的每个方法对着 C ABI v11 的一个入口，这里再对着一个 REST 端点。
+一句话：`Transport` 接口的每个方法对着 C ABI v12 的一个入口，这里再对着一个 REST 端点。
 三方一一对应，见下面的对照表。v7 的 ABI 清单在 [phase-a1-acceptance.md](phase-a1-acceptance.md#c-abi-v7-的最终签名清单)，
 v8 加的两个取数入口见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)，
 v9 加的 `lyflow_run_summary` 见 [ADR-0022](adr/0022-run-summary-as-core-output.md)。
@@ -43,6 +43,7 @@ v11 再加的 `isolate`（只运行某几个节点）与 `force`（强制重算�
 | GET | `/lyflow/runs/:runId/indices/:nodeId/:port?offset=&count=` | `getOutputIndices` | `lyflow_output_indices` |
 | GET | `/lyflow/cache` | `cacheStats` | `lyflow_cache_stats` |
 | DELETE | `/lyflow/cache` | `clearCache` | `lyflow_cache_clear` |
+| POST | `/lyflow/cache/evict` | `evictCache` | `lyflow_cache_evict` |
 | GET | `/lyflow/library` | `getLibraryStatus` | `lyflow_library_count` |
 | POST | `/lyflow/library/refresh` | `refreshLibrary` | `lyflow_set_library_dirs` |
 | POST | `/lyflow/library/save` | `saveAsLibrary` | 桥接层的事，core 不参与 |
@@ -237,11 +238,12 @@ run 走 `lyflow_run_options.params_json`，validate / plan 走 `lyflow_validate_
 | 0 | `u32` | magic `0x4350594C`（'LYPC'） |
 | 4 | `u32` | `pointCount` —— 这一份里有几个点（抽稀之后） |
 | 8 | `u32` | `totalPoints` —— 抽稀之前有几个点 |
-| 12 | `u32` | `flags`：bit0 = 带 intensity，bit1 = 带 normals |
+| 12 | `u32` | `flags`：bit0 = 带 intensity，bit1 = 带 normals，bit2 = 带 rgb（v12） |
 | 16 | `f32[6]` | `bounds`，`[minX,minY,minZ,maxX,maxY,maxZ]`，用**全量**点算 |
 | 40 | `f32[3n]` | `xyz` |
 | 40+12n | `f32[n]` | `intensity`，仅当 bit0 置位 |
 | … | `f32[3n]` | `normals`，仅当 bit1 置位，排在 intensity 之后 |
+| … | `u8[3n]` | `rgb`（0..255），仅当 bit2 置位，**排在所有 float 通道之后**并补 0 到 4 字节的整数倍 |
 
 `maxPoints` 是上限，不是要求；`0` 表示不抽稀。响应必须带 `Content-Length`。
 magic 对不上时编辑器会当成「响应不是点云」直接报错，所以**错误一定要走非 2xx + JSON**，
@@ -310,6 +312,11 @@ magic 对不上时编辑器会当成「响应不是点云」直接报错，所�
 ```
 
 `DELETE /lyflow/cache` 返回 `{}`。
+
+`POST /lyflow/cache/evict`：请求体 `{ "doc": {…}, "graphPath": "…"|null, "nodeIds": ["b"], "downstream": true, "params"?: {…} }`，
+返回 `{ "removed": 3, "skippedPinned": 0, "nodes": ["b", "c"] }`。按「图 + 节点」清缓存（`lyflow_cache_evict`）：
+给的是节点，cacheKey 由 core 按这张图、这组图参数取值算（ADR-0007）；`downstream` 连同全部下游；
+正被运行钉住的跳过；预览命名空间里的不动。图校验不过时返回 400 与第一条诊断。
 
 `GET /lyflow/library`：`{ "dirs": [], "count": 0, "problems": [] }`。
 `POST /lyflow/library/refresh`：`{ "status": {…}, "manifest": {…} }`（重扫之后连新 manifest 一起给）。
@@ -437,6 +444,7 @@ magic 对不上时编辑器会当成「响应不是点云」直接报错，所�
   桩服务器拿不到它们（ADR-0019 的「代价」）。
 - **`loadGraph` 的 `migrations` 恒为 `[]`**：桩不跑 `lyflow migrate`。
 - **`saveAsLibrary` 返回 501**。
+- **`/lyflow/cache/evict` 恒为 `removed: 0`**：没有常驻结果仓，没东西可清；`nodes` 原样回给的 id。
 - **`/lyflow/snippets` 扫的是工作区的 `snippets/` 与 `LYFLOW_SNIPPET_DIRS`**；Tauri 侧扫的是 app data 下的 `snippets/`。
 - **不发热重载帧**。
 

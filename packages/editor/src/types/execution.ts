@@ -79,6 +79,16 @@ export interface PlanNode {
 }
 
 /** `cache_stats` 的返回。 */
+/** `evictCache` 的回包（C ABI v12 `lyflow_cache_evict`）。 */
+export interface EvictResult {
+  /** 删掉的缓存条目数（一个节点每个输出端口一条）。 */
+  removed: number;
+  /** 正被运行钉住、没删的条目数。 */
+  skippedPinned: number;
+  /** 命中的节点 id（完整路径 id；含下游时连同下游）。 */
+  nodes: string[];
+}
+
 export interface CacheStats {
   entries: number;
   bytes: number;
@@ -333,6 +343,8 @@ export interface OutputInfo {
 export const CLOUD_MAGIC = 0x4350594c;
 export const CLOUD_HAS_INTENSITY = 1;
 export const CLOUD_HAS_NORMALS = 2;
+/** v12：rgb 块，3n 个 0..255，放在所有 float 通道之后、补齐到 4 字节。 */
+export const CLOUD_HAS_RGB = 4;
 
 export interface CloudPayload {
   pointCount: number;
@@ -344,6 +356,8 @@ export interface CloudPayload {
   intensity: Float32Array | null;
   /** 3n 个 float，或 null。法线着色靠它（M3 尾巴 c）。 */
   normals: Float32Array | null;
+  /** 3n 个 0..255，或 null（C ABI v12）。RGB 着色靠它。 */
+  rgb: Uint8Array | null;
 }
 
 /** 解析二进制点云。用视图而不是拷贝：一百万点是 12MB，多拷一次就是多 12MB
@@ -366,7 +380,7 @@ export function decodeCloud(buffer: ArrayBuffer): CloudPayload {
   const bounds = new Float32Array(buffer, 16, 6);
   const xyzOffset = 40;
   const xyz = new Float32Array(buffer, xyzOffset, pointCount * 3);
-  // 通道按 flags 的位序依次排在坐标后面：先 intensity，再 normals
+  // 通道按 flags 的位序依次排在坐标后面：先 intensity，再 normals，最后 rgb
   let offset = xyzOffset + pointCount * 12;
   let intensity: Float32Array | null = null;
   if (flags & CLOUD_HAS_INTENSITY) {
@@ -378,8 +392,12 @@ export function decodeCloud(buffer: ArrayBuffer): CloudPayload {
     normals = new Float32Array(buffer, offset, pointCount * 3);
     offset += pointCount * 12;
   }
+  let rgb: Uint8Array | null = null;
+  if (flags & CLOUD_HAS_RGB) {
+    rgb = new Uint8Array(buffer, offset, pointCount * 3);
+  }
 
-  return { pointCount, totalPoints, bounds, xyz, intensity, normals };
+  return { pointCount, totalPoints, bounds, xyz, intensity, normals, rgb };
 }
 
 export const TENSOR_MAGIC = 0x4e54594c;

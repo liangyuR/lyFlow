@@ -2,6 +2,7 @@ import type { CoreInfo, OperatorManifestBundle } from "../types/manifest";
 import type { GraphDoc } from "../types/graph";
 import type {
   CacheStats,
+  EvictResult,
   ExecutionEvent,
   GraphDiagnostic,
   OutputInfo,
@@ -248,6 +249,21 @@ export class HttpTransport implements Transport {
 
   clearCache(): Promise<void> {
     return this.#send<void>("DELETE", "/lyflow/cache");
+  }
+  evictCache(
+    doc: GraphDoc,
+    graphPath: string | null,
+    nodeIds: string[],
+    downstream: boolean,
+    params?: Record<string, unknown>,
+  ): Promise<EvictResult> {
+    return this.#send<EvictResult>("POST", "/lyflow/cache/evict", {
+      doc,
+      graphPath,
+      nodeIds,
+      downstream,
+      ...(params ? { params } : {}),
+    });
   }
   cacheStats(): Promise<CacheStats> {
     return this.#get<CacheStats>("/lyflow/cache");

@@ -4,7 +4,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import { findBaseCloud, firstCloudPort, type BaseCloud } from "../../lib/basecloud";
 import { cacheKey, cloudCache, dropOtherRuns, putCache } from "../../lib/cloudCache";
-import { RAMPS, type RampName } from "../../lib/ramps";
+import { RAMPS, writeRgbColors, type RampName } from "../../lib/ramps";
 import { disposeOverlay, extentOf, shapesOf } from "../../lib/shapes2d";
 import { registerPeekCanvas } from "../../lib/peekCanvas";
 import { augmentOperators, levelOf, resolveOutput } from "../../lib/subgraph";
@@ -322,14 +322,23 @@ export function CloudView({ win, src }: PeekViewProps) {
 
   const hasIntensity = cloud?.intensity != null;
   const hasNormals = cloud?.normals != null;
-  // 选了「强度」但这片云没有强度通道时实际走高度着色，那就让下拉框也显示「高度」——
-  // 下拉框写着强度、画面却是高度，用户只会以为强度数据本身有问题。
+  const hasRgb = cloud?.rgb != null;
+  // 选了「强度」但这片云没有强度通道时实际走别的着色，那就让下拉框也显示实际那一种 ——
+  // 下拉框写着强度、画面却是高度，用户只会以为强度数据本身有问题。没有强度但自带颜色的
+  // （模型分割的类别色、PCD 里的 rgb）先退到 RGB：那本来就是给人看的颜色
   const effectiveShading: ShadingMode =
-    (shading === "intensity" && !hasIntensity) || (shading === "normal" && !hasNormals)
-      ? "height"
-      : shading;
+    shading === "intensity" && !hasIntensity
+      ? hasRgb
+        ? "rgb"
+        : "height"
+      : (shading === "normal" && !hasNormals) || (shading === "rgb" && !hasRgb)
+        ? "height"
+        : shading;
   const isFlat = effectiveShading === "flat";
   const isNormalShading = effectiveShading === "normal";
+  const isRgbShading = effectiveShading === "rgb";
+  // 色带与范围只对「标量 → 颜色」的着色有意义
+  const noRamp = isFlat || isRgbShading;
   const [lo, hi] = useMemo(
     () => dataRangeOf(cloud, effectiveShading),
     [cloud, effectiveShading],
@@ -496,13 +505,14 @@ export function CloudView({ win, src }: PeekViewProps) {
         : null;
     const arr = reuse ? (reuse.array as Float32Array) : new Float32Array(cloud.pointCount * 3);
     if (isNormalShading) writeNormalColors(arr, cloud);
+    else if (isRgbShading) writeRgbColors(arr, cloud.rgb, cloud.pointCount);
     else writeColors(arr, cloud, effectiveShading, ramp, lo, hi);
     if (reuse) reuse.needsUpdate = true;
     else geometry.setAttribute("color", new THREE.BufferAttribute(arr, 3));
     material.vertexColors = true;
     material.color.setHex(0xffffff);
     material.needsUpdate = true;
-  }, [cloud, effectiveShading, isFlat, isNormalShading, ramp, lo, hi]);
+  }, [cloud, effectiveShading, isFlat, isNormalShading, isRgbShading, ramp, lo, hi]);
 
   // -- 2D 几何叠画（G7）：整组重建，线与端口同色 -----------------------------
   const shapeStat = useMemo(
@@ -587,7 +597,7 @@ export function CloudView({ win, src }: PeekViewProps) {
           value={effectiveShading}
           onChange={(e) => setOpts(win.id, { shading: e.target.value as ShadingMode })}
           title={
-            shading === effectiveShading ? "着色方式" : "这片点云没有该通道，已退回高度着色"
+            shading === effectiveShading ? "着色方式" : "这片点云没有该通道，已换成它实际有的着色"
           }
         >
           <option value="intensity" disabled={!hasIntensity}>
@@ -597,6 +607,9 @@ export function CloudView({ win, src }: PeekViewProps) {
           <option value="normal" disabled={!hasNormals}>
             法线{hasNormals ? "" : "（无）"}
           </option>
+          <option value="rgb" disabled={!hasRgb} title="点云自带的颜色（PCD 的 rgb、模型分割的类别色）">
+            RGB{hasRgb ? "" : "（无）"}
+          </option>
           <option value="flat">单色</option>
         </select>
         <select
@@ -604,7 +617,7 @@ export function CloudView({ win, src }: PeekViewProps) {
           data-testid="peek-ramp"
           value={ramp}
           onChange={(e) => setOpts(win.id, { ramp: e.target.value as RampName })}
-          disabled={isFlat}
+          disabled={noRamp}
           title="色带"
         >
           <option value="viridis">viridis</option>

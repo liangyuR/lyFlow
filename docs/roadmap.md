@@ -140,7 +140,7 @@ C ABI 升到 v4：加了 `lyflow_plan` / `lyflow_cache_clear` / `lyflow_cache_st
 
 **已知毛刺**：
 - 结果仓不再随 run 结束而缩小，常驻内存约等于 LRU 预算（默认 min(8 GB, 物理内存 40%)）。
-  状态栏显示占用，抽屉里可以清空 —— 但**没有**按图/按节点的细粒度淘汰。
+  状态栏显示占用，抽屉里可以清空；C ABI v12 起画布右键能「清除此节点及下游的缓存」（`lyflow_cache_evict`）。
 - 热重载会清空缓存并取消正在跑的 run。这是 E4 定死的取舍，不是遗漏。
 - `filter.random_sample` 升到了 2.0.0（`count`/`ratio` → `keepCount`/`keepRatio`）。
   M2 以前存的图打开时会提示迁移一次，保存后不再提示。

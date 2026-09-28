@@ -6,11 +6,11 @@
 
 | 层 | 命令 | 规模 | 跑一遍 |
 |---|---|---|---|
-| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 151 例；`LYFLOW_PACKS=dts` 159 例；`LYFLOW_PACKS=gap;dts` 240 例 | 分钟级（含编译） |
-| Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 135（纯平台构建 79 通过 / 56 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑） | < 1 分钟（已编译时） |
+| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 153 例；`LYFLOW_PACKS=dts` 161 例；`LYFLOW_PACKS=gap;dts` 242 例 | 分钟级（含编译） |
+| Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 136（纯平台构建 79 通过 / 57 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑） | < 1 分钟（已编译时） |
 | editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 62 | 秒级 |
-| MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 28 | 秒级 |
-| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`） | 710 条断言、92 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
+| MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 29 | 秒级 |
+| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`） | 712 条断言、92 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 32 条断言（精简前 58） | 几分钟 |
 
 ## 放在哪一层
@@ -31,6 +31,7 @@
 | 配方与四类失配 | 共享夹具 `schema/fixtures/recipes/`：`bridge/src/recipe.rs` 与 `packages/editor/test/recipes.test.mjs` 对着同一份 `expected.json`；e2e `params_p3.mjs` 只验界面、磁盘与对话框 |
 | 参数面板（虚拟列表、搜索、chip、14 种控件） | `packages/editor/test/param-panel.test.mjs`、`param-values.test.mjs`；e2e `params_p2.mjs` |
 | 迁移（含改连线 ADR-0025） | `core/tests/test_cache.cpp`（迁移链）、`bridge/src/patch.rs` / `commands.rs`、`packages/editor/test/migrations.test.mjs` |
+| 点云载荷的 rgb、按节点清缓存（C ABI v12） | `core/tests/test_output_view.cpp`、`test_cache.cpp`；`bridge/src/execution.rs` 的 `cloud_payload_carries_rgb_last_and_padded`；`packages/mcp/test/cloud.test.ts`；e2e `m4.mjs`（RGB 着色）、`noderun.mjs`（右键清缓存） |
 | 数据类型、Bundle、输出视图 ABI | `core/tests/test_data.cpp`、`test_bundle.cpp`、`test_output_view.cpp`、`test_contract.cpp` |
 | 运行摘要（summary） | `core/tests/test_summary.cpp`；CLI 的 `--summary` 形状在 `bridge/src/cli.rs` |
 | 标准算子 / PCD 读写 / ONNX | `packs/std-pointcloud/tests/*`、`packs/std-ml/tests/test_ml_ops.cpp`（模型用例要 `LYFLOW_TEST_ONNX_MODEL`，不设会打出跳过） |

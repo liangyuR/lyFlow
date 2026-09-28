@@ -11,7 +11,7 @@ Tauri 桌面壳。职责：IPC、序列化、文件读写、进程生命周期�
 | `core_ffi.rs` | — | C ABI 边界：加载 DLL、调用、把 C 的堆内存拷成 Rust 的（ADR-0004/0009）。 |
 | `graph.rs` | — | GraphDoc 的 Rust 表示与结构校验（三层校验的中间那层）。 |
 | `cli.rs` / `eval.rs` / `perturb.rs` | — | headless CLI（ADR-0012/0020）。一行 Tauri 都不碰。 |
-| `commands.rs` | `host` | 33 条 `#[tauri::command]`。每条都对 `R: tauri::Runtime` 泛型 —— 外部宿主与测试里的 `MockRuntime` 都不是 `Wry`。 |
+| `commands.rs` | `host` | 34 条 `#[tauri::command]`。每条都对 `R: tauri::Runtime` 泛型 —— 外部宿主与测试里的 `MockRuntime` 都不是 `Wry`。 |
 | `execution.rs` | `host` | `RunManager`：运行的生命周期、事件推流、二进制编码。 |
 | `watcher.rs` | `host` | 开发期热重载与库目录监视（ADR-0009/0010）。 |
 | `host.rs` | `host` | `attach()` / `lyflow_handler!` / `SceneProvider` / `resolve_path` —— 外部 Rust 宿主复用上面三个模块的入口（[docs/embedding.md](../docs/embedding.md#rusttauri-宿主)）。 |
@@ -159,11 +159,12 @@ PCL 算子里时，这个 command 会等它跑完。
 
 ```
 u32 magic 'LYPC' | u32 pointCount | u32 totalPoints | u32 flags
-f32 bounds[6] | f32 xyz[3n] | [f32 intensity[n]] | [f32 normals[3n]]
+f32 bounds[6] | f32 xyz[3n] | [f32 intensity[n]] | [f32 normals[3n]] | [u8 rgb[3n]，补齐到 4 字节]
 ```
 
-可选通道按 `flags` 的位序依次排在坐标后面：bit0 = intensity，bit1 = normals。
-前端按同样的顺序算偏移，所以加通道只要在两端各加一个位。
+可选通道按 `flags` 的位序依次排在坐标后面：bit0 = intensity，bit1 = normals，bit2 = rgb（v12）。
+前端按同样的顺序算偏移，所以加通道只要在两端各加一个位。rgb 是字节、放在最后并补齐 ——
+老解码器不看第 3 位也不看尾部，新的 float 通道也不会被它挤到不对齐的偏移上。
 
 一百万点走 JSON 是 30MB 文本加一次全量解析；走这条是 12MB 字节加一次
 `new Float32Array(buffer, offset, len)`。magic 不是装饰：IPC 上游出错时返回的

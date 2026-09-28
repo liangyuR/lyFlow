@@ -6,10 +6,24 @@ import fs from "node:fs";
 export const CLOUD_MAGIC = 0x4350594c;
 export const CLOUD_HAS_INTENSITY = 1;
 export const CLOUD_HAS_NORMALS = 2;
+export const CLOUD_HAS_RGB = 4;
+
+/** PCD 的 rgb 列：PCL 习惯把 0x00RRGGBB 按位塞进一个 float 写出来（TYPE F），也有人写成整数（TYPE U）。 */
+function unpackRgb(text, type) {
+  let packed;
+  if (type === "F") {
+    const f = new Float32Array([Number(text)]);
+    packed = new Uint32Array(f.buffer)[0];
+  } else {
+    packed = Number(text) >>> 0;
+  }
+  return [(packed >>> 16) & 0xff, (packed >>> 8) & 0xff, packed & 0xff];
+}
 
 function parseAsciiPcd(text) {
   const lines = text.split(/\r?\n/);
   let fields = [];
+  let types = [];
   let points = 0;
   let start = -1;
   for (let i = 0; i < lines.length; i += 1) {
@@ -17,6 +31,7 @@ function parseAsciiPcd(text) {
     if (!line || line.startsWith("#")) continue;
     const [key, ...rest] = line.split(/\s+/);
     if (key === "FIELDS") fields = rest;
+    else if (key === "TYPE") types = rest;
     else if (key === "POINTS") points = Number(rest[0]);
     else if (key === "WIDTH" && points === 0) points = Number(rest[0]);
     else if (key === "DATA") {
@@ -36,10 +51,13 @@ function parseAsciiPcd(text) {
   const iny = fields.indexOf("normal_y");
   const inz = fields.indexOf("normal_z");
   const hasNormals = inx >= 0 && iny >= 0 && inz >= 0;
+  let irgb = fields.indexOf("rgb");
+  if (irgb < 0) irgb = fields.indexOf("rgba");
 
   const xyz = [];
   const intensity = [];
   const normals = [];
+  const rgb = [];
   for (let i = start; i < lines.length && xyz.length / 3 < points; i += 1) {
     const line = (lines[i] ?? "").trim();
     if (!line) continue;
@@ -51,12 +69,14 @@ function parseAsciiPcd(text) {
     xyz.push(x, y, z);
     if (ii >= 0) intensity.push(Number(cols[ii]));
     if (hasNormals) normals.push(Number(cols[inx]), Number(cols[iny]), Number(cols[inz]));
+    if (irgb >= 0) rgb.push(...unpackRgb(cols[irgb], types[irgb]));
   }
   return {
     count: xyz.length / 3,
     xyz,
     intensity: ii >= 0 ? intensity : null,
     normals: hasNormals ? normals : null,
+    rgb: irgb >= 0 ? rgb : null,
   };
 }
 
@@ -67,12 +87,14 @@ function stride(cloud, maxPoints) {
   const xyz = [];
   const intensity = cloud.intensity ? [] : null;
   const normals = cloud.normals ? [] : null;
+  const rgb = cloud.rgb ? [] : null;
   for (let i = 0; i < cloud.count; i += step) {
     xyz.push(cloud.xyz[i * 3], cloud.xyz[i * 3 + 1], cloud.xyz[i * 3 + 2]);
     if (intensity) intensity.push(cloud.intensity[i]);
     if (normals) normals.push(cloud.normals[i * 3], cloud.normals[i * 3 + 1], cloud.normals[i * 3 + 2]);
+    if (rgb) rgb.push(cloud.rgb[i * 3], cloud.rgb[i * 3 + 1], cloud.rgb[i * 3 + 2]);
   }
-  return { count: xyz.length / 3, xyz, intensity, normals };
+  return { count: xyz.length / 3, xyz, intensity, normals, rgb };
 }
 
 export function encodeCloudFromPcd(file, maxPoints) {
@@ -94,8 +116,11 @@ export function encodeCloudFromPcd(file, maxPoints) {
   let flags = 0;
   if (cloud.intensity) flags |= CLOUD_HAS_INTENSITY;
   if (cloud.normals) flags |= CLOUD_HAS_NORMALS;
+  if (cloud.rgb) flags |= CLOUD_HAS_RGB;
 
-  const extra = (cloud.intensity ? n * 4 : 0) + (cloud.normals ? n * 12 : 0);
+  // rgb 块放最后、补齐到 4 字节（与 bridge 的 encode_cloud 一致）
+  const rgbLen = cloud.rgb ? (n * 3 + 3) & ~3 : 0;
+  const extra = (cloud.intensity ? n * 4 : 0) + (cloud.normals ? n * 12 : 0) + rgbLen;
   const buf = Buffer.alloc(16 + 24 + n * 12 + extra);
   buf.writeUInt32LE(CLOUD_MAGIC, 0);
   buf.writeUInt32LE(n, 4);
@@ -109,6 +134,9 @@ export function encodeCloudFromPcd(file, maxPoints) {
   }
   if (cloud.normals) {
     for (let i = 0; i < n * 3; i += 1, off += 4) buf.writeFloatLE(cloud.normals[i], off);
+  }
+  if (cloud.rgb) {
+    for (let i = 0; i < n * 3; i += 1, off += 1) buf.writeUInt8(cloud.rgb[i], off);
   }
   return buf;
 }

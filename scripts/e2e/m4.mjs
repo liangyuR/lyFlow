@@ -729,12 +729,21 @@ async function suiteM3Tails(cdp, report, ws) {
   report.section("M3 尾巴：法线着色可用、PNG 导出走保存对话框、core-watch 见 m4-acceptance");
 
   await cdp.eval(`await window.__lyflow.transport.clearCache(); return true;`);
+  // 自带颜色、没有强度的点云（C ABI v12 起 rgb 进了载荷）：三个点，红绿蓝打包成 uint32
+  const colored = path.join(ws.dir, "彩色 三点.pcd");
+  fs.writeFileSync(
+    colored,
+    "# .PCD v0.7\nVERSION 0.7\nFIELDS x y z rgb\nSIZE 4 4 4 4\nTYPE F F F U\nCOUNT 1 1 1 1\n" +
+      "WIDTH 3\nHEIGHT 1\nVIEWPOINT 0 0 0 1 0 0 0\nPOINTS 3\nDATA ascii\n" +
+      "0 0 0 16711680\n0.1 0 0 65280\n0.2 0 0 255\n",
+  );
   await newDoc(cdp);
   const ids = await buildGraph(
     cdp,
     [
       { key: "gen", op: "gen.synthetic", params: { pointCount: 20000, seed: 61 } },
       { key: "nrm", op: "features.normals", params: { kSearch: 10 } },
+      { key: "rgb", op: "io.load_pcd", params: { path: colored } },
     ],
     [{ from: ["gen", "cloud"], to: ["nrm", "cloud"] }],
   );
@@ -769,6 +778,22 @@ async function suiteM3Tails(cdp, report, ws) {
     return { shading: v.getAttribute('data-shading'), value: sel.value };
   `);
   report.eq("切到法线着色之后视图确实是 normal", shaded.shading, "normal");
+
+  // 默认的「强度」遇到没有强度、自带颜色的点云，退到 RGB 而不是高度
+  await cdp.eval(`
+    const sel = document.querySelector('[data-testid="viewer-shading"]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+    setter.call(sel, 'intensity');
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  `);
+  await selectAndReadViewer(cdp, ids.rgb);
+  const rgb = await cdp.eval(`
+    const sel = document.querySelector('[data-testid="viewer-shading"]');
+    const opt = [...sel.options].find((o) => o.value === 'rgb');
+    return { shading: document.querySelector('.viewer').getAttribute('data-shading'), rgbEnabled: opt ? !opt.disabled : null };
+  `);
+  report.eq("自带颜色、没有强度的点云默认按 RGB 着色", rgb, { shading: "rgb", rgbEnabled: true });
 
   // PNG 导出的落盘那一半：对话框是原生的，CDP 驱动不了，但写文件这一步可以验
   const target = path.join(ws.dir, "导出 视图.png");

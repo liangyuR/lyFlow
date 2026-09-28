@@ -300,6 +300,43 @@ pub fn clear_cache() -> Result<(), String> {
     Ok(())
 }
 
+/// 按「图 + 节点」清缓存（C ABI v12 `lyflow_cache_evict`）。给 core 的是节点，cacheKey 仍由它算
+/// （ADR-0007 E1）；`downstream` 连同全部下游。回 `{ removed, skippedPinned, nodes }`。
+#[tauri::command]
+pub fn evict_cache<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    doc: GraphDoc,
+    #[allow(non_snake_case)] graphPath: Option<String>,
+    #[allow(non_snake_case)] nodeIds: Vec<String>,
+    downstream: Option<bool>,
+    params: Option<serde_json::Map<String, serde_json::Value>>,
+) -> Result<serde_json::Value, String> {
+    let graph_path = resolve_opt(&host::config(&app), graphPath)?;
+    let core = core_ffi::core()?;
+    let json = serde_json::to_string(&doc).map_err(|e| e.to_string())?;
+    let params_json = params_json_of(params.as_ref())?;
+    let raw = core
+        .cache_evict(
+            &json,
+            &base_dir_of(graph_path.as_deref()),
+            &nodeIds,
+            downstream.unwrap_or(false),
+            params_json.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
+    let value: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("core 返回的清缓存结果不是合法 JSON: {e}"))?;
+    // 图编不过时 core 回的是诊断数组：清不了，把第一条说出来
+    if let Some(diags) = value.as_array() {
+        let first = diags
+            .first()
+            .and_then(|d| d["message"].as_str())
+            .unwrap_or("图校验不过");
+        return Err(format!("图有错，清不了缓存：{first}"));
+    }
+    Ok(value)
+}
+
 #[tauri::command]
 pub fn cache_stats() -> Result<serde_json::Value, String> {
     let raw = core_ffi::core()?.cache_stats().map_err(|e| e.to_string())?;

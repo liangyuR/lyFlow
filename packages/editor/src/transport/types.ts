@@ -5,6 +5,7 @@ import type { CoreInfo, OperatorManifestBundle, SnippetDesc } from "../types/man
 import type { GraphDoc } from "../types/graph";
 import type {
   CacheStats,
+  EvictResult,
   ExecutionEvent,
   GraphDiagnostic,
   OutputInfo,
@@ -123,6 +124,15 @@ export interface Transport {
     params?: Record<string, unknown>,
   ): Promise<PlanNode[]>;
   clearCache(): Promise<void>;
+  /** 按「图 + 节点」清缓存（v12）。给的是节点，cacheKey 由 core 算（ADR-0007）；
+   *  downstream 连同全部下游。预览命名空间里的结果不动。 */
+  evictCache(
+    doc: GraphDoc,
+    graphPath: string | null,
+    nodeIds: string[],
+    downstream: boolean,
+    params?: Record<string, unknown>,
+  ): Promise<EvictResult>;
   cacheStats(): Promise<CacheStats>;
   /** 启动一次运行，返回 runId。状态走 `onExecutionEvent`。 */
   runGraph(doc: GraphDoc, graphPath: string | null, options?: RunOptions): Promise<string>;

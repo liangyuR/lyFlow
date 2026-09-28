@@ -1,7 +1,7 @@
 //! 把整个 IPC 层交给外部 Rust/Tauri 宿主（docs/embedding.md「Rust/Tauri 宿主」）。
 //!
 //! 宿主自己建 `tauri::Builder`、自己开窗、自己注册自己的命令；LyFlow 这边出
-//! `attach()`（managed state + 启动步骤）与 `lyflow_handler!`（33 条命令的清单）。
+//! `attach()`（managed state + 启动步骤）与 `lyflow_handler!`（34 条命令的清单）。
 //! LyFlow 自己的 `run()` 走的是同一对东西 —— 分叉的实现会长出只在其中一边出现的 bug。
 
 use std::collections::BTreeMap;
@@ -280,7 +280,7 @@ fn output_ports(manifest: &serde_json::Value, op: &str) -> Result<Vec<String>, S
 
 // ------------------------------------------------------------------ 命令清单
 
-/// LyFlow 的 33 条命令，加上宿主自己的那些，合成一个 `invoke_handler`。
+/// LyFlow 的 34 条命令，加上宿主自己的那些，合成一个 `invoke_handler`。
 ///
 /// ```ignore
 /// .invoke_handler(lyflow_lib::lyflow_handler![my_open_scene, my_close_scene])
@@ -304,6 +304,7 @@ macro_rules! lyflow_handler {
             $crate::commands::validate_graph,
             $crate::commands::plan_graph,
             $crate::commands::clear_cache,
+            $crate::commands::evict_cache,
             $crate::commands::cache_stats,
             $crate::commands::run_graph,
             $crate::commands::cancel_run,

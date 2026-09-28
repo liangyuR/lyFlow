@@ -684,6 +684,12 @@ async function route(req, res, url) {
     );
   }
 
+  if (req.method === "POST" && p === "/lyflow/cache/evict") {
+    // 桩服务器没有常驻结果仓：没有东西可清，回一个形状对的空结果
+    const body = await json();
+    return send(res, 200, { removed: 0, skippedPinned: 0, nodes: body.nodeIds ?? [] });
+  }
+
   if (p === "/lyflow/cache") {
     // 桩服务器每次请求都是新进程，进程间没有共享缓存
     if (req.method === "DELETE") return send(res, 200, {});

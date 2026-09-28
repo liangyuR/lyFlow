@@ -41,6 +41,7 @@ import { defaultViewFor } from "../lib/viewRule";
 import { augmentOperators, fullId, levelOf, pathIsValid } from "../lib/subgraph";
 import { canConnect, compatibleSources, compatibleTargets, inferAnyTypes } from "../lib/typecheck";
 import { keyHint } from "../lib/keymap";
+import { evictNodeCache } from "../store/cache";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
@@ -1045,6 +1046,27 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
             }}
           >
             仅此节点（用现有上游）
+          </button>
+          <button
+            type="button"
+            data-testid="ctx-evict-node"
+            disabled={running}
+            title="把此节点与它全部下游的缓存结果删掉：下次运行这些节点要重算，内存也放出来（正在运行时不能清）"
+            onClick={() => {
+              const g = useGraphStore.getState();
+              void evictNodeCache(g.doc, g.filePath, fullId(path, menu.nodeId))
+                .then((r) =>
+                  useUiStore
+                    .getState()
+                    .showToast(`清掉 ${r.removed} 条缓存（${r.nodes.length} 个节点）`),
+                )
+                .catch((e: unknown) =>
+                  useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn"),
+                );
+              setMenu(null);
+            }}
+          >
+            清除此节点及下游的缓存
           </button>
           <button
             type="button"

@@ -734,6 +734,17 @@ async function suiteMenu(cdp, report) {
     JSON.stringify(s3?.isolate));
   report.eq("「仅此节点」：只有 b 的显示变了", Object.keys(trans).sort(), [ids.b]);
   report.eq("「仅此节点」：a、c 的状态与耗时不变", await statesOf(cdp, [ids.a, ids.c]), before);
+
+  // 清除此节点及下游的缓存（C ABI v12）：给 core 的是节点，清完计划跟着变 —— b、c 要重算，a 还在
+  await openMenu(cdp, ids.b);
+  await click(cdp, await centerOf(cdp, '[data-testid="ctx-evict-node"]'));
+  const cachedOf = `(id) => window.__lyflow.stores.cache.getState().plan.get(id)?.cached`;
+  await cdp.waitFor(`(${cachedOf})(${lit(ids.b)}) === false`, { timeoutMs: 5000, what: "b 的缓存被清掉" }).catch(() => {});
+  const cached = await cdp.eval(`
+    const c = ${cachedOf};
+    return { a: c(${lit(ids.a)}), b: c(${lit(ids.b)}), c: c(${lit(ids.c)}) };
+  `);
+  report.eq("「清除此节点及下游的缓存」：b、c 不再命中缓存，上游 a 还在", cached, { a: true, b: false, c: false });
 }
 
 export const nodeRunSuites = [

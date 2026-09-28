@@ -9,7 +9,7 @@ import { findBaseCloud, firstCloudPort, type BaseCloud } from "../lib/basecloud"
 import { cacheKey, cloudCache, dropOtherRuns, putCache } from "../lib/cloudCache";
 import { withBoundValues } from "../lib/graphParams";
 import { effectiveParams } from "../lib/params";
-import { RAMPS, type RampName } from "../lib/ramps";
+import { RAMPS, writeRgbColors, type RampName } from "../lib/ramps";
 import { copyFrameWrites, pickFrame, roiFramesOf } from "../lib/roiFrames";
 import { rememberRoiBounds } from "../lib/roiThumbs";
 import { disposeOverlay, extentOf, shapesOf } from "../lib/shapes2d";
@@ -27,7 +27,7 @@ import { RoiLayer, type RoiItem } from "./RoiLayer";
 import { ValueView } from "./peek/ValueView";
 import "../styles.viewer.css";
 
-export type ShadingMode = "intensity" | "height" | "normal" | "flat";
+export type ShadingMode = "intensity" | "height" | "normal" | "rgb" | "flat";
 export type { RampName } from "../lib/ramps";
 /** 相机模式（G7）。2d = 正交俯视 XY，看剖面用。 */
 export type CameraMode = "3d" | "2d";
@@ -467,14 +467,23 @@ export function Viewer3D() {
 
   const hasIntensity = cloud?.intensity != null;
   const hasNormals = cloud?.normals != null;
-  // 选了「强度」但这片云没有强度通道时实际走高度着色，那就让下拉框也显示「高度」——
-  // 下拉框写着强度、画面却是高度，用户只会以为强度数据本身有问题。
+  const hasRgb = cloud?.rgb != null;
+  // 选了「强度」但这片云没有强度通道时实际走别的着色，那就让下拉框也显示实际那一种 ——
+  // 下拉框写着强度、画面却是高度，用户只会以为强度数据本身有问题。没有强度但自带颜色的
+  // （模型分割的类别色、PCD 里的 rgb）先退到 RGB：那本来就是给人看的颜色
   const effectiveShading: ShadingMode =
-    (shading === "intensity" && !hasIntensity) || (shading === "normal" && !hasNormals)
-      ? "height"
-      : shading;
+    shading === "intensity" && !hasIntensity
+      ? hasRgb
+        ? "rgb"
+        : "height"
+      : (shading === "normal" && !hasNormals) || (shading === "rgb" && !hasRgb)
+        ? "height"
+        : shading;
   const isFlat = effectiveShading === "flat";
   const isNormalShading = effectiveShading === "normal";
+  const isRgbShading = effectiveShading === "rgb";
+  // 色带与范围只对「标量 → 颜色」的着色有意义
+  const noRamp = isFlat || isRgbShading;
 
   const dataRange = useMemo(
     () => dataRangeOf(cloud, effectiveShading),
@@ -687,13 +696,14 @@ export function Viewer3D() {
         : null;
     const arr = reuse ? (reuse.array as Float32Array) : new Float32Array(cloud.pointCount * 3);
     if (isNormalShading) writeNormalColors(arr, cloud);
+    else if (isRgbShading) writeRgbColors(arr, cloud.rgb, cloud.pointCount);
     else writeColors(arr, cloud, effectiveShading, ramp, lo, hi);
     if (reuse) reuse.needsUpdate = true;
     else geometry.setAttribute("color", new THREE.BufferAttribute(arr, 3));
     material.vertexColors = true;
     material.color.setHex(0xffffff);
     material.needsUpdate = true;
-  }, [cloud, effectiveShading, isFlat, isNormalShading, ramp, lo, hi]);
+  }, [cloud, effectiveShading, isFlat, isNormalShading, isRgbShading, ramp, lo, hi]);
 
   // 点大小只改材质，不重建几何体 —— 它曾经也在上面那个 effect 的依赖里，
   // 拖一下滑块就要重分配 24MB 颜色数组、重扫两百万点（见 README「踩过的坑」）。
@@ -991,7 +1001,7 @@ export function Viewer3D() {
               title={
                 shading === effectiveShading
                   ? "着色方式"
-                  : "这片点云没有该通道，已退回高度着色"
+                  : "这片点云没有该通道，已换成它实际有的着色"
               }
             >
               <option value="intensity" disabled={!hasIntensity}>
@@ -1001,6 +1011,9 @@ export function Viewer3D() {
               <option value="normal" disabled={!hasNormals} title="需要点云带法线通道">
                 法线{hasNormals ? "" : "（无）"}
               </option>
+              <option value="rgb" disabled={!hasRgb} title="点云自带的颜色（PCD 的 rgb、模型分割的类别色）">
+                RGB{hasRgb ? "" : "（无）"}
+              </option>
               <option value="flat">单色</option>
             </select>
             <select
@@ -1008,7 +1021,7 @@ export function Viewer3D() {
               data-testid="viewer-ramp"
               value={ramp}
               onChange={(e) => setRamp(e.target.value as RampName)}
-              disabled={isFlat}
+              disabled={noRamp}
               title="色带"
             >
               <option value="viridis">viridis</option>
@@ -1022,7 +1035,7 @@ export function Viewer3D() {
               step="any"
               value={rangeAuto ? round3(lo) : manualRange[0]}
               onChange={(e) => setRangeEnd(0, e.target.value)}
-              disabled={isFlat}
+              disabled={noRamp}
               title="着色范围下限"
             />
             <input
@@ -1032,7 +1045,7 @@ export function Viewer3D() {
               step="any"
               value={rangeAuto ? round3(hi) : manualRange[1]}
               onChange={(e) => setRangeEnd(1, e.target.value)}
-              disabled={isFlat}
+              disabled={noRamp}
               title="着色范围上限"
             />
             <button
@@ -1040,7 +1053,7 @@ export function Viewer3D() {
               className="viewer__btn"
               data-testid="viewer-range-auto"
               onClick={() => setRangeAuto(true)}
-              disabled={isFlat || rangeAuto}
+              disabled={noRamp || rangeAuto}
               title="范围回到数据实际的最小/最大"
             >
               自动

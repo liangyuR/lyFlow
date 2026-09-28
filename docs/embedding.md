@@ -8,7 +8,7 @@
   只是换成一个 crate。
 - **Rust/Tauri 宿主**（[下文](#rusttauri-宿主)）：宿主是 Tauri 2 的 app，
   前端嵌 `@lyflow/editor`，Rust 侧直接复用 `lyflow_lib` 的整个 IPC 层 ——
-  33 条 command、`RunManager`、三条事件流、库算子扫描，一行都不用自己写。
+  34 条 command、`RunManager`、三条事件流、库算子扫描，一行都不用自己写。
 - **只要编辑器界面**，嵌进自己的 React 页面：看文末的
   [前端编辑器](#前端编辑器lyfloweditor)。
 
@@ -16,7 +16,7 @@
 只依赖同目录的 `lyflow/c_api.h`，不 include 任何 core 内部头，也不链接任何库 ——
 core 是运行时加载的 DLL（[ADR-0004](adr/0004-core-as-dll.md)）。
 
-契约版本是 **C ABI v11**（v9 的 run summary 见 [ADR-0022](adr/0022-run-summary-as-core-output.md)；
+契约版本是 **C ABI v12**（v9 的 run summary 见 [ADR-0022](adr/0022-run-summary-as-core-output.md)；
 v8 的张量与下标入口见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)）。
 `lyflow::kClientAbiVersion` 与 core 的 `LYFLOW_ABI_VERSION` 必须一致；对不上时
 `Client` 的构造函数会抛 `ClientError`，而不是等到某次调用才崩。
@@ -28,6 +28,16 @@ v11 在它后面又加了两对：`isolate` / `isolate_count`（只运行这几�
 （强制重算这几个节点），见下面「[部分运行：targets、isolate、force](#部分运行targetsisolateforce)」。
 结构体变长了，所以 ABI 号跟着加一 —— `client.hpp` 与 `lyflow-client` 都是零初始化整个结构体再填，
 不用这两项的宿主什么都不用改。
+
+v12 两件事，都在结果仓那一侧：
+
+- `lyflow_cloud_view` 在 `handle` 之前加了 `const uint8_t* rgb`（3n 个 0..255，或 NULL），`flags` 的 bit2
+  （`LYFLOW_CLOUD_HAS_RGB`）表示带颜色。**视图结构体是调用方分配、core 往里写的**，所以这一条不是追加字段那么简单 ——
+  拿 v11 的头文件配 v12 的 core 会越界写，这就是必须对齐 ABI 号的原因。`client.hpp` 的 `CloudView::rgb()`、
+  Rust 客户端的 `CloudView::rgb()` 已经跟上。
+- 新入口 `lyflow_cache_evict(graph, baseDir, nodeIds, n, includeDownstream, paramsJson)`：按「图 + 节点」清缓存，
+  返回 `{ removed, skippedPinned, nodes }`。给的是节点不是 cacheKey —— 缓存判定仍只归 core（ADR-0007）；
+  被运行钉住的跳过，预览命名空间里的不动。`client.hpp` 是 `Client::evictCache`，Rust 是 `Core::cache_evict`。
 
 v9 加的那一个入口是 `lyflow_run_summary(runId)`：一次运行的结构化收尾。
 `RunResult::summary` 就是它的原文，`RunHandle::runSummary()` 也能单独取。
@@ -405,7 +415,7 @@ fn main() {
 > 要有自己的 setup 就别再调 `.setup()`，改成在自己那个里面调
 > `lyflow_lib::host::setup(app.handle())`。
 
-`lyflow_handler!` 把 LyFlow 的 33 条命令和宿主自己的命令合成一个
+`lyflow_handler!` 把 LyFlow 的 34 条命令和宿主自己的命令合成一个
 `invoke_handler`。它能跨 crate 是因为 `#[tauri::command]` 除了函数本身还发一对
 `#[macro_export]` 的 `macro_rules!`，并在同一个模块里 `pub use` 了它们 ——
 `lyflow_lib::commands::get_manifest` 这条路径对函数和对宏都解析得开，

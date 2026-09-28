@@ -1,6 +1,8 @@
 export const CLOUD_MAGIC = 0x4350594c;
 export const CLOUD_HAS_INTENSITY = 1;
 export const CLOUD_HAS_NORMALS = 2;
+/** C ABI v12：rgb 块，3n 个 0..255，排在所有 float 通道之后。 */
+export const CLOUD_HAS_RGB = 4;
 
 export interface CloudPayload {
   pointCount: number;
@@ -9,6 +11,7 @@ export interface CloudPayload {
   xyz: Float32Array;
   intensity: Float32Array | null;
   normals: Float32Array | null;
+  rgb: Uint8Array | null;
 }
 
 export function decodeCloud(buffer: ArrayBuffer): CloudPayload {
@@ -37,7 +40,9 @@ export function decodeCloud(buffer: ArrayBuffer): CloudPayload {
     normals = new Float32Array(buffer, offset, pointCount * 3);
     offset += pointCount * 12;
   }
-  return { pointCount, totalPoints, bounds, xyz, intensity, normals };
+  let rgb: Uint8Array | null = null;
+  if (flags & CLOUD_HAS_RGB) rgb = new Uint8Array(buffer, offset, pointCount * 3);
+  return { pointCount, totalPoints, bounds, xyz, intensity, normals, rgb };
 }
 
 export interface ChannelStat {
@@ -71,6 +76,7 @@ export interface CloudPoint {
   z: number;
   intensity?: number;
   normal?: [number, number, number];
+  rgb?: [number, number, number];
 }
 
 export interface CloudSummary {
@@ -94,6 +100,12 @@ export function summarizeCloud(payload: CloudPayload, head: number): CloudSummar
     channels["ny"] = statOf(payload.normals, 3, 1);
     channels["nz"] = statOf(payload.normals, 3, 2);
   }
+  if (payload.rgb) {
+    const rgb = Float32Array.from(payload.rgb);
+    channels["r"] = statOf(rgb, 3, 0);
+    channels["g"] = statOf(rgb, 3, 1);
+    channels["b"] = statOf(rgb, 3, 2);
+  }
 
   const points: CloudPoint[] = [];
   const take = Math.max(0, Math.min(head, payload.pointCount));
@@ -104,6 +116,13 @@ export function summarizeCloud(payload: CloudPayload, head: number): CloudSummar
       z: payload.xyz[i * 3 + 2] as number,
     };
     if (payload.intensity) point.intensity = payload.intensity[i] as number;
+    if (payload.rgb) {
+      point.rgb = [
+        payload.rgb[i * 3] as number,
+        payload.rgb[i * 3 + 1] as number,
+        payload.rgb[i * 3 + 2] as number,
+      ];
+    }
     if (payload.normals) {
       point.normal = [
         payload.normals[i * 3] as number,

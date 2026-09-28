@@ -77,13 +77,13 @@ interface LyFlowEditorProps {
 | `new HttpTransport(baseUrl, token?)` | 跑在浏览器里，对着 [`docs/http-transport.md`](../../docs/http-transport.md) 的后端 |
 | `new StaticTransport(manifestUrl?)` | 只读：读一份 dump 出来的 manifest，什么都跑不了。没有后端时也能把界面渲染出来 |
 
-Rust 侧用 `lyflow_lib::host::attach`（`host` feature）把 LyFlow 的那 33 条 command
+Rust 侧用 `lyflow_lib::host::attach`（`host` feature）把 LyFlow 的那 34 条 command
 挂到自己的 `tauri::Builder` 上，不必自己实现任何一条；命令名与事件名都不带前缀，
 `TauriTransport` 拿来就能用。做法见
 [`docs/embedding.md`](../../docs/embedding.md#rusttauri-宿主)。
 
 要接自己的后端就实现 `Transport` 接口（`src/transport/types.ts`）。
-它的每个方法都对着 C ABI v11 的一个入口。v7 那一版的完整清单见
+它的每个方法都对着 C ABI v12 的一个入口。v7 那一版的完整清单见
 [`docs/phase-a1-acceptance.md`](../../docs/phase-a1-acceptance.md#c-abi-v7-的最终签名清单)，
 v8 增补的张量与下标两个入口见 [ADR-0019](../../docs/adr/0019-output-tensor-and-indices-over-abi.md)，
 v9 增补的 `lyflow_run_summary` 见 [ADR-0022](../../docs/adr/0022-run-summary-as-core-output.md)

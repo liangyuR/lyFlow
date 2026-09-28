@@ -7,7 +7,7 @@ import { localIdOf, type SubPath } from "../lib/subgraph";
 import { transport } from "../transport";
 import { runParamsOf } from "./recipe";
 import { useUiStore } from "./ui";
-import type { CacheStats, PlanNode } from "../types/execution";
+import type { CacheStats, EvictResult, PlanNode } from "../types/execution";
 import type { GraphDoc } from "../types/graph";
 
 /** doc 每次变都重新编译一次代价太大，攒一下再问。 */
@@ -168,6 +168,20 @@ export async function refreshCacheStats(): Promise<void> {
   } catch {
     useCacheStore.getState().setStats(null);
   }
+}
+
+/** 右键「清除此节点及下游的缓存」（C ABI v12）。给 core 的是节点（完整路径 id），cacheKey 由它算
+ *  （ADR-0007）。清完立刻重编一次计划：虚线框与「将重算 N 个节点」跟着变。 */
+export async function evictNodeCache(
+  doc: GraphDoc,
+  graphPath: string | null,
+  nodeId: string,
+  downstream = true,
+): Promise<EvictResult> {
+  const out = await transport.evictCache(doc, graphPath, [nodeId], downstream, runParamsOf(doc));
+  await requestPlan(doc, graphPath);
+  await refreshCacheStats();
+  return out;
 }
 
 export async function clearCache(): Promise<void> {
