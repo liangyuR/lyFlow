@@ -10,7 +10,7 @@
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 136（纯平台构建 79 通过 / 57 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑） | < 1 分钟（已编译时） |
 | editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 75 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 29 | 秒级 |
-| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`） | 721 条断言、97 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
+| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`） | 730 条断言、98 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 32 条断言（精简前 58） | 几分钟 |
 
 ## 放在哪一层
@@ -39,7 +39,7 @@
 | gap 测量、积木、导入、模型 ROI | `packs/gap/tests/*`；e2e `gap.mjs`、`m8b.mjs`、`m8c.mjs`、`params_p4.mjs`（编辑器 vs CLI 逐位相同） |
 | 2D 拖框（文件底图与输入端口底图）、自动连线、片段 | `packages/editor/test/autoconnect.test.mjs`、`roiframes.test.mjs`；e2e `m8b.mjs`、`m8c.mjs` |
 | 两节点输出对比（差异表的配对、每种类型的行、容差、全量点数；进入即冻结、换 B 解冻、B 被删自动退出、快捷键；两栏内容合并） | `packages/editor/test/compare-diff.test.mjs`、`compare-store.test.mjs`、`view-rule.test.mjs`；e2e `compare.mjs`（两栏、冻结后重跑只有 A 变、共用相机、右键换 B、A 跟随、拖框互斥、两侧都只有值）。差异表每种类型的数值只在单测里钉 |
-| 预览里选点与测距（屏幕空间最近点、看不见的点跳过、同距取近、一组两点、readout 的单位与行） | `packages/editor/test/pick.test.mjs` |
+| 预览里选点与测距（屏幕空间最近点、看不见的点跳过、同距取近、一组两点、readout 的单位与行） | `packages/editor/test/pick.test.mjs`；快捷键 `M` 不撞 `Ctrl+M` 在 `compare-store.test.mjs` 的快捷键那条；e2e `m3.mjs` 的测量组（真单击选点、拖动不选、重跑标过期、换节点清掉）、`compare.mjs` 一句（A、B 两栏各点一次） |
 | 连线查看器 Edge Peek | e2e `peek.mjs`；窗口上限与自动关窗的提示 `packages/editor/test/peek-store.test.mjs` |
 | 按输出类型选视图（主预览的点云 / 值） | `packages/editor/test/view-rule.test.mjs`；e2e `gap.mjs` 的「量测输出」组（`transform.make` 显示值、手动选只对当时的节点有效） |
 | 动效、hover、端点对齐 | e2e `motion.mjs`、`noderun.mjs` |

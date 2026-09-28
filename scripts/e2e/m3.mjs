@@ -8,6 +8,8 @@ import { sleep } from "./cdp.mjs";
 import {
   buildGraph,
   centerOf,
+  clickUntilPicked,
+  pressKey,
   openInspectorAdvanced,
   dragMouse,
   lit,
@@ -1139,6 +1141,91 @@ async function suiteViewer(cdp, report) {
   );
 }
 
+/** 预览上的测量标记，一次读全。 */
+function readMeasure(cdp) {
+  return cdp.eval(`
+    const v = document.querySelector('.viewer');
+    const rows = [...document.querySelectorAll('[data-testid="measure-readout"] .measure-readout__row')]
+      .map((r) => r.getAttribute('data-key'));
+    const num3 = (s) => (s ? s.split(',').map(Number) : null);
+    return {
+      on: v.getAttribute('data-measuring'),
+      count: Number(v.getAttribute('data-measure')),
+      p1: num3(v.getAttribute('data-measure-p1')),
+      p2: num3(v.getAttribute('data-measure-p2')),
+      dist: v.getAttribute('data-measure-dist') === null ? null : Number(v.getAttribute('data-measure-dist')),
+      stale: v.getAttribute('data-measure-stale'),
+      node: v.getAttribute('data-node'),
+      rows,
+      readout: !!document.querySelector('[data-testid="measure-readout"]'),
+    };
+  `);
+}
+
+async function suiteMeasure(cdp, report) {
+  report.section("测量（measure-plan）：M 开工具、单击选点、两点测距、拖动不选点、重跑标过期、换节点清掉");
+  await newDoc(cdp);
+  const ids = await buildGraph(
+    cdp,
+    [{ key: "gen", op: "gen.synthetic", params: { pointCount: 20000, seed: 5 } },
+     { key: "voxel", op: "filter.voxel_grid", params: { leafSize: [0.03, 0.03, 0.03] } }],
+    [{ from: ["gen", "cloud"], to: ["voxel", "cloud"] }],
+  );
+  const run = await runAndWait(cdp, () => pressF5(cdp));
+  mustOk(run.status === "ok", "先跑一次", run.status);
+  const view = await selectAndReadViewer(cdp, ids.gen);
+  mustOk(view.count > 0, "预览画出了 gen 的点", JSON.stringify(view));
+
+  await pressKey(cdp, "m", 77);
+  await sleep(200);
+  const on = await readMeasure(cdp);
+  report.eq("按 M：测量工具开着、读数框出来", [on.on, on.readout, on.count], ["1", true, 0]);
+
+  const center = await centerOf(cdp, '[data-testid="viewer3d-canvas"]');
+  const first = await clickUntilPicked(cdp, center, async () => (await readMeasure(cdp)).count === 1);
+  mustOk(Boolean(first), "在画面中心附近点中了一个点");
+  const one = await readMeasure(cdp);
+  report.ok("第一次单击：P1 有坐标、读数只有 P1", Array.isArray(one.p1) && one.p1.length === 3 &&
+    JSON.stringify(one.rows) === JSON.stringify(["p1"]), JSON.stringify(one));
+
+  await dragMouse(cdp, { x: center.x + 40, y: center.y }, { x: center.x + 100, y: center.y + 30 });
+  await sleep(300);
+  report.eq("拖动转视角不算选点", (await readMeasure(cdp)).count, 1);
+
+  const second = await clickUntilPicked(cdp, { x: center.x - 50, y: center.y + 20 },
+    async () => (await readMeasure(cdp)).count === 2);
+  mustOk(Boolean(second), "又点中了第二个点");
+  const two = await readMeasure(cdp);
+  const expect = Math.hypot(...two.p2.map((v, i) => v - two.p1[i]));
+  report.ok("第二次单击：距离 = 两点坐标之差的模，读数有 |d| 与 Δ",
+    two.dist > 0 && Math.abs(two.dist - expect) <= 1e-5 * Math.max(1, expect) &&
+      two.rows.includes("dist") && two.rows.includes("delta"),
+    JSON.stringify({ two, expect }));
+
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMode("2d"); return true;`);
+  await sleep(300);
+  report.ok("2D 剖面下多一行 XY 平面距离", (await readMeasure(cdp)).rows.includes("distXY"));
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMode("3d"); return true;`);
+
+  await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.gen)}, 'seed', 6); return true;`);
+  await runAndWait(cdp, () => pressF5(cdp));
+  await cdp.waitFor(`document.querySelector('.viewer')?.getAttribute('data-measure-stale') === '1'`,
+    { timeoutMs: 15_000, what: "重跑后测量标成过期" }).catch(() => {});
+  const stale = await readMeasure(cdp);
+  report.eq("同一节点重跑：两个点位留着、标「云已更新」", [stale.count, stale.stale], [2, "1"]);
+
+  await select(cdp, ids.voxel);
+  await cdp.waitFor(`document.querySelector('.viewer')?.getAttribute('data-node') === ${lit(ids.voxel)}`,
+    { timeoutMs: 15_000, what: "预览切到 voxel" });
+  await sleep(200);
+  report.eq("换节点：测量清掉", (await readMeasure(cdp)).count, 0);
+
+  await pressKey(cdp, "m", 77);
+  await sleep(200);
+  const off = await readMeasure(cdp);
+  report.eq("再按 M 关掉工具、读数框收起", [off.on, off.readout], ["0", false]);
+}
+
 // ---------------------------------------------------------- Shift+F5 / #27
 
 async function suiteRunToSelected(cdp, report) {
@@ -1169,5 +1256,6 @@ export const m3Suites = [
   suiteEditing,
   suitePanels,
   suiteViewer,
+  suiteMeasure,
   suiteRunToSelected,
 ];

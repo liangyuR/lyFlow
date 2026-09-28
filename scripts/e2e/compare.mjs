@@ -4,6 +4,8 @@ import { sleep } from "./cdp.mjs";
 import {
   buildGraph,
   centerOf,
+  clickAt,
+  clickUntilPicked,
   dragMouse,
   lit,
   mustOk,
@@ -30,14 +32,6 @@ const CHAIN_EDGES = [
   { from: ["pick", "selected"], to: ["fit", "cloud"] },
   { from: ["fit", "line"], to: ["rr", "in"] },
 ];
-
-async function clickAt(cdp, p) {
-  const common = { x: p.x, y: p.y, button: "left", clickCount: 1 };
-  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y, buttons: 0 });
-  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", buttons: 1, ...common });
-  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", buttons: 0, ...common });
-  await sleep(150);
-}
 
 async function clickTestId(cdp, testId) {
   const p = await centerOf(cdp, `[data-testid="${testId}"]`);
@@ -188,6 +182,20 @@ async function suiteCompareFreeze(cdp, report) {
   const flat = await waitCompare(cdp, (c) => c.camera === "2d", "切到 2D");
   report.eq("2D 剖面下两栏仍是点云", [flat.paneA.view, flat.paneB.view], ["cloud", "cloud"]);
   await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMode("3d"); return true;`);
+
+  // 测量与对比联动（measure-plan M8）：点在哪一栏就吸附到那一栏的云
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMeasuring(true); return true;`);
+  const count = () => cdp.eval(`return Number(document.querySelector('.viewer').getAttribute('data-measure'));`);
+  const paneCenter = (s) => cdp.eval(`
+    const r = document.querySelector('[data-testid="compare-pane-${s}"]').getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + 12 + (r.height - 12) / 2) };
+  `);
+  const pa = await clickUntilPicked(cdp, await paneCenter("a"), async () => (await count()) === 1, { step: 8, tries: 60 });
+  const pb = await clickUntilPicked(cdp, await paneCenter("b"), async () => (await count()) === 2, { step: 8, tries: 60 });
+  mustOk(Boolean(pa && pb), "A 栏、B 栏各点中了一个点", { pa, pb });
+  report.eq("对比时 A 栏、B 栏各点一次：两个点分别记成来自 A、B",
+    await cdp.eval(`return document.querySelector('.viewer').getAttribute('data-measure-panes');`), "A,B");
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMeasuring(false); return true;`);
 }
 
 async function suiteCompareFollow(cdp, report) {

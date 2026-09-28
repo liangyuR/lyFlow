@@ -265,3 +265,25 @@ export async function viewerBounds(cdp) {
   const parse = (s) => (s ? s.split(",").map(Number) : null);
   return { cloud: parse(read?.cloud), overlay: parse(read?.overlay) };
 }
+
+/** 真鼠标单击（按下、原地松开）。 */
+export async function clickAt(cdp, p) {
+  const common = { x: p.x, y: p.y, button: "left", clickCount: 1 };
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y, buttons: 0 });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", buttons: 1, ...common });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", buttons: 0, ...common });
+  await sleep(150);
+}
+
+/** 预览里测量选点：从 around 开始按螺旋试着单击，直到 done() 成立（点到了一个显示的点）。
+ *  脚本不知道哪个像素底下有点，就一圈圈往外试；返回真点中的那个屏幕位置，没点中返回 null。 */
+export async function clickUntilPicked(cdp, around, done, { step = 6, tries = 40 } = {}) {
+  for (let i = 0; i < tries; i += 1) {
+    const r = step * Math.sqrt(i);
+    const a = i * 2.4;
+    const p = { x: Math.round(around.x + r * Math.cos(a)), y: Math.round(around.y + r * Math.sin(a)) };
+    await clickAt(cdp, p);
+    if (await done()) return p;
+  }
+  return null;
+}
