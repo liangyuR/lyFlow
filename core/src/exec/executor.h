@@ -111,6 +111,13 @@ std::string planGraphJson(const std::string& graphJson, const std::filesystem::p
                           const std::vector<std::string>& targets,
                           const std::string& paramsJson = {});
 
+/// 按「图 + 节点」清缓存（lyflow_cache_evict，v12）。全图、完整模式编一次计划，nodeIds 按路径前缀
+/// 匹配（同 targets），downstream 时连同全部下游；返回 { removed, skippedPinned, nodes }，
+/// 校验有错时返回诊断数组（与 planGraphJson 同一套区分办法）。
+std::string evictNodesJson(const std::string& graphJson, const std::filesystem::path& baseDir,
+                           const std::vector<std::string>& nodeIds, bool downstream,
+                           const std::string& paramsJson = {});
+
 /// 每节点每参数的生效值与来源（m6-plan §2）。返回
 /// `{ nodes: [ { node, op, params: [ { param, value, source, label?, unit?, min?, max? } ] } ] }`；
 /// 校验有错时返回诊断数组（以 '[' 开头），与 planGraphJson 同一套区分办法。

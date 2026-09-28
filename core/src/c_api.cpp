@@ -170,6 +170,27 @@ void lyflow_cache_clear(void) {
   }
 }
 
+char* lyflow_cache_evict(const char* graph_json, const char* base_dir,
+                         const char* const* node_ids, size_t n, int include_downstream,
+                         const char* params_json) {
+  try {
+    registry();
+    const std::string base = fromC(base_dir);
+    std::vector<std::string> ids;
+    for (std::size_t i = 0; node_ids && i < n; ++i) ids.push_back(fromC(node_ids[i]));
+    return dup(lyflow::exec::evictNodesJson(
+        fromC(graph_json),
+        base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base), ids,
+        include_downstream != 0, fromC(params_json)));
+  } catch (const std::exception& e) {
+    lyflow::Diagnostics d;
+    d.error("", lyflow::Phase::Compile, "internal", std::string("清缓存时内部异常: ") + e.what());
+    return dup(d.toJson());
+  } catch (...) {
+    return dup(std::string("[]"));
+  }
+}
+
 char* lyflow_cache_stats(void) {
   try {
     const auto s = lyflow::exec::ResultStore::instance().stats();
@@ -281,11 +302,13 @@ int lyflow_output_cloud(const char* run_id, const char* node_id, const char* por
     out->point_count = preview->pointCount;
     out->total_points = preview->totalPoints;
     out->flags = (preview->hasIntensity ? LYFLOW_CLOUD_HAS_INTENSITY : 0u) |
-                 (preview->hasNormals ? LYFLOW_CLOUD_HAS_NORMALS : 0u);
+                 (preview->hasNormals ? LYFLOW_CLOUD_HAS_NORMALS : 0u) |
+                 (preview->hasRgb ? LYFLOW_CLOUD_HAS_RGB : 0u);
     std::memcpy(out->bounds, preview->bounds, sizeof(out->bounds));
     out->xyz = preview->xyz.data();
     out->intensity = preview->hasIntensity ? preview->intensity.data() : nullptr;
     out->normals = preview->hasNormals ? preview->normals.data() : nullptr;
+    out->rgb = preview->hasRgb ? preview->rgb.data() : nullptr;
     out->handle = preview;
     return 0;
   } catch (...) {

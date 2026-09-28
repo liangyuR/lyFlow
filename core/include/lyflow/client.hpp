@@ -116,6 +116,10 @@ class CloudView {
   const float* normals() const {
     return (view_.flags & LYFLOW_CLOUD_HAS_NORMALS) ? view_.normals : nullptr;
   }
+  /// 3 * pointCount 个 0..255，或 nullptr（v12）。
+  const std::uint8_t* rgb() const {
+    return (view_.flags & LYFLOW_CLOUD_HAS_RGB) ? view_.rgb : nullptr;
+  }
   const float* bounds() const { return view_.bounds; }
 
  private:
@@ -443,6 +447,18 @@ class Client {
   }
 
   void clearCache() const { fn_.cache_clear(); }
+  /// 按「图 + 节点」清缓存（v12）：返回 `{ removed, skippedPinned, nodes }` 的 JSON 文本；
+  /// 图校验不过时是诊断数组（'[' 开头），与 plan 同一套区分办法。
+  std::string evictCache(const std::string& graphJson, const std::vector<std::string>& nodeIds,
+                         bool includeDownstream = false, const std::string& baseDir = {},
+                         const std::string& paramsJson = {}) const {
+    std::vector<const char*> ptrs;
+    for (const std::string& id : nodeIds) ptrs.push_back(id.c_str());
+    return owned(fn_.cache_evict(graphJson.c_str(), baseDir.c_str(),
+                                 ptrs.empty() ? nullptr : ptrs.data(), ptrs.size(),
+                                 includeDownstream ? 1 : 0,
+                                 paramsJson.empty() ? nullptr : paramsJson.c_str()));
+  }
   std::string cacheStats() const { return owned(fn_.cache_stats()); }
 
  private:
@@ -459,6 +475,8 @@ class Client {
     char* (*plan_params)(const char*, const char*, const char* const*, size_t,
                          const char*) = nullptr;
     void (*cache_clear)() = nullptr;
+    char* (*cache_evict)(const char*, const char*, const char* const*, size_t, int,
+                         const char*) = nullptr;
     char* (*cache_stats)() = nullptr;
     lyflow_run* (*run_start)(const char*, const lyflow_run_options*, lyflow_event_cb,
                              void*) = nullptr;
@@ -571,6 +589,7 @@ inline void Client::bind(const std::string& where) {
   need(fn_.plan, "lyflow_plan", where);
   need(fn_.plan_params, "lyflow_plan_params", where);
   need(fn_.cache_clear, "lyflow_cache_clear", where);
+  need(fn_.cache_evict, "lyflow_cache_evict", where);
   need(fn_.cache_stats, "lyflow_cache_stats", where);
   need(fn_.run_start, "lyflow_run_start", where);
   need(fn_.run_cancel, "lyflow_run_cancel", where);

@@ -20,7 +20,7 @@ use libloading::{Library, Symbol};
 pub type EventCb = unsafe extern "C" fn(*const c_char, *mut c_void);
 
 /// C ABI 的版本号。与 core/include/lyflow/c_api.h 的 LYFLOW_ABI_VERSION 必须一致。
-pub const ABI_VERSION: u32 = 11;
+pub const ABI_VERSION: u32 = 12;
 
 /// 运行时注入一个源节点的输出（v7）。缓冲由调用方持有到 `lyflow_run_start` 返回。
 #[repr(C)]
@@ -72,11 +72,14 @@ pub struct CloudViewRaw {
     pub xyz: *const f32,
     pub intensity: *const f32,
     pub normals: *const f32,
+    /// 3 * point_count 个 0..255，或 null（v12，加在 handle 之前）。
+    pub rgb: *const u8,
     pub handle: *mut c_void,
 }
 
 pub const CLOUD_HAS_INTENSITY: u32 = 1;
 pub const CLOUD_HAS_NORMALS: u32 = 2;
+pub const CLOUD_HAS_RGB: u32 = 4;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -254,6 +257,14 @@ type FnImport =
     unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> *mut c_char;
 type FnSetLibraryDirs = unsafe extern "C" fn(*const *const c_char, usize) -> *mut c_char;
 type FnLibraryCount = unsafe extern "C" fn() -> usize;
+type FnCacheEvict = unsafe extern "C" fn(
+    *const c_char,
+    *const c_char,
+    *const *const c_char,
+    usize,
+    c_int,
+    *const c_char,
+) -> *mut c_char;
 type FnOutputSave = unsafe extern "C" fn(
     *const c_char,
     *const c_char,
@@ -276,6 +287,7 @@ pub struct Core {
     plan_params: FnPlanParams,
     effective_params: FnValidate,
     cache_clear: FnVoid,
+    cache_evict: FnCacheEvict,
     cache_stats: FnJson,
     run_start: FnRunStart,
     run_cancel: FnRunOp,
@@ -347,6 +359,7 @@ impl Core {
             // 与 validate 同签名（graph_json, base_dir）→ JSON 文本。
             effective_params: sym!(lib, "lyflow_effective_params", FnValidate),
             cache_clear: sym!(lib, "lyflow_cache_clear", FnVoid),
+            cache_evict: sym!(lib, "lyflow_cache_evict", FnCacheEvict),
             cache_stats: sym!(lib, "lyflow_cache_stats", FnJson),
             run_start: sym!(lib, "lyflow_run_start", FnRunStart),
             run_cancel: sym!(lib, "lyflow_run_cancel", FnRunOp),
@@ -481,6 +494,37 @@ impl Core {
         unsafe { (self.cache_clear)() };
     }
 
+    /// 按「图 + 节点」清缓存（v12）。返回 `{ removed, skippedPinned, nodes }` 的 JSON 文本；
+    /// 图校验不过时是诊断数组（'[' 开头），与 `plan` 同一套区分办法。节点 id 语义同 targets。
+    pub fn cache_evict(
+        &self,
+        graph_json: &str,
+        base_dir: &str,
+        node_ids: &[String],
+        include_downstream: bool,
+        params_json: Option<&str>,
+    ) -> Result<String, CoreError> {
+        let g = CString::new(graph_json)?;
+        let b = CString::new(base_dir)?;
+        let p = params_json.map(CString::new).transpose()?;
+        let owned: Vec<CString> = node_ids
+            .iter()
+            .map(|t| CString::new(t.as_str()))
+            .collect::<Result<_, _>>()?;
+        let ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
+        let head = if ptrs.is_empty() { std::ptr::null() } else { ptrs.as_ptr() };
+        unsafe {
+            self.take_owned((self.cache_evict)(
+                g.as_ptr(),
+                b.as_ptr(),
+                head,
+                ptrs.len(),
+                c_int::from(include_downstream),
+                p.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+            ))
+        }
+    }
+
     pub fn cache_stats(&self) -> Result<String, CoreError> {
         unsafe { self.take_owned((self.cache_stats)()) }
     }
@@ -611,6 +655,7 @@ impl Core {
             xyz: std::ptr::null(),
             intensity: std::ptr::null(),
             normals: std::ptr::null(),
+            rgb: std::ptr::null(),
             handle: std::ptr::null_mut(),
         };
         let rc = unsafe {
@@ -731,6 +776,16 @@ impl CloudView {
             return &[];
         }
         unsafe { std::slice::from_raw_parts(self.raw.normals, self.raw.point_count as usize * 3) }
+    }
+    pub fn has_rgb(&self) -> bool {
+        self.raw.flags & CLOUD_HAS_RGB != 0 && !self.raw.rgb.is_null()
+    }
+    /// 3 * point_count 个 0..255（v12）。
+    pub fn rgb(&self) -> &[u8] {
+        if !self.has_rgb() {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts(self.raw.rgb, self.raw.point_count as usize * 3) }
     }
 }
 

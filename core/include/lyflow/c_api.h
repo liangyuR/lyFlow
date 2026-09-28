@@ -1,8 +1,8 @@
 #ifndef LYFLOW_C_API_H
 #define LYFLOW_C_API_H
-// C ABI v11。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
+// C ABI v12。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
 // 三条约定（char* 归属、异常不跨 ABI、只导出 C 函数）见 core/README.md「C ABI 约定」。
-#define LYFLOW_ABI_VERSION 11
+#define LYFLOW_ABI_VERSION 12
 #include <stddef.h>
 #include <stdint.h>
 
@@ -72,6 +72,17 @@ LYFLOW_API char* lyflow_plan_params(const char* graph_json, const char* base_dir
 // 进程级地丢掉全部缓存结果，别的 run 的结果也一并丢，所以调用方应当先取消。
 // 只想让某一次运行不吃缓存的，用 lyflow_run_options.no_reuse。
 LYFLOW_API void lyflow_cache_clear(void);
+
+// 按「图 + 节点」清缓存（v12）。core 把这张图（全图、完整模式、带 params_json 的取值）编一次计划，
+// 找出 node_ids 这些节点的 cacheKey —— id 语义同 targets，子图节点按路径前缀展开；
+// include_downstream 非 0 时连同它们的全部下游 —— 把对应结果从结果仓删掉。缓存判定仍只归 core
+// （ADR-0007 E1）：调用方给的是节点，不是 cacheKey。
+// 正被运行钉住的跳过；预览命名空间里的结果不动（那些 cacheKey 混着预览参数，按图算不出来）。
+// 返回 { "removed": 删掉的条目数, "skippedPinned": 跳过的条目数, "nodes": [命中的节点 id] }；
+// 图校验不过时返回 lyflow_plan 那种诊断数组（以 '[' 开头）。
+LYFLOW_API char* lyflow_cache_evict(const char* graph_json, const char* base_dir,
+                                    const char* const* node_ids, size_t n, int include_downstream,
+                                    const char* params_json);
 
 // { entries, bytes, budgetBytes, hits, misses, evictions } 的 JSON 对象。
 LYFLOW_API char* lyflow_cache_stats(void);
@@ -164,17 +175,19 @@ LYFLOW_API void lyflow_run_free(lyflow_run* run);
 typedef struct {
   uint32_t point_count;   /* 抽样后的点数 */
   uint32_t total_points;  /* 抽样前的点数 */
-  uint32_t flags;         /* bit0: 带 intensity；bit1: 带 normals */
+  uint32_t flags;         /* bit0: 带 intensity；bit1: 带 normals；bit2: 带 rgb（v12） */
   uint32_t reserved;
   float bounds[6];        /* minx,miny,minz,maxx,maxy,maxz；空云时全 0 */
   const float* xyz;       /* 3 * point_count */
   const float* intensity; /* point_count，或 NULL */
   const float* normals;   /* 3 * point_count，或 NULL */
+  const uint8_t* rgb;     /* 3 * point_count，逐分量 0..255，或 NULL（v12 加在 handle 之前） */
   void* handle;           /* 内部持有，勿动 */
 } lyflow_cloud_view;
 
 #define LYFLOW_CLOUD_HAS_INTENSITY 1u
 #define LYFLOW_CLOUD_HAS_NORMALS 2u
+#define LYFLOW_CLOUD_HAS_RGB 4u
 
 // 取某个节点某个输出端口的点云，等步长抽样到 max_points 以内。
 // 返回 0 = 成功；非 0 = 没有这个结果 / 该输出不是点云。

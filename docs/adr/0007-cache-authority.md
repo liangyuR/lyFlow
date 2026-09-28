@@ -73,3 +73,7 @@ C ABI 因此多三个入口：`lyflow_plan`、`lyflow_cache_clear`、`lyflow_cac
 缓存落盘（跨进程持久化）会推翻这里的一部分：那时 `cached` 的判定要多一层
 「磁盘上有没有」，而 LRU 要变成两级。m3-plan §5 明确不做，`externalKey`
 与内容寻址的键定义已经为它留好了口子。
+
+> **修订（C ABI v12）**：加了 `lyflow_cache_evict`，按「图 + 节点」清缓存（可连同下游）。入口收的是节点，
+> core 自己编计划算出 cacheKey 再删 —— 前端照样不碰 cacheKey（E1）；被 pin 住的跳过（「pin 不是可选的」）。
+> 预览命名空间里的结果不动：那些 cacheKey 混着预览参数，按图算不出来，而它们本来就是抽稀过的小份。

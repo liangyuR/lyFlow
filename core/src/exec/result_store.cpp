@@ -1,5 +1,6 @@
 #include "exec/result_store.h"
 
+#include <set>
 #include <algorithm>
 
 #if defined(_WIN32)
@@ -321,12 +322,15 @@ bool ResultStore::previewCloud(const std::string& runId, const std::string& node
   out.totalPoints = static_cast<std::uint32_t>(total);
   out.hasIntensity = cloud->hasIntensity();
   out.hasNormals = cloud->hasNormals();
+  out.hasRgb = cloud->hasRgb() && cloud->rgb.size() == total * 3;
   out.xyz.clear();
   out.intensity.clear();
   out.normals.clear();
+  out.rgb.clear();
   out.xyz.reserve((total / step + 1) * 3);
   if (out.hasIntensity) out.intensity.reserve(total / step + 1);
   if (out.hasNormals) out.normals.reserve((total / step + 1) * 3);
+  if (out.hasRgb) out.rgb.reserve((total / step + 1) * 3);
 
   for (std::size_t i = 0; i < total; i += step) {
     out.xyz.push_back(cloud->xyz[i * 3]);
@@ -337,6 +341,11 @@ bool ResultStore::previewCloud(const std::string& runId, const std::string& node
       out.normals.push_back(cloud->normals[i * 3]);
       out.normals.push_back(cloud->normals[i * 3 + 1]);
       out.normals.push_back(cloud->normals[i * 3 + 2]);
+    }
+    if (out.hasRgb) {
+      out.rgb.push_back(cloud->rgb[i * 3]);
+      out.rgb.push_back(cloud->rgb[i * 3 + 1]);
+      out.rgb.push_back(cloud->rgb[i * 3 + 2]);
     }
   }
   out.pointCount = static_cast<std::uint32_t>(out.xyz.size() / 3);
@@ -358,6 +367,33 @@ void ResultStore::freeRun(const std::string& runId) {
   namedOutputs_.erase(runId);
   summaries_.erase(runId);
   evictLocked();
+}
+
+std::size_t ResultStore::evict(const std::vector<std::string>& cacheKeys,
+                               std::size_t* skippedPinned) {
+  std::lock_guard<std::mutex> lock(mu_);
+  const std::set<std::string> wanted(cacheKeys.begin(), cacheKeys.end());
+  std::size_t removed = 0;
+  std::size_t pinned = 0;
+  for (auto it = lru_.begin(); it != lru_.end();) {
+    auto entry = byKey_.find(*it);
+    if (entry == byKey_.end() || !wanted.count(entry->second.cacheKey)) {
+      ++it;
+      continue;
+    }
+    // 正在算的那一份不能扔（ADR-0007「pin 不是可选的」）
+    if (pins_.count(entry->second.cacheKey)) {
+      ++pinned;
+      ++it;
+      continue;
+    }
+    bytes_ -= entry->second.bytes;
+    byKey_.erase(entry);
+    it = lru_.erase(it);
+    ++removed;
+  }
+  if (skippedPinned) *skippedPinned = pinned;
+  return removed;
 }
 
 void ResultStore::clear() {

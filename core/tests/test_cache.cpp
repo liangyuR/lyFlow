@@ -159,6 +159,24 @@ TEST_CASE("lyflow_plan 的预测集合与实际 skipped 集合完全一致") {
   CHECK(predicted == statesOf(again, "skipped"));
   CHECK(predicted.size() == 3);
 
+  // 按节点清缓存（lyflow_cache_evict，v12）之后，plan 的预测跟着变：清 v 连同下游 → 只剩 g 还在；
+  // 不带下游只清自己。给的是节点，cacheKey 仍由 core 算（ADR-0007 E1）
+  const auto cachedNow = [&] {
+    std::set<std::string> out;
+    for (const Json& n : Json::parse(exec::planGraphJson(doc.dump(), {}, {}))) {
+      if (n["cached"].get<bool>()) out.insert(n["nodeId"].get<std::string>());
+    }
+    return out;
+  };
+  const Json withDown = Json::parse(exec::evictNodesJson(doc.dump(), {}, {"v"}, true));
+  CHECK(withDown["nodes"] == Json::array({"v", "p"}));
+  CHECK(withDown["removed"].get<int>() >= 2);
+  CHECK(cachedNow() == std::set<std::string>{"g"});
+  runGraphCached(doc);
+  const Json alone = Json::parse(exec::evictNodesJson(doc.dump(), {}, {"g"}, false));
+  CHECK(alone["nodes"] == Json::array({"g"}));
+  CHECK(cachedNow() == std::set<std::string>{"v", "p"});
+
   // 校验失败时返回的是诊断而不是计划
   const Json bad = makeGraph({{"a", "no.such.op"}}, {});
   const Json out = Json::parse(exec::planGraphJson(bad.dump(), {}, {}));
@@ -166,6 +184,25 @@ TEST_CASE("lyflow_plan 的预测集合与实际 skipped 集合完全一致") {
   REQUIRE(out.size() >= 1);
   CHECK(out[0]["kind"] == "diagnostic");
   CHECK(out[0]["code"] == "unknown_op");
+}
+
+TEST_CASE("ResultStore::evict 跳过被钉住的条目（正在算的那一份不能扔）") {
+  exec::ResultStore& store = exec::ResultStore::instance();
+  store.clear();
+  PointCloud a;
+  a.push(0, 0, 0);
+  PointCloud b;
+  b.push(1, 1, 1);
+  store.put("r", "a", "cloud", "key-a", Data::cloud(std::move(a)));
+  store.put("r", "b", "cloud", "key-b", Data::cloud(std::move(b)));
+  store.pin("key-b");
+  std::size_t skipped = 0;
+  CHECK(store.evict({"key-a", "key-b"}, &skipped) == 1);
+  CHECK(skipped == 1);
+  CHECK(store.peek("key-a", {"cloud"}) == false);
+  CHECK(store.peek("key-b", {"cloud"}) == true);
+  store.unpin("key-b");
+  store.clear();
 }
 
 TEST_CASE("LRU 字节预算：超预算时从最久没用的一头淘汰") {

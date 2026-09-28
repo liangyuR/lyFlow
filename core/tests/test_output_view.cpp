@@ -179,6 +179,41 @@ TEST_CASE("lyflow_output_indices：sourceCloudId 原样带出，offset/count 分
   lyflow_indices_view_free(&past);
 }
 
+TEST_CASE("lyflow_output_cloud 带 rgb（v12）：flags 第 3 位，抽样后与 xyz 同一组下标；没有 rgb 时为 NULL") {
+  exec::ResultStore& store = exec::ResultStore::instance();
+  store.clear();
+  PointCloud colored;
+  for (int i = 0; i < 10; ++i) {
+    colored.push(static_cast<float>(i), 0.0f, 0.0f);
+    colored.rgb.insert(colored.rgb.end(), {static_cast<std::uint8_t>(i * 10), 7, 255});
+  }
+  store.put("rgb", "n", "colored", "rgb-colored", Data::cloud(std::move(colored)));
+  PointCloud plain;
+  plain.push(1.0f, 2.0f, 3.0f);
+  store.put("rgb", "n", "plain", "rgb-plain", Data::cloud(std::move(plain)));
+
+  lyflow_cloud_view view{};
+  REQUIRE(lyflow_output_cloud("rgb", "n", "colored", 5, &view) == 0);
+  CHECK((view.flags & LYFLOW_CLOUD_HAS_RGB) != 0u);
+  REQUIRE(view.rgb != nullptr);
+  REQUIRE(view.point_count == 5u);
+  // 等步长 2：第 k 个点是原来的第 2k 个，xyz 与 rgb 取的是同一个
+  for (std::uint32_t k = 0; k < view.point_count; ++k) {
+    CHECK(view.xyz[k * 3] == doctest::Approx(static_cast<float>(2 * k)));
+    CHECK(view.rgb[k * 3] == 2 * k * 10);
+    CHECK(view.rgb[k * 3 + 1] == 7);
+    CHECK(view.rgb[k * 3 + 2] == 255);
+  }
+  lyflow_cloud_view_free(&view);
+
+  lyflow_cloud_view bare{};
+  REQUIRE(lyflow_output_cloud("rgb", "n", "plain", 0, &bare) == 0);
+  CHECK((bare.flags & LYFLOW_CLOUD_HAS_RGB) == 0u);
+  CHECK(bare.rgb == nullptr);
+  lyflow_cloud_view_free(&bare);
+  store.clear();
+}
+
 TEST_CASE("视图的 handle 让借来的数据活过结果仓的清空") {
   const std::string run = "view-keepalive";
   seedOutputs(run);

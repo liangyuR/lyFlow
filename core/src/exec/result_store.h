@@ -18,11 +18,14 @@ struct CloudPreview {
   std::uint32_t totalPoints = 0;  ///< 抽样前
   bool hasIntensity = false;
   bool hasNormals = false;
+  bool hasRgb = false;
   float bounds[6] = {0, 0, 0, 0, 0, 0};
   std::vector<float> xyz;
   std::vector<float> intensity;
   /// 3 * pointCount，或空。3D 视图的「法线着色」靠它（M3 尾巴 c）。
   std::vector<float> normals;
+  /// 3 * pointCount，逐分量 0..255，或空（v12）。与 xyz 同一组下标抽样。
+  std::vector<std::uint8_t> rgb;
 };
 
 struct OutputInfo {
@@ -130,6 +133,10 @@ class ResultStore {
 
   /// 清空一切。测试与「清空缓存」菜单用。
   void clear();
+
+  /// 删掉这些 cacheKey（不带端口）下的全部条目（lyflow_cache_evict）。被钉住的跳过、计进
+  /// skippedPinned。返回删掉的条目数。索引层里指着它们的项留着 —— 取不到就当没结果，与 LRU 淘汰同一种形态。
+  std::size_t evict(const std::vector<std::string>& cacheKeys, std::size_t* skippedPinned);
 
   std::size_t liveEntryCount() const;
   CacheStats stats() const;

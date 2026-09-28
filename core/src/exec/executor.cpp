@@ -1791,6 +1791,70 @@ std::string planGraphJson(const std::string& graphJson, const std::filesystem::p
   return w.str();
 }
 
+// --------------------------------------------------------------- 按节点清缓存
+
+std::string evictNodesJson(const std::string& graphJson, const std::filesystem::path& baseDir,
+                           const std::vector<std::string>& nodeIds, bool downstream,
+                           const std::string& paramsJson) {
+  Diagnostics diags;
+  RawGraph raw;
+  Plan plan;
+  if (!prepareGraph(graphJson, raw, diags, paramsJson)) return diags.toJson();
+
+  BuildOptions build;
+  build.runId = "evict";
+  build.baseDir = baseDir;
+  buildPlan(ensureRegistry(), raw, build, plan, diags);
+  if (diags.hasErrors() || !plan.ok) return diags.toJson();
+
+  // id 语义同 targets：子图节点的 id 等于它展开后的全部内部节点（路径前缀，F2）
+  const auto matches = [&](const std::string& id) {
+    for (const std::string& want : nodeIds) {
+      if (id == want || (id.size() > want.size() && id.compare(0, want.size(), want) == 0 &&
+                         id[want.size()] == '/')) {
+        return true;
+      }
+    }
+    return false;
+  };
+  std::vector<char> picked(plan.nodes.size(), 0);
+  for (std::size_t i = 0; i < plan.nodes.size(); ++i) picked[i] = matches(plan.nodes[i].id) ? 1 : 0;
+  if (downstream) {
+    // plan.nodes 是拓扑序：上游总在前面，一趟就能把下游闭包传完
+    for (std::size_t i = 0; i < plan.nodes.size(); ++i) {
+      if (picked[i]) continue;
+      for (int u : plan.nodes[i].upstream) {
+        if (picked[static_cast<std::size_t>(u)]) {
+          picked[i] = 1;
+          break;
+        }
+      }
+    }
+  }
+
+  std::vector<std::string> keys;
+  std::vector<std::string> ids;
+  for (std::size_t i = 0; i < plan.nodes.size(); ++i) {
+    if (!picked[i]) continue;
+    ids.push_back(plan.nodes[i].id);
+    if (!plan.nodes[i].cacheKey.empty()) keys.push_back(plan.nodes[i].cacheKey);
+  }
+  std::size_t skippedPinned = 0;
+  const std::size_t removed = ResultStore::instance().evict(keys, &skippedPinned);
+
+  JsonWriter w;
+  w.setIndent(0);
+  w.beginObject();
+  w.field("removed", static_cast<std::int64_t>(removed));
+  w.field("skippedPinned", static_cast<std::int64_t>(skippedPinned));
+  w.key("nodes");
+  w.beginArray();
+  for (const std::string& id : ids) w.value(id);
+  w.endArray();
+  w.endObject();
+  return w.str();
+}
+
 // --------------------------------------------------------------- 生效参数视图
 
 std::string effectiveParamsJson(const std::string& graphJson,

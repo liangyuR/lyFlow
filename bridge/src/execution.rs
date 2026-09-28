@@ -241,21 +241,34 @@ pub fn encode_cloud(view: &core_ffi::CloudView) -> Vec<u8> {
     let n = view.point_count() as usize;
     let has_intensity = view.has_intensity();
     let has_normals = view.has_normals();
-    let extra = if has_intensity { n * 4 } else { 0 } + if has_normals { n * 12 } else { 0 };
+    let has_rgb = view.has_rgb();
+    let rgb_len = if has_rgb { (n * 3 + 3) & !3 } else { 0 };
+    let extra =
+        if has_intensity { n * 4 } else { 0 } + if has_normals { n * 12 } else { 0 } + rgb_len;
     let mut out = Vec::with_capacity(16 + 24 + n * 12 + extra);
+    // flags 按实际写出的通道算，不照抄 core 的：载荷里有什么、位就是什么
+    let flags = if has_intensity { core_ffi::CLOUD_HAS_INTENSITY } else { 0 }
+        | if has_normals { core_ffi::CLOUD_HAS_NORMALS } else { 0 }
+        | if has_rgb { core_ffi::CLOUD_HAS_RGB } else { 0 };
 
     out.extend_from_slice(&CLOUD_MAGIC.to_le_bytes());
     out.extend_from_slice(&view.point_count().to_le_bytes());
     out.extend_from_slice(&view.total_points().to_le_bytes());
-    out.extend_from_slice(&view.flags().to_le_bytes());
+    out.extend_from_slice(&flags.to_le_bytes());
     append_f32(&mut out, &view.bounds());
     append_f32(&mut out, view.xyz());
     if has_intensity {
         append_f32(&mut out, view.intensity());
     }
-    // 法线排在强度之后：前端按 flags 里的两个位依次算偏移
+    // 法线排在强度之后：前端按 flags 里的位依次算偏移
     if has_normals {
         append_f32(&mut out, view.normals());
+    }
+    // rgb（v12）放在最后、补齐到 4 字节：老解码器不认第 3 位也不看尾部，照样解得开；
+    // 以后再加 float 通道也还落在对齐的偏移上
+    if has_rgb {
+        out.extend_from_slice(view.rgb());
+        out.resize(out.len() + (rgb_len - n * 3), 0);
     }
     out
 }
@@ -566,6 +579,54 @@ mod tests {
         assert_eq!(bytes.len(), 16 + 24 + n * 12 + n * 4 + n * 12);
         let first = f32::from_le_bytes(bytes[16 + 24 + n * 12 + n * 4..][..4].try_into().unwrap());
         assert_eq!(first, view.normals()[0]);
+    }
+
+    /// v12：rgb 进了视图与载荷。放在最后、补齐到 4 字节 —— 老解码器不看第 3 位也不看尾部。
+    #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
+    fn cloud_payload_carries_rgb_last_and_padded() {
+        let dir = std::env::temp_dir().join(format!("lyflow-rgb-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pcd = dir.join("rgb.pcd");
+        // 三个点：红、绿、蓝（打包成 0x00RRGGBB 的 uint32）
+        std::fs::write(
+            &pcd,
+            "# .PCD v0.7
+VERSION 0.7
+FIELDS x y z rgb
+SIZE 4 4 4 4
+TYPE F F F U
+COUNT 1 1 1 1
+             WIDTH 3
+HEIGHT 1
+VIEWPOINT 0 0 0 1 0 0 0
+POINTS 3
+DATA ascii
+             0 0 0 16711680
+1 0 0 65280
+2 0 0 255
+",
+        )
+        .unwrap();
+        let doc = serde_json::json!({
+            "schemaVersion": 1, "id": "t",
+            "nodes": [{"id": "r", "op": "io.load_pcd", "params": {"path": pcd.to_string_lossy()}}],
+            "edges": []
+        });
+        let f = run(doc, "");
+        assert_eq!(f.run_status(), "ok", "{:#?}", f.events);
+
+        let view = f.core.output_cloud(&f.run_id, "r", "cloud", 0).unwrap();
+        assert!(view.has_rgb(), "PCD 里的 rgb 应当一路带到视图");
+        assert_eq!(view.rgb(), &[255, 0, 0, 0, 255, 0, 0, 0, 255]);
+
+        let bytes = encode_cloud(&view);
+        let flags = u32_at(&bytes, 12);
+        assert_eq!(flags & crate::core_ffi::CLOUD_HAS_RGB, crate::core_ffi::CLOUD_HAS_RGB);
+        // 头 40 + xyz 36 + rgb 9 补齐到 12；这片云没有强度与法线
+        assert_eq!(bytes.len(), 40 + 36 + 12, "rgb 块没放在最后或没补齐");
+        assert_eq!(&bytes[76..85], view.rgb());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn u32_at(bytes: &[u8], off: usize) -> u32 {
