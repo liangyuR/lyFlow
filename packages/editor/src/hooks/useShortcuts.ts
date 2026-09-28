@@ -6,6 +6,7 @@ import { useEffect, type RefObject } from "react";
 import { matchShortcut } from "../lib/keymap";
 import { subgraphIdOf } from "../types/graph";
 import { levelOf } from "../lib/subgraph";
+import { useCompareStore } from "../store/compare";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { usePeekStore, type PeekWindow } from "../store/peek";
@@ -250,6 +251,10 @@ export function useShortcuts(
         case "paramPanel":
           e.preventDefault();
           ui.toggleParamPanel();
+          return;
+        case "compare":
+          e.preventDefault();
+          useCompareStore.getState().toggle();
           return;
         case "help":
           e.preventDefault();
