@@ -293,6 +293,21 @@ TEST_CASE("库目录：*.lyflow-op.json 注册成 lib.<id>，和内置算子无�
   CHECK(log.finalState("s/v") == "done");
   CHECK(elementCountOf(log, "s/p") > 0);
 
+  // 定义（v13 lyflow_library_definition）：文件原样去掉 id，category 不带 Library/ 前缀；
+  // 把它原样写进 doc 当 sub: 跑，结果与库算子逐位相同 —— 编辑器「展开为内联子图」就靠这一条
+  const std::string raw = exec::Library::instance().definitionJson("lib.clean");
+  REQUIRE_FALSE(raw.empty());
+  const Json got = Json::parse(raw);
+  CHECK_FALSE(got.contains("id"));
+  CHECK(got["category"] == "Cleanup");
+  CHECK(exec::Library::instance().definitionJson("lib.nope").empty());
+  Json inlined = doc;
+  inlined["subgraphs"] = Json{{"clean_inline", got}};
+  inlined["nodes"][1]["op"] = "sub:clean_inline";
+  const RunLog viaSub = runGraph(inlined);
+  REQUIRE(viaSub.runStatus() == "ok");
+  CHECK(elementCountOf(viaSub, "s/p") == elementCountOf(log, "s/p"));
+
   // 收尾：库必须清空，否则后面的测试会看到一个多出来的算子
   exec::Library::instance().setDirs({});
   CHECK(ensureRegistry().find("lib.clean") == nullptr);

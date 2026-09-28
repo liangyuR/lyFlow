@@ -29,6 +29,11 @@ class Library {
   /// 按算子 id（`lib.<x>`）找定义。返回的指针在下一次 setDirs 之前有效。
   const SubgraphDef* find(const std::string& opId) const;
 
+  /// 库文件的原样内容去掉 `id` —— 正好是图文档里 `subgraphs.<id>` 的形状，编辑器「展开为内联子图」
+  /// 直接写进 doc（docs/library-inline-plan.md）。category 是文件里写的，不带 `Library/` 前缀。
+  /// 找不到返回空串。
+  std::string definitionJson(const std::string& opId) const;
+
   std::size_t size() const;
   std::vector<std::string> dirs() const;
 
@@ -37,6 +42,9 @@ class Library {
 
   mutable std::mutex mu_;
   std::map<std::string, SubgraphDef> defs_;
+  /// 与 defs_ 同键：扫描时读到的原始 JSON（已去掉 id）。解析后的 SubgraphDef 丢了 ui 坐标等
+  /// 编辑器要的东西，反序列化回去也不是逐键相同，所以原样留一份。
+  std::map<std::string, nlohmann::json> raw_;
   std::vector<std::filesystem::path> dirs_;
 };
 

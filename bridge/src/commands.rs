@@ -649,6 +649,18 @@ pub fn get_library_status<R: Runtime>(app: tauri::AppHandle<R>) -> Result<Librar
     })
 }
 
+/// 库算子 `lib.<id>` 的定义（C ABI v13）：库文件原样去掉 `id`，形状同图文档里的 `subgraphs.<id>`。
+/// 编辑器「展开为内联子图」直接写进 doc（docs/library-inline-plan.md）。找不到返回 null。
+#[tauri::command]
+pub fn get_library_definition(
+    #[allow(non_snake_case)] opId: String,
+) -> Result<Option<serde_json::Value>, String> {
+    let core = core_ffi::core()?;
+    let raw = core.library_definition(&opId).map_err(|e| e.to_string())?;
+    raw.map(|text| serde_json::from_str(&text).map_err(|e| format!("库定义不是合法 JSON: {e}")))
+        .transpose()
+}
+
 #[derive(Serialize)]
 pub struct LibraryRefresh {
     pub status: LibraryStatus,

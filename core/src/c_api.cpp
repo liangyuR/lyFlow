@@ -100,6 +100,14 @@ size_t lyflow_library_count(void) {
   }
 }
 
+char* lyflow_library_definition(const char* op_id) {
+  try {
+    return dup(lyflow::exec::Library::instance().definitionJson(fromC(op_id)));
+  } catch (...) {
+    return dup(std::string());
+  }
+}
+
 char* lyflow_validate(const char* graph_json, const char* base_dir) {
   return lyflow_validate_params(graph_json, base_dir, nullptr);
 }

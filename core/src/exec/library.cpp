@@ -39,6 +39,7 @@ Library& Library::instance() {
 std::vector<std::string> Library::setDirs(const std::vector<std::filesystem::path>& dirs) {
   std::vector<std::string> problems;
   std::map<std::string, SubgraphDef> defs;
+  std::map<std::string, nlohmann::json> raw;
   std::vector<OperatorDesc> operators;
 
   for (const auto& dir : dirs) {
@@ -94,6 +95,9 @@ std::vector<std::string> Library::setDirs(const std::vector<std::filesystem::pat
         continue;
       }
       defs.emplace(opId, std::move(def));
+      nlohmann::json body = j;
+      body.erase("id");
+      raw.emplace(opId, std::move(body));
       operators.push_back(std::move(op));
     }
   }
@@ -101,6 +105,7 @@ std::vector<std::string> Library::setDirs(const std::vector<std::filesystem::pat
   {
     std::lock_guard<std::mutex> lock(mu_);
     defs_ = std::move(defs);
+    raw_ = std::move(raw);
     dirs_ = dirs;
   }
   ensureRegistry().setLibraryOperators(std::move(operators));
@@ -111,6 +116,12 @@ const SubgraphDef* Library::find(const std::string& opId) const {
   std::lock_guard<std::mutex> lock(mu_);
   auto it = defs_.find(opId);
   return it == defs_.end() ? nullptr : &it->second;
+}
+
+std::string Library::definitionJson(const std::string& opId) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto it = raw_.find(opId);
+  return it == raw_.end() ? std::string() : it->second.dump();
 }
 
 std::size_t Library::size() const {

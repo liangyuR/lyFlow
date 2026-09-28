@@ -20,7 +20,7 @@ use libloading::{Library, Symbol};
 pub type EventCb = unsafe extern "C" fn(*const c_char, *mut c_void);
 
 /// C ABI 的版本号。与 core/include/lyflow/c_api.h 的 LYFLOW_ABI_VERSION 必须一致。
-pub const ABI_VERSION: u32 = 12;
+pub const ABI_VERSION: u32 = 13;
 
 /// 运行时注入一个源节点的输出（v7）。缓冲由调用方持有到 `lyflow_run_start` 返回。
 #[repr(C)]
@@ -257,6 +257,7 @@ type FnImport =
     unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> *mut c_char;
 type FnSetLibraryDirs = unsafe extern "C" fn(*const *const c_char, usize) -> *mut c_char;
 type FnLibraryCount = unsafe extern "C" fn() -> usize;
+type FnLibraryDefinition = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type FnCacheEvict = unsafe extern "C" fn(
     *const c_char,
     *const c_char,
@@ -306,6 +307,7 @@ pub struct Core {
     output_save: FnOutputSave,
     set_library_dirs: FnSetLibraryDirs,
     library_count: FnLibraryCount,
+    library_definition: FnLibraryDefinition,
     #[allow(dead_code)]
     lib: Library,
 }
@@ -378,6 +380,7 @@ impl Core {
             output_save: sym!(lib, "lyflow_output_save", FnOutputSave),
             set_library_dirs: sym!(lib, "lyflow_set_library_dirs", FnSetLibraryDirs),
             library_count: sym!(lib, "lyflow_library_count", FnLibraryCount),
+            library_definition: sym!(lib, "lyflow_library_definition", FnLibraryDefinition),
             lib,
         })
     }
@@ -567,6 +570,14 @@ impl Core {
 
     pub fn library_count(&self) -> usize {
         unsafe { (self.library_count)() }
+    }
+
+    /// 库算子 `lib.<id>` 的定义（v13）：库文件原样去掉 `id`，形状同图文档里的 `subgraphs.<id>`。
+    /// 找不到返回 None。
+    pub fn library_definition(&self, op_id: &str) -> Result<Option<String>, CoreError> {
+        let id = CString::new(op_id)?;
+        let raw = unsafe { self.take_owned((self.library_definition)(id.as_ptr())) }?;
+        Ok(if raw.is_empty() { None } else { Some(raw) })
     }
 
     /// 把某个输出整份写盘。Err 里是一句人话的失败原因。

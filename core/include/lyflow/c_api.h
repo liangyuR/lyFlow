@@ -1,8 +1,8 @@
 #ifndef LYFLOW_C_API_H
 #define LYFLOW_C_API_H
-// C ABI v12。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
+// C ABI v13。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
 // 三条约定（char* 归属、异常不跨 ABI、只导出 C 函数）见 core/README.md「C ABI 约定」。
-#define LYFLOW_ABI_VERSION 12
+#define LYFLOW_ABI_VERSION 13
 #include <stddef.h>
 #include <stdint.h>
 
@@ -42,6 +42,10 @@ LYFLOW_API char* lyflow_set_library_dirs(const char* const* dirs, size_t n);
 
 // 当前注册了几个库算子。
 LYFLOW_API size_t lyflow_library_count(void);
+
+// v13：库算子 `lib.<id>` 的定义 —— 库文件原样去掉 `id`，形状同图文档里的 `subgraphs.<id>`，
+// 编辑器「展开为内联子图」直接写进 doc。找不到返回空串。
+LYFLOW_API char* lyflow_library_definition(const char* op_id);
 
 // ------------------------------------------------------------------ 只校验
 
