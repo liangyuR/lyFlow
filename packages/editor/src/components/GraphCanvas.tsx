@@ -42,6 +42,7 @@ import { augmentOperators, fullId, levelOf, pathIsValid } from "../lib/subgraph"
 import { canConnect, compatibleSources, compatibleTargets, inferAnyTypes } from "../lib/typecheck";
 import { keyHint } from "../lib/keymap";
 import { evictNodeCache } from "../store/cache";
+import { useCompareStore } from "../store/compare";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
@@ -105,6 +106,9 @@ interface ContextMenuState {
   nodeId: string;
   x: number;
   y: number;
+  /** 右键时顺手改了选区的话，改之前的选区。「设为对比基准」要还原它：预览的 A 跟随选中，
+   *  右键把 B 设好却把 A 也换成了同一个节点，两栏就比了个寂寞。 */
+  before: { nodes: string[]; edges: string[] } | null;
 }
 
 interface EdgeMenuState {
@@ -758,9 +762,13 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     e.preventDefault();
     // 右键的节点如果不在选区里，就先把它选上 —— 否则菜单里的动作作用于谁很含糊
     const ui = useUiStore.getState();
-    if (!ui.selectedNodes.has(node.id)) ui.setSelection([node.id], []);
+    let before: ContextMenuState["before"] = null;
+    if (!ui.selectedNodes.has(node.id)) {
+      before = { nodes: [...ui.selectedNodes], edges: [...ui.selectedEdges] };
+      ui.setSelection([node.id], []);
+    }
     setEdgeMenu(null);
-    setMenu({ nodeId: node.id, x: e.clientX, y: e.clientY });
+    setMenu({ nodeId: node.id, x: e.clientX, y: e.clientY, before });
   }, []);
 
   const onEdgeContextMenu = useCallback((e: React.MouseEvent, edge: Edge) => {
@@ -1067,6 +1075,19 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
             }}
           >
             清除此节点及下游的缓存
+          </button>
+          <button
+            type="button"
+            data-testid="ctx-compare-b"
+            title="把这个节点设为对比的基准（B），跟随它的最新结果；A 照旧跟随选中。已在对比就换 B"
+            onClick={() => {
+              useCompareStore.getState().setB({ path, nodeId: menu.nodeId });
+              // A 留在右键之前看着的那个节点上
+              if (menu.before) useUiStore.getState().setSelection(menu.before.nodes, menu.before.edges);
+              setMenu(null);
+            }}
+          >
+            设为对比基准（B）
           </button>
           <button
             type="button"

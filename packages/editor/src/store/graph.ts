@@ -65,6 +65,7 @@ import {
   recipeSet,
   useRecipeStore,
 } from "./recipe";
+import { useCompareStore } from "./compare";
 import { useUiStore } from "./ui";
 
 enablePatches();
@@ -1427,6 +1428,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     newDoc() {
       useUiStore.getState().setPath([]);
+      // 新图里可能恰好有同 id 的节点，prune 认不出「已经不是那个节点了」
+      useCompareStore.getState().exit();
       const doc = emptyDoc();
       set({
         doc,
@@ -1443,6 +1446,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     loadDoc(doc, path) {
       useUiStore.getState().setPath([]);
+      useCompareStore.getState().exit();
       set({
         doc,
         savedDoc: doc,

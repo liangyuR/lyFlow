@@ -8,6 +8,7 @@ import {
   lit,
   mustOk,
   newDoc,
+  pressCtrl,
   pressF5,
   runAndWait,
   select,
@@ -196,10 +197,9 @@ async function suiteCompareFollow(cdp, report) {
   await cdp.eval(`window.__lyflow.stores.compare.getState().toggle(); return true;`);
   await waitCompare(cdp, (c) => c.on === "1" && c.frozen === "1", "进入对比并冻结");
 
-  await cdp.eval(`
-    window.__lyflow.stores.compare.getState().setB({ path: window.__lyflow.stores.ui.getState().path, nodeId: ${lit(ids.fit)} });
-    return true;
-  `);
+  // 右键「设为对比基准（B）」：已在对比就换 B
+  await openNodeMenu(cdp, ids.fit);
+  await clickTestId(cdp, "ctx-compare-b");
   const fit = await waitCompare(
     cdp,
     (c) => c.b === ids.fit && c.paneB?.view === "cloud" && c.diff?.rows.line,
@@ -227,4 +227,131 @@ async function suiteCompareFollow(cdp, report) {
   report.ok("退出对比：两栏与差异表都收起", !off.paneA && !off.diff, JSON.stringify(off));
 }
 
-export const compareSuites = [suiteCompareFreeze, suiteCompareFollow];
+/** 真的在节点上弹出右键菜单（与 noderun.mjs 同一种派发）。 */
+async function openNodeMenu(cdp, id) {
+  const ok = await cdp.eval(`
+    const el = document.querySelector('[data-testid="node-${id}"]');
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true,
+      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }));
+    await new Promise((r2) => setTimeout(r2, 150));
+    return !!document.querySelector('[data-testid="node-context-menu"]');
+  `);
+  mustOk(ok, `节点 ${id} 的右键菜单弹出来了`);
+}
+
+/** 参数面板的虚拟列表里把某一行滚到挂上为止（params_p2.mjs 的 reveal 的精简版）。 */
+function revealRow(cdp, selector) {
+  return cdp.eval(`
+    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const list = document.querySelector('[data-testid="pp-list"]');
+    if (!list) return false;
+    const find = () => document.querySelector(${lit(selector)});
+    list.scrollTop = 0;
+    await frame();
+    for (let i = 0; i < 200 && !find(); i += 1) {
+      if (list.scrollTop + list.clientHeight >= list.scrollHeight - 1) break;
+      list.scrollTop += Math.max(80, list.clientHeight * 0.7);
+      await frame();
+    }
+    return !!find();
+  `);
+}
+
+async function suiteCompareExits(cdp, report) {
+  report.section("对比：右键进入、B 被删自动退出、快捷键开关预览、拖框互斥（§6 5、7、8）");
+  const ids = await prepare(cdp);
+  await selectAndWaitCloud(cdp, ids.gen);
+
+  await openNodeMenu(cdp, ids.fit);
+  await clickTestId(cdp, "ctx-compare-b");
+  const entered = await waitCompare(cdp, (c) => c.on === "1" && c.b === ids.fit, "右键把 fit 设为 B");
+  report.eq("没在对比时右键「设为对比基准（B）」：进入，B = fit，跟随最新不冻结",
+    [entered.on, entered.b, entered.frozen, entered.a], ["1", ids.fit, "0", ids.gen]);
+
+  await cdp.eval(`window.__lyflow.stores.graph.getState().deleteNodes([${lit(ids.fit)}]); return true;`);
+  await waitCompare(cdp, (c) => c.on === "0", "B 的节点被删后退出对比");
+  const toast = await cdp.eval(`return window.__lyflow.stores.ui.getState().toast?.text ?? null;`);
+  report.eq("删掉 B 的节点：退出对比并提示", toast, "对比基准节点已删除，已退出对比");
+
+  // 参数面板开着、预览收起：快捷键进入时先把预览展开，否则进入了也看不见
+  await selectAndWaitCloud(cdp, ids.gen);
+  await cdp.eval(`
+    const ui = window.__lyflow.stores.ui.getState();
+    ui.toggleParamPanel(true);
+    ui.setPanelViewerOpen(false);
+    document.activeElement?.blur?.();
+    return true;
+  `);
+  await sleep(300);
+  await pressCtrl(cdp, "D", ["shift"]);
+  const byKey = await waitCompare(cdp, (c) => c.on === "1", "Ctrl+Shift+D 进入对比");
+  const viewerOpen = await cdp.eval(`return window.__lyflow.stores.ui.getState().paramPanel.viewerOpen;`);
+  report.eq("面板开着、预览收起时按 Ctrl+Shift+D：预览展开、进入对比、B 冻结在 gen",
+    [viewerOpen, byKey.on, byKey.b, byKey.frozen], [true, "1", ids.gen, "1"]);
+  await pressCtrl(cdp, "D", ["shift"]);
+  const byKeyOff = await waitCompare(cdp, (c) => c.on === "0", "再按一次退出");
+  report.eq("再按一次 Ctrl+Shift+D 退出", byKeyOff.on, "0");
+
+  // 拖框与对比互斥（C8）：参数面板 ROI 行的「拖框」先退出对比
+  await newDoc(cdp);
+  const roi = await buildGraph(
+    cdp,
+    [
+      { key: "gen", op: "gen.synthetic", params: { pointCount: 5000, seed: 14 } },
+      { key: "show", op: "test.param_showcase" },
+    ],
+    [{ from: ["gen", "cloud"], to: ["show", "cloud"] }],
+  );
+  const run = await runAndWait(cdp, () => pressF5(cdp));
+  mustOk(run.status === "ok", "带 ROI 参数的图跑通了", run.status);
+  await selectAndWaitCloud(cdp, roi.gen);
+  await cdp.eval(`window.__lyflow.stores.compare.getState().toggle(); return true;`);
+  await waitCompare(cdp, (c) => c.on === "1", "进入对比");
+  const key = `${roi.show}.roi`;
+  mustOk(await revealRow(cdp, `[data-testid="pp-roi-edit-${key}"]`), "参数面板里找得到 ROI 行的「拖框」");
+  await cdp.eval(`document.querySelector('[data-testid="pp-roi-edit-${key}"]').click(); return true;`);
+  await cdp.waitFor(`Number(document.querySelector('.viewer')?.getAttribute('data-roi-edit') || 0) > 0`,
+    { what: "进入 2D 拖框", timeoutMs: 15_000 }).catch(() => {});
+  const dragging = await readCompare(cdp);
+  const roiEdit = await cdp.eval(`return Number(document.querySelector('.viewer').getAttribute('data-roi-edit') || 0);`);
+  report.ok("对比开着时点「拖框」：先退出对比，再进 2D 拖框", dragging.on === "0" && roiEdit > 0,
+    `compare=${dragging.on} roiEdit=${roiEdit}`);
+  await cdp.eval(`
+    const ui = window.__lyflow.stores.ui.getState();
+    ui.toggleParamPanel(false);
+    ui.setPanelViewerOpen(false);
+    ui.setViewerMode('3d');
+    return true;
+  `);
+}
+
+async function suiteCompareValues(cdp, report) {
+  report.section("对比：两侧都只有值 —— 两张值表格并排，差异表比 Transform（§6 9）");
+  await newDoc(cdp);
+  await cdp.eval(`window.__lyflow.stores.compare.getState().exit(); return true;`);
+  const ids = await buildGraph(cdp, [{ key: "pose", op: "transform.make" }], []);
+  const run = await runAndWait(cdp, () => pressF5(cdp));
+  mustOk(run.status === "ok", "transform.make 跑通了", run.status);
+  await select(cdp, ids.pose);
+  await cdp.waitFor(
+    `(() => { const v = document.querySelector('.viewer');
+              return v && v.getAttribute('data-node') === ${lit(ids.pose)} && v.getAttribute('data-view') === 'value'; })()`,
+    { timeoutMs: 20_000, what: "预览切到 pose 的值表格" },
+  );
+  await cdp.eval(`window.__lyflow.stores.compare.getState().toggle(); return true;`);
+  await waitCompare(cdp, (c) => c.on === "1" && c.frozen === "1", "进入对比并冻结");
+  await cdp.eval(`
+    window.__lyflow.stores.graph.getState().setParam(${lit(ids.pose)}, 'translation', [0.1, 0, 0]);
+    return true;
+  `);
+  await runAndWait(cdp, () => pressF5(cdp));
+  const after = await waitCompare(cdp, (c) => c.diff?.rows["transform.m"]?.changed === "1", "Transform 那一行标成不同");
+  const panes = await cdp.eval(`return document.querySelectorAll('.viewer [data-testid="viewer-values"]').length;`);
+  report.eq("两栏都是值表格", [after.paneA.view, after.paneB.view, panes], ["value", "value", 2]);
+  report.eq("Transform 只写最大绝对差", after.diff.rows["transform.m"].delta, "max|Δ| 0.1");
+  await cdp.eval(`window.__lyflow.stores.compare.getState().exit(); return true;`);
+}
+
+export const compareSuites = [suiteCompareFreeze, suiteCompareFollow, suiteCompareExits, suiteCompareValues];
