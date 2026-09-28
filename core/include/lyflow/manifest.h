@@ -222,17 +222,21 @@ struct FileFilter {
 inline constexpr const char* kParamSemantics[] = {"roi"};
 
 /// roi 框画在哪片云上。空 = 画在节点在视图里显示的那片数据云上（数据坐标系）；
-/// 给了 = 画在 `<dirParam 的目录>/<fileParams 的每个文件名>` 拼起来的云上
-/// （例如 gap.locate_template 的四个角色框在模板坐标系里，底图是那个槽的左右模板）。
+/// 给了 dir/files = 画在 `<dirParam 的目录>/<fileParams 的每个文件名>` 拼起来的云上
+/// （例如 gap.locate_template 的四个角色框在模板坐标系里，底图是那个槽的左右模板）；
+/// 给了 inputPorts = 画在这几个输入端口上游的结果上（gap.align_template 的模板是输入端口，不是文件）。
+/// 两种二选一。
 struct RoiBackdrop {
   std::string dirParam;                   // Path 参数（mode=dir）
   std::vector<std::string> fileParams;    // String / Path 参数
+  /// PointCloud 输入端口名。编辑器沿边取上游那一次运行的结果当底图，所以要先跑过一次。
+  std::vector<std::string> inputPorts;
   /// 同一底图的一组框在编辑器切换条上的名字（m8-plan L20），例如「模板 2」；
   /// labelParam 给了就在后面接上那个参数的当前值（「模板 2 · f2」）。都是可选的。
   std::string label;
   std::string labelParam;                 // String 参数
 
-  bool isSet() const { return !dirParam.empty() || !fileParams.empty(); }
+  bool isSet() const { return !dirParam.empty() || !fileParams.empty() || !inputPorts.empty(); }
 };
 
 struct Param {

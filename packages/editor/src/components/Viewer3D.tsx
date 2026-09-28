@@ -462,8 +462,22 @@ export function Viewer3D() {
     count: number;
     error: string | null;
   }>(NO_BACKDROP);
+  // 底图（L15）两种来源：roiBackdrop 指的文件，经宿主读；或者输入端口，沿边取上游那一次运行的结果
+  // （gap.align_template 的模板是输入端口不是文件）。端口那种要带上 runId 与运行状态：跑完了要重取
+  const portSources = useMemo(() => {
+    if (!roi || roi.inputs.length === 0 || !activeNode) return null;
+    const level = levelOf(doc, path);
+    return roi.inputs.map((name) => {
+      const e = level.edges.find((x) => x.to.node === activeNode.id && x.to.port === name);
+      return e ? resolveOutput(doc, path, e.from.node, e.from.port) : null;
+    });
+  }, [roi, activeNode, doc, path]);
   const backdropKey =
-    roi && roi.files.length > 0 ? JSON.stringify({ files: roi.files, graphPath }) : "";
+    roi && roi.files.length > 0
+      ? JSON.stringify({ files: roi.files, graphPath })
+      : roi && portSources
+        ? JSON.stringify({ ports: portSources, inputs: roi.inputs, runId: runId ?? null, runStatus })
+        : "";
 
   const hasIntensity = cloud?.intensity != null;
   const hasNormals = cloud?.normals != null;
@@ -743,26 +757,54 @@ export function Viewer3D() {
     }
   }, [overlayShapes, cloud, typesByName]);
 
-  // -- 拖框的底图（L15）：roiBackdrop 指的文件（例如槽 1 的左右模板）。不属于任何一次运行 ——
-  // 框没填好时 locate_template 过不了校验，根本不会跑，底图却必须先看得见。
+  // -- 拖框的底图（L15）：roiBackdrop 指的文件（例如槽 1 的左右模板）不属于任何一次运行 ——
+  // 框没填好时 locate_template 过不了校验，根本不会跑，底图却必须先看得见。指的是输入端口时
+  // （align_template），底图就是上游那一次运行的结果，没跑过要说清楚。
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
     disposeOverlay(scene.backdrop);
-    if (!backdropKey || typeof transport.loadCloudFile !== "function") {
+    if (!backdropKey) {
       setBackdrop(NO_BACKDROP);
       return;
     }
-    const { files, graphPath: base } = JSON.parse(backdropKey) as {
-      files: string[];
-      graphPath: string | null;
+    const spec = JSON.parse(backdropKey) as {
+      files?: string[];
+      graphPath?: string | null;
+      ports?: ({ nodeId: string; port: string } | null)[];
+      inputs?: string[];
+      runId?: string | null;
+    };
+    if (spec.files && typeof transport.loadCloudFile !== "function") {
+      setBackdrop(NO_BACKDROP);
+      return;
+    }
+    const load = (): Promise<CloudPayload[]> => {
+      if (spec.files) {
+        return Promise.all(
+          spec.files.map((f) =>
+            transport.loadCloudFile!(f, spec.graphPath ?? null, 200_000).then(decodeCloud),
+          ),
+        );
+      }
+      const inputs = spec.inputs ?? [];
+      const unwired = inputs.filter((_, i) => !spec.ports?.[i]);
+      if (unwired.length > 0) {
+        return Promise.reject(new Error(`底图取自输入 ${unwired.join(" / ")} 的上游，但它没接上`));
+      }
+      if (!spec.runId) {
+        return Promise.reject(new Error(`先运行一次：底图取自输入 ${inputs.join(" / ")} 上游的结果`));
+      }
+      return Promise.all(
+        (spec.ports ?? []).map((src) =>
+          transport.getOutputCloud(spec.runId!, src!.nodeId, src!.port, 200_000).then(decodeCloud),
+        ),
+      );
     };
     let cancelled = false;
     void (async () => {
       try {
-        const payloads = await Promise.all(
-          files.map((f) => transport.loadCloudFile!(f, base, 200_000).then(decodeCloud)),
-        );
+        const payloads = await load();
         if (cancelled) return;
         // 几片拼成一片；NaN 槽不画（包围盒会被它毒成 NaN）
         const xyz: number[] = [];
@@ -817,7 +859,10 @@ export function Viewer3D() {
     if (!roi || !activeOp || !roiNode) return [];
     const eff = effectiveParams(activeOp, roiNode);
     const bounds =
-      backdrop.bounds ?? (roi.files.length === 0 && cloud && cloud.pointCount > 0 ? cloud.bounds : null);
+      backdrop.bounds ??
+      (roi.files.length === 0 && roi.inputs.length === 0 && cloud && cloud.pointCount > 0
+        ? cloud.bounds
+        : null);
     const n = roi.params.length;
     return roi.params.map((param, i) => {
       const raw = eff[param.name];
@@ -1128,13 +1173,14 @@ export function Viewer3D() {
         {roiEditing && activeNode && (
           <RoiLayer host={sceneHost} nodeId={activeNode.id} items={roiItems} />
         )}
-        {(display.status || loading) && (
-          // 拖框时底图（模板）已经画出来了，状态只缩在角上，不盖住画面
+        {(display.status || loading || (roiEditing && backdrop.error)) && (
+          // 拖框时底图（模板）已经画出来了，状态只缩在角上，不盖住画面。底图取不到的原因也在这里说
           <div
             className={`viewer__empty${roiEditing ? " viewer__empty--corner" : ""}`}
             data-testid="viewer3d-status"
           >
-            {loading ? "正在取点云…" : display.status}
+            {/* 拖框时底图取不到的原因比「未运行」有用：它说的是要先跑哪一段 */}
+            {loading ? "正在取点云…" : roiEditing && backdrop.error ? backdrop.error : display.status}
           </div>
         )}
       </div>

@@ -13,13 +13,17 @@ export interface RoiFrame {
   label: string;
   /** 这一组里当前可见的框，按声明顺序。 */
   params: Param[];
-  /** 底图文件（已拼好目录）。空 = 画在数据云上。 */
+  /** 底图文件（已拼好目录）。 */
   files: string[];
+  /** 底图取自这几个输入端口的上游结果。files 与 inputs 都空 = 画在数据云上。 */
+  inputs: string[];
 }
 
 export function frameKeyOf(p: Param): string {
   const b = p.roiBackdrop;
-  return b ? `${b.dir}|${(b.files ?? []).join(",")}` : "data";
+  if (!b) return "data";
+  if (b.inputs && b.inputs.length > 0) return `inputs|${b.inputs.join(",")}`;
+  return `${b.dir ?? ""}|${(b.files ?? []).join(",")}`;
 }
 
 function joinPath(dir: string, file: string): string {
@@ -46,7 +50,13 @@ export function roiFramesOf(op: OperatorDesc | undefined, node: GraphNode | unde
     const key = frameKeyOf(p);
     let frame = frames.find((f) => f.key === key);
     if (!frame) {
-      frame = { key, label: frameLabel(p, eff), params: [], files: backdropFiles(p, eff) };
+      frame = {
+        key,
+        label: frameLabel(p, eff),
+        params: [],
+        files: backdropFiles(p, eff),
+        inputs: p.roiBackdrop?.inputs ?? [],
+      };
       frames.push(frame);
     }
     frame.params.push(p);
@@ -64,7 +74,7 @@ function frameLabel(p: Param, eff: Record<string, unknown>): string {
 
 function backdropFiles(p: Param, eff: Record<string, unknown>): string[] {
   const b = p.roiBackdrop;
-  if (!b) return [];
+  if (!b || !b.dir) return [];
   const dir = String(eff[b.dir] ?? "");
   if (!dir) return [];
   return (b.files ?? [])

@@ -190,8 +190,9 @@ void writeParam(JsonWriter& w, const Param& p) {
   if (p.roiBackdrop.isSet()) {
     w.key("roiBackdrop");
     w.beginObject();
-    w.field("dir", p.roiBackdrop.dirParam);
+    w.fieldIfSet("dir", p.roiBackdrop.dirParam);
     w.fieldIfSet("files", p.roiBackdrop.fileParams);
+    w.fieldIfSet("inputs", p.roiBackdrop.inputPorts);
     w.fieldIfSet("label", p.roiBackdrop.label);
     w.fieldIfSet("labelParam", p.roiBackdrop.labelParam);
     w.endObject();
@@ -606,14 +607,30 @@ std::vector<std::string> Registry::validate() const {
         fail(pwhere + " semantic=roi 只能标在 vec4f 参数上");
       }
       if (!p.roiBackdrop.isSet()) continue;
-      const Param* dir = findParam(op, p.roiBackdrop.dirParam);
-      if (!dir || dir->type != ParamType::Path) {
-        fail(pwhere + " roiBackdrop.dir '" + p.roiBackdrop.dirParam + "' 要指向本算子的一个 path 参数");
-      }
-      for (const std::string& f : p.roiBackdrop.fileParams) {
-        const Param* fp = findParam(op, f);
-        if (!fp || (fp->type != ParamType::String && fp->type != ParamType::Path)) {
-          fail(pwhere + " roiBackdrop.files 里的 '" + f + "' 要指向本算子的一个 string / path 参数");
+      if (!p.roiBackdrop.inputPorts.empty()) {
+        // 底图取自输入端口的上游结果：与 dir/files 二选一，端口必须是本算子的 PointCloud 输入
+        if (!p.roiBackdrop.dirParam.empty() || !p.roiBackdrop.fileParams.empty()) {
+          fail(pwhere + " roiBackdrop 的 inputs 与 dir/files 只能二选一");
+        }
+        for (const std::string& name : p.roiBackdrop.inputPorts) {
+          const Port* in = nullptr;
+          for (const Port& candidate : op.inputs) {
+            if (candidate.name == name) in = &candidate;
+          }
+          if (!in || in->type != "PointCloud") {
+            fail(pwhere + " roiBackdrop.inputs 里的 '" + name + "' 要指向本算子的一个 PointCloud 输入端口");
+          }
+        }
+      } else {
+        const Param* dir = findParam(op, p.roiBackdrop.dirParam);
+        if (!dir || dir->type != ParamType::Path) {
+          fail(pwhere + " roiBackdrop.dir '" + p.roiBackdrop.dirParam + "' 要指向本算子的一个 path 参数");
+        }
+        for (const std::string& f : p.roiBackdrop.fileParams) {
+          const Param* fp = findParam(op, f);
+          if (!fp || (fp->type != ParamType::String && fp->type != ParamType::Path)) {
+            fail(pwhere + " roiBackdrop.files 里的 '" + f + "' 要指向本算子的一个 string / path 参数");
+          }
         }
       }
       if (!p.roiBackdrop.labelParam.empty()) {

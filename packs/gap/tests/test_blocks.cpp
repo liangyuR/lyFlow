@@ -795,8 +795,26 @@ TEST_CASE("roi 语义标记（m8-plan L15）：locate_template 的四个角色�
   CHECK(overall->semantic == "roi");
   CHECK_FALSE(overall->roiBackdrop.isSet());
 
+  // align_template 的模板是输入端口：底图取自 tplLeft / tplRight 的上游结果，不是文件
+  const OperatorDesc* align = ensureRegistry().find("gap.align_template");
+  REQUIRE(align != nullptr);
+  for (const char* name : {"roiFlushBase", "roiGapLeft", "roiFlushRef", "roiGapRight"}) {
+    const Param* roi = findParam(*align, name);
+    REQUIRE(roi != nullptr);
+    CHECK(roi->semantic == "roi");
+    CHECK(roi->roiBackdrop.inputPorts == std::vector<std::string>{"tplLeft", "tplRight"});
+    CHECK(roi->roiBackdrop.dirParam.empty());
+  }
+
   const Json manifest = Json::parse(ensureRegistry().toManifestJson());
   for (const Json& o : manifest["operators"]) {
+    if (o["id"] == "gap.align_template") {
+      for (const Json& p : o["params"]) {
+        if (p["name"] != "roiGapLeft") continue;
+        CHECK(p["roiBackdrop"]["inputs"] == Json::array({"tplLeft", "tplRight"}));
+        CHECK_FALSE(p["roiBackdrop"].contains("dir"));
+      }
+    }
     if (o["id"] != "gap.locate_template") continue;
     for (const Json& p : o["params"]) {
       if (p["name"] != "template2TargetRoi") continue;

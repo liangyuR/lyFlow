@@ -48,6 +48,15 @@ test("每个启用的槽一组框，标签是「模板 k · Id」，底图是那
   assert.deepEqual(two.map((f) => f.label), ["模板 1 · f1", "模板 2 · big"]);
   assert.deepEqual(two[1].params.map((p) => p.name), ["t2Datum", "t2Target"]);
   assert.ok(two.every((f) => f.params.every((p) => p.name !== "overall")));
+
+  // 底图是输入端口的那一种（gap.align_template 的模板从 tplLeft / tplRight 进来）：一组、没有文件
+  const byPort = (name) => ({ ...roi(name, 0), roiBackdrop: { inputs: ["tplLeft", "tplRight"] } });
+  const align = { ...op, id: "t.align", params: [byPort("base"), byPort("gap")] };
+  const frames = roiFramesOf(align, { id: "a", op: "t.align", params: {} });
+  assert.deepEqual(
+    frames.map((f) => ({ key: f.key, files: f.files, inputs: f.inputs, params: f.params.map((p) => p.name) })),
+    [{ key: "inputs|tplLeft,tplRight", files: [], inputs: ["tplLeft", "tplRight"], params: ["base", "gap"] }],
+  );
 });
 
 test("选过的组还在就用它，槽被关掉了就退回第一组", () => {

@@ -7,7 +7,7 @@ import path from "node:path";
 
 import { sleep } from "./cdp.mjs";
 import { ROOT } from "./harness.mjs";
-import { dragMouse, lit, mustOk, newDoc, pressEscape, pressF5, runAndWait, select } from "./page.mjs";
+import { buildGraph, dragMouse, lit, mustOk, newDoc, pressEscape, pressF5, runAndWait, select } from "./page.mjs";
 
 // ------------------------------------------------------------ 合成剖面（毫米）
 // 与 packs/gap/tests/test_blocks.cpp 的夹具同一个形状：左板顶面 y=165，右板 y=164（高 1 mm），
@@ -600,6 +600,70 @@ async function suiteAutoConnect(cdp, report) {
 
 /** 算子面板：Tauri 不接管拖放（真窗口里拖得进画布的前提）；右缘分栏可拖宽并记住。
  *  分栏的上下限、松手记宽与右侧分栏是同一个 useDragSplit，P2 验收 9 已经验过，这里不重复。 */
+/** m8b 验收遗留的那一条：align_template 的四个框在模板坐标系里，模板是输入端口不是文件 ——
+ *  底图取自 tplLeft / tplRight 上游那一次运行的结果。没跑过要说清楚，跑过就画出来。 */
+async function suiteAlignTemplateBackdrop(cdp, report, ws) {
+  report.section("align_template 拖框：底图取自输入端口 tplLeft / tplRight 的上游结果");
+  const scene = makeScene(ws);
+  await newDoc(cdp);
+  const ids = await buildGraph(
+    cdp,
+    [
+      { key: "cloud", op: "gen.synthetic", params: { pointCount: 2000, seed: 7 } },
+      {
+        key: "tpl",
+        op: "gap.load_template",
+        params: { dir: scene.templates, left: "left_template.pcd", right: "right_template.pcd" },
+      },
+      { key: "align", op: "gap.align_template" },
+    ],
+    [
+      { from: ["cloud", "cloud"], to: ["align", "cloud"] },
+      { from: ["tpl", "left"], to: ["align", "tplLeft"] },
+      { from: ["tpl", "right"], to: ["align", "tplRight"] },
+    ],
+  );
+  // 进拖框：与参数面板 ROI 行的「拖框」同一组动作（选中、点云场景、2D 相机）
+  await cdp.eval(`
+    const ui = window.__lyflow.stores.ui.getState();
+    ui.setSelection([${lit(ids.align)}], []);
+    ui.setViewerContentPick({ nodeId: ${lit(ids.align)}, content: 'cloud' });
+    ui.setViewerMode('2d');
+    return true;
+  `);
+  const read = () =>
+    cdp.eval(`
+      const v = document.querySelector('.viewer');
+      return {
+        roiEdit: Number(v.getAttribute('data-roi-edit')),
+        backdrop: Number(v.getAttribute('data-backdrop')),
+        bounds: v.getAttribute('data-backdrop-bounds'),
+        status: document.querySelector('[data-testid="viewer3d-status"]')?.textContent ?? '',
+      };
+    `);
+  await sleep(400);
+  const before = await read();
+  report.ok(
+    "没跑过：四个框进了拖框，底图为空并说明要先运行一次",
+    before.roiEdit === 4 && before.backdrop === 0 && /先运行一次/.test(before.status),
+    JSON.stringify(before),
+  );
+
+  await runAndWait(cdp, () => cdp.eval(`await window.__lyflow.run({ targets: [${lit(ids.tpl)}] }); return true;`));
+  await cdp.waitFor(`Number(document.querySelector('.viewer')?.getAttribute('data-backdrop')) > 0`, {
+    timeoutMs: 10_000,
+    what: "底图画出来",
+  }).catch(() => {});
+  const after = await read();
+  // 左右模板在测量帧的 x = 0 两侧：底图的包围盒要跨过 0
+  const [minX, , , maxX] = (after.bounds ?? "").split(",").map(Number);
+  report.ok(
+    "跑过上游之后：底图就是左右两片模板（包围盒跨过 x = 0）",
+    after.roiEdit === 4 && after.backdrop > 0 && minX < 0 && maxX > 0,
+    JSON.stringify(after),
+  );
+}
+
 async function suitePalette(cdp, report) {
   report.section("算子面板：Tauri 不接管拖放；右缘分栏可拖宽");
   // 合成 DragEvent 绕过了系统那一层，验不出窗口的拖放目标被 Tauri 占着（bridge/README「踩过的坑」）
@@ -625,4 +689,11 @@ async function suitePalette(cdp, report) {
   await cdp.eval(`localStorage.removeItem(${lit(KEY)}); return true;`);
 }
 
-export const m8bSuites = [suiteBuildFromBlank, suiteBundlePeek, suiteDragWrongSide, suiteAutoConnect, suitePalette];
+export const m8bSuites = [
+  suiteBuildFromBlank,
+  suiteBundlePeek,
+  suiteDragWrongSide,
+  suiteAlignTemplateBackdrop,
+  suiteAutoConnect,
+  suitePalette,
+];

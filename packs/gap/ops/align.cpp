@@ -317,6 +317,10 @@ Param roiParam(const char* name, const char* label) {
   p.unit = "mm";
   p.group = "ROI";
   p.componentLabels = {"X Min", "Y Min", "X Max", "Y Max"};
+  // 框在模板坐标系里，底图就是喂进来的左右模板（m8b 验收遗留的那一条）：模板是输入端口不是文件，
+  // 所以底图取自 tplLeft / tplRight 上游那一次运行的结果
+  p.semantic = "roi";
+  p.roiBackdrop.inputPorts = {"tplLeft", "tplRight"};
   return p;
 }
 
