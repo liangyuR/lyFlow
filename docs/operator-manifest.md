@@ -127,7 +127,7 @@ manifest 导出）、编辑器（`lib/transform.ts`、`lib/curve.ts`）三方同
 需要复杂逻辑说明算子该拆了。三个判据同时给时按 `eq` → `ne` → `in` 取第一个；schema、core（`Condition`、
 `conditionHolds`、manifest 导出）、编辑器（`lib/params.ts` 的 `isConditionMet`）三方同一套（param-recipe P1.6）。
 
-分组用 `group` 字段，`advanced: true` 的参数默认收进折叠区（参数面板里默认收起，param-recipe P2.3）。
+分组用 `group` 字段，`advanced: true` 的参数默认收进折叠区（参数面板与 Inspector 里都默认收起，param-recipe P2.3；组里有参数报错时 Inspector 自动展开）。
 
 ## 参数的语义标记（`semantic`，M8b）
 

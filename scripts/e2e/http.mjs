@@ -1,7 +1,7 @@
 // HttpTransport 的验收：Node 桩服务器 + 系统 Chrome/Edge（CDP）驱动
 // examples/host-react。跑法与前置条件见 ./README.md 的「e2e:http」。
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -68,6 +68,41 @@ function tail(child, keep = 40) {
 // ---------------------------------------------------------------- 各分组
 
 /** 宿主与包共用同一个 React：宿主组件里调包内 store 的 hook 不炸。 */
+const SEED_SNIPPET = "http_user_snippet";
+const SEED_CLOUD = "模板/左模板.pcd";
+
+/** 宿主集成那一组要的工作区文件：一个用户片段、一片点云文件（m8-plan L14 / L15 的 HTTP 那一半）。
+ *  编辑器启动时就去扫片段，所以要在起桩服务器之前放好。 */
+function seedWorkspaceFiles(ws) {
+  fs.mkdirSync(path.join(ws, "snippets"));
+  fs.writeFileSync(
+    path.join(ws, "snippets", `${SEED_SNIPPET}.lyflow-snippet.json`),
+    JSON.stringify({
+      schemaVersion: 1,
+      id: SEED_SNIPPET,
+      label: "HTTP 用户片段",
+      nodes: [{ id: "g", op: "gen.synthetic" }],
+      edges: [],
+    }),
+    "utf8",
+  );
+  const graph = path.join(ws, "seed-cloud.lyflow.json");
+  fs.writeFileSync(
+    graph,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "seed-cloud",
+      nodes: [{ id: "gen", op: "gen.synthetic", params: { pointCount: 800, seed: 3 } }],
+      edges: [],
+    }),
+    "utf8",
+  );
+  fs.mkdirSync(path.join(ws, path.dirname(SEED_CLOUD)), { recursive: true });
+  const r = spawnSync(CLI, ["dump", graph, "gen:cloud", path.join(ws, SEED_CLOUD)], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`造底图点云失败：${r.stderr}`);
+  fs.rmSync(graph);
+}
+
 async function suiteHost(cdp, report) {
   report.section("宿主集成：@lyflow/editor + HttpTransport");
 
@@ -90,6 +125,29 @@ async function suiteHost(cdp, report) {
   const snap = await cdp.eval(`return window.__lyflow.snapshot();`);
   report.eq("传输层是 http", snap.transport, "http");
   report.ok("算子表读到了（≥16）", snap.operatorCount >= 16, String(snap.operatorCount));
+
+  // 用户片段经 GET /lyflow/snippets 进节点面板，标着「用户」
+  await cdp.waitFor(`!!document.querySelector('[data-testid="snippet-${SEED_SNIPPET}"]')`, {
+    timeoutMs: 10_000,
+    what: "节点面板里出现工作区的用户片段",
+  }).catch(() => {});
+  const snippetRow = await cdp.eval(`
+    const row = document.querySelector('[data-testid="snippet-${SEED_SNIPPET}"]');
+    return row ? row.textContent : null;
+  `);
+  report.ok(
+    "工作区 snippets/ 里的片段经 HTTP 出现在节点面板（标着「用户」）",
+    typeof snippetRow === "string" && snippetRow.includes("HTTP 用户片段") && snippetRow.includes("用户"),
+    String(snippetRow),
+  );
+
+  // 2D 拖框的模板底图走 GET /lyflow/files/cloud：相对路径按图所在目录解析，载荷与 clouds 端点同一布局
+  const cloud = await cdp.eval(`
+    const buf = await window.__lyflow.transport.loadCloudFile(${lit(SEED_CLOUD)}, "demo.lyflow.json", 100);
+    const v = new DataView(buf);
+    return { magic: v.getUint32(0, true) === 0x4350594c, shown: v.getUint32(4, true), total: v.getUint32(8, true) };
+  `);
+  report.eq("经 HTTP 读磁盘上的点云文件（抽稀到 maxPoints）", cloud, { magic: true, shown: 100, total: 800 });
 }
 
 /** 打开图 → 改参数 → 运行 → 看 3D → 取图级输出。 */
@@ -448,6 +506,7 @@ async function main() {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), "lyflow-http-e2e-"));
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "lyflow-http-chrome-"));
   console.log(`工作区 ${ws}`);
+  seedWorkspaceFiles(ws);
 
   const server = spawn(
     process.execPath,
@@ -464,7 +523,9 @@ async function main() {
 
   const host = spawn(
     "pnpm",
-    ["--filter", "lyflow-host-react", "dev", "--port", String(HOST_PORT), "--strictPort"],
+    // --host 写死 127.0.0.1：vite 默认听 localhost，有的机器上它只解析到 ::1，
+    // 下面按 127.0.0.1 等就永远等不到
+    ["--filter", "lyflow-host-react", "dev", "--port", String(HOST_PORT), "--strictPort", "--host", "127.0.0.1"],
     {
       cwd: ROOT,
       shell: true,
@@ -497,6 +558,11 @@ async function main() {
         "--no-default-browser-check",
         "--disable-extensions",
         "--remote-allow-origins=*",
+        // 有头跑时窗口被挡住或没拿到前台，Chrome 会把页面当成 hidden：CDP 的键鼠事件送不进去、
+        // rAF 也不来，F5 触发不了运行（docs/motion-acceptance.md「环境问题」）。这三项关掉后台降级
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+        "--disable-background-timer-throttling",
         ...(process.env.LYFLOW_E2E_HEADLESS === "1" ? ["--headless=new"] : []),
         `http://127.0.0.1:${HOST_PORT}/`,
       ],
@@ -509,6 +575,8 @@ async function main() {
     });
     cdp = await Cdp.connect(target.webSocketDebuggerUrl);
     await cdp.send("Runtime.enable");
+    // 页面始终以为自己有焦点：键盘事件不依赖这个窗口此刻是不是前台
+    await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => {});
     await cdp.send("Console.enable").catch(() => {});
     cdp.on("Runtime.consoleAPICalled", (p) => {
       if (p.type === "error") {

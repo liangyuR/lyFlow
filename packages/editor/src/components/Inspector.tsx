@@ -414,6 +414,18 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
     if (key) setRoiFrame(node.id, key);
   }, [accordion, focused, node.id, groups, frameOfGroup, setRoiFrame]);
 
+  // 高级组默认收起，与参数面板同一规则（param-recipe P2）。组里有参数报错、或抽屉里的诊断指到
+  // 组里的参数时自动展开 —— 错误不能藏在收起的组里。换了节点就回到默认。
+  const [openAdvanced, setOpenAdvanced] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => setOpenAdvanced(new Set()), [node.id]);
+  const toggleAdvanced = (name: string) =>
+    setOpenAdvanced((cur) => {
+      const next = new Set(cur);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+
   const staleVersion = node.opVersion && node.opVersion !== op.version;
 
   return (
@@ -493,6 +505,34 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
             />
           ));
           const frame = accordion ? frameOfGroup[gi] : null;
+          if (!frame && g.advanced) {
+            const invalid = visible.some((p) => errors.has(p.name));
+            const pointed =
+              focused?.nodeId === node.id && visible.some((p) => p.name === focused.paramPath);
+            const open = openAdvanced.has(g.name) || invalid || pointed;
+            return (
+              <section
+                key={`${g.name}-${g.advanced}`}
+                className="insp__group insp__group--advanced"
+                data-testid={`inspector-advanced-${g.name}`}
+                data-open={open ? "1" : "0"}
+              >
+                <button
+                  type="button"
+                  className={`insp__group-title insp__group-toggle${invalid ? " is-invalid" : ""}`}
+                  aria-expanded={open}
+                  onClick={() => toggleAdvanced(g.name)}
+                  title={invalid ? "组里有参数报错，保持展开" : undefined}
+                >
+                  {open ? "▾ " : "▸ "}
+                  {g.name}
+                  {g.name !== "高级" && <span className="insp__group-adv">高级</span>}
+                  <span className="insp__group-count">{visible.length}</span>
+                </button>
+                {open && rows}
+              </section>
+            );
+          }
           if (!frame) {
             return (
               <section key={`${g.name}-${g.advanced}`} className="insp__group">

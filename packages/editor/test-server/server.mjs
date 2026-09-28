@@ -443,6 +443,76 @@ function outputInfoOf(state, nodeId) {
   return latest ?? [];
 }
 
+/** 磁盘上的点云文件 → 二进制载荷。与 bridge 的 `read_cloud_file` 同一个办法：一张只有
+ *  io.load_pcd 的图，dump 成 ASCII PCD 再编码。相对路径按图所在目录解析，结果必须还在工作区里。 */
+async function cloudFileOf(p, graphPath, maxPoints) {
+  let full;
+  if (path.isAbsolute(p)) {
+    full = resolveWorkspace(p);
+  } else {
+    if (!graphPath) {
+      throw Object.assign(new Error(`${p} 是相对路径，图还没保存，不知道相对哪个目录`), { status: 400 });
+    }
+    full = resolveWorkspace(path.join(path.dirname(resolveWorkspace(graphPath)), p));
+  }
+  if (!fs.existsSync(full)) throw Object.assign(new Error(`文件不存在 ${p}`), { status: 404 });
+  const graphFile = scratchFile(".lyflow.json");
+  fs.writeFileSync(
+    graphFile,
+    JSON.stringify({
+      schemaVersion: 1,
+      id: "load-cloud-file",
+      nodes: [{ id: "load", op: "io.load_pcd", params: { path: full } }],
+      edges: [],
+    }),
+    "utf8",
+  );
+  const pcd = scratchFile(".pcd");
+  try {
+    const r = await runCli(["dump", graphFile, "load:cloud", pcd, "--format", "ascii"]);
+    if (!fs.existsSync(pcd)) {
+      throw Object.assign(new Error(`读不了 ${p}：${r.stderr.trim()}`), { status: 400 });
+    }
+    return encodeCloudFromPcd(pcd, maxPoints);
+  } finally {
+    fs.rmSync(graphFile, { force: true });
+    fs.rmSync(pcd, { force: true });
+  }
+}
+
+/** 用户片段：工作区的 `snippets/` 与 LYFLOW_SNIPPET_DIRS（分号分隔）里的每个 *.lyflow-snippet.json。
+ *  与 bridge 的 `scan_snippets` 同一套最低要求：是 JSON 对象、有 id / label / nodes。 */
+function scanSnippets() {
+  const dirs = [path.join(ROOT, "snippets")];
+  for (const d of (process.env.LYFLOW_SNIPPET_DIRS ?? "").split(";")) if (d) dirs.push(d);
+  const snippets = [];
+  const problems = [];
+  for (const dir of dirs) {
+    let names;
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names.filter((n) => n.endsWith(".lyflow-snippet.json")).sort()) {
+      const file = path.join(dir, name);
+      let v;
+      try {
+        v = JSON.parse(fs.readFileSync(file, "utf8"));
+      } catch (e) {
+        problems.push(`${file}：${e instanceof Error ? e.message : String(e)}`);
+        continue;
+      }
+      if (v && typeof v.id === "string" && typeof v.label === "string" && Array.isArray(v.nodes)) {
+        snippets.push({ ...v, source: file });
+      } else {
+        problems.push(`${file}：缺 id / label / nodes`);
+      }
+    }
+  }
+  return { dirs, snippets, problems };
+}
+
 async function cloudOf(state, nodeId, port, maxPoints) {
   const pcd = scratchFile(".pcd");
   const r = await runCli([
@@ -581,6 +651,22 @@ async function route(req, res, url) {
     });
     return res.end(buf);
   }
+
+  if (req.method === "GET" && p === "/lyflow/files/cloud") {
+    const buf = await cloudFileOf(
+      q.get("path") ?? "",
+      q.get("graphPath"),
+      Number(q.get("maxPoints") ?? 0),
+    );
+    res.writeHead(200, {
+      "Content-Type": "application/octet-stream",
+      "Content-Length": buf.length,
+      "Access-Control-Allow-Origin": "*",
+    });
+    return res.end(buf);
+  }
+
+  if (req.method === "GET" && p === "/lyflow/snippets") return send(res, 200, scanSnippets());
 
   m = /^\/lyflow\/runs\/([^/]+)\/tensors\/([^/]+)\/([^/]+)$/.exec(p);
   if (req.method === "GET" && m) {

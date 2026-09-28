@@ -1532,3 +1532,29 @@
   .toolbar__group--run { gap: 6px; }
   .toolbar__elapsed { min-width: 0; }
 }
+
+/* 高级组（默认收起，与参数面板同一规则）：标题是个按钮，长得和别的组标题一样 */
+.insp__group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.insp__group-toggle:hover { color: var(--lyflow-fg-0); }
+.insp__group--advanced[data-open="0"] .insp__group-toggle { margin-bottom: 0; }
+
+.insp__group-adv,
+.insp__group-count {
+  font-weight: normal;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--lyflow-fg-2);
+}
+
+.insp__group-count { margin-left: auto; }

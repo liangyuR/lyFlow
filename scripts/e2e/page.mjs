@@ -203,6 +203,18 @@ export async function replan(cdp) {
   return cdp.eval(`return window.__lyflow.snapshot().cache;`);
 }
 
+/** 把 Inspector 里收起的高级组全部展开（高级组默认收起，与参数面板同一规则）。 */
+export async function openInspectorAdvanced(cdp) {
+  await cdp.eval(`
+    for (const b of document.querySelectorAll('.insp__group--advanced[data-open="0"] > .insp__group-toggle')) b.click();
+    return true;
+  `);
+  await cdp.waitFor(`!document.querySelector('.insp__group--advanced[data-open="0"]')`, {
+    timeoutMs: 3000,
+    what: "Inspector 的高级组展开",
+  });
+}
+
 /** 选中一个节点，等 3D 视图真的切过去，返回它显示的点数与状态（见 ./README.md）。 */
 export async function selectAndReadViewer(cdp, nodeId, timeoutMs = 30_000) {
   await select(cdp, nodeId);

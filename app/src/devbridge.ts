@@ -251,6 +251,8 @@ export function installDevBridge(transport: Transport): void {
                 cached: n.stats?.cached === true,
                 bypassed: n.stats?.bypassed === true,
                 provided: n.stats?.provided === true,
+                // 事件里没带就是 null，不替它猜：skipped 节点靠它区分「已缓存」与「未被需要」
+                outputsAvailable: n.stats?.outputsAvailable ?? null,
                 reason: n.stats?.reason ?? null,
                 errors: n.errors,
               },

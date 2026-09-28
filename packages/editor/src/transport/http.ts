@@ -19,6 +19,7 @@ import type {
   RecentEntry,
   RecipeDirListing,
   RunOptions,
+  SnippetScan,
   Transport,
   TransportKind,
   Unlisten,
@@ -198,6 +199,23 @@ export class HttpTransport implements Transport {
         `${encodeURIComponent(port)}?maxPoints=${maxPoints}`,
     );
     return res.arrayBuffer();
+  }
+
+  /** 磁盘上的点云文件（2D 拖框的模板底图，m8-plan L15）。载荷与 getOutputCloud 同一布局。 */
+  async loadCloudFile(
+    path: string,
+    graphPath: string | null,
+    maxPoints: number,
+  ): Promise<ArrayBuffer> {
+    const q = new URLSearchParams({ path, maxPoints: String(maxPoints) });
+    if (graphPath) q.set("graphPath", graphPath);
+    const res = await this.#request(`/lyflow/files/cloud?${q.toString()}`);
+    return res.arrayBuffer();
+  }
+
+  /** 服务端目录里的用户片段（m8-plan L14）。 */
+  listSnippets(): Promise<SnippetScan> {
+    return this.#get<SnippetScan>("/lyflow/snippets");
   }
 
   async getOutputTensor(

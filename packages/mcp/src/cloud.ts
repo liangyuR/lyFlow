@@ -126,3 +126,69 @@ export function summarizeCloud(payload: CloudPayload, head: number): CloudSummar
     head: points,
   };
 }
+
+// ---------------------------------------------------------------- 张量与下标的切片（ADR-0019）
+// 布局见 docs/http-transport.md 的 tensors / indices 两节，小端。
+
+export const TENSOR_MAGIC = 0x4e54594c;
+export const INDICES_MAGIC = 0x5849594c;
+
+export interface TensorSlice {
+  /** 永远是完整形状，不随切片变。 */
+  shape: number[];
+  total: number;
+  offset: number;
+  values: number[];
+}
+
+export function decodeTensor(buffer: ArrayBuffer): TensorSlice {
+  if (buffer.byteLength < 32) {
+    throw new Error(`张量载荷太短（${buffer.byteLength} 字节），多半不是张量数据`);
+  }
+  const view = new DataView(buffer);
+  const magic = view.getUint32(0, true);
+  if (magic !== TENSOR_MAGIC) {
+    throw new Error(`张量载荷的 magic 不对（0x${magic.toString(16)}），多半不是张量数据`);
+  }
+  const rank = view.getUint32(4, true);
+  const count = view.getUint32(12, true);
+  const offset = Number(view.getBigUint64(16, true));
+  const total = Number(view.getBigUint64(24, true));
+  const need = 32 + rank * 8 + count * 4;
+  if (buffer.byteLength < need) {
+    throw new Error(`张量载荷被截断：要 ${need} 字节，只有 ${buffer.byteLength}`);
+  }
+  const shape: number[] = [];
+  for (let i = 0; i < rank; i += 1) shape.push(Number(view.getBigInt64(32 + i * 8, true)));
+  const data = 32 + rank * 8;
+  const values: number[] = [];
+  for (let i = 0; i < count; i += 1) values.push(view.getFloat32(data + i * 4, true));
+  return { shape, total, offset, values };
+}
+
+export interface IndicesSlice {
+  total: number;
+  /** u64，转成十进制字符串：超出 Number 的安全整数范围时不丢精度。 */
+  sourceCloudId: string;
+  values: number[];
+}
+
+export function decodeIndices(buffer: ArrayBuffer): IndicesSlice {
+  if (buffer.byteLength < 24) {
+    throw new Error(`下标载荷太短（${buffer.byteLength} 字节），多半不是下标数据`);
+  }
+  const view = new DataView(buffer);
+  const magic = view.getUint32(0, true);
+  if (magic !== INDICES_MAGIC) {
+    throw new Error(`下标载荷的 magic 不对（0x${magic.toString(16)}），多半不是下标数据`);
+  }
+  const count = view.getUint32(4, true);
+  const total = view.getUint32(8, true);
+  const need = 24 + count * 4;
+  if (buffer.byteLength < need) {
+    throw new Error(`下标载荷被截断：要 ${need} 字节，只有 ${buffer.byteLength}`);
+  }
+  const values: number[] = [];
+  for (let i = 0; i < count; i += 1) values.push(view.getInt32(24 + i * 4, true));
+  return { total, sourceCloudId: view.getBigUint64(16, true).toString(), values };
+}

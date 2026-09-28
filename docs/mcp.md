@@ -214,7 +214,10 @@ MCP 只读配方，**不提供写配方的工具**（param-recipe P4.2）—— 
 带法线时 `channels` 多 `nx` / `ny` / `nz`，`head` 的每个点多一个 `normal`。
 统计全在 MCP 进程里算，core 一行没改。
 
-其余类型：`Tensor` 给 `{kind:"tensor", shape, count, min, max, mean}`；`Indices` 给 `{kind:"indices", count}`；`Measurement` 这类小值给 `{kind:"value", value}` 原样。
+其余类型：`Tensor` 给 `{kind:"tensor", shape, count, min, max, mean, head}`；`Indices` 给
+`{kind:"indices", count, sourceCloudId, head}`。`head` 走契约的 `tensors` / `indices` 切片端点
+（ADR-0019），只取前 `head` 个；后端没实现这两个端点时（参考桩服务器返回 501）没有 `head`，
+换成一句 `headUnavailable` 说明原因。`Measurement` 这类小值给 `{kind:"value", value}` 原样。
 
 ### `eval` / `perturb` 的样本集
 

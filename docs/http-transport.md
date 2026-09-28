@@ -51,6 +51,8 @@ v11 再加的 `isolate`（只运行某几个节点）与 `force`（强制重算�
 | GET / PUT / DELETE | `/lyflow/files/backup?path=` | `readBackup` / `writeBackup` / `discardBackup` | 桥接层 |
 | GET | `/lyflow/files/backup/status?path=` | `backupStatus` | 桥接层 |
 | PUT | `/lyflow/files/bytes?path=` | `writeFileBytes` | 桥接层 |
+| GET | `/lyflow/files/cloud?path=&graphPath=&maxPoints=` | `loadCloudFile` | 桥接层（`io.load_pcd` 跑一次） |
+| GET | `/lyflow/snippets` | `listSnippets` | 桥接层 |
 | GET | `/lyflow/files/recipes?dir=` | `listRecipeDir` | 桥接层（param-recipe P3.2） |
 | GET / PUT / DELETE | `/lyflow/files/recipe?path=` | `readRecipeFile` / `writeRecipeFile` / `deleteRecipeFile` | 桥接层 |
 | POST | `/lyflow/files/recipe/rename` | `renameRecipeFile` | 桥接层 |
@@ -344,6 +346,16 @@ magic 对不上时编辑器会当成「响应不是点云」直接报错，所�
 `PUT /lyflow/files/bytes?path=…`：请求体是**裸二进制**（`application/octet-stream`），
 3D 视图导出 PNG 用它。
 
+`GET /lyflow/files/cloud?path=…&graphPath=…&maxPoints=N`：读一个磁盘上的点云文件，不属于任何一次运行
+（m8-plan L15：2D 拖框的模板底图）。载荷与 `clouds` 端点**同一布局**。`path` 是相对路径时按
+`graphPath` 所在目录解析 —— 与图里 `path` 参数同一口径；图没保存（没给 `graphPath`）而 `path` 又是相对的，
+返回 400。解析后不许逃出工作区（403）；文件不存在 404。编辑器不给这个端点时只画框、不画底图。
+
+`GET /lyflow/snippets` → `{ "dirs": [...], "snippets": [...], "problems": [...] }`：用户目录里的片段
+（m8-plan L14），每个 `*.lyflow-snippet.json` 原样放进 `snippets`（多一个 `source` 字段写明来自哪个文件）。
+只查最低要求：是 JSON 对象、有 `id` / `label` / `nodes`；不合格的进 `problems`。扫哪些目录由服务端定，
+在 `dirs` 里报出来。算子包随附的片段在 manifest 里，不走这里。
+
 ### 配方文件（param-recipe P3.2）
 
 配方是图文件旁边 `<图名>.recipes/` 目录里的 `*.lyflow-recipe.json`（格式与目录约定见 [recipe.md](recipe.md)）。
@@ -425,6 +437,7 @@ magic 对不上时编辑器会当成「响应不是点云」直接报错，所�
   桩服务器拿不到它们（ADR-0019 的「代价」）。
 - **`loadGraph` 的 `migrations` 恒为 `[]`**：桩不跑 `lyflow migrate`。
 - **`saveAsLibrary` 返回 501**。
+- **`/lyflow/snippets` 扫的是工作区的 `snippets/` 与 `LYFLOW_SNIPPET_DIRS`**；Tauri 侧扫的是 app data 下的 `snippets/`。
 - **不发热重载帧**。
 
 这些都是桩的省略，不是契约的一部分。

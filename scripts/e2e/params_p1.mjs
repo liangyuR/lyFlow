@@ -16,7 +16,17 @@ import path from "node:path";
 
 import { sleep } from "./cdp.mjs";
 import { ROOT } from "./harness.mjs";
-import { buildGraph, lit, mustOk, newDoc, pressCtrl, pressF5, runAndWait, select } from "./page.mjs";
+import {
+  buildGraph,
+  lit,
+  mustOk,
+  newDoc,
+  openInspectorAdvanced,
+  pressCtrl,
+  pressF5,
+  runAndWait,
+  select,
+} from "./page.mjs";
 
 // ------------------------------------------------------------ 页面侧的小工具
 
@@ -288,6 +298,8 @@ async function suiteIncludeInSubgraph(cdp, report, ws) {
   await sleep(250);
   await select(cdp, ids.voxel);
   await sleep(200);
+  // minPointsPerVoxel 在「高级」组里，Inspector 默认收起
+  await openInspectorAdvanced(cdp);
   const includedInner = await paramMenu(cdp, "minPointsPerVoxel", "param-menu-include");
   mustOk(includedInner === "ok", "在实例 A 里右键内参 → 纳入配方", includedInner);
 
@@ -315,6 +327,7 @@ async function suiteIncludeInSubgraph(cdp, report, ws) {
       undoLabel: "纳入配方 minPointsPerVoxel",
     },
   );
+  await openInspectorAdvanced(cdp);
   const inner = await rowOf(cdp, "minPointsPerVoxel");
   report.eq("子图里这一行标着由图参数提供", inner?.graphParam, "minPointsPerVoxel");
   report.eq("而且可以在这里改（改的是图参数）", inner?.disabled, false);

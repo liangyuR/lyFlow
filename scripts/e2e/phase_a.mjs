@@ -45,7 +45,11 @@ async function suiteLazyBranch(cdp, report) {
   report.eq("主路径成功时整轮仍是 ok", run.status, "ok");
   report.eq("fallback 跑完了", run.nodes[ids.fb]?.state, "done");
   report.eq("备用源报 skipped", run.nodes[ids.b]?.state, "skipped");
-  report.eq("备用源的原因是 not_demanded", run.nodes[ids.b]?.reason, "not_demanded");
+  report.eq(
+    "备用源的原因是 not_demanded，且没有可取的输出（outputsAvailable=false）",
+    { reason: run.nodes[ids.b]?.reason, outputsAvailable: run.nodes[ids.b]?.outputsAvailable },
+    { reason: "not_demanded", outputsAvailable: false },
+  );
   report.eq("备用链尾也是 not_demanded", run.nodes[ids.bTail]?.reason, "not_demanded");
 
   const painted = await opacityOf(cdp, ids.b);

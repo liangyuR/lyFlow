@@ -8,10 +8,10 @@
 |---|---|---|---|
 | C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 151 例；`LYFLOW_PACKS=dts` 159 例；`LYFLOW_PACKS=gap;dts` 240 例 | 分钟级（含编译） |
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 134（纯平台构建 79 通过 / 55 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑） | < 1 分钟（已编译时） |
-| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 61 | 秒级 |
-| MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 27 | 秒级 |
-| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`） | 709 条断言、92 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
-| 浏览器宿主 e2e | `pnpm e2e:http` | 30 条断言（精简前 58） | 几分钟 |
+| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 62 | 秒级 |
+| MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 28 | 秒级 |
+| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`） | 710 条断言、92 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
+| 浏览器宿主 e2e | `pnpm e2e:http` | 32 条断言（精简前 58） | 几分钟 |
 
 ## 放在哪一层
 
@@ -37,13 +37,13 @@
 | dts 面差（与宿主 Python 旧算法的对照、现场轮廓） | `packs/dts/tests/test_dts_ops.cpp`（夹具 `tests/data/*.h`） |
 | gap 测量、积木、导入、模型 ROI | `packs/gap/tests/*`；e2e `gap.mjs`、`m8b.mjs`、`m8c.mjs`、`params_p4.mjs`（编辑器 vs CLI 逐位相同） |
 | 2D 拖框、自动连线、片段 | `packages/editor/test/autoconnect.test.mjs`、`roiframes.test.mjs`；e2e `m8b.mjs`、`m8c.mjs` |
-| 连线查看器 Edge Peek | e2e `peek.mjs` |
+| 连线查看器 Edge Peek | e2e `peek.mjs`；窗口上限与自动关窗的提示 `packages/editor/test/peek-store.test.mjs` |
 | 按输出类型选视图（主预览的点云 / 值） | `packages/editor/test/view-rule.test.mjs`；e2e `gap.mjs` 的「量测输出」组（`transform.make` 显示值、手动选只对当时的节点有效） |
 | 动效、hover、端点对齐 | e2e `motion.mjs`、`noderun.mjs` |
 | 节点运行按钮 | e2e `noderun.mjs` |
 | 分栏、拖放配置（dragDropEnabled） | e2e `params_p2.mjs`（右侧分栏）、`m8b.mjs` 的算子面板组 |
 | MCP 工具、argv 拼装、CLI 解析 | `packages/mcp/test/*`（`smoke.test.ts` 是唯一跑通 MCP → CLI 的） |
-| HTTP 传输、宿主嵌入 | `scripts/e2e/http.mjs` |
+| HTTP 传输、宿主嵌入（含用户片段、底图点云文件两个端点） | `scripts/e2e/http.mjs` |
 | 外部 Rust/Tauri 宿主（`attach`、`lyflow_handler!`、`sceneId` 注入、工作区路径） | `bridge/tests/host.rs`（`MockRuntime` 跑真 IPC） |
 
 ## 共用的夹具与辅助

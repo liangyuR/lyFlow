@@ -8,6 +8,7 @@ import { sleep } from "./cdp.mjs";
 import {
   buildGraph,
   centerOf,
+  openInspectorAdvanced,
   dragMouse,
   lit,
   mustOk,
@@ -105,8 +106,10 @@ async function suiteCache(cdp, report) {
   report.eq("原图重跑全部 skipped", skipped.length, 3);
   report.eq("plan_graph 的预测集合与实际 skipped 完全一致", predicted, skipped);
   report.ok(
-    "skipped 的原因标成了「缓存」而不是「静音」",
-    Object.values(second.nodes).every((n) => n.cached === true && n.bypassed === false),
+    "skipped 的原因标成了「缓存」而不是「静音」，且输出可取（outputsAvailable）",
+    Object.values(second.nodes).every(
+      (n) => n.cached === true && n.bypassed === false && n.outputsAvailable === true,
+    ),
     JSON.stringify(second.nodes),
   );
   report.ok("重跑总耗时 < 50 ms", second.durationMs != null && second.durationMs < 50,
@@ -505,6 +508,15 @@ async function suiteParamLinkage(cdp, report) {
     return id;
   `);
   await sleep(250);
+  // keepOrganized 在「高级」组里：Inspector 默认收起（与参数面板同一规则），展开才看得到
+  const folded = await cdp.eval(`
+    return {
+      collapsed: !!document.querySelector('.insp__group--advanced[data-open="0"]'),
+      rowShown: !!document.querySelector('[data-testid="param-keepOrganized"]'),
+    };
+  `);
+  report.eq("高级组默认收起，里面的参数行不渲染", folded, { collapsed: true, rowShown: false });
+  await openInspectorAdvanced(cdp);
   const disabled = await domOf(
     cdp,
     '[data-testid="param-keepOrganized"] input[type="checkbox"]',

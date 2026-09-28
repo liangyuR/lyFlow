@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CLOUD_HAS_INTENSITY, CLOUD_MAGIC, decodeCloud, summarizeCloud } from "../src/cloud.js";
+import {
+  CLOUD_HAS_INTENSITY,
+  CLOUD_MAGIC,
+  INDICES_MAGIC,
+  TENSOR_MAGIC,
+  decodeCloud,
+  decodeIndices,
+  decodeTensor,
+  summarizeCloud,
+} from "../src/cloud.js";
 
 function encode(
   xyz: number[],
@@ -82,4 +91,52 @@ test("magic 不对或太短的载荷直接报错", () => {
   const buffer = encode([0, 0, 0]);
   new DataView(buffer).setUint32(0, 0x12345678, true);
   assert.throws(() => decodeCloud(buffer), /magic/);
+  // 张量 / 下标的解码器同一口径：点云载荷塞给它们也认得出不是自己
+  assert.throws(() => decodeTensor(new ArrayBuffer(8)), /太短/);
+  assert.throws(() => decodeTensor(encode([0, 0, 0])), /magic/);
+  assert.throws(() => decodeIndices(new ArrayBuffer(8)), /太短/);
+  assert.throws(() => decodeIndices(encode([0, 0, 0])), /magic/);
+});
+
+/** 按 docs/http-transport.md 的布局造一片张量：完整形状 + 从 offset 起的 values。 */
+function encodeTensor(shape: number[], offset: number, total: number, values: number[]): ArrayBuffer {
+  const buffer = new ArrayBuffer(32 + shape.length * 8 + values.length * 4);
+  const view = new DataView(buffer);
+  view.setUint32(0, TENSOR_MAGIC, true);
+  view.setUint32(4, shape.length, true);
+  view.setUint32(12, values.length, true);
+  view.setBigUint64(16, BigInt(offset), true);
+  view.setBigUint64(24, BigInt(total), true);
+  shape.forEach((d, i) => view.setBigInt64(32 + i * 8, BigInt(d), true));
+  values.forEach((v, i) => view.setFloat32(32 + shape.length * 8 + i * 4, v, true));
+  return buffer;
+}
+
+function encodeIndices(total: number, sourceCloudId: bigint, values: number[]): ArrayBuffer {
+  const buffer = new ArrayBuffer(24 + values.length * 4);
+  const view = new DataView(buffer);
+  view.setUint32(0, INDICES_MAGIC, true);
+  view.setUint32(4, values.length, true);
+  view.setUint32(8, total, true);
+  view.setBigUint64(16, sourceCloudId, true);
+  values.forEach((v, i) => view.setInt32(24 + i * 4, v, true));
+  return buffer;
+}
+
+test("张量与下标的切片按契约解出来：形状是完整的、u64 的云 id 不丢精度", () => {
+  assert.deepEqual(
+    {
+      tensor: decodeTensor(encodeTensor([2, 3, 4], 0, 24, [0.5, -1, 2])),
+      indices: decodeIndices(encodeIndices(1000, 2n ** 63n + 5n, [7, 9, 42])),
+      emptyTensor: decodeTensor(encodeTensor([8], 8, 8, [])),
+    },
+    {
+      tensor: { shape: [2, 3, 4], total: 24, offset: 0, values: [0.5, -1, 2] },
+      indices: { total: 1000, sourceCloudId: "9223372036854775813", values: [7, 9, 42] },
+      // offset 越界是成功 + 空切片，不是错误
+      emptyTensor: { shape: [8], total: 8, offset: 8, values: [] },
+    },
+  );
+  const cut = encodeTensor([4], 0, 4, [1, 2, 3, 4]).slice(0, 40);
+  assert.throws(() => decodeTensor(cut), /截断/);
 });

@@ -21,9 +21,11 @@ const TEST_SERVER = ROOT
 function entryPoint(): string | null {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const pkg = path.resolve(here, "..", "..");
+  // build-test 是这次 `pnpm test` 刚编出来的，排在前面：dist 可能是很久以前 build 的，
+  // 优先用它会让冒烟测的是旧代码、源码改动全被盖住
   for (const candidate of [
-    path.join(pkg, "dist", "index.js"),
     path.join(pkg, "build-test", "src", "index.js"),
+    path.join(pkg, "dist", "index.js"),
   ]) {
     if (fs.existsSync(candidate)) return candidate;
   }
@@ -90,8 +92,12 @@ const DOC = {
   nodes: [
     { id: "gen", op: "gen.synthetic", params: { pointCount: 5000, seed: 7 } },
     { id: "voxel", op: "filter.voxel_grid", params: { leafSize: [0.02, 0.02, 0.02] } },
+    { id: "plane", op: "segment.ransac_plane", params: { distanceThreshold: 0.02 } },
   ],
-  edges: [{ id: "e1", from: { node: "gen", port: "cloud" }, to: { node: "voxel", port: "cloud" } }],
+  edges: [
+    { id: "e1", from: { node: "gen", port: "cloud" }, to: { node: "voxel", port: "cloud" } },
+    { id: "e2", from: { node: "voxel", port: "cloud" }, to: { node: "plane", port: "cloud" } },
+  ],
   outputs: { thinned: { node: "voxel", port: "cloud" } },
 };
 
@@ -204,6 +210,21 @@ test(
         assert.ok(stat && Number.isFinite(stat.mean), `${axis} 的统计不对：${JSON.stringify(stat)}`);
       }
       assert.equal((summary["head"] as unknown[]).length, Math.min(3, pointCount));
+
+      // 下标（ADR-0019）：个数来自元数据；前几个下标走 indices 端点。参考桩服务器不实现它（501），
+      // 取不到时要带上原因，而不是静默少一个 head
+      const inliers = payload(
+        await client.callTool({
+          name: "summarize_output",
+          arguments: { runId, nodeId: "plane", port: "inliers", head: 3 },
+        }),
+      );
+      assert.ok(
+        inliers["kind"] === "indices" &&
+          (inliers["count"] as number) > 0 &&
+          (Array.isArray(inliers["head"]) || typeof inliers["headUnavailable"] === "string"),
+        JSON.stringify(inliers),
+      );
     } finally {
       await client?.close().catch(() => undefined);
       server?.kill();

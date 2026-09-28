@@ -144,6 +144,8 @@ export const usePeekStore = create<PeekState>((set, get) => ({
         return null;
       }
       windows = windows.filter((w) => w.id !== victim.id);
+      // 自动关窗要说出来：用户正看着的那个窗口突然没了，不提示就只会以为是 bug
+      useUiStore.getState().showToast(`查看窗口最多 ${PEEK_MAX_WINDOWS} 个，关掉了最早打开的那个`);
     }
     let view = win.view;
     let viewAuto = win.viewAuto ?? true;
@@ -151,6 +153,9 @@ export const usePeekStore = create<PeekState>((set, get) => ({
       const victim = windows.find((w) => w.locked === null && isWebglView(w.view));
       if (victim) {
         windows = windows.filter((w) => w.id !== victim.id);
+        useUiStore
+          .getState()
+          .showToast(`3D 窗口最多 ${PEEK_MAX_WEBGL} 个，关掉了最早打开的那个（锁定的不会被关）`);
       } else {
         useUiStore.getState().showToast("3D 窗口太多了，先关掉几个", "warn");
         view = "value";

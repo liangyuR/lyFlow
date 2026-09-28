@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { evalArgv, paramsArgv, patchArgv, perturbArgv, recipesArgv } from "./argv.js";
 import { DEFAULT_CLI_TIMEOUT_MS, runCli, stderrTail } from "./cli.js";
-import { decodeCloud, summarizeCloud } from "./cloud.js";
+import { decodeCloud, decodeIndices, decodeTensor, summarizeCloud } from "./cloud.js";
 import type { Config } from "./config.js";
 import { resolveGraph, type ResolvedGraph } from "./graph.js";
 import { HttpError, LyFlowHttp } from "./http.js";
@@ -469,7 +469,8 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
     {
       title: "把一个输出压成统计量",
       description:
-        "点云给点数、包围盒、每通道 min/max/mean 与前几个点；张量给形状与统计量；" +
+        "点云给点数、包围盒、每通道 min/max/mean 与前几个点；张量给形状、统计量与前几个值；" +
+        "下标给个数、指向哪片云与前几个下标；" +
         "其余类型原样给值。统计在 MCP 进程里算，不搬点云给调用方。",
       inputSchema: {
         runId: z.string(),
@@ -506,6 +507,9 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           const buffer = await http.cloud(args.runId, args.nodeId, args.port, maxPoints);
           const summary = summarizeCloud(decodeCloud(buffer), head);
           return ok({ ...base, maxPoints, ...summary });
+        }
+        if ((info.type === "Tensor" || info.type === "Indices") && head > 0) {
+          return ok({ ...base, ...(await sliceSummary(http, args, info, head)) });
         }
         return ok({ ...base, ...nonCloudSummary(info) });
       } catch (e) {
@@ -910,6 +914,27 @@ const CLI_MISSING =
   "（以及带 recipe 的 run_graph）起的是本地 " +
   "lyflow 可执行文件，把它的路径放进 MCP 服务的环境变量 LYFLOW_CLI 再试。";
 
+/** 张量 / 下标再取前 `head` 个值（HTTP 契约的 tensors / indices 端点，ADR-0019）。
+ *  后端没实现这两个端点时（参考桩服务器返回 501）退回只给元数据，并说明为什么没有 head。 */
+async function sliceSummary(
+  http: LyFlowHttp,
+  args: { runId: string; nodeId: string; port: string },
+  info: OutputInfo,
+  head: number,
+): Promise<Record<string, unknown>> {
+  const meta = nonCloudSummary(info);
+  try {
+    if (info.type === "Tensor") {
+      const t = decodeTensor(await http.slice("tensors", args.runId, args.nodeId, args.port, head));
+      return { ...meta, shape: t.shape, count: t.total, head: t.values };
+    }
+    const x = decodeIndices(await http.slice("indices", args.runId, args.nodeId, args.port, head));
+    return { ...meta, count: x.total, sourceCloudId: x.sourceCloudId, head: x.values };
+  } catch (e) {
+    return { ...meta, headUnavailable: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 function nonCloudSummary(info: OutputInfo): Record<string, unknown> {
   const value = info.value;
   if (info.type === "Tensor") {
@@ -920,14 +945,12 @@ function nonCloudSummary(info: OutputInfo): Record<string, unknown> {
       min: value?.min ?? null,
       max: value?.max ?? null,
       mean: value?.mean ?? null,
-      note: "张量数据不进 IPC，只有形状与统计量（见 execution-event schema）",
     };
   }
   if (info.type === "Indices") {
     return {
       kind: "indices",
       count: info.elementCount ?? null,
-      note: "这一版 HTTP 契约只有点云的二进制端点，下标取不到逐个值",
     };
   }
   return { kind: "value", value: value ?? null };

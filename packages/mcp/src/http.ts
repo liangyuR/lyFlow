@@ -153,6 +153,21 @@ export class LyFlowHttp {
     return res.arrayBuffer();
   }
 
+  /** 张量或下标的一片（ADR-0019）。`count` 必须大于 0 —— 0 在契约里是「取到末尾」。 */
+  async slice(
+    kind: "tensors" | "indices",
+    runId: string,
+    nodeId: string,
+    port: string,
+    count: number,
+  ): Promise<ArrayBuffer> {
+    const res = await this.request(
+      `/lyflow/runs/${encodeURIComponent(runId)}/${kind}/${encodeURIComponent(nodeId)}/` +
+        `${encodeURIComponent(port)}?offset=0&count=${count}`,
+    );
+    return res.arrayBuffer();
+  }
+
   async #openEvents(timeoutMs: number): Promise<WebSocket> {
     const protocols = this.token
       ? ["lyflow.v1", `lyflow-token.${this.token}`]
