@@ -26,12 +26,11 @@ import type { GraphNode, SubgraphDef } from "../types/graph";
 
 import { OperatorDetail, PortRow } from "./OperatorDetail";
 import { ParamControl } from "./ParamControls";
+import { num } from "../lib/format";
 
 /** 六位有效数字。2D 几何的坐标是米，原样打印会拖一串浮点噪声。 */
-export function num(v: number | undefined): string {
-  if (v === undefined || !Number.isFinite(v)) return "—";
-  return String(Number(v.toPrecision(6)));
-}
+// num 搬到了 lib/format（对比的差异表要在纯函数里用）；从这里转出，老的 import 不用改
+export { num } from "../lib/format";
 
 function pair(v: [number, number] | number | null | undefined): string {
   return Array.isArray(v) ? `(${num(v[0])}, ${num(v[1])})` : "—";
