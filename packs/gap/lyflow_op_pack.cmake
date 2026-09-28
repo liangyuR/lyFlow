@@ -4,6 +4,12 @@ file(GLOB GAP_TESTS CONFIGURE_DEPENDS "${LYFLOW_PACK_DIR}/tests/*.cpp")
 
 # onnxruntime 与 std-ml 用同一份（那个包已经把根目录解析好了）。
 find_package(yaml-cpp CONFIG QUIET)
+# vcpkg 里较旧的 yaml-cpp（0.7）只导出不带命名空间的 `yaml-cpp` 目标，0.8 起才有 `yaml-cpp::yaml-cpp`。
+# 不补这一层，装着 0.7 的机器会被下面那条「先装 yaml-cpp」误报拦住 —— 它其实装着。
+if(TARGET yaml-cpp AND NOT TARGET yaml-cpp::yaml-cpp)
+  add_library(yaml-cpp::yaml-cpp INTERFACE IMPORTED)
+  set_target_properties(yaml-cpp::yaml-cpp PROPERTIES INTERFACE_LINK_LIBRARIES yaml-cpp)
+endif()
 
 # 随包的片段（m8-plan L14）：snippets/*.lyflow-snippet.json 编进包里，经 manifest 的 snippets 段
 # 给出（ops/snippets.cpp 注册）。按字节写成十六进制数组：不受 MSVC 字符串字面量长度的限制，
@@ -37,7 +43,10 @@ lyflow_op_pack(
   INCLUDES "${LYFLOW_PACK_DIR}/algo" "${LYFLOW_ONNXRUNTIME_ROOT}/include" "${GAP_GENERATED}"
   LINK     lyflow_pcl_support lyflow_std_algo yaml-cpp::yaml-cpp
            "${LYFLOW_ONNXRUNTIME_ROOT}/lib/onnxruntime.lib"
-  DEFINES  _USE_MATH_DEFINES
+  # _ENABLE_EXTENDED_ALIGNED_STORAGE：groove.cpp 对 pcl::PointXYZRGB（16 字节对齐）做 std::stable_sort，
+  # VS2019（MSVC 14.29）的实现借 aligned_union 开临时缓冲，遇到扩展对齐就 static_assert。定这个宏是认可
+  # 15.8 之后正确的对齐 —— 只在与 15.8 之前编出的代码混链时才有布局差异，core 整个是同一个工具链编的
+  DEFINES  _USE_MATH_DEFINES _ENABLE_EXTENDED_ALIGNED_STORAGE
   # yaml-cpp 的 YAML::Exception 继承 std::runtime_error 又带 dllexport，不是包能改的
   OPTIONS  /wd4275
 )
