@@ -96,6 +96,10 @@ interface UiState {
   setPanelViewerOpen(open: boolean): void;
   viewerMode: ViewerMode;
   setViewerMode(mode: ViewerMode): void;
+  /** 预览的测量工具开着（docs/measure-plan.md）：单击选点、两点测距。放在这里而不是 Viewer3D 里：
+   *  快捷键 M 与参数面板进拖框（要把它关掉）都得碰得到。 */
+  viewerMeasuring: boolean;
+  setViewerMeasuring(on: boolean): void;
   /** 主预览里手动选的内容（点云 / 值）。只对选它时的那个节点有效（键是 fullId）：
    *  视图一换到别的节点就清掉，回到按输出类型自动选（lib/viewRule 的 viewerContentFor）。 */
   viewerContentPick: { nodeId: string; content: ViewerContent } | null;
@@ -171,6 +175,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   drawer: null,
   paramPanel: { open: false, maximized: false, tab: "nodes", viewerOpen: false },
   viewerMode: "3d",
+  viewerMeasuring: false,
   viewerContentPick: null,
   helpOpen: false,
   focusedDiagnostic: null,
@@ -289,6 +294,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setViewerMode(mode) {
     if (get().viewerMode === mode) return;
     set({ viewerMode: mode });
+  },
+  setViewerMeasuring(on) {
+    if (get().viewerMeasuring === on) return;
+    set({ viewerMeasuring: on });
   },
   setViewerContentPick(pick) {
     const cur = get().viewerContentPick;

@@ -12,7 +12,9 @@ import {
   fitToBounds,
   overlayBoundsOf,
   paintPoints,
+  pickMatrixOf,
   round3,
+  setMeasureMarks,
   setPoints,
   unionBounds,
   type CameraMode,
@@ -23,6 +25,15 @@ import {
 import { diffSides, type CompareSide } from "../lib/compareDiff";
 import { withBoundValues } from "../lib/graphParams";
 import { effectiveParams } from "../lib/params";
+import {
+  addPick,
+  distanceOf,
+  measureLines,
+  NO_MEASURE,
+  pickCount,
+  pickNearest,
+  type Measure,
+} from "../lib/pick";
 import type { RampName } from "../lib/ramps";
 import { copyFrameWrites, pickFrame, roiFramesOf } from "../lib/roiFrames";
 import { rememberRoiBounds } from "../lib/roiThumbs";
@@ -547,6 +558,66 @@ export function Viewer3D() {
   // 切换条只给带底图的组（有名字的）；数据坐标系那一组只有一组，不需要切
   const roiTabs = roiEditing && roiFrames.some((f) => f.label) ? roiFrames : [];
 
+  // -- 测量（docs/measure-plan.md）：单击选点、两点测距 --------------------------
+  const measuring = useUiStore((s) => s.viewerMeasuring);
+  const setMeasuring = useUiStore((s) => s.setViewerMeasuring);
+  const [measure, setMeasure] = useState<Measure>(NO_MEASURE);
+  // 只在点云场景里、且不在拖框时可用：拖框独占指针（M7）
+  const measureOn = measuring && stageContent === "cloud" && !roiEditing;
+  useEffect(() => {
+    if (measuring && roiEditing) setMeasuring(false);
+  }, [measuring, roiEditing]);
+  // 换节点就清掉；同一节点重跑保留坐标、标「云已更新」（M7）。两个 effect 的顺序不能换：
+  // 换节点的那一次提交里云也变了，先清再标，标的是空测量、不起作用
+  useEffect(() => {
+    setMeasure(NO_MEASURE);
+  }, [display.nodeId, compareB?.nodeId, measureOn]);
+  useEffect(() => {
+    setMeasure((m) => (pickCount(m) > 0 && !m.stale ? { ...m, stale: true } : m));
+  }, [cloud, cloudB]);
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    setMeasureMarks(scene, [measure.p1, measure.p2].filter((p) => p !== null).map((p) => p.xyz));
+  }, [measure]);
+  // 单击选点：按下到松开位移 < 4 px 且 < 400 ms 才算单击，拖动照旧交给 OrbitControls 转视角
+  const cloudsRef = useRef<[CloudPayload | null, CloudPayload | null]>([null, null]);
+  cloudsRef.current = [cloud, cloudB];
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!measureOn || !scene) return;
+    const el = scene.renderer.domElement;
+    let down: { x: number; y: number; t: number } | null = null;
+    const onDown = (e: PointerEvent) => {
+      down = e.button === 0 ? { x: e.clientX, y: e.clientY, t: performance.now() } : null;
+    };
+    const onUp = (e: PointerEvent) => {
+      const d = down;
+      down = null;
+      if (!d || e.button !== 0) return;
+      if (Math.hypot(e.clientX - d.x, e.clientY - d.y) >= 4 || performance.now() - d.t > 400) return;
+      const hit = scene.paneAt(e.clientX, e.clientY);
+      const c = hit ? cloudsRef.current[hit.pane] : null;
+      if (!hit || !c || c.pointCount === 0) return;
+      const found = pickNearest(c.xyz, c.pointCount, pickMatrixOf(scene), hit.viewport, hit.local);
+      if (!found) return;
+      const i = found.index;
+      const xyz: [number, number, number] = [c.xyz[i * 3]!, c.xyz[i * 3 + 1]!, c.xyz[i * 3 + 2]!];
+      setMeasure((m) => addPick(m, { xyz, pane: hit.pane }));
+    };
+    el.addEventListener("pointerdown", onDown);
+    el.addEventListener("pointerup", onUp);
+    el.style.cursor = "crosshair";
+    return () => {
+      el.removeEventListener("pointerdown", onDown);
+      el.removeEventListener("pointerup", onUp);
+      el.style.cursor = "";
+    };
+  }, [measureOn]);
+  const measureText = measureLines(measure, cameraMode, compareOn);
+  const measureAttr = (p: Measure["p1"]) => (p ? p.xyz.map((v) => Number(v.toPrecision(6))).join(",") : undefined);
+  const measureDist = distanceOf(measure);
+
   /** 把当前这组框原样写进其它启用的组（L20「复制到其它槽」），整个算一条撤销。 */
   const copyFrameToOthers = () => {
     if (!roi || !activeOp || !activeNode || !roiNode) return;
@@ -621,6 +692,15 @@ export function Viewer3D() {
       data-compare-frozen={compareOn ? (frozenB ? "1" : "0") : undefined}
       data-compare-run-b={compareOn ? (sourceB.display.runId ?? "") : undefined}
       data-split={compareOn ? split : undefined}
+      data-measuring={measureOn ? "1" : "0"}
+      data-measure={pickCount(measure)}
+      data-measure-p1={measureAttr(measure.p1)}
+      data-measure-p2={measureAttr(measure.p2)}
+      data-measure-dist={measureDist === null ? undefined : Number(measureDist.toPrecision(6))}
+      data-measure-panes={
+        measure.p1 ? [measure.p1, measure.p2].filter((p) => p !== null).map((p) => (p.pane === 0 ? "A" : "B")).join(",") : undefined
+      }
+      data-measure-stale={measure.stale ? "1" : undefined}
     >
       <div className="viewer__bar">
         <span className="viewer__title">预览</span>
@@ -816,6 +896,25 @@ export function Viewer3D() {
           <button
             type="button"
             className="viewer__btn"
+            data-testid="viewer-measure"
+            data-on={measureOn ? "1" : "0"}
+            onClick={() => setMeasuring(!measuring)}
+            disabled={roiEditing}
+            title={
+              roiEditing
+                ? "拖框时不能测量"
+                : measuring
+                  ? "关掉测量（M）"
+                  : "测量（M）：单击选点看坐标，再点一个量距离；拖动照旧转视角"
+            }
+          >
+            {measuring ? "测量中" : "测量"}
+          </button>
+        )}
+        {stageContent === "cloud" && (
+          <button
+            type="button"
+            className="viewer__btn"
             data-testid="viewer-export"
             onClick={() => void exportPng()}
             title="把当前画面存成 PNG"
@@ -896,6 +995,43 @@ export function Viewer3D() {
           >
             {/* 拖框时底图取不到的原因比「未运行」有用：它说的是要先跑哪一段 */}
             {loading ? "正在取点云…" : roiEditing && backdrop.error ? backdrop.error : display.status}
+          </div>
+        )}
+        {measureOn && (
+          <div
+            className="measure-readout"
+            data-testid="measure-readout"
+            title={`拾取只吸附到画面上显示的 ${((cloud?.pointCount ?? 0) + (compareOn ? (cloudB?.pointCount ?? 0) : 0)).toLocaleString()} 点（抽稀后的），不向后端要全分辨率`}
+          >
+            {measureText.map((l) => (
+              <div key={l.key} className="measure-readout__row" data-key={l.key}>
+                <span className="measure-readout__label">{l.label}</span>
+                <span className="measure-readout__value">{l.text}</span>
+              </div>
+            ))}
+            {measure.stale && (
+              <div className="measure-readout__stale" data-testid="measure-stale">
+                云已更新，点位是之前选的
+              </div>
+            )}
+            <div className="measure-readout__foot">
+              <span>
+                {pickCount(measure) === 0
+                  ? "单击画面选一个点"
+                  : pickCount(measure) === 1
+                    ? "再点一个点量距离"
+                    : "再点一次重新开始"}
+              </span>
+              <button
+                type="button"
+                className="viewer__btn"
+                data-testid="measure-clear"
+                disabled={pickCount(measure) === 0}
+                onClick={() => setMeasure(NO_MEASURE)}
+              >
+                清除
+              </button>
+            </div>
           </div>
         )}
       </div>

@@ -265,3 +265,47 @@
 .compare-diff__table tr.is-only td { color: var(--lyflow-fg-2); opacity: 0.7; }
 
 .compare-diff__empty { padding: 6px 8px; color: var(--lyflow-fg-2); }
+
+/* ---------------------------------------------- 测量（docs/measure-plan.md）：读数放右下角的固定小框
+   只是读数，鼠标穿过它落到画布上 —— 两栏上下叠时它正好压在 B 栏上，挡住就点不了 B 栏的点 */
+.measure-readout {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 3;
+  max-width: min(65%, 300px);
+  padding: 4px 6px;
+  border: 1px solid var(--lyflow-border-strong);
+  border-radius: 6px;
+  background: rgba(17, 20, 26, 0.9);
+  color: var(--lyflow-fg-1);
+  font-size: 10.5px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.measure-readout button { pointer-events: auto; }
+
+.measure-readout__row {
+  display: flex;
+  gap: 8px;
+  font-family: var(--lyflow-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.measure-readout__label { flex: none; width: 40px; color: var(--lyflow-fg-2); }
+.measure-readout__row[data-key="p1"] .measure-readout__label { color: #34d399; }
+.measure-readout__row[data-key="p2"] .measure-readout__label { color: #f472b6; }
+.measure-readout__row[data-key="dist"] .measure-readout__value { color: var(--lyflow-fg-0); font-weight: 500; }
+.measure-readout__value { overflow-wrap: anywhere; }
+
+.measure-readout__stale { margin-top: 2px; color: var(--lyflow-warn); }
+
+.measure-readout__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+  color: var(--lyflow-fg-2);
+}

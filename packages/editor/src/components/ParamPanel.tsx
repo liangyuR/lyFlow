@@ -763,9 +763,10 @@ function RoiThumb({ row }: { row: NodeParamRow }) {
 /** 进现有的 2D 拖框视图（Viewer3D 的 RoiLayer）：选中节点、切到这一组框、相机切 2D、视图展开。
  *  定义里的节点先进到那一层 —— 视图只画当前层的节点。拖动写回走 setParam，与 Inspector 同一条路。 */
 function enterRoiEdit(row: NodeParamRow, frame: string | null) {
-  // 对比模式没有拖框（compare-plan C8）：两件事互斥，拖框优先
+  // 对比模式没有拖框（compare-plan C8）：两件事互斥，拖框优先；测量工具同理（measure-plan M7）
   useCompareStore.getState().exit();
   const ui = useUiStore.getState();
+  ui.setViewerMeasuring(false);
   if (row.path.length !== ui.path.length) ui.setPath(row.path);
   ui.setPinnedNode(null);
   ui.setSelection([row.node.id], []);

@@ -1,7 +1,7 @@
 // 预览里的选点与测距（docs/measure-plan.md）。纯函数，不依赖 three：矩阵按 16 个数传进来，
 // node:test 直接测。
 
-import { num, signed } from "./format";
+import { num } from "./format";
 
 export interface Viewport {
   x: number;
@@ -97,8 +97,15 @@ export function lengthText(v: number): string {
   return `${num(v)} m · ${num(v * 1000)} mm`;
 }
 
+/** 坐标与 Δ 只给 4 位有效数字：readout 在矮小的预览里，6 位的三元组一行放不下；
+ *  要精读的是距离，距离照旧 6 位（lengthText）。 */
+function short(x: number): string {
+  if (!Number.isFinite(x)) return "—";
+  return String(Number(x.toPrecision(4)));
+}
+
 function vec(v: readonly number[], sign = false): string {
-  return `(${v.map((x) => (sign ? (x === 0 ? "0" : signed(x)) : num(x))).join(", ")}) m`;
+  return `(${v.map((x) => (sign && x > 0 ? `+${short(x)}` : short(x))).join(", ")}) m`;
 }
 
 /** readout 的几行。compare = 对比模式，点位后面标 A / B；2D 剖面多一行 XY 平面距离。 */

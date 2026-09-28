@@ -31,7 +31,7 @@ test("屏幕空间最近点：半径内取最近，同距取离相机近的，�
   assert.deepEqual(wrong, [], "说明 / 实际 / 期望");
 });
 
-test("一组两点：第 3 次重新开始；readout 米 + 毫米并列，2D 多一行 XY 距离，对比标 A / B", () => {
+test("一组两点：第 3 次重新开始；readout 米 + 毫米并列、坐标 4 位，2D 多一行 XY 距离，对比标 A / B", () => {
   const p = (x, y, z, pane = 0) => ({ xyz: [x, y, z], pane });
   let m = addPick(NO_MEASURE, p(0, 0, 0));
   assert.equal(pickCount(m), 1);
@@ -49,6 +49,12 @@ test("一组两点：第 3 次重新开始；readout 米 + 毫米并列，2D 多
     measureLines(m, "2d").find((l) => l.key === "distXY")?.text,
     "0.005 m · 5 mm",
     "XY 平面距离不管 z",
+  );
+
+  assert.deepEqual(
+    measureLines(addPick(NO_MEASURE, p(-0.902288, 1.22897, 0.00283622)), "3d")[0].text,
+    "(-0.9023, 1.229, 0.002836) m",
+    "坐标只给 4 位有效数字（距离才要精读）",
   );
 
   m = addPick(m, p(1, 1, 1));

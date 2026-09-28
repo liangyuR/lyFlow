@@ -5,6 +5,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
+import type { Viewport } from "./pick";
 import { RAMPS, writeRgbColors, type RampName } from "./ramps";
 import { disposeOverlay } from "./shapes2d";
 import type { CloudPayload } from "../types/execution";
@@ -31,6 +32,8 @@ export interface Scene {
   overlay: THREE.Group;
   /** 拖框的底图（m8-plan L15）：roiBackdrop 指的那几个文件拼起来的云，例如模板。只在单栏用。 */
   backdrop: THREE.Group;
+  /** 测量的标记点与连线（measure-plan M6）。不属于任何一栏：两栏都画，同一个世界坐标。 */
+  measure: THREE.Group;
   /** 每帧渲染前调一遍。RoiLayer 靠它把 DOM 框跟着相机摆位。 */
   frameListeners: Set<() => void>;
   /** 正交相机的可视半宽，随 fit 改变；aspect 变了要重算上下边。 */
@@ -46,6 +49,8 @@ export interface Scene {
   setViews(views: 1 | 2, split?: SplitMode): void;
   /** 立刻画一帧（导出 PNG 前用：没开 preserveDrawingBuffer，读缓冲前得先画）。 */
   renderFrame(): void;
+  /** 屏幕坐标落在哪一栏、那一栏在画布里的矩形（CSS px，左上为原点）。落在画布外返回 null。 */
+  paneAt(clientX: number, clientY: number): { pane: 0 | 1; viewport: Viewport; local: { x: number; y: number } } | null;
   dispose(): void;
 }
 
@@ -78,6 +83,8 @@ export function createScene(host: HTMLDivElement): Scene {
   scene.add(overlays[0], overlays[1]);
   const backdrop = new THREE.Group();
   scene.add(backdrop);
+  const measure = new THREE.Group();
+  scene.add(measure);
   const frameListeners = new Set<() => void>();
 
   // 画布的 CSS 尺寸，两栏切视口要用
@@ -150,6 +157,7 @@ export function createScene(host: HTMLDivElement): Scene {
     overlays,
     overlay: overlays[0],
     backdrop,
+    measure,
     frameListeners,
     halfWidth: 2,
     aspect: 1,
@@ -192,6 +200,20 @@ export function createScene(host: HTMLDivElement): Scene {
     renderFrame() {
       render();
     },
+    paneAt(clientX, clientY) {
+      const r = renderer.domElement.getBoundingClientRect();
+      const local = { x: clientX - r.left, y: clientY - r.top };
+      if (local.x < 0 || local.y < 0 || local.x > r.width || local.y > r.height) return null;
+      if (state.views === 1) return { pane: 0, viewport: { x: 0, y: 0, w: r.width, h: r.height }, local };
+      if (state.split === "lr") {
+        const w = r.width / 2;
+        const pane = local.x < w ? 0 : 1;
+        return { pane, viewport: { x: pane * w, y: 0, w, h: r.height }, local };
+      }
+      const h = r.height / 2;
+      const pane = local.y < h ? 0 : 1;
+      return { pane, viewport: { x: 0, y: pane * h, w: r.width, h }, local };
+    },
     dispose() {
       cancelAnimationFrame(raf);
       observer.disconnect();
@@ -201,6 +223,7 @@ export function createScene(host: HTMLDivElement): Scene {
       disposeOverlay(overlays[0]);
       disposeOverlay(overlays[1]);
       disposeOverlay(backdrop);
+      disposeOverlay(measure);
       frameListeners.clear();
       // helper 自己也有 geometry 和 material。不放的话每次挂载都漏一份。
       for (const helper of [grid, axes]) {
@@ -221,6 +244,50 @@ export function createScene(host: HTMLDivElement): Scene {
   observer.observe(host);
   tick();
   return state;
+}
+
+// ------------------------------------------------------------ 测量标记
+
+/** 两个标记点的颜色：1 绿 2 粉，与 ROI 框的前两种同色（Viewer3D 的 ROI_COLORS）。 */
+const MEASURE_COLORS = [0x34d399, 0xf472b6];
+
+/** 重画测量标记：点固定像素大小、不被点云遮挡（depthTest 关、renderOrder 压在底图之上）。 */
+export function setMeasureMarks(scene: Scene, points: readonly (readonly [number, number, number])[]): void {
+  disposeOverlay(scene.measure);
+  if (points.length === 0) return;
+  const pos = new Float32Array(points.flat());
+  const col = new Float32Array(points.length * 3);
+  const c = new THREE.Color();
+  points.forEach((_, i) => {
+    c.setHex(MEASURE_COLORS[i % MEASURE_COLORS.length]!);
+    col.set([c.r, c.g, c.b], i * 3);
+  });
+  if (points.length >= 2) {
+    const lineGeom = new THREE.BufferGeometry();
+    lineGeom.setAttribute("position", new THREE.BufferAttribute(pos.slice(0, 6), 3));
+    const line = new THREE.Line(
+      lineGeom,
+      new THREE.LineBasicMaterial({ color: 0xf5f5f5, depthTest: false, transparent: true, opacity: 0.9 }),
+    );
+    line.renderOrder = 9;
+    scene.measure.add(line);
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geom.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  const marks = new THREE.Points(
+    geom,
+    new THREE.PointsMaterial({ size: 9, sizeAttenuation: false, vertexColors: true, depthTest: false }),
+  );
+  marks.renderOrder = 10;
+  scene.measure.add(marks);
+}
+
+/** 拾取要的投影矩阵：projection × view（列主序 16 个数）。 */
+export function pickMatrixOf(scene: Scene): Float32Array {
+  const cam = scene.active() as THREE.PerspectiveCamera | THREE.OrthographicCamera;
+  cam.updateMatrixWorld();
+  return Float32Array.from(new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse).elements);
 }
 
 // ------------------------------------------------------------ 点云几何与着色

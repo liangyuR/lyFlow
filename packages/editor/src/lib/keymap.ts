@@ -63,6 +63,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: "toggleDrawer", keys: ["Ctrl+`"], label: "日志与诊断抽屉", scope: "global", group: "视图" },
   { id: "paramPanel", keys: ["Ctrl+Shift+P"], label: "参数面板", scope: "global", group: "视图" },
   { id: "compare", keys: ["Ctrl+Shift+D"], label: "对比 / 退出对比", scope: "global", group: "视图" },
+  { id: "measure", keys: ["M"], label: "测量（预览里选点 / 测距）", scope: "global", group: "视图" },
   { id: "help", keys: ["?"], label: "快捷键面板", scope: "global", group: "视图" },
 ];
 

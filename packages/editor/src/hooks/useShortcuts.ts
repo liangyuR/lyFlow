@@ -256,6 +256,10 @@ export function useShortcuts(
           e.preventDefault();
           useCompareStore.getState().toggle();
           return;
+        case "measure":
+          e.preventDefault();
+          ui.setViewerMeasuring(!ui.viewerMeasuring);
+          return;
         case "help":
           e.preventDefault();
           ui.setHelpOpen(!ui.helpOpen);
