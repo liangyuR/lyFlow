@@ -23,6 +23,7 @@ const TOOLS = [
   "diff_graphs",
   "get_params",
   "list_recipes",
+  "list_metrics",
   "patch_graph",
 ];
 
@@ -49,7 +50,7 @@ test("loadConfig：LYFLOW_HTTP_BASE 必填、缺了说清楚；其余配置项�
   assert.equal(config.workDir, path.join(os.tmpdir(), "lyflow-mcp"));
 });
 
-test("工具面就是这 14 个，输入 schema 的必填项对得上", async () => {
+test("工具面就是这 15 个，输入 schema 的必填项对得上", async () => {
   const client = await connect({ LYFLOW_HTTP_BASE: "http://127.0.0.1:1" });
   const listed = await client.listTools();
   assert.deepEqual(
@@ -71,6 +72,7 @@ test("工具面就是这 14 个，输入 schema 的必填项对得上", async ()
     diff_graphs: ["a", "b"],
     get_params: ["graphPath"],
     list_recipes: ["graphPath"],
+    list_metrics: ["graphPath"],
     patch_graph: ["graphPath"],
   };
   for (const [name, fields] of Object.entries(want)) assert.deepEqual(required(name), fields, name);
@@ -95,7 +97,7 @@ test("resource 清单里有 manifest、三份 schema、两篇文档与图样例"
   await client.close();
 });
 
-test("没配 LYFLOW_CLI 时 eval / perturb / diff_graphs / list_recipes / 带 recipe 的 run_graph 给一句说得清的错", async () => {
+test("没配 LYFLOW_CLI 时 eval / perturb / diff_graphs / list_recipes / list_metrics / 带 recipe 的 run_graph 给一句说得清的错", async () => {
   const client = await connect({ LYFLOW_HTTP_BASE: "http://127.0.0.1:1" });
   for (const [name, args] of [
     ["eval", { graphPath: "g.json", metric: ["outputs.gap"] }],
@@ -105,6 +107,7 @@ test("没配 LYFLOW_CLI 时 eval / perturb / diff_graphs / list_recipes / 带 re
     ],
     ["diff_graphs", { a: "a.json", b: "b.json" }],
     ["list_recipes", { graphPath: "g.json" }],
+    ["list_metrics", { graphPath: "g.json" }],
     // 带 recipe 的 run_graph 要 CLI 查失配：没配 CLI 时在碰后端之前就说清楚
     [
       "run_graph",

@@ -211,6 +211,16 @@ test(
       }
       assert.equal((summary["head"] as unknown[]).length, Math.min(3, pointCount));
 
+      // list_metrics：跑一次图，列出 eval 能写的标量路径（CLI eval --list-metrics）
+      const metrics = payload(
+        await client.callTool({ name: "list_metrics", arguments: { graphPath: graphFile } }),
+      );
+      const metricPaths = (metrics["paths"] as string[] | undefined) ?? [];
+      assert.ok(
+        metricPaths.includes("nodes.voxel.elementCount") && metricPaths.includes("run.durationMs"),
+        JSON.stringify(metrics),
+      );
+
       // 下标（ADR-0019）：个数来自元数据；前几个下标走 indices 端点。参考桩服务器不实现它（501），
       // 取不到时要带上原因，而不是静默少一个 head
       const inliers = payload(

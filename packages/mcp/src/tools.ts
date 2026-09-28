@@ -4,7 +4,7 @@ import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { evalArgv, paramsArgv, patchArgv, perturbArgv, recipesArgv } from "./argv.js";
+import { evalArgv, listMetricsArgv, paramsArgv, patchArgv, perturbArgv, recipesArgv } from "./argv.js";
 import { DEFAULT_CLI_TIMEOUT_MS, runCli, stderrTail } from "./cli.js";
 import { decodeCloud, decodeIndices, decodeTensor, summarizeCloud } from "./cloud.js";
 import type { Config } from "./config.js";
@@ -838,6 +838,45 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
   );
 
   server.registerTool(
+    "list_metrics",
+    {
+      title: "列出能写的指标路径",
+      description:
+        "起本地 lyflow eval --list-metrics：用第一个样本把图跑一次，列出能交给 eval / perturb 的 metric 的" +
+        "全部标量路径（outputs.* / nodes.<节点>.* / run.durationMs）。路径只有跑过才知道，所以它会真的跑一次。" +
+        "样本集入参与 eval 相同；不给样本集就按图本身跑。",
+      inputSchema: {
+        graphPath: z.string().describe("图文件路径，CLI 直接读它"),
+        ...cliSamples,
+        set: z.array(z.string()).optional().describe("<节点>.<参数>=<json>，作用于这次运行"),
+        recipe: RECIPE_FIELD,
+        baseDir: z.string().optional(),
+      },
+    },
+    async (args) => {
+      if (!config.cli) return bad(CLI_MISSING);
+      let argv: string[];
+      try {
+        argv = listMetricsArgv(args);
+      } catch (e) {
+        return failed(e);
+      }
+      const result = await runCli(config, argv);
+      const row = result.lines.find((l) => l.value["kind"] === "metric_paths")?.value;
+      if (result.code !== 0 || !row) {
+        // 第一次运行没成功（校验不过 / 执行失败）时 CLI 在 stderr 说了是哪种
+        return bad(`lyflow eval --list-metrics 退出码 ${result.code}`, {
+          exitCode: result.code,
+          argv,
+          stderrTail: stderrTail(result.stderr),
+        });
+      }
+      const paths = (row["paths"] as string[] | undefined) ?? [];
+      return ok({ exitCode: result.code, sample: row["sample"], count: paths.length, paths });
+    },
+  );
+
+  server.registerTool(
     "patch_graph",
     {
       title: "改图结构",
@@ -917,7 +956,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
 }
 
 const CLI_MISSING =
-  "没有配置 LYFLOW_CLI。eval / perturb / diff_graphs / patch_graph / get_params / list_recipes " +
+  "没有配置 LYFLOW_CLI。eval / perturb / diff_graphs / patch_graph / get_params / list_recipes / list_metrics " +
   "（以及带 recipe 的 run_graph）起的是本地 " +
   "lyflow 可执行文件，把它的路径放进 MCP 服务的环境变量 LYFLOW_CLI 再试。";
 

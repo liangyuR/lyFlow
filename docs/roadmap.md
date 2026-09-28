@@ -281,8 +281,8 @@ gap 领域包从 `xyz-gap-inspector/lyflow/` 搬进本仓库的 `packs/gap/`，�
 
 **仍未做的**：
 - `--region` 允许 `pointFrom: <node>:<port>` 让刀口逐帧跟锚点（平台级引用，不违背 G7）
-- `list_metrics(graphPath)`
-- `outputsAvailable` 的业务侧 harvest 与 `devbridge.ts` 快照透出（留给阶段 B）
+- ~~`list_metrics(graphPath)`~~（已做：CLI `eval --list-metrics` + MCP `list_metrics`）
+- `outputsAvailable` 的业务侧 harvest（留给阶段 B；`devbridge.ts` 快照透出已做）
 
 ## M6 — 能被读懂 ✅
 

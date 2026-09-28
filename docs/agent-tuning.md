@@ -426,6 +426,7 @@ lyflow eval g.lyflow.json \
 | `lyflow run <g> --summary --set …` | `run_graph` | `set` 是对象不是字符串；返回**就是** summary（`status` / `outputs` / `decisions`），没有点云 |
 | `run` 之后看 `stats.outputs` | `get_node_outputs` | — |
 | `lyflow dump <g> n:port out.pcd` 再自己统计 | `summarize_output` | 不落 PCD，直接给包围盒、每通道 min/max/mean 与前几个点 |
+| `lyflow eval <g> [样本集] --list-metrics` | `list_metrics` | 回 `{ sample, count, paths }`：用第一个样本跑一次，列出能写进 `metric` 的全部标量路径。样本集入参与 `eval` 相同 |
 | `lyflow eval …` | `eval` | 默认 `compact`：一组一行，只回 `paramSet/params/metric/group/n/ok/failCodes?/mean/std`；逐行 `eval_row` 落盘给 `rowsPath` |
 | `lyflow perturb …` | `perturb` | 只回 `perturb_summary` 与不通过的样本；**全部** `perturb_sample` 落盘给 `samplesPath` |
 | `lyflow diff a b --json` | `diff_graphs` | 原样 |

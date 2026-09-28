@@ -220,7 +220,7 @@ lyflow diff before.lyflow.json after.lyflow.json
 
 工具：`list_operators` / `get_operator` / `list_port_types` / `validate_graph` /
 `plan_graph` / `run_graph` / `get_node_outputs` / `summarize_output` / `eval` / `perturb` /
-`diff_graphs` / `get_params` / `patch_graph` / `list_recipes`。`run_graph` 现在以 run summary 为主体返回
+`diff_graphs` / `get_params` / `patch_graph` / `list_recipes` / `list_metrics`。`run_graph` 现在以 run summary 为主体返回
 （[ADR-0022](docs/adr/0022-run-summary-as-core-output.md)）；`patch_graph` 对应 CLI
 `lyflow patch`，`dryRun` 默认 true（[ADR-0023](docs/adr/0023-patch-as-idempotent-structural-edit.md)）；
 `get_params` 对应 `lyflow params`，回的是每节点每参数的生效值与来源。

@@ -79,7 +79,7 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                           [--csv <out.csv>] [--base-dir <dir>]
   lyflow eval     <graph> [<样本集>] [--params <paramsets.json>]
                           [--param <n>.<p>=<start>:<end>:<steps>]...
-                          --metric <path> [--metric <path>]...
+                          (--metric <path> [--metric <path>]... | --list-metrics)
                           [--holdout <tag>=<value>] [--group-by <tag>]
                           [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--no-cache]
                           [--set <nodeId>.<param>=<json>]... [--recipe <配方文件>] [--param <名字>=<json>]...
@@ -91,6 +91,8 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
         （--no-summary 还认，但已经是 no-op。）
         指标路径：outputs.<名字>[.字段...] / nodes.<节点>.<端口>[.字段...]
                   nodes.<节点>.durationMs|elementCount|byteSize / run.durationMs
+        --list-metrics：不跑统计，只用第一个参数组 × 第一个样本跑一次，输出一行
+                  {\"kind\":\"metric_paths\",\"paths\":[...]} —— 这张图在这批样本上能写的全部指标路径。
         样本集三选一：
           --samples <samples.jsonl>
           --samples-glob <pat> --bind <n>.<p>
@@ -1735,7 +1737,7 @@ const VALUE_OPTS: &[&str] = &[
 ];
 const BOOL_OPTS: &[&str] = &[
     "no-cache", "preview", "write", "check", "json", "help", "outputs", "dry-run",
-    "summary", "no-summary", "fine",
+    "summary", "no-summary", "fine", "list-metrics",
 ];
 
 pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
@@ -2754,6 +2756,19 @@ mod tests {
         assert!(r.err.contains("run.durationMs"), "{}", r.err);
         let bad = cli(&["eval", &graph, "--samples", &samples, "--metric", "gap"]);
         assert_eq!(bad.code, EXIT_USAGE);
+
+        // --list-metrics：同一批路径正向给出来（一行 metric_paths、退出码 0），不用故意写错一个指标
+        let listed = cli(&["eval", &graph, "--samples", &samples, "--list-metrics"]);
+        assert_eq!(listed.code, EXIT_OK, "{}", listed.err);
+        let first = &listed.lines()[0];
+        let paths: Vec<&str> = first["paths"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        assert!(
+            first["kind"] == "metric_paths"
+                && first["sample"] == "a"
+                && ["nodes.v.elementCount", "run.durationMs"].iter().all(|p| paths.contains(p)),
+            "{}",
+            listed.out
+        );
     }
 
     #[test]

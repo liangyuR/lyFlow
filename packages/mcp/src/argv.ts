@@ -108,6 +108,24 @@ export function evalArgv(input: EvalInput, paramsFile: string | null): string[] 
   return argv;
 }
 
+export interface ListMetricsInput extends SampleSelector {
+  graphPath: string;
+  baseDir?: string | undefined;
+  set?: string[] | undefined;
+  recipe?: string | undefined;
+}
+
+/** `lyflow eval --list-metrics`：样本集入参与 eval 同一套，列出来的路径正是 eval 认的。 */
+export function listMetricsArgv(input: ListMetricsInput): string[] {
+  const argv = ["eval", input.graphPath];
+  if (input.baseDir) argv.push("--base-dir", input.baseDir);
+  argv.push(...samplesArgv(input));
+  for (const s of input.set ?? []) argv.push("--set", s);
+  if (input.recipe) argv.push("--recipe", input.recipe);
+  argv.push("--list-metrics");
+  return argv;
+}
+
 export interface ParamsInput {
   graphPath: string;
   node?: string[] | undefined;

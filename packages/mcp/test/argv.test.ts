@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { evalArgv, paramsArgv, patchArgv, perturbArgv, recipesArgv } from "../src/argv.js";
+import { evalArgv, listMetricsArgv, paramsArgv, patchArgv, perturbArgv, recipesArgv } from "../src/argv.js";
 
 interface MappingRow {
   name: string;
@@ -216,6 +216,11 @@ test("工具入参 → CLI argv 的映射（params / recipes / eval / perturb / 
         "--csv", "D:/tmp/a1.csv",
         "--no-cache",
       ],
+    },
+    {
+      name: "list_metrics 是 eval --list-metrics，样本集入参与 eval 同一套",
+      argv: listMetricsArgv({ graphPath: "g.json", samplesPath: "s.jsonl", set: ["g.seed=3"] }),
+      want: ["eval", "g.json", "--samples", "s.jsonl", "--set", "g.seed=3", "--list-metrics"],
     },
     // ---------------------------------------------------------------- patch
     {

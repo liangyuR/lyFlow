@@ -6,7 +6,7 @@
 
 一句话：**它是 [HTTP 传输契约](http-transport.md) 的又一个消费方，不是第四种传输。**
 描述、校验、执行这些走 `/lyflow/*`（test-server 或阶段 B 的业务服务都行）；
-`eval` / `perturb` / `diff_graphs` / `get_params` / `patch_graph` / `list_recipes` 起本地 `lyflow` 可执行文件
+`eval` / `perturb` / `diff_graphs` / `get_params` / `patch_graph` / `list_recipes` / `list_metrics` 起本地 `lyflow` 可执行文件
 （ADR-0020：它们是 CLI 子命令，MCP 只是另一张皮）。
 理由见 [ADR-0021](adr/0021-mcp-as-transport-consumer.md)。
 
@@ -45,7 +45,7 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 |---|---|---|
 | `LYFLOW_HTTP_BASE` | 是 | `/lyflow/*` 的基址，例如 `http://127.0.0.1:8787`。缺了进程直接退出并说明 |
 | `LYFLOW_HTTP_TOKEN` | 否 | 有它就每个请求带 `Authorization: Bearer`，WebSocket 走 `lyflow-token.<token>` 子协议 |
-| `LYFLOW_CLI` | 否 | 本地 `lyflow.exe` 路径。`eval` / `perturb` / `diff_graphs` / `get_params` / `patch_graph` / `list_recipes`，以及带 `recipe` 的 `run_graph` 用它；缺了就返回一句说得清的错，其余工具不受影响 |
+| `LYFLOW_CLI` | 否 | 本地 `lyflow.exe` 路径。`eval` / `perturb` / `diff_graphs` / `get_params` / `patch_graph` / `list_recipes` / `list_metrics`，以及带 `recipe` 的 `run_graph` 用它；缺了就返回一句说得清的错，其余工具不受影响 |
 | `LYFLOW_PACKS` | 否 | 透传给 CLI 子进程。注意它在当前实现里是**构建期**变量（`scripts/build-core.ps1` 用它选算子包），运行期的 exe 已经带着自己那份算子表 |
 | `LYFLOW_WORK_DIR` | 否 | `eval` / `perturb` 的逐行结果落盘目录，默认 `os.tmpdir()/lyflow-mcp` |
 
@@ -92,6 +92,7 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 | `perturb` | `graphPath` `after` `region` `axis` `metric[]` … | `LYFLOW_CLI perturb …` | `perturb_summary` 数组 + 不通过样本 + `samplesPath` + `rowsPath` |
 | `diff_graphs` | `a` `b` | `LYFLOW_CLI diff a b --json` | `{exitCode, diff}` 原样 |
 | `get_params` | `graphPath` `node[]?` `only?` `set[]?` `recipe?` `baseDir?` | `LYFLOW_CLI params … --json` | `{exitCode, argv, count, params:[{node,op,param,value,source,graphParam?,unit?,min?,max?}], stderrTail}` |
+| `list_metrics` | `graphPath` 样本 `set[]?` `recipe?` | `LYFLOW_CLI eval <graph> … --list-metrics` | `{exitCode, sample, count, paths}`：第一个样本跑一次后能写进 `metric` 的全部标量路径 |
 | `list_recipes` | `graphPath` | `LYFLOW_CLI recipes <graph> --json` | `{dir, exists, default, count, recipes:[{name,file,default,values,runnable,blocking,mismatches,items}], problems}`（见下） |
 | `patch_graph` | `graphPath` `removeNode[]?` `addNode[]?` `rewire[]?` `connect[]?` `set[]?` `dryRun?` `out?` | `LYFLOW_CLI patch … --json` | `patch_result` 摊平：`{exitCode, argv, applied, noops, wrote, diff, stderrTail}` |
 

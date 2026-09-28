@@ -998,6 +998,17 @@ impl<'a> Engine<'a> {
         })
     }
 
+    /// `--list-metrics`：只跑第一个参数组 × 第一个样本，列出这张图在这批样本上能取的全部标量路径。
+    /// 路径只有跑过才知道（Record 的字段、图输出的值都是运行期的），所以不做静态推导 ——
+    /// 与 eval 真跑时第一次运行是同一条路（`attempt(0, 0, true)`），列出来的就是 eval 认的。
+    pub(crate) fn metric_paths(&self) -> Result<(Row, Vec<String>), String> {
+        if self.param_sets.is_empty() || self.samples.is_empty() {
+            return Err("没有参数组或样本，跑不了第一次运行".to_string());
+        }
+        let a = self.attempt(0, 0, true)?;
+        Ok((a.row, a.available))
+    }
+
     pub(crate) fn run(&self, on_row: &mut dyn FnMut(&Row)) -> Result<i32, EngineError> {
         let mut worst = EXIT_OK;
         let mut first: Option<Attempt> = None;
@@ -1150,6 +1161,41 @@ pub(crate) fn summarize(
     groups
 }
 
+/// `eval --list-metrics` 的输出：一行 `metric_paths`。第一次运行没成功时列不出路径，
+/// 说清楚是哪种失败（校验不过是退出码 1，执行失败是 2），而不是给一张空表假装「这张图没有指标」。
+fn list_metric_paths(engine: &Engine, samples: &[Sample], out: &Sink, err: &Sink) -> i32 {
+    let (row, paths) = match engine.metric_paths() {
+        Ok(v) => v,
+        Err(e) => {
+            line(err, &e);
+            return EXIT_FAILED;
+        }
+    };
+    if row.status != "ok" {
+        line(
+            err,
+            &format!(
+                "第一次运行（参数组 0 × 样本 {}）没成功：{}{}，列不出路径",
+                samples[row.sample].id,
+                row.status,
+                if row.errors.is_empty() { String::new() } else { format!("（{}）", row.errors.join(", ")) }
+            ),
+        );
+        return if row.status == "validation_failed" { EXIT_INVALID } else { EXIT_FAILED };
+    }
+    json_line(
+        out,
+        &json!({
+            "kind": "metric_paths",
+            "paramSet": row.param_set,
+            "sample": samples[row.sample].id,
+            "paths": paths,
+        }),
+    );
+    line(err, &format!("{} 条标量路径（参数组 0 × 样本 {} 跑出来的）", paths.len(), samples[row.sample].id));
+    EXIT_OK
+}
+
 pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let Some(path) = parsed.positional.first().cloned() else {
         line(err, "用法：lyflow eval <graph> --samples <samples.jsonl> --metric <path>");
@@ -1157,8 +1203,10 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
 
     let metric_specs = parsed.many("metric");
-    if metric_specs.is_empty() {
-        line(err, "至少给一个 --metric <path>，例如 --metric outputs.gap");
+    // --list-metrics 不要指标：它就是用来问「有哪些指标可写」的
+    let list_only = parsed.has("list-metrics");
+    if metric_specs.is_empty() && !list_only {
+        line(err, "至少给一个 --metric <path>，例如 --metric outputs.gap（不知道写什么就先 --list-metrics）");
         return EXIT_USAGE;
     }
     let metrics: Vec<MetricPath> = match metric_specs
@@ -1270,6 +1318,10 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         // `--no-summary` 留着当 no-op：老脚本照样跑得过。
         summary: parsed.has("summary"),
     };
+
+    if list_only {
+        return list_metric_paths(&engine, &samples, out, err);
+    }
 
     let mut rows: Vec<Row> = Vec::new();
     let code = {
