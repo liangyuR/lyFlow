@@ -105,6 +105,9 @@
   min-width: 0;
 }
 
+/* 对比时两栏各只有一半宽，再加一张差异表：视图长高（compare-plan §1.2） */
+.app__viewer:has(> .viewer[data-compare="1"]) { flex-basis: 60%; }
+
 .app__inspector {
   flex: 1;
   overflow-y: auto;

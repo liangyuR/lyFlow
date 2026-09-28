@@ -76,3 +76,9 @@ export function viewerContentFor(
   if (types.length === 0) return "cloud";
   return types.some((t) => drawable(t, bundles)) ? "cloud" : "value";
 }
+
+/** 对比模式两栏合起来的内容（compare-plan §1.6）：一侧可画就两栏都是点云场景 —— 只有值的那一侧
+ *  显示「无点云输出」，它的值照样进差异表；两侧都只有值才换成两张并排的值表格。 */
+export function compareContentFor(a: ViewerContent, b: ViewerContent): ViewerContent {
+  return a === "cloud" || b === "cloud" ? "cloud" : "value";
+}

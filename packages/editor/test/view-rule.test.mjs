@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { viewerContentFor } from "../src/lib/viewRule.ts";
+import { compareContentFor, viewerContentFor } from "../src/lib/viewRule.ts";
 
 const bundles = [
   { kind: "gap.ScanPair", fields: [{ name: "primary", type: "PointCloud" }] },
@@ -32,4 +32,11 @@ test("主预览：有一个可画的端口就显示点云场景，全是值才�
     .map(([name, types, want]) => [name, viewerContentFor(types, bundles), want])
     .filter(([, got, want]) => got !== want);
   assert.deepEqual(wrong, [], "说明 / 实际 / 期望");
+});
+
+test("对比的两栏：一侧可画就是点云场景，两侧都只有值才是值表格", () => {
+  const got = [["cloud", "cloud"], ["cloud", "value"], ["value", "cloud"], ["value", "value"]].map(
+    ([a, b]) => compareContentFor(a, b),
+  );
+  assert.deepEqual(got, ["cloud", "cloud", "cloud", "value"]);
 });

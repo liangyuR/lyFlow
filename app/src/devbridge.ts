@@ -13,6 +13,7 @@ import {
   useGraphStore,
   useManifestStore,
   usePeekStore,
+  useCompareStore,
   useRecipeStore,
   useUiStore,
   useValidationStore,
@@ -39,6 +40,8 @@ interface DevBridge {
     execution: typeof useExecutionStore;
     cache: typeof useCacheStore;
     peek: typeof usePeekStore;
+    /** 两节点输出对比（交互清单 #35）：B 槽与冻结快照。 */
+    compare: typeof useCompareStore;
     validation: typeof useValidationStore;
     /** 配方（param-recipe P3）：配方集合、当前配方、存盘簿记。改配方走 graph store 的动作（K7）。 */
     recipe: typeof useRecipeStore;
@@ -108,6 +111,7 @@ export function installDevBridge(transport: Transport): void {
       execution: useExecutionStore,
       cache: useCacheStore,
       peek: usePeekStore,
+      compare: useCompareStore,
       validation: useValidationStore,
       recipe: useRecipeStore,
     },

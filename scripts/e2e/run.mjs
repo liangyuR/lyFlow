@@ -17,6 +17,7 @@ import {
   select,
   selectAndReadViewer,
 } from "./page.mjs";
+import { compareSuites } from "./compare.mjs";
 import { gapSuites } from "./gap.mjs";
 import { m3Suites } from "./m3.mjs";
 import { m4Suites } from "./m4.mjs";
@@ -362,7 +363,7 @@ async function main() {
     await suiteCancel(cdp, report);
 
     const grouped = [
-      ...m3Suites, ...m4Suites, ...phaseASuites, ...gapSuites, ...peekSuites, ...m8bSuites, ...m8cSuites,
+      ...m3Suites, ...m4Suites, ...phaseASuites, ...gapSuites, ...peekSuites, ...compareSuites, ...m8bSuites, ...m8cSuites,
       ...motionSuites, ...nodeRunSuites, ...paramsP1Suites, ...paramsP2Suites, ...paramsP3Suites,
       ...paramsP4Suites,
     ];

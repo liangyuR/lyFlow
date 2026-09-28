@@ -1,6 +1,11 @@
 /* 3D 视图补齐（M3 §2.6）新增的样式。styles.editor.css 有人并行在改，新类一律放这里。 */
 
-.viewer__bar--tools { border-bottom: 1px solid var(--lyflow-border); }
+/* 右侧栏窄时（参数面板开着）一行放不下：折行而不是把「钉住 / 对比 / PNG」挤出栏外 */
+.viewer__bar--tools {
+  border-bottom: 1px solid var(--lyflow-border);
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
 
 .viewer__label { color: var(--lyflow-fg-2); }
 
@@ -109,3 +114,154 @@
 .viewer__values .peek-value { flex: none; }
 .viewer__values .peek-value__scroll { overflow: visible; }
 .viewer__values .peek-value__raw { max-height: none; }
+
+/* ---------------------------------------------- 两节点输出并排对比（交互清单 #35）
+   两栏盖在同一块画布上（一个场景、两个 scissor 视口）：标签条以外不接鼠标，拖动落到画布上两栏一起转。 */
+.compare-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  pointer-events: none;
+}
+
+.compare-stage--lr { flex-direction: row; }
+.compare-stage--tb { flex-direction: column; }
+
+.compare-pane {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.compare-stage--lr .compare-pane--a { border-right: 1px solid var(--lyflow-border-strong); }
+.compare-stage--tb .compare-pane--a { border-bottom: 1px solid var(--lyflow-border-strong); }
+
+.compare-pane__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--lyflow-fg-1);
+  background: rgba(17, 20, 26, 0.72);
+  pointer-events: auto;
+}
+
+.compare-pane__side { font-weight: 600; white-space: nowrap; color: #8fb8ff; }
+.compare-pane--b .compare-pane__side { color: #fbbf24; }
+
+.compare-pane__label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.compare-pane__freeze.is-on { border-color: #7dd3fc; color: #7dd3fc; }
+
+.compare-pane__status {
+  position: absolute;
+  inset: 24px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  text-align: center;
+  color: var(--lyflow-fg-2);
+  font-size: 12px;
+  background: rgba(17, 20, 26, 0.88);
+}
+
+.compare-pane__count {
+  position: absolute;
+  left: 6px;
+  bottom: 4px;
+  font-size: 10.5px;
+  color: var(--lyflow-fg-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.compare-pane .viewer__values { inset: 24px 0 0; pointer-events: auto; }
+
+.compare-diff {
+  flex: 0 0 auto;
+  max-height: 40%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-1);
+  font-size: 11px;
+}
+
+.compare-diff__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+}
+
+.compare-diff__toggle {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--lyflow-fg-1);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.compare-diff__summary { color: var(--lyflow-fg-2); }
+.compare-diff__summary b { font-weight: 500; color: var(--lyflow-fg-1); }
+.compare-diff__summary b.is-changed { color: var(--lyflow-accent); }
+
+.compare-diff__badge {
+  padding: 0 4px;
+  border: 1px solid var(--lyflow-warn);
+  border-radius: 4px;
+  color: var(--lyflow-warn);
+}
+
+.compare-diff__filter { display: flex; align-items: center; gap: 3px; color: var(--lyflow-fg-2); }
+
+.compare-diff__scroll { overflow: auto; min-height: 0; }
+
+/* 一侧来自预览运行：数字不可比，整表变淡（§2.3 modeMismatch） */
+.compare-diff.is-mismatch .compare-diff__scroll { opacity: 0.55; }
+
+.compare-diff__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--lyflow-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.compare-diff__table th {
+  position: sticky;
+  top: 0;
+  padding: 2px 6px;
+  text-align: left;
+  font-weight: 500;
+  color: var(--lyflow-fg-2);
+  background: var(--lyflow-bg-1);
+}
+
+/* 值列可以折行：右侧栏窄，三元组一长就把 Δ 挤到横向滚动条外面去了，而 Δ 是最该看见的那一列 */
+.compare-diff__table td {
+  padding: 1px 6px;
+  color: var(--lyflow-fg-1);
+  border-top: 1px solid var(--lyflow-border);
+  vertical-align: top;
+}
+
+.compare-diff__table td.compare-diff__key { white-space: nowrap; }
+
+.compare-diff__table tr.is-changed td:first-child { box-shadow: inset 2px 0 0 var(--lyflow-accent); }
+.compare-diff__table tr.is-changed .compare-diff__delta { color: var(--lyflow-accent); }
+.compare-diff__table tr.is-only td { color: var(--lyflow-fg-2); opacity: 0.7; }
+
+.compare-diff__empty { padding: 6px 8px; color: var(--lyflow-fg-2); }

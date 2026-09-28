@@ -18,7 +18,9 @@ import {
   type CameraMode,
   type Scene,
   type ShadingMode,
+  type SplitMode,
 } from "../lib/cloudScene";
+import { diffSides, type CompareSide } from "../lib/compareDiff";
 import { withBoundValues } from "../lib/graphParams";
 import { effectiveParams } from "../lib/params";
 import type { RampName } from "../lib/ramps";
@@ -26,17 +28,21 @@ import { copyFrameWrites, pickFrame, roiFramesOf } from "../lib/roiFrames";
 import { rememberRoiBounds } from "../lib/roiThumbs";
 import { disposeOverlay, extentOf, shapesOf } from "../lib/shapes2d";
 import { fullId, levelOf, resolveOutput } from "../lib/subgraph";
+import { compareContentFor } from "../lib/viewRule";
 import { exportCanvasPng } from "../lib/exportPng";
 import { transport } from "../transport";
+import { useCompareStore, type CompareSlot, type CompareSnapshot } from "../store/compare";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useGraphParamOverrides } from "../store/recipe";
 import { useUiStore } from "../store/ui";
 import { decodeCloud, type CloudPayload, type OutputStat } from "../types/execution";
+import { CompareDiff } from "./CompareDiff";
+import { CompareStage } from "./CompareStage";
 import { RoiLayer, type RoiItem } from "./RoiLayer";
-import { ValueView } from "./peek/ValueView";
-import { useViewerSource } from "../hooks/useViewerSource";
+import { ValuePane } from "./ValuePane";
+import { useViewerSource, type ViewerSource } from "../hooks/useViewerSource";
 import "../styles.viewer.css";
 
 export type { ShadingMode, CameraMode } from "../lib/cloudScene";
@@ -71,23 +77,54 @@ function placeholderOf(
   return [cx - hw, cy - hh, cx + hw, cy + hh];
 }
 
-/** 主预览的「值」内容：每个输出端口一张表，与连线查看器的值视图是同一个组件。
- *  Bundle 字段展开出来的 `<port>.<field>` 不单列 —— 整个端口的值里已经有 fields。 */
-function ValuePane({ outputs }: { outputs: readonly OutputStat[] | undefined }) {
-  const shown = (outputs ?? []).filter((o) => !o.port.includes("."));
-  return (
-    <div className="viewer__values" data-testid="viewer-values">
-      {shown.map((o) => (
-        <section key={o.port} className="viewer__value" data-port={o.port}>
-          <header className="viewer__value-head">
-            <span>{o.port}</span>
-            <span className="viewer__value-type">{o.type}</span>
-          </header>
-          <ValueView stat={o} />
-        </section>
-      ))}
-    </div>
-  );
+/** 对比时双栏的最小宽度：比它窄就改成上下叠（compare-plan §1.2）。 */
+const COMPARE_MIN_LR_WIDTH = 480;
+
+/** 这一侧此刻显示着的结果冻成快照；还没有结果（在取、没跑、出错……）返回 null。
+ *  判据与 Edge Peek 的锁定条件相同：状态文字为空且不在取数（EdgePeek.tsx:76）。 */
+function snapshotOf(src: ViewerSource, label: string, maxPoints: number): CompareSnapshot | null {
+  const d = src.display;
+  if (src.loading || d.status !== null || !d.runId || !d.nodeId) return null;
+  return {
+    runId: d.runId,
+    preview: d.preview,
+    label,
+    content: src.content,
+    outputs: src.outputs,
+    cloud: d.cloud,
+    cloudPort: d.port,
+    base: d.base,
+    maxPoints,
+  };
+}
+
+/** 2D 几何叠画（G7）：整组重建，线与端口同色。对比时 A、B 各一组。 */
+function drawShapes(
+  group: THREE.Group,
+  shapes: readonly OutputStat[],
+  cloud: CloudPayload | null,
+  typesByName: ReadonlyMap<string, { color?: string }>,
+): void {
+  disposeOverlay(group);
+  if (shapes.length === 0) return;
+  // 线的长度/十字的大小要有个尺度参照：优先用点云的跨度，没有云就用几何自己的。
+  const span = cloud
+    ? Math.max(cloud.bounds[3]! - cloud.bounds[0]!, cloud.bounds[4]! - cloud.bounds[1]!, 1e-3)
+    : Math.max(...shapes.map(extentOf), 1e-3);
+  for (const out of shapes) {
+    const hex = typesByName.get(out.type)?.color ?? "#6b7280";
+    const color = new THREE.Color(hex).getHex();
+    for (const line of shapesOf(out, color, span)) group.add(line);
+  }
+}
+
+function sideOf(src: ViewerSource): CompareSide {
+  return { outputs: src.outputs, cloud: src.display.cloud, cloudPort: src.display.port, preview: src.display.preview };
+}
+
+/** 栏标题：节点标题优先，其次算子 label（与「底图：xxx」同一条规则）。 */
+function nodeLabel(src: ViewerSource, fallback: string | null): string {
+  return src.node?.ui?.title ?? src.op?.label ?? src.node?.id ?? fallback ?? "";
 }
 
 export function Viewer3D() {
@@ -136,6 +173,41 @@ export function Viewer3D() {
   });
   const { display, loading, node: activeNode, op: activeOp, outputs: activeOutputs, content } = source;
   const { cloud } = display;
+
+  // -- 对比（交互清单 #35）：A 就是上面那个（跟随选中 / 钉住），B 是一个显式的槽 ---------------
+  const compareOn = useCompareStore((s) => s.on);
+  const compareB = useCompareStore((s) => s.b);
+  const frozenB = useCompareStore((s) => s.snapshot);
+  const sourceB = useViewerSource({
+    slot: compareOn ? compareB : null,
+    idleText: "",
+    maxPoints,
+    pick: null,
+    frozen: compareOn ? frozenB : null,
+  });
+  const cloudB = compareOn ? sourceB.display.cloud : null;
+  // 一侧可画就两栏都是点云场景；两侧都只有值才换成两张值表格（§1.6）
+  const stageContent = compareOn ? compareContentFor(content, sourceB.content) : content;
+  const labelA = nodeLabel(source, activeId);
+  const labelB = compareOn ? nodeLabel(sourceB, compareB?.nodeId ?? null) : "";
+  const diff = useMemo(
+    () => (compareOn ? diffSides(sideOf(source), sideOf(sourceB)) : null),
+    // source / sourceB 每次渲染都是新对象；差异只随这四样变
+    [compareOn, source.display, source.outputs, sourceB.display, sourceB.outputs],
+  );
+  const canFreezeB = compareOn && !frozenB && snapshotOf(sourceB, labelB, maxPoints) !== null;
+  // 进入对比时顺手冻住 B（C2）：store 的 toggle 调这里，拿 A 此刻显示着的结果
+  const captureRef = useRef<(slot: CompareSlot) => CompareSnapshot | null>(() => null);
+  captureRef.current = (slot) =>
+    slot.path === path && slot.nodeId === display.nodeId ? snapshotOf(source, labelA, maxPoints) : null;
+  useEffect(() => {
+    useCompareStore.getState().setCapture((slot) => captureRef.current(slot));
+    return () => useCompareStore.getState().setCapture(null);
+  }, []);
+  // B 的节点被删（撤销也算）就退出对比
+  useEffect(() => {
+    useCompareStore.getState().prune(doc);
+  }, [doc]);
   // 参数面板的 ROI 缩略图拿这片云的范围当底图（param-recipe P2.7）
   useEffect(() => {
     if (display.nodeId && cloud && cloud.pointCount > 0) {
@@ -181,16 +253,23 @@ export function Viewer3D() {
       return e ? resolveOutput(doc, path, e.from.node, e.from.port) : null;
     });
   }, [roi, activeNode, doc, path]);
+  // 对比模式下没有拖框，也就不要底图（C8）
   const backdropKey =
-    roi && roi.files.length > 0
+    compareOn
+      ? ""
+      : roi && roi.files.length > 0
       ? JSON.stringify({ files: roi.files, graphPath })
       : roi && portSources
         ? JSON.stringify({ ports: portSources, inputs: roi.inputs, runId: runId ?? null, runStatus })
         : "";
 
-  const hasIntensity = cloud?.intensity != null;
-  const hasNormals = cloud?.normals != null;
-  const hasRgb = cloud?.rgb != null;
+  // 对比时按两侧都有才算有（C5）：A 有强度 B 没有，两栏都退到高度 —— 同一个值涂同一种颜色
+  const drawn = compareOn ? [cloud, cloudB].filter((c) => c && c.pointCount > 0) : [cloud];
+  const allHave = (channel: "intensity" | "normals" | "rgb") =>
+    drawn.length > 0 && drawn.every((c) => c?.[channel] != null);
+  const hasIntensity = allHave("intensity");
+  const hasNormals = allHave("normals");
+  const hasRgb = allHave("rgb");
   // 选了「强度」但这片云没有强度通道时实际走别的着色，那就让下拉框也显示实际那一种 ——
   // 下拉框写着强度、画面却是高度，用户只会以为强度数据本身有问题。没有强度但自带颜色的
   // （模型分割的类别色、PCD 里的 rgb）先退到 RGB：那本来就是给人看的颜色
@@ -207,10 +286,14 @@ export function Viewer3D() {
   // 色带与范围只对「标量 → 颜色」的着色有意义
   const noRamp = isFlat || isRgbShading;
 
-  const dataRange = useMemo(
-    () => dataRangeOf(cloud, effectiveShading),
-    [cloud, effectiveShading],
-  );
+  // 「自动」范围：对比时取两侧的并集（C5）
+  const dataRange = useMemo<[number, number]>(() => {
+    const a = dataRangeOf(cloud, effectiveShading);
+    if (!cloudB || cloudB.pointCount === 0) return a;
+    const b = dataRangeOf(cloudB, effectiveShading);
+    if (!cloud || cloud.pointCount === 0) return b;
+    return [Math.min(a[0], b[0]), Math.max(a[1], b[1])];
+  }, [cloud, cloudB, effectiveShading]);
   const [lo, hi] = rangeAuto ? dataRange : manualRange;
 
   const pinnedLabel = useMemo(() => {
@@ -238,6 +321,38 @@ export function Viewer3D() {
     };
   }, []);
 
+  // -- 对比的两栏：同一个场景切成两个视口，窄了就上下叠 ----------------------
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!compareOn || !host) return;
+    const measure = () => setNarrow(host.clientWidth < COMPARE_MIN_LR_WIDTH);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [compareOn]);
+  const split: SplitMode = narrow ? "tb" : "lr";
+  useEffect(() => {
+    sceneRef.current?.setViews(compareOn ? 2 : 1, split);
+  }, [compareOn, split]);
+  // 验收脚本读相机：两栏共用一台，拖动任一栏两边一起变（§6 第 3 条）
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const host = hostRef.current;
+    if (!compareOn || !scene || !host) return;
+    const write = () => {
+      const c = scene.active().position;
+      const text = [c.x, c.y, c.z].map(round3).join(",");
+      if (host.dataset.cameraPos !== text) host.dataset.cameraPos = text;
+    };
+    scene.frameListeners.add(write);
+    return () => {
+      scene.frameListeners.delete(write);
+      delete host.dataset.cameraPos;
+    };
+  }, [compareOn]);
+
   // -- 几何体：只随点云重建，着色参数一律不进这个 effect ---------------------
   useEffect(() => {
     const scene = sceneRef.current;
@@ -247,19 +362,31 @@ export function Viewer3D() {
     setPoints(scene, 0, buildPoints(cloud, pointSizeRef.current));
   }, [cloud]);
 
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    setPoints(scene, 1, buildPoints(cloudB, pointSizeRef.current));
+  }, [cloudB]);
+
   // 换着色模式/色带/范围只重写 color 属性，positions 和 boundingSphere 原样留着。
   useEffect(() => {
     const points = sceneRef.current?.points[0];
     if (!points || !cloud || cloud.pointCount === 0) return;
     paintPoints(points, cloud, { shading: effectiveShading, ramp, lo, hi });
   }, [cloud, effectiveShading, ramp, lo, hi]);
+  useEffect(() => {
+    const points = sceneRef.current?.points[1];
+    if (!points || !cloudB || cloudB.pointCount === 0) return;
+    paintPoints(points, cloudB, { shading: effectiveShading, ramp, lo, hi });
+  }, [cloudB, effectiveShading, ramp, lo, hi]);
 
   // 点大小只改材质，不重建几何体 —— 它曾经也在上面那个 effect 的依赖里，
   // 拖一下滑块就要重分配 24MB 颜色数组、重扫两百万点（见 README「踩过的坑」）。
   useEffect(() => {
     pointSizeRef.current = pointSize;
-    const p = sceneRef.current?.points[0];
-    if (p) (p.material as THREE.PointsMaterial).size = pointSize;
+    for (const p of sceneRef.current?.points ?? []) {
+      if (p) (p.material as THREE.PointsMaterial).size = pointSize;
+    }
   }, [pointSize]);
 
   // -- 2D 几何叠画（G7）：整组重建，线与端口同色 -----------------------------
@@ -276,21 +403,19 @@ export function Viewer3D() {
     return n;
   }, [overlayShapes]);
 
+  const overlayShapesB = useMemo(
+    () => (compareOn ? (sourceB.outputs ?? []).filter((o) => o.value !== undefined) : []),
+    [compareOn, sourceB.outputs],
+  );
+
   useEffect(() => {
     const scene = sceneRef.current;
-    if (!scene) return;
-    disposeOverlay(scene.overlay);
-    if (overlayShapes.length === 0) return;
-    // 线的长度/十字的大小要有个尺度参照：优先用点云的跨度，没有云就用几何自己的。
-    const span = cloud
-      ? Math.max(cloud.bounds[3]! - cloud.bounds[0]!, cloud.bounds[4]! - cloud.bounds[1]!, 1e-3)
-      : Math.max(...overlayShapes.map(extentOf), 1e-3);
-    for (const out of overlayShapes) {
-      const hex = typesByName.get(out.type)?.color ?? "#6b7280";
-      const color = new THREE.Color(hex).getHex();
-      for (const line of shapesOf(out, color, span)) scene.overlay.add(line);
-    }
+    if (scene) drawShapes(scene.overlays[0], overlayShapes, cloud, typesByName);
   }, [overlayShapes, cloud, typesByName]);
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (scene) drawShapes(scene.overlays[1], overlayShapesB, cloudB, typesByName);
+  }, [overlayShapesB, cloudB, typesByName]);
 
   // -- 拖框的底图（L15）：roiBackdrop 指的文件（例如槽 1 的左右模板）不属于任何一次运行 ——
   // 框没填好时 locate_template 过不了校验，根本不会跑，底图却必须先看得见。指的是输入端口时
@@ -414,7 +539,11 @@ export function Viewer3D() {
     });
   }, [roi, activeOp, roiNode, backdrop.bounds, cloud]);
   const roiEditing =
-    content === "cloud" && cameraMode === "2d" && roiItems.length > 0 && activeNode !== undefined;
+    !compareOn &&
+    content === "cloud" &&
+    cameraMode === "2d" &&
+    roiItems.length > 0 &&
+    activeNode !== undefined;
   // 切换条只给带底图的组（有名字的）；数据坐标系那一组只有一组，不需要切
   const roiTabs = roiEditing && roiFrames.some((f) => f.label) ? roiFrames : [];
 
@@ -435,9 +564,10 @@ export function Viewer3D() {
     const scene = sceneRef.current;
     if (!scene) return;
     setOverlayBounds(overlayBoundsOf(scene.overlay));
-    const bounds = unionBounds(cloud, scene.overlay, scene.backdrop);
+    // 对比时按 A ∪ B 取景（§1.3）：同一台相机，两栏里的东西都要装得下
+    const bounds = unionBounds([cloud, cloudB], scene.overlays[0], scene.overlays[1], scene.backdrop);
     if (bounds) fitToBounds(scene, bounds);
-  }, [cloud, overlayShapes, backdrop.bounds]);
+  }, [cloud, cloudB, overlayShapes, overlayShapesB, backdrop.bounds, compareOn, split]);
 
   // 相机模式（G7）。只换 controls 挂的那台相机，场景与几何原封不动。
   useEffect(() => {
@@ -456,7 +586,9 @@ export function Viewer3D() {
     if (!scene) return;
     // 读 buffer 前立刻重画一帧：换成 preserveDrawingBuffer 的话每一帧都要多付一次代价。
     scene.renderFrame();
-    await exportCanvasPng(scene.renderer.domElement, display.nodeId ?? "view");
+    // 对比时一块画布就是两栏，导出的天然是一张并排图（C4）
+    const name = compareOn ? `${display.nodeId ?? "A"}_vs_${compareB?.nodeId ?? "B"}` : (display.nodeId ?? "view");
+    await exportCanvasPng(scene.renderer.domElement, name);
   };
 
   return (
@@ -483,6 +615,12 @@ export function Viewer3D() {
       data-backdrop={backdrop.count}
       data-backdrop-bounds={boundsAttr(backdrop.bounds)}
       data-backdrop-error={backdrop.error ?? undefined}
+      data-compare={compareOn ? "1" : "0"}
+      data-compare-a={compareOn ? (activeKey ?? "") : undefined}
+      data-compare-b={compareOn && compareB ? fullId(compareB.path, compareB.nodeId) : undefined}
+      data-compare-frozen={compareOn ? (frozenB ? "1" : "0") : undefined}
+      data-compare-run-b={compareOn ? (sourceB.display.runId ?? "") : undefined}
+      data-split={compareOn ? split : undefined}
     >
       <div className="viewer__bar">
         <span className="viewer__title">预览</span>
@@ -557,7 +695,9 @@ export function Viewer3D() {
               className="viewer__fit"
               onClick={() => {
                 const scene = sceneRef.current;
-                const bounds = scene ? unionBounds(cloud, scene.overlay, scene.backdrop) : null;
+                const bounds = scene
+                  ? unionBounds([cloud, cloudB], scene.overlays[0], scene.overlays[1], scene.backdrop)
+                  : null;
                 if (scene && bounds) fitToBounds(scene, bounds);
               }}
               disabled={!cloud && overlayCount === 0 && backdrop.count === 0}
@@ -657,7 +797,22 @@ export function Viewer3D() {
         >
           {pinnedId ? "已钉住" : "钉住"}
         </button>
-        {content === "cloud" && (
+        <button
+          type="button"
+          className="viewer__btn"
+          data-testid="viewer-compare"
+          data-on={compareOn ? "1" : "0"}
+          onClick={() => useCompareStore.getState().toggle()}
+          disabled={!compareOn && !activeId}
+          title={
+            compareOn
+              ? "退出对比（Ctrl+Shift+D）"
+              : "与基准对比（Ctrl+Shift+D）：B 冻结在当前结果上，之后改参数重跑只有 A 变"
+          }
+        >
+          {compareOn ? "退出对比" : "对比"}
+        </button>
+        {stageContent === "cloud" && (
           <button
             type="button"
             className="viewer__btn"
@@ -704,11 +859,36 @@ export function Viewer3D() {
 
       <div className="viewer__stage">
         <div className="viewer__canvas" ref={hostRef} data-testid="viewer3d-canvas" />
-        {content === "value" && !display.status && !loading && <ValuePane outputs={activeOutputs} />}
+        {compareOn && (
+          <CompareStage
+            split={split}
+            stage={stageContent}
+            a={{ display, loading, content, outputs: activeOutputs, label: labelA }}
+            b={{
+              display: sourceB.display,
+              loading: sourceB.loading,
+              content: sourceB.content,
+              outputs: sourceB.outputs,
+              label: labelB,
+            }}
+            frozen={frozenB !== null}
+            canFreeze={canFreezeB}
+            frozenPoints={frozenB?.maxPoints ?? null}
+            onFreeze={() => {
+              const snap = snapshotOf(sourceB, labelB, maxPoints);
+              if (snap) useCompareStore.getState().freeze(snap);
+            }}
+            onUnfreeze={() => useCompareStore.getState().unfreeze()}
+            onExit={() => useCompareStore.getState().exit()}
+          />
+        )}
+        {!compareOn && content === "value" && !display.status && !loading && (
+          <ValuePane outputs={activeOutputs} />
+        )}
         {roiEditing && activeNode && (
           <RoiLayer host={sceneHost} nodeId={activeNode.id} items={roiItems} />
         )}
-        {(display.status || loading || (roiEditing && backdrop.error)) && (
+        {!compareOn && (display.status || loading || (roiEditing && backdrop.error)) && (
           // 拖框时底图（模板）已经画出来了，状态只缩在角上，不盖住画面。底图取不到的原因也在这里说
           <div
             className={`viewer__empty${roiEditing ? " viewer__empty--corner" : ""}`}
@@ -719,6 +899,7 @@ export function Viewer3D() {
           </div>
         )}
       </div>
+      {diff && <CompareDiff diff={diff} />}
     </div>
   );
 }

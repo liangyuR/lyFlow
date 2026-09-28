@@ -19,6 +19,7 @@ export {
 export { useGraphStore, currentSubgraph, emptyDoc } from "./store/graph";
 export { useUiStore } from "./store/ui";
 export { usePeekStore, type PeekWindow, type PeekView } from "./store/peek";
+export { useCompareStore, type CompareSlot, type CompareSnapshot } from "./store/compare";
 export { peekSourceOf, type PeekSource } from "./lib/peekSource";
 export {
   useManifestStore,
