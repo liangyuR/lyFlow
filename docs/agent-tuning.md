@@ -119,16 +119,16 @@ lyflow patch graph.lyflow.json --remove-node 'b_*' \
 lyflow patch graph.lyflow.json --rewire n_fb_line:out=n_fit_base:line -o short.lyflow.json --json
 ```
 
-- **动作顺序定死 remove → add → rewire → set → recipe → param**，与你打字的先后无关。所以「先改接线、再删被短接掉
+- **动作顺序定死 remove → add → rewire → connect → set → recipe → param**，与你打字的先后无关。所以「先改接线、再删被短接掉
   的那条分支」是**两条命令**：第一条只 `--rewire`，第二条才 `--remove-node`。
   反过来写（一条命令里又删又接）会报「图里没有节点 X」，因为删在前。
 - `--remove-node` 连带删它的所有边；glob 只对 id（`b_*` 这种）。
   **图级 `outputs` 还指着的节点不给删** —— 报错、整体不写，而不是静默把那个读数删掉。
 - `--rewire <节点>:<端口>=<节点>:<端口>` 把**所有**从左端口出发的边改为从右端口出发，
   这是「短接掉一段」的写法。
-- `--add-node '{"id":…,"op":…}'` 只加节点，加不了边；新节点要么是不需要输入的源算子，
-  要么配 `--rewire` 把已有的边挪到它身上。
-- **可以重跑。** 删不存在的 id、左端口已经没有出边的 rewire、同值的 set 都是 no-op 并在 stderr 说一句，
+- `--add-node '{"id":…,"op":…}'` 只加节点；要接边配 `--connect <节点>:<输出>=<节点>:<输入>`（排在 add 之后，
+  同一条命令里就能把新节点接上）。目标输入口已经有边时报错、整体不写 —— 换源用 `--rewire`。
+- **可以重跑。** 删不存在的 id、左端口已经没有出边的 rewire、已经在的边（connect）、同值的 set 都是 no-op 并在 stderr 说一句，
   所以同一条命令跑两遍第二遍什么都不做，`lyflow diff` 为空。这正是「改一处 → 全量重跑 →
   证明只有该动的那几格动了」这条工作法的前提。
 - 每一步之后过形状校验，最后过 `validate`；**任一步不过就整体不写**，退出 1 并把全部诊断打在 stdout。
@@ -429,7 +429,7 @@ lyflow eval g.lyflow.json \
 | `lyflow eval …` | `eval` | 默认 `compact`：一组一行，只回 `paramSet/params/metric/group/n/ok/failCodes?/mean/std`；逐行 `eval_row` 落盘给 `rowsPath` |
 | `lyflow perturb …` | `perturb` | 只回 `perturb_summary` 与不通过的样本；**全部** `perturb_sample` 落盘给 `samplesPath` |
 | `lyflow diff a b --json` | `diff_graphs` | 原样 |
-| `lyflow patch <g> --remove-node … --rewire … --dry-run` | `patch_graph` | 四个动作是四个数组（`removeNode` / `addNode` / `rewire` / `set`）；**`dryRun` 默认 true**，要真写得显式给 `dryRun: false`，`out` 必须配着它给 |
+| `lyflow patch <g> --remove-node … --rewire … --dry-run` | `patch_graph` | 五个动作是五个数组（`removeNode` / `addNode` / `rewire` / `connect` / `set`）；**`dryRun` 默认 true**，要真写得显式给 `dryRun: false`，`out` 必须配着它给 |
 | `lyflow params <g> --only … --set …` | `get_params` | 字段同名（`node` / `only` / `set` / `recipe` / `baseDir`），`--json` 由工具自己加；回 `{ count, params: [...] }`，一行一个参数。未知节点 / 未知参数 / 配方失配在 CLI 那边是退出码 4，工具据此报错并把诊断或 stderr 带回来 |
 | `lyflow recipes <g> --json` | `list_recipes` | 每个配方一项：`runnable`、四类失配各几条、`items`（`kind/param/message/fixLabel`）、默认星标；只读，没有写配方的工具 |
 | `lyflow run <g> --recipe <文件>` | `run_graph` 的 `recipe` | 失配 ①–③ 时不跑、报错带条目（CLI 是退出码 4）；跑成了返回里多一个 `recipe` |

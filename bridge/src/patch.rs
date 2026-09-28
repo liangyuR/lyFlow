@@ -1,6 +1,6 @@
 //! `lyflow patch` —— 图的结构编辑（ADR-0023）。
 //!
-//! 六个动作、固定顺序（remove → add → rewire → set → recipe → param）、幂等、每步之后过一遍形状校验，
+//! 七个动作、固定顺序（remove → add → rewire → connect → set → recipe → param）、幂等、每步之后过一遍形状校验，
 //! 最后过 core 的 `validate`；任一步不过就整体不写。图手术的那几件事（找空位、
 //! 改边的源端口）与 `perturb::insert_after` 是同一套写法，只是这里由命令行指定。
 
@@ -14,7 +14,7 @@ use crate::cli::{
     render_diff, Loaded, Parsed, Sink, EXIT_FAILED, EXIT_INVALID, EXIT_OK, EXIT_USAGE,
 };
 use crate::eval::wildcard_match_cs;
-use crate::graph::{GraphDoc, Node, PortRef};
+use crate::graph::{Edge, GraphDoc, Node, PortRef};
 
 /// 新节点没给坐标时放在图的右下角空白处。UI 字段，不影响执行。
 const CORNER_DX: f64 = 260.0;
@@ -29,6 +29,8 @@ pub(crate) struct Applied {
     pub removed: Vec<String>,
     pub added: Vec<String>,
     pub rewired: Vec<String>,
+    /// `--connect` 新加的边（原样的 spec）。
+    pub connected: Vec<String>,
     pub set: Vec<String>,
     /// `--recipe` 改了 default 的顶层参数名（配方里的值写成了基础）。
     pub recipe: Vec<String>,
@@ -54,6 +56,7 @@ impl Applied {
         self.removed.is_empty()
             && self.added.is_empty()
             && self.rewired.is_empty()
+            && self.connected.is_empty()
             && self.set.is_empty()
             && self.recipe.is_empty()
             && self.params.is_empty()
@@ -64,6 +67,7 @@ impl Applied {
             "removed": self.removed,
             "added": self.added,
             "rewired": self.rewired,
+            "connected": self.connected,
             "set": self.set,
             "recipe": self.recipe,
             "param": self.params,
@@ -73,7 +77,7 @@ impl Applied {
 
 type Step = fn(&mut GraphDoc, &[String], &mut Applied) -> Result<(), String>;
 
-// ------------------------------------------------------------------ 四个动作
+// ------------------------------------------------------------------ 七个动作
 
 /// `--remove-node <id|glob>`：删节点与它的所有边。glob 只对 id，**大小写敏感**
 /// （m6-plan §10 第 6 条）：`N_FB_*` 不该配上 `n_fb_*`，多删一批比少删一个更难发现。
@@ -177,8 +181,8 @@ pub(crate) fn apply_rewires(
         let (left, right) = spec.split_once('=').ok_or_else(|| {
             format!("--rewire 的写法是 <节点>:<端口>=<节点>:<端口>，收到 {spec}")
         })?;
-        let (from_node, from_port) = parse_port(left, spec)?;
-        let (to_node, to_port) = parse_port(right, spec)?;
+        let (from_node, from_port) = parse_port("--rewire", left, spec)?;
+        let (to_node, to_port) = parse_port("--rewire", right, spec)?;
         for (id, what) in [(&from_node, "左端口"), (&to_node, "右端口")] {
             if !doc.nodes.iter().any(|n| &n.id == id) {
                 return Err(format!("--rewire {spec} 的{what}：图里没有节点 {id}"));
@@ -216,6 +220,47 @@ pub(crate) fn apply_rewires(
             ));
         }
         applied.rewired.push(spec.clone());
+    }
+    Ok(())
+}
+
+/// `--connect <节点>:<输出>=<节点>:<输入>`：加一条边（ADR-0023 当初留的口子）。
+/// 同样的边已经在了是 no-op；目标输入口已经被别的边占了，由之后的形状校验报「单连接」、整体不写 ——
+/// 要换源就用 `--rewire`，不在这里悄悄顶掉。排在 add 之后，所以同一条命令里新加的节点当场就能连。
+pub(crate) fn apply_connects(
+    doc: &mut GraphDoc,
+    specs: &[String],
+    applied: &mut Applied,
+) -> Result<(), String> {
+    for spec in specs {
+        let (left, right) = spec.split_once('=').ok_or_else(|| {
+            format!("--connect 的写法是 <节点>:<输出>=<节点>:<输入>，收到 {spec}")
+        })?;
+        let from = parse_port("--connect", left, spec)?;
+        let to = parse_port("--connect", right, spec)?;
+        for ((id, _), what) in [(&from, "源端"), (&to, "目标端")] {
+            if !doc.nodes.iter().any(|n| &n.id == id) {
+                return Err(format!("--connect {spec} 的{what}：图里没有节点 {id}"));
+            }
+        }
+        let (from, to) = (
+            PortRef { node: from.0, port: from.1 },
+            PortRef { node: to.0, port: to.1 },
+        );
+        if doc.edges.iter().any(|e| {
+            e.from.node == from.node && e.from.port == from.port && e.to.node == to.node && e.to.port == to.port
+        }) {
+            applied.noop(
+                "connect",
+                spec,
+                "same_edge",
+                &format!("--connect {spec}：这条边已经在了，跳过"),
+            );
+            continue;
+        }
+        let id = doc.unique_edge_id(&format!("e_{}_{}", from.node, to.node));
+        doc.edges.push(Edge { id, from, to });
+        applied.connected.push(spec.clone());
     }
     Ok(())
 }
@@ -313,18 +358,18 @@ pub(crate) fn apply_params(
     Ok(())
 }
 
-fn parse_port(spec: &str, whole: &str) -> Result<(String, String), String> {
+fn parse_port(flag: &str, spec: &str, whole: &str) -> Result<(String, String), String> {
     let (node, port) = spec.split_once(':').ok_or_else(|| {
-        format!("--rewire 的两端都要写成 <节点>:<端口>，收到 {spec}（整条是 {whole}）")
+        format!("{flag} 的两端都要写成 <节点>:<端口>，收到 {spec}（整条是 {whole}）")
     })?;
     if node.is_empty() || port.is_empty() {
         return Err(format!(
-            "--rewire 的两端都要写成 <节点>:<端口>，收到 {spec}（整条是 {whole}）"
+            "{flag} 的两端都要写成 <节点>:<端口>，收到 {spec}（整条是 {whole}）"
         ));
     }
     if node.contains('/') || port.contains('/') {
         return Err(format!(
-            "--rewire {spec} 指向子图内部端口：这一版只改顶层图的边"
+            "{flag} {spec} 指向子图内部端口：这一版只改顶层图的边"
         ));
     }
     Ok((node.to_string(), port.to_string()))
@@ -382,15 +427,16 @@ pub(crate) fn cmd_patch(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         line(
             err,
             "用法：lyflow patch <graph> [--remove-node <id|glob>]... [--add-node <json>]... \
-             [--rewire <from>=<to>]... [--set <node>.<param>=<json>]... [--recipe <文件>] [--param <名字>=<json>]... \
+             [--rewire <from>=<to>]... [--connect <from>=<to>]... [--set <node>.<param>=<json>]... [--recipe <文件>] [--param <名字>=<json>]... \
              [--dry-run] [-o <out>] [--json]",
         );
         return EXIT_USAGE;
     };
-    let actions: [(&str, Step, &[String]); 6] = [
+    let actions: [(&str, Step, &[String]); 7] = [
         ("remove-node", apply_removes, parsed.many("remove-node")),
         ("add-node", apply_adds, parsed.many("add-node")),
         ("rewire", apply_rewires, parsed.many("rewire")),
+        ("connect", apply_connects, parsed.many("connect")),
         ("set", apply_sets, parsed.many("set")),
         ("recipe", apply_recipes, parsed.many("recipe")),
         ("param", apply_params, parsed.many("param")),
@@ -398,7 +444,7 @@ pub(crate) fn cmd_patch(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     if actions.iter().all(|(_, _, specs)| specs.is_empty()) {
         line(
             err,
-            "至少给一个动作：--remove-node / --add-node / --rewire / --set / --recipe / --param",
+            "至少给一个动作：--remove-node / --add-node / --rewire / --connect / --set / --recipe / --param",
         );
         return EXIT_USAGE;
     }
@@ -510,10 +556,11 @@ pub(crate) fn cmd_patch(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     }
 
     let done = format!(
-        "删 {} 个节点、加 {} 个、改接 {} 处、改参数 {} 处、配方写回基础 {} 个、改顶层参数 {} 个；{} 条无操作",
+        "删 {} 个节点、加 {} 个、改接 {} 处、加边 {} 条、改参数 {} 处、配方写回基础 {} 个、改顶层参数 {} 个；{} 条无操作",
         applied.removed.len(),
         applied.added.len(),
         applied.rewired.len(),
+        applied.connected.len(),
         applied.set.len(),
         applied.recipe.len(),
         applied.params.len(),
@@ -867,6 +914,45 @@ mod tests {
         assert_eq!(bad.lines()[0][0]["code"], "bad_param");
         assert!(bad.err.contains("没有写任何文件"), "{}", bad.err);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before, "不该写盘");
+
+        // sink 的输入已经接着 a：--connect 不替人顶掉，由「单连接」拦住（要换源用 --rewire）
+        let taken = cli(&["patch", &path, "--connect", "g:cloud=sink:cloud", "--json"]);
+        assert_eq!(taken.code, EXIT_INVALID, "{}", taken.out);
+        assert!(taken.err.contains("connect 之后"), "{}", taken.err);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before, "不该写盘");
+    }
+
+    /// `--add-node` 单独用只对源算子成立（ADR-0023）；配上 `--connect`，一条命令就能挂上一个要输入的节点。
+    /// 同一条 `--connect` 再跑一遍是 no-op（same_edge），文件一个字节不动。
+    #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
+    fn connect_wires_a_node_added_in_the_same_patch_and_is_idempotent() {
+        let dir = workspace("connect");
+        let path = graph(&dir, false);
+        let first = cli(&[
+            "patch",
+            &path,
+            "--add-node",
+            r#"{"id":"v2","op":"filter.voxel_grid","params":{"leafSize":[0.05,0.05,0.05]}}"#,
+            "--connect",
+            "g:cloud=v2:cloud",
+            "--json",
+        ]);
+        assert_eq!(first.code, EXIT_OK, "{}", first.err);
+        assert_eq!(ids(&first.result()["applied"]["connected"]), vec!["g:cloud=v2:cloud"]);
+        let doc = read(&path);
+        let wired = doc["edges"].as_array().unwrap().iter().any(|e| {
+            e["from"] == json!({"node": "g", "port": "cloud"}) && e["to"] == json!({"node": "v2", "port": "cloud"})
+        });
+        assert!(wired, "{}", doc["edges"]);
+        let after_first = std::fs::read_to_string(&path).unwrap();
+
+        let again = cli(&["patch", &path, "--connect", "g:cloud=v2:cloud", "--json"]);
+        assert_eq!(again.code, EXIT_OK, "{}", again.err);
+        let res = again.result();
+        assert_eq!(res["noops"][0]["reason"], "same_edge", "{}", again.out);
+        assert_eq!(res["wrote"], Value::Null, "全 no-op 的原地覆写不该落盘");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), after_first);
     }
 
     /// 节点 id 的通配是大小写敏感的（m6-plan §10 第 6 条）：`N_FB_*` 配不上 `n_fb_*`，

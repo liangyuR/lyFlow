@@ -95,6 +95,10 @@ core 的 `validate` 是权威那一层（算子、参数、端口类型、必填
 两条命令做完（先 12 条 `--rewire`，再 `--remove-node 'n_fb_*' --remove-node 'b_*'`），
 一条命令写不下的原因正是上面那条「顺序定死」。等到真的有人被 `--connect` 卡住再加。
 
+> **修订**：`--connect <节点>:<输出>=<节点>:<输入>` 已加上，顺序是 remove → add → rewire → **connect** → set →
+> recipe → param，所以同一条命令里新加的节点当场就能接上。同样的边已经在是 no-op（`same_edge`）；
+> 目标输入口已被别的边占着时由结构校验的「单连接」拦住、整体不写 —— 换源仍用 `--rewire`，`--connect` 不替人顶掉。
+
 **glob 只对节点 id，且大小写敏感**（m6-plan §10 第 6 条）—— `wildcard_match_cs`（`eval.rs`，
 `*` 与 `?`，与文件名那份共用同一个 glob 引擎，但另起一个函数）。节点 id 是图里写死的标识符，
 `N_FB_*` 与 `n_fb_*` 是两个不同的选择，让它们互相匹配只会让 `--remove-node` 悄悄多删一批 ——

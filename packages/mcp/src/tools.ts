@@ -842,8 +842,8 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
     {
       title: "改图结构",
       description:
-        "起本地 lyflow patch：删节点、加节点、改接线、改参数，顺序定死 remove → add → rewire → set。" +
-        "**dryRun 默认 true**，先看 diff 再写。幂等：删不存在的 id、没有出边的 rewire、同值的 set 都是 no-op，" +
+        "起本地 lyflow patch：删节点、加节点、改接线、加边、改参数，顺序定死 remove → add → rewire → connect → set。" +
+        "**dryRun 默认 true**，先看 diff 再写。幂等：删不存在的 id、没有出边的 rewire、已经在的边、同值的 set 都是 no-op，" +
         "所以同一条调用跑两遍第二遍 diff 为空。每步过形状校验、最后过 validate，任一步不过整体不写。",
       inputSchema: {
         graphPath: z.string().describe("图文件路径，CLI 直接读它；不给 out 时就地覆写的也是它"),
@@ -861,6 +861,13 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           .array(z.string())
           .optional()
           .describe("<节点>:<端口>=<节点>:<端口>，所有从左端口出发的边改为从右端口出发"),
+        connect: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "<节点>:<输出>=<节点>:<输入>，加一条边；排在 addNode 之后，新加的节点当场能连。" +
+              "目标输入已经有边时报错（换源用 rewire）",
+          ),
         set: z.array(z.string()).optional().describe("<节点>.<参数>=<json>，与 CLI --set 相同"),
         dryRun: z.boolean().optional().describe("默认 true：只算差异不写文件"),
         out: z.string().optional().describe("写到别的路径（要配 dryRun:false）；不给就原地覆写"),

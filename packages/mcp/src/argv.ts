@@ -143,6 +143,7 @@ export interface PatchInput {
   removeNode?: string[] | undefined;
   addNode?: Record<string, unknown>[] | undefined;
   rewire?: string[] | undefined;
+  connect?: string[] | undefined;
   set?: string[] | undefined;
   dryRun?: boolean | undefined;
   out?: string | undefined;
@@ -153,13 +154,16 @@ export function patchArgv(input: PatchInput): string[] {
   const removeNode = input.removeNode ?? [];
   const addNode = input.addNode ?? [];
   const rewire = input.rewire ?? [];
+  const connect = input.connect ?? [];
   const set = input.set ?? [];
-  if (removeNode.length + addNode.length + rewire.length + set.length === 0) {
-    throw new Error("至少给一个动作：removeNode / addNode / rewire / set");
+  if (removeNode.length + addNode.length + rewire.length + connect.length + set.length === 0) {
+    throw new Error("至少给一个动作：removeNode / addNode / rewire / connect / set");
   }
-  for (const r of rewire) {
-    if (!/^[^:=]+:[^:=]+=[^:=]+:[^:=]+$/.test(r)) {
-      throw new Error(`rewire 的写法是 <节点>:<端口>=<节点>:<端口>，收到 ${r}`);
+  for (const [name, specs] of [["rewire", rewire], ["connect", connect]] as const) {
+    for (const r of specs) {
+      if (!/^[^:=]+:[^:=]+=[^:=]+:[^:=]+$/.test(r)) {
+        throw new Error(`${name} 的写法是 <节点>:<端口>=<节点>:<端口>，收到 ${r}`);
+      }
     }
   }
   // dryRun 默认 true：一个能原地覆写图的工具，默认必须是「先给我看差异」
@@ -172,6 +176,7 @@ export function patchArgv(input: PatchInput): string[] {
   for (const id of removeNode) argv.push("--remove-node", id);
   for (const node of addNode) argv.push("--add-node", JSON.stringify(node));
   for (const r of rewire) argv.push("--rewire", r);
+  for (const c of connect) argv.push("--connect", c);
   for (const s of set) argv.push("--set", s);
   if (dryRun) argv.push("--dry-run");
   if (input.out) argv.push("-o", input.out);

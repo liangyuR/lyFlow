@@ -80,6 +80,18 @@ pub enum GraphError {
 }
 
 impl GraphDoc {
+    /// 图里还没被占用的边 id：`base`，占了就 `base_2`、`base_3`……
+    /// 图手术（迁移加边、perturb 插节点、patch --connect）都走它，免得三处各写一份。
+    pub(crate) fn unique_edge_id(&self, base: &str) -> String {
+        let mut id = base.to_string();
+        let mut k = 2usize;
+        while self.edges.iter().any(|e| e.id == id) {
+            id = format!("{base}_{k}");
+            k += 1;
+        }
+        id
+    }
+
     /// 结构完整性校验。不需要 manifest。
     pub fn validate_structure(&self) -> Result<(), GraphError> {
         if self.schema_version != SCHEMA_VERSION {
@@ -221,13 +233,7 @@ impl GraphDoc {
                 let (Some(from), Some(to)) = (port_ref(&e["from"]), port_ref(&e["to"])) else {
                     continue;
                 };
-                let base = e["id"].as_str().unwrap_or("m").to_string();
-                let mut id = base.clone();
-                let mut k = 2;
-                while self.edges.iter().any(|x| x.id == id) {
-                    id = format!("{base}_{k}");
-                    k += 1;
-                }
+                let id = self.unique_edge_id(e["id"].as_str().unwrap_or("m"));
                 self.edges.push(Edge { id, from, to });
             }
         }

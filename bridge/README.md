@@ -243,7 +243,7 @@ lyflow recipes  g.lyflow.json --json                                          # 
 - `run` / `validate` / `plan` / `params` / `eval` / `patch` 都认（`dump` / `sweep` / `perturb` 经同一个 `load_graph`，也认；
   `migrate` 拒绝）。叠加顺序：基础 → `--recipe` → `--param`；配方的值与 `--param` 一样写成图参数的 `default` 再交给 core。
 - `eval`：配方作用于所有样本；`--params` 的参数组里不含 `.` 的键写图参数，夹在配方与 `--param` 之间。
-- `patch --recipe`：把配方的值写回基础（落盘），动作顺序 remove → add → rewire → set → recipe → param。
+- `patch --recipe`：把配方的值写回基础（落盘），动作顺序 remove → add → rewire → connect → set → recipe → param。
 - 失配 ①–③：`recipe_mismatch:`，退出码 4，一个节点都不跑、什么都不写；④ 只在 stderr 提示。读不出配方是 `bad_recipe:`（4）。
 - `lyflow recipes`：只读，不需要 core；给 `--recipe` 时每行带合成好的 `params`（MCP 的 `run_graph` 拿它交给后端）。
 
@@ -324,7 +324,7 @@ lyflow patch 4.lyflow.json --remove-node 'b_*' --rewire n_fb_line:out=n_fit_base
 lyflow patch 4.lyflow.json --rewire n_fb_line:out=n_fit_base:line -o short.lyflow.json --json
 ```
 
-- **顺序是 remove → add → rewire → set**，与命令行上的先后无关 —— 同一组动作换个写法得到同一张图。
+- **顺序是 remove → add → rewire → connect → set → recipe → param**，与命令行上的先后无关 —— 同一组动作换个写法得到同一张图。
   「先改接线再删节点」要写成两条命令，中间那一步本来就该被看一眼。
 - `--remove-node` 删节点连带它的所有边；glob（`*` / `?`，大小写不敏感）只对 id。
   **图级 `outputs` 还指着的节点不给删**：报错、整体不写、退出 1。

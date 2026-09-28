@@ -178,7 +178,7 @@ lyflow recipes 车门缝隙.lyflow.json --json        # 列配方目录：名字
   规则），写在配方之上；命令行的 `--param` 最后写，永远说了算。完整顺序：基础 → 配方 → 参数组 → `--param`。参数组里写了图没声明
   的名字是 `unknown_param`，退出码 4。
 - **`patch --recipe`**：把配方的值**写回基础**（落盘改图参数的 `default`，等于在编辑器里对每一行点「写回基础」）。动作顺序
-  remove → add → rewire → set → recipe → param，回执 `applied.recipe` 列出改了的名字；全部同值是 no-op。
+  remove → add → rewire → connect → set → recipe → param，回执 `applied.recipe` 列出改了的名字；全部同值是 no-op。
 - **失配 ①–③**：不跑、不写，**退出码 4**，stderr 逐条列出（与编辑器同一套用语，`[类别] 参数：原因 → 建议`）：
 
   ```

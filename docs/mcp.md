@@ -93,7 +93,7 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 | `diff_graphs` | `a` `b` | `LYFLOW_CLI diff a b --json` | `{exitCode, diff}` 原样 |
 | `get_params` | `graphPath` `node[]?` `only?` `set[]?` `recipe?` `baseDir?` | `LYFLOW_CLI params … --json` | `{exitCode, argv, count, params:[{node,op,param,value,source,graphParam?,unit?,min?,max?}], stderrTail}` |
 | `list_recipes` | `graphPath` | `LYFLOW_CLI recipes <graph> --json` | `{dir, exists, default, count, recipes:[{name,file,default,values,runnable,blocking,mismatches,items}], problems}`（见下） |
-| `patch_graph` | `graphPath` `removeNode[]?` `addNode[]?` `rewire[]?` `set[]?` `dryRun?` `out?` | `LYFLOW_CLI patch … --json` | `patch_result` 摊平：`{exitCode, argv, applied, noops, wrote, diff, stderrTail}` |
+| `patch_graph` | `graphPath` `removeNode[]?` `addNode[]?` `rewire[]?` `connect[]?` `set[]?` `dryRun?` `out?` | `LYFLOW_CLI patch … --json` | `patch_result` 摊平：`{exitCode, argv, applied, noops, wrote, diff, stderrTail}` |
 
 ### 图怎么给
 
@@ -104,7 +104,7 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 ### `patch_graph`：`dryRun` 默认 **true**
 
 改图结构的四个动作（[ADR-0023](adr/0023-patch-as-idempotent-structural-edit.md)），
-顺序定死 remove → add → rewire → set，与传参顺序无关。默认只算差异不写文件；
+顺序定死 remove → add → rewire → connect → set，与传参顺序无关。默认只算差异不写文件；
 要真写就给 `dryRun: false`，写到别的路径再加 `out`（`out` 必须配 `dryRun: false`，
 否则当场报错 ——「我以为它写了」是这套工具里最贵的误解）。
 

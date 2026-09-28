@@ -116,12 +116,12 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
         图旁配方目录（<图名>.recipes/）里的配方：名字、值个数、四类失配与建议、默认配方。只读，退出码 0。
         给了 --recipe 就只看这几个文件，每个另带 params（合成好的图参数取值，给宿主 / MCP 用）。
   lyflow patch    <graph> [--remove-node <id|glob>]... [--add-node <json>]...
-                          [--rewire <节点>:<端口>=<节点>:<端口>]...
+                          [--rewire <节点>:<端口>=<节点>:<端口>]... [--connect <节点>:<输出>=<节点>:<输入>]...
                           [--set <nodeId>.<param>=<json>]... [--recipe <配方文件>] [--param <名字>=<json>]...
                           [--dry-run] [-o <out>] [--json] [--base-dir <dir>]
-        动作顺序定死 remove → add → rewire → set → recipe（把配方的值写回基础）→ param（改顶层参数的 default）；
+        动作顺序定死 remove → add → rewire → connect（加一条边）→ set → recipe（把配方的值写回基础）→ param（改顶层参数的 default）；
         每步之后过形状校验，最后过 validate，
-        任一步不过就整体不写（退出码 1）。幂等：删不存在的 id、没有出边的 rewire、
+        任一步不过就整体不写（退出码 1）。幂等：删不存在的 id、没有出边的 rewire、已经在的边、
         同值的 set 都是 no-op 并在 stderr 说一句，所以同一条命令跑两遍第二遍 diff 为空
         （这一遍不落盘，免得白白动 mtime；给了 -o 就照写）。
         --dry-run 不写文件，stdout 是与 `lyflow diff` 逐字相同的差异。
@@ -1731,7 +1731,7 @@ const VALUE_OPTS: &[&str] = &[
     "kind", "output", "samples", "samples-glob", "bind", "params", "holdout", "group-by",
     "after", "region", "axis", "expect", "tolerance", "samples-dir", "bind-pair", "pattern",
     "sample-subdir", "sort-by", "split-half", "samples-jsonl-out",
-    "remove-node", "add-node", "rewire", "node", "only", "input", "recipe",
+    "remove-node", "add-node", "rewire", "connect", "node", "only", "input", "recipe",
 ];
 const BOOL_OPTS: &[&str] = &[
     "no-cache", "preview", "write", "check", "json", "help", "outputs", "dry-run",

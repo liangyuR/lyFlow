@@ -141,12 +141,7 @@ pub(crate) fn insert_after(
             out.port = "cloud".to_string();
         }
     }
-    let mut edge_id = format!("__perturb_in_{id}");
-    let mut n = 2usize;
-    while doc.edges.iter().any(|e| e.id == edge_id) {
-        edge_id = format!("__perturb_in_{id}_{n}");
-        n += 1;
-    }
+    let edge_id = doc.unique_edge_id(&format!("__perturb_in_{id}"));
     doc.edges.push(Edge {
         id: edge_id,
         from: PortRef {

@@ -219,13 +219,14 @@ test("工具入参 → CLI argv 的映射（params / recipes / eval / perturb / 
     },
     // ---------------------------------------------------------------- patch
     {
-      name: "patch 把四个动作按 remove → add → rewire → set 的顺序展开，dryRun 默认开",
+      name: "patch 把五个动作按 remove → add → rewire → connect → set 的顺序展开，dryRun 默认开",
       argv: patchArgv({
         graphPath: "4.lyflow.json",
         baseDir: "configs/R1",
         removeNode: ["b_*", "n_dead"],
         addNode: [{ id: "g2", op: "gen.synthetic", params: { seed: 3 } }],
         rewire: ["n_fb_line:out=n_fit_base:line"],
+        connect: ["g2:cloud=n_fit_l:cloud"],
         set: ["n_fit_l.distThresh=0.8"],
       }),
       want: [
@@ -235,6 +236,7 @@ test("工具入参 → CLI argv 的映射（params / recipes / eval / perturb / 
         "--remove-node", "n_dead",
         "--add-node", '{"id":"g2","op":"gen.synthetic","params":{"seed":3}}',
         "--rewire", "n_fb_line:out=n_fit_base:line",
+        "--connect", "g2:cloud=n_fit_l:cloud",
         "--set", "n_fit_l.distThresh=0.8",
         "--dry-run",
         "--json",
@@ -284,6 +286,7 @@ test("入参不成立时当场报错，不去起 CLI", () => {
     ["patch 的 out 要配 dryRun:false", () => patchArgv({ graphPath: "g.json", removeNode: ["b_*"], out: "out.json" }), /dryRun:false/],
     ["rewire 两端都没写端口", () => patchArgv({ graphPath: "g.json", rewire: ["n_fb_line=n_fit"] }), /端口/],
     ["rewire 目标端没写端口", () => patchArgv({ graphPath: "g.json", rewire: ["a:out=b"] }), /端口/],
+    ["connect 与 rewire 同一种写法", () => patchArgv({ graphPath: "g.json", connect: ["a=b:in"] }), /connect 的写法/],
   ];
   for (const [name, call, error] of rows) assert.throws(call, error, name);
 });
