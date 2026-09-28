@@ -4,7 +4,7 @@ import { newLocalId } from "../lib/ids";
 import { levelOf, type SubPath } from "../lib/subgraph";
 import { useUiStore } from "./ui";
 import type { RampName } from "../lib/ramps";
-import type { ShadingMode } from "../components/Viewer3D";
+import type { ShadingMode } from "../lib/cloudScene";
 import type { GraphDoc, PortRef } from "../types/graph";
 
 /** fields = Bundle 的字段表（m8-plan L17）：先列字段，点进字段再按字段类型换视图。 */

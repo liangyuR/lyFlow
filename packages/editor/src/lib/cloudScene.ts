@@ -1,0 +1,438 @@
+// 点云预览的 three.js 场景（从 Viewer3D 抽出来，docs/compare-plan.md §3.3）。一个 WebGLRenderer、
+// 一块画布；对比模式下 views = 2，同一台相机按两个 scissor 视口各画一遍（C4）—— 相机同步不用「镜像」，
+// 本来就是同一台，WebGL 上下文数也不变。views = 1 时与抽出来之前逐行同一行为。
+
+import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+
+import { RAMPS, writeRgbColors, type RampName } from "./ramps";
+import { disposeOverlay } from "./shapes2d";
+import type { CloudPayload } from "../types/execution";
+
+export type ShadingMode = "intensity" | "height" | "normal" | "rgb" | "flat";
+/** 相机模式（G7）。2d = 正交俯视 XY，看剖面用。 */
+export type CameraMode = "3d" | "2d";
+/** 两栏怎么摆：左右（默认）或上下（容器太窄时）。 */
+export type SplitMode = "lr" | "tb";
+
+export interface Scene {
+  renderer: THREE.WebGLRenderer;
+  scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
+  /** 2D 剖面相机（G7）：正交、俯视 XY、不许旋转。 */
+  ortho: THREE.OrthographicCamera;
+  controls: OrbitControls;
+  mode: CameraMode;
+  /** 每栏一片云；views = 1 时只用第 0 个。 */
+  points: [THREE.Points | null, THREE.Points | null];
+  /** 每栏一组叠画的 2D 几何（G7）。整组一起换，不逐个增删。 */
+  overlays: [THREE.Group, THREE.Group];
+  /** = overlays[0]。单栏的代码只认它。 */
+  overlay: THREE.Group;
+  /** 拖框的底图（m8-plan L15）：roiBackdrop 指的那几个文件拼起来的云，例如模板。只在单栏用。 */
+  backdrop: THREE.Group;
+  /** 每帧渲染前调一遍。RoiLayer 靠它把 DOM 框跟着相机摆位。 */
+  frameListeners: Set<() => void>;
+  /** 正交相机的可视半宽，随 fit 改变；aspect 变了要重算上下边。 */
+  halfWidth: number;
+  /** **单栏**的宽高比：两栏时是半块画布的。 */
+  aspect: number;
+  views: 1 | 2;
+  split: SplitMode;
+  active(): THREE.Camera;
+  applyOrtho(): void;
+  setMode(mode: CameraMode): void;
+  /** 切单栏 / 两栏。两栏时每栏的视口一样大，相机的宽高比按单栏算。 */
+  setViews(views: 1 | 2, split?: SplitMode): void;
+  /** 立刻画一帧（导出 PNG 前用：没开 preserveDrawingBuffer，读缓冲前得先画）。 */
+  renderFrame(): void;
+  dispose(): void;
+}
+
+export function createScene(host: HTMLDivElement): Scene {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(0x11141a, 1);
+  host.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.001, 10_000);
+  camera.up.set(0, 0, 1); // 点云世界里 Z 朝上，别用 three 默认的 Y 朝上
+  camera.position.set(2, -2, 1.5);
+
+  // 正交相机看 −Z 方向，up 是 +Y：屏幕上就是标准的 XY 平面。
+  const ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 1000);
+  ortho.up.set(0, 1, 0);
+  ortho.position.set(0, 0, 10);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.12;
+
+  const grid = new THREE.GridHelper(4, 16, 0x33404f, 0x232a33);
+  grid.rotation.x = Math.PI / 2; // GridHelper 默认躺在 XZ 面上，转到 XY
+  scene.add(grid);
+  const axes = new THREE.AxesHelper(0.5);
+  scene.add(axes);
+  const overlays: [THREE.Group, THREE.Group] = [new THREE.Group(), new THREE.Group()];
+  scene.add(overlays[0], overlays[1]);
+  const backdrop = new THREE.Group();
+  scene.add(backdrop);
+  const frameListeners = new Set<() => void>();
+
+  // 画布的 CSS 尺寸，两栏切视口要用
+  let width = 1;
+  let height = 1;
+
+  /** 第 i 栏的视口，CSS 像素、左下角为原点（three 的 setViewport 就是这么数的）。 */
+  const paneRect = (i: 0 | 1): [number, number, number, number] => {
+    if (state.split === "lr") {
+      const w = width / 2;
+      return [i * w, 0, w, height];
+    }
+    const h = height / 2;
+    return [0, i === 0 ? h : 0, width, h];
+  };
+
+  const render = () => {
+    const cam = state.active();
+    if (state.views === 1) {
+      renderer.render(scene, cam);
+      return;
+    }
+    // 两栏：每一遍只让这一栏的云与几何可见。不用 THREE.Layers —— Group 的 layers 不传给子节点，
+    // 叠画几何是一组线，逐条设层容易漏；visible 对整组生效。
+    renderer.setScissorTest(true);
+    for (const i of [0, 1] as const) {
+      const other = (1 - i) as 0 | 1;
+      const hidden = state.points[other];
+      if (hidden) hidden.visible = false;
+      overlays[other].visible = false;
+      const [x, y, w, h] = paneRect(i);
+      renderer.setViewport(x, y, w, h);
+      renderer.setScissor(x, y, w, h);
+      renderer.render(scene, cam);
+      if (hidden) hidden.visible = true;
+      overlays[other].visible = true;
+    }
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, width, height);
+  };
+
+  let raf = 0;
+  const tick = () => {
+    raf = requestAnimationFrame(tick);
+    controls.update();
+    for (const fn of frameListeners) fn();
+    render();
+  };
+
+  const resize = () => {
+    width = host.clientWidth || 1;
+    height = host.clientHeight || 1;
+    renderer.setSize(width, height, false);
+    const paneW = state.views === 2 && state.split === "lr" ? width / 2 : width;
+    const paneH = state.views === 2 && state.split === "tb" ? height / 2 : height;
+    camera.aspect = paneW / paneH;
+    camera.updateProjectionMatrix();
+    state.aspect = paneW / paneH;
+    state.applyOrtho();
+  };
+
+  const state: Scene = {
+    renderer,
+    scene,
+    camera,
+    ortho,
+    controls,
+    mode: "3d",
+    points: [null, null],
+    overlays,
+    overlay: overlays[0],
+    backdrop,
+    frameListeners,
+    halfWidth: 2,
+    aspect: 1,
+    views: 1,
+    split: "lr",
+    active() {
+      return state.mode === "2d" ? state.ortho : state.camera;
+    },
+    applyOrtho() {
+      const h = state.halfWidth / Math.max(state.aspect, 1e-3);
+      ortho.left = -state.halfWidth;
+      ortho.right = state.halfWidth;
+      ortho.top = h;
+      ortho.bottom = -h;
+      ortho.updateProjectionMatrix();
+    },
+    setMode(mode) {
+      if (state.mode === mode) return;
+      state.mode = mode;
+      // OrbitControls 只认它构造时那台相机，换模式就换 object；
+      // 2D 下关掉旋转，否则一拖就离开了 XY 平面，那这个模式就没意义了。
+      const target = state.controls.target;
+      state.controls.object = state.active() as THREE.PerspectiveCamera;
+      state.controls.enableRotate = mode === "3d";
+      if (mode === "2d") {
+        ortho.position.set(target.x, target.y, target.z + 10);
+        ortho.zoom = 1;
+        state.applyOrtho();
+      }
+      state.controls.update();
+    },
+    setViews(views, split = state.split) {
+      if (state.views === views && state.split === split) return;
+      state.views = views;
+      state.split = split;
+      if (views === 1) setPoints(state, 1, null);
+      if (views === 1) disposeOverlay(overlays[1]);
+      resize();
+    },
+    renderFrame() {
+      render();
+    },
+    dispose() {
+      cancelAnimationFrame(raf);
+      observer.disconnect();
+      controls.dispose();
+      setPoints(state, 0, null);
+      setPoints(state, 1, null);
+      disposeOverlay(overlays[0]);
+      disposeOverlay(overlays[1]);
+      disposeOverlay(backdrop);
+      frameListeners.clear();
+      // helper 自己也有 geometry 和 material。不放的话每次挂载都漏一份。
+      for (const helper of [grid, axes]) {
+        helper.geometry.dispose();
+        const m = helper.material;
+        if (Array.isArray(m)) m.forEach((x) => x.dispose());
+        else m.dispose();
+      }
+      // renderer.dispose() **不释放 WebGL 上下文**（那是 forceContextLoss），
+      // 少了它每次挂载/卸载漏一个，攒够十几个后视图突然全黑（见 README「踩过的坑」）。
+      renderer.dispose();
+      renderer.forceContextLoss();
+      host.removeChild(renderer.domElement);
+    },
+  };
+  resize();
+  const observer = new ResizeObserver(resize);
+  observer.observe(host);
+  tick();
+  return state;
+}
+
+// ------------------------------------------------------------ 点云几何与着色
+
+/** 一片云的 Points。零拷贝：cloud.xyz 就是 IPC 缓冲上的视图。空云返回 null。 */
+export function buildPoints(cloud: CloudPayload | null, size: number): THREE.Points | null {
+  if (!cloud || cloud.pointCount === 0) return null;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(cloud.xyz, 3));
+  // 自己算 boundingSphere：让 three 从 attribute 里算一遍是白花的钱，
+  // 而且 bounds 是全量点云的，比抽样后的更准。
+  const cx = (cloud.bounds[0]! + cloud.bounds[3]!) / 2;
+  const cy = (cloud.bounds[1]! + cloud.bounds[4]!) / 2;
+  const cz = (cloud.bounds[2]! + cloud.bounds[5]!) / 2;
+  const radius =
+    Math.hypot(
+      cloud.bounds[3]! - cloud.bounds[0]!,
+      cloud.bounds[4]! - cloud.bounds[1]!,
+      cloud.bounds[5]! - cloud.bounds[2]!,
+    ) / 2 || 1;
+  geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(cx, cy, cz), radius);
+
+  const material = new THREE.PointsMaterial({
+    size,
+    sizeAttenuation: false,
+    vertexColors: false,
+    color: 0x8fb8ff,
+  });
+  return new THREE.Points(geometry, material);
+}
+
+/** 换掉第 i 栏的云：旧的从场景摘下并释放。 */
+export function setPoints(scene: Scene, i: 0 | 1, points: THREE.Points | null): void {
+  const old = scene.points[i];
+  if (old) {
+    scene.scene.remove(old);
+    old.geometry.dispose();
+    (old.material as THREE.Material).dispose();
+  }
+  scene.points[i] = points;
+  if (points) scene.scene.add(points);
+}
+
+export interface Paint {
+  shading: ShadingMode;
+  ramp: RampName;
+  lo: number;
+  hi: number;
+}
+
+/** 着色只重写 color 属性，positions 和 boundingSphere 原样留着；数组能复用就复用，
+ *  换色带时不再分配几十兆。shading 是降级之后**实际**用的那一种。 */
+export function paintPoints(points: THREE.Points, cloud: CloudPayload, paint: Paint): void {
+  const geometry = points.geometry;
+  const material = points.material as THREE.PointsMaterial;
+
+  if (paint.shading === "flat") {
+    geometry.deleteAttribute("color");
+    material.vertexColors = false;
+    material.color.setHex(0x8fb8ff);
+    material.needsUpdate = true;
+    return;
+  }
+
+  const prev = geometry.getAttribute("color");
+  const reuse =
+    prev instanceof THREE.BufferAttribute &&
+    prev.count === cloud.pointCount &&
+    prev.array instanceof Float32Array
+      ? prev
+      : null;
+  const arr = reuse ? (reuse.array as Float32Array) : new Float32Array(cloud.pointCount * 3);
+  if (paint.shading === "normal") writeNormalColors(arr, cloud);
+  else if (paint.shading === "rgb") writeRgbColors(arr, cloud.rgb, cloud.pointCount);
+  else writeColors(arr, cloud, paint.shading, paint.ramp, paint.lo, paint.hi);
+  if (reuse) reuse.needsUpdate = true;
+  else geometry.setAttribute("color", new THREE.BufferAttribute(arr, 3));
+  material.vertexColors = true;
+  material.color.setHex(0xffffff);
+  material.needsUpdate = true;
+}
+
+/** 着色用的标量：强度模式取强度通道，其余取 Z。 */
+function shadingValue(cloud: CloudPayload, mode: ShadingMode, i: number): number {
+  if (mode === "intensity" && cloud.intensity) return cloud.intensity[i]!;
+  return cloud.xyz[i * 3 + 2]!;
+}
+
+/** 法线着色：分量的绝对值直接当 RGB。色带对它没有意义，所以走单独一条路。 */
+export function writeNormalColors(out: Float32Array, cloud: CloudPayload): void {
+  const n = cloud.normals;
+  if (!n) return;
+  for (let i = 0; i < cloud.pointCount; i += 1) {
+    out[i * 3] = Math.abs(n[i * 3] ?? 0);
+    out[i * 3 + 1] = Math.abs(n[i * 3 + 1] ?? 0);
+    out[i * 3 + 2] = Math.abs(n[i * 3 + 2] ?? 0);
+  }
+}
+
+/** 就地写颜色。复用已有数组是为了换色带时不再分配几十兆。 */
+export function writeColors(
+  out: Float32Array,
+  cloud: CloudPayload,
+  mode: ShadingMode,
+  ramp: RampName,
+  lo: number,
+  hi: number,
+) {
+  const paint = RAMPS[ramp];
+  const span = hi - lo || 1;
+  const c = new THREE.Color();
+  for (let i = 0; i < cloud.pointCount; i += 1) {
+    paint((shadingValue(cloud, mode, i) - lo) / span, c);
+    out[i * 3] = c.r;
+    out[i * 3 + 1] = c.g;
+    out[i * 3 + 2] = c.b;
+  }
+}
+
+/** 该模式下数据的实际取值范围，「自动」按钮和范围输入框的初值都用它。 */
+export function dataRangeOf(cloud: CloudPayload | null, mode: ShadingMode): [number, number] {
+  if (!cloud || cloud.pointCount === 0) return [0, 1];
+  if (mode === "intensity" && cloud.intensity) {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let i = 0; i < cloud.pointCount; i += 1) {
+      const v = cloud.intensity[i]!;
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    return Number.isFinite(lo) ? [lo, hi] : [0, 1];
+  }
+  // 高度用 bounds 而不是重新扫一遍：bounds 是**全量**点云算的，
+  // 抽稀后的极值会让同一份数据在不同 maxPoints 下呈现不同的配色。
+  return [cloud.bounds[2]!, cloud.bounds[5]!];
+}
+
+// ------------------------------------------------------------ 包围盒与取景
+
+export function round3(v: number) {
+  return Number.isFinite(v) ? Math.round(v * 1000) / 1000 : 0;
+}
+
+/** 「云 + 叠画几何」的联合包围盒。取并集而不是二选一：几何再小也挤不掉云，
+ *  云再大也不会把 ROI 框推出画面。对比模式把两栏的云都传进来（C4）。都空时返回 null。 */
+export function unionBounds(
+  clouds: CloudPayload | null | readonly (CloudPayload | null)[],
+  ...groups: THREE.Group[]
+): Float32Array | null {
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  const list = Array.isArray(clouds) ? clouds : [clouds as CloudPayload | null];
+  for (const cloud of list) {
+    if (!cloud || cloud.pointCount === 0) continue;
+    for (let i = 0; i < 3; i += 1) {
+      min[i] = Math.min(min[i]!, cloud.bounds[i]!);
+      max[i] = Math.max(max[i]!, cloud.bounds[i + 3]!);
+    }
+  }
+  for (const overlay of groups) {
+    if (overlay.children.length === 0) continue;
+    const box = new THREE.Box3().setFromObject(overlay);
+    if (!box.isEmpty()) {
+      const lo = [box.min.x, box.min.y, box.min.z];
+      const hi = [box.max.x, box.max.y, box.max.z];
+      for (let i = 0; i < 3; i += 1) {
+        min[i] = Math.min(min[i]!, lo[i]!);
+        max[i] = Math.max(max[i]!, hi[i]!);
+      }
+    }
+  }
+  if (!Number.isFinite(min[0]) || !Number.isFinite(max[0])) return null;
+  return new Float32Array([min[0]!, min[1]!, min[2]!, max[0]!, max[1]!, max[2]!]);
+}
+
+/** 叠画几何自己的包围盒。空组返回 null。 */
+export function overlayBoundsOf(overlay: THREE.Group): Float32Array | null {
+  if (overlay.children.length === 0) return null;
+  const box = new THREE.Box3().setFromObject(overlay);
+  if (box.isEmpty()) return null;
+  return new Float32Array([box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z]);
+}
+
+/** 包围盒 → data- 属性上的六个数。null 是空串。 */
+export function boundsAttr(bounds: ArrayLike<number> | null): string {
+  if (!bounds) return "";
+  return Array.from(bounds, round3).join(",");
+}
+
+export function fitToBounds(scene: Scene, bounds: Float32Array) {
+  const cx = (bounds[0]! + bounds[3]!) / 2;
+  const cy = (bounds[1]! + bounds[4]!) / 2;
+  const cz = (bounds[2]! + bounds[5]!) / 2;
+  const size = Math.max(
+    bounds[3]! - bounds[0]!,
+    bounds[4]! - bounds[1]!,
+    bounds[5]! - bounds[2]!,
+    1e-3,
+  );
+  const d = size * 1.8;
+  scene.controls.target.set(cx, cy, cz);
+  scene.camera.position.set(cx + d, cy - d, cz + d * 0.7);
+  scene.camera.near = size / 1000;
+  scene.camera.far = size * 100;
+  scene.camera.updateProjectionMatrix();
+
+  // 正交相机按 XY 的实际跨度取景，Z 不参与 —— 剖面视图里 Z 是「厚度」。
+  const spanX = Math.max(bounds[3]! - bounds[0]!, 1e-4);
+  const spanY = Math.max(bounds[4]! - bounds[1]!, 1e-4);
+  scene.halfWidth = Math.max(spanX, spanY * Math.max(scene.aspect, 1e-3)) * 0.6;
+  scene.ortho.position.set(cx, cy, cz + Math.max(size * 10, 1));
+  scene.ortho.zoom = 1;
+  scene.applyOrtho();
+  scene.controls.update();
+}

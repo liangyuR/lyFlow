@@ -3,13 +3,27 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import { findBaseCloud, firstCloudPort, type BaseCloud } from "../lib/basecloud";
 import { cacheKey, cloudCache, dropOtherRuns, putCache } from "../lib/cloudCache";
+import {
+  boundsAttr,
+  buildPoints,
+  createScene,
+  dataRangeOf,
+  fitToBounds,
+  overlayBoundsOf,
+  paintPoints,
+  round3,
+  setPoints,
+  unionBounds,
+  type CameraMode,
+  type Scene,
+  type ShadingMode,
+} from "../lib/cloudScene";
 import { withBoundValues } from "../lib/graphParams";
 import { effectiveParams } from "../lib/params";
-import { RAMPS, writeRgbColors, type RampName } from "../lib/ramps";
+import type { RampName } from "../lib/ramps";
 import { copyFrameWrites, pickFrame, roiFramesOf } from "../lib/roiFrames";
 import { rememberRoiBounds } from "../lib/roiThumbs";
 import { disposeOverlay, extentOf, shapesOf } from "../lib/shapes2d";
@@ -27,10 +41,8 @@ import { RoiLayer, type RoiItem } from "./RoiLayer";
 import { ValueView } from "./peek/ValueView";
 import "../styles.viewer.css";
 
-export type ShadingMode = "intensity" | "height" | "normal" | "rgb" | "flat";
+export type { ShadingMode, CameraMode } from "../lib/cloudScene";
 export type { RampName } from "../lib/ramps";
-/** 相机模式（G7）。2d = 正交俯视 XY，看剖面用。 */
-export type CameraMode = "3d" | "2d";
 
 /** 当前展示的东西。三者永远一起换，见 Viewer3D 里的注释。 */
 interface Display {
@@ -44,263 +56,6 @@ interface Display {
 }
 
 const MAX_POINTS_CHOICES = [100_000, 500_000, 2_000_000, 8_000_000];
-
-interface Scene {
-  renderer: THREE.WebGLRenderer;
-  scene: THREE.Scene;
-  camera: THREE.PerspectiveCamera;
-  /** 2D 剖面相机（G7）：正交、俯视 XY、不许旋转。 */
-  ortho: THREE.OrthographicCamera;
-  controls: OrbitControls;
-  mode: CameraMode;
-  points: THREE.Points | null;
-  /** 叠画的 2D 几何（G7）。整组一起换，不逐个增删。 */
-  overlay: THREE.Group;
-  /** 拖框的底图（m8-plan L15）：roiBackdrop 指的那几个文件拼起来的云，例如模板。 */
-  backdrop: THREE.Group;
-  /** 每帧渲染前调一遍。RoiLayer 靠它把 DOM 框跟着相机摆位。 */
-  frameListeners: Set<() => void>;
-  /** 正交相机的可视半宽，随 fit 改变；aspect 变了要重算上下边。 */
-  halfWidth: number;
-  aspect: number;
-  active(): THREE.Camera;
-  applyOrtho(): void;
-  setMode(mode: CameraMode): void;
-  dispose(): void;
-}
-
-function createScene(host: HTMLDivElement): Scene {
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setClearColor(0x11141a, 1);
-  host.appendChild(renderer.domElement);
-
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(50, 1, 0.001, 10_000);
-  camera.up.set(0, 0, 1); // 点云世界里 Z 朝上，别用 three 默认的 Y 朝上
-  camera.position.set(2, -2, 1.5);
-
-  // 正交相机看 −Z 方向，up 是 +Y：屏幕上就是标准的 XY 平面。
-  const ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 1000);
-  ortho.up.set(0, 1, 0);
-  ortho.position.set(0, 0, 10);
-
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.12;
-
-  const grid = new THREE.GridHelper(4, 16, 0x33404f, 0x232a33);
-  grid.rotation.x = Math.PI / 2; // GridHelper 默认躺在 XZ 面上，转到 XY
-  scene.add(grid);
-  const axes = new THREE.AxesHelper(0.5);
-  scene.add(axes);
-  const overlay = new THREE.Group();
-  scene.add(overlay);
-  const backdrop = new THREE.Group();
-  scene.add(backdrop);
-  const frameListeners = new Set<() => void>();
-
-  let raf = 0;
-  const tick = () => {
-    raf = requestAnimationFrame(tick);
-    controls.update();
-    for (const fn of frameListeners) fn();
-    renderer.render(scene, state.active());
-  };
-
-  const state: Scene = {
-    renderer,
-    scene,
-    camera,
-    ortho,
-    controls,
-    mode: "3d",
-    points: null,
-    overlay,
-    backdrop,
-    frameListeners,
-    halfWidth: 2,
-    aspect: 1,
-    active() {
-      return state.mode === "2d" ? state.ortho : state.camera;
-    },
-    applyOrtho() {
-      const h = state.halfWidth / Math.max(state.aspect, 1e-3);
-      ortho.left = -state.halfWidth;
-      ortho.right = state.halfWidth;
-      ortho.top = h;
-      ortho.bottom = -h;
-      ortho.updateProjectionMatrix();
-    },
-    setMode(mode) {
-      if (state.mode === mode) return;
-      state.mode = mode;
-      // OrbitControls 只认它构造时那台相机，换模式就换 object；
-      // 2D 下关掉旋转，否则一拖就离开了 XY 平面，那这个模式就没意义了。
-      const target = state.controls.target;
-      state.controls.object = state.active() as THREE.PerspectiveCamera;
-      state.controls.enableRotate = mode === "3d";
-      if (mode === "2d") {
-        ortho.position.set(target.x, target.y, target.z + 10);
-        ortho.zoom = 1;
-        state.applyOrtho();
-      }
-      state.controls.update();
-    },
-    dispose() {
-      cancelAnimationFrame(raf);
-      controls.dispose();
-      if (state.points) {
-        state.points.geometry.dispose();
-        (state.points.material as THREE.Material).dispose();
-      }
-      disposeOverlay(overlay);
-      disposeOverlay(backdrop);
-      frameListeners.clear();
-      // helper 自己也有 geometry 和 material。不放的话每次挂载都漏一份。
-      for (const helper of [grid, axes]) {
-        helper.geometry.dispose();
-        const m = helper.material;
-        if (Array.isArray(m)) m.forEach((x) => x.dispose());
-        else m.dispose();
-      }
-      // renderer.dispose() **不释放 WebGL 上下文**（那是 forceContextLoss），
-      // 少了它每次挂载/卸载漏一个，攒够十几个后视图突然全黑（见 README「踩过的坑」）。
-      renderer.dispose();
-      renderer.forceContextLoss();
-      host.removeChild(renderer.domElement);
-    },
-  };
-  tick();
-  return state;
-}
-
-/** 着色用的标量：强度模式取强度通道，其余取 Z。 */
-function shadingValue(cloud: CloudPayload, mode: ShadingMode, i: number): number {
-  if (mode === "intensity" && cloud.intensity) return cloud.intensity[i]!;
-  return cloud.xyz[i * 3 + 2]!;
-}
-
-/** 法线着色：分量的绝对值直接当 RGB。色带对它没有意义，所以走单独一条路。 */
-function writeNormalColors(out: Float32Array, cloud: CloudPayload): void {
-  const n = cloud.normals;
-  if (!n) return;
-  for (let i = 0; i < cloud.pointCount; i += 1) {
-    out[i * 3] = Math.abs(n[i * 3] ?? 0);
-    out[i * 3 + 1] = Math.abs(n[i * 3 + 1] ?? 0);
-    out[i * 3 + 2] = Math.abs(n[i * 3 + 2] ?? 0);
-  }
-}
-
-/** 就地写颜色。复用已有数组是为了换色带时不再分配几十兆。 */
-function writeColors(
-  out: Float32Array,
-  cloud: CloudPayload,
-  mode: ShadingMode,
-  ramp: RampName,
-  lo: number,
-  hi: number,
-) {
-  const paint = RAMPS[ramp];
-  const span = hi - lo || 1;
-  const c = new THREE.Color();
-  for (let i = 0; i < cloud.pointCount; i += 1) {
-    paint((shadingValue(cloud, mode, i) - lo) / span, c);
-    out[i * 3] = c.r;
-    out[i * 3 + 1] = c.g;
-    out[i * 3 + 2] = c.b;
-  }
-}
-
-/** 该模式下数据的实际取值范围，「自动」按钮和范围输入框的初值都用它。 */
-function dataRangeOf(cloud: CloudPayload | null, mode: ShadingMode): [number, number] {
-  if (!cloud || cloud.pointCount === 0) return [0, 1];
-  if (mode === "intensity" && cloud.intensity) {
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (let i = 0; i < cloud.pointCount; i += 1) {
-      const v = cloud.intensity[i]!;
-      if (v < lo) lo = v;
-      if (v > hi) hi = v;
-    }
-    return Number.isFinite(lo) ? [lo, hi] : [0, 1];
-  }
-  // 高度用 bounds 而不是重新扫一遍：bounds 是**全量**点云算的，
-  // 抽稀后的极值会让同一份数据在不同 maxPoints 下呈现不同的配色。
-  return [cloud.bounds[2]!, cloud.bounds[5]!];
-}
-
-function round3(v: number) {
-  return Number.isFinite(v) ? Math.round(v * 1000) / 1000 : 0;
-}
-
-/** 「底图云 + 叠画几何」的联合包围盒。取并集而不是二选一：几何再小也挤不掉云，
- *  云再大也不会把 ROI 框推出画面。两者都空时返回 null。 */
-function unionBounds(cloud: CloudPayload | null, ...groups: THREE.Group[]): Float32Array | null {
-  const min = [Infinity, Infinity, Infinity];
-  const max = [-Infinity, -Infinity, -Infinity];
-  if (cloud && cloud.pointCount > 0) {
-    for (let i = 0; i < 3; i += 1) {
-      min[i] = Math.min(min[i]!, cloud.bounds[i]!);
-      max[i] = Math.max(max[i]!, cloud.bounds[i + 3]!);
-    }
-  }
-  for (const overlay of groups) {
-    if (overlay.children.length === 0) continue;
-    const box = new THREE.Box3().setFromObject(overlay);
-    if (!box.isEmpty()) {
-      const lo = [box.min.x, box.min.y, box.min.z];
-      const hi = [box.max.x, box.max.y, box.max.z];
-      for (let i = 0; i < 3; i += 1) {
-        min[i] = Math.min(min[i]!, lo[i]!);
-        max[i] = Math.max(max[i]!, hi[i]!);
-      }
-    }
-  }
-  if (!Number.isFinite(min[0]) || !Number.isFinite(max[0])) return null;
-  return new Float32Array([min[0]!, min[1]!, min[2]!, max[0]!, max[1]!, max[2]!]);
-}
-
-/** 叠画几何自己的包围盒。空组返回 null。 */
-function overlayBoundsOf(overlay: THREE.Group): Float32Array | null {
-  if (overlay.children.length === 0) return null;
-  const box = new THREE.Box3().setFromObject(overlay);
-  if (box.isEmpty()) return null;
-  return new Float32Array([box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z]);
-}
-
-/** 包围盒 → data- 属性上的六个数。null 是空串。 */
-function boundsAttr(bounds: ArrayLike<number> | null): string {
-  if (!bounds) return "";
-  return Array.from(bounds, round3).join(",");
-}
-
-function fitToBounds(scene: Scene, bounds: Float32Array) {
-  const cx = (bounds[0]! + bounds[3]!) / 2;
-  const cy = (bounds[1]! + bounds[4]!) / 2;
-  const cz = (bounds[2]! + bounds[5]!) / 2;
-  const size = Math.max(
-    bounds[3]! - bounds[0]!,
-    bounds[4]! - bounds[1]!,
-    bounds[5]! - bounds[2]!,
-    1e-3,
-  );
-  const d = size * 1.8;
-  scene.controls.target.set(cx, cy, cz);
-  scene.camera.position.set(cx + d, cy - d, cz + d * 0.7);
-  scene.camera.near = size / 1000;
-  scene.camera.far = size * 100;
-  scene.camera.updateProjectionMatrix();
-
-  // 正交相机按 XY 的实际跨度取景，Z 不参与 —— 剖面视图里 Z 是「厚度」。
-  const spanX = Math.max(bounds[3]! - bounds[0]!, 1e-4);
-  const spanY = Math.max(bounds[4]! - bounds[1]!, 1e-4);
-  scene.halfWidth = Math.max(spanX, spanY * Math.max(scene.aspect, 1e-3)) * 0.6;
-  scene.ortho.position.set(cx, cy, cz + Math.max(size * 10, 1));
-  scene.ortho.zoom = 1;
-  scene.applyOrtho();
-  scene.controls.update();
-}
 
 // ------------------------------------------------------------ 2D 拖框（L15）
 
@@ -494,7 +249,6 @@ export function Viewer3D() {
         ? "height"
         : shading;
   const isFlat = effectiveShading === "flat";
-  const isNormalShading = effectiveShading === "normal";
   const isRgbShading = effectiveShading === "rgb";
   // 色带与范围只对「标量 → 颜色」的着色有意义
   const noRamp = isFlat || isRgbShading;
@@ -523,21 +277,7 @@ export function Viewer3D() {
     sceneRef.current = scene;
     setSceneHost(scene);
 
-    const resize = () => {
-      const w = host.clientWidth || 1;
-      const h = host.clientHeight || 1;
-      scene.renderer.setSize(w, h, false);
-      scene.camera.aspect = w / h;
-      scene.camera.updateProjectionMatrix();
-      scene.aspect = w / h;
-      scene.applyOrtho();
-    };
-    resize();
-    const observer = new ResizeObserver(resize);
-    observer.observe(host);
-
     return () => {
-      observer.disconnect();
       scene.dispose();
       sceneRef.current = null;
       setSceneHost(null);
@@ -650,80 +390,22 @@ export function Viewer3D() {
     const scene = sceneRef.current;
     if (!scene) return;
 
-    if (scene.points) {
-      scene.scene.remove(scene.points);
-      scene.points.geometry.dispose();
-      (scene.points.material as THREE.Material).dispose();
-      scene.points = null;
-    }
-    if (!cloud || cloud.pointCount === 0) return;
-
-    const geometry = new THREE.BufferGeometry();
-    // 零拷贝：cloud.xyz 就是 IPC 缓冲上的视图
-    geometry.setAttribute("position", new THREE.BufferAttribute(cloud.xyz, 3));
-    // 自己算 boundingSphere：让 three 从 attribute 里算一遍是白花的钱，
-    // 而且 bounds 是全量点云的，比抽样后的更准。
-    const cx = (cloud.bounds[0]! + cloud.bounds[3]!) / 2;
-    const cy = (cloud.bounds[1]! + cloud.bounds[4]!) / 2;
-    const cz = (cloud.bounds[2]! + cloud.bounds[5]!) / 2;
-    const radius =
-      Math.hypot(
-        cloud.bounds[3]! - cloud.bounds[0]!,
-        cloud.bounds[4]! - cloud.bounds[1]!,
-        cloud.bounds[5]! - cloud.bounds[2]!,
-      ) / 2 || 1;
-    geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(cx, cy, cz), radius);
-
-    const material = new THREE.PointsMaterial({
-      // 从 ref 读初值：pointSize **不能**进这个 effect 的依赖，见下面那条注释
-      size: pointSizeRef.current,
-      sizeAttenuation: false,
-      vertexColors: false,
-      color: 0x8fb8ff,
-    });
-    const points = new THREE.Points(geometry, material);
-    scene.scene.add(points);
-    scene.points = points;
+    // 点大小从 ref 读初值：pointSize **不能**进这个 effect 的依赖，见下面那条注释
+    setPoints(scene, 0, buildPoints(cloud, pointSizeRef.current));
   }, [cloud]);
 
   // 换着色模式/色带/范围只重写 color 属性，positions 和 boundingSphere 原样留着。
   useEffect(() => {
-    const points = sceneRef.current?.points;
+    const points = sceneRef.current?.points[0];
     if (!points || !cloud || cloud.pointCount === 0) return;
-    const geometry = points.geometry;
-    const material = points.material as THREE.PointsMaterial;
-
-    if (isFlat) {
-      geometry.deleteAttribute("color");
-      material.vertexColors = false;
-      material.color.setHex(0x8fb8ff);
-      material.needsUpdate = true;
-      return;
-    }
-
-    const prev = geometry.getAttribute("color");
-    const reuse =
-      prev instanceof THREE.BufferAttribute &&
-      prev.count === cloud.pointCount &&
-      prev.array instanceof Float32Array
-        ? prev
-        : null;
-    const arr = reuse ? (reuse.array as Float32Array) : new Float32Array(cloud.pointCount * 3);
-    if (isNormalShading) writeNormalColors(arr, cloud);
-    else if (isRgbShading) writeRgbColors(arr, cloud.rgb, cloud.pointCount);
-    else writeColors(arr, cloud, effectiveShading, ramp, lo, hi);
-    if (reuse) reuse.needsUpdate = true;
-    else geometry.setAttribute("color", new THREE.BufferAttribute(arr, 3));
-    material.vertexColors = true;
-    material.color.setHex(0xffffff);
-    material.needsUpdate = true;
-  }, [cloud, effectiveShading, isFlat, isNormalShading, isRgbShading, ramp, lo, hi]);
+    paintPoints(points, cloud, { shading: effectiveShading, ramp, lo, hi });
+  }, [cloud, effectiveShading, ramp, lo, hi]);
 
   // 点大小只改材质，不重建几何体 —— 它曾经也在上面那个 effect 的依赖里，
   // 拖一下滑块就要重分配 24MB 颜色数组、重扫两百万点（见 README「踩过的坑」）。
   useEffect(() => {
     pointSizeRef.current = pointSize;
-    const p = sceneRef.current?.points;
+    const p = sceneRef.current?.points[0];
     if (p) (p.material as THREE.PointsMaterial).size = pointSize;
   }, [pointSize]);
 
@@ -920,7 +602,7 @@ export function Viewer3D() {
     const scene = sceneRef.current;
     if (!scene) return;
     // 读 buffer 前立刻重画一帧：换成 preserveDrawingBuffer 的话每一帧都要多付一次代价。
-    scene.renderer.render(scene.scene, scene.camera);
+    scene.renderFrame();
     await exportCanvasPng(scene.renderer.domElement, display.nodeId ?? "view");
   };
 
