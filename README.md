@@ -218,9 +218,9 @@ lyflow diff before.lyflow.json after.lyflow.json
 它是那份契约的又一个消费方，不是第四种传输（[ADR-0021](docs/adr/0021-mcp-as-transport-consumer.md)），
 所以同一个二进制既能接仓库里的桩服务器，也能接阶段 B 的业务服务 —— 换后端只改一个环境变量。
 
-13 个工具：`list_operators` / `get_operator` / `list_port_types` / `validate_graph` /
+工具：`list_operators` / `get_operator` / `list_port_types` / `validate_graph` /
 `plan_graph` / `run_graph` / `get_node_outputs` / `summarize_output` / `eval` / `perturb` /
-`diff_graphs` / `get_params` / `patch_graph`。`run_graph` 现在以 run summary 为主体返回
+`diff_graphs` / `get_params` / `patch_graph` / `list_recipes`。`run_graph` 现在以 run summary 为主体返回
 （[ADR-0022](docs/adr/0022-run-summary-as-core-output.md)）；`patch_graph` 对应 CLI
 `lyflow patch`，`dryRun` 默认 true（[ADR-0023](docs/adr/0023-patch-as-idempotent-structural-edit.md)）；
 `get_params` 对应 `lyflow params`，回的是每节点每参数的生效值与来源。
@@ -283,10 +283,10 @@ app 盯着这个目录，工具栏的「库」按钮也能手动重扫。
 - **改 C++ 不用重启。** `pnpm dev` 下热重载（[ADR-0009](docs/adr/0009-hot-reload-by-copy.md)）。
 - **交互清单 P0 + P1 全部完成**（[interaction-checklist](docs/interaction-checklist.md)）。
 
-16 个算子覆盖一条真实 pipeline：`load_pcd → crop_box → voxel_grid →
+内置算子覆盖一条真实 pipeline：`load_pcd → crop_box → voxel_grid →
 statistical_outlier → ransac_plane → extract_indices → save_pcd`。
 
-下一步是 M5「外延」：第二种数据域 Image、第三方算子插件 DLL。见 [roadmap](docs/roadmap.md)。
+路线图见 [roadmap](docs/roadmap.md)。
 
 前端不写单元测试，验证方式是通过 CDP 驱动真实运行的 app
 （[scripts/e2e](scripts/e2e/)）。逐条验收记录见

@@ -45,7 +45,7 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 |---|---|---|
 | `LYFLOW_HTTP_BASE` | 是 | `/lyflow/*` 的基址，例如 `http://127.0.0.1:8787`。缺了进程直接退出并说明 |
 | `LYFLOW_HTTP_TOKEN` | 否 | 有它就每个请求带 `Authorization: Bearer`，WebSocket 走 `lyflow-token.<token>` 子协议 |
-| `LYFLOW_CLI` | 否 | 本地 `lyflow.exe` 路径。`eval` / `perturb` / `diff_graphs` / `get_params` / `patch_graph` 用它；缺了这五个工具返回一句说得清的错，其余工具不受影响 |
+| `LYFLOW_CLI` | 否 | 本地 `lyflow.exe` 路径。`eval` / `perturb` / `diff_graphs` / `get_params` / `patch_graph` / `list_recipes`，以及带 `recipe` 的 `run_graph` 用它；缺了就返回一句说得清的错，其余工具不受影响 |
 | `LYFLOW_PACKS` | 否 | 透传给 CLI 子进程。注意它在当前实现里是**构建期**变量（`scripts/build-core.ps1` 用它选算子包），运行期的 exe 已经带着自己那份算子表 |
 | `LYFLOW_WORK_DIR` | 否 | `eval` / `perturb` 的逐行结果落盘目录，默认 `os.tmpdir()/lyflow-mcp` |
 
@@ -214,9 +214,7 @@ MCP 只读配方，**不提供写配方的工具**（param-recipe P4.2）—— 
 带法线时 `channels` 多 `nx` / `ny` / `nz`，`head` 的每个点多一个 `normal`。
 统计全在 MCP 进程里算，core 一行没改。
 
-其余类型：`Tensor` 给 `{kind:"tensor", shape, count, min, max, mean}`（张量数据本来就不进 IPC，
-只有形状与统计量）；`Indices` 给 `{kind:"indices", count}`（这一版契约只有点云有二进制端点，
-取不到逐个下标）；`Measurement` 这类小值给 `{kind:"value", value}` 原样。
+其余类型：`Tensor` 给 `{kind:"tensor", shape, count, min, max, mean}`；`Indices` 给 `{kind:"indices", count}`；`Measurement` 这类小值给 `{kind:"value", value}` 原样。
 
 ### `eval` / `perturb` 的样本集
 

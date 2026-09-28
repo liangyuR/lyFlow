@@ -22,10 +22,10 @@ core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fa
 
 | 包 | 版本 | DEFAULT | 算子 | 依赖 |
 |---|---|---|---|---|
-| `std-pointcloud` | 0.1.0 | ON | 19 个点云 / 2D 量测 / 编辑算子 | PCL |
+| `std-pointcloud` | 0.1.0 | ON | 点云 / 2D 量测 / 编辑算子 | PCL |
 | `std-ml` | 0.1.0 | ON | `ml.onnx_run` | onnxruntime |
-| `gap` | 0.2.0 | **OFF** | 21 个 `gap.*` | PCL、yaml-cpp、onnxruntime |
-| `dts` | 0.1.0 | **OFF** | 8 个 `dts.*` | 无（零第三方，不链 PCL） |
+| `gap` | 0.2.0 | **OFF** | `gap.*` | PCL、yaml-cpp、onnxruntime |
+| `dts` | 0.1.0 | **OFF** | `dts.*` | 无（零第三方，不链 PCL） |
 
 `DEFAULT OFF` 的包用 **`LYFLOW_PACKS`** 按名字打开（分号分隔的**包名**，
 不是目录 —— 那是 `LYFLOW_OP_PACKS` 的事）：
@@ -129,7 +129,7 @@ cargo 会按 feature 集把 `lyflow-app` 建好几遍（app、lib 的 test、CLI
 每一份有自己的 `OUT_DIR` 和自己的 `lyflow_core.dll`。开发构建里每个 exe
 **加载的是自己那一份**（`build.rs` 发的 `LYFLOW_CORE_BIN`），
 所以两种模式来回切不会串味 —— 不带外部包跑过 `pnpm check` 之后，
-带 gap 包的 `pnpm tauri dev` 仍然是 37 个算子，反过来也一样。
+带 gap 包的 `pnpm tauri dev` 仍然带着 gap 的算子，反过来也一样。
 `target/debug/` 与 `deps/` 里那份拷贝只服务 `tauri build` 与打包。
 
 包用 `file(COPY ...)` 往 `bin/` 里放的 DLL（`std-ml` 的 `onnxruntime.dll` 就是）
@@ -424,7 +424,7 @@ gap 包是第一个用上它的：20 个输入端口声明了契约。第一条�
 | `Point2D` | 一个点 | 画成十字 |
 | `Measurement` | 值 + 单位 + ok + 消息 + 判定 + 上下限 | Inspector 的「输出」一栏 |
 | `Record` | 带类型标签的 JSON | Inspector 里显示 JSON |
-| `Tensor` | 形状 + float32 数据，行主序 | Inspector 里显示形状与 min/max/mean |
+| `Tensor` | 形状 + float32 数据，行主序 | 连线查看器画成图像；Inspector 与预览里显示形状与 min/max/mean |
 
 领域专有的结构走 `Record`：`Record{ type: "GapAlignment", data: {...} }`。
 加一个领域结构因此不用改 core，代价是它在图上只是一团 JSON，没有专门的可视化。

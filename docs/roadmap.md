@@ -184,7 +184,6 @@ C ABI 升到 v5：加了 `lyflow_set_library_dirs` / `lyflow_library_count` / `l
 - 库算子不能「展开为内联子图」：定义在库文件里，前端手上只有合成出来的 OperatorDesc。
   右键那一项会明说这一点。
 - `save_as_library` 拒绝嵌套了 `sub:` 的子图 —— 库文件必须自包含。
-- preview 只跑到选中节点。没选中节点时拖参数不会触发预览。
 - 300 节点的基准是合成图（30 条链 × 10 个 reroute），不是真实 pipeline。
 
 ## M4 之后 — core 零第三方依赖
@@ -255,7 +254,7 @@ gap 领域包从 `xyz-gap-inspector/lyflow/` 搬进本仓库的 `packs/gap/`，�
 - [x] `edit.translate_region` 标准算子 + `lyflow perturb`：图手术插节点 → 轴扫描位移 →
       每样本报斜率与正负两侧斜率，抓「读数不响应」与「取绝对值折叠」两种失效
 - [x] [agent-tuning.md](agent-tuning.md)：给只有 CLI/MCP 的人与 Agent 的工作法
-- [x] `packages/mcp`：对着 `/lyflow/*` HTTP 契约的 MCP 服务（stdio，11 个工具、8 类 resource），
+- [x] `packages/mcp`：对着 `/lyflow/*` HTTP 契约的 MCP 服务（stdio），
       `eval` / `perturb` / `diff_graphs` 起本地 CLI；输出一律裁过（点云只给统计量，
       `eval_row` 落盘给路径）。不依赖 `@lyflow/editor`，同一个二进制既接 test-server
       也接阶段 B 的业务服务（[mcp.md](mcp.md)、[ADR-0021](adr/0021-mcp-as-transport-consumer.md)）
@@ -328,15 +327,29 @@ Agent，不用自己重建「这次 run 到底发生了什么」，也不用手�
 - [ ] **业务仓库（xyz-gap-inspector）那一侧没有动**（m6-plan §6：`ApplyParameterPatches` 改成
       硬失败、`LyFlowMeasurer` 改读 summary），按计划是单独一个 PR。
 
-## M7 — 去掉复刻约束，把散文变成校验
+## M7 — 去掉复刻约束，把散文变成校验 ✅
 
-计划见 [m7-plan.md](m7-plan.md)。目标：**gap 包不再以「与原算法数值相同」为正确性标准；
+计划见 [m7-plan.md](m7-plan.md)，验收见 [m7-acceptance.md](m7-acceptance.md)。目标：**gap 包不再以「与原算法数值相同」为正确性标准；
 算子的约束要么是加载期校验，要么是运行期信号。**
 
-- [ ] manifest 删除 `preconditions`；`OperatorDesc` 加可选 `validate` 钩子（加载期、纯参数与连接关系）
-- [ ] 顶层图参数：GraphDoc `params`，CLI `--param`，C ABI v10 `params_json`，`lyflow params` 的 `source: graph`
-- [ ] gap 算子修正：`business_rois.datumSide` 与只搬框中心的变换、`fit_line.toward`、固定半径全路径生效、
+- [x] manifest 删除 `preconditions`；`OperatorDesc` 加可选 `validate` 钩子（加载期、纯参数与连接关系）
+- [x] 顶层图参数：GraphDoc `params`，CLI `--param`，C ABI v10 `params_json`，`lyflow params` 的 `source: graph`
+- [x] gap 算子修正：`business_rois.datumSide` 与只搬框中心的变换、`fit_line.toward`、固定半径全路径生效、
       `flush.signed` 默认 true；导入器跟着改并生成 `gapOffset` / `modelPath`
+
+## M7 之后
+
+各有计划与验收文档，这里只做索引：
+
+- M8 让人也能建图（gap 积木、Bundle、片段、2D 拖框）：[m8-plan.md](m8-plan.md)，
+  验收 [m8a](m8a-acceptance.md) / [m8b](m8b-acceptance.md) / [m8c](m8c-acceptance.md)
+- 连线内容查看器 Edge Peek：[edge-peek-plan.md](edge-peek-plan.md)
+- 节点运行按钮：[node-run-plan.md](node-run-plan.md)，[验收](node-run-acceptance.md)
+- 参数面板与参数配方：[param-recipe-plan.md](param-recipe-plan.md)，验收 p1–p4
+- 动效：[motion-plan.md](motion-plan.md)，[验收](motion-acceptance.md)
+- 阶段 A 为被嵌入做准备：[phase-a-plan.md](phase-a-plan.md)，验收 [a1](phase-a1-acceptance.md) / [a2](phase-a2-acceptance.md)；
+  阶段 B 在业务仓库：[phase-b-plan.md](phase-b-plan.md)
+- dts 算子包（默认关）：[packs/dts/README.md](../packs/dts/README.md)
 
 ## M5 之后 — 外延（只列方向，动工前再写计划）
 

@@ -99,7 +99,7 @@ gap 包把 Python 生成器的逻辑移植成 C++ 导入器（模板路径 / 模
 
 ```
 car_config/
-  database_manifest.yml          schema_version: 5, lyflow_abi: 6, pack_versions: {...}
+  database_manifest.yml          schema_version: 5, lyflow_abi: …, pack_versions: {...}
   <车型>/<device>/
     plc_bytes.yml
     <point>/

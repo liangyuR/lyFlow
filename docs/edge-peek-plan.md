@@ -109,7 +109,7 @@ LYFLOW_API void lyflow_indices_view_free(lyflow_indices_view* view);
   **零拷贝**，与 `CloudPreview` 不同 —— 点云要抽稀所以必须复制，张量切片不需要。
 - `shape` 永远给完整形状，不随 `offset/count` 变 —— 前端要靠它算切片。
 - 张量**不做抽稀**：抽稀过的图像没有意义。数据量靠切片控制。
-- `LYFLOW_ABI_VERSION` 7 → 8，同步 `bridge/src/core_ffi.rs:17` 的 `ABI_VERSION`。
+- `LYFLOW_ABI_VERSION` 7 → 8，Rust 侧的 `ABI_VERSION` 同步改。
 
 ### 2.2 core 单测（`core/tests/`）
 

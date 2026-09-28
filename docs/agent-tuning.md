@@ -119,7 +119,7 @@ lyflow patch graph.lyflow.json --remove-node 'b_*' \
 lyflow patch graph.lyflow.json --rewire n_fb_line:out=n_fit_base:line -o short.lyflow.json --json
 ```
 
-- **动作顺序定死 remove → add → rewire → set**，与你打字的先后无关。所以「先改接线、再删被短接掉
+- **动作顺序定死 remove → add → rewire → set → recipe → param**，与你打字的先后无关。所以「先改接线、再删被短接掉
   的那条分支」是**两条命令**：第一条只 `--rewire`，第二条才 `--remove-node`。
   反过来写（一条命令里又删又接）会报「图里没有节点 X」，因为删在前。
 - `--remove-node` 连带删它的所有边；glob 只对 id（`b_*` 这种）。

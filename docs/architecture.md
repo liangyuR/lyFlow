@@ -9,7 +9,7 @@
 | 编辑器包 `packages/editor` | TS / React | 图编辑、类型校验（UI 级）、参数表单、3D 视图、状态展示、本地撤销重做、快捷键、`--lyflow-*` 主题 | 执行调度、算子语义、结果计算、内存管理、**怎么和后端说话**、文件对话框、页面级样式 |
 | 宿主壳 `app/`（Tauri）或 `examples/host-react/`（浏览器） | TS / React | 装配一个 `Transport`、文件对话框、窗口标题与菜单、页面级 CSS、验收窗口桥 | 图的任何语义 |
 | 桥接 | Rust | IPC、序列化/反序列化、文件读写、进程与生命周期、事件推流、崩溃隔离 | 理解算子语义、改写图结构 |
-| 核心 | C++ | 算子注册表、拓扑调度、中间结果缓存与复用、并行与显存管理、**权威校验** | UI 状态、节点坐标、**任何具体算法** |
+| 核心 | C++ | 算子注册表、拓扑调度、中间结果缓存与复用、并行、**权威校验** | UI 状态、节点坐标、**任何具体算法** |
 | 算子包 | C++ | 算子实现、对第三方库（PCL、领域库）的依赖 | 执行调度、类型表、缓存策略 |
 
 编辑器与「计算在哪儿」之间隔着 `Transport`（[ADR-0018](adr/0018-editor-as-package.md)）：
@@ -27,13 +27,14 @@
 （测试基础设施）与 `util.reroute`（编辑器语义），零第三方依赖
 （[ADR-0014](adr/0014-std-as-pack-core-zero-dep.md)）。
 
-仓库内现在有三个包（[ADR-0015](adr/0015-algorithms-live-in-lyflow-packs.md)）：
+仓库内的包（[ADR-0015](adr/0015-algorithms-live-in-lyflow-packs.md)）：
 
 | 包 | 算子 | 默认 |
 |---|---|---|
-| `packs/std-pointcloud` | 14 个点云 + 4 个 2D 量测（拟合、ICP、盒裁剪） | 开 |
+| `packs/std-pointcloud` | 点云处理与 2D 量测（拟合、ICP、盒裁剪） | 开 |
 | `packs/std-ml` | `ml.onnx_run` | 开 |
-| `packs/gap` | 21 个 `gap.*`（间隙/段差测量） | 关，`LYFLOW_PACKS=gap` 打开 |
+| `packs/gap` | `gap.*`（间隙/段差测量） | 关，`LYFLOW_PACKS=gap` 打开 |
+| `packs/dts` | `dts.*`（车门胶条面差） | 关，`LYFLOW_PACKS=dts` 打开 |
 
 **算法住在包里，通用的那部分住在标准包里。** 标准包导出 `lyflow_std_algo`，
 领域包调它而不是再抄一份拟合 —— 「加一个领域」因此不会把同一个 RANSAC 复制第二遍。
@@ -78,7 +79,7 @@ C++ 不能信任传进来的 GraphDoc。
 
 C++ 收到后的处理顺序：
 1. **校验** — 算子存在？版本兼容？端口类型匹配？必填参数齐全？参数在合法范围内？有环？
-2. **编译** — GraphDoc → 内部执行计划（拓扑序、缓存键、资源预估）
+2. **编译** — GraphDoc → 内部执行计划（拓扑序、缓存键）
 3. **执行** — 按计划跑，边跑边发事件
 
 ### ③ ExecutionEvent — 状态上行
@@ -146,9 +147,6 @@ NodeState: idle → pending → running → (done | error | cancelled | skipped)
 CLI：`lyflow run --summary` 在 JSON Lines 末尾多一行 `{"kind":"run_summary", …}`；
 `lyflow eval` 的每行 `eval_row` **默认不带**，`--summary` 打开（体积是逐行的）。
 
-Live preview 是体验的分水岭，但也是最容易做错的一块：需要 C++ 侧支持**可取消**和**降级质量**。
-建议 M2 之后再做，不要在早期把接口锁死成不可取消的同步调用。
-
 ## 缓存与复用
 
 缓存键由 C++ 计算，形式上是节点的「上游内容哈希」：
@@ -164,9 +162,3 @@ UI 上把受影响的下游节点标成 stale（虚线边框之类）是很值�
 结果仓按 cacheKey 内容寻址，`runId → (nodeId, port) → cacheKey` 只是索引。
 前端要看点云时按需拉一份**二进制**载荷 —— 一百万点的 JSON 是 30MB 文本加一次
 全量解析，那条路走不通。
-
-## 为什么先不做子图
-
-子图/复合算子涉及嵌套序列化、端口提升、跨层引用和跨层缓存键，是整个项目里最贵的一块。
-GraphDoc 的 schema 里预留了 `subgraphs` 字段和 `op` 的命名空间，
-但 M0–M3 不实现。见 [roadmap.md](roadmap.md)。

@@ -33,7 +33,7 @@
 
 ## 实施要点
 
-- 映射层放在单独模块（`app/src/lib/mapping.ts`），禁止其他地方直接引用 React Flow
+- 映射层放在单独模块（`packages/editor/src/lib/mapping.ts`），禁止其他地方直接引用 React Flow
   的类型作为持久化结构
 - change 动作是封闭集合：`addNode` / `deleteNodes` / `moveNodes` / `setParam` /
   `connect` / `disconnect` / `setNodeUi` / `pasteNodes`
