@@ -4,8 +4,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
-import { findBaseCloud, firstCloudPort, type BaseCloud } from "../lib/basecloud";
-import { cacheKey, cloudCache, dropOtherRuns, putCache } from "../lib/cloudCache";
 import {
   boundsAttr,
   buildPoints,
@@ -27,11 +25,10 @@ import type { RampName } from "../lib/ramps";
 import { copyFrameWrites, pickFrame, roiFramesOf } from "../lib/roiFrames";
 import { rememberRoiBounds } from "../lib/roiThumbs";
 import { disposeOverlay, extentOf, shapesOf } from "../lib/shapes2d";
-import { augmentOperators, fullId, levelOf, resolveOutput } from "../lib/subgraph";
-import { viewerContentFor, type ViewerContent } from "../lib/viewRule";
+import { fullId, levelOf, resolveOutput } from "../lib/subgraph";
 import { exportCanvasPng } from "../lib/exportPng";
 import { transport } from "../transport";
-import { aggregatedNodes, useExecutionStore } from "../store/execution";
+import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useGraphParamOverrides } from "../store/recipe";
@@ -39,21 +36,11 @@ import { useUiStore } from "../store/ui";
 import { decodeCloud, type CloudPayload, type OutputStat } from "../types/execution";
 import { RoiLayer, type RoiItem } from "./RoiLayer";
 import { ValueView } from "./peek/ValueView";
+import { useViewerSource } from "../hooks/useViewerSource";
 import "../styles.viewer.css";
 
 export type { ShadingMode, CameraMode } from "../lib/cloudScene";
 export type { RampName } from "../lib/ramps";
-
-/** 当前展示的东西。三者永远一起换，见 Viewer3D 里的注释。 */
-interface Display {
-  nodeId: string | null;
-  /** 这片云属于哪一次运行。验收脚本用它量「事件到渲染」的延迟。 */
-  runId: string | null;
-  cloud: CloudPayload | null;
-  status: string | null;
-  /** 这片云是从上游借来的底图时，借的是谁。自己有云时为 null。 */
-  base: BaseCloud | null;
-}
 
 const MAX_POINTS_CHOICES = [100_000, 500_000, 2_000_000, 8_000_000];
 
@@ -117,25 +104,8 @@ export function Viewer3D() {
   const cameraMode = useUiStore((s) => s.viewerMode);
   const setCameraMode = useUiStore((s) => s.setViewerMode);
   const [maxPoints, setMaxPoints] = useState(2_000_000);
-  // 云、状态、以及**它属于哪个节点**必须一起换：拆成三个 useState 的话，切换节点时会出现
-  // 「标题是新节点、点云还是旧节点」的中间态 —— 肉眼看不见，但验收脚本会稳定读到它。
-  const [display, setDisplay] = useState<Display>({
-    nodeId: null,
-    runId: null,
-    cloud: null,
-    status: "未运行",
-    base: null,
-  });
-  const [loading, setLoading] = useState(false);
   // 只读地暴露给验收脚本：底图云与叠画几何各自的包围盒，用来断言两者在同一个平面上。
   const [overlayBounds, setOverlayBounds] = useState<Float32Array | null>(null);
-  const { cloud } = display;
-  // 参数面板的 ROI 缩略图拿这片云的范围当底图（param-recipe P2.7）
-  useEffect(() => {
-    if (display.nodeId && cloud && cloud.pointCount > 0) {
-      rememberRoiBounds(fullId(useUiStore.getState().path, display.nodeId), cloud.bounds);
-    }
-  }, [display.nodeId, cloud]);
 
   const selected = useUiStore((s) => s.selectedNodes);
   const path = useUiStore((s) => s.path);
@@ -151,30 +121,31 @@ export function Viewer3D() {
   const selectedId = selected.size === 1 ? [...selected][0]! : null;
   // 钉住优先于选中：钉住期间在画布上点别的节点，视图不跟着走（§2.6）。
   const activeId = pinnedId ?? selectedId;
-  const activeNode = useMemo(
-    () => (activeId ? nodes.find((n) => n.id === activeId) : undefined),
-    [activeId, nodes],
-  );
-  // 只订阅**这一个节点的状态字符串**，不要订阅整张 nodes Map ——
-  // 那张 Map 每来一条事件就是新引用，会排起一队几十兆的 IPC（见 README「踩过的坑」）。
-  const activeState = useExecutionStore((s) =>
-    activeId ? aggregatedNodes(path, s.nodes).get(activeId)?.state : undefined,
-  );
-  // 叠画用的非点云输出（G7）。stats 是事件里那一份，引用稳定，不会每帧新建。
-  const activeOutputs = useExecutionStore((s) =>
-    activeId ? aggregatedNodes(path, s.nodes).get(activeId)?.stats?.outputs : undefined,
-  );
+  const activeKey = activeId ? fullId(path, activeId) : null;
+  // 手动选的「值 / 点云」只对当时那个节点有效，换节点就回到自动
+  const contentPick = useUiStore((s) => s.viewerContentPick);
+  const setContentPick = useUiStore((s) => s.setViewerContentPick);
+  const slotA = useMemo(() => (activeId ? { path, nodeId: activeId } : null), [path, activeId]);
+  // 取数（hooks/useViewerSource）：状态、输出统计、显示点云还是值、取云或借上游的底图
+  const source = useViewerSource({
+    slot: slotA,
+    idleText: selected.size > 1 ? "选中了多个节点" : "选中一个节点查看它的输出",
+    maxPoints,
+    pick: contentPick && contentPick.nodeId === activeKey ? contentPick.content : null,
+    frozen: null,
+  });
+  const { display, loading, node: activeNode, op: activeOp, outputs: activeOutputs, content } = source;
+  const { cloud } = display;
+  // 参数面板的 ROI 缩略图拿这片云的范围当底图（param-recipe P2.7）
+  useEffect(() => {
+    if (display.nodeId && cloud && cloud.pointCount > 0) {
+      rememberRoiBounds(fullId(useUiStore.getState().path, display.nodeId), cloud.bounds);
+    }
+  }, [display.nodeId, cloud]);
   const typesByName = useManifestStore((s) => s.typesByName);
-  const operatorsById = useManifestStore((s) => s.operatorsById);
-  const ops = useMemo(
-    () => augmentOperators(operatorsById, doc.subgraphs),
-    [operatorsById, doc.subgraphs],
-  );
-  const bundles = useManifestStore((s) => s.bundle?.bundles);
   const graphPath = useGraphStore((s) => s.filePath);
   // 2D 拖框（m8-plan L15）：选中节点带 roi 语义标记的参数按底图分组；一次只画选中的那一组
   // （L20：locate_template 的一个模板槽），切换条列出全部组
-  const activeOp = activeNode ? ops.get(activeNode.op) : undefined;
   // 框的位置按有效值画（param-recipe P1.4）：被图参数绑定的 roi 参数取图参数的值，
   // 拖动写回照旧走 setParam —— 它在 store 里自己路由到图参数
   const overrides = useGraphParamOverrides();
@@ -186,23 +157,6 @@ export function Viewer3D() {
     [doc, path, activeNode, activeOp, overrides],
   );
   const roiFrames = useMemo(() => roiFramesOf(activeOp, roiNode), [activeOp, roiNode]);
-  // 显示点云场景还是值的表格（lib/viewRule）。类型取这次运行的实际类型，没跑过就用声明的 ——
-  // 不必等运行结束才知道该显示什么。手动选的只对当时那个节点有效，换节点就回到自动。
-  const autoContent = useMemo<ViewerContent>(
-    () =>
-      activeOp
-        ? viewerContentFor(
-            activeOp.outputs.map((o) => activeOutputs?.find((st) => st.port === o.name)?.type ?? o.type),
-            bundles,
-          )
-        : "cloud",
-    [activeOp, activeOutputs, bundles],
-  );
-  const activeKey = activeId ? fullId(path, activeId) : null;
-  const contentPick = useUiStore((s) => s.viewerContentPick);
-  const setContentPick = useUiStore((s) => s.setViewerContentPick);
-  const content: ViewerContent =
-    contentPick && contentPick.nodeId === activeKey ? contentPick.content : autoContent;
   // 离开那个节点就忘掉手动选的：换走再回来也回到自动，而不是悄悄停在上次选的值表格上
   useEffect(() => {
     if (contentPick && contentPick.nodeId !== activeKey) setContentPick(null);
@@ -283,107 +237,6 @@ export function Viewer3D() {
       setSceneHost(null);
     };
   }, []);
-
-  // -- 取点云 ---------------------------------------------------------------
-  useEffect(() => {
-    let cancelled = false;
-    const show = (
-      status: string | null,
-      payload: CloudPayload | null = null,
-      base: BaseCloud | null = null,
-    ) => {
-      if (cancelled) return;
-      setDisplay({ nodeId: activeId, runId: runId ?? null, cloud: payload, status, base });
-    };
-
-    if (!activeNode) {
-      setLoading(false);
-      show(selected.size > 1 ? "选中了多个节点" : "选中一个节点查看它的输出");
-      return;
-    }
-    if (!runId || runStatus === "idle") {
-      setLoading(false);
-      show("未运行");
-      return;
-    }
-    if (activeState === "error") {
-      setLoading(false);
-      show("该节点运行出错");
-      return;
-    }
-    if (activeState !== "done" && activeState !== "skipped") {
-      setLoading(false);
-      show(activeState === "running" ? "正在计算…" : "该节点尚未产出结果");
-      return;
-    }
-    // 显示值时不取云：值就在事件里（stats.outputs），底图也用不上
-    if (content === "value") {
-      setLoading(false);
-      show(null);
-      return;
-    }
-    // 自己有云就用自己的；没有就沿输入边往上游借最近的一片当底图，几何叠在它上面 ——
-    // 只输出 Box2D/Line2D 的节点若显示成空白，用户就看不出框压在剖面的哪里。
-    // Bundle 里的点云字段也算「自己的云」（`<port>.<field>`，m8-plan L3）。
-    const port = firstCloudPort(ops, activeNode.op, bundles, activeOutputs);
-    let base: BaseCloud | null = null;
-    // 子图节点的结果在内部那个叶子上，按路径查结果仓（F2）
-    let resolved = port ? resolveOutput(doc, path, activeNode.id, port) : null;
-    if (port && !resolved) {
-      setLoading(false);
-      show("这个算子的内部结果查不到（库算子的定义在库文件里）");
-      return;
-    }
-    if (!port) {
-      base = findBaseCloud(doc, path, activeNode.id, ops, bundles);
-      resolved = base?.resolved ?? null;
-    }
-    if (!resolved) {
-      setLoading(false);
-      show("该节点无点云输出，上游也没有可当底图的点云");
-      return;
-    }
-
-    dropOtherRuns(runId);
-    const key = cacheKey(runId, resolved.nodeId, resolved.port, maxPoints);
-    const hit = cloudCache.get(key);
-    if (hit) {
-      // 命中也要 delete+set 一下，否则 LRU 的「最近使用」永远不更新
-      putCache(key, hit);
-      setLoading(false);
-      show(hit.pointCount === 0 ? "该节点的点云是空的" : null, hit, base);
-      return;
-    }
-
-    setLoading(true);
-    void (async () => {
-      try {
-        // 预览时没必要拉超过预览点数的量：那条路径上本来就不会有更多点
-        const cap = isPreview ? Math.min(maxPoints, previewMaxPoints) : maxPoints;
-        const buffer = await transport.getOutputCloud(
-          runId,
-          resolved.nodeId,
-          resolved.port,
-          cap,
-        );
-        if (cancelled) return;
-        const payload = decodeCloud(buffer);
-        putCache(key, payload);
-        show(payload.pointCount === 0 ? "该节点的点云是空的" : null, payload, base);
-      } catch (e) {
-        show(e instanceof Error ? e.message : String(e));
-      } finally {
-        // 这里**不看 cancelled**：切换节点会作废旧请求，若那时不放下 loading，
-        // 而新节点又不需要发请求（比如没有点云输出），界面就永远停在「正在取点云…」。
-        setLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeNode, activeId, selected.size, runId, runStatus, activeState, maxPoints, doc, path,
-      isPreview, previewMaxPoints, ops, bundles, activeOutputs, content]);
 
   // -- 几何体：只随点云重建，着色参数一律不进这个 effect ---------------------
   useEffect(() => {

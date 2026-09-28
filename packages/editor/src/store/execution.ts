@@ -488,18 +488,21 @@ function sameAggregate(a: NodeExecution | undefined, b: NodeExecution): boolean 
   );
 }
 
-let aggCache: {
-  path: SubPath;
+/** 每个路径各缓存一份：对比模式下 A、B 可能在不同层级（compare-plan §1.7），单槽缓存会让两边
+ *  轮流把对方挤掉 —— 子图节点每次都合并出新对象，订阅它的 selector 就每次拿到新引用。
+ *  路径数组的引用是稳定的（ui.path、对比槽里存的那份），WeakMap 随它回收。 */
+const aggCache = new WeakMap<SubPath, {
   nodes: ReadonlyMap<string, NodeExecution>;
   result: Map<string, NodeExecution>;
-} | null = null;
+}>();
 
 /** 当前层级的「本地 id → 执行状态」。按对象身份缓存，一次事件批只算一遍。 */
 export function aggregatedNodes(
   path: SubPath,
   nodes: ReadonlyMap<string, NodeExecution>,
 ): ReadonlyMap<string, NodeExecution> {
-  if (aggCache && aggCache.path === path && aggCache.nodes === nodes) return aggCache.result;
+  const cached = aggCache.get(path);
+  if (cached && cached.nodes === nodes) return cached.result;
   const prefix = pathPrefix(path);
   const groups = new Map<string, NodeExecution[]>();
   for (const [id, exec] of nodes) {
@@ -512,7 +515,7 @@ export function aggregatedNodes(
     if (list) list.push(exec);
     else groups.set(local, [exec]);
   }
-  const previous = aggCache?.result;
+  const previous = cached?.result;
   const result = new Map<string, NodeExecution>();
   for (const [local, list] of groups) {
     // 叶子节点直接复用原对象，引用不变，节点组件就不会白重渲
@@ -520,7 +523,7 @@ export function aggregatedNodes(
     const prev = previous?.get(local);
     result.set(local, prev && sameAggregate(prev, merged) ? prev : merged);
   }
-  aggCache = { path, nodes, result };
+  aggCache.set(path, { nodes, result });
   return result;
 }
 
