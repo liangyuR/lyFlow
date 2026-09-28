@@ -5,8 +5,8 @@
   python ab_fallback.py --dataset <...> --baseline "%TEMP%\\lyflow-gap-baseline" \\
       --break-model --only <sample_id> --only <sample_id>
 
-与 `lyflow_ab.py` 的区别：图不是 Python 生成器产的，而是 C++ 导入器产的**回退图**
-（模型 ROI 主路径 + `b_` 前缀的模板备用闭包，见 packs/gap/README.md）。
+与 `lyflow_ab.py` 的区别：两者的图都由 C++ 导入器产，这里跑的是**回退图**
+（模型 ROI 主路径 + `b_` 前缀的模板备用闭包，见 packs/gap/README.md），`lyflow_ab.py` 跑的是单一路径的细粒度图。
 
 **历史对拍工具。** M7 起 gap 包的行为已有意偏离基线（ROI 只搬中心、fit_line 的 toward、
 固定半径全路径生效、flush 默认带符号等），出现不一致是预期的；它不再是验收门槛，
@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -36,7 +35,6 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import lyflow_ab as ab  # noqa: E402
-import lyflow_graph_from_config as gen  # noqa: E402
 
 TOLERANCE_MM = 0.002
 DEFAULT_MODEL = r"C:\Users\11601\OneDrive\Documents\DTS\models\v12s0.onnx"
@@ -44,29 +42,10 @@ CHOICE_NODE = "n_fb_flushBase"
 MISSING_MODEL = "no-such-model.onnx"
 
 
-def stage(config: Path, work: Path, model: str) -> Path:
-    key = gen.safe_id("_".join(config.resolve().parts[-3:-1]))
-    point = work / "stage" / key
-    point.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(config, point / config.name)
-    templates = config.parent / config.stem
-    if templates.is_dir():
-        shutil.copytree(templates, point / config.stem, dirs_exist_ok=True)
-    (point / "setting.yml").write_text(
-        "model_roi:\n  enabled: true\n  model_path: " + model + "\n",
-        encoding="utf-8", newline="")
-    return point / config.name
-
-
 def import_graph(lyflow: Path, config: Path, out: Path) -> tuple[dict | None, str]:
-    out.parent.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.run(
-        [str(lyflow), "import", str(config), "--kind", "StandardGap.yml:model",
-         "--base-dir", str(config.parent), "-o", str(out)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if proc.returncode != 0 or not out.is_file():
-        return None, f"exit {proc.returncode}: {proc.stderr.strip()[:300]}"
-    doc = json.loads(out.read_text(encoding="utf-8"))
+    doc, why = ab.import_graph(lyflow, config, "StandardGap.yml:model", out)
+    if doc is None:
+        return None, why
     if not any(n["op"] == "flow.fallback" for n in doc["nodes"]):
         return None, "导入器没有产出带 flow.fallback 的图"
     return doc, ""
@@ -170,8 +149,8 @@ def main(argv: list[str]) -> int:
         sample_id = sample["sample_id"]
         config = (root / sample["config"]).resolve()
         if str(config) not in graphs:
-            staged = stage(config, work, args.model)
-            path = work / "graphs" / (gen.safe_id(staged.parent.name) + ".lyflow.json")
+            staged = ab.stage(config, work, args.model)
+            path = work / "graphs" / (ab.safe_id(staged.parent.name) + ".lyflow.json")
             doc, why = import_graph(lyflow, staged, path)
             if doc is None:
                 print(f"  {sample_id}: 导入失败 {why}", file=sys.stderr)

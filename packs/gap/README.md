@@ -18,7 +18,7 @@
 packs/gap/
   ops/     26 个 gap.* 算子 + StandardGap.yml 导入器
   algo/    算法源码，从 xyz-gap-inspector 的 src/ 复制而来，命名空间不改
-  tools/   历史对拍工具：Python 图生成器、两条 A/B、回退图 A/B 与导入器等价性脚本
+  tools/   历史对拍工具：两条 A/B 与回退图 A/B（图都由导入器出）
   tests/   随包走的 doctest
   snippets/ 随包的片段（*.lyflow-snippet.json，M8b）
 ```
@@ -228,8 +228,8 @@ python packs\gap\tools\lyflow_ab.py --dataset <dataset.yml> `
 ## 导入器：StandardGap.yml → 图
 
 `lyflow import` 直接把一份 `StandardGap.yml` 转成图，不必装 Python
-（A1-7，实现在 `ops/import_standard_gap.cpp`）。`tools/lyflow_graph_from_config.py` 只为历史对拍保留，
-不跟着算子参数改动同步，生成图一律用导入器。**默认产出积木图**（M8a，m8-plan L12）；
+（A1-7，实现在 `ops/import_standard_gap.cpp`）。生成图只有这一份实现 —— 原来的 Python 生成器已经删掉，
+对拍工具也改走导入器。**默认产出积木图**（M8a，m8-plan L12）；
 `--fine`（等价于 kind 后面加 `:fine`）产出细粒度图，每一步一个节点。六个 kind 共用同一份实现：
 
 | kind | 走哪条路径 |
@@ -430,16 +430,9 @@ n_fb_quality_ref   n_fit_ref.quality         b_n_fit_ref.quality
 只在想看「偏离落在哪些样本上、偏了多少」时手动跑。
 
 ```powershell
-# Python 版图生成器（不跟算子参数改动同步；生成图请用 lyflow import）
-python packs\gap\tools\lyflow_graph_from_config.py `
-    <StandardGap.yml> --primary <Master.pcd> --secondary <Slave.pcd> -o graph.lyflow.json
-
-# 39 个样本的 A/B：生成图 → lyflow run → 与基线 results.csv 比对
+# 39 个样本的 A/B：lyflow import 出图 → lyflow run → 与基线 results.csv 比对
 python packs\gap\tools\lyflow_ab.py `
     --dataset <dataset.yml> --baseline <放 results.csv 的目录> [--model <onnx>]
-
-# C++ 导入器 vs Python 生成器的逐节点对比
-python packs\gap\tools\compare_importer.py [--dataset <dataset.yml>]
 
 # 回退图的 A/B：lyflow import 产回退图 -> lyflow run -> 与模型基线比 gap/flush
 python packs\gap\tools\ab_fallback.py `
@@ -451,8 +444,9 @@ python packs\gap\tools\ab_fallback.py `
     --break-model --only <sample_id>
 ```
 
-- `compare_importer.py` 比节点集合（id + op + 参数值）与边集合，忽略 ui 坐标与 meta。
-  导入器按 M7 的参数写图而 Python 生成器没有，两边不再逐节点相同。
+- `lyflow_ab.py` 用导入器出图（模板路径 `StandardGap.yml:template:fine`，带 `--model` 时 `:model:fine`），
+  每份配置一张图、同一份配置的样本共用，样本之间只 `--set` 读盘节点的两片点云；黑盒对照 `n_ref`
+  （`gap.measure_reference`）导入器不产，脚本补进图里、接在 `n_load` 上。暂存夹具与 `ab_fallback.py` 共用一份。
 - `ab_fallback.py` 跑的是**导入器产的回退图**，为每份配置暂存一份带
   `model_roi.enabled: true` 的夹具，`n_load` / `b_n_load` 用 `--set` 覆盖成 `source=files`
   加两个绝对路径；它顺带统计回退真的触发了的样本（`n_fb_flushBase.choice == "b"`

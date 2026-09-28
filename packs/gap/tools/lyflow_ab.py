@@ -1,10 +1,15 @@
 #!/usr/bin/env python
-"""A/B：拿 dataset.yml 的每个样本生成一张 LyFlow 图，跑 `lyflow run`，与基线 results.csv 比对。
+"""A/B：拿 dataset.yml 的每份配置经 `lyflow import` 导出一张 LyFlow 图，按样本跑 `lyflow run`，与基线 results.csv 比对。
 
   python lyflow_ab.py --dataset <dataset.yml> --baseline <baseline_dir> [--lyflow lyflow.exe]
   python lyflow_ab.py --dataset <...> --baseline <...\\lyflow-gap-baseline-model> --model v12s0.onnx
 
 不带 --model 比的是配置/模板路径，带 --model 比的是现场在用的模型 ROI 路径。
+
+图由 C++ 导入器产（`StandardGap.yml:template:fine` / `StandardGap.yml:model:fine`）—— 与编辑器、CLI 同一份实现，
+不再有第二套 Python 生成器。导入器只拿 (文本, baseDir)，所以每份配置先暂存一份夹具（配置 + 模板目录 +
+setting.yml）；点云不进夹具，跑每个样本时用 `--set` 把读盘节点指到那两个文件。黑盒对照 `n_ref`
+（`gap.measure_reference`）导入器不产，这里补进图里，接在读盘节点的 primary / secondary 上。
 
 **历史对拍工具。** M7 起 gap 包的行为已有意偏离基线（ROI 只搬中心、fit_line 的 toward、
 固定半径全路径生效、flush 默认带符号等），出现不一致是预期的；它不再是验收门槛，
@@ -26,14 +31,12 @@ import argparse
 import csv
 import json
 import math
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import yaml
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import lyflow_graph_from_config as gen  # noqa: E402
 
 TOLERANCE_MM = 0.002
 # 现场值只有两位小数，而且和离线跑的是不同的一次构建，容差自然要松一档（§10）。
@@ -42,21 +45,63 @@ FIELD_TOLERANCE_MM = 0.006
 # 拆分算子里读值的节点。判定节点在它们下游，值一样。
 SPLIT_NODES = {"flush": "n_flush", "gap": "n_gap"}
 REFERENCE_NODE = "n_ref"
+# 读盘节点：模板/模型路径只有 n_load；带回退的图还有备用闭包里的 b_n_load
+LOAD_NODES = ("n_load", "b_n_load")
+IMPORT_KIND = {False: "StandardGap.yml:template:fine", True: "StandardGap.yml:model:fine"}
+
+SAFE = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
 
 
-class Args:
-    """gen.build 要的那几个字段。argparse 的 Namespace 装不下额外键，索性自己给一个。"""
+def safe_id(text: str) -> str:
+    return "".join(c if c in SAFE else "_" for c in text)
 
-    def __init__(self, **kw):
-        self.point_dir = None
-        self.primary = None
-        self.secondary = None
-        self.template_dir = None
-        self.sample_id = None
-        self.graph_id = None
-        self.name = None
-        self.model = None
-        self.__dict__.update(kw)
+
+def stage(config: Path, work: Path, model: str | None) -> Path:
+    """暂存一份夹具：配置、同名模板目录、setting.yml（有模型才打开 model_roi）。返回暂存后的配置路径。"""
+    key = safe_id("_".join(config.resolve().parts[-3:-1])) + ("_model" if model else "")
+    point = work / "stage" / key
+    point.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(config, point / config.name)
+    templates = config.parent / config.stem
+    if templates.is_dir():
+        shutil.copytree(templates, point / config.stem, dirs_exist_ok=True)
+    setting = point / "setting.yml"
+    if model:
+        setting.write_text("model_roi:\n  enabled: true\n  model_path: " + model + "\n",
+                           encoding="utf-8", newline="")
+    elif setting.exists():
+        setting.unlink()
+    return point / config.name
+
+
+def import_graph(lyflow: Path, config: Path, kind: str, out: Path) -> tuple[dict | None, str]:
+    """`lyflow import`，失败时返回 (None, 原因)。"""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(
+        [str(lyflow), "import", str(config), "--kind", kind,
+         "--base-dir", str(config.parent), "-o", str(out)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if proc.returncode != 0 or not out.is_file():
+        return None, f"exit {proc.returncode}: {proc.stderr.strip()[:300]}"
+    return json.loads(out.read_text(encoding="utf-8")), ""
+
+
+def add_reference(doc: dict, config: Path, model: str | None) -> None:
+    """黑盒对照：导入器不产，补一个 gap.measure_reference 接在 n_load 上。直接改 JSON 而不走
+    `lyflow patch` —— 点云要到运行时才 --set 进来，patch 的整图校验在那之前过不了。"""
+    params = {
+        "configPath": str(config),
+        "deriveTemplateDir": False,
+        "templateDir": str(config.parent / config.stem),
+    }
+    if model:
+        params["useModel"] = True
+        params["modelPath"] = model
+    doc["nodes"].append({"id": REFERENCE_NODE, "op": "gap.measure_reference", "params": params,
+                         "ui": {"position": {"x": 0, "y": 900}, "title": "黑盒对照"}})
+    for port in ("primary", "secondary"):
+        doc["edges"].append({"id": f"e_ref_{port}", "from": {"node": "n_load", "port": port},
+                             "to": {"node": REFERENCE_NODE, "port": port}})
 
 
 def read_field_values(manifest: Path, samples: list[dict]) -> dict[str, dict[str, float]]:
@@ -112,10 +157,29 @@ def to_float(text: str) -> float | None:
         return None
 
 
-def run_graph(lyflow: Path, graph: Path) -> tuple[dict, list[str]]:
+def sample_sets(doc: dict, primary: Path, secondary: Path, sample_id: str) -> list[str]:
+    """把图里的读盘节点指到这个样本的两片点云，黑盒对照记上样本号。"""
+    present = {n["id"] for n in doc["nodes"]}
+    args: list[str] = []
+    for node in LOAD_NODES:
+        if node not in present:
+            continue
+        args += ["--set", f"{node}.source=" + json.dumps("files"),
+                 "--set", f"{node}.primaryFile=" + json.dumps(str(primary)),
+                 "--set", f"{node}.secondaryFile=" + json.dumps(str(secondary))]
+    if REFERENCE_NODE in present:
+        args += ["--set", f"{REFERENCE_NODE}.sampleId=" + json.dumps(sample_id)]
+    return args
+
+
+def run_graph(lyflow: Path, graph: Path, base: Path | None = None,
+              sets: list[str] | None = None) -> tuple[dict, list[str]]:
     """跑一张图，返回 {nodeId: {port: value}} 与节点级错误列表。"""
-    proc = subprocess.run([str(lyflow), "run", str(graph)],
-                          capture_output=True, text=True, encoding="utf-8", errors="replace")
+    argv = [str(lyflow), "run", str(graph)]
+    if base is not None:
+        argv += ["--base-dir", str(base)]
+    argv += sets or []
+    proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace")
     values: dict[str, dict] = {}
     errors: list[str] = []
     if not proc.stdout.strip():
@@ -200,24 +264,38 @@ def main(argv: list[str]) -> int:
         print(f"模型: {model}", file=sys.stderr)
     field = read_field_values(args.field_values or (root / "manifest.csv"), samples)
 
+    kind = IMPORT_KIND[model is not None]
+    graphs: dict[str, tuple[Path, dict, Path] | None] = {}
     rows = []
     for sample in samples:
         sample_id = sample["sample_id"]
         config = (root / sample["config"]).resolve()
         pcd = sample.get("pcd") or {}
-        graph_path = out_dir / f"{gen.safe_id(sample_id)}.lyflow.json"
-        build_args = Args(primary=str((root / pcd["primary"]).resolve()),
-                          secondary=str((root / pcd["secondary"]).resolve()),
-                          sample_id=sample_id,
-                          graph_id=f"ab_{gen.safe_id(sample_id)}",
-                          name=sample_id,
-                          model=model)
-        doc = gen.build(config, build_args)
-        with graph_path.open("w", encoding="utf-8", newline="\n") as f:
-            json.dump(doc, f, ensure_ascii=False, indent=2)
-            f.write("\n")
-
-        values, errors = run_graph(lyflow, graph_path)
+        # 同一份配置的样本共用一张图（导入器按配置出图），样本之间只差 --set 进来的两片点云
+        if str(config) not in graphs:
+            staged = stage(config, out_dir, model)
+            graph_path = out_dir / "graphs" / (safe_id(staged.parent.name) + ".lyflow.json")
+            doc, why = import_graph(lyflow, staged, kind, graph_path)
+            if doc is None:
+                print(f"  {sample_id}: 导入失败 {why}", file=sys.stderr)
+                graphs[str(config)] = None
+            else:
+                add_reference(doc, config, model)
+                with graph_path.open("w", encoding="utf-8", newline="\n") as f:
+                    json.dump(doc, f, ensure_ascii=False, indent=2)
+                    f.write("\n")
+                graphs[str(config)] = (graph_path, doc, staged.parent)
+        entry = graphs[str(config)]
+        if entry is None:
+            rows.append({"sample": sample_id, "problems": ["导入失败"], "errors": [],
+                         "baselineGap": None, "baselineFlush": None, "splitGap": None,
+                         "splitFlush": None, "dGap": None, "dFlush": None, "dFieldGap": None,
+                         "dFieldFlush": None, "baselineSuccess": False, "splitSuccess": False})
+            continue
+        graph_path, doc, base_dir = entry
+        sets = sample_sets(doc, (root / pcd["primary"]).resolve(),
+                           (root / pcd["secondary"]).resolve(), sample_id)
+        values, errors = run_graph(lyflow, graph_path, base_dir, sets)
         base = baseline.get(sample_id, {})
         row = {
             "sample": sample_id,
