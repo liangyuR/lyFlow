@@ -42,8 +42,13 @@ Status makeRoiSet(const Inputs& inputs, const ParamView& params, Outputs& output
       datumRight = datumOnRight(datum, seamLeft, seamRight);
     }
   }
+  // 模板路径上，选中的那个槽的框若是回放配置里的全局框，来源记 config（原算法的判据）
+  std::string source = params.choice("source");
+  if (source == "template" && alignment != nullptr) {
+    source = alignment->data.value("roisFrom", source);
+  }
   nlohmann::json info =
-      roiInfo(datumRight, params.choice("source"),
+      roiInfo(datumRight, source,
               alignment ? alignment->data : nlohmann::json(), overall,
               crop ? crop->data : nlohmann::json());
   outputs.set("rois", roiSetOf(inputs.get("datum"), inputs.get("target"), inputs.get("seamLeft"),
@@ -113,7 +118,7 @@ void registerBundleOps(Registry& r) {
   {
     OperatorDesc op;
     op.id = "gap.make_roi_set";
-    op.version = "1.0.0";
+    op.version = "1.1.0";
     op.label = "组角色框";
     op.category = "间隙/组合";
     op.keywords = {"bundle", "roi set", "组合", "角色框"};
@@ -142,7 +147,9 @@ void registerBundleOps(Registry& r) {
     source.name = "source";
     source.type = ParamType::Enum;
     source.label = "Source";
-    source.doc = "框从哪来，进 info.source。result_bundle 的 roi_source 取它。";
+    source.doc =
+        "框从哪来，进 info.source。result_bundle 的 roi_source 取它。template 且接了 alignment 时"
+        "按选中槽的 roisFrom 细分成 template / config。";
     source.def = Value::text("template");
     source.options = {EnumOption{"template", "Template", "模板 + ICP。"},
                       EnumOption{"model", "Model", "分割模型。"}};

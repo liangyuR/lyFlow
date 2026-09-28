@@ -132,6 +132,9 @@ struct Candidate {
   Roi flushRef{};
   Roi gapLeft{};
   Roi gapRight{};
+  // 候选自己写了 rois（哪怕只写了一部分）。没写的四框在解析时已经用配置里的全局框填好 ——
+  // 原算法把后一种记 roi_source = config（docs/result-bundle-plan.md (b)）
+  bool ownRois = false;
 };
 
 enum class Mode { Template, Model, Auto };
@@ -287,6 +290,7 @@ Status parseConfig(const YAML::Node& cfg, const fs::path& baseDir, Mode mode, Co
       cand.left = textOr(item, "left", "left_template.pcd");
       cand.right = textOr(item, "right", "right_template.pcd");
       const YAML::Node rois = child(item, "rois");
+      cand.ownRois = present(rois);
       const YAML::Node croiFlush = child(rois, "flush");
       const YAML::Node croiGap = child(rois, "gap");
       const YAML::Node base = child(croiFlush, "base_roi");
@@ -560,6 +564,13 @@ std::string finish(Builder& g, const Config& c, const Tail& t, bool fine) {
         {"binds", t.modelPathBinds},
         {"doc", "模型 ROI 用的 ONNX（setting.yml 的 model_roi.model_path）。"}};
   }
+  // 图文件的 sha256（docs/result-bundle-plan.md (a)）：执行器没有注入口子，宿主经 params_json 传；
+  // 值进 cacheKey，换了图不会命中旧的汇总
+  graphParams["graphSha256"] = nlohmann::json{
+      {"type", "string"},
+      {"default", ""},
+      {"binds", nlohmann::json::array({t.bundleNode + ".graphSha256"})},
+      {"doc", "图文件的 sha256，进结果汇总的 graph_sha256。宿主用 --param / params_json 传。"}};
   doc["params"] = std::move(graphParams);
   return doc.dump(2);
 }
@@ -591,6 +602,7 @@ std::string blockLocateTemplate(Builder& g, const Config& c, const std::string& 
     p[prefix + "TargetRoi"] = cand.flushRef;
     p[prefix + "SeamLeftRoi"] = cand.gapLeft;
     p[prefix + "SeamRightRoi"] = cand.gapRight;
+    p[prefix + "RoisFrom"] = cand.ownRois ? "template" : "config";
   }
   const std::string node = g.node(id, "gap.locate_template", p, column, row, title);
   g.edge(scan.node, scan.port, node, "scan");
@@ -885,6 +897,7 @@ FineTemplate fineTemplateBranch(Builder& g, const Config& c, const std::string& 
     ap["roiGapLeft"] = cand.gapLeft;
     ap["roiFlushRef"] = cand.flushRef;
     ap["roiGapRight"] = cand.gapRight;
+    ap["roisFrom"] = cand.ownRois ? "template" : "config";
     const std::string node = g.node(prefix + "n_align_" + cid, "gap.align_template", ap,
                                     column + 3, 3 + static_cast<int>(order) * 2, "ICP " + cid);
     g.edge(b.cropM, "cloud", node, "cloud");

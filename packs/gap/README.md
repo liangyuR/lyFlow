@@ -60,7 +60,7 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
 | `gap.load_template` | → left, right | 读一对模板 PCD |
 | `gap.align_template` | cloud, tplLeft, tplRight → alignment | 全局粗配 + 左右两侧 ICP + 信赖域 + 退化锁定 |
 | `gap.select_alignment` | a,[b],[c],[d] → alignment | 按 `min(l,r)` ↓、`mean` ↓、配置顺序 ↑、id ↑ 选模板 |
-| `gap.result_bundle` | gap, flush, rois (RoiSet), scan (ScanPair), roiOverall?, 三份 quality, cropStatus?, alignment?, fallback → bundle | 汇成一个 `GapResultBundle`，字段对齐旧 `QualityMetrics`。四个框与 roi_source 取自 `rois`，整体框 / 对齐结果 / 裁剪状态不接端口时取 `rois.info`，点数取自 `scan`（定位之后的那一对云） |
+| `gap.result_bundle` | gap, flush, rois (RoiSet), scan (ScanPair), roiOverall?, 三份 quality, cropStatus?, alignment?, fallback → bundle | 汇成一个 `GapResultBundle`，字段对齐旧 `QualityMetrics`。四个框与 roi_source 取自 `rois`（模板路径上按选中槽的 `roisFrom` 分 template / config），整体框 / 对齐结果 / 裁剪状态不接端口时取 `rois.info`，点数取自 `scan`（定位之后的那一对云）；`graph_sha256` 取参数 `graphSha256`，导入的图把它绑成顶层图参数由宿主传；`point_counts` 里不产出的键写在 op.doc（[result-bundle-plan.md](../../docs/result-bundle-plan.md)） |
 | `gap.business_rois` | alignment → 四个 Box2D, seam | 业务 ROI 按 ICP 变换搬到当前样本上：只搬框中心，宽高保持配置里的原值。`datumSide` 决定 base ROI 用哪一侧的变换，默认 `auto` 由模板坐标系里的框推出（M8a）；`seam` 是两个缝框中心连线的中点，接 `gap.fit_line.toward` |
 | `gap.fit_line` | cloud, box, toward, refLine? → line, inliers, innerEnd | 直线拟合 + 靠 `toward` 一端的截取重拟合（`toward` 接缝那一侧的 ROI）。`dirMode` 可把方向锚到 `refLine` 上（`band` 只兜底，`fixed` 一律钉死、只拟法向偏移）—— ROI 只有两三毫米宽时它自己拟出来的方向基本是噪声，还会偶尔整条歪几十度而残差很小。`minInliers` 是唯一拦得住「ROI 跑偏、照样拟出一条没意义的线」的地方 |
 | `gap.selected_point` | cloud, box → point | 离 ROI min 角最近的点（取自整片云） |

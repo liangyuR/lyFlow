@@ -375,7 +375,23 @@ TEST_CASE("gap 的两种 Bundle：scan.merged 取得到点云、图输出指向�
   CHECK(outputs["datum"]["type"] == "Box2D");
   CHECK(outputs["datum"]["value"]["min"][0].get<double>() == doctest::Approx(-0.015).epsilon(0.01));
   CHECK(outputs["side"]["value"]["data"]["datumSide"] == "left");
-  CHECK(outputs["side"]["value"]["data"]["source"] == "template");
+  // f1 没自带 rois，四框是配置里的全局框：原算法记 config（docs/result-bundle-plan.md (b)）
+  CHECK(outputs["side"]["value"]["data"]["source"] == "config");
+  CHECK(outputs["bundle"]["value"]["data"]["roi_source"] == "config");
+  CHECK(outputs["bundle"]["value"]["data"]["graph_sha256"] == "");
+
+  SUBCASE("细粒度图走 make_roi_set，来源同样按选中槽的 roisFrom；graph_sha256 由顶层图参数传进来") {
+    Json fine = importAs("StandardGap.yml:template:fine", kSyntheticConfig, scene.root);
+    fine["outputs"]["side"] = {{"node", "n_roi_set"}, {"port", "rois.info"}};
+    fine["params"]["graphSha256"]["default"] = "0123abcd";
+    CHECK(errorsOf(fine).empty());
+    test::Session fs(fine, scene.root);
+    REQUIRE(fs.wait().finalState("n_bundle") == "done");
+    const Json got = Json::parse(exec::runOutputsJson(fs.runId()));
+    CHECK(got["side"]["value"]["data"]["source"] == "config");
+    CHECK(got["bundle"]["value"]["data"]["roi_source"] == "config");
+    CHECK(got["bundle"]["value"]["data"]["graph_sha256"] == "0123abcd");
+  }
 
   Json wrong = importAs("StandardGap.yml:template", kSyntheticConfig, scene.root);
   dropEdgesInto(wrong, "n_line", "rois");
@@ -484,7 +500,7 @@ TEST_CASE("locate_template 把 datum 框拖到 target 那一侧：validate 在�
 TEST_CASE("每个模板槽各有自己的四框（m8-plan L19）：没有公共四框、没有 Override，槽 1 恒启用") {
   const OperatorDesc* op = packRegistry().find("gap.locate_template");
   REQUIRE(op != nullptr);
-  CHECK(op->version == "2.0.0");
+  CHECK(op->version == "2.1.0");  // 2.1：每个槽多一个 RoisFrom（result-bundle-plan (b)）
   for (const Param& p : op->params) {
     CAPTURE(p.name);
     for (const char* gone : {"datumRoi", "targetRoi", "seamLeftRoi", "seamRightRoi"}) {
@@ -1043,7 +1059,7 @@ TEST_CASE("result_bundle v1 → v2：七个散端口收进新插的 make_scan_pa
     REQUIRE(migrations.size() == 1);
     const Json& m = migrations[0];
     CHECK(m["nodeId"] == "n_bundle");
-    CHECK(m["opVersion"] == "2.0.0");
+    CHECK(m["opVersion"] == "2.1.0");
     REQUIRE(m.contains("edits"));
     // alignment / roiOverall 在 v2 仍是 bundle 的端口，那两条边原样留着
     CHECK(m["edits"]["removeEdges"].size() == 7);
@@ -1051,7 +1067,8 @@ TEST_CASE("result_bundle v1 → v2：七个散端口收进新插的 make_scan_pa
     std::set<std::string> added;
     for (const Json& n : m["edits"]["addNodes"]) added.insert(n["op"].get<std::string>());
     CHECK(added == std::set<std::string>{"gap.make_roi_set", "gap.make_scan_pair"});
-    CHECK(m["edits"]["addEdges"].size() == 9);
+    // 4 条框 + 3 条云进两个新节点、两个新节点各接回 bundle，外加 alignment 同时接给 make_roi_set
+    CHECK(m["edits"]["addEdges"].size() == 10);
     CHECK(errorsOf(v1).empty());
 
     // 老图当场就能跑（执行器在内存里用迁移后的拓扑），汇总与 m8a 的细粒度图逐字段相同

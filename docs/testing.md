@@ -6,7 +6,7 @@
 
 | 层 | 命令 | 规模 | 跑一遍 |
 |---|---|---|---|
-| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 153 例；`LYFLOW_PACKS=dts` 161 例；`LYFLOW_PACKS=gap;dts` 242 例 | 分钟级（含编译） |
+| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 153 例；`LYFLOW_PACKS=dts` 161 例；`LYFLOW_PACKS=gap;dts` 243 例 | 分钟级（含编译） |
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 137（纯平台构建 79 通过 / 58 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑） | < 1 分钟（已编译时） |
 | editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 76 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 29 | 秒级 |

@@ -223,6 +223,9 @@ Status alignTemplate(const Inputs& inputs, const ParamView& params, Outputs& out
     rois[kKeys[i]] = {v[0], v[1], v[2], v[3]};
   }
   record.data["rois"] = rois;
+  // 这个槽的四框从哪来（docs/result-bundle-plan.md (b)）：候选自带 rois = template，
+  // 只回放配置里的全局框 = config —— 与原算法的 quality.roi_source 同一个判据
+  record.data["roisFrom"] = params.choice("roisFrom");
 
   ctx.log(LogLevel::Info, "ICP " + params.text("templateId") + ": left=" +
                               std::to_string(left.outcome.score) +
@@ -329,7 +332,7 @@ Param roiParam(const char* name, const char* label) {
 void registerAlignTemplate(Registry& r) {
   OperatorDesc op;
   op.id = "gap.align_template";
-  op.version = "1.0.0";
+  op.version = "1.1.0";
   op.label = "配准模板";
   op.category = "间隙/配准";
   op.keywords = {"icp", "template", "align", "配准", "模板"};
@@ -352,6 +355,18 @@ void registerAlignTemplate(Registry& r) {
   templateId.type = ParamType::String;
   templateId.label = "Template Id";
   templateId.def = Value::text("primary");
+
+  Param roisFrom;
+  roisFrom.name = "roisFrom";
+  roisFrom.type = ParamType::Enum;
+  roisFrom.label = "ROIs From";
+  roisFrom.doc =
+      "这个槽的四个框从哪来，进 GapAlignment.roisFrom，结果汇总的 roi_source 取它："
+      "template = 候选自带 rois，config = 候选没带、回放配置里的全局框。导入器按配置写。";
+  roisFrom.def = Value::text("template");
+  roisFrom.advanced = true;
+  roisFrom.options = {EnumOption{"template", "Template", "候选自带 rois。"},
+                      EnumOption{"config", "Config", "候选没带，用配置里的全局框。"}};
 
   Param poseMode;
   poseMode.name = "initialPoseMode";
@@ -384,6 +399,7 @@ void registerAlignTemplate(Registry& r) {
       roiParam("roiGapLeft", "Gap Left ROI"),
       roiParam("roiFlushRef", "Flush Ref ROI"),
       roiParam("roiGapRight", "Gap Right ROI"),
+      roisFrom,
   };
   op.capabilities = {false, false, true};
   op.compute = &fine::alignTemplate;

@@ -177,7 +177,9 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
       pointCounts[templateId + "_global_coarse_attempted"] = 1;
       pointCounts[templateId + "_global_coarse_succeeded"] = a.value("globalSucceeded", false) ? 1 : 0;
     }
-    if (roiSource.empty()) roiSource = a.contains("rois") ? "template" : "config";
+    if (roiSource.empty()) {
+      roiSource = a.value("roisFrom", std::string(a.contains("rois") ? "template" : "config"));
+    }
   }
   bundle["icp"] = std::move(icp);
 
@@ -342,6 +344,13 @@ TopologyEdit migrateResultBundleFromV1(const nlohmann::json&,
         const MigrationInput* in = inputOn(inputs, g.oldPorts[k]);
         edit.addEdges.push_back({in->fromNode, in->fromPort, std::string("@new:") + g.key, g.fields[k]});
       }
+      // 模板路径上 roi_source 按选中槽的 roisFrom 分 template / config，datumSide 也按对齐记录推：
+      // bundle 原来那条 alignment 输入同时接给新插的 make_roi_set，与细粒度图的接法一致
+      if (std::string(g.key) == "rois") {
+        if (const MigrationInput* a = inputOn(inputs, "alignment")) {
+          edit.addEdges.push_back({a->fromNode, a->fromPort, "@new:rois", "alignment"});
+        }
+      }
       edit.addEdges.push_back({std::string("@new:") + g.key, g.target, "@self", g.target});
       edit.notes.push_back(joinNames(present) + " 收进新插的 " + g.op + "，接到 " + g.target +
                            "：汇总结果与 v1 相同");
@@ -361,7 +370,7 @@ TopologyEdit migrateResultBundleFromV1(const nlohmann::json&,
 void registerResultBundle(Registry& r) {
   OperatorDesc op;
   op.id = "gap.result_bundle";
-  op.version = "2.0.0";
+  op.version = "2.1.0";
   op.label = "结果汇总";
   op.category = "间隙/测量";
   op.keywords = {"bundle", "quality", "diagnostics", "汇总", "质量"};
@@ -370,8 +379,15 @@ void registerResultBundle(Registry& r) {
       "字段与旧 QualityMetrics 一一对应，业务侧的 results.csv 与 metadata.json 由它填。\n"
       "只汇总不计算：没接的端口记 inactive 或缺省，不代表那一项真的合格。"
       "四个框与 roi_source 取自 rois（RoiSet），点数取自 scan（定位之后的 ScanPair）；"
-      "left_point_count / right_point_count 填的都是合并云的点数；graphSha256 由调用方填，"
-      "留空的 bundle 没法溯源到具体哪张图。";
+      "left_point_count / right_point_count 填的都是合并云的点数。\n"
+      "graph_sha256 取参数 graphSha256：导入器把它声明成顶层图参数，宿主用 --param / params_json 传图文件的"
+      " sha256；留空的 bundle 没法溯源到具体哪张图。\n"
+      "roi_source 取 rois.info.source（模板路径上按选中槽的 roisFrom 分 template / config，模型路径 model），"
+      "回退选了备用路径记 template。\n"
+      "point_counts 不产出、以业务侧为准的键（docs/result-bundle-plan.md (c)）：非 line end 配置下的"
+      " flush_ref_roi（没有 fit_line）；preprocess_* 的口径在跟随裁剪之前（原算法在之后），且等于 input；"
+      "input_*_removed_non_finite、filter_before_*、segmentation_*、consistency_gate_exceeded（没有端口带这些数）；"
+      "*_global_coarse_* 只有选中候选的那一条；原算法的逐圆诊断键。";
   op.inputs = {
       Port{"gap", "Measurement", "Gap", "间隙测量值。", true},
       optional("flush", "Measurement", "Flush", "段差测量值。没有面差需求的测点可以不接，记 inactive。"),
@@ -403,7 +419,7 @@ void registerResultBundle(Registry& r) {
                 "原算法记 skipped:no_model_roi。"),
       textParam("consistencyMode", "Consistency Mode", "off", "跨侧一致性闸门的模式，只做记录。"),
       textParam("graphSha256", "Graph SHA-256", "",
-                "图文件的 sha256。执行器还没有注入口子，暂时由调用方填。"),
+                "图文件的 sha256。导入的图把它绑成顶层图参数 graphSha256，由宿主传。"),
   };
   op.capabilities = {false, true, true};
   op.compute = &resultBundle;

@@ -174,7 +174,7 @@ TEST_CASE("导入器注册了六种 kind；导入的图每个节点都写了 opV
   for (const auto& o : manifest["operators"]) {
     versions[o["id"].get<std::string>()] = o["version"].get<std::string>();
   }
-  REQUIRE(versions.at("gap.locate_template") == "2.0.0");
+  REQUIRE(versions.at("gap.locate_template") == "2.1.0");
   Fixture f("opversion", "model_roi:\n  enabled: true\n  model_path: X:/m.onnx\n");
   for (const char* kind : {"StandardGap.yml:template", "StandardGap.yml:template:fine",
                            "StandardGap.yml:model", "StandardGap.yml:model:fine"}) {
@@ -760,7 +760,37 @@ TEST_CASE("导入的图带顶层参数：gapOffset 绑两处，模型模式的 m
   }
   CHECK(stringList(model["params"]["gapOffset"]["binds"]) ==
         std::vector<std::string>{"n_circles.offset", "n_gap.offset"});
+  // 图文件的 sha256 由宿主经 params_json 传（docs/result-bundle-plan.md (a)）
+  for (const nlohmann::json* doc : {&tpl, &model}) {
+    REQUIRE((*doc)["params"].contains("graphSha256"));
+    CHECK((*doc)["params"]["graphSha256"]["type"] == "string");
+    CHECK((*doc)["params"]["graphSha256"]["default"] == "");
+    CHECK(stringList((*doc)["params"]["graphSha256"]["binds"]) ==
+          std::vector<std::string>{"n_bundle.graphSha256"});
   }
+  }
+}
+
+TEST_CASE("roisFrom：候选自带 rois 的槽记 template，没带的（回放全局框）记 config —— 积木 / 细粒度都写") {
+  // kConfig 的 f1 没带 rois；再加一个带了 rois 的 f2
+  std::string yaml = kConfig;
+  const std::string f1 = "    - {id: f1, left: left_template.pcd, right: right_template.pcd}\n";
+  const auto at = yaml.find(f1);
+  REQUIRE(at != std::string::npos);
+  yaml.insert(at + f1.size(),
+              "    - {id: f2, left: f2_left.pcd, right: f2_right.pcd,\n"
+              "       rois: {gap: {left_roi: [4, 162, 8, 170]}}}\n");
+  Status s;
+  const nlohmann::json blocks = importText("StandardGap.yml:template", yaml, &s);
+  REQUIRE(s.ok);
+  const nlohmann::json& locate = nodeById(blocks, "n_locate");
+  CHECK(locate["params"]["template1RoisFrom"] == "config");
+  CHECK(locate["params"]["template2RoisFrom"] == "template");
+
+  const nlohmann::json fine = importText("StandardGap.yml:template:fine", yaml, &s);
+  REQUIRE(s.ok);
+  CHECK(nodeById(fine, "n_align_f1")["params"]["roisFrom"] == "config");
+  CHECK(nodeById(fine, "n_align_f2")["params"]["roisFrom"] == "template");
 }
 
 TEST_CASE("导入的图过 core 的 validate：模板、模型、带 fallback 三种 × 积木 / 细粒度") {

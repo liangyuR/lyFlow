@@ -254,10 +254,15 @@ embed_minimal ok
 - **`bundle.graph_sha256` 是空串。** A1-9 要求它「由执行器注入到 ctx」，而 `ExecContext`
   现在没有这个口子。加它要动 core 的公共头，且与 A1 的其余部分无关，所以留给阶段 B；
   算子把它暴露成参数，调用方可以自己填。`pack_versions` 已经有了（算子自己从注册表汇总）。
+  **（2026-09-29 补了一半）**导入器把它声明成顶层图参数 `graphSha256`、绑到 `n_bundle.graphSha256`，宿主经
+  `params_json` / `--param` 传图文件的 sha256；执行器注入仍等阶段 B 定口径（[result-bundle-plan.md](result-bundle-plan.md) (a)）。
 - **`bundle.roi_source` 是推断出来的**，不是权威的：有 alignment 记录 → `template`，
   有 cropStatus → `model`，fallback 选了 b → `template`。原算法靠「选中的候选自带 ROI 没有」
   区分 `template` 与 `config`，而 `GapAlignment` 记录总是带 `rois` 键，所以 `config` 目前取不到。
   这份数据集上 67/67 都对，但对一份候选没有 `rois` 段的配置会判错。
+  **（2026-09-29 已补）**`gap.align_template` 加 `roisFrom`（`gap.locate_template` 每个槽一个 `template<i>RoisFrom`），
+  导入器按候选有没有 `rois` 写 template / config，对齐记录带着它，`make_roi_set` 与结果汇总按选中的那个槽取 ——
+  与原算法同一个判据（[result-bundle-plan.md](result-bundle-plan.md) (b)）。
 - **`bundle.crop_status` 的 `skipped:no_model_roi` 走参数**，不走端口 ——
   它取决于 `roll_anchored_crop.enabled`，那是配置不是端口值。两个生成器都会在模板路径上
   把 `gap.result_bundle.cropStatus` 设成它。

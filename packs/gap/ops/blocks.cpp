@@ -267,7 +267,8 @@ Status locateTemplate(const Inputs& inputs, const ParamView& params, Outputs& ou
         .set("roiFlushBase", params.raw().at(rois.datum))
         .set("roiFlushRef", params.raw().at(rois.target))
         .set("roiGapLeft", params.raw().at(rois.seamLeft))
-        .set("roiGapRight", params.raw().at(rois.seamRight));
+        .set("roiGapRight", params.raw().at(rois.seamRight))
+        .set("roisFrom", params.raw().at(slot.prefix + "RoisFrom"));
     if (Status s = align.run(ctx, "ICP " + id, "scan"); !s.ok) return s;
     alignments.push_back(align.out("alignment"));
   }
@@ -288,7 +289,8 @@ Status locateTemplate(const Inputs& inputs, const ParamView& params, Outputs& ou
   bool datumRight = false;
   datumOnRightInRecord(rec.data, &datumRight);
   nlohmann::json info =
-      roiInfo(datumRight, "template", rec.data, box.asBox2D(), nlohmann::json());
+      roiInfo(datumRight, rec.data.value("roisFrom", std::string("template")), rec.data,
+              box.asBox2D(), nlohmann::json());
   outputs.set("rois", roiSetOf(business.out("flushBase"), business.out("flushRef"),
                                business.out("gapLeft"), business.out("gapRight"), std::move(info)));
   outputs.set("alignment", alignment);
@@ -772,7 +774,7 @@ void registerBlockOps(Registry& r) {
   {
     OperatorDesc op;
     op.id = "gap.locate_template";
-    op.version = "2.0.0";
+    op.version = "2.1.0";
     op.label = "模板定位";
     op.category = "间隙/积木";
     op.keywords = {"template", "icp", "locate", "模板", "定位", "积木"};
@@ -857,6 +859,11 @@ void registerBlockOps(Registry& r) {
         params.push_back(slotted(roiParam(prefix + kSlotRoles[role] + "Roi", kRoleLabels[role],
                                           kRoleDocs[role], group, advanced, k)));
       }
+      Param roisFrom = paramOf(r, "gap.align_template", "roisFrom", 1, group.c_str());
+      roisFrom.name = prefix + "RoisFrom";
+      roisFrom = slotted(roisFrom);
+      roisFrom.advanced = true;
+      params.push_back(roisFrom);
     }
     for (const char* name :
          {"initialPoseMode", "maxMatchingDist", "maxFitnessDist", "maxIterations", "normalKnn",
