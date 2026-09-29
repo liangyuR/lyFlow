@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import { findBaseCloud, firstCloudPort, type BaseCloud } from "../../lib/basecloud";
-import { cacheKey, cloudCache, dropOtherRuns, putCache } from "../../lib/cloudCache";
+import { cacheKey, cloudCache, dropOtherRuns, fetchCloud, putCache } from "../../lib/cloudCache";
 import { RAMPS, writeRgbColors, type RampName } from "../../lib/ramps";
 import { disposeOverlay, extentOf, shapesOf } from "../../lib/shapes2d";
 import { registerPeekCanvas } from "../../lib/peekCanvas";
@@ -417,15 +417,10 @@ export function CloudView({ win, src }: PeekViewProps) {
     setLoading(true);
     void (async () => {
       try {
-        const buffer = await transport.getOutputCloud(
-          runId,
-          resolved.nodeId,
-          resolved.port,
-          maxPoints,
+        const payload = await fetchCloud(key, async () =>
+          decodeCloud(await transport.getOutputCloud(runId, resolved.nodeId, resolved.port, maxPoints)),
         );
         if (cancelled) return;
-        const payload = decodeCloud(buffer);
-        putCache(key, payload);
         show(payload.pointCount === 0 ? "该端口的点云是空的" : null, payload, target.base);
       } catch (e) {
         show(lockedRun ? FROZEN : e instanceof Error ? e.message : String(e));

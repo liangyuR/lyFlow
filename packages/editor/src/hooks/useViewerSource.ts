@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { findBaseCloud, firstCloudPort, type BaseCloud } from "../lib/basecloud";
-import { cacheKey, cloudCache, dropOtherRuns, putCache } from "../lib/cloudCache";
+import { cacheKey, cloudCache, dropOtherRuns, fetchCloud, putCache } from "../lib/cloudCache";
 import { augmentOperators, levelOf, resolveOutput } from "../lib/subgraph";
 import { viewerContentFor, type ViewerContent } from "../lib/viewRule";
 import { transport } from "../transport";
@@ -112,6 +112,7 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: Vie
     preview: false,
   });
   const [loading, setLoading] = useState(false);
+  const notRun = !runId || runStatus === "idle";
 
   // -- 取点云 ---------------------------------------------------------------
   useEffect(() => {
@@ -132,7 +133,7 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: Vie
       show(idleText);
       return;
     }
-    if (!runId || runStatus === "idle") {
+    if (notRun || !runId) {
       setLoading(false);
       show("未运行");
       return;
@@ -191,10 +192,10 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: Vie
       try {
         // 预览时没必要拉超过预览点数的量：那条路径上本来就不会有更多点
         const cap = isPreview ? Math.min(maxPoints, previewMaxPoints) : maxPoints;
-        const buffer = await transport.getOutputCloud(runId, resolved.nodeId, resolved.port, cap);
+        const payload = await fetchCloud(key, async () =>
+          decodeCloud(await transport.getOutputCloud(runId, resolved.nodeId, resolved.port, cap)),
+        );
         if (cancelled) return;
-        const payload = decodeCloud(buffer);
-        putCache(key, payload);
         show(payload.pointCount === 0 ? "该节点的点云是空的" : null, payload, base, port);
       } catch (e) {
         show(e instanceof Error ? e.message : String(e));
@@ -208,7 +209,8 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: Vie
     return () => {
       cancelled = true;
     };
-  }, [frozen, node, nodeId, idleText, runId, runStatus, liveState, maxPoints, doc, path,
+    // 依赖的是「还没运行」这个布尔值而不是 runStatus 本身：running → ok 不该让取数重来一遍
+  }, [frozen, node, nodeId, idleText, runId, notRun, liveState, maxPoints, doc, path,
       isPreview, previewMaxPoints, ops, bundles, liveOutputs, content]);
 
   const frozenDisplay = useMemo<Display | null>(

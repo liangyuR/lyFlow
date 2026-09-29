@@ -61,3 +61,23 @@ export function putCache(key: string, payload: CloudPayload) {
     cloudCache.delete(victim);
   }
 }
+
+/** 正在取的那几份：键同 cloudCache。 */
+const inflight = new Map<string, Promise<CloudPayload>>();
+
+/** 同一个键只取一次：已经在取就等那一份，取完进缓存。取数 effect 因依赖变化重跑时（节点刚 done、
+ *  运行紧接着 finished，effect 被作废又重来），不合并的话同一片云会并发取两三遍，
+ *  从「运行结束」算起白白多等一整次 IPC（m4「事件到渲染」偶发超时就是它）。 */
+export function fetchCloud(key: string, load: () => Promise<CloudPayload>): Promise<CloudPayload> {
+  const pending = inflight.get(key);
+  if (pending) return pending;
+  const p = load()
+    .then((payload) => {
+      putCache(key, payload);
+      return payload;
+    })
+    .finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
+}
+
