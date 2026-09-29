@@ -20,7 +20,7 @@ use libloading::{Library, Symbol};
 pub type EventCb = unsafe extern "C" fn(*const c_char, *mut c_void);
 
 /// C ABI 的版本号。与 core/include/lyflow/c_api.h 的 LYFLOW_ABI_VERSION 必须一致。
-pub const ABI_VERSION: u32 = 13;
+pub const ABI_VERSION: u32 = 14;
 
 /// 运行时注入一个源节点的输出（v7）。缓冲由调用方持有到 `lyflow_run_start` 返回。
 #[repr(C)]
@@ -258,6 +258,7 @@ type FnImport =
 type FnSetLibraryDirs = unsafe extern "C" fn(*const *const c_char, usize) -> *mut c_char;
 type FnLibraryCount = unsafe extern "C" fn() -> usize;
 type FnLibraryDefinition = unsafe extern "C" fn(*const c_char) -> *mut c_char;
+type FnCacheSetDir = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
 type FnCacheEvict = unsafe extern "C" fn(
     *const c_char,
     *const c_char,
@@ -308,6 +309,7 @@ pub struct Core {
     set_library_dirs: FnSetLibraryDirs,
     library_count: FnLibraryCount,
     library_definition: FnLibraryDefinition,
+    cache_set_dir: FnCacheSetDir,
     #[allow(dead_code)]
     lib: Library,
 }
@@ -381,6 +383,7 @@ impl Core {
             set_library_dirs: sym!(lib, "lyflow_set_library_dirs", FnSetLibraryDirs),
             library_count: sym!(lib, "lyflow_library_count", FnLibraryCount),
             library_definition: sym!(lib, "lyflow_library_definition", FnLibraryDefinition),
+            cache_set_dir: sym!(lib, "lyflow_cache_set_dir", FnCacheSetDir),
             lib,
         })
     }
@@ -570,6 +573,20 @@ impl Core {
 
     pub fn library_count(&self) -> usize {
         unsafe { (self.library_count)() }
+    }
+
+    /// 落盘缓存（v14，docs/disk-cache-plan.md）：结果放在 `<dir>/<fingerprint>/` 下，`dir` 空串 = 关。
+    /// `fingerprint` 是构建指纹 —— 变了整个目录不再复用。Err 里是一句人话的原因。
+    pub fn cache_set_dir(&self, dir: &str, fingerprint: &str) -> Result<(), String> {
+        let cs = |s: &str| CString::new(s).map_err(|e| e.to_string());
+        let (d, f) = (cs(dir)?, cs(fingerprint)?);
+        let message = unsafe { self.take_owned((self.cache_set_dir)(d.as_ptr(), f.as_ptr())) }
+            .map_err(|e| e.to_string())?;
+        if message.is_empty() {
+            Ok(())
+        } else {
+            Err(message)
+        }
     }
 
     /// 库算子 `lib.<id>` 的定义（v13）：库文件原样去掉 `id`，形状同图文档里的 `subgraphs.<id>`。

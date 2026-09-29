@@ -1,5 +1,7 @@
 #include "exec/result_store.h"
 
+#include "exec/disk_cache.h"
+
 #include <set>
 #include <algorithm>
 
@@ -180,14 +182,36 @@ bool ResultStore::getLocked(const std::string& runId, const std::string& nodeId,
   return true;
 }
 
-bool ResultStore::peek(const std::string& cacheKey,
-                       const std::vector<std::string>& ports) const {
-  if (cacheKey.empty() || ports.empty()) return false;
-  std::lock_guard<std::mutex> lock(mu_);
+bool ResultStore::completeLocked(const std::string& cacheKey,
+                                 const std::vector<std::string>& ports) const {
   for (const auto& port : ports) {
     if (!byKey_.count(entryKey(cacheKey, port))) return false;
   }
   return true;
+}
+
+void ResultStore::insertLocked(const std::string& cacheKey, const std::string& port, Data data) {
+  const std::string key = entryKey(cacheKey, port);
+  if (byKey_.count(key)) return;
+  Entry e;
+  e.bytes = data.byteSize();
+  e.cacheKey = cacheKey;
+  e.data = std::move(data);
+  lru_.push_back(key);
+  e.lru = std::prev(lru_.end());
+  bytes_ += e.bytes;
+  byKey_.emplace(key, std::move(e));
+}
+
+bool ResultStore::peek(const std::string& cacheKey,
+                       const std::vector<std::string>& ports) const {
+  if (cacheKey.empty() || ports.empty()) return false;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (completeLocked(cacheKey, ports)) return true;
+  }
+  // 落盘缓存（docs/disk-cache-plan.md）：plan 的 cached 预测与执行器同一个判据，盘上有也算
+  return DiskCache::instance().has(cacheKey, ports);
 }
 
 bool ResultStore::reuse(const std::string& runId, const std::string& nodeId,
@@ -198,12 +222,30 @@ bool ResultStore::reuse(const std::string& runId, const std::string& nodeId,
     counters_.misses += 1;
     return false;
   }
-  std::lock_guard<std::mutex> lock(mu_);
-  for (const auto& port : ports) {
-    if (!byKey_.count(entryKey(cacheKey, port))) {
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (!completeLocked(cacheKey, ports) && !DiskCache::instance().enabled()) {
       counters_.misses += 1;
       return false;
     }
+  }
+  // 内存里不齐就查盘（锁外读文件），读到的放进内容层再按原路径命中
+  PortData fromDisk;
+  bool needDisk = false;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    needDisk = !completeLocked(cacheKey, ports);
+  }
+  if (needDisk && !DiskCache::instance().load(cacheKey, ports, fromDisk)) {
+    std::lock_guard<std::mutex> lock(mu_);
+    counters_.misses += 1;
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(mu_);
+  for (auto& [port, data] : fromDisk) insertLocked(cacheKey, port, std::move(data));
+  if (!completeLocked(cacheKey, ports)) {
+    counters_.misses += 1;
+    return false;
   }
   infos.clear();
   for (const auto& port : ports) {
@@ -216,6 +258,7 @@ bool ResultStore::reuse(const std::string& runId, const std::string& nodeId,
     index_[runId][nodeId][port] = key;
   }
   counters_.hits += 1;
+  evictLocked();
   return true;
 }
 

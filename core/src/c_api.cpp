@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "exec/disk_cache.h"
 #include "exec/executor.h"
 #include "exec/library.h"
 #include "exec/result_store.h"
@@ -168,6 +169,16 @@ char* lyflow_effective_params(const char* graph_json, const char* base_dir) {
     return dup(d.toJson());
   } catch (...) {
     return dup(std::string("[]"));
+  }
+}
+
+char* lyflow_cache_set_dir(const char* dir, const char* fingerprint) {
+  try {
+    return dup(lyflow::exec::DiskCache::instance().setDir(fromC(dir), fromC(fingerprint)));
+  } catch (const std::exception& e) {
+    return dup(std::string("设置落盘缓存目录时内部异常: ") + e.what());
+  } catch (...) {
+    return dup(std::string("设置落盘缓存目录时内部异常"));
   }
 }
 

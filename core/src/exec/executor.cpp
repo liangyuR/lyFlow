@@ -1,3 +1,4 @@
+#include "exec/disk_cache.h"
 #include "exec/executor.h"
 
 #include <algorithm>
@@ -870,6 +871,24 @@ class Scheduler {
       // 强制重算的结果覆盖同 cacheKey 的旧结果（修订一 V1）：键没变而内容变了的只有外部输入，
       // 那正是用户点「强制重算」想看到的新东西。
       store_.put(options_.runId, node.id, p.name, node.cacheKey, d, /*replace=*/node.forced);
+    }
+
+    // 落盘缓存（docs/disk-cache-plan.md）：确定性、够贵、全部端口都能落盘的节点整个写一份。
+    // 预览（源头抽稀）、注入、静音透传的结果不写 —— 它们要么不该跨进程复用，要么复用没意义。
+    DiskCache& disk = DiskCache::instance();
+    if (disk.enabled() && options_.mode != RunMode::Preview && !bypassed && !node.provided &&
+        node.op->capabilities.deterministic && durationMs >= disk.minDurationMs()) {
+      PortData ports;
+      bool all = !node.op->outputs.empty();
+      for (const Port& p : node.op->outputs) {
+        auto it = outputValues.find(p.name);
+        if (it == outputValues.end() || !persistable(it->second)) {
+          all = false;
+          break;
+        }
+        ports.emplace_back(p.name, it->second);
+      }
+      if (all) disk.store(node.cacheKey, ports);
     }
 
     sink_.nodeFinished(node.id, bypassed ? "skipped" : "done", durationMs, primaryElements,

@@ -1,8 +1,8 @@
 #ifndef LYFLOW_C_API_H
 #define LYFLOW_C_API_H
-// C ABI v13。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
+// C ABI v14。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
 // 三条约定（char* 归属、异常不跨 ABI、只导出 C 函数）见 core/README.md「C ABI 约定」。
-#define LYFLOW_ABI_VERSION 13
+#define LYFLOW_ABI_VERSION 14
 #include <stddef.h>
 #include <stdint.h>
 
@@ -72,6 +72,12 @@ LYFLOW_API char* lyflow_plan(const char* graph_json, const char* base_dir,
 LYFLOW_API char* lyflow_plan_params(const char* graph_json, const char* base_dir,
                                     const char* const* targets, size_t n,
                                     const char* params_json);
+
+// v14：落盘缓存（docs/disk-cache-plan.md）。dir 为 NULL / 空串 = 关（默认）。fingerprint 由宿主给
+// （构建指纹：core DLL 的内容哈希等），结果放在 <dir>/<fingerprint>/ 下，指纹变了整个目录不再复用 ——
+// cacheKey 只看算子版本，改了实现没升版本时靠它避开旧结果。缓存判定仍只归 core：内存里没有就查盘，
+// 确定性、够贵（≥ 20 ms）、全部端口是点云或张量的节点算完落盘。返回空串 = 成功，否则一句人话的原因。
+LYFLOW_API char* lyflow_cache_set_dir(const char* dir, const char* fingerprint);
 
 // 进程级地丢掉全部缓存结果，别的 run 的结果也一并丢，所以调用方应当先取消。
 // 只想让某一次运行不吃缓存的，用 lyflow_run_options.no_reuse。

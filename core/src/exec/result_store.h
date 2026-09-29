@@ -160,6 +160,10 @@ class ResultStore {
   };
 
   void touchLocked(const std::string& key);
+  /// 只进内容层、不挂索引（磁盘层读回来的那几份）。
+  void insertLocked(const std::string& cacheKey, const std::string& port, Data data);
+  /// 内存里这些端口齐不齐。
+  bool completeLocked(const std::string& cacheKey, const std::vector<std::string>& ports) const;
   /// get 的无锁版本，只认端口名本身（不拆字段）。
   bool getLocked(const std::string& runId, const std::string& nodeId, const std::string& port,
                  Data& out) const;

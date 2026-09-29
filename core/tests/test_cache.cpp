@@ -3,10 +3,13 @@
 #include <doctest/doctest.h>
 
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <random>
 #include <set>
 #include <thread>
 
+#include "exec/disk_cache.h"
 #include "exec/plan.h"
 #include "exec/result_store.h"
 #include "helpers.h"
@@ -815,4 +818,123 @@ TEST_CASE("visibleWhen：藏起来的参数只查形态不查必填，eq 与 ne 
     REQUIRE(shown.size() == 1);
     CHECK(shown[0]["paramPath"] == "path");
   }
+}
+
+// ------------------------------------------------ 落盘缓存（docs/disk-cache-plan.md）
+
+TEST_CASE("落盘缓存的编解码：点云带 intensity / normals / rgb、张量，逐位往返；点云读回换新 id；别的类型不落盘") {
+  PointCloud c;
+  c.xyz = {0.f, 1.f, 2.f, 3.f, 4.f, 5.f};
+  c.intensity = {0.5f, 0.25f};
+  c.normals = {0.f, 0.f, 1.f, 1.f, 0.f, 0.f};
+  c.rgb = {255, 0, 0, 0, 128, 255};
+  Tensor t;
+  t.shape = {1, 2, 3};
+  t.data = {1.f, 2.f, 3.f, 4.f, 5.f, 6.f};
+  const exec::PortData ports = {{"cloud", Data::cloud(c)}, {"logits", Data::tensor(t)}};
+  std::string bytes;
+  REQUIRE(exec::encodeNode(ports, bytes));
+  exec::PortData back;
+  REQUIRE(exec::decodeNode(bytes, back));
+  REQUIRE(back.size() == 2);
+  const PointCloud* bc = back[0].second.asCloud();
+  REQUIRE(bc != nullptr);
+  CHECK(back[0].first == "cloud");
+  CHECK(bc->xyz == c.xyz);
+  CHECK(bc->intensity == c.intensity);
+  CHECK(bc->normals == c.normals);
+  CHECK(bc->rgb == c.rgb);
+  CHECK(bc->id != c.id);  // 进程内唯一：读回来的是一片新云，Indices 对账不会认错
+  const Tensor* bt = back[1].second.asTensor();
+  REQUIRE(bt != nullptr);
+  CHECK(bt->shape == t.shape);
+  CHECK(bt->data == t.data);
+
+  // 截断 / 魔数不对都当坏文件
+  CHECK_FALSE(exec::decodeNode(bytes.substr(0, bytes.size() - 3), back));
+  CHECK_FALSE(exec::decodeNode("XXXX" + bytes.substr(4), back));
+  // 有一个端口不是点云 / 张量，整节点不编
+  Indices idx;
+  idx.values = {0};
+  CHECK_FALSE(exec::encodeNode({{"cloud", Data::cloud(c)}, {"indices", Data::indices(idx)}}, bytes));
+}
+
+TEST_CASE("落盘缓存：另一个「进程」（清空内存）照样命中且逐位相同，plan 的 cached 预测查盘；指纹换了不命中；坏文件当未命中") {
+  ensureTestOps();
+  const auto dir = std::filesystem::temp_directory_path() / "lyflow-disk-cache-test";
+  std::filesystem::remove_all(dir);
+  exec::DiskCache& disk = exec::DiskCache::instance();
+  disk.setMinDurationMs(0);  // 测试图都很快；阈值的逻辑本身就是一个比较
+  REQUIRE(disk.setDir(dir.u8string(), "fpA").empty());
+
+  // g / t / s 只出点云（能落盘），h 出 Indices（不能）；s 用读回的 t 与现算的 h 对账
+  const Json doc = makeGraph(
+      {
+          {"g", "gen.synthetic", kSmall},
+          {"t", "test.thin", Json{{"leaf", {0.02, 0.02, 0.02}}}},
+          {"h", "test.half_indices"},
+          {"s", "test.split"},
+      },
+      {{"g.cloud", "t.cloud"}, {"t.cloud", "h.cloud"}, {"t.cloud", "s.cloud"}, {"h.indices", "s.indices"}});
+  auto selected = [](const std::string& runId) {
+    Data d;
+    REQUIRE(exec::ResultStore::instance().get(runId, "s", "selected", d));
+    return d.asCloud()->xyz;
+  };
+  std::vector<float> first;
+  {
+    Session s(doc);  // 先清空内存再跑：第一次全部真算、落盘
+    REQUIRE(s.wait().runStatus() == "ok");
+    first = selected(s.runId());
+  }
+  std::size_t files = 0;
+  for (const auto& e : std::filesystem::recursive_directory_iterator(dir)) {
+    if (e.path().extension() == ".lfc") ++files;
+  }
+  CHECK(files == 3);  // g、t、s；h 的 Indices 不落盘
+
+  // 清空内存 = 换了一个进程：plan 预测 g / t / s 命中、h 要算
+  exec::ResultStore::instance().clear();
+  std::set<std::string> predicted;
+  for (const Json& n : Json::parse(exec::planGraphJson(doc.dump(), {}, {}))) {
+    if (n["cached"].get<bool>()) predicted.insert(n["nodeId"].get<std::string>());
+  }
+  CHECK(predicted == std::set<std::string>{"g", "t", "s"});
+  {
+    Session s(doc);
+    RunLog& log = s.wait();
+    REQUIRE(log.runStatus() == "ok");
+    CHECK(log.nodeEvent("g", "skipped")["stats"]["cached"] == true);
+    CHECK(log.nodeEvent("s", "skipped")["stats"]["cached"] == true);
+    CHECK(selected(s.runId()) == first);
+  }
+
+  // 指纹换了（重编了 core）：旧目录不再复用
+  REQUIRE(disk.setDir(dir.u8string(), "fpB").empty());
+  {
+    Session s(doc);
+    RunLog& log = s.wait();
+    REQUIRE(log.runStatus() == "ok");
+    CHECK(log.finalState("g") == "done");
+    CHECK(selected(s.runId()) == first);
+  }
+
+  // 坏文件（写到一半被杀）：当未命中、删掉，这一次照常真算并重写
+  for (const auto& e : std::filesystem::recursive_directory_iterator(dir / "fpB")) {
+    if (e.path().extension() != ".lfc") continue;
+    std::ofstream(e.path(), std::ios::binary | std::ios::trunc) << "LFC1broken";
+  }
+  {
+    Session s(doc);
+    RunLog& log = s.wait();
+    REQUIRE(log.runStatus() == "ok");
+    CHECK(log.finalState("g") == "done");
+    CHECK(selected(s.runId()) == first);
+  }
+
+  // 关掉：之后的测试不受影响
+  REQUIRE(disk.setDir("", "").empty());
+  disk.setMinDurationMs(20);
+  CHECK_FALSE(disk.enabled());
+  std::filesystem::remove_all(dir);
 }
