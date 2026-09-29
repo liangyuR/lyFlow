@@ -33,7 +33,8 @@ function paneStatus(p: ComparePaneProps, stage: ViewerContent): string | null {
   if (p.loading) return "正在取点云…";
   if (p.display.status) return p.display.status;
   // 两栏是点云场景、这一侧只有值（§1.6）：值照样进下面的差异表
-  if (stage === "cloud" && p.content === "value") return "该节点无点云输出，它的值见下方差异表";
+  // 图像那一侧同理：对比里不并排画图（compareContentFor）
+  if (stage === "cloud" && p.content !== "cloud") return "该节点无点云输出，它的值见下方差异表";
   return null;
 }
 

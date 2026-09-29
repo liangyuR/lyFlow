@@ -56,10 +56,11 @@ Status resizeCompute(const Inputs& inputs, const ParamView& params, Outputs& out
 
 Status cropCompute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
   const Image& in = *inputs.get("image").asImage();
-  int x0 = static_cast<int>(params.integer("x"));
-  int y0 = static_cast<int>(params.integer("y"));
-  int x1 = x0 + static_cast<int>(params.integer("width"));
-  int y1 = y0 + static_cast<int>(params.integer("height"));
+  const auto roi = params.vec4("roi");
+  int x0 = static_cast<int>(std::floor(roi[0]));
+  int y0 = static_cast<int>(std::floor(roi[1]));
+  int x1 = static_cast<int>(std::ceil(roi[2]));
+  int y1 = static_cast<int>(std::ceil(roi[3]));
   if (inputs.has("box")) {
     // 接了框就用框：像素坐标的 Box2D（通常来自 image.region_stats 的 bbox）
     const Box2D& b = *inputs.get("box").asBox2D();
@@ -78,7 +79,7 @@ Status cropCompute(const Inputs& inputs, const ParamView& params, Outputs& outpu
   if (x1 <= x0 || y1 <= y0) {
     return badParam("裁剪框落在图像外面（图像 " + std::to_string(in.width) + "×" +
                         std::to_string(in.height) + "），裁出来是空的",
-                    "width");
+                    "roi");
   }
   // ROI 子矩阵不连续，putMat 里 fromMat 会 clone 一份连续的
   return img::putMat(outputs, "image", cvx::view(in)(cv::Rect(x0, y0, x1 - x0, y1 - y0)));
@@ -196,16 +197,22 @@ void registerImageCrop(Registry& r) {
   op.label = "裁剪";
   op.category = "图像/基础";
   op.keywords = {"crop", "roi", "裁剪", "截取"};
-  op.doc = "按像素矩形裁出一块；接了 box 就用框（像素单位的 Box2D）。超出图像的部分截掉。";
+  op.doc = "按像素矩形 [x0, y0, x1, y1] 裁出一块（主预览里可以在输入图上拖框）；接了 box 就用框"
+           "（像素单位的 Box2D）。超出图像的部分截掉。";
   op.inputs = {img::imageIn(),
-               Port{"box", "Box2D", "Box", "可选：像素坐标的框，接了就不看下面四个参数。", false}};
+               Port{"box", "Box2D", "Box", "可选：像素坐标的框，接了就不看 ROI 参数。", false}};
   op.outputs = {img::imageOut()};
-  Param x = img::intParam("x", "X", 0, 0, 1 << 20, "左上角 x，像素。");
-  Param y = img::intParam("y", "Y", 0, 0, 1 << 20, "左上角 y，像素。");
-  Param w = img::intParam("width", "Width", 256, 1, 1 << 20, "宽，像素。");
-  Param h = img::intParam("height", "Height", 256, 1, 1 << 20, "高，像素。");
-  for (Param* p : {&x, &y, &w, &h}) p->unit = "px";
-  op.params = {x, y, w, h};
+  Param roi;
+  roi.name = "roi";
+  roi.type = ParamType::Vec4f;
+  roi.label = "ROI";
+  roi.doc = "[x0, y0, x1, y1]，像素，左上角是原点、y 向下；右下角不含。";
+  roi.def = Value::vec({0.0, 0.0, 256.0, 256.0});
+  roi.unit = "px";
+  roi.step = 1;
+  roi.semantic = "roi";
+  roi.componentLabels = {"X0", "Y0", "X1", "Y1"};
+  op.params = {roi};
   op.capabilities = {false, false, true};
   op.compute = &cropCompute;
   r.addOperator(std::move(op));

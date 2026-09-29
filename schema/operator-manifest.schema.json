@@ -234,7 +234,7 @@
         "enabledWhen": { "$ref": "#/$defs/condition" },
         "semantic": {
           "enum": ["roi"],
-          "description": "语义标记（m8-plan L15），只有编辑器读。roi = vec4f 的 [xMin, yMin, xMax, yMax]，XY 平面上的一个框，单位按 unit；编辑器在 2D 剖面视图里把它画成可拖、可拉伸的框。"
+          "description": "语义标记（m8-plan L15），只有编辑器读。roi = vec4f 的 [xMin, yMin, xMax, yMax]，XY 平面上的一个框，单位按 unit；编辑器在 2D 剖面视图里把它画成可拖、可拉伸的框。unit = px 时是图像上的像素框（左上角原点、y 向下），画在本算子输入的那张图上：算子要有 Image 输入、不另给 roiBackdrop。"
         },
         "roiBackdrop": {
           "type": "object",

@@ -23,3 +23,10 @@
   transform-origin: 0 0;
   image-rendering: pixelated;
 }
+
+/* 叠画层：几何与像素框。层本身不接指针（拖动平移照旧），框自己接。 */
+.peek-image__overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}

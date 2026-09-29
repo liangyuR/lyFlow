@@ -160,8 +160,7 @@ TEST_CASE("image.to_gray / resize / crop：RGB 加权、灰度原样共享像素
                                  {"height", Value::integer(3)}}).ok);
   CHECK(c.image().width == 7);
 
-  REQUIRE(c.run("image.crop", {{"x", Value::integer(10)}, {"y", Value::integer(5)},
-                               {"width", Value::integer(20)}, {"height", Value::integer(8)}}).ok);
+  REQUIRE(c.run("image.crop", {{"roi", Value::vec({10, 5, 30, 13})}}).ok);
   CHECK(c.image().width == 20);
   CHECK(c.image().at(0, 0, 2) == test::image::testImageValue(PixelDepth::U8, 10, 5, 2));
   Box2D box;

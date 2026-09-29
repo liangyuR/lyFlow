@@ -726,9 +726,10 @@ function RoiThumb({ row }: { row: NodeParamRow }) {
   const H = 44;
   const [x0, y0, x1, y1] = thumb.extent;
   const sx = (x: number) => ((x - x0) / (x1 - x0)) * W;
-  // 世界 y 向上、屏幕 y 向下
-  const sy = (y: number) => H - ((y - y0) / (y1 - y0)) * H;
-  const enter = () => enterRoiEdit(row, thumb.frame);
+  // 世界 y 向上、屏幕 y 向下；像素框（unit = px）本来就是 y 向下
+  const px = row.param.unit === "px";
+  const sy = (y: number) => (px ? ((y - y0) / (y1 - y0)) * H : H - ((y - y0) / (y1 - y0)) * H);
+  const enter = () => enterRoiEdit(row, thumb.frame, px);
   return (
     <div className="prow__roi">
       <svg
@@ -747,9 +748,9 @@ function RoiThumb({ row }: { row: NodeParamRow }) {
             key={b.param}
             className={`prow__thumb-box${b.current ? " is-current" : ""}`}
             x={sx(b.rect[0])}
-            y={sy(b.rect[3])}
+            y={Math.min(sy(b.rect[1]), sy(b.rect[3]))}
             width={Math.max(1, sx(b.rect[2]) - sx(b.rect[0]))}
-            height={Math.max(1, sy(b.rect[1]) - sy(b.rect[3]))}
+            height={Math.max(1, Math.abs(sy(b.rect[1]) - sy(b.rect[3])))}
           />
         ))}
       </svg>
@@ -761,8 +762,9 @@ function RoiThumb({ row }: { row: NodeParamRow }) {
 }
 
 /** 进现有的 2D 拖框视图（Viewer3D 的 RoiLayer）：选中节点、切到这一组框、相机切 2D、视图展开。
- *  定义里的节点先进到那一层 —— 视图只画当前层的节点。拖动写回走 setParam，与 Inspector 同一条路。 */
-function enterRoiEdit(row: NodeParamRow, frame: string | null) {
+ *  定义里的节点先进到那一层 —— 视图只画当前层的节点。拖动写回走 setParam，与 Inspector 同一条路。
+ *  像素框（imagePixels）进主预览的图像模式：框画在节点输入的那张图上（docs/image-plan.md 阶段 3）。 */
+function enterRoiEdit(row: NodeParamRow, frame: string | null, imagePixels = false) {
   // 对比模式没有拖框（compare-plan C8）：两件事互斥，拖框优先；测量工具同理（measure-plan M7）
   useCompareStore.getState().exit();
   const ui = useUiStore.getState();
@@ -771,6 +773,11 @@ function enterRoiEdit(row: NodeParamRow, frame: string | null) {
   ui.setPinnedNode(null);
   ui.setSelection([row.node.id], []);
   if (frame) ui.setRoiFrame(row.node.id, frame);
+  if (imagePixels) {
+    ui.setViewerContentPick({ nodeId: fullId(row.path, row.node.id), content: "image" });
+    ui.setPanelViewerOpen(true);
+    return;
+  }
   // 拖框要的是点云场景；节点的输出若只有值，自动规则会选表格
   ui.setViewerContentPick({ nodeId: fullId(row.path, row.node.id), content: "cloud" });
   ui.setViewerMode("2d");

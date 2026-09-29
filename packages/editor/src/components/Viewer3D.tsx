@@ -40,6 +40,7 @@ import { useUiStore } from "../store/ui";
 import { decodeCloud, type CloudPayload, type OutputStat } from "../types/execution";
 import { CompareDiff } from "./CompareDiff";
 import { CompareStage } from "./CompareStage";
+import { ImagePane } from "./ImagePane";
 import { MeasureReadout } from "./MeasureReadout";
 import { RoiLayer, type RoiItem } from "./RoiLayer";
 import { ValuePane } from "./ValuePane";
@@ -173,7 +174,7 @@ export function Viewer3D() {
     pick: contentPick && contentPick.nodeId === activeKey ? contentPick.content : null,
     frozen: null,
   });
-  const { display, loading, node: activeNode, op: activeOp, outputs: activeOutputs, content } = source;
+  const { display, loading, node: activeNode, op: activeOp, outputs: activeOutputs, content, autoContent } = source;
   const { cloud } = display;
 
   // -- 对比（交互清单 #35）：A 就是上面那个（跟随选中 / 钉住），B 是一个显式的槽 ---------------
@@ -615,7 +616,13 @@ export function Viewer3D() {
       // 而不是去猜多久之后 React 会渲染完（scripts/e2e）。
       data-node={display.nodeId ?? ""}
       data-view={
-        loading ? "loading" : content === "value" && !display.status ? "value" : cloud ? "cloud" : "empty"
+        loading
+          ? "loading"
+          : (content === "value" || content === "image") && !display.status
+            ? content
+            : cloud
+              ? "cloud"
+              : "empty"
       }
       data-content={content}
       data-shading={effectiveShading}
@@ -666,20 +673,23 @@ export function Viewer3D() {
         <select
           className="viewer__select"
           data-testid="viewer-camera"
-          value={content === "value" ? "value" : cameraMode}
+          value={content === "value" || content === "image" ? content : cameraMode}
           onChange={(e) => {
             const v = e.target.value;
-            if (v === "value") {
-              if (activeKey) setContentPick({ nodeId: activeKey, content: "value" });
+            if (v === "value" || v === "image") {
+              if (activeKey) setContentPick({ nodeId: activeKey, content: v });
               return;
             }
             setCameraMode(v as CameraMode);
-            if (activeKey && content === "value") setContentPick({ nodeId: activeKey, content: "cloud" });
+            if (activeKey && content !== "cloud") setContentPick({ nodeId: activeKey, content: "cloud" });
           }}
-          title="3D 自由视角 / 2D 正交俯视 XY（剖面）/ 输出值的表格。默认按节点的输出类型选，换节点就回到默认"
+          title="3D 自由视角 / 2D 正交俯视 XY（剖面）/ 图像（图像域的节点）/ 输出值的表格。默认按节点的输入输出类型选，换节点就回到默认"
         >
           <option value="3d">3D</option>
           <option value="2d">2D 剖面</option>
+          <option value="image" disabled={!activeKey || autoContent !== "image"}>
+            图像
+          </option>
           <option value="value" disabled={!activeKey}>
             值
           </option>
@@ -922,10 +932,23 @@ export function Viewer3D() {
         {!compareOn && content === "value" && !display.status && !loading && (
           <ValuePane outputs={activeOutputs} />
         )}
+        {!compareOn && content === "image" && activeNode && activeOp && roiNode && (
+          // 状态（未运行 / 正在计算…）由 ImagePane 自己画：运行中它继续显示上一次的图，状态缩在角上
+          <ImagePane
+            doc={doc}
+            path={path}
+            node={activeNode}
+            op={activeOp}
+            roiNode={roiNode}
+            runId={display.runId}
+            status={display.status}
+            outputs={activeOutputs}
+          />
+        )}
         {roiEditing && activeNode && (
           <RoiLayer host={sceneHost} nodeId={activeNode.id} items={roiItems} />
         )}
-        {!compareOn && (display.status || loading || (roiEditing && backdrop.error)) && (
+        {!compareOn && !(content === "image" && activeNode) && (display.status || loading || (roiEditing && backdrop.error)) && (
           // 拖框时底图（模板）已经画出来了，状态只缩在角上，不盖住画面。底图取不到的原因也在这里说
           <div
             className={`viewer__empty${roiEditing ? " viewer__empty--corner" : ""}`}

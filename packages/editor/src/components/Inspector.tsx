@@ -40,20 +40,22 @@ function pair(v: [number, number] | number | null | undefined): string {
 export function formatOutputValue(o: OutputStat): string {
   const v: OutputValue | undefined = o.value;
   if (!v) return `${o.elementCount} 个元素`;
+  // 图像算子的几何是像素坐标（docs/image-plan.md Q2）：值上写明，免得当成米读
+  const px = v.unit === "px" && v.kind !== "Measurement" ? " px" : "";
   switch (v.kind) {
     case "Measurement":
       if (v.value === null || v.value === undefined) return v.message || "未测出";
       return `${num(v.value)} ${v.unit ?? ""}`.trim();
     case "Box2D":
-      return `${pair(v.min)} → ${pair(v.max)}`;
+      return `${pair(v.min)} → ${pair(v.max)}${px}`;
     case "Line2D":
       return v.hasSegment
-        ? `${pair(v.start)} → ${pair(v.end)}`
-        : `过 ${pair(v.point)} 方向 ${pair(v.dir)}`;
+        ? `${pair(v.start)} → ${pair(v.end)}${px}`
+        : `过 ${pair(v.point)} 方向 ${pair(v.dir)}${px}`;
     case "Circle2D":
-      return `圆心 ${pair(v.center)} 半径 ${num(v.radius)}`;
+      return `圆心 ${pair(v.center)} 半径 ${num(v.radius)}${px}`;
     case "Point2D":
-      return pair(v.p);
+      return `${pair(v.p)}${px}`;
     case "Record":
       return `${v.type ?? ""} ${JSON.stringify(v.data ?? {})}`.trim();
     case "Plane":

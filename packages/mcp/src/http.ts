@@ -153,6 +153,22 @@ export class LyFlowHttp {
     return res.arrayBuffer();
   }
 
+  /** 图像的第 level 级、从 row 起 rows 行（0 = 到底），LYIM 载荷（docs/http-transport.md「图像」）。 */
+  async image(
+    runId: string,
+    nodeId: string,
+    port: string,
+    level: number,
+    row: number,
+    rows: number,
+  ): Promise<ArrayBuffer> {
+    const res = await this.request(
+      `/lyflow/runs/${encodeURIComponent(runId)}/images/${encodeURIComponent(nodeId)}/` +
+        `${encodeURIComponent(port)}?level=${level}&row=${row}&rows=${rows}`,
+    );
+    return res.arrayBuffer();
+  }
+
   /** 张量或下标的一片（ADR-0019）。`count` 必须大于 0 —— 0 在契约里是「取到末尾」。 */
   async slice(
     kind: "tensors" | "indices",

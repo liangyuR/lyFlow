@@ -149,6 +149,8 @@ manifest 导出）、编辑器（`lib/transform.ts`、`lib/curve.ts`）三方同
 ```
 
 - `semantic: "roi"` 只能标在 `vec4f` 上（`lyflow manifest --check` 查）；单位按 `unit`，`mm` 按 0.001 换成米。
+- `unit: "px"` 的 roi 是**图像上的框**（[image-plan.md](image-plan.md) 阶段 3）：算子要有 `Image` 输入、不另给 `roiBackdrop`，
+  编辑器在主预览的图像模式里把它画在输入那张图上（左上角原点、y 向下），例如 `image.crop.roi`。
 - 编辑器在 2D 剖面视图里把选中节点**当前可见**的 roi 参数画成可拖、可拉伸的框（拖框身平移、拖四角拉伸，
   吸附 0.1 mm，整段拖动一条撤销），与数字框是同一个参数的两种编辑方式。
 - 没有 `roiBackdrop`：框在数据坐标系里，画在节点显示的那片云上（例如 `gap.overall_roi.roi`）。

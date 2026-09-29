@@ -18,6 +18,7 @@ const TOOLS = [
   "run_graph",
   "get_node_outputs",
   "summarize_output",
+  "view_output_image",
   "eval",
   "perturb",
   "diff_graphs",
@@ -50,7 +51,7 @@ test("loadConfig：LYFLOW_HTTP_BASE 必填、缺了说清楚；其余配置项�
   assert.equal(config.workDir, path.join(os.tmpdir(), "lyflow-mcp"));
 });
 
-test("工具面就是这 15 个，输入 schema 的必填项对得上", async () => {
+test("工具面就是这 16 个，输入 schema 的必填项对得上", async () => {
   const client = await connect({ LYFLOW_HTTP_BASE: "http://127.0.0.1:1" });
   const listed = await client.listTools();
   assert.deepEqual(
@@ -66,6 +67,7 @@ test("工具面就是这 15 个，输入 schema 的必填项对得上", async ()
     get_operator: ["id"],
     list_operators: [],
     summarize_output: ["nodeId", "port", "runId"],
+    view_output_image: ["nodeId", "port", "runId"],
     run_graph: [],
     eval: ["graphPath", "metric"],
     perturb: ["after", "axis", "graphPath", "metric", "region"],
