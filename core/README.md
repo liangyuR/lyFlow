@@ -33,6 +33,10 @@ tests/                doctest 测试
 M2 以来完全一致；它同时导出 `lyflow_pcl_support`，别的包要 PCL 就链它，
 不各自 `find_package`（[ADR-0005](../docs/adr/0005-pcl-boundary.md)）。
 
+**OpenCV 归 `packs/std-image`**（vcpkg 的 `opencv4`，只用 core / imgproc / imgcodecs；
+`opencv2/` 的头只在那个包里，进出一律经它的 `lyflow_cv/adapter.h`，[ADR-0026](../docs/adr/0026-image-data-domain.md)）。
+默认开，找不到时 CMake 直接 FATAL 并打印安装命令。
+
 **onnxruntime 归 `packs/std-ml`**，**yaml-cpp 归 `packs/gap`**
 （[ADR-0015](../docs/adr/0015-algorithms-live-in-lyflow-packs.md)）。前者不在 vcpkg 里，
 构建前跑一次 `scripts/fetch-onnxruntime.ps1` 备到 `third_party/onnxruntime/`（已 gitignore），
@@ -44,6 +48,7 @@ M2 以来完全一致；它同时导出 `lyflow_pcl_support`，别的包要 PCL 
 
 ```powershell
 C:\vcpkg\vcpkg.exe install pcl:x64-windows                  # 标准点云包
+C:\vcpkg\vcpkg.exe install opencv4:x64-windows              # 标准图像包 std-image
 pwsh -ExecutionPolicy Bypass -File scripts/fetch-onnxruntime.ps1  # std-ml
 C:\vcpkg\vcpkg.exe install yaml-cpp:x64-windows             # 只有 gap 包要
 ```

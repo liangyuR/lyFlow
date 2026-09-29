@@ -561,6 +561,46 @@ async function suiteImagePeek(cdp, report) {
   const [x, y, r, g, b] = m.slice(1).map(Number);
   const f = (c) => (x * 3 + y * 5 + c * 60) % 256;
   report.eq(`(${x}, ${y}) 的 RGB 与合成公式一致`, [r, g, b], [f(0), f(1), f(2)]);
+
+  // std-image（OpenCV）在真 app 里：灰度 → Otsu → 区域统计；掩膜那条边的视图是单通道 u8
+  await resetPeek(cdp);
+  await newDoc(cdp);
+  const chain = await buildGraph(
+    cdp,
+    [
+      { key: "img", op: "test.make_image", params: { width: 64, height: 48, channels: 3 } },
+      { key: "gray", op: "image.to_gray" },
+      { key: "bin", op: "image.threshold" },
+      { key: "stats", op: "image.region_stats" },
+    ],
+    [
+      { from: ["img", "image"], to: ["gray", "image"] },
+      { from: ["gray", "image"], to: ["bin", "image"] },
+      { from: ["gray", "image"], to: ["stats", "image"] },
+      { from: ["bin", "mask"], to: ["stats", "mask"] },
+    ],
+  );
+  await normalizeZoom(cdp, 0.7);
+  await placeAtScreen(cdp, {
+    [chain.img]: { x: 20, y: 60 },
+    [chain.gray]: { x: Math.round(box.w * 0.27), y: 60 },
+    [chain.bin]: { x: Math.round(box.w * 0.5), y: 60 },
+    [chain.stats]: { x: Math.round(box.w * 0.74), y: 160 },
+  });
+  const ran = await runAndWait(cdp, () => pressF5(cdp));
+  const area = (await portStat(cdp, chain.stats, "area"))?.value?.value;
+  report.ok("OpenCV 链路在 app 里跑通：Otsu 分出的前景面积在 (0, 64×48) 之间",
+    ran.status === "ok" && area > 0 && area < 64 * 48, JSON.stringify({ status: ran.status, area }));
+  const maskEdge = await edgeOf(cdp, chain.bin, "mask", chain.stats, "mask");
+  const maskWin = await openByDoubleClick(cdp, report, maskEdge, "掩膜边");
+  let maskDom = null;
+  for (let i = 0; i < 60 && maskWin?.win; i += 1) {
+    maskDom = await readImagePeek(cdp, maskWin.win.id);
+    if (maskDom && maskDom.w > 0) break;
+    await sleep(120);
+  }
+  report.eq("掩膜边：单通道 u8、原图尺寸", maskDom && [maskDom.channels, maskDom.depth, maskDom.w, maskDom.h],
+    [1, "u8", 64, 48]);
 }
 
 async function suiteLockPeek(cdp, report) {

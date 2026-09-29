@@ -12,7 +12,7 @@
 | 在哪 | 本仓库的 `packs/*` | 任意目录 |
 | 怎么加入 | `LYFLOW_STD_PACKS`（默认 ON）自动扫，`LYFLOW_PACKS` 按**包名**点名 | `LYFLOW_OP_PACKS` 按**目录**显式列出 |
 | 注册顺序 | 紧跟 `gen.synthetic` | 排在 core 自带的算子全注册完之后（`flow.select` 之后） |
-| 例子 | `packs/std-pointcloud`、`packs/std-ml`、`packs/gap`、`packs/dts` | 任何自己写的包 |
+| 例子 | `packs/std-pointcloud`、`packs/std-ml`、`packs/std-image`、`packs/gap`、`packs/dts` | 任何自己写的包 |
 
 core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fallback`、`flow.select`
 （后两个是 [ADR-0016](adr/0016-error-as-value-and-lazy-ports.md) 的调度原语）——
@@ -24,6 +24,7 @@ core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fa
 |---|---|---|---|---|
 | `std-pointcloud` | 0.1.0 | ON | 点云 / 2D 量测 / 编辑算子 | PCL |
 | `std-ml` | 0.1.0 | ON | `ml.onnx_run` | onnxruntime |
+| `std-image` | 0.1.0 | ON | 图像域：读写、灰度 / 缩放 / 裁剪 / 平滑 / 位深、二值化 / 形态学、找圆、区域统计、图像 ↔ 张量（[image-plan.md](image-plan.md)） | OpenCV 4（core / imgproc / imgcodecs） |
 | `gap` | 0.2.0 | **OFF** | `gap.*` | PCL、yaml-cpp、onnxruntime |
 | `dts` | 0.1.0 | **OFF** | `dts.*` | 无（零第三方，不链 PCL） |
 

@@ -13,6 +13,7 @@ import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
 import { errorsOf, useNodeValidation } from "../store/validation";
+import type { NodeStats } from "../types/execution";
 import type { Port } from "../types/manifest";
 import { NodeRunButton } from "./NodeRunButton";
 import { useNodeMotion } from "./useNodeMotion";
@@ -22,6 +23,15 @@ function formatCount(n: number): string {
   if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(2)} 亿`;
   if (n >= 10_000) return `${(n / 10_000).toFixed(1)} 万`;
   return String(n);
+}
+
+/** 节点底栏的规模：图像是「宽×高」（像素数读成「25.6 万」没有意义），其余是元素数。 */
+function formatSize(stats: NodeStats): string {
+  const first = stats.outputs?.[0];
+  if (first?.type === "Image" && first.value?.width !== undefined) {
+    return `${first.value.width}×${first.value.height}`;
+  }
+  return formatCount(stats.elementCount ?? 0);
 }
 
 function formatDuration(ms: number): string {
@@ -321,7 +331,7 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
             </span>
           )}
           {exec?.stats?.elementCount != null && (
-            <span className="node__count">{formatCount(exec.stats.elementCount)}</span>
+            <span className="node__count">{formatSize(exec.stats)}</span>
           )}
           {exec?.children && (
             <span className="node__count" data-testid={`node-children-${id}`}>

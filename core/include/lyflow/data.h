@@ -78,13 +78,18 @@ struct Plane {
   float d = 0;
 };
 
-// 以下六种是 2D 量测域的通用载荷。坐标一律是**米**，与点云同单位；
-// 只有 Measurement 的 value 例外，它带自己的 unit（通常是 mm）。
+// 以下六种是 2D 量测域的通用载荷。四种几何（Box2D / Line2D / Circle2D / Point2D）的坐标
+// 默认是**米**，与点云同单位；图像算子产出的是**像素**，由 unit 标出（docs/image-plan.md Q2）。
+// Measurement 的 value 例外，它带自己的 unit 字串（通常是 mm）。
+
+/// 2D 几何坐标的单位。字段追加在各结构体末尾：聚合初始化只写坐标的老代码照旧是米。
+enum class Unit2D : std::uint8_t { Meter = 0, Pixel = 1 };
 
 /// 轴对齐 2D 包围盒。
 struct Box2D {
   float min[2] = {0, 0};
   float max[2] = {0, 0};
+  Unit2D unit = Unit2D::Meter;
 };
 
 /// 2D 直线：过 point、方向 dir（单位向量）。可选带两个端点变成线段。
@@ -94,15 +99,18 @@ struct Line2D {
   bool hasSegment = false;
   float start[2] = {0, 0};
   float end[2] = {0, 0};
+  Unit2D unit = Unit2D::Meter;
 };
 
 struct Circle2D {
   float center[2] = {0, 0};
   float radius = 0;
+  Unit2D unit = Unit2D::Meter;
 };
 
 struct Point2D {
   float p[2] = {0, 0};
+  Unit2D unit = Unit2D::Meter;
 };
 
 /// 一次测量的结果。value 非有限表示没测出来，此时 ok=false 且 message 说明原因。

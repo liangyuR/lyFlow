@@ -19,6 +19,11 @@ void writePair(JsonWriter& w, const char* key, const float v[2]) {
   w.endArray();
 }
 
+/// 只有像素才写：米是缺省，老的消费方看到的 JSON 一个字都不变。
+void writeUnit(JsonWriter& w, Unit2D unit) {
+  if (unit == Unit2D::Pixel) w.field("unit", std::string("px"));
+}
+
 std::atomic<std::uint64_t>& cloudIdCounter() {
   static std::atomic<std::uint64_t> counter{1};
   return counter;
@@ -503,6 +508,7 @@ std::string Data::valueJson() const {
     case Kind::Box2D:
       writePair(w, "min", box2d_->min);
       writePair(w, "max", box2d_->max);
+      writeUnit(w, box2d_->unit);
       break;
     case Kind::Line2D:
       writePair(w, "point", line2d_->point);
@@ -512,13 +518,16 @@ std::string Data::valueJson() const {
         writePair(w, "start", line2d_->start);
         writePair(w, "end", line2d_->end);
       }
+      writeUnit(w, line2d_->unit);
       break;
     case Kind::Circle2D:
       writePair(w, "center", circle2d_->center);
       w.field("radius", static_cast<double>(circle2d_->radius));
+      writeUnit(w, circle2d_->unit);
       break;
     case Kind::Point2D:
       writePair(w, "p", point2d_->p);
+      writeUnit(w, point2d_->unit);
       break;
     case Kind::Measurement: {
       const Measurement& m = *measurement_;

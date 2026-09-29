@@ -120,6 +120,7 @@ export interface OutputValue {
   /** Measurement。value 为 null 表示没测出来（C++ 侧的非有限值）。 */
   value?: number | null;
   ok?: boolean;
+  /** Measurement 的单位字串；四种 2D 几何上只有 "px" 一种写法（图像算子产出的像素坐标），缺省是米。 */
   unit?: string;
   message?: string;
   verdict?: string;

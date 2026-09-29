@@ -60,6 +60,50 @@ lyflow::Image copyImageInput(const lyflow_run_image_input& in) {
 /// LYIM 载荷的 48 字节头（docs/http-transport.md「图像」）。`.lyim` 文件与 HTTP 响应同一布局。
 constexpr std::uint32_t kImageMagic = 0x4D49594Cu;  // 'LYIM' 小端
 
+/// lyflow_output_image 的 handle：持有这一级的图像（level 0 就是结果仓里那一份的浅拷贝）。
+struct ImageHold {
+  lyflow::Image image;
+};
+
+
+/// 图像整张写成 `.lyim`：LYIM 载荷原样落盘（level 0、全部行）。别的扩展名拒掉 ——
+/// PNG 这类要编解码器的格式归 std-image 的 io.save_image，core 不带。
+std::string saveImageLyim(const lyflow::Image& img, const std::string& file) {
+  const std::filesystem::path p = std::filesystem::u8path(file);
+  std::string ext = p.extension().u8string();
+  for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  if (ext != ".lyim") {
+    return "图像输出只能存成 .lyim（PNG 等格式请在图里接 io.save_image），收到的是 '" + ext + "'";
+  }
+  if (!img.consistent()) return "图像不完整，没有可写的像素";
+  const std::uint32_t head[12] = {
+      kImageMagic,
+      static_cast<std::uint32_t>(img.width),
+      static_cast<std::uint32_t>(img.height),
+      static_cast<std::uint32_t>(img.channels),
+      static_cast<std::uint32_t>(img.depth),
+      0u,  // level
+      static_cast<std::uint32_t>(img.width),
+      static_cast<std::uint32_t>(img.height),
+      0u,  // row_offset
+      static_cast<std::uint32_t>(img.height),
+      static_cast<std::uint32_t>(img.rowBytes()),
+      0u,
+  };
+  std::ofstream f(p, std::ios::binary | std::ios::trunc);
+  if (!f) return "打不开输出文件: " + file;
+  f.write(reinterpret_cast<const char*>(head), sizeof head);
+  f.write(reinterpret_cast<const char*>(img.pixels.get()),
+          static_cast<std::streamsize>(img.byteSize()));
+  // 像素之后补齐到 4 字节，与 HTTP 载荷一致
+  const std::size_t pad = (4 - img.byteSize() % 4) % 4;
+  const char zeros[4] = {0, 0, 0, 0};
+  f.write(zeros, static_cast<std::streamsize>(pad));
+  if (!f) return "写输出文件失败: " + file;
+  return std::string();
+}
+
+
 // 用 malloc 而不是 new[]：跨 ABI 边界的内存必须能被 C 侧的 free 释放。
 char* dup(const std::string& s) {
   char* out = static_cast<char*>(std::malloc(s.size() + 1));
@@ -417,14 +461,6 @@ void lyflow_tensor_view_free(lyflow_tensor_view* view) {
   std::memset(view, 0, sizeof(*view));
 }
 
-namespace {
-
-/// lyflow_output_image 的 handle：持有这一级的图像（level 0 就是结果仓里那一份的浅拷贝）。
-struct ImageHold {
-  lyflow::Image image;
-};
-
-}  // namespace
 
 int lyflow_output_image(const char* run_id, const char* node_id, const char* port,
                         uint32_t level, uint32_t row_offset, uint32_t row_count,
@@ -577,46 +613,6 @@ char* lyflow_import(const char* kind, const char* text, const char* base_dir) {
   }
 }
 
-namespace {
-
-/// 图像整张写成 `.lyim`：LYIM 载荷原样落盘（level 0、全部行）。别的扩展名拒掉 ——
-/// PNG 这类要编解码器的格式归 std-image 的 io.save_image，core 不带。
-std::string saveImageLyim(const lyflow::Image& img, const std::string& file) {
-  const std::filesystem::path p = std::filesystem::u8path(file);
-  std::string ext = p.extension().u8string();
-  for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  if (ext != ".lyim") {
-    return "图像输出只能存成 .lyim（PNG 等格式请在图里接 io.save_image），收到的是 '" + ext + "'";
-  }
-  if (!img.consistent()) return "图像不完整，没有可写的像素";
-  const std::uint32_t head[12] = {
-      kImageMagic,
-      static_cast<std::uint32_t>(img.width),
-      static_cast<std::uint32_t>(img.height),
-      static_cast<std::uint32_t>(img.channels),
-      static_cast<std::uint32_t>(img.depth),
-      0u,  // level
-      static_cast<std::uint32_t>(img.width),
-      static_cast<std::uint32_t>(img.height),
-      0u,  // row_offset
-      static_cast<std::uint32_t>(img.height),
-      static_cast<std::uint32_t>(img.rowBytes()),
-      0u,
-  };
-  std::ofstream f(p, std::ios::binary | std::ios::trunc);
-  if (!f) return "打不开输出文件: " + file;
-  f.write(reinterpret_cast<const char*>(head), sizeof head);
-  f.write(reinterpret_cast<const char*>(img.pixels.get()),
-          static_cast<std::streamsize>(img.byteSize()));
-  // 像素之后补齐到 4 字节，与 HTTP 载荷一致
-  const std::size_t pad = (4 - img.byteSize() % 4) % 4;
-  const char zeros[4] = {0, 0, 0, 0};
-  f.write(zeros, static_cast<std::streamsize>(pad));
-  if (!f) return "写输出文件失败: " + file;
-  return std::string();
-}
-
-}  // namespace
 
 char* lyflow_output_save(const char* run_id, const char* node_id, const char* port,
                          const char* path, const char* format) {

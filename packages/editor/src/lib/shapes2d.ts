@@ -43,6 +43,8 @@ export function extentOf(out: OutputStat): number {
 export function shapesOf(out: OutputStat, color: number, span: number): THREE.Line[] {
   const v = out.value;
   if (!v) return [];
+  // 图像算子产出的几何是像素坐标（docs/image-plan.md Q2）：叠在米制的点云场景里只会画错地方
+  if (v.unit === "px") return [];
   switch (v.kind) {
     case "Box2D": {
       const [x0, y0] = Array.isArray(v.min) ? v.min : [0, 0];

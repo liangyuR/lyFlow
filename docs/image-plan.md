@@ -176,10 +176,10 @@ HTTP 桩（test-server）张量那条路给的是 501，因为桩没有常驻结
 
 | 阶段 | 内容 | 估时 | 验收 |
 |---|---|---|---|
-| 1 | §1 数据模型 + §2 清单（不含 OpenCV）+ ABI v15 + 载荷 + 连线查看器 `ImageView`。测试源用 core 测试里的合成算子 `test.gradient_image` | 3–4 天 | doctest（取视图、切片、level、越界、磁盘缓存往返、摘要）；cargo（载荷布局）；e2e `peek` 加一组「双击看图、悬停读值」；`e2e:http` 走 `.lyim` |
-| 2 | `std-image` 包 + adapter + §4 前三组算子 + `image.to_tensor` / `tensor.to_image` | 3–4 天 | 包内 doctest（adapter 往返、BGR/RGB、零拷贝持有）；纯 2D 与推理两条链路在 CLI 跑通；e2e 一条「读图 → 二值化 → 看」 |
+| 1 ✅ | §1 数据模型 + §2 清单（不含 OpenCV）+ ABI v15 + 载荷 + 连线查看器 `ImageView`。测试源用 core 测试里的合成算子 `test.make_image` | 3–4 天 | doctest（取视图、切片、level、越界、磁盘缓存往返、摘要）；cargo（载荷布局）；e2e `peek` 加一组「双击看图、悬停读值」；`e2e:http` 走 `.lyim` |
+| 2 ✅ | `std-image` 包 + adapter + §4 前三组算子 + `image.to_tensor` / `tensor.to_image` | 3–4 天 | 包内 doctest（adapter 往返、BGR/RGB、零拷贝持有）；纯 2D 与推理两条链路在 CLI 跑通；e2e 一条「读图 → 二值化 → 看」 |
 | 3 | 主预览图像模式 + 几何叠画 + 图像上拖 ROI + MCP 图片返回 | 3 天 | e2e `m8b` 拖框组加一例；MCP 冒烟调一次 `view_output_image` |
 | 4 | 跨域：`cloud.from_depth` / `cloud.to_depth_image` | 2 天 | 跨域链路跑通；深度图转点云再转回，与原图逐像素对得上 |
 
-每个阶段各自提交；阶段 1 结束时写 ADR-0026（Image 数据域与取数方式），并照惯例写 `image-acceptance.md`。
+每个阶段各自提交；阶段 1 结束时写 ADR-0026（Image 数据域与取数方式），并照惯例写验收记录：[image-acceptance.md](image-acceptance.md)（阶段 1–2 已写）。
 测试照 [testing.md](testing.md)：能在 doctest 测的不进 e2e，改完同步地图与数字。
