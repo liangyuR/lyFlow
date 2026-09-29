@@ -198,6 +198,11 @@ lyflow params g.lyflow.json --only explicit --json | jq -r '"\(.node).\(.param)=
 
 ## 3. `eval`：一组样本 × 一组参数 → 一个标量 → 一组统计
 
+> **跨进程复用上游：`--cache-dir`。** 一次 `eval / sweep / perturb` 进程内本来就复用缓存；但调参循环每一轮是一个新进程
+> （MCP 尤其如此），读 PCD、预处理、ONNX 推理每轮从头算。给 `--cache-dir <dir>`（或环境变量 `LYFLOW_CACHE_DIR`）后，
+> 确定性、耗时 ≥ 20 ms、输出全是点云或张量的节点落盘，下一个进程直接命中。重编 core 之后旧结果自动不再复用；
+> 改了**图文件以外**的输入（比如覆盖了同名 PCD 却保留了修改时间）才需要 `lyflow cache clear --cache-dir <dir>`。
+
 样本集是一份 JSON Lines，一行一帧：
 
 ```jsonc

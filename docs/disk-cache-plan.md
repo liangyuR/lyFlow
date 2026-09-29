@@ -1,6 +1,6 @@
 # 结果缓存落盘 —— 实施计划（方案 B：CLI 专用、默认关）
 
-> 状态：**已确认，按 §5 的建议值实施**（2026-09-29）。调研见 [disk-cache-research.md](disk-cache-research.md)。
+> 状态：**已实施**（2026-09-29，D1–D3）。调研见 [disk-cache-research.md](disk-cache-research.md)。
 
 ## 0. 要解决的问题
 

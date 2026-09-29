@@ -48,6 +48,7 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 | `LYFLOW_CLI` | 否 | 本地 `lyflow.exe` 路径。`eval` / `perturb` / `diff_graphs` / `get_params` / `patch_graph` / `list_recipes` / `list_metrics`，以及带 `recipe` 的 `run_graph` 用它；缺了就返回一句说得清的错，其余工具不受影响 |
 | `LYFLOW_PACKS` | 否 | 透传给 CLI 子进程。注意它在当前实现里是**构建期**变量（`scripts/build-core.ps1` 用它选算子包），运行期的 exe 已经带着自己那份算子表 |
 | `LYFLOW_WORK_DIR` | 否 | `eval` / `perturb` 的逐行结果落盘目录，默认 `os.tmpdir()/lyflow-mcp` |
+| `LYFLOW_CACHE_DIR` | 否 | 结果缓存落盘目录，原样传给每次起的 CLI 子进程（CLI 自己认这个变量，等价于 `--cache-dir`）：MCP 每次工具调用都是一个新进程，配了它，读盘、滤波、ONNX 推理这类贵的上游在第二次调用起直接命中。默认不设 = 关。按构建指纹分目录，重编 core 后旧结果不再复用；占用用 `lyflow cache info --cache-dir <dir>` 看（[disk-cache-plan.md](disk-cache-plan.md)） |
 
 ### 4. 在 Claude Code 里配
 
