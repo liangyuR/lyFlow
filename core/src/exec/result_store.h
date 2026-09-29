@@ -106,6 +106,15 @@ class ResultStore {
   bool attach(const std::string& runId, const std::string& nodeId, const std::string& cacheKey,
               const std::vector<std::string>& ports);
 
+  /// 正式运行（非预览）顺利收场时登记（node-run 修订二）：部分运行收场时，当前 cacheKey 挂不上的
+  /// 计划外节点从「上一次完成的运行」里把旧结果挂过来，界面标成过期而不是退回 idle。
+  void noteCompleted(const std::string& runId);
+  /// runId 之外、索引还活着（宿主还没 freeRun）的最近一次完成运行；没有就是空串。
+  std::string lastCompletedBefore(const std::string& runId) const;
+  /// 把 fromRun 里这个节点的索引原样挂进 runId：每个端口的数据都还在内容层才挂，返回挂没挂上。
+  /// 与 attach 一样不算缓存命中，不动 hits / misses。
+  bool attachFromRun(const std::string& fromRun, const std::string& runId, const std::string& nodeId);
+
   /// 不改动命中计数的只读探测，lyflow_plan 用它预测 cached。
   bool peek(const std::string& cacheKey, const std::vector<std::string>& ports) const;
 
@@ -177,6 +186,8 @@ class ResultStore {
   std::unordered_map<std::string, Entry> byKey_;
   std::unordered_map<std::string, NodeMap> index_;
   std::unordered_map<std::string, std::vector<NamedOutput>> namedOutputs_;
+  /// 最近几次完成的正式运行，旧的在前（noteCompleted）。只记 id，索引活不活看 index_。
+  std::vector<std::string> completed_;
   /// runId -> run summary 的 JSON 文本（ADR-0022）。与索引同生共死。
   std::unordered_map<std::string, std::string> summaries_;
   /// 前 = 最久没用，后 = 刚用过

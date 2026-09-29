@@ -203,6 +203,39 @@ void ResultStore::insertLocked(const std::string& cacheKey, const std::string& p
   byKey_.emplace(key, std::move(e));
 }
 
+void ResultStore::noteCompleted(const std::string& runId) {
+  std::lock_guard<std::mutex> lock(mu_);
+  completed_.erase(std::remove(completed_.begin(), completed_.end(), runId), completed_.end());
+  completed_.push_back(runId);
+  if (completed_.size() > 8) completed_.erase(completed_.begin());
+}
+
+std::string ResultStore::lastCompletedBefore(const std::string& runId) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  for (auto it = completed_.rbegin(); it != completed_.rend(); ++it) {
+    if (*it != runId && index_.count(*it)) return *it;
+  }
+  return std::string();
+}
+
+bool ResultStore::attachFromRun(const std::string& fromRun, const std::string& runId,
+                                const std::string& nodeId) {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto run = index_.find(fromRun);
+  if (run == index_.end()) return false;
+  auto node = run->second.find(nodeId);
+  if (node == run->second.end() || node->second.empty()) return false;
+  for (const auto& [port, key] : node->second) {
+    if (!byKey_.count(key)) return false;
+  }
+  const PortMap ports = node->second;  // 先拷一份：下面往 index_ 里插新键可能让迭代器失效
+  for (const auto& [port, key] : ports) {
+    touchLocked(key);
+    index_[runId][nodeId][port] = key;
+  }
+  return true;
+}
+
 bool ResultStore::peek(const std::string& cacheKey,
                        const std::vector<std::string>& ports) const {
   if (cacheKey.empty() || ports.empty()) return false;
@@ -441,6 +474,7 @@ std::size_t ResultStore::evict(const std::vector<std::string>& cacheKeys,
 
 void ResultStore::clear() {
   std::lock_guard<std::mutex> lock(mu_);
+  completed_.clear();
   index_.clear();
   namedOutputs_.clear();
   summaries_.clear();

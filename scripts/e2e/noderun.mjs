@@ -367,9 +367,18 @@ async function suiteSmartUpstream(cdp, report) {
   `);
   report.ok("依次：a 的 done 早于 b 的 running", order.aDone >= 0 && order.aDone < order.bRunning, JSON.stringify(order));
   report.ok("c 不进计划", started && !started.plan.includes(ids.c), JSON.stringify(started?.plan));
-  // 修订一 V2：c 的键跟着 a 变了、仓里没有当前结果 → 不挂，编辑器把它退回 idle（与 §6 验收 17 字面不同，见验收记录）
-  report.ok("c 的键变了、不在 attached 里 → 退回 idle（不显示「完成」却取不到输出）",
-    !finished?.attached?.includes(ids.c) && (run.nodes[ids.c]?.state ?? "idle") === "idle", JSON.stringify({ attached: finished?.attached, c: run.nodes[ids.c] }));
+  // 修订二：c 的键跟着 a 变了、仓里没有当前结果 → 不按当前键挂（不在 attached），而是从上一次的全图运行挂旧结果
+  // （attachedStale）：仍是 done、画成过期的虚线框、按新 runId 取得到旧输出 ——「过期但还能看」，不退回 idle
+  const cView = await cdp.eval(`
+    const { runId } = window.__lyflow.stores.execution.getState();
+    const el = document.querySelector('[data-testid="node-${ids.c}"]');
+    return { stale: el?.getAttribute('data-stale'),
+             ports: (await window.__lyflow.transport.getOutputInfo(runId, ${lit(ids.c)})).map((o) => o.port) };
+  `);
+  report.ok("c 的键变了：不在 attached、在 attachedStale 里 → 仍是 done、虚线框（data-stale=1）、按新 runId 取得到旧输出",
+    !finished?.attached?.includes(ids.c) && JSON.stringify(finished?.attachedStale) === JSON.stringify([ids.c]) &&
+      run.nodes[ids.c]?.state === "done" && cView.stale === "1" && cView.ports.length > 0,
+    JSON.stringify({ attached: finished?.attached, attachedStale: finished?.attachedStale, c: run.nodes[ids.c], cView }));
   const dInfo = await cdp.eval(`
     const { runId } = window.__lyflow.stores.execution.getState();
     return (await window.__lyflow.transport.getOutputInfo(runId, ${lit(d)})).map((o) => o.port);
@@ -478,6 +487,24 @@ async function suiteStopAndPreempt(cdp, report) {
     { timeoutMs: 30_000, what: "抢占后的智能运行开始" },
   );
   report.eq("点击发起了新的智能运行（targets=[slow]）", preempt.targets, [ids.slow]);
+  // 修订二：右键「运行到此节点」运行中也能点，与按钮、Shift+F5 一样是抢占；「清除缓存」运行中仍置灰
+  const ctx = await cdp.eval(`
+    const el = document.querySelector('[data-testid="node-${ids.slow}"]');
+    const r = el.getBoundingClientRect();
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true,
+      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }));
+    await new Promise((r2) => setTimeout(r2, 150));
+    const runTo = document.querySelector('[data-testid="run-to-node"]');
+    const evict = document.querySelector('[data-testid="ctx-evict-node"]');
+    const out = { status: window.__lyflow.stores.execution.getState().runStatus,
+                  runTo: runTo ? { disabled: runTo.disabled, title: runTo.getAttribute('title') } : null,
+                  evict: evict ? evict.disabled : null };
+    document.querySelector('.react-flow__pane')?.click();
+    return out;
+  `);
+  report.ok("运行中右键：「运行到此节点」可点、title 写明是抢占；「清除此节点及下游的缓存」置灰",
+    ctx.status === "running" && ctx.runTo?.disabled === false && /抢占/.test(ctx.runTo?.title ?? "") && ctx.evict === true,
+    JSON.stringify(ctx));
   await waitRunEnd(cdp, "抢占后的运行结束");
   const end = await cdp.eval(`
     const s = window.__lyflow.stores.execution.getState();

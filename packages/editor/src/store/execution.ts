@@ -336,7 +336,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       case "run_finished": {
         flushNow();
         if (s.targets.length > 0 && Array.isArray(event.attached)) {
-          dropUnreachable(s.isolate, event.attached);
+          // 挂了过期旧结果的（修订二）也留着：输出取得到，stale 虚线框由 cache store 按键画
+          dropUnreachable(s.isolate, [...event.attached, ...(event.attachedStale ?? [])]);
         }
         set({
           runStatus: event.status as RunStatus,
@@ -392,7 +393,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   },
 }));
 
-/** 部分运行收场（R7 / V2）：节点表里留着的那些，这次既没重算、没命中缓存、也没被 core 挂进来的，
+/** 部分运行收场（R7 / V2）：节点表里留着的那些，这次既没重算、没命中缓存、也没被 core 挂进来的
+ *  （当前键的结果，或修订二的过期旧结果），
  *  按新 runId 已经取不到输出了 —— 退回 idle，不能显示「完成」却点开是空的。stale 不动（那是
  *  cache store 的事）。老 core 不带 attached，调用方不会走到这里。 */
 function dropUnreachable(isolate: readonly string[], attached: readonly string[]): void {

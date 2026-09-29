@@ -8,11 +8,11 @@
 
 | 层 | 命令 | 规模 | 跑一遍 |
 |---|---|---|---|
-| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 155 例；`LYFLOW_PACKS=dts` 163 例；`LYFLOW_PACKS=gap;dts` 245 例 | 分钟级（含编译） |
+| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 156 例；`LYFLOW_PACKS=dts` 164 例；`LYFLOW_PACKS=gap;dts` 246 例 | 分钟级（含编译） |
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 138（纯平台构建 80 通过 / 58 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
 | editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 77 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 29 | 秒级 |
-| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`） | 739 条断言、98 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
+| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`） | 740 条断言、98 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 32 条断言（精简前 58） | 几分钟 |
 
 ## 放在哪一层
@@ -27,7 +27,7 @@
 | 功能 | 主要测试 |
 |---|---|
 | 执行器、事件 seq、取消、并发、缓存复用（含落盘缓存：编解码往返、清空内存后命中、指纹隔离、坏文件） | `core/tests/test_executor.cpp`、`test_cache.cpp`、`test_flow.cpp`（并发 8 run、取消 100 次）；跨进程与 `--cache-dir` / `LYFLOW_CACHE_DIR` / `lyflow cache info|clear` 在 `bridge/tests/disk_cache.rs`（落盘开关是进程级的，不放进和别的用例同进程的单元测试） |
-| 计划、cacheKey、Run to node / 选中 | `core/tests/test_plan.cpp`、`test_noderun.cpp`；e2e `m3.mjs`（Shift+F5）、`noderun.mjs`（右键「运行到此节点」） |
+| 计划、cacheKey、Run to node / 选中 | `core/tests/test_plan.cpp`、`test_noderun.cpp`（含修订二的 `attachedStale`：挂上一次的旧结果）；e2e `m3.mjs`（Shift+F5）、`noderun.mjs`（右键「运行到此节点」，运行中可点 = 抢占；改上游后下游过期但还能看） |
 | 子图、库算子（含展开为内联子图：定义去掉 id、内联后逐位相同；库目录设置：`bridge/src/library_settings.rs` 单测、e2e m4 面板增删 + CLI 同读） | `core/tests/test_subgraph.cpp`；`packages/editor/test/graph-params-actions.test.mjs`（合成 / 解散 / 展开库算子的 store 动作）；e2e `m4.mjs` |
 | 图参数（规格、校验、传参） | `core/tests/test_graph_params.cpp`、`test_params.cpp`；`packages/editor/test/graph-params*.test.mjs`；e2e `params_p1.mjs` |
 | 配方与四类失配 | 共享夹具 `schema/fixtures/recipes/`：`bridge/src/recipe.rs` 与 `packages/editor/test/recipes.test.mjs` 对着同一份 `expected.json`；e2e `params_p3.mjs` 只验界面、磁盘与对话框 |

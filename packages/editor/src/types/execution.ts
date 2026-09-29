@@ -294,6 +294,9 @@ export interface RunFinishedEvent extends EventBase {
   /** 带 targets 的运行才有（node-run R7，修订一 V2 推广到「运行到此」与智能运行）：没执行、
    *  但结果仓里有它们当前 cacheKey 的结果、已挂进这次运行的节点 —— 按这次的 runId 取得到输出。 */
   attached?: string[];
+  /** 其中当前 cacheKey 挂不上、从上一次完成的运行挂来**旧**结果的节点（node-run 修订二）：
+   *  输出取得到，但已过期 —— 编辑器按精确 stale 画虚线框，不退回 idle。 */
+  attachedStale?: string[];
   /** ADR-0022。老 core（ABI < v9）没有它。 */
   summary?: RunSummary;
 }

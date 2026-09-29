@@ -532,7 +532,8 @@
     "durationMs": 40.1,
     "attached": [
       "n_save"
-    ]
+    ],
+    "attachedStale": []
   },
   {
     "schemaVersion": 1,

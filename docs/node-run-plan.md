@@ -111,3 +111,21 @@ core / bridge：
 19. 右键三项：「运行到此」与单击一致；「强制重算此节点」与 Shift+单击一致；「仅此节点」在上游过时时置灰且写明缺谁，绕过预判调用得到 `upstream_not_ready` toast、没有节点 running。
 20. 本节点有编辑期校验 error 时按钮置灰；运行中点自己停止、全图运行中点它抢占（原验收 10 照旧）。
 21. 不回归：`pnpm check`、带 `LYFLOW_PACKS=gap;dts` 的 `pnpm e2e`（落盘、grep 未验/跳过）、`pnpm e2e:http` headless 全绿。
+
+## 7. 修订二（2026-09-29）：过期但还能看；右键「运行到此」运行中可点
+
+修订一验收时知会了两处与字面不同的地方（[验收记录](node-run-acceptance.md)「与计划字面不同」），用户确认按我的建议定：
+
+| # | 决定 | 理由 |
+|---|---|---|
+| W1 | **部分运行里，当前 cacheKey 挂不上的计划外节点挂上一次的旧结果**：core 在 `run_finished` 里另列 `attachedStale: string[]`（与 `attached` 不相交，带 targets 的运行才有）。「上一次」= 结果仓里最近一次**顺利完成的正式运行**（非预览、status ok），且宿主还没 `freeRun` 它（桌面端 RunManager 在新运行结束后才换掉 finished 槽；CLI 一个进程一次运行，没有上一次）。旧结果在 summary 之后才挂，summary 仍只说这一次。编辑器把 `attachedStale` 与 `attached` 一样留在节点表里（仍 done），stale 虚线框照 ADR-0007 的精确判定画（ranWith 里还是旧键）；输出按新 runId 取得到，3D 视图 / Edge Peek / 对比照常 | 改完上游只跑到中间某个节点时，下游退回 idle 会把「刚才看到的结果」整个抹掉；标成过期、还能点开看，才是 KNIME / Houdini 的「脏但可看」。不与 R7 冲突：R7 的「当前键」保证 `attached` 里的结果是对的，旧结果另列一栏、由虚线框告诉用户它对不上 |
+| W2 | **右键「运行到此节点」运行中可点**，语义 = 抢占（与 Shift+F5、节点按钮一致）；运行中 `title` 写明「取消正在进行的运行，改跑到此节点」。「清除此节点及下游的缓存」运行中仍置灰 | V6 说它与单击同一动作，可用性也该一致；清缓存会动正在用的结果，保留限制 |
+
+不变：全图运行不挂旧结果（它自己就产出全部节点）；预览运行不当「上一次」（抽稀过的数据）；出错 / 取消的运行不当「上一次」（缺节点）。
+C ABI 不变（v14）：只是 `run_finished` 事件多一个字段，老编辑器忽略它 —— 老编辑器上这些节点照旧退回 idle。
+
+### 修订二的验收
+
+22. core doctest：上一次全图运行留着时，改 c 的参数只运行 b → d 在 `attached`、c 在 `attachedStale`、c 零执行、按新 runId 取得到旧输出、summary 里没有 c；上一次是预览运行时 `attachedStale` 为空；上一次已被释放时为空。
+23. e2e `noderun.mjs`（验收 17 那组）：改 a 后单击 b → c 不在 `attached`、在 `attachedStale`，仍 done、`data-stale="1"`、按新 runId 取得到输出。
+24. e2e `noderun.mjs`（验收 10 那组）：全图运行被节点按钮抢占、新运行 running 时右键：「运行到此节点」可点且 title 含「抢占」，「清除缓存」置灰。

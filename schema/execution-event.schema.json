@@ -282,6 +282,13 @@
           },
           "description": "只在带 targets 的运行（运行到此、智能运行、isolate；run_started.targets 非空）时出现（node-run R7，修订一 V2）：这次没有执行、也没有任何事件，但结果仓里有它们当前 cacheKey 的结果、已挂进这次运行的节点（下游、兄弟支路；开跑前就失败时是整张图里有结果的那些）。它们的输出可以按这次的 runId 取。不在这里、这次也没有收场事件的节点，按这次的 runId 取不到输出。"
         },
+        "attachedStale": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "与 attached 同时出现（node-run 修订二）：计划外、当前 cacheKey 的结果不在仓里（上游改过了），但宿主还留着上一次顺利完成的正式运行，于是把它们**旧的**结果挂进了这次运行。输出按这次的 runId 取得到，但对不上当前的图 —— 编辑器保持它们的 done 并按精确 stale 画过期虚线框（「过期但还能看」）。与 attached 不相交；不计入 summary。没有上一次运行（CLI、第一次运行）时是空数组。"
+        },
         "summary": {
           "$ref": "#/$defs/summary",
           "description": "结构化的运行收尾（ADR-0022）。与 lyflow_run_summary(runId) 返回的是同一个对象。宿主的成败判定读 summary.status，不要自己从 node_state 重建。"

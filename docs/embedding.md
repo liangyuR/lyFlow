@@ -557,5 +557,6 @@ Shift+单击再加 `force`）与右键三项（运行到此 / 强制重算此节
 `diagnostics[]` 每个缺结果的上游一条），不执行任何算子 —— 编辑器据此弹 warn 级 toast、把缺结果的上游
 闪一下。`run_finished.attached[]`（R7 / V2）告诉编辑器哪些计划外节点的输出按新 runId 还取得到：带 targets
 的运行收场时，带了这个字段，编辑器就把节点表里这次没有事件、又不在 attached 里的节点退回 idle；
-不带（老后端）就全部照旧。不认识这个字段的老后端会把它当成普通的全图运行，所以宿主换 core 时要一起换。
+不带（老后端）就全部照旧。`run_finished.attachedStale[]`（node-run 修订二）是当前键挂不上、从上一次完成的运行挂来
+**旧**结果的那些：编辑器同样留着（仍 done、画过期虚线框、输出取得到）；后端不做这一步就不发它，这些节点退回 idle。不认识这个字段的老后端会把它当成普通的全图运行，所以宿主换 core 时要一起换。
 HTTP 契约里对应 `POST /lyflow/run` 信封的 `isolate` / `force` 字段（[http-transport.md](http-transport.md)）。

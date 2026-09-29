@@ -1016,7 +1016,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
           <button
             type="button"
             data-testid="run-to-node"
-            disabled={running}
+            title={running ? "取消正在进行的运行，改跑到此节点（与 Shift+F5、节点上的运行按钮一样是抢占）" : undefined}
             onClick={() => {
               onRunToNode(menu.nodeId);
               setMenu(null);

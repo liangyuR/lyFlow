@@ -294,11 +294,13 @@ class EventSink {
   /// diagnostics 是 run 级、但各自指着一个节点的诊断（node-run R2 的 upstream_not_ready：
   /// 每个缺结果的上游一条）。它们不是那些节点自己的失败，所以不走 node_state。
   /// attached 是部分运行（带 targets）挂进来的计划外节点（node-run R7 / 修订一 V2）；
+  /// attachedStale 是其中当前 cacheKey 挂不上、从上一次完成的运行挂来旧结果的那些（修订二）。
   /// 全图运行传 nullptr，字段不出现。
   void runFinished(const char* status, double durationMs, const Status* error,
                    const std::string& summaryJson = {},
                    const std::vector<Diagnostic>* diagnostics = nullptr,
-                   const std::vector<std::string>* attached = nullptr) {
+                   const std::vector<std::string>* attached = nullptr,
+                   const std::vector<std::string>* attachedStale = nullptr) {
     JsonWriter w;
     std::lock_guard<std::mutex> lock(mu_);
     begin(w, "run_finished");
@@ -326,6 +328,12 @@ class EventSink {
       w.key("attached");
       w.beginArray();
       for (const std::string& id : *attached) w.value(id);
+      w.endArray();
+    }
+    if (attachedStale) {
+      w.key("attachedStale");
+      w.beginArray();
+      for (const std::string& id : *attachedStale) w.value(id);
       w.endArray();
     }
     if (!summaryJson.empty()) {
@@ -486,6 +494,25 @@ std::vector<Diagnostic> missingUpstream(const Plan& plan, const RunOptions& opti
     if (!reusable) {
       out.push_back(Diagnostic{n.id, Severity::Error, upstreamNotReady(n.id), nullptr});
     }
+  }
+  return out;
+}
+
+/// 部分运行的「挂过期结果」（node-run 修订二）：attachUnplanned 挂不上（当前 cacheKey 的结果不在仓里 ——
+/// 上游改过了）的计划外节点，从上一次完成的运行里把它**旧的**结果挂过来。编辑器按精确 stale 把它们画成
+/// 虚线框、输出照样取得到（「过期但还能看」），而不是退回 idle。上一次运行的索引只要宿主还没 freeRun 就在
+/// （桌面端的 RunManager 在新运行结束之后才换掉 finished 槽）；CLI 一个进程一次运行，没有上一次，自然什么都不挂。
+std::vector<std::string> attachStale(const Plan& full, const std::string& runId,
+                                     const std::map<std::string, NodeOutcome>& outcomes,
+                                     const std::vector<std::string>& attached, ResultStore& store) {
+  std::vector<std::string> out;
+  const std::string prev = store.lastCompletedBefore(runId);
+  if (prev.empty()) return out;
+  const std::set<std::string> done(attached.begin(), attached.end());
+  for (const PlanNode& n : full.nodes) {
+    if (!n.op || n.provided || n.op->outputs.empty()) continue;
+    if (outcomes.count(n.id) || done.count(n.id)) continue;
+    if (store.attachFromRun(prev, runId, n.id)) out.push_back(n.id);
   }
   return out;
 }
@@ -1629,8 +1656,11 @@ void Run::workImpl() {
                                                    /*forceFailed=*/true, &shelf,
                                                    sink.contractViolations());
       shelf.setSummary(options_.runId, summary);
+      // 过期的旧结果在 summary 之后才挂：summary 说的是这一次，不能把旧值当成这次的结果报出去
+      const std::vector<std::string> stale =
+          attachStale(fullPlan, options_.runId, sink.outcomes(), attached, shelf);
       const Status first = missing.front().status;
-      sink.runFinished("error", failedAt, &first, summary, &missing, &attached);
+      sink.runFinished("error", failedAt, &first, summary, &missing, &attached, &stale);
       return;
     }
   }
@@ -1680,16 +1710,22 @@ void Run::workImpl() {
   const std::string summary = buildSummaryJson(options_.runId, plan, sink.outcomes(), total,
                                                cancelled, &store, sink.contractViolations());
   store.setSummary(options_.runId, summary);
+  // 过期的旧结果在 summary 之后才挂（修订二）：summary 说的是这一次
+  std::vector<std::string> stale;
+  if (partial) stale = attachStale(fullPlan, options_.runId, sink.outcomes(), attached, store);
+  const std::vector<std::string>* staleOut = partial ? &stale : nullptr;
 
   if (cancelled) {
     Status s = Status::Error(Phase::Execute, "cancelled", "运行已取消");
-    sink.runFinished("cancelled", total, &s, summary, nullptr, attachedOut);
+    sink.runFinished("cancelled", total, &s, summary, nullptr, attachedOut, staleOut);
   } else if (scheduler.anyError()) {
     Status s = Status::Error(Phase::Execute, "internal",
                              std::to_string(scheduler.failedCount()) + " 个节点未能完成");
-    sink.runFinished("error", total, &s, summary, nullptr, attachedOut);
+    sink.runFinished("error", total, &s, summary, nullptr, attachedOut, staleOut);
   } else {
-    sink.runFinished("ok", total, nullptr, summary, nullptr, attachedOut);
+    // 顺利收场的正式运行才能当下一次部分运行的「上一次」：预览是抽稀过的，出错 / 取消的缺节点
+    if (options_.mode != RunMode::Preview) store.noteCompleted(options_.runId);
+    sink.runFinished("ok", total, nullptr, summary, nullptr, attachedOut, staleOut);
   }
 }
 

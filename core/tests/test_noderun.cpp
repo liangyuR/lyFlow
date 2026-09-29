@@ -58,10 +58,10 @@ std::unique_ptr<HeldRun> holdRun(const Json& doc, std::vector<std::string> isola
   return held;
 }
 
-std::vector<std::string> attachedOf(const RunLog& log) {
+std::vector<std::string> attachedOf(const RunLog& log, const char* field = "attached") {
   const std::vector<Json> f = log.ofKind("run_finished");
-  if (f.empty() || !f.back().contains("attached")) return {};
-  return f.back()["attached"].get<std::vector<std::string>>();
+  if (f.empty() || !f.back().contains(field)) return {};
+  return f.back()[field].get<std::vector<std::string>>();
 }
 
 /// a → b → c，三个 tally 各带自己的 tag。prefix 让每个用例的计数互不干扰。
@@ -412,6 +412,8 @@ TEST_CASE("验收 6b：结果仓里没有 c 当前 cacheKey 的结果（改了 c
   Data data;
   CHECK_FALSE(exec::ResultStore::instance().get(changed->log.runId, "c", "cloud", data));
   CHECK(tallyOf("r7xc2") == 0);
+  // 上一次运行的索引已经放掉了（runWith 返回前析构）：没有旧结果可挂，也就不标过期（修订二）
+  CHECK(attachedOf(changed->log, "attachedStale").empty());
 
   // c 从没跑过：只跑到 b（targets），再单独跑 b
   exec::ResultStore::instance().clear();
@@ -423,6 +425,42 @@ TEST_CASE("验收 6b：结果仓里没有 c 当前 cacheKey 的结果（改了 c
   CHECK_FALSE(contains(a2, "c"));
   CHECK_FALSE(contains(a2, "d"));
   CHECK(tallyOf("r7yc") == 0);
+}
+
+TEST_CASE("修订二：上一次的运行还在时，当前键挂不上的计划外节点挂它的旧结果，列进 attachedStale（过期但还能看）") {
+  ensureTestOps();
+  exec::ResultStore::instance().clear();
+  // 上一次全图运行留着 —— 桌面端的 RunManager 在新运行结束之后才换掉 finished 槽
+  auto previous = holdRun(forked("r8"), {});
+  REQUIRE(previous->log.runStatus() == "ok");
+
+  // c 的参数改了（键变了），只运行 b：d 照常按当前键挂上；c 挂上一次的旧结果，标过期
+  auto partial = holdRun(forked("r8", "c2"), {"b"});
+  REQUIRE(partial->log.runStatus() == "ok");
+  CHECK(contains(attachedOf(partial->log), "d"));
+  CHECK_FALSE(contains(attachedOf(partial->log), "c"));
+  CHECK(attachedOf(partial->log, "attachedStale") == std::vector<std::string>{"c"});
+  CHECK(tallyOf("r8c2") == 0);  // 挂旧结果不执行
+  Data data;
+  REQUIRE(exec::ResultStore::instance().get(partial->log.runId, "c", "cloud", data));
+  CHECK(data.asCloud()->pointCount() == 4);
+  // summary 说的是这一次：旧结果不当成这次的产出（它在 summary 之后才挂）
+  const Json summary = partial->log.ofKind("run_finished").back()["summary"];
+  CHECK(summary.dump().find("\"c\"") == std::string::npos);
+
+  // 预览运行（源头抽稀）不当「上一次」
+  exec::ResultStore::instance().clear();
+  auto preview = std::make_unique<HeldRun>();
+  preview->log.runId = "noderun-held-preview";
+  {
+    exec::RunOptions options;
+    options.runId = preview->log.runId;
+    options.mode = exec::RunMode::Preview;
+    preview->run = std::make_unique<exec::Run>(forked("r8p").dump(), options, &detail::collect, &preview->log);
+    preview->run->join();
+  }
+  auto afterPreview = holdRun(forked("r8p", "c2"), {"b"});
+  CHECK(attachedOf(afterPreview->log, "attachedStale").empty());
 }
 
 TEST_CASE("R7：上游不齐、开跑前就失败时，已有的结果照样挂上") {
