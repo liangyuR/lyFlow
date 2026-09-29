@@ -13,6 +13,7 @@ import type {
   BackupStatus,
   CoreReloadFailed,
   LibraryRefresh,
+  LibrarySettings,
   LibraryStatus,
   LoadedGraph,
   ManifestUpdated,
@@ -157,6 +158,13 @@ export class StaticTransport implements Transport {
   }
   async getLibraryStatus(): Promise<LibraryStatus> {
     return { dirs: [], count: 0, problems: [] };
+  }
+  async getLibrarySettings(): Promise<LibrarySettings> {
+    // 静态宿主没有库目录
+    return { defaultDir: "", extraDirs: [], envDirs: [], editable: false };
+  }
+  async setLibraryDirs(): Promise<LibraryRefresh> {
+    return browserOnly("设置库目录");
   }
   async getLibraryDefinition(): Promise<SubgraphDef | null> {
     // 静态宿主没有库目录，也就没有库算子

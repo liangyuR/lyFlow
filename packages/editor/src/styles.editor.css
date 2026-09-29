@@ -1125,6 +1125,68 @@
   text-align: left;
 }
 .toolbar__recentmenu button:hover { background: var(--lyflow-bg-3); }
+/* 库算子目录（docs/library-dirs.md）：与最近文件同一个下拉框体 */
+.library-menu {
+  min-width: 360px;
+  max-width: 520px;
+  font-size: 11px;
+}
+.library-menu__title { padding: 2px 4px 4px; color: var(--lyflow-fg-2); }
+.library-menu__dirs { margin: 0; padding: 0; list-style: none; }
+.library-menu__dirs li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 3px;
+}
+.library-menu__dirs li:hover { background: var(--lyflow-bg-3); }
+.library-menu__path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--lyflow-mono);
+  color: var(--lyflow-fg-1);
+}
+.library-menu__tag { flex: none; color: var(--lyflow-fg-2); }
+.toolbar__recentmenu .library-menu__remove {
+  display: inline;
+  width: auto;
+  flex: none;
+  padding: 0 4px;
+  color: var(--lyflow-fg-2);
+}
+.library-menu__add, .library-menu__foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+.library-menu__add input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 1px solid var(--lyflow-border);
+  border-radius: 3px;
+  background: var(--lyflow-bg-1);
+  color: var(--lyflow-fg-0);
+  font-family: var(--lyflow-mono);
+  font-size: 11px;
+}
+.toolbar__recentmenu .library-menu__add button,
+.toolbar__recentmenu .library-menu__foot button {
+  display: inline;
+  width: auto;
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--lyflow-border);
+  border-radius: 3px;
+}
+.library-menu__foot span { flex: 1 1 auto; color: var(--lyflow-fg-2); }
+.library-menu__note { margin-top: 4px; padding: 0 4px; color: var(--lyflow-fg-2); }
+
 .toolbar__recentempty {
   display: block;
   padding: 6px 8px;

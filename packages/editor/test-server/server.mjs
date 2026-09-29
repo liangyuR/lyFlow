@@ -716,6 +716,13 @@ async function route(req, res, url) {
   if (req.method === "POST" && p === "/lyflow/library/save") {
     throw Object.assign(new Error("桩服务器不支持保存到库"), { status: 501 });
   }
+  if (req.method === "GET" && p === "/lyflow/library/settings") {
+    // 桩服务器没有库目录：只读的空设置，界面上显示「宿主不支持」
+    return send(res, 200, { defaultDir: "", extraDirs: [], envDirs: [], editable: false });
+  }
+  if (req.method === "POST" && p === "/lyflow/library/dirs") {
+    throw Object.assign(new Error("桩服务器没有库目录，设置不了"), { status: 501 });
+  }
   if (req.method === "GET" && p === "/lyflow/library/definition") {
     throw Object.assign(new Error("桩服务器没有库目录，取不到库算子的定义"), { status: 501 });
   }

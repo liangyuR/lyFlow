@@ -10,6 +10,7 @@ use std::sync::{Mutex, RwLock};
 use tauri::{Manager, Runtime};
 
 use crate::core_ffi;
+use crate::library_settings;
 use crate::execution::{
     encode_cloud, encode_indices, encode_tensor, PreviewOptions, RunManager, StartOptions,
 };
@@ -560,19 +561,73 @@ pub fn library_dirs<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<Vec<String>
             .map(|d| d.to_string_lossy().into_owned())
             .collect());
     }
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("拿不到 app data 目录: {e}"))?
-        .join("library");
+    let app_data = app_data_dir(app)?;
+    let dir = app_data.join("library");
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建 {} 失败: {e}", dir.display()))?;
-    let mut dirs = vec![dir.to_string_lossy().into_owned()];
-    if let Ok(extra) = std::env::var("LYFLOW_LIBRARY_DIRS") {
-        for d in extra.split(';').filter(|d| !d.is_empty()) {
-            dirs.push(d.to_string());
-        }
+    // 默认目录 → 设置界面加的（library-dirs.json，CLI 读同一个文件）→ 环境变量 LYFLOW_LIBRARY_DIRS
+    Ok(library_settings::compose(
+        &dir.to_string_lossy(),
+        &library_settings::read_extra(&app_data),
+        &library_settings::env_dirs(),
+    ))
+}
+
+fn app_data_dir<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map_err(|e| format!("拿不到 app data 目录: {e}"))
+}
+
+/// 库目录的设置（设置界面用）。宿主经 HostConfig 整个指定了目录时只读。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibrarySettings {
+    /// 「保存到库」写进的那个目录（app data 下的 library/）。
+    pub default_dir: String,
+    /// 设置里加的目录（可增删）。
+    pub extra_dirs: Vec<String>,
+    /// 环境变量 LYFLOW_LIBRARY_DIRS 里的目录（只读，界面上标出来）。
+    pub env_dirs: Vec<String>,
+    /// false = 目录由宿主配置，这里改不了。
+    pub editable: bool,
+}
+
+#[tauri::command]
+pub fn get_library_settings<R: Runtime>(app: tauri::AppHandle<R>) -> Result<LibrarySettings, String> {
+    if let Some(dirs) = host::config(&app).library_dirs.as_ref() {
+        let mut all = dirs.iter().map(|d| d.to_string_lossy().into_owned());
+        return Ok(LibrarySettings {
+            default_dir: all.next().unwrap_or_default(),
+            extra_dirs: all.collect(),
+            env_dirs: Vec::new(),
+            editable: false,
+        });
     }
-    Ok(dirs)
+    let app_data = app_data_dir(&app)?;
+    Ok(LibrarySettings {
+        default_dir: app_data.join("library").to_string_lossy().into_owned(),
+        extra_dirs: library_settings::read_extra(&app_data),
+        env_dirs: library_settings::env_dirs(),
+        editable: true,
+    })
+}
+
+/// 写设置里的额外目录并立刻重扫（设置界面「添加 / 删除」）。拿回新 manifest，与 refresh_library 同形。
+#[tauri::command]
+pub fn set_library_dirs<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    runs: tauri::State<'_, RunManager>,
+    #[allow(non_snake_case)] extraDirs: Vec<String>,
+) -> Result<LibraryRefresh, String> {
+    if host::config(&app).library_dirs.is_some() {
+        return Err("库目录由宿主配置（HostConfig.library_dirs），在这里改不了".into());
+    }
+    library_settings::write_extra(&app_data_dir(&app)?, &extraDirs)?;
+    let status = rescan_library(&app, &runs)?;
+    Ok(LibraryRefresh {
+        status,
+        manifest: manifest_value()?,
+    })
 }
 
 /// 库目录里每个 `*.lyflow-op.json` 的（路径, 大小, 修改时间），排好序。

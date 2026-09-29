@@ -48,6 +48,8 @@ v11 再加的 `isolate`（只运行某几个节点）与 `force`（强制重算�
 | POST | `/lyflow/library/refresh` | `refreshLibrary` | `lyflow_set_library_dirs` |
 | POST | `/lyflow/library/save` | `saveAsLibrary` | 桥接层的事，core 不参与 |
 | GET | `/lyflow/library/definition?op=lib.<id>` | `getLibraryDefinition` | `lyflow_library_definition`（v13） |
+| GET | `/lyflow/library/settings` | `getLibrarySettings` | 桥接层的事（[library-dirs.md](library-dirs.md)） |
+| POST | `/lyflow/library/dirs` | `setLibraryDirs` | 桥接层写设置，再 `lyflow_set_library_dirs` 重扫 |
 | POST | `/lyflow/import` | `importGraph` | `lyflow_import` |
 | GET / PUT | `/lyflow/files/graph?path=` | `loadGraph` / `saveGraph` | 桥接层 |
 | GET / PUT / DELETE | `/lyflow/files/backup?path=` | `readBackup` / `writeBackup` / `discardBackup` | 桥接层 |

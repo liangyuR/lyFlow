@@ -14,6 +14,7 @@ import type {
   CoreReloadFailed,
   LibraryMeta,
   LibraryRefresh,
+  LibrarySettings,
   LibraryStatus,
   LoadedGraph,
   ManifestUpdated,
@@ -243,6 +244,14 @@ export class TauriTransport implements Transport {
   async getLibraryDefinition(opId: string): Promise<SubgraphDef | null> {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<SubgraphDef | null>("get_library_definition", { opId });
+  }
+  async getLibrarySettings(): Promise<LibrarySettings> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<LibrarySettings>("get_library_settings");
+  }
+  async setLibraryDirs(extraDirs: string[]): Promise<LibraryRefresh> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<LibraryRefresh>("set_library_dirs", { extraDirs });
   }
   async getLibraryStatus(): Promise<LibraryStatus> {
     const { invoke } = await import("@tauri-apps/api/core");

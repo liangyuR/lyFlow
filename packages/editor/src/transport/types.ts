@@ -70,6 +70,18 @@ export interface LibraryStatus {
   problems: string[];
 }
 
+/** 库目录的设置（设置界面用，docs/library-dirs.md）。 */
+export interface LibrarySettings {
+  /** 「保存到库」写进的目录（app data 下的 library/）。 */
+  defaultDir: string;
+  /** 设置里加的目录，可增删；app 与 CLI 读同一份。 */
+  extraDirs: string[];
+  /** 环境变量 LYFLOW_LIBRARY_DIRS 里的目录，只读。 */
+  envDirs: string[];
+  /** false = 目录由宿主配置（或宿主没有库目录），这里改不了。 */
+  editable: boolean;
+}
+
 export interface LibraryRefresh {
   status: LibraryStatus;
   manifest: OperatorManifestBundle;
@@ -190,6 +202,10 @@ export interface Transport {
   getLibraryStatus(): Promise<LibraryStatus>;
   /** 重扫库目录并拿回新 manifest。 */
   refreshLibrary(): Promise<LibraryRefresh>;
+  /** 库目录的设置：默认目录、设置里加的、环境变量里的、能不能改。 */
+  getLibrarySettings(): Promise<LibrarySettings>;
+  /** 写设置里的额外目录并立刻重扫，拿回新 manifest（与 refreshLibrary 同形）。 */
+  setLibraryDirs(extraDirs: string[]): Promise<LibraryRefresh>;
   /** 把 doc 里的一个子图存成库文件。 */
   saveAsLibrary(doc: GraphDoc, subgraphId: string, meta: LibraryMeta): Promise<LibraryStatus>;
   /** 库算子 `lib.<id>` 的定义（C ABI v13）：形状同 `doc.subgraphs.<id>`，「展开为内联子图」写进 doc。

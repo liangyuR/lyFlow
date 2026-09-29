@@ -1,10 +1,13 @@
 // M4 验收：子图（§1）、live preview（§2）、大图性能（§4）。CLI（§3）由 cargo test
 // 覆盖，理由见 ../../docs/m4-acceptance.md。与 M2/M3 的分组共用一个 app 实例。
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { sleep } from "./cdp.mjs";
+import { ROOT } from "./harness.mjs";
 import {
   buildGraph,
   centerOf,
@@ -469,6 +472,62 @@ async function suiteLibrary(cdp, report) {
   report.eq("一次撤销回到库算子",
     await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.find((n) => n.id === ${lit(fresh.lib)}).op;`),
     `lib.${libId}`);
+
+  // 库目录设置（docs/library-dirs.md）：工具栏「库 ▾」里粘贴一个目录、添加 → 当场重扫、manifest 里出现那个目录里的
+  // 库算子；CLI 读同一份设置也认得它；× 去掉就没了。设置写在真的 app data 里，收尾一定还原
+  if (libFile && fs.existsSync(libFile)) {
+    const extraId = `e2e_extra_${Date.now().toString(36)}`;
+    const extraDir = path.join(os.tmpdir(), `lyflow-e2e-libdir-${extraId}`);
+    fs.mkdirSync(extraDir, { recursive: true });
+    const body = JSON.parse(fs.readFileSync(libFile, "utf8"));
+    body.id = extraId;
+    fs.writeFileSync(path.join(extraDir, `${extraId}.lyflow-op.json`), JSON.stringify(body, null, 2), "utf8");
+    const original = await cdp.eval(`return (await window.__lyflow.transport.getLibrarySettings()).extraDirs;`);
+    const hasOp = (id) => cdp.eval(`return window.__lyflow.stores.manifest.getState().operatorsById.has(${lit(id)});`);
+    try {
+      await cdp.eval(`document.querySelector('[data-testid="library-toggle"]').click(); return true;`);
+      await cdp.waitFor(`!!document.querySelector('[data-testid="library-dir-input"]')`, { what: "库目录面板打开" });
+      const added = await cdp.eval(`
+        const input = document.querySelector('[data-testid="library-dir-input"]');
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(input, ${lit(extraDir)});
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((d) => setTimeout(d, 80));
+        document.querySelector('[data-testid="library-add"]').click();
+        return true;
+      `);
+      mustOk(added, "在库目录面板里填了目录并点了添加");
+      await cdp.waitFor(`window.__lyflow.stores.manifest.getState().operatorsById.has(${lit("lib." + extraId)})`,
+        { what: "新加的目录里的库算子进了 manifest", timeoutMs: 15_000 }).catch(() => {});
+      const listed = await cdp.eval(`
+        return [...document.querySelectorAll('[data-testid="library-dir"]')].map((li) => li.getAttribute('data-kind') + ':' + li.getAttribute('title'));
+      `);
+      report.ok("面板里「添加」：当场保存并重扫，manifest 里有了新目录里的库算子，列表里多一行可删的目录",
+        (await hasOp(`lib.${extraId}`)) && listed.includes(`extra:${extraDir}`), JSON.stringify(listed));
+
+      const cli = path.join(ROOT, "bridge", "target", "debug", "lyflow.exe");
+      const r = spawnSync(cli, ["manifest"], { encoding: "utf8" });
+      report.ok("CLI 读同一份设置：lyflow manifest 里也有它", r.status === 0 && r.stdout.includes(`lib.${extraId}`),
+        `${cli} exit=${r.status} ${String(r.stderr).slice(0, 200)}`);
+
+      await cdp.eval(`
+        const li = [...document.querySelectorAll('[data-testid="library-dir"]')].find((x) => x.getAttribute('title') === ${lit(extraDir)});
+        li.querySelector('[data-testid="library-remove"]').click();
+        return true;
+      `);
+      await cdp.waitFor(`!window.__lyflow.stores.manifest.getState().operatorsById.has(${lit("lib." + extraId)})`,
+        { what: "去掉目录后库算子消失", timeoutMs: 15_000 }).catch(() => {});
+      report.eq("× 去掉目录：它的库算子从 manifest 里消失", await hasOp(`lib.${extraId}`), false);
+    } finally {
+      await cdp.eval(`
+        const r = await window.__lyflow.transport.setLibraryDirs(${lit(original)});
+        window.__lyflow.stores.manifest.getState().replaceBundle(r.manifest, 0);
+        document.querySelector('[data-testid="library-toggle"]')?.click();
+        return true;
+      `);
+      fs.rmSync(extraDir, { recursive: true, force: true });
+    }
+  }
 
   // 收尾：把库文件删掉，不然下一次跑会看到一堆积压的 e2e 算子
   if (libFile && fs.existsSync(libFile)) {

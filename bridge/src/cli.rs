@@ -1802,21 +1802,14 @@ pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
 /// 库算子目录。CLI 与 app 用同一份列表，否则会出现「界面里能跑、CI 里报缺算子」。
 /// 顺序与 app 一致：app data 下的 library/，再加 LYFLOW_LIBRARY_DIRS（分号分隔）。
 pub fn library_dirs() -> Vec<String> {
-    let mut dirs = Vec::new();
-    if let Some(base) = std::env::var_os("APPDATA").map(PathBuf::from) {
-        dirs.push(
-            base.join("com.lyflow.app")
-                .join("library")
-                .to_string_lossy()
-                .into_owned(),
-        );
-    }
-    if let Ok(extra) = std::env::var("LYFLOW_LIBRARY_DIRS") {
-        for d in extra.split(';').filter(|d| !d.is_empty()) {
-            dirs.push(d.to_string());
-        }
-    }
-    dirs
+    use crate::library_settings as ls;
+    // 设置界面加的目录存在 app 的 app data 里（library-dirs.json），CLI 读同一个文件
+    let Some(base) = std::env::var_os("APPDATA").map(PathBuf::from) else {
+        return ls::env_dirs();
+    };
+    let app_data = base.join("com.lyflow.app");
+    let default = app_data.join("library").to_string_lossy().into_owned();
+    ls::compose(&default, &ls::read_extra(&app_data), &ls::env_dirs())
 }
 
 /// 进程启动时装一次库算子。目录不存在时什么都不做。

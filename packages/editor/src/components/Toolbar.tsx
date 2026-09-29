@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { dialogs } from "../lib/dialogs";
 import { baseName, recentFiles } from "../lib/files";
 import { keyHint } from "../lib/keymap";
 import { useCacheStore } from "../store/cache";
@@ -8,7 +9,7 @@ import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useRecipesDirty } from "../store/recipe";
 import { useUiStore } from "../store/ui";
-import { transport, type RecentEntry } from "../transport";
+import { transport, type LibraryRefresh, type LibrarySettings, type RecentEntry } from "../transport";
 
 import { RecipeMenu } from "./RecipeMenu";
 
@@ -120,15 +121,33 @@ function PreviewControls() {
   );
 }
 
-/** 重扫库算子目录（ADR-0010）。库文件是手工放进去的，得有个不重启的入口。 */
-function LibraryButton() {
+/** 库算子目录（ADR-0010）：列出、增删、重扫。设置里加的目录 app 与 CLI 读同一份（docs/library-dirs.md），
+ *  改了当场保存并重扫。宿主经 HostConfig 整个指定了目录时只读。 */
+function LibraryMenu() {
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const refresh = async () => {
+  const [settings, setSettings] = useState<LibrarySettings | null>(null);
+  const [draft, setDraft] = useState("");
+  const [status, setStatus] = useState<{ count: number; problems: string[] } | null>(null);
+
+  const load = async () => {
+    try {
+      setSettings(await transport.getLibrarySettings());
+    } catch (e) {
+      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
+    }
+  };
+  useEffect(() => {
+    if (open) void load();
+  }, [open]);
+
+  const run = async (act: () => Promise<LibraryRefresh>) => {
     setBusy(true);
     try {
-      const result = await transport.refreshLibrary();
+      const result = await act();
       useManifestStore.getState().replaceBundle(result.manifest, 0);
       const problems = result.status.problems;
+      setStatus({ count: result.status.count, problems });
       useUiStore
         .getState()
         .showToast(
@@ -137,22 +156,124 @@ function LibraryButton() {
             : `库算子有 ${problems.length} 个问题：${problems[0]}`,
           problems.length === 0 ? "info" : "warn",
         );
+      await load();
     } catch (e) {
       useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
     } finally {
       setBusy(false);
     }
   };
+  const save = (extra: string[]) => run(() => transport.setLibraryDirs(extra));
+  const add = (dir: string) => {
+    const d = dir.trim();
+    if (!d || !settings) return;
+    setDraft("");
+    void save([...settings.extraDirs, d]);
+  };
+  const pickPath = dialogs().pickPath;
+  const browse = async () => {
+    if (!pickPath) return;
+    const d = await pickPath({ mode: "dir" });
+    if (d) add(d);
+  };
+
+  const editable = settings?.editable === true;
   return (
-    <button
-      type="button"
-      data-testid="library-refresh"
-      disabled={busy}
-      title="重扫库算子目录"
-      onClick={() => void refresh()}
-    >
-      库
-    </button>
+    <div className="toolbar__recent">
+      <button
+        type="button"
+        data-testid="library-toggle"
+        aria-expanded={open}
+        title="库算子目录：列出、增删、重扫"
+        onClick={() => setOpen((v) => !v)}
+      >
+        库 ▾
+      </button>
+      {open && (
+        <div className="toolbar__recentmenu library-menu" data-testid="library-menu">
+          <div className="library-menu__title">库算子目录</div>
+          {settings && (
+            <ul className="library-menu__dirs">
+              {settings.defaultDir && (
+                <li data-testid="library-dir" data-kind="default" title={settings.defaultDir}>
+                  <span className="library-menu__path">{settings.defaultDir}</span>
+                  <span className="library-menu__tag">默认 ·「保存到库」写这里</span>
+                </li>
+              )}
+              {settings.extraDirs.map((d) => (
+                <li key={d} data-testid="library-dir" data-kind={editable ? "extra" : "host"} title={d}>
+                  <span className="library-menu__path">{d}</span>
+                  {editable && (
+                    <button
+                      type="button"
+                      className="library-menu__remove"
+                      data-testid="library-remove"
+                      disabled={busy}
+                      title="从库目录里去掉（目录本身不删）"
+                      onClick={() => void save(settings.extraDirs.filter((x) => x !== d))}
+                    >
+                      ×
+                    </button>
+                  )}
+                </li>
+              ))}
+              {settings.envDirs.map((d) => (
+                <li key={`env:${d}`} data-testid="library-dir" data-kind="env" title={d}>
+                  <span className="library-menu__path">{d}</span>
+                  <span className="library-menu__tag">环境变量 LYFLOW_LIBRARY_DIRS</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {settings && !editable && (
+            <div className="library-menu__note">目录由宿主配置，在这里改不了</div>
+          )}
+          {editable && (
+            <div className="library-menu__add">
+              <input
+                data-testid="library-dir-input"
+                placeholder="粘贴一个目录路径，回车添加"
+                value={draft}
+                disabled={busy}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") add(draft);
+                }}
+              />
+              <button type="button" data-testid="library-add" disabled={busy || !draft.trim()} onClick={() => add(draft)}>
+                添加
+              </button>
+              {pickPath && (
+                <button type="button" data-testid="library-browse" disabled={busy} onClick={() => void browse()}>
+                  浏览…
+                </button>
+              )}
+            </div>
+          )}
+          <div className="library-menu__foot">
+            <span data-testid="library-count">
+              {status
+                ? status.problems.length === 0
+                  ? `${status.count} 个库算子`
+                  : `${status.problems.length} 个问题`
+                : ""}
+            </span>
+            <button
+              type="button"
+              data-testid="library-refresh"
+              disabled={busy}
+              title="重扫库算子目录（库文件是手工放进去的，不重启就生效）"
+              onClick={() => void run(() => transport.refreshLibrary())}
+            >
+              重扫
+            </button>
+          </div>
+          {editable && (
+            <div className="library-menu__note">新加的目录下次启动才会自动盯着文件变化；在那之前改了库文件点「重扫」</div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -332,7 +453,7 @@ export function Toolbar({
         >
           抽屉
         </button>
-        <LibraryButton />
+        <LibraryMenu />
         <button
           type="button"
           data-testid="help-toggle"

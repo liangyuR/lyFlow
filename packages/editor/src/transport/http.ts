@@ -14,6 +14,7 @@ import type {
   CoreReloadFailed,
   LibraryMeta,
   LibraryRefresh,
+  LibrarySettings,
   LibraryStatus,
   LoadedGraph,
   ManifestUpdated,
@@ -399,6 +400,12 @@ export class HttpTransport implements Transport {
 
   getLibraryStatus(): Promise<LibraryStatus> {
     return this.#get<LibraryStatus>("/lyflow/library");
+  }
+  getLibrarySettings(): Promise<LibrarySettings> {
+    return this.#get<LibrarySettings>("/lyflow/library/settings");
+  }
+  setLibraryDirs(extraDirs: string[]): Promise<LibraryRefresh> {
+    return this.#send<LibraryRefresh>("POST", "/lyflow/library/dirs", { extraDirs });
   }
   getLibraryDefinition(opId: string): Promise<SubgraphDef | null> {
     return this.#get<SubgraphDef | null>(`/lyflow/library/definition?op=${encodeURIComponent(opId)}`);

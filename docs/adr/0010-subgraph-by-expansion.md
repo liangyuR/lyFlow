@@ -83,3 +83,10 @@ C ABI v13 加 `lyflow_library_definition(op_id)`：返回库文件原样去掉 `
 其余不动；库算子与 `sub:` 走同一条展开路径，所以展开前后 compile 出同一张平图（`test_subgraph.cpp`
 「库目录」那条钉了逐位相同）。定义由 core 给而不是 bridge 自己去读库目录：按 id 找文件、多个目录谁优先
 这套规则只留一份。设计见 [library-inline-plan.md](../library-inline-plan.md)。
+
+## 修订（2026-09-29）：库目录的设置界面
+
+库目录原来只能靠环境变量 `LYFLOW_LIBRARY_DIRS` 加。现在工具栏「库 ▾」里能增删，存在 `<app data>/library-dirs.json`；
+完整列表是「默认 `library/` → 设置里加的 → 环境变量」，app 与 CLI 用同一个函数读同一个文件（`bridge/src/library_settings.rs`）。
+宿主经 `HostConfig.library_dirs` 指定时以宿主为准、界面只读。见 [library-dirs.md](../library-dirs.md)。
+

@@ -4,6 +4,7 @@
 pub mod cli;
 pub mod core_ffi;
 mod disk_cache;
+pub mod library_settings;
 mod eval;
 pub mod graph;
 mod patch;
