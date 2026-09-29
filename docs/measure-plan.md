@@ -74,7 +74,8 @@ export function measureLines(m: Measure, mode: CameraMode): { key: string; text:
 - 角度、面积、点到平面距离。
 - 悬停高亮 / 悬停读数（每次 mousemove 投 200 万点不划算）。
 - 全分辨率邻域拾取（M3）。
-- Edge Peek 的 `CloudView` 里测量（它有自己那份场景代码，compare-plan §7 已记「改用 cloudScene 另起一片」，做了那片之后自然就有）。
+- ~~Edge Peek 的 `CloudView` 里测量~~：2026-09-29 已做 —— `CloudView` 改用 `lib/cloudScene`，测量逻辑抽成 `hooks/useMeasure` +
+  `components/MeasureReadout`，查看器窗口工具栏一个「测量」按钮、每个窗口各自开关（`M` 键仍只管主预览）。
 
 ## 5. 风险
 

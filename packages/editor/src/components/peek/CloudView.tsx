@@ -1,10 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 import { findBaseCloud, firstCloudPort, type BaseCloud } from "../../lib/basecloud";
 import { cacheKey, cloudCache, dropOtherRuns, fetchCloud, putCache } from "../../lib/cloudCache";
-import { RAMPS, writeRgbColors, type RampName } from "../../lib/ramps";
+import {
+  boundsAttr,
+  buildPoints,
+  createScene,
+  dataRangeOf,
+  fitToBounds,
+  overlayBoundsOf,
+  paintPoints,
+  setPoints,
+  unionBounds,
+  type CameraMode,
+  type Scene,
+  type ShadingMode,
+} from "../../lib/cloudScene";
+import type { RampName } from "../../lib/ramps";
 import { disposeOverlay, extentOf, shapesOf } from "../../lib/shapes2d";
 import { registerPeekCanvas } from "../../lib/peekCanvas";
 import { augmentOperators, levelOf, resolveOutput } from "../../lib/subgraph";
@@ -13,7 +26,8 @@ import { useManifestStore } from "../../store/manifest";
 import { PEEK_FROZEN, usePeekStore } from "../../store/peek";
 import { transport } from "../../transport";
 import { decodeCloud, type CloudPayload } from "../../types/execution";
-import type { CameraMode, ShadingMode } from "../Viewer3D";
+import { measureAttrs, useMeasure } from "../../hooks/useMeasure";
+import { MeasureReadout } from "../MeasureReadout";
 import type { PeekViewProps } from "./types";
 
 const MAX_POINTS_CHOICES = [100_000, 200_000, 500_000, 2_000_000];
@@ -25,247 +39,6 @@ interface Display {
   cloud: CloudPayload | null;
   status: string | null;
   base: BaseCloud | null;
-}
-
-interface Scene {
-  renderer: THREE.WebGLRenderer;
-  scene: THREE.Scene;
-  camera: THREE.PerspectiveCamera;
-  /** 2D 剖面相机（G7）：正交、俯视 XY、不许旋转。 */
-  ortho: THREE.OrthographicCamera;
-  controls: OrbitControls;
-  mode: CameraMode;
-  points: THREE.Points | null;
-  /** 叠画的 2D 几何（G7）。整组一起换，不逐个增删。 */
-  overlay: THREE.Group;
-  /** 正交相机的可视半宽，随 fit 改变；aspect 变了要重算上下边。 */
-  halfWidth: number;
-  aspect: number;
-  active(): THREE.Camera;
-  applyOrtho(): void;
-  setMode(mode: CameraMode): void;
-  dispose(): void;
-}
-
-function createScene(host: HTMLDivElement): Scene {
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setClearColor(0x11141a, 1);
-  host.appendChild(renderer.domElement);
-
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(50, 1, 0.001, 10_000);
-  camera.up.set(0, 0, 1); // 点云世界里 Z 朝上，别用 three 默认的 Y 朝上
-  camera.position.set(2, -2, 1.5);
-
-  // 正交相机看 −Z 方向，up 是 +Y：屏幕上就是标准的 XY 平面。
-  const ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 1000);
-  ortho.up.set(0, 1, 0);
-  ortho.position.set(0, 0, 10);
-
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.12;
-
-  const grid = new THREE.GridHelper(4, 16, 0x33404f, 0x232a33);
-  grid.rotation.x = Math.PI / 2; // GridHelper 默认躺在 XZ 面上，转到 XY
-  scene.add(grid);
-  const axes = new THREE.AxesHelper(0.5);
-  scene.add(axes);
-  const overlay = new THREE.Group();
-  scene.add(overlay);
-
-  let raf = 0;
-  const tick = () => {
-    raf = requestAnimationFrame(tick);
-    controls.update();
-    renderer.render(scene, state.active());
-  };
-
-  const state: Scene = {
-    renderer,
-    scene,
-    camera,
-    ortho,
-    controls,
-    mode: "3d",
-    points: null,
-    overlay,
-    halfWidth: 2,
-    aspect: 1,
-    active() {
-      return state.mode === "2d" ? state.ortho : state.camera;
-    },
-    applyOrtho() {
-      const h = state.halfWidth / Math.max(state.aspect, 1e-3);
-      ortho.left = -state.halfWidth;
-      ortho.right = state.halfWidth;
-      ortho.top = h;
-      ortho.bottom = -h;
-      ortho.updateProjectionMatrix();
-    },
-    setMode(mode) {
-      if (state.mode === mode) return;
-      state.mode = mode;
-      // OrbitControls 只认它构造时那台相机，换模式就换 object；
-      // 2D 下关掉旋转，否则一拖就离开了 XY 平面，那这个模式就没意义了。
-      const target = state.controls.target;
-      state.controls.object = state.active() as THREE.PerspectiveCamera;
-      state.controls.enableRotate = mode === "3d";
-      if (mode === "2d") {
-        ortho.position.set(target.x, target.y, target.z + 10);
-        ortho.zoom = 1;
-        state.applyOrtho();
-      }
-      state.controls.update();
-    },
-    dispose() {
-      cancelAnimationFrame(raf);
-      controls.dispose();
-      if (state.points) {
-        state.points.geometry.dispose();
-        (state.points.material as THREE.Material).dispose();
-      }
-      disposeOverlay(overlay);
-      // helper 自己也有 geometry 和 material。不放的话每次挂载都漏一份。
-      for (const helper of [grid, axes]) {
-        helper.geometry.dispose();
-        const m = helper.material;
-        if (Array.isArray(m)) m.forEach((x) => x.dispose());
-        else m.dispose();
-      }
-      // renderer.dispose() **不释放 WebGL 上下文**（那是 forceContextLoss），
-      // 少了它每次挂载/卸载漏一个，攒够十几个后视图突然全黑（见 README「踩过的坑」）。
-      renderer.dispose();
-      renderer.forceContextLoss();
-      host.removeChild(renderer.domElement);
-    },
-  };
-  tick();
-  return state;
-}
-
-/** 着色用的标量：强度模式取强度通道，其余取 Z。 */
-function shadingValue(cloud: CloudPayload, mode: ShadingMode, i: number): number {
-  if (mode === "intensity" && cloud.intensity) return cloud.intensity[i]!;
-  return cloud.xyz[i * 3 + 2]!;
-}
-
-/** 法线着色：分量的绝对值直接当 RGB。色带对它没有意义，所以走单独一条路。 */
-function writeNormalColors(out: Float32Array, cloud: CloudPayload): void {
-  const n = cloud.normals;
-  if (!n) return;
-  for (let i = 0; i < cloud.pointCount; i += 1) {
-    out[i * 3] = Math.abs(n[i * 3] ?? 0);
-    out[i * 3 + 1] = Math.abs(n[i * 3 + 1] ?? 0);
-    out[i * 3 + 2] = Math.abs(n[i * 3 + 2] ?? 0);
-  }
-}
-
-/** 就地写颜色。复用已有数组是为了换色带时不再分配几十兆。 */
-function writeColors(
-  out: Float32Array,
-  cloud: CloudPayload,
-  mode: ShadingMode,
-  ramp: RampName,
-  lo: number,
-  hi: number,
-) {
-  const paint = RAMPS[ramp];
-  const span = hi - lo || 1;
-  const c = new THREE.Color();
-  for (let i = 0; i < cloud.pointCount; i += 1) {
-    paint((shadingValue(cloud, mode, i) - lo) / span, c);
-    out[i * 3] = c.r;
-    out[i * 3 + 1] = c.g;
-    out[i * 3 + 2] = c.b;
-  }
-}
-
-function dataRangeOf(cloud: CloudPayload | null, mode: ShadingMode): [number, number] {
-  if (!cloud || cloud.pointCount === 0) return [0, 1];
-  if (mode === "intensity" && cloud.intensity) {
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (let i = 0; i < cloud.pointCount; i += 1) {
-      const v = cloud.intensity[i]!;
-      if (v < lo) lo = v;
-      if (v > hi) hi = v;
-    }
-    return Number.isFinite(lo) ? [lo, hi] : [0, 1];
-  }
-  // 高度用 bounds 而不是重新扫一遍：bounds 是**全量**点云算的，
-  // 抽稀后的极值会让同一份数据在不同 maxPoints 下呈现不同的配色。
-  return [cloud.bounds[2]!, cloud.bounds[5]!];
-}
-
-/** 「底图云 + 叠画几何」的联合包围盒。取并集而不是二选一：几何再小也挤不掉云，
- *  云再大也不会把 ROI 框推出画面。两者都空时返回 null。 */
-function unionBounds(cloud: CloudPayload | null, overlay: THREE.Group): Float32Array | null {
-  const min = [Infinity, Infinity, Infinity];
-  const max = [-Infinity, -Infinity, -Infinity];
-  if (cloud && cloud.pointCount > 0) {
-    for (let i = 0; i < 3; i += 1) {
-      min[i] = Math.min(min[i]!, cloud.bounds[i]!);
-      max[i] = Math.max(max[i]!, cloud.bounds[i + 3]!);
-    }
-  }
-  if (overlay.children.length > 0) {
-    const box = new THREE.Box3().setFromObject(overlay);
-    if (!box.isEmpty()) {
-      const lo = [box.min.x, box.min.y, box.min.z];
-      const hi = [box.max.x, box.max.y, box.max.z];
-      for (let i = 0; i < 3; i += 1) {
-        min[i] = Math.min(min[i]!, lo[i]!);
-        max[i] = Math.max(max[i]!, hi[i]!);
-      }
-    }
-  }
-  if (!Number.isFinite(min[0]) || !Number.isFinite(max[0])) return null;
-  return new Float32Array([min[0]!, min[1]!, min[2]!, max[0]!, max[1]!, max[2]!]);
-}
-
-function round3(v: number) {
-  return Number.isFinite(v) ? Math.round(v * 1000) / 1000 : 0;
-}
-
-function boundsAttr(bounds: ArrayLike<number> | null): string {
-  if (!bounds) return "";
-  return Array.from(bounds, round3).join(",");
-}
-
-function overlayBoundsOf(overlay: THREE.Group): Float32Array | null {
-  if (overlay.children.length === 0) return null;
-  const box = new THREE.Box3().setFromObject(overlay);
-  if (box.isEmpty()) return null;
-  return new Float32Array([box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z]);
-}
-
-function fitToBounds(scene: Scene, bounds: Float32Array) {
-  const cx = (bounds[0]! + bounds[3]!) / 2;
-  const cy = (bounds[1]! + bounds[4]!) / 2;
-  const cz = (bounds[2]! + bounds[5]!) / 2;
-  const size = Math.max(
-    bounds[3]! - bounds[0]!,
-    bounds[4]! - bounds[1]!,
-    bounds[5]! - bounds[2]!,
-    1e-3,
-  );
-  const d = size * 1.8;
-  scene.controls.target.set(cx, cy, cz);
-  scene.camera.position.set(cx + d, cy - d, cz + d * 0.7);
-  scene.camera.near = size / 1000;
-  scene.camera.far = size * 100;
-  scene.camera.updateProjectionMatrix();
-
-  // 正交相机按 XY 的实际跨度取景，Z 不参与 —— 剖面视图里 Z 是「厚度」。
-  const spanX = Math.max(bounds[3]! - bounds[0]!, 1e-4);
-  const spanY = Math.max(bounds[4]! - bounds[1]!, 1e-4);
-  scene.halfWidth = Math.max(spanX, spanY * Math.max(scene.aspect, 1e-3)) * 0.6;
-  scene.ortho.position.set(cx, cy, cz + Math.max(size * 10, 1));
-  scene.ortho.zoom = 1;
-  scene.applyOrtho();
-  scene.controls.update();
 }
 
 interface CloudTarget {
@@ -285,6 +58,8 @@ export function CloudView({ win, src }: PeekViewProps) {
   });
   const [loading, setLoading] = useState(false);
   const [overlayBounds, setOverlayBounds] = useState<Float32Array | null>(null);
+  const [sceneHost, setSceneHost] = useState<Scene | null>(null);
+  const [measuring, setMeasuring] = useState(false);
   const { cloud } = display;
 
   const doc = useGraphStore((s) => s.doc);
@@ -335,7 +110,6 @@ export function CloudView({ win, src }: PeekViewProps) {
         ? "height"
         : shading;
   const isFlat = effectiveShading === "flat";
-  const isNormalShading = effectiveShading === "normal";
   const isRgbShading = effectiveShading === "rgb";
   // 色带与范围只对「标量 → 颜色」的着色有意义
   const noRamp = isFlat || isRgbShading;
@@ -349,24 +123,11 @@ export function CloudView({ win, src }: PeekViewProps) {
     if (!host) return;
     const scene = createScene(host);
     sceneRef.current = scene;
-
-    const resize = () => {
-      const w = host.clientWidth || 1;
-      const h = host.clientHeight || 1;
-      scene.renderer.setSize(w, h, false);
-      scene.camera.aspect = w / h;
-      scene.camera.updateProjectionMatrix();
-      scene.aspect = w / h;
-      scene.applyOrtho();
-    };
-    resize();
-    const observer = new ResizeObserver(resize);
-    observer.observe(host);
-
+    setSceneHost(scene);
     return () => {
-      observer.disconnect();
       scene.dispose();
       sceneRef.current = null;
+      setSceneHost(null);
     };
   }, []);
 
@@ -375,7 +136,7 @@ export function CloudView({ win, src }: PeekViewProps) {
       registerPeekCanvas(win.id, () => {
         const scene = sceneRef.current;
         if (!scene) return null;
-        scene.renderer.render(scene.scene, scene.active());
+        scene.renderFrame();
         return scene.renderer.domElement;
       }),
     [win.id],
@@ -441,73 +202,15 @@ export function CloudView({ win, src }: PeekViewProps) {
     const scene = sceneRef.current;
     if (!scene) return;
 
-    if (scene.points) {
-      scene.scene.remove(scene.points);
-      scene.points.geometry.dispose();
-      (scene.points.material as THREE.Material).dispose();
-      scene.points = null;
-    }
-    if (!cloud || cloud.pointCount === 0) return;
-
-    const geometry = new THREE.BufferGeometry();
-    // 零拷贝：cloud.xyz 就是 IPC 缓冲上的视图
-    geometry.setAttribute("position", new THREE.BufferAttribute(cloud.xyz, 3));
-    // 自己算 boundingSphere：让 three 从 attribute 里算一遍是白花的钱，
-    // 而且 bounds 是全量点云的，比抽样后的更准。
-    const cx = (cloud.bounds[0]! + cloud.bounds[3]!) / 2;
-    const cy = (cloud.bounds[1]! + cloud.bounds[4]!) / 2;
-    const cz = (cloud.bounds[2]! + cloud.bounds[5]!) / 2;
-    const radius =
-      Math.hypot(
-        cloud.bounds[3]! - cloud.bounds[0]!,
-        cloud.bounds[4]! - cloud.bounds[1]!,
-        cloud.bounds[5]! - cloud.bounds[2]!,
-      ) / 2 || 1;
-    geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(cx, cy, cz), radius);
-
-    const material = new THREE.PointsMaterial({
-      size: POINT_SIZE,
-      sizeAttenuation: false,
-      vertexColors: false,
-      color: 0x8fb8ff,
-    });
-    const points = new THREE.Points(geometry, material);
-    scene.scene.add(points);
-    scene.points = points;
+    setPoints(scene, 0, buildPoints(cloud, POINT_SIZE));
   }, [cloud]);
 
   // 换着色模式/色带只重写 color 属性，positions 和 boundingSphere 原样留着。
   useEffect(() => {
-    const points = sceneRef.current?.points;
+    const points = sceneRef.current?.points[0];
     if (!points || !cloud || cloud.pointCount === 0) return;
-    const geometry = points.geometry;
-    const material = points.material as THREE.PointsMaterial;
-
-    if (isFlat) {
-      geometry.deleteAttribute("color");
-      material.vertexColors = false;
-      material.color.setHex(0x8fb8ff);
-      material.needsUpdate = true;
-      return;
-    }
-
-    const prev = geometry.getAttribute("color");
-    const reuse =
-      prev instanceof THREE.BufferAttribute &&
-      prev.count === cloud.pointCount &&
-      prev.array instanceof Float32Array
-        ? prev
-        : null;
-    const arr = reuse ? (reuse.array as Float32Array) : new Float32Array(cloud.pointCount * 3);
-    if (isNormalShading) writeNormalColors(arr, cloud);
-    else if (isRgbShading) writeRgbColors(arr, cloud.rgb, cloud.pointCount);
-    else writeColors(arr, cloud, effectiveShading, ramp, lo, hi);
-    if (reuse) reuse.needsUpdate = true;
-    else geometry.setAttribute("color", new THREE.BufferAttribute(arr, 3));
-    material.vertexColors = true;
-    material.color.setHex(0xffffff);
-    material.needsUpdate = true;
-  }, [cloud, effectiveShading, isFlat, isNormalShading, isRgbShading, ramp, lo, hi]);
+    paintPoints(points, cloud, { shading: effectiveShading, ramp, lo, hi });
+  }, [cloud, effectiveShading, ramp, lo, hi]);
 
   // -- 2D 几何叠画（G7）：整组重建，线与端口同色 -----------------------------
   const shapeStat = useMemo(
@@ -551,6 +254,15 @@ export function CloudView({ win, src }: PeekViewProps) {
     sceneRef.current?.setMode(cameraMode);
   }, [cameraMode]);
 
+  // 每个窗口自己一份测量；M 键只管主预览。有云才能量
+  const measureOn = measuring && cloud !== null && cloud.pointCount > 0;
+  const { measure, clear: clearMeasure } = useMeasure(
+    sceneHost,
+    measureOn,
+    [cloud, null],
+    `${win.id}|${target.resolved?.nodeId ?? ""}|${target.resolved?.port ?? ""}`,
+  );
+
   const setOpts = usePeekStore((s) => s.setOpts);
   const empty = !cloud && !shapeStat;
   const status = loading ? "正在取点云…" : display.status;
@@ -568,6 +280,7 @@ export function CloudView({ win, src }: PeekViewProps) {
       data-base={display.base?.localId ?? ""}
       data-cloud-bounds={boundsAttr(cloud && cloud.pointCount > 0 ? cloud.bounds : null)}
       data-overlay-bounds={boundsAttr(overlayBounds)}
+      {...measureAttrs(measureOn, measure)}
     >
       <div className="peek-cloud__bar">
         {display.base && (
@@ -633,6 +346,17 @@ export function CloudView({ win, src }: PeekViewProps) {
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          className="peek__btn"
+          data-testid="peek-measure"
+          data-on={measureOn ? "1" : "0"}
+          disabled={!cloud || cloud.pointCount === 0}
+          onClick={() => setMeasuring(!measuring)}
+          title={measuring ? "关掉测量" : "测量：单击选点看坐标，再点一个量距离；拖动照旧转视角"}
+        >
+          测量
+        </button>
       </div>
 
       <div className="peek-cloud__stage">
@@ -641,6 +365,14 @@ export function CloudView({ win, src }: PeekViewProps) {
           <div className="peek-cloud__empty" data-testid="peek-cloud-status">
             {status}
           </div>
+        )}
+        {measureOn && (
+          <MeasureReadout
+            measure={measure}
+            mode={cameraMode}
+            pointCount={cloud?.pointCount ?? 0}
+            onClear={clearMeasure}
+          />
         )}
       </div>
     </div>

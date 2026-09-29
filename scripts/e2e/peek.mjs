@@ -2,6 +2,8 @@ import { sleep } from "./cdp.mjs";
 import {
   buildGraph,
   canvasBox,
+  centerOf,
+  clickUntilPicked,
   lit,
   mustOk,
   newDoc,
@@ -261,6 +263,22 @@ async function suiteCloudPeek(cdp, report, fixture) {
     report.fail("双击没有开出窗", JSON.stringify(opened.after));
     return;
   }
+
+  // 测量（与主预览共用 hooks/useMeasure）：窗口自己的开关，单击点中一个点；主预览的测量不跟着开。
+  // 放在 park 之前：挪到角落之后窗口的画布大半在画面外，点不准
+  await waitPeek(cdp, opened.win.id, (d) => d.cloudCanvas && countsOf(d.countText));
+  const winSel = `[data-testid="edge-peek"][data-peek-id="${opened.win.id}"]`;
+  await clickIn(cdp, opened.win.id, '[data-testid="peek-measure"]');
+  const peekPicks = () => cdp.eval(`
+    return Number(document.querySelector(${lit(winSel + ' [data-testid="peek-cloud"]')})?.getAttribute('data-measure') ?? -1);
+  `);
+  const picked = await clickUntilPicked(cdp, await centerOf(cdp, `${winSel} [data-testid="peek-cloud-canvas"]`),
+    async () => (await peekPicks()) === 1);
+  const mainMeasuring = await cdp.eval(`return document.querySelector('.viewer').getAttribute('data-measuring');`);
+  report.ok("查看器里开「测量」：单击点中一个点，主预览的测量没跟着开",
+    Boolean(picked) && mainMeasuring === "0", JSON.stringify({ picked, mainMeasuring }));
+  await clickIn(cdp, opened.win.id, '[data-testid="peek-measure"]');
+  report.eq("再点一次关掉、点位清掉", await peekPicks(), 0);
   await park(cdp);
 
   report.eq("窗口挂在被双击的那条边上", opened.win.edgeId, edge);
