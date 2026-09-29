@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { beginPreview, endPreview, schedulePreview } from "../lib/preview";
+import { rootOf } from "../lib/root";
 import { useGraphStore } from "../store/graph";
 import type { Param } from "../types/manifest";
 
@@ -19,6 +20,8 @@ interface DragState {
   /** 未量化的累计值。量化只作用于写出去的那一份，否则慢拖会永远走不动。 */
   acc: number;
   active: boolean;
+  /** 拖动时挂 lyflow-param-dragging 的那个编辑器根（不是 body）。 */
+  host: HTMLElement | null;
 }
 
 /** 一格的大小：manifest 的 step 优先，其次整数 1、soft 范围的 1/200，最后 0.01。 */
@@ -43,7 +46,7 @@ function quantize(v: number, q: number): number {
 function finishDrag(d: DragState | null, nodeId?: string): void {
   if (!d?.active) return;
   d.active = false;
-  document.body.classList.remove("param-dragging");
+  d.host?.classList.remove("lyflow-param-dragging");
   useGraphStore.getState().commit("拖动参数");
   endPreview(nodeId);
 }
@@ -109,7 +112,14 @@ export function NumberInput({
   const onPointerDown = (e: React.PointerEvent<HTMLInputElement>) => {
     if (disabled || e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    drag.current = { id: e.pointerId, startX: e.clientX, lastX: e.clientX, acc: value, active: false };
+    drag.current = {
+      id: e.pointerId,
+      startX: e.clientX,
+      lastX: e.clientX,
+      acc: value,
+      active: false,
+      host: rootOf(e.currentTarget),
+    };
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLInputElement>) => {
@@ -121,7 +131,7 @@ export function NumberInput({
       d.lastX = e.clientX;
       d.acc = value;
       editing.current = false; // 拖动压过打字，接下来由它接管显示
-      document.body.classList.add("param-dragging");
+      d.host?.classList.add("lyflow-param-dragging");
       setDragging(true);
       useGraphStore.getState().begin();
       if (nodeId) beginPreview(nodeId);

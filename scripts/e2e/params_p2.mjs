@@ -232,6 +232,22 @@ async function suiteLayout(cdp, report) {
     const b = document.querySelector('[data-testid="right-splitter"]').getBoundingClientRect();
     return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) };
   `);
+  // 拖动中的状态类挂在编辑器根上、不碰宿主的 body（docs/multi-instance-research.md 的防呆）：
+  // 按下把手那一刻就挂上，原地松开就撤，宽度不变，不影响下面的拖宽
+  const press = { x: handle.x, y: handle.y, button: "left", clickCount: 1 };
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: handle.x, y: handle.y, buttons: 0 });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", buttons: 1, ...press });
+  const resizing = () => cdp.eval(`
+    return { root: document.querySelector('[data-lyflow-editor]').classList.contains('lyflow-is-resizing'),
+             body: document.body.className.includes('resizing') };
+  `);
+  const during = await resizing();
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", buttons: 0, ...press });
+  await sleep(80);
+  const released = await resizing();
+  report.eq("拖分栏的状态类挂在编辑器根上、不碰 body，松手就撤",
+    [during.root, during.body, released.root], [true, false, false]);
+
   const limit = d.body.w - 280 - 320;
   const delta = width0 + 120 <= limit ? 120 : -120;
   await dragMouse(cdp, handle, { x: handle.x - delta, y: handle.y }, { steps: 10 });

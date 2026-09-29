@@ -97,5 +97,9 @@ live preview 那三处原来就是后者，在 HTTP 下会静默失效。
 
 - **一个页面里多个编辑器实例**。stores 与 transport 都是模块级单例，两个实例会共用一份文档。
   真要做就得把 store 建进 React context，那是一次不小的改造，等有需求再说。
+  **修订（2026-09-29）**：先做了防呆 —— 第二个 `<LyFlowEditor>` 挂载时 `console.error`；拖分栏 / 拖参数的状态类
+  改挂在编辑器根元素上（带 `lyflow-` 前缀，不再碰 `body`）；节点面板按 React Flow 自己的 `domNode` 找画布，
+  不再 `document.querySelector`。完整改造的调研（单例清单、store 调用计数、context 与 iframe 两个方案）见
+  [multi-instance-research.md](../multi-instance-research.md)。
 - **`dist` 构建与 npm 发布**。见上面「一」。
 - **编辑器自己的多文档 / 多标签**（阶段 A 的「不做」里就写了）。

@@ -1,7 +1,7 @@
 // 左侧算子面板。分类树完全由 manifest 的 category 推导，前端不硬编码分类名。
 // 三种加节点的方式：拖到画布、双击、画布上双击搜索 —— 因为三种人都会试。
 
-import { useReactFlow } from "@xyflow/react";
+import { useReactFlow, useStore as useFlowStore } from "@xyflow/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { addNodeWithAutoConnect, insertSnippet } from "../lib/insert";
@@ -18,8 +18,10 @@ export const SNIPPET_DND_MIME = "application/lyflow-snippet";
 /** 画布可视区中心的画布坐标。双击添加时落在这里，比写死原点合理。 */
 function useViewportCenter() {
   const { screenToFlowPosition } = useReactFlow();
+  // 这个编辑器自己的画布：document.querySelector 在一页有两个画布时会拿到第一个
+  const flowRoot = useFlowStore((s) => s.domNode);
   return () => {
-    const pane = document.querySelector(".react-flow__pane");
+    const pane = flowRoot?.querySelector(".react-flow__pane");
     const rect = pane?.getBoundingClientRect();
     if (!rect) return { x: 0, y: 0 };
     return screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });

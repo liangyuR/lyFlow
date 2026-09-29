@@ -18,9 +18,9 @@
   user-select: none;
 }
 
-/* 拖动期间全局压掉选中与光标，否则横拖会在页面上刷出一片蓝 */
-body.param-dragging,
-body.param-dragging * {
+/* 拖动期间整个编辑器压掉选中与光标，否则横拖会刷出一片蓝。类挂在编辑器的根上（不是 body） */
+.lyflow-param-dragging,
+.lyflow-param-dragging * {
   cursor: ew-resize !important;
   user-select: none !important;
 }

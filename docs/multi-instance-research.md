@@ -1,6 +1,12 @@
 # 同一页面多个编辑器实例 —— 调研记录
 
-> 状态：**调研记录，设计待专门讨论**（2026-09-29）。C 档「同页多编辑器实例」。
+> 状态：**调研记录；防呆已做，完整改造暂缓**（2026-09-29）。C 档「同页多编辑器实例」。
+>
+> 已做的防呆：第二个 `<LyFlowEditor>` 挂载时 `console.error`（`LyFlowEditor.tsx` 的 `mountedEditors`）；
+> `is-resizing` / `param-dragging` 改成 `lyflow-is-resizing` / `lyflow-param-dragging`，挂在编辑器根
+> `[data-lyflow-editor]` 上（`lib/root.ts`）；`NodePalette` 按 React Flow 的 `domNode` 找画布；
+> `docs/embedding.md` 写明「一页一个编辑器」。「无主按键」（`useShortcuts` 在 `ownerDocument` 上的监听）没动 ——
+> 一页只有一个实例时它是对的。下文 §1 里这几处是改之前的样子。
 > 路径相对 `packages/editor/src`；行号是写这份记录时的位置，以符号名为准。
 
 ## 结论

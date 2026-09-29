@@ -541,6 +541,14 @@ let spec = RunSpec::new(&graph_json, &run_id, &base_dir, &[])
 适合的场景：录屏/截图要稳定的画面、远程桌面这类重绘很贵的环境、宿主页面自己有一套动效规范。
 `examples/host-react/` 的宿主栏上有一个「动效」开关，就是这个 prop。
 
+**一页一个编辑器。** store 与 transport 都是模块级单例（[ADR-0018](adr/0018-editor-as-package.md)）：
+同一页面挂两个 `<LyFlowEditor>` 会共用同一份文档与 store，后挂载的 `transport` 顶掉先挂的。
+编辑器检测到第二个实例挂载时会 `console.error`，不再静默串台。要在一个宿主里切换多份图，
+做成 tab 并在切换时卸载当前实例、挂下一个；真正的多实例（每个实例一套 store）的调研与方案见
+[multi-instance-research.md](multi-instance-research.md)。编辑器往 DOM 上挂的状态类（拖分栏时的
+`lyflow-is-resizing`、拖动参数时的 `lyflow-param-dragging`）加在编辑器自己的根元素（`[data-lyflow-editor]`）上，
+不碰宿主的 `body`。
+
 **自己实现 `Transport` 时**，`runGraph(doc, graphPath, options)` 的 `options` 里多了
 `isolate?: string[]` 与 `force?: string[]`（展开后的路径 id）：节点标题栏的运行按钮（单击 `targets`、
 Shift+单击再加 `force`）与右键三项（运行到此 / 强制重算此节点 / 仅此节点）发的就是它们，语义见上面

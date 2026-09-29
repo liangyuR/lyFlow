@@ -13,6 +13,7 @@ import { ShortcutPanel } from "./components/ShortcutPanel";
 import { Toolbar } from "./components/Toolbar";
 import { Viewer3D } from "./components/Viewer3D";
 import { useShortcuts } from "./hooks/useShortcuts";
+import { rootOf } from "./lib/root";
 import {
   backupStatus,
   BACKUP_INTERVAL_MS,
@@ -227,7 +228,7 @@ function useDragSplit(
         }
       }
       dragging.current = false;
-      document.body.classList.remove("is-resizing");
+      rootOf(container.current)?.classList.remove("lyflow-is-resizing");
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -239,8 +240,9 @@ function useDragSplit(
 
   const onPointerDown = useCallback(() => {
     dragging.current = true;
-    document.body.classList.add("is-resizing");
-  }, []);
+    // 挂在这个编辑器的根上而不是 body：同一页面的别的东西不该跟着禁掉指针事件
+    rootOf(container.current)?.classList.add("lyflow-is-resizing");
+  }, [container]);
 
   return { width, onPointerDown };
 }
@@ -762,6 +764,10 @@ export interface LyFlowEditorProps extends WorkspaceProps {
   animations?: boolean | undefined;
 }
 
+/** 当前挂着几个 LyFlowEditor。store 与 transport 都是模块级单例（ADR-0018），第二个会和第一个共用
+ *  一份文档、后挂的 transport 顶掉先挂的 —— 静默串台比报错难查得多，所以直接报（docs/multi-instance-research.md）。 */
+let mountedEditors = 0;
+
 export function LyFlowEditor({
   transport: t,
   dialogs: d,
@@ -769,6 +775,19 @@ export function LyFlowEditor({
   animations,
   ...rest
 }: LyFlowEditorProps) {
+  useEffect(() => {
+    mountedEditors += 1;
+    if (mountedEditors > 1) {
+      console.error(
+        `[lyflow] 同一页面挂了 ${mountedEditors} 个 <LyFlowEditor>：editor 包目前只支持一页一个（ADR-0018），` +
+          "它们会共用同一份文档与 store，后挂载的 transport 会顶掉先挂的。见 docs/embedding.md「一页一个编辑器」",
+      );
+    }
+    return () => {
+      mountedEditors -= 1;
+    };
+  }, []);
+
   // 装在 render 里而不是 effect 里：子树的 store 一挂载就会去调传输层。
   setTransport(t);
   setDialogs(d);
