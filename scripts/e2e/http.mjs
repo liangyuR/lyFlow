@@ -380,6 +380,35 @@ async function suiteNodeRunOverHttp(cdp, report) {
     JSON.stringify({ status: smart.status, tail: smart.nodes[ids.tail], smartTail }));
 }
 
+/** 图像端点（docs/http-transport.md「图像」）：桩用 `lyflow dump … .lyim` 取整张图再按行切，只给 level 0。
+ *  图像来自 core 的测试算子 test.make_image（桩服务器带 LYFLOW_TEST_OPS=1 起，CLI 继承）。 */
+async function suiteImageOverHttp(cdp, report) {
+  report.section("HttpTransport：图像按行切片取回，要的级别桩照实回 0，像素与合成公式一致");
+
+  await newDoc(cdp);
+  const ids = await buildGraph(
+    cdp,
+    [{ key: "img", op: "test.make_image", params: { width: 40, height: 30, channels: 3 } }],
+    [],
+  );
+  const run = await runAndWait(cdp, () => cdp.eval(`await window.__lyflow.run(); return true;`));
+  mustOk(run.status === "ok", "合成图像这张图跑通了", run.status);
+  const got = await cdp.eval(`
+    const { runId } = window.__lyflow.stores.execution.getState();
+    const buf = await window.__lyflow.transport.getOutputImage(runId, ${lit(ids.img)}, 'image', 2, 5, 3);
+    const h = new DataView(buf);
+    const u = (i) => h.getUint32(i * 4, true);
+    const px = new Uint8Array(buf, 48);
+    return { magic: u(0), w: u(1), h: u(2), c: u(3), depth: u(4), level: u(5), row: u(8), rows: u(9),
+             rowBytes: u(10), first: [px[0], px[1], px[2]], x2: px[2 * 3] };
+  `);
+  // 第 5 行第 0、2 个像素：(x·3 + y·5 + c·60) mod 256
+  report.eq("帧头与像素", got, {
+    magic: 0x4d49594c, w: 40, h: 30, c: 3, depth: 1, level: 0, row: 5, rows: 3, rowBytes: 120,
+    first: [25, 85, 145], x2: 31,
+  });
+}
+
 /** 图参数的取值经 HTTP 信封的 params 走到桩服务器、再变成 CLI 的 --param（param-recipe P1.5）：
  *  运行、校验、取点云三处用的是同一组值。 */
 async function suiteGraphParamsOverHttp(cdp, report) {
@@ -517,7 +546,8 @@ async function main() {
       "--cli", CLI,
       "--token", TOKEN,
     ],
-    { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] },
+    // LYFLOW_TEST_OPS：桩起的 CLI 继承它，test.make_image 才注册得上（suiteImageOverHttp）
+    { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, LYFLOW_TEST_OPS: "1" } },
   );
   const serverLog = tail(server);
 
@@ -603,6 +633,7 @@ async function main() {
     await suiteBuildAndShortcut(cdp, report);
     await suiteAnimationsProp(cdp, report);
     await suiteNodeRunOverHttp(cdp, report);
+    await suiteImageOverHttp(cdp, report);
     await suiteGraphParamsOverHttp(cdp, report);
     await suiteRecipesOverHttp(cdp, report, ws);
 

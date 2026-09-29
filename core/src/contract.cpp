@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace lyflow {
 namespace {
@@ -155,16 +156,22 @@ bool checkPortContract(const nlohmann::json& contract, const Data& value,
 
   auto shape = contract.find("shape");
   if (shape != contract.end() && shape->is_array()) {
-    const Tensor* t = value.asTensor();
-    if (t == nullptr) {
+    // 图像的形状按 [高, 宽, 通道] 读（与 HWC 布局一致）：「要灰度图」就是 [-1, -1, 1]，
+    // 不必为它另开第五种键（docs/image-plan.md I7）。
+    std::vector<std::int64_t> dims;
+    if (const Tensor* t = value.asTensor()) {
+      dims = t->shape;
+    } else if (const Image* img = value.asImage()) {
+      dims = {img->height, img->width, img->channels};
+    } else {
       return reject({{"shape", *shape}}, {{"type", std::string(value.typeName())}},
-                    "端口契约：要的是张量，实际收到 " + std::string(value.typeName()));
+                    "端口契约：要的是张量或图像，实际收到 " + std::string(value.typeName()));
     }
-    nlohmann::json got = t->shape;
-    bool okShape = t->shape.size() == shape->size();
+    nlohmann::json got = dims;
+    bool okShape = dims.size() == shape->size();
     for (std::size_t i = 0; okShape && i < shape->size(); ++i) {
       const auto want = (*shape)[i].is_number_integer() ? (*shape)[i].get<std::int64_t>() : -1;
-      if (want >= 0 && t->shape[i] != want) okShape = false;
+      if (want >= 0 && dims[i] != want) okShape = false;
     }
     if (!okShape) {
       return reject({{"shape", *shape}}, {{"shape", got}},
@@ -204,6 +211,23 @@ bool checkPortContract(const nlohmann::json& contract, const Data& value,
         return reject({{"finite", true}}, {{"nonFinite", bad}},
                       "端口契约：张量必须全是有限值，实际有 " + std::to_string(bad) +
                           " 个非有限元素（共 " + std::to_string(t->data.size()) + " 个）");
+      }
+    } else if (const Image* img = value.asImage()) {
+      // u8 / u16 天然有限；f32 才要数
+      std::size_t bad = 0;
+      if (img->depth == PixelDepth::F32 && img->consistent()) {
+        const std::size_t n = img->byteSize() / sizeof(float);
+        const std::uint8_t* p = img->pixels.get();
+        for (std::size_t i = 0; i < n; ++i) {
+          float v;
+          std::memcpy(&v, p + i * sizeof(float), sizeof v);
+          if (!std::isfinite(v)) bad += 1;
+        }
+      }
+      if (bad != 0) {
+        return reject({{"finite", true}}, {{"nonFinite", bad}},
+                      "端口契约：图像的像素必须全是有限值，实际有 " + std::to_string(bad) +
+                          " 个非有限分量");
       }
     } else if (const Measurement* m = value.asMeasurement()) {
       if (!std::isfinite(m->value)) {

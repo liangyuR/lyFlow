@@ -355,7 +355,9 @@ Agent，不用自己重建「这次 run 到底发生了什么」，也不用手�
 
 - 第二种数据域 **Image**：`Data::Kind::Image`、2D 视图、OpenCV 算子按 PCL 同样的边界规则接入。
   `Tensor` 与 `ml.onnx_run` 已经就位，图像推理不用再造一遍。
-  这是对「数据模型是否通用」的真正检验，也是项目名里「Vision Flow」的兑现
+  这是对「数据模型是否通用」的真正检验，也是项目名里「Vision Flow」的兑现。
+  **实施中**：计划 [image-plan.md](image-plan.md)、决定 [ADR-0026](adr/0026-image-data-domain.md)；
+  阶段 1（数据模型、C ABI v15、连线查看器的图像视图）已做，OpenCV 包 `std-image` 是阶段 2
 - 第三方算子插件 DLL：`lyflow_plugin_init(Registry*)`，同工具链约束
 - ~~缓存落盘~~（C ABI v14 已做 CLI 专用、默认关的一版：`--cache-dir` / `LYFLOW_CACHE_DIR`，按构建指纹分目录，[disk-cache-plan.md](disk-cache-plan.md)；编辑器跨会话仍未做）
 - 两节点输出并排对比（P2 #35）

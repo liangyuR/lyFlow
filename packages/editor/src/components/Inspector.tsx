@@ -59,7 +59,11 @@ export function formatOutputValue(o: OutputStat): string {
     case "Plane":
       return `n=(${(v.normal ?? []).map(num).join(", ")}) d=${num(v.d)}`;
     case "Tensor":
-      return `[${(v.shape ?? []).join(", ")}] 均值 ${num(v.mean ?? undefined)}`;
+      return `[${(v.shape ?? []).join(", ")}] 均值 ${num(typeof v.mean === "number" ? v.mean : undefined)}`;
+    case "Image": {
+      const means = Array.isArray(v.mean) ? v.mean.map((m) => num(m ?? undefined)).join(", ") : "—";
+      return `${v.width ?? "?"}×${v.height ?? "?"}×${v.channels ?? "?"} ${v.depth ?? ""} · 均值 (${means})`;
+    }
     default:
       return `${o.elementCount} 个元素`;
   }

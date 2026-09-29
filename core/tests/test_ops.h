@@ -16,6 +16,7 @@
 
 #include "lyflow/operator.h"
 #include "lyflow/registry.h"
+#include "image_test_op.h"
 #include "param_showcase_op.h"
 
 namespace lyflow::test {
@@ -729,6 +730,8 @@ inline void ensureTestOps() {
     }
     // 参数面板的全类型示例（param-recipe P2.10）。编辑器 e2e 经 LYFLOW_TEST_OPS 注册同一份
     registerParamShowcase(r);
+    // 合成图像（docs/image-plan.md 阶段 1），同样经 LYFLOW_TEST_OPS 进 e2e
+    registerImageTestOps(r);
   });
 }
 

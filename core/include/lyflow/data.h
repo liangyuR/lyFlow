@@ -132,6 +132,45 @@ struct Tensor {
   std::string shapeString() const;
 };
 
+/// 像素位深。值就是每个通道占几个字节。
+enum class PixelDepth : std::uint8_t { U8 = 1, U16 = 2, F32 = 4 };
+
+/// "u8" / "u16" / "f32"。
+const char* pixelDepthName(PixelDepth d);
+
+/// 2D 图像（docs/image-plan.md §1）：行主序、通道交错（HWC）、行紧排（不留行填充）。
+/// 通道 1 = 灰度，3 = RGB，4 = RGBA —— 顺序是 RGB，BGR 只在 OpenCV 的 adapter 里出现。
+/// pixels 是别名构造的 shared_ptr：所有者可以是任何东西（一块 vector、一个 cv::Mat），
+/// 所以算子包能把 OpenCV 的结果零拷贝交给 core，而 core 不认识 OpenCV（与 ADR-0005 同一条边界）。
+struct Image {
+  std::int32_t width = 0;
+  std::int32_t height = 0;
+  std::int32_t channels = 0;
+  PixelDepth depth = PixelDepth::U8;
+  std::shared_ptr<const std::uint8_t> pixels;
+
+  std::size_t pixelCount() const;
+  std::size_t bytesPerPixel() const;
+  std::size_t rowBytes() const;
+  std::size_t byteSize() const;
+  /// 尺寸为正、通道是 1/3/4、有像素缓冲。执行器在算子写出后查一次（同点云的 channelsConsistent）。
+  bool consistent() const;
+
+  /// 新分配一块清零的缓冲，经 mutablePixels 写完再交给 Data。
+  static Image allocate(std::int32_t width, std::int32_t height, std::int32_t channels,
+                        PixelDepth depth);
+  /// 只对 allocate 出来、还没交出去的图像用：core 自己的算子与测试往里写像素。
+  std::uint8_t* mutablePixels() { return const_cast<std::uint8_t*>(pixels.get()); }
+
+  /// 第 (x, y) 个像素第 c 个通道的值，按位深读出、转成 double。不检查越界。
+  double at(std::int32_t x, std::int32_t y, std::int32_t c) const;
+};
+
+/// 2^level 倍的块均值缩小（lyflow_output_image 的 level > 0）：输出尺寸向上取整，
+/// 边上不满一块的按实际像素数平均；u8 / u16 四舍五入，f32 跳过非有限值（整块都不有限就是 NaN）。
+/// level = 0 原样返回（共享同一块像素）。输入不完整返回空 Image。
+Image shrinkImage(const Image& src, unsigned level);
+
 /// 带类型标签的 JSON。算子包用它定义领域结构而不必改 core（ADR-0013）。
 struct Record {
   std::string type;
@@ -148,6 +187,8 @@ class Data {
     Box2D, Line2D, Circle2D, Point2D, Measurement, Record, Tensor, Error,
     /// 一组有名字的字段（m8-plan L1）。端口类型写作 `Bundle<kind>`，追加在末尾不打乱既有序号。
     Bundle,
+    /// 2D 图像（docs/image-plan.md），同样追加在末尾。
+    Image,
   };
 
   Data() = default;
@@ -172,6 +213,10 @@ class Data {
   }
   static Data error(lyflow::Status s);
   static Data bundle(lyflow::Bundle b);
+  static Data image(std::shared_ptr<const lyflow::Image> i);
+  static Data image(lyflow::Image i) {
+    return image(std::make_shared<const lyflow::Image>(std::move(i)));
+  }
 
   Kind kind() const { return kind_; }
   bool empty() const { return kind_ == Kind::None; }
@@ -191,10 +236,12 @@ class Data {
   const lyflow::Tensor* asTensor() const;
   const lyflow::Status* asError() const;
   const lyflow::Bundle* asBundle() const;
+  const lyflow::Image* asImage() const;
   bool isError() const { return kind_ == Kind::Error; }
 
   std::shared_ptr<const PointCloud> cloudPtr() const { return cloud_; }
   std::shared_ptr<const lyflow::Tensor> tensorPtr() const { return tensor_; }
+  std::shared_ptr<const lyflow::Image> imagePtr() const { return image_; }
 
   /// 对应 manifest 里的端口类型名，用于错误信息与事件里的 stats。
   /// Bundle 是 `Bundle<kind>`，指针活到这份 Data 析构为止 —— 调用方要留着就拷成 string。
@@ -203,7 +250,7 @@ class Data {
   /// 粗略的内存占用，给事件里的统计用。所有通道都算进去。
   std::size_t byteSize() const;
 
-  /// 点数 / 元素数。点云 = 点数，Indices = 下标个数，Bundle = 字段数，其余 = 1。
+  /// 点数 / 元素数。点云 = 点数，Indices = 下标个数，Bundle = 字段数，Image = 像素数，其余 = 1。
   std::size_t elementCount() const;
 
   /// 给 Inspector / 3D 叠画看的可读 JSON。点云与 Indices 返回空串（太大，走二进制）。
@@ -224,6 +271,7 @@ class Data {
   std::shared_ptr<const lyflow::Tensor> tensor_;
   std::shared_ptr<const lyflow::Status> error_;
   std::shared_ptr<const lyflow::Bundle> bundle_;
+  std::shared_ptr<const lyflow::Image> image_;
 };
 
 /// 一根线带一组有关系的数据（m8-plan L1）：`{ kind, 有序的 名字 → Data }`。

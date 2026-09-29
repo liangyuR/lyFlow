@@ -16,7 +16,7 @@
 只依赖同目录的 `lyflow/c_api.h`，不 include 任何 core 内部头，也不链接任何库 ——
 core 是运行时加载的 DLL（[ADR-0004](adr/0004-core-as-dll.md)）。
 
-契约版本是 **C ABI v12**（v9 的 run summary 见 [ADR-0022](adr/0022-run-summary-as-core-output.md)；
+契约版本是 **C ABI v15**（v9 的 run summary 见 [ADR-0022](adr/0022-run-summary-as-core-output.md)；
 v8 的张量与下标入口见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)）。
 `lyflow::kClientAbiVersion` 与 core 的 `LYFLOW_ABI_VERSION` 必须一致；对不上时
 `Client` 的构造函数会抛 `ClientError`，而不是等到某次调用才崩。
@@ -38,6 +38,20 @@ v12 两件事，都在结果仓那一侧：
 - 新入口 `lyflow_cache_evict(graph, baseDir, nodeIds, n, includeDownstream, paramsJson)`：按「图 + 节点」清缓存，
   返回 `{ removed, skippedPinned, nodes }`。给的是节点不是 cacheKey —— 缓存判定仍只归 core（ADR-0007）；
   被运行钉住的跳过，预览命名空间里的不动。`client.hpp` 是 `Client::evictCache`，Rust 是 `Core::cache_evict`。
+
+v13 加了 `lyflow_library_definition(opId)`（按算子 id 取库定义），v14 加了结果缓存落盘
+（`lyflow_cache_set_dir` 等，见 [disk-cache-plan.md](disk-cache-plan.md)），都是纯增量入口。
+
+v15 是第二个数据域 **Image**（[image-plan.md](image-plan.md)）：
+
+- 新入口 `lyflow_output_image(run, node, port, level, rowOffset, rowCount, view)` / `lyflow_image_view_free`。
+  `level = 0` 是原图、零拷贝借用（同张量）；`level = k` 是 2^k 倍块均值缩小，core 现算一份。
+  按行切片，`rowOffset` 越界是空切片不是错误。像素行主序、通道交错、**RGB(A) 顺序**，`depth` 是每通道字节数（1 / 2 / 4）。
+  `client.hpp` 是 `Client::image` / `RunHandle::image`（`ImageView`），Rust 是 `Core::output_image`。
+- `lyflow_run_options` 末尾加了 `image_inputs` / `image_input_count`：运行时注入图像（`lyflow_run_image_input`，
+  允许带行填充的 `row_bytes`，core 拷成紧排）。另开结构体是因为 `lyflow_run_input` 是数组元素，改它的大小就破坏 ABI。
+  `client.hpp` 是 `RunOptions::imageInputs`（`InputImage`），Rust 是 `RunSpec::image_inputs`。**BGR 的相机缓冲要宿主先转成 RGB。**
+- `lyflow_output_save` 对图像输出写 `.lyim`（与 HTTP 的 LYIM 载荷同一布局）；PNG 等格式在图里接 `io.save_image`。
 
 v9 加的那一个入口是 `lyflow_run_summary(runId)`：一次运行的结构化收尾。
 `RunResult::summary` 就是它的原文，`RunHandle::runSummary()` 也能单独取。
@@ -502,7 +516,7 @@ use lyflow_client::{Core, RunSpec};
 let core = Core::load_from(Path::new("D:/lyflow-runtime/bin/lyflow_core.dll"))?;
 core.self_check().map_err(|e| /* 算子描述不干净，拒绝启动 */ e)?;
 
-assert_eq!(lyflow_client::ABI_VERSION, 11); // 与 core 的 LYFLOW_ABI_VERSION 对齐
+assert_eq!(lyflow_client::ABI_VERSION, 15); // 与 core 的 LYFLOW_ABI_VERSION 对齐
 
 // 顶层图参数：RunSpec 的 params_json: Option<&str>，或链式的 with_params_json
 let spec = RunSpec::new(&graph_json, &run_id, &base_dir, &[])

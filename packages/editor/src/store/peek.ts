@@ -8,7 +8,14 @@ import type { ShadingMode } from "../lib/cloudScene";
 import type { GraphDoc, PortRef } from "../types/graph";
 
 /** fields = Bundle 的字段表（m8-plan L17）：先列字段，点进字段再按字段类型换视图。 */
-export type PeekView = "cloud3d" | "cloud2d" | "tensor" | "value" | "indices" | "fields";
+export type PeekView =
+  | "cloud3d"
+  | "cloud2d"
+  | "tensor"
+  | "image"
+  | "value"
+  | "indices"
+  | "fields";
 
 export type TensorLayout = "auto" | "HWC" | "CHW" | "NHWC" | "NCHW";
 

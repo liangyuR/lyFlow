@@ -314,6 +314,7 @@ macro_rules! lyflow_handler {
             $crate::commands::get_output_cloud,
             $crate::commands::get_output_tensor,
             $crate::commands::get_output_indices,
+            $crate::commands::get_output_image,
             $crate::commands::load_cloud_file,
             $crate::commands::list_snippets,
             $crate::commands::get_recent_files,

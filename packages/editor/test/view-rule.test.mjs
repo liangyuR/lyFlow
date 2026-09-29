@@ -21,6 +21,7 @@ test("主预览：有一个可画的端口就显示点云场景，全是值才�
     ["只有 Record（字符串 / JSON）", ["Record"], "value"],
     ["量测与平面", ["Measurement", "Plane"], "value"],
     ["张量在主预览里只看得到值", ["Tensor"], "value"],
+    ["图像在主预览里暂时只看得到尺寸与统计量（图像模式是 image-plan 阶段 3）", ["Image"], "value"],
     ["Bundle 里有点云字段", ["Bundle<gap.ScanPair>"], "cloud"],
     ["Bundle 里有 2D 几何字段", ["Bundle<t.Rois>"], "cloud"],
     ["Bundle 里全是值", ["Bundle<t.Info>"], "value"],

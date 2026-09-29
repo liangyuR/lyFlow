@@ -267,3 +267,85 @@ TEST_CASE("jsonNumber 对非有限值给出合法 JSON") {
   CHECK(jsonNumber(2.0) == "2.0");
   CHECK(jsonNumber(0.5) == "0.5");
 }
+
+// ------------------------------------------- 图像（docs/image-plan.md §1）
+
+TEST_CASE("Image：类型名往返、元素数是像素数、valueJson 逐通道统计只算有限值、像素不进 JSON") {
+  CHECK(kindFromTypeName("Image") == Data::Kind::Image);
+  CHECK(std::string(typeNameFromKind(Data::Kind::Image)) == "Image");
+
+  Image img = Image::allocate(3, 2, 3, PixelDepth::U16);
+  std::uint16_t* px = reinterpret_cast<std::uint16_t*>(img.mutablePixels());
+  for (int i = 0; i < 6; ++i) {
+    px[i * 3 + 0] = static_cast<std::uint16_t>(i);         // R: 0..5
+    px[i * 3 + 1] = static_cast<std::uint16_t>(1000);      // G: 常数
+    px[i * 3 + 2] = static_cast<std::uint16_t>(60000 - i); // B
+  }
+  const Data d = Data::image(img);
+  CHECK(std::string(d.typeName()) == "Image");
+  CHECK(d.elementCount() == 6);
+  CHECK(d.byteSize() == 6 * 3 * 2);
+  CHECK(d.asImage()->at(2, 1, 0) == 5.0);
+  const nlohmann::json v = nlohmann::json::parse(d.valueJson());
+  CHECK(v["kind"] == "Image");
+  CHECK(v["width"] == 3);
+  CHECK(v["height"] == 2);
+  CHECK(v["channels"] == 3);
+  CHECK(v["depth"] == "u16");
+  CHECK(v["min"] == nlohmann::json::array({0, 1000, 59995}));
+  CHECK(v["max"] == nlohmann::json::array({5, 1000, 60000}));
+  CHECK(v["mean"][0] == doctest::Approx(2.5));
+  CHECK_FALSE(v.contains("pixels"));
+
+  // f32：非有限值不进统计；整个通道都不有限时写成 null
+  Image f = Image::allocate(2, 1, 1, PixelDepth::F32);
+  float* fp = reinterpret_cast<float*>(f.mutablePixels());
+  fp[0] = std::numeric_limits<float>::quiet_NaN();
+  fp[1] = 4.0f;
+  const nlohmann::json fv = nlohmann::json::parse(Data::image(f).valueJson());
+  CHECK(fv["min"] == nlohmann::json::array({4.0}));
+  CHECK(fv["mean"] == nlohmann::json::array({4.0}));
+  fp[1] = std::numeric_limits<float>::infinity();
+  CHECK(nlohmann::json::parse(Data::image(f).valueJson())["mean"][0].is_null());
+
+  // 不完整的图像（通道 2、没有像素）consistent 为假
+  Image bad;
+  bad.width = 4;
+  bad.height = 4;
+  bad.channels = 2;
+  CHECK_FALSE(bad.consistent());
+  CHECK_FALSE(Image{}.consistent());
+  CHECK(Image::allocate(1, 1, 4, PixelDepth::U8).consistent());
+}
+
+TEST_CASE("shrinkImage：2^level 块均值，尺寸向上取整、边上的半块按实际像素平均，u8 四舍五入，f32 跳过 NaN") {
+  // 5x3 的单通道 u8，值 = x + 10y
+  Image img = Image::allocate(5, 3, 1, PixelDepth::U8);
+  for (int y = 0; y < 3; ++y) {
+    for (int x = 0; x < 5; ++x) img.mutablePixels()[y * 5 + x] = static_cast<std::uint8_t>(x + 10 * y);
+  }
+  const Image half = shrinkImage(img, 1);
+  REQUIRE(half.width == 3);
+  REQUIRE(half.height == 2);
+  // (0,0) 块 = {0,1,10,11} → 5.5 → 6；右上半块 (2,0) = {4,14} → 9；右下角只剩一个像素 24
+  CHECK(half.at(0, 0, 0) == 6.0);
+  CHECK(half.at(2, 0, 0) == 9.0);
+  CHECK(half.at(2, 1, 0) == 24.0);
+  CHECK(half.at(0, 1, 0) == 21.0);  // {20,21} → 20.5 → 21
+
+  // level 0 原样返回、共享像素
+  CHECK(shrinkImage(img, 0).pixels.get() == img.pixels.get());
+  // 超大的级别收成 1x1，值是全图均值
+  const Image dot = shrinkImage(img, 8);
+  CHECK(dot.width == 1);
+  CHECK(dot.height == 1);
+
+  Image f = Image::allocate(2, 2, 1, PixelDepth::F32);
+  float* fp = reinterpret_cast<float*>(f.mutablePixels());
+  fp[0] = std::numeric_limits<float>::quiet_NaN();
+  fp[1] = 1.0f;
+  fp[2] = 2.0f;
+  fp[3] = 3.0f;
+  CHECK(shrinkImage(f, 1).at(0, 0, 0) == doctest::Approx(2.0));
+  CHECK_FALSE(shrinkImage(Image{}, 1).consistent());
+}

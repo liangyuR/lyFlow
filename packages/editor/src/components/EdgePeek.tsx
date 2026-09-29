@@ -17,6 +17,7 @@ import { useUiStore } from "../store/ui";
 
 import { CloudView } from "./peek/CloudView";
 import { FieldsView } from "./peek/FieldsView";
+import { ImageView } from "./peek/ImageView";
 import { IndicesView } from "./peek/IndicesView";
 import { TensorView } from "./peek/TensorView";
 import { ValueView } from "./peek/ValueView";
@@ -27,6 +28,7 @@ const VIEW_LABEL: Record<PeekView, string> = {
   cloud3d: "3D",
   cloud2d: "2D",
   tensor: "图像",
+  image: "图像",
   value: "文本",
   indices: "列表",
   fields: "字段",
@@ -36,6 +38,7 @@ const VIEW_TITLE: Record<PeekView, string> = {
   cloud3d: "3D 自由视角点云",
   cloud2d: "正交俯视 XY（剖面 + 2D 几何）",
   tensor: "张量图像",
+  image: "图像：可缩放、悬停读像素值",
   value: "键值表 + 原始 JSON",
   indices: "下标列表",
   fields: "Bundle 的字段表，点进字段看它的内容",
@@ -61,7 +64,7 @@ function shortRun(runId: string): string {
 }
 
 function canvasView(view: PeekView): boolean {
-  return isWebglView(view) || view === "tensor";
+  return isWebglView(view) || view === "tensor" || view === "image";
 }
 
 export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
@@ -376,6 +379,8 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
           <CloudView win={win} src={src} />
         ) : win.view === "tensor" ? (
           <TensorView win={win} src={src} />
+        ) : win.view === "image" ? (
+          <ImageView win={win} src={src} />
         ) : win.view === "indices" ? (
           <IndicesView win={win} src={src} />
         ) : win.view === "fields" ? (

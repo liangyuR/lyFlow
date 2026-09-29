@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 #include "lyflow/json_writer.h"
@@ -39,6 +40,129 @@ void Bounds::extend(float x, float y, float z) {
   max[0] = std::max(max[0], x);
   max[1] = std::max(max[1], y);
   max[2] = std::max(max[2], z);
+}
+
+const char* pixelDepthName(PixelDepth d) {
+  switch (d) {
+    case PixelDepth::U8:  return "u8";
+    case PixelDepth::U16: return "u16";
+    case PixelDepth::F32: return "f32";
+  }
+  return "u8";
+}
+
+std::size_t Image::pixelCount() const {
+  if (width <= 0 || height <= 0) return 0;
+  return static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+}
+
+std::size_t Image::bytesPerPixel() const {
+  return channels > 0 ? static_cast<std::size_t>(channels) * static_cast<std::size_t>(depth) : 0;
+}
+
+std::size_t Image::rowBytes() const {
+  return width > 0 ? static_cast<std::size_t>(width) * bytesPerPixel() : 0;
+}
+
+std::size_t Image::byteSize() const {
+  return height > 0 ? rowBytes() * static_cast<std::size_t>(height) : 0;
+}
+
+bool Image::consistent() const {
+  if (width <= 0 || height <= 0) return false;
+  if (channels != 1 && channels != 3 && channels != 4) return false;
+  if (depth != PixelDepth::U8 && depth != PixelDepth::U16 && depth != PixelDepth::F32) return false;
+  return pixels != nullptr;
+}
+
+Image Image::allocate(std::int32_t w, std::int32_t h, std::int32_t c, PixelDepth d) {
+  Image img;
+  img.width = w;
+  img.height = h;
+  img.channels = c;
+  img.depth = d;
+  // vector 当所有者、别名指针指向它的数据 —— 与外部所有者（cv::Mat）是同一种形状
+  auto owner = std::make_shared<std::vector<std::uint8_t>>(img.byteSize());
+  img.pixels = std::shared_ptr<const std::uint8_t>(owner, owner->data());
+  return img;
+}
+
+double Image::at(std::int32_t x, std::int32_t y, std::int32_t c) const {
+  const std::uint8_t* p = pixels.get() + static_cast<std::size_t>(y) * rowBytes() +
+                          (static_cast<std::size_t>(x) * static_cast<std::size_t>(channels) +
+                           static_cast<std::size_t>(c)) *
+                              static_cast<std::size_t>(depth);
+  switch (depth) {
+    case PixelDepth::U8:
+      return static_cast<double>(*p);
+    case PixelDepth::U16: {
+      std::uint16_t v;
+      std::memcpy(&v, p, sizeof v);
+      return static_cast<double>(v);
+    }
+    case PixelDepth::F32: {
+      float v;
+      std::memcpy(&v, p, sizeof v);
+      return static_cast<double>(v);
+    }
+  }
+  return 0;
+}
+
+namespace {
+
+template <typename T>
+void shrinkInto(const Image& src, Image& dst, std::size_t block) {
+  const std::size_t w = static_cast<std::size_t>(src.width), h = static_cast<std::size_t>(src.height);
+  const std::size_t c = static_cast<std::size_t>(src.channels);
+  const std::size_t ow = static_cast<std::size_t>(dst.width);
+  const T* in = reinterpret_cast<const T*>(src.pixels.get());
+  T* out = reinterpret_cast<T*>(dst.mutablePixels());
+  std::vector<double> sum(ow * c);
+  std::vector<std::uint32_t> n(ow * c);
+  for (std::size_t oy = 0; oy < static_cast<std::size_t>(dst.height); ++oy) {
+    std::fill(sum.begin(), sum.end(), 0.0);
+    std::fill(n.begin(), n.end(), 0u);
+    const std::size_t y1 = std::min(h, (oy + 1) * block);
+    for (std::size_t y = oy * block; y < y1; ++y) {
+      const T* row = in + y * w * c;
+      for (std::size_t x = 0; x < w; ++x) {
+        const std::size_t o = (x / block) * c;
+        for (std::size_t k = 0; k < c; ++k) {
+          const double v = static_cast<double>(row[x * c + k]);
+          if (!std::isfinite(v)) continue;
+          sum[o + k] += v;
+          n[o + k] += 1;
+        }
+      }
+    }
+    T* orow = out + oy * ow * c;
+    for (std::size_t i = 0; i < ow * c; ++i) {
+      if constexpr (std::is_floating_point_v<T>) {
+        orow[i] = n[i] ? static_cast<T>(sum[i] / n[i]) : std::numeric_limits<T>::quiet_NaN();
+      } else {
+        orow[i] = n[i] ? static_cast<T>(std::lround(sum[i] / n[i])) : T(0);
+      }
+    }
+  }
+}
+
+}  // namespace
+
+Image shrinkImage(const Image& src, unsigned level) {
+  if (!src.consistent()) return Image{};
+  if (level == 0) return src;
+  const std::size_t block = std::size_t{1} << std::min(level, 30u);
+  const auto scaled = [block](std::int32_t v) {
+    return static_cast<std::int32_t>((static_cast<std::size_t>(v) + block - 1) / block);
+  };
+  Image dst = Image::allocate(scaled(src.width), scaled(src.height), src.channels, src.depth);
+  switch (src.depth) {
+    case PixelDepth::U8:  shrinkInto<std::uint8_t>(src, dst, block); break;
+    case PixelDepth::U16: shrinkInto<std::uint16_t>(src, dst, block); break;
+    case PixelDepth::F32: shrinkInto<float>(src, dst, block); break;
+  }
+  return dst;
 }
 
 std::size_t Tensor::elementCount() const {
@@ -226,6 +350,13 @@ Data Data::bundle(lyflow::Bundle b) {
   return d;
 }
 
+Data Data::image(std::shared_ptr<const lyflow::Image> i) {
+  Data d;
+  d.kind_ = Kind::Image;
+  d.image_ = std::move(i);
+  return d;
+}
+
 Bundle& Bundle::set(const std::string& name, Data value) {
   for (auto& f : fields) {
     if (f.first == name) {
@@ -263,6 +394,7 @@ const Record* Data::asRecord() const { return kind_ == Kind::Record ? record_.ge
 const Tensor* Data::asTensor() const { return kind_ == Kind::Tensor ? tensor_.get() : nullptr; }
 const Status* Data::asError() const { return kind_ == Kind::Error ? error_.get() : nullptr; }
 const Bundle* Data::asBundle() const { return kind_ == Kind::Bundle ? bundle_.get() : nullptr; }
+const Image* Data::asImage() const { return kind_ == Kind::Image ? image_.get() : nullptr; }
 
 const char* Data::typeName() const {
   if (kind_ == Kind::Bundle && bundle_) return bundle_->typeName.c_str();
@@ -310,6 +442,8 @@ std::size_t Data::byteSize() const {
       for (const auto& f : bundle_->fields) total += f.first.size() + f.second.byteSize();
       return total;
     }
+    case Kind::Image:
+      return image_ ? image_->byteSize() : 0;
   }
   return 0;
 }
@@ -336,6 +470,8 @@ std::size_t Data::elementCount() const {
       return tensor_ ? tensor_->data.size() : 0;
     case Kind::Bundle:
       return bundle_ ? bundle_->fields.size() : 0;
+    case Kind::Image:
+      return image_ ? image_->pixelCount() : 0;
   }
   return 0;
 }
@@ -426,6 +562,44 @@ std::string Data::valueJson() const {
       w.field("mean", finite ? sum / static_cast<double>(finite) : nan);
       break;
     }
+    case Kind::Image: {
+      // 像素走二进制（lyflow_output_image）；这里只给尺寸与逐通道统计，只算有限值（同 Tensor）
+      const Image& img = *image_;
+      w.field("width", static_cast<std::int64_t>(img.width));
+      w.field("height", static_cast<std::int64_t>(img.height));
+      w.field("channels", static_cast<std::int64_t>(img.channels));
+      w.field("depth", std::string(pixelDepthName(img.depth)));
+      const int nc = img.consistent() ? img.channels : 0;
+      std::vector<double> lo(nc, 0), hi(nc, 0), sum(nc, 0);
+      std::vector<std::size_t> finite(nc, 0);
+      for (std::int32_t y = 0; nc > 0 && y < img.height; ++y) {
+        for (std::int32_t x = 0; x < img.width; ++x) {
+          for (int c = 0; c < nc; ++c) {
+            const double v = img.at(x, y, c);
+            if (!std::isfinite(v)) continue;
+            if (finite[c] == 0) {
+              lo[c] = hi[c] = v;
+            } else {
+              lo[c] = std::min(lo[c], v);
+              hi[c] = std::max(hi[c], v);
+            }
+            sum[c] += v;
+            ++finite[c];
+          }
+        }
+      }
+      const double nan = std::numeric_limits<double>::quiet_NaN();
+      const auto series = [&](const char* key, auto pick) {
+        w.key(key);
+        w.beginArray();
+        for (int c = 0; c < nc; ++c) w.value(finite[c] ? pick(c) : nan);
+        w.endArray();
+      };
+      series("min", [&](int c) { return lo[c]; });
+      series("max", [&](int c) { return hi[c]; });
+      series("mean", [&](int c) { return sum[c] / static_cast<double>(finite[c]); });
+      break;
+    }
     case Kind::Error: {
       const Status& s = *error_;
       w.field("phase", std::string(toString(s.phase)));
@@ -476,6 +650,7 @@ Data::Kind kindFromTypeName(const std::string& typeName) {
   if (typeName == "Record") return Data::Kind::Record;
   if (typeName == "Tensor") return Data::Kind::Tensor;
   if (typeName == "Error") return Data::Kind::Error;
+  if (typeName == "Image") return Data::Kind::Image;
   if (parseBundleType(typeName, nullptr)) return Data::Kind::Bundle;
   return Data::Kind::None;  // 含 "Any"：不约束具体载荷
 }
@@ -508,6 +683,7 @@ const char* typeNameFromKind(Data::Kind kind) {
     case Data::Kind::Tensor:      return "Tensor";
     case Data::Kind::Error:       return "Error";
     case Data::Kind::Bundle:      return "Bundle";
+    case Data::Kind::Image:       return "Image";
   }
   return "None";
 }

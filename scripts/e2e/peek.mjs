@@ -463,6 +463,106 @@ async function suiteTensorPeek(cdp, report) {
   report.eq("这一片的元素数 = 画布宽 × 高", dom?.tensor?.sliceCount ?? null, w * h);
 }
 
+/** 图像视图（docs/image-plan.md 阶段 1）：图像来自 core 的测试算子 test.make_image（LYFLOW_TEST_OPS=1，
+ *  harness 起 app 时设）—— 阶段 1 还没有 OpenCV 包。像素值公式与 core/tests/image_test_op.h 的 testImageValue 一致。 */
+function readImagePeek(cdp, peekId) {
+  const root = `[data-testid="edge-peek"][data-peek-id="${peekId}"]`;
+  return cdp.eval(`
+    const el = document.querySelector(${lit(root)});
+    const v = el ? el.querySelector('[data-testid="peek-image"]') : null;
+    if (!v) return null;
+    const n = (k) => Number(v.getAttribute(k));
+    const readout = el.querySelector('[data-testid="peek-image-readout"]');
+    const msg = el.querySelector('[data-testid="peek-image-msg"]');
+    const stage = el.querySelector('.peek-image__stage');
+    const r = stage ? stage.getBoundingClientRect() : null;
+    return {
+      fullW: n('data-full-w'), fullH: n('data-full-h'), channels: n('data-channels'),
+      depth: v.getAttribute('data-depth'), level: v.getAttribute('data-level'),
+      w: n('data-w'), h: n('data-h'),
+      readout: readout ? readout.textContent : null,
+      msg: msg ? msg.textContent : null,
+      stage: r ? { x: r.left, y: r.top, w: r.width, h: r.height } : null,
+    };
+  `);
+}
+
+async function suiteImagePeek(cdp, report) {
+  const present = await cdp.eval(`
+    return window.__lyflow.stores.manifest.getState().operatorsById.has('test.make_image');
+  `);
+  mustOk(present === true, "manifest 里有 test.make_image（harness 设了 LYFLOW_TEST_OPS=1）", String(present));
+
+  report.section("双击图像边：先看适配窗口的缩小级别，切到原图后悬停读到的像素值与公式一致");
+
+  await newDoc(cdp);
+  await resetPeek(cdp);
+  const ids = await buildGraph(
+    cdp,
+    [
+      { key: "img", op: "test.make_image", params: { width: 3000, height: 1000, channels: 3 } },
+      { key: "rr", op: "util.reroute" },
+    ],
+    [{ from: ["img", "image"], to: ["rr", "in"] }],
+  );
+  await normalizeZoom(cdp, 0.8);
+  const box = await canvasBox(cdp);
+  await placeAtScreen(cdp, {
+    [ids.img]: { x: 40, y: 120 },
+    [ids.rr]: { x: Math.round(box.w * 0.6), y: 120 },
+  });
+  const run = await runAndWait(cdp, () => pressF5(cdp));
+  mustOk(run.status === "ok", "合成图像这张图跑通了", JSON.stringify(run.nodes));
+
+  const edge = await edgeOf(cdp, ids.img, "image", ids.rr, "in");
+  const opened = await openByDoubleClick(cdp, report, edge, "图像边");
+  mustOk(Boolean(opened?.win), "图像边开出了窗", JSON.stringify(opened?.after));
+  // 不 park：要在窗里悬停，窗得整个在画布里
+  await cdp.eval(`
+    window.__lyflow.stores.peek.getState().move(${lit(opened.win.id)}, { x: ${box.x + 30}, y: ${box.y + 30} });
+    return true;
+  `);
+  await sleep(150);
+  report.eq("运行时类型 Image、默认视图 image", [opened.win.type, opened.win.view], ["Image", "image"]);
+
+  let dom = null;
+  for (let i = 0; i < 80; i += 1) {
+    dom = await readImagePeek(cdp, opened.win.id);
+    if (dom && dom.w > 0) break;
+    await sleep(120);
+  }
+  // 3000×1000：长边 ≤ 2048 的最小级别是 1（块均值 2×2），1500×500
+  report.eq("适配级别 = 1、这一级 1500×500、原图 3000×1000×3 u8",
+    dom && [dom.level, dom.w, dom.h, dom.fullW, dom.fullH, dom.channels, dom.depth],
+    ["1", 1500, 500, 3000, 1000, 3, "u8"]);
+
+  const switched = await cdp.eval(`
+    const el = document.querySelector('[data-testid="edge-peek"][data-peek-id=${lit(opened.win.id)}]');
+    const sel = el.querySelector('[data-testid="peek-image-level"]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+    setter.call(sel, '0');
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  `);
+  mustOk(switched === true, "切到原图");
+  for (let i = 0; i < 80; i += 1) {
+    dom = await readImagePeek(cdp, opened.win.id);
+    if (dom && dom.level === "0" && dom.w === 3000) break;
+    await sleep(120);
+  }
+  mustOk(dom?.level === "0" && dom.w === 3000, "原图取到了（分段取齐）", JSON.stringify(dom));
+
+  const at = { x: Math.round(dom.stage.x + dom.stage.w / 2), y: Math.round(dom.stage.y + dom.stage.h / 2) };
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y, buttons: 0 });
+  await sleep(200);
+  dom = await readImagePeek(cdp, opened.win.id);
+  const m = /^\((\d+), (\d+)\) = \[(\d+), (\d+), (\d+)\]$/.exec(dom?.readout ?? "");
+  mustOk(Boolean(m), "悬停出了读数", String(dom?.readout));
+  const [x, y, r, g, b] = m.slice(1).map(Number);
+  const f = (c) => (x * 3 + y * 5 + c * 60) % 256;
+  report.eq(`(${x}, ${y}) 的 RGB 与合成公式一致`, [r, g, b], [f(0), f(1), f(2)]);
+}
+
 async function suiteLockPeek(cdp, report) {
   report.section("锁定快照：改参数重跑后，锁定窗的数值不变，未锁定窗跟着变");
 
@@ -659,6 +759,7 @@ export { countsOf, openByDoubleClick, park, peekWindows, resetPeek, waitPeek };
 export const peekSuites = [
   suiteSharedGraphPeeks,
   suiteTensorPeek,
+  suiteImagePeek,
   suiteLockPeek,
   suiteLifecyclePeek,
   suiteEdgeMenu,

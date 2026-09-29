@@ -1,8 +1,8 @@
 #ifndef LYFLOW_C_API_H
 #define LYFLOW_C_API_H
-// C ABI v14。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
+// C ABI v15。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
 // 三条约定（char* 归属、异常不跨 ABI、只导出 C 函数）见 core/README.md「C ABI 约定」。
-#define LYFLOW_ABI_VERSION 14
+#define LYFLOW_ABI_VERSION 15
 #include <stddef.h>
 #include <stdint.h>
 
@@ -76,7 +76,7 @@ LYFLOW_API char* lyflow_plan_params(const char* graph_json, const char* base_dir
 // v14：落盘缓存（docs/disk-cache-plan.md）。dir 为 NULL / 空串 = 关（默认）。fingerprint 由宿主给
 // （构建指纹：core DLL 的内容哈希等），结果放在 <dir>/<fingerprint>/ 下，指纹变了整个目录不再复用 ——
 // cacheKey 只看算子版本，改了实现没升版本时靠它避开旧结果。缓存判定仍只归 core：内存里没有就查盘，
-// 确定性、够贵（≥ 20 ms）、全部端口是点云或张量的节点算完落盘。返回空串 = 成功，否则一句人话的原因。
+// 确定性、够贵（≥ 20 ms）、全部端口是点云、张量或图像的节点算完落盘。返回空串 = 成功，否则一句人话的原因。
 LYFLOW_API char* lyflow_cache_set_dir(const char* dir, const char* fingerprint);
 
 // 进程级地丢掉全部缓存结果，别的 run 的结果也一并丢，所以调用方应当先取消。
@@ -124,6 +124,22 @@ typedef struct {
 
 #define LYFLOW_INPUT_POINT_CLOUD 0
 
+/* v15：运行时注入一张图像（docs/image-plan.md §2）。与 lyflow_run_input 规则相同（注入输出 / 注入输入、
+   调用方的缓冲只需活到 lyflow_run_start 返回，core 会拷一份），只是载荷换成图像。
+   另开一个结构体而不是往 lyflow_run_input 里加字段：那是数组元素，改大小就是破坏 ABI。
+   像素：行主序、通道交错，通道 1 = 灰度 / 3 = RGB / 4 = RGBA —— **顺序是 RGB**，BGR 的相机缓冲要宿主先转。 */
+typedef struct {
+  const char* node_id;
+  const char* port;
+  uint32_t width;
+  uint32_t height;
+  uint32_t channels;               /* 1 / 3 / 4 */
+  uint32_t depth;                  /* 每通道字节数：1 = u8，2 = u16，4 = f32 */
+  uint32_t row_bytes;              /* 一行的字节数，0 = 紧排（width * channels * depth）；可以更大（带行填充的相机缓冲） */
+  uint32_t reserved;
+  const uint8_t* pixels;           /* row_bytes * height 字节 */
+} lyflow_run_image_input;
+
 typedef struct {
   const char* run_id;              /* 由调用方分配（Rust 用 ULID），事件里原样回传 */
   const char* base_dir;            /* 相对路径参数的基准目录，可为 NULL */
@@ -154,6 +170,9 @@ typedef struct {
      run_finished.attached 列出它们，输出按这次的 run_id 照样取得到（R7 / V2）。 */
   const char* const* force;
   size_t force_count;
+  /* v15：运行时注入的图像，NULL/0 表示没有。与 inputs 可以同时给（同一个节点的不同端口也行）。 */
+  const lyflow_run_image_input* image_inputs;
+  size_t image_input_count;
 } lyflow_run_options;
 
 #define LYFLOW_RUN_MODE_FULL 0
@@ -240,6 +259,33 @@ LYFLOW_API int lyflow_output_indices(const char* run_id, const char* node_id, co
 
 LYFLOW_API void lyflow_indices_view_free(lyflow_indices_view* view);
 
+// v15：图像按级别 + 行切片取（docs/image-plan.md §5.1）。
+// level = 0 是原图，**零拷贝**：pixels 直接指进结果仓里那一份，handle 一释放就失效。
+// level = k 是 2^k 倍的块均值缩小（边上不满一块的按实际像素数平均），core 现算一份放进 handle。
+// 缩小不是抽稀：隔行取样得到的是另一张图（ADR-0019），块均值是「离远了看同一张图」。
+typedef struct {
+  uint32_t width;         /* 这一级的宽高（完整尺寸，不随行切片变） */
+  uint32_t height;
+  uint32_t channels;      /* 1 / 3 / 4，顺序 RGB(A) */
+  uint32_t depth;         /* 每通道字节数：1 = u8，2 = u16，4 = f32 */
+  uint32_t level;         /* 实际给出的级别：要的太大时收到「长边缩到 1 像素」那一级 */
+  uint32_t full_width;    /* 原图（level 0）的宽高 */
+  uint32_t full_height;
+  uint32_t row_offset;    /* 本次切片的起始行 */
+  uint32_t row_count;     /* 本次返回的行数 */
+  uint32_t row_bytes;     /* 一行的字节数 = width * channels * depth（行紧排） */
+  const uint8_t* pixels;  /* row_count * row_bytes 字节，指向 row_offset 那一行 */
+  void* handle;           /* 内部持有，勿动 */
+} lyflow_image_view;
+
+// row_offset 越界返回成功、row_count = 0；row_count = 0 表示「从 row_offset 取到最后一行」。
+// 返回 0 = 成功；1 = 没有这个结果 / 该输出不是图像；2 = out 为空；3 = 异常。
+LYFLOW_API int lyflow_output_image(const char* run_id, const char* node_id, const char* port,
+                                   uint32_t level, uint32_t row_offset, uint32_t row_count,
+                                   lyflow_image_view* out);
+
+LYFLOW_API void lyflow_image_view_free(lyflow_image_view* view);
+
 // 某节点全部输出的 { port, type, elementCount, byteSize, value? } JSON 数组。
 // Bundle 端口（type 是 "Bundle<kind>"）那一项之后紧跟它的每个字段，port 写成 <port>.<field>。
 LYFLOW_API char* lyflow_output_info(const char* run_id, const char* node_id);
@@ -274,6 +320,8 @@ LYFLOW_API char* lyflow_import(const char* kind, const char* text, const char* b
 
 // 把某个输出整份写到磁盘（PCD/PLY 按扩展名）。CLI 的 `lyflow dump` 用它 ——
 // 写盘格式的知识留在 core。返回空串 = 成功，否则是一句人话的失败原因。
+// v15：图像输出写 `.lyim`（与 HTTP 的 LYIM 载荷同一布局、整张 level 0，docs/http-transport.md）；
+// PNG 等通用格式归 std-image 包的 io.save_image —— core 不带图像编解码器。
 LYFLOW_API char* lyflow_output_save(const char* run_id, const char* node_id, const char* port,
                                     const char* path, const char* format);
 

@@ -470,7 +470,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
       title: "把一个输出压成统计量",
       description:
         "点云给点数、包围盒、每通道 min/max/mean 与前几个点；张量给形状、统计量与前几个值；" +
-        "下标给个数、指向哪片云与前几个下标；" +
+        "下标给个数、指向哪片云与前几个下标；图像给尺寸、通道、位深与逐通道 min/max/mean；" +
         "其余类型原样给值。统计在 MCP 进程里算，不搬点云给调用方。",
       inputSchema: {
         runId: z.string(),
@@ -990,6 +990,19 @@ function nonCloudSummary(info: OutputInfo): Record<string, unknown> {
       kind: "tensor",
       shape: value?.shape ?? null,
       count: value?.count ?? info.elementCount ?? null,
+      min: value?.min ?? null,
+      max: value?.max ?? null,
+      mean: value?.mean ?? null,
+    };
+  }
+  if (info.type === "Image") {
+    // 像素不搬（走二进制端点），valueJson 里已经有逐通道统计（docs/image-plan.md §5.5）
+    return {
+      kind: "image",
+      width: value?.width ?? null,
+      height: value?.height ?? null,
+      channels: value?.channels ?? null,
+      depth: value?.depth ?? null,
       min: value?.min ?? null,
       max: value?.max ?? null,
       mean: value?.mean ?? null,

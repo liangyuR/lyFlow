@@ -20,7 +20,7 @@ use libloading::{Library, Symbol};
 pub type EventCb = unsafe extern "C" fn(*const c_char, *mut c_void);
 
 /// C ABI 的版本号。与 core/include/lyflow/c_api.h 的 LYFLOW_ABI_VERSION 必须一致。
-pub const ABI_VERSION: u32 = 14;
+pub const ABI_VERSION: u32 = 15;
 
 /// 运行时注入一个源节点的输出（v7）。缓冲由调用方持有到 `lyflow_run_start` 返回。
 #[repr(C)]
@@ -36,6 +36,20 @@ pub struct RunInputRaw {
 }
 
 pub const INPUT_POINT_CLOUD: i32 = 0;
+
+/// 运行时注入一张图像（v15）。另开结构体：`RunInputRaw` 是数组元素，改大小就破坏 ABI。
+#[repr(C)]
+pub struct RunImageInputRaw {
+    pub node_id: *const c_char,
+    pub port: *const c_char,
+    pub width: u32,
+    pub height: u32,
+    pub channels: u32,
+    pub depth: u32,
+    pub row_bytes: u32,
+    pub reserved: u32,
+    pub pixels: *const u8,
+}
 
 #[repr(C)]
 pub struct RunOptionsRaw {
@@ -59,6 +73,9 @@ pub struct RunOptionsRaw {
     /// v11：强制重算这些节点（修订一 V1）；NULL/0 = 没有。
     pub force: *const *const c_char,
     pub force_count: usize,
+    /// v15：运行时注入的图像；NULL/0 = 没有。
+    pub image_inputs: *const RunImageInputRaw,
+    pub image_input_count: usize,
 }
 
 #[repr(C)]
@@ -93,6 +110,24 @@ pub struct TensorViewRaw {
     pub handle: *mut c_void,
 }
 
+/// v15：图像的一级、一段行（docs/image-plan.md §5.1）。
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ImageViewRaw {
+    pub width: u32,
+    pub height: u32,
+    pub channels: u32,
+    pub depth: u32,
+    pub level: u32,
+    pub full_width: u32,
+    pub full_height: u32,
+    pub row_offset: u32,
+    pub row_count: u32,
+    pub row_bytes: u32,
+    pub pixels: *const u8,
+    pub handle: *mut c_void,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct IndicesViewRaw {
@@ -115,6 +150,19 @@ pub struct RunInput {
     pub rgb: Vec<u8>,
 }
 
+/// 一次运行注入的一张图像（v15）。像素行主序、通道交错、RGB 顺序、行紧排；
+/// `depth` 是每通道字节数（1 = u8，2 = u16，4 = f32）。
+#[derive(Clone, Debug)]
+pub struct RunImageInput {
+    pub node_id: String,
+    pub port: String,
+    pub width: u32,
+    pub height: u32,
+    pub channels: u32,
+    pub depth: u32,
+    pub pixels: Vec<u8>,
+}
+
 /// 一次运行的全部选项（C ABI v7）。写成位置参数就没人读得懂了。
 #[derive(Clone)]
 pub struct RunSpec<'a> {
@@ -132,6 +180,8 @@ pub struct RunSpec<'a> {
     pub no_reuse: bool,
     /// 运行时注入的源数据（ADR-0017）。
     pub inputs: &'a [RunInput],
+    /// 运行时注入的图像（v15）。
+    pub image_inputs: &'a [RunImageInput],
     /// 顶层图参数的取值（v10），JSON 对象 `{ 名字: 值 }`。None = 全用图里的 default。
     pub params_json: Option<&'a str>,
     /// 只运行这些节点（v11，docs/node-run-plan.md R1–R2）。空 = 普通运行。给了它 core 就忽略
@@ -160,6 +210,7 @@ impl<'a> RunSpec<'a> {
             preview_budget_ms: 0,
             no_reuse: false,
             inputs: &[],
+            image_inputs: &[],
             params_json: None,
             isolate: &[],
             force: &[],
@@ -250,6 +301,16 @@ type FnOutputIndices = unsafe extern "C" fn(
     *mut IndicesViewRaw,
 ) -> c_int;
 type FnIndicesViewFree = unsafe extern "C" fn(*mut IndicesViewRaw);
+type FnOutputImage = unsafe extern "C" fn(
+    *const c_char,
+    *const c_char,
+    *const c_char,
+    u32,
+    u32,
+    u32,
+    *mut ImageViewRaw,
+) -> c_int;
+type FnImageViewFree = unsafe extern "C" fn(*mut ImageViewRaw);
 type FnOutputInfo = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
 type FnRunOutputs = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type FnRunSummary = unsafe extern "C" fn(*const c_char) -> *mut c_char;
@@ -301,6 +362,8 @@ pub struct Core {
     tensor_view_free: FnTensorViewFree,
     output_indices: FnOutputIndices,
     indices_view_free: FnIndicesViewFree,
+    output_image: FnOutputImage,
+    image_view_free: FnImageViewFree,
     output_info: FnOutputInfo,
     run_outputs: FnRunOutputs,
     run_summary: FnRunSummary,
@@ -375,6 +438,8 @@ impl Core {
             tensor_view_free: sym!(lib, "lyflow_tensor_view_free", FnTensorViewFree),
             output_indices: sym!(lib, "lyflow_output_indices", FnOutputIndices),
             indices_view_free: sym!(lib, "lyflow_indices_view_free", FnIndicesViewFree),
+            output_image: sym!(lib, "lyflow_output_image", FnOutputImage),
+            image_view_free: sym!(lib, "lyflow_image_view_free", FnImageViewFree),
             output_info: sym!(lib, "lyflow_output_info", FnOutputInfo),
             run_outputs: sym!(lib, "lyflow_run_outputs", FnRunOutputs),
             run_summary: sym!(lib, "lyflow_run_summary", FnRunSummary),
@@ -759,6 +824,151 @@ impl Core {
             core: Arc::clone(self),
         })
     }
+
+    /// 图像的第 `level` 级（0 = 原图、零拷贝；k = 2^k 倍块均值缩小），
+    /// 从 `row_offset` 起取 `row_count` 行（0 = 到底）。
+    pub fn output_image(
+        self: &Arc<Self>,
+        run_id: &str,
+        node_id: &str,
+        port: &str,
+        level: u32,
+        row_offset: u32,
+        row_count: u32,
+    ) -> Result<ImageView, CoreError> {
+        let r = CString::new(run_id)?;
+        let n = CString::new(node_id)?;
+        let p = CString::new(port)?;
+        let mut raw = ImageViewRaw::empty();
+        let rc = unsafe {
+            (self.output_image)(
+                r.as_ptr(),
+                n.as_ptr(),
+                p.as_ptr(),
+                level,
+                row_offset,
+                row_count,
+                &mut raw,
+            )
+        };
+        if rc != 0 {
+            return Err(CoreError::NoSuchOutput);
+        }
+        Ok(ImageView {
+            raw,
+            core: Arc::clone(self),
+        })
+    }
+}
+
+impl ImageViewRaw {
+    fn empty() -> Self {
+        ImageViewRaw {
+            width: 0,
+            height: 0,
+            channels: 0,
+            depth: 0,
+            level: 0,
+            full_width: 0,
+            full_height: 0,
+            row_offset: 0,
+            row_count: 0,
+            row_bytes: 0,
+            pixels: std::ptr::null(),
+            handle: std::ptr::null_mut(),
+        }
+    }
+}
+
+/// core 借出来的一段图像行，Drop 时还回去。level 0 直接指进结果仓。
+pub struct ImageView {
+    raw: ImageViewRaw,
+    core: Arc<Core>,
+}
+
+impl ImageView {
+    pub fn width(&self) -> u32 {
+        self.raw.width
+    }
+    pub fn height(&self) -> u32 {
+        self.raw.height
+    }
+    pub fn channels(&self) -> u32 {
+        self.raw.channels
+    }
+    pub fn depth(&self) -> u32 {
+        self.raw.depth
+    }
+    pub fn level(&self) -> u32 {
+        self.raw.level
+    }
+    pub fn full_width(&self) -> u32 {
+        self.raw.full_width
+    }
+    pub fn full_height(&self) -> u32 {
+        self.raw.full_height
+    }
+    pub fn row_offset(&self) -> u32 {
+        self.raw.row_offset
+    }
+    pub fn row_count(&self) -> u32 {
+        self.raw.row_count
+    }
+    pub fn row_bytes(&self) -> u32 {
+        self.raw.row_bytes
+    }
+    /// row_count * row_bytes 字节。
+    pub fn pixels(&self) -> &[u8] {
+        if self.raw.pixels.is_null() || self.raw.row_count == 0 {
+            return &[];
+        }
+        unsafe {
+            std::slice::from_raw_parts(
+                self.raw.pixels,
+                self.raw.row_count as usize * self.raw.row_bytes as usize,
+            )
+        }
+    }
+
+    /// 借一段调用方的内存当 ImageView 用，不走 core —— 给宿主测自己的编码路径。
+    #[cfg(any(test, feature = "test-util"))]
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn borrowed(
+        core: Arc<Core>,
+        width: u32,
+        height: u32,
+        channels: u32,
+        depth: u32,
+        level: u32,
+        full: (u32, u32),
+        row_offset: u32,
+        pixels: &[u8],
+    ) -> Self {
+        let row_bytes = width * channels * depth;
+        ImageView {
+            raw: ImageViewRaw {
+                width,
+                height,
+                channels,
+                depth,
+                level,
+                full_width: full.0,
+                full_height: full.1,
+                row_offset,
+                row_count: if row_bytes == 0 { 0 } else { pixels.len() as u32 / row_bytes },
+                row_bytes,
+                pixels: pixels.as_ptr(),
+                handle: std::ptr::null_mut(),
+            },
+            core,
+        }
+    }
+}
+
+impl Drop for ImageView {
+    fn drop(&mut self) {
+        unsafe { (self.core.image_view_free)(&mut self.raw) };
+    }
 }
 
 /// core 借出来的点云缓冲，Drop 时还回去。桥接层里唯一持有 C++ 指针一段时间的地方，
@@ -1003,6 +1213,32 @@ impl RunHandle {
             })
             .collect();
 
+        let image_names: Vec<(CString, CString)> = spec
+            .image_inputs
+            .iter()
+            .map(|i| Ok((CString::new(i.node_id.as_str())?, CString::new(i.port.as_str())?)))
+            .collect::<Result<_, std::ffi::NulError>>()?;
+        let image_raw: Vec<RunImageInputRaw> = spec
+            .image_inputs
+            .iter()
+            .zip(image_names.iter())
+            .map(|(i, (node, port))| RunImageInputRaw {
+                node_id: node.as_ptr(),
+                port: port.as_ptr(),
+                width: i.width,
+                height: i.height,
+                channels: i.channels,
+                depth: i.depth,
+                row_bytes: 0,
+                reserved: 0,
+                pixels: if i.pixels.is_empty() {
+                    std::ptr::null()
+                } else {
+                    i.pixels.as_ptr()
+                },
+            })
+            .collect();
+
         let params_c = spec.params_json.map(CString::new).transpose()?;
         let options = RunOptionsRaw {
             run_id: rid.as_ptr(),
@@ -1038,6 +1274,12 @@ impl RunHandle {
                 force_ptrs.as_ptr()
             },
             force_count: force_ptrs.len(),
+            image_inputs: if image_raw.is_empty() {
+                std::ptr::null()
+            } else {
+                image_raw.as_ptr()
+            },
+            image_input_count: image_raw.len(),
         };
 
         let user_ptr = Box::into_raw(user) as *mut c_void;

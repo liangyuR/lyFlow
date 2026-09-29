@@ -17,6 +17,8 @@ export function defaultViewFor(type: string | null): PeekView {
       return "cloud2d";
     case "Tensor":
       return "tensor";
+    case "Image":
+      return "image";
     case "Indices":
       return "indices";
     default:
@@ -27,6 +29,7 @@ export function defaultViewFor(type: string | null): PeekView {
 const VIEWS_POINT_CLOUD: PeekView[] = ["cloud3d", "cloud2d", "value"];
 const VIEWS_SHAPE_2D: PeekView[] = ["cloud2d", "value"];
 const VIEWS_TENSOR: PeekView[] = ["tensor", "value"];
+const VIEWS_IMAGE: PeekView[] = ["image", "value"];
 const VIEWS_INDICES: PeekView[] = ["indices"];
 const VIEWS_VALUE: PeekView[] = ["value"];
 const VIEWS_BUNDLE: PeekView[] = ["fields", "value"];
@@ -43,6 +46,8 @@ export function viewsFor(type: string | null): PeekView[] {
       return VIEWS_SHAPE_2D;
     case "Tensor":
       return VIEWS_TENSOR;
+    case "Image":
+      return VIEWS_IMAGE;
     case "Indices":
       return VIEWS_INDICES;
     default:
@@ -68,7 +73,8 @@ function drawable(type: string | null, bundles: readonly BundleDesc[] | undefine
 }
 
 /** 节点的全部输出类型 → 主预览的内容。有一个可画的端口就是点云场景；
- *  全是 Record / Measurement / Plane / Tensor 这类只有值的，才换成表格。 */
+ *  全是 Record / Measurement / Plane / Tensor / Image 这类只有值的，才换成表格
+ *  （主预览的图像模式在 docs/image-plan.md 阶段 3，之前 Image 在主预览里只有尺寸与统计量）。 */
 export function viewerContentFor(
   types: readonly (string | null)[],
   bundles?: readonly BundleDesc[],

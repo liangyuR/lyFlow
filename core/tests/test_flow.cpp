@@ -8,6 +8,7 @@
 #include "exec/executor.h"
 #include "exec/result_store.h"
 #include "helpers.h"
+#include "lyflow/c_api.h"
 #include "test_ops.h"
 
 namespace lyflow::test {
@@ -252,6 +253,87 @@ TEST_CASE("运行时注入：源节点的 compute 被跳过，输出就是注入
 
   const Json outputs = Json::parse(exec::runOutputsJson(s.runId()));
   CHECK(outputs["thinned"]["elementCount"] == 3);
+}
+
+TEST_CASE("注入摘要带上点云的 normals / rgb：同样的 xyz 换一份颜色不命中旧缓存（修前命中、下游拿到旧颜色）") {
+  ensureTestOps();
+  const Json doc = makeGraph(
+      {N{"n_src", "test.counted", Json{{"pointCount", 5}}},
+       N{"n_t", "test.thin", Json{{"leaf", Json::array({0.01, 0.01, 0.01})}}}},
+      {E{"n_src.cloud", "n_t.cloud"}});
+  auto colored = [](std::uint8_t r) {
+    PointCloud c;
+    for (int i = 0; i < 3; ++i) {
+      c.push(static_cast<float>(i), 0.0F, 0.0F);
+      c.rgb.insert(c.rgb.end(), {r, 0, 0});
+    }
+    return std::vector<exec::InjectedInput>{exec::InjectedInput{"n_src", "cloud", Data::cloud(std::move(c))}};
+  };
+  {
+    Session s(doc, {}, {}, /*keepCache=*/false, 0, false, colored(10));
+    CHECK(s.wait().finalState("n_t") == "done");
+  }
+  {
+    Session s(doc, {}, {}, /*keepCache=*/true, 0, false, colored(10));
+    CHECK(s.wait().finalState("n_t") == "skipped");
+  }
+  Session s(doc, {}, {}, /*keepCache=*/true, 0, false, colored(200));
+  CHECK(s.wait().finalState("n_t") == "done");
+}
+
+namespace {
+
+void collectInto(const char* json, void* user) { static_cast<RunLog*>(user)->events.push_back(Json::parse(json)); }
+
+}  // namespace
+
+TEST_CASE("C ABI 注入图像（v15）：带行填充的缓冲拷成紧排；描述不合法时报在那个节点上") {
+  ensureTestOps();
+  ResultStore::instance().clear();
+  const Json doc = makeGraph({N{"n_src", "test.make_image", Json::object()},
+                              N{"n_g", "test.take_gray", Json::object()}},
+                             {E{"n_src.image", "n_g.image"}});
+  const std::string graph = doc.dump();
+  // 3x2 灰度 u8，每行 3 个像素 + 1 字节填充
+  const std::uint8_t padded[8] = {1, 2, 3, 99, 4, 5, 6, 99};
+  auto runWith = [&](const lyflow_run_image_input& in, const char* runId, RunLog& log) {
+    lyflow_run_options opts{};
+    opts.run_id = runId;
+    opts.image_inputs = &in;
+    opts.image_input_count = 1;
+    lyflow_run* run = lyflow_run_start(graph.c_str(), &opts, &collectInto, &log);
+    REQUIRE(run != nullptr);
+    lyflow_run_join(run);
+    return run;
+  };
+
+  lyflow_run_image_input in{};
+  in.node_id = "n_src";
+  in.port = "image";
+  in.width = 3;
+  in.height = 2;
+  in.channels = 1;
+  in.depth = 1;
+  in.row_bytes = 4;
+  in.pixels = padded;
+  RunLog log;
+  lyflow_run* run = runWith(in, "abi-image", log);
+  CHECK(log.runStatus() == "ok");
+  CHECK(log.nodeEvent("n_src", "done")["stats"]["provided"] == true);
+  lyflow_image_view v{};
+  REQUIRE(lyflow_output_image("abi-image", "n_src", "image", 0, 0, 0, &v) == 0);
+  CHECK(v.row_bytes == 3u);
+  CHECK(std::vector<std::uint8_t>(v.pixels, v.pixels + 6) == std::vector<std::uint8_t>{1, 2, 3, 4, 5, 6});
+  lyflow_image_view_free(&v);
+  lyflow_run_free(run);
+
+  lyflow_run_image_input bad = in;
+  bad.channels = 2;
+  RunLog badLog;
+  lyflow_run* badRun = runWith(bad, "abi-image-bad", badLog);
+  CHECK(badLog.runStatus() == "error");
+  CHECK(badLog.nodeEvent("n_src", "error")["error"]["code"] == "internal");
+  lyflow_run_free(badRun);
 }
 
 namespace {

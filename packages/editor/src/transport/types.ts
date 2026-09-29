@@ -173,6 +173,16 @@ export interface Transport {
     offset: number,
     count: number,
   ): Promise<ArrayBuffer>;
+  /** 图像（ABI v15，docs/image-plan.md §5）：第 level 级、从 row 起 rows 行（0 = 到底），LYIM 载荷。
+   *  可选：比 v15 早的宿主没有它，编辑器只显示尺寸与统计量。 */
+  getOutputImage?(
+    runId: string,
+    nodeId: string,
+    port: string,
+    level: number,
+    row: number,
+    rows: number,
+  ): Promise<ArrayBuffer>;
   onExecutionEvent(cb: (e: ExecutionEvent) => void): Promise<Unlisten>;
   onManifestUpdated(cb: (e: ManifestUpdated) => void): Promise<Unlisten>;
   onCoreReloadFailed(cb: (e: CoreReloadFailed) => void): Promise<Unlisten>;

@@ -23,6 +23,8 @@ constexpr char kMagic[4] = {'L', 'F', 'C', '1'};
 constexpr std::uint32_t kFormatVersion = 1;
 constexpr std::uint8_t kKindCloud = 1;
 constexpr std::uint8_t kKindTensor = 2;
+// 老文件里不会出现 3，所以加 Image 不用升 kFormatVersion（docs/image-plan.md §2）
+constexpr std::uint8_t kKindImage = 3;
 constexpr std::uint8_t kHasIntensity = 1;
 constexpr std::uint8_t kHasNormals = 2;
 constexpr std::uint8_t kHasRgb = 4;
@@ -106,6 +108,29 @@ bool decodeTensor(Reader& r, Tensor& t) {
   return t.consistent();
 }
 
+void encodeImage(const Image& img, std::string& out) {
+  put(out, static_cast<std::uint32_t>(img.width));
+  put(out, static_cast<std::uint32_t>(img.height));
+  put(out, static_cast<std::uint32_t>(img.channels));
+  put(out, static_cast<std::uint32_t>(img.depth));
+  out.append(reinterpret_cast<const char*>(img.pixels.get()), img.byteSize());
+}
+
+bool decodeImage(Reader& r, Image& img) {
+  std::uint32_t w = 0, h = 0, c = 0, d = 0;
+  if (!r.get(w) || !r.get(h) || !r.get(c) || !r.get(d)) return false;
+  if (w == 0 || h == 0 || w > 1u << 20 || h > 1u << 20) return false;
+  if (d != 1 && d != 2 && d != 4) return false;
+  if (c != 1 && c != 3 && c != 4) return false;
+  img = Image::allocate(static_cast<std::int32_t>(w), static_cast<std::int32_t>(h),
+                        static_cast<std::int32_t>(c), static_cast<PixelDepth>(d));
+  const std::size_t n = img.byteSize();
+  if (r.s.size() - r.at < n) return false;
+  std::memcpy(img.mutablePixels(), r.s.data() + r.at, n);
+  r.at += n;
+  return img.consistent();
+}
+
 /// 读文件头与端口表（不读负载内容）：名字、种类、负载在文件里的起点与长度。
 struct PortEntry {
   std::string name;
@@ -162,7 +187,10 @@ std::string safeName(const std::string& key) {
 
 }  // namespace
 
-bool persistable(const Data& d) { return d.asCloud() != nullptr || d.asTensor() != nullptr; }
+bool persistable(const Data& d) {
+  if (const Image* img = d.asImage()) return img->consistent();
+  return d.asCloud() != nullptr || d.asTensor() != nullptr;
+}
 
 bool encodeNode(const PortData& ports, std::string& out) {
   if (ports.empty()) return false;
@@ -178,6 +206,9 @@ bool encodeNode(const PortData& ports, std::string& out) {
     if (const PointCloud* c = d.asCloud()) {
       kind = kKindCloud;
       encodeCloud(*c, payload);
+    } else if (const Image* img = d.asImage()) {
+      kind = kKindImage;
+      encodeImage(*img, payload);
     } else {
       kind = kKindTensor;
       encodeTensor(*d.asTensor(), payload);
@@ -208,6 +239,10 @@ bool decodeNode(const std::string& bytes, PortData& out) {
       Tensor t;
       if (!decodeTensor(r, t) || r.at != payload.size()) return false;
       ports.emplace_back(e.name, Data::tensor(std::move(t)));
+    } else if (e.kind == kKindImage) {
+      Image img;
+      if (!decodeImage(r, img) || r.at != payload.size()) return false;
+      ports.emplace_back(e.name, Data::image(std::move(img)));
     } else {
       return false;
     }

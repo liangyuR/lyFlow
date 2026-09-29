@@ -8,12 +8,12 @@
 
 | 层 | 命令 | 规模 | 跑一遍 |
 |---|---|---|---|
-| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 156 例；`LYFLOW_PACKS=dts` 164 例；`LYFLOW_PACKS=gap;dts` 246 例 | 分钟级（含编译） |
-| Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 138（纯平台构建 80 通过 / 58 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
+| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 162 例；`LYFLOW_PACKS=dts` 170 例；`LYFLOW_PACKS=gap;dts` 252 例 | 分钟级（含编译） |
+| Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 139（纯平台构建 81 通过 / 58 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
 | editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 77 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 29 | 秒级 |
-| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`） | 740 条断言、98 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
-| 浏览器宿主 e2e | `pnpm e2e:http` | 32 条断言（精简前 58） | 几分钟 |
+| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`） | 743 条断言、99 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
+| 浏览器宿主 e2e | `pnpm e2e:http` | 33 条断言（精简前 58） | 几分钟 |
 
 ## 放在哪一层
 
@@ -35,6 +35,7 @@
 | 迁移（含改连线 ADR-0025） | `core/tests/test_cache.cpp`（迁移链）、`bridge/src/patch.rs` / `commands.rs`、`packages/editor/test/migrations.test.mjs` |
 | 点云载荷的 rgb、按节点清缓存（C ABI v12） | `core/tests/test_output_view.cpp`、`test_cache.cpp`；`bridge/src/execution.rs` 的 `cloud_payload_carries_rgb_last_and_padded`；`packages/mcp/test/cloud.test.ts`；e2e `m4.mjs`（RGB 着色）、`noderun.mjs`（右键清缓存） |
 | 数据类型、Bundle、输出视图 ABI | `core/tests/test_data.cpp`、`test_bundle.cpp`、`test_output_view.cpp`、`test_contract.cpp` |
+| 图像数据域（docs/image-plan.md：valueJson 逐通道统计、块均值缩小、`lyflow_output_image` 的级别 / 行切片 / 越界、落盘往返、`shape` 契约用在图像上、C ABI 注入图像带行填充、注入摘要带 normals / rgb） | `core/tests/test_data.cpp`、`test_output_view.cpp`、`test_cache.cpp`、`test_contract.cpp`、`test_flow.cpp`（合成图像的测试算子 `test.make_image` / `test.take_gray` 在 `core/tests/image_test_op.h`，e2e 经 `LYFLOW_TEST_OPS` 同一份）；LYIM 载荷布局 `bridge/src/execution.rs` 的 `encode_image_frame_matches_the_documented_layout`；差异表的 Image 行 `compare-diff.test.mjs`；e2e `peek.mjs` 的图像组（适配级别、切原图分段取齐、悬停读数与合成公式一致） |
 | 运行摘要（summary） | `core/tests/test_summary.cpp`；CLI 的 `--summary` 形状在 `bridge/src/cli.rs` |
 | 标准算子 / PCD 读写 / ONNX | `packs/std-pointcloud/tests/*`、`packs/std-ml/tests/test_ml_ops.cpp`（模型用例要 `LYFLOW_TEST_ONNX_MODEL`，不设会打出跳过） |
 | dts 面差（与宿主 Python 旧算法的对照、现场轮廓） | `packs/dts/tests/test_dts_ops.cpp`（夹具 `tests/data/*.h`） |
@@ -52,7 +53,7 @@
 | 图结构编辑 `lyflow patch`（七个动作、幂等、改坏不落盘） | `bridge/src/patch.rs` 的测试模块 |
 | 指标路径（`eval` 写错时列出、`--list-metrics` 正向列出） | `bridge/src/cli.rs` 的 `eval_lists_the_available_paths_when_the_metric_is_wrong`、`bridge/src/eval.rs` 的 `available_paths_*` |
 | MCP 工具、argv 拼装、CLI 解析 | `packages/mcp/test/*`（`smoke.test.ts` 是唯一跑通 MCP → CLI 的） |
-| HTTP 传输、宿主嵌入（含用户片段、底图点云文件两个端点） | `scripts/e2e/http.mjs` |
+| HTTP 传输、宿主嵌入（含用户片段、底图点云文件两个端点，图像端点的行切片） | `scripts/e2e/http.mjs` |
 | 外部 Rust/Tauri 宿主（`attach`、`lyflow_handler!`、`sceneId` 注入、工作区路径） | `bridge/tests/host.rs`（`MockRuntime` 跑真 IPC） |
 
 ## 共用的夹具与辅助

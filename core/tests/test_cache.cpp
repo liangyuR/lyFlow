@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <random>
@@ -822,7 +823,7 @@ TEST_CASE("visibleWhen：藏起来的参数只查形态不查必填，eq 与 ne 
 
 // ------------------------------------------------ 落盘缓存（docs/disk-cache-plan.md）
 
-TEST_CASE("落盘缓存的编解码：点云带 intensity / normals / rgb、张量，逐位往返；点云读回换新 id；别的类型不落盘") {
+TEST_CASE("落盘缓存的编解码：点云带 intensity / normals / rgb、张量、图像，逐位往返；点云读回换新 id；别的类型不落盘") {
   PointCloud c;
   c.xyz = {0.f, 1.f, 2.f, 3.f, 4.f, 5.f};
   c.intensity = {0.5f, 0.25f};
@@ -831,12 +832,15 @@ TEST_CASE("落盘缓存的编解码：点云带 intensity / normals / rgb、张�
   Tensor t;
   t.shape = {1, 2, 3};
   t.data = {1.f, 2.f, 3.f, 4.f, 5.f, 6.f};
-  const exec::PortData ports = {{"cloud", Data::cloud(c)}, {"logits", Data::tensor(t)}};
+  Image img = Image::allocate(3, 2, 4, PixelDepth::U16);
+  for (std::size_t i = 0; i < img.byteSize(); ++i) img.mutablePixels()[i] = static_cast<std::uint8_t>(i * 7);
+  const exec::PortData ports = {
+      {"cloud", Data::cloud(c)}, {"logits", Data::tensor(t)}, {"image", Data::image(img)}};
   std::string bytes;
   REQUIRE(exec::encodeNode(ports, bytes));
   exec::PortData back;
   REQUIRE(exec::decodeNode(bytes, back));
-  REQUIRE(back.size() == 2);
+  REQUIRE(back.size() == 3);
   const PointCloud* bc = back[0].second.asCloud();
   REQUIRE(bc != nullptr);
   CHECK(back[0].first == "cloud");
@@ -849,6 +853,13 @@ TEST_CASE("落盘缓存的编解码：点云带 intensity / normals / rgb、张�
   REQUIRE(bt != nullptr);
   CHECK(bt->shape == t.shape);
   CHECK(bt->data == t.data);
+  const Image* bi = back[2].second.asImage();
+  REQUIRE(bi != nullptr);
+  CHECK(bi->width == 3);
+  CHECK(bi->height == 2);
+  CHECK(bi->channels == 4);
+  CHECK(bi->depth == PixelDepth::U16);
+  CHECK(std::memcmp(bi->pixels.get(), img.pixels.get(), img.byteSize()) == 0);
 
   // 截断 / 魔数不对都当坏文件
   CHECK_FALSE(exec::decodeNode(bytes.substr(0, bytes.size() - 3), back));

@@ -234,6 +234,22 @@ export class HttpTransport implements Transport {
     return res.arrayBuffer();
   }
 
+  /** 图像（ABI v15）：LYIM 载荷，docs/http-transport.md「图像」。 */
+  async getOutputImage(
+    runId: string,
+    nodeId: string,
+    port: string,
+    level: number,
+    row: number,
+    rows: number,
+  ): Promise<ArrayBuffer> {
+    const res = await this.#request(
+      `/lyflow/runs/${encodeURIComponent(runId)}/images/${encodeURIComponent(nodeId)}/` +
+        `${encodeURIComponent(port)}?level=${level}&row=${row}&rows=${rows}`,
+    );
+    return res.arrayBuffer();
+  }
+
   async getOutputIndices(
     runId: string,
     nodeId: string,

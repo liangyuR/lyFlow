@@ -244,6 +244,17 @@ function fieldsFor(type: string, port: string, ea: Entry, eb: Entry, sa: Compare
         { kind: "number", key: k("max"), a: scalar(va.max), b: scalar(vb.max) },
         { kind: "number", key: k("mean"), a: scalar(va.mean), b: scalar(vb.mean) },
       ];
+    case "Image": {
+      // 像素不进差异表（走二进制），只比尺寸与逐通道均值
+      const size = (v: typeof va) =>
+        v.width === undefined ? undefined : `${v.width}×${v.height}×${v.channels} ${v.depth ?? ""}`.trim();
+      const means = (v: typeof va) =>
+        Array.isArray(v.mean) ? v.mean.map((m) => (typeof m === "number" ? m : NaN)) : undefined;
+      return [
+        { kind: "text", key: k("size"), a: size(va), b: size(vb) },
+        { kind: "vector", key: k("mean"), a: means(va), b: means(vb) },
+      ];
+    }
     case "Indices":
       return [{ kind: "count", key: k("count"), a: ea.stat.elementCount, b: eb.stat.elementCount }];
     case "Error":

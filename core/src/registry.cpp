@@ -530,16 +530,17 @@ std::vector<std::string> Registry::validate() const {
         if (p.contract.is_object()) {
           // 契约与端口类型对不对得上。声明了 shape 却接在 PointCloud 上，
           // 只会在第一次真跑的时候变成一个莫名其妙的 contract_violation。
-          if (p.contract.contains("shape") && p.type != "Tensor" && p.type != kAnyTypeName) {
-            fail(portWhere + " contract: shape 只对 Tensor 端口有意义，这个端口是 " + p.type);
+          if (p.contract.contains("shape") && p.type != "Tensor" && p.type != "Image" &&
+              p.type != kAnyTypeName) {
+            fail(portWhere + " contract: shape 只对 Tensor / Image 端口有意义，这个端口是 " + p.type);
           }
           if (p.contract.contains("recordType") && p.type != "Record" && p.type != kAnyTypeName) {
             fail(portWhere + " contract: recordType 只对 Record 端口有意义，这个端口是 " + p.type);
           }
           if (p.contract.contains("finite") && p.type != "PointCloud" && p.type != "Tensor" &&
-              p.type != "Measurement" && p.type != kAnyTypeName) {
+              p.type != "Image" && p.type != "Measurement" && p.type != kAnyTypeName) {
             fail(portWhere +
-                 " contract: finite 只对 PointCloud / Tensor / Measurement 端口有意义，"
+                 " contract: finite 只对 PointCloud / Tensor / Image / Measurement 端口有意义，"
                  "这个端口是 " + p.type);
           }
         }
