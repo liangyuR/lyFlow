@@ -1254,6 +1254,10 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             return EXIT_FAILED;
         }
     };
+    if let Err(e) = crate::disk_cache::enable(parsed, &core, err) {
+        line(err, &e);
+        return EXIT_USAGE;
+    }
     let loaded = match load_graph(parsed, &path, err) {
         Ok(l) => l,
         Err(e) => {

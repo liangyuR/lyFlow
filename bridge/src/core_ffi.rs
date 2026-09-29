@@ -38,6 +38,11 @@ fn dll_path() -> PathBuf {
     exe_dir().join(DLL_NAME)
 }
 
+/// CLI 实际加载的那个 core DLL（落盘缓存的构建指纹按它的内容算）。
+pub(crate) fn dll_file() -> PathBuf {
+    dll_path()
+}
+
 /// 开发期热重载的源头：`scripts/core-watch.ps1` 就往这里构建（ADR-0009）。
 /// 安装包里这个路径不存在，watcher 于是不启动。
 pub fn watch_source() -> Option<PathBuf> {

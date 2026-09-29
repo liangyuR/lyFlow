@@ -56,6 +56,11 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
         --summary：JSON Lines 末尾多一行 {\"kind\":\"run_summary\", ...}，
                    status 三态 ok|degraded|failed，每个图级输出三态 value|inactive|failed，
                    外加 decisions（全部 FallbackChoice）。ADR-0022。
+        --cache-dir <dir>（run / eval / sweep / perturb 都认；或环境变量 LYFLOW_CACHE_DIR）：结果缓存落盘，
+                 另一个进程跑同一张图时贵的上游直接命中。默认关；按构建指纹分目录，重编 core 之后旧结果不再复用。
+                 只落盘确定性、耗时 ≥ 20 ms、输出全是点云或张量的节点。docs/disk-cache-plan.md
+  lyflow cache    info|clear --cache-dir <dir> [--stale]
+        info：各个指纹目录的文件数与字节数，current 标出当前 core 的那一个；clear 删掉（--stale 只删旧指纹的）
   lyflow import   <file> --kind <kind> [--fine] [-o <out.lyflow.json>] [--base-dir <dir>]
         --fine：产出细粒度图（每一步一个节点）而不是默认的积木图（m8-plan L12），
         等价于 --kind <kind>:fine；导入器没注册那种 kind 时报错。
@@ -1056,6 +1061,9 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(c) => c,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
+    if let Err(e) = crate::disk_cache::enable(parsed, &core, err) {
+        return fail(err, &e, EXIT_USAGE);
+    }
     let loaded = match load_graph(parsed, &path, err) {
         Ok(l) => l,
         Err(e) => return fail(err, &e, load_exit(&e)),
@@ -1403,6 +1411,9 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(c) => c,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
+    if let Err(e) = crate::disk_cache::enable(parsed, &core, err) {
+        return fail(err, &e, EXIT_USAGE);
+    }
     let loaded = match load_graph(parsed, &path, err) {
         Ok(l) => l,
         Err(e) => return fail(err, &e, load_exit(&e)),
@@ -1734,13 +1745,13 @@ pub(crate) fn fail(err: &Sink, message: &str, code: i32) -> i32 {
 const VALUE_OPTS: &[&str] = &[
     "to", "set", "base-dir", "parallel", "preview-points", "param", "metric", "csv", "format",
     "kind", "output", "samples", "samples-glob", "bind", "params", "holdout", "group-by",
-    "after", "region", "axis", "expect", "tolerance", "samples-dir", "bind-pair", "pattern",
+    "after", "region", "axis", "expect", "tolerance", "samples-dir", "bind-pair", "pattern", "cache-dir",
     "sample-subdir", "sort-by", "split-half", "samples-jsonl-out",
     "remove-node", "add-node", "rewire", "connect", "node", "only", "input", "recipe",
 ];
 const BOOL_OPTS: &[&str] = &[
     "no-cache", "preview", "write", "check", "json", "help", "outputs", "dry-run",
-    "summary", "no-summary", "fine", "list-metrics",
+    "summary", "no-summary", "fine", "list-metrics", "stale",
 ];
 
 pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
@@ -1779,6 +1790,7 @@ pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
         "diff" => cmd_diff(&parsed, out, err),
         "patch" => patch::cmd_patch(&parsed, out, err),
         "recipes" => recipe::cmd_recipes(&parsed, out, err),
+        "cache" => crate::disk_cache::cmd_cache(&parsed, out, err),
         other => {
             line(err, &format!("不认识的子命令 {other}"));
             line(err, USAGE);

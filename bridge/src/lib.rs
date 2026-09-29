@@ -3,6 +3,7 @@
 
 pub mod cli;
 pub mod core_ffi;
+mod disk_cache;
 mod eval;
 pub mod graph;
 mod patch;
