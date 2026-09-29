@@ -524,7 +524,20 @@ async function suitePreview(cdp, report) {
   // 真实鼠标拖动滑块：从中间往右拖一段
   const slider = await centerOf(cdp, '[data-testid="param-slider-keepRatio"]');
   mustOk(slider != null, "找到 keepRatio 的滑块", JSON.stringify(slider));
-  await dragMouse(cdp, { x: slider.x - 40, y: slider.y }, { x: slider.x + 40, y: slider.y }, { steps: 8 });
+  // 拖得像人一样慢一点（每步约 60 ms）：dragMouse 的 12 ms 一步整段只要 100 ms，预览运行来不及画就被
+  // 下一次取消，最后画出来的总是松手后补的那次正式运行 —— 量的就不是「跟手」了
+  {
+    const from = { x: slider.x - 40, y: slider.y };
+    const common = { button: "left", buttons: 1, clickCount: 1 };
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y, buttons: 0 });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: from.x, y: from.y, ...common });
+    for (let i = 1; i <= 8; i += 1) {
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x + i * 10, y: from.y, ...common });
+      await sleep(60);
+    }
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: from.x + 80, y: from.y, ...common });
+    await sleep(120);
+  }
 
   // 拖动触发了预览运行：等不到就超时抛出，分组中断
   await cdp.waitFor(
@@ -532,19 +545,29 @@ async function suitePreview(cdp, report) {
     { timeoutMs: 20_000, what: "预览运行结束" },
   );
 
-  const latency = await cdp.waitFor(
+  // 事件到渲染（M4 验收的定义）：拖动中那几次**预览运行**从结束到视图画出它的云。最后一次 ok 的运行是
+  // 松手后补的正式运行（全量取数，debug 构建里光 IPC 就 50–80 ms），不算「跟手」，只打出来参考。
+  // 取中位数：拖动中有好几次预览，单次抖动不该决定成败
+  const timing = await cdp.waitFor(
     `(() => {
-       const runs = window.__lyflow.runMarks;
+       const runs = window.__lyflow.runMarks.filter((m) => m.status === 'ok');
        const marks = window.__m4.marks.filter((m) => m.view === 'cloud');
-       for (let i = runs.length - 1; i >= 0; i -= 1) {
-         const hit = marks.find((m) => m.run === runs[i].runId && m.at >= runs[i].at);
-         if (hit) return Math.round(hit.at - runs[i].at);
+       const drawn = [];
+       for (const r of runs) {
+         const hit = marks.find((m) => m.run === r.runId && m.at >= r.at);
+         if (hit) drawn.push({ run: r.runId, ms: Math.round(hit.at - r.at) });
        }
-       return null;
+       const last = runs[runs.length - 1];
+       if (!last || !drawn.some((d) => d.run === last.runId)) return null;  // 等正式运行也画出来
+       return { preview: drawn.filter((d) => d.run !== last.runId).map((d) => d.ms),
+                formal: drawn.find((d) => d.run === last.runId).ms };
      })()`,
-    { timeoutMs: 20_000, what: "视图画出预览结果" },
+    { timeoutMs: 20_000, what: "视图画出预览与正式结果" },
   );
-  report.ok(`事件到渲染 ${latency} ms < 100 ms`, latency != null && latency < 100, `${latency} ms`);
+  const sorted = [...timing.preview].sort((a, b) => a - b);
+  const latency = sorted.length > 0 ? sorted[Math.floor((sorted.length - 1) / 2)] : null;
+  report.ok(`事件到渲染（拖动中的预览运行，中位数）${latency} ms < 100 ms`, latency != null && latency < 100,
+    `预览 ${JSON.stringify(timing.preview)} ms，松手后的正式运行 ${timing.formal} ms`);
 
   const previewRun = await cdp.eval(`
     const s = window.__lyflow.snapshot();

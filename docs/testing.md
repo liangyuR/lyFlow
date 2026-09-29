@@ -4,11 +4,13 @@
 
 2026-09-26 按四路审计做过一次合并精简（提交 test/prune），数字是那之后的：
 
+（2026-09-29 逐项实测过一遍：C++ 默认 / dts / gap;dts 三种构建，Rust 默认与纯平台构建 `LYFLOW_STD_PACKS=0`、`tests/host.rs` 带 dts 全跑，下表的数都是跑出来的，不是推算。）
+
 | 层 | 命令 | 规模 | 跑一遍 |
 |---|---|---|---|
 | C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 155 例；`LYFLOW_PACKS=dts` 163 例；`LYFLOW_PACKS=gap;dts` 245 例 | 分钟级（含编译） |
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 137（纯平台构建 79 通过 / 58 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
-| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 76 | 秒级 |
+| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 77 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 29 | 秒级 |
 | 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`） | 734 条断言、98 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 32 条断言（精简前 58） | 几分钟 |
@@ -40,6 +42,7 @@
 | 2D 拖框（文件底图与输入端口底图）、自动连线、片段 | `packages/editor/test/autoconnect.test.mjs`、`roiframes.test.mjs`；e2e `m8b.mjs`、`m8c.mjs` |
 | 两节点输出对比（差异表的配对、每种类型的行、容差、全量点数；进入即冻结、换 B 解冻、B 被删自动退出、快捷键；两栏内容合并） | `packages/editor/test/compare-diff.test.mjs`、`compare-store.test.mjs`、`view-rule.test.mjs`；e2e `compare.mjs`（两栏、冻结后重跑只有 A 变、共用相机、右键换 B、A 跟随、拖框互斥、两侧都只有值）。差异表每种类型的数值只在单测里钉 |
 | 预览里选点与测距（屏幕空间最近点、看不见的点跳过、同距取近、一组两点、readout 的单位与行） | `packages/editor/test/pick.test.mjs`；快捷键 `M` 不撞 `Ctrl+M` 在 `compare-store.test.mjs` 的快捷键那条；e2e `m3.mjs` 的测量组（真单击选点、拖动不选、重跑标过期、换节点清掉）、`compare.mjs` 一句（A、B 两栏各点一次） |
+| 点云缓存的并发请求合并（同键只取一次、失败不留占位） | `packages/editor/test/cloud-cache.test.mjs`；e2e `m4.mjs` §2 的「事件到渲染」（拖动中预览运行的延迟中位数） |
 | `lyflow eval / sweep / perturb`（值路径、样本集、轴扫描与斜率、`pointFrom` 刀口跟锚点） | `bridge/src/eval.rs`、`perturb.rs` 的单元测试；`bridge/src/cli.rs` 的 `perturb_*` 集成测试（`crop_chain` 小图：固定刀口斜率 > 0、刀口跟锚点挪走后不响应、取不到锚点判失败）；MCP `packages/mcp/test/argv.test.ts` |
 | 连线查看器 Edge Peek | e2e `peek.mjs`；窗口上限与自动关窗的提示 `packages/editor/test/peek-store.test.mjs` |
 | 按输出类型选视图（主预览的点云 / 值） | `packages/editor/test/view-rule.test.mjs`；e2e `gap.mjs` 的「量测输出」组（`transform.make` 显示值、手动选只对当时的节点有效） |
