@@ -942,13 +942,14 @@ export function Viewer3D() {
             roiNode={roiNode}
             runId={display.runId}
             status={display.status}
+            nodeState={source.state}
             outputs={activeOutputs}
           />
         )}
         {roiEditing && activeNode && (
           <RoiLayer host={sceneHost} nodeId={activeNode.id} items={roiItems} />
         )}
-        {!compareOn && !(content === "image" && activeNode) && (display.status || loading || (roiEditing && backdrop.error)) && (
+        {!compareOn && !(content === "image" && activeNode && activeOp && roiNode) && (display.status || loading || (roiEditing && backdrop.error)) && (
           // 拖框时底图（模板）已经画出来了，状态只缩在角上，不盖住画面。底图取不到的原因也在这里说
           <div
             className={`viewer__empty${roiEditing ? " viewer__empty--corner" : ""}`}

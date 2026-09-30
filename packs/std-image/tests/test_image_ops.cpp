@@ -4,6 +4,7 @@
 
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <unordered_map>
 
@@ -134,7 +135,7 @@ TEST_CASE("io.save_image → io.load_image 往返逐像素相同（RGB 顺序不
   std::filesystem::remove_all(dir, ec);
 }
 
-TEST_CASE("image.to_gray / resize / crop：RGB 加权、灰度原样共享像素；尺寸；像素框裁剪，米制的框被拒") {
+TEST_CASE("image.to_gray / resize / crop：RGB 加权、灰度原样共享像素；尺寸；像素框裁剪，米制的框被拒；全宽裁剪不借上游的像素") {
   Call c;
   Image rgb = Image::allocate(4, 2, 3, PixelDepth::U8);
   for (std::size_t i = 0; i < 8; ++i) {
@@ -176,6 +177,25 @@ TEST_CASE("image.to_gray / resize / crop：RGB 加权、灰度原样共享像素
   box.unit = Unit2D::Meter;
   c.inputs["box"] = Data::box2d(box);
   CHECK(c.run("image.crop").code == "bad_input");
+
+  // 全宽 / 单行的子矩阵在 OpenCV 里是连续的：修前 fromMat 不拷，输出指着输入的缓冲却不持有它，
+  // 输入一放掉就读到已释放的内存（review 修正，PR #1）。输出必须有自己的一份
+  c.inputs.erase("box");
+  for (const auto& roi : {std::vector<double>{0, 10, 100, 30}, std::vector<double>{5, 7, 60, 8}}) {
+    Data in = Data::image(makeRgb(100, 60));
+    const std::uint8_t* lo = in.asImage()->pixels.get();
+    const std::uint8_t* hi = lo + in.asImage()->byteSize();
+    c.inputs["image"] = in;
+    REQUIRE(c.run("image.crop", {{"roi", Value::vec(roi)}}).ok);
+    const Data out = c.outputs["image"];
+    const std::uint8_t* p = out.asImage()->pixels.get();
+    CHECK_MESSAGE((p < lo || p >= hi), "裁剪输出借着输入的像素：roi = ", roi[0], ",", roi[1], ",", roi[2], ",", roi[3]);
+    c.inputs.clear();
+    in = Data();
+    c.outputs.clear();
+    const int x0 = static_cast<int>(roi[0]), y0 = static_cast<int>(roi[1]);
+    CHECK(out.asImage()->at(3, 0, 1) == test::image::testImageValue(PixelDepth::U8, x0 + 3, y0, 1));
+  }
 }
 
 TEST_CASE("image.threshold：Otsu 分开两块灰度；单通道契约拦住 RGB；Otsu 不收 u16") {
@@ -229,7 +249,7 @@ TEST_CASE("image.find_circle：画一个圆找回来（像素坐标、unit = px 
   CHECK(none.code == "circle_not_found");
 }
 
-TEST_CASE("image.region_stats：掩膜内的均值、面积、外接框（像素，可直接接 crop）；掩膜尺寸不对报 bad_input") {
+TEST_CASE("image.region_stats：掩膜内的均值、面积、外接框（像素，可直接接 crop）；掩膜尺寸不对或多通道报 bad_input；f32 掩膜的小正值也算前景") {
   const Image g = test::image::makeTestImage(30, 20, 1, PixelDepth::U8);
   Image mask = Image::allocate(30, 20, 1, PixelDepth::U8);
   for (int y = 5; y < 9; ++y) {
@@ -252,6 +272,16 @@ TEST_CASE("image.region_stats：掩膜内的均值、面积、外接框（像素
 
   c.inputs["mask"] = Data::image(Image::allocate(3, 3, 1, PixelDepth::U8));
   CHECK(c.run("image.region_stats").code == "bad_input");
+  c.inputs["mask"] = Data::image(Image::allocate(30, 20, 3, PixelDepth::U8));
+  CHECK(c.run("image.region_stats").code == "bad_input");  // 修前 OpenCV 抛异常、报成 internal
+
+  Image fmask = Image::allocate(30, 20, 1, PixelDepth::F32);
+  float* fp = reinterpret_cast<float*>(fmask.mutablePixels());
+  fp[0] = 0.3f;  // 修前先转 u8 被舍成 0、当成背景
+  fp[1] = std::numeric_limits<float>::quiet_NaN();  // NaN 不算
+  c.inputs["mask"] = Data::image(fmask);
+  REQUIRE(c.run("image.region_stats").ok);
+  CHECK(c.outputs["area"].asMeasurement()->value == 1.0);
 }
 
 TEST_CASE("image.to_tensor ↔ tensor.to_image：NCHW 的 (v·scale − mean)/std；CHW 张量读回 f32 原值；u8 按范围拉伸") {

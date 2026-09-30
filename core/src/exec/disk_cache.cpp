@@ -122,10 +122,11 @@ bool decodeImage(Reader& r, Image& img) {
   if (w == 0 || h == 0 || w > 1u << 20 || h > 1u << 20) return false;
   if (d != 1 && d != 2 && d != 4) return false;
   if (c != 1 && c != 3 && c != 4) return false;
+  // 先按剩余字节查长度、再分配：坏文件的头写个 2^20 × 2^20 就是 16 TiB，分配会抛 bad_alloc（review 修正）
+  const std::uint64_t n = std::uint64_t{w} * h * c * d;
+  if (n > r.s.size() - r.at) return false;
   img = Image::allocate(static_cast<std::int32_t>(w), static_cast<std::int32_t>(h),
                         static_cast<std::int32_t>(c), static_cast<PixelDepth>(d));
-  const std::size_t n = img.byteSize();
-  if (r.s.size() - r.at < n) return false;
   std::memcpy(img.mutablePixels(), r.s.data() + r.at, n);
   r.at += n;
   return img.consistent();

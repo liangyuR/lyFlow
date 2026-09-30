@@ -4,7 +4,8 @@
 // - view：零拷贝，建一个指向 Image 像素的 cv::Mat 头。**只读** —— 像素在结果仓里被别的节点共享，
 //   原地改就是改了上游的结果；要原地改先 clone()。Mat 不持有所有权，Image 要活得比它久。
 // - fromMat：零拷贝交给 core。别名 shared_ptr 持有 Mat 的引用计数，core 不认识 OpenCV 也能保活。
-//   不连续的 Mat（ROI 子矩阵）先 clone 成连续的一份。
+//   不连续的 Mat（ROI 子矩阵）、以及数据不归 OpenCV 管的 Mat（view() 建的头与它的子矩阵）先 clone 一份 ——
+//   后者不拷就是借着上游的像素却不持有它。
 // - BGR ↔ RGB 只在读写文件那一层（io.load_image / io.save_image）转，其余算子不管通道顺序。
 #include <string>
 

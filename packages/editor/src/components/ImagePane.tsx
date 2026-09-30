@@ -11,7 +11,7 @@ import { levelOf, resolveOutput } from "../lib/subgraph";
 import { transport } from "../transport";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
-import type { OutputStat, OutputValue } from "../types/execution";
+import type { NodeState, OutputStat, OutputValue } from "../types/execution";
 import type { GraphDoc, GraphNode } from "../types/graph";
 import type { OperatorDesc } from "../types/manifest";
 import type { SubPath } from "../lib/subgraph";
@@ -68,10 +68,12 @@ export interface ImagePaneProps {
   runId: string | null;
   /** 主预览此刻的状态文字（未运行 / 正在计算… / 出错……）；null = 这个节点这次运行的结果齐了。 */
   status: string | null;
+  /** 节点这次运行的状态。画的是输入那张图时，节点自己出错不妨碍画图（见下）。 */
+  nodeState: NodeState | undefined;
   outputs: readonly OutputStat[] | undefined;
 }
 
-export function ImagePane({ doc, path, node, op, roiNode, runId, status, outputs }: ImagePaneProps) {
+export function ImagePane({ doc, path, node, op, roiNode, runId, status, nodeState, outputs }: ImagePaneProps) {
   const rois = useMemo(() => imageRoiParams(op, roiNode), [op, roiNode]);
   const shapes = useMemo(() => (outputs ?? []).filter((o) => o.value?.unit === "px"), [outputs]);
   // 有框要拖、或者要叠几何而自己没有图像输出时，画输入的那张图
@@ -83,9 +85,12 @@ export function ImagePane({ doc, path, node, op, roiNode, runId, status, outputs
   // 运行中（自动运行、拖参数时的预览运行）状态会短暂变成「正在计算…」：这时继续画上一次取成功的那张图，
   // 画布不卸掉 —— 否则每跑一次放大的位置就丢了，拖框拖到一半也会断。跑完换新结果，视角不动（ImageCanvas）
   const lastGood = useRef<{ runId: string; srcKey: string } | null>(null);
-  if (status === null && runId && srcKey) lastGood.current = { runId, srcKey };
+  // 画的是输入那张图时，节点自己出错（找圆找不到、裁剪框落在图外）照样画：这正是要看输入、把框拖回来的时候。
+  // 上游没跑出来的话取元信息会失败，界面照实说（review 修正，PR #1）
+  const ready = status === null || (src?.from === "input" && nodeState === "error");
+  if (ready && runId && srcKey) lastGood.current = { runId, srcKey };
   const shownRunId =
-    status === null ? runId : lastGood.current && lastGood.current.srcKey === srcKey ? lastGood.current.runId : null;
+    ready ? runId : lastGood.current && lastGood.current.srcKey === srcKey ? lastGood.current.runId : null;
 
   // 尺寸与位深：结果仓里那个输出的元信息（上游节点的 stats 不一定在当前层，按 runId 问一次最稳）
   const [meta, setMeta] = useState<Meta | null>(null);

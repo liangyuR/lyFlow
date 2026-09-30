@@ -736,6 +736,7 @@ async function suiteImageMainView(cdp, report) {
           rois: Number(p.getAttribute('data-rois')),
           box: r ? { x: r.left, y: r.top, w: r.width, h: r.height } : null,
           roi: box ? box.getAttribute('data-roi') : null,
+          corner: p.querySelector('[data-testid="viewer3d-status"]')?.textContent ?? null,
         };
       `);
       if (got) return got;
@@ -788,6 +789,22 @@ async function suiteImageMainView(cdp, report) {
     return window.__lyflow.stores.graph.getState().doc.nodes.find((n) => n.id === ${lit(ids.crop)}).params.roi;
   `);
   report.eq("一次拖动一条撤销：撤回到拖之前", undone, [100, 50, 300, 250]);
+
+  // 节点自己出错（框落在图外）：照样画输入那张图、状态缩在角上 —— 这正是要把框拖回来的时候。
+  // 先选别的节点（换了底图），免得「上一次的图」替它挡着（review 修正，PR #1）
+  const setRoi = (v) => cdp.eval(`
+    window.__lyflow.stores.graph.getState().setParam(${lit(ids.crop)}, 'roi', ${lit(v)}); return true;
+  `);
+  await setRoi([2000, 2000, 2100, 2100]);
+  const bad = await runAndWait(cdp, () => pressF5(cdp));
+  await pane(ids.stats);
+  const failed = await pane(ids.crop);
+  report.ok("crop 出错之后选中它：仍画输入那张图、框在，角上写着出错",
+    bad.nodes[ids.crop]?.state === "error" && failed?.source === "input" && failed.rois === 1 &&
+      String(failed.corner).includes("出错"),
+    JSON.stringify({ state: bad.nodes[ids.crop]?.state, failed }));
+  await setRoi([100, 50, 300, 250]);
+  mustOk((await runAndWait(cdp, () => pressF5(cdp))).status === "ok", "框改回来之后重跑成功");
 
   const stats = await pane(ids.stats);
   report.ok("region_stats：画输入那张图（gray），bbox（px）叠在上面",

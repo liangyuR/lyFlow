@@ -1139,9 +1139,10 @@ class Scheduler {
       }
       if (const Image* img = it->second.asImage()) {
         if (!img->consistent()) {
-          return Status::Error(Phase::Execute, "internal",
-                               std::string("输出端口 '") + p.name +
-                                   "' 的图像不完整（宽高要为正、通道 1/3/4、要有像素缓冲）",
+          // 宿主注入的（provided）是调用方给错了，不是 core 或算子的 bug
+          return Status::Error(Phase::Execute, node.provided ? "bad_input" : "internal",
+                               std::string(node.provided ? "注入的" : "") + "输出端口 '" + p.name +
+                                   "' 的图像不完整（宽高要为正、通道 1/3/4、位深 1/2/4、要有像素）",
                                {}, p.name);
         }
       }

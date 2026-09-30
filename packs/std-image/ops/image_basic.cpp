@@ -81,7 +81,7 @@ Status cropCompute(const Inputs& inputs, const ParamView& params, Outputs& outpu
                         std::to_string(in.height) + "），裁出来是空的",
                     "roi");
   }
-  // ROI 子矩阵不连续，putMat 里 fromMat 会 clone 一份连续的
+  // 子矩阵借的是输入的像素：putMat 里 fromMat 会 clone 一份自己持有的（全宽的子矩阵也连续，照样要拷）
   return img::putMat(outputs, "image", cvx::view(in)(cv::Rect(x0, y0, x1 - x0, y1 - y0)));
 }
 

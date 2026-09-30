@@ -111,13 +111,15 @@ struct Image {
 ### 5.1 C ABI（v15）
 
 ```c
-typedef struct lyflow_image_view {
-  uint32_t width, height;        /* 这一级（level）的完整尺寸，不随切片变 */
-  uint32_t channels, depth;      /* depth：每通道字节数 1 / 2 / 4 */
-  uint32_t level;                /* 实际给出的级别（可能被 clamp） */
+/* 实施时的定义以 core/include/lyflow/c_api.h 为准；比最初的提案多了原图宽高 */
+typedef struct {
+  uint32_t width, height;             /* 这一级（level）的完整尺寸，不随切片变 */
+  uint32_t channels, depth;           /* depth：每通道字节数 1 / 2 / 4 */
+  uint32_t level;                     /* 实际给出的级别（要得太大时收到长边 1 像素那一级） */
+  uint32_t full_width, full_height;   /* 原图（level 0）的宽高 */
   uint32_t row_offset, row_count;
   uint32_t row_bytes;
-  const uint8_t* pixels;         /* 指向 row_offset 那一行 */
+  const uint8_t* pixels;              /* 指向 row_offset 那一行 */
   void* handle;
 } lyflow_image_view;
 
@@ -133,8 +135,9 @@ LYFLOW_API void lyflow_image_view_free(lyflow_image_view* view);
 
 ### 5.2 二进制载荷 `LYIM`
 
-`magic u32 | width u32 | height u32 | channels u32 | depth u32 | level u32 | row_offset u32 | row_count u32 | row_bytes u32 | 保留 u32`（40 字节头），后面接像素、补齐到 4 字节。
-头长 40，所以 u16 / f32 像素天然对齐，前端可以零拷贝建 `Uint16Array` / `Float32Array`（http-transport.md 的共同规则）。
+`magic u32 | width u32 | height u32 | channels u32 | depth u32 | level u32 | full_width u32 | full_height u32 | row_offset u32 | row_count u32 | row_bytes u32 | 保留 u32`
+（48 字节头，逐项的表见 [http-transport.md](http-transport.md)「图像」），后面接像素、补齐到 4 字节。
+头长 48，所以 u16 / f32 像素天然对齐，前端可以零拷贝建 `Uint16Array` / `Float32Array`（http-transport.md 的共同规则）。
 
 ### 5.3 HTTP 桩
 

@@ -863,6 +863,16 @@ TEST_CASE("落盘缓存的编解码：点云带 intensity / normals / rgb、张�
 
   // 截断 / 魔数不对都当坏文件
   CHECK_FALSE(exec::decodeNode(bytes.substr(0, bytes.size() - 3), back));
+  // 图像头写成 2^20 × 2^20：先查长度再分配，当坏文件（修前先分配 16 TiB，bad_alloc 在工作线程里直接 terminate）
+  {
+    std::string huge;
+    REQUIRE(exec::encodeNode({{"image", Data::image(img)}}, huge));
+    const std::uint32_t side = 1u << 20;
+    // 头 12 字节 + 名字长度 2 + "image" 5 + 种类 1 + 负载长度 8 = 28：负载从宽开始
+    std::memcpy(&huge[28], &side, sizeof side);
+    std::memcpy(&huge[32], &side, sizeof side);
+    CHECK_FALSE(exec::decodeNode(huge, back));
+  }
   CHECK_FALSE(exec::decodeNode("XXXX" + bytes.substr(4), back));
   // 有一个端口不是点云 / 张量，整节点不编
   Indices idx;

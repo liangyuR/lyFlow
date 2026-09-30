@@ -72,7 +72,7 @@ void registerBuiltinTypes(Registry& r) {
       "一组有名字的字段（Bundle<kind>）：一根线带一组有关系的数据，字段表见 manifest 的 bundles。"});
 
   // docs/image-plan.md I2：一个类型，通道数与位深是运行时属性（同点云的可选通道）；
-  // 要求几个通道的端口用 channels 契约声明。
+  // 要求几个通道的端口用 shape 契约声明（图像按 [高, 宽, 通道] 读，ADR-0026）。
   r.addType(PortType{
       "Image", "#2dd4bf", {},
       "2D 图像：行主序、通道交错，通道 1/3/4（灰度 / RGB / RGBA），位深 u8/u16/f32。"

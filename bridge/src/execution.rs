@@ -815,6 +815,21 @@ DATA ascii
 
         let empty = unsafe { core_ffi::ImageView::borrowed(core, 3, 2, 3, 1, 0, (3, 2), 9, &[]) };
         assert_eq!(encode_image(&empty).len(), 48, "空切片只有帧头");
+
+        // 注入图像：像素比 宽×高×通道×位深 短就不交指针（修前 core 会越界读，review 修正 PR #1）
+        let input = |len: usize| core_ffi::RunImageInput {
+            node_id: "n".into(),
+            port: "image".into(),
+            width: 3,
+            height: 2,
+            channels: 3,
+            depth: 2,
+            pixels: vec![0; len],
+        };
+        assert!(input(35).pixels_ptr().is_null(), "差一个字节");
+        assert!(!input(36).pixels_ptr().is_null(), "刚好够");
+        assert!(!input(40).pixels_ptr().is_null(), "多给的尾巴不读");
+        assert!(input(0).pixels_ptr().is_null());
     }
 
     #[test]

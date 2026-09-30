@@ -163,6 +163,22 @@ pub struct RunImageInput {
     pub pixels: Vec<u8>,
 }
 
+impl RunImageInput {
+    /// 交给 core 的像素指针。`pixels` 比 宽 × 高 × 通道 × 位深 短（或乘出来溢出）时给 null：
+    /// core 按紧排读满 `width * channels * depth * height` 字节，短了就是越界读；给 null 则把它当成
+    /// 不完整的图像，报在那个节点上（bad_input）。多给的尾巴不读。
+    pub fn pixels_ptr(&self) -> *const u8 {
+        let need = (self.width as u64)
+            .checked_mul(self.height as u64)
+            .and_then(|n| n.checked_mul(self.channels as u64))
+            .and_then(|n| n.checked_mul(self.depth as u64));
+        match need {
+            Some(n) if n > 0 && (self.pixels.len() as u64) >= n => self.pixels.as_ptr(),
+            _ => std::ptr::null(),
+        }
+    }
+}
+
 /// 一次运行的全部选项（C ABI v7）。写成位置参数就没人读得懂了。
 #[derive(Clone)]
 pub struct RunSpec<'a> {
@@ -1231,11 +1247,7 @@ impl RunHandle {
                 depth: i.depth,
                 row_bytes: 0,
                 reserved: 0,
-                pixels: if i.pixels.is_empty() {
-                    std::ptr::null()
-                } else {
-                    i.pixels.as_ptr()
-                },
+                pixels: i.pixels_ptr(),
             })
             .collect();
 

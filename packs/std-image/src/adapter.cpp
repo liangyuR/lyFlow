@@ -30,7 +30,12 @@ bool fromMat(cv::Mat m, Image& out) {
     case CV_32F: depth = PixelDepth::F32; break;
     default: return false;
   }
-  if (!m.isContinuous()) m = m.clone();
+  // 两种情况要先拷一份：
+  // - 不连续（一般的 ROI 子矩阵）：core 的 Image 要行紧排；
+  // - 数据不归 OpenCV 管（u == nullptr）：view() 建的头、以及它的子矩阵都是这样。全宽或只有一行的子矩阵
+  //   isContinuous() 为真，不拷的话输出就借着上游的像素、却不持有它 —— 上游结果被清掉 / 淘汰之后读到的是
+  //   已释放的内存（review 修正，PR #1）
+  if (!m.isContinuous() || m.u == nullptr) m = m.clone();
   auto holder = std::make_shared<cv::Mat>(std::move(m));
   Image img;
   img.width = holder->cols;

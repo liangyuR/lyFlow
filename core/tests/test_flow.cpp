@@ -332,7 +332,7 @@ TEST_CASE("C ABI 注入图像（v15）：带行填充的缓冲拷成紧排；描
   RunLog badLog;
   lyflow_run* badRun = runWith(bad, "abi-image-bad", badLog);
   CHECK(badLog.runStatus() == "error");
-  CHECK(badLog.nodeEvent("n_src", "error")["error"]["code"] == "internal");
+  CHECK(badLog.nodeEvent("n_src", "error")["error"]["code"] == "bad_input");  // 宿主给错了，不是 internal
   lyflow_run_free(badRun);
 }
 

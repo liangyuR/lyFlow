@@ -132,9 +132,14 @@ Status regionStatsCompute(const Inputs& inputs, const ParamView& params, Outputs
                           " 不一样大",
                       "mask");
     }
-    cv::Mat m8;
-    cvx::view(mk).convertTo(m8, CV_8U);
-    mask = m8 > 0;
+    if (mk.channels != 1) {
+      return badInput("掩膜要是单通道图（收到 " + std::to_string(mk.channels) + " 通道）；先接 image.to_gray",
+                      "mask");
+    }
+    // 非零处算区域：直接比较原值，f32 掩膜里 0 < v < 0.5 的也算（先转 u8 会舍成 0）；NaN 不算
+    const cv::Mat mv = cvx::view(mk);
+    mask = mv != 0;
+    if (mk.depth == PixelDepth::F32) mask &= (mv == mv);
   } else {
     mask = cv::Mat(plane.size(), CV_8U, cv::Scalar(255));
   }
