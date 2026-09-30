@@ -8,7 +8,7 @@
 
 | 层 | 命令 | 规模 | 跑一遍 |
 |---|---|---|---|
-| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 170 例；`LYFLOW_PACKS=dts` 178 例；`LYFLOW_PACKS=gap;dts` 260 例 | 分钟级（含编译） |
+| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 173 例；`LYFLOW_PACKS=dts` 181 例；`LYFLOW_PACKS=gap;dts` 263 例 | 分钟级（含编译） |
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 139（纯平台构建 81 通过 / 58 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
 | editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 77 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 30 | 秒级 |
@@ -37,10 +37,10 @@
 | 数据类型、Bundle、输出视图 ABI | `core/tests/test_data.cpp`、`test_bundle.cpp`、`test_output_view.cpp`、`test_contract.cpp` |
 | 图像数据域（docs/image-plan.md：valueJson 逐通道统计、块均值缩小、`lyflow_output_image` 的级别 / 行切片 / 越界、落盘往返、`shape` 契约用在图像上、C ABI 注入图像带行填充、注入摘要带 normals / rgb） | `core/tests/test_data.cpp`、`test_output_view.cpp`、`test_cache.cpp`、`test_contract.cpp`、`test_flow.cpp`（合成图像的测试算子 `test.make_image` / `test.take_gray` 在 `core/tests/image_test_op.h`，e2e 经 `LYFLOW_TEST_OPS` 同一份）；LYIM 载荷布局 `bridge/src/execution.rs` 的 `encode_image_frame_matches_the_documented_layout`；差异表的 Image 行 `compare-diff.test.mjs`；e2e `peek.mjs` 的图像组（适配级别、切原图分段取齐、悬停读数与合成公式一致） |
 | 运行摘要（summary） | `core/tests/test_summary.cpp`；CLI 的 `--summary` 形状在 `bridge/src/cli.rs` |
-| 标准算子 / PCD 读写 / ONNX | `packs/std-pointcloud/tests/*`、`packs/std-ml/tests/test_ml_ops.cpp`（模型用例要 `LYFLOW_TEST_ONNX_MODEL`，不设会打出跳过） |
+| 标准算子 / PCD 读写 / ONNX | `packs/std-pointcloud/tests/*`、`packs/std-ml/tests/test_ml_ops.cpp`（模型用例要 `LYFLOW_TEST_ONNX_MODEL`，不设会打出跳过；`[N,6,1280] → [N,8,1280]` 的模型本机在桌面 DTS 文件夹的 `v12s0.onnx`） |
 | 主预览的图像模式（画输出还是输入那张图、放大后重跑视角不动、像素框拖动写回参数并可撤销、像素几何叠画；规则本身在 `view-rule.test.mjs`） | e2e `m8b.mjs` 的 `suiteImageMainView` |
 | MCP 看图（LYIM 解码、u16 拉伸到 8 位、最近邻缩、PNG 头与 inflate 读回；冒烟里真调一次 `view_output_image`） | `packages/mcp/test/cloud.test.ts`、`smoke.test.ts`、`server.test.ts`（工具面 16 个） |
-| 图像算子（std-image：adapter 零拷贝与 RGB 顺序、读写往返含中文路径、各算子数值、像素单位的几何、单通道契约） | `packs/std-image/tests/test_image_ops.cpp`；e2e `peek.mjs` 图像组的最后一段（真 app 里灰度 → Otsu → 区域统计、掩膜边是单通道 u8） |
+| 图像算子（std-image：adapter 零拷贝与 RGB 顺序、读写往返含中文路径、各算子数值、像素单位的几何、单通道契约；深度图 ↔ 点云的反投影、来回一趟逐像素相同、z 缓冲；图像 → 张量 → ONNX → 图像的推理链路，同样要 `LYFLOW_TEST_ONNX_MODEL`） | `packs/std-image/tests/test_image_ops.cpp`；e2e `peek.mjs` 图像组的最后一段（真 app 里灰度 → Otsu → 区域统计、掩膜边是单通道 u8） |
 | dts 面差（与宿主 Python 旧算法的对照、现场轮廓） | `packs/dts/tests/test_dts_ops.cpp`（夹具 `tests/data/*.h`） |
 | gap 测量、积木、导入、模型 ROI | `packs/gap/tests/*`；e2e `gap.mjs`、`m8b.mjs`、`m8c.mjs`、`params_p4.mjs`（编辑器 vs CLI 逐位相同） |
 | 2D 拖框（文件底图与输入端口底图）、自动连线、片段 | `packages/editor/test/autoconnect.test.mjs`、`roiframes.test.mjs`；e2e `m8b.mjs`、`m8c.mjs` |

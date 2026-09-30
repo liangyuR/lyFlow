@@ -18,5 +18,7 @@ void registerImageFindCircle(Registry& r);
 void registerImageRegionStats(Registry& r);
 void registerImageToTensor(Registry& r);
 void registerTensorToImage(Registry& r);
+void registerCloudFromDepth(Registry& r);
+void registerCloudToDepthImage(Registry& r);
 
 }  // namespace lyflow::ops

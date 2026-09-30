@@ -262,9 +262,14 @@ class Data {
   std::size_t elementCount() const;
 
   /// 给 Inspector / 3D 叠画看的可读 JSON。点云与 Indices 返回空串（太大，走二进制）。
+  /// 图像的逐通道统计要扫整张图：只算一次，同一份 Data 的浅拷贝共用结果（Image 不可变）。
   std::string valueJson() const;
 
  private:
+  /// 图像 valueJson 的一次性缓存（PR #1 review 留下的一条：结果仓在锁里一遍遍重算整图统计）。
+  struct ValueCache;
+  std::string valueJsonUncached() const;
+
   Kind kind_ = Kind::None;
   std::shared_ptr<const PointCloud> cloud_;
   std::shared_ptr<const Indices> indices_;
@@ -280,6 +285,7 @@ class Data {
   std::shared_ptr<const lyflow::Status> error_;
   std::shared_ptr<const lyflow::Bundle> bundle_;
   std::shared_ptr<const lyflow::Image> image_;
+  std::shared_ptr<ValueCache> valueCache_;
 };
 
 /// 一根线带一组有关系的数据（m8-plan L1）：`{ kind, 有序的 名字 → Data }`。

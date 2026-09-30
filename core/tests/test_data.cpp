@@ -270,7 +270,7 @@ TEST_CASE("jsonNumber 对非有限值给出合法 JSON") {
 
 // ------------------------------------------- 图像（docs/image-plan.md §1）
 
-TEST_CASE("Image：类型名往返、元素数是像素数、valueJson 逐通道统计只算有限值、像素不进 JSON") {
+TEST_CASE("Image：类型名往返、元素数是像素数、valueJson 逐通道统计只算有限值且只算一次、像素不进 JSON") {
   CHECK(kindFromTypeName("Image") == Data::Kind::Image);
   CHECK(std::string(typeNameFromKind(Data::Kind::Image)) == "Image");
 
@@ -307,6 +307,20 @@ TEST_CASE("Image：类型名往返、元素数是像素数、valueJson 逐通道
   CHECK(fv["mean"] == nlohmann::json::array({4.0}));
   fp[1] = std::numeric_limits<float>::infinity();
   CHECK(nlohmann::json::parse(Data::image(f).valueJson())["mean"][0].is_null());
+
+  // 统计只算一次、浅拷贝共用（Image 不可变）：之后再改那块缓冲（违反约定）也看不到 —— 证明第二次没重扫
+  {
+    Image once = Image::allocate(2, 1, 1, PixelDepth::U8);
+    std::uint8_t* raw = once.mutablePixels();
+    raw[0] = 10;
+    raw[1] = 30;
+    const Data a = Data::image(std::move(once));
+    const std::string first = a.valueJson();
+    raw[1] = 250;
+    const Data b = a;  // 浅拷贝
+    CHECK(b.valueJson() == first);
+    CHECK(nlohmann::json::parse(first)["max"] == nlohmann::json::array({30}));
+  }
 
   // 不完整的图像（通道 2、没有像素）consistent 为假
   Image bad;

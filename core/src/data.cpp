@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <mutex>
 
 #include "lyflow/json_writer.h"
 
@@ -355,10 +356,16 @@ Data Data::bundle(lyflow::Bundle b) {
   return d;
 }
 
+struct Data::ValueCache {
+  std::once_flag once;
+  std::string json;
+};
+
 Data Data::image(std::shared_ptr<const lyflow::Image> i) {
   Data d;
   d.kind_ = Kind::Image;
   d.image_ = std::move(i);
+  d.valueCache_ = std::make_shared<ValueCache>();
   return d;
 }
 
@@ -482,6 +489,14 @@ std::size_t Data::elementCount() const {
 }
 
 std::string Data::valueJson() const {
+  if (valueCache_) {
+    std::call_once(valueCache_->once, [this] { valueCache_->json = valueJsonUncached(); });
+    return valueCache_->json;
+  }
+  return valueJsonUncached();
+}
+
+std::string Data::valueJsonUncached() const {
   // 点云与 Indices 走二进制通道（ADR-0006），这里给空串。
   if (kind_ == Kind::None || kind_ == Kind::PointCloud || kind_ == Kind::Indices) return {};
 

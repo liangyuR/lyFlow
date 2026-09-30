@@ -35,5 +35,6 @@ C:\vcpkg\vcpkg.exe install opencv4:x64-windows
 | `image.find_circle` | 霍夫找圆，取最强的一个 → `Circle2D`（px） |
 | `image.region_stats` | 掩膜内的均值、面积、外接框（px，可接 `image.crop`） |
 | `image.to_tensor` / `tensor.to_image` | 推理前后的显式转换：scale、mean/std、NCHW 等布局 |
+| `cloud.from_depth` / `cloud.to_depth_image` | 深度图 ↔ 点云（针孔内参，x 右、y 下、z 前，米）：无效深度不出点，可选彩色图上色；投回去按 z 缓冲取最近。两者互逆（[image-plan.md](../../docs/image-plan.md) §4.1）。不用 OpenCV |
 
 测试在 `tests/test_image_ops.cpp`，图一律现造（合成渐变、`cv::circle` 画的圆），仓库不进图片。

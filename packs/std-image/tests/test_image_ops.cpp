@@ -2,8 +2,10 @@
 // 每个算子的数值、像素单位的几何、单通道契约。图像一律现造（合成渐变 / cv::circle 画的圆），仓库不进图片。
 #include <doctest/doctest.h>
 
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <string>
 #include <unordered_map>
@@ -11,6 +13,7 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include "exec/result_store.h"
 #include "helpers.h"
 #include "image_test_op.h"
 #include "lyflow/operator.h"
@@ -336,4 +339,169 @@ TEST_CASE("image.normalize / blur：u16 拉伸到 u8 满量程；不拉伸按 sc
   CHECK(c.run("image.blur", {{"ksize", Value::integer(4)}}).code == "bad_param");
   REQUIRE(c.run("image.blur").ok);
   CHECK(c.image().depth == PixelDepth::U16);
+}
+
+// ------------------------------------------------------------ 深度图 ↔ 点云（阶段 4，image-plan §4.1）
+
+namespace {
+
+Image depthU16(int w, int h, const std::function<std::uint16_t(int, int)>& value) {
+  Image d = Image::allocate(w, h, 1, PixelDepth::U16);
+  auto* p = reinterpret_cast<std::uint16_t*>(d.mutablePixels());
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) p[y * w + x] = value(x, y);
+  }
+  return d;
+}
+
+std::unordered_map<std::string, Value> intrinsics(double fx, double fy, double cx, double cy) {
+  return {{"fx", Value::number(fx)}, {"fy", Value::number(fy)}, {"cx", Value::number(cx)}, {"cy", Value::number(cy)}};
+}
+
+}  // namespace
+
+TEST_CASE("cloud.from_depth：针孔反投影（x 右、y 下、z 前）；0 与范围外不出点；step 隔点取；彩色图按像素上色；尺寸不对 / 内参非法报错") {
+  // 4×3，(u, v) 处深度 = 1000 + 100u + 10v 毫米，(0, 0) 是 0（没测到）
+  const Image d = depthU16(4, 3, [](int x, int y) { return x == 0 && y == 0 ? 0 : 1000 + 100 * x + 10 * y; });
+  Call c;
+  c.inputs["depth"] = Data::image(d);
+  auto k = intrinsics(2.0, 4.0, 1.5, 1.0);
+  REQUIRE(c.run("cloud.from_depth", k).ok);
+  const PointCloud* cloud = c.outputs["cloud"].asCloud();
+  REQUIRE(cloud != nullptr);
+  CHECK(cloud->pointCount() == 11);
+  CHECK_FALSE(cloud->hasRgb());
+  // 第一个出来的点是 (u=1, v=0)：z = 1.1 m，x = (1 − 1.5)·1.1 / 2，y = (0 − 1)·1.1 / 4
+  CHECK(cloud->xyz[0] == doctest::Approx((1 - 1.5) * 1.1 / 2));
+  CHECK(cloud->xyz[1] == doctest::Approx((0 - 1.0) * 1.1 / 4));
+  CHECK(cloud->xyz[2] == doctest::Approx(1.1));
+
+  auto ranged = k;
+  ranged["minDepth"] = Value::number(1.15);
+  ranged["maxDepth"] = Value::number(1.305);
+  REQUIRE(c.run("cloud.from_depth", ranged).ok);
+  // 1.15 ≤ z ≤ 1.3：u=2（1.2 / 1.21 / 1.22）与 u=3（1.3 那一个）
+  CHECK(c.outputs["cloud"].asCloud()->pointCount() == 4);
+
+  auto stepped = k;
+  stepped["step"] = Value::integer(2);
+  REQUIRE(c.run("cloud.from_depth", stepped).ok);
+  CHECK(c.outputs["cloud"].asCloud()->pointCount() == 3);  // (0,0) 无效，(2,0) (0,2) (2,2)
+
+  // 彩色图：u8 原样；u16 取高 8 位
+  Image rgb = Image::allocate(4, 3, 3, PixelDepth::U8);
+  for (int i = 0; i < 12; ++i) {
+    rgb.mutablePixels()[i * 3] = static_cast<std::uint8_t>(i * 10);
+    rgb.mutablePixels()[i * 3 + 1] = 7;
+    rgb.mutablePixels()[i * 3 + 2] = 200;
+  }
+  c.inputs["color"] = Data::image(rgb);
+  REQUIRE(c.run("cloud.from_depth", k).ok);
+  const PointCloud* colored = c.outputs["cloud"].asCloud();
+  REQUIRE(colored->hasRgb());
+  CHECK(std::vector<std::uint8_t>(colored->rgb.begin(), colored->rgb.begin() + 3) ==
+        std::vector<std::uint8_t>{10, 7, 200});  // 第一个点是像素 1
+  Image rgb16 = Image::allocate(4, 3, 3, PixelDepth::U16);
+  reinterpret_cast<std::uint16_t*>(rgb16.mutablePixels())[3] = 0xAB12;  // 像素 1 的 R
+  c.inputs["color"] = Data::image(rgb16);
+  REQUIRE(c.run("cloud.from_depth", k).ok);
+  CHECK(c.outputs["cloud"].asCloud()->rgb[0] == 0xAB);
+
+  c.inputs["color"] = Data::image(Image::allocate(5, 3, 3, PixelDepth::U8));
+  CHECK(c.run("cloud.from_depth", k).code == "bad_input");
+  c.inputs.erase("color");
+  auto bad = k;
+  bad["fx"] = Value::number(0);
+  CHECK(c.run("cloud.from_depth", bad).code == "bad_param");
+}
+
+TEST_CASE("深度图 → cloud.from_depth → cloud.to_depth_image 来回一趟：u16 与 f32 都逐像素相同（无效像素仍是 0）；z 缓冲取最近") {
+  const int W = 64, H = 48;
+  const auto k = intrinsics(80.0, 82.0, 31.5, 23.0);
+  SUBCASE("u16 毫米") {
+    const Image d = depthU16(W, H, [](int x, int y) {
+      return (x * 7 + y * 3) % 11 == 0 ? 0 : static_cast<std::uint16_t>(500 + x * 25 + y * 11);
+    });
+    Call c;
+    c.inputs["depth"] = Data::image(d);
+    REQUIRE(c.run("cloud.from_depth", k).ok);
+    c.inputs.clear();
+    c.inputs["cloud"] = c.outputs["cloud"];
+    auto back = k;
+    back["width"] = Value::integer(W);
+    back["height"] = Value::integer(H);
+    REQUIRE(c.run("cloud.to_depth_image", back).ok);
+    const Image& out = c.image("depth");
+    REQUIRE(out.depth == PixelDepth::U16);
+    CHECK(std::memcmp(out.pixels.get(), d.pixels.get(), d.byteSize()) == 0);
+  }
+  SUBCASE("f32 米") {
+    Image d = Image::allocate(W, H, 1, PixelDepth::F32);
+    auto* p = reinterpret_cast<float*>(d.mutablePixels());
+    for (int i = 0; i < W * H; ++i) p[i] = i % 13 == 0 ? 0.0f : 0.4f + 0.001f * static_cast<float>(i % 500);
+    Call c;
+    c.inputs["depth"] = Data::image(d);
+    auto m = k;
+    m["depthScale"] = Value::number(1.0);
+    REQUIRE(c.run("cloud.from_depth", m).ok);
+    c.inputs.clear();
+    c.inputs["cloud"] = c.outputs["cloud"];
+    auto back = k;
+    back["width"] = Value::integer(W);
+    back["height"] = Value::integer(H);
+    back["depth"] = Value::text("f32");
+    REQUIRE(c.run("cloud.to_depth_image", back).ok);
+    const Image& out = c.image("depth");
+    for (int i = 0; i < W * H; ++i) {
+      CHECK_MESSAGE(out.at(i % W, i / W, 0) == doctest::Approx(p[i]).epsilon(1e-6), "像素 ", i);
+    }
+  }
+  SUBCASE("同一个像素落两个点取近的；z ≤ 0 与投影到图外的点丢掉") {
+    PointCloud cloud;
+    cloud.push(0.0f, 0.0f, 2.0f);   // 投到主点 (31.5→32, 23)
+    cloud.push(0.0f, 0.0f, 1.5f);   // 同一像素、更近
+    cloud.push(0.0f, 0.0f, -1.0f);  // 相机后面
+    cloud.push(100.0f, 0.0f, 1.0f); // 图外
+    Call c;
+    c.inputs["cloud"] = Data::cloud(std::move(cloud));
+    auto back = k;
+    back["width"] = Value::integer(W);
+    back["height"] = Value::integer(H);
+    REQUIRE(c.run("cloud.to_depth_image", back).ok);
+    const Image& out = c.image("depth");
+    CHECK(out.at(32, 23, 0) == 1500.0);
+    double nonzero = 0;
+    for (int y = 0; y < H; ++y) {
+      for (int x = 0; x < W; ++x) nonzero += out.at(x, y, 0) != 0 ? 1 : 0;
+    }
+    CHECK(nonzero == 1);
+  }
+}
+
+TEST_CASE("推理链路：图像 → image.to_tensor（CHW）→ ml.onnx_run → tensor.to_image，形状一路对上（要 LYFLOW_TEST_ONNX_MODEL）") {
+  // 模型是 [N, 6, 1280] → [N, 8, 1280] 的剖面模型（std-ml 的测试同一个前提）：拿一张 1280×6 的单通道图当 [1, 6, 1280] 喂进去。
+  // 验的是链路通、形状对，不是视觉语义（image-plan §4.1）
+  const char* model = std::getenv("LYFLOW_TEST_ONNX_MODEL");
+  if (model == nullptr || *model == '\0') {
+    MESSAGE("跳过：没设 LYFLOW_TEST_ONNX_MODEL（指向一个 [N,6,1280] → [N,8,1280] 的 onnx 模型）");
+    return;
+  }
+  lyflow::test::ensureTestOps();
+  const Json doc = test::makeGraph(
+      {test::N{"img", "test.make_image", Json{{"width", 1280}, {"height", 6}, {"channels", 1}, {"depth", "f32"}}},
+       test::N{"tensor", "image.to_tensor", Json{{"layout", "CHW"}, {"scale", 0.001}}},
+       test::N{"infer", "ml.onnx_run", Json{{"modelPath", std::string(model)}}},
+       test::N{"back", "tensor.to_image", Json::object()}},
+      {test::E{"img.image", "tensor.image"}, test::E{"tensor.tensor", "infer.input"},
+       test::E{"infer.output", "back.tensor"}});
+  test::Session s(doc);
+  test::RunLog& log = s.wait();
+  REQUIRE_MESSAGE(log.runStatus() == "ok", log.events.back().dump());
+  Data tensor;
+  REQUIRE(exec::ResultStore::instance().get(s.runId(), "infer", "output", tensor));
+  CHECK(tensor.asTensor()->shape == std::vector<std::int64_t>{1, 8, 1280});
+  Data image;
+  REQUIRE(exec::ResultStore::instance().get(s.runId(), "back", "image", image));
+  CHECK(std::vector<int>{image.asImage()->width, image.asImage()->height, image.asImage()->channels} ==
+        std::vector<int>{1280, 8, 1});
 }
