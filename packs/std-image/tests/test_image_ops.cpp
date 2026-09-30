@@ -407,12 +407,28 @@ TEST_CASE("cloud.from_depth：针孔反投影（x 右、y 下、z 前）；0 与
   REQUIRE(c.run("cloud.from_depth", k).ok);
   CHECK(c.outputs["cloud"].asCloud()->rgb[0] == 0xAB);
 
+  // f32 的 RGBA 彩色图：0..1 映射到 0..255，alpha 不用
+  Image rgbaF = Image::allocate(4, 3, 4, PixelDepth::F32);
+  float* fp = reinterpret_cast<float*>(rgbaF.mutablePixels());
+  fp[4] = 0.5f;  // 像素 1 的 R
+  fp[5] = 2.0f;  // 超出 1 截到 255
+  c.inputs["color"] = Data::image(rgbaF);
+  REQUIRE(c.run("cloud.from_depth", k).ok);
+  const auto& rgbF = c.outputs["cloud"].asCloud()->rgb;
+  CHECK(std::vector<int>{rgbF[0], rgbF[1], rgbF[2]} == std::vector<int>{128, 255, 0});
+
   c.inputs["color"] = Data::image(Image::allocate(5, 3, 3, PixelDepth::U8));
   CHECK(c.run("cloud.from_depth", k).code == "bad_input");
+  c.inputs["color"] = Data::image(Image::allocate(4, 3, 1, PixelDepth::U8));
+  CHECK(c.run("cloud.from_depth", k).code == "bad_input");  // 单通道不是彩色图
   c.inputs.erase("color");
   auto bad = k;
   bad["fx"] = Value::number(0);
   CHECK(c.run("cloud.from_depth", bad).code == "bad_param");
+  auto flipped = k;
+  flipped["minDepth"] = Value::number(2.0);
+  flipped["maxDepth"] = Value::number(1.0);
+  CHECK(c.run("cloud.from_depth", flipped).code == "bad_param");  // 修前：静默出一片空云（review 修正 PR #2）
 }
 
 TEST_CASE("深度图 → cloud.from_depth → cloud.to_depth_image 来回一趟：u16 与 f32 都逐像素相同（无效像素仍是 0）；z 缓冲取最近") {
@@ -476,6 +492,29 @@ TEST_CASE("深度图 → cloud.from_depth → cloud.to_depth_image 来回一趟�
     }
     CHECK(nonzero == 1);
   }
+  SUBCASE("投影超出 32 位的点丢掉，不落进第 0 列；u16 量程外的点不占像素（review 修正 PR #2）") {
+    PointCloud cloud;
+    cloud.push(0.0f, 0.0f, 1.2f);     // 主点，1.2 m
+    cloud.push(0.0f, 0.0f, 0.0003f);  // 同一像素，0.3 mm：u16 取整成 0，修前抢下像素写成 0
+    cloud.push(100.0f, 0.0f, 1e-6f);  // u = 80·100/1e-6 = 8e9：修前 MSVC 的 lround 返回 0，落进 (0, 23)
+    cloud.push(0.0f, 5.0f, 80.0f);    // 80 m = 80000 mm > 65535：修前截成 65535 冒充合法深度
+    Call c;
+    c.inputs["cloud"] = Data::cloud(std::move(cloud));
+    auto back = k;
+    back["width"] = Value::integer(W);
+    back["height"] = Value::integer(H);
+    REQUIRE(c.run("cloud.to_depth_image", back).ok);
+    const Image& u16 = c.image("depth");
+    CHECK(u16.at(32, 23, 0) == 1200.0);
+    CHECK(u16.at(0, 23, 0) == 0.0);
+    CHECK(u16.at(32, 28, 0) == 0.0);  // 80 m 那个点投到 v = 82·5/80 + 23 ≈ 28
+    back["depth"] = Value::text("f32");
+    REQUIRE(c.run("cloud.to_depth_image", back).ok);
+    const Image& f32 = c.image("depth");
+    CHECK(f32.at(0, 23, 0) == 0.0);  // 修前这里是 1e-6 的假深度
+    CHECK(f32.at(32, 23, 0) == doctest::Approx(0.0003));  // f32 没有量程问题：最近的就是它
+    CHECK(f32.at(32, 28, 0) == doctest::Approx(80.0));
+  }
 }
 
 TEST_CASE("推理链路：图像 → image.to_tensor（CHW）→ ml.onnx_run → tensor.to_image，形状一路对上（要 LYFLOW_TEST_ONNX_MODEL）") {
@@ -484,6 +523,11 @@ TEST_CASE("推理链路：图像 → image.to_tensor（CHW）→ ml.onnx_run →
   const char* model = std::getenv("LYFLOW_TEST_ONNX_MODEL");
   if (model == nullptr || *model == '\0') {
     MESSAGE("跳过：没设 LYFLOW_TEST_ONNX_MODEL（指向一个 [N,6,1280] → [N,8,1280] 的 onnx 模型）");
+    return;
+  }
+  if (ensureRegistry().find("ml.onnx_run") == nullptr) {
+    // 点名构建（LYFLOW_STD_PACKS=0 LYFLOW_PACKS=std-image）没有 std-ml
+    MESSAGE("跳过：这次构建没编 std-ml，没有 ml.onnx_run");
     return;
   }
   lyflow::test::ensureTestOps();

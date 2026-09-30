@@ -98,7 +98,7 @@ struct Image {
 | IO | `io.load_image`（png / jpg / bmp / tif，参数 `mode`：原样 / 灰度 / 彩色；u16 原样保留）、`io.save_image` | Image |
 | 基础 | `image.to_gray`、`image.resize`、`image.crop`（像素矩形参数，`semantic="roi"`）、`image.blur`（高斯 / 中值）、`image.normalize`（位深转换 + 线性拉伸） | Image |
 | 分割与测量 | `image.threshold`（固定 / Otsu / 自适应，输入契约 `shape: [-1, -1, 1]`）、`image.morphology`、`image.find_circle`（Hough，取最强一个）、`image.region_stats`（掩膜内的均值、面积） | Image 掩膜 / Circle2D / Measurement |
-| 跨域 | `image.to_tensor`、`tensor.to_image`（I9）；`cloud.from_depth`（u16 深度图 + fx fy cx cy + 深度比例 → PointCloud，可选再给一张彩色图填 rgb）、`cloud.to_depth_image`（有序云或投影 → 深度图） | Tensor / Image / PointCloud |
+| 跨域 | `image.to_tensor`、`tensor.to_image`（I9）；`cloud.from_depth`（u16 深度图 + fx fy cx cy + 深度比例 → PointCloud，可选再给一张彩色图填 rgb）、`cloud.to_depth_image`（按内参投影 → 深度图） | Tensor / Image / PointCloud |
 
 三条验收链路：
 
@@ -116,7 +116,7 @@ struct Image {
 | D4 | **无效深度跳过**：0、非有限值、落在 `[minDepth, maxDepth]` 外（上限 0 = 不限）的像素不出点。输出是无序点云 | core 的点云是无序的（ADR-0005 背景）；有序云要改数据模型，不在这次 |
 | D5 | 可选 `color` 输入：与深度图同样大的 RGB(A) 图，按像素给点上色（u8 原样；u16 取高 8 位；f32 按 0..1 映射） | 深度相机大多带一张对齐好的彩色图；不对齐的要先配准，那不是这个算子的事 |
 | D6 | `step`：每隔几个像素取一个（1 = 全取） | 百万像素的深度图出百万个点，调参时先稀疏看 |
-| D7 | `cloud.to_depth_image`：按内参把点投影回去，一个像素落多个点取**最近的**（z 缓冲），落不到点的像素是 0；z ≤ 0 与投影到图外的点丢掉。输出 u16（÷ depthScale 四舍五入）或 f32（米） | 与 from_depth 互逆：同一组内参来回一趟，有效像素逐个相等（验收） |
+| D7 | `cloud.to_depth_image`：按内参把点投影回去，一个像素落多个点取**最近的**（z 缓冲），落不到点的像素是 0；z ≤ 0 与投影到图外的点丢掉。输出 u16（÷ depthScale 四舍五入）或 f32（米）；u16 时取整后为 0 或大于 65535 的点**在进 z 缓冲之前**丢掉（否则前者抢下像素又写成 0，后者被截成 65535 冒充合法深度） | 与 from_depth 互逆：同一组内参、同一个 depthScale（f32 输出是米，对应 from_depth 的 depthScale = 1）来回一趟，有效像素逐个相等（验收） |
 | D8 | 两个算子放在 `std-image`（图像域），但**不用 OpenCV** | 包的依赖已经在了；算法就是几行针孔公式 |
 
 另外两件顺带做的：

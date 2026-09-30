@@ -67,6 +67,9 @@ Status fromDepthCompute(const Inputs& inputs, const ParamView& params, Outputs& 
   const double minZ = params.number("minDepth");
   const double maxZ = params.number("maxDepth");
   const int step = static_cast<int>(params.integer("step"));
+  if (maxZ > 0 && minZ > maxZ) {
+    return badParam("minDepth 比 maxDepth 还大，一个点都出不来（maxDepth = 0 表示不限）", "minDepth");
+  }
   const Image* color = nullptr;
   if (inputs.has("color")) {
     color = inputs.get("color").asImage();
@@ -127,10 +130,21 @@ Status toDepthCompute(const Inputs& inputs, const ParamView& params, Outputs& ou
     if ((p & 0xFFFF) == 0 && ctx.cancelled()) return Status::Ok();
     const double x = cloud.xyz[p * 3], y = cloud.xyz[p * 3 + 1], z = cloud.xyz[p * 3 + 2];
     if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) || z <= 0) continue;
-    const long u = std::lround(k.fx * x / z + k.cx);
-    const long v = std::lround(k.fy * y / z + k.cy);
-    if (u < 0 || v < 0 || u >= w || v >= h) continue;
-    float& slot = zbuf[static_cast<std::size_t>(v) * w + static_cast<std::size_t>(u)];
+    // 先在 double 上判断落在图内、再取整：lround 返回 long，Windows 上是 32 位，超范围（z 几乎为 0 的点
+    // 投出几十亿）时 MSVC 返回 0 —— 0 能过越界检查，点就被写进第 0 列 / 行（review 修正，PR #2）。
+    // NaN 也在这里被比较挡掉
+    const double pu = k.fx * x / z + k.cx;
+    const double pv = k.fy * y / z + k.cy;
+    if (!(pu > -0.5 && pu < w - 0.5 && pv > -0.5 && pv < h - 0.5)) continue;
+    // u16 输出取整后为 0（比半个单位还近）或超过 65535 的点丢掉：不然前者抢下像素又被写成 0（无效），
+    // 后者被截成 65535 冒充一个合法深度（D7）
+    if (asU16) {
+      const double d = std::round(z / scale);
+      if (d < 1 || d > 65535) continue;
+    }
+    const auto u = static_cast<std::size_t>(std::lround(pu));
+    const auto v = static_cast<std::size_t>(std::lround(pv));
+    float& slot = zbuf[v * static_cast<std::size_t>(w) + u];
     if (static_cast<float>(z) < slot) {
       if (!std::isfinite(slot)) ++kept;
       slot = static_cast<float>(z);
@@ -142,8 +156,8 @@ Status toDepthCompute(const Inputs& inputs, const ParamView& params, Outputs& ou
     const float z = zbuf[i];
     const bool hit = std::isfinite(z);
     if (asU16) {
-      const double d = hit ? std::round(z / scale) : 0.0;
-      const auto u16 = static_cast<std::uint16_t>(std::clamp(d, 0.0, 65535.0));
+      // 进 z 缓冲之前按 double 查过 1 ≤ d ≤ 65535；z 缓冲存的是 float，边上差半个单位也不许溢出 / 变成 0
+      const auto u16 = static_cast<std::uint16_t>(hit ? std::clamp(std::round(z / scale), 1.0, 65535.0) : 0.0);
       std::memcpy(out.mutablePixels() + i * 2, &u16, 2);
     } else {
       const float f = hit ? z : 0.0f;  // 没落到点的像素是 0，与 from_depth 的「0 = 没测到」一致
@@ -219,7 +233,9 @@ void registerCloudToDepthImage(Registry& r) {
   op.category = "图像/转换";
   op.keywords = {"depth", "project", "range image", "深度图", "投影", "点云"};
   op.doc = "按针孔内参把相机坐标系下的点云投影成深度图：一个像素落多个点取最近的，没落到点的像素是 0，"
-           "z ≤ 0 与投影到图外的点丢掉。与 cloud.from_depth 互逆（同一组内参来回一趟，有效像素不变）。";
+           "z ≤ 0 与投影到图外的点丢掉；u16 输出时超出量程（取整后为 0 或大于 65535）的点也丢掉。"
+           "与 cloud.from_depth 互逆：同一组内参、同一个 depthScale（f32 输出是米，对应 from_depth 的 depthScale = 1）"
+           "来回一趟，有效像素不变。";
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "相机坐标系下的点云（x 右、y 下、z 前，米）。", true}};
   op.outputs = {img::imageOut("depth", "单通道深度图。")};
   std::vector<Param> params = intrinsicParams();
