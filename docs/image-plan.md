@@ -98,13 +98,31 @@ struct Image {
 | IO | `io.load_image`（png / jpg / bmp / tif，参数 `mode`：原样 / 灰度 / 彩色；u16 原样保留）、`io.save_image` | Image |
 | 基础 | `image.to_gray`、`image.resize`、`image.crop`（像素矩形参数，`semantic="roi"`）、`image.blur`（高斯 / 中值）、`image.normalize`（位深转换 + 线性拉伸） | Image |
 | 分割与测量 | `image.threshold`（固定 / Otsu / 自适应，输入契约 `shape: [-1, -1, 1]`）、`image.morphology`、`image.find_circle`（Hough，取最强一个）、`image.region_stats`（掩膜内的均值、面积） | Image 掩膜 / Circle2D / Measurement |
-| 跨域 | `image.to_tensor`、`tensor.to_image`（I9）；`cloud.from_depth`（u16 深度图 + fx fy cx cy + 深度比例 → PointCloud，可选再给一张彩色图填 rgb）、`cloud.to_depth_image`（有序云或投影 → 深度图） | Tensor / Image / PointCloud |
+| 跨域 | `image.to_tensor`、`tensor.to_image`（I9）；`cloud.from_depth`（u16 深度图 + fx fy cx cy + 深度比例 → PointCloud，可选再给一张彩色图填 rgb）、`cloud.to_depth_image`（按内参投影 → 深度图） | Tensor / Image / PointCloud |
 
 三条验收链路：
 
 - **纯 2D**：`load_image → to_gray → threshold → region_stats`，得到一个带上下限判定的 Measurement；
 - **推理**：`load_image → resize → to_tensor → ml.onnx_run → tensor.to_image`；
 - **跨域**：`load_image(深度 u16) → cloud.from_depth → filter.passthrough → …`。一张图里点云和图像两个域都有，这才是「数据模型通用」的真实检验。
+
+### 4.1 阶段 4 的约定（深度图 ↔ 点云，2026-09-30 定）
+
+| # | 决定 | 理由 |
+|---|---|---|
+| D1 | **相机坐标系按 OpenCV 针孔约定**：x 向右、y 向下、z 向前（离开相机），单位米。`x = (u − cx)·z / fx`，`y = (v − cy)·z / fy`，`u, v` 是像素中心的整数坐标 | 与 OpenCV / 绝大多数相机 SDK 的内参同一套，拿到手的 fx fy cx cy 不用换算；点云要换到机器人或世界坐标系就接 `transform.apply` |
+| D2 | **内参是算子参数**（fx fy cx cy，像素），不进数据模型 | ADR-0026「不做」：出现第二个需要内参的算子前不加相机类型。两个算子各带一份，参数可以提升成图参数共用 |
+| D3 | **深度值 × `depthScale` = 米**。u16 默认 0.001（毫米深度图，最常见）；f32 深度图一般是米，设 1 | 相机 SDK 的深度单位五花八门，一个乘数就能覆盖 |
+| D4 | **无效深度跳过**：0、非有限值、落在 `[minDepth, maxDepth]` 外（上限 0 = 不限）的像素不出点。输出是无序点云 | core 的点云是无序的（ADR-0005 背景）；有序云要改数据模型，不在这次 |
+| D5 | 可选 `color` 输入：与深度图同样大的 RGB(A) 图，按像素给点上色（u8 原样；u16 取高 8 位；f32 按 0..1 映射） | 深度相机大多带一张对齐好的彩色图；不对齐的要先配准，那不是这个算子的事 |
+| D6 | `step`：每隔几个像素取一个（1 = 全取） | 百万像素的深度图出百万个点，调参时先稀疏看 |
+| D7 | `cloud.to_depth_image`：按内参把点投影回去，一个像素落多个点取**最近的**（z 缓冲），落不到点的像素是 0；z ≤ 0 与投影到图外的点丢掉。输出 u16（÷ depthScale 四舍五入）或 f32（米）；u16 时取整后为 0 或大于 65535 的点**在进 z 缓冲之前**丢掉（否则前者抢下像素又写成 0，后者被截成 65535 冒充合法深度） | 与 from_depth 互逆：同一组内参、同一个 depthScale（f32 输出是米，对应 from_depth 的 depthScale = 1）来回一趟，有效像素逐个相等（验收） |
+| D8 | 两个算子放在 `std-image`（图像域），但**不用 OpenCV** | 包的依赖已经在了；算法就是几行针孔公式 |
+
+另外两件顺带做的：
+- **图像统计缓存**（PR #1 review 留下的一条）：`Data::valueJson` 对图像只算一次，存在 Data 共享的缓存里。深度图正是大图，每次取输出元信息都整图重算会拖慢结果仓。
+- **推理链路验证**：用桌面 DTS 文件夹里的 `v12s0.onnx`（gap 的剖面模型，`[N, 6, 1280] → [N, 8, 1280]`，不是视觉模型）走一遍
+  `图像 → image.to_tensor（CHW）→ ml.onnx_run → tensor.to_image`，验证的是链路通、形状对，不是视觉语义。
 
 ## 5. 取数与显示
 
@@ -182,7 +200,7 @@ HTTP 桩（test-server）张量那条路给的是 501，因为桩没有常驻结
 | 1 ✅ | §1 数据模型 + §2 清单（不含 OpenCV）+ ABI v15 + 载荷 + 连线查看器 `ImageView`。测试源用 core 测试里的合成算子 `test.make_image` | 3–4 天 | doctest（取视图、切片、level、越界、磁盘缓存往返、摘要）；cargo（载荷布局）；e2e `peek` 加一组「双击看图、悬停读值」；`e2e:http` 走 `.lyim` |
 | 2 ✅ | `std-image` 包 + adapter + §4 前三组算子 + `image.to_tensor` / `tensor.to_image` | 3–4 天 | 包内 doctest（adapter 往返、BGR/RGB、零拷贝持有）；纯 2D 与推理两条链路在 CLI 跑通；e2e 一条「读图 → 二值化 → 看」 |
 | 3 ✅ | 主预览图像模式 + 几何叠画 + 图像上拖 ROI + MCP 图片返回 | 3 天 | e2e `m8b` 拖框组加一例；MCP 冒烟调一次 `view_output_image` |
-| 4 | 跨域：`cloud.from_depth` / `cloud.to_depth_image` | 2 天 | 跨域链路跑通；深度图转点云再转回，与原图逐像素对得上 |
+| 4 ✅ | 跨域：`cloud.from_depth` / `cloud.to_depth_image` | 2 天 | 跨域链路跑通；深度图转点云再转回，与原图逐像素对得上 |
 
 每个阶段各自提交；阶段 1 结束时写 ADR-0026（Image 数据域与取数方式），并照惯例写验收记录：[image-acceptance.md](image-acceptance.md)（阶段 1–2 已写）。
 测试照 [testing.md](testing.md)：能在 doctest 测的不进 e2e，改完同步地图与数字。

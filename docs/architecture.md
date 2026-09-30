@@ -33,7 +33,7 @@
 |---|---|---|
 | `packs/std-pointcloud` | 点云处理与 2D 量测（拟合、ICP、盒裁剪） | 开 |
 | `packs/std-ml` | `ml.onnx_run` | 开 |
-| `packs/std-image` | 图像域（OpenCV，边界同 ADR-0005）：读写、基础处理、分割、找圆、区域统计、图像 ↔ 张量 | 开 |
+| `packs/std-image` | 图像域（OpenCV，边界同 ADR-0005）：读写、基础处理、分割、找圆、区域统计、图像 ↔ 张量、深度图 ↔ 点云 | 开 |
 | `packs/gap` | `gap.*`（间隙/段差测量） | 关，`LYFLOW_PACKS=gap` 打开 |
 | `packs/dts` | `dts.*`（车门胶条面差） | 关，`LYFLOW_PACKS=dts` 打开 |
 

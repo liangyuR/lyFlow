@@ -1,7 +1,7 @@
-# 图像数据域验收（阶段 1–3）
+# 图像数据域验收（阶段 1–4）
 
 > 2026-09-29。计划 [image-plan.md](image-plan.md)，决定 [ADR-0026](adr/0026-image-data-domain.md)。
-> 阶段 4（深度图 ↔ 点云）未做。
+> 四个阶段都已做（阶段 4 在 PR #1 合并之后另起一个分支）。
 
 ## 阶段 1：数据模型、C ABI v15、连线查看器
 
@@ -48,6 +48,37 @@ CLI 手工跑的那一次：320×200 的合成 RGB 图先 `io.save_image` 成 `c
 | 检查器里像素几何的值标 `px` | ✅ 手工看过 | `Inspector.tsx` |
 | MCP `view_output_image`：LYIM 解码、u16 拉伸、最近邻缩、PNG 读回；冒烟里真调一次拿到 PNG 与元信息 | ✅ | `packages/mcp/test/cloud.test.ts`、`smoke.test.ts` |
 | 注册表自检：`unit = px` 的 roi 要有 Image 输入、不给 roiBackdrop | ✅ | `registry.cpp`（std-image 的 `image.crop.roi` 过自检） |
+
+## 阶段 4：深度图 ↔ 点云、图像统计缓存、推理链路
+
+约定见 image-plan §4.1（D1–D8）。
+
+| 验收 | 结果 | 在哪 |
+|---|---|---|
+| `cloud.from_depth`：针孔反投影的数值；0 与深度范围外不出点；step 隔点取；彩色图按像素上色（u8 原样、u16 取高 8 位）；尺寸不对 / 内参非法报错 | ✅ | `packs/std-image/tests/test_image_ops.cpp` |
+| 深度图 → 点云 → 深度图来回一趟：u16（毫米）与 f32（米）都逐像素相同，无效像素仍是 0 | ✅ | 同上 |
+| `cloud.to_depth_image` 的 z 缓冲：同一像素取最近；z ≤ 0 与图外的点丢掉 | ✅ | 同上 |
+| 跨域链路在 CLI 跑通：`io.load_image（u16 PNG）→ cloud.from_depth → filter.passthrough → cloud.to_depth_image`，中文目录与文件名 | ✅ 手工 | 见下 |
+| 图像的逐通道统计只算一次，浅拷贝共用 | ✅ | `core/tests/test_data.cpp` |
+| 推理链路：图像 → `image.to_tensor`（CHW）→ `ml.onnx_run` → `tensor.to_image`，形状一路对上 | ✅（设了 `LYFLOW_TEST_ONNX_MODEL`） | `test_image_ops.cpp`；模型是桌面 DTS 文件夹的 `v12s0.onnx` |
+
+CLI 那一次：320×240 的合成 u16 深度图存成 `跨域/深度.png`，读回转点云（76800 个像素里 2 个为 0 → 76798 个点），
+z ≤ 20 m 的 31448 个点投回去，最大深度正好 20000 mm；整云投回去的深度图与原图的像素**逐字节相同**。
+
+PR #2 的 review（只读子代理）找出的问题，一起修了：
+
+| # | 问题 | 修法 | 测试 |
+|---|---|---|---|
+| 中 | `to_depth_image` 取整用 `lround`，返回 `long`（Windows 上 32 位）：z 几乎为 0 的点投出几十亿，MSVC 返回 0，能过越界检查，点落进第 0 列 / 行、还是最近的，把那里的有效深度抹掉 | 先在 double 上判断有限且落在图内，再取整 | `test_image_ops.cpp` 来回一趟用例的新 SUBCASE：8e9 的点不落进 (0, 23) |
+| 低 | u16 输出里比半个单位还近的点抢下像素又写成 0；超过 65535 的被截成 65535 | 这两种点在进 z 缓冲之前丢掉（D7 写明） | 同一个 SUBCASE：0.3 mm 噪点不挤掉同一像素的 1.2 m 真点，80 m 的点在 u16 里不出现、在 f32 里照常 |
+| 低 | `minDepth > maxDepth` 静默出空云 | 报 bad_param | from_depth 用例加一行 |
+| 低 | 文档「两者互逆」写得太宽；§4 表里还写着「有序云」 | 写明要同一个 depthScale；表改掉 | —— |
+| 低 | 缺 f32 / RGBA 彩色图、单通道彩色图被拒的测试；设了模型但没编 std-ml 时推理用例会失败 | 补测试；没有 `ml.onnx_run` 时跳过 | from_depth 用例加几行 |
+
+关于推理链路：`v12s0.onnx` 是 gap 的剖面模型（`channels [N, 6, 1280] → logits [N, 8, 1280]`，PyTorch 导出），不是视觉模型。
+这里拿一张 1280×6 的单通道图当 `[1, 6, 1280]` 喂进去，验的是**链路通、形状对**，不是视觉语义。
+同一个模型也让 std-ml 那两条一直跳过的用例跑了起来（`ml.onnx_run` 零张量给出 `[2, 8, 1280]`、形状不符报 bad_input），都通过。
+这三条在没设环境变量时照旧打出「跳过」（`pnpm check` 默认不设）。
 
 ## 与计划字面不同
 
@@ -98,7 +129,7 @@ CLI 手工跑的那一次：320×200 的合成 RGB 图先 `io.save_image` 成 `c
 
 ## 数字
 
-- doctest：默认 170 例；`LYFLOW_PACKS=dts` 178；`gap;dts` 260（阶段 1 +6，阶段 2 +8）。
+- doctest：默认 173 例；`LYFLOW_PACKS=dts` 181；`gap;dts` 263（阶段 1 +6，阶段 2 +8，阶段 4 +3）。
 - cargo：lib 139（+1）。editor 77（在已有用例里加行，个数不变）；MCP 30（阶段 3 +1）。
 - e2e：752 条断言、100 个分组（阶段 1–2 +5 条 +1 组，阶段 3 +6 条 +1 组，review 修正 +1 条；全量跑过，失败的 3 条是 KUN10 缺数据的已知项）；
   `e2e:http` 33（阶段 1 +1）。
