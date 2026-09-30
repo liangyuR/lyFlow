@@ -89,6 +89,7 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 | `run_graph` | 同上 + `targets?` `set?` `recipe?` `mode?` `timeoutMs?` | `POST /lyflow/run` + WS 等该 `runId` 的 `run_finished`；给了 `recipe` 先 `LYFLOW_CLI recipes --recipe` | core 的 run summary + `runId` / `runStatus` / `diagnostics`（见下），带 `recipe` 时另有 `recipe` |
 | `get_node_outputs` | `runId` `nodeId` | `GET /lyflow/runs/:id/nodes/:node/outputs` | `{outputs:[OutputInfo]}` 原样 |
 | `summarize_output` | `runId` `nodeId` `port` `maxPoints?` `head?` | 点云走 `GET …/clouds/:node/:port`，其余用 `OutputInfo.value` | 见下 |
+| `view_output_image` | `runId` `nodeId` `port` `maxEdge?`（默认 768） | `GET …/images/:node/:port?level=` 按段取齐 | **一张 PNG**（MCP 的 `image` 内容）+ 一段元信息 `{size, channels, depth, shown, range}`：u16 / f32 按这张图的有限值拉伸到 8 位，`range` 写明。只收 Image 端口 —— 张量在图里先接 `tensor.to_image`（[image-plan.md](image-plan.md) §5.5） |
 | `eval` | `graphPath` 样本 参数 `metric[]` `recipe?` … | `LYFLOW_CLI eval …` | 压紧的统计（`compact`，默认开）+ 失败样本清单 + `rowsPath` |
 | `perturb` | `graphPath` `after` `region` `axis` `metric[]` … | `LYFLOW_CLI perturb …` | `perturb_summary` 数组 + 不通过样本 + `samplesPath` + `rowsPath` |
 | `diff_graphs` | `a` `b` | `LYFLOW_CLI diff a b --json` | `{exitCode, diff}` 原样 |
@@ -199,6 +200,13 @@ MCP 只读配方，**不提供写配方的工具**（param-recipe P4.2）—— 
 - **`get_params { …, recipe }`**：「按这个配方跑时每个参数的生效值」，被图参数写入的行 `source: "graph"`、另带 `graphParam`；
   失配时 CLI 退出码 4，工具报错并带回 stderr（条目在里面）。`only` 多了 `"graph"`。
 - **`eval { …, recipe }`**：透传 `--recipe`，作用于所有样本；叠加顺序 基础 → 配方 → `params` 里的参数组 → `param`。
+
+### `view_output_image`
+
+MCP 第一次返回非文本内容：调用方拿到的是一张能直接看的图，而不是一串数。
+选的级别是「长边不超过 `maxEdge`」的最小一级（core 的块均值缩小）；HTTP 桩只给 level 0，
+这时 MCP 自己再按最近邻缩到 `maxEdge` 以内。PNG 在 MCP 进程里用 Node 自带的 zlib 编，不加依赖。
+坐标约定写在元信息的 `note` 里：左上角原点、y 向下，原图像素 —— 与图像算子输出的几何（`unit: "px"`）同一套。
 
 ### `summarize_output` 的返回
 

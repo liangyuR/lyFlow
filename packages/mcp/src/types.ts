@@ -83,7 +83,8 @@ export interface OutputValue {
   count?: number;
   min?: unknown;
   max?: unknown;
-  mean?: number | null;
+  /** Tensor 是标量，Image 是逐通道数组。 */
+  mean?: number | (number | null)[] | null;
   [key: string]: unknown;
 }
 

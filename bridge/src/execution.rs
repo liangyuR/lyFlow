@@ -339,6 +339,37 @@ pub fn encode_indices(view: &core_ffi::IndicesView) -> Vec<u8> {
     out
 }
 
+/// 图像载荷（ABI v15，docs/http-transport.md「图像」）。`.lyim` 文件（`lyflow dump`）是同一布局。
+pub const IMAGE_MAGIC: u32 = 0x4D49_594C; // 'LYIM' 小端
+/// 帧头 12 个 u32。48 是 4 的倍数：u16 / f32 像素在前端能零拷贝开类型化数组。
+pub const IMAGE_HEADER_BYTES: usize = 48;
+
+pub fn encode_image(view: &core_ffi::ImageView) -> Vec<u8> {
+    let pixels = view.pixels();
+    let padded = (pixels.len() + 3) & !3;
+    let mut out = Vec::with_capacity(IMAGE_HEADER_BYTES + padded);
+    for v in [
+        IMAGE_MAGIC,
+        view.width(),
+        view.height(),
+        view.channels(),
+        view.depth(),
+        view.level(),
+        view.full_width(),
+        view.full_height(),
+        view.row_offset(),
+        view.row_count(),
+        view.row_bytes(),
+        0,
+    ] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    // 像素本来就是小端字节（core 按本机字节序存，桥接只跑在小端机器上）
+    out.extend_from_slice(pixels);
+    out.resize(IMAGE_HEADER_BYTES + padded, 0);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -764,6 +795,41 @@ DATA ascii
         assert_eq!(empty_bytes.len(), 32 + 3 * 8, "空切片只有帧头加 shape");
         assert_eq!(u32_at(&empty_bytes, 12), 0);
         assert_eq!(u64_at(&empty_bytes, 16), 24);
+    }
+
+    #[test]
+    fn encode_image_frame_matches_the_documented_layout() {
+        let core = crate::core_ffi::core().expect("加载 core 失败");
+        // 3x2 RGB u8 的第 1 行（9 字节）：载荷补齐到 12
+        let row: Vec<u8> = (0..9).collect();
+        let view = unsafe {
+            core_ffi::ImageView::borrowed(Arc::clone(&core), 3, 2, 3, 1, 1, (6, 4), 1, &row)
+        };
+        assert_eq!(view.row_count(), 1);
+        let bytes = encode_image(&view);
+        let head: Vec<u32> = (0..12).map(|i| u32_at(&bytes, i * 4)).collect();
+        assert_eq!(head, vec![IMAGE_MAGIC, 3, 2, 3, 1, 1, 6, 4, 1, 1, 9, 0], "帧头逐项");
+        assert_eq!(&bytes[48..57], &row[..]);
+        assert_eq!(bytes.len(), 48 + 12, "像素补齐到 4 字节");
+        assert_eq!(IMAGE_HEADER_BYTES % 4, 0, "像素必须 4 字节对齐，前端才能零拷贝开 Float32Array");
+
+        let empty = unsafe { core_ffi::ImageView::borrowed(core, 3, 2, 3, 1, 0, (3, 2), 9, &[]) };
+        assert_eq!(encode_image(&empty).len(), 48, "空切片只有帧头");
+
+        // 注入图像：像素比 宽×高×通道×位深 短就不交指针（修前 core 会越界读，review 修正 PR #1）
+        let input = |len: usize| core_ffi::RunImageInput {
+            node_id: "n".into(),
+            port: "image".into(),
+            width: 3,
+            height: 2,
+            channels: 3,
+            depth: 2,
+            pixels: vec![0; len],
+        };
+        assert!(input(35).pixels_ptr().is_null(), "差一个字节");
+        assert!(!input(36).pixels_ptr().is_null(), "刚好够");
+        assert!(!input(40).pixels_ptr().is_null(), "多给的尾巴不读");
+        assert!(input(0).pixels_ptr().is_null());
     }
 
     #[test]

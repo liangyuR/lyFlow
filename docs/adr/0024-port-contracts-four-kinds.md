@@ -28,7 +28,7 @@ manifest 的端口上加一个可选的 `contract`，只有四种键：
 - `elementCount` 的口径：点云 = 点数，Indices = 下标个数，Tensor = 元素总数，其余类型固定为 1
   （`Data::elementCount()`）。
 - `finite` 只对 PointCloud（坐标）/ Tensor（全部元素）/ Measurement（value）有意义，声明在别的
-  类型上是 manifest 自检失败；同理 `shape` 只对 Tensor、`recordType` 只对 Record 有意义。
+  类型上是 manifest 自检失败；同理 `shape` 只对 Tensor（以及 Image，按 `[高, 宽, 通道]` 读，2026-09-29 补）、`recordType` 只对 Record 有意义。
 - **为什么只有四种、为什么不做表达式**：与 `Param::visibleWhen` 同一条原则 —— 需要更复杂判断
   的时候，通常说明这个算子该拆了。表达式语言要配一个求值器、一套错误信息、一份文档，而它换来
   的表达力在这四条之外几乎没有真实用例。四种之外的任何键都让 `Registry::validate()` 拒掉

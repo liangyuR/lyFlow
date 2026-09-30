@@ -102,7 +102,8 @@ export interface CacheStats {
  *  坐标一律是米；Measurement 的 value 带自己的 unit。 */
 export interface OutputValue {
   kind: string;
-  /** Box2D（两角）。Tensor 复用这两个键，但那里是标量统计量。 */
+  /** Box2D（两角）。Tensor 复用这两个键，但那里是标量统计量；Image 也用这两个键，是逐通道的数组
+   *  （非有限写成 null）—— 类型上不并进来，免得 Box2D 的读法都要多判一种，读 Image 的地方自己断言。 */
   min?: [number, number] | number | null;
   max?: [number, number] | number | null;
   /** Line2D */
@@ -119,6 +120,7 @@ export interface OutputValue {
   /** Measurement。value 为 null 表示没测出来（C++ 侧的非有限值）。 */
   value?: number | null;
   ok?: boolean;
+  /** Measurement 的单位字串；四种 2D 几何上只有 "px" 一种写法（图像算子产出的像素坐标），缺省是米。 */
   unit?: string;
   message?: string;
   verdict?: string;
@@ -135,7 +137,13 @@ export interface OutputValue {
   /** Tensor。张量本身不进 IPC，只有形状与统计量。 */
   shape?: number[];
   count?: number;
-  mean?: number | null;
+  /** Tensor 是标量；Image 是逐通道的数组。 */
+  mean?: number | (number | null)[] | null;
+  /** Image（docs/image-plan.md）。像素走二进制（getOutputImage），这里只有尺寸与逐通道统计。 */
+  width?: number;
+  height?: number;
+  channels?: number;
+  depth?: "u8" | "u16" | "f32";
 }
 
 export interface OutputStat {
@@ -437,6 +445,72 @@ export function decodeTensor(buffer: ArrayBuffer): TensorPayload {
   const shape = Array.from(new BigInt64Array(buffer, 32, rank), Number);
   const data = new Float32Array(buffer, dataOffset, count);
   return { rank, count, offset, total, shape, data };
+}
+
+export const IMAGE_MAGIC = 0x4d49594c;
+/** LYIM 帧头 12 个 u32（docs/http-transport.md「图像」）。 */
+export const IMAGE_HEADER_BYTES = 48;
+
+export interface ImagePayload {
+  /** 这一级的宽高（完整尺寸，不随行切片变）。 */
+  width: number;
+  height: number;
+  channels: number;
+  /** 每通道字节数：1 = u8，2 = u16，4 = f32。 */
+  depth: 1 | 2 | 4;
+  /** 实际给出的级别：2^level 倍块均值缩小。可能与请求的不同（HTTP 桩只给 0）。 */
+  level: number;
+  fullWidth: number;
+  fullHeight: number;
+  rowOffset: number;
+  rowCount: number;
+  rowBytes: number;
+  /** rowCount · width · channels 个通道值，零拷贝视图。 */
+  pixels: Uint8Array | Uint16Array | Float32Array;
+}
+
+export function decodeImage(buffer: ArrayBuffer): ImagePayload {
+  if (buffer.byteLength < IMAGE_HEADER_BYTES) {
+    throw new Error(`图像载荷太短（${buffer.byteLength} 字节），多半不是图像数据`);
+  }
+  const h = new DataView(buffer);
+  const magic = h.getUint32(0, true);
+  if (magic !== IMAGE_MAGIC) {
+    throw new Error(`图像载荷的 magic 不对（0x${magic.toString(16)}），响应不是图像`);
+  }
+  const u = (i: number) => h.getUint32(i * 4, true);
+  const width = u(1);
+  const height = u(2);
+  const channels = u(3);
+  const depth = u(4);
+  if (depth !== 1 && depth !== 2 && depth !== 4) {
+    throw new Error(`图像载荷的位深不认识（${depth} 字节/通道）`);
+  }
+  const rowCount = u(9);
+  const rowBytes = u(10);
+  if (buffer.byteLength < IMAGE_HEADER_BYTES + rowCount * rowBytes) {
+    throw new Error(`图像载荷太短（${buffer.byteLength} 字节），装不下 ${rowCount} 行 × ${rowBytes} 字节`);
+  }
+  const n = rowCount * width * channels;
+  const pixels =
+    depth === 1
+      ? new Uint8Array(buffer, IMAGE_HEADER_BYTES, n)
+      : depth === 2
+        ? new Uint16Array(buffer, IMAGE_HEADER_BYTES, n)
+        : new Float32Array(buffer, IMAGE_HEADER_BYTES, n);
+  return {
+    width,
+    height,
+    channels,
+    depth,
+    level: u(5),
+    fullWidth: u(6),
+    fullHeight: u(7),
+    rowOffset: u(8),
+    rowCount,
+    rowBytes,
+    pixels,
+  };
 }
 
 export interface IndicesPayload {

@@ -230,6 +230,8 @@ mod tests {
             "Measurement",
             "Record",
             "Tensor",
+            // 第二个数据域（docs/image-plan.md）
+            "Image",
         ] {
             assert!(types.contains(&ty), "类型表里少了 {ty}");
         }

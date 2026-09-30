@@ -58,7 +58,7 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                    外加 decisions（全部 FallbackChoice）。ADR-0022。
         --cache-dir <dir>（run / eval / sweep / perturb 都认；或环境变量 LYFLOW_CACHE_DIR）：结果缓存落盘，
                  另一个进程跑同一张图时贵的上游直接命中。默认关；按构建指纹分目录，重编 core 之后旧结果不再复用。
-                 只落盘确定性、耗时 ≥ 20 ms、输出全是点云或张量的节点。docs/disk-cache-plan.md
+                 只落盘确定性、耗时 ≥ 20 ms、输出全是点云、张量或图像的节点。docs/disk-cache-plan.md
   lyflow cache    info|clear --cache-dir <dir> [--stale]
         info：各个指纹目录的文件数与字节数，current 标出当前 core 的那一个；clear 删掉（--stale 只删旧指纹的）
   lyflow import   <file> --kind <kind> [--fine] [-o <out.lyflow.json>] [--base-dir <dir>]
@@ -79,6 +79,7 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
   lyflow migrate  <graph> [--write]
   lyflow manifest [--check]
   lyflow dump     <graph> <nodeId>:<port> <out.pcd> [--format <binary|ascii|binary_compressed>]
+                          图像输出写 <out.lyim>（LYIM 载荷原样落盘，docs/http-transport.md）
   lyflow sweep    <graph> --param <nodeId>.<param>=<start>:<end>:<steps> [--param ...]
                           --metric <nodeId>:<port>.<elementCount|byteSize|durationMs>
                           [--csv <out.csv>] [--base-dir <dir>]
@@ -1250,7 +1251,7 @@ fn cmd_import(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
 
 fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     if parsed.positional.len() < 3 {
-        line(err, "用法：lyflow dump <graph> <nodeId>:<port> <out.pcd>");
+        line(err, "用法：lyflow dump <graph> <nodeId>:<port> <out.pcd|out.lyim>");
         return EXIT_USAGE;
     }
     let path = parsed.positional[0].clone();

@@ -31,8 +31,19 @@ function joinPath(dir: string, file: string): string {
   return /[\\/]$/.test(dir) ? dir + file : `${dir}/${file}`;
 }
 
+/** 点云上的框（米 / 毫米，画在 2D 剖面里）。像素框另走 imageRoiParams —— 两种坐标系不混。 */
 function isRoi(p: Param): boolean {
-  return p.semantic === "roi" && p.type === "vec4f";
+  return p.semantic === "roi" && p.type === "vec4f" && p.unit !== "px";
+}
+
+/** 像素框（unit = px，docs/image-plan.md 阶段 3）：画在节点输入的那张图上，主预览的图像模式里拖。
+ *  只算当前可见的。 */
+export function imageRoiParams(op: OperatorDesc | undefined, node: GraphNode | undefined): Param[] {
+  if (!op || !node) return [];
+  const eff = effectiveParams(op, node);
+  return op.params.filter(
+    (p) => p.semantic === "roi" && p.type === "vec4f" && p.unit === "px" && isVisible(p, eff),
+  );
 }
 
 /** 选中节点可拖的框，按底图分组。坐标系不同的框不能画在同一片底图上：有带底图的组时只列

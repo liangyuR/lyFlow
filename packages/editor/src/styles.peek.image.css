@@ -1,0 +1,32 @@
+.peek-image {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.peek-image__stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--lyflow-bg-0);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.peek-image__canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  transform-origin: 0 0;
+  image-rendering: pixelated;
+}
+
+/* 叠画层：几何与像素框。层本身不接指针（拖动平移照旧），框自己接。 */
+.peek-image__overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}

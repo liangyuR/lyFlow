@@ -41,6 +41,7 @@ v11 再加的 `isolate`（只运行某几个节点）与 `force`（强制重算�
 | GET | `/lyflow/runs/:runId/clouds/:nodeId/:port` | `getOutputCloud` | `lyflow_output_cloud` |
 | GET | `/lyflow/runs/:runId/tensors/:nodeId/:port?offset=&count=` | `getOutputTensor` | `lyflow_output_tensor` |
 | GET | `/lyflow/runs/:runId/indices/:nodeId/:port?offset=&count=` | `getOutputIndices` | `lyflow_output_indices` |
+| GET | `/lyflow/runs/:runId/images/:nodeId/:port?level=&row=&rows=` | `getOutputImage` | `lyflow_output_image` |
 | GET | `/lyflow/cache` | `cacheStats` | `lyflow_cache_stats` |
 | DELETE | `/lyflow/cache` | `clearCache` | `lyflow_cache_clear` |
 | POST | `/lyflow/cache/evict` | `evictCache` | `lyflow_cache_evict` |
@@ -298,6 +299,38 @@ magic 对不上时编辑器会当成「响应不是点云」直接报错，所�
   与点云同理：magic 对不上编辑器就当成「响应不是张量」，**不要往这两个端点里塞错误文本**。
 
 **参考实现（`packages/editor/test-server/`）不覆盖这两个端点，返回 501。**
+
+### `GET /lyflow/runs/:runId/images/:nodeId/:port?level=&row=&rows=`
+
+`Content-Type: application/octet-stream`，载荷是 `lyflow_output_image` 的视图（ABI v15，[image-plan.md](image-plan.md) §5；
+编码在 `bridge/src/execution.rs` 的 `encode_image`）。**小端**，帧头 12 个 `u32`：
+
+| 偏移 | 类型 | 含义 |
+|---|---|---|
+| 0 | `u32` | magic `0x4D49594C`（'LYIM'） |
+| 4 | `u32` | `width` —— 这一级的宽 |
+| 8 | `u32` | `height` —— 这一级的高（完整高度，不随行切片变） |
+| 12 | `u32` | `channels` —— 1 / 3 / 4，顺序 RGB(A) |
+| 16 | `u32` | `depth` —— 每通道字节数：1 = u8，2 = u16，4 = f32 |
+| 20 | `u32` | `level` —— **实际给出的**级别（可能与请求的不同，见下） |
+| 24 | `u32` | `fullWidth` —— 原图（level 0）的宽 |
+| 28 | `u32` | `fullHeight` —— 原图的高 |
+| 32 | `u32` | `rowOffset` —— 这一段从第几行开始 |
+| 36 | `u32` | `rowCount` —— 这一段有几行 |
+| 40 | `u32` | `rowBytes` —— 一行的字节数 = `width·channels·depth`（行紧排） |
+| 44 | `u32` | 保留，恒为 0 |
+| 48 | `u8[rowCount·rowBytes]` | 像素，行主序、通道交错；之后补齐到 4 字节 |
+
+- `level` 缺省 0（原图）；`level = k` 是 2^k 倍**块均值**缩小（尺寸向上取整）。要得太大时给「长边 1 像素」那一级。
+  缩小不是抽稀：隔行取样是另一张图（ADR-0019），块均值是离远了看同一张图。编辑器先要一级概览，放大到 1:1 再按可视行要 level 0。
+- `row` 缺省 0，`rows` 缺省 0 表示到最后一行；**`row` 越界是成功 + 空切片**（`rowCount = 0`），与张量同一条约定。
+- 桥接层按 **16 MB** 收行数：`rowCount` 可能比要的少，按帧头里的值接着要下一段。
+- 48 字节帧头让 u16 / f32 像素落在自然对齐上，前端直接开 `Uint16Array` / `Float32Array`，零拷贝。
+- `lyflow dump <graph> <node>:<port> out.lyim` 写出的文件就是这份载荷（level 0、全部行）。
+- 不是图像 / 没有结果时非 2xx + JSON 错误体，同上。
+
+**参考实现**用 `lyflow dump … .lyim` 取整张图再按行切，**只给 level 0**（帧头的 `level` 照实写 0）——
+没有常驻结果仓，缩小那一步在桩里不做；调用方本来就必须按帧头里的 `level` 解释尺寸。
 那个桩服务器每次请求起一次 `lyflow` CLI，没有常驻的结果仓；点云能work 是因为 CLI 的
 `dump` 会写出 PCD 文件，而张量与下标没有对应的落盘格式。理由见
 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md) 的「代价」一节。

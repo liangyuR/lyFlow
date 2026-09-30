@@ -98,6 +98,25 @@
 
 .viewer__value + .viewer__value { border-top: 1px solid var(--lyflow-border-strong); }
 
+/* 图像内容（docs/image-plan.md 阶段 3）：同样盖在画布上，里面是与连线查看器共用的 ImageCanvas。 */
+.viewer__image {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  background: var(--lyflow-bg-0);
+}
+
+.viewer-image__shapes {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
 .viewer__value-head {
   display: flex;
   gap: 8px;

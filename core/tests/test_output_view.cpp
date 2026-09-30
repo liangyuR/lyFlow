@@ -235,3 +235,92 @@ TEST_CASE("视图的 handle 让借来的数据活过结果仓的清空") {
   lyflow_tensor_view_free(&view);
   lyflow_indices_view_free(&ix);
 }
+
+// ------------------------------------------- 图像（ABI v15，docs/image-plan.md §5.1）
+
+TEST_CASE("lyflow_output_image：level 0 零拷贝按行切片；level 1 块均值缩小；级别过大收到 1 像素那级；越界是空切片；返回码") {
+  exec::ResultStore& store = exec::ResultStore::instance();
+  store.clear();
+  // 6x4 RGB u8，像素值 = (x + 10y, 100, 200)
+  Image img = Image::allocate(6, 4, 3, PixelDepth::U8);
+  for (int y = 0; y < 4; ++y) {
+    for (int x = 0; x < 6; ++x) {
+      std::uint8_t* p = img.mutablePixels() + (y * 6 + x) * 3;
+      p[0] = static_cast<std::uint8_t>(x + 10 * y);
+      p[1] = 100;
+      p[2] = 200;
+    }
+  }
+  store.put("img", "n", "image", "img-image", Data::image(img));
+  PointCloud cloud;
+  cloud.push(0, 0, 0);
+  store.put("img", "n", "cloud", "img-cloud", Data::cloud(std::move(cloud)));
+
+  SUBCASE("level 0：第 1 行起取 2 行，指针直接指进结果仓") {
+    lyflow_image_view v{};
+    REQUIRE(lyflow_output_image("img", "n", "image", 0, 1, 2, &v) == 0);
+    CHECK(v.width == 6u);
+    CHECK(v.height == 4u);
+    CHECK(v.channels == 3u);
+    CHECK(v.depth == 1u);
+    CHECK(v.level == 0u);
+    CHECK(v.full_width == 6u);
+    CHECK(v.full_height == 4u);
+    CHECK(v.row_offset == 1u);
+    CHECK(v.row_count == 2u);
+    CHECK(v.row_bytes == 18u);
+    Data stored;
+    REQUIRE(store.get("img", "n", "image", stored));
+    CHECK(v.pixels == stored.asImage()->pixels.get() + 18);
+    CHECK(v.pixels[0] == 10);                  // (0,1) 的 R
+    CHECK(v.pixels[18 + 5 * 3] == 25);         // (5,2) 的 R
+    // 结果仓清空之后借来的像素还活着（handle 持有）
+    store.clear();
+    CHECK(v.pixels[18 + 5 * 3 + 2] == 200);
+    lyflow_image_view_free(&v);
+    CHECK(v.handle == nullptr);
+    CHECK(v.pixels == nullptr);
+  }
+
+  SUBCASE("level 1：3x2，第一格 = {0,1,10,11} 的均值；row_count=0 取到底") {
+    lyflow_image_view v{};
+    REQUIRE(lyflow_output_image("img", "n", "image", 1, 0, 0, &v) == 0);
+    CHECK(v.width == 3u);
+    CHECK(v.height == 2u);
+    CHECK(v.level == 1u);
+    CHECK(v.full_width == 6u);
+    CHECK(v.row_count == 2u);
+    CHECK(v.row_bytes == 9u);
+    CHECK(v.pixels[0] == 6);  // 5.5 四舍五入
+    CHECK(v.pixels[1] == 100);
+    lyflow_image_view_free(&v);
+  }
+
+  SUBCASE("级别过大：收到长边 1 像素的那一级（6 → 3 → 2 → 1，level 3）") {
+    lyflow_image_view v{};
+    REQUIRE(lyflow_output_image("img", "n", "image", 30, 0, 0, &v) == 0);
+    CHECK(v.level == 3u);
+    CHECK(v.width == 1u);
+    CHECK(v.height == 1u);
+    lyflow_image_view_free(&v);
+  }
+
+  SUBCASE("row_offset 越界：成功、row_count = 0、宽高照给") {
+    lyflow_image_view v{};
+    CHECK(lyflow_output_image("img", "n", "image", 0, 99, 1, &v) == 0);
+    CHECK(v.row_count == 0u);
+    CHECK(v.pixels == nullptr);
+    CHECK(v.width == 6u);
+    lyflow_image_view_free(&v);
+  }
+
+  SUBCASE("返回码：不是图像 / 没有结果是 1，out 为空是 2") {
+    lyflow_image_view v{};
+    CHECK(lyflow_output_image("img", "n", "cloud", 0, 0, 0, &v) == 1);
+    CHECK(v.handle == nullptr);
+    CHECK(lyflow_output_image("img", "n", "nope", 0, 0, 0, &v) == 1);
+    CHECK(lyflow_output_image("no-run", "n", "image", 0, 0, 0, &v) == 1);
+    CHECK(lyflow_output_image("img", "n", "image", 0, 0, 0, nullptr) == 2);
+  }
+  store.clear();
+}

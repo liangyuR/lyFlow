@@ -12,7 +12,7 @@
 | 在哪 | 本仓库的 `packs/*` | 任意目录 |
 | 怎么加入 | `LYFLOW_STD_PACKS`（默认 ON）自动扫，`LYFLOW_PACKS` 按**包名**点名 | `LYFLOW_OP_PACKS` 按**目录**显式列出 |
 | 注册顺序 | 紧跟 `gen.synthetic` | 排在 core 自带的算子全注册完之后（`flow.select` 之后） |
-| 例子 | `packs/std-pointcloud`、`packs/std-ml`、`packs/gap`、`packs/dts` | 任何自己写的包 |
+| 例子 | `packs/std-pointcloud`、`packs/std-ml`、`packs/std-image`、`packs/gap`、`packs/dts` | 任何自己写的包 |
 
 core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fallback`、`flow.select`
 （后两个是 [ADR-0016](adr/0016-error-as-value-and-lazy-ports.md) 的调度原语）——
@@ -24,6 +24,7 @@ core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fa
 |---|---|---|---|---|
 | `std-pointcloud` | 0.1.0 | ON | 点云 / 2D 量测 / 编辑算子 | PCL |
 | `std-ml` | 0.1.0 | ON | `ml.onnx_run` | onnxruntime |
+| `std-image` | 0.1.0 | ON | 图像域：读写、灰度 / 缩放 / 裁剪 / 平滑 / 位深、二值化 / 形态学、找圆、区域统计、图像 ↔ 张量（[image-plan.md](image-plan.md)） | OpenCV 4（core / imgproc / imgcodecs） |
 | `gap` | 0.2.0 | **OFF** | `gap.*` | PCL、yaml-cpp、onnxruntime |
 | `dts` | 0.1.0 | **OFF** | `dts.*` | 无（零第三方，不链 PCL） |
 
@@ -414,7 +415,7 @@ gap 包是第一个用上它的：20 个输入端口声明了契约。第一条�
 ## 端口类型
 
 包**不能**往类型表里加类型 —— 前端要在不知道任何包的前提下给端口着色、
-在 3D 视图里叠画几何。core 已经有六种 2D 量测域的通用载荷，外加一个给推理用的 `Tensor`：
+在 3D 视图里叠画几何。core 已经有六种 2D 量测域的通用载荷，外加一个给推理用的 `Tensor` 与第二个数据域 `Image`：
 
 | 类型 | 载荷 | 3D 视图 |
 |---|---|---|
@@ -425,6 +426,7 @@ gap 包是第一个用上它的：20 个输入端口声明了契约。第一条�
 | `Measurement` | 值 + 单位 + ok + 消息 + 判定 + 上下限 | Inspector 的「输出」一栏 |
 | `Record` | 带类型标签的 JSON | Inspector 里显示 JSON |
 | `Tensor` | 形状 + float32 数据，行主序 | 连线查看器画成图像；Inspector 与预览里显示形状与 min/max/mean |
+| `Image` | 宽 × 高 × 通道（1/3/4，RGB(A) 顺序）、位深 u8/u16/f32，行主序、通道交错（[image-plan.md](image-plan.md)） | 连线查看器按级别取、可缩放、悬停读像素；Inspector 显示尺寸与逐通道均值 |
 
 领域专有的结构走 `Record`：`Record{ type: "GapAlignment", data: {...} }`。
 加一个领域结构因此不用改 core，代价是它在图上只是一团 JSON，没有专门的可视化。

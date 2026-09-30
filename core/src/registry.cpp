@@ -530,16 +530,17 @@ std::vector<std::string> Registry::validate() const {
         if (p.contract.is_object()) {
           // 契约与端口类型对不对得上。声明了 shape 却接在 PointCloud 上，
           // 只会在第一次真跑的时候变成一个莫名其妙的 contract_violation。
-          if (p.contract.contains("shape") && p.type != "Tensor" && p.type != kAnyTypeName) {
-            fail(portWhere + " contract: shape 只对 Tensor 端口有意义，这个端口是 " + p.type);
+          if (p.contract.contains("shape") && p.type != "Tensor" && p.type != "Image" &&
+              p.type != kAnyTypeName) {
+            fail(portWhere + " contract: shape 只对 Tensor / Image 端口有意义，这个端口是 " + p.type);
           }
           if (p.contract.contains("recordType") && p.type != "Record" && p.type != kAnyTypeName) {
             fail(portWhere + " contract: recordType 只对 Record 端口有意义，这个端口是 " + p.type);
           }
           if (p.contract.contains("finite") && p.type != "PointCloud" && p.type != "Tensor" &&
-              p.type != "Measurement" && p.type != kAnyTypeName) {
+              p.type != "Image" && p.type != "Measurement" && p.type != kAnyTypeName) {
             fail(portWhere +
-                 " contract: finite 只对 PointCloud / Tensor / Measurement 端口有意义，"
+                 " contract: finite 只对 PointCloud / Tensor / Image / Measurement 端口有意义，"
                  "这个端口是 " + p.type);
           }
         }
@@ -605,6 +606,14 @@ std::vector<std::string> Registry::validate() const {
       }
       if (p.semantic == "roi" && p.type != ParamType::Vec4f) {
         fail(pwhere + " semantic=roi 只能标在 vec4f 参数上");
+      }
+      if (p.semantic == "roi" && p.unit == "px") {
+        // 像素框（docs/image-plan.md 阶段 3）画在本算子输入的那张图上：要有 Image 输入，不另给底图
+        bool hasImageIn = false;
+        for (const Port& in : op.inputs) hasImageIn = hasImageIn || in.type == "Image";
+        if (!hasImageIn) fail(pwhere + " unit=px 的 roi 画在输入图像上，算子要有一个 Image 输入端口");
+        if (p.roiBackdrop.isSet()) fail(pwhere + " unit=px 的 roi 不另给 roiBackdrop（底图就是输入图像）");
+        continue;
       }
       if (!p.roiBackdrop.isSet()) continue;
       if (!p.roiBackdrop.inputPorts.empty()) {

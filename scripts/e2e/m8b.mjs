@@ -689,11 +689,134 @@ async function suitePalette(cdp, report) {
   await cdp.eval(`localStorage.removeItem(${lit(KEY)}); return true;`);
 }
 
+/** 主预览的图像模式（docs/image-plan.md 阶段 3）：
+ *  图像节点画自己的输出；带像素框的节点（image.crop）画输入那张图、框可拖、一次拖动一条撤销；
+ *  只输出像素几何的节点（region_stats 的 bbox）画输入那张图、几何叠在上面。 */
+async function suiteImageMainView(cdp, report) {
+  report.section("主预览的图像模式：画哪张图、像素框拖动写回参数（可撤销）、像素几何叠在输入图上");
+  await newDoc(cdp);
+  const ids = await buildGraph(
+    cdp,
+    [
+      { key: "img", op: "test.make_image", params: { width: 640, height: 400, channels: 3 } },
+      { key: "crop", op: "image.crop", params: { roi: [100, 50, 300, 250] } },
+      { key: "gray", op: "image.to_gray" },
+      { key: "bin", op: "image.threshold" },
+      { key: "stats", op: "image.region_stats" },
+    ],
+    [
+      { from: ["img", "image"], to: ["crop", "image"] },
+      { from: ["img", "image"], to: ["gray", "image"] },
+      { from: ["gray", "image"], to: ["bin", "image"] },
+      { from: ["gray", "image"], to: ["stats", "image"] },
+      { from: ["bin", "mask"], to: ["stats", "mask"] },
+    ],
+  );
+  const run = await runAndWait(cdp, () => pressF5(cdp));
+  mustOk(run.status === "ok", "图像链路跑通", JSON.stringify(run.nodes));
+  // 主预览就在右栏里，不用开参数面板的预览分栏（setPanelViewerOpen）—— 那是面板的布局状态，
+  // 开了不还原会让后面 params_p2 的面板少一截高度
+
+  const pane = async (nodeId) => {
+    await select(cdp, nodeId);
+    for (let i = 0; i < 80; i += 1) {
+      const got = await cdp.eval(`
+        const v = document.querySelector('.viewer');
+        const p = v && v.getAttribute('data-node') === ${lit(nodeId)}
+          ? v.querySelector('[data-testid="viewer-image-pane"]') : null;
+        const img = p ? p.querySelector('[data-testid="viewer-image"]') : null;
+        if (!p || !img || Number(img.getAttribute('data-w')) === 0) return null;
+        const box = p.querySelector('.roi-box');
+        const r = box ? box.getBoundingClientRect() : null;
+        return {
+          view: v.getAttribute('data-view'),
+          source: p.getAttribute('data-source'),
+          sourceNode: p.getAttribute('data-source-node'),
+          shapes: p.querySelectorAll('[data-testid="viewer-image-shapes"] > *').length,
+          rois: Number(p.getAttribute('data-rois')),
+          box: r ? { x: r.left, y: r.top, w: r.width, h: r.height } : null,
+          roi: box ? box.getAttribute('data-roi') : null,
+          corner: p.querySelector('[data-testid="viewer3d-status"]')?.textContent ?? null,
+        };
+      `);
+      if (got) return got;
+      await sleep(120);
+    }
+    return null;
+  };
+
+  const img = await pane(ids.img);
+  report.eq("图像节点：视图是 image、画自己的输出、没有框", img && [img.view, img.source, img.rois], ["image", "output", 0]);
+
+  // 放大之后再跑一次（新的 runId）：同一张图的新结果不重置视角、不卸掉画布
+  const canvasWidth = () => cdp.eval(`
+    const c = document.querySelector('[data-testid="viewer-image-canvas"]');
+    return c ? Math.round(parseFloat(c.style.width)) : null;
+  `);
+  const stage = await cdp.eval(`
+    const r = document.querySelector('[data-testid="viewer-image-pane"] .peek-image__stage').getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  `);
+  const before = await canvasWidth();
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: stage.x, y: stage.y, deltaX: 0, deltaY: -120 });
+  await sleep(150);
+  const zoomed = await canvasWidth();
+  const rerun = await runAndWait(cdp, () => pressF5(cdp));
+  await sleep(400);
+  const after = await canvasWidth();
+  report.ok("放大后再运行一次：缩放保持（同一张图的新结果不重新适配）",
+    rerun.status === "ok" && zoomed > before && after === zoomed, JSON.stringify({ before, zoomed, after }));
+
+  const crop = await pane(ids.crop);
+  report.eq("image.crop：画输入那张图（上游 img）、一个像素框、框的值就是参数",
+    crop && [crop.source, crop.sourceNode, crop.rois, crop.roi], ["input", ids.img, 1, "100,50,300,250"]);
+  mustOk(Boolean(crop?.box), "框在画面上", JSON.stringify(crop));
+  const scale = crop.box.w / 200; // 屏幕像素 / 原图像素
+  const from = { x: Math.round(crop.box.x + crop.box.w / 2), y: Math.round(crop.box.y + crop.box.h / 2) };
+  await dragMouse(cdp, from, { x: from.x + 60, y: from.y + 30 }, { steps: 10 });
+  const moved = await cdp.eval(`
+    return window.__lyflow.stores.graph.getState().doc.nodes.find((n) => n.id === ${lit(ids.crop)}).params.roi;
+  `);
+  // 平移 60 / 30 个屏幕像素 = 60/scale、30/scale 个原图像素；宽高不变（取整到像素，±1）
+  const dx = 60 / scale;
+  const dy = 30 / scale;
+  report.ok("拖框身：参数整体平移了屏幕位移 ÷ 缩放，宽高不变",
+    Array.isArray(moved) && Math.abs(moved[0] - (100 + dx)) <= 1.5 && Math.abs(moved[1] - (50 + dy)) <= 1.5 &&
+      moved[2] - moved[0] === 200 && moved[3] - moved[1] === 200,
+    JSON.stringify({ moved, dx, dy, scale }));
+  await cdp.eval(`window.__lyflow.stores.graph.getState().undo(); return true;`);
+  const undone = await cdp.eval(`
+    return window.__lyflow.stores.graph.getState().doc.nodes.find((n) => n.id === ${lit(ids.crop)}).params.roi;
+  `);
+  report.eq("一次拖动一条撤销：撤回到拖之前", undone, [100, 50, 300, 250]);
+
+  // 节点自己出错（框落在图外）：照样画输入那张图、状态缩在角上 —— 这正是要把框拖回来的时候。
+  // 先选别的节点（换了底图），免得「上一次的图」替它挡着（review 修正，PR #1）
+  const setRoi = (v) => cdp.eval(`
+    window.__lyflow.stores.graph.getState().setParam(${lit(ids.crop)}, 'roi', ${lit(v)}); return true;
+  `);
+  await setRoi([2000, 2000, 2100, 2100]);
+  const bad = await runAndWait(cdp, () => pressF5(cdp));
+  await pane(ids.stats);
+  const failed = await pane(ids.crop);
+  report.ok("crop 出错之后选中它：仍画输入那张图、框在，角上写着出错",
+    bad.nodes[ids.crop]?.state === "error" && failed?.source === "input" && failed.rois === 1 &&
+      String(failed.corner).includes("出错"),
+    JSON.stringify({ state: bad.nodes[ids.crop]?.state, failed }));
+  await setRoi([100, 50, 300, 250]);
+  mustOk((await runAndWait(cdp, () => pressF5(cdp))).status === "ok", "框改回来之后重跑成功");
+
+  const stats = await pane(ids.stats);
+  report.ok("region_stats：画输入那张图（gray），bbox（px）叠在上面",
+    stats?.source === "input" && stats.sourceNode === ids.gray && stats.shapes >= 1, JSON.stringify(stats));
+}
+
 export const m8bSuites = [
   suiteBuildFromBlank,
   suiteBundlePeek,
   suiteDragWrongSide,
   suiteAlignTemplateBackdrop,
+  suiteImageMainView,
   suiteAutoConnect,
   suitePalette,
 ];

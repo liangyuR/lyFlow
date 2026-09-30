@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "image_test_op.h"
 #include "param_showcase_op.h"
 
 namespace lyflow::test {
@@ -13,6 +14,7 @@ void registerE2eOps(Registry& r) {
   const char* flag = std::getenv("LYFLOW_TEST_OPS");
   if (flag == nullptr || std::strcmp(flag, "1") != 0) return;
   registerParamShowcase(r);
+  registerImageTestOps(r);
 }
 
 }  // namespace lyflow::test

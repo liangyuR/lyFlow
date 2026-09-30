@@ -12,7 +12,7 @@ use tauri::{Manager, Runtime};
 use crate::core_ffi;
 use crate::library_settings;
 use crate::execution::{
-    encode_cloud, encode_indices, encode_tensor, PreviewOptions, RunManager, StartOptions,
+    encode_cloud, encode_image, encode_indices, encode_tensor, PreviewOptions, RunManager, StartOptions,
 };
 use crate::graph::GraphDoc;
 use crate::host::{self, HostConfig};
@@ -524,6 +524,55 @@ pub fn get_output_indices(
         .output_indices(&runId, &nodeId, &port, offset.unwrap_or(0), clamp_slice(count))
         .map_err(|e| e.to_string())?;
     Ok(tauri::ipc::Response::new(encode_indices(&view)))
+}
+
+/// 一次图像请求最多带多少字节的像素（与张量切片的 4M 个 f32 同一个量级）。
+const IMAGE_BYTES_LIMIT: usize = 16 * 1024 * 1024;
+
+/// 图像（ABI v15）：`level` 级、从 `row` 起 `rows` 行（缺省 / 0 = 到底）。超过 16 MB 就少给几行 ——
+/// 帧头里的 row_count 是实际给的，前端据此接着要下一段（docs/http-transport.md「图像」）。
+#[tauri::command]
+pub fn get_output_image(
+    #[allow(non_snake_case)] runId: String,
+    #[allow(non_snake_case)] nodeId: String,
+    port: String,
+    level: Option<u32>,
+    row: Option<u32>,
+    rows: Option<u32>,
+) -> Result<tauri::ipc::Response, String> {
+    Ok(tauri::ipc::Response::new(output_image_payload(
+        &runId,
+        &nodeId,
+        &port,
+        level.unwrap_or(0),
+        row.unwrap_or(0),
+        rows.unwrap_or(0),
+    )?))
+}
+
+/// 取一段图像并编码成 LYIM 载荷，按 16 MB 收行数。
+fn output_image_payload(
+    run_id: &str,
+    node_id: &str,
+    port: &str,
+    level: u32,
+    row: u32,
+    rows: u32,
+) -> Result<Vec<u8>, String> {
+    let core = core_ffi::core()?;
+    let view = core
+        .output_image(run_id, node_id, port, level, row, rows)
+        .map_err(|e| e.to_string())?;
+    let row_bytes = view.row_bytes().max(1) as usize;
+    let fit = (IMAGE_BYTES_LIMIT / row_bytes).max(1) as u32;
+    if view.row_count() <= fit {
+        return Ok(encode_image(&view));
+    }
+    drop(view);
+    let clipped = core
+        .output_image(run_id, node_id, port, level, row, fit)
+        .map_err(|e| e.to_string())?;
+    Ok(encode_image(&clipped))
 }
 
 /// 写一段二进制到磁盘。3D 视图导出 PNG 与「把结果另存」都走它 ——

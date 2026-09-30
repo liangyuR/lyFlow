@@ -114,6 +114,26 @@ TEST_CASE("契约：shape —— -1 的那一维随便，定死的那两维必�
   CHECK(out.violations[0]["actual"]["shape"] == Json::array({2, 3, 5}));
 }
 
+TEST_CASE("契约：shape 用在图像上按 [高, 宽, 通道] 读 —— 要灰度图的端口接了 RGB 图就报（docs/image-plan.md I7）") {
+  ensureTestOps();
+  auto graphWith = [](int channels) {
+    return makeGraph({N{"n_img", "test.make_image", Json{{"width", 8}, {"height", 5}, {"channels", channels}}},
+                      N{"n_g", "test.take_gray", Json::object()}},
+                     {E{"n_img.image", "n_g.image"}});
+  };
+  {
+    Session s(graphWith(1));
+    RunLog& log = s.wait();
+    CHECK(log.runStatus() == "ok");
+  }
+  const Outcome out = runAndInspect(graphWith(3), "n_g");
+  REQUIRE(out.nodeError.is_object());
+  CHECK(out.nodeError["code"] == "contract_violation");
+  REQUIRE(out.violations.size() == 1);
+  CHECK(out.violations[0]["expected"]["shape"] == Json::array({-1, -1, 1}));
+  CHECK(out.violations[0]["actual"]["shape"] == Json::array({5, 8, 3}));
+}
+
 TEST_CASE("契约：recordType —— Record 的 type 字串对不上") {
   ensureTestOps();
   const Json doc = makeGraph({okCount(), N{"n_r", "test.make_record", Json{{"type", "Other"}}},

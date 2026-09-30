@@ -138,6 +138,12 @@ test("每种类型摊开成哪些行、Δ = A − B 怎么写", () => {
       },
     ],
     [
+      "Image：尺寸按文本，逐通道均值按向量",
+      [stat("im", "Image", { kind: "Image", width: 4, height: 3, channels: 3, depth: "u8", mean: [10, 20, 30] })],
+      [stat("im", "Image", { kind: "Image", width: 4, height: 3, channels: 3, depth: "u8", mean: [10, 20, 31] })],
+      { "im.size": ["4×3×3 u8", "4×3×3 u8", null, false], "im.mean": ["(10, 20, 30)", "(10, 20, 31)", "(0, 0, -1)", true] },
+    ],
+    [
       "Indices：只比个数，带百分比",
       [stat("idx", "Indices", undefined, 2_001_880)],
       [stat("idx", "Indices", undefined, 2_000_000)],

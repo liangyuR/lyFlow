@@ -11,7 +11,7 @@ import {
   type TensorLayout,
 } from "../../store/peek";
 import { transport } from "../../transport";
-import { decodeTensor, type TensorPayload } from "../../types/execution";
+import { decodeTensor, type OutputValue, type TensorPayload } from "../../types/execution";
 import type { PeekViewProps } from "./types";
 
 import "../../styles.peek.tensor.css";
@@ -382,7 +382,7 @@ function drawLine(
   }
 }
 
-function statScalar(v: [number, number] | number | null | undefined): number | undefined {
+function statScalar(v: OutputValue["min"] | OutputValue["mean"]): number | undefined {
   return typeof v === "number" ? v : undefined;
 }
 
@@ -550,7 +550,7 @@ export function TensorView({ win, src }: PeekViewProps) {
               </tr>
               <tr>
                 <th scope="row">mean</th>
-                <td>{num(value?.mean ?? undefined)}</td>
+                <td>{num(statScalar(value?.mean))}</td>
               </tr>
             </tbody>
           </table>

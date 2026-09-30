@@ -46,6 +46,20 @@ struct InputCloud {
   std::vector<std::uint8_t> rgb;
 };
 
+/// 注入一张图像（ABI v15）。规则同 InputCloud。像素行主序、通道交错、**RGB 顺序**，
+/// 每通道 depth 字节（1 = u8，2 = u16，4 = f32）；rowBytes 为 0 表示紧排。
+struct InputImage {
+  std::string nodeId;
+  std::string port;
+  std::uint32_t width = 0;
+  std::uint32_t height = 0;
+  std::uint32_t channels = 0;
+  std::uint32_t depth = 1;
+  std::uint32_t rowBytes = 0;
+  /// 调用方持有，活到 startRun 返回即可（core 会拷一份）。
+  const std::uint8_t* pixels = nullptr;
+};
+
 struct RunOptions {
   std::string runId;
   std::string baseDir;
@@ -57,6 +71,7 @@ struct RunOptions {
   std::uint32_t previewBudgetMs = 0;
   bool noReuse = false;
   std::vector<InputCloud> inputs;
+  std::vector<InputImage> imageInputs;
   /// 顶层图参数的取值（ABI v10），JSON 对象 { 名字: 值 }。空串 = 全用图里的 default。
   std::string paramsJson;
 
@@ -171,6 +186,49 @@ class TensorView {
 
   lyflow_tensor_view view_{};
   void (*free_)(lyflow_tensor_view*) = nullptr;
+};
+
+/// 一张图像的一级、一段行（ABI v15）。level 0 零拷贝借用，释放前别让 RunResult 析构。
+class ImageView {
+ public:
+  ImageView() = default;
+  ~ImageView() { reset(); }
+  ImageView(const ImageView&) = delete;
+  ImageView& operator=(const ImageView&) = delete;
+  ImageView(ImageView&& other) noexcept { steal(other); }
+  ImageView& operator=(ImageView&& other) noexcept {
+    if (this != &other) {
+      reset();
+      steal(other);
+    }
+    return *this;
+  }
+
+  bool valid() const { return view_.handle != nullptr; }
+  std::uint32_t width() const { return view_.width; }
+  std::uint32_t height() const { return view_.height; }
+  std::uint32_t channels() const { return view_.channels; }
+  std::uint32_t depth() const { return view_.depth; }
+  std::uint32_t level() const { return view_.level; }
+  std::uint32_t fullWidth() const { return view_.full_width; }
+  std::uint32_t fullHeight() const { return view_.full_height; }
+  std::uint32_t rowOffset() const { return view_.row_offset; }
+  std::uint32_t rowCount() const { return view_.row_count; }
+  std::uint32_t rowBytes() const { return view_.row_bytes; }
+  const std::uint8_t* pixels() const { return view_.pixels; }
+
+ private:
+  friend class Client;
+  void reset();
+  void steal(ImageView& other) {
+    view_ = other.view_;
+    free_ = other.free_;
+    std::memset(&other.view_, 0, sizeof(other.view_));
+    other.free_ = nullptr;
+  }
+
+  lyflow_image_view view_{};
+  void (*free_)(lyflow_image_view*) = nullptr;
 };
 
 class IndicesView {
@@ -291,6 +349,9 @@ class RunHandle {
 
   IndicesView indices(const std::string& nodeId, const std::string& port,
                       std::uint64_t offset = 0, std::uint32_t count = 0) const;
+
+  ImageView image(const std::string& nodeId, const std::string& port, std::uint32_t level = 0,
+                  std::uint32_t rowOffset = 0, std::uint32_t rowCount = 0) const;
 
   RunResult result();
 
@@ -432,12 +493,27 @@ class Client {
     return out;
   }
 
+  /// 图像的第 level 级（0 = 原图，k = 2^k 倍块均值缩小），从 rowOffset 起取 rowCount 行（0 = 到底）。
+  ImageView image(const std::string& runId, const std::string& nodeId, const std::string& port,
+                  std::uint32_t level = 0, std::uint32_t rowOffset = 0,
+                  std::uint32_t rowCount = 0) const {
+    ImageView out;
+    const int rc = fn_.output_image(runId.c_str(), nodeId.c_str(), port.c_str(), level, rowOffset,
+                                    rowCount, &out.view_);
+    if (rc != 0) {
+      std::memset(&out.view_, 0, sizeof(out.view_));
+      return out;
+    }
+    out.free_ = fn_.image_view_free;
+    return out;
+  }
+
   /// 某个节点全部输出端口的元信息 JSON 数组；非点云的项带 value。
   std::string outputInfo(const std::string& runId, const std::string& nodeId) const {
     return owned(fn_.output_info(runId.c_str(), nodeId.c_str()));
   }
 
-  /// 把某个输出整份写盘（PCD/PLY 按扩展名）。失败时抛 ClientError。
+  /// 把某个输出整份写盘（点云 PCD/PLY 按扩展名，图像 .lyim）。失败时抛 ClientError。
   void save(const std::string& runId, const std::string& nodeId, const std::string& port,
             const std::string& path, const std::string& format = {}) const {
     const std::string message =
@@ -495,6 +571,9 @@ class Client {
     int (*output_indices)(const char*, const char*, const char*, uint64_t, uint32_t,
                           lyflow_indices_view*) = nullptr;
     void (*indices_view_free)(lyflow_indices_view*) = nullptr;
+    int (*output_image)(const char*, const char*, const char*, uint32_t, uint32_t, uint32_t,
+                        lyflow_image_view*) = nullptr;
+    void (*image_view_free)(lyflow_image_view*) = nullptr;
     char* (*output_info)(const char*, const char*) = nullptr;
     char* (*output_save)(const char*, const char*, const char*, const char*,
                          const char*) = nullptr;
@@ -543,6 +622,12 @@ inline void CloudView::reset() {
 }
 
 inline void TensorView::reset() {
+  if (free_ && view_.handle) free_(&view_);
+  std::memset(&view_, 0, sizeof(view_));
+  free_ = nullptr;
+}
+
+inline void ImageView::reset() {
   if (free_ && view_.handle) free_(&view_);
   std::memset(&view_, 0, sizeof(view_));
   free_ = nullptr;
@@ -604,6 +689,8 @@ inline void Client::bind(const std::string& where) {
   need(fn_.tensor_view_free, "lyflow_tensor_view_free", where);
   need(fn_.output_indices, "lyflow_output_indices", where);
   need(fn_.indices_view_free, "lyflow_indices_view_free", where);
+  need(fn_.output_image, "lyflow_output_image", where);
+  need(fn_.image_view_free, "lyflow_image_view_free", where);
   need(fn_.output_info, "lyflow_output_info", where);
   need(fn_.output_save, "lyflow_output_save", where);
 }
@@ -659,6 +746,13 @@ inline IndicesView RunHandle::indices(const std::string& nodeId, const std::stri
   return client_->indices(runId_, nodeId, port, offset, count);
 }
 
+inline ImageView RunHandle::image(const std::string& nodeId, const std::string& port,
+                                  std::uint32_t level, std::uint32_t rowOffset,
+                                  std::uint32_t rowCount) const {
+  if (!client_) return ImageView();
+  return client_->image(runId_, nodeId, port, level, rowOffset, rowCount);
+}
+
 inline RunResult RunHandle::result() {
   join();
   RunResult out;
@@ -704,6 +798,21 @@ inline RunHandle Client::startRun(const std::string& graphJson, const RunOptions
     inputs.push_back(raw);
   }
 
+  std::vector<lyflow_run_image_input> images;
+  images.reserve(options.imageInputs.size());
+  for (const InputImage& in : options.imageInputs) {
+    lyflow_run_image_input raw{};
+    raw.node_id = in.nodeId.c_str();
+    raw.port = in.port.c_str();
+    raw.width = in.width;
+    raw.height = in.height;
+    raw.channels = in.channels;
+    raw.depth = in.depth;
+    raw.row_bytes = in.rowBytes;
+    raw.pixels = in.pixels;
+    images.push_back(raw);
+  }
+
   lyflow_run_options opts{};
   opts.run_id = handle.runId_.c_str();
   opts.base_dir = options.baseDir.c_str();
@@ -717,6 +826,8 @@ inline RunHandle Client::startRun(const std::string& graphJson, const RunOptions
   opts.no_reuse = options.noReuse ? 1 : 0;
   opts.inputs = inputs.empty() ? nullptr : inputs.data();
   opts.input_count = inputs.size();
+  opts.image_inputs = images.empty() ? nullptr : images.data();
+  opts.image_input_count = images.size();
   opts.params_json = options.paramsJson.empty() ? nullptr : options.paramsJson.c_str();
 
   lyflow_run* run =

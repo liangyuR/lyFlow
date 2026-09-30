@@ -1,8 +1,11 @@
 #include "lyflow/c_api.h"
 
+#include <algorithm>
+#include <cctype>
 #include <clocale>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -29,6 +32,77 @@ lyflow::Registry& registry() {
   ensureProcessInit();
   return lyflow::ensureRegistry();
 }
+
+/// 宿主注入的图像拷成 core 自己的一份（调用方的缓冲只活到 lyflow_run_start 返回），顺手去掉行填充。
+/// 描述不合法时给一个不完整的 Image（没有像素）：执行器在注入的输出 / 输入上都会查 consistent()，
+/// 报在那个节点上 —— 比在这里静默丢掉、再让下游报「没写输出」好懂。
+lyflow::Image copyImageInput(const lyflow_run_image_input& in) {
+  lyflow::Image img;
+  img.width = static_cast<std::int32_t>(in.width);
+  img.height = static_cast<std::int32_t>(in.height);
+  img.channels = static_cast<std::int32_t>(in.channels);
+  img.depth = static_cast<lyflow::PixelDepth>(in.depth);
+  const bool shapeOk = in.width > 0 && in.height > 0 && in.width <= (1u << 20) &&
+                       in.height <= (1u << 20) &&
+                       (in.channels == 1 || in.channels == 3 || in.channels == 4) &&
+                       (in.depth == 1 || in.depth == 2 || in.depth == 4);
+  if (!shapeOk || in.pixels == nullptr) return img;
+  const std::size_t tight = img.rowBytes();
+  const std::size_t stride = in.row_bytes == 0 ? tight : in.row_bytes;
+  if (stride < tight) return img;
+  lyflow::Image out = lyflow::Image::allocate(img.width, img.height, img.channels, img.depth);
+  for (std::uint32_t y = 0; y < in.height; ++y) {
+    std::memcpy(out.mutablePixels() + y * tight, in.pixels + y * stride, tight);
+  }
+  return out;
+}
+
+/// LYIM 载荷的 48 字节头（docs/http-transport.md「图像」）。`.lyim` 文件与 HTTP 响应同一布局。
+constexpr std::uint32_t kImageMagic = 0x4D49594Cu;  // 'LYIM' 小端
+
+/// lyflow_output_image 的 handle：持有这一级的图像（level 0 就是结果仓里那一份的浅拷贝）。
+struct ImageHold {
+  lyflow::Image image;
+};
+
+
+/// 图像整张写成 `.lyim`：LYIM 载荷原样落盘（level 0、全部行）。别的扩展名拒掉 ——
+/// PNG 这类要编解码器的格式归 std-image 的 io.save_image，core 不带。
+std::string saveImageLyim(const lyflow::Image& img, const std::string& file) {
+  const std::filesystem::path p = std::filesystem::u8path(file);
+  std::string ext = p.extension().u8string();
+  for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  if (ext != ".lyim") {
+    return "图像输出只能存成 .lyim（PNG 等格式请在图里接 io.save_image），收到的是 '" + ext + "'";
+  }
+  if (!img.consistent()) return "图像不完整，没有可写的像素";
+  const std::uint32_t head[12] = {
+      kImageMagic,
+      static_cast<std::uint32_t>(img.width),
+      static_cast<std::uint32_t>(img.height),
+      static_cast<std::uint32_t>(img.channels),
+      static_cast<std::uint32_t>(img.depth),
+      0u,  // level
+      static_cast<std::uint32_t>(img.width),
+      static_cast<std::uint32_t>(img.height),
+      0u,  // row_offset
+      static_cast<std::uint32_t>(img.height),
+      static_cast<std::uint32_t>(img.rowBytes()),
+      0u,
+  };
+  std::ofstream f(p, std::ios::binary | std::ios::trunc);
+  if (!f) return "打不开输出文件: " + file;
+  f.write(reinterpret_cast<const char*>(head), sizeof head);
+  f.write(reinterpret_cast<const char*>(img.pixels.get()),
+          static_cast<std::streamsize>(img.byteSize()));
+  // 像素之后补齐到 4 字节，与 HTTP 载荷一致
+  const std::size_t pad = (4 - img.byteSize() % 4) % 4;
+  const char zeros[4] = {0, 0, 0, 0};
+  f.write(zeros, static_cast<std::streamsize>(pad));
+  if (!f) return "写输出文件失败: " + file;
+  return std::string();
+}
+
 
 // 用 malloc 而不是 new[]：跨 ABI 边界的内存必须能被 C 侧的 free 释放。
 char* dup(const std::string& s) {
@@ -274,6 +348,11 @@ lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* o
         options.inputs.push_back(lyflow::exec::InjectedInput{
             fromC(in.node_id), fromC(in.port), lyflow::Data::cloud(std::move(cloud))});
       }
+      for (std::size_t i = 0; opts->image_inputs && i < opts->image_input_count; ++i) {
+        options.inputs.push_back(lyflow::exec::InjectedInput{
+            fromC(opts->image_inputs[i].node_id), fromC(opts->image_inputs[i].port),
+            lyflow::Data::image(copyImageInput(opts->image_inputs[i]))});
+      }
     }
     if (options.runId.empty()) options.runId = "run";
     return reinterpret_cast<lyflow_run*>(
@@ -382,6 +461,59 @@ void lyflow_tensor_view_free(lyflow_tensor_view* view) {
   std::memset(view, 0, sizeof(*view));
 }
 
+
+int lyflow_output_image(const char* run_id, const char* node_id, const char* port,
+                        uint32_t level, uint32_t row_offset, uint32_t row_count,
+                        lyflow_image_view* out) {
+  if (!out) return 2;
+  std::memset(out, 0, sizeof(*out));
+  try {
+    lyflow::Data data;
+    if (!lyflow::exec::ResultStore::instance().get(fromC(run_id), fromC(node_id), fromC(port),
+                                                   data)) {
+      return 1;
+    }
+    const lyflow::Image* src = data.asImage();
+    if (!src || !src->consistent()) return 1;
+
+    // 要的级别太大时给「长边缩到 1 像素」那一级，而不是报错：前端按窗口大小算级别，算大了是常事
+    // 尺寸向上取整，所以 2^level >= 长边时就是 1 像素
+    const auto longest = static_cast<std::uint64_t>(std::max(src->width, src->height));
+    unsigned maxLevel = 0;
+    while ((std::uint64_t{1} << maxLevel) < longest) ++maxLevel;
+    const unsigned lv = std::min<unsigned>(level, maxLevel);
+    auto* held = new ImageHold{lyflow::shrinkImage(*src, lv)};
+    const lyflow::Image& img = held->image;
+
+    const std::uint32_t h = static_cast<std::uint32_t>(img.height);
+    const std::uint32_t begin = row_offset > h ? h : row_offset;
+    const std::uint32_t avail = h - begin;
+    const std::uint32_t take = (row_count == 0 || row_count > avail) ? avail : row_count;
+
+    out->width = static_cast<uint32_t>(img.width);
+    out->height = h;
+    out->channels = static_cast<uint32_t>(img.channels);
+    out->depth = static_cast<uint32_t>(img.depth);
+    out->level = lv;
+    out->full_width = static_cast<uint32_t>(src->width);
+    out->full_height = static_cast<uint32_t>(src->height);
+    out->row_offset = row_offset;
+    out->row_count = take;
+    out->row_bytes = static_cast<uint32_t>(img.rowBytes());
+    out->pixels = take == 0 ? nullptr : img.pixels.get() + std::size_t{begin} * img.rowBytes();
+    out->handle = held;
+    return 0;
+  } catch (...) {
+    return 3;
+  }
+}
+
+void lyflow_image_view_free(lyflow_image_view* view) {
+  if (!view || !view->handle) return;
+  delete reinterpret_cast<ImageHold*>(view->handle);
+  std::memset(view, 0, sizeof(*view));
+}
+
 int lyflow_output_indices(const char* run_id, const char* node_id, const char* port,
                           uint64_t offset, uint32_t count, lyflow_indices_view* out) {
   if (!out) return 2;
@@ -481,6 +613,7 @@ char* lyflow_import(const char* kind, const char* text, const char* base_dir) {
   }
 }
 
+
 char* lyflow_output_save(const char* run_id, const char* node_id, const char* port,
                          const char* path, const char* format) {
   try {
@@ -491,9 +624,12 @@ char* lyflow_output_save(const char* run_id, const char* node_id, const char* po
                                                    data)) {
       return dup(std::string("结果仓里没有 ") + fromC(node_id) + "." + fromC(port));
     }
+    if (const lyflow::Image* img = data.asImage()) {
+      return dup(saveImageLyim(*img, file));
+    }
     const lyflow::PointCloud* cloud = data.asCloud();
     if (!cloud) {
-      return dup(std::string("端口 ") + fromC(port) + " 不是点云（是 " + data.typeName() + "）");
+      return dup(std::string("端口 ") + fromC(port) + " 不是点云或图像（是 " + data.typeName() + "）");
     }
     const std::string fmt = fromC(format);
     const lyflow::Status s = lyflow::saveCloudToFile(

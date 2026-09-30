@@ -124,7 +124,8 @@ test(
       server = spawn(
         process.execPath,
         [TEST_SERVER, "--port", String(port), "--root", workspace, "--cli", CLI],
-        { stdio: ["ignore", "pipe", "pipe"] },
+        // LYFLOW_TEST_OPS：桩起的 CLI 继承它，图像那一段的 test.make_image 才注册得上
+        { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, LYFLOW_TEST_OPS: "1" } },
       );
       server.stderr?.setEncoding("utf8");
       server.stderr?.on("data", (c: string) => process.stderr.write(`[test-server] ${c}`));
@@ -235,6 +236,33 @@ test(
           (Array.isArray(inliers["head"]) || typeof inliers["headUnavailable"] === "string"),
         JSON.stringify(inliers),
       );
+
+      // view_output_image（docs/image-plan.md §5.5）：图像输出变成一张 PNG + 元信息
+      const imageFile = path.join(workspace, "image.lyflow.json");
+      fs.writeFileSync(
+        imageFile,
+        JSON.stringify({
+          schemaVersion: 1,
+          id: "mcp-smoke-image",
+          nodes: [
+            { id: "img", op: "test.make_image", params: { width: 64, height: 48, channels: 3 } },
+            { id: "gray", op: "image.to_gray" },
+          ],
+          edges: [{ id: "e", from: { node: "img", port: "image" }, to: { node: "gray", port: "image" } }],
+        }),
+        "utf8",
+      );
+      const imageRun = payload(await client.callTool({ name: "run_graph", arguments: { graphPath: imageFile } }));
+      assert.equal(imageRun["status"], "ok", JSON.stringify(imageRun));
+      const viewed = (await client.callTool({
+        name: "view_output_image",
+        arguments: { runId: imageRun["runId"] as string, nodeId: "gray", port: "image" },
+      })) as { content: { type: string; data?: string; mimeType?: string; text?: string }[] };
+      const picture = viewed.content.find((c) => c.type === "image");
+      assert.equal(picture?.mimeType, "image/png", JSON.stringify(viewed).slice(0, 400));
+      assert.deepEqual([...Buffer.from(picture?.data ?? "", "base64").subarray(1, 4)], [0x50, 0x4e, 0x47]);
+      const meta = JSON.parse(viewed.content.find((c) => c.type === "text")?.text ?? "{}");
+      assert.deepEqual([meta.size, meta.channels, meta.depth], [[64, 48], 1, "u8"]);
     } finally {
       await client?.close().catch(() => undefined);
       server?.kill();

@@ -538,6 +538,44 @@ async function cloudOf(state, nodeId, port, maxPoints) {
   }
 }
 
+// 图像（docs/http-transport.md「图像」）：`lyflow dump` 写出 .lyim（就是 LYIM 载荷、level 0、全部行），
+// 这里只按行切。缩小（level > 0）不做 —— 帧头的 level 照实写 0，调用方按它解释尺寸。
+async function imageOf(state, nodeId, port, row, rows) {
+  const file = scratchFile(".lyim");
+  const r = await runCli([
+    "dump",
+    state.graphFile,
+    `${nodeId}:${port}`,
+    file,
+    "--base-dir",
+    state.baseDir,
+    ...paramArgs(state.params),
+  ]);
+  if (!fs.existsSync(file)) {
+    throw Object.assign(new Error(`取不到 ${nodeId}:${port} 的图像：${r.stderr.trim()}`), {
+      status: 404,
+    });
+  }
+  try {
+    const whole = fs.readFileSync(file);
+    const head = new Uint32Array(whole.buffer, whole.byteOffset, 12).slice();
+    const height = head[2];
+    const rowBytes = head[10];
+    const begin = Math.min(row, height);
+    const take = rows > 0 ? Math.min(rows, height - begin) : height - begin;
+    head[5] = 0; // level
+    head[8] = row; // rowOffset：照请求写，越界时 rowCount = 0
+    head[9] = take;
+    const pixels = whole.subarray(48 + begin * rowBytes, 48 + (begin + take) * rowBytes);
+    const out = Buffer.alloc(48 + ((pixels.length + 3) & ~3));
+    Buffer.from(head.buffer).copy(out, 0);
+    pixels.copy(out, 48);
+    return out;
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
+}
+
 // -------------------------------------------------------------------- HTTP
 
 function readBody(req) {
@@ -674,6 +712,25 @@ async function route(req, res, url) {
       new Error("桩服务器不支持取张量（没有常驻结果仓），见 docs/http-transport.md"),
       { status: 501 },
     );
+  }
+
+  m = /^\/lyflow\/runs\/([^/]+)\/images\/([^/]+)\/([^/]+)$/.exec(p);
+  if (req.method === "GET" && m) {
+    const state = runOf(decodeURIComponent(m[1]));
+    await state.done;
+    const buf = await imageOf(
+      state,
+      decodeURIComponent(m[2]),
+      decodeURIComponent(m[3]),
+      Number(q.get("row") ?? 0),
+      Number(q.get("rows") ?? 0),
+    );
+    res.writeHead(200, {
+      "Content-Type": "application/octet-stream",
+      "Content-Length": buf.length,
+      "Access-Control-Allow-Origin": "*",
+    });
+    return res.end(buf);
   }
 
   m = /^\/lyflow\/runs\/([^/]+)\/indices\/([^/]+)\/([^/]+)$/.exec(p);

@@ -7,6 +7,7 @@ import { z } from "zod";
 import { evalArgv, listMetricsArgv, paramsArgv, patchArgv, perturbArgv, recipesArgv } from "./argv.js";
 import { DEFAULT_CLI_TIMEOUT_MS, runCli, stderrTail } from "./cli.js";
 import { decodeCloud, decodeIndices, decodeTensor, summarizeCloud } from "./cloud.js";
+import { decodeImage, encodePng, levelToFit, toPicture } from "./image.js";
 import type { Config } from "./config.js";
 import { resolveGraph, type ResolvedGraph } from "./graph.js";
 import { HttpError, LyFlowHttp } from "./http.js";
@@ -18,9 +19,10 @@ const MAX_FAILURES = 20;
 const DEFAULT_RUN_TIMEOUT_MS = 300000;
 const DEFAULT_MAX_POINTS = 200000;
 const DEFAULT_HEAD = 8;
+const DEFAULT_IMAGE_EDGE = 768;
 
 type ToolResult = {
-  content: { type: "text"; text: string }[];
+  content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[];
   isError?: boolean;
 };
 
@@ -470,7 +472,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
       title: "把一个输出压成统计量",
       description:
         "点云给点数、包围盒、每通道 min/max/mean 与前几个点；张量给形状、统计量与前几个值；" +
-        "下标给个数、指向哪片云与前几个下标；" +
+        "下标给个数、指向哪片云与前几个下标；图像给尺寸、通道、位深与逐通道 min/max/mean；" +
         "其余类型原样给值。统计在 MCP 进程里算，不搬点云给调用方。",
       inputSchema: {
         runId: z.string(),
@@ -512,6 +514,78 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           return ok({ ...base, ...(await sliceSummary(http, args, info, head)) });
         }
         return ok({ ...base, ...nonCloudSummary(info) });
+      } catch (e) {
+        return failed(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "view_output_image",
+    {
+      title: "把一张图像输出拿来看",
+      description:
+        "返回一张缩小的 PNG（MCP 的 image 内容）和一段元信息，让调用方真的看见中间结果：" +
+        "二值化分得对不对、框落在哪里、推理的掩膜长什么样。" +
+        "u16 / f32 按这张图的有限值范围拉伸到 8 位（元信息里写明范围）。只收 Image 端口；" +
+        "张量先在图里接 tensor.to_image。",
+      inputSchema: {
+        runId: z.string(),
+        nodeId: z.string(),
+        port: z.string(),
+        maxEdge: z
+          .number()
+          .int()
+          .min(16)
+          .max(4096)
+          .optional()
+          .describe(`PNG 的长边上限（像素），默认 ${DEFAULT_IMAGE_EDGE}`),
+      },
+    },
+    async (args) => {
+      try {
+        const infos = await http.nodeOutputs(args.runId, args.nodeId);
+        const info = infos.find((o) => o.port === args.port);
+        if (!info) {
+          return bad(`节点 ${args.nodeId} 上没有输出端口 ${args.port}`, { ports: infos.map((o) => o.port) });
+        }
+        if (info.type !== "Image") {
+          return bad(`端口 ${args.port} 是 ${info.type}，不是 Image`, {
+            hint: info.type === "Tensor" ? "在图里接 tensor.to_image 再看" : undefined,
+          });
+        }
+        const maxEdge = args.maxEdge ?? DEFAULT_IMAGE_EDGE;
+        const fullW = Number(info.value?.width ?? 0);
+        const fullH = Number(info.value?.height ?? 0);
+        const level = levelToFit(fullW, fullH, maxEdge);
+        // 按段取齐：服务端按 16 MB 收行数；HTTP 桩只给 level 0（帧头照实写）
+        const first = decodeImage(await http.image(args.runId, args.nodeId, args.port, level, 0, 0));
+        const values = new Float64Array(first.width * first.height * first.channels);
+        let part = first;
+        for (;;) {
+          values.set(part.values, part.rowOffset * part.width * part.channels);
+          const next = part.rowOffset + part.rowCount;
+          if (part.rowCount === 0 || next >= part.height) break;
+          part = decodeImage(await http.image(args.runId, args.nodeId, args.port, first.level, next, 0));
+        }
+        const pic = toPicture(first.width, first.height, first.channels, first.depth, values, maxEdge);
+        const meta = {
+          runId: args.runId,
+          nodeId: args.nodeId,
+          port: args.port,
+          size: [first.fullWidth, first.fullHeight],
+          channels: first.channels,
+          depth: first.depth === 1 ? "u8" : first.depth === 2 ? "u16" : "f32",
+          shown: [pic.width, pic.height],
+          range: pic.range,
+          note: "坐标：左上角原点、y 向下，原图像素；PNG 是缩小过的，按 size / shown 的比例换算",
+        };
+        return {
+          content: [
+            { type: "image", data: encodePng(pic).toString("base64"), mimeType: "image/png" },
+            { type: "text", text: JSON.stringify(meta) },
+          ],
+        };
       } catch (e) {
         return failed(e);
       }
@@ -990,6 +1064,19 @@ function nonCloudSummary(info: OutputInfo): Record<string, unknown> {
       kind: "tensor",
       shape: value?.shape ?? null,
       count: value?.count ?? info.elementCount ?? null,
+      min: value?.min ?? null,
+      max: value?.max ?? null,
+      mean: value?.mean ?? null,
+    };
+  }
+  if (info.type === "Image") {
+    // 像素不搬（走二进制端点），valueJson 里已经有逐通道统计（docs/image-plan.md §5.5）
+    return {
+      kind: "image",
+      width: value?.width ?? null,
+      height: value?.height ?? null,
+      channels: value?.channels ?? null,
+      depth: value?.depth ?? null,
       min: value?.min ?? null,
       max: value?.max ?? null,
       mean: value?.mean ?? null,

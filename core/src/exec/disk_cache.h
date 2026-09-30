@@ -4,7 +4,7 @@
 // 缓存判定仍只归 core（ADR-0007）：调用方只给目录，不决定哪个节点命中。
 //
 // 布局：<dir>/<fingerprint>/<cacheKey 前两位>/<cacheKey>.lfc，一个节点一个文件、全部端口在里面。
-// 只落盘「每个端口都是点云或张量」的节点 —— 贵的上游（读盘、滤波、ONNX 推理）都在这两种上。
+// 只落盘「每个端口都是点云、张量或图像」的节点 —— 贵的上游（读盘、滤波、ONNX 推理）都在这两种上。
 #include <cstdint>
 #include <filesystem>
 #include <mutex>

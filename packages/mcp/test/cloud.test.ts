@@ -12,6 +12,7 @@ import {
   decodeTensor,
   summarizeCloud,
 } from "../src/cloud.js";
+import { IMAGE_MAGIC, decodeImage, encodePng, levelToFit, toPicture } from "../src/image.js";
 
 function encode(
   xyz: number[],
@@ -161,4 +162,33 @@ test("张量与下标的切片按契约解出来：形状是完整的、u64 的�
   );
   const cut = encodeTensor([4], 0, 4, [1, 2, 3, 4]).slice(0, 40);
   assert.throws(() => decodeTensor(cut), /截断/);
+});
+
+test("图像载荷（LYIM）解出来；u16 拉伸到 8 位、超过边长按最近邻缩；PNG 头与像素经 inflate 读回一致", async () => {
+  // 3x2 单通道 u16，第 1 行起的 2 行
+  const buffer = new ArrayBuffer(48 + 12);
+  const view = new DataView(buffer);
+  [IMAGE_MAGIC, 3, 2, 1, 2, 0, 3, 2, 0, 2, 6, 0].forEach((v, i) => view.setUint32(i * 4, v, true));
+  [0, 1000, 2000, 3000, 4000, 5000].forEach((v, i) => view.setUint16(48 + i * 2, v, true));
+  const img = decodeImage(buffer);
+  assert.deepEqual(
+    { w: img.width, h: img.height, c: img.channels, depth: img.depth, rows: img.rowCount, values: [...img.values] },
+    { w: 3, h: 2, c: 1, depth: 2, rows: 2, values: [0, 1000, 2000, 3000, 4000, 5000] },
+  );
+  assert.equal(levelToFit(3000, 1000, 768), 2);
+
+  const pic = toPicture(3, 2, 1, 2, img.values, 1024);
+  assert.deepEqual({ range: pic.range, bytes: [...pic.bytes] }, { range: [0, 5000], bytes: [0, 51, 102, 153, 204, 255] });
+  assert.deepEqual([toPicture(3, 2, 1, 2, img.values, 2).width, toPicture(3, 2, 1, 2, img.values, 2).height], [2, 1]);
+
+  const png = encodePng(pic);
+  assert.deepEqual([...png.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  assert.equal(png.readUInt32BE(16), 3); // IHDR 宽
+  assert.equal(png[25], 0); // 灰度
+  const idatLen = png.readUInt32BE(33);
+  assert.equal(png.toString("ascii", 37, 41), "IDAT");
+  const { inflateSync } = await import("node:zlib");
+  const raw = inflateSync(png.subarray(41, 41 + idatLen));
+  assert.deepEqual([...raw], [0, 0, 51, 102, 0, 153, 204, 255]); // 每行前一个过滤器字节
+  assert.throws(() => decodeImage(buffer.slice(0, 50)), /截断/);
 });

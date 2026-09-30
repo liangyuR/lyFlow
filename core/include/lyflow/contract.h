@@ -1,8 +1,8 @@
 #pragma once
 // 端口契约（ADR-0024）。四种键，刻意不做表达式语言：
 //   elementCount: { eq | min | max }   点数 / 下标数 / 张量元素数
-//   finite: true                       点云坐标、张量、Measurement 的值必须是有限的
-//   shape: [..]                        张量形状，-1 是「这一维随便」
+//   finite: true                       点云坐标、张量、f32 图像、Measurement 的值必须是有限的
+//   shape: [..]                        张量形状，-1 是「这一维随便」；图像按 [高, 宽, 通道] 读
 //   recordType: "<type>"               Record 的 type 字串
 // 需要第五种的时候先问「是不是这个算子该拆了」，与 Param::visibleWhen 同一条原则。
 #include <string>

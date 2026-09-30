@@ -1054,6 +1054,13 @@ class Scheduler {
                                    "，实际收到 " + d.typeName(),
                                {}, port);
         }
+        if (const Image* img = d.asImage(); img && !img->consistent()) {
+          // 注入的输出由 checkOutputs 兜；注入的输入不经过它，在这里拦
+          return Status::Error(Phase::Execute, "bad_input",
+                               "注入的输入端口 '" + port +
+                                   "' 的图像不完整（宽高要为正、通道 1/3/4、位深 1/2/4、要有像素）",
+                               {}, port);
+        }
         if (!node.bypass) {
           nlohmann::json contractWant;
           nlohmann::json contractGot;
@@ -1127,6 +1134,15 @@ class Scheduler {
                                std::string("输出端口 '") + p.name +
                                    "' 的点云通道长度不一致（intensity/normals/rgb "
                                    "必须为空或与点数对齐）",
+                               {}, p.name);
+        }
+      }
+      if (const Image* img = it->second.asImage()) {
+        if (!img->consistent()) {
+          // 宿主注入的（provided）是调用方给错了，不是 core 或算子的 bug
+          return Status::Error(Phase::Execute, node.provided ? "bad_input" : "internal",
+                               std::string(node.provided ? "注入的" : "") + "输出端口 '" + p.name +
+                                   "' 的图像不完整（宽高要为正、通道 1/3/4、位深 1/2/4、要有像素）",
                                {}, p.name);
         }
       }
@@ -1565,8 +1581,15 @@ void Run::workImpl() {
       h.add(in.port);
       h.add(std::string(in.data.typeName()));
       if (const PointCloud* c = in.data.asCloud()) {
+        // 每个通道各是一段（addBytes 自带分隔）：同样的 xyz 换一份法向或颜色，键就不同
         h.addBytes(c->xyz.data(), c->xyz.size() * sizeof(float));
         h.addBytes(c->intensity.data(), c->intensity.size() * sizeof(float));
+        h.addBytes(c->normals.data(), c->normals.size() * sizeof(float));
+        h.addBytes(c->rgb.data(), c->rgb.size());
+      } else if (const Image* img = in.data.asImage()) {
+        h.add(std::to_string(img->width) + "x" + std::to_string(img->height) + "x" +
+              std::to_string(img->channels) + ":" + pixelDepthName(img->depth));
+        if (img->pixels) h.addBytes(img->pixels.get(), img->byteSize());
       }
     }
     for (auto& kv : digests) providedDigest[kv.first] = kv.second.hex();

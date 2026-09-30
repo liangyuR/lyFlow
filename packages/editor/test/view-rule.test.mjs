@@ -13,7 +13,7 @@ const bundles = [
 
 test("主预览：有一个可画的端口就显示点云场景，全是值才换成表格", () => {
   const cases = [
-    // [说明, 输出类型, 期望]
+    // [说明, 输出类型, 期望, 输入类型（可选）]
     ["点云", ["PointCloud"], "cloud"],
     ["只有 2D 几何：叠在上游借来的底图上", ["Box2D", "Line2D"], "cloud"],
     ["Indices 指向一片云，底图有意义", ["Indices", "Plane"], "cloud"],
@@ -21,6 +21,10 @@ test("主预览：有一个可画的端口就显示点云场景，全是值才�
     ["只有 Record（字符串 / JSON）", ["Record"], "value"],
     ["量测与平面", ["Measurement", "Plane"], "value"],
     ["张量在主预览里只看得到值", ["Tensor"], "value"],
+    ["输出图像：图像模式", ["Image"], "image"],
+    ["图像域的像素几何（找圆 / 区域统计）：画在输入那张图上", ["Measurement", "Box2D"], "image", ["Image", "Image"]],
+    ["输入是图像、输出是点云（深度图转点云）：点云优先", ["PointCloud"], "cloud", ["Image"]],
+    ["没有图像的 2D 几何照旧叠在点云底图上", ["Box2D"], "cloud", ["PointCloud"]],
     ["Bundle 里有点云字段", ["Bundle<gap.ScanPair>"], "cloud"],
     ["Bundle 里有 2D 几何字段", ["Bundle<t.Rois>"], "cloud"],
     ["Bundle 里全是值", ["Bundle<t.Info>"], "value"],
@@ -29,7 +33,7 @@ test("主预览：有一个可画的端口就显示点云场景，全是值才�
     ["没有输出端口", [], "cloud"],
   ];
   const wrong = cases
-    .map(([name, types, want]) => [name, viewerContentFor(types, bundles), want])
+    .map(([name, types, want, inputs]) => [name, viewerContentFor(types, bundles, inputs), want])
     .filter(([, got, want]) => got !== want);
   assert.deepEqual(wrong, [], "说明 / 实际 / 期望");
 });

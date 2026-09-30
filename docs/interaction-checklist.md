@@ -57,7 +57,7 @@
 | 27 | Run to node（只跑上游闭包） | ✅ M2 | 右键节点 → 运行到此节点（运行中也可点，= 抢占）；Shift+F5 跑到选中节点 |
 | 28 | 数字框拖动改值（drag-to-change） | ✅ M3 | 水平拖 = step，Shift ×10，Alt ÷10；整段一条撤销 |
 | 29 | 快捷键体系 + 可查询的快捷键面板 | ✅ M3 | 键表只有 `lib/keymap.ts` 一张，处理器和 `?` 面板都从它生成（E7） |
-| 30 | 选中节点 → 3D 视图预览其输出 | ✅ M2 → M3 补齐 | M3 加着色模式（强度/高度/单色）、色带与范围、钉住、导出 PNG。接入 gap 之后补：节点自己没有点云输出时，沿输入边取上游最近的一片云当**底图**，几何叠在它上面，栏上标「底图：<节点名>」；取景按「底图云 + 几何」的联合包围盒。之后补**测量**：工具栏「测量」/ `M`，单击选点看坐标、再点一个量距离（米 + 毫米，2D 下多 XY 平面距离），只吸附到显示的点，对比模式下可在 A、B 两栏各点一次量位移（[measure-plan.md](measure-plan.md)） |
+| 30 | 选中节点 → 3D 视图预览其输出 | ✅ M2 → M3 补齐 | M3 加着色模式（强度/高度/单色）、色带与范围、钉住、导出 PNG。接入 gap 之后补：节点自己没有点云输出时，沿输入边取上游最近的一片云当**底图**，几何叠在它上面，栏上标「底图：<节点名>」；取景按「底图云 + 几何」的联合包围盒。之后补**测量**：工具栏「测量」/ `M`，单击选点看坐标、再点一个量距离（米 + 毫米，2D 下多 XY 平面距离），只吸附到显示的点，对比模式下可在 A、B 两栏各点一次量位移（[measure-plan.md](measure-plan.md)）。图像域的节点换成**图像模式**：画输出的图，或（像素几何 / 像素框的节点）画输入的那张图，几何叠在上面、像素框可拖（[image-plan.md](image-plan.md) 阶段 3） |
 
 ## P2 — 可以先不做
 
@@ -74,7 +74,7 @@
 | 36 | 图的 diff / 版本对比 | ✅ M4 | `lyflow diff`：合并默认值后比较，忽略 `ui`；只移动节点时输出为空 |
 | 37 | 大图性能（数百节点） | ✅ M4 | `onlyRenderVisibleElements`（> 80 节点才开）+ 执行事件 16 ms 合并；300 节点打开 < 1 s、拖动 ≥ 30 fps |
 | 38 | 协作 / 多人编辑 | ⬜ 不计划 | |
-| 39 | 双击连线查看内容（Edge Peek） | ✅ S1–S7 | 四种视图：3D 点云 / 正交 2D（剖面 + 2D 几何）/ 张量图像 / 键值表 + 原始 JSON。可多开、可拖动、可锁定快照；上限 **6 窗，其中带 WebGL 的 4 个**。没有运行在跑时 `Esc` 关最前面的一个。计划见 [edge-peek-plan.md](edge-peek-plan.md)，张量 / 下标的 ABI 见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)；验收在 `scripts/e2e/peek.mjs`。点云视图与主预览用同一份场景代码（`lib/cloudScene`），工具栏有「测量」（每个窗口各自开关，[measure-plan.md](measure-plan.md)） |
+| 39 | 双击连线查看内容（Edge Peek） | ✅ S1–S7 | 五种视图：3D 点云 / 正交 2D（剖面 + 2D 几何）/ 张量图像 / 图像（Image：按级别取、缩放、悬停读像素，[image-plan.md](image-plan.md)）/ 键值表 + 原始 JSON。可多开、可拖动、可锁定快照；上限 **6 窗，其中带 WebGL 的 4 个**。没有运行在跑时 `Esc` 关最前面的一个。计划见 [edge-peek-plan.md](edge-peek-plan.md)，张量 / 下标的 ABI 见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)；验收在 `scripts/e2e/peek.mjs`。点云视图与主预览用同一份场景代码（`lib/cloudScene`），工具栏有「测量」（每个窗口各自开关，[measure-plan.md](measure-plan.md)） |
 | 40 | 节点运行按钮（标题栏右端的小圆圈） | ✅ node-run | 修订一起单击 = 智能运行（`targets`：本节点 + 缺结果或过时的上游，下游不动，计划外节点的结果照样挂着可取），hover 预告会一并跑哪些上游或「已是最新」；Shift+单击 = 强制重算（core 的 `force`，C ABI v11）。右键三项：运行到此 / 强制重算此节点 / 仅此节点（`isolate`：上游只用已有结果，不齐时置灰；绕过去由 core 在开跑前拒绝，`upstream_not_ready` toast + 缺结果的上游闪一下）。自己发起的那次运行中点它是停止，别的运行中点它是抢占（右键「运行到此」同样，修订二）。上游改过、下游不在这次计划里时，下游留着上一次的结果、画过期虚线框、还能点开看（修订二）。计划见 [node-run-plan.md](node-run-plan.md)，验收在 `scripts/e2e/noderun.mjs` |
 | 41 | 参数面板（一张图的全部参数在一处看、改） | ✅ param-recipe P2 | 工具栏「参数」或 **Ctrl+Shift+P** 开关；画布右侧与画布并排，开着时替代 Inspector；拖分栏改宽（记在 localStorage），「□」最大化（画布收起）。页签：按节点 / 配方矩阵 / 配方管理（后两个 P3）。按节点页：顶部「图参数」分组（改值、改规格、解除绑定、删除），然后按节点 → group 列出全部参数，advanced 默认收起，子图实例可展开进定义（标「子图定义 · N 个实例共享」），库算子只读。每行 label（改过有蓝点）/ 控件 / 恢复与「纳入配方」书签；搜索（参数名、label、节点、值）+ chip（全部 / 已改动 / 配方 / 诊断 / 类型）。画布选中 ↔ 面板定位双向联动；ROI 行有缩略图、点「拖框」进 2D 拖框视图。1000 参数打开 < 300 ms（虚拟化）。计划见 [param-recipe-plan.md](param-recipe-plan.md) P2，验收在 `scripts/e2e/params_p2.mjs` |
 | 42 | transform / curve 参数控件 | ✅ param-recipe P2 | transform：平移 xyz + 旋转 xyz（度，R = Rz·Ry·Rx），可切 4×4 矩阵；curve：小画布拖控制点（双击加点、双击点删除）+ 控制点列表 + 线性 / 平滑。值格式见 [operator-manifest.md](operator-manifest.md)「transform 与 curve 的值」。面板与 Inspector 同一份控件 |

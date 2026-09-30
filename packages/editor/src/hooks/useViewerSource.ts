@@ -96,6 +96,7 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: Vie
         ? viewerContentFor(
             op.outputs.map((o) => outputs?.find((st) => st.port === o.name)?.type ?? o.type),
             bundles,
+            op.inputs.map((i) => i.type),
           )
         : "cloud",
     [op, outputs, bundles],
@@ -148,8 +149,9 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: Vie
       show(liveState === "running" ? "正在计算…" : "该节点尚未产出结果");
       return;
     }
-    // 显示值时不取云：值就在事件里（stats.outputs），底图也用不上
-    if (content === "value") {
+    // 显示值时不取云：值就在事件里（stats.outputs），底图也用不上。
+    // 图像由 ImagePane 自己按级别取（docs/image-plan.md 阶段 3），这里同样不取云
+    if (content === "value" || content === "image") {
       setLoading(false);
       show(null);
       return;
