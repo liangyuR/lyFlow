@@ -4,7 +4,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { matchShortcut } from "../src/lib/keymap.ts";
+import { errorNodeIds, revealError } from "../src/lib/revealError.ts";
 import { describeEventNode, locateEventNode } from "../src/lib/subgraph.ts";
+import { useGraphStore } from "../src/store/graph.ts";
+import { useManifestStore } from "../src/store/manifest.ts";
 import { aggregatedNodes, onNodeTransition, useExecutionStore } from "../src/store/execution.ts";
 import { useUiStore } from "../src/store/ui.ts";
 
@@ -152,4 +156,38 @@ test("revealNode：打开到那一层、选中、请画布移过去；同一个�
   s = useUiStore.getState();
   assert.equal(s.revealRequest.seq, seq + 1);
   assert.equal(s.path, samePath, "同一层不换路径对象");
+});
+
+test("在出错的节点之间跳：第一个是根因，F8 往后、Shift+F8 往前，到头绕回；上游失败连带的不算", () => {
+  const err = (paramPath) => ({ phase: "execute", code: "bad_param", message: "坏了", paramPath });
+  useGraphStore.setState({ doc: sgDoc });
+  useManifestStore.setState({ operatorsById: sgOps });
+  useExecutionStore.setState({
+    nodes: new Map([
+      ["a/v", { state: "error", errors: [err("leafSize")] }],
+      ["a/n/x", { state: "cancelled", errors: [{ phase: "execute", code: "upstream_failed", message: "上游失败" }] }],
+      ["top", { state: "error", errors: [err("leafSize")] }],
+    ]),
+  });
+  useUiStore.setState({ path: [], selectedNodes: new Set(), focusedDiagnostic: null, revealRequest: null });
+  assert.deepEqual(errorNodeIds(), ["a/v", "top"]);
+
+  const at = () => {
+    const s = useUiStore.getState();
+    return [s.path.map((p) => p.nodeId).join("/"), [...s.selectedNodes][0], s.focusedDiagnostic?.paramPath];
+  };
+  assert.equal(revealError(0), true);
+  assert.deepEqual(at(), ["a", "v", "leafSize"], "第一个：打开到子图里");
+  revealError(1);
+  assert.deepEqual(at(), ["", "top", "leafSize"], "往后：回到顶层的那个");
+  revealError(1);
+  assert.deepEqual(at(), ["a", "v", "leafSize"], "到头绕回");
+  revealError(-1);
+  assert.deepEqual(at(), ["", "top", "leafSize"], "往前");
+
+  useExecutionStore.setState({ nodes: new Map() });
+  assert.equal(revealError(1), false, "没有出错的节点：什么都不做");
+
+  const key = (k, shiftKey) => ({ key: k, ctrlKey: false, metaKey: false, shiftKey, altKey: false });
+  assert.deepEqual([matchShortcut(key("F8", false))?.id, matchShortcut(key("F8", true))?.id], ["nextError", "prevError"]);
 });

@@ -18,6 +18,7 @@ import {
   pressCtrl,
   pressEscape,
   pressF5,
+  pressKey,
   replan,
   runAndWait,
   select,
@@ -986,6 +987,11 @@ async function suiteInnerError(cdp, report) {
   await sleep(300);
   report.eq("点工具栏的「error 1」：定位到第一个出错的节点（在子图里也打开进去）", await where(),
     { path: [composed.nodeId], selected: [ids.voxel], param: "leafSize" });
+  await cdp.eval(`const u = window.__lyflow.stores.ui.getState(); u.exitTo(0); u.setSelection([], []); return true;`);
+  await sleep(200);
+  await pressKey(cdp, "F8", 119);
+  await sleep(300);
+  report.eq("按 F8：同样跳到那个出错的节点", await where(), { path: [composed.nodeId], selected: [ids.voxel], param: "leafSize" });
   await cdp.eval(`window.__lyflow.stores.ui.getState().exitTo(0); return true;`);
 }
 

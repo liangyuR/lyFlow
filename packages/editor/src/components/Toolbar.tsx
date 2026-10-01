@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { dialogs } from "../lib/dialogs";
 import { baseName, recentFiles } from "../lib/files";
 import { keyHint } from "../lib/keymap";
-import { describeEventNode } from "../lib/subgraph";
+import { revealError } from "../lib/revealError";
 import { useCacheStore } from "../store/cache";
 import { summarize, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
@@ -364,8 +364,8 @@ function RunControls({ onRun, onCancel }: { onRun: () => void; onCancel: () => v
               type="button"
               className="toolbar__stat toolbar__stat--error toolbar__stat--link"
               data-testid="run-summary-error"
-              title="定位到第一个出错的节点（在子图里也打开进去）"
-              onClick={revealFirstError}
+              title={`定位到第一个出错的节点（在子图里也打开进去）。${keyHint("nextError")} / ${keyHint("prevError")} 在出错的节点之间跳`}
+              onClick={() => revealError(0)}
             >
               error {summary.error}
             </button>
@@ -390,20 +390,6 @@ function RunControls({ onRun, onCancel }: { onRun: () => void; onCancel: () => v
       )}
     </div>
   );
-}
-
-/** 定位到这次运行第一个出错的节点。上游失败连带的是 cancelled（core 的 upstream_failed），
- *  所以第一个 error 就是根因；它在子图里时打开到那一层（describeEventNode）。 */
-function revealFirstError(): void {
-  const nodes = useExecutionStore.getState().nodes;
-  for (const [id, n] of nodes) {
-    if (n.state !== "error" || n.errors.length === 0) continue;
-    const d = describeEventNode(useGraphStore.getState().doc, useManifestStore.getState().operatorsById, id);
-    if (!d.reveal) return;
-    const { path, localId, exact } = d.reveal;
-    useUiStore.getState().revealNode(path, localId, exact ? n.errors[0]?.paramPath : undefined);
-    return;
-  }
 }
 
 export function Toolbar({

@@ -6,6 +6,7 @@ import { useEffect, type RefObject } from "react";
 import { matchShortcut } from "../lib/keymap";
 import { subgraphIdOf } from "../types/graph";
 import { levelOf } from "../lib/subgraph";
+import { revealError } from "../lib/revealError";
 import { useCompareStore } from "../store/compare";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
@@ -87,6 +88,11 @@ export function useShortcuts(
         case "runToNode":
           e.preventDefault();
           handlers.onRunToSelected();
+          return;
+        case "nextError":
+        case "prevError":
+          // 没有出错的节点时不吞掉按键
+          if (revealError(hit.id === "nextError" ? 1 : -1)) e.preventDefault();
           return;
         case "cancel":
           // Esc 先退子图再取消运行：在子图里按 Esc，用户想的是「出去」
