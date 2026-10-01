@@ -52,7 +52,7 @@
 | 22 | 对齐参考线 / 网格吸附 | ✅ M3 | `snapGrid=[8,8]`，Shift 临时关掉；参考线自绘在 `ViewportPortal` 里 |
 | 23 | 上游参数改动 → 下游节点标 stale（虚线框） | ✅ M2 → M3 精确化 | M3 起精确到节点：`plan_graph` 的 cacheKey 与 `run_started` 对比（[ADR-0007](adr/0007-cache-authority.md)） |
 | 24 | Reroute 节点（连线整理） | ✅ M3 | `util.reroute` 是 `Any → Any` 的**普通算子**；在**边的右键菜单**里「在此插入 Reroute」。原来的双击连线中点已让给 #39 的查看器（edge-peek-plan P1） |
-| 25 | 节点折叠 / 重命名 / 静音（bypass） | ✅ M3 | Ctrl+E / 双击标题 / Ctrl+M。bypass 是执行语义，进 doc 也进撤销栈 |
+| 25 | 节点折叠 / 重命名 / 静音（bypass） | ✅ M3 | Ctrl+E / 双击标题 / Ctrl+M。bypass 是执行语义，进 doc 也进撤销栈。子图里按 Ctrl+M / Ctrl+E 以前在顶层找第一个选中的节点、找不到，于是永远是「打开」，再按一次取消不了（2026-10-02 修；Ctrl+A 同理，以前选上的是顶层的 id） |
 | 26 | 参数右键：重置为默认 / 复制值 / 粘贴值 | ✅ M3 | 外加「复制路径名」，给 M4 的 CLI `--set` 用；粘贴按参数类型校验形态 |
 | 27 | Run to node（只跑上游闭包） | ✅ M2 | 右键节点 → 运行到此节点（运行中也可点，= 抢占）；Shift+F5 跑到选中节点 |
 | 28 | 数字框拖动改值（drag-to-change） | ✅ M3 | 水平拖 = step，Shift ×10，Alt ÷10；整段一条撤销 |

@@ -418,6 +418,30 @@ async function suiteNested(cdp, report) {
     await pressCtrl(cdp, "z");
     await sleep(200);
   }
+  // 这一层的 Ctrl+A / Ctrl+M / Ctrl+E：以前在顶层找节点 —— 全选选上的是这一层没有的 id，
+  // 静音与折叠永远是「打开」，再按一次也取消不了
+  await pressCtrl(cdp, "a");
+  await sleep(150);
+  const selectedAll = await cdp.eval(`return [[...window.__lyflow.stores.ui.getState().selectedNodes].sort(),
+    [...window.__lyflow.snapshot().level.nodes].sort()];`);
+  report.eq("在第二层里 Ctrl+A：选上的是这一层的全部节点", selectedAll[0], selectedAll[1]);
+  const innerFlags = () => cdp.eval(`return window.__lyflow.stores.graph.getState().doc.subgraphs[${lit(inner.subgraphId)}].nodes
+    .map((n) => [n.bypass === true, n.ui?.collapsed === true]);`);
+  // 选区自己设（不靠上面那次 Ctrl+A），这一条只钉「第一个选中节点的状态从哪一层找」
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection(window.__lyflow.snapshot().level.nodes, []); return true;`);
+  const flagsBefore = await innerFlags();
+  await pressCtrl(cdp, "m");
+  await sleep(150);
+  await pressCtrl(cdp, "e");
+  await sleep(150);
+  const flagsOn = await innerFlags();
+  await pressCtrl(cdp, "m");
+  await sleep(150);
+  await pressCtrl(cdp, "e");
+  await sleep(150);
+  report.ok("在第二层里 Ctrl+M / Ctrl+E 按两次：先全静音、全折叠，再全部还原",
+    flagsOn.every(([b, c]) => b && c) && JSON.stringify(await innerFlags()) === JSON.stringify(flagsBefore),
+    JSON.stringify({ flagsBefore, flagsOn }));
   await pressEscape(cdp);
   await pressEscape(cdp);
   await sleep(150);

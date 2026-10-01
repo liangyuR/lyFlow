@@ -182,7 +182,8 @@ export function useShortcuts(
         }
         case "selectAll":
           e.preventDefault();
-          ui.setSelection(graph.doc.nodes.map((n) => n.id), []);
+          // 这一层的节点。以前取顶层的：在子图里 Ctrl+A 选上的是一组这一层没有的 id
+          ui.setSelection(levelOf(graph.doc, ui.path).nodes.map((n) => n.id), []);
           return;
         case "delete": {
           if (ui.selectedNodes.size === 0 && ui.selectedEdges.size === 0) return;
@@ -197,8 +198,9 @@ export function useShortcuts(
           const ids = [...ui.selectedNodes];
           if (ids.length === 0) return;
           e.preventDefault();
-          // 以第一个选中节点的当前状态为准整体切换，避免多选时互相翻转
-          const first = graph.doc.nodes.find((n) => n.id === ids[0]);
+          // 以第一个选中节点的当前状态为准整体切换，避免多选时互相翻转。从这一层找它：
+          // 以前在顶层找，子图里找不到，于是永远是「静音」，再按一次也取消不了
+          const first = levelOf(graph.doc, ui.path).nodes.find((n) => n.id === ids[0]);
           graph.setBypass(ids, !(first?.bypass === true));
           return;
         }
@@ -206,7 +208,7 @@ export function useShortcuts(
           const ids = [...ui.selectedNodes];
           if (ids.length === 0) return;
           e.preventDefault();
-          const first = graph.doc.nodes.find((n) => n.id === ids[0]);
+          const first = levelOf(graph.doc, ui.path).nodes.find((n) => n.id === ids[0]);
           graph.setCollapsed(ids, !(first?.ui?.collapsed === true));
           return;
         }
