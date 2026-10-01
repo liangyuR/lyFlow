@@ -34,8 +34,19 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
       std::swap(keep[i], keep[pick(rng)]);
     }
     keep.resize(want);
-    // 保持原始顺序：抽样不该顺便把点云打乱，下游看 diff 会疯掉
-    std::sort(keep.begin(), keep.end());
+    // 保持原始顺序：抽样不该顺便把点云打乱，下游看 diff 会疯掉。下标互不相同、都在 [0, n) 里，
+    // 留得多时在一张 n 格的标记表上顺着扫一遍就是排好的 —— 200 万点留一半时 std::sort 要 60 ms 以上，
+    // 这样几毫秒；留得少（默认 1 万个）时排序本身就快，扫 n 格反倒更慢。两条路给出同一串下标
+    if (want * 16 < n) {
+      std::sort(keep.begin(), keep.end());
+    } else {
+      std::vector<char> marked(n, 0);
+      for (const std::int32_t i : keep) marked[static_cast<std::size_t>(i)] = 1;
+      std::size_t at = 0;
+      for (std::size_t i = 0; i < n; ++i) {
+        if (marked[i]) keep[at++] = static_cast<std::int32_t>(i);
+      }
+    }
   }
 
   outputs.set("cloud", Data::cloud(in.select(keep)));

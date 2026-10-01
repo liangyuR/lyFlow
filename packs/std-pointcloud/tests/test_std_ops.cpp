@@ -7,9 +7,12 @@
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/search/kdtree.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <numeric>
+#include <random>
 
 #include "exec/result_store.h"
 #include "helpers.h"
@@ -360,6 +363,58 @@ TEST_CASE("edit.translate_region：零法向是 bad_param") {
   REQUIRE_FALSE(e.empty());
   CHECK(e["error"]["code"] == "bad_param");
   CHECK(e["error"]["paramPath"] == "normal");
+}
+
+// 随机采样把下标排回原顺序：留得多时改用标记表顺着扫（std::sort 在 200 万点留一半时要 60 ms 以上）。
+// 参照就是原来的做法（同一个种子的部分 Fisher-Yates，再 std::sort）：两条路、两种模式都要逐点相同
+TEST_CASE("随机采样：标记表与排序两条路给出与原实现逐点相同的结果") {
+  test::OpCall gen;
+  REQUIRE(gen.run("gen.synthetic", {{"pointCount", Value::integer(50000)}, {"seed", Value::integer(8)}}).ok);
+  const PointCloud& in = *gen.out("cloud").asCloud();
+  const std::size_t n = in.pointCount();
+  const auto reference = [&](std::size_t want, std::uint32_t seed) {
+    std::vector<std::int32_t> keep(n);
+    std::iota(keep.begin(), keep.end(), 0);
+    std::mt19937 rng(seed);
+    for (std::size_t i = 0; i < want; ++i) {
+      std::uniform_int_distribution<std::size_t> pick(i, n - 1);
+      std::swap(keep[i], keep[pick(rng)]);
+    }
+    keep.resize(want);
+    std::sort(keep.begin(), keep.end());
+    return in.select(keep);
+  };
+  struct Case {
+    const char* mode;
+    std::int64_t count;
+    double ratio;
+    std::size_t want;
+  };
+  // 1000 个（want × 16 < n：排序那条路）、一半与九成（标记表那条路）、全留（不抽）
+  const Case cases[] = {{"count", 1000, 0.0, 1000}, {"ratio", 0, 0.5, n / 2}, {"ratio", 0, 0.9, n * 9 / 10},
+                        {"count", static_cast<std::int64_t>(n) + 5, 0.0, n}};
+  for (const Case& c : cases) {
+    for (std::int64_t seed : {1, 42}) {
+      CAPTURE(c.mode);
+      CAPTURE(c.want);
+      CAPTURE(seed);
+      test::OpCall call;
+      call.inputs["cloud"] = gen.out("cloud");
+      REQUIRE(call.run("filter.random_sample", {{"mode", Value::text(c.mode)},
+                                                {"keepCount", Value::integer(c.count)},
+                                                {"keepRatio", Value::number(c.ratio)},
+                                                {"seed", Value::integer(seed)}})
+                  .ok);
+      const PointCloud& got = *call.out("cloud").asCloud();
+      if (c.want < n) {
+        const PointCloud want = reference(c.want, static_cast<std::uint32_t>(seed));
+        CHECK(got.xyz == want.xyz);
+        CHECK(got.intensity == want.intensity);
+      } else {
+        CHECK(got.xyz == in.xyz);  // 全留：不抽
+      }
+    }
+  }
 }
 
 // 法线与两个离群点滤波改成按线程预算分段并行（ops/parallel.h；vcpkg 的 PCL 没开 OpenMP，它们原来是单线程的
