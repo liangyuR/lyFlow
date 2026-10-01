@@ -202,6 +202,11 @@ lyflow params g.lyflow.json --only explicit --json | jq -r '"\(.node).\(.param)=
 > （MCP 尤其如此），读 PCD、预处理、ONNX 推理每轮从头算。给 `--cache-dir <dir>`（或环境变量 `LYFLOW_CACHE_DIR`）后，
 > 确定性、耗时 ≥ 20 ms、输出全是点云或张量的节点落盘，下一个进程直接命中。重编 core 之后旧结果自动不再复用；
 > 改了**图文件以外**的输入（比如覆盖了同名 PCD 却保留了修改时间）才需要 `lyflow cache clear --cache-dir <dir>`。
+>
+> **样本多时：`--jobs <n>`（MCP 的 `jobs`）。** 默认一次接一次；`--jobs 4` 同时跑四次，行的顺序与内容不变
+> （除了 `durationMs`），停也停在同一行，内存大约是 n 倍。收益看图：全是单线程算子的图接近线性，统计离群点这种
+> 自己就吃满核的图有限。几十帧 × 几组参数的扫描值得开；MCP 这边调用被取消时子进程跟着结束，不会在后台接着跑。
+> 没成的那几次，CLI 在 stderr（MCP 的 `stderrTail`）上归成一行：`没成的 10 次：failed 8（io × 5、bad_param × 3）`。
 
 样本集是一份 JSON Lines，一行一帧：
 
