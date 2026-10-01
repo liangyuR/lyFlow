@@ -968,12 +968,15 @@ async function suiteBigGraph(cdp, report) {
   // 拖动帧率：页面里挂一个 rAF 采样器，然后用 CDP 发**真**鼠标事件拖一个节点。
   // 合成 MouseEvent 骗不过 React Flow 的 d3-drag（它要读 event.view.document）。
   await cdp.eval(`
-    window.__m4fps = { frames: [], last: performance.now(), stop: false };
+    // 采样循环闭包住自己这一份：上一段的循环还挂着一帧回调，读全局对象的话它会接着往新的这份里写，
+    // 两个循环交替记帧间隔、一半是 0，中位数就成了几千 fps（扫过那条以前就是这么「过」的）
+    const state = { frames: [], last: performance.now(), stop: false };
+    window.__m4fps = state;
     const tick = () => {
       const now = performance.now();
-      window.__m4fps.frames.push(now - window.__m4fps.last);
-      window.__m4fps.last = now;
-      if (!window.__m4fps.stop) requestAnimationFrame(tick);
+      state.frames.push(now - state.last);
+      state.last = now;
+      if (!state.stop) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
     return true;
@@ -1008,12 +1011,15 @@ async function suiteBigGraph(cdp, report) {
   const box = await cdp.eval(`const r = document.querySelector('.react-flow__pane').getBoundingClientRect();
     return { x: r.left, y: r.top, w: r.width, h: r.height };`);
   await cdp.eval(`
-    window.__m4fps = { frames: [], last: performance.now(), stop: false };
+    // 采样循环闭包住自己这一份：上一段的循环还挂着一帧回调，读全局对象的话它会接着往新的这份里写，
+    // 两个循环交替记帧间隔、一半是 0，中位数就成了几千 fps（扫过那条以前就是这么「过」的）
+    const state = { frames: [], last: performance.now(), stop: false };
+    window.__m4fps = state;
     const tick = () => {
       const now = performance.now();
-      window.__m4fps.frames.push(now - window.__m4fps.last);
-      window.__m4fps.last = now;
-      if (!window.__m4fps.stop) requestAnimationFrame(tick);
+      state.frames.push(now - state.last);
+      state.last = now;
+      if (!state.stop) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
     return true;
