@@ -21,7 +21,7 @@
 | 检查器的节点 id | 路径 id（`--to`、`--set` 认的那个），点了复制 | 同上 |
 | 空画布 | 写着从哪开始（搜算子、打开、拖片段） | e2e `m3.mjs` 的 `suiteEditing` |
 | 警告样式 | 三条 CSS 选择器被批量改名改坏（`.toast--lyflow-warn` 等），警告 toast、「非确定性」标签、warn 日志一直没上色 | e2e `noderun.mjs` 的 `suiteIsolateOnly` 查计算出来的颜色 |
-| 大图 | 节点运行按钮的上游闭包与计划查询改为按身份缓存（原来每个按钮每次 store 更新都整图扫一遍） | `node-run.test.mjs` 与原实现逐个对照；300 节点打开 ~310 → ~240 ms（profile） |
+| 大图 | 节点运行按钮的上游闭包与计划查询改为按身份缓存（原来每个按钮每次 store 更新都整图扫一遍）；映射层每条边不再线性找节点 | `node-run.test.mjs` 与原实现逐个对照、`typecheck.test.mjs` 的映射那条；300 节点打开 ~310 → ~240 ms（profile） |
 
 ## 宿主、CLI 与 MCP
 
@@ -32,7 +32,7 @@
 | `eval / sweep / perturb --jobs` | 同时跑几次，行的顺序与内容不变，停也停在同一行；Ctrl+C 一次取消全部 | `eval.rs` 的 `ordered_parallel_*`；`cli.rs` 的两条对照 |
 | 终端进度行 | eval / sweep / perturb 与 run：stdout 重定向、stderr 在终端上时原地刷新一行，管道里一个字节不多 | `eval.rs` 的 `the_progress_line_*`、`cli.rs` 的 `the_run_progress_line_*` |
 | 失败的原因写在 stderr | run / validate 列出诊断与出错节点；eval / perturb 把没成的几次按原因归成一行 | `cli.rs` 写法错那张表；`eval.rs` 的 `the_failure_digest_*` |
-| 数字选项写错是用法错 | `--parallel 4x` 以前悄悄当成 0 | `cli.rs` 写法错那张表 |
+| 选项写错是用法错 | `--parallel 4x` 以前悄悄当成 0；`dump --format asci` 以前悄悄写成 binary | `cli.rs` 写法错那张表 |
 | MCP | eval / perturb 的 `jobs`；客户端取消时 CLI 子进程跟着结束、`run_graph` 替它发 cancel；eval / perturb 逐行发进度通知 | `packages/mcp/test/cli.test.ts`、`smoke.test.ts`（去掉接线时冒烟会失败） |
 | `pnpm e2e --only` | 按模块 / 分组挑着跑 | `scripts/e2e/README.md` |
 
@@ -54,6 +54,7 @@
 ## 代码质量
 
 - clippy 清零（bridge、lyflow-client），MSRV 写准；gap 包全量构建的 5 条编译警告修掉。
+- 原来只有 e2e 间接碰到的核心逻辑补了单测：拖线挡错（类型、成环、Any 推导、置灰表）、算子搜索排序、GraphDoc → React Flow 映射、节点复制粘贴、删节点连带删边。编辑器的 node:test 从 86 到 101。
 - 包测试里七份 `NullContext + Call` 统一成 `test::OpCall`；参数面板虚拟列表的 e2e 帮手收进 `page.mjs`；删掉五个没人调的导出。
 - e2e：工具栏宽度那组不再跟着 KUN10 数据一起失败（自己搭状态）；live preview 那组先预热预览缓存（量的才是「跟手」）；
   m4 的第一组起了名字（`--only` 挑得到）。
