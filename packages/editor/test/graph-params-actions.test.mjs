@@ -35,6 +35,31 @@ const doc = () => g().doc;
 const node = (id, lvl = doc()) => lvl.nodes.find((n) => n.id === id);
 const inClean = () => useUiStore.getState().setPath([{ nodeId: "n_clean", subgraphId: "sg_clean" }]);
 
+test("多选一起改（检查器）：同一个参数写进每个节点，一条撤销；数字框拖动的外层事务里就并进去", () => {
+  reset();
+  const both = () => [node("n_clean").params.leafSize, node("n_clean2").params.leafSize];
+  const steps = g().past.length;
+  g().setParamMany(["n_clean", "n_clean2"], "leafSize", [0.02, 0.02, 0.02]);
+  assert.deepEqual(both(), [[0.02, 0.02, 0.02], [0.02, 0.02, 0.02]]);
+  assert.equal(g().past.length, steps + 1);
+  assert.equal(g().past.at(-1).label, "修改 2 个节点的 leafSize");
+  g().undo();
+  assert.deepEqual(both(), [[0.01, 0.01, 0.01], undefined], "一次 Ctrl+Z 两个一起还原");
+
+  g().begin();
+  for (const v of [0.03, 0.04]) g().setParamMany(["n_clean", "n_clean2"], "leafSize", [v, v, v]);
+  g().commit("拖动参数");
+  assert.equal(g().past.length, steps + 1);
+  assert.equal(g().past.at(-1).label, "拖动参数");
+  assert.deepEqual(both(), [[0.04, 0.04, 0.04], [0.04, 0.04, 0.04]]);
+
+  // 被图参数绑定的那个照样改图参数，不写成节点显式值（每个节点都走 setParam 的路由）
+  g().promoteToGraphParam("n_voxel", "leafSize");
+  g().setParamMany(["n_voxel"], "leafSize", [0.07, 0.07, 0.07]);
+  assert.deepEqual(doc().params.leafSize.default, [0.07, 0.07, 0.07]);
+  assert.equal(node("n_voxel").params.leafSize, undefined);
+});
+
 test("纳入配方：当前有效值成为 default、规格从 manifest 抄、节点显式值被删；一次撤销完全还原", () => {
   reset();
   const before = structuredClone(doc());

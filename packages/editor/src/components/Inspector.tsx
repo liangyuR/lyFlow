@@ -663,6 +663,137 @@ export function Inspector() {
   );
 }
 
+/** 多选时的检查器：选中的是同一种算子时一起改参数 —— 改一次写进每个节点，一条撤销（setParamMany）。
+ *  各节点值相同的参数显示那个值；不同的标「不同」，控件里先放第一个节点的值，改了就统一成新值。
+ *  不同算子混选时只列各有几个。 */
+function MultiInspector({ ids }: { ids: string[] }) {
+  const fullDoc = useGraphStore((s) => s.doc);
+  const path = useUiStore((s) => s.path);
+  const base = useManifestStore((s) => s.operatorsById);
+  const operatorsById = augmentOperators(base, fullDoc.subgraphs);
+  const level = levelOf(fullDoc, path);
+  const nodes = ids.flatMap((id) => {
+    const n = level.nodes.find((x) => x.id === id);
+    return n ? [n] : [];
+  });
+  const counts = new Map<string, number>();
+  for (const n of nodes) counts.set(n.op, (counts.get(n.op) ?? 0) + 1);
+  const op = counts.size === 1 && nodes[0] ? operatorsById.get(nodes[0].op) : undefined;
+  return (
+    <div className="insp insp--multi" data-testid="inspector-multi">
+      <header className="insp__head">
+        <p className="insp__multi-count">已选中 {ids.length} 个节点</p>
+        <ul className="insp__multi-ops">
+          {[...counts].map(([opId, n]) => (
+            <li key={opId}>
+              {n} × {operatorsById.get(opId)?.label ?? opId}
+            </li>
+          ))}
+        </ul>
+      </header>
+      {op && op.params.length > 0 ? (
+        <MultiParams nodes={nodes} op={op} />
+      ) : (
+        <p className="insp__hint">
+          {op ? "此算子没有参数" : "选中的是同一种算子时，可以在这里一起改参数。"}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function MultiParams({ nodes, op }: { nodes: GraphNode[]; op: OperatorDesc }) {
+  const doc = useGraphStore((s) => s.doc);
+  const path = useUiStore((s) => s.path);
+  const overrides = useGraphParamOverrides();
+  const def = currentSubgraph(doc, path);
+  const names = useMemo(() => op.params.map((p) => p.name), [op.params]);
+  // 每个节点各自的有效值（被图参数绑定的取图参数的值，与单个节点的检查器同一份）
+  const each = useMemo(
+    () => nodes.map((n) => effectiveParams(op, withBoundValues(doc, path, n, names, overrides))),
+    [nodes, op, doc, path, names, overrides],
+  );
+  const groups = useMemo(() => groupParams(op.params), [op.params]);
+  const ids = nodes.map((n) => n.id);
+  return (
+    <>
+      {groups.map((g) => {
+        // 联动条件按各节点自己的值判：有一个节点上看得见就列出来
+        const visible = g.params.filter((p) => each.some((e) => isVisible(p, e)));
+        if (visible.length === 0) return null;
+        return (
+          <section key={`${g.name}-${g.advanced}`} className="insp__group">
+            {(g.name || g.advanced) && (
+              <h4 className="insp__group-title">
+                {g.name || "高级"}
+                {g.advanced && g.name !== "高级" && <span className="insp__group-adv">高级</span>}
+              </h4>
+            )}
+            {visible.map((p) => {
+              const values = each.map((e) => e[p.name]);
+              // 已提升的内参只读、联动条件在哪个节点上不满足就禁用 —— 与单个节点的检查器同一规则
+              const locked = nodes.some(
+                (n) => promotedBy(def, n.id, p.name) !== undefined && !resolveGraphBinding(doc, path, n.id, p.name),
+              );
+              return (
+                <MultiParamRow
+                  key={p.name}
+                  param={p}
+                  ids={ids}
+                  values={values}
+                  disabled={locked || !each.every((e) => isEnabled(p, e))}
+                />
+              );
+            })}
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
+function MultiParamRow({
+  param,
+  ids,
+  values,
+  disabled,
+}: {
+  param: Param;
+  ids: string[];
+  values: unknown[];
+  disabled: boolean;
+}) {
+  const setParamMany = useGraphStore((s) => s.setParamMany);
+  const first = values[0];
+  const same = values.every((v) => valueEquals(v, first));
+  return (
+    <div
+      className={`insp-param${disabled ? " is-disabled" : ""}`}
+      data-testid={`multi-param-${param.name}`}
+      data-mixed={same ? undefined : "1"}
+    >
+      <div className="insp-param__label">
+        <span title={param.doc}>{param.label || param.name}</span>
+        {!same && (
+          <span className="insp-param__mixed" title="选中的节点里这个参数的值不一样；改了就统一成新值">
+            不同
+          </span>
+        )}
+      </div>
+      <div className="insp-param__control">
+        <ParamControl
+          param={param}
+          value={first}
+          disabled={disabled}
+          onChange={(v) => {
+            if (!same || !valueEquals(v, first)) setParamMany(ids, param.name, v);
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function InspectorBody() {
   const selectedNodes = useUiStore((s) => s.selectedNodes);
   const inspectedOperator = useUiStore((s) => s.inspectedOperator);
@@ -688,14 +819,7 @@ function InspectorBody() {
     }
   }
 
-  if (selectedNodes.size > 1) {
-    return (
-      <div className="insp insp--multi">
-        <p>已选中 {selectedNodes.size} 个节点</p>
-        <p className="insp__hint">批量编辑参数是后续里程碑的事，M1 一次只编辑一个节点。</p>
-      </div>
-    );
-  }
+  if (selectedNodes.size > 1) return <MultiInspector ids={[...selectedNodes]} />;
 
   // 在子图里且没选中节点：显示子图自己的说明与提升出来的参数
   const last = path[path.length - 1];

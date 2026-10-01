@@ -384,10 +384,34 @@
 }
 
 .insp--empty,
-.insp--multi,
 .insp--missing {
   padding: 28px 18px;
   color: var(--lyflow-fg-1);
+}
+
+.insp--multi .insp__head {
+  margin-bottom: 12px;
+}
+
+.insp__multi-count {
+  margin: 0 0 4px;
+  color: var(--lyflow-fg-0);
+}
+
+.insp__multi-ops {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--lyflow-fg-2);
+  font-size: 12px;
+}
+
+.insp-param__mixed {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--lyflow-bg-3);
+  color: var(--lyflow-fg-2);
+  font-size: 10px;
 }
 
 .insp--missing code {

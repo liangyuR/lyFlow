@@ -337,6 +337,9 @@ interface GraphState {
   moveNodes(moves: readonly { id: string; position: { x: number; y: number } }[]): void;
   /** at：节点所在的层级，不给 = 当前层级（ui.path）。参数面板展开进子图定义时给的是那一层的路径。 */
   setParam(nodeId: string, name: string, value: unknown, at?: SubPath): void;
+  /** 同一个参数一次写进几个节点（多选时的检查器）。每个节点照 setParam 的路由（被图参数绑定的改图参数、
+   *  选着配方时记一笔），整体一条撤销；已经在外层事务里（数字框拖动的 begin / commit）就并进去。 */
+  setParamMany(nodeIds: readonly string[], name: string, value: unknown): void;
   setNodeUi(nodeId: string, patch: Partial<NodeUi>): void;
   connect(from: PortRef, to: PortRef): ConnectVerdict;
   disconnect(edgeIds: readonly string[]): void;
@@ -726,6 +729,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
       // 滑块拖动时 setParam 每帧都来，靠外层 begin/commit 合成一条撤销。
       if (get().pendingSnapshot) mutate(apply);
       else transact(`修改 ${op.label}.${name}`, apply);
+    },
+
+    setParamMany(nodeIds, name, value) {
+      if (nodeIds.length === 0) return;
+      const outer = get().pendingSnapshot !== null;
+      if (!outer) get().begin();
+      for (const id of nodeIds) get().setParam(id, name, value);
+      if (!outer) get().commit(`修改 ${nodeIds.length} 个节点的 ${name}`);
     },
 
     setNodeUi(nodeId, patch) {

@@ -979,6 +979,33 @@ async function suiteEditing(cdp, report) {
     report.fail("找不到可拖动的数字框", "[data-testid=param-drag-pointCount]");
   }
 
+  // 多选同一种算子：检查器里一起改。值不一样的行标「不同」，拖一下两个节点都变成同一个值，一条撤销
+  const twin = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    const id = g.addNode('gen.synthetic', { x: 40, y: 400 });
+    window.__lyflow.stores.graph.getState().setParam(id, 'pointCount', 12000);
+    window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}, id], []);
+    return id;
+  `);
+  await sleep(250);
+  report.ok("选中两个同算子节点：检查器换成一起改的表单，点数那一行标着「不同」",
+    await cdp.eval(`return !!document.querySelector('[data-testid="inspector-multi"] [data-testid="multi-param-pointCount"][data-mixed="1"]');`));
+  const multiDrag = await centerOf(cdp, '[data-testid="multi-param-pointCount"] [data-testid="param-drag-pointCount"]');
+  if (multiDrag) {
+    const undoBefore = await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+    await dragMouse(cdp, multiDrag, { x: multiDrag.x + 60, y: multiDrag.y }, { steps: 12 });
+    await sleep(200);
+    const both = await cdp.eval(`
+      const g = window.__lyflow.stores.graph.getState();
+      const of = (id) => g.doc.nodes.find((n) => n.id === id).params.pointCount;
+      return { a: of(${lit(ids.gen)}), b: of(${lit(twin)}), past: g.past.length };
+    `);
+    report.ok("拖一下两个节点都变成同一个值", both.a === both.b && both.a !== 12000, JSON.stringify(both));
+    report.eq("两个节点一起改只记一条撤销", both.past - undoBefore, 1);
+  } else {
+    report.fail("多选表单里找不到可拖动的数字框", '[data-testid="multi-param-pointCount"]');
+  }
+
   // #29 快捷键面板。先移开焦点：上一组把焦点留在了参数输入框里，
   // 而键表里 help 没标 inTextField，会被「打字时不拦键」的铁律挡掉。
   await cdp.eval(`
