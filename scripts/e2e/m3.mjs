@@ -1518,6 +1518,20 @@ async function suitePanels(cdp, report, ws) {
   `);
   report.eq("浏览器快捷键（Ctrl+S 网页另存为、Ctrl+P 打印、Ctrl+F / F3 查找）挡掉，普通按键与缩放不挡", blocked,
     { save: true, print: true, find: true, f3: true, plainS: false, zoom: false });
+  // 从资源管理器拖进来的文件：页面里没人接就挡掉浏览器的默认动作（导航到那个文件，整个 app 换掉）；不带文件的拖放不挡。
+  // 导航本身 CDP 的模拟拖放触发不了，这里只验挡板接上了
+  const dropGuard = await cdp.eval(`
+    const fire = (type, withFile) => {
+      const dt = new DataTransfer();
+      if (withFile) dt.items.add(new File(['x'], 'scan.pcd'));
+      else dt.setData('text/plain', 'x');
+      const ev = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt });
+      document.querySelector('.toolbar').dispatchEvent(ev);
+      return ev.defaultPrevented;
+    };
+    return { fileOver: fire('dragover', true), fileDrop: fire('drop', true), textDrop: fire('drop', false) };
+  `);
+  report.eq("拖进来的文件松在工具栏上：挡掉浏览器的默认动作；不带文件的拖放不挡", dropGuard, { fileOver: true, fileDrop: true, textDrop: false });
   const nativeMenu = await cdp.eval(`
     const fire = (el) => {
       const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });

@@ -22,6 +22,11 @@ function wantsNativeMenu(e: MouseEvent, win: Window, dev: boolean): boolean {
   return (win.getSelection()?.toString() ?? "") !== "";
 }
 
+/** 从资源管理器拖进来的文件（页面里的拖放 —— 算子面板拖到画布 —— 不带 Files）。 */
+function carriesFiles(e: DragEvent): boolean {
+  return e.dataTransfer?.types.includes("Files") ?? false;
+}
+
 export function installBrowserGuard(win: Window = window, { dev = false } = {}): () => void {
   const onKey = (e: KeyboardEvent) => {
     if (isBrowserShortcut(e)) e.preventDefault();
@@ -29,10 +34,21 @@ export function installBrowserGuard(win: Window = window, { dev = false } = {}):
   const onMenu = (e: MouseEvent) => {
     if (!e.defaultPrevented && !wantsNativeMenu(e, win, dev)) e.preventDefault();
   };
+  // 拖进来的文件页面里没人接（画布只接算子与片段）就挡掉默认动作：浏览器的默认是导航过去 —— 整个 app 换成那个
+  // 文件。tauri.conf.json 的 dragDropEnabled 是 false（开着的话 Windows 上页面里的拖放就不灵了），所以 WebView2
+  // 照浏览器的规矩办。CDP 模拟的拖放不走 WebView2 外部拖放那条路，导航本身没在 e2e 里验过；dragover / drop 两头都挡
+  // 是 Electron 那边通行的做法
+  const onFileDrag = (e: DragEvent) => {
+    if (carriesFiles(e) && !e.defaultPrevented) e.preventDefault();
+  };
   win.addEventListener("keydown", onKey, true);
   win.addEventListener("contextmenu", onMenu);
+  win.addEventListener("dragover", onFileDrag);
+  win.addEventListener("drop", onFileDrag);
   return () => {
     win.removeEventListener("keydown", onKey, true);
     win.removeEventListener("contextmenu", onMenu);
+    win.removeEventListener("dragover", onFileDrag);
+    win.removeEventListener("drop", onFileDrag);
   };
 }
