@@ -724,13 +724,16 @@ async function suiteLibrary(cdp, report) {
         return true;
       `);
       mustOk(added, "在库目录面板里填了目录并点了添加");
-      await cdp.waitFor(`window.__lyflow.stores.manifest.getState().operatorsById.has(${lit("lib." + extraId)})`,
-        { what: "新加的目录里的库算子进了 manifest", timeoutMs: 15_000 }).catch(() => {});
+      // 两样都等：面板先换 manifest、再去取一遍设置才刷新列表（又一次 IPC），只等 manifest 会读到还没刷新的列表
+      await cdp.waitFor(`window.__lyflow.stores.manifest.getState().operatorsById.has(${lit("lib." + extraId)})
+          && [...document.querySelectorAll('[data-testid="library-dir"]')].some((li) => li.getAttribute('title') === ${lit(extraDir)})`,
+        { what: "新加的目录里的库算子进了 manifest、列表里也有了那个目录", timeoutMs: 15_000 }).catch(() => {});
       const listed = await cdp.eval(`
         return [...document.querySelectorAll('[data-testid="library-dir"]')].map((li) => li.getAttribute('data-kind') + ':' + li.getAttribute('title'));
       `);
+      const opIn = await hasOp(`lib.${extraId}`);
       report.ok("面板里「添加」：当场保存并重扫，manifest 里有了新目录里的库算子，列表里多一行可删的目录",
-        (await hasOp(`lib.${extraId}`)) && listed.includes(`extra:${extraDir}`), JSON.stringify(listed));
+        opIn && listed.includes(`extra:${extraDir}`), JSON.stringify({ opIn, listed }));
 
       const cli = path.join(ROOT, "bridge", "target", "debug", "lyflow.exe");
       const r = spawnSync(cli, ["manifest"], { encoding: "utf8" });
