@@ -40,7 +40,8 @@
 | 运行摘要（summary） | `core/tests/test_summary.cpp`；CLI 的 `--summary` 形状在 `bridge/src/cli.rs` |
 | 标准算子 / PCD 读写 / ONNX | `packs/std-pointcloud/tests/*`、`packs/std-ml/tests/test_ml_ops.cpp`（模型用例要 `LYFLOW_TEST_ONNX_MODEL`，不设会打出跳过；`[N,6,1280] → [N,8,1280]` 的模型本机在桌面 DTS 文件夹的 `v12s0.onnx`） |
 | 主预览的图像模式（画输出还是输入那张图、放大后重跑视角不动、像素框拖动写回参数并可撤销、像素几何叠画；规则本身在 `view-rule.test.mjs`） | e2e `m8b.mjs` 的 `suiteImageMainView` |
-| MCP 看图（LYIM 解码、u16 拉伸到 8 位、最近邻缩、PNG 头与 inflate 读回；冒烟里真调一次 `view_output_image`） | `packages/mcp/test/cloud.test.ts`、`smoke.test.ts`、`server.test.ts`（工具面 16 个） |
+| 大图预览（ADR-0028：源头按 2 的幂缩到 4 MP、像素参数 / 几何 / 量测在 compute 两侧换算、`absolute` 绝对尺寸、u16 单通道缩小时 0 不计入、超预算提示按数据域） | 规则与执行器端到端在 `core/tests/test_pixel_scale.cpp`（探针算子 `test.px_probe` 在同一个文件里）；shrinkImage 的 scale 与 D3 在 `test_data.cpp`；点云那一支的提示在 `test_subgraph.cpp` 的预览超预算用例；真实链路（找圆、区域统计预览与正式对得上）在 `packs/std-image/tests/test_image_ops.cpp`；主预览按原图尺寸摆放、角标、框与正式结果同一处在 e2e `m8b.mjs` 的 `suiteImagePreviewScale` |
+| MCP 看图（LYIM 解码、u16 拉伸到 8 位、最近邻缩、PNG 头与 inflate 读回、超过 16 MB 分段取齐；冒烟里真调一次 `view_output_image`） | `packages/mcp/test/cloud.test.ts`、`smoke.test.ts`、`server.test.ts`（工具面 16 个） |
 | 图像算子（std-image：adapter 零拷贝与 RGB 顺序、读写往返含中文路径、各算子数值、像素单位的几何、单通道契约；深度图 ↔ 点云的反投影、来回一趟逐像素相同、z 缓冲；图像 → 张量 → ONNX → 图像的推理链路，同样要 `LYFLOW_TEST_ONNX_MODEL`） | `packs/std-image/tests/test_image_ops.cpp`；e2e `peek.mjs` 图像组的最后一段（真 app 里灰度 → Otsu → 区域统计、掩膜边是单通道 u8） |
 | dts 面差（与宿主 Python 旧算法的对照、现场轮廓） | `packs/dts/tests/test_dts_ops.cpp`（夹具 `tests/data/*.h`） |
 | gap 测量、积木、导入、模型 ROI | `packs/gap/tests/*`；e2e `gap.mjs`、`m8b.mjs`、`m8c.mjs`、`params_p4.mjs`（编辑器 vs CLI 逐位相同） |
@@ -49,7 +50,7 @@
 | 预览里选点与测距（屏幕空间最近点、看不见的点跳过、同距取近、一组两点、readout 的单位与行） | `packages/editor/test/pick.test.mjs`；快捷键 `M` 不撞 `Ctrl+M` 在 `compare-store.test.mjs` 的快捷键那条；e2e `m3.mjs` 的测量组（真单击选点、拖动不选、重跑标过期、换节点清掉）、`compare.mjs` 一句（A、B 两栏各点一次） |
 | 点云缓存的并发请求合并（同键只取一次、失败不留占位） | `packages/editor/test/cloud-cache.test.mjs`；e2e `m4.mjs` §2 的「事件到渲染」（拖动中预览运行的延迟中位数） |
 | `lyflow eval / sweep / perturb`（值路径、样本集、轴扫描与斜率、`pointFrom` 刀口跟锚点） | `bridge/src/eval.rs`、`perturb.rs` 的单元测试；`bridge/src/cli.rs` 的 `perturb_*` 集成测试（`crop_chain` 小图：固定刀口斜率 > 0、刀口跟锚点挪走后不响应、取不到锚点判失败）；MCP `packages/mcp/test/argv.test.ts` |
-| 连线查看器 Edge Peek | e2e `peek.mjs`；窗口上限与自动关窗的提示 `packages/editor/test/peek-store.test.mjs` |
+| 连线查看器 Edge Peek | e2e `peek.mjs`；窗口上限与自动关窗的提示 `packages/editor/test/peek-store.test.mjs`；图像按段取齐（超过 16 MB 分几段要）`packages/editor/test/image-fetch.test.mjs` |
 | 按输出类型选视图（主预览的点云 / 值） | `packages/editor/test/view-rule.test.mjs`；e2e `gap.mjs` 的「量测输出」组（`transform.make` 显示值、手动选只对当时的节点有效） |
 | 动效、hover、端点对齐 | e2e `motion.mjs`、`noderun.mjs` |
 | 节点运行按钮 | e2e `noderun.mjs` |

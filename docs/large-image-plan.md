@@ -1,6 +1,6 @@
 # 大图：抢占不阻塞、图像预览按比例缩小 —— 实施计划（image-plan 阶段 5）
 
-> 2026-10-01。状态：**已定，实施中**。D1–D3 按建议值（用户 2026-10-01 确认），E1–E9 是实施时定的细节。
+> 2026-10-01。状态：**已实施**（L1–L3，验收 [large-image-acceptance.md](large-image-acceptance.md)）。D1–D3 按建议值（用户 2026-10-01 确认），E1–E9 是实施时定的细节。
 > 来源：[image-acceptance.md](image-acceptance.md)「已知毛刺」的大图实测，以及同日在真 app 里的抢占实验。
 
 ## 0. 要解决的问题
