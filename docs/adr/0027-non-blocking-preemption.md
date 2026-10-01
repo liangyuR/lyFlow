@@ -20,10 +20,14 @@ bridge/README 当时写下了代价：旧 run 卡在不可取消的算子里时�
 
 1. **`run_graph` 里不再 join。** 有 run 在算时，取消它、挪进 `draining`，新请求排进 `pending`，立即返回新 runId。
 2. **同一时刻最多一个 run 在算。** `draining` 退出之前再来的请求顶掉 `pending`，只留最新一个；`draining` 退出时由它的收尾线程启动 `pending`。
-3. **排队中的请求作废时补发 `run_finished`。** 被 `cancel` 取消、被 `stop_active` / `drop_all` 清掉的补发 `cancelled`；
+3. **排队中的请求作废时补发 `run_finished`。** 被 `cancel` 取消的补发 `cancelled`；
    启动失败（core 返回空句柄，只在内存不足时）补发 `error`。被新请求顶掉的不补发。
 4. **`run_graph` 照旧是同步命令**，不改成 async。
-5. 重扫库目录（`stop_active`）与热重载（`drop_all`）**仍然等**被抢占的那个退出。
+5. **重扫库目录与热重载在「维护窗口」里做**（`RunManager::pause`，2026-10-01 补，见「代价」最后一条的来历）：
+   进窗口时在算的与排干中的取消掉、等它们退出（不在主线程上等）；窗口里来的请求只排队、只留最新一个，
+   窗口结束才开跑，开跑时取的是那一刻的 core（热重载之后就是新的一代）。排队中的请求不作废 —— 它是用户最后一次要的。
+   同一时刻只有一个窗口。重扫库目录的三个命令（`refresh_library` / `set_library_dirs` / `save_as_library`）
+   改成 async：在线程池上等，重建注册表这一步再回到主线程做（注册表在 core 里没有锁，别的同步命令都在主线程上读它）。
 
 ## 理由
 
@@ -56,12 +60,14 @@ bridge/README 当时写下了代价：旧 run 卡在不可取消的算子里时�
 - 被抢占的 run 算完之前，新请求开不了跑：拖一个慢算子的参数时，结果要等上一次算完。界面不卡，但不更快 ——
   让慢算子本身变快是图像预览按比例缩小的事（ADR-0028）。
 - 排队的请求要自己持有一份图 JSON 与注入数据（`RunInput` 的缓冲），拷贝只花在真要排队的那一次。
-- 重扫库目录仍会等停不下来的算子算完，那段时间窗口是卡的。它是显式的、少见的操作，注册表重建的正确性比它重要。
-- **watcher 线程上的那两条路不受主线程串行保护**（这条早就存在，本 ADR 没有改变它）：库目录的文件监视在自己的线程上重扫
-  （`stop_active` → `set_library_dirs`），热重载在自己的线程上 `drop_all` → 换 DLL。它们等被抢占的那个退出时，主线程上来的
-  `run_graph` 照样能当场开跑，新 run 就赶上了注册表重建或换代。修法是在状态里加一道「暂停」：暂停期间来的请求只排队、
-  注册表重建完再开跑 —— 换 DLL 那条还要让排队的请求换用新的 core，没有在这次做。
-- 排队的请求在 `stop_active` / `drop_all` 里先补发 cancelled 再等，界面不用陪着等那个停不下来的算子。
+- 重扫库目录、热重载仍要等停不下来的算子算完才做得了 —— 但不再卡界面（决策 5），等的那几秒里发起的运行排着队。
+- **（已修）watcher 线程上的两条路曾不受主线程串行保护**：库目录的文件监视在自己的线程上重扫（先 `stop_active` 再
+  `set_library_dirs`），热重载在自己的线程上 `drop_all` → 换 DLL；两步之间主线程上来的 `run_graph` 照样能当场开跑，
+  新 run 就赶上了注册表重建（`Registry::setLibraryOperators` 先 resize 再 push_back，`std::vector<OperatorDesc>` 一扩容，
+  在算的 run 手里的**全部**算子指针都悬空）或换代（排队的请求捕获的是提交时那一代的 core）。
+  从界面点「重扫库目录」也卡主线程：运行卡在 3 s 的算子里时，紧跟的最轻的 IPC 等了 2.9 s（与修前的 `run_graph` 同一类）。
+  两样都由决策 5 的维护窗口修掉，验收在 `bridge/src/execution.rs` 的状态机用例与 e2e `noderun.mjs` 的
+  `suiteLibraryRescanStalled`。
 
 ## 不做
 

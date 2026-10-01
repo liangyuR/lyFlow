@@ -630,6 +630,54 @@ async function suitePreemptStalled(cdp, report) {
     seen.first === "cancelled" && seen.middleStarted.length === 0 && seen.last === "ok", JSON.stringify(seen));
 }
 
+/** 维护窗口（ADR-0027）：重扫库目录要等在算的那个退出（它握着算子描述）。修前这一步在主线程上等 ——
+ *  运行卡在 3 s 的算子里时「重扫库目录」让紧跟的最轻的 IPC 等了 2.9 s；两步之间来的 run_graph 还能当场开跑，
+ *  手里的指针随即被重建注册表释放（watcher 线程那条路）。 */
+async function suiteLibraryRescanStalled(cdp, report) {
+  report.section("维护窗口（ADR-0027）：运行卡在停不下来的算子里时重扫库目录，主线程不卡；期间发起的运行排队，" +
+    "被停掉的那个退出、重扫完才开跑");
+  await newDoc(cdp);
+  await installRecorder(cdp);
+  const ids = await buildGraph(cdp, [{ key: "stall", op: "test.stall", params: { ms: 2500 } }], []);
+  await cdp.eval(`void window.__lyflow.run({}); return true;`);
+  await cdp.waitFor(`window.__lyflow.snapshot().run.nodes[${lit(ids.stall)}]?.state === 'running'`,
+    { timeoutMs: 30_000, what: "test.stall 进入 running" });
+  const first = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
+
+  const got = await cdp.eval(`
+    const inv = window.__TAURI_INTERNALS__.invoke;
+    const t0 = performance.now();
+    const refresh = inv('refresh_library').then(
+      (r) => ({ ms: Math.round(performance.now() - t0), operators: r?.manifest?.operators?.length ?? 0 }),
+      (e) => ({ error: String(e) }));
+    await new Promise((r) => setTimeout(r, 30));
+    const t1 = performance.now();
+    await inv('get_core_info');
+    const probeMs = Math.round(performance.now() - t1);
+    const t2 = performance.now();
+    await window.__lyflow.run({});
+    const runMs = Math.round(performance.now() - t2);
+    return { probeMs, runMs, queued: window.__lyflow.stores.execution.getState().runId, refresh: await refresh };
+  `);
+  report.ok(`重扫期间最轻的 IPC ${got.probeMs} ms、发起一次运行 ${got.runMs} ms（都 ≤ 300；修前 IPC 等了 2.9 s）`,
+    got.probeMs <= 300 && got.runMs <= 300, JSON.stringify(got));
+  report.ok("重扫等被停掉的那个退出才完成（≥ 1 s），拿回新的 manifest",
+    !got.refresh.error && got.refresh.ms >= 1000 && got.refresh.operators > 0, JSON.stringify(got.refresh));
+
+  await cdp.waitFor(
+    `(() => { const s = window.__lyflow.stores.execution.getState();
+              return s.runId === ${lit(got.queued)} && s.runStatus !== 'running' ? s.runStatus : null; })()`,
+    { timeoutMs: 30_000, what: "排队的那次跑完" },
+  );
+  const order = await cdp.eval(`
+    return window.__lyNodeRun.events
+      .filter((e) => e.runId === ${lit(first)} || e.runId === ${lit(got.queued)})
+      .map((e) => (e.runId === ${lit(first)} ? 'first' : 'queued') + ':' + e.kind + (e.status ? ':' + e.status : ''));
+  `);
+  report.eq("被停掉的那个以 cancelled 收场之后，排队的那次才开跑、跑完（同一时刻最多一个在算）", order,
+    ["first:run_started", "first:run_finished:cancelled", "queued:run_started", "queued:run_finished:ok"]);
+}
+
 // ------------------------------------ 验收 11：hover、端点对齐（进度环在上面的验收 10 里，复用那张慢图）
 
 async function suiteLook(cdp, report) {
@@ -836,6 +884,7 @@ export const nodeRunSuites = [
   suiteIsolateOnly,
   suiteStopAndPreempt,
   suitePreemptStalled,
+  suiteLibraryRescanStalled,
   suiteLook,
   suiteAttached,
   suiteMenu,

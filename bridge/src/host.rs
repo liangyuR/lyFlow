@@ -96,10 +96,8 @@ pub fn setup<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if hot_reload {
         crate::watcher::spawn(app.clone());
     }
-    // 库算子目录（ADR-0010）。
-    use tauri::Manager;
-    let runs = app.state::<crate::execution::RunManager>();
-    match crate::commands::rescan_library(app, &runs) {
+    // 库算子目录（ADR-0010）。这时还没有运行，也还在主线程上：直接扫，不用维护窗口
+    match crate::commands::rescan_library(app) {
         Ok(status) if !status.problems.is_empty() => {
             for p in &status.problems {
                 eprintln!("库算子: {p}");

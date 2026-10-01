@@ -163,6 +163,18 @@ struct State {
     pending: Option<Pending>,
     /// 上一次跑完的那个。留着是为了 3D 视图还能取到它的点云。
     finished: Option<Run>,
+    /// 维护窗口里（重扫库目录、热重载，`RunManager::pause`）：新请求只排队，不开跑。
+    paused: bool,
+}
+
+/// 维护窗口怎么处置运行（`RunManager::pause`）。
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum PauseMode {
+    /// 重扫库目录：注册表要重建，在算的 run 手里握着 OperatorDesc 指针，得停下、等它退出；
+    /// DLL 不换代，跑完的照样安全 —— 被停掉的那一次留作「上一次完成的」（界面上留着的就是它的结果）。
+    KeepResults,
+    /// 热重载：上一次跑完的也放掉。只要还有一个 RunHandle 活着，旧 DLL 的引用计数就归不了零（ADR-0009）。
+    ReleaseAll,
 }
 
 fn lock(inner: &Mutex<State>) -> MutexGuard<'_, State> {
@@ -197,7 +209,7 @@ fn settle(inner: &Arc<Mutex<State>>, st: &mut State, run: &Run) -> Option<(Notif
         return None;
     }
     if !holds(&st.draining, run) {
-        // 被 stop_active / drop_all 拿走的：它们自己 join，这里什么都不用做
+        // 被维护窗口（pause）拿走的：Paused 自己 join，这里什么都不用做
         return None;
     }
     st.draining = None;
@@ -280,6 +292,8 @@ fn never_started_event(run_id: &str, status: &str, error: Option<&str>) -> serde
 #[derive(Clone, Default)]
 pub struct RunManager {
     inner: Arc<Mutex<State>>,
+    /// 维护窗口结束时通知（`pause` 在这里等上一个窗口）。
+    resumed: Arc<std::sync::Condvar>,
 }
 
 impl RunManager {
@@ -308,10 +322,12 @@ impl RunManager {
                 let owned = OwnedStart::copy_of(graph_json, base_dir, &options);
                 let (launch_app, notify_app) = (app.clone(), app.clone());
                 let (launch_id, notify_id) = (run_id.clone(), run_id.clone());
-                let core = Arc::clone(&core);
                 Pending::new(
                     run_id.clone(),
                     move || {
+                        // 开跑时再取 core：排队期间可能热重载换了一代。在提交时那一代上开跑，
+                        // 它就一直卸载不掉，跑的还是旧的算子（ADR-0009）
+                        let core = core_ffi::core()?;
                         let options = owned.options();
                         launch(&launch_app, core, &owned.graph_json, &owned.base_dir, options, &launch_id)
                     },
@@ -333,7 +349,7 @@ impl RunManager {
     ) -> Result<(), String> {
         let replaced = {
             let mut st = lock(&self.inner);
-            if st.active.is_none() && st.draining.is_none() {
+            if !st.paused && st.active.is_none() && st.draining.is_none() {
                 let run = now()?;
                 activate(&self.inner, &mut st, run);
                 return Ok(());
@@ -369,50 +385,33 @@ impl RunManager {
         }
     }
 
-    /// 停掉在算的（含被抢占、还没退出的那个），排队的作废，上一次跑完的留着。重扫库目录前调（ADR-0010）：
-    /// 注册表要重建，在算的 run 手里握着 OperatorDesc 指针；跑完的只剩结果仓里的索引，DLL 也没换代，
-    /// 它的数据照样安全。放掉它的话，界面上显示「完成」的节点按这个 runId 就取不到输出了。
-    /// 这里要等停不下来的算子算完 —— 重扫库目录要的正是「此后没有 run 握着旧的算子描述」。
-    pub fn stop_active(&self) {
-        let (runs, pending) = {
+    /// 进入维护窗口（重扫库目录、热重载，ADR-0027）：在算的与排干中的取消掉，交给返回的 `Paused` 去等；
+    /// 窗口里来的请求只排队（只留最新一个）—— `Paused` 放掉时才开跑，开跑时取的是那一刻的 core。
+    /// 排队中的请求不作废：它是用户最后一次要的，库重扫完、换完代照样该跑。
+    ///
+    /// 同一时刻只有一个窗口：已经有一个时在这里等它结束（重扫与热重载在不同线程上，不能交错着改注册表）。
+    /// 不要在 Tauri 主线程上调 —— 等的可能是一个停不下来的算子（`Paused::drain`）。
+    pub fn pause(&self, mode: PauseMode) -> Paused {
+        let (taken, finished) = {
             let mut st = lock(&self.inner);
-            ([st.active.take(), st.draining.take()], st.pending.take())
+            while st.paused {
+                st = self.resumed.wait(st).unwrap_or_else(|e| e.into_inner());
+            }
+            st.paused = true;
+            let taken: Vec<Run> = [st.active.take(), st.draining.take()].into_iter().flatten().collect();
+            let finished = if mode == PauseMode::ReleaseAll { st.finished.take() } else { None };
+            (taken, finished)
         };
-        // 排队的那个先收场再等：等的可能是一个停不下来的算子，界面不该在这几秒里一直显示「运行中」
-        if let Some(p) = pending {
-            (p.notify)("cancelled", None);
-        }
-        for run in runs.iter().flatten() {
+        for run in &taken {
             run.cancel();
         }
-        for run in runs.iter().flatten() {
-            run.join();
+        Paused {
+            manager: self.clone(),
+            mode,
+            taken,
+            finished,
+            drained: false,
         }
-    }
-
-    /// 放掉全部 run。热重载前必须调 —— 只要还有一个 RunHandle 活着，
-    /// 旧 DLL 的引用计数就归不了零，新一代加载了也顶不掉它（ADR-0009）。
-    /// 重扫库目录不换 DLL，用不着它，见 `stop_active`。
-    pub fn drop_all(&self) {
-        let (runs, pending, finished) = {
-            let mut st = lock(&self.inner);
-            (
-                [st.active.take(), st.draining.take()],
-                st.pending.take(),
-                st.finished.take(),
-            )
-        };
-        if let Some(p) = pending {
-            (p.notify)("cancelled", None);
-        }
-        for run in runs.iter().flatten() {
-            run.cancel();
-        }
-        for run in runs.iter().flatten() {
-            run.join();
-        }
-        drop(runs);
-        drop(finished);
     }
 
     /// 把一个跑完的 run 放进 finished 槽。`start` 要 AppHandle 推事件，测试里没有 ——
@@ -437,6 +436,68 @@ impl RunManager {
             .active
             .as_ref()
             .map(|h| h.run_id().to_string())
+    }
+}
+
+/// 一个维护窗口（`RunManager::pause`）。先 `drain` 等被停掉的那几个退出，做完要做的事，再放掉它 ——
+/// 放掉时恢复：窗口里排着队的那个开跑。
+pub struct Paused {
+    manager: RunManager,
+    mode: PauseMode,
+    /// 被停掉的那一个（在算的或排干中的，最多一个）。
+    taken: Vec<Run>,
+    /// ReleaseAll 时一起拿走的上一次完成的那个。
+    finished: Option<Run>,
+    drained: bool,
+}
+
+impl Paused {
+    /// 等被停掉的那几个退出。停不下来的算子要算完才会退出，所以不在 Tauri 主线程上调。
+    /// ReleaseAll 时等完就放掉它们（连同上一次完成的）：换代之前旧 DLL 的引用要归零。
+    pub fn drain(&mut self) {
+        for run in &self.taken {
+            run.join();
+        }
+        if self.mode == PauseMode::ReleaseAll {
+            self.taken.clear();
+            self.finished = None;
+        }
+        self.drained = true;
+    }
+}
+
+impl Drop for Paused {
+    fn drop(&mut self) {
+        if !self.drained {
+            self.drain();
+        }
+        let (failed, replaced) = {
+            let mut st = lock(&self.manager.inner);
+            // KeepResults：界面上留着的正是被停掉的那一次（前端的 resultRunId 还指着它），留作上一次完成的 ——
+            // 放掉的话那些「完成」的节点就取不到输出了
+            let replaced = match self.taken.pop() {
+                Some(run) => st.finished.replace(run),
+                None => None,
+            };
+            st.paused = false;
+            self.manager.resumed.notify_all();
+            let failed = match st.pending.take() {
+                Some(Pending { launch, notify, .. }) => match launch() {
+                    Ok(next) => {
+                        activate(&self.manager.inner, &mut st, next);
+                        None
+                    }
+                    Err(reason) => Some((notify, reason)),
+                },
+                None => None,
+            };
+            (failed, replaced)
+        };
+        // 旧的 finished 在锁外放掉（lyflow_run_free），补发的事件也不在锁里发
+        drop(replaced);
+        if let Some((notify, reason)) = failed {
+            notify("error", Some(reason));
+        }
     }
 }
 
@@ -705,6 +766,10 @@ mod tests {
         }
     }
 
+    fn finished_id(manager: &RunManager) -> Option<String> {
+        lock(&manager.inner).finished.as_ref().map(|r| r.run_id().to_string())
+    }
+
     /// 收尾线程是异步的：轮询到条件成立，2 s 还不成立就失败。
     fn eventually(what: &str, cond: impl Fn() -> bool) {
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -772,64 +837,90 @@ mod tests {
         eventually("a 排干", || manager.is_idle());
         assert_eq!(s.launched(), ["a"], "取消掉的排队请求不该再开跑");
         // 没有人顶替它：界面上留着的就是 a 的结果，a 进 finished 而不是被放掉（review 第二轮）
-        assert_eq!(
-            lock(&manager.inner).finished.as_ref().map(|r| r.run_id().to_string()).as_deref(),
-            Some("a")
-        );
-    }
+        assert_eq!(finished_id(&manager).as_deref(), Some("a"));
 
-    #[test]
-    fn stop_active_waits_for_the_draining_run_and_cancels_the_queued_one() {
-        let manager = RunManager::new();
-        let s = Arc::new(Script::default());
-        s.submit(&manager, "a", Behaves::Stuck);
-        s.submit(&manager, "b", Behaves::Cooperative);
-
-        let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let stopper = {
-            let manager = manager.clone();
-            let stopped = Arc::clone(&stopped);
-            std::thread::spawn(move || {
-                manager.stop_active();
-                stopped.store(true, std::sync::atomic::Ordering::SeqCst);
-            })
-        };
-        // 先等到排队的那个收场（它在等之前发），再确认 stop_active 还卡着 —— 不靠 sleep 赌线程已经跑到了
-        eventually("排队的那个先收场", || !s.notified().is_empty());
-        assert!(
-            !stopped.load(std::sync::atomic::Ordering::SeqCst),
-            "重扫库目录要等被抢占的那个真的退出（它还握着算子描述）"
-        );
-        assert_eq!(s.notified(), [("b".to_string(), "cancelled", None)]);
-        s.run("a").finish();
-        stopper.join().unwrap();
+        // 维护窗口里排着队的那个同样能取消：补发 cancelled，窗口结束时什么都不开跑
+        let paused = manager.pause(PauseMode::KeepResults);
+        s.submit(&manager, "c", Behaves::Cooperative);
+        manager.cancel("c");
+        drop(paused);
+        assert_eq!(s.notified().last(), Some(&("c".to_string(), "cancelled", None)));
         assert_eq!(s.launched(), ["a"]);
         assert!(manager.is_idle());
     }
 
-    /// 热重载前的 drop_all：在算的与排干中的都取消并等齐，排队的作废，上一次跑完的也放掉。
+    /// 重扫库目录的维护窗口（ADR-0027）：在算的停下、等它退出；窗口里来的请求只排队、不开跑。
+    /// 修前重扫之前 stop_active 一下，两步之间主线程上来的 run_graph 当场开跑，手里的算子描述随即被重建注册表释放。
+    /// 窗口结束时只开跑最新的那一个；被停掉的那一次留作上一次完成的（界面上留着的是它的结果）。
     #[test]
-    fn drop_all_cancels_and_waits_for_everything_and_cancels_the_queued_one() {
+    fn a_pause_queues_requests_until_it_ends_and_then_runs_only_the_latest() {
+        let manager = RunManager::new();
+        let s = Arc::new(Script::default());
+        s.submit(&manager, "a", Behaves::Stuck);
+
+        let mut paused = manager.pause(PauseMode::KeepResults);
+        assert!(s.run("a").was_cancelled(), "进窗口时在算的那个被取消");
+        s.submit(&manager, "b", Behaves::Cooperative);
+        s.submit(&manager, "c", Behaves::Cooperative);
+        assert_eq!(s.launched(), ["a"], "窗口里来的请求一个都不开跑");
+
+        let waiter = std::thread::spawn(move || {
+            paused.drain();
+            paused
+        });
+        std::thread::sleep(Duration::from_millis(30));
+        assert!(!waiter.is_finished(), "drain 要等停不下来的那个真的退出（它还握着算子描述）");
+        s.run("a").finish();
+        let paused = waiter.join().unwrap();
+        assert_eq!(s.launched(), ["a"], "等完了也还在窗口里：重扫这一步还没做");
+
+        drop(paused);
+        assert_eq!(s.launched(), ["a", "c"], "窗口结束，最新的那个开跑");
+        assert!(s.notified().is_empty(), "被顶掉的 b 不补发（与抢占同一条规矩）");
+        assert_eq!(finished_id(&manager).as_deref(), Some("a"), "被停掉的那一次留作上一次完成的");
+    }
+
+    /// 热重载的窗口：上一次完成的也放掉（只要还有一个 RunHandle 活着，旧 DLL 就卸载不掉），
+    /// 排队的请求不作废，换完代才开跑（开跑时取的是新的一代，见 `start` 里的 Pending）。
+    #[test]
+    fn a_hot_reload_pause_releases_every_run_and_starts_the_queued_one_afterwards() {
         let manager = RunManager::new();
         let s = Arc::new(Script::default());
         s.submit(&manager, "done", Behaves::Cooperative);
         s.run("done").finish();
-        eventually("done 进 finished", || manager.active_run_id().is_none());
+        eventually("done 进 finished", || finished_id(&manager).as_deref() == Some("done"));
         s.submit(&manager, "a", Behaves::Stuck);
         s.submit(&manager, "b", Behaves::Cooperative);
 
-        let dropper = {
-            let manager = manager.clone();
-            std::thread::spawn(move || manager.drop_all())
-        };
-        eventually("排队的那个先收场", || !s.notified().is_empty());
-        assert!(!dropper.is_finished(), "drop_all 要等停不下来的那个退出（它握着旧 DLL）");
-        assert_eq!(s.notified(), [("b".to_string(), "cancelled", None)]);
+        let mut paused = manager.pause(PauseMode::ReleaseAll);
         s.run("a").finish();
-        dropper.join().unwrap();
-        assert!(manager.is_idle());
-        assert!(lock(&manager.inner).finished.is_none(), "上一次跑完的也要放掉");
-        assert_eq!(s.launched(), ["done", "a"]);
+        paused.drain();
+        // 除了测试自己记的那一份（和这里临时借的一份），没有人再握着它们。收尾线程 join 返回之后
+        // 才放掉它那一份，所以等一下：真 DLL 的最后一个引用同样是在那里落下的
+        for id in ["done", "a"] {
+            eventually(&format!("{id} 被放掉"), || Arc::strong_count(&s.run(id)) == 2);
+        }
+        assert_eq!(s.launched(), ["done", "a"], "排队的 b 不作废，也还没开跑");
+        drop(paused);
+        assert_eq!(s.launched(), ["done", "a", "b"]);
+        assert!(s.notified().is_empty());
+        assert!(finished_id(&manager).is_none(), "热重载不留被停掉的那个");
+    }
+
+    /// 重扫（线程池上）与热重载（watcher 线程上）可能同时来：同一时刻只有一个窗口，后来的等前一个结束。
+    #[test]
+    fn a_second_pause_waits_for_the_first_one_to_end() {
+        let manager = RunManager::new();
+        let first = manager.pause(PauseMode::KeepResults);
+        let second = {
+            let manager = manager.clone();
+            std::thread::spawn(move || drop(manager.pause(PauseMode::ReleaseAll)))
+        };
+        std::thread::sleep(Duration::from_millis(30));
+        assert!(!second.is_finished(), "第一个窗口还没结束");
+        drop(first);
+        second.join().unwrap();
+        assert!(!lock(&manager.inner).paused);
     }
 
     #[test]
@@ -845,6 +936,16 @@ mod tests {
             [("b".to_string(), "error", Some("线程都没起来".to_string()))]
         );
         assert!(manager.active_run_id().is_none());
+
+        // 维护窗口结束时才开跑的那个起不来：同样补发 error
+        let paused = manager.pause(PauseMode::KeepResults);
+        s.submit(&manager, "c", Behaves::FailsToStart);
+        drop(paused);
+        assert_eq!(
+            s.notified().last(),
+            Some(&("c".to_string(), "error", Some("线程都没起来".to_string())))
+        );
+        assert!(manager.is_idle());
     }
 
     /// 补发的那条要能被前端当成一条普通的 run_finished：schema 要的字段齐、status 是三种之一。
@@ -1588,8 +1689,12 @@ DATA ascii
         // 别的测试手里的 OperatorDesc* 失效 —— 要验的是 RunManager 这一侧，与库里有什么无关
         let dir = std::env::temp_dir().join(format!("lyflow-lib-rescan-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        crate::commands::rescan_library_dirs(&manager, vec![dir.to_string_lossy().into_owned()])
+        // 与 rescan_library_paused 同一个窗口；这里没有 Tauri 主线程，就地扫
+        let mut paused = manager.pause(PauseMode::KeepResults);
+        paused.drain();
+        crate::commands::rescan_library_dirs(vec![dir.to_string_lossy().into_owned()])
             .expect("重扫失败");
+        drop(paused);
         let _ = std::fs::remove_dir_all(&dir);
 
         let view = core
