@@ -668,6 +668,35 @@
   text-align: center;
 }
 
+/* 查找节点（Ctrl+F）：与算子搜索同一套外观，多两样：所在子图、出错标记。
+   标题与层级太长时各自省略，右端的算子名不被挤掉 */
+.finder .search-popup__label,
+.finder__where {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finder__where {
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
+
+.finder .search-popup__cat,
+.finder__err {
+  flex-shrink: 0;
+}
+
+.finder__err {
+  padding: 0 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--lyflow-danger) 22%, transparent);
+  color: var(--lyflow-danger);
+  font-size: 10px;
+}
+
 /* ------------------------------------------------------------------ misc */
 
 .palette__tip {

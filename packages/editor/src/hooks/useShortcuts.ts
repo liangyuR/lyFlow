@@ -52,11 +52,12 @@ export function useShortcuts(
 
       // 编辑器自己的对话框开着（起配方名、确认删除……）：按键全归它，快捷键一个都不响
       if (useModalStore.getState().current) return;
-      // 搜索弹层和快捷键面板自己处理按键，别在这里抢
+      // 搜索弹层、查找节点和快捷键面板自己处理按键，别在这里抢
       if (ui.searchPopup) {
         if (e.key === "Escape") ui.closeSearch();
         return;
       }
+      if (ui.finderOpen) return;
       if (ui.helpOpen && e.key === "Escape") {
         ui.setHelpOpen(false);
         return;
@@ -269,6 +270,10 @@ export function useShortcuts(
         case "help":
           e.preventDefault();
           ui.setHelpOpen(!ui.helpOpen);
+          return;
+        case "findNode":
+          e.preventDefault();
+          ui.setFinderOpen(true);
           return;
       }
     };

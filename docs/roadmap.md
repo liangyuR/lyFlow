@@ -182,8 +182,8 @@ C ABI 升到 v5：加了 `lyflow_set_library_dirs` / `lyflow_library_count` / `l
 - ~~子图内部节点的诊断挂在路径 id 上，顶层只看得到「这个子图红了」，
   要进去才知道是哪个内参（ADR-0010 的代价一）。~~ 已补：子图节点上写明是哪个内部节点出的错，
   点它、点诊断、点工具栏的「error N」都直接打开到它；F8 / Shift+F8 在出错的节点之间跳（2026-10-01）。
-- 库算子不能「展开为内联子图」：定义在库文件里，前端手上只有合成出来的 OperatorDesc。
-  右键那一项会明说这一点。
+- ~~库算子不能「展开为内联子图」：定义在库文件里，前端手上只有合成出来的 OperatorDesc。~~
+  已补：core 出定义（C ABI v13），右键「展开为内联子图」把定义拷进图（[library-inline-plan.md](library-inline-plan.md)，2026-09-29）。
 - `save_as_library` 拒绝嵌套了 `sub:` 的子图 —— 库文件必须自包含。
 - 300 节点的基准是合成图（30 条链 × 10 个 reroute），不是真实 pipeline。
 

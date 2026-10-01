@@ -106,6 +106,8 @@ interface UiState {
   setViewerContentPick(pick: { nodeId: string; content: ViewerContent } | null): void;
   /** 快捷键面板开着没有（`?`）。 */
   helpOpen: boolean;
+  /** 查找节点的弹层开着没有（Ctrl+F，components/NodeFinder）。 */
+  finderOpen: boolean;
   /** 抽屉里点了某条诊断 → 定位到这个节点/参数。 */
   focusedDiagnostic: { nodeId: string; paramPath?: string | undefined } | null;
   /** 画布要把哪个节点移进视野（revealNode 发起，GraphCanvas 执行）。seq 每次加一：同一个节点再点一次也要动。 */
@@ -135,6 +137,7 @@ interface UiState {
   endConnection(): void;
   toggleDrawer(tab?: DrawerTab): void;
   setHelpOpen(open: boolean): void;
+  setFinderOpen(open: boolean): void;
   focusDiagnostic(nodeId: string, paramPath?: string): void;
   /** 打开到 path 那一层、选中 localId，并请画布把它移进视野（revealRequest）。诊断抽屉、子图节点上的
    *  错误文字点进去时用：出错的节点可能在子图里，也可能在画面外。paramPath 交给 Inspector 标红框。 */
@@ -183,6 +186,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   viewerMeasuring: false,
   viewerContentPick: null,
   helpOpen: false,
+  finderOpen: false,
   focusedDiagnostic: null,
   revealRequest: null,
   autoHint: null,
@@ -275,6 +279,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   setHelpOpen(open) {
     set({ helpOpen: open });
+  },
+  setFinderOpen(open) {
+    if (get().finderOpen === open) return;
+    set({ finderOpen: open });
   },
   toggleParamPanel(open) {
     const cur = get().paramPanel;

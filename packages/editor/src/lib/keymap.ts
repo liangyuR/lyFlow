@@ -61,6 +61,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: "dissolve", keys: ["Ctrl+Shift+G"], label: "解散子图", scope: "canvas", group: "节点" },
   { id: "enterSubgraph", keys: ["Ctrl+Enter"], label: "进入子图", scope: "canvas", group: "节点" },
 
+  { id: "findNode", keys: ["Ctrl+F"], label: "查找节点（连子图里面的，回车跳过去）", scope: "global", group: "视图" },
   { id: "layout", keys: ["Ctrl+L"], label: "整理布局", scope: "canvas", group: "视图" },
   { id: "fitView", keys: ["Ctrl+Shift+F"], label: "适配视图", scope: "canvas", group: "视图" },
   { id: "toggleDrawer", keys: ["Ctrl+`"], label: "日志与诊断抽屉", scope: "global", group: "视图" },

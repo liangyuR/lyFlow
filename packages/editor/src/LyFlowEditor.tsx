@@ -7,6 +7,7 @@ import { GraphCanvas } from "./components/GraphCanvas";
 import { Inspector } from "./components/Inspector";
 import { NodePalette } from "./components/NodePalette";
 import { Modal } from "./components/Modal";
+import { NodeFinder } from "./components/NodeFinder";
 import { NodeSearch } from "./components/NodeSearch";
 import { ParamPanel } from "./components/ParamPanel";
 import { ShortcutPanel } from "./components/ShortcutPanel";
@@ -730,6 +731,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       <BottomDrawer />
       <StatusBar />
       <NodeSearch />
+      <NodeFinder />
       <ShortcutPanel />
       <Modal />
       <Toast />

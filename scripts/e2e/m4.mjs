@@ -319,6 +319,27 @@ async function suiteNested(cdp, report) {
   await pressEscape(cdp);
   await sleep(150);
   report.eq("连按两次 Esc 回到顶层", (await snapshot(cdp)).path.length, 0);
+
+  // 查找节点（Ctrl+F）：在顶层按名字找，直接跳进两层子图里的那个节点
+  await pressCtrl(cdp, "f");
+  await sleep(150);
+  report.ok("Ctrl+F 打开查找节点", await cdp.eval(`return !!document.querySelector('[data-testid="node-finder"]');`));
+  const voxelLabel = await cdp.eval(`return window.__lyflow.stores.manifest.getState().operatorsById.get('filter.voxel_grid').label;`);
+  await cdp.send("Input.insertText", { text: voxelLabel });
+  await sleep(150);
+  const found = await cdp.eval(`
+    const row = document.querySelector('[data-testid="node-finder-row"]');
+    return row ? { id: row.dataset.id, where: row.querySelector('.finder__where')?.textContent ?? null } : null;
+  `);
+  report.ok("按名字找到两层子图里的那个节点，行上写着它在哪两层里",
+    found?.id === nested && (found?.where ?? "").includes(" › "), JSON.stringify(found));
+  await pressKey(cdp, "Enter", 13);
+  await sleep(300);
+  report.eq("回车：打开到那一层、选中它，弹层关掉", await cdp.eval(`
+    const s = window.__lyflow.stores.ui.getState();
+    return { path: s.path.map((p) => p.nodeId), selected: [...s.selectedNodes], open: s.finderOpen };
+  `), { path: [outer.nodeId, inner.nodeId], selected: [ids.voxel], open: false });
+  await cdp.eval(`window.__lyflow.stores.ui.getState().exitTo(0); return true;`);
 }
 
 async function suiteRecursion(cdp, report) {

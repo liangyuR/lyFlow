@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { matchShortcut } from "../src/lib/keymap.ts";
+import { listGraphNodes, searchGraphNodes } from "../src/lib/findNodes.ts";
 import { errorNodeIds, revealError } from "../src/lib/revealError.ts";
 import { describeEventNode, locateEventNode } from "../src/lib/subgraph.ts";
 import { useGraphStore } from "../src/store/graph.ts";
@@ -125,6 +126,31 @@ test("事件 id → 打开到哪一层、选中谁、一层层叫什么", () => 
   }
   assert.equal(locateEventNode(sgDoc, "gone/x"), null, "节点被删了");
   assert.deepEqual(locateEventNode(sgDoc, "a/n/x").path, [{ nodeId: "a", subgraphId: "s1" }, { nodeId: "n", subgraphId: "s2" }]);
+});
+
+test("查找节点（Ctrl+F）：整张图连子图里面的一起列，按名字模糊找；库算子里面进不去，不列", () => {
+  const all = listGraphNodes(sgDoc, sgOps);
+  assert.deepEqual(
+    all.map((e) => [e.id, e.title, e.parents.join(" › ")]),
+    [
+      ["top", "体素降采样", ""],
+      ["a", "预处理", ""],
+      ["a/v", "体素降采样", "预处理"],
+      ["a/n", "去噪", "预处理"],
+      ["a/n/x", "离群点", "预处理 › 去噪"],
+      ["lib1", "库去噪", ""],
+    ],
+  );
+  assert.deepEqual(all[4].path, [{ nodeId: "a", subgraphId: "s1" }, { nodeId: "n", subgraphId: "s2" }]);
+  const ids = (q) => searchGraphNodes(all, q).map((h) => h.entry.id);
+  assert.deepEqual(ids("离群"), ["a/n/x"], "起过标题的按标题找");
+  assert.equal(searchGraphNodes(all, "统计").find((h) => h.entry.id === "a/n/x")?.fieldIndex, 2, "也认算子名");
+  assert.deepEqual(ids("体素"), ["top", "a/v"], "同分保持文档顺序");
+  assert.equal(ids("").length, all.length, "空查询列全部");
+  assert.deepEqual(ids("zzz"), []);
+
+  const key = (k) => ({ key: k, ctrlKey: true, metaKey: false, shiftKey: false, altKey: false });
+  assert.equal(matchShortcut(key("f"))?.id, "findNode");
 });
 
 test("聚合出来的子图节点记着错误来自哪个内部节点；只有一个内部节点的子图也是", () => {
