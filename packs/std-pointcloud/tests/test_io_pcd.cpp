@@ -187,29 +187,37 @@ void requireSameCloud(const pcl::PCLPointCloud2& want, const pcl::PCLPointCloud2
   }
 }
 
+/// 线程数：1 是顺序读写，3 与 8 走并行那条（PCL 的流坏掉之后、或者分块格式化）。结果都要与 PCL 一样。
+constexpr int kThreadCounts[] = {1, 3, 8};
+
 /// 同一个文件：PCL 读一遍、loadPcd 读一遍。出错时（返回 -1）PCL 留在 cloud 里的半截数据也要一样。
 void requireSameRead(const std::filesystem::path& file) {
   pcl::PCLPointCloud2 want;
-  pcl::PCLPointCloud2 got;
   const int rcWant = pcl::io::loadPCDFile(file.string(), want);
-  const int rcGot = pio::loadPcd(file.string(), got);
-  CHECK(rcGot == rcWant);
-  requireSameCloud(want, got);
+  for (const int threads : kThreadCounts) {
+    CAPTURE(threads);
+    pcl::PCLPointCloud2 got;
+    const int rcGot = pio::loadPcd(file.string(), got, threads);
+    CHECK(rcGot == rcWant);
+    requireSameCloud(want, got);
+  }
 }
 
 /// 同一份 cloud：PCL 写一个文件、savePcdAscii 写一个，返回值与每个字节都一样。
 void requireSameWrite(const pcl::PCLPointCloud2& cloud, const AsciiTempDir& dir, const std::string& name) {
   const std::filesystem::path a = dir.file(name + ".pcl.pcd");
-  const std::filesystem::path b = dir.file(name + ".ours.pcd");
   const int rcWant = pcl::io::savePCDFile(a.string(), cloud, Eigen::Vector4f::Zero(),
                                           Eigen::Quaternionf::Identity(), /*binary_mode=*/false);
-  const int rcGot = pio::savePcdAscii(b.string(), cloud);
-  CHECK(rcGot == rcWant);
-  REQUIRE(std::filesystem::exists(b) == std::filesystem::exists(a));
-  if (!std::filesystem::exists(a)) return;
-  const std::string fa = readBytes(a);
-  const std::string fb = readBytes(b);
-  if (fa != fb) {
+  const std::string fa = std::filesystem::exists(a) ? readBytes(a) : std::string();
+  for (const int threads : kThreadCounts) {
+    CAPTURE(threads);
+    const std::filesystem::path b = dir.file(name + ".ours" + std::to_string(threads) + ".pcd");
+    const int rcGot = pio::savePcdAscii(b.string(), cloud, threads);
+    CHECK(rcGot == rcWant);
+    REQUIRE(std::filesystem::exists(b) == std::filesystem::exists(a));
+    if (!std::filesystem::exists(a)) continue;
+    const std::string fb = readBytes(b);
+    if (fa == fb) continue;
     const auto diff = std::mismatch(fa.begin(), fa.end(), fb.begin(), fb.end());
     const std::size_t at = static_cast<std::size_t>(diff.first - fa.begin());
     const std::size_t lineStart = at == 0 ? std::string::npos : fa.rfind('\n', at - 1);
@@ -272,7 +280,7 @@ TEST_CASE("ASCII PCD 写：与 PCL 的 savePCDFile 逐字节相同") {
                 field("d", 56, pcl::PCLPointField::FLOAT64, 2),
                 field("_", 72, pcl::PCLPointField::FLOAT32, 1)};
     c.point_step = 76;
-    c.width = 3000;
+    c.width = 30000;  // 跨四块（每块 8192 点），并行格式化才真的分得开
     c.height = 1;
     c.row_step = c.point_step * c.width;
     c.data.resize(static_cast<std::size_t>(c.row_step));

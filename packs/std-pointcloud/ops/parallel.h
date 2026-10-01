@@ -11,6 +11,7 @@
 #include <exception>
 #include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace lyflow::ops {
@@ -18,12 +19,13 @@ namespace lyflow::ops {
 /// 每段的点数：够大才值得分给一个线程，也正好是看一次取消的间隔（同 ops::Ticker 的 8192）。
 constexpr std::size_t kParallelBlock = 8192;
 
-/// 把 [0, n) 切成 kParallelBlock 一段，threads 个线程轮流领下一段，各自调 body(begin, end)。
+/// 把 [0, n) 切成 block 一段，threads 个线程轮流领下一段，各自调 body(begin, end)。
 /// body 返回 false 表示看到了取消：别的线程领完手上这一段就停。threads ≤ 1 或只有一段时就在当前线程跑。
 /// body 里抛的异常在这里收齐、回到调用线程上再抛 —— 从工作线程逃出去就是 std::terminate。
+/// 逐点的循环用下面那个（block = kParallelBlock）；已经切成几十份粗块的（ASCII PCD 的行段）传 block = 1。
 template <class Body>
-void parallelFor(std::size_t n, int threads, Body&& body) {
-  const std::size_t blocks = (n + kParallelBlock - 1) / kParallelBlock;
+void parallelFor(std::size_t n, int threads, std::size_t block, Body&& body) {
+  const std::size_t blocks = (n + block - 1) / block;
   const std::size_t count = std::min<std::size_t>(static_cast<std::size_t>(std::max(1, threads)), blocks);
   std::atomic<std::size_t> next{0};
   std::atomic<bool> stop{false};
@@ -32,10 +34,10 @@ void parallelFor(std::size_t n, int threads, Body&& body) {
   auto work = [&] {
     try {
       while (!stop.load(std::memory_order_relaxed)) {
-        const std::size_t block = next.fetch_add(1, std::memory_order_relaxed);
-        if (block >= blocks) return;
-        const std::size_t begin = block * kParallelBlock;
-        if (!body(begin, std::min(n, begin + kParallelBlock))) stop.store(true, std::memory_order_relaxed);
+        const std::size_t b = next.fetch_add(1, std::memory_order_relaxed);
+        if (b >= blocks) return;
+        const std::size_t begin = b * block;
+        if (!body(begin, std::min(n, begin + block))) stop.store(true, std::memory_order_relaxed);
       }
     } catch (...) {
       std::lock_guard<std::mutex> lock(errorMu);
@@ -49,6 +51,11 @@ void parallelFor(std::size_t n, int threads, Body&& body) {
   work();
   for (auto& th : pool) th.join();
   if (error) std::rethrow_exception(error);
+}
+
+template <class Body>
+void parallelFor(std::size_t n, int threads, Body&& body) {
+  parallelFor(n, threads, kParallelBlock, std::forward<Body>(body));
 }
 
 }  // namespace lyflow::ops

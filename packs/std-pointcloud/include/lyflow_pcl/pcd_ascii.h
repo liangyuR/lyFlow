@@ -10,10 +10,10 @@
 namespace lyflow::ops::io {
 
 /// 等同 `pcl::io::loadPCDFile(file, cloud)`：返回值、cloud 的每个字段与 data 的每个字节都一样。
-/// `file` 是 PclPath 给的窄字符串。
-int loadPcd(const std::string& file, pcl::PCLPointCloud2& cloud);
+/// `file` 是 PclPath 给的窄字符串；`threads` 是节点的线程预算，ASCII 正文按它分块并行（结果与线程数无关）。
+int loadPcd(const std::string& file, pcl::PCLPointCloud2& cloud, int threads = 1);
 
 /// 等同 `pcl::io::savePCDFile(file, cloud, 原点 0, 单位朝向, binary_mode=false)`：写出的文件逐字节相同。
-int savePcdAscii(const std::string& file, const pcl::PCLPointCloud2& cloud);
+int savePcdAscii(const std::string& file, const pcl::PCLPointCloud2& cloud, int threads = 1);
 
 }  // namespace lyflow::ops::io

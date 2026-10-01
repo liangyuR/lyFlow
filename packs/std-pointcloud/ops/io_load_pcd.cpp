@@ -45,7 +45,7 @@ Status compute(const Inputs&, const ParamView& params, Outputs& outputs, ExecCon
       rc = pcl::io::loadPLYFile(narrow.str(), blob);
     } else {
       // 等同 pcl::io::loadPCDFile，只是 ASCII 正文快十倍（pcd_ascii.h）
-      rc = io::loadPcd(narrow.str(), blob);
+      rc = io::loadPcd(narrow.str(), blob, ctx.threadBudget());
     }
   } catch (const std::exception& e) {
     return Status::Error(Phase::Execute, "io",

@@ -24,7 +24,7 @@ std::string lowerExtension(const std::filesystem::path& p) {
 Status compute(const Inputs& inputs, const ParamView& params, Outputs&, ExecContext& ctx) {
   const PointCloud& cloud = *inputs.get("cloud").asCloud();
   const std::filesystem::path file = params.path("path");
-  const Status s = saveCloudToFile(cloud, file, params.choice("format"));
+  const Status s = saveCloudToFile(cloud, file, params.choice("format"), ctx.threadBudget());
   if (!s.ok) return s;
   ctx.log(LogLevel::Info,
           "写出 " + std::to_string(cloud.pointCount()) + " 个点 -> " + file.u8string());
@@ -35,6 +35,11 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs&, ExecCont
 
 Status saveCloudToFile(const PointCloud& cloud, const std::filesystem::path& file,
                        const std::string& format) {
+  return saveCloudToFile(cloud, file, format, 1);
+}
+
+Status saveCloudToFile(const PointCloud& cloud, const std::filesystem::path& file,
+                       const std::string& format, int threads) {
   std::error_code ec;
   if (!file.parent_path().empty()) {
     std::filesystem::create_directories(file.parent_path(), ec);
@@ -62,7 +67,7 @@ Status saveCloudToFile(const PointCloud& cloud, const std::filesystem::path& fil
                                 Eigen::Quaternionf::Identity(), format != "ascii");
     } else if (format == "ascii") {
       // 等同 savePCDFile(…, binary_mode=false)，写出来逐字节相同，快十倍（pcd_ascii.h）
-      rc = io::savePcdAscii(narrow.str(), blob);
+      rc = io::savePcdAscii(narrow.str(), blob, threads);
     } else if (format == "binary_compressed") {
       // savePCDFile 的 binary_mode 走的是非压缩二进制，压缩要走 PCDWriter 的专门入口
       pcl::PCDWriter writer;
