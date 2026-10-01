@@ -27,39 +27,9 @@ namespace {
 using namespace lyflow;
 using lyflow::test::Json;
 
-class NullContext final : public ExecContext {
- public:
-  explicit NullContext(std::filesystem::path base = {}) : baseDir_(std::move(base)) {}
-  bool cancelled() const override { return false; }
-  void progress(float, std::string_view) override {}
-  void log(LogLevel, std::string) override {}
-  const std::filesystem::path& baseDir() const override { return baseDir_; }
-  int threadBudget() const override { return 1; }
-
- private:
-  std::filesystem::path baseDir_;
-};
-
 /// 直接调一个算子的 compute（不经执行器）。参数先填默认值再覆盖。
-struct Call {
-  std::unordered_map<std::string, Data> inputs;
-  std::unordered_map<std::string, Data> outputs;
-  ParamMap params;
-  std::filesystem::path base;
-
-  Status run(const std::string& opId, const std::unordered_map<std::string, Value>& overrides = {}) {
-    const OperatorDesc* op = ensureRegistry().find(opId);
-    REQUIRE_MESSAGE(op != nullptr, opId);
-    params.clear();
-    outputs.clear();
-    for (const Param& p : op->params) params[p.name] = p.def;
-    for (const auto& [k, v] : overrides) params[k] = v;
-    NullContext ctx(base);
-    ParamView view(params, base);
-    Inputs in(inputs);
-    Outputs out(outputs);
-    return op->compute(in, view, out, ctx);
-  }
+/// 直接调 compute（test::OpCall），外加按端口取图像。
+struct Call : test::OpCall {
   const Image& image(const char* port = "image") {
     REQUIRE(outputs.count(port));
     const Image* img = outputs[port].asImage();

@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "helpers.h"
 #include "lyflow/operator.h"
 #include "lyflow/registry.h"
 
@@ -23,18 +24,6 @@ namespace {
 using namespace lyflow;
 
 /// 不取消、不记进度的最小 ExecContext。
-class NullContext final : public ExecContext {
- public:
-  bool cancelled() const override { return false; }
-  void progress(float, std::string_view) override {}
-  void log(LogLevel, std::string) override {}
-  const std::filesystem::path& baseDir() const override { return baseDir_; }
-  int threadBudget() const override { return 1; }
-
- private:
-  std::filesystem::path baseDir_;
-};
-
 const Registry& packRegistry() {
   static Registry r = [] {
     Registry reg;
@@ -45,41 +34,9 @@ const Registry& packRegistry() {
 }
 
 /// 直接调一个算子的 compute：参数先铺默认值，再用 overrides 覆盖。
-struct Call {
-  std::unordered_map<std::string, Data> inputs;
-  std::unordered_map<std::string, Data> outputs;
-  ParamMap params;
-  Status status;
-
-  Status run(const std::string& opId, const std::unordered_map<std::string, Value>& overrides = {}) {
-    const OperatorDesc* op = packRegistry().find(opId);
-    REQUIRE(op != nullptr);
-    for (const Param& p : op->params) params[p.name] = p.def;
-    for (const auto& [k, v] : overrides) params[k] = v;
-    NullContext ctx;
-    const std::filesystem::path base;
-    ParamView view(params, base);
-    Inputs in(inputs);
-    Outputs out(outputs);
-    status = op->compute(in, view, out, ctx);
-    return status;
-  }
-
-  const Data& out(const std::string& port) { return outputs[port]; }
-
-  /// 调算子的 validate 钩子（J5）：参数同样先铺默认值，connected 是「已连上的输入端口」。
-  std::vector<Issue> validate(const std::string& opId,
-                              const std::unordered_map<std::string, Value>& overrides,
-                              const std::set<std::string>& connected) {
-    const OperatorDesc* op = packRegistry().find(opId);
-    REQUIRE(op != nullptr);
-    REQUIRE(op->validate != nullptr);
-    for (const Param& p : op->params) params[p.name] = p.def;
-    for (const auto& [k, v] : overrides) params[k] = v;
-    const std::filesystem::path base;
-    ParamView view(params, base);
-    return op->validate(view, connected);
-  }
+/// 直接调 compute（test::OpCall），只用本包的注册表。
+struct Call : test::OpCall {
+  Call() : OpCall(packRegistry()) {}
 };
 
 /// 某个输入端口集合下的 validate 结果里有没有这条 error。

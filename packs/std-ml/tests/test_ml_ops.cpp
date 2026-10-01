@@ -18,18 +18,6 @@ namespace {
 
 using namespace lyflow;
 
-class NullContext final : public ExecContext {
- public:
-  bool cancelled() const override { return false; }
-  void progress(float, std::string_view) override {}
-  void log(LogLevel, std::string) override {}
-  const std::filesystem::path& baseDir() const override { return baseDir_; }
-  int threadBudget() const override { return 1; }
-
- private:
-  std::filesystem::path baseDir_;
-};
-
 const Registry& packRegistry() {
   static Registry r = [] {
     Registry reg;
@@ -39,23 +27,9 @@ const Registry& packRegistry() {
   return r;
 }
 
-struct Call {
-  std::unordered_map<std::string, Data> inputs;
-  std::unordered_map<std::string, Data> outputs;
-  ParamMap params;
-
-  Status run(const std::string& opId, const std::unordered_map<std::string, Value>& overrides = {}) {
-    const OperatorDesc* op = packRegistry().find(opId);
-    REQUIRE(op != nullptr);
-    for (const Param& p : op->params) params[p.name] = p.def;
-    for (const auto& [k, v] : overrides) params[k] = v;
-    NullContext ctx;
-    const std::filesystem::path base;
-    ParamView view(params, base);
-    Inputs in(inputs);
-    Outputs out(outputs);
-    return op->compute(in, view, out, ctx);
-  }
+/// 直接调 compute（test::OpCall），只用本包的注册表。
+struct Call : test::OpCall {
+  Call() : OpCall(packRegistry()) {}
 };
 
 /// 测试模型只认环境变量 LYFLOW_TEST_ONNX_MODEL。没设或文件不在时返回 false，
