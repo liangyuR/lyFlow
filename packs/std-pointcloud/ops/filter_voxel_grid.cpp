@@ -1,8 +1,10 @@
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <vector>
 
 #include "ops.h"
+#include "parallel.h"
 
 namespace lyflow::ops {
 namespace {
@@ -120,6 +122,21 @@ struct Voxel {
   std::int32_t firstIndex = -1;
 };
 
+/// 一个线程负责的那份体素：体素按下标的哈希分给几个线程（partitionOf），每份自己一张查找表。
+struct Part {
+  VoxelTable lookup;
+  std::vector<Voxel> voxels;  // 这份里按第一次出现的顺序
+  std::vector<std::int32_t> best;
+  std::vector<double> bestDist;
+  explicit Part(std::size_t expected) : lookup(expected) {}
+};
+
+/// 体素归哪个线程。与查找表的槽位用不同的位（查找表取 splitmix 之后的低位），免得一份里扎堆。
+inline std::size_t partitionOf(const VoxelIndex& key, std::size_t parts) {
+  const std::uint64_t h = static_cast<std::uint64_t>(VoxelIndexHash{}(key)) * 0x9E3779B97F4A7C15ull;
+  return static_cast<std::size_t>(h >> 40) % parts;
+}
+
 Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                ExecContext& ctx) {
   const PointCloud& in = *inputs.get("cloud").asCloud();
@@ -132,87 +149,174 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                          "leafSize");
   }
 
+  // 并行：每个线程按点的顺序扫一遍全部点、只管哈希到自己的那些体素 —— 每个体素的累加与最近点的取舍
+  // 都还是点的顺序，与单线程逐位相同；最后按体素的第一个点归并回全局的先来后到（= 原来的输出顺序）。
+  // 点少的时候分不开：几个线程各自把全部点的下标算一遍，不划算
   const std::size_t n = in.pointCount();
-  VoxelTable lookup(n / 8 + 16);
-  std::vector<Voxel> voxels;  // 插入顺序 = 输出顺序，保证两次运行结果字节一致
+  const std::size_t parts = n < 2 * kParallelBlock ? 1 : static_cast<std::size_t>(std::max(1, ctx.threadBudget()));
+  std::vector<Part> part;
+  part.reserve(parts);
+  for (std::size_t t = 0; t < parts; ++t) part.emplace_back(n / 8 / parts + 16);
+  std::atomic<bool> overflow{false};
+  std::atomic<bool> stop{false};
 
-  Ticker ticker(ctx, n);
-  for (std::size_t p = 0; p < n; ++p) {
-    if (ticker.tick(p)) return Status::Ok();
-    const float x = in.xyz[p * 3], y = in.xyz[p * 3 + 1], z = in.xyz[p * 3 + 2];
-    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) continue;
-
-    VoxelIndex key{};
-    if (!voxelIndexOf(x, y, z, leaf, key)) {
-      return Status::Error(Phase::Execute, "bad_param",
-                           "点的坐标相对 Leaf Size 太大，体素下标溢出（点云单位对吗？"
-                           "或者把 Leaf Size 调大）",
-                           "leafSize");
-    }
-    const std::size_t vi = lookup.findOrInsert(key, voxels.size());
-    if (vi == voxels.size()) {
-      voxels.emplace_back();
-      voxels.back().firstIndex = static_cast<std::int32_t>(p);
-    }
-    Voxel& v = voxels[vi];
-    v.sx += x;
-    v.sy += y;
-    v.sz += z;
-    v.count += 1;
-    if (in.hasIntensity()) v.si += in.intensity[p];
-    if (in.hasNormals()) {
-      v.snx += in.normals[p * 3];
-      v.sny += in.normals[p * 3 + 1];
-      v.snz += in.normals[p * 3 + 2];
-    }
-    if (in.hasRgb()) {
-      v.sr += in.rgb[p * 3];
-      v.sg += in.rgb[p * 3 + 1];
-      v.sb += in.rgb[p * 3 + 2];
-    }
+  // 先并行地给每个点定下归哪一份（kSkip = 非有限值，跳过）；溢出在这一趟里就查出来。单线程时省掉这一趟
+  constexpr std::uint8_t kSkip = 0xFF;
+  std::vector<std::uint8_t> owner;
+  if (parts > 1) {
+    owner.resize(n);
+    parallelFor(n, static_cast<int>(parts), [&](std::size_t b, std::size_t e) {
+      if (ctx.cancelled()) {
+        stop.store(true, std::memory_order_relaxed);
+        return false;
+      }
+      for (std::size_t p = b; p < e; ++p) {
+        const float x = in.xyz[p * 3], y = in.xyz[p * 3 + 1], z = in.xyz[p * 3 + 2];
+        VoxelIndex key{};
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+          owner[p] = kSkip;
+        } else if (!voxelIndexOf(x, y, z, leaf, key)) {
+          overflow.store(true, std::memory_order_relaxed);
+          return false;
+        } else {
+          owner[p] = static_cast<std::uint8_t>(partitionOf(key, parts));
+        }
+      }
+      return true;
+    });
   }
+  const auto mineOrSkip = [&](std::size_t p, std::size_t t) { return parts == 1 || owner[p] == t; };
 
-  if (nearest) {
-    // 最近点模式：先算质心，再在体素内找离质心最近的**原始点**，
-    // 最后一次性 select —— 通道搬运交给 select 一处负责（data.h 的约定）。
-    std::vector<std::int32_t> best(voxels.size(), -1);
-    std::vector<double> bestDist(voxels.size(), 1e300);
-    // 第二遍同样要轮询取消：漏掉的话 cancellable=true 成了谎话，
-    // 而抢占式运行同步等 join，前端会整整卡住这一趟。
-    Ticker ticker2(ctx, n);
-    for (std::size_t p = 0; p < n; ++p) {
-      if (ticker2.tick(p)) return Status::Ok();
-      const float x = in.xyz[p * 3], y = in.xyz[p * 3 + 1], z = in.xyz[p * 3 + 2];
-      if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) continue;
-      VoxelIndex key{};
-      if (!voxelIndexOf(x, y, z, leaf, key)) continue;  // 第一趟已经报过错，走不到这里
-      const std::size_t vi = lookup.find(key);
-      const Voxel& v = voxels[vi];
-      const double cx = v.sx / v.count, cy = v.sy / v.count, cz = v.sz / v.count;
-      const double d = (x - cx) * (x - cx) + (y - cy) * (y - cy) + (z - cz) * (z - cz);
-      if (d < bestDist[vi]) {
-        bestDist[vi] = d;
-        best[vi] = static_cast<std::int32_t>(p);
+  if (!overflow.load() && !stop.load()) parallelFor(parts, static_cast<int>(parts), 1, [&](std::size_t t0, std::size_t t1) {
+    for (std::size_t t = t0; t < t1; ++t) {
+      Part& mine = part[t];
+      Ticker ticker(ctx, n);  // 进度只让第 0 份报（几个线程一起报会来回跳）
+      for (std::size_t p = 0; p < n; ++p) {
+        if ((p & 0x1FFF) == 0) {
+          if (stop.load(std::memory_order_relaxed)) return false;
+          if (t == 0 ? ticker.tick(p) : ctx.cancelled()) {
+            stop.store(true, std::memory_order_relaxed);
+            return false;
+          }
+        }
+        if (!mineOrSkip(p, t)) continue;
+        const float x = in.xyz[p * 3], y = in.xyz[p * 3 + 1], z = in.xyz[p * 3 + 2];
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) continue;
+
+        VoxelIndex key{};
+        if (!voxelIndexOf(x, y, z, leaf, key)) {
+          overflow.store(true, std::memory_order_relaxed);
+          stop.store(true, std::memory_order_relaxed);
+          return false;
+        }
+        const std::size_t vi = mine.lookup.findOrInsert(key, mine.voxels.size());
+        if (vi == mine.voxels.size()) {
+          mine.voxels.emplace_back();
+          mine.voxels.back().firstIndex = static_cast<std::int32_t>(p);
+        }
+        Voxel& v = mine.voxels[vi];
+        v.sx += x;
+        v.sy += y;
+        v.sz += z;
+        v.count += 1;
+        if (in.hasIntensity()) v.si += in.intensity[p];
+        if (in.hasNormals()) {
+          v.snx += in.normals[p * 3];
+          v.sny += in.normals[p * 3 + 1];
+          v.snz += in.normals[p * 3 + 2];
+        }
+        if (in.hasRgb()) {
+          v.sr += in.rgb[p * 3];
+          v.sg += in.rgb[p * 3 + 1];
+          v.sb += in.rgb[p * 3 + 2];
+        }
       }
     }
-    std::vector<std::int32_t> keep;
-    keep.reserve(voxels.size());
-    for (std::size_t vi = 0; vi < voxels.size(); ++vi) {
-      if (voxels[vi].count >= minPts && best[vi] >= 0) keep.push_back(best[vi]);
+    return true;
+  });
+  if (overflow.load()) {
+    return Status::Error(Phase::Execute, "bad_param",
+                         "点的坐标相对 Leaf Size 太大，体素下标溢出（点云单位对吗？"
+                         "或者把 Leaf Size 调大）",
+                         "leafSize");
+  }
+  if (stop.load()) return Status::Ok();  // 取消了
+
+  if (nearest) {
+    // 最近点模式：先算质心，再在体素内找离质心最近的**原始点**，最后一次性 select ——
+    // 通道搬运交给 select 一处负责（data.h 的约定）。第二遍同样按份并行、同样轮询取消：
+    // 漏掉的话 cancellable=true 成了谎话，而抢占式运行同步等 join，前端会整整卡住这一趟。
+    parallelFor(parts, static_cast<int>(parts), 1, [&](std::size_t t0, std::size_t t1) {
+      for (std::size_t t = t0; t < t1; ++t) {
+        Part& mine = part[t];
+        mine.best.assign(mine.voxels.size(), -1);
+        mine.bestDist.assign(mine.voxels.size(), 1e300);
+        Ticker ticker(ctx, n);
+        for (std::size_t p = 0; p < n; ++p) {
+          if ((p & 0x1FFF) == 0) {
+            if (stop.load(std::memory_order_relaxed)) return false;
+            if (t == 0 ? ticker.tick(p) : ctx.cancelled()) {
+              stop.store(true, std::memory_order_relaxed);
+              return false;
+            }
+          }
+          if (!mineOrSkip(p, t)) continue;
+          const float x = in.xyz[p * 3], y = in.xyz[p * 3 + 1], z = in.xyz[p * 3 + 2];
+          if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) continue;
+          VoxelIndex key{};
+          if (!voxelIndexOf(x, y, z, leaf, key)) continue;  // 第一趟已经报过错，走不到这里
+          const std::size_t vi = mine.lookup.find(key);
+          const Voxel& v = mine.voxels[vi];
+          const double cx = v.sx / v.count, cy = v.sy / v.count, cz = v.sz / v.count;
+          const double d = (x - cx) * (x - cx) + (y - cy) * (y - cy) + (z - cz) * (z - cz);
+          if (d < mine.bestDist[vi]) {
+            mine.bestDist[vi] = d;
+            mine.best[vi] = static_cast<std::int32_t>(p);
+          }
+        }
+      }
+      return true;
+    });
+    if (stop.load()) return Status::Ok();
+  }
+
+  // 几份体素按第一个点归并回全局的先来后到：每份里本来就按第一个点递增
+  std::vector<std::size_t> cursor(parts, 0);
+  std::size_t total = 0;
+  for (const Part& pt : part) total += pt.voxels.size();
+  auto forEachVoxelInOrder = [&](auto&& visit) {
+    std::fill(cursor.begin(), cursor.end(), 0);
+    for (std::size_t k = 0; k < total; ++k) {
+      std::size_t pick = parts;
+      for (std::size_t t = 0; t < parts; ++t) {
+        if (cursor[t] == part[t].voxels.size()) continue;
+        if (pick == parts || part[t].voxels[cursor[t]].firstIndex < part[pick].voxels[cursor[pick]].firstIndex) pick = t;
+      }
+      visit(part[pick], cursor[pick]);
+      ++cursor[pick];
     }
+  };
+
+  if (nearest) {
+    std::vector<std::int32_t> keep;
+    keep.reserve(total);
+    forEachVoxelInOrder([&](const Part& pt, std::size_t vi) {
+      if (pt.voxels[vi].count >= minPts && pt.best[vi] >= 0) keep.push_back(pt.best[vi]);
+    });
     outputs.set("cloud", Data::cloud(in.select(keep)));
     return Status::Ok();
   }
 
   // 质心模式：产出的是原始数据里不存在的新点，所以只能自己搬通道。
   PointCloud out;
-  out.xyz.reserve(voxels.size() * 3);
-  if (in.hasIntensity()) out.intensity.reserve(voxels.size());
-  if (in.hasNormals()) out.normals.reserve(voxels.size() * 3);
-  if (in.hasRgb()) out.rgb.reserve(voxels.size() * 3);
+  out.xyz.reserve(total * 3);
+  if (in.hasIntensity()) out.intensity.reserve(total);
+  if (in.hasNormals()) out.normals.reserve(total * 3);
+  if (in.hasRgb()) out.rgb.reserve(total * 3);
 
-  for (const Voxel& v : voxels) {
-    if (v.count < minPts) continue;
+  forEachVoxelInOrder([&](const Part& pt, std::size_t vi) {
+    const Voxel& v = pt.voxels[vi];
+    if (v.count < minPts) return;
     const double inv = 1.0 / v.count;
     out.push(static_cast<float>(v.sx * inv), static_cast<float>(v.sy * inv),
              static_cast<float>(v.sz * inv));
@@ -230,7 +334,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
       out.rgb.push_back(static_cast<std::uint8_t>(v.sg * inv));
       out.rgb.push_back(static_cast<std::uint8_t>(v.sb * inv));
     }
-  }
+  });
 
   outputs.set("cloud", Data::cloud(std::move(out)));
   return Status::Ok();

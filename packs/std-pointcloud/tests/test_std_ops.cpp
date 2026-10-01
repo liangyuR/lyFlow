@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <unordered_map>
+#include <cstring>
 #include <limits>
 #include <numeric>
 #include <random>
@@ -188,6 +190,136 @@ TEST_CASE("体素栅格 nearest 模式也响应取消") {
                            .count();
   CHECK(log.runStatus() == "cancelled");
   CHECK(elapsed < 2000);
+}
+
+TEST_CASE("体素栅格：按线程预算并行之后与原来的单线程写法逐字节相同（质心 / 最近点、全部通道与 NaN、1 / 3 / 8 个线程）") {
+  // 参照就是改并行之前的那一版：按点的顺序一趟扫完，体素按第一次出现的顺序编号，累加都在 double 里
+  test::OpCall gen;
+  REQUIRE(gen.run("gen.synthetic", {{"pointCount", Value::integer(60000)}, {"seed", Value::integer(11)}}).ok);
+  PointCloud in = *gen.out("cloud").asCloud();
+  const std::size_t n = in.pointCount();
+  std::mt19937 rng(5);
+  std::uniform_real_distribution<float> unit(-1.0f, 1.0f);
+  in.normals.resize(n * 3);
+  in.rgb.resize(n * 3);
+  for (std::size_t i = 0; i < n * 3; ++i) {
+    in.normals[i] = unit(rng);
+    in.rgb[i] = static_cast<std::uint8_t>(rng() & 0xFF);
+  }
+  for (std::size_t k = 0; k < 20; ++k) in.xyz[((k * 997) % n) * 3 + 1] = std::numeric_limits<float>::quiet_NaN();
+
+  struct Key {
+    std::int64_t i, j, k;
+    bool operator==(const Key& o) const { return i == o.i && j == o.j && k == o.k; }
+  };
+  struct KeyHash {
+    std::size_t operator()(const Key& v) const { return std::hash<std::int64_t>()(v.i * 73856093 ^ v.j * 19349663 ^ v.k * 83492791); }
+  };
+  struct Acc {
+    double sx = 0, sy = 0, sz = 0, si = 0, snx = 0, sny = 0, snz = 0, sr = 0, sg = 0, sb = 0;
+    std::int32_t count = 0;
+  };
+  const auto keyOf = [](float x, float y, float z, float leaf) {
+    return Key{static_cast<std::int64_t>(std::floor(static_cast<double>(x) / leaf)),
+               static_cast<std::int64_t>(std::floor(static_cast<double>(y) / leaf)),
+               static_cast<std::int64_t>(std::floor(static_cast<double>(z) / leaf))};
+  };
+  const auto reference = [&](float leaf, std::int32_t minPts, bool nearest) {
+    std::unordered_map<Key, std::size_t, KeyHash> index;
+    std::vector<Acc> acc;
+    for (std::size_t p = 0; p < n; ++p) {
+      const float x = in.xyz[p * 3], y = in.xyz[p * 3 + 1], z = in.xyz[p * 3 + 2];
+      if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) continue;
+      const auto [it, fresh] = index.try_emplace(keyOf(x, y, z, leaf), acc.size());
+      if (fresh) acc.emplace_back();
+      Acc& v = acc[it->second];
+      v.sx += x; v.sy += y; v.sz += z; v.count += 1;
+      v.si += in.intensity[p];
+      v.snx += in.normals[p * 3]; v.sny += in.normals[p * 3 + 1]; v.snz += in.normals[p * 3 + 2];
+      v.sr += in.rgb[p * 3]; v.sg += in.rgb[p * 3 + 1]; v.sb += in.rgb[p * 3 + 2];
+    }
+    if (nearest) {
+      std::vector<std::int32_t> best(acc.size(), -1);
+      std::vector<double> bestDist(acc.size(), 1e300);
+      for (std::size_t p = 0; p < n; ++p) {
+        const float x = in.xyz[p * 3], y = in.xyz[p * 3 + 1], z = in.xyz[p * 3 + 2];
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) continue;
+        const std::size_t vi = index.at(keyOf(x, y, z, leaf));
+        const Acc& v = acc[vi];
+        const double cx = v.sx / v.count, cy = v.sy / v.count, cz = v.sz / v.count;
+        const double d = (x - cx) * (x - cx) + (y - cy) * (y - cy) + (z - cz) * (z - cz);
+        if (d < bestDist[vi]) {
+          bestDist[vi] = d;
+          best[vi] = static_cast<std::int32_t>(p);
+        }
+      }
+      std::vector<std::int32_t> keep;
+      for (std::size_t vi = 0; vi < acc.size(); ++vi) {
+        if (acc[vi].count >= minPts && best[vi] >= 0) keep.push_back(best[vi]);
+      }
+      return in.select(keep);
+    }
+    PointCloud out;
+    for (const Acc& v : acc) {
+      if (v.count < minPts) continue;
+      const double inv = 1.0 / v.count;
+      out.push(static_cast<float>(v.sx * inv), static_cast<float>(v.sy * inv), static_cast<float>(v.sz * inv));
+      out.intensity.push_back(static_cast<float>(v.si * inv));
+      double nx = v.snx * inv, ny = v.sny * inv, nz = v.snz * inv;
+      const double len = std::sqrt(nx * nx + ny * ny + nz * nz);
+      if (len > 1e-9) { nx /= len; ny /= len; nz /= len; }
+      out.normals.push_back(static_cast<float>(nx));
+      out.normals.push_back(static_cast<float>(ny));
+      out.normals.push_back(static_cast<float>(nz));
+      out.rgb.push_back(static_cast<std::uint8_t>(v.sr * inv));
+      out.rgb.push_back(static_cast<std::uint8_t>(v.sg * inv));
+      out.rgb.push_back(static_cast<std::uint8_t>(v.sb * inv));
+    }
+    return out;
+  };
+  const auto sameBytes = [](const auto& a, const auto& b) {
+    return a.size() == b.size() && (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(a[0])) == 0);
+  };
+
+  // 叶大小按这片云自己的尺寸取：细的（体素多、多数只有一两个点）与粗的（每个体素几十个点）各一档
+  float extent = 0;
+  for (int axis = 0; axis < 3; ++axis) {
+    float lo = std::numeric_limits<float>::max(), hi = -lo;
+    for (std::size_t i = 0; i < n; ++i) {
+      const float v = in.xyz[i * 3 + axis];
+      if (!std::isfinite(v)) continue;
+      lo = std::min(lo, v);
+      hi = std::max(hi, v);
+    }
+    extent = std::max(extent, hi - lo);
+  }
+  REQUIRE(extent > 0);
+  for (const float leaf : {extent / 120.0f, extent / 25.0f}) {
+    for (const std::int32_t minPts : {1, 3}) {
+      for (const bool nearest : {false, true}) {
+        const PointCloud want = reference(leaf, minPts, nearest);
+        REQUIRE(want.pointCount() > 10);
+        for (const int threads : {1, 3, 8}) {
+          CAPTURE(leaf);
+          CAPTURE(minPts);
+          CAPTURE(nearest);
+          CAPTURE(threads);
+          test::OpCall call;
+          call.threads = threads;
+          call.inputs["cloud"] = Data::cloud(in);
+          REQUIRE(call.run("filter.voxel_grid", {{"leafSize", Value::vec({leaf, leaf, leaf})},
+                                                 {"minPointsPerVoxel", Value::integer(minPts)},
+                                                 {"representative", Value::text(nearest ? "nearest" : "centroid")}})
+                      .ok);
+          const PointCloud& got = *call.out("cloud").asCloud();
+          CHECK(sameBytes(got.xyz, want.xyz));
+          CHECK(sameBytes(got.intensity, want.intensity));
+          CHECK(sameBytes(got.normals, want.normals));
+          CHECK(sameBytes(got.rgb, want.rgb));
+        }
+      }
+    }
+  }
 }
 
 TEST_CASE("util.merge：空点云不该把另一侧的通道带走") {
