@@ -482,6 +482,7 @@ CLI 上有的，MCP 上要么有同名字段，要么在这里写明不提供 �
 | `--recipe` | `recipe` | **MCP 不提供** | 配方文件路径，作用于所有样本；`perturb` 测的是灵敏度，不按配方跑 |
 | `--no-cache` | `noCache` | `noCache` | 布尔 |
 | `--parallel` | **MCP 不提供** | **MCP 不提供** | 它是传给 core 的节点并行度，不在判断的关键路径上 |
+| `--jobs` | `jobs` | `jobs` | 同时跑几次（默认 1）；行的顺序与内容不变，只是更快 |
 | `--after` | — | `after` | — |
 | `--region` | — | `region` | 给对象不给 JSON 字符串；`point` / `min` / `max` 是米 |
 | `--axis` | — | `axis` | 位移是米 |

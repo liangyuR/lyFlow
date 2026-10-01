@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{mpsc, Arc};
 
 use serde_json::{json, Map, Value};
 
 use crate::cli::{
     core, defaults_by_op, diagnostics_of, execute, has_errors, json_line, line, load_graph,
-    parse_axis, component_count, Loaded, Parsed, RunRequest, Sink, EXIT_CANCELLED, EXIT_FAILED,
-    EXIT_INVALID, EXIT_OK, EXIT_USAGE,
+    parse_axis, component_count, Loaded, Parsed, RunGroup, RunRequest, Sink, EXIT_CANCELLED,
+    EXIT_FAILED, EXIT_INVALID, EXIT_OK, EXIT_USAGE,
 };
 use crate::core_ffi::Core;
 use crate::graph::GraphDoc;
@@ -834,6 +835,18 @@ pub(crate) struct Engine<'a> {
     /// 每行带一份 run summary（ADR-0022）。**默认关**，`--summary` 打开 ——
     /// 体积是逐行的，一维 bundle 就 6 KB（m6-plan §10 第 5 条）。
     pub summary: bool,
+    /// `--jobs`：同时跑几次。1 = 一次接一次。多于 1 时行仍按顺序交出（run_jobs）。
+    pub jobs: usize,
+}
+
+/// 一行的状态对应的退出码。
+fn row_exit(status: &str) -> i32 {
+    match status {
+        "ok" => EXIT_OK,
+        "validation_failed" => EXIT_INVALID,
+        "cancelled" => EXIT_CANCELLED,
+        _ => EXIT_FAILED,
+    }
 }
 
 struct Attempt {
@@ -883,6 +896,7 @@ impl<'a> Engine<'a> {
         pi: usize,
         si: usize,
         enumerate: bool,
+        group: Option<&RunGroup>,
     ) -> Result<Attempt, String> {
         let ps = &self.param_sets[pi];
         let sample = &self.samples[si];
@@ -935,6 +949,7 @@ impl<'a> Engine<'a> {
                 stream: None,
                 params_json: None,
                 inputs: &[],
+                group,
             },
         )?;
         let wants_outputs = enumerate || self.metrics.iter().any(MetricPath::needs_outputs);
@@ -1010,15 +1025,20 @@ impl<'a> Engine<'a> {
         if self.param_sets.is_empty() || self.samples.is_empty() {
             return Err("没有参数组或样本，跑不了第一次运行".to_string());
         }
-        let a = self.attempt(0, 0, true)?;
+        let a = self.attempt(0, 0, true, None)?;
         Ok((a.row, a.available))
     }
 
+    /// 第 k 次运行是哪组参数 × 哪个样本。参数组在外层：同时在跑的几次多半是同一组参数的不同样本，
+    /// 与一次接一次时的顺序也一致。
+    fn split(&self, k: usize) -> (usize, usize) {
+        (k / self.samples.len(), k % self.samples.len())
+    }
+
     pub(crate) fn run(&self, on_row: &mut dyn FnMut(&Row)) -> Result<i32, EngineError> {
-        let mut worst = EXIT_OK;
         let mut first: Option<Attempt> = None;
         if !self.param_sets.is_empty() && !self.samples.is_empty() && !self.metrics.is_empty() {
-            let a = self.attempt(0, 0, true).map_err(EngineError::Failed)?;
+            let a = self.attempt(0, 0, true, None).map_err(EngineError::Failed)?;
             if a.row.status == "ok" {
                 let missing: Vec<String> = self
                     .metrics
@@ -1036,28 +1056,123 @@ impl<'a> Engine<'a> {
             }
             first = Some(a);
         }
-        for pi in 0..self.param_sets.len() {
-            for si in 0..self.samples.len() {
-                let attempt = match first.take() {
-                    Some(a) => a,
-                    None => self.attempt(pi, si, false).map_err(EngineError::Failed)?,
-                };
-                let code = match attempt.row.status.as_str() {
-                    "ok" => EXIT_OK,
-                    "validation_failed" => EXIT_INVALID,
-                    "cancelled" => EXIT_CANCELLED,
-                    _ => EXIT_FAILED,
-                };
-                if code == EXIT_CANCELLED {
-                    on_row(&attempt.row);
-                    return Ok(EXIT_CANCELLED);
+        let total = self.param_sets.len() * self.samples.len();
+        let mut worst = EXIT_OK;
+        // 交出一行。Some(退出码) = 到此为止：这一行被取消了（Ctrl+C），后面的不再跑
+        let mut emit = |row: &Row| -> Option<i32> {
+            on_row(row);
+            match row_exit(&row.status) {
+                EXIT_CANCELLED => Some(EXIT_CANCELLED),
+                code => {
+                    worst = worst.max(code);
+                    None
                 }
-                worst = worst.max(code);
-                on_row(&attempt.row);
+            }
+        };
+        let mut start = 0;
+        if let Some(a) = first.take() {
+            if let Some(code) = emit(&a.row) {
+                return Ok(code);
+            }
+            start = 1;
+        }
+        let stopped = if self.jobs > 1 && total.saturating_sub(start) > 1 {
+            self.run_jobs(start, total, &mut emit)?
+        } else {
+            let mut stopped = None;
+            for k in start..total {
+                let (pi, si) = self.split(k);
+                let a = self.attempt(pi, si, false, None).map_err(EngineError::Failed)?;
+                stopped = emit(&a.row);
+                if stopped.is_some() {
+                    break;
+                }
+            }
+            stopped
+        };
+        Ok(stopped.unwrap_or(worst))
+    }
+
+    /// `--jobs`：第 start..total 次分给 jobs 个线程跑，行仍按顺序交给 emit —— 输出与一次接一次时
+    /// 逐行相同（durationMs 除外）。core 允许几次运行同时在算，线程预算按整个进程在算的节点数分。
+    /// 有一次回来是 cancelled（Ctrl+C 把在跑的都取消了）就整批取消：之后才起的那次一登记就取消。
+    fn run_jobs(
+        &self,
+        start: usize,
+        total: usize,
+        emit: &mut dyn FnMut(&Row) -> Option<i32>,
+    ) -> Result<Option<i32>, EngineError> {
+        let group = RunGroup::default();
+        let work = |k: usize| -> Result<Attempt, String> {
+            let (pi, si) = self.split(k);
+            let a = self.attempt(pi, si, false, Some(&group))?;
+            if a.row.status == "cancelled" {
+                group.cancel();
+            }
+            Ok(a)
+        };
+        ordered_parallel(start..total, self.jobs, &group, &work, &mut |a: Attempt| emit(&a.row))
+            .map_err(EngineError::Failed)
+    }
+}
+
+/// 把 range 里的任务分给 jobs 个线程做，结果按序号顺序交给 take —— 交出的顺序与一个接一个做时相同。
+/// 收场也与一个接一个时停在同一处：
+/// - take 返回 Some（这一行被取消了）：不再起新的，group 里还在跑的取消，排在后面的结果丢掉。
+/// - 某个任务返回 Err：不再起新的；排在它前面、还在做的照常做完交出，然后返回这个 Err，
+///   排在它后面的取消、丢掉。
+fn ordered_parallel<T: Send, R>(
+    range: std::ops::Range<usize>,
+    jobs: usize,
+    group: &RunGroup,
+    work: &(dyn Fn(usize) -> Result<T, String> + Sync),
+    take: &mut dyn FnMut(T) -> Option<R>,
+) -> Result<Option<R>, String> {
+    let end = range.end;
+    let next = AtomicUsize::new(range.start);
+    let stop = AtomicBool::new(false);
+    let (tx, rx) = mpsc::channel::<(usize, Result<T, String>)>();
+    std::thread::scope(|scope| {
+        for _ in 0..jobs.min(range.len()) {
+            let tx = tx.clone();
+            let (next, stop) = (&next, &stop);
+            scope.spawn(move || {
+                while !stop.load(Ordering::SeqCst) && !group.cancelled() {
+                    let k = next.fetch_add(1, Ordering::SeqCst);
+                    if k >= end {
+                        break;
+                    }
+                    let result = work(k);
+                    if result.is_err() {
+                        stop.store(true, Ordering::SeqCst);
+                    }
+                    if tx.send((k, result)).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(tx);
+        let mut ready: BTreeMap<usize, Result<T, String>> = BTreeMap::new();
+        let mut want = range.start;
+        for (k, result) in rx.iter() {
+            ready.insert(k, result);
+            while let Some(result) = ready.remove(&want) {
+                want += 1;
+                let done = match result {
+                    Err(e) => Err(e),
+                    Ok(t) => match take(t) {
+                        Some(r) => Ok(Some(r)),
+                        None => continue,
+                    },
+                };
+                stop.store(true, Ordering::SeqCst);
+                group.cancel();
+                return done;
             }
         }
-        Ok(worst)
-    }
+        Ok(None)
+    })
 }
 
 fn csv_cell(v: &Value) -> String {
@@ -1312,6 +1427,13 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         .one("parallel")
         .and_then(|v| v.parse::<i32>().ok())
         .unwrap_or(0);
+    let jobs = match crate::cli::jobs_of(parsed) {
+        Ok(n) => n,
+        Err(e) => {
+            line(err, &e);
+            return EXIT_USAGE;
+        }
+    };
 
     let engine = Engine {
         core: &core,
@@ -1326,6 +1448,7 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         // 参数 2.5 MB —— 一个「每行都带上」的默认值会把 eval 的输出撑成不可读。
         // `--no-summary` 留着当 no-op：老脚本照样跑得过。
         summary: parsed.has("summary"),
+        jobs,
     };
 
     if list_only {
@@ -1856,6 +1979,79 @@ mod tests {
                                  "data": {"point_counts": {"left": 640, "right": 512}}}},
             "cloud": {"node": "n_c", "port": "cloud", "type": "PointCloud", "elementCount": 99}
         })
+    }
+
+    /// 第 k 个任务睡 (n - k) × 2 ms：越靠后的越先做完，交出的顺序仍是 0..n。
+    #[test]
+    fn ordered_parallel_hands_results_over_in_order() {
+        let n = 12;
+        let group = RunGroup::default();
+        let work = |k: usize| -> Result<usize, String> {
+            std::thread::sleep(std::time::Duration::from_millis(((n - k) * 2) as u64));
+            Ok(k)
+        };
+        let mut got = Vec::new();
+        let r = ordered_parallel(2..n, 4, &group, &work, &mut |k: usize| {
+            got.push(k);
+            None::<()>
+        });
+        assert_eq!(r, Ok(None));
+        assert_eq!(got, (2..n).collect::<Vec<_>>());
+        assert!(!group.cancelled());
+        // 任务比线程少也照常
+        let mut few = Vec::new();
+        assert_eq!(ordered_parallel(0..2, 8, &group, &work, &mut |k| {
+            few.push(k);
+            None::<()>
+        }), Ok(None));
+        assert_eq!(few, vec![0, 1]);
+    }
+
+    /// 第 5 个出错：0..5 照常交出（4 比 5 晚做完也一样），然后报这个错；之后不再起新的。
+    #[test]
+    fn ordered_parallel_stops_at_the_first_error_in_order() {
+        let group = RunGroup::default();
+        let started = AtomicUsize::new(0);
+        let work = |k: usize| -> Result<usize, String> {
+            started.fetch_add(1, Ordering::SeqCst);
+            if k == 4 {
+                std::thread::sleep(std::time::Duration::from_millis(30));
+            }
+            if k == 5 {
+                return Err("第 5 个坏了".to_string());
+            }
+            Ok(k)
+        };
+        let mut got = Vec::new();
+        let r = ordered_parallel(0..40, 3, &group, &work, &mut |k: usize| {
+            got.push(k);
+            None::<()>
+        });
+        assert_eq!(r, Err("第 5 个坏了".to_string()));
+        assert_eq!(got, vec![0, 1, 2, 3, 4]);
+        assert!(started.load(Ordering::SeqCst) < 40, "出错之后不该把剩下的都起完");
+        assert!(group.cancelled(), "排在后面、还在跑的要取消");
+    }
+
+    /// take 说到此为止（这一行被取消了）：交到这一行为止，整批取消，不再起新的。
+    #[test]
+    fn ordered_parallel_stops_when_a_row_says_so() {
+        let group = RunGroup::default();
+        let started = AtomicUsize::new(0);
+        let work = |k: usize| -> Result<usize, String> {
+            started.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            Ok(k)
+        };
+        let mut got = Vec::new();
+        let r = ordered_parallel(0..1000, 4, &group, &work, &mut |k: usize| {
+            got.push(k);
+            (k == 6).then_some("cancelled")
+        });
+        assert_eq!(r, Ok(Some("cancelled")));
+        assert_eq!(got, (0..=6).collect::<Vec<_>>());
+        assert!(group.cancelled());
+        assert!(started.load(Ordering::SeqCst) < 100, "停了之后不该再起新的");
     }
 
     #[test]

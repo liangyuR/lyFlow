@@ -631,6 +631,12 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
             "配方文件路径，作用于所有样本；叠加顺序 基础 → 配方 → params 里的参数组 → param。失配 ①–③ 时退出码 4",
           ),
         noCache: z.boolean().optional(),
+        jobs: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe("同时跑几次（CLI --jobs，默认 1）。行的顺序与内容不变，只是更快；内存大约是 jobs 倍"),
         summary: z
           .boolean()
           .optional()
@@ -729,6 +735,12 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         baseDir: z.string().optional(),
         set: z.array(z.string()).optional(),
         noCache: z.boolean().optional(),
+        jobs: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe("同时跑几次（CLI --jobs，默认 1）。行的顺序与内容不变，只是更快；内存大约是 jobs 倍"),
       },
     },
     async (args) => {

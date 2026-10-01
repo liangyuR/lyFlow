@@ -246,6 +246,8 @@ MCP 第一次返回非文本内容：调用方拿到的是一张能直接看的�
 
 每个 glob 在一帧里要**恰好匹配到一个**文件，否则 `exitCode` 4 并在 `stderr` 里说是哪一帧。
 
+样本多时给 `jobs`（CLI `--jobs`）同时跑几次：行的顺序与内容不变，只是更快，内存大约是 `jobs` 倍。
+
 CLI 的 `--samples-jsonl-out` 与 `--parallel` **MCP 不提供**，逐条对照见
 [agent-tuning.md](agent-tuning.md) §7。
 

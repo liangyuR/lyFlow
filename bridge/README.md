@@ -279,7 +279,7 @@ lyflow eval <graph> <样本集>
                     [--param <名字>=<json>]...
                     --metric <path> [--metric <path>]...
                     [--holdout <tag>=<value>] [--group-by <tag>]
-                    [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--no-cache] [--set ...]
+                    [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--jobs <n>] [--no-cache] [--set ...]
 
 <样本集> 三选一（perturb 共用同一组）：
     --samples <samples.jsonl>
@@ -322,7 +322,12 @@ lyflow eval 4.lyflow.json --samples-dir kun10/sensor --sample-subdir 4 \
   `--split-half` 排序后前一半 `a`、后一半 `b`（奇数时前半多一个），配 `--holdout <key>=b`。
 - stdout 每行一个 `eval_row`，末尾每个（参数组 × 指标）一行 `eval_summary`
   （`n / ok / failCodes / mean / std / min / max / p2p`；`std` 是样本标准差，`n<2` 给 `null`）。
-- 样本之间**顺序跑**，`--parallel` 是传给 core 的节点并行度，与 `run` 同义。缓存默认开。
+- 样本之间默认**一次接一次**；`--jobs <n>`（eval / sweep / perturb）同时跑 n 次，行仍按原顺序交出、
+  除 `durationMs` 外逐行相同，停也停在同一行（某一行被 Ctrl+C 取消、某次运行内部出错）。
+  参数组在外层，同时在跑的几次多半是同一组参数的不同样本。内存大约是 n 倍；
+  core 的线程预算按整个进程在算的节点数分，几次加起来不超订。
+  4 核 8 线程的笔记本上：全是单线程算子的图约 1.8×，统计离群点这种自己就吃满核的图 1.3–1.5×。
+  `--parallel` 是传给 core 的节点并行度（一次运行里），与 `run` 同义。缓存默认开。
 - `sweep` 现在是这套引擎上的一层壳，只负责轴展开与 `sweep_row` 的老形状；
   它的 `--metric nodeId:port.field` 老写法两个子命令都还认。
 

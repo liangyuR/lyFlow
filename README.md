@@ -159,17 +159,17 @@ lyflow dump     graph.lyflow.json nodeId:port out.pcd [--format binary|ascii|bin
                                   # 图像输出写 out.lyim（LYIM 载荷原样落盘）
 lyflow sweep    graph.lyflow.json --param nodeId.param=start:end:steps [--param ...]
                                   --metric nodeId:port.elementCount|byteSize|durationMs
-                                  [--csv out.csv] [--base-dir d]
+                                  [--csv out.csv] [--base-dir d] [--jobs n]
 lyflow eval     graph.lyflow.json [<样本集>] [--params sets.json] [--param n.p=start:end:steps]...
                                   (--metric <值路径> [--metric ...] | --list-metrics)
                                   [--holdout tag=value] [--group-by tag] [--csv out.csv]
-                                  [--base-dir d] [--parallel n] [--no-cache]
+                                  [--base-dir d] [--parallel n] [--jobs n] [--no-cache]
                                   [--set ...] [--recipe ...] [--param name=<json>]... [--summary]
 lyflow perturb  graph.lyflow.json --after nodeId:port --region <选区 JSON>
                                   --axis x|y|z=start:end:steps [<样本集>]
                                   --metric <值路径> [--metric ...]
                                   [--expect slope] [--tolerance v] [--csv out.csv]
-                                  [--base-dir d] [--parallel n] [--no-cache] [--set ...]
+                                  [--base-dir d] [--parallel n] [--jobs n] [--no-cache] [--set ...]
 lyflow diff     a.lyflow.json b.lyflow.json [--json]
 lyflow recipes  graph.lyflow.json [--recipe r.lyflow-recipe.json]... [--json]
 lyflow patch    graph.lyflow.json [--remove-node id|glob]... [--add-node <json>]...

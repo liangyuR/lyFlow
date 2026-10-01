@@ -82,14 +82,17 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                           图像输出写 <out.lyim>（LYIM 载荷原样落盘，docs/http-transport.md）
   lyflow sweep    <graph> --param <nodeId>.<param>=<start>:<end>:<steps> [--param ...]
                           --metric <nodeId>:<port>.<elementCount|byteSize|durationMs>
-                          [--csv <out.csv>] [--base-dir <dir>]
+                          [--csv <out.csv>] [--base-dir <dir>] [--jobs <n>]
   lyflow eval     <graph> [<样本集>] [--params <paramsets.json>]
                           [--param <n>.<p>=<start>:<end>:<steps>]...
                           (--metric <path> [--metric <path>]... | --list-metrics)
                           [--holdout <tag>=<value>] [--group-by <tag>]
-                          [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--no-cache]
+                          [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--jobs <n>] [--no-cache]
                           [--set <nodeId>.<param>=<json>]... [--recipe <配方文件>] [--param <名字>=<json>]...
                           [--summary]
+        --jobs <n>（eval / sweep / perturb）：同时跑 n 次（默认 1，一次接一次），输出仍按原顺序、
+                 除 durationMs 外逐行相同；内存大约是 n 倍。--parallel 是一次运行里的节点并行度，与它无关。
+                 Ctrl+C 一次取消全部在跑的。
         --recipe 作用于所有样本；--params 的参数组里不含「.」的键写顶层图参数。
         叠加顺序：基础（default）→ --recipe → 参数组 → --param。
         每行 eval_row **默认不带** summary（ADR-0022）；--summary 打开。
@@ -113,7 +116,7 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                           [<样本集>，与 eval 同一组选项]
                           --metric <path> [--metric <path>]...
                           [--expect <slope>] [--tolerance <v>] [--csv <out.csv>]
-                          [--base-dir <dir>] [--parallel <n>] [--no-cache] [--set ...]
+                          [--base-dir <dir>] [--parallel <n>] [--jobs <n>] [--no-cache] [--set ...]
         选区 JSON：{\"kind\":\"halfspace\",\"point\":[x,y,z],\"normal\":[x,y,z]}
                    {\"kind\":\"box\",\"min\":[x,y,z],\"max\":[x,y,z]}
         刀口跟着锚点走（只 halfspace）：加 \"pointFrom\":{\"x\":{\"path\":<值路径>,\"scale\":s,\"offset\":o}}
@@ -268,6 +271,17 @@ pub(crate) fn axis_param_specs(parsed: &Parsed) -> Vec<String> {
         .collect()
 }
 
+/// `--jobs <n>`（eval / sweep / perturb）：同时跑几次，默认 1（一次接一次）。
+pub(crate) fn jobs_of(parsed: &Parsed) -> Result<usize, String> {
+    match parsed.one("jobs") {
+        None => Ok(1),
+        Some(v) => match v.parse::<usize>() {
+            Ok(n) if n >= 1 => Ok(n),
+            _ => Err(format!("--jobs 要一个正整数，收到 {v}")),
+        },
+    }
+}
+
 /// `--param <名字>=<json>`：把值写成该顶层参数的 default。core 的语义就是「给了值用值，
 /// 没给用 default」，所以校验、计划、生效参数与运行看到的是同一个值。
 pub(crate) fn apply_graph_param(doc: &mut GraphDoc, spec: &str) -> Result<bool, String> {
@@ -384,10 +398,48 @@ unsafe extern "C" fn on_event(event_json: *const c_char, user: *mut c_void) {
     });
 }
 
-/// 正在跑的那一次。Ctrl+C 的处理器在别的线程上，只能从这里拿句柄。
-fn active_run() -> &'static Mutex<Option<Arc<RunHandle>>> {
-    static ACTIVE: OnceLock<Mutex<Option<Arc<RunHandle>>>> = OnceLock::new();
-    ACTIVE.get_or_init(|| Mutex::new(None))
+/// 正在跑的那几次（`eval --jobs` 同时有好几次）。Ctrl+C 的处理器在别的线程上，只能从这里拿句柄。
+fn active_runs() -> &'static Mutex<Vec<Arc<RunHandle>>> {
+    static ACTIVE: OnceLock<Mutex<Vec<Arc<RunHandle>>>> = OnceLock::new();
+    ACTIVE.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// 一起收场的一批运行（`eval --jobs` 的那几个线程）。`cancel()` 取消已经在跑的，之后才登记上的
+/// 一登记就取消 —— Ctrl+C 的那一刻正好在两次运行之间的线程，起的下一次也逃不掉。
+/// 只管这一批：同一进程里别的运行（单测并行跑的别的用例）不受影响。
+#[derive(Default)]
+pub(crate) struct RunGroup {
+    state: Mutex<(Vec<Arc<RunHandle>>, bool)>,
+}
+
+impl RunGroup {
+    pub(crate) fn cancel(&self) {
+        if let Ok(mut st) = self.state.lock() {
+            st.1 = true;
+            for run in &st.0 {
+                run.cancel();
+            }
+        }
+    }
+
+    pub(crate) fn cancelled(&self) -> bool {
+        self.state.lock().map(|st| st.1).unwrap_or(true)
+    }
+
+    fn enter(&self, run: &Arc<RunHandle>) {
+        if let Ok(mut st) = self.state.lock() {
+            if st.1 {
+                run.cancel();
+            }
+            st.0.push(Arc::clone(run));
+        }
+    }
+
+    fn leave(&self, run: &Arc<RunHandle>) {
+        if let Ok(mut st) = self.state.lock() {
+            st.0.retain(|r| !Arc::ptr_eq(r, run));
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -403,9 +455,11 @@ mod console {
     }
 
     unsafe extern "system" fn on_break(_kind: u32) -> i32 {
-        if let Ok(guard) = super::active_run().lock() {
-            if let Some(run) = guard.as_ref() {
-                run.cancel();
+        if let Ok(runs) = super::active_runs().lock() {
+            if !runs.is_empty() {
+                for run in runs.iter() {
+                    run.cancel();
+                }
                 // 返回 1 = 我们处理了，别让默认处理器直接杀进程；
                 // 取消是协作式的，主线程还要把 run_finished 发完。
                 return 1;
@@ -534,6 +588,8 @@ pub(crate) struct RunRequest<'a> {
     pub params_json: Option<&'a str>,
     /// 运行时注入的点云（`--input`），经 C ABI 的 run inputs 交给 core（ADR-0017 / m8-plan L18）。
     pub inputs: &'a [RunInput],
+    /// 这次运行归哪一批（`eval --jobs`）：那一批取消时它也取消。
+    pub group: Option<&'a RunGroup>,
 }
 
 /// 用 core 自己的 `io.load_pcd` 读一个点云文件：跑一个单节点的图，按 `max_points`（0 = 全量）
@@ -569,6 +625,7 @@ pub(crate) fn read_cloud_file(
             stream: None,
             params_json: None,
             inputs: &[],
+            group: None,
         },
     )?;
     if result.status != "ok" {
@@ -654,12 +711,18 @@ pub(crate) fn execute(core: &Arc<Core>, req: RunRequest<'_>) -> Result<RunResult
         unsafe { RunHandle::start(Arc::clone(core), spec, on_event, ctx) }
             .map_err(|e| e.to_string())?,
     );
-    if let Ok(mut guard) = active_run().lock() {
-        *guard = Some(Arc::clone(&handle));
+    if let Ok(mut runs) = active_runs().lock() {
+        runs.push(Arc::clone(&handle));
+    }
+    if let Some(group) = req.group {
+        group.enter(&handle);
     }
     handle.join();
-    if let Ok(mut guard) = active_run().lock() {
-        *guard = None;
+    if let Some(group) = req.group {
+        group.leave(&handle);
+    }
+    if let Ok(mut runs) = active_runs().lock() {
+        runs.retain(|r| !Arc::ptr_eq(r, &handle));
     }
     // join 返回后 core 保证不再回调，这时读收集到的事件才是安全的
     let events = unsafe { (*ptr).events.lock().map_err(|e| e.to_string())?.clone() };
@@ -1115,6 +1178,7 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             stream: Some(Arc::clone(out)),
             params_json: None,
             inputs: &inputs,
+            group: None,
         },
     ) {
         Ok(r) => r,
@@ -1281,6 +1345,7 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             stream: Some(Arc::clone(out)),
             params_json: None,
             inputs: &[],
+            group: None,
         },
     ) {
         Ok(r) => r,
@@ -1426,6 +1491,10 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(v) => v,
         Err(e) => return fail(err, &e, EXIT_USAGE),
     };
+    let jobs = match jobs_of(parsed) {
+        Ok(n) => n,
+        Err(e) => return fail(err, &e, EXIT_USAGE),
+    };
 
     let metrics = [metric];
     let samples = [eval::Sample::whole_graph()];
@@ -1440,6 +1509,7 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         no_cache: false,
         // sweep 的每一行只报一个标量，summary 在这里是纯体积
         summary: false,
+        jobs,
     };
 
     let mut csv_rows: Vec<String> = Vec::new();
@@ -1743,7 +1813,7 @@ pub(crate) fn fail(err: &Sink, message: &str, code: i32) -> i32 {
 }
 
 const VALUE_OPTS: &[&str] = &[
-    "to", "set", "base-dir", "parallel", "preview-points", "param", "metric", "csv", "format",
+    "to", "set", "base-dir", "parallel", "jobs", "preview-points", "param", "metric", "csv", "format",
     "kind", "output", "samples", "samples-glob", "bind", "params", "holdout", "group-by",
     "after", "region", "axis", "expect", "tolerance", "samples-dir", "bind-pair", "pattern", "cache-dir",
     "sample-subdir", "sort-by", "split-half", "samples-jsonl-out",
@@ -2720,7 +2790,7 @@ mod tests {
                 r#"{"id":"b","set":{"g.seed":3222}}"#,
             ],
         );
-        let r = cli(&[
+        let args = [
             "eval",
             &graph,
             "--samples",
@@ -2729,7 +2799,8 @@ mod tests {
             "v.minPointsPerVoxel=1:3:3",
             "--metric",
             "nodes.v.elementCount",
-        ]);
+        ];
+        let r = cli(&args);
         assert_eq!(r.code, EXIT_OK, "{}", r.err);
         let lines = r.lines();
         let rows: Vec<&Value> = lines.iter().filter(|l| l["kind"] == "eval_row").collect();
@@ -2742,6 +2813,60 @@ mod tests {
         assert_eq!(summaries.len(), 3);
         let mean = |s: &Value| s["groups"]["all"]["mean"].as_f64().unwrap();
         assert!(mean(summaries[2]) < mean(summaries[0]));
+
+        // --jobs：同时跑几次，输出与一次接一次时逐行相同（durationMs 除外）
+        let jobs = cli(&[&args[..], &["--jobs", "4"]].concat());
+        assert_eq!(jobs.code, EXIT_OK, "{}", jobs.err);
+        assert_eq!(without_durations(jobs.lines()), without_durations(lines));
+        let bad = cli(&[&args[..], &["--jobs", "0"]].concat());
+        assert_eq!(bad.code, EXIT_USAGE);
+        assert!(bad.err.contains("--jobs"), "{}", bad.err);
+    }
+
+    fn without_durations(lines: Vec<Value>) -> Vec<Value> {
+        lines
+            .into_iter()
+            .map(|mut l| {
+                if let Some(obj) = l.as_object_mut() {
+                    obj.remove("durationMs");
+                }
+                l
+            })
+            .collect()
+    }
+
+    /// 某个样本自己就跑不起来（set 写到了不存在的节点）：--jobs 与一次接一次停在同一行 ——
+    /// 排在它前面的照常交出，然后报错退出 2；排在后面、已经起了的那几次结果丢掉。
+    #[test]
+    #[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]
+    fn eval_with_jobs_stops_at_the_same_row_as_without() {
+        let dir = workspace("evaljobsfail");
+        let graph = chain(&dir, 327);
+        let samples = samples_file(
+            &dir,
+            "s.jsonl",
+            &[
+                r#"{"id":"a","set":{"g.seed":3271}}"#,
+                r#"{"id":"b","set":{"g.seed":3272}}"#,
+                r#"{"id":"c","set":{"nope.seed":1}}"#,
+                r#"{"id":"d","set":{"g.seed":3274}}"#,
+                r#"{"id":"e","set":{"g.seed":3275}}"#,
+            ],
+        );
+        let args = ["eval", &graph, "--samples", &samples, "--metric", "nodes.v.elementCount"];
+        let serial = cli(&args);
+        let jobs = cli(&[&args[..], &["--jobs", "3"]].concat());
+        for r in [&serial, &jobs] {
+            assert_eq!(r.code, EXIT_FAILED, "{} / {}", r.out, r.err);
+            assert!(r.err.contains("nope"), "{}", r.err);
+            let ids: Vec<Value> = r
+                .lines()
+                .into_iter()
+                .filter(|l| l["kind"] == "eval_row")
+                .map(|l| l["sample"].clone())
+                .collect();
+            assert_eq!(ids, vec![json!("a"), json!("b")]);
+        }
     }
 
     #[test]
@@ -3178,6 +3303,7 @@ mod tests {
                 stream: None,
                 params_json: Some(r#"{"count": 1234}"#),
                 inputs: &[],
+                group: None,
             },
         )
         .unwrap();
@@ -3200,6 +3326,7 @@ mod tests {
                 stream: None,
                 params_json: Some(r#"{"nope": 1}"#),
                 inputs: &[],
+                group: None,
             },
         )
         .unwrap();
