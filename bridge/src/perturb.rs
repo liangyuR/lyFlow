@@ -518,6 +518,15 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         }
         None => DEFAULT_TOLERANCE,
     };
+    let (parallel, jobs) = match crate::cli::parallel_of(parsed)
+        .and_then(|p| Ok((p, crate::cli::jobs_of(parsed)?)))
+    {
+        Ok(v) => v,
+        Err(e) => {
+            line(err, &e);
+            return EXIT_USAGE;
+        }
+    };
 
     let samples = match collect_samples(parsed, err) {
         Ok(s) => s,
@@ -566,17 +575,6 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let loaded: Loaded = loaded;
 
     let param_sets = displacement_param_sets(&perturb_id, axis_index, &displacements);
-    let parallel = parsed
-        .one("parallel")
-        .and_then(|v| v.parse::<i32>().ok())
-        .unwrap_or(0);
-    let jobs = match crate::cli::jobs_of(parsed) {
-        Ok(n) => n,
-        Err(e) => {
-            line(err, &e);
-            return EXIT_USAGE;
-        }
-    };
 
     // pointFrom（docs/pointfrom-plan.md）：第一遍在未扰动的图上（位移 0，__perturb 恒等）逐样本读锚点，
     // 第二遍把这一帧的刀口写进样本的 set。锚点取自未扰动的运行，不会被刀口带着动；上游结果留在进程内

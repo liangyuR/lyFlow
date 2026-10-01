@@ -1484,6 +1484,15 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         holdout,
         group_by: parsed.one("group-by").map(str::to_string),
     };
+    let (parallel, jobs) = match crate::cli::parallel_of(parsed)
+        .and_then(|p| Ok((p, crate::cli::jobs_of(parsed)?)))
+    {
+        Ok(v) => v,
+        Err(e) => {
+            line(err, &e);
+            return EXIT_USAGE;
+        }
+    };
 
     let samples = match collect_samples(parsed, err) {
         Ok(s) => s,
@@ -1553,18 +1562,6 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     }
     let param_sets = combine_param_sets(explicit, axes);
     let pinned: Vec<String> = crate::cli::graph_param_specs(parsed).into_iter().cloned().collect();
-
-    let parallel = parsed
-        .one("parallel")
-        .and_then(|v| v.parse::<i32>().ok())
-        .unwrap_or(0);
-    let jobs = match crate::cli::jobs_of(parsed) {
-        Ok(n) => n,
-        Err(e) => {
-            line(err, &e);
-            return EXIT_USAGE;
-        }
-    };
 
     let engine = Engine {
         core: &core,

@@ -274,14 +274,28 @@ pub(crate) fn axis_param_specs(parsed: &Parsed) -> Vec<String> {
         .collect()
 }
 
+/// 非负整数选项。没给用 default；给了却不是非负整数就是用法错 —— 以前 `--parallel` 与
+/// `--preview-points` 悄悄当成默认值，`--parallel 4x` 打错一个字没人知道。
+pub(crate) fn uint_opt(parsed: &Parsed, name: &str, default: u32) -> Result<u32, String> {
+    match parsed.one(name) {
+        None => Ok(default),
+        Some(v) => v
+            .parse::<u32>()
+            .map_err(|_| format!("--{name} 要一个非负整数，收到 {v}")),
+    }
+}
+
+/// `--parallel <n>`（run / eval / perturb）：一次运行里同时算几个节点，0（默认）= min(4, 核数)。
+pub(crate) fn parallel_of(parsed: &Parsed) -> Result<i32, String> {
+    let n = uint_opt(parsed, "parallel", 0)?;
+    i32::try_from(n).map_err(|_| format!("--parallel 太大了：{n}"))
+}
+
 /// `--jobs <n>`（eval / sweep / perturb）：同时跑几次，默认 1（一次接一次）。
 pub(crate) fn jobs_of(parsed: &Parsed) -> Result<usize, String> {
-    match parsed.one("jobs") {
-        None => Ok(1),
-        Some(v) => match v.parse::<usize>() {
-            Ok(n) if n >= 1 => Ok(n),
-            _ => Err(format!("--jobs 要一个正整数，收到 {v}")),
-        },
+    match uint_opt(parsed, "jobs", 1)? {
+        0 => Err("--jobs 要一个正整数，收到 0".to_string()),
+        n => Ok(n as usize),
     }
 }
 
@@ -1177,6 +1191,12 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         line(err, "用法：lyflow run <graph>");
         return EXIT_USAGE;
     };
+    let (parallel, preview_points) = match parallel_of(parsed)
+        .and_then(|p| Ok((p, uint_opt(parsed, "preview-points", 0)?)))
+    {
+        Ok(v) => v,
+        Err(e) => return fail(err, &e, EXIT_USAGE),
+    };
     let core = match core() {
         Ok(c) => c,
         Err(e) => return fail(err, &e, EXIT_FAILED),
@@ -1212,14 +1232,6 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         }
         Err(e) => return fail(err, &e, EXIT_FAILED),
     }
-    let parallel = parsed
-        .one("parallel")
-        .and_then(|v| v.parse::<i32>().ok())
-        .unwrap_or(0);
-    let preview_points = parsed
-        .one("preview-points")
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(0);
     let targets: Vec<String> = parsed.many("to").to_vec();
 
     let result = match execute(
@@ -1528,6 +1540,10 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(m) => m,
         Err(e) => return fail(err, &e, EXIT_USAGE),
     };
+    let jobs = match jobs_of(parsed) {
+        Ok(n) => n,
+        Err(e) => return fail(err, &e, EXIT_USAGE),
+    };
 
     let core = match core() {
         Ok(c) => c,
@@ -1546,10 +1562,6 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
     let param_sets = match eval::axis_param_sets(&loaded.doc, &defaults, &axis_param_specs(parsed)) {
         Ok(v) => v,
-        Err(e) => return fail(err, &e, EXIT_USAGE),
-    };
-    let jobs = match jobs_of(parsed) {
-        Ok(n) => n,
         Err(e) => return fail(err, &e, EXIT_USAGE),
     };
 
@@ -2491,6 +2503,14 @@ mod tests {
             (perturb("nope:cloud", HALFSPACE), EXIT_USAGE, "没有节点"),
             (vec!["patch", &graph], EXIT_USAGE, "至少给一个动作"),
             (vec!["patch"], EXIT_USAGE, "用法：lyflow patch"),
+            // 数字选项写错：以前悄悄当成默认值
+            (vec!["run", &graph, "--parallel", "4x"], EXIT_USAGE, "--parallel 要一个非负整数，收到 4x"),
+            (vec!["run", &graph, "--preview-points", "-5"], EXIT_USAGE, "--preview-points"),
+            (vec!["eval", &graph, "--metric", "run.durationMs", "--parallel", "abc"], EXIT_USAGE, "--parallel"),
+            (vec!["eval", &graph, "--metric", "run.durationMs", "--jobs", "0"], EXIT_USAGE, "--jobs"),
+            (vec!["sweep", &graph, "--param", "v.minPointsPerVoxel=1:2:2", "--metric", "v:cloud.elementCount",
+                  "--jobs", "two"], EXIT_USAGE, "--jobs"),
+            (perturb("g:cloud", HALFSPACE).into_iter().chain(["--jobs", "-1"]).collect(), EXIT_USAGE, "--jobs"),
         ];
         for (args, code, want) in &cases {
             let r = cli(args);
@@ -2893,9 +2913,6 @@ mod tests {
         let jobs = cli(&[&args[..], &["--jobs", "4"]].concat());
         assert_eq!(jobs.code, EXIT_OK, "{}", jobs.err);
         assert_eq!(without_durations(jobs.lines()), without_durations(lines));
-        let bad = cli(&[&args[..], &["--jobs", "0"]].concat());
-        assert_eq!(bad.code, EXIT_USAGE);
-        assert!(bad.err.contains("--jobs"), "{}", bad.err);
     }
 
     fn without_durations(lines: Vec<Value>) -> Vec<Value> {
