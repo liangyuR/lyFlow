@@ -686,7 +686,24 @@ async function suiteReconnect(cdp, report) {
     JSON.stringify(after.edges),
   );
   report.eq("改接是一条撤销记录", after.undoLabel, "改接连线");
-  void ids.voxel;
+
+  // 线头松在节点的身子上（没对准端口）：改接到它唯一能接的那个输入，一条撤销、不弹搜索面板。以前当成松在空白处：
+  // 断开、弹「添加算子」。React Flow 改接时也调 onConnectEnd，两边都接的话会接出两条一样的线
+  const anchor2 = await centerOf(cdp, ".react-flow__edgeupdater-target");
+  const voxelBody = await cdp.eval(`
+    const r = document.querySelector('[data-testid="node-${ids.voxel}"]').getBoundingClientRect();
+    return { x: Math.round(r.left + r.width * 0.6), y: Math.round(r.top + r.height * 0.6) };
+  `);
+  const pastBeforeBody = await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+  await dragMouse(cdp, anchor2, voxelBody, { steps: 18 });
+  await sleep(250);
+  const onBody = await cdp.eval(`
+    const s = window.__lyflow.snapshot();
+    return { edges: s.doc.edges.map((e) => e.from.node + '>' + e.to.node + '.' + e.to.port), undoLabel: s.undoLabel,
+             added: window.__lyflow.stores.graph.getState().past.length - ${pastBeforeBody}, search: !!document.querySelector('.search-popup') };
+  `);
+  report.eq("线头松在节点身子上：改接到它唯一的输入，一条撤销，不弹搜索面板", onBody,
+    { edges: [`${ids.gen}>${ids.voxel}.cloud`], undoLabel: "改接连线", added: 1, search: false });
 }
 
 /** #21：把一个孤立节点拖到连线上 → 自动插入到中间。 */
@@ -852,6 +869,37 @@ async function suiteDropToSearch(cdp, report) {
   report.eq("空查询时刚用过的算子排第一、标着「最近」", first, { op: added, tag: "最近" });
   await pressEscape(cdp);
   await sleep(150);
+  // 拖线松在节点的身子上（没对准端口）：接上它唯一能接的那个输入，不弹搜索面板；能接的不止一个（合并点云的 a、b）
+  // 时提示对准端口、什么也不接。以前两种都当成松在空白处，弹「添加算子」
+  const extra = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    return { voxel: g.addNode('filter.voxel_grid', { x: 0, y: 0 }), merge: window.__lyflow.stores.graph.getState().addNode('util.merge', { x: 0, y: 0 }) };
+  `);
+  const dropBox = await canvasBox(cdp);
+  await placeAtScreen(cdp, {
+    [ids.gen]: { x: 40, y: 60 },
+    [extra.voxel]: { x: Math.round(dropBox.w * 0.5), y: 40 },
+    [extra.merge]: { x: Math.round(dropBox.w * 0.5), y: Math.round(dropBox.h * 0.45) },
+  });
+  await sleep(250);
+  const bodyOf = (id) => cdp.eval(`
+    const r = document.querySelector('[data-testid="node-${id}"]').getBoundingClientRect();
+    return { x: Math.round(r.left + r.width * 0.6), y: Math.round(r.top + r.height * 0.6) };
+  `);
+  const genPort = () => centerOf(cdp, `[data-testid="port-${ids.gen}-cloud"] .react-flow__handle`);
+  const wired = () => cdp.eval(`return window.__lyflow.snapshot().doc.edges.map((e) => e.from.node + '>' + e.to.node + '.' + e.to.port);`);
+  await dragMouse(cdp, await genPort(), await bodyOf(extra.voxel), { steps: 14 });
+  await sleep(250);
+  report.eq("拖线松在体素节点的身子上：接上它唯一的输入，不弹搜索面板",
+    { edges: await wired(), search: await cdp.eval(`return !!document.querySelector('.search-popup');`) },
+    { edges: [`${ids.gen}>${extra.voxel}.cloud`], search: false });
+  await dragMouse(cdp, await genPort(), await bodyOf(extra.merge), { steps: 14 });
+  await sleep(250);
+  report.eq("松在合并点云的身子上（a、b 都能接）：什么也不接，提示对准端口",
+    { edges: await wired(), search: await cdp.eval(`return !!document.querySelector('.search-popup');`),
+      toast: await cdp.eval(`return window.__lyflow.stores.ui.getState().toast?.text ?? null;`) },
+    { edges: [`${ids.gen}>${extra.voxel}.cloud`], search: false, toast: "合并点云 上有 2 个端口能接，拖到要接的那个端口上" });
+
   report.ok("算子面板顶上有「最近用过」一组，里面有它",
     await cdp.eval(`return !!document.querySelector('[data-testid="palette-recent"] [data-op-id=${lit(added ?? "")}]');`));
 }
