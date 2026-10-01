@@ -1,5 +1,7 @@
 // 系统剪贴板。可能因为不安全上下文或没授权而不可用：一律吞掉异常，写不进返回 false、读不到返回 null。
-// 参数的「复制值 / 粘贴值 / 复制路径名」、检查器的节点 id、节点的复制粘贴都走这里。
+// 参数的「复制值 / 粘贴值 / 复制路径名」、检查器的节点 id、节点的复制都走这里。
+// readClipboard 只给点菜单这种拿不到 paste 事件的地方用：WebView2 里它要宿主放行剪贴板读取，
+// 没放行就弹一个「想要查看剪贴板」的框（LyFlow 自己的壳放行了，见 bridge/src/lib.rs）。Ctrl+V 读 paste 事件。
 
 export async function copyText(text: string): Promise<boolean> {
   try {

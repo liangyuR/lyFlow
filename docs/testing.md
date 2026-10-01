@@ -36,7 +36,7 @@
 | 多选同一种算子一起改参数（`setParamMany`：每个节点照 `setParam` 路由、一条撤销、并进拖动的外层事务） | `packages/editor/test/graph-params-actions.test.mjs`；真界面（标「不同」、拖一下两个都变、一条撤销）在 e2e `m3.mjs` 的 `suiteEditing` |
 | 拖线时的即时挡错（P0 #7 端口类型、#16 环检测、E6 Any 推导；`compatibleTargets` / `compatibleSources` 的置灰表）；GraphDoc → React Flow 的映射（连线按实际类型着色、惰性边虚线、引用复用）| `packages/editor/test/typecheck.test.mjs`；真鼠标拖线在 e2e `m3.mjs`、`m8b.mjs` |
 | 算子搜索的排序（名字命中优先、短的优先、缩写与中文关键词、说明命中标字段） | `packages/editor/test/search.test.mjs`；弹层与面板的真界面在 e2e `m3.mjs` |
-| 图参数（规格、校验、传参） | `core/tests/test_graph_params.cpp`、`test_params.cpp`；`packages/editor/test/graph-params*.test.mjs`；e2e `params_p1.mjs` |
+| 图参数（规格、校验、传参） | `core/tests/test_graph_params.cpp`、`test_params.cpp`；`packages/editor/test/graph-params*.test.mjs`；e2e `params_p1.mjs`（参数菜单的复制路径名 / 粘贴值、读剪贴板不弹权限框也在它的 `suiteIncludeTopLevel` 末尾） |
 | 配方与四类失配 | 共享夹具 `schema/fixtures/recipes/`：`bridge/src/recipe.rs` 与 `packages/editor/test/recipes.test.mjs` 对着同一份 `expected.json`；e2e `params_p3.mjs` 只验界面、磁盘与对话框 |
 | 参数面板（虚拟列表、搜索、chip、14 种控件） | `packages/editor/test/param-panel.test.mjs`、`param-values.test.mjs`；e2e `params_p2.mjs` |
 | 迁移（含改连线 ADR-0025） | `core/tests/test_cache.cpp`（迁移链）、`bridge/src/patch.rs` / `commands.rs`、`packages/editor/test/migrations.test.mjs` |
@@ -51,7 +51,7 @@
 | 图像算子（std-image：adapter 零拷贝与 RGB 顺序、读写往返含中文路径、各算子数值、像素单位的几何、单通道契约；深度图 ↔ 点云的反投影、来回一趟逐像素相同、z 缓冲；图像 → 张量 → ONNX → 图像的推理链路，同样要 `LYFLOW_TEST_ONNX_MODEL`） | `packs/std-image/tests/test_image_ops.cpp`；e2e `peek.mjs` 图像组的最后一段（真 app 里灰度 → Otsu → 区域统计、掩膜边是单通道 u8） |
 | dts 面差（与宿主 Python 旧算法的对照、现场轮廓） | `packs/dts/tests/test_dts_ops.cpp`（夹具 `tests/data/*.h`） |
 | gap 测量、积木、导入、模型 ROI | `packs/gap/tests/*`；e2e `gap.mjs`、`m8b.mjs`、`m8c.mjs`、`params_p4.mjs`（编辑器 vs CLI 逐位相同） |
-| 2D 拖框（文件底图与输入端口底图）、自动连线、片段；加节点记进「最近用过」（搜索弹层与面板空查询时排最前）；节点复制粘贴（id 重映射、内部连线、平移、静音照旧；系统剪贴板里带标记的 JSON 与整张图的 JSON，真按键在 e2e `m3.mjs` 的 `suiteEditing`，子图里复制取当前这一层在 e2e `m4.mjs` 的 `suiteNested`；被图参数绑定的参数在副本上写成有效值在 `graph-params-actions.test.mjs`）；删节点连带删边（P0 #5）；F 适配选中（e2e `suiteEditing`） | `packages/editor/test/autoconnect.test.mjs`、`roiframes.test.mjs`；e2e `m8b.mjs`、`m8c.mjs`；「最近用过」的真界面在 e2e `m3.mjs` 的 `suiteDropToSearch` 末尾 |
+| 2D 拖框（文件底图与输入端口底图）、自动连线、片段；加节点记进「最近用过」（搜索弹层与面板空查询时排最前）；节点复制粘贴（id 重映射、内部连线、平移、静音照旧；系统剪贴板里带标记的 JSON 与整张图的 JSON，真按键在 e2e `m3.mjs` 的 `suiteEditing`，Ctrl+V 读 paste 事件、不调 `readText` 也在那里；子图里复制取当前这一层在 e2e `m4.mjs` 的 `suiteNested`；被图参数绑定的参数在副本上写成有效值在 `graph-params-actions.test.mjs`）；删节点连带删边（P0 #5）；F 适配选中（e2e `suiteEditing`） | `packages/editor/test/autoconnect.test.mjs`、`roiframes.test.mjs`；e2e `m8b.mjs`、`m8c.mjs`；「最近用过」的真界面在 e2e `m3.mjs` 的 `suiteDropToSearch` 末尾 |
 | 两节点输出对比（差异表的配对、每种类型的行、容差、全量点数；进入即冻结、换 B 解冻、B 被删自动退出、快捷键；两栏内容合并） | `packages/editor/test/compare-diff.test.mjs`、`compare-store.test.mjs`、`view-rule.test.mjs`；e2e `compare.mjs`（两栏、冻结后重跑只有 A 变、共用相机、右键换 B、A 跟随、拖框互斥、两侧都只有值）。差异表每种类型的数值只在单测里钉 |
 | 预览里选点与测距（屏幕空间最近点、看不见的点跳过、同距取近、一组两点、readout 的单位与行） | `packages/editor/test/pick.test.mjs`；快捷键 `M` 不撞 `Ctrl+M` 在 `compare-store.test.mjs` 的快捷键那条；e2e `m3.mjs` 的测量组（真单击选点、拖动不选、重跑标过期、换节点清掉）、`compare.mjs` 一句（A、B 两栏各点一次） |
 | 点云缓存的并发请求合并（同键只取一次、失败不留占位） | `packages/editor/test/cloud-cache.test.mjs`；e2e `m4.mjs` §2 的「事件到渲染」（拖动中预览运行的延迟中位数） |

@@ -25,10 +25,12 @@ import {
   viewportScale,
   pressShiftF5,
   replan,
+  restoreClipboard,
   runAndWait,
   saveGraphTo,
   select,
   selectAndReadViewer,
+  stubClipboard,
 } from "./page.mjs";
 
 /** 一条三节点直链：生成 → 体素 → 透传。缓存与 stale 的分组都用它。 */
@@ -1020,14 +1022,11 @@ async function suiteEditing(cdp, report) {
   `);
   report.ok("按 F：选中的节点落到画布中间", framed != null && Math.abs(framed.dx) < 40 && Math.abs(framed.dy) < 40, JSON.stringify(framed));
 
-  // #12 复制粘贴走系统剪贴板（另一个窗口、重开之后也粘得进来）。系统剪贴板换成页面里的桩：
-  // CDP 驱动的窗口不一定拿得到剪贴板权限，而这里要验的是「写的是什么、粘的是哪一份」
+  // #12 复制粘贴走系统剪贴板（另一个窗口、重开之后也粘得进来）。系统剪贴板换成页面里的桩（stubClipboard）：
+  // 这里要验的是「写的是什么、粘的是哪一份」，不该动用户真的剪贴板
+  await stubClipboard(cdp);
   await cdp.eval(`
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    window.__lyClipSaved = { w: navigator.clipboard.writeText, r: navigator.clipboard.readText };
-    window.__lyClip = '';
-    navigator.clipboard.writeText = async (t) => { window.__lyClip = t; };
-    navigator.clipboard.readText = async () => window.__lyClip;
     window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}, ${lit(twin)}], []);
     return true;
   `);
@@ -1053,11 +1052,9 @@ async function suiteEditing(cdp, report) {
   await pressCtrl(cdp, "v");
   await sleep(300);
   report.eq("整张图的 JSON 也粘得进来", (await countNodes()) - before, 3);
-  await cdp.eval(`
-    navigator.clipboard.writeText = window.__lyClipSaved.w;
-    navigator.clipboard.readText = window.__lyClipSaved.r;
-    return true;
-  `);
+  // 内容是从 paste 事件里拿的：readText 在 WebView2 里会弹权限框，没人点就一直挂着，Ctrl+V 什么也粘不上
+  report.eq("Ctrl+V 没去调 navigator.clipboard.readText", await cdp.eval(`return window.__lyClipReads;`), 0);
+  await restoreClipboard(cdp);
 
   // #29 快捷键面板。先移开焦点：上一组把焦点留在了参数输入框里，
   // 而键表里 help 没标 inTextField，会被「打字时不拦键」的铁律挡掉。

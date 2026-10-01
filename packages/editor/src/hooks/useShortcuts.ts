@@ -6,7 +6,7 @@ import { useEffect, type RefObject } from "react";
 import { matchShortcut } from "../lib/keymap";
 import { subgraphIdOf } from "../types/graph";
 import { augmentOperators, levelOf } from "../lib/subgraph";
-import { copyText, readClipboard } from "../lib/clipboard";
+import { copyText } from "../lib/clipboard";
 import { materializeBindings } from "../lib/graphParams";
 import { stepHistory } from "../lib/history";
 import { decodeNodeClipboard, encodeNodeClipboard } from "../lib/nodeClipboard";
@@ -168,20 +168,11 @@ export function useShortcuts(
           ui.showToast(`已复制 ${nodes.length} 个节点`);
           return;
         }
-        case "paste": {
-          e.preventDefault();
-          const at = handlers.cursorFlowPosition();
-          // 系统剪贴板里是节点（另一个窗口复制的、或者一整张图的 JSON）就粘它，否则用应用内的那一份
-          void readClipboard().then((text) => {
-            const u = useUiStore.getState();
-            const clip = (text ? decodeNodeClipboard(text) : null) ?? u.clipboard;
-            if (!clip || clip.nodes.length === 0) return;
-            const result = useGraphStore.getState().pasteNodes(clip, at);
-            if (result.nodeIds.length > 0) u.setSelection(result.nodeIds, []);
-            else u.showToast("剪贴板里的算子在当前 core 里不存在", "warn");
-          });
+        case "paste":
+          // 不拦、也不在这里读剪贴板：navigator.clipboard.readText() 在 WebView2 里要权限，
+          // 会弹一个「想要查看剪贴板」的框，没人点就一直挂着。放这次按键过去，浏览器自己发 paste 事件，
+          // 剪贴板的内容就在事件里（onPaste）
           return;
-        }
         case "duplicate": {
           if (ui.selectedNodes.size === 0) return;
           e.preventDefault();
@@ -305,6 +296,20 @@ export function useShortcuts(
       }
     };
 
+    // Ctrl+V 粘节点。系统剪贴板里是节点（另一个窗口复制的、或者一整张图的 JSON）就粘它，否则用应用内的那一份
+    const onPaste = (e: ClipboardEvent) => {
+      if (useModalStore.getState().current || inTextField(e.target)) return;
+      const ui = useUiStore.getState();
+      if (ui.searchPopup || ui.finderOpen) return;
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      const clip = (text ? decodeNodeClipboard(text) : null) ?? ui.clipboard;
+      if (!clip || clip.nodes.length === 0) return;
+      e.preventDefault();
+      const result = useGraphStore.getState().pasteNodes(clip, handlers.cursorFlowPosition());
+      if (result.nodeIds.length > 0) ui.setSelection(result.nodeIds, []);
+      else ui.showToast("剪贴板里的算子在当前 core 里不存在", "warn");
+    };
+
     // 挂在编辑器根元素上（A2-3）：宿主页面里的其它输入不该被我们拦截。
     const el = root.current;
     if (!el) return;
@@ -315,11 +320,19 @@ export function useShortcuts(
       if (e.target !== owner.body) return;
       onKeyDown(e);
     };
+    const onOrphanPaste = (e: ClipboardEvent) => {
+      if (e.target !== owner.body) return;
+      onPaste(e);
+    };
     el.addEventListener("keydown", onKeyDown);
     owner.addEventListener("keydown", onOrphanKeyDown);
+    el.addEventListener("paste", onPaste);
+    owner.addEventListener("paste", onOrphanPaste);
     return () => {
       el.removeEventListener("keydown", onKeyDown);
       owner.removeEventListener("keydown", onOrphanKeyDown);
+      el.removeEventListener("paste", onPaste);
+      owner.removeEventListener("paste", onOrphanPaste);
     };
   }, [handlers, root]);
 }

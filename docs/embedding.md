@@ -429,6 +429,10 @@ fn main() {
 被抢占的那个在后台算完它手上那个停不下来的算子，期间的请求只留最新一个。宿主自己的命令同样跑在主线程上的话，
 也别在里面等一个 run —— 那会让整个窗口一起等。
 
+> **剪贴板读取要宿主放行。** 参数菜单的「粘贴值」调 `navigator.clipboard.readText()`，WebView2 默认会弹一个
+> 「想要查看复制到剪贴板的文本和图像」的框。宿主开窗口时加 `.enable_clipboard_access()`（LyFlow 自己的壳见
+> `bridge/src/lib.rs` 的 `open_main_window`）就不弹了。Ctrl+V 粘节点读的是 paste 事件，不需要这个权限。
+>
 > **它占掉了 `Builder::setup`。** tauri 的 `setup` 是整份替换不是追加，所以宿主
 > 要有自己的 setup 就别再调 `.setup()`，改成在自己那个里面调
 > `lyflow_lib::host::setup(app.handle())`。
