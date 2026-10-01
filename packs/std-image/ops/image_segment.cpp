@@ -250,7 +250,9 @@ void registerImageFindCircle(Registry& r) {
   Param edge = img::floatParam("edgeThreshold", "Edge Threshold", 100.0, "Canny 的高阈值。");
   edge.advanced = true;
   Param acc = img::floatParam("accumulatorThreshold", "Accumulator", 30.0,
-                              "累加阈值：越小找到的（假）圆越多。");
+                              "累加阈值：越小找到的（假）圆越多。票数约等于圆周上的边缘像素数，所以按像素计。");
+  // 票数随圆周长度变：预览缩小 s 倍时阈值也 ÷ s，正式运行找得到的小圆预览里才不会漏掉（ADR-0028，review 修正）
+  acc.unit = "px";
   Param minR = img::floatParam("minRadius", "Min Radius", 0.0, "最小半径；0 = 不限。");
   minR.unit = "px";
   minR.min = 0.0;

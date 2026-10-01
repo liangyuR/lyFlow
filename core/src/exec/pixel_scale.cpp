@@ -151,6 +151,18 @@ Data scalePixelData(const Data& d, double factor) {
   }
 }
 
+Data toNodeScale(const Data& d, std::int32_t s) {
+  if (s <= 1) return d;
+  if (const Image* img = d.asImage()) {
+    if (img->scale >= s) return d;
+    // 比例都是 2 的幂：差几倍就再缩几级
+    unsigned level = 0;
+    while ((static_cast<std::int64_t>(img->scale) << level) < s && level < 30) ++level;
+    return Data::image(shrinkImage(*img, level));
+  }
+  return scalePixelData(d, 1.0 / static_cast<double>(s));
+}
+
 void scaleOutputs(std::unordered_map<std::string, Data>& outputs, std::int32_t s,
                   bool absoluteSize) {
   if (s <= 1) return;

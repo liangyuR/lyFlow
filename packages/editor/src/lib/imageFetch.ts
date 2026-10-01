@@ -21,12 +21,20 @@ export type GetImage = (
   rows: number,
 ) => Promise<ArrayBuffer>;
 
+/** 取齐之前作废了（换了图、换了级别、组件卸掉）就别再要后面几段：一段 16 MB，二十兆像素的 RGB 原图要四段。 */
+export class FetchAbandoned extends Error {
+  constructor() {
+    super("取图已作废");
+  }
+}
+
 export async function fetchImageLevel(
   get: GetImage,
   runId: string,
   nodeId: string,
   port: string,
   level: number,
+  abandoned: () => boolean = () => false,
 ): Promise<FetchedLevel> {
   let first: ImagePayload | null = null;
   let pixels: Uint8Array | Uint16Array | Float32Array | null = null;
@@ -43,6 +51,7 @@ export async function fetchImageLevel(
     pixels!.set(part.pixels, part.rowOffset * part.width * part.channels);
     row = part.rowOffset + part.rowCount;
     if (row >= part.height) break;
+    if (abandoned()) throw new FetchAbandoned();
   }
   if (first === null || pixels === null) throw new Error("没取到图像");
   return { width: first.width, height: first.height, channels: first.channels, level: first.level, pixels };

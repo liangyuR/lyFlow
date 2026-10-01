@@ -612,6 +612,26 @@ class Scheduler {
   std::int32_t imageScale() const { return imageScale_.load(); }
 
  private:
+  void notePreviewImageScale(std::int32_t s) {
+    std::int32_t seen = imageScale_.load();
+    while (s > seen && !imageScale_.compare_exchange_weak(seen, s)) {
+    }
+  }
+
+  /// 预览时源头命中缓存（拖参数时除了第一次都是这样）：从复用的输出里认出抽稀过的点云、缩小过的图像。
+  /// 不认的话稳定状态下的超预算提示就丢了建议（review 修正：修前只在真算的那一次记）。
+  /// 抽稀正好抽到上限，所以点数 ≥ 上限就是抽过的。
+  void notePreviewSourceReused(const std::vector<OutputInfo>& infos) {
+    const std::size_t cap =
+        options_.previewMaxPoints ? options_.previewMaxPoints : kDefaultPreviewMaxPoints;
+    for (const auto& o : infos) {
+      if (o.type == "PointCloud" && o.elementCount >= cap) decimatedCloud_ = true;
+      if (o.type != "Image" || o.valueJson.empty()) continue;
+      const nlohmann::json v = nlohmann::json::parse(o.valueJson, nullptr, false);
+      if (v.is_object()) notePreviewImageScale(v.value("scale", 1));
+    }
+  }
+
   /// 整轮跑完后清点。一个失败若被下游的 acceptsError 端口全数接住，就不算整体失败 ——
   /// 「模型路径失败、回退到模板路径、量出结果」这条路必须以 run_finished: ok 收场
   /// （ADR-0016）。
@@ -760,6 +780,7 @@ class Scheduler {
         node.op->capabilities.deterministic && !node.op->outputs.empty()) {
       std::vector<OutputInfo> infos;
       if (store_.reuse(options_.runId, node.id, node.cacheKey, outputPortNames(*node.op), infos)) {
+        if (options_.mode == RunMode::Preview && node.inputs.empty()) notePreviewSourceReused(infos);
         std::size_t bytes = 0;
         for (const auto& o : infos) bytes += o.byteSize;
         const std::size_t primary = infos.empty() ? 0 : infos.front().elementCount;
@@ -823,9 +844,7 @@ class Scheduler {
         ParamMap scaledParams;
         if (pixelScale > 1) {
           scaledParams = scalePixelParams(*node.op, node.params, pixelScale);
-          for (auto& kv : inputValues) {
-            kv.second = scalePixelData(kv.second, 1.0 / static_cast<double>(pixelScale));
-          }
+          for (auto& kv : inputValues) kv.second = toNodeScale(kv.second, pixelScale);
         }
         Inputs inputs(inputValues);
         Outputs outputs(outputValues);
@@ -902,9 +921,7 @@ class Scheduler {
           const unsigned level = previewLevel(*img, kPreviewMaxPixels);
           if (level == 0) continue;
           Image small = shrinkImage(*img, level);
-          std::int32_t seen = imageScale_.load();
-          while (small.scale > seen && !imageScale_.compare_exchange_weak(seen, small.scale)) {
-          }
+          notePreviewImageScale(small.scale);
           kv.second = Data::image(std::move(small));
         }
       }

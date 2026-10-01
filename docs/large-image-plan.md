@@ -27,7 +27,7 @@
 | D3 | **u16 单通道图缩小时 0 不参与平均**（已确认） | 0 是深度图的无效值；块均值把它和有效深度平均，边缘出飞点。u16 单通道正是深度图最常见的形态 |
 | E1 | 同一时刻**最多一个 run 在算**（被抢占、还没退出的那个也算）；它退出之前来的请求**只留最新一个**，等它退出再开跑 | 编辑器拖动时一秒能发好几次预览；不设上限的话，每次抢占都留下一个停不下来的计算，CPU 与内存一起失控 |
 | E2 | `run_graph` 照旧是同步命令、照旧在主线程上，只是**里面不再 join** | 命令之间在主线程上串行，是重扫库目录「先停 run 再重建注册表」的前提；改成异步命令会丢掉这条串行 |
-| E3 | 排队中的请求被顶掉或被取消时，桥接层**补发一条 `run_finished(cancelled)`** | 前端拿到 runId 就进入「运行中」，等的是这条事件；从没开跑的 run 不会有 core 发的事件 |
+| E3 | 排队中的请求被取消（`cancel`、`stop_active`、`drop_all`）时，桥接层**补发一条 `run_finished(cancelled)`**；被新请求顶掉的不补发 | 前端拿到 runId 就进入「运行中」，等的是这条事件；从没开跑的 run 不会有 core 发的事件。被顶掉的那个，发起方手里已经是更新的 runId，补一条反而让工具栏闪一下「已取消」（ADR-0027） |
 | E4 | 预览时源头的图像超过 **4 MP（2²² 像素）** 就按 2 的幂缩小到不超过它；复用 `shrinkImage` 的块均值 | 4 MP 下灰度 → 平滑 → 二值化 → 开运算 → 区域统计约 40 ms；2 的幂复用现成的缩小与显示级别。不新增 ABI 字段 |
 | E5 | `Image` 加 `scale`（每个像素对应原图 scale × scale 个像素，默认 1）；预览缩小过的源头图 > 1 | 下游要知道自己在多大的图上算；编辑器要按原图尺寸摆放（`valueJson` 带出 `scale`，C ABI 不变） |
 | E6 | **像素量在图上一律是原图坐标**。预览时节点的 s = 它的图像输入的 scale：像素参数 ÷ s、像素几何与像素量测的输入 ÷ s，compute，输出 × s（`px²` 的量测 × s²） | 参数、连线上的几何、画在图上的框都只有一套坐标；换算只发生在 compute 两侧，算子不知道自己在预览（ADR-0011 的原则） |
@@ -40,17 +40,17 @@
 `RunManager` 的状态：`active`（在跑）、`draining`（被抢占、已取消、还没退出，最多一个）、`pending`（等 draining 退出再开跑的请求，最多一个）、`finished`（上一次跑完的）。
 不变式：`draining` 非空时 `active` 为空。
 
-- `start`：先生成 runId。有 `active` → 取消它、挪进 `draining`、请求进 `pending`；已有 `draining` → 请求顶掉旧的 `pending`（旧的补发 cancelled）；
+- `start`：先生成 runId。有 `active` → 取消它、挪进 `draining`、请求进 `pending`；已有 `draining` → 请求顶掉旧的 `pending`（不补发，见 E3）；
   都没有 → 当场启动。**全程不 join**，立即返回 runId。
 - 每个 run 起一个收尾线程（今天就有）：join 完持锁看自己是谁 —— 是 `active` 就进 `finished`；是 `draining` 就清掉它、启动 `pending`。
 - `cancel(id)`：是 `active` 就取消；是 `pending` 就丢掉并补发 cancelled。
-- `stop_active`（重扫库目录）与 `drop_all`（热重载）：取消并 join `active` 与 `draining`，丢掉 `pending`（补发 cancelled）。前者仍在主线程上等 —— 重扫库目录要的正是「此后没有 run 握着旧的算子描述」。
+- `stop_active`（重扫库目录）与 `drop_all`（热重载）：取消并 join `active` 与 `draining`，丢掉 `pending`（先补发 cancelled 再等）。前者仍在主线程上等 —— 重扫库目录要的正是「此后没有 run 握着旧的算子描述」。
 - 排队中的请求自己持有图 JSON 与注入数据（`RunInput` 本来就自带缓冲），启动失败（core 返回空句柄，只在内存不足时）补发 `run_finished(error)`。
 - 前端：`execution.ts` 那条「两次 run_graph 走不同的工作线程」的注释改掉；runId 对不上的事件本来就当孤儿处理，晚到的旧事件无害。
 
 测试：
-- `cargo test`：状态机用假的 run（可控地「卡住」）测 —— 抢占立即返回、最多一个 draining、只留最新请求、被顶掉 / 取消的请求补发 cancelled、
-  draining 退出后最新请求开跑、`stop_active` / `drop_all` 等齐全部；真 DLL 上补一条「抢占一个卡住的 run 立即返回」。
+- `cargo test`：状态机用假的 run（可控地「卡住」）测 —— 抢占立即返回、最多一个 draining、只留最新请求、取消排队的补发 cancelled、
+  draining 退出后最新请求开跑、`stop_active` / `drop_all` 等齐全部。真 DLL 上的「抢占卡住的 run」由下面的 e2e 覆盖（不理取消的测试算子只在 `LYFLOW_TEST_OPS=1` 时注册，cargo 的进程里没有它）。
 - e2e：core 测试算子 `test.stall`（`LYFLOW_TEST_OPS=1`，不理取消、睡满 `ms`）；抢占它时 `run_graph` 立即返回、探针测得主窗口一次都不卡、
   最后一次请求跑完。
 

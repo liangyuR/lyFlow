@@ -31,6 +31,11 @@ Status probeCompute(const Inputs& in, const ParamView& p, Outputs& out, ExecCont
     const Circle2D* c = in.get("near").asCircle2D();
     seen.data["near"] = {c->center[0], c->center[1], c->radius};
   }
+  if (in.has("other")) {
+    const Image* other = in.get("other").asImage();
+    seen.data["otherWidth"] = other->width;
+    seen.data["otherScale"] = other->scale;
+  }
   out.set("seen", Data::record(seen));
 
   Circle2D circle;
@@ -60,7 +65,8 @@ const OperatorDesc& probeOp() {
     op.version = "1.0.0";
     op.label = "像素探针";
     op.category = "Test";
-    op.inputs = {Port{"image", "Image", "Image", "", true}, Port{"near", "Circle2D", "Near", "", false}};
+    op.inputs = {Port{"image", "Image", "Image", "", true}, Port{"near", "Circle2D", "Near", "", false},
+                 Port{"other", "Image", "Other", "", false}};
     op.outputs = {Port{"seen", "Record", "Seen", "", true}, Port{"circle", "Circle2D", "Circle", "", true},
                   Port{"area", "Measurement", "Area", "", true}, Port{"image", "Image", "Image", "", true}};
     Param len;
@@ -121,9 +127,9 @@ Json outputValue(const RunLog& log, const std::string& node, const std::string& 
   return Json();
 }
 
-RunLog runIn(const Json& doc, exec::RunMode mode, std::uint32_t budgetMs = 0) {
+RunLog runIn(const Json& doc, exec::RunMode mode, std::uint32_t budgetMs = 0, bool keepCache = false) {
   static int counter = 0;
-  exec::ResultStore::instance().clear();
+  if (!keepCache) exec::ResultStore::instance().clear();
   exec::RunOptions options;
   options.runId = "pixel-scale-" + std::to_string(counter++);
   options.mode = mode;
@@ -256,15 +262,18 @@ TEST_CASE("预览时源头的大图按 2 的幂缩小，下游在小图上算、
   probeOp();
   // src 4100 × 2050 = 8.4 MP → 缩一级到 2050 × 1025（scale 2）
   // a：普通的像素参数；b：resize 到绝对尺寸那一类（mode = size）；
-  // c 吃 b 的图（回到原图比例）和 a 的圆；d 吃 a 的图（还是 scale 2）和 a 的圆
+  // c 吃 b 的图（回到原图比例）和 a 的圆；d 吃 a 的图（还是 scale 2）和 a 的圆；
+  // e 吃 a 的图（scale 2）与 b 的图（scale 1）：比例不一样的两张图进同一个节点
   const Json doc = makeGraph(
       {N{"src", "test.make_image", Json{{"width", 4100}, {"height", 2050}, {"channels", 1}}},
        N{"a", "test.px_probe", Json{{"len", 10}, {"k", 5}}},
        N{"b", "test.px_probe", Json{{"mode", "size"}, {"size", 640}}},
        N{"c", "test.px_probe", Json::object()},
-       N{"d", "test.px_probe", Json::object()}},
+       N{"d", "test.px_probe", Json::object()},
+       N{"e", "test.px_probe", Json::object()}},
       {E{"src.image", "a.image"}, E{"a.image", "b.image"}, E{"b.image", "c.image"},
-       E{"a.circle", "c.near"}, E{"a.image", "d.image"}, E{"a.circle", "d.near"}});
+       E{"a.circle", "c.near"}, E{"a.image", "d.image"}, E{"a.circle", "d.near"},
+       E{"a.image", "e.image"}, E{"b.image", "e.other"}});
 
   SUBCASE("预览") {
     const RunLog log = runIn(doc, exec::RunMode::Preview, /*budgetMs=*/1);
@@ -291,6 +300,11 @@ TEST_CASE("预览时源头的大图按 2 的幂缩小，下游在小图上算、
     const Json d = outputValue(log, "d", "seen")["data"];
     CHECK(Json{d["imageScale"], d["near"]} == Json{2, {5, 5, 5}});
 
+    // 比例不一样的两张图（review 修正）：scale 1 的那张先缩到 scale 2 再进 compute，两张才对得上。
+    // 修前原样交进去 —— 例如推理掩膜 resize 回原图尺寸再与预览缩小过的原图一起进 region_stats，报「不一样大」
+    const Json e = outputValue(log, "e", "seen")["data"];
+    CHECK(Json{e["imageScale"], e["otherWidth"], e["otherScale"]} == Json{2, 320, 2});
+
     // 超预算的提示：点名最慢的节点；没抽稀点云就不提「降低预览点数」
     std::string warn;
     for (const Json& e : log.ofKind("log")) {
@@ -299,6 +313,17 @@ TEST_CASE("预览时源头的大图按 2 的幂缩小，下游在小图上算、
     CHECK(warn.find("最慢的是 ") != std::string::npos);
     CHECK(warn.find("图像已按 1/2 预览") != std::string::npos);
     CHECK(warn.find("降低预览点数") == std::string::npos);
+
+    // 再拖一下 a 的参数：源头这回命中预览缓存（拖参数时除了第一次都是这样），提示里照样写着缩过图（review 修正）
+    Json dragged = doc;
+    dragged["nodes"][1]["params"]["len"] = 12;
+    const RunLog again = runIn(dragged, exec::RunMode::Preview, /*budgetMs=*/1, /*keepCache=*/true);
+    REQUIRE(again.finalState("src") == "skipped");
+    std::string warnAgain;
+    for (const Json& ev : again.ofKind("log")) {
+      if (ev.value("level", "") == "warn") warnAgain = ev.value("message", "");
+    }
+    CHECK(warnAgain.find("图像已按 1/2 预览") != std::string::npos);
   }
   SUBCASE("正式运行：一切照原图") {
     const RunLog log = runIn(doc, exec::RunMode::Full);

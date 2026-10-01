@@ -564,11 +564,14 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           level,
         );
         const pic = toPicture(first.width, first.height, first.channels, first.depth, values, maxEdge);
+        // 预览运行（mode: "preview"）里源头缩小过的图（ADR-0028）：size 报原图尺寸，坐标才与参数、几何同一套
+        const scale = typeof info.value?.scale === "number" && info.value.scale > 1 ? info.value.scale : 1;
         const meta = {
           runId: args.runId,
           nodeId: args.nodeId,
           port: args.port,
-          size: [first.fullWidth, first.fullHeight],
+          size: [first.fullWidth * scale, first.fullHeight * scale],
+          ...(scale > 1 ? { previewScale: scale } : {}),
           channels: first.channels,
           depth: first.depth === 1 ? "u8" : first.depth === 2 ? "u16" : "f32",
           shown: [pic.width, pic.height],

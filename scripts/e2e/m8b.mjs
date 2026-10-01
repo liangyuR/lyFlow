@@ -852,8 +852,18 @@ async function suiteImagePreviewScale(cdp, report) {
     return null;
   };
 
+  const fitted = await look(1);
+  mustOk(fitted !== null && fitted.badge === null, "正式结果：没有预览角标、框在画面上", JSON.stringify(fitted));
+  // 先放大一格：视角要在预览 ↔ 正式之间保持（review 修正：修前取图拿新 runId 配旧尺寸，切换时重新适配、放大丢了）
+  const stage = await cdp.eval(`
+    const r = document.querySelector('[data-testid="viewer-image-pane"] .peek-image__stage').getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  `);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: stage.x, y: stage.y, deltaX: 0, deltaY: -120 });
+  await sleep(150);
   const before = await look(1);
-  mustOk(before !== null && before.badge === null, "正式结果：没有预览角标、框在画面上", JSON.stringify(before));
+  mustOk(before !== null && before.canvasW > fitted.canvasW, "滚轮放大了一格", JSON.stringify({ fitted, before }));
+
   // 与拖参数时同一条路（lib/preview.ts）：mode = preview、只跑到选中的节点
   const pv = await runAndWait(cdp, () =>
     cdp.eval(`void window.__lyflow.run({ targets: [${lit(ids.crop)}], preview: true }); return true;`),
@@ -861,9 +871,15 @@ async function suiteImagePreviewScale(cdp, report) {
   const during = await look(2);
   report.ok("预览运行：主预览画的是缩小 1/2 的图（2050 宽），角标「预览 1/2」",
     pv.status === "ok" && during?.fullW === 2050 && during.badge === "预览 1/2", JSON.stringify({ status: pv.status, during }));
-  const drift = during ? Math.max(...during.box.map((v, k) => Math.abs(v - before.box[k]))) : Infinity;
-  report.ok(`像素框在预览图上与正式结果画在同一处（最大偏差 ${drift} px ≤ 1），画布没有重新适配`,
-    drift <= 1 && during.canvasW === before.canvasW, JSON.stringify({ before, during }));
+  // 再跑一次正式运行（松手后补的那一次）：回到原图，视角与框还在原处
+  const back = await runAndWait(cdp, () => pressF5(cdp));
+  const after = await look(1);
+  const drift = (a, b) => (a && b ? Math.max(...a.box.map((v, k) => Math.abs(v - b.box[k]))) : Infinity);
+  const d1 = drift(during, before);
+  const d2 = drift(after, before);
+  report.ok(`像素框与放大后的视角在预览与正式之间都保持（框最大偏差 ${d1} / ${d2} px ≤ 1，画布宽度不变 = 没有重新适配）`,
+    back.status === "ok" && d1 <= 1 && d2 <= 1 && during.canvasW === before.canvasW && after.canvasW === before.canvasW,
+    JSON.stringify({ before, during, after }));
 }
 
 export const m8bSuites = [

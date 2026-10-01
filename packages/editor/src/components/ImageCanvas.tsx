@@ -141,10 +141,11 @@ async function fetchLevel(
   nodeId: string,
   port: string,
   level: number,
+  abandoned: () => boolean,
 ): Promise<Omit<Loaded, "key" | "viewKey" | "pixelScale">> {
   const get = transport.getOutputImage;
   if (!get) throw new Error("宿主不支持取图像（需要 C ABI v15）");
-  return fetchImageLevel((...args) => get.apply(transport, args), runId, nodeId, port, level);
+  return fetchImageLevel((...args) => get.apply(transport, args), runId, nodeId, port, level, abandoned);
 }
 
 interface ViewXf {
@@ -240,7 +241,7 @@ export function ImageCanvas({
     setError(null);
     void (async () => {
       try {
-        const img = await fetchLevel(runId, nodeId, port, level);
+        const img = await fetchLevel(runId, nodeId, port, level, () => cancelled);
         if (cancelled) return;
         setLoaded({ ...img, key: fetchKey, viewKey, pixelScale });
       } catch (e) {
@@ -431,16 +432,6 @@ export function ImageCanvas({
           </span>
         )}
 
-        {pixelScale > 1 && (
-          <span
-            className="peek-image__badge"
-            data-testid={`${testid}-preview-scale`}
-            title="拖参数时的预览：源头的大图按比例缩小过，框与几何照旧是原图坐标；松手后的正式运行是原图"
-          >
-            预览 1/{pixelScale}
-          </span>
-        )}
-
         <label className="peek-tensor__check" title={`不拉伸时按 ${depth} 的原值范围 ${naturalRange(depth).join("–")} 显示`}>
           <input
             type="checkbox"
@@ -494,6 +485,16 @@ export function ImageCanvas({
         />
         {xf && img && overlay && (
           <div className="peek-image__overlay">{overlay(overlayView(xf, 2 ** img.level * img.pixelScale))}</div>
+        )}
+        {/* 浮在画面角上，不占工具条：预览 ↔ 正式之间切换时画面不该挪动（e2e 量的就是框的屏幕位置） */}
+        {pixelScale > 1 && (
+          <span
+            className="peek-image__badge"
+            data-testid={`${testid}-preview-scale`}
+            title="拖参数时的预览：源头的大图按比例缩小过，框与几何照旧是原图坐标；松手后的正式运行是原图"
+          >
+            预览 1/{pixelScale}
+          </span>
         )}
         {message !== null && (
           <p className="peek-tensor__overlay" data-testid={`${testid}-msg`}>

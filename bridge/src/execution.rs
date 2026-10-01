@@ -373,14 +373,15 @@ impl RunManager {
             let mut st = lock(&self.inner);
             ([st.active.take(), st.draining.take()], st.pending.take())
         };
+        // 排队的那个先收场再等：等的可能是一个停不下来的算子，界面不该在这几秒里一直显示「运行中」
+        if let Some(p) = pending {
+            (p.notify)("cancelled", None);
+        }
         for run in runs.iter().flatten() {
             run.cancel();
         }
         for run in runs.iter().flatten() {
             run.join();
-        }
-        if let Some(p) = pending {
-            (p.notify)("cancelled", None);
         }
     }
 
@@ -396,14 +397,14 @@ impl RunManager {
                 st.finished.take(),
             )
         };
+        if let Some(p) = pending {
+            (p.notify)("cancelled", None);
+        }
         for run in runs.iter().flatten() {
             run.cancel();
         }
         for run in runs.iter().flatten() {
             run.join();
-        }
-        if let Some(p) = pending {
-            (p.notify)("cancelled", None);
         }
         drop(runs);
         drop(finished);
@@ -414,6 +415,13 @@ impl RunManager {
     #[cfg(test)]
     pub fn adopt_finished(&self, handle: RunHandle) {
         lock(&self.inner).finished = Some(Arc::new(handle));
+    }
+
+    /// 没有在算的、排干中的、排队的（测试等「全部收场」用：被抢占的 run 不在 active 里）。
+    #[cfg(test)]
+    fn is_idle(&self) -> bool {
+        let st = lock(&self.inner);
+        st.active.is_none() && st.draining.is_none() && st.pending.is_none()
     }
 
     /// 当前是否还有活跃的运行。
@@ -755,8 +763,8 @@ mod tests {
         assert_eq!(s.notified(), [("b".to_string(), "cancelled", None)]);
 
         s.run("a").finish();
-        eventually("a 排干", || manager.active_run_id().is_none());
-        std::thread::sleep(Duration::from_millis(20));
+        // a 被抢占后在 draining 里，不在 active 里：要等的是全部收场（review 修正：修前等的条件一开始就成立）
+        eventually("a 排干", || manager.is_idle());
         assert_eq!(s.launched(), ["a"], "取消掉的排队请求不该再开跑");
     }
 
@@ -781,10 +789,40 @@ mod tests {
             !stopped.load(std::sync::atomic::Ordering::SeqCst),
             "重扫库目录要等被抢占的那个真的退出（它还握着算子描述）"
         );
+        assert_eq!(
+            s.notified(),
+            [("b".to_string(), "cancelled", None)],
+            "排队的那个在等之前就收场，界面不用陪着等"
+        );
         s.run("a").finish();
         stopper.join().unwrap();
-        assert_eq!(s.notified(), [("b".to_string(), "cancelled", None)]);
         assert_eq!(s.launched(), ["a"]);
+        assert!(manager.is_idle());
+    }
+
+    /// 热重载前的 drop_all：在算的与排干中的都取消并等齐，排队的作废，上一次跑完的也放掉。
+    #[test]
+    fn drop_all_cancels_and_waits_for_everything_and_cancels_the_queued_one() {
+        let manager = RunManager::new();
+        let s = Arc::new(Script::default());
+        s.submit(&manager, "done", Behaves::Cooperative);
+        s.run("done").finish();
+        eventually("done 进 finished", || manager.active_run_id().is_none());
+        s.submit(&manager, "a", Behaves::Stuck);
+        s.submit(&manager, "b", Behaves::Cooperative);
+
+        let dropper = {
+            let manager = manager.clone();
+            std::thread::spawn(move || manager.drop_all())
+        };
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(!dropper.is_finished(), "drop_all 要等停不下来的那个退出（它握着旧 DLL）");
+        assert_eq!(s.notified(), [("b".to_string(), "cancelled", None)]);
+        s.run("a").finish();
+        dropper.join().unwrap();
+        assert!(manager.is_idle());
+        assert!(lock(&manager.inner).finished.is_none(), "上一次跑完的也要放掉");
+        assert_eq!(s.launched(), ["done", "a"]);
     }
 
     #[test]

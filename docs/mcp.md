@@ -89,7 +89,7 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 | `run_graph` | 同上 + `targets?` `set?` `recipe?` `mode?` `timeoutMs?` | `POST /lyflow/run` + WS 等该 `runId` 的 `run_finished`；给了 `recipe` 先 `LYFLOW_CLI recipes --recipe` | core 的 run summary + `runId` / `runStatus` / `diagnostics`（见下），带 `recipe` 时另有 `recipe` |
 | `get_node_outputs` | `runId` `nodeId` | `GET /lyflow/runs/:id/nodes/:node/outputs` | `{outputs:[OutputInfo]}` 原样 |
 | `summarize_output` | `runId` `nodeId` `port` `maxPoints?` `head?` | 点云走 `GET …/clouds/:node/:port`，其余用 `OutputInfo.value` | 见下 |
-| `view_output_image` | `runId` `nodeId` `port` `maxEdge?`（默认 768） | `GET …/images/:node/:port?level=` 按段取齐 | **一张 PNG**（MCP 的 `image` 内容）+ 一段元信息 `{size, channels, depth, shown, range}`：u16 / f32 按这张图的有限值拉伸到 8 位，`range` 写明。只收 Image 端口 —— 张量在图里先接 `tensor.to_image`（[image-plan.md](image-plan.md) §5.5） |
+| `view_output_image` | `runId` `nodeId` `port` `maxEdge?`（默认 768） | `GET …/images/:node/:port?level=` 按段取齐 | **一张 PNG**（MCP 的 `image` 内容）+ 一段元信息 `{size, channels, depth, shown, range}`：u16 / f32 按这张图的有限值拉伸到 8 位，`range` 写明。`size` 是原图尺寸；预览运行（`run_graph` 的 `mode: "preview"`）里源头缩小过的图另带 `previewScale`（[ADR-0028](adr/0028-image-preview-pixel-scale.md)）。只收 Image 端口 —— 张量在图里先接 `tensor.to_image`（[image-plan.md](image-plan.md) §5.5） |
 | `eval` | `graphPath` 样本 参数 `metric[]` `recipe?` … | `LYFLOW_CLI eval …` | 压紧的统计（`compact`，默认开）+ 失败样本清单 + `rowsPath` |
 | `perturb` | `graphPath` `after` `region` `axis` `metric[]` … | `LYFLOW_CLI perturb …` | `perturb_summary` 数组 + 不通过样本 + `samplesPath` + `rowsPath` |
 | `diff_graphs` | `a` `b` | `LYFLOW_CLI diff a b --json` | `{exitCode, diff}` 原样 |

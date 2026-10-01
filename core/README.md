@@ -219,7 +219,8 @@ compute 可能被调用不止一次，所以它必须是纯的 —— 有副作�
 抽稀走 `PointCloud::select`，所有通道一起搬。
 
 图像在源头按 2 的幂缩到 4 MP 以内（`exec/pixel_scale.h`，[ADR-0028](../docs/adr/0028-image-preview-pixel-scale.md)），
-缩出来的图 `scale > 1`。下游节点的输入图带着 scale 时，执行器替它换算：`unit = px` 的参数 ÷ s、连线上的像素几何与量测 ÷ s，
+缩出来的图 `scale > 1`。下游节点的输入图带着 scale 时，执行器替它换算：`unit = px` 的参数 ÷ s、连线上的像素几何与量测 ÷ s、
+比例更小的输入图先缩到 s，
 算完再 × s（`px²` × s²），新产出的图带上 s —— 算子照旧不知道自己在预览。绝对尺寸的参数标 `absolute`，不换算。
 
 cacheKey 混入 `preview:<maxPoints>`，所以预览与正式的结果互不命中；

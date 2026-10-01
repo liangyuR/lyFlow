@@ -34,6 +34,10 @@ bool hasActiveAbsoluteSize(const OperatorDesc& op, const ParamMap& params);
 /// "px²" 乘 factor²，判定的上下限一起）乘以 factor；Bundle 逐字段。别的类型原样返回（同一份 Data）。
 Data scalePixelData(const Data& d, double factor);
 
+/// 把节点的一个输入换算到这个节点的比例 s 上（compute 之前那一半）：像素几何与量测 ÷ s；
+/// 比例比 s 小的图像（例如 resize 到原图尺寸的掩膜，scale 1）缩到 s，几张输入图才一样大。
+Data toNodeScale(const Data& d, std::int32_t s);
+
 /// compute 之后的那一半：像素几何与量测 × s；scale 还是 1 的输出图像设成 s ——
 /// 有生效的绝对尺寸参数时保持 1（resize 到指定宽高的图与输入不在一个比例上）。
 void scaleOutputs(std::unordered_map<std::string, Data>& outputs, std::int32_t s,

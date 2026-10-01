@@ -31,9 +31,13 @@
   pointer-events: none;
 }
 
-/* 「预览 1/s」：拖参数时源头的大图缩小过（ADR-0028）。与工具条里别的控件同一行，用警示色说明「这不是原图」 */
+/* 「预览 1/s」：拖参数时源头的大图缩小过（ADR-0028）。浮在画面左上角、不接指针，用警示色说明「这不是原图」 */
 .peek-image__badge {
-  align-self: center;
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  pointer-events: none;
+  background: var(--lyflow-bg-0);
   padding: 1px 6px;
   border: 1px solid var(--lyflow-warn);
   border-radius: 3px;

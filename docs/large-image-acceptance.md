@@ -46,6 +46,24 @@
 | 原有的主预览图像模式（画哪张图、拖框写回参数可撤销、放大后重跑视角不动、出错照画输入图） | ✅ | e2e `m8b.mjs` `suiteImageMainView` |
 | 「超过 16 MB 分段取图」：编辑器与 MCP 各自按帧头的 rowCount 接着要、拼接位置对、类型化数组的位深对 | ✅ | `packages/editor/test/image-fetch.test.mjs`；`packages/mcp/test/cloud.test.ts` |
 
+## review 修正
+
+只读子代理审查（三个提交加未提交的文档）找出的，逐条核实后都修了：
+
+| # | 问题 | 修法 | 测试 |
+|---|---|---|---|
+| 1 中 | 预览 ↔ 正式之间切换时，主预览拿**新 runId** 配**上一次的尺寸与比例**去取图：取到的是另一种尺度的图，画面重新适配一两次、放大丢了，叠画中间几帧偏一倍；从预览切回正式时还会按旧尺寸要一份四段的原图 | ImagePane 把元信息所属的那一次运行交给 ImageCanvas（尺寸、比例、runId 三者一致）；分段取图加作废回调，换了图就不再要后面几段 | e2e `suiteImagePreviewScale` 改成先放大一格、预览、再正式运行：两次切换画布宽度都不变、框偏差 0 px。**临时改回修前的写法跑过：这一条失败** —— 画布 474 → 379 px 重新适配（放大丢了）、框偏 138 px（初版 e2e 只看最终状态、没放大，所以没抓到）；`image-fetch.test.mjs` 加作废那一条 |
+| 2 中 | 同一节点的几张输入图比例不一样时不对齐：例如推理掩膜 resize 回原图尺寸（scale 1）与预览缩小过的原图（scale 2）一起进 `region_stats`，预览报「不一样大」，正式运行没事 | 进 compute 前比例比 s 小的图先缩到 s（`toNodeScale`） | `test_pixel_scale.cpp` 端到端用例加节点 e：两张比例不同的图进同一个节点，第二张缩到 320 宽、scale 2 |
+| 3 低 | 超预算提示的建议只在源头真算的那次记：拖参数时源头命中预览缓存，稳定状态下的提示丢了「降低预览点数」（对点云是回退）与「图像已按 1/s 预览」 | 源头命中缓存时从复用的输出里认（点数 ≥ 上限 = 抽过；valueJson 的 scale） | 同一用例再拖一下 a 的参数（源头 skipped），提示里照样有缩图那句 |
+| 4 低 | `image.find_circle` 的累加阈值没标单位：票数随圆周长度变，预览不缩的话正式运行找得到的小圆预览里会漏掉 | 标 `unit = px`，doc 写明「票数约等于圆周上的边缘像素数」 | —— |
+| 5 低 | MCP `view_output_image` 不认 scale：`run_graph` 的 `mode: "preview"` 下 `size` 报的是缩小后的尺寸，而说明写着坐标是原图像素 | `size` 报原图尺寸，另带 `previewScale` | —— |
+| 6 低 | `stop_active` / `drop_all` 等完停不下来的那个才给排队的请求补发 cancelled，界面那几秒一直「运行中」 | 先补发再等 | 状态机用例断言「等之前就收场」，补 `drop_all` 用例 |
+| 7 低 | 文档自相矛盾：计划 E3 说被顶掉的请求补发 cancelled（代码按 ADR-0027 不发）；§2 许诺了真 DLL 上的 cargo 用例 | 文档改成与代码一致；真 DLL 的抢占由 e2e 覆盖（不理取消的测试算子只在 `LYFLOW_TEST_OPS=1` 时注册） | —— |
+| 8 低 | 一条状态机用例的等待条件一开始就成立（被抢占的在 draining、不在 active），靠的是 20 ms 的 sleep | 测试用的 `is_idle()`：在算、排干、排队全空 | —— |
+
+另外一条审查指出、**没有在这次修**的（早就存在）：库目录的文件监视与热重载在 watcher 线程上 `stop_active` / `drop_all`，
+不受主线程串行保护，期间主线程上来的 `run_graph` 能当场开跑。ADR-0027 已改正「靠主线程串行」的说法，并写下修法（状态里加一道暂停）。
+
 ## 与计划字面不同
 
 - **E8 说要给 `blur.ksize`、`threshold.blockSize` 补 `step = 2`：它们本来就有。** 另外给 `blur.sigma`、`cloud.from_depth.step`
@@ -74,8 +92,8 @@
 2026-10-01 全量实测（testing.md 的表同步更新）：
 
 - doctest：默认 178 例（+5：`test_pixel_scale.cpp` 4 例、std-image 1 例）；`LYFLOW_PACKS=dts` 186；`gap;dts` 268。全过。
-- cargo：lib 145（+6，状态机）；纯平台构建 87 通过 / 58 ignored；`tests/host.rs` 11 通过 / 2 ignored；`tests/disk_cache.rs` 2。全过。
-- editor 79（+2，分段取图）；MCP 31（+1，分段取图）。
+- cargo：lib 146（+7，状态机，含 review 修正补的 `drop_all`）；纯平台构建 88 通过 / 58 ignored；`tests/host.rs` 11 通过 / 2 ignored；`tests/disk_cache.rs` 2。全过。
+- editor 80（+3，分段取图与作废）；MCP 31（+1，分段取图）。
 - e2e（`LYFLOW_PACKS=gap;dts`）：756 条断言、102 个分组（+4 条、+2 组）；753 通过，失败的 3 条是 KUN10 缺数据的已知项
   （P4 验收 26 与依赖它状态的工具栏宽度那组）。`e2e:http` 33/33。
 - `pnpm check`：除「嵌入 SDK」那一步外一次跑通；那一步在 `%TEMP%\lyflow-consumer-build` 里配置消费方工程时 CMake 的

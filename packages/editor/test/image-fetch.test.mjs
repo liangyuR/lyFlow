@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { fetchImageLevel } from "../src/lib/imageFetch.ts";
+import { FetchAbandoned, fetchImageLevel } from "../src/lib/imageFetch.ts";
 import { IMAGE_HEADER_BYTES, IMAGE_MAGIC } from "../src/types/execution.ts";
 
 /** 一段 LYIM 载荷：值 = 行号 × 100 + 列号 × channels + 通道（与像素位置一一对应，拼错一行就对不上）。 */
@@ -70,4 +70,25 @@ test("一段就取完的图只要一次；给出的级别照帧头（要得太�
   const { get, asked } = fakeGet(spec, 100);
   const img = await fetchImageLevel(get, "r", "n", "image", 9);
   assert.deepEqual({ level: img.level, asked: asked.length, firstLevel: asked[0].level }, { level: 7, asked: 1, firstLevel: 9 });
+});
+
+test("作废了就不再要后面几段：取第一段之后作废，抛 FetchAbandoned、只要过一次", async () => {
+  // review 修正：从预览切回正式结果时，旧的那次取图（二十兆像素的 RGB 原图要四段）不该把剩下几段也要完
+  const spec = { width: 5, height: 10, channels: 1, depth: 1 };
+  const { get, asked } = fakeGet(spec, 4);
+  let gone = false;
+  const pending = fetchImageLevel(
+    async (...args) => {
+      const buf = await get(...args);
+      gone = true;
+      return buf;
+    },
+    "r",
+    "n",
+    "image",
+    0,
+    () => gone,
+  );
+  await assert.rejects(pending, FetchAbandoned);
+  assert.equal(asked.length, 1);
 });

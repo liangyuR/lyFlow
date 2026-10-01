@@ -152,6 +152,9 @@ export function ImagePane({ doc, path, node, op, roiNode, runId, status, nodeSta
   if (!m) return centered(status ?? metaError ?? (shownRunId ? "正在取图像…" : "未运行"));
 
   const colorOf = (type: string) => typesByName.get(type)?.color ?? "#fbbf24";
+  // 取图用元信息所属的那一次运行（review 修正）：新一次运行的元信息还没到时，尺寸与比例还是上一次的 ——
+  // 拿新 runId 配旧尺寸，预览 ↔ 正式之间切换时取到的是另一种尺度的图，画面重新适配、叠画偏一倍
+  const imageRun = m.key.slice(0, m.key.indexOf("|"));
   return (
     <div
       className="viewer__image"
@@ -163,7 +166,7 @@ export function ImagePane({ doc, path, node, op, roiNode, runId, status, nodeSta
       data-showing-run={shownRunId ?? ""}
     >
       <ImageCanvas
-        runId={shownRunId}
+        runId={imageRun}
         nodeId={src.nodeId}
         port={src.port}
         fullW={m.width}
