@@ -32,6 +32,15 @@ function inTextField(target: EventTarget | null): boolean {
   );
 }
 
+/** 焦点在输入框里时先让它提交：数字框、文字框都是失焦才提交，不先提交的话 F5 跑的、Ctrl+S 存的是打字之前的值
+ *  （以前就是这样：打了 1234 没失焦就按 F5，跑的还是 1000；Ctrl+S 干脆不响应）。失焦触发的 onBlur 是同步的，
+ *  这一句返回时 store 里已经是新值；再把焦点放回去，接着改不用重新点。 */
+function commitFocusedField(target: EventTarget | null): void {
+  if (!inTextField(target) || !(target instanceof HTMLElement)) return;
+  target.blur();
+  target.focus();
+}
+
 /** 页面上选着一段（不全是空白的）文字。 */
 function hasTextSelection(doc: Document): boolean {
   const sel = doc.getSelection();
@@ -109,10 +118,12 @@ export function useShortcuts(
       switch (hit.id) {
         case "run":
           e.preventDefault();
+          commitFocusedField(e.target);
           handlers.onRun();
           return;
         case "runToNode":
           e.preventDefault();
+          commitFocusedField(e.target);
           handlers.onRunToSelected();
           return;
         case "nextError":
@@ -134,10 +145,12 @@ export function useShortcuts(
 
         case "save":
           e.preventDefault();
+          commitFocusedField(e.target);
           handlers.onSave();
           return;
         case "saveAs":
           e.preventDefault();
+          commitFocusedField(e.target);
           handlers.onSaveAs();
           return;
         case "open":

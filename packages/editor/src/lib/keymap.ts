@@ -41,8 +41,9 @@ export const SHORTCUTS: readonly Shortcut[] = [
 
   { id: "new", keys: ["Ctrl+N"], label: "新建", scope: "global", group: "文件" },
   { id: "open", keys: ["Ctrl+O"], label: "打开", scope: "global", group: "文件" },
-  { id: "save", keys: ["Ctrl+S"], label: "保存", scope: "global", group: "文件" },
-  { id: "saveAs", keys: ["Ctrl+Shift+S"], label: "另存为", scope: "global", group: "文件" },
+  // 存盘打不出字符，输入框里照样响应：先提交那个框里打的字再存（useShortcuts 的 commitFocusedField）
+  { id: "save", keys: ["Ctrl+S"], label: "保存", scope: "global", group: "文件", inTextField: true },
+  { id: "saveAs", keys: ["Ctrl+Shift+S"], label: "另存为", scope: "global", group: "文件", inTextField: true },
 
   { id: "undo", keys: ["Ctrl+Z"], label: "撤销", scope: "global", group: "编辑" },
   { id: "redo", keys: ["Ctrl+Shift+Z", "Ctrl+Y"], label: "重做", scope: "global", group: "编辑" },

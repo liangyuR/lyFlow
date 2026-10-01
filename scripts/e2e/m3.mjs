@@ -1012,6 +1012,16 @@ async function suiteEditing(cdp, report) {
     `);
     report.ok("水平拖动改了数值", after.value !== 30000, `pointCount=${after.value}`);
     report.eq("整段拖动只记一条撤销", after.past - undoBefore, 1);
+
+    // 数字框里打了字、没失焦就按 F5：先提交再跑（以前跑的是打字之前的值 —— 数字框失焦才提交）
+    await cdp.eval(`document.querySelector('[data-testid="param-drag-pointCount"]').focus(); return true;`);
+    await pressKey(cdp, "a", 65, ["ctrl"]);
+    await cdp.send("Input.insertText", { text: "4321" });
+    const ranTyped = await runAndWait(cdp, () => pressF5(cdp));
+    report.eq("数字框里打了字没失焦就按 F5：跑的是新值，焦点还在框里",
+      { count: ranTyped.nodes[ids.gen]?.elementCount ?? null, focused: await cdp.eval(`return document.activeElement?.dataset?.testid ?? null;`) },
+      { count: 4321, focused: "param-drag-pointCount" });
+    await cdp.eval(`document.activeElement?.blur(); return true;`);
   } else {
     report.fail("找不到可拖动的数字框", "[data-testid=param-drag-pointCount]");
   }
@@ -1283,6 +1293,19 @@ async function suitePanels(cdp, report, ws) {
   report.ok("备份比正文新时被认出来", status.exists && status.newer, JSON.stringify(status));
   await cdp.eval(`await window.__lyflow.transport.discardBackup(${lit(graphPath)}); return true;`);
   report.ok("丢弃备份后文件没了", !fs.existsSync(`${graphPath}~`));
+
+  // 参数框里打了字、没失焦就按 Ctrl+S：先提交再存（以前 Ctrl+S 在输入框里不响应，打的字也没进文件）
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}], []); return true;`);
+  await sleep(250);
+  await cdp.eval(`document.querySelector('[data-testid="param-drag-pointCount"]').focus(); return true;`);
+  await pressKey(cdp, "a", 65, ["ctrl"]);
+  await cdp.send("Input.insertText", { text: "2468" });
+  await pressCtrl(cdp, "s");
+  const savedCount = () => JSON.parse(fs.readFileSync(graphPath, "utf8")).nodes.find((n) => n.id === ids.gen)?.params?.pointCount ?? null;
+  for (let i = 0; i < 25 && savedCount() !== 2468; i += 1) await sleep(200);
+  report.eq("参数框里打了字没失焦就按 Ctrl+S：文件里是新值，图不算没存", { file: savedCount(), dirty: await cdp.eval(`return window.__lyflow.stores.graph.getState().dirty;`) },
+    { file: 2468, dirty: false });
+  await cdp.eval(`document.activeElement?.blur(); return true;`);
 
   // 窗口标题
   await cdp.eval(`
