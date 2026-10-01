@@ -66,6 +66,7 @@
 | MCP 工具、argv 拼装、CLI 解析（含逐行回调、请求取消时结束子进程：`cli.test.ts` 用 node 当假 CLI；客户端取消 `run_graph` 时后端那次运行跟着取消：`smoke.test.ts` 里 `test.stall` 睡 20 秒、几秒内收到 cancelled） | `packages/mcp/test/*`（`smoke.test.ts` 是唯一跑通 MCP → CLI 的） |
 | HTTP 传输、宿主嵌入（含用户片段、底图点云文件两个端点，图像端点的行切片） | `scripts/e2e/http.mjs` |
 | 外部 Rust/Tauri 宿主（`attach`、`lyflow_handler!`、`sceneId` 注入、工作区路径） | `bridge/tests/host.rs`（`MockRuntime` 跑真 IPC） |
+| 桌面壳：窗口标题、关窗口前问一句（有没存的改动才问、取消不关；判断经 devbridge 换掉原生对话框走一遍，监听装没装上、destroy 的权限另查）、主窗口放行剪贴板读取 | e2e `m3.mjs` 的 `suitePanels` 末尾；剪贴板读取在 `params_p1.mjs` 的 `suiteIncludeTopLevel` |
 
 ## 共用的夹具与辅助
 

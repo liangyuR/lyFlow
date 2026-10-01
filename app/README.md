@@ -4,9 +4,10 @@
 这里只剩把它装进一个桌面窗口所需要的东西（[ADR-0018](../docs/adr/0018-editor-as-package.md)）：
 
 ```
-src/main.tsx      入口：挑一个 Transport，装窗口桥与标题，渲染 <LyFlowEditor>
+src/main.tsx      入口：挑一个 Transport，装窗口桥、标题与关窗口前那一问，渲染 <LyFlowEditor>
 src/dialogs.ts    Tauri 的文件对话框，注入给编辑器
 src/title.ts      窗口标题 `文件名 *`
+src/closeGuard.ts 关窗口前问一句（有没存的改动时）；要 capabilities 里的 core:window:allow-destroy
 src/devbridge.ts  验收窗口桥（scripts/e2e 用）
 src/shell.css     页面级重置：html/body/#root 的高度与底色
 index.html        #root
@@ -29,7 +30,7 @@ const transport = inTauri() ? new TauriTransport() : new StaticTransport();
 
 打开、另存、放弃改动、恢复备份、参数里的路径选择、3D 导出 PNG ——
 这六件事要弹系统对话框，编辑器包不认识 `@tauri-apps/plugin-dialog`，
-由 `src/dialogs.ts` 实现 `EditorDialogs` 注入进去。
+由 `src/dialogs.ts` 实现 `EditorDialogs` 注入进去。关窗口前那一问不经编辑器：窗口是壳的，`src/closeGuard.ts` 直接读包里的脏标记。
 
 ## 验收
 

@@ -30,6 +30,8 @@ import {
   type Transport,
 } from "@lyflow/editor";
 
+import { closeGuard, shouldClose } from "./closeGuard";
+
 interface DevBridge {
   version: string;
   transport: Transport;
@@ -55,6 +57,12 @@ interface DevBridge {
     /** 立刻写一次 30 s 自动备份里的那份配方集合 / 从它恢复（界面上恢复要经宿主的确认对话框）。 */
     autosave(): Promise<void>;
     restoreAutosave(): Promise<boolean>;
+  };
+  /** 壳自己的东西。关窗口前那一问（closeGuard.ts）：装上了没有；换掉原生对话框（脚本点不了）
+   *  直接走一遍「要不要关」，`answer` 是对话框里点了哪个。 */
+  shell: {
+    closeGuardInstalled(): boolean;
+    shouldClose(answer: boolean): Promise<{ asked: boolean; close: boolean }>;
   };
   /** 立刻编译一次，不等 debounce。验收脚本不想为 150ms 睡一觉。 */
   plan(): Promise<void>;
@@ -122,6 +130,17 @@ export function installDevBridge(transport: Transport): void {
       specDigest: () => specDigest(useGraphStore.getState().doc),
       autosave: () => writeRecipeAutosave(),
       restoreAutosave: () => restoreRecipeAutosave(),
+    },
+    shell: {
+      closeGuardInstalled: () => closeGuard.installed,
+      async shouldClose(answer) {
+        let asked = false;
+        const close = await shouldClose(async () => {
+          asked = true;
+          return answer;
+        });
+        return { asked, close };
+      },
     },
     async plan() {
       const g = useGraphStore.getState();

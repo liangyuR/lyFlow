@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 
 import { LyFlowEditor, TauriTransport, StaticTransport, type Transport } from "@lyflow/editor";
 
+import { installCloseGuard } from "./closeGuard";
 import { installDevBridge } from "./devbridge";
 import { tauriDialogs } from "./dialogs";
 import { installWindowTitle } from "./title";
@@ -22,6 +23,7 @@ const transport: Transport = inTauri() ? new TauriTransport() : new StaticTransp
 // 免得脚本连上来时 store 的订阅还没建立、错过最早的几次状态变迁。
 installDevBridge(transport);
 installWindowTitle();
+void installCloseGuard();
 
 ReactDOM.createRoot(root).render(
   <React.StrictMode>
