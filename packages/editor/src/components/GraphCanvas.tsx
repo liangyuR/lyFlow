@@ -89,7 +89,6 @@ const VIRTUALIZE_ABOVE = 80;
 // 按**引用**比较它跟踪的那批 props（`defaultEdgeOptions` 就在里面），内联对象每次渲染
 // 都是新引用，effect 于是每帧跑满一遍并往 store 里写一次、通知一遍所有订阅者。
 // 剩下几个虽然不在跟踪表里，但一样会白白透传给内层组件。
-const DELETE_KEYS = ["Delete"];
 const MULTI_SELECTION_KEYS = ["Shift", "Control"];
 /** 中键与右键平移。左键留给框选。 */
 const PAN_BUTTONS = [1, 2];
@@ -578,13 +577,14 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       setSnapping(true);
       useUiStore.getState().setHoverPaused(false);
       const graph = useGraphStore.getState();
-      graph.commit("移动节点");
+      // 插进连线并进这次拖动的那一条撤销：以前先记「移动节点」、再记一条插入，Ctrl+Z 一次节点还插在线上
       const selection = useUiStore.getState().selectedNodes;
-      if (selection.size <= 1 && dragged.current === node.id) {
-        if (insertOnHoveredEdge(node.id)) {
-          useUiStore.getState().showToast("已插入到连线中间");
-        }
-      }
+      const inserted =
+        selection.size <= 1 &&
+        dragged.current === node.id &&
+        graph.batch("插入到连线中间", () => insertOnHoveredEdge(node.id));
+      graph.commit(inserted ? "插入到连线中间" : "移动节点");
+      if (inserted) useUiStore.getState().showToast("已插入到连线中间");
       dragged.current = null;
     },
     [insertOnHoveredEdge],
@@ -793,10 +793,16 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     (edgeId: string, screen: { x: number; y: number }) => {
       const graph = useGraphStore.getState();
       const at = screenToFlowPosition(screen);
-      const id = graph.addNode(REROUTE_OP, { x: at.x - 40, y: at.y - 20 });
-      if (!id) return;
-      if (!graph.insertOnEdge(edgeId, id, "in", "out")) graph.deleteNodes([id]);
-      else useUiStore.getState().setSelection([id], []);
+      // 加节点与插进连线一条撤销（以前两条：Ctrl+Z 一次，连线回来了、reroute 还孤零零地留着）
+      const id = graph.batch("插入 Reroute", (cancel) => {
+        const added = graph.addNode(REROUTE_OP, { x: at.x - 40, y: at.y - 20 });
+        if (added && !graph.insertOnEdge(edgeId, added, "in", "out")) {
+          cancel();
+          return null;
+        }
+        return added;
+      });
+      if (id) useUiStore.getState().setSelection([id], []);
     },
     [screenToFlowPosition],
   );
@@ -1000,9 +1006,11 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         // 大图只画视野里的节点（§4）。小图不开：开了之后平移会有一帧空窗。
         onlyRenderVisibleElements={nodes.length > VIRTUALIZE_ABOVE}
         // zoomOnDoubleClick 必须关：d3-zoom 会 stopImmediatePropagation 把双击拦死。
-        // deleteKeyCode 不含 Backspace：输入框里退格却删掉节点是经典事故（app/README.md）。
+        // 删除只走键表（useShortcuts 的 delete，Backspace 不删：输入框里退格却删掉节点是经典事故，app/README.md）。
+        // React Flow 自己的 deleteKeyCode 关掉：它不管编辑器的对话框开没开（对话框开着、焦点不在它里面时按 Delete，
+        // 后面选中的节点就没了），删节点与断边也各记一条撤销
         zoomOnDoubleClick={false}
-        deleteKeyCode={DELETE_KEYS}
+        deleteKeyCode={null}
         multiSelectionKeyCode={MULTI_SELECTION_KEYS}
         selectionKeyCode={null}
         panOnDrag={PAN_BUTTONS}

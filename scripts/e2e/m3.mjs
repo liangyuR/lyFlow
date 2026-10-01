@@ -294,6 +294,7 @@ async function suiteBypassReroute(cdp, report) {
     `.react-flow__edge[data-id="${edgeId}"] .react-flow__edge-interaction`,
   );
   mustOk(Boolean(point), "拿到了连线中点", JSON.stringify(point));
+  const pastBeforeReroute = await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
   const menu = await cdp.eval(`
     const el = document.elementFromPoint(${point.x}, ${point.y});
     if (!el) return 'no-element';
@@ -332,6 +333,19 @@ async function suiteBypassReroute(cdp, report) {
     );
     report.eq("reroute 的端口颜色随源类型变化", color, source);
   }
+
+  // 加 reroute 与插进连线一条撤销：以前两条，Ctrl+Z 一次连线回来了、reroute 还孤零零地留着
+  await pressCtrl(cdp, "z");
+  await sleep(200);
+  const undoneReroute = await cdp.eval(`
+    const d = window.__lyflow.snapshot().doc;
+    return { reroutes: d.nodes.filter((n) => n.op === 'util.reroute').length, edge: d.edges.some((e) => e.id === ${lit(edgeId)}),
+             past: window.__lyflow.stores.graph.getState().past.length };
+  `);
+  report.eq("Ctrl+Z 一次：插进去的 reroute 没了、原来那条边回来，撤销栈回到插入之前", undoneReroute,
+    { reroutes: 1, edge: true, past: pastBeforeReroute });
+  await pressCtrl(cdp, "y");
+  await sleep(200);
 
   // 接不兼容的类型要被拒
   const verdict = await cdp.eval(`
@@ -736,6 +750,8 @@ async function suiteInsertOnEdge(cdp, report) {
     report.fail("拿不到拖动的起止点", "");
     return;
   }
+  const freeAt = await cdp.eval(`return window.__lyflow.snapshot().doc.nodes.find((n) => n.id === ${lit(ids.free)}).ui.position;`);
+  const pastBeforeDrag = await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
   await dragMouse(cdp, plan.grab, plan.drop, { steps: 20 });
   await sleep(400);
 
@@ -750,6 +766,16 @@ async function suiteInsertOnEdge(cdp, report) {
     !edges.some((e) => e.from.node === ids.gen && e.to.node === ids.crop),
     JSON.stringify(edges),
   );
+  // 拖动与插入一条撤销：以前先记「移动节点」再记一条插入，Ctrl+Z 一次节点还插在线上
+  await pressCtrl(cdp, "z");
+  await sleep(200);
+  const back = await cdp.eval(`
+    const d = window.__lyflow.snapshot().doc;
+    return { edges: d.edges.map((e) => e.from.node + '>' + e.to.node), at: d.nodes.find((n) => n.id === ${lit(ids.free)}).ui.position,
+             past: window.__lyflow.stores.graph.getState().past.length };
+  `);
+  report.eq("Ctrl+Z 一次：原来那条边回来、节点回到拖之前的地方，撤销栈回到拖之前", back,
+    { edges: [`${ids.gen}>${ids.crop}`], at: freeAt, past: pastBeforeDrag });
 }
 
 // ------------------------------------------------------------ P1 #18 搜索接上
@@ -772,6 +798,7 @@ async function suiteDropToSearch(cdp, report) {
     report.fail("找不到源端口", "");
     return;
   }
+  const pastBeforePick = await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
   await dragMouse(cdp, source, { x: source.x + 320, y: source.y + 160 }, { steps: 14 });
   await sleep(250);
   report.ok(
@@ -807,6 +834,12 @@ async function suiteDropToSearch(cdp, report) {
     doc.edges.length === 1 && doc.edges[0].from.node === ids.gen,
     JSON.stringify(doc.edges),
   );
+  // 加节点与接线一条撤销：以前两条，Ctrl+Z 一次线没了、节点还在
+  await pressCtrl(cdp, "z");
+  await sleep(200);
+  report.eq("Ctrl+Z 一次：新节点与那条线一起撤掉，撤销栈回到加之前",
+    await cdp.eval(`const d = window.__lyflow.snapshot().doc; return { nodes: d.nodes.length, edges: d.edges.length, past: window.__lyflow.stores.graph.getState().past.length };`),
+    { nodes: 1, edges: 0, past: pastBeforePick });
 
   // 再打开搜索面板（空查询）：刚用过的那个排在第一，标着「最近」；面板顶上也多了一组
   const added = doc.nodes.find((n) => n.id !== ids.gen)?.op;
@@ -1080,6 +1113,22 @@ async function suiteEditing(cdp, report) {
   await pressCtrl(cdp, "z");
   await sleep(150);
   report.eq("Ctrl+Z 一次两个都回去", { gen: await posOf(ids.gen), voxel: await posOf(ids.voxel) }, { gen: b0.gen, voxel: b0.voxel });
+
+  // 多选批量删除，真按 Delete（删除只走键表；框选把相连的边也选上了，以前断边、删节点记成两条）
+  const docCount = () => cdp.eval(`const d = window.__lyflow.stores.graph.getState().doc; return { nodes: d.nodes.length, edges: d.edges.length };`);
+  const beforeDel = { ...(await docCount()), past: await pastLen() };
+  await pressKey(cdp, "Delete", 46);
+  await sleep(200);
+  const del = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    return { gone: [${lit(ids.gen)}, ${lit(ids.voxel)}].every((id) => !g.doc.nodes.some((n) => n.id === id)),
+             edges: g.doc.edges.length, past: g.past.length, selected: window.__lyflow.stores.ui.getState().selectedNodes.size };
+  `);
+  report.ok("Delete：框选的节点连同相连的边一起删掉，只记一条撤销，选中清空",
+    del.gone && del.edges < beforeDel.edges && del.past - beforeDel.past === 1 && del.selected === 0, JSON.stringify({ beforeDel, del }));
+  await pressCtrl(cdp, "z");
+  await sleep(200);
+  report.eq("Ctrl+Z 一次都回来", await docCount(), { nodes: beforeDel.nodes, edges: beforeDel.edges });
   await pressEscape(cdp);
 
   // #12 复制粘贴走系统剪贴板（另一个窗口、重开之后也粘得进来）。系统剪贴板换成页面里的桩（stubClipboard）：

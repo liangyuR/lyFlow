@@ -28,6 +28,7 @@ import {
   pickRecipe,
   pressCtrl,
   pressF5,
+  pressKey,
   replan,
   revealInList as reveal,
   runAndWait,
@@ -218,7 +219,19 @@ async function suiteCreateSaveReopen(cdp, report, ws) {
   report.section("P3 验收 17：新建两个配方、各改几项、Ctrl+S → 两个配方文件 + index.json，图同时保存；重开后都还原");
   const { ids, file, dir } = await recipeGraph(cdp, ws, "车门缝隙 17");
 
-  await must("起名对话框：新建配方 A", newRecipeFromMenu(cdp, A));
+  // 对话框开着、焦点不在它里面时按 Delete：画布上选中的节点不能跟着没了。以前 React Flow 自己的
+  // deleteKeyCode 不管编辑器的对话框，后面选中的节点就被删了（快捷键那边对话框开着时一个都不响）
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([${lit(ids.voxel)}], []); return true;`);
+  await click(cdp, '[data-testid="recipe-toggle"]');
+  await click(cdp, '[data-testid="recipe-new"]');
+  await cdp.waitFor(`!!document.querySelector('[data-testid="modal"][data-kind="text"]')`, { what: "起名对话框" });
+  await blurActive(cdp);
+  await pressKey(cdp, "Delete", 46);
+  await sleep(150);
+  report.ok("起名对话框开着时按 Delete，画布上选中的节点还在",
+    await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.some((n) => n.id === ${lit(ids.voxel)});`));
+  await cdp.eval(`window.__lyflow.stores.ui.getState().clearSelection(); return true;`);
+  await must("起名对话框：新建配方 A", answerText(cdp, A));
   await openPanel(cdp, "nodes");
   // 在按节点页被绑定的行上打字：选着配方 → 写进配方（K6 ①）
   await must("A：leafSize 第一个分量改成 0.03", typeInto(cdp, rowSel(`${ids.voxel}.leafSize`), "0.03"));

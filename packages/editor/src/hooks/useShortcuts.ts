@@ -206,8 +206,17 @@ export function useShortcuts(
         case "delete": {
           if (ui.selectedNodes.size === 0 && ui.selectedEdges.size === 0) return;
           e.preventDefault();
-          if (ui.selectedEdges.size > 0) graph.disconnect([...ui.selectedEdges]);
-          if (ui.selectedNodes.size > 0) graph.deleteNodes([...ui.selectedNodes]);
+          const nodes = [...ui.selectedNodes];
+          const edges = [...ui.selectedEdges];
+          // 一条撤销：框选会把相连的边一起选上，以前先断边、再删节点记成两条，Ctrl+Z 一次只回来节点、边还断着
+          const label =
+            nodes.length > 0
+              ? nodes.length === 1 ? "删除节点" : `删除 ${nodes.length} 个节点`
+              : edges.length === 1 ? "断开连线" : `断开 ${edges.length} 条连线`;
+          graph.batch(label, () => {
+            if (edges.length > 0) graph.disconnect(edges);
+            if (nodes.length > 0) graph.deleteNodes(nodes);
+          });
           ui.clearSelection();
           return;
         }

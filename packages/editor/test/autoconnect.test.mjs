@@ -198,3 +198,43 @@ test("删节点（P0 #5）：连着它的边一并删掉，别的边不动；一
   useGraphStore.getState().undo();
   assert.deepEqual(edgesOf(), before);
 });
+
+test("batch：一个手势里的几个动作一条撤销；拖动的事务里并进那一条；cancel 撤回、不记", () => {
+  reset();
+  const g = () => useGraphStore.getState();
+  const a = addNodeWithAutoConnect("t.read", { x: 0, y: 0 }).nodeIds[0];
+  const b = addNodeWithAutoConnect("t.locate", { x: 200, y: 0 }).nodeIds[0];
+  const edge = doc().edges.find((e) => e.from.node === a && e.to.node === b).id;
+  const start = { doc: doc(), past: g().past.length };
+
+  // Delete 键删掉框选的节点与连线：断边、删节点以前记成两条
+  g().batch("删除节点", () => {
+    g().disconnect([edge]);
+    g().deleteNodes([b]);
+  });
+  assert.equal(g().past.length, start.past + 1);
+  assert.equal(g().past.at(-1).label, "删除节点");
+  g().undo();
+  assert.equal(doc(), start.doc, "一次撤销全回来");
+
+  // 拖到连线上松手：插入并进拖动的那一条，由拖动的 commit 记
+  g().begin();
+  g().moveNodes([{ id: b, position: { x: 260, y: 40 } }]);
+  g().batch("插入到连线中间", () => g().addNode("t.reroute", { x: 0, y: 100 }));
+  assert.equal(g().past.length, start.past, "拖动没放手之前一条都不记");
+  g().commit("插入到连线中间");
+  assert.equal(g().past.length, start.past + 1);
+  g().undo();
+  assert.equal(doc(), start.doc);
+
+  // cancel：fn 里做的全撤回，不记撤销，也不留着事务
+  const id = g().batch("插入 Reroute", (cancel) => {
+    const added = g().addNode("t.reroute", { x: 0, y: 0 });
+    cancel();
+    return added;
+  });
+  assert.ok(id, "返回 fn 的结果");
+  assert.equal(doc(), start.doc);
+  assert.equal(g().past.length, start.past);
+  assert.equal(g().pendingSnapshot, null);
+});

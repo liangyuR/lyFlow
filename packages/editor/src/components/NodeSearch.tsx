@@ -70,22 +70,27 @@ export function NodeSearch() {
       return;
     }
     const graph = useGraphStore.getState();
-    const nodeId = graph.addNode(opId, popup.flow);
-    if (nodeId) {
-      useUiStore.getState().setSelection([nodeId], []);
-      useUiStore.getState().noteOperatorUsed(opId);
+    const pendingFrom = popup.pendingFrom;
+    const op = useManifestStore.getState().operatorsById.get(opId);
+    // 加节点与接线一条撤销（以前两条：Ctrl+Z 一次，线没了、节点还在）
+    const nodeId = graph.batch(op ? `添加 ${op.label}` : "添加节点", () => {
+      const id = graph.addNode(opId, popup.flow);
       // 从端口拖出、中途松手弹出的搜索面板：选中后自动接上。
       // 接不上（类型不匹配）不算错误 —— 节点已经落下了，用户可以自己改。
-      if (popup.pendingFrom) {
-        const op = useManifestStore.getState().operatorsById.get(opId);
+      if (id) {
         // 拖的是输入端时新节点在上游，端口方向要反过来（P1 #18/#19）
         const fromInput = popup.pendingSide === "input";
         const port = fromInput ? op?.outputs[0] : op?.inputs[0];
         if (port) {
-          if (fromInput) graph.connect({ node: nodeId, port: port.name }, popup.pendingFrom);
-          else graph.connect(popup.pendingFrom, { node: nodeId, port: port.name });
+          if (fromInput) graph.connect({ node: id, port: port.name }, pendingFrom);
+          else graph.connect(pendingFrom, { node: id, port: port.name });
         }
       }
+      return id;
+    });
+    if (nodeId) {
+      useUiStore.getState().setSelection([nodeId], []);
+      useUiStore.getState().noteOperatorUsed(opId);
     }
     closeSearch();
   };

@@ -326,6 +326,10 @@ interface GraphState {
   /** 拖动/滑块这类连续操作：开始时拍一张，结束时整体记一条撤销。 */
   begin(): void;
   commit(label: string): void;
+  /** 一个手势里的几个动作记成一条撤销（删掉选中的节点与连线、加节点再接上……）：fn 里照常调各个动作。
+   *  外面已经有事务（拖动中、外层的 batch）就并进那一条，由开它的那一方记；fn 里调 cancel() 撤回 fn
+   *  做的全部改动、不记撤销。以前这些手势记成好几条，Ctrl+Z 一次只撤回一半。 */
+  batch<T>(label: string, fn: (cancel: () => void) => T): T;
 
   // -- 语义化动作 ---------------------------------------------------------
   addNode(opId: string, position: { x: number; y: number }): string | null;
@@ -448,8 +452,15 @@ interface GraphState {
 type RecipeStep = (recipes: RecipeSet, doc: GraphDoc) => RecipeSet;
 
 export const useGraphStore = create<GraphState>((set, get) => {
+  /** 正在跑的 batch 有几层。> 0 时 transact 只改不记，由 batch 合成一条。 */
+  let batchDepth = 0;
+
   /** 记一条撤销，然后应用变更。用于单步操作。recipes 给了就在同一步里改配方集合（K7）。 */
   const transact = (label: string, recipe: (draft: GraphDoc) => void, recipes?: RecipeStep) => {
+    if (batchDepth > 0) {
+      mutate(recipe, recipes);
+      return;
+    }
     const { doc, past } = get();
     const before = recipeSet();
     const next = produce(doc, recipe);
@@ -536,6 +547,27 @@ export const useGraphStore = create<GraphState>((set, get) => {
         pendingRecipes: null,
         dirty: doc !== get().savedDoc,
       });
+    },
+
+    batch(label, fn) {
+      const opened = get().pendingSnapshot === null;
+      if (opened) get().begin();
+      const start = { doc: get().doc, recipes: recipeSet() };
+      let cancelled = false;
+      batchDepth += 1;
+      try {
+        return fn(() => {
+          cancelled = true;
+        });
+      } finally {
+        batchDepth -= 1;
+        if (cancelled) {
+          set({ doc: start.doc, dirty: start.doc !== get().savedDoc });
+          applyRecipeSet(start.recipes);
+        }
+        // 没撤回、也没改动时 commit 自己不记
+        if (opened) get().commit(label);
+      }
     },
 
     addNode(opId, position) {
