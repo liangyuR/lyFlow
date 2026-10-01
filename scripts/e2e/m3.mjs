@@ -1494,6 +1494,27 @@ async function suitePanels(cdp, report, ws) {
   `);
   report.ok("壳有 destroy 窗口的权限（core:window:allow-destroy）", !/not allowed|denied|permission/i.test(destroyCheck), destroyCheck);
 
+  // 桌面壳挡掉 WebView2 自己的刷新键（app/src/browserGuard.ts）：以前 Ctrl+R、搜索面板 / 对话框开着时的 F5 都会把
+  // 整个 app 重新载入（真按键探过：页面里的标记没了），没存的图、撤销栈、运行结果全没了，关窗口前那一问也拦不住
+  await cdp.eval(`window.__lyReloadMark = 7; return true;`);
+  await pressKey(cdp, "r", 82, ["ctrl"]);
+  await sleep(1200);
+  await cdp.eval(`window.__lyflow.stores.ui.getState().openSearch({ screen: { x: 400, y: 300 }, flow: { x: 0, y: 0 } }); return true;`);
+  await sleep(150);
+  await pressF5(cdp);
+  await sleep(1200);
+  report.eq("Ctrl+R、搜索面板开着时的 F5：页面没有重新载入", await cdp.eval(`return window.__lyReloadMark ?? null;`), 7);
+  await pressEscape(cdp);
+  const nativeMenu = await cdp.eval(`
+    const fire = (el) => {
+      const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+      el.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    };
+    return { toolbar: fire(document.querySelector('.toolbar')), input: fire(document.querySelector('[data-testid="doc-name"]')) };
+  `);
+  report.eq("右键：工具栏上不弹浏览器自己的菜单（刷新、另存为），输入框里照旧有剪切 / 复制 / 粘贴", nativeMenu, { toolbar: true, input: false });
+
   // 没存过盘的图也定时备份（lib/autosave.ts；逻辑的单测在 packages/editor/test/autosave.test.mjs）：
   // 这里验真的 app data 位置与真的写盘。用户自己的那份已经被 harness 挪开了，收尾时挪回去
   await newDoc(cdp);
