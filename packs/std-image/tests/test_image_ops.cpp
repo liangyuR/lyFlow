@@ -247,6 +247,9 @@ TEST_CASE("image.find_circle：画一个圆找回来（像素坐标、unit = px 
   CHECK(circle->radius == doctest::Approx(40).epsilon(0.08));
   CHECK(circle->unit == Unit2D::Pixel);
   CHECK(Json::parse(c.outputs["circle"].valueJson())["unit"] == "px");
+  // 预览把半径缩小之后可能不足 1（4 倍预览里的 3 → 0.75）：截断成 0 对 OpenCV 是「不限」，会找回这个半径 40 的圆。
+  // 四舍五入、正数至少 1 —— 半径上限 1 找不到它（review 第二轮）
+  CHECK(c.run("image.find_circle", {{"maxRadius", Value::number(0.75)}}).code == "circle_not_found");
 
   c.inputs["image"] = Data::image(Image::allocate(64, 64, 1, PixelDepth::U8));
   const Status none = c.run("image.find_circle");
@@ -573,11 +576,17 @@ TEST_CASE("大图预览（ADR-0028）：源头缩一级，找圆与区域统计�
        test::N{"bin", "image.threshold", Json::object()},
        test::N{"stats", "image.region_stats", Json::object()},
        test::N{"fit", "image.resize", Json{{"mode", "size"}, {"width", 640}, {"height", 480}}},
-       test::N{"tensor", "image.to_tensor", Json::object()}},
+       test::N{"tensor", "image.to_tensor", Json::object()},
+       // 动态尺寸推理那一类：掩膜 → 张量 →（模型）→ 张量 → 图像，再与原图一起进区域统计
+       test::N{"maskT", "image.to_tensor", Json::object()},
+       test::N{"back", "tensor.to_image", Json::object()},
+       test::N{"stats2", "image.region_stats", Json::object()}},
       {test::E{"load.image", "blur.image"}, test::E{"blur.image", "circle.image"},
        test::E{"blur.image", "bin.image"}, test::E{"load.image", "stats.image"},
        test::E{"bin.mask", "stats.mask"}, test::E{"load.image", "fit.image"},
-       test::E{"fit.image", "tensor.image"}});
+       test::E{"fit.image", "tensor.image"}, test::E{"bin.mask", "maskT.image"},
+       test::E{"maskT.tensor", "back.tensor"}, test::E{"load.image", "stats2.image"},
+       test::E{"back.image", "stats2.mask"}});
   const auto run = [&](exec::RunMode mode) {
     exec::ResultStore::instance().clear();
     exec::RunOptions options;
@@ -633,6 +642,11 @@ TEST_CASE("大图预览（ADR-0028）：源头缩一级，找圆与区域统计�
   CHECK(fa == doctest::Approx(3.14159265 * 500 * 500).epsilon(0.01));
   CHECK(pa == doctest::Approx(fa).epsilon(0.02));
   CHECK(value(preview, "stats", "area")["unit"] == "px²");
+
+  // 经过张量转回来的掩膜也记着比例（review 第二轮）：修前它被当成原图比例、又缩一遍，与原图「不一样大」
+  CHECK(value(preview, "back", "image")["scale"] == 2);
+  REQUIRE_MESSAGE(preview.finalState("stats2") == "done", preview.nodeEvent("stats2", "error").dump());
+  CHECK(value(preview, "stats2", "area")["value"].get<double>() == doctest::Approx(fa).epsilon(0.02));
 
   // resize 到指定宽高是绝对尺寸：预览里照旧 640 × 480，推理的输入形状不变
   CHECK(value(preview, "tensor", "tensor")["shape"] == value(full, "tensor", "tensor")["shape"]);

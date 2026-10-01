@@ -200,9 +200,14 @@ fn settle(inner: &Arc<Mutex<State>>, st: &mut State, run: &Run) -> Option<(Notif
         // 被 stop_active / drop_all 拿走的：它们自己 join，这里什么都不用做
         return None;
     }
-    // 被抢占的不进 finished 槽：它的结果是残缺的，留着只会让 3D 视图显示半张图。
     st.draining = None;
-    let Pending { launch, notify, .. } = st.pending.take()?;
+    let Some(Pending { launch, notify, .. }) = st.pending.take() else {
+        // 排队的那个已经被取消、没有人顶替它：界面上留着的正是这一次的结果（前端的 resultRunId 还指着它，
+        // 节点表也是它的），放掉的话那些「完成」的节点就取不到输出了（review 第二轮）
+        st.finished = Some(Arc::clone(run));
+        return None;
+    };
+    // 有人顶替：被抢占的不进 finished 槽 —— 它的结果是残缺的，新的那次一开跑界面就跟过去了
     match launch() {
         Ok(next) => {
             activate(inner, st, next);
@@ -766,6 +771,11 @@ mod tests {
         // a 被抢占后在 draining 里，不在 active 里：要等的是全部收场（review 修正：修前等的条件一开始就成立）
         eventually("a 排干", || manager.is_idle());
         assert_eq!(s.launched(), ["a"], "取消掉的排队请求不该再开跑");
+        // 没有人顶替它：界面上留着的就是 a 的结果，a 进 finished 而不是被放掉（review 第二轮）
+        assert_eq!(
+            lock(&manager.inner).finished.as_ref().map(|r| r.run_id().to_string()).as_deref(),
+            Some("a")
+        );
     }
 
     #[test]
@@ -784,16 +794,13 @@ mod tests {
                 stopped.store(true, std::sync::atomic::Ordering::SeqCst);
             })
         };
-        std::thread::sleep(Duration::from_millis(50));
+        // 先等到排队的那个收场（它在等之前发），再确认 stop_active 还卡着 —— 不靠 sleep 赌线程已经跑到了
+        eventually("排队的那个先收场", || !s.notified().is_empty());
         assert!(
             !stopped.load(std::sync::atomic::Ordering::SeqCst),
             "重扫库目录要等被抢占的那个真的退出（它还握着算子描述）"
         );
-        assert_eq!(
-            s.notified(),
-            [("b".to_string(), "cancelled", None)],
-            "排队的那个在等之前就收场，界面不用陪着等"
-        );
+        assert_eq!(s.notified(), [("b".to_string(), "cancelled", None)]);
         s.run("a").finish();
         stopper.join().unwrap();
         assert_eq!(s.launched(), ["a"]);
@@ -815,7 +822,7 @@ mod tests {
             let manager = manager.clone();
             std::thread::spawn(move || manager.drop_all())
         };
-        std::thread::sleep(Duration::from_millis(50));
+        eventually("排队的那个先收场", || !s.notified().is_empty());
         assert!(!dropper.is_finished(), "drop_all 要等停不下来的那个退出（它握着旧 DLL）");
         assert_eq!(s.notified(), [("b".to_string(), "cancelled", None)]);
         s.run("a").finish();

@@ -20,7 +20,7 @@ constexpr std::size_t kPreviewMaxPixels = std::size_t{1} << 22;
 /// 把 img 缩到不超过 maxPixels 要的最小级别（缩小 2^level 倍）。不用缩是 0。
 unsigned previewLevel(const Image& img, std::size_t maxPixels);
 
-/// 节点的 s：它的图像输入里最大的 scale；没有图像输入是 1。
+/// 节点的 s：它的图像（与从图像转来的张量）输入里最大的 scale；都没有是 1。
 std::int32_t inputScale(const std::unordered_map<std::string, Data>& inputs);
 
 /// 像素参数 ÷ s（E6、E8）：unit = px 且不是 absolute 的那些。浮点直接除；整数四舍五入，
@@ -38,7 +38,7 @@ Data scalePixelData(const Data& d, double factor);
 /// 比例比 s 小的图像（例如 resize 到原图尺寸的掩膜，scale 1）缩到 s，几张输入图才一样大。
 Data toNodeScale(const Data& d, std::int32_t s);
 
-/// compute 之后的那一半：像素几何与量测 × s；scale 还是 1 的输出图像设成 s ——
+/// compute 之后的那一半：像素几何与量测 × s；scale 还是 1 的输出图像与张量设成 s ——
 /// 有生效的绝对尺寸参数时保持 1（resize 到指定宽高的图与输入不在一个比例上）。
 void scaleOutputs(std::unordered_map<std::string, Data>& outputs, std::int32_t s,
                   bool absoluteSize);

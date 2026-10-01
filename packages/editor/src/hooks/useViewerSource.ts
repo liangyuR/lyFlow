@@ -66,7 +66,8 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: Vie
     () => (path && nodeId ? levelOf(doc, path).nodes.find((n) => n.id === nodeId) : undefined),
     [doc, path, nodeId],
   );
-  const runId = useExecutionStore((s) => s.runId);
+  // 按节点表实际反映的那一次运行取数：带 targets 的运行还在排队时，它的 runId 在 core 里什么都取不到（ADR-0027）
+  const runId = useExecutionStore((s) => s.resultRunId);
   const runStatus = useExecutionStore((s) => s.runStatus);
   const isPreview = useExecutionStore((s) => s.preview);
   const previewMaxPoints = useUiStore((s) => s.previewMaxPoints);

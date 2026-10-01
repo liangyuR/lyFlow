@@ -499,6 +499,12 @@ std::string Data::valueJson() const {
   return valueJsonUncached();
 }
 
+Data Data::withTensorScale(std::int32_t s) const {
+  Data d = *this;
+  d.tensorScale_ = s;
+  return d;
+}
+
 std::string Data::valueJsonUncached() const {
   // 点云与 Indices 走二进制通道（ADR-0006），这里给空串。
   if (kind_ == Kind::None || kind_ == Kind::PointCloud || kind_ == Kind::Indices) return {};
@@ -573,6 +579,7 @@ std::string Data::valueJsonUncached() const {
       for (std::int64_t d : t.shape) w.value(d);
       w.endArray();
       w.field("count", static_cast<std::int64_t>(t.data.size()));
+      if (tensorScale_ > 1) w.field("scale", static_cast<std::int64_t>(tensorScale_));
       // 张量本身不进 IPC，Inspector 只看得到这三个数（T7）
       double lo = 0, hi = 0, sum = 0;
       std::size_t finite = 0;

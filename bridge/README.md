@@ -148,15 +148,17 @@ D3：同一时刻一个活跃 run，**新 run 抢占旧 run**。抢占**不阻�
 - 有 run 在算时再来一个：取消它、挪进 `draining`，新请求进 `pending`，`run_graph` 立即返回新 runId；
 - `draining` 退出之前再来的请求顶掉 `pending` —— 只留最新一个，**同一时刻最多一个 run 在算**；
 - 每个 run 的收尾线程 join 完看自己是谁：`active` 进 `finished`，`draining` 清掉后启动 `pending`；
+  `pending` 已经作废、没有新的顶上来时，`draining` 也进 `finished` —— 编辑器的节点表还是它的结果；
 - `cancel` 命中排队中的请求时直接作废，补发一条 `run_finished(cancelled)`（seq 0）—— 前端拿到 runId 就进了「运行中」，等的就是它；
   被新请求顶掉的不补发（前端只认最后发起的那次）。排队的请求启动失败（只在内存不足时）补发 `run_finished(error)`；
 - `stop_active`（重扫库目录）与 `drop_all`（热重载）仍然等 `active` 与 `draining` 都退出：此后不能有 run 握着旧的算子描述或旧 DLL。
 
 前端拿到新 runId 时，被抢占的那个可能还没发出它的 `run_finished(cancelled)`：前端按 runId 分流事件，
-对不上的当孤儿暂存、下一次 `beginRun` 清掉，晚到的无害。
+对不上的当孤儿暂存、下一次 `beginRun` 清掉，晚到的无害。取数则按执行 store 的 `resultRunId`（节点表反映的那一次）：
+带 targets 的运行等它的 `run_started` 才换 —— 排队时 core 里还没有它的任何结果。
 
 内存上界也在这里：最多同时持有**两份** run 的结果（在算的 —— `active` 或 `draining` —— 加上一次完成的，
-用户可能正在 3D 视图里看它）。被抢占的那个退出后就被 drop，
+用户可能正在 3D 视图里看它）。被抢占的那个退出后，有排队的接着开跑就被 drop（没有的话它留作上一次完成的那份），
 `lyflow_run_free` 顺手把它在结果仓里的东西全删掉。
 
 `RunHandle` 的 `Drop` 严格按 cancel → join → free 的顺序走，

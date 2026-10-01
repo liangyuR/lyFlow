@@ -816,34 +816,44 @@ async function suiteImageMainView(cdp, report) {
 async function suiteImagePreviewScale(cdp, report) {
   report.section("大图预览（ADR-0028）：预览运行把 8.4 MP 的图缩到 1/2，主预览角标「预览 1/2」、按原图尺寸摆放，像素框与正式结果画在同一处");
   await newDoc(cdp);
+  // crop 之后再接一个 blur：它的输出（2000×1000）比源头小，正式运行的适配级别是 0、预览时是缩小 1/2 的那张
   const ids = await buildGraph(
     cdp,
     [
       { key: "img", op: "test.make_image", params: { width: 4100, height: 2050, channels: 1 } },
       { key: "crop", op: "image.crop", params: { roi: [1000, 500, 3000, 1500] } },
+      { key: "blur", op: "image.blur" },
     ],
-    [{ from: ["img", "image"], to: ["crop", "image"] }],
+    [
+      { from: ["img", "image"], to: ["crop", "image"] },
+      { from: ["crop", "image"], to: ["blur", "image"] },
+    ],
   );
   const full = await runAndWait(cdp, () => pressF5(cdp));
   mustOk(full.status === "ok", "大图链路跑通", JSON.stringify(full.nodes));
   await select(cdp, ids.crop);
 
-  /** 等主预览画的是 pixelScale = want 的那张图、框在画面上，读出角标、尺寸与框的屏幕位置。 */
-  const look = async (want) => {
+  /** 等主预览画的是 pixelScale = want（且一个显示像素 = block 个原图像素）的那张图，读出角标、尺寸、
+   *  画布的屏幕尺寸与位置；withBox 时还要框在画面上、读出框的屏幕位置。 */
+  const look = async (want, { block = null, withBox = true } = {}) => {
     for (let i = 0; i < 100; i += 1) {
       const got = await cdp.eval(`
         const p = document.querySelector('[data-testid="viewer-image-pane"]');
         const img = p ? p.querySelector('[data-testid="viewer-image"]') : null;
         const box = p ? p.querySelector('.roi-box') : null;
-        if (!img || img.getAttribute('data-pixel-scale') !== ${lit(String(want))} || Number(img.getAttribute('data-w')) === 0 || !box) return null;
+        if (!img || img.getAttribute('data-pixel-scale') !== ${lit(String(want))} || Number(img.getAttribute('data-w')) === 0) return null;
+        if (${withBox} && !box) return null;
+        if (${lit(block === null ? "" : String(block))} !== '' && img.getAttribute('data-block') !== ${lit(String(block))}) return null;
         if (img.getAttribute('data-stale') === '1') return null;
-        const r = box.getBoundingClientRect();
+        const r = box ? box.getBoundingClientRect() : null;
         const c = p.querySelector('[data-testid="viewer-image-canvas"]');
         return {
           badge: p.querySelector('[data-testid="viewer-image-preview-scale"]')?.textContent ?? null,
           fullW: Number(img.getAttribute('data-full-w')),
+          block: Number(img.getAttribute('data-block')),
           canvasW: c ? Math.round(parseFloat(c.style.width)) : null,
-          box: [r.left, r.top, r.width, r.height].map((v) => Math.round(v)),
+          at: c ? c.style.transform : null,
+          box: r ? [r.left, r.top, r.width, r.height].map((v) => Math.round(v)) : null,
         };
       `);
       if (got) return got;
@@ -851,35 +861,81 @@ async function suiteImagePreviewScale(cdp, report) {
     }
     return null;
   };
+  const drift = (a, b) => (a?.box && b?.box ? Math.max(...a.box.map((v, k) => Math.abs(v - b.box[k]))) : Infinity);
+  const wheelIn = async () => {
+    const at = await cdp.eval(`
+      const r = document.querySelector('[data-testid="viewer-image-pane"] .peek-image__stage').getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    `);
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: at.x, y: at.y, deltaX: 0, deltaY: -120 });
+    await sleep(150);
+  };
+  const setLevel = (value) => cdp.eval(`
+    const sel = document.querySelector('[data-testid="viewer-image-level"]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+    setter.call(sel, ${lit(value)});
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  `);
+  /** 与拖参数时同一条路（lib/preview.ts）：mode = preview、只跑到 node。 */
+  const previewTo = (node) => runAndWait(cdp, () =>
+    cdp.eval(`void window.__lyflow.run({ targets: [${lit(node)}], preview: true }); return true;`),
+  );
 
   const fitted = await look(1);
   mustOk(fitted !== null && fitted.badge === null, "正式结果：没有预览角标、框在画面上", JSON.stringify(fitted));
   // 先放大一格：视角要在预览 ↔ 正式之间保持（review 修正：修前取图拿新 runId 配旧尺寸，切换时重新适配、放大丢了）
-  const stage = await cdp.eval(`
-    const r = document.querySelector('[data-testid="viewer-image-pane"] .peek-image__stage').getBoundingClientRect();
-    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
-  `);
-  await cdp.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: stage.x, y: stage.y, deltaX: 0, deltaY: -120 });
-  await sleep(150);
+  await wheelIn();
   const before = await look(1);
   mustOk(before !== null && before.canvasW > fitted.canvasW, "滚轮放大了一格", JSON.stringify({ fitted, before }));
 
-  // 与拖参数时同一条路（lib/preview.ts）：mode = preview、只跑到选中的节点
-  const pv = await runAndWait(cdp, () =>
-    cdp.eval(`void window.__lyflow.run({ targets: [${lit(ids.crop)}], preview: true }); return true;`),
-  );
+  const pv = await previewTo(ids.crop);
   const during = await look(2);
   report.ok("预览运行：主预览画的是缩小 1/2 的图（2050 宽），角标「预览 1/2」",
     pv.status === "ok" && during?.fullW === 2050 && during.badge === "预览 1/2", JSON.stringify({ status: pv.status, during }));
   // 再跑一次正式运行（松手后补的那一次）：回到原图，视角与框还在原处
   const back = await runAndWait(cdp, () => pressF5(cdp));
   const after = await look(1);
-  const drift = (a, b) => (a && b ? Math.max(...a.box.map((v, k) => Math.abs(v - b.box[k]))) : Infinity);
   const d1 = drift(during, before);
   const d2 = drift(after, before);
   report.ok(`像素框与放大后的视角在预览与正式之间都保持（框最大偏差 ${d1} / ${d2} px ≤ 1，画布宽度不变 = 没有重新适配）`,
     back.status === "ok" && d1 <= 1 && d2 <= 1 && during.canvasW === before.canvasW && after.canvasW === before.canvasW,
     JSON.stringify({ before, during, after }));
+
+  // 手选的级别按「一个显示像素是几个原图像素」记（review 第二轮）：修前「原图」= 这张图自己的第 0 级，
+  // 预览时是块 2、正式时是块 1，两边认不成同一张图 —— 每次切换都闪「正在取图像」、重新适配
+  await setLevel("0");
+  const orig = await look(1, { block: 1 });
+  report.ok("手选「原图」：取的是块 1（4100 宽）、视角不动（画布宽度与框都没变）",
+    orig !== null && orig.canvasW === after.canvasW && drift(orig, after) <= 1, JSON.stringify({ after, orig }));
+  const pv2 = await previewTo(ids.crop);
+  const during2 = await look(2, { block: 2 });
+  const back2 = await runAndWait(cdp, () => pressF5(cdp));
+  const after2 = await look(1, { block: 1 });
+  const d3 = drift(during2, orig);
+  const d4 = drift(after2, orig);
+  report.ok(`选着「原图」：预览时先显示 1/2 那一级、正式结果回到原图，框最大偏差 ${d3} / ${d4} px ≤ 1、画布宽度不变`,
+    pv2.status === "ok" && back2.status === "ok" && during2?.badge === "预览 1/2" && d3 <= 1 && d4 <= 1 &&
+      during2.canvasW === orig.canvasW && after2.canvasW === orig.canvasW,
+    JSON.stringify({ orig, during2, after2 }));
+
+  // 比源头小的输出：blur 的 2000×1000 正式运行适配级别 0（块 1），预览时是 1000×500（块 2）
+  await setLevel("auto");
+  await select(cdp, ids.blur);
+  const small = await look(1, { block: 1, withBox: false });
+  mustOk(small !== null && small.fullW === 2000, "选中 blur：主预览画它的输出（2000 宽、块 1）", JSON.stringify(small));
+  await wheelIn();
+  const zoomed = await look(1, { block: 1, withBox: false });
+  mustOk(zoomed !== null && zoomed.canvasW > small.canvasW, "滚轮放大了一格", JSON.stringify({ small, zoomed }));
+  const pv3 = await previewTo(ids.blur);
+  const during3 = await look(2, { block: 2, withBox: false });
+  const back3 = await runAndWait(cdp, () => pressF5(cdp));
+  const after3 = await look(1, { block: 1, withBox: false });
+  report.ok("比源头小的输出（2000×1000）：预览 1/2 ↔ 正式之间画布的尺寸与位置都不变（不重新适配）",
+    pv3.status === "ok" && back3.status === "ok" && during3?.fullW === 1000 &&
+      [during3.canvasW, during3.at] + "" === [zoomed.canvasW, zoomed.at] + "" &&
+      [after3?.canvasW, after3?.at] + "" === [zoomed.canvasW, zoomed.at] + "",
+    JSON.stringify({ zoomed, during3, after3 }));
 }
 
 export const m8bSuites = [

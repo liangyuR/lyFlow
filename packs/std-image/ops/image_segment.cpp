@@ -83,11 +83,12 @@ Status findCircleCompute(const Inputs& inputs, const ParamView& params, Outputs&
   const double minR = params.number("minRadius");
   const double maxR = params.number("maxRadius");
   if (maxR > 0 && maxR < minR) return badParam("最大半径比最小半径还小", "maxRadius");
+  // 预览里半径按比例缩过（ADR-0028）：截断会把 0.75 变成 0 —— 对 OpenCV 那是「不限」。四舍五入，正数至少 1
+  const auto radius = [](double r) { return r > 0 ? std::max(1, static_cast<int>(std::lround(r))) : 0; };
   std::vector<cv::Vec3f> circles;
   cv::HoughCircles(cvx::view(in), circles, cv::HOUGH_GRADIENT, params.number("dp"),
                    params.number("minDist"), params.number("edgeThreshold"),
-                   params.number("accumulatorThreshold"), static_cast<int>(minR),
-                   static_cast<int>(maxR));
+                   params.number("accumulatorThreshold"), radius(minR), radius(maxR));
   if (circles.empty()) {
     return Status::Error(Phase::Execute, "circle_not_found",
                          "没找到圆：调低累加阈值、放宽半径范围，或先平滑去噪", "accumulatorThreshold");

@@ -251,6 +251,12 @@ class Data {
   const lyflow::Image* asImage() const;
   bool isError() const { return kind_ == Kind::Error; }
 
+  /// 预览缩小过的图像转出来的张量记着比例（ADR-0028）：图像 → 张量 → 推理 → 张量 → 图像这条链上，转回来的图
+  /// 接着带上它，下游才不会把一张已经是小图的掩膜当成原图再缩一遍。只对 Tensor 有意义（图像的在 Image::scale）；
+  /// 记在 Data 上而不是 Tensor 里：换个比例不必把整块张量拷一遍。
+  std::int32_t tensorScale() const { return tensorScale_; }
+  Data withTensorScale(std::int32_t s) const;
+
   std::shared_ptr<const PointCloud> cloudPtr() const { return cloud_; }
   std::shared_ptr<const lyflow::Tensor> tensorPtr() const { return tensor_; }
   std::shared_ptr<const lyflow::Image> imagePtr() const { return image_; }
@@ -290,6 +296,7 @@ class Data {
   std::shared_ptr<const lyflow::Bundle> bundle_;
   std::shared_ptr<const lyflow::Image> image_;
   std::shared_ptr<ValueCache> valueCache_;
+  std::int32_t tensorScale_ = 1;
 };
 
 /// 一根线带一组有关系的数据（m8-plan L1）：`{ kind, 有序的 名字 → Data }`。

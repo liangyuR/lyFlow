@@ -135,8 +135,9 @@ export function ImagePane({ doc, path, node, op, roiNode, runId, status, nodeSta
     return () => {
       cancelled = true;
     };
-    // src 每次渲染可能是新对象；它的内容已经在 metaKey 里
-  }, [metaKey]);
+    // src 每次渲染可能是新对象；它的内容已经在 metaKey 里。节点状态变了也再问一次：同一个 runId
+    // 先前问的时候结果还没到（取不到就停在「不是图像」），跑完之后 metaKey 不变、不重问就一直停在那（review 第二轮）
+  }, [metaKey, ready, nodeState]);
 
   const centered = (text: string) => (
     <div className="viewer__empty" data-testid="viewer3d-status">

@@ -26,6 +26,8 @@ std::int32_t inputScale(const std::unordered_map<std::string, Data>& inputs) {
   std::int32_t s = 1;
   for (const auto& kv : inputs) {
     if (const Image* img = kv.second.asImage()) s = std::max(s, img->scale);
+    // 从缩小过的图转来的张量也算（review 第二轮）：tensor.to_image 的输出才知道自己是小图
+    if (kv.second.asTensor()) s = std::max(s, kv.second.tensorScale());
   }
   return s;
 }
@@ -167,6 +169,10 @@ void scaleOutputs(std::unordered_map<std::string, Data>& outputs, std::int32_t s
                   bool absoluteSize) {
   if (s <= 1) return;
   for (auto& kv : outputs) {
+    if (kv.second.asTensor()) {
+      if (kv.second.tensorScale() == 1 && !absoluteSize) kv.second = kv.second.withTensorScale(s);
+      continue;
+    }
     if (const Image* img = kv.second.asImage()) {
       // 原样传出去的输入图本来就带着 s；新产出的图默认是 1，在这里补上
       if (img->scale == 1 && !absoluteSize) {

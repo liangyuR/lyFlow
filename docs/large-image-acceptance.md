@@ -42,7 +42,7 @@
 
 | 验收 | 结果 | 在哪 |
 |---|---|---|
-| 预览运行里主预览画的是缩小 1/2 的图、角标「预览 1/2」；像素框与正式结果画在同一处（实测最大偏差 1 px），画布不重新适配 | ✅ | e2e `m8b.mjs` `suiteImagePreviewScale` |
+| 预览运行里主预览画的是缩小 1/2 的图、角标「预览 1/2」；像素框与正式结果画在同一处（实测最大偏差 0 px），画布不重新适配 —— 源头的大图、手选「原图」、比源头小的输出（2000×1000）三种都验（后两种是 review 第二轮补的） | ✅ | e2e `m8b.mjs` `suiteImagePreviewScale` |
 | 原有的主预览图像模式（画哪张图、拖框写回参数可撤销、放大后重跑视角不动、出错照画输入图） | ✅ | e2e `m8b.mjs` `suiteImageMainView` |
 | 「超过 16 MB 分段取图」：编辑器与 MCP 各自按帧头的 rowCount 接着要、拼接位置对、类型化数组的位深对 | ✅ | `packages/editor/test/image-fetch.test.mjs`；`packages/mcp/test/cloud.test.ts` |
 
@@ -63,6 +63,21 @@
 
 另外一条审查指出、**没有在这次修**的（早就存在）：库目录的文件监视与热重载在 watcher 线程上 `stop_active` / `drop_all`，
 不受主线程串行保护，期间主线程上来的 `run_graph` 能当场开跑。ADR-0027 已改正「靠主线程串行」的说法，并写下修法（状态里加一道暂停）。
+
+## review 第二轮
+
+开 PR 之后又让一个只读子代理审了一遍（含第一轮的修正），五条都核实了、都修了；第 2 条顺带补了一处同源的毛病：
+
+| # | 问题 | 修法 | 测试 |
+|---|---|---|---|
+| 1 中 | 第一轮按「一个显示像素是几个原图像素」认图，只在两边恰好相等时成立：比源头小的输出（crop 之后的 2000×1000：正式适配级别 0 是块 1，预览是块 2）与手选的级别（「原图」在预览里是块 2、正式是块 1）每次预览 ↔ 正式都闪「正在取图像」、视角乱掉。e2e 只看了 crop 的 4100 宽输入，恰好相等 | ImageCanvas 的视角改按原图坐标记（原图一个像素在屏幕上多大、原图原点在哪）；认图看节点、端口与原图坐标下的尺寸（差不到粗的那边一个比例）；手选的级别也按原图记，「原图」在预览里先给最细的那一级。换运行、换级别都只换画上去的那张 —— 换级别也不再重新适配，放大后切「原图」就在原处看细节 | e2e `suiteImagePreviewScale` 加两段：选着「原图」时预览 ↔ 正式框偏差 0 px、画布宽度不变；选中 blur（2000×1000）放大一格后预览 ↔ 正式画布的尺寸与位置不变。**临时改回修前的写法（只加了 `data-block` 属性）跑过：三条都失败** —— 切「原图」画布 474 → 1895 px，之后预览 ↔ 正式框偏 739 / 554 px；小一些的输出 474 → 379 px（放大丢了） |
+| 2 中 | 带 targets 的运行（预览、运行到此、单节点运行）排队时，视图拿新 runId 去取，core 里还没有它的结果：主预览停在「这个输出不是图像」，跑完也不重取（元信息只认 runId 与源）；排队的那次开跑前被取消的话一直如此。ADR-0027「事件顺序没有人依赖」的说法不对。同源的另一处：排队的那次从没开跑就收场时，被抢占那次正在算的节点一直转圈（它后面的事件认不到当前 runId 上） | 执行 store 加 `resultRunId`：节点表反映哪一次，视图就按哪一次取 —— 全图运行发起即换，带 targets 的等 `run_started`；排队的作废、没有新的顶上来时，被抢占的那个退出后留作上一次完成的运行；主预览的元信息随节点状态重取；从没开跑的 `run_finished` 到达时，被抢占那次在算、在排队的节点落成已取消 | `packages/editor/test/execution-store.test.mjs`（新，2 例：三种运行什么时候换 runId；合成的 cancelled / error 收场时视图留在被抢占的那次、在算的节点落成已取消，开跑过的不动）；`bridge/src/execution.rs` 取消排队请求的用例加断言：被抢占的那个进了 finished |
+| 3 低 | 第一轮的 `toNodeScale` 让经过张量的链路回退：缩小的图 → `to_tensor` → 动态尺寸模型 → `tensor.to_image` 出来的掩膜已经是预览尺寸、却标着 scale 1，与原图一起进 `region_stats` 时又被缩一次，报「不一样大」 | 张量带比例（`Data::tensorScale`）：从缩小的图转来的、算出来的、转回的图都是 s；磁盘缓存不存比例不是 1 的张量 | `test_image_ops.cpp` 大图预览用例加一段：掩膜 → 张量 → 图像 → 与原图一起进 `region_stats`，预览里转回的图 scale 2、面积与正式运行差 ≤ 2% |
+| 4 低 | 两条状态机用例（`stop_active` / `drop_all` 要等被抢占的那个）靠 50 ms 的 sleep 等停机线程跑到那一步 | 先等排队的那个补发了 cancelled（它在等之前发），再断言停机线程还卡着 | —— |
+| 5 低 | `image.find_circle` 的半径上下限 ÷ s 后截断：maxRadius 3 在 1/4 预览里成了 0，OpenCV 当成「不限」，预览里找到一个大圆 | 四舍五入，正数至少是 1 | `test_image_ops.cpp`：maxRadius 0.75 找不到半径 40 的圆（修前截断成 0 = 不限，会找到） |
+
+修这一轮时撞上一个与代码无关的坑：加 `Data` 的成员之后 doctest 在一条点云用例里崩（SIGSEGV），原因是 ninja 的依赖记录里有 7 个测试目标文件
+一条头文件依赖都没有（`ninja -t deps` 显示 `#deps 0`），改了 `data.h` 它们不重编、与新的内存布局对不上。重编之后依赖记录回来了，178 例全过。
 
 ## 与计划字面不同
 
@@ -89,12 +104,12 @@
 
 ## 数字
 
-2026-10-01 全量实测（testing.md 的表同步更新）：
+2026-10-01 全量实测，PR #3 第二轮 review 修正之后又按同样的跑法跑了一遍（testing.md 的表同步更新）：
 
-- doctest：默认 178 例（+5：`test_pixel_scale.cpp` 4 例、std-image 1 例）；`LYFLOW_PACKS=dts` 186；`gap;dts` 268。全过。
-- cargo：lib 146（+7，状态机，含 review 修正补的 `drop_all`）；纯平台构建 88 通过 / 58 ignored；`tests/host.rs` 11 通过 / 2 ignored；`tests/disk_cache.rs` 2。全过。
-- editor 80（+3，分段取图与作废）；MCP 31（+1，分段取图）。
-- e2e（`LYFLOW_PACKS=gap;dts`）：756 条断言、102 个分组（+4 条、+2 组）；753 通过，失败的 3 条是 KUN10 缺数据的已知项
+- doctest：默认 178 例（+5：`test_pixel_scale.cpp` 4 例、std-image 1 例；第二轮的断言加在已有用例里）；`LYFLOW_PACKS=dts` 186；`gap;dts` 268。全过。
+- cargo：lib 146（+7，状态机，含第一轮补的 `drop_all`）；`tests/host.rs` 11 通过 / 2 ignored；`tests/disk_cache.rs` 2。全过。
+  纯平台构建 88 通过 / 58 ignored 是第一轮跑的 —— 第二轮没有增删 Rust 用例，没有重跑。
+- editor 82（+5：分段取图与作废 3、`execution-store.test.mjs` 2）；MCP 31（+1，分段取图）。
+- e2e（`LYFLOW_PACKS=gap;dts`）：759 条断言、102 个分组（+7 条、+2 组）；756 通过，失败的 3 条是 KUN10 缺数据的已知项
   （P4 验收 26 与依赖它状态的工具栏宽度那组）。`e2e:http` 33/33。
-- `pnpm check`：除「嵌入 SDK」那一步外一次跑通；那一步在 `%TEMP%\lyflow-consumer-build` 里配置消费方工程时 CMake 的
-  `try_compile` 读不到 `rules.ninja`，换一个新目录单独重跑配置、编译、`embed_minimal` 都过 —— 环境偶发，与本次改动无关。
+- `pnpm check`：第二轮一次跑通（第一轮「嵌入 SDK」那一步撞上过 CMake `try_compile` 读不到 `rules.ninja` 的环境偶发，这次没有）。
