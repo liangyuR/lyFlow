@@ -647,6 +647,40 @@ impl RunResult {
             .and_then(|e| e["durationMs"].as_f64())
             .unwrap_or(0.0)
     }
+
+    /// 这次运行为什么没成，给 stderr 看：run_finished 自己带的错（编译期，例如 --to 写了不存在的节点），
+    /// 再是每个出错节点的第一条错误。被上游连带取消的（upstream_failed）不列 —— 根因已经在上面了。
+    fn failure_lines(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(e) = self
+            .events
+            .iter()
+            .rev()
+            .find(|e| e["kind"] == "run_finished")
+            .map(|e| &e["error"])
+            .filter(|e| e.is_object())
+        {
+            out.push(explain_line(None, e));
+        }
+        let mut failed: Vec<&Value> = Vec::new();
+        for e in &self.events {
+            if e["kind"] != "node_state" || e["state"] != "error" {
+                continue;
+            }
+            if failed.iter().any(|f| f["nodeId"] == e["nodeId"]) {
+                continue;
+            }
+            failed.push(e);
+        }
+        for e in failed.iter().take(MAX_EXPLAINED) {
+            let first = e["errors"].as_array().and_then(|a| a.first()).unwrap_or(&e["error"]);
+            out.push(explain_line(e["nodeId"].as_str(), first));
+        }
+        if failed.len() > MAX_EXPLAINED {
+            out.push(format!("  …还有 {} 个节点出错", failed.len() - MAX_EXPLAINED));
+        }
+        out
+    }
 }
 
 pub(crate) struct RunRequest<'a> {
@@ -835,6 +869,38 @@ pub(crate) fn has_errors(diags: &[Value]) -> bool {
     diags.iter().any(|d| d["severity"] == "error")
 }
 
+/// 一条诊断或错误在 stderr 上的样子：「  节点.参数：消息（代码）」。没有节点的（图参数、编译期）只写消息。
+fn explain_line(node: Option<&str>, item: &Value) -> String {
+    let mut at = node.unwrap_or_default().to_string();
+    if let Some(p) = item["paramPath"].as_str() {
+        at = if at.is_empty() { p.to_string() } else { format!("{at}.{p}") };
+    } else if let Some(port) = item["portName"].as_str() {
+        at = if at.is_empty() { port.to_string() } else { format!("{at}:{port}") };
+    }
+    let message = item["message"].as_str().unwrap_or_default();
+    let code = item["code"].as_str().map(|c| format!("（{c}）")).unwrap_or_default();
+    if at.is_empty() {
+        format!("  {message}{code}")
+    } else {
+        format!("  {at}：{message}{code}")
+    }
+}
+
+/// 最多列这么多条，再多的说一句还有几条 —— 几百条诊断刷满屏幕谁也看不完。
+const MAX_EXPLAINED: usize = 10;
+
+/// 校验没过时把每条 error 写到 stderr：诊断本身在 stdout 的 JSON 行里，而 stdout 常被重定向进文件，
+/// 终端上原来只有一句「校验失败」，看不出错在哪。
+fn explain_diagnostics(err: &Sink, diags: &[Value]) {
+    let errors: Vec<&Value> = diags.iter().filter(|d| d["severity"] == "error").collect();
+    for d in errors.iter().take(MAX_EXPLAINED) {
+        line(err, &explain_line(d["nodeId"].as_str(), d));
+    }
+    if errors.len() > MAX_EXPLAINED {
+        line(err, &format!("  …还有 {} 条", errors.len() - MAX_EXPLAINED));
+    }
+}
+
 fn cmd_validate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let Some(path) = parsed.positional.first().cloned() else {
         line(err, "用法：lyflow validate <graph>");
@@ -854,7 +920,10 @@ fn cmd_validate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
     json_line(out, &Value::Array(diags.clone()));
     if has_errors(&diags) {
-        line(err, &format!("{} 条错误", diags.len()));
+        // 以前数的是全部诊断（警告也算进「错误」里）
+        let errors = diags.iter().filter(|d| d["severity"] == "error").count();
+        line(err, &format!("{errors} 条错误："));
+        explain_diagnostics(err, &diags);
         return EXIT_INVALID;
     }
     line(err, "校验通过");
@@ -1294,7 +1363,8 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
                 for d in &remaining {
                     json_line(out, d);
                 }
-                line(err, "校验失败，没有执行");
+                line(err, "校验失败，没有执行：");
+                explain_diagnostics(err, &remaining);
                 return EXIT_INVALID;
             }
         }
@@ -1377,6 +1447,11 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
                 .unwrap_or_default()
         ),
     );
+    if result.status != "ok" {
+        for l in result.failure_lines() {
+            line(err, &l);
+        }
+    }
     result.exit_code()
 }
 
@@ -2585,6 +2660,13 @@ mod tests {
     fn wrong_usage_is_rejected_with_its_exit_code_and_message() {
         let dir = workspace("usage");
         let graph = chain(&dir, 309);
+        // 纯平台构建里也成立的两张图：一个不存在的算子、一张空图
+        let unknown = dir.join("unknown-op.lyflow.json");
+        std::fs::write(&unknown, r#"{"schemaVersion":1,"id":"u","nodes":[{"id":"a","op":"nope.op"}],"edges":[]}"#).unwrap();
+        let unknown = unknown.to_string_lossy().into_owned();
+        let empty = dir.join("empty.lyflow.json");
+        std::fs::write(&empty, r#"{"schemaVersion":1,"id":"e","nodes":[],"edges":[]}"#).unwrap();
+        let empty = empty.to_string_lossy().into_owned();
         let crop = crop_chain(&dir, 3403, 17007);
         let scene = samples_file(&dir, "scene.jsonl", &[r#"{"id":"a","scene":"sc_1"}"#]);
         let perturb = |after: &'static str, region: &'static str| {
@@ -2613,6 +2695,10 @@ mod tests {
             (vec!["sweep", &graph, "--param", "v.minPointsPerVoxel=1:2:2", "--metric", "v:cloud.elementCount",
                   "--jobs", "two"], EXIT_USAGE, "--jobs"),
             (perturb("g:cloud", HALFSPACE).into_iter().chain(["--jobs", "-1"]).collect(), EXIT_USAGE, "--jobs"),
+            // 失败的原因也写在 stderr 上：诊断在 stdout 的 JSON 行里，stdout 常被重定向进文件
+            (vec!["run", &unknown], EXIT_INVALID, "a：当前 core 没有注册算子 'nope.op'（unknown_op）"),
+            (vec!["validate", &unknown], EXIT_INVALID, "1 条错误：\n  a：当前 core 没有注册算子"),
+            (vec!["run", &empty, "--to", "zzz"], EXIT_FAILED, "目标不存在: zzz（unknown_node）"),
         ];
         for (args, code, want) in &cases {
             let r = cli(args);
