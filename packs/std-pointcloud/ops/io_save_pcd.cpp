@@ -8,6 +8,7 @@
 
 #include "ops.h"
 #include "lyflow_pcl/adapter.h"
+#include "lyflow_pcl/pcd_ascii.h"
 #include "lyflow_pcl/pcl_path.h"
 
 namespace lyflow::ops {
@@ -60,8 +61,8 @@ Status saveCloudToFile(const PointCloud& cloud, const std::filesystem::path& fil
       rc = pcl::io::savePLYFile(narrow.str(), blob, Eigen::Vector4f::Zero(),
                                 Eigen::Quaternionf::Identity(), format != "ascii");
     } else if (format == "ascii") {
-      rc = pcl::io::savePCDFile(narrow.str(), blob, Eigen::Vector4f::Zero(),
-                                Eigen::Quaternionf::Identity(), /*binary_mode=*/false);
+      // 等同 savePCDFile(…, binary_mode=false)，写出来逐字节相同，快十倍（pcd_ascii.h）
+      rc = io::savePcdAscii(narrow.str(), blob);
     } else if (format == "binary_compressed") {
       // savePCDFile 的 binary_mode 走的是非压缩二进制，压缩要走 PCDWriter 的专门入口
       pcl::PCDWriter writer;

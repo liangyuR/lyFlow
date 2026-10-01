@@ -8,6 +8,7 @@
 
 #include "ops.h"
 #include "lyflow_pcl/adapter.h"
+#include "lyflow_pcl/pcd_ascii.h"
 #include "lyflow_pcl/pcl_path.h"
 
 namespace lyflow::ops {
@@ -43,7 +44,8 @@ Status compute(const Inputs&, const ParamView& params, Outputs& outputs, ExecCon
     if (ext == ".ply") {
       rc = pcl::io::loadPLYFile(narrow.str(), blob);
     } else {
-      rc = pcl::io::loadPCDFile(narrow.str(), blob);
+      // 等同 pcl::io::loadPCDFile，只是 ASCII 正文快十倍（pcd_ascii.h）
+      rc = io::loadPcd(narrow.str(), blob);
     }
   } catch (const std::exception& e) {
     return Status::Error(Phase::Execute, "io",
