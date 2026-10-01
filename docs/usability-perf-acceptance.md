@@ -87,6 +87,6 @@
 | C++ doctest | 默认 185、`LYFLOW_PACKS=dts` 193、`gap;dts` 275，全过 |
 | Rust | lib 154；`tests/host.rs` 11 通过 / 2 ignored；`tests/disk_cache.rs` 2；clippy 无告警（纯平台构建这一轮没重跑） |
 | 编辑器 node:test / MCP | 102 / 32 |
-| 桌面 e2e（`LYFLOW_PACKS=gap;dts`） | 808 / 809，104 个分组；唯一的失败是 KUN10 数据不在（验收 26 的「未验」） |
+| 桌面 e2e（`LYFLOW_PACKS=gap;dts`） | 808 / 809，104 个分组；唯一的失败是 KUN10 数据不在（验收 26 的「未验」）。之后加了 hover、拖动帧率、没存过盘的图的自动备份几条，再跑一遍是 815 / 816，跑完 app data 里没有留下验收的备份 |
 | 安装包 e2e（`pnpm e2e:packaged`，同样的包） | 815 / 816，唯一的失败同上 —— 主窗口改成代码里开（放行剪贴板读取）之后，安装包照样起得来 |
 | `pnpm e2e:http` | 33 / 33 |
