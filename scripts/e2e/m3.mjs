@@ -1204,6 +1204,21 @@ async function suiteEditing(cdp, report) {
     pastedSel.length === 1 && afterUndo.added === 2 && afterUndo.stale.length === 0, JSON.stringify({ pastedSel, afterUndo }));
   // 内容是从 paste 事件里拿的：readText 在 WebView2 里会弹权限框，没人点就一直挂着，Ctrl+V 什么也粘不上
   report.eq("Ctrl+V 没去调 navigator.clipboard.readText", await cdp.eval(`return window.__lyClipReads;`), 0);
+  // 复制了节点之后又去别处复制了一段字（系统剪贴板里是那段字）：Ctrl+V 不再粘出应用内那几个旧节点，提示一句
+  await cdp.eval(`
+    window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}], []);
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    return true;
+  `);
+  await pressCtrl(cdp, "c");
+  await sleep(150);
+  await cdp.eval(`window.__lyClip = 'D:/scans/frame_0001.pcd'; return true;`);
+  const beforeText = await countNodes();
+  await pressCtrl(cdp, "v");
+  await sleep(250);
+  report.eq("复制节点之后又复制了一段字：Ctrl+V 不粘旧节点，提示剪贴板里不是节点",
+    { added: (await countNodes()) - beforeText, toast: await cdp.eval(`return window.__lyflow.stores.ui.getState().toast?.text ?? null;`) },
+    { added: 0, toast: "剪贴板里不是节点" });
   await restoreClipboard(cdp);
 
   // 键盘焦点在控件上：Tab / Space 归控件（挪焦点、按下去），不开算子搜索；空白处 Tab 照样开搜索。焦点在勾选框上

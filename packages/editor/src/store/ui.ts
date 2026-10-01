@@ -59,6 +59,8 @@ interface UiState {
   selectedEdges: ReadonlySet<string>;
   searchPopup: SearchPopup | null;
   clipboard: Clipboard | null;
+  /** 最近一次复制节点没写进系统剪贴板（不安全上下文、没授权）：粘贴时只能靠应用内的那一份。 */
+  clipboardOnlyInApp: boolean;
   /** 短暂提示（连线被拒绝的原因、保存成功之类）。 */
   toast: { text: string; kind: "info" | "warn" } | null;
   /** 面板里高亮的算子，用于在没选中节点时展示算子说明。 */
@@ -191,6 +193,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   selectedEdges: new Set(),
   searchPopup: null,
   clipboard: null,
+  clipboardOnlyInApp: false,
   toast: null,
   inspectedOperator: null,
   pinnedNode: null,

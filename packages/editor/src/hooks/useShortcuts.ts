@@ -202,7 +202,7 @@ export function useShortcuts(
           const clip = { nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) };
           ui.setClipboard(clip);
           // 也写一份到系统剪贴板：另一个窗口、重开之后照样粘得进来（写不进就只有应用内这一份）
-          void copyText(encodeNodeClipboard(clip));
+          void copyText(encodeNodeClipboard(clip)).then((ok) => useUiStore.setState({ clipboardOnlyInApp: !ok }));
           if (hit.id === "cut") graph.deleteNodes([...ids]);
           ui.showToast(`已复制 ${nodes.length} 个节点`);
           return;
@@ -349,14 +349,20 @@ export function useShortcuts(
       }
     };
 
-    // Ctrl+V 粘节点。系统剪贴板里是节点（另一个窗口复制的、或者一整张图的 JSON）就粘它，否则用应用内的那一份
+    // Ctrl+V 粘节点。系统剪贴板里是节点（另一个窗口复制的、或者一整张图的 JSON）就粘它。应用内的那一份只在系统剪贴板
+    // 指望不上的时候顶上：上次复制没写进去、或者读出来是空的。系统剪贴板里是别的字 = 复制了节点之后又去别处复制了
+    // 东西 —— 以前照样粘出那几个旧节点
     const onPaste = (e: ClipboardEvent) => {
       if (useModalStore.getState().current || inTextField(e.target)) return;
       const ui = useUiStore.getState();
       if (ui.searchPopup || ui.finderOpen) return;
       const text = e.clipboardData?.getData("text/plain") ?? "";
-      const clip = (text ? decodeNodeClipboard(text) : null) ?? ui.clipboard;
-      if (!clip || clip.nodes.length === 0) return;
+      const decoded = text ? decodeNodeClipboard(text) : null;
+      const clip = decoded ?? (text === "" || ui.clipboardOnlyInApp ? ui.clipboard : null);
+      if (!clip || clip.nodes.length === 0) {
+        if (text !== "" && !decoded) ui.showToast("剪贴板里不是节点", "warn");
+        return;
+      }
       e.preventDefault();
       const result = useGraphStore.getState().pasteNodes(clip, handlers.cursorFlowPosition());
       if (result.nodeIds.length > 0) ui.setSelection(result.nodeIds, []);
