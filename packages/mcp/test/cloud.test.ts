@@ -12,7 +12,7 @@ import {
   decodeTensor,
   summarizeCloud,
 } from "../src/cloud.js";
-import { IMAGE_MAGIC, decodeImage, encodePng, levelToFit, toPicture } from "../src/image.js";
+import { IMAGE_MAGIC, decodeImage, encodePng, fetchImage, levelToFit, toPicture } from "../src/image.js";
 
 function encode(
   xyz: number[],
@@ -191,4 +191,32 @@ test("图像载荷（LYIM）解出来；u16 拉伸到 8 位、超过边长按最
   const raw = inflateSync(png.subarray(41, 41 + idatLen));
   assert.deepEqual([...raw], [0, 0, 51, 102, 0, 153, 204, 255]); // 每行前一个过滤器字节
   assert.throws(() => decodeImage(buffer.slice(0, 50)), /截断/);
+});
+
+test("view_output_image 按段取齐（fetchImage）：每段 4 行的 10 行图要三次，拼出来逐值相同；后续几段按帧头给的级别要", async () => {
+  // 这条路以前没有测试（image-acceptance「留到以后」）：服务端按 16 MB 收行数，测试里的图都一段取完
+  const width = 3;
+  const height = 10;
+  const asked: { level: number; row: number }[] = [];
+  const get = async (level: number, row: number) => {
+    asked.push({ level, row });
+    const rows = Math.min(4, height - row);
+    const buffer = new ArrayBuffer(48 + ((rows * width + 3) & ~3));
+    const view = new DataView(buffer);
+    // 帧头写实际给出的是第 0 级（HTTP 桩就是这样），后续几段要照它要
+    [IMAGE_MAGIC, width, height, 1, 1, 0, width, height, row, rows, width, 0].forEach((v, i) =>
+      view.setUint32(i * 4, v, true),
+    );
+    for (let i = 0; i < rows * width; i += 1) view.setUint8(48 + i, (row + Math.floor(i / width)) * 10 + (i % width));
+    return buffer;
+  };
+  const { first, values } = await fetchImage(get, 2);
+  assert.deepEqual(
+    { asked, size: [first.width, first.height], values: [...values] },
+    {
+      asked: [{ level: 2, row: 0 }, { level: 0, row: 4 }, { level: 0, row: 8 }],
+      size: [3, 10],
+      values: Array.from({ length: width * height }, (_, i) => Math.floor(i / width) * 10 + (i % width)),
+    },
+  );
 });

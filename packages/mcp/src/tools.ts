@@ -7,7 +7,7 @@ import { z } from "zod";
 import { evalArgv, listMetricsArgv, paramsArgv, patchArgv, perturbArgv, recipesArgv } from "./argv.js";
 import { DEFAULT_CLI_TIMEOUT_MS, runCli, stderrTail } from "./cli.js";
 import { decodeCloud, decodeIndices, decodeTensor, summarizeCloud } from "./cloud.js";
-import { decodeImage, encodePng, levelToFit, toPicture } from "./image.js";
+import { encodePng, fetchImage, levelToFit, toPicture } from "./image.js";
 import type { Config } from "./config.js";
 import { resolveGraph, type ResolvedGraph } from "./graph.js";
 import { HttpError, LyFlowHttp } from "./http.js";
@@ -559,15 +559,10 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         const fullH = Number(info.value?.height ?? 0);
         const level = levelToFit(fullW, fullH, maxEdge);
         // 按段取齐：服务端按 16 MB 收行数；HTTP 桩只给 level 0（帧头照实写）
-        const first = decodeImage(await http.image(args.runId, args.nodeId, args.port, level, 0, 0));
-        const values = new Float64Array(first.width * first.height * first.channels);
-        let part = first;
-        for (;;) {
-          values.set(part.values, part.rowOffset * part.width * part.channels);
-          const next = part.rowOffset + part.rowCount;
-          if (part.rowCount === 0 || next >= part.height) break;
-          part = decodeImage(await http.image(args.runId, args.nodeId, args.port, first.level, next, 0));
-        }
+        const { first, values } = await fetchImage(
+          (lv, row) => http.image(args.runId, args.nodeId, args.port, lv, row, 0),
+          level,
+        );
         const pic = toPicture(first.width, first.height, first.channels, first.depth, values, maxEdge);
         const meta = {
           runId: args.runId,

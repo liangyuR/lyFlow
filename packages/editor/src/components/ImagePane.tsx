@@ -56,6 +56,8 @@ interface Meta {
   height: number;
   channels: number;
   depth: Depth;
+  /** 预览缩小过的图是 > 1（ADR-0028） */
+  scale: number;
 }
 
 export interface ImagePaneProps {
@@ -122,6 +124,7 @@ export function ImagePane({ doc, path, node, op, roiNode, runId, status, nodeSta
           height: v.height ?? 0,
           channels: v.channels ?? 0,
           depth: v.depth ?? "u8",
+          scale: typeof v.scale === "number" && v.scale > 1 ? v.scale : 1,
         });
       } catch (e) {
         if (cancelled) return;
@@ -167,6 +170,7 @@ export function ImagePane({ doc, path, node, op, roiNode, runId, status, nodeSta
         fullH={m.height}
         channels={m.channels}
         depth={m.depth}
+        pixelScale={m.scale}
         testid="viewer-image"
         overlay={(view) => (
           <>

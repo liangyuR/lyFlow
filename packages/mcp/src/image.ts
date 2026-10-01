@@ -60,6 +60,24 @@ export function decodeImage(buffer: ArrayBuffer): ImageSlice {
   };
 }
 
+/** 按段取齐一级图像：服务端按 16 MB 收行数，照帧头的 rowCount 接着要；HTTP 桩只给 level 0（帧头照实写），
+ *  后续几段按帧头里实际给出的级别要。`get(level, row)` 取从 row 起到底的那一段。 */
+export async function fetchImage(
+  get: (level: number, row: number) => Promise<ArrayBuffer>,
+  level: number,
+): Promise<{ first: ImageSlice; values: Float64Array }> {
+  const first = decodeImage(await get(level, 0));
+  const values = new Float64Array(first.width * first.height * first.channels);
+  let part = first;
+  for (;;) {
+    values.set(part.values, part.rowOffset * part.width * part.channels);
+    const next = part.rowOffset + part.rowCount;
+    if (part.rowCount === 0 || next >= part.height) break;
+    part = decodeImage(await get(first.level, next));
+  }
+  return { first, values };
+}
+
 /** 长边不超过 maxEdge 的最小级别（与 core 的缩小同一个取整：向上取整）。 */
 export function levelToFit(width: number, height: number, maxEdge: number): number {
   let level = 0;

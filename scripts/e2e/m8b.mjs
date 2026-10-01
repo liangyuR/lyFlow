@@ -811,12 +811,68 @@ async function suiteImageMainView(cdp, report) {
     stats?.source === "input" && stats.sourceNode === ids.gray && stats.shapes >= 1, JSON.stringify(stats));
 }
 
+// 大图预览（docs/large-image-plan.md L3，ADR-0028）：拖参数时的预览运行在源头把大图缩小，下游在小图上算；
+// 主预览按原图尺寸摆放、角上写明是预览，像素框照旧是原图坐标 —— 与正式运行时画在同一个屏幕位置
+async function suiteImagePreviewScale(cdp, report) {
+  report.section("大图预览（ADR-0028）：预览运行把 8.4 MP 的图缩到 1/2，主预览角标「预览 1/2」、按原图尺寸摆放，像素框与正式结果画在同一处");
+  await newDoc(cdp);
+  const ids = await buildGraph(
+    cdp,
+    [
+      { key: "img", op: "test.make_image", params: { width: 4100, height: 2050, channels: 1 } },
+      { key: "crop", op: "image.crop", params: { roi: [1000, 500, 3000, 1500] } },
+    ],
+    [{ from: ["img", "image"], to: ["crop", "image"] }],
+  );
+  const full = await runAndWait(cdp, () => pressF5(cdp));
+  mustOk(full.status === "ok", "大图链路跑通", JSON.stringify(full.nodes));
+  await select(cdp, ids.crop);
+
+  /** 等主预览画的是 pixelScale = want 的那张图、框在画面上，读出角标、尺寸与框的屏幕位置。 */
+  const look = async (want) => {
+    for (let i = 0; i < 100; i += 1) {
+      const got = await cdp.eval(`
+        const p = document.querySelector('[data-testid="viewer-image-pane"]');
+        const img = p ? p.querySelector('[data-testid="viewer-image"]') : null;
+        const box = p ? p.querySelector('.roi-box') : null;
+        if (!img || img.getAttribute('data-pixel-scale') !== ${lit(String(want))} || Number(img.getAttribute('data-w')) === 0 || !box) return null;
+        if (img.getAttribute('data-stale') === '1') return null;
+        const r = box.getBoundingClientRect();
+        const c = p.querySelector('[data-testid="viewer-image-canvas"]');
+        return {
+          badge: p.querySelector('[data-testid="viewer-image-preview-scale"]')?.textContent ?? null,
+          fullW: Number(img.getAttribute('data-full-w')),
+          canvasW: c ? Math.round(parseFloat(c.style.width)) : null,
+          box: [r.left, r.top, r.width, r.height].map((v) => Math.round(v)),
+        };
+      `);
+      if (got) return got;
+      await sleep(120);
+    }
+    return null;
+  };
+
+  const before = await look(1);
+  mustOk(before !== null && before.badge === null, "正式结果：没有预览角标、框在画面上", JSON.stringify(before));
+  // 与拖参数时同一条路（lib/preview.ts）：mode = preview、只跑到选中的节点
+  const pv = await runAndWait(cdp, () =>
+    cdp.eval(`void window.__lyflow.run({ targets: [${lit(ids.crop)}], preview: true }); return true;`),
+  );
+  const during = await look(2);
+  report.ok("预览运行：主预览画的是缩小 1/2 的图（2050 宽），角标「预览 1/2」",
+    pv.status === "ok" && during?.fullW === 2050 && during.badge === "预览 1/2", JSON.stringify({ status: pv.status, during }));
+  const drift = during ? Math.max(...during.box.map((v, k) => Math.abs(v - before.box[k]))) : Infinity;
+  report.ok(`像素框在预览图上与正式结果画在同一处（最大偏差 ${drift} px ≤ 1），画布没有重新适配`,
+    drift <= 1 && during.canvasW === before.canvasW, JSON.stringify({ before, during }));
+}
+
 export const m8bSuites = [
   suiteBuildFromBlank,
   suiteBundlePeek,
   suiteDragWrongSide,
   suiteAlignTemplateBackdrop,
   suiteImageMainView,
+  suiteImagePreviewScale,
   suiteAutoConnect,
   suitePalette,
 ];
