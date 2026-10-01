@@ -425,6 +425,10 @@ fn main() {
 `attach()` 做三件事：`manage(RunManager)`、`manage(Arc<HostConfig>)`、
 一个 `setup`（库算子重扫 + 可选的热重载 watcher）。
 
+`RunManager` 的抢占不阻塞（[ADR-0027](adr/0027-non-blocking-preemption.md)）：`run_graph` 立即返回新 runId，
+被抢占的那个在后台算完它手上那个停不下来的算子，期间的请求只留最新一个。宿主自己的命令同样跑在主线程上的话，
+也别在里面等一个 run —— 那会让整个窗口一起等。
+
 > **它占掉了 `Builder::setup`。** tauri 的 `setup` 是整份替换不是追加，所以宿主
 > 要有自己的 setup 就别再调 `.setup()`，改成在自己那个里面调
 > `lyflow_lib::host::setup(app.handle())`。

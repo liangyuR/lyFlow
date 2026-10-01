@@ -588,8 +588,9 @@ export async function subscribeExecutionEvents(): Promise<void> {
   await subscription;
 }
 
-/** 本地的运行序号：两次 run_graph 走不同的 Tauri 工作线程，回复顺序不保证等于
- *  发起顺序。序号让后发的那次赢，与 C++ 侧「后开始的抢占先开始的」一致。 */
+/** 本地的运行序号：让后发的那次赢，与桥接层「后来的请求抢占先来的」一致。Tauri 宿主里
+ *  run_graph 在主线程上排队、按发起顺序回复，而且不再等被抢占的 run 退出（ADR-0027）；
+ *  HTTP 宿主的回复顺序没有保证 —— 序号对两者都成立。 */
 let runTicket = 0;
 
 /** 宿主给的点云会话 id。`setRunSceneId` 由 `<LyFlowEditor sceneId>` 在渲染期装上，和

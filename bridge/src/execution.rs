@@ -1,9 +1,10 @@
 //! 运行的生命周期管理。D3：同一时刻一个活跃 run，新 run 抢占旧 run。
-//! 最多同时持有两份 run 的索引（正在跑的 + 上一次完成的），详见 bridge/README.md。
+//! 抢占不阻塞（ADR-0027）：被抢占的 run 在后台排干，它退出之前来的请求只留最新一个 ——
+//! 同一时刻最多一个 run 在算。最多同时持有两份 run 的索引（在算的 + 上一次完成的），详见 bridge/README.md。
 
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_void};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use tauri::{AppHandle, Emitter, Runtime};
 
@@ -67,12 +68,207 @@ pub struct StartOptions<'a> {
     pub inputs: &'a [core_ffi::RunInput],
 }
 
+/// 排队的请求自己持有的那份启动参数：它要活到被抢占的那个退出（ADR-0027）。
+struct OwnedStart {
+    graph_json: String,
+    base_dir: String,
+    targets: Vec<String>,
+    isolate: Vec<String>,
+    force: Vec<String>,
+    preview: Option<PreviewOptions>,
+    params_json: Option<String>,
+    inputs: Vec<core_ffi::RunInput>,
+}
+
+impl OwnedStart {
+    fn copy_of(graph_json: &str, base_dir: &str, o: &StartOptions<'_>) -> Self {
+        OwnedStart {
+            graph_json: graph_json.to_string(),
+            base_dir: base_dir.to_string(),
+            targets: o.targets.to_vec(),
+            isolate: o.isolate.to_vec(),
+            force: o.force.to_vec(),
+            preview: o.preview,
+            params_json: o.params_json.map(str::to_string),
+            inputs: o.inputs.to_vec(),
+        }
+    }
+
+    fn options(&self) -> StartOptions<'_> {
+        StartOptions {
+            targets: &self.targets,
+            isolate: &self.isolate,
+            force: &self.force,
+            preview: self.preview,
+            params_json: self.params_json.as_deref(),
+            inputs: &self.inputs,
+        }
+    }
+}
+
+/// RunManager 管着的一次运行。真实实现是 `RunHandle`；状态机的测试用可控的假 run。
+pub(crate) trait LiveRun: Send + Sync {
+    fn run_id(&self) -> &str;
+    /// 协作式取消：执行器在节点之间、可取消的算子在循环里看这个标志。
+    fn cancel(&self);
+    /// 等它退出。可以有好几个线程同时等，都等到同一次退出。
+    fn join(&self);
+}
+
+impl LiveRun for RunHandle {
+    fn run_id(&self) -> &str {
+        RunHandle::run_id(self)
+    }
+    fn cancel(&self) {
+        RunHandle::cancel(self)
+    }
+    fn join(&self) {
+        RunHandle::join(self)
+    }
+}
+
+pub(crate) type Run = Arc<dyn LiveRun>;
+
+/// 从没开跑就作废的请求怎么收场：`"cancelled"`，或启动失败时的 `"error"` + 原因。
+type Notify = Box<dyn FnOnce(&'static str, Option<String>) + Send>;
+
+/// 等被抢占的那个退出再开跑的请求（ADR-0027）。
+pub(crate) struct Pending {
+    run_id: String,
+    launch: Box<dyn FnOnce() -> Result<Run, String> + Send>,
+    notify: Notify,
+}
+
+impl Pending {
+    pub(crate) fn new(
+        run_id: impl Into<String>,
+        launch: impl FnOnce() -> Result<Run, String> + Send + 'static,
+        notify: impl FnOnce(&'static str, Option<String>) + Send + 'static,
+    ) -> Self {
+        Pending {
+            run_id: run_id.into(),
+            launch: Box::new(launch),
+            notify: Box::new(notify),
+        }
+    }
+}
+
 #[derive(Default)]
 struct State {
     /// 正在跑的那个。
-    active: Option<Arc<RunHandle>>,
+    active: Option<Run>,
+    /// 被抢占、已取消、还没退出的那个：停不下来的算子还在算。有它时 active 一定为空。
+    draining: Option<Run>,
+    /// 等 draining 退出再开跑的请求，只留最新一个。
+    pending: Option<Pending>,
     /// 上一次跑完的那个。留着是为了 3D 视图还能取到它的点云。
-    finished: Option<Arc<RunHandle>>,
+    finished: Option<Run>,
+}
+
+fn lock(inner: &Mutex<State>) -> MutexGuard<'_, State> {
+    // 收尾线程里出过一次 panic，不该让此后所有的运行都起不来
+    inner.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn holds(slot: &Option<Run>, run: &Run) -> bool {
+    slot.as_ref().is_some_and(|r| r.run_id() == run.run_id())
+}
+
+/// 把 run 设成 active，并起它的收尾线程：join 完持锁看自己现在是谁（`settle`）。
+fn activate(inner: &Arc<Mutex<State>>, st: &mut State, run: Run) {
+    st.active = Some(Arc::clone(&run));
+    let inner = Arc::clone(inner);
+    // 不能在 command 线程上等 —— 那就退化成同步执行了。
+    std::thread::spawn(move || {
+        run.join();
+        let failed = settle(&inner, &mut lock(&inner), &run);
+        // 补发的事件不在锁里发
+        if let Some((notify, reason)) = failed {
+            notify("error", Some(reason));
+        }
+    });
+}
+
+/// 一个 run 退出之后的状态转移。返回启动失败的那个排队请求，由调用方在锁外补发 error。
+fn settle(inner: &Arc<Mutex<State>>, st: &mut State, run: &Run) -> Option<(Notify, String)> {
+    if holds(&st.active, run) {
+        // 旧 finished 在这一行被 drop → lyflow_run_free → 结果仓回收。
+        st.finished = st.active.take();
+        return None;
+    }
+    if !holds(&st.draining, run) {
+        // 被 stop_active / drop_all 拿走的：它们自己 join，这里什么都不用做
+        return None;
+    }
+    // 被抢占的不进 finished 槽：它的结果是残缺的，留着只会让 3D 视图显示半张图。
+    st.draining = None;
+    let Pending { launch, notify, .. } = st.pending.take()?;
+    match launch() {
+        Ok(next) => {
+            activate(inner, st, next);
+            None
+        }
+        Err(reason) => Some((notify, reason)),
+    }
+}
+
+/// 启动一次运行（不排队的那一步）。`options` 只需活到这里返回 —— core 在 run_start 里拷一份。
+fn launch<R: Runtime>(
+    app: &AppHandle<R>,
+    core: Arc<Core>,
+    graph_json: &str,
+    base_dir: &str,
+    options: StartOptions<'_>,
+    run_id: &str,
+) -> Result<Run, String> {
+    let ctx = Box::new(EmitCtx {
+        app: app.clone(),
+        run_id: run_id.to_string(),
+    });
+    let mut spec = RunSpec::new(graph_json, run_id, base_dir, options.targets);
+    spec.isolate = options.isolate;
+    spec.force = options.force;
+    spec.params_json = options.params_json;
+    spec.inputs = options.inputs;
+    if let Some(p) = options.preview {
+        spec.mode = 1;
+        spec.preview_max_points = p.max_points;
+        spec.preview_budget_ms = p.budget_ms;
+    }
+    let handle = unsafe { RunHandle::start(core, spec, trampoline::<R>, ctx) }
+        .map_err(|e| e.to_string())?;
+    Ok(Arc::new(handle))
+}
+
+/// 从没开跑就作废的请求补一条 run_finished（ADR-0027）：前端拿到 runId 就进了「运行中」，
+/// 等的就是这一条。
+fn emit_never_started<R: Runtime>(
+    app: &AppHandle<R>,
+    run_id: &str,
+    status: &str,
+    error: Option<&str>,
+) {
+    if let Err(e) = app.emit(EVENT_NAME, never_started_event(run_id, status, error)) {
+        eprintln!("补发 run_finished 失败 (run {run_id}): {e}");
+    }
+}
+
+/// 这个 run 不会再有别的事件，所以它就是 seq 0。
+fn never_started_event(run_id: &str, status: &str, error: Option<&str>) -> serde_json::Value {
+    let mut event = serde_json::json!({
+        "schemaVersion": 1,
+        "runId": run_id,
+        "seq": 0,
+        "kind": "run_finished",
+        "status": status,
+        "durationMs": 0,
+    });
+    if let Some(message) = error {
+        event["error"] = serde_json::json!({
+            "phase": "execute", "code": "internal", "message": message,
+        });
+    }
+    event
 }
 
 /// Tauri managed state。
@@ -86,11 +282,12 @@ impl RunManager {
         Self::default()
     }
 
-    /// 启动一次运行，返回 run id。抢占是同步的：旧 run 的 cancel+join 在本函数里做完，
-    /// 前端拿到新 runId 时旧 run 的 run_finished(cancelled) 一定已经发出去了。
+    /// 启动一次运行，立即返回 run id —— 不等任何别的 run（ADR-0027）。
+    /// 有 run 在算时：取消它、挪进 draining，这一次排队，等它退出再开跑；排队中的旧请求被顶掉。
+    /// 前端拿到新 runId 时，被抢占的那个可能还没发出 run_finished(cancelled)：事件按 runId 分流，晚到的无害。
     ///
-    /// `options.inputs` 是运行时注入的源数据（ADR-0017）。缓冲只需活到
-    /// `RunHandle::start` 返回 —— core 在里面拷一份，所以这里拿引用就够。
+    /// `options.inputs` 是运行时注入的源数据（ADR-0017）。当场能开跑时只借用；
+    /// 要排队的话请求自己拷一份，因为它要活到被抢占的那个退出。
     pub fn start<R: Runtime>(
         &self,
         app: &AppHandle<R>,
@@ -99,81 +296,91 @@ impl RunManager {
         base_dir: &str,
         options: StartOptions<'_>,
     ) -> Result<String, String> {
-        let previous = self.inner.lock().unwrap().active.take();
-        if let Some(prev) = previous {
-            prev.cancel();
-            prev.join();
-            // 被抢占的 run 不进 finished 槽：它的结果是残缺的，
-            // 留着只会让 3D 视图显示半张图。
-        }
-
         let run_id = ulid::new();
-        let ctx = Box::new(EmitCtx {
-            app: app.clone(),
-            run_id: run_id.clone(),
-        });
-        let mut spec = RunSpec::new(graph_json, &run_id, base_dir, options.targets);
-        spec.isolate = options.isolate;
-        spec.force = options.force;
-        spec.params_json = options.params_json;
-        spec.inputs = options.inputs;
-        if let Some(p) = options.preview {
-            spec.mode = 1;
-            spec.preview_max_points = p.max_points;
-            spec.preview_budget_ms = p.budget_ms;
-        }
-        let handle = unsafe { RunHandle::start(core, spec, trampoline::<R>, ctx) }
-            .map_err(|e| e.to_string())?;
-        let handle = Arc::new(handle);
-
-        self.inner.lock().unwrap().active = Some(Arc::clone(&handle));
-
-        // 后台等它结束，然后挪进 finished 槽。
-        // 不能在 command 线程上等 —— 那就退化成同步执行了。
-        let inner = Arc::clone(&self.inner);
-        std::thread::spawn(move || {
-            handle.join();
-            let mut st = inner.lock().unwrap();
-            let still_active = st
-                .active
-                .as_ref()
-                .map(|h| h.run_id() == handle.run_id())
-                .unwrap_or(false);
-            if still_active {
-                st.active = None;
-                // 旧 finished 在这一行被 drop → lyflow_run_free → 结果仓回收。
-                st.finished = Some(handle);
-            }
-        });
-
+        self.submit(
+            || launch(app, Arc::clone(&core), graph_json, base_dir, options, &run_id),
+            || {
+                let owned = OwnedStart::copy_of(graph_json, base_dir, &options);
+                let (launch_app, notify_app) = (app.clone(), app.clone());
+                let (launch_id, notify_id) = (run_id.clone(), run_id.clone());
+                let core = Arc::clone(&core);
+                Pending::new(
+                    run_id.clone(),
+                    move || {
+                        let options = owned.options();
+                        launch(&launch_app, core, &owned.graph_json, &owned.base_dir, options, &launch_id)
+                    },
+                    move |status, error| {
+                        emit_never_started(&notify_app, &notify_id, status, error.as_deref())
+                    },
+                )
+            },
+        )?;
         Ok(run_id)
     }
 
-    /// 取消指定的运行。id 对不上就什么都不做 —— 用户按 Esc 的那一刻，
-    /// 他想取消的可能已经自己跑完了。
-    pub fn cancel(&self, run_id: &str) {
-        let st = self.inner.lock().unwrap();
-        if let Some(active) = st.active.as_ref() {
-            if active.run_id() == run_id {
-                active.cancel();
+    /// 状态机本体（`start` 给它配上 Tauri 的启动与补发）。`now` 在当场能开跑时调，`later` 只在要排队时调 ——
+    /// 拷一份注入数据的代价只花在真要排队的那一次。全程不 join。
+    pub(crate) fn submit(
+        &self,
+        now: impl FnOnce() -> Result<Run, String>,
+        later: impl FnOnce() -> Pending,
+    ) -> Result<(), String> {
+        let replaced = {
+            let mut st = lock(&self.inner);
+            if st.active.is_none() && st.draining.is_none() {
+                let run = now()?;
+                activate(&self.inner, &mut st, run);
+                return Ok(());
             }
+            if let Some(active) = st.active.take() {
+                active.cancel();
+                st.draining = Some(active);
+            }
+            st.pending.replace(later())
+        };
+        // 被顶掉的排队请求不补发事件：发起方手里已经是这一次的 runId（前端只认最后发起的那次），
+        // 补一条 cancelled 反而会让工具栏闪一下「已取消」。
+        drop(replaced);
+        Ok(())
+    }
+
+    /// 取消指定的运行。id 对不上就什么都不做 —— 用户按 Esc 的那一刻，
+    /// 他想取消的可能已经自己跑完了。排队中的那个直接作废，补发 cancelled。
+    pub fn cancel(&self, run_id: &str) {
+        let dropped = {
+            let mut st = lock(&self.inner);
+            if let Some(active) = st.active.as_ref().filter(|r| r.run_id() == run_id) {
+                active.cancel();
+                None
+            } else if st.pending.as_ref().is_some_and(|p| p.run_id == run_id) {
+                st.pending.take()
+            } else {
+                None
+            }
+        };
+        if let Some(p) = dropped {
+            (p.notify)("cancelled", None);
         }
     }
 
-    /// 停掉正在跑的那个，上一次跑完的留着。重扫库目录前调（ADR-0010）：注册表要重建，
-    /// 正在跑的 run 手里握着 OperatorDesc 指针；跑完的只剩结果仓里的索引，DLL 也没换代，
+    /// 停掉在算的（含被抢占、还没退出的那个），排队的作废，上一次跑完的留着。重扫库目录前调（ADR-0010）：
+    /// 注册表要重建，在算的 run 手里握着 OperatorDesc 指针；跑完的只剩结果仓里的索引，DLL 也没换代，
     /// 它的数据照样安全。放掉它的话，界面上显示「完成」的节点按这个 runId 就取不到输出了。
-    /// 被停掉的那个与被抢占同理，不进 finished 槽。
+    /// 这里要等停不下来的算子算完 —— 重扫库目录要的正是「此后没有 run 握着旧的算子描述」。
     pub fn stop_active(&self) {
-        let active = self
-            .inner
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .active
-            .take();
-        if let Some(run) = active {
+        let (runs, pending) = {
+            let mut st = lock(&self.inner);
+            ([st.active.take(), st.draining.take()], st.pending.take())
+        };
+        for run in runs.iter().flatten() {
             run.cancel();
+        }
+        for run in runs.iter().flatten() {
             run.join();
+        }
+        if let Some(p) = pending {
+            (p.notify)("cancelled", None);
         }
     }
 
@@ -181,15 +388,24 @@ impl RunManager {
     /// 旧 DLL 的引用计数就归不了零，新一代加载了也顶不掉它（ADR-0009）。
     /// 重扫库目录不换 DLL，用不着它，见 `stop_active`。
     pub fn drop_all(&self) {
-        let (active, finished) = {
-            let mut st = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-            (st.active.take(), st.finished.take())
+        let (runs, pending, finished) = {
+            let mut st = lock(&self.inner);
+            (
+                [st.active.take(), st.draining.take()],
+                st.pending.take(),
+                st.finished.take(),
+            )
         };
-        if let Some(run) = &active {
+        for run in runs.iter().flatten() {
             run.cancel();
+        }
+        for run in runs.iter().flatten() {
             run.join();
         }
-        drop(active);
+        if let Some(p) = pending {
+            (p.notify)("cancelled", None);
+        }
+        drop(runs);
         drop(finished);
     }
 
@@ -197,23 +413,21 @@ impl RunManager {
     /// 测试自己起 run、收事件，再交给这里，模拟「上一次跑完、留着给 3D 视图取」的状态。
     #[cfg(test)]
     pub fn adopt_finished(&self, handle: RunHandle) {
-        self.inner.lock().unwrap().finished = Some(Arc::new(handle));
+        lock(&self.inner).finished = Some(Arc::new(handle));
     }
 
     /// 当前是否还有活跃的运行。
     // 这个类型唯一的只读窗口。目前没有调用方，但删掉再加回来只会让人重新想一遍锁的边界。
     #[allow(dead_code)]
     pub fn active_run_id(&self) -> Option<String> {
-        self.inner
-            .lock()
-            .unwrap()
+        lock(&self.inner)
             .active
             .as_ref()
             .map(|h| h.run_id().to_string())
     }
 }
 
-/// 二进制点云载荷（ADR-0006）。布局见 bridge/README.md「二进制点云」。
+// 二进制点云载荷（ADR-0006）。布局见 bridge/README.md「二进制点云」。
 /// magic 不是装饰：没有它，一段 JSON 错误文本会被前端当成坐标画出来。
 pub const CLOUD_MAGIC: u32 = 0x4350_594C; // 'LYPC' 小端
 
@@ -376,6 +590,233 @@ mod tests {
     use crate::core_ffi::CLOUD_HAS_INTENSITY;
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
+
+    // ------------------------------------------------------------ 抢占的状态机（ADR-0027）
+
+    /// 假 run 开跑之后的样子。
+    #[derive(Clone, Copy, PartialEq)]
+    enum Behaves {
+        /// 取消即退出（执行器在节点之间看取消标志）
+        Cooperative,
+        /// 不理取消，`finish()` 之前一直不退出：停在一次 OpenCV 调用里的算子
+        Stuck,
+        /// 根本起不来（core 返回空句柄）
+        FailsToStart,
+    }
+
+    struct FakeRun {
+        id: String,
+        behaves: Behaves,
+        cancelled: std::sync::atomic::AtomicBool,
+        done: Mutex<bool>,
+        exited: std::sync::Condvar,
+    }
+
+    impl FakeRun {
+        fn finish(&self) {
+            *self.done.lock().unwrap() = true;
+            self.exited.notify_all();
+        }
+        fn was_cancelled(&self) -> bool {
+            self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl LiveRun for FakeRun {
+        fn run_id(&self) -> &str {
+            &self.id
+        }
+        fn cancel(&self) {
+            self.cancelled.store(true, std::sync::atomic::Ordering::SeqCst);
+            if self.behaves == Behaves::Cooperative {
+                self.finish();
+            }
+        }
+        fn join(&self) {
+            let mut done = self.done.lock().unwrap();
+            while !*done {
+                done = self.exited.wait(done).unwrap();
+            }
+        }
+    }
+
+    /// 记下状态机对每个请求做了什么：开跑了哪些、给哪些补发了什么。
+    #[derive(Default)]
+    struct Script {
+        launched: Mutex<Vec<String>>,
+        notified: Mutex<Vec<(String, &'static str, Option<String>)>>,
+        runs: Mutex<std::collections::HashMap<String, Arc<FakeRun>>>,
+    }
+
+    impl Script {
+        /// 提交一个请求，与 `RunManager::start` 走同一个 `submit`：能开跑就当场开，否则排队。
+        fn submit(self: &Arc<Self>, manager: &RunManager, id: &str, behaves: Behaves) {
+            let launch = {
+                let script = Arc::clone(self);
+                let id = id.to_string();
+                move || -> Result<Run, String> {
+                    if behaves == Behaves::FailsToStart {
+                        return Err("线程都没起来".to_string());
+                    }
+                    let run = Arc::new(FakeRun {
+                        id: id.clone(),
+                        behaves,
+                        cancelled: Default::default(),
+                        done: Mutex::new(false),
+                        exited: Default::default(),
+                    });
+                    script.launched.lock().unwrap().push(id.clone());
+                    script.runs.lock().unwrap().insert(id, Arc::clone(&run));
+                    Ok(run)
+                }
+            };
+            let notify = {
+                let script = Arc::clone(self);
+                let id = id.to_string();
+                move |status: &'static str, error: Option<String>| {
+                    script.notified.lock().unwrap().push((id, status, error));
+                }
+            };
+            manager
+                .submit(launch.clone(), || Pending::new(id, launch, notify))
+                .expect("submit 不该失败");
+        }
+        fn run(&self, id: &str) -> Arc<FakeRun> {
+            Arc::clone(&self.runs.lock().unwrap()[id])
+        }
+        fn launched(&self) -> Vec<String> {
+            self.launched.lock().unwrap().clone()
+        }
+        fn notified(&self) -> Vec<(String, &'static str, Option<String>)> {
+            self.notified.lock().unwrap().clone()
+        }
+    }
+
+    /// 收尾线程是异步的：轮询到条件成立，2 s 还不成立就失败。
+    fn eventually(what: &str, cond: impl Fn() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !cond() {
+            assert!(Instant::now() < deadline, "等了 2 s 还没有：{what}");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    /// 修前：`start` 里同步 join 被抢占的 run，而 run_graph 在 Tauri 主线程上 —— 真 app 里抢占一次
+    /// 正在跑霍夫找圆的运行，窗口卡了 7.5 s、被 Windows 判「未响应」（docs/large-image-plan.md §0）。
+    #[test]
+    fn preempting_a_stuck_run_returns_at_once_and_only_the_latest_request_runs_after_it_drains() {
+        let manager = RunManager::new();
+        let s = Arc::new(Script::default());
+        s.submit(&manager, "a", Behaves::Stuck);
+
+        let started = Instant::now();
+        s.submit(&manager, "b", Behaves::Cooperative); // 抢占 a：a 收到取消，但停不下来
+        s.submit(&manager, "c", Behaves::Cooperative); // b 还没开跑就被顶掉
+        s.submit(&manager, "d", Behaves::Cooperative); // c 同理
+        assert!(
+            started.elapsed() < Duration::from_millis(200),
+            "抢占一个停不下来的 run 不该等它：{:?}",
+            started.elapsed()
+        );
+        assert!(s.run("a").was_cancelled(), "被抢占的要收到取消");
+        assert_eq!(s.launched(), ["a"], "a 退出之前一个都不开跑：同一时刻最多一个 run 在算");
+
+        s.run("a").finish();
+        eventually("a 退出后开跑最后一个请求", || s.launched() == ["a", "d"]);
+        assert!(s.notified().is_empty(), "被顶掉的请求不补发事件：{:?}", s.notified());
+        assert_eq!(manager.active_run_id().as_deref(), Some("d"));
+
+        // d 正常跑完进 finished；再来一个不用排队，当场开跑
+        s.run("d").finish();
+        eventually("d 跑完", || manager.active_run_id().is_none());
+        s.submit(&manager, "e", Behaves::Cooperative);
+        assert_eq!(s.launched(), ["a", "d", "e"]);
+    }
+
+    /// 被抢占的 run 收到取消就退出（绝大多数情况）：排队的那一个紧接着开跑。
+    #[test]
+    fn preempting_a_cooperative_run_starts_the_new_one_as_soon_as_it_exits() {
+        let manager = RunManager::new();
+        let s = Arc::new(Script::default());
+        s.submit(&manager, "a", Behaves::Cooperative);
+        s.submit(&manager, "b", Behaves::Cooperative);
+        eventually("a 一取消就退出，b 随即开跑", || s.launched() == ["a", "b"]);
+        assert!(s.run("a").was_cancelled());
+        assert!(s.notified().is_empty());
+    }
+
+    #[test]
+    fn cancelling_a_queued_request_drops_it_and_reports_it_cancelled() {
+        let manager = RunManager::new();
+        let s = Arc::new(Script::default());
+        s.submit(&manager, "a", Behaves::Stuck);
+        s.submit(&manager, "b", Behaves::Cooperative);
+        manager.cancel("b");
+        assert_eq!(s.notified(), [("b".to_string(), "cancelled", None)]);
+
+        s.run("a").finish();
+        eventually("a 排干", || manager.active_run_id().is_none());
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(s.launched(), ["a"], "取消掉的排队请求不该再开跑");
+    }
+
+    #[test]
+    fn stop_active_waits_for_the_draining_run_and_cancels_the_queued_one() {
+        let manager = RunManager::new();
+        let s = Arc::new(Script::default());
+        s.submit(&manager, "a", Behaves::Stuck);
+        s.submit(&manager, "b", Behaves::Cooperative);
+
+        let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopper = {
+            let manager = manager.clone();
+            let stopped = Arc::clone(&stopped);
+            std::thread::spawn(move || {
+                manager.stop_active();
+                stopped.store(true, std::sync::atomic::Ordering::SeqCst);
+            })
+        };
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(
+            !stopped.load(std::sync::atomic::Ordering::SeqCst),
+            "重扫库目录要等被抢占的那个真的退出（它还握着算子描述）"
+        );
+        s.run("a").finish();
+        stopper.join().unwrap();
+        assert_eq!(s.notified(), [("b".to_string(), "cancelled", None)]);
+        assert_eq!(s.launched(), ["a"]);
+    }
+
+    #[test]
+    fn a_queued_request_that_fails_to_start_is_reported_as_an_error() {
+        let manager = RunManager::new();
+        let s = Arc::new(Script::default());
+        s.submit(&manager, "a", Behaves::Stuck);
+        s.submit(&manager, "b", Behaves::FailsToStart);
+        s.run("a").finish();
+        eventually("补发 error", || !s.notified().is_empty());
+        assert_eq!(
+            s.notified(),
+            [("b".to_string(), "error", Some("线程都没起来".to_string()))]
+        );
+        assert!(manager.active_run_id().is_none());
+    }
+
+    /// 补发的那条要能被前端当成一条普通的 run_finished：schema 要的字段齐、status 是三种之一。
+    #[test]
+    fn the_run_finished_for_a_run_that_never_started_has_the_fields_the_schema_requires() {
+        let cancelled = never_started_event("r1", "cancelled", None);
+        for key in ["schemaVersion", "runId", "seq", "kind", "status"] {
+            assert!(!cancelled[key].is_null(), "缺 {key}: {cancelled}");
+        }
+        assert_eq!(cancelled["kind"], "run_finished");
+        assert_eq!(cancelled["seq"], 0);
+        assert!(cancelled.get("error").is_none());
+
+        let failed = never_started_event("r2", "error", Some("线程都没起来"));
+        assert_eq!(failed["error"]["phase"], "execute");
+        assert_eq!(failed["error"]["message"], "线程都没起来");
+    }
 
     /// 测试侧的事件收集器。不经 Tauri —— 值得测的是 libloading 加载 DLL →
     /// C ABI 启动 run → 工作线程回调 → 事件 JSON → cancel/join/free 这一整条。

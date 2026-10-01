@@ -7,6 +7,7 @@
 
 #include "image_test_op.h"
 #include "param_showcase_op.h"
+#include "stall_test_op.h"
 
 namespace lyflow::test {
 
@@ -15,6 +16,7 @@ void registerE2eOps(Registry& r) {
   if (flag == nullptr || std::strcmp(flag, "1") != 0) return;
   registerParamShowcase(r);
   registerImageTestOps(r);
+  registerStallTestOp(r);
 }
 
 }  // namespace lyflow::test
