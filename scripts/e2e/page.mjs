@@ -164,8 +164,11 @@ export async function pickRecipe(cdp, name) {
 }
 
 /** 真实鼠标拖拽。连线吸附、拖节点到线上这类手感项只有真事件才验得到。 */
+/** CDP 的 buttons 是「此刻按着哪些键」的位掩码，要与 button 对得上（右键拖动时 buttons 里没有右键，页面会当它已经松开了）。 */
+const BUTTON_MASK = { left: 1, right: 2, middle: 4 };
+
 export async function dragMouse(cdp, from, to, { steps = 12, button = "left" } = {}) {
-  const common = { button, buttons: 1, clickCount: 1 };
+  const common = { button, buttons: BUTTON_MASK[button] ?? 1, clickCount: 1 };
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y, buttons: 0 });
   await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: from.x, y: from.y, ...common });
   // 先挪 2 px 把 React Flow 的 nodeDragThreshold 吃掉。不这么做的话第一步的位移
@@ -342,10 +345,10 @@ export async function viewerBounds(cdp) {
 }
 
 /** 真鼠标单击（按下、原地松开）。 */
-export async function clickAt(cdp, p) {
-  const common = { x: p.x, y: p.y, button: "left", clickCount: 1 };
+export async function clickAt(cdp, p, { button = "left" } = {}) {
+  const common = { x: p.x, y: p.y, button, clickCount: 1 };
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y, buttons: 0 });
-  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", buttons: 1, ...common });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", buttons: BUTTON_MASK[button] ?? 1, ...common });
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", buttons: 0, ...common });
   await sleep(150);
 }

@@ -18,6 +18,7 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useRightDragPan } from "../hooks/useRightDragPan";
 import { layoutGraph } from "../lib/layout";
 import { useMotionEnabled, viewportMs, withLayoutTransition } from "../lib/motion";
 import {
@@ -299,6 +300,8 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
 
   const { screenToFlowPosition, fitView } = useReactFlow();
   const wrapper = useRef<HTMLDivElement>(null);
+  // 右键在节点 / 连线上拖也平移；拖过之后松手不弹右键菜单
+  useRightDragPan(wrapper);
   // 删除残影挂在这一层（N3）。它在 ViewportPortal 里，坐标就是画布坐标
   const ghostLayer = useRef<HTMLDivElement>(null);
   const motionOn = useMotionEnabled();

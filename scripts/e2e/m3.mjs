@@ -1129,6 +1129,26 @@ async function suiteEditing(cdp, report) {
   await pressCtrl(cdp, "z");
   await sleep(200);
   report.eq("Ctrl+Z 一次都回来", await docCount(), { nodes: beforeDel.nodes, edges: beforeDel.edges });
+
+  // 右键拖动平移（中键与右键平移）：按在节点上拖也平移、松手不弹菜单；不挪的右键单击照样弹节点菜单。
+  // 以前按在节点上拖不动（React Flow 只在空白处接右键平移），松手时指针在哪个节点 / 连线上就弹哪个的菜单
+  const vpAt = () => cdp.eval(`
+    const m = new DOMMatrixReadOnly(getComputedStyle(document.querySelector('.react-flow__viewport')).transform);
+    return { x: Math.round(m.e), y: Math.round(m.f) };
+  `);
+  const anyMenu = () => cdp.eval(`return !!document.querySelector('[data-testid="node-context-menu"], [data-testid="edge-context-menu"]');`);
+  const genHead = await centerOf(cdp, `[data-testid="node-${ids.gen}"] .node__head`);
+  const v0 = await vpAt();
+  await dragMouse(cdp, genHead, { x: genHead.x + 60, y: genHead.y + 40 }, { steps: 8, button: "right" });
+  await sleep(200);
+  const v1 = await vpAt();
+  const menuAfterDrag = await anyMenu();
+  report.ok("右键按在节点上拖：画布跟着平移，松手不弹菜单",
+    Math.abs(v1.x - v0.x - 60) <= 2 && Math.abs(v1.y - v0.y - 40) <= 2 && !menuAfterDrag, JSON.stringify({ v0, v1, menuAfterDrag }));
+  await clickAt(cdp, await centerOf(cdp, `[data-testid="node-${ids.gen}"] .node__head`), { button: "right" });
+  await sleep(200);
+  report.ok("右键单击节点照样弹节点菜单", await cdp.eval(`return !!document.querySelector('[data-testid="node-context-menu"]');`));
+  await pressEscape(cdp);
   await pressEscape(cdp);
 
   // #12 复制粘贴走系统剪贴板（另一个窗口、重开之后也粘得进来）。系统剪贴板换成页面里的桩（stubClipboard）：
