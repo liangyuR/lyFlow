@@ -415,6 +415,26 @@ async function suiteAllTypes(cdp, report, ws) {
       JSON.stringify({ before, after, shown }));
   }
 
+  // 聚焦的数字框上滚滚轮：值不变（浏览器本来会一格一格改它 —— 点过一下框、再滚面板，参数就悄悄变了）
+  {
+    const numSel = `${rowSel(`${ids.show}.iterations`)} input.ctl--num`;
+    await reveal(cdp, rowSel(`${ids.show}.iterations`));
+    const before = (await paramsOf(cdp, ids.show)).iterations;
+    const at = await cdp.eval(`
+      const el = document.querySelector(${lit(numSel)});
+      el.focus();
+      const b = el.getBoundingClientRect();
+      return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) };
+    `);
+    for (let i = 0; i < 3; i += 1) {
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: at.x, y: at.y, deltaX: 0, deltaY: 120 });
+      await sleep(60);
+    }
+    await cdp.eval(`document.activeElement?.blur(); return true;`);
+    await sleep(120);
+    report.eq("聚焦的数字框上滚三下滚轮：值不变", (await paramsOf(cdp, ids.show)).iterations, before);
+  }
+
   // color 的 alpha（overlay 带 alpha 通道）
   await typeIn(cdp, rowSel(`${ids.show}.overlay`), "0.25", { tag: "input.ctl--num" });
   report.ok("color（带 alpha）：A 改成 0.25，其余三个分量不动",

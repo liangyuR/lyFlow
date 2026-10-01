@@ -180,6 +180,11 @@ export function NumberInput({
       onPointerUp={onPointerEnd}
       onPointerCancel={onPointerEnd}
       onFocus={() => (editing.current = true)}
+      // 聚焦的数字框上滚滚轮：浏览器会一格一格改它的值（点过一下框、再滚面板，参数就悄悄变了）。
+      // 先失焦（照常提交打了的字），这一下滚轮就去滚面板
+      onWheel={(e) => {
+        if (document.activeElement === e.currentTarget) e.currentTarget.blur();
+      }}
       onChange={(e) => {
         editing.current = true;
         setText(e.target.value);
