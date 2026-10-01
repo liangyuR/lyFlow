@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { dialogs } from "../lib/dialogs";
 import { baseName, recentFiles } from "../lib/files";
+import { stepHistory } from "../lib/history";
 import { keyHint } from "../lib/keymap";
 import { revealError } from "../lib/revealError";
 import { useCacheStore } from "../store/cache";
@@ -402,8 +403,6 @@ export function Toolbar({
   onCancel,
   onLayout,
 }: ToolbarActions) {
-  const undo = useGraphStore((s) => s.undo);
-  const redo = useGraphStore((s) => s.redo);
   // 选长度而不是调 canUndo()：函数引用不变，组件不会因为栈变化而重渲染。
   const pastLen = useGraphStore((s) => s.past.length);
   const futureLen = useGraphStore((s) => s.future.length);
@@ -432,7 +431,7 @@ export function Toolbar({
         <button
           type="button"
           disabled={pastLen === 0}
-          onClick={undo}
+          onClick={() => stepHistory("undo")}
           aria-label="撤销"
           title={nextUndo ? `撤销：${nextUndo} (Ctrl+Z)` : "撤销 (Ctrl+Z)"}
         >
@@ -441,7 +440,7 @@ export function Toolbar({
         <button
           type="button"
           disabled={futureLen === 0}
-          onClick={redo}
+          onClick={() => stepHistory("redo")}
           aria-label="重做"
           title={nextRedo ? `重做：${nextRedo} (Ctrl+Shift+Z)` : "重做 (Ctrl+Shift+Z)"}
         >

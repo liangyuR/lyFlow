@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { effectiveGraphValues, resolveGraphBinding, specFromParam } from "../src/lib/graphParams.ts";
+import { stepHistory } from "../src/lib/history.ts";
 import { useGraphStore } from "../src/store/graph.ts";
 import { useManifestStore } from "../src/store/manifest.ts";
 import { runParamsOf } from "../src/store/recipe.ts";
@@ -52,6 +53,15 @@ test("多选一起改（检查器）：同一个参数写进每个节点，一�
   assert.equal(g().past.length, steps + 1);
   assert.equal(g().past.at(-1).label, "拖动参数");
   assert.deepEqual(both(), [[0.04, 0.04, 0.04], [0.04, 0.04, 0.04]]);
+
+  // 撤销 / 重做带一句 toast 说是哪一步（Ctrl+Z 是盲按的）；栈空时什么都不做
+  stepHistory("undo");
+  assert.equal(useUiStore.getState().toast?.text, "已撤销：拖动参数");
+  stepHistory("redo");
+  assert.equal(useUiStore.getState().toast?.text, "已重做：拖动参数");
+  useUiStore.getState().hideToast();
+  stepHistory("redo");
+  assert.equal(useUiStore.getState().toast, null, "没有可重做的：不弹");
 
   // 被图参数绑定的那个照样改图参数，不写成节点显式值（每个节点都走 setParam 的路由）
   g().promoteToGraphParam("n_voxel", "leafSize");

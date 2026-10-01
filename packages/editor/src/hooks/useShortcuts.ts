@@ -6,6 +6,7 @@ import { useEffect, type RefObject } from "react";
 import { matchShortcut } from "../lib/keymap";
 import { subgraphIdOf } from "../types/graph";
 import { levelOf } from "../lib/subgraph";
+import { stepHistory } from "../lib/history";
 import { revealError } from "../lib/revealError";
 import { useCompareStore } from "../store/compare";
 import { useExecutionStore } from "../store/execution";
@@ -126,11 +127,11 @@ export function useShortcuts(
 
         case "undo":
           e.preventDefault();
-          graph.undo();
+          stepHistory("undo");
           return;
         case "redo":
           e.preventDefault();
-          graph.redo();
+          stepHistory("redo");
           return;
 
         case "copy":
