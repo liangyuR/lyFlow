@@ -58,6 +58,8 @@ pnpm e2e --only m8b:suiteImagePreviewScale,noderun   # 只跑点名的（两种�
 `--only` 逗号分隔，每一项是模块（文件名：`m3`、`peek`、`params_p2`…）、分组函数名（在哪个模块都算）
 或「模块:分组」。`run` 是 `run.mjs` 开头那五组（中文路径、演示 pipeline、validate、坏参数、取消）——
 它们彼此依赖，只能整块点。点了不存在的名字会在起 app 之前报错，并列出全部可选的。
+分组按函数名挑，所以 `xxxSuites` 数组里放具名函数，不放匿名的箭头函数（name 是空串，`--only` 挑不出来；
+几段共用一个夹具时包一层具名的，见 `m4.mjs` 的 `suiteCompose`）。
 
 调试脚本本身时，另开一个窗口跑
 
