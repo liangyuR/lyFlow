@@ -1278,6 +1278,22 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
           </button>
           <button
             type="button"
+            data-testid="ctx-fit-selection"
+            onClick={() => {
+              // 与 F 键同一档：只对准一个时不放大到糊满屏幕
+              void fitView({
+                nodes: menuTargets().map((id) => ({ id })),
+                duration: viewportMs(motionOn),
+                maxZoom: 1,
+                padding: 0.4,
+              });
+              setMenu(null);
+            }}
+          >
+            对准选中的节点 <kbd>{keyHint("fitSelection")}</kbd>
+          </button>
+          <button
+            type="button"
             data-testid="ctx-fit"
             onClick={() => {
               void fitView({ duration: viewportMs(motionOn) });

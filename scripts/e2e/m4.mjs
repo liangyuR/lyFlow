@@ -99,6 +99,27 @@ async function composeChecks(cdp, report) {
     [ids.gen, ids.crop, ids.voxel].sort());
   report.eq("右键 sor →「选中下游」：它自己与 tail", await selectVia(ids.sor, "ctx-select-downstream"),
     [ids.sor, ids.tail].sort());
+  // 右键「对准选中的节点」（与 F 同一档）：菜单里有这一项、标着 F；点了菜单收起，选中的那段（上一步选的 sor 与 tail）
+  // 落到画布中间
+  const fit = await cdp.eval(`
+    const el = document.querySelector('[data-testid="node-${ids.sor}"]');
+    const r = el.getBoundingClientRect();
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 10, clientY: r.top + 10 }));
+    await new Promise((d) => setTimeout(d, 150));
+    const btn = document.querySelector('[data-testid="ctx-fit-selection"]');
+    if (!btn) return null;
+    const key = btn.querySelector('kbd')?.textContent ?? '';
+    btn.click();
+    await new Promise((d) => setTimeout(d, 600));
+    const pane = document.querySelector('.react-flow__pane').getBoundingClientRect();
+    const a = document.querySelector('[data-testid="node-${ids.sor}"]').getBoundingClientRect();
+    const b = document.querySelector('[data-testid="node-${ids.tail}"]').getBoundingClientRect();
+    const mid = (Math.min(a.left, b.left) + Math.max(a.right, b.right)) / 2;
+    return { key, menuClosed: !document.querySelector('[data-testid="ctx-fit-selection"]'),
+             dx: Math.round(mid - (pane.left + pane.width / 2)) };
+  `);
+  report.ok("右键「对准选中的节点」（标着 F）：点了菜单收起、视图对准它",
+    fit?.key === "F" && fit.menuClosed && Math.abs(fit.dx) < 60, JSON.stringify(fit));
   await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([], []); return true;`);
 
   const flat = await runAndWait(cdp, () => pressF5(cdp));
