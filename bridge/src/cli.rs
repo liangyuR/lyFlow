@@ -1551,6 +1551,12 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         return EXIT_USAGE;
     };
     let target_file = parsed.positional[2].clone();
+    // 写错的格式（--format asci）以前一路传到写盘那里，落进「其余一律 binary」悄悄写成二进制
+    const FORMATS: &[&str] = &["binary", "ascii", "binary_compressed"];
+    let format = parsed.one("format").unwrap_or("binary").to_string();
+    if !FORMATS.contains(&format.as_str()) {
+        return fail(err, &format!("--format 只认 {}，收到 {format}", FORMATS.join(" / ")), EXIT_USAGE);
+    }
     let core = match core() {
         Ok(c) => c,
         Err(e) => return fail(err, &e, EXIT_FAILED),
@@ -1585,7 +1591,6 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         return result.exit_code();
     }
     // dump 的目标路径按当前工作目录解析，不跟着图文件走 —— 命令行里的路径就该是命令行的
-    let format = parsed.one("format").unwrap_or("binary").to_string();
     let run_id = result.events
         .first()
         .and_then(|e| e["runId"].as_str())
@@ -2699,6 +2704,7 @@ mod tests {
             (vec!["run", &unknown], EXIT_INVALID, "a：当前 core 没有注册算子 'nope.op'（unknown_op）"),
             (vec!["validate", &unknown], EXIT_INVALID, "1 条错误：\n  a：当前 core 没有注册算子"),
             (vec!["run", &empty, "--to", "zzz"], EXIT_FAILED, "目标不存在: zzz（unknown_node）"),
+            (vec!["dump", &graph, "v:cloud", "out.pcd", "--format", "asci"], EXIT_USAGE, "--format 只认 binary / ascii / binary_compressed，收到 asci"),
         ];
         for (args, code, want) in &cases {
             let r = cli(args);
