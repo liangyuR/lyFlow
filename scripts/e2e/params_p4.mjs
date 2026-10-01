@@ -15,7 +15,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { sleep } from "./cdp.mjs";
-import { clickSelector as click, lit, mustOk, newDoc, pickRecipe, pressCtrl, pressF5, runAndWait, saveGraphTo } from "./page.mjs";
+import {
+  buildGraph,
+  clickSelector as click,
+  lit,
+  mustOk,
+  newDoc,
+  pickRecipe,
+  pressCtrl,
+  pressF5,
+  runAndWait,
+  saveGraphTo,
+} from "./page.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CLI = path.join(ROOT, "bridge", "target", "debug", "lyflow.exe");
@@ -192,20 +203,63 @@ async function suiteCliMatchesEditor(cdp, report, ws) {
 
 const EIGHT = "车门缝隙检测左前";
 
+/** 验收 26 留下的那种状态，用合成小图搭：图存在中文工作区里、一个图参数纳入了配方、选着配方、跑过一次。
+ *  返回接下来改哪个图参数、改成多少（改了就是「已过时 + 将重算 + 配方没存」）。 */
+async function crowdedRecipeState(cdp, ws) {
+  const dir = path.join(ws.dir, "工具栏宽度");
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  const graphFile = path.join(dir, "合成小图.lyflow.json");
+  await newDoc(cdp);
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setAutoRun(false); return true;`);
+  const ids = await buildGraph(
+    cdp,
+    [
+      { key: "gen", op: "gen.synthetic", params: { pointCount: 4000 } },
+      { key: "voxel", op: "filter.voxel_grid" },
+    ],
+    [{ from: ["gen", "cloud"], to: ["voxel", "cloud"] }],
+  );
+  const param = await cdp.eval(
+    `return window.__lyflow.stores.graph.getState().promoteToGraphParam(${lit(ids.voxel)}, 'minPointsPerVoxel');`,
+  );
+  mustOk(typeof param === "string", "minPointsPerVoxel 纳入配方（成为图参数）", param);
+  await saveGraphTo(cdp, graphFile);
+  const made = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    if (!g.createRecipe(${lit(RECIPE)})) return 'create';
+    g.setRecipeValue(${lit(RECIPE)}, ${lit(param)}, 2);
+    return 'ok';
+  `);
+  mustOk(made === "ok", "新建配方并写进一个值", made);
+  mustOk((await pickRecipe(cdp, RECIPE)) === "ok", "工具栏下拉框选中配方");
+  await saveByKey(cdp);
+  const run = await runAndWait(cdp, () => pressF5(cdp));
+  mustOk(run.status === "ok", "合成小图跑过一次", run.status);
+  return { param, value: 3 };
+}
+
 /** 1280–1440 宽时图名框完整放下 8 个汉字；工具栏里什么都不溢出、运行区的状态字不被裁、配方下拉框在窗口里。
  *  状态照 P3 截图那样挤：跑过一次（done N）、改过参数（已过时 + 将重算 N 个）、有文件名、选着配方且没存。 */
-async function suiteToolbarWidth(cdp, report) {
+async function suiteToolbarWidth(cdp, report, ws) {
   report.section("顺手修：1280–1440 宽的窗口里，工具栏的图名框完整放下 8 个汉字");
-  const state = await cdp.eval(`
+  const readState = () => cdp.eval(`
     const b = window.__lyflow;
     const g = b.stores.graph.getState();
     return { file: g.filePath, recipe: b.snapshot().recipe?.current ?? null };
   `);
-  report.ok("前置：图有路径、选着配方（接着验收 26 的状态）", Boolean(state.file) && state.recipe === RECIPE, JSON.stringify(state));
+  let state = await readState();
+  // 接着验收 26 的状态；它没跑（KUN10 数据不在）就自己搭一个一样挤的，这一组照样验得到
+  let tweak = { param: "levelDepth", value: 1.1 };
+  if (!(state.file && state.recipe === RECIPE)) {
+    tweak = await crowdedRecipeState(cdp, ws);
+    state = await readState();
+  }
+  report.ok("前置：图有路径、选着配方、跑过一次", Boolean(state.file) && state.recipe === RECIPE, JSON.stringify(state));
   await cdp.eval(`
     const g = window.__lyflow.stores.graph.getState();
     g.setName(${lit(EIGHT)});
-    g.setRecipeValue(${lit(RECIPE)}, 'levelDepth', 1.1);
+    g.setRecipeValue(${lit(RECIPE)}, ${lit(tweak.param)}, ${tweak.value});
     return true;
   `);
   await cdp.eval(`await window.__lyflow.plan(); return true;`);
