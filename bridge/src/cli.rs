@@ -6,6 +6,7 @@ use std::ffi::CStr;
 use std::io::Write;
 use std::os::raw::{c_char, c_void};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::{json, Value};
@@ -93,6 +94,8 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
         --jobs <n>（eval / sweep / perturb）：同时跑 n 次（默认 1，一次接一次），输出仍按原顺序、
                  除 durationMs 外逐行相同；内存大约是 n 倍。--parallel 是一次运行里的节点并行度，与它无关。
                  Ctrl+C 一次取消全部在跑的。
+        进度（eval / sweep / perturb）：stdout 重定向到文件、stderr 还在终端上时（… > rows.jsonl），
+                 stderr 上原地刷新一行「[k/总数] 样本 · 状态 · 耗时 · 还要约 …」，收场时清掉；管道里没有。
         --recipe 作用于所有样本；--params 的参数组里不含「.」的键写顶层图参数。
         叠加顺序：基础（default）→ --recipe → 参数组 → --param。
         每行 eval_row **默认不带** summary（ADR-0022）；--summary 打开。
@@ -476,11 +479,65 @@ mod console {
             SetConsoleCtrlHandler(Some(on_break), 1);
         }
     }
+
+    #[repr(C)]
+    struct Coord {
+        x: i16,
+        y: i16,
+    }
+
+    #[repr(C)]
+    struct SmallRect {
+        left: i16,
+        top: i16,
+        right: i16,
+        bottom: i16,
+    }
+
+    #[repr(C)]
+    struct ScreenBufferInfo {
+        size: Coord,
+        cursor: Coord,
+        attributes: u16,
+        window: SmallRect,
+        max_window: Coord,
+    }
+
+    extern "system" {
+        fn GetStdHandle(which: u32) -> *mut std::ffi::c_void;
+        fn GetConsoleScreenBufferInfo(console: *mut std::ffi::c_void, info: *mut ScreenBufferInfo) -> i32;
+    }
+
+    /// stderr 所在控制台窗口有多宽（列数）。不是控制台时 None。
+    pub fn stderr_width() -> Option<usize> {
+        const STD_ERROR_HANDLE: u32 = -12i32 as u32;
+        let mut info = ScreenBufferInfo {
+            size: Coord { x: 0, y: 0 },
+            cursor: Coord { x: 0, y: 0 },
+            attributes: 0,
+            window: SmallRect { left: 0, top: 0, right: 0, bottom: 0 },
+            max_window: Coord { x: 0, y: 0 },
+        };
+        // SAFETY: GetStdHandle 不会失败到 UB；info 是本函数里的栈上对象，调用期间一直有效
+        let ok = unsafe { GetConsoleScreenBufferInfo(GetStdHandle(STD_ERROR_HANDLE), &mut info) };
+        let cols = i32::from(info.window.right) - i32::from(info.window.left) + 1;
+        (ok != 0 && cols > 0).then_some(cols as usize)
+    }
 }
 
 #[cfg(not(windows))]
 mod console {
     pub fn install() {}
+
+    /// 没有控制台 API 可问：认 shell 导出的 COLUMNS，没有就 None（进度行不截断）。
+    pub fn stderr_width() -> Option<usize> {
+        std::env::var("COLUMNS").ok()?.parse().ok()
+    }
+}
+
+/// stderr 所在终端有多宽（列数）。进度行按它截断：比窗口宽就会折行，原地刷新就不灵了。
+pub(crate) fn stderr_width() -> Option<usize> {
+    console::stderr_width()
 }
 
 pub(crate) struct RunResult {
@@ -1517,10 +1574,12 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         .first()
         .map(|ps| ps.display.keys().cloned().collect())
         .unwrap_or_default();
-    let worst = {
+    let mut progress = eval::Progress::new(err, param_sets.len());
+    let result = {
         let mut on_row = |row: &eval::Row| {
             let combo = param_sets[row.param_set].display.clone();
             let value = row.metrics.first().copied().flatten();
+            progress.row(&eval::progress_text(row, None, true));
             json_line(
                 out,
                 &json!({
@@ -1541,16 +1600,18 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             cells.push(value.map(|v| v.to_string()).unwrap_or_default());
             csv_rows.push(cells.join(","));
         };
-        match engine.run(&mut on_row) {
-            Ok(c) => c,
-            Err(eval::EngineError::Failed(e)) => return fail(err, &e, EXIT_FAILED),
-            Err(eval::EngineError::Usage(message, available)) => {
-                line(err, &message);
-                for p in available.iter().take(200) {
-                    line(err, &format!("  {p}"));
-                }
-                return EXIT_USAGE;
+        engine.run(&mut on_row)
+    };
+    progress.clear();
+    let worst = match result {
+        Ok(c) => c,
+        Err(eval::EngineError::Failed(e)) => return fail(err, &e, EXIT_FAILED),
+        Err(eval::EngineError::Usage(message, available)) => {
+            line(err, &message);
+            for p in available.iter().take(200) {
+                line(err, &format!("  {p}"));
             }
+            return EXIT_USAGE;
         }
     };
 
@@ -1898,8 +1959,22 @@ pub fn load_library(dirs: &[String]) -> Vec<String> {
     core.set_library_dirs(&existing).unwrap_or_default()
 }
 
+/// stderr 是终端、stdout 不是（`lyflow eval … > rows.jsonl`）：这时 eval / sweep / perturb 才在 stderr 上
+/// 画一行进度（eval::Progress）。只有真正的 `lyflow` 进程（main）会打开：run_cli 的测试、MCP 的管道里
+/// 永远是关的；stdout 也在终端上时 JSON 行本身就在滚，再插一行进度只会把两者搅在一起。
+static PROGRESS_LINE: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn progress_line() -> bool {
+    PROGRESS_LINE.load(Ordering::Relaxed)
+}
+
 pub fn main() -> i32 {
+    use std::io::IsTerminal;
     let args: Vec<String> = std::env::args().skip(1).collect();
+    PROGRESS_LINE.store(
+        std::io::stderr().is_terminal() && !std::io::stdout().is_terminal(),
+        Ordering::Relaxed,
+    );
     let out = sink_of(std::io::stdout());
     let err = sink_of(std::io::stderr());
     for problem in load_library(&library_dirs()) {

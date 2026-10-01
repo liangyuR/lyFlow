@@ -659,9 +659,11 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
 
     let mut rows: Vec<Row> = Vec::new();
-    let code = {
+    let mut progress = crate::eval::Progress::new(err, param_sets.len() * run_samples.len());
+    let result = {
         let mut on_row = |row: &Row| {
             let sample = &run_samples[row.sample];
+            progress.row(&crate::eval::progress_text(row, Some(&sample.id), param_sets.len() > 1));
             let mut m = Map::new();
             for (metric, value) in metrics.iter().zip(&row.metrics) {
                 m.insert(metric.raw.clone(), num(*value));
@@ -687,10 +689,12 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             kept.sample = index_of[row.sample];
             rows.push(kept);
         };
-        match engine.run(&mut on_row) {
-            Ok(c) => c,
-            Err(e) => return report_engine_error(e, err),
-        }
+        engine.run(&mut on_row)
+    };
+    progress.clear();
+    let code = match result {
+        Ok(c) => c,
+        Err(e) => return report_engine_error(e, err),
     };
 
     let mut worst = code;

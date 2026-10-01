@@ -328,6 +328,9 @@ lyflow eval 4.lyflow.json --samples-dir kun10/sensor --sample-subdir 4 \
   core 的线程预算按整个进程在算的节点数分，几次加起来不超订。
   4 核 8 线程的笔记本上：全是单线程算子的图约 1.8×，统计离群点这种自己就吃满核的图 1.3–1.5×。
   `--parallel` 是传给 core 的节点并行度（一次运行里），与 `run` 同义。缓存默认开。
+- **进度行**：stdout 重定向到文件、stderr 还在终端上时（`lyflow eval … > rows.jsonl`），stderr 上原地刷新一行
+  `[k/总数] 样本 · 参数组 · 状态 · 耗时 · 还要约 …`，收场时清掉（`eval::Progress`）。`\r` 加补空格、
+  按控制台宽度截断，不靠 ANSI 转义；管道、MCP、`run_cli` 的测试里一个字节都不多（开关只在 `cli::main` 里设）。
 - `sweep` 现在是这套引擎上的一层壳，只负责轴展开与 `sweep_row` 的老形状；
   它的 `--metric nodeId:port.field` 老写法两个子命令都还认。
 

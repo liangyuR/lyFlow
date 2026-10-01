@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
@@ -839,6 +840,136 @@ pub(crate) struct Engine<'a> {
     pub jobs: usize,
 }
 
+/// 终端里的一行进度：「[k/总数] 样本 · 状态 · 耗时 · 还要约 …」，同一行原地刷新（`\r` 加补空格，
+/// 不靠 ANSI 转义 —— 老的 Windows 控制台不认），收场时清掉。开不开看 `cli::progress_line()`：
+/// 关着的时候一个字都不写。
+pub(crate) struct Progress<'a> {
+    err: &'a Sink,
+    on: bool,
+    total: usize,
+    done: usize,
+    started: std::time::Instant,
+    /// 上一次写出去的显示宽度：下一次比它短时补空格盖掉
+    width: usize,
+    /// 终端有多宽：写满一整行会折行（光标到了下一行，\r 回不去），所以最多写到 cols - 1 列
+    cols: Option<usize>,
+}
+
+impl<'a> Progress<'a> {
+    pub(crate) fn new(err: &'a Sink, total: usize) -> Self {
+        let on = crate::cli::progress_line();
+        Self::with(err, total, on, if on { crate::cli::stderr_width() } else { None })
+    }
+
+    fn with(err: &'a Sink, total: usize, on: bool, cols: Option<usize>) -> Self {
+        Self {
+            err,
+            on,
+            total,
+            done: 0,
+            started: std::time::Instant::now(),
+            width: 0,
+            cols,
+        }
+    }
+
+    /// 又交出了一行。
+    pub(crate) fn row(&mut self, what: &str) {
+        if !self.on {
+            return;
+        }
+        self.done += 1;
+        let left = self.total.saturating_sub(self.done);
+        let eta = if left > 0 {
+            let per = self.started.elapsed().as_secs_f64() / self.done as f64;
+            format!(" · 还要约 {}", human_seconds(per * left as f64))
+        } else {
+            String::new()
+        };
+        let mut text = format!("[{}/{}] {what}{eta}", self.done, self.total);
+        if let Some(cols) = self.cols {
+            text = truncate_to_width(&text, cols.saturating_sub(1));
+        }
+        let width = display_width(&text);
+        let pad = " ".repeat(self.width.saturating_sub(width));
+        self.write(&format!("\r{text}{pad}"));
+        self.width = width;
+    }
+
+    /// 清掉进度行，光标回到行首 —— 之后的 stderr 照常一行行写。
+    pub(crate) fn clear(&mut self) {
+        if self.on && self.width > 0 {
+            self.write(&format!("\r{}\r", " ".repeat(self.width)));
+            self.width = 0;
+        }
+    }
+
+    fn write(&self, text: &str) {
+        if let Ok(mut w) = self.err.lock() {
+            let _ = w.write_all(text.as_bytes());
+            let _ = w.flush();
+        }
+    }
+}
+
+/// 进度行里的「样本 · 参数组 · 状态 · 耗时」。参数组只有一个时不写。
+pub(crate) fn progress_text(row: &Row, sample: Option<&str>, many_sets: bool) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(id) = sample {
+        parts.push(truncate_to_width(id, 32));
+    }
+    if many_sets {
+        parts.push(format!("参数组 {}", row.param_set));
+    }
+    parts.push(row.status.clone());
+    parts.push(format!("{:.0} ms", row.duration_ms));
+    parts.join(" · ")
+}
+
+/// 截到 max 列以内，截掉了就以「…」结尾。
+fn truncate_to_width(s: &str, max: usize) -> String {
+    if display_width(s) <= max {
+        return s.to_string();
+    }
+    const ELLIPSIS: char = '…';
+    let room = max.saturating_sub(char_width(ELLIPSIS));
+    let mut out = String::new();
+    let mut used = 0;
+    for c in s.chars() {
+        let w = char_width(c);
+        if used + w > room {
+            break;
+        }
+        out.push(c);
+        used += w;
+    }
+    out.push(ELLIPSIS);
+    out
+}
+
+/// 终端里的显示宽度。U+1100 以上一律按两格算：中日韩字符确实占两格，「…」这类在中文控制台里
+/// 也常画成两格 —— 宁可多算（多补几个空格、早一点截断），少算就会折行或留下残字。
+fn display_width(s: &str) -> usize {
+    s.chars().map(char_width).sum()
+}
+
+fn char_width(c: char) -> usize {
+    if (c as u32) >= 0x1100 {
+        2
+    } else {
+        1
+    }
+}
+
+fn human_seconds(s: f64) -> String {
+    let s = s.round().max(0.0) as u64;
+    match s {
+        0..=59 => format!("{s} 秒"),
+        60..=3599 => format!("{} 分 {} 秒", s / 60, s % 60),
+        _ => format!("{} 小时 {} 分", s / 3600, s % 3600 / 60),
+    }
+}
+
 /// 一行的状态对应的退出码。
 fn row_exit(status: &str) -> i32 {
     match status {
@@ -1456,9 +1587,11 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     }
 
     let mut rows: Vec<Row> = Vec::new();
-    let code = {
+    let mut progress = Progress::new(err, param_sets.len() * samples.len());
+    let result = {
         let mut on_row = |row: &Row| {
             let sample = &samples[row.sample];
+            progress.row(&progress_text(row, Some(&sample.id), param_sets.len() > 1));
             let mut m = Map::new();
             for (metric, value) in metrics.iter().zip(&row.metrics) {
                 m.insert(
@@ -1486,30 +1619,32 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             json_line(out, &line_json);
             rows.push(row.clone());
         };
-        match engine.run(&mut on_row) {
-            Ok(c) => c,
-            Err(EngineError::Failed(e)) => {
-                line(err, &e);
-                return EXIT_FAILED;
-            }
-            Err(EngineError::Usage(message, available)) => {
-                line(err, &message);
-                if available.is_empty() {
-                    line(err, "这张图跑完一次后没有任何标量路径可取");
-                } else {
-                    line(err, "这张图上可用的标量路径：");
-                    for p in available.iter().take(MAX_LISTED_PATHS) {
-                        line(err, &format!("  {p}"));
-                    }
-                    if available.len() > MAX_LISTED_PATHS {
-                        line(
-                            err,
-                            &format!("  …还有 {} 条", available.len() - MAX_LISTED_PATHS),
-                        );
-                    }
+        engine.run(&mut on_row)
+    };
+    progress.clear();
+    let code = match result {
+        Ok(c) => c,
+        Err(EngineError::Failed(e)) => {
+            line(err, &e);
+            return EXIT_FAILED;
+        }
+        Err(EngineError::Usage(message, available)) => {
+            line(err, &message);
+            if available.is_empty() {
+                line(err, "这张图跑完一次后没有任何标量路径可取");
+            } else {
+                line(err, "这张图上可用的标量路径：");
+                for p in available.iter().take(MAX_LISTED_PATHS) {
+                    line(err, &format!("  {p}"));
                 }
-                return EXIT_USAGE;
+                if available.len() > MAX_LISTED_PATHS {
+                    line(
+                        err,
+                        &format!("  …还有 {} 条", available.len() - MAX_LISTED_PATHS),
+                    );
+                }
             }
+            return EXIT_USAGE;
         }
     };
 
@@ -1979,6 +2114,68 @@ mod tests {
                                  "data": {"point_counts": {"left": 640, "right": 512}}}},
             "cloud": {"node": "n_c", "port": "cloud", "type": "PointCloud", "elementCount": 99}
         })
+    }
+
+    #[derive(Clone, Default)]
+    struct Buf(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Buf {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// 进度行：同一行原地刷新（短的那次补空格盖掉长的），清掉之后是一行空白、光标在行首；
+    /// 关着的时候（管道、MCP、测试）一个字节都不写。
+    #[test]
+    fn the_progress_line_rewrites_itself_and_stays_silent_when_off() {
+        let buf = Buf::default();
+        let sink = crate::cli::sink_of(buf.clone());
+        let row = |status: &str, ms: f64| Row {
+            param_set: 0,
+            sample: 0,
+            status: status.to_string(),
+            metrics: Vec::new(),
+            errors: Vec::new(),
+            duration_ms: ms,
+            skipped: Vec::new(),
+            summary: None,
+        };
+        let text = || String::from_utf8(buf.0.lock().unwrap().clone()).unwrap();
+
+        let mut off = Progress::with(&sink, 2, false, Some(80));
+        off.row(&progress_text(&row("ok", 1.0), Some("a"), false));
+        off.clear();
+        assert_eq!(text(), "");
+
+        let mut p = Progress::with(&sink, 2, true, None);
+        p.row(&progress_text(&row("validation_failed", 12.0), Some("一个很长的样本名"), true));
+        let first = text();
+        assert!(first.starts_with("\r[1/2] 一个很长的样本名 · 参数组 0 · validation_failed · 12 ms · 还要约 "), "{first}");
+        p.row(&progress_text(&row("ok", 3.0), Some("b"), false));
+        let second = text()[first.len()..].to_string();
+        assert!(second.starts_with("\r[2/2] b · ok · 3 ms"), "{second}");
+        assert!(!second.contains("还要约"), "最后一行不报剩余时间");
+        assert_eq!(display_width(&second), display_width(&first), "短的这次补空格盖掉上一行");
+        p.clear();
+        let cleared = text()[first.len() + second.len()..].to_string();
+        assert!(cleared.starts_with('\r') && cleared.ends_with('\r') && cleared.trim().is_empty());
+
+        // 比终端窄一列以内：写满一整行会折行，\r 就回不到这一行了
+        let mut narrow = Progress::with(&sink, 9, true, Some(20));
+        let before = text().len();
+        narrow.row(&progress_text(&row("ok", 3.0), Some("一个很长的样本名"), true));
+        let shown = text()[before..].to_string();
+        let w = display_width(shown.trim_start_matches('\r'));
+        assert!(w <= 19 && shown.ends_with('…'), "{shown:?} {w}");
+
+        assert_eq!(human_seconds(42.4), "42 秒");
+        assert_eq!(human_seconds(125.0), "2 分 5 秒");
+        assert_eq!(human_seconds(7300.0), "2 小时 1 分");
     }
 
     /// 第 k 个任务睡 (n - k) × 2 ms：越靠后的越先做完，交出的顺序仍是 0..n。
