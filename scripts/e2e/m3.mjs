@@ -1206,6 +1206,50 @@ async function suiteEditing(cdp, report) {
   report.eq("Ctrl+V 没去调 navigator.clipboard.readText", await cdp.eval(`return window.__lyClipReads;`), 0);
   await restoreClipboard(cdp);
 
+  // 键盘焦点在控件上：Tab / Space 归控件（挪焦点、按下去），不开算子搜索；空白处 Tab 照样开搜索。焦点在勾选框上
+  // Ctrl+Z 照样撤销。以前 Tab / Space 一律开搜索（键盘按不了工具栏的按钮），勾选框、滑块又当成输入框，快捷键全被拦
+  await cdp.eval(`if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); return true;`);
+  await pressKey(cdp, "Tab", 9);
+  await sleep(200);
+  report.ok("空白处按 Tab：开算子搜索", await cdp.eval(`return !!document.querySelector('.search-popup');`));
+  await pressEscape(cdp);
+  await sleep(150);
+  await cdp.eval(`document.querySelector('[data-testid="library-toggle"]').focus(); return true;`);
+  await pressKey(cdp, " ", 32);
+  await sleep(250);
+  report.eq("焦点在工具栏按钮上按 Space：按下它，不开算子搜索",
+    await cdp.eval(`return { menu: !!document.querySelector('[data-testid="library-menu"]'), search: !!document.querySelector('.search-popup') };`),
+    { menu: true, search: false });
+  await cdp.eval(`document.querySelector('[data-testid="library-toggle"]').click(); return true;`);
+  await cdp.eval(`
+    window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}], []);
+    return true;
+  `);
+  await sleep(250);
+  await cdp.eval(`
+    for (const el of document.querySelectorAll('[data-testid^="inspector-advanced-"]')) {
+      const s = el.matches('summary, button') ? el : el.querySelector('summary, button');
+      (s ?? el).click();
+    }
+    return true;
+  `);
+  await sleep(200);
+  const checkOf = () => cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    return { value: g.doc.nodes.find((n) => n.id === ${lit(ids.gen)}).params.withIntensity ?? null, past: g.past.length };
+  `);
+  const c0 = await checkOf();
+  await cdp.eval(`document.querySelector('[data-testid="param-withIntensity"] input[type="checkbox"]').focus(); return true;`);
+  await pressKey(cdp, " ", 32);
+  await sleep(150);
+  const c1 = await checkOf();
+  await pressKey(cdp, "z", 90, ["ctrl"]);
+  await sleep(150);
+  const c2 = await checkOf();
+  report.ok("焦点在勾选框上：Space 勾掉它，Ctrl+Z 撤回来",
+    c1.value === false && c1.past === c0.past + 1 && c2.value === c0.value && c2.past === c0.past, JSON.stringify({ c0, c1, c2 }));
+  await cdp.eval(`if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); return true;`);
+
   // #29 快捷键面板。先移开焦点：上一组把焦点留在了参数输入框里，
   // 而键表里 help 没标 inTextField，会被「打字时不拦键」的铁律挡掉。
   await cdp.eval(`

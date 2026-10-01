@@ -20,16 +20,24 @@ import { usePeekStore, type PeekWindow } from "../store/peek";
 import { useUiStore } from "../store/ui";
 import { useModalStore } from "../lib/modal";
 
+/** 打字用的 input。勾选框、滑块、颜色、文件这些 input 不打字 —— 以前一律当输入框，点过勾选框、拖过滑块之后
+ *  焦点留在上面，Ctrl+Z、Delete、F 都没反应。 */
+const TYPING_INPUTS = new Set(["text", "search", "number", "email", "url", "tel", "password", "date", "datetime-local", "month", "time", "week"]);
+
 function inTextField(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   if (!el) return false;
   const tag = el.tagName;
-  return (
-    tag === "INPUT" ||
-    tag === "TEXTAREA" ||
-    tag === "SELECT" ||
-    el.isContentEditable === true
-  );
+  if (tag === "INPUT") return TYPING_INPUTS.has((el as HTMLInputElement).type);
+  return tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable === true;
+}
+
+/** 按钮、链接、各种 input 这些控件：Tab 在它们之间挪焦点、Space 按下它们。 */
+const CONTROL_SELECTOR =
+  'button, a[href], summary, input, select, textarea, [role="button"], [role="menuitem"], [role="tab"], [role="checkbox"], [role="switch"], [role="slider"], [role="option"]';
+
+function onControl(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(CONTROL_SELECTOR) !== null;
 }
 
 /** 焦点在输入框里时先让它提交：数字框、文字框都是失焦才提交，不先提交的话 F5 跑的、Ctrl+S 存的是打字之前的值
@@ -253,6 +261,9 @@ export function useShortcuts(
           return;
         }
         case "search":
+          // 焦点在按钮、勾选框这些控件上时 Tab / Space 是它们自己的（挪焦点、按下去）。以前一律拿去开算子搜索：
+          // 用键盘点不了工具栏的按钮，Tab 也走不出去
+          if (onControl(e.target)) return;
           e.preventDefault();
           ui.openSearch({
             screen: handlers.cursorScreenPosition(),
