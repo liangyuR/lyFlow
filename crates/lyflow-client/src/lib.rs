@@ -947,6 +947,11 @@ impl ImageView {
     }
 
     /// 借一段调用方的内存当 ImageView 用，不走 core —— 给宿主测自己的编码路径。
+    ///
+    /// # Safety
+    ///
+    /// 视图只记下 `pixels` 的裸指针，不带生命周期：视图（以及从它取出的切片）在用的期间，
+    /// `pixels` 必须一直活着、不被改动。行数按 `pixels.len() / 每行字节数` 算，不满一行的尾巴不算。
     #[cfg(any(test, feature = "test-util"))]
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn borrowed(
@@ -971,7 +976,7 @@ impl ImageView {
                 full_width: full.0,
                 full_height: full.1,
                 row_offset,
-                row_count: if row_bytes == 0 { 0 } else { pixels.len() as u32 / row_bytes },
+                row_count: (pixels.len() as u32).checked_div(row_bytes).unwrap_or(0),
                 row_bytes,
                 pixels: pixels.as_ptr(),
                 handle: std::ptr::null_mut(),
@@ -1082,6 +1087,10 @@ impl TensorView {
 
     /// 借一段调用方的内存当 TensorView 用，不走 core —— 给宿主测自己的编码路径。
     /// 挂在 `test-util` 后面：它绕过了 core 的所有权约定，不该出现在生产构建里。
+    ///
+    /// # Safety
+    ///
+    /// 视图只记下 `shape` 与 `data` 的裸指针，不带生命周期：视图在用的期间，两者必须一直活着、不被改动。
     #[cfg(any(test, feature = "test-util"))]
     pub unsafe fn borrowed(
         core: Arc<Core>,
@@ -1163,8 +1172,14 @@ unsafe impl Send for RunHandle {}
 unsafe impl Sync for RunHandle {}
 
 impl RunHandle {
-    /// 启动一次运行。`user` 由本函数接管，join 之后才会被释放。调用者须保证
-    /// `cb` 能安全地在 core 的工作线程上被调用，且只解引用 `user`。
+    /// 启动一次运行。`user` 由本函数接管，join 之后才会被释放。
+    ///
+    /// # Safety
+    ///
+    /// - `cb` 会在 core 的工作线程上被调用，几个节点并行时还会同时被调用，直到 join 返回为止：
+    ///   它必须能跨线程安全地执行，而且不能让 panic 展开穿过它（展开穿过 C++ 栈帧是未定义行为，
+    ///   bridge 的回调用 `catch_unwind` 兜着）。
+    /// - `cb` 拿到的 user 指针只能按 `T` 解引用、只读或自带同步；它在 join 返回之后才被释放。
     pub unsafe fn start<T>(
         core: Arc<Core>,
         spec: RunSpec<'_>,

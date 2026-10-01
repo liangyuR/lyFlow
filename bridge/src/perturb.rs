@@ -198,7 +198,7 @@ pub(crate) fn insert_after(
             };
         }
     }
-    for (_, out) in doc.outputs.iter_mut() {
+    for out in doc.outputs.values_mut() {
         if out.node == node && out.port == port {
             out.node = id.clone();
             out.port = "cloud".to_string();

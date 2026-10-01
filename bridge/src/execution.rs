@@ -995,8 +995,7 @@ mod tests {
         fn final_state(&self, node: &str) -> String {
             self.events
                 .iter()
-                .filter(|e| e["kind"] == "node_state" && e["nodeId"] == node)
-                .last()
+                .rfind(|e| e["kind"] == "node_state" && e["nodeId"] == node)
                 .map(|e| e["state"].as_str().unwrap_or("").to_string())
                 .unwrap_or_default()
         }

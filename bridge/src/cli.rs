@@ -465,8 +465,7 @@ impl RunResult {
     fn final_state(&self, node_id: &str) -> Option<String> {
         self.events
             .iter()
-            .filter(|e| e["kind"] == "node_state" && e["nodeId"] == node_id)
-            .last()
+            .rfind(|e| e["kind"] == "node_state" && e["nodeId"] == node_id)
             .and_then(|e| e["state"].as_str().map(str::to_owned))
     }
 
@@ -3126,8 +3125,7 @@ mod tests {
         events
             .iter()
             .filter(|e| e["kind"] == "node_state" && e["nodeId"] == node)
-            .filter(|e| e["state"] == "done" || e["state"] == "skipped")
-            .last()
+            .rfind(|e| e["state"] == "done" || e["state"] == "skipped")
             .and_then(|e| e["stats"]["elementCount"].as_i64())
     }
 
