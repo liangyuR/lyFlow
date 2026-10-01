@@ -71,4 +71,12 @@
 
 ## 数字
 
-（全量实测后填）
+2026-10-01 全量实测（testing.md 的表同步更新）：
+
+- doctest：默认 178 例（+5：`test_pixel_scale.cpp` 4 例、std-image 1 例）；`LYFLOW_PACKS=dts` 186；`gap;dts` 268。全过。
+- cargo：lib 145（+6，状态机）；纯平台构建 87 通过 / 58 ignored；`tests/host.rs` 11 通过 / 2 ignored；`tests/disk_cache.rs` 2。全过。
+- editor 79（+2，分段取图）；MCP 31（+1，分段取图）。
+- e2e（`LYFLOW_PACKS=gap;dts`）：756 条断言、102 个分组（+4 条、+2 组）；753 通过，失败的 3 条是 KUN10 缺数据的已知项
+  （P4 验收 26 与依赖它状态的工具栏宽度那组）。`e2e:http` 33/33。
+- `pnpm check`：除「嵌入 SDK」那一步外一次跑通；那一步在 `%TEMP%\lyflow-consumer-build` 里配置消费方工程时 CMake 的
+  `try_compile` 读不到 `rules.ninja`，换一个新目录单独重跑配置、编译、`embed_minimal` 都过 —— 环境偶发，与本次改动无关。
