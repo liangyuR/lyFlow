@@ -19,7 +19,7 @@ import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
 import type { PlanNode } from "../types/execution";
-import type { GraphDoc, GraphLevel } from "../types/graph";
+import type { GraphDoc, GraphEdge, GraphLevel } from "../types/graph";
 import type { OperatorDesc } from "../types/manifest";
 
 /** 按钮的 `data-run-state`（U6，V5 起 disabled 只剩「本节点有校验错误」一种）。 */
@@ -42,16 +42,49 @@ export function runUpstreamOf(level: GraphLevel, nodeId: string, op: OperatorDes
   return out;
 }
 
+/** 当前层的入边按目标节点分好，组内保持 edges 里的先后（ancestorsOf 的遍历顺序与原来逐条扫一样）。
+ *  按 edges 数组的身份缓存：immer 只在连线真的变了时才换一个新数组。 */
+const incomingCache = new WeakMap<readonly GraphEdge[], Map<string, GraphEdge[]>>();
+
+function incomingOf(edges: readonly GraphEdge[]): Map<string, GraphEdge[]> {
+  let index = incomingCache.get(edges);
+  if (!index) {
+    index = new Map();
+    for (const e of edges) {
+      const list = index.get(e.to.node);
+      if (list) list.push(e);
+      else index.set(e.to.node, [e]);
+    }
+    incomingCache.set(edges, index);
+  }
+  return index;
+}
+
+/** ancestorsOf 的结果，按 edges 的身份 + 节点数 + 节点缓存。NodeRunButton 在 graph store 的 selector 里调它：
+ *  store 每次更新（拖节点时每一帧）每个按钮都要调一遍，300 个节点的图上原来每帧几十毫秒。 */
+const ancestorsCache = new WeakMap<readonly GraphEdge[], Map<string, readonly string[]>>();
+
 /** 当前层里这个节点的全部祖先（沿所有入边往上），离源头近的排前面 —— 提示里「将一并运行上游
- *  A、B」照数据流向念。智能运行的计划就是这个闭包（core 的 targets 语义）。 */
-export function ancestorsOf(level: GraphLevel, nodeId: string): string[] {
+ *  A、B」照数据流向念。智能运行的计划就是这个闭包（core 的 targets 语义）。返回的数组是共享的缓存，别改它。 */
+export function ancestorsOf(level: GraphLevel, nodeId: string): readonly string[] {
+  let byNode = ancestorsCache.get(level.edges);
+  if (!byNode) {
+    byNode = new Map();
+    ancestorsCache.set(level.edges, byNode);
+  }
+  // 节点数进键：深度上限是它（有环的坏图靠它停下来）
+  const key = `${level.nodes.length}\n${nodeId}`;
+  const hit = byNode.get(key);
+  if (hit) return hit;
+
+  const incoming = incomingOf(level.edges);
   const depth = new Map<string, number>();
   let frontier = [nodeId];
   for (let d = 1; frontier.length > 0 && d <= level.nodes.length; d += 1) {
     const next: string[] = [];
     for (const id of frontier) {
-      for (const e of level.edges) {
-        if (e.to.node !== id || e.from.node === nodeId) continue;
+      for (const e of incoming.get(id) ?? []) {
+        if (e.from.node === nodeId) continue;
         const seen = depth.get(e.from.node);
         if (seen !== undefined && seen >= d) continue;
         depth.set(e.from.node, d);
@@ -60,7 +93,9 @@ export function ancestorsOf(level: GraphLevel, nodeId: string): string[] {
     }
     frontier = next;
   }
-  return [...depth.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
+  const result = [...depth.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
+  byNode.set(key, result);
+  return result;
 }
 
 /** 当前层里从 start 出发沿连线能到的全部节点（含 start 自己）：up = 往上游走，down = 往下游走。
@@ -110,15 +145,33 @@ export interface RunForecastInput {
   stale: ReadonlySet<string>;
 }
 
+/** 计划按本层节点分好（plan 的先后不变），按 (plan, path) 的身份缓存。planEntries 原来每次都把整份计划
+ *  扫一遍，而每个运行按钮对本节点与每个祖先各问一次、执行状态每更新一次就全问一遍 —— 大图上是平方级。 */
+const planIndexCache = new WeakMap<
+  ReadonlyMap<string, PlanNode>,
+  { path: SubPath; byLocal: Map<string, PlanNode[]> }
+>();
+
+const NO_ENTRIES: readonly PlanNode[] = [];
+
 /** 本层节点对应的计划条目（子图节点展开成它的全部内部节点）。惰性与静音的不算：前者这次
  *  多半不跑，后者只是透传、不花力气。 */
-function planEntries(input: RunForecastInput, local: string): PlanNode[] {
-  const out: PlanNode[] = [];
-  for (const n of input.plan.values()) {
-    if (n.lazy === true || n.bypass) continue;
-    if (localIdOf(input.path, n.nodeId) === local) out.push(n);
+function planEntries(input: RunForecastInput, local: string): readonly PlanNode[] {
+  let cached = planIndexCache.get(input.plan);
+  if (!cached || cached.path !== input.path) {
+    const byLocal = new Map<string, PlanNode[]>();
+    for (const n of input.plan.values()) {
+      if (n.lazy === true || n.bypass) continue;
+      const id = localIdOf(input.path, n.nodeId);
+      if (id === null) continue;
+      const list = byLocal.get(id);
+      if (list) list.push(n);
+      else byLocal.set(id, [n]);
+    }
+    cached = { path: input.path, byLocal };
+    planIndexCache.set(input.plan, cached);
   }
-  return out;
+  return cached.byLocal.get(local) ?? NO_ENTRIES;
 }
 
 /** 这个节点下次运行会不会真算（而不是命中缓存）。 */
