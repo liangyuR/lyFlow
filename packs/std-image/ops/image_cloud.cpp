@@ -218,7 +218,9 @@ void registerCloudFromDepth(Registry& r) {
   maxD.min = 0.0;
   params.push_back(minD);
   params.push_back(maxD);
-  params.push_back(img::intParam("step", "Step", 1, 1, 64, "每隔几个像素取一个；1 = 全取。"));
+  Param step = img::intParam("step", "Step", 1, 1, 64, "每隔几个像素取一个；1 = 全取。");
+  step.unit = "px";
+  params.push_back(step);
   op.params = std::move(params);
   op.capabilities = {true, false, true};
   op.compute = &fromDepthCompute;
@@ -239,10 +241,13 @@ void registerCloudToDepthImage(Registry& r) {
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "相机坐标系下的点云（x 右、y 下、z 前，米）。", true}};
   op.outputs = {img::imageOut("depth", "单通道深度图。")};
   std::vector<Param> params = intrinsicParams();
+  // 输出图的尺寸是绝对的：预览缩小时不跟着换算（ADR-0028）
   Param w = img::intParam("width", "Width", 640, 1, 16384, "输出宽度（像素）。");
   w.unit = "px";
+  w.absolute = true;
   Param h = img::intParam("height", "Height", 480, 1, 16384, "输出高度（像素）。");
   h.unit = "px";
+  h.absolute = true;
   params.push_back(w);
   params.push_back(h);
   params.push_back(img::enumParam("depth", "Depth", "u16",

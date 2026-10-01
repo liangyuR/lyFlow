@@ -379,6 +379,8 @@ bool valueEquals(const Value& a, const Value& b) {
   return false;
 }
 
+}  // namespace
+
 /// 条件未设置视为成立。引用了不存在的参数也视为成立 —— 那是 Registry::validate()
 /// 的活，校验期不该因为算子描述的笔误把用户的图判成非法。
 bool conditionHolds(const Condition& c, const ParamMap& params) {
@@ -395,8 +397,6 @@ bool conditionHolds(const Condition& c, const ParamMap& params) {
   }
   return true;
 }
-
-}  // namespace
 
 // ------------------------------------------------------------------- Any 推导
 

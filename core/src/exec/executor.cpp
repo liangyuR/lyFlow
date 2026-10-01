@@ -13,6 +13,7 @@
 
 #include "exec/graph.h"
 #include "exec/hash.h"
+#include "exec/pixel_scale.h"
 #include "exec/plan.h"
 #include "exec/result_store.h"
 #include "exec/subgraph.h"
@@ -606,6 +607,9 @@ class Scheduler {
   bool anyError() const { return anyError_; }
   bool sawCancel() const { return sawCancel_; }
   std::size_t failedCount() const { return failed_; }
+  /// 这次预览在源头抽稀过点云 / 把图像缩小了几倍（1 = 没缩）。超预算的提示按它给建议（E9）。
+  bool decimatedCloud() const { return decimatedCloud_.load(); }
+  std::int32_t imageScale() const { return imageScale_.load(); }
 
  private:
   /// 整轮跑完后清点。一个失败若被下游的 acceptsError 端口全数接住，就不算整体失败 ——
@@ -781,6 +785,7 @@ class Scheduler {
     std::unordered_map<std::string, Data> inputValues;
     std::unordered_map<std::string, Data> outputValues;
     bool bypassed = false;
+    std::int32_t pixelScale = 1;  // 这个节点在多大比例的图上算（ADR-0028），只有 compute 那条路会改它
     Status status = Status::Ok();
 
     if (node.provided) {
@@ -812,9 +817,19 @@ class Scheduler {
           sink_.nodeFailed(node.id, "error", {bad}, msSince(nodeStart));
           return Verdict::Failed;
         }
+        // 输入里有预览缩小过的图（ADR-0028）：像素参数与连线上的像素几何换算到这张图上，
+        // 出来时再换回原图坐标（见下面的 scaleOutputs）。正式运行里没有 scale > 1 的图，这里什么都不做
+        pixelScale = inputScale(inputValues);
+        ParamMap scaledParams;
+        if (pixelScale > 1) {
+          scaledParams = scalePixelParams(*node.op, node.params, pixelScale);
+          for (auto& kv : inputValues) {
+            kv.second = scalePixelData(kv.second, 1.0 / static_cast<double>(pixelScale));
+          }
+        }
         Inputs inputs(inputValues);
         Outputs outputs(outputValues);
-        ParamView params(node.params, options_.baseDir);
+        ParamView params(pixelScale > 1 ? scaledParams : node.params, options_.baseDir);
         NodeContext ctx(sink_, cancelled_, node.id, options_.baseDir, threadBudget_);
         try {
           status = node.op->compute(inputs, params, outputs, ctx);
@@ -862,6 +877,11 @@ class Scheduler {
       return Verdict::Failed;
     }
 
+    // compute 的另一侧：像素几何与量测换回原图坐标，新产出的图带上比例（ADR-0028）
+    if (pixelScale > 1) {
+      scaleOutputs(outputValues, pixelScale, hasActiveAbsoluteSize(*node.op, node.params));
+    }
+
     if (const Status contract = checkOutputs(node, outputValues, bypassed); !contract.ok) {
       recordFailure(i, contract);
       sink_.nodeFailed(node.id, "error", {contract}, durationMs);
@@ -869,13 +889,24 @@ class Scheduler {
     }
 
     // 预览抽稀只在源头做一次：无输入的节点抽完，整条链自然都变快（F5）。
+    // 图像按 2 的幂缩到 4 MP 以内（ADR-0028）：下游的像素参数按它的 scale 换算，算子不知道自己在预览。
     if (options_.mode == RunMode::Preview && node.inputs.empty()) {
       const std::size_t cap = options_.previewMaxPoints ? options_.previewMaxPoints
                                                         : kDefaultPreviewMaxPoints;
       for (auto& kv : outputValues) {
-        const PointCloud* c = kv.second.asCloud();
-        if (!c || c->pointCount() <= cap) continue;
-        kv.second = Data::cloud(decimateCloud(*c, cap));
+        if (const PointCloud* c = kv.second.asCloud()) {
+          if (c->pointCount() <= cap) continue;
+          kv.second = Data::cloud(decimateCloud(*c, cap));
+          decimatedCloud_ = true;
+        } else if (const Image* img = kv.second.asImage()) {
+          const unsigned level = previewLevel(*img, kPreviewMaxPixels);
+          if (level == 0) continue;
+          Image small = shrinkImage(*img, level);
+          std::int32_t seen = imageScale_.load();
+          while (small.scale > seen && !imageScale_.compare_exchange_weak(seen, small.scale)) {
+          }
+          kv.second = Data::image(std::move(small));
+        }
       }
     }
 
@@ -1185,6 +1216,9 @@ class Scheduler {
   bool anyError_ = false;
   bool sawCancel_ = false;
   std::size_t failed_ = 0;
+  // 多个 worker 同时写：源头节点可以并行
+  std::atomic<bool> decimatedCloud_{false};
+  std::atomic<std::int32_t> imageScale_{1};
 };
 
 // ------------------------------------------------------------------ summary
@@ -1712,13 +1746,35 @@ void Run::workImpl() {
 
   const double total = msSince(t0);
   // 超预算的预览要说出来：用户看到的「拖不动」在这里有个可读的名字（F5）。
+  // 点名最慢的那个节点；只有源头真抽稀过点云，「降低预览点数」才是有用的建议（E9）。
   if (options_.mode == RunMode::Preview) {
     const std::uint32_t budget =
         options_.previewBudgetMs ? options_.previewBudgetMs : kDefaultPreviewBudgetMs;
     if (total > static_cast<double>(budget)) {
-      sink.log("warn", std::string(),
-               "预览耗时 " + std::to_string(static_cast<long long>(total)) + " ms，超过预算 " +
-                   std::to_string(budget) + " ms；建议降低预览点数");
+      std::string message = "预览耗时 " + std::to_string(static_cast<long long>(total)) +
+                            " ms，超过预算 " + std::to_string(budget) + " ms";
+      const std::string* slowest = nullptr;
+      double slowestMs = -1;
+      for (const auto& [id, outcome] : sink.outcomes()) {
+        if (outcome.durationMs > slowestMs) {
+          slowest = &id;
+          slowestMs = outcome.durationMs;
+        }
+      }
+      if (slowest) {
+        std::string op;
+        for (const auto& n : plan.nodes) {
+          if (n.id == *slowest && n.op) op = n.op->id;
+        }
+        message += "；最慢的是 " + *slowest + (op.empty() ? "" : "（" + op) + "，" +
+                   std::to_string(static_cast<long long>(slowestMs)) + " ms" +
+                   (op.empty() ? "" : "）");
+      }
+      if (scheduler.decimatedCloud()) message += "；可以降低预览点数";
+      if (scheduler.imageScale() > 1) {
+        message += "；图像已按 1/" + std::to_string(scheduler.imageScale()) + " 预览";
+      }
+      sink.log("warn", std::string(), message);
     }
   }
   // 挂结果放在 summary 之前（R7）：挂上的节点要是声明了图级输出，summary 里就是 value。

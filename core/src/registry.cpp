@@ -140,6 +140,7 @@ void writeParam(JsonWriter& w, const Param& p) {
   if (p.softMax) w.field("softMax", *p.softMax);
   if (p.step)    w.field("step", *p.step);
   w.fieldIfSet("unit", p.unit);
+  if (p.absolute) w.field("absolute", true);
   w.fieldIfSet("componentLabels", p.componentLabels);
 
   if (!p.options.empty()) {
@@ -594,6 +595,8 @@ std::vector<std::string> Registry::validate() const {
     // roiBackdrop 指的必须是本算子自己的参数。
     for (const auto& p : op.params) {
       const std::string pwhere = where + " param '" + p.name + "'";
+      // 绝对尺寸只对像素参数有意义：执行器只换算 unit=px 的参数（ADR-0028）
+      if (p.absolute && p.unit != "px") fail(pwhere + " absolute 只能标在 unit=px 的参数上");
       if (p.semantic.empty()) {
         if (p.roiBackdrop.isSet()) fail(pwhere + " 给了 roiBackdrop 却没有 semantic=roi");
         continue;

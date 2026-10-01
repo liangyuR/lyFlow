@@ -19,7 +19,8 @@
    像素是别名构造的 `shared_ptr<const uint8_t>`，所有者可以是任何东西。
 3. **取数（C ABI v15）**：`lyflow_output_image(run, node, port, level, rowOffset, rowCount, view)`。
    - level 0 是原图、零拷贝借用；
-   - level k 是 2^k 倍**块均值**缩小（尺寸向上取整），core 现算一份；
+   - level k 是 2^k 倍**块均值**缩小（尺寸向上取整），core 现算一份；u16 单通道（深度图）的 0 不参与平均
+     （2026-10-01 补，同一个函数也用在预览时源头的缩小上，[ADR-0028](0028-image-preview-pixel-scale.md)）；
    - 按行切片，越界是空切片；
    - 桥接层按 16 MB 收行数。
 4. **宿主注入**：另开 `lyflow_run_image_input` 挂在 run options 末尾，允许带行填充的缓冲。

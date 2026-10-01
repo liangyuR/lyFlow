@@ -32,7 +32,7 @@
 | E5 | `Image` 加 `scale`（每个像素对应原图 scale × scale 个像素，默认 1）；预览缩小过的源头图 > 1 | 下游要知道自己在多大的图上算；编辑器要按原图尺寸摆放（`valueJson` 带出 `scale`，C ABI 不变） |
 | E6 | **像素量在图上一律是原图坐标**。预览时节点的 s = 它的图像输入的 scale：像素参数 ÷ s、像素几何与像素量测的输入 ÷ s，compute，输出 × s（`px²` 的量测 × s²） | 参数、连线上的几何、画在图上的框都只有一套坐标；换算只发生在 compute 两侧，算子不知道自己在预览（ADR-0011 的原则） |
 | E7 | 输出图像的 scale：节点有**生效的绝对尺寸参数**（`visibleWhen` 成立的 `absolute: true`）时是 1，否则继承 s | `image.resize` 的 size 模式产出的是用户指定尺寸的图，与输入不在一个比例；scale 模式照旧继承。不用改算子 |
-| E8 | 整数像素参数换算后按 `min + n × step` 取整再夹到 `[min, max]`；`blur.ksize`、`threshold.blockSize` 补 `step = 2` | 奇数核换算后还是奇数，滑块也不再能拖出偶数 |
+| E8 | 整数像素参数换算后按 `min + n × step` 取整再夹到 `[min, max]`（`blur.ksize`、`threshold.blockSize` 本来就是 `step = 2`） | 奇数核换算后还是奇数 |
 | E9 | 超预算的预览日志点名最慢的节点；抽稀过点云才建议「降低预览点数」 | 对图像链路给「降低预览点数」是错的建议 |
 
 ## 2. L1 抢占不阻塞（bridge）
@@ -59,8 +59,8 @@
 - 执行器：源头（无输入的节点，含宿主注入）在预览下按 E4 缩小图像输出、设 `scale`；按 E6 / E7 换算参数、几何、量测与输出图像的 scale。
 - `shrinkImage`：u16 单通道时 0 不计入（D3）；输出的 `scale` = 输入 × 2^level。显示用的级别（`lyflow_output_image` 的 level）同一个函数，一起受益。
 - manifest：`Param` 加 `absolute`（只对 `unit = px` 有意义，自检拒掉别的用法）；schema 与 operator-manifest.md 各补一句。
-- std-image：`image.resize` 的 `width / height`、`cloud.to_depth_image` 的 `width / height` 标 `absolute`；`blur.ksize`、`threshold.blockSize` 加 `step = 2`；
-  `image.region_stats` 的面积单位改成 `px²`。
+- std-image：`image.resize` 的 `width / height`、`cloud.to_depth_image` 的 `width / height` 标 `absolute`；
+  `blur.sigma`、`cloud.from_depth.step` 补上 `unit = px`（它们本来就是像素量）；`image.region_stats` 的面积单位改成 `px²`。
 - `valueJson`：图像带 `scale`（只在 > 1 时写）。落盘缓存遇到 `scale ≠ 1` 的图像不落盘（预览本来就不落盘，这是防线）。
 
 测试（doctest）：源头缩小（4 MP 上限、2 的幂、scale）、D3、像素参数换算（float / int / 奇数步长 / roi / absolute 不换）、

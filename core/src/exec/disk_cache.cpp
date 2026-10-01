@@ -189,7 +189,9 @@ std::string safeName(const std::string& key) {
 }  // namespace
 
 bool persistable(const Data& d) {
-  if (const Image* img = d.asImage()) return img->consistent();
+  // scale 不进文件格式：预览缩小过的图（scale > 1）本来就不落盘（预览命名空间不落盘），这是第二道防线 ——
+  // 读回来变成 scale 1，下游的像素参数就不再换算了（ADR-0028）
+  if (const Image* img = d.asImage()) return img->consistent() && img->scale == 1;
   return d.asCloud() != nullptr || d.asTensor() != nullptr;
 }
 

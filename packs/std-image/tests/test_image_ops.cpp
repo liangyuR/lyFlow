@@ -2,6 +2,7 @@
 // 每个算子的数值、像素单位的几何、单通道契约。图像一律现造（合成渐变 / cv::circle 画的圆），仓库不进图片。
 #include <doctest/doctest.h>
 
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -548,4 +549,95 @@ TEST_CASE("推理链路：图像 → image.to_tensor（CHW）→ ml.onnx_run →
   REQUIRE(exec::ResultStore::instance().get(s.runId(), "back", "image", image));
   CHECK(std::vector<int>{image.asImage()->width, image.asImage()->height, image.asImage()->channels} ==
         std::vector<int>{1280, 8, 1});
+}
+
+TEST_CASE("大图预览（ADR-0028）：源头缩一级，找圆与区域统计换回原图坐标后与正式运行对得上；resize 到指定宽高后的张量形状不变") {
+  test::ensureTestOps();
+  const std::filesystem::path dir =
+      std::filesystem::temp_directory_path() / std::filesystem::u8path("lyflow-大图预览");
+  std::filesystem::create_directories(dir);
+  // 4100 × 2050 的灰度图，圆心 (2000, 1000)、半径 500 的亮圆。8.4 MP 超过 4 MP → 预览缩一级（scale 2）
+  cv::Mat canvas(2050, 4100, CV_8UC1, cv::Scalar(20));
+  cv::circle(canvas, cv::Point(2000, 1000), 500, cv::Scalar(230), cv::FILLED);
+  Image disk;
+  REQUIRE(cvx::fromMat(canvas, disk));
+  Call save;
+  save.base = dir;
+  save.inputs["image"] = Data::image(disk);
+  REQUIRE(save.run("io.save_image", {{"path", Value::text("圆.png")}}).ok);
+
+  const Json doc = test::makeGraph(
+      {test::N{"load", "io.load_image", Json{{"path", "圆.png"}, {"mode", "gray"}}},
+       test::N{"blur", "image.blur", Json{{"ksize", 9}}},
+       test::N{"circle", "image.find_circle", Json{{"minRadius", 300}, {"maxRadius", 700}, {"minDist", 400}}},
+       test::N{"bin", "image.threshold", Json::object()},
+       test::N{"stats", "image.region_stats", Json::object()},
+       test::N{"fit", "image.resize", Json{{"mode", "size"}, {"width", 640}, {"height", 480}}},
+       test::N{"tensor", "image.to_tensor", Json::object()}},
+      {test::E{"load.image", "blur.image"}, test::E{"blur.image", "circle.image"},
+       test::E{"blur.image", "bin.image"}, test::E{"load.image", "stats.image"},
+       test::E{"bin.mask", "stats.mask"}, test::E{"load.image", "fit.image"},
+       test::E{"fit.image", "tensor.image"}});
+  const auto run = [&](exec::RunMode mode) {
+    exec::ResultStore::instance().clear();
+    exec::RunOptions options;
+    options.runId = mode == exec::RunMode::Preview ? "big-image-preview" : "big-image-full";
+    options.baseDir = dir;
+    options.mode = mode;
+    test::RunLog log;
+    log.runId = options.runId;
+    exec::Run r(doc.dump(), options, &test::detail::collect, &log);
+    r.join();
+    return log;
+  };
+  // 先把事件留住：nodeEvent 返回的是临时 Json，range-for 里直接对它取下标会悬空
+  const auto value = [](const test::RunLog& log, const char* node, const char* port) {
+    const Json done = log.nodeEvent(node, "done");
+    const auto stats = done.find("stats");
+    if (stats == done.end()) return Json();
+    for (const Json& o : stats->value("outputs", Json::array())) {
+      if (o.value("port", "") == port) return o.value("value", Json());
+    }
+    return Json();
+  };
+  const test::RunLog full = run(exec::RunMode::Full);
+  const test::RunLog preview = run(exec::RunMode::Preview);
+  REQUIRE(full.runStatus() == "ok");
+  REQUIRE(preview.runStatus() == "ok");
+  CHECK(value(preview, "load", "image")["scale"] == 2);
+  CHECK_FALSE(value(full, "load", "image").contains("scale"));
+
+  // 正式运行找回了画上去的圆；预览在一半大的图上找，换回原图坐标后差在几个像素以内
+  // （一个预览像素是 2 个原图像素，霍夫的累加分辨率也跟着粗一倍）
+  const Json fc = value(full, "circle", "circle");
+  const Json pc = value(preview, "circle", "circle");
+  const auto near = [](const Json& a, const Json& b, double tol) {
+    return std::abs(a.get<double>() - b.get<double>()) <= tol;
+  };
+  CHECK(std::abs(fc["center"][0].get<double>() - 2000) <= 3);
+  CHECK(std::abs(fc["radius"].get<double>() - 500) <= 3);
+  CHECK_MESSAGE(near(pc["center"][0], fc["center"][0], 4), pc.dump(), " vs ", fc.dump());
+  CHECK_MESSAGE(near(pc["center"][1], fc["center"][1], 4), pc.dump(), " vs ", fc.dump());
+  CHECK_MESSAGE(near(pc["radius"], fc["radius"], 4), pc.dump(), " vs ", fc.dump());
+
+  // 区域统计：外接框按 s 换回、面积按 s² 换回
+  const Json fb = value(full, "stats", "bbox");
+  const Json pb = value(preview, "stats", "bbox");
+  for (const char* corner : {"min", "max"}) {
+    for (int k = 0; k < 2; ++k) {
+      CHECK_MESSAGE(near(pb[corner][k], fb[corner][k], 4), pb.dump(), " vs ", fb.dump());
+    }
+  }
+  const double fa = value(full, "stats", "area")["value"].get<double>();
+  const double pa = value(preview, "stats", "area")["value"].get<double>();
+  CHECK(fa == doctest::Approx(3.14159265 * 500 * 500).epsilon(0.01));
+  CHECK(pa == doctest::Approx(fa).epsilon(0.02));
+  CHECK(value(preview, "stats", "area")["unit"] == "px²");
+
+  // resize 到指定宽高是绝对尺寸：预览里照旧 640 × 480，推理的输入形状不变
+  CHECK(value(preview, "tensor", "tensor")["shape"] == value(full, "tensor", "tensor")["shape"]);
+  CHECK(value(full, "tensor", "tensor")["shape"] == Json{1, 1, 480, 640});
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
 }

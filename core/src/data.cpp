@@ -117,8 +117,9 @@ double Image::at(std::int32_t x, std::int32_t y, std::int32_t c) const {
 
 namespace {
 
+/// skipZero：0 不计入平均（u16 单通道 = 深度图，0 是无效深度，large-image-plan D3）。
 template <typename T>
-void shrinkInto(const Image& src, Image& dst, std::size_t block) {
+void shrinkInto(const Image& src, Image& dst, std::size_t block, bool skipZero) {
   const std::size_t w = static_cast<std::size_t>(src.width), h = static_cast<std::size_t>(src.height);
   const std::size_t c = static_cast<std::size_t>(src.channels);
   const std::size_t ow = static_cast<std::size_t>(dst.width);
@@ -136,7 +137,7 @@ void shrinkInto(const Image& src, Image& dst, std::size_t block) {
         const std::size_t o = (x / block) * c;
         for (std::size_t k = 0; k < c; ++k) {
           const double v = static_cast<double>(row[x * c + k]);
-          if (!std::isfinite(v)) continue;
+          if (!std::isfinite(v) || (skipZero && v == 0)) continue;
           sum[o + k] += v;
           n[o + k] += 1;
         }
@@ -163,10 +164,12 @@ Image shrinkImage(const Image& src, unsigned level) {
     return static_cast<std::int32_t>((static_cast<std::size_t>(v) + block - 1) / block);
   };
   Image dst = Image::allocate(scaled(src.width), scaled(src.height), src.channels, src.depth);
+  dst.scale = src.scale * static_cast<std::int32_t>(block);
+  const bool depthMap = src.depth == PixelDepth::U16 && src.channels == 1;
   switch (src.depth) {
-    case PixelDepth::U8:  shrinkInto<std::uint8_t>(src, dst, block); break;
-    case PixelDepth::U16: shrinkInto<std::uint16_t>(src, dst, block); break;
-    case PixelDepth::F32: shrinkInto<float>(src, dst, block); break;
+    case PixelDepth::U8:  shrinkInto<std::uint8_t>(src, dst, block, false); break;
+    case PixelDepth::U16: shrinkInto<std::uint16_t>(src, dst, block, depthMap); break;
+    case PixelDepth::F32: shrinkInto<float>(src, dst, block, false); break;
   }
   return dst;
 }
@@ -593,6 +596,8 @@ std::string Data::valueJsonUncached() const {
       w.field("height", static_cast<std::int64_t>(img.height));
       w.field("channels", static_cast<std::int64_t>(img.channels));
       w.field("depth", std::string(pixelDepthName(img.depth)));
+      // 预览缩小过的图（ADR-0028）：编辑器按 宽 × scale、高 × scale 摆放，叠画与拖框照旧用原图坐标
+      if (img.scale > 1) w.field("scale", static_cast<std::int64_t>(img.scale));
       const int nc = img.consistent() ? img.channels : 0;
       std::vector<double> lo(nc, 0), hi(nc, 0), sum(nc, 0);
       std::vector<std::size_t> finite(nc, 0);

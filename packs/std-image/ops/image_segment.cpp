@@ -160,7 +160,8 @@ Status regionStatsCompute(const Inputs& inputs, const ParamView& params, Outputs
     box.max[1] = static_cast<float>(r.y + r.height);
   }
   outputs.set("mean", Data::measurement(measured(mean, "")));
-  outputs.set("area", Data::measurement(measured(area > 0 ? area : nan, "px")));
+  // 面积是像素个数，量纲是 px²：预览缩小时按 s² 换回原图（ADR-0028）
+  outputs.set("area", Data::measurement(measured(area > 0 ? area : nan, "px²")));
   outputs.set("bbox", Data::box2d(box));
   return Status::Ok();
 }

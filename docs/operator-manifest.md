@@ -129,6 +129,24 @@ manifest 导出）、编辑器（`lib/transform.ts`、`lib/curve.ts`）三方同
 
 分组用 `group` 字段，`advanced: true` 的参数默认收进折叠区（参数面板与 Inspector 里都默认收起，param-recipe P2.3；组里有参数报错时 Inspector 自动展开）。
 
+## 像素参数与预览（`unit: "px"`、`absolute`，[ADR-0028](adr/0028-image-preview-pixel-scale.md)）
+
+预览时源头的大图会按 2 的幂缩小（超过 4 MP 才缩），下游节点在小图上算。执行器为此**读参数的单位**：
+
+- `unit: "px"` 的参数是**图上的距离**（核大小、半径、框、内参、取点间隔）：节点在缩小 s 倍的图上算时，执行器把它 ÷ s 再交给 compute。
+  整数参数四舍五入，有 `step` 时落回 `min + n × step`（奇数核写 `min: 1, step: 2`，换算后还是奇数），再夹到 `[min, max]`。
+- `absolute: true`（只能和 `unit: "px"` 一起用，`lyflow manifest --check` 查）是**绝对尺寸** —— 输出图的宽高这一类：
+  预览时不换算；它生效（`visibleWhen` 成立）时，本算子输出的图回到原图比例。例如 `image.resize` 的 `width / height`
+  （size 模式下产出的就是用户指定的尺寸，推理链路靠它对上模型的输入形状）。
+- 算子不用知道自己在预览：连线上的像素几何（`unit = px` 的 Box2D / Line2D / Circle2D / Point2D）与像素量测（`unit` 为 `px` / `px²`）
+  进 compute 前 ÷ s、出来 × s，图上的像素量一律是原图坐标。所以像素个数这类量的单位要写 `px²`，不是 `px`。
+
+```jsonc
+{ "name": "ksize", "type": "int", "default": 5, "min": 1, "max": 99, "step": 2, "unit": "px" }       // 跟着缩、保持奇数
+{ "name": "width", "type": "int", "default": 640, "unit": "px", "absolute": true,
+  "visibleWhen": { "param": "mode", "eq": "size" } }                                                    // 不缩
+```
+
 ## 参数的语义标记（`semantic`，M8b）
 
 参数可以带一个只给编辑器看的语义标记，执行器与校验一概不看。目前只有一种：
