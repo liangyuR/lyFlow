@@ -94,8 +94,9 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
         --jobs <n>（eval / sweep / perturb）：同时跑 n 次（默认 1，一次接一次），输出仍按原顺序、
                  除 durationMs 外逐行相同；内存大约是 n 倍。--parallel 是一次运行里的节点并行度，与它无关。
                  Ctrl+C 一次取消全部在跑的。
-        进度（eval / sweep / perturb）：stdout 重定向到文件、stderr 还在终端上时（… > rows.jsonl），
-                 stderr 上原地刷新一行「[k/总数] 样本 · 状态 · 耗时 · 还要约 …」，收场时清掉；管道里没有。
+        进度（eval / sweep / perturb；run 也有）：stdout 重定向到文件、stderr 还在终端上时（… > rows.jsonl），
+                 stderr 上原地刷新一行「[k/总数] 样本 · 状态 · 耗时 · 还要约 …」（run 是「[k/总数] 节点 · 正在算 …」），
+                 收场时清掉；管道里没有。
         --recipe 作用于所有样本；--params 的参数组里不含「.」的键写顶层图参数。
         叠加顺序：基础（default）→ --recipe → 参数组 → --param。
         每行 eval_row **默认不带** summary（ADR-0022）；--summary 打开。
@@ -393,6 +394,7 @@ pub(crate) fn core() -> Result<Arc<Core>, String> {
 struct RunCtx {
     sink: Option<Sink>,
     events: Mutex<Vec<Value>>,
+    hook: Option<EventHook>,
 }
 
 unsafe extern "C" fn on_event(event_json: *const c_char, user: *mut c_void) {
@@ -408,6 +410,9 @@ unsafe extern "C" fn on_event(event_json: *const c_char, user: *mut c_void) {
             line(sink, text);
         }
         if let Ok(value) = serde_json::from_str::<Value>(text) {
+            if let Some(hook) = &ctx.hook {
+                hook(&value);
+            }
             if let Ok(mut v) = ctx.events.lock() {
                 v.push(value);
             }
@@ -661,7 +666,12 @@ pub(crate) struct RunRequest<'a> {
     pub inputs: &'a [RunInput],
     /// 这次运行归哪一批（`eval --jobs`）：那一批取消时它也取消。
     pub group: Option<&'a RunGroup>,
+    /// 每条事件解析出来之后再交给它一份（`lyflow run` 的进度行）。在 core 的线程上调。
+    pub on_event: Option<EventHook>,
 }
+
+/// RunRequest::on_event 的类型。
+pub(crate) type EventHook = Arc<dyn Fn(&Value) + Send + Sync>;
 
 /// 用 core 自己的 `io.load_pcd` 读一个点云文件：跑一个单节点的图，按 `max_points`（0 = 全量）
 /// 取回。编辑器的 2D 拖框底图（模板云，Tauri 的 load_cloud_file）走它，PCD / PLY 都认；
@@ -697,6 +707,7 @@ pub(crate) fn read_cloud_file(
             params_json: None,
             inputs: &[],
             group: None,
+            on_event: None,
         },
     )?;
     if result.status != "ok" {
@@ -767,6 +778,7 @@ pub(crate) fn execute(core: &Arc<Core>, req: RunRequest<'_>) -> Result<RunResult
     let ctx = Box::new(RunCtx {
         sink: req.stream,
         events: Mutex::new(Vec::new()),
+        hook: req.on_event,
     });
     let ptr = &*ctx as *const RunCtx;
     let mut spec = RunSpec::new(req.graph_json, &run_id, req.base_dir, req.targets);
@@ -1186,6 +1198,62 @@ fn cmd_manifest(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     }
 }
 
+/// `lyflow run` 的进度行（与 eval 的同一行机制，eval::Progress）：几个节点算完了、正在算哪几个、已过多久。
+/// 一次运行里各节点耗时差得太远，不报剩余时间。事件在 core 的线程上来，所以包在 Mutex 里。
+struct RunProgress {
+    line: eval::Progress,
+    started: std::time::Instant,
+    planned: usize,
+    finished: usize,
+    running: Vec<String>,
+}
+
+impl RunProgress {
+    fn new(err: &Sink) -> Self {
+        Self {
+            line: eval::Progress::new(err, 0),
+            started: std::time::Instant::now(),
+            planned: 0,
+            finished: 0,
+            running: Vec::new(),
+        }
+    }
+
+    fn event(&mut self, e: &Value) {
+        match e["kind"].as_str() {
+            Some("run_started") => {
+                self.planned = e["plan"].as_array().map_or(0, Vec::len);
+            }
+            Some("node_state") => {
+                let Some(id) = e["nodeId"].as_str() else { return };
+                match e["state"].as_str() {
+                    Some("running") => {
+                        if !self.running.iter().any(|r| r == id) {
+                            self.running.push(id.to_string());
+                        }
+                    }
+                    Some("done" | "skipped" | "error" | "cancelled") => {
+                        self.running.retain(|r| r != id);
+                        self.finished += 1;
+                    }
+                    _ => return,
+                }
+                self.line.show(&self.text());
+            }
+            _ => {}
+        }
+    }
+
+    fn text(&self) -> String {
+        let mut s = format!("[{}/{}] 节点", self.finished, self.planned);
+        if !self.running.is_empty() {
+            s.push_str(&format!(" · 正在算 {}", self.running.join("、")));
+        }
+        s.push_str(&format!(" · 已过 {:.1} 秒", self.started.elapsed().as_secs_f64()));
+        s
+    }
+}
+
 fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let Some(path) = parsed.positional.first().cloned() else {
         line(err, "用法：lyflow run <graph>");
@@ -1233,8 +1301,17 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Err(e) => return fail(err, &e, EXIT_FAILED),
     }
     let targets: Vec<String> = parsed.many("to").to_vec();
+    let progress = progress_line().then(|| Arc::new(Mutex::new(RunProgress::new(err))));
+    let hook = progress.as_ref().map(|p| {
+        let p = Arc::clone(p);
+        Arc::new(move |e: &Value| {
+            if let Ok(mut p) = p.lock() {
+                p.event(e);
+            }
+        }) as EventHook
+    });
 
-    let result = match execute(
+    let result = execute(
         &core,
         RunRequest {
             graph_json: &loaded.json,
@@ -1248,8 +1325,15 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             params_json: None,
             inputs: &inputs,
             group: None,
+            on_event: hook,
         },
-    ) {
+    );
+    if let Some(p) = &progress {
+        if let Ok(mut p) = p.lock() {
+            p.line.clear();
+        }
+    }
+    let result = match result {
         Ok(r) => r,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
@@ -1415,6 +1499,7 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             params_json: None,
             inputs: &[],
             group: None,
+            on_event: None,
         },
     ) {
         Ok(r) => r,
@@ -2477,6 +2562,23 @@ mod tests {
         assert!(last["contractViolations"].as_array().unwrap().is_empty());
     }
 
+    /// `lyflow run` 的进度行：数 plan 里的节点，算完一个（不管成没成）加一，正在算的按开跑先后列出来。
+    /// 开关只在 main 里设，这里只看计数与那一行的字（eval::Progress 的原地刷新在 eval.rs 里测）。
+    #[test]
+    fn the_run_progress_line_counts_nodes_and_names_the_running_ones() {
+        let err = sink_of(std::io::sink());
+        let mut p = RunProgress::new(&err);
+        p.event(&json!({"kind": "run_started", "plan": ["a", "b", "c"]}));
+        p.event(&json!({"kind": "node_state", "nodeId": "a", "state": "running"}));
+        p.event(&json!({"kind": "node_state", "nodeId": "b", "state": "running"}));
+        p.event(&json!({"kind": "node_state", "nodeId": "a", "state": "done"}));
+        p.event(&json!({"kind": "node_state", "nodeId": "c", "state": "pending"}));
+        assert!(p.text().starts_with("[1/3] 节点 · 正在算 b · 已过 "), "{}", p.text());
+        p.event(&json!({"kind": "node_state", "nodeId": "b", "state": "error"}));
+        p.event(&json!({"kind": "node_state", "nodeId": "c", "state": "skipped"}));
+        assert!(p.text().starts_with("[3/3] 节点 · 已过 "), "{}", p.text());
+    }
+
     /// 写法错一张表：参数、退出码、stderr 里该有的字。都在任何节点开跑之前拦下，
     /// 不依赖标准包 —— 纯平台构建里照样跑。
     #[test]
@@ -3396,6 +3498,7 @@ mod tests {
                 params_json: Some(r#"{"count": 1234}"#),
                 inputs: &[],
                 group: None,
+                on_event: None,
             },
         )
         .unwrap();
@@ -3419,6 +3522,7 @@ mod tests {
                 params_json: Some(r#"{"nope": 1}"#),
                 inputs: &[],
                 group: None,
+                on_event: None,
             },
         )
         .unwrap();

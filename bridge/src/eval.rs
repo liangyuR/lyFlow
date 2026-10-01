@@ -843,8 +843,8 @@ pub(crate) struct Engine<'a> {
 /// 终端里的一行进度：「[k/总数] 样本 · 状态 · 耗时 · 还要约 …」，同一行原地刷新（`\r` 加补空格，
 /// 不靠 ANSI 转义 —— 老的 Windows 控制台不认），收场时清掉。开不开看 `cli::progress_line()`：
 /// 关着的时候一个字都不写。
-pub(crate) struct Progress<'a> {
-    err: &'a Sink,
+pub(crate) struct Progress {
+    err: Sink,
     on: bool,
     total: usize,
     done: usize,
@@ -855,15 +855,15 @@ pub(crate) struct Progress<'a> {
     cols: Option<usize>,
 }
 
-impl<'a> Progress<'a> {
-    pub(crate) fn new(err: &'a Sink, total: usize) -> Self {
+impl Progress {
+    pub(crate) fn new(err: &Sink, total: usize) -> Self {
         let on = crate::cli::progress_line();
         Self::with(err, total, on, if on { crate::cli::stderr_width() } else { None })
     }
 
-    fn with(err: &'a Sink, total: usize, on: bool, cols: Option<usize>) -> Self {
+    fn with(err: &Sink, total: usize, on: bool, cols: Option<usize>) -> Self {
         Self {
-            err,
+            err: Arc::clone(err),
             on,
             total,
             done: 0,
@@ -886,10 +886,18 @@ impl<'a> Progress<'a> {
         } else {
             String::new()
         };
-        let mut text = format!("[{}/{}] {what}{eta}", self.done, self.total);
-        if let Some(cols) = self.cols {
-            text = truncate_to_width(&text, cols.saturating_sub(1));
+        self.show(&format!("[{}/{}] {what}{eta}", self.done, self.total));
+    }
+
+    /// 原地换成这一行（按终端宽度截断、比上一行短就补空格盖掉）。不计数 —— `lyflow run` 自己数节点。
+    pub(crate) fn show(&mut self, text: &str) {
+        if !self.on {
+            return;
         }
+        let text = match self.cols {
+            Some(cols) => truncate_to_width(text, cols.saturating_sub(1)),
+            None => text.to_string(),
+        };
         let width = display_width(&text);
         let pad = " ".repeat(self.width.saturating_sub(width));
         self.write(&format!("\r{text}{pad}"));
@@ -1081,6 +1089,7 @@ impl<'a> Engine<'a> {
                 params_json: None,
                 inputs: &[],
                 group,
+                on_event: None,
             },
         )?;
         let wants_outputs = enumerate || self.metrics.iter().any(MetricPath::needs_outputs);
