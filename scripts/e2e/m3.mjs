@@ -16,6 +16,7 @@ import {
   mustOk,
   newDoc,
   pressCtrl,
+  pressEscape,
   pressF5,
   pressQuestion,
   canvasBox,
@@ -802,6 +803,20 @@ async function suiteDropToSearch(cdp, report) {
     doc.edges.length === 1 && doc.edges[0].from.node === ids.gen,
     JSON.stringify(doc.edges),
   );
+
+  // 再打开搜索面板（空查询）：刚用过的那个排在第一，标着「最近」；面板顶上也多了一组
+  const added = doc.nodes.find((n) => n.id !== ids.gen)?.op;
+  await cdp.eval(`window.__lyflow.stores.ui.getState().openSearch({ screen: { x: 300, y: 200 }, flow: { x: 0, y: 0 } }); return true;`);
+  await sleep(200);
+  const first = await cdp.eval(`
+    const row = document.querySelector('.search-popup__row');
+    return row ? { op: row.dataset.opId, tag: row.querySelector('.search-popup__why')?.textContent ?? null } : null;
+  `);
+  report.eq("空查询时刚用过的算子排第一、标着「最近」", first, { op: added, tag: "最近" });
+  await pressEscape(cdp);
+  await sleep(150);
+  report.ok("算子面板顶上有「最近用过」一组，里面有它",
+    await cdp.eval(`return !!document.querySelector('[data-testid="palette-recent"] [data-op-id=${lit(added ?? "")}]');`));
 }
 
 // ------------------------------------------------ P1 #22 网格吸附与自动布局

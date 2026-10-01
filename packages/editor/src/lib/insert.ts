@@ -26,6 +26,7 @@ export function addNodeWithAutoConnect(
   position: { x: number; y: number },
 ): AutoConnectResult {
   const result = useGraphStore.getState().addNodeAuto(opId, position);
+  if (result.nodeIds.length > 0) useUiStore.getState().noteOperatorUsed(opId);
   report(result, "已添加");
   return result;
 }

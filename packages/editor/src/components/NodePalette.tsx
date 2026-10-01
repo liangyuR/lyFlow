@@ -87,6 +87,37 @@ function SnippetBranch({ query }: { query: string }) {
   );
 }
 
+/** 最近用过的算子（空查询时排在分类树前面）。一个都没有时不出现。 */
+function RecentBranch() {
+  const recentOps = useUiStore((s) => s.recentOps);
+  const operatorsById = useManifestStore((s) => s.operatorsById);
+  const inspected = useUiStore((s) => s.inspectedOperator);
+  const [open, setOpen] = useState(true);
+  const ops = recentOps.flatMap((id) => {
+    const op = operatorsById.get(id);
+    return op ? [op] : [];
+  });
+  if (ops.length === 0) return null;
+  return (
+    <div className="tree-branch tree-branch--recent" data-testid="palette-recent" style={{ ["--depth" as string]: 0 }}>
+      <button type="button" className="tree-branch__head" onClick={() => setOpen((v) => !v)}>
+        <span className={`tree-branch__caret${open ? " is-open" : ""}`} aria-hidden>
+          ▸
+        </span>
+        最近用过
+        <span className="tree-branch__count">{ops.length}</span>
+      </button>
+      {open && (
+        <div className="tree-branch__body">
+          {ops.map((op) => (
+            <OperatorRow key={op.id} op={op} active={op.id === inspected} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface TreeNode {
   name: string;
   path: string;
@@ -282,9 +313,12 @@ export function NodePalette() {
             ))
           )
         ) : (
-          [...tree.children.values()].map((child) => (
-            <TreeBranch key={child.path} node={child} depth={0} />
-          ))
+          <>
+            <RecentBranch />
+            {[...tree.children.values()].map((child) => (
+              <TreeBranch key={child.path} node={child} depth={0} />
+            ))}
+          </>
         )}
       </div>
 

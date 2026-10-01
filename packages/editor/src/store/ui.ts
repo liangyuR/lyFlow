@@ -108,6 +108,11 @@ interface UiState {
   helpOpen: boolean;
   /** 查找节点的弹层开着没有（Ctrl+F，components/NodeFinder）。 */
   finderOpen: boolean;
+  /** 最近用过的算子 id，新的在前，最多 RECENT_OPS_MAX 个。算子搜索与面板空查询时排在最前。
+   *  记在 localStorage：只是个方便，读不到、写不进就当没有。 */
+  recentOps: readonly string[];
+  /** 又用了一次这个算子（界面上加了一个它的节点）：挪到最前。 */
+  noteOperatorUsed(opId: string): void;
   /** 抽屉里点了某条诊断 → 定位到这个节点/参数。 */
   focusedDiagnostic: { nodeId: string; paramPath?: string | undefined } | null;
   /** 画布要把哪个节点移进视野（revealNode 发起，GraphCanvas 执行）。seq 每次加一：同一个节点再点一次也要动。 */
@@ -163,6 +168,20 @@ function sameIds(a: ReadonlySet<string>, b: readonly string[]): boolean {
 
 const NO_PATH: SubPath = [];
 
+const RECENT_OPS_KEY = "lyflow.recentOperators";
+export const RECENT_OPS_MAX = 8;
+
+function loadRecentOps(): string[] {
+  try {
+    const raw = globalThis.localStorage?.getItem(RECENT_OPS_KEY);
+    const v: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(v)) return [];
+    return v.filter((s): s is string => typeof s === "string").slice(0, RECENT_OPS_MAX);
+  } catch {
+    return [];
+  }
+}
+
 export const useUiStore = create<UiState>((set, get) => ({
   path: NO_PATH,
   autoRun: true,
@@ -187,6 +206,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   viewerContentPick: null,
   helpOpen: false,
   finderOpen: false,
+  recentOps: loadRecentOps(),
   focusedDiagnostic: null,
   revealRequest: null,
   autoHint: null,
@@ -283,6 +303,17 @@ export const useUiStore = create<UiState>((set, get) => ({
   setFinderOpen(open) {
     if (get().finderOpen === open) return;
     set({ finderOpen: open });
+  },
+  noteOperatorUsed(opId) {
+    const cur = get().recentOps;
+    if (cur[0] === opId) return;
+    const next = [opId, ...cur.filter((id) => id !== opId)].slice(0, RECENT_OPS_MAX);
+    set({ recentOps: next });
+    try {
+      globalThis.localStorage?.setItem(RECENT_OPS_KEY, JSON.stringify(next));
+    } catch {
+      // 存不进（隐私模式、配额满）：这一次会话里照样有，下次打开没了而已
+    }
   },
   toggleParamPanel(open) {
     const cur = get().paramPanel;

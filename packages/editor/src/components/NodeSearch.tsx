@@ -17,6 +17,7 @@ export function NodeSearch() {
   const popup = useUiStore((s) => s.searchPopup);
   const closeSearch = useUiStore((s) => s.closeSearch);
   const operators = useManifestStore((s) => s.bundle?.operators);
+  const recentOps = useUiStore((s) => s.recentOps);
 
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -35,11 +36,18 @@ export function NodeSearch() {
   const rows = useMemo(() => {
     const all = operators ?? [];
     if (!query.trim()) {
-      // 空查询列全部，让人知道有哪些可用，而不是面对一个空白框
-      return all.slice(0, MAX_ROWS).map((op) => ({ op, fieldIndex: 0, indices: [] as number[] }));
+      // 空查询列全部，让人知道有哪些可用，而不是面对一个空白框；最近用过的排在最前
+      const recent = new Set(recentOps);
+      const first = recentOps.flatMap((id) => all.filter((op) => op.id === id));
+      const rest = all.filter((op) => !recent.has(op.id));
+      return [...first, ...rest]
+        .slice(0, MAX_ROWS)
+        .map((op) => ({ op, fieldIndex: 0, indices: [] as number[], recent: recent.has(op.id) }));
     }
-    return searchOperators(all, query).slice(0, MAX_ROWS);
-  }, [operators, query]);
+    return searchOperators(all, query)
+      .slice(0, MAX_ROWS)
+      .map((hit) => ({ ...hit, recent: false }));
+  }, [operators, query, recentOps]);
 
   useEffect(() => setCursor(0), [query]);
 
@@ -65,6 +73,7 @@ export function NodeSearch() {
     const nodeId = graph.addNode(opId, popup.flow);
     if (nodeId) {
       useUiStore.getState().setSelection([nodeId], []);
+      useUiStore.getState().noteOperatorUsed(opId);
       // 从端口拖出、中途松手弹出的搜索面板：选中后自动接上。
       // 接不上（类型不匹配）不算错误 —— 节点已经落下了，用户可以自己改。
       if (popup.pendingFrom) {
@@ -136,6 +145,7 @@ export function NodeSearch() {
               >
                 <span className="search-popup__label">{hit.op.label}</span>
                 <span className="search-popup__cat">{hit.op.category}</span>
+                {hit.recent && <span className="search-popup__why">最近</span>}
                 {hit.fieldIndex > 0 && (
                   <span className="search-popup__why">{FIELD_LABELS[hit.fieldIndex]}</span>
                 )}

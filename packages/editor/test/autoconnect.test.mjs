@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { planAutoConnect } from "../src/lib/autoconnect.ts";
+import { addNodeWithAutoConnect } from "../src/lib/insert.ts";
 import { useGraphStore } from "../src/store/graph.ts";
 import { useManifestStore } from "../src/store/manifest.ts";
 import { useUiStore } from "../src/store/ui.ts";
@@ -134,4 +135,17 @@ test("插入片段：内部边照搬，对外输入按提示接到片段外唯�
   useGraphStore.getState().undo();
   assert.equal(doc().edges.length, before);
   assert.equal(doc().nodes.length, 2);
+});
+
+test("界面上加了节点就记进「最近用过」：挪到最前、不重复、最多 8 个；没加上不记", () => {
+  reset();
+  useUiStore.setState({ recentOps: [] });
+  addNodeWithAutoConnect("t.read", { x: 0, y: 0 });
+  addNodeWithAutoConnect("t.locate", { x: 200, y: 0 });
+  addNodeWithAutoConnect("t.read", { x: 0, y: 200 });
+  assert.deepEqual(useUiStore.getState().recentOps, ["t.read", "t.locate"]);
+  addNodeWithAutoConnect("t.nope", { x: 0, y: 400 });
+  assert.deepEqual(useUiStore.getState().recentOps, ["t.read", "t.locate"], "当前 core 里没有的算子加不上，不记");
+  for (let i = 0; i < 10; i += 1) useUiStore.getState().noteOperatorUsed(`x.${i}`);
+  assert.deepEqual(useUiStore.getState().recentOps, ["x.9", "x.8", "x.7", "x.6", "x.5", "x.4", "x.3", "x.2"]);
 });
