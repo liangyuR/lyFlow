@@ -351,6 +351,7 @@ Agent，不用自己重建「这次 run 到底发生了什么」，也不用手�
 - 阶段 A 为被嵌入做准备：[phase-a-plan.md](phase-a-plan.md)，验收 [a1](phase-a1-acceptance.md) / [a2](phase-a2-acceptance.md)；
   阶段 B 在业务仓库：[phase-b-plan.md](phase-b-plan.md)
 - dts 算子包（默认关）：[packs/dts/README.md](../packs/dts/README.md)
+- 易用性、算子性能与代码质量一轮（2026-10-01 – 10-02，没有事先的计划）：[usability-perf-acceptance.md](usability-perf-acceptance.md)
 
 ## M5 之后 — 外延（只列方向，动工前再写计划）
 

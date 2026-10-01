@@ -4,7 +4,7 @@
 
 2026-09-26 按四路审计做过一次合并精简（提交 test/prune），数字是那之后的：
 
-（2026-09-29 逐项实测过一遍：C++ 默认 / dts / gap;dts 三种构建，Rust 默认与纯平台构建 `LYFLOW_STD_PACKS=0`、`tests/host.rs` 带 dts 全跑，下表的数都是跑出来的，不是推算。2026-10-01 大图阶段之后按同样的跑法再实测一遍，数字已更新；PR #3 第二轮 review 修正后又跑了一遍；2026-10-01 晚的易用性 / 性能 / 代码质量这一轮之后全部重跑，含纯平台构建与安装包。）
+（2026-09-29 逐项实测过一遍：C++ 默认 / dts / gap;dts 三种构建，Rust 默认与纯平台构建 `LYFLOW_STD_PACKS=0`、`tests/host.rs` 带 dts 全跑，下表的数都是跑出来的，不是推算。2026-10-01 大图阶段之后按同样的跑法再实测一遍，数字已更新；PR #3 第二轮 review 修正后又跑了一遍；2026-10-01 晚的易用性 / 性能 / 代码质量这一轮之后全部重跑，含纯平台构建与安装包；2026-10-02 这一轮的后半段之后又全部重跑一遍（[usability-perf-acceptance.md](usability-perf-acceptance.md) 末尾）。）
 
 | 层 | 命令 | 规模 | 跑一遍 |
 |---|---|---|---|
@@ -12,7 +12,7 @@
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 154（纯平台构建 95 通过 / 59 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
 | editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 94 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 32 | 秒级 |
-| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 770 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
+| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 794 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 33 条断言（精简前 58） | 几分钟 |
 
 ## 放在哪一层
