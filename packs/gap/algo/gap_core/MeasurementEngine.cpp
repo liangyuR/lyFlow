@@ -93,10 +93,10 @@ MeasurementResult MeasurementEngine::measure(const MeasurementRequest& request) 
     if (!request.configuration.flush.enabled && !request.configuration.gap.enabled) {
       failGlobally({FailureStage::kInput, FailureCode::kInvalidConfiguration, "configuration",
                     "at least one of gap or flush must be enabled"});
-    } else if (const auto failure = validateCloud(primary_cloud, "primary"); failure) {
-      failGlobally(failure);
-    } else if (const auto failure = validateCloud(secondary_cloud, "secondary"); failure) {
-      failGlobally(failure);
+    } else if (const auto primaryFailure = validateCloud(primary_cloud, "primary"); primaryFailure) {
+      failGlobally(primaryFailure);
+    } else if (const auto secondaryFailure = validateCloud(secondary_cloud, "secondary"); secondaryFailure) {
+      failGlobally(secondaryFailure);
     } else {
       detection::GapDetection detector;
       detector.setConfiguration(request.configuration);
@@ -107,10 +107,10 @@ MeasurementResult MeasurementEngine::measure(const MeasurementRequest& request) 
       try {
         detector.detect(primary_cloud, secondary_cloud);
       } catch (const std::exception& error) {
-        const Failure failure{detector.currentStage(), classifyFailureCode(error.what()),
-                              "pipeline", error.what()};
+        const Failure pipelineFailure{detector.currentStage(), classifyFailureCode(error.what()),
+                                      "pipeline", error.what()};
         detector.finishDiagnostics();
-        failGlobally(failure);
+        failGlobally(pipelineFailure);
       }
 
       result.quality = detector.qualityMetrics();

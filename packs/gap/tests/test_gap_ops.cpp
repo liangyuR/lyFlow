@@ -1538,7 +1538,7 @@ TEST_CASE("圆心高度带的 guard：带内结果不变，出带才重拟") {
 
 TEST_CASE("圆拟合的弱地板：钉死的那台弧太短就退回合并云") {
   // Slave 在右 ROI 里只有一小段弧（短弧上圆心定不住），Master 有完整的一段。
-  const auto build = [](const std::unordered_map<std::string, Value>& over) {
+  const auto build = [] {
     PointCloud primary, secondary, merged;
     pushLeftArc(primary);
     pushLeftArc(secondary);
@@ -1555,17 +1555,17 @@ TEST_CASE("圆拟合的弱地板：钉死的那台弧太短就退回合并云") 
     return call;
   };
   // 不设地板：钉死 Secondary，就拿那段 10° 的弧去拟
-  auto loose = build({});
+  auto loose = build();
   REQUIRE(loose->run("gap.fit_gap_circles", {{"rightCamera", Value::text("Secondary")}}).ok);
   const float looseR = loose->out("right").asCircle2D()->radius;
 
   // 设了地板：退回合并云，拟出来的和 Both 一致
-  auto floored = build({});
+  auto floored = build();
   REQUIRE(floored
               ->run("gap.fit_gap_circles", {{"rightCamera", Value::text("Secondary")},
                                             {"rightMinArcDeg", Value::number(60.0)}})
               .ok);
-  auto both = build({});
+  auto both = build();
   REQUIRE(both->run("gap.fit_gap_circles").ok);
   CHECK(floored->out("right").asCircle2D()->radius == both->out("right").asCircle2D()->radius);
   CHECK(floored->out("right").asCircle2D()->center[0] == both->out("right").asCircle2D()->center[0]);
