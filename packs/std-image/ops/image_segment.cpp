@@ -122,8 +122,29 @@ Status regionStatsCompute(const Inputs& inputs, const ParamView& params, Outputs
   if (channel >= in.channels) {
     return badParam("图像只有 " + std::to_string(in.channels) + " 个通道", "channel");
   }
+  // 单通道图直接借原图（不拷一份通道）
   cv::Mat plane;
-  cv::extractChannel(cvx::view(in), plane, channel);
+  if (in.channels == 1) {
+    plane = cvx::view(in);
+  } else {
+    cv::extractChannel(cvx::view(in), plane, channel);
+  }
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  // 不接掩膜、也没有 NaN 要排除（不是 f32）：区域就是整张图。直接算，不必先造一张全 255 的掩膜再扫三遍 ——
+  // 整数位深的和在 OpenCV 里是精确累加，有没有掩膜结果都一样
+  if (!inputs.has("mask") && plane.depth() != CV_32F) {
+    const int area = plane.rows * plane.cols;
+    Box2D box;
+    box.unit = Unit2D::Pixel;
+    if (area > 0) {
+      box.max[0] = static_cast<float>(plane.cols);
+      box.max[1] = static_cast<float>(plane.rows);
+    }
+    outputs.set("mean", Data::measurement(measured(area > 0 ? cv::mean(plane)[0] : nan, "")));
+    outputs.set("area", Data::measurement(measured(area > 0 ? area : nan, "px²")));
+    outputs.set("bbox", Data::box2d(box));
+    return Status::Ok();
+  }
   cv::Mat mask;
   if (inputs.has("mask")) {
     const Image& mk = *inputs.get("mask").asImage();
@@ -147,7 +168,6 @@ Status regionStatsCompute(const Inputs& inputs, const ParamView& params, Outputs
   if (plane.depth() == CV_32F) mask &= (plane == plane);  // NaN 不算进区域
 
   const int area = cv::countNonZero(mask);
-  const double nan = std::numeric_limits<double>::quiet_NaN();
   double mean = nan;
   Box2D box;
   box.unit = Unit2D::Pixel;

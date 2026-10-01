@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <limits>
 
 #include "exec/result_store.h"
 #include "helpers.h"
@@ -366,81 +367,86 @@ TEST_CASE("edit.translate_region：零法向是 bad_param") {
 TEST_CASE("法线与两个离群点滤波：分段并行的结果与 PCL 原实现逐点相同，与线程数无关") {
   test::OpCall gen;
   REQUIRE(gen.run("gen.synthetic", {{"pointCount", Value::integer(60000)}, {"seed", Value::integer(5)}}).ok);
-  const Data cloud = gen.out("cloud");
-  const PointCloud& in = *cloud.asCloud();
-  const auto pc = ops::adapter::toPcl(in);
+  // 两份云：原样的（is_dense，半径离群点走 K 近邻那一支），与掺了 NaN 点的（三个算子都走「非有限点」那一支）
+  PointCloud withNaN = *gen.out("cloud").asCloud();
+  for (std::size_t i = 0; i < withNaN.pointCount(); i += 997) withNaN.xyz[i * 3] = std::numeric_limits<float>::quiet_NaN();
+  for (const Data& cloud : {gen.out("cloud"), Data::cloud(std::move(withNaN))}) {
+    const PointCloud& in = *cloud.asCloud();
+    const auto pc = ops::adapter::toPcl(in);
+    CAPTURE(pc->is_dense);
 
-  pcl::Indices sorKept;
-  {
-    pcl::StatisticalOutlierRemoval<pcl::PointXYZ> f;
-    f.setInputCloud(pc);
-    f.setMeanK(30);
-    f.setStddevMulThresh(1.0);
-    f.filter(sorKept);
-  }
-  pcl::Indices rorKept;
-  {
-    pcl::RadiusOutlierRemoval<pcl::PointXYZ> f;
-    f.setInputCloud(pc);
-    f.setRadiusSearch(0.05);
-    f.setMinNeighborsInRadius(5);
-    f.filter(rorKept);
-  }
-  pcl::PointCloud<pcl::Normal> ref;
-  {
-    pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
-    ne.setInputCloud(pc);
-    ne.setSearchMethod(pcl::make_shared<pcl::search::KdTree<pcl::PointXYZ>>());
-    ne.setKSearch(20);
-    ne.setViewPoint(0.0f, 0.0f, 0.0f);
-    ne.compute(ref);
-  }
-  const auto keptOf = [&](const test::OpCall& c) {
-    std::vector<char> removed(in.pointCount(), 0);
-    for (std::int32_t i : c.outputs.at("removed").asIndices()->values) removed[static_cast<std::size_t>(i)] = 1;
-    pcl::Indices kept;
-    for (std::size_t i = 0; i < removed.size(); ++i) {
-      if (!removed[i]) kept.push_back(static_cast<pcl::index_t>(i));
+    pcl::Indices sorKept;
+    {
+      pcl::StatisticalOutlierRemoval<pcl::PointXYZ> f;
+      f.setInputCloud(pc);
+      f.setMeanK(30);
+      f.setStddevMulThresh(1.0);
+      f.filter(sorKept);
     }
-    return kept;
-  };
-  REQUIRE(sorKept.size() < in.pointCount());  // 参照本身确实剔掉了离群点，下面的比较才有意义
-  REQUIRE(rorKept.size() < in.pointCount());
-
-  for (int threads : {1, 3, 8}) {
-    CAPTURE(threads);
-    test::OpCall c;
-    c.threads = threads;
-    c.inputs["cloud"] = cloud;
-    REQUIRE(c.run("filter.statistical_outlier", {{"meanK", Value::integer(30)}, {"stddevMul", Value::number(1.0)}}).ok);
-    CHECK(keptOf(c) == sorKept);
-    REQUIRE(c.run("filter.radius_outlier", {{"radius", Value::number(0.05)}, {"minNeighbors", Value::integer(5)}}).ok);
-    CHECK(keptOf(c) == rorKept);
-
-    REQUIRE(c.run("features.normals", {{"kSearch", Value::integer(20)}}).ok);
-    const PointCloud& got = *c.out("cloud").asCloud();
-    REQUIRE(got.normals.size() == in.pointCount() * 3);
-    float worst = 0.0f;
-    for (std::size_t i = 0; i < in.pointCount(); ++i) {
-      const pcl::Normal& r = ref[i];
-      for (int a = 0; a < 3; ++a) {
-        // 邻域退化时 PCL 填 NaN，算子置零
-        const float want = std::isfinite(r.normal[a]) ? r.normal[a] : 0.0f;
-        worst = std::max(worst, std::abs(got.normals[i * 3 + static_cast<std::size_t>(a)] - want));
+    pcl::Indices rorKept;
+    {
+      pcl::RadiusOutlierRemoval<pcl::PointXYZ> f;
+      f.setInputCloud(pc);
+      f.setRadiusSearch(0.05);
+      f.setMinNeighborsInRadius(5);
+      f.filter(rorKept);
+    }
+    pcl::PointCloud<pcl::Normal> ref;
+    {
+      pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
+      ne.setInputCloud(pc);
+      ne.setSearchMethod(pcl::make_shared<pcl::search::KdTree<pcl::PointXYZ>>());
+      ne.setKSearch(20);
+      ne.setViewPoint(0.0f, 0.0f, 0.0f);
+      ne.compute(ref);
+    }
+    const auto keptOf = [&](const test::OpCall& c) {
+      std::vector<char> removed(in.pointCount(), 0);
+      for (std::int32_t i : c.outputs.at("removed").asIndices()->values) removed[static_cast<std::size_t>(i)] = 1;
+      pcl::Indices kept;
+      for (std::size_t i = 0; i < removed.size(); ++i) {
+        if (!removed[i]) kept.push_back(static_cast<pcl::index_t>(i));
       }
+      return kept;
+    };
+    REQUIRE(sorKept.size() < in.pointCount());  // 参照本身确实剔掉了离群点，下面的比较才有意义
+    REQUIRE(rorKept.size() < in.pointCount());
+
+    for (int threads : {1, 3, 8}) {
+      CAPTURE(threads);
+      test::OpCall c;
+      c.threads = threads;
+      c.inputs["cloud"] = cloud;
+      REQUIRE(c.run("filter.statistical_outlier", {{"meanK", Value::integer(30)}, {"stddevMul", Value::number(1.0)}}).ok);
+      CHECK(keptOf(c) == sorKept);
+      REQUIRE(c.run("filter.radius_outlier", {{"radius", Value::number(0.05)}, {"minNeighbors", Value::integer(5)}}).ok);
+      CHECK(keptOf(c) == rorKept);
+
+      REQUIRE(c.run("features.normals", {{"kSearch", Value::integer(20)}}).ok);
+      const PointCloud& got = *c.out("cloud").asCloud();
+      REQUIRE(got.normals.size() == in.pointCount() * 3);
+      float worst = 0.0f;
+      for (std::size_t i = 0; i < in.pointCount(); ++i) {
+        const pcl::Normal& r = ref[i];
+        for (int a = 0; a < 3; ++a) {
+          // 邻域退化（或点本身不是有限的）时 PCL 填 NaN，算子置零
+          const float want = std::isfinite(r.normal[a]) ? r.normal[a] : 0.0f;
+          worst = std::max(worst, std::abs(got.normals[i * 3 + static_cast<std::size_t>(a)] - want));
+        }
+      }
+      CHECK(worst == 0.0f);
     }
-    CHECK(worst == 0.0f);
   }
 
   // 顺带修的：flipTowardsViewpoint 关掉就不翻 —— PCL 的 NormalEstimation 不论如何都朝视点（没设就是原点）翻，
   // 以前这个开关关了也照翻。开着时每个法线都朝着视点，关掉时朝向就是 PCA 给的那样，有正有负
   const auto facingAway = [&](bool flip) {
     test::OpCall c;
-    c.inputs["cloud"] = cloud;
+    c.inputs["cloud"] = gen.out("cloud");
     REQUIRE(c.run("features.normals", {{"kSearch", Value::integer(20)}, {"flipTowardsViewpoint", Value::boolean(flip)}}).ok);
     const PointCloud& got = *c.out("cloud").asCloud();
     std::size_t away = 0;
-    for (std::size_t i = 0; i < in.pointCount(); ++i) {
+    for (std::size_t i = 0; i < got.pointCount(); ++i) {
       const float* p = &got.xyz[i * 3];
       const float* n = &got.normals[i * 3];
       if (-p[0] * n[0] - p[1] * n[1] - p[2] * n[2] < 0.0f) ++away;

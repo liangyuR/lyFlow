@@ -247,6 +247,25 @@ TEST_CASE("image.region_stats：掩膜内的均值、面积、外接框（像素
   CHECK(std::vector<float>{b->min[0], b->min[1], b->max[0], b->max[1]} ==
         std::vector<float>{10, 5, 16, 9});
 
+  // 不接掩膜：区域就是整张图（不造全 255 的掩膜、直接算的那条路），与接一张全 255 的掩膜逐位相同
+  for (const auto& [channels, depth] : {std::pair{1, PixelDepth::U8}, std::pair{3, PixelDepth::U16}}) {
+    CAPTURE(channels);
+    Call whole;
+    whole.inputs["image"] = Data::image(test::image::makeTestImage(30, 20, channels, depth));
+    Image all = Image::allocate(30, 20, 1, PixelDepth::U8);
+    std::fill(all.mutablePixels(), all.mutablePixels() + 600, std::uint8_t{255});
+    whole.inputs["mask"] = Data::image(all);
+    const std::unordered_map<std::string, Value> ch{{"channel", Value::integer(channels - 1)}};
+    REQUIRE(whole.run("image.region_stats", ch).ok);
+    const double maskedMean = whole.outputs["mean"].asMeasurement()->value;
+    whole.inputs.erase("mask");
+    REQUIRE(whole.run("image.region_stats", ch).ok);
+    CHECK(whole.outputs["area"].asMeasurement()->value == 600.0);
+    CHECK(whole.outputs["mean"].asMeasurement()->value == maskedMean);
+    const Box2D* wb = whole.outputs["bbox"].asBox2D();
+    CHECK(std::vector<float>{wb->min[0], wb->min[1], wb->max[0], wb->max[1]} == std::vector<float>{0, 0, 30, 20});
+  }
+
   c.inputs["mask"] = Data::image(Image::allocate(3, 3, 1, PixelDepth::U8));
   CHECK(c.run("image.region_stats").code == "bad_input");
   c.inputs["mask"] = Data::image(Image::allocate(30, 20, 3, PixelDepth::U8));

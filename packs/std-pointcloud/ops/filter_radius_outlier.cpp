@@ -50,7 +50,9 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
         const int k = tree.nearestKSearch(index, meanK, nn, d2);
         keptFlag[i] = k == meanK && !(maxSqr < d2[static_cast<std::size_t>(meanK) - 1]);
       } else {
-        const int k = tree.radiusSearch(index, radius, nn, d2);
+        // 只要知道「够不够 minNeighbors + 1 个」：最多要这么多个，稠密处就不必把半径内的几百个点全列出来。
+        // 判据不变 —— 返回 min(半径内的个数, meanK)，大于 minNeighbors 当且仅当半径内至少 meanK 个
+        const int k = tree.radiusSearch(index, radius, nn, d2, static_cast<unsigned int>(meanK));
         keptFlag[i] = k > minNeighbors;
       }
     }
