@@ -277,6 +277,15 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     cursor.current = { x: e.clientX, y: e.clientY };
   }, []);
+  /** 粘贴、Tab 搜索落在哪：鼠标在画布上就跟着鼠标；不在（停在检查器、工具栏上，或者还没动过）就落在画布中间。
+   *  以前一律照鼠标的位置算 —— 在检查器上按 Ctrl+V，节点粘到了检查器底下，画布上看不见。 */
+  const canvasPoint = useCallback(() => {
+    const c = cursor.current;
+    const pane = root.current?.querySelector(".react-flow")?.getBoundingClientRect();
+    if (!pane || pane.width === 0) return c;
+    const inside = c.x >= pane.left && c.x <= pane.right && c.y >= pane.top && c.y <= pane.bottom;
+    return inside ? c : { x: Math.round(pane.left + pane.width / 2), y: Math.round(pane.top + pane.height / 2) };
+  }, []);
 
   const loadManifest = useManifestStore((s) => s.load);
   const manifestStatus = useManifestStore((s) => s.status);
@@ -620,10 +629,10 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         // 只选了一个时别放大到糊满屏幕：maxZoom 与「打开到出错的节点」同一档
         void fitView({ nodes: ids.map((id) => ({ id })), duration: fitMs, maxZoom: 1, padding: 0.4 });
       },
-      cursorFlowPosition: () => screenToFlowPosition(cursor.current),
-      cursorScreenPosition: () => cursor.current,
+      cursorFlowPosition: () => screenToFlowPosition(canvasPoint()),
+      cursorScreenPosition: canvasPoint,
     }),
-    [doSave, doOpen, doNew, doRun, doCancel, doLayout, fitView, fitMs, screenToFlowPosition],
+    [doSave, doOpen, doNew, doRun, doCancel, doLayout, fitView, fitMs, screenToFlowPosition, canvasPoint],
   );
 
   useShortcuts(handlers, root);

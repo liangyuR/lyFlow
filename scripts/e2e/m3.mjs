@@ -1267,6 +1267,24 @@ async function suiteEditing(cdp, report) {
   report.eq("复制节点之后又复制了一段字：Ctrl+V 不粘旧节点，提示剪贴板里不是节点",
     { added: (await countNodes()) - beforeText, toast: await cdp.eval(`return window.__lyflow.stores.ui.getState().toast?.text ?? null;`) },
     { added: 0, toast: "剪贴板里不是节点" });
+  // 鼠标停在检查器上按 Ctrl+V：节点落在画布里（画布中间），不落到检查器底下。以前照鼠标的位置算，粘出来看不见
+  await pressCtrl(cdp, "c");
+  await sleep(150);
+  const inspAt = await cdp.eval(`
+    const r = document.querySelector('.insp')?.getBoundingClientRect();
+    return r ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + 40) } : null;
+  `);
+  mustOk(inspAt != null, "检查器在屏幕上", inspAt);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: inspAt.x, y: inspAt.y, buttons: 0 });
+  await pressCtrl(cdp, "v");
+  await sleep(250);
+  const landed = await cdp.eval(`
+    const pane = document.querySelector('.react-flow').getBoundingClientRect();
+    const id = [...window.__lyflow.stores.ui.getState().selectedNodes][0];
+    const r = document.querySelector('[data-testid="node-' + id + '"]')?.getBoundingClientRect();
+    return r ? { insideX: r.left >= pane.left && r.left < pane.right, insideY: r.top >= pane.top && r.top < pane.bottom } : null;
+  `);
+  report.eq("鼠标停在检查器上按 Ctrl+V：粘出来的节点落在画布里", landed, { insideX: true, insideY: true });
   await restoreClipboard(cdp);
 
   // 键盘焦点在控件上：Tab / Space 归控件（挪焦点、按下去），不开算子搜索；空白处 Tab 照样开搜索。焦点在勾选框上
