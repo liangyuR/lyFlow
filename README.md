@@ -76,6 +76,7 @@ C++ 生成的 `OperatorManifest`，Rust 转发给前端。**加新算子只改 C
 
 ```
 core/     C++ 核心：算子注册表 + manifest 导出 + 校验/展开/编译/执行 + 结果仓。编成 DLL
+packs/    算子包，构建期编进同一个 DLL：std-pointcloud / std-ml / std-image 默认编，gap / dts 是领域包、默认关
 crates/lyflow-client/  C ABI 的 Rust 客户端：加载 core DLL、跑图、取结果。`client.hpp` 的对应物
 bridge/   Rust 桥接层：Tauri 壳（lyflow-app）与 headless CLI（lyflow）。在客户端之上加
           路径解析、进程单例、热重载
@@ -141,37 +142,56 @@ stderr 给人看。退出码：`0` 成功、`1` 校验失败、`2` 执行失败�
 
 ```bash
 lyflow run      graph.lyflow.json [--to nodeId]... [--set nodeId.param=<json>]...
-                                  [--param name=<json>]...
-                                  [--base-dir d] [--parallel n] [--no-cache]
-                                  [--preview] [--preview-points n]
-lyflow validate graph.lyflow.json
-lyflow plan     graph.lyflow.json [--to nodeId]...
-lyflow params   graph.lyflow.json [--node nodeId]... [--only explicit|default|bound]
-                                  [--set nodeId.param=<json>]... [--param name=<json>]... [--json]
+                                  [--recipe r.lyflow-recipe.json] [--param name=<json>]...
+                                  [--base-dir d] [--parallel n] [--no-cache] [--cache-dir d]
+                                  [--preview] [--preview-points n] [--outputs] [--summary]
+                                  [--input nodeId.port=file.pcd]...
+lyflow cache    info|clear --cache-dir d [--stale]
+lyflow import   file --kind kind [--fine] [-o out.lyflow.json] [--base-dir d]
+lyflow validate graph.lyflow.json [--base-dir d] [--set ...] [--recipe ...] [--param ...]
+lyflow plan     graph.lyflow.json [--to nodeId]... [--base-dir d] [--set ...] [--recipe ...] [--param ...]
+lyflow params   graph.lyflow.json [--node nodeId]... [--only explicit|default|bound|graph]
+                                  [--set nodeId.param=<json>]... [--recipe ...] [--param name=<json>]...
+                                  [--base-dir d] [--json]
 lyflow migrate  graph.lyflow.json [--write]
 lyflow manifest [--check]
 lyflow dump     graph.lyflow.json nodeId:port out.pcd [--format binary|ascii|binary_compressed]
+                                  # 图像输出写 out.lyim（LYIM 载荷原样落盘）
 lyflow sweep    graph.lyflow.json --param nodeId.param=start:end:steps [--param ...]
-                                  --metric nodeId:port.elementCount [--csv out.csv]
-lyflow eval     graph.lyflow.json <样本集>
-                                  [--params sets.json] [--param n.p=start:end:steps]...
-                                  --metric <值路径> [--metric ...] [--holdout tag=value]
-                                  [--group-by tag] [--csv out.csv]
+                                  --metric nodeId:port.elementCount|byteSize|durationMs
+                                  [--csv out.csv] [--base-dir d]
+lyflow eval     graph.lyflow.json [<样本集>] [--params sets.json] [--param n.p=start:end:steps]...
+                                  (--metric <值路径> [--metric ...] | --list-metrics)
+                                  [--holdout tag=value] [--group-by tag] [--csv out.csv]
+                                  [--base-dir d] [--parallel n] [--no-cache]
+                                  [--set ...] [--recipe ...] [--param name=<json>]... [--summary]
 lyflow perturb  graph.lyflow.json --after nodeId:port --region <选区 JSON>
-                                  --axis x|y|z=start:end:steps --metric <值路径>
-                                  <样本集> [--expect slope] [--tolerance v]
+                                  --axis x|y|z=start:end:steps [<样本集>]
+                                  --metric <值路径> [--metric ...]
+                                  [--expect slope] [--tolerance v] [--csv out.csv]
+                                  [--base-dir d] [--parallel n] [--no-cache] [--set ...]
 lyflow diff     a.lyflow.json b.lyflow.json [--json]
+lyflow recipes  graph.lyflow.json [--recipe r.lyflow-recipe.json]... [--json]
+lyflow patch    graph.lyflow.json [--remove-node id|glob]... [--add-node <json>]...
+                                  [--rewire 节点:端口=节点:端口]... [--connect 节点:输出=节点:输入]...
+                                  [--set ...] [--recipe ...] [--param ...]
+                                  [--dry-run] [-o out] [--json] [--base-dir d]
 
 <样本集> 三选一，eval 与 perturb 共用：
   --samples samples.jsonl
   --samples-glob pat --bind n.p
-  --samples-dir root --bind-pair n.pA,n.pB --pattern globA,globB
+  --samples-dir root --bind-pair n.pA,n.pB --pattern globA,globB    # 单文件时 --bind n.p --pattern glob
                 [--sample-subdir name] [--sort-by name|mtime] [--split-half tagKey]
+  另可加 --samples-jsonl-out path，把生成的样本集写出来核对、复用
 ```
 
+每个选项的完整说明（`--input` 的两种注入、`patch` 的动作顺序、`perturb` 的单位、配方的四类失配……）见 `lyflow --help`。
+`--cache-dir`（或环境变量 `LYFLOW_CACHE_DIR`）在 `run` / `eval` / `sweep` / `perturb` 上都认：结果缓存落盘，
+默认关，按构建指纹分目录（[disk-cache-plan.md](docs/disk-cache-plan.md)）。
+
 `eval` 与 `perturb` 的 `--metric` 是**值路径**：`outputs.gap`、`nodes.n_fit.quality.rmsResidualMm`、
-`nodes.v.elementCount`、`run.durationMs`。路径拼错时 stderr 会列出这张图上所有可用的标量路径
-（[ADR-0020](docs/adr/0020-eval-and-perturb-as-cli.md)）。
+`nodes.v.elementCount`、`run.durationMs`。路径拼错时 stderr 会列出这张图上所有可用的标量路径，
+`eval --list-metrics` 也能直接列出来（[ADR-0020](docs/adr/0020-eval-and-perturb-as-cli.md)）。
 样本集的目录模式（`--samples-dir`）把「双相机配对 + 按时间前后各半打 tag」也内建了，
 不用再为每个测点写生成脚本。用法见 [docs/agent-tuning.md](docs/agent-tuning.md)。
 
@@ -220,12 +240,13 @@ lyflow diff before.lyflow.json after.lyflow.json
 所以同一个二进制既能接仓库里的桩服务器，也能接阶段 B 的业务服务 —— 换后端只改一个环境变量。
 
 工具：`list_operators` / `get_operator` / `list_port_types` / `validate_graph` /
-`plan_graph` / `run_graph` / `get_node_outputs` / `summarize_output` / `eval` / `perturb` /
+`plan_graph` / `run_graph` / `get_node_outputs` / `summarize_output` / `view_output_image` / `eval` / `perturb` /
 `diff_graphs` / `get_params` / `patch_graph` / `list_recipes` / `list_metrics`。`run_graph` 现在以 run summary 为主体返回
 （[ADR-0022](docs/adr/0022-run-summary-as-core-output.md)）；`patch_graph` 对应 CLI
 `lyflow patch`，`dryRun` 默认 true（[ADR-0023](docs/adr/0023-patch-as-idempotent-structural-edit.md)）；
 `get_params` 对应 `lyflow params`，回的是每节点每参数的生效值与来源。
 输出一律裁过（Agent 每次调用都在花上下文）：点云只给点数、包围盒、每通道 min/max/mean 与前几个点，
+图像只给尺寸与逐通道统计、要看就用 `view_output_image` 取一张缩小的 PNG（MCP 的 `image` 内容），
 `eval` 的统计默认压成一行一组（`compact`）、`eval_row` 与 `perturb_sample` 落盘给路径。
 起法、`.mcp.json` 片段与每个工具的返回形状见 [docs/mcp.md](docs/mcp.md)，
 CLI 选项与 MCP 字段的逐条对照见 [docs/agent-tuning.md](docs/agent-tuning.md) §7。
@@ -245,13 +266,20 @@ app 盯着这个目录，工具栏的「库」按钮也能手动重扫。
 
 ## 加一个算子
 
-1. 新建 `core/src/ops/<category>_<name>.cpp`
-2. 在 `core/src/ops/ops.h` 加声明
-3. 在 `core/src/builtin_ops.cpp` 的 `registerBuiltinOps` 加一行调用
+算子住在算子包里，core 自己只留 `gen.synthetic`、`util.reroute`、`flow.fallback`、`flow.select` 四个
+（[ADR-0014](docs/adr/0014-std-as-pack-core-zero-dep.md)）。往现成的包里加一个，以 `packs/std-pointcloud` 为例：
+
+1. 新建 `packs/std-pointcloud/ops/<category>_<name>.cpp`：`OperatorDesc` + `compute`，外加一个 `registerXxx(Registry&)`
+   （包按 `ops/*.cpp` 收源文件，CMake 不用改）
+2. 在同目录的 `ops.h` 加声明
+3. 在 `ops/register.cpp` 的 `registerPackOps` 里加一行调用
 
 存盘之后几秒内它就出现在节点面板里，连同它的分类、端口颜色、参数控件和取值范围。
 **前端不用改任何东西**（[ADR-0003](docs/adr/0003-manifest-from-cpp.md)），
-**也不用重启**（`pnpm dev` 下的热重载）。
+**也不用重启**（`pnpm dev` 下的热重载，`core-watch` 同时盯着 `core/` 与 `packs/`）。
+
+compute 的写法约定见 [core/README.md](core/README.md)「加一个算子」；
+要新开一个包（自己的依赖、PCH、默认开或关）见 [docs/op-packs.md](docs/op-packs.md)。
 
 > 热重载会清空结果缓存并取消正在跑的 run —— 缓存里的对象属于旧那份 DLL，
 > 跨代持有它是未定义行为（[ADR-0009](docs/adr/0009-hot-reload-by-copy.md)）。
@@ -259,7 +287,21 @@ app 盯着这个目录，工具栏的「库」按钮也能手动重扫。
 
 ## 状态
 
-**M4 完成 —— 能扩展。** 图本身成了可复用、可脚本化、可交互探索的资产：
+M0–M7 已完成，之后的功能各有计划与验收文档，索引在 [roadmap](docs/roadmap.md)。M4 之后加上的几块：
+
+- **能被 Agent 用（M5）。** `lyflow eval` / `perturb` 与 MCP 服务：只拿得到 CLI 或 MCP 的 Agent
+  能独立给一组测点设计图、调稳参数，不用自己写解析器、批跑器或评估脚本（[agent-tuning.md](docs/agent-tuning.md)）。
+- **能被读懂（M6）。** run summary 是 core 产出的一个对象；`lyflow patch` 做幂等的结构编辑，
+  `lyflow params` 给每个参数的生效值与来源；端口契约在输入绑定时检查。
+- **约束变成校验（M7）。** 算子的约束要么是加载期 `validate`，要么是运行期信号；GraphDoc 有了顶层图参数。
+- **人也能建图（M8 起）。** gap 积木、Bundle、片段、2D 拖框；之后又有连线查看器、节点运行按钮、
+  参数面板与配方、两节点对比、测量。
+- **能被嵌入（阶段 A）。** C ABI + `client.hpp` 与 Rust 客户端、`@lyflow/editor` 组件与 HTTP 传输契约
+  （[embedding.md](docs/embedding.md)）。
+- **第二个数据域 Image。** OpenCV 包 `std-image`；图像在连线查看器与主预览里可看、可拖像素框，
+  MCP 能把中间结果当图片返回，深度图与点云互转（[image-plan.md](docs/image-plan.md)）。
+
+**M4 —— 能扩展。** 图本身成了可复用、可脚本化、可交互探索的资产：
 
 - **子图 / 库算子。** Ctrl+G 合成、双击进入、参数提升、保存成库文件。
   子图在 C++ 的 compile 之前展开成平图，执行器与缓存对它一无所知
@@ -287,11 +329,9 @@ app 盯着这个目录，工具栏的「库」按钮也能手动重扫。
 内置算子覆盖一条真实 pipeline：`load_pcd → crop_box → voxel_grid →
 statistical_outlier → ransac_plane → extract_indices → save_pcd`。
 
-路线图见 [roadmap](docs/roadmap.md)。
-
-前端不写单元测试，验证方式是通过 CDP 驱动真实运行的 app
-（[scripts/e2e](scripts/e2e/)）。逐条验收记录见
-[docs/m4-acceptance.md](docs/m4-acceptance.md)。
+编辑器的 store 动作与纯函数有 node:test 单测（`packages/editor/test`）；真鼠标键盘、渲染与跨进程的
+完整链路靠 CDP 驱动真实运行的 app（[scripts/e2e](scripts/e2e/)）。各层测什么、测在哪见
+[docs/testing.md](docs/testing.md)，各里程碑的逐条验收记录在 `docs/*-acceptance.md`。
 
 ## License
 

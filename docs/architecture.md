@@ -16,7 +16,7 @@
 `TauriTransport` 走 `#[tauri::command]`，`HttpTransport` 走
 [docs/http-transport.md](http-transport.md) 的 REST + WebSocket，
 `StaticTransport` 只读一份 dump 出来的 manifest。三者的方法一一对应，
-再一一对应到 C ABI v14 —— 换传输不换语义。
+再一一对应到 C ABI v15 —— 换传输不换语义。
 
 核心编译成一个只导出 C ABI 的 DLL，桥接层在运行时加载它（[ADR-0004](adr/0004-core-as-dll.md)）。
 这条边界同时是崩溃隔离面和 M3 热重载的接缝。
@@ -24,7 +24,8 @@
 算子包在**构建期**编进同一个 DLL，没有第四个进程也没有插件 ABI
 （[ADR-0013](adr/0013-op-packs-static.md)）。包分两类，机制相同：仓库内的
 `packs/*` 与 `LYFLOW_OP_PACKS` 指到的外部目录。core 自己只留 `gen.synthetic`
-（测试基础设施）与 `util.reroute`（编辑器语义），零第三方依赖
+（测试基础设施）、`util.reroute`（编辑器语义）与 `flow.fallback` / `flow.select`
+（调度原语，[ADR-0016](adr/0016-error-as-value-and-lazy-ports.md)），零第三方依赖
 （[ADR-0014](adr/0014-std-as-pack-core-zero-dep.md)）。
 
 仓库内的包（[ADR-0015](adr/0015-algorithms-live-in-lyflow-packs.md)）：

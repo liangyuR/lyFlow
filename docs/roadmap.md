@@ -353,15 +353,14 @@ Agent，不用自己重建「这次 run 到底发生了什么」，也不用手�
 
 ## M5 之后 — 外延（只列方向，动工前再写计划）
 
-- 第二种数据域 **Image**：`Data::Kind::Image`、2D 视图、OpenCV 算子按 PCL 同样的边界规则接入。
-  `Tensor` 与 `ml.onnx_run` 已经就位，图像推理不用再造一遍。
-  这是对「数据模型是否通用」的真正检验，也是项目名里「Vision Flow」的兑现。
-  **实施中**：计划 [image-plan.md](image-plan.md)、决定 [ADR-0026](adr/0026-image-data-domain.md)；
-  四个阶段都已做：数据模型与 C ABI v15、OpenCV 包 `std-image`、主预览的图像模式与 MCP 看图、
-  深度图 ↔ 点云（`cloud.from_depth` / `cloud.to_depth_image`）。验收见 [image-acceptance.md](image-acceptance.md)
+- ~~第二种数据域 **Image**~~（已做：计划 [image-plan.md](image-plan.md)、决定 [ADR-0026](adr/0026-image-data-domain.md)、
+  验收 [image-acceptance.md](image-acceptance.md)。四个阶段：数据模型与 C ABI v15、OpenCV 包 `std-image`、
+  主预览的图像模式与 MCP 看图、深度图 ↔ 点云（`cloud.from_depth` / `cloud.to_depth_image`）。
+  「数据模型是否通用」的检验：core 一侧经住了，焊死的在编辑器视图层，见验收文档同名一节。
+  **已知缺口是大图**：预览不缩图像、`image.find_circle` 没有上界，见验收文档「已知毛刺」）
 - 第三方算子插件 DLL：`lyflow_plugin_init(Registry*)`，同工具链约束
 - ~~缓存落盘~~（C ABI v14 已做 CLI 专用、默认关的一版：`--cache-dir` / `LYFLOW_CACHE_DIR`，按构建指纹分目录，[disk-cache-plan.md](disk-cache-plan.md)；编辑器跨会话仍未做）
-- 两节点输出并排对比（P2 #35）
+- ~~两节点输出并排对比（P2 #35）~~（已做：[compare-plan.md](compare-plan.md)，验收在 `scripts/e2e/compare.mjs`）
 
 不计划：协作 / 多人编辑（P2 #38）。
 

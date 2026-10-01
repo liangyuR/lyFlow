@@ -1,6 +1,6 @@
 # 图像数据域（Image）计划 —— 调研与待定决定
 
-> 2026-09-29。状态：**已定，实施中**。§0 全按建议值；§6 三问的答复：
+> 2026-09-29。状态：**已实施**（四个阶段，2026-09-30 合入 main；验收与已知问题见 [image-acceptance.md](image-acceptance.md)）。§0 全按建议值；§6 三问的答复：
 > Q1 暂无具体的业务图像场景，先按 §4 的通用集做、用合成图测；Q2 选 (a)，几何值带 `unit`；Q3 `std-image` 默认开。
 > 阶段 1 的 e2e 用 core 的测试算子 `test.make_image`（`LYFLOW_TEST_OPS=1`，与 `test.param_showcase` 同一条路）出图，
 > 不必等 OpenCV 包。决定写成了 [ADR-0026](adr/0026-image-data-domain.md)。
@@ -202,5 +202,5 @@ HTTP 桩（test-server）张量那条路给的是 501，因为桩没有常驻结
 | 3 ✅ | 主预览图像模式 + 几何叠画 + 图像上拖 ROI + MCP 图片返回 | 3 天 | e2e `m8b` 拖框组加一例；MCP 冒烟调一次 `view_output_image` |
 | 4 ✅ | 跨域：`cloud.from_depth` / `cloud.to_depth_image` | 2 天 | 跨域链路跑通；深度图转点云再转回，与原图逐像素对得上 |
 
-每个阶段各自提交；阶段 1 结束时写 ADR-0026（Image 数据域与取数方式），并照惯例写验收记录：[image-acceptance.md](image-acceptance.md)（阶段 1–2 已写）。
+每个阶段各自提交；阶段 1 结束时写 ADR-0026（Image 数据域与取数方式），并照惯例写验收记录：[image-acceptance.md](image-acceptance.md)（四个阶段都已写）。
 测试照 [testing.md](testing.md)：能在 doctest 测的不进 e2e，改完同步地图与数字。

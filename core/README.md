@@ -4,17 +4,17 @@
 **权威校验**的一层（[docs/architecture.md](../docs/architecture.md)）。
 
 ```
-include/lyflow/       公共头。零 PCL（ADR-0005），算子作者只需要看这里
-  data.h              PointCloud / Indices / Transform / Plane
+include/lyflow/       公共头。零 PCL / OpenCV 头（ADR-0005、ADR-0026），算子作者只需要看这里
+  data.h              PointCloud / Indices / Transform / Plane / 2D 几何 / Measurement / Record / Tensor / Bundle / Image
   operator.h          ParamView / Inputs / Outputs / ExecContext / ComputeFn
   manifest.h          算子描述的数据结构，序列化成 operator-manifest.json
   status.h            结构化诊断（paramPath / portName）+ Status::Demand（ADR-0016）
-  c_api.h             C ABI v14 —— DLL 只导出这里的东西
+  c_api.h             C ABI v15 —— DLL 只导出这里的东西
   client.hpp          嵌入宿主用的 header-only 封装，只依赖 c_api.h（docs/embedding.md）
 src/exec/             parse → expand → validate → compile(Plan) → execute + ResultStore
   subgraph.cpp        子图展开成平图（ADR-0010）；library.cpp 扫描库目录
-src/ops/              手写算子。**不许 include 任何 PCL 头**
-src/ops/pcl/          PCL 算子，经 adapter 进出；单独吃一个 PCH
+src/ops/              core 自己的四个算子：gen.synthetic / util.reroute / flow.fallback / flow.select。
+                      其余算子都在 ../packs/（ADR-0014）
 third_party/          vendored 单头：nlohmann/json、doctest、xxhash
 tests/                doctest 测试
 ```
@@ -113,10 +113,15 @@ cmake --build build/core
 
 ## 加一个算子
 
-1. 新建 `src/ops/<category>_<name>.cpp`（要用 PCL 就放 `src/ops/pcl/` 下），
-   实现 `Status compute(...)` 和 `void registerXxx(Registry&)`
-2. 在 `src/ops/ops.h` 加声明
-3. 在 `src/builtin_ops.cpp` 的 `registerBuiltinOps` 里加一行调用
+新算子进算子包，不进 core（[ADR-0014](../docs/adr/0014-std-as-pack-core-zero-dep.md)）。
+往现成的包里加一个，以 `packs/std-pointcloud` 为例：
+
+1. 新建 `packs/std-pointcloud/ops/<category>_<name>.cpp`，
+   实现 `Status compute(...)` 和 `void registerXxx(Registry&)`（包按 `ops/*.cpp` 收源文件）
+2. 在同目录的 `ops.h` 加声明
+3. 在 `ops/register.cpp` 的 `registerPackOps` 里加一行调用
+
+要新开一个包（自己的依赖、PCH、默认开或关）见 [docs/op-packs.md](../docs/op-packs.md)。
 
 **前端不用改任何东西。** 这是 [ADR-0003](../docs/adr/0003-manifest-from-cpp.md) 的承诺。
 
