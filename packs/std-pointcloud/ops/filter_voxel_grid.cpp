@@ -1,5 +1,6 @@
 #include <cmath>
-#include <unordered_map>
+#include <cstdint>
+#include <vector>
 
 #include "ops.h"
 
@@ -21,6 +22,75 @@ struct VoxelIndexHash {
     }
     return static_cast<std::size_t>(h);
   }
+};
+
+/// 体素下标 → voxels 里的位置。开放寻址、线性探测、容量是 2 的幂：200 万点上 std::unordered_map
+/// 每个新体素一次堆分配、每次查找跳两三次指针，是这个算子耗时的大头。语义不变 —— 体素按第一次出现的顺序编号，
+/// 表里怎么摆不影响结果。键与位置放在同一个条目里（一次探测碰一条缓存行），槽位用 splitmix64 打散：
+/// 相邻体素的下标只差 1，直接拿哈希的低位当槽位会挤成一长串，线性探测就退化了。
+class VoxelTable {
+ public:
+  explicit VoxelTable(std::size_t expected) {
+    std::size_t cap = 16;
+    while (cap < expected * 2) cap <<= 1;
+    entries_.assign(cap, Entry{});
+    mask_ = cap - 1;
+  }
+
+  /// 有就返回它的位置；没有就记成 next 并返回 next（调用方据此知道是新体素）。
+  std::size_t findOrInsert(const VoxelIndex& key, std::size_t next) {
+    if ((size_ + 1) * 2 > entries_.size()) grow();
+    for (std::size_t at = slotOf(key);; at = (at + 1) & mask_) {
+      Entry& e = entries_[at];
+      if (e.value == kEmpty) {
+        e.key = key;
+        e.value = next;
+        ++size_;
+        return next;
+      }
+      if (e.key == key) return e.value;
+    }
+  }
+
+  /// 第一趟之后找一定在的那一个（nearest 模式的第二趟）。
+  std::size_t find(const VoxelIndex& key) const {
+    for (std::size_t at = slotOf(key);; at = (at + 1) & mask_) {
+      if (entries_[at].key == key) return entries_[at].value;
+    }
+  }
+
+ private:
+  static constexpr std::size_t kEmpty = static_cast<std::size_t>(-1);
+  struct Entry {
+    VoxelIndex key{};
+    std::size_t value = kEmpty;
+  };
+
+  std::size_t slotOf(const VoxelIndex& key) const {
+    std::uint64_t x = VoxelIndexHash{}(key);
+    x ^= x >> 30;
+    x *= 0xbf58476d1ce4e5b9ull;
+    x ^= x >> 27;
+    x *= 0x94d049bb133111ebull;
+    x ^= x >> 31;
+    return static_cast<std::size_t>(x) & mask_;
+  }
+
+  void grow() {
+    std::vector<Entry> old = std::move(entries_);
+    entries_.assign(old.size() * 2, Entry{});
+    mask_ = entries_.size() - 1;
+    for (const Entry& e : old) {
+      if (e.value == kEmpty) continue;
+      std::size_t at = slotOf(e.key);
+      while (entries_[at].value != kEmpty) at = (at + 1) & mask_;
+      entries_[at] = e;
+    }
+  }
+
+  std::vector<Entry> entries_;
+  std::size_t mask_ = 0;
+  std::size_t size_ = 0;
 };
 
 /// 下标能不能装进 int64。装不下时 static_cast 是 UB，而「坐标是 1e30」这种
@@ -63,9 +133,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
   }
 
   const std::size_t n = in.pointCount();
-  std::unordered_map<VoxelIndex, std::size_t, VoxelIndexHash> lookup;
+  VoxelTable lookup(n / 8 + 16);
   std::vector<Voxel> voxels;  // 插入顺序 = 输出顺序，保证两次运行结果字节一致
-  lookup.reserve(n / 4 + 16);
 
   Ticker ticker(ctx, n);
   for (std::size_t p = 0; p < n; ++p) {
@@ -80,13 +149,12 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                            "或者把 Leaf Size 调大）",
                            "leafSize");
     }
-    auto it = lookup.find(key);
-    if (it == lookup.end()) {
-      it = lookup.emplace(key, voxels.size()).first;
+    const std::size_t vi = lookup.findOrInsert(key, voxels.size());
+    if (vi == voxels.size()) {
       voxels.emplace_back();
       voxels.back().firstIndex = static_cast<std::int32_t>(p);
     }
-    Voxel& v = voxels[it->second];
+    Voxel& v = voxels[vi];
     v.sx += x;
     v.sy += y;
     v.sz += z;
@@ -118,7 +186,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
       if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) continue;
       VoxelIndex key{};
       if (!voxelIndexOf(x, y, z, leaf, key)) continue;  // 第一趟已经报过错，走不到这里
-      const std::size_t vi = lookup.at(key);
+      const std::size_t vi = lookup.find(key);
       const Voxel& v = voxels[vi];
       const double cx = v.sx / v.count, cy = v.sy / v.count, cz = v.sz / v.count;
       const double d = (x - cx) * (x - cx) + (y - cy) * (y - cy) + (z - cz) * (z - cz);
