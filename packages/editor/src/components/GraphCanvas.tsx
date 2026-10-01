@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { layoutGraph } from "../lib/layout";
 import { useMotionEnabled, viewportMs, withLayoutTransition } from "../lib/motion";
 import {
+  closureOf,
   isolateUnavailableTitle,
   nodeRunAvailability,
   runNodeOnly,
@@ -825,6 +826,17 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     return ui.selectedNodes.size > 0 ? [...ui.selectedNodes] : menu ? [menu.nodeId] : [];
   }, [menu]);
 
+  const selectClosure = useCallback(
+    (dir: "up" | "down") => {
+      const ids = closureOf(levelView(), menuTargets(), dir);
+      const ui = useUiStore.getState();
+      ui.setSelection(ids, []);
+      ui.showToast(`已选中${dir === "up" ? "上游" : "下游"}（含自己）${ids.length} 个节点`);
+      setMenu(null);
+    },
+    [menuTargets],
+  );
+
   const menuNode = menu ? view.nodes.find((n) => n.id === menu.nodeId) : undefined;
   // 「仅此节点」的可用性（修订一 V6：上游不齐时置灰、写明缺谁）：菜单打开时判一次
   const menuRunOnly = menu ? nodeRunAvailability(menu.nodeId) : null;
@@ -1122,6 +1134,22 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
             }}
           >
             设为对比基准（B）
+          </button>
+          <button
+            type="button"
+            data-testid="ctx-select-upstream"
+            title="从这个节点（或选中的这些）沿连线往上游走，把整条链都选上"
+            onClick={() => selectClosure("up")}
+          >
+            选中上游
+          </button>
+          <button
+            type="button"
+            data-testid="ctx-select-downstream"
+            title="从这个节点（或选中的这些）沿连线往下游走，把整条链都选上"
+            onClick={() => selectClosure("down")}
+          >
+            选中下游
           </button>
           <button
             type="button"

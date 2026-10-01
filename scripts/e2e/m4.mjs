@@ -72,12 +72,34 @@ async function enterByDoubleClick(cdp, nodeId) {
 
 // -------------------------------------------------------- §1.1 合成与展开
 
-async function suiteCompose(cdp, report) {
+async function composeChecks(cdp, report) {
   report.section("§1 子图：合成之后结果一模一样，事件里是路径式 id");
 
   await cdp.eval(`await window.__lyflow.transport.clearCache(); return true;`);
   await newDoc(cdp);
   const ids = await buildGraph(cdp, CHAIN_NODES, CHAIN_EDGES);
+
+  // 右键「选中上游 / 选中下游」：沿连线把整条链选上（合成、静音、整理之前先这样圈出来）
+  const selectVia = (nodeId, item) => cdp.eval(`
+    const u = window.__lyflow.stores.ui.getState();
+    u.setSelection([], []);
+    const el = document.querySelector('[data-testid="node-${nodeId}"]');
+    const r = el.getBoundingClientRect();
+    el.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+    }));
+    await new Promise((d) => setTimeout(d, 150));
+    const btn = document.querySelector('[data-testid="${item}"]');
+    if (!btn) return 'no-menu-item';
+    btn.click();
+    await new Promise((d) => setTimeout(d, 150));
+    return [...window.__lyflow.stores.ui.getState().selectedNodes].sort();
+  `);
+  report.eq("右键 voxel →「选中上游」：gen、crop 与它自己", await selectVia(ids.voxel, "ctx-select-upstream"),
+    [ids.gen, ids.crop, ids.voxel].sort());
+  report.eq("右键 sor →「选中下游」：它自己与 tail", await selectVia(ids.sor, "ctx-select-downstream"),
+    [ids.sor, ids.tail].sort());
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([], []); return true;`);
 
   const flat = await runAndWait(cdp, () => pressF5(cdp));
   const flatTail = flat.nodes[ids.tail]?.elementCount;
@@ -1025,12 +1047,16 @@ async function suiteInnerError(cdp, report) {
   await cdp.eval(`window.__lyflow.stores.ui.getState().exitTo(0); return true;`);
 }
 
+/** 合成 → 进出子图 → 参数提升，三段共用合成出来的那一张图。要有名字：`pnpm e2e --only m4:suiteCompose`
+ *  按函数名挑组，原来这里是个匿名箭头函数（name 是空串），挑不出来。 */
+async function suiteCompose(cdp, report) {
+  const fixture = await composeChecks(cdp, report);
+  await suiteNavigate(cdp, report, fixture);
+  await suitePromote(cdp, report, fixture);
+}
+
 export const m4Suites = [
-  async (cdp, report) => {
-    const fixture = await suiteCompose(cdp, report);
-    await suiteNavigate(cdp, report, fixture);
-    await suitePromote(cdp, report, fixture);
-  },
+  suiteCompose,
   suiteInnerError,
   suiteShortcuts,
   suiteNested,

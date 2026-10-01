@@ -10,7 +10,7 @@
 |---|---|---|---|
 | C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 180 例；`LYFLOW_PACKS=dts` 188 例；`LYFLOW_PACKS=gap;dts` 270 例 | 分钟级（含编译） |
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 152（纯平台构建 93 通过 / 59 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
-| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 88 | 秒级 |
+| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 90 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 31 | 秒级 |
 | 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 770 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 33 条断言（精简前 58） | 几分钟 |
@@ -55,7 +55,7 @@
 | 连线查看器 Edge Peek | e2e `peek.mjs`；窗口上限与自动关窗的提示 `packages/editor/test/peek-store.test.mjs`；图像按段取齐（超过 16 MB 分几段要）`packages/editor/test/image-fetch.test.mjs` |
 | 按输出类型选视图（主预览的点云 / 值） | `packages/editor/test/view-rule.test.mjs`；e2e `gap.mjs` 的「量测输出」组（`transform.make` 显示值、手动选只对当时的节点有效） |
 | 动效、hover、端点对齐 | e2e `motion.mjs`、`noderun.mjs` |
-| 节点运行按钮 | e2e `noderun.mjs` |
+| 节点运行按钮；右键「选中上游 / 下游」 | 图结构（智能运行的上游闭包、选中上 / 下游的闭包）在 `packages/editor/test/node-run.test.mjs`；按钮在 e2e `noderun.mjs`；右键菜单的选中在 e2e `m4.mjs` 的 `suiteCompose` 开头 |
 | 分栏、拖放配置（dragDropEnabled） | e2e `params_p2.mjs`（右侧分栏）、`m8b.mjs` 的算子面板组 |
 | 图结构编辑 `lyflow patch`（七个动作、幂等、改坏不落盘） | `bridge/src/patch.rs` 的测试模块 |
 | 指标路径（`eval` 写错时列出、`--list-metrics` 正向列出） | `bridge/src/cli.rs` 的 `eval_lists_the_available_paths_when_the_metric_is_wrong`、`bridge/src/eval.rs` 的 `available_paths_*` |

@@ -63,6 +63,25 @@ export function ancestorsOf(level: GraphLevel, nodeId: string): string[] {
   return [...depth.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
 }
 
+/** 当前层里从 start 出发沿连线能到的全部节点（含 start 自己）：up = 往上游走，down = 往下游走。
+ *  按 level.nodes 的顺序返回。右键「选中上游 / 选中下游」用：选上一整条链再合成、静音、整理、复制。 */
+export function closureOf(level: GraphLevel, start: readonly string[], dir: "up" | "down"): string[] {
+  const seen = new Set(start.filter((id) => level.nodes.some((n) => n.id === id)));
+  let frontier = [...seen];
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const e of level.edges) {
+      const [from, to] = dir === "up" ? [e.to.node, e.from.node] : [e.from.node, e.to.node];
+      if (frontier.includes(from) && !seen.has(to)) {
+        seen.add(to);
+        next.push(to);
+      }
+    }
+    frontier = next;
+  }
+  return level.nodes.filter((n) => seen.has(n.id)).map((n) => n.id);
+}
+
 // ------------------------------------------------------------------ 预判
 
 /** 上游有没有可用结果：本会话跑过（done / skipped）、输出可取、不 stale。
