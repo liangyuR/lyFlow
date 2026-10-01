@@ -477,6 +477,7 @@ fn wrong_usage_is_rejected_with_its_exit_code_and_message() {
         (vec!["validate", &unknown], EXIT_INVALID, "1 条错误：\n  a：当前 core 没有注册算子"),
         (vec!["run", &empty, "--to", "zzz"], EXIT_FAILED, "目标不存在: zzz（unknown_node）"),
         (vec!["dump", &graph, "v:cloud", "out.pcd", "--format", "asci"], EXIT_USAGE, "--format 只认 binary / ascii / binary_compressed，收到 asci"),
+        (vec!["dump", &graph, "zzz:cloud", "out.pcd"], EXIT_FAILED, "目标不存在: zzz（unknown_node）"),
     ];
     for (args, code, want) in &cases {
         let r = cli(args);

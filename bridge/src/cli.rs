@@ -1588,6 +1588,10 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
     if result.status != "ok" {
         line(err, &format!("运行 {}，没有可写的结果", result.status));
+        // 为什么没成（目标节点不存在、上游出错……）同 run 一样写在 stderr 上：原来只在 stdout 的 JSON 行里
+        for l in result.failure_lines() {
+            line(err, &l);
+        }
         return result.exit_code();
     }
     // dump 的目标路径按当前工作目录解析，不跟着图文件走 —— 命令行里的路径就该是命令行的
