@@ -9,6 +9,7 @@ import { UNTITLED_BACKUP } from "./harness.mjs";
 import {
   buildGraph,
   centerOf,
+  clickAt,
   clickUntilPicked,
   pressKey,
   openInspectorAdvanced,
@@ -1023,6 +1024,64 @@ async function suiteEditing(cdp, report) {
   `);
   report.ok("按 F：选中的节点落到画布中间", framed != null && Math.abs(framed.dx) < 40 && Math.abs(framed.dy) < 40, JSON.stringify(framed));
 
+  // 挪节点都进撤销栈：选中节点按方向键（React Flow 的键盘挪动）每按一下一条；拖框选出来的那个选区整段一条。
+  // 以前这两种挪动都直接写进 doc、撤销栈里没有 —— Ctrl+Z 撤掉的是上一步
+  await pressCtrl(cdp, "f", ["shift"]);  // 先看全图：gen 与 voxel 都在屏幕上
+  await sleep(500);
+  const posOf = (id) => cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.find((n) => n.id === ${lit(id)}).ui.position;`);
+  const pastLen = () => cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+  await clickAt(cdp, await centerOf(cdp, `[data-testid="node-${ids.gen}"] .node__head`));
+  const k0 = { pos: await posOf(ids.gen), past: await pastLen() };
+  for (let i = 0; i < 2; i += 1) {
+    await pressKey(cdp, "ArrowRight", 39);
+    await sleep(80);
+  }
+  await sleep(150);
+  const k1 = { pos: await posOf(ids.gen), past: await pastLen() };
+  report.ok("选中节点按两下 →：挪了，撤销栈多两条", k1.pos.x > k0.pos.x && k1.past - k0.past === 2, JSON.stringify({ k0, k1 }));
+  await pressCtrl(cdp, "z");
+  await sleep(150);
+  const k2 = await posOf(ids.gen);
+  report.ok("Ctrl+Z 只撤掉最后那一下", k2.x < k1.pos.x && k2.x > k0.pos.x, JSON.stringify({ k0: k0.pos, k1: k1.pos, k2 }));
+
+  // 框选 gen 与 voxel（从左上角外面的空白处拖到右下角外面），再拖那个选区。
+  // 框的两个角都要离画布边 48 px 以上：框选时指针进了离边 40 px 那一圈，React Flow 会自动平移画布
+  // （autoPanOnSelection），算好的框就套不住节点了。先缩小一点给四周留出地方
+  await normalizeZoom(cdp, 0.7);
+  const box = await cdp.eval(`
+    const flow = document.querySelector('.react-flow').getBoundingClientRect();
+    const clear = (x, y) => x - flow.left >= 48 && flow.right - x >= 48 && y - flow.top >= 48 && flow.bottom - y >= 48;
+    const rects = [${lit(ids.gen)}, ${lit(ids.voxel)}].map((id) => document.querySelector('[data-testid="node-' + id + '"]').getBoundingClientRect());
+    const left = Math.min(...rects.map((r) => r.left)), top = Math.min(...rects.map((r) => r.top));
+    const right = Math.max(...rects.map((r) => r.right)), bottom = Math.max(...rects.map((r) => r.bottom));
+    for (let d = 14; d < 120; d += 6) {
+      const x = Math.round(left - d), y = Math.round(top - d), x2 = Math.round(right + d), y2 = Math.round(bottom + d);
+      if (clear(x, y) && clear(x2, y2) && document.elementFromPoint(x, y)?.classList.contains('react-flow__pane')) {
+        return { from: { x, y }, to: { x: x2, y: y2 } };
+      }
+    }
+    return null;
+  `);
+  mustOk(box != null, "gen 与 voxel 左上角外面有离画布边够远的空白可以开始框选", box);
+  // 以前框选只选上先碰到的那一个、选区也不出来：onSelectionChange 与 onNodesChange/onEdgesChange
+  // 来回改连线的选中，控制台报 Maximum update depth exceeded（那条红字由 run.mjs 收尾的「控制台无报错」兜住）
+  await dragMouse(cdp, box.from, box.to, { steps: 10 });
+  await sleep(200);
+  const boxed = await cdp.eval(`return [...window.__lyflow.stores.ui.getState().selectedNodes];`);
+  report.ok("框选：gen 与 voxel 都选上了", boxed.includes(ids.gen) && boxed.includes(ids.voxel), JSON.stringify(boxed));
+  const rect = await centerOf(cdp, ".react-flow__nodesselection-rect");
+  mustOk(rect != null, "框选之后出现了选区", rect);
+  const b0 = { gen: await posOf(ids.gen), voxel: await posOf(ids.voxel), past: await pastLen() };
+  await dragMouse(cdp, rect, { x: rect.x + 48, y: rect.y + 32 }, { steps: 12 });
+  await sleep(200);
+  const b1 = { gen: await posOf(ids.gen), voxel: await posOf(ids.voxel), past: await pastLen() };
+  report.ok("拖选区：两个节点一起挪了，整段只记一条撤销",
+    b1.gen.x !== b0.gen.x && b1.voxel.x !== b0.voxel.x && b1.past - b0.past === 1, JSON.stringify({ b0, b1 }));
+  await pressCtrl(cdp, "z");
+  await sleep(150);
+  report.eq("Ctrl+Z 一次两个都回去", { gen: await posOf(ids.gen), voxel: await posOf(ids.voxel) }, { gen: b0.gen, voxel: b0.voxel });
+  await pressEscape(cdp);
+
   // #12 复制粘贴走系统剪贴板（另一个窗口、重开之后也粘得进来）。系统剪贴板换成页面里的桩（stubClipboard）：
   // 这里要验的是「写的是什么、粘的是哪一份」，不该动用户真的剪贴板
   await stubClipboard(cdp);
@@ -1053,6 +1112,17 @@ async function suiteEditing(cdp, report) {
   await pressCtrl(cdp, "v");
   await sleep(300);
   report.eq("整张图的 JSON 也粘得进来", (await countNodes()) - before, 3);
+  // 粘进来的那个是选中的；撤销掉这次粘贴，它没了，选中里也不该还挂着它的 id
+  const pastedSel = await cdp.eval(`return [...window.__lyflow.stores.ui.getState().selectedNodes];`);
+  await pressCtrl(cdp, "z");
+  await sleep(200);
+  const afterUndo = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    const stale = [...window.__lyflow.stores.ui.getState().selectedNodes].filter((id) => !g.doc.nodes.some((n) => n.id === id));
+    return { added: g.doc.nodes.length - ${before}, stale };
+  `);
+  report.ok("Ctrl+Z 撤掉粘贴：节点没了，选中里也没留下它的 id",
+    pastedSel.length === 1 && afterUndo.added === 2 && afterUndo.stale.length === 0, JSON.stringify({ pastedSel, afterUndo }));
   // 内容是从 paste 事件里拿的：readText 在 WebView2 里会弹权限框，没人点就一直挂着，Ctrl+V 什么也粘不上
   report.eq("Ctrl+V 没去调 navigator.clipboard.readText", await cdp.eval(`return window.__lyClipReads;`), 0);
   await restoreClipboard(cdp);

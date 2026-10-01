@@ -23,6 +23,8 @@
 | 复制带绑定的节点 | 被图参数绑定的参数在副本上写成此刻的有效值（Ctrl+C 与 Ctrl+D；以前回到算子默认值，副本的行为悄悄变了） | `graph-params-actions.test.mjs` |
 | 撤销 / 重做的提示 | toast 说撤掉的是哪一步 | `graph-params-actions.test.mjs`；e2e `m4.mjs` 的 `suiteLibrary` |
 | F 适配选中 | 把视图对准选中的节点（Ctrl+Shift+F 仍是全图） | e2e `m3.mjs` 的 `suiteEditing` |
+| 框选 | 以前框选只选上先碰到的那一个、可以整体拖的选区不出来，控制台报 Maximum update depth exceeded：`onSelectionChange` 报的是 React Flow 自己那份慢一拍的选中，与 `onNodesChange` / `onEdgesChange` 来回改连线的选中。现在选中只认 select 变更；这一层已经没了的 id（撤销掉一次粘贴之类，以前是那个回调顺带剪的）另外剪掉 | e2e `m3.mjs` 的 `suiteEditing`（换回原来的回调时框选那条失败、控制台报错；不剪时撤销粘贴那条失败） |
+| 挪节点都进撤销栈 | 方向键挪选中的节点每按一下一条，拖框选出来的选区整段一条。以前两种都直接写进图、撤销栈里没有，Ctrl+Z 撤掉的是上一步 | 同上 |
 | 日志页 | 只看警告与错误、按节点或内容筛；节点写带层级的名字，点它打开到那一层 | e2e `m4.mjs` 的 `suiteNested` |
 | 检查器的节点 id | 路径 id（`--to`、`--set` 认的那个），点了复制 | 同上 |
 | 空画布 | 写着从哪开始（搜算子、打开、拖片段） | e2e `m3.mjs` 的 `suiteEditing` |

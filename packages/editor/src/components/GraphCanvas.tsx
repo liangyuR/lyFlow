@@ -15,7 +15,6 @@ import {
   type FinalConnectionState,
   type NodeChange,
   type OnNodeDrag,
-  type OnSelectionChangeParams,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -354,6 +353,19 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     usePeekStore.getState().prune(doc, path);
   }, [doc, path]);
 
+  // 选中里这一层已经没有的 id 剪掉（撤销掉一次添加、右键删除……）。以前是 onSelectionChange 顺带剪的 ——
+  // React Flow 报回来的选中里自然没有它们；那个回调拿掉之后（见 onNodesChange 里的注释）由这里管
+  useEffect(() => {
+    const ui = useUiStore.getState();
+    const nodeIds = new Set(view.nodes.map((n) => n.id));
+    const edgeIds = new Set(view.edges.map((e) => e.id));
+    const keptNodes = [...ui.selectedNodes].filter((id) => nodeIds.has(id));
+    const keptEdges = [...ui.selectedEdges].filter((id) => edgeIds.has(id));
+    if (keptNodes.length < ui.selectedNodes.size || keptEdges.length < ui.selectedEdges.size) {
+      ui.setSelection(keptNodes, keptEdges);
+    }
+  }, [view]);
+
   const anyTypes = useMemo(() => inferAnyTypes(ctx, view), [ctx, view]);
 
   const { nodes: docNodes, edges } = useMemo(
@@ -389,7 +401,15 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     const graph = useGraphStore.getState();
 
     const moves = extractMoves(changes as { type: string; id: string; position?: { x: number; y: number } }[]);
-    if (moves.length > 0) graph.moveNodes(moves);
+    if (moves.length > 0) {
+      // 拖动（拖节点、拖框选出来的那个选区）由 onNodeDragStart / onSelectionDragStart 的 begin 与 Stop 的
+      // commit 包成一条撤销。不在事务里的挪动 —— React Flow 的键盘挪动（选中节点按方向键）—— 各自记一条：
+      // 以前直接写进 doc、撤销栈里没有，Ctrl+Z 撤掉的是上一步
+      const inTransaction = graph.pendingSnapshot !== null;
+      if (!inTransaction) graph.begin();
+      graph.moveNodes(moves);
+      if (!inTransaction) graph.commit("移动节点");
+    }
 
     const removed = changes.filter((c) => c.type === "remove").map((c) => c.id);
     if (removed.length > 0) graph.deleteNodes(removed);
@@ -440,11 +460,11 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       }
     }
 
-    // select / dragging 是 UI 运行时状态，不进 GraphDoc。选中照旧由 onSelectionChange 兜底，
-    // 但点击产生的 select 变更要在这里就写进 ui store：React Flow 点选节点时只改它内部的
-    // nodeLookup、不触发 store 更新，onSelectionChange 要等下一次 store 更新（通常是下一次点击）
-    // 才发出来 —— 一次不带移动的点击（触控板轻点、CDP 的真鼠标）选中会慢一拍，参数面板的
-    // 「画布选中 → 定位」跟着慢一拍（param-recipe P2.1）。
+    // select / dragging 是 UI 运行时状态，不进 GraphDoc。选中只认这里（与 onEdgesChange）的 select 变更：
+    // 受控模式下点选、框选、点空白处取消，React Flow 都经它们发出来，ui store 是唯一的来源。
+    // 以前还有一个 onSelectionChange「兜底」，它报的是 React Flow 自己那份、比 props 慢一拍的选中 ——
+    // 框选时它与这里一来一回地改连线的选中（[] ↔ [e]），StoreUpdater 撞上「Maximum update depth exceeded」，
+    // 框选只选上第一个碰到的节点、选区也不出现。
     applySelectChanges(changes, "nodes");
   }, []);
 
@@ -491,6 +511,17 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       pairs("y", [me.y, me.y + me.h / 2, me.y + me.h], [r.y, r.y + r.h / 2, r.y + r.h]);
     }
     setGuides(found.slice(0, 4));
+  }, []);
+
+  // 拖框选出来的那个选区（React Flow 的 nodesselection）：同拖节点一样整段一条撤销，不做对齐参考线与边命中
+  const onSelectionDragStart = useCallback(() => {
+    cancelLayout();
+    useUiStore.getState().setHoverPaused(true);
+    useGraphStore.getState().begin();
+  }, [cancelLayout]);
+  const onSelectionDragStop = useCallback(() => {
+    useUiStore.getState().setHoverPaused(false);
+    useGraphStore.getState().commit("移动节点");
   }, []);
 
   /** 拖动结束时对**单个**选中节点做边命中：多选时插入谁到中间是没有答案的。 */
@@ -670,14 +701,6 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     },
     [ctx],
   );
-
-  // -- 选中 ----------------------------------------------------------------
-  const onSelectionChange = useCallback((params: OnSelectionChangeParams) => {
-    useUiStore.getState().setSelection(
-      params.nodes.map((n) => n.id),
-      params.edges.map((e) => e.id),
-    );
-  }, []);
 
   // -- hover（docs/motion-plan.md H2 / H3）。纯 UI 状态，进 ui store 不进 doc -------
   const onNodeMouseEnter = useCallback((_e: React.MouseEvent, node: { id: string }) => {
@@ -951,6 +974,8 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         onNodeDragStart={onNodeDragStart}
         onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
+        onSelectionDragStart={onSelectionDragStart}
+        onSelectionDragStop={onSelectionDragStop}
         onConnect={onConnect}
         onConnectStart={onConnectStart}
         onConnectEnd={onConnectEnd}
@@ -961,7 +986,6 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         reconnectRadius={CONNECTION_RADIUS}
         connectionRadius={CONNECTION_RADIUS}
         isValidConnection={isValidConnection}
-        onSelectionChange={onSelectionChange}
         onNodeContextMenu={onNodeContextMenu}
         onNodeDoubleClick={onNodeDoubleClick}
         onEdgeDoubleClick={onEdgeDoubleClick}
