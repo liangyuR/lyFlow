@@ -992,6 +992,15 @@ async function suiteInnerError(cdp, report) {
   await pressKey(cdp, "F8", 119);
   await sleep(300);
   report.eq("按 F8：同样跳到那个出错的节点", await where(), { path: [composed.nodeId], selected: [ids.voxel], param: "leafSize" });
+
+  // 检查器：选中子图节点，错误一条条写着来自哪个内部节点，点它也打开到那里
+  await cdp.eval(`const u = window.__lyflow.stores.ui.getState(); u.exitTo(0); u.setSelection([${lit(composed.nodeId)}], []); return true;`);
+  await sleep(300);
+  const src = await cdp.eval(`return document.querySelector('[data-testid="inspector-error-source"]')?.textContent ?? null;`);
+  report.eq("检查器里那条错误前写着内部节点的名字", src, voxelLabel);
+  await cdp.eval(`document.querySelector('[data-testid="inspector-error-source"]').click(); return true;`);
+  await sleep(300);
+  report.eq("点它：同样打开到那个节点", await where(), { path: [composed.nodeId], selected: [ids.voxel], param: "leafSize" });
   await cdp.eval(`window.__lyflow.stores.ui.getState().exitTo(0); return true;`);
 }
 

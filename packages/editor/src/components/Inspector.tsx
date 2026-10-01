@@ -12,7 +12,7 @@ import {
 } from "../lib/graphParams";
 import { groupParams, effectiveParams, isEnabled, isVisible, valueEquals } from "../lib/params";
 import { frameKeyOfGroup, pickFrame, roiFramesOf } from "../lib/roiFrames";
-import { augmentOperators, levelOf, promotedBy } from "../lib/subgraph";
+import { augmentOperators, describeEventNode, levelOf, promotedBy } from "../lib/subgraph";
 import { useExecutionStore, useNodeExecution, useParamErrors } from "../store/execution";
 import { currentSubgraph, useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
@@ -388,6 +388,7 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
   }, [runErrors, validation]);
   const exec = useNodeExecution(node.id);
   const doc = useGraphStore((s) => s.doc);
+  const operatorsById = useManifestStore((s) => s.operatorsById);
   const path = useUiStore((s) => s.path);
   const overrides = useGraphParamOverrides();
   const def = currentSubgraph(doc, path);
@@ -464,12 +465,31 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
             {exec.state === "cancelled" ? "未执行" : "执行出错"}
           </h4>
           <ul>
-            {exec.errors.map((e, i) => (
-              <li key={i}>
-                <code className="insp__errcode">{e.code}</code>
-                <span>{e.message}</span>
-              </li>
-            ))}
+            {exec.errors.map((e, i) => {
+              // 子图 / 库算子：这一条来自哪个内部节点（事件 id 是路径，ADR-0010）—— 写明、点了打开到它
+              const source = exec.errorSources?.[i];
+              const where = source ? describeEventNode(doc, operatorsById, source) : null;
+              return (
+                <li key={i}>
+                  <code className="insp__errcode">{e.code}</code>
+                  {where?.reveal && (
+                    <button
+                      type="button"
+                      className="insp__errsrc"
+                      data-testid="inspector-error-source"
+                      title="打开到这个内部节点"
+                      onClick={() => {
+                        const r = where.reveal!;
+                        useUiStore.getState().revealNode(r.path, r.localId, r.exact ? e.paramPath : undefined);
+                      }}
+                    >
+                      {where.names[where.names.length - 1]}
+                    </button>
+                  )}
+                  <span>{e.message}</span>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}

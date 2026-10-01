@@ -950,6 +950,19 @@
   font-size: 10.5px;
 }
 
+/* 子图 / 库算子：这条错误来自哪个内部节点，点了打开到它 */
+.insp__errsrc {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #ffc4c4;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
 /* ----------------------------------------------------- 3D 视图（P1 #30）*/
 
 .viewer {

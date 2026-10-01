@@ -35,6 +35,8 @@ export interface NodeExecution {
   /** 聚合出来的（子图节点）：errors 里第一条来自哪个内部节点（事件里的完整路径 id）。
    *  节点上的错误文字据此写明是谁、点进去直接打开到它（顶层原来只看得到「这个子图红了」）。 */
   errorSource?: string | undefined;
+  /** 聚合出来的（子图节点）：errors 每一条来自哪个内部节点，与 errors 一一对应（检查器里逐条写明、可点）。 */
+  errorSources?: string[] | undefined;
 }
 
 export interface LogEntry {
@@ -487,14 +489,14 @@ function reduceExecutions(list: readonly NodeExecution[], ids: readonly string[]
   let duration = 0;
   let finished = 0;
   const errors: Diagnostic[] = [];
-  let errorSource: string | undefined;
+  const errorSources: string[] = [];
   for (let i = 0; i < list.length; i += 1) {
     const n = list[i]!;
     if (RANK[n.state] > RANK[state]) state = n.state;
     duration += n.durationMs ?? 0;
     if (n.state === "done" || n.state === "skipped") finished += 1;
-    if (n.errors.length > 0) errorSource ??= n.errorSource ?? ids[i];
     errors.push(...n.errors);
+    for (let k = 0; k < n.errors.length; k += 1) errorSources.push(n.errorSources?.[k] ?? ids[i]!);
   }
   // 全 done/skipped → done（全 skipped 才算 skipped）；有跑完的但还有没开始的 → pending
   if (state === "done" || state === "skipped") {
@@ -508,7 +510,8 @@ function reduceExecutions(list: readonly NodeExecution[], ids: readonly string[]
     progress: list.length > 0 ? finished / list.length : undefined,
     errors,
     children: { total: list.length, finished },
-    errorSource,
+    errorSource: errorSources[0],
+    errorSources: errorSources.length > 0 ? errorSources : undefined,
   };
 }
 
@@ -523,7 +526,8 @@ function sameAggregate(a: NodeExecution | undefined, b: NodeExecution): boolean 
     a.errors.length === b.errors.length &&
     a.children?.finished === b.children?.finished &&
     a.children?.total === b.children?.total &&
-    a.errorSource === b.errorSource
+    a.errorSource === b.errorSource &&
+    a.errorSources?.join("|") === b.errorSources?.join("|")
   );
 }
 

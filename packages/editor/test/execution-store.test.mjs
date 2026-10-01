@@ -134,11 +134,16 @@ test("聚合出来的子图节点记着错误来自哪个内部节点；只有�
     ["a/v", { state: "done", errors: [] }],
     ["a/n/x", { state: "error", errors: [err] }],
     ["b/only", { state: "error", errors: [err] }],
+    ["c/p", { state: "error", errors: [err] }],
+    ["c/q", { state: "error", errors: [err, err] }],
   ]);
   const top = aggregatedNodes([], nodes);
   assert.equal(top.get("top"), nodes.get("top"), "叶子节点原样复用");
   assert.deepEqual([top.get("a").state, top.get("a").errorSource, top.get("a").children], ["error", "a/n/x", { total: 2, finished: 1 }]);
   assert.deepEqual([top.get("b").errorSource, top.get("b").children], ["b/only", { total: 1, finished: 0 }]);
+  // 每一条错误都记着来源（检查器里逐条写明）：与 errors 一一对应
+  assert.deepEqual(top.get("a").errorSources, ["a/n/x"]);
+  assert.deepEqual([top.get("c").errors.length, top.get("c").errorSources], [3, ["c/p", "c/q", "c/q"]]);
   // 进到 a 这一层：n 是它的子图节点，来源还是那个完整 id
   assert.equal(aggregatedNodes([{ nodeId: "a", subgraphId: "s1" }], nodes).get("n").errorSource, "a/n/x");
 });
