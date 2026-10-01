@@ -60,17 +60,6 @@ export const useCacheStore = create<CacheState>((set) => ({
   },
 }));
 
-/** 某个**展开后**的节点是不是 stale：这次编译出来的 cacheKey 与上次运行时不同，
- *  且现在没有缓存。两个条件缺一不可 —— 只看 key 变化的话，改回原值也会一直标着红。 */
-export function isNodeStale(nodeId: string): boolean {
-  const { plan, ranWith } = useCacheStore.getState();
-  const node = plan.get(nodeId);
-  if (!node) return false;
-  const previous = ranWith.get(nodeId);
-  if (previous === undefined) return false;
-  return node.cacheKey !== previous && !node.cached;
-}
-
 let staleCache: {
   path: SubPath;
   plan: ReadonlyMap<string, PlanNode>;
@@ -78,7 +67,9 @@ let staleCache: {
   result: ReadonlySet<string>;
 } | null = null;
 
-/** 当前层级里哪些节点该画虚线框。子图节点只要内部有一个 stale 就算 stale（F2）。 */
+/** 当前层级里哪些节点该画虚线框。子图节点只要内部有一个 stale 就算 stale（F2）。
+ *  stale = 这次编译出来的 cacheKey 与上次运行时不同，**且**现在没有缓存。两个条件缺一不可 ——
+ *  只看 key 变化的话，改回原值也会一直标着红。 */
 export function staleLocalIds(
   path: SubPath,
   plan: ReadonlyMap<string, PlanNode>,
@@ -97,15 +88,6 @@ export function staleLocalIds(
   }
   staleCache = { path, plan, ranWith, result: out };
   return out;
-}
-
-/** 下一次运行要真算的节点数。工具栏的「将重算 N 个节点」就是它。 */
-export function pendingRecompute(): number {
-  let n = 0;
-  for (const node of useCacheStore.getState().plan.values()) {
-    if (!node.cached) n += 1;
-  }
-  return n;
 }
 
 export function useStaleNodeIds(): ReadonlySet<string> {

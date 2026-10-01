@@ -111,35 +111,6 @@ export function wouldCreateCycle(doc: GraphDoc, fromNode: string, toNode: string
   return false;
 }
 
-/** 拓扑排序，返回 null 表示有环。M1 用不到执行顺序，但它是环检测的权威实现 ——
- *  wouldCreateCycle 只管增量连线，这个负责校验一整张图（比如打开别人存的文件）。 */
-export function topoSort(doc: GraphDoc): string[] | null {
-  const indegree = new Map<string, number>();
-  const downstream = new Map<string, string[]>();
-  for (const n of doc.nodes) {
-    indegree.set(n.id, 0);
-    downstream.set(n.id, []);
-  }
-  for (const e of doc.edges) {
-    if (!indegree.has(e.to.node) || !indegree.has(e.from.node)) continue; // 悬空边，交给结构校验
-    indegree.set(e.to.node, (indegree.get(e.to.node) ?? 0) + 1);
-    downstream.get(e.from.node)?.push(e.to.node);
-  }
-
-  const queue = [...indegree.entries()].filter(([, d]) => d === 0).map(([id]) => id);
-  const order: string[] = [];
-  while (queue.length > 0) {
-    const id = queue.shift()!;
-    order.push(id);
-    for (const next of downstream.get(id) ?? []) {
-      const d = (indegree.get(next) ?? 0) - 1;
-      indegree.set(next, d);
-      if (d === 0) queue.push(next);
-    }
-  }
-  return order.length === doc.nodes.length ? order : null;
-}
-
 /** 能不能从 from 连到 to。返回的 reason 会直接显示给用户，所以写人话。 */
 export function canConnect(
   ctx: GraphContext,

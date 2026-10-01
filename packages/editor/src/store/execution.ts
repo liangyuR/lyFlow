@@ -644,10 +644,6 @@ export function setRunSceneId(next: string | null): void {
   sceneId = next;
 }
 
-export function runSceneId(): string | null {
-  return sceneId;
-}
-
 export interface RunRequest {
   targets?: string[] | undefined;
   /** 只运行这些节点（docs/node-run-plan.md R1），展开后的路径 id。给了它 targets 就不用再传。 */

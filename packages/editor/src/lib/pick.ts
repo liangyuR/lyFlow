@@ -87,11 +87,6 @@ export function deltaOf(m: Measure): [number, number, number] | null {
   return [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
 }
 
-export function distanceOf(m: Measure): number | null {
-  const d = deltaOf(m);
-  return d ? Math.hypot(d[0], d[1], d[2]) : null;
-}
-
 /** 距离的写法：米 + 毫米并列（M5）。 */
 export function lengthText(v: number): string {
   return `${num(v)} m · ${num(v * 1000)} mm`;
