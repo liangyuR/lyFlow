@@ -90,14 +90,18 @@
   e2e 现在先确认拖到了、再量帧率，另加一条扫过的帧率。
 - **真实数据没验。** KUN10 / 天幕数据补齐之前，`params_p4` 的验收 26 照旧是「未验」那一条失败。
 
-## 最后一轮验证（2026-10-02，剪贴板、关窗口、PCD / 读文件提速之后又跑了一遍）
+## 最后一轮验证（2026-10-02 晚，真鼠标 / 真按键那一轮修完之后）
+
+框选、撤销粒度、右键平移、Esc / F5 / Ctrl+S / 滚轮、控件上的快捷键、全选拖动提速、图名与标题这一串改完，从头跑了一遍：
 
 | 层 | 结果 |
 |---|---|
-| `pnpm check`（C++ 构建与 doctest、三份契约对 schema、cargo test、CLI、嵌入 SDK、前端 typecheck + build、MCP） | 通过。嵌入 SDK 消费方工程那一步第一次在临时目录里探测编译器就失败（ninja 找不到 `CMakeFiles\rules.ninja`），换一个干净目录重跑编译、`embed_minimal` 都过；其余各步一次过 |
-| C++ doctest | 默认 185、`LYFLOW_PACKS=dts` 193、`gap;dts` 275，全过 |
-| Rust | lib 154；`tests/host.rs` 11 通过 / 2 ignored；`tests/disk_cache.rs` 2；clippy 无告警（纯平台构建这一轮没重跑） |
-| 编辑器 node:test / MCP | 102 / 32 |
-| 桌面 e2e（`LYFLOW_PACKS=gap;dts`） | 808 / 809，104 个分组；唯一的失败是 KUN10 数据不在（验收 26 的「未验」）。之后加了 hover、拖动帧率、没存过盘的图的自动备份几条，再跑一遍是 815 / 816，跑完 app data 里没有留下验收的备份 |
-| 安装包 e2e（`pnpm e2e:packaged`，同样的包） | 815 / 816，唯一的失败同上 —— 主窗口改成代码里开（放行剪贴板读取）之后，安装包照样起得来 |
+| `pnpm check`（C++ 构建与 doctest、三份契约对 schema、cargo test、CLI、嵌入 SDK、前端 typecheck + build、MCP） | 通过 |
+| C++ doctest | 默认 186，全过（`dts` 194、`gap;dts` 276 是上一轮的数，这一轮没改 C++） |
+| Rust | lib 154；`tests/host.rs` 11 通过 / 2 ignored；`tests/disk_cache.rs` 2 |
+| 编辑器 node:test / MCP | 109 / 32 |
+| 桌面 e2e（`LYFLOW_PACKS=gap;dts`） | 841 / 842，104 个分组；唯一的失败是 KUN10 数据不在（验收 26 的「未验」） |
+| 安装包 e2e（`pnpm e2e:packaged`，这一轮重新 `tauri build` 的包） | 848 / 849（比桌面多「安装包（干净目录）」那一节），唯一的失败同上 |
 | `pnpm e2e:http` | 33 / 33 |
+
+上一轮（剪贴板、关窗口、PCD / 读文件提速之后）：C++ 默认 185 / `dts` 193 / `gap;dts` 275，编辑器 102，桌面 e2e 815 / 816，安装包 815 / 816，HTTP 33 / 33。
