@@ -221,7 +221,7 @@ lyflow sweep demo.lyflow.json --param n_voxel.minPointsPerVoxel=1:5:5 \
 lyflow eval demo.lyflow.json --samples-dir kun10/sensor --sample-subdir 4 \
             --bind-pair n_load.primaryFile,n_load.secondaryFile \
             --pattern "*Master*.pcd,*Slave*.pcd" --split-half half \
-            --param n_fit.distThresh=0.2:0.8:4 --metric outputs.gap --holdout half=b
+            --param n_fit.distThresh=0.2:0.8:4 --metric outputs.gap --holdout half=b \n            --jobs 4   # 同时跑四次，行的顺序与内容不变；输出重定向到文件时终端上有一行进度
 
 # 合成位移：在源头之后插一个 edit.translate_region，看读数跟不跟得上
 lyflow perturb demo.lyflow.json --after n_frame_s:cloud \
@@ -300,6 +300,12 @@ M0–M7 已完成，之后的功能各有计划与验收文档，索引在 [road
   （[embedding.md](docs/embedding.md)）。
 - **第二个数据域 Image。** OpenCV 包 `std-image`；图像在连线查看器与主预览里可看、可拖像素框，
   MCP 能把中间结果当图片返回，深度图与点云互转（[image-plan.md](docs/image-plan.md)）。
+- **用着更顺手（2026-10-01）。** 编辑器：Ctrl+F 查找节点（连子图里面的，回车打开到那一层）、
+  F8 / Shift+F8 在出错的节点之间跳、子图内部出错直接定位到那个节点、多选同一种算子一起改参数、
+  右键「选中上游 / 下游」、加节点时最近用过的排在最前；抢占与重扫库目录不卡界面。
+  CLI：`eval / sweep / perturb --jobs` 同时跑几次、终端里有进度行与预计剩余时间、
+  失败的原因写在 stderr 上。MCP：调用被取消时后端那次运行跟着停、`eval` 逐行报进度。
+  算子：法线与两个离群点滤波分段并行、体素栅格换了查找表，线程预算按整个进程在算的节点数分。
 
 **M4 —— 能扩展。** 图本身成了可复用、可脚本化、可交互探索的资产：
 
