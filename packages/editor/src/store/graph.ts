@@ -715,12 +715,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
       if (moves.length === 0) return;
       // 拖动过程中每帧都调，所以走 mutate 不记撤销；
       // 一次拖动的撤销由 begin/commit 包住整体记一条。
+      // 按节点扫一遍查表，不按挪动逐个 find：全选拖几百个节点时每帧原来是平方级
+      const to = new Map(moves.map((m) => [m.id, m.position]));
       mutate((d) => {
-        const lvl = level(d);
-        for (const m of moves) {
-          const node = lvl.nodes.find((n) => n.id === m.id);
-          if (!node) continue;
-          node.ui = { ...node.ui, position: m.position };
+        for (const node of level(d).nodes) {
+          const position = to.get(node.id);
+          if (position) node.ui = { ...node.ui, position };
         }
       });
     },

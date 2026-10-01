@@ -6,7 +6,7 @@
 // 哪些节点；Shift+单击再加 `force: [id]`；「仅此节点」（isolate）降为右键里的次级操作。
 
 import { hasRelativePathParam } from "./params";
-import { augmentOperators, fullId, levelOf, localIdOf, type SubPath } from "./subgraph";
+import { augmentOperators, fullId, levelOf, localIdOf, nodeIndex, type SubPath } from "./subgraph";
 import { staleLocalIds, useCacheStore } from "../store/cache";
 import {
   aggregatedNodes,
@@ -238,7 +238,7 @@ export function nodeLabel(
   id: string,
   operatorsById: ReadonlyMap<string, OperatorDesc>,
 ): string {
-  const node = level.nodes.find((n) => n.id === id);
+  const node = nodeIndex(level.nodes).get(id);
   if (!node) return id;
   return node.ui?.title ?? operatorsById.get(node.op)?.label ?? id;
 }

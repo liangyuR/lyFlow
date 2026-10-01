@@ -39,7 +39,7 @@ import {
 } from "../lib/mapping";
 import { peekSourceOf } from "../lib/peekSource";
 import { defaultViewFor } from "../lib/viewRule";
-import { augmentOperators, fullId, levelOf, pathIsValid } from "../lib/subgraph";
+import { augmentOperators, fullId, levelOf, nodeIndex, pathIsValid } from "../lib/subgraph";
 import { canConnect, compatibleSources, compatibleTargets, inferAnyTypes } from "../lib/typecheck";
 import { keyHint } from "../lib/keymap";
 import { evictNodeCache } from "../store/cache";
@@ -137,8 +137,7 @@ function rectOf(
   id: string,
   measured: ReadonlyMap<string, { width: number; height: number }>,
 ) {
-  const node = doc.nodes.find((n) => n.id === id);
-  const p = node?.ui?.position ?? { x: 0, y: 0 };
+  const p = nodeIndex(doc.nodes).get(id)?.ui?.position ?? { x: 0, y: 0 };
   const size = measured.get(id) ?? { width: 220, height: 90 };
   return { x: p.x, y: p.y, w: size.width, h: size.height };
 }

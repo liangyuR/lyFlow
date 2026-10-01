@@ -402,4 +402,16 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   );
 }
 
-export const OperatorNode = memo(OperatorNodeImpl);
+/** React Flow 每一帧都把拖动中的位置（positionAbsoluteX / Y）当 props 传进来，节点自己用不到它 —— 位置由外层的
+ *  NodeWrapper 用 transform 摆。默认的浅比较让全选拖动时几百个节点每帧整个重渲；别的 props 照常比。 */
+function sameNodeProps(a: NodeProps, b: NodeProps): boolean {
+  const keys = Object.keys(a) as (keyof NodeProps)[];
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const k of keys) {
+    if (k === "positionAbsoluteX" || k === "positionAbsoluteY") continue;
+    if (a[k] !== b[k]) return false;
+  }
+  return true;
+}
+
+export const OperatorNode = memo(OperatorNodeImpl, sameNodeProps);

@@ -12,7 +12,7 @@ import {
 } from "../lib/graphParams";
 import { groupParams, effectiveParams, isEnabled, isVisible, valueEquals } from "../lib/params";
 import { frameKeyOfGroup, pickFrame, roiFramesOf } from "../lib/roiFrames";
-import { augmentOperators, describeEventNode, fullId, levelOf, promotedBy } from "../lib/subgraph";
+import { augmentOperators, describeEventNode, fullId, levelOf, nodeIndex, promotedBy } from "../lib/subgraph";
 import { useExecutionStore, useNodeExecution, useParamErrors } from "../store/execution";
 import { currentSubgraph, useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
@@ -693,8 +693,10 @@ function MultiInspector({ ids }: { ids: string[] }) {
   const base = useManifestStore((s) => s.operatorsById);
   const operatorsById = augmentOperators(base, fullDoc.subgraphs);
   const level = levelOf(fullDoc, path);
+  // 查表不逐个 find：全选几百个节点再拖动时每帧都重渲，原来是平方级
+  const index = nodeIndex(level.nodes);
   const nodes = ids.flatMap((id) => {
-    const n = level.nodes.find((x) => x.id === id);
+    const n = index.get(id);
     return n ? [n] : [];
   });
   const counts = new Map<string, number>();

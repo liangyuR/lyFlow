@@ -34,7 +34,7 @@
 | 日志页（只看警告与错误、按节点或内容筛；节点写带层级的名字，点它打开到那一层）；检查器的节点 id（路径 id，点了复制）；撤销 / 重做之后的 toast | 撤销提示在 `packages/editor/test/graph-params-actions.test.mjs`；真界面在 e2e `m4.mjs`：日志页与节点 id 在 `suiteNested`，Ctrl+Z 的 toast 在 `suiteLibrary` |
 | 子图、库算子（含展开为内联子图：定义去掉 id、内联后逐位相同；库目录设置：`bridge/src/library_settings.rs` 单测、e2e m4 面板增删 + CLI 同读） | `core/tests/test_subgraph.cpp`；`packages/editor/test/graph-params-actions.test.mjs`（合成 / 解散 / 展开库算子的 store 动作）；e2e `m4.mjs` |
 | 多选同一种算子一起改参数（`setParamMany`：每个节点照 `setParam` 路由、一条撤销、并进拖动的外层事务） | `packages/editor/test/graph-params-actions.test.mjs`；真界面（标「不同」、拖一下两个都变、一条撤销）在 e2e `m3.mjs` 的 `suiteEditing` |
-| 拖线时的即时挡错（P0 #7 端口类型、#16 环检测、E6 Any 推导；`compatibleTargets` / `compatibleSources` 的置灰表）；GraphDoc → React Flow 的映射（连线按实际类型着色、惰性边虚线、引用复用）| `packages/editor/test/typecheck.test.mjs`；真鼠标拖线在 e2e `m3.mjs`、`m8b.mjs` |
+| 拖线时的即时挡错（P0 #7 端口类型、#16 环检测、E6 Any 推导；`compatibleTargets` / `compatibleSources` 的置灰表）；GraphDoc → React Flow 的映射（连线按实际类型着色、惰性边虚线、引用复用；只挪了位置的节点 data 沿用原对象）| `packages/editor/test/typecheck.test.mjs`；真鼠标拖线在 e2e `m3.mjs`、`m8b.mjs` |
 | 算子搜索的排序（名字命中优先、短的优先、缩写与中文关键词、说明命中标字段） | `packages/editor/test/search.test.mjs`；弹层与面板的真界面在 e2e `m3.mjs` |
 | 图参数（规格、校验、传参） | `core/tests/test_graph_params.cpp`、`test_params.cpp`；`packages/editor/test/graph-params*.test.mjs`；e2e `params_p1.mjs`（参数菜单的复制路径名 / 粘贴值、读剪贴板不弹权限框也在它的 `suiteIncludeTopLevel` 末尾） |
 | 配方与四类失配 | 共享夹具 `schema/fixtures/recipes/`：`bridge/src/recipe.rs` 与 `packages/editor/test/recipes.test.mjs` 对着同一份 `expected.json`；e2e `params_p3.mjs` 只验界面、磁盘与对话框 |

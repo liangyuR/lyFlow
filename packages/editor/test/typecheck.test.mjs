@@ -120,4 +120,14 @@ test("toReactFlow：连线按源端口的实际类型着色（隔着 reroute 也
   const again = toReactFlow(withLazy, lazyCtx, undefined, undefined, undefined, cache);
   assert.equal(again.nodes, nodes);
   assert.equal(again.edges, edges);
+  // 只挪了一个节点的位置：它是新对象（位置变了），data 沿用原来那个 —— 节点组件按引用比 data，
+  // 全选拖几百个节点时不该每帧整个重渲；没挪的节点整个复用
+  const moved = { ...withLazy, nodes: withLazy.nodes.map((n) => (n.id === "v1" ? { ...n, ui: { position: { x: 999, y: 1 } } } : n)) };
+  const after = toReactFlow(moved, lazyCtx, undefined, undefined, undefined, cache);
+  const was = (id) => nodes.find((n) => n.id === id);
+  const now = (id) => after.nodes.find((n) => n.id === id);
+  assert.notEqual(now("v1"), was("v1"));
+  assert.equal(now("v1").position.x, 999);
+  assert.equal(now("v1").data, was("v1").data);
+  assert.equal(now("g"), was("g"));
 });

@@ -54,6 +54,19 @@ export function levelOf(doc: GraphDoc, path: SubPath): GraphLevel {
   return def ?? doc;
 }
 
+/** 节点数组的 id → 节点索引，按数组的身份缓存：一帧里几百个组件各问各的，只建一次。
+ *  拖着几百个节点时每一帧 doc 都是新的，在 selector / 渲染里逐个 `nodes.find` 就是平方级。 */
+const nodeIndexCache = new WeakMap<readonly GraphNode[], ReadonlyMap<string, GraphNode>>();
+
+export function nodeIndex(nodes: readonly GraphNode[]): ReadonlyMap<string, GraphNode> {
+  let index = nodeIndexCache.get(nodes);
+  if (!index) {
+    index = new Map(nodes.map((n) => [n.id, n]));
+    nodeIndexCache.set(nodes, index);
+  }
+  return index;
+}
+
 /** 事件里的完整 id（「子图节点/…/节点」）→ 要打开到哪一层、选中那一层的哪个节点。
  *  诊断抽屉与子图节点上的错误文字点进去时用：错误挂在路径 id 上（ADR-0010），顶层只看得到「这个子图红了」。
  *  库算子的内部进不去（定义在库文件里，只读）：停在库算子节点本身。路径对不上图（节点被删了）时返回 null。 */

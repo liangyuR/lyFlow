@@ -75,20 +75,24 @@ export function toReactFlow(
 ): { nodes: LyNode[]; edges: LyEdge[] } {
   const nodes: LyNode[] = doc.nodes.map((n) => {
     const size = measured?.get(n.id);
+    const data: OperatorNodeData = {
+      opId: n.op,
+      title: n.ui?.title ?? null,
+      collapsed: n.ui?.collapsed ?? false,
+      bypass: n.bypass === true,
+      anyType: anyTypes.get(n.id) ?? null,
+      subgraphId: subgraphIdOf(n.op),
+      library: n.op.startsWith("lib."),
+    };
+    // 只挪了位置的节点沿用上一轮的 data 对象：节点组件（OperatorNode）按引用比 data，
+    // 拖着几百个节点时每帧换一份新的 data，就是几百个节点每帧整个重渲
+    const prev = cache?.nodes.get(n.id)?.data;
     return {
       id: n.id,
       type: "operator" as const,
       position: n.ui?.position ?? { x: 0, y: 0 },
       selected: selection.nodes.has(n.id),
-      data: {
-        opId: n.op,
-        title: n.ui?.title ?? null,
-        collapsed: n.ui?.collapsed ?? false,
-        bypass: n.bypass === true,
-        anyType: anyTypes.get(n.id) ?? null,
-        subgraphId: subgraphIdOf(n.op),
-        library: n.op.startsWith("lib."),
-      },
+      data: prev && sameNodeData(prev, data) ? prev : data,
       ...(size ? { measured: size } : {}),
       ...(n.ui?.width != null ? { width: n.ui.width } : {}),
     };
@@ -159,13 +163,19 @@ function sameNode(a: LyNode, b: LyNode): boolean {
     a.position.y === b.position.y &&
     a.measured?.width === b.measured?.width &&
     a.measured?.height === b.measured?.height &&
-    a.data.opId === b.data.opId &&
-    a.data.title === b.data.title &&
-    a.data.collapsed === b.data.collapsed &&
-    a.data.bypass === b.data.bypass &&
-    a.data.anyType === b.data.anyType &&
-    a.data.subgraphId === b.data.subgraphId &&
-    a.data.library === b.data.library
+    sameNodeData(a.data, b.data)
+  );
+}
+
+function sameNodeData(a: OperatorNodeData, b: OperatorNodeData): boolean {
+  return (
+    a.opId === b.opId &&
+    a.title === b.title &&
+    a.collapsed === b.collapsed &&
+    a.bypass === b.bypass &&
+    a.anyType === b.anyType &&
+    a.subgraphId === b.subgraphId &&
+    a.library === b.library
   );
 }
 
