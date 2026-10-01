@@ -144,6 +144,28 @@ function rectOf(
 }
 
 /** 当前层级的「像一份 doc」的视图。只认 GraphDoc 的函数都吃它。 */
+/** 空画布的提示：第一次打开就是一片空白，看不出从哪开始。三种加节点的方式都写上（算子面板拖、双击、键盘搜），
+ *  不挡鼠标（双击照样落到画布上），这一层有了节点就消失。 */
+function EmptyHint({ inSubgraph }: { inSubgraph: boolean }) {
+  return (
+    <div className="canvas__empty" data-testid="canvas-empty-hint">
+      <p className="canvas__empty-title">{inSubgraph ? "这个子图还是空的" : "从一个算子开始"}</p>
+      <p>
+        从左侧算子面板拖一个进来，或在空白处双击、按 <kbd>{keyHint("search")}</kbd> 搜索算子
+      </p>
+      {inSubgraph ? (
+        <p>
+          按 <kbd>Esc</kbd> 回到上一层
+        </p>
+      ) : (
+        <p>
+          已有的图按 <kbd>{keyHint("open")}</kbd> 打开
+        </p>
+      )}
+    </div>
+  );
+}
+
 function levelView(): GraphDoc {
   const doc = useGraphStore.getState().doc;
   const lvl = levelOf(doc, useUiStore.getState().path);
@@ -888,6 +910,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       data-layout-moving={override ? "1" : undefined}
     >
       <Breadcrumb />
+      {view.nodes.length === 0 && <EmptyHint inSubgraph={path.length > 0} />}
       <ReactFlow
         nodes={nodes}
         edges={edges}

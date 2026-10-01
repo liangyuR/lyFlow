@@ -855,10 +855,17 @@ async function suiteLayout(cdp, report) {
 // ------------------------------------------ P1 #23 #26 #28 #29 编辑与输入
 
 async function suiteEditing(cdp, report) {
-  report.section("P1 #25 #26 #28 #29：折叠重命名、参数右键、拖动改值、快捷键面板");
+  report.section("P1 #25 #26 #28 #29：折叠重命名、参数右键、拖动改值、快捷键面板；空画布的提示");
 
   await newDoc(cdp);
+  // 空画布的提示：第一次打开就是一片空白时告诉人从哪开始；有了节点就消失
+  const hint = () => cdp.eval(`return document.querySelector('[data-testid="canvas-empty-hint"]')?.textContent ?? null;`);
+  const empty = await hint();
+  report.ok("空画布上写着从哪开始（算子面板、双击、搜索键、打开）",
+    typeof empty === "string" && empty.includes("算子面板") && empty.includes("双击") && empty.includes("Ctrl+O"), String(empty));
   const ids = await buildGraph(cdp, CHAIN_NODES, CHAIN_EDGES);
+  await sleep(150);
+  report.eq("有了节点提示就消失", await hint(), null);
   await select(cdp, ids.voxel);
   await sleep(200);
 
