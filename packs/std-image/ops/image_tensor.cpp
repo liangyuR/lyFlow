@@ -2,7 +2,9 @@
 // HWC → NCHW）必须是图上看得见的参数，不能藏在类型系统里。这两个算子不需要 OpenCV，放在这个包里
 // 是因为它们属于图像域。
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 #include "ops.h"
@@ -15,6 +17,32 @@ using img::badInput;
 using img::badParam;
 
 // -------------------------------------------------------------- image.to_tensor
+
+/// 一种位深的整张图。原来每个值都调一次 Image::at（不内联、每次按位深 switch），1200 万像素的 RGB 要 230 ms；
+/// 这里按位深走裸指针。逐值的算术与原来一字不差（double 乘 scale、减 mean、除 std，最后截成 float），
+/// 所以张量逐位不变。
+template <typename P>
+void toTensorRows(const Image& in, double scale, const std::array<double, 3>& mean, const std::array<double, 3>& stdv,
+                  bool planar, float* out) {
+  const std::int64_t h = in.height, w = in.width, ch = in.channels;
+  const std::uint8_t* base = in.pixels.get();
+  const std::size_t rowBytes = in.rowBytes();
+  for (std::int64_t y = 0; y < h; ++y) {
+    const std::uint8_t* row = base + static_cast<std::size_t>(y) * rowBytes;
+    for (std::int64_t x = 0; x < w; ++x) {
+      for (std::int64_t c = 0; c < ch; ++c) {
+        P raw;
+        std::memcpy(&raw, row + static_cast<std::size_t>(x * ch + c) * sizeof(P), sizeof(P));
+        // mean / std 只作用在前三个通道上；alpha（第 4 个）只乘 scale
+        const double v = static_cast<double>(raw) * scale;
+        const double norm = c < 3 ? (v - mean[c]) / stdv[c] : v;
+        const std::size_t at = planar ? static_cast<std::size_t>((c * h + y) * w + x)
+                                      : static_cast<std::size_t>((y * w + x) * ch + c);
+        out[at] = static_cast<float>(norm);
+      }
+    }
+  }
+}
 
 Status toTensorCompute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                        ExecContext&) {
@@ -34,19 +62,12 @@ Status toTensorCompute(const Inputs& inputs, const ParamView& params, Outputs& o
   else t.shape = {h, w, ch};
   t.data.resize(static_cast<std::size_t>(h * w * ch));
   const bool planar = layout == "NCHW" || layout == "CHW";
-  for (std::int64_t y = 0; y < h; ++y) {
-    for (std::int64_t x = 0; x < w; ++x) {
-      for (std::int64_t c = 0; c < ch; ++c) {
-        // mean / std 只作用在前三个通道上；alpha（第 4 个）只乘 scale
-        const double v = in.at(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y),
-                               static_cast<std::int32_t>(c)) *
-                         scale;
-        const double norm = c < 3 ? (v - mean[c]) / stdv[c] : v;
-        const std::size_t at = planar ? static_cast<std::size_t>((c * h + y) * w + x)
-                                      : static_cast<std::size_t>((y * w + x) * ch + c);
-        t.data[at] = static_cast<float>(norm);
-      }
-    }
+  const std::array<double, 3> m{mean[0], mean[1], mean[2]};
+  const std::array<double, 3> s{stdv[0], stdv[1], stdv[2]};
+  switch (in.depth) {
+    case PixelDepth::U8: toTensorRows<std::uint8_t>(in, scale, m, s, planar, t.data.data()); break;
+    case PixelDepth::U16: toTensorRows<std::uint16_t>(in, scale, m, s, planar, t.data.data()); break;
+    case PixelDepth::F32: toTensorRows<float>(in, scale, m, s, planar, t.data.data()); break;
   }
   outputs.set("tensor", Data::tensor(std::move(t)));
   return Status::Ok();
@@ -127,20 +148,29 @@ Status toImageCompute(const Inputs& inputs, const ParamView& params, Outputs& ou
   }
   Image img = Image::allocate(static_cast<std::int32_t>(w), static_cast<std::int32_t>(h),
                               static_cast<std::int32_t>(c), toU8 ? PixelDepth::U8 : PixelDepth::F32);
-  std::uint8_t* out8 = img.mutablePixels();
-  float* out32 = reinterpret_cast<float*>(img.mutablePixels());
-  for (std::int64_t y = 0; y < h; ++y) {
-    for (std::int64_t x = 0; x < w; ++x) {
-      for (std::int64_t k = 0; k < c; ++k) {
-        const float v = valueAt(x, y, k);
-        const std::size_t at = static_cast<std::size_t>((y * w + x) * c + k);
-        if (toU8) {
-          const float u = std::isfinite(v) ? (v - lo) / (hi - lo) * 255.0f : 0.0f;
-          out8[at] = static_cast<std::uint8_t>(std::lround(std::clamp(u, 0.0f, 255.0f)));
-        } else {
-          out32[at] = v;
+  // 逐值的写法与原来一字不差（(v - lo) / (hi - lo) * 255 在 float 里算、lround、截断）；
+  // 只是 u8 / f32 与交错 / 分平面不再每个值判一次
+  const auto fill = [&](auto&& put) {
+    for (std::int64_t y = 0; y < h; ++y) {
+      for (std::int64_t x = 0; x < w; ++x) {
+        for (std::int64_t k = 0; k < c; ++k) {
+          put(static_cast<std::size_t>((y * w + x) * c + k), valueAt(x, y, k));
         }
       }
+    }
+  };
+  if (toU8) {
+    std::uint8_t* out8 = img.mutablePixels();
+    fill([&](std::size_t at, float v) {
+      const float u = std::isfinite(v) ? (v - lo) / (hi - lo) * 255.0f : 0.0f;
+      out8[at] = static_cast<std::uint8_t>(std::lround(std::clamp(u, 0.0f, 255.0f)));
+    });
+  } else {
+    float* out32 = reinterpret_cast<float*>(img.mutablePixels());
+    if (interleaved) {
+      std::memcpy(out32, t.data.data() + base, plane * static_cast<std::size_t>(c) * sizeof(float));
+    } else {
+      fill([&](std::size_t at, float v) { out32[at] = v; });
     }
   }
   outputs.set("image", Data::image(std::move(img)));
