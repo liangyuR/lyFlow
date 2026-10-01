@@ -1006,6 +1006,20 @@ async function suiteEditing(cdp, report) {
     report.fail("多选表单里找不到可拖动的数字框", '[data-testid="multi-param-pointCount"]');
   }
 
+  // F：把视图对准选中的节点 —— 选中的那个落到画布中间附近
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([${lit(twin)}], []); return true;`);
+  await sleep(100);
+  await pressKey(cdp, "f", 70);
+  await sleep(600);
+  const framed = await cdp.eval(`
+    const pane = document.querySelector('.react-flow__pane').getBoundingClientRect();
+    const node = document.querySelector('[data-testid="node-${twin}"]')?.getBoundingClientRect();
+    if (!node) return null;
+    return { dx: Math.round(node.left + node.width / 2 - (pane.left + pane.width / 2)),
+             dy: Math.round(node.top + node.height / 2 - (pane.top + pane.height / 2)) };
+  `);
+  report.ok("按 F：选中的节点落到画布中间", framed != null && Math.abs(framed.dx) < 40 && Math.abs(framed.dy) < 40, JSON.stringify(framed));
+
   // #12 复制粘贴走系统剪贴板（另一个窗口、重开之后也粘得进来）。系统剪贴板换成页面里的桩：
   // CDP 驱动的窗口不一定拿得到剪贴板权限，而这里要验的是「写的是什么、粘的是哪一份」
   await cdp.eval(`

@@ -576,6 +576,15 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       },
       onLayout: doLayout,
       onFitView: () => void fitView({ duration: fitMs }),
+      onFitSelection: () => {
+        const ids = [...useUiStore.getState().selectedNodes];
+        if (ids.length === 0) {
+          useUiStore.getState().showToast("先选中节点再按 F", "warn");
+          return;
+        }
+        // 只选了一个时别放大到糊满屏幕：maxZoom 与「打开到出错的节点」同一档
+        void fitView({ nodes: ids.map((id) => ({ id })), duration: fitMs, maxZoom: 1, padding: 0.4 });
+      },
       cursorFlowPosition: () => screenToFlowPosition(cursor.current),
       cursorScreenPosition: () => cursor.current,
     }),

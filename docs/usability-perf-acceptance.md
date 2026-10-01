@@ -16,6 +16,7 @@
 | 最近用过的算子 | 算子搜索空查询时排最前、标「最近」；面板顶上一组 | `autoconnect.test.mjs`；e2e `m3.mjs` 的 `suiteDropToSearch` |
 | 复制粘贴走系统剪贴板 | 跨窗口、重开之后都粘得进来，整张图的 JSON 也认；静音的粘出来还是静音的 | `autoconnect.test.mjs`；e2e `m3.mjs` 的 `suiteEditing` |
 | 撤销 / 重做的提示 | toast 说撤掉的是哪一步 | `graph-params-actions.test.mjs`；e2e `m4.mjs` 的 `suiteLibrary` |
+| F 适配选中 | 把视图对准选中的节点（Ctrl+Shift+F 仍是全图） | e2e `m3.mjs` 的 `suiteEditing` |
 | 日志页 | 只看警告与错误、按节点或内容筛；节点写带层级的名字，点它打开到那一层 | e2e `m4.mjs` 的 `suiteNested` |
 | 检查器的节点 id | 路径 id（`--to`、`--set` 认的那个），点了复制 | 同上 |
 | 空画布 | 写着从哪开始（搜算子、打开、拖片段） | e2e `m3.mjs` 的 `suiteEditing` |

@@ -39,6 +39,8 @@ export interface ShortcutHandlers {
   onCancel: () => void;
   onLayout: () => void;
   onFitView: () => void;
+  /** F：把视图对准选中的节点（没选中时提示一句）。 */
+  onFitSelection: () => void;
   /** 画布坐标，粘贴和搜索面板需要知道往哪儿放 */
   cursorFlowPosition: () => { x: number; y: number };
   cursorScreenPosition: () => { x: number; y: number };
@@ -258,6 +260,10 @@ export function useShortcuts(
         case "fitView":
           e.preventDefault();
           handlers.onFitView();
+          return;
+        case "fitSelection":
+          e.preventDefault();
+          handlers.onFitSelection();
           return;
         case "toggleDrawer":
           e.preventDefault();

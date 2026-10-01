@@ -183,3 +183,18 @@ test("复制粘贴（P0 #12）：id 重映射、内部连线留着、整体平�
     assert.equal(decodeNodeClipboard(text), null, text);
   }
 });
+
+test("删节点（P0 #5）：连着它的边一并删掉，别的边不动；一次撤销全回来", () => {
+  reset();
+  const a = addNodeWithAutoConnect("t.read", { x: 0, y: 0 }).nodeIds[0];
+  const b = addNodeWithAutoConnect("t.locate", { x: 200, y: 0 }).nodeIds[0];
+  const c = addNodeWithAutoConnect("t.line", { x: 400, y: 0 }).nodeIds[0];
+  const edgesOf = () => useGraphStore.getState().doc.edges.map((e) => `${e.from.node}>${e.to.node}`).sort();
+  const before = edgesOf();
+  assert.ok(before.includes(`${a}>${b}`) && before.includes(`${b}>${c}`), JSON.stringify(before));
+  useGraphStore.getState().deleteNodes([b]);
+  assert.deepEqual(edgesOf().filter((e) => e.includes(b)), [], "连着 b 的边都没了");
+  assert.equal(useGraphStore.getState().doc.nodes.some((n) => n.id === b), false);
+  useGraphStore.getState().undo();
+  assert.deepEqual(edgesOf(), before);
+});
