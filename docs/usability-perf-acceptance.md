@@ -27,6 +27,7 @@
 | 挪节点都进撤销栈 | 方向键挪选中的节点每按一下一条，拖框选出来的选区整段一条。以前两种都直接写进图、撤销栈里没有，Ctrl+Z 撤掉的是上一步 | 同上 |
 | 一个手势一条撤销 | Delete 删框选的节点与连线、右键插入 reroute、拖线松手后在搜索里选一个（加节点 + 接线）、拖节点到连线上插入：以前都记成两条，Ctrl+Z 一次只撤回一半（边还断着、reroute 孤零零地留着、节点还插在线上）。store 加了 `batch`：里面的动作并成一条，拖动中就并进拖动那一条，`cancel()` 撤回不记 | `autoconnect.test.mjs` 的 batch 那条；e2e `m3.mjs` 的 `suiteEditing`、`suiteBypassReroute`、`suiteInsertOnEdge`、`suiteDropToSearch`（Ctrl+Z 一次全回来、撤销栈回到之前；batch 不合并时这四条失败） |
 | 右键拖动平移 | 中键与右键平移，React Flow 只在空白处接右键：按在节点 / 连线上拖不动，松手时（Windows 上右键菜单在松开时才弹）指针在哪个节点 / 连线上就弹哪个的菜单。现在按在节点 / 连线上也平移，右键拖过几像素之后的那次右键菜单吞掉；不挪的右键单击照常 | e2e `m3.mjs` 的 `suiteEditing`（去掉时失败：没平移、弹了菜单） |
+| 输入框里按 Esc | 打字之后按 Esc 撤回、不提交：数字框、参数的文字框、图参数的规格（配方矩阵的单元格用的是同一套控件）。以前都把打进去的提交了，还记一条撤销 —— Esc 先 setText 再 blur，同一个事件里 onBlur 拿到的还是这一帧打进去的字 | e2e `params_p2.mjs` 的 `suiteAllTypes`、`suiteSearchFilter`（真按键；换回原来的写法时三条都失败） |
 | 对话框开着时按 Delete | 删除只走键表（对话框开着时快捷键一个都不响），React Flow 自己的 `deleteKeyCode` 关掉：以前对话框开着、焦点不在它里面时按 Delete，画布上选中的节点就被删了 | e2e `params_p3.mjs` 的 `suiteCreateSaveReopen`（打开 deleteKeyCode 时失败） |
 | 日志页 | 只看警告与错误、按节点或内容筛；节点写带层级的名字，点它打开到那一层 | e2e `m4.mjs` 的 `suiteNested` |
 | 检查器的节点 id | 路径 id（`--to`、`--set` 认的那个），点了复制 | 同上 |

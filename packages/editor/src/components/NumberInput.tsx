@@ -79,6 +79,9 @@ export function NumberInput({
   const [text, setText] = useState(String(value));
   const [dragging, setDragging] = useState(false);
   const editing = useRef(false);
+  /** Esc 按下了：接着的那次 blur 撤回、不提交。setText 赶不上 —— blur 在同一个事件里同步触发，
+   *  onBlur 拿到的还是这一帧的 text（打进去的那个），以前 Esc 就把它提交了。 */
+  const cancelled = useRef(false);
   const drag = useRef<DragState | null>(null);
 
   // 外部值变了（撤销、切换节点）且用户没在编辑时才同步，
@@ -98,6 +101,11 @@ export function NumberInput({
 
   const commit = () => {
     editing.current = false;
+    if (cancelled.current) {
+      cancelled.current = false;
+      setText(String(value));
+      return;
+    }
     const parsed = integer ? parseInt(text, 10) : parseFloat(text);
     if (Number.isNaN(parsed)) {
       setText(String(value)); // 输入非法，恢复原值而不是写入 NaN
@@ -181,8 +189,7 @@ export function NumberInput({
         if (e.key === "Enter") {
           e.currentTarget.blur();
         } else if (e.key === "Escape") {
-          editing.current = false;
-          setText(String(value));
+          cancelled.current = true;
           e.currentTarget.blur();
         }
       }}

@@ -79,6 +79,23 @@ async function typeIn(cdp, rowSel, text, { index = 0, tag = "input" } = {}) {
   `);
 }
 
+/** 真按键：聚焦 selector 指的输入框、全选、打字、按 Esc。返回 Esc 之后输入框里显示的字。 */
+async function typeThenEscape(cdp, selector, text) {
+  const found = await cdp.eval(`
+    const el = document.querySelector(${lit(selector)});
+    if (!el) return false;
+    el.scrollIntoView({ block: 'center' });
+    el.focus();
+    return true;
+  `);
+  if (!found) return null;
+  await pressKey(cdp, "a", 65, ["ctrl"]);
+  await cdp.send("Input.insertText", { text });
+  await pressKey(cdp, "Escape", 27);
+  await sleep(150);
+  return cdp.eval(`return document.querySelector(${lit(selector)})?.value ?? null;`);
+}
+
 /** 行里的下拉框选一项（原生 setter + change 事件）。 */
 async function chooseIn(cdp, rowSel, value, selector = "select") {
   if (!(await reveal(cdp, rowSel))) return "no-row";
@@ -384,6 +401,18 @@ async function suiteAllTypes(cdp, report, ws) {
               : Array.isArray(v) && v.every((x) => typeof x === "number");
     report.ok(`${c.type}：${c.param} 在面板里改了，doc 里是 ${JSON.stringify(c.want)}（类型对）`,
       how === "ok" && approxEq(v, c.want) && typeOk, `操作 ${how}，doc 里 ${JSON.stringify(v)}`);
+  }
+
+  // 打字之后按 Esc：撤回、不提交。以前两种都把打进去的提交了 —— Esc 先 setText 再 blur，
+  // 同一个事件里 onBlur 拿到的还是这一帧打进去的 text
+  for (const [param, kind, text] of [["iterations", "num", "77"], ["tag", "str", "zzz"]]) {
+    await reveal(cdp, rowSel(`${ids.show}.${param}`));
+    const before = { value: (await paramsOf(cdp, ids.show))[param], past: await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`) };
+    const shown = await typeThenEscape(cdp, `${rowSel(`${ids.show}.${param}`)} input.ctl--${kind}`, text);
+    const after = { value: (await paramsOf(cdp, ids.show))[param], past: await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`) };
+    report.ok(`${param}：打了 ${text} 再按 Esc，值没变、没记撤销，框里回到原值`,
+      approxEq(after.value, before.value) && after.past === before.past && shown === String(before.value),
+      JSON.stringify({ before, after, shown }));
   }
 
   // color 的 alpha（overlay 带 alpha 通道）
@@ -723,6 +752,14 @@ async function suiteSearchFilter(cdp, report) {
   `);
   report.ok("图参数自己的诊断贴在「图参数」分组那一行下", Number(gpDiag.diag) >= 1 && (gpDiag.text ?? "").includes("10"),
     JSON.stringify(gpDiag));
+  // 规格（⚙）里改名字再按 Esc：撤回，图参数不改名（以前改了，一条撤销）
+  await cdp.eval(`document.querySelector('[data-testid="pp-spec-gain"]')?.click(); return true;`);
+  await sleep(150);
+  const specShown = await typeThenEscape(cdp, '[data-testid="pp-spec-gain-name"]', "renamedGain");
+  report.ok("图参数规格里改名字再按 Esc：不改名，框里回到 gain",
+    specShown === "gain" && (await cdp.eval(`return Object.keys(window.__lyflow.stores.graph.getState().doc.params ?? {});`)).includes("gain"),
+    JSON.stringify(specShown));
+  await cdp.eval(`document.querySelector('[data-testid="pp-spec-gain"]')?.click(); return true;`);
   await setChip("all");
   await resetPanel(cdp);
 }

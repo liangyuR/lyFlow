@@ -198,12 +198,19 @@ function FlagsControl({ param, value, disabled, onChange }: ControlProps) {
 function TextishControl({ param, value, disabled, onChange }: ControlProps) {
   const [text, setText] = useState(String(value ?? ""));
   const editing = useRef(false);
+  /** Esc 撤回：接着的 blur 不提交（同 NumberInput —— onBlur 拿到的还是打进去的那个 text） */
+  const cancelled = useRef(false);
   useEffect(() => {
     if (!editing.current) setText(String(value ?? ""));
   }, [value]);
 
   const commit = () => {
     editing.current = false;
+    if (cancelled.current) {
+      cancelled.current = false;
+      setText(String(value ?? ""));
+      return;
+    }
     if (text !== value) onChange(text);
   };
 
@@ -230,8 +237,7 @@ function TextishControl({ param, value, disabled, onChange }: ControlProps) {
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
         if (e.key === "Escape") {
-          editing.current = false;
-          setText(String(value ?? ""));
+          cancelled.current = true;
           e.currentTarget.blur();
         }
       }}
