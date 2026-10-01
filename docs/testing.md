@@ -38,7 +38,7 @@
 | 数据类型、Bundle、输出视图 ABI | `core/tests/test_data.cpp`、`test_bundle.cpp`、`test_output_view.cpp`、`test_contract.cpp` |
 | 图像数据域（docs/image-plan.md：valueJson 逐通道统计、块均值缩小、`lyflow_output_image` 的级别 / 行切片 / 越界、落盘往返、`shape` 契约用在图像上、C ABI 注入图像带行填充、注入摘要带 normals / rgb） | `core/tests/test_data.cpp`、`test_output_view.cpp`、`test_cache.cpp`、`test_contract.cpp`、`test_flow.cpp`（合成图像的测试算子 `test.make_image` / `test.take_gray` 在 `core/tests/image_test_op.h`，e2e 经 `LYFLOW_TEST_OPS` 同一份）；LYIM 载荷布局 `bridge/src/execution.rs` 的 `encode_image_frame_matches_the_documented_layout`；差异表的 Image 行 `compare-diff.test.mjs`；e2e `peek.mjs` 的图像组（适配级别、切原图分段取齐、悬停读数与合成公式一致） |
 | 运行摘要（summary） | `core/tests/test_summary.cpp`；CLI 的 `--summary` 形状在 `bridge/src/cli.rs` |
-| 标准算子 / PCD 读写 / ONNX | `packs/std-pointcloud/tests/*`、`packs/std-ml/tests/test_ml_ops.cpp`（模型用例要 `LYFLOW_TEST_ONNX_MODEL`，不设会打出跳过；`[N,6,1280] → [N,8,1280]` 的模型本机在桌面 DTS 文件夹的 `v12s0.onnx`） |
+| 标准算子 / PCD 读写 / ONNX（法线与两个离群点滤波分段并行：与 PCL 原实现逐点相同、与线程数无关、`flipTowardsViewpoint` 关掉不翻，在 `test_std_ops.cpp` 里拿 PCL 的三个类当参照） | `packs/std-pointcloud/tests/*`、`packs/std-ml/tests/test_ml_ops.cpp`（模型用例要 `LYFLOW_TEST_ONNX_MODEL`，不设会打出跳过；`[N,6,1280] → [N,8,1280]` 的模型本机在桌面 DTS 文件夹的 `v12s0.onnx`） |
 | 主预览的图像模式（画输出还是输入那张图、放大后重跑视角不动、像素框拖动写回参数并可撤销、像素几何叠画；规则本身在 `view-rule.test.mjs`） | e2e `m8b.mjs` 的 `suiteImageMainView` |
 | 大图预览（ADR-0028：源头按 2 的幂缩到 4 MP、像素参数 / 几何 / 量测在 compute 两侧换算、`absolute` 绝对尺寸、u16 单通道缩小时 0 不计入、超预算提示按数据域） | 规则与执行器端到端在 `core/tests/test_pixel_scale.cpp`（探针算子 `test.px_probe` 在同一个文件里）；shrinkImage 的 scale 与 D3 在 `test_data.cpp`；点云那一支的提示在 `test_subgraph.cpp` 的预览超预算用例；真实链路（找圆、区域统计预览与正式对得上，经过张量转回来的图带着比例）在 `packs/std-image/tests/test_image_ops.cpp`；主预览按原图尺寸摆放、角标、框与正式结果同一处，预览 ↔ 正式之间视角不动（源头的大图、手选「原图」、比源头小的输出三种）在 e2e `m8b.mjs` 的 `suiteImagePreviewScale` |
 | MCP 看图（LYIM 解码、u16 拉伸到 8 位、最近邻缩、PNG 头与 inflate 读回、超过 16 MB 分段取齐；冒烟里真调一次 `view_output_image`） | `packages/mcp/test/cloud.test.ts`、`smoke.test.ts`、`server.test.ts`（工具面 16 个） |
@@ -64,7 +64,7 @@
 ## 共用的夹具与辅助
 
 - **共享夹具**：`schema/fixtures/recipes/`（Rust 与 TS 共用）、`schema/examples/*.lyflow.json`、`examples/param-showcase.lyflow.json`（`test.param_showcase` 覆盖 14 种参数类型，C++ / CLI / e2e 共用）。新增跨语言规则时往共享夹具里加一行，别各写一份。
-- **C++**：`core/tests/helpers.h`（`seqIsDense` 等）、`core/tests/test_ops.h`（测试算子，含会抛异常的 `test.throw`）、`param_showcase_op.h`。
+- **C++**：`core/tests/helpers.h`（`seqIsDense` 等；直接调算子的 `test::OpCall` / `test::StubContext` —— 输入里有 Box2D、Record 这类不好拼图的值时用，`threads` 给线程预算，包测试只用本包算子时传自己的注册表）、`core/tests/test_ops.h`（测试算子，含会抛异常的 `test.throw`）、`param_showcase_op.h`。
 - **Rust**：`bridge/src/cli.rs` 的 `#[cfg(test)] pub(crate) mod test_support`（`SharedBuf`、`Ran`、`cli()`），其它模块复用它。
 - **e2e**：`scripts/e2e/page.mjs`（`newDoc`、`buildGraph`、`placeAtScreen`、`dragMouse`、`runAndWait`、`mustOk` 等），`peek.mjs` 的 `openByDoubleClick`，`m8b.mjs` 的 `roiGeometry` / `setCamera` / `waitValidated`；各 params 文件里的 `reveal`、`typeIn`、`pickRecipe` 目前有重复拷贝，新代码先找现成的。
 

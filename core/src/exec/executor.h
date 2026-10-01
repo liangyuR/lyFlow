@@ -60,9 +60,10 @@ struct RunOptions {
 constexpr std::uint32_t kDefaultPreviewMaxPoints = 200000;
 constexpr std::uint32_t kDefaultPreviewBudgetMs = 300;
 
-/// 每个 worker 分到的内部并行度：max(1, cores / maxParallel)。
-/// 算子（比如 PCL 的 OMP 版本）拿它当自己的线程数，免得超订。
-int threadBudgetFor(int maxParallel);
+/// 同时有 concurrent 个节点在算时，每个节点能自己开几个线程：max(1, cores / concurrent)。
+/// 执行器在节点开跑那一刻按「此刻在算的节点数」现算（ExecContext::threadBudget）——
+/// 一条直链上同一时刻只有一个节点在算，它就拿到全部核；按 maxParallel 定死的话只有 cores / 4。
+int threadBudgetFor(int concurrent);
 
 /// maxParallel 的实际取值。0 → min(4, cores)。
 int resolveMaxParallel(int requested);

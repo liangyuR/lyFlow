@@ -550,7 +550,7 @@ class Scheduler {
             const RunOptions& options, ResultStore& store, int workers,
             const std::unordered_map<std::string, std::unordered_map<std::string, Data>>& injected)
       : plan_(plan), sink_(sink), cancelled_(cancelled), options_(options), store_(store),
-        injected_(injected), workers_(workers), threadBudget_(threadBudgetFor(workers)),
+        injected_(injected), workers_(workers),
         n_(plan.nodes.size()), remaining_(n_, 0), verdict_(n_, Verdict::Ok), done_(n_, 0),
         failure_(n_), releases_(n_) {
     // 惰性节点不进就绪队列，但它们的**非惰性**祖先仍要在 demand 发生前跑完 ——
@@ -716,6 +716,16 @@ class Scheduler {
     }
   }
 
+  /// 本节点此刻能开几个线程（ExecContext::threadBudget）：核数按此刻在算的节点数分。
+  int threadBudgetNow() const {
+    int running = 1;
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      running = inflight_;
+    }
+    return threadBudgetFor(running);
+  }
+
   Verdict verdictOf(std::size_t i) const {
     std::lock_guard<std::mutex> lock(mu_);
     return done_[i] ? verdict_[i] : Verdict::Ok;
@@ -849,7 +859,7 @@ class Scheduler {
         Inputs inputs(inputValues);
         Outputs outputs(outputValues);
         ParamView params(pixelScale > 1 ? scaledParams : node.params, options_.baseDir);
-        NodeContext ctx(sink_, cancelled_, node.id, options_.baseDir, threadBudget_);
+        NodeContext ctx(sink_, cancelled_, node.id, options_.baseDir, threadBudgetNow());
         try {
           status = node.op->compute(inputs, params, outputs, ctx);
         } catch (const std::exception& e) {
@@ -1214,7 +1224,6 @@ class Scheduler {
   ResultStore& store_;
   const std::unordered_map<std::string, std::unordered_map<std::string, Data>>& injected_;
   int workers_ = 1;
-  int threadBudget_ = 1;
   std::size_t n_ = 0;
 
   mutable std::mutex mu_;
@@ -1557,10 +1566,10 @@ int resolveMaxParallel(int requested) {
   return std::max(1, std::min<int>(4, cores == 0 ? 1 : static_cast<int>(cores)));
 }
 
-int threadBudgetFor(int maxParallel) {
+int threadBudgetFor(int concurrent) {
   const unsigned cores = std::thread::hardware_concurrency();
   const int total = cores == 0 ? 1 : static_cast<int>(cores);
-  return std::max(1, total / std::max(1, maxParallel));
+  return std::max(1, total / std::max(1, concurrent));
 }
 
 // --------------------------------------------------------------------- Run

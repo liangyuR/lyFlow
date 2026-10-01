@@ -154,10 +154,11 @@ cmake --build build/core
   并行下最容易坏的就是它。
 - 取消是所有 worker 共用的一个 `atomic<bool>`。每个节点在开跑前和算完后各查一次，
   加上 `ops::Ticker` 在循环里查 —— 所以取消的响应时间是「最慢的那个算子的一次轮询」。
-- **`ctx.threadBudget()` = max(1, cores / maxParallel)**。PCL 的 OMP 版本算子
-  （`NormalEstimationOMP` 这类）应当把它传给 `setNumberOfThreads`。
-  **目前是预留的**：标准包里没有算子用它（`features.normals` 与两个离群点滤波都还是单线程的 PCL 实现），
-  等哪个算子在真实流程里成了瓶颈再换 OMP 版本并接上它。
+- **`ctx.threadBudget()` = max(1, cores / 此刻在算的节点数)**，在节点开跑那一刻现算：一条直链上同一时刻
+  只有一个节点在算，它就拿到全部核（以前按 maxParallel 定死，8 核机器上永远只有 2 个）。
+  `features.normals` 与两个离群点滤波按它把逐点的近邻搜索分段并行（`packs/std-pointcloud/ops/parallel.h`）——
+  vcpkg 的 PCL 没开 OpenMP，`NormalEstimationOMP` 这类在这里也是单线程，所以是自己切段，不是换 OMP 版本。
+  逐点的结果写各自的格子；要跨点汇总的量（统计离群点的均值与方差）照原来的顺序单线程累加，结果与线程数无关。
 
 ## 子图与库算子
 

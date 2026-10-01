@@ -2,12 +2,19 @@
 // 拆包时随算子一起搬过来 —— 断言逐条不变，只是换了个文件。
 #include <doctest/doctest.h>
 
+#include <pcl/features/normal_3d.h>
+#include <pcl/filters/radius_outlier_removal.h>
+#include <pcl/filters/statistical_outlier_removal.h>
+#include <pcl/search/kdtree.h>
+
 #include <chrono>
+#include <cmath>
 
 #include "exec/result_store.h"
 #include "helpers.h"
 #include "lyflow/operator.h"
 #include "lyflow/registry.h"
+#include "lyflow_pcl/adapter.h"
 
 using namespace lyflow;
 using namespace lyflow::test;
@@ -352,4 +359,94 @@ TEST_CASE("edit.translate_region：零法向是 bad_param") {
   REQUIRE_FALSE(e.empty());
   CHECK(e["error"]["code"] == "bad_param");
   CHECK(e["error"]["paramPath"] == "normal");
+}
+
+// 法线与两个离群点滤波改成按线程预算分段并行（ops/parallel.h；vcpkg 的 PCL 没开 OpenMP，它们原来是单线程的
+// PCL 实现，200 万点上 12 s / 14 s / 7 s）。参照就是原来直接调的那三个 PCL 类：逐点结果要相同，换几个线程也一样
+TEST_CASE("法线与两个离群点滤波：分段并行的结果与 PCL 原实现逐点相同，与线程数无关") {
+  test::OpCall gen;
+  REQUIRE(gen.run("gen.synthetic", {{"pointCount", Value::integer(60000)}, {"seed", Value::integer(5)}}).ok);
+  const Data cloud = gen.out("cloud");
+  const PointCloud& in = *cloud.asCloud();
+  const auto pc = ops::adapter::toPcl(in);
+
+  pcl::Indices sorKept;
+  {
+    pcl::StatisticalOutlierRemoval<pcl::PointXYZ> f;
+    f.setInputCloud(pc);
+    f.setMeanK(30);
+    f.setStddevMulThresh(1.0);
+    f.filter(sorKept);
+  }
+  pcl::Indices rorKept;
+  {
+    pcl::RadiusOutlierRemoval<pcl::PointXYZ> f;
+    f.setInputCloud(pc);
+    f.setRadiusSearch(0.05);
+    f.setMinNeighborsInRadius(5);
+    f.filter(rorKept);
+  }
+  pcl::PointCloud<pcl::Normal> ref;
+  {
+    pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
+    ne.setInputCloud(pc);
+    ne.setSearchMethod(pcl::make_shared<pcl::search::KdTree<pcl::PointXYZ>>());
+    ne.setKSearch(20);
+    ne.setViewPoint(0.0f, 0.0f, 0.0f);
+    ne.compute(ref);
+  }
+  const auto keptOf = [&](const test::OpCall& c) {
+    std::vector<char> removed(in.pointCount(), 0);
+    for (std::int32_t i : c.outputs.at("removed").asIndices()->values) removed[static_cast<std::size_t>(i)] = 1;
+    pcl::Indices kept;
+    for (std::size_t i = 0; i < removed.size(); ++i) {
+      if (!removed[i]) kept.push_back(static_cast<pcl::index_t>(i));
+    }
+    return kept;
+  };
+  REQUIRE(sorKept.size() < in.pointCount());  // 参照本身确实剔掉了离群点，下面的比较才有意义
+  REQUIRE(rorKept.size() < in.pointCount());
+
+  for (int threads : {1, 3, 8}) {
+    CAPTURE(threads);
+    test::OpCall c;
+    c.threads = threads;
+    c.inputs["cloud"] = cloud;
+    REQUIRE(c.run("filter.statistical_outlier", {{"meanK", Value::integer(30)}, {"stddevMul", Value::number(1.0)}}).ok);
+    CHECK(keptOf(c) == sorKept);
+    REQUIRE(c.run("filter.radius_outlier", {{"radius", Value::number(0.05)}, {"minNeighbors", Value::integer(5)}}).ok);
+    CHECK(keptOf(c) == rorKept);
+
+    REQUIRE(c.run("features.normals", {{"kSearch", Value::integer(20)}}).ok);
+    const PointCloud& got = *c.out("cloud").asCloud();
+    REQUIRE(got.normals.size() == in.pointCount() * 3);
+    float worst = 0.0f;
+    for (std::size_t i = 0; i < in.pointCount(); ++i) {
+      const pcl::Normal& r = ref[i];
+      for (int a = 0; a < 3; ++a) {
+        // 邻域退化时 PCL 填 NaN，算子置零
+        const float want = std::isfinite(r.normal[a]) ? r.normal[a] : 0.0f;
+        worst = std::max(worst, std::abs(got.normals[i * 3 + static_cast<std::size_t>(a)] - want));
+      }
+    }
+    CHECK(worst == 0.0f);
+  }
+
+  // 顺带修的：flipTowardsViewpoint 关掉就不翻 —— PCL 的 NormalEstimation 不论如何都朝视点（没设就是原点）翻，
+  // 以前这个开关关了也照翻。开着时每个法线都朝着视点，关掉时朝向就是 PCA 给的那样，有正有负
+  const auto facingAway = [&](bool flip) {
+    test::OpCall c;
+    c.inputs["cloud"] = cloud;
+    REQUIRE(c.run("features.normals", {{"kSearch", Value::integer(20)}, {"flipTowardsViewpoint", Value::boolean(flip)}}).ok);
+    const PointCloud& got = *c.out("cloud").asCloud();
+    std::size_t away = 0;
+    for (std::size_t i = 0; i < in.pointCount(); ++i) {
+      const float* p = &got.xyz[i * 3];
+      const float* n = &got.normals[i * 3];
+      if (-p[0] * n[0] - p[1] * n[1] - p[2] * n[2] < 0.0f) ++away;
+    }
+    return away;
+  };
+  CHECK(facingAway(true) == 0);
+  CHECK(facingAway(false) > 0);
 }
