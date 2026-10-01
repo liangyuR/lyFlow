@@ -291,6 +291,7 @@ CLI 的 `--samples-jsonl-out` 与 `--parallel` **MCP 不提供**，逐条对照�
   [agent-tuning.md](agent-tuning.md) §3。
 - 退出码 4（用法错，比如指标路径拼错）或者根本起不来时，额外带一个 `stderr` 字段放**全文** ——
   那里面有「这张图上可用的标量路径」这样必须看全的东西。其余情况只给 `stderrTail`。
+  有没成的那几次时，`stderrTail` 是 CLI 归好类的那一行：`没成的 10 次：failed 8（io × 5、bad_param × 3）、…`。
 
 ### `perturb` 的返回
 

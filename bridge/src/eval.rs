@@ -978,6 +978,37 @@ fn human_seconds(s: f64) -> String {
     }
 }
 
+/// 没成的那几次归成一行给 stderr：「没成的 10 次：failed 8（io × 5、bad_param × 3）、validation_failed 2（unknown_op × 2）」。
+/// 逐行的错误在 stdout 的行里，而 stdout 常被重定向进文件 —— 终端上原来只有「N 次 ok」，看不出其余的为什么没成。
+/// 一行有几个错误代码就各数一次；全都 ok 时是 None。
+pub(crate) fn failure_digest(rows: &[Row]) -> Option<String> {
+    let bad: Vec<&Row> = rows.iter().filter(|r| r.status != "ok").collect();
+    if bad.is_empty() {
+        return None;
+    }
+    let mut by_status: BTreeMap<&str, (usize, BTreeMap<&str, usize>)> = BTreeMap::new();
+    for r in &bad {
+        let (n, codes) = by_status.entry(r.status.as_str()).or_default();
+        *n += 1;
+        for c in &r.errors {
+            *codes.entry(c.as_str()).or_default() += 1;
+        }
+    }
+    let parts: Vec<String> = by_status
+        .iter()
+        .map(|(status, (n, codes))| {
+            if codes.is_empty() {
+                return format!("{status} {n}");
+            }
+            let mut list: Vec<(&str, usize)> = codes.iter().map(|(c, k)| (*c, *k)).collect();
+            list.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+            let codes: Vec<String> = list.iter().map(|(c, k)| format!("{c} × {k}")).collect();
+            format!("{status} {n}（{}）", codes.join("、"))
+        })
+        .collect();
+    Some(format!("没成的 {} 次：{}", bad.len(), parts.join("、")))
+}
+
 /// 一行的状态对应的退出码。
 fn row_exit(status: &str) -> i32 {
     match status {
@@ -1698,6 +1729,9 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             ok
         ),
     );
+    if let Some(digest) = failure_digest(&rows) {
+        line(err, &digest);
+    }
     code
 }
 
@@ -2182,6 +2216,33 @@ mod tests {
         assert_eq!(human_seconds(42.4), "42 秒");
         assert_eq!(human_seconds(125.0), "2 分 5 秒");
         assert_eq!(human_seconds(7300.0), "2 小时 1 分");
+    }
+
+    #[test]
+    fn the_failure_digest_groups_by_status_then_code() {
+        let row = |status: &str, errors: &[&str]| Row {
+            param_set: 0,
+            sample: 0,
+            status: status.to_string(),
+            metrics: Vec::new(),
+            errors: errors.iter().map(|e| e.to_string()).collect(),
+            duration_ms: 0.0,
+            skipped: Vec::new(),
+            summary: None,
+        };
+        assert_eq!(failure_digest(&[row("ok", &[])]), None);
+        let rows = [
+            row("ok", &[]),
+            row("failed", &["io"]),
+            row("failed", &["bad_param", "io"]),
+            row("failed", &["io"]),
+            row("validation_failed", &["unknown_op"]),
+            row("cancelled", &[]),
+        ];
+        assert_eq!(
+            failure_digest(&rows).as_deref(),
+            Some("没成的 5 次：cancelled 1、failed 3（io × 3、bad_param × 1）、validation_failed 1（unknown_op × 1）")
+        );
     }
 
     /// 第 k 个任务睡 (n - k) × 2 ms：越靠后的越先做完，交出的顺序仍是 0..n。

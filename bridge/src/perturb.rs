@@ -777,6 +777,9 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             rows.len()
         ),
     );
+    if let Some(digest) = crate::eval::failure_digest(&rows) {
+        line(err, &digest);
+    }
     worst
 }
 
