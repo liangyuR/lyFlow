@@ -8,7 +8,7 @@
 
 | 层 | 命令 | 规模 | 跑一遍 |
 |---|---|---|---|
-| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 179 例；`LYFLOW_PACKS=dts` 187 例；`LYFLOW_PACKS=gap;dts` 269 例 | 分钟级（含编译） |
+| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 180 例；`LYFLOW_PACKS=dts` 188 例；`LYFLOW_PACKS=gap;dts` 270 例 | 分钟级（含编译） |
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 147（纯平台构建 89 通过 / 58 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
 | editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 86 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 31 | 秒级 |
@@ -26,7 +26,7 @@
 
 | 功能 | 主要测试 |
 |---|---|
-| 执行器、事件 seq、取消、并发、缓存复用（含落盘缓存：编解码往返、清空内存后命中、指纹隔离、坏文件） | `core/tests/test_executor.cpp`、`test_cache.cpp`、`test_flow.cpp`（并发 8 run、取消 100 次）；跨进程与 `--cache-dir` / `LYFLOW_CACHE_DIR` / `lyflow cache info|clear` 在 `bridge/tests/disk_cache.rs`（落盘开关是进程级的，不放进和别的用例同进程的单元测试） |
+| 执行器、事件 seq、取消、并发（线程预算按整个进程在算的节点数分：`test.budget`）、缓存复用（含落盘缓存：编解码往返、清空内存后命中、指纹隔离、坏文件） | `core/tests/test_executor.cpp`、`test_cache.cpp`、`test_flow.cpp`（并发 8 run、取消 100 次）；跨进程与 `--cache-dir` / `LYFLOW_CACHE_DIR` / `lyflow cache info|clear` 在 `bridge/tests/disk_cache.rs`（落盘开关是进程级的，不放进和别的用例同进程的单元测试） |
 | 抢占不阻塞（ADR-0027：立即返回、同一时刻最多一个在算、只留最新请求、排队的被取消 / 起不来时补发 run_finished；重扫库目录与热重载的维护窗口：等被停掉的那个退出、期间的请求只排队、窗口不交错） | 状态机在 `bridge/src/execution.rs`（假 run 可控地「卡住」）；真 app 里重扫库目录不卡主线程、期间的运行排到重扫之后在 e2e `noderun.mjs` 的 `suiteLibraryRescanStalled`；编辑器怎么接（视图按 `resultRunId` 取、带 targets 的等 `run_started` 才换，从没开跑就收场时被抢占那次在算的节点落成已取消）在 `packages/editor/test/execution-store.test.mjs`；真 app 里抢占一个卡住的运行不卡主线程在 e2e `noderun.mjs` 的 `suitePreemptStalled`（不理取消的测试算子 `test.stall`，`core/tests/stall_test_op.h`，`LYFLOW_TEST_OPS` 注册） |
 | 计划、cacheKey、Run to node / 选中 | `core/tests/test_plan.cpp`、`test_noderun.cpp`（含修订二的 `attachedStale`：挂上一次的旧结果）；e2e `m3.mjs`（Shift+F5）、`noderun.mjs`（右键「运行到此节点」，运行中可点 = 抢占；改上游后下游过期但还能看） |
 | 子图内部出错的定位（子图节点上写明内部节点、检查器里逐条写明来源，点它 / 点诊断 / 点工具栏 error / F8 打开到那一层并标红框；F8 / Shift+F8 在出错的节点之间跳） | 路径解析、聚合与跳转顺序在 `packages/editor/test/execution-store.test.mjs`；真界面在 e2e `m4.mjs` 的 `suiteInnerError` |

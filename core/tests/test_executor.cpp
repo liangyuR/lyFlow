@@ -7,6 +7,7 @@
 #include <chrono>
 #include <thread>
 
+#include "exec/executor.h"
 #include "exec/result_store.h"
 #include "helpers.h"
 #include "lyflow/operator.h"
@@ -249,6 +250,28 @@ TEST_CASE("取消：在第 k 个节点生效，join 在 1 秒内返回") {
   CHECK(log.finalState("b") == "cancelled");
   CHECK(log.finalState("p") == "cancelled");
   CHECK(log.runStatus() == "cancelled");
+}
+
+TEST_CASE("线程预算按整个进程里在算的节点数分：另一次运行还占着一个节点时只拿一半") {
+  ensureTestOps();
+  const Json probe = makeGraph({{"t", "test.budget"}}, {});
+  REQUIRE(runGraph(probe).runStatus() == "ok");
+  CHECK(ops::lastBudget().load() == exec::threadBudgetFor(1));  // 只有它在算：全部核
+
+  // 另一次运行卡在 test.block 里（编辑器里被抢占、还在收尾的那次就是这样，eval --jobs 也是）
+  ops::blockEntered().store(false);
+  Session other(makeGraph({{"g", "gen.synthetic", kSmall}, {"b", "test.block"}},
+                          {{"g.cloud", "b.cloud"}}));
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (!ops::blockEntered().load() && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  REQUIRE(ops::blockEntered().load());
+  REQUIRE(runGraph(probe).runStatus() == "ok");
+  CHECK(ops::lastBudget().load() == exec::threadBudgetFor(2));
+
+  other.run().cancel();
+  CHECK(other.wait().runStatus() == "cancelled");
 }
 
 TEST_CASE("Run to node：只执行目标的上游闭包") {

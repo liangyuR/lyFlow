@@ -94,7 +94,8 @@ class ExecContext {
   /// 这里给需要自己拼路径的算子用。
   virtual const std::filesystem::path& baseDir() const = 0;
 
-  /// 本节点可以自己开几个线程：核数按「本节点开跑那一刻同时在算的节点数」分（core/README.md「并行」）。
+  /// 本节点可以自己开几个线程：核数按「本节点开跑那一刻整个进程里同时在算的节点数」分
+  /// （跨运行都算，core/README.md「并行」）。
   /// 算子内部再按核数开一遍就是超订。std-pointcloud 的法线与两个离群点滤波按它分段并行做近邻搜索。
   virtual int threadBudget() const = 0;
 };

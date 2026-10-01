@@ -2,6 +2,7 @@
 #include "exec/executor.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <ctime>
@@ -26,6 +27,23 @@ namespace lyflow::exec {
 namespace {
 
 using Clock = std::chrono::steady_clock;
+
+/// 整个进程此刻在算的节点数，跨所有 Run。线程预算按它分（threadBudgetNow）：编辑器里被抢占、
+/// 还在收尾的那次和新的一次同时在算，`lyflow eval --jobs` 同时跑好几次 —— 只按自己这次运行的
+/// 节点数分的话，每次运行都以为整台机器归它，几次加起来就是核数的好几倍。
+std::atomic<int>& runningNodes() {
+  static std::atomic<int> count{0};
+  return count;
+}
+
+/// 一个节点在算的这段时间计进 runningNodes。
+class CountedAsRunning {
+ public:
+  CountedAsRunning() { runningNodes().fetch_add(1, std::memory_order_relaxed); }
+  ~CountedAsRunning() { runningNodes().fetch_sub(1, std::memory_order_relaxed); }
+  CountedAsRunning(const CountedAsRunning&) = delete;
+  CountedAsRunning& operator=(const CountedAsRunning&) = delete;
+};
 
 double msSince(Clock::time_point t0) {
   return std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
@@ -693,7 +711,10 @@ class Scheduler {
         inflight_ += 1;
       }
 
-      const Verdict v = execute(index);
+      const Verdict v = [&] {
+        const CountedAsRunning counted;
+        return execute(index);
+      }();
       finish(index, v, /*releaseDownstream=*/true);
       cv_.notify_all();
     }
@@ -716,14 +737,10 @@ class Scheduler {
     }
   }
 
-  /// 本节点此刻能开几个线程（ExecContext::threadBudget）：核数按此刻在算的节点数分。
+  /// 本节点此刻能开几个线程（ExecContext::threadBudget）：核数按整个进程此刻在算的节点数分
+  /// （runningNodes，跨 Run），不只是这次运行里的。
   int threadBudgetNow() const {
-    int running = 1;
-    {
-      std::lock_guard<std::mutex> lock(mu_);
-      running = inflight_;
-    }
-    return threadBudgetFor(running);
+    return threadBudgetFor(runningNodes().load(std::memory_order_relaxed));
   }
 
   Verdict verdictOf(std::size_t i) const {

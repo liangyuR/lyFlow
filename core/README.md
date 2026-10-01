@@ -156,6 +156,8 @@ cmake --build build/core
   加上 `ops::Ticker` 在循环里查 —— 所以取消的响应时间是「最慢的那个算子的一次轮询」。
 - **`ctx.threadBudget()` = max(1, cores / 此刻在算的节点数)**，在节点开跑那一刻现算：一条直链上同一时刻
   只有一个节点在算，它就拿到全部核（以前按 maxParallel 定死，8 核机器上永远只有 2 个）。
+  「在算的节点」数的是整个进程、跨所有 Run：编辑器里被抢占、还在收尾的那次和新的一次，
+  `lyflow eval --jobs` 同时跑的几次，按各自的节点数分的话每次都以为整台机器归它。
   `features.normals` 与两个离群点滤波按它把逐点的近邻搜索分段并行（`packs/std-pointcloud/ops/parallel.h`）——
   vcpkg 的 PCL 没开 OpenMP，`NormalEstimationOMP` 这类在这里也是单线程，所以是自己切段，不是换 OMP 版本。
   逐点的结果写各自的格子；要跨点汇总的量（统计离群点的均值与方差）照原来的顺序单线程累加，结果与线程数无关。
