@@ -32,6 +32,12 @@ function inTextField(target: EventTarget | null): boolean {
   );
 }
 
+/** 页面上选着一段（不全是空白的）文字。 */
+function hasTextSelection(doc: Document): boolean {
+  const sel = doc.getSelection();
+  return sel != null && !sel.isCollapsed && sel.toString().trim() !== "";
+}
+
 export interface ShortcutHandlers {
   onSave: () => void;
   onSaveAs: () => void;
@@ -54,6 +60,17 @@ export function useShortcuts(
   root: RefObject<HTMLElement | null>,
 ) {
   useEffect(() => {
+    // 挂在编辑器根元素上（A2-3）：宿主页面里的其它输入不该被我们拦截。
+    const el = root.current;
+    if (!el) return;
+    const owner = el.ownerDocument;
+    // 最近一次按下鼠标落没落在画布上。没落在画布上、又选着一段文字（日志、诊断、文档……）时，
+    // Ctrl+C / Ctrl+X 归浏览器：要的是那段文字。以前复制走的是选中的节点，Ctrl+X 还把节点删了
+    let pointerOnCanvas = true;
+    const onPointerDown = (e: PointerEvent) => {
+      pointerOnCanvas = e.target instanceof Element && e.target.closest(".react-flow") !== null;
+    };
+
     const onKeyDown = (e: KeyboardEvent) => {
       const graph = useGraphStore.getState();
       const ui = useUiStore.getState();
@@ -145,6 +162,7 @@ export function useShortcuts(
         case "cut": {
           const ids = ui.selectedNodes;
           if (ids.size === 0) return;
+          if (!pointerOnCanvas && hasTextSelection(owner)) return;
           e.preventDefault();
           const doc = graph.doc;
           // 从当前这一层取：选区是本层的 id。以前取的是顶层的 doc.nodes —— 在子图里复制要么一个都没有，
@@ -312,10 +330,6 @@ export function useShortcuts(
       else ui.showToast("剪贴板里的算子在当前 core 里不存在", "warn");
     };
 
-    // 挂在编辑器根元素上（A2-3）：宿主页面里的其它输入不该被我们拦截。
-    const el = root.current;
-    if (!el) return;
-    const owner = el.ownerDocument;
     // 焦点掉回 body（刚才那个输入框被卸载了之类）时谁都收不到键，
     // 这一条只接管「无主」的按键，宿主自己的控件仍然不受影响。
     const onOrphanKeyDown = (e: KeyboardEvent) => {
@@ -330,11 +344,13 @@ export function useShortcuts(
     owner.addEventListener("keydown", onOrphanKeyDown);
     el.addEventListener("paste", onPaste);
     owner.addEventListener("paste", onOrphanPaste);
+    owner.addEventListener("pointerdown", onPointerDown, true);
     return () => {
       el.removeEventListener("keydown", onKeyDown);
       owner.removeEventListener("keydown", onOrphanKeyDown);
       el.removeEventListener("paste", onPaste);
       owner.removeEventListener("paste", onOrphanPaste);
+      owner.removeEventListener("pointerdown", onPointerDown, true);
     };
   }, [handlers, root]);
 }

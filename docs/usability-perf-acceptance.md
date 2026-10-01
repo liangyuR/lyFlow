@@ -17,6 +17,7 @@
 | 复制粘贴走系统剪贴板 | 跨窗口、重开之后都粘得进来，整张图的 JSON 也认；静音的粘出来还是静音的。Ctrl+V 读 paste 事件里的内容：`readText` 在 WebView2 里会弹「想要查看剪贴板」的框（第一版就是这么写的，真按 Ctrl+V 会弹框，e2e 里因为打了桩没看出来） | `autoconnect.test.mjs`；e2e `m3.mjs` 的 `suiteEditing`（断言没调 `readText`） |
 | 参数菜单「粘贴值」不弹框 | 桌面壳自己开主窗口（`tauri.conf.json` 里 `create: false`），放行剪贴板读取 | e2e `params_p1.mjs` 的 `suiteIncludeTopLevel`（真 `readText` 不挂住、粘贴值写进参数） |
 | 子图里复制 / 剪切 / 全选 / 静音 / 折叠 | 取当前这一层的节点。以前取顶层：复制拿不到，剪切删了本层的节点、剪贴板里却是错的；Ctrl+A 选上的是这一层没有的 id；Ctrl+M / Ctrl+E 永远是「打开」，再按一次取消不了 | e2e `m4.mjs` 的 `suiteNested`（去掉修复时这几条失败） |
+| 选着文字时的 Ctrl+C / Ctrl+X | 刚在日志、诊断里选了一段文字（最近一次按鼠标不在画布上）：归浏览器，复制的是那段文字。以前复制的是选中的节点，Ctrl+X 还把节点删了 | e2e `m4.mjs` 的 `suiteNested`（去掉修复时失败：节点进了剪贴板、被剪掉） |
 | 复制带绑定的节点 | 被图参数绑定的参数在副本上写成此刻的有效值（Ctrl+C 与 Ctrl+D；以前回到算子默认值，副本的行为悄悄变了） | `graph-params-actions.test.mjs` |
 | 撤销 / 重做的提示 | toast 说撤掉的是哪一步 | `graph-params-actions.test.mjs`；e2e `m4.mjs` 的 `suiteLibrary` |
 | F 适配选中 | 把视图对准选中的节点（Ctrl+Shift+F 仍是全图） | e2e `m3.mjs` 的 `suiteEditing` |

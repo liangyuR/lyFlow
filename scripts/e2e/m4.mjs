@@ -11,6 +11,7 @@ import { ROOT } from "./harness.mjs";
 import {
   buildGraph,
   centerOf,
+  clickAt,
   dragMouse,
   lit,
   mustOk,
@@ -377,6 +378,77 @@ async function suiteNested(cdp, report) {
     const s = window.__lyflow.stores.ui.getState();
     return { path: s.path.map((p) => p.nodeId), selected: [...s.selectedNodes] };
   `), { path: [outer.nodeId, inner.nodeId], selected: [ids.sor] });
+  // 在日志里点一下、选上那一行字，再按 Ctrl+C / Ctrl+X：归浏览器（复制的是那段文字），
+  // 选中的节点不进剪贴板、也不被剪掉。测试自己的 copy / cut 监听取消默认动作，不动用户的剪贴板
+  await stubClipboard(cdp);
+  await cdp.eval(`
+    [...document.querySelectorAll('[data-testid="drawer-logs"] .drawer__log')]
+      .find((r) => r.querySelector('.drawer__log-node')?.title === ${lit(sorPath)})
+      ?.querySelector('.drawer__log-text')?.setAttribute('data-ly-probe', '');
+    return true;
+  `);
+  const logText = await centerOf(cdp, "[data-ly-probe]");
+  mustOk(logText != null, "日志里那一行的文字", logText);
+  await clickAt(cdp, logText);
+  const levelCount = () => cdp.eval(`return window.__lyflow.snapshot().level.nodes.length;`);
+  const textCopyBefore = {
+    nodes: await levelCount(),
+    app: await cdp.eval(`return JSON.stringify(window.__lyflow.stores.ui.getState().clipboard);`),
+  };
+  await cdp.eval(`
+    const t = document.querySelector('[data-ly-probe]');
+    const range = document.createRange();
+    range.selectNodeContents(t);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+    window.__lyCopyEvents = [];
+    window.__lyOnCopy = (e) => { window.__lyCopyEvents.push(e.type + ':' + getSelection().toString()); e.preventDefault(); };
+    document.addEventListener('copy', window.__lyOnCopy);
+    document.addEventListener('cut', window.__lyOnCopy);
+    return true;
+  `);
+  await pressCtrl(cdp, "c");
+  await sleep(150);
+  await pressCtrl(cdp, "x");
+  await sleep(150);
+  const textCopy = await cdp.eval(`
+    document.removeEventListener('copy', window.__lyOnCopy);
+    document.removeEventListener('cut', window.__lyOnCopy);
+    getSelection().removeAllRanges();
+    document.querySelector('[data-ly-probe]')?.removeAttribute('data-ly-probe');
+    return { events: window.__lyCopyEvents, written: window.__lyClip,
+             app: JSON.stringify(window.__lyflow.stores.ui.getState().clipboard) };
+  `);
+  report.ok("日志里选着一段文字时 Ctrl+C / Ctrl+X 归浏览器：复制的是那段文字，节点没进剪贴板、也没被剪掉",
+    textCopy.events.length === 2 && /^copy:.*离群点/.test(textCopy.events[0]) && textCopy.written === "" &&
+      textCopy.app === textCopyBefore.app && (await levelCount()) === textCopyBefore.nodes,
+    JSON.stringify({ ...textCopy, before: textCopyBefore }));
+  // 再选上那段文字、然后在画布上点那个节点：点节点（拖也一样）不清掉旧的文字选区（点空白处才清），
+  // 这时 Ctrl+C 要的是节点 —— 所以不能只看「页面上有没有选区」
+  await cdp.eval(`
+    const t = [...document.querySelectorAll('[data-testid="drawer-logs"] .drawer__log')]
+      .find((r) => r.querySelector('.drawer__log-node')?.title === ${lit(sorPath)})?.querySelector('.drawer__log-text');
+    const range = document.createRange();
+    range.selectNodeContents(t);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+    return true;
+  `);
+  const sorOnCanvas = await centerOf(cdp, `[data-testid="node-${ids.sor}"]`);
+  mustOk(sorOnCanvas != null, "画布上的 sor 节点", sorOnCanvas);
+  await clickAt(cdp, sorOnCanvas);
+  await pressCtrl(cdp, "c");
+  await sleep(150);
+  const afterNodeClick = await cdp.eval(`
+    const stale = getSelection().toString();
+    getSelection().removeAllRanges();
+    let ops = null;
+    try { ops = JSON.parse(window.__lyClip).nodes.map((n) => n.op); } catch {}
+    return { stale: /离群点/.test(stale), ops };
+  `);
+  await restoreClipboard(cdp);
+  report.ok("文字还选着、但刚在画布上点了节点：Ctrl+C 复制的是节点", afterNodeClick.stale &&
+    JSON.stringify(afterNodeClick.ops) === JSON.stringify(["filter.statistical_outlier"]), JSON.stringify(afterNodeClick));
   await cdp.eval(`const u = window.__lyflow.stores.ui.getState(); u.exitTo(0); u.toggleDrawer(); return true;`);
 
   const keys1 = JSON.stringify((await snapshot(cdp)).cache.ranWith);
