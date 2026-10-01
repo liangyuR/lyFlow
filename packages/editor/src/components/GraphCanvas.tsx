@@ -697,6 +697,24 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
   const onEdgeMouseLeave = useCallback(() => {
     useUiStore.getState().setHoverEdge(null);
   }, []);
+  // 节点 hover 时淡化不相关的边（H2）：画布上挂一个 data-node-hover，CSS 用 stroke-opacity 统一淡化，
+  // 只有相关的那几条边自己重渲染（FlowEdge）。不经 React state：这只是一个视觉开关，
+  // 开关一次 GraphCanvas 整个重渲染不值得；状态没变时也不碰 DOM（每次写属性都会让样式重算）
+  useEffect(() => {
+    let on = false;
+    const apply = (s: { hoverNodeId: string | null; pendingFrom: unknown; hoverPaused: boolean }) => {
+      const next = s.hoverNodeId != null && !s.pendingFrom && !s.hoverPaused;
+      if (next === on) return;
+      on = next;
+      const el = wrapper.current;
+      if (!el) return;
+      if (on) el.setAttribute("data-node-hover", "");
+      else el.removeAttribute("data-node-hover");
+    };
+    apply(useUiStore.getState());
+    return useUiStore.subscribe(apply);
+  }, []);
+
   // 框选期间不淡化（H2）：拖出来的框会扫过一大片节点
   const onSelectionStart = useCallback(() => {
     useUiStore.getState().setHoverPaused(true);

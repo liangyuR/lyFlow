@@ -61,6 +61,10 @@ pnpm e2e --only m8b:suiteImagePreviewScale,noderun   # 只跑点名的（两种�
 分组按函数名挑，所以 `xxxSuites` 数组里放具名函数，不放匿名的箭头函数（name 是空串，`--only` 挑不出来；
 几段共用一个夹具时包一层具名的，见 `m4.mjs` 的 `suiteCompose`）。
 
+挑出来的组照全量里的先后跑，但中间少了别的组，前一组留下的状态（视口缩放、hover 之类）会直接落到后一组头上。
+已知的一处：`--only m4:suiteBigGraph,motion` 时 motion 的验收 2（平移之后有新节点进入视口）与验收 8 的拖连线那条会挂，
+单跑 motion、或者全量（中间隔着好几个模块）都过 —— 改动之前就是这样，不是回归。
+
 调试脚本本身时，另开一个窗口跑
 
 ```bash

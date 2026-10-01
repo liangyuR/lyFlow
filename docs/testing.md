@@ -58,7 +58,7 @@
 | `lyflow eval / sweep / perturb`（值路径、样本集、轴扫描与斜率、`pointFrom` 刀口跟锚点；`--jobs` 同时跑几次：按顺序交出、停在同一行；终端里的进度行） | `bridge/src/eval/tests.rs`、`perturb.rs` 的单元测试（`--jobs` 的调度用假任务钉：`ordered_parallel_*`；进度行原地刷新、按宽度截断、关着时一个字节不写：`the_progress_line_*`；`run` 的那一行数节点：`cli/tests.rs` 的 `the_run_progress_line_*`；没成的那几次在 stderr 上归成一行：`the_failure_digest_*`）；`cli/tests.rs` 的 `eval_crosses_parameter_sets_with_samples`（`--jobs 4` 与一次接一次逐行相同）、`eval_with_jobs_stops_at_the_same_row_as_without`；`bridge/src/cli/tests.rs` 的 `perturb_*` 集成测试（`crop_chain` 小图：固定刀口斜率 > 0、刀口跟锚点挪走后不响应、取不到锚点判失败）；MCP `packages/mcp/test/argv.test.ts` |
 | 连线查看器 Edge Peek | e2e `peek.mjs`；窗口上限与自动关窗的提示 `packages/editor/test/peek-store.test.mjs`；图像按段取齐（超过 16 MB 分几段要）`packages/editor/test/image-fetch.test.mjs` |
 | 按输出类型选视图（主预览的点云 / 值） | `packages/editor/test/view-rule.test.mjs`；e2e `gap.mjs` 的「量测输出」组（`transform.make` 显示值、手动选只对当时的节点有效） |
-| 动效、hover、端点对齐 | e2e `motion.mjs`、`noderun.mjs` |
+| 动效、hover、端点对齐 | e2e `motion.mjs`、`noderun.mjs`；300 节点的图上真拖一个节点（先确认中心点露在画布上、拖完确实挪了）与鼠标扫过一片节点时的帧率在 `m4.mjs` 的 `suiteBigGraph` |
 | 节点运行按钮；右键「选中上游 / 下游」 | 图结构（智能运行的上游闭包、选中上 / 下游的闭包）在 `packages/editor/test/node-run.test.mjs`；按钮在 e2e `noderun.mjs`；右键菜单的选中在 e2e `m4.mjs` 的 `suiteCompose` 开头 |
 | 分栏、拖放配置（dragDropEnabled） | e2e `params_p2.mjs`（右侧分栏）、`m8b.mjs` 的算子面板组 |
 | 图结构编辑 `lyflow patch`（七个动作、幂等、改坏不落盘） | `bridge/src/patch/tests.rs` |

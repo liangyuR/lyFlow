@@ -69,7 +69,7 @@ React Flow 用 `getBoundingClientRect` 量端口相对节点包装层的位置�
 | # | 决定 |
 |---|---|
 | H1 | **节点 hover**：阴影加深 + 边框提亮（CSS transition，不位移，见 A5）|
-| H2 | **节点 hover 高亮关联边**：`ui` store 加 `hoverNodeId`（经 React Flow 的 `onNodeMouseEnter/Leave`）。与它相连的边 `is-related`（加粗、提亮），其余边 `is-dimmed`（降低不透明度）。拖连线（`pendingFrom`）、拖节点、框选期间不做淡化 |
+| H2 | **节点 hover 高亮关联边**：`ui` store 加 `hoverNodeId`（经 React Flow 的 `onNodeMouseEnter/Leave`）。与它相连的边 `is-related`（加粗、提亮），其余边淡下去（降低 stroke-opacity；2026-10-02 起由画布上的 `data-node-hover` 统一做，不再是每条边一个 `is-dimmed` —— 那样每次 hover 几百条边一起重渲染、各开一个 opacity 效果节点，300 节点的图上鼠标扫过只剩十几帧）。拖连线（`pendingFrom`）、拖节点、框选期间不做淡化 |
 | H3 | **边 hover**：边加粗 + 同色光晕；`ui` store 加 `hoverEdge`（两端的 node/port），两端端口加 `node-port--edge-end`、两端节点加 `is-edge-end`，都用 CSS 高亮 |
 | H4 | **端口 hover**：圆点的 `::before` 视觉层以圆心放大到 1.35 倍（圆点本身不变换，见 A6）+ 类型色光晕（`box-shadow` 用端口自己的颜色，经 CSS 变量传入），标签文字提亮。与拖线期间的 `compatible/incompatible` 样式共存，后者优先 |
 | H5 | hover 状态是纯 UI 状态，不进 GraphDoc、不进撤销栈 |
@@ -89,7 +89,7 @@ React Flow 用 `getBoundingClientRect` 量端口相对节点包装层的位置�
 5. **连线生长**：`connect` 后新边带生长标记，结束后路径完整（`pathLength` 终值 1 / 无残留 dasharray；惰性边的 dasharray 恢复为 `6 4`）。
 6. **流动**：跑一张目标节点会运行足够久的图（找现有可控耗时的算子或测试算子），目标节点 running 时其入边 `data-flowing="1"`，其余边没有；运行结束后全图没有 `data-flowing="1"`。
 7. **状态反馈**：一个节点从 running 到 done 恰有一次 done 闪光标记；到 error 时 `.node__head` 在抖动期间有非零 `translateX`、`.node` 本身始终没有 transform；重新挂载（例如进出子图）已是 done 的节点不闪。
-8. **hover**：真鼠标移到节点 A 上 → A 的所有边 `is-related`、其余 `is-dimmed`；移开全部清除。移到边上 → 两端端口有 `node-port--edge-end`、两端节点有 `is-edge-end`。移到端口 → 圆点计算后的缩放 > 1、`box-shadow` 非 none。拖连线途中经过节点，不出现 `is-dimmed`。
+8. **hover**：真鼠标移到节点 A 上 → A 的所有边 `is-related`、其余淡下去（计算出来的 stroke-opacity < 0.5）；移开全部清除。移到边上 → 两端端口有 `node-port--edge-end`、两端节点有 `is-edge-end`。移到端口 → 圆点计算后的缩放 > 1、`box-shadow` 非 none。拖连线途中经过节点，不淡化（画布上不出现 `data-node-hover`）。
 9. **关动效**：CDP `Emulation.setEmulatedMedia` 设 `prefers-reduced-motion: reduce` 后，第 2、3、5 条的标记都不出现（或时长为 0），第 6 条的边仍有 `data-flowing="1"` 但计算后的 `animation-name` 为 `none`。`animations={false}` 在 `examples/host-react` 或 e2e 能触达的入口至少验证一次。
 10. **不回归**：带 `LYFLOW_PACKS` 跑全部 e2e 分组全绿（尤其 M4 的大图性能阈值不变、M3 的连线手感）；hover/流动引入的重渲染不让大图性能组超阈值。
 

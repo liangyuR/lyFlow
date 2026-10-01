@@ -52,11 +52,14 @@ export function FlowEdge({
 
   // 数据流动（E3）：目标节点 running 的那段时间，数据正被下游消费。只订阅那一个状态串。
   const flowing = useNodeState(target) === "running";
-  // 节点 hover 高亮关联边（H2）。拖连线、拖节点、框选期间不淡化。
-  const relation = useUiStore((s) => {
+  // 节点 hover 高亮关联边（H2）。这里只认「相关」：不相关的那些由画布上的 data-node-hover 统一淡化
+  // （GraphCanvas 与 styles.motion.css）。以前每条边都订阅成 related / dimmed，hover 一换就是几百条边
+  // 一起重渲染、一起开关 opacity（每条一个合成效果节点），300 节点的图上鼠标扫过去只剩十几帧。
+  // 拖连线、拖节点、框选期间不高亮也不淡化。
+  const related = useUiStore((s) => {
     const hover = s.hoverNodeId;
-    if (!hover || s.pendingFrom || s.hoverPaused) return "";
-    return hover === source || hover === target ? "related" : "dimmed";
+    if (!hover || s.pendingFrom || s.hoverPaused) return false;
+    return hover === source || hover === target;
   });
 
   const color = typeof style?.stroke === "string" ? style.stroke : undefined;
@@ -65,7 +68,7 @@ export function FlowEdge({
   const classes = [
     "ly-edge",
     flowing ? "is-flowing" : "",
-    relation ? `is-${relation}` : "",
+    related ? "is-related" : "",
     lazy ? "is-lazy" : "",
   ]
     .filter(Boolean)
@@ -76,7 +79,7 @@ export function FlowEdge({
       className={classes}
       data-flowing={flowing ? "1" : undefined}
       data-growing={growing ? "1" : undefined}
-      data-relation={relation || undefined}
+      data-relation={related ? "related" : undefined}
       // hover 光晕要用边自己的颜色（H3）：经变量交给 CSS
       style={color ? ({ ["--lyflow-edge-color" as string]: color } as CSSProperties) : undefined}
     >

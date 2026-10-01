@@ -209,10 +209,8 @@
   stroke-width: 2;
   transition:
     stroke-width var(--lyflow-motion-fast) var(--lyflow-ease-out),
-    stroke var(--lyflow-motion-fast) var(--lyflow-ease-out);
-}
-.ly-edge {
-  transition: opacity var(--lyflow-motion-fast) var(--lyflow-ease-out);
+    stroke var(--lyflow-motion-fast) var(--lyflow-ease-out),
+    stroke-opacity var(--lyflow-motion-fast) var(--lyflow-ease-out);
 }
 
 /* 边 hover（H3）：加粗 + 同色光晕。颜色经 --lyflow-edge-color 从边组件传进来 */
@@ -221,12 +219,17 @@
   filter: drop-shadow(0 0 3px var(--lyflow-edge-color, var(--lyflow-accent)));
 }
 
-/* 节点 hover 高亮关联边（H2） */
+/* 节点 hover 高亮关联边（H2）。不相关的边淡化：画布上的 data-node-hover（GraphCanvas 挂）+ stroke-opacity。
+   只改画、不开新的合成效果节点 —— 以前是每条边自己 opacity: 0.22，几百条边各一个效果节点，
+   hover 一换全部重新分层，300 节点的图上鼠标扫过去十几帧 */
 .ly-edge.is-related .react-flow__edge-path {
   stroke-width: 3;
 }
-.ly-edge.is-dimmed {
-  opacity: 0.22;
+.canvas[data-node-hover] .ly-edge:not(.is-related) .react-flow__edge-path {
+  stroke-opacity: 0.22;
+}
+.canvas[data-node-hover] .ly-edge:not(.is-related) .ly-edge__flow {
+  stroke-opacity: 0.13;
 }
 
 /* 数据流动（E3）：目标节点 running 时叠一条同色半透明虚线，向目标方向走。

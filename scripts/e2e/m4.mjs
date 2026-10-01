@@ -975,17 +975,66 @@ async function suiteBigGraph(cdp, report) {
     requestAnimationFrame(tick);
     return true;
   `);
-  const grab = await centerOf(cdp, '[data-testid^="node-n_"]');
-  if (grab) {
-    await dragMouse(cdp, grab, { x: grab.x + 160, y: grab.y + 90 }, { steps: 20 });
-  }
+  // 拖的必须是中心点真落在它身上的那个节点：DOM 里第一个节点可能在画布上沿外面（被工具栏盖着），
+  // 以前就是按在工具栏上「拖」—— 节点根本没动，量的是鼠标按着扫过一片节点的 hover
+  const grab = await cdp.eval(`
+    for (const el of document.querySelectorAll('.react-flow__node')) {
+      const r = el.getBoundingClientRect();
+      const x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2);
+      const hit = document.elementFromPoint(x, y);
+      if (hit && hit.closest('.react-flow__node') === el && !hit.closest('.nodrag')) return { id: el.getAttribute('data-id'), x, y };
+    }
+    return null;
+  `);
+  mustOk(grab != null, "画布上有一个中心点露在外面的节点", grab);
+  const posOf = (id) => cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.find((n) => n.id === ${lit(id)}).ui.position;`);
+  const before = await posOf(grab.id);
+  await dragMouse(cdp, grab, { x: grab.x + 160, y: grab.y + 90 }, { steps: 20 });
   const fps = await cdp.eval(`
     window.__m4fps.stop = true;
     const f = window.__m4fps.frames.slice(3).sort((a, b) => a - b);
     if (f.length === 0) return null;
     return Math.round(1000 / f[Math.floor(f.length / 2)]);
   `);
+  const after = await posOf(grab.id);
+  report.ok("拖的那个节点真的挪了", after.x !== before.x || after.y !== before.y, JSON.stringify({ before, after }));
   report.ok(`拖动时的帧率 ${fps} fps ≥ 30`, fps != null && fps >= 30, `${fps} fps`);
+
+  // 不按键从画布左上扫到右下，hover 一路进出几十个节点：以前每进出一次几百条边各自开关 opacity
+  // （每条一个合成效果节点），只剩十几帧；现在淡化由画布上一个属性统一做（styles.motion.css）
+  const box = await cdp.eval(`const r = document.querySelector('.react-flow__pane').getBoundingClientRect();
+    return { x: r.left, y: r.top, w: r.width, h: r.height };`);
+  await cdp.eval(`
+    window.__m4fps = { frames: [], last: performance.now(), stop: false };
+    const tick = () => {
+      const now = performance.now();
+      window.__m4fps.frames.push(now - window.__m4fps.last);
+      window.__m4fps.last = now;
+      if (!window.__m4fps.stop) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    return true;
+  `);
+  for (let i = 0; i <= 40; i += 1) {
+    const t = i / 40;
+    await cdp.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: Math.round(box.x + box.w * (0.25 + 0.5 * t)),
+      y: Math.round(box.y + box.h * (0.15 + 0.7 * t)),
+      buttons: 0,
+    });
+    await sleep(12);
+  }
+  // 挪出画布再收尾：别把 hover 留给下一组
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: Math.round(box.x + box.w / 2), y: Math.round(box.y) - 8, buttons: 0 });
+  await sleep(150);
+  const hoverFps = await cdp.eval(`
+    window.__m4fps.stop = true;
+    const f = window.__m4fps.frames.slice(3).sort((a, b) => a - b);
+    if (f.length === 0) return null;
+    return Math.round(1000 / f[Math.floor(f.length / 2)]);
+  `);
+  report.ok(`鼠标扫过 300 节点的图时的帧率 ${hoverFps} fps ≥ 20（修前 14 上下）`, hoverFps != null && hoverFps >= 20, `${hoverFps} fps`);
 
   // 事件合并：一次运行下来 store 的更新次数远少于事件数
   await newDoc(cdp);
