@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { createMappingCache, toReactFlow } from "../src/lib/mapping.ts";
-import { canConnect, compatibleSources, compatibleTargets, inferAnyTypes, wouldCreateCycle } from "../src/lib/typecheck.ts";
+import { canConnect, compatibleSources, compatibleTargets, dropOnNode, inferAnyTypes, wouldCreateCycle } from "../src/lib/typecheck.ts";
 
 const port = (name, type) => ({ name, type, label: name, doc: "", required: true });
 const op = (id, inputs, outputs) => ({ id, label: id, inputs, outputs, params: [] });
@@ -97,6 +97,28 @@ test("compatibleTargets / compatibleSources：拖线时置灰与高亮的那张�
   // 往 v3 的输入拖回去找源：点云类的输出都行（XYZI 可当 PointCloud 用；r2 推成了 PointCloud）
   const sources = [...compatibleSources(ctx, doc, { node: "v3", port: "cloud" })].sort();
   assert.deepEqual(sources, ["g:cloud", "gi:cloud", "r1:out", "r2:out", "v1:cloud", "v2:cloud"]);
+});
+
+test("dropOnNode：拖线松在节点的身子上 —— 恰好一个能接就接它，多个提示对准，接不上说为什么，松回自己不动", () => {
+  // 加一个两路输入的 m（合并点云那种）
+  const mctx = { ...ctx, operatorsById: new Map([...ctx.operatorsById, ["merge", op("merge", [port("a", "PointCloud"), port("b", "PointCloud")], [port("cloud", "PointCloud")])]]) };
+  const mdoc = { ...doc, nodes: [...doc.nodes, node("m", "merge")] };
+  const P = (n, p) => ({ node: n, port: p });
+  const cases = [
+    // [拖的那一头, 方向, 松在谁身上, 期望]
+    [P("g", "cloud"), "output", "v3", { kind: "connect", from: P("g", "cloud"), to: P("v3", "cloud") }],
+    [P("g", "cloud"), "output", "m", { kind: "reject", reason: "merge 上有 2 个端口能接，拖到要接的那个端口上" }],
+    [P("g", "cloud"), "output", "b", { kind: "reject", reason: "接不到 box 上：类型不匹配：PointCloud → Box2D" }],
+    [P("g", "cloud"), "output", "g", { kind: "self" }],
+    [P("g", "cloud"), "output", "ghost", { kind: "none" }],
+    // 反着拖：空着的输入找源（XYZI 能当 PointCloud 用）；已经接着线的输入说清楚是单连接
+    [P("v3", "cloud"), "input", "gi", { kind: "connect", from: P("gi", "cloud"), to: P("v3", "cloud") }],
+    [P("v1", "cloud"), "input", "gi", { kind: "reject", reason: "这个输入端口已有连线（输入是单连接）：拖它的线头才是改接" }],
+    [P("v3", "cloud"), "input", "b", { kind: "reject", reason: "box 没有输出端口" }],
+  ];
+  for (const [ref, side, target, want] of cases) {
+    assert.deepEqual(dropOnNode(mctx, mdoc, ref, side, target), want, `${ref.node}.${ref.port}（${side}）→ ${target}`);
+  }
 });
 
 // 映射层（lib/mapping）与上面共用这一个夹具：连线颜色、虚线、Any 类型都是从类型推导来的

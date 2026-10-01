@@ -40,7 +40,15 @@ import {
 import { peekSourceOf } from "../lib/peekSource";
 import { defaultViewFor } from "../lib/viewRule";
 import { augmentOperators, fullId, levelOf, nodeIndex, pathIsValid } from "../lib/subgraph";
-import { canConnect, compatibleSources, compatibleTargets, inferAnyTypes, type GraphContext } from "../lib/typecheck";
+import {
+  canConnect,
+  compatibleSources,
+  compatibleTargets,
+  dropOnNode,
+  inferAnyTypes,
+  type DropOnNode,
+  type GraphContext,
+} from "../lib/typecheck";
 import { keyHint } from "../lib/keymap";
 import { evictNodeCache } from "../store/cache";
 import { useCompareStore } from "../store/compare";
@@ -142,15 +150,7 @@ function rectOf(
   return { x: p.x, y: p.y, w: size.width, h: size.height };
 }
 
-/** 拖线松在一个节点的身子上（没对准端口，React Flow 认为没接上）该怎么办。以前一律当成松在空白处、弹「添加算子」的
- *  搜索面板 —— 用户明明是想接到这个节点上。现在：这个节点上恰好一个端口能接就接它；不止一个，提示对准端口；
- *  一个都接不上，说为什么；松回自己身上什么也不做。不在节点上 = none，照旧弹搜索面板。 */
-type DropOnNode =
-  | { kind: "none" }
-  | { kind: "self" }
-  | { kind: "connect"; from: PortRef; to: PortRef }
-  | { kind: "reject"; reason: string };
-
+/** 松手的那一点落在哪个节点上，交给 dropOnNode 判（lib/typecheck）。不在节点上 = none，照旧弹搜索面板。 */
 function resolveDropOnNode(
   ctx: GraphContext,
   current: GraphDoc,
@@ -160,34 +160,9 @@ function resolveDropOnNode(
   owner: Document,
 ): DropOnNode {
   const nodeId = owner.elementFromPoint(point.x, point.y)?.closest(".react-flow__node")?.getAttribute("data-id");
-  if (!nodeId) return { kind: "none" };
-  if (nodeId === ref.node) return { kind: "self" };
-  const node = nodeIndex(current.nodes).get(nodeId);
-  const op = node ? ctx.operatorsById.get(node.op) : undefined;
-  if (!op) return { kind: "none" };
-  // 从一个已经接着线的输入端口反着拖出来的：接到谁身上都是「输入是单连接」，别说成是那个节点的问题
-  if (side === "input" && current.edges.some((e) => e.to.node === ref.node && e.to.port === ref.port)) {
-    return { kind: "reject", reason: "这个输入端口已有连线（输入是单连接）：拖它的线头才是改接" };
-  }
-  const types = inferAnyTypes(ctx, current);
-  // 拖的是输出：在这个节点的输入里找；拖的是输入（反着拖）：在它的输出里找
-  const pairs = (side === "output" ? op.inputs : op.outputs).map((p) =>
-    side === "output"
-      ? { from: ref, to: { node: nodeId, port: p.name } }
-      : { from: { node: nodeId, port: p.name }, to: ref },
-  );
-  const verdicts = pairs.map((pair) => ({ pair, verdict: canConnect(ctx, current, pair.from, pair.to, types) }));
-  const ok = verdicts.filter((v) => v.verdict.ok);
-  if (ok.length === 1) return { kind: "connect", ...ok[0]!.pair };
-  if (ok.length > 1) return { kind: "reject", reason: `${op.label} 上有 ${ok.length} 个端口能接，拖到要接的那个端口上` };
-  const first = verdicts[0]?.verdict;
-  return {
-    kind: "reject",
-    reason: first && !first.ok ? `接不到 ${op.label} 上：${first.reason}` : `${op.label} 没有${side === "output" ? "输入" : "输出"}端口`,
-  };
+  return nodeId ? dropOnNode(ctx, current, ref, side, nodeId) : { kind: "none" };
 }
 
-/** 当前层级的「像一份 doc」的视图。只认 GraphDoc 的函数都吃它。 */
 /** 空画布的提示：第一次打开就是一片空白，看不出从哪开始。三种加节点的方式都写上（算子面板拖、双击、键盘搜），
  *  不挡鼠标（双击照样落到画布上），这一层有了节点就消失。 */
 function EmptyHint({ inSubgraph }: { inSubgraph: boolean }) {
@@ -210,6 +185,7 @@ function EmptyHint({ inSubgraph }: { inSubgraph: boolean }) {
   );
 }
 
+/** 当前层级的「像一份 doc」的视图。只认 GraphDoc 的函数都吃它。 */
 function levelView(): GraphDoc {
   const doc = useGraphStore.getState().doc;
   const lvl = levelOf(doc, useUiStore.getState().path);

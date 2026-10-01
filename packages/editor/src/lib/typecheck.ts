@@ -187,6 +187,47 @@ export function compatibleTargets(
   return out;
 }
 
+/** 拖线松在一个节点的身子上（没对准端口，React Flow 认为没接上）该怎么办。以前一律当成松在空白处、弹「添加算子」的
+ *  搜索面板 —— 用户明明是想接到这个节点上。现在：这个节点上恰好一个端口能接就接它；不止一个，提示对准端口；
+ *  一个都接不上，说为什么；松回自己身上什么也不做。side 是拖的那一头：拖输出就在这个节点的输入里找，反着拖输入就在它的输出里找。 */
+export type DropOnNode =
+  | { kind: "none" }
+  | { kind: "self" }
+  | { kind: "connect"; from: PortRef; to: PortRef }
+  | { kind: "reject"; reason: string };
+
+export function dropOnNode(
+  ctx: GraphContext,
+  doc: GraphDoc,
+  ref: PortRef,
+  side: "output" | "input",
+  nodeId: string,
+): DropOnNode {
+  if (nodeId === ref.node) return { kind: "self" };
+  const node = doc.nodes.find((n) => n.id === nodeId);
+  const op = node ? ctx.operatorsById.get(node.op) : undefined;
+  if (!op) return { kind: "none" };
+  // 从一个已经接着线的输入端口反着拖出来的：接到谁身上都是「输入是单连接」，别说成是那个节点的问题
+  if (side === "input" && doc.edges.some((e) => e.to.node === ref.node && e.to.port === ref.port)) {
+    return { kind: "reject", reason: "这个输入端口已有连线（输入是单连接）：拖它的线头才是改接" };
+  }
+  const types = inferAnyTypes(ctx, doc);
+  const pairs = (side === "output" ? op.inputs : op.outputs).map((p) =>
+    side === "output"
+      ? { from: ref, to: { node: nodeId, port: p.name } }
+      : { from: { node: nodeId, port: p.name }, to: ref },
+  );
+  const verdicts = pairs.map((pair) => ({ pair, verdict: canConnect(ctx, doc, pair.from, pair.to, types) }));
+  const ok = verdicts.filter((v) => v.verdict.ok);
+  if (ok.length === 1) return { kind: "connect", ...ok[0]!.pair };
+  if (ok.length > 1) return { kind: "reject", reason: `${op.label} 上有 ${ok.length} 个端口能接，拖到要接的那个端口上` };
+  const first = verdicts[0]?.verdict;
+  return {
+    kind: "reject",
+    reason: first && !first.ok ? `接不到 ${op.label} 上：${first.reason}` : `${op.label} 没有${side === "output" ? "输入" : "输出"}端口`,
+  };
+}
+
 /** 反向：拖的是输入端口时，哪些输出端口可以当源。#20 的置灰要两个方向都覆盖。 */
 export function compatibleSources(
   ctx: GraphContext,
