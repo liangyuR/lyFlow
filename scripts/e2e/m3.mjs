@@ -1351,6 +1351,41 @@ async function suitePanels(cdp, report, ws) {
     { file: 2468, dirty: false });
   await cdp.eval(`document.activeElement?.blur(); return true;`);
 
+  // 图名框：一个字一个字地敲、回车，只记一条「重命名」撤销；再敲、按 Esc，撤回。以前每敲一个字一条撤销
+  // （中文输入法拼音没上屏的那几下也算），Esc 也不撤
+  const nameState = () => cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    return { name: g.doc.name ?? null, past: g.past.length, box: document.querySelector('[data-testid="doc-name"]').value };
+  `);
+  const n0 = await nameState();
+  await cdp.eval(`document.querySelector('[data-testid="doc-name"]').focus(); return true;`);
+  await pressKey(cdp, "a", 65, ["ctrl"]);
+  for (const ch of "门缝检测") await cdp.send("Input.insertText", { text: ch });
+  await pressKey(cdp, "Enter", 13);
+  await sleep(150);
+  const n1 = await nameState();
+  report.eq("图名框一个字一个字地敲完回车：改了名，只记一条撤销", { name: n1.name, added: n1.past - n0.past }, { name: "门缝检测", added: 1 });
+  await cdp.eval(`document.querySelector('[data-testid="doc-name"]').focus(); return true;`);
+  await pressKey(cdp, "a", 65, ["ctrl"]);
+  await cdp.send("Input.insertText", { text: "别的名字" });
+  await pressKey(cdp, "Escape", 27);
+  await sleep(150);
+  report.eq("图名框里敲了再按 Esc：撤回，名字与撤销栈都不动", await nameState(), n1);
+  // 检查器里的节点标题同一个框（CommitText）：一个字一个字地敲完回车，一条撤销
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}], []); return true;`);
+  await sleep(200);
+  const titleState = () => cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    return { title: g.doc.nodes.find((n) => n.id === ${lit(ids.gen)}).ui?.title ?? null, past: g.past.length };
+  `);
+  const t0 = await titleState();
+  await cdp.eval(`document.querySelector('[data-testid="inspector-title"]').focus(); return true;`);
+  for (const ch of "主点云") await cdp.send("Input.insertText", { text: ch });
+  await pressKey(cdp, "Enter", 13);
+  await sleep(150);
+  const t1 = await titleState();
+  report.eq("检查器里一个字一个字地敲节点标题、回车：改了名，只记一条撤销", { title: t1.title, added: t1.past - t0.past }, { title: "主点云", added: 1 });
+
   // 窗口标题
   await cdp.eval(`
     window.__lyflow.stores.graph.getState().setParam(${lit(ids.gen)}, 'seed', 9);

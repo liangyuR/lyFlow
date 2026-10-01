@@ -30,6 +30,7 @@
 | 数字框上的滚轮 | 聚焦的数字框上滚滚轮，浏览器会一格一格改它的值：点过一下框、再滚检查器 / 参数面板，参数就悄悄变了（失焦时还提交、记一条撤销）。现在滚轮先让它失焦（照常提交打了的字），这一下去滚面板 | e2e `params_p2.mjs` 的 `suiteAllTypes`（真滚轮三下；去掉时值从 42 变成 39） |
 | 控件上的快捷键 | 「打字时不拦键」把所有 input 都算成输入框：点过勾选框、拖过滑块之后焦点留在上面，Ctrl+Z、Delete、F 都没反应；现在只算打字用的那几种。算子搜索的 Tab / Space 以前在哪都响应：焦点在工具栏按钮上按 Space 弹的是算子搜索、按钮按不下去，Tab 也走不出去；现在焦点在控件上时归控件 | e2e `m3.mjs` 的 `suiteEditing`（空白处 Tab 开搜索、按钮上 Space 按下它、勾选框上 Space 再 Ctrl+Z；换回原来的写法时后两条失败） |
 | 打着字按 F5 / Ctrl+S | 数字框、文字框失焦才提交：以前打了 1234 没失焦就按 F5，跑的还是 1000；Ctrl+S 在输入框里干脆不响应。现在这四个键（F5、Shift+F5、Ctrl+S、Ctrl+Shift+S）先让那个框提交（失焦的 onBlur 是同步的）、再把焦点放回去，然后才跑 / 存 | e2e `m3.mjs`：F5 在 `suiteEditing`（查这次运行的点数）、Ctrl+S 在 `suitePanels`（查文件内容）；去掉时两条都失败 |
+| 图名、节点标题、子图名 | 工具栏的图名框、检查器里的节点标题与子图名以前 onChange 直接写 store：每敲一个字一条撤销（中文输入法拼音没上屏的那几下也算），Ctrl+Z 得一个字一个字地退，Esc 也不撤。现在共用一个失焦或回车才提交、Esc 撤回的文字框（CommitText） | e2e `m3.mjs` 的 `suitePanels`（一个字一个字地敲；换回原来的写法时四个字记了四条） |
 | 输入框里按 Esc | 打字之后按 Esc 撤回、不提交：数字框、参数的文字框、图参数的规格（配方矩阵的单元格用的是同一套控件）。以前都把打进去的提交了，还记一条撤销 —— Esc 先 setText 再 blur，同一个事件里 onBlur 拿到的还是这一帧打进去的字 | e2e `params_p2.mjs` 的 `suiteAllTypes`、`suiteSearchFilter`（真按键；换回原来的写法时三条都失败） |
 | 对话框开着时按 Delete | 删除只走键表（对话框开着时快捷键一个都不响），React Flow 自己的 `deleteKeyCode` 关掉：以前对话框开着、焦点不在它里面时按 Delete，画布上选中的节点就被删了 | e2e `params_p3.mjs` 的 `suiteCreateSaveReopen`（打开 deleteKeyCode 时失败） |
 | 日志页 | 只看警告与错误、按节点或内容筛；节点写带层级的名字，点它打开到那一层 | e2e `m4.mjs` 的 `suiteNested` |

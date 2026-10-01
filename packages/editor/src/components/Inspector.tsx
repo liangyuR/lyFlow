@@ -24,6 +24,7 @@ import type { OutputStat, OutputValue } from "../types/execution";
 import type { OperatorDesc, Param } from "../types/manifest";
 import type { GraphNode, SubgraphDef } from "../types/graph";
 
+import { CommitText } from "./CommitText";
 import { OperatorDetail, PortRow } from "./OperatorDetail";
 import { ParamControl } from "./ParamControls";
 import { copyText } from "../lib/clipboard";
@@ -457,12 +458,13 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
   return (
     <div className="insp">
       <header className="insp__head">
-        <input
+        <CommitText
           className="insp__title"
+          data-testid="inspector-title"
           value={node.ui?.title ?? ""}
           placeholder={op.label}
           spellCheck={false}
-          onChange={(e) => setNodeUi(node.id, { title: e.target.value || null })}
+          onCommit={(text) => setNodeUi(node.id, { title: text || null })}
         />
         <div className="insp__meta">
           <code>{op.id}</code>
@@ -630,13 +632,13 @@ function SubgraphInspector({ subgraphId, def }: { subgraphId: string; def: Subgr
   return (
     <div className="insp" data-testid="subgraph-inspector">
       <header className="insp__head">
-        <input
+        <CommitText
           className="insp__title"
           data-testid="subgraph-name"
           value={def.name ?? ""}
           placeholder={subgraphId}
           spellCheck={false}
-          onChange={(e) => rename(subgraphId, e.target.value)}
+          onCommit={(text) => rename(subgraphId, text)}
         />
         <div className="insp__meta">
           <code>sub:{subgraphId}</code>

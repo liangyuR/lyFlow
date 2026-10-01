@@ -13,6 +13,7 @@ import { useRecipesDirty } from "../store/recipe";
 import { useUiStore } from "../store/ui";
 import { transport, type LibraryRefresh, type LibrarySettings, type RecentEntry } from "../transport";
 
+import { CommitText } from "./CommitText";
 import { RecipeMenu } from "./RecipeMenu";
 
 export interface ToolbarActions {
@@ -414,7 +415,6 @@ export function Toolbar({
   const dirty = graphDirty || recipesDirty;
   const filePath = useGraphStore((s) => s.filePath);
   const name = useGraphStore((s) => s.doc.name);
-  const setName = useGraphStore((s) => s.setName);
 
   return (
     <header className="toolbar">
@@ -479,14 +479,14 @@ export function Toolbar({
 
       <div className="toolbar__doc">
         {/* 窄窗口下文件名收起，悬停图名看路径 */}
-        <input
+        <CommitText
           className="toolbar__name"
           data-testid="doc-name"
           value={name ?? ""}
           spellCheck={false}
           placeholder="未命名"
           title={filePath ?? undefined}
-          onChange={(e) => setName(e.target.value)}
+          onCommit={(text) => useGraphStore.getState().setName(text)}
         />
         {/* 脏标记：没有它用户不知道自己有没有存过（交互清单 P0 #13） */}
         {dirty && (
