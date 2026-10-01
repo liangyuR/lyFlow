@@ -251,6 +251,7 @@ MCP 第一次返回非文本内容：调用方拿到的是一张能直接看的�
 `eval` / `perturb` 跑得久：客户端带了 `progressToken` 时，CLI 每交出一行就发一条 `notifications/progress`
 （`progress` 是第几行，`message` 写着样本与状态；总数事先不知道，不给 `total`）。客户端取消这次调用时
 子进程跟着结束（以前会在后台一直跑完，最长 10 分钟），返回里带 `cancelled: true`。
+`run_graph` 同样：客户端取消时替它发 `POST /lyflow/cancel`，不再等 `run_finished`。
 
 CLI 的 `--samples-jsonl-out` 与 `--parallel` **MCP 不提供**，逐条对照见
 [agent-tuning.md](agent-tuning.md) §7。

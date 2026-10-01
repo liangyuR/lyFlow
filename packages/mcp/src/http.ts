@@ -23,6 +23,8 @@ export interface RunWaitResult {
   runId: string;
   events: ExecutionEvent[];
   timedOut: boolean;
+  /** 调用方取消了（signal）：已经替它发了 POST /lyflow/cancel，没等 run_finished 就回来了。 */
+  cancelled: boolean;
 }
 
 function eventsUrlOf(base: string): string {
@@ -214,11 +216,14 @@ export class LyFlowHttp {
     return socket;
   }
 
-  async runAndWait(envelope: RunEnvelope, timeoutMs: number): Promise<RunWaitResult> {
+  /** 发起一次运行、等它的 run_finished。signal 取消时替调用方取消这次运行（MCP 客户端取消了 run_graph：
+   *  原来运行会在后端接着算到完），不等 run_finished 就回来。 */
+  async runAndWait(envelope: RunEnvelope, timeoutMs: number, signal?: AbortSignal): Promise<RunWaitResult> {
     const socket = await this.#openEvents(Math.min(timeoutMs, 15000));
     const frames: ExecutionEvent[] = [];
     let runId: string | null = null;
     let finished = false;
+    let cancelled = false;
     let settle: () => void = () => {};
     const done = new Promise<void>((resolve) => {
       settle = resolve;
@@ -240,6 +245,13 @@ export class LyFlowHttp {
       }
     };
     socket.addEventListener("message", onMessage);
+    // runId 要等 POST /lyflow/run 回来才知道：那之前取消的，回来以后立刻补发
+    const cancel = () => {
+      cancelled = true;
+      if (runId !== null && !finished) void this.sendJson("POST", "/lyflow/cancel", { runId }).catch(() => {});
+      settle();
+    };
+    signal?.addEventListener("abort", cancel, { once: true });
 
     try {
       const started = await this.sendJson<{ runId: string }>("POST", "/lyflow/run", envelope);
@@ -248,15 +260,18 @@ export class LyFlowHttp {
         finished = true;
         settle();
       }
+      if (signal?.aborted) cancel();
       const timer = setTimeout(() => settle(), timeoutMs);
       await done;
       clearTimeout(timer);
       return {
         runId,
         events: frames.filter((f) => f.runId === runId),
-        timedOut: !finished,
+        timedOut: !finished && !cancelled,
+        cancelled: cancelled && !finished,
       };
     } finally {
+      signal?.removeEventListener("abort", cancel);
       socket.removeEventListener("message", onMessage);
       socket.close();
     }

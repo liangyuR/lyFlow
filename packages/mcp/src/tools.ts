@@ -376,7 +376,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         timeoutMs: z.number().int().positive().optional().describe(`等 run_finished 的上限，默认 ${DEFAULT_RUN_TIMEOUT_MS}`),
       },
     },
-    async (args) => {
+    async (args, extra) => {
       let graph;
       try {
         graph = resolveGraph(args);
@@ -413,6 +413,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
             ...(recipe?.params ? { params: recipe.params } : {}),
           },
           args.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
+          extra.signal,
         );
         const events = summarizeRun(result.events);
         const summary = coreSummary(result.events);

@@ -59,7 +59,7 @@
 | 分栏、拖放配置（dragDropEnabled） | e2e `params_p2.mjs`（右侧分栏）、`m8b.mjs` 的算子面板组 |
 | 图结构编辑 `lyflow patch`（七个动作、幂等、改坏不落盘） | `bridge/src/patch.rs` 的测试模块 |
 | 指标路径（`eval` 写错时列出、`--list-metrics` 正向列出） | `bridge/src/cli.rs` 的 `eval_lists_the_available_paths_when_the_metric_is_wrong`、`bridge/src/eval.rs` 的 `available_paths_*` |
-| MCP 工具、argv 拼装、CLI 解析（含逐行回调、请求取消时结束子进程：`cli.test.ts` 用 node 当假 CLI） | `packages/mcp/test/*`（`smoke.test.ts` 是唯一跑通 MCP → CLI 的） |
+| MCP 工具、argv 拼装、CLI 解析（含逐行回调、请求取消时结束子进程：`cli.test.ts` 用 node 当假 CLI；客户端取消 `run_graph` 时后端那次运行跟着取消：`smoke.test.ts` 里 `test.stall` 睡 20 秒、几秒内收到 cancelled） | `packages/mcp/test/*`（`smoke.test.ts` 是唯一跑通 MCP → CLI 的） |
 | HTTP 传输、宿主嵌入（含用户片段、底图点云文件两个端点，图像端点的行切片） | `scripts/e2e/http.mjs` |
 | 外部 Rust/Tauri 宿主（`attach`、`lyflow_handler!`、`sceneId` 注入、工作区路径） | `bridge/tests/host.rs`（`MockRuntime` 跑真 IPC） |
 
