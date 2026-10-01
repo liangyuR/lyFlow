@@ -29,10 +29,10 @@
 |---|---|---|
 | 重扫库目录不卡界面 | 在执行管理器的维护窗口里做：等被停掉的那个退出、期间的运行只排队；热重载同一个窗口 | `bridge/src/execution.rs` 的状态机单测；e2e `noderun.mjs` 的 `suiteLibraryRescanStalled`（重扫期间 IPC 6 ms，修前 2.9 s） |
 | 安装包 | 里面的 core 就是这次构建编出来的那一份；release 不开热重载 | `pnpm e2e:packaged` 开头的「安装包（干净目录）」一节 |
-| `eval / sweep / perturb --jobs` | 同时跑几次，行的顺序与内容不变，停也停在同一行；Ctrl+C 一次取消全部 | `eval.rs` 的 `ordered_parallel_*`；`cli.rs` 的两条对照 |
-| 终端进度行 | eval / sweep / perturb 与 run：stdout 重定向、stderr 在终端上时原地刷新一行，管道里一个字节不多 | `eval.rs` 的 `the_progress_line_*`、`cli.rs` 的 `the_run_progress_line_*` |
-| 失败的原因写在 stderr | run / validate 列出诊断与出错节点；eval / perturb 把没成的几次按原因归成一行 | `cli.rs` 写法错那张表；`eval.rs` 的 `the_failure_digest_*` |
-| 选项写错是用法错 | `--parallel 4x` 以前悄悄当成 0；`dump --format asci` 以前悄悄写成 binary | `cli.rs` 写法错那张表 |
+| `eval / sweep / perturb --jobs` | 同时跑几次，行的顺序与内容不变，停也停在同一行；Ctrl+C 一次取消全部 | `eval.rs` 的 `ordered_parallel_*`；`cli/tests.rs` 的两条对照 |
+| 终端进度行 | eval / sweep / perturb 与 run：stdout 重定向、stderr 在终端上时原地刷新一行，管道里一个字节不多 | `eval.rs` 的 `the_progress_line_*`、`cli/tests.rs` 的 `the_run_progress_line_*` |
+| 失败的原因写在 stderr | run / validate 列出诊断与出错节点；eval / perturb 把没成的几次按原因归成一行 | `cli/tests.rs` 写法错那张表；`eval.rs` 的 `the_failure_digest_*` |
+| 选项写错是用法错 | `--parallel 4x` 以前悄悄当成 0；`dump --format asci` 以前悄悄写成 binary | `cli/tests.rs` 写法错那张表 |
 | MCP | eval / perturb 的 `jobs`；客户端取消时 CLI 子进程跟着结束、`run_graph` 替它发 cancel；eval / perturb 逐行发进度通知 | `packages/mcp/test/cli.test.ts`、`smoke.test.ts`（去掉接线时冒烟会失败） |
 | `pnpm e2e --only` | 按模块 / 分组挑着跑 | `scripts/e2e/README.md` |
 
@@ -55,7 +55,7 @@
 
 - clippy 清零（bridge、lyflow-client），MSRV 写准；gap 包全量构建的 5 条编译警告修掉。
 - 原来只有 e2e 间接碰到的核心逻辑补了单测：拖线挡错（类型、成环、Any 推导、置灰表）、算子搜索排序、GraphDoc → React Flow 映射、节点复制粘贴、删节点连带删边。编辑器的 node:test 从 86 到 101。
-- 包测试里七份 `NullContext + Call` 统一成 `test::OpCall`；参数面板虚拟列表的 e2e 帮手收进 `page.mjs`；删掉五个没人调的导出。
+- `bridge/src/cli.rs` 的测试搬进 `cli/tests.rs`（原文件四千多行、一半是测试，搬的时候逐行对照过）；包测试里七份 `NullContext + Call` 统一成 `test::OpCall`；参数面板虚拟列表的 e2e 帮手收进 `page.mjs`；删掉五个没人调的导出。
 - e2e：工具栏宽度那组不再跟着 KUN10 数据一起失败（自己搭状态）；live preview 那组先预热预览缓存（量的才是「跟手」）；
   m4 的第一组起了名字（`--only` 挑得到）。
 
