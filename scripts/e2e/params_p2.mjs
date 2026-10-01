@@ -30,6 +30,7 @@ import {
   pressF5,
   runAndWait,
   saveGraphTo,
+  revealInList as reveal,
 } from "./page.mjs";
 
 const SHOW = "test.param_showcase";
@@ -59,36 +60,6 @@ async function resetPanel(cdp) {
     return true;
   `);
   await sleep(120);
-}
-
-/** 虚拟化列表里把某一项滚到挂上为止：从顶上开始一屏一屏往下翻，找到就滚进视口中间。
- *  返回它在屏幕上的矩形；翻到底都没有返回 null。 */
-async function reveal(cdp, selector) {
-  return cdp.eval(`
-    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const list = document.querySelector('[data-testid="pp-list"]');
-    if (!list) return null;
-    const find = () => document.querySelector(${lit(selector)});
-    let el = find();
-    if (!el) {
-      list.scrollTop = 0;
-      await frame();
-      for (let i = 0; i < 400 && !(el = find()); i += 1) {
-        if (list.scrollTop + list.clientHeight >= list.scrollHeight - 1) break;
-        list.scrollTop += Math.max(80, list.clientHeight * 0.7);
-        await frame();
-      }
-    }
-    if (!el) return null;
-    const lr = list.getBoundingClientRect();
-    const r0 = el.getBoundingClientRect();
-    if (r0.top < lr.top + 40 || r0.bottom > lr.bottom - 40) {
-      list.scrollTop += r0.top - lr.top - lr.height / 3;
-      await frame();
-    }
-    const r = find()?.getBoundingClientRect();
-    return r ? { x: r.left, y: r.top, w: r.width, h: r.height } : null;
-  `);
 }
 
 /** 在一行里的某个输入框里「打字」再失焦：原生 value setter + input 事件（React 才看得见），失焦才提交。 */

@@ -15,7 +15,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { sleep } from "./cdp.mjs";
-import { lit, mustOk, newDoc, pressCtrl, pressF5, runAndWait, saveGraphTo } from "./page.mjs";
+import { clickSelector as click, lit, mustOk, newDoc, pickRecipe, pressCtrl, pressF5, runAndWait, saveGraphTo } from "./page.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CLI = path.join(ROOT, "bridge", "target", "debug", "lyflow.exe");
@@ -27,23 +27,6 @@ const RECIPE = "车型A·P4";
 // ------------------------------------------------------------ 小工具
 
 const snap = (cdp) => cdp.eval(`return window.__lyflow.snapshot();`);
-
-async function click(cdp, selector) {
-  return cdp.eval(`
-    const el = document.querySelector(${lit(selector)});
-    if (!el) return 'missing';
-    el.click();
-    await new Promise((d) => setTimeout(d, 150));
-    return 'ok';
-  `);
-}
-
-async function pickRecipe(cdp, name) {
-  await click(cdp, '[data-testid="recipe-toggle"]');
-  const r = await click(cdp, `[data-testid="recipe-option"][data-name=${lit(name)}]`);
-  await sleep(120);
-  return r;
-}
 
 /** 真按 Ctrl+S，等图与配方都存完。 */
 async function saveByKey(cdp) {

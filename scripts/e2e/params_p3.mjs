@@ -19,7 +19,20 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { sleep } from "./cdp.mjs";
-import { buildGraph, lit, mustOk, newDoc, pressCtrl, pressF5, replan, runAndWait, saveGraphTo } from "./page.mjs";
+import {
+  buildGraph,
+  clickSelector,
+  lit,
+  mustOk,
+  newDoc,
+  pickRecipe,
+  pressCtrl,
+  pressF5,
+  replan,
+  revealInList as reveal,
+  runAndWait,
+  saveGraphTo,
+} from "./page.mjs";
 
 // ------------------------------------------------------------ 小工具
 
@@ -61,30 +74,6 @@ async function closePanel(cdp) {
   `);
 }
 
-/** 虚拟化列表里把某一行滚到挂上为止（同 params_p2.mjs 的 reveal）。 */
-async function reveal(cdp, selector) {
-  return cdp.eval(`
-    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const list = document.querySelector('[data-testid="pp-list"]');
-    if (!list) return null;
-    const find = () => document.querySelector(${lit(selector)});
-    let el = find();
-    if (!el) {
-      list.scrollTop = 0;
-      await frame();
-      for (let i = 0; i < 200 && !(el = find()); i += 1) {
-        if (list.scrollTop + list.clientHeight >= list.scrollHeight - 1) break;
-        list.scrollTop += Math.max(80, list.clientHeight * 0.7);
-        await frame();
-      }
-    }
-    if (!el) return null;
-    el.scrollIntoView({ block: 'center' });
-    await frame();
-    return true;
-  `);
-}
-
 /** 在一个元素（或它里面第 index 个 input）里「打字」再失焦：原生 setter + input 事件，失焦才提交。 */
 async function typeInto(cdp, selector, text, { index = 0, inList = true } = {}) {
   if (inList && !(await reveal(cdp, selector))) return "no-row";
@@ -104,13 +93,7 @@ async function typeInto(cdp, selector, text, { index = 0, inList = true } = {}) 
 
 async function click(cdp, selector, { inList = false } = {}) {
   if (inList && !(await reveal(cdp, selector))) return "no-row";
-  return cdp.eval(`
-    const el = document.querySelector(${lit(selector)});
-    if (!el) return 'missing';
-    el.click();
-    await new Promise((d) => setTimeout(d, 150));
-    return 'ok';
-  `);
+  return clickSelector(cdp, selector);
 }
 
 /** 编辑器自己的起名对话框：填名字、点确定。返回 'ok' 或卡在哪。 */
@@ -134,14 +117,6 @@ async function answerText(cdp, value, { check = null } = {}) {
 async function answerChoice(cdp, id) {
   await cdp.waitFor(`!!document.querySelector('[data-testid="modal"][data-kind="choice"]')`, { what: "选择对话框" });
   return click(cdp, `[data-testid="modal-choice-${id}"]`);
-}
-
-/** 工具栏下拉框里点一项（名字 "" = 基础）。 */
-async function pickRecipe(cdp, name) {
-  await click(cdp, '[data-testid="recipe-toggle"]');
-  const r = await click(cdp, `[data-testid="recipe-option"][data-name=${lit(name)}]`);
-  await sleep(120);
-  return r;
 }
 
 async function newRecipeFromMenu(cdp, name, { copy = false } = {}) {

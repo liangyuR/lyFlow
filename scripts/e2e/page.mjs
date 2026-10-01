@@ -88,6 +88,56 @@ export const pressShiftF5 = (cdp) => pressKey(cdp, "F5", 116, ["shift"]);
 export const pressEscape = (cdp) => pressKey(cdp, "Escape", 27);
 export const pressQuestion = (cdp) => pressKey(cdp, "?", 191, ["shift"]);
 
+/** 参数面板是虚拟列表（param-recipe P2）：要的行可能还没渲染。从顶上一段段往下滚找到它，
+ *  再把它滚到列表里不贴边的位置。返回它在屏幕上的矩形；找不到返回 null。
+ *  原来 params_p2 / params_p3 / compare 各抄一份（返回值各不相同），统一到这里。 */
+export async function revealInList(cdp, selector) {
+  return cdp.eval(`
+    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const list = document.querySelector('[data-testid="pp-list"]');
+    if (!list) return null;
+    const find = () => document.querySelector(${lit(selector)});
+    let el = find();
+    if (!el) {
+      list.scrollTop = 0;
+      await frame();
+      for (let i = 0; i < 400 && !(el = find()); i += 1) {
+        if (list.scrollTop + list.clientHeight >= list.scrollHeight - 1) break;
+        list.scrollTop += Math.max(80, list.clientHeight * 0.7);
+        await frame();
+      }
+    }
+    if (!el) return null;
+    const lr = list.getBoundingClientRect();
+    const r0 = el.getBoundingClientRect();
+    if (r0.top < lr.top + 40 || r0.bottom > lr.bottom - 40) {
+      list.scrollTop += r0.top - lr.top - lr.height / 3;
+      await frame();
+    }
+    const r = find()?.getBoundingClientRect();
+    return r ? { x: r.left, y: r.top, w: r.width, h: r.height } : null;
+  `);
+}
+
+/** 按选择器点一下（DOM click，不走真鼠标）再等 150 ms 让界面跟上。返回 'ok' 或 'missing'。 */
+export async function clickSelector(cdp, selector) {
+  return cdp.eval(`
+    const el = document.querySelector(${lit(selector)});
+    if (!el) return 'missing';
+    el.click();
+    await new Promise((d) => setTimeout(d, 150));
+    return 'ok';
+  `);
+}
+
+/** 工具栏的配方下拉框里点一项（名字 "" = 基础）。 */
+export async function pickRecipe(cdp, name) {
+  await clickSelector(cdp, '[data-testid="recipe-toggle"]');
+  const r = await clickSelector(cdp, `[data-testid="recipe-option"][data-name=${lit(name)}]`);
+  await sleep(120);
+  return r;
+}
+
 /** 真实鼠标拖拽。连线吸附、拖节点到线上这类手感项只有真事件才验得到。 */
 export async function dragMouse(cdp, from, to, { steps = 12, button = "left" } = {}) {
   const common = { button, buttons: 1, clickCount: 1 };

@@ -67,7 +67,7 @@
 - **共享夹具**：`schema/fixtures/recipes/`（Rust 与 TS 共用）、`schema/examples/*.lyflow.json`、`examples/param-showcase.lyflow.json`（`test.param_showcase` 覆盖 14 种参数类型，C++ / CLI / e2e 共用）。新增跨语言规则时往共享夹具里加一行，别各写一份。
 - **C++**：`core/tests/helpers.h`（`seqIsDense` 等；直接调算子的 `test::OpCall` / `test::StubContext` —— 输入里有 Box2D、Record 这类不好拼图的值时用，`threads` 给线程预算，包测试只用本包算子时传自己的注册表）、`core/tests/test_ops.h`（测试算子，含会抛异常的 `test.throw`）、`param_showcase_op.h`。
 - **Rust**：`bridge/src/cli.rs` 的 `#[cfg(test)] pub(crate) mod test_support`（`SharedBuf`、`Ran`、`cli()`），其它模块复用它。
-- **e2e**：`scripts/e2e/page.mjs`（`newDoc`、`buildGraph`、`placeAtScreen`、`dragMouse`、`runAndWait`、`mustOk` 等），`peek.mjs` 的 `openByDoubleClick`，`m8b.mjs` 的 `roiGeometry` / `setCamera` / `waitValidated`；各 params 文件里的 `reveal`、`typeIn`、`pickRecipe` 目前有重复拷贝，新代码先找现成的。
+- **e2e**：`scripts/e2e/page.mjs`（`newDoc`、`buildGraph`、`placeAtScreen`、`dragMouse`、`runAndWait`、`mustOk`，参数面板虚拟列表里滚到某一行的 `revealInList`、`clickSelector`、`pickRecipe` 等），`peek.mjs` 的 `openByDoubleClick`，`m8b.mjs` 的 `roiGeometry` / `setCamera` / `waitValidated`。各 params 文件的 `typeIn` / `typeInto` 仍是各写一份（要不要先滚进列表、往哪种控件里打字各不相同），新代码先找现成的。
 
 ## 写测试的规矩
 
