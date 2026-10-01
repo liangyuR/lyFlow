@@ -3,7 +3,7 @@
 
 import type { Edge, Node } from "@xyflow/react";
 
-import { subgraphIdOf, type GraphDoc } from "../types/graph";
+import { subgraphIdOf, type GraphDoc, type GraphNode } from "../types/graph";
 import type { AnyTypes, GraphContext } from "./typecheck";
 import { ANY, findPort, inferAnyTypes } from "./typecheck";
 
@@ -94,11 +94,14 @@ export function toReactFlow(
     };
   });
 
+  // 每条边要查两端的节点：先建一张表。原来逐条 doc.nodes.find，拖节点时每帧都是「边数 × 节点数」
+  const byId = new Map<string, GraphNode>();
+  for (const n of doc.nodes) byId.set(n.id, n);
   const edges: LyEdge[] = doc.edges.map((e) => {
-    const color = edgeColor(doc, ctx, e.from.node, e.from.port, anyTypes);
+    const color = edgeColor(byId, ctx, e.from.node, e.from.port, anyTypes);
     // 惰性边（ADR-0016）：目标输入端口 lazy===true，上游闭包不进初始计划，
     // 主路径成功时不跑。画成虚线；tooltip 由边组件按 data.lazy 挂（components/FlowEdge.tsx）。
-    const lazy = isLazyInput(doc, ctx, e.to.node, e.to.port);
+    const lazy = isLazyInput(byId, ctx, e.to.node, e.to.port);
     return {
       id: e.id,
       source: e.from.node,
@@ -184,13 +187,13 @@ function sameEdge(a: LyEdge, b: LyEdge): boolean {
 
 /** 连线颜色取自源端口的**实际**类型：串了 reroute 之后颜色也要跟着源变（E6）。 */
 function edgeColor(
-  doc: GraphDoc,
+  byId: ReadonlyMap<string, GraphNode>,
   ctx: GraphContext,
   nodeId: string,
   portName: string,
   anyTypes: AnyTypes,
 ): string {
-  const node = doc.nodes.find((n) => n.id === nodeId);
+  const node = byId.get(nodeId);
   const op = node ? ctx.operatorsById.get(node.op) : undefined;
   const port = findPort(op, portName, "output");
   if (!port) return "#6b7280";
@@ -201,12 +204,12 @@ function edgeColor(
 /** 一条边是不是惰性的，只看目标节点的目标输入端口（ADR-0016）：
  *  这个端口的上游闭包不进初始计划，算子 compute 返回 Demand 时才被调度。 */
 function isLazyInput(
-  doc: GraphDoc,
+  byId: ReadonlyMap<string, GraphNode>,
   ctx: GraphContext,
   nodeId: string,
   portName: string,
 ): boolean {
-  const node = doc.nodes.find((n) => n.id === nodeId);
+  const node = byId.get(nodeId);
   const op = node ? ctx.operatorsById.get(node.op) : undefined;
   return findPort(op, portName, "input")?.lazy === true;
 }

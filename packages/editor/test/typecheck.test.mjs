@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { createMappingCache, toReactFlow } from "../src/lib/mapping.ts";
 import { canConnect, compatibleSources, compatibleTargets, inferAnyTypes, wouldCreateCycle } from "../src/lib/typecheck.ts";
 
 const port = (name, type) => ({ name, type, label: name, doc: "", required: true });
@@ -96,4 +97,27 @@ test("compatibleTargets / compatibleSources：拖线时置灰与高亮的那张�
   // 往 v3 的输入拖回去找源：点云类的输出都行（XYZI 可当 PointCloud 用；r2 推成了 PointCloud）
   const sources = [...compatibleSources(ctx, doc, { node: "v3", port: "cloud" })].sort();
   assert.deepEqual(sources, ["g:cloud", "gi:cloud", "r1:out", "r2:out", "v1:cloud", "v2:cloud"]);
+});
+
+// 映射层（lib/mapping）与上面共用这一个夹具：连线颜色、虚线、Any 类型都是从类型推导来的
+test("toReactFlow：连线按源端口的实际类型着色（隔着 reroute 也对）、惰性输入画虚线、节点带推导出的 Any 类型；没变的对象复用", () => {
+  const lazyCtx = {
+    ...ctx,
+    operatorsById: new Map([...ctx.operatorsById, ["fallback", op("fallback", [{ ...port("alt", "PointCloud"), lazy: true }], [])]]),
+  };
+  const withLazy = { ...doc, nodes: [...doc.nodes, node("f", "fallback")], edges: [...doc.edges, edge("v2", "cloud", "f", "alt")] };
+  const cache = createMappingCache();
+  const { nodes, edges } = toReactFlow(withLazy, lazyCtx, undefined, undefined, undefined, cache);
+  const byId = Object.fromEntries(edges.map((e) => [e.id, e]));
+  assert.equal(byId["r1.out-r2.in"].style.stroke, "#1", "reroute 的输出推成了 PointCloud，颜色跟着源走");
+  assert.equal(byId["g.cloud-v1.cloud"].style.stroke, "#1");
+  assert.equal(byId["v2.cloud-f.alt"].data.lazy, true);
+  assert.equal(byId["v2.cloud-f.alt"].style.strokeDasharray, "6 4");
+  assert.equal(byId["g.cloud-v1.cloud"].data.lazy, false);
+  assert.equal(nodes.find((n) => n.id === "r2").data.anyType, "PointCloud");
+  assert.equal(nodes.find((n) => n.id === "ghost").data.anyType, null);
+  // 同样的输入再映射一次：节点与连线数组整个复用（React Flow 靠引用不变走快路径）
+  const again = toReactFlow(withLazy, lazyCtx, undefined, undefined, undefined, cache);
+  assert.equal(again.nodes, nodes);
+  assert.equal(again.edges, edges);
 });
