@@ -16,7 +16,7 @@
 | 最近用过的算子 | 算子搜索空查询时排最前、标「最近」；面板顶上一组 | `autoconnect.test.mjs`；e2e `m3.mjs` 的 `suiteDropToSearch` |
 | 复制粘贴走系统剪贴板 | 跨窗口、重开之后都粘得进来，整张图的 JSON 也认；静音的粘出来还是静音的。Ctrl+V 读 paste 事件里的内容：`readText` 在 WebView2 里会弹「想要查看剪贴板」的框（第一版就是这么写的，真按 Ctrl+V 会弹框，e2e 里因为打了桩没看出来） | `autoconnect.test.mjs`；e2e `m3.mjs` 的 `suiteEditing`（断言没调 `readText`） |
 | 没存过盘的图也自动备份 | 30 秒一次写到 app data 里（`untitled.lyflow.json~`），崩溃、断电、被强杀之后下次开 app 问要不要恢复；存了盘、新建或打开别的图之后删掉。从自动备份恢复出来的图（两种都是）算没保存 —— 以前恢复 `<file>~` 之后标成已保存 | `autosave.test.mjs`；e2e `m3.mjs` 的 `suitePanels`（真的 app data、真的写盘；harness 不动用户自己的那份） |
-| 刷新键与浏览器右键菜单 | 桌面壳里的 WebView2 还是浏览器：Ctrl+R、搜索面板 / 对话框开着时的 F5 会把整个 app 重新载入（没存的图、撤销栈、运行结果全没了，关窗口前那一问也拦不住）；右键弹的是浏览器自己的菜单（刷新、另存为、打印）。Tauri 2 没开放 WebView2 的那两个设置，壳在页面里挡：刷新键捕获阶段 preventDefault、不拦传播（编辑器照样收到 F5 去运行），右键菜单只在输入框里、选着文字时留着 | e2e `m3.mjs` 的 `suitePanels`（真按 Ctrl+R、开着搜索面板按 F5，页面里的标记还在；不装时标记没了） |
+| 刷新键与浏览器右键菜单 | 桌面壳里的 WebView2 还是浏览器：Ctrl+R、搜索面板 / 对话框开着时的 F5 会把整个 app 重新载入（没存的图、撤销栈、运行结果全没了，关窗口前那一问也拦不住）；编辑器不接键的时候（搜索面板、对话框开着，焦点在输入框里）Ctrl+S 弹「网页另存为」、Ctrl+P 打印、Ctrl+F 开浏览器的查找条；右键弹的是浏览器自己的菜单（刷新、另存为、打印）。Tauri 2 没开放 WebView2 的那两个设置，壳在页面里挡：这些键捕获阶段 preventDefault、不拦传播（编辑器照样收到 F5 去运行、Ctrl+S 去保存），右键菜单只在输入框里、选着文字时留着 | e2e `m3.mjs` 的 `suitePanels`（真按 Ctrl+R、开着搜索面板按 F5，页面里的标记还在；不装时标记没了；另外几个键查 defaultPrevented） |
 | 关窗口前问一句 | 有没存的改动（图或配方）时点 × 先问「确定关闭吗」，取消就不关；以前直接关，没存过盘的图连备份都没有（M3 计划里写了、没做） | e2e `m3.mjs` 的 `suitePanels`；真给窗口发 WM_CLOSE 看过一次（有改动时弹框、窗口不关，没改动时关掉） |
 | 参数菜单「粘贴值」不弹框 | 桌面壳自己开主窗口（`tauri.conf.json` 里 `create: false`），放行剪贴板读取 | e2e `params_p1.mjs` 的 `suiteIncludeTopLevel`（真 `readText` 不挂住、粘贴值写进参数） |
 | 子图里复制 / 剪切 / 全选 / 静音 / 折叠 | 取当前这一层的节点。以前取顶层：复制拿不到，剪切删了本层的节点、剪贴板里却是错的；Ctrl+A 选上的是这一层没有的 id；Ctrl+M / Ctrl+E 永远是「打开」，再按一次取消不了 | e2e `m4.mjs` 的 `suiteNested`（去掉修复时这几条失败） |

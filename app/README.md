@@ -8,7 +8,7 @@ src/main.tsx      入口：挑一个 Transport，装窗口桥、标题、关窗�
 src/dialogs.ts    Tauri 的文件对话框，注入给编辑器
 src/title.ts      窗口标题 `文件名 *`
 src/closeGuard.ts 关窗口前问一句（有没存的改动时）；要 capabilities 里的 core:window:allow-destroy
-src/browserGuard.ts 挡掉 WebView2 自己的刷新键（F5 / Ctrl+R）与右键菜单（输入框里、选着文字时留着）；Tauri 2 没开放那两个设置
+src/browserGuard.ts 挡掉 WebView2 自己的浏览器快捷键（刷新 F5 / Ctrl+R、网页另存为 Ctrl+S、打印 Ctrl+P、查找 Ctrl+F / Ctrl+G / F3）与右键菜单（输入框里、选着文字时留着）；只 preventDefault，编辑器照样收到这些键；Tauri 2 没开放那两个设置
 src/devbridge.ts  验收窗口桥（scripts/e2e 用）
 src/shell.css     页面级重置：html/body/#root 的高度与底色
 index.html        #root

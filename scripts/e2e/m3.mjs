@@ -1505,6 +1505,19 @@ async function suitePanels(cdp, report, ws) {
   await sleep(1200);
   report.eq("Ctrl+R、搜索面板开着时的 F5：页面没有重新载入", await cdp.eval(`return window.__lyReloadMark ?? null;`), 7);
   await pressEscape(cdp);
+  // 别的浏览器快捷键也挡（编辑器不接键的时候按下去，弹的是「网页另存为」、打印、浏览器的查找条）。合成事件发在 <html> 上：
+  // 壳的挡板挂在 window 的捕获阶段收得到，编辑器的两个监听（根元素上的、body 上的）都收不到 —— 不会真去保存、开查找
+  const blocked = await cdp.eval(`
+    const fire = (init) => {
+      const ev = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+      document.documentElement.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    };
+    return { save: fire({ key: 's', ctrlKey: true }), print: fire({ key: 'p', ctrlKey: true }), find: fire({ key: 'f', ctrlKey: true }),
+             f3: fire({ key: 'F3' }), plainS: fire({ key: 's' }), zoom: fire({ key: '=', ctrlKey: true }) };
+  `);
+  report.eq("浏览器快捷键（Ctrl+S 网页另存为、Ctrl+P 打印、Ctrl+F / F3 查找）挡掉，普通按键与缩放不挡", blocked,
+    { save: true, print: true, find: true, f3: true, plainS: false, zoom: false });
   const nativeMenu = await cdp.eval(`
     const fire = (el) => {
       const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
