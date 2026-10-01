@@ -402,7 +402,7 @@ function coerceValue(param: Param, raw: unknown): Coerced {
 }
 
 /** 剪贴板可能因为不安全上下文或没授权而不可用，一律吞掉异常返回失败。 */
-async function copyText(text: string): Promise<boolean> {
+export async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
     return true;

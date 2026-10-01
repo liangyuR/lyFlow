@@ -323,6 +323,39 @@ async function suiteNested(cdp, report) {
 
   const first = await runAndWait(cdp, () => pressF5(cdp));
   report.eq("第一次跑通", first.status, "ok");
+
+  // 日志页（日志只留最近一次运行的，所以接在真算了一遍的这次后面）：两层子图里的 sor 写的那条日志，节点写名字（带它在哪两层），按内容筛得出来，点它打开到那一层
+  const sorPath = `${outer.nodeId}/${inner.nodeId}/${ids.sor}`;
+  await cdp.eval(`window.__lyflow.stores.ui.getState().toggleDrawer('log'); return true;`);
+  await sleep(200);
+  await cdp.eval(`
+    const input = document.querySelector('[data-testid="drawer-log-filter"]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, '离群点');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  `);
+  await sleep(200);
+  const logRow = await cdp.eval(`
+    const rows = [...document.querySelectorAll('[data-testid="drawer-logs"] .drawer__log')];
+    const hit = rows.find((r) => r.querySelector('.drawer__log-node')?.title === ${lit(sorPath)});
+    return { rows: rows.length, name: hit?.querySelector('.drawer__log-node')?.textContent ?? null,
+             text: hit?.querySelector('.drawer__log-text')?.textContent ?? null };
+  `);
+  report.ok("日志按内容筛出 sor 那条，节点写的是带层级的名字",
+    logRow.rows >= 1 && (logRow.name ?? "").split(" › ").length === 3 && /离群点/.test(logRow.text ?? ""), JSON.stringify(logRow));
+  await cdp.eval(`
+    const rows = [...document.querySelectorAll('[data-testid="drawer-logs"] .drawer__log-node')];
+    rows.find((b) => b.title === ${lit(sorPath)})?.click();
+    return true;
+  `);
+  await sleep(300);
+  report.eq("点日志里的节点名：打开到它所在的那一层、选中它", await cdp.eval(`
+    const s = window.__lyflow.stores.ui.getState();
+    return { path: s.path.map((p) => p.nodeId), selected: [...s.selectedNodes] };
+  `), { path: [outer.nodeId, inner.nodeId], selected: [ids.sor] });
+  await cdp.eval(`const u = window.__lyflow.stores.ui.getState(); u.exitTo(0); u.toggleDrawer(); return true;`);
+
   const keys1 = JSON.stringify((await snapshot(cdp)).cache.ranWith);
 
   const second = await runAndWait(cdp, () => pressF5(cdp));
@@ -361,7 +394,11 @@ async function suiteNested(cdp, report) {
     const s = window.__lyflow.stores.ui.getState();
     return { path: s.path.map((p) => p.nodeId), selected: [...s.selectedNodes], open: s.finderOpen };
   `), { path: [outer.nodeId, inner.nodeId], selected: [ids.voxel], open: false });
+  await sleep(150);
+  report.eq("检查器写着它的节点 id（路径 id，--to / --set 认的那个）",
+    await cdp.eval(`return document.querySelector('[data-testid="inspector-node-id"]')?.textContent ?? null;`), `#${nested}`);
   await cdp.eval(`window.__lyflow.stores.ui.getState().exitTo(0); return true;`);
+
 }
 
 async function suiteRecursion(cdp, report) {
@@ -513,6 +550,8 @@ async function suiteLibrary(cdp, report) {
     JSON.stringify({ libCounts, subCounts }));
   await pressCtrl(cdp, "z");
   await sleep(200);
+  report.eq("Ctrl+Z 之后 toast 说撤掉的是哪一步", await cdp.eval(`return window.__lyflow.stores.ui.getState().toast?.text ?? null;`),
+    "已撤销：展开库算子");
   report.eq("一次撤销回到库算子",
     await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.find((n) => n.id === ${lit(fresh.lib)}).op;`),
     `lib.${libId}`);

@@ -1,7 +1,7 @@
 // 底部抽屉（m3-plan §2.5）：日志、诊断列表、缓存统计。
 // 三样都是「跑完之后想看一眼」的东西，塞进右侧检查器会把参数挤没。
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { describeEventNode } from "../lib/subgraph";
 import { clearCache, formatBytes, refreshCacheStats, useCacheStore } from "../store/cache";
@@ -29,19 +29,77 @@ function useDiagnostics() {
   return out;
 }
 
+/** 日志页。节点写名字（子图里带上它在哪几层，与诊断页同一个写法），点一下打开到它；
+ *  一次运行几百条日志时能只看警告与错误、按节点或内容筛。 */
 function LogTab() {
   const logs = useExecutionStore((s) => s.logs);
+  const doc = useGraphStore((s) => s.doc);
+  const ops = useManifestStore((s) => s.operatorsById);
+  const [onlyWarn, setOnlyWarn] = useState(false);
+  const [query, setQuery] = useState("");
   if (logs.length === 0) return <p className="drawer__empty">还没有日志。运行一次试试。</p>;
+
+  const described = new Map<string, ReturnType<typeof describeEventNode>>();
+  const describe = (id: string) => {
+    let d = described.get(id);
+    if (!d) {
+      d = describeEventNode(doc, ops, id);
+      described.set(id, d);
+    }
+    return d;
+  };
+  const q = query.trim().toLowerCase();
+  const shown = logs.filter((l) => {
+    if (onlyWarn && l.level !== "warn" && l.level !== "error") return false;
+    if (!q) return true;
+    const who = l.nodeId ? `${l.nodeId} ${describe(l.nodeId).names.join(" ")}` : "";
+    return `${who} ${l.message}`.toLowerCase().includes(q);
+  });
   return (
-    <ol className="drawer__logs" data-testid="drawer-logs">
-      {logs.map((l) => (
-        <li key={l.seq} className={`drawer__log drawer__log--${l.level}`}>
-          <span className="drawer__log-level">{l.level}</span>
-          {l.nodeId && <span className="drawer__log-node">{l.nodeId}</span>}
-          <span className="drawer__log-text">{l.message}</span>
-        </li>
-      ))}
-    </ol>
+    <>
+      <div className="drawer__logbar">
+        <label>
+          <input type="checkbox" checked={onlyWarn} onChange={(e) => setOnlyWarn(e.target.checked)} />
+          只看警告与错误
+        </label>
+        <input
+          type="search"
+          value={query}
+          placeholder="筛选：节点或内容"
+          spellCheck={false}
+          data-testid="drawer-log-filter"
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <span className="drawer__logcount" data-testid="drawer-log-count">
+          {shown.length} / {logs.length}
+        </span>
+      </div>
+      <ol className="drawer__logs" data-testid="drawer-logs">
+        {shown.map((l) => {
+          const d = l.nodeId ? describe(l.nodeId) : null;
+          return (
+            <li key={l.seq} className={`drawer__log drawer__log--${l.level}`}>
+              <span className="drawer__log-level">{l.level}</span>
+              {l.nodeId && d && (
+                <button
+                  type="button"
+                  className="drawer__log-node"
+                  title={l.nodeId}
+                  disabled={!d.reveal}
+                  onClick={() => {
+                    const r = d.reveal;
+                    if (r) useUiStore.getState().revealNode(r.path, r.localId);
+                  }}
+                >
+                  {d.names.join(" › ")}
+                </button>
+              )}
+              <span className="drawer__log-text">{l.message}</span>
+            </li>
+          );
+        })}
+      </ol>
+    </>
   );
 }
 

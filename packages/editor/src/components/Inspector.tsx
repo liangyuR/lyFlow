@@ -12,7 +12,7 @@ import {
 } from "../lib/graphParams";
 import { groupParams, effectiveParams, isEnabled, isVisible, valueEquals } from "../lib/params";
 import { frameKeyOfGroup, pickFrame, roiFramesOf } from "../lib/roiFrames";
-import { augmentOperators, describeEventNode, levelOf, promotedBy } from "../lib/subgraph";
+import { augmentOperators, describeEventNode, fullId, levelOf, promotedBy } from "../lib/subgraph";
 import { useExecutionStore, useNodeExecution, useParamErrors } from "../store/execution";
 import { currentSubgraph, useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
@@ -25,7 +25,7 @@ import type { OperatorDesc, Param } from "../types/manifest";
 import type { GraphNode, SubgraphDef } from "../types/graph";
 
 import { OperatorDetail, PortRow } from "./OperatorDetail";
-import { ParamControl } from "./ParamControls";
+import { copyText, ParamControl } from "./ParamControls";
 import { num } from "../lib/format";
 
 /** 六位有效数字。2D 几何的坐标是米，原样打印会拖一串浮点噪声。 */
@@ -373,6 +373,25 @@ function ParamRow({
   );
 }
 
+/** 节点 id，点一下复制：`lyflow run --to`、`--set <节点>.<参数>`、诊断里认的都是它（子图里是路径 id）。 */
+function NodeIdChip({ id }: { id: string }) {
+  return (
+    <button
+      type="button"
+      className="insp__nodeid"
+      data-testid="inspector-node-id"
+      title="节点 id，点一下复制：lyflow run --to、--set <节点>.<参数> 与诊断里认的都是它（子图里是路径 id）"
+      onClick={() => {
+        void copyText(id).then((ok) => {
+          useUiStore.getState().showToast(ok ? `已复制节点 id ${id}` : "剪贴板不可用，复制失败", ok ? "info" : "warn");
+        });
+      }}
+    >
+      #{id}
+    </button>
+  );
+}
+
 function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
   const setNodeUi = useGraphStore((s) => s.setNodeUi);
   const runErrors = useParamErrors(node.id);
@@ -447,6 +466,7 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
         <div className="insp__meta">
           <code>{op.id}</code>
           <span className="tag tag--version">v{op.version}</span>
+          <NodeIdChip id={fullId(path, node.id)} />
         </div>
         {staleVersion && (
           <p className="insp__warn">

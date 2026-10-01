@@ -31,6 +31,7 @@
 | 计划、cacheKey、Run to node / 选中 | `core/tests/test_plan.cpp`、`test_noderun.cpp`（含修订二的 `attachedStale`：挂上一次的旧结果）；e2e `m3.mjs`（Shift+F5）、`noderun.mjs`（右键「运行到此节点」，运行中可点 = 抢占；改上游后下游过期但还能看） |
 | 子图内部出错的定位（子图节点上写明内部节点、检查器里逐条写明来源，点它 / 点诊断 / 点工具栏 error / F8 打开到那一层并标红框；F8 / Shift+F8 在出错的节点之间跳） | 路径解析、聚合与跳转顺序在 `packages/editor/test/execution-store.test.mjs`；真界面在 e2e `m4.mjs` 的 `suiteInnerError` |
 | 查找节点（Ctrl+F：整张图连子图里面的一起列、按名字 / id / 算子 / 所在子图模糊找，回车打开到那一层；库算子里面不列） | 列举与排序在 `packages/editor/test/execution-store.test.mjs`（与上一行共用子图夹具）；真界面在 e2e `m4.mjs` 的 `suiteNested` 末尾（顶层直接跳进两层子图） |
+| 日志页（只看警告与错误、按节点或内容筛；节点写带层级的名字，点它打开到那一层）；检查器的节点 id（路径 id，点了复制）；撤销 / 重做之后的 toast | 撤销提示在 `packages/editor/test/graph-params-actions.test.mjs`；真界面在 e2e `m4.mjs`：日志页与节点 id 在 `suiteNested`，Ctrl+Z 的 toast 在 `suiteLibrary` |
 | 子图、库算子（含展开为内联子图：定义去掉 id、内联后逐位相同；库目录设置：`bridge/src/library_settings.rs` 单测、e2e m4 面板增删 + CLI 同读） | `core/tests/test_subgraph.cpp`；`packages/editor/test/graph-params-actions.test.mjs`（合成 / 解散 / 展开库算子的 store 动作）；e2e `m4.mjs` |
 | 多选同一种算子一起改参数（`setParamMany`：每个节点照 `setParam` 路由、一条撤销、并进拖动的外层事务） | `packages/editor/test/graph-params-actions.test.mjs`；真界面（标「不同」、拖一下两个都变、一条撤销）在 e2e `m3.mjs` 的 `suiteEditing` |
 | 图参数（规格、校验、传参） | `core/tests/test_graph_params.cpp`、`test_params.cpp`；`packages/editor/test/graph-params*.test.mjs`；e2e `params_p1.mjs` |
