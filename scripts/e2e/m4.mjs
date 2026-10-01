@@ -606,6 +606,14 @@ async function suitePreview(cdp, report) {
   await runAndWait(cdp, () => pressF5(cdp));
   await select(cdp, ids.sample);
   await sleep(300);
+  // 预热预览的缓存：源头的 40 万点先在预览命名空间里算好一次（previewMaxPoints 取编辑器自己的，缓存键才对得上）。
+  // 不预热的话拖动中的第一次预览要现算源头，机器一忙就超过拖动的一步（60 ms）、每次都被下一步取消，
+  // 一次也画不出来 —— 量的就成了「源头多久能算完」，不是「跟手」（2026-10-02 全量里撞上过一次）
+  await runAndWait(cdp, () => cdp.eval(`
+    const s = window.__lyflow.snapshot();
+    await window.__lyflow.run({ targets: [${lit(ids.sample)}], preview: true, previewMaxPoints: s.preview.maxPoints });
+    return true;
+  `));
 
   // 在页面里装一个观察器，记录 3D 视图**真的换了一片云**的时刻
   await cdp.eval(`
