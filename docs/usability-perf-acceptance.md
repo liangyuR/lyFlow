@@ -15,6 +15,8 @@
 | 右键「选中上游 / 下游」 | 沿连线把整条链选上，再合成、静音、整理、复制 | `node-run.test.mjs`；e2e `m4.mjs` 的 `suiteCompose` |
 | 最近用过的算子 | 算子搜索空查询时排最前、标「最近」；面板顶上一组 | `autoconnect.test.mjs`；e2e `m3.mjs` 的 `suiteDropToSearch` |
 | 复制粘贴走系统剪贴板 | 跨窗口、重开之后都粘得进来，整张图的 JSON 也认；静音的粘出来还是静音的 | `autoconnect.test.mjs`；e2e `m3.mjs` 的 `suiteEditing` |
+| 子图里复制 / 剪切 | 取当前这一层的节点（以前取顶层：复制拿不到，剪切删了本层的节点、剪贴板里却是错的） | e2e `m4.mjs` 的 `suiteNested` |
+| 复制带绑定的节点 | 被图参数绑定的参数在副本上写成此刻的有效值（Ctrl+C 与 Ctrl+D；以前回到算子默认值，副本的行为悄悄变了） | `graph-params-actions.test.mjs` |
 | 撤销 / 重做的提示 | toast 说撤掉的是哪一步 | `graph-params-actions.test.mjs`；e2e `m4.mjs` 的 `suiteLibrary` |
 | F 适配选中 | 把视图对准选中的节点（Ctrl+Shift+F 仍是全图） | e2e `m3.mjs` 的 `suiteEditing` |
 | 日志页 | 只看警告与错误、按节点或内容筛；节点写带层级的名字，点它打开到那一层 | e2e `m4.mjs` 的 `suiteNested` |
@@ -54,7 +56,7 @@
 ## 代码质量
 
 - clippy 清零（bridge、lyflow-client），MSRV 写准；gap 包全量构建的 5 条编译警告修掉。
-- 原来只有 e2e 间接碰到的核心逻辑补了单测：拖线挡错（类型、成环、Any 推导、置灰表）、算子搜索排序、GraphDoc → React Flow 映射、节点复制粘贴、删节点连带删边。编辑器的 node:test 从 86 到 101。
+- 原来只有 e2e 间接碰到的核心逻辑补了单测：拖线挡错（类型、成环、Any 推导、置灰表）、算子搜索排序、GraphDoc → React Flow 映射、节点复制粘贴、删节点连带删边。编辑器的 node:test 从 86 到 102。
 - `bridge/src/cli.rs` 的测试搬进 `cli/tests.rs`（原文件四千多行、一半是测试，搬的时候逐行对照过）；包测试里七份 `NullContext + Call` 统一成 `test::OpCall`；参数面板虚拟列表的 e2e 帮手收进 `page.mjs`；删掉五个没人调的导出。
 - e2e：工具栏宽度那组不再跟着 KUN10 数据一起失败（自己搭状态）；live preview 那组先预热预览缓存（量的才是「跟手」）；
   m4 的第一组起了名字（`--only` 挑得到）。

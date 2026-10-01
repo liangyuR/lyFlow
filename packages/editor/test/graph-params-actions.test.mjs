@@ -70,6 +70,16 @@ test("多选一起改（检查器）：同一个参数写进每个节点，一�
   assert.equal(node("n_voxel").params.leafSize, undefined);
 });
 
+test("Ctrl+D 复制被图参数绑定的节点：副本写着此刻的有效值（不带绑定），不再回到算子默认值", () => {
+  reset();
+  g().promoteToGraphParam("n_voxel", "leafSize");
+  g().setGraphParamDefault("leafSize", [0.03, 0.03, 0.03]);
+  const copy = g().duplicateNodes(["n_voxel"]).nodeIds[0];
+  assert.deepEqual(node(copy).params.leafSize, [0.03, 0.03, 0.03]);
+  assert.deepEqual(doc().params.leafSize.binds, ["n_voxel.leafSize"], "副本不进 binds：绑定是图参数的属性");
+  assert.equal(node("n_voxel").params.leafSize, undefined, "原件照旧由图参数提供");
+});
+
 test("纳入配方：当前有效值成为 default、规格从 manifest 抄、节点显式值被删；一次撤销完全还原", () => {
   reset();
   const before = structuredClone(doc());

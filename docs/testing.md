@@ -10,7 +10,7 @@
 |---|---|---|---|
 | C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 181 例；`LYFLOW_PACKS=dts` 189 例；`LYFLOW_PACKS=gap;dts` 271 例 | 分钟级（含编译） |
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 154（纯平台构建 95 通过 / 59 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
-| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 101 | 秒级 |
+| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 102 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 32 | 秒级 |
 | 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 794 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 33 条断言（精简前 58） | 几分钟 |
@@ -51,7 +51,7 @@
 | 图像算子（std-image：adapter 零拷贝与 RGB 顺序、读写往返含中文路径、各算子数值、像素单位的几何、单通道契约；深度图 ↔ 点云的反投影、来回一趟逐像素相同、z 缓冲；图像 → 张量 → ONNX → 图像的推理链路，同样要 `LYFLOW_TEST_ONNX_MODEL`） | `packs/std-image/tests/test_image_ops.cpp`；e2e `peek.mjs` 图像组的最后一段（真 app 里灰度 → Otsu → 区域统计、掩膜边是单通道 u8） |
 | dts 面差（与宿主 Python 旧算法的对照、现场轮廓） | `packs/dts/tests/test_dts_ops.cpp`（夹具 `tests/data/*.h`） |
 | gap 测量、积木、导入、模型 ROI | `packs/gap/tests/*`；e2e `gap.mjs`、`m8b.mjs`、`m8c.mjs`、`params_p4.mjs`（编辑器 vs CLI 逐位相同） |
-| 2D 拖框（文件底图与输入端口底图）、自动连线、片段；加节点记进「最近用过」（搜索弹层与面板空查询时排最前）；节点复制粘贴（id 重映射、内部连线、平移、静音照旧；系统剪贴板里带标记的 JSON 与整张图的 JSON，真按键在 e2e `m3.mjs` 的 `suiteEditing`）；删节点连带删边（P0 #5）；F 适配选中（e2e `suiteEditing`） | `packages/editor/test/autoconnect.test.mjs`、`roiframes.test.mjs`；e2e `m8b.mjs`、`m8c.mjs`；「最近用过」的真界面在 e2e `m3.mjs` 的 `suiteDropToSearch` 末尾 |
+| 2D 拖框（文件底图与输入端口底图）、自动连线、片段；加节点记进「最近用过」（搜索弹层与面板空查询时排最前）；节点复制粘贴（id 重映射、内部连线、平移、静音照旧；系统剪贴板里带标记的 JSON 与整张图的 JSON，真按键在 e2e `m3.mjs` 的 `suiteEditing`，子图里复制取当前这一层在 e2e `m4.mjs` 的 `suiteNested`；被图参数绑定的参数在副本上写成有效值在 `graph-params-actions.test.mjs`）；删节点连带删边（P0 #5）；F 适配选中（e2e `suiteEditing`） | `packages/editor/test/autoconnect.test.mjs`、`roiframes.test.mjs`；e2e `m8b.mjs`、`m8c.mjs`；「最近用过」的真界面在 e2e `m3.mjs` 的 `suiteDropToSearch` 末尾 |
 | 两节点输出对比（差异表的配对、每种类型的行、容差、全量点数；进入即冻结、换 B 解冻、B 被删自动退出、快捷键；两栏内容合并） | `packages/editor/test/compare-diff.test.mjs`、`compare-store.test.mjs`、`view-rule.test.mjs`；e2e `compare.mjs`（两栏、冻结后重跑只有 A 变、共用相机、右键换 B、A 跟随、拖框互斥、两侧都只有值）。差异表每种类型的数值只在单测里钉 |
 | 预览里选点与测距（屏幕空间最近点、看不见的点跳过、同距取近、一组两点、readout 的单位与行） | `packages/editor/test/pick.test.mjs`；快捷键 `M` 不撞 `Ctrl+M` 在 `compare-store.test.mjs` 的快捷键那条；e2e `m3.mjs` 的测量组（真单击选点、拖动不选、重跑标过期、换节点清掉）、`compare.mjs` 一句（A、B 两栏各点一次） |
 | 点云缓存的并发请求合并（同键只取一次、失败不留占位） | `packages/editor/test/cloud-cache.test.mjs`；e2e `m4.mjs` §2 的「事件到渲染」（拖动中预览运行的延迟中位数） |

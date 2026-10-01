@@ -9,6 +9,7 @@ import {
   graphParamNameProblem,
   graphParamValue,
   joinBind,
+  materializeBindings,
   resolveGraphBinding,
   specFromParam,
   splitBind,
@@ -920,7 +921,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const { doc } = get();
       const lvl = level(doc);
       const kept = new Set(ids);
-      const nodes = lvl.nodes.filter((n) => kept.has(n.id));
+      // 被图参数绑定的参数写成此刻的有效值：副本不带绑定，原来会悄悄回到算子默认值
+      const nodes = materializeBindings(
+        doc,
+        useUiStore.getState().path,
+        lvl.nodes.filter((n) => kept.has(n.id)),
+        ctx(doc).operatorsById,
+        currentOverrides(),
+      );
       if (nodes.length === 0) return { nodeIds: [] };
       const edges = lvl.edges.filter((e) => kept.has(e.from.node) && kept.has(e.to.node));
       const origin = nodes.reduce(

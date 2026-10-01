@@ -83,6 +83,31 @@ export async function pressKey(cdp, key, windowsVirtualKeyCode, mods = []) {
 export const pressCtrl = (cdp, letter, extra = []) =>
   pressKey(cdp, letter.toLowerCase(), letter.toUpperCase().charCodeAt(0), ["ctrl", ...extra]);
 
+/** e2e 不动用户的系统剪贴板：写进页面里的桩 `window.__lyClip`。Ctrl+V 照样真按、走浏览器的 paste 事件，
+ *  只是事件里读到的换成桩里的那一段。readText 只记次数（`window.__lyClipReads`）：
+ *  Ctrl+V 不该用它 —— WebView2 里它会弹一个「想要查看剪贴板」的框。用完 restoreClipboard。 */
+export const stubClipboard = (cdp) =>
+  cdp.eval(`
+    if (!window.__lyClipSaved) window.__lyClipSaved = { getData: DataTransfer.prototype.getData };
+    window.__lyClip = '';
+    window.__lyClipReads = 0;
+    navigator.clipboard.writeText = async (t) => { window.__lyClip = t; };
+    navigator.clipboard.readText = async () => { window.__lyClipReads += 1; return window.__lyClip; };
+    DataTransfer.prototype.getData = function (type) {
+      return type === 'text/plain' ? window.__lyClip : window.__lyClipSaved.getData.call(this, type);
+    };
+    return true;
+  `);
+
+export const restoreClipboard = (cdp) =>
+  cdp.eval(`
+    delete navigator.clipboard.writeText;
+    delete navigator.clipboard.readText;
+    if (window.__lyClipSaved) DataTransfer.prototype.getData = window.__lyClipSaved.getData;
+    delete window.__lyClipSaved;
+    return true;
+  `);
+
 export const pressF5 = (cdp) => pressKey(cdp, "F5", 116);
 export const pressShiftF5 = (cdp) => pressKey(cdp, "F5", 116, ["shift"]);
 export const pressEscape = (cdp) => pressKey(cdp, "Escape", 27);

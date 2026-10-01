@@ -20,9 +20,11 @@ import {
   pressF5,
   pressKey,
   replan,
+  restoreClipboard,
   runAndWait,
   select,
   selectAndReadViewer,
+  stubClipboard,
 } from "./page.mjs";
 
 /** 一条五节点直链：生成 → 裁剪 → 体素 → 去噪 → 直通。合成的对象是中间三个。 */
@@ -391,6 +393,31 @@ async function suiteNested(cdp, report) {
   const deep = await snapshot(cdp);
   report.eq("能进到第二层", deep.path.length, 2);
   report.eq("第二层的事件前缀是两段", deep.pathPrefix, `${outer.nodeId}/${inner.nodeId}/`);
+  // 子图里复制粘贴：复制的是这一层的节点（以前取的是顶层的 doc.nodes，在这里一个都拿不到）
+  const levelOps = () => cdp.eval(`return window.__lyflow.snapshot().level.nodes.map((id) =>
+    window.__lyflow.stores.graph.getState().doc.subgraphs[${lit(inner.subgraphId)}].nodes.find((n) => n.id === id)?.op ?? null);`);
+  const opsBefore = await levelOps();
+  await stubClipboard(cdp);
+  await cdp.eval(`
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    window.__lyflow.stores.ui.getState().setSelection([${lit(ids.voxel)}], []);
+    return true;
+  `);
+  await pressCtrl(cdp, "c");
+  await sleep(150);
+  await pressCtrl(cdp, "v");
+  await sleep(400);
+  await restoreClipboard(cdp);
+  const opsAfter = await levelOps();
+  const pasted = opsAfter.length === opsBefore.length + 1;
+  report.ok("在第二层里复制粘贴：多出来的是这一层的那个体素节点", pasted &&
+    opsAfter.filter((o) => o === "filter.voxel_grid").length === opsBefore.filter((o) => o === "filter.voxel_grid").length + 1,
+    JSON.stringify({ opsBefore, opsAfter }));
+  // 没粘上就别撤：撤掉的会是外面那次合成子图，后面几条全跟着错
+  if (pasted) {
+    await pressCtrl(cdp, "z");
+    await sleep(200);
+  }
   await pressEscape(cdp);
   await pressEscape(cdp);
   await sleep(150);

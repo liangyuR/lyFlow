@@ -5,14 +5,17 @@ import { useEffect, type RefObject } from "react";
 
 import { matchShortcut } from "../lib/keymap";
 import { subgraphIdOf } from "../types/graph";
-import { levelOf } from "../lib/subgraph";
+import { augmentOperators, levelOf } from "../lib/subgraph";
 import { copyText, readClipboard } from "../lib/clipboard";
+import { materializeBindings } from "../lib/graphParams";
 import { stepHistory } from "../lib/history";
 import { decodeNodeClipboard, encodeNodeClipboard } from "../lib/nodeClipboard";
 import { revealError } from "../lib/revealError";
 import { useCompareStore } from "../store/compare";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
+import { useManifestStore } from "../store/manifest";
+import { currentOverrides } from "../store/recipe";
 import { usePeekStore, type PeekWindow } from "../store/peek";
 import { useUiStore } from "../store/ui";
 import { useModalStore } from "../lib/modal";
@@ -144,9 +147,19 @@ export function useShortcuts(
           if (ids.size === 0) return;
           e.preventDefault();
           const doc = graph.doc;
-          const nodes = doc.nodes.filter((n) => ids.has(n.id));
+          // 从当前这一层取：选区是本层的 id。以前取的是顶层的 doc.nodes —— 在子图里复制要么一个都没有，
+          // 要么拿到顶层同名的那个节点；剪切更糟，剪贴板里是错的，本层的节点却真删了
+          const level = levelOf(doc, ui.path);
+          const ops = augmentOperators(useManifestStore.getState().operatorsById, doc.subgraphs);
+          const nodes = materializeBindings(
+            doc,
+            ui.path,
+            level.nodes.filter((n) => ids.has(n.id)),
+            ops,
+            currentOverrides(),
+          );
           // 只带走两端都在选区内的边 —— 粘贴时内部连线得以保留
-          const edges = doc.edges.filter((edge) => ids.has(edge.from.node) && ids.has(edge.to.node));
+          const edges = level.edges.filter((edge) => ids.has(edge.from.node) && ids.has(edge.to.node));
           const clip = { nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) };
           ui.setClipboard(clip);
           // 也写一份到系统剪贴板：另一个窗口、重开之后照样粘得进来（写不进就只有应用内这一份）

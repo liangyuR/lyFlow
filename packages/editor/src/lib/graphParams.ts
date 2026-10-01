@@ -144,6 +144,22 @@ export function withBoundValues(
   return params ? { ...node, params } : node;
 }
 
+/** 复制节点（Ctrl+C / Ctrl+D）时用：被图参数绑定的参数写成此刻的有效值（图参数的值，带当前配方的覆盖）。
+ *  绑定是图参数的属性、不跟着副本走（param-recipe P1 验收第 8 条）—— 以前副本上的这个参数回到算子默认值，
+ *  复制出来的节点行为悄悄变了。没有绑定的节点原样返回。 */
+export function materializeBindings(
+  doc: GraphDoc,
+  path: SubPath,
+  nodes: readonly GraphNode[],
+  ops: ReadonlyMap<string, OperatorDesc>,
+  overrides: Readonly<Record<string, unknown>>,
+): GraphNode[] {
+  return nodes.map((n) => {
+    const op = ops.get(n.op);
+    return op ? withBoundValues(doc, path, n, op.params.map((p) => p.name), overrides) : n;
+  });
+}
+
 /** 第一个被绑定目标在 manifest 里的声明。老格式的图参数没有 type，规格就借它；
  *  参数面板「已改动」的判据（与算子默认不同）也拿它的 default 比。 */
 export function boundDecl(

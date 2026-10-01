@@ -165,6 +165,6 @@ e2e 期间不再动 `packages/`、`app/`、`bridge/` 下的文件。最后一次
 7. **顺手堵上的几个 `unknown_bind` 陷阱**：删节点摘掉指着它的 bind；合成子图时被绑定的参数自动提升成外参、bind 改指到
    新实例；解散子图时 bind 改指回内联出来的内参（不再往内参上写会撞 `param_conflict` 的显式值）；取消子图提升时摘掉
    指着那个外参的 bind。
-8. **没做的**：复制粘贴 / Ctrl+D 出来的副本不带绑定（绑定是图参数的属性，不是节点的），副本上的这个参数回到算子默认值；
+8. **没做的**：复制粘贴 / Ctrl+D 出来的副本不带绑定（绑定是图参数的属性，不是节点的），副本上的这个参数回到算子默认值（2026-10-02 起副本上写的是复制那一刻的有效值，仍不带绑定，见 `graphParams.ts` 的 `materializeBindings`）；
    宿主经 HTTP 的 MCP 客户端（`packages/mcp`）没加 params（P4）。
 9. `validate_schema.py` 原来用 `jsonschema.validate`，跨文件 `$ref` 会触发联网取 `$id`（github 404）；改成本地 registry。
