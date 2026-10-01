@@ -32,6 +32,9 @@ export interface NodeExecution {
   stats?: NodeStats | undefined;
   /** 聚合出来的（子图节点）：内部一共几个节点、跑完了几个。 */
   children?: { total: number; finished: number } | undefined;
+  /** 聚合出来的（子图节点）：errors 里第一条来自哪个内部节点（事件里的完整路径 id）。
+   *  节点上的错误文字据此写明是谁、点进去直接打开到它（顶层原来只看得到「这个子图红了」）。 */
+  errorSource?: string | undefined;
 }
 
 export interface LogEntry {
@@ -479,15 +482,18 @@ const RANK: Record<NodeState, number> = {
 
 /** 子图节点的状态 = 内部节点的归约：任一 error → error，任一 running → running，
  *  全 done/skipped → done（全 skipped 才算 skipped）。 */
-function reduceExecutions(list: readonly NodeExecution[]): NodeExecution {
+function reduceExecutions(list: readonly NodeExecution[], ids: readonly string[]): NodeExecution {
   let state: NodeState = "skipped";
   let duration = 0;
   let finished = 0;
   const errors: Diagnostic[] = [];
-  for (const n of list) {
+  let errorSource: string | undefined;
+  for (let i = 0; i < list.length; i += 1) {
+    const n = list[i]!;
     if (RANK[n.state] > RANK[state]) state = n.state;
     duration += n.durationMs ?? 0;
     if (n.state === "done" || n.state === "skipped") finished += 1;
+    if (n.errors.length > 0) errorSource ??= n.errorSource ?? ids[i];
     errors.push(...n.errors);
   }
   // 全 done/skipped → done（全 skipped 才算 skipped）；有跑完的但还有没开始的 → pending
@@ -502,6 +508,7 @@ function reduceExecutions(list: readonly NodeExecution[]): NodeExecution {
     progress: list.length > 0 ? finished / list.length : undefined,
     errors,
     children: { total: list.length, finished },
+    errorSource,
   };
 }
 
@@ -515,7 +522,8 @@ function sameAggregate(a: NodeExecution | undefined, b: NodeExecution): boolean 
     a.message === b.message &&
     a.errors.length === b.errors.length &&
     a.children?.finished === b.children?.finished &&
-    a.children?.total === b.children?.total
+    a.children?.total === b.children?.total &&
+    a.errorSource === b.errorSource
   );
 }
 
@@ -535,22 +543,27 @@ export function aggregatedNodes(
   const cached = aggCache.get(path);
   if (cached && cached.nodes === nodes) return cached.result;
   const prefix = pathPrefix(path);
-  const groups = new Map<string, NodeExecution[]>();
+  const groups = new Map<string, { list: NodeExecution[]; ids: string[] }>();
   for (const [id, exec] of nodes) {
     if (prefix && !id.startsWith(prefix)) continue;
     const rest = id.slice(prefix.length);
     if (!rest) continue;
     const slash = rest.indexOf("/");
     const local = slash < 0 ? rest : rest.slice(0, slash);
-    const list = groups.get(local);
-    if (list) list.push(exec);
-    else groups.set(local, [exec]);
+    const group = groups.get(local);
+    if (group) {
+      group.list.push(exec);
+      group.ids.push(id);
+    } else {
+      groups.set(local, { list: [exec], ids: [id] });
+    }
   }
   const previous = cached?.result;
   const result = new Map<string, NodeExecution>();
-  for (const [local, list] of groups) {
-    // 叶子节点直接复用原对象，引用不变，节点组件就不会白重渲
-    const merged = list.length === 1 ? list[0]! : reduceExecutions(list);
+  for (const [local, { list, ids }] of groups) {
+    // 叶子节点直接复用原对象，引用不变，节点组件就不会白重渲。只有一个内部节点的子图也要归约 ——
+    // 否则它的错误不知道是谁的
+    const merged = list.length === 1 && ids[0] === prefix + local ? list[0]! : reduceExecutions(list, ids);
     const prev = previous?.get(local);
     result.set(local, prev && sameAggregate(prev, merged) ? prev : merged);
   }

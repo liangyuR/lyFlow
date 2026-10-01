@@ -4,7 +4,7 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { memo, useEffect, useRef, useState } from "react";
 
-import { augmentOperators } from "../lib/subgraph";
+import { augmentOperators, describeEventNode } from "../lib/subgraph";
 import { ANY } from "../lib/typecheck";
 import type { OperatorNodeData } from "../lib/mapping";
 import { useNodeStale } from "../store/cache";
@@ -173,6 +173,15 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   const fx = useRef<HTMLSpanElement>(null);
   const head = useRef<HTMLDivElement>(null);
   useNodeMotion(id, exec?.state ?? "idle", { root, fx, head });
+  // 子图 / 库算子节点上的错误来自内部的某个节点（ADR-0010 的路径 id）：写明是谁，点了打开到它。
+  // selector 只在有错误来源时才去解析，返回的是一个字符串 —— 节点不会因为文档的别处变了而重渲。
+  // 同样放在早退之前（hook 的个数不能变：算子缺失 ↔ 有算子之间切换时 React 会直接崩）
+  const errorSource = exec?.errorSource;
+  const errorWho = useGraphStore((s) => {
+    if (!errorSource) return null;
+    const names = describeEventNode(s.doc, base, errorSource).names;
+    return names[names.length - 1] ?? null;
+  });
 
   // 算子在当前 core 里不存在：可能是打开了别人存的图，也可能是热重载删掉了它。
   // 必须显式画出来 —— 静默渲染成空节点会让人以为图坏了（1.5）。
@@ -195,6 +204,11 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   const rows = Math.max(op.inputs.length, op.outputs.length);
   const state = exec?.state ?? "idle";
   const errorText = exec?.errors[0]?.message;
+  const revealError = () => {
+    if (!errorSource) return;
+    const r = describeEventNode(useGraphStore.getState().doc, base, errorSource).reveal;
+    if (r) useUiStore.getState().revealNode(r.path, r.localId, r.exact ? exec?.errors[0]?.paramPath : undefined);
+  };
   // 只被惰性端口依赖、这次没被 demand（ADR-0016）。画成半透明，与「命中缓存」区分开。
   const notDemanded = exec?.stats?.reason === "not_demanded";
   const classes = [
@@ -341,7 +355,22 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
           {exec?.durationMs != null && (
             <span className="node__time">{formatDuration(exec.durationMs)}</span>
           )}
-          {errorText && <span className="node__err" title={errorText}>{errorText}</span>}
+          {errorText && errorWho ? (
+            <button
+              type="button"
+              className="node__err node__err--link nodrag"
+              data-testid={`node-err-${id}`}
+              title={`${errorWho}：${errorText} —— 点此打开到它`}
+              onClick={(e) => {
+                e.stopPropagation();
+                revealError();
+              }}
+            >
+              {errorWho}：{errorText}
+            </button>
+          ) : (
+            errorText && <span className="node__err" title={errorText}>{errorText}</span>
+          )}
         </div>
       )}
 

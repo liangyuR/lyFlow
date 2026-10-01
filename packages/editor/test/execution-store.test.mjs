@@ -4,7 +4,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { onNodeTransition, useExecutionStore } from "../src/store/execution.ts";
+import { describeEventNode, locateEventNode } from "../src/lib/subgraph.ts";
+import { aggregatedNodes, onNodeTransition, useExecutionStore } from "../src/store/execution.ts";
+import { useUiStore } from "../src/store/ui.ts";
 
 let seqs = new Map();
 const ev = (runId, kind, rest = {}) => {
@@ -77,4 +79,77 @@ test("排队的那次没开跑就收场：视图留在被抢占的那次，它�
   } finally {
     off();
   }
+});
+
+// 子图内部节点的错误（事件 id 是路径，ADR-0010）：顶层原来只看得到「这个子图红了」，要自己进去找
+const sgDoc = {
+  schemaVersion: 1,
+  id: "doc",
+  nodes: [
+    { id: "top", op: "filter.voxel_grid" },
+    { id: "a", op: "sub:s1", ui: { title: "预处理" } },
+    { id: "lib1", op: "lib.denoise" },
+  ],
+  edges: [],
+  subgraphs: {
+    s1: { name: "S1", nodes: [{ id: "v", op: "filter.voxel_grid" }, { id: "n", op: "sub:s2" }], edges: [], inputs: [], outputs: [], params: [] },
+    s2: { name: "去噪", nodes: [{ id: "x", op: "filter.statistical_outlier", ui: { title: "离群点" } }], edges: [], inputs: [], outputs: [], params: [] },
+  },
+};
+const sgOps = new Map([
+  ["filter.voxel_grid", { label: "体素降采样" }],
+  ["filter.statistical_outlier", { label: "统计离群点剔除" }],
+  ["lib.denoise", { label: "库去噪" }],
+]);
+
+test("事件 id → 打开到哪一层、选中谁、一层层叫什么", () => {
+  const cases = [
+    // [事件 id, 路径（子图节点 id）, 选中, 名字, 落到的就是它本身]
+    ["top", [], "top", ["体素降采样"], true],
+    ["a/v", ["a"], "v", ["预处理", "体素降采样"], true],
+    ["a/n/x", ["a", "n"], "x", ["预处理", "去噪", "离群点"], true],
+    // 库算子的内部进不去：停在库算子身上，参数红框不标
+    ["lib1/inner", [], "lib1", ["库去噪"], false],
+  ];
+  for (const [id, path, local, names, exact] of cases) {
+    const d = describeEventNode(sgDoc, sgOps, id);
+    assert.deepEqual(
+      [d.reveal?.path.map((seg) => seg.nodeId), d.reveal?.localId, d.names, d.reveal?.exact],
+      [path, local, names, exact],
+      id,
+    );
+  }
+  assert.equal(locateEventNode(sgDoc, "gone/x"), null, "节点被删了");
+  assert.deepEqual(locateEventNode(sgDoc, "a/n/x").path, [{ nodeId: "a", subgraphId: "s1" }, { nodeId: "n", subgraphId: "s2" }]);
+});
+
+test("聚合出来的子图节点记着错误来自哪个内部节点；只有一个内部节点的子图也是", () => {
+  const err = { phase: "execute", code: "bad_param", message: "Leaf size 太小", paramPath: "leafSize" };
+  const nodes = new Map([
+    ["top", { state: "done", errors: [] }],
+    ["a/v", { state: "done", errors: [] }],
+    ["a/n/x", { state: "error", errors: [err] }],
+    ["b/only", { state: "error", errors: [err] }],
+  ]);
+  const top = aggregatedNodes([], nodes);
+  assert.equal(top.get("top"), nodes.get("top"), "叶子节点原样复用");
+  assert.deepEqual([top.get("a").state, top.get("a").errorSource, top.get("a").children], ["error", "a/n/x", { total: 2, finished: 1 }]);
+  assert.deepEqual([top.get("b").errorSource, top.get("b").children], ["b/only", { total: 1, finished: 0 }]);
+  // 进到 a 这一层：n 是它的子图节点，来源还是那个完整 id
+  assert.equal(aggregatedNodes([{ nodeId: "a", subgraphId: "s1" }], nodes).get("n").errorSource, "a/n/x");
+});
+
+test("revealNode：打开到那一层、选中、请画布移过去；同一个节点再点一次也要动", () => {
+  useUiStore.setState({ path: [], selectedNodes: new Set(), focusedDiagnostic: null, revealRequest: null });
+  const path = [{ nodeId: "a", subgraphId: "s1" }];
+  useUiStore.getState().revealNode(path, "v", "leafSize");
+  let s = useUiStore.getState();
+  assert.deepEqual([s.path, [...s.selectedNodes], s.focusedDiagnostic, s.revealRequest?.nodeId],
+    [path, ["v"], { nodeId: "v", paramPath: "leafSize" }, "v"]);
+  const seq = s.revealRequest.seq;
+  const samePath = s.path;
+  useUiStore.getState().revealNode(path, "v");
+  s = useUiStore.getState();
+  assert.equal(s.revealRequest.seq, seq + 1);
+  assert.equal(s.path, samePath, "同一层不换路径对象");
 });

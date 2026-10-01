@@ -3,6 +3,7 @@
 
 import { useEffect } from "react";
 
+import { describeEventNode } from "../lib/subgraph";
 import { clearCache, formatBytes, refreshCacheStats, useCacheStore } from "../store/cache";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
@@ -141,16 +142,20 @@ function DiagnosticsTab() {
     <SummaryHeader />
     <ul className="drawer__diags" data-testid="drawer-diagnostics">
       {items.map((d, i) => {
-        const node = doc.nodes.find((n) => n.id === d.nodeId);
-        const op = node ? label.get(node.op) : undefined;
+        // 事件 id 是路径（ADR-0010）：子图里的节点带上一层层的子图名，点了打开到那一层
+        const target = describeEventNode(doc, label, d.nodeId);
         return (
           <li key={`${d.nodeId}-${i}`}>
             <button
               type="button"
               data-testid={`diag-${d.nodeId}`}
-              onClick={() => useUiStore.getState().focusDiagnostic(d.nodeId, d.paramPath)}
+              onClick={() => {
+                const r = target.reveal;
+                if (r) useUiStore.getState().revealNode(r.path, r.localId, r.exact ? d.paramPath : undefined);
+                else useUiStore.getState().focusDiagnostic(d.nodeId, d.paramPath);
+              }}
             >
-              <span className="drawer__diag-node">{node?.ui?.title ?? op?.label ?? d.nodeId}</span>
+              <span className="drawer__diag-node">{target.names.join(" › ")}</span>
               <code className="drawer__diag-code">{d.code}</code>
               {d.paramPath && <code className="drawer__diag-param">{d.paramPath}</code>}
               <span className="drawer__diag-text">{d.message}</span>

@@ -937,12 +937,65 @@ async function suiteM3Tails(cdp, report, ws) {
   );
 }
 
+/** 子图内部节点出错（事件 id 是路径，ADR-0010）：顶层原来只看得到「这个子图红了」、诊断里是一串路径 id，
+ *  点诊断也进不去子图（选中的是一个顶层没有的 id）。 */
+async function suiteInnerError(cdp, report) {
+  report.section("§1.6 子图内部出错：子图节点上写明是哪个内部节点，点它或点诊断都打开到那个节点");
+  await newDoc(cdp);
+  const ids = await buildGraph(
+    cdp,
+    [
+      { key: "gen", op: "gen.synthetic", params: { pointCount: 2000 } },
+      { key: "voxel", op: "filter.voxel_grid", params: { leafSize: [0, 0.01, 0.01] } },
+      { key: "sor", op: "filter.statistical_outlier", params: { meanK: 10 } },
+    ],
+    [
+      { from: ["gen", "cloud"], to: ["voxel", "cloud"] },
+      { from: ["voxel", "cloud"], to: ["sor", "cloud"] },
+    ],
+  );
+  const composed = await compose(cdp, [ids.voxel, ids.sor]);
+  mustOk(Boolean(composed?.nodeId), "voxel 与 sor 合成了子图", JSON.stringify(composed));
+  // 坏参数让这次运行失败；失败本身不单独断言，下面子图节点与诊断里写着的那条就是证据
+  await runAndWait(cdp, () => pressF5(cdp));
+  const voxelLabel = await cdp.eval(`return window.__lyflow.stores.manifest.getState().operatorsById.get('filter.voxel_grid').label;`);
+  const where = () => cdp.eval(`
+    const s = window.__lyflow.stores.ui.getState();
+    return { path: s.path.map((p) => p.nodeId), selected: [...s.selectedNodes], param: s.focusedDiagnostic?.paramPath ?? null };
+  `);
+
+  const err = await cdp.eval(`return document.querySelector('[data-testid="node-err-${composed.nodeId}"]')?.textContent ?? null;`);
+  report.ok(`子图节点上的错误写明是内部的「${voxelLabel}」`, typeof err === "string" && err.startsWith(`${voxelLabel}：`), String(err));
+  await cdp.eval(`document.querySelector('[data-testid="node-err-${composed.nodeId}"]').click(); return true;`);
+  await sleep(300);
+  report.eq("点它：打开到子图、选中出错的那个节点、参数红框标在 leafSize 上", await where(),
+    { path: [composed.nodeId], selected: [ids.voxel], param: "leafSize" });
+
+  await cdp.eval(`window.__lyflow.stores.ui.getState().exitTo(0); window.__lyflow.stores.ui.getState().toggleDrawer('diagnostics'); return true;`);
+  await sleep(300);
+  const item = `diag-${composed.nodeId}/${ids.voxel}`;
+  const name = await cdp.eval(`return document.querySelector('[data-testid="${item}"] .drawer__diag-node')?.textContent ?? null;`);
+  report.ok("诊断里的名字带着它所在的子图（不是一串路径 id）", typeof name === "string" && name.includes(" › ") && name.endsWith(voxelLabel), String(name));
+  await cdp.eval(`document.querySelector('[data-testid="${item}"]').click(); return true;`);
+  await sleep(300);
+  report.eq("点诊断：同样打开到那个节点", await where(), { path: [composed.nodeId], selected: [ids.voxel], param: "leafSize" });
+  await cdp.eval(`window.__lyflow.stores.ui.getState().exitTo(0); window.__lyflow.stores.ui.setState({ drawer: null }); return true;`);
+
+  await sleep(200);
+  await cdp.eval(`document.querySelector('[data-testid="run-summary-error"]').click(); return true;`);
+  await sleep(300);
+  report.eq("点工具栏的「error 1」：定位到第一个出错的节点（在子图里也打开进去）", await where(),
+    { path: [composed.nodeId], selected: [ids.voxel], param: "leafSize" });
+  await cdp.eval(`window.__lyflow.stores.ui.getState().exitTo(0); return true;`);
+}
+
 export const m4Suites = [
   async (cdp, report) => {
     const fixture = await suiteCompose(cdp, report);
     await suiteNavigate(cdp, report, fixture);
     await suitePromote(cdp, report, fixture);
   },
+  suiteInnerError,
   suiteShortcuts,
   suiteNested,
   suiteRecursion,

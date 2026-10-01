@@ -773,6 +773,19 @@
   max-width: 160px;
 }
 
+/* 子图 / 库算子上的错误来自内部某个节点：点了打开到它 */
+.node__err--link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.node__err--link:hover { color: #ffc4c4; }
+
 /* --------------------------------------------------------------- 右键菜单 */
 
 .ctxmenu {
@@ -831,6 +844,17 @@
 
 .toolbar__stat--done      { color: #9ce6ad; }
 .toolbar__stat--error     { color: #ff9a9a; }
+/* error N 可以点：定位到第一个出错的节点 */
+.toolbar__stat--link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.toolbar__stat--link:hover { color: #ffc4c4; }
 .toolbar__stat--cancelled { color: #ffd08a; }
 .toolbar__stat--stale     { color: var(--lyflow-fg-2); font-style: italic; }
 

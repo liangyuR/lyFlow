@@ -706,6 +706,17 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     // fitView 的引用是稳定的（useReactFlow 返回的都是），列进依赖只是为了 lint
   }, [fitView, motionOn]);
 
+  // 诊断、子图节点上的错误文字点进来（ui.revealNode）：等这一层画出来，把那个节点移进视野。
+  // 不放大过 1:1 —— 只框一个节点的话 fitView 会把它放得满屏
+  const revealRequest = useUiStore((s) => s.revealRequest);
+  useEffect(() => {
+    if (!revealRequest) return;
+    const timer = setTimeout(() => {
+      void fitView({ nodes: [{ id: revealRequest.nodeId }], duration: viewportMs(motionOn), maxZoom: 1, padding: 0.6 });
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [revealRequest, fitView, motionOn]);
+
   const onNodeDoubleClick = useCallback(
     (e: React.MouseEvent, node: { id: string }) => {
       // 双击标题改名的事件先冒泡到这里，标题那一片已经 stopPropagation 过了

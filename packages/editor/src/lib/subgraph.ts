@@ -54,6 +54,53 @@ export function levelOf(doc: GraphDoc, path: SubPath): GraphLevel {
   return def ?? doc;
 }
 
+/** 事件里的完整 id（「子图节点/…/节点」）→ 要打开到哪一层、选中那一层的哪个节点。
+ *  诊断抽屉与子图节点上的错误文字点进去时用：错误挂在路径 id 上（ADR-0010），顶层只看得到「这个子图红了」。
+ *  库算子的内部进不去（定义在库文件里，只读）：停在库算子节点本身。路径对不上图（节点被删了）时返回 null。 */
+export function locateEventNode(
+  doc: GraphDoc,
+  eventId: string,
+): { path: PathSegment[]; localId: string } | null {
+  const parts = eventId.split("/");
+  const path: PathSegment[] = [];
+  let level: GraphLevel = doc;
+  for (let i = 0; i < parts.length; i += 1) {
+    const node = level.nodes.find((n) => n.id === parts[i]);
+    if (!node) return null;
+    if (i === parts.length - 1) return { path, localId: node.id };
+    const subgraphId = subgraphIdOf(node.op);
+    const def = subgraphId ? doc.subgraphs?.[subgraphId] : undefined;
+    if (!subgraphId || !def) return { path, localId: node.id };
+    path.push({ nodeId: node.id, subgraphId });
+    level = def;
+  }
+  return null;
+}
+
+/** 节点在界面上叫什么：起过标题用标题，子图节点用子图的名字，其余用算子名。 */
+export function nodeTitle(doc: GraphDoc, node: GraphNode, ops: ReadonlyMap<string, OperatorDesc>): string {
+  const sub = subgraphIdOf(node.op);
+  return node.ui?.title ?? (sub ? doc.subgraphs?.[sub]?.name : undefined) ?? ops.get(node.op)?.label ?? node.id;
+}
+
+/** 事件 id 指着的节点：一层层的名字（最后一个是它自己）与 locateEventNode 的结果。
+ *  exact = 落到的就是它本身；停在库算子身上时为 false（那时参数红框不该标，参数是库算子内部节点的）。 */
+export function describeEventNode(
+  doc: GraphDoc,
+  ops: ReadonlyMap<string, OperatorDesc>,
+  eventId: string,
+): { names: string[]; reveal: { path: PathSegment[]; localId: string; exact: boolean } | null } {
+  const at = locateEventNode(doc, eventId);
+  if (!at) return { names: [eventId], reveal: null };
+  const names = at.path.map((seg, k) => {
+    const host = levelOf(doc, at.path.slice(0, k)).nodes.find((n) => n.id === seg.nodeId);
+    return host ? nodeTitle(doc, host, ops) : seg.nodeId;
+  });
+  const node = levelOf(doc, at.path).nodes.find((n) => n.id === at.localId);
+  names.push(node ? nodeTitle(doc, node, ops) : at.localId);
+  return { names, reveal: { ...at, exact: fullId(at.path, at.localId) === eventId } };
+}
+
 /** 路径还指得到东西吗。删掉子图节点之后要靠它把用户弹回上一层。 */
 export function pathIsValid(doc: GraphDoc, path: SubPath): boolean {
   let level: GraphLevel = doc;

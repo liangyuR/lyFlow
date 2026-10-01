@@ -108,6 +108,8 @@ interface UiState {
   helpOpen: boolean;
   /** 抽屉里点了某条诊断 → 定位到这个节点/参数。 */
   focusedDiagnostic: { nodeId: string; paramPath?: string | undefined } | null;
+  /** 画布要把哪个节点移进视野（revealNode 发起，GraphCanvas 执行）。seq 每次加一：同一个节点再点一次也要动。 */
+  revealRequest: { nodeId: string; seq: number } | null;
 
   /** 自动连线没能唯一确定的那些输入与它们的候选输出（m8-plan L13），键都是 `nodeId:portName`。
    *  端口据此高亮；手动连上、点空白处或下一次自动连线时清掉。null = 没有。 */
@@ -134,6 +136,9 @@ interface UiState {
   toggleDrawer(tab?: DrawerTab): void;
   setHelpOpen(open: boolean): void;
   focusDiagnostic(nodeId: string, paramPath?: string): void;
+  /** 打开到 path 那一层、选中 localId，并请画布把它移进视野（revealRequest）。诊断抽屉、子图节点上的
+   *  错误文字点进去时用：出错的节点可能在子图里，也可能在画面外。paramPath 交给 Inspector 标红框。 */
+  revealNode(path: SubPath, localId: string, paramPath?: string): void;
 
   /** 进入一个子图节点。选中会被清掉 —— 层级换了，旧的选中没有意义。 */
   enterSubgraph(segment: PathSegment): void;
@@ -179,6 +184,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   viewerContentPick: null,
   helpOpen: false,
   focusedDiagnostic: null,
+  revealRequest: null,
   autoHint: null,
   roiFrame: {},
 
@@ -308,6 +314,18 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   focusDiagnostic(nodeId, paramPath) {
     set({ focusedDiagnostic: { nodeId, paramPath }, selectedNodes: new Set([nodeId]) });
+  },
+
+  revealNode(path, localId, paramPath) {
+    const same =
+      path.length === get().path.length && path.every((seg, i) => seg.nodeId === get().path[i]?.nodeId);
+    set({
+      // 同一层就不换路径对象：换了的话订阅 path 的组件全要重算
+      ...(same ? {} : { path: [...path], selectedEdges: new Set(), hoverNodeId: null, hoverEdge: null }),
+      selectedNodes: new Set([localId]),
+      focusedDiagnostic: { nodeId: localId, paramPath },
+      revealRequest: { nodeId: localId, seq: (get().revealRequest?.seq ?? 0) + 1 },
+    });
   },
 
   enterSubgraph(segment) {
