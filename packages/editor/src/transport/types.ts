@@ -193,6 +193,10 @@ export interface Transport {
   backupStatus(path: string): Promise<BackupStatus>;
   readBackup(path: string): Promise<LoadedGraph>;
   discardBackup(path: string): Promise<void>;
+  /** 没存过盘的图的定时备份放在哪：返回一个「正文」路径，备份写在它旁边的 `~`（正文本身从不存在），
+   *  之后照样走上面四个。可选：没有这个口（HTTP、静态快照）时没存过盘的图不备份。Tauri：app data 下的
+   *  untitled.lyflow.json（lib/autosave.ts）。 */
+  untitledBackupPath?(): Promise<string>;
 
   // ---- 配方文件（param-recipe P3.2）。文本进、文本出：格式与校验在编辑器（lib/recipes.ts），
   // 后端只管读写与路径约束（docs/recipe.md「路径安全」）：配方目录（`*.recipes/`）里的 `*.lyflow-recipe.json`、

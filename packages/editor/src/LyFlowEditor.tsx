@@ -16,6 +16,14 @@ import { Viewer3D } from "./components/Viewer3D";
 import { useShortcuts } from "./hooks/useShortcuts";
 import { rootOf } from "./lib/root";
 import {
+  autosaveTick,
+  discardUntitledBackup,
+  findUntitledBackup,
+  restoreUntitled,
+  untitledRestoreMessage,
+} from "./lib/autosave";
+import { dialogs } from "./lib/dialogs";
+import {
   backupStatus,
   BACKUP_INTERVAL_MS,
   confirmDiscard,
@@ -28,7 +36,6 @@ import {
   rememberFile,
   saveDocTo,
   suggestFileName,
-  writeBackup,
 } from "./lib/files";
 import { layoutGraph, needsInitialLayout } from "./lib/layout";
 import {
@@ -63,7 +70,6 @@ import {
   loadRecipesFor,
   prepareRecipeSave,
   restoreRecipeAutosave,
-  writeRecipeAutosave,
 } from "./store/recipeFiles";
 import { useUiStore } from "./store/ui";
 import { scheduleValidate } from "./store/validation";
@@ -379,20 +385,35 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     [],
   );
 
-  // -- 每 30 秒写一次 `<file>~` 备份 -----------------------------------------
-  // 配方有没存的改动时同一拍写 `<配方目录>/autosave~.json`（整个内存里的配方集合），并照样写一份
-  // `<file>~` —— 下次开图时「恢复备份」只问一次，图与配方一起回来（docs/recipe.md「自动备份」）
+  // -- 每 30 秒一次自动备份：存过盘的写 `<file>~`，没存过盘的写到 app data 里（lib/autosave.ts）-------
   useEffect(() => {
-    const t = setInterval(() => {
-      const graph = useGraphStore.getState();
-      const recipes = recipesDirty();
-      // 没存过盘的图没有 `<file>~` 可写；没改过的也不用写
-      if (!graph.filePath || (!graph.dirty && !recipes)) return;
-      void writeBackup(graph.filePath, graph.doc);
-      if (recipes) void writeRecipeAutosave();
-    }, BACKUP_INTERVAL_MS);
+    const t = setInterval(() => void autosaveTick(), BACKUP_INTERVAL_MS);
     return () => clearInterval(t);
   }, []);
+
+  // -- 开 app 时：上次有一张没存过盘的图没保存就退出了（崩溃、断电、被强杀），问一句要不要恢复 -----------
+  const offeredUntitled = useRef(false);
+  useEffect(() => {
+    if (manifestStatus !== "ready" || offeredUntitled.current) return;
+    offeredUntitled.current = true;
+    void (async () => {
+      const backup = await findUntitledBackup();
+      const blank = () => {
+        const g = useGraphStore.getState();
+        return !g.filePath && !g.dirty && g.doc.nodes.length === 0;
+      };
+      // 只在还是那张空白的新图时问：宿主可能一开就载入了别的图，那就不打扰（备份留到下次）
+      if (!backup || !blank()) return;
+      if (!(await dialogs().confirmRestore(backup.path, untitledRestoreMessage(backup)))) {
+        await discardUntitledBackup();
+        return;
+      }
+      if (!blank()) return;
+      restoreUntitled(backup);
+      setTimeout(() => void fitView({ duration: fitMs }), 50);
+      useUiStore.getState().showToast(`已恢复上次没存的图（${backup.loaded.doc.nodes.length} 个节点），记得保存`);
+    })();
+  }, [manifestStatus, fitView, fitMs]);
 
   // -- 打开文件的公共尾巴：迁移写回、缺坐标就布局、记最近文件 -----------------
   const afterOpen = useCallback(
@@ -433,7 +454,8 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
             path,
             restored.migrations.filter(isMigration),
           );
-          useGraphStore.getState().markSaved(path);
+          // 内容不在盘上：算没保存（以前 markSaved 成「已保存」—— 标题没有 *、关窗口也不问，恢复出来的又丢了）
+          useGraphStore.getState().markUnsaved();
           const recipes = await restoreRecipeAutosave();
           useUiStore.getState().showToast(recipes ? "已从自动备份恢复图与配方，记得保存" : "已从自动备份恢复，记得保存");
           return;
@@ -458,6 +480,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     const ui = useUiStore.getState();
     try {
       let path = graph.filePath;
+      const wasUntitled = !path;
       if (!path || forcePicker) {
         path = await pickSavePath(path ?? suggestFileName(graph.doc));
         if (!path) return; // 用户取消
@@ -476,11 +499,22 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       await rememberFile(path);
       // 存过盘就没有「未保存的改动」了，备份留着只会在下次开图时误报
       await discardBackup(path);
+      if (wasUntitled) await discardUntitledBackup();
       ui.showToast("已保存");
     } catch (e) {
       ui.showToast(e instanceof Error ? e.message : String(e), "warn");
     }
   }, []);
+
+  /** 打开一张图；被换掉的是没存过盘的那张时，它的备份也删掉（用户已经确认过放弃它）。 */
+  const openUnlessCancelled = useCallback(
+    async (path: string) => {
+      const wasUntitled = !useGraphStore.getState().filePath;
+      await openPath(path);
+      if (wasUntitled && useGraphStore.getState().filePath === path) await discardUntitledBackup();
+    },
+    [openPath],
+  );
 
   const doOpen = useCallback(async () => {
     const graph = useGraphStore.getState();
@@ -489,23 +523,24 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       if (!(await confirmDiscard(graph.dirty || recipesDirty()))) return;
       const path = await pickOpenPath();
       if (!path) return;
-      await openPath(path);
+      await openUnlessCancelled(path);
     } catch (e) {
       ui.showToast(e instanceof Error ? e.message : String(e), "warn");
     }
-  }, [openPath]);
+  }, [openUnlessCancelled]);
 
   const doOpenRecent = useCallback(
     async (path: string) => {
       if (!(await confirmDiscard(useGraphStore.getState().dirty || recipesDirty()))) return;
-      await openPath(path);
+      await openUnlessCancelled(path);
     },
-    [openPath],
+    [openUnlessCancelled],
   );
 
   const doNew = useCallback(async () => {
     const graph = useGraphStore.getState();
     if (!(await confirmDiscard(graph.dirty || recipesDirty()))) return;
+    if (!graph.filePath) void discardUntitledBackup();
     graph.newDoc();
     useUiStore.getState().clearSelection();
     useCacheStore.getState().reset();

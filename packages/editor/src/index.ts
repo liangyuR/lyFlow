@@ -84,3 +84,11 @@ export {
 export { useCacheStore, requestPlan, schedulePlan, refreshCacheStats, formatBytes } from "./store/cache";
 export { levelOf, pathPrefix, fullId } from "./lib/subgraph";
 export { layoutGraph, needsInitialLayout } from "./lib/layout";
+export {
+  autosaveTick,
+  discardUntitledBackup,
+  findUntitledBackup,
+  restoreUntitled,
+  untitledBackupPath,
+  type UntitledBackup,
+} from "./lib/autosave";

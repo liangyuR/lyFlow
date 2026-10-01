@@ -55,6 +55,7 @@ v11 再加的 `isolate`（只运行某几个节点）与 `force`（强制重算�
 | GET / PUT | `/lyflow/files/graph?path=` | `loadGraph` / `saveGraph` | 桥接层 |
 | GET / PUT / DELETE | `/lyflow/files/backup?path=` | `readBackup` / `writeBackup` / `discardBackup` | 桥接层 |
 | GET | `/lyflow/files/backup/status?path=` | `backupStatus` | 桥接层 |
+| —（不提供） | — | `untitledBackupPath`（可选） | 没存过盘的图的定时备份放在哪；HTTP 传输没有这个口，浏览器宿主里没存过盘的图照旧不备份 |
 | PUT | `/lyflow/files/bytes?path=` | `writeFileBytes` | 桥接层 |
 | GET | `/lyflow/files/cloud?path=&graphPath=&maxPoints=` | `loadCloudFile` | 桥接层（`io.load_pcd` 跑一次） |
 | GET | `/lyflow/snippets` | `listSnippets` | 桥接层 |

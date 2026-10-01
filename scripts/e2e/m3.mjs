@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { sleep } from "./cdp.mjs";
+import { UNTITLED_BACKUP } from "./harness.mjs";
 import {
   buildGraph,
   centerOf,
@@ -1170,6 +1171,28 @@ async function suitePanels(cdp, report, ws) {
     } catch (e) { return String(e); }
   `);
   report.ok("壳有 destroy 窗口的权限（core:window:allow-destroy）", !/not allowed|denied|permission/i.test(destroyCheck), destroyCheck);
+
+  // 没存过盘的图也定时备份（lib/autosave.ts；逻辑的单测在 packages/editor/test/autosave.test.mjs）：
+  // 这里验真的 app data 位置与真的写盘。用户自己的那份已经被 harness 挪开了，收尾时挪回去
+  await newDoc(cdp);
+  await cdp.eval(`window.__lyflow.stores.graph.getState().addNode('gen.synthetic', { x: 0, y: 0 }); return true;`);
+  const untitled = await cdp.eval(`return await window.__lyflow.autosave.untitledPath();`);
+  report.ok("没存过盘的图的备份在 app data 里（untitled.lyflow.json 旁边的 ~）",
+    typeof untitled === "string" && path.isAbsolute(untitled) && `${untitled}~` === UNTITLED_BACKUP, String(untitled));
+  await cdp.eval(`await window.__lyflow.autosave.tick(); return true;`);
+  report.ok("走一拍定时备份：真的写出了那个 ~ 文件", fs.existsSync(UNTITLED_BACKUP));
+  await newDoc(cdp); // 相当于重开 app：一张空白的新图
+  report.eq("找得回来", await cdp.eval(`return (await window.__lyflow.autosave.findUntitled())?.nodes ?? null;`), 1);
+  const back = await cdp.eval(`
+    const ok = await window.__lyflow.autosave.restoreUntitled();
+    await new Promise((d) => setTimeout(d, 100));
+    const g = window.__lyflow.stores.graph.getState();
+    return { ok, nodes: g.doc.nodes.length, path: g.filePath, dirty: g.dirty, title: document.title };
+  `);
+  report.ok("换上：一个节点、没有路径、算没保存（标题带 *）",
+    back.ok && back.nodes === 1 && back.path === null && back.dirty && / \* — LyFlow$/.test(back.title), JSON.stringify(back));
+  await cdp.eval(`await window.__lyflow.autosave.discardUntitled(); return true;`);
+  report.ok("删掉之后文件没了", !fs.existsSync(UNTITLED_BACKUP));
 }
 
 // ------------------------------------------------------------ #30 / 2.6 视图

@@ -8,7 +8,7 @@
   只是换成一个 crate。
 - **Rust/Tauri 宿主**（[下文](#rusttauri-宿主)）：宿主是 Tauri 2 的 app，
   前端嵌 `@lyflow/editor`，Rust 侧直接复用 `lyflow_lib` 的整个 IPC 层 ——
-  37 条 command、`RunManager`、三条事件流、库算子扫描，一行都不用自己写。
+  39 条 command、`RunManager`、三条事件流、库算子扫描，一行都不用自己写。
 - **只要编辑器界面**，嵌进自己的 React 页面：看文末的
   [前端编辑器](#前端编辑器lyfloweditor)。
 
@@ -437,7 +437,7 @@ fn main() {
 > 要有自己的 setup 就别再调 `.setup()`，改成在自己那个里面调
 > `lyflow_lib::host::setup(app.handle())`。
 
-`lyflow_handler!` 把 LyFlow 的 37 条命令和宿主自己的命令合成一个
+`lyflow_handler!` 把 LyFlow 的 39 条命令和宿主自己的命令合成一个
 `invoke_handler`。它能跨 crate 是因为 `#[tauri::command]` 除了函数本身还发一对
 `#[macro_export]` 的 `macro_rules!`，并在同一个模块里 `pub use` 了它们 ——
 `lyflow_lib::commands::get_manifest` 这条路径对函数和对宏都解析得开，

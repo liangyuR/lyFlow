@@ -15,6 +15,7 @@
 | 右键「选中上游 / 下游」 | 沿连线把整条链选上，再合成、静音、整理、复制 | `node-run.test.mjs`；e2e `m4.mjs` 的 `suiteCompose` |
 | 最近用过的算子 | 算子搜索空查询时排最前、标「最近」；面板顶上一组 | `autoconnect.test.mjs`；e2e `m3.mjs` 的 `suiteDropToSearch` |
 | 复制粘贴走系统剪贴板 | 跨窗口、重开之后都粘得进来，整张图的 JSON 也认；静音的粘出来还是静音的。Ctrl+V 读 paste 事件里的内容：`readText` 在 WebView2 里会弹「想要查看剪贴板」的框（第一版就是这么写的，真按 Ctrl+V 会弹框，e2e 里因为打了桩没看出来） | `autoconnect.test.mjs`；e2e `m3.mjs` 的 `suiteEditing`（断言没调 `readText`） |
+| 没存过盘的图也自动备份 | 30 秒一次写到 app data 里（`untitled.lyflow.json~`），崩溃、断电、被强杀之后下次开 app 问要不要恢复；存了盘、新建或打开别的图之后删掉。从自动备份恢复出来的图（两种都是）算没保存 —— 以前恢复 `<file>~` 之后标成已保存 | `autosave.test.mjs`；e2e `m3.mjs` 的 `suitePanels`（真的 app data、真的写盘；harness 不动用户自己的那份） |
 | 关窗口前问一句 | 有没存的改动（图或配方）时点 × 先问「确定关闭吗」，取消就不关；以前直接关，没存过盘的图连备份都没有（M3 计划里写了、没做） | e2e `m3.mjs` 的 `suitePanels`；真给窗口发 WM_CLOSE 看过一次（有改动时弹框、窗口不关，没改动时关掉） |
 | 参数菜单「粘贴值」不弹框 | 桌面壳自己开主窗口（`tauri.conf.json` 里 `create: false`），放行剪贴板读取 | e2e `params_p1.mjs` 的 `suiteIncludeTopLevel`（真 `readText` 不挂住、粘贴值写进参数） |
 | 子图里复制 / 剪切 / 全选 / 静音 / 折叠 | 取当前这一层的节点。以前取顶层：复制拿不到，剪切删了本层的节点、剪贴板里却是错的；Ctrl+A 选上的是这一层没有的 id；Ctrl+M / Ctrl+E 永远是「打开」，再按一次取消不了 | e2e `m4.mjs` 的 `suiteNested`（去掉修复时这几条失败） |

@@ -25,6 +25,11 @@ import {
   specDigest,
   writeRecipeAutosave,
   restoreRecipeAutosave,
+  autosaveTick,
+  untitledBackupPath,
+  findUntitledBackup,
+  restoreUntitled,
+  discardUntitledBackup,
   type RunRequest,
   type StateTransition,
   type Transport,
@@ -57,6 +62,15 @@ interface DevBridge {
     /** 立刻写一次 30 s 自动备份里的那份配方集合 / 从它恢复（界面上恢复要经宿主的确认对话框）。 */
     autosave(): Promise<void>;
     restoreAutosave(): Promise<boolean>;
+  };
+  /** 定时备份（lib/autosave.ts）：立刻走一拍；没存过盘的图的那份备份 —— 找、换上、删（开 app 时那一问的
+   *  几步；界面上换上之前要经宿主的确认对话框，脚本直接调）。 */
+  autosave: {
+    tick(): Promise<void>;
+    untitledPath(): Promise<string | null>;
+    findUntitled(): Promise<{ path: string; nodes: number; savedAt: number | null } | null>;
+    restoreUntitled(): Promise<boolean>;
+    discardUntitled(): Promise<void>;
   };
   /** 壳自己的东西。关窗口前那一问（closeGuard.ts）：装上了没有；换掉原生对话框（脚本点不了）
    *  直接走一遍「要不要关」，`answer` 是对话框里点了哪个。 */
@@ -130,6 +144,21 @@ export function installDevBridge(transport: Transport): void {
       specDigest: () => specDigest(useGraphStore.getState().doc),
       autosave: () => writeRecipeAutosave(),
       restoreAutosave: () => restoreRecipeAutosave(),
+    },
+    autosave: {
+      tick: () => autosaveTick(),
+      untitledPath: () => untitledBackupPath(),
+      async findUntitled() {
+        const b = await findUntitledBackup();
+        return b ? { path: b.path, nodes: b.loaded.doc.nodes.length, savedAt: b.savedAt } : null;
+      },
+      async restoreUntitled() {
+        const b = await findUntitledBackup();
+        if (!b) return false;
+        restoreUntitled(b);
+        return true;
+      },
+      discardUntitled: () => discardUntitledBackup(),
     },
     shell: {
       closeGuardInstalled: () => closeGuard.installed,

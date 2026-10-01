@@ -321,6 +321,7 @@ macro_rules! lyflow_handler {
             $crate::commands::backup_status,
             $crate::commands::read_backup,
             $crate::commands::discard_backup,
+            $crate::commands::untitled_backup_path,
             $crate::commands::write_file_bytes,
             $crate::commands::list_recipe_dir,
             $crate::commands::read_recipe_file,

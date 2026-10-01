@@ -1010,6 +1010,16 @@ pub fn read_backup<R: Runtime>(
     load_graph_at(&backup_path(&host::resolve_path(&host::config(&app), &path)?))
 }
 
+/// 没存过盘的图的定时备份放在哪：`<app data>/untitled.lyflow.json`。这个文件本身从不存在，备份写的是
+/// 它旁边的 `~` —— 于是 write_backup / backup_status / read_backup / discard_backup 原样能用，「备份在、
+/// 正文不在」天然就是「备份比正文新」。同时开两个窗口、都在画没存过的图时只留后写的那一份。
+#[tauri::command]
+pub fn untitled_backup_path<R: Runtime>(app: tauri::AppHandle<R>) -> Result<String, String> {
+    let dir = app_data_dir(&app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 {} 失败: {e}", dir.display()))?;
+    Ok(dir.join("untitled.lyflow.json").to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 pub fn discard_backup<R: Runtime>(app: tauri::AppHandle<R>, path: String) -> Result<(), String> {
     let backup = backup_path(&host::resolve_path(&host::config(&app), &path)?);

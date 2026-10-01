@@ -438,6 +438,8 @@ interface GraphState {
   loadDoc(doc: GraphDoc, path: string | null): void;
   /** 存盘成功。doc 是真正写下去的那一份（存盘是异步的，期间用户可能又改了）；不给就是当前的。 */
   markSaved(path: string, doc?: GraphDoc): void;
+  /** 从自动备份恢复出来的图：内容不在盘上，算没保存（标题带 *、关窗口会问）。保存点清空 —— 撤销回不到「已保存」。 */
+  markUnsaved(): void;
   setName(name: string): void;
   clearRejection(): void;
 }
@@ -1501,6 +1503,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
     markSaved(path, saved) {
       const doc = saved ?? get().doc;
       set({ filePath: path, savedDoc: doc, dirty: get().doc !== doc });
+    },
+
+    markUnsaved() {
+      set({ savedDoc: null, dirty: true });
     },
 
     setName(name) {
