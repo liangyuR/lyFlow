@@ -1006,6 +1006,45 @@ async function suiteEditing(cdp, report) {
     report.fail("多选表单里找不到可拖动的数字框", '[data-testid="multi-param-pointCount"]');
   }
 
+  // #12 复制粘贴走系统剪贴板（另一个窗口、重开之后也粘得进来）。系统剪贴板换成页面里的桩：
+  // CDP 驱动的窗口不一定拿得到剪贴板权限，而这里要验的是「写的是什么、粘的是哪一份」
+  await cdp.eval(`
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    window.__lyClipSaved = { w: navigator.clipboard.writeText, r: navigator.clipboard.readText };
+    window.__lyClip = '';
+    navigator.clipboard.writeText = async (t) => { window.__lyClip = t; };
+    navigator.clipboard.readText = async () => window.__lyClip;
+    window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}, ${lit(twin)}], []);
+    return true;
+  `);
+  await sleep(150);
+  await pressCtrl(cdp, "c");
+  await sleep(200);
+  const copied = await cdp.eval(`
+    try { const v = JSON.parse(window.__lyClip); return { kind: v.kind, nodes: v.nodes.length }; } catch { return null; }
+  `);
+  report.eq("Ctrl+C 往系统剪贴板写了一段带标记的 JSON（两个节点）", copied, { kind: "lyflow.nodes", nodes: 2 });
+  const countNodes = () => cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.length;`);
+  const before = await countNodes();
+  // 清掉应用内的那一份：粘进来的只能是系统剪贴板里的
+  await cdp.eval(`window.__lyflow.stores.ui.setState({ clipboard: null }); return true;`);
+  await pressCtrl(cdp, "v");
+  await sleep(300);
+  report.eq("Ctrl+V 从系统剪贴板粘回两个节点（应用内的那份已经清掉）", (await countNodes()) - before, 2);
+  // 文本编辑器里复制来的整张图也认
+  await cdp.eval(`
+    window.__lyClip = JSON.stringify({ schemaVersion: 1, id: 'clip', nodes: [{ id: 'p', op: 'gen.synthetic', ui: { position: { x: 0, y: 0 } } }], edges: [] });
+    return true;
+  `);
+  await pressCtrl(cdp, "v");
+  await sleep(300);
+  report.eq("整张图的 JSON 也粘得进来", (await countNodes()) - before, 3);
+  await cdp.eval(`
+    navigator.clipboard.writeText = window.__lyClipSaved.w;
+    navigator.clipboard.readText = window.__lyClipSaved.r;
+    return true;
+  `);
+
   // #29 快捷键面板。先移开焦点：上一组把焦点留在了参数输入框里，
   // 而键表里 help 没标 inTextField，会被「打字时不拦键」的铁律挡掉。
   await cdp.eval(`

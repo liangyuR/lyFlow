@@ -6,7 +6,9 @@ import { useEffect, type RefObject } from "react";
 import { matchShortcut } from "../lib/keymap";
 import { subgraphIdOf } from "../types/graph";
 import { levelOf } from "../lib/subgraph";
+import { copyText, readClipboard } from "../lib/clipboard";
 import { stepHistory } from "../lib/history";
+import { decodeNodeClipboard, encodeNodeClipboard } from "../lib/nodeClipboard";
 import { revealError } from "../lib/revealError";
 import { useCompareStore } from "../store/compare";
 import { useExecutionStore } from "../store/execution";
@@ -143,21 +145,26 @@ export function useShortcuts(
           const nodes = doc.nodes.filter((n) => ids.has(n.id));
           // 只带走两端都在选区内的边 —— 粘贴时内部连线得以保留
           const edges = doc.edges.filter((edge) => ids.has(edge.from.node) && ids.has(edge.to.node));
-          ui.setClipboard({
-            nodes: JSON.parse(JSON.stringify(nodes)),
-            edges: JSON.parse(JSON.stringify(edges)),
-          });
+          const clip = { nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) };
+          ui.setClipboard(clip);
+          // 也写一份到系统剪贴板：另一个窗口、重开之后照样粘得进来（写不进就只有应用内这一份）
+          void copyText(encodeNodeClipboard(clip));
           if (hit.id === "cut") graph.deleteNodes([...ids]);
           ui.showToast(`已复制 ${nodes.length} 个节点`);
           return;
         }
         case "paste": {
-          const clip = ui.clipboard;
-          if (!clip || clip.nodes.length === 0) return;
           e.preventDefault();
-          const result = graph.pasteNodes(clip, handlers.cursorFlowPosition());
-          if (result.nodeIds.length > 0) ui.setSelection(result.nodeIds, []);
-          else ui.showToast("剪贴板里的算子在当前 core 里不存在", "warn");
+          const at = handlers.cursorFlowPosition();
+          // 系统剪贴板里是节点（另一个窗口复制的、或者一整张图的 JSON）就粘它，否则用应用内的那一份
+          void readClipboard().then((text) => {
+            const u = useUiStore.getState();
+            const clip = (text ? decodeNodeClipboard(text) : null) ?? u.clipboard;
+            if (!clip || clip.nodes.length === 0) return;
+            const result = useGraphStore.getState().pasteNodes(clip, at);
+            if (result.nodeIds.length > 0) u.setSelection(result.nodeIds, []);
+            else u.showToast("剪贴板里的算子在当前 core 里不存在", "warn");
+          });
           return;
         }
         case "duplicate": {

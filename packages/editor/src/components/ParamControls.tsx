@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { copyText, readClipboard } from "../lib/clipboard";
 import { curveProblem } from "../lib/curve";
 import { dialogs } from "../lib/dialogs";
 import { joinBind, type GraphBinding } from "../lib/graphParams";
@@ -401,38 +402,6 @@ function coerceValue(param: Param, raw: unknown): Coerced {
   }
 }
 
-/** 剪贴板可能因为不安全上下文或没授权而不可用，一律吞掉异常返回失败。 */
-export async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return legacyCopy(text);
-  }
-}
-
-function legacyCopy(text: string): boolean {
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.cssText = "position:fixed;top:-1000px;opacity:0";
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    ta.remove();
-    return ok;
-  } catch {
-    return false;
-  }
-}
-
-async function readClipboard(): Promise<string | null> {
-  try {
-    return await navigator.clipboard.readText();
-  } catch {
-    return null;
-  }
-}
 
 function ParamMenu({
   param,

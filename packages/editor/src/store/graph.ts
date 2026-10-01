@@ -797,6 +797,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
           op: n.op,
           opVersion: n.opVersion ?? op.version,
           params: pruneUnknownParams(op, n.params),
+          // 静音的节点粘出来还是静音的（以前丢了）
+          ...(n.bypass ? { bypass: true } : {}),
           ui: {
             ...n.ui,
             position: {

@@ -25,7 +25,8 @@ import type { OperatorDesc, Param } from "../types/manifest";
 import type { GraphNode, SubgraphDef } from "../types/graph";
 
 import { OperatorDetail, PortRow } from "./OperatorDetail";
-import { copyText, ParamControl } from "./ParamControls";
+import { ParamControl } from "./ParamControls";
+import { copyText } from "../lib/clipboard";
 import { num } from "../lib/format";
 
 /** 六位有效数字。2D 几何的坐标是米，原样打印会拖一串浮点噪声。 */

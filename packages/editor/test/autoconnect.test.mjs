@@ -5,6 +5,7 @@ import { test } from "node:test";
 
 import { planAutoConnect } from "../src/lib/autoconnect.ts";
 import { addNodeWithAutoConnect } from "../src/lib/insert.ts";
+import { decodeNodeClipboard, encodeNodeClipboard } from "../src/lib/nodeClipboard.ts";
 import { useGraphStore } from "../src/store/graph.ts";
 import { useManifestStore } from "../src/store/manifest.ts";
 import { useUiStore } from "../src/store/ui.ts";
@@ -148,4 +149,37 @@ test("界面上加了节点就记进「最近用过」：挪到最前、不重�
   assert.deepEqual(useUiStore.getState().recentOps, ["t.read", "t.locate"], "当前 core 里没有的算子加不上，不记");
   for (let i = 0; i < 10; i += 1) useUiStore.getState().noteOperatorUsed(`x.${i}`);
   assert.deepEqual(useUiStore.getState().recentOps, ["x.9", "x.8", "x.7", "x.6", "x.5", "x.4", "x.3", "x.2"]);
+});
+
+test("复制粘贴（P0 #12）：id 重映射、内部连线留着、整体平移到落点、静音照旧；系统剪贴板的两种文字都认", () => {
+  reset();
+  const r = addNodeWithAutoConnect("t.read", { x: 100, y: 100 }).nodeIds[0];
+  const l = addNodeWithAutoConnect("t.locate", { x: 300, y: 140 }).nodeIds[0];
+  useGraphStore.getState().setBypass([l], true);
+  const doc = useGraphStore.getState().doc;
+  const clip = {
+    nodes: doc.nodes.filter((n) => [r, l].includes(n.id)),
+    edges: doc.edges.filter((e) => e.from.node === r && e.to.node === l),
+  };
+  assert.equal(clip.edges.length, 1, "两个节点之间自动连上了一条");
+
+  // 经系统剪贴板走一圈：编码、解码，与原样相同
+  const round = decodeNodeClipboard(encodeNodeClipboard(clip));
+  assert.deepEqual(round, clip);
+  const pasted = useGraphStore.getState().pasteNodes(round, { x: 1000, y: 500 });
+  assert.equal(pasted.nodeIds.length, 2);
+  const after = useGraphStore.getState().doc;
+  const [pr, pl] = pasted.nodeIds.map((id) => after.nodes.find((n) => n.id === id));
+  assert.ok(![r, l].includes(pr.id) && ![r, l].includes(pl.id), "id 重新分配");
+  assert.deepEqual([pr.ui.position, pl.ui.position], [{ x: 1000, y: 500 }, { x: 1200, y: 540 }], "左上角落到落点，相对位置不变");
+  assert.equal(pl.bypass, true, "静音的粘出来还是静音的");
+  assert.ok(after.edges.some((e) => e.from.node === pr.id && e.to.node === pl.id), "内部连线跟着走");
+
+  // 整张图的 JSON 也认；外部连线（一端不在这批节点里）丢掉；别的文字不认
+  const fromDoc = decodeNodeClipboard(JSON.stringify({ schemaVersion: 1, nodes: clip.nodes, edges: [...clip.edges,
+    { id: "x", from: { node: "elsewhere", port: "scan" }, to: { node: l, port: "scan" } }] }));
+  assert.deepEqual(fromDoc?.edges, clip.edges);
+  for (const text of ["", "hello", "[1,2]", '{"nodes":[{"id":"a","op":"t.read"}]}', '{"kind":"lyflow.nodes","nodes":[]}']) {
+    assert.equal(decodeNodeClipboard(text), null, text);
+  }
 });
