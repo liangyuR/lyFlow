@@ -52,6 +52,7 @@ struct Image {
 - `Data::Kind::Image` **追加在 `Bundle` 之后**（data.h:146，注释要求不挪老序号）。工厂函数与 `asImage()` 仿 `tensor` 成对加上。
 - `data.cpp` 里每个按 kind 分派的 switch 都要加一支：`byteSize`、`elementCount`（= 像素数）、`valueJson`、`kindFromTypeName`、`typeNameFromKind`。
 - `valueJson`：`{kind:"image", width, height, channels, depth, min[], max[], mean[]}`，**逐通道**、只统计有限值（同 Tensor 的规则）。像素本身不进 JSON。
+  预览缩小过的图另带 `scale`（> 1 才写，阶段 5，[ADR-0028](adr/0028-image-preview-pixel-scale.md)）。
 - 暂**不带**相机内参或像素到世界的变换。深度图转点云时，内参作为那个算子的参数（§4 第三组），不进数据模型。等出现第二个需要内参的算子再议。
 
 ## 2. 要改的地方（「加一个数据域」的真实清单）
@@ -201,6 +202,7 @@ HTTP 桩（test-server）张量那条路给的是 501，因为桩没有常驻结
 | 2 ✅ | `std-image` 包 + adapter + §4 前三组算子 + `image.to_tensor` / `tensor.to_image` | 3–4 天 | 包内 doctest（adapter 往返、BGR/RGB、零拷贝持有）；纯 2D 与推理两条链路在 CLI 跑通；e2e 一条「读图 → 二值化 → 看」 |
 | 3 ✅ | 主预览图像模式 + 几何叠画 + 图像上拖 ROI + MCP 图片返回 | 3 天 | e2e `m8b` 拖框组加一例；MCP 冒烟调一次 `view_output_image` |
 | 4 ✅ | 跨域：`cloud.from_depth` / `cloud.to_depth_image` | 2 天 | 跨域链路跑通；深度图转点云再转回，与原图逐像素对得上 |
+| 5 ✅ | 大图：抢占不阻塞、预览按比例缩小图像（[large-image-plan.md](large-image-plan.md)） | 3–4 天 | [large-image-acceptance.md](large-image-acceptance.md) |
 
 每个阶段各自提交；阶段 1 结束时写 ADR-0026（Image 数据域与取数方式），并照惯例写验收记录：[image-acceptance.md](image-acceptance.md)（四个阶段都已写）。
 测试照 [testing.md](testing.md)：能在 doctest 测的不进 e2e，改完同步地图与数字。

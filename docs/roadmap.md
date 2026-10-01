@@ -357,7 +357,7 @@ Agent，不用自己重建「这次 run 到底发生了什么」，也不用手�
   验收 [image-acceptance.md](image-acceptance.md)。四个阶段：数据模型与 C ABI v15、OpenCV 包 `std-image`、
   主预览的图像模式与 MCP 看图、深度图 ↔ 点云（`cloud.from_depth` / `cloud.to_depth_image`）。
   「数据模型是否通用」的检验：core 一侧经住了，焊死的在编辑器视图层，见验收文档同名一节。
-  **已知缺口是大图**：预览不缩图像、`image.find_circle` 没有上界，见验收文档「已知毛刺」）
+  大图在阶段 5 补上：抢占不阻塞（[ADR-0027](adr/0027-non-blocking-preemption.md)）、预览按比例缩小图像（[ADR-0028](adr/0028-image-preview-pixel-scale.md)），计划 [large-image-plan.md](large-image-plan.md)、验收 [large-image-acceptance.md](large-image-acceptance.md)）
 - 第三方算子插件 DLL：`lyflow_plugin_init(Registry*)`，同工具链约束
 - ~~缓存落盘~~（C ABI v14 已做 CLI 专用、默认关的一版：`--cache-dir` / `LYFLOW_CACHE_DIR`，按构建指纹分目录，[disk-cache-plan.md](disk-cache-plan.md)；编辑器跨会话仍未做）
 - ~~两节点输出并排对比（P2 #35）~~（已做：[compare-plan.md](compare-plan.md)，验收在 `scripts/e2e/compare.mjs`）

@@ -76,7 +76,7 @@ inline Status takeGrayCompute(const Inputs& inputs, const ParamView&, Outputs& o
   const Image* img = inputs.get("image").asImage();
   Measurement m;
   m.ok = img != nullptr;
-  m.unit = "px";
+  m.unit = "px²";  // 像素个数，量纲是 px²（预览按 s² 换回原图，ADR-0028）
   m.value = img ? static_cast<double>(img->pixelCount()) : 0.0;
   outputs.set("pixels", Data::measurement(m));
   return Status::Ok();

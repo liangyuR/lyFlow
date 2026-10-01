@@ -365,11 +365,14 @@ TEST_CASE("preview 超预算会发一条 warn 日志") {
     run.join();
   }
   REQUIRE(log.runStatus() == "ok");
-  bool warned = false;
+  std::string warning;
   for (const Json& e : log.ofKind("log")) {
     if (e.value("level", "") == "warn" && e.value("message", "").find("预览耗时") == 0) {
-      warned = true;
+      warning = e.value("message", "");
     }
   }
-  CHECK(warned);
+  CHECK_FALSE(warning.empty());
+  // 点名最慢的节点；源头真抽稀过点云（40 万 → 20 万），「降低预览点数」才是有用的建议（large-image-plan E9）
+  CHECK(warning.find("最慢的是 ") != std::string::npos);
+  CHECK(warning.find("可以降低预览点数") != std::string::npos);
 }

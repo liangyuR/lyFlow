@@ -56,6 +56,8 @@ interface Meta {
   height: number;
   channels: number;
   depth: Depth;
+  /** 预览缩小过的图是 > 1（ADR-0028） */
+  scale: number;
 }
 
 export interface ImagePaneProps {
@@ -122,6 +124,7 @@ export function ImagePane({ doc, path, node, op, roiNode, runId, status, nodeSta
           height: v.height ?? 0,
           channels: v.channels ?? 0,
           depth: v.depth ?? "u8",
+          scale: typeof v.scale === "number" && v.scale > 1 ? v.scale : 1,
         });
       } catch (e) {
         if (cancelled) return;
@@ -132,8 +135,9 @@ export function ImagePane({ doc, path, node, op, roiNode, runId, status, nodeSta
     return () => {
       cancelled = true;
     };
-    // src 每次渲染可能是新对象；它的内容已经在 metaKey 里
-  }, [metaKey]);
+    // src 每次渲染可能是新对象；它的内容已经在 metaKey 里。节点状态变了也再问一次：同一个 runId
+    // 先前问的时候结果还没到（取不到就停在「不是图像」），跑完之后 metaKey 不变、不重问就一直停在那（review 第二轮）
+  }, [metaKey, ready, nodeState]);
 
   const centered = (text: string) => (
     <div className="viewer__empty" data-testid="viewer3d-status">
@@ -149,6 +153,9 @@ export function ImagePane({ doc, path, node, op, roiNode, runId, status, nodeSta
   if (!m) return centered(status ?? metaError ?? (shownRunId ? "正在取图像…" : "未运行"));
 
   const colorOf = (type: string) => typesByName.get(type)?.color ?? "#fbbf24";
+  // 取图用元信息所属的那一次运行（review 修正）：新一次运行的元信息还没到时，尺寸与比例还是上一次的 ——
+  // 拿新 runId 配旧尺寸，预览 ↔ 正式之间切换时取到的是另一种尺度的图，画面重新适配、叠画偏一倍
+  const imageRun = m.key.slice(0, m.key.indexOf("|"));
   return (
     <div
       className="viewer__image"
@@ -160,13 +167,14 @@ export function ImagePane({ doc, path, node, op, roiNode, runId, status, nodeSta
       data-showing-run={shownRunId ?? ""}
     >
       <ImageCanvas
-        runId={shownRunId}
+        runId={imageRun}
         nodeId={src.nodeId}
         port={src.port}
         fullW={m.width}
         fullH={m.height}
         channels={m.channels}
         depth={m.depth}
+        pixelScale={m.scale}
         testid="viewer-image"
         overlay={(view) => (
           <>

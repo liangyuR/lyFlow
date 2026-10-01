@@ -98,7 +98,7 @@ export function peekSourceOf(
     manifest.operatorsById,
     manifest.bundle?.bundles,
     resolved,
-    exec.runId,
+    exec.resultRunId,
     exec.runStatus,
     leaf?.state,
     leaf?.stats?.outputs,
@@ -109,7 +109,8 @@ export function usePeekSource(path: SubPath, from: PortRef, field: string | null
   const doc = useGraphStore((s) => s.doc);
   const operatorsById = useManifestStore((s) => s.operatorsById);
   const bundles = useManifestStore((s) => s.bundle?.bundles);
-  const runId = useExecutionStore((s) => s.runId);
+  // 按节点表反映的那一次运行取数（见 store/execution 的 resultRunId）
+  const runId = useExecutionStore((s) => s.resultRunId);
   const runStatus = useExecutionStore((s) => s.runStatus);
 
   const resolved = useMemo(

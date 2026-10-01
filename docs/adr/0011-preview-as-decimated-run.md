@@ -22,6 +22,8 @@ architecture.md 把 live preview 称作「体验的分水岭，也是最容易�
   load / synthetic / 将来的库源节点自动都算，加新算子不用记得配什么。
 - 抽稀走 `PointCloud::select`，所以 intensity / normals / rgb 一起被搬走，
   下游算子拿到的仍然是一片形状正常的点云。
+- （2026-10-01 补）图像在源头按 2 的幂缩小到 4 MP 以内；缩小改变了像素量的尺度，所以执行器替下游换算
+  像素参数与像素几何 —— 算子照旧不知道自己在预览（[ADR-0028](0028-image-preview-pixel-scale.md)）。
 - **cacheKey 混入 `preview:<maxPoints>`**：预览结果与正式结果互不命中，
   互不淘汰对方（都在同一个 LRU 里，但键不同）。
 - 超过 `previewBudgetMs` 的 run 发一条 `log warn`，前端据此提示「降低预览点数」。

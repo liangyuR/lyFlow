@@ -254,6 +254,9 @@ struct Param {
   std::optional<double> softMax;
   std::optional<double> step;
   std::string unit;
+  /// 只对 unit = "px" 有意义：这是一个绝对的像素尺寸（例如输出图的宽高），不是输入图上的距离。
+  /// 预览缩小时不跟着换算；它生效（visibleWhen 成立）时，本算子输出的图像回到原图比例（ADR-0028）。
+  bool absolute = false;
 
   std::vector<std::string> componentLabels;  // vecNf 分量名，默认 X/Y/Z/W
   std::vector<EnumOption> options;           // enum / flags

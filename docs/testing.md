@@ -4,22 +4,22 @@
 
 2026-09-26 按四路审计做过一次合并精简（提交 test/prune），数字是那之后的：
 
-（2026-09-29 逐项实测过一遍：C++ 默认 / dts / gap;dts 三种构建，Rust 默认与纯平台构建 `LYFLOW_STD_PACKS=0`、`tests/host.rs` 带 dts 全跑，下表的数都是跑出来的，不是推算。）
+（2026-09-29 逐项实测过一遍：C++ 默认 / dts / gap;dts 三种构建，Rust 默认与纯平台构建 `LYFLOW_STD_PACKS=0`、`tests/host.rs` 带 dts 全跑，下表的数都是跑出来的，不是推算。2026-10-01 大图阶段之后按同样的跑法再实测一遍，数字已更新；PR #3 第二轮 review 修正后又跑了一遍，纯平台构建那一项没有重跑 —— 这一轮没有增删 Rust 用例。）
 
 | 层 | 命令 | 规模 | 跑一遍 |
 |---|---|---|---|
-| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 173 例；`LYFLOW_PACKS=dts` 181 例；`LYFLOW_PACKS=gap;dts` 263 例 | 分钟级（含编译） |
-| Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 139（纯平台构建 81 通过 / 58 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
-| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 77 | 秒级 |
-| MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 30 | 秒级 |
-| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`） | 752 条断言、100 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
+| C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 178 例；`LYFLOW_PACKS=dts` 186 例；`LYFLOW_PACKS=gap;dts` 268 例 | 分钟级（含编译） |
+| Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 146（纯平台构建 88 通过 / 58 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
+| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 82 | 秒级 |
+| MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 31 | 秒级 |
+| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`） | 759 条断言、102 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 33 条断言（精简前 58） | 几分钟 |
 
 ## 放在哪一层
 
 - **算法、数值、执行语义、C ABI 契约** → C++ doctest。gap / dts 的测量数值只在这里钉，改动必须保留数值与容差。
 - **bridge 的封送、IPC 命令、CLI 的参数 / 退出码 / 输出形状、配方失配的 Rust 实现** → `cargo test`。与 C++ 同层重复的不要再写（C++ 已经测了语义，Rust 只测封送和命令层）。要标准包算子的测试加 `#[cfg_attr(std_packs_off, ignore = "纯平台构建没有标准包")]`，要 dts 包的加 `#[cfg_attr(not(dts_pack), ignore = …)]`，与不带这个属性的不要合并。
-- **编辑器 store 动作与 lib 纯函数**（图参数、配方、迁移写回、自动连线、参数面板模型、transform / curve、布局、ROI 标签摆放）→ `packages/editor/test`。
+- **编辑器 store 动作与 lib 纯函数**（图参数、配方、迁移写回、自动连线、参数面板模型、transform / curve、布局、ROI 标签摆放、执行事件怎么落进节点表）→ `packages/editor/test`。
 - **只有真界面才有的**（真鼠标 / 按键、DOM 标记、渲染、系统层行为、跨进程的完整链路）→ e2e。e2e 里**不要**再逐字段复查单测已经测过的 store 数据，只留界面那一半。
 
 ## 已有覆盖：按功能查
@@ -27,6 +27,7 @@
 | 功能 | 主要测试 |
 |---|---|
 | 执行器、事件 seq、取消、并发、缓存复用（含落盘缓存：编解码往返、清空内存后命中、指纹隔离、坏文件） | `core/tests/test_executor.cpp`、`test_cache.cpp`、`test_flow.cpp`（并发 8 run、取消 100 次）；跨进程与 `--cache-dir` / `LYFLOW_CACHE_DIR` / `lyflow cache info|clear` 在 `bridge/tests/disk_cache.rs`（落盘开关是进程级的，不放进和别的用例同进程的单元测试） |
+| 抢占不阻塞（ADR-0027：立即返回、同一时刻最多一个在算、只留最新请求、排队的被取消 / 起不来时补发 run_finished、重扫库目录等被抢占的那个退出） | 状态机在 `bridge/src/execution.rs`（假 run 可控地「卡住」）；编辑器怎么接（视图按 `resultRunId` 取、带 targets 的等 `run_started` 才换，从没开跑就收场时被抢占那次在算的节点落成已取消）在 `packages/editor/test/execution-store.test.mjs`；真 app 里抢占一个卡住的运行不卡主线程在 e2e `noderun.mjs` 的 `suitePreemptStalled`（不理取消的测试算子 `test.stall`，`core/tests/stall_test_op.h`，`LYFLOW_TEST_OPS` 注册） |
 | 计划、cacheKey、Run to node / 选中 | `core/tests/test_plan.cpp`、`test_noderun.cpp`（含修订二的 `attachedStale`：挂上一次的旧结果）；e2e `m3.mjs`（Shift+F5）、`noderun.mjs`（右键「运行到此节点」，运行中可点 = 抢占；改上游后下游过期但还能看） |
 | 子图、库算子（含展开为内联子图：定义去掉 id、内联后逐位相同；库目录设置：`bridge/src/library_settings.rs` 单测、e2e m4 面板增删 + CLI 同读） | `core/tests/test_subgraph.cpp`；`packages/editor/test/graph-params-actions.test.mjs`（合成 / 解散 / 展开库算子的 store 动作）；e2e `m4.mjs` |
 | 图参数（规格、校验、传参） | `core/tests/test_graph_params.cpp`、`test_params.cpp`；`packages/editor/test/graph-params*.test.mjs`；e2e `params_p1.mjs` |
@@ -39,7 +40,8 @@
 | 运行摘要（summary） | `core/tests/test_summary.cpp`；CLI 的 `--summary` 形状在 `bridge/src/cli.rs` |
 | 标准算子 / PCD 读写 / ONNX | `packs/std-pointcloud/tests/*`、`packs/std-ml/tests/test_ml_ops.cpp`（模型用例要 `LYFLOW_TEST_ONNX_MODEL`，不设会打出跳过；`[N,6,1280] → [N,8,1280]` 的模型本机在桌面 DTS 文件夹的 `v12s0.onnx`） |
 | 主预览的图像模式（画输出还是输入那张图、放大后重跑视角不动、像素框拖动写回参数并可撤销、像素几何叠画；规则本身在 `view-rule.test.mjs`） | e2e `m8b.mjs` 的 `suiteImageMainView` |
-| MCP 看图（LYIM 解码、u16 拉伸到 8 位、最近邻缩、PNG 头与 inflate 读回；冒烟里真调一次 `view_output_image`） | `packages/mcp/test/cloud.test.ts`、`smoke.test.ts`、`server.test.ts`（工具面 16 个） |
+| 大图预览（ADR-0028：源头按 2 的幂缩到 4 MP、像素参数 / 几何 / 量测在 compute 两侧换算、`absolute` 绝对尺寸、u16 单通道缩小时 0 不计入、超预算提示按数据域） | 规则与执行器端到端在 `core/tests/test_pixel_scale.cpp`（探针算子 `test.px_probe` 在同一个文件里）；shrinkImage 的 scale 与 D3 在 `test_data.cpp`；点云那一支的提示在 `test_subgraph.cpp` 的预览超预算用例；真实链路（找圆、区域统计预览与正式对得上，经过张量转回来的图带着比例）在 `packs/std-image/tests/test_image_ops.cpp`；主预览按原图尺寸摆放、角标、框与正式结果同一处，预览 ↔ 正式之间视角不动（源头的大图、手选「原图」、比源头小的输出三种）在 e2e `m8b.mjs` 的 `suiteImagePreviewScale` |
+| MCP 看图（LYIM 解码、u16 拉伸到 8 位、最近邻缩、PNG 头与 inflate 读回、超过 16 MB 分段取齐；冒烟里真调一次 `view_output_image`） | `packages/mcp/test/cloud.test.ts`、`smoke.test.ts`、`server.test.ts`（工具面 16 个） |
 | 图像算子（std-image：adapter 零拷贝与 RGB 顺序、读写往返含中文路径、各算子数值、像素单位的几何、单通道契约；深度图 ↔ 点云的反投影、来回一趟逐像素相同、z 缓冲；图像 → 张量 → ONNX → 图像的推理链路，同样要 `LYFLOW_TEST_ONNX_MODEL`） | `packs/std-image/tests/test_image_ops.cpp`；e2e `peek.mjs` 图像组的最后一段（真 app 里灰度 → Otsu → 区域统计、掩膜边是单通道 u8） |
 | dts 面差（与宿主 Python 旧算法的对照、现场轮廓） | `packs/dts/tests/test_dts_ops.cpp`（夹具 `tests/data/*.h`） |
 | gap 测量、积木、导入、模型 ROI | `packs/gap/tests/*`；e2e `gap.mjs`、`m8b.mjs`、`m8c.mjs`、`params_p4.mjs`（编辑器 vs CLI 逐位相同） |
@@ -48,7 +50,7 @@
 | 预览里选点与测距（屏幕空间最近点、看不见的点跳过、同距取近、一组两点、readout 的单位与行） | `packages/editor/test/pick.test.mjs`；快捷键 `M` 不撞 `Ctrl+M` 在 `compare-store.test.mjs` 的快捷键那条；e2e `m3.mjs` 的测量组（真单击选点、拖动不选、重跑标过期、换节点清掉）、`compare.mjs` 一句（A、B 两栏各点一次） |
 | 点云缓存的并发请求合并（同键只取一次、失败不留占位） | `packages/editor/test/cloud-cache.test.mjs`；e2e `m4.mjs` §2 的「事件到渲染」（拖动中预览运行的延迟中位数） |
 | `lyflow eval / sweep / perturb`（值路径、样本集、轴扫描与斜率、`pointFrom` 刀口跟锚点） | `bridge/src/eval.rs`、`perturb.rs` 的单元测试；`bridge/src/cli.rs` 的 `perturb_*` 集成测试（`crop_chain` 小图：固定刀口斜率 > 0、刀口跟锚点挪走后不响应、取不到锚点判失败）；MCP `packages/mcp/test/argv.test.ts` |
-| 连线查看器 Edge Peek | e2e `peek.mjs`；窗口上限与自动关窗的提示 `packages/editor/test/peek-store.test.mjs` |
+| 连线查看器 Edge Peek | e2e `peek.mjs`；窗口上限与自动关窗的提示 `packages/editor/test/peek-store.test.mjs`；图像按段取齐（超过 16 MB 分几段要）`packages/editor/test/image-fetch.test.mjs` |
 | 按输出类型选视图（主预览的点云 / 值） | `packages/editor/test/view-rule.test.mjs`；e2e `gap.mjs` 的「量测输出」组（`transform.make` 显示值、手动选只对当时的节点有效） |
 | 动效、hover、端点对齐 | e2e `motion.mjs`、`noderun.mjs` |
 | 节点运行按钮 | e2e `noderun.mjs` |

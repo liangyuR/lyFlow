@@ -156,6 +156,9 @@ struct Image {
   std::int32_t channels = 0;
   PixelDepth depth = PixelDepth::U8;
   std::shared_ptr<const std::uint8_t> pixels;
+  /// 每个像素对应原图（全分辨率）的 scale × scale 个像素。只有预览时源头缩小过的图和它的下游 > 1
+  /// （docs/large-image-plan.md E5）；算子不用管它 —— 执行器按它换算像素参数与像素几何（ADR-0028）。
+  std::int32_t scale = 1;
 
   std::size_t pixelCount() const;
   std::size_t bytesPerPixel() const;
@@ -174,9 +177,10 @@ struct Image {
   double at(std::int32_t x, std::int32_t y, std::int32_t c) const;
 };
 
-/// 2^level 倍的块均值缩小（lyflow_output_image 的 level > 0）：输出尺寸向上取整，
+/// 2^level 倍的块均值缩小（lyflow_output_image 的 level > 0、预览时源头的大图）：输出尺寸向上取整，
 /// 边上不满一块的按实际像素数平均；u8 / u16 四舍五入，f32 跳过非有限值（整块都不有限就是 NaN）。
-/// level = 0 原样返回（共享同一块像素）。输入不完整返回空 Image。
+/// u16 单通道的 0 不参与平均（深度图的无效值，large-image-plan D3；整块都是 0 才是 0）。
+/// 输出的 scale = 输入的 scale × 2^level。level = 0 原样返回（共享同一块像素）。输入不完整返回空 Image。
 Image shrinkImage(const Image& src, unsigned level);
 
 /// 带类型标签的 JSON。算子包用它定义领域结构而不必改 core（ADR-0013）。
@@ -247,6 +251,12 @@ class Data {
   const lyflow::Image* asImage() const;
   bool isError() const { return kind_ == Kind::Error; }
 
+  /// 预览缩小过的图像转出来的张量记着比例（ADR-0028）：图像 → 张量 → 推理 → 张量 → 图像这条链上，转回来的图
+  /// 接着带上它，下游才不会把一张已经是小图的掩膜当成原图再缩一遍。只对 Tensor 有意义（图像的在 Image::scale）；
+  /// 记在 Data 上而不是 Tensor 里：换个比例不必把整块张量拷一遍。
+  std::int32_t tensorScale() const { return tensorScale_; }
+  Data withTensorScale(std::int32_t s) const;
+
   std::shared_ptr<const PointCloud> cloudPtr() const { return cloud_; }
   std::shared_ptr<const lyflow::Tensor> tensorPtr() const { return tensor_; }
   std::shared_ptr<const lyflow::Image> imagePtr() const { return image_; }
@@ -286,6 +296,7 @@ class Data {
   std::shared_ptr<const lyflow::Bundle> bundle_;
   std::shared_ptr<const lyflow::Image> image_;
   std::shared_ptr<ValueCache> valueCache_;
+  std::int32_t tensorScale_ = 1;
 };
 
 /// 一根线带一组有关系的数据（m8-plan L1）：`{ kind, 有序的 名字 → Data }`。

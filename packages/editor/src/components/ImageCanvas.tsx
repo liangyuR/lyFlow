@@ -2,13 +2,15 @@
 // 先按窗口能放下的大小要一级缩小的概览（core 的块均值，ABI v15），可以切到原图；滚轮缩放、拖动平移、
 // 双击回到适配。悬停读出原图坐标与像素值 —— level > 0 时读到的是那一块的均值，读数上写明。
 // 叠画（像素几何、可拖的像素框）经 overlay 画在图上，坐标一律是**原图像素**，与显示的级别无关。
+// 预览时源头缩小过的图（pixelScale > 1，ADR-0028）按原图尺寸摆放：一个像素拉成 pixelScale 个原图像素那么大。
+// 视角（缩放、平移）与级别都按原图坐标记：换级别、预览 ↔ 正式只换画上去的那张图，视角不动。
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
 
 import { num } from "./Inspector";
 import { RAMPS, type RampName } from "../lib/ramps";
+import { fetchImageLevel } from "../lib/imageFetch";
 import { transport } from "../transport";
-import { decodeImage, type ImagePayload } from "../types/execution";
 
 import "../styles.peek.tensor.css";
 import "../styles.peek.image.css";
@@ -40,6 +42,31 @@ function maxLevelOf(w: number, h: number): number {
   return level;
 }
 
+/** 2 的幂 s 是 2 的几次方（s = 1、2、4…）。 */
+function log2Of(s: number): number {
+  let k = 0;
+  while (2 ** k < s && k < 30) k += 1;
+  return k;
+}
+
+/** 原图坐标里的一张图：认「是不是同一张图」用，与哪一次运行、取的哪一级无关。 */
+interface Footprint {
+  nodeId: string;
+  port: string;
+  /** 原图像素：这张图自己的宽高 × 它的比例。 */
+  w: number;
+  h: number;
+  /** 这张图的比例（预览缩小过的 > 1）：尺寸只精确到这么多个原图像素。 */
+  scale: number;
+}
+
+/** 同一个节点、端口，原图坐标下的尺寸差不到粗的那一边的比例。4101 宽的原图缩一半是 2051、
+ *  按原图算 4102 —— 差的那一个像素是取整，不是另一张图。 */
+function sameFootprint(a: Footprint, b: Footprint): boolean {
+  const m = Math.max(a.scale, b.scale);
+  return a.nodeId === b.nodeId && a.port === b.port && Math.abs(a.w - b.w) < m && Math.abs(a.h - b.h) < m;
+}
+
 /** 不拉伸时每种位深的「原值」范围：u8 0..255、u16 0..65535、f32 0..1。 */
 function naturalRange(depth: Depth): [number, number] {
   if (depth === "u8") return [0, 255];
@@ -48,14 +75,22 @@ function naturalRange(depth: Depth): [number, number] {
 }
 
 interface Loaded {
+  /** 哪一次运行的哪一级：与当前的 fetchKey 相同才是「要的那张」。 */
   key: string;
-  /** 不含 runId 的那一半：同一个节点、端口、级别。新一次运行的图还没到时，旧的先顶着。 */
-  viewKey: string;
+  /** 原图坐标里的这张图。新一次运行、另一级的图还没到时，同一张图的旧的先顶着。 */
+  footprint: Footprint;
+  /** 取的时候那张图的比例：一个显示像素 = 2^level × pixelScale 个原图像素。 */
+  pixelScale: number;
   width: number;
   height: number;
   channels: number;
   level: number;
   pixels: Uint8Array | Uint16Array | Float32Array;
+}
+
+/** 一个显示像素是几个原图像素。 */
+function blockOf(img: Loaded): number {
+  return 2 ** img.level * img.pixelScale;
 }
 
 function extentOf(img: Loaded, picks: number[]): { lo: number; hi: number } | null {
@@ -132,41 +167,21 @@ function draw(
   ctx.putImageData(out, 0, 0);
 }
 
-/** 一级图像按段取齐：桥接层按 16 MB 收行数，照帧头的 rowCount 接着要。 */
+/** 一级图像按段取齐（lib/imageFetch）。 */
 async function fetchLevel(
   runId: string,
   nodeId: string,
   port: string,
   level: number,
-): Promise<Omit<Loaded, "key" | "viewKey">> {
+  abandoned: () => boolean,
+): Promise<Omit<Loaded, "key" | "footprint" | "pixelScale">> {
   const get = transport.getOutputImage;
   if (!get) throw new Error("宿主不支持取图像（需要 C ABI v15）");
-  let first: ImagePayload | null = null;
-  let pixels: Uint8Array | Uint16Array | Float32Array | null = null;
-  let row = 0;
-  for (;;) {
-    const part = decodeImage(await get.call(transport, runId, nodeId, port, level, row, 0));
-    if (first === null) {
-      first = part;
-      const n = part.width * part.height * part.channels;
-      pixels =
-        part.depth === 1 ? new Uint8Array(n) : part.depth === 2 ? new Uint16Array(n) : new Float32Array(n);
-    }
-    if (part.rowCount === 0) break;
-    pixels!.set(part.pixels, part.rowOffset * part.width * part.channels);
-    row = part.rowOffset + part.rowCount;
-    if (row >= part.height) break;
-  }
-  if (first === null || pixels === null) throw new Error("没取到图像");
-  return {
-    width: first.width,
-    height: first.height,
-    channels: first.channels,
-    level: first.level,
-    pixels,
-  };
+  return fetchImageLevel((...args) => get.apply(transport, args), runId, nodeId, port, level, abandoned);
 }
 
+/** 视角按原图坐标记：scale = 原图一个像素在屏幕上多大，(tx, ty) = 原图 (0, 0) 在舞台上的位置。
+ *  换级别、预览 ↔ 正式（一个显示像素对应的原图像素数变了）都不用动它。 */
 interface ViewXf {
   scale: number;
   tx: number;
@@ -200,6 +215,9 @@ export interface ImageCanvasProps {
   /** 画布挂上 / 摘下时回调（连线查看器的导出 PNG 要拿它）。 */
   onCanvas?: (canvas: HTMLCanvasElement | null) => void;
   overlay?: (view: ImageOverlayView) => ReactNode;
+  /** 预览时源头缩小过的图（valueJson 的 scale，ADR-0028）：一个像素对应原图 pixelScale × pixelScale 个像素。
+   *  fullW / fullH 是这张图自己的尺寸；叠画、拖框与读数照旧用原图坐标，角标写明是预览。 */
+  pixelScale?: number;
 }
 
 export function ImageCanvas({
@@ -214,6 +232,7 @@ export function ImageCanvas({
   testid,
   onCanvas,
   overlay,
+  pixelScale = 1,
 }: ImageCanvasProps) {
   const [levelChoice, setLevelChoice] = useState<"auto" | number>("auto");
   // null = 还没手动选过：跟着图走（三通道以上看 RGB；u8 不拉伸，u16 / f32 拉伸）
@@ -226,21 +245,30 @@ export function ImageCanvas({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [xf, setXf] = useState<ViewXf | null>(null);
+  /** 鼠标下的原图坐标（浮点）：落在哪个显示像素按画着的那张图算，换了一级读数跟着对。 */
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
 
-  const autoLevel = levelToFit(fullW, fullH, OVERVIEW_EDGE);
-  const maxLevel = maxLevelOf(fullW, fullH);
+  // 级别按原图算：k = 一个显示像素是 2^k 个原图像素（手选的也记成这个）。预览缩小过的图（s = 2^sk）
+  // 只有 k ≥ sk 的那些：选了更细的先给它自己最细的一级，松手后的正式结果到了再是选的那一级
+  const logicalW = fullW * pixelScale;
+  const logicalH = fullH * pixelScale;
+  const autoLevel = levelToFit(logicalW, logicalH, OVERVIEW_EDGE);
+  const maxLevel = maxLevelOf(logicalW, logicalH);
   let minLevel = 0;
-  while (levelSize(fullW, minLevel) * levelSize(fullH, minLevel) > MAX_LEVEL_PIXELS) minLevel += 1;
-  const level = levelChoice === "auto" ? autoLevel : Math.max(minLevel, Math.min(maxLevel, levelChoice));
+  while (levelSize(logicalW, minLevel) * levelSize(logicalH, minLevel) > MAX_LEVEL_PIXELS) minLevel += 1;
+  const wanted = levelChoice === "auto" ? autoLevel : Math.max(minLevel, Math.min(maxLevel, levelChoice));
+  /** 这张图自己要取的那一级。 */
+  const level = Math.max(0, wanted - log2Of(pixelScale));
+  /** 「适配」此刻落在哪一块上（下拉框里写这个，与别的选项同一种写法）。 */
+  const autoBlock = 2 ** Math.max(autoLevel, log2Of(pixelScale));
 
   const canFetch = fullW > 0 && fullH > 0 && runId !== null && nodeId !== "" && port !== "";
-  const viewKey = `${nodeId}|${port}|${level}`;
-  const fetchKey = `${runId ?? ""}|${viewKey}`;
+  const footprint: Footprint = { nodeId, port, w: logicalW, h: logicalH, scale: pixelScale };
+  const fetchKey = `${runId ?? ""}|${nodeId}|${port}|${pixelScale}|${level}`;
 
   useEffect(() => {
     if (!canFetch || runId === null) {
@@ -254,9 +282,10 @@ export function ImageCanvas({
     setError(null);
     void (async () => {
       try {
-        const img = await fetchLevel(runId, nodeId, port, level);
+        const img = await fetchLevel(runId, nodeId, port, level, () => cancelled);
         if (cancelled) return;
-        setLoaded({ ...img, key: fetchKey, viewKey });
+        const at: Footprint = { nodeId, port, w: fullW * pixelScale, h: fullH * pixelScale, scale: pixelScale };
+        setLoaded({ ...img, key: fetchKey, footprint: at, pixelScale });
       } catch (e) {
         if (cancelled) return;
         setLoaded(null);
@@ -268,11 +297,12 @@ export function ImageCanvas({
     return () => {
       cancelled = true;
     };
-  }, [canFetch, runId, errorText, nodeId, port, level, fetchKey, viewKey]);
+  }, [canFetch, runId, errorText, nodeId, port, level, fetchKey, pixelScale, fullW, fullH]);
 
-  // 自动运行 / 拖参数时的预览运行每次都换 runId：同一个节点、端口、级别的旧图先顶着，
+  // 自动运行 / 拖参数时的预览运行每次都换 runId，换级别也要重取：原图坐标里是同一张图的旧图先顶着，
   // 新图到了再换 —— 否则每跑一次画面就闪一下、放大的位置也丢了，拖框拖到一半还会被卸载
-  const img = loaded !== null && (loaded.key === fetchKey || loaded.viewKey === viewKey) ? loaded : null;
+  const img =
+    loaded !== null && (loaded.key === fetchKey || sameFootprint(loaded.footprint, footprint)) ? loaded : null;
   const stale = img !== null && img.key !== fetchKey;
 
   const picks = useMemo(() => {
@@ -291,42 +321,50 @@ export function ImageCanvas({
     draw(canvas, img, picks, lo, hi, ramp);
   }, [img, picks, lo, hi, ramp]);
 
-  // 换了一级、换了一张图（尺寸变了）才适配到窗口；同一张图的新一次运行不动视角
-  const fit = () => {
+  // 第一次有图、换了一张图（节点、端口或原图坐标下的尺寸变了）才适配到窗口；同一张图换了运行、换了级别、
+  // 预览 ↔ 正式都不动视角（review 第二轮：按显示比例认图时，小一些的图与手选的级别每次切换都重新适配）
+  const fittedFor = useRef<Footprint | null>(null);
+  const fitTo = (target: Loaded) => {
     const stage = stageRef.current;
-    if (!stage || !img) return;
+    if (!stage) return;
+    // 画出来的范围（原图像素）：最后一块不满也按整块画，适配的是整张画布
+    const dw = target.width * blockOf(target);
+    const dh = target.height * blockOf(target);
     const sw = stage.clientWidth;
     const sh = stage.clientHeight;
-    const scale = Math.min(sw / img.width, sh / img.height);
-    setXf({ scale, tx: (sw - img.width * scale) / 2, ty: (sh - img.height * scale) / 2 });
+    const scale = Math.min(sw / dw, sh / dh);
+    setXf({ scale, tx: (sw - dw * scale) / 2, ty: (sh - dh * scale) / 2 });
+    fittedFor.current = target.footprint;
   };
-  const fitKey = img ? `${img.viewKey}|${img.width}x${img.height}` : "";
-  useEffect(fit, [fitKey]);
+  useEffect(() => {
+    if (!img) return;
+    const prev = fittedFor.current;
+    if (prev !== null && sameFootprint(prev, img.footprint)) {
+      fittedFor.current = img.footprint;
+      return;
+    }
+    fitTo(img);
+    // fitTo 只读 ref 与 img
+  }, [img]);
 
   const toImage = (clientX: number, clientY: number) => {
     const stage = stageRef.current;
-    if (!stage || !xf || !img) return null;
+    if (!stage || !xf) return null;
     const r = stage.getBoundingClientRect();
-    const x = Math.floor((clientX - r.left - xf.tx) / xf.scale);
-    const y = Math.floor((clientY - r.top - xf.ty) / xf.scale);
-    if (x < 0 || y < 0 || x >= img.width || y >= img.height) return null;
-    return { x, y };
+    return { x: (clientX - r.left - xf.tx) / xf.scale, y: (clientY - r.top - xf.ty) / xf.scale };
   };
 
-  /** 原图像素 ↔ 屏幕：显示的是第 level 级，一个显示像素 = block 个原图像素。 */
-  const overlayView = (t: ViewXf, block: number): ImageOverlayView => {
-    const s = t.scale / block;
-    return {
-      scale: s,
-      fullWidth: fullW,
-      fullHeight: fullH,
-      toStage: (x, y) => [t.tx + x * s, t.ty + y * s],
-      toImage: (clientX, clientY) => {
-        const r = stageRef.current?.getBoundingClientRect();
-        return [(clientX - (r?.left ?? 0) - t.tx) / s, (clientY - (r?.top ?? 0) - t.ty) / s];
-      },
-    };
-  };
+  /** 原图像素 ↔ 屏幕：视角本来就按原图坐标记，与显示的是哪一级无关。 */
+  const overlayView = (t: ViewXf): ImageOverlayView => ({
+    scale: t.scale,
+    fullWidth: logicalW,
+    fullHeight: logicalH,
+    toStage: (x, y) => [t.tx + x * t.scale, t.ty + y * t.scale],
+    toImage: (clientX, clientY) => {
+      const r = stageRef.current?.getBoundingClientRect();
+      return [(clientX - (r?.left ?? 0) - t.tx) / t.scale, (clientY - (r?.top ?? 0) - t.ty) / t.scale];
+    },
+  });
 
   const onWheel = (e: React.WheelEvent) => {
     const stage = stageRef.current;
@@ -335,7 +373,8 @@ export function ImageCanvas({
     const mx = e.clientX - r.left;
     const my = e.clientY - r.top;
     const k = e.deltaY < 0 ? 1.25 : 0.8;
-    const scale = Math.max(0.02, Math.min(64, xf.scale * k));
+    // 原图一个像素最多放到 64 屏幕像素；缩小几乎不设下限（上万像素宽的图适配时就在 0.1 以下）
+    const scale = Math.max(1e-3, Math.min(64, xf.scale * k));
     const f = scale / xf.scale;
     setXf({ scale, tx: mx - (mx - xf.tx) * f, ty: my - (my - xf.ty) * f });
   };
@@ -354,16 +393,24 @@ export function ImageCanvas({
   if (error !== null) message = error;
   else if (img === null) message = loading ? "正在取图像…" : "还没取到图像";
 
-  const block = img ? 2 ** img.level : 1;
+  const block = img ? blockOf(img) : 1;
   const readout = (() => {
     if (!hover || !img) return null;
-    const base = (hover.y * img.width + hover.x) * img.channels;
+    const px = Math.floor(hover.x / block);
+    const py = Math.floor(hover.y / block);
+    if (px < 0 || py < 0 || px >= img.width || py >= img.height) return null;
+    const base = (py * img.width + px) * img.channels;
     const vals = Array.from({ length: img.channels }, (_, c) => img.pixels[base + c] ?? NaN);
-    const x0 = hover.x * block;
-    const y0 = hover.y * block;
-    const where = block > 1 ? `(${x0}–${Math.min(fullW, x0 + block) - 1}, ${y0}–${Math.min(fullH, y0 + block) - 1})` : `(${x0}, ${y0})`;
+    const x0 = px * block;
+    const y0 = py * block;
+    const { w: shownW, h: shownH } = img.footprint;
+    const where = block > 1 ? `(${x0}–${Math.min(shownW, x0 + block) - 1}, ${y0}–${Math.min(shownH, y0 + block) - 1})` : `(${x0}, ${y0})`;
     const text = vals.map((v) => (depth === "f32" ? num(v) : Number.isFinite(v) ? String(v) : "—")).join(", ");
-    return `${where} = [${text}]${block > 1 ? `（第 ${img.level} 级的块均值）` : ""}`;
+    const notes = [
+      img.pixelScale > 1 ? `预览 1/${img.pixelScale}` : "",
+      img.level > 0 ? `1/${block} 的块均值` : "",
+    ].filter(Boolean);
+    return `${where} = [${text}]${notes.length > 0 ? `（${notes.join("，")}）` : ""}`;
   })();
 
   const levels: number[] = [];
@@ -378,6 +425,8 @@ export function ImageCanvas({
       data-channels={channels}
       data-depth={depth}
       data-level={img?.level ?? ""}
+      data-block={img ? block : ""}
+      data-pixel-scale={pixelScale}
       data-stale={stale ? "1" : "0"}
       data-w={img?.width ?? 0}
       data-h={img?.height ?? 0}
@@ -388,11 +437,15 @@ export function ImageCanvas({
           <select
             className="peek-tensor__select"
             data-testid={`${testid}-level`}
-            value={String(levelChoice)}
+            value={levelChoice === "auto" ? "auto" : String(wanted)}
             onChange={(e) => setLevelChoice(e.target.value === "auto" ? "auto" : Number(e.target.value))}
-            title="0 = 原图；k = 2^k 倍块均值缩小（离远了看同一张图）"
+            title={
+              pixelScale > 1
+                ? `这是缩小 1/${pixelScale} 的预览图：比 1/${pixelScale} 细的级别先按 1/${pixelScale} 显示，松手后的正式结果再按选的来`
+                : "原图 = 一个像素一个像素地看；1/k = k × k 块均值缩小（离远了看同一张图）"
+            }
           >
-            <option value="auto">适配（{autoLevel}）</option>
+            <option value="auto">适配（{autoBlock === 1 ? "原图" : `1/${autoBlock}`}）</option>
             {levels.map((l) => (
               <option key={l} value={String(l)}>
                 {l === 0 ? "原图" : `1/${2 ** l}`}
@@ -470,7 +523,9 @@ export function ImageCanvas({
           dragRef.current = null;
         }}
         onPointerLeave={() => setHover(null)}
-        onDoubleClick={fit}
+        onDoubleClick={() => {
+          if (img) fitTo(img);
+        }}
       >
         <canvas
           className="peek-image__canvas"
@@ -482,15 +537,25 @@ export function ImageCanvas({
           style={
             xf && img
               ? {
-                  width: img.width * xf.scale,
-                  height: img.height * xf.scale,
+                  width: img.width * block * xf.scale,
+                  height: img.height * block * xf.scale,
                   transform: `translate(${xf.tx}px, ${xf.ty}px)`,
                 }
               : { visibility: "hidden" }
           }
         />
         {xf && img && overlay && (
-          <div className="peek-image__overlay">{overlay(overlayView(xf, 2 ** img.level))}</div>
+          <div className="peek-image__overlay">{overlay(overlayView(xf))}</div>
+        )}
+        {/* 浮在画面角上，不占工具条：预览 ↔ 正式之间切换时画面不该挪动（e2e 量的就是框的屏幕位置） */}
+        {pixelScale > 1 && (
+          <span
+            className="peek-image__badge"
+            data-testid={`${testid}-preview-scale`}
+            title="拖参数时的预览：源头的大图按比例缩小过，框与几何照旧是原图坐标；松手后的正式运行是原图"
+          >
+            预览 1/{pixelScale}
+          </span>
         )}
         {message !== null && (
           <p className="peek-tensor__overlay" data-testid={`${testid}-msg`}>
@@ -504,8 +569,9 @@ export function ImageCanvas({
           <span data-testid={`${testid}-readout`}>{readout}</span>
         ) : (
           <>
-            {fullW}×{fullH}×{channels} {depth}
-            {img && img.level > 0 ? ` · 显示 1/${block}（${img.width}×${img.height}）` : ""} · 范围 {num(lo)}–{num(hi)}
+            {fullW * pixelScale}×{fullH * pixelScale}×{channels} {depth}
+            {pixelScale > 1 ? ` · 预览 1/${pixelScale}（${fullW}×${fullH}）` : ""}
+            {img && block > 1 ? ` · 显示 1/${block}（${img.width}×${img.height}）` : ""} · 范围 {num(lo)}–{num(hi)}
           </>
         )}
       </div>

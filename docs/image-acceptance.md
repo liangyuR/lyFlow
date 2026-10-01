@@ -138,11 +138,11 @@ image-plan §2 列了「加一个数据域」要改的地方，并约定清单�
 留到以后（记在这里，不在这次改）：
 - ~~图像的逐通道统计在结果仓的锁里、每次取输出元信息都重算一遍，2000 万像素的图每次几十毫秒~~（阶段 4 已做：Data 里缓存一份，浅拷贝共用）。
 - 拖框的 begin / commit 在拖动中途画布被卸掉时可能不配对（点云的 RoiLayer 同一写法）。
-- 编辑器 `fetchLevel` 与 MCP `view_output_image` 的「超过 16 MB 分段取」没有测试覆盖（测试用的图都一段取完）。
+- ~~编辑器 `fetchLevel` 与 MCP `view_output_image` 的「超过 16 MB 分段取」没有测试覆盖（测试用的图都一段取完）~~（阶段 5 补上：`lib/imageFetch.ts`、MCP 的 `fetchImage`，各用假的取数函数测分段拼接）。
 
 ## 已知毛刺
 
-- **大图没有验过，实测有两处问题（2026-10-01，修法待定）。** 上面各阶段验收用的图最大 320×240（推理那条是 1280×6）。
+- ~~**大图没有验过，实测有两处问题（2026-10-01，修法待定）。**~~ 阶段 5 已修：抢占不阻塞、预览按比例缩小图像，修前修后的实测见 [large-image-acceptance.md](large-image-acceptance.md)。下面是当时的记录。上面各阶段验收用的图最大 320×240（推理那条是 1280×6）。
   用 `test.make_image`（`LYFLOW_TEST_OPS=1`）出 5472×3648 的合成图，CLI 跑：
   - **预览不缩图像。** ADR-0011 的源头抽稀只认点云（`executor.cpp` 里 `asCloud()` 那一段），`--preview` 下每个节点仍是
     19,961,856 像素。`to_gray → blur → threshold(otsu) → morphology(open) → region_stats` 单算一趟约 200 ms

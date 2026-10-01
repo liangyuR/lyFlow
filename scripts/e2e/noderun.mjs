@@ -506,12 +506,15 @@ async function suiteStopAndPreempt(cdp, report) {
     ctx.status === "running" && ctx.runTo?.disabled === false && /抢占/.test(ctx.runTo?.title ?? "") && ctx.evict === true,
     JSON.stringify(ctx));
   await waitRunEnd(cdp, "抢占后的运行结束");
+  // ADR-0027：抢占不再等被抢占的那个退出，它的 run_finished(cancelled) 晚于新 runId 到达、
+  // 按 runId 分流成孤儿，不进 store —— 看录下来的事件流
   const end = await cdp.eval(`
     const s = window.__lyflow.stores.execution.getState();
-    return { runId: s.runId, status: s.runStatus, marks: window.__lyflow.runMarks.map((m) => ({ runId: m.runId, status: m.status })) };
+    const fin = window.__lyNodeRun.events.find((e) => e.kind === 'run_finished' && e.runId === ${lit(fullRun.runId)});
+    return { runId: s.runId, status: s.runStatus, preempted: fin?.status ?? null };
   `);
-  report.ok("被抢占的全图运行以 cancelled 收场", end.marks.some((m) => m.runId === fullRun.runId && m.status === "cancelled"),
-    JSON.stringify(end.marks));
+  report.ok("被抢占的全图运行以 cancelled 收场（它自己的 run_finished）", end.preempted === "cancelled",
+    JSON.stringify(end));
   report.ok("抢占它的那次跑完了（ok），而不是被当成「停止」", end.runId === preempt.runId && end.status === "ok", JSON.stringify(end));
 
   // 验收 11 的进度环：复用这张刚跑完的慢图，不再另搭一张、另跑一遍全图。
@@ -573,6 +576,58 @@ async function suiteStopAndPreempt(cdp, report) {
     await cdp.send("Emulation.setEmulatedMedia", { features: [] });
     await sleep(150);
   }
+}
+
+// ---------------------------- 抢占一个停不下来的运行（docs/large-image-plan.md L1，ADR-0027）
+
+async function suitePreemptStalled(cdp, report) {
+  const present = await cdp.eval(`return window.__lyflow.stores.manifest.getState().operatorsById.has('test.stall');`);
+  mustOk(present === true, "manifest 里有 test.stall（harness 设了 LYFLOW_TEST_OPS=1）", String(present));
+  report.section("抢占不阻塞（ADR-0027）：运行卡在一个停不下来的算子里时再发起运行，run_graph 与紧随的 IPC 立即返回；" +
+    "中间的请求被顶掉、从没开跑，最后一个在被抢占的那个退出之后跑完");
+  await newDoc(cdp);
+  await installRecorder(cdp);
+  const ids = await buildGraph(cdp, [{ key: "stall", op: "test.stall", params: { ms: 2500 } }], []);
+  await cdp.eval(`window.__lyflow.clearTransitions(); void window.__lyflow.run({}); return true;`);
+  await cdp.waitFor(`window.__lyflow.snapshot().run.nodes[${lit(ids.stall)}]?.state === 'running'`,
+    { timeoutMs: 30_000, what: "test.stall 进入 running" });
+  const first = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
+
+  // 连发三次运行，每次之后紧跟一个最轻的 IPC：修前 run_graph 在主线程上 join 被抢占的那个，
+  // 两者都要等它算完（真 app 里抢占霍夫找圆实测 3–8 s，窗口被判「未响应」）
+  const sent = await cdp.eval(`
+    const inv = window.__TAURI_INTERNALS__.invoke;
+    const rows = [];
+    for (let i = 0; i < 3; i += 1) {
+      const t0 = performance.now();
+      await window.__lyflow.run({});
+      const run = performance.now() - t0;
+      const t1 = performance.now();
+      await inv('get_core_info');
+      rows.push({ runId: window.__lyflow.stores.execution.getState().runId,
+                  runMs: Math.round(run), ipcMs: Math.round(performance.now() - t1) });
+    }
+    return rows;
+  `);
+  const slowest = Math.max(...sent.flatMap((r) => [r.runMs, r.ipcMs]));
+  report.ok(`抢占卡住的运行：三次 run_graph 与紧随的 IPC 最慢 ${slowest} ms（≤ 300）`, slowest <= 300,
+    JSON.stringify(sent));
+
+  const last = sent.at(-1).runId;
+  await cdp.waitFor(
+    `(() => { const s = window.__lyflow.stores.execution.getState();
+              return s.runId === ${lit(last)} && s.runStatus !== 'running' ? s.runStatus : null; })()`,
+    { timeoutMs: 30_000, what: "最后一次请求跑完" },
+  );
+  const seen = await cdp.eval(`
+    const ev = window.__lyNodeRun.events;
+    const status = (id) => ev.find((e) => e.kind === 'run_finished' && e.runId === id)?.status ?? null;
+    const started = (id) => ev.some((e) => e.kind === 'run_started' && e.runId === id);
+    return { first: status(${lit(first)}), last: status(${lit(last)}),
+             middleStarted: ${lit(sent.slice(0, -1).map((r) => r.runId))}.filter(started) };
+  `);
+  report.ok("被抢占的那个算完后以 cancelled 收场；被顶掉的两次从没开跑；最后一次跑完（ok）",
+    seen.first === "cancelled" && seen.middleStarted.length === 0 && seen.last === "ok", JSON.stringify(seen));
 }
 
 // ------------------------------------ 验收 11：hover、端点对齐（进度环在上面的验收 10 里，复用那张慢图）
@@ -780,6 +835,7 @@ export const nodeRunSuites = [
   suiteSmartUpstream,
   suiteIsolateOnly,
   suiteStopAndPreempt,
+  suitePreemptStalled,
   suiteLook,
   suiteAttached,
   suiteMenu,

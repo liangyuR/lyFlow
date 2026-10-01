@@ -172,11 +172,14 @@ void registerImageResize(Registry& r) {
   scale.softMax = 4.0;
   scale.step = 0.05;
   scale.visibleWhen = img::when("mode", Value::text("scale"));
+  // 指定宽高是绝对尺寸：预览缩小时照旧是这个尺寸（推理链路靠它对上模型输入），输出回到原图比例（ADR-0028）
   Param width = img::intParam("width", "Width", 640, 1, 65535, "输出宽度，像素。");
   width.unit = "px";
+  width.absolute = true;
   width.visibleWhen = img::when("mode", Value::text("size"));
   Param height = img::intParam("height", "Height", 480, 1, 65535, "输出高度，像素。");
   height.unit = "px";
+  height.absolute = true;
   height.visibleWhen = img::when("mode", Value::text("size"));
   Param interp = img::enumParam("interpolation", "Interpolation", "area",
                                 {EnumOption{"area", "区域平均", "缩小首选"},
@@ -237,6 +240,7 @@ void registerImageBlur(Registry& r) {
   k.step = 2;
   Param sigma = img::floatParam("sigma", "Sigma", 0.0, "高斯的标准差；0 = 按核大小自动算。");
   sigma.min = 0.0;
+  sigma.unit = "px";
   sigma.visibleWhen = img::when("method", Value::text("gaussian"));
   op.params = {method, k, sigma};
   op.capabilities = {false, false, true};

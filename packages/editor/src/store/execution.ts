@@ -54,6 +54,11 @@ export type RunPhase = "idle" | "running" | "ok" | "error" | "cancelled";
 
 interface ExecutionState {
   runId: string | null;
+  /** 节点表此刻反映的是哪一次运行的结果 —— 视图（主预览、连线查看器）按它取数，不按 runId。
+   *  两者只在一种时候不一样：带 targets / isolate 的运行（预览、运行到此、单节点运行）发起之后、它的 run_started 到达之前。
+   *  这时节点表留着上一次的结果，而新的 run 可能还在桥接层排队（ADR-0027：被抢占的那个还没退出）——
+   *  core 里还没有它的任何结果，拿它去取只会取不到。排队的那个从没开跑就被取消时，它就一直是上一次的。 */
+  resultRunId: string | null;
   runStatus: RunPhase;
   /** 本次运行是不是预览（ADR-0011）。正式结果到达后会覆盖它。 */
   preview: boolean;
@@ -167,6 +172,7 @@ function dropStaged(): void {
 
 export const useExecutionStore = create<ExecutionState>((set, get) => ({
   runId: null,
+  resultRunId: null,
   runStatus: "idle",
   preview: false,
   startedAt: null,
@@ -194,6 +200,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     const only = isolate.length > 0 || targets.length > 0;
     set({
       runId,
+      // 全图运行清空节点表，结果当场就归新的这次；带 targets 的留着上一次的，等它的 run_started 再换
+      resultRunId: only ? get().resultRunId : runId,
       runStatus: "running",
       preview,
       startedAt: Date.now(),
@@ -241,6 +249,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
 
     switch (event.kind) {
       case "run_started": {
+        // 真开跑了：从这一刻起节点表里的结果按这一次取（排队中的请求要等被抢占的那个退出，见 resultRunId）
+        if (s.resultRunId !== event.runId) set({ resultRunId: event.runId });
         if (s.isolate.length === 0 && s.targets.length > 0) {
           // 部分运行（运行到此、智能运行，V2）：计划里的节点照常先亮成「排队中」，
           // 计划外的留着上一次的样子，收场时再按 attached 决定留不留
@@ -339,6 +349,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
           // 挂了过期旧结果的（修订二）也留着：输出取得到，stale 虚线框由 cache store 按键画
           dropUnreachable(s.isolate, [...event.attached, ...(event.attachedStale ?? [])]);
         }
+        // 从没开跑就收场的（排在被抢占的运行后面，开跑前被取消或起不来，ADR-0027）：节点表还是被抢占的
+        // 那一次的样子，而那一次后面的事件已经不归当前 runId、不会落库 —— 它当时在算的节点不能一直转圈
+        if (s.resultRunId !== event.runId) settleAbandoned();
         set({
           runStatus: event.status as RunStatus,
           durationMs: event.durationMs ?? null,
@@ -375,6 +388,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     notReady = [];
     set({
       runId: null,
+      resultRunId: null,
       runStatus: "idle",
       preview: false,
       startedAt: null,
@@ -411,6 +425,21 @@ function dropUnreachable(isolate: readonly string[], attached: readonly string[]
   }
   served = new Set();
   touched = new Set();
+  if (next) useExecutionStore.setState({ nodes: next });
+}
+
+/** 被抢占的那一次留在节点表里的半截状态：在算的、排着队的落成「已取消」—— 它确实被取消了
+ *  （抢占就是取消），自己收场时发的也是这个，只是那些事件已经认不到当前的 runId 上。 */
+function settleAbandoned(): void {
+  const current = useExecutionStore.getState().nodes;
+  let next: Map<string, NodeExecution> | null = null;
+  const at = Date.now();
+  for (const [id, exec] of current) {
+    if (exec.state !== "running" && exec.state !== "pending") continue;
+    next ??= new Map(current);
+    next.set(id, { ...exec, state: "cancelled" });
+    for (const fn of transitionListeners) fn({ nodeId: id, state: "cancelled", at });
+  }
   if (next) useExecutionStore.setState({ nodes: next });
 }
 
@@ -588,8 +617,9 @@ export async function subscribeExecutionEvents(): Promise<void> {
   await subscription;
 }
 
-/** 本地的运行序号：两次 run_graph 走不同的 Tauri 工作线程，回复顺序不保证等于
- *  发起顺序。序号让后发的那次赢，与 C++ 侧「后开始的抢占先开始的」一致。 */
+/** 本地的运行序号：让后发的那次赢，与桥接层「后来的请求抢占先来的」一致。Tauri 宿主里
+ *  run_graph 在主线程上排队、按发起顺序回复，而且不再等被抢占的 run 退出（ADR-0027）；
+ *  HTTP 宿主的回复顺序没有保证 —— 序号对两者都成立。 */
 let runTicket = 0;
 
 /** 宿主给的点云会话 id。`setRunSceneId` 由 `<LyFlowEditor sceneId>` 在渲染期装上，和

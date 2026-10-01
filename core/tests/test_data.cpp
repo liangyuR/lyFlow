@@ -3,6 +3,9 @@
 #include <doctest/doctest.h>
 
 #include <cmath>
+#include <cstring>
+#include <initializer_list>
+#include <iterator>
 #include <limits>
 
 #include "lyflow/data.h"
@@ -362,4 +365,23 @@ TEST_CASE("shrinkImage：2^level 块均值，尺寸向上取整、边上的半�
   fp[3] = 3.0f;
   CHECK(shrinkImage(f, 1).at(0, 0, 0) == doctest::Approx(2.0));
   CHECK_FALSE(shrinkImage(Image{}, 1).consistent());
+
+  // 缩出来的图记着比例（ADR-0028）：scale 逐级相乘，level 0 原样
+  CHECK(half.scale == 2);
+  CHECK(shrinkImage(half, 1).scale == 4);
+  CHECK(shrinkImage(img, 0).scale == 1);
+
+  // u16 单通道 = 深度图：0 是无效深度，不参与平均（large-image-plan D3）；整块都是 0 才是 0。
+  // 别的位深 / 通道数的 0 是真实的黑，照常平均
+  const auto u16 = [](std::int32_t channels, std::initializer_list<std::uint16_t> values) {
+    Image u = Image::allocate(2, 1, channels, PixelDepth::U16);
+    std::memcpy(u.mutablePixels(), std::data(values), values.size() * sizeof(std::uint16_t));
+    return u;
+  };
+  CHECK(shrinkImage(u16(1, {0, 3000}), 1).at(0, 0, 0) == 3000.0);
+  CHECK(shrinkImage(u16(1, {0, 0}), 1).at(0, 0, 0) == 0.0);
+  CHECK(shrinkImage(u16(3, {0, 0, 0, 3000, 3000, 3000}), 1).at(0, 0, 0) == 1500.0);
+  Image dark = Image::allocate(2, 1, 1, PixelDepth::U8);
+  dark.mutablePixels()[1] = 200;
+  CHECK(shrinkImage(dark, 1).at(0, 0, 0) == 100.0);
 }

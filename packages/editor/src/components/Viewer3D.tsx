@@ -153,7 +153,8 @@ export function Viewer3D() {
   const setPinnedId = useUiStore((s) => s.setPinnedNode);
   const doc = useGraphStore((s) => s.doc);
   const nodes = useMemo(() => levelOf(doc, path).nodes, [doc, path]);
-  const runId = useExecutionStore((s) => s.runId);
+  // 底图取自输入端口时同样按节点表反映的那一次运行取（见 store/execution 的 resultRunId）
+  const runId = useExecutionStore((s) => s.resultRunId);
   const runStatus = useExecutionStore((s) => s.runStatus);
   const isPreview = useExecutionStore((s) => s.preview);
   const previewMaxPoints = useUiStore((s) => s.previewMaxPoints);

@@ -113,6 +113,10 @@ bool coerceParam(const Param& p, const nlohmann::json& j, Value& out, std::strin
 /// 硬边界 min/max（逐分量）。softMin/softMax 只是滑块范围，不查。
 bool checkRange(const Param& p, const Value& v, std::string& message);
 
+/// visibleWhen / enabledWhen 在这组参数下成不成立。没设条件、引用了不存在的参数都算成立。
+/// 执行器用它判断「绝对尺寸」的像素参数此刻是否生效（docs/large-image-plan.md E7）。
+bool conditionHolds(const Condition& c, const ParamMap& params);
+
 /// 参数规范化后的 JSON（键排序、浮点稳定）。cacheKey 与测试都用它。
 std::string canonicalParamsJson(const ParamMap& params);
 

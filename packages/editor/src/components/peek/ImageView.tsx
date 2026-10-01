@@ -31,6 +31,7 @@ export function ImageView({ win, src }: PeekViewProps) {
       fullH={typeof value?.height === "number" ? value.height : 0}
       channels={typeof value?.channels === "number" ? value.channels : 0}
       depth={value?.depth ?? "u8"}
+      pixelScale={typeof value?.scale === "number" && value.scale > 1 ? value.scale : 1}
       errorText={lockedRun ? PEEK_FROZEN : null}
       testid="peek-image"
       onCanvas={(el) => {

@@ -83,11 +83,12 @@ Status findCircleCompute(const Inputs& inputs, const ParamView& params, Outputs&
   const double minR = params.number("minRadius");
   const double maxR = params.number("maxRadius");
   if (maxR > 0 && maxR < minR) return badParam("最大半径比最小半径还小", "maxRadius");
+  // 预览里半径按比例缩过（ADR-0028）：截断会把 0.75 变成 0 —— 对 OpenCV 那是「不限」。四舍五入，正数至少 1
+  const auto radius = [](double r) { return r > 0 ? std::max(1, static_cast<int>(std::lround(r))) : 0; };
   std::vector<cv::Vec3f> circles;
   cv::HoughCircles(cvx::view(in), circles, cv::HOUGH_GRADIENT, params.number("dp"),
                    params.number("minDist"), params.number("edgeThreshold"),
-                   params.number("accumulatorThreshold"), static_cast<int>(minR),
-                   static_cast<int>(maxR));
+                   params.number("accumulatorThreshold"), radius(minR), radius(maxR));
   if (circles.empty()) {
     return Status::Error(Phase::Execute, "circle_not_found",
                          "没找到圆：调低累加阈值、放宽半径范围，或先平滑去噪", "accumulatorThreshold");
@@ -160,7 +161,8 @@ Status regionStatsCompute(const Inputs& inputs, const ParamView& params, Outputs
     box.max[1] = static_cast<float>(r.y + r.height);
   }
   outputs.set("mean", Data::measurement(measured(mean, "")));
-  outputs.set("area", Data::measurement(measured(area > 0 ? area : nan, "px")));
+  // 面积是像素个数，量纲是 px²：预览缩小时按 s² 换回原图（ADR-0028）
+  outputs.set("area", Data::measurement(measured(area > 0 ? area : nan, "px²")));
   outputs.set("bbox", Data::box2d(box));
   return Status::Ok();
 }
@@ -249,7 +251,9 @@ void registerImageFindCircle(Registry& r) {
   Param edge = img::floatParam("edgeThreshold", "Edge Threshold", 100.0, "Canny 的高阈值。");
   edge.advanced = true;
   Param acc = img::floatParam("accumulatorThreshold", "Accumulator", 30.0,
-                              "累加阈值：越小找到的（假）圆越多。");
+                              "累加阈值：越小找到的（假）圆越多。票数约等于圆周上的边缘像素数，所以按像素计。");
+  // 票数随圆周长度变：预览缩小 s 倍时阈值也 ÷ s，正式运行找得到的小圆预览里才不会漏掉（ADR-0028，review 修正）
+  acc.unit = "px";
   Param minR = img::floatParam("minRadius", "Min Radius", 0.0, "最小半径；0 = 不限。");
   minR.unit = "px";
   minR.min = 0.0;

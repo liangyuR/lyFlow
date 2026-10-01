@@ -144,6 +144,8 @@ export interface OutputValue {
   height?: number;
   channels?: number;
   depth?: "u8" | "u16" | "f32";
+  /** 预览时源头缩小过的图（ADR-0028）：一个像素对应原图 scale × scale 个像素。只在 > 1 时有。 */
+  scale?: number;
 }
 
 export interface OutputStat {

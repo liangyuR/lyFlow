@@ -126,8 +126,19 @@ fn main() {
     let mut dirs = Vec::new();
     collect(&core.join("src"), &mut files, &mut dirs);
     collect(&core.join("include"), &mut files, &mut dirs);
-    // tests/ 不进监听列表：cargo 只构建 lyflow_core 这一个目标，
+    // tests/ 的大部分不进监听列表：cargo 只构建 lyflow_core 这一个目标，
     // 改测试不该触发 core 重编（core 的测试由 scripts/build-core.ps1 跑）。
+    // 例外是编进 DLL 的那几个：tests/e2e/ 与它 include 的测试算子头（`*_op.h`，LYFLOW_TEST_OPS=1 时注册）。
+    // 不听它们的话，改了测试算子 app 里还是旧的那一份（加 test.stall 时踩到）。
+    collect(&core.join("tests").join("e2e"), &mut files, &mut dirs);
+    if let Ok(entries) = std::fs::read_dir(core.join("tests")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.to_string_lossy().ends_with("_op.h") {
+                files.push(path);
+            }
+        }
+    }
     files.push(core.join("CMakeLists.txt"));
     files.push(core.join("lyflow-utf8.manifest"));
     files.sort();
