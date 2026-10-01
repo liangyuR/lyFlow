@@ -448,12 +448,16 @@ async function suiteHotReload(cdp, report) {
   report.section("1.5 热重载：开发期装置已就位");
 
   const info = await cdp.eval(`return await window.__lyflow.transport.getCoreInfo();`);
-  report.ok("core 报告了热重载能力与代数", info?.hotReload === true, JSON.stringify(info));
+  // 安装包里不开（release 构建，bridge/src/core_ffi.rs 的 watch_source），那一条在 run.mjs 的「安装包」组里验
+  const packaged = process.env.LYFLOW_E2E_PACKAGED === "1";
+  report.ok(packaged ? "安装包：core 报告了代数，热重载关着" : "core 报告了热重载能力与代数",
+    info?.hotReload === !packaged, JSON.stringify(info));
   report.eq("启动时是第 0 代", info?.generation, 0);
+  // 状态栏的「热重载 · 第 N 代」只在开着时出现
   report.eq(
-    "状态栏的代数与 core 一致",
+    packaged ? "状态栏没有热重载角标" : "状态栏的代数与 core 一致",
     await domOf(cdp, '[data-testid="statusbar-generation"]', "el.getAttribute('data-generation')"),
-    String(info?.generation ?? 0),
+    packaged ? null : String(info?.generation ?? 0),
   );
   // 换代本身在 cargo test 里验（hot_reload_swaps_in_a_fresh_generation）：
   // CDP 没法在一次会话里重编 C++，手工复现步骤见 docs/m3-acceptance.md。

@@ -52,7 +52,12 @@ fetch，所以 `cdp.mjs` 零依赖。
 ```bash
 pnpm e2e           # 自己起 tauri dev，跑完自己收尾
 pnpm e2e:packaged  # 同一套断言，跑 tauri build 产物在干净目录里的拷贝
+pnpm e2e --only m8b:suiteImagePreviewScale,noderun   # 只跑点名的（两种都能带）
 ```
+
+`--only` 逗号分隔，每一项是模块（文件名：`m3`、`peek`、`params_p2`…）、分组函数名（在哪个模块都算）
+或「模块:分组」。`run` 是 `run.mjs` 开头那五组（中文路径、演示 pipeline、validate、坏参数、取消）——
+它们彼此依赖，只能整块点。点了不存在的名字会在起 app 之前报错，并列出全部可选的。
 
 调试脚本本身时，另开一个窗口跑
 
@@ -107,10 +112,12 @@ cargo build --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features
 
 ## 干净目录验收（`stagePackagedApp`）
 
-把 `tauri build` 的产物复刻成一个干净目录里的安装结果：拷 exe + 同目录的全部
-DLL —— 这正是两个安装包往 `$INSTDIR` 放的东西（NSIS 的 `SetOutPath $INSTDIR`，
-WiX 的 `INSTALLDIR`）。目的是验证「DLL 随包」和「从 exe 同目录加载」这条路径，
-而不是验证安装程序本身。
+把 `tauri build` 的产物复刻成一个干净目录里的安装结果：拷两个 exe（`target/release/`）+
+`bridge/target/bundle-core/` 里的全部 DLL —— 这正是两个安装包往 `$INSTDIR` 放的东西
+（`bundle.resources`；NSIS 的 `SetOutPath $INSTDIR`，WiX 的 `INSTALLDIR`）。目的是验证「DLL 随包」
+和「从 exe 同目录加载」这条路径，而不是验证安装程序本身。不取 `target/release/` 里的 DLL：
+app 与 CLI 的构建脚本都往那里拷，谁后拷谁说了算。「安装包」那一组还断言打包的 core 带着
+这次构建 `LYFLOW_PACKS` 要的包、热重载关着 —— 跑的时候环境变量要与 `tauri build` 那次一致。
 
 注意这**不等于**在一台干净机器上验证：这台机器有 MSVC 和 vcpkg，漏打包的 DLL
 仍然可能被系统从别处找到。

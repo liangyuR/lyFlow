@@ -248,6 +248,8 @@ fn main() {
             println!("cargo:warning=拷贝 core 运行时到 {} 失败: {e}", dest.display());
         }
     }
+    #[cfg(feature = "desktop")]
+    stage_bundle_core(&bin);
 
     utf8_manifest_step(&core.join("lyflow-utf8.manifest"));
     tauri_step();
@@ -299,6 +301,45 @@ fn tauri_step() {
 /// 关掉 desktop feature 时只构建 CLI，Tauri 一行都不碰（F6）。
 #[cfg(not(feature = "desktop"))]
 fn tauri_step() {}
+
+/// 安装包里的 core 运行时（`tauri.conf.json` 的 `bundle.resources` 指向这里）。
+/// 必须就是这一次构建编出来的那一份：以前指向 `build-core.ps1` 的 `build/core/bin`，那是另一棵构建树，
+/// 装进去的是那边最后一次编的 —— `LYFLOW_PACKS=gap;dts pnpm tauri build` 打出来的包里没有 gap。
+/// 也不能取 `target/<profile>/`：CLI（`--no-default-features`）的构建脚本也往那里拷，谁后拷谁说了算。
+///
+/// release 每次都整份换掉（先删旧的 DLL：换了一组包时多出来的不该留在安装包里）；debug 只在还没有时放一份 ——
+/// tauri-build 在 debug 下也按 resources 往 target 里拷，glob 什么都匹配不到会报错，
+/// 而一次 `tauri dev` 不该把上一次 release 留下的换掉（release 的构建脚本下次不一定重跑）。
+#[cfg(feature = "desktop")]
+fn stage_bundle_core(bin: &Path) {
+    let staging = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join("bundle-core");
+    let is_dll = |p: &Path| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("dll"));
+    let staged: Vec<PathBuf> = std::fs::read_dir(&staging)
+        .map(|d| d.flatten().map(|e| e.path()).filter(|p| is_dll(p)).collect())
+        .unwrap_or_default();
+    let release = std::env::var("PROFILE").as_deref() == Ok("release");
+    if !release && !staged.is_empty() {
+        return;
+    }
+    let result = (|| -> std::io::Result<()> {
+        std::fs::create_dir_all(&staging)?;
+        for old in &staged {
+            std::fs::remove_file(old)?;
+        }
+        for entry in std::fs::read_dir(bin)?.flatten() {
+            let src = entry.path();
+            if entry.file_type()?.is_file() && is_dll(&src) {
+                std::fs::copy(&src, staging.join(entry.file_name()))?;
+            }
+        }
+        Ok(())
+    })();
+    if let Err(e) = result {
+        println!("cargo:warning=准备安装包里的 core 运行时（{}）失败: {e}", staging.display());
+    }
+}
 
 /// 从 OUT_DIR 反推 `target/<profile>/`（往上数四层）。cargo 没有官方变量，
 /// 但拷贝失败只是 warning + 运行时报「找不到 lyflow_core.dll」，不是静默错误。

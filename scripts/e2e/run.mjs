@@ -32,6 +32,45 @@ import { paramsP4Suites } from "./params_p4.mjs";
 import { peekSuites } from "./peek.mjs";
 import { phaseASuites } from "./phase_a.mjs";
 
+/** 各模块的分组，按跑的顺序。键是文件名，`--only` 按它点名。 */
+const MODULES = {
+  m3: m3Suites,
+  m4: m4Suites,
+  phase_a: phaseASuites,
+  gap: gapSuites,
+  peek: peekSuites,
+  compare: compareSuites,
+  m8b: m8bSuites,
+  m8c: m8cSuites,
+  motion: motionSuites,
+  noderun: nodeRunSuites,
+  params_p1: paramsP1Suites,
+  params_p2: paramsP2Suites,
+  params_p3: paramsP3Suites,
+  params_p4: paramsP4Suites,
+};
+
+/** `--only a,b:c`：只跑点名的。一项可以是模块（`m8b`）、分组函数名（`suiteImagePreviewScale`，
+ *  在哪个模块都算）或「模块:分组」。`run` 是本文件开头那五组 —— 它们彼此依赖（validate 要用演示
+ *  pipeline 的结果），只能整块点。没有 `--only` 时返回 null（全跑）；点了不存在的直接报错并列出可选的。 */
+function parseOnly(argv) {
+  const at = argv.findIndex((a) => a === "--only" || a.startsWith("--only="));
+  if (at < 0) return null;
+  const raw = argv[at].startsWith("--only=") ? argv[at].slice("--only=".length) : argv[at + 1] ?? "";
+  const items = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  if (items.length === 0) throw new Error("--only 后面要跟要跑的模块或分组，例如 --only m8b:suiteImagePreviewScale");
+  const known = Object.entries(MODULES).flatMap(([mod, suites]) => suites.map((s) => `${mod}:${s.name}`));
+  const hit = (item, mod, name) => item === mod || item === name || item === `${mod}:${name}`;
+  const unknown = items.filter((item) => item !== "run" && !known.some((k) => hit(item, ...k.split(":"))));
+  if (unknown.length > 0) {
+    throw new Error(`--only 里有找不到的：${unknown.join(", ")}。可选：run（开头五组）、${Object.keys(MODULES).join("、")}，或\n  ${known.join("\n  ")}`);
+  }
+  return {
+    preamble: items.includes("run"),
+    matches: (mod, name) => items.some((item) => hit(item, mod, name)),
+  };
+}
+
 // ------------------------------------------------------------------- 各分组
 
 /** §11：中文目录下保存图 + 存 PCD。顺带生成后面演示 pipeline 要读的那个文件。 */
@@ -319,6 +358,8 @@ async function main() {
   // --packaged：不起 tauri dev，而是把 `tauri build` 的产物拷进一个干净目录再启动。
   // 验的是 m2-plan §11 的「安装包在干净目录能启动并跑通演示 pipeline（DLL 随包）」。
   const packaged = process.argv.includes("--packaged");
+  // 先解析：点错了名字不必等两分钟起 app 才知道
+  const only = parseOnly(process.argv);
 
   const report = new Report();
   const ws = makeChineseWorkspace();
@@ -326,6 +367,8 @@ async function main() {
 
   let staged = null;
   if (packaged) {
+    // 各分组据此区分开发构建与安装包（例如热重载只在前者有）
+    process.env.LYFLOW_E2E_PACKAGED = "1";
     staged = stagePackagedApp();
     console.log(`干净安装目录：${staged.dir}（${staged.dlls} 个 DLL 随包）`);
   }
@@ -351,22 +394,36 @@ async function main() {
     const ort = ["onnxruntime.dll", "onnxruntime_providers_shared.dll"];
     const present = ort.filter((n) => fs.existsSync(path.join(staged.dir, n)));
     report.eq("onnxruntime 两个 DLL 都在干净目录里", present, ort);
+    // 装进去的 core 就是这次构建的那一份：以前 bundle.resources 指向 build-core.ps1 的另一棵构建树，
+    // LYFLOW_PACKS=gap;dts 打出来的包里没有 gap，这里的数照样对得上 —— 只看算子个数抓不到
+    const packs = await cdp.eval(`
+      return [...new Set([...window.__lyflow.stores.manifest.getState().operatorsById.values()]
+        .map((o) => (o.pack ?? '').split('@')[0]).filter(Boolean))].sort();
+    `);
+    const want = [
+      ...(process.env.LYFLOW_STD_PACKS === "0" ? [] : ["std-image", "std-ml", "std-pointcloud"]),
+      ...(process.env.LYFLOW_PACKS ?? "").split(";").map((s) => s.trim()).filter(Boolean),
+    ];
+    report.ok(`打包的 core 带着这次构建要的包（${want.join("、")}）`, want.every((p) => packs.includes(p)),
+      `有：${JSON.stringify(packs)}；要：${JSON.stringify(want)}`);
+    report.eq("打包产物不开热重载（开发期装置，只在 debug 构建里有）", info?.hotReload, false);
   }
 
   try {
-    const { pcdName } = await suiteChinesePath(cdp, report, ws);
-    const { ids } = await suiteDemoPipeline(cdp, report, ws, pcdName);
-    // 顺序有意义：validate/info 要用演示 pipeline 那次成功运行留下的结果，
-    // 所以必须排在把 leafSize 改坏的那一组之前。
-    await suiteValidateAndInfo(cdp, report, ids);
-    await suiteBadParam(cdp, report, ids);
-    await suiteCancel(cdp, report);
+    if (only === null || only.preamble) {
+      const { pcdName } = await suiteChinesePath(cdp, report, ws);
+      const { ids } = await suiteDemoPipeline(cdp, report, ws, pcdName);
+      // 顺序有意义：validate/info 要用演示 pipeline 那次成功运行留下的结果，
+      // 所以必须排在把 leafSize 改坏的那一组之前。
+      await suiteValidateAndInfo(cdp, report, ids);
+      await suiteBadParam(cdp, report, ids);
+      await suiteCancel(cdp, report);
+    }
 
-    const grouped = [
-      ...m3Suites, ...m4Suites, ...phaseASuites, ...gapSuites, ...peekSuites, ...compareSuites, ...m8bSuites, ...m8cSuites,
-      ...motionSuites, ...nodeRunSuites, ...paramsP1Suites, ...paramsP2Suites, ...paramsP3Suites,
-      ...paramsP4Suites,
-    ];
+    const grouped = Object.entries(MODULES)
+      .flatMap(([mod, suites]) => suites.map((suite) => ({ mod, suite })))
+      .filter(({ mod, suite }) => only === null || only.matches(mod, suite.name))
+      .map(({ suite }) => suite);
     for (const suite of grouped) {
       try {
         await suite(cdp, report, ws);
