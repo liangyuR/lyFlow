@@ -577,7 +577,7 @@
   font-family: var(--lyflow-mono);
 }
 
-.tag--lyflow-warn {
+.tag--warn {
   border-color: var(--lyflow-warn);
   color: var(--lyflow-warn);
 }

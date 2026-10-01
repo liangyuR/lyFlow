@@ -416,7 +416,14 @@ async function suiteIsolateOnly(cdp, report) {
   const run = await runAndWait(cdp, () => cdp.eval(`await window.__lyflow.run({ isolate: [${lit(ids.b)}] }); return true;`));
   const toast = await cdp.eval(`
     const t = document.querySelector('[data-testid="toast"]');
-    return t ? { text: t.textContent, warn: t.classList.contains('toast--warn') } : null;
+    if (!t) return null;
+    // 类名对了还不够：样式表里那条规则曾经被批量改名改成 .toast--lyflow-warn，类名对得上、却一直没上色
+    const probe = document.createElement('span');
+    probe.style.color = getComputedStyle(t).getPropertyValue('--lyflow-warn').trim();
+    document.body.appendChild(probe);
+    const want = getComputedStyle(probe).color;
+    probe.remove();
+    return { text: t.textContent, warn: t.classList.contains('toast--warn'), styled: getComputedStyle(t).color === want };
   `);
   await sleep(450);
   const flashes = await cdp.eval(`const r = window.__lyMotion.rec.locate; r.stop(); return r.hits.map((h) => ({ key: h.key, value: h.value }));`);
@@ -426,7 +433,8 @@ async function suiteIsolateOnly(cdp, report) {
   report.ok("run_finished.diagnostics 指向 a、code 是 upstream_not_ready",
     finished?.error?.code === "upstream_not_ready" && finished.diagnostics?.some((d) => d.nodeId === ids.a && d.code === "upstream_not_ready"),
     JSON.stringify(finished && { error: finished.error, diagnostics: finished.diagnostics }));
-  report.ok("warn 级 toast，文案是「上游 … 还没有可用结果」", toast?.warn && /还没有可用结果/.test(toast.text) && toast.text.includes(ids.a), JSON.stringify(toast));
+  report.ok("warn 级 toast（真的是警告色），文案是「上游 … 还没有可用结果」",
+    toast?.warn && toast.styled && /还没有可用结果/.test(toast.text) && toast.text.includes(ids.a), JSON.stringify(toast));
   report.ok("没有任何节点进入 running", !Object.values(trans).some((list) => list.includes("running")), JSON.stringify(trans));
   report.ok("缺结果的上游 a 闪了一下定位光（data-flash=\"locate\"）", flashes.some((h) => h.key === `node-${ids.a}` && h.value === "locate"),
     JSON.stringify(flashes));

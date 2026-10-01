@@ -308,6 +308,24 @@
   font-size: 11px;
 }
 
+.insp__nodeid {
+  margin-left: auto;
+  overflow: hidden;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-fg-2);
+  font: 11px var(--lyflow-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: copy;
+}
+
+.insp__nodeid:hover {
+  color: var(--lyflow-fg-0);
+}
+
 .insp__doc {
   margin: 8px 0 0;
   color: var(--lyflow-fg-1);
@@ -747,7 +765,7 @@
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
 }
 
-.toast--lyflow-warn {
+.toast--warn {
   border-color: var(--lyflow-warn);
   color: var(--lyflow-warn);
 }
@@ -1378,9 +1396,36 @@
 .drawer__logs { margin: 0; padding: 0; list-style: none; font-family: var(--lyflow-mono); }
 .drawer__log { display: flex; gap: 8px; padding: 1px 0; }
 .drawer__log-level { width: 42px; color: var(--lyflow-fg-2); }
-.drawer__log--lyflow-warn .drawer__log-level { color: var(--lyflow-warn); }
+.drawer__log--warn .drawer__log-level { color: var(--lyflow-warn); }
 .drawer__log--error .drawer__log-level { color: #ff8b8b; }
-.drawer__log-node { color: var(--lyflow-accent-dim); }
+.drawer__log-node {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--lyflow-accent-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.drawer__log-node:hover:not(:disabled) { color: var(--lyflow-accent); text-decoration: underline; }
+.drawer__log-node:disabled { cursor: default; }
+.drawer__logbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.drawer__logbar label { display: flex; align-items: center; gap: 4px; color: var(--lyflow-fg-1); }
+.drawer__logbar input[type="search"] {
+  width: 220px;
+  padding: 2px 6px;
+  border: 1px solid var(--lyflow-border);
+  border-radius: 4px;
+  background: var(--lyflow-bg-0);
+  color: var(--lyflow-fg-0);
+  font: inherit;
+}
+.drawer__logcount { margin-left: auto; color: var(--lyflow-fg-2); }
 .drawer__log-text { color: var(--lyflow-fg-1); }
 
 /* 运行收尾（ADR-0022）。三态各有自己的颜色：绿=拿到，黄=降级，红=失败 —— 用户
