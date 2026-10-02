@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import { layoutGraph, needsInitialLayout } from "../src/lib/layout.ts";
 import { fitSidePanes } from "../src/lib/panes.ts";
+import { placeMenu } from "../src/lib/placement.ts";
 
 const chain = (withPositions) => ({
   schemaVersion: 1,
@@ -47,5 +48,22 @@ test("窗口窄了两侧面板让位：右栏先缩到最窄，不够再缩左�
   ];
   for (const [name, total, left, right, want] of cases) {
     assert.deepEqual(fitSidePanes(total, left, right, 320), want, name);
+  }
+});
+
+// 右键菜单摆进窗口（1440 × 900 的窗口、离边 4 px）：放不下就翻到鼠标另一边，比窗口还高就贴顶限高。
+// 修前照鼠标位置往右下摆，画布下半部分右键节点时菜单大半截在窗口外
+test("右键菜单摆进窗口：放不下翻到鼠标另一边，比窗口还高就贴顶、限高", () => {
+  const vp = { width: 1440, height: 900 };
+  const menu = { width: 150, height: 300 };
+  const cases = [
+    ["放得下：照鼠标位置", { x: 100, y: 100 }, menu, { left: 100, top: 100 }],
+    ["下面放不下：翻到鼠标上面", { x: 100, y: 800 }, menu, { left: 100, top: 500 }],
+    ["右边放不下：翻到鼠标左边", { x: 1400, y: 100 }, menu, { left: 1250, top: 100 }],
+    ["翻上去还放不下：贴着窗口顶", { x: 100, y: 500 }, { width: 150, height: 600 }, { left: 100, top: 4 }],
+    ["比窗口还高：贴顶、限高（里面滚）", { x: 100, y: 400 }, { width: 150, height: 1000 }, { left: 100, top: 4, maxHeight: 892 }],
+  ];
+  for (const [name, at, size, want] of cases) {
+    assert.deepEqual(placeMenu(at, size, vp), want, name);
   }
 });

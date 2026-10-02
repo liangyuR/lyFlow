@@ -2,7 +2,9 @@
 // 这里是菜单本身：每一项与它要的派生值（作用于谁、能不能「仅此节点」、哪些端口能标成图级输出）。
 
 import { useReactFlow } from "@xyflow/react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useRef } from "react";
+
+import { useMenuPlacement } from "../hooks/useMenuPlacement";
 
 import { keyHint } from "../lib/keymap";
 import { layoutGraph } from "../lib/layout";
@@ -106,6 +108,9 @@ export function NodeContextMenu({
     onClose();
   }, [menuTargets, onClose]);
 
+  const box = useRef<HTMLDivElement>(null);
+  const placement = useMenuPlacement(box, { x: menu.x, y: menu.y });
+
   const doDissolve = useCallback(() => {
     const inlined = useGraphStore.getState().dissolveSubgraph(menu.nodeId);
     if (inlined.length > 0) {
@@ -119,8 +124,9 @@ export function NodeContextMenu({
 
   return (
     <div
+      ref={box}
       className="ctxmenu"
-      style={{ left: menu.x, top: menu.y }}
+      style={placement}
       data-testid="node-context-menu"
       onClick={(e) => e.stopPropagation()}
     >

@@ -60,6 +60,7 @@ import { addNodeWithAutoConnect, insertSnippetById } from "../lib/insert";
 import { EdgePeekLayer } from "./EdgePeekLayer";
 import { FlowEdge } from "./FlowEdge";
 import { OPERATOR_DND_MIME, SNIPPET_DND_MIME } from "./NodePalette";
+import { EdgeContextMenu, type EdgeMenuState } from "./EdgeContextMenu";
 import { NodeContextMenu, type ContextMenuState } from "./NodeContextMenu";
 import { OperatorNode } from "./OperatorNode";
 import { useCanvasMotion } from "./useCanvasMotion";
@@ -100,12 +101,6 @@ const DEFAULT_EDGE_OPTIONS = { type: "default" };
 export interface CanvasActions {
   /** 只跑到某个节点（交互清单 P1 #27）。 */
   onRunToNode: (nodeId: string) => void;
-}
-
-interface EdgeMenuState {
-  edgeId: string;
-  x: number;
-  y: number;
 }
 
 const PEEK_FLASH_MS = 200;
@@ -1089,45 +1084,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
 
       <EdgePeekLayer />
 
-      {edgeMenu && (
-        <div
-          className="ctxmenu"
-          style={{ left: edgeMenu.x, top: edgeMenu.y }}
-          data-testid="edge-context-menu"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            type="button"
-            data-testid="edge-ctx-peek"
-            onClick={() => {
-              openPeek(edgeMenu.edgeId, { x: edgeMenu.x, y: edgeMenu.y });
-              setEdgeMenu(null);
-            }}
-          >
-            查看内容
-          </button>
-          <button
-            type="button"
-            data-testid="edge-ctx-reroute"
-            onClick={() => {
-              insertReroute(edgeMenu.edgeId, { x: edgeMenu.x, y: edgeMenu.y });
-              setEdgeMenu(null);
-            }}
-          >
-            在此插入 Reroute
-          </button>
-          <button
-            type="button"
-            data-testid="edge-ctx-delete"
-            onClick={() => {
-              useGraphStore.getState().disconnect([edgeMenu.edgeId]);
-              setEdgeMenu(null);
-            }}
-          >
-            删除连线
-          </button>
-        </div>
-      )}
+      {edgeMenu && <EdgeContextMenu menu={edgeMenu} onPeek={openPeek} onReroute={insertReroute} onClose={closeMenu} />}
 
       {menu && (
         <NodeContextMenu

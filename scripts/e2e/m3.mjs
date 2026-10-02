@@ -1260,6 +1260,23 @@ async function suiteEditing(cdp, report) {
   await clickAt(cdp, inspCorner);
   await sleep(150);
   report.eq("右键菜单：Esc 收起，在菜单外面（检查器上）点一下也收起", { esc: menuAfterEsc, outside: await anyMenu() }, { esc: false, outside: false });
+  // 右键菜单摆进窗口：画布下沿的节点上右键，菜单翻到鼠标上面、整个在窗口里。以前照鼠标位置往下摆，
+  // 二十来项的菜单大半截跑到窗口外面点不着。节点放在左下（右下角是小地图，窗口正中下方是提示）
+  const flowBox = await cdp.eval(`const r = document.querySelector('.react-flow').getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) };`);
+  await placeAtScreen(cdp, { [ids.gen]: { x: 80, y: flowBox.h - 70 } });
+  await sleep(200);
+  await clickAt(cdp, await centerOf(cdp, `[data-testid="node-${ids.gen}"] .node__head`), { button: "right" });
+  await sleep(200);
+  const menuBox = await cdp.eval(`
+    const m = document.querySelector('[data-testid="node-context-menu"]');
+    if (!m) return null;
+    const r = m.getBoundingClientRect();
+    return { left: Math.round(r.left), top: Math.round(r.top), right: Math.round(r.right), bottom: Math.round(r.bottom), vw: innerWidth, vh: innerHeight };
+  `);
+  report.ok("画布下沿的节点上右键：菜单整个在窗口里",
+    menuBox != null && menuBox.left >= 0 && menuBox.top >= 0 && menuBox.right <= menuBox.vw && menuBox.bottom <= menuBox.vh, JSON.stringify(menuBox));
+  await pressEscape(cdp);
+  await sleep(100);
 
   // #12 复制粘贴走系统剪贴板（另一个窗口、重开之后也粘得进来）。系统剪贴板换成页面里的桩（stubClipboard）：
   // 这里要验的是「写的是什么、粘的是哪一份」，不该动用户真的剪贴板

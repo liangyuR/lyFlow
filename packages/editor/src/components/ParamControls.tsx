@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import { copyText, readClipboard } from "../lib/clipboard";
 import { curveProblem } from "../lib/curve";
 import { dialogs } from "../lib/dialogs";
@@ -469,6 +470,7 @@ function ParamMenu({
   const path = at ?? uiPath;
   const inSubgraph = path.length > 0;
   const ref = useRef<HTMLDivElement>(null);
+  const placement = useMenuPlacement(ref, { x, y });
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -524,7 +526,7 @@ function ParamMenu({
       ref={ref}
       className="ctxmenu param-menu"
       data-testid="param-menu"
-      style={{ left: Math.max(4, Math.min(x, window.innerWidth - 180)), top: y }}
+      style={placement}
       onContextMenu={(e) => e.preventDefault()}
     >
       <button
