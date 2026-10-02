@@ -920,6 +920,36 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     useUiStore.getState().clearAutoHint();
   }, [closeMenu]);
 
+  // 右键菜单开着时：Esc 收起（并且只收起菜单 —— 以前 Esc 照样落到「退出子图」上，菜单还悬在那儿）；
+  // 在菜单外面按下鼠标收起（以前只有点画布才收，点工具栏、检查器它留着）；滚轮缩放画布也收起（菜单是按屏幕坐标摆的，
+  // 画布一动它就对不上节点了）
+  const menuOpen = menu !== null || edgeMenu !== null;
+  useEffect(() => {
+    if (!menuOpen) return;
+    const owner = wrapper.current?.ownerDocument ?? document;
+    const outside = (target: EventTarget | null) => !(target instanceof Element && target.closest(".ctxmenu"));
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeMenu();
+    };
+    const onPointer = (e: PointerEvent) => {
+      if (outside(e.target)) closeMenu();
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (outside(e.target)) closeMenu();
+    };
+    owner.addEventListener("keydown", onKey, true);
+    owner.addEventListener("pointerdown", onPointer, true);
+    owner.addEventListener("wheel", onWheel, true);
+    return () => {
+      owner.removeEventListener("keydown", onKey, true);
+      owner.removeEventListener("pointerdown", onPointer, true);
+      owner.removeEventListener("wheel", onWheel, true);
+    };
+  }, [menuOpen, closeMenu]);
+
   const menuTargets = useCallback((): string[] => {
     const ui = useUiStore.getState();
     return ui.selectedNodes.size > 0 ? [...ui.selectedNodes] : menu ? [menu.nodeId] : [];

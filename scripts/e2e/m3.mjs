@@ -1206,8 +1206,16 @@ async function suiteEditing(cdp, report) {
   await clickAt(cdp, await centerOf(cdp, `[data-testid="node-${ids.gen}"] .node__head`), { button: "right" });
   await sleep(200);
   report.ok("右键单击节点照样弹节点菜单", await cdp.eval(`return !!document.querySelector('[data-testid="node-context-menu"]');`));
+  // 右键菜单：Esc 收起；在菜单外面（检查器上）按下鼠标也收起。以前 Esc 不管它，只有点画布才收
   await pressEscape(cdp);
-  await pressEscape(cdp);
+  await sleep(100);
+  const menuAfterEsc = await anyMenu();
+  await clickAt(cdp, await centerOf(cdp, `[data-testid="node-${ids.gen}"] .node__head`), { button: "right" });
+  await sleep(200);
+  const inspCorner = await cdp.eval(`const r = document.querySelector('.insp').getBoundingClientRect(); return { x: Math.round(r.left + 6), y: Math.round(r.top + 6) };`);
+  await clickAt(cdp, inspCorner);
+  await sleep(150);
+  report.eq("右键菜单：Esc 收起，在菜单外面（检查器上）点一下也收起", { esc: menuAfterEsc, outside: await anyMenu() }, { esc: false, outside: false });
 
   // #12 复制粘贴走系统剪贴板（另一个窗口、重开之后也粘得进来）。系统剪贴板换成页面里的桩（stubClipboard）：
   // 这里要验的是「写的是什么、粘的是哪一份」，不该动用户真的剪贴板
