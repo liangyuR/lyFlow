@@ -1140,10 +1140,10 @@ async function suiteEditing(cdp, report) {
   // 框的两个角都要离画布边 48 px 以上：框选时指针进了离边 40 px 那一圈，React Flow 会自动平移画布
   // （autoPanOnSelection），算好的框就套不住节点了。先缩小一点给四周留出地方
   await normalizeZoom(cdp, 0.7);
-  const box = await cdp.eval(`
+  const boxAround = (nodeIds) => cdp.eval(`
     const flow = document.querySelector('.react-flow').getBoundingClientRect();
     const clear = (x, y) => x - flow.left >= 48 && flow.right - x >= 48 && y - flow.top >= 48 && flow.bottom - y >= 48;
-    const rects = [${lit(ids.gen)}, ${lit(ids.voxel)}].map((id) => document.querySelector('[data-testid="node-' + id + '"]').getBoundingClientRect());
+    const rects = ${JSON.stringify(nodeIds)}.map((id) => document.querySelector('[data-testid="node-' + id + '"]').getBoundingClientRect());
     const left = Math.min(...rects.map((r) => r.left)), top = Math.min(...rects.map((r) => r.top));
     const right = Math.max(...rects.map((r) => r.right)), bottom = Math.max(...rects.map((r) => r.bottom));
     for (let d = 14; d < 120; d += 6) {
@@ -1154,6 +1154,7 @@ async function suiteEditing(cdp, report) {
     }
     return null;
   `);
+  const box = await boxAround([ids.gen, ids.voxel]);
   mustOk(box != null, "gen 与 voxel 左上角外面有离画布边够远的空白可以开始框选", box);
   // 以前框选只选上先碰到的那一个、选区也不出来：onSelectionChange 与 onNodesChange/onEdgesChange
   // 来回改连线的选中，控制台报 Maximum update depth exceeded（那条红字由 run.mjs 收尾的「控制台无报错」兜住）
@@ -1161,13 +1162,21 @@ async function suiteEditing(cdp, report) {
   await sleep(200);
   const boxed = await cdp.eval(`return [...window.__lyflow.stores.ui.getState().selectedNodes];`);
   report.ok("框选：gen 与 voxel 都选上了", boxed.includes(ids.gen) && boxed.includes(ids.voxel), JSON.stringify(boxed));
-  const rect = await centerOf(cdp, ".react-flow__nodesselection-rect");
-  mustOk(rect != null, "框选之后出现了选区", rect);
+  // 框选之后选中的节点照样点得着：以前 React Flow 的选区框盖在它们上面，端口拖不出线、运行按钮点不着、右键双击都没反应
+  const reach = await cdp.eval(`
+    const g = '[data-testid="node-${ids.gen}"]';
+    const hit = (sel) => { const e = document.querySelector(sel); if (!e) return 'missing'; const b = e.getBoundingClientRect();
+      const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      return top?.closest('.react-flow__nodesselection-rect') ? 'selection-rect' : (top?.closest(g) ? 'node' : String(top?.className ?? null)); };
+    return { head: hit(g + ' .node__head'), port: hit(g + ' .react-flow__handle.source') };
+  `);
+  report.eq("框选之后选中节点的标题、输出端口照样点得着（不被选区框盖住）", reach, { head: "node", port: "node" });
+  const genHeadSel = await centerOf(cdp, `[data-testid="node-${ids.gen}"] .node__head`);
   const b0 = { gen: await posOf(ids.gen), voxel: await posOf(ids.voxel), past: await pastLen() };
-  await dragMouse(cdp, rect, { x: rect.x + 48, y: rect.y + 32 }, { steps: 12 });
+  await dragMouse(cdp, genHeadSel, { x: genHeadSel.x + 48, y: genHeadSel.y + 32 }, { steps: 12 });
   await sleep(200);
   const b1 = { gen: await posOf(ids.gen), voxel: await posOf(ids.voxel), past: await pastLen() };
-  report.ok("拖选区：两个节点一起挪了，整段只记一条撤销",
+  report.ok("拖其中一个选中的节点：两个一起挪了，整段只记一条撤销",
     b1.gen.x !== b0.gen.x && b1.voxel.x !== b0.voxel.x && b1.past - b0.past === 1, JSON.stringify({ b0, b1 }));
   await pressCtrl(cdp, "z");
   await sleep(150);
@@ -1188,6 +1197,35 @@ async function suiteEditing(cdp, report) {
   await pressCtrl(cdp, "z");
   await sleep(200);
   report.eq("Ctrl+Z 一次都回来", await docCount(), { nodes: beforeDel.nodes, edges: beforeDel.edges });
+
+  // 按着 Shift 框选是往选中里加（与按着 Shift / Ctrl 点选一致），不按是换掉。以前按不按都换掉：开框时 React Flow
+  // 先把选中清空。原来选的也要跟着整组拖 —— React Flow 框选时把框外节点的内部状态改成了未选中，不换新对象它不重建
+  const selectedNow = () => cdp.eval(`return [...window.__lyflow.stores.ui.getState().selectedNodes];`);
+  const voxelBox = await boxAround([ids.voxel]);
+  mustOk(voxelBox != null, "voxel 四周有离画布边够远的空白可以开始框选", voxelBox);
+  const genHead0 = await centerOf(cdp, `[data-testid="node-${ids.gen}"] .node__head`);
+  await clickAt(cdp, genHead0);
+  await dragMouse(cdp, voxelBox.from, voxelBox.to, { steps: 10 });
+  await sleep(200);
+  const replaced = await selectedNow();
+  await clickAt(cdp, genHead0);
+  const shiftKey = { key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16, nativeVirtualKeyCode: 16 };
+  await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...shiftKey, modifiers: 8 });
+  await dragMouse(cdp, voxelBox.from, voxelBox.to, { steps: 10, modifiers: 8 });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...shiftKey, modifiers: 0 });
+  await sleep(200);
+  const added = await selectedNow();
+  const voxelHead = await centerOf(cdp, `[data-testid="node-${ids.voxel}"] .node__head`);
+  const m0 = { gen: await posOf(ids.gen), voxel: await posOf(ids.voxel) };
+  await dragMouse(cdp, voxelHead, { x: voxelHead.x + 40, y: voxelHead.y + 24 }, { steps: 12 });
+  await sleep(200);
+  const m1 = { gen: await posOf(ids.gen), voxel: await posOf(ids.voxel) };
+  report.ok("不按键框选换掉选中；按着 Shift 框选加进去，拖新框的那个、原来选的跟着走",
+    !replaced.includes(ids.gen) && replaced.includes(ids.voxel) && added.includes(ids.gen) && added.includes(ids.voxel) &&
+      m1.gen.x !== m0.gen.x && m1.voxel.x !== m0.voxel.x,
+    JSON.stringify({ replaced, added, m0, m1 }));
+  await pressCtrl(cdp, "z");
+  await sleep(150);
 
   // 右键拖动平移（中键与右键平移）：按在节点上拖也平移、松手不弹菜单；不挪的右键单击照样弹节点菜单。
   // 以前按在节点上拖不动（React Flow 只在空白处接右键平移），松手时指针在哪个节点 / 连线上就弹哪个的菜单

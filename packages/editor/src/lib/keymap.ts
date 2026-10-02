@@ -136,7 +136,9 @@ export const MOUSE_GESTURES: readonly { area: string; items: readonly { gesture:
     area: "画布",
     items: [
       { gesture: "左键在空白处拖", does: "框选" },
+      { gesture: "Ctrl / Shift + 拖框", does: "框住的加进选中" },
       { gesture: "Ctrl / Shift + 单击节点", does: "加选或取消这一个" },
+      { gesture: "拖其中一个选中的节点", does: "整组一起移动" },
       { gesture: "中键或右键拖", does: "平移（右键按在节点、连线上拖也行）" },
       { gesture: "滚轮", does: "缩放" },
       { gesture: "双击空白处", does: "搜索并添加算子" },

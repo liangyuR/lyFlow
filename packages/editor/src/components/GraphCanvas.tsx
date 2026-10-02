@@ -18,6 +18,7 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useAdditiveSelection } from "../hooks/useAdditiveSelection";
 import { useRightDragPan } from "../hooks/useRightDragPan";
 import { useMotionEnabled, viewportMs } from "../lib/motion";
 import { registerViewportHandle } from "../lib/viewportHandle";
@@ -276,8 +277,13 @@ function LibraryDialog({
   );
 }
 
-/** React Flow 的 select 变更（增量：只列状态变了的那些）合进 ui store 的选中。setSelection 自己先比对再写。 */
-function applySelectChanges(changes: readonly { type: string; id?: string; selected?: boolean }[], kind: "nodes" | "edges") {
+/** React Flow 的 select 变更（增量：只列状态变了的那些）合进 ui store 的选中。setSelection 自己先比对再写。
+ *  keep 里的不取消选中：按着 Shift / Ctrl 框选时那一刻已经选着的（useAdditiveSelection）。 */
+function applySelectChanges(
+  changes: readonly { type: string; id?: string; selected?: boolean }[],
+  kind: "nodes" | "edges",
+  keep?: ReadonlySet<string>,
+) {
   let touched = false;
   const ui = useUiStore.getState();
   const next = new Set(kind === "nodes" ? ui.selectedNodes : ui.selectedEdges);
@@ -285,7 +291,7 @@ function applySelectChanges(changes: readonly { type: string; id?: string; selec
     if (c.type !== "select" || c.id === undefined) continue;
     touched = true;
     if (c.selected) next.add(c.id);
-    else next.delete(c.id);
+    else if (!keep?.has(c.id)) next.delete(c.id);
   }
   if (!touched) return;
   if (kind === "nodes") ui.setSelection([...next], [...ui.selectedEdges]);
@@ -308,6 +314,8 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
   const wrapper = useRef<HTMLDivElement>(null);
   // 右键在节点 / 连线上拖也平移；拖过之后松手不弹右键菜单
   useRightDragPan(wrapper);
+  // 按着 Shift / Ctrl 拖框是往选中里加
+  const keepSelected = useAdditiveSelection(wrapper);
   // 删除残影挂在这一层（N3）。它在 ViewportPortal 里，坐标就是画布坐标
   const ghostLayer = useRef<HTMLDivElement>(null);
   const motionOn = useMotionEnabled();
@@ -325,6 +333,8 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
    */
   const measured = useRef(new Map<string, { width: number; height: number }>());
   const [measuredTick, setMeasuredTick] = useState(0);
+  /** 让下面的映射换掉几个节点对象、React Flow 重建它们的内部节点（见 onSelectionEnd）。 */
+  const [resyncTick, setResyncTick] = useState(0);
   // 映射结果的引用归一：没变的节点保持同一个对象，React Flow 的 adoptUserNodes 才会走
   // checkEquality 快路径，不重建内部节点、不丢 measured。详见 lib/mapping.ts 的 MappingCache。
   const mapping = useRef(createMappingCache());
@@ -388,9 +398,9 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         anyTypes,
         mapping.current,
       ),
-    // measuredTick 是 measured.current 的变更信号，故意作为依赖
+    // measuredTick 是 measured.current 的变更信号、resyncTick 是映射缓存被清掉几项的信号，故意作为依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [view, ctx, selectedNodes, selectedEdges, measuredTick, anyTypes],
+    [view, ctx, selectedNodes, selectedEdges, measuredTick, resyncTick, anyTypes],
   );
 
   // 自动布局过渡（N4）：只把这一帧的临时位置叠在映射结果上，映射缓存里仍是 doc 的位置 ——
@@ -475,14 +485,14 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     // 以前还有一个 onSelectionChange「兜底」，它报的是 React Flow 自己那份、比 props 慢一拍的选中 ——
     // 框选时它与这里一来一回地改连线的选中（[] ↔ [e]），StoreUpdater 撞上「Maximum update depth exceeded」，
     // 框选只选上第一个碰到的节点、选区也不出现。
-    applySelectChanges(changes, "nodes");
-  }, []);
+    applySelectChanges(changes, "nodes", keepSelected.current?.nodes);
+  }, [keepSelected]);
 
   const onEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => {
     const removed = changes.filter((c) => c.type === "remove").map((c) => c.id);
     if (removed.length > 0) useGraphStore.getState().disconnect(removed);
-    applySelectChanges(changes, "edges");
-  }, []);
+    applySelectChanges(changes, "edges", keepSelected.current?.edges);
+  }, [keepSelected]);
 
   // -- 拖动：整段拖动只记一条撤销 + 对齐参考线（交互清单 P1 #22）-------------
   const onNodeDragStart: OnNodeDrag<LyNode> = useCallback(
@@ -523,7 +533,8 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
     setGuides(found.slice(0, 4));
   }, []);
 
-  // 拖框选出来的那个选区（React Flow 的 nodesselection）：同拖节点一样整段一条撤销，不做对齐参考线与边命中
+  // 拖 React Flow 的选区框（nodesselection）：同拖节点一样整段一条撤销，不做对齐参考线与边命中。这层框在
+  // styles.editor.css 里不接指针（拖任一个选中的节点就整组走），宿主改了样式让它接时这里兜着 —— 不然每一帧各记一条
   const onSelectionDragStart = useCallback(() => {
     cancelLayout();
     useUiStore.getState().setHoverPaused(true);
@@ -781,7 +792,15 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
   }, []);
   const onSelectionEnd = useCallback(() => {
     useUiStore.getState().setHoverPaused(false);
-  }, []);
+    // 按着 Shift / Ctrl 框选完：React Flow 框选时把框外节点的内部状态直接改成未选中（getSelectionChanges 带 mutate），
+    // 留下来的那几个我们没取消选中、节点对象没变，它不重建 —— 内部一直当它们没选中：选区框不含它们，拖选区也不带它们。
+    // 从映射缓存里拿掉，下一轮换成新对象，React Flow 照 selected: true 重建
+    const kept = keepSelected.current;
+    if (kept && kept.nodes.size > 0) {
+      for (const id of kept.nodes) mapping.current.nodes.delete(id);
+      setResyncTick((t) => t + 1);
+    }
+  }, [keepSelected]);
 
   // -- 双击：空白处开搜索面板，连线中点插一个 reroute，子图节点进去 ----------
   const onDoubleClick = useCallback(

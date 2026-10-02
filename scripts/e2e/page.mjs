@@ -167,9 +167,10 @@ export async function pickRecipe(cdp, name) {
 /** CDP 的 buttons 是「此刻按着哪些键」的位掩码，要与 button 对得上（右键拖动时 buttons 里没有右键，页面会当它已经松开了）。 */
 const BUTTON_MASK = { left: 1, right: 2, middle: 4 };
 
-export async function dragMouse(cdp, from, to, { steps = 12, button = "left" } = {}) {
-  const common = { button, buttons: BUTTON_MASK[button] ?? 1, clickCount: 1 };
-  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y, buttons: 0 });
+/** modifiers 是 CDP 的位掩码（Alt 1、Ctrl 2、Meta 4、Shift 8），只进鼠标事件；要 React Flow 认的「按着」得另发按键。 */
+export async function dragMouse(cdp, from, to, { steps = 12, button = "left", modifiers = 0 } = {}) {
+  const common = { button, buttons: BUTTON_MASK[button] ?? 1, clickCount: 1, modifiers };
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y, buttons: 0, modifiers });
   await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: from.x, y: from.y, ...common });
   // 先挪 2 px 把 React Flow 的 nodeDragThreshold 吃掉。不这么做的话第一步的位移
   // 会被整段吞掉 —— 位移越大丢得越多，落点就永远差那么一截。
