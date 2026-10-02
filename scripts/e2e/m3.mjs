@@ -1356,12 +1356,15 @@ async function suiteEditing(cdp, report) {
       hasRun: !!el.querySelector('[data-testid="shortcut-run"]'),
       hasMute: !!el.querySelector('[data-testid="shortcut-mute"]'),
       hasLayout: !!el.querySelector('[data-testid="shortcut-layout"]'),
+      mouse: [...el.querySelectorAll('[data-testid^="mouse-gestures-"]')].map((g) => g.querySelectorAll('li').length),
     };
   `);
   report.ok("? 打开了快捷键面板", Boolean(sheet), JSON.stringify(sheet));
   if (sheet) {
     report.ok("面板从键表生成，条目数与表一致", sheet.rows >= 20, `${sheet.rows} 条`);
     report.ok("表里有 F5 / Ctrl+M / Ctrl+G", sheet.hasRun && sheet.hasMute && sheet.hasLayout);
+    // 鼠标的用法也写出来（右键拖平移、松在节点身上接线、预览里双击设转心……不写没人知道）：画布、预览两组
+    report.ok("面板里还有鼠标的用法：画布、预览两组", sheet.mouse.length === 2 && sheet.mouse.every((n) => n >= 4), JSON.stringify(sheet.mouse));
   }
   await cdp.eval(`window.__lyflow.stores.ui.getState().setHelpOpen(false); return true;`);
 }
@@ -1760,6 +1763,14 @@ async function suiteMeasure(cdp, report) {
   await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMode("2d"); return true;`);
   await sleep(300);
   report.ok("2D 剖面下多一行 XY 平面距离", (await readMeasure(cdp)).rows.includes("distXY"));
+  // 2D 剖面下左键拖是平移（转心跟着挪）：以前旋转关了之后左键什么也不干，只能右键拖着挪
+  const targetOf = () => cdp.eval(`return document.querySelector('[data-testid="viewer3d-canvas"] canvas')?.dataset.target ?? null;`);
+  const t2d0 = await targetOf();
+  await dragMouse(cdp, { x: center.x + 30, y: center.y + 30 }, { x: center.x + 90, y: center.y + 60 });
+  await sleep(300);
+  const t2d1 = await targetOf();
+  report.ok("2D 剖面下左键拖：平移（转心挪了），也不算选点",
+    t2d0 !== null && t2d1 !== null && t2d0 !== t2d1 && (await readMeasure(cdp)).count === 2, JSON.stringify({ t2d0, t2d1 }));
   await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMode("3d"); return true;`);
 
   await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.gen)}, 'seed', 6); return true;`);

@@ -129,3 +129,33 @@ export function matchShortcut(e: KeyEventLike): Shortcut | null {
   }
   return null;
 }
+
+/** 鼠标的用法，`?` 面板上与键表并列。按键能从键表生成，手势不能 —— 这张表就是唯一的那份，改了手势改这里。 */
+export const MOUSE_GESTURES: readonly { area: string; items: readonly { gesture: string; does: string }[] }[] = [
+  {
+    area: "画布",
+    items: [
+      { gesture: "左键在空白处拖", does: "框选" },
+      { gesture: "Ctrl / Shift + 单击节点", does: "加选或取消这一个" },
+      { gesture: "中键或右键拖", does: "平移（右键按在节点、连线上拖也行）" },
+      { gesture: "滚轮", does: "缩放" },
+      { gesture: "双击空白处", does: "搜索并添加算子" },
+      { gesture: "双击节点标题 / 子图节点", does: "改名 / 进入子图" },
+      { gesture: "双击连线", does: "打开连线查看器" },
+      { gesture: "从端口拖出、松在空白处", does: "搜索算子，选中后自动接上" },
+      { gesture: "从端口拖出、松在节点身上", does: "接到它唯一能接的那个端口" },
+      { gesture: "拖输入端连线的线头", does: "改接；松在空白处断开" },
+      { gesture: "把节点拖到连线上", does: "插到中间" },
+      { gesture: "右键节点 / 连线", does: "菜单" },
+    ],
+  },
+  {
+    area: "预览",
+    items: [
+      { gesture: "左键拖", does: "3D 下转视角，2D 剖面下平移" },
+      { gesture: "右键拖 / 滚轮", does: "平移 / 缩放" },
+      { gesture: "双击一个点", does: "转心挪到它上面（之后绕着它转）" },
+      { gesture: "测量开着时单击", does: "选点、两点测距" },
+    ],
+  },
+];

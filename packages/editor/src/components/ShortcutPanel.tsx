@@ -1,7 +1,7 @@
 // `?` 快捷键面板。整张表从 lib/keymap.ts 生成（E7）——
 // 手抄一份说明必然和实际按键漂移，而用户只会相信面板上写的那个。
 
-import { groupedShortcuts, SCOPE_LABEL } from "../lib/keymap";
+import { groupedShortcuts, MOUSE_GESTURES, SCOPE_LABEL } from "../lib/keymap";
 import { useUiStore } from "../store/ui";
 
 export function ShortcutPanel() {
@@ -31,6 +31,22 @@ export function ShortcutPanel() {
                       {s.keys.map((k) => (
                         <kbd key={k}>{k}</kbd>
                       ))}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+          {/* 鼠标的用法：按键之外的那一半（右键拖平移、松在节点身上接线、预览里双击设转心……）不写出来没人知道 */}
+          {MOUSE_GESTURES.map((g) => (
+            <section key={g.area} className="sheet__group" data-testid={`mouse-gestures-${g.area}`}>
+              <h3>鼠标 · {g.area}</h3>
+              <ul>
+                {g.items.map((m) => (
+                  <li key={m.gesture}>
+                    <span className="sheet__label">{m.does}</span>
+                    <span className="sheet__keys">
+                      <kbd>{m.gesture}</kbd>
                     </span>
                   </li>
                 ))}

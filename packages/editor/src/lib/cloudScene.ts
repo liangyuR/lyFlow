@@ -73,6 +73,11 @@ export function createScene(host: HTMLDivElement): Scene {
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.12;
+  // 转心（target）写在 canvas 上：验收脚本看平移、双击设转心有没有生效（转视角不动它，平移才动）
+  controls.addEventListener("change", () => {
+    const c = controls.target;
+    renderer.domElement.dataset.target = [c.x, c.y, c.z].map((v) => Number(v.toPrecision(6))).join(",");
+  });
 
   const grid = new THREE.GridHelper(4, 16, 0x33404f, 0x232a33);
   grid.rotation.x = Math.PI / 2; // GridHelper 默认躺在 XZ 面上，转到 XY
@@ -182,6 +187,8 @@ export function createScene(host: HTMLDivElement): Scene {
       const target = state.controls.target;
       state.controls.object = state.active() as THREE.PerspectiveCamera;
       state.controls.enableRotate = mode === "3d";
+      // 2D 下左键拖改成平移：旋转关了之后左键原来什么也不干，只能右键拖着挪（俯视图里人人先拿左键拖）
+      state.controls.mouseButtons.LEFT = mode === "3d" ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN;
       if (mode === "2d") {
         ortho.position.set(target.x, target.y, target.z + 10);
         ortho.zoom = 1;
