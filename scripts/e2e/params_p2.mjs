@@ -253,6 +253,20 @@ async function suiteLayout(cdp, report) {
   d = await dom();
   report.ok("重新打开：还是拖过的宽度（记住宽度）", Math.abs(d.right.w - width1) <= 2, `${d.right.w} vs ${width1}`);
 
+  // 窗口窄了（1920 屏半屏贴靠是 960，桌面窗口最小 900）：两侧面板让位，画布留够 320、面板不出窗口；
+  // 拉回来还是记住的宽度。修前两侧都不缩：参数面板开着时画布挤成 0，面板右边一截跑到窗口外点不着
+  const vh = await cdp.eval(`return window.innerHeight;`);
+  await cdp.send("Emulation.setDeviceMetricsOverride", { width: 900, height: vh, deviceScaleFactor: 0, mobile: false });
+  await sleep(250);
+  const narrow = await dom();
+  const vw = await cdp.eval(`return window.innerWidth;`);
+  await cdp.send("Emulation.clearDeviceMetricsOverride");
+  await sleep(250);
+  d = await dom();
+  report.ok("窗口窄到 900：画布留够 320、参数面板整个在窗口里；拉回来还是记住的宽度",
+    narrow.canvas.w >= 318 && narrow.right.x + narrow.right.w <= vw + 1 && Math.abs(d.right.w - width1) <= 2,
+    `窄：画布 ${narrow.canvas.w}px，面板 ${narrow.right.x}..${narrow.right.x + narrow.right.w} / 窗口 ${vw}；拉回来面板 ${d.right.w} vs ${width1}`);
+
   // 最大化 → 画布收起；还原 → 画布回来，宽度不变
   await cdp.eval(`document.querySelector('[data-testid="pp-maximize"]').click(); return true;`);
   await sleep(250);

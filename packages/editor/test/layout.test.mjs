@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { layoutGraph, needsInitialLayout } from "../src/lib/layout.ts";
+import { fitSidePanes } from "../src/lib/panes.ts";
 
 const chain = (withPositions) => ({
   schemaVersion: 1,
@@ -30,4 +31,21 @@ test("自动布局给每个节点一个落点，上游排在下游左边", () =>
   assert.equal(moves.length, 2);
   const at = Object.fromEntries(moves.map((m) => [m.id, m.position]));
   assert.ok(at.a.x < at.b.x, JSON.stringify(at));
+});
+
+// 三栏分宽度：窗口窄了两侧面板让位（右栏先缩），画布至少留 320。
+// 修前两侧都不缩：1024 宽的窗口打开参数面板，画布挤成 0，面板右边一截跑到窗口外
+test("窗口窄了两侧面板让位：右栏先缩到最窄，不够再缩左栏，画布留够最窄", () => {
+  const palette = { width: 280, min: 180 };
+  const panel = { width: 804, min: 360 };
+  const cases = [
+    ["放得下：原样", 1436, palette, { width: 380, min: 260 }, { left: 280, right: 380 }],
+    ["只缩右栏就够", 1020, palette, panel, { left: 280, right: 420 }],
+    ["右栏到最窄，再缩左栏", 896, palette, panel, { left: 216, right: 360 }],
+    ["两侧都到最窄还放不下：停在最窄，画布让", 700, palette, panel, { left: 180, right: 360 }],
+    ["还没量到宽度：原样", 0, palette, panel, { left: 280, right: 804 }],
+  ];
+  for (const [name, total, left, right, want] of cases) {
+    assert.deepEqual(fitSidePanes(total, left, right, 320), want, name);
+  }
 });

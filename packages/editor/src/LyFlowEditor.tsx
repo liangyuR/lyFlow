@@ -1,6 +1,6 @@
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { MotionConfig } from "motion/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { BottomDrawer } from "./components/BottomDrawer";
 import { GraphCanvas } from "./components/GraphCanvas";
@@ -38,6 +38,7 @@ import {
   suggestFileName,
 } from "./lib/files";
 import { layoutGraph, needsInitialLayout } from "./lib/layout";
+import { fitSidePanes } from "./lib/panes";
 import {
   MotionEnabledContext,
   useMotionEnabled,
@@ -85,6 +86,11 @@ import "./styles.peek.css";
 import "./styles.blocks.css";
 
 const kMinCanvasWidth = 320;
+/** 两条分栏把手一共占的宽（styles.css 的 .app__splitter：右边那条净占 4px，左边那条压在面板边框上）。 */
+const kSplittersWidth = 4;
+const kPaletteMin = 180;
+const kInspectorMin = 260;
+const kPanelMin = 360;
 /** 参数面板宽度记在 localStorage 的这个键下（P2.1「记住宽度」）。 */
 const PANEL_WIDTH_KEY = "lyflow.paramPanel.width";
 /** 左侧算子面板的宽度，同样拖了就记住。 */
@@ -254,6 +260,29 @@ function useDragSplit(
   return { width, onPointerDown };
 }
 
+/** 编辑器这一行有多宽（跟着窗口 / 宿主容器变），给 fitSidePanes 用。只在窄到放不下 wanted 时才让 Workspace 重画：
+ *  宽的时候窗口怎么拖都不重渲染整棵树。量到的值放在 ref 里，面板开关、拖分栏引起的重渲染照样读到最新的。 */
+function useRowWidth(container: React.RefObject<HTMLElement | null>, wanted: number): number {
+  const width = useRef(0);
+  const wantedRef = useRef(wanted);
+  wantedRef.current = wanted;
+  const [, setTight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = container.current;
+    if (!el) return;
+    const measure = () => {
+      width.current = el.getBoundingClientRect().width;
+      setTight(width.current < wantedRef.current ? width.current : null);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [container]);
+  return width.current;
+}
+
 function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps) {
   const { screenToFlowPosition, fitView } = useReactFlow();
   const root = useRef<HTMLDivElement>(null);
@@ -263,14 +292,19 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   const panel = useUiStore((s) => s.paramPanel);
   // 三栏互相限制：拖哪一栏都给另外两栏（画布至少 kMinCanvasWidth）留够地方。宽度在拖的那一刻从 ref 取
   const widths = useRef({ palette: 0, right: 0 });
-  const reserveForPalette = useCallback(() => widths.current.right + kMinCanvasWidth, []);
-  const reserveForRight = useCallback(() => widths.current.palette + kMinCanvasWidth, []);
-  const palettePane = useDragSplit(280, 180, 640, root, reserveForPalette, PALETTE_WIDTH_KEY, "left");
-  const rightPane = useDragSplit(380, 260, 900, root, reserveForRight);
+  const reserveForPalette = useCallback(() => widths.current.right + kMinCanvasWidth + kSplittersWidth, []);
+  const reserveForRight = useCallback(() => widths.current.palette + kMinCanvasWidth + kSplittersWidth, []);
+  const palettePane = useDragSplit(280, kPaletteMin, 640, root, reserveForPalette, PALETTE_WIDTH_KEY, "left");
+  const rightPane = useDragSplit(380, kInspectorMin, 900, root, reserveForRight);
   // 参数面板（param-recipe P2.1）另有一份宽度：它比 Inspector 宽得多，两者来回切时各记各的
-  const panelPane = useDragSplit(640, 360, 1800, root, reserveForRight, PANEL_WIDTH_KEY);
-  const paletteWidth = palettePane.width;
-  widths.current = { palette: paletteWidth, right: panel.open ? panelPane.width : rightPane.width };
+  const panelPane = useDragSplit(640, kPanelMin, 1800, root, reserveForRight, PANEL_WIDTH_KEY);
+  const leftWanted = { width: palettePane.width, min: kPaletteMin };
+  const rightWanted = panel.open ? { width: panelPane.width, min: kPanelMin } : { width: rightPane.width, min: kInspectorMin };
+  const rowWidth = useRowWidth(root, leftWanted.width + rightWanted.width + kMinCanvasWidth + kSplittersWidth);
+  // 窗口窄了两侧先让（右栏先缩），画布至少留 kMinCanvasWidth；拖分栏时的上限也按让过之后的宽算
+  const fitted = fitSidePanes(rowWidth - kSplittersWidth, leftWanted, rightWanted, kMinCanvasWidth);
+  const paletteWidth = fitted.left;
+  widths.current = { palette: fitted.left, right: fitted.right };
 
   // 粘贴和搜索面板要知道往哪儿放。跟着鼠标走比总是放在画布中心自然得多。
   const cursor = useRef({ x: 0, y: 0 });
@@ -750,7 +784,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
 
         <aside
           className={`app__right${panel.open ? " app__right--panel" : ""}`}
-          style={{ width: panel.open ? panelPane.width : rightPane.width }}
+          style={{ width: fitted.right }}
           data-testid="right-pane"
         >
           {/* 3D 视图在上、参数在下：视觉项目的核心闭环是「改参数 → 看结果」，
