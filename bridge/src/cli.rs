@@ -2097,6 +2097,24 @@ const BOOL_OPTS: &[&str] = &[
     "summary", "no-summary", "fine", "list-metrics", "stale",
 ];
 
+/// `lyflow <子命令> --help` 只给这个子命令在 USAGE 里的那一段（到下一个子命令、或不缩进的说明为止），外加退出码那一行。
+/// 以前 --help 被当成普通开关，落进各子命令「少了 graph」的那一句短用法，还按写法错退出 4。
+fn usage_of(command: &str) -> Option<String> {
+    let lines: Vec<&str> = USAGE.lines().collect();
+    let head = format!("  lyflow {command} ");
+    let start = lines.iter().position(|l| l.starts_with(&head) || l.trim_end() == head.trim_end())?;
+    let end = lines[start + 1..]
+        .iter()
+        .position(|l| l.starts_with("  lyflow ") || (!l.is_empty() && !l.starts_with(' ')))
+        .map_or(lines.len(), |i| start + 1 + i);
+    let mut section = lines[start..end].join("\n").trim_end().to_string();
+    if let Some(codes) = lines.iter().find(|l| l.starts_with("退出码")) {
+        section.push_str("\n\n");
+        section.push_str(codes);
+    }
+    Some(section)
+}
+
 pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
     let Some(command) = args.first().cloned() else {
         line(err, USAGE);
@@ -2118,6 +2136,13 @@ pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
             return EXIT_USAGE;
         }
     };
+    if parsed.has("help") {
+        match usage_of(&command) {
+            Some(section) => line(err, &section),
+            None => line(err, USAGE),
+        }
+        return EXIT_OK;
+    }
     match command.as_str() {
         "run" => cmd_run(&parsed, out, err),
         "validate" => cmd_validate(&parsed, out, err),

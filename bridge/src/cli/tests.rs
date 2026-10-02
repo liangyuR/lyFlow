@@ -486,6 +486,9 @@ fn wrong_usage_is_rejected_with_its_exit_code_and_message() {
         // plan、import 没成也说为什么（以前只有「图当前不合法，编译不出计划」「导入失败」）
         (vec!["plan", &graph, "--to", "zzz"], EXIT_INVALID, "目标不存在: zzz（unknown_node）"),
         (vec!["import", &graph, "--kind", "nosuchkind"], EXIT_INVALID, "没有注册 'nosuchkind' 这种导入器"),
+        // 子命令后面跟 --help：给这个子命令那一段用法、退出 0（以前是「少了 graph」的一句短用法，退出 4）
+        (vec!["run", "--help"], EXIT_OK, "--preview-points"),
+        (vec!["sweep", "--help"], EXIT_OK, "--jobs"),
     ];
     for (args, code, want) in &cases {
         let r = cli(args);
