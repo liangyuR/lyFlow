@@ -40,6 +40,7 @@ import {
   compatibleTargets,
   dropOnNode,
   inferAnyTypes,
+  insertPortsFor,
   type DropOnNode,
   type GraphContext,
 } from "../lib/typecheck";
@@ -139,6 +140,16 @@ function resolveDropOnNode(
 ): DropOnNode {
   const nodeId = owner.elementFromPoint(point.x, point.y)?.closest(".react-flow__node")?.getAttribute("data-id");
   return nodeId ? dropOnNode(ctx, current, ref, side, nodeId) : { kind: "none" };
+}
+
+/** 指针底下的那条连线（FlowEdge 的命中路径 20 px 宽）。只认这个画布里的。 */
+function edgeAt(canvas: HTMLElement | null, point: { x: number; y: number }): string | null {
+  if (!canvas) return null;
+  for (const el of canvas.ownerDocument.elementsFromPoint(point.x, point.y)) {
+    const edge = el.closest(".react-flow__edge");
+    if (edge && canvas.contains(edge)) return edge.getAttribute("data-id");
+  }
+  return null;
 }
 
 /** 空画布的提示：第一次打开就是一片空白，看不出从哪开始。三种加节点的方式都写上（算子面板拖、双击、键盘搜），
@@ -562,25 +573,9 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         if (!hit) continue;
 
         // 有且仅有一对兼容端口时才插入。多于一对就没有唯一解，宁可不动。
-        const without: GraphDoc = { ...current, edges: current.edges.filter((e) => e.id !== edge.id) };
-        const pairs: { inPort: string; outPort: string }[] = [];
-        for (const inPort of op.inputs) {
-          for (const outPort of op.outputs) {
-            const upstreamOk = canConnect(ctx, without, edge.from, {
-              node: nodeId,
-              port: inPort.name,
-            }).ok;
-            const downstreamOk = canConnect(
-              ctx,
-              without,
-              { node: nodeId, port: outPort.name },
-              edge.to,
-            ).ok;
-            if (upstreamOk && downstreamOk) pairs.push({ inPort: inPort.name, outPort: outPort.name });
-          }
-        }
-        if (pairs.length !== 1) continue;
-        graph.insertOnEdge(edge.id, nodeId, pairs[0]!.inPort, pairs[0]!.outPort);
+        const ports = insertPortsFor(ctx, current, edge, nodeId);
+        if (!ports) continue;
+        graph.insertOnEdge(edge.id, nodeId, ports.inPort, ports.outPort);
         return true;
       }
       return false;
@@ -970,9 +965,32 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       const opId = e.dataTransfer.getData(OPERATOR_DND_MIME);
       if (!opId) return;
       e.preventDefault();
+      // 松在一条连线上：插到它中间（加节点与插入一条撤销）。以前照样按类型自动连线 —— 新节点接到上游，
+      // 下游还连着原来那条线；接上了的节点再拖到线上也插不进（已有连线的不参与），只能自己断线重接
+      const edgeId = edgeAt(wrapper.current, { x: e.clientX, y: e.clientY });
+      if (edgeId) {
+        const graph = useGraphStore.getState();
+        const inserted = graph.batch("插入到连线中间", (cancel) => {
+          const id = graph.addNode(opId, position);
+          const current = levelView();
+          const edge = current.edges.find((x) => x.id === edgeId);
+          const ports = id && edge ? insertPortsFor(ctx, current, edge, id) : null;
+          // 插不进（没有唯一的一对端口）就整个不算，下面照旧加节点、自动连线
+          if (!id || !ports || !graph.insertOnEdge(edgeId, id, ports.inPort, ports.outPort)) {
+            cancel();
+            return false;
+          }
+          return true;
+        });
+        if (inserted) {
+          useUiStore.getState().noteOperatorUsed(opId);
+          useUiStore.getState().showToast("已插入到连线中间");
+          return;
+        }
+      }
       addNodeWithAutoConnect(opId, position);
     },
-    [screenToFlowPosition],
+    [screenToFlowPosition, ctx],
   );
 
   return (

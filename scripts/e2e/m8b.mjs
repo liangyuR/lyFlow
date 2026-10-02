@@ -687,6 +687,35 @@ async function suitePalette(cdp, report) {
   // 还原：后面的分组按 280 的面板算坐标
   await dragMouse(cdp, d1.handle, { x: d0.left + d0.side, y: d1.handle.y }, { steps: 10 });
   await cdp.eval(`localStorage.removeItem(${lit(KEY)}); return true;`);
+
+  // 从面板拖到一条连线上：插到它中间，加节点与插入一条撤销。以前松在线上照样按类型自动连线 —— 新节点接到上游、
+  // 下游还连着原来那条线（两个点云源时干脆不连），要插进去还得自己断线重接
+  await newDoc(cdp);
+  const ids = await buildGraph(
+    cdp,
+    [{ key: "gen", op: "gen.synthetic", params: { pointCount: 2000 } }, { key: "vox", op: "filter.voxel_grid" }],
+    [{ from: ["gen", "cloud"], to: ["vox", "cloud"] }],
+  );
+  await sleep(250);
+  const mid = await cdp.eval(`
+    const p = document.querySelector('.react-flow__edge .react-flow__edge-interaction');
+    if (!p) return null;
+    const pt = p.getPointAtLength(p.getTotalLength() / 2).matrixTransform(p.getScreenCTM());
+    return { x: Math.round(pt.x), y: Math.round(pt.y) };
+  `);
+  mustOk(mid != null, "画布上有 gen → vox 那条线", mid);
+  const past0 = await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+  const dropped = await dropFromPalette(cdp, '.palette [data-op-id="filter.passthrough"]', mid);
+  await sleep(200);
+  const wired = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    const pass = g.doc.nodes.find((n) => n.op === 'filter.passthrough')?.id ?? null;
+    return { pass, edges: g.doc.edges.map((e) => e.from.node + '.' + e.from.port + '>' + e.to.node + '.' + e.to.port).sort(), past: g.past.length };
+  `);
+  const want = wired.pass ? [`${ids.gen}.cloud>${wired.pass}.cloud`, `${wired.pass}.cloud>${ids.vox}.cloud`].sort() : null;
+  report.ok("从面板拖到 gen → vox 的线上：直通滤波插到中间，加节点与插入一条撤销",
+    dropped === "ok" && JSON.stringify(wired.edges) === JSON.stringify(want) && wired.past - past0 === 1,
+    JSON.stringify({ dropped, wired, past0 }));
 }
 
 /** 主预览的图像模式（docs/image-plan.md 阶段 3）：

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { createMappingCache, toReactFlow } from "../src/lib/mapping.ts";
-import { canConnect, compatibleSources, compatibleTargets, dropOnNode, inferAnyTypes, wouldCreateCycle } from "../src/lib/typecheck.ts";
+import { canConnect, compatibleSources, compatibleTargets, dropOnNode, inferAnyTypes, insertPortsFor, wouldCreateCycle } from "../src/lib/typecheck.ts";
 
 const port = (name, type) => ({ name, type, label: name, doc: "", required: true });
 const op = (id, inputs, outputs) => ({ id, label: id, inputs, outputs, params: [] });
@@ -118,6 +118,31 @@ test("dropOnNode：拖线松在节点的身子上 —— 恰好一个能接就�
   ];
   for (const [ref, side, target, want] of cases) {
     assert.deepEqual(dropOnNode(mctx, mdoc, ref, side, target), want, `${ref.node}.${ref.port}（${side}）→ ${target}`);
+  }
+});
+
+test("insertPortsFor：插到 g → v1 那条线中间 —— 恰好一对端口两头都接得上才给，不止一对或接不上给 null", () => {
+  const ictx = {
+    ...ctx,
+    operatorsById: new Map([
+      ...ctx.operatorsById,
+      ["merge", op("merge", [port("a", "PointCloud"), port("b", "PointCloud")], [port("cloud", "PointCloud")])],
+      ["pass", op("pass", [port("cloud", "PointCloud")], [port("cloud", "PointCloud"), port("idx", "Indices")])],
+    ]),
+    typesByName: new Map([...ctx.typesByName, ["Indices", { name: "Indices", color: "#5" }]]),
+  };
+  const idoc = { ...doc, nodes: [...doc.nodes, node("m", "merge"), node("p", "pass"), node("r3", "reroute")] };
+  const line = doc.edges[0]; // g.cloud → v1.cloud
+  const cases = [
+    ["一进一出的体素", "v3", { inPort: "cloud", outPort: "cloud" }],
+    ["两个输出只有一个接得上下游（直通滤波那种）", "p", { inPort: "cloud", outPort: "cloud" }],
+    ["reroute（Any）", "r3", { inPort: "in", outPort: "out" }],
+    ["两路输入都接得上（合并）：没有唯一解", "m", null],
+    ["类型接不上", "b", null],
+    ["没注册的算子", "ghost", null],
+  ];
+  for (const [name, nodeId, want] of cases) {
+    assert.deepEqual(insertPortsFor(ictx, idoc, line, nodeId), want, name);
   }
 });
 

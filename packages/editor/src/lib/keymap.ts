@@ -147,7 +147,7 @@ export const MOUSE_GESTURES: readonly { area: string; items: readonly { gesture:
       { gesture: "从端口拖出、松在空白处", does: "搜索算子，选中后自动接上" },
       { gesture: "从端口拖出、松在节点身上", does: "接到它唯一能接的那个端口" },
       { gesture: "拖输入端连线的线头", does: "改接；松在空白处断开" },
-      { gesture: "把节点拖到连线上", does: "插到中间" },
+      { gesture: "把节点（或面板里的算子）拖到连线上", does: "插到中间" },
       { gesture: "右键节点 / 连线", does: "菜单" },
     ],
   },

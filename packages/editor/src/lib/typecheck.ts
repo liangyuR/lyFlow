@@ -1,7 +1,7 @@
 // 连接合法性校验 + 拓扑。这一层是**手感**不是正确性（docs/architecture.md）：拖线时即时挡错、给人话原因。
 // C++ 侧执行前必须独立完整校验一遍 —— 这里能被绕过（手改文件、脚本生成的图、旧版本客户端）。
 
-import type { GraphDoc, PortRef } from "../types/graph";
+import type { GraphDoc, GraphEdge, PortRef } from "../types/graph";
 import type { OperatorDesc, Port, PortType } from "../types/manifest";
 
 export interface GraphContext {
@@ -226,6 +226,31 @@ export function dropOnNode(
     kind: "reject",
     reason: first && !first.ok ? `接不到 ${op.label} 上：${first.reason}` : `${op.label} 没有${side === "output" ? "输入" : "输出"}端口`,
   };
+}
+
+/** 把一个节点插到一条连线中间用哪一对端口：拿掉这条线之后，上游接得上它的某个输入、它的某个输出接得上下游 ——
+ *  恰好一对时给出来；没有、或不止一对（没有唯一解，宁可不动）时 null。拖节点到线上、从算子面板拖到线上都按它。 */
+export function insertPortsFor(
+  ctx: GraphContext,
+  doc: GraphDoc,
+  edge: GraphEdge,
+  nodeId: string,
+): { inPort: string; outPort: string } | null {
+  const node = doc.nodes.find((n) => n.id === nodeId);
+  const op = node ? ctx.operatorsById.get(node.op) : undefined;
+  if (!op) return null;
+  const without: GraphDoc = { ...doc, edges: doc.edges.filter((e) => e.id !== edge.id) };
+  const types = inferAnyTypes(ctx, without);
+  let found: { inPort: string; outPort: string } | null = null;
+  for (const inPort of op.inputs) {
+    if (!canConnect(ctx, without, edge.from, { node: nodeId, port: inPort.name }, types).ok) continue;
+    for (const outPort of op.outputs) {
+      if (!canConnect(ctx, without, { node: nodeId, port: outPort.name }, edge.to, types).ok) continue;
+      if (found) return null;
+      found = { inPort: inPort.name, outPort: outPort.name };
+    }
+  }
+  return found;
 }
 
 /** 反向：拖的是输入端口时，哪些输出端口可以当源。#20 的置灰要两个方向都覆盖。 */
