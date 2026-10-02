@@ -1011,6 +1011,25 @@ async function suiteEditing(cdp, report) {
     report.eq("双击标题改名写进了 ui.title", renamed, "粗降采样");
   }
 
+  // F2 也能改名（选中一个节点时，与双击标题同一个改名框）。改名框里什么都不改就回车：不记撤销、标题不变 ——
+  // 以前双击标题再点走，节点就被写上一个等于算子名的自定义标题，图标成改过、多一条「重命名节点」
+  await select(cdp, ids.gen);
+  await sleep(150);
+  const pastBeforeF2 = await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+  await pressKey(cdp, "F2", 113);
+  await sleep(200);
+  const renameFocus = await cdp.eval(`return document.activeElement?.getAttribute('data-testid') ?? null;`);
+  await pressKey(cdp, "Enter", 13);
+  await sleep(150);
+  const afterF2 = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    return { past: g.past.length, title: g.doc.nodes.find((n) => n.id === ${lit(ids.gen)}).ui?.title ?? null,
+             open: !!document.querySelector('[data-testid="node-rename-${ids.gen}"]') };
+  `);
+  report.eq("选中节点按 F2：改名框打开并拿到焦点；什么都不改就回车：收起、不记撤销、标题还是跟着算子名",
+    { focus: renameFocus, past: afterF2.past - pastBeforeF2, title: afterF2.title, open: afterF2.open },
+    { focus: `node-rename-${ids.gen}`, past: 0, title: null, open: false });
+
   // #26 参数右键菜单
   await select(cdp, ids.voxel);
   await sleep(200);

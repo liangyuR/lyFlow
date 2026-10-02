@@ -116,10 +116,13 @@ function PortHandle({ nodeId, port, side, index, anyType }: PortHandleProps) {
   );
 }
 
-/** 双击标题就地改名（交互清单 P1 #25）。空串 = 回到 manifest 的 label。 */
-function TitleEditor({ id, initial, onDone }: { id: string; initial: string; onDone: () => void }) {
-  const [text, setText] = useState(initial);
+/** 双击标题或 F2 就地改名（交互清单 P1 #25）。空串、或改成和算子名一样 = 回到 manifest 的 label。
+ *  没改就不提交：以前双击标题再点走，节点就被写上一个等于算子名的自定义标题 —— 图标成改过、多一条撤销，
+ *  以后算子改名它也跟不上。 */
+function TitleEditor({ id, title, label }: { id: string; title: string | null; label: string }) {
+  const [text, setText] = useState(title ?? label);
   const input = useRef<HTMLInputElement>(null);
+  const onDone = () => useUiStore.getState().setRenamingNode(null);
 
   useEffect(() => {
     input.current?.focus();
@@ -127,7 +130,9 @@ function TitleEditor({ id, initial, onDone }: { id: string; initial: string; onD
   }, []);
 
   const commit = () => {
-    useGraphStore.getState().renameNode(id, text.trim() ? text : null);
+    const typed = text.trim();
+    const next = typed && typed !== label ? typed : null;
+    if (next !== title) useGraphStore.getState().renameNode(id, next);
     onDone();
   };
 
@@ -163,7 +168,7 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   const stale = useNodeStale(id);
   // 实时校验（m8-plan L16）：拼的时候就标红，不等运行。只看 error，warning 进 Inspector。
   const invalid = errorsOf(useNodeValidation(id));
-  const [renaming, setRenaming] = useState(false);
+  const renaming = useUiStore((s) => s.renamingNode === id);
   // 鼠标指着的连线从这里出发或到这里（docs/motion-plan.md H3）
   const edgeEnd = useUiStore(
     (s) => s.hoverEdge !== null && (s.hoverEdge.from.node === id || s.hoverEdge.to.node === id),
@@ -261,11 +266,11 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
         title={errorText ?? op.doc}
         onDoubleClick={(e) => {
           e.stopPropagation();
-          setRenaming(true);
+          useUiStore.getState().setRenamingNode(id);
         }}
       >
         {renaming ? (
-          <TitleEditor id={id} initial={title ?? op.label} onDone={() => setRenaming(false)} />
+          <TitleEditor id={id} title={title} label={op.label} />
         ) : (
           <span className="node__title">{title ?? op.label}</span>
         )}

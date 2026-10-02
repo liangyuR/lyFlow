@@ -264,6 +264,14 @@ export function useShortcuts(
           graph.setCollapsed(ids, !(first?.ui?.collapsed === true));
           return;
         }
+        case "rename": {
+          // 与双击标题同一个改名框（节点上就地改）。多选时改谁不明确，不响应
+          const ids = [...ui.selectedNodes];
+          if (ids.length !== 1) return;
+          e.preventDefault();
+          ui.setRenamingNode(ids[0]!);
+          return;
+        }
         case "search":
           // 焦点在按钮、勾选框这些控件上时 Tab / Space 是它们自己的（挪焦点、按下去）。以前一律拿去开算子搜索：
           // 用键盘点不了工具栏的按钮，Tab 也走不出去

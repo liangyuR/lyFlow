@@ -57,6 +57,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
 
   { id: "mute", keys: ["Ctrl+M"], label: "静音 / 取消静音", scope: "canvas", group: "节点" },
   { id: "collapse", keys: ["Ctrl+E"], label: "折叠 / 展开", scope: "canvas", group: "节点" },
+  { id: "rename", keys: ["F2"], label: "改名（选中一个节点时）", scope: "canvas", group: "节点" },
   { id: "search", keys: ["Tab", "Space"], label: "搜索并添加算子", scope: "canvas", group: "节点" },
 
   { id: "compose", keys: ["Ctrl+G"], label: "合成子图", scope: "canvas", group: "节点" },

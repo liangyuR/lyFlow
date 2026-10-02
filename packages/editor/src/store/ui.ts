@@ -86,6 +86,8 @@ interface UiState {
 
   /** 底部抽屉。null = 收起。 */
   drawer: DrawerTab | null;
+  /** 正在就地改名的节点（双击标题或 F2）。同一时刻最多一个。 */
+  renamingNode: string | null;
 
   /** 参数面板（param-recipe P2.1）：开着时替代 Inspector；最大化时画布收起。宽度在 LyFlowEditor 里
    *  （拖分栏、记在 localStorage），不在这里。纯 UI 状态，不进 doc、不进撤销。 */
@@ -143,6 +145,7 @@ interface UiState {
   beginConnection(from: PendingConnection, compatible: ReadonlySet<string>): void;
   endConnection(): void;
   toggleDrawer(tab?: DrawerTab): void;
+  setRenamingNode(id: string | null): void;
   setHelpOpen(open: boolean): void;
   setFinderOpen(open: boolean): void;
   focusDiagnostic(nodeId: string, paramPath?: string): void;
@@ -203,6 +206,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   hoverEdge: null,
   hoverPaused: false,
   drawer: null,
+  renamingNode: null,
   paramPanel: { open: false, maximized: false, tab: "nodes", viewerOpen: false },
   viewerMode: "3d",
   viewerMeasuring: false,
@@ -293,6 +297,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   endConnection() {
     if (!get().pendingFrom) return;
     set({ pendingFrom: null, compatiblePorts: NO_PORTS });
+  },
+  setRenamingNode(id) {
+    if (get().renamingNode !== id) set({ renamingNode: id });
   },
   toggleDrawer(tab) {
     const current = get().drawer;
@@ -392,7 +399,8 @@ export const useUiStore = create<UiState>((set, get) => ({
     });
   },
   setPath(path) {
-    set({ path, selectedNodes: new Set(), selectedEdges: new Set(), hoverNodeId: null, hoverEdge: null });
+    // 换了一层：那一层的改名框跟着节点一起卸掉了，不留一个「正在改名」
+    set({ path, selectedNodes: new Set(), selectedEdges: new Set(), hoverNodeId: null, hoverEdge: null, renamingNode: null });
   },
   setAutoRun(on) {
     set({ autoRun: on });

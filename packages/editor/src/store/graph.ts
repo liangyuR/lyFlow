@@ -903,11 +903,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     renameNode(id, title) {
+      // null = 回到 manifest 的 label。没变就什么都不做：不记撤销、不把文档标成改过
+      const next = title && title.trim() ? title : null;
+      const current = level(get().doc).nodes.find((n) => n.id === id);
+      if (!current || (current.ui?.title ?? null) === next) return;
       transact("重命名节点", (d) => {
         const node = level(d).nodes.find((n) => n.id === id);
         if (!node) return;
-        // null = 回到 manifest 的 label
-        node.ui = { ...node.ui, title: title && title.trim() ? title : null };
+        node.ui = { ...node.ui, title: next };
       });
     },
 
