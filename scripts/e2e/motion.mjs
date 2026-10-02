@@ -16,6 +16,7 @@ import {
   newDoc,
   normalizeZoom,
   placeAtScreen,
+  setViewport,
   pressCtrl,
   pressF5,
   runAndWait,
@@ -192,8 +193,10 @@ async function suiteEnter(cdp, report) {
     { loaded, loadHits }, { loaded: 10, loadHits: [] });
   report.eq("loadDoc 10 节点：任何连线都没有生长标记", loadGrow, []);
 
-  // > 80 节点：编辑着搭出来（每个都标过进场），等窗口过期，再平移到另一半
+  // > 80 节点：编辑着搭出来（每个都标过进场），等窗口过期，再平移到另一半。视口先定死在 1:1：下面两段平移的距离
+  // 是照 1:1 算的，上一组（m4 的大图）留下 0.2 的缩放时一平移就越过了整张网格，一个新节点都进不来
   await newDoc(cdp);
+  await setViewport(cdp, { x: 0, y: 0, zoom: 1 });
   const big = await cdp.eval(`
     const g = () => window.__lyflow.stores.graph.getState();
     for (let i = 0; i < 96; i += 1) g().addNode('util.reroute', { x: (i % 24) * 260, y: Math.floor(i / 24) * 150 });
@@ -588,7 +591,8 @@ async function suiteHover(cdp, report) {
     { from: ["voxel", "cloud"], to: ["pass", "cloud"] },
     { from: ["g2", "cloud"], to: ["crop", "cloud"] },
   ]);
-  await normalizeZoom(cdp, 0.7);
+  // 缩放定死在 0.7（normalizeZoom 只往小里压：上一组留下 0.2 的话节点小得真鼠标 hover 不上）
+  await setViewport(cdp, { x: 0, y: 0, zoom: 0.7 });
   const box = await canvasBox(cdp);
   await placeAtScreen(cdp, {
     [ids.g1]: { x: 20, y: 30 },

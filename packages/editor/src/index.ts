@@ -92,3 +92,4 @@ export {
   untitledBackupPath,
   type UntitledBackup,
 } from "./lib/autosave";
+export { viewportHandle, type Viewport } from "./lib/viewportHandle";

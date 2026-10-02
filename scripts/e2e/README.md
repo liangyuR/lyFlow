@@ -62,8 +62,9 @@ pnpm e2e --only m8b:suiteImagePreviewScale,noderun   # 只跑点名的（两种�
 几段共用一个夹具时包一层具名的，见 `m4.mjs` 的 `suiteCompose`）。
 
 挑出来的组照全量里的先后跑，但中间少了别的组，前一组留下的状态（视口缩放、hover 之类）会直接落到后一组头上。
-已知的一处：`--only m4:suiteBigGraph,motion` 时 motion 的验收 2（平移之后有新节点进入视口）与验收 8 的拖连线那条会挂，
-单跑 motion、或者全量（中间隔着好几个模块）都过 —— 改动之前就是这样，不是回归。
+靠视口几何的组开头自己定死视口：`page.mjs` 的 `setViewport`（经窗口桥定 React Flow 的 x / y / zoom）；`normalizeZoom`
+只往小里压，上一组留下 0.2 的缩放它不管。以前记过的一处 —— `--only m4:suiteBigGraph,motion` 时 motion 的验收 2
+（平移之后有新节点进入视口）与验收 8 的拖连线那条挂掉 —— 就是这么来的，两组开头定死视口之后过了。
 
 调试脚本本身时，另开一个窗口跑
 

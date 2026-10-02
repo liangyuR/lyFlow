@@ -26,6 +26,7 @@ import {
   writeRecipeAutosave,
   restoreRecipeAutosave,
   autosaveTick,
+  viewportHandle,
   untitledBackupPath,
   findUntitledBackup,
   restoreUntitled,
@@ -89,6 +90,9 @@ interface DevBridge {
    *  来自**事件**而不是 store 快照 —— 16 ms 的合并窗口会把中间态吃掉。 */
   transitions: StateTransition[];
   clearTransitions(): void;
+  /** 画布视口（React Flow 的 x / y / zoom）：读，或者定死 —— 上一组留下的缩放别落到下一组头上。画布没挂载时是 null / 不动。 */
+  viewport(): { x: number; y: number; zoom: number } | null;
+  setViewport(v: { x: number; y: number; zoom: number }): void;
   /** 每次运行结束的时刻，live preview 的「跟手」断言靠它算延迟。 */
   runMarks: { runId: string; status: string; at: number }[];
   /** 图级命名输出（ADR-0017）。只读转发，不碰 store。 */
@@ -187,6 +191,12 @@ export function installDevBridge(transport: Transport): void {
     clearTransitions() {
       transitions.length = 0;
       runMarks.length = 0;
+    },
+    viewport() {
+      return viewportHandle()?.get() ?? null;
+    },
+    setViewport(v) {
+      viewportHandle()?.set(v);
     },
     runMarks,
     async runOutputs(runId) {

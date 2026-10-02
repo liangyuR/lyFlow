@@ -210,6 +210,13 @@ export async function normalizeZoom(cdp, maxScale = 0.8) {
   await sleep(150);
 }
 
+/** 把画布视口定死在 v（x / y 是屏幕像素的平移，zoom 是缩放）。normalizeZoom 只会往小里压：上一组留下 0.2 的缩放时
+ *  它不管，下一组拿真鼠标点的、靠平移把节点拉进视口的就对不上（scripts/e2e/README.md 记过的那处顺序依赖）。 */
+export async function setViewport(cdp, v) {
+  await cdp.eval(`window.__lyflow.setViewport(${lit(v)}); return true;`);
+  await sleep(150);
+}
+
 /** 画布本身的位置与大小。摆位前先问一句，免得把节点放到右侧面板底下。 */
 export async function canvasBox(cdp) {
   return cdp.eval(`

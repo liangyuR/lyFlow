@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useRightDragPan } from "../hooks/useRightDragPan";
 import { useMotionEnabled, viewportMs } from "../lib/motion";
+import { registerViewportHandle } from "../lib/viewportHandle";
 import {
   createMappingCache,
   distanceToSegment,
@@ -299,7 +300,11 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
   const selectedNodes = useUiStore((s) => s.selectedNodes);
   const selectedEdges = useUiStore((s) => s.selectedEdges);
 
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, fitView, getViewport, setViewport } = useReactFlow();
+  useEffect(() => {
+    registerViewportHandle({ get: getViewport, set: (v) => void setViewport(v) });
+    return () => registerViewportHandle(null);
+  }, [getViewport, setViewport]);
   const wrapper = useRef<HTMLDivElement>(null);
   // 右键在节点 / 连线上拖也平移；拖过之后松手不弹右键菜单
   useRightDragPan(wrapper);
