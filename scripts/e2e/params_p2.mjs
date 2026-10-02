@@ -352,6 +352,8 @@ function typeCases(show) {
           const el = document.querySelector(${lit(r("tint"))}).querySelector('input[type="color"]');
           Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, '#ff8000');
           el.dispatchEvent(new Event('input', { bubbles: true }));
+          // 真的取色器关上时发 change：这一段选色就记成一条撤销
+          el.dispatchEvent(new Event('change', { bubbles: true }));
           return 'ok';
         `);
       },
@@ -433,6 +435,28 @@ async function suiteAllTypes(cdp, report, ws) {
     await cdp.eval(`document.activeElement?.blur(); return true;`);
     await sleep(120);
     report.eq("聚焦的数字框上滚三下滚轮：值不变", (await paramsOf(cdp, ids.show)).iterations, before);
+  }
+
+  // 取色器拖着选（一路发 input，关上时一个 change）：整段一条撤销，值是最后那个。以前每一下 input 都是一条
+  {
+    await reveal(cdp, rowSel(`${ids.show}.tint`));
+    const pastNow = () => cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+    const p0 = await pastNow();
+    await cdp.eval(`
+      const el = document.querySelector(${lit(rowSel(`${ids.show}.tint`))}).querySelector('input[type="color"]');
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      for (const c of ['#102030', '#203040', '#304050', '#405060', '#506070']) {
+        set.call(el, c);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 30));
+      }
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    `);
+    await sleep(100);
+    const tint = (await paramsOf(cdp, ids.show)).tint;
+    report.ok("取色器拖着选（五次 input 再关上）：只记一条撤销，值是最后那个",
+      (await pastNow()) - p0 === 1 && approxEq(tint, [0x50 / 255, 0x60 / 255, 0x70 / 255]), JSON.stringify({ added: (await pastNow()) - p0, tint }));
   }
 
   // color 的 alpha（overlay 带 alpha 通道）

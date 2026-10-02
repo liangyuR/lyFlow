@@ -285,20 +285,53 @@ function toHex(v: unknown): string {
   return `#${c(r)}${c(g)}${c(b)}`;
 }
 
+/** 取色器停手这么久就算选完了，记那一条撤销。 */
+const COLOR_SETTLE_MS = 400;
+
 function ColorControl({ param, value, disabled, onChange, nodeId }: ControlProps) {
   const arr = Array.isArray(value) ? (value as number[]) : [0, 0, 0];
   const hex = toHex(value);
   const alpha = arr.length === 4 ? (arr[3] ?? 1) : null;
+
+  // 取色器拖着选的时候一直发 input（React 的 onChange 就是它）：以前每一下都是一条撤销、一次校验。现在一段选色包成
+  // 一条：第一次 input 时 begin，原生 change（取色器关上）、失焦、卸载或者停手 400 ms 时 commit
+  const input = useRef<HTMLInputElement>(null);
+  const live = useRef(false);
+  const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finish = useCallback(() => {
+    if (settle.current) clearTimeout(settle.current);
+    settle.current = null;
+    if (!live.current) return;
+    live.current = false;
+    useGraphStore.getState().commit(`修改 ${param.label ?? param.name}`);
+  }, [param.label, param.name]);
+  useEffect(() => {
+    const el = input.current;
+    el?.addEventListener("change", finish);
+    return () => {
+      el?.removeEventListener("change", finish);
+      finish();
+    };
+  }, [finish]);
+
   return (
     <div className="ctl-row ctl-color">
       {/* 色块本身就是取色器；旁边写出十六进制，面板里扫一眼就对得上数 */}
       <input
+        ref={input}
         className="ctl ctl--color"
         type="color"
         disabled={disabled}
         value={hex}
         data-testid={`color-${param.name}`}
+        onBlur={finish}
         onChange={(e) => {
+          if (!live.current) {
+            live.current = true;
+            useGraphStore.getState().begin();
+          }
+          if (settle.current) clearTimeout(settle.current);
+          settle.current = setTimeout(finish, COLOR_SETTLE_MS);
           const next = e.target.value;
           const rgb = [1, 3, 5].map((i) => parseInt(next.slice(i, i + 2), 16) / 255);
           // 保留原有 alpha 分量，取色器只给 RGB
