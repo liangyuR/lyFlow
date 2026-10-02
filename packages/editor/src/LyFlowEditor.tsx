@@ -1,6 +1,6 @@
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { MotionConfig } from "motion/react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { BottomDrawer } from "./components/BottomDrawer";
 import { GraphCanvas } from "./components/GraphCanvas";
@@ -11,11 +11,12 @@ import { NodeFinder } from "./components/NodeFinder";
 import { NodeSearch } from "./components/NodeSearch";
 import { ParamPanel } from "./components/ParamPanel";
 import { ShortcutPanel } from "./components/ShortcutPanel";
+import { StatusBar } from "./components/StatusBar";
+import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
 import { Viewer3D } from "./components/Viewer3D";
-import { useDragFraction } from "./hooks/useDragFraction";
+import { usePaneLayout } from "./hooks/usePaneLayout";
 import { useShortcuts } from "./hooks/useShortcuts";
-import { rootOf } from "./lib/root";
 import {
   autosaveTick,
   discardUntitledBackup,
@@ -39,8 +40,6 @@ import {
   suggestFileName,
 } from "./lib/files";
 import { layoutGraph, needsInitialLayout } from "./lib/layout";
-import { fitSidePanes } from "./lib/panes";
-import { readStoredNumber, writeStoredNumber } from "./lib/prefs";
 import {
   MotionEnabledContext,
   useMotionEnabled,
@@ -50,7 +49,6 @@ import {
 } from "./lib/motion";
 import { fullId, levelOf } from "./lib/subgraph";
 import {
-  formatBytes,
   refreshCacheStats,
   requestPlan,
   schedulePlan,
@@ -87,212 +85,6 @@ import "./styles.editor.css";
 import "./styles.peek.css";
 import "./styles.blocks.css";
 
-const kMinCanvasWidth = 320;
-/** 两条分栏把手一共占的宽（styles.css 的 .app__splitter：右边那条净占 4px，左边那条压在面板边框上）。 */
-const kSplittersWidth = 4;
-const kPaletteMin = 180;
-const kInspectorMin = 260;
-const kPanelMin = 360;
-/** 右栏里预览占多高（占右栏的比例）：检查器模式与参数面板模式各一个。没拖过时用样式表的默认。 */
-const VIEWER_FRACTION_KEY = "lyflow.viewer.fraction";
-const PANEL_VIEWER_FRACTION_KEY = "lyflow.viewer.fraction.panel";
-/** 参数面板宽度记在 localStorage 的这个键下（P2.1「记住宽度」）。 */
-const PANEL_WIDTH_KEY = "lyflow.paramPanel.width";
-/** 左侧算子面板的宽度，同样拖了就记住。 */
-const PALETTE_WIDTH_KEY = "lyflow.palette.width";
-
-const TRANSPORT_LABEL: Record<string, string> = {
-  tauri: "Tauri · 实时",
-  http: "HTTP · 实时",
-  static: "静态快照",
-};
-
-const TRANSPORT_TITLE: Record<string, string> = {
-  tauri: "实时读取 C++ 注册表",
-  http: "经 HTTP 后端读取 C++ 注册表",
-  static: "静态模式：读的是 dump 出来的 manifest 快照，可能过期",
-};
-
-function StatusBar() {
-  const coreInfo = useManifestStore((s) => s.coreInfo);
-  const transportKind = useManifestStore((s) => s.transportKind);
-  const path = useUiStore((s) => s.path);
-  const doc = useGraphStore((s) => s.doc);
-  const level = levelOf(doc, path);
-  const nodeCount = level.nodes.length;
-  const edgeCount = level.edges.length;
-  const selected = useUiStore((s) => s.selectedNodes.size);
-  const stats = useCacheStore((s) => s.stats);
-  const [libraryCount, setLibraryCount] = useState(0);
-
-  useEffect(() => {
-    void transport
-      .getLibraryStatus()
-      .then((s) => setLibraryCount(s.count))
-      .catch(() => setLibraryCount(0));
-  }, []);
-
-  return (
-    <footer className="statusbar">
-      <span className="statusbar__milestone">M4 · 能扩展</span>
-      <span>{nodeCount} 节点</span>
-      <span>{edgeCount} 连线</span>
-      {libraryCount > 0 && (
-        <span data-testid="statusbar-library" title="库算子（app data 下的 library/）">
-          库 {libraryCount}
-        </span>
-      )}
-      {selected > 0 && <span>已选 {selected}</span>}
-      <span className="statusbar__spacer" />
-      {stats && (
-        <span
-          className="statusbar__cache"
-          data-testid="statusbar-cache"
-          title={`结果缓存 ${stats.entries} 条，预算 ${formatBytes(stats.budgetBytes)}`}
-        >
-          缓存 {formatBytes(stats.bytes)}
-        </span>
-      )}
-      {coreInfo && (
-        <>
-          <span>lyflow-core {coreInfo.version}</span>
-          <span data-testid="statusbar-operators">{coreInfo.operatorCount} 算子</span>
-          {coreInfo.hotReload && (
-            <span
-              className="statusbar__hot"
-              data-testid="statusbar-generation"
-              data-generation={coreInfo.generation ?? 0}
-              title="开发期热重载已开启：改 C++ 存盘即生效"
-            >
-              热重载 · 第 {coreInfo.generation ?? 0} 代
-            </span>
-          )}
-        </>
-      )}
-      <span
-        className={`statusbar__transport statusbar__transport--${transportKind}`}
-        title={
-          TRANSPORT_TITLE[transportKind]
-        }
-      >
-        {TRANSPORT_LABEL[transportKind]}
-      </span>
-    </footer>
-  );
-}
-
-/** 提示停多久：短的 2.6 秒；长句按字数加（一秒读五六个字），警告至少 4 秒，最长 8 秒。
- *  以前一律 2.6 秒：「这个输入端口已有连线（输入是单连接）：拖它的线头才是改接」这样的句子没读完就没了。 */
-function toastMs(text: string, kind: "info" | "warn"): number {
-  return Math.min(8000, Math.max(kind === "warn" ? 4000 : 2600, 1200 + [...text].length * 170));
-}
-
-/** 连线被拒绝的原因、保存成功之类的短提示。鼠标停在上面时不消失，移开后重新计时。 */
-function Toast() {
-  const toast = useUiStore((s) => s.toast);
-  const hideToast = useUiStore((s) => s.hideToast);
-  const [hovered, setHovered] = useState(false);
-
-  useEffect(() => {
-    if (!toast) {
-      setHovered(false);
-      return;
-    }
-    if (hovered) return;
-    const t = setTimeout(hideToast, toastMs(toast.text, toast.kind));
-    return () => clearTimeout(t);
-  }, [toast, hovered, hideToast]);
-
-  if (!toast) return null;
-  return (
-    <div
-      className={`toast toast--${toast.kind}`}
-      data-testid="toast"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      {toast.text}
-    </div>
-  );
-}
-
-/** 记住的宽度（localStorage）。读不到、存的不是正数都退回默认 —— 这只是个方便，不是状态。 */
-function storedWidth(key: string | undefined, fallback: number): number {
-  const v = key ? readStoredNumber(key) : null;
-  return v !== null && v > 0 ? v : fallback;
-}
-
-/** 可拖分栏（右侧面板、左侧算子面板）。一条 4px 把手 + 全局 pointermove，
- *  不引分栏库 —— 一个库的成本是十几 KB 加一套 API，这里只要一个数字。
- *  给了 persistKey 就在松手时把宽度记进 localStorage，下次打开还是这个宽（参数面板，P2.1）。
- *  reserve 是拖动时要给其余部分留的宽度：左右两栏互相限制，所以在拖的那一刻才取。 */
-function useDragSplit(
-  initial: number,
-  min: number,
-  max: number,
-  container: React.RefObject<HTMLElement | null>,
-  reserve: () => number,
-  persistKey?: string,
-  side: "left" | "right" = "right",
-) {
-  const [width, setWidth] = useState(() => Math.max(min, Math.min(max, storedWidth(persistKey, initial))));
-  const dragging = useRef(false);
-  const latest = useRef(width);
-  latest.current = width;
-
-  useEffect(() => {
-    const move = (e: PointerEvent) => {
-      if (!dragging.current) return;
-      const rect = container.current?.getBoundingClientRect();
-      const limit = rect ? Math.max(min, Math.min(max, rect.width - reserve())) : max;
-      const next = side === "left" ? e.clientX - (rect ? rect.left : 0) : (rect ? rect.right : window.innerWidth) - e.clientX;
-      setWidth(Math.max(min, Math.min(limit, next)));
-    };
-    const up = () => {
-      if (dragging.current && persistKey) writeStoredNumber(persistKey, Math.round(latest.current));
-      dragging.current = false;
-      rootOf(container.current)?.classList.remove("lyflow-is-resizing");
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    return () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-  }, [container, min, max, reserve, persistKey, side]);
-
-  const onPointerDown = useCallback(() => {
-    dragging.current = true;
-    // 挂在这个编辑器的根上而不是 body：同一页面的别的东西不该跟着禁掉指针事件
-    rootOf(container.current)?.classList.add("lyflow-is-resizing");
-  }, [container]);
-
-  return { width, onPointerDown };
-}
-
-/** 编辑器这一行有多宽（跟着窗口 / 宿主容器变），给 fitSidePanes 用。只在窄到放不下 wanted 时才让 Workspace 重画：
- *  宽的时候窗口怎么拖都不重渲染整棵树。量到的值放在 ref 里，面板开关、拖分栏引起的重渲染照样读到最新的。 */
-function useRowWidth(container: React.RefObject<HTMLElement | null>, wanted: number): number {
-  const width = useRef(0);
-  const wantedRef = useRef(wanted);
-  wantedRef.current = wanted;
-  const [, setTight] = useState<number | null>(null);
-  useLayoutEffect(() => {
-    const el = container.current;
-    if (!el) return;
-    const measure = () => {
-      width.current = el.getBoundingClientRect().width;
-      setTight(width.current < wantedRef.current ? width.current : null);
-    };
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [container]);
-  return width.current;
-}
-
 function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps) {
   const { screenToFlowPosition, fitView } = useReactFlow();
   const root = useRef<HTMLDivElement>(null);
@@ -300,35 +92,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   const motionOn = useMotionEnabled();
   const fitMs = viewportMs(motionOn);
   const panel = useUiStore((s) => s.paramPanel);
-  // 三栏互相限制：拖哪一栏都给另外两栏（画布至少 kMinCanvasWidth）留够地方。宽度在拖的那一刻从 ref 取
-  const widths = useRef({ palette: 0, right: 0 });
-  const reserveForPalette = useCallback(() => widths.current.right + kMinCanvasWidth + kSplittersWidth, []);
-  const reserveForRight = useCallback(() => widths.current.palette + kMinCanvasWidth + kSplittersWidth, []);
-  const palettePane = useDragSplit(280, kPaletteMin, 640, root, reserveForPalette, PALETTE_WIDTH_KEY, "left");
-  const rightPane = useDragSplit(380, kInspectorMin, 900, root, reserveForRight);
-  // 参数面板（param-recipe P2.1）另有一份宽度：它比 Inspector 宽得多，两者来回切时各记各的
-  const panelPane = useDragSplit(640, kPanelMin, 1800, root, reserveForRight, PANEL_WIDTH_KEY);
-  const leftWanted = { width: palettePane.width, min: kPaletteMin };
-  const rightWanted = panel.open ? { width: panelPane.width, min: kPanelMin } : { width: rightPane.width, min: kInspectorMin };
-  const rowWidth = useRowWidth(root, leftWanted.width + rightWanted.width + kMinCanvasWidth + kSplittersWidth);
-  // 窗口窄了两侧先让（右栏先缩），画布至少留 kMinCanvasWidth；拖分栏时的上限也按让过之后的宽算
-  const fitted = fitSidePanes(rowWidth - kSplittersWidth, leftWanted, rightWanted, kMinCanvasWidth);
-  const paletteWidth = fitted.left;
-  widths.current = { palette: fitted.left, right: fitted.right };
-
-  // 右栏里预览与下面（检查器 / 参数面板）之间可以上下拖，两种模式各记各的比例（参数面板开着时下面要的地方多）
-  const rightCol = useRef<HTMLElement>(null);
-  const viewerBox = useRef<HTMLDivElement>(null);
-  const getRightCol = useCallback(() => rightCol.current, []);
-  const getViewerBox = useCallback(() => viewerBox.current, []);
-  const inspectorViewer = useDragFraction({
-    column: getRightCol, pane: getViewerBox, edge: "top", minPx: 160, restMinPx: 160, persistKey: VIEWER_FRACTION_KEY,
-  });
-  const panelViewer = useDragFraction({
-    column: getRightCol, pane: getViewerBox, edge: "top", minPx: 160, restMinPx: 200, persistKey: PANEL_VIEWER_FRACTION_KEY,
-  });
-  const viewerSplit = panel.open ? panelViewer : inspectorViewer;
-  const viewerShown = !(panel.open && !panel.viewerOpen);
+  const layout = usePaneLayout(root, panel);
 
   // 粘贴和搜索面板要知道往哪儿放。跟着鼠标走比总是放在画布中心自然得多。
   const cursor = useRef({ x: 0, y: 0 });
@@ -771,7 +535,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       />
 
       <main className={`app__body${panel.open && panel.maximized ? " is-panel-max" : ""}`}>
-        <aside className="app__sidebar" style={{ width: paletteWidth }}>
+        <aside className="app__sidebar" style={{ width: layout.paletteWidth }}>
           {manifestStatus === "loading" && <p className="app__hint">正在读取算子描述…</p>}
           {manifestStatus === "error" && (
             <div className="app__error">
@@ -787,7 +551,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
 
         <div
           className="app__splitter app__splitter--left"
-          onPointerDown={palettePane.onPointerDown}
+          onPointerDown={layout.onPaletteSplitterDown}
           role="separator"
           aria-orientation="vertical"
           title="拖动调整算子面板宽度"
@@ -800,7 +564,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
 
         <div
           className="app__splitter"
-          onPointerDown={panel.open ? panelPane.onPointerDown : rightPane.onPointerDown}
+          onPointerDown={layout.onRightSplitterDown}
           role="separator"
           aria-orientation="vertical"
           data-testid="right-splitter"
@@ -808,9 +572,9 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
 
         <aside
           className={`app__right${panel.open ? " app__right--panel" : ""}`}
-          style={{ width: fitted.right }}
+          style={{ width: layout.rightWidth }}
           data-testid="right-pane"
-          ref={rightCol}
+          ref={layout.rightCol}
         >
           {/* 3D 视图在上、参数在下：视觉项目的核心闭环是「改参数 → 看结果」，
               两者离得越近越好（交互清单 P1 #30）。参数面板开着时视图收成一条标题栏
@@ -828,17 +592,17 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
             </button>
           )}
           <div
-            className={`app__viewer${viewerShown ? "" : " is-collapsed"}`}
-            ref={viewerBox}
-            style={viewerSplit.fraction !== null ? { flexBasis: `${viewerSplit.fraction * 100}%` } : undefined}
+            className={`app__viewer${layout.viewer.shown ? "" : " is-collapsed"}`}
+            ref={layout.viewerBox}
+            style={layout.viewer.fraction !== null ? { flexBasis: `${layout.viewer.fraction * 100}%` } : undefined}
           >
             <Viewer3D />
           </div>
-          {viewerShown && (
+          {layout.viewer.shown && (
             <div
               className="app__hsplit"
-              onPointerDown={viewerSplit.onPointerDown}
-              onDoubleClick={viewerSplit.reset}
+              onPointerDown={layout.viewer.onPointerDown}
+              onDoubleClick={layout.viewer.reset}
               role="separator"
               aria-orientation="horizontal"
               title="拖动调整预览高度，双击恢复默认"
