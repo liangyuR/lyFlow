@@ -483,6 +483,9 @@ fn wrong_usage_is_rejected_with_its_exit_code_and_message() {
         // 扫一个不存在的参数：每组都没过校验。以前 stderr 只有「扫了 2 组」
         (vec!["sweep", &graph, "--param", "v.nope=1:2:2", "--metric", "v:cloud.elementCount"], EXIT_INVALID,
          "没成的 2 次：validation_failed 2（unknown_param × 2）"),
+        // plan、import 没成也说为什么（以前只有「图当前不合法，编译不出计划」「导入失败」）
+        (vec!["plan", &graph, "--to", "zzz"], EXIT_INVALID, "目标不存在: zzz（unknown_node）"),
+        (vec!["import", &graph, "--kind", "nosuchkind"], EXIT_INVALID, "没有注册 'nosuchkind' 这种导入器"),
     ];
     for (args, code, want) in &cases {
         let r = cli(args);

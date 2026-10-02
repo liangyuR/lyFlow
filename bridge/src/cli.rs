@@ -966,7 +966,9 @@ fn cmd_plan(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     json_line(out, &Value::Array(items.clone()));
     // 校验没过时 core 返回的是诊断数组，靠有没有 cacheKey 区分（ADR-0007）
     if items.iter().any(|n| !n["cacheKey"].is_string()) {
-        line(err, "图当前不合法，编译不出计划");
+        // 为什么不合法同 validate 一样写在 stderr 上：以前只有这一句，--to 写错了节点都看不出来
+        line(err, "图当前不合法，编译不出计划：");
+        explain_diagnostics(err, &items);
         return EXIT_INVALID;
     }
     let recompute = items.iter().filter(|n| n["cached"] != true).count();
@@ -1505,14 +1507,16 @@ fn cmd_import(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let graph_json = match core.import(kind, &text, &base_dir) {
         Ok(g) => g,
         Err(diags) => {
+            line(err, "导入失败：");
             if let Ok(items) = serde_json::from_str::<Vec<Value>>(&diags) {
                 for d in &items {
                     json_line(out, d);
                 }
+                // 原因写在 stderr 上（--kind 写错、文件格式不对）：以前只在 stdout 的 JSON 行里
+                explain_diagnostics(err, &items);
             } else {
                 line(err, &diags);
             }
-            line(err, "导入失败");
             return EXIT_INVALID;
         }
     };

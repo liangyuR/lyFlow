@@ -55,7 +55,7 @@
 | 安装包 | 里面的 core 就是这次构建编出来的那一份；release 不开热重载 | `pnpm e2e:packaged` 开头的「安装包（干净目录）」一节 |
 | `eval / sweep / perturb --jobs` | 同时跑几次，行的顺序与内容不变，停也停在同一行；Ctrl+C 一次取消全部 | `eval/tests.rs` 的 `ordered_parallel_*`；`cli/tests.rs` 的两条对照 |
 | 终端进度行 | eval / sweep / perturb 与 run：stdout 重定向、stderr 在终端上时原地刷新一行，管道里一个字节不多 | `eval/tests.rs` 的 `the_progress_line_*`、`cli/tests.rs` 的 `the_run_progress_line_*` |
-| 失败的原因写在 stderr | run / validate / dump 列出诊断与出错节点（dump 的目标节点写错以前只说「运行 error」；端口写错以前只说「结果仓里没有 g.nope」，现在说这个节点有哪些输出、退出码 4）；eval / perturb / sweep 把没成的几次按原因归成一行（sweep 是这一轮补的：扫一个写错名字的参数，以前 stderr 只有「扫了 2 组」） | `cli/tests.rs` 写法错那张表；`eval/tests.rs` 的 `the_failure_digest_*` |
+| 失败的原因写在 stderr | run / validate / dump / plan / import 列出诊断与出错节点（plan 以前只说「图当前不合法，编译不出计划」、import 只说「导入失败」）（dump 的目标节点写错以前只说「运行 error」；端口写错以前只说「结果仓里没有 g.nope」，现在说这个节点有哪些输出、退出码 4）；eval / perturb / sweep 把没成的几次按原因归成一行（sweep 是这一轮补的：扫一个写错名字的参数，以前 stderr 只有「扫了 2 组」） | `cli/tests.rs` 写法错那张表；`eval/tests.rs` 的 `the_failure_digest_*` |
 | 选项写错是用法错 | `--parallel 4x` 以前悄悄当成 0；`dump --format asci` 以前悄悄写成 binary | `cli/tests.rs` 写法错那张表 |
 | MCP | eval / perturb 的 `jobs`；客户端取消时 CLI 子进程跟着结束、`run_graph` 替它发 cancel；eval / perturb 逐行发进度通知 | `packages/mcp/test/cli.test.ts`、`smoke.test.ts`（去掉接线时冒烟会失败） |
 | `pnpm e2e --only` | 按模块 / 分组挑着跑 | `scripts/e2e/README.md` |
