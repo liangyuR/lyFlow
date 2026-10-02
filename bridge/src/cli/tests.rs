@@ -480,6 +480,9 @@ fn wrong_usage_is_rejected_with_its_exit_code_and_message() {
         (vec!["dump", &graph, "zzz:cloud", "out.pcd"], EXIT_FAILED, "目标不存在: zzz（unknown_node）"),
         // 端口写错：说这个节点有哪些输出（以前只有「结果仓里没有 v.nope」）
         (vec!["dump", &graph, "v:nope", "out.pcd"], EXIT_USAGE, "节点 v 没有输出端口 nope（它的输出：cloud）"),
+        // 扫一个不存在的参数：每组都没过校验。以前 stderr 只有「扫了 2 组」
+        (vec!["sweep", &graph, "--param", "v.nope=1:2:2", "--metric", "v:cloud.elementCount"], EXIT_INVALID,
+         "没成的 2 次：validation_failed 2（unknown_param × 2）"),
     ];
     for (args, code, want) in &cases {
         let r = cli(args);

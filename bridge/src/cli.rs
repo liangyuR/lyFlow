@@ -1769,6 +1769,8 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
 
     let mut csv_rows: Vec<String> = Vec::new();
+    // 没成的那几行留着，收尾时按原因归成一行写到 stderr（同 eval / perturb）
+    let mut failed_rows: Vec<eval::Row> = Vec::new();
     let keys: Vec<String> = param_sets
         .first()
         .map(|ps| ps.display.keys().cloned().collect())
@@ -1798,6 +1800,9 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
                 .collect();
             cells.push(value.map(|v| v.to_string()).unwrap_or_default());
             csv_rows.push(cells.join(","));
+            if row.status != "ok" {
+                failed_rows.push(row.clone());
+            }
         };
         engine.run(&mut on_row)
     };
@@ -1832,6 +1837,10 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         line(err, &format!("表格写到 {csv_path}"));
     }
     line(err, &format!("扫了 {} 组", param_sets.len()));
+    // 以前只有这一句：参数名写错（每组都 validation_failed、退出 1）时终端上看不出为什么
+    if let Some(digest) = eval::failure_digest(&failed_rows) {
+        line(err, &digest);
+    }
     worst
 }
 
