@@ -34,7 +34,8 @@ export const SHORTCUTS: readonly Shortcut[] = [
     group: "运行",
     inTextField: true,
   },
-  { id: "cancel", keys: ["Escape"], label: "取消运行", scope: "global", group: "运行", inTextField: true },
+  // 输入框里的 Esc 归那个框（撤回打的字），不取消运行（useShortcuts）
+  { id: "cancel", keys: ["Escape"], label: "取消运行", scope: "global", group: "运行" },
   // 在出错的节点之间跳（子图里的也打开进去）。F8 打不出字符，输入框里照样响应
   { id: "nextError", keys: ["F8"], label: "下一个出错的节点", scope: "global", group: "运行", inTextField: true },
   { id: "prevError", keys: ["Shift+F8"], label: "上一个出错的节点", scope: "global", group: "运行", inTextField: true },

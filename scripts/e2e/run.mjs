@@ -12,6 +12,7 @@ import {
   newDoc,
   pressEscape,
   pressF5,
+  pressKey,
   runAndWait,
   saveGraphTo,
   select,
@@ -322,6 +323,27 @@ async function suiteCancel(cdp, report) {
   );
   // 等它真的跑起来再取消，否则测的是「还没开始就取消」
   await sleep(400);
+  // 输入框里的 Esc 归那个框：运行中在参数框里打了字、按 Esc 撤回，运行照跑。以前运行跟着被取消了 ——
+  // 快捷键的监听挂在编辑器根元素上，比框自己的 onKeyDown 先到
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}], []); return true;`);
+  await sleep(200);
+  // 取消是异步的（core 收尾之后才变 cancelled），看状态分不出来：数一数发出去的取消请求
+  await cdp.eval(`
+    const t = window.__lyflow.transport;
+    window.__lyCancelCalls = 0;
+    t.__lyOrigCancel ??= t.cancelRun;
+    t.cancelRun = function (...args) { window.__lyCancelCalls += 1; return t.__lyOrigCancel.apply(this, args); };
+    return true;
+  `);
+  await cdp.eval(`document.querySelector('[data-testid="param-drag-pointCount"]').focus(); return true;`);
+  await pressKey(cdp, "a", 65, ["ctrl"]);
+  await cdp.send("Input.insertText", { text: "1234" });
+  await pressEscape(cdp);
+  await sleep(300);
+  report.eq("运行中在参数框里按 Esc：撤回打的字，没有发取消", await cdp.eval(`
+    return { cancels: window.__lyCancelCalls, box: document.querySelector('[data-testid="param-drag-pointCount"]').value };
+  `), { cancels: 0, box: "3000000" });
+  // 框撤回之后失焦了：再按一次 Esc 才是取消运行
   await pressEscape(cdp);
 
   await cdp.waitFor(
@@ -332,6 +354,7 @@ async function suiteCancel(cdp, report) {
   const run = await cdp.eval(`return window.__lyflow.snapshot().run;`);
   void before;
   report.eq("运行状态 cancelled", run.status, "cancelled");
+  await cdp.eval(`const t = window.__lyflow.transport; t.cancelRun = t.__lyOrigCancel; return true;`);
 
   const running = Object.entries(run.nodes).filter(([, n]) => n.state === "running");
   report.ok("状态里没有残留的 running", running.length === 0, JSON.stringify(running));

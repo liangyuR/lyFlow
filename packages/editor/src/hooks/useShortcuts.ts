@@ -100,6 +100,10 @@ export function useShortcuts(
         return;
       }
       if (ui.finderOpen) return;
+      // 输入框里的 Esc 归那个框（撤回打的字、清空搜索），一次只退一层。这个监听挂在编辑器根元素上，比框自己的
+      // onKeyDown（React 在根容器上才分发）先到，框里 stopPropagation 也拦不住它：以前运行中在参数框里按 Esc 想撤回
+      // 打的字，运行跟着被取消；在子图里按，顺带退出了子图；开着的查看器窗口也被关掉一个。框处理完会失焦，再按一次才是全局的
+      if (e.key === "Escape" && inTextField(e.target)) return;
       if (ui.helpOpen && e.key === "Escape") {
         ui.setHelpOpen(false);
         return;
@@ -119,7 +123,7 @@ export function useShortcuts(
 
       const hit = matchShortcut(e);
       if (!hit) return;
-      // 键表说了这个动作在输入框里也响应才响应。F5/Esc 是唯二的例外 ——
+      // 键表说了这个动作在输入框里也响应才响应（F5、F8、存盘这几个打不出字符的）——
       // 用户很可能刚改完参数、焦点还在输入框里就按 F5。
       if (!hit.inTextField && inTextField(e.target)) return;
 
