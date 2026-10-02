@@ -1410,7 +1410,17 @@ async function suitePanels(cdp, report, ws) {
     return menu ? [...menu.querySelectorAll('[data-testid="recent-item"]')].map(b => b.title) : null;
   `);
   report.ok("最近文件里有刚存的那个", (recent ?? []).includes(graphPath), JSON.stringify(recent));
+  // 工具栏的下拉框：Esc 收起，点它外面也收起（以前只有再点一下按钮才收）
+  const recentOpen = () => cdp.eval(`return !!document.querySelector('[data-testid="recent-menu"]');`);
+  await pressEscape(cdp);
+  await sleep(100);
+  const afterEsc = await recentOpen();
   await cdp.eval(`document.querySelector('[data-testid="recent-toggle"]').click(); return true;`);
+  await sleep(200);
+  const paneCorner = await cdp.eval(`const r = document.querySelector('.react-flow__pane').getBoundingClientRect(); return { x: Math.round(r.right - 30), y: Math.round(r.bottom - 30) };`);
+  await clickAt(cdp, paneCorner);
+  await sleep(150);
+  report.eq("最近文件的下拉框：Esc 收起，点它外面（画布上）也收起", { esc: afterEsc, outside: await recentOpen() }, { esc: false, outside: false });
 
   // 备份：写一份比正文新的 `<file>~`，backup_status 要认出来
   await cdp.eval(`

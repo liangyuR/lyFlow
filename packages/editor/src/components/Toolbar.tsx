@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useDismiss } from "../hooks/useDismiss";
 import { dialogs } from "../lib/dialogs";
 import { baseName, recentFiles } from "../lib/files";
 import { stepHistory } from "../lib/history";
@@ -31,6 +32,8 @@ export interface ToolbarActions {
 function RecentMenu({ onPick }: { onPick: (path: string) => void }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<RecentEntry[]>([]);
+  const box = useRef<HTMLDivElement>(null);
+  useDismiss(open, box, useCallback(() => setOpen(false), []));
 
   useEffect(() => {
     if (!open) return;
@@ -38,7 +41,7 @@ function RecentMenu({ onPick }: { onPick: (path: string) => void }) {
   }, [open]);
 
   return (
-    <div className="toolbar__recent">
+    <div className="toolbar__recent" ref={box}>
       <button
         type="button"
         data-testid="recent-toggle"
@@ -132,6 +135,8 @@ function LibraryMenu() {
   const [settings, setSettings] = useState<LibrarySettings | null>(null);
   const [draft, setDraft] = useState("");
   const [status, setStatus] = useState<{ count: number; problems: string[] } | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  useDismiss(open, box, useCallback(() => setOpen(false), []));
 
   const load = async () => {
     try {
@@ -182,7 +187,7 @@ function LibraryMenu() {
 
   const editable = settings?.editable === true;
   return (
-    <div className="toolbar__recent">
+    <div className="toolbar__recent" ref={box}>
       <button
         type="button"
         data-testid="library-toggle"
