@@ -1355,10 +1355,29 @@
 /* -- 底部抽屉（§2.5）------------------------------------------------------- */
 
 .drawer {
+  position: relative;
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--lyflow-border);
   background: var(--lyflow-bg-1);
+}
+
+/* 抽屉的上沿：往上拖变高。压在上边框上，命中区 7px */
+.drawer__resize {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 7px;
+  cursor: row-resize;
+  z-index: 6;
+}
+
+.drawer__resize:hover::after {
+  content: "";
+  position: absolute;
+  inset: 3px 0;
+  background: var(--lyflow-accent);
 }
 .drawer.is-open { height: 220px; }
 

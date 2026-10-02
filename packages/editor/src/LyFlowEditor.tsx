@@ -13,6 +13,7 @@ import { ParamPanel } from "./components/ParamPanel";
 import { ShortcutPanel } from "./components/ShortcutPanel";
 import { Toolbar } from "./components/Toolbar";
 import { Viewer3D } from "./components/Viewer3D";
+import { useDragFraction } from "./hooks/useDragFraction";
 import { useShortcuts } from "./hooks/useShortcuts";
 import { rootOf } from "./lib/root";
 import {
@@ -39,6 +40,7 @@ import {
 } from "./lib/files";
 import { layoutGraph, needsInitialLayout } from "./lib/layout";
 import { fitSidePanes } from "./lib/panes";
+import { readStoredNumber, writeStoredNumber } from "./lib/prefs";
 import {
   MotionEnabledContext,
   useMotionEnabled,
@@ -91,6 +93,9 @@ const kSplittersWidth = 4;
 const kPaletteMin = 180;
 const kInspectorMin = 260;
 const kPanelMin = 360;
+/** 右栏里预览占多高（占右栏的比例）：检查器模式与参数面板模式各一个。没拖过时用样式表的默认。 */
+const VIEWER_FRACTION_KEY = "lyflow.viewer.fraction";
+const PANEL_VIEWER_FRACTION_KEY = "lyflow.viewer.fraction.panel";
 /** 参数面板宽度记在 localStorage 的这个键下（P2.1「记住宽度」）。 */
 const PANEL_WIDTH_KEY = "lyflow.paramPanel.width";
 /** 左侧算子面板的宽度，同样拖了就记住。 */
@@ -176,34 +181,45 @@ function StatusBar() {
   );
 }
 
-/** 连线被拒绝的原因、保存成功之类的短提示。 */
+/** 提示停多久：短的 2.6 秒；长句按字数加（一秒读五六个字），警告至少 4 秒，最长 8 秒。
+ *  以前一律 2.6 秒：「这个输入端口已有连线（输入是单连接）：拖它的线头才是改接」这样的句子没读完就没了。 */
+function toastMs(text: string, kind: "info" | "warn"): number {
+  return Math.min(8000, Math.max(kind === "warn" ? 4000 : 2600, 1200 + [...text].length * 170));
+}
+
+/** 连线被拒绝的原因、保存成功之类的短提示。鼠标停在上面时不消失，移开后重新计时。 */
 function Toast() {
   const toast = useUiStore((s) => s.toast);
   const hideToast = useUiStore((s) => s.hideToast);
+  const [hovered, setHovered] = useState(false);
 
   useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(hideToast, 2600);
+    if (!toast) {
+      setHovered(false);
+      return;
+    }
+    if (hovered) return;
+    const t = setTimeout(hideToast, toastMs(toast.text, toast.kind));
     return () => clearTimeout(t);
-  }, [toast, hideToast]);
+  }, [toast, hovered, hideToast]);
 
   if (!toast) return null;
   return (
-    <div className={`toast toast--${toast.kind}`} data-testid="toast">
+    <div
+      className={`toast toast--${toast.kind}`}
+      data-testid="toast"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       {toast.text}
     </div>
   );
 }
 
-/** 记住的宽度（localStorage）。读不到、被禁用、存的不是数都退回默认 —— 这只是个方便，不是状态。 */
+/** 记住的宽度（localStorage）。读不到、存的不是正数都退回默认 —— 这只是个方便，不是状态。 */
 function storedWidth(key: string | undefined, fallback: number): number {
-  if (!key) return fallback;
-  try {
-    const v = Number(window.localStorage.getItem(key));
-    return Number.isFinite(v) && v > 0 ? v : fallback;
-  } catch {
-    return fallback;
-  }
+  const v = key ? readStoredNumber(key) : null;
+  return v !== null && v > 0 ? v : fallback;
 }
 
 /** 可拖分栏（右侧面板、左侧算子面板）。一条 4px 把手 + 全局 pointermove，
@@ -233,13 +249,7 @@ function useDragSplit(
       setWidth(Math.max(min, Math.min(limit, next)));
     };
     const up = () => {
-      if (dragging.current && persistKey) {
-        try {
-          window.localStorage.setItem(persistKey, String(Math.round(latest.current)));
-        } catch {
-          // 隐私模式、存储被禁：记不住就记不住，宽度这一次照样生效
-        }
-      }
+      if (dragging.current && persistKey) writeStoredNumber(persistKey, Math.round(latest.current));
       dragging.current = false;
       rootOf(container.current)?.classList.remove("lyflow-is-resizing");
     };
@@ -305,6 +315,20 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   const fitted = fitSidePanes(rowWidth - kSplittersWidth, leftWanted, rightWanted, kMinCanvasWidth);
   const paletteWidth = fitted.left;
   widths.current = { palette: fitted.left, right: fitted.right };
+
+  // 右栏里预览与下面（检查器 / 参数面板）之间可以上下拖，两种模式各记各的比例（参数面板开着时下面要的地方多）
+  const rightCol = useRef<HTMLElement>(null);
+  const viewerBox = useRef<HTMLDivElement>(null);
+  const getRightCol = useCallback(() => rightCol.current, []);
+  const getViewerBox = useCallback(() => viewerBox.current, []);
+  const inspectorViewer = useDragFraction({
+    column: getRightCol, pane: getViewerBox, edge: "top", minPx: 160, restMinPx: 160, persistKey: VIEWER_FRACTION_KEY,
+  });
+  const panelViewer = useDragFraction({
+    column: getRightCol, pane: getViewerBox, edge: "top", minPx: 160, restMinPx: 200, persistKey: PANEL_VIEWER_FRACTION_KEY,
+  });
+  const viewerSplit = panel.open ? panelViewer : inspectorViewer;
+  const viewerShown = !(panel.open && !panel.viewerOpen);
 
   // 粘贴和搜索面板要知道往哪儿放。跟着鼠标走比总是放在画布中心自然得多。
   const cursor = useRef({ x: 0, y: 0 });
@@ -786,6 +810,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
           className={`app__right${panel.open ? " app__right--panel" : ""}`}
           style={{ width: fitted.right }}
           data-testid="right-pane"
+          ref={rightCol}
         >
           {/* 3D 视图在上、参数在下：视觉项目的核心闭环是「改参数 → 看结果」，
               两者离得越近越好（交互清单 P1 #30）。参数面板开着时视图收成一条标题栏
@@ -802,9 +827,24 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
               {panel.viewerOpen ? "▾" : "▸"} 预览
             </button>
           )}
-          <div className={`app__viewer${panel.open && !panel.viewerOpen ? " is-collapsed" : ""}`}>
+          <div
+            className={`app__viewer${viewerShown ? "" : " is-collapsed"}`}
+            ref={viewerBox}
+            style={viewerSplit.fraction !== null ? { flexBasis: `${viewerSplit.fraction * 100}%` } : undefined}
+          >
             <Viewer3D />
           </div>
+          {viewerShown && (
+            <div
+              className="app__hsplit"
+              onPointerDown={viewerSplit.onPointerDown}
+              onDoubleClick={viewerSplit.reset}
+              role="separator"
+              aria-orientation="horizontal"
+              title="拖动调整预览高度，双击恢复默认"
+              data-testid="viewer-splitter"
+            />
+          )}
           {panel.open ? (
             <ParamPanel />
           ) : (

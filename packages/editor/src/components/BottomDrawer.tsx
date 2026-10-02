@@ -1,7 +1,10 @@
 // 底部抽屉（m3-plan §2.5）：日志、诊断列表、缓存统计。
 // 三样都是「跑完之后想看一眼」的东西，塞进右侧检查器会把参数挤没。
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { useDragFraction } from "../hooks/useDragFraction";
+import { rootOf } from "../lib/root";
 
 import { describeEventNode } from "../lib/subgraph";
 import { clearCache, formatBytes, refreshCacheStats, useCacheStore } from "../store/cache";
@@ -10,6 +13,9 @@ import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore, type DrawerTab } from "../store/ui";
 import type { OutputState, SummaryStatus } from "../types/execution";
+
+/** 抽屉拖到多高（占整个编辑器的比例）记在这个键下。没拖过时是样式表的 220 px。 */
+const DRAWER_FRACTION_KEY = "lyflow.drawer.fraction";
 
 const TABS: { id: DrawerTab; label: string }[] = [
   { id: "log", label: "日志" },
@@ -272,9 +278,33 @@ export function BottomDrawer() {
   const toggle = useUiStore((s) => s.toggleDrawer);
   const logCount = useExecutionStore((s) => s.logs.length);
   const diagCount = useDiagnostics().length;
+  // 上沿可以往上拖高（日志、诊断一多，220 px 只看得到十来行）
+  const self = useRef<HTMLDivElement>(null);
+  const getRoot = useCallback(() => rootOf(self.current), []);
+  const getSelf = useCallback(() => self.current, []);
+  const resize = useDragFraction({
+    column: getRoot, pane: getSelf, edge: "bottom", minPx: 120, restMinPx: 300, persistKey: DRAWER_FRACTION_KEY,
+  });
 
   return (
-    <div className={`drawer${drawer ? " is-open" : ""}`} data-testid="drawer" data-tab={drawer ?? ""}>
+    <div
+      className={`drawer${drawer ? " is-open" : ""}`}
+      ref={self}
+      style={drawer && resize.fraction !== null ? { height: `${resize.fraction * 100}%` } : undefined}
+      data-testid="drawer"
+      data-tab={drawer ?? ""}
+    >
+      {drawer && (
+        <div
+          className="drawer__resize"
+          onPointerDown={resize.onPointerDown}
+          onDoubleClick={resize.reset}
+          role="separator"
+          aria-orientation="horizontal"
+          title="拖动调整高度，双击恢复默认"
+          data-testid="drawer-splitter"
+        />
+      )}
       <div className="drawer__tabs">
         {TABS.map((t) => (
           <button

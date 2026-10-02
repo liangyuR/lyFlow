@@ -12,7 +12,7 @@
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 154（纯平台构建 95 通过 / 59 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
 | editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 112 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 32 | 秒级 |
-| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 861 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
+| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 864 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 33 条断言（精简前 58） | 几分钟 |
 
 ## 放在哪一层
@@ -34,7 +34,7 @@
 | 日志页（只看警告与错误、按节点或内容筛；节点写带层级的名字，点它打开到那一层）；检查器的节点 id（路径 id，点了复制）；撤销 / 重做之后的 toast | 撤销提示在 `packages/editor/test/graph-params-actions.test.mjs`；真界面在 e2e `m4.mjs`：日志页与节点 id 在 `suiteNested`，Ctrl+Z 的 toast 在 `suiteLibrary` |
 | 子图、库算子（含展开为内联子图：定义去掉 id、内联后逐位相同；库目录设置：`bridge/src/library_settings.rs` 单测、e2e m4 面板增删 + CLI 同读） | `core/tests/test_subgraph.cpp`；`packages/editor/test/graph-params-actions.test.mjs`（合成 / 解散 / 展开库算子的 store 动作）；e2e `m4.mjs` |
 | 多选同一种算子一起改参数（`setParamMany`：每个节点照 `setParam` 路由、一条撤销、并进拖动的外层事务） | `packages/editor/test/graph-params-actions.test.mjs`；真界面（标「不同」、拖一下两个都变、一条撤销）在 e2e `m3.mjs` 的 `suiteEditing` |
-| 拖线时的即时挡错（P0 #7 端口类型、#16 环检测、E6 Any 推导；`compatibleTargets` / `compatibleSources` 的置灰表；松在节点身子上接哪个端口的 `dropOnNode`）；GraphDoc → React Flow 的映射（连线按实际类型着色、惰性边虚线、引用复用；只挪了位置的节点 data 沿用原对象）| `packages/editor/test/typecheck.test.mjs`；真鼠标拖线在 e2e `m3.mjs`、`m8b.mjs` |
+| 拖线时的即时挡错（P0 #7 端口类型、#16 环检测、E6 Any 推导；`compatibleTargets` / `compatibleSources` 的置灰表；松在节点身子上接哪个端口的 `dropOnNode`）；GraphDoc → React Flow 的映射（连线按实际类型着色、惰性边虚线、引用复用；只挪了位置的节点 data 沿用原对象）| `packages/editor/test/typecheck.test.mjs`；真鼠标拖线在 e2e `m3.mjs`、`m8b.mjs`；长一点的提示按字数停留（警告至少 4 秒）在 `m3.mjs` 的 `suiteDropToSearch` |
 | 算子搜索的排序（名字命中优先、短的优先、缩写与中文关键词、说明命中标字段） | `packages/editor/test/search.test.mjs`；弹层与面板的真界面在 e2e `m3.mjs` |
 | 图参数（规格、校验、传参） | `core/tests/test_graph_params.cpp`、`test_params.cpp`；`packages/editor/test/graph-params*.test.mjs`；e2e `params_p1.mjs`（参数菜单的复制路径名 / 粘贴值、读剪贴板不弹权限框也在它的 `suiteIncludeTopLevel` 末尾） |
 | 配方与四类失配 | 共享夹具 `schema/fixtures/recipes/`：`bridge/src/recipe.rs` 与 `packages/editor/test/recipes.test.mjs` 对着同一份 `expected.json`；e2e `params_p3.mjs` 只验界面、磁盘与对话框 |
@@ -60,7 +60,7 @@
 | 按输出类型选视图（主预览的点云 / 值） | `packages/editor/test/view-rule.test.mjs`；e2e `gap.mjs` 的「量测输出」组（`transform.make` 显示值、手动选只对当时的节点有效） |
 | 动效、hover、端点对齐 | e2e `motion.mjs`、`noderun.mjs`；300 节点的图上真拖一个节点（先确认中心点露在画布上、拖完确实挪了）与鼠标扫过一片节点时的帧率在 `m4.mjs` 的 `suiteBigGraph` |
 | 节点运行按钮；右键「选中上游 / 下游」 | 图结构（智能运行的上游闭包、选中上 / 下游的闭包）在 `packages/editor/test/node-run.test.mjs`；按钮在 e2e `noderun.mjs`；右键菜单的选中在 e2e `m4.mjs` 的 `suiteCompose` 开头 |
-| 分栏、拖放配置（dragDropEnabled）；窗口窄了两侧面板让位、画布留够最窄 | 怎么让（右栏先缩、到最窄停）在 `packages/editor/test/layout.test.mjs`；e2e `params_p2.mjs` 的 `suiteLayout`（右侧分栏；窗口真缩到 900、参数面板不出窗口）、`m8b.mjs` 的算子面板组 |
+| 分栏、拖放配置（dragDropEnabled）；窗口窄了两侧面板让位、画布留够最窄 | 怎么让（右栏先缩、到最窄停）在 `packages/editor/test/layout.test.mjs`；e2e `params_p2.mjs` 的 `suiteLayout`（右侧分栏；窗口真缩到 900、参数面板不出窗口；预览与检查器之间、底部抽屉的上沿上下拖，双击恢复默认）、`m8b.mjs` 的算子面板组 |
 | 图结构编辑 `lyflow patch`（七个动作、幂等、改坏不落盘） | `bridge/src/patch/tests.rs` |
 | 指标路径（`eval` 写错时列出、`--list-metrics` 正向列出） | `bridge/src/cli/tests.rs` 的 `eval_lists_the_available_paths_when_the_metric_is_wrong`、`bridge/src/eval/tests.rs` 的 `available_paths_*` |
 | MCP 工具、argv 拼装、CLI 解析（含逐行回调、请求取消时结束子进程：`cli.test.ts` 用 node 当假 CLI；客户端取消 `run_graph` 时后端那次运行跟着取消：`smoke.test.ts` 里 `test.stall` 睡 20 秒、几秒内收到 cancelled） | `packages/mcp/test/*`（`smoke.test.ts` 是唯一跑通 MCP → CLI 的） |

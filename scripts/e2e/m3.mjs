@@ -900,6 +900,11 @@ async function suiteDropToSearch(cdp, report) {
     { edges: await wired(), search: await cdp.eval(`return !!document.querySelector('.search-popup');`),
       toast: await cdp.eval(`return window.__lyflow.stores.ui.getState().toast?.text ?? null;`) },
     { edges: [`${ids.gen}>${extra.voxel}.cloud`], search: false, toast: "合并点云 上有 2 个端口能接，拖到要接的那个端口上" });
+  // 长一点的提示停得够读完（按字数算，警告至少 4 秒）。以前一律 2.6 秒，这一句没读完就收了
+  await sleep(3200);
+  report.eq("这条提示 3 秒多之后还在（以前 2.6 秒就收了）",
+    await cdp.eval(`return document.querySelector('[data-testid="toast"]')?.textContent ?? null;`),
+    "合并点云 上有 2 个端口能接，拖到要接的那个端口上");
 
   report.ok("算子面板顶上有「最近用过」一组，里面有它",
     await cdp.eval(`return !!document.querySelector('[data-testid="palette-recent"] [data-op-id=${lit(added ?? "")}]');`));

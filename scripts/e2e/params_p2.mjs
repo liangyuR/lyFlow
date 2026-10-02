@@ -249,6 +249,58 @@ async function suiteLayout(cdp, report) {
   await sleep(150);
   d = await dom();
   report.ok("关上面板：右侧回到 Inspector 的宽度", d.right.w < Math.min(width0, width1) - 100, `${d.right.w}px`);
+
+  // 预览与检查器之间、底部抽屉的上沿都能上下拖，松手按比例记住；双击把手回到默认、忘掉记住的。
+  // 以前预览固定占右栏 44%、抽屉固定 220 px，日志一多只看得到十来行
+  const rows = () => cdp.eval(`
+    const h = (sel) => Math.round(document.querySelector(sel)?.getBoundingClientRect().height ?? -1);
+    const mid = (sel) => { const b = document.querySelector(sel)?.getBoundingClientRect();
+      return b ? { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) } : null; };
+    return { viewer: h('.app__viewer'), drawer: h('[data-testid="drawer"]'),
+             viewerHandle: mid('[data-testid="viewer-splitter"]'), drawerHandle: mid('[data-testid="drawer-splitter"]'),
+             stored: [localStorage.getItem('lyflow.viewer.fraction'), localStorage.getItem('lyflow.drawer.fraction')] };
+  `);
+  const toggleLog = () => cdp.eval(`window.__lyflow.stores.ui.getState().toggleDrawer('log'); return true;`);
+  const doubleClick = async (p) => {
+    for (const clickCount of [1, 2]) {
+      await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: p.x, y: p.y, button: "left", buttons: 1, clickCount });
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: p.x, y: p.y, button: "left", buttons: 0, clickCount });
+    }
+    await sleep(150);
+  };
+  // 先双击两个把手回到默认：上一次跑到一半留下的比例不算
+  const r0 = await rows();
+  mustOk(r0.viewerHandle != null, "预览下沿有可拖的把手", r0);
+  await doubleClick(r0.viewerHandle);
+  await toggleLog();
+  await sleep(200);
+  const r1 = await rows();
+  mustOk(r1.drawerHandle != null, "抽屉打开后上沿有可拖的把手", r1);
+  await doubleClick(r1.drawerHandle);
+  await toggleLog();
+  await sleep(200);
+  const v0 = await rows();
+  await dragMouse(cdp, v0.viewerHandle, { x: v0.viewerHandle.x, y: v0.viewerHandle.y + 80 }, { steps: 10 });
+  const v1 = await rows();
+  await toggleLog();
+  await sleep(200);
+  const d0 = await rows();
+  await dragMouse(cdp, d0.drawerHandle, { x: d0.drawerHandle.x, y: d0.drawerHandle.y - 60 }, { steps: 10 });
+  const d1 = await rows();
+  report.ok("预览往下拖高 80、抽屉往上拖高 60，松手都记住了",
+    Math.abs(v1.viewer - v0.viewer - 80) <= 6 && Math.abs(d1.drawer - d0.drawer - 60) <= 6 && d1.stored.every((s) => s !== null),
+    JSON.stringify({ v0: v0.viewer, v1: v1.viewer, d0: d0.drawer, d1: d1.drawer, stored: d1.stored }));
+  // 双击两个把手：回到默认、记住的删掉（后面的分组照默认的样子跑，对比时预览更高的那一档也还在）
+  await doubleClick(d1.drawerHandle);
+  const d2 = await rows();
+  await toggleLog();
+  await sleep(200);
+  const v2 = await rows();
+  await doubleClick(v2.viewerHandle);
+  const v3 = await rows();
+  report.ok("双击把手：抽屉与预览回到默认的高度，记住的比例删掉",
+    Math.abs(d2.drawer - d0.drawer) <= 2 && Math.abs(v3.viewer - v0.viewer) <= 2 && v3.stored.every((s) => s === null),
+    JSON.stringify({ d0: d0.drawer, d2: d2.drawer, v0: v0.viewer, v3: v3.viewer, stored: v3.stored }));
   await openPanel(cdp);
   d = await dom();
   report.ok("重新打开：还是拖过的宽度（记住宽度）", Math.abs(d.right.w - width1) <= 2, `${d.right.w} vs ${width1}`);
