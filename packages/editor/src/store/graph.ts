@@ -715,12 +715,20 @@ export const useGraphStore = create<GraphState>((set, get) => {
       if (moves.length === 0) return;
       // 拖动过程中每帧都调，所以走 mutate 不记撤销；
       // 一次拖动的撤销由 begin/commit 包住整体记一条。
-      // 按节点扫一遍查表，不按挪动逐个 find：全选拖几百个节点时每帧原来是平方级
-      const to = new Map(moves.map((m) => [m.id, m.position]));
+      // 下标在原图（不是 draft）上查好，draft 上只碰挪了的那几个：不按挪动逐个 find（全选拖几百个节点时每帧平方级），
+      // 也不在 draft 上把节点挨个读一遍（immer 读一个就建一个代理，一千个节点的图上拖一个节点每帧上千个）
+      const index = new Map<string, number>();
+      level(get().doc).nodes.forEach((n, i) => index.set(n.id, i));
+      const at = moves.flatMap((m) => {
+        const i = index.get(m.id);
+        return i === undefined ? [] : [[i, m.position] as const];
+      });
+      if (at.length === 0) return;
       mutate((d) => {
-        for (const node of level(d).nodes) {
-          const position = to.get(node.id);
-          if (position) node.ui = { ...node.ui, position };
+        const nodes = level(d).nodes;
+        for (const [i, position] of at) {
+          const node = nodes[i]!;
+          node.ui = { ...node.ui, position };
         }
       });
     },
