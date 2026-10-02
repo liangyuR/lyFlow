@@ -43,6 +43,7 @@
 | 空画布 | 写着从哪开始（搜算子、打开、拖片段） | e2e `m3.mjs` 的 `suiteEditing` |
 | 警告样式 | 三条 CSS 选择器被批量改名改坏（`.toast--lyflow-warn` 等），警告 toast、「非确定性」标签、warn 日志一直没上色 | e2e `noderun.mjs` 的 `suiteIsolateOnly` 查计算出来的颜色 |
 | 大图上的 hover | 鼠标扫过 300 节点的图 14 → 33 fps（p90 帧 170–256 → 40–55 ms）；从一个 hover 着的节点开始拖 25 → 41 fps。节点 hover 时淡化不相关的边原来是每条边自己 `is-dimmed`（opacity）：hover 一换几百条边一起重渲染、各开一个合成效果节点再全部重新分层。改成画布上一个 `data-node-hover` + CSS 用 stroke-opacity 淡化，只有相关的几条边重渲染 | e2e `m4.mjs` 的 `suiteBigGraph`（扫过 ≥ 20 fps）、`motion.mjs` 的 hover 组（淡化看计算出来的 stroke-opacity） |
+| 点云缓存的字节预算 | 预览取回来的点云缓存按 256 MB 封顶（LRU），可只算了坐标与强度：带法线的云按一半记，带颜色的也少记，预算实际是两倍上下。现在每个底层 buffer 记一次（各通道都是同一个 IPC buffer 上的视图），法线、颜色都算上 | `cloud-cache.test.mjs`（三片带法线与颜色的云超预算时最早的那片让位；以前三片都留着） |
 | 全选拖动几百个节点 | 300 个节点全选后拖动，开发构建里一帧 216 → 133 ms。每帧都在做的平方级查找换成查表（store 的 moveNodes、节点运行按钮的上游名字、多选检查器、对齐参考线；共用一张按节点数组身份缓存的 id 索引）；只挪了位置的节点沿用原来的 data 对象，节点组件比较 props 时不看 React Flow 每帧传进来的位置 —— 原来几百个节点每帧整个重渲。剩下的大头是连线跟着重画、浏览器排版 | `typecheck.test.mjs` 的映射那条（data 沿用；去掉时失败）；帧率是探针量的，没进 e2e（开发构建里抖得厉害） |
 | 大图 | 节点运行按钮的上游闭包与计划查询改为按身份缓存（原来每个按钮每次 store 更新都整图扫一遍）；映射层每条边不再线性找节点 | `node-run.test.mjs` 与原实现逐个对照、`typecheck.test.mjs` 的映射那条；300 节点打开 ~310 → ~240 ms（profile） |
 

@@ -8,8 +8,14 @@ export const cloudCache = new Map<string, CloudPayload>();
  *  按条数封顶的话 8 条能攒到 1GB。 */
 const CACHE_BYTES = 256 * 1024 * 1024;
 
+/** 这片云实际占着的字节：每个底层 buffer 记一次。decodeCloud 出来的各通道都是同一个 IPC buffer 上的视图，
+ *  记 buffer 才连法线、颜色一起算上 —— 以前只算坐标与强度，带法线的云按一半记，预算形同两倍。 */
 function payloadBytes(p: CloudPayload) {
-  return p.xyz.byteLength + (p.intensity?.byteLength ?? 0);
+  const buffers = new Set<ArrayBufferLike>([p.xyz.buffer]);
+  for (const channel of [p.intensity, p.normals, p.rgb]) if (channel) buffers.add(channel.buffer);
+  let bytes = 0;
+  for (const b of buffers) bytes += b.byteLength;
+  return bytes;
 }
 
 export function cacheKey(runId: string, nodeId: string, port: string, maxPoints: number) {
