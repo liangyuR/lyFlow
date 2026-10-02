@@ -478,6 +478,8 @@ fn wrong_usage_is_rejected_with_its_exit_code_and_message() {
         (vec!["run", &empty, "--to", "zzz"], EXIT_FAILED, "目标不存在: zzz（unknown_node）"),
         (vec!["dump", &graph, "v:cloud", "out.pcd", "--format", "asci"], EXIT_USAGE, "--format 只认 binary / ascii / binary_compressed，收到 asci"),
         (vec!["dump", &graph, "zzz:cloud", "out.pcd"], EXIT_FAILED, "目标不存在: zzz（unknown_node）"),
+        // 端口写错：说这个节点有哪些输出（以前只有「结果仓里没有 v.nope」）
+        (vec!["dump", &graph, "v:nope", "out.pcd"], EXIT_USAGE, "节点 v 没有输出端口 nope（它的输出：cloud）"),
     ];
     for (args, code, want) in &cases {
         let r = cli(args);

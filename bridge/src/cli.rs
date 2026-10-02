@@ -639,6 +639,17 @@ impl RunResult {
         None
     }
 
+    /// 这个节点这次产出了哪些输出端口（最后一条带 stats 的 node_state）。节点没跑、没有 stats 时是 None。
+    fn output_ports(&self, node_id: &str) -> Option<Vec<String>> {
+        let e = self
+            .events
+            .iter()
+            .rev()
+            .find(|e| e["kind"] == "node_state" && e["nodeId"] == node_id && e["stats"]["outputs"].is_array())?;
+        let ports = e["stats"]["outputs"].as_array()?;
+        Some(ports.iter().filter_map(|o| o["port"].as_str().map(str::to_string)).collect())
+    }
+
     pub(crate) fn duration_ms(&self) -> f64 {
         self.events
             .iter()
@@ -1600,6 +1611,13 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         .and_then(|e| e["runId"].as_str())
         .unwrap_or_default()
         .to_string();
+    // 端口写错：说这个节点有哪些输出（以前只有 core 那句「结果仓里没有 g.nope」）
+    if let Some(ports) = result.output_ports(node_id) {
+        if !ports.iter().any(|p| p == port) {
+            let have = if ports.is_empty() { "没有输出".to_string() } else { format!("它的输出：{}", ports.join("、")) };
+            return fail(err, &format!("节点 {node_id} 没有输出端口 {port}（{have}）"), EXIT_USAGE);
+        }
+    }
     if let Err(e) = core.output_save(&run_id, node_id, port, &target_file, &format) {
         return fail(err, &e, EXIT_FAILED);
     }
