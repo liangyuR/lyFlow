@@ -196,6 +196,17 @@ export function NumberInput({
         } else if (e.key === "Escape") {
           cancelled.current = true;
           e.currentTarget.blur();
+        } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+          // 按这个参数的步长走一格（Shift ×10、Alt ×0.1，与拖动一样），只改框里的字，回车或失焦才提交。
+          // 浏览器自己的步进在没声明 step 的浮点框上是 ±1：体素边长 0.01 按一下成了 1.01
+          e.preventDefault();
+          const typed = integer ? parseInt(text, 10) : parseFloat(text);
+          const base = Number.isNaN(typed) ? value : typed;
+          const unit = integer ? Math.max(1, Math.round(dragStep)) : dragStep * (e.altKey ? 0.1 : 1);
+          const delta = (e.key === "ArrowUp" ? 1 : -1) * unit * (e.shiftKey ? 10 : 1);
+          const next = clamp(integer ? Math.round(base + delta) : Number.parseFloat((base + delta).toPrecision(12)));
+          editing.current = true;
+          setText(String(next));
         }
       }}
     />

@@ -503,6 +503,23 @@ async function suiteAllTypes(cdp, report, ws) {
     report.eq("聚焦的数字框上滚三下滚轮：值不变", (await paramsOf(cdp, ids.show)).iterations, before);
   }
 
+  // 数字框里按 ↑：按这个参数的步长走一格（没声明 step 时是范围的 1/200），回车提交。浏览器自己的步进在没声明
+  // step 的浮点框上是 ±1：weights 的 A 是 0.25，按一下成了 1.25（失焦再被夹成 1）
+  {
+    const wSel = `${rowSel(`${ids.show}.weights`)} input.ctl--num`;
+    await reveal(cdp, rowSel(`${ids.show}.weights`));
+    const before = (await paramsOf(cdp, ids.show)).weights[0];
+    await cdp.eval(`document.querySelector(${lit(wSel)}).focus(); return true;`);
+    await pressKey(cdp, "ArrowUp", 38);
+    await sleep(80);
+    const shown = await cdp.eval(`return document.querySelector(${lit(wSel)}).value;`);
+    await pressKey(cdp, "Enter", 13);
+    await sleep(150);
+    const after = (await paramsOf(cdp, ids.show)).weights[0];
+    report.ok("数字框里按 ↑ 走一格（weights 没声明 step：范围 0–1 的 1/200），回车提交",
+      approxEq(Number(shown), before + 0.005) && approxEq(after, before + 0.005), JSON.stringify({ before, shown, after }));
+  }
+
   // 取色器拖着选（一路发 input，关上时一个 change）：整段一条撤销，值是最后那个。以前每一下 input 都是一条
   {
     await reveal(cdp, rowSel(`${ids.show}.tint`));
