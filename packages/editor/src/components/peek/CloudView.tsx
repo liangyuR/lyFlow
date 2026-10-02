@@ -26,6 +26,7 @@ import { useManifestStore } from "../../store/manifest";
 import { PEEK_FROZEN, usePeekStore } from "../../store/peek";
 import { transport } from "../../transport";
 import { decodeCloud, type CloudPayload } from "../../types/execution";
+import { useFocusOnDoubleClick } from "../../hooks/useFocusOnDoubleClick";
 import { measureAttrs, useMeasure } from "../../hooks/useMeasure";
 import { MeasureReadout } from "../MeasureReadout";
 import type { PeekViewProps } from "./types";
@@ -262,6 +263,8 @@ export function CloudView({ win, src }: PeekViewProps) {
     [cloud, null],
     `${win.id}|${target.resolved?.nodeId ?? ""}|${target.resolved?.port ?? ""}`,
   );
+  // 双击一个点：转心挪到它上面（测量时不接）
+  useFocusOnDoubleClick(sceneHost, [cloud, null], measureOn);
 
   const setOpts = usePeekStore((s) => s.setOpts);
   const empty = !cloud && !shapeStat;

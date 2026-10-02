@@ -32,6 +32,7 @@ import {
   saveGraphTo,
   select,
   selectAndReadViewer,
+  viewerBounds,
   stubClipboard,
 } from "./page.mjs";
 
@@ -1707,6 +1708,28 @@ async function suiteMeasure(cdp, report) {
   mustOk(run.status === "ok", "先跑一次", run.status);
   const view = await selectAndReadViewer(cdp, ids.gen);
   mustOk(view.count > 0, "预览画出了 gen 的点", JSON.stringify(view));
+
+  // 测量关着时双击一个点：转心挪到它上面（相机跟着平移，之后转视角绕着它转）。在画面中心附近一圈圈试着真双击，
+  // 直到落在一个点上（脚本不知道哪个像素底下有点）
+  const viewCenter = await centerOf(cdp, '[data-testid="viewer3d-canvas"]');
+  const focusOf = () => cdp.eval(`return document.querySelector('[data-testid="viewer3d-canvas"] canvas')?.dataset.focus ?? null;`);
+  let focus = null;
+  for (let k = 0; k < 24 && !focus; k += 1) {
+    const r = 6 + k * 4;
+    const at = { x: Math.round(viewCenter.x + r * Math.cos(k * 0.9)), y: Math.round(viewCenter.y + r * Math.sin(k * 0.9)) };
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y, buttons: 0 });
+    for (const clickCount of [1, 2]) {
+      await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button: "left", buttons: 1, clickCount });
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: at.x, y: at.y, button: "left", buttons: 0, clickCount });
+    }
+    await sleep(120);
+    focus = await focusOf();
+  }
+  const cloudBox = (await viewerBounds(cdp)).cloud;
+  const fxyz = focus ? focus.split(",").map(Number) : null;
+  report.ok("测量关着时在预览里双击一个点：转心挪到了它上面（那个点在云的包围盒里）",
+    fxyz !== null && cloudBox !== null && fxyz.every((v, i) => v >= cloudBox[i] - 1e-3 && v <= cloudBox[i + 3] + 1e-3),
+    JSON.stringify({ focus, cloudBox }));
 
   await pressKey(cdp, "m", 77);
   await sleep(200);

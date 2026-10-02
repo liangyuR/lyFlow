@@ -44,6 +44,7 @@ import { ImagePane } from "./ImagePane";
 import { MeasureReadout } from "./MeasureReadout";
 import { RoiLayer, type RoiItem } from "./RoiLayer";
 import { ValuePane } from "./ValuePane";
+import { useFocusOnDoubleClick } from "../hooks/useFocusOnDoubleClick";
 import { measureAttrs, useMeasure } from "../hooks/useMeasure";
 import { useViewerSource, type ViewerSource } from "../hooks/useViewerSource";
 import "../styles.viewer.css";
@@ -565,6 +566,8 @@ export function Viewer3D() {
     [cloud, cloudB],
     `${display.nodeId ?? ""}|${compareB?.nodeId ?? ""}`,
   );
+  // 双击一个点：转心挪到它上面（测量、拖框时不接）
+  useFocusOnDoubleClick(sceneHost, [cloud, cloudB], measureOn || roiEditing || stageContent !== "cloud");
 
   /** 把当前这组框原样写进其它启用的组（L20「复制到其它槽」），整个算一条撤销。 */
   const copyFrameToOthers = () => {

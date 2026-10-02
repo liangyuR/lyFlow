@@ -477,6 +477,16 @@ export function boundsAttr(bounds: ArrayLike<number> | null): string {
   return Array.from(bounds, round3).join(",");
 }
 
+/** 把视角的中心（OrbitControls 的 target）挪到 p 上：当前相机与 target 一起平移同一段，视线方向不变 ——
+ *  画面平移到 p 居中、之后转视角绕着它转（useFocusOnDoubleClick）。正交俯视时也是平移。 */
+export function focusOn(scene: Scene, p: [number, number, number]) {
+  const t = scene.controls.target;
+  const offset = new THREE.Vector3(p[0] - t.x, p[1] - t.y, p[2] - t.z);
+  scene.controls.object.position.add(offset);
+  t.add(offset);
+  scene.controls.update();
+}
+
 export function fitToBounds(scene: Scene, bounds: Float32Array) {
   const cx = (bounds[0]! + bounds[3]!) / 2;
   const cy = (bounds[1]! + bounds[4]!) / 2;
