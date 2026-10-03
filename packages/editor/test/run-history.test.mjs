@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { diffRuns, diffText, previousReading, runReadingsOf, shortValue } from "../src/lib/runHistory.ts";
+import { diffRuns, diffText, previousReading, previousReadingIn, runReadingsOf, shortValue } from "../src/lib/runHistory.ts";
 import { MAX_RUN_RECORDS, useRunHistoryStore } from "../src/store/runHistory.ts";
 
 const ops = new Map([
@@ -43,6 +43,13 @@ test("调参记录：两次运行之间改了什么 —— 有效参数（缺省
       "合成点云 · Point Count 30000 → 9；粗降采样 · Leaf Size [0.02, 0.02, 0.02] → [1, 1, 1]；粗降采样 · minPoints 1 → 2 等 5 处"],
   ];
   for (const [name, next, want] of cases) assert.equal(diffText(diffRuns(rec(base), next, ops)), want, name);
+  const shared = (leaf) => ({
+    ...base,
+    nodes: [{ id: "L", op: "sub:s", params: {} }, { id: "R", op: "sub:s", params: {} }],
+    subgraphs: { s: { name: "S", nodes: [{ id: "v", op: "filter.voxel_grid", params: { leafSize: [leaf, leaf, leaf] } }], edges: [], inputs: [], outputs: [], params: [] } },
+  });
+  const subOps = new Map([...ops, ["sub:s", { id: "sub:s", label: "S", params: [] }]]);
+  assert.equal(diffRuns(rec(shared(0.02)), rec(shared(0.03)), subOps).changes.length, 1, "两个实例里是同一个节点：改一处只算一处");
   assert.equal(shortValue("x".repeat(40)).length, 24, "长字符串截短");
   assert.equal(shortValue(true), "开");
 });
@@ -61,6 +68,15 @@ test("调参记录：读数按 id、端口排好，比上一次找同一个；�
   ]);
   assert.equal(previousReading({ readings }, { id: "s/b", port: "gap" })?.value, 3.5);
   assert.equal(previousReading(undefined, readings[0]), null);
+  const gapAt = (v) => [{ id: "s/b", port: "gap", value: v, unit: "mm", verdict: null }];
+  const recs = [
+    { status: "ok", readings: gapAt(0.61) },
+    { status: "cancelled", readings: [] },
+    { status: "ok", readings: [] },
+    { status: "ok", readings: gapAt(0.5) },
+  ];
+  assert.equal(previousReadingIn(recs, 0, recs[0].readings[0])?.value, 0.5, "被顶掉的、没算它的都跳过，比的是 0.5");
+  assert.equal(previousReadingIn(recs, 3, recs[3].readings[0]), null, "最早的那一次没有上一次");
 
   const h = () => useRunHistoryStore.getState();
   h().clear();
@@ -68,6 +84,7 @@ test("调参记录：读数按 id、端口排好，比上一次找同一个；�
   h().begin("r-iso", base, {}, null, { isolate: ["v"] });
   assert.equal(h().records.length, 0, "预览、单节点运行不记");
   h().begin("r1", base, { thr: 1 }, "夜班", { targets: ["v"] });
+  h().planned("r1", ["a", "s/b"]);
   h().finish("r1", "ok", 120, nodes);
   h().finish("gone", "ok", 1, nodes);
   assert.deepEqual(h().records.map((r) => [r.seq, r.status, r.durationMs, r.recipe, r.targets, r.readings.length]),
@@ -81,9 +98,14 @@ test("调参记录：读数按 id、端口排好，比上一次找同一个；�
     [["r3", "running", []], ["r2", "ok", ["s/b"]]], "r2 的收场后到也照样记上；只记计划里的 s/b");
   h().begin("r4", base, {}, null, {});
   assert.equal(h().records[1].status, "cancelled", "r3 一直没收场就被 r4 顶掉：记成取消");
+  h().begin("p", base, {}, null, { preview: true });
+  assert.deepEqual([h().records[0].runId, h().records[0].status], ["r4", "cancelled"], "被预览顶掉的也记成取消（预览自己不记）");
+  h().begin("r5", base, {}, null, { targets: ["s/b"] });
+  h().finish("r5", "error", 3, nodes);
+  assert.deepEqual(h().records[0].readings, [], "运行到某处、没收到 run_started（编译就失败了）：节点表里的是上一次的，不记");
   for (let i = 0; i < MAX_RUN_RECORDS + 5; i += 1) h().begin(`x${i}`, base, {}, null, {});
   assert.equal(h().records.length, MAX_RUN_RECORDS, "只留最近 50 次");
-  assert.equal(h().records[0].seq, 4 + MAX_RUN_RECORDS + 5, "新的在前，序号接着数（r1–r4 之后又 55 次）");
+  assert.equal(h().records[0].seq, 5 + MAX_RUN_RECORDS + 5, "新的在前，序号接着数（r1–r5 之后又 55 次）");
   h().clear();
   assert.deepEqual([h().records.length, h().seq], [0, 0], "换一张图清空、序号从头数");
 });

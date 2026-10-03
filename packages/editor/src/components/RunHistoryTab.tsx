@@ -6,7 +6,7 @@ import { useMemo } from "react";
 
 import { num } from "../lib/format";
 import { verdictTone } from "../lib/outputs";
-import { diffRuns, diffText, previousReading, type RunRecord } from "../lib/runHistory";
+import { diffRuns, diffText, previousReadingIn, type RunRecord } from "../lib/runHistory";
 import { augmentOperators, describeEventNode } from "../lib/subgraph";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
@@ -51,9 +51,7 @@ export function RunHistoryTab() {
         const prev = records[i + 1];
         const ops = augmentOperators(baseOps, { ...prev?.doc.subgraphs, ...r.doc.subgraphs });
         const diff = prev ? diffRuns(prev, r, ops) : null;
-        // 读数的「比上一次」只跟跑完了的比
-        const lastDone = records.slice(i + 1).find((p) => p.status !== "running");
-        return { r, diff, lastDone };
+        return { r, i, diff };
       }),
     [records, baseOps],
   );
@@ -69,10 +67,17 @@ export function RunHistoryTab() {
 
   return (
     <ol className="runs" data-testid="run-history">
-      {rows.map(({ r, diff, lastDone }) => (
-        <RunRow key={r.runId} record={r} diffLine={diff ? diffText(diff) : "这张图打开以来的第一次"}
-          diffTitle={diff ? diffText(diff, Infinity) : ""} lastDone={lastDone} describe={(id) => describeEventNode(doc, ops, id)}
-          onRestore={() => restoreRun(r, baseOps)} />
+      {rows.map(({ r, i, diff }) => (
+        <RunRow
+          key={r.runId}
+          record={r}
+          // 更早的记录被 50 条的上限挤掉了时说清楚，不冒充「第一次」
+          diffLine={diff ? diffText(diff) : r.seq === 1 ? "这张图打开以来的第一次" : "更早的记录已不保留，比不出改了什么"}
+          diffTitle={diff ? diffText(diff, Infinity) : ""}
+          before={(rd) => previousReadingIn(records, i, rd)}
+          describe={(id) => describeEventNode(doc, ops, id)}
+          onRestore={() => restoreRun(r, baseOps)}
+        />
       ))}
     </ol>
   );
@@ -80,45 +85,52 @@ export function RunHistoryTab() {
 
 /** 「恢复这组参数」：改回那一次的参数，说清楚哪些没能恢复（后来删掉的节点、那时还没有的、配方里的值）。 */
 function restoreRun(r: RunRecord, baseOps: Parameters<typeof augmentOperators>[0]): void {
-  const changed = useGraphStore.getState().restoreParams(r.doc, `恢复第 ${r.seq} 次运行的参数`);
+  const { changed, skipped } = useGraphStore.getState().restoreParams(r.doc, `恢复第 ${r.seq} 次运行的参数`);
   const after = useGraphStore.getState().doc;
   const left = diffRuns(
     { doc: r.doc, params: r.params },
     { doc: after, params: runParamsOf(after) },
     augmentOperators(baseOps, { ...r.doc.subgraphs, ...after.subgraphs }),
   );
+  // 图参数只在一边有（后来加的、删掉的）：不怪配方
+  const onBoth = (id: string) => !!r.doc.params?.[id.slice(3)] && !!after.params?.[id.slice(3)];
+  const gpOneSide = left.changes.filter((c) => c.id.startsWith("gp:") && !onBoth(c.id)).length;
+  const recipeDiffs = left.changes.filter((c) => c.id.startsWith("gp:") && onBoth(c.id)).length;
   const notes = [
     left.removed.length > 0 ? `${left.removed.length} 个节点后来删掉了` : null,
     left.added.length > 0 ? `${left.added.length} 个节点那时还没有` : null,
-    left.changes.length > 0 ? `${left.changes.length} 处对不上（配方里的值没动）` : null,
+    skipped > 0 ? `${skipped} 处参数现在（或那时）由图参数 / 子图参数提供、或已不存在，没动` : null,
+    gpOneSide > 0 ? `${gpOneSide} 个图参数是后来加的或删掉的` : null,
+    recipeDiffs > 0 ? `${recipeDiffs} 处对不上（配方里的值没动）` : null,
   ].filter(Boolean);
+  const tail = notes.length > 0 ? `；${notes.join("，")}` : "";
   const ui = useUiStore.getState();
-  if (changed === 0 && notes.length === 0) {
-    ui.showToast(`参数与第 ${r.seq} 次运行时一样`);
+  // 什么都没改就没有撤销可撤：不说「Ctrl+Z 撤回」（按了会撤掉别的一步）
+  if (changed === 0) {
+    ui.showToast(notes.length === 0 ? `参数与第 ${r.seq} 次运行时一样` : `没有可恢复的参数${tail}`, notes.length > 0 ? "warn" : "info");
     return;
   }
-  ui.showToast(
-    `已恢复第 ${r.seq} 次运行时的参数（${changed} 处，Ctrl+Z 撤回）${notes.length > 0 ? `；${notes.join("，")}` : ""}`,
-    notes.length > 0 ? "warn" : "info",
-  );
+  ui.showToast(`已恢复第 ${r.seq} 次运行时的参数（${changed} 处，Ctrl+Z 撤回）${tail}`, notes.length > 0 ? "warn" : "info");
 }
 
 function RunRow({
   record: r,
   diffLine,
   diffTitle,
-  lastDone,
+  before: beforeOf,
   describe,
   onRestore,
 }: {
   record: RunRecord;
   diffLine: string;
   diffTitle: string;
-  lastDone: RunRecord | undefined;
+  /** 「比上一次」那一次的同一个读数（没被取消、有这个读数的最近一次）。 */
+  before: (rd: RunRecord["readings"][number]) => RunRecord["readings"][number] | null;
   describe: (id: string) => ReturnType<typeof describeEventNode>;
   onRestore: () => void;
 }) {
-  const scope = r.targets.length > 0 ? `运行到 ${r.targets.map((t) => describe(t).names.at(-1) ?? t).join("、")}` : "整张图";
+  // 写全路径：同一个子图用了两次时，只写节点自己的名字分不出是哪一个
+  const scope = r.targets.length > 0 ? `运行到 ${r.targets.map((t) => describe(t).names.join(" › ")).join("、")}` : "整张图";
   return (
     <li className="runs__row" data-testid="run-record" data-seq={r.seq} data-status={r.status}>
       <div className="runs__head">
@@ -148,7 +160,7 @@ function RunRow({
         <div className="runs__readings">
           {r.readings.map((rd) => {
             const d = describe(rd.id);
-            const before = previousReading(lastDone, rd);
+            const before = beforeOf(rd);
             const delta = deltaText(rd.value, before?.value ?? null);
             return (
               <button
@@ -157,13 +169,13 @@ function RunRow({
                 className="runs__reading"
                 data-testid="run-reading"
                 data-tone={verdictTone(rd.verdict) ?? undefined}
-                title={`${d.names.join(" › ")}.${rd.port}${before ? `；上一次 ${before.value === null ? "未测出" : num(before.value)}` : ""} —— 点此打开到它`}
+                title={`${d.names.join(" › ")}.${rd.port}${before ? `；上一次 ${before.value === null ? "未测出" : num(before.value)}` : ""}${d.reveal ? " —— 点此打开到它" : ""}`}
                 disabled={!d.reveal}
                 onClick={() => {
                   if (d.reveal) useUiStore.getState().revealNode(d.reveal.path, d.reveal.localId);
                 }}
               >
-                <span className="runs__reading-name">{d.names.at(-1) ?? rd.id}.{rd.port}</span>
+                <span className="runs__reading-name">{d.names.join(" › ")}.{rd.port}</span>
                 <span className="runs__reading-value">
                   {rd.value === null ? "未测出" : `${num(rd.value)}${rd.unit ? ` ${rd.unit}` : ""}`}
                 </span>

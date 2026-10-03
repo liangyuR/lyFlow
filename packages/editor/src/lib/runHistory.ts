@@ -2,7 +2,7 @@
 // 的循环，以前上一次是多少只能靠脑子记；撤销历史记的是改动，不是结果。这里只放纯函数，store 在 store/runHistory.ts。
 
 import { num } from "./format";
-import { listGraphNodes } from "./findNodes";
+import { docNodeKey, listGraphNodes } from "./findNodes";
 import { effectiveParams, valueEquals } from "./params";
 import { levelOf } from "./subgraph";
 import type { NodeExecution } from "../store/execution";
@@ -82,6 +82,17 @@ export function previousReading(prev: RunRecord | undefined, r: RunReading): Run
   return prev?.readings.find((p) => p.id === r.id && p.port === r.port) ?? null;
 }
 
+/** 「比上一次」：records 新的在前，从第 from 条之后往更早找，第一条没被取消、而且有这个读数的（被顶掉的、
+ *  运行到别处没算它的都跳过）。 */
+export function previousReadingIn(records: readonly RunRecord[], from: number, r: RunReading): RunReading | null {
+  for (const p of records.slice(from + 1)) {
+    if (p.status === "cancelled") continue;
+    const hit = previousReading(p, r);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 /** 参数值写短：数字六位有效数字，向量逐个，字符串原样（太长截掉）。 */
 export function shortValue(v: unknown): string {
   if (typeof v === "number") return num(v);
@@ -105,13 +116,22 @@ export function diffRuns(
   const before = index(prev.doc);
   const after = index(next.doc);
   const nameOf = (e: { title: string; parents: string[] }) => [...e.parents, e.title].join(" › ");
+  // 子图定义是共用的：两个实例里列出来的是文档里同一个节点，改一处只算一处
+  const seen = new Set<string>();
+  const once = (e: Parameters<typeof docNodeKey>[0], tag: string) => {
+    const key = `${tag}\u0001${docNodeKey(e)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  };
   for (const [id, a] of after) {
     const b = before.get(id);
     if (!b || b.opId !== a.opId) {
-      out.added.push(nameOf(a));
-      if (b) out.removed.push(nameOf(b));
+      if (once(a, "+")) out.added.push(nameOf(a));
+      if (b && once(b, "-")) out.removed.push(nameOf(b));
       continue;
     }
+    if (!once(a, "=")) continue;
     if (a.muted !== b.muted) (a.muted ? out.muted : out.unmuted).push(nameOf(a));
     const op = ops.get(a.opId);
     if (!op) continue;
@@ -125,7 +145,7 @@ export function diffRuns(
       out.changes.push({ id, where: nameOf(a), param: param.label || param.name, from: pb[param.name], to: pa[param.name] });
     }
   }
-  for (const [id, b] of before) if (!after.has(id)) out.removed.push(nameOf(b));
+  for (const [id, b] of before) if (!after.has(id) && once(b, "-")) out.removed.push(nameOf(b));
   const names = new Set([...Object.keys(prev.params ?? {}), ...Object.keys(next.params ?? {})]);
   for (const name of names) {
     const from = prev.params?.[name];

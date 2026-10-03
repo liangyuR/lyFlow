@@ -705,6 +705,16 @@
   padding: 4px 0;
 }
 
+/* 列不下时的那一句：固定在列表下面 */
+.search-popup__more {
+  flex: none;
+  margin: 0;
+  padding: 4px 12px;
+  border-top: 1px solid var(--lyflow-border);
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
+
 /* 当前那一行的算子：说明（两行，全文在面板里）与进出端口 */
 .search-popup__detail {
   flex: none;

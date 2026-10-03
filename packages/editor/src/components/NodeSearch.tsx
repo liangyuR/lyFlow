@@ -333,14 +333,21 @@ export function NodeSearch() {
               );
             })
           )}
-          {total > rows.length && (
-            <p className="search-popup__empty" data-testid="search-more">
-              还有 {total - rows.length} 个，继续输入缩小范围
-            </p>
-          )}
         </div>
+        {/* 不放在滚动的列表里：键盘走到第 40 行时它还在下面看不见 */}
+        {total > rows.length && (
+          <p className="search-popup__more" data-testid="search-more" onMouseDown={(e) => e.preventDefault()}>
+            还有 {total - rows.length} 个，继续输入缩小范围
+          </p>
+        )}
         {activeOp && (
-          <div className="search-popup__detail" data-testid="search-detail" data-op-id={activeOp.id}>
+          // 点这一块不把焦点从输入框拿走：不然 ↑↓、回车、打字都没反应了
+          <div
+            className="search-popup__detail"
+            data-testid="search-detail"
+            data-op-id={activeOp.id}
+            onMouseDown={(e) => e.preventDefault()}
+          >
             {activeOp.doc && <p className="search-popup__doc">{activeOp.doc}</p>}
             <p className="search-popup__io">
               <span>输入 {portsText(activeOp.inputs)}</span>
@@ -354,7 +361,11 @@ export function NodeSearch() {
   );
 }
 
-/** 「cloud（PointCloud）、ref（Line2D）」；没有写「无」。 */
-function portsText(ports: readonly { name: string; type: string; label?: string | undefined }[]): string {
-  return ports.length === 0 ? "无" : ports.map((p) => `${p.label || p.name}（${p.type}）`).join("、");
+/** 「cloud（PointCloud）、pose（Transform，可选）」；没有写「无」。可选只出现在输入口上。 */
+function portsText(
+  ports: readonly { name: string; type: string; label?: string | undefined; required?: boolean | undefined }[],
+): string {
+  return ports.length === 0
+    ? "无"
+    : ports.map((p) => `${p.label || p.name}（${p.type}${p.required === false ? "，可选" : ""}）`).join("、");
 }

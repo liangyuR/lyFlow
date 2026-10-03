@@ -6,6 +6,7 @@ import { create } from "zustand";
 
 import { healPlan, planAutoConnect, unconnectedRequiredInputs, type AutoAmbiguity } from "../lib/autoconnect";
 import {
+  graphParamBoundTo,
   graphParamNameProblem,
   graphParamValue,
   joinBind,
@@ -363,8 +364,10 @@ interface GraphState {
   /** 静音（交互清单 P1 #25）。是执行语义，所以进 doc、进撤销栈。 */
   setBypass(ids: readonly string[], value: boolean): void;
   /** 把参数恢复成 from 那一份里的（调参记录的「恢复这组参数」）：两边都有、算子没换的节点（子图定义里的按定义对上）
-   *  恢复参数与静音，图参数恢复基础值；节点不增不删、连线不动，配方里的值不动。一条撤销。返回改了几处（0 = 本来就一样）。 */
-  restoreParams(from: GraphDoc, label: string): number;
+   *  逐个参数按有效值恢复、恢复静音，图参数恢复基础值；那时绑着图参数、后来图参数删掉了的，把那时的值写回节点。
+   *  现在或那时由图参数 / 子图参数提供的参数不动（节点上写值会冲突，那时的值也不在节点上），算子已不声明的也不动 ——
+   *  这两种记在 skipped。节点不增不删、连线与配方不动。一条撤销；changed 为 0 时不记。 */
+  restoreParams(from: GraphDoc, label: string): { changed: number; skipped: number };
   /** 折叠：只显示标题与已连端口。纯 UI，但存进文件里下次打开还在。 */
   setCollapsed(ids: readonly string[], value: boolean): void;
   renameNode(id: string, title: string | null): void;
@@ -951,14 +954,37 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     restoreParams(from, label) {
       let changed = 0;
+      let skipped = 0;
+      const ops = ctx(get().doc).operatorsById;
       transact(label, (d) => {
-        const pairs: [GraphLevel, GraphLevel | undefined][] = [[d, from]];
-        for (const [id, def] of Object.entries(d.subgraphs ?? {})) pairs.push([def, from.subgraphs?.[id]]);
-        for (const [now, then] of pairs) {
+        // 一对一对的层：顶层，再是每个子图定义（按定义 id 对上）
+        const pairs: [GraphLevel, GraphLevel | undefined, SubgraphDef | null, SubgraphDef | undefined][] = [[d, from, null, undefined]];
+        for (const [id, def] of Object.entries(d.subgraphs ?? {})) pairs.push([def, from.subgraphs?.[id], def, from.subgraphs?.[id]]);
+        for (const [now, then, defNow, defThen] of pairs) {
           for (const n of now.nodes) {
             const old = then?.nodes.find((x) => x.id === n.id && x.op === n.op);
             if (!old) continue;
-            if (!valueEquals(n.params ?? {}, old.params ?? {})) {
+            const op = ops.get(n.op);
+            if (op) {
+              // 按有效值逐个参数比：稀疏存储里写没写缺省值不算改；一处 = 一个参数（与「调参」页的那一行同一个数法）
+              for (const p of op.params) {
+                const want = effectiveValue(op, old, p.name);
+                if (valueEquals(effectiveValue(op, n, p.name), want)) continue;
+                const owned = defNow
+                  ? !!promotedBy(defNow, n.id, p.name) || !!promotedBy(defThen, n.id, p.name)
+                  : !!graphParamBoundTo(d, n.id, p.name) || !!graphParamBoundTo(from, n.id, p.name);
+                if (owned) {
+                  skipped += 1;
+                  continue;
+                }
+                n.params = sparseSet(op, n.params, p.name, plain(want));
+                changed += 1;
+              }
+              // 算子已不声明的键（子图接口改过）：那时的值写回去只会报 unknown_param
+              for (const key of Object.keys(old.params ?? {})) {
+                if (!op.params.some((p) => p.name === key) && !valueEquals(old.params?.[key], n.params?.[key])) skipped += 1;
+              }
+            } else if (!valueEquals(n.params ?? {}, old.params ?? {})) {
               n.params = structuredClone(old.params ?? {});
               changed += 1;
             }
@@ -976,8 +1002,21 @@ export const useGraphStore = create<GraphState>((set, get) => {
             changed += 1;
           }
         }
+        // 那时绑着图参数、后来图参数删掉了（值写回了节点）：把那时的值写回去，不然节点退回算子默认 —— 哪一次都没用过的值
+        const boundNow = new Set(Object.values(d.params ?? {}).flatMap((gp) => gp.binds ?? []));
+        for (const old of Object.values(from.params ?? {})) {
+          for (const bind of old.binds ?? []) {
+            if (boundNow.has(bind)) continue;
+            const t = splitBind(bind);
+            const node = t ? d.nodes.find((x) => x.id === t.node) : undefined;
+            const op = node ? ops.get(node.op) : undefined;
+            if (!t || !node || !op || valueEquals(effectiveValue(op, node, t.param), old.default)) continue;
+            writeBack(d, ops, bind, old.default);
+            changed += 1;
+          }
+        }
       });
-      return changed;
+      return { changed, skipped };
     },
 
     setBypass(ids, value) {

@@ -35,8 +35,16 @@ export const useRunHistoryStore = create<RunHistoryState>((set, get) => ({
   records: [],
   seq: 0,
   begin(runId, doc, params, recipe, request) {
+    // 被这一次顶掉的（抢占、排队时被取消）收不到自己的收场：还挂着「运行中」的记成取消 —— 预览、单节点运行也会顶掉它
+    const prev = get().records;
+    const settled = prev.some((r) => r.status === "running")
+      ? prev.map((r) => (r.status === "running" ? { ...r, status: "cancelled" as const } : r))
+      : prev;
     // 预览是抽稀过的，读数不能当结论；单节点运行（isolate）只算一个节点，与前后两次比不出东西
-    if (request.preview || (request.isolate?.length ?? 0) > 0) return;
+    if (request.preview || (request.isolate?.length ?? 0) > 0) {
+      if (settled !== prev) set({ records: settled });
+      return;
+    }
     const seq = get().seq + 1;
     const record: RunRecord = {
       seq,
@@ -50,8 +58,7 @@ export const useRunHistoryStore = create<RunHistoryState>((set, get) => ({
       durationMs: null,
       readings: [],
     };
-    // 被这一次顶掉的（抢占、排队时被取消）收不到自己的收场：还挂着「运行中」的记成取消
-    const records = [record, ...get().records.map((r) => (r.status === "running" ? { ...r, status: "cancelled" as const } : r))];
+    const records = [record, ...settled];
     for (const dropped of records.slice(MAX_RUN_RECORDS)) plans.delete(dropped.runId);
     set({ seq, records: records.slice(0, MAX_RUN_RECORDS) });
   },
@@ -63,8 +70,9 @@ export const useRunHistoryStore = create<RunHistoryState>((set, get) => ({
     const i = records.findIndex((r) => r.runId === runId);
     if (i < 0) return;
     const record = records[i]!;
-    // 运行到某个节点时节点表里留着上一次的别的节点：只记这一次算了的
-    const plan = record.targets.length > 0 ? plans.get(runId) : undefined;
+    // 运行到某个节点时节点表里留着上一次的别的节点：只记这一次算了的。没收到 run_started（编译就失败了、排队时被取消）
+    // 的就一个都没算，节点表里的全是上一次的
+    const plan = record.targets.length > 0 ? (plans.get(runId) ?? new Set<string>()) : undefined;
     const readings = runReadingsOf(nodes).filter((r) => !plan || plan.has(r.id));
     plans.delete(runId);
     const next = records.slice();

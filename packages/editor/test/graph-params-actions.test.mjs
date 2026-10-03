@@ -602,16 +602,39 @@ test("恢复某次运行的参数（调参记录）：节点参数、静音、�
   const added = g().addNode("filter.voxel_grid", { x: 0, y: 900 });
   const steps = g().past.length;
 
-  const changed = g().restoreParams(then, "恢复第 1 次运行的参数");
+  const { changed } = g().restoreParams(then, "恢复第 1 次运行的参数");
   const inner = () => doc().subgraphs.sg_clean.nodes.find((n) => n.id === "s_voxel");
   assert.deepEqual(
     [changed, node("n_voxel").params.leafSize, node("n_plane").bypass ?? false, doc().params.planeTol.default, inner().params.minPointsPerVoxel,
       !!node(added), g().past.length - steps, g().past.at(-1).label],
     [4, [0.005, 0.005, 0.005], false, 0.006, undefined, true, 1, "恢复第 1 次运行的参数"],
   );
-  assert.equal(g().restoreParams(then, "再来一次"), 0, "已经一样了：0 处");
+  assert.equal(g().restoreParams(then, "再来一次").changed, 0, "已经一样了：0 处");
   assert.equal(g().past.length - steps, 1, "一样的时候不记撤销");
   g().undo();
   assert.deepEqual([node("n_voxel").params.leafSize, node("n_plane").bypass, inner().params.minPointsPerVoxel], [[0.02, 0.02, 0.02], true, 5], "Ctrl+Z 一次全回来");
+
+  // 一处 = 一个参数；稀疏里写没写缺省值不算改
+  reset();
+  const run = doc();
+  g().setParam("n_voxel", "leafSize", [0.02, 0.02, 0.02]);
+  g().setParam("n_voxel", "minPointsPerVoxel", 3);
+  assert.deepEqual(g().restoreParams(run, "x"), { changed: 2, skipped: 0 }, "改了两个参数：2 处");
+  // 跑完之后「纳入配方」：现在由图参数提供，节点上不写值（写了就是 param_conflict），记成没动
+  reset();
+  const before = doc();
+  g().setParam("n_voxel", "leafSize", [0.02, 0.02, 0.02]);
+  const gp2 = g().promoteToGraphParam("n_voxel", "leafSize");
+  g().setGraphParamDefault(gp2, [0.04, 0.04, 0.04]);
+  const r1 = g().restoreParams(before, "恢复");
+  assert.deepEqual([r1.skipped, node("n_voxel").params.leafSize, doc().params[gp2].binds], [1, undefined, ["n_voxel.leafSize"]],
+    "绑着的参数不写回节点、绑定还在");
+  // 那时绑着图参数、后来删掉了：值写回节点的是那时的（不是算子默认）
+  reset();
+  const bound = doc();
+  g().removeGraphParam("planeTol");
+  g().setParam("n_plane", "distanceThreshold", 0.05);
+  const r2 = g().restoreParams(bound, "恢复");
+  assert.deepEqual([r2.changed, node("n_plane").params.distanceThreshold], [1, 0.006], "删掉的图参数那时的 0.006 写回节点");
 });
 
