@@ -46,3 +46,29 @@ export function revealShift(
   if (dx === 0 && dy === 0) return null;
   return { x: (pane.width / 2 - (view.x + dx)) / z, y: (pane.height / 2 - (view.y + dy)) / z };
 }
+
+/** 画布坐标下的矩形（节点的位置与大小）。 */
+export interface FlowRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** 选中一个节点按 Tab、从它接出的新节点放在哪：它右边隔一段、同一高度；那里已经有节点（它接着的下游、别的分支）
+ *  就往下让到不压着谁 —— 新节点是并出来的一条分支，不插进原来那条链。新节点的大小按选中的这个估。 */
+export function branchSlot(
+  anchor: FlowRect,
+  others: readonly FlowRect[],
+  gap: { x: number; y: number } = { x: 80, y: 40 },
+): { x: number; y: number } {
+  const x = anchor.x + anchor.w + gap.x;
+  let y = anchor.y;
+  for (let i = 0; i < 100; i += 1) {
+    const hit = others.filter((o) => o.x < x + anchor.w && x < o.x + o.w && o.y < y + anchor.h && y < o.y + o.h);
+    if (hit.length === 0) break;
+    y = Math.max(...hit.map((o) => o.y + o.h)) + gap.y;
+  }
+  return { x, y };
+}
+

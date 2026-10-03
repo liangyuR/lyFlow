@@ -233,7 +233,8 @@ export function NodeSearch() {
       return id;
     });
     if (nodeId) {
-      useUiStore.getState().setSelection([nodeId], []);
+      if (popup.follow) useUiStore.getState().followNode(nodeId);
+      else useUiStore.getState().setSelection([nodeId], []);
       useUiStore.getState().noteOperatorUsed(opId);
       // 选的是置灰的那种：节点照样放下，说一声没接线
       if (!port && op) {

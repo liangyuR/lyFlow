@@ -942,13 +942,15 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
           if (followTarget.current === target) followTarget.current = null;
         }
         for (let i = 0; i < 30 && !cancelled; i += 1) {
-          // 这期间焦点被别的接走了（开了搜索、查找节点、改名框）：不抢回来
+          // 这期间焦点被别的接走了（开了搜索、查找节点、改名框）：不抢回来。落回编辑器根元素（画布的祖先）的不算 ——
+          // 搜索弹层选完一关，焦点先掉回 body、再被根元素收回去
           const active = doc.activeElement;
-          if (active !== focusedBefore && active !== doc.body && !(active && host.contains(active))) return;
+          if (active !== focusedBefore && active !== doc.body && !(active && (host.contains(active) || active.contains(host)))) return;
           const el = host.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
           if (el) {
             el.focus({ preventScroll: true });
-            return;
+            // 刚加的节点量出大小之前是 visibility: hidden，focus 不生效：下一帧再试
+            if (doc.activeElement === el) return;
           }
           await new Promise((r) => requestAnimationFrame(r));
         }

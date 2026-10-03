@@ -74,6 +74,7 @@ import { scheduleValidate } from "./store/validation";
 import { setTransport, transport, type Transport } from "./transport";
 import { setDialogs, type EditorDialogs } from "./lib/dialogs";
 import { hasRelativePathParam } from "./lib/params";
+import { branchSlot } from "./lib/placement";
 import { isMigration, type MigrationAction } from "./types/execution";
 import type { GraphDoc } from "./types/graph";
 
@@ -83,7 +84,7 @@ import "./styles.peek.css";
 import "./styles.blocks.css";
 
 function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps) {
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, flowToScreenPosition, fitView, getNodes } = useReactFlow();
   const root = useRef<HTMLDivElement>(null);
   // 关动效时视口也一步到位（A4）：适配视图、整理之后的 fitView 都不带过渡
   const motionOn = useMotionEnabled();
@@ -442,8 +443,22 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       },
       cursorFlowPosition: () => screenToFlowPosition(canvasPoint()),
       cursorScreenPosition: canvasPoint,
+      branchSlot: (nodeId: string) => {
+        // 量过的大小优先；只渲染视野里的节点时视野外的没量过，按默认的估
+        const rect = (n: { position: { x: number; y: number }; measured?: { width?: number; height?: number } }) => ({
+          x: n.position.x,
+          y: n.position.y,
+          w: n.measured?.width ?? 220,
+          h: n.measured?.height ?? 90,
+        });
+        const nodes = getNodes();
+        const anchor = nodes.find((n) => n.id === nodeId);
+        if (!anchor) return null;
+        const flow = branchSlot(rect(anchor), nodes.filter((n) => n.id !== nodeId).map(rect));
+        return { flow, screen: flowToScreenPosition(flow) };
+      },
     }),
-    [doSave, doOpen, doNew, doRun, doCancel, doLayout, fitView, fitMs, screenToFlowPosition, canvasPoint],
+    [doSave, doOpen, doNew, doRun, doCancel, doLayout, fitView, fitMs, screenToFlowPosition, flowToScreenPosition, getNodes, canvasPoint],
   );
 
   useShortcuts(handlers, root);

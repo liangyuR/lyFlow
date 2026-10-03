@@ -23,6 +23,8 @@ export interface SearchPopup {
   insertEdge?: string;
   /** 把这个节点（当前层的本地 id）换成选中的算子（节点右键「换成别的算子…」）。 */
   replaceNode?: string;
+  /** 放下之后把画布挪过去、焦点给新节点（选中一个节点按 Tab 接出：新节点可能在视野外，接着按 Tab 还要从它接）。 */
+  follow?: boolean;
 }
 
 export interface Clipboard {

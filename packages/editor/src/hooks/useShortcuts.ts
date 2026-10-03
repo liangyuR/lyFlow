@@ -5,7 +5,8 @@ import { useEffect, type RefObject } from "react";
 
 import { matchShortcut } from "../lib/keymap";
 import { subgraphIdOf } from "../types/graph";
-import { levelOf } from "../lib/subgraph";
+import { augmentOperators, fullId, levelOf } from "../lib/subgraph";
+import { useManifestStore } from "../store/manifest";
 import { copyNodes, deleteHealing, deleteSelection } from "../lib/editActions";
 import { stepHistory } from "../lib/history";
 import { decodeNodeClipboard } from "../lib/nodeClipboard";
@@ -34,6 +35,19 @@ function inTextField(target: EventTarget | null): boolean {
 /** 按钮、链接、各种 input 这些控件：Tab 在它们之间挪焦点、Space 按下它们。 */
 const CONTROL_SELECTOR =
   'button, a[href], summary, input, select, textarea, [role="button"], [role="menuitem"], [role="tab"], [role="checkbox"], [role="switch"], [role="slider"], [role="option"]';
+
+/** 选中一个节点按 Tab 时从它的哪个输出接出：预览里选看的那个（还是它的输出时），否则第一个。没有输出的（写文件这类）null。 */
+function branchFrom(nodeId: string): { node: string; port: string } | null {
+  const ui = useUiStore.getState();
+  const doc = useGraphStore.getState().doc;
+  const node = levelOf(doc, ui.path).nodes.find((n) => n.id === nodeId);
+  const op = node ? augmentOperators(useManifestStore.getState().operatorsById, doc.subgraphs).get(node.op) : undefined;
+  const outputs = op?.outputs ?? [];
+  if (outputs.length === 0) return null;
+  const picked = ui.viewerPortPick.get(fullId(ui.path, nodeId));
+  const port = outputs.find((o) => o.name === picked) ?? outputs[0]!;
+  return { node: nodeId, port: port.name };
+}
 
 function onControl(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(CONTROL_SELECTOR) !== null;
@@ -69,6 +83,8 @@ export interface ShortcutHandlers {
   /** 画布坐标，粘贴和搜索面板需要知道往哪儿放 */
   cursorFlowPosition: () => { x: number; y: number };
   cursorScreenPosition: () => { x: number; y: number };
+  /** 从这个节点接出的新节点放哪（画布坐标）与弹层摆哪（屏幕坐标）；节点不在画布上时 null。 */
+  branchSlot: (nodeId: string) => { flow: { x: number; y: number }; screen: { x: number; y: number } } | null;
 }
 
 export function useShortcuts(
@@ -300,6 +316,16 @@ export function useShortcuts(
           // 用键盘点不了工具栏的按钮，Tab 也走不出去
           if (onControl(e.target)) return;
           e.preventDefault();
+          {
+            // 只选中了一个节点：新算子接在它的输出后面（预览里选看的那个输出，没选过就是第一个），放在它右边、
+            // 并出一条分支；选完画布跟过去、焦点给新节点，接着按 Tab 一路往下接
+            const from = ui.selectedNodes.size === 1 && ui.selectedEdges.size === 0 ? branchFrom([...ui.selectedNodes][0]!) : null;
+            const slot = from ? handlers.branchSlot(from.node) : null;
+            if (from && slot) {
+              ui.openSearch({ ...slot, pendingFrom: from, pendingSide: "output", follow: true });
+              return;
+            }
+          }
           // 只选中了一条连线（没有节点）：选中的算子插到它中间。框选会把相连的线一起选上，所以「没选节点」不能省
           ui.openSearch({
             screen: handlers.cursorScreenPosition(),

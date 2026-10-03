@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { layoutGraph, needsInitialLayout } from "../src/lib/layout.ts";
 import { fitSidePanes } from "../src/lib/panes.ts";
-import { placeMenu, revealShift } from "../src/lib/placement.ts";
+import { branchSlot, placeMenu, revealShift } from "../src/lib/placement.ts";
 
 const chain = (withPositions) => ({
   schemaVersion: 1,
@@ -92,7 +92,7 @@ test("readStoredBool / writeStoredBool：坏值当没有，存储抛异常时照
 });
 
 // 键盘沿连线走时画布挪多少（lib/placement 的 revealShift）：在视野里不挪；不在就只挪最少的一点；放不下就居中
-test("revealShift：节点移进视野只挪最少的一点，缩放不变", () => {
+test("revealShift：节点移进视野只挪最少的一点，缩放不变；branchSlot：Tab 接出的新节点放在右边，压着谁就往下让", () => {
   const pane = { width: 800, height: 600 };
   const inset = { top: 40, right: 40, bottom: 40, left: 40 };
   const at1 = { x: 0, y: 0, zoom: 1 };
@@ -104,4 +104,15 @@ test("revealShift：节点移进视野只挪最少的一点，缩放不变", () 
     ["画布比节点还窄：居中", at1, { width: 200, height: 600 }, { x: 300, y: 100, w: 200, h: 90 }, inset, { x: 400, y: 300 }],
   ];
   for (const [name, view, size, rect, pad, want] of cases) assert.deepEqual(revealShift(view, size, rect, pad), want, name);
+
+  const anchor = { x: 0, y: 0, w: 200, h: 90 };
+  const slots = [
+    // [说明, 别的节点, 期望]
+    ["右边空着：同一高度、隔 80", [], { x: 280, y: 0 }],
+    ["右边是它接着的下游：往下让到它下面", [{ x: 300, y: 10, w: 220, h: 100 }], { x: 280, y: 150 }],
+    ["下面一层又压着：接着往下", [{ x: 300, y: 10, w: 220, h: 100 }, { x: 260, y: 160, w: 200, h: 90 }], { x: 280, y: 290 }],
+    ["只挨着、不压着：不让", [{ x: 480, y: 0, w: 200, h: 90 }, { x: 280, y: 90, w: 200, h: 90 }], { x: 280, y: 0 }],
+    ["左边、上面的不管", [{ x: -300, y: 0, w: 200, h: 90 }, { x: 280, y: -200, w: 200, h: 90 }], { x: 280, y: 0 }],
+  ];
+  for (const [name, others, want] of slots) assert.deepEqual(branchSlot(anchor, others), want, `branchSlot：${name}`);
 });

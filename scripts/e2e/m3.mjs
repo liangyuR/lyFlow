@@ -462,6 +462,71 @@ async function suiteBypassReroute(cdp, report) {
     { ...replacing, ...replaced, undone: await chainOf() },
     { self: false, named: true, chain: ["filter.random_sample>filter.statistical_outlier", "gen.synthetic>filter.random_sample"],
       steps: 1, kept: "filter.random_sample", undone: insertedChain });
+
+  // 选中一个节点按 Tab：新算子接在它的输出后面、放在它右边（右边已经有下游就往下让，并出一条分支），选中新节点、
+  // 焦点给它；接着按 Tab 从新节点再接一个。以前 Tab 不管选中的节点：放在鼠标处，自动连线在几个来源之间挑不出就不接
+  const genId = await cdp.eval(`return window.__lyflow.snapshot().doc.nodes.find((n) => n.op === 'gen.synthetic').id;`);
+  const boxOf = (id) => cdp.eval(`
+    const r = document.querySelector('[data-testid="node-' + ${lit(id)} + '"]')?.getBoundingClientRect();
+    return r ? { l: r.left, t: r.top, r: r.right, b: r.bottom } : null;
+  `);
+  const tabState = () => cdp.eval(`
+    const s = window.__lyflow.snapshot();
+    const id = s.selected.length === 1 ? s.selected[0] : null;
+    const into = s.doc.edges.find((e) => e.to.node === id);
+    return { id, op: s.doc.nodes.find((n) => n.id === id)?.op ?? null,
+             from: into ? into.from.node + '.' + into.from.port : null,
+             focused: document.activeElement?.closest('.react-flow__node')?.getAttribute('data-id') ?? null };
+  `);
+  const overlaps = (a, b) => a && b && a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+  const pastBranch = await pastNow();
+  await clickAt(cdp, await centerOf(cdp, `[data-testid="node-${genId}"] .node__head`));
+  await sleep(150);
+  await pressKey(cdp, "Tab", 9);
+  await sleep(200);
+  const branchNote = await cdp.eval(`return document.querySelector('.search-popup__input')?.placeholder ?? null;`);
+  await cdp.send("Input.insertText", { text: "随机采样" });
+  await sleep(200);
+  await pressKey(cdp, "Enter", 13);
+  await sleep(500);
+  const t1 = await tabState();
+  const [genBox, voxBox, t1Box] = [await boxOf(genId), await boxOf(voxId), await boxOf(t1.id)];
+  report.ok("选中 gen 按 Tab 选随机采样：接在 gen.cloud 后面，放在 gen 右边、不压着已有的体素（并出一条分支），选中它、焦点在它上面",
+    t1.op === "filter.random_sample" && t1.from === `${genId}.cloud` && t1.focused === t1.id &&
+      t1Box && genBox && t1Box.l > genBox.r && !overlaps(t1Box, voxBox) && /^接到 .+ 的算子/.test(branchNote ?? ""),
+    JSON.stringify({ branchNote, t1, genBox, voxBox, t1Box }));
+  await pressKey(cdp, "Tab", 9);
+  await sleep(200);
+  await cdp.send("Input.insertText", { text: "voxel" });
+  await sleep(200);
+  await pressKey(cdp, "Enter", 13);
+  await sleep(500);
+  const t2 = await tabState();
+  const t2Box = await boxOf(t2.id);
+  report.ok("接着按 Tab 选体素：从刚加的随机采样接出、放在它右边，选中它、焦点在它上面",
+    t2.op === "filter.voxel_grid" && t2.from === `${t1.id}.cloud` && t2.focused === t2.id && t2Box && t1Box && t2Box.l > t1Box.r,
+    JSON.stringify({ t2, t2Box }));
+  // 回到随机采样再按 Tab：它右边已经是刚接的体素，新节点往下让、不压着它（并出第二条分支）
+  await clickAt(cdp, await centerOf(cdp, `[data-testid="node-${t1.id}"] .node__head`));
+  await sleep(150);
+  await pressKey(cdp, "Tab", 9);
+  await sleep(200);
+  await cdp.send("Input.insertText", { text: "voxel" });
+  await sleep(200);
+  await pressKey(cdp, "Enter", 13);
+  await sleep(500);
+  const t3 = await tabState();
+  const t3Box = await boxOf(t3.id);
+  const branchSteps = (await pastNow()) - pastBranch;
+  for (let i = 0; i < 3; i += 1) {
+    await pressCtrl(cdp, "z");
+    await sleep(150);
+  }
+  await sleep(100);
+  report.ok("回到随机采样再按 Tab：右边已有下游，新节点往下让到它下面、不压着；三次各一条撤销，Ctrl+Z 三下回到原样",
+    t3.from === `${t1.id}.cloud` && t3Box && t2Box && t3Box.l > t1Box.r && t3Box.t >= t2Box.b && !overlaps(t3Box, t2Box) &&
+      branchSteps === 3 && JSON.stringify(await chainOf()) === JSON.stringify(insertedChain),
+    JSON.stringify({ t3, t3Box, branchSteps }));
 }
 
 // ------------------------------------------------------------- 1.4 迁移
