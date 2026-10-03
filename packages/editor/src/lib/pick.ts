@@ -99,6 +99,23 @@ function short(x: number): string {
   return String(Number(x.toPrecision(4)));
 }
 
+/** 包围盒尺寸（预览栏）：X × Y × Z，4 位有效数字同坐标；最长边（取整后）不到 1 m 整组换成 mm（一组一个单位）。
+ *  title 逐轴写米 + 毫米。不是 6 个有限数、或 max < min（空云）→ null。 */
+export function extentText(
+  b: ArrayLike<number> | null | undefined,
+): { text: string; title: string; size: [number, number, number] } | null {
+  if (!b || b.length < 6) return null;
+  const size = [0, 1, 2].map((i) => b[i + 3]! - b[i]!) as [number, number, number];
+  if (!size.every((v) => Number.isFinite(v) && v >= 0)) return null;
+  // 取整之后再定单位：0.99996 写成「1 m」而不是「1000 mm」
+  const mm = Number(Math.max(...size).toPrecision(4)) < 1;
+  return {
+    size,
+    text: `${size.map((v) => short(mm ? v * 1000 : v)).join(" × ")} ${mm ? "mm" : "m"}`,
+    title: ["X", "Y", "Z"].map((a, i) => `${a} ${lengthText(size[i]!)}`).join("\n"),
+  };
+}
+
 function vec(v: readonly number[], sign = false): string {
   return `(${v.map((x) => (sign && x > 0 ? `+${short(x)}` : short(x))).join(", ")}) m`;
 }

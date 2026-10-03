@@ -77,6 +77,8 @@ export {
   useExecutionStore,
   onNodeTransition,
   startRun,
+  restartRun,
+  runControlsOf,
   cancelCurrentRun,
   subscribeExecutionEvents,
   setRunSceneId,

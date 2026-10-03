@@ -7,7 +7,7 @@ import { stepHistory } from "../lib/history";
 import { keyHint } from "../lib/keymap";
 import { revealError } from "../lib/revealError";
 import { useCacheStore } from "../store/cache";
-import { summarize, useExecutionStore } from "../store/execution";
+import { runControlsOf, summarize, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useRecipesDirty } from "../store/recipe";
@@ -24,6 +24,8 @@ export interface ToolbarActions {
   onSave: () => void;
   onSaveAs: () => void;
   onRun: () => void;
+  /** 运行中点「↻ 重跑」：同样的范围再来一次。F5 照旧是运行整张图。 */
+  onRerun: () => void;
   onCancel: () => void;
   onLayout: () => void;
 }
@@ -319,8 +321,14 @@ function RunClock({ startedAt }: { startedAt: number }) {
   return <span className="toolbar__elapsed">{formatDuration(now - startedAt)}</span>;
 }
 
-function RunControls({ onRun, onCancel }: { onRun: () => void; onCancel: () => void }) {
+function RunControls({ onRun, onRerun, onCancel }: { onRun: () => void; onRerun: () => void; onCancel: () => void }) {
   const runStatus = useExecutionStore((s) => s.runStatus);
+  // 按字符串订阅：进度事件不让两个按钮重渲
+  const [runMode, cancelMode] = useExecutionStore((s) => {
+    const c = runControlsOf(s);
+    return `${c.run}|${c.cancel}`;
+  }).split("|");
+  const rerun = runMode === "rerun";
   const startedAt = useExecutionStore((s) => s.startedAt);
   const durationMs = useExecutionStore((s) => s.durationMs);
   const nodes = useExecutionStore((s) => s.nodes);
@@ -337,21 +345,24 @@ function RunControls({ onRun, onCancel }: { onRun: () => void; onCancel: () => v
         type="button"
         className="toolbar__run"
         data-testid="run-button"
-        onClick={onRun}
-        disabled={running || nodeCount === 0}
-        title="运行 (F5)"
+        data-mode={runMode}
+        onClick={rerun ? onRerun : onRun}
+        // 预览与自动补跑的那一次在跑时照旧不能点（拖参数时按钮不闪）
+        disabled={(running && !rerun) || nodeCount === 0}
+        title={rerun ? "重跑：停掉这一次、按同样的范围重新开始（F5 运行整张图）" : "运行 (F5)"}
       >
-        ▶ 运行
+        {rerun ? "↻ 重跑" : "▶ 运行"}
       </button>
       <button
         type="button"
         className="toolbar__cancel"
         data-testid="cancel-button"
+        data-cancelling={cancelMode === "cancelling" ? "1" : undefined}
         onClick={onCancel}
-        disabled={!running}
-        title="取消 (Esc)"
+        disabled={cancelMode !== "on"}
+        title={cancelMode === "cancelling" ? "已经发出取消，等正在算的那个算子停下来" : "取消 (Esc)"}
       >
-        ■ 取消
+        {cancelMode === "cancelling" ? "取消中…" : "■ 取消"}
       </button>
 
       {running && startedAt != null && <RunClock startedAt={startedAt} />}
@@ -407,6 +418,7 @@ export function Toolbar({
   onSave,
   onSaveAs,
   onRun,
+  onRerun,
   onCancel,
   onLayout,
 }: ToolbarActions) {
@@ -478,7 +490,7 @@ export function Toolbar({
         </button>
       </div>
 
-      <RunControls onRun={onRun} onCancel={onCancel} />
+      <RunControls onRun={onRun} onRerun={onRerun} onCancel={onCancel} />
       <div className="toolbar__group toolbar__group--preview">
         <PreviewControls />
       </div>

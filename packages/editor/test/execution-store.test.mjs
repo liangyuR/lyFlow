@@ -10,8 +10,17 @@ import { culpritOf, errorNodeIds, failedUpstream, revealError, revealNodeError }
 import { describeEventNode, locateEventNode } from "../src/lib/subgraph.ts";
 import { useGraphStore } from "../src/store/graph.ts";
 import { useManifestStore } from "../src/store/manifest.ts";
-import { aggregatedNodes, onNodeTransition, useExecutionStore } from "../src/store/execution.ts";
+import {
+  aggregatedNodes,
+  cancelCurrentRun,
+  onNodeTransition,
+  restartRun,
+  runControlsOf,
+  startRun,
+  useExecutionStore,
+} from "../src/store/execution.ts";
 import { useUiStore } from "../src/store/ui.ts";
+import { setTransport } from "../src/transport/index.ts";
 
 let seqs = new Map();
 const ev = (runId, kind, rest = {}) => {
@@ -266,4 +275,65 @@ test("连带没执行的根因在子图外面：从子图节点那里往外一�
   const c = culpritOf(doc, inner, "x", nodes);
   assert.deepEqual([c?.path.length, c?.id], [0, "p"]);
   assert.equal(culpritOf(doc, [], "z", new Map([["z", { state: "cancelled", errors: [upstream] }]])), null, "哪一层都没有");
+});
+
+test("工具栏的运行 / 重跑 / 取消中：人发起的运行在跑时是重跑；预览、自动补的那次不变；取消发出去之后是取消中", () => {
+  const base = { runStatus: "running", preview: false, cancelling: false, request: {} };
+  const cases = [
+    ["没在跑", { ...base, runStatus: "idle" }, ["run", "off"]],
+    ["人发起的运行", base, ["rerun", "on"]],
+    ["预览运行（拖参数）：按钮不闪", { ...base, preview: true }, ["run", "on"]],
+    ["松手后补的那一次", { ...base, request: { targets: ["n"], auto: true } }, ["run", "on"]],
+    ["取消发出去了", { ...base, cancelling: true }, ["rerun", "cancelling"]],
+    ...["ok", "error", "cancelled"].map((st) => [`收场：${st}`, { ...base, runStatus: st }, ["run", "off"]]),
+  ];
+  for (const [name, s, want] of cases) {
+    const c = runControlsOf(s);
+    assert.deepEqual([c.run, c.cancel], want, name);
+  }
+});
+
+test("取消中的起落；重跑照原来的范围再来一次，目标删掉了就跑整张图", async () => {
+  const calls = [];
+  const cancels = [];
+  let failCancel = false;
+  setTransport({
+    kind: "fake",
+    async runGraph(_doc, _path, opts) {
+      calls.push(opts);
+      return `R${calls.length}`;
+    },
+    async cancelRun(id) {
+      cancels.push(id);
+      if (failCancel) throw new Error("断了");
+    },
+  });
+  useExecutionStore.getState().reset();
+  seqs = new Map();
+  useGraphStore.setState({ doc: sgDoc });
+  useManifestStore.setState({ operatorsById: sgOps });
+
+  await startRun(sgDoc, null, { targets: ["a/n/x"], force: ["a/n/x"] });
+  await cancelCurrentRun();
+  await cancelCurrentRun();
+  let s = useExecutionStore.getState();
+  assert.deepEqual([cancels, s.cancelling, s.runStatus], [["R1"], true, "running"], "再按一次 Esc 不再发一遍");
+
+  await restartRun(sgDoc, null);
+  s = useExecutionStore.getState();
+  assert.deepEqual([calls[1].targets, calls[1].force, calls[1].mode, s.runId, s.cancelling],
+    [["a/n/x"], ["a/n/x"], "full", "R2", false], "重跑：同样的范围；取消中到此为止");
+  assert.equal("auto" in calls[1], false, "auto 不交给 core");
+  apply(ev("R2", "run_finished", { status: "ok" }));
+  assert.deepEqual([useExecutionStore.getState().runStatus, useExecutionStore.getState().cancelling], ["ok", false]);
+
+  await startRun(sgDoc, null, {});
+  failCancel = true;
+  await assert.rejects(cancelCurrentRun());
+  assert.equal(useExecutionStore.getState().cancelling, false, "取消没发出去：撤回「取消中」");
+  failCancel = false;
+
+  await startRun(sgDoc, null, { targets: ["a/gone"] });
+  await restartRun(sgDoc, null);
+  assert.equal(calls.at(-1).targets, undefined, "要跑到的节点删掉了：退回整张图");
 });

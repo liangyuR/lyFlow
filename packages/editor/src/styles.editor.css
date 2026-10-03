@@ -1029,6 +1029,8 @@
 
 .toolbar__run:not(:disabled) { color: #9ce6ad; }
 .toolbar__cancel:not(:disabled) { color: #ffb4b4; }
+/* 文字会变（运行 ↔ 重跑、取消 ↔ 取消中…）：宽度定住，工具栏不跟着挪 */
+.toolbar__run, .toolbar__cancel { min-width: 5.5em; }
 
 .toolbar__elapsed {
   font-variant-numeric: tabular-nums;

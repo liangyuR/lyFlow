@@ -63,6 +63,17 @@
 
 .viewer__stage .viewer__empty { inset: 0; }
 
+/* 包围盒尺寸：栏窄时它最先让（省略号），全文在 title */
+.viewer__extent {
+  min-width: 0;
+  flex-shrink: 10;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--lyflow-fg-2);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 2D 拖框的模板切换条（m8-plan L20）：一次只处理一个模板槽的框。 */
 .viewer__bar--roi {
   border-bottom: 1px solid var(--lyflow-border);

@@ -54,6 +54,7 @@ import {
 } from "./store/cache";
 import {
   cancelCurrentRun,
+  restartRun,
   setRunSceneId,
   startRun,
   subscribeExecutionEvents,
@@ -182,7 +183,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       const ui = useUiStore.getState();
       const exec = useExecutionStore.getState();
       if (!ui.autoRun || exec.runStatus === "idle" || exec.preview || g.doc.nodes.length === 0) return;
-      void startRun(g.doc, g.filePath, {}).catch((e: unknown) => {
+      void startRun(g.doc, g.filePath, { auto: true }).catch((e: unknown) => {
         ui.showToast(e instanceof Error ? e.message : String(e), "warn");
       });
     });
@@ -398,6 +399,12 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       onOpen: () => void doOpen(),
       onNew: () => void doNew(),
       onRun: () => void doRun(),
+      onRerun: () => {
+        const graph = useGraphStore.getState();
+        void restartRun(graph.doc, graph.filePath).catch((e: unknown) => {
+          useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
+        });
+      },
       onCancel: () => void doCancel(),
       onRunToNode: (nodeId: string) => void doRun([nodeId]),
       onRunToSelected: () => {
@@ -498,6 +505,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         onSave={handlers.onSave}
         onSaveAs={handlers.onSaveAs}
         onRun={handlers.onRun}
+        onRerun={handlers.onRerun}
         onCancel={handlers.onCancel}
         onLayout={handlers.onLayout}
       />

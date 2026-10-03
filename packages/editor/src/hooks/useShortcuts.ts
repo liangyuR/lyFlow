@@ -11,7 +11,7 @@ import { stepHistory } from "../lib/history";
 import { decodeNodeClipboard } from "../lib/nodeClipboard";
 import { revealError } from "../lib/revealError";
 import { useCompareStore } from "../store/compare";
-import { useExecutionStore } from "../store/execution";
+import { runControlsOf, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { usePeekStore, type PeekWindow } from "../store/peek";
 import { useUiStore } from "../store/ui";
@@ -105,7 +105,9 @@ export function useShortcuts(
         ui.setHelpOpen(false);
         return;
       }
-      if (e.key === "Escape" && useExecutionStore.getState().runStatus !== "running") {
+      // 取消已经发出去了（取消中…）就当没在跑：Esc 回到关查看器窗口、退子图这些平常的用处
+      const cancellable = runControlsOf(useExecutionStore.getState()).cancel === "on";
+      if (e.key === "Escape" && !cancellable) {
         const peek = usePeekStore.getState();
         const top = peek.windows.reduce<PeekWindow | null>(
           (best, w) => (best === null || w.z > best.z ? w : best),
@@ -145,12 +147,12 @@ export function useShortcuts(
           return;
         case "cancel":
           // Esc 先退子图再取消运行：在子图里按 Esc，用户想的是「出去」
-          if (ui.path.length > 0 && useExecutionStore.getState().runStatus !== "running") {
+          if (ui.path.length > 0 && !cancellable) {
             e.preventDefault();
             ui.exitTo(ui.path.length - 1);
             return;
           }
-          if (useExecutionStore.getState().runStatus !== "running") return;
+          if (!cancellable) return;
           e.preventDefault();
           handlers.onCancel();
           return;

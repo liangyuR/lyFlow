@@ -28,6 +28,7 @@ function fire(nodeId: string, preview: boolean): void {
     targets: [target],
     preview,
     previewMaxPoints: preview ? ui.previewMaxPoints : undefined,
+    auto: true,
   }).catch(() => {
     // 预览失败不打断编辑：正式运行时用户自然会看到同一条错误
   });

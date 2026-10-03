@@ -2167,11 +2167,24 @@ async function suiteViewerBody(cdp, report) {
   await cdp.waitFor(`document.querySelector('.viewer .viewer__count')?.textContent.replace(/\D/g, '').endsWith(${lit(String(nRest))})`,
     { timeoutMs: 10_000, what: "预览换成 rest 的点云" }).catch(() => {});
   report.eq("下拉框换到 rest：预览里是 rest 的点", await portView(), { port: "rest", total: nRest });
+  // 栏上的包围盒尺寸跟着显示的那片云走（写法在 pick.test.mjs）
+  const extentNow = () => cdp.eval(`
+    const el = document.querySelector('[data-testid="viewer-extent"]');
+    const b = (document.querySelector('.viewer')?.getAttribute('data-cloud-bounds') ?? '').split(',').map(Number);
+    return { text: el?.textContent ?? null, size: (el?.dataset.size ?? '').split(',').map(Number),
+             span: b.length === 6 ? [b[3] - b[0], b[4] - b[1], b[5] - b[2]] : null };
+  `);
+  const extRest = await extentNow();
   // 检查器的「输出」里点云一行一个，真鼠标点 selected 那一行，预览改看它
   await cdp.eval(`document.querySelector('[data-testid="output-cloud-selected"]')?.scrollIntoView({ block: 'center' }); return true;`);
   await clickAt(cdp, await centerOf(cdp, '[data-testid="output-cloud-selected"]'));
   await sleep(400);
   report.eq("检查器里点 selected 那一行：预览改看 selected", await portView(), { port: "selected", total: nSel });
+  const extSel = await extentNow();
+  report.ok("栏上的包围盒尺寸跟着换成 selected 那片云的（与 data-cloud-bounds 的跨度一致、与 rest 时不同）",
+    !!extRest.text && !!extSel.text && extSel.text !== extRest.text && extSel.span !== null &&
+      extSel.size.every((v, i) => Math.abs(v - extSel.span[i]) <= 2e-3),
+    JSON.stringify({ extRest, extSel }));
   // 从接在 rest 上的那条线开连线查看器，点「在主 3D 视图打开」：主视图钉住 pick、看的是 rest
   const restEdge = await cdp.eval(`
     return window.__lyflow.stores.graph.getState().doc.edges.find((e) => e.from.node === ${lit(sp.pick)} && e.from.port === 'rest')?.id ?? null;

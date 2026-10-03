@@ -18,6 +18,7 @@ import {
   newDoc,
   normalizeZoom,
   placeAtScreen,
+  pressEscape,
   pressF5,
   replan,
   runAndWait,
@@ -637,6 +638,46 @@ async function suitePreemptStalled(cdp, report) {
   `);
   report.ok("被抢占的那个算完后以 cancelled 收场；被顶掉的两次从没开跑；最后一次跑完（ok）",
     seen.first === "cancelled" && seen.middleStarted.length === 0 && seen.last === "ok", JSON.stringify(seen));
+
+  // 工具栏：人发起的运行在跑时「▶ 运行」变「↻ 重跑」；按 Esc 取消之后写「取消中…」（停不下来的算子要等它自己跑完，
+  // 以前取消按钮看着跟没按一样）；取消中点「↻ 重跑」：同样的范围再来一次，取消按钮当场回到「■ 取消」
+  await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.stall)}, 'ms', 2000); return true;`);
+  await cdp.eval(`document.activeElement?.blur(); return true;`);
+  await pressF5(cdp);
+  await cdp.waitFor(`window.__lyflow.snapshot().run.nodes[${lit(ids.stall)}]?.state === 'running'`,
+    { timeoutMs: 30_000, what: "test.stall 又进了 running" });
+  const r1 = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
+  const bar = () => cdp.eval(`
+    const run = document.querySelector('[data-testid="run-button"]');
+    const cancel = document.querySelector('[data-testid="cancel-button"]');
+    return { run: run.textContent, runDisabled: run.disabled, cancel: cancel.textContent, cancelDisabled: cancel.disabled,
+             status: window.__lyflow.stores.execution.getState().runStatus };
+  `);
+  const running = await bar();
+  await pressEscape(cdp);
+  await sleep(150);
+  const cancelling = await bar();
+  report.ok("运行中工具栏是「↻ 重跑」；按 Esc 后取消按钮写「取消中…」变灰，停不下来的算子还在跑",
+    running.run === "↻ 重跑" && !running.runDisabled && running.cancel === "■ 取消" &&
+      cancelling.cancel === "取消中…" && cancelling.cancelDisabled && cancelling.status === "running",
+    JSON.stringify({ running, cancelling }));
+  await click(cdp, await centerOf(cdp, '[data-testid="run-button"]'));
+  await cdp.waitFor(`window.__lyflow.stores.execution.getState().runId !== ${lit(r1)}`, { timeoutMs: 10_000, what: "重跑发起" });
+  const afterRerun = await bar();
+  const r2 = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
+  await cdp.waitFor(
+    `(() => { const s = window.__lyflow.stores.execution.getState(); return s.runId === ${lit(r2)} && s.runStatus !== 'running'; })()`,
+    { timeoutMs: 30_000, what: "重跑跑完" },
+  );
+  const done = await bar();
+  const fin = await cdp.eval(`
+    const ev = window.__lyNodeRun.events;
+    const status = (id) => ev.find((e) => e.kind === 'run_finished' && e.runId === id)?.status ?? null;
+    return { r1: status(${lit(r1)}), r2: status(${lit(r2)}) };
+  `);
+  report.ok("取消中点「↻ 重跑」：取消按钮当场回到「■ 取消」；被停的那次以 cancelled 收场、重跑的跑完；之后回到「▶ 运行」、取消变灰",
+    afterRerun.cancel === "■ 取消" && fin.r1 === "cancelled" && fin.r2 === "ok" && done.run === "▶ 运行" && done.cancelDisabled,
+    JSON.stringify({ afterRerun, fin, done }));
 }
 
 /** 维护窗口（ADR-0027）：重扫库目录要等在算的那个退出（它握着算子描述）。修前这一步在主线程上等 ——

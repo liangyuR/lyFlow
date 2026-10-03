@@ -27,6 +27,7 @@ import type { RampName } from "../lib/ramps";
 import { copyFrameWrites, pickFrame, roiFramesOf } from "../lib/roiFrames";
 import { rememberRoiBounds } from "../lib/roiThumbs";
 import { disposeOverlay, extentOf, shapesOf } from "../lib/shapes2d";
+import { extentText } from "../lib/pick";
 import { fullId, levelOf, resolveOutput } from "../lib/subgraph";
 import { compareContentFor } from "../lib/viewRule";
 import { sameFrame } from "../lib/viewFit";
@@ -190,6 +191,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   });
   const { display, loading, node: activeNode, op: activeOp, outputs: activeOutputs, content, autoContent } = source;
   const { cloud } = display;
+  const extent = cloud && cloud.pointCount > 0 ? extentText(cloud.bounds) : null;
 
   // -- 对比（交互清单 #35）：A 就是上面那个（跟随选中 / 钉住），B 是一个显式的槽 ---------------
   const compareOn = useCompareStore((s) => s.on);
@@ -714,6 +716,17 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
               );
             })}
           </select>
+        )}
+        {!compareOn && content === "cloud" && extent && (
+          // 包围盒尺寸：看一眼就知道这片云多大、单位对不对（全量云的，不随显示点数抽样变）
+          <span
+            className="viewer__extent"
+            data-testid="viewer-extent"
+            data-size={extent.size.map(round3).join(",")}
+            title={`包围盒尺寸${display.base ? `（底图 ${display.base.label}）` : ""}\n${extent.title}`}
+          >
+            {extent.text}
+          </span>
         )}
         {cloud && (
           <span className="viewer__count" title="显示点数 / 总点数">
