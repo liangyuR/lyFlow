@@ -256,6 +256,14 @@ test("复制粘贴带着子图定义：另一张图里认得出来、同内容�
   assert.equal(r.recursive, 1);
   useUiStore.getState().setPath([]);
   assert.equal(paste(clip).recursive, 0);
+
+  // 加节点（搜索里选了这张图的子图）同一条：在 A 里加 sub:A 拒掉，顶层照加
+  useUiStore.getState().enterSubgraph({ nodeId: "n1", subgraphId: "A" });
+  assert.equal(useGraphStore.getState().addNode("sub:A", { x: 0, y: 0 }), null);
+  assert.equal(useGraphStore.getState().lastRejection, "子图不能放进它自己里面");
+  assert.deepEqual(addNodeWithAutoConnect("sub:A", { x: 0, y: 0 }).nodeIds, []);
+  useUiStore.getState().setPath([]);
+  assert.equal(addNodeWithAutoConnect("sub:A", { x: 0, y: 0 }).nodeIds.length, 1);
 });
 
 test("删节点（P0 #5）：连着它的边一并删掉，别的边不动；一次撤销全回来", () => {

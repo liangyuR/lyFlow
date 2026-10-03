@@ -675,6 +675,29 @@ async function suiteRecursion(cdp, report) {
   report.ok("粘过来的这张图跑得通（两层子图里面的节点都算了）", ran.status === "ok" && nestedRan === 2,
     JSON.stringify({ status: ran.status, nodes: Object.keys(ran.nodes ?? {}) }));
   await restoreClipboard(cdp);
+
+  // 搜索里也列这张图的子图：进到外层子图里打开搜索，内层的能加、外层（它自己）不列 —— 放进去就是递归
+  const names = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState().doc;
+    return { outerNode: g.nodes.find((n) => n.op === ${lit(`sub:${outer.subgraphId}`)})?.id ?? null,
+             inner: g.subgraphs[${lit(inner.subgraphId)}].name, outer: g.subgraphs[${lit(outer.subgraphId)}].name };
+  `);
+  await enterByDoubleClick(cdp, names.outerNode);
+  const searchRows = async (q) => {
+    await cdp.eval(`window.__lyflow.stores.ui.getState().openSearch({ screen: { x: 400, y: 300 }, flow: { x: 0, y: 0 } }); return true;`);
+    await sleep(200);
+    await cdp.send("Input.insertText", { text: q });
+    await sleep(200);
+    const ids = await cdp.eval(`return [...document.querySelectorAll('.search-popup__row')].map((r) => r.dataset.opId ?? r.dataset.snippetId);`);
+    await pressEscape(cdp);
+    await sleep(150);
+    return ids;
+  };
+  const listed = { inner: await searchRows(names.inner), outer: await searchRows(names.outer) };
+  await cdp.eval(`window.__lyflow.stores.ui.getState().exitTo(0); return true;`);
+  report.ok("外层子图里打开搜索：搜得到内层子图（这张图里的，能直接加），外层自己不列",
+    listed.inner.includes(`sub:${inner.subgraphId}`) && !listed.outer.includes(`sub:${outer.subgraphId}`),
+    JSON.stringify({ names, listed }));
 }
 
 // ------------------------------------------------------------ §1 库算子

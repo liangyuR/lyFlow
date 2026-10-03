@@ -116,6 +116,14 @@ function ctx(doc: GraphDoc): GraphContext {
   };
 }
 
+/** sub: 节点放进当前这一层会不会套进它自己（含更里面一层）：当前所在的这几层子图它都不能用到。 */
+function wouldRecurse(doc: GraphDoc, opId: string): boolean {
+  const sub = subgraphIdOf(opId);
+  if (sub === null) return false;
+  const around = new Set(useUiStore.getState().path.map((seg) => seg.subgraphId));
+  return around.size > 0 && subgraphReaches(doc.subgraphs, sub, around);
+}
+
 /** 当前层级。ui.path 是导航状态，改图的动作都作用在它指的那一层。 */
 function level(doc: GraphDoc): GraphLevel {
   return levelOf(doc, useUiStore.getState().path);
@@ -645,6 +653,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
         set({ lastRejection: `算子未注册：${opId}` });
         return null;
       }
+      if (wouldRecurse(get().doc, opId)) {
+        set({ lastRejection: "子图不能放进它自己里面" });
+        return null;
+      }
       const id = newLocalId("n", allIds(get().doc));
       transact(`添加 ${op.label}`, (d) => {
         level(d).nodes.push({
@@ -665,6 +677,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
       if (!op) {
         set({ lastRejection: `算子未注册：${opId}` });
         return { nodeIds: [], wired: 0, ambiguous: [], missing: [opId] };
+      }
+      if (wouldRecurse(doc, opId)) {
+        set({ lastRejection: "子图不能放进它自己里面" });
+        return { nodeIds: [], wired: 0, ambiguous: [], missing: [] };
       }
       const taken = allIds(doc);
       const id = newLocalId("n", taken);

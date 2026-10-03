@@ -65,7 +65,8 @@
 
 /* ---------------------------------------------------------- 片段库（L14） */
 
-.op-row--snippet .op-row__glyph {
+.op-row--snippet .op-row__glyph,
+.search-popup__glyph {
   margin-right: 5px;
   color: #c8a86b;
 }

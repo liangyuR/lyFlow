@@ -2,19 +2,26 @@
 // 键盘全程可用（输入过滤、↑↓、Enter、Esc）—— 鼠标点选是退路不是主路。
 // 从端口拖线松在空白处唤起时（#18）：接得上拖出那一头的算子排前面、行尾写接到它的哪个端口，接不上的置灰排在后面。
 // 要插到一条连线中间时（连线右键「插入算子…」、只选中一条连线按 Tab）同理：插得进的排前面、写着进出用哪两个端口。
+// 单纯加节点（双击空白处、Tab）时片段也在里面（⧉，选中就是带自动连线的插入），这张图里的子图也能搜到。
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { addNodeWithAutoConnect, insertIntoEdge, replaceOperator } from "../lib/insert";
+import { addNodeWithAutoConnect, insertIntoEdge, insertSnippet, replaceOperator } from "../lib/insert";
 import { planReplace } from "../lib/replace";
-import { searchOperators, FIELD_LABELS } from "../lib/search";
+import { searchOperators, searchSnippets, searchableOps, FIELD_LABELS, SNIPPET_FIELD_LABELS } from "../lib/search";
 import { augmentOperators, levelOf } from "../lib/subgraph";
 import { findPort, inferAnyTypes, insertPortsFor, pendingPort, pendingType } from "../lib/typecheck";
 import { estimateNodeHeight } from "../lib/placement";
 import { useGraphStore } from "../store/graph";
-import { useManifestStore } from "../store/manifest";
+import { useManifestStore, useSnippets } from "../store/manifest";
 import { useUiStore } from "../store/ui";
-import type { OperatorDesc } from "../types/manifest";
+import { SUBGRAPH_OP_PREFIX } from "../types/graph";
+import type { OperatorDesc, SnippetDesc } from "../types/manifest";
+
+/** 列表里的一行：算子（含这张图的子图），或片段。 */
+type Row =
+  | { kind: "op"; key: string; op: OperatorDesc; fieldIndex: number; indices: readonly number[]; recent: boolean }
+  | { kind: "snippet"; key: string; snippet: SnippetDesc; fieldIndex: number; indices: readonly number[]; missing: number };
 
 /** 拖线唤起时，每个算子接拖出那一头用哪个端口（null = 接不上），以及占位字里写的「接到谁」。 */
 interface PendingInfo {
@@ -49,12 +56,18 @@ const POPUP_HEIGHT = 360;
 export function NodeSearch() {
   const popup = useUiStore((s) => s.searchPopup);
   const closeSearch = useUiStore((s) => s.closeSearch);
-  const operators = useManifestStore((s) => s.bundle?.operators);
+  const bundleOps = useManifestStore((s) => s.bundle?.operators);
   const recentOps = useUiStore((s) => s.recentOps);
   const baseOps = useManifestStore((s) => s.operatorsById);
   const typesByName = useManifestStore((s) => s.typesByName);
   const doc = useGraphStore((s) => s.doc);
   const path = useUiStore((s) => s.path);
+  const snippets = useSnippets();
+  // manifest 里的算子 + 这张图里的子图（会套进当前这几层自己的不列）
+  const operators = useMemo(
+    () => searchableOps(bundleOps ?? [], doc.subgraphs, new Set(path.map((seg) => seg.subgraphId))),
+    [bundleOps, doc.subgraphs, path],
+  );
 
   // 拖线唤起的：先把每个算子接哪个端口算出来（算子几十个、端口几个，弹层开着时算一次）
   const pending = useMemo<PendingInfo | null>(() => {
@@ -164,37 +177,72 @@ export function NodeSearch() {
 
   const { rows, incompatible, total } = useMemo(() => {
     // 换算子时不列它自己
-    const all = (operators ?? []).filter((op) => op.id !== replace?.self);
-    let hits: { op: OperatorDesc; fieldIndex: number; indices: readonly number[]; recent: boolean }[];
+    const all = operators.filter((op) => op.id !== replace?.self);
+    const opRow = (op: OperatorDesc, fieldIndex: number, indices: readonly number[], recent: boolean): Row =>
+      ({ kind: "op", key: `op:${op.id}`, op, fieldIndex, indices, recent });
+    // 片段只在单纯加节点时列：拖线、插线、换算子要的是一个算子
+    const snippetRow = (snippet: SnippetDesc, fieldIndex: number, indices: readonly number[]): Row => ({
+      kind: "snippet",
+      key: `snippet:${snippet.id}`,
+      snippet,
+      fieldIndex,
+      indices,
+      missing: snippet.nodes.filter((n) => !baseOps.has(n.op)).length,
+    });
+    const withSnippets = guide === null;
+    let hits: Row[];
     if (!query.trim()) {
-      // 空查询列全部，让人知道有哪些可用，而不是面对一个空白框；最近用过的排在最前
+      // 空查询列全部，让人知道有哪些可用，而不是面对一个空白框；最近用过的排在最前，片段一小组跟在后面
       const recent = new Set(recentOps);
       const first = recentOps.flatMap((id) => all.filter((op) => op.id === id));
       const rest = all.filter((op) => !recent.has(op.id));
-      hits = [...first, ...rest].map((op) => ({ op, fieldIndex: 0, indices: [] as number[], recent: recent.has(op.id) }));
+      hits = [
+        ...first.map((op) => opRow(op, 0, [], true)),
+        ...(withSnippets ? snippets.map((s) => snippetRow(s, 0, [])) : []),
+        ...rest.map((op) => opRow(op, 0, [], false)),
+      ];
     } else {
-      hits = searchOperators(all, query).map((hit) => ({ ...hit, recent: false }));
+      // 算子与片段按同一个分数混排（同分时算子在前：sort 是稳定的）
+      const scored = [
+        ...searchOperators(all, query).map((h) => ({ row: opRow(h.op, h.fieldIndex, h.indices, false), score: h.score })),
+        ...(withSnippets
+          ? searchSnippets(snippets, query).map((h) => ({ row: snippetRow(h.snippet, h.fieldIndex, h.indices), score: h.score }))
+          : []),
+      ];
+      scored.sort((a, b) => b.score - a.score);
+      hits = scored.map((x) => x.row);
     }
     if (!guide) return { rows: hits.slice(0, MAX_ROWS), incompatible: 0, total: hits.length };
     // 合适的排前面（各自保持原来的先后），不合适的置灰排在后面、不藏起来：也许就是想放一个不接线的。
     // 先分再截：不然算子一多，合适的那几个可能被截在 MAX_ROWS 外面
-    const ok = hits.filter((h) => guide.fit.get(h.op.id) != null);
-    const no = hits.filter((h) => guide.fit.get(h.op.id) == null);
+    const fits = (h: Row) => h.kind === "op" && guide.fit.get(h.op.id) != null;
+    const ok = hits.filter(fits);
+    const no = hits.filter((h) => !fits(h));
     return { rows: [...ok, ...no].slice(0, MAX_ROWS), incompatible: no.length, total: hits.length };
-  }, [operators, query, recentOps, guide, replace]);
+  }, [operators, snippets, baseOps, query, recentOps, guide, replace]);
 
   useEffect(() => setCursor(0), [query]);
 
   useEffect(() => {
     if (rows.length === 0) return;
-    const id = rows[Math.min(cursor, rows.length - 1)]?.op.id;
-    if (!id) return;
+    const key = rows[Math.min(cursor, rows.length - 1)]?.key;
+    if (!key) return;
     listRef.current
-      ?.querySelector(`[data-op-id="${CSS.escape(id)}"]`)
+      ?.querySelector(`[data-row-key="${CSS.escape(key)}"]`)
       ?.scrollIntoView({ block: "nearest" });
   }, [cursor, rows]);
 
   if (!popup) return null;
+
+  // 片段：与面板里双击同一条路（带自动连线的插入），落在光标处
+  const pickRow = (row: Row) => {
+    if (row.kind === "op") {
+      pick(row.op.id);
+      return;
+    }
+    insertSnippet(row.snippet, popup.flow);
+    closeSearch();
+  };
 
   const pick = (opId: string) => {
     // 换算子：换不了（子图出口会断）弹层留着，换一个
@@ -248,7 +296,9 @@ export function NodeSearch() {
   };
 
   // 当前那一行的算子说明与进出端口：以前只有名字和分类，选之前不知道它干什么、接什么（面板里单击才看得到说明）
-  const activeOp = rows[Math.min(cursor, rows.length - 1)]?.op;
+  const activeRow = rows[Math.min(cursor, rows.length - 1)];
+  const activeOp = activeRow?.kind === "op" ? activeRow.op : undefined;
+  const activeSnippet = activeRow?.kind === "snippet" ? activeRow.snippet : undefined;
 
   // 贴着光标放，但不能溢出窗口
   // 两头都夹：选中一个节点按 Tab 时弹层摆在新节点要落的地方，那个节点在视野外的话坐标是负的
@@ -265,7 +315,7 @@ export function NodeSearch() {
     } else if (e.key === "Enter") {
       e.preventDefault();
       const hit = rows[Math.min(cursor, rows.length - 1)];
-      if (hit) pick(hit.op.id);
+      if (hit) pickRow(hit);
     } else if (e.key === "Escape") {
       e.preventDefault();
       closeSearch();
@@ -296,15 +346,43 @@ export function NodeSearch() {
             <p className="search-popup__empty">没有匹配的算子</p>
           ) : (
             rows.map((hit, i) => {
+              const active = i === Math.min(cursor, rows.length - 1);
+              if (hit.kind === "snippet") {
+                return (
+                  <div key={hit.key} className="search-popup__item">
+                    <button
+                      type="button"
+                      data-row-key={hit.key}
+                      data-snippet-id={hit.snippet.id}
+                      data-testid="search-snippet"
+                      className={`search-popup__row${active ? " is-active" : ""}${hit.missing > 0 ? " is-incompatible" : ""}`}
+                      onMouseEnter={() => setCursor(i)}
+                      onClick={() => pickRow(hit)}
+                    >
+                      <span className="search-popup__label">
+                        <span className="search-popup__glyph" aria-hidden>
+                          ⧉
+                        </span>
+                        {hit.snippet.label}
+                      </span>
+                      <span className="search-popup__port">
+                        {hit.missing > 0 ? `缺 ${hit.missing} 个算子` : `片段 · ${hit.snippet.nodes.length} 节点`}
+                      </span>
+                      {hit.snippet.category && <span className="search-popup__cat">{hit.snippet.category}</span>}
+                      {hit.fieldIndex > 0 && <span className="search-popup__why">{SNIPPET_FIELD_LABELS[hit.fieldIndex]}</span>}
+                    </button>
+                  </div>
+                );
+              }
               const port = pending ? (pending.portOf.get(hit.op.id) ?? null) : null;
               const fitNote = guide ? (guide.fit.get(hit.op.id) ?? null) : null;
               const note = fitNote ?? guide?.miss?.get(hit.op.id) ?? null;
               const greyed = guide !== null && fitNote === null;
               // 合适与不合适之间一条分隔：写明后面这些为什么不合适
               const prev = i > 0 ? rows[i - 1] : undefined;
-              const firstGreyed = greyed && (!prev || guide.fit.get(prev.op.id) != null);
+              const firstGreyed = greyed && (!prev || (prev.kind === "op" && guide.fit.get(prev.op.id) != null));
               return (
-                <div key={hit.op.id} className="search-popup__item">
+                <div key={hit.key} className="search-popup__item">
                   {firstGreyed && (
                     <p className="search-popup__sep" data-testid="search-incompatible-sep">
                       {guide.sep(incompatible)}
@@ -312,18 +390,19 @@ export function NodeSearch() {
                   )}
                   <button
                     type="button"
+                    data-row-key={hit.key}
                     data-op-id={hit.op.id}
                     data-port={port ?? undefined}
                     data-incompatible={greyed ? "1" : undefined}
-                    className={`search-popup__row${i === Math.min(cursor, rows.length - 1) ? " is-active" : ""}${
-                      greyed ? " is-incompatible" : ""
-                    }`}
+                    className={`search-popup__row${active ? " is-active" : ""}${greyed ? " is-incompatible" : ""}`}
                     onMouseEnter={() => setCursor(i)}
-                    onClick={() => pick(hit.op.id)}
+                    onClick={() => pickRow(hit)}
                   >
                     <span className="search-popup__label">{hit.op.label}</span>
                     {note && <span className="search-popup__port">{note}</span>}
-                    <span className="search-popup__cat">{hit.op.category}</span>
+                    <span className="search-popup__cat">
+                      {hit.op.id.startsWith(SUBGRAPH_OP_PREFIX) ? "这张图的子图" : hit.op.category}
+                    </span>
                     {hit.recent && <span className="search-popup__why">最近</span>}
                     {hit.fieldIndex > 0 && (
                       <span className="search-popup__why">{FIELD_LABELS[hit.fieldIndex]}</span>
@@ -353,6 +432,22 @@ export function NodeSearch() {
               <span>输入 {portsText(activeOp.inputs)}</span>
               <span className="search-popup__arrow">→</span>
               <span>输出 {portsText(activeOp.outputs)}</span>
+            </p>
+          </div>
+        )}
+        {activeSnippet && (
+          <div
+            className="search-popup__detail"
+            data-testid="search-detail"
+            data-snippet-id={activeSnippet.id}
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            {activeSnippet.doc && <p className="search-popup__doc">{activeSnippet.doc}</p>}
+            <p className="search-popup__io">
+              <span>
+                {activeSnippet.nodes.length} 个节点：
+                {activeSnippet.nodes.map((n) => baseOps.get(n.op)?.label ?? `${n.op}（当前 core 没有）`).join("、")}
+              </span>
             </p>
           </div>
         )}

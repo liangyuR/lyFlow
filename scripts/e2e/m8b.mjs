@@ -811,6 +811,35 @@ async function suitePalette(cdp, report) {
   report.ok("从面板拖到 gen → vox 的线上：直通滤波插到中间，加节点与插入一条撤销",
     dropped === "ok" && JSON.stringify(wired.edges) === JSON.stringify(want) && wired.past - past0 === 1,
     JSON.stringify({ dropped, wired, past0 }));
+
+  // 双击空白处的搜索里也有片段：真双击、打「测点骨架」、回车 —— 插入整个片段（与面板里双击同一条路），Ctrl+Z 一次全撤
+  await newDoc(cdp);
+  await sleep(200);
+  const corner = await cdp.eval(`const r = document.querySelector('.react-flow__pane').getBoundingClientRect();
+    return { x: Math.round(r.right - 80), y: Math.round(r.top + 80) };`);
+  for (const clickCount of [1, 2]) {
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: corner.x, y: corner.y, button: "left", buttons: 1, clickCount });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: corner.x, y: corner.y, button: "left", buttons: 0, clickCount });
+  }
+  await sleep(250);
+  await cdp.send("Input.insertText", { text: "测点骨架" });
+  await sleep(250);
+  const first = await cdp.eval(`
+    const row = document.querySelector('.search-popup__row.is-active');
+    return { snippet: row?.dataset.snippetId ?? null, note: row?.querySelector('.search-popup__port')?.textContent ?? null,
+             detail: document.querySelector('[data-testid="search-detail"]')?.dataset.snippetId ?? null };
+  `);
+  const wantNodes = await cdp.eval(`return window.__lyflow.stores.manifest.getState().bundle.snippets.find((s) => s.id === 'gap.measure_skeleton')?.nodes.length ?? -1;`);
+  await pressKey(cdp, "Enter", 13);
+  await sleep(300);
+  const inserted = await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.length;`);
+  await pressCtrl(cdp, "z");
+  await sleep(200);
+  const afterUndo = await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.length;`);
+  report.ok("双击空白处的搜索里打「测点骨架」：片段排第一行（写着几个节点、底下是片段的说明），回车插入整个片段，Ctrl+Z 一次全撤",
+    first.snippet === "gap.measure_skeleton" && first.note === `片段 · ${wantNodes} 节点` && first.detail === "gap.measure_skeleton" &&
+      wantNodes > 1 && inserted === wantNodes && afterUndo === 0,
+    JSON.stringify({ first, wantNodes, inserted, afterUndo }));
 }
 
 /** 主预览的图像模式（docs/image-plan.md 阶段 3）：

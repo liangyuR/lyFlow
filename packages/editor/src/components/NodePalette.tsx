@@ -5,7 +5,7 @@ import { useReactFlow, useStore as useFlowStore } from "@xyflow/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { addNodeWithAutoConnect, insertSnippet } from "../lib/insert";
-import { FIELD_LABELS, searchOperators, type OperatorHit } from "../lib/search";
+import { FIELD_LABELS, searchOperators, searchSnippets, type OperatorHit } from "../lib/search";
 import { useManifestStore, useSnippets } from "../store/manifest";
 import { useUiStore } from "../store/ui";
 import type { OperatorDesc, SnippetDesc } from "../types/manifest";
@@ -62,10 +62,8 @@ function SnippetRow({ snippet }: { snippet: SnippetDesc }) {
 function SnippetBranch({ query }: { query: string }) {
   const snippets = useSnippets();
   const [open, setOpen] = useState(true);
-  const q = query.trim().toLowerCase();
-  const shown = q
-    ? snippets.filter((s) => `${s.label} ${s.id} ${s.category ?? ""}`.toLowerCase().includes(q))
-    : snippets;
+  // 与搜索弹层同一套模糊匹配：两处搜同一个词，片段一处有一处没有会让人以为没装上
+  const shown = query.trim() ? searchSnippets(snippets, query).map((h) => h.snippet) : snippets;
   if (shown.length === 0) return null;
   return (
     <div className="tree-branch tree-branch--snippets" data-testid="snippet-library" style={{ ["--depth" as string]: 0 }}>
