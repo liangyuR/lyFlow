@@ -170,6 +170,19 @@
   默认值、范围，带一个开关。默认开更好发现，但检查器会长出一截。
 - **打开文件时的自动布局算不算一步撤销。** 现在不算（打开就排好，Ctrl+Z 回不到没排的样子）。
 
+## 这一轮的验证（2026-10-03，两批复核都改完之后，ea07707）
+
+| 层 | 结果 |
+|---|---|
+| `pnpm check`（带 `LYFLOW_PACKS=gap;dts`） | 通过：C++ 276、Rust lib 154、`tests/host.rs` 13、`tests/disk_cache.rs` 2、编辑器 node:test 137、MCP 32 |
+| 桌面 e2e（`pnpm e2e`） | 906 / 907（第二批复核之前整跑；复核改动涉及的四组 `m3:suiteBypassReroute`、`m3:suiteEditing`、`noderun:suitePreemptStalled`、`m4:suiteNested` 改完重跑 87 / 87） |
+| 安装包 e2e（这一轮重新 `tauri build` 的包，含两批复核） | 913 / 914 |
+| `pnpm e2e:http` | 33 / 33 |
+
+失败的都只是 KUN10 那一条（真实数据不在）。偶发一次：第一趟 `pnpm check` 里 Rust 的 `run_to_node_attaches_unplanned_downstream` 挂了一次
+（「运行到此」时下游 p 上一次的结果没挂上 —— 像是同一进程里并行的别的用例把缓存挤掉了），单独连跑三遍、再整跑 `pnpm check` 都过，
+这一轮没动 Rust 与 core，没有去追。
+
 ## 后段的验证（2026-10-02 深夜 – 10-03）
 
 窄窗口、框选两项之后（0b7666c）整条链从头跑过：`pnpm check` 通过（这一趟带 `LYFLOW_PACKS=gap;dts`：C++ 276、Rust lib 154、`tests/host.rs` 13、`tests/disk_cache.rs` 2、编辑器 112、MCP 32）；桌面 e2e 860 / 861、安装包 867 / 868、HTTP 33 / 33，失败的都只是 KUN10 那一条。之后的六项（预览与抽屉的高度、提示停留、三栏布局拆出去、右键菜单摆进窗口、数字框方向键、面板拖到连线上、F2 改名）只动了编辑器：编辑器 node:test 114、typecheck 通过，桌面 e2e 867 / 868（同样只差 KUN10）；安装包与 HTTP 两种 e2e 没有为它们重跑。
