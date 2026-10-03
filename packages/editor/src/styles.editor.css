@@ -1542,6 +1542,51 @@
   color: var(--lyflow-warn);
 }
 
+/* -- 调参记录（抽屉的「调参」页）------------------------------------------- */
+
+.runs { margin: 0; padding: 0; list-style: none; }
+.runs__row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--lyflow-border);
+}
+.runs__row[data-status="running"] { opacity: 0.7; }
+.runs__head { display: flex; align-items: baseline; gap: 10px; font-size: 11px; color: var(--lyflow-fg-2); }
+.runs__seq { color: var(--lyflow-fg-0); font-family: var(--lyflow-mono); }
+.runs__time { font-variant-numeric: tabular-nums; }
+.runs__status--ok { color: var(--lyflow-ok, #5ac27a); }
+.runs__status--error { color: #ff8b8b; }
+.runs__status--cancelled { color: var(--lyflow-warn); }
+.runs__diff {
+  overflow: hidden;
+  color: var(--lyflow-fg-1);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.runs__readings { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.runs__reading {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 6px;
+  border: 1px solid var(--lyflow-border);
+  border-radius: 4px;
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-fg-1);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.runs__reading:hover:not(:disabled) { border-color: var(--lyflow-accent); }
+.runs__reading:disabled { cursor: default; }
+.runs__reading-value { color: var(--lyflow-fg-0); font-variant-numeric: tabular-nums; }
+.runs__reading[data-tone="ng"] .runs__reading-value { color: #ff9a9a; }
+.runs__reading[data-tone="margin"] .runs__reading-value { color: #f5c56b; }
+.runs__delta { color: var(--lyflow-fg-2); font-variant-numeric: tabular-nums; }
+
 /* -- 底部抽屉（§2.5）------------------------------------------------------- */
 
 .drawer {

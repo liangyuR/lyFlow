@@ -1057,6 +1057,31 @@ async function suitePreview(cdp, report) {
   const p4 = await pinState();
   report.ok("再按 P：取消钉住，预览跟着选中回到 s1",
     p4.pinned === null && p4.node === pin.s1 && /取消钉住/.test(p4.toast ?? ""), JSON.stringify(p4));
+
+  // 抽屉的「调参」页：这张图打开以来每次正式运行一行，新的在上，写着比上一次改了什么；预览运行不记。
+  // 这一段跑了四次正式运行：F5、拖完补的、两次点角标上的 ▶（运行到 s2）
+  const drawerBeforeRuns = await cdp.eval(`return window.__lyflow.stores.ui.getState().drawer;`);
+  await cdp.eval(`if (!window.__lyflow.stores.ui.getState().drawer) window.__lyflow.stores.ui.getState().toggleDrawer('log'); return true;`);
+  await sleep(150);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="drawer-tab-runs"]'));
+  await sleep(200);
+  const runRows = await cdp.eval(`
+    return [...document.querySelectorAll('[data-testid="run-record"]')].map((r) => ({
+      seq: Number(r.dataset.seq), status: r.dataset.status,
+      head: r.querySelector('.runs__head')?.textContent ?? '',
+      diff: r.querySelector('[data-testid="run-diff"]')?.textContent ?? '' }));
+  `);
+  const s1Name = await cdp.eval(`
+    const n = window.__lyflow.stores.graph.getState().doc.nodes.find((x) => x.id === ${lit(pin.s1)});
+    return n.ui?.title ?? window.__lyflow.stores.manifest.getState().operatorsById.get(n.op).label;
+  `);
+  report.ok("「调参」页：四次正式运行一行一次、新的在上（预览不记）；第一次写「打开以来的第一次」，之后写 s1 的比例从多少改到多少；运行到 s2 的写着",
+    JSON.stringify(runRows.map((r) => [r.seq, r.status])) === JSON.stringify([[4, "ok"], [3, "ok"], [2, "ok"], [1, "ok"]]) &&
+      runRows[3].diff === "这张图打开以来的第一次" &&
+      runRows.slice(0, 3).every((r) => r.diff.startsWith(`${s1Name} · `) && / → /.test(r.diff)) &&
+      / → 0\.2$/.test(runRows[1].diff) && /运行到/.test(runRows[1].head) && /整张图/.test(runRows[3].head),
+    JSON.stringify({ s1Name, runRows }));
+  await cdp.eval(`window.__lyflow.stores.ui.setState({ drawer: ${lit(drawerBeforeRuns)} }); return true;`);
 }
 
 // ------------------------------------------------------------- §4 大图性能

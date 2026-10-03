@@ -41,7 +41,7 @@ export interface PendingConnection {
   side: "input" | "output";
 }
 
-export type DrawerTab = "log" | "diagnostics" | "cache";
+export type DrawerTab = "log" | "diagnostics" | "runs" | "cache";
 
 /** 参数面板的三个页签（param-recipe P2.2）。配方矩阵与配方管理在 P3 填内容。 */
 export type ParamPanelTab = "nodes" | "matrix" | "recipes";

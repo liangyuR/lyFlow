@@ -7,7 +7,8 @@ import { flashNodesLocate } from "../lib/motion";
 import { localIdOf, locateEventNode, pathPrefix, type SubPath } from "../lib/subgraph";
 import { transport } from "../transport";
 import { refreshCacheStats, useCacheStore } from "./cache";
-import { currentRecipeBlocker, runParamsOf } from "./recipe";
+import { currentRecipeBlocker, runParamsOf, useRecipeStore } from "./recipe";
+import { useRunHistoryStore } from "./runHistory";
 import { useUiStore } from "./ui";
 import type {
   Diagnostic,
@@ -265,6 +266,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       case "run_started": {
         // 真开跑了：从这一刻起节点表里的结果按这一次取（排队中的请求要等被抢占的那个退出，见 resultRunId）
         if (s.resultRunId !== event.runId) set({ resultRunId: event.runId });
+        useRunHistoryStore.getState().planned(event.runId, event.plan ?? []);
         if (s.isolate.length === 0 && s.targets.length > 0) {
           // 部分运行（运行到此、智能运行，V2）：计划里的节点照常先亮成「排队中」，
           // 计划外的留着上一次的样子，收场时再按 attached 决定留不留
@@ -377,6 +379,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         // 预览时不刷缓存统计：那是「事件到渲染」这条热路径上白多出来的一次 IPC
         if (!s.preview) void refreshCacheStats();
         if (s.isolate.length > 0) reportNotReady(event.diagnostics);
+        // 调参记录：这一次的状态、耗时与量测读数（预览不记，begin 时就没记它）
+        useRunHistoryStore.getState().finish(event.runId, event.status as RunStatus, event.durationMs ?? null, useExecutionStore.getState().nodes);
         break;
       }
       case "log": {
@@ -693,16 +697,19 @@ export async function startRun(
       const blocker = currentRecipeBlocker(doc);
       if (blocker) throw new Error(blocker);
     }
+    const params = request.params ?? runParamsOf(doc);
     const runId = await transport.runGraph(doc, graphPath, {
       targets: request.targets,
       isolate: isolate.length > 0 ? isolate : undefined,
       force: request.force && request.force.length > 0 ? request.force : undefined,
       mode: preview ? "preview" : "full",
       previewMaxPoints: request.previewMaxPoints,
-      params: request.params ?? runParamsOf(doc),
+      params,
       sceneId,
     });
     if (ticket !== runTicket) return; // 已经有更晚的一次运行发起了，这次的回复作废
+    // 调参记录：交给 core 的就是这份图与这组图参数（预览、单节点运行不记）
+    useRunHistoryStore.getState().begin(runId, doc, params, useRecipeStore.getState().current, request);
     // 给了 isolate 时 core 的 targets 就是同一组（R1），这边也照这个记
     store.beginRun(runId, isolate.length > 0 ? isolate : (request.targets ?? []), preview, isolate, request);
   } catch (e) {

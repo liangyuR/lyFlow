@@ -7,6 +7,7 @@ import { useDragFraction } from "../hooks/useDragFraction";
 import { rootOf } from "../lib/root";
 
 import { formatOutputValue, sortSummaryOutputs } from "../lib/outputs";
+import { RunHistoryTab } from "./RunHistoryTab";
 import { describeEventNode } from "../lib/subgraph";
 import { clearCache, formatBytes, refreshCacheStats, useCacheStore } from "../store/cache";
 import { useExecutionStore } from "../store/execution";
@@ -21,6 +22,7 @@ const DRAWER_FRACTION_KEY = "lyflow.drawer.fraction";
 const TABS: { id: DrawerTab; label: string }[] = [
   { id: "log", label: "日志" },
   { id: "diagnostics", label: "诊断" },
+  { id: "runs", label: "调参" },
   { id: "cache", label: "缓存" },
 ];
 
@@ -358,6 +360,7 @@ export function BottomDrawer() {
         <div className="drawer__body">
           {drawer === "log" && <LogTab />}
           {drawer === "diagnostics" && <DiagnosticsTab />}
+          {drawer === "runs" && <RunHistoryTab />}
           {drawer === "cache" && <CacheTab />}
         </div>
       )}

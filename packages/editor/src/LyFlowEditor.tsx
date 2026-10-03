@@ -71,6 +71,7 @@ import {
 } from "./store/recipeFiles";
 import { useUiStore } from "./store/ui";
 import { scheduleValidate } from "./store/validation";
+import { useRunHistoryStore } from "./store/runHistory";
 import { setTransport, transport, type Transport } from "./transport";
 import { setDialogs, type EditorDialogs } from "./lib/dialogs";
 import { hasRelativePathParam } from "./lib/params";
@@ -197,6 +198,8 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         void loadRecipesFor(state.filePath);
         // 换了一张图（打开、新建）：上一张图那次运行的范围不能拿来「↻ 重跑」这一张（节点 id 常常同名）
         useExecutionStore.setState({ request: null });
+        // 调参记录是这张图的：换图就清空，序号从头数
+        useRunHistoryStore.getState().clear();
         // 打开之后要适配画布：预览最大化着（画布 0 宽）就先还原
         useUiStore.getState().setViewerMaximized(false);
       }
