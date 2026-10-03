@@ -1624,6 +1624,19 @@
 .runs__reading[data-tone="margin"] .runs__reading-value { color: #f5c56b; }
 .runs__delta { color: var(--lyflow-fg-2); font-variant-numeric: tabular-nums; }
 .runs__spacer { flex: 1; }
+.runs__base {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--lyflow-border);
+  background: color-mix(in srgb, var(--lyflow-accent) 10%, var(--lyflow-bg-1));
+  color: var(--lyflow-fg-1);
+  font-size: 11px;
+}
+.runs__row.is-baseline { background: color-mix(in srgb, var(--lyflow-accent) 8%, transparent); }
+.runs__diff--base { color: var(--lyflow-accent); }
+.runs__restore.is-on { border-color: var(--lyflow-accent); color: var(--lyflow-accent); }
 .runs__restore {
   padding: 0 8px;
   border: 1px solid var(--lyflow-border-strong);

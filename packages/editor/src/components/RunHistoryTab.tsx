@@ -6,7 +6,7 @@ import { useMemo } from "react";
 
 import { num } from "../lib/format";
 import { verdictTone } from "../lib/outputs";
-import { diffRuns, diffText, previousReadingIn, type RunRecord } from "../lib/runHistory";
+import { diffRuns, diffText, previousReading, previousReadingIn, type RunRecord } from "../lib/runHistory";
 import { augmentOperators, describeEventNode } from "../lib/subgraph";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
@@ -41,19 +41,22 @@ function deltaText(now: number | null, before: number | null): string | null {
 
 export function RunHistoryTab() {
   const records = useRunHistoryStore((s) => s.records);
+  const baselineId = useRunHistoryStore((s) => s.baseline);
   const doc = useGraphStore((s) => s.doc);
   const baseOps = useManifestStore((s) => s.operatorsById);
+  const baseline = baselineId ? records.find((r) => r.runId === baselineId) : undefined;
 
-  // 每一行与它前一次（更早的那一条）比；图参数、子图定义都按各自那一份
+  // 每一行与它前一次（更早的那一条）比；定了基准的话再与基准比一行。图参数、子图定义都按各自那一份
   const rows = useMemo(
     () =>
       records.map((r, i) => {
         const prev = records[i + 1];
-        const ops = augmentOperators(baseOps, { ...prev?.doc.subgraphs, ...r.doc.subgraphs });
+        const ops = augmentOperators(baseOps, { ...prev?.doc.subgraphs, ...baseline?.doc.subgraphs, ...r.doc.subgraphs });
         const diff = prev ? diffRuns(prev, r, ops) : null;
-        return { r, i, diff };
+        const vsBase = baseline && baseline !== r ? diffRuns(baseline, r, ops) : null;
+        return { r, i, diff, vsBase };
       }),
-    [records, baseOps],
+    [records, baseOps, baseline],
   );
   const ops = useMemo(() => augmentOperators(baseOps, doc.subgraphs), [baseOps, doc.subgraphs]);
 
@@ -66,20 +69,40 @@ export function RunHistoryTab() {
   }
 
   return (
-    <ol className="runs" data-testid="run-history">
-      {rows.map(({ r, i, diff }) => (
-        <RunRow
-          key={r.runId}
-          record={r}
-          // 更早的记录被 50 条的上限挤掉了时说清楚，不冒充「第一次」
-          diffLine={diff ? diffText(diff) : r.seq === 1 ? "这张图打开以来的第一次" : "更早的记录已不保留，比不出改了什么"}
-          diffTitle={diff ? diffText(diff, Infinity) : ""}
-          before={(rd) => previousReadingIn(records, i, rd)}
-          describe={(id) => describeEventNode(doc, ops, id)}
-          onRestore={() => restoreRun(r, baseOps)}
-        />
-      ))}
-    </ol>
+    <>
+      {baseline && (
+        // 基准钉在最上面：调了几次之后要回头看的就是它
+        <div className="runs__base" data-testid="run-baseline-bar">
+          <span>
+            基准 #{baseline.seq} · {clock(baseline.at)}
+            {baseline.readings.length > 0 && ` · ${baseline.readings.map((rd) => `${rd.port} ${rd.value === null ? "未测出" : num(rd.value)}`).join("，")}`}
+          </span>
+          <button type="button" className="runs__restore" onClick={() => useRunHistoryStore.getState().setBaseline(null)}>
+            取消基准
+          </button>
+        </div>
+      )}
+      <ol className="runs" data-testid="run-history">
+        {rows.map(({ r, i, diff, vsBase }) => (
+          <RunRow
+            key={r.runId}
+            record={r}
+            // 更早的记录被 50 条的上限挤掉了时说清楚，不冒充「第一次」
+            diffLine={diff ? diffText(diff) : r.seq === 1 ? "这张图打开以来的第一次" : "更早的记录已不保留，比不出改了什么"}
+            diffTitle={diff ? diffText(diff, Infinity) : ""}
+            baseLine={vsBase && baseline ? `比基准 #${baseline.seq}：${diffText(vsBase)}` : null}
+            baseTitle={vsBase ? diffText(vsBase, Infinity) : ""}
+            isBaseline={baseline === r}
+            // 读数的变化：定了基准就与基准比，不然与上一次比
+            before={(rd) => (baseline && baseline !== r ? previousReading(baseline, rd) : previousReadingIn(records, i, rd))}
+            beforeLabel={baseline && baseline !== r ? `基准 #${baseline.seq}` : "上一次"}
+            describe={(id) => describeEventNode(doc, ops, id)}
+            onRestore={() => restoreRun(r, baseOps)}
+            onBaseline={() => useRunHistoryStore.getState().setBaseline(baseline === r ? null : r.runId)}
+          />
+        ))}
+      </ol>
+    </>
   );
 }
 
@@ -126,22 +149,34 @@ function RunRow({
   record: r,
   diffLine,
   diffTitle,
+  baseLine,
+  baseTitle,
+  isBaseline,
   before: beforeOf,
+  beforeLabel,
   describe,
   onRestore,
+  onBaseline,
 }: {
   record: RunRecord;
   diffLine: string;
   diffTitle: string;
-  /** 「比上一次」那一次的同一个读数（没被取消、有这个读数的最近一次）。 */
+  /** 「比基准 #7：…」（定了基准、这一行不是基准时）。 */
+  baseLine: string | null;
+  baseTitle: string;
+  isBaseline: boolean;
+  /** 读数比的那一次的同一个读数：基准，或上一次（没被取消、有这个读数的最近一次）。 */
   before: (rd: RunRecord["readings"][number]) => RunRecord["readings"][number] | null;
+  beforeLabel: string;
   describe: (id: string) => ReturnType<typeof describeEventNode>;
   onRestore: () => void;
+  onBaseline: () => void;
 }) {
   // 写全路径：同一个子图用了两次时，只写节点自己的名字分不出是哪一个
   const scope = r.targets.length > 0 ? `运行到 ${r.targets.map((t) => describe(t).names.join(" › ")).join("、")}` : "整张图";
   return (
-    <li className="runs__row" data-testid="run-record" data-seq={r.seq} data-status={r.status}>
+    <li className={`runs__row${isBaseline ? " is-baseline" : ""}`} data-testid="run-record" data-seq={r.seq} data-status={r.status}
+      data-baseline={isBaseline ? "1" : undefined}>
       <div className="runs__head">
         <span className="runs__seq">#{r.seq}</span>
         <span className="runs__time">{clock(r.at)}</span>
@@ -150,6 +185,17 @@ function RunRow({
         <span className="runs__scope">{scope}</span>
         {r.recipe && <span className="runs__scope">配方 {r.recipe}</span>}
         <span className="runs__spacer" />
+        {r.status !== "running" && (
+          <button
+            type="button"
+            className={`runs__restore${isBaseline ? " is-on" : ""}`}
+            data-testid="run-baseline"
+            title={isBaseline ? "取消基准" : "设为基准：之后每一次都与它比（改了什么、读数差多少）"}
+            onClick={onBaseline}
+          >
+            {isBaseline ? "基准 ✓" : "设为基准"}
+          </button>
+        )}
         {r.status !== "running" && (
           <button
             type="button"
@@ -165,6 +211,11 @@ function RunRow({
       <div className="runs__diff" data-testid="run-diff" title={diffTitle}>
         {diffLine}
       </div>
+      {baseLine && (
+        <div className="runs__diff runs__diff--base" data-testid="run-diff-base" title={baseTitle}>
+          {baseLine}
+        </div>
+      )}
       {r.readings.length > 0 && (
         <div className="runs__readings">
           {r.readings.map((rd) => {
@@ -178,7 +229,7 @@ function RunRow({
                 className="runs__reading"
                 data-testid="run-reading"
                 data-tone={verdictTone(rd.verdict) ?? undefined}
-                title={`${d.names.join(" › ")}.${rd.port}${before ? `；上一次 ${before.value === null ? "未测出" : num(before.value)}` : ""}${d.reveal ? " —— 点此打开到它" : ""}`}
+                title={`${d.names.join(" › ")}.${rd.port}${before ? `；${beforeLabel} ${before.value === null ? "未测出" : num(before.value)}` : ""}${d.reveal ? " —— 点此打开到它" : ""}`}
                 disabled={!d.reveal}
                 onClick={() => {
                   if (d.reveal) useUiStore.getState().revealNode(d.reveal.path, d.reveal.localId);

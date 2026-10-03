@@ -1090,6 +1090,25 @@ async function suitePreview(cdp, report) {
       / → 0\.2$/.test(runRows[1].diff) && /运行到/.test(runRows[1].head) && /整张图/.test(runRows[3].head),
     JSON.stringify({ s1Name, runRows }));
 
+  // 设为基准：点第 1 次那一行的「设为基准」—— 最上面钉一条基准，之后每一行多一行「比基准 #1：…」
+  // 抽屉里放不下全部几行：先把第 1 次那一行滚进来
+  const showRow1 = () => cdp.eval(`document.querySelector('[data-testid="run-record"][data-seq="1"]')?.scrollIntoView({ block: 'nearest' }); return true;`);
+  await showRow1();
+  await sleep(100);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="run-record"][data-seq="1"] [data-testid="run-baseline"]'));
+  await sleep(200);
+  const based = await cdp.eval(`
+    const row = (seq) => document.querySelector('[data-testid="run-record"][data-seq="' + seq + '"]');
+    return { bar: document.querySelector('[data-testid="run-baseline-bar"]')?.textContent ?? null,
+             mark: row(1)?.dataset.baseline ?? null,
+             base4: row(4)?.querySelector('[data-testid="run-diff-base"]')?.textContent ?? null,
+             base1: !!row(1)?.querySelector('[data-testid="run-diff-base"]') };
+  `);
+  report.ok("点第 1 次的「设为基准」：最上面钉着「基准 #1」，第 4 次那一行多一行「比基准 #1：s1 · … → …」，基准自己那一行没有",
+    /^基准 #1 · /.test(based.bar ?? "") && based.mark === "1" && !based.base1 &&
+      new RegExp(`^比基准 #1：${s1Name} · .+ → `).test(based.base4 ?? ""),
+    JSON.stringify(based));
+
   // 「恢复这组参数」：点第 1 次那一行，s1 的比例回到那时的 0.5，一条撤销；Ctrl+Z 回来
   const ratioNow = () => cdp.eval(`
     // 有效值：0.5 是默认值，稀疏存储时不写进 params
@@ -1098,6 +1117,8 @@ async function suitePreview(cdp, report) {
   `);
   const ratioBefore = await ratioNow();
   const pastBeforeRestore = await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+  await showRow1();
+  await sleep(100);
   await clickAt(cdp, await centerOf(cdp, '[data-testid="run-record"][data-seq="1"] [data-testid="run-restore"]'));
   await sleep(200);
   const restored = { ratio: await ratioNow(), steps: (await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`)) - pastBeforeRestore,

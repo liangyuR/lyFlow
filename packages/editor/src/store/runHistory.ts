@@ -15,6 +15,9 @@ interface RunHistoryState {
   records: readonly RunRecord[];
   /** 这张图打开以来第几次运行（只数记下来的那些）。 */
   seq: number;
+  /** 基准（runId）：调到一组好的之后接着试，每一次都与它比，而不只是与上一次比。不随 50 条的上限被挤掉。 */
+  baseline: string | null;
+  setBaseline(runId: string | null): void;
   begin(
     runId: string,
     doc: GraphDoc,
@@ -34,6 +37,12 @@ const plans = new Map<string, ReadonlySet<string>>();
 export const useRunHistoryStore = create<RunHistoryState>((set, get) => ({
   records: [],
   seq: 0,
+  baseline: null,
+  setBaseline(runId) {
+    if (get().baseline === runId) return;
+    if (runId !== null && !get().records.some((r) => r.runId === runId)) return;
+    set({ baseline: runId });
+  },
   begin(runId, doc, params, recipe, request) {
     // 被这一次顶掉的（抢占、排队时被取消）收不到自己的收场：还挂着「运行中」的记成取消 —— 预览、单节点运行也会顶掉它
     const prev = get().records;
@@ -58,9 +67,14 @@ export const useRunHistoryStore = create<RunHistoryState>((set, get) => ({
       durationMs: null,
       readings: [],
     };
-    const records = [record, ...settled];
-    for (const dropped of records.slice(MAX_RUN_RECORDS)) plans.delete(dropped.runId);
-    set({ seq, records: records.slice(0, MAX_RUN_RECORDS) });
+    const all = [record, ...settled];
+    // 留最近的 50 条；基准被挤到外面的话占掉第 50 个位置
+    const baseline = get().baseline;
+    const keep = all.slice(0, MAX_RUN_RECORDS);
+    const base = baseline && !keep.some((r) => r.runId === baseline) ? all.find((r) => r.runId === baseline) : undefined;
+    const records = base ? [...keep.slice(0, MAX_RUN_RECORDS - 1), base] : keep;
+    for (const dropped of all) if (!records.includes(dropped)) plans.delete(dropped.runId);
+    set({ seq, records });
   },
   planned(runId, plan) {
     if (get().records.some((r) => r.runId === runId)) plans.set(runId, new Set(plan));
@@ -81,7 +95,7 @@ export const useRunHistoryStore = create<RunHistoryState>((set, get) => ({
   },
   clear() {
     plans.clear();
-    if (get().records.length === 0 && get().seq === 0) return;
-    set({ records: [], seq: 0 });
+    if (get().records.length === 0 && get().seq === 0 && get().baseline === null) return;
+    set({ records: [], seq: 0, baseline: null });
   },
 }));

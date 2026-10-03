@@ -103,9 +103,14 @@ test("调参记录：读数按 id、端口排好，比上一次找同一个；�
   h().begin("r5", base, {}, null, { targets: ["s/b"] });
   h().finish("r5", "error", 3, nodes);
   assert.deepEqual(h().records[0].readings, [], "运行到某处、没收到 run_started（编译就失败了）：节点表里的是上一次的，不记");
+  // 基准：只能定在记着的那几次上；不随 50 条的上限被挤掉（占掉最后一个位置）
+  h().setBaseline("nope");
+  assert.equal(h().baseline, null, "没有这一次：不定");
+  h().setBaseline("r1");
   for (let i = 0; i < MAX_RUN_RECORDS + 5; i += 1) h().begin(`x${i}`, base, {}, null, {});
   assert.equal(h().records.length, MAX_RUN_RECORDS, "只留最近 50 次");
   assert.equal(h().records[0].seq, 5 + MAX_RUN_RECORDS + 5, "新的在前，序号接着数（r1–r5 之后又 55 次）");
+  assert.deepEqual([h().records.at(-1).runId, h().baseline], ["r1", "r1"], "基准 r1 留在最后一个位置");
   h().clear();
-  assert.deepEqual([h().records.length, h().seq], [0, 0], "换一张图清空、序号从头数");
+  assert.deepEqual([h().records.length, h().seq, h().baseline], [0, 0, null], "换一张图清空、序号从头数、基准也清掉");
 });
