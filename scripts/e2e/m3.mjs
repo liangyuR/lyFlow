@@ -1473,6 +1473,77 @@ async function suiteEditing(cdp, report) {
   await pressEscape(cdp);
   await sleep(100);
 
+  // 右键菜单的基本编辑（以前二十来项里偏偏没有删除、复制、改名）；混选时检查器里点一种算子收窄选区；空白处右键也有
+  // 菜单（以前毫无反应）
+  {
+    const head = (id) => centerOf(cdp, `[data-testid="node-${id}"] .node__head`);
+    const rightClickOn = async (id) => {
+      await clickAt(cdp, await head(id), { button: "right" });
+      await sleep(200);
+    };
+    const pick = async (testId) => {
+      const p = await centerOf(cdp, `[data-testid="${testId}"]`);
+      mustOk(p != null, `菜单里有 ${testId}`, p);
+      await clickAt(cdp, p);
+      await sleep(200);
+    };
+    const graphState = () => cdp.eval(`
+      const g = window.__lyflow.stores.graph.getState();
+      return { nodes: g.doc.nodes.length, edges: g.doc.edges.length, past: g.past.length,
+               selected: [...window.__lyflow.stores.ui.getState().selectedNodes].sort() };
+    `);
+    const s0 = await graphState();
+    await rightClickOn(ids.voxel);
+    await pick("ctx-disconnect");
+    const disc = await graphState();
+    await pressCtrl(cdp, "z");
+    await sleep(200);
+    await rightClickOn(ids.gen);
+    await pick("ctx-select-same");
+    const same = (await graphState()).selected;
+    await rightClickOn(ids.gen);
+    await pick("ctx-rename");
+    const renaming = await cdp.eval(`return document.activeElement?.getAttribute('data-testid') ?? null;`);
+    await pressEscape(cdp);
+    await sleep(150);
+    await rightClickOn(ids.voxel);
+    await pick("ctx-delete");
+    const del = await graphState();
+    await pressCtrl(cdp, "z");
+    await sleep(200);
+    // 混选（两个合成点云 + 体素）：检查器里点「2 × 合成点云」→ 只留它们，一起改参数的表单出来
+    await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}, ${lit(twin)}, ${lit(ids.voxel)}], []); return true;`);
+    await sleep(200);
+    await pick("multi-pick-gen.synthetic");
+    const narrowed = { selected: (await graphState()).selected,
+      form: await cdp.eval(`return !!document.querySelector('[data-testid="inspector-multi"] [data-testid="multi-param-pointCount"]');`) };
+    // 空白处：在画布上找一块空的（不在节点、连线、按钮、小地图上）
+    const blank = await cdp.eval(`
+      const r = document.querySelector('.react-flow__pane').getBoundingClientRect();
+      for (let y = r.top + 40; y < r.bottom - 160; y += 24) {
+        for (let x = r.left + 80; x < r.right - 220; x += 24) {
+          if (document.elementFromPoint(x, y)?.classList.contains('react-flow__pane')) return { x: Math.round(x), y: Math.round(y) };
+        }
+      }
+      return null;
+    `);
+    mustOk(blank != null, "画布上找得到一块空白", blank);
+    await clickAt(cdp, blank, { button: "right" });
+    await sleep(200);
+    const paneMenu = await cdp.eval(`return !!document.querySelector('[data-testid="pane-context-menu"]');`);
+    await pick("pane-ctx-add");
+    const popupAt = await cdp.eval(`const b = document.querySelector('.search-popup')?.getBoundingClientRect(); return b ? { x: Math.round(b.left), y: Math.round(b.top) } : null;`);
+    await pressEscape(cdp);
+    await sleep(150);
+    report.eq("右键菜单：断开全部连线、选中同一种算子、改名、删除（各一条撤销）；混选时点检查器里的一种收窄；空白处右键 → 添加算子在右键处开搜索",
+      { disc: { edges: disc.edges < s0.edges, nodes: disc.nodes === s0.nodes, steps: disc.past - s0.past },
+        same, renaming, del: { nodes: s0.nodes - del.nodes, steps: del.past - s0.past },
+        narrowed, paneMenu, near: popupAt != null && Math.abs(popupAt.x - blank.x) <= 30 && Math.abs(popupAt.y - blank.y) <= 30 },
+      { disc: { edges: true, nodes: true, steps: 1 },
+        same: [ids.gen, twin].sort(), renaming: `node-rename-${ids.gen}`, del: { nodes: 1, steps: 1 },
+        narrowed: { selected: [ids.gen, twin].sort(), form: true }, paneMenu: true, near: true });
+  }
+
   // #12 复制粘贴走系统剪贴板（另一个窗口、重开之后也粘得进来）。系统剪贴板换成页面里的桩（stubClipboard）：
   // 这里要验的是「写的是什么、粘的是哪一份」，不该动用户真的剪贴板
   await stubClipboard(cdp);

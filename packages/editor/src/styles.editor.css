@@ -974,6 +974,24 @@
 
 .ctxmenu button:hover:not(:disabled) { background: var(--lyflow-bg-3); }
 .ctxmenu button:disabled { color: var(--lyflow-fg-2); cursor: default; }
+/* 菜单里分组的那条线、删除这种不好撤回的动作用警示色 */
+/* 检查器混选时「2 × 体素栅格」：点了只留这一种 */
+.insp__multi-pick {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--lyflow-accent);
+  font: inherit;
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+
+.ctxmenu__sep {
+  margin: 4px 6px;
+  border: 0;
+  border-top: 1px solid var(--lyflow-border);
+}
+.ctxmenu button.ctxmenu__danger { color: #ff8a8a; }
 
 /* ------------------------------------------------ 工具栏的运行区 */
 

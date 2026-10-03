@@ -557,7 +557,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         />
 
         <section className="app__canvas">
-          <GraphCanvas onRunToNode={handlers.onRunToNode} onOpenRecent={(p) => void doOpenRecent(p)} />
+          <GraphCanvas onRunToNode={handlers.onRunToNode} onOpenRecent={(p) => void doOpenRecent(p)} onLayout={handlers.onLayout} />
         </section>
 
         <div

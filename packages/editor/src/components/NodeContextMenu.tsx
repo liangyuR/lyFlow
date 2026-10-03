@@ -6,6 +6,7 @@ import { useCallback, useMemo, useRef } from "react";
 
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 
+import { copyNodes, deleteHealing, deleteSelection, disconnectAll, selectSameOp } from "../lib/editActions";
 import { keyHint } from "../lib/keymap";
 import { layoutGraph } from "../lib/layout";
 import { useMotionEnabled, viewportMs, withLayoutTransition } from "../lib/motion";
@@ -130,6 +131,84 @@ export function NodeContextMenu({
       data-testid="node-context-menu"
       onClick={(e) => e.stopPropagation()}
     >
+      {/* 基本编辑：以前这二十来项里偏偏没有删除、复制、改名（连线菜单倒有「删除连线」），不熟快捷键的人只能去找键 */}
+      <button
+        type="button"
+        data-testid="ctx-rename"
+        title="改右键的这一个（多选时也是）"
+        onClick={() => {
+          onClose();
+          useUiStore.getState().setRenamingNode(menu.nodeId);
+        }}
+      >
+        改名 <kbd>{keyHint("rename")}</kbd>
+      </button>
+      <button
+        type="button"
+        data-testid="ctx-copy"
+        onClick={() => {
+          copyNodes(new Set(menuTargets()), false);
+          onClose();
+        }}
+      >
+        复制 <kbd>{keyHint("copy")}</kbd>
+      </button>
+      <button
+        type="button"
+        data-testid="ctx-duplicate"
+        onClick={() => {
+          const made = useGraphStore.getState().duplicateNodes(menuTargets());
+          if (made.nodeIds.length > 0) useUiStore.getState().setSelection(made.nodeIds, []);
+          onClose();
+        }}
+      >
+        原地复制 <kbd>{keyHint("duplicate")}</kbd>
+      </button>
+      <button
+        type="button"
+        data-testid="ctx-disconnect"
+        disabled={!view.edges.some((e) => menuTargets().includes(e.from.node) || menuTargets().includes(e.to.node))}
+        onClick={() => {
+          disconnectAll(menuTargets());
+          onClose();
+        }}
+      >
+        断开全部连线
+      </button>
+      <button
+        type="button"
+        data-testid="ctx-select-same"
+        onClick={() => {
+          const n = selectSameOp(menu.nodeId);
+          useUiStore.getState().showToast(`选中了同一种算子的 ${n} 个节点`);
+          onClose();
+        }}
+      >
+        选中同一种算子
+      </button>
+      <button
+        type="button"
+        data-testid="ctx-delete-heal"
+        title="删掉后把上下游接回去（规则与静音透传一致）"
+        onClick={() => {
+          deleteHealing(menuTargets());
+          onClose();
+        }}
+      >
+        删除并接通上下游 <kbd>{keyHint("deleteHeal")}</kbd>
+      </button>
+      <button
+        type="button"
+        className="ctxmenu__danger"
+        data-testid="ctx-delete"
+        onClick={() => {
+          deleteSelection(menuTargets(), []);
+          onClose();
+        }}
+      >
+        删除 <kbd>{keyHint("delete")}</kbd>
+      </button>
+      <hr className="ctxmenu__sep" />
       <button
         type="button"
         data-testid="run-to-node"

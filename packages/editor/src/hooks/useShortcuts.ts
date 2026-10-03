@@ -5,17 +5,14 @@ import { useEffect, type RefObject } from "react";
 
 import { matchShortcut } from "../lib/keymap";
 import { subgraphIdOf } from "../types/graph";
-import { augmentOperators, levelOf } from "../lib/subgraph";
-import { copyText } from "../lib/clipboard";
-import { materializeBindings } from "../lib/graphParams";
+import { levelOf } from "../lib/subgraph";
+import { copyNodes, deleteHealing, deleteSelection } from "../lib/editActions";
 import { stepHistory } from "../lib/history";
-import { decodeNodeClipboard, encodeNodeClipboard } from "../lib/nodeClipboard";
+import { decodeNodeClipboard } from "../lib/nodeClipboard";
 import { revealError } from "../lib/revealError";
 import { useCompareStore } from "../store/compare";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
-import { useManifestStore } from "../store/manifest";
-import { currentOverrides } from "../store/recipe";
 import { usePeekStore, type PeekWindow } from "../store/peek";
 import { useUiStore } from "../store/ui";
 import { useModalStore } from "../lib/modal";
@@ -192,26 +189,7 @@ export function useShortcuts(
           if (ids.size === 0) return;
           if (!pointerOnCanvas && hasTextSelection(owner)) return;
           e.preventDefault();
-          const doc = graph.doc;
-          // 从当前这一层取：选区是本层的 id。以前取的是顶层的 doc.nodes —— 在子图里复制要么一个都没有，
-          // 要么拿到顶层同名的那个节点；剪切更糟，剪贴板里是错的，本层的节点却真删了
-          const level = levelOf(doc, ui.path);
-          const ops = augmentOperators(useManifestStore.getState().operatorsById, doc.subgraphs);
-          const nodes = materializeBindings(
-            doc,
-            ui.path,
-            level.nodes.filter((n) => ids.has(n.id)),
-            ops,
-            currentOverrides(),
-          );
-          // 只带走两端都在选区内的边 —— 粘贴时内部连线得以保留
-          const edges = level.edges.filter((edge) => ids.has(edge.from.node) && ids.has(edge.to.node));
-          const clip = { nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) };
-          ui.setClipboard(clip);
-          // 也写一份到系统剪贴板：另一个窗口、重开之后照样粘得进来（写不进就只有应用内这一份）
-          void copyText(encodeNodeClipboard(clip)).then((ok) => useUiStore.setState({ clipboardOnlyInApp: !ok }));
-          if (hit.id === "cut") graph.deleteNodes([...ids]);
-          ui.showToast(`已复制 ${nodes.length} 个节点`);
+          copyNodes(ids, hit.id === "cut");
           return;
         }
         case "paste":
@@ -234,31 +212,16 @@ export function useShortcuts(
         case "delete": {
           if (ui.selectedNodes.size === 0 && ui.selectedEdges.size === 0) return;
           e.preventDefault();
-          const nodes = [...ui.selectedNodes];
-          const edges = [...ui.selectedEdges];
-          // 一条撤销：框选会把相连的边一起选上，以前先断边、再删节点记成两条，Ctrl+Z 一次只回来节点、边还断着
-          const label =
-            nodes.length > 0
-              ? nodes.length === 1 ? "删除节点" : `删除 ${nodes.length} 个节点`
-              : edges.length === 1 ? "断开连线" : `断开 ${edges.length} 条连线`;
-          graph.batch(label, () => {
-            if (edges.length > 0) graph.disconnect(edges);
-            if (nodes.length > 0) graph.deleteNodes(nodes);
-          });
-          ui.clearSelection();
+          deleteSelection([...ui.selectedNodes], [...ui.selectedEdges]);
           return;
         }
 
         case "deleteHeal": {
           // 从链中间拿掉一步：删掉选中的节点，上下游按静音透传的规则接回去（一条撤销）。以前只能 Delete，上下游
           // 全断开，后面分出几支就要再拖几次线
-          const ids = [...ui.selectedNodes];
-          if (ids.length === 0) return;
+          if (ui.selectedNodes.size === 0) return;
           e.preventDefault();
-          const r = graph.deleteNodesHealing(ids);
-          ui.clearSelection();
-          const left = r.unresolved > 0 ? `；${r.unresolved} 个下游没有合适的来源，没接` : "";
-          ui.showToast(`已删除 ${ids.length} 个节点，接通 ${r.wired} 条${left}`, r.unresolved > 0 ? "warn" : "info");
+          deleteHealing([...ui.selectedNodes]);
           return;
         }
         case "mute": {

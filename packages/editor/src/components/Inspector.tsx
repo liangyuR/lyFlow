@@ -711,7 +711,22 @@ function MultiInspector({ ids }: { ids: string[] }) {
         <ul className="insp__multi-ops">
           {[...counts].map(([opId, n]) => (
             <li key={opId}>
-              {n} × {operatorsById.get(opId)?.label ?? opId}
+              {counts.size > 1 ? (
+                // 混选了几种算子：点一种就把选区收窄成它，一起改参数的表单就出来了
+                <button
+                  type="button"
+                  className="insp__multi-pick"
+                  data-testid={`multi-pick-${opId}`}
+                  title="只留这一种算子，一起改参数"
+                  onClick={() => useUiStore.getState().setSelection(nodes.filter((x) => x.op === opId).map((x) => x.id), [])}
+                >
+                  {n} × {operatorsById.get(opId)?.label ?? opId}
+                </button>
+              ) : (
+                <>
+                  {n} × {operatorsById.get(opId)?.label ?? opId}
+                </>
+              )}
             </li>
           ))}
         </ul>
@@ -720,7 +735,7 @@ function MultiInspector({ ids }: { ids: string[] }) {
         <MultiParams nodes={nodes} op={op} />
       ) : (
         <p className="insp__hint">
-          {op ? "此算子没有参数" : "选中的是同一种算子时，可以在这里一起改参数。"}
+          {op ? "此算子没有参数" : "选中的是同一种算子时，可以在这里一起改参数：点上面的一种，只留它。"}
         </p>
       )}
     </div>

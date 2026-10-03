@@ -67,6 +67,7 @@ import { FlowEdge } from "./FlowEdge";
 import { OPERATOR_DND_MIME, SNIPPET_DND_MIME } from "./NodePalette";
 import { EdgeContextMenu, type EdgeMenuState } from "./EdgeContextMenu";
 import { NodeContextMenu, type ContextMenuState } from "./NodeContextMenu";
+import { PaneContextMenu, type PaneMenuState } from "./PaneContextMenu";
 import { OperatorNode } from "./OperatorNode";
 import { useCanvasMotion } from "./useCanvasMotion";
 
@@ -108,6 +109,8 @@ export interface CanvasActions {
   onRunToNode: (nodeId: string) => void;
   /** 空画布上点了一个最近打开的文件。不给就不列。 */
   onOpenRecent?: ((path: string) => void) | undefined;
+  /** 整张图整理布局（与工具栏、Ctrl+L 同一个）。空白处右键菜单用；不给就不列这一项。 */
+  onLayout?: (() => void) | undefined;
 }
 
 const PEEK_FLASH_MS = 200;
@@ -356,7 +359,7 @@ function applySelectChanges(
   else ui.setSelection([...ui.selectedNodes], [...next]);
 }
 
-export function GraphCanvas({ onRunToNode, onOpenRecent }: CanvasActions) {
+export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActions) {
   const doc = useGraphStore((s) => s.doc);
   const path = useUiStore((s) => s.path);
   const baseOperators = useManifestStore((s) => s.operatorsById);
@@ -400,6 +403,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent }: CanvasActions) {
   const sizeBurst = useRef({ count: 0, resetHandle: null as number | null });
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const [edgeMenu, setEdgeMenu] = useState<EdgeMenuState | null>(null);
+  const [paneMenu, setPaneMenu] = useState<PaneMenuState | null>(null);
   const [guides, setGuides] = useState<Guide[]>([]);
   const [snapping, setSnapping] = useState(true);
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
@@ -974,18 +978,31 @@ export function GraphCanvas({ onRunToNode, onOpenRecent }: CanvasActions) {
       ui.setSelection([node.id], []);
     }
     setEdgeMenu(null);
+    setPaneMenu(null);
     setMenu({ nodeId: node.id, x: e.clientX, y: e.clientY, before });
   }, []);
 
   const onEdgeContextMenu = useCallback((e: React.MouseEvent, edge: Edge) => {
     e.preventDefault();
     setMenu(null);
+    setPaneMenu(null);
     setEdgeMenu({ edgeId: edge.id, x: e.clientX, y: e.clientY });
+  }, []);
+
+  /** 空白处右键：React Flow 在「右键拖平移」模式下自己吞掉了这个 contextmenu（只 preventDefault、不往下发），
+   *  冒泡到外层这里再接。右键拖过平移之后的那一次 useRightDragPan 在捕获阶段就吞掉了，到不了这里。 */
+  const onCanvasContextMenu = useCallback((e: React.MouseEvent) => {
+    if (!(e.target instanceof Element) || !e.target.classList.contains("react-flow__pane")) return;
+    e.preventDefault();
+    setMenu(null);
+    setEdgeMenu(null);
+    setPaneMenu({ x: e.clientX, y: e.clientY });
   }, []);
 
   const closeMenu = useCallback(() => {
     setMenu(null);
     setEdgeMenu(null);
+    setPaneMenu(null);
   }, []);
 
   const onPaneClick = useCallback(() => {
@@ -996,7 +1013,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent }: CanvasActions) {
   // 右键菜单开着时：Esc 收起（并且只收起菜单 —— 以前 Esc 照样落到「退出子图」上，菜单还悬在那儿）；
   // 在菜单外面按下鼠标收起（以前只有点画布才收，点工具栏、检查器它留着）；滚轮缩放画布也收起（菜单是按屏幕坐标摆的，
   // 画布一动它就对不上节点了）
-  const menuOpen = menu !== null || edgeMenu !== null;
+  const menuOpen = menu !== null || edgeMenu !== null || paneMenu !== null;
   useEffect(() => {
     if (!menuOpen) return;
     const owner = wrapper.current?.ownerDocument ?? document;
@@ -1062,6 +1079,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent }: CanvasActions) {
       className="canvas"
       ref={wrapper}
       onDoubleClick={onDoubleClick}
+      onContextMenu={onCanvasContextMenu}
       onDragOver={onDragOver}
       onDrop={onDrop}
       onClick={() => {
@@ -1174,6 +1192,18 @@ export function GraphCanvas({ onRunToNode, onOpenRecent }: CanvasActions) {
           }
           onPeek={openPeek}
           onReroute={insertReroute}
+          onClose={closeMenu}
+        />
+      )}
+
+      {paneMenu && (
+        <PaneContextMenu
+          menu={paneMenu}
+          onAddOperator={(at) => useUiStore.getState().openSearch({ screen: at, flow: screenToFlowPosition(at) })}
+          onSelectAll={() => useUiStore.getState().setSelection(levelView().nodes.map((n) => n.id), [])}
+          onLayout={onLayout}
+          onFitView={() => void fitView({ duration: viewportMs(motionOn) })}
+          onHelp={() => useUiStore.getState().setHelpOpen(true)}
           onClose={closeMenu}
         />
       )}
