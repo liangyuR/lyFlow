@@ -11,7 +11,7 @@ import { augmentOperators } from "../src/lib/subgraph.ts";
 import { historyRows, jumpHistory, stepHistory } from "../src/lib/history.ts";
 import { useGraphStore } from "../src/store/graph.ts";
 import { useManifestStore } from "../src/store/manifest.ts";
-import { runParamsOf, useRecipeStore } from "../src/store/recipe.ts";
+import { resetRecipes, runParamsOf, selectRecipe, useRecipeStore } from "../src/store/recipe.ts";
 import { useUiStore } from "../src/store/ui.ts";
 
 const root = new URL("../../../", import.meta.url);
@@ -654,5 +654,23 @@ test("恢复某次运行的参数（调参记录）：节点参数、静音、�
   g().setParam("n_plane", "distanceThreshold", 0.05);
   const r2 = g().restoreParams(bound, "恢复");
   assert.deepEqual([r2.changed, node("n_plane").params.distanceThreshold], [1, 0.006], "删掉的图参数那时的 0.006 写回节点");
+
+  // 选着配方时调的值写进配方：那次用的就是现在这个配方，配方里的值也改回去（同一条撤销）；不是同一个配方就不动配方
+  reset();
+  resetRecipes("g.recipes", "ready");
+  assert.equal(g().createRecipe("夜班"), true);
+  selectRecipe("夜班");
+  g().editGraphParamValue("planeTol", 0.01);
+  const night = { doc: doc(), params: runParamsOf(doc()), recipe: "夜班" };
+  g().editGraphParamValue("planeTol", 0.03);
+  const steps2 = g().past.length;
+  const r3 = g().restoreParams(night.doc, "恢复", { params: night.params, recipe: night.recipe });
+  assert.deepEqual([r3.changed, runParamsOf(doc()).planeTol, g().past.length - steps2], [1, 0.01, 1], "配方里的 0.03 改回 0.01，一条撤销");
+  g().undo();
+  assert.equal(runParamsOf(doc()).planeTol, 0.03, "Ctrl+Z 连配方一起回去");
+  selectRecipe(null);
+  assert.equal(g().restoreParams(night.doc, "恢复", { params: night.params, recipe: night.recipe }).changed, 0,
+    "现在选着基础、那次是夜班：配方不动（doc 本来就一样）");
+  resetRecipes(null, "none");
 });
 

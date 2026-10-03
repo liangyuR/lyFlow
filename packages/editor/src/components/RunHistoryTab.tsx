@@ -10,7 +10,7 @@ import { diffRuns, diffText, previousReadingIn, type RunRecord } from "../lib/ru
 import { augmentOperators, describeEventNode } from "../lib/subgraph";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
-import { runParamsOf } from "../store/recipe";
+import { runParamsOf, useRecipeStore } from "../store/recipe";
 import { useRunHistoryStore } from "../store/runHistory";
 import { useUiStore } from "../store/ui";
 
@@ -85,7 +85,12 @@ export function RunHistoryTab() {
 
 /** 「恢复这组参数」：改回那一次的参数，说清楚哪些没能恢复（后来删掉的节点、那时还没有的、配方里的值）。 */
 function restoreRun(r: RunRecord, baseOps: Parameters<typeof augmentOperators>[0]): void {
-  const { changed, skipped } = useGraphStore.getState().restoreParams(r.doc, `恢复第 ${r.seq} 次运行的参数`);
+  const { changed, skipped } = useGraphStore.getState().restoreParams(r.doc, `恢复第 ${r.seq} 次运行的参数`, {
+    params: r.params,
+    recipe: r.recipe,
+  });
+  const current = useRecipeStore.getState().current;
+  const where = (name: string | null) => (name ? `配方「${name}」` : "基础");
   const after = useGraphStore.getState().doc;
   const left = diffRuns(
     { doc: r.doc, params: r.params },
@@ -101,7 +106,11 @@ function restoreRun(r: RunRecord, baseOps: Parameters<typeof augmentOperators>[0
     left.added.length > 0 ? `${left.added.length} 个节点那时还没有` : null,
     skipped > 0 ? `${skipped} 处参数现在（或那时）由图参数 / 子图参数提供、或已不存在，没动` : null,
     gpOneSide > 0 ? `${gpOneSide} 个图参数是后来加的或删掉的` : null,
-    recipeDiffs > 0 ? `${recipeDiffs} 处对不上（配方里的值没动）` : null,
+    recipeDiffs > 0
+      ? r.recipe !== current
+        ? `那一次是在${where(r.recipe)}下跑的、现在是${where(current)}：配方里的 ${recipeDiffs} 处没动（切到${where(r.recipe)}再恢复）`
+        : `${recipeDiffs} 处对不上`
+      : null,
   ].filter(Boolean);
   const tail = notes.length > 0 ? `；${notes.join("，")}` : "";
   const ui = useUiStore.getState();
@@ -146,7 +155,7 @@ function RunRow({
             type="button"
             className="runs__restore"
             data-testid="run-restore"
-            title="把参数改回这一次运行时的（节点的参数与静音、图参数的基础值；节点不增不删、配方不动）。一条撤销"
+            title="把参数改回这一次运行时的（节点的参数与静音、图参数；现在选着的就是那次的配方时配方里的值也改回去；节点不增不删）。一条撤销"
             onClick={onRestore}
           >
             恢复这组参数
