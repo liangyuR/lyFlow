@@ -362,6 +362,9 @@ interface GraphState {
 
   /** 静音（交互清单 P1 #25）。是执行语义，所以进 doc、进撤销栈。 */
   setBypass(ids: readonly string[], value: boolean): void;
+  /** 把参数恢复成 from 那一份里的（调参记录的「恢复这组参数」）：两边都有、算子没换的节点（子图定义里的按定义对上）
+   *  恢复参数与静音，图参数恢复基础值；节点不增不删、连线不动，配方里的值不动。一条撤销。返回改了几处（0 = 本来就一样）。 */
+  restoreParams(from: GraphDoc, label: string): number;
   /** 折叠：只显示标题与已连端口。纯 UI，但存进文件里下次打开还在。 */
   setCollapsed(ids: readonly string[], value: boolean): void;
   renameNode(id: string, title: string | null): void;
@@ -944,6 +947,37 @@ export const useGraphStore = create<GraphState>((set, get) => {
         lvl.edges.push(...newEdges);
       });
       return { nodeIds: newNodes.map((n) => n.id), idMap };
+    },
+
+    restoreParams(from, label) {
+      let changed = 0;
+      transact(label, (d) => {
+        const pairs: [GraphLevel, GraphLevel | undefined][] = [[d, from]];
+        for (const [id, def] of Object.entries(d.subgraphs ?? {})) pairs.push([def, from.subgraphs?.[id]]);
+        for (const [now, then] of pairs) {
+          for (const n of now.nodes) {
+            const old = then?.nodes.find((x) => x.id === n.id && x.op === n.op);
+            if (!old) continue;
+            if (!valueEquals(n.params ?? {}, old.params ?? {})) {
+              n.params = structuredClone(old.params ?? {});
+              changed += 1;
+            }
+            if ((n.bypass === true) !== (old.bypass === true)) {
+              if (old.bypass) n.bypass = true;
+              else delete n.bypass;
+              changed += 1;
+            }
+          }
+        }
+        for (const [name, gp] of Object.entries(d.params ?? {})) {
+          const old = from.params?.[name];
+          if (old && !valueEquals(gp.default, old.default)) {
+            gp.default = structuredClone(old.default);
+            changed += 1;
+          }
+        }
+      });
+      return changed;
     },
 
     setBypass(ids, value) {

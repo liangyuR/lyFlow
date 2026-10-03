@@ -1081,6 +1081,25 @@ async function suitePreview(cdp, report) {
       runRows.slice(0, 3).every((r) => r.diff.startsWith(`${s1Name} · `) && / → /.test(r.diff)) &&
       / → 0\.2$/.test(runRows[1].diff) && /运行到/.test(runRows[1].head) && /整张图/.test(runRows[3].head),
     JSON.stringify({ s1Name, runRows }));
+
+  // 「恢复这组参数」：点第 1 次那一行，s1 的比例回到那时的 0.5，一条撤销；Ctrl+Z 回来
+  const ratioNow = () => cdp.eval(`
+    // 有效值：0.5 是默认值，稀疏存储时不写进 params
+    const n = window.__lyflow.stores.graph.getState().doc.nodes.find((x) => x.id === ${lit(pin.s1)});
+    return n.params.keepRatio ?? window.__lyflow.stores.manifest.getState().operatorsById.get(n.op).params.find((q) => q.name === 'keepRatio').default;
+  `);
+  const ratioBefore = await ratioNow();
+  const pastBeforeRestore = await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="run-record"][data-seq="1"] [data-testid="run-restore"]'));
+  await sleep(200);
+  const restored = { ratio: await ratioNow(), steps: (await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`)) - pastBeforeRestore,
+                     toast: await cdp.eval(`return window.__lyflow.stores.ui.getState().toast?.text ?? null;`) };
+  await pressCtrl(cdp, "z");
+  await sleep(150);
+  report.ok("点第 1 次那一行的「恢复这组参数」：s1 的比例回到 0.5、一条撤销、说了改了几处；Ctrl+Z 回到恢复之前",
+    restored.ratio === 0.5 && ratioBefore !== 0.5 && restored.steps === 1 && /^已恢复第 1 次运行时的参数（1 处/.test(restored.toast ?? "") &&
+      (await ratioNow()) === ratioBefore,
+    JSON.stringify({ ratioBefore, restored }));
   await cdp.eval(`window.__lyflow.stores.ui.setState({ drawer: ${lit(drawerBeforeRuns)} }); return true;`);
 }
 

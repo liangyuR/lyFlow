@@ -1,5 +1,6 @@
 // 抽屉的「调参」页：每次正式运行一行，新的在上。写着这次比上一次改了什么、量测读数是多少、比上一次变了多少，
-// 点读数打开到那个节点。调参的循环（改阈值 → 跑 → 看 gap 变了多少）以前上一次是多少全靠脑子记。
+// 点读数打开到那个节点；「恢复这组参数」把参数改回那一次的（一条撤销）。调参的循环（改阈值 → 跑 → 看 gap 变了多少）
+// 以前上一次是多少全靠脑子记，回到读数最好的那一组只能一个个参数凭记忆改回去。
 
 import { useMemo } from "react";
 
@@ -9,6 +10,7 @@ import { diffRuns, diffText, previousReading, type RunRecord } from "../lib/runH
 import { augmentOperators, describeEventNode } from "../lib/subgraph";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
+import { runParamsOf } from "../store/recipe";
 import { useRunHistoryStore } from "../store/runHistory";
 import { useUiStore } from "../store/ui";
 
@@ -69,9 +71,35 @@ export function RunHistoryTab() {
     <ol className="runs" data-testid="run-history">
       {rows.map(({ r, diff, lastDone }) => (
         <RunRow key={r.runId} record={r} diffLine={diff ? diffText(diff) : "这张图打开以来的第一次"}
-          diffTitle={diff ? diffText(diff, Infinity) : ""} lastDone={lastDone} describe={(id) => describeEventNode(doc, ops, id)} />
+          diffTitle={diff ? diffText(diff, Infinity) : ""} lastDone={lastDone} describe={(id) => describeEventNode(doc, ops, id)}
+          onRestore={() => restoreRun(r, baseOps)} />
       ))}
     </ol>
+  );
+}
+
+/** 「恢复这组参数」：改回那一次的参数，说清楚哪些没能恢复（后来删掉的节点、那时还没有的、配方里的值）。 */
+function restoreRun(r: RunRecord, baseOps: Parameters<typeof augmentOperators>[0]): void {
+  const changed = useGraphStore.getState().restoreParams(r.doc, `恢复第 ${r.seq} 次运行的参数`);
+  const after = useGraphStore.getState().doc;
+  const left = diffRuns(
+    { doc: r.doc, params: r.params },
+    { doc: after, params: runParamsOf(after) },
+    augmentOperators(baseOps, { ...r.doc.subgraphs, ...after.subgraphs }),
+  );
+  const notes = [
+    left.removed.length > 0 ? `${left.removed.length} 个节点后来删掉了` : null,
+    left.added.length > 0 ? `${left.added.length} 个节点那时还没有` : null,
+    left.changes.length > 0 ? `${left.changes.length} 处对不上（配方里的值没动）` : null,
+  ].filter(Boolean);
+  const ui = useUiStore.getState();
+  if (changed === 0 && notes.length === 0) {
+    ui.showToast(`参数与第 ${r.seq} 次运行时一样`);
+    return;
+  }
+  ui.showToast(
+    `已恢复第 ${r.seq} 次运行时的参数（${changed} 处，Ctrl+Z 撤回）${notes.length > 0 ? `；${notes.join("，")}` : ""}`,
+    notes.length > 0 ? "warn" : "info",
   );
 }
 
@@ -81,12 +109,14 @@ function RunRow({
   diffTitle,
   lastDone,
   describe,
+  onRestore,
 }: {
   record: RunRecord;
   diffLine: string;
   diffTitle: string;
   lastDone: RunRecord | undefined;
   describe: (id: string) => ReturnType<typeof describeEventNode>;
+  onRestore: () => void;
 }) {
   const scope = r.targets.length > 0 ? `运行到 ${r.targets.map((t) => describe(t).names.at(-1) ?? t).join("、")}` : "整张图";
   return (
@@ -98,6 +128,18 @@ function RunRow({
         {r.durationMs !== null && <span className="runs__time">{duration(r.durationMs)}</span>}
         <span className="runs__scope">{scope}</span>
         {r.recipe && <span className="runs__scope">配方 {r.recipe}</span>}
+        <span className="runs__spacer" />
+        {r.status !== "running" && (
+          <button
+            type="button"
+            className="runs__restore"
+            data-testid="run-restore"
+            title="把参数改回这一次运行时的（节点的参数与静音、图参数的基础值；节点不增不删、配方不动）。一条撤销"
+            onClick={onRestore}
+          >
+            恢复这组参数
+          </button>
+        )}
       </div>
       <div className="runs__diff" data-testid="run-diff" title={diffTitle}>
         {diffLine}

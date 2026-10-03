@@ -589,3 +589,29 @@ test("travel(n) 与连按 n 次撤销 / 重做走到同一个地方；撤销历�
   const full = Array.from({ length: 100 }, () => ({ label: "x", doc: doc(), recipes: recipes().set }));
   assert.match(historyRows(full, [], { doc: doc(), recipes: recipes().set }, null).at(-1).label, /^更早/);
 });
+
+test("恢复某次运行的参数（调参记录）：节点参数、静音、子图定义里的、图参数基础值改回去，后加的节点不动，一条撤销", () => {
+  reset();
+  const then = doc();
+  g().setParam("n_voxel", "leafSize", [0.02, 0.02, 0.02]);
+  g().setBypass(["n_plane"], true);
+  g().setGraphParamDefault("planeTol", 0.02);
+  inClean();
+  g().setParam("s_voxel", "minPointsPerVoxel", 5);
+  useUiStore.getState().setPath([]);
+  const added = g().addNode("filter.voxel_grid", { x: 0, y: 900 });
+  const steps = g().past.length;
+
+  const changed = g().restoreParams(then, "恢复第 1 次运行的参数");
+  const inner = () => doc().subgraphs.sg_clean.nodes.find((n) => n.id === "s_voxel");
+  assert.deepEqual(
+    [changed, node("n_voxel").params.leafSize, node("n_plane").bypass ?? false, doc().params.planeTol.default, inner().params.minPointsPerVoxel,
+      !!node(added), g().past.length - steps, g().past.at(-1).label],
+    [4, [0.005, 0.005, 0.005], false, 0.006, undefined, true, 1, "恢复第 1 次运行的参数"],
+  );
+  assert.equal(g().restoreParams(then, "再来一次"), 0, "已经一样了：0 处");
+  assert.equal(g().past.length - steps, 1, "一样的时候不记撤销");
+  g().undo();
+  assert.deepEqual([node("n_voxel").params.leafSize, node("n_plane").bypass, inner().params.minPointsPerVoxel], [[0.02, 0.02, 0.02], true, 5], "Ctrl+Z 一次全回来");
+});
+

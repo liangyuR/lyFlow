@@ -1586,6 +1586,18 @@
 .runs__reading[data-tone="ng"] .runs__reading-value { color: #ff9a9a; }
 .runs__reading[data-tone="margin"] .runs__reading-value { color: #f5c56b; }
 .runs__delta { color: var(--lyflow-fg-2); font-variant-numeric: tabular-nums; }
+.runs__spacer { flex: 1; }
+.runs__restore {
+  padding: 0 8px;
+  border: 1px solid var(--lyflow-border-strong);
+  border-radius: var(--lyflow-radius);
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-fg-1);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.runs__restore:hover { border-color: var(--lyflow-accent); color: var(--lyflow-fg-0); }
 
 /* -- 底部抽屉（§2.5）------------------------------------------------------- */
 
