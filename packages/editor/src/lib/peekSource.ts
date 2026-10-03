@@ -23,6 +23,18 @@ export interface PeekSource {
   bundle: BundleDesc | null;
   /** 这个节点这次运行的全部输出统计。字段表要按 `<port>.<field>` 从里面挑。 */
   outputs: readonly OutputStat[] | undefined;
+  /** 正在跑、这个节点排在里面还没出结果（没出错）：查看器可以接着显示上一帧（keepLastFrame）。 */
+  busy: boolean;
+}
+
+/** 正在重算时接着显示上一帧：看的还是同一个端口（同一个字段）、上一帧是好的，就返回上一帧（原样，同一个对象 ——
+ *  视图不会因此重取数据）。否则 null，照旧显示 live 的状态（「正在计算…」、出错、未运行）。
+ *  以前一按 F5、拖参数的每一次预览，查看器都整个卸掉再建：视角、测量都丢了，画面一闪一闪。 */
+export function keepLastFrame(live: PeekSource, last: PeekSource | null): PeekSource | null {
+  if (!live.busy || !last || last.status !== null || !last.resolved || !live.resolved) return null;
+  const same =
+    last.resolved.nodeId === live.resolved.nodeId && last.resolved.port === live.resolved.port && last.field === live.field;
+  return same ? last : null;
 }
 
 function bundleOf(type: string | null | undefined, bundles: readonly BundleDesc[] | undefined) {
@@ -66,6 +78,8 @@ function build(
     status = leafState === "running" ? "正在计算…" : "该节点尚未产出结果";
   else if (!stat) status = "该节点尚未产出结果";
   else if (type === null || type === "Any") status = "未运行";
+  const busy =
+    runStatus === "running" && leafState !== "error" && leafState !== "done" && leafState !== "skipped" && leafState !== "cancelled";
 
   return {
     resolved,
@@ -77,6 +91,7 @@ function build(
     field: activeField,
     bundle,
     outputs: leafOutputs,
+    busy,
   };
 }
 

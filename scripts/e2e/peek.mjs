@@ -309,6 +309,18 @@ async function suiteCloudPeek(cdp, report, fixture) {
   const cam3 = await steadyCamera();
   const shownRun = () => cdp.eval(`return document.querySelector(${lit(winSel + ' [data-testid="peek-cloud"]')})?.dataset.run ?? null;`);
   const runBefore = await shownRun();
+  // 运行期间接着显示上一帧：给视图的元素打个记号、盯着角上的「正在计算…」出没出现过
+  await cdp.eval(`
+    const view = document.querySelector(${lit(winSel + ' [data-testid="peek-cloud"]')});
+    if (view) view.__lyMark = true;
+    window.__lyBusySeen = false;
+    window.__lyBusyObs?.disconnect();
+    window.__lyBusyObs = new MutationObserver(() => {
+      if (document.querySelector(${lit(winSel + ' [data-testid="peek-busy"]')})) window.__lyBusySeen = true;
+    });
+    window.__lyBusyObs.observe(document.querySelector(${lit(winSel)}), { subtree: true, childList: true, attributes: true });
+    return true;
+  `);
   await cdp.eval(`await window.__lyflow.transport.clearCache(); return true;`);
   const rerun = await runAndWait(cdp, () => pressF5(cdp));
   let runAfter = runBefore;
@@ -321,6 +333,14 @@ async function suiteCloudPeek(cdp, report, fixture) {
   report.ok("查看器里转过视角之后重跑：窗里换成了新的一次，视角留着（不拉回全貌）",
     rerun.status === "ok" && runAfter !== runBefore && cam3 && !near(cam3, cam2) && near(cam4, cam3),
     JSON.stringify({ runBefore, runAfter, cam2, cam3, cam4 }));
+  const kept = await cdp.eval(`
+    window.__lyBusyObs?.disconnect();
+    const view = document.querySelector(${lit(winSel + ' [data-testid="peek-cloud"]')});
+    return { sameView: view?.__lyMark === true, busySeen: window.__lyBusySeen,
+             busyNow: !!document.querySelector(${lit(winSel + ' [data-testid="peek-busy"]')}) };
+  `);
+  report.eq("重跑期间接着显示上一帧（角上写过「正在计算…」，跑完收起），视图没被卸掉重建", kept,
+    { sameView: true, busySeen: true, busyNow: false });
 
   // 点大小：+ 放大（降采样后只剩几千点时看得清）
   const sizeOf = () => cdp.eval(`return Number(document.querySelector(${lit(winSel + ' [data-testid="peek-cloud"]')})?.dataset.pointSize);`);

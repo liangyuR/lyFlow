@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { keepLastFrame } from "../src/lib/peekSource.ts";
 import { PEEK_MAX_WEBGL, PEEK_MAX_WINDOWS, usePeekStore } from "../src/store/peek.ts";
 import { useUiStore } from "../src/store/ui.ts";
 
@@ -20,6 +21,27 @@ function openAll(views) {
   useUiStore.setState({ toast: null });
   return views.map((v, i) => usePeekStore.getState().open(request(i, ...v)));
 }
+
+test("keepLastFrame：正在重算同一个端口时接着显示上一帧（原样那一个对象），别的情况照旧显示 live", () => {
+  const src = (over = {}) => ({
+    resolved: { nodeId: "n1", port: "cloud" }, runId: "r1", type: "PointCloud", stat: undefined, status: null,
+    label: "n1", field: null, bundle: null, outputs: undefined, busy: false, ...over,
+  });
+  const last = src();
+  const running = src({ runId: "r2", status: "正在计算…", busy: true });
+  const cases = [
+    ["正在重算同一个端口", running, last, last],
+    ["没在算（出错了）", src({ status: "该节点运行出错" }), last, null],
+    ["没在算（跑完了）", src({ runId: "r2" }), last, null],
+    ["还没有过好的一帧", running, null, null],
+    ["上一帧本身不是好的", running, src({ status: "未运行" }), null],
+    ["换了端口", src({ resolved: { nodeId: "n1", port: "other" }, status: "正在计算…", busy: true }), last, null],
+    ["换了节点", src({ resolved: { nodeId: "n2", port: "cloud" }, status: "正在计算…", busy: true }), last, null],
+    ["换了字段", src({ field: "merged", status: "正在计算…", busy: true }), last, null],
+    ["内部结果查不到", src({ resolved: null, status: "这个算子的内部结果查不到", busy: true }), last, null],
+  ];
+  for (const [name, live, prev, want] of cases) assert.equal(keepLastFrame(live, prev), want, name);
+});
 
 test("超过上限时关掉最早的未锁定窗口并提示；锁定的窗口留着", () => {
   const cases = [

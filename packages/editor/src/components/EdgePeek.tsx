@@ -5,7 +5,7 @@ import { exportCanvasPng } from "../lib/exportPng";
 import { takePeekCanvas } from "../lib/peekCanvas";
 import { cloudPortsOf } from "../lib/basecloud";
 import { fullId, levelOf } from "../lib/subgraph";
-import { usePeekSource, type PeekSource } from "../lib/peekSource";
+import { keepLastFrame, usePeekSource, type PeekSource } from "../lib/peekSource";
 import { defaultViewFor, viewsFor } from "../lib/viewRule";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
@@ -84,7 +84,13 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
   }, [win.locked, live]);
 
   const frozen = win.locked ? frozenRef.current : null;
-  const src = frozen ?? live;
+  // 正在重算这个节点：接着显示上一帧（角上写「正在计算…」），不把视图卸掉 —— 视角、测量都留着，画面不闪
+  const lastGoodRef = useRef<PeekSource | null>(null);
+  useEffect(() => {
+    if (!win.locked && live.status === null) lastGoodRef.current = live;
+  }, [win.locked, live]);
+  const held = frozen ? null : keepLastFrame(live, lastGoodRef.current);
+  const src = frozen ?? held ?? live;
   const lockedNoData = win.locked !== null && frozen === null;
 
   const typeColor = useManifestStore((s) =>
@@ -379,7 +385,12 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
         </button>
       </div>
 
-      <div className="peek__body">
+      <div className="peek__body" data-busy={held ? "1" : undefined}>
+        {held && (
+          <span className="peek__busy" data-testid="peek-busy">
+            正在计算…
+          </span>
+        )}
         {lockedNoData ? (
           <p className="peek__status" data-testid="peek-status">
             这一份快照没有数据

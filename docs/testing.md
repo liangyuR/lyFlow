@@ -10,9 +10,9 @@
 |---|---|---|---|
 | C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 186 例；`LYFLOW_PACKS=dts` 194 例；`LYFLOW_PACKS=gap;dts` 276 例 | 分钟级（含编译） |
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 154（纯平台构建 95 通过 / 59 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
-| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 151 | 秒级 |
+| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 152 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 32 | 秒级 |
-| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 956 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
+| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 957 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 33 条断言（精简前 58） | 几分钟 |
 
 ## 放在哪一层
@@ -58,7 +58,7 @@
 | 点云缓存的并发请求合并（同键只取一次、失败不留占位）与字节预算（法线、颜色也算） | `packages/editor/test/cloud-cache.test.mjs`；e2e `m4.mjs` §2 的「事件到渲染」（拖动中预览运行的延迟中位数；拖动中每次重跑预览都留着上一片云、没有变空） |
 | `lyflow eval / sweep / perturb`（值路径、样本集、轴扫描与斜率、`pointFrom` 刀口跟锚点；`--jobs` 同时跑几次：按顺序交出、停在同一行；终端里的进度行） | `bridge/src/eval/tests.rs`、`perturb.rs` 的单元测试（`--jobs` 的调度用假任务钉：`ordered_parallel_*`；进度行原地刷新、按宽度截断、关着时一个字节不写：`the_progress_line_*`；`run` 的那一行数节点：`cli/tests.rs` 的 `the_run_progress_line_*`；没成的那几次在 stderr 上归成一行：`the_failure_digest_*`）；`cli/tests.rs` 的 `eval_crosses_parameter_sets_with_samples`（`--jobs 4` 与一次接一次逐行相同）、`eval_with_jobs_stops_at_the_same_row_as_without`；`bridge/src/cli/tests.rs` 的 `perturb_*` 集成测试（`crop_chain` 小图：固定刀口斜率 > 0、刀口跟锚点挪走后不响应、取不到锚点判失败）；MCP `packages/mcp/test/argv.test.ts` |
 | 预览的显示设置（着色、色带、点大小、显示点数落 localStorage、读回时逐项校验；手动着色范围按着色模式分开记）；选看哪个点云输出（预览栏下拉框、检查器「输出」里点一行、连线查看器「在主 3D 视图打开」带上端口；几何节点的底图跟着它接的那个口） | 读回的校验、按模式取范围、启动时读回、`cloudPortsOf` 与底图沿边取端口在 `packages/editor/test/view-rule.test.mjs`；栏上的包围盒尺寸怎么写（`extentText`）在 `pick.test.mjs`；网格跟着云走（`gridSpec`：1/2/5 的格子、居中在整格上、没重新取景时不换档）在 `view-rule.test.mjs`，x = 1000 的云在 e2e `suiteViewer`；真界面在 e2e `m3.mjs` 的 `suiteViewer`（分组结束时放回原来的存储；提取下标的 selected / rest） |
-| 连线查看器 Edge Peek | e2e `peek.mjs`（含 ⤢ 回到全貌、转过视角之后重跑视角留着、点大小、新窗口沿用主预览的着色）；窗口上限与自动关窗的提示、新窗口带上主预览的着色 / 色带 / 点大小 `packages/editor/test/peek-store.test.mjs`；图像按段取齐（超过 16 MB 分几段要）`packages/editor/test/image-fetch.test.mjs` |
+| 连线查看器 Edge Peek | e2e `peek.mjs`（含 ⤢ 回到全貌、转过视角之后重跑视角留着、重跑期间接着显示上一帧不卸掉视图、点大小、新窗口沿用主预览的着色）；重算时留不留上一帧（`keepLastFrame`）在 `peek-store.test.mjs`；窗口上限与自动关窗的提示、新窗口带上主预览的着色 / 色带 / 点大小 `packages/editor/test/peek-store.test.mjs`；图像按段取齐（超过 16 MB 分几段要）`packages/editor/test/image-fetch.test.mjs` |
 | 按输出类型选视图（主预览的点云 / 值）；量测读数写在节点底栏与运行收尾里 | `packages/editor/test/view-rule.test.mjs`（读数怎么写 `readingsOf`、收尾里有问题的排上面 `sortSummaryOutputs`，`lib/outputs.ts`）；e2e `gap.mjs` 的「量测输出」组（`transform.make` 显示值、手动选只对当时的节点有效；节点底栏的读数与判定、运行收尾的读数 / 排序 / 真点节点名打开到它，工具栏的「NG 1」与点它列出 is:ng 再回车，值与收尾都从执行事件灌；判定计数 `verdictTally`、一个节点最差的判定 `worstTone` 在 `view-rule.test.mjs`，is:ng / is:边界 在 `execution-store.test.mjs` 的查找节点那一条） |
 | 调参记录（抽屉的「调参」页：每次正式运行记下交给 core 的图与图参数、量测读数；两次之间改了什么、读数变了多少；「恢复这组参数」） | 改了什么（有效参数、静音、增删节点、图参数，写成一行）、读数按 id 排、预览与单节点运行不记、运行到某个节点只记计划里的、被下一次顶掉的记成取消、最多 50 次、基准只能定在记着的那几次上且不被挤掉在 `packages/editor/test/run-history.test.mjs`；真界面（真点「调参」页签，四次正式运行、新的在上、预览不记、写着改了哪个参数；点第 1 次的「设为基准」看「比基准 #1」那一行、点「恢复这组参数」再 Ctrl+Z）在 e2e `m4.mjs` 的 `suitePreview` 末尾；恢复本身（节点参数、静音、子图定义里的、图参数基础值，后加的节点不动，一条撤销，一样时不记；那次用的就是现在选着的配方时配方里的值也改回去、不是同一个配方就不动）在 `graph-params-actions.test.mjs` |
 | 动效、hover、端点对齐 | e2e `motion.mjs`、`noderun.mjs`；300 节点的图上真拖一个节点（先确认中心点露在画布上、拖完确实挪了）与鼠标扫过一片节点时的帧率在 `m4.mjs` 的 `suiteBigGraph` |
