@@ -251,7 +251,7 @@ async function suiteBadParam(cdp, report, ids) {
     for (let i = 0; i < 80; i += 1) {
       const r = await cdp.eval(`
         const v = document.querySelector('.viewer');
-        if (!v || v.getAttribute('data-node') !== ${lit(nodeId)}) return null;
+        if (!v || v.getAttribute('data-node') !== ${lit(nodeId)} || v.getAttribute('data-view') === 'loading') return null;
         const q = (id) => v.querySelector('[data-testid="' + id + '"]');
         if (!q('viewer3d-status')) return null;
         return {
@@ -260,6 +260,11 @@ async function suiteBadParam(cdp, report, ids) {
           revealError: q('viewer-reveal-error')?.textContent ?? null,
           revealUpstream: !!q('viewer-reveal-upstream'),
           runHere: !!q('viewer-run-here'),
+          view: v.getAttribute('data-view'),
+          base: v.getAttribute('data-base'),
+          baseText: q('viewer-base')?.textContent ?? null,
+          docked: q('viewer-empty')?.getAttribute('data-docked') === '1',
+          note: q('viewer-status-note')?.textContent ?? null,
         };
       `);
       if (r) return r;
@@ -271,10 +276,20 @@ async function suiteBadParam(cdp, report, ids) {
   report.ok("预览区：出错的 voxel 写出错误原文、给「定位到参数 leafSize」、没有「运行到此」",
     onVoxel?.status === "该节点运行出错" && onVoxel.detail === run.nodes[ids.voxel]?.errors?.[0]?.message &&
       onVoxel.revealError === "定位到参数 leafSize" && !onVoxel.runHere, JSON.stringify(onVoxel));
+  // 出错多半是数据的问题：画面画它的输入（上游 crop 的云），错误原文与「定位」挪到角上照旧给，写明画的是谁的、几个点。
+  // 以前整块盖上「该节点运行出错」，看输入得自己找输入边、开连线查看器
+  const cropLabel = await cdp.eval(`
+    const n = window.__lyflow.stores.graph.getState().doc.nodes.find((x) => x.id === ${lit(ids.crop)});
+    return n.ui?.title ?? window.__lyflow.stores.manifest.getState().operatorsById.get(n.op).label;
+  `);
+  report.ok("预览区：出错的 voxel 画的是它的输入（crop 的云），状态挪到角上，写着「输入：crop」与画面取自谁、几个点",
+    onVoxel?.view === "cloud" && onVoxel.base === ids.crop && onVoxel.docked && onVoxel.baseText === `输入：${cropLabel}` &&
+      new RegExp(`^画面是它的输入（取自「${cropLabel}」，[0-9,]+ 点）$`).test(onVoxel.note ?? ""),
+    JSON.stringify({ cropLabel, onVoxel }));
   const onSor = await readEmpty(ids.sor);
   report.ok("预览区：被连带没执行的 sor 说是上游出错、点名 voxel、给「定位到出错的节点」",
     onSor?.status === "上游节点出错，这个节点没有执行" && /^出错的是上游的「.+」$/.test(onSor.detail ?? "") &&
-      onSor.revealUpstream && !onSor.runHere, JSON.stringify(onSor));
+      onSor.revealUpstream && !onSor.runHere && !onSor.docked && onSor.view === "empty", JSON.stringify(onSor));
   // 真鼠标点「定位到出错的节点」：选中跳到 voxel，检查器标出 leafSize
   await clickAt(cdp, await centerOf(cdp, '.viewer [data-testid="viewer-reveal-upstream"]'));
   const located = await cdp.eval(`

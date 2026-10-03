@@ -86,16 +86,18 @@ function titleOf(node: GraphNode, ops: ReadonlyMap<string, OperatorDesc>): strin
   return node.ui?.title ?? ops.get(node.op)?.label ?? node.id;
 }
 
-/** 一个节点的直接上游，**按输入端口的声明顺序**排。多个输入时靠这个顺序定优先级。 */
+/** 一个节点的直接上游，**按输入端口的声明顺序**排。多个输入时靠这个顺序定优先级。给了 onlyPort 就只看那个输入口。 */
 function upstreamOf(
   doc: GraphDoc,
   path: SubPath,
   node: GraphNode,
   ops: ReadonlyMap<string, OperatorDesc>,
+  onlyPort?: string,
 ): Frame[] {
   const out: Frame[] = [];
   const level = levelOf(doc, path);
   for (const port of ops.get(node.op)?.inputs ?? []) {
+    if (onlyPort !== undefined && port.name !== onlyPort) continue;
     let linked = false;
     for (const e of level.edges) {
       if (e.to.node === node.id && e.to.port === port.name) {
@@ -121,13 +123,15 @@ function upstreamOf(
   return out;
 }
 
-/** 从 localId 出发，广度优先找最近的有点云输出的上游节点。找不到返回 null。 */
+/** 从 localId 出发，广度优先找最近的有点云输出的上游节点。找不到返回 null。
+ *  viaPort：先只从这个输入口往上找（出错的节点报错时指着的那个口）；这个口没接东西就照旧从全部输入口找。 */
 export function findBaseCloud(
   doc: GraphDoc,
   path: SubPath,
   localId: string,
   ops: ReadonlyMap<string, OperatorDesc>,
   bundles?: readonly BundleDesc[],
+  viaPort?: string,
 ): BaseCloud | null {
   const start = nodeAt(doc, path, localId);
   if (!start) return null;
@@ -142,7 +146,8 @@ export function findBaseCloud(
       queue.push(f);
     }
   };
-  push(upstreamOf(doc, path, start, ops));
+  const via = viaPort !== undefined ? upstreamOf(doc, path, start, ops, viaPort) : [];
+  push(via.length > 0 ? via : upstreamOf(doc, path, start, ops));
 
   // 队列是先进先出，所以先耗完同一层深度才往上走一层 —— 「最近的」由此保证，
   // 同深度之间的先后则来自 upstreamOf 的端口声明顺序。

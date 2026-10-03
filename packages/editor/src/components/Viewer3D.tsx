@@ -246,10 +246,11 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   }, [doc]);
   // 参数面板的 ROI 缩略图拿这片云的范围当底图（param-recipe P2.7）
   useEffect(() => {
-    if (display.nodeId && cloud && cloud.pointCount > 0) {
+    // 出错节点画的是它的输入，不是它自己的结果：不记
+    if (display.nodeId && cloud && cloud.pointCount > 0 && !display.failed) {
       rememberRoiBounds(fullId(useUiStore.getState().path, display.nodeId), cloud.bounds);
     }
-  }, [display.nodeId, cloud]);
+  }, [display.nodeId, display.failed, cloud]);
   const typesByName = useManifestStore((s) => s.typesByName);
   const graphPath = useGraphStore((s) => s.filePath);
   // 2D 拖框（m8-plan L15）：选中节点带 roi 语义标记的参数按底图分组；一次只画选中的那一组
@@ -716,9 +717,13 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
             className="viewer__base"
             data-testid="viewer-base"
             data-node={display.base.localId}
-            title={`该节点没有点云输出，底图取自上游最近的一片云（${display.base.localId}）`}
+            title={
+              display.failed
+                ? `该节点出错了，画面是它的输入（取自 ${display.base.localId}）：看看是不是数据的问题`
+                : `该节点没有点云输出，底图取自上游最近的一片云（${display.base.localId}）`
+            }
           >
-            底图：{display.base.label}
+            {display.failed ? "输入" : "底图"}：{display.base.label}
           </span>
         )}
         {!compareOn && content === "cloud" && activeKey && source.cloudPorts.length > 1 && (
@@ -1066,6 +1071,14 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
           // （它比「未运行」有用：说的是要先跑哪一段）。说的是节点运行状态时跟着给下一步（运行到此、定位出错处）
           <ViewerStatus
             corner={roiEditing || !!display.busy}
+            docked={!!display.failed && !loading}
+            note={
+              display.failed && display.base && cloud && !loading
+                ? cloud.pointCount === 0
+                  ? `画面是它的输入（取自「${display.base.label}」）：是空的 —— 根因多半在上游`
+                  : `画面是它的输入（取自「${display.base.label}」，${cloud.pointCount.toLocaleString()} 点）`
+                : null
+            }
             text={loading ? "正在取点云…" : roiEditing && backdrop.error ? backdrop.error : (display.status ?? "")}
             nodeId={activeNode && !loading && !(roiEditing && backdrop.error) ? display.nodeId : null}
             onRunToNode={onRunToNode}

@@ -181,13 +181,14 @@ test("启动时从 localStorage 读回显示设置，改了就写回去", async 
 });
 
 // 预览选看哪个点云输出（lib/basecloud）：列出全部点云口；几何节点的底图跟着它接的那个口走
-test("cloudPortsOf：点云口按声明顺序，再是 Bundle 里的点云字段；底图沿边取它接的那个口", async () => {
+test("cloudPortsOf：点云口按声明顺序，再是 Bundle 里的点云字段；底图沿边取它接的那个口；出错节点的输入先取报错指着的那个口", async () => {
   const { cloudPortsOf, findBaseCloud } = await import("../src/lib/basecloud.ts");
   const port = (name, type) => ({ name, type });
   const ops = new Map([
     ["seg.extract", { id: "seg.extract", inputs: [port("cloud", "PointCloud")], outputs: [port("selected", "PointCloud"), port("rest", "PointCloud")] }],
     ["io.pair", { id: "io.pair", inputs: [], outputs: [port("info", "Record"), port("pair", "Bundle<t.ScanPair>")] }],
     ["fit.line", { id: "fit.line", inputs: [port("cloud", "PointCloud")], outputs: [port("line", "Line2D")] }],
+    ["m.flush", { id: "m.flush", inputs: [port("base", "PointCloud"), port("ref", "PointCloud"), port("hint", "Line2D")], outputs: [port("value", "Measurement")] }],
   ]);
   const bundles = [{ kind: "t.ScanPair", fields: [{ name: "primary", type: "PointCloud" }, { name: "meta", type: "Record" }, { name: "merged", type: "PointCloud" }] }];
   for (const [opId, want] of [
@@ -206,6 +207,20 @@ test("cloudPortsOf：点云口按声明顺序，再是 Bundle 里的点云字段
   });
   assert.equal(findBaseCloud(doc("rest"), [], "f", ops, bundles)?.resolved.port, "rest", "接在 rest 上：底图是 rest（以前是 selected）");
   assert.equal(findBaseCloud(doc("selected"), [], "f", ops, bundles)?.resolved.port, "selected");
+
+  // 两个点云输入的量测节点出错：报错指着哪个口就画那个口接的云；没指、指的口没接东西都照旧按声明顺序取第一个
+  const two = {
+    schemaVersion: 1,
+    nodes: [{ id: "a", op: "seg.extract", params: {} }, { id: "b", op: "seg.extract", params: {} }, { id: "m", op: "m.flush", params: {} }],
+    edges: [
+      { id: "e1", from: { node: "a", port: "selected" }, to: { node: "m", port: "base" } },
+      { id: "e2", from: { node: "b", port: "rest" }, to: { node: "m", port: "ref" } },
+    ],
+  };
+  for (const [via, want] of [[undefined, "a.selected"], ["ref", "b.rest"], ["base", "a.selected"], ["hint", "a.selected"], ["nope", "a.selected"]]) {
+    const hit = findBaseCloud(two, [], "m", ops, bundles, via)?.resolved;
+    assert.equal(hit ? `${hit.nodeId}.${hit.port}` : null, want, `viaPort=${via}`);
+  }
 });
 
 test("量测读数：节点底栏写四位有效数字 + 单位与判定，悬停有全文；运行收尾里有问题的在上", () => {

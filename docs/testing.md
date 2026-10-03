@@ -12,7 +12,7 @@
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 154（纯平台构建 95 通过 / 59 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
 | editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 146 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 32 | 秒级 |
-| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 930 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
+| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 931 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 33 条断言（精简前 58） | 几分钟 |
 
 ## 放在哪一层
@@ -30,7 +30,7 @@
 | 抢占不阻塞（ADR-0027：立即返回、同一时刻最多一个在算、只留最新请求、排队的被取消 / 起不来时补发 run_finished；重扫库目录与热重载的维护窗口：等被停掉的那个退出、期间的请求只排队、窗口不交错） | 状态机在 `bridge/src/execution/tests.rs`（假 run 可控地「卡住」）；真 app 里重扫库目录不卡主线程、期间的运行排到重扫之后在 e2e `noderun.mjs` 的 `suiteLibraryRescanStalled`；编辑器怎么接（视图按 `resultRunId` 取、带 targets 的等 `run_started` 才换，从没开跑就收场时被抢占那次在算的节点落成已取消）在 `packages/editor/test/execution-store.test.mjs`；工具栏的「↻ 重跑」/「取消中…」（`runControlsOf`、取消中的起落、重跑沿用原来的范围）也在这个文件；真 app 里抢占一个卡住的运行不卡主线程、取消中点重跑在 e2e `noderun.mjs` 的 `suitePreemptStalled`（不理取消的测试算子 `test.stall`，`core/tests/stall_test_op.h`，`LYFLOW_TEST_OPS` 注册） |
 | 计划、cacheKey、Run to node / 选中 | `core/tests/test_plan.cpp`、`test_noderun.cpp`（含修订二的 `attachedStale`：挂上一次的旧结果）；e2e `m3.mjs`（Shift+F5）、`noderun.mjs`（右键「运行到此节点」，运行中可点 = 抢占；改上游后下游过期但还能看） |
 | 子图内部出错的定位（子图节点上写明内部节点、检查器里逐条写明来源，点它 / 点诊断 / 点工具栏 error / F8 打开到那一层并标红框；F8 / Shift+F8 在出错的节点之间跳） | 路径解析、聚合与跳转顺序在 `packages/editor/test/execution-store.test.mjs`；真界面在 e2e `m4.mjs` 的 `suiteInnerError` |
-| 预览区的空态给下一步（没跑过 → 运行到此节点；出错 → 错误原文 + 定位到参数；被上游连带没执行 → 点名出错的节点 + 定位过去） | 找最近的出错上游（只穿过被连带取消的；根因在子图外面时往外一层接着找：`culpritOf`）、子图节点打开到里面那个在 `packages/editor/test/execution-store.test.mjs`（与上一行共用子图夹具）；真界面在 e2e `run.mjs` 的 `suiteBadParam`（出错 / 连带，真鼠标点定位）与 `noderun.mjs` 的 `suiteMenu` 开头（真鼠标点「运行到此节点」） |
+| 预览区的空态给下一步（没跑过 → 运行到此节点；出错 → 错误原文 + 定位到参数，画面画它的输入、状态挪到角上；被上游连带没执行 → 点名出错的节点 + 定位过去） | 找最近的出错上游（只穿过被连带取消的；根因在子图外面时往外一层接着找：`culpritOf`）、子图节点打开到里面那个在 `packages/editor/test/execution-store.test.mjs`（与上一行共用子图夹具）；出错节点画哪个输入（报错指着的口优先，`findBaseCloud` 的 viaPort）在 `view-rule.test.mjs`；真界面在 e2e `run.mjs` 的 `suiteBadParam`（出错 / 连带，真鼠标点定位；出错的 voxel 画的是 crop 的云）与 `noderun.mjs` 的 `suiteMenu` 开头（真鼠标点「运行到此节点」） |
 | 查找节点（Ctrl+F：整张图连子图里面的一起列、按名字 / id / 算子 / 所在子图模糊找，回车打开到那一层；库算子里面不列；is:muted / is:error / op: 筛选、Alt+Enter 选上这一层命中的全部）；状态栏「静音 N」 | 列举、排序与筛选词（`parseFinderQuery`）在 `packages/editor/test/execution-store.test.mjs`（与上一行共用子图夹具）；真界面在 e2e `m4.mjs` 的 `suiteNested` 末尾（顶层直接跳进两层子图；真按 Ctrl+M 静音两层里各一个、点状态栏「静音 2」、Alt+Enter、op: 筛选） |
 | 日志页（只看警告与错误、按节点或内容筛；节点写带层级的名字，点它打开到那一层）；检查器的节点 id（路径 id，点了复制）；撤销 / 重做之后的 toast | 撤销提示在 `packages/editor/test/graph-params-actions.test.mjs`；真界面在 e2e `m4.mjs`：日志页与节点 id 在 `suiteNested`，Ctrl+Z 的 toast 在 `suiteLibrary` |
 | 子图、库算子（含展开为内联子图：定义去掉 id、内联后逐位相同；库目录设置：`bridge/src/library_settings.rs` 单测、e2e m4 面板增删 + CLI 同读） | `core/tests/test_subgraph.cpp`；`packages/editor/test/graph-params-actions.test.mjs`（合成 / 解散 / 展开库算子的 store 动作）；e2e `m4.mjs` |

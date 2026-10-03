@@ -63,6 +63,23 @@
 
 .viewer__stage .viewer__empty { inset: 0; }
 
+/* 出错节点的画面是它的输入：状态挪到左下角，错误原文与「定位」照旧给，不盖住点 */
+.viewer__stage .viewer__empty.viewer__empty--docked {
+  inset: auto auto 8px 8px;
+  max-width: min(72%, 440px);
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 6px 10px;
+  text-align: left;
+  border: 1px solid color-mix(in srgb, var(--lyflow-danger) 50%, transparent);
+  border-radius: 6px;
+  background: rgba(17, 20, 26, 0.88);
+}
+.viewer__empty--docked [data-testid="viewer3d-status"] { color: var(--lyflow-danger); }
+.viewer__empty--docked .viewer__empty-actions { align-items: flex-start; }
+.viewer__empty-note { font-size: 11px; color: var(--lyflow-fg-2); }
+
 /* 参数改过、画面还是上一次的结果：左上角一条，不挡点（左下是重跑时的状态，右下是测量） */
 .viewer__stale {
   position: absolute;

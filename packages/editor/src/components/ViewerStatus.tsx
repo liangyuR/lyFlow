@@ -45,12 +45,18 @@ export function StaleBadge({
 export function ViewerStatus({
   text,
   corner = false,
+  docked = false,
+  note = null,
   nodeId = null,
   onRunToNode,
 }: {
   text: string;
   /** 画面上还有东西（重跑中的上一片云、拖框的底图）：缩到角上，不给动作。 */
   corner?: boolean;
+  /** 画面上是出错节点的输入：挪到角上，但错误原文与「定位」照旧给。 */
+  docked?: boolean;
+  /** 再补一行（画面上的云取自谁、是不是空的）。 */
+  note?: string | null;
   /** 文字说的是这个节点（当前层）的运行状态时给，据此配动作。没有点云输出、取不到图这类提示不给。 */
   nodeId?: string | null;
   onRunToNode?: ((nodeId: string) => void) | undefined;
@@ -114,11 +120,20 @@ export function ViewerStatus({
   }
 
   return (
-    <div className={`viewer__empty${corner ? " viewer__empty--corner" : ""}`} data-testid="viewer-empty">
+    <div
+      className={`viewer__empty${corner ? " viewer__empty--corner" : ""}${docked ? " viewer__empty--docked" : ""}`}
+      data-testid="viewer-empty"
+      data-docked={docked ? "1" : undefined}
+    >
       <span data-testid="viewer3d-status">{text}</span>
       {detail && (
         <span className="viewer__empty-detail" data-testid="viewer-status-detail">
           {detail}
+        </span>
+      )}
+      {note && (
+        <span className="viewer__empty-note" data-testid="viewer-status-note">
+          {note}
         </span>
       )}
       {action && <div className="viewer__empty-actions">{action}</div>}

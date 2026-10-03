@@ -36,6 +36,8 @@ export interface Display {
   content?: ViewerContent;
   /** 正在重跑、屏幕上还是上一次的云（状态缩到角上）。 */
   busy?: boolean;
+  /** 节点出错了，画面上是它的输入（base 是取自谁）：状态挪到角上，错误原文与「定位」照旧给。 */
+  failed?: boolean;
 }
 
 export interface ViewerSourceInput {
@@ -87,6 +89,10 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = nu
   // 被上游连带取消的（upstream_failed）与出错一样盖住画面：结果已经作废，不是「还在算」
   const liveCode = useExecutionStore((s) =>
     path && nodeId ? aggregatedNodes(path, s.nodes).get(nodeId)?.errors[0]?.code : undefined,
+  );
+  // 出错时指着哪个输入口（insufficient_points 的 cloud 这类）：画它的输入时先画那个口接的云
+  const liveErrorPort = useExecutionStore((s) =>
+    path && nodeId ? aggregatedNodes(path, s.nodes).get(nodeId)?.errors[0]?.portName : undefined,
   );
   // 叠画用的非点云输出（G7）。stats 是事件里那一份，引用稳定，不会每帧新建。
   const liveOutputs = useExecutionStore((s) =>
@@ -153,10 +159,73 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = nu
       show("未运行");
       return;
     }
+    // 取一片云来画（自己的输出，或借来的底图 / 出错节点的输入）。failed 给了就是出错节点的输入：状态一直是它，
+    // 取不到（上游这次也没产出）就照旧只写出错
+    const fetchAndShow = (
+      resolved: { nodeId: string; port: string },
+      base: BaseCloud | null,
+      port: string | null,
+      failed: string | null,
+    ) => {
+      const statusOf = (p: CloudPayload) => failed ?? (p.pointCount === 0 ? "该节点的点云是空的" : null);
+      const shown = (status: string | null, payload: CloudPayload | null) => {
+        if (cancelled) return;
+        setDisplay({
+          nodeId,
+          runId: runId ?? null,
+          cloud: payload,
+          status,
+          base: payload ? base : null,
+          port: payload ? port : null,
+          preview: isPreview,
+          content,
+          ...(failed && payload ? { failed: true } : {}),
+        });
+      };
+      dropOtherRuns(runId);
+      const key = cacheKey(runId, resolved.nodeId, resolved.port, maxPoints);
+      const hit = cloudCache.get(key);
+      if (hit) {
+        // 命中也要 delete+set 一下，否则 LRU 的「最近使用」永远不更新
+        putCache(key, hit);
+        setLoading(false);
+        shown(statusOf(hit), hit);
+        return;
+      }
+      setLoading(true);
+      void (async () => {
+        try {
+          // 预览时没必要拉超过预览点数的量：那条路径上本来就不会有更多点
+          const cap = isPreview ? Math.min(maxPoints, previewMaxPoints) : maxPoints;
+          const payload = await fetchCloud(key, async () =>
+            decodeCloud(await transport.getOutputCloud(runId, resolved.nodeId, resolved.port, cap)),
+          );
+          if (cancelled) return;
+          shown(statusOf(payload), payload);
+        } catch (e) {
+          shown(failed ?? (e instanceof Error ? e.message : String(e)), null);
+        } finally {
+          // 这里**不看 cancelled**：切换节点会作废旧请求，若那时不放下 loading，
+          // 而新节点又不需要发请求（比如没有点云输出），界面就永远停在「正在取点云…」。
+          setLoading(false);
+        }
+      })();
+    };
+
     if (liveState === "error") {
-      setLoading(false);
-      show("该节点运行出错");
-      return;
+      // 出错多半是数据的问题（点太少、ROI 里是空的）：把它的输入画出来 —— 报错指着哪个输入口就画那个口接的云，
+      // 没指就沿输入边往上找最近的一片。以前整块盖上「该节点运行出错」，要自己去找输入边、开连线查看器
+      // 只输出值的量测节点也画（值反正没出来）；图像由 ImagePane 自己管
+      const input = content !== "image" ? findBaseCloud(doc, path, node.id, ops, bundles, liveErrorPort) : null;
+      if (!input) {
+        setLoading(false);
+        show("该节点运行出错");
+        return;
+      }
+      fetchAndShow(input.resolved, input, null, "该节点运行出错");
+      return () => {
+        cancelled = true;
+      };
     }
     if (liveState === "cancelled" && liveCode === "upstream_failed") {
       setLoading(false);
@@ -205,41 +274,13 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = nu
       return;
     }
 
-    dropOtherRuns(runId);
-    const key = cacheKey(runId, resolved.nodeId, resolved.port, maxPoints);
-    const hit = cloudCache.get(key);
-    if (hit) {
-      // 命中也要 delete+set 一下，否则 LRU 的「最近使用」永远不更新
-      putCache(key, hit);
-      setLoading(false);
-      show(hit.pointCount === 0 ? "该节点的点云是空的" : null, hit, base, port);
-      return;
-    }
-
-    setLoading(true);
-    void (async () => {
-      try {
-        // 预览时没必要拉超过预览点数的量：那条路径上本来就不会有更多点
-        const cap = isPreview ? Math.min(maxPoints, previewMaxPoints) : maxPoints;
-        const payload = await fetchCloud(key, async () =>
-          decodeCloud(await transport.getOutputCloud(runId, resolved.nodeId, resolved.port, cap)),
-        );
-        if (cancelled) return;
-        show(payload.pointCount === 0 ? "该节点的点云是空的" : null, payload, base, port);
-      } catch (e) {
-        show(e instanceof Error ? e.message : String(e));
-      } finally {
-        // 这里**不看 cancelled**：切换节点会作废旧请求，若那时不放下 loading，
-        // 而新节点又不需要发请求（比如没有点云输出），界面就永远停在「正在取点云…」。
-        setLoading(false);
-      }
-    })();
+    fetchAndShow(resolved, base, port, null);
 
     return () => {
       cancelled = true;
     };
     // 依赖的是「还没运行」这个布尔值而不是 runStatus 本身：running → ok 不该让取数重来一遍
-  }, [frozen, node, nodeId, idleText, runId, notRun, liveState, liveCode, maxPoints, doc, path,
+  }, [frozen, node, nodeId, idleText, runId, notRun, liveState, liveCode, liveErrorPort, maxPoints, doc, path,
       isPreview, previewMaxPoints, ops, bundles, liveOutputs, content, portPick, cloudPorts]);
 
   const frozenDisplay = useMemo<Display | null>(
