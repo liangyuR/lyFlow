@@ -84,6 +84,12 @@ export async function confirmRestore(path: string): Promise<boolean> {
   return dialogs().confirmRestore(path, message);
 }
 
+/** 上级目录的名字：不同目录下的同名文件（demo.lyflow.json）在最近文件里靠它分清。没有上级时空串。 */
+export function parentName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts.length >= 2 ? (parts[parts.length - 2] ?? "") : "";
+}
+
 export function baseName(path: string): string {
   // Windows 的路径是反斜杠（对话框给的就是）：两种都认，否则工具栏上显示的是整条路径
   const parts = path.split(/[\\/]/);

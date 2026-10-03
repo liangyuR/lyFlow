@@ -57,9 +57,10 @@ import {
   PEEK_DEFAULT_SIZE,
 } from "../store/peek";
 import { useUiStore } from "../store/ui";
-import { transport } from "../transport";
+import { transport, type RecentEntry } from "../transport";
 import { subgraphIdOf, type GraphDoc, type PortRef } from "../types/graph";
 
+import { baseName, parentName, recentFiles } from "../lib/files";
 import { addNodeWithAutoConnect, insertIntoEdge, insertSnippetById } from "../lib/insert";
 import { EdgePeekLayer } from "./EdgePeekLayer";
 import { FlowEdge } from "./FlowEdge";
@@ -105,6 +106,8 @@ const DEFAULT_EDGE_OPTIONS = { type: "default" };
 export interface CanvasActions {
   /** 只跑到某个节点（交互清单 P1 #27）。 */
   onRunToNode: (nodeId: string) => void;
+  /** 空画布上点了一个最近打开的文件。不给就不列。 */
+  onOpenRecent?: ((path: string) => void) | undefined;
 }
 
 const PEEK_FLASH_MS = 200;
@@ -166,7 +169,21 @@ function edgeAt(canvas: HTMLElement | null, point: { x: number; y: number }): st
 
 /** 空画布的提示：第一次打开就是一片空白，看不出从哪开始。三种加节点的方式都写上（算子面板拖、双击、键盘搜），
  *  不挡鼠标（双击照样落到画布上），这一层有了节点就消失。 */
-function EmptyHint({ inSubgraph }: { inSubgraph: boolean }) {
+function EmptyHint({ inSubgraph, onOpenRecent }: { inSubgraph: boolean; onOpenRecent?: ((path: string) => void) | undefined }) {
+  // 还没打开文件的空白新图：把最近打开的几个直接列在这里（以前藏在工具栏 16 px 宽的 ▾ 里，每次开 app 都是一张空图）
+  const filePath = useGraphStore((s) => s.filePath);
+  const showRecent = !inSubgraph && !filePath && onOpenRecent !== undefined;
+  const [recent, setRecent] = useState<RecentEntry[]>([]);
+  useEffect(() => {
+    if (!showRecent) return;
+    let live = true;
+    void recentFiles().then((items) => {
+      if (live) setRecent(items.slice(0, 5));
+    });
+    return () => {
+      live = false;
+    };
+  }, [showRecent]);
   return (
     <div className="canvas__empty" data-testid="canvas-empty-hint">
       <p className="canvas__empty-title">{inSubgraph ? "这个子图还是空的" : "从一个算子开始"}</p>
@@ -181,6 +198,18 @@ function EmptyHint({ inSubgraph }: { inSubgraph: boolean }) {
         <p>
           已有的图按 <kbd>{keyHint("open")}</kbd> 打开
         </p>
+      )}
+      {showRecent && recent.length > 0 && (
+        // 只有这一块接鼠标：别处的双击照样落到画布上开算子搜索
+        <div className="canvas__recent" data-testid="empty-recent" onDoubleClick={(e) => e.stopPropagation()}>
+          <p className="canvas__recent-title">最近打开</p>
+          {recent.map((r) => (
+            <button key={r.path} type="button" data-testid="empty-recent-item" title={r.path} onClick={() => onOpenRecent?.(r.path)}>
+              {baseName(r.path)}
+              <span className="recent__dir">{parentName(r.path)}</span>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -327,7 +356,7 @@ function applySelectChanges(
   else ui.setSelection([...ui.selectedNodes], [...next]);
 }
 
-export function GraphCanvas({ onRunToNode }: CanvasActions) {
+export function GraphCanvas({ onRunToNode, onOpenRecent }: CanvasActions) {
   const doc = useGraphStore((s) => s.doc);
   const path = useUiStore((s) => s.path);
   const baseOperators = useManifestStore((s) => s.operatorsById);
@@ -1044,7 +1073,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       data-layout-moving={override ? "1" : undefined}
     >
       <Breadcrumb />
-      {view.nodes.length === 0 && <EmptyHint inSubgraph={path.length > 0} />}
+      {view.nodes.length === 0 && <EmptyHint inSubgraph={path.length > 0} onOpenRecent={onOpenRecent} />}
       <ReactFlow
         nodes={nodes}
         edges={edges}

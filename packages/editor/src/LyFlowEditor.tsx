@@ -254,11 +254,8 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       graph.loadDoc(doc, path);
       ui.clearSelection();
 
-      if (migrations.length > 0) {
-        // 一条撤销记录、置 dirty：用户可以撤销掉这次迁移再决定（ADR-0008）
-        const n = useGraphStore.getState().applyMigrations(migrations);
-        if (n > 0) ui.showToast(`已迁移 ${n} 个节点，保存后生效`);
-      }
+      // 一条撤销记录、置 dirty：用户可以撤销掉这次迁移再决定（ADR-0008）
+      const migrated = migrations.length > 0 ? useGraphStore.getState().applyMigrations(migrations) : 0;
       // 脚本生成的图必须能打开（graph-doc.md 的承诺）。只在缺坐标时布局，
       // 永远不覆盖用户摆好的位置（E8）。
       if (needsInitialLayout(useGraphStore.getState().doc)) {
@@ -267,7 +264,8 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         setTimeout(() => void fitView({ duration: fitMs }), 50);
       }
       await rememberFile(path);
-      ui.showToast(`已打开 ${doc.nodes.length} 个节点`);
+      // 迁移的那句并进来：以前两条分开弹，「已迁移」紧接着就被「已打开」顶掉
+      ui.showToast(`已打开 ${doc.nodes.length} 个节点${migrated > 0 ? `，迁移了 ${migrated} 个（保存后生效）` : ""}`);
     },
     [fitView, fitMs],
   );
@@ -559,7 +557,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         />
 
         <section className="app__canvas">
-          <GraphCanvas onRunToNode={handlers.onRunToNode} />
+          <GraphCanvas onRunToNode={handlers.onRunToNode} onOpenRecent={(p) => void doOpenRecent(p)} />
         </section>
 
         <div

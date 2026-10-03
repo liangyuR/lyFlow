@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useDismiss } from "../hooks/useDismiss";
 import { dialogs } from "../lib/dialogs";
-import { baseName, recentFiles } from "../lib/files";
+import { baseName, parentName, recentFiles } from "../lib/files";
 import { stepHistory } from "../lib/history";
 import { keyHint } from "../lib/keymap";
 import { revealError } from "../lib/revealError";
@@ -65,6 +65,7 @@ function RecentMenu({ onPick }: { onPick: (path: string) => void }) {
               }}
             >
               {baseName(r.path)}
+              <span className="recent__dir">{parentName(r.path)}</span>
             </button>
           ))}
         </div>

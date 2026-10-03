@@ -1681,6 +1681,28 @@ async function suitePanels(cdp, report, ws) {
   await sleep(150);
   report.eq("最近文件的下拉框：Esc 收起，点它外面（画布上）也收起", { esc: afterEsc, outside: await recentOpen() }, { esc: false, outside: false });
 
+  // 新建之后空画布上直接列出最近打开的（以前只藏在工具栏 16 px 宽的 ▾ 里）：别处双击照样开算子搜索，点一条打开它
+  await cdp.eval(`window.__lyflow.stores.graph.getState().newDoc(); return true;`);
+  await sleep(400);
+  const emptyRecent = await cdp.eval(`return [...document.querySelectorAll('[data-testid="empty-recent-item"]')].map((b) => b.title);`);
+  // 右上角：左下角是缩放按钮、右下角是小地图
+  const corner = await cdp.eval(`const r = document.querySelector('.react-flow__pane').getBoundingClientRect(); return { x: Math.round(r.right - 60), y: Math.round(r.top + 60) };`);
+  for (const clickCount of [1, 2]) {
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: corner.x, y: corner.y, button: "left", buttons: 1, clickCount });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: corner.x, y: corner.y, button: "left", buttons: 0, clickCount });
+  }
+  await sleep(200);
+  const searchOnDbl = await cdp.eval(`return !!document.querySelector('.search-popup');`);
+  await pressEscape(cdp);
+  await sleep(150);
+  const recentItem = await centerOf(cdp, `[data-testid="empty-recent-item"][title="${graphPath.replace(/\\/g, "\\\\")}"]`);
+  mustOk(recentItem != null, "空画布的最近打开里有刚存的那个", emptyRecent);
+  await clickAt(cdp, recentItem);
+  await cdp.waitFor(`window.__lyflow.stores.graph.getState().filePath === ${lit(graphPath)}`, { timeoutMs: 10_000, what: "从空画布打开最近的文件" });
+  report.ok("新建之后空画布列出最近打开的、别处双击照样开搜索，点一条就打开它",
+    emptyRecent.includes(graphPath) && searchOnDbl && (await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.length;`)) > 0,
+    JSON.stringify({ emptyRecent, searchOnDbl }));
+
   // 备份：写一份比正文新的 `<file>~`，backup_status 要认出来
   await cdp.eval(`
     const b = window.__lyflow;
@@ -1751,7 +1773,8 @@ async function suitePanels(cdp, report, ws) {
   `);
   await sleep(200);
   const title = await cdp.eval(`return document.title;`);
-  report.ok("窗口标题带文件名与脏标记", /最近 文件\.lyflow\.json \*/.test(title), title);
+  // 只有文件名（以前 Windows 的反斜杠路径没拆开，标题上是整条路径）
+  report.ok("窗口标题是「文件名 * — LyFlow」", /^最近 文件\.lyflow\.json \* — LyFlow$/.test(title), title);
 
   // 关窗口前问一句（app/src/closeGuard.ts）。原生对话框脚本点不了，tauri 的 invoke 也换不掉（只读属性），
   // 所以经 devbridge 换个对话框走一遍「要不要关」；监听装没装上、destroy 有没有权限另外查

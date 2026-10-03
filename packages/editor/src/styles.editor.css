@@ -899,6 +899,44 @@
   text-align: center;
 }
 .canvas__empty p { margin: 0; }
+
+/* 空画布上的最近打开：这一块接鼠标（.canvas__empty 整体不接，双击照样落到画布上） */
+.canvas__recent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 280px;
+  margin-top: 12px;
+  pointer-events: auto;
+}
+.canvas__recent-title {
+  color: var(--lyflow-fg-1);
+  font-size: 12px;
+  text-align: left;
+}
+.canvas__recent button {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--lyflow-radius);
+  background: transparent;
+  color: var(--lyflow-fg-0);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.canvas__recent button:hover {
+  background: var(--lyflow-bg-2);
+}
+
+/* 最近文件里文件名后面那一小段上级目录 */
+.recent__dir {
+  margin-left: auto;
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
 .canvas__empty-title { color: var(--lyflow-fg-1); font-size: 15px; }
 .canvas__empty kbd {
   padding: 1px 5px;

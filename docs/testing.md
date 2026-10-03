@@ -12,7 +12,7 @@
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 154（纯平台构建 95 通过 / 59 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
 | editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 121 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 32 | 秒级 |
-| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 878 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
+| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 879 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 33 条断言（精简前 58） | 几分钟 |
 
 ## 放在哪一层
@@ -67,7 +67,7 @@
 | HTTP 传输、宿主嵌入（含用户片段、底图点云文件两个端点，图像端点的行切片） | `scripts/e2e/http.mjs` |
 | 外部 Rust/Tauri 宿主（`attach`、`lyflow_handler!`、`sceneId` 注入、工作区路径） | `bridge/tests/host.rs`（`MockRuntime` 跑真 IPC） |
 | 自动备份（存过盘的写 `<file>~`、没存过盘的写到传输层给的那一处、找回来、换上算没保存、删掉；没有那个口的传输不备份；读坏了的删掉） | `packages/editor/test/autosave.test.mjs`（内存里的假传输）；真的 app data 位置与写盘在 e2e `m3.mjs` 的 `suitePanels` 末尾（harness 跑之前把用户自己的那份挪开、收尾时挪回去） |
-| 桌面壳：窗口标题、关窗口前问一句（有没存的改动才问、取消不关；判断经 devbridge 换掉原生对话框走一遍，监听装没装上、destroy 的权限另查）、主窗口放行剪贴板读取、挡掉 WebView2 的刷新键（Ctrl+R / 搜索面板开着时的 F5 不重新载入）与右键菜单 | e2e `m3.mjs` 的 `suitePanels` 末尾；剪贴板读取在 `params_p1.mjs` 的 `suiteIncludeTopLevel` |
+| 桌面壳：窗口标题（只有文件名：Windows 的反斜杠路径也拆开）、新建之后空画布列出最近打开的（点一条打开、别处双击照样开搜索）、关窗口前问一句（有没存的改动才问、取消不关；判断经 devbridge 换掉原生对话框走一遍，监听装没装上、destroy 的权限另查）、主窗口放行剪贴板读取、挡掉 WebView2 的刷新键（Ctrl+R / 搜索面板开着时的 F5 不重新载入）与右键菜单 | e2e `m3.mjs` 的 `suitePanels` 末尾；剪贴板读取在 `params_p1.mjs` 的 `suiteIncludeTopLevel` |
 
 ## 共用的夹具与辅助
 
