@@ -210,7 +210,9 @@ export function useShortcuts(
           // Esc 先退子图再取消运行：在子图里按 Esc，用户想的是「出去」
           if (ui.path.length > 0 && !cancellable) {
             e.preventDefault();
-            ui.exitTo(ui.path.length - 1);
+            // 拦住传播：焦点在画布的节点上时 React Flow 把 Esc 当成「取消选中」，刚选上的子图节点又被清掉
+            e.stopPropagation();
+            ui.leaveTo(ui.path.length - 1);
             return;
           }
           if (!cancellable) return;

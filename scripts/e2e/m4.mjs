@@ -245,9 +245,11 @@ async function suiteNavigate(cdp, report, fixture) {
 
   // 面包屑那条路也要能用
   await enterByDoubleClick(cdp, composed.nodeId);
-  await cdp.eval(`document.querySelector('[data-testid="breadcrumb-root"]').click(); return true;`);
-  await sleep(150);
-  report.eq("点面包屑的「顶层」也能退出", (await snapshot(cdp)).path.length, 0);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="breadcrumb-root"]'));
+  await sleep(250);
+  const viaCrumb = await snapshot(cdp);
+  report.eq("点面包屑的「顶层」也能退出，选中刚出来的子图节点", { depth: viaCrumb.path.length, selected: viaCrumb.selected },
+    { depth: 0, selected: [composed.nodeId] });
 }
 
 // ------------------------------------------------------- §1.4 提升参数
@@ -516,9 +518,15 @@ async function suiteNested(cdp, report) {
     flagsOn.every(([b, c]) => b && c) && JSON.stringify(await innerFlags()) === JSON.stringify(flagsBefore),
     JSON.stringify({ flagsBefore, flagsOn }));
   await pressEscape(cdp);
-  await pressEscape(cdp);
   await sleep(150);
-  report.eq("连按两次 Esc 回到顶层", (await snapshot(cdp)).path.length, 0);
+  await pressEscape(cdp);
+  await sleep(300);
+  // 出来之后选中刚出来的那个子图节点、焦点在它上面（以前什么都没选中，刚才在看哪一个得自己再找）
+  report.eq("连按两次 Esc 回到顶层，选中的是刚出来的外层子图节点、焦点在它上面", await cdp.eval(`
+    const s = window.__lyflow.stores.ui.getState();
+    return { depth: s.path.length, selected: [...s.selectedNodes],
+             focused: document.activeElement?.closest('.react-flow__node')?.getAttribute('data-id') ?? null };
+  `), { depth: 0, selected: [outer.nodeId], focused: outer.nodeId });
 
   // 查找节点（Ctrl+F）：在顶层按名字找，直接跳进两层子图里的那个节点
   await pressCtrl(cdp, "f");

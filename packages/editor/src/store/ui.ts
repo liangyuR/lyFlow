@@ -188,6 +188,9 @@ interface UiState {
   enterSubgraph(segment: PathSegment): void;
   /** 退到第 depth 层（0 = 顶层）。 */
   exitTo(depth: number): void;
+  /** 用户退出子图（Esc、面包屑）：退到第 depth 层，选中刚出来的那个子图节点、移进视野、焦点给它。
+   *  以前出来就什么都没选中，刚才在看的是哪一个得自己再找。脚本里直接调 exitTo 的不变。 */
+  leaveTo(depth: number): void;
   setPath(path: SubPath): void;
   setAutoRun(on: boolean): void;
   setPreviewMaxPoints(n: number): void;
@@ -464,6 +467,16 @@ export const useUiStore = create<UiState>((set, get) => ({
       selectedEdges: new Set(),
       hoverNodeId: null,
       hoverEdge: null,
+    });
+  },
+  leaveTo(depth) {
+    const path = get().path;
+    if (depth >= path.length) return;
+    const from = path[depth]!.nodeId;
+    get().exitTo(depth);
+    set({
+      selectedNodes: new Set([from]),
+      revealRequest: { nodeId: from, seq: (get().revealRequest?.seq ?? 0) + 1, follow: true },
     });
   },
   setPath(path) {

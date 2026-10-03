@@ -241,11 +241,11 @@ function replaceInto(occupant: string, from: PortRef, to: PortRef): ConnectVerdi
 function Breadcrumb() {
   const path = useUiStore((s) => s.path);
   const doc = useGraphStore((s) => s.doc);
-  const exitTo = useUiStore((s) => s.exitTo);
+  const leaveTo = useUiStore((s) => s.leaveTo);
   if (path.length === 0) return null;
   return (
     <nav className="breadcrumb" data-testid="breadcrumb" data-depth={path.length}>
-      <button type="button" data-testid="breadcrumb-root" onClick={() => exitTo(0)}>
+      <button type="button" data-testid="breadcrumb-root" onClick={() => leaveTo(0)}>
         顶层
       </button>
       {path.map((seg, i) => (
@@ -254,7 +254,7 @@ function Breadcrumb() {
           <button
             type="button"
             data-testid={`breadcrumb-${i}`}
-            onClick={() => exitTo(i + 1)}
+            onClick={() => leaveTo(i + 1)}
             disabled={i === path.length - 1}
           >
             {doc.subgraphs?.[seg.subgraphId]?.name || seg.subgraphId}
