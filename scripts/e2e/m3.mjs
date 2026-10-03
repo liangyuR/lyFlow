@@ -2437,10 +2437,9 @@ async function suiteMeasure(cdp, report) {
       !restored.max && Math.abs(restored.right.w - beforeMax.right.w) <= 2 && Math.abs(restored.canvas.w - beforeMax.canvas.w) <= 2 &&
       restored.buf === beforeMax.buf,
     JSON.stringify({ beforeMax, maxed, keptNodes, measuredMax, restored }));
-  // 焦点在画布的节点上按 Shift+Space：最大化，选中不丢（React Flow 会把 Shift+空格当成多选里的取消选中）；Esc 还原。
-  // 焦点直接给节点（点一下已选中的节点会让选中短暂变空、把上面量好的两个点清掉，后面的断言还要用）
-  await cdp.eval(`document.querySelector('.react-flow__node[data-id="${ids.gen}"]').focus(); return true;`);
-  await sleep(100);
+  // 焦点在画布的节点上（真点一下）按 Shift+Space：最大化，选中不丢（React Flow 会把 Shift+空格当成多选里的取消选中）；Esc 还原
+  await clickAt(cdp, await centerOf(cdp, `[data-testid="node-${ids.gen}"] .node__head`));
+  await sleep(150);
   await pressKey(cdp, " ", 32, ["shift"]);
   await sleep(300);
   const byKey = await cdp.eval(`
