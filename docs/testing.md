@@ -10,9 +10,9 @@
 |---|---|---|---|
 | C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 186 例；`LYFLOW_PACKS=dts` 194 例；`LYFLOW_PACKS=gap;dts` 276 例 | 分钟级（含编译） |
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 154（纯平台构建 95 通过 / 59 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
-| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 142 | 秒级 |
+| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 143 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 32 | 秒级 |
-| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 913 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
+| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 914 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 33 条断言（精简前 58） | 几分钟 |
 
 ## 放在哪一层
@@ -39,7 +39,7 @@
 | 算子搜索的排序（名字命中优先、短的优先、缩写与中文关键词、说明命中标字段） | `packages/editor/test/search.test.mjs`；弹层与面板的真界面在 e2e `m3.mjs` |
 | 图参数（规格、校验、传参） | `core/tests/test_graph_params.cpp`、`test_params.cpp`；`packages/editor/test/graph-params*.test.mjs`；e2e `params_p1.mjs`（参数菜单的复制路径名 / 粘贴值、读剪贴板不弹权限框也在它的 `suiteIncludeTopLevel` 末尾） |
 | 配方与四类失配 | 共享夹具 `schema/fixtures/recipes/`：`bridge/src/recipe.rs` 与 `packages/editor/test/recipes.test.mjs` 对着同一份 `expected.json`；e2e `params_p3.mjs` 只验界面、磁盘与对话框 |
-| 参数面板（虚拟列表、搜索、chip、14 种控件；打字之后按 Esc 撤回：数字框与文字框在 `suiteAllTypes`、图参数规格在 `suiteSearchFilter`；聚焦的数字框上滚滚轮不改值、数字框里按 ↑ 按参数的步长走一格、没范围的参数按值的量级走（步长怎么取：`stepFor` 在 `param-values.test.mjs`）、下拉框里选完一项就按 Ctrl+Z 撤得掉、取色器拖着选一条撤销也在 `suiteAllTypes`） | `packages/editor/test/param-panel.test.mjs`、`param-values.test.mjs`；e2e `params_p2.mjs` |
+| 参数面板（虚拟列表、搜索、chip、14 种控件；打字之后按 Esc 撤回：数字框与文字框在 `suiteAllTypes`、图参数规格在 `suiteSearchFilter`；聚焦的数字框上滚滚轮不改值、数字框里按 ↑ 按参数的步长走一格、没范围的参数按值的量级走（步长怎么取：`stepFor` 在 `param-values.test.mjs`）、下拉框里选完一项就按 Ctrl+Z 撤得掉、取色器拖着选一条撤销也在 `suiteAllTypes`）；数字框能打算式与相对改法（`lib/numExpr`：算式、*2 / +=5、全角符号、越界夹住与取整说一声在 `param-values.test.mjs`；多选里各按各的值改、绑着同一个图参数只改一次在 `graph-params-actions.test.mjs`；真界面在 e2e `m3.mjs` 的 `suiteEditing`：多选里打全角「＊２０００」） | `packages/editor/test/param-panel.test.mjs`、`param-values.test.mjs`；e2e `params_p2.mjs` |
 | 迁移（含改连线 ADR-0025） | `core/tests/test_cache.cpp`（迁移链）、`bridge/src/patch/tests.rs` / `commands.rs`、`packages/editor/test/migrations.test.mjs` |
 | 点云载荷的 rgb、按节点清缓存（C ABI v12） | `core/tests/test_output_view.cpp`、`test_cache.cpp`；`bridge/src/execution/tests.rs` 的 `cloud_payload_carries_rgb_last_and_padded`；`packages/mcp/test/cloud.test.ts`；e2e `m4.mjs`（RGB 着色）、`noderun.mjs`（右键清缓存） |
 | 数据类型、Bundle、输出视图 ABI | `core/tests/test_data.cpp`、`test_bundle.cpp`、`test_output_view.cpp`、`test_contract.cpp` |

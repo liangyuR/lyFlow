@@ -3,9 +3,11 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { applyNumEdit, numEditNote, parseNumEdit, type NumEdit } from "../lib/numExpr";
 import { beginPreview, endPreview, schedulePreview } from "../lib/preview";
 import { rootOf } from "../lib/root";
 import { useGraphStore } from "../store/graph";
+import { useUiStore } from "../store/ui";
 
 /** 拖过这么多像素才算一格。太小手抖就改值，太大又拖不动。 */
 const DRAG_PX_PER_STEP = 4;
@@ -46,7 +48,12 @@ export interface NumberInputProps {
   integer: boolean;
   min?: number | undefined;
   max?: number | undefined;
+  /** 不再用（框是 type=text、能打算式了，浏览器的步进不在了）；留着只为调用处不用改。 */
   step?: number | undefined;
+  /** 提示里怎么称呼它（越界夹住、看不懂的那句话）。 */
+  label?: string | undefined;
+  /** 打的是相对改法（*2、+=5……）时交给它：多选时每个节点按各自的值改。不给就按这个框的值改。 */
+  onRelative?: ((edit: Extract<NumEdit, { kind: "rel" }>) => void) | undefined;
   /** 拖一格、按一下 ↑↓ 走多少。给函数时按当前值算（lib/params.ts 的 stepFor：没有范围的参数看值的量级）。 */
   dragStep: number | ((ref: number) => number);
   dragName?: string | undefined;
@@ -60,13 +67,16 @@ export function NumberInput({
   integer,
   min,
   max,
-  step,
+  label,
+  onRelative,
   dragStep,
   dragName,
   nodeId,
   onCommit,
 }: NumberInputProps) {
   const [text, setText] = useState(String(value));
+  /** 回车时打的字看不懂：框标红、焦点留着改，不提交也不恢复。 */
+  const [invalid, setInvalid] = useState(false);
   const [dragging, setDragging] = useState(false);
   const editing = useRef(false);
   /** Esc 按下了：接着的那次 blur 撤回、不提交。setText 赶不上 —— blur 在同一个事件里同步触发，
@@ -96,21 +106,37 @@ export function NumberInput({
     return n;
   };
 
+  const who = label ?? dragName ?? "这个数";
+
   const commit = () => {
     editing.current = false;
+    setInvalid(false);
     if (cancelled.current) {
       cancelled.current = false;
       setText(String(value));
       return;
     }
-    const parsed = integer ? parseInt(text, 10) : parseFloat(text);
-    if (Number.isNaN(parsed)) {
-      setText(String(value)); // 输入非法，恢复原值而不是写入 NaN
+    const edit = parseNumEdit(text);
+    if (edit.kind === "empty") {
+      setText(String(value));
       return;
     }
-    const next = clamp(parsed);
-    setText(String(next));
-    if (next !== value) onCommit(next);
+    if (edit.kind === "error") {
+      // 看不懂：恢复原值、说一声（以前悄悄恢复，「1.5abc」还被当成 1.5 提交了）
+      useUiStore.getState().showToast(`${who}：没看懂「${text}」（${edit.msg}），已恢复 ${value}`, "warn");
+      setText(String(value));
+      return;
+    }
+    if (edit.kind === "rel" && onRelative) {
+      onRelative(edit);
+      setText(String(value));
+      return;
+    }
+    const r = applyNumEdit(edit, value, { integer, min, max });
+    const note = numEditNote(who, [r], { min, max });
+    if (note) useUiStore.getState().showToast(note, "warn");
+    setText(String(r.value));
+    if (r.value !== value) onCommit(r.value);
   };
 
   // 先抓住指针再判阈值：拖出输入框之外的那一段也要收得到
@@ -172,11 +198,16 @@ export function NumberInput({
   return (
     <input
       className={`ctl ctl--num${disabled ? "" : " is-draggable"}`}
-      type="number"
+      // 能打算式与相对改法（0.01*2、*2、+=5）：type=number 不让打 * ( )
+      type="text"
+      spellCheck={false}
+      autoComplete="off"
       disabled={disabled}
       value={text}
-      step={step ?? (integer ? 1 : "any")}
+      title="可以打算式（0.01*2、(3+4)/2）或相对改法（*2、/2、+=5、-=0.5）；回车提交、Esc 撤回"
       data-testid={dragName ? `param-drag-${dragName}` : undefined}
+      data-invalid={invalid ? "1" : undefined}
+      aria-invalid={invalid || undefined}
       data-dragging={dragging ? "1" : undefined}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -190,11 +221,21 @@ export function NumberInput({
       }}
       onChange={(e) => {
         editing.current = true;
+        setInvalid(false);
         setText(e.target.value);
       }}
       onBlur={commit}
       onKeyDown={(e) => {
+        // 输入法正在拼：回车、Esc、方向键都是它的
+        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
         if (e.key === "Enter") {
+          // 看不懂：标红、焦点留着改（失焦才恢复）
+          const edit = parseNumEdit(text);
+          if (edit.kind === "error") {
+            setInvalid(true);
+            useUiStore.getState().showToast(`${who}：没看懂「${text}」（${edit.msg}），改一下再回车，Esc 撤回`, "warn");
+            return;
+          }
           e.currentTarget.blur();
         } else if (e.key === "Escape") {
           cancelled.current = true;
@@ -203,8 +244,8 @@ export function NumberInput({
           // 按这个参数的步长走一格（Shift ×10、Alt ×0.1，与拖动一样），只改框里的字，回车或失焦才提交。
           // 浏览器自己的步进在没声明 step 的浮点框上是 ±1：体素边长 0.01 按一下成了 1.01
           e.preventDefault();
-          const typed = integer ? parseInt(text, 10) : parseFloat(text);
-          const base = Number.isNaN(typed) ? value : typed;
+          const typed = parseNumEdit(text);
+          const base = typed.kind === "abs" ? typed.value : typed.kind === "rel" ? applyNumEdit(typed, value, { integer: false }).value : value;
           const delta = (e.key === "ArrowUp" ? 1 : -1) * unitOf(stepAt(base), e.shiftKey, e.altKey);
           const next = clamp(integer ? Math.round(base + delta) : Number.parseFloat((base + delta).toPrecision(12)));
           editing.current = true;

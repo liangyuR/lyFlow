@@ -1314,6 +1314,30 @@ async function suiteEditing(cdp, report) {
   await sleep(250);
   report.ok("选中两个同算子节点：检查器换成一起改的表单，点数那一行标着「不同」",
     await cdp.eval(`return !!document.querySelector('[data-testid="inspector-multi"] [data-testid="multi-param-pointCount"][data-mixed="1"]');`));
+
+  // 数字框能打算式与相对改法：多选里用输入法打全角的「＊２０００」回车 —— 各乘各的，超上限的夹住并说一声，一条撤销
+  const counts = () => cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    const of = (id) => g.doc.nodes.find((n) => n.id === id).params.pointCount ?? 30000;
+    return { a: of(${lit(ids.gen)}), b: of(${lit(twin)}), past: g.past.length };
+  `);
+  const n0 = await counts();
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="multi-param-pointCount"] [data-testid="param-drag-pointCount"]'));
+  await sleep(100);
+  await pressCtrl(cdp, "a");
+  await cdp.send("Input.insertText", { text: "＊２０００" });
+  await pressKey(cdp, "Enter", 13);
+  await sleep(250);
+  const n1 = await counts();
+  const toastText = await cdp.eval(`return window.__lyflow.stores.ui.getState().toast?.text ?? null;`);
+  await pressCtrl(cdp, "z");
+  await sleep(200);
+  const n2 = await counts();
+  const capped = (n) => Math.min(n * 2000, 20000000);
+  report.ok("多选里打全角「＊２０００」回车：各乘各的、超上限的夹住并提示，一条撤销；Ctrl+Z 两个都回去",
+    n1.a === capped(n0.a) && n1.b === capped(n0.b) && n1.past - n0.past === 1 && /上限/.test(toastText ?? "") &&
+      n2.a === n0.a && n2.b === n0.b,
+    JSON.stringify({ n0, n1, toastText, n2 }));
   const multiDrag = await centerOf(cdp, '[data-testid="multi-param-pointCount"] [data-testid="param-drag-pointCount"]');
   if (multiDrag) {
     const undoBefore = await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);

@@ -894,6 +894,8 @@ function MultiParamRow({
           onChange={(v) => {
             if (!same || !valueEquals(v, first)) setParamMany(ids, param.name, v);
           }}
+          // 相对改法（*2、+=5）每个节点按自己的值改，不是都改成第一个的
+          onChangeEach={(update) => setParamMany(ids, param.name, (cur: unknown) => update(cur))}
         />
       </div>
     </div>

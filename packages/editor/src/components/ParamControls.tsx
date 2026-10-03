@@ -10,6 +10,7 @@ import { curveProblem } from "../lib/curve";
 import { dialogs } from "../lib/dialogs";
 import { joinBind, type GraphBinding } from "../lib/graphParams";
 import { fullId, type SubPath } from "../lib/subgraph";
+import { applyNumEdit, numEditNote, type NumApplied, type NumEdit } from "../lib/numExpr";
 import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
 import type { EnumOption, Param } from "../types/manifest";
@@ -34,11 +35,33 @@ export interface ControlProps {
   promotedAs?: string | undefined;
   /** 这个参数最终由哪个顶层图参数提供（param-recipe P1.4）。右键菜单据此给「纳入配方」或「解除绑定」。 */
   graphBinding?: GraphBinding | null | undefined;
+  /** 多选一起改时给：相对改法（*2、+=5）按每个节点各自的值算（updater 拿到那个节点此刻的值）。 */
+  onChangeEach?: ((update: (cur: unknown) => unknown) => void) | undefined;
+}
+
+/** 多选时的相对改法：每个节点按自己的值改，夹住的统计起来说一声。 */
+function relativeEach(
+  onChangeEach: (update: (cur: unknown) => unknown) => void,
+  label: string,
+  lim: { integer: boolean; min?: number | undefined; max?: number | undefined },
+  map: (cur: unknown, apply: (n: number) => number) => unknown,
+) {
+  return (edit: Extract<NumEdit, { kind: "rel" }>) => {
+    const results: NumApplied[] = [];
+    const apply = (n: number) => {
+      const r = applyNumEdit(edit, n, lim);
+      results.push(r);
+      return r.value;
+    };
+    onChangeEach((cur) => map(cur, apply));
+    const note = numEditNote(label, results, lim);
+    if (note) useUiStore.getState().showToast(note, "warn");
+  };
 }
 
 // ---------------------------------------------------------------- 数值
 
-function NumberControl({ param, value, disabled, onChange, nodeId }: ControlProps) {
+function NumberControl({ param, value, disabled, onChange, nodeId, onChangeEach }: ControlProps) {
   const integer = param.type === "int";
   const num = typeof value === "number" ? value : 0;
   const sMin = param.softMin ?? param.min;
@@ -54,6 +77,14 @@ function NumberControl({ param, value, disabled, onChange, nodeId }: ControlProp
         min={param.min}
         max={param.max}
         step={param.step}
+        label={param.label || param.name}
+        onRelative={
+          onChangeEach
+            ? relativeEach(onChangeEach, param.label || param.name, { integer, min: param.min, max: param.max }, (cur, apply) =>
+                typeof cur === "number" ? apply(cur) : cur,
+              )
+            : undefined
+        }
         dragStep={(ref) => stepFor(param, integer, ref)}
         dragName={param.name}
         nodeId={nodeId}
@@ -80,7 +111,7 @@ function NumberControl({ param, value, disabled, onChange, nodeId }: ControlProp
 
 const DEFAULT_COMPONENTS = ["X", "Y", "Z", "W"];
 
-function VectorControl({ param, value, disabled, onChange, nodeId }: ControlProps) {
+function VectorControl({ param, value, disabled, onChange, nodeId, onChangeEach }: ControlProps) {
   const size = param.type === "vec2f" ? 2 : param.type === "vec3f" ? 3 : 4;
   const vec = Array.isArray(value) ? (value as number[]) : new Array<number>(size).fill(0);
   const labels = param.componentLabels ?? DEFAULT_COMPONENTS;
@@ -107,6 +138,17 @@ function VectorControl({ param, value, disabled, onChange, nodeId }: ControlProp
               min={param.min}
               max={param.max}
               step={param.step}
+              label={`${param.label || param.name} ${labels[i] ?? DEFAULT_COMPONENTS[i]}`}
+              onRelative={
+                onChangeEach
+                  ? relativeEach(onChangeEach, `${param.label || param.name} ${labels[i] ?? DEFAULT_COMPONENTS[i]}`,
+                      { integer: false, min: param.min, max: param.max },
+                      (cur, apply) =>
+                        Array.isArray(cur)
+                          ? cur.map((c, j) => (typeof c === "number" && (locked || j === i) ? apply(c) : c))
+                          : cur)
+                  : undefined
+              }
               dragStep={(ref) => stepFor(param, false, ref)}
               dragName={`${param.name}-${i}`}
               nodeId={nodeId}

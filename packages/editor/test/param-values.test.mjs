@@ -171,3 +171,51 @@ test("carryParams：换成别的算子时哪些参数带过去", async () => {
   for (const [name, params, want] of cases) assert.deepEqual(carryParams(oldOp, newOp, params), want, name);
   assert.deepEqual(carryParams(undefined, newOp, { n: [1, 2, 3] }).params, { n: [1, 2, 3] }, "旧算子没注册：按形状判");
 });
+
+// 数字框里打的字（lib/numExpr）：数、算式、相对改法、输入法的全角符号；夹住与取整要说一声
+test("parseNumEdit / applyNumEdit：算式、相对改法、全角、夹住与取整", async () => {
+  const { applyNumEdit, numEditNote, parseNumEdit } = await import("../src/lib/numExpr.ts");
+  const F = { integer: false };
+  const cases = [
+    // [说明, 打的字, 当前值, 限制, 期望（数 / {value, clamped, rounded} / "error" / "empty"）]
+    ["算式", "0.01*2", 1, F, 0.02],
+    ["括号", "(3+4)/2", 1, F, 3.5],
+    ["浮点尾巴抹掉", "0.1+0.2", 1, F, 0.3],
+    ["科学计数法", "1e-3", 1, F, 0.001],
+    ["点开头", ".5", 1, F, 0.5],
+    ["空格", " 2 * 3 ", 1, F, 6],
+    ["乘", "*2", 5, F, 10],
+    ["除", "/2", 5, F, 2.5],
+    ["加", "+=5", 5, F, 10],
+    ["减", "-=0.5", 5, F, 4.5],
+    ["乘一个算式", "*=(1+1)", 5, F, 10],
+    ["负数是绝对值（不是减）", "-0.5", 5, F, -0.5],
+    ["全角的乘号与数字", "＊２", 5, F, 10],
+    ["全角括号", "（３＋４）／２", 1, F, 3.5],
+    ["中文句号当小数点", "1。5", 1, F, 1.5],
+    ["减号 U+2212", "−3", 1, F, -3],
+    ["越过上限：夹住", "+=5", 8, { integer: false, max: 10 }, { value: 10, clamped: "max", rounded: false }],
+    ["整数：四舍五入", "*1.5", 3, { integer: true }, { value: 5, clamped: undefined, rounded: true }],
+    ["后面跟着字", "1.5abc", 1, F, "error"],
+    ["两个乘号", "2**3", 1, F, "error"],
+    ["括号没配上", "(1+2", 1, F, "error"],
+    ["除以 0", "/0", 1, F, "error"],
+    ["太大", "1e400", 1, F, "error"],
+    ["空", "", 1, F, "empty"],
+  ];
+  const wrong = [];
+  for (const [name, text, cur, lim, want] of cases) {
+    const edit = parseNumEdit(text);
+    let got;
+    if (edit.kind === "error" || edit.kind === "empty") got = edit.kind;
+    else {
+      const r = applyNumEdit(edit, cur, lim);
+      got = typeof want === "number" ? r.value : { value: r.value, clamped: r.clamped, rounded: r.rounded ?? false };
+    }
+    if (JSON.stringify(got) !== JSON.stringify(want)) wrong.push([name, got, want]);
+  }
+  assert.deepEqual(wrong, [], "说明 / 实际 / 期望");
+  assert.equal(numEditNote("Point Count", [{ value: 3, clamped: "max" }, { value: 2 }], { max: 3 }),
+    "Point Count：2 个里 1 个超出上限 3，已取上限");
+  assert.equal(numEditNote("x", [{ value: 2 }], {}), null);
+});

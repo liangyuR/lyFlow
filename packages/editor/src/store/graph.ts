@@ -349,7 +349,9 @@ interface GraphState {
   setParam(nodeId: string, name: string, value: unknown, at?: SubPath): void;
   /** 同一个参数一次写进几个节点（多选时的检查器）。每个节点照 setParam 的路由（被图参数绑定的改图参数、
    *  选着配方时记一笔），整体一条撤销；已经在外层事务里（数字框拖动的 begin / commit）就并进去。 */
-  setParamMany(nodeIds: readonly string[], name: string, value: unknown): void;
+  /** value 给函数时按每个节点此刻的值算（多选里的相对改法）：先全读出来再写 —— 两个节点绑着同一个图参数时只改一次。
+   *  算出来没变的节点不写；一个都没变就不记撤销。 */
+  setParamMany(nodeIds: readonly string[], name: string, value: unknown | ((cur: unknown, nodeId: string) => unknown)): void;
   setNodeUi(nodeId: string, patch: Partial<NodeUi>): void;
   connect(from: PortRef, to: PortRef): ConnectVerdict;
   disconnect(edgeIds: readonly string[]): void;
@@ -804,9 +806,28 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     setParamMany(nodeIds, name, value) {
       if (nodeIds.length === 0) return;
+      let writes: { id: string; value: unknown }[] = nodeIds.map((id) => ({ id, value }));
+      if (typeof value === "function") {
+        const { doc } = get();
+        const path = useUiStore.getState().path;
+        const lvl = levelAt(doc, undefined);
+        const ops = ctx(doc).operatorsById;
+        const update = value as (cur: unknown, nodeId: string) => unknown;
+        writes = [];
+        for (const id of nodeIds) {
+          const binding = resolveGraphBinding(doc, path, id, name);
+          const node = lvl.nodes.find((n) => n.id === id);
+          const op = node ? ops.get(node.op) : undefined;
+          const cur = binding ? graphParamValue(doc, binding.graphParam, currentOverrides()) : node && op ? effectiveValue(op, node, name) : undefined;
+          if (cur === undefined) continue;
+          const next = update(cur, id);
+          if (!valueEquals(next, cur)) writes.push({ id, value: next });
+        }
+        if (writes.length === 0) return;
+      }
       const outer = get().pendingSnapshot !== null;
       if (!outer) get().begin();
-      for (const id of nodeIds) get().setParam(id, name, value);
+      for (const w of writes) get().setParam(w.id, name, w.value);
       if (!outer) get().commit(`修改 ${nodeIds.length} 个节点的 ${name}`);
     },
 

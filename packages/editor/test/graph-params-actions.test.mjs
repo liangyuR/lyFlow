@@ -57,6 +57,7 @@ test("多选一起改（检查器）：同一个参数写进每个节点，一�
   assert.equal(g().past.at(-1).label, "拖动参数");
   assert.deepEqual(both(), [[0.04, 0.04, 0.04], [0.04, 0.04, 0.04]]);
 
+
   // 撤销 / 重做带一句 toast 说是哪一步（Ctrl+Z 是盲按的）；栈空时什么都不做
   stepHistory("undo");
   assert.equal(useUiStore.getState().toast?.text, "已撤销：拖动参数");
@@ -66,11 +67,27 @@ test("多选一起改（检查器）：同一个参数写进每个节点，一�
   stepHistory("redo");
   assert.equal(useUiStore.getState().toast, null, "没有可重做的：不弹");
 
+  // 相对改法（*2）：每个节点按自己的值改，一条撤销；一个都没变就不记
+  g().setParam("n_clean2", "leafSize", [0.01, 0.01, 0.01]);
+  const relSteps = g().past.length;
+  const double = (cur) => cur.map((x) => x * 2);
+  g().setParamMany(["n_clean", "n_clean2"], "leafSize", double);
+  assert.deepEqual(both(), [[0.08, 0.08, 0.08], [0.02, 0.02, 0.02]], "各乘各的");
+  assert.equal(g().past.length, relSteps + 1);
+  g().undo();
+  assert.deepEqual(both(), [[0.04, 0.04, 0.04], [0.01, 0.01, 0.01]], "一次撤销两个一起还原");
+  g().setParamMany(["n_clean", "n_clean2"], "leafSize", (cur) => cur);
+  assert.equal(g().past.length, relSteps, "没变：不记撤销");
+
   // 被图参数绑定的那个照样改图参数，不写成节点显式值（每个节点都走 setParam 的路由）
   g().promoteToGraphParam("n_voxel", "leafSize");
   g().setParamMany(["n_voxel"], "leafSize", [0.07, 0.07, 0.07]);
   assert.deepEqual(doc().params.leafSize.default, [0.07, 0.07, 0.07]);
   assert.equal(node("n_voxel").params.leafSize, undefined);
+  // 两个节点绑着同一个图参数：相对改法先全读出来再写，只乘一次（不是 ×4）
+  g().bindToGraphParam("leafSize", "n_clean", "leafSize");
+  g().setParamMany(["n_voxel", "n_clean"], "leafSize", double);
+  assert.deepEqual(doc().params.leafSize.default, [0.14, 0.14, 0.14]);
 });
 
 test("右键复制 / 粘贴参数：稀疏的展开、只粘同一种算子、一条撤销；被图参数或子图参数提供的不动", () => {
