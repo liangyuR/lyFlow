@@ -679,7 +679,8 @@ export function Toolbar({
   );
 }
 
-/** 结果过时了：改了参数（静音、增删节点）就写「改了 N 处未跑」，点开调参页看是哪几处、能逐条改回；
+/** 结果过时了：改了参数（静音、增删节点）就写「改 N 处」（与「已过时」差不多宽：1280 宽的窗口里运行区挤满时
+ *  长了会被裁掉），悬停写全，点开调参页看是哪几处、能逐条改回；
  *  只动了连线之类比不出来的照旧写「已过时」。 */
 function StaleChip() {
   const pending = usePendingChanges();
@@ -695,13 +696,13 @@ function StaleChip() {
       type="button"
       className="toolbar__stat toolbar__stat--stale toolbar__stat--link"
       data-testid="run-pending-chip"
-      title={`运行之后改了：${diffText(pending.diff, Infinity)}。点开调参页逐条看、改回`}
+      title={`运行之后改了 ${pending.count} 处、还没跑：${diffText(pending.diff, Infinity)}。点开调参页逐条看、改回`}
       onClick={() => {
         const ui = useUiStore.getState();
         if (ui.drawer !== "runs") ui.toggleDrawer("runs");
       }}
     >
-      改了 {pending.count} 处未跑
+      改 {pending.count} 处
     </button>
   );
 }

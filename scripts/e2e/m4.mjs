@@ -671,8 +671,8 @@ async function suiteRecursion(cdp, report) {
       JSON.stringify(other.subgraphs) === JSON.stringify([inner.subgraphId, outer.subgraphId].sort()),
     JSON.stringify(other));
   const ran = await runAndWait(cdp, () => pressF5(cdp));
-  const nestedRan = Object.entries(ran.nodes ?? {}).filter(([id, n]) => id.split("/").length === 3 && n.state === "done").length;
-  report.ok("粘过来的这张图跑得通（两层子图里面的节点都算了）", ran.status === "ok" && nestedRan === 2,
+  const nestedRan = Object.entries(ran.nodes ?? {}).filter(([id, n]) => id.split("/").length === 3 && (n.state === "done" || n.state === "skipped")).length;
+  report.ok("粘过来的这张图跑得通（两层子图里面的节点都算了；整组跑时前面跑过同一张图，缓存命中算 skipped）", ran.status === "ok" && nestedRan === 2,
     JSON.stringify({ status: ran.status, nodes: Object.keys(ran.nodes ?? {}) }));
   await restoreClipboard(cdp);
 
@@ -1207,7 +1207,7 @@ async function suitePreview(cdp, report) {
       (await ratioNow()) === ratioBefore,
     JSON.stringify({ ratioBefore, restored }));
 
-  // 未运行的改动：敲数回车改两个节点的保留比例（不自动运行）—— 工具栏写「改了 2 处未跑」，调参页顶上一行列出两处；
+  // 未运行的改动：敲数回车改两个节点的保留比例（不自动运行）—— 工具栏写「改 2 处」，调参页顶上一行列出两处；
   // 点 s1 那一处的 ↩ 只改回它（一条撤销，Ctrl+Z 做不到：得连后面那处一起撤），剩 1 处；「全部改回」之后那一行收起
   const typeRatio = async (nodeId, value) => {
     await select(cdp, nodeId);
@@ -1244,8 +1244,8 @@ async function suitePreview(cdp, report) {
   const pending1 = await pendingNow();
   const afterRevert = { s1: await ratioOf(pin.s1), s2: await ratioOf(pin.s2),
                         steps: (await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`)) - pastBeforeRevert };
-  report.ok("敲数回车改了两处没跑：工具栏写「改了 2 处未跑」、调参页顶上列出两处；点 s1 那一处的 ↩ 只改回它（一条撤销），剩 1 处",
-    pending2.chip === "改了 2 处未跑" && pending2.rows.length === 2 && pending1.chip === "改了 1 处未跑" && pending1.rows.length === 1 &&
+  report.ok("敲数回车改了两处没跑：工具栏写「改 2 处」、调参页顶上列出两处；点 s1 那一处的 ↩ 只改回它（一条撤销），剩 1 处",
+    pending2.chip === "改 2 处" && pending2.rows.length === 2 && pending1.chip === "改 1 处" && pending1.rows.length === 1 &&
       /→ 0\.32/.test(pending1.rows[0]) && JSON.stringify(afterRevert) === JSON.stringify({ s1: ran.s1, s2: 0.32, steps: 1 }),
     JSON.stringify({ ran, pending2, pending1, afterRevert, revertAt }));
   await clickAt(cdp, await centerOf(cdp, '[data-testid="run-pending-restore-all"]'));
