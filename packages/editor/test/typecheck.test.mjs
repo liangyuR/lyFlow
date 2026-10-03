@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { createMappingCache, toReactFlow } from "../src/lib/mapping.ts";
-import { canConnect, compatibleSources, compatibleTargets, dropOnNode, inferAnyTypes, insertPortsFor, pendingPort, wouldCreateCycle } from "../src/lib/typecheck.ts";
+import { canConnect, compatibleSources, compatibleTargets, dropOnNode, dropOnPort, inferAnyTypes, insertPortsFor, pendingPort, wouldCreateCycle } from "../src/lib/typecheck.ts";
 
 const port = (name, type) => ({ name, type, label: name, doc: "", required: true });
 const op = (id, inputs, outputs) => ({ id, label: id, inputs, outputs, params: [] });
@@ -143,6 +143,22 @@ test("insertPortsFor：插到 g → v1 那条线中间 —— 恰好一对端口
   ];
   for (const [name, nodeId, want] of cases) {
     assert.deepEqual(insertPortsFor(ictx, idoc, line, nodeId), want, name);
+  }
+});
+
+test("dropOnPort：拖线松在一个具体端口上 —— 只判它；被占、类型不对、同一侧都说自己的原因，不另找", () => {
+  const P = (n, p) => ({ node: n, port: p });
+  const cases = [
+    // [拖的那一头, 方向, 松手处的端口, 它的哪一侧, 期望]
+    [P("g", "cloud"), "output", P("v3", "cloud"), "input", { kind: "connect", from: P("g", "cloud"), to: P("v3", "cloud") }],
+    [P("g", "cloud"), "output", P("v2", "cloud"), "input", { kind: "reject", reason: "输入端口已有连线（输入是单连接）" }],
+    [P("g", "cloud"), "output", P("b", "box"), "input", { kind: "reject", reason: "类型不匹配：PointCloud → Box2D" }],
+    [P("g", "cloud"), "output", P("v1", "cloud"), "output", { kind: "reject", reason: "这是输出端口：拖到输入端口上" }],
+    [P("g", "cloud"), "output", P("g", "cloud"), "output", { kind: "self" }],
+    [P("v3", "cloud"), "input", P("gi", "cloud"), "output", { kind: "connect", from: P("gi", "cloud"), to: P("v3", "cloud") }],
+  ];
+  for (const [ref, side, target, targetSide, want] of cases) {
+    assert.deepEqual(dropOnPort(ctx, doc, ref, side, target, targetSide), want, `${ref.node}.${ref.port} → ${target.node}.${target.port}（${targetSide}）`);
   }
 });
 

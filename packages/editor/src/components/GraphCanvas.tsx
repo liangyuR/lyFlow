@@ -39,6 +39,7 @@ import {
   compatibleSources,
   compatibleTargets,
   dropOnNode,
+  dropOnPort,
   inferAnyTypes,
   insertPortsFor,
   type DropOnNode,
@@ -129,7 +130,8 @@ function rectOf(
   return { x: p.x, y: p.y, w: size.width, h: size.height };
 }
 
-/** 松手的那一点落在哪个节点上，交给 dropOnNode 判（lib/typecheck）。不在节点上 = none，照旧弹搜索面板。 */
+/** 松手的那一点落在哪：落在一个端口上只判那个端口（dropOnPort），落在节点身上交给 dropOnNode（lib/typecheck）。
+ *  都不是 = none，照旧弹搜索面板。 */
 function resolveDropOnNode(
   ctx: GraphContext,
   current: GraphDoc,
@@ -138,7 +140,15 @@ function resolveDropOnNode(
   point: { x: number; y: number },
   owner: Document,
 ): DropOnNode {
-  const nodeId = owner.elementFromPoint(point.x, point.y)?.closest(".react-flow__node")?.getAttribute("data-id");
+  const hit = owner.elementFromPoint(point.x, point.y);
+  const handle = hit?.closest(".react-flow__handle");
+  const handleNode = handle?.getAttribute("data-nodeid");
+  const handlePort = handle?.getAttribute("data-handleid");
+  if (handle && handleNode && handlePort) {
+    const targetSide = handle.classList.contains("source") ? "output" : "input";
+    return dropOnPort(ctx, current, ref, side, { node: handleNode, port: handlePort }, targetSide);
+  }
+  const nodeId = hit?.closest(".react-flow__node")?.getAttribute("data-id");
   return nodeId ? dropOnNode(ctx, current, ref, side, nodeId) : { kind: "none" };
 }
 
@@ -650,7 +660,12 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
           ? { x: event.clientX, y: event.clientY }
           : { x: event.changedTouches[0]?.clientX ?? 0, y: event.changedTouches[0]?.clientY ?? 0 };
       const ref = { node: pending.node, port: pending.port };
-      const drop = resolveDropOnNode(ctx, levelView(), ref, pending.side, point, wrapper.current?.ownerDocument ?? document);
+      // React Flow 吸附到了一个端口（指针离它 24 px 以内）却没接上：同样只判那一个端口
+      const snapped = state.toHandle;
+      const drop =
+        snapped?.id && snapped.nodeId
+          ? dropOnPort(ctx, levelView(), ref, pending.side, { node: snapped.nodeId, port: snapped.id }, snapped.type === "source" ? "output" : "input")
+          : resolveDropOnNode(ctx, levelView(), ref, pending.side, point, wrapper.current?.ownerDocument ?? document);
       if (drop.kind === "connect") {
         const verdict = useGraphStore.getState().connect(drop.from, drop.to);
         if (verdict.ok) ui.clearAutoHint();

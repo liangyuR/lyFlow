@@ -287,6 +287,26 @@ export function insertPortsFor(
   return found;
 }
 
+/** 拖线松在一个具体的端口上、React Flow 却没接上（多半是那个输入已被占，或类型不对）：只判这一个端口，说它自己的原因。
+ *  以前当成松在节点身上、在整个节点里另找能接的：松在合并的 a（已被占）上接到了 b，松在 ICP 的 source 上接到了
+ *  target —— 语义反了，还没有任何提示。target 是松手处的端口，targetSide 是它在自己节点上的哪一侧。 */
+export function dropOnPort(
+  ctx: GraphContext,
+  doc: GraphDoc,
+  ref: PortRef,
+  side: "output" | "input",
+  target: PortRef,
+  targetSide: "output" | "input",
+): DropOnNode {
+  if (target.node === ref.node) return { kind: "self" };
+  if (targetSide === side) {
+    return { kind: "reject", reason: side === "output" ? "这是输出端口：拖到输入端口上" : "这是输入端口：拖到输出端口上" };
+  }
+  const [from, to] = side === "output" ? [ref, target] : [target, ref];
+  const verdict = canConnect(ctx, doc, from, to);
+  return verdict.ok ? { kind: "connect", from, to } : { kind: "reject", reason: verdict.reason };
+}
+
 /** 反向：拖的是输入端口时，哪些输出端口可以当源。#20 的置灰要两个方向都覆盖。 */
 export function compatibleSources(
   ctx: GraphContext,

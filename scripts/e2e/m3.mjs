@@ -906,6 +906,20 @@ async function suiteDropToSearch(cdp, report) {
     await cdp.eval(`return document.querySelector('[data-testid="toast"]')?.textContent ?? null;`),
     "合并点云 上有 2 个端口能接，拖到要接的那个端口上");
 
+  // 松在一个已被占的输入端口上（合并的 a 已经接着 gen）：只判这个端口、说它被占了，不再悄悄接到隔壁空着的 b。
+  // 以前当成松在节点身上、在整个节点里另找能接的 —— 体素接进了 b，没有任何提示
+  await cdp.eval(`window.__lyflow.stores.graph.getState().connect({ node: ${lit(ids.gen)}, port: 'cloud' }, { node: ${lit(extra.merge)}, port: 'a' }); return true;`);
+  await sleep(200);
+  const voxOut = await centerOf(cdp, `[data-testid="port-${extra.voxel}-cloud"].node-port--output .react-flow__handle`);
+  const mergeA = await centerOf(cdp, `[data-testid="port-${extra.merge}-a"] .react-flow__handle`);
+  mustOk(voxOut != null && mergeA != null, "找得到体素的输出端口与合并的 a", { voxOut, mergeA });
+  await dragMouse(cdp, voxOut, mergeA, { steps: 14 });
+  await sleep(250);
+  report.eq("松在已被占的合并.a 上：不接到隔壁的 b，提示 a 已有连线",
+    { edges: (await wired()).filter((e) => e.includes(extra.merge)),
+      toast: await cdp.eval(`return window.__lyflow.stores.ui.getState().toast?.text ?? null;`) },
+    { edges: [`${ids.gen}>${extra.merge}.a`], toast: "输入端口已有连线（输入是单连接）" });
+
   report.ok("算子面板顶上有「最近用过」一组，里面有它",
     await cdp.eval(`return !!document.querySelector('[data-testid="palette-recent"] [data-op-id=${lit(added ?? "")}]');`));
 
