@@ -38,7 +38,8 @@ function finishDrag(d: DragState | null, nodeId?: string): void {
   if (!d?.active) return;
   d.active = false;
   d.host?.classList.remove("lyflow-param-dragging");
-  useGraphStore.getState().commit("拖动参数");
+  // 不给名字：store 按实际改了什么起名（「修改 体素 · 体素边长」）
+  useGraphStore.getState().commit();
   endPreview(nodeId);
 }
 
@@ -291,7 +292,7 @@ export function Slider({
         if (nodeId) beginPreview(nodeId);
       }}
       onPointerUp={() => {
-        useGraphStore.getState().commit("拖动参数");
+        useGraphStore.getState().commit();
         endPreview(nodeId);
       }}
       onChange={(e) => {

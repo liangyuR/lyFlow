@@ -8,10 +8,10 @@ import { copyParams, pasteParams, resetParams } from "../src/lib/editActions.ts"
 import { effectiveGraphValues, resolveGraphBinding, specFromParam } from "../src/lib/graphParams.ts";
 import { planParamPaste } from "../src/lib/paramClipboard.ts";
 import { augmentOperators } from "../src/lib/subgraph.ts";
-import { stepHistory } from "../src/lib/history.ts";
+import { historyRows, jumpHistory, stepHistory } from "../src/lib/history.ts";
 import { useGraphStore } from "../src/store/graph.ts";
 import { useManifestStore } from "../src/store/manifest.ts";
-import { runParamsOf } from "../src/store/recipe.ts";
+import { runParamsOf, useRecipeStore } from "../src/store/recipe.ts";
 import { useUiStore } from "../src/store/ui.ts";
 
 const root = new URL("../../../", import.meta.url);
@@ -496,4 +496,88 @@ test("库算子展开为内联子图：定义换新 id 写进 doc，op 换成 su
 
   g().undo();
   assert.deepEqual(doc(), before, "一次撤销回到库算子");
+});
+
+test("撤销记录写节点名字与参数 label；拖动、挪节点不给名字时按实际改了什么起名", () => {
+  reset();
+  const leaf = voxelDecl.find((p) => p.name === "leafSize").label || "leafSize";
+  const voxel = node("n_voxel").ui?.title ?? "Voxel Grid";
+  const plane = node("n_plane").ui.title;
+  const last = () => g().past.at(-1).label;
+  const cases = [
+    ["一次改参数", () => g().setParam("n_voxel", "leafSize", [0.02, 0.02, 0.02]), `修改 ${voxel} · ${leaf}`],
+    ["拖动参数（commit 不给名字）", () => {
+      g().begin();
+      for (const v of [0.03, 0.04]) g().setParam("n_voxel", "leafSize", [v, v, v]);
+      g().commit();
+    }, `修改 ${voxel} · ${leaf}`],
+    ["拖一个节点", () => {
+      g().begin();
+      g().moveNodes([{ id: "n_plane", position: { x: 5, y: 5 } }]);
+      g().commit();
+    }, `移动 ${plane}`],
+    ["拖两个节点", () => {
+      g().begin();
+      g().moveNodes([{ id: "n_plane", position: { x: 9, y: 9 } }, { id: "n_voxel", position: { x: 1, y: 1 } }]);
+      g().commit();
+    }, "移动 2 个节点"],
+    ["给了名字就用给的", () => {
+      g().begin();
+      g().setParam("n_voxel", "leafSize", [0.05, 0.05, 0.05]);
+      g().commit("拖动参数");
+    }, "拖动参数"],
+    ["一段里改了两样", () => {
+      g().begin();
+      g().setParam("n_voxel", "leafSize", [0.06, 0.06, 0.06]);
+      g().setParam("n_voxel", "minPointsPerVoxel", 2);
+      g().commit();
+    }, `修改 ${voxel} · ${leaf} 等 2 处`],
+  ];
+  for (const [name, act, want] of cases) {
+    act();
+    assert.equal(last(), want, name);
+  }
+});
+
+test("travel(n) 与连按 n 次撤销 / 重做走到同一个地方；撤销历史列表标出存盘的那一步", () => {
+  reset();
+  for (const v of [0.02, 0.03, 0.04, 0.05]) g().setParam("n_voxel", "leafSize", [v, v, v]);
+  const snapshot = () => ({ doc: doc(), past: g().past.map((e) => e.label), future: g().future.map((e) => e.label) });
+  for (const steps of [-1, -3, 2, -99, 99, 0]) {
+    const start = snapshot();
+    // 连按：一步一步
+    for (let i = 0; i < Math.abs(steps); i += 1) {
+      if (steps < 0) g().undo();
+      else g().redo();
+    }
+    const stepped = snapshot();
+    // 一步一步退回起点，再一次走过去
+    const delta = stepped.past.length - start.past.length;
+    for (let i = 0; i < Math.abs(delta); i += 1) {
+      if (delta < 0) g().redo();
+      else g().undo();
+    }
+    assert.equal(doc(), start.doc, `travel(${steps})：先退回了起点`);
+    const moved = g().travel(steps);
+    assert.deepEqual([snapshot().doc === stepped.doc, snapshot().past, snapshot().future], [true, stepped.past, stepped.future], `travel(${steps})`);
+    assert.equal(moved, stepped.past.length - start.past.length, `travel(${steps}) 返回实际走了几步`);
+  }
+
+  // 存盘点：标在存盘那一步上；点它一次走回去，dirty 跟着消失
+  reset();
+  g().setParam("n_voxel", "leafSize", [0.02, 0.02, 0.02]);
+  g().markSaved("g.lyflow.json");
+  for (const v of [0.03, 0.04, 0.05]) g().setParam("n_voxel", "leafSize", [v, v, v]);
+  const recipes = () => useRecipeStore.getState();
+  const rows = () => historyRows(g().past, g().future, { doc: doc(), recipes: recipes().set },
+    g().savedDoc ? { doc: g().savedDoc, recipes: recipes().saved } : null);
+  const savedRows = rows().filter((r) => r.saved);
+  assert.deepEqual(savedRows.map((r) => r.steps), [-3], "存盘的是往回第三步");
+  assert.equal(rows()[0].kind, "current", "最上面是现在（没有能重做的）");
+  jumpHistory(-3, savedRows[0].label);
+  assert.deepEqual([g().dirty, g().future.length], [false, 3]);
+  assert.match(useUiStore.getState().toast.text, /^已撤销 3 步/);
+  assert.deepEqual(rows().filter((r) => r.kind === "current").map((r) => r.saved), [true]);
+  g().markUnsaved();
+  assert.equal(rows().some((r) => r.saved), false, "从备份恢复、算没保存：哪一行都不标");
 });

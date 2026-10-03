@@ -328,7 +328,10 @@ interface GraphState {
   // -- 事务 ---------------------------------------------------------------
   /** 拖动/滑块这类连续操作：开始时拍一张，结束时整体记一条撤销。 */
   begin(): void;
-  commit(label: string): void;
+  /** 收尾一段事务。不给 label 就按这段里实际改了什么起名（「修改 体素 · 体素边长」「移动 3 个节点」）。 */
+  commit(label?: string): void;
+  /** 一次走好几步（撤销历史列表里点一行）：负数撤销、正数重做，到头就停。返回实际走了几步（带符号）。 */
+  travel(steps: number): number;
   /** 一个手势里的几个动作记成一条撤销（删掉选中的节点与连线、加节点再接上……）：fn 里照常调各个动作。
    *  外面已经有事务（拖动中、外层的 batch）就并进那一条，由开它的那一方记；fn 里调 cancel() 撤回 fn
    *  做的全部改动、不记撤销。以前这些手势记成好几条，Ctrl+Z 一次只撤回一半。 */
@@ -465,6 +468,13 @@ type RecipeStep = (recipes: RecipeSet, doc: GraphDoc) => RecipeSet;
 export const useGraphStore = create<GraphState>((set, get) => {
   /** 正在跑的 batch 有几层。> 0 时 transact 只改不记，由 batch 合成一条。 */
   let batchDepth = 0;
+  /** 这段事务里实际改了什么（拖动参数、挪节点每帧记一句、去重）：commit 不给名字时拿它起名，撤销历史里看得出是哪一步。 */
+  let hints: string[] = [];
+  const note = (h: string) => {
+    if (get().pendingSnapshot && !hints.includes(h)) hints.push(h);
+  };
+  const hintLabel = (): string | null =>
+    hints.length === 0 ? null : hints.length === 1 ? hints[0]! : `${hints[0]} 等 ${hints.length} 处`;
 
   /** 记一条撤销，然后应用变更。用于单步操作。recipes 给了就在同一步里改配方集合（K7）。 */
   const transact = (label: string, recipe: (draft: GraphDoc) => void, recipes?: RecipeStep) => {
@@ -540,19 +550,22 @@ export const useGraphStore = create<GraphState>((set, get) => {
     begin() {
       // 已经在事务里就不要覆盖起点 —— 嵌套 begin 应当是幂等的
       if (get().pendingSnapshot) return;
+      hints = [];
       set({ pendingSnapshot: get().doc, pendingRecipes: recipeSet() });
     },
 
     commit(label) {
       const { pendingSnapshot, pendingRecipes, doc, past } = get();
       if (!pendingSnapshot) return;
+      const named = label ?? hintLabel() ?? "编辑";
+      hints = [];
       const recipesBefore = pendingRecipes ?? recipeSet();
       if (pendingSnapshot === doc && recipesBefore === recipeSet()) {
         set({ pendingSnapshot: null, pendingRecipes: null }); // 拖了但没动，不记
         return;
       }
       set({
-        past: [...past, { label, doc: pendingSnapshot, recipes: recipesBefore }].slice(-MAX_HISTORY),
+        past: [...past, { label: named, doc: pendingSnapshot, recipes: recipesBefore }].slice(-MAX_HISTORY),
         future: [],
         pendingSnapshot: null,
         pendingRecipes: null,
@@ -754,6 +767,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
         return i === undefined ? [] : [[i, m.position] as const];
       });
       if (at.length === 0) return;
+      if (get().pendingSnapshot) {
+        const one = at.length === 1 ? level(get().doc).nodes[at[0]![0]] : undefined;
+        note(one ? `移动 ${one.ui?.title ?? ctx(get().doc).operatorsById.get(one.op)?.label ?? one.id}` : `移动 ${at.length} 个节点`);
+      }
       mutate((d) => {
         const nodes = level(d).nodes;
         for (const [i, position] of at) {
@@ -770,6 +787,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       // 的来路。Inspector、参数面板、2D 拖框、粘贴、重置都经这里，所以在这一处路由而不是各处各判一遍。
       const binding = resolveGraphBinding(doc, path, nodeId, name);
       if (binding) {
+        note(`修改图参数 ${doc.params?.[binding.graphParam]?.label ?? binding.graphParam}`);
         get().editGraphParamValue(binding.graphParam, value);
         return;
       }
@@ -777,6 +795,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
       if (!node) return;
       const op = ctx(doc).operatorsById.get(node.op);
       if (!op) return;
+      // 撤销记录里写节点的名字与参数的 label（以前是「修改 Voxel Grid.leafSize」「拖动参数」，几个同类节点分不出是哪个）
+      const what = `修改 ${node.ui?.title ?? op.label} · ${op.params.find((p) => p.name === name)?.label || name}`;
 
       // K6 ②：选着配方时改一个没纳入配方的参数 —— 照常改图（影响所有配方），行上记一笔，
       // 给「改为只在本配方生效」用（它要知道改之前的值）
@@ -800,8 +820,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
       };
 
       // 滑块拖动时 setParam 每帧都来，靠外层 begin/commit 合成一条撤销。
-      if (get().pendingSnapshot) mutate(apply);
-      else transact(`修改 ${op.label}.${name}`, apply);
+      if (get().pendingSnapshot) {
+        note(what);
+        mutate(apply);
+      } else transact(what, apply);
     },
 
     setParamMany(nodeIds, name, value) {
@@ -1626,6 +1648,29 @@ export const useGraphStore = create<GraphState>((set, get) => {
         pendingRecipes: null,
       });
       applyRecipeSet(entry.recipes);
+    },
+
+    travel(steps) {
+      if (steps === 0) return 0;
+      let { past, future, doc } = get();
+      let recipes = recipeSet();
+      past = past.slice();
+      future = future.slice();
+      const from = steps < 0 ? past : future;
+      const to = steps < 0 ? future : past;
+      let moved = 0;
+      while (moved < Math.abs(steps) && from.length > 0) {
+        const entry = from.pop()!;
+        to.push({ label: entry.label, doc, recipes });
+        doc = entry.doc;
+        recipes = entry.recipes;
+        moved += 1;
+      }
+      if (moved === 0) return 0;
+      hints = [];
+      set({ doc, past, future, dirty: doc !== get().savedDoc, pendingSnapshot: null, pendingRecipes: null });
+      applyRecipeSet(recipes);
+      return steps < 0 ? -moved : moved;
     },
 
     canUndo: () => get().past.length > 0,

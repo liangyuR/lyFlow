@@ -1388,6 +1388,39 @@ async function suiteEditing(cdp, report) {
   const k2 = await posOf(ids.gen);
   report.ok("Ctrl+Z 只撤掉最后那一下", k2.x < k1.pos.x && k2.x > k0.pos.x, JSON.stringify({ k0: k0.pos, k1: k1.pos, k2 }));
 
+  // 撤销历史：撤销 / 重做旁边的 ▾ 列出每一步（写着节点名字，新的在上，还能重做的那一步也在），点一行一次走好几步，Esc 收起
+  const histState = () => cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    const rows = [...document.querySelectorAll('[data-testid="history-row"]')].map((r) => ({
+      kind: r.dataset.kind, steps: Number(r.dataset.steps), text: r.textContent }));
+    return { open: !!document.querySelector('[data-testid="history-menu"]'), rows, past: g.past.length, future: g.future.length,
+             doc: JSON.stringify(g.doc), toast: window.__lyflow.stores.ui.getState().toast?.text ?? null,
+             focused: document.activeElement?.getAttribute('data-testid') ?? null };
+  `);
+  const genName = await cdp.eval(`
+    const n = window.__lyflow.stores.graph.getState().doc.nodes.find((x) => x.id === ${lit(ids.gen)});
+    return n.ui?.title ?? window.__lyflow.stores.manifest.getState().operatorsById.get(n.op).label;
+  `);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="history-toggle"]'));
+  await sleep(200);
+  const h0 = await histState();
+  const current = h0.rows.find((r) => r.kind === "current");
+  const redoRow = h0.rows.find((r) => r.kind === "future");
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="history-row"][data-steps="-2"]'));
+  await sleep(200);
+  const h1 = await histState();
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="history-row"][data-steps="2"]'));
+  await sleep(200);
+  const h2 = await histState();
+  await pressEscape(cdp);
+  await sleep(150);
+  const h3 = await histState();
+  report.ok("撤销历史：▾ 列出每一步（现在这步写着「移动 gen」、能重做的那步也在），点一行一次撤 2 步、再点回来一次重做 2 步，Esc 收起回到 ▾",
+    h0.open && current?.text === `移动 ${genName}` && redoRow?.text === `移动 ${genName}` &&
+      h1.past === h0.past - 2 && h1.future === h0.future + 2 && /^已撤销 2 步/.test(h1.toast ?? "") && h1.open &&
+      h2.doc === h0.doc && h2.past === h0.past && !h3.open && h3.focused === "history-toggle",
+    JSON.stringify({ genName, h0: { ...h0, doc: undefined }, h1: { ...h1, doc: undefined }, same: h2.doc === h0.doc, h3: { open: h3.open, focused: h3.focused } }));
+
   // 框选 gen 与 voxel（从左上角外面的空白处拖到右下角外面），再拖那个选区。
   // 框的两个角都要离画布边 48 px 以上：框选时指针进了离边 40 px 那一圈，React Flow 会自动平移画布
   // （autoPanOnSelection），算好的框就套不住节点了。先缩小一点给四周留出地方

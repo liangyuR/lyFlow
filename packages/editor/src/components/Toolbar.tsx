@@ -3,14 +3,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useDismiss } from "../hooks/useDismiss";
 import { dialogs } from "../lib/dialogs";
 import { baseName, parentName, recentFiles } from "../lib/files";
-import { stepHistory } from "../lib/history";
+import { historyRows, jumpHistory, stepHistory } from "../lib/history";
 import { keyHint } from "../lib/keymap";
 import { revealError } from "../lib/revealError";
 import { useCacheStore } from "../store/cache";
 import { runControlsOf, summarize, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
-import { useRecipesDirty } from "../store/recipe";
+import { useRecipeStore, useRecipesDirty } from "../store/recipe";
 import { useUiStore } from "../store/ui";
 import { transport, type LibraryRefresh, type LibrarySettings, type RecentEntry } from "../transport";
 
@@ -68,6 +68,85 @@ function RecentMenu({ onPick }: { onPick: (path: string) => void }) {
             >
               {baseName(r.path)}
               <span className="recent__dir">{parentName(r.path)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 撤销历史：撤销 / 重做旁边的 ▾。列出做过的每一步（新的在上），存盘的那一步标着，点一行一次走到那里。 */
+function HistoryMenu() {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  // 收起时焦点若丢了（掉回 body、或还在菜单里）就还给 ▾：键盘接着用，不用再去点
+  useDismiss(open, box, useCallback(() => {
+    setOpen(false);
+    const active = document.activeElement;
+    if (!active || active === document.body || box.current?.contains(active)) toggle.current?.focus();
+  }, []));
+  const past = useGraphStore((s) => s.past);
+  const future = useGraphStore((s) => s.future);
+  const doc = useGraphStore((s) => s.doc);
+  const savedDoc = useGraphStore((s) => s.savedDoc);
+  const recipes = useRecipeStore((s) => s.set);
+  const savedRecipes = useRecipeStore((s) => s.saved);
+  const rows = open
+    ? historyRows(past, future, { doc, recipes }, savedDoc ? { doc: savedDoc, recipes: savedRecipes } : null)
+    : [];
+  const current = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (open) current.current?.scrollIntoView({ block: "nearest" });
+  }, [open]);
+
+  return (
+    <div className="toolbar__recent" ref={box}>
+      <button
+        ref={toggle}
+        type="button"
+        data-testid="history-toggle"
+        aria-expanded={open}
+        disabled={past.length === 0 && future.length === 0}
+        title="撤销历史：点一行一次走到那一步"
+        onClick={() => setOpen((v) => !v)}
+      >
+        ▾
+      </button>
+      {open && (
+        <div
+          className="toolbar__recentmenu history-menu"
+          data-testid="history-menu"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              setOpen(false);
+              toggle.current?.focus();
+            }
+          }}
+        >
+          {rows.map((r) => (
+            <button
+              // 按它在整条时间线上的位置给 key（走几步都不变）：点过的那一行不重新挂载，焦点留在它上面
+              key={past.length + r.steps}
+              ref={r.kind === "current" ? current : undefined}
+              type="button"
+              className={`history-menu__row is-${r.kind}`}
+              data-testid="history-row"
+              data-kind={r.kind}
+              data-steps={r.steps}
+              data-saved={r.saved ? "1" : undefined}
+              aria-current={r.kind === "current" ? "step" : undefined}
+              title={r.label}
+              // 现在这一行点了没用，但不用 disabled：刚点过的那一行变成「现在」时焦点不能丢
+              aria-disabled={r.steps === 0 || undefined}
+              onClick={() => {
+                if (r.steps !== 0) jumpHistory(r.steps, r.label);
+              }}
+            >
+              <span className="history-menu__label">{r.label}</span>
+              {r.saved && <span className="history-menu__saved">● 已保存</span>}
             </button>
           ))}
         </div>
@@ -464,6 +543,7 @@ export function Toolbar({
         >
           ↷<span className="toolbar__label"> 重做</span>
         </button>
+        <HistoryMenu />
       </div>
 
       <div className="toolbar__group">

@@ -1400,6 +1400,28 @@
   text-align: left;
 }
 .toolbar__recentmenu button:hover { background: var(--lyflow-bg-3); }
+/* 撤销历史：新的在上；还能重做的那几步淡一点，现在这一步高亮，存盘的那一步带个点 */
+.history-menu {
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+}
+.history-menu__row {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+.history-menu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.history-menu__row.is-future { color: var(--lyflow-fg-2) !important; }
+.history-menu__row.is-current { background: var(--lyflow-bg-3) !important; color: var(--lyflow-fg-0) !important; }
+.history-menu__row[aria-disabled="true"] { cursor: default; }
+.history-menu__saved { flex: none; color: var(--lyflow-accent); font-size: 11px; }
 /* 库算子目录（docs/library-dirs.md）：与最近文件同一个下拉框体 */
 .library-menu {
   min-width: 360px;

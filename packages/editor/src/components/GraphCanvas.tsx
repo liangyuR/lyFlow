@@ -491,7 +491,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
       const inTransaction = graph.pendingSnapshot !== null;
       if (!inTransaction) graph.begin();
       graph.moveNodes(moves);
-      if (!inTransaction) graph.commit("移动节点");
+      if (!inTransaction) graph.commit();
     }
 
     const removed = changes.filter((c) => c.type === "remove").map((c) => c.id);
@@ -605,7 +605,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
   }, [cancelLayout]);
   const onSelectionDragStop = useCallback(() => {
     useUiStore.getState().setHoverPaused(false);
-    useGraphStore.getState().commit("移动节点");
+    useGraphStore.getState().commit();
   }, []);
 
   /** 拖动结束时对**单个**选中节点做边命中：多选时插入谁到中间是没有答案的。 */
