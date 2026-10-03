@@ -151,15 +151,17 @@ function SummaryHeader() {
           {outputs.map(([name, o]) => {
             const where = describeEventNode(doc, ops, o.node);
             const verdict = o.value?.kind === "Measurement" ? o.value.verdict || null : null;
+            // Record（gap 的结果包这类）展开是几 KB 的 JSON：收尾里照旧只写个数，内容在检查器里看
+            const text = o.state === "value" && o.value && o.value.kind !== "Record" ? formatOutputValue(o) : null;
             return (
               <li key={name} data-testid={`summary-output-${name}`} data-state={o.state} data-verdict={verdict ?? undefined}>
                 <span className="drawer__summary-name">{name}</span>
                 <code className={`drawer__summary-state drawer__summary-state--${o.state}`}>
                   {OUTPUT_STATE_LABEL[o.state] ?? o.state}
                 </code>
-                {o.state === "value" && o.value && (
-                  <span className="drawer__summary-value" data-testid={`summary-value-${name}`}>
-                    {formatOutputValue(o)}
+                {text && (
+                  <span className="drawer__summary-value" data-testid={`summary-value-${name}`} title={text}>
+                    {text}
                   </span>
                 )}
                 {verdict && <span className={`insp-out__verdict is-${verdict}`}>{verdict}</span>}
@@ -185,7 +187,7 @@ function SummaryHeader() {
                 {o.state === "inactive" && o.reason && (
                   <span className="drawer__summary-from">{o.reason}</span>
                 )}
-                {o.state === "value" && !o.value && typeof o.elementCount === "number" && (
+                {o.state === "value" && !text && typeof o.elementCount === "number" && (
                   <span className="drawer__summary-from">{o.elementCount} 个</span>
                 )}
               </li>

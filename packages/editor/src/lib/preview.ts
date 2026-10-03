@@ -7,7 +7,6 @@ import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
 import { transport } from "../transport";
 import { previewTargets } from "./nodeRun";
-import { fullId, levelOf, pathPrefix } from "./subgraph";
 
 /** 拖动过程中每一帧都在改值，攒一下再发。30 ms 是「跟手」和「别打死自己」的平衡点。 */
 export const PREVIEW_DEBOUNCE_MS = 30;
@@ -25,10 +24,15 @@ function fire(nodeId: string, preview: boolean): void {
   const graph = useGraphStore.getState();
   const ui = useUiStore.getState();
   if (graph.doc.nodes.length === 0) return;
-  // 正看着的下游节点（钉住的、对比里没冻结的 B）一起算：不然拖上游的参数时画面不动
+  // 正看着的下游节点一起算：预览上的那个（与 Viewer3D 的 activeId 同一条规则：钉住的，没钉就是选中的那一个 ——
+  // 参数面板里改别的节点时选中不变）、对比里没冻结的 B。不然拖上游的参数时画面不动
   const compare = useCompareStore.getState();
-  const b = compare.on && !compare.snapshot && compare.b && pathPrefix(compare.b.path) === pathPrefix(ui.path) ? compare.b.nodeId : null;
-  const targets = previewTargets(levelOf(graph.doc, ui.path), nodeId, [ui.pinnedNode, b]).map((id) => fullId(ui.path, id));
+  const selected = ui.selectedNodes.size === 1 ? [...ui.selectedNodes][0]! : null;
+  const active = ui.pinnedNode ?? selected;
+  const targets = previewTargets(graph.doc, ui.path, nodeId, [
+    active ? { path: ui.path, nodeId: active } : null,
+    compare.on && !compare.snapshot ? compare.b : null,
+  ]);
   void startRun(graph.doc, graph.filePath, {
     targets,
     preview,

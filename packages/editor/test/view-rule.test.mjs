@@ -221,6 +221,26 @@ test("cloudPortsOf：点云口按声明顺序，再是 Bundle 里的点云字段
     const hit = findBaseCloud(two, [], "m", ops, bundles, via)?.resolved;
     assert.equal(hit ? `${hit.nodeId}.${hit.port}` : null, want, `viaPort=${via}`);
   }
+  // 直接接在输入口上的才叫「它的输入」：几何节点隔一跳借来的是上游的云（栏上写「上游」不写「输入」）
+  assert.equal(findBaseCloud(two, [], "m", ops, bundles)?.direct, true, "m 的 base 口直接接着 a.selected");
+  assert.equal(findBaseCloud(doc("rest"), [], "f", ops, bundles)?.direct, true, "f 的 cloud 口直接接着 x.rest");
+  const hop = {
+    schemaVersion: 1,
+    nodes: [{ id: "x", op: "seg.extract", params: {} }, { id: "f", op: "fit.line", params: {} }, { id: "g", op: "fit.line", params: {} }],
+    edges: [
+      { id: "e1", from: { node: "x", port: "selected" }, to: { node: "f", port: "cloud" } },
+      { id: "e2", from: { node: "f", port: "line" }, to: { node: "g", port: "cloud" } },
+    ],
+  };
+  assert.deepEqual([findBaseCloud(hop, [], "g", ops, bundles)?.localId, findBaseCloud(hop, [], "g", ops, bundles)?.direct], ["x", false],
+    "g 的输入是 f 的直线：找到的 x 的云隔了一跳");
+  const pair = {
+    schemaVersion: 1,
+    nodes: [{ id: "p", op: "io.pair", params: {} }, { id: "f", op: "fit.line", params: {} }],
+    edges: [{ id: "e", from: { node: "p", port: "pair" }, to: { node: "f", port: "cloud" } }],
+  };
+  assert.deepEqual([findBaseCloud(pair, [], "f", ops, bundles)?.resolved.port, findBaseCloud(pair, [], "f", ops, bundles)?.direct],
+    ["pair.merged", true], "直接接着的 Bundle 里的点云字段也算");
 });
 
 test("量测读数：节点底栏写四位有效数字 + 单位与判定，悬停有全文；运行收尾里有问题的在上", () => {

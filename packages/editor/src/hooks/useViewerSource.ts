@@ -91,9 +91,11 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = nu
     path && nodeId ? aggregatedNodes(path, s.nodes).get(nodeId)?.errors[0]?.code : undefined,
   );
   // 出错时指着哪个输入口（insufficient_points 的 cloud 这类）：画它的输入时先画那个口接的云
-  const liveErrorPort = useExecutionStore((s) =>
-    path && nodeId ? aggregatedNodes(path, s.nodes).get(nodeId)?.errors[0]?.portName : undefined,
-  );
+  // 子图 / 库算子节点的错误是里面的叶子报的（errorSource）：portName 是叶子的口、不是这个节点的输入口，不用（同 ViewerStatus 对 paramPath）
+  const liveErrorPort = useExecutionStore((s) => {
+    const exec = path && nodeId ? aggregatedNodes(path, s.nodes).get(nodeId) : undefined;
+    return exec && !exec.errorSource ? exec.errors[0]?.portName : undefined;
+  });
   // 叠画用的非点云输出（G7）。stats 是事件里那一份，引用稳定，不会每帧新建。
   const liveOutputs = useExecutionStore((s) =>
     path && nodeId ? aggregatedNodes(path, s.nodes).get(nodeId)?.stats?.outputs : undefined,

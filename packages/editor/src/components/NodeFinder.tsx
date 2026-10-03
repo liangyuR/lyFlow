@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { listGraphNodes, NODE_FIELD_LABELS, searchGraphNodes } from "../lib/findNodes";
+import { docNodeKey, listGraphNodes, NODE_FIELD_LABELS, searchGraphNodes } from "../lib/findNodes";
 import { pathPrefix } from "../lib/subgraph";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
@@ -66,13 +66,18 @@ export function NodeFinder() {
   const pickAll = () => {
     const ui = useUiStore.getState();
     const here = pathPrefix(ui.path);
-    const ids = hits.filter((h) => pathPrefix(h.entry.path) === here).map((h) => h.entry.localId);
-    const elsewhere = hits.length - ids.length;
+    const hereHits = hits.filter((h) => pathPrefix(h.entry.path) === here);
+    const ids = hereHits.map((h) => h.entry.localId);
+    // 同一个子图定义的别的实例里列出来的是同一个节点：选上了就不算「别的层没选」的
+    const picked = new Set(hereHits.map((h) => docNodeKey(h.entry)));
+    const elsewhere = hits.filter((h) => pathPrefix(h.entry.path) !== here && !picked.has(docNodeKey(h.entry))).length;
     if (ids.length === 0) {
       ui.showToast(hits.length === 0 ? "没有匹配的节点" : `这一层没有匹配的；${elsewhere} 个在别的层，回车逐个打开`, "warn");
       return;
     }
     close();
+    // 选上是为了接着编辑：预览最大化着（画布、检查器都看不见）就先还原，与回车打开到节点（revealNode）一样
+    ui.setViewerMaximized(false);
     ui.setSelection(ids, []);
     ui.showToast(`选中了这一层的 ${ids.length} 个节点${elsewhere > 0 ? `（另有 ${elsewhere} 个在别的层，没选）` : ""}`);
   };
@@ -116,7 +121,7 @@ export function NodeFinder() {
           data-testid="node-finder-input"
           type="text"
           value={query}
-          placeholder="查找节点：名字、id、算子、所在子图…（is:muted / is:error / op:… 筛选，Alt+Enter 全选）"
+          placeholder="查找节点（is:muted / is:error / op:… 筛选，Alt+Enter 选这一层的）"
           spellCheck={false}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -148,7 +153,7 @@ export function NodeFinder() {
             })
           )}
           {hits.length > rows.length && (
-            <p className="search-popup__empty">还有 {hits.length - rows.length} 个，继续输入缩小范围（Alt+Enter 连它们一起选）</p>
+            <p className="search-popup__empty">还有 {hits.length - rows.length} 个，继续输入缩小范围（Alt+Enter 选上这一层命中的全部）</p>
           )}
         </div>
       </div>

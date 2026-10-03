@@ -111,6 +111,9 @@
   pointer-events: auto;
 }
 .viewer__stale button:hover { border-color: var(--lyflow-accent); }
+/* 值 / 图像盖满画布：角标在时它们往下让出一条，不压表头与「级别 / 通道 / 色带」那条栏，▶ 也不挡栏上的选择框 */
+.viewer__stage:has(> .viewer__stale) > .viewer__values,
+.viewer__stage:has(> .viewer__stale) > .viewer__image { top: 34px; }
 
 /* 网格一格多大：栏窄时排在尺寸之后让 */
 .viewer__grid {

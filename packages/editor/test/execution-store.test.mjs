@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { matchShortcut } from "../src/lib/keymap.ts";
-import { listGraphNodes, parseFinderQuery, searchGraphNodes } from "../src/lib/findNodes.ts";
+import { docNodeKey, listGraphNodes, parseFinderQuery, searchGraphNodes } from "../src/lib/findNodes.ts";
 import { culpritOf, errorNodeIds, failedUpstream, revealError, revealNodeError } from "../src/lib/revealError.ts";
 import { describeEventNode, locateEventNode } from "../src/lib/subgraph.ts";
 import { useGraphStore } from "../src/store/graph.ts";
@@ -178,12 +178,19 @@ test("查找节点（Ctrl+F）：整张图连子图里面的一起列，按名�
     ["op:sub:s2", ["a/n"]],
     ["op:voxel is:muted op:grid", ["top", "a/v"]],
     ["is:foo", []],
+    ["is:constructor", []],
+    ["is:__proto__ 体素", []],
   ];
   for (const [q, want] of filtered) {
     assert.deepEqual(searchGraphNodes(muted, q, failed).map((h) => h.entry.id), want, q);
   }
   assert.deepEqual(searchGraphNodes(muted, "is:error").map((h) => h.entry.id), [], "不给出错判断就当都没出错");
   assert.deepEqual(parseFinderQuery("  op:Voxel  is:muted  离群 "), { text: "离群", muted: true, error: false, ops: ["voxel"] });
+  // 子图定义是共用的：两个实例里列出来的 v 是文档里同一个节点（状态栏只数一次，Alt+Enter 不说它「在别的层没选」）
+  const twice = listGraphNodes({ ...mutedDoc, nodes: [...mutedDoc.nodes, { id: "a2", op: "sub:s1" }] }, sgOps);
+  const vs = twice.filter((e) => e.localId === "v");
+  assert.deepEqual([vs.map((e) => e.id), new Set(vs.map(docNodeKey)).size], [["a/v", "a2/v"], 1]);
+  assert.notEqual(docNodeKey(twice.find((e) => e.id === "top")), docNodeKey(vs[0]), "顶层的节点与子图里的不混");
 
   const key = (k) => ({ key: k, ctrlKey: true, metaKey: false, shiftKey: false, altKey: false });
   assert.equal(matchShortcut(key("f"))?.id, "findNode");

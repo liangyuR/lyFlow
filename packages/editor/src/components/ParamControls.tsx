@@ -269,9 +269,13 @@ function TextishControl({
       setText(String(value ?? ""));
       return;
     }
+    // 没动过：照旧什么都不做。存着的值带空格、引号（老图、CLI --set）时点进去再点出来不该悄悄改掉它，
+    // 多选里更不该把第一个节点的值写给大家
+    if (text === value) return;
     const next = normalize ? normalize(text) : text;
     if (next !== text) setText(next);
-    if (next !== value) onChange(next);
+    // 收拾过的字与当前值一样也交出去：多选里各节点的值不一样时（显示的是第一个的），外面靠这一下统一
+    if (next !== value || next !== text) onChange(next);
   };
 
   const shared = {
@@ -569,9 +573,15 @@ function ParamMenu({
       try {
         raw = JSON.parse(text) as unknown;
       } catch {
-        ui.showToast("粘贴失败：剪贴板内容不是合法 JSON", "warn");
-        return;
+        // 路径参数：资源管理器「复制文件地址」给的 "D:\data\x.pcd" 不是合法 JSON，按路径收
+        if (param.type !== "path") {
+          ui.showToast("粘贴失败：剪贴板内容不是合法 JSON", "warn");
+          return;
+        }
+        raw = cleanPathText(text);
       }
+      // "D:\track\frame.pcd" 恰好是合法 JSON，\t、\f 却解成了控制字符：按原文当路径收（「复制值」复制出来的是转义过的，解出来没有控制字符）
+      if (param.type === "path" && typeof raw === "string" && /[\u0000-\u001f]/.test(raw)) raw = cleanPathText(text);
       const r = coerceValue(param, raw);
       if (!r.ok) {
         ui.showToast(r.msg, "warn");

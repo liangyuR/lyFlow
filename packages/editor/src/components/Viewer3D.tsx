@@ -101,6 +101,11 @@ const COMPARE_MIN_LR_WIDTH = 480;
 
 /** 这一侧此刻显示着的结果冻成快照；还没有结果（在取、没跑、出错……）返回 null。
  *  判据与 Edge Peek 的锁定条件相同：状态文字为空且不在取数（EdgePeek.tsx:76）。 */
+/** 对比里出错的那一侧不画它的输入：并排时那一栏整个盖着「出错」，画了也看不见，还会算进两栏的取景与差异表。 */
+function withoutFailedInput(src: ViewerSource): ViewerSource {
+  return src.display.failed ? { ...src, display: { ...src.display, cloud: null, base: null, failed: false } } : src;
+}
+
 function snapshotOf(src: ViewerSource, label: string, maxPoints: number): CompareSnapshot | null {
   const d = src.display;
   if (src.loading || d.status !== null || !d.runId || !d.nodeId) return null;
@@ -193,8 +198,9 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   const slotA = useMemo(() => (activeId ? { path, nodeId: activeId } : null), [path, activeId]);
   const portPick = useUiStore((s) => (activeKey ? (s.viewerPortPick.get(activeKey) ?? null) : null));
   const setPortPick = useUiStore((s) => s.setViewerPortPick);
+  const compareOn = useCompareStore((s) => s.on);
   // 取数（hooks/useViewerSource）：状态、输出统计、显示点云还是值、取云或借上游的底图
-  const source = useViewerSource({
+  const sourceA = useViewerSource({
     slot: slotA,
     idleText: selected.size > 1 ? "选中了多个节点" : "选中一个节点查看它的输出",
     maxPoints,
@@ -202,25 +208,29 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
     portPick,
     frozen: null,
   });
-  const { display, loading, node: activeNode, op: activeOp, outputs: activeOutputs, content, autoContent } = source;
+  const source = compareOn ? withoutFailedInput(sourceA) : sourceA;
+  const { display, loading, node: activeNode, op: activeOp, outputs: activeOutputs, autoContent } = source;
+  // 20：出错节点画的是它的输入（failed 只在取到云时才置）：哪怕节点自己只输出值，栏与工具也按点云场景给
+  const content = display.failed ? "cloud" : source.content;
   const { cloud } = display;
   const extent = cloud && cloud.pointCount > 0 ? extentText(cloud.bounds) : null;
 
   // -- 对比（交互清单 #35）：A 就是上面那个（跟随选中 / 钉住），B 是一个显式的槽 ---------------
-  const compareOn = useCompareStore((s) => s.on);
   const compareB = useCompareStore((s) => s.b);
   const frozenB = useCompareStore((s) => s.snapshot);
   const portPickB = useUiStore((s) =>
     compareOn && compareB ? (s.viewerPortPick.get(fullId(compareB.path, compareB.nodeId)) ?? null) : null,
   );
-  const sourceB = useViewerSource({
-    slot: compareOn ? compareB : null,
-    idleText: "",
-    maxPoints,
-    pick: null,
-    portPick: portPickB,
-    frozen: compareOn ? frozenB : null,
-  });
+  const sourceB = withoutFailedInput(
+    useViewerSource({
+      slot: compareOn ? compareB : null,
+      idleText: "",
+      maxPoints,
+      pick: null,
+      portPick: portPickB,
+      frozen: compareOn ? frozenB : null,
+    }),
+  );
   const cloudB = compareOn ? sourceB.display.cloud : null;
   // 一侧可画就两栏都是点云场景；两侧都只有值才换成两张值表格（§1.6）
   const stageContent = compareOn ? compareContentFor(content, sourceB.content) : content;
@@ -719,11 +729,13 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
             data-node={display.base.localId}
             title={
               display.failed
-                ? `该节点出错了，画面是它的输入（取自 ${display.base.localId}）：看看是不是数据的问题`
+                ? display.base.direct
+                  ? `该节点出错了，画面是它的输入（取自 ${display.base.localId}）：看看是不是数据的问题`
+                  : `该节点出错了，它的输入里没有点云，画面是上游最近的一片云（取自 ${display.base.localId}）`
                 : `该节点没有点云输出，底图取自上游最近的一片云（${display.base.localId}）`
             }
           >
-            {display.failed ? "输入" : "底图"}：{display.base.label}
+            {display.failed ? (display.base.direct ? "输入" : "上游") : "底图"}：{display.base.label}
           </span>
         )}
         {!compareOn && content === "cloud" && activeKey && source.cloudPorts.length > 1 && (
@@ -1071,12 +1083,11 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
           // （它比「未运行」有用：说的是要先跑哪一段）。说的是节点运行状态时跟着给下一步（运行到此、定位出错处）
           <ViewerStatus
             corner={roiEditing || !!display.busy}
-            docked={!!display.failed && !loading}
+            docked={!!display.failed && !display.busy && !loading}
             note={
-              display.failed && display.base && cloud && !loading
-                ? cloud.pointCount === 0
-                  ? `画面是它的输入（取自「${display.base.label}」）：是空的 —— 根因多半在上游`
-                  : `画面是它的输入（取自「${display.base.label}」，${cloud.pointCount.toLocaleString()} 点）`
+              display.failed && display.base && cloud && !display.busy && !loading
+                ? `画面是${display.base.direct ? "它的输入" : "上游最近的一片云"}（取自「${display.base.label}」` +
+                  (cloud.totalPoints === 0 ? "）：是空的 —— 根因多半在上游" : `，${cloud.totalPoints.toLocaleString()} 点）`)
                 : null
             }
             text={loading ? "正在取点云…" : roiEditing && backdrop.error ? backdrop.error : (display.status ?? "")}

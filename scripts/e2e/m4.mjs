@@ -565,12 +565,13 @@ async function suiteNested(cdp, report) {
              rows: [...document.querySelectorAll('[data-testid="node-finder-row"]')]
                .map((r) => ({ id: r.dataset.id, muted: !!r.querySelector('.finder__muted') })) };
   `), { query: "is:muted ", rows: [{ id: ids.gen, muted: true }, { id: nested, muted: true }] });
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMaximized(true); return true;`);
   await pressKey(cdp, "Enter", 13, ["alt"]);
   await sleep(200);
-  report.eq("Alt+Enter：选上这一层的那个（gen），说一声另一个在别的层；弹层关掉", await cdp.eval(`
+  report.eq("预览最大化着按 Alt+Enter：先还原画布，选上这一层的那个（gen），说一声另一个在别的层；弹层关掉", await cdp.eval(`
     const s = window.__lyflow.stores.ui.getState();
-    return { selected: [...s.selectedNodes], open: s.finderOpen, toast: s.toast?.text ?? null };
-  `), { selected: [ids.gen], open: false, toast: "选中了这一层的 1 个节点（另有 1 个在别的层，没选）" });
+    return { selected: [...s.selectedNodes], open: s.finderOpen, toast: s.toast?.text ?? null, maximized: s.viewerMaximized };
+  `), { selected: [ids.gen], open: false, toast: "选中了这一层的 1 个节点（另有 1 个在别的层，没选）", maximized: false });
   await pressCtrl(cdp, "f");
   await sleep(150);
   await cdp.send("Input.insertText", { text: "op:statistical" });
@@ -891,7 +892,11 @@ async function suitePreview(cdp, report) {
          if (hit) drawn.push({ run: r.runId, ms: Math.round(hit.at - r.at) });
        }
        const last = runs[runs.length - 1];
-       if (!last || !drawn.some((d) => d.run === last.runId)) return null;  // 等正式运行也画出来
+       // 等的是松手后那次正式运行：机器一忙，它还没跑完时最后一次画出来的是预览（2026-10-03 整跑撞上过：
+       // 接着读到的源头点数是抽稀过的 20 万）
+       const ex = window.__lyflow.stores.execution.getState();
+       if (ex.preview || ex.runStatus === 'running' || !last || last.runId !== ex.runId) return null;
+       if (!drawn.some((d) => d.run === last.runId)) return null;  // 等正式运行也画出来
        return { preview: drawn.filter((d) => d.run !== last.runId).map((d) => d.ms),
                 formal: drawn.find((d) => d.run === last.runId).ms };
      })()`,
@@ -1008,6 +1013,43 @@ async function suitePreview(cdp, report) {
   report.ok("点角标上的 ▶ 运行到此节点：算到 s2（目标就是它），点数变成新的，角标消失",
     ranStale.targets.length === 1 && ranStale.targets[0] === pin.s2 && p3.s2 !== p2.s2 && p3.s2 != null && !p3.stale,
     JSON.stringify({ targets: ranStale.targets, p3 }));
+
+  // 关了自动运行再拖：松手就停在预览上 —— 画面是新值、只是抽稀过，角标说「抽稀的预览 · 还没正式运行」（不说「上一次的结果」），
+  // 拖着的时候不出来；点它的 ▶ 补一次正式运行，角标走
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setAutoRun(false); return true;`);
+  const offSlider = await centerOf(cdp, '[data-testid="param-slider-keepRatio"]');
+  const pBefore = await pinState();
+  const seenWhileDragging = [];
+  {
+    const common = { button: "left", buttons: 1, clickCount: 1 };
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: offSlider.x, y: offSlider.y, buttons: 0 });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: offSlider.x, y: offSlider.y, ...common });
+    for (let i = 1; i <= 6; i += 1) {
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: offSlider.x + i * 8, y: offSlider.y, ...common });
+      await sleep(80);
+      seenWhileDragging.push(await cdp.eval(`return !!document.querySelector('[data-testid="viewer-stale"]');`));
+    }
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: offSlider.x + 48, y: offSlider.y, ...common });
+  }
+  await cdp.waitFor(
+    `(() => { const s = window.__lyflow.stores.execution.getState();
+              return s.runId !== ${lit(pBefore.runId)} && s.preview && s.runStatus !== 'running'; })()`,
+    { timeoutMs: 20_000, what: "拖动的预览运行结束" },
+  );
+  await replan(cdp);
+  await sleep(250);
+  const p5 = await pinState();
+  const badge5 = await cdp.eval(`return document.querySelector('[data-testid="viewer-stale"]')?.textContent ?? null;`);
+  report.ok("关了自动运行拖上游：拖着的时候不出角标；松手停在预览上，角标说「抽稀的预览 · 还没正式运行」",
+    seenWhileDragging.every((x) => !x) && p5.preview === true && /抽稀的预览/.test(badge5 ?? "") && !/上一次的结果/.test(badge5 ?? ""),
+    JSON.stringify({ seenWhileDragging, p5, badge5 }));
+  const ranFormal = await runAndWait(cdp, async () => clickAt(cdp, await centerOf(cdp, '[data-testid="viewer-stale-run"]')));
+  await replan(cdp);
+  await sleep(200);
+  const p6 = await pinState();
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setAutoRun(true); return true;`);
+  report.ok("点角标上的 ▶：补一次正式运行（不是预览），角标走",
+    ranFormal.preview === false && !p6.stale, JSON.stringify({ preview: ranFormal.preview, p6 }));
 
   // 再按 P：取消钉住，预览回到选中的 s1
   await pressKey(cdp, "p", 80);
@@ -1417,6 +1459,23 @@ async function suiteM3Tails(cdp, report, ws) {
       ["done", "skipped"].includes(ranPasted.nodes[ids.rgb]?.state) &&
       (await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.find((x) => x.id === ${lit(ids.rgb)}).params.path;`)) === colored,
     JSON.stringify({ pasted, state: ranPasted.nodes[ids.rgb]?.state, errors: ranPasted.nodes[ids.rgb]?.errors }));
+
+  // 存着的路径带空格（老图、CLI --set 写进来的）：点进框里看一眼再点出来，不悄悄改掉它、不记撤销
+  const spaced = `${colored} `;
+  const pastSpaced = await cdp.eval(`
+    window.__lyflow.stores.graph.getState().setParam(${lit(ids.rgb)}, 'path', ${lit(spaced)});
+    return window.__lyflow.stores.graph.getState().past.length;
+  `);
+  await sleep(150);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="param-path"] input.ctl--str'));
+  await sleep(100);
+  await pressKey(cdp, "Tab", 9);
+  await sleep(150);
+  const untouched = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    return { path: g.doc.nodes.find((x) => x.id === ${lit(ids.rgb)}).params.path, past: g.past.length };
+  `);
+  report.eq("存着的路径带空格：点进框里再点出来，不改它、不记撤销", untouched, { path: spaced, past: pastSpaced });
 }
 
 /** 子图内部节点出错（事件 id 是路径，ADR-0010）：顶层原来只看得到「这个子图红了」、诊断里是一串路径 id，

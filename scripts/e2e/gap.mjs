@@ -254,6 +254,9 @@ async function suiteMeasurementOutputs(cdp, report) {
           gap: { state: 'value', node: ${lit(ids.gen)}, port: 'value', type: 'Measurement', elementCount: 1, value: meas(6.4138, 'ok') },
           flush: { state: 'value', node: ${lit(ids.pose)}, port: 'value', type: 'Measurement', elementCount: 1, value: meas(7.9, 'high') },
           cloud: { state: 'value', node: ${lit(ids.gen)}, port: 'cloud', type: 'PointCloud', elementCount: 5000 },
+          // gap 的结果包这类 Record 展开是几 KB 的 JSON：收尾里照旧只写个数
+          bundle: { state: 'value', node: ${lit(ids.gen)}, port: 'value', type: 'Record', elementCount: 1,
+                    value: { kind: 'Record', type: 'GapResultBundle', data: { gap: { value_mm: 3.78 }, fits: new Array(40).fill({ a: 1, b: 2 }) } } },
         },
       },
     });
@@ -271,8 +274,9 @@ async function suiteMeasurementOutputs(cdp, report) {
     }));
   `);
   const poseLabel = await cdp.eval(`return window.__lyflow.stores.manifest.getState().operatorsById.get('transform.make').label;`);
-  report.ok("运行收尾：量测输出写着读数与判定，判 high 的排在最上；节点写名字；点云照旧写个数",
-    JSON.stringify(summaryRows.map((r) => r.name)) === JSON.stringify(["flush", "gap", "cloud"]) &&
+  report.ok("运行收尾：量测输出写着读数与判定，判 high 的排在最上；节点写名字；点云、Record 照旧写个数（Record 不展开成一大串）",
+    JSON.stringify(summaryRows.map((r) => r.name)) === JSON.stringify(["flush", "gap", "cloud", "bundle"]) &&
+      summaryRows[3].value === null && summaryRows[3].count === "1 个" &&
       summaryRows[0].value === "7.9 mm" && summaryRows[0].verdict === "high" && summaryRows[0].node === `${poseLabel}.value` &&
       summaryRows[1].value === "6.4138 mm" && summaryRows[1].verdict === "ok" &&
       summaryRows[2].value === null && summaryRows[2].count === "5000 个",
@@ -283,6 +287,17 @@ async function suiteMeasurementOutputs(cdp, report) {
   report.eq("点收尾里的节点名：打开到它（选中它）",
     await cdp.eval(`return [...window.__lyflow.stores.ui.getState().selectedNodes];`), [ids.pose]);
   await cdp.eval(`window.__lyflow.stores.ui.setState({ drawer: ${lit(drawerBefore)} }); return true;`);
+
+  // 再跑一次出了错（单节点运行不清节点表，出错的事件不带 stats）：底栏不再挂着上一次的读数与判定
+  await cdp.eval(`
+    const e = window.__lyflow.stores.execution.getState();
+    e.apply({ schemaVersion: 1, runId: e.runId, seq: 100003, kind: 'node_state', nodeId: ${lit(ids.gen)}, state: 'error',
+              errors: [{ code: 'insufficient_points', message: '点太少', portName: 'cloud' }] });
+    return true;
+  `);
+  await sleep(200);
+  report.eq("出错之后底栏不写上一次的读数（不再挂着「6.414 mm OK」）",
+    await cdp.eval(`return !!document.querySelector('[data-testid="node-readings-' + ${lit(ids.gen)} + '"]');`), false);
 }
 
 /** 可选：打开一张真实的 gap 图跑一遍，看 ROI 框有没有画出来。图用

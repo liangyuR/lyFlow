@@ -10,6 +10,7 @@ import { planReplace } from "../lib/replace";
 import { searchOperators, FIELD_LABELS } from "../lib/search";
 import { augmentOperators, levelOf } from "../lib/subgraph";
 import { findPort, inferAnyTypes, insertPortsFor, pendingPort, pendingType } from "../lib/typecheck";
+import { estimateNodeHeight } from "../lib/placement";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
@@ -224,7 +225,9 @@ export function NodeSearch() {
     const port = pending?.portOf.get(opId) ?? null;
     // 加节点与接线一条撤销（以前两条：Ctrl+Z 一次，线没了、节点还在）
     const nodeId = graph.batch(op ? `添加 ${op.label}` : "添加节点", () => {
-      const id = graph.addNode(opId, popup.flow);
+      // 从选中的节点接出：这时才知道新节点多高（端口多的比选中的那个高），按它重新找一次不压着别人的位置
+      const at = popup.place && op ? (popup.place({ h: estimateNodeHeight(op.inputs.length, op.outputs.length) }) ?? popup.flow) : popup.flow;
+      const id = graph.addNode(opId, at);
       // 拖的是输入端时新节点在上游，端口方向要反过来（P1 #18/#19）
       if (id && port) {
         if (popup.pendingSide === "input") graph.connect({ node: id, port }, pendingFrom);
@@ -245,8 +248,9 @@ export function NodeSearch() {
   };
 
   // 贴着光标放，但不能溢出窗口
-  const left = Math.min(popup.screen.x, window.innerWidth - POPUP_WIDTH - 12);
-  const top = Math.min(popup.screen.y, window.innerHeight - POPUP_HEIGHT - 12);
+  // 两头都夹：选中一个节点按 Tab 时弹层摆在新节点要落的地方，那个节点在视野外的话坐标是负的
+  const left = Math.max(12, Math.min(popup.screen.x, window.innerWidth - POPUP_WIDTH - 12));
+  const top = Math.max(12, Math.min(popup.screen.y, window.innerHeight - POPUP_HEIGHT - 12));
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {

@@ -39,8 +39,30 @@ test("closureOf：沿连线往上 / 往下走到头，含起点，按文档顺�
     ["d", [null, null], ["d"]],
     ["c", ["e", "d"], ["c", "e"]],
   ];
+  const here = (id) => (id ? { path: [], nodeId: id } : null);
   for (const [edited, eyes, want] of watched) {
-    assert.deepEqual(previewTargets(level, edited, eyes), want, `previewTargets ${edited} ← ${eyes.join(",")}`);
+    assert.deepEqual(previewTargets(level, [], edited, eyes.map(here)), want, `previewTargets ${edited} ← ${eyes.join(",")}`);
+  }
+  // 改的在子图里（参数面板展开的定义行是「S/p」，或者进了 S 改 p）、看着的在外面一层：从包着改动的 S 往下游找
+  //   g → S{ p → q } → m      z（孤立）
+  const sdoc = {
+    nodes: ["g", "S", "m", "z"].map((id) => ({ id, op: id === "S" ? "sub:s" : "t.op" })),
+    edges: [edge("g", "S"), edge("S", "m")],
+    subgraphs: { s: { nodes: [{ id: "p", op: "t.op" }, { id: "q", op: "t.op" }], edges: [edge("p", "q")], inputs: [], outputs: [], params: [] } },
+  };
+  const inS = [{ nodeId: "S", subgraphId: "s" }];
+  const nested = [
+    // [说明, 当前层, 改的节点, 看着的, 期望]
+    ["顶层改定义行，看着顶层的 m", [], "S/p", [{ path: [], nodeId: "m" }], ["S/p", "m"]],
+    ["进了 S 改 p，B 在顶层的 m", inS, "p", [{ path: [], nodeId: "m" }], ["S/p", "m"]],
+    ["顶层孤立的 z 不带", inS, "p", [{ path: [], nodeId: "z" }], ["S/p"]],
+    ["同一层下游的 q", inS, "p", [{ path: inS, nodeId: "q" }], ["S/p", "S/q"]],
+    ["看着的就是包着它的 S", inS, "p", [{ path: [], nodeId: "S" }], ["S/p", "S"]],
+    ["看着的就是它自己", inS, "p", [{ path: inS, nodeId: "p" }], ["S/p"]],
+    ["看着的在更深的别处：不认", [], "m", [{ path: inS, nodeId: "q" }], ["m"]],
+  ];
+  for (const [name, path, edited, eyes, want] of nested) {
+    assert.deepEqual(previewTargets(sdoc, path, edited, eyes), want, `previewTargets：${name}`);
   }
 });
 

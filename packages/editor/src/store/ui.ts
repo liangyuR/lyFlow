@@ -25,6 +25,8 @@ export interface SearchPopup {
   replaceNode?: string;
   /** 放下之后把画布挪过去、焦点给新节点（选中一个节点按 Tab 接出：新节点可能在视野外，接着按 Tab 还要从它接）。 */
   follow?: boolean;
+  /** 选了算子之后按新节点的高度重新找落点（选中一个节点按 Tab 接出时给；flow 是按选中的那个节点的大小估的）。 */
+  place?: (size: { h: number }) => { x: number; y: number } | null;
 }
 
 export interface Clipboard {

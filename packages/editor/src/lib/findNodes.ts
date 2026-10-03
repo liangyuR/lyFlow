@@ -61,6 +61,12 @@ export interface NodeHit {
   fieldIndex: number;
 }
 
+/** 文档里的哪一个节点：子图定义是共用的，同一个定义的两个实例里列出来的是同一个节点（静音、参数都是同一份）。
+ *  顶层的节点没有定义，只看 id。 */
+export function docNodeKey(entry: GraphNodeEntry): string {
+  return `${entry.path[entry.path.length - 1]?.subgraphId ?? ""}\u0000${entry.localId}`;
+}
+
 /** 顺序即优先级：名字命中比 id、算子名、所在子图的名字更值钱。 */
 export const NODE_FIELD_LABELS = ["名称", "id", "算子", "所在子图"] as const;
 
@@ -92,12 +98,14 @@ export function parseFinderQuery(query: string): FinderQuery {
     const m = /^(is|op)[:：](.+)$/i.exec(word);
     const key = m?.[1]!.toLowerCase();
     const value = m?.[2] ?? "";
-    if (key === "is" && IS_WORDS[value.toLowerCase()]) {
-      out[IS_WORDS[value.toLowerCase()]!] = true;
+    const lower = value.toLowerCase();
+    // 只认自己的键：is:constructor、is:__proto__ 会撞上 Object.prototype 上的东西
+    if (key === "is" && Object.hasOwn(IS_WORDS, lower)) {
+      out[IS_WORDS[lower]!] = true;
       continue;
     }
     if (key === "op") {
-      out.ops.push(value.toLowerCase());
+      out.ops.push(lower);
       continue;
     }
     rest.push(word);

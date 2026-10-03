@@ -56,19 +56,27 @@ export interface FlowRect {
 }
 
 /** 选中一个节点按 Tab、从它接出的新节点放在哪：它右边隔一段、同一高度；那里已经有节点（它接着的下游、别的分支）
- *  就往下让到不压着谁 —— 新节点是并出来的一条分支，不插进原来那条链。新节点的大小按选中的这个估。 */
+ *  就往下让到不压着谁 —— 新节点是并出来的一条分支，不插进原来那条链。新节点的大小不给就按选中的这个估。 */
 export function branchSlot(
   anchor: FlowRect,
   others: readonly FlowRect[],
   gap: { x: number; y: number } = { x: 80, y: 40 },
+  size: { w?: number; h?: number } = {},
 ): { x: number; y: number } {
+  const w = size.w ?? anchor.w;
+  const h = size.h ?? anchor.h;
   const x = anchor.x + anchor.w + gap.x;
   let y = anchor.y;
   for (let i = 0; i < 100; i += 1) {
-    const hit = others.filter((o) => o.x < x + anchor.w && x < o.x + o.w && o.y < y + anchor.h && y < o.y + o.h);
+    const hit = others.filter((o) => o.x < x + w && x < o.x + o.w && o.y < y + h && y < o.y + o.h);
     if (hit.length === 0) break;
     y = Math.max(...hit.map((o) => o.y + o.h)) + gap.y;
   }
   return { x, y };
 }
 
+/** 还没放下的节点大概多高：标题栏、上下留白，再加上端口那几行（左边输入、右边输出，取多的那一边）。
+ *  与样式表里 .node__head / .node__body 的尺寸对得上（一行端口的节点量出来是 68）。 */
+export function estimateNodeHeight(inputs: number, outputs: number): number {
+  return 46 + 22 * Math.max(1, inputs, outputs);
+}

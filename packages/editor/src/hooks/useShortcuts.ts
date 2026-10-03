@@ -84,7 +84,10 @@ export interface ShortcutHandlers {
   cursorFlowPosition: () => { x: number; y: number };
   cursorScreenPosition: () => { x: number; y: number };
   /** 从这个节点接出的新节点放哪（画布坐标）与弹层摆哪（屏幕坐标）；节点不在画布上时 null。 */
-  branchSlot: (nodeId: string) => { flow: { x: number; y: number }; screen: { x: number; y: number } } | null;
+  branchSlot: (
+    nodeId: string,
+    size?: { h: number },
+  ) => { flow: { x: number; y: number }; screen: { x: number; y: number } } | null;
 }
 
 export function useShortcuts(
@@ -319,10 +322,23 @@ export function useShortcuts(
           {
             // 只选中了一个节点：新算子接在它的输出后面（预览里选看的那个输出，没选过就是第一个），放在它右边、
             // 并出一条分支；选完画布跟过去、焦点给新节点，接着按 Tab 一路往下接
-            const from = ui.selectedNodes.size === 1 && ui.selectedEdges.size === 0 ? branchFrom([...ui.selectedNodes][0]!) : null;
+            // 框选会把相连的线一起选上：选中的线都连着这个节点的，照样算「只选中了一个节点」
+            const only = ui.selectedNodes.size === 1 ? [...ui.selectedNodes][0]! : null;
+            const edges = only ? levelOf(graph.doc, ui.path).edges : [];
+            const ownEdges = [...ui.selectedEdges].every((id) => {
+              const ed = edges.find((x) => x.id === id);
+              return ed !== undefined && (ed.from.node === only || ed.to.node === only);
+            });
+            const from = only && ownEdges ? branchFrom(only) : null;
             const slot = from ? handlers.branchSlot(from.node) : null;
             if (from && slot) {
-              ui.openSearch({ ...slot, pendingFrom: from, pendingSide: "output", follow: true });
+              ui.openSearch({
+                ...slot,
+                pendingFrom: from,
+                pendingSide: "output",
+                follow: true,
+                place: (size) => handlers.branchSlot(from.node, size)?.flow ?? null,
+              });
               return;
             }
           }

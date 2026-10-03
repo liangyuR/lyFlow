@@ -250,9 +250,10 @@ pnpm e2e:http                             # 桩 + Chrome + 宿主，一条龙
 自己推一定会在那儿错 —— 而且错得很安静。`staleLocalIds` 要求
 「键变了 **且** 现在没有缓存」两个条件同时成立，只看键变化的话改回原值也会一直标着红。
 
-读它的有两处：节点上的虚线框（`NodeRunButton`），和预览左上角的「参数改过了 · 画面是上一次的结果」
+读它的有：节点上的虚线框（`OperatorNode` 的 `is-stale`）、运行按钮的预判（`NodeRunButton`，以及 `lib/nodeRun.ts` 里
+「仅此节点」的 `nodeRunAvailability`），和预览左上角的「参数改过了 · 画面是上一次的结果」
 （`ViewerStatus.tsx` 的 `StaleBadge`，跑着的时候不显示）。拖参数的 preview run 除了改的节点，还带上正看着的、
-在它下游的节点（钉住的、对比里没冻结的 B，`lib/nodeRun.ts` 的 `previewTargets`）—— 不然钉在下游时拖上游的参数，
+在它下游的节点（预览上的那个 —— 钉住的，没钉就是选中的 —— 与对比里没冻结的 B，`lib/nodeRun.ts` 的 `previewTargets`）—— 不然钉在下游时拖上游的参数，
 画面一动不动（ADR-0011 修订）。
 
 ## 迁移是一条可撤销的动作

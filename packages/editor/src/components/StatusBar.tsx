@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { listGraphNodes } from "../lib/findNodes";
-import { levelOf, pathPrefix } from "../lib/subgraph";
+import { docNodeKey, listGraphNodes } from "../lib/findNodes";
+import { levelOf } from "../lib/subgraph";
 import { formatBytes, useCacheStore } from "../store/cache";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
@@ -34,11 +34,11 @@ export function StatusBar() {
   const stats = useCacheStore((s) => s.stats);
   const ops = useManifestStore((s) => s.operatorsById);
   // 静音的节点（连子图里面的）：忘了取消的静音会悄悄改掉结果，而节点上的斜纹在大图里常常不在视野里
+  // 子图定义是共用的：两个实例里的同一个节点只算一个（静音的是文档里那一个节点）
   const muted = useMemo(() => {
-    const all = listGraphNodes(doc, ops).filter((e) => e.muted);
-    const here = pathPrefix(path);
-    return { total: all.length, here: all.filter((e) => pathPrefix(e.path) === here).length };
-  }, [doc, ops, path]);
+    const keys = new Set(listGraphNodes(doc, ops).filter((e) => e.muted).map(docNodeKey));
+    return { total: keys.size, here: level.nodes.filter((n) => n.bypass === true).length };
+  }, [doc, ops, level]);
   const [libraryCount, setLibraryCount] = useState(0);
 
   useEffect(() => {

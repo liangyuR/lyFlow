@@ -1676,7 +1676,14 @@
 .drawer__summary-choice { color: var(--lyflow-accent-dim); }
 .drawer__summary-where,
 .drawer__summary-from { color: var(--lyflow-fg-2); font-size: 11px; }
-.drawer__summary-value { color: var(--lyflow-fg-0); font-variant-numeric: tabular-nums; }
+.drawer__summary-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--lyflow-fg-0);
+  font-variant-numeric: tabular-nums;
+}
 .drawer__summary-node { font-size: 11px; }
 .drawer__summary-outputs li[data-verdict="high"] .drawer__summary-value,
 .drawer__summary-outputs li[data-verdict="low"] .drawer__summary-value,

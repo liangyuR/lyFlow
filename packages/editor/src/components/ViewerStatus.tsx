@@ -13,7 +13,9 @@ import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
 
 /** 参数改过、还没重跑：画面上还是上一次的结果。以前什么都不说 —— 关了自动运行、或在下游钉住时敲数改参数，
- *  看着像改了没反应。跑着的时候不说：马上就有新结果，预览一次次重跑时它也会一闪一闪。 */
+ *  看着像改了没反应。跑着的时候、拖着参数的时候不说：马上就有新结果，不然预览一次次重跑时它一闪一闪。
+ *  上一次是预览运行（关了自动运行时松手就停在这儿）：画面是新值，只是抽稀过 —— 说「还没正式运行」，不说「上一次的结果」
+ *  （预览的缓存键带着预览的命名空间，与计划里正式的键永远对不上，stale 总是真）。 */
 export function StaleBadge({
   nodeId,
   onRunToNode,
@@ -23,11 +25,13 @@ export function StaleBadge({
 }) {
   const stale = useNodeStale(nodeId);
   const running = useExecutionStore((s) => s.runStatus === "running");
+  const fromPreview = useExecutionStore((s) => s.preview);
+  const previewing = useUiStore((s) => s.previewing);
   const canRun = useManifestStore((s) => s.transportKind !== "static");
-  if (!stale || running) return null;
+  if (!stale || running || previewing) return null;
   return (
-    <div className="viewer__stale" data-testid="viewer-stale">
-      <span>参数改过了 · 画面是上一次的结果</span>
+    <div className="viewer__stale" data-testid="viewer-stale" data-preview={fromPreview ? "1" : undefined}>
+      <span>{fromPreview ? "画面是抽稀的预览 · 还没正式运行" : "参数改过了 · 画面是上一次的结果"}</span>
       {onRunToNode && canRun && (
         <button
           type="button"
@@ -63,7 +67,8 @@ export function ViewerStatus({
 }) {
   const path = useUiStore((s) => s.path);
   const doc = useGraphStore((s) => s.doc);
-  const target = corner ? null : nodeId;
+  // 缩在角上不给动作；出错节点画着输入时（docked）照样给错误原文与定位，哪怕在拖框
+  const target = corner && !docked ? null : nodeId;
   const exec = useExecutionStore((s) => (target ? aggregatedNodes(path, s.nodes).get(target) : undefined));
   const running = useExecutionStore((s) => s.runStatus === "running");
   const canRun = useManifestStore((s) => s.transportKind !== "static");

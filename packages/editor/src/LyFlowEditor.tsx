@@ -443,7 +443,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       },
       cursorFlowPosition: () => screenToFlowPosition(canvasPoint()),
       cursorScreenPosition: canvasPoint,
-      branchSlot: (nodeId: string) => {
+      branchSlot: (nodeId: string, size?: { h: number }) => {
         // 量过的大小优先；只渲染视野里的节点时视野外的没量过，按默认的估
         const rect = (n: { position: { x: number; y: number }; measured?: { width?: number; height?: number } }) => ({
           x: n.position.x,
@@ -454,7 +454,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         const nodes = getNodes();
         const anchor = nodes.find((n) => n.id === nodeId);
         if (!anchor) return null;
-        const flow = branchSlot(rect(anchor), nodes.filter((n) => n.id !== nodeId).map(rect));
+        const flow = branchSlot(rect(anchor), nodes.filter((n) => n.id !== nodeId).map(rect), undefined, size);
         return { flow, screen: flowToScreenPosition(flow) };
       },
     }),

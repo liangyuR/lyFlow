@@ -14,6 +14,8 @@ export interface BaseCloud {
   label: string;
   /** 展开到叶子之后的路径 id + 端口，直接用于 getOutputCloud。 */
   resolved: { nodeId: string; port: string };
+  /** 就是接在它输入口上的那片云（直接接着的点云口，或直接接着的 Bundle 里的点云字段）；隔了几跳找到的是 false。 */
+  direct?: boolean;
 }
 
 /** 该算子的第一个 PointCloud 输出端口。没有时再看 Bundle 输出里的点云字段，返回
@@ -72,6 +74,8 @@ interface Frame {
   path: SubPath;
   id: string;
   port?: string;
+  /** 起点直接接着的那一圈。 */
+  first?: boolean;
 }
 
 function frameKey(frame: Frame): string {
@@ -147,7 +151,7 @@ export function findBaseCloud(
     }
   };
   const via = viaPort !== undefined ? upstreamOf(doc, path, start, ops, viaPort) : [];
-  push(via.length > 0 ? via : upstreamOf(doc, path, start, ops));
+  push((via.length > 0 ? via : upstreamOf(doc, path, start, ops)).map((f) => ({ ...f, first: true })));
 
   // 队列是先进先出，所以先耗完同一层深度才往上走一层 —— 「最近的」由此保证，
   // 同深度之间的先后则来自 upstreamOf 的端口声明顺序。
@@ -163,7 +167,8 @@ export function findBaseCloud(
     // 解不开的（库算子的定义在库文件里）不算数，继续往上找
     const resolved = port ? resolveOutput(doc, frame.path, node.id, port) : null;
     if (port && resolved) {
-      return { localId: node.id, label: titleOf(node, ops), resolved };
+      const direct = !!frame.first && !!frame.port && !!port && (port === frame.port || port.startsWith(`${frame.port}.`));
+      return { localId: node.id, label: titleOf(node, ops), resolved, direct };
     }
     push(upstreamOf(doc, frame.path, node, ops));
   }

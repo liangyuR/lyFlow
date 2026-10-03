@@ -244,7 +244,9 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
     .join(" ");
 
   const cached = exec?.stats?.cached === true;
-  const readings = readingsOf(exec?.stats?.outputs);
+  // 出错 / 取消 / 运行中的事件不带 stats，节点表里留着的是上一次的（单节点运行不清节点表）：那时不写读数与判定 ——
+  // 一个刚出错的节点旁边挂着上一次的「6.414 mm OK」比元素数还误导
+  const readings = state === "done" || state === "skipped" ? readingsOf(exec?.stats?.outputs) : [];
   // 输出能不能取，认 outputsAvailable 而不是认 state：skipped 既可能是「算过了，输出照样在」
   // 也可能是「这一支根本没被需要，什么都没有」。老 core 不带这个字段，按 not_demanded 兜底。
   const outputsAvailable = exec?.stats?.outputsAvailable ?? !notDemanded;

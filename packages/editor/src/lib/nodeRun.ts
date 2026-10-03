@@ -175,13 +175,24 @@ export function closureOf(level: GraphLevel, start: readonly string[], dir: "up"
   return level.nodes.filter((n) => seen.has(n.id)).map((n) => n.id);
 }
 
-/** 拖参数（live preview）时要算到哪几个节点：改的这个，再加上正看着的、在它下游的节点 —— 钉住的那个、对比里没冻结的 B。
+/** 拖参数（live preview）时要算到哪几个节点（完整 id）：改的这个（path 那一层的 nodeId；参数面板里展开的子图定义行是
+ *  「实例/内部」），再加上正看着的、在它下游的节点 —— 预览上的那个（钉住的，没钉就是选中的）、对比里没冻结的 B。
+ *  看着的可以在外面几层（改的是子图里的参数、B 在顶层）：在它那一层，从包着这次改动的那个节点往下游找。
  *  以前只算改的这个：钉住下游的结果去拖上游的阈值，画面一动不动，像是参数没起作用（ADR-0011 修订）。
  *  不在下游的不带上：它们的结果不受这次改动影响，带上只是白算。 */
-export function previewTargets(level: GraphLevel, nodeId: string, watched: readonly (string | null)[]): string[] {
-  const down = new Set(closureOf(level, [nodeId], "down"));
-  const out = [nodeId];
-  for (const id of watched) if (id && down.has(id) && !out.includes(id)) out.push(id);
+export function previewTargets(
+  doc: GraphDoc,
+  path: SubPath,
+  nodeId: string,
+  watched: readonly ({ path: SubPath; nodeId: string } | null)[],
+): string[] {
+  const out = [fullId(path, nodeId)];
+  for (const w of watched) {
+    if (!w || w.path.length > path.length || !w.path.every((seg, i) => seg.nodeId === path[i]!.nodeId)) continue;
+    const from = w.path.length < path.length ? path[w.path.length]!.nodeId : nodeId.split("/")[0]!;
+    const id = fullId(w.path, w.nodeId);
+    if (!out.includes(id) && closureOf(levelOf(doc, w.path), [from], "down").includes(w.nodeId)) out.push(id);
+  }
   return out;
 }
 

@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { layoutGraph, needsInitialLayout } from "../src/lib/layout.ts";
 import { fitSidePanes } from "../src/lib/panes.ts";
-import { branchSlot, placeMenu, revealShift } from "../src/lib/placement.ts";
+import { branchSlot, estimateNodeHeight, placeMenu, revealShift } from "../src/lib/placement.ts";
 
 const chain = (withPositions) => ({
   schemaVersion: 1,
@@ -115,4 +115,10 @@ test("revealShift：节点移进视野只挪最少的一点，缩放不变；bra
     ["左边、上面的不管", [{ x: -300, y: 0, w: 200, h: 90 }, { x: 280, y: -200, w: 200, h: 90 }], { x: 280, y: 0 }],
   ];
   for (const [name, others, want] of slots) assert.deepEqual(branchSlot(anchor, others), want, `branchSlot：${name}`);
+  // 新节点比选中的高（端口多）：按它自己的高度躲开下面的节点
+  const below = [{ x: 300, y: 110, w: 220, h: 90 }];
+  assert.deepEqual(branchSlot({ x: 0, y: 0, w: 200, h: 68 }, below), { x: 280, y: 0 }, "按选中的那个估：擦边过去");
+  assert.deepEqual(branchSlot({ x: 0, y: 0, w: 200, h: 68 }, below, undefined, { h: estimateNodeHeight(4, 2) }), { x: 280, y: 240 },
+    "四个输入的新节点 134 高：压着下面那个，往下让");
+  assert.deepEqual([estimateNodeHeight(0, 1), estimateNodeHeight(1, 1), estimateNodeHeight(4, 2)], [68, 68, 134], "一行端口量出来是 68");
 });

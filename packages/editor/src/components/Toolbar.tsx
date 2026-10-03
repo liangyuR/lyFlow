@@ -6,6 +6,7 @@ import { baseName, parentName, recentFiles } from "../lib/files";
 import { historyRows, jumpHistory, stepHistory } from "../lib/history";
 import { keyHint } from "../lib/keymap";
 import { revealError } from "../lib/revealError";
+import { cleanPathText } from "../lib/params";
 import { useCacheStore } from "../store/cache";
 import { runControlsOf, summarize, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
@@ -257,7 +258,8 @@ function LibraryMenu() {
   };
   const save = (extra: string[]) => run(() => transport.setLibraryDirs(extra));
   const add = (dir: string) => {
-    const d = dir.trim();
+    // 资源管理器「复制文件地址」给的带引号，与路径参数同一个收拾法
+    const d = cleanPathText(dir);
     if (!d || !settings) return;
     setDraft("");
     void save([...settings.extraDirs, d]);

@@ -506,9 +506,15 @@ async function suiteBypassReroute(cdp, report) {
   report.ok("接着按 Tab 选体素：从刚加的随机采样接出、放在它右边，选中它、焦点在它上面",
     t2.op === "filter.voxel_grid" && t2.from === `${t1.id}.cloud` && t2.focused === t2.id && t2Box && t1Box && t2Box.l > t1Box.r,
     JSON.stringify({ t2, t2Box }));
-  // 回到随机采样再按 Tab：它右边已经是刚接的体素，新节点往下让、不压着它（并出第二条分支）
-  await clickAt(cdp, await centerOf(cdp, `[data-testid="node-${t1.id}"] .node__head`));
-  await sleep(150);
+  // 回到随机采样再按 Tab：它右边已经是刚接的体素，新节点往下让、不压着它（并出第二条分支）。这次真框选它 ——
+  // 框选会把相连的线一起选上，照样算「只选中了一个节点」
+  const t1Now = await boxOf(t1.id);
+  await dragMouse(cdp, { x: t1Now.l - 10, y: t1Now.t - 10 }, { x: t1Now.r + 10, y: t1Now.b + 10 }, { steps: 8 });
+  await sleep(200);
+  const boxed = await cdp.eval(`
+    const ui = window.__lyflow.stores.ui.getState();
+    return { nodes: [...ui.selectedNodes], edges: ui.selectedEdges.size };
+  `);
   await pressKey(cdp, "Tab", 9);
   await sleep(200);
   await cdp.send("Input.insertText", { text: "voxel" });
@@ -523,10 +529,10 @@ async function suiteBypassReroute(cdp, report) {
     await sleep(150);
   }
   await sleep(100);
-  report.ok("回到随机采样再按 Tab：右边已有下游，新节点往下让到它下面、不压着；三次各一条撤销，Ctrl+Z 三下回到原样",
-    t3.from === `${t1.id}.cloud` && t3Box && t2Box && t3Box.l > t1Box.r && t3Box.t >= t2Box.b && !overlaps(t3Box, t2Box) &&
+  report.ok("框选随机采样（连着的线一起选上）再按 Tab：照样从它接出；右边已有下游，新节点往下让到它下面、不压着；三次各一条撤销，Ctrl+Z 三下回到原样",
+    boxed.nodes.length === 1 && boxed.nodes[0] === t1.id && boxed.edges >= 1 && t3.from === `${t1.id}.cloud` && t3Box && t2Box && t3Box.l > t1Box.r && t3Box.t >= t2Box.b && !overlaps(t3Box, t2Box) &&
       branchSteps === 3 && JSON.stringify(await chainOf()) === JSON.stringify(insertedChain),
-    JSON.stringify({ t3, t3Box, branchSteps }));
+    JSON.stringify({ boxed, t3, t3Box, branchSteps }));
 }
 
 // ------------------------------------------------------------- 1.4 迁移
