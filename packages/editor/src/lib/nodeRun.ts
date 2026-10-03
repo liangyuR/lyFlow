@@ -175,6 +175,16 @@ export function closureOf(level: GraphLevel, start: readonly string[], dir: "up"
   return level.nodes.filter((n) => seen.has(n.id)).map((n) => n.id);
 }
 
+/** 拖参数（live preview）时要算到哪几个节点：改的这个，再加上正看着的、在它下游的节点 —— 钉住的那个、对比里没冻结的 B。
+ *  以前只算改的这个：钉住下游的结果去拖上游的阈值，画面一动不动，像是参数没起作用（ADR-0011 修订）。
+ *  不在下游的不带上：它们的结果不受这次改动影响，带上只是白算。 */
+export function previewTargets(level: GraphLevel, nodeId: string, watched: readonly (string | null)[]): string[] {
+  const down = new Set(closureOf(level, [nodeId], "down"));
+  const out = [nodeId];
+  for (const id of watched) if (id && down.has(id) && !out.includes(id)) out.push(id);
+  return out;
+}
+
 // ------------------------------------------------------------------ 预判
 
 /** 上游有没有可用结果：本会话跑过（done / skipped）、输出可取、不 stale。

@@ -395,6 +395,23 @@ export function useShortcuts(
           e.preventDefault();
           ui.setViewerMeasuring(!ui.viewerMeasuring);
           return;
+        case "pin": {
+          e.preventDefault();
+          // 与预览栏的「钉住」按钮同一个开关：钉着就取消；没钉着就钉住选中的那一个
+          if (ui.pinnedNode) {
+            ui.setPinnedNode(null);
+            ui.showToast("已取消钉住：预览重新跟着选中走");
+            return;
+          }
+          const only = ui.selectedNodes.size === 1 ? [...ui.selectedNodes][0]! : null;
+          if (!only) {
+            ui.showToast("先选中一个节点，再按 P 把预览钉在它上面");
+            return;
+          }
+          ui.setPinnedNode(only);
+          ui.showToast("已钉住：选别的节点预览不换，再按 P 取消");
+          return;
+        }
         case "viewTop":
         case "viewFront":
         case "viewSide":

@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { ancestorsOf, closureOf, stepAlong, upstreamToRun, willCompute } from "../src/lib/nodeRun.ts";
+import { ancestorsOf, closureOf, previewTargets, stepAlong, upstreamToRun, willCompute } from "../src/lib/nodeRun.ts";
 
 //   a → b → d → e
 //        ↘     ↗
@@ -15,7 +15,7 @@ const level = {
   edges: [edge("a", "b"), edge("b", "d"), edge("d", "e"), edge("b", "x"), edge("c", "x"), edge("x", "e")],
 };
 
-test("closureOf：沿连线往上 / 往下走到头，含起点，按文档顺序；多个起点合在一起", () => {
+test("closureOf：沿连线往上 / 往下走到头，含起点，按文档顺序；多个起点合在一起。拖参数时跟着重算的（previewTargets）只带下游的", () => {
   const cases = [
     // [起点, 方向, 期望]
     [["d"], "up", ["a", "b", "d"]],
@@ -28,6 +28,19 @@ test("closureOf：沿连线往上 / 往下走到头，含起点，按文档顺�
   ];
   for (const [start, dir, want] of cases) {
     assert.deepEqual(closureOf(level, start, dir), want, `${start.join("+")} ${dir}`);
+  }
+  // 拖 b 的参数：钉住的 / 对比 B 在 b 下游才一起算；上游、旁支、没有、就是 b 自己、重复的都不带
+  const watched = [
+    // [改的节点, 正看着的（钉住、对比 B）, 期望]
+    ["b", ["e", null], ["b", "e"]],
+    ["b", ["x", "d"], ["b", "x", "d"]],
+    ["b", ["a", "c"], ["b"]],
+    ["b", ["b", "e", "e"], ["b", "e"]],
+    ["d", [null, null], ["d"]],
+    ["c", ["e", "d"], ["c", "e"]],
+  ];
+  for (const [edited, eyes, want] of watched) {
+    assert.deepEqual(previewTargets(level, edited, eyes), want, `previewTargets ${edited} ← ${eyes.join(",")}`);
   }
 });
 

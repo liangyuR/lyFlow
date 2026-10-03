@@ -903,6 +903,83 @@ async function suitePreview(cdp, report) {
     Object.values(full.nodes).every((n) => n.state === "skipped"), true);
 
   await cdp.eval(`window.__m4.observer.disconnect(); return true;`);
+
+  // 预览钉在下游（真按 P），去拖上游的比例：钉住的那个跟着重算（以前只算改的节点，画面一动不动，像是参数没起作用）。
+  // 敲数回车不触发运行：预览左上角说「画面是上一次的结果」，点它的 ▶ 算到钉住的节点；再按 P 取消钉住，预览回到选中的
+  await newDoc(cdp);
+  const pin = await buildGraph(
+    cdp,
+    [
+      { key: "gen", op: "gen.synthetic", params: { pointCount: 20000, seed: 7 } },
+      { key: "s1", op: "filter.random_sample", params: { mode: "ratio", keepRatio: 0.5, seed: 1 } },
+      { key: "s2", op: "filter.random_sample", params: { mode: "ratio", keepRatio: 0.5, seed: 2 } },
+    ],
+    [{ from: ["gen", "cloud"], to: ["s1", "cloud"] }, { from: ["s1", "cloud"], to: ["s2", "cloud"] }],
+  );
+  await runAndWait(cdp, () => pressF5(cdp));
+  const pinState = () => cdp.eval(`
+    const s = window.__lyflow.snapshot();
+    const v = document.querySelector('.viewer');
+    return { pinned: window.__lyflow.stores.ui.getState().pinnedNode, node: v?.getAttribute('data-node') ?? null,
+             s1: s.run.nodes[${lit(pin.s1)}]?.elementCount ?? null, s2: s.run.nodes[${lit(pin.s2)}]?.elementCount ?? null,
+             targets: s.run.targets, preview: s.run.preview, runId: s.run.runId,
+             stale: !!document.querySelector('[data-testid="viewer-stale"]'),
+             toast: window.__lyflow.stores.ui.getState().toast?.text ?? null };
+  `);
+  await select(cdp, pin.s2);
+  await sleep(200);
+  await cdp.eval(`document.activeElement?.blur(); return true;`);
+  await pressKey(cdp, "p", 80);
+  await sleep(150);
+  await select(cdp, pin.s1);
+  await sleep(250);
+  const p0 = await pinState();
+  report.ok("选中下游 s2 按 P：钉住它，再选上游 s1 预览仍是 s2",
+    p0.pinned === pin.s2 && p0.node === pin.s2 && /已钉住/.test(p0.toast ?? ""), JSON.stringify(p0));
+
+  // 真拖 s1 的比例滑块（往左一段）：拖动中的预览与松手后的正式运行都算到 s2
+  const pinSlider = await centerOf(cdp, '[data-testid="param-slider-keepRatio"]');
+  mustOk(pinSlider != null, "找到 s1 的 keepRatio 滑块");
+  await dragMouse(cdp, pinSlider, { x: pinSlider.x - 50, y: pinSlider.y }, { steps: 10 });
+  await cdp.waitFor(
+    `(() => { const s = window.__lyflow.stores.execution.getState();
+              return s.runId !== ${lit(p0.runId)} && !s.preview && s.runStatus !== 'running' && s.runStatus !== 'idle'; })()`,
+    { timeoutMs: 30_000, what: "松手后补的正式运行结束" },
+  );
+  await sleep(200);
+  const p1 = await pinState();
+  report.ok("拖上游 s1 的比例：钉住的下游 s2 跟着重算（正式运行的目标带着 s2，点数变了），预览没标「上一次的结果」",
+    p1.targets.includes(pin.s2) && p1.s2 !== p0.s2 && p1.s2 != null && p1.s1 !== p0.s1 && !p1.stale && p1.node === pin.s2,
+    JSON.stringify({ p0, p1 }));
+
+  // 敲数回车：不触发运行，钉住的 s2 过时了 —— 预览左上角说一声，点它的 ▶ 一次算到 s2
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="param-drag-keepRatio"]'));
+  await sleep(100);
+  await pressCtrl(cdp, "a");
+  await cdp.send("Input.insertText", { text: "0.2" });
+  await pressKey(cdp, "Enter", 13);
+  await cdp.eval(`document.activeElement?.blur(); return true;`);
+  await replan(cdp);
+  await sleep(200);
+  const p2 = await pinState();
+  report.ok("敲数回车改了上游：钉住的 s2 在预览左上角标「参数改过了 · 画面是上一次的结果」，点数还是旧的",
+    p2.stale && p2.s2 === p1.s2 && p2.runId === p1.runId &&
+      /上一次的结果/.test(await cdp.eval(`return document.querySelector('[data-testid="viewer-stale"]')?.textContent ?? '';`)),
+    JSON.stringify(p2));
+  const ranStale = await runAndWait(cdp, async () => clickAt(cdp, await centerOf(cdp, '[data-testid="viewer-stale-run"]')));
+  await replan(cdp);
+  await sleep(200);
+  const p3 = await pinState();
+  report.ok("点角标上的 ▶ 运行到此节点：算到 s2（目标就是它），点数变成新的，角标消失",
+    ranStale.targets.length === 1 && ranStale.targets[0] === pin.s2 && p3.s2 !== p2.s2 && p3.s2 != null && !p3.stale,
+    JSON.stringify({ targets: ranStale.targets, p3 }));
+
+  // 再按 P：取消钉住，预览回到选中的 s1
+  await pressKey(cdp, "p", 80);
+  await sleep(250);
+  const p4 = await pinState();
+  report.ok("再按 P：取消钉住，预览跟着选中回到 s1",
+    p4.pinned === null && p4.node === pin.s1 && /取消钉住/.test(p4.toast ?? ""), JSON.stringify(p4));
 }
 
 // ------------------------------------------------------------- §4 大图性能

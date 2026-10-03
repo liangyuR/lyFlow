@@ -88,6 +88,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: "paramPanel", keys: ["Ctrl+Shift+P"], label: "参数面板", scope: "global", group: "视图" },
   { id: "compare", keys: ["Ctrl+Shift+D"], label: "对比 / 退出对比", scope: "global", group: "视图" },
   { id: "measure", keys: ["M"], label: "测量（预览里选点 / 测距）", scope: "global", group: "视图" },
+  { id: "pin", keys: ["P"], label: "钉住预览 / 取消钉住（钉住后选别的节点预览不换，拖上游参数它也跟着重算）", scope: "global", group: "视图" },
   // 数字键只在鼠标停在 3D 预览上时响：别处照旧（打字、下拉框）
   { id: "viewTop", keys: ["1"], label: "俯视", scope: "viewer", group: "预览视角" },
   { id: "viewFront", keys: ["2"], label: "前视", scope: "viewer", group: "预览视角" },

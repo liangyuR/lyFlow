@@ -41,14 +41,14 @@ const state = () => {
   return { on: s.on, b: s.b?.nodeId ?? null, frozen: s.snapshot?.runId ?? null, toast: useUiStore.getState().toast?.text ?? null };
 };
 
-test("预览的快捷键不与画布的撞：Ctrl+Shift+D 对比 / Ctrl+D 原地复制 / Shift+D 复制并保留输入，M 测量 / Ctrl+M 静音，Shift+Space 最大化 / Space 搜索，Alt+方向键沿连线走 / 方向键挪节点", () => {
+test("预览的快捷键不与画布的撞：Ctrl+Shift+D 对比 / Ctrl+D 原地复制 / Shift+D 复制并保留输入，M 测量 / Ctrl+M 静音，P 钉住 / Ctrl+Shift+P 参数面板，Shift+Space 最大化 / Space 搜索，Alt+方向键沿连线走 / 方向键挪节点", () => {
   const key = (k, ctrlKey, shiftKey = false, altKey = false) => ({ key: k, ctrlKey, metaKey: false, shiftKey, altKey });
   const got = [key("D", true, true), key("d", true), key("D", false, true), key("m", false), key("m", true), key(" ", false, true), key(" ", false),
     key("ArrowRight", false, false, true), key("ArrowUp", false, false, true), key("ArrowRight", false), key("ArrowRight", false, true, true),
-    key("1", false), key("4", false), key("1", true), key("!", false, true)]
+    key("1", false), key("4", false), key("1", true), key("!", false, true), key("p", false), key("P", true, true)]
     .map((e) => matchShortcut(e)?.id ?? null);
   assert.deepEqual(got, ["compare", "duplicate", "duplicateWired", "measure", "mute", "maximizeViewer", "search", "navDown", "navPrev", null, null,
-    "viewTop", "viewIso", null, null]);
+    "viewTop", "viewIso", null, null, "pin", "paramPanel"]);
   // 表里每一个键位按下去都回到它自己：以后谁再加一个键撞上了前面的，这里先红
   const collided = SHORTCUTS.flatMap((s) => s.keys.map((combo) => {
     const parts = combo.split("+");

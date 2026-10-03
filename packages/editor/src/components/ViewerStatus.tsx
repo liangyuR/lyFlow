@@ -6,10 +6,41 @@ import { keyHint } from "../lib/keymap";
 import { nodeLabel } from "../lib/nodeRun";
 import { culpritOf, revealError, revealNodeError } from "../lib/revealError";
 import { augmentOperators, levelOf } from "../lib/subgraph";
+import { useNodeStale } from "../store/cache";
 import { aggregatedNodes, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
+
+/** 参数改过、还没重跑：画面上还是上一次的结果。以前什么都不说 —— 关了自动运行、或在下游钉住时敲数改参数，
+ *  看着像改了没反应。跑着的时候不说：马上就有新结果，预览一次次重跑时它也会一闪一闪。 */
+export function StaleBadge({
+  nodeId,
+  onRunToNode,
+}: {
+  nodeId: string;
+  onRunToNode?: ((nodeId: string) => void) | undefined;
+}) {
+  const stale = useNodeStale(nodeId);
+  const running = useExecutionStore((s) => s.runStatus === "running");
+  const canRun = useManifestStore((s) => s.transportKind !== "static");
+  if (!stale || running) return null;
+  return (
+    <div className="viewer__stale" data-testid="viewer-stale">
+      <span>参数改过了 · 画面是上一次的结果</span>
+      {onRunToNode && canRun && (
+        <button
+          type="button"
+          data-testid="viewer-stale-run"
+          title="算出这个节点（缺结果或过时的上游一并算，下游不动），与节点右键「运行到此节点」相同"
+          onClick={() => onRunToNode(nodeId)}
+        >
+          ▶ 运行到此节点
+        </button>
+      )}
+    </div>
+  );
+}
 
 export function ViewerStatus({
   text,

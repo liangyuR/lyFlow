@@ -53,7 +53,8 @@ import { decodeCloud, type CloudPayload, type OutputStat } from "../types/execut
 import { CompareDiff } from "./CompareDiff";
 import { CompareStage } from "./CompareStage";
 import { ImagePane } from "./ImagePane";
-import { ViewerStatus } from "./ViewerStatus";
+import { StaleBadge, ViewerStatus } from "./ViewerStatus";
+import { keyHint } from "../lib/keymap";
 import { MeasureReadout } from "./MeasureReadout";
 import { RoiLayer, type RoiItem } from "./RoiLayer";
 import { ValuePane } from "./ValuePane";
@@ -931,7 +932,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
           data-pinned={pinnedId ? "1" : "0"}
           onClick={() => setPinnedId(pinnedId ? null : selectedId)}
           disabled={!pinnedId && !selectedId}
-          title={pinnedId ? "取消钉住，重新跟随选中" : "钉住当前节点，选别的节点也不切换"}
+          title={`${pinnedId ? "取消钉住，重新跟随选中" : "钉住当前节点，选别的节点也不切换"}（${keyHint("pin")}）`}
         >
           {pinnedId ? "已钉住" : "钉住"}
         </button>
@@ -1069,6 +1070,10 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
             nodeId={activeNode && !loading && !(roiEditing && backdrop.error) ? display.nodeId : null}
             onRunToNode={onRunToNode}
           />
+        )}
+        {!compareOn && activeId && !display.status && !loading && (
+          // 画面上有结果、但参数改过还没重跑：左上角说一声，给「运行到此节点」
+          <StaleBadge nodeId={activeId} onRunToNode={onRunToNode} />
         )}
         {measureOn && (
           <MeasureReadout

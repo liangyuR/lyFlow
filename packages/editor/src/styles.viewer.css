@@ -63,6 +63,38 @@
 
 .viewer__stage .viewer__empty { inset: 0; }
 
+/* 参数改过、画面还是上一次的结果：左上角一条，不挡点（左下是重跑时的状态，右下是测量） */
+.viewer__stale {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 16px);
+  padding: 2px 3px 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--lyflow-warn) 60%, transparent);
+  border-radius: 4px;
+  background: rgba(17, 20, 26, 0.85);
+  color: var(--lyflow-warn);
+  font-size: 11px;
+  pointer-events: none;
+}
+.viewer__stale > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.viewer__stale button {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid var(--lyflow-border-strong);
+  border-radius: var(--lyflow-radius);
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-fg-0);
+  font-size: 11px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.viewer__stale button:hover { border-color: var(--lyflow-accent); }
+
 /* 网格一格多大：栏窄时排在尺寸之后让 */
 .viewer__grid {
   min-width: 0;

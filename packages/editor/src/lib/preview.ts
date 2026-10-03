@@ -1,11 +1,13 @@
 // Live preview（ADR-0011）。拖参数时发 `mode=preview` 的普通 run，松手后按
 // 「自动运行」开关补一次正式 run。抢占靠 M2 就定下的「新 run 取消旧 run」。
 
+import { useCompareStore } from "../store/compare";
 import { startRun, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
 import { transport } from "../transport";
-import { fullId } from "./subgraph";
+import { previewTargets } from "./nodeRun";
+import { fullId, levelOf, pathPrefix } from "./subgraph";
 
 /** 拖动过程中每一帧都在改值，攒一下再发。30 ms 是「跟手」和「别打死自己」的平衡点。 */
 export const PREVIEW_DEBOUNCE_MS = 30;
@@ -23,9 +25,12 @@ function fire(nodeId: string, preview: boolean): void {
   const graph = useGraphStore.getState();
   const ui = useUiStore.getState();
   if (graph.doc.nodes.length === 0) return;
-  const target = fullId(ui.path, nodeId);
+  // 正看着的下游节点（钉住的、对比里没冻结的 B）一起算：不然拖上游的参数时画面不动
+  const compare = useCompareStore.getState();
+  const b = compare.on && !compare.snapshot && compare.b && pathPrefix(compare.b.path) === pathPrefix(ui.path) ? compare.b.nodeId : null;
+  const targets = previewTargets(levelOf(graph.doc, ui.path), nodeId, [ui.pinnedNode, b]).map((id) => fullId(ui.path, id));
   void startRun(graph.doc, graph.filePath, {
-    targets: [target],
+    targets,
     preview,
     previewMaxPoints: preview ? ui.previewMaxPoints : undefined,
     auto: true,
@@ -41,7 +46,7 @@ export function beginPreview(nodeId: string): void {
   useUiStore.getState().setPreviewing(true);
 }
 
-/** 值变了：debounce 一次 preview run，目标是这个节点。 */
+/** 值变了：debounce 一次 preview run，目标是这个节点（和正看着的下游节点）。 */
 export function schedulePreview(nodeId: string): void {
   if (transport.kind === "static") return;
   if (!useUiStore.getState().previewing) return;
