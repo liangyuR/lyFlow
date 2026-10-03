@@ -2023,10 +2023,10 @@ async function suitePanels(cdp, report, ws) {
       return ev.defaultPrevented;
     };
     return { save: fire({ key: 's', ctrlKey: true }), print: fire({ key: 'p', ctrlKey: true }), find: fire({ key: 'f', ctrlKey: true }),
-             f3: fire({ key: 'F3' }), plainS: fire({ key: 's' }), zoom: fire({ key: '=', ctrlKey: true }) };
+             f3: fire({ key: 'F3' }), back: fire({ key: 'ArrowLeft', altKey: true }), plainS: fire({ key: 's' }), zoom: fire({ key: '=', ctrlKey: true }) };
   `);
   report.eq("浏览器快捷键（Ctrl+S 网页另存为、Ctrl+P 打印、Ctrl+F / F3 查找）挡掉，普通按键与缩放不挡", blocked,
-    { save: true, print: true, find: true, f3: true, plainS: false, zoom: false });
+    { save: true, print: true, find: true, f3: true, back: true, plainS: false, zoom: false });
   // 从资源管理器拖进来的文件：页面里没人接就挡掉浏览器的默认动作（导航到那个文件，整个 app 换掉）；不带文件的拖放不挡。
   // 导航本身 CDP 的模拟拖放触发不了，这里只验挡板接上了
   const dropGuard = await cdp.eval(`

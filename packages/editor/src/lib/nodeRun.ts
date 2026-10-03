@@ -98,6 +98,64 @@ export function ancestorsOf(level: GraphLevel, nodeId: string): readonly string[
   return result;
 }
 
+export type NavDir = "up" | "down" | "prev" | "next";
+
+/** 沿连线走的上一步：从 from 往 via 那边走到了 to。同级之间挪、往回退都看它。 */
+export interface NavHop {
+  from: string;
+  via: "up" | "down";
+  to: string;
+}
+
+/** 这一层里 id 在 via 那边直接相连的节点（去重、不含自己），按位置从上到下、从左到右排（同位置按文档顺序）。 */
+function neighboursOf(level: GraphLevel, id: string, via: "up" | "down"): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const e of level.edges) {
+    const other = via === "up" ? (e.to.node === id ? e.from.node : null) : e.from.node === id ? e.to.node : null;
+    if (!other || other === id || seen.has(other)) continue;
+    seen.add(other);
+    out.push(other);
+  }
+  const index = nodeIndex(level.nodes);
+  const order = new Map(level.nodes.map((n, i) => [n.id, i]));
+  const pos = (n: string) => index.get(n)?.ui?.position ?? { x: 0, y: 0 };
+  return out.sort((a, b) => pos(a).y - pos(b).y || pos(a).x - pos(b).x || order.get(a)! - order.get(b)!);
+}
+
+/** 键盘沿连线走一步（Alt+方向键）。up / down：刚从那一边过来就先退回去（→ 再 ← 回到出发的那个），否则取最上面那个；
+ *  prev / next：在「同一个上游的那几个下游」（没有上游时是「同一个下游的那几个上游」）里挪，到头不绕回。走不动返回 null。 */
+export function stepAlong(
+  level: GraphLevel,
+  cur: string,
+  dir: NavDir,
+  last: NavHop | null,
+): { id: string; hop: NavHop } | null {
+  if (!level.nodes.some((n) => n.id === cur)) return null;
+  const came = last && last.to === cur ? last : null;
+  if (dir === "up" || dir === "down") {
+    const list = neighboursOf(level, cur, dir);
+    if (list.length === 0) return null;
+    const back = came && came.via !== dir && list.includes(came.from) ? came.from : null;
+    const id = back ?? list[0]!;
+    return { id, hop: { from: cur, via: dir, to: id } };
+  }
+  let from: string | null = came ? came.from : null;
+  let via: "up" | "down" = came ? came.via : "down";
+  if (!from) {
+    const ups = neighboursOf(level, cur, "up");
+    const downs = ups.length > 0 ? [] : neighboursOf(level, cur, "down");
+    from = ups[0] ?? downs[0] ?? null;
+    via = ups.length > 0 ? "down" : "up";
+  }
+  if (!from) return null;
+  const siblings = neighboursOf(level, from, via);
+  const at = siblings.indexOf(cur);
+  const next = at < 0 ? -1 : dir === "next" ? at + 1 : at - 1;
+  if (next < 0 || next >= siblings.length) return null;
+  return { id: siblings[next]!, hop: { from, via, to: siblings[next]! } };
+}
+
 /** 当前层里从 start 出发沿连线能到的全部节点（含 start 自己）：up = 往上游走，down = 往下游走。
  *  按 level.nodes 的顺序返回。右键「选中上游 / 选中下游」用：选上一整条链再合成、静音、整理、复制。 */
 export function closureOf(level: GraphLevel, start: readonly string[], dir: "up" | "down"): string[] {

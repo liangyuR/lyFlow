@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { layoutGraph, needsInitialLayout } from "../src/lib/layout.ts";
 import { fitSidePanes } from "../src/lib/panes.ts";
-import { placeMenu } from "../src/lib/placement.ts";
+import { placeMenu, revealShift } from "../src/lib/placement.ts";
 
 const chain = (withPositions) => ({
   schemaVersion: 1,
@@ -89,4 +89,19 @@ test("readStoredBool / writeStoredBool：坏值当没有，存储抛异常时照
   } finally {
     delete globalThis.localStorage;
   }
+});
+
+// 键盘沿连线走时画布挪多少（lib/placement 的 revealShift）：在视野里不挪；不在就只挪最少的一点；放不下就居中
+test("revealShift：节点移进视野只挪最少的一点，缩放不变", () => {
+  const pane = { width: 800, height: 600 };
+  const inset = { top: 40, right: 40, bottom: 40, left: 40 };
+  const at1 = { x: 0, y: 0, zoom: 1 };
+  const cases = [
+    ["已经在视野里", at1, pane, { x: 100, y: 100, w: 200, h: 90 }, inset, null],
+    ["出了右边：只横着挪", at1, pane, { x: 700, y: 100, w: 200, h: 90 }, inset, { x: 540, y: 300 }],
+    ["压在顶上的面包屑下面：只竖着挪", at1, pane, { x: 100, y: 20, w: 200, h: 90 }, { ...inset, top: 72 }, { x: 400, y: 248 }],
+    ["缩放 0.5：换算成 flow 坐标", { x: 0, y: 0, zoom: 0.5 }, pane, { x: 1600, y: 100, w: 200, h: 90 }, inset, { x: 1080, y: 600 }],
+    ["画布比节点还窄：居中", at1, { width: 200, height: 600 }, { x: 300, y: 100, w: 200, h: 90 }, inset, { x: 400, y: 300 }],
+  ];
+  for (const [name, view, size, rect, pad, want] of cases) assert.deepEqual(revealShift(view, size, rect, pad), want, name);
 });

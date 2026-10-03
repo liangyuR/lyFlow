@@ -143,7 +143,9 @@ interface UiState {
   /** 抽屉里点了某条诊断 → 定位到这个节点/参数。 */
   focusedDiagnostic: { nodeId: string; paramPath?: string | undefined } | null;
   /** 画布要把哪个节点移进视野（revealNode 发起，GraphCanvas 执行）。seq 每次加一：同一个节点再点一次也要动。 */
-  revealRequest: { nodeId: string; seq: number } | null;
+  revealRequest: { nodeId: string; seq: number; follow?: true } | null;
+  /** 键盘沿连线走到这个节点（当前层）：选中它，请画布只挪最少的一点把它移进视野、再把焦点放到它上面。 */
+  followNode(nodeId: string): void;
 
   /** 自动连线没能唯一确定的那些输入与它们的候选输出（m8-plan L13），键都是 `nodeId:portName`。
    *  端口据此高亮；手动连上、点空白处或下一次自动连线时清掉。null = 没有。 */
@@ -420,6 +422,14 @@ export const useUiStore = create<UiState>((set, get) => ({
       revealRequest: { nodeId: localId, seq: (get().revealRequest?.seq ?? 0) + 1 },
       // 定位要把画布移过去：预览最大化着（画布 0 宽）就先还原
       viewerMaximized: false,
+    });
+  },
+
+  followNode(nodeId) {
+    set({
+      selectedNodes: new Set([nodeId]),
+      selectedEdges: new Set(),
+      revealRequest: { nodeId, seq: (get().revealRequest?.seq ?? 0) + 1, follow: true },
     });
   },
 

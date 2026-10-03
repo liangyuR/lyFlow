@@ -1,7 +1,7 @@
 // `?` 快捷键面板。整张表从 lib/keymap.ts 生成（E7）——
 // 手抄一份说明必然和实际按键漂移，而用户只会相信面板上写的那个。
 
-import { groupedShortcuts, MOUSE_GESTURES, SCOPE_LABEL } from "../lib/keymap";
+import { keyLabel, groupedShortcuts, MOUSE_GESTURES, SCOPE_LABEL } from "../lib/keymap";
 import { useUiStore } from "../store/ui";
 
 export function ShortcutPanel() {
@@ -29,7 +29,7 @@ export function ShortcutPanel() {
                     <span className="sheet__scope">{SCOPE_LABEL[s.scope]}</span>
                     <span className="sheet__keys">
                       {s.keys.map((k) => (
-                        <kbd key={k}>{k}</kbd>
+                        <kbd key={k}>{keyLabel(k)}</kbd>
                       ))}
                     </span>
                   </li>

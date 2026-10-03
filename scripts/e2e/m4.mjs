@@ -22,6 +22,7 @@ import {
   pressKey,
   replan,
   restoreClipboard,
+  setViewport,
   runAndWait,
   select,
   selectAndReadViewer,
@@ -938,7 +939,7 @@ async function suiteBigGraph(cdp, report) {
       lanes.push(ids);
     }
     const doc = g().doc;
-    return { ms: Math.round(performance.now() - t0), nodes: doc.nodes.length, edges: doc.edges.length };
+    return { ms: Math.round(performance.now() - t0), nodes: doc.nodes.length, edges: doc.edges.length, lane0: lanes[0] };
   `);
   mustOk(built.nodes === 300 && built.edges >= 380, "搭出 300 节点 / ≥ 380 边", JSON.stringify(built));
 
@@ -968,6 +969,39 @@ async function suiteBigGraph(cdp, report) {
     virtualized.rendered < virtualized.total,
     JSON.stringify(virtualized),
   );
+
+  // 键盘沿连线走（Alt+→）：从链头一路走到链尾，链尾一开始在视野外、没挂 DOM；每一步选中跟着走、画布只挪一点把它移进来，
+  // 焦点落在它上面、预览跟着换；React Flow 自己的方向键挪节点不跟着响（原来的节点不动、不记撤销）
+  const [head, tail] = [built.lane0[0], built.lane0[9]];
+  await setViewport(cdp, { x: 60, y: 60, zoom: 1 });
+  mustOk(await cdp.eval(`return !document.querySelector('.react-flow__node[data-id="${tail}"]');`), "链尾一开始不在 DOM 里");
+  await clickAt(cdp, await centerOf(cdp, `[data-testid="node-${head}"] .node__head`));
+  await sleep(200);
+  const walk0 = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    return { past: g.past.length, pos: JSON.stringify(g.doc.nodes.find((n) => n.id === ${lit(head)}).ui.position) };
+  `);
+  for (let i = 0; i < 9; i += 1) {
+    await pressKey(cdp, "ArrowRight", 39, ["alt"]);
+    await sleep(260);
+  }
+  await sleep(300);
+  const walked = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    const el = document.querySelector('.react-flow__node[data-id="${tail}"]');
+    const r = el?.getBoundingClientRect();
+    const p = document.querySelector('.react-flow__pane').getBoundingClientRect();
+    return {
+      selected: [...window.__lyflow.stores.ui.getState().selectedNodes],
+      focused: document.activeElement?.closest('.react-flow__node')?.getAttribute('data-id') ?? null,
+      inPane: !!r && r.left >= p.left && r.right <= p.right && r.top >= p.top && r.bottom <= p.bottom,
+      viewer: document.querySelector('.viewer')?.getAttribute('data-node') ?? null,
+      pastDelta: g.past.length - ${walk0.past},
+      headMoved: JSON.stringify(g.doc.nodes.find((n) => n.id === ${lit(head)}).ui.position) !== ${lit(walk0.pos)},
+    };
+  `);
+  report.eq("Alt+→ 九下从链头走到链尾：选中、焦点、预览都跟着走，链尾移进了视野；节点没被挪、不记撤销", walked,
+    { selected: [tail], focused: tail, inPane: true, viewer: tail, pastDelta: 0, headMoved: false });
 
   // 拖动帧率：页面里挂一个 rAF 采样器，然后用 CDP 发**真**鼠标事件拖一个节点。
   // 合成 MouseEvent 骗不过 React Flow 的 d3-drag（它要读 event.view.document）。

@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { ancestorsOf, closureOf, upstreamToRun, willCompute } from "../src/lib/nodeRun.ts";
+import { ancestorsOf, closureOf, stepAlong, upstreamToRun, willCompute } from "../src/lib/nodeRun.ts";
 
 //   a → b → d → e
 //        ↘     ↗
@@ -29,6 +29,30 @@ test("closureOf：沿连线往上 / 往下走到头，含起点，按文档顺�
   for (const [start, dir, want] of cases) {
     assert.deepEqual(closureOf(level, start, dir), want, `${start.join("+")} ${dir}`);
   }
+});
+
+test("stepAlong（Alt+方向键沿连线走）：上下游取最上面的；刚从那边过来先退回去；同级在同一组里挪、到头不绕回", () => {
+  // 同一张图摆上位置：b 的下游 d 在上、x 在下；x 的上游 b 在上、c 在下；e 的上游 d 在上、x 在下
+  const pos = { a: [0, 0], b: [200, 0], c: [0, 200], d: [400, 0], x: [400, 200], e: [600, 100], f: [0, 400] };
+  const placed = { ...level, nodes: level.nodes.map((n) => ({ ...n, ui: { position: { x: pos[n.id][0], y: pos[n.id][1] } } })) };
+  const hop = (from, via, to) => ({ from, via, to });
+  const cases = [
+    // [说明, 当前, 方向, 上一步, 期望走到]
+    ["下游：多个取最上面的", "b", "down", null, "d"],
+    ["上游：多个取最上面的", "e", "up", null, "d"],
+    ["刚从 c 往下走到 x：往上先退回 c（不是最上面的 b）", "x", "up", hop("c", "down", "x"), "c"],
+    ["同级：b 的下游里 d 的下一个", "d", "next", null, "x"],
+    ["同级：从 e 往上走到的 x，上一个是 d", "x", "prev", hop("e", "up", "x"), "d"],
+    ["没有上游：在同一个下游的那几个上游里挪", "c", "prev", null, "b"],
+    ["到头不绕回", "x", "next", null, null],
+    ["源头往上", "a", "up", null, null],
+    ["孤立节点往下", "f", "down", null, null],
+    ["不在这一层", "gone", "up", null, null],
+  ];
+  for (const [name, cur, dir, last, want] of cases) {
+    assert.equal(stepAlong(placed, cur, dir, last)?.id ?? null, want, name);
+  }
+  assert.deepEqual(stepAlong(placed, "x", "up", hop("c", "down", "x")).hop, hop("x", "up", "c"), "记下这一步，再往下能回到 x");
 });
 
 test("ancestorsOf：不含自己，离源头近的排前面", () => {

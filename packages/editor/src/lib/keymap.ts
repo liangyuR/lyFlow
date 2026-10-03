@@ -72,6 +72,11 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: "compose", keys: ["Ctrl+G"], label: "合成子图", scope: "canvas", group: "节点" },
   { id: "dissolve", keys: ["Ctrl+Shift+G"], label: "解散子图", scope: "canvas", group: "节点" },
   { id: "enterSubgraph", keys: ["Ctrl+Enter"], label: "进入子图", scope: "canvas", group: "节点" },
+  // 沿连线走（数据从左往右流）：选中跟着走、画布移过去、预览跟着换。不按 Alt 的方向键仍是挪节点
+  { id: "navUp", keys: ["Alt+ArrowLeft"], label: "选中上游节点（沿连线）", scope: "canvas", group: "节点" },
+  { id: "navDown", keys: ["Alt+ArrowRight"], label: "选中下游节点（沿连线）", scope: "canvas", group: "节点" },
+  { id: "navPrev", keys: ["Alt+ArrowUp"], label: "选中上一个同级节点（同一个上游的另一个下游）", scope: "canvas", group: "节点" },
+  { id: "navNext", keys: ["Alt+ArrowDown"], label: "选中下一个同级节点", scope: "canvas", group: "节点" },
 
   { id: "findNode", keys: ["Ctrl+F"], label: "查找节点（连子图里面的，回车跳过去）", scope: "global", group: "视图" },
   { id: "layout", keys: ["Ctrl+L"], label: "整理布局", scope: "canvas", group: "视图" },
@@ -89,7 +94,14 @@ export const SHORTCUTS_BY_ID = new Map(SHORTCUTS.map((s) => [s.id, s]));
 
 /** 显示用的第一个键位，按钮 title 里用。 */
 export function keyHint(id: string): string {
-  return SHORTCUTS_BY_ID.get(id)?.keys[0] ?? "";
+  return keyLabel(SHORTCUTS_BY_ID.get(id)?.keys[0] ?? "");
+}
+
+const ARROWS: Record<string, string> = { ArrowLeft: "←", ArrowRight: "→", ArrowUp: "↑", ArrowDown: "↓" };
+
+/** 键位串给人看的写法：方向键写成箭头。 */
+export function keyLabel(combo: string): string {
+  return combo.replace(/Arrow(Left|Right|Up|Down)/, (m) => ARROWS[m] ?? m);
 }
 
 /** `?` 面板的分组，顺序按表里第一次出现的先后。 */

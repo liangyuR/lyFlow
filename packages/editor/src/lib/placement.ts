@@ -24,3 +24,25 @@ export function placeMenu(
   top = Math.max(margin, Math.min(top, viewport.height - margin - height));
   return tall ? { left, top, maxHeight: room } : { left, top };
 }
+
+/** 把一个节点挪进画布视野要平移多少（键盘沿连线走时用）：已经在视野里（减去四边留白）返回 null；否则返回新的视野中心
+ *  （flow 坐标，交给 setCenter，缩放不变），只挪最少的那一点 —— 走一条长链时画面不来回跳。某一边放不下这个节点就让它居中。
+ *  view 是 React Flow 的视口（屏幕 = flow × zoom + (x, y)），pane 是画布的宽高，rect 是节点的 flow 坐标与大小。 */
+export function revealShift(
+  view: { x: number; y: number; zoom: number },
+  pane: { width: number; height: number },
+  rect: { x: number; y: number; w: number; h: number },
+  inset: { top: number; right: number; bottom: number; left: number },
+): { x: number; y: number } | null {
+  const z = view.zoom;
+  const axis = (start: number, size: number, lo: number, hi: number) => {
+    if (size > hi - lo) return (lo + hi) / 2 - (start + size / 2);
+    if (start < lo) return lo - start;
+    if (start + size > hi) return hi - (start + size);
+    return 0;
+  };
+  const dx = axis(rect.x * z + view.x, rect.w * z, inset.left, pane.width - inset.right);
+  const dy = axis(rect.y * z + view.y, rect.h * z, inset.top, pane.height - inset.bottom);
+  if (dx === 0 && dy === 0) return null;
+  return { x: (pane.width / 2 - (view.x + dx)) / z, y: (pane.height / 2 - (view.y + dy)) / z };
+}

@@ -9,6 +9,7 @@ import { levelOf } from "../lib/subgraph";
 import { copyNodes, deleteHealing, deleteSelection } from "../lib/editActions";
 import { stepHistory } from "../lib/history";
 import { decodeNodeClipboard } from "../lib/nodeClipboard";
+import { stepAlong, type NavDir, type NavHop } from "../lib/nodeRun";
 import { revealError } from "../lib/revealError";
 import { useCompareStore } from "../store/compare";
 import { runControlsOf, useExecutionStore } from "../store/execution";
@@ -81,6 +82,8 @@ export function useShortcuts(
     // 最近一次按下鼠标落没落在画布上。没落在画布上、又选着一段文字（日志、诊断、文档……）时，
     // Ctrl+C / Ctrl+X 归浏览器：要的是那段文字。以前复制走的是选中的节点，Ctrl+X 还把节点删了
     let pointerOnCanvas = true;
+    // 键盘沿连线走的上一步（同级之间挪、往回退要看它）；换了层、或者选中换成了别的就不算
+    let navHop: (NavHop & { pathKey: string }) | null = null;
     const onPointerDown = (e: PointerEvent) => {
       pointerOnCanvas = e.target instanceof Element && e.target.closest(".react-flow") !== null;
     };
@@ -309,6 +312,26 @@ export function useShortcuts(
           }
           return;
         }
+        case "navUp":
+        case "navDown":
+        case "navPrev":
+        case "navNext": {
+          // 拦住传播：React Flow 自己的方向键挪节点不看修饰键。眼下它看到时选中已经换走了（React 先把这次选中刷进去）才没挪，
+          // 别指望这个时序 —— 不然 Alt+→ 会把原来那个节点也挪一格、记一条撤销
+          e.preventDefault();
+          e.stopPropagation();
+          if (ui.selectedNodes.size !== 1 || graph.pendingSnapshot) return;
+          const cur = [...ui.selectedNodes][0]!;
+          const pathKey = ui.path.map((seg) => seg.nodeId).join("/");
+          const last = navHop && navHop.pathKey === pathKey && navHop.to === cur ? navHop : null;
+          const dir: NavDir = hit.id === "navUp" ? "up" : hit.id === "navDown" ? "down" : hit.id === "navPrev" ? "prev" : "next";
+          const step = stepAlong(levelOf(graph.doc, ui.path), cur, dir, last);
+          if (!step) return;
+          navHop = { ...step.hop, pathKey };
+          ui.followNode(step.id);
+          return;
+        }
+
         case "enterSubgraph": {
           const ids = [...ui.selectedNodes];
           if (ids.length !== 1) return;

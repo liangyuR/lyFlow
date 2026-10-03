@@ -62,6 +62,7 @@ import { subgraphIdOf, type GraphDoc, type PortRef } from "../types/graph";
 
 import { baseName, parentName, recentFiles } from "../lib/files";
 import { addNodeWithAutoConnect, insertIntoEdge, insertSnippetById } from "../lib/insert";
+import { revealShift } from "../lib/placement";
 import { EdgePeekLayer } from "./EdgePeekLayer";
 import { FlowEdge } from "./FlowEdge";
 import { OPERATOR_DND_MIME, SNIPPET_DND_MIME } from "./NodePalette";
@@ -367,7 +368,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
   const selectedNodes = useUiStore((s) => s.selectedNodes);
   const selectedEdges = useUiStore((s) => s.selectedEdges);
 
-  const { screenToFlowPosition, fitView, getViewport, setViewport } = useReactFlow();
+  const { screenToFlowPosition, fitView, getViewport, setViewport, setCenter } = useReactFlow();
   useEffect(() => {
     registerViewportHandle({ get: getViewport, set: (v) => void setViewport(v) });
     return () => registerViewportHandle(null);
@@ -904,11 +905,36 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
   const revealRequest = useUiStore((s) => s.revealRequest);
   useEffect(() => {
     if (!revealRequest) return;
+    if (revealRequest.follow) {
+      // 键盘沿连线走（ui.followNode）：只挪最少的一点把它移进视野（不缩放，走长链时画面不来回跳），移到了再把焦点给它 ——
+      // 只渲染视野里的节点时它这时才挂上；先给焦点的话 React Flow 自己的「聚焦即平移」会把我们的动画打断
+      const id = revealRequest.nodeId;
+      const host = wrapper.current;
+      const box = host?.getBoundingClientRect();
+      const inset = { top: 40 + (useUiStore.getState().path.length > 0 ? 32 : 0), right: 40, bottom: 40, left: 40 };
+      const view = getViewport();
+      const center = box ? revealShift(view, { width: box.width, height: box.height }, rectOf(levelView(), id, measured.current), inset) : null;
+      let cancelled = false;
+      void (async () => {
+        if (center) await setCenter(center.x, center.y, { zoom: view.zoom, duration: viewportMs(motionOn) });
+        for (let i = 0; i < 30 && !cancelled; i += 1) {
+          const el = host?.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
+          if (el) {
+            el.focus({ preventScroll: true });
+            return;
+          }
+          await new Promise((r) => requestAnimationFrame(r));
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
     const timer = setTimeout(() => {
       void fitView({ nodes: [{ id: revealRequest.nodeId }], duration: viewportMs(motionOn), maxZoom: 1, padding: 0.6 });
     }, 60);
     return () => clearTimeout(timer);
-  }, [revealRequest, fitView, motionOn]);
+  }, [revealRequest, fitView, motionOn, getViewport, setCenter, levelView]);
 
   const onNodeDoubleClick = useCallback(
     (e: React.MouseEvent, node: { id: string }) => {

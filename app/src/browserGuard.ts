@@ -10,6 +10,9 @@
 /** WebView2 的浏览器快捷键里 app 用不着、按了有害的那些：刷新、另存为、打印、页内查找。缩放（Ctrl+= / Ctrl+-）是另一个设置，不挡。 */
 export function isBrowserShortcut(e: KeyboardEvent): boolean {
   if (e.key === "F5" || e.key === "BrowserRefresh" || e.key === "F3") return true;
+  // Alt+← / Alt+→ 是浏览器的后退 / 前进（编辑器拿它们沿连线走）：输入框里、搜索面板开着时编辑器不接，也不能让页面退回去
+  if (e.key === "BrowserBack" || e.key === "BrowserForward") return true;
+  if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) return true;
   if (!(e.ctrlKey || e.metaKey) || e.altKey) return false;
   return ["r", "s", "p", "f", "g"].includes(e.key.toLowerCase());
 }
