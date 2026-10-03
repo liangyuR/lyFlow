@@ -31,7 +31,15 @@ import { fullId, levelOf, resolveOutput } from "../lib/subgraph";
 import { compareContentFor } from "../lib/viewRule";
 import { sameFrame } from "../lib/viewFit";
 import { exportCanvasPng } from "../lib/exportPng";
-import { MAX_POINTS_CHOICES, rangeFor, withRangeAuto, withRangeEnd, type ManualRanges } from "../lib/viewPrefs";
+import {
+  MAX_POINTS_CHOICES,
+  rangeDigits,
+  rangeFor,
+  roundTo,
+  withRangeAuto,
+  withRangeEnd,
+  type ManualRanges,
+} from "../lib/viewPrefs";
 import { transport } from "../transport";
 import { useCompareStore, type CompareSlot, type CompareSnapshot } from "../store/compare";
 import { useExecutionStore } from "../store/execution";
@@ -187,11 +195,15 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   const compareOn = useCompareStore((s) => s.on);
   const compareB = useCompareStore((s) => s.b);
   const frozenB = useCompareStore((s) => s.snapshot);
+  const portPickB = useUiStore((s) =>
+    compareOn && compareB ? (s.viewerPortPick.get(fullId(compareB.path, compareB.nodeId)) ?? null) : null,
+  );
   const sourceB = useViewerSource({
     slot: compareOn ? compareB : null,
     idleText: "",
     maxPoints,
     pick: null,
+    portPick: portPickB,
     frozen: compareOn ? frozenB : null,
   });
   const cloudB = compareOn ? sourceB.display.cloud : null;
@@ -305,6 +317,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   }, [cloud, cloudB, effectiveShading]);
   const { range: shownRange, auto: rangeAuto } = rangeFor(manualRanges, effectiveShading, dataRange);
   const [lo, hi] = shownRange;
+  const rangeDigitsNow = rangeDigits(lo, hi);
 
   const pinnedLabel = useMemo(() => {
     if (!pinnedId) return "";
@@ -611,7 +624,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
     const v = Number(raw);
     if (!Number.isFinite(v)) return;
     // 另一个界取框里看得到的那个数（自动时显示的是取整过的）：填完一个界，另一个框里的数不该跟着跳
-    const shown: [number, number] = rangeAuto ? [round3(lo), round3(hi)] : [lo, hi];
+    const shown: [number, number] = rangeAuto ? [roundTo(lo, rangeDigitsNow), roundTo(hi, rangeDigitsNow)] : [lo, hi];
     setManualRanges((m) => withRangeEnd(m, effectiveShading, end, v, shown));
   };
 
@@ -686,7 +699,8 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
           <select
             className="viewer__select"
             data-testid="viewer-port"
-            value={display.port ?? source.cloudPorts[0]}
+            // 选过就显示选的那个：没跑过、出错时 display.port 是空的，框不该跳回第一个
+            value={portPick && source.cloudPorts.includes(portPick) ? portPick : (display.port ?? source.cloudPorts[0])}
             onChange={(e) => setPortPick(activeKey, e.target.value)}
             title="看这个节点的哪个点云输出（按节点记着，换节点再回来还是它）"
           >
@@ -821,7 +835,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
               data-testid="viewer-range-min"
               type="number"
               step="any"
-              value={rangeAuto ? round3(lo) : lo}
+              value={rangeAuto ? roundTo(lo, rangeDigitsNow) : lo}
               onChange={(e) => setRangeEnd(0, e.target.value)}
               disabled={noRamp}
               title="着色范围下限"
@@ -831,7 +845,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
               data-testid="viewer-range-max"
               type="number"
               step="any"
-              value={rangeAuto ? round3(hi) : hi}
+              value={rangeAuto ? roundTo(hi, rangeDigitsNow) : hi}
               onChange={(e) => setRangeEnd(1, e.target.value)}
               disabled={noRamp}
               title="着色范围上限"

@@ -4,7 +4,7 @@
 
 import { keyHint } from "../lib/keymap";
 import { nodeLabel } from "../lib/nodeRun";
-import { failedUpstream, revealError, revealNodeError } from "../lib/revealError";
+import { culpritOf, revealError, revealNodeError } from "../lib/revealError";
 import { augmentOperators, levelOf } from "../lib/subgraph";
 import { aggregatedNodes, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
@@ -31,13 +31,14 @@ export function ViewerStatus({
   const running = useExecutionStore((s) => s.runStatus === "running");
   const canRun = useManifestStore((s) => s.transportKind !== "static");
   const baseOps = useManifestStore((s) => s.operatorsById);
-  // 连带没执行的：沿入边往上找离它最近的出错节点（按字符串订阅，进度事件不让它算出新东西）
+  // 连带没执行的：沿入边往上找离它最近的出错节点；这一层找不到（子图的入口不是边）就从子图节点那里往外一层接着找。
+  // 结果是「第几层\n那一层的本地 id」，空串 = 哪一层都没找到。按字符串订阅，进度事件不让它算出新东西
   const culprit = useExecutionStore((s) => {
     if (!target) return null;
-    const execs = aggregatedNodes(path, s.nodes);
-    const me = execs.get(target);
+    const me = aggregatedNodes(path, s.nodes).get(target);
     if (me?.state !== "cancelled" || me.errors[0]?.code !== "upstream_failed") return null;
-    return failedUpstream(levelOf(doc, path), target, (id) => execs.get(id)?.state) ?? "";
+    const c = culpritOf(doc, path, target, s.nodes);
+    return c ? `${c.path.length}\n${c.id}` : "";
   });
 
   const state = exec?.state;
@@ -52,13 +53,15 @@ export function ViewerStatus({
       </button>
     );
   } else if (target && culprit !== null) {
-    const name = culprit ? nodeLabel(levelOf(doc, path), culprit, augmentOperators(baseOps, doc.subgraphs)) : null;
+    const [depth, hit] = culprit ? culprit.split("\n") : [];
+    const at = depth !== undefined ? path.slice(0, Number(depth)) : path;
+    const name = hit ? nodeLabel(levelOf(doc, at), hit, augmentOperators(baseOps, doc.subgraphs)) : null;
     detail = name ? `出错的是上游的「${name}」` : (first?.message ?? null);
     action = (
       <button
         type="button"
         data-testid="viewer-reveal-upstream"
-        onClick={() => (culprit ? revealNodeError(path, culprit) : revealError(0))}
+        onClick={() => (hit ? revealNodeError(at, hit) : revealError(0))}
       >
         定位到出错的节点
       </button>

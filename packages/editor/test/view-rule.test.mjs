@@ -94,6 +94,14 @@ test("手动着色范围：只改当前着色那一份，另一个界取当前�
   assert.deepEqual([rangeFor(m, "height", autoH).auto, rangeFor(m, "intensity", autoI).range], [true, [0, 100]],
     "高度回到自动，强度那一份还在");
   assert.equal(withRangeAuto(m, "normal"), m, "本来就是自动：原样返回");
+
+  // 范围框的小数位随跨度走（米为单位）：亚毫米的高度范围两端不能显示成同一个数，取整差不过跨度的千分之一
+  const { rangeDigits, roundTo } = await import("../src/lib/viewPrefs.ts");
+  for (const [lo, hi, want] of [[0, 255, 3], [0, 1, 3], [0.0101, 0.0104, 7], [-0.0003, 0.0004, 7], [5, 5, 3], [0, Infinity, 3]]) {
+    assert.equal(rangeDigits(lo, hi), want, `${lo}–${hi}`);
+  }
+  const d = rangeDigits(0.0101, 0.0104);
+  assert.ok(roundTo(0.0101, d) < roundTo(0.0104, d), "两端显示得出差别");
 });
 
 test("启动时从 localStorage 读回显示设置，改了就写回去", async () => {

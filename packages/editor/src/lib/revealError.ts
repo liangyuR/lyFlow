@@ -1,13 +1,13 @@
 // 在出错的节点之间跳（工具栏的「error N」、F8 / Shift+F8）。错误挂在展开后的路径 id 上（ADR-0010）：
 // 子图里的那个也要打开到它所在的一层（describeEventNode），参数上标红框。
 
-import { describeEventNode, fullId, type SubPath } from "./subgraph";
-import { aggregatedNodes, useExecutionStore } from "../store/execution";
+import { describeEventNode, fullId, levelOf, type SubPath } from "./subgraph";
+import { aggregatedNodes, useExecutionStore, type NodeExecution } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
 import type { NodeState } from "../types/execution";
-import type { GraphEdge } from "../types/graph";
+import type { GraphDoc, GraphEdge } from "../types/graph";
 
 /** 这次运行里出错的节点（error 状态、带诊断），按事件到达的顺序。上游失败连带的是 cancelled
  *  （core 的 upstream_failed），不在这里 —— 第一个就是根因。 */
@@ -50,7 +50,8 @@ export function revealNodeError(path: SubPath, localId: string): boolean {
   return revealEventNode(exec?.errorSource ?? fullId(path, localId));
 }
 
-/** 被上游连带取消的节点（cancelled + upstream_failed）是因为谁：沿入边往上找离它最近的出错节点。
+/** 被上游连带取消的节点（cancelled + upstream_failed）是因为谁：沿入边往上找离它最近的出错节点，
+ *  只穿过同样被连带取消的 —— 跑完了的节点（flow.fallback 这类 acceptsError 的）把上游的错接住了，根因不在那边。
  *  根因不在这一层（子图的输入在外面就断了）时返回 null。 */
 export function failedUpstream(
   level: { edges: readonly GraphEdge[] },
@@ -65,11 +66,31 @@ export function failedUpstream(
       for (const e of level.edges) {
         if (e.to.node !== id || seen.has(e.from.node)) continue;
         seen.add(e.from.node);
-        if (stateOf(e.from.node) === "error") return e.from.node;
-        next.push(e.from.node);
+        const state = stateOf(e.from.node);
+        if (state === "error") return e.from.node;
+        if (state === "cancelled") next.push(e.from.node);
       }
     }
     frontier = next;
+  }
+  return null;
+}
+
+/** failedUpstream，这一层找不到就从子图节点那里往外一层接着找：子图的入口不是边，根因在子图外面时里面这一层看不到。
+ *  返回根因所在的那一层和它在那一层的本地 id；哪一层都找不到返回 null。 */
+export function culpritOf(
+  doc: GraphDoc,
+  path: SubPath,
+  nodeId: string,
+  nodes: ReadonlyMap<string, NodeExecution>,
+): { path: SubPath; id: string } | null {
+  let from = nodeId;
+  for (let depth = path.length; depth >= 0; depth -= 1) {
+    const at = depth === path.length ? path : path.slice(0, depth);
+    const execs = aggregatedNodes(at, nodes);
+    const hit = failedUpstream(levelOf(doc, at), from, (id) => execs.get(id)?.state);
+    if (hit) return { path: at, id: hit };
+    if (depth > 0) from = path[depth - 1]!.nodeId;
   }
   return null;
 }

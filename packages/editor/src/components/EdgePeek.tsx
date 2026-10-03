@@ -3,9 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pinRun, unpinRun } from "../lib/cloudCache";
 import { exportCanvasPng } from "../lib/exportPng";
 import { takePeekCanvas } from "../lib/peekCanvas";
-import { fullId } from "../lib/subgraph";
+import { cloudPortsOf } from "../lib/basecloud";
+import { fullId, levelOf } from "../lib/subgraph";
 import { usePeekSource, type PeekSource } from "../lib/peekSource";
 import { defaultViewFor, viewsFor } from "../lib/viewRule";
+import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import {
   clampPeekScreen,
@@ -192,10 +194,16 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
     const ui = useUiStore.getState();
     if (!samePath(ui.path, win.path)) ui.setPath(win.path);
     ui.setPinnedNode(win.from.node);
-    // 带上端口：从接在 rest 上的线打开，主视图看的就是 rest（不是这个节点的第一个点云口）
-    ui.setViewerPortPick(fullId(win.path, win.from.node), win.field ? `${win.from.port}.${win.field}` : win.from.port);
+    // 带上端口：从接在 rest 上的线打开，主视图看的就是 rest（不是这个节点的第一个点云口）。
+    // 不是点云口（Record、整个 Bundle 的字段表）就不动：别把这个节点先前选好的那个口冲掉
+    const port = win.field ? `${win.from.port}.${win.field}` : win.from.port;
+    const node = levelOf(useGraphStore.getState().doc, win.path).nodes.find((n) => n.id === win.from.node);
+    const manifest = useManifestStore.getState();
+    if (node && cloudPortsOf(manifest.operatorsById, node.op, manifest.bundle?.bundles).includes(port)) {
+      ui.setViewerPortPick(fullId(win.path, win.from.node), port);
+    }
     ui.showToast(`主 3D 视图已钉住 ${live.label}`);
-  }, [win.path, win.from.node, live.label]);
+  }, [win.path, win.from.node, win.from.port, win.field, live.label]);
 
   const exportPng = useCallback(() => {
     const ui = useUiStore.getState();

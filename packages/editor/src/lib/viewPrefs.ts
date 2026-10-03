@@ -68,6 +68,20 @@ export function saveViewerPrefs(p: ViewerPrefs): void {
   }
 }
 
+/** 范围框里显示几位小数：至少 3 位，跨度小就多给 —— 点云以米为单位，亚毫米的高度范围按固定 3 位两端都是同一个数，
+ *  填一个界时另一个界取的就是那个取整过的数，整片云塌成一种颜色。按跨度给，取整差不过跨度的千分之一。 */
+export function rangeDigits(lo: number, hi: number): number {
+  const span = hi - lo;
+  if (!(span > 0) || !Number.isFinite(span)) return 3;
+  return Math.min(12, Math.max(3, 3 - Math.floor(Math.log10(span))));
+}
+
+export function roundTo(v: number, digits: number): number {
+  if (!Number.isFinite(v)) return 0;
+  const f = 10 ** digits;
+  return Math.round(v * f) / f;
+}
+
 /** 每种着色各自的手动范围；没有这一项 = 自动（取数据实际的最小 / 最大）。 */
 export type ManualRanges = Readonly<Partial<Record<ShadingMode, readonly [number, number]>>>;
 

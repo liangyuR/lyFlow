@@ -202,12 +202,15 @@ async function suiteLayout(cdp, report) {
     report.ok("真鼠标点「展开说明」：整段都出来了", (await insp()).docLines > 2);
     await cdp.eval(`document.querySelector('[data-testid="inspector-ports-toggle"]').scrollIntoView({ block: 'center' }); return true;`);
     await clickAt(cdp, await centerOf(cdp, '[data-testid="inspector-ports-toggle"]'));
+    // 取消选中：检查器整个卸掉，再选回来时端口小节重新挂上，开合只能从 localStorage 读回来
     await select(cdp, icp.gen);
+    await sleep(150);
+    await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([], []); return true;`);
     await sleep(200);
     await select(cdp, icp.icp);
     await sleep(250);
     const c = await insp();
-    report.ok("真鼠标收起端口小节：换个节点再回来还收着，记进了 localStorage", c.open === false && c.stored === "0", JSON.stringify(c));
+    report.ok("真鼠标收起端口小节：取消选中再选回来还收着，记进了 localStorage", c.open === false && c.stored === "0", JSON.stringify(c));
   } finally {
     await cdp.eval(`
       const v = ${lit(portsStored)};

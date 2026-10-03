@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { matchShortcut } from "../src/lib/keymap.ts";
 import { listGraphNodes, searchGraphNodes } from "../src/lib/findNodes.ts";
-import { errorNodeIds, failedUpstream, revealError, revealNodeError } from "../src/lib/revealError.ts";
+import { culpritOf, errorNodeIds, failedUpstream, revealError, revealNodeError } from "../src/lib/revealError.ts";
 import { describeEventNode, locateEventNode } from "../src/lib/subgraph.ts";
 import { useGraphStore } from "../src/store/graph.ts";
 import { useManifestStore } from "../src/store/manifest.ts";
@@ -219,17 +219,20 @@ test("在出错的节点之间跳：第一个是根因，F8 往后、Shift+F8 �
   assert.equal(revealNodeError([], "a"), true);
   assert.deepEqual(at(), ["a", "v", "leafSize"], "子图节点的错误：打开到里面那个");
 
-  // 被连带没执行的节点是因为谁：沿入边往上找最近的出错节点（l → m → n，旁支 k → n）
+  // 被连带没执行的节点是因为谁：沿入边往上找最近的出错节点（l → m → n，旁支 j → k → n）
   const chain = { edges: [
     { from: { node: "l", port: "o" }, to: { node: "m", port: "i" } },
     { from: { node: "m", port: "o" }, to: { node: "n", port: "i" } },
     { from: { node: "k", port: "o" }, to: { node: "n", port: "j" } },
+    { from: { node: "j", port: "o" }, to: { node: "k", port: "i" } },
   ] };
   for (const [states, want, why] of [
     [{ l: "error", m: "cancelled" }, "l", "隔一层的根因"],
     [{ l: "error", m: "error" }, "m", "两个都错：取最近的"],
     [{ l: "done", m: "cancelled", k: "error" }, "k", "旁支上的"],
     [{ l: "done", m: "cancelled" }, null, "这一层里找不到（根因在外面）"],
+    // m 跑完了（flow.fallback 接住了 l 的错）：l 不是 n 没执行的原因，真正的在旁支上
+    [{ l: "error", m: "done", k: "cancelled", j: "error" }, "j", "不穿过跑完了的节点"],
   ]) {
     assert.equal(failedUpstream(chain, "n", (id) => states[id]), want, why);
   }
@@ -239,4 +242,28 @@ test("在出错的节点之间跳：第一个是根因，F8 往后、Shift+F8 �
 
   const key = (k, shiftKey) => ({ key: k, ctrlKey: false, metaKey: false, shiftKey, altKey: false });
   assert.deepEqual([matchShortcut(key("F8", false))?.id, matchShortcut(key("F8", true))?.id], ["nextError", "prevError"]);
+});
+
+test("连带没执行的根因在子图外面：从子图节点那里往外一层接着找，不跳到整张图的第一个错", () => {
+  // 顶层 z（不相干的错，节点表里排第一）、p → S；S 里面 x 接的是 S 的入口（不是边），被 p 连带取消
+  const doc = {
+    schemaVersion: 1,
+    id: "d",
+    nodes: [{ id: "z", op: "t" }, { id: "p", op: "t" }, { id: "S", op: "sub:s9" }],
+    edges: [{ id: "e1", from: { node: "p", port: "o" }, to: { node: "S", port: "in" } }],
+    subgraphs: {
+      s9: { name: "S", nodes: [{ id: "x", op: "t" }], edges: [], params: [], outputs: [],
+            inputs: [{ name: "in", type: "PointCloud", to: [{ node: "x", port: "cloud" }] }] },
+    },
+  };
+  const upstream = { phase: "execute", code: "upstream_failed", message: "上游节点 p 失败，未执行" };
+  const nodes = new Map([
+    ["z", { state: "error", errors: [{ phase: "execute", code: "bad_param", message: "坏了" }] }],
+    ["p", { state: "error", errors: [{ phase: "execute", code: "bad_param", message: "坏了" }] }],
+    ["S/x", { state: "cancelled", errors: [upstream] }],
+  ]);
+  const inner = [{ nodeId: "S", subgraphId: "s9" }];
+  const c = culpritOf(doc, inner, "x", nodes);
+  assert.deepEqual([c?.path.length, c?.id], [0, "p"]);
+  assert.equal(culpritOf(doc, [], "z", new Map([["z", { state: "cancelled", errors: [upstream] }]])), null, "哪一层都没有");
 });

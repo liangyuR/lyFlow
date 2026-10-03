@@ -3,6 +3,7 @@ export { LyFlowEditor, type LyFlowEditorProps } from "./LyFlowEditor";
 export * from "./transport";
 export { browserDialogs, NoDialogError, type EditorDialogs } from "./lib/dialogs";
 export { resolveUnsaved } from "./lib/unsaved";
+export { modalHostReady } from "./lib/modal";
 
 export type * from "./types/graph";
 export type * from "./types/manifest";

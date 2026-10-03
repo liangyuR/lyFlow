@@ -442,6 +442,16 @@ async function main() {
     packagedExe: staged?.exe ?? null,
   });
   const { cdp, consoleErrors } = app;
+  // e2e 与开发中的 app 共用一份 WebView2 存储：你在 app 里存下的界面偏好（预览的着色 / 显示点数、检查器端口小节的
+  // 开合）先挪开、各组从默认开始，跑完放回去。显示点数被记成 100K 时，各组比的点数全对不上
+  const PREF_KEYS = ["lyflow.viewer.display", "lyflow.inspector.portsOpen"];
+  const parkedPrefs = await cdp.eval(`
+    const keys = ${lit(PREF_KEYS)};
+    const saved = Object.fromEntries(keys.map((k) => [k, localStorage.getItem(k)]));
+    keys.forEach((k) => localStorage.removeItem(k));
+    window.__lyflow.stores.ui.setState({ viewerPrefs: { shading: 'intensity', ramp: 'viridis', pointSize: 1.6, maxPoints: 2000000 } });
+    return saved;
+  `).catch(() => null);
 
   if (packaged) {
     report.section("安装包（干净目录）");
@@ -509,6 +519,14 @@ async function main() {
     report.fail("验收脚本中断", e.stack ?? String(e));
   } finally {
     report.summary();
+    if (parkedPrefs) {
+      await cdp.eval(`
+        for (const [k, v] of Object.entries(${lit(parkedPrefs)})) {
+          if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v);
+        }
+        return true;
+      `).catch(() => {});
+    }
     await app.close();
     ws.cleanup();
     if (staged) {

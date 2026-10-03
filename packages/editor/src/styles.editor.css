@@ -405,6 +405,9 @@
 
 /* 节点端口小节（M6 §3）：<details> 本身给了折叠，summary 复用参数分组标题的样式。 */
 .insp__ports summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   cursor: pointer;
   list-style: none;
 }

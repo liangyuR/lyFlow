@@ -1985,15 +1985,18 @@ const VIEWER_PREFS_KEY = "lyflow.viewer.display";
 async function suiteViewer(cdp, report) {
   report.section("P1 #30 / §2.6：着色模式、色带与范围、钉住、导出");
   // 显示设置会落 localStorage（lib/viewPrefs）：记下原样，分组结束时放回去，不影响后面的分组
-  const storedPrefs = await cdp.eval(`return localStorage.getItem(${lit(VIEWER_PREFS_KEY)});`);
+  // （run.mjs 开跑时已经把你自己存的那份挪开、换成默认）
+  const before = await cdp.eval(`
+    return { raw: localStorage.getItem(${lit(VIEWER_PREFS_KEY)}), prefs: window.__lyflow.stores.ui.getState().viewerPrefs };
+  `);
   try {
     await suiteViewerBody(cdp, report);
   } finally {
     await cdp.eval(`
-      const raw = ${lit(storedPrefs)};
-      if (raw === null) localStorage.removeItem(${lit(VIEWER_PREFS_KEY)});
-      else localStorage.setItem(${lit(VIEWER_PREFS_KEY)}, raw);
-      window.__lyflow.stores.ui.setState({ viewerPrefs: { shading: 'intensity', ramp: 'viridis', pointSize: 1.6, maxPoints: 2000000 } });
+      const before = ${lit(before)};
+      if (before.raw === null) localStorage.removeItem(${lit(VIEWER_PREFS_KEY)});
+      else localStorage.setItem(${lit(VIEWER_PREFS_KEY)}, before.raw);
+      window.__lyflow.stores.ui.setState({ viewerPrefs: before.prefs });
       return true;
     `);
   }
