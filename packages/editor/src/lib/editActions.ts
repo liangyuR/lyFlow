@@ -1,7 +1,7 @@
 // 节点的几个基本编辑动作：快捷键（useShortcuts）与右键菜单（NodeContextMenu、空白处菜单）共用这一份，
 // 免得两边各写一遍、行为慢慢走样（复制的范围、删除的撤销粒度、接通的提示）。
 
-import { useGraphStore } from "../store/graph";
+import { useGraphStore, type PasteResult } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { currentOverrides } from "../store/recipe";
 import { useUiStore } from "../store/ui";
@@ -9,9 +9,10 @@ import { copyText } from "./clipboard";
 import { materializeBindings } from "./graphParams";
 import { encodeNodeClipboard } from "./nodeClipboard";
 import { planParamPaste, planParamReset, snapshotParams, type ParamEditPlan } from "./paramClipboard";
-import { augmentOperators, levelOf } from "./subgraph";
+import { augmentOperators, levelOf, subgraphsUsedBy } from "./subgraph";
 
-/** 复制（cut 时再删掉）这一层里的这些节点。只带走两端都在里面的边 —— 粘贴时内部连线得以保留。
+/** 复制（cut 时再删掉）这一层里的这些节点。只带走两端都在里面的边 —— 粘贴时内部连线得以保留；
+ *  子图节点用到的子图定义也带走（粘进另一张图才认得出来）。
  *  应用内一份，系统剪贴板也写一份（另一个窗口、重开之后照样粘得进来）。返回复制了几个。 */
 export function copyNodes(ids: ReadonlySet<string>, cut: boolean): number {
   const graph = useGraphStore.getState();
@@ -23,7 +24,12 @@ export function copyNodes(ids: ReadonlySet<string>, cut: boolean): number {
   const ops = augmentOperators(useManifestStore.getState().operatorsById, doc.subgraphs);
   const nodes = materializeBindings(doc, ui.path, level.nodes.filter((n) => ids.has(n.id)), ops, currentOverrides());
   const edges = level.edges.filter((edge) => ids.has(edge.from.node) && ids.has(edge.to.node));
-  const clip = { nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) };
+  const subgraphs = subgraphsUsedBy(nodes, doc.subgraphs);
+  const clip = {
+    nodes: JSON.parse(JSON.stringify(nodes)),
+    edges: JSON.parse(JSON.stringify(edges)),
+    ...(Object.keys(subgraphs).length > 0 ? { subgraphs: JSON.parse(JSON.stringify(subgraphs)) } : {}),
+  };
   ui.setClipboard(clip);
   void copyText(encodeNodeClipboard(clip)).then((ok) => useUiStore.setState({ clipboardOnlyInApp: !ok }));
   // 剪切也是删：指着它们的图级输出一并取消了，说一声（粘回来的是新 id，输出不会跟着回来）
@@ -31,6 +37,27 @@ export function copyNodes(ids: ReadonlySet<string>, cut: boolean): number {
   const outs = dropped.length > 0 ? `；${droppedOutputsText(dropped)}` : "";
   ui.showToast(`已${cut ? "剪切" : "复制"} ${nodes.length} 个节点${outs}`, outs ? "warn" : "info");
   return nodes.length;
+}
+
+/** 粘贴之后说一声：几个没粘上、为什么（算子在当前 core 里没有、子图放不进它自己里面），哪份子图定义另起了名字。
+ *  没什么要说的返回 null。 */
+export function pasteNotice(r: PasteResult): { text: string; kind: "info" | "warn" } | null {
+  const why: string[] = [];
+  const missing = [...new Set(r.missing)];
+  if (missing.length > 0) {
+    const names = missing.length > 3 ? `${missing.slice(0, 3).join("、")} 等 ${missing.length} 种` : missing.join("、");
+    why.push(`算子 ${names} 在当前 core 里不存在`);
+  }
+  if (r.recursive > 0) why.push("子图不能放进它自己里面");
+  const skipped = r.missing.length + r.recursive;
+  const parts: string[] = [];
+  if (skipped > 0) parts.push(r.nodeIds.length > 0 ? `${skipped} 个节点没粘：${why.join("；")}` : `没粘上：${why.join("；")}`);
+  if (r.renamed.length > 0) {
+    const list = r.renamed.map((x) => `「${x.from}」另存为「${x.to}」`).join("、");
+    parts.push(`这张图里已有同名、内容不同的子图，粘进来的${list}`);
+  }
+  if (parts.length === 0) return null;
+  return { text: parts.join("。"), kind: skipped > 0 ? "warn" : "info" };
 }
 
 /** 删掉这些节点与连线，一条撤销（框选会把相连的边一起选上：以前先断边、再删节点记成两条）。清掉选中。 */

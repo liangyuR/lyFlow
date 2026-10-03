@@ -3,6 +3,7 @@
 
 import { graphParamBoundTo, joinBind } from "./graphParams";
 import { newLocalId } from "./ids";
+import { valueEquals } from "./params";
 import { ANY, findPort, inferAnyTypes, type GraphContext } from "./typecheck";
 import type { OperatorDesc, Param, Port } from "../types/manifest";
 import {
@@ -582,5 +583,120 @@ export function remapGraphOutputs(
     }
   }
   return dropped;
+}
+
+// ------------------------------------------------- 复制粘贴带着的子图定义
+
+/** 这些节点用到的子图定义，连同定义里面再用到的。复制节点时一起带走：粘进另一张图里 sub: 节点才认得出来。 */
+export function subgraphsUsedBy(
+  nodes: readonly GraphNode[],
+  subgraphs: GraphDoc["subgraphs"],
+): Record<string, SubgraphDef> {
+  const out: Record<string, SubgraphDef> = {};
+  const visit = (list: readonly GraphNode[]): void => {
+    for (const node of list) {
+      const id = subgraphIdOf(node.op);
+      const def = id !== null ? subgraphs?.[id] : undefined;
+      if (id === null || !def || Object.hasOwn(out, id)) continue;
+      out[id] = def;
+      visit(def.nodes);
+    }
+  };
+  visit(nodes);
+  return out;
+}
+
+/** 从 from 这份定义往里走（含它自己）碰得到 targets 里的哪一个吗。粘贴时防「子图放进它自己里面」。 */
+export function subgraphReaches(
+  subgraphs: GraphDoc["subgraphs"],
+  from: string,
+  targets: ReadonlySet<string>,
+): boolean {
+  const seen = new Set<string>();
+  const walk = (id: string): boolean => {
+    if (targets.has(id)) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return (subgraphs?.[id]?.nodes ?? []).some((n) => {
+      const sub = subgraphIdOf(n.op);
+      return sub !== null && walk(sub);
+    });
+  };
+  return walk(from);
+}
+
+export interface SubgraphMerge {
+  /** 剪贴板里的子图 id → 粘进来之后用的 id。 */
+  ids: Map<string, string>;
+  /** 要加进 doc.subgraphs 的定义（里面的 sub: 已按 ids 改好）。 */
+  added: Record<string, SubgraphDef>;
+  /** 这张图里有同 id、内容不同的定义：粘进来的那份另起了 id（id）与名字（from → to）。 */
+  renamed: { id: string; from: string; to: string }[];
+}
+
+/** 两份定义算不算同一份：节点的摆放、标题这些 ui 不算（复制之后在子图里挪了挪节点，不该粘出第二份）。 */
+function sameDefinition(a: SubgraphDef, b: SubgraphDef): boolean {
+  const plain = (d: SubgraphDef): unknown =>
+    JSON.parse(JSON.stringify({ ...d, nodes: d.nodes.map((n) => ({ ...n, ui: undefined })) }));
+  return valueEquals(plain(a), plain(b));
+}
+
+function suffixedLabel(taken: Set<string>, base: string): string {
+  for (let i = 2; ; i += 1) {
+    const candidate = `${base} ${i}`;
+    if (!taken.has(candidate)) {
+      taken.add(candidate);
+      return candidate;
+    }
+  }
+}
+
+/** 剪贴板带来的子图定义怎么并进这张图：同 id 同内容的就用这张图里的；同 id 不同内容的另起一个 id、名字加个号；
+ *  这张图里没有的照原 id 加进来。「同内容」也看它里面用到的子图：里面那一份另起了，外面这份也得另起。 */
+export function mergeSubgraphs(
+  existing: GraphDoc["subgraphs"],
+  incoming: Readonly<Record<string, SubgraphDef>>,
+): SubgraphMerge {
+  const have = existing ?? {};
+  const differs = new Set(
+    Object.keys(incoming).filter((id) => Object.hasOwn(have, id) && !sameDefinition(have[id]!, incoming[id]!)),
+  );
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [id, def] of Object.entries(incoming)) {
+      if (differs.has(id) || !Object.hasOwn(have, id)) continue;
+      const inner = def.nodes.some((n) => {
+        const sub = subgraphIdOf(n.op);
+        return sub !== null && differs.has(sub);
+      });
+      if (inner) {
+        differs.add(id);
+        grew = true;
+      }
+    }
+  }
+  const takenIds = new Set([...Object.keys(have), ...Object.keys(incoming)]);
+  const takenNames = new Set(Object.values(have).flatMap((d) => (d.name ? [d.name] : [])));
+  const ids = new Map<string, string>();
+  for (const id of Object.keys(incoming)) ids.set(id, differs.has(id) ? uniqueName(takenIds, id) : id);
+  const added: Record<string, SubgraphDef> = {};
+  const renamed: SubgraphMerge["renamed"] = [];
+  for (const [id, def] of Object.entries(incoming)) {
+    const to = ids.get(id)!;
+    if (Object.hasOwn(have, to)) continue; // 用这张图里的那一份
+    const copy = structuredClone(def);
+    for (const n of copy.nodes) {
+      const sub = subgraphIdOf(n.op);
+      const mapped = sub !== null ? ids.get(sub) : undefined;
+      if (mapped !== undefined) n.op = SUBGRAPH_OP_PREFIX + mapped;
+    }
+    if (to !== id) {
+      const from = def.name ?? id;
+      copy.name = suffixedLabel(takenNames, from);
+      renamed.push({ id: to, from, to: copy.name });
+    }
+    added[to] = copy;
+  }
+  return { ids, added, renamed };
 }
 

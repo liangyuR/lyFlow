@@ -41,9 +41,12 @@ import {
   levelKeyOf,
   levelOf,
   fullId,
+  mergeSubgraphs,
   pathIsValid,
   promotedBy,
   remapGraphOutputs,
+  subgraphReaches,
+  subgraphsUsedBy,
   type ComposeResult,
   type SubPath,
 } from "../lib/subgraph";
@@ -55,6 +58,7 @@ import {
   GRAPH_SCHEMA_VERSION,
   LIBRARY_OP_PREFIX,
   subgraphIdOf,
+  SUBGRAPH_OP_PREFIX,
   type GraphDoc,
   type GraphLevel,
   type GraphNode,
@@ -293,7 +297,15 @@ export interface PasteResult {
   nodeIds: string[];
   /** 原件 id → 副本 id（粘贴时剪贴板里的 id → 新 id）。 */
   idMap: ReadonlyMap<string, string>;
+  /** 没粘的节点的算子 id：当前 core 里没有（子图节点没带定义、这张图里也没有的也算）。 */
+  missing: string[];
+  /** 没粘的子图节点：粘进去就成了它自己里面套它自己。 */
+  recursive: number;
+  /** 带来的子图定义与这张图里同 id 的内容不同、另起了 id 与名字的（lib/subgraph 的 mergeSubgraphs）。 */
+  renamed: { id: string; from: string; to: string }[];
 }
+
+const NOTHING_PASTED: PasteResult = { nodeIds: [], idMap: new Map(), missing: [], recursive: 0, renamed: [] };
 
 /** 拖入节点 / 插入片段之后自动连线的结果（m8-plan L13 / L14）。 */
 export interface AutoConnectResult {
@@ -364,7 +376,11 @@ interface GraphState {
   setNodeUi(nodeId: string, patch: Partial<NodeUi>): void;
   connect(from: PortRef, to: PortRef): ConnectVerdict;
   disconnect(edgeIds: readonly string[]): void;
-  pasteNodes(payload: { nodes: GraphNode[]; edges: GraphDoc["edges"] }, at: { x: number; y: number }): PasteResult;
+  /** payload.subgraphs：剪贴板带来的子图定义（另一张图里复制的子图节点），按 mergeSubgraphs 并进来、与节点同一条撤销。 */
+  pasteNodes(
+    payload: { nodes: GraphNode[]; edges: GraphDoc["edges"]; subgraphs?: GraphDoc["subgraphs"] },
+    at: { x: number; y: number },
+  ): PasteResult;
 
   /** 静音（交互清单 P1 #25）。是执行语义，所以进 doc、进撤销栈。 */
   setBypass(ids: readonly string[], value: boolean): void;
@@ -920,9 +936,17 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     pasteNodes(payload, at) {
-      const taken = allIds(get().doc);
+      const doc = get().doc;
+      const taken = allIds(doc);
       const idMap = new Map<string, string>();
-      const manifest = ctx(get().doc).operatorsById;
+      // 剪贴板带来的子图定义：这张图里没有的加进来，同 id 不同内容的另起一个（不覆盖这张图里的）
+      const merge = mergeSubgraphs(doc.subgraphs, payload.subgraphs ?? {});
+      const subgraphs = Object.keys(merge.added).length > 0 ? { ...doc.subgraphs, ...merge.added } : doc.subgraphs;
+      const manifest = augmentOperators(useManifestStore.getState().operatorsById, subgraphs);
+      // 正在哪几层子图里：粘进来的子图节点（连同它里面）不能再用到它们，不然展开时没完没了
+      const around = new Set(useUiStore.getState().path.map((seg) => seg.subgraphId));
+      const missing: string[] = [];
+      let recursive = 0;
 
       // 粘贴的节点整体平移到目标位置，保持相对布局
       const origin = payload.nodes.reduce(
@@ -937,14 +961,24 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
       const newNodes: GraphNode[] = [];
       for (const n of payload.nodes) {
-        const op = manifest.get(n.op);
-        if (!op) continue; // 剪贴板里的算子在当前 core 里不存在，跳过
+        const sub = subgraphIdOf(n.op);
+        const target = sub !== null ? (merge.ids.get(sub) ?? sub) : null;
+        const opId = target !== null ? SUBGRAPH_OP_PREFIX + target : n.op;
+        const op = manifest.get(opId);
+        if (!op) {
+          missing.push(n.op); // 剪贴板里的算子在当前 core 里不存在，跳过
+          continue;
+        }
+        if (target !== null && subgraphReaches(subgraphs, target, around)) {
+          recursive += 1;
+          continue;
+        }
         const id = newLocalId("n", taken);
         taken.add(id);
         idMap.set(n.id, id);
         newNodes.push({
           id,
-          op: n.op,
+          op: opId,
           opVersion: n.opVersion ?? op.version,
           params: pruneUnknownParams(op, n.params),
           // 静音的节点粘出来还是静音的（以前丢了）
@@ -972,14 +1006,22 @@ export const useGraphStore = create<GraphState>((set, get) => {
           };
         });
 
-      if (newNodes.length === 0) return { nodeIds: [], idMap };
+      if (newNodes.length === 0) return { ...NOTHING_PASTED, idMap, missing, recursive };
 
+      // 只加粘上了的节点用得到的那几份定义
+      const used = subgraphsUsedBy(newNodes, subgraphs);
+      const addDefs = Object.entries(merge.added).filter(([id]) => Object.hasOwn(used, id));
       transact(newNodes.length === 1 ? "粘贴节点" : `粘贴 ${newNodes.length} 个节点`, (d) => {
+        if (addDefs.length > 0) {
+          d.subgraphs ??= {};
+          for (const [id, def] of addDefs) d.subgraphs[id] = def;
+        }
         const lvl = level(d);
         lvl.nodes.push(...newNodes);
         lvl.edges.push(...newEdges);
       });
-      return { nodeIds: newNodes.map((n) => n.id), idMap };
+      const renamed = merge.renamed.filter((r) => Object.hasOwn(used, r.id));
+      return { nodeIds: newNodes.map((n) => n.id), idMap, missing, recursive, renamed };
     },
 
     restoreParams(from, label, run) {
@@ -1162,7 +1204,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     duplicateNodes(ids, opts) {
-      if (ids.length === 0) return { nodeIds: [], idMap: new Map() };
+      if (ids.length === 0) return NOTHING_PASTED;
       const { doc } = get();
       const lvl = level(doc);
       const kept = new Set(ids);
@@ -1174,7 +1216,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         ctx(doc).operatorsById,
         currentOverrides(),
       );
-      if (nodes.length === 0) return { nodeIds: [], idMap: new Map() };
+      if (nodes.length === 0) return NOTHING_PASTED;
       const edges = lvl.edges.filter((e) => kept.has(e.from.node) && kept.has(e.to.node));
       const origin = nodes.reduce(
         (acc, n) => ({

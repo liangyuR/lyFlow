@@ -32,6 +32,8 @@ export interface SearchPopup {
 export interface Clipboard {
   nodes: GraphNode[];
   edges: GraphDoc["edges"];
+  /** 这些节点用到的子图定义（lib/nodeClipboard）。 */
+  subgraphs?: GraphDoc["subgraphs"];
 }
 
 /** 正在拖出的那一端。side 是这一端在自己节点上的方向。 */

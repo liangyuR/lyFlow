@@ -4,8 +4,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { healPlan, planAutoConnect } from "../src/lib/autoconnect.ts";
+import { pasteNotice } from "../src/lib/editActions.ts";
 import { addNodeWithAutoConnect } from "../src/lib/insert.ts";
 import { decodeNodeClipboard, encodeNodeClipboard } from "../src/lib/nodeClipboard.ts";
+import { subgraphsUsedBy } from "../src/lib/subgraph.ts";
 import { useGraphStore } from "../src/store/graph.ts";
 import { useManifestStore } from "../src/store/manifest.ts";
 import { useUiStore } from "../src/store/ui.ts";
@@ -182,6 +184,78 @@ test("复制粘贴（P0 #12）：id 重映射、内部连线留着、整体平�
   for (const text of ["", "hello", "[1,2]", '{"nodes":[{"id":"a","op":"t.read"}]}', '{"kind":"lyflow.nodes","nodes":[]}']) {
     assert.equal(decodeNodeClipboard(text), null, text);
   }
+});
+
+test("复制粘贴带着子图定义：另一张图里认得出来、同内容的不再加、同名不同内容的另起一份、放不进它自己里面", () => {
+  reset();
+  const sub = (name, nodes) => ({ name, nodes, edges: [], inputs: [], outputs: [], params: [] });
+  const node = (id, op, x = 0) => ({ id, op, params: {}, ui: { position: { x, y: 0 } } });
+  // 外层 A 里套着内层 B；C 没被谁用
+  const defs = {
+    A: sub("外层", [node("a1", "t.read"), node("a2", "sub:B", 200)]),
+    B: sub("内层", [node("b1", "t.locate")]),
+    C: sub("闲着", [node("c1", "t.read")]),
+  };
+  const source = { schemaVersion: 1, id: "src", nodes: [node("n1", "sub:A"), node("n2", "t.read", 300)], edges: [], subgraphs: defs };
+  assert.deepEqual(Object.keys(subgraphsUsedBy(source.nodes, defs)).sort(), ["A", "B"], "复制时带上它用到的，连同里面的");
+  assert.deepEqual(subgraphsUsedBy([source.nodes[1]], defs), {}, "没有子图节点就不带");
+  const clip = decodeNodeClipboard(encodeNodeClipboard({ nodes: source.nodes, edges: [], subgraphs: subgraphsUsedBy(source.nodes, defs) }));
+  assert.deepEqual(Object.keys(clip.subgraphs).sort(), ["A", "B"], "经系统剪贴板走一圈定义还在");
+  const paste = (c) => useGraphStore.getState().pasteNodes(structuredClone(c), { x: 0, y: 0 });
+  const opsOf = (r) => r.nodeIds.map((id) => doc().nodes.find((n) => n.id === id).op);
+
+  // 另一张图（没有这几份定义）：照原 id 加进来，子图节点粘上；一条撤销连定义一起撤掉
+  let r = paste(clip);
+  assert.deepEqual(opsOf(r), ["sub:A", "t.read"]);
+  assert.deepEqual(Object.keys(doc().subgraphs).sort(), ["A", "B"]);
+  assert.equal(pasteNotice(r), null, "都粘上了、没另起名字：不说话");
+  useGraphStore.getState().undo();
+  assert.deepEqual(Object.keys(doc().subgraphs ?? {}), [], "撤销连带走定义");
+
+  // 加进来的只有粘上的节点用得到的：剪贴板里多带了一份没人用的 C 也不加
+  paste({ ...clip, subgraphs: { ...clip.subgraphs, C: defs.C } });
+  assert.deepEqual(Object.keys(doc().subgraphs).sort(), ["A", "B"]);
+
+  // 再粘一次：这张图里已有一模一样的（子图里节点挪过位置也算一样），不再加
+  const moved = structuredClone(clip);
+  moved.subgraphs.B.nodes[0].ui.position = { x: 999, y: 999 };
+  r = paste(moved);
+  assert.deepEqual(opsOf(r), ["sub:A", "t.read"]);
+  assert.deepEqual(Object.keys(doc().subgraphs).sort(), ["A", "B"]);
+
+  // 同 id 内容不同（内层的参数改过）：内层另起一份，套着它的外层也得另起；这张图里原来那两份不动
+  const changed = structuredClone(clip);
+  changed.subgraphs.B.nodes[0].params = { k: 1 };
+  const before = structuredClone(doc().subgraphs);
+  r = paste(changed);
+  assert.deepEqual(opsOf(r), ["sub:A_2", "t.read"]);
+  assert.deepEqual(Object.keys(doc().subgraphs).sort(), ["A", "A_2", "B", "B_2"]);
+  assert.deepEqual({ A: doc().subgraphs.A, B: doc().subgraphs.B }, before);
+  assert.deepEqual(doc().subgraphs.A_2.nodes.map((n) => n.op), ["t.read", "sub:B_2"], "外层那份里面指向另起的内层");
+  assert.deepEqual([doc().subgraphs.A_2.name, doc().subgraphs.B_2.name], ["外层 2", "内层 2"]);
+  assert.deepEqual(pasteNotice(r), { kind: "info", text: "这张图里已有同名、内容不同的子图，粘进来的「外层」另存为「外层 2」、「内层」另存为「内层 2」" });
+
+  // 剪贴板没带定义（老版本复制的）、这张图里也没有：子图节点不粘，说是哪个算子
+  useGraphStore.getState().newDoc();
+  r = paste({ nodes: clip.nodes, edges: [] });
+  assert.deepEqual([opsOf(r), r.missing], [["t.read"], ["sub:A"]]);
+  assert.deepEqual(pasteNotice(r), { kind: "warn", text: "1 个节点没粘：算子 sub:A 在当前 core 里不存在" });
+
+  // 在 A 里面、或者在 A 里面的 B 里面：A 都粘不进来（不然展开时没完没了）；别的节点照粘
+  useGraphStore.getState().loadDoc(structuredClone(source), null);
+  useUiStore.getState().enterSubgraph({ nodeId: "n1", subgraphId: "A" });
+  r = paste(clip);
+  assert.deepEqual([r.nodeIds.length, r.recursive], [1, 1]);
+  assert.equal(doc().subgraphs.A.nodes.filter((n) => n.op === "t.read").length, 2, "别的节点粘进了 A 这一层");
+  useUiStore.getState().enterSubgraph({ nodeId: "a2", subgraphId: "B" });
+  r = paste({ nodes: [clip.nodes[0]], edges: [], subgraphs: clip.subgraphs });
+  assert.deepEqual([r.nodeIds, r.recursive], [[], 1]);
+  assert.deepEqual(pasteNotice(r), { kind: "warn", text: "没粘上：子图不能放进它自己里面" });
+  // B 里面粘 B 也不行；顶层粘 A 可以
+  r = paste({ nodes: [node("x", "sub:B")], edges: [], subgraphs: { B: defs.B } });
+  assert.equal(r.recursive, 1);
+  useUiStore.getState().setPath([]);
+  assert.equal(paste(clip).recursive, 0);
 });
 
 test("删节点（P0 #5）：连着它的边一并删掉，别的边不动；一次撤销全回来", () => {

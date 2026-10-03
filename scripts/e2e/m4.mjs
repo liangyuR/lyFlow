@@ -621,6 +621,60 @@ async function suiteRecursion(cdp, report) {
 
   const run = await runAndWait(cdp, () => pressF5(cdp));
   report.eq("跑它只会失败，不会崩", run.status, "error");
+
+  // 界面上复制粘贴也造不出来：子图节点粘不进它自己里面（提示一句，别的节点照粘）。
+  // 复制带着它用到的两层子图定义：新建一张图粘进去认得出来、跑得通。剪贴板走桩，不动用户的
+  await newDoc(cdp);
+  const ids = await buildGraph(cdp, CHAIN_NODES.slice(0, 4), CHAIN_EDGES.slice(0, 3));
+  const inner = await compose(cdp, [ids.voxel, ids.sor]);
+  const outer = await compose(cdp, [ids.crop, inner.nodeId]);
+  await stubClipboard(cdp);
+  await cdp.eval(`
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}, ${lit(outer.nodeId)}], []);
+    return true;
+  `);
+  await pressCtrl(cdp, "c");
+  await sleep(150);
+  const carried = await cdp.eval(`return Object.keys(JSON.parse(window.__lyClip || '{}').subgraphs ?? {}).sort();`);
+  report.eq("复制子图节点：剪贴板里带着它用到的两层子图定义", carried, [inner.subgraphId, outer.subgraphId].sort());
+
+  const innerOps = () => cdp.eval(`return window.__lyflow.stores.graph.getState().doc.subgraphs[${lit(inner.subgraphId)}].nodes.map((n) => n.op);`);
+  await enterByDoubleClick(cdp, outer.nodeId);
+  await enterByDoubleClick(cdp, inner.nodeId);
+  const opsBefore = await innerOps();
+  await cdp.eval(`window.__lyflow.stores.ui.getState().hideToast(); return true;`);
+  await pressCtrl(cdp, "v");
+  await sleep(300);
+  const inSelf = await cdp.eval(`
+    const ui = window.__lyflow.stores.ui.getState();
+    return { depth: ui.path.length, toast: ui.toast?.text ?? null, kind: ui.toast?.kind ?? null };
+  `);
+  const opsAfter = await innerOps();
+  report.ok("在它自己的里层粘贴：外层子图节点不粘（生成节点照粘），提示「子图不能放进它自己里面」",
+    inSelf.depth === 2 && opsAfter.length === opsBefore.length + 1 && opsAfter.at(-1) === "gen.synthetic" &&
+      inSelf.toast === "1 个节点没粘：子图不能放进它自己里面" && inSelf.kind === "warn",
+    JSON.stringify({ inSelf, opsBefore, opsAfter }));
+  await cdp.eval(`window.__lyflow.stores.ui.getState().exitTo(0); return true;`);
+
+  await newDoc(cdp);
+  await setViewport(cdp, { x: 0, y: 0, zoom: 1 });
+  await pressCtrl(cdp, "v");
+  await sleep(400);
+  const other = await cdp.eval(`
+    const doc = window.__lyflow.stores.graph.getState().doc;
+    return { ops: doc.nodes.map((n) => n.op).sort(), edges: doc.edges.length, subgraphs: Object.keys(doc.subgraphs ?? {}).sort(),
+             toast: window.__lyflow.stores.ui.getState().toast?.text ?? null };
+  `);
+  report.ok("新建一张图再 Ctrl+V：子图节点与它的两层定义都过来了，连线还在",
+    JSON.stringify(other.ops) === JSON.stringify(["gen.synthetic", `sub:${outer.subgraphId}`].sort()) && other.edges === 1 &&
+      JSON.stringify(other.subgraphs) === JSON.stringify([inner.subgraphId, outer.subgraphId].sort()),
+    JSON.stringify(other));
+  const ran = await runAndWait(cdp, () => pressF5(cdp));
+  const nestedRan = Object.entries(ran.nodes ?? {}).filter(([id, n]) => id.split("/").length === 3 && n.state === "done").length;
+  report.ok("粘过来的这张图跑得通（两层子图里面的节点都算了）", ran.status === "ok" && nestedRan === 2,
+    JSON.stringify({ status: ran.status, nodes: Object.keys(ran.nodes ?? {}) }));
+  await restoreClipboard(cdp);
 }
 
 // ------------------------------------------------------------ §1 库算子

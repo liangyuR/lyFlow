@@ -7,7 +7,7 @@ import { matchShortcut } from "../lib/keymap";
 import { subgraphIdOf } from "../types/graph";
 import { augmentOperators, fullId, levelOf } from "../lib/subgraph";
 import { useManifestStore } from "../store/manifest";
-import { copyNodes, deleteHealing, deleteSelection } from "../lib/editActions";
+import { copyNodes, deleteHealing, deleteSelection, pasteNotice } from "../lib/editActions";
 import { stepHistory } from "../lib/history";
 import { decodeNodeClipboard } from "../lib/nodeClipboard";
 import { stepAlong, type NavDir, type NavHop } from "../lib/nodeRun";
@@ -500,7 +500,8 @@ export function useShortcuts(
       e.preventDefault();
       const result = useGraphStore.getState().pasteNodes(clip, handlers.cursorFlowPosition());
       if (result.nodeIds.length > 0) ui.setSelection(result.nodeIds, []);
-      else ui.showToast("剪贴板里的算子在当前 core 里不存在", "warn");
+      const notice = pasteNotice(result);
+      if (notice) ui.showToast(notice.text, notice.kind);
     };
 
     // 焦点掉回 body（刚才那个输入框被卸载了之类）时谁都收不到键，
