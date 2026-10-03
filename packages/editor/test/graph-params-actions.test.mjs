@@ -80,6 +80,45 @@ test("Ctrl+D 复制被图参数绑定的节点：副本写着此刻的有效值�
   assert.equal(node("n_voxel").params.leafSize, undefined, "原件照旧由图参数提供");
 });
 
+test("Shift+D 复制并保留输入：副本接原件的同一个上游、输出空着；子图里接上子图入口；一条撤销", () => {
+  const cases = [
+    // [说明, 进子图, 复制谁, keepInputs, 期望]
+    ["顶层一个", false, ["n_voxel"], true, { into: ["n_load.cloud>copy0.cloud"], out: 0, boundary: null, steps: 1, label: "复制并保留输入" }],
+    ["顶层两个：选区里面的照旧连副本之间，外面进来的接上", false, ["n_voxel", "n_plane"], true,
+      { into: ["copy0.cloud>copy1.cloud", "n_load.cloud>copy0.cloud"], out: 0, boundary: null, steps: 1, label: "复制 2 个节点并保留输入" }],
+    ["不保留（Ctrl+D）照旧", false, ["n_voxel"], false, { into: [], out: 0, boundary: null, steps: 1, label: "粘贴节点" }],
+    ["子图实例", false, ["n_clean"], true, { into: ["n_plane.rest>copy0.cloud"], out: 0, boundary: null, steps: 1, label: "复制并保留输入" }],
+    ["子图里：接的是子图入口（inputs[].to）", true, ["s_voxel"], true,
+      { into: [], out: 0, boundary: ["s_voxel.cloud", "copy0.cloud"], steps: 1, label: "复制并保留输入" }],
+  ];
+  for (const [name, inside, ids, keepInputs, want] of cases) {
+    reset();
+    if (inside) inClean();
+    const lvl = () => (inside ? doc().subgraphs.sg_clean : doc());
+    const before = structuredClone(doc());
+    const steps = g().past.length;
+    const r = g().duplicateNodes(ids, { keepInputs });
+    const alias = new Map(r.nodeIds.map((id, i) => [id, `copy${i}`]));
+    const nameOf = (id) => alias.get(id) ?? id;
+    const got = {
+      into: lvl().edges.filter((e) => alias.has(e.to.node)).map((e) => `${nameOf(e.from.node)}.${e.from.port}>${nameOf(e.to.node)}.${e.to.port}`).sort(),
+      out: lvl().edges.filter((e) => alias.has(e.from.node) && !alias.has(e.to.node)).length,
+      boundary: inside ? lvl().inputs[0].to.map((t) => `${nameOf(t.node)}.${t.port}`) : null,
+      steps: g().past.length - steps,
+      label: g().past.at(-1)?.label,
+    };
+    assert.deepEqual(got, want, name);
+    if (inside) {
+      // 删掉副本：子图入口里指着它的那条一起摘掉（以前留着，下次运行 core 报 unknown_port）
+      g().deleteNodes(r.nodeIds);
+      assert.deepEqual(lvl().inputs[0].to.map((t) => t.node), ["s_voxel"], `${name}：删掉副本`);
+      g().undo();
+    }
+    g().undo();
+    assert.deepEqual(doc(), before, `${name}：一次撤销完全还原`);
+  }
+});
+
 test("纳入配方：当前有效值成为 default、规格从 manifest 抄、节点显式值被删；一次撤销完全还原", () => {
   reset();
   const before = structuredClone(doc());

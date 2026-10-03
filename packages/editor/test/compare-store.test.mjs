@@ -41,10 +41,10 @@ const state = () => {
   return { on: s.on, b: s.b?.nodeId ?? null, frozen: s.snapshot?.runId ?? null, toast: useUiStore.getState().toast?.text ?? null };
 };
 
-test("预览的两个快捷键不与画布的撞：Ctrl+Shift+D 对比 / Ctrl+D 原地复制，M 测量 / Ctrl+M 静音", () => {
+test("预览的两个快捷键不与画布的撞：Ctrl+Shift+D 对比 / Ctrl+D 原地复制 / Shift+D 复制并保留输入，M 测量 / Ctrl+M 静音", () => {
   const key = (k, ctrlKey, shiftKey = false) => ({ key: k, ctrlKey, metaKey: false, shiftKey, altKey: false });
-  const got = [key("D", true, true), key("d", true), key("m", false), key("m", true)].map((e) => matchShortcut(e)?.id);
-  assert.deepEqual(got, ["compare", "duplicate", "measure", "mute"]);
+  const got = [key("D", true, true), key("d", true), key("D", false, true), key("m", false), key("m", true)].map((e) => matchShortcut(e)?.id);
+  assert.deepEqual(got, ["compare", "duplicate", "duplicateWired", "measure", "mute"]);
 });
 
 test("toggle：以当前节点进入，已有结果就冻住；再按一次退出", () => {

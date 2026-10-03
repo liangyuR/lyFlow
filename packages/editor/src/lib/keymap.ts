@@ -52,6 +52,14 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: "cut", keys: ["Ctrl+X"], label: "剪切", scope: "canvas", group: "编辑" },
   { id: "paste", keys: ["Ctrl+V"], label: "粘贴", scope: "canvas", group: "编辑" },
   { id: "duplicate", keys: ["Ctrl+D"], label: "原地复制", scope: "canvas", group: "编辑" },
+  // 输入框里 Shift+D 是打一个大写 D：不在输入框里响应
+  {
+    id: "duplicateWired",
+    keys: ["Shift+D"],
+    label: "复制并保留输入（副本接同一个上游，并排调两组参数）",
+    scope: "canvas",
+    group: "编辑",
+  },
   { id: "selectAll", keys: ["Ctrl+A"], label: "全选", scope: "canvas", group: "编辑" },
   { id: "delete", keys: ["Delete"], label: "删除选中", scope: "canvas", group: "编辑" },
   { id: "deleteHeal", keys: ["Ctrl+Delete"], label: "删除选中的节点并接通上下游", scope: "canvas", group: "编辑" },

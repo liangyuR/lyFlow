@@ -287,6 +287,8 @@ function promoteInDraft(
 
 export interface PasteResult {
   nodeIds: string[];
+  /** 原件 id → 副本 id（粘贴时剪贴板里的 id → 新 id）。 */
+  idMap: ReadonlyMap<string, string>;
 }
 
 /** 拖入节点 / 插入片段之后自动连线的结果（m8-plan L13 / L14）。 */
@@ -363,8 +365,9 @@ interface GraphState {
   insertOnEdge(edgeId: string, nodeId: string, inPort: string, outPort: string): boolean;
   /** 自动布局的落点。整段算一条撤销记录（E8）。 */
   applyLayout(moves: readonly { id: string; position: { x: number; y: number } }[]): void;
-  /** 原地复制选中节点（Ctrl+D）。 */
-  duplicateNodes(ids: readonly string[]): PasteResult;
+  /** 原地复制选中节点（Ctrl+D）。keepInputs：副本的输入接到原件的同一个上游、输出空着（Shift+D，并排调两组参数比一比）；
+   *  在子图里，从子图入口进来的那几条（不是边，是 inputs[].to）也接上。一条撤销。 */
+  duplicateNodes(ids: readonly string[], opts?: { keepInputs?: boolean }): PasteResult;
   /** 把 C++ 给的迁移动作写回 doc（ADR-0008）。返回真正改动的节点数。 */
   applyMigrations(actions: readonly MigrationAction[]): number;
 
@@ -702,6 +705,13 @@ export const useGraphStore = create<GraphState>((set, get) => {
         lvl.nodes = lvl.nodes.filter((n) => !kill.has(n.id));
         // 删节点自动清理相连边（交互清单 P0 #5）
         lvl.edges = lvl.edges.filter((e) => !kill.has(e.from.node) && !kill.has(e.to.node));
+        // 子图里：子图入口接到被删节点上的那几条（inputs[].to）也摘掉，以前留着，下次运行 core 报 unknown_port
+        if (lvl !== d) {
+          for (const input of (lvl as SubgraphDef).inputs ?? []) {
+            const kept = input.to.filter((t) => !kill.has(t.node));
+            if (kept.length !== input.to.length) input.to = kept;
+          }
+        }
         // 顶层图参数指着被删节点的 bind 一并摘掉，否则存下来就是一条 unknown_bind。
         // 图参数本身留着（可能还绑着别人，也可能用户马上要重新绑）
         if (lvl === d && d.params) {
@@ -879,14 +889,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
           };
         });
 
-      if (newNodes.length === 0) return { nodeIds: [] };
+      if (newNodes.length === 0) return { nodeIds: [], idMap };
 
       transact(newNodes.length === 1 ? "粘贴节点" : `粘贴 ${newNodes.length} 个节点`, (d) => {
         const lvl = level(d);
         lvl.nodes.push(...newNodes);
         lvl.edges.push(...newEdges);
       });
-      return { nodeIds: newNodes.map((n) => n.id) };
+      return { nodeIds: newNodes.map((n) => n.id), idMap };
     },
 
     setBypass(ids, value) {
@@ -975,8 +985,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
       });
     },
 
-    duplicateNodes(ids) {
-      if (ids.length === 0) return { nodeIds: [] };
+    duplicateNodes(ids, opts) {
+      if (ids.length === 0) return { nodeIds: [], idMap: new Map() };
       const { doc } = get();
       const lvl = level(doc);
       const kept = new Set(ids);
@@ -988,7 +998,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         ctx(doc).operatorsById,
         currentOverrides(),
       );
-      if (nodes.length === 0) return { nodeIds: [] };
+      if (nodes.length === 0) return { nodeIds: [], idMap: new Map() };
       const edges = lvl.edges.filter((e) => kept.has(e.from.node) && kept.has(e.to.node));
       const origin = nodes.reduce(
         (acc, n) => ({
@@ -998,10 +1008,34 @@ export const useGraphStore = create<GraphState>((set, get) => {
         { x: Infinity, y: Infinity },
       );
       // 偏移一点，否则复制出来的节点完全盖在原件上，用户以为什么都没发生
-      return get().pasteNodes(
-        { nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) },
-        { x: (Number.isFinite(origin.x) ? origin.x : 0) + 40, y: (Number.isFinite(origin.y) ? origin.y : 0) + 40 },
-      );
+      const paste = () =>
+        get().pasteNodes(
+          { nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) },
+          { x: (Number.isFinite(origin.x) ? origin.x : 0) + 40, y: (Number.isFinite(origin.y) ? origin.y : 0) + 40 },
+        );
+      if (!opts?.keepInputs) return paste();
+      const label = nodes.length === 1 ? "复制并保留输入" : `复制 ${nodes.length} 个节点并保留输入`;
+      return get().batch(label, () => {
+        const made = paste();
+        // 从选区外面进来的边：副本也接一条（选区里面的连线 pasteNodes 已经照着复制了）
+        for (const e of lvl.edges) {
+          const copy = made.idMap.get(e.to.node);
+          if (copy && !made.idMap.has(e.from.node)) get().connect(e.from, { node: copy, port: e.to.port });
+        }
+        // 在子图里：从子图入口进来的那几条不是边，是 inputs[].to，副本的端口也加进去
+        transact(label, (d) => {
+          const def = level(d);
+          if (def === d) return;
+          for (const input of (def as SubgraphDef).inputs ?? []) {
+            const extra = input.to.flatMap((t) => {
+              const copy = made.idMap.get(t.node);
+              return copy ? [{ node: copy, port: t.port }] : [];
+            });
+            if (extra.length > 0) input.to.push(...extra);
+          }
+        });
+        return made;
+      });
     },
 
     applyMigrations(actions) {

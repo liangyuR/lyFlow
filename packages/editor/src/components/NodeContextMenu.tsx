@@ -166,6 +166,18 @@ export function NodeContextMenu({
       </button>
       <button
         type="button"
+        data-testid="ctx-duplicate-wired"
+        title="副本的输入接到同一个上游、输出空着：并排调两组参数比一比"
+        onClick={() => {
+          const made = useGraphStore.getState().duplicateNodes(menuTargets(), { keepInputs: true });
+          if (made.nodeIds.length > 0) useUiStore.getState().setSelection(made.nodeIds, []);
+          onClose();
+        }}
+      >
+        复制并保留输入 <kbd>{keyHint("duplicateWired")}</kbd>
+      </button>
+      <button
+        type="button"
         data-testid="ctx-disconnect"
         disabled={!view.edges.some((e) => menuTargets().includes(e.from.node) || menuTargets().includes(e.to.node))}
         onClick={() => {

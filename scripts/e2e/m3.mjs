@@ -1511,6 +1511,34 @@ async function suiteEditing(cdp, report) {
     const del = await graphState();
     await pressCtrl(cdp, "z");
     await sleep(200);
+    // Shift+D / 右键「复制并保留输入」：副本接着 gen 的输出、自己的输出空着（并排调两组参数）
+    const wired = () => cdp.eval(`
+      const g = window.__lyflow.stores.graph.getState();
+      const sel = [...window.__lyflow.stores.ui.getState().selectedNodes];
+      const copy = sel.length === 1 && sel[0] !== ${lit(ids.voxel)} ? sel[0] : null;
+      const into = g.doc.edges.filter((e) => e.to.node === copy);
+      return { copy: copy !== null, into: into.map((e) => e.from.node + '.' + e.from.port + '>' + e.to.port),
+               out: g.doc.edges.filter((e) => e.from.node === copy).length,
+               drawn: into.length > 0 && into.every((e) => !!document.querySelector('.react-flow__edge[data-id="' + e.id + '"]')),
+               steps: g.past.length - ${s0.past} };
+    `);
+    await clickAt(cdp, await head(ids.voxel));
+    await sleep(150);
+    await pressKey(cdp, "D", 68, ["shift"]);
+    await sleep(250);
+    const byKey = await wired();
+    await pressCtrl(cdp, "z");
+    await sleep(200);
+    const undone = (await graphState()).nodes === s0.nodes;
+    await rightClickOn(ids.voxel);
+    await pick("ctx-duplicate-wired");
+    await sleep(100);
+    const byMenu = await wired();
+    await pressCtrl(cdp, "z");
+    await sleep(200);
+    const wiredWant = { copy: true, into: [`${ids.gen}.cloud>cloud`], out: 0, drawn: true, steps: 1 };
+    report.eq("Shift+D 与右键「复制并保留输入」：副本接着 gen 的输出、自己的输出空着、画出了那条线、各一条撤销",
+      { byKey, undone, byMenu }, { byKey: wiredWant, undone: true, byMenu: wiredWant });
     // 混选（两个合成点云 + 体素）：检查器里点「2 × 合成点云」→ 只留它们，一起改参数的表单出来
     await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}, ${lit(twin)}, ${lit(ids.voxel)}], []); return true;`);
     await sleep(200);

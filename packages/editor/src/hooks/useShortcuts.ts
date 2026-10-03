@@ -199,10 +199,11 @@ export function useShortcuts(
           // 会弹一个「想要查看剪贴板」的框，没人点就一直挂着。放这次按键过去，浏览器自己发 paste 事件，
           // 剪贴板的内容就在事件里（onPaste）
           return;
-        case "duplicate": {
+        case "duplicate":
+        case "duplicateWired": {
           if (ui.selectedNodes.size === 0) return;
           e.preventDefault();
-          const result = graph.duplicateNodes([...ui.selectedNodes]);
+          const result = graph.duplicateNodes([...ui.selectedNodes], { keepInputs: hit.id === "duplicateWired" });
           if (result.nodeIds.length > 0) ui.setSelection(result.nodeIds, []);
           return;
         }
