@@ -11,6 +11,8 @@ import {
   restoreUntitled,
   untitledBackupPath,
 } from "../src/lib/autosave.ts";
+import { settleModal, useModalStore } from "../src/lib/modal.ts";
+import { resolveUnsaved } from "../src/lib/unsaved.ts";
 import { useGraphStore } from "../src/store/graph.ts";
 import { useManifestStore } from "../src/store/manifest.ts";
 import { setTransport } from "../src/transport/index.ts";
@@ -134,4 +136,31 @@ test("markUnsaved：从 `<file>~` 恢复出来的图保留路径、算没保存"
   g().markUnsaved();
   assert.equal(g().dirty, true);
   assert.equal(g().filePath, "g.lyflow.json");
+});
+
+test("有没存的改动时问「保存 / 不保存 / 取消」：存成了或不保存才接着做；另存为取消了等于取消", async () => {
+  const cases = [
+    // [说明, 点了哪个（null = Esc）, 保存的结果, 期望能接着做, 期望调了保存]
+    ["保存、存成了", "save", true, true, true],
+    ["保存、另存为对话框取消了（或写盘出错）", "save", false, false, true],
+    ["不保存", "discard", true, true, false],
+    ["取消", "cancel", true, false, false],
+    ["Esc", null, true, false, false],
+  ];
+  for (const [name, choice, saved, want, wantSave] of cases) {
+    useGraphStore.setState({ dirty: true });
+    let calls = 0;
+    const pending = resolveUnsaved("新建", async () => {
+      calls += 1;
+      return saved;
+    });
+    const modal = useModalStore.getState().current;
+    assert.deepEqual(modal?.choices.map((c) => c.id), ["save", "discard", "cancel"], `${name}：保存排第一（默认拿焦点）`);
+    assert.match(modal.message, /这张图有改动还没保存。新建之前/, name);
+    settleModal(choice);
+    assert.deepEqual([await pending, calls === 1], [want, wantSave], name);
+  }
+  useGraphStore.setState({ dirty: false });
+  assert.equal(await resolveUnsaved("新建", async () => assert.fail("没有改动不该存")), true, "没有改动：不问、直接接着做");
+  assert.equal(useModalStore.getState().current, null);
 });

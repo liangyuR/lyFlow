@@ -29,9 +29,10 @@ const transport = inTauri() ? new TauriTransport() : new StaticTransport();
 
 ## 对话框归壳
 
-打开、另存、放弃改动、恢复备份、参数里的路径选择、3D 导出 PNG ——
-这六件事要弹系统对话框，编辑器包不认识 `@tauri-apps/plugin-dialog`，
-由 `src/dialogs.ts` 实现 `EditorDialogs` 注入进去。关窗口前那一问不经编辑器：窗口是壳的，`src/closeGuard.ts` 直接读包里的脏标记。
+打开、另存、恢复备份、参数里的路径选择、3D 导出 PNG ——
+这几件事要弹系统对话框，编辑器包不认识 `@tauri-apps/plugin-dialog`，
+由 `src/dialogs.ts` 实现 `EditorDialogs` 注入进去。有没存的改动时那一问（保存 / 不保存 / 取消）是编辑器自己画的；
+关窗口是壳的事，`src/closeGuard.ts` 拦下 ×，问的也是编辑器那一问（包里导出的 `resolveUnsaved`）。
 
 ## 验收
 

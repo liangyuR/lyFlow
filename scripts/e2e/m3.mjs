@@ -1850,11 +1850,53 @@ async function suitePanels(cdp, report, ws) {
   // 关窗口前问一句（app/src/closeGuard.ts）。原生对话框脚本点不了，tauri 的 invoke 也换不掉（只读属性），
   // 所以经 devbridge 换个对话框走一遍「要不要关」；监听装没装上、destroy 有没有权限另外查
   report.ok("关窗口前那一问装上了", await cdp.eval(`return window.__lyflow.shell.closeGuardInstalled();`));
-  const shouldClose = (answer) => cdp.eval(`return await window.__lyflow.shell.shouldClose(${lit(answer)});`);
-  report.eq("有没存的改动时点 ×：先问一句，选「取消」窗口不关", await shouldClose(false), { asked: true, close: false });
-  report.eq("选「关闭」才关", await shouldClose(true), { asked: true, close: true });
-  await cdp.eval(`const g = window.__lyflow.stores.graph.getState(); g.markSaved(g.filePath); return true;`);
-  report.eq("没有改动时点 × 直接关、不问", await shouldClose(false), { asked: false, close: true });
+  // 问的是编辑器画的「保存 / 不保存 / 取消」（lib/unsaved；以前是原生的「关闭 / 取消」，想保住改动只能先取消、存盘、再点 ×）。
+  // 真鼠标点对话框里的按钮
+  const savedSeed = () => JSON.parse(fs.readFileSync(graphPath, "utf8")).nodes.find((n) => n.id === ids.gen)?.params?.seed ?? null;
+  const pickChoice = async (choice) => {
+    const sel = `[data-testid="modal-choice-${choice}"]`;
+    await cdp.waitFor(`!!document.querySelector(${lit(sel)})`, { timeoutMs: 3000, what: "「保存 / 不保存 / 取消」弹出来" });
+    await clickAt(cdp, await centerOf(cdp, sel));
+  };
+  const shouldClose = async (choice) => {
+    await cdp.eval(`window.__lyClose = window.__lyflow.shell.shouldClose(); return true;`);
+    if (choice) await pickChoice(choice);
+    // 不该问却弹了对话框（没人去点）时别一直等：3 秒没结果就按 Esc 收掉，报出来
+    return cdp.eval(`
+      const r = await Promise.race([window.__lyClose, new Promise((d) => setTimeout(() => d(null), 3000))]);
+      if (r === null) {
+        document.querySelector('[data-testid="modal"]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        return { stuck: true, dirty: window.__lyflow.stores.graph.getState().dirty };
+      }
+      return { ...r, dirty: window.__lyflow.stores.graph.getState().dirty };
+    `);
+  };
+  const seedOnDisk = savedSeed();
+  mustOk(seedOnDisk !== 9, "文件里还是改之前的种子", seedOnDisk);
+  report.eq("有没存的改动时点 ×：问「保存 / 不保存 / 取消」，选「取消」窗口不关、改动还在", await shouldClose("cancel"),
+    { asked: true, close: false, dirty: true });
+  report.eq("选「不保存」：关，文件不动", { ...(await shouldClose("discard")), file: savedSeed() },
+    { asked: true, close: true, dirty: true, file: seedOnDisk });
+  report.eq("选「保存」：先存盘再关", { ...(await shouldClose("save")), file: savedSeed() },
+    { asked: true, close: true, dirty: false, file: 9 });
+  report.eq("没有改动时点 × 直接关、不问", await shouldClose(null), { asked: false, close: true, dirty: false });
+
+  // 工具栏「新建」同一问：取消 → 什么都不动；保存 → 先存盘再换成空图
+  await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.gen)}, 'seed', 11); return true;`);
+  const newBtn = '.toolbar button[title^="新建"]';
+  const docState = () => cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    return { nodes: g.doc.nodes.length, dirty: g.dirty, path: g.filePath };
+  `);
+  const beforeNew = await docState();
+  await clickAt(cdp, await centerOf(cdp, newBtn));
+  await pickChoice("cancel");
+  report.eq("改了参数点「新建」、选「取消」：图没换、改动还在", await docState(), beforeNew);
+  await clickAt(cdp, await centerOf(cdp, newBtn));
+  await pickChoice("save");
+  for (let i = 0; i < 25 && (await docState()).nodes !== 0; i += 1) await sleep(100);
+  report.eq("再点「新建」、选「保存」：文件里是改过的那份，换成了空图", { ...(await docState()), file: savedSeed() },
+    { nodes: 0, dirty: false, path: null, file: 11 });
   // 有监听时 tauri 不自己关、由 JS 来 destroy：壳得有这个权限，没有的话点 × 就再也关不掉。
   // 拿一个不存在的窗口名真调一次：权限不够是 ACL 先拒，够了才走到「找不到窗口」
   const destroyCheck = await cdp.eval(`

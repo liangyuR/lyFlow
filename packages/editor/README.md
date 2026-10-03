@@ -102,8 +102,9 @@ Static transport 只读。
 
 ## 对话框
 
-打开、另存、放弃改动、恢复备份这四件事要弹系统对话框，编辑器不知道怎么弹，
-由宿主注入：
+打开、另存、恢复备份这几件事要弹系统对话框，编辑器不知道怎么弹，
+由宿主注入（有没存的改动时那一问「保存 / 不保存 / 取消」是编辑器自己画的，`lib/unsaved.ts`，不经宿主；
+宿主关窗口前也可以调导出的 `resolveUnsaved("关闭窗口")`，桌面壳就是这么做的）：
 
 ```ts
 import type { EditorDialogs } from "@lyflow/editor";
@@ -111,7 +112,6 @@ import type { EditorDialogs } from "@lyflow/editor";
 const dialogs: EditorDialogs = {
   pickOpenPath: () => …,          // 返回 null 表示用户取消
   pickSavePath: (suggested) => …,
-  confirmDiscard: (dirty) => …,
   confirmRestore: (path, message) => …,
   pickPath: (req) => …,           // 可选：参数表单的路径选择、3D 导出 PNG
   pickRecipePath: (mode, name) => …, // 可选：配方的导入（open）/ 导出（save）

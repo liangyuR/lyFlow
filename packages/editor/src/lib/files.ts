@@ -16,12 +16,6 @@ export async function pickSavePath(suggested: string): Promise<string | null> {
   return dialogs().pickSavePath(suggested);
 }
 
-/** 有未保存改动时问一句。返回 true 表示可以继续。 */
-export async function confirmDiscard(dirty: boolean): Promise<boolean> {
-  if (!dirty) return true;
-  return dialogs().confirmDiscard(dirty);
-}
-
 export async function saveDocTo(path: string, doc: GraphDoc): Promise<void> {
   await transport.saveGraph(path, doc);
 }

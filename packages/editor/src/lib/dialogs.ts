@@ -19,8 +19,9 @@ export interface EditorDialogs {
   /** 返回 null 表示用户取消。 */
   pickOpenPath(): Promise<string | null>;
   pickSavePath(suggested: string): Promise<string | null>;
-  /** 有未保存改动时问一句。返回 true 表示可以继续。 */
-  confirmDiscard(dirty: boolean): Promise<boolean>;
+  /** 不再调用：有没存的改动时改成编辑器自己画的「保存 / 不保存 / 取消」（lib/unsaved）。
+   *  留着只为旧宿主的实现照样通过类型检查。 */
+  confirmDiscard?: ((dirty: boolean) => Promise<boolean>) | undefined;
   /** 备份比正文新时问一句。返回 true 表示用户要恢复。 */
   confirmRestore(path: string, message: string): Promise<boolean>;
   /** 可选：配方的导入（open）与导出（save）选文件（param-recipe P3.6）。不给就退回 pickPath，
@@ -34,10 +35,6 @@ export const browserDialogs: EditorDialogs = {
   },
   async pickSavePath() {
     throw new NoDialogError();
-  },
-  async confirmDiscard(dirty) {
-    if (!dirty) return true;
-    return window.confirm("当前图有未保存的改动，确定放弃吗？");
   },
   async confirmRestore(_path, message) {
     return window.confirm(message);

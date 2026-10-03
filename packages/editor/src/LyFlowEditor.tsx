@@ -25,19 +25,17 @@ import {
   untitledRestoreMessage,
 } from "./lib/autosave";
 import { dialogs } from "./lib/dialogs";
+import { saveCurrent } from "./lib/saveFlow";
+import { resolveUnsaved } from "./lib/unsaved";
 import {
   backupStatus,
   BACKUP_INTERVAL_MS,
-  confirmDiscard,
   confirmRestore,
   discardBackup,
   loadDocFrom,
   pickOpenPath,
-  pickSavePath,
   readBackup,
   rememberFile,
-  saveDocTo,
-  suggestFileName,
 } from "./lib/files";
 import { layoutGraph, needsInitialLayout } from "./lib/layout";
 import {
@@ -65,11 +63,9 @@ import { useGraphStore } from "./store/graph";
 import { useManifestStore } from "./store/manifest";
 import { recipesDirty, useRecipeStore } from "./store/recipe";
 import {
-  commitRecipeSave,
   discardRecipeAutosave,
   followGraphPath,
   loadRecipesFor,
-  prepareRecipeSave,
   restoreRecipeAutosave,
 } from "./store/recipeFiles";
 import { useUiStore } from "./store/ui";
@@ -304,35 +300,9 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   );
 
   // -- 文件操作 -------------------------------------------------------------
+  // 保存在 lib/saveFlow：「保存 / 不保存 / 取消」那一问选了保存，也走它
   const doSave = useCallback(async (forcePicker: boolean) => {
-    const graph = useGraphStore.getState();
-    const ui = useUiStore.getState();
-    try {
-      let path = graph.filePath;
-      const wasUntitled = !path;
-      if (!path || forcePicker) {
-        path = await pickSavePath(path ?? suggestFileName(graph.doc));
-        if (!path) return; // 用户取消
-      }
-      // 一次保存图与所有有改动的配方文件（K6 ③）。配方先查外部修改：用户选了取消，图也不存
-      const doc = graph.doc;
-      const recipes = await prepareRecipeSave(doc, path);
-      if (recipes === "cancelled") {
-        ui.showToast("已取消保存", "warn");
-        return;
-      }
-      await saveDocTo(path, doc);
-      // 记下的是真正写下去的那一份：撤销回到它时 dirty 复原（P1.6）
-      useGraphStore.getState().markSaved(path, doc);
-      if (recipes) await commitRecipeSave(recipes);
-      await rememberFile(path);
-      // 存过盘就没有「未保存的改动」了，备份留着只会在下次开图时误报
-      await discardBackup(path);
-      if (wasUntitled) await discardUntitledBackup();
-      ui.showToast("已保存");
-    } catch (e) {
-      ui.showToast(e instanceof Error ? e.message : String(e), "warn");
-    }
+    await saveCurrent(forcePicker);
   }, []);
 
   /** 打开一张图；被换掉的是没存过盘的那张时，它的备份也删掉（用户已经确认过放弃它）。 */
@@ -346,10 +316,9 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   );
 
   const doOpen = useCallback(async () => {
-    const graph = useGraphStore.getState();
     const ui = useUiStore.getState();
     try {
-      if (!(await confirmDiscard(graph.dirty || recipesDirty()))) return;
+      if (!(await resolveUnsaved("打开别的图"))) return;
       const path = await pickOpenPath();
       if (!path) return;
       await openUnlessCancelled(path);
@@ -360,15 +329,16 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
 
   const doOpenRecent = useCallback(
     async (path: string) => {
-      if (!(await confirmDiscard(useGraphStore.getState().dirty || recipesDirty()))) return;
+      if (!(await resolveUnsaved("打开别的图"))) return;
       await openUnlessCancelled(path);
     },
     [openUnlessCancelled],
   );
 
   const doNew = useCallback(async () => {
+    if (!(await resolveUnsaved("新建"))) return;
+    // 问过之后再取：选了保存，没存过盘的图这时已经有了路径
     const graph = useGraphStore.getState();
-    if (!(await confirmDiscard(graph.dirty || recipesDirty()))) return;
     if (!graph.filePath) void discardUntitledBackup();
     graph.newDoc();
     useUiStore.getState().clearSelection();

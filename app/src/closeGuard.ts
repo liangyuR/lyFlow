@@ -6,28 +6,27 @@
 // onCloseRequested 替我们 destroy —— 所以 capabilities 里要有 core:window:allow-destroy，
 // 少了它点 × 就再也关不掉（e2e m3 的 suitePanels 查着）。
 
-import { recipesDirty, useGraphStore } from "@lyflow/editor";
+//
+// 问的是编辑器画的「保存 / 不保存 / 取消」（@lyflow/editor 的 resolveUnsaved）：以前是原生的「关闭 / 取消」，
+// 想保住改动只能先取消、存盘、再点一次 ×。
 
-const MESSAGE = "当前图有未保存的改动，关闭窗口会丢掉它们。确定关闭吗？";
+import { recipesDirty, resolveUnsaved, useGraphStore } from "@lyflow/editor";
 
 /** 装上了没有（验收脚本经 devbridge 读）。 */
 export const closeGuard = { installed: false };
 
-/** 要不要关：没有没存的改动（图或配方）直接关；有就问，选「关闭」才关。
- *  单独拿出来，验收脚本经 devbridge 换个 ask 直接调 —— 原生对话框脚本点不了。 */
-export async function shouldClose(ask: (message: string) => Promise<boolean>): Promise<boolean> {
+/** 要不要关：没有没存的改动（图或配方）直接关；有就问，存成了或选了不保存才关。
+ *  decide 单独拿出来，验收脚本经 devbridge 知道问没问。 */
+export async function shouldClose(
+  decide: () => Promise<boolean> = () => resolveUnsaved("关闭窗口"),
+): Promise<boolean> {
   if (!useGraphStore.getState().dirty && !recipesDirty()) return true;
-  return ask(MESSAGE);
+  return decide();
 }
 
 export async function installCloseGuard(): Promise<void> {
   if (!("__TAURI_INTERNALS__" in window)) return;
-  const [{ getCurrentWindow }, { ask }] = await Promise.all([
-    import("@tauri-apps/api/window"),
-    import("@tauri-apps/plugin-dialog"),
-  ]);
-  const askNative = (message: string) =>
-    ask(message, { title: "LyFlow", kind: "warning", okLabel: "关闭", cancelLabel: "取消" });
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
   let asking = false;
   await getCurrentWindow().onCloseRequested(async (event) => {
     // 对话框还开着又点了一次 ×：不叠第二个框
@@ -37,7 +36,7 @@ export async function installCloseGuard(): Promise<void> {
     }
     asking = true;
     try {
-      if (!(await shouldClose(askNative))) event.preventDefault();
+      if (!(await shouldClose())) event.preventDefault();
     } finally {
       asking = false;
     }

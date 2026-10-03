@@ -31,6 +31,7 @@ import {
   findUntitledBackup,
   restoreUntitled,
   discardUntitledBackup,
+  resolveUnsaved,
   type RunRequest,
   type StateTransition,
   type Transport,
@@ -73,11 +74,11 @@ interface DevBridge {
     restoreUntitled(): Promise<boolean>;
     discardUntitled(): Promise<void>;
   };
-  /** 壳自己的东西。关窗口前那一问（closeGuard.ts）：装上了没有；换掉原生对话框（脚本点不了）
-   *  直接走一遍「要不要关」，`answer` 是对话框里点了哪个。 */
+  /** 壳自己的东西。关窗口前那一问（closeGuard.ts）：装上了没有；不点 × 直接走一遍「要不要关」——
+   *  弹的是编辑器里的「保存 / 不保存 / 取消」，脚本自己去点，等这个 Promise 拿结果。 */
   shell: {
     closeGuardInstalled(): boolean;
-    shouldClose(answer: boolean): Promise<{ asked: boolean; close: boolean }>;
+    shouldClose(): Promise<{ asked: boolean; close: boolean }>;
   };
   /** 立刻编译一次，不等 debounce。验收脚本不想为 150ms 睡一觉。 */
   plan(): Promise<void>;
@@ -166,11 +167,11 @@ export function installDevBridge(transport: Transport): void {
     },
     shell: {
       closeGuardInstalled: () => closeGuard.installed,
-      async shouldClose(answer) {
+      async shouldClose() {
         let asked = false;
-        const close = await shouldClose(async () => {
+        const close = await shouldClose(() => {
           asked = true;
-          return answer;
+          return resolveUnsaved("关闭窗口");
         });
         return { asked, close };
       },

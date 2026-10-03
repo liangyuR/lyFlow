@@ -31,14 +31,6 @@ export const tauriDialogs: EditorDialogs = {
     return typeof picked === "string" ? picked : null;
   },
 
-  async confirmDiscard(dirty: boolean) {
-    if (!dirty) return true;
-    const message = "当前图有未保存的改动，确定放弃吗？";
-    if (!inTauri()) return window.confirm(message);
-    const { ask } = await import("@tauri-apps/plugin-dialog");
-    return ask(message, { title: "LyFlow", kind: "warning" });
-  },
-
   async confirmRestore(_path: string, message: string) {
     if (!inTauri()) return window.confirm(message);
     const { ask } = await import("@tauri-apps/plugin-dialog");
