@@ -21,6 +21,7 @@ import {
   pressF5,
   replan,
   runAndWait,
+  select,
   selectAndReadViewer,
 } from "./page.mjs";
 
@@ -832,6 +833,29 @@ async function suiteMenu(cdp, report) {
   report.section("修订一 验收 19：右键三项 —— 运行到此 = 单击、强制重算此节点 = Shift+单击、仅此节点（用现有上游）");
   await installRecorder(cdp);
   const ids = await smallChain(cdp);
+
+  // 预览区的空态给下一步：没跑过的节点，预览里有「▶ 运行到此节点」，真鼠标点它 = 右键「运行到此」
+  await select(cdp, ids.b);
+  const empty = await cdp.eval(`
+    const t0 = performance.now();
+    while (performance.now() - t0 < 5000) {
+      const v = document.querySelector('.viewer');
+      const btn = v?.getAttribute('data-node') === ${lit(ids.b)} ? v.querySelector('[data-testid="viewer-run-here"]') : null;
+      if (btn) return { status: v.querySelector('[data-testid="viewer3d-status"]')?.textContent ?? null, text: btn.textContent };
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return null;
+  `);
+  report.ok("预览区：选中还没跑过的 b，写着没结果、给「▶ 运行到此节点」", empty !== null && empty.text === "▶ 运行到此节点" &&
+    ["未运行", "该节点尚未产出结果"].includes(empty.status), JSON.stringify(empty));
+  const here = await runAndWait(cdp, async () => click(cdp, await centerOf(cdp, '[data-testid="viewer-run-here"]')));
+  const s0 = await startedOf(cdp, here.runId);
+  const shown = await selectAndReadViewer(cdp, ids.b);
+  report.ok("点它：targets=[b]（与右键「运行到此」一致）、下游 c 不跑、预览里出了 b 的点云",
+    here.status === "ok" && s0 && JSON.stringify(s0.targets) === JSON.stringify([ids.b]) && here.nodes[ids.c]?.state !== "done" &&
+      shown.count > 0 && !shown.status,
+    JSON.stringify({ targets: s0?.targets, c: here.nodes[ids.c]?.state, shown }));
+
   const full = await runAndWait(cdp, () => pressF5(cdp));
   mustOk(full.status === "ok", "全图运行 ok", full.status);
   await sleep(200);

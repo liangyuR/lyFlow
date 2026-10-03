@@ -8,6 +8,8 @@ import { sleep } from "./cdp.mjs";
 import { launchApp, makeChineseWorkspace, Report, stagePackagedApp } from "./harness.mjs";
 import {
   buildGraph,
+  centerOf,
+  clickAt,
   lit,
   newDoc,
   pressEscape,
@@ -242,6 +244,45 @@ async function suiteBadParam(cdp, report, ids) {
   `);
   report.eq("画布上 voxel 节点是 error", domStates[ids.voxel], "error");
   report.eq("画布上 sor 节点是 cancelled", domStates[ids.sor], "cancelled");
+
+  // 预览区的空态给下一步：出错的写原文、给「定位到参数」；被连带没执行的说是谁出的错、给「定位到出错的节点」
+  const readEmpty = async (nodeId) => {
+    await select(cdp, nodeId);
+    for (let i = 0; i < 80; i += 1) {
+      const r = await cdp.eval(`
+        const v = document.querySelector('.viewer');
+        if (!v || v.getAttribute('data-node') !== ${lit(nodeId)}) return null;
+        const q = (id) => v.querySelector('[data-testid="' + id + '"]');
+        if (!q('viewer3d-status')) return null;
+        return {
+          status: q('viewer3d-status').textContent,
+          detail: q('viewer-status-detail')?.textContent ?? null,
+          revealError: q('viewer-reveal-error')?.textContent ?? null,
+          revealUpstream: !!q('viewer-reveal-upstream'),
+          runHere: !!q('viewer-run-here'),
+        };
+      `);
+      if (r) return r;
+      await sleep(100);
+    }
+    return null;
+  };
+  const onVoxel = await readEmpty(ids.voxel);
+  report.ok("预览区：出错的 voxel 写出错误原文、给「定位到参数 leafSize」、没有「运行到此」",
+    onVoxel?.status === "该节点运行出错" && onVoxel.detail === run.nodes[ids.voxel]?.errors?.[0]?.message &&
+      onVoxel.revealError === "定位到参数 leafSize" && !onVoxel.runHere, JSON.stringify(onVoxel));
+  const onSor = await readEmpty(ids.sor);
+  report.ok("预览区：被连带没执行的 sor 说是上游出错、点名 voxel、给「定位到出错的节点」",
+    onSor?.status === "上游节点出错，这个节点没有执行" && /^出错的是上游的「.+」$/.test(onSor.detail ?? "") &&
+      onSor.revealUpstream && !onSor.runHere, JSON.stringify(onSor));
+  // 真鼠标点「定位到出错的节点」：选中跳到 voxel，检查器标出 leafSize
+  await clickAt(cdp, await centerOf(cdp, '.viewer [data-testid="viewer-reveal-upstream"]'));
+  const located = await cdp.eval(`
+    const s = window.__lyflow.stores.ui.getState();
+    return { sel: [...s.selectedNodes], param: s.focusedDiagnostic?.paramPath ?? null };
+  `);
+  report.ok("点它：选中跳到 voxel、标出 leafSize", located.sel.length === 1 && located.sel[0] === ids.voxel &&
+    located.param === "leafSize", JSON.stringify(located));
 
   // 复原，后面的分组还要用这张图
   await cdp.eval(`

@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { matchShortcut } from "../src/lib/keymap.ts";
 import { listGraphNodes, searchGraphNodes } from "../src/lib/findNodes.ts";
-import { errorNodeIds, revealError } from "../src/lib/revealError.ts";
+import { errorNodeIds, failedUpstream, revealError, revealNodeError } from "../src/lib/revealError.ts";
 import { describeEventNode, locateEventNode } from "../src/lib/subgraph.ts";
 import { useGraphStore } from "../src/store/graph.ts";
 import { useManifestStore } from "../src/store/manifest.ts";
@@ -215,6 +215,24 @@ test("在出错的节点之间跳：第一个是根因，F8 往后、Shift+F8 �
   assert.deepEqual(at(), ["a", "v", "leafSize"], "到头绕回");
   revealError(-1);
   assert.deepEqual(at(), ["", "top", "leafSize"], "往前");
+  // 预览区空态的「定位到出错的地方」：子图节点打开到里面出错的那个
+  assert.equal(revealNodeError([], "a"), true);
+  assert.deepEqual(at(), ["a", "v", "leafSize"], "子图节点的错误：打开到里面那个");
+
+  // 被连带没执行的节点是因为谁：沿入边往上找最近的出错节点（l → m → n，旁支 k → n）
+  const chain = { edges: [
+    { from: { node: "l", port: "o" }, to: { node: "m", port: "i" } },
+    { from: { node: "m", port: "o" }, to: { node: "n", port: "i" } },
+    { from: { node: "k", port: "o" }, to: { node: "n", port: "j" } },
+  ] };
+  for (const [states, want, why] of [
+    [{ l: "error", m: "cancelled" }, "l", "隔一层的根因"],
+    [{ l: "error", m: "error" }, "m", "两个都错：取最近的"],
+    [{ l: "done", m: "cancelled", k: "error" }, "k", "旁支上的"],
+    [{ l: "done", m: "cancelled" }, null, "这一层里找不到（根因在外面）"],
+  ]) {
+    assert.equal(failedUpstream(chain, "n", (id) => states[id]), want, why);
+  }
 
   useExecutionStore.setState({ nodes: new Map() });
   assert.equal(revealError(1), false, "没有出错的节点：什么都不做");

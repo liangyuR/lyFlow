@@ -80,6 +80,10 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: Vie
   const liveState = useExecutionStore((s) =>
     path && nodeId ? aggregatedNodes(path, s.nodes).get(nodeId)?.state : undefined,
   );
+  // 被上游连带取消的（upstream_failed）与出错一样盖住画面：结果已经作废，不是「还在算」
+  const liveCode = useExecutionStore((s) =>
+    path && nodeId ? aggregatedNodes(path, s.nodes).get(nodeId)?.errors[0]?.code : undefined,
+  );
   // 叠画用的非点云输出（G7）。stats 是事件里那一份，引用稳定，不会每帧新建。
   const liveOutputs = useExecutionStore((s) =>
     path && nodeId ? aggregatedNodes(path, s.nodes).get(nodeId)?.stats?.outputs : undefined,
@@ -147,6 +151,11 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: Vie
     if (liveState === "error") {
       setLoading(false);
       show("该节点运行出错");
+      return;
+    }
+    if (liveState === "cancelled" && liveCode === "upstream_failed") {
+      setLoading(false);
+      show("上游节点出错，这个节点没有执行");
       return;
     }
     if (liveState !== "done" && liveState !== "skipped") {
@@ -224,7 +233,7 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: Vie
       cancelled = true;
     };
     // 依赖的是「还没运行」这个布尔值而不是 runStatus 本身：running → ok 不该让取数重来一遍
-  }, [frozen, node, nodeId, idleText, runId, notRun, liveState, maxPoints, doc, path,
+  }, [frozen, node, nodeId, idleText, runId, notRun, liveState, liveCode, maxPoints, doc, path,
       isPreview, previewMaxPoints, ops, bundles, liveOutputs, content]);
 
   const frozenDisplay = useMemo<Display | null>(

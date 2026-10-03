@@ -42,6 +42,7 @@ import { decodeCloud, type CloudPayload, type OutputStat } from "../types/execut
 import { CompareDiff } from "./CompareDiff";
 import { CompareStage } from "./CompareStage";
 import { ImagePane } from "./ImagePane";
+import { ViewerStatus } from "./ViewerStatus";
 import { MeasureReadout } from "./MeasureReadout";
 import { RoiLayer, type RoiItem } from "./RoiLayer";
 import { ValuePane } from "./ValuePane";
@@ -132,7 +133,7 @@ function nodeLabel(src: ViewerSource, fallback: string | null): string {
   return src.node?.ui?.title ?? src.op?.label ?? src.node?.id ?? fallback ?? "";
 }
 
-export function Viewer3D() {
+export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => void) | undefined } = {}) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<Scene | null>(null);
 
@@ -959,6 +960,7 @@ export function Viewer3D() {
             status={display.status}
             nodeState={source.state}
             outputs={activeOutputs}
+            onRunToNode={onRunToNode}
           />
         )}
         {roiEditing && activeNode && (
@@ -966,13 +968,13 @@ export function Viewer3D() {
         )}
         {!compareOn && !(content === "image" && activeNode && activeOp && roiNode) && (display.status || loading || (roiEditing && backdrop.error)) && (
           // 拖框时底图（模板）已经画出来了，状态只缩在角上，不盖住画面。底图取不到的原因也在这里说
-          <div
-            className={`viewer__empty${roiEditing || display.busy ? " viewer__empty--corner" : ""}`}
-            data-testid="viewer3d-status"
-          >
-            {/* 拖框时底图取不到的原因比「未运行」有用：它说的是要先跑哪一段 */}
-            {loading ? "正在取点云…" : roiEditing && backdrop.error ? backdrop.error : display.status}
-          </div>
+          // （它比「未运行」有用：说的是要先跑哪一段）。说的是节点运行状态时跟着给下一步（运行到此、定位出错处）
+          <ViewerStatus
+            corner={roiEditing || !!display.busy}
+            text={loading ? "正在取点云…" : roiEditing && backdrop.error ? backdrop.error : (display.status ?? "")}
+            nodeId={activeNode && !loading && !(roiEditing && backdrop.error) ? display.nodeId : null}
+            onRunToNode={onRunToNode}
+          />
         )}
         {measureOn && (
           <MeasureReadout

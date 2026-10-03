@@ -594,7 +594,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
             ref={layout.viewerBox}
             style={layout.viewer.fraction !== null ? { flexBasis: `${layout.viewer.fraction * 100}%` } : undefined}
           >
-            <Viewer3D />
+            <Viewer3D onRunToNode={handlers.onRunToNode} />
           </div>
           {layout.viewer.shown && (
             <div
