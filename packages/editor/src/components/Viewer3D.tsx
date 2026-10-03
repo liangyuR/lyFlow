@@ -1086,8 +1086,15 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
             nodeId={activeNode.id}
             items={roiItems}
             // 有底图数底图的点，没有（框在数据坐标系里）数画面上这片云的
+            // 框在模板坐标系（有底图）就只数底图的：底图正在重取、取不到时不写，不拿数据坐标系的云去数
             countIn={(rect) =>
-              backdrop.count > 0 ? countInRect(backdropXyz.current, rect) : cloud ? countInRect(cloud.xyz, rect) : null
+              backdropKey
+                ? backdropXyz.current
+                  ? countInRect(backdropXyz.current, rect)
+                  : null
+                : cloud
+                  ? countInRect(cloud.xyz, rect)
+                  : null
             }
           />
         )}

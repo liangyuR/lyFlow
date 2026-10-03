@@ -180,6 +180,21 @@ function dropStaged(): void {
   latestSeq = -1;
 }
 
+/** 判定（NG / 边界 / ok）看的节点表。拖参数的预览运行（抽稀的）、节点表还不是这一次的（带 targets 的运行开跑前，
+ *  可能还是预览那次的）、松手自动补的那一次还在跑：都留着上一次正式运行的。工具栏的计数与查找节点的 is:ng 看同一份，
+ *  不然点「NG 1」列出来的是另一回事。 */
+let judgedNodes: ReadonlyMap<string, NodeExecution> = new Map();
+
+export function judgedNodesOf(s: Pick<ExecutionState, "nodes" | "preview" | "runId" | "resultRunId" | "runStatus" | "request">) {
+  const hold = s.preview || s.resultRunId !== s.runId || (s.runStatus === "running" && s.request?.auto === true);
+  if (!hold) judgedNodes = s.nodes;
+  return judgedNodes;
+}
+
+export function useJudgedNodes(): ReadonlyMap<string, NodeExecution> {
+  return useExecutionStore(judgedNodesOf);
+}
+
 export const useExecutionStore = create<ExecutionState>((set, get) => ({
   runId: null,
   resultRunId: null,
@@ -709,7 +724,8 @@ export async function startRun(
     });
     if (ticket !== runTicket) return; // 已经有更晚的一次运行发起了，这次的回复作废
     // 调参记录：交给 core 的就是这份图与这组图参数（预览、单节点运行不记）
-    useRunHistoryStore.getState().begin(runId, doc, params, useRecipeStore.getState().current, request);
+    const recipes = useRecipeStore.getState();
+    useRunHistoryStore.getState().begin(runId, doc, params, recipes.current, request, recipes.currentId);
     // 给了 isolate 时 core 的 targets 就是同一组（R1），这边也照这个记
     store.beginRun(runId, isolate.length > 0 ? isolate : (request.targets ?? []), preview, isolate, request);
   } catch (e) {

@@ -7,11 +7,11 @@ import { historyRows, jumpHistory, stepHistory } from "../lib/history";
 import { keyHint } from "../lib/keymap";
 import { revealError } from "../lib/revealError";
 import { cleanPathText } from "../lib/params";
-import { verdictTally, verdictTone, type VerdictTally } from "../lib/outputs";
+import { verdictTally, verdictTone } from "../lib/outputs";
 import { runReadingsOf } from "../lib/runHistory";
-import { augmentOperators, describeEventNode } from "../lib/subgraph";
+import { augmentOperators, describeEventNode, fullId, levelOf, locateEventNode } from "../lib/subgraph";
 import { useCacheStore } from "../store/cache";
-import { runControlsOf, summarize, useExecutionStore } from "../store/execution";
+import { runControlsOf, summarize, useExecutionStore, useJudgedNodes } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useRecipeStore, useRecipesDirty } from "../store/recipe";
@@ -502,25 +502,29 @@ function RunControls({ onRun, onRerun, onCancel }: { onRun: () => void; onRerun:
  *  点 NG / 边界 打开查找节点（is:ng / is:margin），回车打开到它、Alt+Enter 选上这一层的。拖参数的预览运行不算 ——
  *  那是抽稀的，留着上一次正式运行的计数，不跟着一闪一闪。 */
 function VerdictTallyChips() {
-  const nodes = useExecutionStore((s) => s.nodes);
-  const preview = useExecutionStore((s) => s.preview);
+  // 拖参数的预览、松手自动补的那一次还在跑：看的是上一次正式运行的节点表（与查找节点的 is:ng 同一份）
+  const nodes = useJudgedNodes();
   const doc = useGraphStore((s) => s.doc);
   const baseOps = useManifestStore((s) => s.operatorsById);
-  const last = useRef<{ tally: VerdictTally; ng: string[] } | null>(null);
-  const now = useMemo(() => {
-    if (preview) return null;
+  const { tally, ng } = useMemo(() => {
     const readings = runReadingsOf(nodes);
-    if (readings.length === 0) return { tally: verdictTally([]), ng: [] };
+    if (readings.length === 0) return { tally: verdictTally([]), ng: [] as string[] };
     const ops = augmentOperators(baseOps, doc.subgraphs);
     const ng = readings
       .filter((r) => verdictTone(r.verdict) === "ng")
       .map((r) => `${describeEventNode(doc, ops, r.id).names.join(" › ")}.${r.port}`);
-    return { tally: verdictTally(readings), ng };
-  }, [nodes, preview, doc, baseOps]);
-  if (now) last.current = now;
-  const shown = now ?? last.current;
-  if (!shown) return null;
-  const { tally, ng } = shown;
+    // 没测出来、但接着的判定节点判了的（量测 → gap.judge）：判定那边已经记成 NG，这一个不再算一次「未测出」
+    const judged = new Set(readings.filter((r) => r.verdict).map((r) => r.id));
+    const feedsJudge = (r: { id: string; port: string }) => {
+      const at = locateEventNode(doc, r.id);
+      if (!at || fullId(at.path, at.localId) !== r.id) return false;
+      return levelOf(doc, at.path).edges.some(
+        (e) => e.from.node === at.localId && e.from.port === r.port && judged.has(fullId(at.path, e.to.node)),
+      );
+    };
+    const counted = readings.filter((r) => r.value !== null || r.verdict || !feedsJudge(r));
+    return { tally: verdictTally(counted), ng };
+  }, [nodes, doc, baseOps]);
   if (tally.ng + tally.margin + tally.ok + tally.unmeasured === 0) return null;
   const open = (seed: string) => useUiStore.getState().setFinderOpen(true, seed);
   return (

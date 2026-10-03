@@ -24,6 +24,7 @@ interface RunHistoryState {
     params: Readonly<Record<string, unknown>> | undefined,
     recipe: string | null,
     request: RunRequest,
+    recipeId?: string | null,
   ): void;
   /** run_started 的计划（完整 id）：运行到某个节点时只有这些是这一次算的，读数只记它们。 */
   planned(runId: string, plan: readonly string[]): void;
@@ -43,7 +44,7 @@ export const useRunHistoryStore = create<RunHistoryState>((set, get) => ({
     if (runId !== null && !get().records.some((r) => r.runId === runId)) return;
     set({ baseline: runId });
   },
-  begin(runId, doc, params, recipe, request) {
+  begin(runId, doc, params, recipe, request, recipeId = null) {
     // 被这一次顶掉的（抢占、排队时被取消）收不到自己的收场：还挂着「运行中」的记成取消 —— 预览、单节点运行也会顶掉它
     const prev = get().records;
     const settled = prev.some((r) => r.status === "running")
@@ -62,6 +63,7 @@ export const useRunHistoryStore = create<RunHistoryState>((set, get) => ({
       doc,
       params,
       recipe,
+      recipeId,
       targets: request.targets ?? [],
       status: "running",
       durationMs: null,

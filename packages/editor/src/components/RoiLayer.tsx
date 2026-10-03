@@ -221,10 +221,13 @@ export function RoiLayer({
       if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
       if (host) host.controls.enabled = true;
       useGraphStore.getState().commit(`拖动 ${d.label}`);
-      // 拖完松手：这个节点跑过（有结果可看）且开着自动运行就补一次运行。从空白开始拼图、框还没画齐时不跑
+      // 拖完松手：这个节点跑过（有结果可看），或者正在跑的那一次里排着它（开跑时排着的节点先回到 idle），且开着自动运行，
+      // 就补一次运行。这一组还有没设置的框不跑（core 的校验必然拒掉，只会多一次红的运行）；从空白开始拼、没跑过也不跑
       const ui = useUiStore.getState();
-      const ran = aggregatedNodes(ui.path, useExecutionStore.getState().nodes).get(nodeId)?.state;
-      if (d.moved && ran && ran !== "idle") runAfterDrag(nodeId);
+      const exec = useExecutionStore.getState();
+      const ran = aggregatedNodes(ui.path, exec.nodes).get(nodeId)?.state;
+      const complete = !itemsRef.current.some((i) => isDegenerate(i.value));
+      if (d.moved && complete && ((ran && ran !== "idle") || exec.runStatus === "running")) runAfterDrag(nodeId);
     },
     [host, nodeId],
   );

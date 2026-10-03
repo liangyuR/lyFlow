@@ -484,6 +484,27 @@ test("合成子图 / 解散子图：被绑定的参数跟着搬，bind 不悬空
   g().undo();
   g().undo();
   assert.deepEqual(doc().outputs[floor], { node: plane.id, port: "inliers" }, "Ctrl+Z 回来");
+
+  // 子图定义里改：两个实例上标的输出都跟着走（levelKeyOf 取的是定义 id）
+  reset();
+  const o1 = g().markGraphOutput({ node: "n_clean/s_sor", port: "cloud" }, "o1");
+  const o2 = g().markGraphOutput({ node: "n_clean2/s_sor", port: "cloud" }, "o2");
+  inClean();
+  const c = g().composeSubgraph(["s_sor"]);
+  assert.deepEqual([doc().outputs[o1].node, doc().outputs[o2].node], [`n_clean/${c.nodeId}/s_sor`, `n_clean2/${c.nodeId}/s_sor`], "子图里合成：两个实例都多一层");
+  const [sor] = g().dissolveSubgraph(c.nodeId);
+  assert.deepEqual([doc().outputs[o1].node, doc().outputs[o2].node], [`n_clean/${sor}`, `n_clean2/${sor}`], "子图里解散：两个实例都少一层");
+  assert.deepEqual(g().deleteNodes([sor]).sort(), [o1, o2].sort(), "子图里删：两个实例上的都删");
+  useUiStore.getState().setPath([]);
+
+  // 顶层解散共用定义的一个实例：另一个实例里的不动
+  reset();
+  const ia = g().markGraphOutput({ node: "n_clean/s_sor", port: "cloud" }, "ia");
+  const ib = g().markGraphOutput({ node: "n_clean2/s_sor", port: "cloud" }, "ib");
+  const inl = g().dissolveSubgraph("n_clean");
+  const sorAt = doc().subgraphs.sg_clean.nodes.findIndex((n) => n.id === "s_sor");
+  assert.deepEqual([doc().outputs[ia], doc().outputs[ib]], [{ node: inl[sorAt], port: "cloud" }, { node: "n_clean2/s_sor", port: "cloud" }],
+    "解散 n_clean：它里面的改指到内联出来的节点，n_clean2 里的不动");
 });
 
 test("库算子展开为内联子图：定义换新 id 写进 doc，op 换成 sub:，参数与连线不动；不是库算子不改；一次撤销还原", () => {
@@ -671,6 +692,15 @@ test("恢复某次运行的参数（调参记录）：节点参数、静音、�
   selectRecipe(null);
   assert.equal(g().restoreParams(night.doc, "恢复", { params: night.params, recipe: night.recipe }).changed, 0,
     "现在选着基础、那次是夜班：配方不动（doc 本来就一样）");
+  // 配方改了名（按 id 认）：照样改回去；基础值与配方里的值都要改回去时也只算一处
+  selectRecipe("夜班");
+  const nightId = useRecipeStore.getState().currentId;
+  g().renameRecipe("夜班", "夜班2");
+  g().setGraphParamDefault("planeTol", 0.02);
+  g().editGraphParamValue("planeTol", 0.03);
+  const r5 = g().restoreParams(night.doc, "恢复", { params: night.params, recipe: "夜班", recipeId: nightId });
+  assert.deepEqual([r5.changed, runParamsOf(doc()).planeTol, doc().params.planeTol.default], [1, 0.01, 0.006],
+    "改了名还是那个配方：0.03 改回 0.01、基础 0.02 改回 0.006，算一处");
   resetRecipes(null, "none");
 });
 

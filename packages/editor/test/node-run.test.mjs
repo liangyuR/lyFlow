@@ -69,6 +69,10 @@ test("closureOf：沿连线往上 / 往下走到头，含起点，按文档顺�
   const { graphParamPreviewId, previewTargetsOf } = await import("../src/lib/preview.ts");
   assert.deepEqual(previewTargetsOf(gdoc, [], graphParamPreviewId("t"), [{ path: [], nodeId: "m" }]), ["g", "m", "S"]);
   assert.deepEqual(previewTargetsOf(gdoc, inS, graphParamPreviewId("t"), []), ["g", "S"], "当前层在子图里也按顶层节点算");
+  assert.deepEqual(previewTargetsOf(gdoc, inS, graphParamPreviewId("t"), [{ path: inS, nodeId: "q" }]), ["g", "S", "S/q"],
+    "进了子图、看着里面的 q：包着它的 S 在下游，q 一起算");
+  assert.deepEqual(previewTargetsOf({ ...gdoc, params: { only: { binds: ["m.y"] } } }, inS, graphParamPreviewId("only"), [{ path: inS, nodeId: "q" }]),
+    ["m"], "S 不在下游：不带");
   assert.deepEqual(previewTargetsOf(gdoc, [], graphParamPreviewId("idle"), []), []);
   assert.deepEqual(previewTargetsOf(gdoc, inS, "p", []), ["S/p"], "节点参数照旧");
 });

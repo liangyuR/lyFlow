@@ -371,11 +371,17 @@ interface GraphState {
   /** 把参数恢复成 from 那一份里的（调参记录的「恢复这组参数」）：两边都有、算子没换的节点（子图定义里的按定义对上）
    *  逐个参数按有效值恢复、恢复静音，图参数恢复基础值；那时绑着图参数、后来图参数删掉了的，把那时的值写回节点。
    *  现在或那时由图参数 / 子图参数提供的参数不动（节点上写值会冲突，那时的值也不在节点上），算子已不声明的也不动 ——
-   *  这两种记在 skipped。节点不增不删、连线与配方不动。一条撤销；changed 为 0 时不记。 */
+   *  这两种记在 skipped。节点不增不删、连线不动。run 是那次运行的图参数取值（params）与配方（recipeId，老记录只有名字
+   *  recipe；null 为基础）：给了 params 且那次就是现在选着的配方时，把该配方里的值改到让每个图参数的有效值与
+   *  run.params 一样（也计入 changed，一个图参数只算一处，与 doc 的改动同一条撤销）；否则配方不动。一条撤销；changed 为 0 时不记。 */
   restoreParams(
     from: GraphDoc,
     label: string,
-    run?: { params?: Readonly<Record<string, unknown>> | undefined; recipe?: string | null | undefined },
+    run?: {
+      params?: Readonly<Record<string, unknown>> | undefined;
+      recipe?: string | null | undefined;
+      recipeId?: string | null | undefined;
+    },
   ): { changed: number; skipped: number };
   /** 折叠：只显示标题与已连端口。纯 UI，但存进文件里下次打开还在。 */
   setCollapsed(ids: readonly string[], value: boolean): void;
@@ -982,8 +988,13 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const ops = ctx(get().doc).operatorsById;
       // 那次运行用的就是现在选着的配方：配方里的值也改回去，让每个图参数的有效值与那次一样（同一条撤销）。
       // 调的正是这些（选着配方时改图参数写进配方，不写 default）
-      const current = useRecipeStore.getState().current;
-      const sameRecipe = !!run?.params && current !== null && run.recipe === current;
+      const rs = useRecipeStore.getState();
+      const current = rs.current;
+      // 按 id 认：改过名的配方还是那一个（老记录没有 id，按名字）
+      const sameRecipe =
+        !!run?.params && current !== null && (run.recipeId != null ? run.recipeId === rs.currentId : run.recipe === current);
+      // 一个图参数只算一处：基础值与配方里的值都改了也是一处
+      const gpCounted = new Set<string>();
       const recipeStep: RecipeStep | undefined = sameRecipe
         ? (recipes, doc) => {
             const entry = findRecipe(recipes, current!);
@@ -995,7 +1006,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
               const now = Object.hasOwn(next.values, name) ? next.values[name] : gp.default;
               if (valueEquals(now, want)) continue;
               next = withValue(next, doc, name, want);
-              changed += 1;
+              if (!gpCounted.has(name)) changed += 1;
             }
             return next === entry ? recipes : replaceRecipe(recipes, current!, touch(next, doc, nowIso()));
           }
@@ -1043,6 +1054,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
           const old = from.params?.[name];
           if (old && !valueEquals(gp.default, old.default)) {
             gp.default = structuredClone(old.default);
+            gpCounted.add(name);
             changed += 1;
           }
         }

@@ -254,7 +254,7 @@ test("deleteNodesHealing：删中间那个、上下游接回去，一条撤销",
   assert.deepEqual(edgesOf(), [`${j1}>${j2}`, `${j2}>${j3}`].sort());
 });
 
-test("batch：一个手势里的几个动作一条撤销；拖动的事务里并进那一条；cancel 撤回、不记", () => {
+test("batch：一个手势里的几个动作一条撤销；拖动的事务里并进那一条；cancel 撤回、不记", async () => {
   reset();
   const g = () => useGraphStore.getState();
   const a = addNodeWithAutoConnect("t.read", { x: 0, y: 0 }).nodeIds[0];
@@ -298,4 +298,11 @@ test("batch：一个手势里的几个动作一条撤销；拖动的事务里并
   g().moveNodes([{ id: a, position: { x: 999, y: 999 } }]);
   g().abort();
   assert.deepEqual([doc() === start.doc, g().past.length, g().pendingSnapshot], [true, start.past, null]);
+  // 配方集合也回到 begin 那一刻（拖的是配方矩阵里的值时）
+  const { useRecipeStore } = await import("../src/store/recipe.ts");
+  const setBefore = useRecipeStore.getState().set;
+  g().begin();
+  useRecipeStore.setState({ set: { ...setBefore, recipes: [...(setBefore.recipes ?? [])] } });
+  g().abort();
+  assert.equal(useRecipeStore.getState().set, setBefore, "配方集合也回去");
 });

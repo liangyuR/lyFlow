@@ -197,7 +197,11 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       if (state.epoch !== prev.epoch) {
         void loadRecipesFor(state.filePath);
         // 换了一张图（打开、新建）：上一张图那次运行的范围不能拿来「↻ 重跑」这一张（节点 id 常常同名）
-        useExecutionStore.setState({ request: null });
+        // 上一张图的运行结果（节点表、判定计数、「↻ 重跑」的范围）都不属于这一张：节点 id 常常同名，不清掉的话
+        // 工具栏的「NG 1」会指到这一张同名的节点上。还在跑的先取消（清掉 runId 之后就没法取消了）
+        const exec = useExecutionStore.getState();
+        if (exec.runStatus === "running") void cancelCurrentRun().catch(() => {});
+        exec.reset();
         // 调参记录是这张图的：换图就清空，序号从头数
         useRunHistoryStore.getState().clear();
         // 打开之后要适配画布：预览最大化着（画布 0 宽）就先还原

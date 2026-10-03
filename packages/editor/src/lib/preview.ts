@@ -7,8 +7,8 @@ import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
 import { transport } from "../transport";
 import { splitBind } from "./graphParams";
-import { previewTargets } from "./nodeRun";
-import type { SubPath } from "./subgraph";
+import { closureOf, previewTargets } from "./nodeRun";
+import { fullId, type SubPath } from "./subgraph";
 import type { GraphDoc } from "../types/graph";
 
 /** 拖的是顶层图参数（图参数那一行、配方矩阵里正在用的那一格）时交给预览的「节点 id」：跑它绑着的那几个顶层节点。
@@ -30,7 +30,11 @@ export function previewTargetsOf(
   if (!nodeId.startsWith(GRAPH_PARAM)) return previewTargets(doc, path, nodeId, watched);
   const binds = doc.params?.[nodeId.slice(GRAPH_PARAM.length)]?.binds ?? [];
   const bound = binds.map((b) => splitBind(b)?.node).filter((id): id is string => !!id);
-  return [...new Set(bound.flatMap((id) => previewTargets(doc, [], id, watched)))];
+  const out = new Set(bound.flatMap((id) => previewTargets(doc, [], id, watched)));
+  // 看着的在子图里（进了子图拖上面的图参数）：previewTargets 只认同层与外层的，按包着它的顶层子图节点在不在下游算
+  const down = closureOf(doc, bound, "down");
+  for (const w of watched) if (w && w.path.length > 0 && down.includes(w.path[0]!.nodeId)) out.add(fullId(w.path, w.nodeId));
+  return [...out];
 }
 
 /** 拖动过程中每一帧都在改值，攒一下再发。30 ms 是「跟手」和「别打死自己」的平衡点。 */
@@ -74,9 +78,16 @@ export function runAfterDrag(nodeId: string): void {
   fire(nodeId, false);
 }
 
+/** 图参数没绑任何节点：拖它没有可跑的，不进预览态（不然「预览中」亮着却什么都不跑）。 */
+function nothingToPreview(nodeId: string): boolean {
+  if (!nodeId.startsWith(GRAPH_PARAM)) return false;
+  const gp = useGraphStore.getState().doc.params?.[nodeId.slice(GRAPH_PARAM.length)];
+  return !gp || gp.binds.length === 0;
+}
+
 /** 参数开始拖动。进入预览态，节点上的状态条会标出来。 */
 export function beginPreview(nodeId: string): void {
-  if (transport.kind === "static") return;
+  if (transport.kind === "static" || nothingToPreview(nodeId)) return;
   lastNode = nodeId;
   useUiStore.getState().setPreviewing(true);
 }

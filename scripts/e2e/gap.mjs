@@ -328,6 +328,24 @@ async function suiteMeasurementOutputs(cdp, report) {
     tally.ng === "NG 1" && tally.ok === null && listedNg.query === "is:ng " &&
       JSON.stringify(listedNg.rows) === JSON.stringify([{ id: ids.plane, tone: "ng" }]) && JSON.stringify(ngPicked) === JSON.stringify([ids.plane]),
     JSON.stringify({ tally, listedNg, ngPicked }));
+
+  // 拖参数的预览运行不算：预览里 plane 判了 ok，工具栏照旧是上一次正式运行的「NG 1」，查找节点的 is:ng 也还是它
+  await cdp.eval(`
+    const e = window.__lyflow.stores.execution.getState();
+    e.beginRun('preview-tally', [${lit(ids.plane)}], true);
+    e.apply({ schemaVersion: 1, runId: 'preview-tally', seq: 0, kind: 'run_started', plan: [${lit(ids.plane)}], targets: [${lit(ids.plane)}], nodes: [], outputs: [] });
+    e.apply({ schemaVersion: 1, runId: 'preview-tally', seq: 1, kind: 'node_state', nodeId: ${lit(ids.plane)}, state: 'done', durationMs: 1,
+              stats: { elementCount: 1, byteSize: 64, outputs: [{ port: 'value', type: 'Measurement', elementCount: 1,
+                value: { kind: 'Measurement', value: 6.4, unit: 'mm', ok: true, verdict: 'ok', nominal: 6.4, lower: 5.4, upper: 7.4 } }] } });
+    return true;
+  `);
+  await sleep(200);
+  const duringPreview = await cdp.eval(`
+    return { ng: document.querySelector('[data-testid="run-tally-ng"]')?.textContent ?? null,
+             ok: document.querySelector('[data-testid="run-tally-ok"]')?.textContent ?? null };
+  `);
+  await cdp.eval(`window.__lyflow.stores.execution.getState().apply({ schemaVersion: 1, runId: 'preview-tally', seq: 2, kind: 'run_finished', status: 'ok', durationMs: 1 }); return true;`);
+  report.eq("拖参数的预览运行不算：预览里判了 ok，工具栏照旧「NG 1」", duringPreview, { ng: "NG 1", ok: null });
 }
 
 /** 可选：打开一张真实的 gap 图跑一遍，看 ROI 框有没有画出来。图用

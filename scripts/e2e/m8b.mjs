@@ -344,6 +344,7 @@ async function suiteBuildFromBlank(cdp, report, ws) {
     JSON.stringify(g && Object.fromEntries(Object.entries(g.boxes).map(([k, b]) => [k, [b.label, b.color]]))));
   report.ok("没填过的框标成未设置", g !== null && Object.values(g.boxes).every((b) => b.unset));
 
+  const runBeforeBoxes = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
   for (const [name, target] of Object.entries(ROLE_BOXES)) {
     const got = await dragBoxTo(cdp, name, target);
     const err = Math.max(...got.map((v, i) => Math.abs(v - target[i])));
@@ -384,8 +385,10 @@ async function suiteBuildFromBlank(cdp, report, ws) {
     JSON.stringify(nudged) === JSON.stringify({ value: v0.map((x, i) => Number((x + (i % 2 === 0 ? 0.1 : 1)).toFixed(6))), steps: 2 }) &&
       JSON.stringify(await roiValue("template1DatumRoi")) === JSON.stringify(v0),
     JSON.stringify({ v0, nudged }));
-  // 拖到一半按 Esc：放弃这一段，框回到原处、不记撤销
+  // 拖到一半按 Esc：放弃这一段，框回到原处、不记撤销。预览最大化着做 —— Esc 归框，不拿去还原预览（也不退子图、不取消运行）
   {
+    await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMaximized(true); return true;`);
+    await sleep(400);
     const g0 = await roiGeometry(cdp);
     const c = g0.boxes.template1DatumRoi.center;
     const common = { button: "left", buttons: 1, clickCount: 1 };
@@ -400,11 +403,15 @@ async function suiteBuildFromBlank(cdp, report, ws) {
     await pressEscape(cdp);
     await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: c.x + 40, y: c.y, ...common });
     await sleep(150);
-    report.ok("拖到一半按 Esc：放弃这一段，框回到原处、不记撤销",
+    const stillMax = await cdp.eval(`return window.__lyflow.stores.ui.getState().viewerMaximized;`);
+    report.ok("预览最大化着拖到一半按 Esc：放弃这一段，框回到原处、不记撤销，预览还最大化着（Esc 归框）",
       JSON.stringify(midway) !== JSON.stringify(v0) &&
-        JSON.stringify(await roiValue("template1DatumRoi")) === JSON.stringify(v0) && (await pastNow()) === pastEsc,
-      JSON.stringify({ v0, midway }));
+        JSON.stringify(await roiValue("template1DatumRoi")) === JSON.stringify(v0) && (await pastNow()) === pastEsc && stillMax === true,
+      JSON.stringify({ v0, midway, stillMax }));
+    await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMaximized(false); return true;`);
+    await sleep(300);
   }
+  report.eq("从空白拼图拖框（节点没跑过）不补运行", await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`), runBeforeBoxes);
 
   // 6. 跑
   const run = await runAndWait(cdp, () => pressF5(cdp), 180_000);
@@ -442,7 +449,7 @@ async function suiteBuildFromBlank(cdp, report, ws) {
         { timeoutMs: 60_000, what: "拖完框松手补的运行" },
       ).catch((e) => ({ error: String(e) }));
       report.ok("跑过之后拖框松手：补一次正式运行、算的是 locate_template", Array.isArray(reran?.targets) && reran.targets.includes(locate),
-        JSON.stringify(reran));
+        JSON.stringify({ reran, boxes: Object.fromEntries(Object.entries(g1.boxes).map(([k, b]) => [k, b.unset ? "unset" : b.value])) }));
       await pressCtrl(cdp, "z");
       await sleep(150);
     }

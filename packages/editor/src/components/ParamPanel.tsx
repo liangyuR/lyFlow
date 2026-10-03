@@ -656,6 +656,7 @@ const PanelParamRow = memo(function PanelParamRow({
           path={path}
           promotedAs={row.promoted ?? undefined}
           graphBinding={binding}
+          previewGraphParam={binding?.graphParam}
           onChange={onChange}
         />
         <Diags diags={row.diags} />

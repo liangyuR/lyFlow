@@ -23,7 +23,7 @@ import { useUiStore } from "../store/ui";
 import { useGraphParamValidation, useNodeValidation, useValidationStore } from "../store/validation";
 import type { OutputStat } from "../types/execution";
 import type { OperatorDesc, Param } from "../types/manifest";
-import type { GraphNode, SubgraphDef } from "../types/graph";
+import { LIBRARY_OP_PREFIX, subgraphIdOf, type GraphNode, type SubgraphDef } from "../types/graph";
 
 import { CommitText } from "./CommitText";
 import { OperatorDetail, PortRow } from "./OperatorDetail";
@@ -99,8 +99,14 @@ function GraphOutputs() {
       {names.map((name) => {
         const ref = outputs![name]!;
         const stat = nodes.get(ref.node)?.stats?.outputs?.find((o) => o.port === ref.port);
-        // 指着的节点不在了（老图、手改过的文件）：存盘、运行都会被拒，标出来、✕ 照样能删
-        const missing = locateEventNode(doc, ref.node) === null;
+        // 运行时取不到的：路径走不通（节点不在了）；走到普通算子了后面还有几段（只有库算子的里面留给 core）；
+        // 指着子图节点 / 库算子本身（core 展开之后没有这个 id）。标出来、✕ 照样能删
+        const at = locateEventNode(doc, ref.node);
+        const hit = at ? levelOf(doc, at.path).nodes.find((n) => n.id === at.localId) : undefined;
+        const isLib = hit?.op.startsWith(LIBRARY_OP_PREFIX) === true;
+        const exact = !!at && fullId(at.path, at.localId) === ref.node;
+        const onInstance = exact && !!hit && (subgraphIdOf(hit.op) !== null || isLib);
+        const missing = !at || (exact ? onInstance : !isLib);
         return (
           <div
             className={`insp-out${missing ? " is-missing" : ""}`}
@@ -115,7 +121,13 @@ function GraphOutputs() {
               {name}
             </span>
             <span className="insp-out__value">
-              {missing ? `节点已不在图里（${ref.node}）` : stat ? formatOutputValue(stat) : `${ref.node}.${ref.port}`}
+              {missing
+                ? onInstance
+                  ? `指着子图节点本身（${ref.node}），运行时取不到`
+                  : `节点已不在图里（${ref.node}）`
+                : stat
+                  ? formatOutputValue(stat)
+                  : `${ref.node}.${ref.port}`}
             </span>
             <button
               type="button"
@@ -370,6 +382,8 @@ function ParamRow({
           nodeId={node.id}
           promotedAs={promoted?.name}
           graphBinding={binding}
+          // 这一行改的是图参数（「由图参数 X 提供」）：预览、松手补运行都按它绑着的全部节点算
+          previewGraphParam={binding?.graphParam}
           onChange={(v) => {
             if (!valueEquals(v, value)) setParam(node.id, param.name, v);
           }}

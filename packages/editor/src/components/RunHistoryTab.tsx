@@ -6,8 +6,9 @@ import { useMemo } from "react";
 
 import { num } from "../lib/format";
 import { verdictTone } from "../lib/outputs";
-import { diffRuns, diffText, previousReading, previousReadingIn, type RunRecord } from "../lib/runHistory";
+import { diffRuns, diffText, previousChain, readingBefore, type RunRecord } from "../lib/runHistory";
 import { augmentOperators, describeEventNode } from "../lib/subgraph";
+import { findRecipe } from "../lib/recipes";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { runParamsOf, useRecipeStore } from "../store/recipe";
@@ -45,20 +46,29 @@ export function RunHistoryTab() {
   const doc = useGraphStore((s) => s.doc);
   const baseOps = useManifestStore((s) => s.operatorsById);
   const baseline = baselineId ? records.find((r) => r.runId === baselineId) : undefined;
+  // 「上一次」的链：被挤出 50 条、接在最后的基准不算谁的上一次
+  const chain = useMemo(() => previousChain(records), [records]);
 
   // 每一行与它前一次（更早的那一条）比；定了基准的话再与基准比一行。图参数、子图定义都按各自那一份
   const rows = useMemo(
     () =>
       records.map((r, i) => {
-        const prev = records[i + 1];
+        const prev = chain[i + 1];
         const ops = augmentOperators(baseOps, { ...prev?.doc.subgraphs, ...baseline?.doc.subgraphs, ...r.doc.subgraphs });
         const diff = prev ? diffRuns(prev, r, ops) : null;
         const vsBase = baseline && baseline !== r ? diffRuns(baseline, r, ops) : null;
         return { r, i, diff, vsBase };
       }),
-    [records, baseOps, baseline],
+    [records, chain, baseOps, baseline],
   );
   const ops = useMemo(() => augmentOperators(baseOps, doc.subgraphs), [baseOps, doc.subgraphs]);
+
+  // 基准那一条的读数：与每一行同一个写法（带节点名、单位），同名端口（gap / flush）才分得清
+  const baseText = (b: RunRecord) =>
+    b.readings.map(
+      (rd) =>
+        `${describeEventNode(doc, ops, rd.id).names.join(" › ")}.${rd.port} ${rd.value === null ? "未测出" : `${num(rd.value)}${rd.unit ? ` ${rd.unit}` : ""}`}`,
+    );
 
   if (records.length === 0) {
     return (
@@ -73,9 +83,9 @@ export function RunHistoryTab() {
       {baseline && (
         // 基准钉在最上面：调了几次之后要回头看的就是它
         <div className="runs__base" data-testid="run-baseline-bar">
-          <span>
+          <span className="runs__base-text" title={baseText(baseline).join("\n")}>
             基准 #{baseline.seq} · {clock(baseline.at)}
-            {baseline.readings.length > 0 && ` · ${baseline.readings.map((rd) => `${rd.port} ${rd.value === null ? "未测出" : num(rd.value)}`).join("，")}`}
+            {baseline.readings.length > 0 && ` · ${baseText(baseline).join("，")}`}
           </span>
           <button type="button" className="runs__restore" onClick={() => useRunHistoryStore.getState().setBaseline(null)}>
             取消基准
@@ -94,7 +104,7 @@ export function RunHistoryTab() {
             baseTitle={vsBase ? diffText(vsBase, Infinity) : ""}
             isBaseline={baseline === r}
             // 读数的变化：定了基准就与基准比，不然与上一次比
-            before={(rd) => (baseline && baseline !== r ? previousReading(baseline, rd) : previousReadingIn(records, i, rd))}
+            before={(rd) => readingBefore(chain, i, r, baseline, rd).reading}
             beforeLabel={baseline && baseline !== r ? `基准 #${baseline.seq}` : "上一次"}
             describe={(id) => describeEventNode(doc, ops, id)}
             onRestore={() => restoreRun(r, baseOps)}
@@ -111,9 +121,15 @@ function restoreRun(r: RunRecord, baseOps: Parameters<typeof augmentOperators>[0
   const { changed, skipped } = useGraphStore.getState().restoreParams(r.doc, `恢复第 ${r.seq} 次运行的参数`, {
     params: r.params,
     recipe: r.recipe,
+    recipeId: r.recipeId,
   });
-  const current = useRecipeStore.getState().current;
+  const rs = useRecipeStore.getState();
+  const current = rs.current;
   const where = (name: string | null) => (name ? `配方「${name}」` : "基础");
+  // 那次的配方现在叫什么（改过名的按 id 找到新名字）；找不到就是删掉了
+  const thenEntry = r.recipeId ? rs.set.recipes.find((e) => e.id === r.recipeId) : r.recipe ? findRecipe(rs.set, r.recipe) : undefined;
+  const thenName = thenEntry?.name ?? null;
+  const sameRecipe = r.recipeId != null ? r.recipeId === rs.currentId : r.recipe === current;
   const after = useGraphStore.getState().doc;
   const left = diffRuns(
     { doc: r.doc, params: r.params },
@@ -130,9 +146,11 @@ function restoreRun(r: RunRecord, baseOps: Parameters<typeof augmentOperators>[0
     skipped > 0 ? `${skipped} 处参数现在（或那时）由图参数 / 子图参数提供、或已不存在，没动` : null,
     gpOneSide > 0 ? `${gpOneSide} 个图参数是后来加的或删掉的` : null,
     recipeDiffs > 0
-      ? r.recipe !== current
-        ? `那一次是在${where(r.recipe)}下跑的、现在是${where(current)}：配方里的 ${recipeDiffs} 处没动（切到${where(r.recipe)}再恢复）`
-        : `${recipeDiffs} 处对不上`
+      ? sameRecipe
+        ? `${recipeDiffs} 处对不上`
+        : r.recipe && !thenEntry
+          ? `那一次是在配方「${r.recipe}」下跑的，这个配方后来删掉了：配方里的 ${recipeDiffs} 处没动`
+          : `那一次是在${where(thenName)}下跑的、现在是${where(current)}：配方里的 ${recipeDiffs} 处没动（切到${where(thenName)}再恢复）`
       : null,
   ].filter(Boolean);
   const tail = notes.length > 0 ? `；${notes.join("，")}` : "";

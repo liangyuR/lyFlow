@@ -9,7 +9,7 @@ import { docNodeKey, listGraphNodes, NODE_FIELD_LABELS, searchGraphNodes } from 
 import { pathPrefix } from "../lib/subgraph";
 import { worstTone } from "../lib/outputs";
 import type { OutputStat } from "../types/execution";
-import { useExecutionStore } from "../store/execution";
+import { useExecutionStore, useJudgedNodes } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
@@ -30,6 +30,8 @@ export function NodeFinder() {
   const doc = useGraphStore((s) => s.doc);
   const operatorsById = useManifestStore((s) => s.operatorsById);
   const exec = useExecutionStore((s) => s.nodes);
+  // NG / 边界看的是与工具栏计数同一份节点表（拖参数的预览不算）
+  const judged = useJudgedNodes();
 
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -52,9 +54,9 @@ export function NodeFinder() {
         entries,
         query,
         (id) => exec.get(id)?.state === "error",
-        (id) => toneOf(exec.get(id)),
+        (id) => toneOf(judged.get(id)),
       ),
-    [entries, query, exec],
+    [entries, query, exec, judged],
   );
   const rows = hits.slice(0, MAX_ROWS);
 
@@ -160,7 +162,7 @@ export function NodeFinder() {
                   {failed && <span className="finder__err">出错</span>}
                   {entry.muted && <span className="finder__muted">静音</span>}
                   {(() => {
-                    const tone = toneOf(exec.get(entry.id));
+                    const tone = toneOf(judged.get(entry.id));
                     return tone === "ng" || tone === "margin" ? (
                       <span className={`finder__tone finder__tone--${tone}`} data-tone={tone}>
                         {tone === "ng" ? "NG" : "边界"}

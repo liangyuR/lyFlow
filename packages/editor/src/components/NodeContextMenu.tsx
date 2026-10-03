@@ -27,14 +27,14 @@ import {
   runNodeSmart,
 } from "../lib/nodeRun";
 import { canPasteParams, planParamReset } from "../lib/paramClipboard";
-import { fullId } from "../lib/subgraph";
+import { fullId, resolveOutput } from "../lib/subgraph";
 import { evictNodeCache } from "../store/cache";
 import { useCompareStore } from "../store/compare";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
 import { transport } from "../transport";
-import { subgraphIdOf, type GraphDoc } from "../types/graph";
+import { LIBRARY_OP_PREFIX, subgraphIdOf, type GraphDoc } from "../types/graph";
 import type { OperatorDesc } from "../types/manifest";
 
 export interface ContextMenuState {
@@ -100,15 +100,18 @@ export function NodeContextMenu({
 
   // 图级输出（ADR-0017）：outputs 里存的是**展开后**的路径 id，
   // 所以在子图里标输出也说得清是哪一个端口。
+  // 子图节点上标：存的是里面出这个口的那个节点的路径 id（core 展开子图之后才找得到它）；库算子的里面前端解不开，不给
   const menuOutputs = useMemo(() => {
-    if (!menuNode) return [];
+    if (!menuNode || menuNode.op.startsWith(LIBRARY_OP_PREFIX)) return [];
     const op = operatorsById.get(menuNode.op);
     if (!op) return [];
     const declared = declaredOutputs ?? {};
-    const full = fullId(path, menuNode.id);
-    return op.outputs.map((port) => {
-      const hit = Object.entries(declared).find(([, o]) => o.node === full && o.port === port.name);
-      return { port: port.name, name: hit?.[0] };
+    const docNow = useGraphStore.getState().doc;
+    return op.outputs.flatMap((port) => {
+      const ref = resolveOutput(docNow, path, menuNode.id, port.name);
+      if (!ref) return [];
+      const hit = Object.entries(declared).find(([, o]) => o.node === ref.nodeId && o.port === ref.port);
+      return [{ port: port.name, ref, name: hit?.[0] }];
     });
   }, [menuNode, operatorsById, declaredOutputs, path]);
 
@@ -454,10 +457,7 @@ export function NodeContextMenu({
               graph.removeGraphOutput(o.name);
               useUiStore.getState().showToast(`已取消图级输出 ${o.name}`);
             } else {
-              const name = graph.markGraphOutput({
-                node: fullId(path, menu.nodeId),
-                port: o.port,
-              });
+              const name = graph.markGraphOutput({ node: o.ref.nodeId, port: o.ref.port });
               useUiStore.getState().showToast(`已标为图级输出 ${name}`);
             }
             onClose();

@@ -26,8 +26,10 @@ export function copyNodes(ids: ReadonlySet<string>, cut: boolean): number {
   const clip = { nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) };
   ui.setClipboard(clip);
   void copyText(encodeNodeClipboard(clip)).then((ok) => useUiStore.setState({ clipboardOnlyInApp: !ok }));
-  if (cut) graph.deleteNodes([...ids]);
-  ui.showToast(`已${cut ? "剪切" : "复制"} ${nodes.length} 个节点`);
+  // 剪切也是删：指着它们的图级输出一并取消了，说一声（粘回来的是新 id，输出不会跟着回来）
+  const dropped = cut ? graph.deleteNodes([...ids]) : [];
+  const outs = dropped.length > 0 ? `；${droppedOutputsText(dropped)}` : "";
+  ui.showToast(`已${cut ? "剪切" : "复制"} ${nodes.length} 个节点${outs}`, outs ? "warn" : "info");
   return nodes.length;
 }
 

@@ -137,6 +137,22 @@ test("事件 id → 打开到哪一层、选中谁、一层层叫什么", () => 
   assert.deepEqual(locateEventNode(sgDoc, "a/n/x").path, [{ nodeId: "a", subgraphId: "s1" }, { nodeId: "n", subgraphId: "s2" }]);
 });
 
+test("判定看的节点表：预览、节点表还不是这一次的、松手自动补的那一次在跑 —— 都留着上一次正式运行的", async () => {
+  const { judgedNodesOf } = await import("../src/store/execution.ts");
+  const formal = new Map([["j", { state: "done", errors: [] }]]);
+  const later = new Map();
+  const base = { nodes: formal, preview: false, runId: "r1", resultRunId: "r1", runStatus: "ok", request: null };
+  assert.equal(judgedNodesOf(base), formal, "正式运行跑完：就是它");
+  const cases = [
+    ["预览", { ...base, nodes: later, preview: true }],
+    ["带 targets 的运行还没开跑（节点表还是上一次的）", { ...base, nodes: later, runId: "r2" }],
+    ["松手自动补的那一次在跑", { ...base, nodes: later, runId: "r2", resultRunId: "r2", runStatus: "running", request: { auto: true } }],
+  ];
+  for (const [name, s] of cases) assert.equal(judgedNodesOf(s), formal, name);
+  assert.equal(judgedNodesOf({ ...base, nodes: later, runId: "r3", resultRunId: "r3", runStatus: "running", request: {} }), later,
+    "手按的运行在跑：看这一次的");
+});
+
 test("查找节点（Ctrl+F）：整张图连子图里面的一起列，按名字模糊找；库算子里面进不去，不列；is:muted / is:error / op: 筛选", () => {
   const all = listGraphNodes(sgDoc, sgOps);
   assert.deepEqual(

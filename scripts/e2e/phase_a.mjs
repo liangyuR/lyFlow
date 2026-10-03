@@ -2,7 +2,7 @@
 // 与图级命名输出。对应 docs/phase-a1-acceptance.md 的两条。与其余分组共用一个 app 实例。
 
 import { sleep } from "./cdp.mjs";
-import { buildGraph, lit, newDoc, pressCtrl, pressF5, pressKey, replan, runAndWait, select } from "./page.mjs";
+import { buildGraph, lit, newDoc, pressCtrl, pressF5, pressKey, replan, restoreClipboard, runAndWait, select, stubClipboard } from "./page.mjs";
 
 /** 主路径成功的 fallback 图：a 来自 gen.synthetic，b 那一路整条都是 deferred。 */
 const OK_NODES = [
@@ -221,6 +221,23 @@ async function suiteGraphOutputs(cdp, report) {
     afterDel.outputs.length === 0 && /图级输出 cloud/.test(afterDel.toast ?? "") &&
       JSON.stringify(backOut) === JSON.stringify({ cloud: { node: ids.pipe, port: "out" } }),
     JSON.stringify({ afterDel, backOut }));
+
+  // Ctrl+X 剪切也是删：提示里同样说连带取消了哪个输出（粘回来的是新 id，输出不会跟着回来）；Ctrl+Z 回来
+  await stubClipboard(cdp);
+  await select(cdp, ids.pipe);
+  await sleep(100);
+  await pressCtrl(cdp, "x");
+  await sleep(200);
+  const afterCut = await cdp.eval(`
+    const ui = window.__lyflow.stores.ui.getState();
+    return { outputs: Object.keys(window.__lyflow.stores.graph.getState().doc.outputs ?? {}), toast: ui.toast?.text ?? null, kind: ui.toast?.kind ?? null };
+  `);
+  await pressCtrl(cdp, "z");
+  await sleep(200);
+  await restoreClipboard(cdp);
+  report.ok("Ctrl+X 剪切标着图级输出的节点：提示（警告）里说了 cloud 一并取消",
+    afterCut.outputs.length === 0 && /^已剪切 1 个节点；图级输出 cloud/.test(afterCut.toast ?? "") && afterCut.kind === "warn",
+    JSON.stringify(afterCut));
 
   // Ctrl+G 把它收进子图：输出改指到子图里面（路径 id），照样跑得通、按名字取得到（以前 bridge 只认顶层 id，F5、Ctrl+S 都被拒）
   await select(cdp, ids.pipe);

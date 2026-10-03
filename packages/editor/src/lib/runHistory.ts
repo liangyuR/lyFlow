@@ -31,6 +31,8 @@ export interface RunRecord {
   /** 交给 core 的图参数取值（当前配方已经叠上去了）。 */
   params: Readonly<Record<string, unknown>> | undefined;
   recipe: string | null;
+  /** 配方的 id（改名之后靠它认出是同一个；老记录没有）。 */
+  recipeId?: string | null;
   /** 运行到哪几个节点（完整 id）；空 = 整张图。 */
   targets: readonly string[];
   status: RunStatus | "running";
@@ -171,3 +173,22 @@ export function diffText(d: RunDiff, max = 3): string {
   if (parts.length === 0) return "参数没变";
   return parts.length > max ? `${parts.slice(0, max).join("；")} 等 ${parts.length} 处` : parts.join("；");
 }
+
+/** 读数的变化跟哪一次比：定了基准（这一行又不是基准自己）跟基准比，不然跟上一次比。 */
+export function readingBefore(
+  records: readonly RunRecord[],
+  i: number,
+  self: RunRecord,
+  baseline: RunRecord | undefined,
+  rd: RunReading,
+): { reading: RunReading | null; label: string } {
+  return baseline && baseline !== self
+    ? { reading: previousReading(baseline, rd), label: `基准 #${baseline.seq}` }
+    : { reading: previousReadingIn(records, i, rd), label: "上一次" };
+}
+
+/** 「上一次」的链：基准被挤出 50 条时接在最后、与前一条不连号 —— 它不是谁的上一次，从链里拿掉。 */
+export function previousChain(records: readonly RunRecord[]): readonly RunRecord[] {
+  return records.length > 1 && records.at(-1)!.seq !== records.at(-2)!.seq - 1 ? records.slice(0, -1) : records;
+}
+

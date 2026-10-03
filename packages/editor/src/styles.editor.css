@@ -1646,6 +1646,7 @@
   color: var(--lyflow-fg-1);
   font-size: 11px;
 }
+.runs__base-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runs__row.is-baseline { background: color-mix(in srgb, var(--lyflow-accent) 8%, transparent); }
 .runs__diff--base { color: var(--lyflow-accent); }
 .runs__restore.is-on { border-color: var(--lyflow-accent); color: var(--lyflow-accent); }

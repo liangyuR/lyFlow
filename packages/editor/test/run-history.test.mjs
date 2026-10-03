@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { diffRuns, diffText, previousReading, previousReadingIn, runReadingsOf, shortValue } from "../src/lib/runHistory.ts";
+import { diffRuns, diffText, previousChain, previousReading, previousReadingIn, readingBefore, runReadingsOf, shortValue } from "../src/lib/runHistory.ts";
 import { MAX_RUN_RECORDS, useRunHistoryStore } from "../src/store/runHistory.ts";
 
 const ops = new Map([
@@ -77,6 +77,14 @@ test("调参记录：读数按 id、端口排好，比上一次找同一个；�
   ];
   assert.equal(previousReadingIn(recs, 0, recs[0].readings[0])?.value, 0.5, "被顶掉的、没算它的都跳过，比的是 0.5");
   assert.equal(previousReadingIn(recs, 3, recs[3].readings[0]), null, "最早的那一次没有上一次");
+  // 定了基准：读数与基准比（不是与上一次）；基准自己那一行照旧与上一次比
+  const withBase = [{ seq: 4, status: "ok", readings: gapAt(0.61) }, { seq: 3, status: "ok", readings: gapAt(0.7) }, { seq: 2, status: "ok", readings: gapAt(0.5) }];
+  assert.deepEqual(readingBefore(withBase, 0, withBase[0], withBase[2], withBase[0].readings[0]), { reading: withBase[2].readings[0], label: "基准 #2" });
+  assert.deepEqual(readingBefore(withBase, 0, withBase[0], undefined, withBase[0].readings[0]), { reading: withBase[1].readings[0], label: "上一次" });
+  assert.equal(readingBefore(withBase, 2, withBase[2], withBase[2], withBase[2].readings[0]).label, "上一次", "基准自己那一行");
+  // 基准被挤出 50 条时接在最后、不连号：不是谁的「上一次」
+  assert.deepEqual(previousChain([{ seq: 9 }, { seq: 8 }, { seq: 1 }]).map((r) => r.seq), [9, 8]);
+  assert.deepEqual(previousChain([{ seq: 9 }, { seq: 8 }, { seq: 7 }]).map((r) => r.seq), [9, 8, 7]);
 
   const h = () => useRunHistoryStore.getState();
   h().clear();
