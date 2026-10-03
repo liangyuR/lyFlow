@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { matchShortcut } from "../src/lib/keymap.ts";
-import { listGraphNodes, searchGraphNodes } from "../src/lib/findNodes.ts";
+import { listGraphNodes, parseFinderQuery, searchGraphNodes } from "../src/lib/findNodes.ts";
 import { culpritOf, errorNodeIds, failedUpstream, revealError, revealNodeError } from "../src/lib/revealError.ts";
 import { describeEventNode, locateEventNode } from "../src/lib/subgraph.ts";
 import { useGraphStore } from "../src/store/graph.ts";
@@ -137,7 +137,7 @@ test("事件 id → 打开到哪一层、选中谁、一层层叫什么", () => 
   assert.deepEqual(locateEventNode(sgDoc, "a/n/x").path, [{ nodeId: "a", subgraphId: "s1" }, { nodeId: "n", subgraphId: "s2" }]);
 });
 
-test("查找节点（Ctrl+F）：整张图连子图里面的一起列，按名字模糊找；库算子里面进不去，不列", () => {
+test("查找节点（Ctrl+F）：整张图连子图里面的一起列，按名字模糊找；库算子里面进不去，不列；is:muted / is:error / op: 筛选", () => {
   const all = listGraphNodes(sgDoc, sgOps);
   assert.deepEqual(
     all.map((e) => [e.id, e.title, e.parents.join(" › ")]),
@@ -157,6 +157,33 @@ test("查找节点（Ctrl+F）：整张图连子图里面的一起列，按名�
   assert.deepEqual(ids("体素"), ["top", "a/v"], "同分保持文档顺序");
   assert.equal(ids("").length, all.length, "空查询列全部");
   assert.deepEqual(ids("zzz"), []);
+
+  // 筛选词：静音的（顶层的 top、子图里的 a/v）、这次出错的、按算子 id / 算子名的一段；认不得的 is:xxx 当普通字
+  const s1 = sgDoc.subgraphs.s1;
+  const mutedDoc = {
+    ...sgDoc,
+    nodes: sgDoc.nodes.map((n) => (n.id === "top" ? { ...n, bypass: true } : n)),
+    subgraphs: { ...sgDoc.subgraphs, s1: { ...s1, nodes: s1.nodes.map((n) => (n.id === "v" ? { ...n, bypass: true } : n)) } },
+  };
+  const muted = listGraphNodes(mutedDoc, sgOps);
+  const failed = (id) => id === "a/n/x";
+  const filtered = [
+    // [查询, 期望]
+    ["is:muted", ["top", "a/v"]],
+    ["is:静音 体素", ["top", "a/v"]],
+    ["is：muted 预处理", ["a/v"]],
+    ["is:error", ["a/n/x"]],
+    ["op:voxel", ["top", "a/v"]],
+    ["op:统计", ["a/n/x"]],
+    ["op:sub:s2", ["a/n"]],
+    ["op:voxel is:muted op:grid", ["top", "a/v"]],
+    ["is:foo", []],
+  ];
+  for (const [q, want] of filtered) {
+    assert.deepEqual(searchGraphNodes(muted, q, failed).map((h) => h.entry.id), want, q);
+  }
+  assert.deepEqual(searchGraphNodes(muted, "is:error").map((h) => h.entry.id), [], "不给出错判断就当都没出错");
+  assert.deepEqual(parseFinderQuery("  op:Voxel  is:muted  离群 "), { text: "离群", muted: true, error: false, ops: ["voxel"] });
 
   const key = (k) => ({ key: k, ctrlKey: true, metaKey: false, shiftKey: false, altKey: false });
   assert.equal(matchShortcut(key("f"))?.id, "findNode");

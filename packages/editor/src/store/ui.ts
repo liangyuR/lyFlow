@@ -137,6 +137,8 @@ interface UiState {
   helpOpen: boolean;
   /** 查找节点的弹层开着没有（Ctrl+F，components/NodeFinder）。 */
   finderOpen: boolean;
+  /** 打开查找时预先填好的查询（状态栏「静音 N」点进来是 is:muted）。 */
+  finderSeed: string;
   /** 最近用过的算子 id，新的在前，最多 RECENT_OPS_MAX 个。算子搜索与面板空查询时排在最前。
    *  记在 localStorage：只是个方便，读不到、写不进就当没有。 */
   recentOps: readonly string[];
@@ -174,7 +176,7 @@ interface UiState {
   toggleDrawer(tab?: DrawerTab): void;
   setRenamingNode(id: string | null): void;
   setHelpOpen(open: boolean): void;
-  setFinderOpen(open: boolean): void;
+  setFinderOpen(open: boolean, seed?: string): void;
   focusDiagnostic(nodeId: string, paramPath?: string): void;
   /** 打开到 path 那一层、选中 localId，并请画布把它移进视野（revealRequest）。诊断抽屉、子图节点上的
    *  错误文字点进去时用：出错的节点可能在子图里，也可能在画面外。paramPath 交给 Inspector 标红框。 */
@@ -245,6 +247,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   viewerPortPick: new Map(),
   helpOpen: false,
   finderOpen: false,
+  finderSeed: "",
   recentOps: loadRecentOps(),
   focusedDiagnostic: null,
   revealRequest: null,
@@ -345,9 +348,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   setHelpOpen(open) {
     set({ helpOpen: open });
   },
-  setFinderOpen(open) {
-    if (get().finderOpen === open) return;
-    set({ finderOpen: open });
+  setFinderOpen(open, seed = "") {
+    if (get().finderOpen === open && (!open || get().finderSeed === seed)) return;
+    set({ finderOpen: open, finderSeed: open ? seed : "" });
   },
   noteOperatorUsed(opId) {
     const cur = get().recentOps;

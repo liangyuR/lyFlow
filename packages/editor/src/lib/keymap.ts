@@ -79,7 +79,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: "navPrev", keys: ["Alt+ArrowUp"], label: "选中上一个同级节点（同一个上游的另一个下游）", scope: "canvas", group: "节点" },
   { id: "navNext", keys: ["Alt+ArrowDown"], label: "选中下一个同级节点", scope: "canvas", group: "节点" },
 
-  { id: "findNode", keys: ["Ctrl+F"], label: "查找节点（连子图里面的，回车跳过去）", scope: "global", group: "视图" },
+  { id: "findNode", keys: ["Ctrl+F"], label: "查找节点（连子图里面的，回车跳过去，Alt+Enter 选上这一层命中的全部；is:muted / is:error / op:… 筛选）", scope: "global", group: "视图" },
   { id: "layout", keys: ["Ctrl+L"], label: "整理布局", scope: "canvas", group: "视图" },
   { id: "fitView", keys: ["Ctrl+Shift+F"], label: "适配视图", scope: "canvas", group: "视图" },
   { id: "fitSelection", keys: ["F"], label: "适配选中的节点", scope: "canvas", group: "视图" },

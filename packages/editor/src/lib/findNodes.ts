@@ -1,5 +1,6 @@
 // 查找节点（Ctrl+F）：整张图里的节点连子图里面的一起列出来（路径 id，ADR-0010），按名字模糊找，
 // 选中后打开到它所在的那一层（revealNode）。库算子的内部只读、进不去，不列。
+// 查询里能夹筛选词：is:muted（静音的）、is:error（这次出错的）、op:<算子 id 或名字的一段>，其余的照旧模糊找。
 
 import { fuzzyMatchAny } from "./fuzzy";
 import { fullId, nodeTitle, type PathSegment } from "./subgraph";
@@ -17,6 +18,10 @@ export interface GraphNodeEntry {
   parents: string[];
   /** 算子名（子图节点是子图的名字）。 */
   opLabel: string;
+  /** 算子 id（子图节点是 sub:<id>）。op: 筛选认它。 */
+  opId: string;
+  /** 静音着（bypass）。 */
+  muted: boolean;
 }
 
 /** 子图嵌套的上限：校验期就拒绝递归引用，这里只防手改坏的文件让它转不出来。 */
@@ -37,6 +42,8 @@ export function listGraphNodes(doc: GraphDoc, ops: ReadonlyMap<string, OperatorD
         title,
         parents,
         opLabel: def ? def.name || subgraphId! : (ops.get(node.op)?.label ?? node.op),
+        opId: node.op,
+        muted: node.bypass === true,
       });
       if (subgraphId && def && path.length < MAX_DEPTH) {
         walk(def, [...path, { nodeId: node.id, subgraphId }], [...parents, title]);
@@ -57,9 +64,63 @@ export interface NodeHit {
 /** 顺序即优先级：名字命中比 id、算子名、所在子图的名字更值钱。 */
 export const NODE_FIELD_LABELS = ["名称", "id", "算子", "所在子图"] as const;
 
-/** 空查询原样返回全部（文档顺序）；否则按分数排，同分保持文档顺序。 */
-export function searchGraphNodes(entries: readonly GraphNodeEntry[], query: string): NodeHit[] {
-  const q = query.trim();
+/** 查询拆成筛选词与要模糊找的字。 */
+export interface FinderQuery {
+  text: string;
+  muted: boolean;
+  error: boolean;
+  /** op: 后面的字（小写），每一个都得在算子 id 或算子名里。 */
+  ops: string[];
+}
+
+const IS_WORDS: Record<string, "muted" | "error"> = {
+  muted: "muted",
+  mute: "muted",
+  bypass: "muted",
+  静音: "muted",
+  error: "error",
+  err: "error",
+  出错: "error",
+};
+
+/** 「is:muted 体素」→ 只看静音的、再按「体素」找。认不得的 is:xxx 当普通字（找不到东西，比悄悄忽略好懂）。
+ *  冒号全角半角都认。 */
+export function parseFinderQuery(query: string): FinderQuery {
+  const out: FinderQuery = { text: "", muted: false, error: false, ops: [] };
+  const rest: string[] = [];
+  for (const word of query.trim().split(/\s+/).filter(Boolean)) {
+    const m = /^(is|op)[:：](.+)$/i.exec(word);
+    const key = m?.[1]!.toLowerCase();
+    const value = m?.[2] ?? "";
+    if (key === "is" && IS_WORDS[value.toLowerCase()]) {
+      out[IS_WORDS[value.toLowerCase()]!] = true;
+      continue;
+    }
+    if (key === "op") {
+      out.ops.push(value.toLowerCase());
+      continue;
+    }
+    rest.push(word);
+  }
+  out.text = rest.join(" ");
+  return out;
+}
+
+/** 空查询原样返回全部（文档顺序）；否则按分数排，同分保持文档顺序。筛选词先筛，剩下的字再模糊找；
+ *  isError 按完整 id 问这次运行里它出没出错（不给就当都没出错）。 */
+export function searchGraphNodes(
+  all: readonly GraphNodeEntry[],
+  query: string,
+  isError?: (id: string) => boolean,
+): NodeHit[] {
+  const f = parseFinderQuery(query);
+  const entries = all.filter(
+    (e) =>
+      (!f.muted || e.muted) &&
+      (!f.error || (isError?.(e.id) ?? false)) &&
+      f.ops.every((o) => e.opId.toLowerCase().includes(o) || e.opLabel.toLowerCase().includes(o)),
+  );
+  const q = f.text;
   if (!q) return entries.map((entry) => ({ entry, score: 0, fieldIndex: 0 }));
   const hits: NodeHit[] = [];
   for (const entry of entries) {

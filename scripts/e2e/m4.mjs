@@ -542,8 +542,43 @@ async function suiteNested(cdp, report) {
   await sleep(150);
   report.eq("检查器写着它的节点 id（路径 id，--to / --set 认的那个）",
     await cdp.eval(`return document.querySelector('[data-testid="inspector-node-id"]')?.textContent ?? null;`), `#${nested}`);
-  await cdp.eval(`window.__lyflow.stores.ui.getState().exitTo(0); return true;`);
 
+  // 静音的节点：状态栏「静音 N」连子图里面的一起数，点它列出来（行上标「静音」），Alt+Enter 选上这一层的、说一声别的层
+  // 还有几个；查询里 op: 筛算子。以前忘了取消的静音只看得到节点上的斜纹，大图里常常不在视野里
+  await pressCtrl(cdp, "m");
+  await sleep(150);
+  await cdp.eval(`window.__lyflow.stores.ui.getState().exitTo(0); return true;`);
+  await select(cdp, ids.gen);
+  await sleep(100);
+  await pressCtrl(cdp, "m");
+  await sleep(200);
+  const chip = await cdp.eval(`
+    const b = document.querySelector('[data-testid="statusbar-muted"]');
+    return b ? { text: b.textContent, title: b.title } : null;
+  `);
+  report.ok("在第二层静音体素、顶层静音 gen：状态栏「静音 2」，悬停写这一层 1 个、别的层 1 个",
+    chip?.text === "静音 2" && /这一层 1 个，别的层 1 个/.test(chip?.title ?? ""), JSON.stringify(chip));
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="statusbar-muted"]'));
+  await sleep(200);
+  report.eq("点它：查找节点打开、查询是 is:muted，列出这两个（行上标「静音」）", await cdp.eval(`
+    return { query: document.querySelector('[data-testid="node-finder-input"]')?.value ?? null,
+             rows: [...document.querySelectorAll('[data-testid="node-finder-row"]')]
+               .map((r) => ({ id: r.dataset.id, muted: !!r.querySelector('.finder__muted') })) };
+  `), { query: "is:muted ", rows: [{ id: ids.gen, muted: true }, { id: nested, muted: true }] });
+  await pressKey(cdp, "Enter", 13, ["alt"]);
+  await sleep(200);
+  report.eq("Alt+Enter：选上这一层的那个（gen），说一声另一个在别的层；弹层关掉", await cdp.eval(`
+    const s = window.__lyflow.stores.ui.getState();
+    return { selected: [...s.selectedNodes], open: s.finderOpen, toast: s.toast?.text ?? null };
+  `), { selected: [ids.gen], open: false, toast: "选中了这一层的 1 个节点（另有 1 个在别的层，没选）" });
+  await pressCtrl(cdp, "f");
+  await sleep(150);
+  await cdp.send("Input.insertText", { text: "op:statistical" });
+  await sleep(150);
+  report.eq("查询里 op: 按算子筛：op:statistical 只剩两层子图里的 sor",
+    await cdp.eval(`return [...document.querySelectorAll('[data-testid="node-finder-row"]')].map((r) => r.dataset.id);`), [sorPath]);
+  await pressEscape(cdp);
+  await sleep(100);
 }
 
 async function suiteRecursion(cdp, report) {

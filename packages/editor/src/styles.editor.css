@@ -776,8 +776,17 @@
 }
 
 .finder .search-popup__cat,
-.finder__err {
+.finder__err,
+.finder__muted {
   flex-shrink: 0;
+}
+
+.finder__muted {
+  padding: 0 5px;
+  border-radius: 3px;
+  background: rgba(240, 160, 32, 0.16);
+  color: var(--lyflow-warn);
+  font-size: 10px;
 }
 
 .finder__err {
@@ -1516,6 +1525,16 @@
 /* -- 状态栏 ---------------------------------------------------------------- */
 
 .statusbar__cache { font-variant-numeric: tabular-nums; }
+.statusbar__muted {
+  padding: 0 6px;
+  border: 0;
+  border-radius: 3px;
+  background: rgba(240, 160, 32, 0.16);
+  color: var(--lyflow-warn);
+  font: inherit;
+  cursor: pointer;
+}
+.statusbar__muted:hover { background: rgba(240, 160, 32, 0.28); }
 .statusbar__hot {
   padding: 0 6px;
   border-radius: 3px;

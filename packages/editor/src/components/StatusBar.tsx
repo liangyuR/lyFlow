@@ -1,8 +1,9 @@
 // 底部状态栏：这一层的节点 / 连线数、选中、库算子、缓存、core 版本与热重载、传输方式。
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { levelOf } from "../lib/subgraph";
+import { listGraphNodes } from "../lib/findNodes";
+import { levelOf, pathPrefix } from "../lib/subgraph";
 import { formatBytes, useCacheStore } from "../store/cache";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
@@ -31,6 +32,13 @@ export function StatusBar() {
   const edgeCount = level.edges.length;
   const selected = useUiStore((s) => s.selectedNodes.size);
   const stats = useCacheStore((s) => s.stats);
+  const ops = useManifestStore((s) => s.operatorsById);
+  // 静音的节点（连子图里面的）：忘了取消的静音会悄悄改掉结果，而节点上的斜纹在大图里常常不在视野里
+  const muted = useMemo(() => {
+    const all = listGraphNodes(doc, ops).filter((e) => e.muted);
+    const here = pathPrefix(path);
+    return { total: all.length, here: all.filter((e) => pathPrefix(e.path) === here).length };
+  }, [doc, ops, path]);
   const [libraryCount, setLibraryCount] = useState(0);
 
   useEffect(() => {
@@ -51,6 +59,19 @@ export function StatusBar() {
         </span>
       )}
       {selected > 0 && <span>已选 {selected}</span>}
+      {muted.total > 0 && (
+        <button
+          type="button"
+          className="statusbar__muted"
+          data-testid="statusbar-muted"
+          title={`静音的节点不参与计算、输出直通上游：这一层 ${muted.here} 个${
+            muted.total > muted.here ? `，别的层 ${muted.total - muted.here} 个` : ""
+          } —— 点一下列出来（Alt+Enter 选上这一层的）`}
+          onClick={() => useUiStore.getState().setFinderOpen(true, "is:muted ")}
+        >
+          静音 {muted.total}
+        </button>
+      )}
       <span className="statusbar__spacer" />
       {stats && (
         <span
