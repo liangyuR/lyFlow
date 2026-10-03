@@ -6,6 +6,7 @@ import { create } from "zustand";
 import type { PathSegment, SubPath } from "../lib/subgraph";
 import type { ViewerContent } from "../lib/viewRule";
 import { loadViewerPrefs, saveViewerPrefs, type ViewerPrefs } from "../lib/viewPrefs";
+import type { ParamClipboard } from "../lib/paramClipboard";
 import type { GraphDoc, GraphNode, PortRef } from "../types/graph";
 
 export interface SearchPopup {
@@ -66,6 +67,9 @@ interface UiState {
   selectedEdges: ReadonlySet<string>;
   searchPopup: SearchPopup | null;
   clipboard: Clipboard | null;
+  /** 右键「复制参数」复制下来的那一组（lib/paramClipboard）。只在内存里，不进系统剪贴板。 */
+  paramClipboard: ParamClipboard | null;
+  setParamClipboard(c: ParamClipboard | null): void;
   /** 最近一次复制节点没写进系统剪贴板（不安全上下文、没授权）：粘贴时只能靠应用内的那一份。 */
   clipboardOnlyInApp: boolean;
   /** 短暂提示（连线被拒绝的原因、保存成功之类）。 */
@@ -211,6 +215,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   searchPopup: null,
   clipboard: null,
   clipboardOnlyInApp: false,
+  paramClipboard: null,
   toast: null,
   inspectedOperator: null,
   pinnedNode: null,
@@ -290,6 +295,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   closeSearch() {
     set({ searchPopup: null });
+  },
+  setParamClipboard(c) {
+    set({ paramClipboard: c });
   },
   setClipboard(c) {
     set({ clipboard: c });

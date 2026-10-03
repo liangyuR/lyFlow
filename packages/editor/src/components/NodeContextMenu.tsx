@@ -6,7 +6,16 @@ import { useCallback, useMemo, useRef } from "react";
 
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 
-import { copyNodes, deleteHealing, deleteSelection, disconnectAll, selectSameOp } from "../lib/editActions";
+import {
+  copyNodes,
+  copyParams,
+  deleteHealing,
+  deleteSelection,
+  disconnectAll,
+  pasteParams,
+  resetParams,
+  selectSameOp,
+} from "../lib/editActions";
 import { keyHint } from "../lib/keymap";
 import { layoutGraph } from "../lib/layout";
 import { useMotionEnabled, viewportMs, withLayoutTransition } from "../lib/motion";
@@ -17,6 +26,7 @@ import {
   runNodeOnly,
   runNodeSmart,
 } from "../lib/nodeRun";
+import { canPasteParams, planParamReset } from "../lib/paramClipboard";
 import { fullId } from "../lib/subgraph";
 import { evictNodeCache } from "../store/cache";
 import { useCompareStore } from "../store/compare";
@@ -57,6 +67,8 @@ export function NodeContextMenu({
   onSaveLibrary: (subgraphId: string) => void;
 }) {
   const path = useUiStore((s) => s.path);
+  const paramClip = useUiStore((s) => s.paramClipboard);
+  const docNow = useGraphStore((s) => s.doc);
   const running = useExecutionStore((s) => s.runStatus === "running");
   const declaredOutputs = useGraphStore((s) => s.doc.outputs);
   const { fitView } = useReactFlow();
@@ -82,6 +94,7 @@ export function NodeContextMenu({
   const menuNode = view.nodes.find((n) => n.id === menu.nodeId);
   // 「仅此节点」的可用性（修订一 V6：上游不齐时置灰、写明缺谁）：菜单打开时判一次
   const menuRunOnly = nodeRunAvailability(menu.nodeId);
+  const menuOp = menuNode ? operatorsById.get(menuNode.op) : undefined;
   const menuSubgraphId = menuNode ? subgraphIdOf(menuNode.op) : null;
   const menuIsLibrary = menuNode?.op.startsWith("lib.") === true;
 
@@ -197,6 +210,44 @@ export function NodeContextMenu({
         }}
       >
         选中同一种算子
+      </button>
+      {/* 整组参数：调好了一个，让同类的几个照着来；或者一下子回到默认 */}
+      <button
+        type="button"
+        data-testid="ctx-copy-params"
+        disabled={!menuOp || menuOp.params.length === 0}
+        onClick={() => {
+          copyParams(menu.nodeId);
+          // 右键时顺手改了选区的话还原它：从一个节点复制、再右键同类的几个粘贴，原来选着的那几个还在
+          if (menu.before) useUiStore.getState().setSelection(menu.before.nodes, menu.before.edges);
+          onClose();
+        }}
+      >
+        复制参数
+      </button>
+      <button
+        type="button"
+        data-testid="ctx-paste-params"
+        disabled={!canPasteParams(docNow, paramClip, menuNode?.op)}
+        title={paramClip ? `来自「${paramClip.from}」，写进选中的同一种算子` : "先在一个同类节点上「复制参数」"}
+        onClick={() => {
+          pasteParams(menuTargets());
+          onClose();
+        }}
+      >
+        粘贴参数
+      </button>
+      <button
+        type="button"
+        data-testid="ctx-reset-params"
+        disabled={planParamReset(docNow, path, menuTargets(), operatorsById).edits.length === 0}
+        title="节点上改过的参数都回到算子默认值（被图参数提供的不动）"
+        onClick={() => {
+          resetParams(menuTargets());
+          onClose();
+        }}
+      >
+        全部恢复默认
       </button>
       <button
         type="button"

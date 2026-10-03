@@ -1570,6 +1570,46 @@ async function suiteEditing(cdp, report) {
       { disc: { edges: true, nodes: true, steps: 1 },
         same: [ids.gen, twin].sort(), renaming: `node-rename-${ids.gen}`, del: { nodes: 1, steps: 1 },
         narrowed: { selected: [ids.gen, twin].sort(), form: true }, paneMenu: true, near: true });
+
+    // 右键「复制参数 / 粘贴参数 / 全部恢复默认」：调好一个，让同类的照着来；粘贴只写同一种算子，各一条撤销
+    const paramsOf = (id) => cdp.eval(`
+      const p = window.__lyflow.stores.graph.getState().doc.nodes.find((n) => n.id === ${lit(id)}).params ?? {};
+      return Object.fromEntries(Object.entries(p).sort(([a], [b]) => a.localeCompare(b)));
+    `);
+    await cdp.eval(`
+      const g = window.__lyflow.stores.graph.getState();
+      g.setParam(${lit(twin)}, 'pointCount', 7777);
+      g.setParam(${lit(twin)}, 'seed', 99);
+      window.__lyflow.stores.ui.getState().setSelection([${lit(twin)}, ${lit(ids.voxel)}], []);
+      return true;
+    `);
+    await sleep(150);
+    const genParams = await paramsOf(ids.gen);
+    const twinBefore = await paramsOf(twin);
+    const voxelBefore = await paramsOf(ids.voxel);
+    mustOk(JSON.stringify(genParams) !== JSON.stringify(twinBefore), "两个合成点云的参数本来不一样", { genParams, twinBefore });
+    await rightClickOn(ids.gen);
+    await pick("ctx-copy-params");
+    const keptSel = (await graphState()).selected;
+    const p0 = (await graphState()).past;
+    await rightClickOn(twin);
+    await pick("ctx-paste-params");
+    const pasted = { twin: await paramsOf(twin), voxel: await paramsOf(ids.voxel), steps: (await graphState()).past - p0 };
+    await pressCtrl(cdp, "z");
+    await sleep(200);
+    const pasteUndone = await paramsOf(twin);
+    await cdp.eval(`window.__lyflow.stores.ui.getState().clearSelection(); return true;`);
+    await sleep(100);
+    const p1 = (await graphState()).past;
+    await rightClickOn(twin);
+    await pick("ctx-reset-params");
+    const reset = { twin: await paramsOf(twin), steps: (await graphState()).past - p1 };
+    await pressCtrl(cdp, "z");
+    await sleep(200);
+    report.eq("右键复制参数（选区不变）→ 在选中的两个上粘贴：同一种算子照着改、体素不动、一条撤销；全部恢复默认：一条撤销",
+      { keptSel, pasted, undone: pasteUndone, reset },
+      { keptSel: [twin, ids.voxel].sort(), pasted: { twin: genParams, voxel: voxelBefore, steps: 1 }, undone: twinBefore,
+        reset: { twin: {}, steps: 1 } });
   }
 
   // #12 复制粘贴走系统剪贴板（另一个窗口、重开之后也粘得进来）。系统剪贴板换成页面里的桩（stubClipboard）：

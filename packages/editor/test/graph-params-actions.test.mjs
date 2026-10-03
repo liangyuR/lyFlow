@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
+import { copyParams, pasteParams, resetParams } from "../src/lib/editActions.ts";
 import { effectiveGraphValues, resolveGraphBinding, specFromParam } from "../src/lib/graphParams.ts";
+import { planParamPaste } from "../src/lib/paramClipboard.ts";
 import { stepHistory } from "../src/lib/history.ts";
 import { useGraphStore } from "../src/store/graph.ts";
 import { useManifestStore } from "../src/store/manifest.ts";
@@ -68,6 +70,67 @@ test("多选一起改（检查器）：同一个参数写进每个节点，一�
   g().setParamMany(["n_voxel"], "leafSize", [0.07, 0.07, 0.07]);
   assert.deepEqual(doc().params.leafSize.default, [0.07, 0.07, 0.07]);
   assert.equal(node("n_voxel").params.leafSize, undefined);
+});
+
+test("右键复制 / 粘贴参数：稀疏的展开、只粘同一种算子、一条撤销；被图参数或子图参数提供的不动", () => {
+  reset();
+  const ui = () => useUiStore.getState();
+  assert.equal(copyParams("n_voxel"), true);
+  assert.deepEqual(ui().paramClipboard.values, { leafSize: [0.005, 0.005, 0.005], minPointsPerVoxel: 0 }, "没写的参数按默认值带上");
+
+  const n2 = g().addNode("filter.voxel_grid", { x: 0, y: 300 });
+  g().setParam(n2, "minPointsPerVoxel", 3);
+  const steps = g().past.length;
+  pasteParams([n2, "n_plane"]);
+  assert.deepEqual(node(n2).params, { leafSize: [0.005, 0.005, 0.005] }, "minPoints 回到默认就删键（稀疏）");
+  assert.deepEqual(node("n_plane").params, { constraint: "axis" }, "不是同一种算子：没动");
+  assert.deepEqual([g().past.length - steps, g().past.at(-1).label], [1, "粘贴参数"]);
+  assert.match(ui().toast.text, /1 个节点不是同一种算子/);
+  pasteParams([n2]);
+  assert.equal(g().past.length - steps, 1, "已经一样：不记空撤销");
+  g().undo();
+  assert.deepEqual(node(n2).params, { minPointsPerVoxel: 3 }, "一次撤销还原");
+
+  // 被图参数绑定的：复制取图参数此刻的值；粘贴时不动它（图参数是共享的，不该被一次粘贴悄悄改掉）
+  g().promoteToGraphParam("n_voxel", "leafSize");
+  g().setGraphParamDefault("leafSize", [0.03, 0.03, 0.03]);
+  copyParams("n_voxel");
+  assert.deepEqual(ui().paramClipboard.values.leafSize, [0.03, 0.03, 0.03]);
+  copyParams(n2);
+  const plan = planParamPaste(doc(), [], ui().paramClipboard, ["n_voxel"], useManifestStore.getState().operatorsById);
+  assert.deepEqual([plan.locked, plan.edits.map((e) => e.name)], [1, ["minPointsPerVoxel"]]);
+
+  // 子图里：提升成子图参数的那个不复制、也不粘
+  reset();
+  copyParams("n_voxel");
+  inClean();
+  pasteParams(["s_voxel"]);
+  assert.deepEqual(node("s_voxel", doc().subgraphs.sg_clean).params, {}, "leafSize 由子图参数提供，minPoints 本来就一样");
+  copyParams("s_voxel");
+  assert.equal("leafSize" in ui().paramClipboard.values, false);
+
+  // 子图节点的 id 只在一张图里有意义：换了一张图不粘
+  reset();
+  copyParams("n_clean");
+  const other = fixture();
+  other.id = "another-doc";
+  useGraphStore.getState().loadDoc(other, "h.lyflow.json");
+  const ops = useManifestStore.getState().operatorsById;
+  assert.equal(planParamPaste(doc(), [], ui().paramClipboard, ["n_clean2"], ops).edits.length, 0);
+});
+
+test("右键全部恢复默认：节点上写着的都删掉，一条撤销；被图参数提供的不动", () => {
+  reset();
+  const before = structuredClone(doc());
+  const steps = g().past.length;
+  resetParams(["n_voxel", "n_plane", "n_clean"]);
+  assert.deepEqual([node("n_voxel").params, node("n_plane").params, node("n_clean").params], [{}, {}, {}]);
+  assert.equal(doc().params.planeTol.default, 0.006, "n_plane.distanceThreshold 绑着的图参数不动");
+  assert.deepEqual([g().past.length - steps, g().past.at(-1).label], [1, "3 个节点恢复默认参数"]);
+  resetParams(["n_voxel"]);
+  assert.equal(g().past.length - steps, 1, "已经是默认：不记空撤销");
+  g().undo();
+  assert.deepEqual(doc(), before, "一次撤销还原");
 });
 
 test("Ctrl+D 复制被图参数绑定的节点：副本写着此刻的有效值（不带绑定），不再回到算子默认值", () => {

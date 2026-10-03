@@ -8,6 +8,7 @@ import { useUiStore } from "../store/ui";
 import { copyText } from "./clipboard";
 import { materializeBindings } from "./graphParams";
 import { encodeNodeClipboard } from "./nodeClipboard";
+import { planParamPaste, planParamReset, snapshotParams, type ParamEditPlan } from "./paramClipboard";
 import { augmentOperators, levelOf } from "./subgraph";
 
 /** 复制（cut 时再删掉）这一层里的这些节点。只带走两端都在里面的边 —— 粘贴时内部连线得以保留。
@@ -74,4 +75,61 @@ export function selectSameOp(nodeId: string): number {
   const ids = level.nodes.filter((n) => n.op === op).map((n) => n.id);
   ui.setSelection(ids, []);
   return ids.length;
+}
+
+function opsNow() {
+  return augmentOperators(useManifestStore.getState().operatorsById, useGraphStore.getState().doc.subgraphs);
+}
+
+/** 照着计划一条撤销写进去（setParam：被绑定的路由、稀疏写都在那里）。没有要改的就什么都不记。 */
+function applyParamEdits(plan: ParamEditPlan, label: string): void {
+  if (plan.edits.length === 0) return;
+  const graph = useGraphStore.getState();
+  graph.batch(label, () => {
+    for (const e of plan.edits) graph.setParam(e.nodeId, e.name, e.value);
+  });
+}
+
+/** 没动的那几样说清楚：不是同一种算子的节点、不归节点自己管的参数。 */
+function leftAlone(plan: ParamEditPlan): string {
+  const parts: string[] = [];
+  if (plan.skippedOp > 0) parts.push(`${plan.skippedOp} 个节点不是同一种算子，没动`);
+  if (plan.locked > 0) parts.push(`${plan.locked} 个参数由图参数 / 子图参数提供，没动`);
+  return parts.length > 0 ? `；${parts.join("；")}` : "";
+}
+
+/** 右键「复制参数」：这个节点此刻的整组参数进参数剪贴板。没有参数的返回 false。 */
+export function copyParams(nodeId: string): boolean {
+  const ui = useUiStore.getState();
+  const clip = snapshotParams(useGraphStore.getState().doc, ui.path, nodeId, opsNow(), currentOverrides());
+  if (!clip) return false;
+  ui.setParamClipboard(clip);
+  ui.showToast(`已复制「${clip.from}」的 ${Object.keys(clip.values).length} 个参数`);
+  return true;
+}
+
+/** 右键「粘贴参数」：写进这些节点里同一种算子的那几个，一条撤销。 */
+export function pasteParams(ids: readonly string[]): void {
+  const ui = useUiStore.getState();
+  const clip = ui.paramClipboard;
+  if (!clip) return;
+  const plan = planParamPaste(useGraphStore.getState().doc, ui.path, clip, ids, opsNow());
+  applyParamEdits(plan, plan.nodes === 1 ? "粘贴参数" : `粘贴参数到 ${plan.nodes} 个节点`);
+  ui.showToast(
+    plan.edits.length === 0
+      ? `参数已经和「${clip.from}」一样${leftAlone(plan)}`
+      : `已把「${clip.from}」的参数写进 ${plan.nodes} 个节点${leftAlone(plan)}`,
+    plan.skippedOp > 0 || plan.locked > 0 ? "warn" : "info",
+  );
+}
+
+/** 右键「全部恢复默认」：节点上写着的参数都删掉（回到算子默认值），一条撤销。 */
+export function resetParams(ids: readonly string[]): void {
+  const ui = useUiStore.getState();
+  const plan = planParamReset(useGraphStore.getState().doc, ui.path, ids, opsNow());
+  applyParamEdits(plan, plan.nodes === 1 ? "恢复默认参数" : `${plan.nodes} 个节点恢复默认参数`);
+  ui.showToast(
+    plan.edits.length === 0 ? `已经都是默认值${leftAlone(plan)}` : `${plan.nodes} 个节点的参数恢复了默认值${leftAlone(plan)}`,
+    plan.locked > 0 ? "warn" : "info",
+  );
 }
