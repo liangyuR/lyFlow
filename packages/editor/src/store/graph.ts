@@ -75,7 +75,7 @@ import { useUiStore } from "./ui";
 
 enablePatches();
 
-const MAX_HISTORY = 100;
+export const MAX_HISTORY = 100;
 
 /** 一条撤销记录：doc 与内存里的配方集合一起快照（param-recipe K7）—— 改配方值、新建删除配方与改图
  *  进同一个撤销栈，Ctrl+Z 只有一种直觉。当前选着哪个配方不在这里（切换配方不算一步撤销）。 */
@@ -1393,8 +1393,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
         if (into) into.default = plain(value);
       };
       // 滑块与数字框拖动时每帧都来，靠外层 begin/commit 合成一条撤销（同 setParam）
-      if (get().pendingSnapshot) mutate(apply);
-      else transact(`修改图参数 ${name}`, apply);
+      if (get().pendingSnapshot) {
+        note(`修改图参数 ${gp.label ?? name}`);
+        mutate(apply);
+      } else transact(`修改图参数 ${name}`, apply);
     },
 
     setGraphParamSpec(name, patch) {
@@ -1420,7 +1422,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     setRecipeValue(recipe, param, value) {
-      if (!get().doc.params?.[param]) return;
+      const gp = get().doc.params?.[param];
+      if (!gp) return;
+      note(`配方 ${recipe}：修改 ${gp.label ?? param}`);
       editRecipe(`配方 ${recipe}：修改 ${param}`, recipe, (e, doc) => withValue(e, doc, param, value));
     },
 

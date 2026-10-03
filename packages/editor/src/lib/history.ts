@@ -1,7 +1,7 @@
 // 撤销 / 重做一步，并用一句 toast 说是哪一步。Ctrl+Z 是盲按的 —— 工具栏按钮的 title 才写着下一步是什么，
 // 连按几下时不看提示就不知道退到了哪。快捷键与工具栏按钮都走这里，两处说的一样。
 
-import { useGraphStore, type HistoryEntry } from "../store/graph";
+import { MAX_HISTORY, useGraphStore, type HistoryEntry } from "../store/graph";
 import type { RecipeSet } from "../lib/recipes";
 import { useUiStore } from "../store/ui";
 
@@ -44,7 +44,9 @@ export function historyRows(
     rows.push({ label: past[i]!.label, steps: i - (past.length - 1), kind: i === past.length - 1 ? "current" : "past", saved: isSaved(after.doc, after.recipes) });
   }
   const origin = past[0] ? { doc: past[0].doc, recipes: past[0].recipes } : now;
-  rows.push({ label: "打开时", steps: -past.length, kind: past.length === 0 ? "current" : "origin", saved: isSaved(origin.doc, origin.recipes) });
+  // 撤销栈只留 100 步：满了的话最底下那一行已经不是打开时的样子
+  const originLabel = past.length >= MAX_HISTORY ? `更早（只留最近 ${MAX_HISTORY} 步）` : "打开时";
+  rows.push({ label: originLabel, steps: -past.length, kind: past.length === 0 ? "current" : "origin", saved: isSaved(origin.doc, origin.recipes) });
   return rows;
 }
 

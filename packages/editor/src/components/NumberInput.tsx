@@ -1,13 +1,16 @@
 // 数字框与滑块：参数表单里所有数字（int / float、向量分量、transform、curve 的控制点）共用这一个。
 // 撤销粒度：打字失焦/回车才提交（一次编辑一条撤销），横向拖动与滑块用 begin()/commit() 包住一整段。
 
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 
 import { applyNumEdit, numEditNote, parseNumEdit, type NumEdit } from "../lib/numExpr";
 import { beginPreview, endPreview, schedulePreview } from "../lib/preview";
 import { rootOf } from "../lib/root";
 import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
+
+/** 多选一起改的那一行包着它：没接 onRelative 的框（变换、曲线、颜色）就不接相对改法。 */
+export const MultiEditContext = createContext(false);
 
 /** 拖过这么多像素才算一格。太小手抖就改值，太大又拖不动。 */
 const DRAG_PX_PER_STEP = 4;
@@ -76,6 +79,7 @@ export function NumberInput({
   onCommit,
 }: NumberInputProps) {
   const [text, setText] = useState(String(value));
+  const multiEdit = useContext(MultiEditContext);
   /** 回车时打的字看不懂：框标红、焦点留着改，不提交也不恢复。 */
   const [invalid, setInvalid] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -130,6 +134,14 @@ export function NumberInput({
     }
     if (edit.kind === "rel" && onRelative) {
       onRelative(edit);
+      // 框里写这个框自己那份的新值（它显示的是第一个节点的值）：写旧值的话，F5 / Ctrl+S 先失焦再聚焦时 store 的新值
+      // 刷不进来，下一次失焦就把旧值当绝对值写给每一个节点
+      setText(String(applyNumEdit(edit, value, { integer, min, max }).value));
+      return;
+    }
+    if (edit.kind === "rel" && multiEdit) {
+      // 多选里这一种控件（变换、曲线、颜色的 A）还不会按各自的值算：不拿第一个节点的值去统一大家
+      useUiStore.getState().showToast(`${who}：多选时这里还不支持相对改法（${text}），请直接填数`, "warn");
       setText(String(value));
       return;
     }
@@ -233,6 +245,9 @@ export function NumberInput({
           // 看不懂：标红、焦点留着改（失焦才恢复）
           const edit = parseNumEdit(text);
           if (edit.kind === "error") {
+            // 拦住：外面包着的（配方矩阵的格子）把这个回车当成「填完了」就收起来了
+            e.preventDefault();
+            e.stopPropagation();
             setInvalid(true);
             useUiStore.getState().showToast(`${who}：没看懂「${text}」（${edit.msg}），改一下再回车，Esc 撤回`, "warn");
             return;

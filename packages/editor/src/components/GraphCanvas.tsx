@@ -652,7 +652,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
         selection.size <= 1 &&
         dragged.current === node.id &&
         graph.batch("插入到连线中间", () => insertOnHoveredEdge(node.id));
-      graph.commit(inserted ? "插入到连线中间" : "移动节点");
+      graph.commit(inserted ? "插入到连线中间" : undefined);
       if (inserted) useUiStore.getState().showToast("已插入到连线中间");
       dragged.current = null;
     },

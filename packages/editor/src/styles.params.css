@@ -21,6 +21,12 @@
   cursor: ew-resize;
 }
 
+/* 回车时打的字看不懂：标红，焦点留着改 */
+.ctl--num[data-invalid="1"] {
+  border-color: var(--lyflow-danger);
+  box-shadow: 0 0 0 1px var(--lyflow-danger);
+}
+
 .ctl--num[data-dragging="1"] {
   border-color: var(--lyflow-accent-dim);
   user-select: none;

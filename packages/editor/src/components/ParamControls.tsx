@@ -143,10 +143,17 @@ function VectorControl({ param, value, disabled, onChange, nodeId, onChangeEach 
                 onChangeEach
                   ? relativeEach(onChangeEach, `${param.label || param.name} ${labels[i] ?? DEFAULT_COMPONENTS[i]}`,
                       { integer: false, min: param.min, max: param.max },
-                      (cur, apply) =>
-                        Array.isArray(cur)
-                          ? cur.map((c, j) => (typeof c === "number" && (locked || j === i) ? apply(c) : c))
-                          : cur)
+                      (cur, apply) => {
+                        if (!Array.isArray(cur)) return cur;
+                        // 锁着：按改的那个分量算一次，其余分量跟它一样（与单选时锁着的行为一致）
+                        if (locked) {
+                          const c = cur[i];
+                          if (typeof c !== "number") return cur;
+                          const v = apply(c);
+                          return cur.map(() => v);
+                        }
+                        return cur.map((c, j) => (j === i && typeof c === "number" ? apply(c) : c));
+                      })
                   : undefined
               }
               dragStep={(ref) => stepFor(param, false, ref)}

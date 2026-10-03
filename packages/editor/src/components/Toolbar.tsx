@@ -91,10 +91,12 @@ function HistoryMenu() {
   const future = useGraphStore((s) => s.future);
   const doc = useGraphStore((s) => s.doc);
   const savedDoc = useGraphStore((s) => s.savedDoc);
+  // 没存过盘的新图：savedDoc 是新建时的那一份，但它从没写进文件，不标「已保存」
+  const filePath = useGraphStore((s) => s.filePath);
   const recipes = useRecipeStore((s) => s.set);
   const savedRecipes = useRecipeStore((s) => s.saved);
   const rows = open
-    ? historyRows(past, future, { doc, recipes }, savedDoc ? { doc: savedDoc, recipes: savedRecipes } : null)
+    ? historyRows(past, future, { doc, recipes }, savedDoc && filePath ? { doc: savedDoc, recipes: savedRecipes } : null)
     : [];
   const current = useRef<HTMLButtonElement>(null);
   useEffect(() => {

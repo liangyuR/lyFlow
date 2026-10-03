@@ -227,9 +227,13 @@ export function createScene(host: HTMLDivElement): Scene {
       if (!prev || prev.cell !== spec.cell || prev.divisions !== spec.divisions || !grid.parent) {
         scene.remove(grid);
         disposeHelper(grid);
-        // 中心不在原点了：中心线与别的线同一个颜色
-        grid = new THREE.GridHelper(spec.cell * spec.divisions, spec.divisions, 0x2b3542, 0x232a33);
+        // 中心不在原点了：中心线与别的线同一个颜色（不然像是坐标轴）
+        grid = new THREE.GridHelper(spec.cell * spec.divisions, spec.divisions, 0x232a33, 0x232a33);
         grid.rotation.x = Math.PI / 2; // GridHelper 默认躺在 XZ 面上，转到 XY
+        // 永远先画、不写深度：2D 剖面里网格与最底下那层点的深度分不开（正交相机的深度精度不够），
+        // 后建的网格会压在点上，重跑时还一会儿压一会儿不压
+        grid.renderOrder = -1;
+        (grid.material as THREE.Material).depthWrite = false;
         scene.add(grid);
       }
       grid.position.set(spec.center[0], spec.center[1], spec.z);

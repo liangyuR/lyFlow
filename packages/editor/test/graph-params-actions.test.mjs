@@ -532,6 +532,11 @@ test("撤销记录写节点名字与参数 label；拖动、挪节点不给名�
       g().setParam("n_voxel", "minPointsPerVoxel", 2);
       g().commit();
     }, `修改 ${voxel} · ${leaf} 等 2 处`],
+    ["拖图参数的数（以前是「编辑」）", () => {
+      g().begin();
+      for (const v of [0.007, 0.008]) g().setGraphParamDefault("planeTol", v);
+      g().commit();
+    }, "修改图参数 planeTol"],
   ];
   for (const [name, act, want] of cases) {
     act();
@@ -580,4 +585,7 @@ test("travel(n) 与连按 n 次撤销 / 重做走到同一个地方；撤销历�
   assert.deepEqual(rows().filter((r) => r.kind === "current").map((r) => r.saved), [true]);
   g().markUnsaved();
   assert.equal(rows().some((r) => r.saved), false, "从备份恢复、算没保存：哪一行都不标");
+  // 撤销栈只留 100 步：满了时最底下那一行不再叫「打开时」
+  const full = Array.from({ length: 100 }, () => ({ label: "x", doc: doc(), recipes: recipes().set }));
+  assert.match(historyRows(full, [], { doc: doc(), recipes: recipes().set }, null).at(-1).label, /^更早/);
 });
