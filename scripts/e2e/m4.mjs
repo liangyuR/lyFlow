@@ -1183,6 +1183,52 @@ async function suitePreview(cdp, report) {
     restored.ratio === 0.5 && ratioBefore !== 0.5 && restored.steps === 1 && /^已恢复第 1 次运行时的参数（1 处/.test(restored.toast ?? "") &&
       (await ratioNow()) === ratioBefore,
     JSON.stringify({ ratioBefore, restored }));
+
+  // 未运行的改动：敲数回车改两个节点的保留比例（不自动运行）—— 工具栏写「改了 2 处未跑」，调参页顶上一行列出两处；
+  // 点 s1 那一处的 ↩ 只改回它（一条撤销，Ctrl+Z 做不到：得连后面那处一起撤），剩 1 处；「全部改回」之后那一行收起
+  const typeRatio = async (nodeId, value) => {
+    await select(cdp, nodeId);
+    await sleep(250);
+    await cdp.eval(`document.querySelector('[data-testid="param-drag-keepRatio"]').focus(); return true;`);
+    await pressKey(cdp, "a", 65, ["ctrl"]);
+    await cdp.send("Input.insertText", { text: String(value) });
+    await pressKey(cdp, "Enter", 13);
+    await sleep(200);
+  };
+  const ratioOf = (id) => cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.find((n) => n.id === ${lit(id)}).params.keepRatio ?? 0.5;`);
+  const ran = { s1: await ratioOf(pin.s1), s2: await ratioOf(pin.s2) };
+  const pendingNow = () => cdp.eval(`
+    return { chip: document.querySelector('[data-testid="run-pending-chip"]')?.textContent ?? null,
+             rows: [...document.querySelectorAll('[data-testid="run-pending-change"]')].map((c) => c.textContent) };
+  `);
+  await typeRatio(pin.s1, 0.31);
+  await typeRatio(pin.s2, 0.32);
+  await replan(cdp);
+  await sleep(150);
+  const pending2 = await pendingNow();
+  const pastBeforeRevert = await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+  await cdp.eval(`document.querySelector('[data-testid="run-pending"]')?.scrollIntoView({ block: 'nearest' }); return true;`);
+  const revertAt = await cdp.eval(`
+    const chip = [...document.querySelectorAll('[data-testid="run-pending-change"]')].find((c) => c.textContent.includes('→ 0.31'));
+    const b = chip?.querySelector('[data-testid="run-pending-revert"]');
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  `);
+  if (revertAt) await clickAt(cdp, revertAt);
+  await replan(cdp);
+  await sleep(150);
+  const pending1 = await pendingNow();
+  const afterRevert = { s1: await ratioOf(pin.s1), s2: await ratioOf(pin.s2),
+                        steps: (await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`)) - pastBeforeRevert };
+  report.ok("敲数回车改了两处没跑：工具栏写「改了 2 处未跑」、调参页顶上列出两处；点 s1 那一处的 ↩ 只改回它（一条撤销），剩 1 处",
+    pending2.chip === "改了 2 处未跑" && pending2.rows.length === 2 && pending1.chip === "改了 1 处未跑" && pending1.rows.length === 1 &&
+      /→ 0\.32/.test(pending1.rows[0]) && JSON.stringify(afterRevert) === JSON.stringify({ s1: ran.s1, s2: 0.32, steps: 1 }),
+    JSON.stringify({ ran, pending2, pending1, afterRevert, revertAt }));
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="run-pending-restore-all"]'));
+  await sleep(200);
+  report.eq("「全部改回」：剩下那一处也改回到那次运行的值，那一行收起",
+    { row: await cdp.eval(`return !!document.querySelector('[data-testid="run-pending"]');`), s2: await ratioOf(pin.s2) }, { row: false, s2: ran.s2 });
   await cdp.eval(`window.__lyflow.stores.ui.setState({ drawer: ${lit(drawerBeforeRuns)} }); return true;`);
 
   // 拖图参数：s1 的比例纳入配方之后，在检查器上面「图参数」那一行真拖滑块 —— 拖着的时候预览它绑着的 s1，

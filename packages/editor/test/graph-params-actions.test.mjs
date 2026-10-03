@@ -9,6 +9,8 @@ import { effectiveGraphValues, resolveGraphBinding, specFromParam } from "../src
 import { planParamPaste } from "../src/lib/paramClipboard.ts";
 import { augmentOperators } from "../src/lib/subgraph.ts";
 import { historyRows, jumpHistory, stepHistory } from "../src/lib/history.ts";
+import { changeCount, diffRuns } from "../src/lib/runHistory.ts";
+import { canRevert, revertChange } from "../src/hooks/usePendingChanges.ts";
 import { useGraphStore } from "../src/store/graph.ts";
 import { useManifestStore } from "../src/store/manifest.ts";
 import { resetRecipes, runParamsOf, selectRecipe, useRecipeStore } from "../src/store/recipe.ts";
@@ -627,6 +629,40 @@ test("travel(n) 与连按 n 次撤销 / 重做走到同一个地方；撤销历�
   // 撤销栈只留 100 步：满了时最底下那一行不再叫「打开时」
   const full = Array.from({ length: 100 }, () => ({ label: "x", doc: doc(), recipes: recipes().set }));
   assert.match(historyRows(full, [], { doc: doc(), recipes: recipes().set }, null).at(-1).label, /^更早/);
+});
+
+test("未运行的改动逐条改回（调参页的 ↩）：节点参数、子图定义里的、图参数（选着配方写进配方）各一条撤销，别的几处还在", () => {
+  reset();
+  const run = { doc: doc(), params: runParamsOf(doc()) };
+  g().setParam("n_voxel", "leafSize", [0.02, 0.02, 0.02]);
+  inClean();
+  g().setParam("s_voxel", "minPointsPerVoxel", 5);
+  useUiStore.getState().setPath([]);
+  g().setGraphParamDefault("planeTol", 0.02);
+  g().setBypass(["n_plane"], true);
+  const ops = augmentOperators(useManifestStore.getState().operatorsById, doc().subgraphs);
+  const pending = (from = run) => diffRuns(from, { doc: doc(), params: runParamsOf(doc()) }, ops);
+  const d = pending();
+  assert.deepEqual([d.changes.map((c) => `${c.id}.${c.name}`).sort(), changeCount(d)],
+    [["gp:planeTol.planeTol", "n_clean/s_voxel.minPointsPerVoxel", "n_voxel.leafSize"], 4], "三个参数 + 一处静音");
+  assert.deepEqual(d.changes.map(canRevert), [true, true, true]);
+  for (const c of d.changes) {
+    const steps = g().past.length;
+    revertChange(c);
+    assert.equal(g().past.length - steps, 1, `${c.id}：一条撤销`);
+  }
+  assert.deepEqual([pending().changes, changeCount(pending())], [[], 1], "参数都改回了，静音那一处还在（它没有 ↩）");
+  assert.equal(canRevert({ ...d.changes[0], id: "n_gone", name: "x" }), false, "节点后来删掉了：不给 ↩");
+
+  // 选着配方：图参数改回的是配方里的值
+  resetRecipes("g.recipes", "ready");
+  assert.equal(g().createRecipe("夜班"), true);
+  selectRecipe("夜班");
+  const night = { doc: doc(), params: runParamsOf(doc()) };
+  g().editGraphParamValue("planeTol", 0.04);
+  revertChange(pending(night).changes[0]);
+  assert.deepEqual([runParamsOf(doc()).planeTol, pending(night).changes], [night.params.planeTol, []]);
+  selectRecipe(null);
 });
 
 test("恢复某次运行的参数（调参记录）：节点参数、静音、子图定义里的、图参数基础值改回去，后加的节点不动，一条撤销", () => {

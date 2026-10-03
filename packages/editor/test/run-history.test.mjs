@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { diffRuns, diffText, previousChain, previousReading, previousReadingIn, readingBefore, runReadingsOf, shortValue } from "../src/lib/runHistory.ts";
+import { changeCount, diffRuns, diffText, pendingBase, previousChain, previousReading, previousReadingIn, readingBefore, runReadingsOf, shortValue } from "../src/lib/runHistory.ts";
 import { MAX_RUN_RECORDS, useRunHistoryStore } from "../src/store/runHistory.ts";
 
 const ops = new Map([
@@ -52,6 +52,28 @@ test("调参记录：两次运行之间改了什么 —— 有效参数（缺省
   assert.equal(diffRuns(rec(shared(0.02)), rec(shared(0.03)), subOps).changes.length, 1, "两个实例里是同一个节点：改一处只算一处");
   assert.equal(shortValue("x".repeat(40)).length, 24, "长字符串截短");
   assert.equal(shortValue(true), "开");
+});
+
+test("还没跑的改动跟哪一次比：屏幕上那次结果的记录；不在记录里（预览）、没跑完、被取消的退到最近一条跑完的；一共几处", () => {
+  const r = (runId, status) => ({ runId, status });
+  const records = [r("p", "running"), r("c", "cancelled"), r("b", "error"), r("a", "ok")];
+  const cases = [
+    // [说明, 屏幕上是哪一次的结果, 期望跟哪一次比]
+    ["屏幕上就是 a", "a", "a"],
+    ["出错的那一次也算跑完", "b", "b"],
+    ["屏幕上是预览（不在记录里）", "preview", "b"],
+    ["屏幕上那次被取消了", "c", "b"],
+    ["还在跑", "p", "b"],
+    ["还没有结果", null, "b"],
+  ];
+  for (const [name, shown, want] of cases) assert.equal(pendingBase(records, shown)?.runId ?? null, want, name);
+  assert.equal(pendingBase([r("c", "cancelled"), r("p", "running")], "c"), null, "一条跑完的都没有");
+  const d = diffRuns({ doc: base, params: { thr: 1 } }, {
+    doc: withNodes([{ ...base.nodes[0], bypass: true }, { ...base.nodes[1], params: { leafSize: [0.03, 0.03, 0.03] } }]),
+    params: { thr: 2 },
+  }, ops);
+  assert.deepEqual([changeCount(d), d.changes.map((c) => [c.id, c.name, c.param])],
+    [3, [["v", "leafSize", "Leaf Size"], ["gp:thr", "thr", "阈值"]]], "两个参数 + 一处静音；带着参数名（改回去要用）");
 });
 
 test("调参记录：读数按 id、端口排好，比上一次找同一个；预览与单节点运行不记，最多留 50 次", () => {

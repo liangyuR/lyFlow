@@ -1661,6 +1661,38 @@
   cursor: pointer;
 }
 .runs__restore:hover { border-color: var(--lyflow-accent); color: var(--lyflow-fg-0); }
+/* 未运行的改动：一处一个小块，参数的那几块带 ↩ */
+.runs__pending {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--lyflow-border);
+  background: color-mix(in srgb, var(--lyflow-warn) 8%, var(--lyflow-bg-1));
+  color: var(--lyflow-fg-1);
+  font-size: 11px;
+}
+.runs__pending-title { color: var(--lyflow-warn); }
+.runs__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--lyflow-border);
+  border-radius: var(--lyflow-radius);
+  background: var(--lyflow-bg-2);
+  font-variant-numeric: tabular-nums;
+}
+.runs__chip-undo {
+  padding: 0 3px;
+  border: none;
+  background: none;
+  color: var(--lyflow-fg-2);
+  font: inherit;
+  cursor: pointer;
+}
+.runs__chip-undo:hover { color: var(--lyflow-accent); }
 
 /* -- 底部抽屉（§2.5）------------------------------------------------------- */
 

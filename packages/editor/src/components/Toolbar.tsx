@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useDismiss } from "../hooks/useDismiss";
+import { usePendingChanges } from "../hooks/usePendingChanges";
 import { dialogs } from "../lib/dialogs";
 import { baseName, parentName, recentFiles } from "../lib/files";
 import { historyRows, jumpHistory, stepHistory } from "../lib/history";
@@ -8,7 +9,7 @@ import { keyHint } from "../lib/keymap";
 import { revealError } from "../lib/revealError";
 import { cleanPathText } from "../lib/params";
 import { verdictTally, verdictTone } from "../lib/outputs";
-import { runReadingsOf } from "../lib/runHistory";
+import { diffText, runReadingsOf } from "../lib/runHistory";
 import { augmentOperators, describeEventNode, fullId, levelOf, locateEventNode } from "../lib/subgraph";
 import { useCacheStore } from "../store/cache";
 import { runControlsOf, summarize, useExecutionStore, useJudgedNodes } from "../store/execution";
@@ -480,11 +481,7 @@ function RunControls({ onRun, onRerun, onCancel }: { onRun: () => void; onRerun:
               cancelled {summary.cancelled}
             </span>
           )}
-          {stale && (
-            <span className="toolbar__stat toolbar__stat--stale" title="运行之后图被改过，结果已过时">
-              已过时
-            </span>
-          )}
+          {stale && <StaleChip />}
           <VerdictTallyChips />
         </span>
       )}
@@ -679,5 +676,32 @@ export function Toolbar({
         <RecipeMenu />
       </div>
     </header>
+  );
+}
+
+/** 结果过时了：改了参数（静音、增删节点）就写「改了 N 处未跑」，点开调参页看是哪几处、能逐条改回；
+ *  只动了连线之类比不出来的照旧写「已过时」。 */
+function StaleChip() {
+  const pending = usePendingChanges();
+  if (!pending) {
+    return (
+      <span className="toolbar__stat toolbar__stat--stale" title="运行之后图被改过，结果已过时">
+        已过时
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="toolbar__stat toolbar__stat--stale toolbar__stat--link"
+      data-testid="run-pending-chip"
+      title={`运行之后改了：${diffText(pending.diff, Infinity)}。点开调参页逐条看、改回`}
+      onClick={() => {
+        const ui = useUiStore.getState();
+        if (ui.drawer !== "runs") ui.toggleDrawer("runs");
+      }}
+    >
+      改了 {pending.count} 处未跑
+    </button>
   );
 }

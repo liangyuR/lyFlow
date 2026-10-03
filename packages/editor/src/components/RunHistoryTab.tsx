@@ -6,7 +6,8 @@ import { useMemo } from "react";
 
 import { num } from "../lib/format";
 import { verdictTone } from "../lib/outputs";
-import { diffRuns, diffText, previousChain, readingBefore, type RunRecord } from "../lib/runHistory";
+import { diffRuns, diffText, previousChain, readingBefore, shortValue, type RunRecord } from "../lib/runHistory";
+import { canRevert, revertChange, usePendingChanges, type PendingChanges } from "../hooks/usePendingChanges";
 import { augmentOperators, describeEventNode } from "../lib/subgraph";
 import { findRecipe } from "../lib/recipes";
 import { useGraphStore } from "../store/graph";
@@ -46,6 +47,7 @@ export function RunHistoryTab() {
   const doc = useGraphStore((s) => s.doc);
   const baseOps = useManifestStore((s) => s.operatorsById);
   const baseline = baselineId ? records.find((r) => r.runId === baselineId) : undefined;
+  const pending = usePendingChanges();
   // 「上一次」的链：被挤出 50 条、接在最后的基准不算谁的上一次
   const chain = useMemo(() => previousChain(records), [records]);
 
@@ -92,6 +94,7 @@ export function RunHistoryTab() {
           </button>
         </div>
       )}
+      {pending && <PendingRow pending={pending} onRestoreAll={() => restoreRun(pending.base, baseOps)} />}
       <ol className="runs" data-testid="run-history">
         {rows.map(({ r, i, diff, vsBase }) => (
           <RunRow
@@ -161,6 +164,56 @@ function restoreRun(r: RunRecord, baseOps: Parameters<typeof augmentOperators>[0
     return;
   }
   ui.showToast(`已恢复第 ${r.seq} 次运行时的参数（${changed} 处，Ctrl+Z 撤回）${tail}`, notes.length > 0 ? "warn" : "info");
+}
+
+/** 「未运行的改动」：屏幕上那次结果之后改了哪几处，参数一处一个、各带一个 ↩ 单独改回（Ctrl+Z 是线性的：
+ *  撤第一处得把后面几处一起撤掉）。「全部改回」就是那一次的「恢复这组参数」。 */
+function PendingRow({ pending, onRestoreAll }: { pending: PendingChanges; onRestoreAll: () => void }) {
+  const { base, diff } = pending;
+  const others = [
+    ...diff.muted.map((n) => `静音 ${n}`),
+    ...diff.unmuted.map((n) => `取消静音 ${n}`),
+    ...diff.added.map((n) => `加了 ${n}`),
+    ...diff.removed.map((n) => `删了 ${n}`),
+  ];
+  return (
+    <div className="runs__pending" data-testid="run-pending">
+      <span className="runs__pending-title" title={`与第 ${base.seq} 次运行（屏幕上那次结果）比；按 F5 跑`}>
+        未运行的改动 · 比 #{base.seq}
+      </span>
+      {diff.changes.map((c) => (
+        <span key={`${c.id}\u0001${c.name}`} className="runs__chip" data-testid="run-pending-change">
+          {c.where} · {c.param} {shortValue(c.from)} → {shortValue(c.to)}
+          {canRevert(c) && (
+            <button
+              type="button"
+              className="runs__chip-undo"
+              data-testid="run-pending-revert"
+              title={`改回第 ${base.seq} 次运行时的值 ${shortValue(c.from)}（一条撤销）`}
+              onClick={() => revertChange(c)}
+            >
+              ↩
+            </button>
+          )}
+        </span>
+      ))}
+      {others.map((t) => (
+        <span key={t} className="runs__chip" title="这一处没法单独改回：用 Ctrl+Z，或「全部改回」">
+          {t}
+        </span>
+      ))}
+      <span className="runs__spacer" />
+      <button
+        type="button"
+        className="runs__restore"
+        data-testid="run-pending-restore-all"
+        title={`把参数全部改回第 ${base.seq} 次运行时的（同那一行的「恢复这组参数」）。一条撤销`}
+        onClick={onRestoreAll}
+      >
+        全部改回
+      </button>
+    </div>
+  );
 }
 
 function RunRow({

@@ -46,7 +46,10 @@ export interface ParamChange {
   id: string;
   /** 「子图 › 节点」或「图参数」。 */
   where: string;
+  /** 参数的显示名（label，没有就是 name）。 */
   param: string;
+  /** 参数名（节点参数的 name、图参数的名字）：改回去要用它。 */
+  name: string;
   from: unknown;
   to: unknown;
 }
@@ -146,7 +149,14 @@ export function diffRuns(
     const pb = effectiveParams(op, nodeB);
     for (const param of op.params) {
       if (valueEquals(pa[param.name], pb[param.name])) continue;
-      out.changes.push({ id, where: nameOf(a), param: param.label || param.name, from: pb[param.name], to: pa[param.name] });
+      out.changes.push({
+        id,
+        where: nameOf(a),
+        param: param.label || param.name,
+        name: param.name,
+        from: pb[param.name],
+        to: pa[param.name],
+      });
     }
   }
   for (const [id, b] of before) if (!after.has(id) && once(b, "-")) out.removed.push(nameOf(b));
@@ -156,9 +166,22 @@ export function diffRuns(
     const to = next.params?.[name];
     if (valueEquals(from, to)) continue;
     const label = next.doc.params?.[name]?.label ?? prev.doc.params?.[name]?.label ?? name;
-    out.changes.push({ id: `gp:${name}`, where: "图参数", param: label, from, to });
+    out.changes.push({ id: `gp:${name}`, where: "图参数", param: label, name, from, to });
   }
   return out;
+}
+
+/** 一共几处：参数一处一个，静音 / 取消静音 / 加 / 删的节点一个一个。 */
+export function changeCount(d: RunDiff): number {
+  return d.changes.length + d.muted.length + d.unmuted.length + d.added.length + d.removed.length;
+}
+
+/** 「还没跑的改动」跟哪一次比：屏幕上那次结果的记录（resultRunId）；它不在记录里（预览、单节点运行不记）或者没跑完、
+ *  被取消了，就跟最近一条跑完的比。一条都没有返回 null。 */
+export function pendingBase(records: readonly RunRecord[], resultRunId: string | null): RunRecord | null {
+  const done = (r: RunRecord) => r.status === "ok" || r.status === "error";
+  const shown = resultRunId ? records.find((r) => r.runId === resultRunId && done(r)) : undefined;
+  return shown ?? records.find(done) ?? null;
 }
 
 /** 一行字说完改了什么：「体素 · Leaf Size 0.02 → 0.03；…」，太多写「等 N 处」。没改写「参数没变」。 */
