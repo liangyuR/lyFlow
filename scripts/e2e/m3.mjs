@@ -364,6 +364,62 @@ async function suiteBypassReroute(cdp, report) {
   `);
   report.ok("推导成 PointCloud 之后能接到 PointCloud 端口", verdict.good, JSON.stringify(verdict));
   report.ok("接不兼容类型被拒", !verdict.bad, verdict.reason);
+
+  // 在连线上插入算子：连线右键「插入算子…」、只选中一条连线时按 Tab，都打开算子搜索 —— 插得进的排前面、写着进出用
+  // 哪两个端口；选中后插到线中间，一条撤销。以前右键只能插 reroute；Tab 加的节点按类型接到链尾，再拖到线上也插不进
+  await newDoc(cdp);
+  const ins = await buildGraph(
+    cdp,
+    [{ key: "gen", op: "gen.synthetic", params: { pointCount: 2000 } }, { key: "sor", op: "filter.statistical_outlier" }],
+    [{ from: ["gen", "cloud"], to: ["sor", "cloud"] }],
+  );
+  await normalizeZoom(cdp, 0.6);
+  const insBox = await canvasBox(cdp);
+  await placeAtScreen(cdp, { [ins.gen]: { x: 16, y: 60 }, [ins.sor]: { x: Math.round(insBox.w * 0.7), y: 60 } });
+  await sleep(250);
+  const chainOf = () => cdp.eval(`
+    const d = window.__lyflow.snapshot().doc;
+    const op = (id) => d.nodes.find((n) => n.id === id)?.op;
+    return d.edges.map((e) => op(e.from.node) + '>' + op(e.to.node)).sort();
+  `);
+  const pastNow = () => cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+  const insEdge = await cdp.eval(`return window.__lyflow.snapshot().doc.edges[0].id;`);
+  const mid = await centerOf(cdp, `.react-flow__edge[data-id="${insEdge}"] .react-flow__edge-interaction`);
+  mustOk(Boolean(mid), "拿到了 gen → sor 那条线的中点", mid);
+  const insertedChain = ["filter.voxel_grid>filter.statistical_outlier", "gen.synthetic>filter.voxel_grid"];
+  // 1) 真右键连线 → 插入算子…
+  const pastMenu = await pastNow();
+  await clickAt(cdp, mid, { button: "right" });
+  await sleep(200);
+  const insertItem = await centerOf(cdp, '[data-testid="edge-ctx-insert"]');
+  mustOk(Boolean(insertItem), "连线右键菜单里有「插入算子…」", insertItem);
+  await clickAt(cdp, insertItem);
+  await sleep(200);
+  const offered = await cdp.eval(`
+    const r = document.querySelector('.search-popup__row');
+    return { note: r?.querySelector('.search-popup__port')?.textContent ?? null,
+             placeholder: document.querySelector('.search-popup__input')?.placeholder ?? null };
+  `);
+  await cdp.send("Input.insertText", { text: "voxel" });
+  await sleep(200);
+  await pressKey(cdp, "Enter", 13);
+  await sleep(250);
+  const viaMenu = { chain: await chainOf(), steps: (await pastNow()) - pastMenu };
+  await pressCtrl(cdp, "z");
+  await sleep(200);
+  const undoneInsert = await chainOf();
+  // 2) 真点选连线 → Tab
+  await clickAt(cdp, mid);
+  await sleep(150);
+  await pressKey(cdp, "Tab", 9);
+  await sleep(200);
+  await cdp.send("Input.insertText", { text: "voxel" });
+  await sleep(200);
+  await pressKey(cdp, "Enter", 13);
+  await sleep(250);
+  report.eq("连线右键「插入算子…」与选中连线按 Tab：搜索里插得进的排前面并写着进出端口，选体素插到 gen 与 sor 中间，一条撤销",
+    { note: offered.note !== null, between: /之间/.test(offered.placeholder ?? ""), viaMenu, undoneInsert, viaTab: await chainOf() },
+    { note: true, between: true, viaMenu: { chain: insertedChain, steps: 1 }, undoneInsert: ["gen.synthetic>filter.statistical_outlier"], viaTab: insertedChain });
 }
 
 // ------------------------------------------------------------- 1.4 迁移

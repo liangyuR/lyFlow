@@ -280,9 +280,11 @@ export function useShortcuts(
           // 用键盘点不了工具栏的按钮，Tab 也走不出去
           if (onControl(e.target)) return;
           e.preventDefault();
+          // 只选中了一条连线（没有节点）：选中的算子插到它中间。框选会把相连的线一起选上，所以「没选节点」不能省
           ui.openSearch({
             screen: handlers.cursorScreenPosition(),
             flow: handlers.cursorFlowPosition(),
+            ...(ui.selectedEdges.size === 1 && ui.selectedNodes.size === 0 ? { insertEdge: [...ui.selectedEdges][0]! } : {}),
           });
           return;
 

@@ -1,13 +1,14 @@
 // 画布上的算子搜索弹层（交互清单 P0 #9）。双击空白处唤起，在光标处落节点。
 // 键盘全程可用（输入过滤、↑↓、Enter、Esc）—— 鼠标点选是退路不是主路。
 // 从端口拖线松在空白处唤起时（#18）：接得上拖出那一头的算子排前面、行尾写接到它的哪个端口，接不上的置灰排在后面。
+// 要插到一条连线中间时（连线右键「插入算子…」、只选中一条连线按 Tab）同理：插得进的排前面、写着进出用哪两个端口。
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { addNodeWithAutoConnect } from "../lib/insert";
+import { addNodeWithAutoConnect, insertIntoEdge } from "../lib/insert";
 import { searchOperators, FIELD_LABELS } from "../lib/search";
 import { augmentOperators, levelOf } from "../lib/subgraph";
-import { findPort, inferAnyTypes, pendingPort, pendingType } from "../lib/typecheck";
+import { findPort, inferAnyTypes, insertPortsFor, pendingPort, pendingType } from "../lib/typecheck";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import { useUiStore } from "../store/ui";
@@ -22,6 +23,16 @@ interface PendingInfo {
   /** 「RANSAC 平面.Inliers」 */
   from: string;
 }
+
+/** 搜索里怎么引导：哪些算子合适（值是行尾的标注，null = 不合适、置灰排后面）、分隔行写什么、占位字。 */
+interface Guide {
+  fit: ReadonlyMap<string, string | null>;
+  sep: (n: number) => string;
+  placeholder: string;
+}
+
+/** 探针节点的 id：判「这个算子插不插得进那条线」时临时放进图里，不进 store。 */
+const PROBE_ID = "__lyflow_probe__";
 
 function portLabel(op: OperatorDesc, name: string, side: "input" | "output"): string {
   return findPort(op, name, side)?.label || name;
@@ -59,6 +70,45 @@ export function NodeSearch() {
     return { side, portOf, type: pendingType(ctx, view, from, side), from: `${who}.${port}` };
   }, [popup, doc, path, baseOps, typesByName, operators]);
 
+  // 插到一条线中间：每个算子放一个探针节点进去，看有没有唯一的一对端口两头都接得上（与拖节点到线上同一个判法）
+  const insert = useMemo(() => {
+    const edgeId = popup?.insertEdge;
+    if (!edgeId) return null;
+    const lvl = levelOf(doc, path);
+    const view = { ...doc, nodes: lvl.nodes, edges: lvl.edges };
+    const edge = view.edges.find((e) => e.id === edgeId);
+    if (!edge) return null;
+    const ctx = { operatorsById: augmentOperators(baseOps, doc.subgraphs), typesByName };
+    const types = inferAnyTypes(ctx, { ...view, edges: view.edges.filter((e) => e.id !== edgeId) });
+    const fit = new Map<string, string | null>();
+    for (const op of operators ?? []) {
+      const probe = { ...view, nodes: [...view.nodes, { id: PROBE_ID, op: op.id, params: {} }] };
+      const ports = insertPortsFor(ctx, probe, edge, PROBE_ID, types);
+      fit.set(op.id, ports ? `${portLabel(op, ports.inPort, "input")} → ${portLabel(op, ports.outPort, "output")}` : null);
+    }
+    const name = (id: string) => {
+      const n = view.nodes.find((x) => x.id === id);
+      return n?.ui?.title ?? (n ? ctx.operatorsById.get(n.op)?.label : undefined) ?? id;
+    };
+    return { fit, between: `${name(edge.from.node)} → ${name(edge.to.node)}` };
+  }, [popup, doc, path, baseOps, typesByName, operators]);
+
+  const guide = useMemo<Guide | null>(() => {
+    if (pending) {
+      const arrow = pending.side === "input" ? "← " : "→ ";
+      const fit = new Map<string, string | null>();
+      for (const op of operators ?? []) {
+        const port = pending.portOf.get(op.id) ?? null;
+        fit.set(op.id, port ? arrow + portLabel(op, port, pending.side === "input" ? "output" : "input") : null);
+      }
+      return { fit, sep: (n) => `${n} 个算子接不上 ${pending.type ?? "这一头"}`, placeholder: `接到 ${pending.from} 的算子…` };
+    }
+    if (insert) {
+      return { fit: insert.fit, sep: (n) => `${n} 个算子插不进这条线`, placeholder: `插到 ${insert.between} 之间的算子…` };
+    }
+    return null;
+  }, [pending, insert, operators]);
+
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -85,13 +135,13 @@ export function NodeSearch() {
     } else {
       hits = searchOperators(all, query).map((hit) => ({ ...hit, recent: false }));
     }
-    if (!pending) return { rows: hits.slice(0, MAX_ROWS), incompatible: 0 };
-    // 接得上的排前面（各自保持原来的先后），接不上的置灰排在后面、不藏起来：也许就是想放一个不接线的。
-    // 先分再截：不然算子一多，接得上的那几个可能被截在 MAX_ROWS 外面
-    const ok = hits.filter((h) => pending.portOf.get(h.op.id) != null);
-    const no = hits.filter((h) => pending.portOf.get(h.op.id) == null);
+    if (!guide) return { rows: hits.slice(0, MAX_ROWS), incompatible: 0 };
+    // 合适的排前面（各自保持原来的先后），不合适的置灰排在后面、不藏起来：也许就是想放一个不接线的。
+    // 先分再截：不然算子一多，合适的那几个可能被截在 MAX_ROWS 外面
+    const ok = hits.filter((h) => guide.fit.get(h.op.id) != null);
+    const no = hits.filter((h) => guide.fit.get(h.op.id) == null);
     return { rows: [...ok, ...no].slice(0, MAX_ROWS), incompatible: no.length };
-  }, [operators, query, recentOps, pending]);
+  }, [operators, query, recentOps, guide]);
 
   useEffect(() => setCursor(0), [query]);
 
@@ -107,6 +157,16 @@ export function NodeSearch() {
   if (!popup) return null;
 
   const pick = (opId: string) => {
+    // 插到一条线中间：加节点与插入一条撤销；插不进就照旧放下（按类型自动连线）、说一声
+    if (popup.insertEdge) {
+      if (!insertIntoEdge(opId, popup.insertEdge)) {
+        addNodeWithAutoConnect(opId, popup.flow);
+        const op = useManifestStore.getState().operatorsById.get(opId);
+        if (op) useUiStore.getState().showToast(`${op.label} 插不进这条线：放在了一边`, "warn");
+      }
+      closeSearch();
+      return;
+    }
     // 双击空白处唤起的：与拖入同一条路，按类型自动连线（m8-plan L13）
     if (!popup.pendingFrom) {
       addNodeWithAutoConnect(opId, popup.flow);
@@ -175,7 +235,7 @@ export function NodeSearch() {
           className="search-popup__input"
           type="text"
           value={query}
-          placeholder={pending ? `接到 ${pending.from} 的算子…` : "搜索算子…"}
+          placeholder={guide ? guide.placeholder : "搜索算子…"}
           spellCheck={false}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -185,15 +245,16 @@ export function NodeSearch() {
           ) : (
             rows.map((hit, i) => {
               const port = pending ? (pending.portOf.get(hit.op.id) ?? null) : null;
-              const greyed = pending !== null && port === null;
-              // 接得上与接不上之间一条分隔：写明后面这些接不上什么
+              const note = guide ? (guide.fit.get(hit.op.id) ?? null) : null;
+              const greyed = guide !== null && note === null;
+              // 合适与不合适之间一条分隔：写明后面这些为什么不合适
               const prev = i > 0 ? rows[i - 1] : undefined;
-              const firstGreyed = greyed && (!prev || pending.portOf.get(prev.op.id) != null);
+              const firstGreyed = greyed && (!prev || guide.fit.get(prev.op.id) != null);
               return (
                 <div key={hit.op.id} className="search-popup__item">
                   {firstGreyed && (
                     <p className="search-popup__sep" data-testid="search-incompatible-sep">
-                      {incompatible} 个算子接不上 {pending.type ?? "这一头"}
+                      {guide.sep(incompatible)}
                     </p>
                   )}
                   <button
@@ -208,12 +269,7 @@ export function NodeSearch() {
                     onClick={() => pick(hit.op.id)}
                   >
                     <span className="search-popup__label">{hit.op.label}</span>
-                    {port && pending && (
-                      <span className="search-popup__port">
-                        {pending.side === "input" ? "← " : "→ "}
-                        {portLabel(hit.op, port, pending.side === "input" ? "output" : "input")}
-                      </span>
-                    )}
+                    {note && <span className="search-popup__port">{note}</span>}
                     <span className="search-popup__cat">{hit.op.category}</span>
                     {hit.recent && <span className="search-popup__why">最近</span>}
                     {hit.fieldIndex > 0 && (

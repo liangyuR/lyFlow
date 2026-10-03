@@ -60,7 +60,7 @@ import { useUiStore } from "../store/ui";
 import { transport } from "../transport";
 import { subgraphIdOf, type GraphDoc, type PortRef } from "../types/graph";
 
-import { addNodeWithAutoConnect, insertSnippetById } from "../lib/insert";
+import { addNodeWithAutoConnect, insertIntoEdge, insertSnippetById } from "../lib/insert";
 import { EdgePeekLayer } from "./EdgePeekLayer";
 import { FlowEdge } from "./FlowEdge";
 import { OPERATOR_DND_MIME, SNIPPET_DND_MIME } from "./NodePalette";
@@ -1018,29 +1018,14 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       // 松在一条连线上：插到它中间（加节点与插入一条撤销）。以前照样按类型自动连线 —— 新节点接到上游，
       // 下游还连着原来那条线；接上了的节点再拖到线上也插不进（已有连线的不参与），只能自己断线重接
       const edgeId = edgeAt(wrapper.current, { x: e.clientX, y: e.clientY });
-      if (edgeId) {
-        const graph = useGraphStore.getState();
-        const inserted = graph.batch("插入到连线中间", (cancel) => {
-          const id = graph.addNode(opId, position);
-          const current = levelView();
-          const edge = current.edges.find((x) => x.id === edgeId);
-          const ports = id && edge ? insertPortsFor(ctx, current, edge, id) : null;
-          // 插不进（没有唯一的一对端口）就整个不算，下面照旧加节点、自动连线
-          if (!id || !ports || !graph.insertOnEdge(edgeId, id, ports.inPort, ports.outPort)) {
-            cancel();
-            return false;
-          }
-          return true;
-        });
-        if (inserted) {
-          useUiStore.getState().noteOperatorUsed(opId);
-          useUiStore.getState().showToast("已插入到连线中间");
-          return;
-        }
+      // 插不进（没有唯一的一对端口）就照旧加节点、自动连线
+      if (edgeId && insertIntoEdge(opId, edgeId, position)) {
+        useUiStore.getState().showToast("已插入到连线中间");
+        return;
       }
       addNodeWithAutoConnect(opId, position);
     },
-    [screenToFlowPosition, ctx],
+    [screenToFlowPosition],
   );
 
   return (
@@ -1152,7 +1137,17 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
 
       <EdgePeekLayer />
 
-      {edgeMenu && <EdgeContextMenu menu={edgeMenu} onPeek={openPeek} onReroute={insertReroute} onClose={closeMenu} />}
+      {edgeMenu && (
+        <EdgeContextMenu
+          menu={edgeMenu}
+          onInsertOp={(edgeId, at) =>
+            useUiStore.getState().openSearch({ screen: at, flow: screenToFlowPosition(at), insertEdge: edgeId })
+          }
+          onPeek={openPeek}
+          onReroute={insertReroute}
+          onClose={closeMenu}
+        />
+      )}
 
       {menu && (
         <NodeContextMenu

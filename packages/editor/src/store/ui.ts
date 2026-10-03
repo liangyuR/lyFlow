@@ -17,6 +17,8 @@ export interface SearchPopup {
   pendingFrom?: PortRef;
   /** pendingFrom 是它自己节点上的哪一侧。output = 新节点接在它下游。 */
   pendingSide?: "input" | "output";
+  /** 选中的算子插到这条线中间（连线右键「插入算子…」、只选中一条连线时按 Tab）。 */
+  insertEdge?: string;
 }
 
 export interface Clipboard {

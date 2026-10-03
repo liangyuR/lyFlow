@@ -1,4 +1,4 @@
-// 连线的右键菜单：查看内容、在此插入 Reroute、删除连线。
+// 连线的右键菜单：插入算子、查看内容、在此插入 Reroute、删除连线。
 
 import { useRef } from "react";
 
@@ -13,11 +13,14 @@ export interface EdgeMenuState {
 
 export function EdgeContextMenu({
   menu,
+  onInsertOp,
   onPeek,
   onReroute,
   onClose,
 }: {
   menu: EdgeMenuState;
+  /** 在右键处打开算子搜索，选中的插到这条线中间。 */
+  onInsertOp: (edgeId: string, at: { x: number; y: number }) => void;
   onPeek: (edgeId: string, at: { x: number; y: number }) => void;
   onReroute: (edgeId: string, at: { x: number; y: number }) => void;
   onClose: () => void;
@@ -27,6 +30,16 @@ export function EdgeContextMenu({
   const at = { x: menu.x, y: menu.y };
   return (
     <div ref={box} className="ctxmenu" style={style} data-testid="edge-context-menu" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        data-testid="edge-ctx-insert"
+        onClick={() => {
+          onClose();
+          onInsertOp(menu.edgeId, at);
+        }}
+      >
+        插入算子…
+      </button>
       <button
         type="button"
         data-testid="edge-ctx-peek"

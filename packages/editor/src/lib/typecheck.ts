@@ -298,12 +298,13 @@ export function insertPortsFor(
   doc: GraphDoc,
   edge: GraphEdge,
   nodeId: string,
+  anyTypes?: AnyTypes,
 ): { inPort: string; outPort: string } | null {
   const node = doc.nodes.find((n) => n.id === nodeId);
   const op = node ? ctx.operatorsById.get(node.op) : undefined;
   if (!op) return null;
   const without: GraphDoc = { ...doc, edges: doc.edges.filter((e) => e.id !== edge.id) };
-  const types = inferAnyTypes(ctx, without);
+  const types = anyTypes ?? inferAnyTypes(ctx, without);
   let found: { inPort: string; outPort: string } | null = null;
   for (const inPort of op.inputs) {
     if (!canConnect(ctx, without, edge.from, { node: nodeId, port: inPort.name }, types).ok) continue;
