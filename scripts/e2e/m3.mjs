@@ -485,8 +485,21 @@ async function suiteBypassReroute(cdp, report) {
   await pressKey(cdp, "Tab", 9);
   await sleep(200);
   const branchNote = await cdp.eval(`return document.querySelector('.search-popup__input')?.placeholder ?? null;`);
+  const moreBefore = await cdp.eval(`return document.querySelector('[data-testid="search-more"]')?.textContent ?? null;`);
   await cdp.send("Input.insertText", { text: "随机采样" });
   await sleep(200);
+  // 搜索弹层底下写着当前那一行的算子说明与进出端口；列不下的写「还有 N 个」
+  const detail = await cdp.eval(`
+    const d = document.querySelector('[data-testid="search-detail"]');
+    const op = window.__lyflow.stores.manifest.getState().operatorsById.get('filter.random_sample');
+    return { op: d?.dataset.opId ?? null, doc: d?.querySelector('.search-popup__doc')?.textContent ?? null, want: op?.doc ?? null,
+             io: d?.querySelector('.search-popup__io')?.textContent ?? null,
+             more: document.querySelector('[data-testid="search-more"]')?.textContent ?? null };
+  `);
+  report.ok("搜索弹层：空查询时列不下的写「还有 N 个」；打字之后底下写着当前那一行（随机采样）的说明与进出端口",
+    /^还有 \d+ 个/.test(moreBefore ?? "") && detail.op === "filter.random_sample" && detail.doc === detail.want && !!detail.want &&
+      /^输入 .*（PointCloud）.*→输出 .*（PointCloud）/.test(detail.io ?? "") && detail.more === null,
+    JSON.stringify({ moreBefore, detail }));
   await pressKey(cdp, "Enter", 13);
   await sleep(500);
   const t1 = await tabState();

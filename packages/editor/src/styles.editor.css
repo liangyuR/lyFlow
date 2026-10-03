@@ -699,9 +699,36 @@
 }
 
 .search-popup__list {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 4px 0;
 }
+
+/* 当前那一行的算子：说明（两行，全文在面板里）与进出端口 */
+.search-popup__detail {
+  flex: none;
+  padding: 6px 12px 8px;
+  border-top: 1px solid var(--lyflow-border);
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
+.search-popup__doc {
+  display: -webkit-box;
+  margin: 0 0 4px;
+  overflow: hidden;
+  color: var(--lyflow-fg-1);
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.search-popup__io {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  margin: 0;
+  font-family: var(--lyflow-mono);
+}
+.search-popup__arrow { color: var(--lyflow-fg-2); }
 
 .search-popup__row {
   display: flex;

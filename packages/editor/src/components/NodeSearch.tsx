@@ -162,7 +162,7 @@ export function NodeSearch() {
     }
   }, [popup]);
 
-  const { rows, incompatible } = useMemo(() => {
+  const { rows, incompatible, total } = useMemo(() => {
     // 换算子时不列它自己
     const all = (operators ?? []).filter((op) => op.id !== replace?.self);
     let hits: { op: OperatorDesc; fieldIndex: number; indices: readonly number[]; recent: boolean }[];
@@ -175,12 +175,12 @@ export function NodeSearch() {
     } else {
       hits = searchOperators(all, query).map((hit) => ({ ...hit, recent: false }));
     }
-    if (!guide) return { rows: hits.slice(0, MAX_ROWS), incompatible: 0 };
+    if (!guide) return { rows: hits.slice(0, MAX_ROWS), incompatible: 0, total: hits.length };
     // 合适的排前面（各自保持原来的先后），不合适的置灰排在后面、不藏起来：也许就是想放一个不接线的。
     // 先分再截：不然算子一多，合适的那几个可能被截在 MAX_ROWS 外面
     const ok = hits.filter((h) => guide.fit.get(h.op.id) != null);
     const no = hits.filter((h) => guide.fit.get(h.op.id) == null);
-    return { rows: [...ok, ...no].slice(0, MAX_ROWS), incompatible: no.length };
+    return { rows: [...ok, ...no].slice(0, MAX_ROWS), incompatible: no.length, total: hits.length };
   }, [operators, query, recentOps, guide, replace]);
 
   useEffect(() => setCursor(0), [query]);
@@ -246,6 +246,9 @@ export function NodeSearch() {
     }
     closeSearch();
   };
+
+  // 当前那一行的算子说明与进出端口：以前只有名字和分类，选之前不知道它干什么、接什么（面板里单击才看得到说明）
+  const activeOp = rows[Math.min(cursor, rows.length - 1)]?.op;
 
   // 贴着光标放，但不能溢出窗口
   // 两头都夹：选中一个节点按 Tab 时弹层摆在新节点要落的地方，那个节点在视野外的话坐标是负的
@@ -330,8 +333,28 @@ export function NodeSearch() {
               );
             })
           )}
+          {total > rows.length && (
+            <p className="search-popup__empty" data-testid="search-more">
+              还有 {total - rows.length} 个，继续输入缩小范围
+            </p>
+          )}
         </div>
+        {activeOp && (
+          <div className="search-popup__detail" data-testid="search-detail" data-op-id={activeOp.id}>
+            {activeOp.doc && <p className="search-popup__doc">{activeOp.doc}</p>}
+            <p className="search-popup__io">
+              <span>输入 {portsText(activeOp.inputs)}</span>
+              <span className="search-popup__arrow">→</span>
+              <span>输出 {portsText(activeOp.outputs)}</span>
+            </p>
+          </div>
+        )}
       </div>
     </>
   );
+}
+
+/** 「cloud（PointCloud）、ref（Line2D）」；没有写「无」。 */
+function portsText(ports: readonly { name: string; type: string; label?: string | undefined }[]): string {
+  return ports.length === 0 ? "无" : ports.map((p) => `${p.label || p.name}（${p.type}）`).join("、");
 }
