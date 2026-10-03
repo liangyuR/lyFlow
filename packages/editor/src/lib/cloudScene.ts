@@ -9,7 +9,7 @@ import type { Viewport } from "./pick";
 import { RAMPS, writeRgbColors, type RampName } from "./ramps";
 import { disposeOverlay } from "./shapes2d";
 import type { CloudPayload } from "../types/execution";
-import { ISO_DIR, presetPosition, type ViewPreset } from "./viewFit";
+import { gridSpec, ISO_DIR, presetPosition, type GridSpec, type ViewPreset } from "./viewFit";
 
 export type ShadingMode = "intensity" | "height" | "normal" | "rgb" | "flat";
 /** 相机模式（G7）。2d = 正交俯视 XY，看剖面用。 */
@@ -35,6 +35,10 @@ export interface Scene {
   backdrop: THREE.Group;
   /** 测量的标记点与连线（measure-plan M6）。不属于任何一栏：两栏都画，同一个世界坐标。 */
   measure: THREE.Group;
+  /** 此刻的网格（跟着云走，lib/viewFit 的 gridSpec）。 */
+  grid: GridSpec | null;
+  /** 换网格：格子大小或格数变了才重建，位置每次都挪。null = 不动。 */
+  setGrid(spec: GridSpec | null): void;
   /** 每帧渲染前调一遍。RoiLayer 靠它把 DOM 框跟着相机摆位。 */
   frameListeners: Set<() => void>;
   /** 正交相机的可视半宽，随 fit 改变；aspect 变了要重算上下边。 */
@@ -80,11 +84,16 @@ export function createScene(host: HTMLDivElement): Scene {
     renderer.domElement.dataset.target = [c.x, c.y, c.z].map((v) => Number(v.toPrecision(6))).join(",");
   });
 
-  const grid = new THREE.GridHelper(4, 16, 0x33404f, 0x232a33);
-  grid.rotation.x = Math.PI / 2; // GridHelper 默认躺在 XZ 面上，转到 XY
-  scene.add(grid);
-  const axes = new THREE.AxesHelper(0.5);
+  // 网格跟着云走（setGrid）：先放一个与以前差不多的 4 m 网格，第一片云一到就换
+  let grid = new THREE.GridHelper(1, 2);
+  const axes = new THREE.AxesHelper(1);
   scene.add(axes);
+  const disposeHelper = (helper: THREE.LineSegments) => {
+    helper.geometry.dispose();
+    const m = helper.material;
+    if (Array.isArray(m)) m.forEach((x) => x.dispose());
+    else m.dispose();
+  };
   const overlays: [THREE.Group, THREE.Group] = [new THREE.Group(), new THREE.Group()];
   scene.add(overlays[0], overlays[1]);
   const backdrop = new THREE.Group();
@@ -211,6 +220,24 @@ export function createScene(host: HTMLDivElement): Scene {
     renderFrame() {
       render();
     },
+    grid: null,
+    setGrid(spec) {
+      if (!spec) return;
+      const prev = state.grid;
+      if (!prev || prev.cell !== spec.cell || prev.divisions !== spec.divisions || !grid.parent) {
+        scene.remove(grid);
+        disposeHelper(grid);
+        // 中心不在原点了：中心线与别的线同一个颜色
+        grid = new THREE.GridHelper(spec.cell * spec.divisions, spec.divisions, 0x2b3542, 0x232a33);
+        grid.rotation.x = Math.PI / 2; // GridHelper 默认躺在 XZ 面上，转到 XY
+        scene.add(grid);
+      }
+      grid.position.set(spec.center[0], spec.center[1], spec.z);
+      // 坐标轴还在原点，长 3 格：云离原点远时它在画面外，不挡事
+      axes.scale.setScalar(spec.cell * 3);
+      state.grid = spec;
+      renderer.domElement.dataset.grid = [spec.cell, spec.center[0], spec.center[1], spec.z].map((v) => Number(v.toPrecision(9))).join(",");
+    },
     paneAt(clientX, clientY) {
       const r = renderer.domElement.getBoundingClientRect();
       const local = { x: clientX - r.left, y: clientY - r.top };
@@ -237,12 +264,8 @@ export function createScene(host: HTMLDivElement): Scene {
       disposeOverlay(measure);
       frameListeners.clear();
       // helper 自己也有 geometry 和 material。不放的话每次挂载都漏一份。
-      for (const helper of [grid, axes]) {
-        helper.geometry.dispose();
-        const m = helper.material;
-        if (Array.isArray(m)) m.forEach((x) => x.dispose());
-        else m.dispose();
-      }
+      disposeHelper(grid);
+      disposeHelper(axes);
       // renderer.dispose() **不释放 WebGL 上下文**（那是 forceContextLoss），
       // 少了它每次挂载/卸载漏一个，攒够十几个后视图突然全黑（见 README「踩过的坑」）。
       renderer.dispose();
@@ -250,6 +273,7 @@ export function createScene(host: HTMLDivElement): Scene {
       host.removeChild(renderer.domElement);
     },
   };
+  state.setGrid(gridSpec([-2, -2, 0, 2, 2, 0]));
   resize();
   const observer = new ResizeObserver(resize);
   observer.observe(host);
@@ -540,4 +564,5 @@ export function fitToBounds(scene: Scene, bounds: Float32Array) {
   scene.ortho.zoom = 1;
   scene.applyOrtho();
   scene.controls.update();
+  scene.setGrid(gridSpec(bounds));
 }

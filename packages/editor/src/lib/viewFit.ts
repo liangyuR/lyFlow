@@ -1,3 +1,5 @@
+import { niceStep } from "./params";
+
 // 换了一片云要不要重新取景。同一个坐标系里（两个包围盒相交、对角线差不到 4 倍）就不动相机：调参数重跑、
 // 在链上逐个点节点时，视角连同双击设好的转心都留着；平移了 100 m、放大了 1000 倍、完全不相交的才重新取景。
 // 不用「新云的中心在不在视野里」作判据：放大到云的一角时中心在视野外，照样会复位。
@@ -55,3 +57,43 @@ export function presetOfShortcut(id: string): ViewPreset | null {
 
 /** 快捷键按在哪个预览上：useShortcuts 往鼠标底下那个预览发这个事件，预览自己转过去（detail.done 置 true）。 */
 export const VIEW_PRESET_EVENT = "lyflow:view-preset";
+
+// 预览的网格跟着云走（以前固定 4 m、16 格、铺在原点）：格子取 1/2/5 × 10^n，让云的长边上有 10–25 格；
+// 中心对齐到整格上、铺在云最低点的下面一丝。毫米级的小零件、x = 1000 m 的云都看得到网格，栏上写着一格多大。
+
+export interface GridSpec {
+  /** 一格多大（米）。 */
+  cell: number;
+  /** 一共几格（偶数：中心正好落在一条线上）。 */
+  divisions: number;
+  center: [number, number];
+  /** 网格所在的高度：云的最低点往下一丝（不和最底下那层点重叠闪烁）。 */
+  z: number;
+  /** 栏上写的：「格 10 mm」。 */
+  text: string;
+}
+
+export function gridText(cell: number): string {
+  return cell < 1 ? `格 ${Number((cell * 1000).toPrecision(3))} mm` : `格 ${Number(cell.toPrecision(3))} m`;
+}
+
+/** b 是包围盒 [minx, miny, minz, maxx, maxy, maxz]。keepCell：上一次的格子 —— 没重新取景时（同一坐标系里重跑、换节点）
+ *  只要云上还有 6–40 格就不换档，拖参数时网格不在两档之间来回跳。不是 6 个有限数返回 null。 */
+export function gridSpec(b: ArrayLike<number>, keepCell: number | null = null): GridSpec | null {
+  if (b.length < 6) return null;
+  for (let i = 0; i < 6; i += 1) if (!Number.isFinite(b[i]!)) return null;
+  const span = Math.max(b[3]! - b[0]!, b[4]! - b[1]!) || b[5]! - b[2]! || 0.01;
+  const across = keepCell ? span / keepCell : 0;
+  const cell = keepCell && across >= 6 && across <= 40 ? keepCell : niceStep(span / 10);
+  const snap = (v: number) => Math.round(v / cell) * cell;
+  const cx = snap((b[0]! + b[3]!) / 2);
+  const cy = snap((b[1]! + b[4]!) / 2);
+  const half = Math.max(b[3]! - cx, cx - b[0]!, b[4]! - cy, cy - b[1]!, 0);
+  return {
+    cell,
+    divisions: 2 * (Math.ceil(half / cell - 1e-9) + 2),
+    center: [cx, cy],
+    z: b[2]! - cell * 1e-3,
+    text: gridText(cell),
+  };
+}

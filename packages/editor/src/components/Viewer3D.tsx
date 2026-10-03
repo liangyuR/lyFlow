@@ -31,7 +31,7 @@ import { disposeOverlay, extentOf, shapesOf } from "../lib/shapes2d";
 import { extentText } from "../lib/pick";
 import { fullId, levelOf, resolveOutput } from "../lib/subgraph";
 import { compareContentFor } from "../lib/viewRule";
-import { sameFrame } from "../lib/viewFit";
+import { gridSpec, sameFrame } from "../lib/viewFit";
 import { exportCanvasPng } from "../lib/exportPng";
 import {
   MAX_POINTS_CHOICES,
@@ -616,18 +616,27 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   // 视角连同双击设好的转心都留着。以前每片新云都取景一次，方向写死成斜 45°，正交相机的缩放也回到 1。
   // 第一片云、开关对比、换分栏方向时照旧取景。必须排在上面那个 effect 之后：取景要量的是它刚建好的那一组线。
   const fitted = useRef<{ bounds: Float32Array; compare: boolean; split: SplitMode } | null>(null);
+  const [gridText, setGridText] = useState<string | null>(null);
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
     setOverlayBounds(overlayBoundsOf(scene.overlay));
     // 对比时按 A ∪ B 取景（§1.3）：同一台相机，两栏里的东西都要装得下
     const bounds = unionBounds([cloud, cloudB], scene.overlays[0], scene.overlays[1], scene.backdrop);
-    if (!bounds) return;
+    if (!bounds) {
+      setGridText(null);
+      return;
+    }
     const last = fitted.current;
     // 两栏换排法（最大化 / 还原时上下 ↔ 左右）不算：每栏的宽高比跟着 resize 变了，视角与转心留着
-    if (last && last.compare === compareOn && sameFrame(last.bounds, bounds)) return;
-    fitToBounds(scene, bounds);
-    fitted.current = { bounds, compare: compareOn, split };
+    if (last && last.compare === compareOn && sameFrame(last.bounds, bounds)) {
+      // 不重新取景：网格跟到这片云下面，格子能不换档就不换
+      scene.setGrid(gridSpec(bounds, scene.grid?.cell ?? null));
+    } else {
+      fitToBounds(scene, bounds);
+      fitted.current = { bounds, compare: compareOn, split };
+    }
+    setGridText(scene.grid?.text ?? null);
   }, [cloud, cloudB, overlayShapes, overlayShapesB, backdrop.bounds, compareOn, split]);
 
   // 相机模式（G7）。只换 controls 挂的那台相机，场景与几何原封不动。
@@ -743,6 +752,11 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
             {extent.text}
           </span>
         )}
+        {content === "cloud" && gridText && (
+          <span className="viewer__grid" data-testid="viewer-grid" title="网格一格多大（跟着云取 1 / 2 / 5 × 10ⁿ，铺在云的最低处）">
+            {gridText}
+          </span>
+        )}
         {cloud && (
           <span className="viewer__count" title="显示点数 / 总点数">
             {cloud.pointCount.toLocaleString()} / {cloud.totalPoints.toLocaleString()} 点
@@ -808,6 +822,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
                 if (scene && bounds) {
                   fitToBounds(scene, bounds);
                   fitted.current = { bounds, compare: compareOn, split };
+                  setGridText(scene.grid?.text ?? null);
                 }
               }}
               disabled={!cloud && overlayCount === 0 && backdrop.count === 0}

@@ -53,6 +53,7 @@ interface CloudTarget {
 export function CloudView({ win, src }: PeekViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const peekRoot = useRef<HTMLDivElement>(null);
+  const [gridText, setGridText] = useState<string | null>(null);
   const sceneRef = useRef<Scene | null>(null);
 
   const [display, setDisplay] = useState<Display>({
@@ -277,6 +278,7 @@ export function CloudView({ win, src }: PeekViewProps) {
     setOverlayBounds(overlayBoundsOf(scene.overlay));
     const bounds = unionBounds(cloud, scene.overlay);
     if (bounds) fitToBounds(scene, bounds);
+    setGridText(bounds ? (scene.grid?.text ?? null) : null);
   }, [cloud, shapeStat]);
 
   useEffect(() => {
@@ -307,7 +309,10 @@ export function CloudView({ win, src }: PeekViewProps) {
   const fit = () => {
     const scene = sceneRef.current;
     const bounds = scene ? unionBounds(cloud, scene.overlay) : null;
-    if (scene && bounds) fitToBounds(scene, bounds);
+    if (scene && bounds) {
+      fitToBounds(scene, bounds);
+      setGridText(scene.grid?.text ?? null);
+    }
   };
   const status = loading ? "正在取点云…" : display.status;
   const pointChoices = MAX_POINTS_CHOICES.includes(maxPoints)
@@ -343,6 +348,11 @@ export function CloudView({ win, src }: PeekViewProps) {
         {cloud && (
           <span className="peek-cloud__count" title="显示点数 / 总点数">
             {cloud.pointCount.toLocaleString()} / {cloud.totalPoints.toLocaleString()}
+          </span>
+        )}
+        {gridText && (
+          <span className="peek-cloud__count" data-testid="peek-grid" title="网格一格多大">
+            {gridText}
           </span>
         )}
         <span className="peek-cloud__spacer" />

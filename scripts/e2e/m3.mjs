@@ -2103,8 +2103,13 @@ async function suiteViewerBody(cdp, report) {
   const ids = await buildGraph(
     cdp,
     [{ key: "gen", op: "gen.synthetic", params: { pointCount: 8000, seed: 2 } },
-     { key: "voxel", op: "filter.voxel_grid", params: { leafSize: [0.03, 0.03, 0.03] } }],
-    [{ from: ["gen", "cloud"], to: ["voxel", "cloud"] }],
+     { key: "voxel", op: "filter.voxel_grid", params: { leafSize: [0.03, 0.03, 0.03] } },
+     // 网格跟着云走：一片挪到 x = 1000 的云
+     { key: "make", op: "transform.make", params: { translation: [1000, 0, 0] } },
+     { key: "far", op: "transform.apply" }],
+    [{ from: ["gen", "cloud"], to: ["voxel", "cloud"] },
+     { from: ["gen", "cloud"], to: ["far", "cloud"] },
+     { from: ["make", "transform"], to: ["far", "transform"] }],
   );
   const run = await runAndWait(cdp, () => pressF5(cdp));
   mustOk(run.status === "ok", "先跑一次", run.status);
@@ -2220,6 +2225,31 @@ async function suiteViewerBody(cdp, report) {
     await domOf(cdp, ".viewer", "el.getAttribute('data-node')"),
     ids.voxel,
   );
+
+  // 网格跟着云走：x = 1000 的云，网格居中在它下面、格子按云取；回到 gen，网格回到原点附近、格子不变
+  const gridOf = async (nodeId) => {
+    await selectAndReadViewer(cdp, nodeId);
+    await sleep(200);
+    return cdp.eval(`
+      const v = document.querySelector('.viewer');
+      const g = (document.querySelector('[data-testid="viewer3d-canvas"] canvas')?.dataset.grid ?? '').split(',').map(Number);
+      const b = (v.getAttribute('data-cloud-bounds') ?? '').split(',').map(Number);
+      return { text: document.querySelector('[data-testid="viewer-grid"]')?.textContent ?? null, cell: g[0], cx: g[1], cy: g[2], z: g[3], b };
+    `);
+  };
+  const gFar = await gridOf(ids.far);
+  const gGen = await gridOf(ids.gen);
+  const gridOk = (g) => {
+    if (!g.text || !/^格 [\d.]+ (mm|m)$/.test(g.text) || g.b.length !== 6) return false;
+    const span = Math.max(g.b[3] - g.b[0], g.b[4] - g.b[1]);
+    return span / g.cell >= 10 && span / g.cell < 25 &&
+      Math.abs(g.cx - (g.b[0] + g.b[3]) / 2) <= g.cell / 2 + 1e-3 && Math.abs(g.cy - (g.b[1] + g.b[4]) / 2) <= g.cell / 2 + 1e-3 &&
+      // data-cloud-bounds 只到小数点后 3 位：高度按那个精度比
+      g.z <= g.b[2] + 1e-3 && g.z >= g.b[2] - g.cell / 100 - 1e-3;
+  };
+  report.ok("预览网格跟着云：x=1000 的云网格居中在它下面、格子按云取；回到 gen 回到原点附近，格子不变",
+    gridOk(gFar) && gridOk(gGen) && gFar.cx > 999 && Math.abs(gGen.cx) < 1 && gFar.text === gGen.text,
+    JSON.stringify({ gFar, gGen }));
 
   // 导出：真正的下载由浏览器接管，这里只点一下，抛异常会被控制台分组逮到
   mustOk(
