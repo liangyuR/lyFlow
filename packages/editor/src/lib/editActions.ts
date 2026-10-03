@@ -39,11 +39,18 @@ export function deleteSelection(nodes: readonly string[], edges: readonly string
     nodes.length > 0
       ? nodes.length === 1 ? "删除节点" : `删除 ${nodes.length} 个节点`
       : edges.length === 1 ? "断开连线" : `断开 ${edges.length} 条连线`;
+  let dropped: string[] = [];
   graph.batch(label, () => {
     if (edges.length > 0) graph.disconnect(edges);
-    if (nodes.length > 0) graph.deleteNodes(nodes);
+    if (nodes.length > 0) dropped = graph.deleteNodes(nodes);
   });
   useUiStore.getState().clearSelection();
+  if (dropped.length > 0) useUiStore.getState().showToast(droppedOutputsText(dropped), "warn");
+}
+
+/** 删掉的节点上标着图级输出：一并取消了，说一声（宿主按名字取它们）。 */
+function droppedOutputsText(names: readonly string[]): string {
+  return `图级输出 ${names.join("、")} 指着删掉的节点，一并取消了（Ctrl+Z 撤回）`;
 }
 
 /** 删掉这些节点、上下游按静音透传的规则接回去（一条撤销），提示接了几条、几条没接上。 */
@@ -53,7 +60,8 @@ export function deleteHealing(ids: readonly string[]): void {
   const r = useGraphStore.getState().deleteNodesHealing(ids);
   ui.clearSelection();
   const left = r.unresolved > 0 ? `；${r.unresolved} 个下游没有合适的来源，没接` : "";
-  ui.showToast(`已删除 ${ids.length} 个节点，接通 ${r.wired} 条${left}`, r.unresolved > 0 ? "warn" : "info");
+  const outs = r.dropped.length > 0 ? `；${droppedOutputsText(r.dropped)}` : "";
+  ui.showToast(`已删除 ${ids.length} 个节点，接通 ${r.wired} 条${left}${outs}`, r.unresolved > 0 || outs ? "warn" : "info");
 }
 
 /** 断开这些节点的全部连线（一条撤销）。返回断了几条。 */

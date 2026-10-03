@@ -247,7 +247,7 @@ test("deleteNodesHealing：删中间那个、上下游接回去，一条撤销",
   useGraphStore.getState().connect({ node: j2, port: "value" }, { node: j3, port: "value" });
   const past = useGraphStore.getState().past.length;
   const edgesOf = () => useGraphStore.getState().doc.edges.map((e) => `${e.from.node}>${e.to.node}`).sort();
-  assert.deepEqual(useGraphStore.getState().deleteNodesHealing([j2]), { wired: 1, unresolved: 0 });
+  assert.deepEqual(useGraphStore.getState().deleteNodesHealing([j2]), { wired: 1, unresolved: 0, dropped: [] });
   assert.deepEqual(edgesOf(), [`${j1}>${j3}`]);
   assert.equal(useGraphStore.getState().past.length - past, 1, "一条撤销");
   useGraphStore.getState().undo();

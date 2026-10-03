@@ -2033,6 +2033,8 @@
   background: var(--lyflow-bg-2);
 }
 
+.insp__outputs .insp-out.is-missing .insp-out__value { color: #ff9a9a; }
+
 .insp__outputs .insp-out {
   align-items: center;
 }

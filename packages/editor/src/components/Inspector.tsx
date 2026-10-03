@@ -13,7 +13,7 @@ import {
 import { groupParams, effectiveParams, isEnabled, isVisible, valueEquals } from "../lib/params";
 import { readStoredBool, writeStoredBool } from "../lib/prefs";
 import { frameKeyOfGroup, pickFrame, roiFramesOf } from "../lib/roiFrames";
-import { augmentOperators, describeEventNode, fullId, levelOf, nodeIndex, promotedBy } from "../lib/subgraph";
+import { augmentOperators, describeEventNode, fullId, levelOf, locateEventNode, nodeIndex, promotedBy } from "../lib/subgraph";
 import { useExecutionStore, useNodeExecution, useParamErrors } from "../store/execution";
 import { currentSubgraph, useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
@@ -88,6 +88,7 @@ function OutputValues({ outputs, nodeKey }: { outputs: OutputStat[]; nodeKey: st
 function GraphOutputs() {
   const outputs = useGraphStore((s) => s.doc.outputs);
   const remove = useGraphStore((s) => s.removeGraphOutput);
+  const doc = useGraphStore((s) => s.doc);
   const nodes = useExecutionStore((s) => s.nodes);
   const names = Object.keys(outputs ?? {});
   if (names.length === 0) return null;
@@ -98,9 +99,12 @@ function GraphOutputs() {
       {names.map((name) => {
         const ref = outputs![name]!;
         const stat = nodes.get(ref.node)?.stats?.outputs?.find((o) => o.port === ref.port);
+        // 指着的节点不在了（老图、手改过的文件）：存盘、运行都会被拒，标出来、✕ 照样能删
+        const missing = locateEventNode(doc, ref.node) === null;
         return (
           <div
-            className="insp-out"
+            className={`insp-out${missing ? " is-missing" : ""}`}
+            data-missing={missing ? "1" : undefined}
             key={name}
             data-testid={`graph-output-${name}`}
             data-node={ref.node}
@@ -111,7 +115,7 @@ function GraphOutputs() {
               {name}
             </span>
             <span className="insp-out__value">
-              {stat ? formatOutputValue(stat) : `${ref.node}.${ref.port}`}
+              {missing ? `节点已不在图里（${ref.node}）` : stat ? formatOutputValue(stat) : `${ref.node}.${ref.port}`}
             </span>
             <button
               type="button"

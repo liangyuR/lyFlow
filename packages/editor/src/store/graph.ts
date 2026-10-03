@@ -38,10 +38,12 @@ import {
   composeSubgraph as composeInto,
   dissolveSubgraph as dissolveFrom,
   inlineLibraryNode,
+  levelKeyOf,
   levelOf,
   fullId,
   pathIsValid,
   promotedBy,
+  remapGraphOutputs,
   type ComposeResult,
   type SubPath,
 } from "../lib/subgraph";
@@ -345,9 +347,10 @@ interface GraphState {
   addNodeAuto(opId: string, position: { x: number; y: number }): AutoConnectResult;
   /** 插入片段：带自动连线的粘贴（L14）。插完是普通节点，没有展开 / 收回。 */
   insertSnippet(snippet: SnippetDesc, at: { x: number; y: number }): AutoConnectResult;
-  deleteNodes(ids: readonly string[]): void;
+  /** 返回连带删掉的图级输出名（它们指着被删的节点）。 */
+  deleteNodes(ids: readonly string[]): string[];
   /** 删节点并把上下游接回去（规则同静音透传，lib/autoconnect 的 healPlan）。一条撤销。 */
-  deleteNodesHealing(ids: readonly string[]): { wired: number; unresolved: number };
+  deleteNodesHealing(ids: readonly string[]): { wired: number; unresolved: number; dropped: string[] };
   moveNodes(moves: readonly { id: string; position: { x: number; y: number } }[]): void;
   /** at：节点所在的层级，不给 = 当前层级（ui.path）。参数面板展开进子图定义时给的是那一层的路径。 */
   setParam(nodeId: string, name: string, value: unknown, at?: SubPath): void;
@@ -722,10 +725,15 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     deleteNodes(ids) {
-      if (ids.length === 0) return;
+      if (ids.length === 0) return [];
       const kill = new Set(ids);
       const label = ids.length === 1 ? "删除节点" : `删除 ${ids.length} 个节点`;
+      const before = get().doc;
+      const key = levelKeyOf(useUiStore.getState().path);
+      let dropped: string[] = [];
       transact(label, (d) => {
+        // 图级输出指着被删的节点（或它里面的）：一并删掉，不然存盘、运行都报「指向不存在的节点」
+        dropped = remapGraphOutputs(d, before, key, (segs, k) => (kill.has(segs[k]!) ? null : undefined));
         const lvl = level(d);
         lvl.nodes = lvl.nodes.filter((n) => !kill.has(n.id));
         // 删节点自动清理相连边（交互清单 P0 #5）
@@ -746,18 +754,20 @@ export const useGraphStore = create<GraphState>((set, get) => {
           }
         }
       });
+      return dropped;
     },
 
     deleteNodesHealing(ids) {
-      if (ids.length === 0) return { wired: 0, unresolved: 0 };
+      if (ids.length === 0) return { wired: 0, unresolved: 0, dropped: [] };
       const doc = get().doc;
       const plan = healPlan(ctx(doc), levelDoc(doc), new Set(ids));
       let wired = 0;
+      let dropped: string[] = [];
       get().batch(ids.length === 1 ? "删除并接通" : `删除 ${ids.length} 个节点并接通`, () => {
-        get().deleteNodes(ids);
+        dropped = get().deleteNodes(ids);
         for (const w of plan.wires) if (get().connect(w.from, w.to).ok) wired += 1;
       });
-      return { wired, unresolved: plan.unresolved + plan.wires.length - wired };
+      return { wired, unresolved: plan.unresolved + plan.wires.length - wired, dropped };
     },
 
     moveNodes(moves) {
@@ -1194,8 +1204,16 @@ export const useGraphStore = create<GraphState>((set, get) => {
       if (ids.length === 0) return null;
       const path = useUiStore.getState().path;
       let result: ComposeResult | null = null;
+      const before = get().doc;
       transact(ids.length === 1 ? "合成子图" : `把 ${ids.length} 个节点合成子图`, (d) => {
         result = composeInto(ctx(d), d, path, ids, allIds(d));
+        const made = result as ComposeResult | null;
+        if (!made) return;
+        // 被收进去的节点上标着的图级输出：路径 id 里多一层新的子图节点
+        const picked = new Set(ids);
+        remapGraphOutputs(d, before, levelKeyOf(path), (segs, k, port) =>
+          picked.has(segs[k]!) ? { node: [...segs.slice(0, k), made.nodeId, ...segs.slice(k)].join("/"), port } : undefined,
+        );
       });
       return result;
     },
@@ -1203,8 +1221,25 @@ export const useGraphStore = create<GraphState>((set, get) => {
     dissolveSubgraph(nodeId) {
       const path = useUiStore.getState().path;
       let inlined: string[] = [];
+      const before = get().doc;
+      const host = levelOf(before, path).nodes.find((n) => n.id === nodeId);
+      const sid = host ? subgraphIdOf(host.op) : null;
+      const def = sid ? before.subgraphs?.[sid] : undefined;
       transact("解散子图", (d) => {
         inlined = dissolveFrom(d, path, nodeId, allIds(d));
+        if (!def || inlined.length !== def.nodes.length) return;
+        // dissolveFrom 按定义里的顺序给内联出来的节点分新 id
+        const rename = new Map(def.nodes.map((n, i) => [n.id, inlined[i]!]));
+        remapGraphOutputs(d, before, levelKeyOf(path), (segs, k, port) => {
+          if (segs[k] !== nodeId) return undefined;
+          if (k === segs.length - 1) {
+            const from = def.outputs.find((o) => o.name === port)?.from;
+            const id = from ? rename.get(from.node) : undefined;
+            return from && id ? { node: [...segs.slice(0, k), id].join("/"), port: from.port } : null;
+          }
+          const id = rename.get(segs[k + 1]!);
+          return id ? { node: [...segs.slice(0, k), id, ...segs.slice(k + 2)].join("/"), port } : null;
+        });
       });
       return inlined;
     },

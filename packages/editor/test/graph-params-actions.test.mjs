@@ -443,9 +443,11 @@ test("撤销回到保存点时 dirty 复原（P1.6）", () => {
   assert.equal(g().dirty, true, "再往前就又和磁盘不一样了");
 });
 
-test("合成子图 / 解散子图：被绑定的参数跟着搬，bind 不悬空、值还归图参数管", () => {
+test("合成子图 / 解散子图：被绑定的参数跟着搬，bind 不悬空、值还归图参数管；图级输出跟着改路径，删节点连带删它的", () => {
   reset();
   g().promoteToGraphParam("n_voxel", "leafSize");
+  const floor = g().markGraphOutput({ node: "n_plane", port: "inliers" }, "floor");
+  const inner2 = g().markGraphOutput({ node: "n_clean2/s_sor", port: "cloud" }, "inner2");
   const composed = g().composeSubgraph(["n_voxel", "n_plane"]);
   assert.ok(composed);
   const def = doc().subgraphs[composed.subgraphId];
@@ -454,6 +456,8 @@ test("合成子图 / 解散子图：被绑定的参数跟着搬，bind 不悬空
   assert.deepEqual(doc().params.leafSize.binds, [`${composed.nodeId}.leafSize`]);
   assert.deepEqual(doc().params.planeTol.binds, [`${composed.nodeId}.distanceThreshold`]);
   assert.equal(def.params.find((p) => p.name === "distanceThreshold").default, 0.006);
+  assert.deepEqual(doc().outputs[floor], { node: `${composed.nodeId}/n_plane`, port: "inliers" }, "收进去的节点上的输出：路径里多一层");
+  const whole = g().markGraphOutput({ node: composed.nodeId, port: def.outputs[0].name }, "whole");
 
   const inlined = g().dissolveSubgraph(composed.nodeId);
   assert.equal(inlined.length, 2);
@@ -466,6 +470,20 @@ test("合成子图 / 解散子图：被绑定的参数跟着搬，bind 不悬空
   assert.equal(plane.op, "segment.plane");
   assert.equal(voxel.params.leafSize, undefined, "解散时不往被绑定的内参上写显式值");
   assert.equal(plane.params.distanceThreshold, undefined);
+  const from = def.outputs[0].from;
+  assert.deepEqual(
+    [doc().outputs[floor], doc().outputs[whole].port, node(doc().outputs[whole].node).op, doc().outputs[inner2]],
+    [{ node: plane.id, port: "inliers" }, from.port, from.node === "n_plane" ? "segment.plane" : "filter.voxel_grid", { node: "n_clean2/s_sor", port: "cloud" }],
+    "解散：路径里少那一层、换成新 id；标在子图节点自己身上的改指到里面出这个口的节点；别的实例里的不动",
+  );
+
+  // 删节点：指着它（或它里面）的图级输出一并删掉，删了哪几个交回去；Ctrl+Z 回来
+  assert.deepEqual(g().deleteNodes([plane.id]).sort(), [floor, whole].sort(), "两个输出都指着 plane");
+  assert.deepEqual([doc().outputs[floor], doc().outputs[inner2]], [undefined, { node: "n_clean2/s_sor", port: "cloud" }]);
+  assert.deepEqual(g().deleteNodes(["n_clean2"]), [inner2], "删子图实例：标在它里面的也删");
+  g().undo();
+  g().undo();
+  assert.deepEqual(doc().outputs[floor], { node: plane.id, port: "inliers" }, "Ctrl+Z 回来");
 });
 
 test("库算子展开为内联子图：定义换新 id 写进 doc，op 换成 sub:，参数与连线不动；不是库算子不改；一次撤销还原", () => {

@@ -1,7 +1,8 @@
 // 阶段 A 验收：惰性分支（plan_extended / not_demanded 半透明 / stale 不误报）
 // 与图级命名输出。对应 docs/phase-a1-acceptance.md 的两条。与其余分组共用一个 app 实例。
 
-import { buildGraph, lit, newDoc, pressF5, replan, runAndWait, select } from "./page.mjs";
+import { sleep } from "./cdp.mjs";
+import { buildGraph, lit, newDoc, pressCtrl, pressF5, pressKey, replan, runAndWait, select } from "./page.mjs";
 
 /** 主路径成功的 fallback 图：a 来自 gen.synthetic，b 那一路整条都是 deferred。 */
 const OK_NODES = [
@@ -202,6 +203,36 @@ async function suiteGraphOutputs(cdp, report) {
   `);
   report.eq("取消后 doc 上没有图级输出了", Object.keys(removed.outputs), []);
   report.ok("列表也跟着收起来了", removed.section === false, JSON.stringify(removed));
+
+  // 删掉标着图级输出的节点：输出一并取消、提示说是哪个（以前留着，存盘、F5 都报「指向不存在的节点」）；Ctrl+Z 一起回来
+  await cdp.eval(`window.__lyflow.stores.graph.getState().markGraphOutput({ node: ${lit(ids.pipe)}, port: 'out' }, 'cloud'); return true;`);
+  await select(cdp, ids.pipe);
+  await sleep(100);
+  await pressKey(cdp, "Delete", 46);
+  await sleep(200);
+  const afterDel = await cdp.eval(`
+    return { outputs: Object.keys(window.__lyflow.stores.graph.getState().doc.outputs ?? {}),
+             toast: window.__lyflow.stores.ui.getState().toast?.text ?? null };
+  `);
+  await pressCtrl(cdp, "z");
+  await sleep(200);
+  const backOut = await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.outputs ?? {};`);
+  report.ok("删掉标着图级输出的节点：输出一并取消、提示说了是哪个；Ctrl+Z 一起回来",
+    afterDel.outputs.length === 0 && /图级输出 cloud/.test(afterDel.toast ?? "") &&
+      JSON.stringify(backOut) === JSON.stringify({ cloud: { node: ids.pipe, port: "out" } }),
+    JSON.stringify({ afterDel, backOut }));
+
+  // Ctrl+G 把它收进子图：输出改指到子图里面（路径 id），照样跑得通、按名字取得到（以前 bridge 只认顶层 id，F5、Ctrl+S 都被拒）
+  await select(cdp, ids.pipe);
+  await sleep(100);
+  await pressCtrl(cdp, "g");
+  await sleep(300);
+  const nestedOut = await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.outputs?.cloud ?? null;`);
+  const ranNested = await runAndWait(cdp, () => pressF5(cdp));
+  report.ok("Ctrl+G 收进子图：输出改指到子图里面（路径 id），F5 跑得通、run_started 带着它",
+    typeof nestedOut?.node === "string" && nestedOut.node.endsWith(`/${ids.pipe}`) && nestedOut.port === "out" &&
+      ranNested.status === "ok" && Array.isArray(ranNested.outputs) && ranNested.outputs.some((o) => o.name === "cloud"),
+    JSON.stringify({ nestedOut, status: ranNested.status, outputs: ranNested.outputs }));
 }
 
 export const phaseASuites = [suiteLazyBranch, suitePlanExtended, suiteGraphOutputs];

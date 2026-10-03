@@ -541,3 +541,46 @@ export function promotedBy(
 ): SubParam | undefined {
   return def?.params?.find((p) => p.binds?.some((b) => b.node === nodeId && b.param === param));
 }
+
+/** 一个层级的钥匙：顶层是 ""，子图定义是定义 id（同一个定义的几个实例共用它）。 */
+export function levelKeyOf(path: SubPath): string {
+  return path.length === 0 ? "" : path[path.length - 1]!.subgraphId;
+}
+
+/** 按层改写图级输出（路径 id 指着的节点）。删节点、合成、解散都会让路径 id 失效：存下来 bridge 报「指向不存在的节点」，
+ *  F5、Ctrl+S 都过不去。路径逐段走：落在 levelKey 那一层的那一段交给 fn —— 返回新的 { node, port }、null（删掉这个输出）、
+ *  或 undefined（不动）。fn 看的是 before（改之前的那份）；改的是 doc（store 在 draft 上调）。返回删掉的输出名。 */
+export function remapGraphOutputs(
+  doc: GraphDoc,
+  before: GraphDoc,
+  levelKey: string,
+  fn: (segs: string[], k: number, port: string) => { node: string; port: string } | null | undefined,
+): string[] {
+  const dropped: string[] = [];
+  if (!doc.outputs) return dropped;
+  for (const [name, out] of Object.entries(before.outputs ?? {})) {
+    const segs = out.node.split("/");
+    let level: GraphLevel | undefined = before;
+    let key = "";
+    for (let k = 0; k < segs.length && level; k += 1) {
+      if (key === levelKey) {
+        const next = fn(segs, k, out.port);
+        if (next === null) {
+          delete doc.outputs[name];
+          dropped.push(name);
+          break;
+        }
+        if (next) {
+          doc.outputs[name] = { ...doc.outputs[name], node: next.node, port: next.port };
+          break;
+        }
+      }
+      const node: GraphNode | undefined = level.nodes.find((n) => n.id === segs[k]);
+      const sid: string | null = node ? subgraphIdOf(node.op) : null;
+      level = sid ? before.subgraphs?.[sid] : undefined;
+      key = sid ?? "";
+    }
+  }
+  return dropped;
+}
+
