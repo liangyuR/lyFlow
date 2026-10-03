@@ -543,6 +543,45 @@ export function applyViewPreset(scene: Scene, view: ViewPreset): boolean {
   return true;
 }
 
+/** 相机此刻的样子（两台相机与转心）。场景重建之后放回去：连线查看器在运行期间换成「正在计算…」会卸掉画布。 */
+export interface CameraView {
+  target: [number, number, number];
+  position: [number, number, number];
+  near: number;
+  far: number;
+  orthoPosition: [number, number, number];
+  orthoZoom: number;
+  halfWidth: number;
+}
+
+export function saveCameraView(scene: Scene): CameraView {
+  const t = scene.controls.target;
+  const p = scene.camera.position;
+  const o = scene.ortho.position;
+  return {
+    target: [t.x, t.y, t.z],
+    position: [p.x, p.y, p.z],
+    near: scene.camera.near,
+    far: scene.camera.far,
+    orthoPosition: [o.x, o.y, o.z],
+    orthoZoom: scene.ortho.zoom,
+    halfWidth: scene.halfWidth,
+  };
+}
+
+export function restoreCameraView(scene: Scene, view: CameraView): void {
+  scene.controls.target.set(...view.target);
+  scene.camera.position.set(...view.position);
+  scene.camera.near = view.near;
+  scene.camera.far = view.far;
+  scene.camera.updateProjectionMatrix();
+  scene.ortho.position.set(...view.orthoPosition);
+  scene.ortho.zoom = view.orthoZoom;
+  scene.halfWidth = view.halfWidth;
+  scene.applyOrtho();
+  scene.controls.update();
+}
+
 export function fitToBounds(scene: Scene, bounds: Float32Array) {
   const cx = (bounds[0]! + bounds[3]!) / 2;
   const cy = (bounds[1]! + bounds[4]!) / 2;

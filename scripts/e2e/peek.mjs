@@ -304,6 +304,24 @@ async function suiteCloudPeek(cdp, report, fixture) {
   report.ok("查看器里真鼠标转过视角，点 ⤢ 回到全貌", cam0 && cam1 && !near(cam1, cam0) && near(cam2, cam0),
     JSON.stringify({ cam0, cam1, cam2 }));
 
+  // 转过视角之后重跑（清掉缓存，窗里换成新的一片云、还在同一个地方）：视角留着，不拉回全貌
+  await dragMouse(cdp, mid, { x: mid.x - 60, y: mid.y + 30 });
+  const cam3 = await steadyCamera();
+  const shownRun = () => cdp.eval(`return document.querySelector(${lit(winSel + ' [data-testid="peek-cloud"]')})?.dataset.run ?? null;`);
+  const runBefore = await shownRun();
+  await cdp.eval(`await window.__lyflow.transport.clearCache(); return true;`);
+  const rerun = await runAndWait(cdp, () => pressF5(cdp));
+  let runAfter = runBefore;
+  for (let i = 0; i < 40 && runAfter === runBefore; i += 1) {
+    await sleep(150);
+    runAfter = await shownRun();
+  }
+  await waitPeek(cdp, opened.win.id, (d) => d.cloudCanvas && countsOf(d.countText));
+  const cam4 = await steadyCamera();
+  report.ok("查看器里转过视角之后重跑：窗里换成了新的一次，视角留着（不拉回全貌）",
+    rerun.status === "ok" && runAfter !== runBefore && cam3 && !near(cam3, cam2) && near(cam4, cam3),
+    JSON.stringify({ runBefore, runAfter, cam2, cam3, cam4 }));
+
   // 点大小：+ 放大（降采样后只剩几千点时看得清）
   const sizeOf = () => cdp.eval(`return Number(document.querySelector(${lit(winSel + ' [data-testid="peek-cloud"]')})?.dataset.pointSize);`);
   const size0 = await sizeOf();

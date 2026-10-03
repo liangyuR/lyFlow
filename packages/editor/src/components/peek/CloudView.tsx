@@ -12,9 +12,12 @@ import {
   fitToBounds,
   overlayBoundsOf,
   paintPoints,
+  restoreCameraView,
+  saveCameraView,
   setPoints,
   unionBounds,
   type CameraMode,
+  type CameraView,
   type Scene,
   type ShadingMode,
 } from "../../lib/cloudScene";
@@ -32,7 +35,7 @@ import { useFocusOnDoubleClick } from "../../hooks/useFocusOnDoubleClick";
 import { measureAttrs, useMeasure } from "../../hooks/useMeasure";
 import { MeasureReadout } from "../MeasureReadout";
 import { ViewPresetButtons, useViewPresetEvents } from "../ViewPresetButtons";
-import type { ViewPreset } from "../../lib/viewFit";
+import { gridSpec, sameFrame, type ViewPreset } from "../../lib/viewFit";
 import type { PeekViewProps } from "./types";
 
 const MAX_POINTS_CHOICES = [100_000, 200_000, 500_000, 2_000_000];
@@ -50,11 +53,17 @@ interface CloudTarget {
   base: BaseCloud | null;
 }
 
+/** 每个窗口最后的视角与那时取景量的范围。运行期间窗里换成「正在计算…」会卸掉画布，算完回来接着用 ——
+ *  不然每次重跑都被拉回全貌。窗口关掉之后下次存的时候清掉。 */
+const keptViews = new Map<string, { bounds: Float32Array; view: CameraView }>();
+
 export function CloudView({ win, src }: PeekViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const peekRoot = useRef<HTMLDivElement>(null);
   const [gridText, setGridText] = useState<string | null>(null);
   const sceneRef = useRef<Scene | null>(null);
+  /** 上次取景量的范围（下面取景的 effect 用）。 */
+  const fitted = useRef<Float32Array | null>(null);
 
   const [display, setDisplay] = useState<Display>({
     runId: null,
@@ -130,13 +139,17 @@ export function CloudView({ win, src }: PeekViewProps) {
     if (!host) return;
     const scene = createScene(host);
     sceneRef.current = scene;
+    fitted.current = null;
     setSceneHost(scene);
     return () => {
+      const open = new Set(usePeekStore.getState().windows.map((w) => w.id));
+      for (const id of keptViews.keys()) if (!open.has(id)) keptViews.delete(id);
+      if (fitted.current && open.has(win.id)) keptViews.set(win.id, { bounds: fitted.current, view: saveCameraView(scene) });
       scene.dispose();
       sceneRef.current = null;
       setSceneHost(null);
     };
-  }, []);
+  }, [win.id]);
 
   useEffect(
     () =>
@@ -270,16 +283,33 @@ export function CloudView({ win, src }: PeekViewProps) {
     for (const line of shapesOf(shapeStat, color, span)) scene.overlay.add(line);
   }, [shapeStat, cloud, typesByName]);
 
-  // 换了云或换了几何就自动取景一次；同一份内容里调参数不该把视角拉回去。
+  // 换了云或换了几何时看一眼要不要取景：还在同一个坐标系里（sameFrame，与主预览同一条）就不动相机 ——
+  // 调参数重跑之后，在窗口里转好的视角、双击设好的转心都留着（运行期间画布卸掉过的，放回卸掉前的视角）。
+  // 以前每次重跑都拉回斜 45° 的全貌。第一片云、换到差得远的一片时照旧取景。
   // 必须排在上面那个 effect 之后：取景要量的是它刚建好的那一组线。
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
     setOverlayBounds(overlayBoundsOf(scene.overlay));
     const bounds = unionBounds(cloud, scene.overlay);
-    if (bounds) fitToBounds(scene, bounds);
-    setGridText(bounds ? (scene.grid?.text ?? null) : null);
-  }, [cloud, shapeStat]);
+    if (!bounds) {
+      setGridText(null);
+      return;
+    }
+    const kept = fitted.current ? null : keptViews.get(win.id);
+    if (kept && sameFrame(kept.bounds, bounds)) {
+      restoreCameraView(scene, kept.view);
+      fitted.current = kept.bounds;
+    }
+    if (fitted.current && sameFrame(fitted.current, bounds)) {
+      // 不重新取景：网格跟到这片云下面，格子能不换档就不换
+      scene.setGrid(gridSpec(bounds, scene.grid?.cell ?? null));
+    } else {
+      fitToBounds(scene, bounds);
+      fitted.current = bounds;
+    }
+    setGridText(scene.grid?.text ?? null);
+  }, [cloud, shapeStat, win.id]);
 
   useEffect(() => {
     sceneRef.current?.setMode(cameraMode);
