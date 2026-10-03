@@ -2219,8 +2219,11 @@ async function suiteMeasure(cdp, report) {
   await sleep(200);
   report.eq("换节点：测量清掉", (await readMeasure(cdp)).count, 0);
   const cam2 = await cameraOf();
+  // 阻尼的尾巴还会挪个千分之一（没有新的一帧时读数停在半路）：按 1 cm 比。重新取景挪的是米级
+  const sameCam = (a, b) => a.target === b.target && a.pos !== null && b.pos !== null &&
+    a.pos.split(",").every((v, i) => Math.abs(Number(v) - Number(b.pos.split(",")[i])) <= 0.01);
   report.ok("重跑（换了随机种子）、换到同一坐标系里的 voxel：相机位置与转心都没动",
-    cam0.pos !== null && cam0.target !== null && JSON.stringify(cam1) === JSON.stringify(cam0) && JSON.stringify(cam2) === JSON.stringify(cam0),
+    cam0.pos !== null && cam0.target !== null && sameCam(cam1, cam0) && sameCam(cam2, cam0),
     JSON.stringify({ cam0, cam1, cam2 }));
 
   await pressKey(cdp, "m", 77);
