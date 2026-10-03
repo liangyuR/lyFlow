@@ -5,7 +5,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { addNodeWithAutoConnect, insertIntoEdge } from "../lib/insert";
+import { addNodeWithAutoConnect, insertIntoEdge, replaceOperator } from "../lib/insert";
+import { planReplace } from "../lib/replace";
 import { searchOperators, FIELD_LABELS } from "../lib/search";
 import { augmentOperators, levelOf } from "../lib/subgraph";
 import { findPort, inferAnyTypes, insertPortsFor, pendingPort, pendingType } from "../lib/typecheck";
@@ -27,6 +28,8 @@ interface PendingInfo {
 /** 搜索里怎么引导：哪些算子合适（值是行尾的标注，null = 不合适、置灰排后面）、分隔行写什么、占位字。 */
 interface Guide {
   fit: ReadonlyMap<string, string | null>;
+  /** 不合适的那几行行尾写什么（换算子时「断 2 条线」）。 */
+  miss?: ReadonlyMap<string, string>;
   sep: (n: number) => string;
   placeholder: string;
 }
@@ -93,7 +96,40 @@ export function NodeSearch() {
     return { fit, between: `${name(edge.from.node)} → ${name(edge.to.node)}` };
   }, [popup, doc, path, baseOps, typesByName, operators]);
 
+  // 换算子：每个算子算一遍换上去会断几条线。连线全留着的排前面；会断线的置灰排后面、照样能选（换完说清楚丢了什么）；
+  // 子图出口会断的选了也不换
+  const replace = useMemo(() => {
+    const nodeId = popup?.replaceNode;
+    if (!nodeId) return null;
+    const lvl = levelOf(doc, path);
+    const node = lvl.nodes.find((n) => n.id === nodeId);
+    if (!node) return null;
+    const ctx = { operatorsById: augmentOperators(baseOps, doc.subgraphs), typesByName };
+    const fit = new Map<string, string | null>();
+    const miss = new Map<string, string>();
+    for (const op of operators ?? []) {
+      if (op.id === node.op) continue;
+      const plan = planReplace(ctx, doc, path, nodeId, op);
+      if (plan && !plan.blocked && plan.droppedEdges.length === 0) {
+        fit.set(op.id, "连线全留着");
+        continue;
+      }
+      fit.set(op.id, null);
+      miss.set(op.id, !plan ? "换不了" : plan.blocked ? "子图输出会断，换不了" : `断 ${plan.droppedEdges.length} 条线`);
+    }
+    const name = node.ui?.title ?? ctx.operatorsById.get(node.op)?.label ?? node.id;
+    return { fit, miss, self: node.op, name };
+  }, [popup, doc, path, baseOps, typesByName, operators]);
+
   const guide = useMemo<Guide | null>(() => {
+    if (replace) {
+      return {
+        fit: replace.fit,
+        miss: replace.miss,
+        sep: (n) => `${n} 个算子换上去会断线`,
+        placeholder: `把「${replace.name}」换成…`,
+      };
+    }
     if (pending) {
       const arrow = pending.side === "input" ? "← " : "→ ";
       const fit = new Map<string, string | null>();
@@ -107,7 +143,7 @@ export function NodeSearch() {
       return { fit: insert.fit, sep: (n) => `${n} 个算子插不进这条线`, placeholder: `插到 ${insert.between} 之间的算子…` };
     }
     return null;
-  }, [pending, insert, operators]);
+  }, [replace, pending, insert, operators]);
 
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -124,7 +160,8 @@ export function NodeSearch() {
   }, [popup]);
 
   const { rows, incompatible } = useMemo(() => {
-    const all = operators ?? [];
+    // 换算子时不列它自己
+    const all = (operators ?? []).filter((op) => op.id !== replace?.self);
     let hits: { op: OperatorDesc; fieldIndex: number; indices: readonly number[]; recent: boolean }[];
     if (!query.trim()) {
       // 空查询列全部，让人知道有哪些可用，而不是面对一个空白框；最近用过的排在最前
@@ -141,7 +178,7 @@ export function NodeSearch() {
     const ok = hits.filter((h) => guide.fit.get(h.op.id) != null);
     const no = hits.filter((h) => guide.fit.get(h.op.id) == null);
     return { rows: [...ok, ...no].slice(0, MAX_ROWS), incompatible: no.length };
-  }, [operators, query, recentOps, guide]);
+  }, [operators, query, recentOps, guide, replace]);
 
   useEffect(() => setCursor(0), [query]);
 
@@ -157,6 +194,11 @@ export function NodeSearch() {
   if (!popup) return null;
 
   const pick = (opId: string) => {
+    // 换算子：换不了（子图出口会断）弹层留着，换一个
+    if (popup.replaceNode) {
+      if (replaceOperator(opId, popup.replaceNode)) closeSearch();
+      return;
+    }
     // 插到一条线中间：加节点与插入一条撤销；插不进就照旧放下（按类型自动连线）、说一声
     if (popup.insertEdge) {
       if (!insertIntoEdge(opId, popup.insertEdge)) {
@@ -245,8 +287,9 @@ export function NodeSearch() {
           ) : (
             rows.map((hit, i) => {
               const port = pending ? (pending.portOf.get(hit.op.id) ?? null) : null;
-              const note = guide ? (guide.fit.get(hit.op.id) ?? null) : null;
-              const greyed = guide !== null && note === null;
+              const fitNote = guide ? (guide.fit.get(hit.op.id) ?? null) : null;
+              const note = fitNote ?? guide?.miss?.get(hit.op.id) ?? null;
+              const greyed = guide !== null && fitNote === null;
               // 合适与不合适之间一条分隔：写明后面这些为什么不合适
               const prev = i > 0 ? rows[i - 1] : undefined;
               const firstGreyed = greyed && (!prev || guide.fit.get(prev.op.id) != null);

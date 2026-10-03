@@ -44,6 +44,7 @@ import {
   type ComposeResult,
   type SubPath,
 } from "../lib/subgraph";
+import { planReplace, type ReplacePlan } from "../lib/replace";
 import { canConnect, type ConnectVerdict, type GraphContext } from "../lib/typecheck";
 import type { MigrationAction, MigrationEdits } from "../types/execution";
 import type { OperatorDesc, Param, SnippetDesc } from "../types/manifest";
@@ -376,6 +377,9 @@ interface GraphState {
   composeSubgraph(ids: readonly string[]): ComposeResult | null;
   /** 解散一个子图节点，内容内联回本层。返回内联出来的节点 id。 */
   dissolveSubgraph(nodeId: string): string[];
+  /** 把这一层的一个节点换成别的算子（右键「换成别的算子…」）：id、位置、标题、静音照旧，连线、参数、绑定按
+   *  lib/replace 的规则能留的留下。一条撤销。换不了（子图出口会断、算子不存在）返回 null 并写 lastRejection。 */
+  replaceNodeOp(nodeId: string, opId: string): ReplacePlan | null;
   /** 库算子「展开为内联子图」：def 是 core 给的库定义（transport.getLibraryDefinition）。
    *  一条撤销。返回新子图的 id；不是库算子时 null、什么都不改。 */
   inlineLibrary(nodeId: string, def: SubgraphDef): string | null;
@@ -1087,6 +1091,54 @@ export const useGraphStore = create<GraphState>((set, get) => {
         inlined = dissolveFrom(d, path, nodeId, allIds(d));
       });
       return inlined;
+    },
+
+    replaceNodeOp(nodeId, opId) {
+      const { doc } = get();
+      const path = useUiStore.getState().path;
+      const c = ctx(doc);
+      const op = c.operatorsById.get(opId);
+      const plan = op ? planReplace(c, doc, path, nodeId, op) : null;
+      if (!op || !plan || plan.blocked) {
+        set({ lastRejection: plan?.blocked ?? `换不了：找不到算子 ${opId}` });
+        return null;
+      }
+      const dropEdges = new Set(plan.droppedEdges);
+      const unbind = new Set(plan.unbind);
+      const dropInputs = new Set(plan.droppedInputs);
+      transact(`换成 ${op.label}`, (d) => {
+        const lvl = level(d);
+        const node = lvl.nodes.find((n) => n.id === nodeId);
+        if (!node) return;
+        node.op = op.id;
+        // 写新算子的版本：留着旧的会被当成要迁移
+        node.opVersion = op.version;
+        node.params = { ...plan.params };
+        lvl.edges = lvl.edges.filter((e) => !dropEdges.has(e.id));
+        if (lvl === d) {
+          for (const gp of Object.values(d.params ?? {})) {
+            const kept = gp.binds.filter((b) => {
+              const dot = b.lastIndexOf(".");
+              return !(b.slice(0, dot) === nodeId && unbind.has(b.slice(dot + 1)));
+            });
+            if (kept.length !== gp.binds.length) gp.binds = kept;
+          }
+        } else {
+          const def = lvl as SubgraphDef;
+          for (const sp of def.params ?? []) {
+            const kept = (sp.binds ?? []).filter((b) => !(b.node === nodeId && unbind.has(b.param)));
+            if (kept.length !== (sp.binds ?? []).length) sp.binds = kept;
+          }
+          for (const input of def.inputs ?? []) {
+            if (dropInputs.has(input.name)) input.to = input.to.filter((t) => t.node !== nodeId);
+          }
+        }
+        for (const name of plan.droppedOutputs) {
+          if (d.outputs) delete d.outputs[name];
+        }
+      });
+      for (const p of plan.droppedParams) clearBaseEdit(`${fullId(path, nodeId)}.${p}`);
+      return plan;
     },
 
     inlineLibrary(nodeId, def) {

@@ -141,3 +141,33 @@ test("stepFor：声明了 step 用它；有范围取 1/200；没范围看当前�
   }
   assert.deepEqual([2499.995, 0.015, 0.005, 7, 1].map(niceStep), [2000, 0.01, 0.005, 5, 1]);
 });
+
+// 换算子（lib/replace）时参数怎么带过去：同名同类型才带；枚举值要在新选项里；越界夹进新范围；等于新默认值删键
+test("carryParams：换成别的算子时哪些参数带过去", async () => {
+  const { carryParams } = await import("../src/lib/replace.ts");
+  const oldOp = { params: [
+    { name: "k", type: "float", default: 1 },
+    { name: "e", type: "enum", default: "a" },
+    { name: "n", type: "int", default: 5 },
+    { name: "gone", type: "float", default: 0 },
+    { name: "same", type: "float", default: 2 },
+  ] };
+  const newOp = { params: [
+    { name: "k", type: "float", default: 1, min: 0.5, max: 3 },
+    { name: "e", type: "enum", default: "a", options: [{ value: "a", label: "A" }, { value: "b", label: "B" }] },
+    { name: "n", type: "vec3f", default: [0, 0, 0] },
+    { name: "same", type: "float", default: 2 },
+  ] };
+  const cases = [
+    // [说明, 原参数, 期望 { params, dropped, clamped }]
+    ["同名同类型：带过去", { k: 2 }, { params: { k: 2 }, dropped: [], clamped: [] }],
+    ["越界：夹进新范围", { k: 9 }, { params: { k: 3 }, dropped: [], clamped: ["k"] }],
+    ["夹到新默认值：删键", { k: 0.1, same: 2 }, { params: { k: 0.5 }, dropped: [], clamped: ["k"] }],
+    ["枚举值在新选项里", { e: "b" }, { params: { e: "b" }, dropped: [], clamped: [] }],
+    ["枚举值不在新选项里：不带", { e: "c" }, { params: {}, dropped: ["e"], clamped: [] }],
+    ["类型变了：不带", { n: 7 }, { params: {}, dropped: ["n"], clamped: [] }],
+    ["新算子没有这个参数：不带", { gone: 1 }, { params: {}, dropped: ["gone"], clamped: [] }],
+  ];
+  for (const [name, params, want] of cases) assert.deepEqual(carryParams(oldOp, newOp, params), want, name);
+  assert.deepEqual(carryParams(undefined, newOp, { n: [1, 2, 3] }).params, { n: [1, 2, 3] }, "旧算子没注册：按形状判");
+});

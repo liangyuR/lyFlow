@@ -94,3 +94,30 @@ export function insertSnippetById(id: string, at: { x: number; y: number }): Aut
   }
   return insertSnippet(snippet, at);
 }
+
+/** 节点右键「换成别的算子…」选中一个算子之后：换上、说清楚丢了什么。换不了（子图出口会断）返回 false，弹层留着。 */
+export function replaceOperator(opId: string, nodeId: string): boolean {
+  const graph = useGraphStore.getState();
+  const ui = useUiStore.getState();
+  const plan = graph.replaceNodeOp(nodeId, opId);
+  if (!plan) {
+    ui.showToast(useGraphStore.getState().lastRejection ?? "换不了", "warn");
+    return false;
+  }
+  ui.setSelection([nodeId], []);
+  ui.noteOperatorUsed(opId);
+  const label = useManifestStore.getState().operatorsById.get(opId)?.label ?? opId;
+  const lost: string[] = [];
+  if (plan.droppedEdges.length > 0) lost.push(`断开 ${plan.droppedEdges.length} 条线`);
+  if (plan.droppedParams.length > 0) lost.push(`${plan.droppedParams.join("、")} 新算子没有，没带过去`);
+  if (plan.clampedParams.length > 0) lost.push(`${plan.clampedParams.join("、")} 夹进了新范围`);
+  if (plan.unbind.length > 0) lost.push(`摘掉了 ${plan.unbind.join("、")} 的绑定`);
+  if (plan.droppedInputs.length > 0) lost.push(`子图入口 ${plan.droppedInputs.join("、")} 不再接它`);
+  if (plan.droppedOutputs.length > 0) lost.push(`删掉了图输出 ${plan.droppedOutputs.join("、")}`);
+  const inSub = ui.path.length > 0 ? "（子图的每个实例都跟着换）" : "";
+  ui.showToast(
+    lost.length > 0 ? `换成了 ${label}：${lost.join("；")}${inSub}` : `换成了 ${label}，连线与参数都留着${inSub}`,
+    lost.length > 0 ? "warn" : "info",
+  );
+  return true;
+}

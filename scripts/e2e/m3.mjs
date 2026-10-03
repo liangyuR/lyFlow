@@ -434,6 +434,34 @@ async function suiteBypassReroute(cdp, report) {
   report.eq("选中中间的体素按 Ctrl+Delete：删掉它、gen 接回 sor，一条撤销；Ctrl+Z 一次回来",
     { ...healed, undone: await chainOf() },
     { chain: ["gen.synthetic>filter.statistical_outlier"], steps: 1, undone: insertedChain });
+
+  // 节点右键「换成别的算子…」：搜索里不列它自己、占位字写着换谁；选随机采样之后进出两条线照旧、id 不变，一条撤销
+  await clickAt(cdp, await centerOf(cdp, `[data-testid="node-${voxId}"] .node__head`), { button: "right" });
+  await sleep(200);
+  const replaceItem = await centerOf(cdp, '[data-testid="ctx-replace-op"]');
+  mustOk(Boolean(replaceItem), "节点右键菜单里有「换成别的算子…」", replaceItem);
+  await clickAt(cdp, replaceItem);
+  await sleep(200);
+  const replacing = await cdp.eval(`
+    return { self: !!document.querySelector('.search-popup__row[data-op-id="filter.voxel_grid"]'),
+             named: /换成/.test(document.querySelector('.search-popup__input')?.placeholder ?? '') };
+  `);
+  const pastReplace = await pastNow();
+  await cdp.send("Input.insertText", { text: "随机采样" });
+  await sleep(200);
+  await pressKey(cdp, "Enter", 13);
+  await sleep(300);
+  const replaced = {
+    chain: await chainOf(),
+    steps: (await pastNow()) - pastReplace,
+    kept: await cdp.eval(`return window.__lyflow.snapshot().doc.nodes.find((n) => n.id === ${lit(voxId)})?.op ?? null;`),
+  };
+  await pressCtrl(cdp, "z");
+  await sleep(200);
+  report.eq("节点右键「换成别的算子…」：搜索不列它自己、占位字写着换谁；选随机采样后进出两条线照旧、id 不变，一条撤销；Ctrl+Z 换回体素",
+    { ...replacing, ...replaced, undone: await chainOf() },
+    { self: false, named: true, chain: ["filter.random_sample>filter.statistical_outlier", "gen.synthetic>filter.random_sample"],
+      steps: 1, kept: "filter.random_sample", undone: insertedChain });
 }
 
 // ------------------------------------------------------------- 1.4 迁移

@@ -1,7 +1,7 @@
 // 画布上的算子节点。按 op id 现查 manifest，不把算子描述塞进节点 data ——
 // 这是热重载的前提：推一份新 manifest 进 store，节点外观自动跟着变。
 
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import { memo, useEffect, useRef, useState } from "react";
 
 import { augmentOperators, describeEventNode } from "../lib/subgraph";
@@ -162,6 +162,15 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   const base = useManifestStore((s) => s.operatorsById);
   const subgraphs = useGraphStore((s) => s.doc.subgraphs);
   const op = augmentOperators(base, subgraphs).get(opId);
+  // 换了算子（右键「换成别的算子…」）：端口变了，让 React Flow 重新量一遍把手，留下的线接到新位置上
+  // （挂上时不量：React Flow 自己量过了，大图上几百个节点各多量一遍白费）
+  const updateInternals = useUpdateNodeInternals();
+  const shownOp = useRef(opId);
+  useEffect(() => {
+    if (shownOp.current === opId) return;
+    shownOp.current = opId;
+    updateInternals(id);
+  }, [id, opId, updateInternals]);
   // 执行状态从独立的 store 现查（P0 #14）：放进节点 data 的话，
   // 每来一条事件就要重建整个节点数组，几十个节点的图会肉眼可见地卡。
   const exec = useNodeExecution(id);

@@ -133,6 +133,39 @@ test("右键全部恢复默认：节点上写着的都删掉，一条撤销；�
   assert.deepEqual(doc(), before, "一次撤销还原");
 });
 
+test("换成别的算子：id、标题照旧；同名同类型的线留下、别的断开；绑定、图输出跟着收拾；子图出口会断就不换；一条撤销", () => {
+  reset();
+  const out = g().markGraphOutput({ node: "n_plane", port: "rest" });
+  const before = structuredClone(doc());
+  const steps = g().past.length;
+  const plan = g().replaceNodeOp("n_plane", "filter.voxel_grid");
+  const n = node("n_plane");
+  assert.deepEqual([n.id, n.op, n.opVersion, n.params, n.ui.title], ["n_plane", "filter.voxel_grid", "1.2.0", {}, before.nodes[2].ui.title]);
+  const wires = doc().edges.filter((e) => e.from.node === "n_plane" || e.to.node === "n_plane").map((e) => `${e.from.node}.${e.from.port}>${e.to.node}.${e.to.port}`);
+  assert.deepEqual(wires, ["n_voxel.cloud>n_plane.cloud"], "进来的 cloud 留着；rest 新算子没有，断开");
+  assert.deepEqual([plan.droppedParams, doc().params.planeTol.binds], [["constraint"], []], "参数与图参数的绑定跟着收拾，图参数本身留着");
+  assert.deepEqual([out in (doc().outputs ?? {}), "cloud" in doc().outputs], [false, true], "指着 rest 的图输出删掉，别的不动");
+  assert.deepEqual([g().past.length - steps, g().past.at(-1).label], [1, "换成 Voxel Grid"]);
+  g().undo();
+  assert.deepEqual(doc(), before, "一次撤销还原");
+
+  // 子图里：提升的参数摘掉绑定（子图参数留着）、子图入口照旧接上、出去的线断开
+  reset();
+  inClean();
+  g().replaceNodeOp("s_voxel", "segment.plane");
+  const def = doc().subgraphs.sg_clean;
+  assert.deepEqual([def.params[0].binds, def.inputs[0].to, def.edges.length], [[], [{ node: "s_voxel", port: "cloud" }], 0]);
+
+  // 子图出口从这个节点出去、新算子没有那个输出：整个不换，说清楚为什么
+  reset();
+  inClean();
+  const untouched = structuredClone(doc());
+  const pastBefore = g().past.length;
+  assert.equal(g().replaceNodeOp("s_sor", "segment.plane"), null);
+  assert.match(g().lastRejection, /子图输出 cloud/);
+  assert.deepEqual([doc(), g().past.length], [untouched, pastBefore]);
+});
+
 test("Ctrl+D 复制被图参数绑定的节点：副本写着此刻的有效值（不带绑定），不再回到算子默认值", () => {
   reset();
   g().promoteToGraphParam("n_voxel", "leafSize");

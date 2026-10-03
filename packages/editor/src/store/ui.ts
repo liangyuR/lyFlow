@@ -21,6 +21,8 @@ export interface SearchPopup {
   pendingSide?: "input" | "output";
   /** 选中的算子插到这条线中间（连线右键「插入算子…」、只选中一条连线时按 Tab）。 */
   insertEdge?: string;
+  /** 把这个节点（当前层的本地 id）换成选中的算子（节点右键「换成别的算子…」）。 */
+  replaceNode?: string;
 }
 
 export interface Clipboard {

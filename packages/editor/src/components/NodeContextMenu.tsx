@@ -251,6 +251,21 @@ export function NodeContextMenu({
       </button>
       <button
         type="button"
+        data-testid="ctx-replace-op"
+        title="只换右键的这一个：连线与同名参数能留的都留着"
+        onClick={() => {
+          onClose();
+          useUiStore.getState().openSearch({
+            screen: { x: menu.x, y: menu.y },
+            flow: menuNode?.ui?.position ?? { x: 0, y: 0 },
+            replaceNode: menu.nodeId,
+          });
+        }}
+      >
+        换成别的算子…
+      </button>
+      <button
+        type="button"
         data-testid="ctx-delete-heal"
         title="删掉后把上下游接回去（规则与静音透传一致）"
         onClick={() => {
