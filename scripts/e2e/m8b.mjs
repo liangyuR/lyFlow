@@ -436,20 +436,39 @@ async function suiteBuildFromBlank(cdp, report, ws) {
   // 跑过之后再拖框：松手补一次正式运行（开着自动运行；拼图时框没画齐、节点没跑过的那几次不跑）
   {
     const before = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
-    const g1 = await roiGeometry(cdp);
+    // 跑完之后底图换成输入端口上的那一片、相机可能跟着重新取景：等框在屏幕上停稳了再按（不然按下去的地方已经不是框）
+    let g1 = await roiGeometry(cdp);
+    for (let i = 0; i < 20; i += 1) {
+      await sleep(150);
+      const g = await roiGeometry(cdp);
+      const steady = JSON.stringify(g?.boxes?.template1DatumRoi?.center) === JSON.stringify(g1?.boxes?.template1DatumRoi?.center);
+      g1 = g;
+      if (steady && g?.boxes?.template1DatumRoi) break;
+    }
     const box = g1?.boxes?.template1DatumRoi;
     if (!box) {
       report.fail("跑过之后 2D 框还在", JSON.stringify(g1));
     } else {
       await dragMouse(cdp, box.center, { x: box.center.x + 6, y: box.center.y }, { steps: 6 });
+      // 再撞上时看得出是哪一步没走到：框没跟着动（没按中）、自动运行关着、节点不是跑过的状态
+      const afterDrag = await cdp.eval(`
+        const s = window.__lyflow.stores.execution.getState();
+        return { autoRun: window.__lyflow.stores.ui.getState().autoRun, runStatus: s.runStatus, preview: s.preview,
+                 state: s.nodes.get(${lit(locate)})?.state ?? null };
+      `);
+      afterDrag.moved = JSON.stringify(await roiValue("template1DatumRoi")) !== JSON.stringify(box.value);
       const reran = await cdp.waitFor(
         `(() => { const s = window.__lyflow.stores.execution.getState();
                   return s.runId !== ${lit(before)} && !s.preview && s.runStatus !== 'running' && s.runStatus !== 'idle'
                     ? { targets: s.targets, status: s.runStatus } : null; })()`,
         { timeoutMs: 60_000, what: "拖完框松手补的运行" },
-      ).catch((e) => ({ error: String(e) }));
+      ).catch(async (e) => ({ error: String(e), final: await cdp.eval(`
+        const s = window.__lyflow.stores.execution.getState();
+        return { runId: s.runId, runStatus: s.runStatus, preview: s.preview, error: s.error ?? null,
+                 selected: [...window.__lyflow.stores.ui.getState().selectedNodes] };
+      `) }));
       report.ok("跑过之后拖框松手：补一次正式运行、算的是 locate_template", Array.isArray(reran?.targets) && reran.targets.includes(locate),
-        JSON.stringify({ reran, boxes: Object.fromEntries(Object.entries(g1.boxes).map(([k, b]) => [k, b.unset ? "unset" : b.value])) }));
+        JSON.stringify({ reran, afterDrag, boxes: Object.fromEntries(Object.entries(g1.boxes).map(([k, b]) => [k, b.unset ? "unset" : b.value])) }));
       await pressCtrl(cdp, "z");
       await sleep(150);
     }
