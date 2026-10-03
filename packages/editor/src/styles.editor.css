@@ -818,6 +818,15 @@
   flex-shrink: 0;
 }
 
+.finder__tone {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+.finder__tone--ng { background: #7a2b2b; color: #ffdede; }
+.finder__tone--margin { background: #7a5c1f; color: #fff1cf; }
+
 .finder__muted {
   padding: 0 5px;
   border-radius: 3px;
@@ -1121,6 +1130,9 @@
 .toolbar__stat--link:hover { color: #ffc4c4; }
 .toolbar__stat--cancelled { color: #ffd08a; }
 .toolbar__stat--stale     { color: var(--lyflow-fg-2); font-style: italic; }
+.toolbar__stat--ng        { color: #ff8b8b; }
+.toolbar__stat--margin    { color: #f5c56b; }
+.toolbar__stat--ok        { color: #9ce6ad; }
 
 .toolbar__runerror {
   color: #ff9a9a;

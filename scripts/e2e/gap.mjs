@@ -7,6 +7,7 @@ import {
   centerOf,
   clickAt,
   lit,
+  pressKey,
   mustOk,
   newDoc,
   pressF5,
@@ -298,6 +299,35 @@ async function suiteMeasurementOutputs(cdp, report) {
   await sleep(200);
   report.eq("出错之后底栏不写上一次的读数（不再挂着「6.414 mm OK」）",
     await cdp.eval(`return !!document.querySelector('[data-testid="node-readings-' + ${lit(ids.gen)} + '"]');`), false);
+
+  // 工具栏的判定计数：plane 判了 high → 「NG 1」（gen 出错了，它留着的上一次的 ok 不算）；点它打开查找节点（is:ng），
+  // 回车打开到那个节点
+  await cdp.eval(`
+    const e = window.__lyflow.stores.execution.getState();
+    e.apply({ schemaVersion: 1, runId: e.runId, seq: 100004, kind: 'node_state', nodeId: ${lit(ids.plane)}, state: 'done', durationMs: 1,
+              stats: { elementCount: 1, byteSize: 64, outputs: [{ port: 'value', type: 'Measurement', elementCount: 1,
+                value: { kind: 'Measurement', value: 9.1, unit: 'mm', ok: true, verdict: 'high', nominal: 6.4, lower: 5.4, upper: 7.4 } }] } });
+    return true;
+  `);
+  await sleep(200);
+  const tally = await cdp.eval(`
+    const t = (id) => document.querySelector('[data-testid="' + id + '"]')?.textContent ?? null;
+    return { ng: t('run-tally-ng'), ok: t('run-tally-ok') };
+  `);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="run-tally-ng"]'));
+  await sleep(200);
+  const listedNg = await cdp.eval(`
+    return { query: document.querySelector('[data-testid="node-finder-input"]')?.value ?? null,
+             rows: [...document.querySelectorAll('[data-testid="node-finder-row"]')]
+               .map((r) => ({ id: r.dataset.id, tone: r.querySelector('.finder__tone')?.dataset.tone ?? null })) };
+  `);
+  await pressKey(cdp, "Enter", 13);
+  await sleep(250);
+  const ngPicked = await cdp.eval(`return [...window.__lyflow.stores.ui.getState().selectedNodes];`);
+  report.ok("工具栏写着「NG 1」（出错的 gen 留着的 ok 不算）；点它列出判了 NG 的 plane（行上标 NG），回车打开到它",
+    tally.ng === "NG 1" && tally.ok === null && listedNg.query === "is:ng " &&
+      JSON.stringify(listedNg.rows) === JSON.stringify([{ id: ids.plane, tone: "ng" }]) && JSON.stringify(ngPicked) === JSON.stringify([ids.plane]),
+    JSON.stringify({ tally, listedNg, ngPicked }));
 }
 
 /** 可选：打开一张真实的 gap 图跑一遍，看 ROI 框有没有画出来。图用

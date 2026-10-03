@@ -117,3 +117,37 @@ export function sortSummaryOutputs<T extends Pick<SummaryOutput, "state" | "valu
     .sort((a, b) => a.r - b.r || a.i - b.i)
     .map((x) => x.e);
 }
+
+/** 一个节点这次的量测判定里最差的那个（不合格 > 接近边界 > 合格）；没有判定的 null。查找节点的 is:ng / is:margin 用。 */
+export function worstTone(outputs: readonly OutputStat[] | undefined): VerdictTone | null {
+  let worst: VerdictTone | null = null;
+  for (const o of outputs ?? []) {
+    if (o.value?.kind !== "Measurement") continue;
+    const tone = verdictTone(o.value.verdict);
+    if (tone === "ng") return "ng";
+    if (tone === "margin" || (tone === "ok" && worst === null)) worst = tone;
+  }
+  return worst;
+}
+
+/** 这次运行的判定一共几个：不合格、接近边界、合格、没测出来（值不是数）。工具栏上的「NG 2 · 边界 1 · ok 12」。 */
+export interface VerdictTally {
+  ng: number;
+  margin: number;
+  ok: number;
+  unmeasured: number;
+}
+
+export function verdictTally(readings: readonly { value: number | null; verdict: string | null }[]): VerdictTally {
+  const out: VerdictTally = { ng: 0, margin: 0, ok: 0, unmeasured: 0 };
+  for (const r of readings) {
+    if (r.value === null && !r.verdict) {
+      out.unmeasured += 1;
+      continue;
+    }
+    const tone = verdictTone(r.verdict);
+    if (tone) out[tone] += 1;
+  }
+  return out;
+}
+

@@ -62,6 +62,8 @@ export interface RunDiff {
 export function runReadingsOf(nodes: ReadonlyMap<string, NodeExecution>): RunReading[] {
   const out: RunReading[] = [];
   for (const [id, n] of nodes) {
+    // 出错 / 取消 / 运行中的事件不带 stats，节点表里留着的是上一次的：不算这一次的读数
+    if (n.state !== "done" && n.state !== "skipped") continue;
     for (const o of n.stats?.outputs ?? []) {
       const v = o.value;
       if (v?.kind !== "Measurement") continue;

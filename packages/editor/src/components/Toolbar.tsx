@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useDismiss } from "../hooks/useDismiss";
 import { dialogs } from "../lib/dialogs";
@@ -7,6 +7,9 @@ import { historyRows, jumpHistory, stepHistory } from "../lib/history";
 import { keyHint } from "../lib/keymap";
 import { revealError } from "../lib/revealError";
 import { cleanPathText } from "../lib/params";
+import { verdictTally, verdictTone, type VerdictTally } from "../lib/outputs";
+import { runReadingsOf } from "../lib/runHistory";
+import { augmentOperators, describeEventNode } from "../lib/subgraph";
 import { useCacheStore } from "../store/cache";
 import { runControlsOf, summarize, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
@@ -482,6 +485,7 @@ function RunControls({ onRun, onRerun, onCancel }: { onRun: () => void; onRerun:
               已过时
             </span>
           )}
+          <VerdictTallyChips />
         </span>
       )}
       <Recompute />
@@ -491,6 +495,69 @@ function RunControls({ onRun, onRerun, onCancel }: { onRun: () => void; onRerun:
         </span>
       )}
     </div>
+  );
+}
+
+/** 这次运行的量测判定一共几个（「NG 2 · 边界 1 · ok 12」）：跑完一眼看出过没过，不用一个个点开节点、也不用进子图找。
+ *  点 NG / 边界 打开查找节点（is:ng / is:margin），回车打开到它、Alt+Enter 选上这一层的。拖参数的预览运行不算 ——
+ *  那是抽稀的，留着上一次正式运行的计数，不跟着一闪一闪。 */
+function VerdictTallyChips() {
+  const nodes = useExecutionStore((s) => s.nodes);
+  const preview = useExecutionStore((s) => s.preview);
+  const doc = useGraphStore((s) => s.doc);
+  const baseOps = useManifestStore((s) => s.operatorsById);
+  const last = useRef<{ tally: VerdictTally; ng: string[] } | null>(null);
+  const now = useMemo(() => {
+    if (preview) return null;
+    const readings = runReadingsOf(nodes);
+    if (readings.length === 0) return { tally: verdictTally([]), ng: [] };
+    const ops = augmentOperators(baseOps, doc.subgraphs);
+    const ng = readings
+      .filter((r) => verdictTone(r.verdict) === "ng")
+      .map((r) => `${describeEventNode(doc, ops, r.id).names.join(" › ")}.${r.port}`);
+    return { tally: verdictTally(readings), ng };
+  }, [nodes, preview, doc, baseOps]);
+  if (now) last.current = now;
+  const shown = now ?? last.current;
+  if (!shown) return null;
+  const { tally, ng } = shown;
+  if (tally.ng + tally.margin + tally.ok + tally.unmeasured === 0) return null;
+  const open = (seed: string) => useUiStore.getState().setFinderOpen(true, seed);
+  return (
+    <>
+      {tally.ng > 0 && (
+        <button
+          type="button"
+          className="toolbar__stat toolbar__stat--ng toolbar__stat--link"
+          data-testid="run-tally-ng"
+          title={`不合格：${ng.join("、")} —— 点一下列出来（回车打开到它）`}
+          onClick={() => open("is:ng ")}
+        >
+          NG {tally.ng}
+        </button>
+      )}
+      {tally.margin > 0 && (
+        <button
+          type="button"
+          className="toolbar__stat toolbar__stat--margin toolbar__stat--link"
+          data-testid="run-tally-margin"
+          title="接近边界 —— 点一下列出来"
+          onClick={() => open("is:margin ")}
+        >
+          边界 {tally.margin}
+        </button>
+      )}
+      {tally.ok > 0 && (
+        <span className="toolbar__stat toolbar__stat--ok" data-testid="run-tally-ok" title="量测判定合格的个数">
+          ok {tally.ok}
+        </span>
+      )}
+      {tally.unmeasured > 0 && (
+        <span className="toolbar__stat toolbar__stat--cancelled" data-testid="run-tally-unmeasured" title="没测出来的量测输出">
+          未测出 {tally.unmeasured}
+        </span>
+      )}
+    </>
   );
 }
 

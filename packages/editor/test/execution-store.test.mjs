@@ -167,6 +167,7 @@ test("查找节点（Ctrl+F）：整张图连子图里面的一起列，按名�
   };
   const muted = listGraphNodes(mutedDoc, sgOps);
   const failed = (id) => id === "a/n/x";
+  const tones = { "a/v": "ng", top: "margin", "a/n/x": "ok" };
   const filtered = [
     // [查询, 期望]
     ["is:muted", ["top", "a/v"]],
@@ -180,12 +181,15 @@ test("查找节点（Ctrl+F）：整张图连子图里面的一起列，按名�
     ["is:foo", []],
     ["is:constructor", []],
     ["is:__proto__ 体素", []],
+    ["is:ng", ["a/v"]],
+    ["is:边界", ["top"]],
+    ["is:不合格 is:muted", ["a/v"]],
   ];
   for (const [q, want] of filtered) {
-    assert.deepEqual(searchGraphNodes(muted, q, failed).map((h) => h.entry.id), want, q);
+    assert.deepEqual(searchGraphNodes(muted, q, failed, (id) => tones[id] ?? null).map((h) => h.entry.id), want, q);
   }
   assert.deepEqual(searchGraphNodes(muted, "is:error").map((h) => h.entry.id), [], "不给出错判断就当都没出错");
-  assert.deepEqual(parseFinderQuery("  op:Voxel  is:muted  离群 "), { text: "离群", muted: true, error: false, ops: ["voxel"] });
+  assert.deepEqual(parseFinderQuery("  op:Voxel  is:muted  离群 "), { text: "离群", muted: true, error: false, ng: false, margin: false, ops: ["voxel"] });
   // 子图定义是共用的：两个实例里列出来的 v 是文档里同一个节点（状态栏只数一次，Alt+Enter 不说它「在别的层没选」）
   const twice = listGraphNodes({ ...mutedDoc, nodes: [...mutedDoc.nodes, { id: "a2", op: "sub:s1" }] }, sgOps);
   const vs = twice.filter((e) => e.localId === "v");

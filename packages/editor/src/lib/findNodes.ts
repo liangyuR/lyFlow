@@ -75,11 +75,15 @@ export interface FinderQuery {
   text: string;
   muted: boolean;
   error: boolean;
+  /** 这次判了不合格的（fail / high / low）。 */
+  ng: boolean;
+  /** 这次判了接近边界的。 */
+  margin: boolean;
   /** op: 后面的字（小写），每一个都得在算子 id 或算子名里。 */
   ops: string[];
 }
 
-const IS_WORDS: Record<string, "muted" | "error"> = {
+const IS_WORDS: Record<string, "muted" | "error" | "ng" | "margin"> = {
   muted: "muted",
   mute: "muted",
   bypass: "muted",
@@ -87,12 +91,16 @@ const IS_WORDS: Record<string, "muted" | "error"> = {
   error: "error",
   err: "error",
   出错: "error",
+  ng: "ng",
+  不合格: "ng",
+  margin: "margin",
+  边界: "margin",
 };
 
 /** 「is:muted 体素」→ 只看静音的、再按「体素」找。认不得的 is:xxx 当普通字（找不到东西，比悄悄忽略好懂）。
  *  冒号全角半角都认。 */
 export function parseFinderQuery(query: string): FinderQuery {
-  const out: FinderQuery = { text: "", muted: false, error: false, ops: [] };
+  const out: FinderQuery = { text: "", muted: false, error: false, ng: false, margin: false, ops: [] };
   const rest: string[] = [];
   for (const word of query.trim().split(/\s+/).filter(Boolean)) {
     const m = /^(is|op)[:：](.+)$/i.exec(word);
@@ -115,17 +123,20 @@ export function parseFinderQuery(query: string): FinderQuery {
 }
 
 /** 空查询原样返回全部（文档顺序）；否则按分数排，同分保持文档顺序。筛选词先筛，剩下的字再模糊找；
- *  isError 按完整 id 问这次运行里它出没出错（不给就当都没出错）。 */
+ *  isError 按完整 id 问这次运行里它出没出错（不给就当都没出错），toneOf 问它这次最差的判定。 */
 export function searchGraphNodes(
   all: readonly GraphNodeEntry[],
   query: string,
   isError?: (id: string) => boolean,
+  toneOf?: (id: string) => "ng" | "margin" | "ok" | null,
 ): NodeHit[] {
   const f = parseFinderQuery(query);
   const entries = all.filter(
     (e) =>
       (!f.muted || e.muted) &&
       (!f.error || (isError?.(e.id) ?? false)) &&
+      (!f.ng || toneOf?.(e.id) === "ng") &&
+      (!f.margin || toneOf?.(e.id) === "margin") &&
       f.ops.every((o) => e.opId.toLowerCase().includes(o) || e.opLabel.toLowerCase().includes(o)),
   );
   const q = f.text;

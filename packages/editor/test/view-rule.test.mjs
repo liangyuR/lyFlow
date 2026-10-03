@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { formatOutputValue, readingsOf, sortSummaryOutputs } from "../src/lib/outputs.ts";
+import { formatOutputValue, readingsOf, sortSummaryOutputs, verdictTally, worstTone } from "../src/lib/outputs.ts";
 import { compareContentFor, viewerContentFor } from "../src/lib/viewRule.ts";
 
 const bundles = [
@@ -276,5 +276,12 @@ test("量测读数：节点底栏写四位有效数字 + 单位与判定，悬�
     ["g", summary("value")],
   ]).map(([name]) => name);
   assert.deepEqual(order, ["d", "e", "f", "b", "a", "c", "g"], "崩了的与判不合格的在最上，其次接近边界，其余照原样");
+
+  // 工具栏的判定计数与查找节点的 is:ng：一个节点取最差的那个判定
+  const rd = (value, verdict) => ({ value, verdict });
+  assert.deepEqual(verdictTally([rd(1, "ok"), rd(2, "high"), rd(3, "fail"), rd(4, "margin"), rd(null, null), rd(5, null)]),
+    { ng: 2, margin: 1, ok: 1, unmeasured: 1 }, "没判定但测出来了的不算进哪一类");
+  assert.deepEqual([worstTone(outputs), worstTone([m("a", 1, { verdict: "ok" }), m("b", 2, { verdict: "margin" })]), worstTone([outputs[0]])],
+    ["ng", "margin", null]);
 });
 

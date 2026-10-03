@@ -7,6 +7,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { docNodeKey, listGraphNodes, NODE_FIELD_LABELS, searchGraphNodes } from "../lib/findNodes";
 import { pathPrefix } from "../lib/subgraph";
+import { worstTone } from "../lib/outputs";
+import type { OutputStat } from "../types/execution";
 import { useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
@@ -15,6 +17,11 @@ import { useUiStore } from "../store/ui";
 const MAX_ROWS = 50;
 const POPUP_WIDTH = 460;
 const POPUP_HEIGHT = 400;
+
+/** 这次的判定（只认这一次跑完的：出错 / 运行中的节点表里留着的是上一次的）。 */
+function toneOf(n: { state: string; stats?: { outputs?: OutputStat[] } | undefined } | undefined) {
+  return n && (n.state === "done" || n.state === "skipped") ? worstTone(n.stats?.outputs) : null;
+}
 
 export function NodeFinder() {
   const open = useUiStore((s) => s.finderOpen);
@@ -40,7 +47,13 @@ export function NodeFinder() {
 
   const entries = useMemo(() => (open ? listGraphNodes(doc, operatorsById) : []), [open, doc, operatorsById]);
   const hits = useMemo(
-    () => searchGraphNodes(entries, query, (id) => exec.get(id)?.state === "error"),
+    () =>
+      searchGraphNodes(
+        entries,
+        query,
+        (id) => exec.get(id)?.state === "error",
+        (id) => toneOf(exec.get(id)),
+      ),
     [entries, query, exec],
   );
   const rows = hits.slice(0, MAX_ROWS);
@@ -121,7 +134,7 @@ export function NodeFinder() {
           data-testid="node-finder-input"
           type="text"
           value={query}
-          placeholder="查找节点（is:muted / is:error / op:… 筛选，Alt+Enter 选这一层的）"
+          placeholder="查找节点（is:muted / is:ng / op:… 筛选，Alt+Enter 选这一层的）"
           spellCheck={false}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -146,6 +159,14 @@ export function NodeFinder() {
                   {entry.parents.length > 0 && <span className="finder__where">在 {entry.parents.join(" › ")}</span>}
                   {failed && <span className="finder__err">出错</span>}
                   {entry.muted && <span className="finder__muted">静音</span>}
+                  {(() => {
+                    const tone = toneOf(exec.get(entry.id));
+                    return tone === "ng" || tone === "margin" ? (
+                      <span className={`finder__tone finder__tone--${tone}`} data-tone={tone}>
+                        {tone === "ng" ? "NG" : "边界"}
+                      </span>
+                    ) : null;
+                  })()}
                   {hit.fieldIndex > 0 && <span className="search-popup__why">{NODE_FIELD_LABELS[hit.fieldIndex]}</span>}
                   {entry.opLabel !== entry.title && <span className="search-popup__cat">{entry.opLabel}</span>}
                 </button>
