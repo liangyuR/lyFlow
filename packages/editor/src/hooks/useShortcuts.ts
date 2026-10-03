@@ -125,7 +125,10 @@ export function useShortcuts(
       if (!hit) return;
       // 键表说了这个动作在输入框里也响应才响应（F5、F8、存盘这几个打不出字符的）——
       // 用户很可能刚改完参数、焦点还在输入框里就按 F5。
-      if (!hit.inTextField && inTextField(e.target)) return;
+      // 下拉框里没有可撤的文字：Ctrl+Z / Ctrl+Y 归编辑器（以前交给浏览器，选完一项按 Ctrl+Z 什么也不发生）。
+      // 字母跳选、方向键、Space 仍归下拉框
+      const undoOnSelect = (hit.id === "undo" || hit.id === "redo") && (e.target as HTMLElement | null)?.tagName === "SELECT";
+      if (!hit.inTextField && inTextField(e.target) && !undoOnSelect) return;
 
       switch (hit.id) {
         case "run":

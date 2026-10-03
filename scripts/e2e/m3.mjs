@@ -1125,6 +1125,17 @@ async function suiteEditing(cdp, report) {
     `);
     report.ok("水平拖动改了数值", after.value !== 30000, `pointCount=${after.value}`);
     report.eq("整段拖动只记一条撤销", after.past - undoBefore, 1);
+    // 拖完紧接着按 Ctrl+Z：撤得掉，框里也回到原值。以前拖完焦点留在框里，Ctrl+Z 落进输入框、什么也没撤
+    await pressCtrl(cdp, "z");
+    await sleep(200);
+    const undoneDrag = await cdp.eval(`
+      const g = window.__lyflow.stores.graph.getState();
+      const el = document.querySelector('[data-testid="param-drag-pointCount"]');
+      return { value: g.doc.nodes.find(n => n.id === ${lit(ids.gen)}).params.pointCount, past: g.past.length,
+               shown: el?.value ?? null, focused: document.activeElement === el };
+    `);
+    report.eq("拖完紧接着按 Ctrl+Z：撤掉这一下，框里也回到 30000，焦点不在框里",
+      undoneDrag, { value: 30000, past: undoBefore, shown: "30000", focused: false });
 
     // 数字框里打了字、没失焦就按 F5：先提交再跑（以前跑的是打字之前的值 —— 数字框失焦才提交）
     await cdp.eval(`document.querySelector('[data-testid="param-drag-pointCount"]').focus(); return true;`);

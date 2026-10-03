@@ -520,6 +520,26 @@ async function suiteAllTypes(cdp, report, ws) {
       approxEq(Number(shown), before + 0.005) && approxEq(after, before + 0.005), JSON.stringify({ before, shown, after }));
   }
 
+  // 下拉框里选了一项（焦点还在它上面）就按 Ctrl+Z：撤得掉。以前下拉框算输入框，Ctrl+Z 交给浏览器、什么也不发生
+  {
+    const modeSel = `${rowSel(`${ids.show}.mode`)} select`;
+    await reveal(cdp, rowSel(`${ids.show}.mode`));
+    const pastNow = () => cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+    const before = { mode: (await paramsOf(cdp, ids.show)).mode, past: await pastNow() };
+    await cdp.eval(`document.querySelector(${lit(modeSel)}).focus(); return true;`);
+    await pressKey(cdp, "ArrowDown", 40);
+    await sleep(150);
+    const chosen = { mode: (await paramsOf(cdp, ids.show)).mode, past: await pastNow() };
+    await pressCtrl(cdp, "z");
+    await sleep(200);
+    const undone = { mode: (await paramsOf(cdp, ids.show)).mode, past: await pastNow(),
+      shown: await cdp.eval(`return document.querySelector(${lit(modeSel)})?.value ?? null;`) };
+    report.ok("下拉框里按 ↓ 换了一项，焦点还在上面就按 Ctrl+Z：撤掉、框里也回去",
+      chosen.mode !== before.mode && chosen.past === before.past + 1 &&
+        undone.mode === before.mode && undone.past === before.past && undone.shown === before.mode,
+      JSON.stringify({ before, chosen, undone }));
+  }
+
   // 取色器拖着选（一路发 input，关上时一个 change）：整段一条撤销，值是最后那个。以前每一下 input 都是一条
   {
     await reveal(cdp, rowSel(`${ids.show}.tint`));

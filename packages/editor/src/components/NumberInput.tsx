@@ -164,6 +164,9 @@ export function NumberInput({
     if (!d.active) return;
     finishDrag(d, nodeId);
     setDragging(false);
+    // 真拖过：焦点别留在框里。按下时浏览器把焦点给了它，拖完紧接着按 Ctrl+Z 就落进了输入框（浏览器对脚本写进去的值
+    // 没有可撤的），拖过的那一下撤不掉。框里的字已经是拖到的值，失焦的提交是空操作。只点不拖照旧聚焦，接着打字
+    e.currentTarget.blur();
   };
 
   return (
