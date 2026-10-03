@@ -228,6 +228,40 @@ export function dropOnNode(
   };
 }
 
+/** 拖线松在空白处、在搜索里挑了一个新算子：新算子的哪个端口接拖出来的这一头。拖的是输出就在它的输入里挑，
+ *  拖的是输入就在它的输出里挑。类型相同 > 能转（castableTo）> 通配（Any）；同分时必填的优先，再按声明顺序。
+ *  接不上返回 null。以前固定取第一个端口：从 RANSAC 的 inliers（Indices）拖出来选「提取索引」，接到了它的
+ *  cloud 上 —— 类型不对、线没接上，节点光秃秃地落下。拖出的这一头还是没推出类型的 Any 时，等于取第一个。 */
+export function pendingPort(
+  ctx: GraphContext,
+  doc: GraphDoc,
+  pending: PortRef,
+  side: "output" | "input",
+  op: OperatorDesc,
+  anyTypes?: AnyTypes,
+): string | null {
+  const node = doc.nodes.find((n) => n.id === pending.node);
+  const own = node ? findPort(ctx.operatorsById.get(node.op), pending.port, side) : undefined;
+  if (!own) return null;
+  const mine = portType(own, pending.node, anyTypes ?? inferAnyTypes(ctx, doc));
+  let best: { name: string; score: number } | null = null;
+  for (const p of side === "output" ? op.inputs : op.outputs) {
+    const [from, to] = side === "output" ? [mine, p.type] : [p.type, mine];
+    if (!typesCompatible(ctx, from, to)) continue;
+    const kind = from === ANY || to === ANY ? 1 : from === to ? 3 : 2;
+    const score = kind * 2 + (p.required ? 1 : 0);
+    if (!best || score > best.score) best = { name: p.name, score };
+  }
+  return best?.name ?? null;
+}
+
+/** 拖出来的这一头的实际类型（Any 按连线推导）。给搜索弹层写「接不上 Indices」用。 */
+export function pendingType(ctx: GraphContext, doc: GraphDoc, pending: PortRef, side: "output" | "input"): string | null {
+  const node = doc.nodes.find((n) => n.id === pending.node);
+  const own = node ? findPort(ctx.operatorsById.get(node.op), pending.port, side) : undefined;
+  return own ? portType(own, pending.node, inferAnyTypes(ctx, doc)) : null;
+}
+
 /** 把一个节点插到一条连线中间用哪一对端口：拿掉这条线之后，上游接得上它的某个输入、它的某个输出接得上下游 ——
  *  恰好一对时给出来；没有、或不止一对（没有唯一解，宁可不动）时 null。拖节点到线上、从算子面板拖到线上都按它。 */
 export function insertPortsFor(

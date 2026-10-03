@@ -698,6 +698,24 @@
   background: var(--lyflow-accent-dim);
 }
 
+/* 拖线唤起的搜索：接不上拖出那一头的算子置灰排在后面（还能选，放下不接线） */
+.search-popup__row.is-incompatible {
+  opacity: 0.45;
+}
+
+.search-popup__port {
+  color: var(--lyflow-accent);
+  font-size: 11px;
+}
+
+.search-popup__sep {
+  margin: 4px 12px 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--lyflow-border);
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
+
 .search-popup__cat {
   margin-left: auto;
   color: var(--lyflow-fg-2);

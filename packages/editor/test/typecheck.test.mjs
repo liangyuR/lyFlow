@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { createMappingCache, toReactFlow } from "../src/lib/mapping.ts";
-import { canConnect, compatibleSources, compatibleTargets, dropOnNode, inferAnyTypes, insertPortsFor, wouldCreateCycle } from "../src/lib/typecheck.ts";
+import { canConnect, compatibleSources, compatibleTargets, dropOnNode, inferAnyTypes, insertPortsFor, pendingPort, wouldCreateCycle } from "../src/lib/typecheck.ts";
 
 const port = (name, type) => ({ name, type, label: name, doc: "", required: true });
 const op = (id, inputs, outputs) => ({ id, label: id, inputs, outputs, params: [] });
@@ -143,6 +143,37 @@ test("insertPortsFor：插到 g → v1 那条线中间 —— 恰好一对端口
   ];
   for (const [name, nodeId, want] of cases) {
     assert.deepEqual(insertPortsFor(ictx, idoc, line, nodeId), want, name);
+  }
+});
+
+test("pendingPort：拖线松在空白处挑了新算子，接它的哪个端口 —— 类型相同 > 能转 > Any，同分按必填与声明顺序", () => {
+  const pctx = {
+    ...ctx,
+    operatorsById: new Map([
+      ...ctx.operatorsById,
+      ["merge", op("merge", [port("a", "PointCloud"), port("b", "PointCloud")], [port("cloud", "PointCloud")])],
+      ["extract", op("extract", [port("cloud", "PointCloud"), port("indices", "Indices")], [port("selected", "PointCloud")])],
+      ["ransac", op("ransac", [port("cloud", "PointCloud")], [port("inliers", "Indices"), port("plane", "Plane")])],
+    ]),
+    typesByName: new Map([...ctx.typesByName, ["Indices", { name: "Indices", color: "#5" }], ["Plane", { name: "Plane", color: "#6" }]]),
+  };
+  const pdoc = { ...doc, nodes: [...doc.nodes, node("ra", "ransac"), node("x", "extract"), node("r9", "reroute")] };
+  const P = (n, p) => ({ node: n, port: p });
+  const O = (id) => pctx.operatorsById.get(id);
+  const cases = [
+    // [拖出的那一头, 哪一侧, 新算子, 期望]
+    ["点云 → 提取索引：cloud", P("g", "cloud"), "output", "extract", "cloud"],
+    ["Indices → 提取索引：indices（修前固定接第一个 cloud，类型不对）", P("ra", "inliers"), "output", "extract", "indices"],
+    ["点云 → 合并：a", P("g", "cloud"), "output", "merge", "a"],
+    ["XYZI → 体素：经 castableTo", P("gi", "cloud"), "output", "voxel", "cloud"],
+    ["点云 → Box2D 的算子：接不上", P("g", "cloud"), "output", "box", null],
+    ["反着拖 提取索引.indices：接 RANSAC 的 inliers", P("x", "indices"), "input", "ransac", "inliers"],
+    ["反着拖 提取索引.cloud：RANSAC 没有点云输出", P("x", "cloud"), "input", "ransac", null],
+    ["推出了类型的 reroute（点云）→ 提取索引：cloud", P("r2", "out"), "output", "extract", "cloud"],
+    ["没推出类型的 reroute：取第一个", P("r9", "out"), "output", "extract", "cloud"],
+  ];
+  for (const [name, from, side, opId, want] of cases) {
+    assert.equal(pendingPort(pctx, pdoc, from, side, O(opId)), want, name);
   }
 });
 

@@ -908,6 +908,46 @@ async function suiteDropToSearch(cdp, report) {
 
   report.ok("算子面板顶上有「最近用过」一组，里面有它",
     await cdp.eval(`return !!document.querySelector('[data-testid="palette-recent"] [data-op-id=${lit(added ?? "")}]');`));
+
+  // 从 RANSAC 平面的 inliers（Indices）拖到空白处：搜索里接得上 Indices 的排前面、行尾写接到哪个端口，接不上的置灰
+  // 排后面；打「提取」回车 → 接到提取索引的 indices 上，加节点与接线一条撤销。以前固定接新算子的第一个端口（cloud）：
+  // 类型不对、线没接上，节点光秃秃地落下，再弹一条「类型不匹配」
+  const ransac = await cdp.eval(`
+    const id = window.__lyflow.stores.graph.getState().addNode('segment.ransac_plane', { x: 0, y: 0 });
+    window.__lyflow.stores.graph.getState().connect({ node: ${lit(ids.gen)}, port: 'cloud' }, { node: id, port: 'cloud' });
+    return id;
+  `);
+  await placeAtScreen(cdp, { [ransac]: { x: 40, y: Math.round(dropBox.h * 0.6) } });
+  await sleep(250);
+  const inliers = await centerOf(cdp, `[data-testid="port-${ransac}-inliers"] .react-flow__handle`);
+  mustOk(inliers != null, "找得到 RANSAC 平面的 inliers 端口", inliers);
+  const pastBeforeTyped = await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+  await dragMouse(cdp, inliers, { x: inliers.x + 260, y: inliers.y + 40 }, { steps: 14 });
+  await sleep(250);
+  const listed = await cdp.eval(`
+    const rows = [...document.querySelectorAll('.search-popup__row')];
+    const extract = rows.find((r) => r.dataset.opId === 'segment.extract_indices');
+    return { firstPort: rows[0]?.dataset.port ?? null,
+             extract: extract ? (extract.dataset.port ?? null) : 'missing',
+             greyedAfter: rows.findIndex((r) => r.dataset.incompatible === '1') > rows.findIndex((r) => r.dataset.port),
+             sep: document.querySelector('[data-testid="search-incompatible-sep"]')?.textContent ?? null,
+             placeholder: document.querySelector('.search-popup__input')?.placeholder ?? null };
+  `);
+  await cdp.send("Input.insertText", { text: "提取" });
+  await sleep(200);
+  await pressKey(cdp, "Enter", 13);
+  await sleep(250);
+  const typedWire = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    const t = window.__lyflow.stores.ui.getState().toast;
+    return { edges: g.doc.edges.filter((e) => e.from.node === ${lit(ransac)}).map((e) => e.from.port + '>' + e.to.port),
+             rejected: t && /类型不匹配|没有能接/.test(t.text) ? t.text : null, past: g.past.length };
+  `);
+  report.ok("从 inliers 拖到空白处：接得上的排前面、写着接到哪个端口，接不上的置灰在后；打「提取」回车接到提取索引的 indices，一条撤销",
+    listed.firstPort !== null && listed.extract === "indices" && listed.greyedAfter && /接不上 Indices/.test(listed.sep ?? "") &&
+      /RANSAC 平面\.Inliers/.test(listed.placeholder ?? "") && JSON.stringify(typedWire.edges) === JSON.stringify(["inliers>indices"]) &&
+      typedWire.rejected === null && typedWire.past - pastBeforeTyped === 1,
+    JSON.stringify({ listed, typedWire, pastBeforeTyped }));
 }
 
 // ------------------------------------------------ P1 #22 网格吸附与自动布局
