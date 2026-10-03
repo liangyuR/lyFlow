@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useDragFraction } from "../hooks/useDragFraction";
 import { rootOf } from "../lib/root";
 
+import { formatOutputValue, sortSummaryOutputs } from "../lib/outputs";
 import { describeEventNode } from "../lib/subgraph";
 import { clearCache, formatBytes, refreshCacheStats, useCacheStore } from "../store/cache";
 import { useExecutionStore } from "../store/execution";
@@ -122,12 +123,15 @@ const OUTPUT_STATE_LABEL: Record<OutputState, string> = {
 };
 
 /** 诊断抽屉顶部的运行收尾（ADR-0022）。一行结论 + 每个图级输出的三态 + 全部决策。
- *  这一段整个来自 core 的 summary —— 前端一个字都不重建。 */
+ *  这一段整个来自 core 的 summary —— 前端一个字都不重建。图级输出写出读数与判定（以前只有「有值」与
+ *  元素数，读数要一个个点开节点看），有问题的排在上面，节点写名字、点一下打开到它。 */
 function SummaryHeader() {
   const summary = useExecutionStore((s) => s.summary);
+  const doc = useGraphStore((s) => s.doc);
+  const ops = useManifestStore((s) => s.operatorsById);
   if (!summary) return null;
 
-  const outputs = Object.entries(summary.outputs);
+  const outputs = sortSummaryOutputs(Object.entries(summary.outputs));
   const decisions = Object.entries(summary.decisions);
 
   return (
@@ -144,29 +148,49 @@ function SummaryHeader() {
 
       {outputs.length > 0 && (
         <ul className="drawer__summary-outputs" data-testid="summary-outputs">
-          {outputs.map(([name, o]) => (
-            <li key={name} data-testid={`summary-output-${name}`} data-state={o.state}>
-              <span className="drawer__summary-name">{name}</span>
-              <code className={`drawer__summary-state drawer__summary-state--${o.state}`}>
-                {OUTPUT_STATE_LABEL[o.state] ?? o.state}
-              </code>
-              <span className="drawer__summary-where">
-                {o.node}.{o.port}
-              </span>
-              {/* failed 的那一维带着回溯出来的源头：不必再去事件流里找 */}
-              {o.state === "failed" && (
-                <span className="drawer__summary-from">
-                  来自 {o.from} · {o.code}
-                </span>
-              )}
-              {o.state === "inactive" && o.reason && (
-                <span className="drawer__summary-from">{o.reason}</span>
-              )}
-              {o.state === "value" && typeof o.elementCount === "number" && (
-                <span className="drawer__summary-from">{o.elementCount} 个</span>
-              )}
-            </li>
-          ))}
+          {outputs.map(([name, o]) => {
+            const where = describeEventNode(doc, ops, o.node);
+            const verdict = o.value?.kind === "Measurement" ? o.value.verdict || null : null;
+            return (
+              <li key={name} data-testid={`summary-output-${name}`} data-state={o.state} data-verdict={verdict ?? undefined}>
+                <span className="drawer__summary-name">{name}</span>
+                <code className={`drawer__summary-state drawer__summary-state--${o.state}`}>
+                  {OUTPUT_STATE_LABEL[o.state] ?? o.state}
+                </code>
+                {o.state === "value" && o.value && (
+                  <span className="drawer__summary-value" data-testid={`summary-value-${name}`}>
+                    {formatOutputValue(o)}
+                  </span>
+                )}
+                {verdict && <span className={`insp-out__verdict is-${verdict}`}>{verdict}</span>}
+                <button
+                  type="button"
+                  className="drawer__log-node drawer__summary-node"
+                  data-testid={`summary-node-${name}`}
+                  title={`${o.node}.${o.port}${where.reveal ? " —— 点此打开到它" : ""}`}
+                  disabled={!where.reveal}
+                  onClick={() => {
+                    const r = where.reveal;
+                    if (r) useUiStore.getState().revealNode(r.path, r.localId);
+                  }}
+                >
+                  {where.names.join(" › ")}.{o.port}
+                </button>
+                {/* failed 的那一维带着回溯出来的源头：不必再去事件流里找 */}
+                {o.state === "failed" && (
+                  <span className="drawer__summary-from">
+                    来自 {o.from} · {o.code}
+                  </span>
+                )}
+                {o.state === "inactive" && o.reason && (
+                  <span className="drawer__summary-from">{o.reason}</span>
+                )}
+                {o.state === "value" && !o.value && typeof o.elementCount === "number" && (
+                  <span className="drawer__summary-from">{o.elementCount} 个</span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
 

@@ -4,6 +4,8 @@
 import { sleep } from "./cdp.mjs";
 import {
   buildGraph,
+  centerOf,
+  clickAt,
   lit,
   mustOk,
   newDoc,
@@ -188,6 +190,17 @@ async function suiteMeasurementOutputs(cdp, report) {
     JSON.stringify(inspector),
   );
 
+  // 节点底栏写量测读数与判定（以前写元素数「1」，读数要一个个点开节点在检查器里看）
+  const reading = await cdp.eval(`
+    const el = document.querySelector('[data-testid="node-readings-' + ${lit(ids.gen)} + '"] .node__reading');
+    return el ? { text: el.querySelector('.node__reading-value').textContent, port: el.dataset.port, tone: el.dataset.tone ?? null,
+                  verdict: el.querySelector('.insp-out__verdict')?.textContent ?? null, title: el.getAttribute('title') } : null;
+  `);
+  report.ok("节点底栏写着量测读数与判定（6.414 mm · ok，不再是元素数），悬停有全文与上下限",
+    reading?.text === "6.414 mm" && reading.port === "value" && reading.verdict === "ok" && reading.tone === "ok" &&
+      reading.title === "value = 6.4138 mm（ok）；标称 6.4，下限 5.4，上限 7.4",
+    JSON.stringify(reading));
+
   // -- 底图：几何节点借上游最近的那片云 ---------------------------------------
   // 几何输出灌到没有点云输出的节点上
   await feedOutputs(cdp, ids.plane, 100001);
@@ -226,6 +239,50 @@ async function suiteMeasurementOutputs(cdp, report) {
     { picked, back: back.view },
     { picked: "value", back: "cloud" },
   );
+
+  // -- 运行收尾：图级输出写读数与判定，有问题的排在上面，节点写名字、点一下打开到它 -----------------
+  // 收尾也从执行事件灌（同上：前端不该知道哪个算子出 Measurement）
+  const drawerBefore = await cdp.eval(`return window.__lyflow.stores.ui.getState().drawer;`);
+  await cdp.eval(`
+    const e = window.__lyflow.stores.execution.getState();
+    const meas = (value, verdict) => ({ kind: 'Measurement', value, unit: 'mm', ok: true, verdict, nominal: 6.4, lower: 5.4, upper: 7.4 });
+    e.apply({
+      schemaVersion: 1, runId: e.runId, seq: 100002, kind: 'run_finished', status: 'ok', durationMs: 5,
+      summary: {
+        runId: e.runId, status: 'ok', durationMs: 5, nodes: {}, decisions: {}, contractViolations: [],
+        outputs: {
+          gap: { state: 'value', node: ${lit(ids.gen)}, port: 'value', type: 'Measurement', elementCount: 1, value: meas(6.4138, 'ok') },
+          flush: { state: 'value', node: ${lit(ids.pose)}, port: 'value', type: 'Measurement', elementCount: 1, value: meas(7.9, 'high') },
+          cloud: { state: 'value', node: ${lit(ids.gen)}, port: 'cloud', type: 'PointCloud', elementCount: 5000 },
+        },
+      },
+    });
+    window.__lyflow.stores.ui.setState({ drawer: 'diagnostics' });
+    return true;
+  `);
+  await sleep(200);
+  const summaryRows = await cdp.eval(`
+    return [...document.querySelectorAll('[data-testid="summary-outputs"] > li')].map((li) => ({
+      name: li.dataset.testid.replace('summary-output-', ''),
+      value: li.querySelector('.drawer__summary-value')?.textContent ?? null,
+      verdict: li.querySelector('.insp-out__verdict')?.textContent ?? null,
+      node: li.querySelector('.drawer__summary-node')?.textContent ?? null,
+      count: li.querySelector('.drawer__summary-from')?.textContent ?? null,
+    }));
+  `);
+  const poseLabel = await cdp.eval(`return window.__lyflow.stores.manifest.getState().operatorsById.get('transform.make').label;`);
+  report.ok("运行收尾：量测输出写着读数与判定，判 high 的排在最上；节点写名字；点云照旧写个数",
+    JSON.stringify(summaryRows.map((r) => r.name)) === JSON.stringify(["flush", "gap", "cloud"]) &&
+      summaryRows[0].value === "7.9 mm" && summaryRows[0].verdict === "high" && summaryRows[0].node === `${poseLabel}.value` &&
+      summaryRows[1].value === "6.4138 mm" && summaryRows[1].verdict === "ok" &&
+      summaryRows[2].value === null && summaryRows[2].count === "5000 个",
+    JSON.stringify({ poseLabel, summaryRows }));
+  await select(cdp, ids.gen);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="summary-node-flush"]'));
+  await sleep(200);
+  report.eq("点收尾里的节点名：打开到它（选中它）",
+    await cdp.eval(`return [...window.__lyflow.stores.ui.getState().selectedNodes];`), [ids.pose]);
+  await cdp.eval(`window.__lyflow.stores.ui.setState({ drawer: ${lit(drawerBefore)} }); return true;`);
 }
 
 /** 可选：打开一张真实的 gap 图跑一遍，看 ROI 框有没有画出来。图用

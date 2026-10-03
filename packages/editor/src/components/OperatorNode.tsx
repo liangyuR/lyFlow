@@ -7,6 +7,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { augmentOperators, describeEventNode } from "../lib/subgraph";
 import { ANY } from "../lib/typecheck";
 import type { OperatorNodeData } from "../lib/mapping";
+import { MAX_NODE_READINGS, readingsOf } from "../lib/outputs";
 import { useNodeStale } from "../store/cache";
 import { useNodeExecution } from "../store/execution";
 import { useGraphStore } from "../store/graph";
@@ -243,6 +244,7 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
     .join(" ");
 
   const cached = exec?.stats?.cached === true;
+  const readings = readingsOf(exec?.stats?.outputs);
   // 输出能不能取，认 outputsAvailable 而不是认 state：skipped 既可能是「算过了，输出照样在」
   // 也可能是「这一支根本没被需要，什么都没有」。老 core 不带这个字段，按 not_demanded 兜底。
   const outputsAvailable = exec?.stats?.outputsAvailable ?? !notDemanded;
@@ -359,8 +361,29 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
               {skipLabel}
             </span>
           )}
-          {exec?.stats?.elementCount != null && (
-            <span className="node__count">{formatSize(exec.stats)}</span>
+          {readings.length > 0 ? (
+            // 量测节点：写读数与判定，不写元素数（永远是「1」）
+            <span className="node__readings" data-testid={`node-readings-${id}`}>
+              {readings.slice(0, MAX_NODE_READINGS).map((r) => (
+                <span
+                  key={r.port}
+                  className="node__reading"
+                  data-port={r.port}
+                  data-tone={r.tone ?? undefined}
+                  title={r.title}
+                >
+                  <span className="node__reading-value">{r.text}</span>
+                  {r.verdict && <span className={`insp-out__verdict is-${r.verdict}`}>{r.verdict}</span>}
+                </span>
+              ))}
+              {readings.length > MAX_NODE_READINGS && (
+                <span className="node__reading-more" title={readings.slice(MAX_NODE_READINGS).map((r) => r.title).join("\n")}>
+                  +{readings.length - MAX_NODE_READINGS}
+                </span>
+              )}
+            </span>
+          ) : (
+            exec?.stats?.elementCount != null && <span className="node__count">{formatSize(exec.stats)}</span>
           )}
           {exec?.children && (
             <span className="node__count" data-testid={`node-children-${id}`}>

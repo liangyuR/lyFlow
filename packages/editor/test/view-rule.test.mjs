@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { formatOutputValue, readingsOf, sortSummaryOutputs } from "../src/lib/outputs.ts";
 import { compareContentFor, viewerContentFor } from "../src/lib/viewRule.ts";
 
 const bundles = [
@@ -206,3 +207,39 @@ test("cloudPortsOf：点云口按声明顺序，再是 Bundle 里的点云字段
   assert.equal(findBaseCloud(doc("rest"), [], "f", ops, bundles)?.resolved.port, "rest", "接在 rest 上：底图是 rest（以前是 selected）");
   assert.equal(findBaseCloud(doc("selected"), [], "f", ops, bundles)?.resolved.port, "selected");
 });
+
+test("量测读数：节点底栏写四位有效数字 + 单位与判定，悬停有全文；运行收尾里有问题的在上", () => {
+  const m = (port, value, extra = {}) => ({
+    port, type: "Measurement", elementCount: 1, value: { kind: "Measurement", value, unit: "mm", ok: true, ...extra },
+  });
+  const outputs = [
+    { port: "cloud", type: "PointCloud", elementCount: 1200 },
+    m("gap", 3.78381, { verdict: "ok", nominal: 3.5, lower: 3, upper: 4 }),
+    m("flush", 9.25, { verdict: "high" }),
+    m("angle", null, { ok: false, message: "两侧交叉" }),
+    m("raw", 0.12345),
+  ];
+  const got = readingsOf(outputs).map((r) => [r.port, r.text, r.verdict, r.tone]);
+  assert.deepEqual(got, [
+    ["gap", "3.784 mm", "ok", "ok"],
+    ["flush", "9.25 mm", "high", "ng"],
+    ["angle", "未测出", null, null],
+    ["raw", "0.1235 mm", null, null],
+  ]);
+  assert.equal(readingsOf(outputs)[0].title, "gap = 3.78381 mm（ok）；标称 3.5，下限 3，上限 4", "悬停是六位有效数字与上下限");
+  assert.deepEqual(readingsOf([{ port: "cloud", type: "PointCloud", elementCount: 5 }]), [], "没有量测输出：底栏照旧写元素数");
+  assert.equal(formatOutputValue({ value: undefined }), "0 个元素", "运行收尾里的输出可能不带元素数");
+
+  const summary = (state, verdict) => ({ state, node: "n", port: "p", value: verdict ? { kind: "Measurement", value: 1, verdict } : undefined });
+  const order = sortSummaryOutputs([
+    ["a", summary("value", "ok")],
+    ["b", summary("value", "margin")],
+    ["c", summary("inactive")],
+    ["d", summary("value", "low")],
+    ["e", summary("failed")],
+    ["f", summary("value", "fail")],
+    ["g", summary("value")],
+  ]).map(([name]) => name);
+  assert.deepEqual(order, ["d", "e", "f", "b", "a", "c", "g"], "崩了的与判不合格的在最上，其次接近边界，其余照原样");
+});
+

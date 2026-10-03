@@ -884,6 +884,21 @@
 .node__dot--skipped   { background: #46a758; opacity: 0.6; }
 
 .node__count { color: var(--lyflow-fg-1); font-variant-numeric: tabular-nums; }
+
+/* 量测读数：值 + 判定。底栏一行放不下就截，全文在 title 与检查器里 */
+.node__readings {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.node__reading { display: inline-flex; align-items: center; gap: 3px; flex: none; }
+.node__reading-value { color: var(--lyflow-fg-0); font-variant-numeric: tabular-nums; }
+.node__reading[data-tone="ng"] .node__reading-value { color: #ff9a9a; }
+.node__reading[data-tone="margin"] .node__reading-value { color: #f5c56b; }
+.node__reading .insp-out__verdict { padding: 0 3px; font-size: 9px; line-height: 13px; }
+.node__reading-more { flex: none; color: var(--lyflow-fg-2); }
 .node__time  { font-variant-numeric: tabular-nums; }
 
 .node__err {
@@ -1642,6 +1657,12 @@
 .drawer__summary-choice { color: var(--lyflow-accent-dim); }
 .drawer__summary-where,
 .drawer__summary-from { color: var(--lyflow-fg-2); font-size: 11px; }
+.drawer__summary-value { color: var(--lyflow-fg-0); font-variant-numeric: tabular-nums; }
+.drawer__summary-node { font-size: 11px; }
+.drawer__summary-outputs li[data-verdict="high"] .drawer__summary-value,
+.drawer__summary-outputs li[data-verdict="low"] .drawer__summary-value,
+.drawer__summary-outputs li[data-verdict="fail"] .drawer__summary-value { color: #ff9a9a; }
+.drawer__summary-outputs li[data-verdict="margin"] .drawer__summary-value { color: #f5c56b; }
 
 .drawer__diags { margin: 0; padding: 0; list-style: none; }
 .drawer__diags button {
@@ -1873,7 +1894,8 @@
 }
 
 .insp-out__verdict.is-high,
-.insp-out__verdict.is-low {
+.insp-out__verdict.is-low,
+.insp-out__verdict.is-fail {
   background: #7a2b2b;
   color: #ffdede;
 }

@@ -21,7 +21,7 @@ import { useGraphParamOverrides, useRecipeStore } from "../store/recipe";
 import { formatValue } from "../lib/recipes";
 import { useUiStore } from "../store/ui";
 import { useGraphParamValidation, useNodeValidation, useValidationStore } from "../store/validation";
-import type { OutputStat, OutputValue } from "../types/execution";
+import type { OutputStat } from "../types/execution";
 import type { OperatorDesc, Param } from "../types/manifest";
 import type { GraphNode, SubgraphDef } from "../types/graph";
 
@@ -30,50 +30,13 @@ import { OperatorDetail, PortRow } from "./OperatorDetail";
 import { ParamControl } from "./ParamControls";
 import { MultiEditContext } from "./NumberInput";
 import { copyText } from "../lib/clipboard";
-import { num } from "../lib/format";
+import { formatOutputValue } from "../lib/outputs";
 
 /** 六位有效数字。2D 几何的坐标是米，原样打印会拖一串浮点噪声。 */
 // num 搬到了 lib/format（对比的差异表要在纯函数里用）；从这里转出，老的 import 不用改
 export { num } from "../lib/format";
-
-function pair(v: [number, number] | number | null | undefined): string {
-  return Array.isArray(v) ? `(${num(v[0])}, ${num(v[1])})` : "—";
-}
-
-/** 非点云输出的一行文本。类型未知时退回类型名，永远不抛。 */
-export function formatOutputValue(o: OutputStat): string {
-  const v: OutputValue | undefined = o.value;
-  if (!v) return `${o.elementCount} 个元素`;
-  // 图像算子的几何是像素坐标（docs/image-plan.md Q2）：值上写明，免得当成米读
-  const px = v.unit === "px" && v.kind !== "Measurement" ? " px" : "";
-  switch (v.kind) {
-    case "Measurement":
-      if (v.value === null || v.value === undefined) return v.message || "未测出";
-      return `${num(v.value)} ${v.unit ?? ""}`.trim();
-    case "Box2D":
-      return `${pair(v.min)} → ${pair(v.max)}${px}`;
-    case "Line2D":
-      return v.hasSegment
-        ? `${pair(v.start)} → ${pair(v.end)}${px}`
-        : `过 ${pair(v.point)} 方向 ${pair(v.dir)}${px}`;
-    case "Circle2D":
-      return `圆心 ${pair(v.center)} 半径 ${num(v.radius)}${px}`;
-    case "Point2D":
-      return `${pair(v.p)}${px}`;
-    case "Record":
-      return `${v.type ?? ""} ${JSON.stringify(v.data ?? {})}`.trim();
-    case "Plane":
-      return `n=(${(v.normal ?? []).map(num).join(", ")}) d=${num(v.d)}`;
-    case "Tensor":
-      return `[${(v.shape ?? []).join(", ")}] 均值 ${num(typeof v.mean === "number" ? v.mean : undefined)}`;
-    case "Image": {
-      const means = Array.isArray(v.mean) ? v.mean.map((m) => num(m ?? undefined)).join(", ") : "—";
-      return `${v.width ?? "?"}×${v.height ?? "?"}×${v.channels ?? "?"} ${v.depth ?? ""} · 均值 (${means})`;
-    }
-    default:
-      return `${o.elementCount} 个元素`;
-  }
-}
+// formatOutputValue 搬到了 lib/outputs（节点底栏与运行收尾也要用）
+export { formatOutputValue } from "../lib/outputs";
 
 /** 该节点这次运行的输出：能读的值逐个列出；点云只列点数，点一下预览改看它（多个点云输出时，
  *  提取下标的 rest 这类以前在预览里怎么都看不到）。 */
