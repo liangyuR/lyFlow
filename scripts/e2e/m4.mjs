@@ -877,6 +877,10 @@ async function suitePreview(cdp, report) {
     JSON.stringify(previewRun),
   );
   report.eq("正式运行的源头是全量点数", previewRun.sourceCount, 400000);
+  // 拖动中每次重跑，预览都留着上一片云（只在角上写「正在计算…」）。以前每次重跑先摘掉点、盖上整块「正在计算…」，
+  // 每 30 ms 一次的预览让画面一闪一闪
+  report.eq("拖动中的每次重跑，预览都没有变空（留着上一片云）",
+    await cdp.eval(`return window.__m4.marks.filter((m) => m.view === 'empty').length;`), 0);
 
   // 单独发一次 preview run，直接断言抽稀与命名空间
   const previewOnly = await runAndWait(cdp, () =>

@@ -32,6 +32,10 @@ export interface Display {
   port: string | null;
   /** 取数那一刻这次运行是不是预览运行（ADR-0011）。 */
   preview: boolean;
+  /** 显示的是哪种内容：重跑时只有同一种内容才留着上一片云。 */
+  content?: ViewerContent;
+  /** 正在重跑、屏幕上还是上一次的云（状态缩到角上）。 */
+  busy?: boolean;
 }
 
 export interface ViewerSourceInput {
@@ -127,7 +131,7 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: Vie
       port: string | null = null,
     ) => {
       if (cancelled) return;
-      setDisplay({ nodeId, runId: runId ?? null, cloud: payload, status, base, port, preview: isPreview });
+      setDisplay({ nodeId, runId: runId ?? null, cloud: payload, status, base, port, preview: isPreview, content });
     };
 
     if (!node || !path) {
@@ -147,7 +151,14 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: Vie
     }
     if (liveState !== "done" && liveState !== "skipped") {
       setLoading(false);
-      show(liveState === "running" ? "正在计算…" : "该节点尚未产出结果");
+      const text = liveState === "running" ? "正在计算…" : "该节点尚未产出结果";
+      // 同一个节点、同一种内容重跑：留着上一片云（图像模式的 lastGood 同一个意思），状态缩到角上。以前一重跑就摘掉
+      // 点、盖上整块「正在计算…」，拖参数时每 30 ms 一次的预览让画面一闪一闪。runId 仍是屏幕上那片云的那次运行
+      setDisplay((prev) =>
+        prev.nodeId === nodeId && prev.cloud && prev.content === content
+          ? { ...prev, status: text, busy: true }
+          : { nodeId, runId: runId ?? null, cloud: null, status: text, base: null, port: null, preview: isPreview, content },
+      );
       return;
     }
     // 显示值时不取云：值就在事件里（stats.outputs），底图也用不上。

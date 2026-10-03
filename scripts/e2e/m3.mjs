@@ -1958,18 +1958,39 @@ async function suiteMeasure(cdp, report) {
     t2d0 !== null && t2d1 !== null && t2d0 !== t2d1 && (await readMeasure(cdp)).count === 2, JSON.stringify({ t2d0, t2d1 }));
   await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMode("3d"); return true;`);
 
+  // 视角在重跑、换到同一坐标系里的节点之后都留着（相机位置与转心不动）。以前每片新云都重新取景：方向回到斜 45°，
+  // 双击设好的转心也没了
+  const cameraOf = () => cdp.eval(`return { pos: document.querySelector('[data-testid="viewer3d-canvas"]')?.dataset.cameraPos ?? null,
+    target: document.querySelector('[data-testid="viewer3d-canvas"] canvas')?.dataset.target ?? null };`);
+  // 前一步刚拖过：等阻尼停下、读数稳定了再当基准
+  let cam0 = await cameraOf();
+  for (let i = 0; i < 20; i += 1) {
+    await sleep(150);
+    const again = await cameraOf();
+    if (JSON.stringify(again) === JSON.stringify(cam0)) break;
+    cam0 = again;
+  }
+  const run0 =await cdp.eval(`return document.querySelector('.viewer')?.getAttribute('data-run') ?? null;`);
   await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.gen)}, 'seed', 6); return true;`);
   await runAndWait(cdp, () => pressF5(cdp));
   await cdp.waitFor(`document.querySelector('.viewer')?.getAttribute('data-measure-stale') === '1'`,
     { timeoutMs: 15_000, what: "重跑后测量标成过期" }).catch(() => {});
   const stale = await readMeasure(cdp);
   report.eq("同一节点重跑：两个点位留着、标「云已更新」", [stale.count, stale.stale], [2, "1"]);
+  await cdp.waitFor(`(document.querySelector('.viewer')?.getAttribute('data-run') ?? '') !== ${lit(run0 ?? "")}`,
+    { timeoutMs: 15_000, what: "预览换成了重跑的那片云" });
+  await sleep(200);
+  const cam1 = await cameraOf();
 
   await select(cdp, ids.voxel);
   await cdp.waitFor(`document.querySelector('.viewer')?.getAttribute('data-node') === ${lit(ids.voxel)}`,
     { timeoutMs: 15_000, what: "预览切到 voxel" });
   await sleep(200);
   report.eq("换节点：测量清掉", (await readMeasure(cdp)).count, 0);
+  const cam2 = await cameraOf();
+  report.ok("重跑（换了随机种子）、换到同一坐标系里的 voxel：相机位置与转心都没动",
+    cam0.pos !== null && cam0.target !== null && JSON.stringify(cam1) === JSON.stringify(cam0) && JSON.stringify(cam2) === JSON.stringify(cam0),
+    JSON.stringify({ cam0, cam1, cam2 }));
 
   await pressKey(cdp, "m", 77);
   await sleep(200);

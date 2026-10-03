@@ -44,3 +44,20 @@ test("对比的两栏：一侧可画就是点云场景，两侧都只有值才�
   );
   assert.deepEqual(got, ["cloud", "cloud", "cloud", "value"]);
 });
+
+// 换了一片云要不要重新取景（lib/viewFit）。修前每片新云都取景：重跑、在链上逐个点节点都把视角拉回斜 45°
+test("sameFrame：包围盒相交、对角线差不到 4 倍才算同一个坐标系（不重新取景）", async () => {
+  const { sameFrame } = await import("../src/lib/viewFit.ts");
+  const box = (x0, y0, z0, x1, y1, z1) => [x0, y0, z0, x1, y1, z1];
+  const base = box(0, 0, 0, 10, 10, 2);
+  const cases = [
+    ["同一片", base, true],
+    ["抽稀之后小一圈", box(0.2, 0.1, 0, 9.8, 9.9, 1.9), true],
+    ["只截了一部分（大小差 3 倍）", box(0, 0, 0, 3.5, 3.5, 1), true],
+    ["平移 100 m", box(100, 0, 0, 110, 10, 2), false],
+    ["放大 1000 倍", box(0, 0, 0, 10000, 10000, 2000), false],
+    ["小到 1/10（差 10 倍）", box(0, 0, 0, 1, 1, 0.2), false],
+    ["退化成一个点、与一片云", box(5, 5, 1, 5, 5, 1), false],
+  ];
+  for (const [name, other, want] of cases) assert.equal(sameFrame(base, other), want, name);
+});

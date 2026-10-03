@@ -29,6 +29,7 @@ import { rememberRoiBounds } from "../lib/roiThumbs";
 import { disposeOverlay, extentOf, shapesOf } from "../lib/shapes2d";
 import { fullId, levelOf, resolveOutput } from "../lib/subgraph";
 import { compareContentFor } from "../lib/viewRule";
+import { sameFrame } from "../lib/viewFit";
 import { exportCanvasPng } from "../lib/exportPng";
 import { transport } from "../transport";
 import { useCompareStore, type CompareSlot, type CompareSnapshot } from "../store/compare";
@@ -341,11 +342,11 @@ export function Viewer3D() {
   useEffect(() => {
     sceneRef.current?.setViews(compareOn ? 2 : 1, split);
   }, [compareOn, split]);
-  // 验收脚本读相机：两栏共用一台，拖动任一栏两边一起变（§6 第 3 条）
+  // 验收脚本读相机：对比时两栏共用一台，拖动任一栏两边一起变（§6 第 3 条）；单栏时看重跑、换节点之后视角动没动
   useEffect(() => {
     const scene = sceneRef.current;
     const host = hostRef.current;
-    if (!compareOn || !scene || !host) return;
+    if (!scene || !host) return;
     const write = () => {
       const c = scene.active().position;
       const text = [c.x, c.y, c.z].map(round3).join(",");
@@ -580,15 +581,21 @@ export function Viewer3D() {
     useGraphStore.getState().commit(`把${roi.label || "当前"}的框复制到其它槽`);
   };
 
-  // 换了云或换了几何就自动取景一次；同一份内容里调参数不该把视角拉回去。
-  // 必须排在上面那个 effect 之后：取景要量的是它刚建好的那一组线。
+  // 换了云或换了几何时看一眼要不要取景：还在同一个坐标系里（sameFrame）就不动相机 —— 调参数重跑、在链上逐个点节点时，
+  // 视角连同双击设好的转心都留着。以前每片新云都取景一次，方向写死成斜 45°，正交相机的缩放也回到 1。
+  // 第一片云、开关对比、换分栏方向时照旧取景。必须排在上面那个 effect 之后：取景要量的是它刚建好的那一组线。
+  const fitted = useRef<{ bounds: Float32Array; compare: boolean; split: SplitMode } | null>(null);
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
     setOverlayBounds(overlayBoundsOf(scene.overlay));
     // 对比时按 A ∪ B 取景（§1.3）：同一台相机，两栏里的东西都要装得下
     const bounds = unionBounds([cloud, cloudB], scene.overlays[0], scene.overlays[1], scene.backdrop);
-    if (bounds) fitToBounds(scene, bounds);
+    if (!bounds) return;
+    const last = fitted.current;
+    if (last && last.compare === compareOn && last.split === split && sameFrame(last.bounds, bounds)) return;
+    fitToBounds(scene, bounds);
+    fitted.current = { bounds, compare: compareOn, split };
   }, [cloud, cloudB, overlayShapes, overlayShapesB, backdrop.bounds, compareOn, split]);
 
   // 相机模式（G7）。只换 controls 挂的那台相机，场景与几何原封不动。
@@ -632,6 +639,7 @@ export function Viewer3D() {
       data-shading={effectiveShading}
       data-pinned={pinnedId ? "1" : "0"}
       data-run={display.runId ?? ""}
+      data-busy={display.busy ? "1" : undefined}
       data-preview={isPreview ? "1" : "0"}
       data-camera={cameraMode}
       data-overlay={overlayCount}
@@ -730,7 +738,10 @@ export function Viewer3D() {
                 const bounds = scene
                   ? unionBounds([cloud, cloudB], scene.overlays[0], scene.overlays[1], scene.backdrop)
                   : null;
-                if (scene && bounds) fitToBounds(scene, bounds);
+                if (scene && bounds) {
+                  fitToBounds(scene, bounds);
+                  fitted.current = { bounds, compare: compareOn, split };
+                }
               }}
               disabled={!cloud && overlayCount === 0 && backdrop.count === 0}
               title="缩放到全部（底图云 + 叠画几何）"
@@ -956,7 +967,7 @@ export function Viewer3D() {
         {!compareOn && !(content === "image" && activeNode && activeOp && roiNode) && (display.status || loading || (roiEditing && backdrop.error)) && (
           // 拖框时底图（模板）已经画出来了，状态只缩在角上，不盖住画面。底图取不到的原因也在这里说
           <div
-            className={`viewer__empty${roiEditing ? " viewer__empty--corner" : ""}`}
+            className={`viewer__empty${roiEditing || display.busy ? " viewer__empty--corner" : ""}`}
             data-testid="viewer3d-status"
           >
             {/* 拖框时底图取不到的原因比「未运行」有用：它说的是要先跑哪一段 */}
