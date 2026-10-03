@@ -1391,6 +1391,32 @@ async function suiteM3Tails(cdp, report, ws) {
     wrote === true && head !== null && head.length === 8 && head[1] === 0x50,
     `${target} ${head === null ? "文件不存在" : head.toString("hex")}`,
   );
+
+  // 路径框里粘一个资源管理器「复制文件地址」给的带引号、前后有空格的路径：存下的是去掉引号与空白的，跑得通。
+  // 以前原样存下、跑的时候才报「文件不存在」。桌面壳没有文件对话框：不摆一个点了只弹提示的「浏览…」
+  const copy = path.join(ws.dir, "彩色 副本.pcd");
+  fs.copyFileSync(colored, copy);
+  await select(cdp, ids.rgb);
+  await sleep(200);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="param-path"] input.ctl--str'));
+  await sleep(100);
+  await pressCtrl(cdp, "a");
+  await cdp.send("Input.insertText", { text: `  "${copy}"  ` });
+  await pressKey(cdp, "Enter", 13);
+  await sleep(200);
+  const pasted = await cdp.eval(`
+    const n = window.__lyflow.stores.graph.getState().doc.nodes.find((x) => x.id === ${lit(ids.rgb)});
+    return { param: n.params.path, shown: document.querySelector('[data-testid="param-path"] input.ctl--str')?.value ?? null,
+             browse: !!document.querySelector('[data-testid="param-path"] .ctl-btn') };
+  `);
+  const ranPasted = await runAndWait(cdp, () => pressF5(cdp));
+  await pressCtrl(cdp, "z");
+  await sleep(150);
+  report.ok("路径框里粘带引号、前后有空格的路径：存下的去掉了引号与空白、框里也是，跑得通；没有文件对话框时不摆「浏览…」；Ctrl+Z 回到原来的",
+    pasted.param === copy && pasted.shown === copy && !pasted.browse &&
+      ["done", "skipped"].includes(ranPasted.nodes[ids.rgb]?.state) &&
+      (await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.find((x) => x.id === ${lit(ids.rgb)}).params.path;`)) === colored,
+    JSON.stringify({ pasted, state: ranPasted.nodes[ids.rgb]?.state, errors: ranPasted.nodes[ids.rgb]?.errors }));
 }
 
 /** 子图内部节点出错（事件 id 是路径，ADR-0010）：顶层原来只看得到「这个子图红了」、诊断里是一串路径 id，

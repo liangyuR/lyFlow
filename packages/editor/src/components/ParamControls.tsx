@@ -11,6 +11,7 @@ import { dialogs } from "../lib/dialogs";
 import { joinBind, type GraphBinding } from "../lib/graphParams";
 import { fullId, type SubPath } from "../lib/subgraph";
 import { applyNumEdit, numEditNote, type NumApplied, type NumEdit } from "../lib/numExpr";
+import { cleanPathText } from "../lib/params";
 import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
 import type { EnumOption, Param } from "../types/manifest";
@@ -246,7 +247,13 @@ function FlagsControl({ param, value, disabled, onChange }: ControlProps) {
   );
 }
 
-function TextishControl({ param, value, disabled, onChange }: ControlProps) {
+function TextishControl({
+  param,
+  value,
+  disabled,
+  onChange,
+  normalize,
+}: ControlProps & { normalize?: (text: string) => string }) {
   const [text, setText] = useState(String(value ?? ""));
   const editing = useRef(false);
   /** Esc 撤回：接着的 blur 不提交（同 NumberInput —— onBlur 拿到的还是打进去的那个 text） */
@@ -262,7 +269,9 @@ function TextishControl({ param, value, disabled, onChange }: ControlProps) {
       setText(String(value ?? ""));
       return;
     }
-    if (text !== value) onChange(text);
+    const next = normalize ? normalize(text) : text;
+    if (next !== text) setText(next);
+    if (next !== value) onChange(next);
   };
 
   const shared = {
@@ -297,12 +306,10 @@ function TextishControl({ param, value, disabled, onChange }: ControlProps) {
 }
 
 function PathControl({ param, value, disabled, onChange }: ControlProps) {
+  // 宿主没给文件对话框（桌面壳现在就没给，param-recipe P3 决定 13）：不摆一个点了只弹「请手动填路径」的按钮
+  const pickPath = dialogs().pickPath;
   const pick = async () => {
-    const pickPath = dialogs().pickPath;
-    if (!pickPath) {
-      useUiStore.getState().showToast("当前宿主没有文件对话框，请手动填路径", "warn");
-      return;
-    }
+    if (!pickPath) return;
     const filters = (param.filters ?? []).map((f) => ({ name: f.name, extensions: f.extensions }));
     const picked = await pickPath({
       mode: param.mode === "save" ? "save" : param.mode === "dir" ? "dir" : "open",
@@ -318,10 +325,13 @@ function PathControl({ param, value, disabled, onChange }: ControlProps) {
         value={value}
         disabled={disabled}
         onChange={onChange}
+        normalize={cleanPathText}
       />
-      <button type="button" className="ctl-btn" disabled={disabled} onClick={() => void pick()}>
-        浏览…
-      </button>
+      {pickPath && (
+        <button type="button" className="ctl-btn" disabled={disabled} onClick={() => void pick()}>
+          浏览…
+        </button>
+      )}
     </div>
   );
 }

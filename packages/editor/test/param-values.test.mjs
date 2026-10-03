@@ -173,7 +173,7 @@ test("carryParams：换成别的算子时哪些参数带过去", async () => {
 });
 
 // 数字框里打的字（lib/numExpr）：数、算式、相对改法、输入法的全角符号；夹住与取整要说一声
-test("parseNumEdit / applyNumEdit：算式、相对改法、全角、夹住与取整", async () => {
+test("parseNumEdit / applyNumEdit：算式、相对改法、全角、夹住与取整；路径框去掉首尾空白与包着的一对引号", async () => {
   const { applyNumEdit, numEditNote, parseNumEdit } = await import("../src/lib/numExpr.ts");
   const F = { integer: false };
   const cases = [
@@ -218,4 +218,19 @@ test("parseNumEdit / applyNumEdit：算式、相对改法、全角、夹住与�
   assert.equal(numEditNote("Point Count", [{ value: 3, clamped: "max" }, { value: 2 }], { max: 3 }),
     "Point Count：2 个里 1 个超出上限 3，已取上限");
   assert.equal(numEditNote("x", [{ value: 2 }], {}), null);
+
+  const { cleanPathText } = await import("../src/lib/params.ts");
+  const paths = [
+    // [粘进来的, 存下的]
+    ['"D:\\data\\a b.pcd"', "D:\\data\\a b.pcd"],
+    ["  'rel/x.pcd'  ", "rel/x.pcd"],
+    ["\u201cD:\\中文\\x.pcd\u201d", "D:\\中文\\x.pcd"],
+    ['" D:\\x.pcd "', "D:\\x.pcd"],
+    ['"D:\\x.pcd\'', '"D:\\x.pcd\''],
+    ['D:\\"quoted"\\x.pcd', 'D:\\"quoted"\\x.pcd'],
+    ['""', ""],
+    ['"', '"'],
+    ["  plain.pcd\t", "plain.pcd"],
+  ];
+  for (const [raw, want] of paths) assert.equal(cleanPathText(raw), want, JSON.stringify(raw));
 });

@@ -167,6 +167,17 @@ export function groupParams(params: readonly Param[]): ParamGroup[] {
 // ---------------------------------------------------------------- 相对路径
 
 /** Windows 盘符、UNC，以及 POSIX 的绝对路径。 */
+/** 包着路径的那一对引号：直的、弯的（中文输入法）都认，两头得配成对。 */
+const QUOTE_PAIRS: Record<string, string> = { '"': '"', "'": "'", "\u201c": "\u201d", "\u2018": "\u2019" };
+
+/** 路径框里粘进来的字：去掉首尾空白，再去掉包着的一对引号（资源管理器「复制文件地址」给的是 "D:\x.pcd"，
+ *  以前原样存下、跑的时候才报「文件不存在」）。只去一对、两头得配成对；中间的引号不动。 */
+export function cleanPathText(text: string): string {
+  const t = text.trim();
+  if (t.length >= 2 && QUOTE_PAIRS[t[0]!] === t[t.length - 1]) return t.slice(1, -1).trim();
+  return t;
+}
+
 function isAbsolutePath(p: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith("\\\\") || p.startsWith("/");
 }
