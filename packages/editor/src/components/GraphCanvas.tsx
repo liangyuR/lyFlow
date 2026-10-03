@@ -35,13 +35,15 @@ import { peekSourceOf } from "../lib/peekSource";
 import { defaultViewFor } from "../lib/viewRule";
 import { augmentOperators, levelOf, nodeIndex, pathIsValid } from "../lib/subgraph";
 import {
-  canConnect,
+  canConnectReplacing,
   compatibleSources,
   compatibleTargets,
   dropOnNode,
   dropOnPort,
   inferAnyTypes,
   insertPortsFor,
+  replaceableTargets,
+  type ConnectVerdict,
   type DropOnNode,
   type GraphContext,
 } from "../lib/typecheck";
@@ -189,6 +191,17 @@ function levelView(): GraphDoc {
   const doc = useGraphStore.getState().doc;
   const lvl = levelOf(doc, useUiStore.getState().path);
   return lvl === doc ? doc : { ...doc, nodes: lvl.nodes, edges: lvl.edges };
+}
+
+/** 顶掉 occupant 那条线、接上 from → to（松在已接着线的输入上 = 换来源），一条撤销。接不上就整个不算。 */
+function replaceInto(occupant: string, from: PortRef, to: PortRef): ConnectVerdict {
+  const graph = useGraphStore.getState();
+  return graph.batch("替换连线", (cancel) => {
+    graph.disconnect([occupant]);
+    const verdict = graph.connect(from, to);
+    if (!verdict.ok) cancel();
+    return verdict;
+  });
 }
 
 /** 面包屑。点任意一段回到那一层（F2）。 */
@@ -613,19 +626,23 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
   );
 
   // -- 连线 ----------------------------------------------------------------
-  const onConnect = useCallback((c: Connection) => {
-    if (!c.source || !c.target || !c.sourceHandle || !c.targetHandle) return;
-    const verdict = useGraphStore.getState().connect(
-      { node: c.source, port: c.sourceHandle },
-      { node: c.target, port: c.targetHandle },
-    );
-    if (!verdict.ok) {
-      useUiStore.getState().showToast(verdict.reason, "warn");
-    } else {
-      // 人自己接了一条：自动连线留下的候选高亮就完成了使命
-      useUiStore.getState().clearAutoHint();
-    }
-  }, []);
+  const onConnect = useCallback(
+    (c: Connection) => {
+      if (!c.source || !c.target || !c.sourceHandle || !c.targetHandle) return;
+      const from = { node: c.source, port: c.sourceHandle };
+      const to = { node: c.target, port: c.targetHandle };
+      // 松在已接着线的输入上：给它换来源（顶掉原来那条），一条撤销
+      const replacing = canConnectReplacing(ctx, levelView(), from, to);
+      const verdict = replacing.ok && replacing.replaces ? replaceInto(replacing.replaces, from, to) : useGraphStore.getState().connect(from, to);
+      if (!verdict.ok) {
+        useUiStore.getState().showToast(verdict.reason, "warn");
+      } else {
+        // 人自己接了一条：自动连线留下的候选高亮就完成了使命
+        useUiStore.getState().clearAutoHint();
+      }
+    },
+    [ctx],
+  );
 
   /** 拖线开始：把「哪些端口能落」算一次存进 ui store，端口自己去读（P1 #20）。 */
   const onConnectStart = useCallback(
@@ -643,6 +660,8 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       useUiStore.getState().beginConnection(
         { ...ref, side: fromOutput ? "output" : "input" },
         compatible,
+        // 从输出往外拖时，已接着线的输入松上去是换来源
+        fromOutput ? replaceableTargets(ctx, current, ref) : undefined,
       );
     },
     [ctx],
@@ -667,7 +686,7 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
           ? dropOnPort(ctx, levelView(), ref, pending.side, { node: snapped.nodeId, port: snapped.id }, snapped.type === "source" ? "output" : "input")
           : resolveDropOnNode(ctx, levelView(), ref, pending.side, point, wrapper.current?.ownerDocument ?? document);
       if (drop.kind === "connect") {
-        const verdict = useGraphStore.getState().connect(drop.from, drop.to);
+        const verdict = drop.replaces ? replaceInto(drop.replaces, drop.from, drop.to) : useGraphStore.getState().connect(drop.from, drop.to);
         if (verdict.ok) ui.clearAutoHint();
         else ui.showToast(verdict.reason, "warn");
         return;
@@ -690,14 +709,28 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
   }, []);
 
   /** 拖离输入端后落到别的端口上（交互清单 P1 #19）。 */
-  const onReconnect = useCallback((oldEdge: Edge, c: Connection) => {
-    if (!c.target || !c.targetHandle) return;
-    const verdict = useGraphStore
-      .getState()
-      .reconnectEdge(oldEdge.id, { node: c.target, port: c.targetHandle });
-    if (verdict.ok) reconnected.current = true;
-    else useUiStore.getState().showToast(verdict.reason, "warn");
-  }, []);
+  const onReconnect = useCallback(
+    (oldEdge: Edge, c: Connection) => {
+      if (!c.target || !c.targetHandle) return;
+      const graph = useGraphStore.getState();
+      const to = { node: c.target, port: c.targetHandle };
+      // 改接到一个已接着线的输入上：顶掉那条，与改接一起一条撤销
+      const from = levelView().edges.find((e) => e.id === oldEdge.id)?.from;
+      const replacing = from ? canConnectReplacing(ctx, levelView(), from, to) : null;
+      const occupant = replacing?.ok ? replacing.replaces : null;
+      const verdict = occupant
+        ? graph.batch("改接连线", (cancel) => {
+            graph.disconnect([occupant]);
+            const v = graph.reconnectEdge(oldEdge.id, to);
+            if (!v.ok) cancel();
+            return v;
+          })
+        : graph.reconnectEdge(oldEdge.id, to);
+      if (verdict.ok) reconnected.current = true;
+      else useUiStore.getState().showToast(verdict.reason, "warn");
+    },
+    [ctx],
+  );
 
   /** 拖离之后落在空白处：断开并弹搜索面板，复用 #18 的通路。 */
   const onReconnectEnd = useCallback(
@@ -715,7 +748,8 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
         const drop = resolveDropOnNode(ctx, levelView(), from, "output", at, wrapper.current?.ownerDocument ?? document);
         if (drop.kind === "connect") {
           graph.batch("改接连线", () => {
-            graph.disconnect([edge.id]);
+            // 松在已接着线的输入上：那条也顶掉（换来源）
+            graph.disconnect(drop.replaces ? [edge.id, drop.replaces] : [edge.id]);
             graph.connect(drop.from, drop.to);
           });
           return;
@@ -745,7 +779,8 @@ export function GraphCanvas({ onRunToNode }: CanvasActions) {
       const sourceHandle = "sourceHandle" in c ? c.sourceHandle : null;
       const targetHandle = "targetHandle" in c ? c.targetHandle : null;
       if (!source || !target || !sourceHandle || !targetHandle) return false;
-      return canConnect(
+      // 已接着线的输入也算能落：松上去是换来源（onConnect 顶掉原来那条）
+      return canConnectReplacing(
         ctx,
         levelView(),
         { node: source, port: sourceHandle },

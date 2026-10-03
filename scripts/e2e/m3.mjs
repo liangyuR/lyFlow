@@ -705,6 +705,30 @@ async function suiteReconnect(cdp, report) {
   `);
   report.eq("线头松在节点身子上：改接到它唯一的输入，一条撤销，不弹搜索面板", onBody,
     { edges: [`${ids.gen}>${ids.voxel}.cloud`], undoLabel: "改接连线", added: 1, search: false });
+
+  // 线头改接到一个已接着线的输入上（crop 已经接着 gen2）：换来源 —— 顶掉 gen2→crop，与改接一起一条撤销
+  const gen2 = await cdp.eval(`
+    const id = window.__lyflow.stores.graph.getState().addNode('gen.synthetic', { x: 0, y: 0 });
+    window.__lyflow.stores.graph.getState().connect({ node: id, port: 'cloud' }, { node: ${lit(ids.crop)}, port: 'cloud' });
+    return id;
+  `);
+  await placeAtScreen(cdp, { [gen2]: { x: 16, y: Math.round(box.h * 0.55) } });
+  await sleep(250);
+  const genEdge = await cdp.eval(`return window.__lyflow.snapshot().doc.edges.find((e) => e.from.node === ${lit(ids.gen)}).id;`);
+  const anchor3 = await centerOf(cdp, `.react-flow__edge[data-id="${genEdge}"] .react-flow__edgeupdater-target`);
+  const cropIn = await centerOf(cdp, `[data-testid="port-${ids.crop}-cloud"] .react-flow__handle`);
+  mustOk(anchor3 != null && cropIn != null, "gen→voxel 的线头与 crop 的输入都找得到", { anchor3, cropIn });
+  const pastBeforeSwap = await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+  await dragMouse(cdp, anchor3, cropIn, { steps: 18 });
+  await sleep(250);
+  const edgesNow = () => cdp.eval(`return window.__lyflow.snapshot().doc.edges.map((e) => e.from.node + '>' + e.to.node + '.' + e.to.port).sort();`);
+  const swapped = { edges: await edgesNow(), added: (await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`)) - pastBeforeSwap,
+    rejected: await cdp.eval(`const t = window.__lyflow.stores.ui.getState().toast; return t && /已有连线/.test(t.text) ? t.text : null;`) };
+  await pressCtrl(cdp, "z");
+  await sleep(200);
+  report.eq("线头改接到已接着线的 crop 上：顶掉 gen2→crop、一条撤销、不弹「已有连线」；Ctrl+Z 一次两条都回来",
+    { ...swapped, undone: await edgesNow() },
+    { edges: [`${ids.gen}>${ids.crop}.cloud`], added: 1, rejected: null, undone: [`${gen2}>${ids.crop}.cloud`, `${ids.gen}>${ids.voxel}.cloud`].sort() });
 }
 
 /** #21：把一个孤立节点拖到连线上 → 自动插入到中间。 */
@@ -906,19 +930,36 @@ async function suiteDropToSearch(cdp, report) {
     await cdp.eval(`return document.querySelector('[data-testid="toast"]')?.textContent ?? null;`),
     "合并点云 上有 2 个端口能接，拖到要接的那个端口上");
 
-  // 松在一个已被占的输入端口上（合并的 a 已经接着 gen）：只判这个端口、说它被占了，不再悄悄接到隔壁空着的 b。
-  // 以前当成松在节点身上、在整个节点里另找能接的 —— 体素接进了 b，没有任何提示
+  // 松在一个已接着线的输入上（合并的 a 已经接着 gen）：给它换来源 —— 顶掉 gen→a、接上体素→a，一条撤销；拖到它附近时
+  // 端口亮成「替换」。以前当成松在节点身上、在整个节点里另找能接的：体素悄悄接进了隔壁的 b，没有任何提示
   await cdp.eval(`window.__lyflow.stores.graph.getState().connect({ node: ${lit(ids.gen)}, port: 'cloud' }, { node: ${lit(extra.merge)}, port: 'a' }); return true;`);
   await sleep(200);
   const voxOut = await centerOf(cdp, `[data-testid="port-${extra.voxel}-cloud"].node-port--output .react-flow__handle`);
   const mergeA = await centerOf(cdp, `[data-testid="port-${extra.merge}-a"] .react-flow__handle`);
   mustOk(voxOut != null && mergeA != null, "找得到体素的输出端口与合并的 a", { voxOut, mergeA });
-  await dragMouse(cdp, voxOut, mergeA, { steps: 14 });
+  const pastBeforeReplace = await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+  {
+    const held = { button: "left", buttons: 1, clickCount: 1 };
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: voxOut.x, y: voxOut.y, buttons: 0 });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: voxOut.x, y: voxOut.y, ...held });
+    for (let i = 1; i <= 12; i += 1) {
+      const t = i / 12;
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: Math.round(voxOut.x + (mergeA.x - voxOut.x) * t), y: Math.round(voxOut.y + (mergeA.y - voxOut.y) * t), ...held });
+      await sleep(15);
+    }
+  }
+  const verdictMid = await cdp.eval(`return {
+    a: document.querySelector('[data-testid="port-${extra.merge}-a"]')?.dataset.portVerdict ?? null,
+    b: document.querySelector('[data-testid="port-${extra.merge}-b"]')?.dataset.portVerdict ?? null };`);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: mergeA.x, y: mergeA.y, button: "left", buttons: 0, clickCount: 1 });
   await sleep(250);
-  report.eq("松在已被占的合并.a 上：不接到隔壁的 b，提示 a 已有连线",
-    { edges: (await wired()).filter((e) => e.includes(extra.merge)),
-      toast: await cdp.eval(`return window.__lyflow.stores.ui.getState().toast?.text ?? null;`) },
-    { edges: [`${ids.gen}>${extra.merge}.a`], toast: "输入端口已有连线（输入是单连接）" });
+  const replaced = { edges: (await wired()).filter((e) => e.includes(extra.merge)),
+    past: await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`) };
+  await pressCtrl(cdp, "z");
+  await sleep(200);
+  report.eq("松在已接着线的合并.a 上：拖到附近时 a 亮成「替换」；松手换成体素→a、b 不碰、一条撤销；Ctrl+Z 一次回到 gen→a",
+    { verdictMid, edges: replaced.edges, steps: replaced.past - pastBeforeReplace, undone: (await wired()).filter((e) => e.includes(extra.merge)) },
+    { verdictMid: { a: "replace", b: "compatible" }, edges: [`${extra.voxel}>${extra.merge}.a`], steps: 1, undone: [`${ids.gen}>${extra.merge}.a`] });
 
   report.ok("算子面板顶上有「最近用过」一组，里面有它",
     await cdp.eval(`return !!document.querySelector('[data-testid="palette-recent"] [data-op-id=${lit(added ?? "")}]');`));

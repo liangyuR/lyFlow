@@ -51,12 +51,13 @@ interface PortHandleProps {
 function PortHandle({ nodeId, port, side, index, anyType }: PortHandleProps) {
   const type = port.type === ANY ? (anyType ?? ANY) : port.type;
   const color = useManifestStore((s) => s.typesByName.get(type)?.color ?? "#6b7280");
-  // 拖线中的兼容性可视化（交互清单 P1 #20）：能落的高亮，不能落的置灰。
+  // 拖线中的兼容性可视化（交互清单 P1 #20）：能落的高亮，不能落的置灰；已接着线、松上去会换掉来源的标「替换」
   const verdict = useUiStore((s) => {
     if (!s.pendingFrom) return "";
     const key = `${nodeId}:${port.name}`;
     if (s.pendingFrom.side === side) return "";
-    return s.compatiblePorts.has(key) ? "compatible" : "incompatible";
+    if (s.compatiblePorts.has(key)) return "compatible";
+    return s.replacePorts.has(key) ? "replace" : "incompatible";
   });
   // 自动连线没能唯一确定（m8-plan L13）：没连上的输入与它的每个候选输出都亮出来
   const auto = useUiStore((s) => {

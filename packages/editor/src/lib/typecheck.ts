@@ -167,6 +167,35 @@ export function canConnect(
   return { ok: true };
 }
 
+/** 能不能把 from 接到 to —— to 已经被别的线占着时顶掉它（拖线松在已接线的输入上 = 给它换个来源，Blender、ComfyUI
+ *  都是这样）。ok 时 replaces 是要顶掉的那条线（没占着时为 null）。类型、成环在拿掉那条线之后的图上判（Any 跟着重推）。
+ *  只给界面上的拖线用：store 的 connect 照旧拒绝被占的输入，CLI 的 --connect 也不替人顶掉（ADR-0023）。 */
+export function canConnectReplacing(
+  ctx: GraphContext,
+  doc: GraphDoc,
+  from: PortRef,
+  to: PortRef,
+): { ok: true; replaces: string | null } | { ok: false; reason: string } {
+  const occupant = doc.edges.find(
+    (e) => e.to.node === to.node && e.to.port === to.port && !(e.from.node === from.node && e.from.port === from.port),
+  );
+  const verdict = occupant
+    ? canConnect(ctx, { ...doc, edges: doc.edges.filter((e) => e.id !== occupant.id) }, from, to)
+    : canConnect(ctx, doc, from, to);
+  return verdict.ok ? { ok: true, replaces: occupant?.id ?? null } : verdict;
+}
+
+/** 拖线时用：从 from 拖出去，哪些已经接着线的输入可以被顶掉（端口上亮成「替换」，与「能落」「不能落」区分开）。 */
+export function replaceableTargets(ctx: GraphContext, doc: GraphDoc, from: PortRef): Set<string> {
+  const out = new Set<string>();
+  for (const e of doc.edges) {
+    if (e.from.node === from.node && e.from.port === from.port) continue;
+    const verdict = canConnectReplacing(ctx, doc, from, e.to);
+    if (verdict.ok && verdict.replaces) out.add(`${e.to.node}:${e.to.port}`);
+  }
+  return out;
+}
+
 /** 拖线时用：给定拖出的源端口，哪些输入端口是可落点。
  *  UI 拿它把不兼容的端口置灰 —— 让类型系统「看得见」。 */
 export function compatibleTargets(
@@ -193,7 +222,7 @@ export function compatibleTargets(
 export type DropOnNode =
   | { kind: "none" }
   | { kind: "self" }
-  | { kind: "connect"; from: PortRef; to: PortRef }
+  | { kind: "connect"; from: PortRef; to: PortRef; replaces?: string }
   | { kind: "reject"; reason: string };
 
 export function dropOnNode(
@@ -287,9 +316,9 @@ export function insertPortsFor(
   return found;
 }
 
-/** 拖线松在一个具体的端口上、React Flow 却没接上（多半是那个输入已被占，或类型不对）：只判这一个端口，说它自己的原因。
- *  以前当成松在节点身上、在整个节点里另找能接的：松在合并的 a（已被占）上接到了 b，松在 ICP 的 source 上接到了
- *  target —— 语义反了，还没有任何提示。target 是松手处的端口，targetSide 是它在自己节点上的哪一侧。 */
+/** 拖线松在一个具体的端口上、React Flow 却没接上：只判这一个端口 —— 已接着线的输入就给它换来源（顶掉原来那条），
+ *  接不上说它自己的原因。以前当成松在节点身上、在整个节点里另找能接的：松在合并的 a（已被占）上接到了 b，松在 ICP 的
+ *  source 上接到了 target —— 语义反了，还没有任何提示。target 是松手处的端口，targetSide 是它在自己节点上的哪一侧。 */
 export function dropOnPort(
   ctx: GraphContext,
   doc: GraphDoc,
@@ -303,8 +332,10 @@ export function dropOnPort(
     return { kind: "reject", reason: side === "output" ? "这是输出端口：拖到输入端口上" : "这是输入端口：拖到输出端口上" };
   }
   const [from, to] = side === "output" ? [ref, target] : [target, ref];
-  const verdict = canConnect(ctx, doc, from, to);
-  return verdict.ok ? { kind: "connect", from, to } : { kind: "reject", reason: verdict.reason };
+  // 松在已接线的输入上 = 换来源（顶掉原来那条）；成环、类型不对说原因
+  const verdict = canConnectReplacing(ctx, doc, from, to);
+  if (!verdict.ok) return { kind: "reject", reason: verdict.reason };
+  return verdict.replaces ? { kind: "connect", from, to, replaces: verdict.replaces } : { kind: "connect", from, to };
 }
 
 /** 反向：拖的是输入端口时，哪些输出端口可以当源。#20 的置灰要两个方向都覆盖。 */

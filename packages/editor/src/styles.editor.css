@@ -1233,6 +1233,14 @@
 .node-port--incompatible {
   opacity: 0.25;
 }
+/* 已接着线的输入：松上去换掉原来的来源（顶掉那条线）。与「能落」区分开，免得以为是加一条 */
+.node-port--replace .node-port__handle {
+  --lyflow-handle-scale: 1.3;
+  box-shadow: 0 0 0 3px rgba(240, 160, 32, 0.45);
+}
+.node-port--replace .node-port__label {
+  color: var(--lyflow-warn);
+}
 
 /* 对齐参考线。活在 ViewportPortal 里，所以坐标就是画布坐标（P1 #22） */
 .canvas__guides {

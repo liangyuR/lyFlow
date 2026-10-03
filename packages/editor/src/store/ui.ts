@@ -72,6 +72,8 @@ interface UiState {
   pendingFrom: PendingConnection | null;
   /** 与 pendingFrom 兼容的端口集合，键是 `nodeId:portName`。 */
   compatiblePorts: ReadonlySet<string>;
+  /** 已经接着线、松上去会顶掉原来那条的输入（换来源）。键同上。 */
+  replacePorts: ReadonlySet<string>;
 
   /** 鼠标指着的节点（H2）：与它相连的边加亮、其余的淡下去。纯 UI 状态，不进 doc 也不进撤销（H5）。 */
   hoverNodeId: string | null;
@@ -142,7 +144,7 @@ interface UiState {
   hideToast(): void;
   setInspectedOperator(id: string | null): void;
   setPinnedNode(id: string | null): void;
-  beginConnection(from: PendingConnection, compatible: ReadonlySet<string>): void;
+  beginConnection(from: PendingConnection, compatible: ReadonlySet<string>, replaceable?: ReadonlySet<string>): void;
   endConnection(): void;
   toggleDrawer(tab?: DrawerTab): void;
   setRenamingNode(id: string | null): void;
@@ -202,6 +204,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   pinnedNode: null,
   pendingFrom: null,
   compatiblePorts: NO_PORTS,
+  replacePorts: NO_PORTS,
   hoverNodeId: null,
   hoverEdge: null,
   hoverPaused: false,
@@ -291,12 +294,12 @@ export const useUiStore = create<UiState>((set, get) => ({
     if (get().pinnedNode === id) return;
     set({ pinnedNode: id });
   },
-  beginConnection(from, compatible) {
-    set({ pendingFrom: from, compatiblePorts: compatible });
+  beginConnection(from, compatible, replaceable = NO_PORTS) {
+    set({ pendingFrom: from, compatiblePorts: compatible, replacePorts: replaceable });
   },
   endConnection() {
     if (!get().pendingFrom) return;
-    set({ pendingFrom: null, compatiblePorts: NO_PORTS });
+    set({ pendingFrom: null, compatiblePorts: NO_PORTS, replacePorts: NO_PORTS });
   },
   setRenamingNode(id) {
     if (get().renamingNode !== id) set({ renamingNode: id });
