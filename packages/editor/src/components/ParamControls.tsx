@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import { copyText, readClipboard } from "../lib/clipboard";
+import { stepFor } from "../lib/params";
 import { curveProblem } from "../lib/curve";
 import { dialogs } from "../lib/dialogs";
 import { joinBind, type GraphBinding } from "../lib/graphParams";
@@ -14,7 +15,7 @@ import { useUiStore } from "../store/ui";
 import type { EnumOption, Param } from "../types/manifest";
 
 import { CurveControl } from "./CurveControl";
-import { dragStepOf, NumberInput, Slider } from "./NumberInput";
+import { NumberInput, Slider } from "./NumberInput";
 import { TransformControl } from "./TransformControl";
 
 import "../styles.params.css";
@@ -53,7 +54,7 @@ function NumberControl({ param, value, disabled, onChange, nodeId }: ControlProp
         min={param.min}
         max={param.max}
         step={param.step}
-        dragStep={dragStepOf(param, integer)}
+        dragStep={(ref) => stepFor(param, integer, ref)}
         dragName={param.name}
         nodeId={nodeId}
         onCommit={onChange}
@@ -106,7 +107,7 @@ function VectorControl({ param, value, disabled, onChange, nodeId }: ControlProp
               min={param.min}
               max={param.max}
               step={param.step}
-              dragStep={dragStepOf(param, false)}
+              dragStep={(ref) => stepFor(param, false, ref)}
               dragName={`${param.name}-${i}`}
               nodeId={nodeId}
               onCommit={(v) => setComponent(i, v)}

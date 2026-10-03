@@ -6,7 +6,6 @@ import { useEffect, useRef, useState } from "react";
 import { beginPreview, endPreview, schedulePreview } from "../lib/preview";
 import { rootOf } from "../lib/root";
 import { useGraphStore } from "../store/graph";
-import type { Param } from "../types/manifest";
 
 /** 拖过这么多像素才算一格。太小手抖就改值，太大又拖不动。 */
 const DRAG_PX_PER_STEP = 4;
@@ -22,18 +21,8 @@ interface DragState {
   active: boolean;
   /** 拖动时挂 lyflow-param-dragging 的那个编辑器根（不是 body）。 */
   host: HTMLElement | null;
-}
-
-/** 一格的大小：manifest 的 step 优先，其次整数 1、soft 范围的 1/200，最后 0.01。 */
-export function dragStepOf(param: Param, integer: boolean): number {
-  if (param.step !== undefined && param.step > 0) return param.step;
-  if (integer) return 1;
-  const lo = param.softMin ?? param.min;
-  const hi = param.softMax ?? param.max;
-  if (lo !== undefined && hi !== undefined && Number.isFinite(lo) && Number.isFinite(hi) && hi > lo) {
-    return (hi - lo) / 200;
-  }
-  return 0.01;
+  /** 这一段拖动的一格：开拖时按当时的值定下来，拖过 10 的整数次幂也不换档。 */
+  step: number;
 }
 
 /** 吸到 step 的整数倍，并抹掉二进制浮点的尾巴（0.30000000000000004）。 */
@@ -58,7 +47,8 @@ export interface NumberInputProps {
   min?: number | undefined;
   max?: number | undefined;
   step?: number | undefined;
-  dragStep: number;
+  /** 拖一格、按一下 ↑↓ 走多少。给函数时按当前值算（lib/params.ts 的 stepFor：没有范围的参数看值的量级）。 */
+  dragStep: number | ((ref: number) => number);
   dragName?: string | undefined;
   nodeId?: string | undefined;
   onCommit: (v: number) => void;
@@ -91,6 +81,13 @@ export function NumberInput({
   }, [value]);
 
   useEffect(() => () => finishDrag(drag.current, nodeId), [nodeId]);
+
+  const stepAt = (ref: number) => (typeof dragStep === "function" ? dragStep(ref) : dragStep);
+  /** Shift ×10、Alt ×0.1 之后的一格。整数至少 1。 */
+  const unitOf = (step: number, shift: boolean, alt: boolean) => {
+    const u = step * (shift ? 10 : 1) * (alt ? 0.1 : 1);
+    return integer ? Math.max(1, Math.round(u)) : u;
+  };
 
   const clamp = (v: number) => {
     let n = v;
@@ -127,6 +124,7 @@ export function NumberInput({
       acc: value,
       active: false,
       host: rootOf(e.currentTarget),
+      step: 0,
     };
   };
 
@@ -138,16 +136,18 @@ export function NumberInput({
       d.active = true;
       d.lastX = e.clientX;
       d.acc = value;
+      d.step = stepAt(value);
       editing.current = false; // 拖动压过打字，接下来由它接管显示
       d.host?.classList.add("lyflow-param-dragging");
       setDragging(true);
       useGraphStore.getState().begin();
       if (nodeId) beginPreview(nodeId);
     }
-    const mult = (e.shiftKey ? 10 : 1) * (e.altKey ? 0.1 : 1);
-    d.acc = clamp(d.acc + ((e.clientX - d.lastX) / DRAG_PX_PER_STEP) * dragStep * mult);
+    // 按实际的一格量化：以前 Alt 细调之后又按原步长吸回去，细调等于没调
+    const unit = unitOf(d.step, e.shiftKey, e.altKey);
+    d.acc = clamp(d.acc + ((e.clientX - d.lastX) / DRAG_PX_PER_STEP) * unit);
     d.lastX = e.clientX;
-    let next = clamp(quantize(d.acc, dragStep));
+    let next = clamp(quantize(d.acc, unit));
     if (integer) next = clamp(Math.round(next));
     setText(String(next));
     if (next !== value) {
@@ -205,8 +205,7 @@ export function NumberInput({
           e.preventDefault();
           const typed = integer ? parseInt(text, 10) : parseFloat(text);
           const base = Number.isNaN(typed) ? value : typed;
-          const unit = integer ? Math.max(1, Math.round(dragStep)) : dragStep * (e.altKey ? 0.1 : 1);
-          const delta = (e.key === "ArrowUp" ? 1 : -1) * unit * (e.shiftKey ? 10 : 1);
+          const delta = (e.key === "ArrowUp" ? 1 : -1) * unitOf(stepAt(base), e.shiftKey, e.altKey);
           const next = clamp(integer ? Math.round(base + delta) : Number.parseFloat((base + delta).toPrecision(12)));
           editing.current = true;
           setText(String(next));

@@ -9,6 +9,14 @@
 }
 
 /* 拖动的可供性：光标提示这个框可以横向拖 */
+/* 参数数字框不要浏览器自带的 ▲▼：没声明 step 的浮点框点一下是 ±1（0.01 成了 1.01）。↑↓ 键与拖动按参数的步长走 */
+.ctl--num::-webkit-inner-spin-button,
+.ctl--num::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
 .ctl--num.is-draggable:not(:disabled) {
   cursor: ew-resize;
 }

@@ -540,6 +540,32 @@ async function suiteAllTypes(cdp, report, ws) {
       JSON.stringify({ before, chosen, undone }));
   }
 
+  // 没声明范围的浮点按值的量级走：customFactor（默认 0.5、没范围也没 step）按 ↑ 是 +0.001；设成 1e-3 再真拖 8 px，
+  // 还在 1e-3 量级。修前一格一律 0.01：按 ↑ 成 0.51、1e-3 拖一下就被量化成 0.01 或 0
+  {
+    const g = `window.__lyflow.stores.graph.getState()`;
+    await cdp.eval(`${g}.setParam(${lit(ids.show)}, 'mode', 'custom'); ${g}.setParam(${lit(ids.show)}, 'customFactor', 0.5); return true;`);
+    await sleep(200);
+    const cfSel = `${rowSel(`${ids.show}.customFactor`)} input.ctl--num`;
+    await reveal(cdp, rowSel(`${ids.show}.customFactor`));
+    await cdp.eval(`document.querySelector(${lit(cfSel)}).focus(); return true;`);
+    await pressKey(cdp, "ArrowUp", 38);
+    await pressKey(cdp, "Enter", 13);
+    await sleep(150);
+    const stepped = (await paramsOf(cdp, ids.show)).customFactor;
+    await cdp.eval(`${g}.setParam(${lit(ids.show)}, 'customFactor', 0.001); return true;`);
+    await sleep(200);
+    const box = await cdp.eval(`
+      const b = document.querySelector(${lit(cfSel)}).getBoundingClientRect();
+      return { x: Math.round(b.left + 20), y: Math.round(b.top + b.height / 2) };
+    `);
+    await dragMouse(cdp, { x: box.x, y: box.y }, { x: box.x + 8, y: box.y }, { steps: 4 });
+    await sleep(150);
+    const dragged = (await paramsOf(cdp, ids.show)).customFactor;
+    report.ok("没范围的浮点按值的量级走：0.5 按 ↑ 是 0.501；1e-3 拖 8 px 还在 1e-3 量级",
+      approxEq(stepped, 0.501) && dragged > 0.001 && dragged < 0.0011, JSON.stringify({ stepped, dragged }));
+  }
+
   // 取色器拖着选（一路发 input，关上时一个 change）：整段一条撤销，值是最后那个。以前每一下 input 都是一条
   {
     await reveal(cdp, rowSel(`${ids.show}.tint`));

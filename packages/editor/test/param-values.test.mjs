@@ -14,7 +14,7 @@ import {
   removePoint,
   yRange,
 } from "../src/lib/curve.ts";
-import { valueEquals } from "../src/lib/params.ts";
+import { niceStep, stepFor, valueEquals } from "../src/lib/params.ts";
 import { asMatrix, compose, decompose, IDENTITY, isRigid, summarize } from "../src/lib/transform.ts";
 
 const close = (a, b, eps = 1e-9) => Math.abs(a - b) <= eps;
@@ -119,4 +119,25 @@ test("valueEquals：curve 这样的对象按键比，与键的书写顺序无关
   assert.ok(!valueEquals(a, { points: [[0, 0], [1, 1]] }));
   assert.ok(!valueEquals(a, { ...a, points: [[0, 0], [1, 0.9]] }));
   assert.ok(!valueEquals(a, [a]));
+});
+
+// 数字框拖一格、按一下 ↑↓ 走多少。修前没范围的一律 0.01、整数一律 1：1e-3 量级的值拖 1 px 就被量化成 0
+test("stepFor：声明了 step 用它；有范围取 1/200；没范围看当前值（0 时看默认值）的量级；整数至少 1；修整成 1/2/5 × 10^k", () => {
+  const P = (extra) => ({ name: "p", type: "float", label: "P", default: 0, ...extra });
+  const cases = [
+    ["声明了 step", P({ step: 0.25 }), false, 3, 0.25],
+    ["浮点有范围 0–1：0.005", P({ min: 0, max: 1 }), false, 0.3, 0.005],
+    ["soft 范围优先，0–3 的 1/200 修整成 0.01", P({ min: 0, max: 100, softMin: 0, softMax: 3 }), false, 1, 0.01],
+    ["整数有范围（点数 1–500000）：2000，不再是 1", P({ min: 1, softMax: 500000 }), true, 40000, 2000],
+    ["整数没范围，值 1000：10", P({}), true, 1000, 10],
+    ["浮点没范围，值 10：0.1", P({}), false, 10, 0.1],
+    ["浮点没范围，值 1e-3：1e-5", P({}), false, 1e-3, 1e-5],
+    ["值是 0：看默认值 0.5", P({ default: 0.5 }), false, 0, 0.001],
+    ["什么都没有：浮点 0.01", P({}), false, undefined, 0.01],
+    ["什么都没有：整数 1", P({}), true, 0, 1],
+  ];
+  for (const [name, param, integer, ref, want] of cases) {
+    assert.ok(Math.abs(stepFor(param, integer, ref) - want) < want * 1e-9, `${name}：得到 ${stepFor(param, integer, ref)}`);
+  }
+  assert.deepEqual([2499.995, 0.015, 0.005, 7, 1].map(niceStep), [2000, 0.01, 0.005, 5, 1]);
 });
