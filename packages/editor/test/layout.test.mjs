@@ -67,3 +67,26 @@ test("右键菜单摆进窗口：放不下翻到鼠标另一边，比窗口还�
     assert.deepEqual(placeMenu(at, size, vp), want, name);
   }
 });
+
+// 记在 localStorage 里的开关（检查器端口小节的开合）：只认 "1" / "0"，存储读不到、写不进都不报错
+test("readStoredBool / writeStoredBool：坏值当没有，存储抛异常时照样往下走", async () => {
+  const { readStoredBool, writeStoredBool } = await import("../src/lib/prefs.ts");
+  const mem = new Map();
+  globalThis.localStorage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)) };
+  try {
+    assert.equal(readStoredBool("k"), null, "没存过");
+    writeStoredBool("k", false);
+    assert.deepEqual([mem.get("k"), readStoredBool("k")], ["0", false]);
+    writeStoredBool("k", true);
+    assert.equal(readStoredBool("k"), true);
+    for (const bad of ["true", "", "2"]) {
+      mem.set("k", bad);
+      assert.equal(readStoredBool("k"), null, `存的是 ${JSON.stringify(bad)}`);
+    }
+    globalThis.localStorage = { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("quota"); } };
+    assert.equal(readStoredBool("k"), null, "读不到");
+    writeStoredBool("k", true); // 写不进：不抛
+  } finally {
+    delete globalThis.localStorage;
+  }
+});

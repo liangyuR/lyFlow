@@ -338,6 +338,26 @@
   margin: 8px 0 0;
   color: var(--lyflow-fg-1);
   font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-line;
+  /* 两行就够判断这是什么算子；整段在「展开说明」里 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.insp__doc.is-open {
+  display: block;
+  overflow: visible;
+}
+.insp__doc-more {
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--lyflow-accent);
+  font-size: 11px;
+  cursor: pointer;
 }
 
 .insp__warn {

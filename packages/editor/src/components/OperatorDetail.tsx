@@ -219,10 +219,7 @@ export function OperatorDetail({ op }: { op: OperatorDesc }) {
       </section>
 
       <section className="detail__section">
-        <h3>
-          参数
-          <span className="detail__hint">M1 会把这里换成 manifest 驱动的可编辑表单</span>
-        </h3>
+        <h3>参数</h3>
         {op.params.length === 0 ? (
           <p className="detail__none">无参数</p>
         ) : (

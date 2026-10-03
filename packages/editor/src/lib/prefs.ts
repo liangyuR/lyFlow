@@ -20,6 +20,24 @@ export function writeStoredNumber(key: string, value: number): void {
   }
 }
 
+/** 开 / 关这类偏好。存的是 "1" / "0"，别的（没存过、读不到、被改坏）都是 null。 */
+export function readStoredBool(key: string): boolean | null {
+  try {
+    const raw = globalThis.localStorage?.getItem(key);
+    return raw === "1" ? true : raw === "0" ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeStoredBool(key: string, value: boolean): void {
+  try {
+    globalThis.localStorage?.setItem(key, value ? "1" : "0");
+  } catch {
+    // 记不住就记不住，这一次照样生效
+  }
+}
+
 export function removeStored(key: string): void {
   try {
     globalThis.localStorage?.removeItem(key);

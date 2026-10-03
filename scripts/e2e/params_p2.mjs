@@ -20,6 +20,8 @@ import { sleep } from "./cdp.mjs";
 import { ROOT } from "./harness.mjs";
 import {
   buildGraph,
+  centerOf,
+  clickAt,
   dragMouse,
   lit,
   mustOk,
@@ -30,6 +32,7 @@ import {
   pressF5,
   runAndWait,
   saveGraphTo,
+  select,
   revealInList as reveal,
 } from "./page.mjs";
 
@@ -167,6 +170,51 @@ async function suiteLayout(cdp, report) {
   await resetPanel(cdp);
   const hasOp = await cdp.eval(`return !!window.__lyflow.stores.manifest.getState().operatorsById.get(${lit(SHOW)});`);
   mustOk(hasOp, "test.param_showcase 没注册：起 app 时要 LYFLOW_TEST_OPS=1");
+
+  // 检查器以调参为主：参数排在端口小节前面（以前端口在前，gap 类算子第一屏常常看不到一个参数）；算子说明截成两行；
+  // 端口小节收起来后换个节点、再回来都还收着（记在 localStorage，分组结束时放回原样）
+  const PORTS_KEY = "lyflow.inspector.portsOpen";
+  const portsStored = await cdp.eval(`const v = localStorage.getItem(${lit(PORTS_KEY)}); localStorage.removeItem(${lit(PORTS_KEY)}); return v;`);
+  try {
+    await newDoc(cdp);
+    const icp = await buildGraph(cdp, [{ key: "icp", op: "register.icp_2d" }, { key: "gen", op: "gen.synthetic" }], []);
+    await select(cdp, icp.icp);
+    await sleep(300);
+    const insp = () => cdp.eval(`
+      const ports = document.querySelector('[data-testid="inspector-ports"]');
+      const params = [...document.querySelectorAll('.app__inspector .insp-param')];
+      const doc = document.querySelector('[data-testid="inspector-doc"]');
+      const lh = doc ? parseFloat(getComputedStyle(doc).lineHeight) : 0;
+      return {
+        portsTop: ports ? Math.round(ports.getBoundingClientRect().top) : null,
+        lastParamTop: params.length ? Math.round(params[params.length - 1].getBoundingClientRect().top) : null,
+        open: ports ? ports.open : null,
+        docLines: doc && lh > 0 ? Math.round(doc.getBoundingClientRect().height / lh) : null,
+        more: !!document.querySelector('[data-testid="inspector-doc-more"]'),
+        stored: localStorage.getItem(${lit(PORTS_KEY)}),
+      };
+    `);
+    const a = await insp();
+    report.ok("检查器：参数排在端口小节前面，算子说明截成两行、给「展开说明」",
+      a.portsTop !== null && a.lastParamTop !== null && a.portsTop > a.lastParamTop && a.docLines === 2 && a.more && a.open === true,
+      JSON.stringify(a));
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="inspector-doc-more"]'));
+    report.ok("真鼠标点「展开说明」：整段都出来了", (await insp()).docLines > 2);
+    await cdp.eval(`document.querySelector('[data-testid="inspector-ports-toggle"]').scrollIntoView({ block: 'center' }); return true;`);
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="inspector-ports-toggle"]'));
+    await select(cdp, icp.gen);
+    await sleep(200);
+    await select(cdp, icp.icp);
+    await sleep(250);
+    const c = await insp();
+    report.ok("真鼠标收起端口小节：换个节点再回来还收着，记进了 localStorage", c.open === false && c.stored === "0", JSON.stringify(c));
+  } finally {
+    await cdp.eval(`
+      const v = ${lit(portsStored)};
+      if (v === null) localStorage.removeItem(${lit(PORTS_KEY)}); else localStorage.setItem(${lit(PORTS_KEY)}, v);
+      return true;
+    `);
+  }
 
   // 六个节点，面板的列表足够长，才验得出「画布选中 → 面板滚过去」
   await newDoc(cdp);

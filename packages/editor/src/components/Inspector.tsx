@@ -1,7 +1,7 @@
 // 右侧检查器：选中节点的参数表单。字段、控件、范围、单位、分组、联动条件
 // 全部由 manifest 生成（ADR-0003），这个文件里没有任何算子的名字。
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   graphParamSpecOf,
@@ -11,6 +11,7 @@ import {
   type GraphBinding,
 } from "../lib/graphParams";
 import { groupParams, effectiveParams, isEnabled, isVisible, valueEquals } from "../lib/params";
+import { readStoredBool, writeStoredBool } from "../lib/prefs";
 import { frameKeyOfGroup, pickFrame, roiFramesOf } from "../lib/roiFrames";
 import { augmentOperators, describeEventNode, fullId, levelOf, nodeIndex, promotedBy } from "../lib/subgraph";
 import { useExecutionStore, useNodeExecution, useParamErrors } from "../store/execution";
@@ -254,12 +255,32 @@ function GraphParamRow({ name }: { name: string }) {
   );
 }
 
-/** 节点的端口小节（M6 §3）：类型、契约、样例。折叠成 <details>，默认展开 ——
- *  没声明契约的算子照样列出来，type 和 doc 本来就有用，但收起来时不占地方。 */
+/** 端口小节开着还是收着，所有节点共用一份，记在 localStorage。 */
+const PORTS_OPEN_KEY = "lyflow.inspector.portsOpen";
+
+/** 节点的端口小节（M6 §3）：类型、契约、样例。排在参数后面（以前排在前面，gap 类算子在 900 高的窗口里
+ *  第一屏常常看不到一个参数）；收起来时只剩一行「端口 2 入 · 1 出」，开合记住。 */
 function NodePorts({ op }: { op: OperatorDesc }) {
+  const [open, setOpen] = useState(() => readStoredBool(PORTS_OPEN_KEY) ?? true);
   return (
-    <details className="insp__group insp__ports" data-testid="inspector-ports" open>
-      <summary className="insp__group-title">端口</summary>
+    <details
+      className="insp__group insp__ports"
+      data-testid="inspector-ports"
+      open={open}
+      // 读 currentTarget.open，不自己取反：浏览器已经切过了，取反会和它打架
+      onToggle={(e) => {
+        const next = e.currentTarget.open;
+        if (next === open) return;
+        setOpen(next);
+        writeStoredBool(PORTS_OPEN_KEY, next);
+      }}
+    >
+      <summary className="insp__group-title" data-testid="inspector-ports-toggle">
+        {open ? "▾ " : "▸ "}端口
+        <span className="insp__group-count">
+          {op.inputs.length} 入 · {op.outputs.length} 出
+        </span>
+      </summary>
       <div className="insp__ports-body">
         <div>
           <h5 className="insp__ports-label">输入</h5>
@@ -477,7 +498,7 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
             默认值或参数含义可能已变更。
           </p>
         )}
-        {op.doc && <p className="insp__doc">{op.doc}</p>}
+        {op.doc && <ClampedDoc key={op.id} text={op.doc} />}
       </header>
 
       {/* 该节点这次运行的全部诊断（D5）。带 paramPath 的会同时在下面标红框，
@@ -532,8 +553,6 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
       )}
 
       {exec?.stats?.outputs && <OutputValues outputs={exec.stats.outputs} />}
-
-      <NodePorts op={op} />
 
       {op.params.length === 0 ? (
         <p className="insp__none">此算子没有参数</p>
@@ -621,7 +640,37 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
           );
         })
       )}
+
+      <NodePorts op={op} />
     </div>
+  );
+}
+
+/** 算子说明截成两行（整段写着契约、算法细节，以前不截，把参数挤到第一屏外）；放不下才给「展开」。 */
+function ClampedDoc({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [open, setOpen] = useState(false);
+  const [overflow, setOverflow] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || open) return;
+    const measure = () => setOverflow(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text, open]);
+  return (
+    <>
+      <p ref={ref} className={`insp__doc${open ? " is-open" : ""}`} data-testid="inspector-doc">
+        {text}
+      </p>
+      {(overflow || open) && (
+        <button type="button" className="insp__doc-more" data-testid="inspector-doc-more" onClick={() => setOpen(!open)}>
+          {open ? "收起" : "展开说明"}
+        </button>
+      )}
+    </>
   );
 }
 
