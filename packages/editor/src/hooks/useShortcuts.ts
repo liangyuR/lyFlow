@@ -112,6 +112,11 @@ export function useShortcuts(
       // 输入框里的 Esc 归那个框（撤回打的字、清空搜索），一次只退一层。这个监听挂在编辑器根元素上，比框自己的
       // onKeyDown（React 在根容器上才分发）先到，框里 stopPropagation 也拦不住它：以前运行中在参数框里按 Esc 想撤回
       // 打的字，运行跟着被取消；在子图里按，顺带退出了子图；开着的查看器窗口也被关掉一个。框处理完会失焦，再按一次才是全局的
+      if (e.key === "Escape" && ui.viewerMaximized && (e.target as HTMLElement | null)?.tagName === "SELECT") {
+        e.preventDefault();
+        ui.setViewerMaximized(false);
+        return;
+      }
       if (e.key === "Escape" && inTextField(e.target)) return;
       if (ui.helpOpen && e.key === "Escape") {
         ui.setHelpOpen(false);
@@ -135,6 +140,8 @@ export function useShortcuts(
       // 在预览栏的下拉框里选完一项，焦点还在它上面
       if (e.key === "Escape" && ui.viewerMaximized) {
         e.preventDefault();
+        // 拦住传播：焦点在画布的节点上时 React Flow 把 Esc 当成「取消选中」，还原回来预览就空了
+        e.stopPropagation();
         ui.setViewerMaximized(false);
         return;
       }
@@ -146,9 +153,14 @@ export function useShortcuts(
       // 下拉框里没有可撤的文字：Ctrl+Z / Ctrl+Y 归编辑器（以前交给浏览器，选完一项按 Ctrl+Z 什么也不发生）。
       // 字母跳选、方向键、Space 仍归下拉框
       const undoOnSelect = (hit.id === "undo" || hit.id === "redo") && (e.target as HTMLElement | null)?.tagName === "SELECT";
-      if (!hit.inTextField && inTextField(e.target) && !undoOnSelect) return;
+      const viewerOnSelect =
+        hit.scope === "viewer" && (e.target as HTMLElement | null)?.tagName === "SELECT" && hovered?.closest("[data-view-presets]") != null;
+      if (!hit.inTextField && inTextField(e.target) && !undoOnSelect && !viewerOnSelect) return;
       // 预览最大化着，画布看不见：删除、复制、搜索这些动画布的键不响（不然在看不见的地方删了节点）
       if (ui.viewerMaximized && hit.scope === "canvas") {
+        if (hit.id === "search" && onControl(e.target)) return;
+        if ((hit.id === "copy" || hit.id === "cut") && hasTextSelection(owner)) return;
+        e.preventDefault();
         ui.showToast("预览最大化中：按 Esc 回到画布再编辑");
         return;
       }
@@ -161,6 +173,8 @@ export function useShortcuts(
           return;
         case "maximizeViewer":
           e.preventDefault();
+          // 拦住传播：焦点在画布的节点上时 React Flow 把 Shift+空格当成多选里的取消选中，预览就成了「选中一个节点…」
+          e.stopPropagation();
           ui.setViewerMaximized(!ui.viewerMaximized);
           return;
         case "runToNode":

@@ -1002,6 +1002,19 @@ async function suiteBigGraph(cdp, report) {
   `);
   report.eq("Alt+→ 九下从链头走到链尾：选中、焦点、预览都跟着走，链尾移进了视野；节点没被挪、不记撤销", walked,
     { selected: [tail], focused: tail, inPane: true, viewer: tail, pastDelta: 0, headMoved: false });
+  // 链尾再按一下：走不动（选中不换），React Flow 自己的方向键挪节点也不能接过去把链尾挪一格
+  const tailBefore = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    return { past: g.past.length, pos: JSON.stringify(g.doc.nodes.find((n) => n.id === ${lit(tail)}).ui.position) };
+  `);
+  await pressKey(cdp, "ArrowRight", 39, ["alt"]);
+  await sleep(250);
+  const tailAfter = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    return { past: g.past.length, pos: JSON.stringify(g.doc.nodes.find((n) => n.id === ${lit(tail)}).ui.position),
+             selected: [...window.__lyflow.stores.ui.getState().selectedNodes] };
+  `);
+  report.eq("链尾上再按 Alt+→：走不动，链尾不被挪、不记撤销", tailAfter, { ...tailBefore, selected: [tail] });
 
   // 拖动帧率：页面里挂一个 rAF 采样器，然后用 CDP 发**真**鼠标事件拖一个节点。
   // 合成 MouseEvent 骗不过 React Flow 的 d3-drag（它要读 event.view.document）。

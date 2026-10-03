@@ -423,7 +423,7 @@ export function CloudView({ win, src }: PeekViewProps) {
         >
           ⤢
         </button>
-        <ViewPresetButtons className="peek__btn" disabled={cameraMode !== "3d" || empty} onPick={pickPreset} />
+        <ViewPresetButtons className="peek__btn" disabled={cameraMode !== "3d"} onPick={pickPreset} />
         <button
           type="button"
           className="peek__btn"

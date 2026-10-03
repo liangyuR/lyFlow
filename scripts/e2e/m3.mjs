@@ -2437,6 +2437,22 @@ async function suiteMeasure(cdp, report) {
       !restored.max && Math.abs(restored.right.w - beforeMax.right.w) <= 2 && Math.abs(restored.canvas.w - beforeMax.canvas.w) <= 2 &&
       restored.buf === beforeMax.buf,
     JSON.stringify({ beforeMax, maxed, keptNodes, measuredMax, restored }));
+  // 焦点在画布的节点上按 Shift+Space：最大化，选中不丢（React Flow 会把 Shift+空格当成多选里的取消选中）；Esc 还原。
+  // 焦点直接给节点（点一下已选中的节点会让选中短暂变空、把上面量好的两个点清掉，后面的断言还要用）
+  await cdp.eval(`document.querySelector('.react-flow__node[data-id="${ids.gen}"]').focus(); return true;`);
+  await sleep(100);
+  await pressKey(cdp, " ", 32, ["shift"]);
+  await sleep(300);
+  const byKey = await cdp.eval(`
+    return { max: !!document.querySelector('.app__body.is-viewer-max'),
+             selected: [...window.__lyflow.stores.ui.getState().selectedNodes],
+             viewer: document.querySelector('.viewer')?.getAttribute('data-node') ?? null };
+  `);
+  await pressEscape(cdp);
+  await sleep(300);
+  const afterEsc = await cdp.eval(`return { max: !!document.querySelector('.app__body.is-viewer-max'), selected: [...window.__lyflow.stores.ui.getState().selectedNodes] };`);
+  report.eq("焦点在节点上按 Shift+Space 最大化、Esc 还原：选中与预览都不丢（React Flow 拿这两个键当取消选中）", { byKey, afterEsc },
+    { byKey: { max: true, selected: [ids.gen], viewer: ids.gen }, afterEsc: { max: false, selected: [ids.gen] } });
   await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMode("3d"); return true;`);
 
   // 标准视角：真点「前」是前视；鼠标在画布上按 1 不动；鼠标在预览上按 1 是俯视；转心始终不动

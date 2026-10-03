@@ -148,7 +148,10 @@ export function createScene(host: HTMLDivElement): Scene {
     const paneH = state.views === 2 && state.split === "tb" ? height / 2 : height;
     camera.aspect = paneW / paneH;
     camera.updateProjectionMatrix();
+    // 2D 剖面与透视相机一样保住竖直方向的范围：变宽了多看一点，而不是把上下裁掉、整体放大
+    const prevAspect = state.aspect;
     state.aspect = paneW / paneH;
+    if (prevAspect > 0 && Number.isFinite(prevAspect)) state.halfWidth *= state.aspect / prevAspect;
     state.applyOrtho();
   };
 

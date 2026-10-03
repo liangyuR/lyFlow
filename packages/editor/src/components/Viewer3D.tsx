@@ -624,7 +624,8 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
     const bounds = unionBounds([cloud, cloudB], scene.overlays[0], scene.overlays[1], scene.backdrop);
     if (!bounds) return;
     const last = fitted.current;
-    if (last && last.compare === compareOn && last.split === split && sameFrame(last.bounds, bounds)) return;
+    // 两栏换排法（最大化 / 还原时上下 ↔ 左右）不算：每栏的宽高比跟着 resize 变了，视角与转心留着
+    if (last && last.compare === compareOn && sameFrame(last.bounds, bounds)) return;
     fitToBounds(scene, bounds);
     fitted.current = { bounds, compare: compareOn, split };
   }, [cloud, cloudB, overlayShapes, overlayShapesB, backdrop.bounds, compareOn, split]);

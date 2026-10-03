@@ -903,6 +903,8 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
   // 诊断、子图节点上的错误文字点进来（ui.revealNode）：等这一层画出来，把那个节点移进视野。
   // 不放大过 1:1 —— 只框一个节点的话 fitView 会把它放得满屏
   const revealRequest = useUiStore((s) => s.revealRequest);
+  // 键盘沿连线走时那次平移的终点（动画还没走完时下一步按它算）
+  const followTarget = useRef<{ x: number; y: number; zoom: number } | null>(null);
   useEffect(() => {
     if (!revealRequest) return;
     if (revealRequest.follow) {
@@ -911,14 +913,39 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
       const id = revealRequest.nodeId;
       const host = wrapper.current;
       const box = host?.getBoundingClientRect();
+      // 画布收起来了（参数面板 / 预览最大化）：只换选中，不挪、不抢焦点（不然方向键会在看不见的地方挪节点）
+      if (!host || !box || box.width < 1 || box.height < 1) return;
+      const doc = host.ownerDocument;
+      const focusedBefore = doc.activeElement;
+      const pane = { width: box.width, height: box.height };
+      const rect = rectOf(levelView(), id, measured.current);
+      // 上一次的平移还在动画里：按它的终点算，不按半路上的那一帧（不然算出来不用挪，等它停下新节点反倒出了视野）
+      const view = followTarget.current ?? getViewport();
       const inset = { top: 40 + (useUiStore.getState().path.length > 0 ? 32 : 0), right: 40, bottom: 40, left: 40 };
-      const view = getViewport();
-      const center = box ? revealShift(view, { width: box.width, height: box.height }, rectOf(levelView(), id, measured.current), inset) : null;
+      let center = revealShift(view, pane, rect, inset);
+      // 右下角的小地图不透明：挪完压在它底下就再往上让一让
+      const mm = host.querySelector(".react-flow__minimap")?.getBoundingClientRect();
+      if (mm && mm.width > 0) {
+        const final = center ? { x: pane.width / 2 - center.x * view.zoom, y: pane.height / 2 - center.y * view.zoom } : view;
+        const sx = rect.x * view.zoom + final.x;
+        const sy = rect.y * view.zoom + final.y;
+        const hit = sx < mm.right - box.left && sx + rect.w * view.zoom > mm.left - box.left &&
+          sy < mm.bottom - box.top && sy + rect.h * view.zoom > mm.top - box.top;
+        if (hit) center = revealShift(view, pane, rect, { ...inset, bottom: Math.max(inset.bottom, box.bottom - mm.top + 8) });
+      }
       let cancelled = false;
       void (async () => {
-        if (center) await setCenter(center.x, center.y, { zoom: view.zoom, duration: viewportMs(motionOn) });
+        if (center) {
+          const target = { x: pane.width / 2 - center.x * view.zoom, y: pane.height / 2 - center.y * view.zoom, zoom: view.zoom };
+          followTarget.current = target;
+          await setCenter(center.x, center.y, { zoom: view.zoom, duration: viewportMs(motionOn) });
+          if (followTarget.current === target) followTarget.current = null;
+        }
         for (let i = 0; i < 30 && !cancelled; i += 1) {
-          const el = host?.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
+          // 这期间焦点被别的接走了（开了搜索、查找节点、改名框）：不抢回来
+          const active = doc.activeElement;
+          if (active !== focusedBefore && active !== doc.body && !(active && host.contains(active))) return;
+          const el = host.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
           if (el) {
             el.focus({ preventScroll: true });
             return;
@@ -1124,6 +1151,8 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
       <Breadcrumb />
       {view.nodes.length === 0 && <EmptyHint inSubgraph={path.length > 0} onOpenRecent={onOpenRecent} />}
       <ReactFlow
+        // 预览最大化时画布看不见：React Flow 自己的方向键挪节点（框选的选区还拿着焦点时）也关掉
+        disableKeyboardA11y={viewerMax}
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}

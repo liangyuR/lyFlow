@@ -75,6 +75,11 @@ test("预览最大化：要动画布的动作先还原它（定位、打开参�
     act();
     assert.equal(ui().viewerMaximized, still, name);
   }
+  // 面板开着（最大化时看不见）再点「参数」：是想看面板 —— 还原，面板照旧开着（以前把看不见的面板关掉了）
+  useUiStore.setState({ viewerMaximized: false, paramPanel: { ...ui().paramPanel, open: true, maximized: false } });
+  ui().setViewerMaximized(true);
+  ui().toggleParamPanel();
+  assert.deepEqual([ui().viewerMaximized, ui().paramPanel.open], [false, true], "最大化着点「参数」");
   useUiStore.setState({ viewerMaximized: false, paramPanel: { ...ui().paramPanel, open: false, maximized: false } });
 });
 

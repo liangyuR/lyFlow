@@ -48,7 +48,8 @@ const VIEW_TITLE: Record<PeekView, string> = {
 };
 
 function boundsOf(el: HTMLElement | null) {
-  const canvas = el?.closest(".canvas");
+  // 预览最大化时画布是 0 宽：按它夹的话窗口只能贴在左边、一截在屏幕外
+  const canvas = el?.closest(useUiStore.getState().viewerMaximized ? ".app__body" : ".canvas");
   if (!canvas) return null;
   const r = canvas.getBoundingClientRect();
   return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };

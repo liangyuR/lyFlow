@@ -360,6 +360,11 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   toggleParamPanel(open) {
     const cur = get().paramPanel;
+    // 预览最大化着、面板开着（只是看不见）：点「参数」是想看面板 —— 还原，而不是把看不见的面板关掉
+    if (open === undefined && cur.open && get().viewerMaximized) {
+      set({ viewerMaximized: false });
+      return;
+    }
     const next = open ?? !cur.open;
     if (next === cur.open) return;
     // 打开参数面板：预览最大化着就还原（面板在预览下面，最大化时看不见）
