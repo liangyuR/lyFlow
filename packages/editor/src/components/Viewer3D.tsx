@@ -1,10 +1,11 @@
 // 3D 点云预览（交互清单 P1 #30）。three.js 随包打、**不走 CDN**：桌面应用断网也得能用。
 // 点云走二进制 IPC，`decodeCloud` 给的 Float32Array 是缓冲上的**视图**，全程零拷贝（ADR-0006）。
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
 import {
+  applyViewPreset,
   boundsAttr,
   buildPoints,
   createScene,
@@ -60,6 +61,8 @@ import { useFocusOnDoubleClick } from "../hooks/useFocusOnDoubleClick";
 import { measureAttrs, useMeasure } from "../hooks/useMeasure";
 import { useViewerSource, type ViewerSource } from "../hooks/useViewerSource";
 import "../styles.viewer.css";
+import type { ViewPreset } from "../lib/viewFit";
+import { ViewPresetButtons, useViewPresetEvents } from "./ViewPresetButtons";
 
 export type { ShadingMode, CameraMode } from "../lib/cloudScene";
 export type { RampName } from "../lib/ramps";
@@ -162,6 +165,13 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   const path = useUiStore((s) => s.path);
   const pinnedId = useUiStore((s) => s.pinnedNode);
   const viewerMax = useUiStore((s) => s.viewerMaximized);
+  const viewerRoot = useRef<HTMLDivElement>(null);
+  // 标准视角：按钮与「鼠标在预览上按 1–4」两路都走这里。对比时两栏共用一台相机，一起转
+  const pickPreset = useCallback((view: ViewPreset) => {
+    const scene = sceneRef.current;
+    return scene ? applyViewPreset(scene, view) : false;
+  }, []);
+  useViewPresetEvents(viewerRoot, pickPreset);
   const setViewerMax = useUiStore((s) => s.setViewerMaximized);
   const setPinnedId = useUiStore((s) => s.setPinnedNode);
   const doc = useGraphStore((s) => s.doc);
@@ -644,7 +654,9 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
 
   return (
     <div
+      ref={viewerRoot}
       className="viewer"
+      data-view-presets={stageContent === "cloud" && cameraMode === "3d" ? "1" : undefined}
       // 验收脚本靠这两个属性判断「视图已经切到这个节点了」，
       // 而不是去猜多久之后 React 会渲染完（scripts/e2e）。
       data-node={display.nodeId ?? ""}
@@ -888,6 +900,9 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
           </>
         )}
         <span className="viewer__spacer" />
+        {stageContent === "cloud" && (
+          <ViewPresetButtons className="viewer__btn" disabled={cameraMode !== "3d"} onPick={pickPreset} />
+        )}
         {pinnedId && (
           <span className="viewer__pinned" title={`已钉住 ${pinnedId}`}>
             📌 {pinnedLabel}

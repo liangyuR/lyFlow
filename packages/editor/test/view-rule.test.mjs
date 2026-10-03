@@ -62,6 +62,32 @@ test("sameFrame：包围盒相交、对角线差不到 4 倍才算同一个坐�
   for (const [name, other, want] of cases) assert.equal(sameFrame(base, other), want, name);
 });
 
+// 标准视角（lib/viewFit 的 presetPosition）：绕着现在的转心转过去、距离不变
+test("presetPosition：绕同一个转心、距离不变；俯视屏幕上方是 +Y；轴测与 ⤢ 同一个方向", async () => {
+  const { ISO_DIR, presetPosition } = await import("../src/lib/viewFit.ts");
+  const target = [1, 2, 3];
+  const from = [4, -2, 3]; // 离转心 5
+  const unit = (v) => {
+    const n = Math.hypot(...v);
+    return v.map((x) => x / n);
+  };
+  const iso = unit(ISO_DIR);
+  const cases = [
+    // [视角, 期望的方向（从转心指向相机）]
+    ["front", [0, -1, 0]],
+    ["side", [1, 0, 0]],
+    ["iso", iso],
+  ];
+  for (const [view, dir] of cases) {
+    const p = presetPosition(view, target, from);
+    const got = unit([p[0] - target[0], p[1] - target[1], p[2] - target[2]]);
+    assert.ok(got.every((v, i) => Math.abs(v - dir[i]) < 1e-9), `${view}：${got}`);
+    assert.ok(Math.abs(Math.hypot(p[0] - 1, p[1] - 2, p[2] - 3) - 5) < 1e-9, `${view}：距离不变`);
+  }
+  const top = presetPosition("top", target, from);
+  assert.ok(top[0] === 1 && top[1] < 2 && top[1] > 1.99 && top[2] > 7.99, `俯视：正上方、往 −Y 偏一丝（屏幕上方 = +Y）：${top}`);
+});
+
 // 预览的显示设置（lib/viewPrefs）：读回存着的那一份时逐项校验；手动着色范围按着色模式分开记
 test("显示设置读回：坏的那一项回到默认，别的照用", async () => {
   const { DEFAULT_VIEWER_PREFS: d, parseViewerPrefs } = await import("../src/lib/viewPrefs.ts");

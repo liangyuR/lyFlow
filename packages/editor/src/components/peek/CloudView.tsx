@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
 import { findBaseCloud, firstCloudPort, type BaseCloud } from "../../lib/basecloud";
 import { cacheKey, cloudCache, dropOtherRuns, fetchCloud, putCache } from "../../lib/cloudCache";
 import {
+  applyViewPreset,
   boundsAttr,
   buildPoints,
   createScene,
@@ -30,6 +31,8 @@ import { decodeCloud, type CloudPayload } from "../../types/execution";
 import { useFocusOnDoubleClick } from "../../hooks/useFocusOnDoubleClick";
 import { measureAttrs, useMeasure } from "../../hooks/useMeasure";
 import { MeasureReadout } from "../MeasureReadout";
+import { ViewPresetButtons, useViewPresetEvents } from "../ViewPresetButtons";
+import type { ViewPreset } from "../../lib/viewFit";
 import type { PeekViewProps } from "./types";
 
 const MAX_POINTS_CHOICES = [100_000, 200_000, 500_000, 2_000_000];
@@ -49,6 +52,7 @@ interface CloudTarget {
 
 export function CloudView({ win, src }: PeekViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const peekRoot = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<Scene | null>(null);
 
   const [display, setDisplay] = useState<Display>({
@@ -292,6 +296,11 @@ export function CloudView({ win, src }: PeekViewProps) {
 
   const setOpts = usePeekStore((s) => s.setOpts);
   const empty = !cloud && !shapeStat;
+  const pickPreset = useCallback((view: ViewPreset) => {
+    const scene = sceneRef.current;
+    return scene ? applyViewPreset(scene, view) : false;
+  }, []);
+  useViewPresetEvents(peekRoot, pickPreset);
   const resize = (factor: number) =>
     setOpts(win.id, { pointSize: clampPointSize(Math.round(pointSize * factor * 10) / 10) });
   // 转过视角后回到全貌（与主预览的 ⤢ 同一个：底图云 + 叠画几何）
@@ -307,7 +316,9 @@ export function CloudView({ win, src }: PeekViewProps) {
 
   return (
     <div
+      ref={peekRoot}
       className="peek-cloud"
+      data-view-presets={cameraMode === "3d" ? "1" : undefined}
       data-testid="peek-cloud"
       data-camera={cameraMode}
       data-shading={effectiveShading}
@@ -412,6 +423,7 @@ export function CloudView({ win, src }: PeekViewProps) {
         >
           ⤢
         </button>
+        <ViewPresetButtons className="peek__btn" disabled={cameraMode !== "3d" || empty} onPick={pickPreset} />
         <button
           type="button"
           className="peek__btn"

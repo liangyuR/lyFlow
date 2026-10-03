@@ -10,9 +10,9 @@
 |---|---|---|---|
 | C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 186 例；`LYFLOW_PACKS=dts` 194 例；`LYFLOW_PACKS=gap;dts` 276 例 | 分钟级（含编译） |
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 154（纯平台构建 95 通过 / 59 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
-| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 140 | 秒级 |
+| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 141 | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 32 | 秒级 |
-| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 909 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
+| 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 910 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 33 条断言（精简前 58） | 几分钟 |
 
 ## 放在哪一层
@@ -62,7 +62,7 @@
 | 按输出类型选视图（主预览的点云 / 值） | `packages/editor/test/view-rule.test.mjs`；e2e `gap.mjs` 的「量测输出」组（`transform.make` 显示值、手动选只对当时的节点有效） |
 | 动效、hover、端点对齐 | e2e `motion.mjs`、`noderun.mjs`；300 节点的图上真拖一个节点（先确认中心点露在画布上、拖完确实挪了）与鼠标扫过一片节点时的帧率在 `m4.mjs` 的 `suiteBigGraph` |
 | 节点运行按钮；右键「选中上游 / 下游」；键盘沿连线走（Alt+方向键） | 图结构（智能运行的上游闭包、选中上 / 下游的闭包、沿连线走一步 `stepAlong`）在 `packages/editor/test/node-run.test.mjs`，画布挪多少（`revealShift`）在 `layout.test.mjs`；300 节点的图上 Alt+→ 九下从链头走到视野外的链尾在 e2e `m4.mjs` 的 `suiteBigGraph`；按钮在 e2e `noderun.mjs`；右键菜单的选中在 e2e `m4.mjs` 的 `suiteCompose` 开头 |
-| 分栏、拖放配置（dragDropEnabled）；窗口窄了两侧面板让位、画布留够最窄；检查器的排布（参数在端口小节前面、算子说明截两行、端口小节的开合记住）；预览最大化（哪些动作先还原、Shift+Space 与 Space 不撞在 `compare-store.test.mjs`；真点按钮、Delete 不删看不见的节点、Esc 还原在 e2e `m3.mjs` 的 `suiteMeasure`） | 怎么让（右栏先缩、到最窄停）、开关偏好的读写在 `packages/editor/test/layout.test.mjs`；e2e `params_p2.mjs` 的 `suiteLayout` 开头（检查器排布，真鼠标点「展开说明」、收起端口小节）；e2e `params_p2.mjs` 的 `suiteLayout`（右侧分栏；窗口真缩到 900、参数面板不出窗口；预览与检查器之间、底部抽屉的上沿上下拖，双击恢复默认）、`m8b.mjs` 的算子面板组 |
+| 分栏、拖放配置（dragDropEnabled）；窗口窄了两侧面板让位、画布留够最窄；检查器的排布（参数在端口小节前面、算子说明截两行、端口小节的开合记住）；预览的标准视角（俯 / 前 / 侧 / 轴：绕转心转、距离不变 `presetPosition` 在 `view-rule.test.mjs`；真点按钮、鼠标在画布上按 1 不动、在预览上按 1 是俯视在 e2e `m3.mjs` 的 `suiteMeasure`）；键表里每一个键位都回到它自己（以后加键撞上前面的先红）在 `compare-store.test.mjs`；预览最大化（哪些动作先还原、Shift+Space 与 Space 不撞在 `compare-store.test.mjs`；真点按钮、Delete 不删看不见的节点、Esc 还原在 e2e `m3.mjs` 的 `suiteMeasure`） | 怎么让（右栏先缩、到最窄停）、开关偏好的读写在 `packages/editor/test/layout.test.mjs`；e2e `params_p2.mjs` 的 `suiteLayout` 开头（检查器排布，真鼠标点「展开说明」、收起端口小节）；e2e `params_p2.mjs` 的 `suiteLayout`（右侧分栏；窗口真缩到 900、参数面板不出窗口；预览与检查器之间、底部抽屉的上沿上下拖，双击恢复默认）、`m8b.mjs` 的算子面板组 |
 | 图结构编辑 `lyflow patch`（七个动作、幂等、改坏不落盘） | `bridge/src/patch/tests.rs` |
 | 指标路径（`eval` 写错时列出、`--list-metrics` 正向列出） | `bridge/src/cli/tests.rs` 的 `eval_lists_the_available_paths_when_the_metric_is_wrong`、`bridge/src/eval/tests.rs` 的 `available_paths_*` |
 | MCP 工具、argv 拼装、CLI 解析（含逐行回调、请求取消时结束子进程：`cli.test.ts` 用 node 当假 CLI；客户端取消 `run_graph` 时后端那次运行跟着取消：`smoke.test.ts` 里 `test.stall` 睡 20 秒、几秒内收到 cancelled） | `packages/mcp/test/*`（`smoke.test.ts` 是唯一跑通 MCP → CLI 的） |

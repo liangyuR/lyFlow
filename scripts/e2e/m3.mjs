@@ -2439,6 +2439,44 @@ async function suiteMeasure(cdp, report) {
     JSON.stringify({ beforeMax, maxed, keptNodes, measuredMax, restored }));
   await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMode("3d"); return true;`);
 
+  // 标准视角：真点「前」是前视；鼠标在画布上按 1 不动；鼠标在预览上按 1 是俯视；转心始终不动
+  const camNow = () => cdp.eval(`
+    const host = document.querySelector('[data-testid="viewer3d-canvas"]');
+    const pos = (host?.dataset.cameraPos ?? '').split(',').map(Number);
+    const target = host?.querySelector('canvas')?.dataset.target ?? null;
+    return { pos, target, t: (target ?? '').split(',').map(Number) };
+  `);
+  const steadyCam = async () => {
+    let c = await camNow();
+    for (let i = 0; i < 20; i += 1) {
+      await sleep(150);
+      const again = await camNow();
+      if (JSON.stringify(again) === JSON.stringify(c)) return again;
+      c = again;
+    }
+    return c;
+  };
+  const along = (c, axis) => {
+    const d = c.pos.map((v, i) => v - c.t[i]);
+    const n = Math.hypot(...d) || 1;
+    return d.map((v) => v / n)[axis];
+  };
+  const camBefore = await steadyCam();
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="view-preset"][data-view="front"]'));
+  const camFront = await steadyCam();
+  const paneMid = await centerOf(cdp, ".react-flow__pane");
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: paneMid.x, y: paneMid.y, buttons: 0 });
+  await pressKey(cdp, "1", 49);
+  const camOnCanvas = await steadyCam();
+  const viewMid = await centerOf(cdp, '[data-testid="viewer3d-canvas"]');
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: viewMid.x, y: viewMid.y, buttons: 0 });
+  await pressKey(cdp, "1", 49);
+  const camTop = await steadyCam();
+  report.ok("预览视角：点「前」是前视；鼠标在画布上按 1 不动；鼠标在预览上按 1 是俯视；转心始终不动",
+    along(camFront, 1) < -0.99 && JSON.stringify(camOnCanvas.pos) === JSON.stringify(camFront.pos) && along(camTop, 2) > 0.99 &&
+      [camFront, camOnCanvas, camTop].every((c) => c.target === camBefore.target),
+    JSON.stringify({ camBefore, camFront, camOnCanvas, camTop }));
+
   // 视角在重跑、换到同一坐标系里的节点之后都留着（相机位置与转心不动）。以前每片新云都重新取景：方向回到斜 45°，
   // 双击设好的转心也没了
   const cameraOf = () => cdp.eval(`return { pos: document.querySelector('[data-testid="viewer3d-canvas"]')?.dataset.cameraPos ?? null,

@@ -1,7 +1,7 @@
 // 快捷键的唯一那张表（E7）。useShortcuts 的分发和 `?` 面板都从它生成 ——
 // 两处各维护一份必然漂移，用户看到的说明会和实际按键对不上。
 
-export type ShortcutScope = "global" | "canvas" | "inspector";
+export type ShortcutScope = "global" | "canvas" | "inspector" | "viewer";
 
 export interface Shortcut {
   /** 稳定的动作 id，处理器按它注册。 */
@@ -20,6 +20,7 @@ export const SCOPE_LABEL: Record<ShortcutScope, string> = {
   global: "全局",
   canvas: "画布",
   inspector: "参数",
+  viewer: "预览（鼠标在上面）",
 };
 
 /// keys 的写法：Ctrl/Shift/Alt + 键名，键名用 KeyboardEvent.key 的可读形式。
@@ -87,6 +88,11 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: "paramPanel", keys: ["Ctrl+Shift+P"], label: "参数面板", scope: "global", group: "视图" },
   { id: "compare", keys: ["Ctrl+Shift+D"], label: "对比 / 退出对比", scope: "global", group: "视图" },
   { id: "measure", keys: ["M"], label: "测量（预览里选点 / 测距）", scope: "global", group: "视图" },
+  // 数字键只在鼠标停在 3D 预览上时响：别处照旧（打字、下拉框）
+  { id: "viewTop", keys: ["1"], label: "俯视", scope: "viewer", group: "预览视角" },
+  { id: "viewFront", keys: ["2"], label: "前视", scope: "viewer", group: "预览视角" },
+  { id: "viewSide", keys: ["3"], label: "侧视", scope: "viewer", group: "预览视角" },
+  { id: "viewIso", keys: ["4"], label: "轴测（与 ⤢ 同一个方向）", scope: "viewer", group: "预览视角" },
   { id: "help", keys: ["?"], label: "快捷键面板", scope: "global", group: "视图" },
 ];
 

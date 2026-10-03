@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { matchShortcut } from "../src/lib/keymap.ts";
+import { matchShortcut, SHORTCUTS } from "../src/lib/keymap.ts";
 import {
   COMPARE_B_GONE,
   COMPARE_NO_NODE,
@@ -44,9 +44,19 @@ const state = () => {
 test("预览的快捷键不与画布的撞：Ctrl+Shift+D 对比 / Ctrl+D 原地复制 / Shift+D 复制并保留输入，M 测量 / Ctrl+M 静音，Shift+Space 最大化 / Space 搜索，Alt+方向键沿连线走 / 方向键挪节点", () => {
   const key = (k, ctrlKey, shiftKey = false, altKey = false) => ({ key: k, ctrlKey, metaKey: false, shiftKey, altKey });
   const got = [key("D", true, true), key("d", true), key("D", false, true), key("m", false), key("m", true), key(" ", false, true), key(" ", false),
-    key("ArrowRight", false, false, true), key("ArrowUp", false, false, true), key("ArrowRight", false), key("ArrowRight", false, true, true)]
+    key("ArrowRight", false, false, true), key("ArrowUp", false, false, true), key("ArrowRight", false), key("ArrowRight", false, true, true),
+    key("1", false), key("4", false), key("1", true), key("!", false, true)]
     .map((e) => matchShortcut(e)?.id ?? null);
-  assert.deepEqual(got, ["compare", "duplicate", "duplicateWired", "measure", "mute", "maximizeViewer", "search", "navDown", "navPrev", null, null]);
+  assert.deepEqual(got, ["compare", "duplicate", "duplicateWired", "measure", "mute", "maximizeViewer", "search", "navDown", "navPrev", null, null,
+    "viewTop", "viewIso", null, null]);
+  // 表里每一个键位按下去都回到它自己：以后谁再加一个键撞上了前面的，这里先红
+  const collided = SHORTCUTS.flatMap((s) => s.keys.map((combo) => {
+    const parts = combo.split("+");
+    const last = parts[parts.length - 1];
+    const e = key(last === "Space" ? " " : last, parts.includes("Ctrl"), parts.includes("Shift") || last === "?", parts.includes("Alt"));
+    return matchShortcut(e)?.id === s.id ? null : `${combo} → ${matchShortcut(e)?.id}（应为 ${s.id}）`;
+  })).filter(Boolean);
+  assert.deepEqual(collided, []);
 });
 
 test("预览最大化：要动画布的动作先还原它（定位、打开参数面板、面板最大化），别的不动", () => {

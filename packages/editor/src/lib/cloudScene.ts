@@ -9,6 +9,7 @@ import type { Viewport } from "./pick";
 import { RAMPS, writeRgbColors, type RampName } from "./ramps";
 import { disposeOverlay } from "./shapes2d";
 import type { CloudPayload } from "../types/execution";
+import { ISO_DIR, presetPosition, type ViewPreset } from "./viewFit";
 
 export type ShadingMode = "intensity" | "height" | "normal" | "rgb" | "flat";
 /** 相机模式（G7）。2d = 正交俯视 XY，看剖面用。 */
@@ -494,6 +495,23 @@ export function focusOn(scene: Scene, p: [number, number, number]) {
   scene.controls.update();
 }
 
+/** 转到一个标准视角（只管 3D 的透视相机：2D 剖面本来就是俯视，正交相机不碰）。先把阻尼没走完的那点转动走完 ——
+ *  不然刚甩了一下就按，相机会接着往外转。转心不动、距离不变。2D 时什么都不做、返回 false。 */
+export function applyViewPreset(scene: Scene, view: ViewPreset): boolean {
+  if (scene.mode === "2d") return false;
+  const c = scene.controls;
+  const damping = c.enableDamping;
+  c.enableDamping = false;
+  c.update();
+  c.enableDamping = damping;
+  const t = c.target;
+  const p = scene.camera.position;
+  const next = presetPosition(view, [t.x, t.y, t.z], [p.x, p.y, p.z]);
+  p.set(next[0], next[1], next[2]);
+  c.update();
+  return true;
+}
+
 export function fitToBounds(scene: Scene, bounds: Float32Array) {
   const cx = (bounds[0]! + bounds[3]!) / 2;
   const cy = (bounds[1]! + bounds[4]!) / 2;
@@ -506,7 +524,7 @@ export function fitToBounds(scene: Scene, bounds: Float32Array) {
   );
   const d = size * 1.8;
   scene.controls.target.set(cx, cy, cz);
-  scene.camera.position.set(cx + d, cy - d, cz + d * 0.7);
+  scene.camera.position.set(cx + d * ISO_DIR[0], cy + d * ISO_DIR[1], cz + d * ISO_DIR[2]);
   scene.camera.near = size / 1000;
   scene.camera.far = size * 100;
   scene.camera.updateProjectionMatrix();

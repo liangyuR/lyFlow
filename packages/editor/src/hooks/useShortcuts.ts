@@ -17,6 +17,7 @@ import { useGraphStore } from "../store/graph";
 import { usePeekStore, type PeekWindow } from "../store/peek";
 import { useUiStore } from "../store/ui";
 import { useModalStore } from "../lib/modal";
+import { presetOfShortcut, VIEW_PRESET_EVENT } from "../lib/viewFit";
 
 /** 打字用的 input。勾选框、滑块、颜色、文件这些 input 不打字 —— 以前一律当输入框，点过勾选框、拖过滑块之后
  *  焦点留在上面，Ctrl+Z、Delete、F 都没反应。 */
@@ -82,6 +83,14 @@ export function useShortcuts(
     // 最近一次按下鼠标落没落在画布上。没落在画布上、又选着一段文字（日志、诊断、文档……）时，
     // Ctrl+C / Ctrl+X 归浏览器：要的是那段文字。以前复制走的是选中的节点，Ctrl+X 还把节点删了
     let pointerOnCanvas = true;
+    // 鼠标此刻停在哪个元素上：1–4 只给鼠标底下那个 3D 预览
+    let hovered: Element | null = null;
+    const onPointerOver = (e: PointerEvent) => {
+      hovered = e.target instanceof Element ? e.target : null;
+    };
+    const onPointerOut = (e: PointerEvent) => {
+      if (e.relatedTarget === null) hovered = null;
+    };
     // 键盘沿连线走的上一步（同级之间挪、往回退要看它）；换了层、或者选中换成了别的就不算
     let navHop: (NavHop & { pathKey: string }) | null = null;
     const onPointerDown = (e: PointerEvent) => {
@@ -372,6 +381,19 @@ export function useShortcuts(
           e.preventDefault();
           ui.setViewerMeasuring(!ui.viewerMeasuring);
           return;
+        case "viewTop":
+        case "viewFront":
+        case "viewSide":
+        case "viewIso": {
+          // 鼠标不在 3D 预览上（或是 2D）：不吞这个键
+          const host = hovered?.closest("[data-view-presets]");
+          const view = presetOfShortcut(hit.id);
+          if (!host || !view) return;
+          const req = { view, done: false };
+          host.dispatchEvent(new CustomEvent(VIEW_PRESET_EVENT, { detail: req }));
+          if (req.done) e.preventDefault();
+          return;
+        }
         case "help":
           e.preventDefault();
           ui.setHelpOpen(!ui.helpOpen);
@@ -418,7 +440,11 @@ export function useShortcuts(
     el.addEventListener("paste", onPaste);
     owner.addEventListener("paste", onOrphanPaste);
     owner.addEventListener("pointerdown", onPointerDown, true);
+    owner.addEventListener("pointerover", onPointerOver, true);
+    owner.addEventListener("pointerout", onPointerOut, true);
     return () => {
+      owner.removeEventListener("pointerover", onPointerOver, true);
+      owner.removeEventListener("pointerout", onPointerOut, true);
       el.removeEventListener("keydown", onKeyDown);
       owner.removeEventListener("keydown", onOrphanKeyDown);
       el.removeEventListener("paste", onPaste);
