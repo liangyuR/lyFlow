@@ -89,6 +89,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   const motionOn = useMotionEnabled();
   const fitMs = viewportMs(motionOn);
   const panel = useUiStore((s) => s.paramPanel);
+  const viewerMax = useUiStore((s) => s.viewerMaximized);
   const layout = usePaneLayout(root, panel);
 
   // 粘贴和搜索面板要知道往哪儿放。跟着鼠标走比总是放在画布中心自然得多。
@@ -195,6 +196,8 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         void loadRecipesFor(state.filePath);
         // 换了一张图（打开、新建）：上一张图那次运行的范围不能拿来「↻ 重跑」这一张（节点 id 常常同名）
         useExecutionStore.setState({ request: null });
+        // 打开之后要适配画布：预览最大化着（画布 0 宽）就先还原
+        useUiStore.getState().setViewerMaximized(false);
       }
       else if (state.filePath !== prev.filePath) followGraphPath(state.filePath);
     });
@@ -388,6 +391,8 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   const doLayout = useCallback(() => {
     const graph = useGraphStore.getState();
     const ui = useUiStore.getState();
+    // 整理是给画布看的：预览最大化着就先还原
+    ui.setViewerMaximized(false);
     const level = levelOf(graph.doc, ui.path);
     const view = { ...graph.doc, nodes: level.nodes, edges: level.edges };
     const moves = layoutGraph(view, ui.selectedNodes.size > 1 ? { only: ui.selectedNodes } : {});
@@ -519,7 +524,10 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         onLayout={handlers.onLayout}
       />
 
-      <main className={`app__body${panel.open && panel.maximized ? " is-panel-max" : ""}`}>
+      <main
+        className={`app__body${viewerMax ? " is-viewer-max" : panel.open && panel.maximized ? " is-panel-max" : ""}`}
+        data-viewer-max={viewerMax ? "1" : undefined}
+      >
         <aside className="app__sidebar" style={{ width: layout.paletteWidth }}>
           {manifestStatus === "loading" && <p className="app__hint">正在读取算子描述…</p>}
           {manifestStatus === "error" && (
@@ -577,13 +585,13 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
             </button>
           )}
           <div
-            className={`app__viewer${layout.viewer.shown ? "" : " is-collapsed"}`}
+            className={`app__viewer${layout.viewer.shown || viewerMax ? "" : " is-collapsed"}`}
             ref={layout.viewerBox}
-            style={layout.viewer.fraction !== null ? { flexBasis: `${layout.viewer.fraction * 100}%` } : undefined}
+            style={layout.viewer.fraction !== null && !viewerMax ? { flexBasis: `${layout.viewer.fraction * 100}%` } : undefined}
           >
             <Viewer3D onRunToNode={handlers.onRunToNode} />
           </div>
-          {layout.viewer.shown && (
+          {layout.viewer.shown && !viewerMax && (
             <div
               className="app__hsplit"
               onPointerDown={layout.viewer.onPointerDown}

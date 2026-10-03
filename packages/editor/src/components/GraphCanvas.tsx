@@ -1004,6 +1004,11 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
     setEdgeMenu(null);
     setPaneMenu(null);
   }, []);
+  // 预览最大化之后画布看不见：右键菜单是 fixed 定位的，会浮在预览上面
+  const viewerMax = useUiStore((s) => s.viewerMaximized);
+  useEffect(() => {
+    if (viewerMax) closeMenu();
+  }, [viewerMax, closeMenu]);
 
   const onPaneClick = useCallback(() => {
     closeMenu();

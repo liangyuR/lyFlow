@@ -2401,6 +2401,42 @@ async function suiteMeasure(cdp, report) {
   const t2d1 = await targetOf();
   report.ok("2D 剖面下左键拖：平移（转心挪了），也不算选点",
     t2d0 !== null && t2d1 !== null && t2d0 !== t2d1 && (await readMeasure(cdp)).count === 2, JSON.stringify({ t2d0, t2d1 }));
+
+  // 预览最大化：真点预览栏的 □，画布与两侧面板收起、预览占满工作区，WebGL 跟着变大；2D 的转心与两个测量点不动；
+  // 画布看不见时 Delete 不删节点；真按 Esc 还原到原来的宽度
+  const layoutNow = () => cdp.eval(`
+    const r = (sel) => { const b = document.querySelector(sel)?.getBoundingClientRect(); return b ? { w: Math.round(b.width), h: Math.round(b.height) } : null; };
+    const canvas = document.querySelector('[data-testid="viewer3d-canvas"] canvas');
+    return { body: r('.app__body'), right: r('[data-testid="right-pane"]'), canvas: r('.app__canvas'), view: r('[data-testid="viewer3d-canvas"]'),
+             buf: canvas?.width ?? 0, target: canvas?.dataset.target ?? null,
+             nodes: window.__lyflow.stores.graph.getState().doc.nodes.length,
+             max: !!document.querySelector('.app__body.is-viewer-max') };
+  `);
+  // 上一步刚拖过：等阻尼停下、转心读数稳定了再当基准
+  let beforeMax = await layoutNow();
+  for (let i = 0; i < 20; i += 1) {
+    await sleep(150);
+    const again = await layoutNow();
+    if (again.target === beforeMax.target) break;
+    beforeMax = again;
+  }
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="viewer-maximize"]'));
+  await cdp.waitFor(`!!document.querySelector('.app__body.is-viewer-max')`, { timeoutMs: 3000, what: "预览最大化" });
+  await sleep(350);
+  const maxed = await layoutNow();
+  await pressKey(cdp, "Delete", 46);
+  await sleep(150);
+  const keptNodes = (await layoutNow()).nodes;
+  const measuredMax = (await readMeasure(cdp)).count;
+  await pressEscape(cdp);
+  await sleep(350);
+  const restored = await layoutNow();
+  report.ok("预览最大化（真点按钮）：占满工作区、WebGL 跟着变大、2D 转心与测量点不动、Delete 不删看不见的节点；真按 Esc 还原到原来的宽度",
+    Math.abs(maxed.view.w - beforeMax.body.w) <= 8 && maxed.canvas.w <= 1 && maxed.buf > beforeMax.buf * 1.5 &&
+      maxed.target === beforeMax.target && measuredMax === 2 && keptNodes === beforeMax.nodes &&
+      !restored.max && Math.abs(restored.right.w - beforeMax.right.w) <= 2 && Math.abs(restored.canvas.w - beforeMax.canvas.w) <= 2 &&
+      restored.buf === beforeMax.buf,
+    JSON.stringify({ beforeMax, maxed, keptNodes, measuredMax, restored }));
   await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMode("3d"); return true;`);
 
   // 视角在重跑、换到同一坐标系里的节点之后都留着（相机位置与转心不动）。以前每片新云都重新取景：方向回到斜 45°，

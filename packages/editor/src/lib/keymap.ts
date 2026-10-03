@@ -78,6 +78,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: "fitView", keys: ["Ctrl+Shift+F"], label: "适配视图", scope: "canvas", group: "视图" },
   { id: "fitSelection", keys: ["F"], label: "适配选中的节点", scope: "canvas", group: "视图" },
   { id: "toggleDrawer", keys: ["Ctrl+`"], label: "日志与诊断抽屉", scope: "global", group: "视图" },
+  { id: "maximizeViewer", keys: ["Shift+Space"], label: "最大化 / 还原预览（Esc 也还原）", scope: "global", group: "视图" },
   { id: "paramPanel", keys: ["Ctrl+Shift+P"], label: "参数面板", scope: "global", group: "视图" },
   { id: "compare", keys: ["Ctrl+Shift+D"], label: "对比 / 退出对比", scope: "global", group: "视图" },
   { id: "measure", keys: ["M"], label: "测量（预览里选点 / 测距）", scope: "global", group: "视图" },

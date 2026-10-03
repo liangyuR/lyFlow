@@ -421,6 +421,8 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
   3D 视图还在那一列顶上，收成一条「预览」标题栏（ROI 行「拖框」会展开它）—— Viewer3D 始终是同一个实例，切换不重建
   WebGL。面板宽度与 Inspector 宽度各记各的，面板那份记在 `localStorage["lyflow.paramPanel.width"]`。最大化把画布压成
   0 宽（不卸载：节点尺寸与端口量测都还在）。面板关着时 Inspector 顶上的图参数简表照旧（P1 加的）。
+  预览也能最大化（预览栏的 □ 或 `Shift+Space`，Esc 还原；ui store 的 `viewerMaximized`）：画布、算子面板、检查器 / 参数面板
+  同样只是藏起来；画布看不见时动画布的快捷键（删除、复制、搜索……）不响，定位到节点、打开参数面板、换图、整理布局先还原。
 - **数据模型在 `lib/paramPanel.ts`**（纯函数、有单测）：行的全集 = 图参数 + 当前层每个节点的**可见**参数 + 子图实例展开进
   定义的节点（按实例各一份，因为绑定链按实例不同）。chip 的判据：已改动 = 与算子默认不同（图参数行比第一个绑定目标的
   默认）；配方 = 图参数本身与被它提供的行；诊断 = 带 paramPath 的校验诊断或上次运行的错误；类型 = param.type。

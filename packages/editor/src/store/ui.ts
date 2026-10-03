@@ -119,6 +119,10 @@ interface UiState {
    *  快捷键 M 与参数面板进拖框（要把它关掉）都得碰得到。 */
   viewerMeasuring: boolean;
   setViewerMeasuring(on: boolean): void;
+  /** 预览最大化：画布、两侧面板收起，预览占满工作区（Shift+Space / 预览栏的 □，Esc 还原）。只在这次会话里。
+   *  要动画布的动作（定位到节点、打开参数面板、换图、整理布局）先还原。 */
+  viewerMaximized: boolean;
+  setViewerMaximized(on: boolean): void;
   /** 主预览里手动选的内容（点云 / 值）。只对选它时的那个节点有效（键是 fullId）：
    *  视图一换到别的节点就清掉，回到按输出类型自动选（lib/viewRule 的 viewerContentFor）。 */
   viewerContentPick: { nodeId: string; content: ViewerContent } | null;
@@ -232,6 +236,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   paramPanel: { open: false, maximized: false, tab: "nodes", viewerOpen: false },
   viewerMode: "3d",
   viewerMeasuring: false,
+  viewerMaximized: false,
   viewerContentPick: null,
   viewerPortPick: new Map(),
   helpOpen: false,
@@ -355,12 +360,17 @@ export const useUiStore = create<UiState>((set, get) => ({
     const cur = get().paramPanel;
     const next = open ?? !cur.open;
     if (next === cur.open) return;
-    set({ paramPanel: { ...cur, open: next, maximized: next ? cur.maximized : false } });
+    // 打开参数面板：预览最大化着就还原（面板在预览下面，最大化时看不见）
+    set({ paramPanel: { ...cur, open: next, maximized: next ? cur.maximized : false }, ...(next ? { viewerMaximized: false } : {}) });
   },
   setParamPanelMaximized(on) {
     const cur = get().paramPanel;
     if (cur.maximized === on) return;
-    set({ paramPanel: { ...cur, maximized: on } });
+    set({ paramPanel: { ...cur, maximized: on }, ...(on ? { viewerMaximized: false } : {}) });
+  },
+  setViewerMaximized(on) {
+    if (get().viewerMaximized === on) return;
+    set({ viewerMaximized: on });
   },
   setParamPanelTab(tab) {
     const cur = get().paramPanel;
@@ -408,6 +418,8 @@ export const useUiStore = create<UiState>((set, get) => ({
       selectedNodes: new Set([localId]),
       focusedDiagnostic: { nodeId: localId, paramPath },
       revealRequest: { nodeId: localId, seq: (get().revealRequest?.seq ?? 0) + 1 },
+      // 定位要把画布移过去：预览最大化着（画布 0 宽）就先还原
+      viewerMaximized: false,
     });
   },
 

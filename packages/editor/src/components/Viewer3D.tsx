@@ -161,6 +161,8 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   const selected = useUiStore((s) => s.selectedNodes);
   const path = useUiStore((s) => s.path);
   const pinnedId = useUiStore((s) => s.pinnedNode);
+  const viewerMax = useUiStore((s) => s.viewerMaximized);
+  const setViewerMax = useUiStore((s) => s.setViewerMaximized);
   const setPinnedId = useUiStore((s) => s.setPinnedNode);
   const doc = useGraphStore((s) => s.doc);
   const nodes = useMemo(() => levelOf(doc, path).nodes, [doc, path]);
@@ -802,6 +804,16 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
             </button>
           </>
         )}
+        <button
+          type="button"
+          className="viewer__fit viewer__max"
+          data-testid="viewer-maximize"
+          aria-pressed={viewerMax}
+          onClick={() => setViewerMax(!viewerMax)}
+          title={viewerMax ? "还原（Esc / Shift+Space）" : "最大化预览：画布与两侧面板收起（Shift+Space，Esc 还原）"}
+        >
+          {viewerMax ? "❐" : "□"}
+        </button>
       </div>
 
       <div className="viewer__bar viewer__bar--tools">

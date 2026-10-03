@@ -63,6 +63,9 @@
 
 .viewer__stage .viewer__empty { inset: 0; }
 
+/* 最大化按钮：栏不换行，窄栏里它不能是被挤出去的那个 */
+.viewer__max { flex-shrink: 0; }
+
 /* 包围盒尺寸：栏窄时它最先让（省略号），全文在 title */
 .viewer__extent {
   min-width: 0;

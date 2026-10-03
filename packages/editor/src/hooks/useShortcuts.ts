@@ -119,6 +119,13 @@ export function useShortcuts(
           return;
         }
       }
+      // 预览最大化着：Esc 先还原（浮着的查看器窗口先一个个关，运行要再按一次才取消）。下拉框里的 Esc 也算：
+      // 在预览栏的下拉框里选完一项，焦点还在它上面
+      if (e.key === "Escape" && ui.viewerMaximized) {
+        e.preventDefault();
+        ui.setViewerMaximized(false);
+        return;
+      }
 
       const hit = matchShortcut(e);
       if (!hit) return;
@@ -128,12 +135,21 @@ export function useShortcuts(
       // 字母跳选、方向键、Space 仍归下拉框
       const undoOnSelect = (hit.id === "undo" || hit.id === "redo") && (e.target as HTMLElement | null)?.tagName === "SELECT";
       if (!hit.inTextField && inTextField(e.target) && !undoOnSelect) return;
+      // 预览最大化着，画布看不见：删除、复制、搜索这些动画布的键不响（不然在看不见的地方删了节点）
+      if (ui.viewerMaximized && hit.scope === "canvas") {
+        ui.showToast("预览最大化中：按 Esc 回到画布再编辑");
+        return;
+      }
 
       switch (hit.id) {
         case "run":
           e.preventDefault();
           commitFocusedField(e.target);
           handlers.onRun();
+          return;
+        case "maximizeViewer":
+          e.preventDefault();
+          ui.setViewerMaximized(!ui.viewerMaximized);
           return;
         case "runToNode":
           e.preventDefault();
@@ -350,7 +366,7 @@ export function useShortcuts(
     const onPaste = (e: ClipboardEvent) => {
       if (useModalStore.getState().current || inTextField(e.target)) return;
       const ui = useUiStore.getState();
-      if (ui.searchPopup || ui.finderOpen) return;
+      if (ui.searchPopup || ui.finderOpen || ui.viewerMaximized) return;
       const text = e.clipboardData?.getData("text/plain") ?? "";
       const decoded = text ? decodeNodeClipboard(text) : null;
       const clip = decoded ?? (text === "" || ui.clipboardOnlyInApp ? ui.clipboard : null);

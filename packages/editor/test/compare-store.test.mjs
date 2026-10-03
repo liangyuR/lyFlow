@@ -41,10 +41,30 @@ const state = () => {
   return { on: s.on, b: s.b?.nodeId ?? null, frozen: s.snapshot?.runId ?? null, toast: useUiStore.getState().toast?.text ?? null };
 };
 
-test("预览的两个快捷键不与画布的撞：Ctrl+Shift+D 对比 / Ctrl+D 原地复制 / Shift+D 复制并保留输入，M 测量 / Ctrl+M 静音", () => {
+test("预览的快捷键不与画布的撞：Ctrl+Shift+D 对比 / Ctrl+D 原地复制 / Shift+D 复制并保留输入，M 测量 / Ctrl+M 静音，Shift+Space 最大化 / Space 搜索", () => {
   const key = (k, ctrlKey, shiftKey = false) => ({ key: k, ctrlKey, metaKey: false, shiftKey, altKey: false });
-  const got = [key("D", true, true), key("d", true), key("D", false, true), key("m", false), key("m", true)].map((e) => matchShortcut(e)?.id);
-  assert.deepEqual(got, ["compare", "duplicate", "duplicateWired", "measure", "mute"]);
+  const got = [key("D", true, true), key("d", true), key("D", false, true), key("m", false), key("m", true), key(" ", false, true), key(" ", false)]
+    .map((e) => matchShortcut(e)?.id);
+  assert.deepEqual(got, ["compare", "duplicate", "duplicateWired", "measure", "mute", "maximizeViewer", "search"]);
+});
+
+test("预览最大化：要动画布的动作先还原它（定位、打开参数面板、面板最大化），别的不动", () => {
+  const ui = () => useUiStore.getState();
+  const cases = [
+    // [说明, 动作, 之后还最大化着吗]
+    ["定位到节点（F8、查找节点、出错的链接）", () => ui().revealNode([], "n1"), false],
+    ["打开参数面板", () => ui().toggleParamPanel(true), false],
+    ["参数面板最大化", () => { ui().toggleParamPanel(true); ui().setViewerMaximized(true); ui().setParamPanelMaximized(true); }, false],
+    ["关参数面板", () => { ui().toggleParamPanel(true); ui().setViewerMaximized(true); ui().toggleParamPanel(false); }, true],
+    ["开测量", () => ui().setViewerMeasuring(true), true],
+    ["换层（连线查看器「在主 3D 视图打开」）", () => ui().setPath([]), true],
+  ];
+  for (const [name, act, still] of cases) {
+    useUiStore.setState({ viewerMaximized: true, viewerMeasuring: false, paramPanel: { ...ui().paramPanel, open: false, maximized: false } });
+    act();
+    assert.equal(ui().viewerMaximized, still, name);
+  }
+  useUiStore.setState({ viewerMaximized: false, paramPanel: { ...ui().paramPanel, open: false, maximized: false } });
 });
 
 test("toggle：以当前节点进入，已有结果就冻住；再按一次退出", () => {

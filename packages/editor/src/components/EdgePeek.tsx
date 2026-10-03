@@ -186,6 +186,7 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
 
   const gotoSource = useCallback(() => {
     const ui = useUiStore.getState();
+    ui.setViewerMaximized(false);
     if (!samePath(ui.path, win.path)) ui.setPath(win.path);
     ui.setSelection([win.from.node], []);
   }, [win.path, win.from.node]);
