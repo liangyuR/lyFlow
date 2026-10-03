@@ -54,6 +54,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: "duplicate", keys: ["Ctrl+D"], label: "原地复制", scope: "canvas", group: "编辑" },
   { id: "selectAll", keys: ["Ctrl+A"], label: "全选", scope: "canvas", group: "编辑" },
   { id: "delete", keys: ["Delete"], label: "删除选中", scope: "canvas", group: "编辑" },
+  { id: "deleteHeal", keys: ["Ctrl+Delete"], label: "删除选中的节点并接通上下游", scope: "canvas", group: "编辑" },
 
   { id: "mute", keys: ["Ctrl+M"], label: "静音 / 取消静音", scope: "canvas", group: "节点" },
   { id: "collapse", keys: ["Ctrl+E"], label: "折叠 / 展开", scope: "canvas", group: "节点" },

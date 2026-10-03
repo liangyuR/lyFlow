@@ -420,6 +420,20 @@ async function suiteBypassReroute(cdp, report) {
   report.eq("连线右键「插入算子…」与选中连线按 Tab：搜索里插得进的排前面并写着进出端口，选体素插到 gen 与 sor 中间，一条撤销",
     { note: offered.note !== null, between: /之间/.test(offered.placeholder ?? ""), viaMenu, undoneInsert, viaTab: await chainOf() },
     { note: true, between: true, viaMenu: { chain: insertedChain, steps: 1 }, undoneInsert: ["gen.synthetic>filter.statistical_outlier"], viaTab: insertedChain });
+
+  // Ctrl+Delete：删掉中间的体素、gen 接回 sor（规则与静音透传一致），一条撤销。以前只能 Delete，上下游全断开
+  const voxId = await cdp.eval(`return window.__lyflow.snapshot().doc.nodes.find((n) => n.op === 'filter.voxel_grid')?.id ?? null;`);
+  await clickAt(cdp, await centerOf(cdp, `[data-testid="node-${voxId}"] .node__head`));
+  await sleep(150);
+  const pastHeal = await pastNow();
+  await pressKey(cdp, "Delete", 46, ["ctrl"]);
+  await sleep(250);
+  const healed = { chain: await chainOf(), steps: (await pastNow()) - pastHeal };
+  await pressCtrl(cdp, "z");
+  await sleep(200);
+  report.eq("选中中间的体素按 Ctrl+Delete：删掉它、gen 接回 sor，一条撤销；Ctrl+Z 一次回来",
+    { ...healed, undone: await chainOf() },
+    { chain: ["gen.synthetic>filter.statistical_outlier"], steps: 1, undone: insertedChain });
 }
 
 // ------------------------------------------------------------- 1.4 迁移

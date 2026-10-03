@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { planAutoConnect } from "../src/lib/autoconnect.ts";
+import { healPlan, planAutoConnect } from "../src/lib/autoconnect.ts";
 import { addNodeWithAutoConnect } from "../src/lib/insert.ts";
 import { decodeNodeClipboard, encodeNodeClipboard } from "../src/lib/nodeClipboard.ts";
 import { useGraphStore } from "../src/store/graph.ts";
@@ -197,6 +197,61 @@ test("删节点（P0 #5）：连着它的边一并删掉，别的边不动；一
   assert.equal(useGraphStore.getState().doc.nodes.some((n) => n.id === b), false);
   useGraphStore.getState().undo();
   assert.deepEqual(edgesOf(), before);
+});
+
+// Ctrl+Delete「删除并接通」：被删节点的每个输出取它第一个类型兼容、已连线的输入的来源（与静音透传同一条规则）
+test("healPlan：删掉节点时上下游怎么接回去 —— 单个、一分二、合并取第一个输入、连着删一串、隔着 reroute、源头接不回", () => {
+  const P = (name, type) => ({ name, type, label: name, doc: "", required: true });
+  const O = (id, inputs, outputs) => ({ id, label: id, inputs, outputs, params: [] });
+  const ctx = {
+    operatorsById: new Map([
+      ["gen", O("gen", [], [P("cloud", "PointCloud")])],
+      ["vox", O("vox", [P("cloud", "PointCloud")], [P("cloud", "PointCloud")])],
+      ["merge", O("merge", [P("a", "PointCloud"), P("b", "PointCloud")], [P("cloud", "PointCloud")])],
+      ["reroute", O("reroute", [P("in", "Any")], [P("out", "Any")])],
+    ]),
+    typesByName: new Map([["PointCloud", { name: "PointCloud", color: "#1" }], ["Any", { name: "Any", color: "#2" }]]),
+  };
+  const E = (f, fp, t, tp) => ({ id: `${f}.${fp}-${t}.${tp}`, from: { node: f, port: fp }, to: { node: t, port: tp } });
+  const N = (id, opId) => ({ id, op: opId, params: {} });
+  const doc = {
+    schemaVersion: 1, id: "h",
+    nodes: [N("g", "gen"), N("g2", "gen"), N("v1", "vox"), N("v2", "vox"), N("v3", "vox"), N("m", "merge"), N("r", "reroute"), N("w", "vox")],
+    edges: [E("g", "cloud", "v1", "cloud"), E("v1", "cloud", "v2", "cloud"), E("v2", "cloud", "v3", "cloud"),
+            E("g", "cloud", "m", "a"), E("g2", "cloud", "m", "b"), E("m", "cloud", "w", "cloud")],
+  };
+  const fanOut = { ...doc, nodes: [...doc.nodes, N("v4", "vox")], edges: [...doc.edges, E("v1", "cloud", "v4", "cloud")] };
+  const viaReroute = { ...doc, edges: [E("g", "cloud", "r", "in"), E("r", "out", "v2", "cloud")] };
+  const wires = (plan) => plan.wires.map((w) => `${w.from.node}.${w.from.port}>${w.to.node}.${w.to.port}`).sort();
+  const cases = [
+    ["删 v1：g 接到 v2", doc, ["v1"], ["g.cloud>v2.cloud"], 0],
+    ["v1 一分二：两支都接回 g", fanOut, ["v1"], ["g.cloud>v2.cloud", "g.cloud>v4.cloud"], 0],
+    ["删合并：取第一个输入 a 的来源", doc, ["m"], ["g.cloud>w.cloud"], 0],
+    ["连着删 v1、v2：g 接到 v3", doc, ["v1", "v2"], ["g.cloud>v3.cloud"], 0],
+    ["隔着 reroute（Any 推成点云）", viaReroute, ["r"], ["g.cloud>v2.cloud"], 0],
+    ["删源头 g：下游接不回", doc, ["g"], [], 2],
+  ];
+  for (const [name, d, ids, want, unresolved] of cases) {
+    const plan = healPlan(ctx, d, new Set(ids));
+    assert.deepEqual({ wires: wires(plan), unresolved: plan.unresolved }, { wires: want, unresolved }, name);
+  }
+});
+
+test("deleteNodesHealing：删中间那个、上下游接回去，一条撤销", () => {
+  reset();
+  const g = useGraphStore.getState();
+  const j1 = g.addNode("t.judge", { x: 0, y: 0 });
+  const j2 = useGraphStore.getState().addNode("t.judge", { x: 200, y: 0 });
+  const j3 = useGraphStore.getState().addNode("t.judge", { x: 400, y: 0 });
+  useGraphStore.getState().connect({ node: j1, port: "value" }, { node: j2, port: "value" });
+  useGraphStore.getState().connect({ node: j2, port: "value" }, { node: j3, port: "value" });
+  const past = useGraphStore.getState().past.length;
+  const edgesOf = () => useGraphStore.getState().doc.edges.map((e) => `${e.from.node}>${e.to.node}`).sort();
+  assert.deepEqual(useGraphStore.getState().deleteNodesHealing([j2]), { wired: 1, unresolved: 0 });
+  assert.deepEqual(edgesOf(), [`${j1}>${j3}`]);
+  assert.equal(useGraphStore.getState().past.length - past, 1, "一条撤销");
+  useGraphStore.getState().undo();
+  assert.deepEqual(edgesOf(), [`${j1}>${j2}`, `${j2}>${j3}`].sort());
 });
 
 test("batch：一个手势里的几个动作一条撤销；拖动的事务里并进那一条；cancel 撤回、不记", () => {

@@ -249,6 +249,18 @@ export function useShortcuts(
           return;
         }
 
+        case "deleteHeal": {
+          // 从链中间拿掉一步：删掉选中的节点，上下游按静音透传的规则接回去（一条撤销）。以前只能 Delete，上下游
+          // 全断开，后面分出几支就要再拖几次线
+          const ids = [...ui.selectedNodes];
+          if (ids.length === 0) return;
+          e.preventDefault();
+          const r = graph.deleteNodesHealing(ids);
+          ui.clearSelection();
+          const left = r.unresolved > 0 ? `；${r.unresolved} 个下游没有合适的来源，没接` : "";
+          ui.showToast(`已删除 ${ids.length} 个节点，接通 ${r.wired} 条${left}`, r.unresolved > 0 ? "warn" : "info");
+          return;
+        }
         case "mute": {
           const ids = [...ui.selectedNodes];
           if (ids.length === 0) return;

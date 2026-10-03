@@ -4,7 +4,7 @@
 import { current, enablePatches, isDraft, produce } from "immer";
 import { create } from "zustand";
 
-import { planAutoConnect, unconnectedRequiredInputs, type AutoAmbiguity } from "../lib/autoconnect";
+import { healPlan, planAutoConnect, unconnectedRequiredInputs, type AutoAmbiguity } from "../lib/autoconnect";
 import {
   graphParamNameProblem,
   graphParamValue,
@@ -339,6 +339,8 @@ interface GraphState {
   /** 插入片段：带自动连线的粘贴（L14）。插完是普通节点，没有展开 / 收回。 */
   insertSnippet(snippet: SnippetDesc, at: { x: number; y: number }): AutoConnectResult;
   deleteNodes(ids: readonly string[]): void;
+  /** 删节点并把上下游接回去（规则同静音透传，lib/autoconnect 的 healPlan）。一条撤销。 */
+  deleteNodesHealing(ids: readonly string[]): { wired: number; unresolved: number };
   moveNodes(moves: readonly { id: string; position: { x: number; y: number } }[]): void;
   /** at：节点所在的层级，不给 = 当前层级（ui.path）。参数面板展开进子图定义时给的是那一层的路径。 */
   setParam(nodeId: string, name: string, value: unknown, at?: SubPath): void;
@@ -709,6 +711,18 @@ export const useGraphStore = create<GraphState>((set, get) => {
           }
         }
       });
+    },
+
+    deleteNodesHealing(ids) {
+      if (ids.length === 0) return { wired: 0, unresolved: 0 };
+      const doc = get().doc;
+      const plan = healPlan(ctx(doc), levelDoc(doc), new Set(ids));
+      let wired = 0;
+      get().batch(ids.length === 1 ? "删除并接通" : `删除 ${ids.length} 个节点并接通`, () => {
+        get().deleteNodes(ids);
+        for (const w of plan.wires) if (get().connect(w.from, w.to).ok) wired += 1;
+      });
+      return { wired, unresolved: plan.unresolved + plan.wires.length - wired };
     },
 
     moveNodes(moves) {
