@@ -110,12 +110,14 @@ export function NodeSearch() {
     for (const op of operators ?? []) {
       if (op.id === node.op) continue;
       const plan = planReplace(ctx, doc, path, nodeId, op);
-      if (plan && !plan.blocked && plan.droppedEdges.length === 0) {
+      // 子图入口进来的那几条也是线（在子图里它们不是边）
+      const cut = plan ? plan.droppedEdges.length + plan.droppedInputs.length : 0;
+      if (plan && !plan.blocked && cut === 0) {
         fit.set(op.id, "连线全留着");
         continue;
       }
       fit.set(op.id, null);
-      miss.set(op.id, !plan ? "换不了" : plan.blocked ? "子图输出会断，换不了" : `断 ${plan.droppedEdges.length} 条线`);
+      miss.set(op.id, !plan ? "换不了" : plan.blocked ? "子图输出会断，换不了" : `断 ${cut} 条线`);
     }
     const name = node.ui?.title ?? ctx.operatorsById.get(node.op)?.label ?? node.id;
     return { fit, miss, self: node.op, name };

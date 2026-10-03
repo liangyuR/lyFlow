@@ -336,4 +336,11 @@ test("取消中的起落；重跑照原来的范围再来一次，目标删掉�
   await startRun(sgDoc, null, { targets: ["a/gone"] });
   await restartRun(sgDoc, null);
   assert.equal(calls.at(-1).targets, undefined, "要跑到的节点删掉了：退回整张图");
+
+  // 范围被忘掉（换了一张图时编辑器清掉它）：还在跑也只是运行整张图
+  await startRun(sgDoc, null, { targets: ["a/n/x"] });
+  useExecutionStore.setState({ request: null });
+  assert.equal(runControlsOf(useExecutionStore.getState()).run, "rerun", "按钮照旧是重跑");
+  await restartRun(sgDoc, null);
+  assert.equal(calls.at(-1).targets, undefined, "没有范围可沿用：整张图");
 });

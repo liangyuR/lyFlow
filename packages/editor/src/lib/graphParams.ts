@@ -156,8 +156,47 @@ export function materializeBindings(
 ): GraphNode[] {
   return nodes.map((n) => {
     const op = ops.get(n.op);
-    return op ? withBoundValues(doc, path, n, op.params.map((p) => p.name), overrides) : n;
+    if (!op) return n;
+    const names = op.params.map((p) => p.name);
+    const bound = withBoundValues(doc, path, n, names, overrides);
+    // 子图里被提升成子图参数的：副本不在提升的 binds 里，原样复制就回到了算子默认值（与图参数同一个坑）
+    let params: Record<string, unknown> | null = null;
+    for (const name of names) {
+      if (resolveGraphBinding(doc, path, n.id, name)) continue;
+      const v = promotedValue(doc, path, n.id, name, overrides);
+      if (v === undefined) continue;
+      params ??= { ...(bound.params ?? {}) };
+      params[name] = v;
+    }
+    return params ? { ...bound, params } : bound;
   });
+}
+
+/** 子图里被提升成子图参数的那个参数此刻的值（按 path 指的那个实例）：沿提升链往外，哪一层的实例上写着就用哪一层的，
+ *  顶层实例上绑了图参数就用图参数的值；一路都没写就用那一层子图参数的 default。不是提升的返回 undefined。 */
+export function promotedValue(
+  doc: GraphDoc,
+  path: SubPath,
+  nodeId: string,
+  param: string,
+  overrides: Readonly<Record<string, unknown>>,
+): unknown {
+  const defAt = (i: number) => doc.subgraphs?.[path[i - 1]!.subgraphId];
+  const spOf = (i: number, node: string, name: string) =>
+    defAt(i)?.params?.find((p) => p.binds?.some((b) => b.node === node && b.param === name));
+  // 第 i 层（0 = 顶层，i = 进到 path[i-1] 那个子图里）上 node.name 的值；那一层没写就是 undefined
+  const at = (i: number, node: string, name: string): unknown => {
+    if (i === 0) {
+      const gp = graphParamBoundTo(doc, node, name);
+      return gp ? graphParamValue(doc, gp, overrides) : doc.nodes.find((n) => n.id === node)?.params?.[name];
+    }
+    const sp = spOf(i, node, name);
+    if (!sp) return defAt(i)?.nodes.find((n) => n.id === node)?.params?.[name];
+    const outer = at(i - 1, path[i - 1]!.nodeId, sp.name);
+    return outer !== undefined ? outer : sp.default;
+  };
+  if (path.length === 0 || !spOf(path.length, nodeId, param)) return undefined;
+  return at(path.length, nodeId, param);
 }
 
 /** 第一个被绑定目标在 manifest 里的声明。老格式的图参数没有 type，规格就借它；

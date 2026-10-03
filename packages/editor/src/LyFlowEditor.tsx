@@ -191,7 +191,11 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     // （第一次存盘）就只换目录。放在订阅里而不是 openPath 里：宿主与脚本直接 loadDoc 也一样生效
     void loadRecipesFor(graph.filePath);
     const stopFiles = useGraphStore.subscribe((state, prev) => {
-      if (state.epoch !== prev.epoch) void loadRecipesFor(state.filePath);
+      if (state.epoch !== prev.epoch) {
+        void loadRecipesFor(state.filePath);
+        // 换了一张图（打开、新建）：上一张图那次运行的范围不能拿来「↻ 重跑」这一张（节点 id 常常同名）
+        useExecutionStore.setState({ request: null });
+      }
       else if (state.filePath !== prev.filePath) followGraphPath(state.filePath);
     });
     return () => {
@@ -401,6 +405,11 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       onRun: () => void doRun(),
       onRerun: () => {
         const graph = useGraphStore.getState();
+        // 与 F5 同一道关：没存过盘的图里有相对路径参数，先说清楚，不让 core 报「文件不存在」
+        if (!graph.filePath && hasRelativePathParam(graph.doc, useManifestStore.getState().operatorsById)) {
+          useUiStore.getState().showToast("图里有相对路径参数，请先保存图（相对路径以图文件所在目录为基准）", "warn");
+          return;
+        }
         void restartRun(graph.doc, graph.filePath).catch((e: unknown) => {
           useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
         });

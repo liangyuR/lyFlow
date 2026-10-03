@@ -27,8 +27,8 @@ export interface ReplacePlan {
   droppedEdges: string[];
   /** 要摘掉绑定的参数名（顶层：图参数的 bind；子图里：子图参数的 bind）。 */
   unbind: string[];
-  /** 子图入口里要摘掉的那几条（`入口名`）。 */
-  droppedInputs: string[];
+  /** 子图入口里要摘掉的那几条（入口名 + 它接在这个节点上的哪个端口）。同一个入口接着这个节点的别的端口照旧。 */
+  droppedInputs: { input: string; port: string }[];
   /** 要删掉的图级命名输出的名字。 */
   droppedOutputs: string[];
   /** 换不了的原因（子图出口会断）；null = 能换。 */
@@ -83,14 +83,24 @@ function paramFits(oldOp: OperatorDesc | undefined, newOp: OperatorDesc, name: s
   return !old || old.type === decl.type;
 }
 
-function portFits(newOp: OperatorDesc, side: "inputs" | "outputs", name: string, type: string): boolean {
+export function portFits(newOp: OperatorDesc, side: "inputs" | "outputs", name: string, type: string): boolean {
   const port = newOp[side].find((p) => p.name === name);
   return !!port && (port.type === type || port.type === "Any" || type === "Any");
 }
 
-/** 同一种子图（不论是哪个实例）：路径上每一层的子图定义都一样。 */
-function sameDefPath(a: SubPath, b: SubPath): boolean {
-  return a.length === b.length && a.every((seg, i) => seg.subgraphId === b[i]!.subgraphId);
+/** 一个绑定的值放到新算子的参数上还合不合法（枚举值在不在新选项里、数在不在新范围里）。 */
+function valueFits(decl: Param, value: unknown): boolean {
+  if (value === undefined) return true;
+  if (decl.options && decl.options.length > 0 && decl.type === "enum") return decl.options.some((o) => o.value === value);
+  const lo = typeof decl.min === "number" ? decl.min : -Infinity;
+  const hi = typeof decl.max === "number" ? decl.max : Infinity;
+  const ok = (x: unknown) => typeof x !== "number" || (x >= lo && x <= hi);
+  return Array.isArray(value) ? value.every(ok) : ok(value);
+}
+
+/** 这一层是哪份子图定义（顶层是 null）。同一份定义的每个实例都跟着换，所以按定义比、不按实例比。 */
+function defOf(path: SubPath): string | null {
+  return path.length > 0 ? path[path.length - 1]!.subgraphId : null;
 }
 
 export function planReplace(
@@ -138,25 +148,32 @@ export function planReplace(
   const unbind = new Set<string>();
   const def: SubgraphDef | undefined =
     path.length > 0 ? doc.subgraphs?.[path[path.length - 1]!.subgraphId] : undefined;
+  // 留下的绑定还要看值：绑着的值（图参数 / 子图参数的 default）在新算子上越界、不在新选项里的也摘掉
+  const keepsBind = (param: string, value: unknown) => {
+    const decl = newOp.params.find((p) => p.name === param);
+    return paramFits(oldOp, newOp, param) && !!decl && valueFits(decl, value);
+  };
   if (path.length === 0) {
     for (const gp of Object.values(doc.params ?? {})) {
       for (const b of gp.binds) {
         const dot = b.lastIndexOf(".");
-        if (b.slice(0, dot) === nodeId && !paramFits(oldOp, newOp, b.slice(dot + 1))) unbind.add(b.slice(dot + 1));
+        if (b.slice(0, dot) === nodeId && !keepsBind(b.slice(dot + 1), gp.default)) unbind.add(b.slice(dot + 1));
       }
     }
   } else {
     for (const sp of def?.params ?? []) {
       for (const b of sp.binds ?? []) {
-        if (b.node === nodeId && !paramFits(oldOp, newOp, b.param)) unbind.add(b.param);
+        if (b.node === nodeId && !keepsBind(b.param, sp.default)) unbind.add(b.param);
       }
     }
   }
 
-  const droppedInputs: string[] = [];
+  const droppedInputs: { input: string; port: string }[] = [];
   let blocked: string | null = null;
   for (const input of def?.inputs ?? []) {
-    if (input.to.some((t) => t.node === nodeId && !portFits(newOp, "inputs", t.port, input.type))) droppedInputs.push(input.name);
+    for (const t of input.to) {
+      if (t.node === nodeId && !portFits(newOp, "inputs", t.port, input.type)) droppedInputs.push({ input: input.name, port: t.port });
+    }
   }
   for (const output of def?.outputs ?? []) {
     if (output.from.node === nodeId && !portFits(newOp, "outputs", output.from.port, output.type)) {
@@ -164,12 +181,20 @@ export function planReplace(
     }
   }
 
+  // 图级命名输出：指着这个节点（同一份定义的任何一个实例上）的一个没了的输出；或者这个节点是子图实例、
+  // 输出指着它里面 —— 换掉之后里面没了，整条都删
   const droppedOutputs: string[] = [];
+  const here = defOf(path);
   for (const [name, o] of Object.entries(doc.outputs ?? {})) {
     const loc = locateEventNode(doc, o.node);
-    if (!loc || loc.localId !== nodeId || !sameDefPath(loc.path, path)) continue;
-    const port = o.port.split(".")[0]!;
-    if (!newOp.outputs.some((p) => p.name === port)) droppedOutputs.push(name);
+    if (!loc) continue;
+    if (loc.localId === nodeId && defOf(loc.path) === here) {
+      const port = o.port.split(".")[0]!;
+      if (!newOp.outputs.some((p) => p.name === port)) droppedOutputs.push(name);
+      continue;
+    }
+    const inside = loc.path.some((seg, k) => seg.nodeId === nodeId && defOf(loc.path.slice(0, k)) === here);
+    if (inside) droppedOutputs.push(name);
   }
 
   return {

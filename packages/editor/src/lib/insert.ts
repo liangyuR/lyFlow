@@ -112,7 +112,7 @@ export function replaceOperator(opId: string, nodeId: string): boolean {
   if (plan.droppedParams.length > 0) lost.push(`${plan.droppedParams.join("、")} 新算子没有，没带过去`);
   if (plan.clampedParams.length > 0) lost.push(`${plan.clampedParams.join("、")} 夹进了新范围`);
   if (plan.unbind.length > 0) lost.push(`摘掉了 ${plan.unbind.join("、")} 的绑定`);
-  if (plan.droppedInputs.length > 0) lost.push(`子图入口 ${plan.droppedInputs.join("、")} 不再接它`);
+  if (plan.droppedInputs.length > 0) lost.push(`子图入口 ${[...new Set(plan.droppedInputs.map((x) => x.input))].join("、")} 不再接它`);
   if (plan.droppedOutputs.length > 0) lost.push(`删掉了图输出 ${plan.droppedOutputs.join("、")}`);
   const inSub = ui.path.length > 0 ? "（子图的每个实例都跟着换）" : "";
   ui.showToast(

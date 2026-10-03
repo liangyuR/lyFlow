@@ -1105,7 +1105,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       }
       const dropEdges = new Set(plan.droppedEdges);
       const unbind = new Set(plan.unbind);
-      const dropInputs = new Set(plan.droppedInputs);
+      const dropInputs = new Set(plan.droppedInputs.map((x) => `${x.input}\u0000${x.port}`));
       transact(`换成 ${op.label}`, (d) => {
         const lvl = level(d);
         const node = lvl.nodes.find((n) => n.id === nodeId);
@@ -1130,7 +1130,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
             if (kept.length !== (sp.binds ?? []).length) sp.binds = kept;
           }
           for (const input of def.inputs ?? []) {
-            if (dropInputs.has(input.name)) input.to = input.to.filter((t) => t.node !== nodeId);
+            const kept = input.to.filter((t) => t.node !== nodeId || !dropInputs.has(`${input.name}\u0000${t.port}`));
+            if (kept.length !== input.to.length) input.to = kept;
           }
         }
         for (const name of plan.droppedOutputs) {
