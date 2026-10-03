@@ -122,6 +122,8 @@ export function useShortcuts(
 
       // 编辑器自己的对话框开着（起配方名、确认删除……）：按键全归它，快捷键一个都不响
       if (useModalStore.getState().current) return;
+      // 正在拖 2D 框：Esc 归框（放弃这一段拖动），不是退子图、取消运行
+      if (e.key === "Escape" && e.target instanceof Element && e.target.closest('.roi-layer[data-dragging="1"]')) return;
       // 搜索弹层、查找节点和快捷键面板自己处理按键，别在这里抢
       if (ui.searchPopup) {
         if (e.key === "Escape") ui.closeSearch();

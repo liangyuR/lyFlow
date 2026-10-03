@@ -138,3 +138,18 @@ export function measureLines(
   out.push({ key: "delta", label: "Δ", text: vec(d, true) });
   return out;
 }
+
+/** 一片点（xyz 三个一组）里落在矩形 [x0, y0, x1, y1]（米，含边）里的有几个，只看 x、y。拖 2D 框时写「N 点」：
+ *  「ROI 里是空的」是 gap / dts 出错的头号原因，以前得跑一遍才知道。 */
+export function countInRect(xyz: ArrayLike<number> | null | undefined, rect: readonly [number, number, number, number]): number {
+  if (!xyz) return 0;
+  const [x0, y0, x1, y1] = rect;
+  let n = 0;
+  for (let i = 0; i + 1 < xyz.length; i += 3) {
+    const x = xyz[i]!;
+    const y = xyz[i + 1]!;
+    if (x >= x0 && x <= x1 && y >= y0 && y <= y1) n += 1;
+  }
+  return n;
+}
+

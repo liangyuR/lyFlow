@@ -292,4 +292,10 @@ test("batch：一个手势里的几个动作一条撤销；拖动的事务里并
   assert.equal(doc(), start.doc);
   assert.equal(g().past.length, start.past);
   assert.equal(g().pendingSnapshot, null);
+
+  // abort：拖 2D 框拖到一半按 Esc —— 回到开始拖的那一刻，不记撤销
+  g().begin();
+  g().moveNodes([{ id: a, position: { x: 999, y: 999 } }]);
+  g().abort();
+  assert.deepEqual([doc() === start.doc, g().past.length, g().pendingSnapshot], [true, start.past, null]);
 });

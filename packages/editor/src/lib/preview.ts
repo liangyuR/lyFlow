@@ -67,6 +67,13 @@ function fire(nodeId: string, preview: boolean): void {
   });
 }
 
+/** 拖完一下（2D 框）松手：开着自动运行就补一次正式运行，与拖滑块松手一样。拖框时不预览：底图是模板，每帧重跑没有可看的。 */
+export function runAfterDrag(nodeId: string): void {
+  if (transport.kind === "static" || !useUiStore.getState().autoRun) return;
+  cancelPending();
+  fire(nodeId, false);
+}
+
 /** 参数开始拖动。进入预览态，节点上的状态条会标出来。 */
 export function beginPreview(nodeId: string): void {
   if (transport.kind === "static") return;

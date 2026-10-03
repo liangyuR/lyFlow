@@ -333,6 +333,8 @@ interface GraphState {
   begin(): void;
   /** 收尾一段事务。不给 label 就按这段里实际改了什么起名（「修改 体素 · 体素边长」「移动 3 个节点」）。 */
   commit(label?: string): void;
+  /** 放弃这段事务：doc 与配方集合回到 begin 那一刻，不记撤销（拖框拖到一半按 Esc）。 */
+  abort(): void;
   /** 一次走好几步（撤销历史列表里点一行）：负数撤销、正数重做，到头就停。返回实际走了几步（带符号）。 */
   travel(steps: number): number;
   /** 一个手势里的几个动作记成一条撤销（删掉选中的节点与连线、加节点再接上……）：fn 里照常调各个动作。
@@ -584,6 +586,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
         pendingRecipes: null,
         dirty: doc !== get().savedDoc,
       });
+    },
+
+    abort() {
+      const { pendingSnapshot, pendingRecipes } = get();
+      if (!pendingSnapshot) return;
+      hints = [];
+      set({ doc: pendingSnapshot, pendingSnapshot: null, pendingRecipes: null, dirty: pendingSnapshot !== get().savedDoc });
+      if (pendingRecipes) applyRecipeSet(pendingRecipes);
     },
 
     batch(label, fn) {

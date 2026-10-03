@@ -7,7 +7,7 @@ import path from "node:path";
 
 import { sleep } from "./cdp.mjs";
 import { ROOT } from "./harness.mjs";
-import { buildGraph, dragMouse, lit, mustOk, newDoc, pressEscape, pressF5, runAndWait, select } from "./page.mjs";
+import { buildGraph, dragMouse, lit, mustOk, newDoc, pressCtrl, pressEscape, pressF5, pressKey, runAndWait, select } from "./page.mjs";
 
 // ------------------------------------------------------------ 合成剖面（毫米）
 // 与 packs/gap/tests/test_blocks.cpp 的夹具同一个形状：左板顶面 y=165，右板 y=164（高 1 mm），
@@ -359,6 +359,53 @@ async function suiteBuildFromBlank(cdp, report, ws) {
   const after = await waitValidated(cdp, locate, false);
   report.eq("框拖好之后校验干净、红框消失", after?.invalid, "0");
 
+  // 最近拖过的那个框（Datum）写着读数：坐标、宽 × 高、框里几个点（以前要跑一遍才知道框是不是空的）
+  const roiValue = (name) => cdp.eval(`
+    return document.querySelector('[data-testid="roi-box-' + ${lit(name)} + '"]')?.getAttribute('data-roi').split(',').map(Number) ?? null;
+  `);
+  const pastNow = () => cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+  const tag = await cdp.eval(`return document.querySelector('[data-testid="roi-tag-template1DatumRoi"]')?.textContent ?? null;`);
+  // 拖出来的值有吸附误差（上面验过在 0.35 mm 以内）：按框此刻的值算期望
+  const v0 = await roiValue("template1DatumRoi");
+  const f = (x) => String(Number(x.toPrecision(6)));
+  const want = `(${f(v0[0])}, ${f(v0[1])}) → (${f(v0[2])}, ${f(v0[3])}) mm · ${f(v0[2] - v0[0])} × ${f(v0[3] - v0[1])} mm · `;
+  const tagMatch = (tag ?? "").startsWith(want) ? /(\d+) 点$/.exec(tag) : null;
+  report.ok("最近拖过的 Datum 框写着读数：坐标、宽 × 高（mm）、框里有点", !!tagMatch && Number(tagMatch[1]) > 0, JSON.stringify({ tag, v0 }));
+  // 方向键微调：一下 0.1 mm（Shift ×10），每下一条撤销；Ctrl+Z 回去
+  const pastNudge = await pastNow();
+  await pressKey(cdp, "ArrowRight", 39);
+  await pressKey(cdp, "ArrowUp", 38, ["shift"]);
+  await sleep(150);
+  const nudged = { value: await roiValue("template1DatumRoi"), steps: (await pastNow()) - pastNudge };
+  await pressCtrl(cdp, "z");
+  await pressCtrl(cdp, "z");
+  await sleep(150);
+  report.ok("焦点在框上按 → 挪 0.1 mm、Shift+↑ 挪 1 mm，各一条撤销；Ctrl+Z 两下回去",
+    JSON.stringify(nudged) === JSON.stringify({ value: v0.map((x, i) => Number((x + (i % 2 === 0 ? 0.1 : 1)).toFixed(6))), steps: 2 }) &&
+      JSON.stringify(await roiValue("template1DatumRoi")) === JSON.stringify(v0),
+    JSON.stringify({ v0, nudged }));
+  // 拖到一半按 Esc：放弃这一段，框回到原处、不记撤销
+  {
+    const g0 = await roiGeometry(cdp);
+    const c = g0.boxes.template1DatumRoi.center;
+    const common = { button: "left", buttons: 1, clickCount: 1 };
+    const pastEsc = await pastNow();
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: c.x, y: c.y, buttons: 0 });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: c.x, y: c.y, ...common });
+    for (let i = 1; i <= 5; i += 1) {
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: c.x + i * 8, y: c.y, ...common });
+      await sleep(30);
+    }
+    const midway = await roiValue("template1DatumRoi");
+    await pressEscape(cdp);
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: c.x + 40, y: c.y, ...common });
+    await sleep(150);
+    report.ok("拖到一半按 Esc：放弃这一段，框回到原处、不记撤销",
+      JSON.stringify(midway) !== JSON.stringify(v0) &&
+        JSON.stringify(await roiValue("template1DatumRoi")) === JSON.stringify(v0) && (await pastNow()) === pastEsc,
+      JSON.stringify({ v0, midway }));
+  }
+
   // 6. 跑
   const run = await runAndWait(cdp, () => pressF5(cdp), 180_000);
   doc = await docOf(cdp);
@@ -378,6 +425,28 @@ async function suiteBuildFromBlank(cdp, report, ws) {
   report.ok("跑出了 gap 数值（合成剖面上约 √37−2 ≈ 4.08 mm）",
     Number.isFinite(values.gap?.value) && Math.abs(values.gap.value - (Math.sqrt(37) - 2)) < 0.3,
     JSON.stringify(values.gap));
+
+  // 跑过之后再拖框：松手补一次正式运行（开着自动运行；拼图时框没画齐、节点没跑过的那几次不跑）
+  {
+    const before = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
+    const g1 = await roiGeometry(cdp);
+    const box = g1?.boxes?.template1DatumRoi;
+    if (!box) {
+      report.fail("跑过之后 2D 框还在", JSON.stringify(g1));
+    } else {
+      await dragMouse(cdp, box.center, { x: box.center.x + 6, y: box.center.y }, { steps: 6 });
+      const reran = await cdp.waitFor(
+        `(() => { const s = window.__lyflow.stores.execution.getState();
+                  return s.runId !== ${lit(before)} && !s.preview && s.runStatus !== 'running' && s.runStatus !== 'idle'
+                    ? { targets: s.targets, status: s.runStatus } : null; })()`,
+        { timeoutMs: 60_000, what: "拖完框松手补的运行" },
+      ).catch((e) => ({ error: String(e) }));
+      report.ok("跑过之后拖框松手：补一次正式运行、算的是 locate_template", Array.isArray(reran?.targets) && reran.targets.includes(locate),
+        JSON.stringify(reran));
+      await pressCtrl(cdp, "z");
+      await sleep(150);
+    }
+  }
 
   const manual = await restoreManualEdges(cdp);
   report.eq("全程没有手连一条边（connect / 改接 / 插到线上一次都没调）", manual, []);

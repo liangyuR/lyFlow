@@ -28,7 +28,7 @@ import type { RampName } from "../lib/ramps";
 import { copyFrameWrites, pickFrame, roiFramesOf } from "../lib/roiFrames";
 import { rememberRoiBounds } from "../lib/roiThumbs";
 import { disposeOverlay, extentOf, shapesOf } from "../lib/shapes2d";
-import { extentText } from "../lib/pick";
+import { countInRect, extentText } from "../lib/pick";
 import { fullId, levelOf, resolveOutput } from "../lib/subgraph";
 import { compareContentFor } from "../lib/viewRule";
 import { gridSpec, sameFrame } from "../lib/viewFit";
@@ -284,6 +284,8 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   const setRoiFrame = useUiStore((s) => s.setRoiFrame);
   const roi = useMemo(() => pickFrame(roiFrames, selectedFrame), [roiFrames, selectedFrame]);
   const [sceneHost, setSceneHost] = useState<Scene | null>(null);
+  // 底图的点（米，xyz 三个一组）：拖 2D 框时数框里有几个点
+  const backdropXyz = useRef<Float32Array | null>(null);
   const [backdrop, setBackdrop] = useState<{
     key: string;
     bounds: Float32Array | null;
@@ -473,6 +475,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
     const scene = sceneRef.current;
     if (!scene) return;
     disposeOverlay(scene.backdrop);
+    backdropXyz.current = null;
     if (!backdropKey) {
       setBackdrop(NO_BACKDROP);
       return;
@@ -526,7 +529,9 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
           }
         }
         const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(xyz), 3));
+        const flat = new Float32Array(xyz);
+        backdropXyz.current = flat;
+        geometry.setAttribute("position", new THREE.BufferAttribute(flat, 3));
         geometry.computeBoundingBox();
         geometry.computeBoundingSphere();
         const material = new THREE.PointsMaterial({
@@ -1076,7 +1081,15 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
           />
         )}
         {roiEditing && activeNode && (
-          <RoiLayer host={sceneHost} nodeId={activeNode.id} items={roiItems} />
+          <RoiLayer
+            host={sceneHost}
+            nodeId={activeNode.id}
+            items={roiItems}
+            // 有底图数底图的点，没有（框在数据坐标系里）数画面上这片云的
+            countIn={(rect) =>
+              backdrop.count > 0 ? countInRect(backdropXyz.current, rect) : cloud ? countInRect(cloud.xyz, rect) : null
+            }
+          />
         )}
         {!compareOn && !(content === "image" && activeNode && activeOp && roiNode) && (display.status || loading || (roiEditing && backdrop.error)) && (
           // 拖框时底图（模板）已经画出来了，状态只缩在角上，不盖住画面。底图取不到的原因也在这里说
