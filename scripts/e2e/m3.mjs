@@ -2133,6 +2133,66 @@ async function suiteViewerBody(cdp, report) {
     `),
     "导出按钮点得到",
   );
+
+  // 预览选看哪个点云输出：提取下标有 selected / rest，以前固定第一个，rest 在预览里怎么都看不到
+  await newDoc(cdp);
+  const sp = await buildGraph(
+    cdp,
+    [{ key: "gen", op: "gen.synthetic", params: { pointCount: 6000, seed: 3 } },
+     { key: "pass", op: "filter.passthrough", params: { min: -100, max: 0.05 } },
+     { key: "pick", op: "segment.extract_indices" },
+     { key: "down", op: "filter.voxel_grid", params: { leafSize: [0.02, 0.02, 0.02] } }],
+    [{ from: ["gen", "cloud"], to: ["pass", "cloud"] },
+     { from: ["gen", "cloud"], to: ["pick", "cloud"] },
+     { from: ["pass", "indices"], to: ["pick", "indices"] },
+     { from: ["pick", "rest"], to: ["down", "cloud"] }],
+  );
+  const spRun = await runAndWait(cdp, () => pressF5(cdp));
+  mustOk(spRun.status === "ok", "提取下标那张图跑通了", spRun.status);
+  const [nSel, nRest] = await cdp.eval(`
+    const n = window.__lyflow.stores.execution.getState().nodes.get(${lit(sp.pick)});
+    return ['selected', 'rest'].map((p) => n?.stats?.outputs?.find((o) => o.port === p)?.elementCount ?? null);
+  `);
+  mustOk(nSel > 0 && nRest > 0 && nSel !== nRest, "selected / rest 都有点、点数不同", JSON.stringify({ nSel, nRest }));
+  const portView = async () => {
+    const v = await selectAndReadViewer(cdp, sp.pick);
+    return { port: await cdp.eval(`return document.querySelector('[data-testid="viewer-port"]')?.value ?? null;`), total: v.total };
+  };
+  const p0 = await portView();
+  report.eq("多个点云输出：预览栏给下拉框，默认第一个（selected）", p0, { port: "selected", total: nSel });
+  await setVal("viewer-port", "rest");
+  await cdp.waitFor(`document.querySelector('.viewer .viewer__count')?.textContent.replace(/\D/g, '').endsWith(${lit(String(nRest))})`,
+    { timeoutMs: 10_000, what: "预览换成 rest 的点云" }).catch(() => {});
+  report.eq("下拉框换到 rest：预览里是 rest 的点", await portView(), { port: "rest", total: nRest });
+  // 检查器的「输出」里点云一行一个，真鼠标点 selected 那一行，预览改看它
+  await cdp.eval(`document.querySelector('[data-testid="output-cloud-selected"]')?.scrollIntoView({ block: 'center' }); return true;`);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="output-cloud-selected"]'));
+  await sleep(400);
+  report.eq("检查器里点 selected 那一行：预览改看 selected", await portView(), { port: "selected", total: nSel });
+  // 从接在 rest 上的那条线开连线查看器，点「在主 3D 视图打开」：主视图钉住 pick、看的是 rest
+  const restEdge = await cdp.eval(`
+    return window.__lyflow.stores.graph.getState().doc.edges.find((e) => e.from.node === ${lit(sp.pick)} && e.from.port === 'rest')?.id ?? null;
+  `);
+  await cdp.eval(`
+    window.__lyflow.stores.peek.getState().open({ edgeId: ${lit(restEdge)}, path: [], from: { node: ${lit(sp.pick)}, port: 'rest' },
+      screen: { x: 260, y: 160 }, view: 'cloud3d' });
+    return true;
+  `);
+  await sleep(300);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="edge-peek"] [data-testid="peek-open-main"]'));
+  await cdp.eval(`window.__lyflow.stores.ui.getState().clearSelection(); return true;`);
+  await sleep(500);
+  const mainView = await cdp.eval(`
+    const v = document.querySelector('.viewer');
+    return { node: v.getAttribute('data-node'), port: document.querySelector('[data-testid="viewer-port"]')?.value ?? null };
+  `);
+  report.eq("连线查看器（rest 那条线）点「在主 3D 视图打开」：主视图钉住 pick、看的是 rest", mainView, { node: sp.pick, port: "rest" });
+  await cdp.eval(`
+    const ui = window.__lyflow.stores.ui.getState();
+    ui.setPinnedNode(null);
+    window.__lyflow.stores.peek.getState().closeAll();
+    return true;
+  `);
 }
 
 /** 预览上的测量标记，一次读全。 */

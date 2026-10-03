@@ -74,13 +74,30 @@ export function formatOutputValue(o: OutputStat): string {
   }
 }
 
-/** 该节点这次运行的非点云输出。点云走 3D 视图，这里只显示能读的值。 */
-function OutputValues({ outputs }: { outputs: OutputStat[] }) {
+/** 该节点这次运行的输出：能读的值逐个列出；点云只列点数，点一下预览改看它（多个点云输出时，
+ *  提取下标的 rest 这类以前在预览里怎么都看不到）。 */
+function OutputValues({ outputs, nodeKey }: { outputs: OutputStat[]; nodeKey: string }) {
   const shown = outputs.filter((o) => o.value !== undefined);
-  if (shown.length === 0) return null;
+  const clouds = outputs.filter((o) => o.type === "PointCloud");
+  const pick = useUiStore((s) => s.viewerPortPick.get(nodeKey) ?? null);
+  if (shown.length === 0 && clouds.length < 2) return null;
   return (
     <section className="insp__group" data-testid="inspector-outputs">
       <h4 className="insp__group-title">输出</h4>
+      {clouds.length > 1 &&
+        clouds.map((o) => (
+          <button
+            type="button"
+            className={`insp-cloud${pick === o.port ? " is-picked" : ""}`}
+            key={o.port}
+            data-testid={`output-cloud-${o.port}`}
+            title="在预览里看这个输出"
+            onClick={() => useUiStore.getState().setViewerPortPick(nodeKey, o.port)}
+          >
+            <span className="insp-out__port">{o.port}</span>
+            <span className="insp-out__value">{o.elementCount.toLocaleString()} 点</span>
+          </button>
+        ))}
       {shown.map((o) => {
         const verdict = o.value?.kind === "Measurement" ? o.value.verdict : undefined;
         return (
@@ -552,7 +569,7 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
         </section>
       )}
 
-      {exec?.stats?.outputs && <OutputValues outputs={exec.stats.outputs} />}
+      {exec?.stats?.outputs && <OutputValues outputs={exec.stats.outputs} nodeKey={fullId(path, node.id)} />}
 
       {op.params.length === 0 ? (
         <p className="insp__none">此算子没有参数</p>

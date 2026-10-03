@@ -48,10 +48,30 @@ export function firstCloudPort(
   return null;
 }
 
-/** 一次搜索里的位置：哪一层、那一层的哪个节点。 */
+/** 该算子的全部点云输出：PointCloud 端口按声明顺序，再是 Bundle 输出里的点云字段（`<port>.<field>`）。
+ *  预览里选看哪一个（提取下标的 selected / rest、配准的 cloud / tplLeft / tplRight）就从这里列。 */
+export function cloudPortsOf(
+  ops: ReadonlyMap<string, OperatorDesc>,
+  opId: string,
+  bundles?: readonly BundleDesc[],
+): string[] {
+  const declared = ops.get(opId)?.outputs ?? [];
+  const out = declared.filter((p) => p.type === "PointCloud").map((p) => p.name);
+  for (const p of declared) {
+    const kind = bundleKindOf(p.type);
+    const desc = kind ? bundles?.find((b) => b.kind === kind) : undefined;
+    for (const f of desc?.fields ?? []) {
+      if (f.type === "PointCloud") out.push(`${p.name}.${f.name}`);
+    }
+  }
+  return out;
+}
+
+/** 一次搜索里的位置：哪一层、那一层的哪个节点；port 是走到它的那条边的源端口（从起点出发时没有）。 */
 interface Frame {
   path: SubPath;
   id: string;
+  port?: string;
 }
 
 function frameKey(frame: Frame): string {
@@ -79,7 +99,7 @@ function upstreamOf(
     let linked = false;
     for (const e of level.edges) {
       if (e.to.node === node.id && e.to.port === port.name) {
-        out.push({ path, id: e.from.node });
+        out.push({ path, id: e.from.node, port: e.from.port });
         linked = true;
       }
     }
@@ -94,7 +114,7 @@ function upstreamOf(
     const parent = path.slice(0, -1);
     for (const e of levelOf(doc, parent).edges) {
       if (e.to.node === seg.nodeId && e.to.port === entry.name) {
-        out.push({ path: parent, id: e.from.node });
+        out.push({ path: parent, id: e.from.node, port: e.from.port });
       }
     }
   }
@@ -130,7 +150,11 @@ export function findBaseCloud(
     const frame = queue.shift()!;
     const node = nodeAt(doc, frame.path, frame.id);
     if (!node) continue;
-    const port = firstCloudPort(ops, node.op, bundles);
+    // 接的就是一个点云口（几何节点接在提取下标的 rest 上）就用它，以前一律取第一个点云口，底图画成了 selected
+    const port =
+      frame.port && cloudPortsOf(ops, node.op, bundles).includes(frame.port)
+        ? frame.port
+        : firstCloudPort(ops, node.op, bundles);
     // 解不开的（库算子的定义在库文件里）不算数，继续往上找
     const resolved = port ? resolveOutput(doc, frame.path, node.id, port) : null;
     if (port && resolved) {

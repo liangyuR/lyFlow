@@ -111,3 +111,31 @@ test("启动时从 localStorage 读回显示设置，改了就写回去", async 
     delete globalThis.localStorage;
   }
 });
+
+// 预览选看哪个点云输出（lib/basecloud）：列出全部点云口；几何节点的底图跟着它接的那个口走
+test("cloudPortsOf：点云口按声明顺序，再是 Bundle 里的点云字段；底图沿边取它接的那个口", async () => {
+  const { cloudPortsOf, findBaseCloud } = await import("../src/lib/basecloud.ts");
+  const port = (name, type) => ({ name, type });
+  const ops = new Map([
+    ["seg.extract", { id: "seg.extract", inputs: [port("cloud", "PointCloud")], outputs: [port("selected", "PointCloud"), port("rest", "PointCloud")] }],
+    ["io.pair", { id: "io.pair", inputs: [], outputs: [port("info", "Record"), port("pair", "Bundle<t.ScanPair>")] }],
+    ["fit.line", { id: "fit.line", inputs: [port("cloud", "PointCloud")], outputs: [port("line", "Line2D")] }],
+  ]);
+  const bundles = [{ kind: "t.ScanPair", fields: [{ name: "primary", type: "PointCloud" }, { name: "meta", type: "Record" }, { name: "merged", type: "PointCloud" }] }];
+  for (const [opId, want] of [
+    ["seg.extract", ["selected", "rest"]],
+    ["io.pair", ["pair.primary", "pair.merged"]],
+    ["fit.line", []],
+    ["no.such", []],
+  ]) {
+    assert.deepEqual(cloudPortsOf(ops, opId, bundles), want, opId);
+  }
+
+  const doc = (fromPort) => ({
+    schemaVersion: 1,
+    nodes: [{ id: "x", op: "seg.extract", params: {} }, { id: "f", op: "fit.line", params: {} }],
+    edges: [{ id: "e", from: { node: "x", port: fromPort }, to: { node: "f", port: "cloud" } }],
+  });
+  assert.equal(findBaseCloud(doc("rest"), [], "f", ops, bundles)?.resolved.port, "rest", "接在 rest 上：底图是 rest（以前是 selected）");
+  assert.equal(findBaseCloud(doc("selected"), [], "f", ops, bundles)?.resolved.port, "selected");
+});

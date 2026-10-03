@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { findBaseCloud, firstCloudPort, type BaseCloud } from "../lib/basecloud";
+import { cloudPortsOf, findBaseCloud, firstCloudPort, type BaseCloud } from "../lib/basecloud";
 import { cacheKey, cloudCache, dropOtherRuns, fetchCloud, putCache } from "../lib/cloudCache";
 import { augmentOperators, levelOf, resolveOutput } from "../lib/subgraph";
 import { viewerContentFor, type ViewerContent } from "../lib/viewRule";
@@ -46,6 +46,8 @@ export interface ViewerSourceInput {
   maxPoints: number;
   /** 手动选的内容（ui.viewerContentPick 里对这个节点的那一条）；null = 按类型自动。 */
   pick: ViewerContent | null;
+  /** 手动选的点云输出（ui.viewerPortPick）；null 或不是这个节点的点云口 = 第一个点云输出。 */
+  portPick?: string | null | undefined;
   /** 给了就原样返回快照：不订阅这次运行之后的结果，也不再向后端要东西（C3）。 */
   frozen: CompareSnapshot | null;
 }
@@ -60,9 +62,11 @@ export interface ViewerSource {
   /** 实际显示的内容：手动选的优先，否则按类型自动。 */
   content: ViewerContent;
   autoContent: ViewerContent;
+  /** 节点的全部点云输出（预览栏多于一个时给个下拉框）。 */
+  cloudPorts: readonly string[];
 }
 
-export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: ViewerSourceInput): ViewerSource {
+export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = null, frozen }: ViewerSourceInput): ViewerSource {
   const path = slot?.path;
   const nodeId = slot?.nodeId ?? null;
   const doc = useGraphStore((s) => s.doc);
@@ -95,6 +99,7 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: Vie
   );
   const bundles = useManifestStore((s) => s.bundle?.bundles);
   const op = node ? ops.get(node.op) : undefined;
+  const cloudPorts = useMemo(() => (node ? cloudPortsOf(ops, node.op, bundles) : []), [ops, node, bundles]);
 
   const outputs = frozen ? frozen.outputs : liveOutputs;
   // 显示点云场景还是值的表格（lib/viewRule）。类型取这次运行的实际类型，没跑过就用声明的 ——
@@ -180,7 +185,8 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: Vie
     // 自己有云就用自己的；没有就沿输入边往上游借最近的一片当底图，几何叠在它上面 ——
     // 只输出 Box2D/Line2D 的节点若显示成空白，用户就看不出框压在剖面的哪里。
     // Bundle 里的点云字段也算「自己的云」（`<port>.<field>`，m8-plan L3）。
-    const port = firstCloudPort(ops, node.op, bundles, liveOutputs);
+    const port =
+      portPick && cloudPorts.includes(portPick) ? portPick : firstCloudPort(ops, node.op, bundles, liveOutputs);
     let base: BaseCloud | null = null;
     // 子图节点的结果在内部那个叶子上，按路径查结果仓（F2）
     let resolved = port ? resolveOutput(doc, path, node.id, port) : null;
@@ -234,7 +240,7 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: Vie
     };
     // 依赖的是「还没运行」这个布尔值而不是 runStatus 本身：running → ok 不该让取数重来一遍
   }, [frozen, node, nodeId, idleText, runId, notRun, liveState, liveCode, maxPoints, doc, path,
-      isPreview, previewMaxPoints, ops, bundles, liveOutputs, content]);
+      isPreview, previewMaxPoints, ops, bundles, liveOutputs, content, portPick, cloudPorts]);
 
   const frozenDisplay = useMemo<Display | null>(
     () =>
@@ -261,5 +267,6 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, frozen }: Vie
     outputs,
     content,
     autoContent,
+    cloudPorts,
   };
 }

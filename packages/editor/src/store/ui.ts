@@ -116,6 +116,10 @@ interface UiState {
   /** 主预览里手动选的内容（点云 / 值）。只对选它时的那个节点有效（键是 fullId）：
    *  视图一换到别的节点就清掉，回到按输出类型自动选（lib/viewRule 的 viewerContentFor）。 */
   viewerContentPick: { nodeId: string; content: ViewerContent } | null;
+  /** 预览看节点的哪个点云输出，键是展开后的路径 id。按节点记着，换节点再回来还是它（端口名一直写在预览栏上，
+   *  不会悄悄停在别的端口）；不进 doc、不落盘。没有这一条 = 第一个点云输出。 */
+  viewerPortPick: ReadonlyMap<string, string>;
+  setViewerPortPick(nodeKey: string, port: string | null): void;
   setViewerContentPick(pick: { nodeId: string; content: ViewerContent } | null): void;
   /** 快捷键面板开着没有（`?`）。 */
   helpOpen: boolean;
@@ -222,6 +226,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   viewerMode: "3d",
   viewerMeasuring: false,
   viewerContentPick: null,
+  viewerPortPick: new Map(),
   helpOpen: false,
   finderOpen: false,
   recentOps: loadRecentOps(),
@@ -364,6 +369,14 @@ export const useUiStore = create<UiState>((set, get) => ({
   setViewerMeasuring(on) {
     if (get().viewerMeasuring === on) return;
     set({ viewerMeasuring: on });
+  },
+  setViewerPortPick(nodeKey, port) {
+    const cur = get().viewerPortPick;
+    if ((cur.get(nodeKey) ?? null) === port) return;
+    const next = new Map(cur);
+    if (port === null) next.delete(nodeKey);
+    else next.set(nodeKey, port);
+    set({ viewerPortPick: next });
   },
   setViewerContentPick(pick) {
     const cur = get().viewerContentPick;

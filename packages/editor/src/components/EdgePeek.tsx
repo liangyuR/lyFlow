@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pinRun, unpinRun } from "../lib/cloudCache";
 import { exportCanvasPng } from "../lib/exportPng";
 import { takePeekCanvas } from "../lib/peekCanvas";
+import { fullId } from "../lib/subgraph";
 import { usePeekSource, type PeekSource } from "../lib/peekSource";
 import { defaultViewFor, viewsFor } from "../lib/viewRule";
 import { useManifestStore } from "../store/manifest";
@@ -191,6 +192,8 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
     const ui = useUiStore.getState();
     if (!samePath(ui.path, win.path)) ui.setPath(win.path);
     ui.setPinnedNode(win.from.node);
+    // 带上端口：从接在 rest 上的线打开，主视图看的就是 rest（不是这个节点的第一个点云口）
+    ui.setViewerPortPick(fullId(win.path, win.from.node), win.field ? `${win.from.port}.${win.field}` : win.from.port);
     ui.showToast(`主 3D 视图已钉住 ${live.label}`);
   }, [win.path, win.from.node, live.label]);
 

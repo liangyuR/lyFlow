@@ -169,12 +169,15 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   const contentPick = useUiStore((s) => s.viewerContentPick);
   const setContentPick = useUiStore((s) => s.setViewerContentPick);
   const slotA = useMemo(() => (activeId ? { path, nodeId: activeId } : null), [path, activeId]);
+  const portPick = useUiStore((s) => (activeKey ? (s.viewerPortPick.get(activeKey) ?? null) : null));
+  const setPortPick = useUiStore((s) => s.setViewerPortPick);
   // 取数（hooks/useViewerSource）：状态、输出统计、显示点云还是值、取云或借上游的底图
   const source = useViewerSource({
     slot: slotA,
     idleText: selected.size > 1 ? "选中了多个节点" : "选中一个节点查看它的输出",
     maxPoints,
     pick: contentPick && contentPick.nodeId === activeKey ? contentPick.content : null,
+    portPick,
     frozen: null,
   });
   const { display, loading, node: activeNode, op: activeOp, outputs: activeOutputs, content, autoContent } = source;
@@ -677,6 +680,26 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
           >
             底图：{display.base.label}
           </span>
+        )}
+        {!compareOn && content === "cloud" && activeKey && source.cloudPorts.length > 1 && (
+          // 多个点云输出（提取下标的 selected / rest……）：选看哪一个。以前固定第一个，rest 怎么都看不到
+          <select
+            className="viewer__select"
+            data-testid="viewer-port"
+            value={display.port ?? source.cloudPorts[0]}
+            onChange={(e) => setPortPick(activeKey, e.target.value)}
+            title="看这个节点的哪个点云输出（按节点记着，换节点再回来还是它）"
+          >
+            {source.cloudPorts.map((p) => {
+              const n = activeOutputs?.find((o) => o.port === p)?.elementCount;
+              return (
+                <option key={p} value={p}>
+                  {p}
+                  {n !== undefined ? `（${n.toLocaleString()} 点）` : ""}
+                </option>
+              );
+            })}
+          </select>
         )}
         {cloud && (
           <span className="viewer__count" title="显示点数 / 总点数">
