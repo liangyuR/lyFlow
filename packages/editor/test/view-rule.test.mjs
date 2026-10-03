@@ -61,3 +61,53 @@ test("sameFrame：包围盒相交、对角线差不到 4 倍才算同一个坐�
   ];
   for (const [name, other, want] of cases) assert.equal(sameFrame(base, other), want, name);
 });
+
+// 预览的显示设置（lib/viewPrefs）：读回存着的那一份时逐项校验；手动着色范围按着色模式分开记
+test("显示设置读回：坏的那一项回到默认，别的照用", async () => {
+  const { DEFAULT_VIEWER_PREFS: d, parseViewerPrefs } = await import("../src/lib/viewPrefs.ts");
+  const good = { shading: "height", ramp: "jet", pointSize: 2.4, maxPoints: 500_000 };
+  const cases = [
+    ["没存过", null, d],
+    ["不是 JSON", "{oops", d],
+    ["是数组", "[1,2]", d],
+    ["全对", JSON.stringify(good), good],
+    ["未知的着色名", JSON.stringify({ ...good, shading: "rainbow" }), { ...good, shading: d.shading }],
+    ["原型链上的名字不算", JSON.stringify({ ...good, ramp: "toString" }), { ...good, ramp: d.ramp }],
+    ["点大小越界：夹到 0.5–6", JSON.stringify({ ...good, pointSize: 40 }), { ...good, pointSize: 6 }],
+    ["点大小不是数", JSON.stringify({ ...good, pointSize: "big" }), { ...good, pointSize: d.pointSize }],
+    ["显示点数不在可选项里", JSON.stringify({ ...good, maxPoints: 123 }), { ...good, maxPoints: d.maxPoints }],
+  ];
+  for (const [name, raw, want] of cases) assert.deepEqual(parseViewerPrefs(raw), want, name);
+});
+
+test("手动着色范围：只改当前着色那一份，另一个界取当前值；「自动」只清当前那一份", async () => {
+  const { rangeFor, withRangeAuto, withRangeEnd } = await import("../src/lib/viewPrefs.ts");
+  const autoI = [0, 255];
+  const autoH = [-1, 3];
+  let m = {};
+  assert.deepEqual(rangeFor(m, "intensity", autoI), { range: autoI, auto: true });
+  m = withRangeEnd(m, "intensity", 1, 100, autoI);
+  assert.deepEqual(rangeFor(m, "intensity", autoI), { range: [0, 100], auto: false }, "填上界：下界取当时的自动值");
+  assert.deepEqual(rangeFor(m, "height", autoH), { range: autoH, auto: true }, "切到高度：还是高度自己的自动范围");
+  m = withRangeEnd(m, "height", 0, 0.5, autoH);
+  m = withRangeAuto(m, "height");
+  assert.deepEqual([rangeFor(m, "height", autoH).auto, rangeFor(m, "intensity", autoI).range], [true, [0, 100]],
+    "高度回到自动，强度那一份还在");
+  assert.equal(withRangeAuto(m, "normal"), m, "本来就是自动：原样返回");
+});
+
+test("启动时从 localStorage 读回显示设置，改了就写回去", async () => {
+  const { VIEWER_PREFS_KEY } = await import("../src/lib/viewPrefs.ts");
+  const stored = { shading: "height", ramp: "gray", pointSize: 3, maxPoints: 500_000 };
+  const mem = new Map([[VIEWER_PREFS_KEY, JSON.stringify(stored)]]);
+  globalThis.localStorage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+  try {
+    // 这个文件里别处没引过 ui store：这里才第一次加载，初值就从上面这份存储里读
+    const { useUiStore } = await import("../src/store/ui.ts");
+    assert.deepEqual(useUiStore.getState().viewerPrefs, stored);
+    useUiStore.getState().setViewerPrefs({ pointSize: 2 });
+    assert.deepEqual(JSON.parse(mem.get(VIEWER_PREFS_KEY)), { ...stored, pointSize: 2 });
+  } finally {
+    delete globalThis.localStorage;
+  }
+});

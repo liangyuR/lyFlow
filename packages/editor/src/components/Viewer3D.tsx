@@ -31,6 +31,7 @@ import { fullId, levelOf, resolveOutput } from "../lib/subgraph";
 import { compareContentFor } from "../lib/viewRule";
 import { sameFrame } from "../lib/viewFit";
 import { exportCanvasPng } from "../lib/exportPng";
+import { MAX_POINTS_CHOICES, rangeFor, withRangeAuto, withRangeEnd, type ManualRanges } from "../lib/viewPrefs";
 import { transport } from "../transport";
 import { useCompareStore, type CompareSlot, type CompareSnapshot } from "../store/compare";
 import { useExecutionStore } from "../store/execution";
@@ -54,7 +55,6 @@ import "../styles.viewer.css";
 export type { ShadingMode, CameraMode } from "../lib/cloudScene";
 export type { RampName } from "../lib/ramps";
 
-const MAX_POINTS_CHOICES = [100_000, 500_000, 2_000_000, 8_000_000];
 
 // ------------------------------------------------------------ 2D 拖框（L15）
 
@@ -137,16 +137,15 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<Scene | null>(null);
 
-  const [shading, setShading] = useState<ShadingMode>("intensity");
-  const [ramp, setRamp] = useState<RampName>("viridis");
-  const [rangeAuto, setRangeAuto] = useState(true);
-  const [manualRange, setManualRange] = useState<[number, number]>([0, 1]);
-  const [pointSize, setPointSize] = useState(1.6);
-  const pointSizeRef = useRef(1.6);
+  // 着色、色带、点大小、显示点数在 ui store（落 localStorage，重启后还是上次的，lib/viewPrefs）
+  const { shading, ramp, pointSize, maxPoints } = useUiStore((s) => s.viewerPrefs);
+  const setPrefs = useUiStore((s) => s.setViewerPrefs);
+  // 手动着色范围按着色模式各记一份：强度下填的 0–255 不该搬到高度上（不落盘：跟数据强相关）
+  const [manualRanges, setManualRanges] = useState<ManualRanges>({});
+  const pointSizeRef = useRef(pointSize);
   // 相机模式在 ui store：参数面板的 ROI 行「进入拖框」要能把它切到 2D（param-recipe P2.7）
   const cameraMode = useUiStore((s) => s.viewerMode);
   const setCameraMode = useUiStore((s) => s.setViewerMode);
-  const [maxPoints, setMaxPoints] = useState(2_000_000);
   // 只读地暴露给验收脚本：底图云与叠画几何各自的包围盒，用来断言两者在同一个平面上。
   const [overlayBounds, setOverlayBounds] = useState<Float32Array | null>(null);
 
@@ -301,7 +300,8 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
     if (!cloud || cloud.pointCount === 0) return b;
     return [Math.min(a[0], b[0]), Math.max(a[1], b[1])];
   }, [cloud, cloudB, effectiveShading]);
-  const [lo, hi] = rangeAuto ? dataRange : manualRange;
+  const { range: shownRange, auto: rangeAuto } = rangeFor(manualRanges, effectiveShading, dataRange);
+  const [lo, hi] = shownRange;
 
   const pinnedLabel = useMemo(() => {
     if (!pinnedId) return "";
@@ -607,8 +607,9 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   const setRangeEnd = (end: 0 | 1, raw: string) => {
     const v = Number(raw);
     if (!Number.isFinite(v)) return;
-    setManualRange(end === 0 ? [v, hi] : [lo, v]);
-    setRangeAuto(false);
+    // 另一个界取框里看得到的那个数（自动时显示的是取整过的）：填完一个界，另一个框里的数不该跟着跳
+    const shown: [number, number] = rangeAuto ? [round3(lo), round3(hi)] : [lo, hi];
+    setManualRanges((m) => withRangeEnd(m, effectiveShading, end, v, shown));
   };
 
   const exportPng = async () => {
@@ -712,7 +713,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
             <select
               className="viewer__select"
               value={maxPoints}
-              onChange={(e) => setMaxPoints(Number(e.target.value))}
+              onChange={(e) => setPrefs({ maxPoints: Number(e.target.value) })}
               title="最多显示多少点（抽样在 C++ 侧做）"
             >
               {MAX_POINTS_CHOICES.map((n) => (
@@ -728,7 +729,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
               max={6}
               step={0.1}
               value={pointSize}
-              onChange={(e) => setPointSize(Number(e.target.value))}
+              onChange={(e) => setPrefs({ pointSize: Number(e.target.value) })}
               title="点大小"
             />
             <button
@@ -761,7 +762,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
               className="viewer__select"
               data-testid="viewer-shading"
               value={effectiveShading}
-              onChange={(e) => setShading(e.target.value as ShadingMode)}
+              onChange={(e) => setPrefs({ shading: e.target.value as ShadingMode })}
               title={
                 shading === effectiveShading
                   ? "着色方式"
@@ -784,7 +785,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
               className="viewer__select"
               data-testid="viewer-ramp"
               value={ramp}
-              onChange={(e) => setRamp(e.target.value as RampName)}
+              onChange={(e) => setPrefs({ ramp: e.target.value as RampName })}
               disabled={noRamp}
               title="色带"
             >
@@ -797,7 +798,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
               data-testid="viewer-range-min"
               type="number"
               step="any"
-              value={rangeAuto ? round3(lo) : manualRange[0]}
+              value={rangeAuto ? round3(lo) : lo}
               onChange={(e) => setRangeEnd(0, e.target.value)}
               disabled={noRamp}
               title="着色范围下限"
@@ -807,7 +808,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
               data-testid="viewer-range-max"
               type="number"
               step="any"
-              value={rangeAuto ? round3(hi) : manualRange[1]}
+              value={rangeAuto ? round3(hi) : hi}
               onChange={(e) => setRangeEnd(1, e.target.value)}
               disabled={noRamp}
               title="着色范围上限"
@@ -816,7 +817,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
               type="button"
               className="viewer__btn"
               data-testid="viewer-range-auto"
-              onClick={() => setRangeAuto(true)}
+              onClick={() => setManualRanges((m) => withRangeAuto(m, effectiveShading))}
               disabled={noRamp || rangeAuto}
               title="范围回到数据实际的最小/最大"
             >

@@ -18,6 +18,7 @@ import {
   type ShadingMode,
 } from "../../lib/cloudScene";
 import type { RampName } from "../../lib/ramps";
+import { clampPointSize, POINT_SIZE_MAX, POINT_SIZE_MIN } from "../../lib/viewPrefs";
 import { disposeOverlay, extentOf, shapesOf } from "../../lib/shapes2d";
 import { registerPeekCanvas } from "../../lib/peekCanvas";
 import { augmentOperators, levelOf, resolveOutput } from "../../lib/subgraph";
@@ -32,7 +33,6 @@ import { MeasureReadout } from "../MeasureReadout";
 import type { PeekViewProps } from "./types";
 
 const MAX_POINTS_CHOICES = [100_000, 200_000, 500_000, 2_000_000];
-const POINT_SIZE = 1.6;
 const FROZEN = PEEK_FROZEN;
 
 interface Display {
@@ -75,7 +75,8 @@ export function CloudView({ win, src }: PeekViewProps) {
   const fromNode = win.from.node;
   const lockedRun = win.locked?.runId ?? null;
   const runId = lockedRun ?? src.runId;
-  const { maxPoints, shading, ramp } = win.opts;
+  const { maxPoints, shading, ramp, pointSize } = win.opts;
+  const pointSizeRef = useRef(pointSize);
   const cameraMode: CameraMode = win.view === "cloud2d" ? "2d" : "3d";
 
   // 自己有云就画自己的；没有就先看本节点还有没有别的点云口，再沿输入边往上游借最近的一片，
@@ -203,8 +204,31 @@ export function CloudView({ win, src }: PeekViewProps) {
     const scene = sceneRef.current;
     if (!scene) return;
 
-    setPoints(scene, 0, buildPoints(cloud, POINT_SIZE));
+    setPoints(scene, 0, buildPoints(cloud, pointSizeRef.current));
   }, [cloud]);
+
+  // 点大小只改材质，不进上面那个几何 effect（拖一下就重建几何太亏）
+  useEffect(() => {
+    pointSizeRef.current = pointSize;
+    const points = sceneRef.current?.points[0];
+    if (points) (points.material as THREE.PointsMaterial).size = pointSize;
+  }, [pointSize]);
+
+  // 验收脚本读相机：拖过视角之后 ⤢ 能不能回到全貌
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const host = hostRef.current;
+    if (!scene || !host) return;
+    const write = () => {
+      const c = scene.active().position;
+      const text = [c.x, c.y, c.z].map((v) => Number(v.toFixed(3))).join(",");
+      if (host.dataset.cameraPos !== text) host.dataset.cameraPos = text;
+    };
+    scene.frameListeners.add(write);
+    return () => {
+      scene.frameListeners.delete(write);
+    };
+  }, []);
 
   // 换着色模式/色带只重写 color 属性，positions 和 boundingSphere 原样留着。
   useEffect(() => {
@@ -268,6 +292,14 @@ export function CloudView({ win, src }: PeekViewProps) {
 
   const setOpts = usePeekStore((s) => s.setOpts);
   const empty = !cloud && !shapeStat;
+  const resize = (factor: number) =>
+    setOpts(win.id, { pointSize: clampPointSize(Math.round(pointSize * factor * 10) / 10) });
+  // 转过视角后回到全貌（与主预览的 ⤢ 同一个：底图云 + 叠画几何）
+  const fit = () => {
+    const scene = sceneRef.current;
+    const bounds = scene ? unionBounds(cloud, scene.overlay) : null;
+    if (scene && bounds) fitToBounds(scene, bounds);
+  };
   const status = loading ? "正在取点云…" : display.status;
   const pointChoices = MAX_POINTS_CHOICES.includes(maxPoints)
     ? MAX_POINTS_CHOICES
@@ -279,6 +311,7 @@ export function CloudView({ win, src }: PeekViewProps) {
       data-testid="peek-cloud"
       data-camera={cameraMode}
       data-shading={effectiveShading}
+      data-point-size={pointSize}
       data-run={display.runId ?? ""}
       data-base={display.base?.localId ?? ""}
       data-cloud-bounds={boundsAttr(cloud && cloud.pointCount > 0 ? cloud.bounds : null)}
@@ -349,6 +382,36 @@ export function CloudView({ win, src }: PeekViewProps) {
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          className="peek__btn"
+          data-testid="peek-point-smaller"
+          disabled={pointSize <= POINT_SIZE_MIN}
+          onClick={() => resize(1 / 1.25)}
+          title="点小一点"
+        >
+          −
+        </button>
+        <button
+          type="button"
+          className="peek__btn"
+          data-testid="peek-point-bigger"
+          disabled={pointSize >= POINT_SIZE_MAX}
+          onClick={() => resize(1.25)}
+          title="点大一点（降采样后只剩几千点时看得清）"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          className="peek__btn"
+          data-testid="peek-fit"
+          disabled={empty}
+          onClick={fit}
+          title="缩放到全部（底图云 + 叠画几何）"
+        >
+          ⤢
+        </button>
         <button
           type="button"
           className="peek__btn"

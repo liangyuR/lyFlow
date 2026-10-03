@@ -5,6 +5,7 @@ import { create } from "zustand";
 
 import type { PathSegment, SubPath } from "../lib/subgraph";
 import type { ViewerContent } from "../lib/viewRule";
+import { loadViewerPrefs, saveViewerPrefs, type ViewerPrefs } from "../lib/viewPrefs";
 import type { GraphDoc, GraphNode, PortRef } from "../types/graph";
 
 export interface SearchPopup {
@@ -55,6 +56,10 @@ interface UiState {
   autoRun: boolean;
   /** 预览点数上限。0 = 用 core 的默认值。 */
   previewMaxPoints: number;
+  /** 预览的着色、色带、点大小、显示点数（lib/viewPrefs）：落 localStorage，重启后还是上次的；
+   *  新开的连线查看器窗口也沿用前三样。 */
+  viewerPrefs: ViewerPrefs;
+  setViewerPrefs(partial: Partial<ViewerPrefs>): void;
   /** 正在拖参数：这期间发的是 preview run。 */
   previewing: boolean;
   selectedNodes: ReadonlySet<string>;
@@ -195,6 +200,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   path: NO_PATH,
   autoRun: true,
   previewMaxPoints: 200_000,
+  viewerPrefs: loadViewerPrefs(),
   previewing: false,
   selectedNodes: new Set(),
   selectedEdges: new Set(),
@@ -410,6 +416,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   setAutoRun(on) {
     set({ autoRun: on });
   },
+  setViewerPrefs(partial) {
+    const next = { ...get().viewerPrefs, ...partial };
+    set({ viewerPrefs: next });
+    saveViewerPrefs(next);
+  },
+
   setPreviewMaxPoints(n) {
     set({ previewMaxPoints: n });
   },

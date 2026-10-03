@@ -1938,9 +1938,26 @@ async function suitePanels(cdp, report, ws) {
 
 // ------------------------------------------------------------ #30 / 2.6 视图
 
+const VIEWER_PREFS_KEY = "lyflow.viewer.display";
+
 async function suiteViewer(cdp, report) {
   report.section("P1 #30 / §2.6：着色模式、色带与范围、钉住、导出");
+  // 显示设置会落 localStorage（lib/viewPrefs）：记下原样，分组结束时放回去，不影响后面的分组
+  const storedPrefs = await cdp.eval(`return localStorage.getItem(${lit(VIEWER_PREFS_KEY)});`);
+  try {
+    await suiteViewerBody(cdp, report);
+  } finally {
+    await cdp.eval(`
+      const raw = ${lit(storedPrefs)};
+      if (raw === null) localStorage.removeItem(${lit(VIEWER_PREFS_KEY)});
+      else localStorage.setItem(${lit(VIEWER_PREFS_KEY)}, raw);
+      window.__lyflow.stores.ui.setState({ viewerPrefs: { shading: 'intensity', ramp: 'viridis', pointSize: 1.6, maxPoints: 2000000 } });
+      return true;
+    `);
+  }
+}
 
+async function suiteViewerBody(cdp, report) {
   await newDoc(cdp);
   const ids = await buildGraph(
     cdp,
@@ -1989,6 +2006,56 @@ async function suiteViewer(cdp, report) {
     return sel.value;
   `);
   report.eq("色带可切换", ramped, "gray");
+
+  // 手动着色范围按着色模式分开记：强度下填的上界不搬到高度上（修前只有一份，切过去整片云一种颜色）；「自动」只清当前那一种
+  const setVal = (testid, v) => cdp.eval(`
+    const el = document.querySelector('[data-testid="${testid}"]');
+    const select = el instanceof HTMLSelectElement;
+    const proto = select ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, ${lit(String(v))});
+    el.dispatchEvent(new Event(select ? 'change' : 'input', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 200));
+    return true;
+  `);
+  const rangeNow = () => cdp.eval(`
+    const q = (id) => document.querySelector('[data-testid="' + id + '"]');
+    return { shading: document.querySelector('.viewer').getAttribute('data-shading'),
+             min: Number(q('viewer-range-min').value), max: Number(q('viewer-range-max').value),
+             auto: q('viewer-range-auto').disabled };
+  `);
+  await setVal("viewer-shading", "intensity");
+  const iAuto = await rangeNow();
+  await setVal("viewer-range-max", 0.4321);
+  const iManual = await rangeNow();
+  await setVal("viewer-shading", "height");
+  const hAuto = await rangeNow();
+  await setVal("viewer-shading", "intensity");
+  const iBack = await rangeNow();
+  report.ok("手动范围按着色分开记：强度下填的上界（下界取当时的自动值）不搬到高度上，切回强度还在",
+    iAuto.shading === "intensity" && iManual.max === 0.4321 && iManual.min === iAuto.min && !iManual.auto &&
+      hAuto.shading === "height" && hAuto.auto && hAuto.max !== 0.4321 && iBack.max === 0.4321 && !iBack.auto,
+    JSON.stringify({ iAuto, iManual, hAuto, iBack }));
+  await setVal("viewer-shading", "height");
+  await setVal("viewer-range-min", -5);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="viewer-range-auto"]'));
+  const hCleared = await rangeNow();
+  await setVal("viewer-shading", "intensity");
+  const iKept = await rangeNow();
+  report.ok("「自动」只清当前着色的那一份", hCleared.auto && hCleared.min !== -5 && iKept.max === 0.4321 && !iKept.auto,
+    JSON.stringify({ hCleared, iKept }));
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="viewer-range-auto"]'));
+
+  // 着色、色带、点大小、显示点数落 localStorage（重启后读回在 view-rule.test.mjs）
+  await setVal("viewer-shading", "height");
+  await cdp.eval(`
+    const el = document.querySelector('.viewer__size');
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(el, '3.2');
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 150));
+    return true;
+  `);
+  const saved = await cdp.eval(`return JSON.parse(localStorage.getItem(${lit(VIEWER_PREFS_KEY)}) ?? 'null');`);
+  report.eq("着色、色带、点大小记进了 localStorage", saved, { shading: "height", ramp: "gray", pointSize: 3.2, maxPoints: 2_000_000 });
 
   // 钉住：钉住 gen 之后选中 voxel，视图不该切过去
   await cdp.eval(`document.querySelector('[data-testid="viewer-pin"]').click(); return true;`);

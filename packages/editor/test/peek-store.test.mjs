@@ -56,4 +56,12 @@ test("超过上限时关掉最早的未锁定窗口并提示；锁定的窗口�
       `${name}：toast=${toast?.text}`,
     );
   }
+
+  // 新窗口沿用主预览的着色、色带、点大小；显示点数仍是查看器自己的 200k
+  const prefs = useUiStore.getState().viewerPrefs;
+  useUiStore.setState({ viewerPrefs: { shading: "height", ramp: "jet", pointSize: 3, maxPoints: 8_000_000 } });
+  const [id] = openAll([["cloud3d"]]);
+  const { shading, ramp, pointSize, maxPoints } = usePeekStore.getState().windows.find((w) => w.id === id).opts;
+  assert.deepEqual({ shading, ramp, pointSize, maxPoints }, { shading: "height", ramp: "jet", pointSize: 3, maxPoints: 200_000 });
+  useUiStore.setState({ viewerPrefs: prefs });
 });

@@ -23,6 +23,8 @@ export interface PeekOpts {
   maxPoints: number;
   shading: ShadingMode;
   ramp: RampName;
+  /** 点大小。放 store 不放组件 state：运行中 CloudView 会被卸载，state 会丢。 */
+  pointSize: number;
   layout: TensorLayout;
   sliceIndex: number;
   channel: number | "rgb";
@@ -73,6 +75,7 @@ export const PEEK_DEFAULT_OPTS: PeekOpts = {
   maxPoints: 200_000,
   shading: "intensity",
   ramp: "viridis",
+  pointSize: 1.6,
   layout: "auto",
   sliceIndex: 0,
   channel: 0,
@@ -137,6 +140,13 @@ export function findWindowForEdge(
   return windows.find((w) => w.edgeId === edgeId && samePath(w.path, path));
 }
 
+/** 新窗口沿用主预览的着色、色带、点大小：以前固定是强度 / viridis，主预览里选好的要一个窗口一个窗口重选。
+ *  显示点数仍是查看器自己的 200k（最多 4 个窗口同时占 WebGL）。 */
+function mainViewerLook(): Pick<PeekOpts, "shading" | "ramp" | "pointSize"> {
+  const { shading, ramp, pointSize } = useUiStore.getState().viewerPrefs;
+  return { shading, ramp, pointSize };
+}
+
 export const usePeekStore = create<PeekState>((set, get) => ({
   windows: [],
   topZ: 0,
@@ -183,7 +193,7 @@ export const usePeekStore = create<PeekState>((set, get) => ({
       locked: win.locked ?? null,
       view,
       viewAuto,
-      opts: { ...PEEK_DEFAULT_OPTS, ...win.opts },
+      opts: { ...PEEK_DEFAULT_OPTS, ...mainViewerLook(), ...win.opts },
       field: win.field ?? null,
     };
     set({ windows: windows.concat(created), topZ: z });

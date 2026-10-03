@@ -3,7 +3,9 @@ import {
   buildGraph,
   canvasBox,
   centerOf,
+  clickAt,
   clickUntilPicked,
+  dragMouse,
   lit,
   mustOk,
   newDoc,
@@ -279,6 +281,35 @@ async function suiteCloudPeek(cdp, report, fixture) {
     Boolean(picked) && mainMeasuring === "0", JSON.stringify({ picked, mainMeasuring }));
   await clickIn(cdp, opened.win.id, '[data-testid="peek-measure"]');
   report.eq("再点一次关掉、点位清掉", await peekPicks(), 0);
+
+  // ⤢：转过视角之后回到全貌。相机带阻尼，等读数停下来再记
+  const canvasSel = `${winSel} [data-testid="peek-cloud-canvas"]`;
+  const steadyCamera = async () => {
+    let last = null;
+    for (let i = 0; i < 40; i += 1) {
+      const now = await cdp.eval(`return document.querySelector(${lit(canvasSel)})?.dataset.cameraPos ?? null;`);
+      if (now !== null && now === last) return now.split(",").map(Number);
+      last = now;
+      await sleep(150);
+    }
+    return last ? last.split(",").map(Number) : null;
+  };
+  const cam0 = await steadyCamera();
+  const mid = await centerOf(cdp, canvasSel);
+  await dragMouse(cdp, mid, { x: mid.x + 70, y: mid.y + 25 });
+  const cam1 = await steadyCamera();
+  await clickAt(cdp, await centerOf(cdp, `${winSel} [data-testid="peek-fit"]`));
+  const cam2 = await steadyCamera();
+  const near = (a, b) => a && b && a.every((v, i) => Math.abs(v - b[i]) <= 1e-2 * Math.max(1, Math.abs(b[i])));
+  report.ok("查看器里真鼠标转过视角，点 ⤢ 回到全貌", cam0 && cam1 && !near(cam1, cam0) && near(cam2, cam0),
+    JSON.stringify({ cam0, cam1, cam2 }));
+
+  // 点大小：+ 放大（降采样后只剩几千点时看得清）
+  const sizeOf = () => cdp.eval(`return Number(document.querySelector(${lit(winSel + ' [data-testid="peek-cloud"]')})?.dataset.pointSize);`);
+  const size0 = await sizeOf();
+  await clickAt(cdp, await centerOf(cdp, `${winSel} [data-testid="peek-point-bigger"]`));
+  const size1 = await sizeOf();
+  report.ok("点 + 点变大", size1 > size0, `${size0} → ${size1}`);
   await park(cdp);
 
   report.eq("窗口挂在被双击的那条边上", opened.win.edgeId, edge);
@@ -318,6 +349,33 @@ async function suiteCloudPeek(cdp, report, fixture) {
   await sleep(250);
   const afterEscape = await peekWindows(cdp);
   report.eq("没有运行在跑时 Esc 关掉最前面的浮窗", afterEscape.length, 0);
+
+  // 新开的窗口沿用主预览的着色（以前固定是强度，主预览里选好的要一个窗口一个窗口重选）
+  const prefs = await cdp.eval(`
+    const s = window.__lyflow.stores.ui.getState();
+    const before = { prefs: s.viewerPrefs, raw: localStorage.getItem('lyflow.viewer.display') };
+    s.setViewerPrefs({ shading: 'height' });
+    return before;
+  `);
+  try {
+    const reopened = await openByDoubleClick(cdp, report, edge, "主预览切到高度后再开");
+    const shading = reopened?.win
+      ? (await cdp.eval(`
+          await new Promise((r) => setTimeout(r, 300));
+          return document.querySelector(${lit(`[data-testid="edge-peek"][data-peek-id="${reopened.win.id}"] [data-testid="peek-cloud"]`)})?.dataset.shading ?? null;
+        `))
+      : null;
+    report.eq("主预览切到高度着色后，新开的窗口也是高度", shading, "height");
+  } finally {
+    await cdp.eval(`
+      const before = ${lit(prefs)};
+      window.__lyflow.stores.ui.setState({ viewerPrefs: before.prefs });
+      if (before.raw === null) localStorage.removeItem('lyflow.viewer.display');
+      else localStorage.setItem('lyflow.viewer.display', before.raw);
+      window.__lyflow.stores.peek.getState().closeAll();
+      return true;
+    `);
+  }
 }
 
 async function suiteShapeAndValuePeek(cdp, report, fixture) {
@@ -737,7 +795,7 @@ async function suiteLifecyclePeek(cdp, report) {
 }
 
 async function suiteEdgeMenu(cdp, report) {
-  report.section("边的右键菜单：三项都在；「在此插入 Reroute」接过了原来的双击行为");
+  report.section("边的右键菜单：四项都在（插入算子在最前）；「在此插入 Reroute」接过了原来的双击行为");
 
   const { ids } = await prepare(cdp);
   await resetPeek(cdp);
@@ -756,8 +814,8 @@ async function suiteEdgeMenu(cdp, report) {
     if (!menu) return 'no-menu';
     return [...menu.querySelectorAll('button')].map((b) => b.getAttribute('data-testid'));
   `);
-  report.eq("菜单里正好是查看内容 / 插入 Reroute / 删除连线", items,
-    ["edge-ctx-peek", "edge-ctx-reroute", "edge-ctx-delete"]);
+  report.eq("菜单里正好是插入算子 / 查看内容 / 插入 Reroute / 删除连线", items,
+    ["edge-ctx-insert", "edge-ctx-peek", "edge-ctx-reroute", "edge-ctx-delete"]);
   if (!Array.isArray(items)) return;
 
   // 插 Reroute 本身（节点多一个、边一拆二）由 m3 的 1.3 分组验，这里只看它不顺手开浮窗
