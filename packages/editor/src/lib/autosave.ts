@@ -2,12 +2,14 @@
 // 旁边的 `~`（Tauri：app data 下的 untitled.lyflow.json），下次开 app 时问要不要恢复 —— 以前没存过盘的图
 // 什么都不备份，崩溃、断电、被强杀就全没了。传输层没有 untitledBackupPath（HTTP、静态快照）时照旧不备份。
 
-import { activeTransport, transport, type LoadedGraph, type Transport } from "../transport";
+import { activeTransport, transport, type BackupStatus, type LoadedGraph, type Transport } from "../transport";
 import { useGraphStore } from "../store/graph";
 import { recipesDirty } from "../store/recipe";
-import { writeRecipeAutosave } from "../store/recipeFiles";
+import { discardRecipeAutosave, writeRecipeAutosave } from "../store/recipeFiles";
 import { isMigration } from "../types/execution";
-import { backupStatus, discardBackup, readBackup, writeBackup } from "./files";
+import { dialogs } from "./dialogs";
+import { backupStatus, baseName, confirmRestore, discardBackup, readBackup, writeBackup } from "./files";
+import { askChoice, modalHostReady } from "./modal";
 
 let cached: { owner: Transport; path: Promise<string | null> } | null = null;
 
@@ -104,5 +106,62 @@ export function untitledRestoreMessage(backup: UntitledBackup): string {
   return (
     `上次有一张还没存过盘的图（${backup.loaded.doc.nodes.length} 个节点${when}）没有保存就退出了。` +
     `要恢复吗？（选否则丢弃它）`
+  );
+}
+
+// ---- 恢复备份那一问（交互清单 2.5）
+// 以前是原生的「是 / 否」：选否（浏览器宿主里按 Esc 也是否）两份备份就删了，点错了找不回来；也没写备份与正文各是
+// 什么时候的。现在画在编辑器里（lib/modal），三选一：恢复 / 丢弃 / 取消 —— 取消什么都不动，备份留着、下次再问。
+// 没挂对话框的宿主（编辑器整个卸掉了）退回原生的是 / 否，与以前一样。
+
+export type RestoreAnswer = "restore" | "discard" | "cancel";
+
+const whenText = (ms: number | null): string => (ms ? new Date(ms).toLocaleString() : "不详");
+
+async function askThree(title: string, message: string, discardLabel: string, fallback: () => Promise<boolean>): Promise<RestoreAnswer> {
+  if (!modalHostReady()) return (await fallback()) ? "restore" : "discard";
+  const choice = await askChoice({
+    title,
+    message,
+    choices: [
+      { id: "restore", label: "恢复备份", tone: "primary" },
+      { id: "discard", label: discardLabel, tone: "danger" },
+      { id: "cancel", label: "取消（备份留着）" },
+    ],
+  });
+  return choice === "restore" || choice === "discard" ? choice : "cancel";
+}
+
+/** 打开 path 之前看一眼它的备份：比正文新就问一句。返回从哪开 —— "backup"、"file"；null = 取消了，不打开、备份都留着。
+ *  选了丢弃、或者备份不比正文新时，图与配方的两份备份都删掉（与以前一样）。 */
+export async function openSourceFor(path: string): Promise<"backup" | "file" | null> {
+  const status: BackupStatus = await backupStatus(path);
+  if (status.newer) {
+    const answer = await askThree(
+      "恢复自动备份？",
+      `${baseName(path)} 有一份比上次保存更新的自动备份（备份于 ${whenText(status.backupModified)}，` +
+        `文件上次保存于 ${whenText(status.fileModified)}）。上次可能是异常退出的，也可能是关的时候选了「不保存」。`,
+      "丢弃备份，打开上次保存的",
+      () => confirmRestore(path),
+    );
+    if (answer === "restore") return "backup";
+    if (answer === "cancel") return null;
+  }
+  if (status.exists) {
+    await discardBackup(path);
+    await discardRecipeAutosave(path);
+  }
+  return "file";
+}
+
+/** 开 app 时那张没存过盘的图：恢复 / 丢弃 / 取消。取消 = 这回先不管、备份留着；不过新开的这张图有了改动，
+ *  定时备份就会写到同一处、换成新图的（只有一个位置）—— 问句里写明。 */
+export function askRestoreUntitled(backup: UntitledBackup): Promise<RestoreAnswer> {
+  return askThree(
+    "恢复上次没存的图？",
+    `${untitledRestoreMessage(backup).replace("要恢复吗？（选否则丢弃它）", "要恢复吗？")}` +
+      "选「取消」备份先留着，不过在新图里改了东西之后，它会被新图的备份替换。",
+    "丢弃它",
+    () => dialogs().confirmRestore(backup.path, untitledRestoreMessage(backup)),
   );
 }

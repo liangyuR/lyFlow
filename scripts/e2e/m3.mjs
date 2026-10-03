@@ -2023,8 +2023,29 @@ async function suitePanels(cdp, report, ws) {
     return await window.__lyflow.transport.backupStatus(${lit(graphPath)});
   `);
   report.ok("备份比正文新时被认出来", status.exists && status.newer, JSON.stringify(status));
-  await cdp.eval(`await window.__lyflow.transport.discardBackup(${lit(graphPath)}); return true;`);
-  report.ok("丢弃备份后文件没了", !fs.existsSync(`${graphPath}~`));
+  // 从空画布的最近打开里点它：编辑器里问恢复 / 丢弃 / 取消。真按 Esc = 取消：不打开、备份留着（以前原生的「否」直接删了）；
+  // 再点一次选「丢弃备份，打开上次保存的」才删、打开正文
+  const openRecentAndAsk = async () => {
+    await newDoc(cdp);
+    await sleep(200);
+    await clickAt(cdp, await centerOf(cdp, `[data-testid="empty-recent-item"][title="${graphPath.replace(/\\/g, "\\\\")}"]`));
+    return cdp.waitFor(`document.querySelector('[data-testid="modal"][data-kind="choice"]')?.textContent ?? null`,
+      { timeoutMs: 10_000, what: "恢复备份那一问" });
+  };
+  const asked = await openRecentAndAsk();
+  await pressEscape(cdp);
+  await sleep(300);
+  const backupEsc = await cdp.eval(`return { path: window.__lyflow.stores.graph.getState().filePath,
+    modal: !!document.querySelector('[data-testid="modal"]') };`);
+  report.ok("打开有新备份的图：编辑器里问「恢复 / 丢弃 / 取消」，写着备份与上次保存的时间；按 Esc 不打开、备份留着",
+    /恢复备份.*丢弃备份，打开上次保存的.*取消（备份留着）/.test(asked) && /备份于 .+文件上次保存于 /.test(asked) &&
+      backupEsc.path === null && !backupEsc.modal && fs.existsSync(`${graphPath}~`),
+    JSON.stringify({ asked, backupEsc }));
+  await openRecentAndAsk();
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="modal-choice-discard"]'));
+  await cdp.waitFor(`window.__lyflow.stores.graph.getState().filePath === ${lit(graphPath)}`, { timeoutMs: 10_000, what: "丢弃备份后打开正文" });
+  report.ok("选「丢弃备份，打开上次保存的」：备份删了，打开的是正文（没标改动）",
+    !fs.existsSync(`${graphPath}~`) && (await cdp.eval(`return window.__lyflow.stores.graph.getState().dirty;`)) === false);
 
   // 参数框里打了字、没失焦就按 Ctrl+S：先提交再存（以前 Ctrl+S 在输入框里不响应，打的字也没进文件）
   await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}], []); return true;`);

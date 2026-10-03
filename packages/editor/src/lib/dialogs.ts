@@ -22,7 +22,8 @@ export interface EditorDialogs {
   /** 不再调用：有没存的改动时改成编辑器自己画的「保存 / 不保存 / 取消」（lib/unsaved）。
    *  留着只为旧宿主的实现照样通过类型检查。 */
   confirmDiscard?: ((dirty: boolean) => Promise<boolean>) | undefined;
-  /** 备份比正文新时问一句。返回 true 表示用户要恢复。 */
+  /** 备份比正文新时问一句。返回 true 表示用户要恢复。平时那一问是编辑器自己画的三选一（lib/autosave 的 openSourceFor），
+   *  这个只在编辑器整个卸掉、画不出对话框时才用。 */
   confirmRestore(path: string, message: string): Promise<boolean>;
   /** 可选：配方的导入（open）与导出（save）选文件（param-recipe P3.6）。不给就退回 pickPath，
    *  再没有就在编辑器里让人输一个路径。suggested 是导出时建议的文件名。 */

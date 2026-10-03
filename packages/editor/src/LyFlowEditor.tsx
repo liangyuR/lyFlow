@@ -22,16 +22,13 @@ import {
   discardUntitledBackup,
   findUntitledBackup,
   restoreUntitled,
-  untitledRestoreMessage,
+  askRestoreUntitled,
+  openSourceFor,
 } from "./lib/autosave";
-import { dialogs } from "./lib/dialogs";
 import { saveCurrent } from "./lib/saveFlow";
 import { resolveUnsaved } from "./lib/unsaved";
 import {
-  backupStatus,
   BACKUP_INTERVAL_MS,
-  confirmRestore,
-  discardBackup,
   loadDocFrom,
   pickOpenPath,
   readBackup,
@@ -64,7 +61,6 @@ import { useGraphStore } from "./store/graph";
 import { useManifestStore } from "./store/manifest";
 import { recipesDirty, useRecipeStore } from "./store/recipe";
 import {
-  discardRecipeAutosave,
   followGraphPath,
   loadRecipesFor,
   restoreRecipeAutosave,
@@ -247,10 +243,9 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       };
       // 只在还是那张空白的新图时问：宿主可能一开就载入了别的图，那就不打扰（备份留到下次）
       if (!backup || !blank()) return;
-      if (!(await dialogs().confirmRestore(backup.path, untitledRestoreMessage(backup)))) {
-        await discardUntitledBackup();
-        return;
-      }
+      const answer = await askRestoreUntitled(backup);
+      if (answer === "discard") await discardUntitledBackup();
+      if (answer !== "restore") return;
       if (!blank()) return;
       restoreUntitled(backup);
       setTimeout(() => void fitView({ duration: fitMs }), 50);
@@ -286,9 +281,10 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     async (path: string) => {
       const ui = useUiStore.getState();
       try {
-        // 备份比正文新 = 上次是异常退出的，先问要不要恢复（§2.5）
-        const status = await backupStatus(path);
-        if (status.newer && (await confirmRestore(path))) {
+        // 备份比正文新：先问恢复 / 丢弃 / 取消（§2.5）。取消就不打开，备份留着
+        const from = await openSourceFor(path);
+        if (from === null) return;
+        if (from === "backup") {
           const restored = await readBackup(path);
           await afterOpen(
             restored.doc,
@@ -300,10 +296,6 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
           const recipes = await restoreRecipeAutosave();
           useUiStore.getState().showToast(recipes ? "已从自动备份恢复图与配方，记得保存" : "已从自动备份恢复，记得保存");
           return;
-        }
-        if (status.exists) {
-          await discardBackup(path);
-          await discardRecipeAutosave(path);
         }
 
         const loaded = await loadDocFrom(path);

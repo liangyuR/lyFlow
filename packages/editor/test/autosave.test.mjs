@@ -5,13 +5,16 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
+  askRestoreUntitled,
   autosaveTick,
   discardUntitledBackup,
   findUntitledBackup,
+  openSourceFor,
   restoreUntitled,
   untitledBackupPath,
 } from "../src/lib/autosave.ts";
-import { settleModal, useModalStore } from "../src/lib/modal.ts";
+import { browserDialogs, setDialogs } from "../src/lib/dialogs.ts";
+import { registerModalHost, settleModal, useModalStore } from "../src/lib/modal.ts";
 import { resolveUnsaved } from "../src/lib/unsaved.ts";
 import { useGraphStore } from "../src/store/graph.ts";
 import { useManifestStore } from "../src/store/manifest.ts";
@@ -103,6 +106,46 @@ test("找回来、换上：没有路径、算没保存（撤销回不到「已�
   await discardUntitledBackup();
   assert.equal(t.files.size, 0);
   assert.equal(await findUntitledBackup(), null);
+});
+
+test("打开时备份比正文新：编辑器里问恢复 / 丢弃 / 取消 —— 取消与 Esc 不打开、备份留着；丢弃才删；没挂对话框退回原生的是 / 否", async () => {
+  const t = fresh();
+  const P = "C:/w/点2.lyflow.json";
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  const unhost = registerModalHost();
+  const cases = [
+    // [说明, 点了哪个（null = Esc）, 期望从哪开（null = 不开）, 期望备份还在]
+    ["恢复备份", "restore", "backup", true],
+    ["丢弃备份，打开上次保存的", "discard", "file", false],
+    ["取消", "cancel", null, true],
+    ["Esc", null, null, true],
+  ];
+  for (const [name, choice, want, kept] of cases) {
+    await t.writeBackup(P, g().doc);
+    const pending = openSourceFor(P);
+    await tick();
+    const modal = useModalStore.getState().current;
+    assert.deepEqual(modal?.choices.map((c) => c.id), ["restore", "discard", "cancel"], `${name}：恢复排第一（默认拿焦点）`);
+    assert.match(modal.message, /^点2\.lyflow\.json 有一份比上次保存更新的自动备份（备份于 .+，文件上次保存于 不详）/, name);
+    settleModal(choice);
+    assert.deepEqual([await pending, t.files.has(`${P}~`)], [want, kept], name);
+  }
+  t.files.delete(`${P}~`);
+  assert.equal(await openSourceFor(P), "file", "没有备份：不问，直接开正文");
+  assert.equal(useModalStore.getState().current, null);
+
+  // 开 app 时没存过盘的那张：同样三选一，取消就是先留着
+  const untitled = askRestoreUntitled({ path: UNTITLED, loaded: { doc: g().doc, migrations: [] }, savedAt: null });
+  assert.match(useModalStore.getState().current?.message ?? "", /要恢复吗？选「取消」备份先留着/);
+  settleModal(null);
+  assert.equal(await untitled, "cancel");
+  unhost();
+
+  // 编辑器整个卸掉了（没挂对话框）：退回原生的是 / 否，否 = 丢弃（与以前一样）
+  setDialogs({ ...browserDialogs, confirmRestore: async () => false });
+  await t.writeBackup(P, g().doc);
+  assert.deepEqual([await openSourceFor(P), t.files.has(`${P}~`)], ["file", false]);
+  setDialogs(undefined);
 });
 
 test("传输层没有 untitledBackupPath（HTTP、静态快照）：没存过盘的图不备份，也找不到", async () => {
