@@ -15,7 +15,7 @@ const level = {
   edges: [edge("a", "b"), edge("b", "d"), edge("d", "e"), edge("b", "x"), edge("c", "x"), edge("x", "e")],
 };
 
-test("closureOf：沿连线往上 / 往下走到头，含起点，按文档顺序；多个起点合在一起。拖参数时跟着重算的（previewTargets）只带下游的", () => {
+test("closureOf：沿连线往上 / 往下走到头，含起点，按文档顺序；多个起点合在一起。拖参数时跟着重算的（previewTargets）只带下游的；拖图参数算它绑着的", async () => {
   const cases = [
     // [起点, 方向, 期望]
     [["d"], "up", ["a", "b", "d"]],
@@ -64,6 +64,13 @@ test("closureOf：沿连线往上 / 往下走到头，含起点，按文档顺�
   for (const [name, path, edited, eyes, want] of nested) {
     assert.deepEqual(previewTargets(sdoc, path, edited, eyes), want, `previewTargets：${name}`);
   }
+  // 拖的是图参数：它绑着的每一个顶层节点（连同下游正看着的）合在一起；进了子图也按顶层算；没绑的什么都不跑
+  const gdoc = { ...sdoc, params: { t: { binds: ["g.x", "S.y"] }, idle: { binds: [] } } };
+  const { graphParamPreviewId, previewTargetsOf } = await import("../src/lib/preview.ts");
+  assert.deepEqual(previewTargetsOf(gdoc, [], graphParamPreviewId("t"), [{ path: [], nodeId: "m" }]), ["g", "m", "S"]);
+  assert.deepEqual(previewTargetsOf(gdoc, inS, graphParamPreviewId("t"), []), ["g", "S"], "当前层在子图里也按顶层节点算");
+  assert.deepEqual(previewTargetsOf(gdoc, [], graphParamPreviewId("idle"), []), []);
+  assert.deepEqual(previewTargetsOf(gdoc, inS, "p", []), ["S/p"], "节点参数照旧");
 });
 
 test("stepAlong（Alt+方向键沿连线走）：上下游取最上面的；刚从那边过来先退回去；同级在同一组里挪、到头不绕回", () => {

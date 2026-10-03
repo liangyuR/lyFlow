@@ -6,7 +6,32 @@ import { startRun, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
 import { transport } from "../transport";
+import { splitBind } from "./graphParams";
 import { previewTargets } from "./nodeRun";
+import type { SubPath } from "./subgraph";
+import type { GraphDoc } from "../types/graph";
+
+/** 拖的是顶层图参数（图参数那一行、配方矩阵里正在用的那一格）时交给预览的「节点 id」：跑它绑着的那几个顶层节点。
+ *  以前这些控件没有节点 id，拖着不预览、松手也不补运行 —— 偏偏 gapOffset、纳入配方的阈值都在这里调。 */
+const GRAPH_PARAM = "\u0001gp:";
+
+export function graphParamPreviewId(name: string): string {
+  return GRAPH_PARAM + name;
+}
+
+/** 这一下拖动要算到哪几个节点（完整 id）。拖的是节点参数：它和它下游正看着的（previewTargets）；拖的是图参数：
+ *  它绑着的每一个顶层节点和它们下游正看着的，合在一起。 */
+export function previewTargetsOf(
+  doc: GraphDoc,
+  path: SubPath,
+  nodeId: string,
+  watched: readonly ({ path: SubPath; nodeId: string } | null)[],
+): string[] {
+  if (!nodeId.startsWith(GRAPH_PARAM)) return previewTargets(doc, path, nodeId, watched);
+  const binds = doc.params?.[nodeId.slice(GRAPH_PARAM.length)]?.binds ?? [];
+  const bound = binds.map((b) => splitBind(b)?.node).filter((id): id is string => !!id);
+  return [...new Set(bound.flatMap((id) => previewTargets(doc, [], id, watched)))];
+}
 
 /** 拖动过程中每一帧都在改值，攒一下再发。30 ms 是「跟手」和「别打死自己」的平衡点。 */
 export const PREVIEW_DEBOUNCE_MS = 30;
@@ -29,10 +54,9 @@ function fire(nodeId: string, preview: boolean): void {
   const compare = useCompareStore.getState();
   const selected = ui.selectedNodes.size === 1 ? [...ui.selectedNodes][0]! : null;
   const active = ui.pinnedNode ?? selected;
-  const targets = previewTargets(graph.doc, ui.path, nodeId, [
-    active ? { path: ui.path, nodeId: active } : null,
-    compare.on && !compare.snapshot ? compare.b : null,
-  ]);
+  const watched = [active ? { path: ui.path, nodeId: active } : null, compare.on && !compare.snapshot ? compare.b : null];
+  const targets = previewTargetsOf(graph.doc, ui.path, nodeId, watched);
+  if (targets.length === 0) return; // 图参数没绑任何节点：没有可跑的
   void startRun(graph.doc, graph.filePath, {
     targets,
     preview,

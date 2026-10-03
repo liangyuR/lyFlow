@@ -836,6 +836,7 @@ const GraphParamPanelRow = memo(function GraphParamPanelRow({
             param={spec}
             value={row.value}
             disabled={false}
+            previewGraphParam={name}
             onChange={(v) => {
               if (!valueEquals(v, row.value)) g().editGraphParamValue(name, v);
             }}

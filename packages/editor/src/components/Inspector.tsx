@@ -210,6 +210,7 @@ function GraphParamRow({ name }: { name: string }) {
             param={spec}
             value={value}
             disabled={false}
+            previewGraphParam={name}
             onChange={(v) => {
               if (!valueEquals(v, value)) useGraphStore.getState().editGraphParamValue(name, v);
             }}

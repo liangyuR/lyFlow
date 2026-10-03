@@ -1109,6 +1109,42 @@ async function suitePreview(cdp, report) {
       (await ratioNow()) === ratioBefore,
     JSON.stringify({ ratioBefore, restored }));
   await cdp.eval(`window.__lyflow.stores.ui.setState({ drawer: ${lit(drawerBeforeRuns)} }); return true;`);
+
+  // 拖图参数：s1 的比例纳入配方之后，在检查器上面「图参数」那一行真拖滑块 —— 拖着的时候预览它绑着的 s1，
+  // 松手补一次正式运行（以前图参数那一行没有节点 id：不预览、松手也不跑）
+  const gpName = await cdp.eval(`return window.__lyflow.stores.graph.getState().promoteToGraphParam(${lit(pin.s1)}, 'keepRatio');`);
+  await select(cdp, pin.s1);
+  await sleep(300);
+  const gpBefore = await pinState();
+  await cdp.eval(`
+    window.__gpSeen = [];
+    window.__gpStop = window.__lyflow.stores.execution.subscribe((s) => {
+      if (s.preview && s.runId && !window.__gpSeen.includes(s.runId)) window.__gpSeen.push(s.runId);
+    });
+    return true;
+  `);
+  const gpSlider = await centerOf(cdp, `[data-testid="graph-param-${gpName}"] [data-testid="param-slider-keepRatio"]`);
+  mustOk(gpSlider != null, "图参数那一行有滑块", JSON.stringify(gpSlider));
+  {
+    const common = { button: "left", buttons: 1, clickCount: 1 };
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: gpSlider.x, y: gpSlider.y, buttons: 0 });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: gpSlider.x, y: gpSlider.y, ...common });
+    for (let i = 1; i <= 6; i += 1) {
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: gpSlider.x - i * 8, y: gpSlider.y, ...common });
+      await sleep(80);
+    }
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: gpSlider.x - 48, y: gpSlider.y, ...common });
+  }
+  await cdp.waitFor(
+    `(() => { const s = window.__lyflow.stores.execution.getState();
+              return s.runId !== ${lit(gpBefore.runId)} && !s.preview && s.runStatus !== 'running' && s.runStatus !== 'idle'; })()`,
+    { timeoutMs: 30_000, what: "拖图参数松手后补的正式运行结束" },
+  );
+  const gpAfter = await pinState();
+  const gpSeen = await cdp.eval(`window.__gpStop(); return window.__gpSeen.length;`);
+  report.ok("拖图参数那一行的滑块：拖着有预览运行，松手补一次正式运行、算的是它绑着的 s1（点数变了）",
+    gpSeen >= 1 && gpAfter.preview === false && gpAfter.targets.includes(pin.s1) && gpAfter.s1 !== gpBefore.s1,
+    JSON.stringify({ gpName, gpSeen, gpBefore, gpAfter }));
 }
 
 // ------------------------------------------------------------- §4 大图性能

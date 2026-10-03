@@ -12,6 +12,7 @@ import { joinBind, type GraphBinding } from "../lib/graphParams";
 import { fullId, type SubPath } from "../lib/subgraph";
 import { applyNumEdit, numEditNote, type NumApplied, type NumEdit } from "../lib/numExpr";
 import { cleanPathText } from "../lib/params";
+import { graphParamPreviewId } from "../lib/preview";
 import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
 import type { EnumOption, Param } from "../types/manifest";
@@ -38,6 +39,8 @@ export interface ControlProps {
   graphBinding?: GraphBinding | null | undefined;
   /** 多选一起改时给：相对改法（*2、+=5）按每个节点各自的值算（updater 拿到那个节点此刻的值）。 */
   onChangeEach?: ((update: (cur: unknown) => unknown) => void) | undefined;
+  /** 这是顶层图参数的控件（不属于哪个节点）：拖动时预览它绑着的节点、松手补运行。 */
+  previewGraphParam?: string | undefined;
 }
 
 /** 多选时的相对改法：每个节点按自己的值改，夹住的统计起来说一声。 */
@@ -736,8 +739,9 @@ export function ParamControl(props: ControlProps) {
   const uiPath = useUiStore((s) => s.path);
   // live preview 的目标是「相对当前层级」的 id：fire() 会再拼上 ui.path 的前缀。
   // 参数面板展开进子图定义的那几行在更深一层，这里把中间那几段实例补上
-  const previewId =
-    props.nodeId && props.path && props.path.length > uiPath.length
+  const previewId = props.previewGraphParam
+    ? graphParamPreviewId(props.previewGraphParam)
+    : props.nodeId && props.path && props.path.length > uiPath.length
       ? [...props.path.slice(uiPath.length).map((seg) => seg.nodeId), props.nodeId].join("/")
       : props.nodeId;
 
