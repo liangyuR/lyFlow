@@ -311,6 +311,8 @@ export async function selectAndReadViewer(cdp, nodeId, timeoutMs = 30_000) {
       const v = document.querySelector('.viewer');
       if (!v || v.getAttribute('data-node') !== ${lit(nodeId)}) return null;
       if (v.getAttribute('data-view') === 'loading') return null;
+      // 重跑中屏幕上还是上一片云（data-busy）：等新的画出来再读
+      if (v.getAttribute('data-busy') === '1') return null;
       const count = v.querySelector('.viewer__count');
       const status = v.querySelector('[data-testid="viewer3d-status"]');
       const base = v.querySelector('[data-testid="viewer-base"]');
