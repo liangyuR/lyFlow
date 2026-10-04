@@ -113,6 +113,10 @@ test("自动运行补谁（paramEditTargets）：参数有效值、静音、图�
     }), { thr: 1, k2: 3 }, { nodes: [], graphParams: [] }],
     ["提升成子图参数不算", swap((d) => { d.subgraphs.s.params = [{ name: "k", type: "float", default: 1, binds: [{ node: "in", param: "k" }] }]; }), p,
       { nodes: [], graphParams: [] }],
+    ["跳回历史时跨过一次纳入配方：搬家的那个不算，同一步里别的参数照样算", swap((d) => {
+      d.nodes[0].params.k = 7;
+      d.params.k2 = { type: "float", default: 3, binds: ["b.k"] };
+    }), { thr: 1, k2: 3 }, { nodes: ["a"], graphParams: [] }],
   ];
   for (const [name, after, params, want] of cases) assert.deepEqual(paramEditTargets(base, after, p, params, ops), want, name);
 

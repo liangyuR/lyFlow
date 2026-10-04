@@ -2,6 +2,7 @@
 // 开跑（run_started）之前视图照旧按上一次取；排队的那次没开跑就收场时，被抢占的那次留下的半截状态落成「已取消」。
 // 真排队、真抢占由 bridge/src/execution.rs 的单测与 e2e noderun.mjs 的抢占组走；这里只钉 store 怎么接事件。
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { matchShortcut } from "../src/lib/keymap.ts";
@@ -397,4 +398,91 @@ test("取消中的起落；重跑照原来的范围再来一次，目标删掉�
   assert.equal(runControlsOf(useExecutionStore.getState()).run, "rerun", "按钮照旧是重跑");
   await restartRun(sgDoc, null);
   assert.equal(calls.at(-1).targets, undefined, "没有范围可沿用：整张图");
+});
+
+test("自动运行的调度（lib/preview）：提交了一步攒 250 ms 补；没跑过不补、跑着时排着的照补；拖动松手并进那一次；换图、关掉撤掉；整图运行撤掉、带 targets 的并进来", async () => {
+  const { autoRunOnCommit, endPreview, skipAutoRunFor } = await import("../src/lib/preview.ts");
+  const { onCommitted } = await import("../src/store/graph.ts");
+  const manifest = JSON.parse(readFileSync(new URL("../../../schema/examples/manifest.example.json", import.meta.url), "utf8"));
+  useManifestStore.getState().replaceBundle(manifest, 1);
+  const calls = [];
+  setTransport({
+    kind: "tauri",
+    async runGraph(_doc, _path, opts) {
+      calls.push(opts.targets ?? null);
+      return `auto${calls.length}`;
+    },
+  });
+  const voxel = (id) => ({ id, op: "filter.voxel_grid", params: {} });
+  const base = { schemaVersion: 1, id: "d", nodes: [voxel("n1"), voxel("n2")],
+    edges: [{ id: "e", from: { node: "n1", port: "cloud" }, to: { node: "n2", port: "cloud" } }] };
+  const g = () => useGraphStore.getState();
+  const ran = (states, status = "ok") => useExecutionStore.setState({ runStatus: status, runId: "r0",
+    nodes: new Map(Object.entries(states).map(([id, state]) => [id, { state, errors: [] }])) });
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 330));
+  const leaf = (v) => [v, v, v];
+  useUiStore.setState({ autoRun: true, previewing: false, path: [], selectedNodes: new Set(), pinnedNode: null });
+  g().loadDoc(structuredClone(base), null);
+  const stop = onCommitted(autoRunOnCommit);
+  try {
+    useExecutionStore.getState().reset();
+    g().setParam("n1", "leafSize", leaf(0.02));
+    await settle();
+    assert.deepEqual(calls.splice(0), [], "这张图还没跑过：不补");
+
+    ran({ n1: "done", n2: "done" });
+    g().setParam("n1", "leafSize", leaf(0.03));
+    g().setParam("n1", "leafSize", leaf(0.031));
+    await settle();
+    assert.deepEqual(calls.splice(0), [["n1"]], "跑过了：连着两下只补一次，算改的那个");
+
+    ran({ n1: "done", n2: "idle" }, "running");
+    g().setParam("n2", "leafSize", leaf(0.04));
+    await settle();
+    assert.deepEqual(calls.splice(0), [["n2"]], "正在跑、排着的节点开跑时回到 idle：照补");
+
+    ran({ n1: "done", n2: "done" });
+    useUiStore.setState({ previewing: true });
+    g().begin();
+    g().setParam("n1", "leafSize", leaf(0.05));
+    g().commit();
+    assert.deepEqual(calls.splice(0), [], "拖动松手的 commit 只攒");
+    endPreview("n1");
+    await settle();
+    assert.deepEqual(calls.splice(0), [["n1"]], "endPreview 并进那一次，之后不再补");
+
+    ran({ n1: "done", n2: "done" });
+    g().setParam("n1", "leafSize", leaf(0.06));
+    g().loadDoc(structuredClone(base), null);
+    ran({ n1: "done", n2: "done" });
+    await settle();
+    assert.deepEqual(calls.splice(0), [], "换了一张图：攒着的不跑到新图上（节点 id 同名）");
+
+    g().setParam("n1", "leafSize", leaf(0.07));
+    await startRun(g().doc, null, { targets: ["n2"] });
+    await settle();
+    assert.deepEqual(calls.splice(0), [["n2", "n1"]], "人点的「运行到 n2」：攒着的 n1 并进来，之后不再补");
+
+    ran({ n1: "done", n2: "done" });
+    g().setParam("n1", "leafSize", leaf(0.08));
+    await startRun(g().doc, null, { auto: true });
+    await settle();
+    assert.deepEqual(calls.splice(0), [null], "整图运行（切配方补的那种）：已经包含，撤掉攒着的");
+
+    ran({ n1: "done", n2: "done" });
+    g().setParam("n1", "leafSize", leaf(0.085));
+    skipAutoRunFor("n1");
+    await settle();
+    assert.deepEqual(calls.splice(0), [], "2D 框还没画齐（RoiLayer 叫它撤）：这一下攒的撤掉");
+
+    ran({ n1: "done", n2: "done" });
+    g().setParam("n1", "leafSize", leaf(0.09));
+    useUiStore.setState({ autoRun: false });
+    await settle();
+    assert.deepEqual(calls.splice(0), [], "关掉自动运行：攒着的也不发");
+  } finally {
+    stop();
+    useUiStore.setState({ autoRun: true, previewing: false });
+    useExecutionStore.getState().reset();
+  }
 });

@@ -8,15 +8,21 @@ import type { Param } from "../types/manifest";
 /** 开着还是收着，所有节点共用一份（lib/prefs 的 "1" / "0"）。默认收起：检查器以调参为主，说明是要时才看。 */
 export const PARAM_DOCS_KEY = "lyflow.inspector.paramDocs";
 
-/** 默认值怎么写：与配方单元格同一套（transform 写成平移 / 旋转、curve 写点数、颜色写 #hex），
- *  flags 写开着的那几项，空字符串写「空」。 */
+/** 默认值怎么写：transform、curve、颜色、枚举、开关与配方单元格同一套（平移 / 旋转、点数、#hex、选项名、开 / 关），
+ *  flags 写开着的那几项，空字符串写「空」；数与数的向量与范围同一套有效数字（lib/format 的 num），不然 65535 写成 65540、
+ *  比它自己的上限还大。curve 的摘要「2 点 · 平滑」里的 · 与这一行分隔各项的撞了，换成逗号。 */
 function valueText(param: Param, v: unknown): string {
   if (v === "") return "空";
   if (param.type === "flags" && typeof v === "number" && param.options) {
     const on = param.options.filter((o) => typeof o.value === "number" && (v & o.value) !== 0).map((o) => o.label || String(o.value));
     return on.length > 0 ? on.join(" + ") : "无";
   }
-  return formatValue(v, param);
+  if (param.type !== "enum" && unitFollowsValue(param)) {
+    if (typeof v === "number") return num(v);
+    if (Array.isArray(v)) return `[${v.map((x) => num(x as number)).join(", ")}]`;
+  }
+  const text = formatValue(v, param);
+  return param.type === "curve" ? text.replaceAll(" · ", "，") : text;
 }
 
 /** 单位跟在默认值后面的那几种：数与数的向量（transform 的 unit 是平移的单位、颜色没有单位，另写）。 */

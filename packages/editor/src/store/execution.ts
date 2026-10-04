@@ -695,11 +695,12 @@ export interface RunRequest {
   auto?: boolean | undefined;
 }
 
-/** 人点的运行（F5、▶、运行到这里、重跑）开跑前调一下：lib/preview 在这里撤掉攒着还没发的自动运行 ——
- *  这一次读的就是现在的图，已经包含那几处改动；不撤的话过一会儿它会把人点的这一次抢占掉。 */
-let beforeExplicitRun: (() => void) | null = null;
+/** 人点的运行（F5、▶、运行到这里、重跑）与切配方补的整图运行开跑前调一下：lib/preview 在这里撤掉攒着还没发的自动运行，
+ *  返回它们要算到的节点 —— 整图运行已经包含，不用；带 targets 的（isolate 的除外）并进这一次。不撤的话过一会儿
+ *  它会把这一次抢占掉。 */
+let beforeExplicitRun: ((doc: GraphDoc) => string[]) | null = null;
 
-export function setBeforeExplicitRun(fn: (() => void) | null): void {
+export function setBeforeExplicitRun(fn: ((doc: GraphDoc) => string[]) | null): void {
   beforeExplicitRun = fn;
 }
 
@@ -708,11 +709,16 @@ export async function startRun(
   graphPath: string | null,
   request: RunRequest = {},
 ): Promise<void> {
-  if (!request.auto) beforeExplicitRun?.();
   const store = useExecutionStore.getState();
   const ticket = ++runTicket;
   const preview = request.preview === true;
   const isolate = request.isolate ?? [];
+  const full = !preview && (request.targets?.length ?? 0) === 0 && isolate.length === 0;
+  let targets = request.targets;
+  if (!request.auto || full) {
+    const pending = beforeExplicitRun?.(doc) ?? [];
+    if (!full && isolate.length === 0 && targets && pending.length > 0) targets = [...new Set([...targets, ...pending])];
+  }
   try {
     // 当前配方有 ①–③ 失配时不能运行（P3.7）：配方里多出来的名字 core 根本看不见（只交声明着的），
     // 类型不符、越界的 core 会报 bad_param，但原因在配方文件里，这里先说清楚是哪个配方的哪几处。
@@ -723,7 +729,7 @@ export async function startRun(
     }
     const params = request.params ?? runParamsOf(doc);
     const runId = await transport.runGraph(doc, graphPath, {
-      targets: request.targets,
+      targets,
       isolate: isolate.length > 0 ? isolate : undefined,
       force: request.force && request.force.length > 0 ? request.force : undefined,
       mode: preview ? "preview" : "full",

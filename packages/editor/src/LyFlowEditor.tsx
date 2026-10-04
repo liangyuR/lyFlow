@@ -35,7 +35,7 @@ import {
   readBackup,
   rememberFile,
 } from "./lib/files";
-import { layoutGraph, needsInitialLayout } from "./lib/layout";
+import { initialLayout, layoutGraph, needsInitialLayout } from "./lib/layout";
 import {
   MotionEnabledContext,
   useMotionEnabled,
@@ -265,14 +265,17 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       graph.loadDoc(doc, path);
       ui.clearSelection();
 
-      // 脚本生成的图必须能打开（graph-doc.md 的承诺）。只在缺坐标时布局，永远不覆盖用户摆好的位置（E8）。
+      // 脚本生成的图必须能打开（graph-doc.md 的承诺）。只排缺坐标的，永远不覆盖用户摆好的位置（E8）。
       // 不记撤销、不算改动（2026-10-04 拍板）；排在迁移前面：迁移那一条撤销回去也是排好的样子
-      if (needsInitialLayout(useGraphStore.getState().doc)) {
-        useGraphStore.getState().layoutLoaded(layoutGraph(useGraphStore.getState().doc));
+      const loaded = useGraphStore.getState().doc;
+      const bare = loaded.nodes.length > 0 && loaded.nodes.every((n) => n.ui?.position == null);
+      if (needsInitialLayout(loaded)) {
+        useGraphStore.getState().layoutLoaded(initialLayout(loaded));
         setTimeout(() => void fitView({ duration: fitMs }), 50);
       }
-      // 一条撤销记录、置 dirty：用户可以撤销掉这次迁移再决定（ADR-0008）
-      const migrated = migrations.length > 0 ? useGraphStore.getState().applyMigrations(migrations) : 0;
+      // 一条撤销记录、置 dirty：用户可以撤销掉这次迁移再决定（ADR-0008）。一个坐标都没有的图迁移时加了节点：同一步里整张重排
+      const migrated =
+        migrations.length > 0 ? useGraphStore.getState().applyMigrations(migrations, bare ? (d) => layoutGraph(d) : undefined) : 0;
       await rememberFile(path);
       // 迁移的那句并进来：以前两条分开弹，「已迁移」紧接着就被「已打开」顶掉
       ui.showToast(`已打开 ${doc.nodes.length} 个节点${migrated > 0 ? `，迁移了 ${migrated} 个（保存后生效）` : ""}`);

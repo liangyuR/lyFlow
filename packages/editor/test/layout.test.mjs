@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { layoutGraph, needsInitialLayout } from "../src/lib/layout.ts";
+import { initialLayout, layoutGraph, needsInitialLayout } from "../src/lib/layout.ts";
 import { fitSidePanes } from "../src/lib/panes.ts";
 import { branchSlot, estimateNodeHeight, placeMenu, revealShift } from "../src/lib/placement.ts";
 
@@ -43,6 +43,31 @@ test("自动布局给每个节点一个落点，上游排在下游左边；打�
   // 手动「整理布局」（Ctrl+L）照旧是一步撤销
   g().applyLayout([{ id: "a", position: { x: 999, y: 0 } }]);
   assert.deepEqual([g().past.length, g().dirty], [1, true]);
+
+  // 有的有坐标、有的没有（脚本往摆好的图里加了一个）：只排没坐标的，放在摆好的右边，摆好的不动
+  const mixed = chain(true);
+  mixed.nodes.push({ id: "c", op: "filter.voxel_grid" });
+  const partial = initialLayout(mixed);
+  assert.deepEqual(partial.map((m) => m.id), ["c"]);
+  assert.ok(partial[0].position.x >= 300 + 300, JSON.stringify(partial));
+  assert.deepEqual(initialLayout(chain(false)), moves, "一个坐标都没有：整张排");
+  assert.deepEqual(initialLayout(chain(true)), [], "坐标都有：不排");
+
+  // 一个坐标都没有的图、迁移时又加了节点：同一步里整张重排（不然加出来的按 near 摆，压在刚排好的那一列上）；撤销回到打开时排好的样子
+  // 五个上游汇进一个节点：迁移按 near 加在它左下方的节点正好压在上游那一列上
+  const fan = { schemaVersion: 1, id: "f", nodes: [...[1, 2, 3, 4, 5].map((k) => ({ id: `p${k}`, op: "gen.synthetic" })), { id: "b", op: "filter.voxel_grid" }],
+    edges: [1, 2, 3, 4, 5].map((k) => ({ id: `e${k}`, from: { node: `p${k}`, port: "cloud" }, to: { node: "b", port: "cloud" } })) };
+  g().loadDoc(fan, "m.lyflow.json");
+  g().layoutLoaded(initialLayout(g().doc));
+  const laid = structuredClone(g().doc.nodes.map((n) => n.ui.position));
+  const action = { kind: "migration", nodeId: "b", severity: "warning", code: "migrated", message: "", op: "filter.voxel_grid", opVersion: "2.0.0",
+    params: {}, edits: { removeEdges: [], addNodes: [{ id: "x", op: "gen.synthetic", params: {}, near: "b" }], addEdges: [] } };
+  g().applyMigrations([action], (d) => layoutGraph(d));
+  const boxes = g().doc.nodes.map((n) => ({ id: n.id, ...n.ui.position }));
+  const overlap = boxes.some((p, i) => boxes.some((q, j) => i < j && Math.abs(p.x - q.x) < 220 && Math.abs(p.y - q.y) < 90));
+  assert.deepEqual([boxes.length, overlap, g().past.length], [7, false, 1], JSON.stringify(boxes));
+  g().undo();
+  assert.deepEqual(g().doc.nodes.map((n) => n.ui.position), laid);
 });
 
 // 三栏分宽度：窗口窄了两侧面板让位（右栏先缩），画布至少留 320。

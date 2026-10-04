@@ -254,11 +254,13 @@ test("参数说明那一行（检查器「参数说明」开着时）：默认�
     ["flags 写开着的那几项", P({ type: "flags", default: 5, options: [{ value: 1, label: "A" }, { value: 2, label: "B" }, { value: 4, label: "C" }] }),
       "默认 A + C · 可选 A / B / C"],
     ["flags 一项都没开", P({ type: "flags", default: 0, options: [{ value: 1, label: "A" }] }), "默认 无 · 可选 A"],
+    ["数与范围同一套有效数字（不截成四位）", P({ type: "int", default: 65535, min: 0, max: 65535 }), "默认 65535 · 范围 0 – 65535"],
+    ["六位有效数字的向量", P({ type: "vec3f", default: [0.123456, 1, 2] }), "默认 [0.123456, 1, 2]"],
     ["transform 的单位是平移的", P({ type: "transform", default: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], unit: "mm" }),
       "默认 T[0, 0, 0] R[0, 0, 0]° · 平移单位 mm"],
   ];
   for (const [name, param, want] of cases) assert.equal(paramFacts(param), want, name);
-  // curve 的上下限管的是 y
-  assert.match(paramFacts(P({ type: "curve", default: { points: [[0, 0], [1, 1]], interp: "linear" }, min: 0, max: 1, softMin: 0, softMax: 0.5 })),
-    / · y 范围 0 – 1 · 画布 y 0 – 0\.5$/);
+  // curve：摘要里的 · 换成逗号（不与这一行分隔各项的撞），上下限管的是 y
+  assert.equal(paramFacts(P({ type: "curve", default: { points: [[0, 0], [1, 1]], interp: "linear" }, min: 0, max: 1, softMin: 0, softMax: 0.5 })),
+    "默认 2 点，线性 · y 范围 0 – 1 · 画布 y 0 – 0.5");
 });

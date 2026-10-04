@@ -423,7 +423,12 @@ interface GraphState {
    *  在子图里，从子图入口进来的那几条（不是边，是 inputs[].to）也接上。一条撤销。 */
   duplicateNodes(ids: readonly string[], opts?: { keepInputs?: boolean }): PasteResult;
   /** 把 C++ 给的迁移动作写回 doc（ADR-0008）。返回真正改动的节点数。 */
-  applyMigrations(actions: readonly MigrationAction[]): number;
+  /** relayout 给了、迁移又往图里加了节点时，在同一步里按它重排（打开一张一个坐标都没有的图时：加出来的节点按 near 摆，
+   *  会压在刚排好的那一列上）。 */
+  applyMigrations(
+    actions: readonly MigrationAction[],
+    relayout?: (doc: GraphDoc) => readonly { id: string; position: { x: number; y: number } }[],
+  ): number;
 
   // -- 子图（ADR-0010）-----------------------------------------------------
   /** 把选中的节点合成一个子图。返回新节点与子图的 id。 */
@@ -1321,7 +1326,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       });
     },
 
-    applyMigrations(actions) {
+    applyMigrations(actions, relayout) {
       if (actions.length === 0) return 0;
       const byNode = new Map(actions.map((a) => [a.nodeId, a]));
       let changed = 0;
@@ -1346,6 +1351,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
           for (const action of actions) {
             if (action.edits && d.nodes.some((n) => n.id === action.nodeId)) {
               applyMigrationEdits(d, action.nodeId, action.edits);
+            }
+          }
+          if (relayout && actions.some((a) => (a.edits?.addNodes.length ?? 0) > 0)) {
+            for (const m of relayout(current(d) as GraphDoc)) {
+              const node = d.nodes.find((n) => n.id === m.id);
+              if (node) node.ui = { ...node.ui, position: m.position };
             }
           }
         },

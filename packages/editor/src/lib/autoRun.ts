@@ -25,9 +25,14 @@ export function paramEditTargets(
   paramsAfter: Readonly<Record<string, unknown>> | undefined,
   ops: ReadonlyMap<string, OperatorDesc>,
 ): ParamEditTargets {
-  // 谁提供参数变了（纳入配方、绑定 / 解绑、删图参数、改名、提升成子图参数）：值是搬家，不是改动 —— 节点上的显式值被删、
-  // 图参数凭空多出来，逐个比会当成改了，白跑一次。这种一步不补（绑定那一下真改了值的少见，要跑按 F5）
-  if (bindingShape(before) !== bindingShape(after)) return { nodes: [], graphParams: [] };
+  // 谁提供参数变了（纳入配方、绑定 / 解绑、删图参数、改名、提升成子图参数）：那个参数的值是搬家，不是改动 —— 节点上的显式值被删、
+  // 图参数凭空多出来，逐个比会当成改了、白跑一次。只跳过提供者变了的那几个参数；同一步里别的参数（跳回历史时跨过一次纳入配方）照样算
+  const providedBefore = providers(before);
+  const providedAfter = providers(after);
+  const moved = (scope: string, node: string, param: string): boolean => {
+    const key = `${scope}|${node}.${param}`;
+    return providedBefore.get(key) !== providedAfter.get(key);
+  };
   const nodes: string[] = [];
   if (before !== after) {
     const was = new Map(listGraphNodes(before, ops).map((e) => [e.id, e]));
@@ -45,19 +50,27 @@ export function paramEditTargets(
       if (!op) continue;
       const pa = effectiveParams(op, a);
       const pb = effectiveParams(op, b);
-      if (op.params.some((p) => !valueEquals(pa[p.name], pb[p.name]))) nodes.push(now.id);
+      const scope = now.path.length > 0 ? now.path[now.path.length - 1]!.subgraphId : "";
+      if (op.params.some((p) => !moved(scope, now.localId, p.name) && !valueEquals(pa[p.name], pb[p.name]))) nodes.push(now.id);
     }
   }
-  const graphParams = Object.keys(after.params ?? {}).filter((name) => !valueEquals(paramsBefore?.[name], paramsAfter?.[name]));
+  // 图参数：前后都在、绑的还是那几个，取值变了才算（新纳入的、删掉的、改了绑定的是搬家）
+  const graphParams = Object.keys(after.params ?? {}).filter((name) => {
+    const was = before.params?.[name];
+    const now = after.params?.[name];
+    return !!was && !!now && valueEquals(was.binds, now.binds) && !valueEquals(paramsBefore?.[name], paramsAfter?.[name]);
+  });
   return { nodes, graphParams };
 }
 
-/** 哪些参数由谁提供：图参数的名字与绑定、每个子图定义提升出来的参数与绑定。 */
-function bindingShape(doc: GraphDoc): string {
-  return JSON.stringify([
-    Object.entries(doc.params ?? {}).map(([name, gp]) => [name, gp.binds]),
-    Object.entries(doc.subgraphs ?? {}).map(([id, def]) => [id, (def.params ?? []).map((p) => [p.name, p.binds])]),
-  ]);
+/** 「节点.参数」由谁提供：顶层的 "|a.k" → 图参数名；子图定义里的 "<子图 id>|in.k" → 提升出来的子图参数名。 */
+function providers(doc: GraphDoc): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [name, gp] of Object.entries(doc.params ?? {})) for (const b of gp.binds) out.set(`|${b}`, name);
+  for (const [id, def] of Object.entries(doc.subgraphs ?? {})) {
+    for (const p of def.params ?? []) for (const b of p.binds) out.set(`${id}|${b.node}.${b.param}`, p.name);
+  }
+  return out;
 }
 
 /** 只补跑过的：节点（子图节点看它里面的）这张图里已经有过状态、不是 idle。从空白开始拼、新接的分支还没跑过时，

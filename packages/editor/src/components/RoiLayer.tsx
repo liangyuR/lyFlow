@@ -6,7 +6,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 
 import { num } from "../lib/format";
-import { runAfterDrag } from "../lib/preview";
+import { runAfterDrag, skipAutoRunFor } from "../lib/preview";
+import { fullId } from "../lib/subgraph";
 import { placeLabels, type LabelBox } from "../lib/roiFrames";
 import { aggregatedNodes, useExecutionStore } from "../store/execution";
 import { useGraphStore } from "../store/graph";
@@ -227,6 +228,8 @@ export function RoiLayer({
       const exec = useExecutionStore.getState();
       const ran = aggregatedNodes(ui.path, exec.nodes).get(nodeId)?.state;
       const complete = !itemsRef.current.some((i) => isDegenerate(i.value));
+      // 这一组还没画齐：commit 那一下刚为它攒的自动运行也撤掉
+      if (d.moved && !complete) skipAutoRunFor(fullId(ui.path, nodeId));
       if (d.moved && complete && ((ran && ran !== "idle") || exec.runStatus === "running")) runAfterDrag(nodeId);
     },
     [host, nodeId],
@@ -252,6 +255,8 @@ export function RoiLayer({
       const [dx, dy] = [dir[0]! * step, dir[1]! * step];
       const [x0, y0, x1, y1] = item.value;
       useGraphStore.getState().setParam(nodeId, item.param, [x0 + dx, y0 + dy, x1 + dx, y1 + dy].map(round));
+      // 这一组还有没设置的框：这一下攒的自动运行撤掉（core 的校验必然拒掉）
+      if (itemsRef.current.some((i) => isDegenerate(i.value))) skipAutoRunFor(fullId(useUiStore.getState().path, nodeId));
       setActive(item.param);
     },
     [host, nodeId],

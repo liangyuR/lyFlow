@@ -13,7 +13,6 @@ import { useUiStore } from "../store/ui";
 import { transport } from "../transport";
 import { effectiveGraphValues, splitBind } from "./graphParams";
 import { closureOf, previewTargets } from "./nodeRun";
-import { findRecipe } from "./recipes";
 import { augmentOperators, fullId, locateEventNode, type SubPath } from "./subgraph";
 import type { GraphDoc } from "../types/graph";
 
@@ -74,7 +73,7 @@ let autoTimer: ReturnType<typeof setTimeout> | null = null;
 const autoNodes = new Set<string>();
 const autoParams = new Set<string>();
 
-function dropAutoRun(): void {
+export function dropAutoRun(): void {
   if (autoTimer !== null) clearTimeout(autoTimer);
   autoTimer = null;
   autoNodes.clear();
@@ -113,22 +112,23 @@ function fireFormal(extra: string | null): void {
 }
 
 /** 提交了一步（graph store 的 onCommitted）：开着自动运行、改的是参数（有效值）、静音或图参数的取值，就攒起来补一次正式运行。
- *  拖动松手不在这里补（那一下 commit 时还在预览态，endPreview 紧接着就补）；只补跑过的节点 —— 从空白开始拼、
- *  新接的分支还没跑过时不替人开第一次（与拖框、切配方同一条）。 */
+ *  拖动松手那一下 commit 时还在预览态：这里照样攒（共用的子图定义里改的，每个实例都在里面），紧接着的 endPreview 一起发、撤掉计时；
+ *  只补跑过的节点 —— 从空白开始拼、新接的分支还没跑过时不替人开第一次（与拖框、切配方同一条）。 */
 export function autoRunOnCommit(change: CommittedChange): void {
   if (transport.kind === "static") return;
   const ui = useUiStore.getState();
-  if (!ui.autoRun || ui.previewing) return;
+  if (!ui.autoRun) return;
   const exec = useExecutionStore.getState();
   if (exec.runStatus === "idle") return;
   const { before, after } = change;
   const ops = augmentOperators(useManifestStore.getState().operatorsById, { ...before.doc.subgraphs, ...after.doc.subgraphs });
-  // 图参数的取值叠着当前配方：前后各按那时的配方集合算
-  const current = useRecipeStore.getState().current;
+  // 图参数的取值叠着当前配方：前后各按那时的配方集合算。按 id 认当前配方 —— 改名、撤销改名时前后的名字不一样
+  const currentId = useRecipeStore.getState().currentId;
   const values = (doc: GraphDoc, recipes: CommittedChange["before"]["recipes"]) =>
-    effectiveGraphValues(doc, findRecipe(recipes, current)?.values ?? {});
+    effectiveGraphValues(doc, (currentId === null ? undefined : recipes.recipes.find((r) => r.id === currentId))?.values ?? {});
   const edits = paramEditTargets(before.doc, after.doc, values(before.doc, before.recipes), values(after.doc, after.recipes), ops);
-  const ready = autoRunTargetsReady(after.doc, edits, exec.nodes);
+  // 正在跑的那一次里排着的节点开跑时先回到 idle（与 RoiLayer 拖框松手同一条）：跑着的时候不按状态筛
+  const ready = exec.runStatus === "running" ? edits : autoRunTargetsReady(after.doc, edits, exec.nodes);
   if (ready.nodes.length === 0 && ready.graphParams.length === 0) return;
   for (const id of ready.nodes) autoNodes.add(id);
   for (const name of ready.graphParams) autoParams.add(name);
@@ -139,8 +139,26 @@ export function autoRunOnCommit(change: CommittedChange): void {
   }, AUTO_RUN_DEBOUNCE_MS);
 }
 
-// 人点的运行读的就是现在的图：攒着的不用再发
-setBeforeExplicitRun(dropAutoRun);
+/** 2D 拖框 / 方向键微调之后这一组还有没设置的框（core 的校验必然拒掉，只会多一次红的运行）：撤掉这一步刚为它攒的。 */
+export function skipAutoRunFor(fullNodeId: string): void {
+  autoNodes.delete(fullNodeId);
+  if (autoNodes.size === 0 && autoParams.size === 0) dropAutoRun();
+}
+
+// 人点的运行（与切配方的整图运行）读的就是现在的图：整图的已经包含攒着的那几处，撤掉；带 targets 的把它们并进来
+// （不然「运行到这里」跑的是别处，改的那几处就没人跑了）
+setBeforeExplicitRun((doc) => {
+  const pending = autoTimer !== null || autoNodes.size > 0 || autoParams.size > 0 ? pendingTargets(doc, null) : [];
+  dropAutoRun();
+  return pending;
+});
+// 换了一张图：上一张攒着还没发的不能跑到这一张上（节点 id 常常同名）；关掉自动运行：攒着的也不发了
+useGraphStore.subscribe((s, p) => {
+  if (s.epoch !== p.epoch) dropAutoRun();
+});
+useUiStore.subscribe((s, p) => {
+  if (p.autoRun && !s.autoRun) dropAutoRun();
+});
 
 function fire(nodeId: string, preview: boolean): void {
   const graph = useGraphStore.getState();
