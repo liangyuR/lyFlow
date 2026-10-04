@@ -873,7 +873,9 @@ async function suiteLibrary(cdp, report) {
         { what: "去掉目录后库算子消失", timeoutMs: 15_000 }).catch(() => {});
       report.eq("× 去掉目录：它的库算子从 manifest 里消失", await hasOp(`lib.${extraId}`), false);
 
-      // 「浏览…」选目录（原生的文件对话框，验收里是桩）：选了就加上、当场重扫；再 × 去掉
+      // 「浏览…」选目录（原生的文件对话框，验收里是桩）：选了就加上、当场重扫；再 × 去掉。上一步去掉目录时面板忙着（按钮灰着），等它退了再点
+      await cdp.waitFor(`document.querySelector('[data-testid="library-browse"]')?.disabled === false`,
+        { what: "去掉目录那次的 busy 退了、「浏览…」可点", timeoutMs: 15_000 });
       const libPicks = await answerPickPath(cdp, extraDir);
       await cdp.eval(`document.querySelector('[data-testid="library-browse"]').click(); return true;`);
       await cdp.waitFor(`window.__lyflow.stores.manifest.getState().operatorsById.has(${lit("lib." + extraId)})`,
@@ -1781,6 +1783,29 @@ async function suiteM3Tails(cdp, report, ws) {
       JSON.stringify(pickReq?.filters ?? []).includes("pcd") &&
       (await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.find((x) => x.id === ${lit(ids.rgb)}).params.path;`)) === colored,
     JSON.stringify({ pickReq, browsed }));
+
+  // 相对路径（相对图所在的目录，整个目录拷走不用改图）：「浏览…」从图所在的目录拼上它开；选在那下面的照旧存成相对的
+  const graphFile = path.join(ws.dir, "浏览 相对.lyflow.json");
+  await cdp.eval(`
+    const b = window.__lyflow;
+    await b.transport.saveGraph(${lit(graphFile)}, b.stores.graph.getState().doc);
+    b.stores.graph.getState().markSaved(${lit(graphFile)});
+    b.stores.graph.getState().setParam(${lit(ids.rgb)}, 'path', ${lit(path.basename(colored))});
+    return true;
+  `);
+  await sleep(200);
+  const relPicks = await answerPickPath(cdp, copy);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="param-path"] .ctl-btn'));
+  await sleep(250);
+  const [relReq] = await pickRequests(cdp, relPicks);
+  const relStored = await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.find((x) => x.id === ${lit(ids.rgb)}).params.path;`);
+  await pressCtrl(cdp, "z");
+  await sleep(150);
+  await pressCtrl(cdp, "z");
+  await sleep(150);
+  report.ok("框里是相对路径（图存过盘）：「浏览…」从图所在的目录拼上它开；选在那下面的照旧存成相对的",
+    relReq?.defaultPath?.toLowerCase() === colored.toLowerCase() && relStored === path.basename(copy),
+    JSON.stringify({ relReq, relStored }));
 
   // 存着的路径带空格（老图、CLI --set 写进来的）：点进框里看一眼再点出来，不悄悄改掉它、不记撤销
   const spaced = `${colored} `;

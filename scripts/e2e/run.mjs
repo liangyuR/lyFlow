@@ -547,6 +547,13 @@ async function main() {
     report.fail("验收脚本中断", e.stack ?? String(e));
   } finally {
     report.summary();
+    // 摘掉文件对话框的桩：LYFLOW_E2E_ATTACH 连的是开发者自己开着的 app，留着它的话「浏览…」「PNG」都悄悄成了取消
+    await cdp.eval(`
+      window.__lyflow?.shell?.stubPickPath(null);
+      delete window.__lyPicks;
+      delete window.__lyPickAnswer;
+      return true;
+    `).catch(() => {});
     if (parkedPrefs) {
       await cdp.eval(`
         for (const [k, v] of Object.entries(${lit(parkedPrefs)})) {

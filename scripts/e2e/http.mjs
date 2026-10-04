@@ -221,6 +221,23 @@ async function suiteEditAndRun(cdp, report, ws) {
       : outputs ?? null,
     { node: "voxel", port: "cloud", type: "PointCloud", elementCount: run.nodes.voxel?.elementCount },
   );
+
+  // 浏览器宿主没有文件对话框（pickPath 不给）：路径参数的框照样在，旁边不摆「浏览…」（桌面壳给的是原生的，见 m4 的 suiteM3Tails）
+  const noDialog = await cdp.eval(`
+    const b = window.__lyflow;
+    const op = [...b.stores.manifest.getState().operatorsById.values()].find((o) => o.params.some((p) => p.type === 'path'));
+    if (!op) return { op: null };
+    const param = op.params.find((p) => p.type === 'path').name;
+    const id = b.stores.graph.getState().addNode(op.id, { x: 40, y: 320 });
+    b.stores.ui.getState().setSelection([id], []);
+    await new Promise((r) => setTimeout(r, 400));
+    const row = document.querySelector('[data-testid="param-' + param + '"]');
+    const out = { op: op.id, row: !!row, browse: !!row?.querySelector('.ctl-btn') };
+    b.stores.graph.getState().undo();
+    return out;
+  `);
+  report.ok("浏览器宿主没有文件对话框：路径参数的框照样在，旁边不摆「浏览…」", noDialog.op !== null && noDialog.row && !noDialog.browse,
+    JSON.stringify(noDialog));
 }
 
 /** 从零搭一张图、走键盘 F5：编辑动作与快捷键在浏览器宿主里也能用。 */

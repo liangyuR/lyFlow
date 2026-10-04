@@ -13,6 +13,7 @@ import { fullId, type SubPath } from "../lib/subgraph";
 import { applyNumEdit, numEditNote, type NumApplied, type NumEdit } from "../lib/numExpr";
 import { cleanPathText } from "../lib/params";
 import { graphParamPreviewId } from "../lib/preview";
+import { joinPath } from "../lib/recipes";
 import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
 import type { EnumOption, Param } from "../types/manifest";
@@ -318,16 +319,24 @@ function PathControl({ param, value, disabled, onChange }: ControlProps) {
   const pick = async () => {
     if (!pickPath) return;
     const filters = (param.filters ?? []).map((f) => ({ name: f.name, extensions: f.extensions }));
-    // 框里已经是一个绝对路径：对话框从它那里开（相对路径是相对图文件的，对话框认不出来，不给）
+    // 对话框从框里的那个路径开：绝对路径照原样；相对路径是相对图文件所在目录的（gap-inspector-integration-design §2.8，
+    // 整个目录拷走不用改图）—— 拼上那个目录给它，没存过盘的图不给
     const current = typeof value === "string" ? cleanPathText(value) : "";
     const absolute = /^([A-Za-z]:[\\/]|[\\/])/.test(current);
+    const graphPath = useGraphStore.getState().filePath;
+    const cut = graphPath ? Math.max(graphPath.lastIndexOf("/"), graphPath.lastIndexOf("\\")) : -1;
+    const graphDir = graphPath && cut >= 0 ? graphPath.slice(0, cut + 1) : null;
+    const start = current === "" ? undefined : absolute ? current : graphDir ? joinPath(graphDir, current) : undefined;
     try {
       const picked = await pickPath({
         mode: param.mode === "save" ? "save" : param.mode === "dir" ? "dir" : "open",
         filters,
-        ...(absolute ? { defaultPath: current } : {}),
+        ...(start ? { defaultPath: start } : {}),
       });
-      if (typeof picked === "string" && picked !== "") onChange(picked);
+      if (typeof picked !== "string" || picked === "") return;
+      // 原来是相对路径、选的又在图所在的目录下面：照旧存相对的（不然这一个节点换了目录就找不到，别的还找得到）
+      const keepRelative = current !== "" && !absolute && graphDir !== null && picked.toLowerCase().startsWith(graphDir.toLowerCase());
+      onChange(keepRelative ? picked.slice(graphDir.length).replace(/\\/g, "/") : picked);
     } catch (e) {
       useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
     }
