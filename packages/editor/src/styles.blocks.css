@@ -65,7 +65,8 @@
 
 /* ---------------------------------------------------------- 片段库（L14） */
 
-.op-row--snippet .op-row__glyph {
+.op-row--snippet .op-row__glyph,
+.search-popup__glyph {
   margin-right: 5px;
   color: #c8a86b;
 }
@@ -105,6 +106,27 @@
 }
 
 /* 位置由 RoiLayer 按「互不遮挡」逐帧摆（m8-plan L21）；这里只是第一帧之前的默认（框上方） */
+/* 最近动过的那个框的读数：坐标、宽 × 高、框里几个点。贴在框下沿外面，不挡框里的点 */
+.roi-box__tag {
+  position: absolute;
+  left: -1px;
+  top: 100%;
+  z-index: 4;
+  margin-top: 2px;
+  padding: 0 4px;
+  border: 1px solid var(--roi-color);
+  border-radius: 3px;
+  background: rgba(17, 20, 26, 0.85);
+  color: var(--lyflow-fg-0);
+  font-size: 10px;
+  line-height: 14px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.roi-box:focus { outline: none; }
+.roi-box:focus-visible { outline: 1px dashed var(--roi-color); outline-offset: 2px; }
+
 .roi-box__label {
   position: absolute;
   left: -1px;

@@ -152,6 +152,26 @@
   user-select: none;
 }
 
+.lyflow-is-resizing.lyflow-is-resizing--rows {
+  cursor: row-resize;
+}
+
+/* 上下拖的把手：右栏里预览与检查器之间。命中区 7px，看上去就是预览原来那条下边框，悬停时变色 */
+.app__hsplit {
+  flex: 0 0 7px;
+  margin: -4px 0 -3px;
+  cursor: row-resize;
+  position: relative;
+  z-index: 5;
+}
+
+.app__hsplit:hover::after {
+  content: "";
+  position: absolute;
+  inset: 3px 0;
+  background: var(--lyflow-accent);
+}
+
 .lyflow-is-resizing .app__canvas,
 .lyflow-is-resizing .app__viewer {
   pointer-events: none;
@@ -577,7 +597,7 @@
   font-family: var(--lyflow-mono);
 }
 
-.tag--lyflow-warn {
+.tag--warn {
   border-color: var(--lyflow-warn);
   color: var(--lyflow-warn);
 }

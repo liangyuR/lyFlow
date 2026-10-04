@@ -41,6 +41,7 @@ export function RecipeMatrix() {
   const baseOps = useManifestStore((s) => s.operatorsById);
   const set = useRecipeStore((s) => s.set);
   const current = useRecipeStore((s) => s.current);
+  const overrides = useRecipeStore((s) => s.overrides);
   const dir = useRecipeStore((s) => s.dir);
   const reports = useRecipeReports(doc);
   const ops = useMemo(() => augmentOperators(baseOps, doc.subgraphs), [baseOps, doc.subgraphs]);
@@ -315,6 +316,9 @@ export function RecipeMatrix() {
                             spec={row.spec}
                             value={cell.value}
                             inline={INLINE.has(row.spec.type)}
+                            previewGraphParam={
+                              c === (current ?? BASE) || (c === BASE && !Object.hasOwn(overrides, row.name)) ? row.name : undefined
+                            }
                             onCommit={(v) => commit(row, c, v)}
                             onReset={
                               c !== BASE && cell.state !== "inherit"
@@ -350,6 +354,7 @@ function CellEditor({
   spec,
   value,
   inline,
+  previewGraphParam,
   onCommit,
   onReset,
   onClose,
@@ -357,6 +362,8 @@ function CellEditor({
   spec: Param;
   value: unknown;
   inline: boolean;
+  /** 这一格就是这次运行用的值：拖动时预览、松手补运行（别的配方的格子改了也不跑）。 */
+  previewGraphParam?: string | undefined;
   onCommit: (v: unknown) => void;
   onReset?: (() => void) | undefined;
   onClose: () => void;
@@ -393,7 +400,7 @@ function CellEditor({
         if (e.key === "Enter" && inline) setTimeout(onClose, 0);
       }}
     >
-      <ParamControl param={param} value={value} disabled={false} onChange={onCommit} />
+      <ParamControl param={param} value={value} disabled={false} onChange={onCommit} previewGraphParam={previewGraphParam} />
       {!inline && (
         <div className="mx-edit__buttons">
           {onReset && (

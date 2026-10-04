@@ -7,7 +7,7 @@ import path from "node:path";
 
 import { sleep } from "./cdp.mjs";
 import { ROOT } from "./harness.mjs";
-import { buildGraph, dragMouse, lit, mustOk, newDoc, pressEscape, pressF5, runAndWait, select } from "./page.mjs";
+import { buildGraph, dragMouse, lit, mustOk, newDoc, pressCtrl, pressEscape, pressF5, pressKey, runAndWait, select } from "./page.mjs";
 
 // ------------------------------------------------------------ 合成剖面（毫米）
 // 与 packs/gap/tests/test_blocks.cpp 的夹具同一个形状：左板顶面 y=165，右板 y=164（高 1 mm），
@@ -344,6 +344,7 @@ async function suiteBuildFromBlank(cdp, report, ws) {
     JSON.stringify(g && Object.fromEntries(Object.entries(g.boxes).map(([k, b]) => [k, [b.label, b.color]]))));
   report.ok("没填过的框标成未设置", g !== null && Object.values(g.boxes).every((b) => b.unset));
 
+  const runBeforeBoxes = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
   for (const [name, target] of Object.entries(ROLE_BOXES)) {
     const got = await dragBoxTo(cdp, name, target);
     const err = Math.max(...got.map((v, i) => Math.abs(v - target[i])));
@@ -358,6 +359,59 @@ async function suiteBuildFromBlank(cdp, report, ws) {
     JSON.stringify(params));
   const after = await waitValidated(cdp, locate, false);
   report.eq("框拖好之后校验干净、红框消失", after?.invalid, "0");
+
+  // 最近拖过的那个框（Datum）写着读数：坐标、宽 × 高、框里几个点（以前要跑一遍才知道框是不是空的）
+  const roiValue = (name) => cdp.eval(`
+    return document.querySelector('[data-testid="roi-box-' + ${lit(name)} + '"]')?.getAttribute('data-roi').split(',').map(Number) ?? null;
+  `);
+  const pastNow = () => cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+  const tag = await cdp.eval(`return document.querySelector('[data-testid="roi-tag-template1DatumRoi"]')?.textContent ?? null;`);
+  // 拖出来的值有吸附误差（上面验过在 0.35 mm 以内）：按框此刻的值算期望
+  const v0 = await roiValue("template1DatumRoi");
+  const f = (x) => String(Number(x.toPrecision(6)));
+  const want = `(${f(v0[0])}, ${f(v0[1])}) → (${f(v0[2])}, ${f(v0[3])}) mm · ${f(v0[2] - v0[0])} × ${f(v0[3] - v0[1])} mm · `;
+  const tagMatch = (tag ?? "").startsWith(want) ? /(\d+) 点$/.exec(tag) : null;
+  report.ok("最近拖过的 Datum 框写着读数：坐标、宽 × 高（mm）、框里有点", !!tagMatch && Number(tagMatch[1]) > 0, JSON.stringify({ tag, v0 }));
+  // 方向键微调：一下 0.1 mm（Shift ×10），每下一条撤销；Ctrl+Z 回去
+  const pastNudge = await pastNow();
+  await pressKey(cdp, "ArrowRight", 39);
+  await pressKey(cdp, "ArrowUp", 38, ["shift"]);
+  await sleep(150);
+  const nudged = { value: await roiValue("template1DatumRoi"), steps: (await pastNow()) - pastNudge };
+  await pressCtrl(cdp, "z");
+  await pressCtrl(cdp, "z");
+  await sleep(150);
+  report.ok("焦点在框上按 → 挪 0.1 mm、Shift+↑ 挪 1 mm，各一条撤销；Ctrl+Z 两下回去",
+    JSON.stringify(nudged) === JSON.stringify({ value: v0.map((x, i) => Number((x + (i % 2 === 0 ? 0.1 : 1)).toFixed(6))), steps: 2 }) &&
+      JSON.stringify(await roiValue("template1DatumRoi")) === JSON.stringify(v0),
+    JSON.stringify({ v0, nudged }));
+  // 拖到一半按 Esc：放弃这一段，框回到原处、不记撤销。预览最大化着做 —— Esc 归框，不拿去还原预览（也不退子图、不取消运行）
+  {
+    await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMaximized(true); return true;`);
+    await sleep(400);
+    const g0 = await roiGeometry(cdp);
+    const c = g0.boxes.template1DatumRoi.center;
+    const common = { button: "left", buttons: 1, clickCount: 1 };
+    const pastEsc = await pastNow();
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: c.x, y: c.y, buttons: 0 });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: c.x, y: c.y, ...common });
+    for (let i = 1; i <= 5; i += 1) {
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: c.x + i * 8, y: c.y, ...common });
+      await sleep(30);
+    }
+    const midway = await roiValue("template1DatumRoi");
+    await pressEscape(cdp);
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: c.x + 40, y: c.y, ...common });
+    await sleep(150);
+    const stillMax = await cdp.eval(`return window.__lyflow.stores.ui.getState().viewerMaximized;`);
+    report.ok("预览最大化着拖到一半按 Esc：放弃这一段，框回到原处、不记撤销，预览还最大化着（Esc 归框）",
+      JSON.stringify(midway) !== JSON.stringify(v0) &&
+        JSON.stringify(await roiValue("template1DatumRoi")) === JSON.stringify(v0) && (await pastNow()) === pastEsc && stillMax === true,
+      JSON.stringify({ v0, midway, stillMax }));
+    await cdp.eval(`window.__lyflow.stores.ui.getState().setViewerMaximized(false); return true;`);
+    await sleep(300);
+  }
+  report.eq("从空白拼图拖框（节点没跑过）不补运行", await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`), runBeforeBoxes);
 
   // 6. 跑
   const run = await runAndWait(cdp, () => pressF5(cdp), 180_000);
@@ -378,6 +432,47 @@ async function suiteBuildFromBlank(cdp, report, ws) {
   report.ok("跑出了 gap 数值（合成剖面上约 √37−2 ≈ 4.08 mm）",
     Number.isFinite(values.gap?.value) && Math.abs(values.gap.value - (Math.sqrt(37) - 2)) < 0.3,
     JSON.stringify(values.gap));
+
+  // 跑过之后再拖框：松手补一次正式运行（开着自动运行；拼图时框没画齐、节点没跑过的那几次不跑）
+  {
+    const before = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
+    // 跑完之后底图换成输入端口上的那一片、相机可能跟着重新取景：等框在屏幕上停稳了再按（不然按下去的地方已经不是框）
+    let g1 = await roiGeometry(cdp);
+    for (let i = 0; i < 20; i += 1) {
+      await sleep(150);
+      const g = await roiGeometry(cdp);
+      const steady = JSON.stringify(g?.boxes?.template1DatumRoi?.center) === JSON.stringify(g1?.boxes?.template1DatumRoi?.center);
+      g1 = g;
+      if (steady && g?.boxes?.template1DatumRoi) break;
+    }
+    const box = g1?.boxes?.template1DatumRoi;
+    if (!box) {
+      report.fail("跑过之后 2D 框还在", JSON.stringify(g1));
+    } else {
+      await dragMouse(cdp, box.center, { x: box.center.x + 6, y: box.center.y }, { steps: 6 });
+      // 再撞上时看得出是哪一步没走到：框没跟着动（没按中）、自动运行关着、节点不是跑过的状态
+      const afterDrag = await cdp.eval(`
+        const s = window.__lyflow.stores.execution.getState();
+        return { autoRun: window.__lyflow.stores.ui.getState().autoRun, runStatus: s.runStatus, preview: s.preview,
+                 state: s.nodes.get(${lit(locate)})?.state ?? null };
+      `);
+      afterDrag.moved = JSON.stringify(await roiValue("template1DatumRoi")) !== JSON.stringify(box.value);
+      const reran = await cdp.waitFor(
+        `(() => { const s = window.__lyflow.stores.execution.getState();
+                  return s.runId !== ${lit(before)} && !s.preview && s.runStatus !== 'running' && s.runStatus !== 'idle'
+                    ? { targets: s.targets, status: s.runStatus } : null; })()`,
+        { timeoutMs: 60_000, what: "拖完框松手补的运行" },
+      ).catch(async (e) => ({ error: String(e), final: await cdp.eval(`
+        const s = window.__lyflow.stores.execution.getState();
+        return { runId: s.runId, runStatus: s.runStatus, preview: s.preview, error: s.error ?? null,
+                 selected: [...window.__lyflow.stores.ui.getState().selectedNodes] };
+      `) }));
+      report.ok("跑过之后拖框松手：补一次正式运行、算的是 locate_template", Array.isArray(reran?.targets) && reran.targets.includes(locate),
+        JSON.stringify({ reran, afterDrag, boxes: Object.fromEntries(Object.entries(g1.boxes).map(([k, b]) => [k, b.unset ? "unset" : b.value])) }));
+      await pressCtrl(cdp, "z");
+      await sleep(150);
+    }
+  }
 
   const manual = await restoreManualEdges(cdp);
   report.eq("全程没有手连一条边（connect / 改接 / 插到线上一次都没调）", manual, []);
@@ -687,6 +782,64 @@ async function suitePalette(cdp, report) {
   // 还原：后面的分组按 280 的面板算坐标
   await dragMouse(cdp, d1.handle, { x: d0.left + d0.side, y: d1.handle.y }, { steps: 10 });
   await cdp.eval(`localStorage.removeItem(${lit(KEY)}); return true;`);
+
+  // 从面板拖到一条连线上：插到它中间，加节点与插入一条撤销。以前松在线上照样按类型自动连线 —— 新节点接到上游、
+  // 下游还连着原来那条线（两个点云源时干脆不连），要插进去还得自己断线重接
+  await newDoc(cdp);
+  const ids = await buildGraph(
+    cdp,
+    [{ key: "gen", op: "gen.synthetic", params: { pointCount: 2000 } }, { key: "vox", op: "filter.voxel_grid" }],
+    [{ from: ["gen", "cloud"], to: ["vox", "cloud"] }],
+  );
+  await sleep(250);
+  const mid = await cdp.eval(`
+    const p = document.querySelector('.react-flow__edge .react-flow__edge-interaction');
+    if (!p) return null;
+    const pt = p.getPointAtLength(p.getTotalLength() / 2).matrixTransform(p.getScreenCTM());
+    return { x: Math.round(pt.x), y: Math.round(pt.y) };
+  `);
+  mustOk(mid != null, "画布上有 gen → vox 那条线", mid);
+  const past0 = await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+  const dropped = await dropFromPalette(cdp, '.palette [data-op-id="filter.passthrough"]', mid);
+  await sleep(200);
+  const wired = await cdp.eval(`
+    const g = window.__lyflow.stores.graph.getState();
+    const pass = g.doc.nodes.find((n) => n.op === 'filter.passthrough')?.id ?? null;
+    return { pass, edges: g.doc.edges.map((e) => e.from.node + '.' + e.from.port + '>' + e.to.node + '.' + e.to.port).sort(), past: g.past.length };
+  `);
+  const want = wired.pass ? [`${ids.gen}.cloud>${wired.pass}.cloud`, `${wired.pass}.cloud>${ids.vox}.cloud`].sort() : null;
+  report.ok("从面板拖到 gen → vox 的线上：直通滤波插到中间，加节点与插入一条撤销",
+    dropped === "ok" && JSON.stringify(wired.edges) === JSON.stringify(want) && wired.past - past0 === 1,
+    JSON.stringify({ dropped, wired, past0 }));
+
+  // 双击空白处的搜索里也有片段：真双击、打「测点骨架」、回车 —— 插入整个片段（与面板里双击同一条路），Ctrl+Z 一次全撤
+  await newDoc(cdp);
+  await sleep(200);
+  const corner = await cdp.eval(`const r = document.querySelector('.react-flow__pane').getBoundingClientRect();
+    return { x: Math.round(r.right - 80), y: Math.round(r.top + 80) };`);
+  for (const clickCount of [1, 2]) {
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: corner.x, y: corner.y, button: "left", buttons: 1, clickCount });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: corner.x, y: corner.y, button: "left", buttons: 0, clickCount });
+  }
+  await sleep(250);
+  await cdp.send("Input.insertText", { text: "测点骨架" });
+  await sleep(250);
+  const first = await cdp.eval(`
+    const row = document.querySelector('.search-popup__row.is-active');
+    return { snippet: row?.dataset.snippetId ?? null, note: row?.querySelector('.search-popup__port')?.textContent ?? null,
+             detail: document.querySelector('[data-testid="search-detail"]')?.dataset.snippetId ?? null };
+  `);
+  const wantNodes = await cdp.eval(`return window.__lyflow.stores.manifest.getState().bundle.snippets.find((s) => s.id === 'gap.measure_skeleton')?.nodes.length ?? -1;`);
+  await pressKey(cdp, "Enter", 13);
+  await sleep(300);
+  const inserted = await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.length;`);
+  await pressCtrl(cdp, "z");
+  await sleep(200);
+  const afterUndo = await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.length;`);
+  report.ok("双击空白处的搜索里打「测点骨架」：片段排第一行（写着几个节点、底下是片段的说明），回车插入整个片段，Ctrl+Z 一次全撤",
+    first.snippet === "gap.measure_skeleton" && first.note === `片段 · ${wantNodes} 节点` && first.detail === "gap.measure_skeleton" &&
+      wantNodes > 1 && inserted === wantNodes && afterUndo === 0,
+    JSON.stringify({ first, wantNodes, inserted, afterUndo }));
 }
 
 /** 主预览的图像模式（docs/image-plan.md 阶段 3）：

@@ -16,6 +16,7 @@ import type { GraphDoc, GraphNode } from "../types/graph";
 import type { OperatorDesc } from "../types/manifest";
 import type { SubPath } from "../lib/subgraph";
 import { ImageCanvas, type Depth, type ImageOverlayView } from "./ImageCanvas";
+import { ViewerStatus } from "./ViewerStatus";
 
 /** 与点云拖框同一组颜色（Viewer3D 的 ROI_COLORS）。 */
 const ROI_COLORS = ["#34d399", "#f472b6", "#60a5fa", "#fbbf24", "#a78bfa", "#f87171"];
@@ -73,9 +74,11 @@ export interface ImagePaneProps {
   /** 节点这次运行的状态。画的是输入那张图时，节点自己出错不妨碍画图（见下）。 */
   nodeState: NodeState | undefined;
   outputs: readonly OutputStat[] | undefined;
+  /** 空态里的「运行到此节点」。不给就不列。 */
+  onRunToNode?: ((nodeId: string) => void) | undefined;
 }
 
-export function ImagePane({ doc, path, node, op, roiNode, runId, status, nodeState, outputs }: ImagePaneProps) {
+export function ImagePane({ doc, path, node, op, roiNode, runId, status, nodeState, outputs, onRunToNode }: ImagePaneProps) {
   const rois = useMemo(() => imageRoiParams(op, roiNode), [op, roiNode]);
   const shapes = useMemo(() => (outputs ?? []).filter((o) => o.value?.unit === "px"), [outputs]);
   // 有框要拖、或者要叠几何而自己没有图像输出时，画输入的那张图
@@ -139,18 +142,18 @@ export function ImagePane({ doc, path, node, op, roiNode, runId, status, nodeSta
     // 先前问的时候结果还没到（取不到就停在「不是图像」），跑完之后 metaKey 不变、不重问就一直停在那（review 第二轮）
   }, [metaKey, ready, nodeState]);
 
-  const centered = (text: string) => (
-    <div className="viewer__empty" data-testid="viewer3d-status">
-      {text}
-    </div>
+  // 说的是节点运行状态（status 来自 useViewerSource）时跟着给下一步；没图、取图出错这些不给
+  const centered = (text: string, fromRun: boolean) => (
+    <ViewerStatus text={text} nodeId={fromRun ? node.id : null} onRunToNode={onRunToNode} />
   );
   if (!src) {
     return centered(
       status ?? (op.inputs.some((p) => p.type === "Image") ? "图像输入没接上，没有图可画" : "这个节点没有图像"),
+      status !== null,
     );
   }
   const m = meta && (meta.key === metaKey || sameSource(meta.key)) ? meta : null;
-  if (!m) return centered(status ?? metaError ?? (shownRunId ? "正在取图像…" : "未运行"));
+  if (!m) return centered(status ?? metaError ?? (shownRunId ? "正在取图像…" : "未运行"), status !== null);
 
   const colorOf = (type: string) => typesByName.get(type)?.color ?? "#fbbf24";
   // 取图用元信息所属的那一次运行（review 修正）：新一次运行的元信息还没到时，尺寸与比例还是上一次的 ——

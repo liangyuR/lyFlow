@@ -307,8 +307,8 @@ TEST_CASE("预览时源头的大图按 2 的幂缩小，下游在小图上算、
 
     // 超预算的提示：点名最慢的节点；没抽稀点云就不提「降低预览点数」
     std::string warn;
-    for (const Json& e : log.ofKind("log")) {
-      if (e.value("level", "") == "warn") warn = e.value("message", "");
+    for (const Json& line : log.ofKind("log")) {
+      if (line.value("level", "") == "warn") warn = line.value("message", "");
     }
     CHECK(warn.find("最慢的是 ") != std::string::npos);
     CHECK(warn.find("图像已按 1/2 预览") != std::string::npos);

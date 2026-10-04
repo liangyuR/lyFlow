@@ -83,15 +83,101 @@ export async function pressKey(cdp, key, windowsVirtualKeyCode, mods = []) {
 export const pressCtrl = (cdp, letter, extra = []) =>
   pressKey(cdp, letter.toLowerCase(), letter.toUpperCase().charCodeAt(0), ["ctrl", ...extra]);
 
+/** e2e 不动用户的系统剪贴板：写进页面里的桩 `window.__lyClip`。Ctrl+V 照样真按、走浏览器的 paste 事件，
+ *  只是事件里读到的换成桩里的那一段。readText 只记次数（`window.__lyClipReads`）：
+ *  Ctrl+V 不该用它 —— WebView2 里它会弹一个「想要查看剪贴板」的框。用完 restoreClipboard。 */
+export const stubClipboard = (cdp) =>
+  cdp.eval(`
+    if (!window.__lyClipSaved) window.__lyClipSaved = { getData: DataTransfer.prototype.getData };
+    window.__lyClip = '';
+    window.__lyClipReads = 0;
+    navigator.clipboard.writeText = async (t) => { window.__lyClip = t; };
+    navigator.clipboard.readText = async () => { window.__lyClipReads += 1; return window.__lyClip; };
+    DataTransfer.prototype.getData = function (type) {
+      return type === 'text/plain' ? window.__lyClip : window.__lyClipSaved.getData.call(this, type);
+    };
+    return true;
+  `);
+
+export const restoreClipboard = (cdp) =>
+  cdp.eval(`
+    delete navigator.clipboard.writeText;
+    delete navigator.clipboard.readText;
+    if (window.__lyClipSaved) DataTransfer.prototype.getData = window.__lyClipSaved.getData;
+    delete window.__lyClipSaved;
+    return true;
+  `);
+
+/** 下一次文件对话框（run.mjs 起 app 时装的桩）答这个路径；返回之前记下的请求条数，配合 pickRequests 看这一次要的是什么。 */
+export const answerPickPath = (cdp, answer) =>
+  cdp.eval(`window.__lyPickAnswer = ${JSON.stringify(answer)}; return window.__lyPicks.length;`);
+
+/** 从第 from 条起，文件对话框被要了哪几次（mode、filters、defaultPath）。 */
+export const pickRequests = (cdp, from = 0) => cdp.eval(`return window.__lyPicks.slice(${Number(from)});`);
+
 export const pressF5 = (cdp) => pressKey(cdp, "F5", 116);
 export const pressShiftF5 = (cdp) => pressKey(cdp, "F5", 116, ["shift"]);
 export const pressEscape = (cdp) => pressKey(cdp, "Escape", 27);
 export const pressQuestion = (cdp) => pressKey(cdp, "?", 191, ["shift"]);
 
+/** 参数面板是虚拟列表（param-recipe P2）：要的行可能还没渲染。从顶上一段段往下滚找到它，
+ *  再把它滚到列表里不贴边的位置。返回它在屏幕上的矩形；找不到返回 null。
+ *  原来 params_p2 / params_p3 / compare 各抄一份（返回值各不相同），统一到这里。 */
+export async function revealInList(cdp, selector) {
+  return cdp.eval(`
+    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const list = document.querySelector('[data-testid="pp-list"]');
+    if (!list) return null;
+    const find = () => document.querySelector(${lit(selector)});
+    let el = find();
+    if (!el) {
+      list.scrollTop = 0;
+      await frame();
+      for (let i = 0; i < 400 && !(el = find()); i += 1) {
+        if (list.scrollTop + list.clientHeight >= list.scrollHeight - 1) break;
+        list.scrollTop += Math.max(80, list.clientHeight * 0.7);
+        await frame();
+      }
+    }
+    if (!el) return null;
+    const lr = list.getBoundingClientRect();
+    const r0 = el.getBoundingClientRect();
+    if (r0.top < lr.top + 40 || r0.bottom > lr.bottom - 40) {
+      list.scrollTop += r0.top - lr.top - lr.height / 3;
+      await frame();
+    }
+    const r = find()?.getBoundingClientRect();
+    return r ? { x: r.left, y: r.top, w: r.width, h: r.height } : null;
+  `);
+}
+
+/** 按选择器点一下（DOM click，不走真鼠标）再等 150 ms 让界面跟上。返回 'ok' 或 'missing'。 */
+export async function clickSelector(cdp, selector) {
+  return cdp.eval(`
+    const el = document.querySelector(${lit(selector)});
+    if (!el) return 'missing';
+    el.click();
+    await new Promise((d) => setTimeout(d, 150));
+    return 'ok';
+  `);
+}
+
+/** 工具栏的配方下拉框里点一项（名字 "" = 基础）。 */
+export async function pickRecipe(cdp, name) {
+  await clickSelector(cdp, '[data-testid="recipe-toggle"]');
+  const r = await clickSelector(cdp, `[data-testid="recipe-option"][data-name=${lit(name)}]`);
+  await sleep(120);
+  return r;
+}
+
 /** 真实鼠标拖拽。连线吸附、拖节点到线上这类手感项只有真事件才验得到。 */
-export async function dragMouse(cdp, from, to, { steps = 12, button = "left" } = {}) {
-  const common = { button, buttons: 1, clickCount: 1 };
-  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y, buttons: 0 });
+/** CDP 的 buttons 是「此刻按着哪些键」的位掩码，要与 button 对得上（右键拖动时 buttons 里没有右键，页面会当它已经松开了）。 */
+const BUTTON_MASK = { left: 1, right: 2, middle: 4 };
+
+/** modifiers 是 CDP 的位掩码（Alt 1、Ctrl 2、Meta 4、Shift 8），只进鼠标事件；要 React Flow 认的「按着」得另发按键。 */
+export async function dragMouse(cdp, from, to, { steps = 12, button = "left", modifiers = 0 } = {}) {
+  const common = { button, buttons: BUTTON_MASK[button] ?? 1, clickCount: 1, modifiers };
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y, buttons: 0, modifiers });
   await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: from.x, y: from.y, ...common });
   // 先挪 2 px 把 React Flow 的 nodeDragThreshold 吃掉。不这么做的话第一步的位移
   // 会被整段吞掉 —— 位移越大丢得越多，落点就永远差那么一截。
@@ -129,6 +215,13 @@ export async function normalizeZoom(cdp, maxScale = 0.8) {
     `);
     await sleep(120);
   }
+  await sleep(150);
+}
+
+/** 把画布视口定死在 v（x / y 是屏幕像素的平移，zoom 是缩放）。normalizeZoom 只会往小里压：上一组留下 0.2 的缩放时
+ *  它不管，下一组拿真鼠标点的、靠平移把节点拉进视口的就对不上（scripts/e2e/README.md 记过的那处顺序依赖）。 */
+export async function setViewport(cdp, v) {
+  await cdp.eval(`window.__lyflow.setViewport(${lit(v)}); return true;`);
   await sleep(150);
 }
 
@@ -225,6 +318,8 @@ export async function selectAndReadViewer(cdp, nodeId, timeoutMs = 30_000) {
       const v = document.querySelector('.viewer');
       if (!v || v.getAttribute('data-node') !== ${lit(nodeId)}) return null;
       if (v.getAttribute('data-view') === 'loading') return null;
+      // 重跑中屏幕上还是上一片云（data-busy）：等新的画出来再读
+      if (v.getAttribute('data-busy') === '1') return null;
       const count = v.querySelector('.viewer__count');
       const status = v.querySelector('[data-testid="viewer3d-status"]');
       const base = v.querySelector('[data-testid="viewer-base"]');
@@ -267,10 +362,10 @@ export async function viewerBounds(cdp) {
 }
 
 /** 真鼠标单击（按下、原地松开）。 */
-export async function clickAt(cdp, p) {
-  const common = { x: p.x, y: p.y, button: "left", clickCount: 1 };
+export async function clickAt(cdp, p, { button = "left" } = {}) {
+  const common = { x: p.x, y: p.y, button, clickCount: 1 };
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y, buttons: 0 });
-  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", buttons: 1, ...common });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", buttons: BUTTON_MASK[button] ?? 1, ...common });
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", buttons: 0, ...common });
   await sleep(150);
 }

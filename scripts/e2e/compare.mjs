@@ -14,6 +14,7 @@ import {
   pressF5,
   runAndWait,
   select,
+  revealInList as revealRow,
 } from "./page.mjs";
 
 // 与 peek.mjs 同一张链：gen → pass → pick → fit → rr
@@ -247,24 +248,6 @@ async function openNodeMenu(cdp, id) {
     return !!document.querySelector('[data-testid="node-context-menu"]');
   `);
   mustOk(ok, `节点 ${id} 的右键菜单弹出来了`);
-}
-
-/** 参数面板的虚拟列表里把某一行滚到挂上为止（params_p2.mjs 的 reveal 的精简版）。 */
-function revealRow(cdp, selector) {
-  return cdp.eval(`
-    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const list = document.querySelector('[data-testid="pp-list"]');
-    if (!list) return false;
-    const find = () => document.querySelector(${lit(selector)});
-    list.scrollTop = 0;
-    await frame();
-    for (let i = 0; i < 200 && !find(); i += 1) {
-      if (list.scrollTop + list.clientHeight >= list.scrollHeight - 1) break;
-      list.scrollTop += Math.max(80, list.clientHeight * 0.7);
-      await frame();
-    }
-    return !!find();
-  `);
 }
 
 async function suiteCompareExits(cdp, report) {

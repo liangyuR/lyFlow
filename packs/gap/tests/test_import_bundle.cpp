@@ -11,6 +11,7 @@
 
 #include "exec/executor.h"
 #include "exec/result_store.h"
+#include "helpers.h"
 #include "lyflow/data.h"
 #include "lyflow/operator.h"
 #include "lyflow/registry.h"
@@ -23,18 +24,6 @@ void registerStandardGapImporter(Registry& r);
 namespace {
 
 using namespace lyflow;
-
-class NullContext final : public ExecContext {
- public:
-  bool cancelled() const override { return false; }
-  void progress(float, std::string_view) override {}
-  void log(LogLevel, std::string) override {}
-  const std::filesystem::path& baseDir() const override { return baseDir_; }
-  int threadBudget() const override { return 1; }
-
- private:
-  std::filesystem::path baseDir_;
-};
 
 const Registry& packRegistry() {
   static Registry r = [] {
@@ -415,7 +404,7 @@ TEST_CASE("gap.result_bundle 的字段与 QualityMetrics 对齐") {
   inputs["cropStatus"] = Data::error(Status::Error(Phase::Execute, "upstream_failed", "x"));
 
   std::unordered_map<std::string, Data> outputs;
-  NullContext ctx;
+  test::StubContext ctx;
   const std::filesystem::path base;
   ParamView view(params, base);
   Inputs in(inputs);

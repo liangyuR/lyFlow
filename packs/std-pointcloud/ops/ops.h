@@ -32,8 +32,11 @@ void registerRegisterIcp2D(Registry& r);
 void registerFilterCropBox2D(Registry& r);
 
 /// 把一片点云写到磁盘（按扩展名选 PCD 或 PLY）。装进 core 的 setCloudWriter，
-/// C ABI 的 lyflow_output_save 与 CLI 的 `lyflow dump` 都经它落盘。
+/// C ABI 的 lyflow_output_save 与 CLI 的 `lyflow dump` 都经它落盘（单线程）。
 Status saveCloudToFile(const PointCloud& cloud, const std::filesystem::path& file,
                        const std::string& format);
+/// 同上，ASCII 正文按 threads 并行格式化（io.save_pcd 传节点的线程预算）。写出来与线程数无关。
+Status saveCloudToFile(const PointCloud& cloud, const std::filesystem::path& file,
+                       const std::string& format, int threads);
 
 }  // namespace lyflow::ops

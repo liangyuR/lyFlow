@@ -24,8 +24,8 @@ pub(crate) fn dir_of(parsed: &Parsed) -> Option<String> {
         .filter(|d| !d.trim().is_empty())
 }
 
-/// 构建指纹：core DLL 的内容哈希 + 同目录其它 DLL（onnxruntime、PCL……）的「名字 / 大小 / 修改时间」
-/// + ABI 号 + 格式版本。改了算子实现重编 core 就是新指纹、整个旧目录不再复用 —— cacheKey 只看算子版本，
+/// 构建指纹：core DLL 的内容哈希 + 同目录其它 DLL（onnxruntime、PCL……）的「名字 / 大小 / 修改时间」+
+/// ABI 号 + 格式版本。改了算子实现重编 core 就是新指纹、整个旧目录不再复用 —— cacheKey 只看算子版本，
 /// 靠它避开实现变了版本没变的旧结果。依赖 DLL 不读全文：每次起进程多花上百毫秒不值。
 pub(crate) fn fingerprint() -> Result<String, String> {
     let dll = core_ffi::dll_file();

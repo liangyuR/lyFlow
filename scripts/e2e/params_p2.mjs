@@ -20,6 +20,8 @@ import { sleep } from "./cdp.mjs";
 import { ROOT } from "./harness.mjs";
 import {
   buildGraph,
+  centerOf,
+  clickAt,
   dragMouse,
   lit,
   mustOk,
@@ -30,6 +32,8 @@ import {
   pressF5,
   runAndWait,
   saveGraphTo,
+  select,
+  revealInList as reveal,
 } from "./page.mjs";
 
 const SHOW = "test.param_showcase";
@@ -61,36 +65,6 @@ async function resetPanel(cdp) {
   await sleep(120);
 }
 
-/** 虚拟化列表里把某一项滚到挂上为止：从顶上开始一屏一屏往下翻，找到就滚进视口中间。
- *  返回它在屏幕上的矩形；翻到底都没有返回 null。 */
-async function reveal(cdp, selector) {
-  return cdp.eval(`
-    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const list = document.querySelector('[data-testid="pp-list"]');
-    if (!list) return null;
-    const find = () => document.querySelector(${lit(selector)});
-    let el = find();
-    if (!el) {
-      list.scrollTop = 0;
-      await frame();
-      for (let i = 0; i < 400 && !(el = find()); i += 1) {
-        if (list.scrollTop + list.clientHeight >= list.scrollHeight - 1) break;
-        list.scrollTop += Math.max(80, list.clientHeight * 0.7);
-        await frame();
-      }
-    }
-    if (!el) return null;
-    const lr = list.getBoundingClientRect();
-    const r0 = el.getBoundingClientRect();
-    if (r0.top < lr.top + 40 || r0.bottom > lr.bottom - 40) {
-      list.scrollTop += r0.top - lr.top - lr.height / 3;
-      await frame();
-    }
-    const r = find()?.getBoundingClientRect();
-    return r ? { x: r.left, y: r.top, w: r.width, h: r.height } : null;
-  `);
-}
-
 /** 在一行里的某个输入框里「打字」再失焦：原生 value setter + input 事件（React 才看得见），失焦才提交。 */
 async function typeIn(cdp, rowSel, text, { index = 0, tag = "input" } = {}) {
   if (!(await reveal(cdp, rowSel))) return "no-row";
@@ -106,6 +80,23 @@ async function typeIn(cdp, rowSel, text, { index = 0, tag = "input" } = {}) {
     await new Promise((d) => setTimeout(d, 80));
     return 'ok';
   `);
+}
+
+/** 真按键：聚焦 selector 指的输入框、全选、打字、按 Esc。返回 Esc 之后输入框里显示的字。 */
+async function typeThenEscape(cdp, selector, text) {
+  const found = await cdp.eval(`
+    const el = document.querySelector(${lit(selector)});
+    if (!el) return false;
+    el.scrollIntoView({ block: 'center' });
+    el.focus();
+    return true;
+  `);
+  if (!found) return null;
+  await pressKey(cdp, "a", 65, ["ctrl"]);
+  await cdp.send("Input.insertText", { text });
+  await pressKey(cdp, "Escape", 27);
+  await sleep(150);
+  return cdp.eval(`return document.querySelector(${lit(selector)})?.value ?? null;`);
 }
 
 /** 行里的下拉框选一项（原生 setter + change 事件）。 */
@@ -179,6 +170,86 @@ async function suiteLayout(cdp, report) {
   await resetPanel(cdp);
   const hasOp = await cdp.eval(`return !!window.__lyflow.stores.manifest.getState().operatorsById.get(${lit(SHOW)});`);
   mustOk(hasOp, "test.param_showcase 没注册：起 app 时要 LYFLOW_TEST_OPS=1");
+
+  // 检查器以调参为主：参数排在端口小节前面（以前端口在前，gap 类算子第一屏常常看不到一个参数）；算子说明截成两行；
+  // 端口小节收起来后换个节点、再回来都还收着（记在 localStorage，分组结束时放回原样）
+  const PORTS_KEY = "lyflow.inspector.portsOpen";
+  const portsStored = await cdp.eval(`const v = localStorage.getItem(${lit(PORTS_KEY)}); localStorage.removeItem(${lit(PORTS_KEY)}); return v;`);
+  const PARAM_DOCS_KEY = "lyflow.inspector.paramDocs";
+  const docsStored = await cdp.eval(`const v = localStorage.getItem(${lit(PARAM_DOCS_KEY)}); localStorage.removeItem(${lit(PARAM_DOCS_KEY)}); return v;`);
+  try {
+    await newDoc(cdp);
+    const icp = await buildGraph(cdp, [{ key: "icp", op: "register.icp_2d" }, { key: "gen", op: "gen.synthetic" }], []);
+    await select(cdp, icp.icp);
+    await sleep(300);
+    const insp = () => cdp.eval(`
+      const ports = document.querySelector('[data-testid="inspector-ports"]');
+      const params = [...document.querySelectorAll('.app__inspector .insp-param')];
+      const doc = document.querySelector('[data-testid="inspector-doc"]');
+      const lh = doc ? parseFloat(getComputedStyle(doc).lineHeight) : 0;
+      return {
+        portsTop: ports ? Math.round(ports.getBoundingClientRect().top) : null,
+        lastParamTop: params.length ? Math.round(params[params.length - 1].getBoundingClientRect().top) : null,
+        open: ports ? ports.open : null,
+        docLines: doc && lh > 0 ? Math.round(doc.getBoundingClientRect().height / lh) : null,
+        more: !!document.querySelector('[data-testid="inspector-doc-more"]'),
+        stored: localStorage.getItem(${lit(PORTS_KEY)}),
+      };
+    `);
+    const a = await insp();
+    report.ok("检查器：参数排在端口小节前面，算子说明截成两行、给「展开说明」",
+      a.portsTop !== null && a.lastParamTop !== null && a.portsTop > a.lastParamTop && a.docLines === 2 && a.more && a.open === true,
+      JSON.stringify(a));
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="inspector-doc-more"]'));
+    report.ok("真鼠标点「展开说明」：整段都出来了", (await insp()).docLines > 2);
+    await cdp.eval(`document.querySelector('[data-testid="inspector-ports-toggle"]').scrollIntoView({ block: 'center' }); return true;`);
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="inspector-ports-toggle"]'));
+    // 取消选中：检查器整个卸掉，再选回来时端口小节重新挂上，开合只能从 localStorage 读回来
+    await select(cdp, icp.gen);
+    await sleep(150);
+    await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([], []); return true;`);
+    await sleep(200);
+    await select(cdp, icp.icp);
+    await sleep(250);
+    const c = await insp();
+    report.ok("真鼠标收起端口小节：取消选中再选回来还收着，记进了 localStorage", c.open === false && c.stored === "0", JSON.stringify(c));
+
+    // 参数说明：默认收起；真点「参数说明」每个参数下面写出说明与「默认 … · 范围 …」，取消选中再选回来还开着；再点收起
+    const docs = () => cdp.eval(`
+      const rows = [...document.querySelectorAll('.app__inspector .insp-param')];
+      const blocks = rows.map((r) => r.querySelector('.insp-param__doc'));
+      return { rows: rows.length, shown: blocks.filter(Boolean).length,
+               facts: blocks.filter(Boolean).every((b) => /^默认 /.test(b.querySelector('.insp-param__facts')?.textContent ?? '')),
+               withDoc: blocks.filter((b) => b?.querySelector('.insp-param__doc-text')).length,
+               pressed: document.querySelector('[data-testid="inspector-param-docs"]')?.getAttribute('aria-pressed') ?? null,
+               stored: localStorage.getItem(${lit(PARAM_DOCS_KEY)}) };
+    `);
+    const d0 = await docs();
+    await cdp.eval(`document.querySelector('[data-testid="inspector-param-docs"]').scrollIntoView({ block: 'center' }); return true;`);
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="inspector-param-docs"]'));
+    await sleep(150);
+    await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([], []); return true;`);
+    await sleep(200);
+    await select(cdp, icp.icp);
+    await sleep(250);
+    const d1 = await docs();
+    await cdp.eval(`document.querySelector('[data-testid="inspector-param-docs"]').scrollIntoView({ block: 'center' }); return true;`);
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="inspector-param-docs"]'));
+    await sleep(150);
+    const d2 = await docs();
+    report.ok("参数说明默认收起；真点开：每个参数下面写说明与「默认 … · 范围 …」，取消选中再选回来还开着（记住）；再点收起",
+      d0.shown === 0 && d0.pressed === "false" && d1.rows > 0 && d1.shown === d1.rows && d1.facts && d1.withDoc > 0 &&
+        d1.pressed === "true" && d1.stored === "1" && d2.shown === 0 && d2.stored === "0",
+      JSON.stringify({ d0, d1, d2 }));
+  } finally {
+    await cdp.eval(`
+      const v = ${lit(portsStored)};
+      if (v === null) localStorage.removeItem(${lit(PORTS_KEY)}); else localStorage.setItem(${lit(PORTS_KEY)}, v);
+      const d = ${lit(docsStored)};
+      if (d === null) localStorage.removeItem(${lit(PARAM_DOCS_KEY)}); else localStorage.setItem(${lit(PARAM_DOCS_KEY)}, d);
+      return true;
+    `);
+  }
 
   // 六个节点，面板的列表足够长，才验得出「画布选中 → 面板滚过去」
   await newDoc(cdp);
@@ -261,9 +332,75 @@ async function suiteLayout(cdp, report) {
   await sleep(150);
   d = await dom();
   report.ok("关上面板：右侧回到 Inspector 的宽度", d.right.w < Math.min(width0, width1) - 100, `${d.right.w}px`);
+
+  // 预览与检查器之间、底部抽屉的上沿都能上下拖，松手按比例记住；双击把手回到默认、忘掉记住的。
+  // 以前预览固定占右栏 44%、抽屉固定 220 px，日志一多只看得到十来行
+  const rows = () => cdp.eval(`
+    const h = (sel) => Math.round(document.querySelector(sel)?.getBoundingClientRect().height ?? -1);
+    const mid = (sel) => { const b = document.querySelector(sel)?.getBoundingClientRect();
+      return b ? { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) } : null; };
+    return { viewer: h('.app__viewer'), drawer: h('[data-testid="drawer"]'),
+             viewerHandle: mid('[data-testid="viewer-splitter"]'), drawerHandle: mid('[data-testid="drawer-splitter"]'),
+             stored: [localStorage.getItem('lyflow.viewer.fraction'), localStorage.getItem('lyflow.drawer.fraction')] };
+  `);
+  const toggleLog = () => cdp.eval(`window.__lyflow.stores.ui.getState().toggleDrawer('log'); return true;`);
+  const doubleClick = async (p) => {
+    for (const clickCount of [1, 2]) {
+      await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: p.x, y: p.y, button: "left", buttons: 1, clickCount });
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: p.x, y: p.y, button: "left", buttons: 0, clickCount });
+    }
+    await sleep(150);
+  };
+  // 先双击两个把手回到默认：上一次跑到一半留下的比例不算
+  const r0 = await rows();
+  mustOk(r0.viewerHandle != null, "预览下沿有可拖的把手", r0);
+  await doubleClick(r0.viewerHandle);
+  await toggleLog();
+  await sleep(200);
+  const r1 = await rows();
+  mustOk(r1.drawerHandle != null, "抽屉打开后上沿有可拖的把手", r1);
+  await doubleClick(r1.drawerHandle);
+  await toggleLog();
+  await sleep(200);
+  const v0 = await rows();
+  await dragMouse(cdp, v0.viewerHandle, { x: v0.viewerHandle.x, y: v0.viewerHandle.y + 80 }, { steps: 10 });
+  const v1 = await rows();
+  await toggleLog();
+  await sleep(200);
+  const d0 = await rows();
+  await dragMouse(cdp, d0.drawerHandle, { x: d0.drawerHandle.x, y: d0.drawerHandle.y - 60 }, { steps: 10 });
+  const d1 = await rows();
+  report.ok("预览往下拖高 80、抽屉往上拖高 60，松手都记住了",
+    Math.abs(v1.viewer - v0.viewer - 80) <= 6 && Math.abs(d1.drawer - d0.drawer - 60) <= 6 && d1.stored.every((s) => s !== null),
+    JSON.stringify({ v0: v0.viewer, v1: v1.viewer, d0: d0.drawer, d1: d1.drawer, stored: d1.stored }));
+  // 双击两个把手：回到默认、记住的删掉（后面的分组照默认的样子跑，对比时预览更高的那一档也还在）
+  await doubleClick(d1.drawerHandle);
+  const d2 = await rows();
+  await toggleLog();
+  await sleep(200);
+  const v2 = await rows();
+  await doubleClick(v2.viewerHandle);
+  const v3 = await rows();
+  report.ok("双击把手：抽屉与预览回到默认的高度，记住的比例删掉",
+    Math.abs(d2.drawer - d0.drawer) <= 2 && Math.abs(v3.viewer - v0.viewer) <= 2 && v3.stored.every((s) => s === null),
+    JSON.stringify({ d0: d0.drawer, d2: d2.drawer, v0: v0.viewer, v3: v3.viewer, stored: v3.stored }));
   await openPanel(cdp);
   d = await dom();
   report.ok("重新打开：还是拖过的宽度（记住宽度）", Math.abs(d.right.w - width1) <= 2, `${d.right.w} vs ${width1}`);
+
+  // 窗口窄了（1920 屏半屏贴靠是 960，桌面窗口最小 900）：两侧面板让位，画布留够 320、面板不出窗口；
+  // 拉回来还是记住的宽度。修前两侧都不缩：参数面板开着时画布挤成 0，面板右边一截跑到窗口外点不着
+  const vh = await cdp.eval(`return window.innerHeight;`);
+  await cdp.send("Emulation.setDeviceMetricsOverride", { width: 900, height: vh, deviceScaleFactor: 0, mobile: false });
+  await sleep(250);
+  const narrow = await dom();
+  const vw = await cdp.eval(`return window.innerWidth;`);
+  await cdp.send("Emulation.clearDeviceMetricsOverride");
+  await sleep(250);
+  d = await dom();
+  report.ok("窗口窄到 900：画布留够 320、参数面板整个在窗口里；拉回来还是记住的宽度",
+    narrow.canvas.w >= 318 && narrow.right.x + narrow.right.w <= vw + 1 && Math.abs(d.right.w - width1) <= 2,
+    `窄：画布 ${narrow.canvas.w}px，面板 ${narrow.right.x}..${narrow.right.x + narrow.right.w} / 窗口 ${vw}；拉回来面板 ${d.right.w} vs ${width1}`);
 
   // 最大化 → 画布收起；还原 → 画布回来，宽度不变
   await cdp.eval(`document.querySelector('[data-testid="pp-maximize"]').click(); return true;`);
@@ -364,6 +501,8 @@ function typeCases(show) {
           const el = document.querySelector(${lit(r("tint"))}).querySelector('input[type="color"]');
           Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, '#ff8000');
           el.dispatchEvent(new Event('input', { bubbles: true }));
+          // 真的取色器关上时发 change：这一段选色就记成一条撤销
+          el.dispatchEvent(new Event('change', { bubbles: true }));
           return 'ok';
         `);
       },
@@ -413,6 +552,123 @@ async function suiteAllTypes(cdp, report, ws) {
               : Array.isArray(v) && v.every((x) => typeof x === "number");
     report.ok(`${c.type}：${c.param} 在面板里改了，doc 里是 ${JSON.stringify(c.want)}（类型对）`,
       how === "ok" && approxEq(v, c.want) && typeOk, `操作 ${how}，doc 里 ${JSON.stringify(v)}`);
+  }
+
+  // 打字之后按 Esc：撤回、不提交。以前两种都把打进去的提交了 —— Esc 先 setText 再 blur，
+  // 同一个事件里 onBlur 拿到的还是这一帧打进去的 text
+  for (const [param, kind, text] of [["iterations", "num", "77"], ["tag", "str", "zzz"]]) {
+    await reveal(cdp, rowSel(`${ids.show}.${param}`));
+    const before = { value: (await paramsOf(cdp, ids.show))[param], past: await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`) };
+    const shown = await typeThenEscape(cdp, `${rowSel(`${ids.show}.${param}`)} input.ctl--${kind}`, text);
+    const after = { value: (await paramsOf(cdp, ids.show))[param], past: await cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`) };
+    report.ok(`${param}：打了 ${text} 再按 Esc，值没变、没记撤销，框里回到原值`,
+      approxEq(after.value, before.value) && after.past === before.past && shown === String(before.value),
+      JSON.stringify({ before, after, shown }));
+  }
+
+  // 聚焦的数字框上滚滚轮：值不变（浏览器本来会一格一格改它 —— 点过一下框、再滚面板，参数就悄悄变了）
+  {
+    const numSel = `${rowSel(`${ids.show}.iterations`)} input.ctl--num`;
+    await reveal(cdp, rowSel(`${ids.show}.iterations`));
+    const before = (await paramsOf(cdp, ids.show)).iterations;
+    const at = await cdp.eval(`
+      const el = document.querySelector(${lit(numSel)});
+      el.focus();
+      const b = el.getBoundingClientRect();
+      return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) };
+    `);
+    for (let i = 0; i < 3; i += 1) {
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: at.x, y: at.y, deltaX: 0, deltaY: 120 });
+      await sleep(60);
+    }
+    await cdp.eval(`document.activeElement?.blur(); return true;`);
+    await sleep(120);
+    report.eq("聚焦的数字框上滚三下滚轮：值不变", (await paramsOf(cdp, ids.show)).iterations, before);
+  }
+
+  // 数字框里按 ↑：按这个参数的步长走一格（没声明 step 时是范围的 1/200），回车提交。浏览器自己的步进在没声明
+  // step 的浮点框上是 ±1：weights 的 A 是 0.25，按一下成了 1.25（失焦再被夹成 1）
+  {
+    const wSel = `${rowSel(`${ids.show}.weights`)} input.ctl--num`;
+    await reveal(cdp, rowSel(`${ids.show}.weights`));
+    const before = (await paramsOf(cdp, ids.show)).weights[0];
+    await cdp.eval(`document.querySelector(${lit(wSel)}).focus(); return true;`);
+    await pressKey(cdp, "ArrowUp", 38);
+    await sleep(80);
+    const shown = await cdp.eval(`return document.querySelector(${lit(wSel)}).value;`);
+    await pressKey(cdp, "Enter", 13);
+    await sleep(150);
+    const after = (await paramsOf(cdp, ids.show)).weights[0];
+    report.ok("数字框里按 ↑ 走一格（weights 没声明 step：范围 0–1 的 1/200），回车提交",
+      approxEq(Number(shown), before + 0.005) && approxEq(after, before + 0.005), JSON.stringify({ before, shown, after }));
+  }
+
+  // 下拉框里选了一项（焦点还在它上面）就按 Ctrl+Z：撤得掉。以前下拉框算输入框，Ctrl+Z 交给浏览器、什么也不发生
+  {
+    const modeSel = `${rowSel(`${ids.show}.mode`)} select`;
+    await reveal(cdp, rowSel(`${ids.show}.mode`));
+    const pastNow = () => cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+    const before = { mode: (await paramsOf(cdp, ids.show)).mode, past: await pastNow() };
+    await cdp.eval(`document.querySelector(${lit(modeSel)}).focus(); return true;`);
+    await pressKey(cdp, "ArrowDown", 40);
+    await sleep(150);
+    const chosen = { mode: (await paramsOf(cdp, ids.show)).mode, past: await pastNow() };
+    await pressCtrl(cdp, "z");
+    await sleep(200);
+    const undone = { mode: (await paramsOf(cdp, ids.show)).mode, past: await pastNow(),
+      shown: await cdp.eval(`return document.querySelector(${lit(modeSel)})?.value ?? null;`) };
+    report.ok("下拉框里按 ↓ 换了一项，焦点还在上面就按 Ctrl+Z：撤掉、框里也回去",
+      chosen.mode !== before.mode && chosen.past === before.past + 1 &&
+        undone.mode === before.mode && undone.past === before.past && undone.shown === before.mode,
+      JSON.stringify({ before, chosen, undone }));
+  }
+
+  // 没声明范围的浮点按值的量级走：customFactor（默认 0.5、没范围也没 step）按 ↑ 是 +0.001；设成 1e-3 再真拖 8 px，
+  // 还在 1e-3 量级。修前一格一律 0.01：按 ↑ 成 0.51、1e-3 拖一下就被量化成 0.01 或 0
+  {
+    const g = `window.__lyflow.stores.graph.getState()`;
+    await cdp.eval(`${g}.setParam(${lit(ids.show)}, 'mode', 'custom'); ${g}.setParam(${lit(ids.show)}, 'customFactor', 0.5); return true;`);
+    await sleep(200);
+    const cfSel = `${rowSel(`${ids.show}.customFactor`)} input.ctl--num`;
+    await reveal(cdp, rowSel(`${ids.show}.customFactor`));
+    await cdp.eval(`document.querySelector(${lit(cfSel)}).focus(); return true;`);
+    await pressKey(cdp, "ArrowUp", 38);
+    await pressKey(cdp, "Enter", 13);
+    await sleep(150);
+    const stepped = (await paramsOf(cdp, ids.show)).customFactor;
+    await cdp.eval(`${g}.setParam(${lit(ids.show)}, 'customFactor', 0.001); return true;`);
+    await sleep(200);
+    const box = await cdp.eval(`
+      const b = document.querySelector(${lit(cfSel)}).getBoundingClientRect();
+      return { x: Math.round(b.left + 20), y: Math.round(b.top + b.height / 2) };
+    `);
+    await dragMouse(cdp, { x: box.x, y: box.y }, { x: box.x + 8, y: box.y }, { steps: 4 });
+    await sleep(150);
+    const dragged = (await paramsOf(cdp, ids.show)).customFactor;
+    report.ok("没范围的浮点按值的量级走：0.5 按 ↑ 是 0.501；1e-3 拖 8 px 还在 1e-3 量级",
+      approxEq(stepped, 0.501) && dragged > 0.001 && dragged < 0.0011, JSON.stringify({ stepped, dragged }));
+  }
+
+  // 取色器拖着选（一路发 input，关上时一个 change）：整段一条撤销，值是最后那个。以前每一下 input 都是一条
+  {
+    await reveal(cdp, rowSel(`${ids.show}.tint`));
+    const pastNow = () => cdp.eval(`return window.__lyflow.stores.graph.getState().past.length;`);
+    const p0 = await pastNow();
+    await cdp.eval(`
+      const el = document.querySelector(${lit(rowSel(`${ids.show}.tint`))}).querySelector('input[type="color"]');
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      for (const c of ['#102030', '#203040', '#304050', '#405060', '#506070']) {
+        set.call(el, c);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 30));
+      }
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    `);
+    await sleep(100);
+    const tint = (await paramsOf(cdp, ids.show)).tint;
+    report.ok("取色器拖着选（五次 input 再关上）：只记一条撤销，值是最后那个",
+      (await pastNow()) - p0 === 1 && approxEq(tint, [0x50 / 255, 0x60 / 255, 0x70 / 255]), JSON.stringify({ added: (await pastNow()) - p0, tint }));
   }
 
   // color 的 alpha（overlay 带 alpha 通道）
@@ -752,6 +1008,14 @@ async function suiteSearchFilter(cdp, report) {
   `);
   report.ok("图参数自己的诊断贴在「图参数」分组那一行下", Number(gpDiag.diag) >= 1 && (gpDiag.text ?? "").includes("10"),
     JSON.stringify(gpDiag));
+  // 规格（⚙）里改名字再按 Esc：撤回，图参数不改名（以前改了，一条撤销）
+  await cdp.eval(`document.querySelector('[data-testid="pp-spec-gain"]')?.click(); return true;`);
+  await sleep(150);
+  const specShown = await typeThenEscape(cdp, '[data-testid="pp-spec-gain-name"]', "renamedGain");
+  report.ok("图参数规格里改名字再按 Esc：不改名，框里回到 gain",
+    specShown === "gain" && (await cdp.eval(`return Object.keys(window.__lyflow.stores.graph.getState().doc.params ?? {});`)).includes("gain"),
+    JSON.stringify(specShown));
+  await cdp.eval(`document.querySelector('[data-testid="pp-spec-gain"]')?.click(); return true;`);
   await setChip("all");
   await resetPanel(cdp);
 }

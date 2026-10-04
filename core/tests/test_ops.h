@@ -186,6 +186,22 @@ inline Status countedCompute(const Inputs&, const ParamView& params, Outputs& ou
   return Status::Ok();
 }
 
+// ------------------------------------------------------------ test.budget
+/// 线程预算的观测口：最近一次 compute 拿到的 ctx.threadBudget()。
+inline std::atomic<int>& lastBudget() {
+  static std::atomic<int> budget{0};
+  return budget;
+}
+
+inline Status budgetCompute(const Inputs&, const ParamView&, Outputs& outputs, ExecContext& ctx) {
+  lastBudget().store(ctx.threadBudget());
+  Measurement threads;
+  threads.value = static_cast<double>(ctx.threadBudget());
+  threads.ok = true;
+  outputs.set("threads", Data::measurement(threads));
+  return Status::Ok();
+}
+
 // ------------------------------------------------------------ test.tally
 /// 单节点运行（node-run）的计数器：按 tag 分开数，一张图里每个节点各记各的。
 /// 与 test.counted 不同，它是确定性的 —— 要命中缓存才测得出「上游没被重跑」。
@@ -557,6 +573,18 @@ inline void ensureTestOps() {
       op.params = {ops::intParam("pointCount", 8, 0.0), ops::intParam("seed", 0, 0.0)};
       op.capabilities = {false, false, true};
       op.compute = &ops::countedCompute;
+      r.addOperator(std::move(op));
+    }
+    {  // 把自己拿到的线程预算记下来；不确定性，每次都真跑
+      OperatorDesc op;
+      op.id = "test.budget";
+      op.version = "1.0.0";
+      op.label = "Thread Budget";
+      op.category = "Test";
+      op.doc = "只在测试里注册：把本节点拿到的 ctx.threadBudget() 记进全局变量，也作为 Measurement 输出。";
+      op.outputs = {Port{"threads", "Measurement", "Threads", "", true}};
+      op.capabilities = {false, false, false};
+      op.compute = &ops::budgetCompute;
       r.addOperator(std::move(op));
     }
     {  // 按 tag 数自己被调了几次、而且确定性（能命中缓存）：单节点运行的执行计数断言靠它

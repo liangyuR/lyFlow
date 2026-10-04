@@ -100,6 +100,34 @@ export function isConditionMet(
   return true;
 }
 
+/** 1、2、5 × 10^k 里不大于 x 的那个（x > 0）：步长取整，免得拖出 2499.995 这种值。 */
+export function niceStep(x: number): number {
+  const base = 10 ** Math.floor(Math.log10(x));
+  const m = x / base;
+  return Number.parseFloat(((m >= 5 ? 5 : m >= 2 ? 2 : 1) * base).toPrecision(12));
+}
+
+/** 数字框拖一格、按一下 ↑↓ 走多少。ref 是当前值。
+ *  manifest 声明了 step 就是它；有有限的范围（soft 优先）就取范围的 1/200；都没有就看当前值的量级，取它的 1/100
+ *  （10 → 0.1、1e-3 → 1e-5；当前值是 0 时看默认值）；什么都没有就 0.01。整数至少 1。修整成 1/2/5 × 10^k。
+ *  以前没范围的一律 0.01、整数一律 1：gap / dts 的参数大多没写范围，10 mm 拖到 20 要拖 4000 px，maxIterations
+ *  只能一格一格挪；更糟的是 1e-3 量级的值拖 1 px 就按 0.01 量化成了 0。 */
+export function stepFor(param: Param, integer: boolean, ref?: number): number {
+  if (param.step !== undefined && param.step > 0) return param.step;
+  const lo = param.softMin ?? param.min;
+  const hi = param.softMax ?? param.max;
+  let raw: number;
+  if (lo !== undefined && hi !== undefined && Number.isFinite(lo) && Number.isFinite(hi) && hi > lo) {
+    raw = (hi - lo) / 200;
+  } else {
+    const fallback = typeof param.default === "number" ? Math.abs(param.default) : 0;
+    const v = ref !== undefined && Number.isFinite(ref) && ref !== 0 ? Math.abs(ref) : fallback;
+    raw = v > 0 ? 10 ** (Math.floor(Math.log10(v)) - 2) : 0.01;
+  }
+  const step = niceStep(raw);
+  return integer ? Math.max(1, Math.round(step)) : step;
+}
+
 export function isVisible(param: Param, effective: Record<string, unknown>): boolean {
   return isConditionMet(param.visibleWhen, effective);
 }
@@ -139,6 +167,17 @@ export function groupParams(params: readonly Param[]): ParamGroup[] {
 // ---------------------------------------------------------------- 相对路径
 
 /** Windows 盘符、UNC，以及 POSIX 的绝对路径。 */
+/** 包着路径的那一对引号：直的、弯的（中文输入法）都认，两头得配成对。 */
+const QUOTE_PAIRS: Record<string, string> = { '"': '"', "'": "'", "\u201c": "\u201d", "\u2018": "\u2019" };
+
+/** 路径框里粘进来的字：去掉首尾空白，再去掉包着的一对引号（资源管理器「复制文件地址」给的是 "D:\x.pcd"，
+ *  以前原样存下、跑的时候才报「文件不存在」）。只去一对、两头得配成对；中间的引号不动。 */
+export function cleanPathText(text: string): string {
+  const t = text.trim();
+  if (t.length >= 2 && QUOTE_PAIRS[t[0]!] === t[t.length - 1]) return t.slice(1, -1).trim();
+  return t;
+}
+
 function isAbsolutePath(p: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith("\\\\") || p.startsWith("/");
 }

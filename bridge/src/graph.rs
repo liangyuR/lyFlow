@@ -116,11 +116,14 @@ impl GraphDoc {
         }
 
         // 图输出必须指向存在的节点。端口是否存在要 manifest 才知道，留给 C++（ADR-0017）。
+        // 子图里标的输出是路径 id（「子图节点/里面的节点」，docs/graph-doc.md）：这里只查第一段在顶层，
+        // 后面几段要展开子图才知道，同样留给 C++
         for (name, out) in &self.outputs {
             if name.is_empty() {
                 problems.push("存在名字为空的图输出".to_string());
             }
-            if !node_ids.contains(out.node.as_str()) {
+            let head = out.node.split('/').next().unwrap_or_default();
+            if !node_ids.contains(head) {
                 problems.push(format!("图输出 {name} 指向不存在的节点: {}", out.node));
             }
             if out.port.is_empty() {
@@ -366,6 +369,13 @@ mod tests {
         bad.outputs.get_mut("cloud").unwrap().node = "ghost".into();
         let err = bad.validate_structure().unwrap_err().to_string();
         assert!(err.contains("指向不存在的节点"), "{err}");
+
+        // 子图里标的输出（路径 id）：第一段在顶层就收下，里面几段留给 C++ 展开时查
+        let mut nested = doc.clone();
+        nested.outputs.get_mut("cloud").unwrap().node = "n1/inner".into();
+        nested.validate_structure().unwrap();
+        nested.outputs.get_mut("cloud").unwrap().node = "ghost/inner".into();
+        assert!(nested.validate_structure().is_err());
     }
 
     /// ADR-0025：迁移诊断里的 edits 删边、插节点、加边；插进来的节点摆在被迁移节点旁边。

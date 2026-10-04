@@ -83,6 +83,9 @@ live preview 那三处原来就是后者，在 HTTP 下会静默失效。
 
 `EditorDialogs`：`pickOpenPath` / `pickSavePath` / `confirmDiscard` / `confirmRestore`
 四件必需，外加可选的 `pickPath`（参数表单里的路径选择、3D 视图导出 PNG）。
+
+（2026-10 修订：`confirmDiscard` 改为可选、不再调用。有没存的改动时要给「保存 / 不保存 / 取消」三个选项，
+宿主的是 / 否对话框给不了，改成编辑器自己画（`lib/unsaved.ts`，与 P3 的多选一对话框同一套）；桌面壳关窗口前问的也是它。）
 不给就退回 `window.confirm` 与浏览器下载。包里因此一行 `@tauri-apps/plugin-dialog` 都没有。
 
 ## 影响

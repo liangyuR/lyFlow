@@ -18,9 +18,11 @@ import {
   newDoc,
   normalizeZoom,
   placeAtScreen,
+  pressEscape,
   pressF5,
   replan,
   runAndWait,
+  select,
   selectAndReadViewer,
 } from "./page.mjs";
 
@@ -398,6 +400,8 @@ async function suiteIsolateOnly(cdp, report) {
   const full = await runAndWait(cdp, () => pressF5(cdp));
   mustOk(full.status === "ok", "全图运行 ok", full.status);
 
+  // 要的是「a 改过、还没重跑」：关着自动运行改（开着的话改完就自动补跑了 a，ADR-0011 的 2026-10-04 修订），这一组结束放回去
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setAutoRun(false); return true;`);
   await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.a)}, 'pointCount', 23456); return true;`);
   const cache = await replan(cdp);
   report.ok("（前提）a 被标为 stale", cache.stale.includes(ids.a), JSON.stringify(cache.stale));
@@ -416,7 +420,14 @@ async function suiteIsolateOnly(cdp, report) {
   const run = await runAndWait(cdp, () => cdp.eval(`await window.__lyflow.run({ isolate: [${lit(ids.b)}] }); return true;`));
   const toast = await cdp.eval(`
     const t = document.querySelector('[data-testid="toast"]');
-    return t ? { text: t.textContent, warn: t.classList.contains('toast--warn') } : null;
+    if (!t) return null;
+    // 类名对了还不够：样式表里那条规则曾经被批量改名改成 .toast--lyflow-warn，类名对得上、却一直没上色
+    const probe = document.createElement('span');
+    probe.style.color = getComputedStyle(t).getPropertyValue('--lyflow-warn').trim();
+    document.body.appendChild(probe);
+    const want = getComputedStyle(probe).color;
+    probe.remove();
+    return { text: t.textContent, warn: t.classList.contains('toast--warn'), styled: getComputedStyle(t).color === want };
   `);
   await sleep(450);
   const flashes = await cdp.eval(`const r = window.__lyMotion.rec.locate; r.stop(); return r.hits.map((h) => ({ key: h.key, value: h.value }));`);
@@ -426,7 +437,8 @@ async function suiteIsolateOnly(cdp, report) {
   report.ok("run_finished.diagnostics 指向 a、code 是 upstream_not_ready",
     finished?.error?.code === "upstream_not_ready" && finished.diagnostics?.some((d) => d.nodeId === ids.a && d.code === "upstream_not_ready"),
     JSON.stringify(finished && { error: finished.error, diagnostics: finished.diagnostics }));
-  report.ok("warn 级 toast，文案是「上游 … 还没有可用结果」", toast?.warn && /还没有可用结果/.test(toast.text) && toast.text.includes(ids.a), JSON.stringify(toast));
+  report.ok("warn 级 toast（真的是警告色），文案是「上游 … 还没有可用结果」",
+    toast?.warn && toast.styled && /还没有可用结果/.test(toast.text) && toast.text.includes(ids.a), JSON.stringify(toast));
   report.ok("没有任何节点进入 running", !Object.values(trans).some((list) => list.includes("running")), JSON.stringify(trans));
   report.ok("缺结果的上游 a 闪了一下定位光（data-flash=\"locate\"）", flashes.some((h) => h.key === `node-${ids.a}` && h.value === "locate"),
     JSON.stringify(flashes));
@@ -434,6 +446,7 @@ async function suiteIsolateOnly(cdp, report) {
   report.ok("a 没有被标红（它没有失败）", aNode !== "error", aNode);
   const head = await cdp.eval(`return getComputedStyle(document.querySelector('[data-testid="node-${ids.a}"] .node__head')).transform;`);
   report.ok("定位闪光不抖动（标题栏没有位移）", head === "none" || /matrix\(1, 0, 0, 1, 0, 0\)/.test(head), head);
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setAutoRun(true); return true;`);
 }
 
 // ------------------------------------------------- 验收 10：运行中停止与抢占
@@ -628,6 +641,94 @@ async function suitePreemptStalled(cdp, report) {
   `);
   report.ok("被抢占的那个算完后以 cancelled 收场；被顶掉的两次从没开跑；最后一次跑完（ok）",
     seen.first === "cancelled" && seen.middleStarted.length === 0 && seen.last === "ok", JSON.stringify(seen));
+
+  // 工具栏：人发起的运行在跑时「▶ 运行」变「↻ 重跑」；按 Esc 取消之后写「取消中…」（停不下来的算子要等它自己跑完，
+  // 以前取消按钮看着跟没按一样）；取消中点「↻ 重跑」：同样的范围再来一次，取消按钮当场回到「■ 取消」
+  await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.stall)}, 'ms', 2000); return true;`);
+  await cdp.eval(`document.activeElement?.blur(); return true;`);
+  await pressF5(cdp);
+  await cdp.waitFor(`window.__lyflow.snapshot().run.nodes[${lit(ids.stall)}]?.state === 'running'`,
+    { timeoutMs: 30_000, what: "test.stall 又进了 running" });
+  const r1 = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
+  const bar = () => cdp.eval(`
+    const run = document.querySelector('[data-testid="run-button"]');
+    const cancel = document.querySelector('[data-testid="cancel-button"]');
+    return { run: run.textContent, runDisabled: run.disabled, cancel: cancel.textContent, cancelDisabled: cancel.disabled,
+             status: window.__lyflow.stores.execution.getState().runStatus };
+  `);
+  const running = await bar();
+  await pressEscape(cdp);
+  await sleep(150);
+  const cancelling = await bar();
+  report.ok("运行中工具栏是「↻ 重跑」；按 Esc 后取消按钮写「取消中…」变灰，停不下来的算子还在跑",
+    running.run === "↻ 重跑" && !running.runDisabled && running.cancel === "■ 取消" &&
+      cancelling.cancel === "取消中…" && cancelling.cancelDisabled && cancelling.status === "running",
+    JSON.stringify({ running, cancelling }));
+  await click(cdp, await centerOf(cdp, '[data-testid="run-button"]'));
+  await cdp.waitFor(`window.__lyflow.stores.execution.getState().runId !== ${lit(r1)}`, { timeoutMs: 10_000, what: "重跑发起" });
+  const afterRerun = await bar();
+  const r2 = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
+  await cdp.waitFor(
+    `(() => { const s = window.__lyflow.stores.execution.getState(); return s.runId === ${lit(r2)} && s.runStatus !== 'running'; })()`,
+    { timeoutMs: 30_000, what: "重跑跑完" },
+  );
+  const done = await bar();
+  const fin = await cdp.eval(`
+    const ev = window.__lyNodeRun.events;
+    const status = (id) => ev.find((e) => e.kind === 'run_finished' && e.runId === id)?.status ?? null;
+    return { r1: status(${lit(r1)}), r2: status(${lit(r2)}) };
+  `);
+  report.ok("取消中点「↻ 重跑」：取消按钮当场回到「■ 取消」；被停的那次以 cancelled 收场、重跑的跑完；之后回到「▶ 运行」、取消变灰",
+    afterRerun.cancel === "■ 取消" && fin.r1 === "cancelled" && fin.r2 === "ok" && done.run === "▶ 运行" && done.cancelDisabled,
+    JSON.stringify({ afterRerun, fin, done }));
+}
+
+/** 维护窗口（ADR-0027）：重扫库目录要等在算的那个退出（它握着算子描述）。修前这一步在主线程上等 ——
+ *  运行卡在 3 s 的算子里时「重扫库目录」让紧跟的最轻的 IPC 等了 2.9 s；两步之间来的 run_graph 还能当场开跑，
+ *  手里的指针随即被重建注册表释放（watcher 线程那条路）。 */
+async function suiteLibraryRescanStalled(cdp, report) {
+  report.section("维护窗口（ADR-0027）：运行卡在停不下来的算子里时重扫库目录，主线程不卡；期间发起的运行排队，" +
+    "被停掉的那个退出、重扫完才开跑");
+  await newDoc(cdp);
+  await installRecorder(cdp);
+  const ids = await buildGraph(cdp, [{ key: "stall", op: "test.stall", params: { ms: 2500 } }], []);
+  await cdp.eval(`void window.__lyflow.run({}); return true;`);
+  await cdp.waitFor(`window.__lyflow.snapshot().run.nodes[${lit(ids.stall)}]?.state === 'running'`,
+    { timeoutMs: 30_000, what: "test.stall 进入 running" });
+  const first = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
+
+  const got = await cdp.eval(`
+    const inv = window.__TAURI_INTERNALS__.invoke;
+    const t0 = performance.now();
+    const refresh = inv('refresh_library').then(
+      (r) => ({ ms: Math.round(performance.now() - t0), operators: r?.manifest?.operators?.length ?? 0 }),
+      (e) => ({ error: String(e) }));
+    await new Promise((r) => setTimeout(r, 30));
+    const t1 = performance.now();
+    await inv('get_core_info');
+    const probeMs = Math.round(performance.now() - t1);
+    const t2 = performance.now();
+    await window.__lyflow.run({});
+    const runMs = Math.round(performance.now() - t2);
+    return { probeMs, runMs, queued: window.__lyflow.stores.execution.getState().runId, refresh: await refresh };
+  `);
+  report.ok(`重扫期间最轻的 IPC ${got.probeMs} ms、发起一次运行 ${got.runMs} ms（都 ≤ 300；修前 IPC 等了 2.9 s）`,
+    got.probeMs <= 300 && got.runMs <= 300, JSON.stringify(got));
+  report.ok("重扫等被停掉的那个退出才完成（≥ 1 s），拿回新的 manifest",
+    !got.refresh.error && got.refresh.ms >= 1000 && got.refresh.operators > 0, JSON.stringify(got.refresh));
+
+  await cdp.waitFor(
+    `(() => { const s = window.__lyflow.stores.execution.getState();
+              return s.runId === ${lit(got.queued)} && s.runStatus !== 'running' ? s.runStatus : null; })()`,
+    { timeoutMs: 30_000, what: "排队的那次跑完" },
+  );
+  const order = await cdp.eval(`
+    return window.__lyNodeRun.events
+      .filter((e) => e.runId === ${lit(first)} || e.runId === ${lit(got.queued)})
+      .map((e) => (e.runId === ${lit(first)} ? 'first' : 'queued') + ':' + e.kind + (e.status ? ':' + e.status : ''));
+  `);
+  report.eq("被停掉的那个以 cancelled 收场之后，排队的那次才开跑、跑完（同一时刻最多一个在算）", order,
+    ["first:run_started", "first:run_finished:cancelled", "queued:run_started", "queued:run_finished:ok"]);
 }
 
 // ------------------------------------ 验收 11：hover、端点对齐（进度环在上面的验收 10 里，复用那张慢图）
@@ -776,6 +877,29 @@ async function suiteMenu(cdp, report) {
   report.section("修订一 验收 19：右键三项 —— 运行到此 = 单击、强制重算此节点 = Shift+单击、仅此节点（用现有上游）");
   await installRecorder(cdp);
   const ids = await smallChain(cdp);
+
+  // 预览区的空态给下一步：没跑过的节点，预览里有「▶ 运行到此节点」，真鼠标点它 = 右键「运行到此」
+  await select(cdp, ids.b);
+  const empty = await cdp.eval(`
+    const t0 = performance.now();
+    while (performance.now() - t0 < 5000) {
+      const v = document.querySelector('.viewer');
+      const btn = v?.getAttribute('data-node') === ${lit(ids.b)} ? v.querySelector('[data-testid="viewer-run-here"]') : null;
+      if (btn) return { status: v.querySelector('[data-testid="viewer3d-status"]')?.textContent ?? null, text: btn.textContent };
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return null;
+  `);
+  report.ok("预览区：选中还没跑过的 b，写着没结果、给「▶ 运行到此节点」", empty !== null && empty.text === "▶ 运行到此节点" &&
+    ["未运行", "该节点尚未产出结果"].includes(empty.status), JSON.stringify(empty));
+  const here = await runAndWait(cdp, async () => click(cdp, await centerOf(cdp, '[data-testid="viewer-run-here"]')));
+  const s0 = await startedOf(cdp, here.runId);
+  const shown = await selectAndReadViewer(cdp, ids.b);
+  report.ok("点它：targets=[b]（与右键「运行到此」一致）、下游 c 不跑、预览里出了 b 的点云",
+    here.status === "ok" && s0 && JSON.stringify(s0.targets) === JSON.stringify([ids.b]) && here.nodes[ids.c]?.state !== "done" &&
+      shown.count > 0 && !shown.status,
+    JSON.stringify({ targets: s0?.targets, c: here.nodes[ids.c]?.state, shown }));
+
   const full = await runAndWait(cdp, () => pressF5(cdp));
   mustOk(full.status === "ok", "全图运行 ok", full.status);
   await sleep(200);
@@ -836,6 +960,7 @@ export const nodeRunSuites = [
   suiteIsolateOnly,
   suiteStopAndPreempt,
   suitePreemptStalled,
+  suiteLibraryRescanStalled,
   suiteLook,
   suiteAttached,
   suiteMenu,

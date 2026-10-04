@@ -8,10 +8,13 @@ import { sleep } from "./cdp.mjs";
 import { launchApp, makeChineseWorkspace, Report, stagePackagedApp } from "./harness.mjs";
 import {
   buildGraph,
+  centerOf,
+  clickAt,
   lit,
   newDoc,
   pressEscape,
   pressF5,
+  pressKey,
   runAndWait,
   saveGraphTo,
   select,
@@ -31,6 +34,45 @@ import { paramsP3Suites } from "./params_p3.mjs";
 import { paramsP4Suites } from "./params_p4.mjs";
 import { peekSuites } from "./peek.mjs";
 import { phaseASuites } from "./phase_a.mjs";
+
+/** 各模块的分组，按跑的顺序。键是文件名，`--only` 按它点名。 */
+const MODULES = {
+  m3: m3Suites,
+  m4: m4Suites,
+  phase_a: phaseASuites,
+  gap: gapSuites,
+  peek: peekSuites,
+  compare: compareSuites,
+  m8b: m8bSuites,
+  m8c: m8cSuites,
+  motion: motionSuites,
+  noderun: nodeRunSuites,
+  params_p1: paramsP1Suites,
+  params_p2: paramsP2Suites,
+  params_p3: paramsP3Suites,
+  params_p4: paramsP4Suites,
+};
+
+/** `--only a,b:c`：只跑点名的。一项可以是模块（`m8b`）、分组函数名（`suiteImagePreviewScale`，
+ *  在哪个模块都算）或「模块:分组」。`run` 是本文件开头那五组 —— 它们彼此依赖（validate 要用演示
+ *  pipeline 的结果），只能整块点。没有 `--only` 时返回 null（全跑）；点了不存在的直接报错并列出可选的。 */
+function parseOnly(argv) {
+  const at = argv.findIndex((a) => a === "--only" || a.startsWith("--only="));
+  if (at < 0) return null;
+  const raw = argv[at].startsWith("--only=") ? argv[at].slice("--only=".length) : argv[at + 1] ?? "";
+  const items = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  if (items.length === 0) throw new Error("--only 后面要跟要跑的模块或分组，例如 --only m8b:suiteImagePreviewScale");
+  const known = Object.entries(MODULES).flatMap(([mod, suites]) => suites.map((s) => `${mod}:${s.name}`));
+  const hit = (item, mod, name) => item === mod || item === name || item === `${mod}:${name}`;
+  const unknown = items.filter((item) => item !== "run" && !known.some((k) => hit(item, ...k.split(":"))));
+  if (unknown.length > 0) {
+    throw new Error(`--only 里有找不到的：${unknown.join(", ")}。可选：run（开头五组）、${Object.keys(MODULES).join("、")}，或\n  ${known.join("\n  ")}`);
+  }
+  return {
+    preamble: items.includes("run"),
+    matches: (mod, name) => items.some((item) => hit(item, mod, name)),
+  };
+}
 
 // ------------------------------------------------------------------- 各分组
 
@@ -203,6 +245,60 @@ async function suiteBadParam(cdp, report, ids) {
   report.eq("画布上 voxel 节点是 error", domStates[ids.voxel], "error");
   report.eq("画布上 sor 节点是 cancelled", domStates[ids.sor], "cancelled");
 
+  // 预览区的空态给下一步：出错的写原文、给「定位到参数」；被连带没执行的说是谁出的错、给「定位到出错的节点」
+  const readEmpty = async (nodeId) => {
+    await select(cdp, nodeId);
+    for (let i = 0; i < 80; i += 1) {
+      const r = await cdp.eval(`
+        const v = document.querySelector('.viewer');
+        if (!v || v.getAttribute('data-node') !== ${lit(nodeId)} || v.getAttribute('data-view') === 'loading') return null;
+        const q = (id) => v.querySelector('[data-testid="' + id + '"]');
+        if (!q('viewer3d-status')) return null;
+        return {
+          status: q('viewer3d-status').textContent,
+          detail: q('viewer-status-detail')?.textContent ?? null,
+          revealError: q('viewer-reveal-error')?.textContent ?? null,
+          revealUpstream: !!q('viewer-reveal-upstream'),
+          runHere: !!q('viewer-run-here'),
+          view: v.getAttribute('data-view'),
+          base: v.getAttribute('data-base'),
+          baseText: q('viewer-base')?.textContent ?? null,
+          docked: q('viewer-empty')?.getAttribute('data-docked') === '1',
+          note: q('viewer-status-note')?.textContent ?? null,
+        };
+      `);
+      if (r) return r;
+      await sleep(100);
+    }
+    return null;
+  };
+  const onVoxel = await readEmpty(ids.voxel);
+  report.ok("预览区：出错的 voxel 写出错误原文、给「定位到参数 leafSize」、没有「运行到此」",
+    onVoxel?.status === "该节点运行出错" && onVoxel.detail === run.nodes[ids.voxel]?.errors?.[0]?.message &&
+      onVoxel.revealError === "定位到参数 leafSize" && !onVoxel.runHere, JSON.stringify(onVoxel));
+  // 出错多半是数据的问题：画面画它的输入（上游 crop 的云），错误原文与「定位」挪到角上照旧给，写明画的是谁的、几个点。
+  // 以前整块盖上「该节点运行出错」，看输入得自己找输入边、开连线查看器
+  const cropLabel = await cdp.eval(`
+    const n = window.__lyflow.stores.graph.getState().doc.nodes.find((x) => x.id === ${lit(ids.crop)});
+    return n.ui?.title ?? window.__lyflow.stores.manifest.getState().operatorsById.get(n.op).label;
+  `);
+  report.ok("预览区：出错的 voxel 画的是它的输入（crop 的云），状态挪到角上，写着「输入：crop」与画面取自谁、几个点",
+    onVoxel?.view === "cloud" && onVoxel.base === ids.crop && onVoxel.docked && onVoxel.baseText === `输入：${cropLabel}` &&
+      new RegExp(`^画面是它的输入（取自「${cropLabel}」，[0-9,]+ 点）$`).test(onVoxel.note ?? ""),
+    JSON.stringify({ cropLabel, onVoxel }));
+  const onSor = await readEmpty(ids.sor);
+  report.ok("预览区：被连带没执行的 sor 说是上游出错、点名 voxel、给「定位到出错的节点」",
+    onSor?.status === "上游节点出错，这个节点没有执行" && /^出错的是上游的「.+」$/.test(onSor.detail ?? "") &&
+      onSor.revealUpstream && !onSor.runHere && !onSor.docked && onSor.view === "empty", JSON.stringify(onSor));
+  // 真鼠标点「定位到出错的节点」：选中跳到 voxel，检查器标出 leafSize
+  await clickAt(cdp, await centerOf(cdp, '.viewer [data-testid="viewer-reveal-upstream"]'));
+  const located = await cdp.eval(`
+    const s = window.__lyflow.stores.ui.getState();
+    return { sel: [...s.selectedNodes], param: s.focusedDiagnostic?.paramPath ?? null };
+  `);
+  report.ok("点它：选中跳到 voxel、标出 leafSize", located.sel.length === 1 && located.sel[0] === ids.voxel &&
+    located.param === "leafSize", JSON.stringify(located));
+
   // 复原，后面的分组还要用这张图
   await cdp.eval(`
     window.__lyflow.stores.graph.getState().setParam(${lit(ids.voxel)}, 'leafSize', [0.006, 0.006, 0.006]);
@@ -283,6 +379,27 @@ async function suiteCancel(cdp, report) {
   );
   // 等它真的跑起来再取消，否则测的是「还没开始就取消」
   await sleep(400);
+  // 输入框里的 Esc 归那个框：运行中在参数框里打了字、按 Esc 撤回，运行照跑。以前运行跟着被取消了 ——
+  // 快捷键的监听挂在编辑器根元素上，比框自己的 onKeyDown 先到
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}], []); return true;`);
+  await sleep(200);
+  // 取消是异步的（core 收尾之后才变 cancelled），看状态分不出来：数一数发出去的取消请求
+  await cdp.eval(`
+    const t = window.__lyflow.transport;
+    window.__lyCancelCalls = 0;
+    t.__lyOrigCancel ??= t.cancelRun;
+    t.cancelRun = function (...args) { window.__lyCancelCalls += 1; return t.__lyOrigCancel.apply(this, args); };
+    return true;
+  `);
+  await cdp.eval(`document.querySelector('[data-testid="param-drag-pointCount"]').focus(); return true;`);
+  await pressKey(cdp, "a", 65, ["ctrl"]);
+  await cdp.send("Input.insertText", { text: "1234" });
+  await pressEscape(cdp);
+  await sleep(300);
+  report.eq("运行中在参数框里按 Esc：撤回打的字，没有发取消", await cdp.eval(`
+    return { cancels: window.__lyCancelCalls, box: document.querySelector('[data-testid="param-drag-pointCount"]').value };
+  `), { cancels: 0, box: "3000000" });
+  // 框撤回之后失焦了：再按一次 Esc 才是取消运行
   await pressEscape(cdp);
 
   await cdp.waitFor(
@@ -293,6 +410,7 @@ async function suiteCancel(cdp, report) {
   const run = await cdp.eval(`return window.__lyflow.snapshot().run;`);
   void before;
   report.eq("运行状态 cancelled", run.status, "cancelled");
+  await cdp.eval(`const t = window.__lyflow.transport; t.cancelRun = t.__lyOrigCancel; return true;`);
 
   const running = Object.entries(run.nodes).filter(([, n]) => n.state === "running");
   report.ok("状态里没有残留的 running", running.length === 0, JSON.stringify(running));
@@ -319,6 +437,8 @@ async function main() {
   // --packaged：不起 tauri dev，而是把 `tauri build` 的产物拷进一个干净目录再启动。
   // 验的是 m2-plan §11 的「安装包在干净目录能启动并跑通演示 pipeline（DLL 随包）」。
   const packaged = process.argv.includes("--packaged");
+  // 先解析：点错了名字不必等两分钟起 app 才知道
+  const only = parseOnly(process.argv);
 
   const report = new Report();
   const ws = makeChineseWorkspace();
@@ -326,6 +446,8 @@ async function main() {
 
   let staged = null;
   if (packaged) {
+    // 各分组据此区分开发构建与安装包（例如热重载只在前者有）
+    process.env.LYFLOW_E2E_PACKAGED = "1";
     staged = stagePackagedApp();
     console.log(`干净安装目录：${staged.dir}（${staged.dlls} 个 DLL 随包）`);
   }
@@ -335,6 +457,29 @@ async function main() {
     packagedExe: staged?.exe ?? null,
   });
   const { cdp, consoleErrors } = app;
+  // e2e 与开发中的 app 共用一份 WebView2 存储：你在 app 里存下的界面偏好（预览的着色 / 显示点数、检查器端口小节的
+  // 开合）先挪开、各组从默认开始，跑完放回去。显示点数被记成 100K 时，各组比的点数全对不上
+  // 文件对话框（参数的「浏览…」、导出 PNG、库目录）是原生的，弹出来就挡住脚本：起 app 就换成桩 —— 记下每次要的是什么，
+  // 答 window.__lyPickAnswer（用过一次就清掉；没放就是 null = 取消）。要路径的组先放答案，见 page.mjs 的 answerPickPath
+  await cdp.eval(`
+    window.__lyPicks = [];
+    window.__lyPickAnswer = null;
+    window.__lyflow.shell.stubPickPath(async (request) => {
+      window.__lyPicks.push(request);
+      const answer = window.__lyPickAnswer;
+      window.__lyPickAnswer = null;
+      return answer;
+    });
+    return true;
+  `).catch(() => null);
+  const PREF_KEYS = ["lyflow.viewer.display", "lyflow.inspector.portsOpen", "lyflow.inspector.paramDocs"];
+  const parkedPrefs = await cdp.eval(`
+    const keys = ${lit(PREF_KEYS)};
+    const saved = Object.fromEntries(keys.map((k) => [k, localStorage.getItem(k)]));
+    keys.forEach((k) => localStorage.removeItem(k));
+    window.__lyflow.stores.ui.setState({ viewerPrefs: { shading: 'intensity', ramp: 'viridis', pointSize: 1.6, maxPoints: 2000000 } });
+    return saved;
+  `).catch(() => null);
 
   if (packaged) {
     report.section("安装包（干净目录）");
@@ -351,22 +496,36 @@ async function main() {
     const ort = ["onnxruntime.dll", "onnxruntime_providers_shared.dll"];
     const present = ort.filter((n) => fs.existsSync(path.join(staged.dir, n)));
     report.eq("onnxruntime 两个 DLL 都在干净目录里", present, ort);
+    // 装进去的 core 就是这次构建的那一份：以前 bundle.resources 指向 build-core.ps1 的另一棵构建树，
+    // LYFLOW_PACKS=gap;dts 打出来的包里没有 gap，这里的数照样对得上 —— 只看算子个数抓不到
+    const packs = await cdp.eval(`
+      return [...new Set([...window.__lyflow.stores.manifest.getState().operatorsById.values()]
+        .map((o) => (o.pack ?? '').split('@')[0]).filter(Boolean))].sort();
+    `);
+    const want = [
+      ...(process.env.LYFLOW_STD_PACKS === "0" ? [] : ["std-image", "std-ml", "std-pointcloud"]),
+      ...(process.env.LYFLOW_PACKS ?? "").split(";").map((s) => s.trim()).filter(Boolean),
+    ];
+    report.ok(`打包的 core 带着这次构建要的包（${want.join("、")}）`, want.every((p) => packs.includes(p)),
+      `有：${JSON.stringify(packs)}；要：${JSON.stringify(want)}`);
+    report.eq("打包产物不开热重载（开发期装置，只在 debug 构建里有）", info?.hotReload, false);
   }
 
   try {
-    const { pcdName } = await suiteChinesePath(cdp, report, ws);
-    const { ids } = await suiteDemoPipeline(cdp, report, ws, pcdName);
-    // 顺序有意义：validate/info 要用演示 pipeline 那次成功运行留下的结果，
-    // 所以必须排在把 leafSize 改坏的那一组之前。
-    await suiteValidateAndInfo(cdp, report, ids);
-    await suiteBadParam(cdp, report, ids);
-    await suiteCancel(cdp, report);
+    if (only === null || only.preamble) {
+      const { pcdName } = await suiteChinesePath(cdp, report, ws);
+      const { ids } = await suiteDemoPipeline(cdp, report, ws, pcdName);
+      // 顺序有意义：validate/info 要用演示 pipeline 那次成功运行留下的结果，
+      // 所以必须排在把 leafSize 改坏的那一组之前。
+      await suiteValidateAndInfo(cdp, report, ids);
+      await suiteBadParam(cdp, report, ids);
+      await suiteCancel(cdp, report);
+    }
 
-    const grouped = [
-      ...m3Suites, ...m4Suites, ...phaseASuites, ...gapSuites, ...peekSuites, ...compareSuites, ...m8bSuites, ...m8cSuites,
-      ...motionSuites, ...nodeRunSuites, ...paramsP1Suites, ...paramsP2Suites, ...paramsP3Suites,
-      ...paramsP4Suites,
-    ];
+    const grouped = Object.entries(MODULES)
+      .flatMap(([mod, suites]) => suites.map((suite) => ({ mod, suite })))
+      .filter(({ mod, suite }) => only === null || only.matches(mod, suite.name))
+      .map(({ suite }) => suite);
     for (const suite of grouped) {
       try {
         await suite(cdp, report, ws);
@@ -388,6 +547,21 @@ async function main() {
     report.fail("验收脚本中断", e.stack ?? String(e));
   } finally {
     report.summary();
+    // 摘掉文件对话框的桩：LYFLOW_E2E_ATTACH 连的是开发者自己开着的 app，留着它的话「浏览…」「PNG」都悄悄成了取消
+    await cdp.eval(`
+      window.__lyflow?.shell?.stubPickPath(null);
+      delete window.__lyPicks;
+      delete window.__lyPickAnswer;
+      return true;
+    `).catch(() => {});
+    if (parkedPrefs) {
+      await cdp.eval(`
+        for (const [k, v] of Object.entries(${lit(parkedPrefs)})) {
+          if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v);
+        }
+        return true;
+      `).catch(() => {});
+    }
     await app.close();
     ws.cleanup();
     if (staged) {

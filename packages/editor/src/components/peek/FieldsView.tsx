@@ -1,7 +1,7 @@
 // Bundle 的字段表（m8-plan L17）：先列字段，点进一个字段再按字段类型复用现有视图
 // （点云 / 框 / 下标 …）。字段的值从 `<port>.<field>` 那一项输出统计里取，与取数同一套寻址。
 
-import { formatOutputValue } from "../Inspector";
+import { formatOutputValue } from "../../lib/outputs";
 import type { PeekSource } from "../../lib/peekSource";
 import { useManifestStore } from "../../store/manifest";
 

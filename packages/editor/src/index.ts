@@ -1,7 +1,9 @@
 export { LyFlowEditor, type LyFlowEditorProps } from "./LyFlowEditor";
 
 export * from "./transport";
-export { browserDialogs, NoDialogError, type EditorDialogs } from "./lib/dialogs";
+export { browserDialogs, NoDialogError, type EditorDialogs, type PathPickRequest } from "./lib/dialogs";
+export { resolveUnsaved } from "./lib/unsaved";
+export { modalHostReady } from "./lib/modal";
 
 export type * from "./types/graph";
 export type * from "./types/manifest";
@@ -75,6 +77,8 @@ export {
   useExecutionStore,
   onNodeTransition,
   startRun,
+  restartRun,
+  runControlsOf,
   cancelCurrentRun,
   subscribeExecutionEvents,
   setRunSceneId,
@@ -84,3 +88,12 @@ export {
 export { useCacheStore, requestPlan, schedulePlan, refreshCacheStats, formatBytes } from "./store/cache";
 export { levelOf, pathPrefix, fullId } from "./lib/subgraph";
 export { layoutGraph, needsInitialLayout } from "./lib/layout";
+export {
+  autosaveTick,
+  discardUntitledBackup,
+  findUntitledBackup,
+  restoreUntitled,
+  untitledBackupPath,
+  type UntitledBackup,
+} from "./lib/autosave";
+export { viewportHandle, type Viewport } from "./lib/viewportHandle";

@@ -30,6 +30,10 @@ if(MSVC)
   # PCL/Eigen 自己的告警不是我们能修的，但包自己的代码仍然 /W4
   target_compile_options(lyflow_pcl_support INTERFACE /wd4127 /wd4267 /wd4244 /wd4324)
 endif()
+# src/pcd_ascii.cpp 判断文件在不在要和 PCL 用同一个 boost::filesystem::exists（窄字符串按 ANSI 代码页
+# 解释，std::filesystem 在 setlocale(".UTF-8") 之后按 UTF-8）。boost_filesystem 本来就是 PCL 的依赖、DLL 早已随包分发。
+find_package(Boost REQUIRED COMPONENTS filesystem)
+target_link_libraries(lyflow_pcl_support INTERFACE Boost::filesystem)
 
 # T2：第二个 INTERFACE 目标，导出 algo/ 的头文件给别的包（gap）直接调。
 # include 根是包目录本身，所以调用方写的是 #include "algo/fit2d.h"。

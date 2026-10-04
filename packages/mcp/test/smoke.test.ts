@@ -263,6 +263,42 @@ test(
       assert.deepEqual([...Buffer.from(picture?.data ?? "", "base64").subarray(1, 4)], [0x50, 0x4e, 0x47]);
       const meta = JSON.parse(viewed.content.find((c) => c.type === "text")?.text ?? "{}");
       assert.deepEqual([meta.size, meta.channels, meta.depth], [[64, 48], 1, "u8"]);
+
+      // 客户端取消 run_graph：MCP 替它发 /lyflow/cancel，后端几秒内收场 —— test.stall 本来要睡满 20 秒
+      const stallFile = path.join(workspace, "stall.lyflow.json");
+      fs.writeFileSync(
+        stallFile,
+        JSON.stringify({ schemaVersion: 1, id: "mcp-smoke-stall", nodes: [{ id: "s", op: "test.stall", params: { ms: 20000 } }], edges: [] }),
+        "utf8",
+      );
+      const events = new WebSocket(`ws://127.0.0.1:${port}/lyflow/events`, ["lyflow.v1"]);
+      await new Promise((resolve, reject) => {
+        events.addEventListener("open", resolve, { once: true });
+        events.addEventListener("error", reject, { once: true });
+      });
+      const frames: { kind?: string; status?: string; runId?: string }[] = [];
+      events.addEventListener("message", (e) => frames.push(JSON.parse(String(e.data))));
+      const abort = new AbortController();
+      const call = client.callTool({ name: "run_graph", arguments: { graphPath: stallFile } }, undefined, {
+        signal: abort.signal,
+      });
+      const until = async (what: string, ok: () => boolean, ms: number) => {
+        const deadline = Date.now() + ms;
+        while (!ok()) {
+          if (Date.now() > deadline) throw new Error(`等不到${what}：${JSON.stringify(frames.slice(-5))}`);
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      };
+      await until("stall 那次运行开跑", () => frames.some((f) => f.kind === "run_started"), 30000);
+      const stallRun = frames.find((f) => f.kind === "run_started")?.runId;
+      const t0 = Date.now();
+      abort.abort();
+      await assert.rejects(call);
+      await until("被取消的 run_finished", () => frames.some((f) => f.runId === stallRun && f.kind === "run_finished"), 15000);
+      const end = frames.find((f) => f.runId === stallRun && f.kind === "run_finished");
+      assert.equal(end?.status, "cancelled", JSON.stringify(end));
+      assert.ok(Date.now() - t0 < 15000, "没等 test.stall 睡满 20 秒");
+      events.close();
     } finally {
       await client?.close().catch(() => undefined);
       server?.kill();

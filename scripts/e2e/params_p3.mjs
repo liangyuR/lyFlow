@@ -19,7 +19,21 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { sleep } from "./cdp.mjs";
-import { buildGraph, lit, mustOk, newDoc, pressCtrl, pressF5, replan, runAndWait, saveGraphTo } from "./page.mjs";
+import {
+  buildGraph,
+  clickSelector,
+  lit,
+  mustOk,
+  newDoc,
+  pickRecipe,
+  pressCtrl,
+  pressF5,
+  pressKey,
+  replan,
+  revealInList as reveal,
+  runAndWait,
+  saveGraphTo,
+} from "./page.mjs";
 
 // ------------------------------------------------------------ 小工具
 
@@ -61,30 +75,6 @@ async function closePanel(cdp) {
   `);
 }
 
-/** 虚拟化列表里把某一行滚到挂上为止（同 params_p2.mjs 的 reveal）。 */
-async function reveal(cdp, selector) {
-  return cdp.eval(`
-    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const list = document.querySelector('[data-testid="pp-list"]');
-    if (!list) return null;
-    const find = () => document.querySelector(${lit(selector)});
-    let el = find();
-    if (!el) {
-      list.scrollTop = 0;
-      await frame();
-      for (let i = 0; i < 200 && !(el = find()); i += 1) {
-        if (list.scrollTop + list.clientHeight >= list.scrollHeight - 1) break;
-        list.scrollTop += Math.max(80, list.clientHeight * 0.7);
-        await frame();
-      }
-    }
-    if (!el) return null;
-    el.scrollIntoView({ block: 'center' });
-    await frame();
-    return true;
-  `);
-}
-
 /** 在一个元素（或它里面第 index 个 input）里「打字」再失焦：原生 setter + input 事件，失焦才提交。 */
 async function typeInto(cdp, selector, text, { index = 0, inList = true } = {}) {
   if (inList && !(await reveal(cdp, selector))) return "no-row";
@@ -104,13 +94,7 @@ async function typeInto(cdp, selector, text, { index = 0, inList = true } = {}) 
 
 async function click(cdp, selector, { inList = false } = {}) {
   if (inList && !(await reveal(cdp, selector))) return "no-row";
-  return cdp.eval(`
-    const el = document.querySelector(${lit(selector)});
-    if (!el) return 'missing';
-    el.click();
-    await new Promise((d) => setTimeout(d, 150));
-    return 'ok';
-  `);
+  return clickSelector(cdp, selector);
 }
 
 /** 编辑器自己的起名对话框：填名字、点确定。返回 'ok' 或卡在哪。 */
@@ -134,14 +118,6 @@ async function answerText(cdp, value, { check = null } = {}) {
 async function answerChoice(cdp, id) {
   await cdp.waitFor(`!!document.querySelector('[data-testid="modal"][data-kind="choice"]')`, { what: "选择对话框" });
   return click(cdp, `[data-testid="modal-choice-${id}"]`);
-}
-
-/** 工具栏下拉框里点一项（名字 "" = 基础）。 */
-async function pickRecipe(cdp, name) {
-  await click(cdp, '[data-testid="recipe-toggle"]');
-  const r = await click(cdp, `[data-testid="recipe-option"][data-name=${lit(name)}]`);
-  await sleep(120);
-  return r;
 }
 
 async function newRecipeFromMenu(cdp, name, { copy = false } = {}) {
@@ -243,7 +219,19 @@ async function suiteCreateSaveReopen(cdp, report, ws) {
   report.section("P3 验收 17：新建两个配方、各改几项、Ctrl+S → 两个配方文件 + index.json，图同时保存；重开后都还原");
   const { ids, file, dir } = await recipeGraph(cdp, ws, "车门缝隙 17");
 
-  await must("起名对话框：新建配方 A", newRecipeFromMenu(cdp, A));
+  // 对话框开着、焦点不在它里面时按 Delete：画布上选中的节点不能跟着没了。以前 React Flow 自己的
+  // deleteKeyCode 不管编辑器的对话框，后面选中的节点就被删了（快捷键那边对话框开着时一个都不响）
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([${lit(ids.voxel)}], []); return true;`);
+  await click(cdp, '[data-testid="recipe-toggle"]');
+  await click(cdp, '[data-testid="recipe-new"]');
+  await cdp.waitFor(`!!document.querySelector('[data-testid="modal"][data-kind="text"]')`, { what: "起名对话框" });
+  await blurActive(cdp);
+  await pressKey(cdp, "Delete", 46);
+  await sleep(150);
+  report.ok("起名对话框开着时按 Delete，画布上选中的节点还在",
+    await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.some((n) => n.id === ${lit(ids.voxel)});`));
+  await cdp.eval(`window.__lyflow.stores.ui.getState().clearSelection(); return true;`);
+  await must("起名对话框：新建配方 A", answerText(cdp, A));
   await openPanel(cdp, "nodes");
   // 在按节点页被绑定的行上打字：选着配方 → 写进配方（K6 ①）
   await must("A：leafSize 第一个分量改成 0.03", typeInto(cdp, rowSel(`${ids.voxel}.leafSize`), "0.03"));

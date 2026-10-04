@@ -102,8 +102,9 @@ Static transport 只读。
 
 ## 对话框
 
-打开、另存、放弃改动、恢复备份这四件事要弹系统对话框，编辑器不知道怎么弹，
-由宿主注入：
+打开、另存这几件事要弹系统对话框，编辑器不知道怎么弹，
+由宿主注入（有没存的改动时那一问「保存 / 不保存 / 取消」、恢复备份那一问「恢复 / 丢弃 / 取消」是编辑器自己画的，`lib/unsaved.ts`、`lib/autosave.ts`，不经宿主 —— `confirmRestore` 只在编辑器整个卸掉、画不出对话框时才用；
+宿主关窗口前也可以调导出的 `resolveUnsaved("关闭窗口")`，桌面壳就是这么做的）：
 
 ```ts
 import type { EditorDialogs } from "@lyflow/editor";
@@ -111,9 +112,8 @@ import type { EditorDialogs } from "@lyflow/editor";
 const dialogs: EditorDialogs = {
   pickOpenPath: () => …,          // 返回 null 表示用户取消
   pickSavePath: (suggested) => …,
-  confirmDiscard: (dirty) => …,
   confirmRestore: (path, message) => …,
-  pickPath: (req) => …,           // 可选：参数表单的路径选择、3D 导出 PNG
+  pickPath: (req) => …,           // 可选：参数表单的「浏览…」、3D / 查看器导出 PNG、库目录（不给：浏览不摆、导出退回浏览器下载）
   pickRecipePath: (mode, name) => …, // 可选：配方的导入（open）/ 导出（save）
 };
 ```
@@ -247,8 +247,14 @@ pnpm e2e:http                             # 桩 + Chrome + 宿主，一条龙
 把结果和上一次 `run_started.nodes[].cacheKey` 对比。
 
 前端算不出 IO 算子的 `externalKey`（路径没变但文件被覆盖了，缓存也得失效），
-自己推一定会在那儿错 —— 而且错得很安静。`isNodeStale` 要求
+自己推一定会在那儿错 —— 而且错得很安静。`staleLocalIds` 要求
 「键变了 **且** 现在没有缓存」两个条件同时成立，只看键变化的话改回原值也会一直标着红。
+
+读它的有：节点上的虚线框（`OperatorNode` 的 `is-stale`）、运行按钮的预判（`NodeRunButton`，以及 `lib/nodeRun.ts` 里
+「仅此节点」的 `nodeRunAvailability`），和预览左上角的「参数改过了 · 画面是上一次的结果」
+（`ViewerStatus.tsx` 的 `StaleBadge`，跑着的时候不显示）。拖参数的 preview run 除了改的节点，还带上正看着的、
+在它下游的节点（预览上的那个 —— 钉住的，没钉就是选中的 —— 与对比里没冻结的 B，`lib/nodeRun.ts` 的 `previewTargets`）—— 不然钉在下游时拖上游的参数，
+画面一动不动（ADR-0011 修订）。
 
 ## 迁移是一条可撤销的动作
 
@@ -421,6 +427,8 @@ hover 在 ui store（`hoverNodeId` / `hoverEdge` / `hoverPaused`），都从 sto
   3D 视图还在那一列顶上，收成一条「预览」标题栏（ROI 行「拖框」会展开它）—— Viewer3D 始终是同一个实例，切换不重建
   WebGL。面板宽度与 Inspector 宽度各记各的，面板那份记在 `localStorage["lyflow.paramPanel.width"]`。最大化把画布压成
   0 宽（不卸载：节点尺寸与端口量测都还在）。面板关着时 Inspector 顶上的图参数简表照旧（P1 加的）。
+  预览也能最大化（预览栏的 □ 或 `Shift+Space`，Esc 还原；ui store 的 `viewerMaximized`）：画布、算子面板、检查器 / 参数面板
+  同样只是藏起来；画布看不见时动画布的快捷键（删除、复制、搜索……）不响，定位到节点、打开参数面板、换图、整理布局先还原。
 - **数据模型在 `lib/paramPanel.ts`**（纯函数、有单测）：行的全集 = 图参数 + 当前层每个节点的**可见**参数 + 子图实例展开进
   定义的节点（按实例各一份，因为绑定链按实例不同）。chip 的判据：已改动 = 与算子默认不同（图参数行比第一个绑定目标的
   默认）；配方 = 图参数本身与被它提供的行；诊断 = 带 paramPath 的校验诊断或上次运行的错误；类型 = param.type。

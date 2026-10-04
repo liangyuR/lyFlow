@@ -548,6 +548,30 @@
   width: auto !important;
 }
 
+/* 预览最大化：画布、算子面板、检查器 / 参数面板都收起，预览占满工作区。只是藏起来、不卸载 ——
+   打到一半的字、滚动位置、节点量测都还在；WebGL 跟着 ResizeObserver 变大 */
+.app__body.is-viewer-max :is(.app__sidebar, .app__splitter, .app__hsplit, .app__viewer-toggle, .app__inspector, .ppanel) {
+  display: none;
+}
+
+.app__body.is-viewer-max .app__canvas {
+  flex: 0 0 0;
+  width: 0;
+  overflow: hidden;
+}
+
+.app__body.is-viewer-max .app__right {
+  flex: 1;
+  width: auto !important;
+  border-left: 0;
+}
+
+/* 子选择器：对比时那条 :has(...) flex-basis:60% 的规则不能赢 */
+.app__body.is-viewer-max > .app__right > .app__viewer {
+  flex: 1 1 auto;
+  border-bottom: 0;
+}
+
 /* 工具栏「参数」按钮开着时 */
 .toolbar button.is-on {
   border-color: var(--lyflow-accent-dim);

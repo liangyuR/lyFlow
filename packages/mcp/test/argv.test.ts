@@ -64,6 +64,15 @@ test("工具入参 → CLI argv 的映射（params / recipes / eval / perturb / 
       want: ["eval", "g", "--metric", "outputs.gap", "--summary"],
     },
     {
+      name: "eval 的 jobs 透传成 --jobs；1 是 CLI 的默认值，不写",
+      argv: [
+        ...evalArgv({ graphPath: "g", metric: ["outputs.gap"], jobs: 4 }, null),
+        "|",
+        ...evalArgv({ graphPath: "g", metric: ["outputs.gap"], jobs: 1 }, null),
+      ],
+      want: ["eval", "g", "--metric", "outputs.gap", "--jobs", "4", "|", "eval", "g", "--metric", "outputs.gap"],
+    },
+    {
       name: "eval 的 recipe 透传成 --recipe",
       argv: evalArgv({ graphPath: "g", metric: ["outputs.gap"], recipe: "A.lyflow-recipe.json" }, null),
       want: ["eval", "g", "--metric", "outputs.gap", "--recipe", "A.lyflow-recipe.json"],
@@ -187,7 +196,7 @@ test("工具入参 → CLI argv 的映射（params / recipes / eval / perturb / 
       ],
     },
     {
-      name: "perturb 也认 samplesDir 那一组，csv 与 noCache 一并透传",
+      name: "perturb 也认 samplesDir 那一组，csv、noCache 与 jobs 一并透传",
       argv: perturbArgv({
         graphPath: "g",
         after: "n_frame_p:cloud",
@@ -201,6 +210,7 @@ test("工具入参 → CLI argv 的映射（params / recipes / eval / perturb / 
         expect: -1000,
         csv: "D:/tmp/a1.csv",
         noCache: true,
+        jobs: 3,
       }),
       want: [
         "perturb", "g",
@@ -215,6 +225,7 @@ test("工具入参 → CLI argv 的映射（params / recipes / eval / perturb / 
         "--expect", "-1000",
         "--csv", "D:/tmp/a1.csv",
         "--no-cache",
+        "--jobs", "3",
       ],
     },
     {
@@ -287,6 +298,7 @@ test("入参不成立时当场报错，不去起 CLI", () => {
         perturbArgv({ graphPath: "g", after: "n_frame_s", region: { kind: "box" }, axis: "x=0:1:2", metric: ["outputs.gap"] }),
       /<nodeId>:<port>/,
     ],
+    ["jobs 要正整数", () => evalArgv({ graphPath: "g", metric: ["m"], jobs: 0 }, null), /jobs/],
     ["patch 至少要一个动作", () => patchArgv({ graphPath: "g.json" }), /至少给一个动作/],
     ["patch 的 out 要配 dryRun:false", () => patchArgv({ graphPath: "g.json", removeNode: ["b_*"], out: "out.json" }), /dryRun:false/],
     ["rewire 两端都没写端口", () => patchArgv({ graphPath: "g.json", rewire: ["n_fb_line=n_fit"] }), /端口/],

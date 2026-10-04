@@ -2,12 +2,25 @@
 // 拆包时随算子一起搬过来 —— 断言逐条不变，只是换了个文件。
 #include <doctest/doctest.h>
 
+#include <pcl/features/normal_3d.h>
+#include <pcl/filters/radius_outlier_removal.h>
+#include <pcl/filters/statistical_outlier_removal.h>
+#include <pcl/search/kdtree.h>
+
+#include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <unordered_map>
+#include <cstring>
+#include <limits>
+#include <numeric>
+#include <random>
 
 #include "exec/result_store.h"
 #include "helpers.h"
 #include "lyflow/operator.h"
 #include "lyflow/registry.h"
+#include "lyflow_pcl/adapter.h"
 
 using namespace lyflow;
 using namespace lyflow::test;
@@ -177,6 +190,136 @@ TEST_CASE("体素栅格 nearest 模式也响应取消") {
                            .count();
   CHECK(log.runStatus() == "cancelled");
   CHECK(elapsed < 2000);
+}
+
+TEST_CASE("体素栅格：按线程预算并行之后与原来的单线程写法逐字节相同（质心 / 最近点、全部通道与 NaN、1 / 3 / 8 个线程）") {
+  // 参照就是改并行之前的那一版：按点的顺序一趟扫完，体素按第一次出现的顺序编号，累加都在 double 里
+  test::OpCall gen;
+  REQUIRE(gen.run("gen.synthetic", {{"pointCount", Value::integer(60000)}, {"seed", Value::integer(11)}}).ok);
+  PointCloud in = *gen.out("cloud").asCloud();
+  const std::size_t n = in.pointCount();
+  std::mt19937 rng(5);
+  std::uniform_real_distribution<float> unit(-1.0f, 1.0f);
+  in.normals.resize(n * 3);
+  in.rgb.resize(n * 3);
+  for (std::size_t i = 0; i < n * 3; ++i) {
+    in.normals[i] = unit(rng);
+    in.rgb[i] = static_cast<std::uint8_t>(rng() & 0xFF);
+  }
+  for (std::size_t k = 0; k < 20; ++k) in.xyz[((k * 997) % n) * 3 + 1] = std::numeric_limits<float>::quiet_NaN();
+
+  struct Key {
+    std::int64_t i, j, k;
+    bool operator==(const Key& o) const { return i == o.i && j == o.j && k == o.k; }
+  };
+  struct KeyHash {
+    std::size_t operator()(const Key& v) const { return std::hash<std::int64_t>()(v.i * 73856093 ^ v.j * 19349663 ^ v.k * 83492791); }
+  };
+  struct Acc {
+    double sx = 0, sy = 0, sz = 0, si = 0, snx = 0, sny = 0, snz = 0, sr = 0, sg = 0, sb = 0;
+    std::int32_t count = 0;
+  };
+  const auto keyOf = [](float x, float y, float z, float leaf) {
+    return Key{static_cast<std::int64_t>(std::floor(static_cast<double>(x) / leaf)),
+               static_cast<std::int64_t>(std::floor(static_cast<double>(y) / leaf)),
+               static_cast<std::int64_t>(std::floor(static_cast<double>(z) / leaf))};
+  };
+  const auto reference = [&](float leaf, std::int32_t minPts, bool nearest) {
+    std::unordered_map<Key, std::size_t, KeyHash> index;
+    std::vector<Acc> acc;
+    for (std::size_t p = 0; p < n; ++p) {
+      const float x = in.xyz[p * 3], y = in.xyz[p * 3 + 1], z = in.xyz[p * 3 + 2];
+      if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) continue;
+      const auto [it, fresh] = index.try_emplace(keyOf(x, y, z, leaf), acc.size());
+      if (fresh) acc.emplace_back();
+      Acc& v = acc[it->second];
+      v.sx += x; v.sy += y; v.sz += z; v.count += 1;
+      v.si += in.intensity[p];
+      v.snx += in.normals[p * 3]; v.sny += in.normals[p * 3 + 1]; v.snz += in.normals[p * 3 + 2];
+      v.sr += in.rgb[p * 3]; v.sg += in.rgb[p * 3 + 1]; v.sb += in.rgb[p * 3 + 2];
+    }
+    if (nearest) {
+      std::vector<std::int32_t> best(acc.size(), -1);
+      std::vector<double> bestDist(acc.size(), 1e300);
+      for (std::size_t p = 0; p < n; ++p) {
+        const float x = in.xyz[p * 3], y = in.xyz[p * 3 + 1], z = in.xyz[p * 3 + 2];
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) continue;
+        const std::size_t vi = index.at(keyOf(x, y, z, leaf));
+        const Acc& v = acc[vi];
+        const double cx = v.sx / v.count, cy = v.sy / v.count, cz = v.sz / v.count;
+        const double d = (x - cx) * (x - cx) + (y - cy) * (y - cy) + (z - cz) * (z - cz);
+        if (d < bestDist[vi]) {
+          bestDist[vi] = d;
+          best[vi] = static_cast<std::int32_t>(p);
+        }
+      }
+      std::vector<std::int32_t> keep;
+      for (std::size_t vi = 0; vi < acc.size(); ++vi) {
+        if (acc[vi].count >= minPts && best[vi] >= 0) keep.push_back(best[vi]);
+      }
+      return in.select(keep);
+    }
+    PointCloud out;
+    for (const Acc& v : acc) {
+      if (v.count < minPts) continue;
+      const double inv = 1.0 / v.count;
+      out.push(static_cast<float>(v.sx * inv), static_cast<float>(v.sy * inv), static_cast<float>(v.sz * inv));
+      out.intensity.push_back(static_cast<float>(v.si * inv));
+      double nx = v.snx * inv, ny = v.sny * inv, nz = v.snz * inv;
+      const double len = std::sqrt(nx * nx + ny * ny + nz * nz);
+      if (len > 1e-9) { nx /= len; ny /= len; nz /= len; }
+      out.normals.push_back(static_cast<float>(nx));
+      out.normals.push_back(static_cast<float>(ny));
+      out.normals.push_back(static_cast<float>(nz));
+      out.rgb.push_back(static_cast<std::uint8_t>(v.sr * inv));
+      out.rgb.push_back(static_cast<std::uint8_t>(v.sg * inv));
+      out.rgb.push_back(static_cast<std::uint8_t>(v.sb * inv));
+    }
+    return out;
+  };
+  const auto sameBytes = [](const auto& a, const auto& b) {
+    return a.size() == b.size() && (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(a[0])) == 0);
+  };
+
+  // 叶大小按这片云自己的尺寸取：细的（体素多、多数只有一两个点）与粗的（每个体素几十个点）各一档
+  float extent = 0;
+  for (int axis = 0; axis < 3; ++axis) {
+    float lo = std::numeric_limits<float>::max(), hi = -lo;
+    for (std::size_t i = 0; i < n; ++i) {
+      const float v = in.xyz[i * 3 + axis];
+      if (!std::isfinite(v)) continue;
+      lo = std::min(lo, v);
+      hi = std::max(hi, v);
+    }
+    extent = std::max(extent, hi - lo);
+  }
+  REQUIRE(extent > 0);
+  for (const float leaf : {extent / 120.0f, extent / 25.0f}) {
+    for (const std::int32_t minPts : {1, 3}) {
+      for (const bool nearest : {false, true}) {
+        const PointCloud want = reference(leaf, minPts, nearest);
+        REQUIRE(want.pointCount() > 10);
+        for (const int threads : {1, 3, 8}) {
+          CAPTURE(leaf);
+          CAPTURE(minPts);
+          CAPTURE(nearest);
+          CAPTURE(threads);
+          test::OpCall call;
+          call.threads = threads;
+          call.inputs["cloud"] = Data::cloud(in);
+          REQUIRE(call.run("filter.voxel_grid", {{"leafSize", Value::vec({leaf, leaf, leaf})},
+                                                 {"minPointsPerVoxel", Value::integer(minPts)},
+                                                 {"representative", Value::text(nearest ? "nearest" : "centroid")}})
+                      .ok);
+          const PointCloud& got = *call.out("cloud").asCloud();
+          CHECK(sameBytes(got.xyz, want.xyz));
+          CHECK(sameBytes(got.intensity, want.intensity));
+          CHECK(sameBytes(got.normals, want.normals));
+          CHECK(sameBytes(got.rgb, want.rgb));
+        }
+      }
+    }
+  }
 }
 
 TEST_CASE("util.merge：空点云不该把另一侧的通道带走") {
@@ -352,4 +495,151 @@ TEST_CASE("edit.translate_region：零法向是 bad_param") {
   REQUIRE_FALSE(e.empty());
   CHECK(e["error"]["code"] == "bad_param");
   CHECK(e["error"]["paramPath"] == "normal");
+}
+
+// 随机采样把下标排回原顺序：留得多时改用标记表顺着扫（std::sort 在 200 万点留一半时要 60 ms 以上）。
+// 参照就是原来的做法（同一个种子的部分 Fisher-Yates，再 std::sort）：两条路、两种模式都要逐点相同
+TEST_CASE("随机采样：标记表与排序两条路给出与原实现逐点相同的结果") {
+  test::OpCall gen;
+  REQUIRE(gen.run("gen.synthetic", {{"pointCount", Value::integer(50000)}, {"seed", Value::integer(8)}}).ok);
+  const PointCloud& in = *gen.out("cloud").asCloud();
+  const std::size_t n = in.pointCount();
+  const auto reference = [&](std::size_t want, std::uint32_t seed) {
+    std::vector<std::int32_t> keep(n);
+    std::iota(keep.begin(), keep.end(), 0);
+    std::mt19937 rng(seed);
+    for (std::size_t i = 0; i < want; ++i) {
+      std::uniform_int_distribution<std::size_t> pick(i, n - 1);
+      std::swap(keep[i], keep[pick(rng)]);
+    }
+    keep.resize(want);
+    std::sort(keep.begin(), keep.end());
+    return in.select(keep);
+  };
+  struct Case {
+    const char* mode;
+    std::int64_t count;
+    double ratio;
+    std::size_t want;
+  };
+  // 1000 个（want × 16 < n：排序那条路）、一半与九成（标记表那条路）、全留（不抽）
+  const Case cases[] = {{"count", 1000, 0.0, 1000}, {"ratio", 0, 0.5, n / 2}, {"ratio", 0, 0.9, n * 9 / 10},
+                        {"count", static_cast<std::int64_t>(n) + 5, 0.0, n}};
+  for (const Case& c : cases) {
+    for (std::int64_t seed : {1, 42}) {
+      CAPTURE(c.mode);
+      CAPTURE(c.want);
+      CAPTURE(seed);
+      test::OpCall call;
+      call.inputs["cloud"] = gen.out("cloud");
+      REQUIRE(call.run("filter.random_sample", {{"mode", Value::text(c.mode)},
+                                                {"keepCount", Value::integer(c.count)},
+                                                {"keepRatio", Value::number(c.ratio)},
+                                                {"seed", Value::integer(seed)}})
+                  .ok);
+      const PointCloud& got = *call.out("cloud").asCloud();
+      if (c.want < n) {
+        const PointCloud want = reference(c.want, static_cast<std::uint32_t>(seed));
+        CHECK(got.xyz == want.xyz);
+        CHECK(got.intensity == want.intensity);
+      } else {
+        CHECK(got.xyz == in.xyz);  // 全留：不抽
+      }
+    }
+  }
+}
+
+// 法线与两个离群点滤波改成按线程预算分段并行（ops/parallel.h；vcpkg 的 PCL 没开 OpenMP，它们原来是单线程的
+// PCL 实现，200 万点上 12 s / 14 s / 7 s）。参照就是原来直接调的那三个 PCL 类：逐点结果要相同，换几个线程也一样
+TEST_CASE("法线与两个离群点滤波：分段并行的结果与 PCL 原实现逐点相同，与线程数无关") {
+  test::OpCall gen;
+  REQUIRE(gen.run("gen.synthetic", {{"pointCount", Value::integer(60000)}, {"seed", Value::integer(5)}}).ok);
+  // 两份云：原样的（is_dense，半径离群点走 K 近邻那一支），与掺了 NaN 点的（三个算子都走「非有限点」那一支）
+  PointCloud withNaN = *gen.out("cloud").asCloud();
+  for (std::size_t i = 0; i < withNaN.pointCount(); i += 997) withNaN.xyz[i * 3] = std::numeric_limits<float>::quiet_NaN();
+  for (const Data& cloud : {gen.out("cloud"), Data::cloud(std::move(withNaN))}) {
+    const PointCloud& in = *cloud.asCloud();
+    const auto pc = ops::adapter::toPcl(in);
+    CAPTURE(pc->is_dense);
+
+    pcl::Indices sorKept;
+    {
+      pcl::StatisticalOutlierRemoval<pcl::PointXYZ> f;
+      f.setInputCloud(pc);
+      f.setMeanK(30);
+      f.setStddevMulThresh(1.0);
+      f.filter(sorKept);
+    }
+    pcl::Indices rorKept;
+    {
+      pcl::RadiusOutlierRemoval<pcl::PointXYZ> f;
+      f.setInputCloud(pc);
+      f.setRadiusSearch(0.05);
+      f.setMinNeighborsInRadius(5);
+      f.filter(rorKept);
+    }
+    pcl::PointCloud<pcl::Normal> ref;
+    {
+      pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
+      ne.setInputCloud(pc);
+      ne.setSearchMethod(pcl::make_shared<pcl::search::KdTree<pcl::PointXYZ>>());
+      ne.setKSearch(20);
+      ne.setViewPoint(0.0f, 0.0f, 0.0f);
+      ne.compute(ref);
+    }
+    const auto keptOf = [&](const test::OpCall& c) {
+      std::vector<char> removed(in.pointCount(), 0);
+      for (std::int32_t i : c.outputs.at("removed").asIndices()->values) removed[static_cast<std::size_t>(i)] = 1;
+      pcl::Indices kept;
+      for (std::size_t i = 0; i < removed.size(); ++i) {
+        if (!removed[i]) kept.push_back(static_cast<pcl::index_t>(i));
+      }
+      return kept;
+    };
+    REQUIRE(sorKept.size() < in.pointCount());  // 参照本身确实剔掉了离群点，下面的比较才有意义
+    REQUIRE(rorKept.size() < in.pointCount());
+
+    for (int threads : {1, 3, 8}) {
+      CAPTURE(threads);
+      test::OpCall c;
+      c.threads = threads;
+      c.inputs["cloud"] = cloud;
+      REQUIRE(c.run("filter.statistical_outlier", {{"meanK", Value::integer(30)}, {"stddevMul", Value::number(1.0)}}).ok);
+      CHECK(keptOf(c) == sorKept);
+      REQUIRE(c.run("filter.radius_outlier", {{"radius", Value::number(0.05)}, {"minNeighbors", Value::integer(5)}}).ok);
+      CHECK(keptOf(c) == rorKept);
+
+      REQUIRE(c.run("features.normals", {{"kSearch", Value::integer(20)}}).ok);
+      const PointCloud& got = *c.out("cloud").asCloud();
+      REQUIRE(got.normals.size() == in.pointCount() * 3);
+      float worst = 0.0f;
+      for (std::size_t i = 0; i < in.pointCount(); ++i) {
+        const pcl::Normal& r = ref[i];
+        for (int a = 0; a < 3; ++a) {
+          // 邻域退化（或点本身不是有限的）时 PCL 填 NaN，算子置零
+          const float want = std::isfinite(r.normal[a]) ? r.normal[a] : 0.0f;
+          worst = std::max(worst, std::abs(got.normals[i * 3 + static_cast<std::size_t>(a)] - want));
+        }
+      }
+      CHECK(worst == 0.0f);
+    }
+  }
+
+  // 顺带修的：flipTowardsViewpoint 关掉就不翻 —— PCL 的 NormalEstimation 不论如何都朝视点（没设就是原点）翻，
+  // 以前这个开关关了也照翻。开着时每个法线都朝着视点，关掉时朝向就是 PCA 给的那样，有正有负
+  const auto facingAway = [&](bool flip) {
+    test::OpCall c;
+    c.inputs["cloud"] = gen.out("cloud");
+    REQUIRE(c.run("features.normals", {{"kSearch", Value::integer(20)}, {"flipTowardsViewpoint", Value::boolean(flip)}}).ok);
+    const PointCloud& got = *c.out("cloud").asCloud();
+    std::size_t away = 0;
+    for (std::size_t i = 0; i < got.pointCount(); ++i) {
+      const float* p = &got.xyz[i * 3];
+      const float* n = &got.normals[i * 3];
+      if (-p[0] * n[0] - p[1] * n[1] - p[2] * n[2] < 0.0f) ++away;
+    }
+    return away;
+  };
+  CHECK(facingAway(true) == 0);
+  CHECK(facingAway(false) > 0);
 }

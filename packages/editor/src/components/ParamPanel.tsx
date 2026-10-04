@@ -656,6 +656,7 @@ const PanelParamRow = memo(function PanelParamRow({
           path={path}
           promotedAs={row.promoted ?? undefined}
           graphBinding={binding}
+          previewGraphParam={binding?.graphParam}
           onChange={onChange}
         />
         <Diags diags={row.diags} />
@@ -836,6 +837,7 @@ const GraphParamPanelRow = memo(function GraphParamPanelRow({
             param={spec}
             value={row.value}
             disabled={false}
+            previewGraphParam={name}
             onChange={(v) => {
               if (!valueEquals(v, row.value)) g().editGraphParamValue(name, v);
             }}
@@ -946,6 +948,8 @@ function SpecText({
 }) {
   const [text, setText] = useState(value);
   useEffect(() => setText(value), [value]);
+  /** Esc 撤回：接着的 blur 不提交（同 NumberInput —— onBlur 拿到的还是打进去的那个 text） */
+  const cancelled = useRef(false);
   return (
     <input
       className="ctl ctl--str"
@@ -954,13 +958,18 @@ function SpecText({
       spellCheck={false}
       onChange={(e) => setText(e.target.value)}
       onBlur={() => {
+        if (cancelled.current) {
+          cancelled.current = false;
+          setText(value);
+          return;
+        }
         if (text === value) return;
         if (!onCommit(text)) setText(value);
       }}
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
         if (e.key === "Escape") {
-          setText(value);
+          cancelled.current = true;
           e.currentTarget.blur();
         }
       }}

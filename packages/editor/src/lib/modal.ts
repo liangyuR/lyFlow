@@ -45,6 +45,21 @@ interface ModalState {
 export const useModalStore = create<ModalState>(() => ({ current: null }));
 
 let seq = 0;
+let hosts = 0;
+
+/** 有没有挂着画对话框的组件（components/Modal）。编辑器的根因为渲染出错整个卸掉之后，askChoice 永远等不到答案 ——
+ *  关窗口那一问据此退回原生对话框，免得窗口再也关不掉。 */
+export function modalHostReady(): boolean {
+  return hosts > 0;
+}
+
+/** Modal 挂上时调，返回卸下时调的那个。 */
+export function registerModalHost(): () => void {
+  hosts += 1;
+  return () => {
+    hosts -= 1;
+  };
+}
 
 /** 一次只开一个：新的来了，旧的按取消收掉。 */
 function open(p: Pending): void {

@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use serde_json::{json, Value};
+use serde_json::Value;
 
 pub(crate) const FILE_NAME: &str = "library-dirs.json";
 pub(crate) const ENV: &str = "LYFLOW_LIBRARY_DIRS";
@@ -32,12 +32,14 @@ pub(crate) fn read_extra(app_data: &Path) -> Vec<String> {
 }
 
 /// 写设置。先规整（去空白、去空串、去重），写临时文件再改名。返回写进去的那一份。
+/// 只有桌面的设置界面写它（`set_library_dirs`）；CLI 只读，不带 desktop 构建时不编。
+#[cfg(any(feature = "desktop", test))]
 pub(crate) fn write_extra(app_data: &Path, dirs: &[String]) -> Result<Vec<String>, String> {
     let dirs = normalize(dirs);
     std::fs::create_dir_all(app_data).map_err(|e| format!("创建 {} 失败: {e}", app_data.display()))?;
     let file = settings_file(app_data);
     let tmp = file.with_extension("json.tmp");
-    let mut text = serde_json::to_string_pretty(&json!({ "extraDirs": dirs })).map_err(|e| e.to_string())?;
+    let mut text = serde_json::to_string_pretty(&serde_json::json!({ "extraDirs": dirs })).map_err(|e| e.to_string())?;
     text.push('\n');
     std::fs::write(&tmp, text).map_err(|e| format!("写入 {} 失败: {e}", tmp.display()))?;
     std::fs::rename(&tmp, &file).map_err(|e| format!("写入 {} 失败: {e}", file.display()))?;

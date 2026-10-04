@@ -4,7 +4,10 @@
 import { sleep } from "./cdp.mjs";
 import {
   buildGraph,
+  centerOf,
+  clickAt,
   lit,
+  pressKey,
   mustOk,
   newDoc,
   pressF5,
@@ -188,6 +191,17 @@ async function suiteMeasurementOutputs(cdp, report) {
     JSON.stringify(inspector),
   );
 
+  // 节点底栏写量测读数与判定（以前写元素数「1」，读数要一个个点开节点在检查器里看）
+  const reading = await cdp.eval(`
+    const el = document.querySelector('[data-testid="node-readings-' + ${lit(ids.gen)} + '"] .node__reading');
+    return el ? { text: el.querySelector('.node__reading-value').textContent, port: el.dataset.port, tone: el.dataset.tone ?? null,
+                  verdict: el.querySelector('.insp-out__verdict')?.textContent ?? null, title: el.getAttribute('title') } : null;
+  `);
+  report.ok("节点底栏写着量测读数与判定（6.414 mm · ok，不再是元素数），悬停有全文与上下限",
+    reading?.text === "6.414 mm" && reading.port === "value" && reading.verdict === "ok" && reading.tone === "ok" &&
+      reading.title === "value = 6.4138 mm（ok）；标称 6.4，下限 5.4，上限 7.4",
+    JSON.stringify(reading));
+
   // -- 底图：几何节点借上游最近的那片云 ---------------------------------------
   // 几何输出灌到没有点云输出的节点上
   await feedOutputs(cdp, ids.plane, 100001);
@@ -226,6 +240,112 @@ async function suiteMeasurementOutputs(cdp, report) {
     { picked, back: back.view },
     { picked: "value", back: "cloud" },
   );
+
+  // -- 运行收尾：图级输出写读数与判定，有问题的排在上面，节点写名字、点一下打开到它 -----------------
+  // 收尾也从执行事件灌（同上：前端不该知道哪个算子出 Measurement）
+  const drawerBefore = await cdp.eval(`return window.__lyflow.stores.ui.getState().drawer;`);
+  await cdp.eval(`
+    const e = window.__lyflow.stores.execution.getState();
+    const meas = (value, verdict) => ({ kind: 'Measurement', value, unit: 'mm', ok: true, verdict, nominal: 6.4, lower: 5.4, upper: 7.4 });
+    e.apply({
+      schemaVersion: 1, runId: e.runId, seq: 100002, kind: 'run_finished', status: 'ok', durationMs: 5,
+      summary: {
+        runId: e.runId, status: 'ok', durationMs: 5, nodes: {}, decisions: {}, contractViolations: [],
+        outputs: {
+          gap: { state: 'value', node: ${lit(ids.gen)}, port: 'value', type: 'Measurement', elementCount: 1, value: meas(6.4138, 'ok') },
+          flush: { state: 'value', node: ${lit(ids.pose)}, port: 'value', type: 'Measurement', elementCount: 1, value: meas(7.9, 'high') },
+          cloud: { state: 'value', node: ${lit(ids.gen)}, port: 'cloud', type: 'PointCloud', elementCount: 5000 },
+          // gap 的结果包这类 Record 展开是几 KB 的 JSON：收尾里照旧只写个数
+          bundle: { state: 'value', node: ${lit(ids.gen)}, port: 'value', type: 'Record', elementCount: 1,
+                    value: { kind: 'Record', type: 'GapResultBundle', data: { gap: { value_mm: 3.78 }, fits: new Array(40).fill({ a: 1, b: 2 }) } } },
+        },
+      },
+    });
+    window.__lyflow.stores.ui.setState({ drawer: 'diagnostics' });
+    return true;
+  `);
+  await sleep(200);
+  const summaryRows = await cdp.eval(`
+    return [...document.querySelectorAll('[data-testid="summary-outputs"] > li')].map((li) => ({
+      name: li.dataset.testid.replace('summary-output-', ''),
+      value: li.querySelector('.drawer__summary-value')?.textContent ?? null,
+      verdict: li.querySelector('.insp-out__verdict')?.textContent ?? null,
+      node: li.querySelector('.drawer__summary-node')?.textContent ?? null,
+      count: li.querySelector('.drawer__summary-from')?.textContent ?? null,
+    }));
+  `);
+  const poseLabel = await cdp.eval(`return window.__lyflow.stores.manifest.getState().operatorsById.get('transform.make').label;`);
+  report.ok("运行收尾：量测输出写着读数与判定，判 high 的排在最上；节点写名字；点云、Record 照旧写个数（Record 不展开成一大串）",
+    JSON.stringify(summaryRows.map((r) => r.name)) === JSON.stringify(["flush", "gap", "cloud", "bundle"]) &&
+      summaryRows[3].value === null && summaryRows[3].count === "1 个" &&
+      summaryRows[0].value === "7.9 mm" && summaryRows[0].verdict === "high" && summaryRows[0].node === `${poseLabel}.value` &&
+      summaryRows[1].value === "6.4138 mm" && summaryRows[1].verdict === "ok" &&
+      summaryRows[2].value === null && summaryRows[2].count === "5000 个",
+    JSON.stringify({ poseLabel, summaryRows }));
+  await select(cdp, ids.gen);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="summary-node-flush"]'));
+  await sleep(200);
+  report.eq("点收尾里的节点名：打开到它（选中它）",
+    await cdp.eval(`return [...window.__lyflow.stores.ui.getState().selectedNodes];`), [ids.pose]);
+  await cdp.eval(`window.__lyflow.stores.ui.setState({ drawer: ${lit(drawerBefore)} }); return true;`);
+
+  // 再跑一次出了错（单节点运行不清节点表，出错的事件不带 stats）：底栏不再挂着上一次的读数与判定
+  await cdp.eval(`
+    const e = window.__lyflow.stores.execution.getState();
+    e.apply({ schemaVersion: 1, runId: e.runId, seq: 100003, kind: 'node_state', nodeId: ${lit(ids.gen)}, state: 'error',
+              errors: [{ code: 'insufficient_points', message: '点太少', portName: 'cloud' }] });
+    return true;
+  `);
+  await sleep(200);
+  report.eq("出错之后底栏不写上一次的读数（不再挂着「6.414 mm OK」）",
+    await cdp.eval(`return !!document.querySelector('[data-testid="node-readings-' + ${lit(ids.gen)} + '"]');`), false);
+
+  // 工具栏的判定计数：plane 判了 high → 「NG 1」（gen 出错了，它留着的上一次的 ok 不算）；点它打开查找节点（is:ng），
+  // 回车打开到那个节点
+  await cdp.eval(`
+    const e = window.__lyflow.stores.execution.getState();
+    e.apply({ schemaVersion: 1, runId: e.runId, seq: 100004, kind: 'node_state', nodeId: ${lit(ids.plane)}, state: 'done', durationMs: 1,
+              stats: { elementCount: 1, byteSize: 64, outputs: [{ port: 'value', type: 'Measurement', elementCount: 1,
+                value: { kind: 'Measurement', value: 9.1, unit: 'mm', ok: true, verdict: 'high', nominal: 6.4, lower: 5.4, upper: 7.4 } }] } });
+    return true;
+  `);
+  await sleep(200);
+  const tally = await cdp.eval(`
+    const t = (id) => document.querySelector('[data-testid="' + id + '"]')?.textContent ?? null;
+    return { ng: t('run-tally-ng'), ok: t('run-tally-ok') };
+  `);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="run-tally-ng"]'));
+  await sleep(200);
+  const listedNg = await cdp.eval(`
+    return { query: document.querySelector('[data-testid="node-finder-input"]')?.value ?? null,
+             rows: [...document.querySelectorAll('[data-testid="node-finder-row"]')]
+               .map((r) => ({ id: r.dataset.id, tone: r.querySelector('.finder__tone')?.dataset.tone ?? null })) };
+  `);
+  await pressKey(cdp, "Enter", 13);
+  await sleep(250);
+  const ngPicked = await cdp.eval(`return [...window.__lyflow.stores.ui.getState().selectedNodes];`);
+  report.ok("工具栏写着「NG 1」（出错的 gen 留着的 ok 不算）；点它列出判了 NG 的 plane（行上标 NG），回车打开到它",
+    tally.ng === "NG 1" && tally.ok === null && listedNg.query === "is:ng " &&
+      JSON.stringify(listedNg.rows) === JSON.stringify([{ id: ids.plane, tone: "ng" }]) && JSON.stringify(ngPicked) === JSON.stringify([ids.plane]),
+    JSON.stringify({ tally, listedNg, ngPicked }));
+
+  // 拖参数的预览运行不算：预览里 plane 判了 ok，工具栏照旧是上一次正式运行的「NG 1」，查找节点的 is:ng 也还是它
+  await cdp.eval(`
+    const e = window.__lyflow.stores.execution.getState();
+    e.beginRun('preview-tally', [${lit(ids.plane)}], true);
+    e.apply({ schemaVersion: 1, runId: 'preview-tally', seq: 0, kind: 'run_started', plan: [${lit(ids.plane)}], targets: [${lit(ids.plane)}], nodes: [], outputs: [] });
+    e.apply({ schemaVersion: 1, runId: 'preview-tally', seq: 1, kind: 'node_state', nodeId: ${lit(ids.plane)}, state: 'done', durationMs: 1,
+              stats: { elementCount: 1, byteSize: 64, outputs: [{ port: 'value', type: 'Measurement', elementCount: 1,
+                value: { kind: 'Measurement', value: 6.4, unit: 'mm', ok: true, verdict: 'ok', nominal: 6.4, lower: 5.4, upper: 7.4 } }] } });
+    return true;
+  `);
+  await sleep(200);
+  const duringPreview = await cdp.eval(`
+    return { ng: document.querySelector('[data-testid="run-tally-ng"]')?.textContent ?? null,
+             ok: document.querySelector('[data-testid="run-tally-ok"]')?.textContent ?? null };
+  `);
+  await cdp.eval(`window.__lyflow.stores.execution.getState().apply({ schemaVersion: 1, runId: 'preview-tally', seq: 2, kind: 'run_finished', status: 'ok', durationMs: 1 }); return true;`);
+  report.eq("拖参数的预览运行不算：预览里判了 ok，工具栏照旧「NG 1」", duringPreview, { ng: "NG 1", ok: null });
 }
 
 /** 可选：打开一张真实的 gap 图跑一遍，看 ROI 框有没有画出来。图用

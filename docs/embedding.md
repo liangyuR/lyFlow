@@ -8,7 +8,7 @@
   只是换成一个 crate。
 - **Rust/Tauri 宿主**（[下文](#rusttauri-宿主)）：宿主是 Tauri 2 的 app，
   前端嵌 `@lyflow/editor`，Rust 侧直接复用 `lyflow_lib` 的整个 IPC 层 ——
-  37 条 command、`RunManager`、三条事件流、库算子扫描，一行都不用自己写。
+  39 条 command、`RunManager`、三条事件流、库算子扫描，一行都不用自己写。
 - **只要编辑器界面**，嵌进自己的 React 页面：看文末的
   [前端编辑器](#前端编辑器lyfloweditor)。
 
@@ -429,11 +429,15 @@ fn main() {
 被抢占的那个在后台算完它手上那个停不下来的算子，期间的请求只留最新一个。宿主自己的命令同样跑在主线程上的话，
 也别在里面等一个 run —— 那会让整个窗口一起等。
 
+> **剪贴板读取要宿主放行。** 参数菜单的「粘贴值」调 `navigator.clipboard.readText()`，WebView2 默认会弹一个
+> 「想要查看复制到剪贴板的文本和图像」的框。宿主开窗口时加 `.enable_clipboard_access()`（LyFlow 自己的壳见
+> `bridge/src/lib.rs` 的 `open_main_window`）就不弹了。Ctrl+V 粘节点读的是 paste 事件，不需要这个权限。
+>
 > **它占掉了 `Builder::setup`。** tauri 的 `setup` 是整份替换不是追加，所以宿主
 > 要有自己的 setup 就别再调 `.setup()`，改成在自己那个里面调
 > `lyflow_lib::host::setup(app.handle())`。
 
-`lyflow_handler!` 把 LyFlow 的 37 条命令和宿主自己的命令合成一个
+`lyflow_handler!` 把 LyFlow 的 39 条命令和宿主自己的命令合成一个
 `invoke_handler`。它能跨 crate 是因为 `#[tauri::command]` 除了函数本身还发一对
 `#[macro_export]` 的 `macro_rules!`，并在同一个模块里 `pub use` 了它们 ——
 `lyflow_lib::commands::get_manifest` 这条路径对函数和对宏都解析得开，

@@ -1,12 +1,13 @@
 // 画布上的算子节点。按 op id 现查 manifest，不把算子描述塞进节点 data ——
 // 这是热重载的前提：推一份新 manifest 进 store，节点外观自动跟着变。
 
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import { memo, useEffect, useRef, useState } from "react";
 
-import { augmentOperators } from "../lib/subgraph";
+import { augmentOperators, describeEventNode } from "../lib/subgraph";
 import { ANY } from "../lib/typecheck";
 import type { OperatorNodeData } from "../lib/mapping";
+import { MAX_NODE_READINGS, readingsOf } from "../lib/outputs";
 import { useNodeStale } from "../store/cache";
 import { useNodeExecution } from "../store/execution";
 import { useGraphStore } from "../store/graph";
@@ -51,12 +52,13 @@ interface PortHandleProps {
 function PortHandle({ nodeId, port, side, index, anyType }: PortHandleProps) {
   const type = port.type === ANY ? (anyType ?? ANY) : port.type;
   const color = useManifestStore((s) => s.typesByName.get(type)?.color ?? "#6b7280");
-  // 拖线中的兼容性可视化（交互清单 P1 #20）：能落的高亮，不能落的置灰。
+  // 拖线中的兼容性可视化（交互清单 P1 #20）：能落的高亮，不能落的置灰；已接着线、松上去会换掉来源的标「替换」
   const verdict = useUiStore((s) => {
     if (!s.pendingFrom) return "";
     const key = `${nodeId}:${port.name}`;
     if (s.pendingFrom.side === side) return "";
-    return s.compatiblePorts.has(key) ? "compatible" : "incompatible";
+    if (s.compatiblePorts.has(key)) return "compatible";
+    return s.replacePorts.has(key) ? "replace" : "incompatible";
   });
   // 自动连线没能唯一确定（m8-plan L13）：没连上的输入与它的每个候选输出都亮出来
   const auto = useUiStore((s) => {
@@ -116,10 +118,13 @@ function PortHandle({ nodeId, port, side, index, anyType }: PortHandleProps) {
   );
 }
 
-/** 双击标题就地改名（交互清单 P1 #25）。空串 = 回到 manifest 的 label。 */
-function TitleEditor({ id, initial, onDone }: { id: string; initial: string; onDone: () => void }) {
-  const [text, setText] = useState(initial);
+/** 双击标题或 F2 就地改名（交互清单 P1 #25）。空串、或改成和算子名一样 = 回到 manifest 的 label。
+ *  没改就不提交：以前双击标题再点走，节点就被写上一个等于算子名的自定义标题 —— 图标成改过、多一条撤销，
+ *  以后算子改名它也跟不上。 */
+function TitleEditor({ id, title, label }: { id: string; title: string | null; label: string }) {
+  const [text, setText] = useState(title ?? label);
   const input = useRef<HTMLInputElement>(null);
+  const onDone = () => useUiStore.getState().setRenamingNode(null);
 
   useEffect(() => {
     input.current?.focus();
@@ -127,7 +132,9 @@ function TitleEditor({ id, initial, onDone }: { id: string; initial: string; onD
   }, []);
 
   const commit = () => {
-    useGraphStore.getState().renameNode(id, text.trim() ? text : null);
+    const typed = text.trim();
+    const next = typed && typed !== label ? typed : null;
+    if (next !== title) useGraphStore.getState().renameNode(id, next);
     onDone();
   };
 
@@ -156,6 +163,15 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   const base = useManifestStore((s) => s.operatorsById);
   const subgraphs = useGraphStore((s) => s.doc.subgraphs);
   const op = augmentOperators(base, subgraphs).get(opId);
+  // 换了算子（右键「换成别的算子…」）：端口变了，让 React Flow 重新量一遍把手，留下的线接到新位置上
+  // （挂上时不量：React Flow 自己量过了，大图上几百个节点各多量一遍白费）
+  const updateInternals = useUpdateNodeInternals();
+  const shownOp = useRef(opId);
+  useEffect(() => {
+    if (shownOp.current === opId) return;
+    shownOp.current = opId;
+    updateInternals(id);
+  }, [id, opId, updateInternals]);
   // 执行状态从独立的 store 现查（P0 #14）：放进节点 data 的话，
   // 每来一条事件就要重建整个节点数组，几十个节点的图会肉眼可见地卡。
   const exec = useNodeExecution(id);
@@ -163,7 +179,7 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   const stale = useNodeStale(id);
   // 实时校验（m8-plan L16）：拼的时候就标红，不等运行。只看 error，warning 进 Inspector。
   const invalid = errorsOf(useNodeValidation(id));
-  const [renaming, setRenaming] = useState(false);
+  const renaming = useUiStore((s) => s.renamingNode === id);
   // 鼠标指着的连线从这里出发或到这里（docs/motion-plan.md H3）
   const edgeEnd = useUiStore(
     (s) => s.hoverEdge !== null && (s.hoverEdge.from.node === id || s.hoverEdge.to.node === id),
@@ -173,6 +189,15 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   const fx = useRef<HTMLSpanElement>(null);
   const head = useRef<HTMLDivElement>(null);
   useNodeMotion(id, exec?.state ?? "idle", { root, fx, head });
+  // 子图 / 库算子节点上的错误来自内部的某个节点（ADR-0010 的路径 id）：写明是谁，点了打开到它。
+  // selector 只在有错误来源时才去解析，返回的是一个字符串 —— 节点不会因为文档的别处变了而重渲。
+  // 同样放在早退之前（hook 的个数不能变：算子缺失 ↔ 有算子之间切换时 React 会直接崩）
+  const errorSource = exec?.errorSource;
+  const errorWho = useGraphStore((s) => {
+    if (!errorSource) return null;
+    const names = describeEventNode(s.doc, base, errorSource).names;
+    return names[names.length - 1] ?? null;
+  });
 
   // 算子在当前 core 里不存在：可能是打开了别人存的图，也可能是热重载删掉了它。
   // 必须显式画出来 —— 静默渲染成空节点会让人以为图坏了（1.5）。
@@ -195,6 +220,11 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   const rows = Math.max(op.inputs.length, op.outputs.length);
   const state = exec?.state ?? "idle";
   const errorText = exec?.errors[0]?.message;
+  const revealError = () => {
+    if (!errorSource) return;
+    const r = describeEventNode(useGraphStore.getState().doc, base, errorSource).reveal;
+    if (r) useUiStore.getState().revealNode(r.path, r.localId, r.exact ? exec?.errors[0]?.paramPath : undefined);
+  };
   // 只被惰性端口依赖、这次没被 demand（ADR-0016）。画成半透明，与「命中缓存」区分开。
   const notDemanded = exec?.stats?.reason === "not_demanded";
   const classes = [
@@ -214,6 +244,9 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
     .join(" ");
 
   const cached = exec?.stats?.cached === true;
+  // 出错 / 取消 / 运行中的事件不带 stats，节点表里留着的是上一次的（单节点运行不清节点表）：那时不写读数与判定 ——
+  // 一个刚出错的节点旁边挂着上一次的「6.414 mm OK」比元素数还误导
+  const readings = state === "done" || state === "skipped" ? readingsOf(exec?.stats?.outputs) : [];
   // 输出能不能取，认 outputsAvailable 而不是认 state：skipped 既可能是「算过了，输出照样在」
   // 也可能是「这一支根本没被需要，什么都没有」。老 core 不带这个字段，按 not_demanded 兜底。
   const outputsAvailable = exec?.stats?.outputsAvailable ?? !notDemanded;
@@ -247,11 +280,11 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
         title={errorText ?? op.doc}
         onDoubleClick={(e) => {
           e.stopPropagation();
-          setRenaming(true);
+          useUiStore.getState().setRenamingNode(id);
         }}
       >
         {renaming ? (
-          <TitleEditor id={id} initial={title ?? op.label} onDone={() => setRenaming(false)} />
+          <TitleEditor id={id} title={title} label={op.label} />
         ) : (
           <span className="node__title">{title ?? op.label}</span>
         )}
@@ -330,8 +363,29 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
               {skipLabel}
             </span>
           )}
-          {exec?.stats?.elementCount != null && (
-            <span className="node__count">{formatSize(exec.stats)}</span>
+          {readings.length > 0 ? (
+            // 量测节点：写读数与判定，不写元素数（永远是「1」）
+            <span className="node__readings" data-testid={`node-readings-${id}`}>
+              {readings.slice(0, MAX_NODE_READINGS).map((r) => (
+                <span
+                  key={r.port}
+                  className="node__reading"
+                  data-port={r.port}
+                  data-tone={r.tone ?? undefined}
+                  title={r.title}
+                >
+                  <span className="node__reading-value">{r.text}</span>
+                  {r.verdict && <span className={`insp-out__verdict is-${r.verdict}`}>{r.verdict}</span>}
+                </span>
+              ))}
+              {readings.length > MAX_NODE_READINGS && (
+                <span className="node__reading-more" title={readings.slice(MAX_NODE_READINGS).map((r) => r.title).join("\n")}>
+                  +{readings.length - MAX_NODE_READINGS}
+                </span>
+              )}
+            </span>
+          ) : (
+            exec?.stats?.elementCount != null && <span className="node__count">{formatSize(exec.stats)}</span>
           )}
           {exec?.children && (
             <span className="node__count" data-testid={`node-children-${id}`}>
@@ -341,7 +395,22 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
           {exec?.durationMs != null && (
             <span className="node__time">{formatDuration(exec.durationMs)}</span>
           )}
-          {errorText && <span className="node__err" title={errorText}>{errorText}</span>}
+          {errorText && errorWho ? (
+            <button
+              type="button"
+              className="node__err node__err--link nodrag"
+              data-testid={`node-err-${id}`}
+              title={`${errorWho}：${errorText} —— 点此打开到它`}
+              onClick={(e) => {
+                e.stopPropagation();
+                revealError();
+              }}
+            >
+              {errorWho}：{errorText}
+            </button>
+          ) : (
+            errorText && <span className="node__err" title={errorText}>{errorText}</span>
+          )}
         </div>
       )}
 
@@ -373,4 +442,16 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   );
 }
 
-export const OperatorNode = memo(OperatorNodeImpl);
+/** React Flow 每一帧都把拖动中的位置（positionAbsoluteX / Y）当 props 传进来，节点自己用不到它 —— 位置由外层的
+ *  NodeWrapper 用 transform 摆。默认的浅比较让全选拖动时几百个节点每帧整个重渲；别的 props 照常比。 */
+function sameNodeProps(a: NodeProps, b: NodeProps): boolean {
+  const keys = Object.keys(a) as (keyof NodeProps)[];
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const k of keys) {
+    if (k === "positionAbsoluteX" || k === "positionAbsoluteY") continue;
+    if (a[k] !== b[k]) return false;
+  }
+  return true;
+}
+
+export const OperatorNode = memo(OperatorNodeImpl, sameNodeProps);

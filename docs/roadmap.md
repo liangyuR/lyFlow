@@ -179,10 +179,11 @@ C ABI 升到 v5：加了 `lyflow_set_library_dirs` / `lyflow_library_count` / `l
 逐条见 [m4-acceptance.md](m4-acceptance.md)。
 
 **已知毛刺**：
-- 子图内部节点的诊断挂在路径 id 上，顶层只看得到「这个子图红了」，
-  要进去才知道是哪个内参（ADR-0010 的代价一）。
-- 库算子不能「展开为内联子图」：定义在库文件里，前端手上只有合成出来的 OperatorDesc。
-  右键那一项会明说这一点。
+- ~~子图内部节点的诊断挂在路径 id 上，顶层只看得到「这个子图红了」，
+  要进去才知道是哪个内参（ADR-0010 的代价一）。~~ 已补：子图节点上写明是哪个内部节点出的错，
+  点它、点诊断、点工具栏的「error N」都直接打开到它；F8 / Shift+F8 在出错的节点之间跳（2026-10-01）。
+- ~~库算子不能「展开为内联子图」：定义在库文件里，前端手上只有合成出来的 OperatorDesc。~~
+  已补：core 出定义（C ABI v13），右键「展开为内联子图」把定义拷进图（[library-inline-plan.md](library-inline-plan.md)，2026-09-29）。
 - `save_as_library` 拒绝嵌套了 `sub:` 的子图 —— 库文件必须自包含。
 - 300 节点的基准是合成图（30 条链 × 10 个 reroute），不是真实 pipeline。
 
@@ -350,6 +351,7 @@ Agent，不用自己重建「这次 run 到底发生了什么」，也不用手�
 - 阶段 A 为被嵌入做准备：[phase-a-plan.md](phase-a-plan.md)，验收 [a1](phase-a1-acceptance.md) / [a2](phase-a2-acceptance.md)；
   阶段 B 在业务仓库：[phase-b-plan.md](phase-b-plan.md)
 - dts 算子包（默认关）：[packs/dts/README.md](../packs/dts/README.md)
+- 易用性、算子性能与代码质量一轮（2026-10-01 – 10-02，没有事先的计划）：[usability-perf-acceptance.md](usability-perf-acceptance.md)
 
 ## M5 之后 — 外延（只列方向，动工前再写计划）
 

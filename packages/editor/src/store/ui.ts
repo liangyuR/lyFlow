@@ -5,6 +5,8 @@ import { create } from "zustand";
 
 import type { PathSegment, SubPath } from "../lib/subgraph";
 import type { ViewerContent } from "../lib/viewRule";
+import { loadViewerPrefs, saveViewerPrefs, type ViewerPrefs } from "../lib/viewPrefs";
+import type { ParamClipboard } from "../lib/paramClipboard";
 import type { GraphDoc, GraphNode, PortRef } from "../types/graph";
 
 export interface SearchPopup {
@@ -17,11 +19,21 @@ export interface SearchPopup {
   pendingFrom?: PortRef;
   /** pendingFrom 是它自己节点上的哪一侧。output = 新节点接在它下游。 */
   pendingSide?: "input" | "output";
+  /** 选中的算子插到这条线中间（连线右键「插入算子…」、只选中一条连线时按 Tab）。 */
+  insertEdge?: string;
+  /** 把这个节点（当前层的本地 id）换成选中的算子（节点右键「换成别的算子…」）。 */
+  replaceNode?: string;
+  /** 放下之后把画布挪过去、焦点给新节点（选中一个节点按 Tab 接出：新节点可能在视野外，接着按 Tab 还要从它接）。 */
+  follow?: boolean;
+  /** 选了算子之后按新节点的高度重新找落点（选中一个节点按 Tab 接出时给；flow 是按选中的那个节点的大小估的）。 */
+  place?: (size: { h: number }) => { x: number; y: number } | null;
 }
 
 export interface Clipboard {
   nodes: GraphNode[];
   edges: GraphDoc["edges"];
+  /** 这些节点用到的子图定义（lib/nodeClipboard）。 */
+  subgraphs?: GraphDoc["subgraphs"];
 }
 
 /** 正在拖出的那一端。side 是这一端在自己节点上的方向。 */
@@ -31,7 +43,7 @@ export interface PendingConnection {
   side: "input" | "output";
 }
 
-export type DrawerTab = "log" | "diagnostics" | "cache";
+export type DrawerTab = "log" | "diagnostics" | "runs" | "cache";
 
 /** 参数面板的三个页签（param-recipe P2.2）。配方矩阵与配方管理在 P3 填内容。 */
 export type ParamPanelTab = "nodes" | "matrix" | "recipes";
@@ -53,12 +65,21 @@ interface UiState {
   autoRun: boolean;
   /** 预览点数上限。0 = 用 core 的默认值。 */
   previewMaxPoints: number;
+  /** 预览的着色、色带、点大小、显示点数（lib/viewPrefs）：落 localStorage，重启后还是上次的；
+   *  新开的连线查看器窗口也沿用前三样。 */
+  viewerPrefs: ViewerPrefs;
+  setViewerPrefs(partial: Partial<ViewerPrefs>): void;
   /** 正在拖参数：这期间发的是 preview run。 */
   previewing: boolean;
   selectedNodes: ReadonlySet<string>;
   selectedEdges: ReadonlySet<string>;
   searchPopup: SearchPopup | null;
   clipboard: Clipboard | null;
+  /** 右键「复制参数」复制下来的那一组（lib/paramClipboard）。只在内存里，不进系统剪贴板。 */
+  paramClipboard: ParamClipboard | null;
+  setParamClipboard(c: ParamClipboard | null): void;
+  /** 最近一次复制节点没写进系统剪贴板（不安全上下文、没授权）：粘贴时只能靠应用内的那一份。 */
+  clipboardOnlyInApp: boolean;
   /** 短暂提示（连线被拒绝的原因、保存成功之类）。 */
   toast: { text: string; kind: "info" | "warn" } | null;
   /** 面板里高亮的算子，用于在没选中节点时展示算子说明。 */
@@ -70,6 +91,8 @@ interface UiState {
   pendingFrom: PendingConnection | null;
   /** 与 pendingFrom 兼容的端口集合，键是 `nodeId:portName`。 */
   compatiblePorts: ReadonlySet<string>;
+  /** 已经接着线、松上去会顶掉原来那条的输入（换来源）。键同上。 */
+  replacePorts: ReadonlySet<string>;
 
   /** 鼠标指着的节点（H2）：与它相连的边加亮、其余的淡下去。纯 UI 状态，不进 doc 也不进撤销（H5）。 */
   hoverNodeId: string | null;
@@ -84,6 +107,8 @@ interface UiState {
 
   /** 底部抽屉。null = 收起。 */
   drawer: DrawerTab | null;
+  /** 正在就地改名的节点（双击标题或 F2）。同一时刻最多一个。 */
+  renamingNode: string | null;
 
   /** 参数面板（param-recipe P2.1）：开着时替代 Inspector；最大化时画布收起。宽度在 LyFlowEditor 里
    *  （拖分栏、记在 localStorage），不在这里。纯 UI 状态，不进 doc、不进撤销。 */
@@ -100,14 +125,35 @@ interface UiState {
    *  快捷键 M 与参数面板进拖框（要把它关掉）都得碰得到。 */
   viewerMeasuring: boolean;
   setViewerMeasuring(on: boolean): void;
+  /** 预览最大化：画布、两侧面板收起，预览占满工作区（Shift+Space / 预览栏的 □，Esc 还原）。只在这次会话里。
+   *  要动画布的动作（定位到节点、打开参数面板、换图、整理布局）先还原。 */
+  viewerMaximized: boolean;
+  setViewerMaximized(on: boolean): void;
   /** 主预览里手动选的内容（点云 / 值）。只对选它时的那个节点有效（键是 fullId）：
    *  视图一换到别的节点就清掉，回到按输出类型自动选（lib/viewRule 的 viewerContentFor）。 */
   viewerContentPick: { nodeId: string; content: ViewerContent } | null;
+  /** 预览看节点的哪个点云输出，键是展开后的路径 id。按节点记着，换节点再回来还是它（端口名一直写在预览栏上，
+   *  不会悄悄停在别的端口）；不进 doc、不落盘。没有这一条 = 第一个点云输出。 */
+  viewerPortPick: ReadonlyMap<string, string>;
+  setViewerPortPick(nodeKey: string, port: string | null): void;
   setViewerContentPick(pick: { nodeId: string; content: ViewerContent } | null): void;
   /** 快捷键面板开着没有（`?`）。 */
   helpOpen: boolean;
+  /** 查找节点的弹层开着没有（Ctrl+F，components/NodeFinder）。 */
+  finderOpen: boolean;
+  /** 打开查找时预先填好的查询（状态栏「静音 N」点进来是 is:muted）。 */
+  finderSeed: string;
+  /** 最近用过的算子 id，新的在前，最多 RECENT_OPS_MAX 个。算子搜索与面板空查询时排在最前。
+   *  记在 localStorage：只是个方便，读不到、写不进就当没有。 */
+  recentOps: readonly string[];
+  /** 又用了一次这个算子（界面上加了一个它的节点）：挪到最前。 */
+  noteOperatorUsed(opId: string): void;
   /** 抽屉里点了某条诊断 → 定位到这个节点/参数。 */
   focusedDiagnostic: { nodeId: string; paramPath?: string | undefined } | null;
+  /** 画布要把哪个节点移进视野（revealNode 发起，GraphCanvas 执行）。seq 每次加一：同一个节点再点一次也要动。 */
+  revealRequest: { nodeId: string; seq: number; follow?: true } | null;
+  /** 键盘沿连线走到这个节点（当前层）：选中它，请画布只挪最少的一点把它移进视野、再把焦点放到它上面。 */
+  followNode(nodeId: string): void;
 
   /** 自动连线没能唯一确定的那些输入与它们的候选输出（m8-plan L13），键都是 `nodeId:portName`。
    *  端口据此高亮；手动连上、点空白处或下一次自动连线时清掉。null = 没有。 */
@@ -129,16 +175,24 @@ interface UiState {
   hideToast(): void;
   setInspectedOperator(id: string | null): void;
   setPinnedNode(id: string | null): void;
-  beginConnection(from: PendingConnection, compatible: ReadonlySet<string>): void;
+  beginConnection(from: PendingConnection, compatible: ReadonlySet<string>, replaceable?: ReadonlySet<string>): void;
   endConnection(): void;
   toggleDrawer(tab?: DrawerTab): void;
+  setRenamingNode(id: string | null): void;
   setHelpOpen(open: boolean): void;
+  setFinderOpen(open: boolean, seed?: string): void;
   focusDiagnostic(nodeId: string, paramPath?: string): void;
+  /** 打开到 path 那一层、选中 localId，并请画布把它移进视野（revealRequest）。诊断抽屉、子图节点上的
+   *  错误文字点进去时用：出错的节点可能在子图里，也可能在画面外。paramPath 交给 Inspector 标红框。 */
+  revealNode(path: SubPath, localId: string, paramPath?: string): void;
 
   /** 进入一个子图节点。选中会被清掉 —— 层级换了，旧的选中没有意义。 */
   enterSubgraph(segment: PathSegment): void;
   /** 退到第 depth 层（0 = 顶层）。 */
   exitTo(depth: number): void;
+  /** 用户退出子图（Esc、面包屑）：退到第 depth 层，选中刚出来的那个子图节点、移进视野、焦点给它。
+   *  以前出来就什么都没选中，刚才在看的是哪一个得自己再找。脚本里直接调 exitTo 的不变。 */
+  leaveTo(depth: number): void;
   setPath(path: SubPath): void;
   setAutoRun(on: boolean): void;
   setPreviewMaxPoints(n: number): void;
@@ -155,30 +209,55 @@ function sameIds(a: ReadonlySet<string>, b: readonly string[]): boolean {
 
 const NO_PATH: SubPath = [];
 
+const RECENT_OPS_KEY = "lyflow.recentOperators";
+export const RECENT_OPS_MAX = 8;
+
+function loadRecentOps(): string[] {
+  try {
+    const raw = globalThis.localStorage?.getItem(RECENT_OPS_KEY);
+    const v: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(v)) return [];
+    return v.filter((s): s is string => typeof s === "string").slice(0, RECENT_OPS_MAX);
+  } catch {
+    return [];
+  }
+}
+
 export const useUiStore = create<UiState>((set, get) => ({
   path: NO_PATH,
   autoRun: true,
   previewMaxPoints: 200_000,
+  viewerPrefs: loadViewerPrefs(),
   previewing: false,
   selectedNodes: new Set(),
   selectedEdges: new Set(),
   searchPopup: null,
   clipboard: null,
+  clipboardOnlyInApp: false,
+  paramClipboard: null,
   toast: null,
   inspectedOperator: null,
   pinnedNode: null,
   pendingFrom: null,
   compatiblePorts: NO_PORTS,
+  replacePorts: NO_PORTS,
   hoverNodeId: null,
   hoverEdge: null,
   hoverPaused: false,
   drawer: null,
+  renamingNode: null,
   paramPanel: { open: false, maximized: false, tab: "nodes", viewerOpen: false },
   viewerMode: "3d",
   viewerMeasuring: false,
+  viewerMaximized: false,
   viewerContentPick: null,
+  viewerPortPick: new Map(),
   helpOpen: false,
+  finderOpen: false,
+  finderSeed: "",
+  recentOps: loadRecentOps(),
   focusedDiagnostic: null,
+  revealRequest: null,
   autoHint: null,
   roiFrame: {},
 
@@ -238,6 +317,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   closeSearch() {
     set({ searchPopup: null });
   },
+  setParamClipboard(c) {
+    set({ paramClipboard: c });
+  },
   setClipboard(c) {
     set({ clipboard: c });
   },
@@ -254,12 +336,15 @@ export const useUiStore = create<UiState>((set, get) => ({
     if (get().pinnedNode === id) return;
     set({ pinnedNode: id });
   },
-  beginConnection(from, compatible) {
-    set({ pendingFrom: from, compatiblePorts: compatible });
+  beginConnection(from, compatible, replaceable = NO_PORTS) {
+    set({ pendingFrom: from, compatiblePorts: compatible, replacePorts: replaceable });
   },
   endConnection() {
     if (!get().pendingFrom) return;
-    set({ pendingFrom: null, compatiblePorts: NO_PORTS });
+    set({ pendingFrom: null, compatiblePorts: NO_PORTS, replacePorts: NO_PORTS });
+  },
+  setRenamingNode(id) {
+    if (get().renamingNode !== id) set({ renamingNode: id });
   },
   toggleDrawer(tab) {
     const current = get().drawer;
@@ -270,16 +355,41 @@ export const useUiStore = create<UiState>((set, get) => ({
   setHelpOpen(open) {
     set({ helpOpen: open });
   },
+  setFinderOpen(open, seed = "") {
+    if (get().finderOpen === open && (!open || get().finderSeed === seed)) return;
+    set({ finderOpen: open, finderSeed: open ? seed : "" });
+  },
+  noteOperatorUsed(opId) {
+    const cur = get().recentOps;
+    if (cur[0] === opId) return;
+    const next = [opId, ...cur.filter((id) => id !== opId)].slice(0, RECENT_OPS_MAX);
+    set({ recentOps: next });
+    try {
+      globalThis.localStorage?.setItem(RECENT_OPS_KEY, JSON.stringify(next));
+    } catch {
+      // 存不进（隐私模式、配额满）：这一次会话里照样有，下次打开没了而已
+    }
+  },
   toggleParamPanel(open) {
     const cur = get().paramPanel;
+    // 预览最大化着、面板开着（只是看不见）：点「参数」是想看面板 —— 还原，而不是把看不见的面板关掉
+    if (open === undefined && cur.open && get().viewerMaximized) {
+      set({ viewerMaximized: false });
+      return;
+    }
     const next = open ?? !cur.open;
     if (next === cur.open) return;
-    set({ paramPanel: { ...cur, open: next, maximized: next ? cur.maximized : false } });
+    // 打开参数面板：预览最大化着就还原（面板在预览下面，最大化时看不见）
+    set({ paramPanel: { ...cur, open: next, maximized: next ? cur.maximized : false }, ...(next ? { viewerMaximized: false } : {}) });
   },
   setParamPanelMaximized(on) {
     const cur = get().paramPanel;
     if (cur.maximized === on) return;
-    set({ paramPanel: { ...cur, maximized: on } });
+    set({ paramPanel: { ...cur, maximized: on }, ...(on ? { viewerMaximized: false } : {}) });
+  },
+  setViewerMaximized(on) {
+    if (get().viewerMaximized === on) return;
+    set({ viewerMaximized: on });
   },
   setParamPanelTab(tab) {
     const cur = get().paramPanel;
@@ -299,6 +409,14 @@ export const useUiStore = create<UiState>((set, get) => ({
     if (get().viewerMeasuring === on) return;
     set({ viewerMeasuring: on });
   },
+  setViewerPortPick(nodeKey, port) {
+    const cur = get().viewerPortPick;
+    if ((cur.get(nodeKey) ?? null) === port) return;
+    const next = new Map(cur);
+    if (port === null) next.delete(nodeKey);
+    else next.set(nodeKey, port);
+    set({ viewerPortPick: next });
+  },
   setViewerContentPick(pick) {
     const cur = get().viewerContentPick;
     if (cur === pick || (cur && pick && cur.nodeId === pick.nodeId && cur.content === pick.content)) {
@@ -308,6 +426,28 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   focusDiagnostic(nodeId, paramPath) {
     set({ focusedDiagnostic: { nodeId, paramPath }, selectedNodes: new Set([nodeId]) });
+  },
+
+  revealNode(path, localId, paramPath) {
+    const same =
+      path.length === get().path.length && path.every((seg, i) => seg.nodeId === get().path[i]?.nodeId);
+    set({
+      // 同一层就不换路径对象：换了的话订阅 path 的组件全要重算
+      ...(same ? {} : { path: [...path], selectedEdges: new Set(), hoverNodeId: null, hoverEdge: null }),
+      selectedNodes: new Set([localId]),
+      focusedDiagnostic: { nodeId: localId, paramPath },
+      revealRequest: { nodeId: localId, seq: (get().revealRequest?.seq ?? 0) + 1 },
+      // 定位要把画布移过去：预览最大化着（画布 0 宽）就先还原
+      viewerMaximized: false,
+    });
+  },
+
+  followNode(nodeId) {
+    set({
+      selectedNodes: new Set([nodeId]),
+      selectedEdges: new Set(),
+      revealRequest: { nodeId, seq: (get().revealRequest?.seq ?? 0) + 1, follow: true },
+    });
   },
 
   enterSubgraph(segment) {
@@ -331,12 +471,29 @@ export const useUiStore = create<UiState>((set, get) => ({
       hoverEdge: null,
     });
   },
+  leaveTo(depth) {
+    const path = get().path;
+    if (depth >= path.length) return;
+    const from = path[depth]!.nodeId;
+    get().exitTo(depth);
+    set({
+      selectedNodes: new Set([from]),
+      revealRequest: { nodeId: from, seq: (get().revealRequest?.seq ?? 0) + 1, follow: true },
+    });
+  },
   setPath(path) {
-    set({ path, selectedNodes: new Set(), selectedEdges: new Set(), hoverNodeId: null, hoverEdge: null });
+    // 换了一层：那一层的改名框跟着节点一起卸掉了，不留一个「正在改名」
+    set({ path, selectedNodes: new Set(), selectedEdges: new Set(), hoverNodeId: null, hoverEdge: null, renamingNode: null });
   },
   setAutoRun(on) {
     set({ autoRun: on });
   },
+  setViewerPrefs(partial) {
+    const next = { ...get().viewerPrefs, ...partial };
+    set({ viewerPrefs: next });
+    saveViewerPrefs(next);
+  },
+
   setPreviewMaxPoints(n) {
     set({ previewMaxPoints: n });
   },

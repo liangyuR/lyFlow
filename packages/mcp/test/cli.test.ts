@@ -39,3 +39,34 @@ test("CLI 路径不存在时把起进程的错原样带回来", async () => {
   assert.ok(result.spawnError !== null);
   assert.match(result.stderr, /失败/);
 });
+
+test("runCli：stdout 每出一行完整的 JSON 就回调一次；调用方取消时结束子进程，取消前交出的行还在", async () => {
+  // node 当「CLI」：先交两行，然后一直不退（模拟一次长 eval）
+  const config = loadConfig({ LYFLOW_HTTP_BASE: "http://127.0.0.1:1", LYFLOW_CLI: process.execPath });
+  const script = [
+    "console.log(JSON.stringify({ kind: 'eval_row', sample: 'a' }));",
+    "setTimeout(() => console.log(JSON.stringify({ kind: 'eval_row', sample: 'b' })), 50);",
+    "setTimeout(() => {}, 60000);",
+  ].join("\n");
+  const seen: string[] = [];
+  const abort = new AbortController();
+  const t0 = Date.now();
+  const result = await runCli(config, ["-e", script], {
+    signal: abort.signal,
+    onLine: (line) => {
+      seen.push(String(line.value["sample"]));
+      if (seen.length === 2) abort.abort();
+    },
+  });
+  assert.deepEqual(seen, ["a", "b"]);
+  assert.equal(result.cancelled, true);
+  assert.equal(result.timedOut, false);
+  assert.deepEqual(result.lines.map((l) => l.value["sample"]), ["a", "b"]);
+  assert.ok(Date.now() - t0 < 10000, "取消之后马上收场，不等那 60 秒");
+
+  // 不取消就照常跑完；已经取消过的 signal 一上来就收场
+  const done = await runCli(config, ["-e", "console.log('{\"kind\":\"x\"}')"]);
+  assert.deepEqual([done.code, done.cancelled, done.lines.length], [0, false, 1]);
+  const already = await runCli(config, ["-e", "setTimeout(() => {}, 60000)"], { signal: AbortSignal.abort() });
+  assert.equal(already.cancelled, true);
+});

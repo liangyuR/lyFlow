@@ -15,7 +15,18 @@ export interface CliResult {
   skipped: string[];
   stderr: string;
   timedOut: boolean;
+  /** 调用方取消了（options.signal）：子进程已经结束，lines 是取消之前交出来的那些。 */
+  cancelled: boolean;
   spawnError: string | null;
+}
+
+export interface CliOptions {
+  timeoutMs?: number | undefined;
+  cwd?: string | undefined;
+  /** MCP 客户端取消了这次工具调用：结束子进程。以前子进程会在后台一直跑到完（最长 10 分钟）。 */
+  signal?: AbortSignal | undefined;
+  /** stdout 每出一行完整的 JSON 就调一次（进度通知用）；返回值里的 lines 照样是全部。 */
+  onLine?: ((line: JsonLine) => void) | undefined;
 }
 
 export function parseJsonLines(chunk: string): { lines: JsonLine[]; skipped: string[] } {
@@ -49,11 +60,7 @@ export function stderrTail(stderr: string): string {
   return lines.length > 0 ? (lines[lines.length - 1] as string) : "";
 }
 
-export function runCli(
-  config: Config,
-  argv: string[],
-  options?: { timeoutMs?: number | undefined; cwd?: string | undefined },
-): Promise<CliResult> {
+export function runCli(config: Config, argv: string[], options?: CliOptions): Promise<CliResult> {
   const exe = config.cli;
   if (!exe) {
     return Promise.resolve({
@@ -63,6 +70,7 @@ export function runCli(
       stderr:
         "没有配置 LYFLOW_CLI：eval / perturb / diff_graphs 需要一个本地 lyflow 可执行文件的路径",
       timedOut: false,
+      cancelled: false,
       spawnError: "LYFLOW_CLI 未配置",
     });
   }
@@ -79,16 +87,34 @@ export function runCli(
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let cancelled = false;
     let spawnError: string | null = null;
+    // onLine 只看完整的行：一次 data 可能停在半行上，剩下的等下一次
+    let pending = "";
 
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill();
     }, timeoutMs);
+    const onAbort = () => {
+      cancelled = true;
+      child.kill();
+    };
+    const signal = options?.signal;
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener("abort", onAbort, { once: true });
 
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (c: string) => {
       stdout += c;
+      const onLine = options?.onLine;
+      if (!onLine) return;
+      pending += c;
+      const cut = pending.lastIndexOf("\n");
+      if (cut < 0) return;
+      const complete = pending.slice(0, cut);
+      pending = pending.slice(cut + 1);
+      for (const line of parseJsonLines(complete).lines) onLine(line);
     });
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (c: string) => {
@@ -99,6 +125,7 @@ export function runCli(
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       const parsed = parseJsonLines(stdout);
       resolve({
         code: spawnError !== null ? -1 : (code ?? -1),
@@ -106,6 +133,7 @@ export function runCli(
         skipped: parsed.skipped,
         stderr: spawnError !== null ? `起 ${exe} 失败：${spawnError}\n${stderr}` : stderr,
         timedOut,
+        cancelled,
         spawnError,
       });
     });

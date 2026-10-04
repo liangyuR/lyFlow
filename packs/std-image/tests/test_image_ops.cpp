@@ -2,6 +2,8 @@
 // 每个算子的数值、像素单位的几何、单通道契约。图像一律现造（合成渐变 / cv::circle 画的圆），仓库不进图片。
 #include <doctest/doctest.h>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -10,6 +12,7 @@
 #include <limits>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
@@ -27,39 +30,9 @@ namespace {
 using namespace lyflow;
 using lyflow::test::Json;
 
-class NullContext final : public ExecContext {
- public:
-  explicit NullContext(std::filesystem::path base = {}) : baseDir_(std::move(base)) {}
-  bool cancelled() const override { return false; }
-  void progress(float, std::string_view) override {}
-  void log(LogLevel, std::string) override {}
-  const std::filesystem::path& baseDir() const override { return baseDir_; }
-  int threadBudget() const override { return 1; }
-
- private:
-  std::filesystem::path baseDir_;
-};
-
 /// 直接调一个算子的 compute（不经执行器）。参数先填默认值再覆盖。
-struct Call {
-  std::unordered_map<std::string, Data> inputs;
-  std::unordered_map<std::string, Data> outputs;
-  ParamMap params;
-  std::filesystem::path base;
-
-  Status run(const std::string& opId, const std::unordered_map<std::string, Value>& overrides = {}) {
-    const OperatorDesc* op = ensureRegistry().find(opId);
-    REQUIRE_MESSAGE(op != nullptr, opId);
-    params.clear();
-    outputs.clear();
-    for (const Param& p : op->params) params[p.name] = p.def;
-    for (const auto& [k, v] : overrides) params[k] = v;
-    NullContext ctx(base);
-    ParamView view(params, base);
-    Inputs in(inputs);
-    Outputs out(outputs);
-    return op->compute(in, view, out, ctx);
-  }
+/// 直接调 compute（test::OpCall），外加按端口取图像。
+struct Call : test::OpCall {
   const Image& image(const char* port = "image") {
     REQUIRE(outputs.count(port));
     const Image* img = outputs[port].asImage();
@@ -277,6 +250,25 @@ TEST_CASE("image.region_stats：掩膜内的均值、面积、外接框（像素
   CHECK(std::vector<float>{b->min[0], b->min[1], b->max[0], b->max[1]} ==
         std::vector<float>{10, 5, 16, 9});
 
+  // 不接掩膜：区域就是整张图（不造全 255 的掩膜、直接算的那条路），与接一张全 255 的掩膜逐位相同
+  for (const auto& [channels, depth] : {std::pair{1, PixelDepth::U8}, std::pair{3, PixelDepth::U16}}) {
+    CAPTURE(channels);
+    Call whole;
+    whole.inputs["image"] = Data::image(test::image::makeTestImage(30, 20, channels, depth));
+    Image all = Image::allocate(30, 20, 1, PixelDepth::U8);
+    std::fill(all.mutablePixels(), all.mutablePixels() + 600, std::uint8_t{255});
+    whole.inputs["mask"] = Data::image(all);
+    const std::unordered_map<std::string, Value> ch{{"channel", Value::integer(channels - 1)}};
+    REQUIRE(whole.run("image.region_stats", ch).ok);
+    const double maskedMean = whole.outputs["mean"].asMeasurement()->value;
+    whole.inputs.erase("mask");
+    REQUIRE(whole.run("image.region_stats", ch).ok);
+    CHECK(whole.outputs["area"].asMeasurement()->value == 600.0);
+    CHECK(whole.outputs["mean"].asMeasurement()->value == maskedMean);
+    const Box2D* wb = whole.outputs["bbox"].asBox2D();
+    CHECK(std::vector<float>{wb->min[0], wb->min[1], wb->max[0], wb->max[1]} == std::vector<float>{0, 0, 30, 20});
+  }
+
   c.inputs["mask"] = Data::image(Image::allocate(3, 3, 1, PixelDepth::U8));
   CHECK(c.run("image.region_stats").code == "bad_input");
   c.inputs["mask"] = Data::image(Image::allocate(30, 20, 3, PixelDepth::U8));
@@ -322,6 +314,119 @@ TEST_CASE("image.to_tensor ↔ tensor.to_image：NCHW 的 (v·scale − mean)/st
   bad.data.assign(50, 0.0f);
   c.inputs["tensor"] = Data::tensor(bad);
   CHECK(c.run("tensor.to_image").code == "bad_input");
+}
+
+TEST_CASE("image.to_tensor / tensor.to_image 与逐值的参照（Image::at 那一版）逐位相同：三种位深 × 1/3/4 通道 × 四种布局") {
+  // 参照就是改写之前的写法：每个值 Image::at、double 运算、最后截成 float；读回图像时 float 里拉伸、lround
+  const double scale = 0.0123;
+  const float mean[3] = {static_cast<float>(0.1), static_cast<float>(0.2), static_cast<float>(0.3)};
+  const float sd[3] = {static_cast<float>(0.229), static_cast<float>(0.224), static_cast<float>(0.225)};
+  const auto refToImage = [](const Tensor& t, bool interleaved, std::int64_t c, std::int64_t h, std::int64_t w,
+                             bool toU8) {
+    const std::size_t plane = static_cast<std::size_t>(h * w);
+    const auto valueAt = [&](std::int64_t x, std::int64_t y, std::int64_t k) {
+      const std::size_t p = static_cast<std::size_t>(y * w + x);
+      return t.data[interleaved ? p * static_cast<std::size_t>(c) + static_cast<std::size_t>(k)
+                                : static_cast<std::size_t>(k) * plane + p];
+    };
+    float lo = 0, hi = 1;
+    if (toU8) {
+      lo = std::numeric_limits<float>::infinity();
+      hi = -lo;
+      for (std::size_t i = 0; i < plane * static_cast<std::size_t>(c); ++i) {
+        const float v = t.data[i];
+        if (!std::isfinite(v)) continue;
+        lo = std::min(lo, v);
+        hi = std::max(hi, v);
+      }
+      if (!(hi > lo)) { lo = 0; hi = 1; }
+    }
+    std::vector<std::uint8_t> out(plane * static_cast<std::size_t>(c) * (toU8 ? 1 : sizeof(float)));
+    for (std::int64_t y = 0; y < h; ++y) {
+      for (std::int64_t x = 0; x < w; ++x) {
+        for (std::int64_t k = 0; k < c; ++k) {
+          const float v = valueAt(x, y, k);
+          const std::size_t at = static_cast<std::size_t>((y * w + x) * c + k);
+          if (toU8) {
+            const float u = std::isfinite(v) ? (v - lo) / (hi - lo) * 255.0f : 0.0f;
+            out[at] = static_cast<std::uint8_t>(std::lround(std::clamp(u, 0.0f, 255.0f)));
+          } else {
+            std::memcpy(&out[at * sizeof(float)], &v, sizeof(float));
+          }
+        }
+      }
+    }
+    return out;
+  };
+  const auto sameBytes = [](const Image& img, const std::vector<std::uint8_t>& want) {
+    return img.byteSize() == want.size() && std::memcmp(img.pixels.get(), want.data(), want.size()) == 0;
+  };
+
+  for (const PixelDepth depth : {PixelDepth::U8, PixelDepth::U16, PixelDepth::F32}) {
+    for (const int ch : {1, 3, 4}) {
+      for (const char* layout : {"NCHW", "NHWC", "CHW", "HWC"}) {
+        CAPTURE(pixelDepthName(depth));
+        CAPTURE(ch);
+        CAPTURE(layout);
+        const std::int64_t w = 37, h = 23;
+        const Image img = test::image::makeTestImage(static_cast<std::int32_t>(w), static_cast<std::int32_t>(h), ch, depth);
+        Call c;
+        c.inputs["image"] = Data::image(img);
+        REQUIRE(c.run("image.to_tensor", {{"layout", Value::text(layout)},
+                                          {"scale", Value::number(scale)},
+                                          {"mean", Value::vec({0.1, 0.2, 0.3})},
+                                          {"std", Value::vec({0.229, 0.224, 0.225})}})
+                    .ok);
+        const Tensor t = *c.outputs["tensor"].asTensor();
+        const bool planar = std::string(layout) == "NCHW" || std::string(layout) == "CHW";
+        std::vector<float> want(static_cast<std::size_t>(w * h * ch));
+        for (std::int64_t y = 0; y < h; ++y) {
+          for (std::int64_t x = 0; x < w; ++x) {
+            for (std::int64_t k = 0; k < ch; ++k) {
+              const double v = img.at(static_cast<std::int32_t>(x), static_cast<std::int32_t>(y),
+                                      static_cast<std::int32_t>(k)) *
+                               scale;
+              const double norm = k < 3 ? (v - mean[k]) / sd[k] : v;
+              const std::size_t at = planar ? static_cast<std::size_t>((k * h + y) * w + x)
+                                            : static_cast<std::size_t>((y * w + x) * ch + k);
+              want[at] = static_cast<float>(norm);
+            }
+          }
+        }
+        REQUIRE(t.data.size() == want.size());
+        CHECK(std::memcmp(t.data.data(), want.data(), want.size() * sizeof(float)) == 0);
+
+        // 再读回图像：f32 与 u8 两种
+        c.inputs.clear();
+        c.inputs["tensor"] = Data::tensor(t);
+        for (const char* d : {"f32", "u8"}) {
+          CAPTURE(d);
+          REQUIRE(c.run("tensor.to_image", {{"layout", Value::text(layout)}, {"depth", Value::text(d)}}).ok);
+          CHECK(sameBytes(c.image(), refToImage(t, !planar, ch, h, w, std::string(d) == "u8")));
+        }
+      }
+    }
+  }
+
+  // 张量里有 nan / inf：u8 拉伸时跳过、写成 0；f32 原样
+  for (const bool interleaved : {true, false}) {
+    CAPTURE(interleaved);
+    Tensor t;
+    const std::int64_t c = 3, h = 4, w = 5;
+    t.shape = interleaved ? std::vector<std::int64_t>{h, w, c} : std::vector<std::int64_t>{c, h, w};
+    t.data.resize(static_cast<std::size_t>(c * h * w));
+    for (std::size_t i = 0; i < t.data.size(); ++i) t.data[i] = static_cast<float>(i) * 0.37f - 3.0f;
+    t.data[3] = std::numeric_limits<float>::quiet_NaN();
+    t.data[7] = std::numeric_limits<float>::infinity();
+    t.data[11] = -std::numeric_limits<float>::infinity();
+    Call c2;
+    c2.inputs["tensor"] = Data::tensor(t);
+    for (const char* d : {"f32", "u8"}) {
+      CAPTURE(d);
+      REQUIRE(c2.run("tensor.to_image", {{"layout", Value::text(interleaved ? "HWC" : "CHW")}, {"depth", Value::text(d)}}).ok);
+      CHECK(sameBytes(c2.image(), refToImage(t, interleaved, c, h, w, std::string(d) == "u8")));
+    }
+  }
 }
 
 TEST_CASE("image.normalize / blur：u16 拉伸到 u8 满量程；不拉伸按 scale 截断；大核中值滤波不收 u16") {

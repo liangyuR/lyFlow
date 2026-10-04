@@ -2,8 +2,9 @@
 // 菜单：「基础」+ 各配方（★ = 默认，红徽标 = 失配数）+「新建配方…」「管理配方…」。
 // 切换不弹窗、不进撤销：未保存的改动留在内存里（K6 ③）。
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
+import { useDismiss } from "../hooks/useDismiss";
 import { BASE_LABEL } from "../lib/recipes";
 import { useGraphStore } from "../store/graph";
 import { selectRecipe, useRecipeReports, useRecipeStore, useRecipesDirty } from "../store/recipe";
@@ -25,15 +26,8 @@ export function RecipeMenu() {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
 
-  // 点菜单外面收起
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: PointerEvent) => {
-      if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
-    };
-    window.addEventListener("pointerdown", away, true);
-    return () => window.removeEventListener("pointerdown", away, true);
-  }, [open]);
+  // 点菜单外面收起，Esc 也收起
+  useDismiss(open, box, useCallback(() => setOpen(false), []));
 
   const blocking = current ? (reports.get(current)?.blocking ?? 0) : 0;
   const pick = (name: string | null) => {

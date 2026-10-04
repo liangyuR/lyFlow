@@ -16,36 +16,7 @@ using namespace lyflow;
 
 namespace {
 
-class NullContext final : public ExecContext {
- public:
-  bool cancelled() const override { return false; }
-  void progress(float, std::string_view) override {}
-  void log(LogLevel, std::string) override {}
-  const std::filesystem::path& baseDir() const override { return baseDir_; }
-  int threadBudget() const override { return 1; }
-
- private:
-  std::filesystem::path baseDir_;
-};
-
-struct Call {
-  std::unordered_map<std::string, Data> inputs;
-  std::unordered_map<std::string, Data> outputs;
-  ParamMap params;
-
-  Status run(const std::string& opId, const std::unordered_map<std::string, Value>& overrides = {}) {
-    const OperatorDesc* op = ensureRegistry().find(opId);
-    REQUIRE(op != nullptr);
-    for (const Param& p : op->params) params[p.name] = p.def;
-    for (const auto& [k, v] : overrides) params[k] = v;
-    NullContext ctx;
-    const std::filesystem::path base;
-    ParamView view(params, base);
-    Inputs in(inputs);
-    Outputs out(outputs);
-    return op->compute(in, view, out, ctx);
-  }
-};
+using Call = test::OpCall;
 
 Box2D box(float xMin, float yMin, float xMax, float yMax) {
   Box2D b;

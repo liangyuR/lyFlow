@@ -4,9 +4,11 @@
 这里只剩把它装进一个桌面窗口所需要的东西（[ADR-0018](../docs/adr/0018-editor-as-package.md)）：
 
 ```
-src/main.tsx      入口：挑一个 Transport，装窗口桥与标题，渲染 <LyFlowEditor>
+src/main.tsx      入口：挑一个 Transport，装窗口桥、标题、关窗口前那一问与 WebView2 刷新键 / 右键菜单的挡板，渲染 <LyFlowEditor>
 src/dialogs.ts    Tauri 的文件对话框，注入给编辑器
 src/title.ts      窗口标题 `文件名 *`
+src/closeGuard.ts 关窗口前问一句（有没存的改动时）；要 capabilities 里的 core:window:allow-destroy
+src/browserGuard.ts 挡掉 WebView2 自己的浏览器快捷键（刷新 F5 / Ctrl+R、网页另存为 Ctrl+S、打印 Ctrl+P、查找 Ctrl+F / Ctrl+G / F3）与右键菜单（输入框里、选着文字时留着），以及从资源管理器拖进来、页面里没人接的文件（默认是导航过去）；只 preventDefault，编辑器照样收到这些键；Tauri 2 没开放那两个设置
 src/devbridge.ts  验收窗口桥（scripts/e2e 用）
 src/shell.css     页面级重置：html/body/#root 的高度与底色
 index.html        #root
@@ -27,16 +29,18 @@ const transport = inTauri() ? new TauriTransport() : new StaticTransport();
 
 ## 对话框归壳
 
-打开、另存、放弃改动、恢复备份、参数里的路径选择、3D 导出 PNG ——
-这六件事要弹系统对话框，编辑器包不认识 `@tauri-apps/plugin-dialog`，
-由 `src/dialogs.ts` 实现 `EditorDialogs` 注入进去。
+打开、另存、恢复备份、参数里的路径选择、3D 导出 PNG ——
+这几件事要弹系统对话框，编辑器包不认识 `@tauri-apps/plugin-dialog`，
+由 `src/dialogs.ts` 实现 `EditorDialogs` 注入进去。有没存的改动时那一问（保存 / 不保存 / 取消）是编辑器自己画的；
+关窗口是壳的事，`src/closeGuard.ts` 拦下 ×，问的也是编辑器那一问（包里导出的 `resolveUnsaved`）。
 
 ## 验收
 
 不写 UI 单元测试（CLAUDE.md）。验收方式是 CDP 驱动真实运行的 Tauri app：
 `pnpm e2e`，脚本在 [`scripts/e2e/`](../scripts/e2e/)。
 `src/devbridge.ts` 把包里那五个 store 挂到 `window.__lyflow` 上供脚本读状态 ——
-它只读+转发，不放任何业务逻辑，应用代码一律不许 import 它。
+它只读+转发，不放任何业务逻辑，应用代码一律不许 import 它。唯一往里写的是 `shell.stubPickPath`：原生的文件对话框会挡住自动化，
+`scripts/e2e/run.mjs` 起 app 就经它把 `dialogs.ts` 的 `pickPath` 换成桩（`overridePickPath`，正常使用时是 null）。
 
 浏览器宿主那条线是 `pnpm e2e:http`（`examples/host-react` + Node 桩服务器）。
 

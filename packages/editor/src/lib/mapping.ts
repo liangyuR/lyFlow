@@ -3,7 +3,7 @@
 
 import type { Edge, Node } from "@xyflow/react";
 
-import { subgraphIdOf, type GraphDoc } from "../types/graph";
+import { subgraphIdOf, type GraphDoc, type GraphNode } from "../types/graph";
 import type { AnyTypes, GraphContext } from "./typecheck";
 import { ANY, findPort, inferAnyTypes } from "./typecheck";
 
@@ -75,30 +75,37 @@ export function toReactFlow(
 ): { nodes: LyNode[]; edges: LyEdge[] } {
   const nodes: LyNode[] = doc.nodes.map((n) => {
     const size = measured?.get(n.id);
+    const data: OperatorNodeData = {
+      opId: n.op,
+      title: n.ui?.title ?? null,
+      collapsed: n.ui?.collapsed ?? false,
+      bypass: n.bypass === true,
+      anyType: anyTypes.get(n.id) ?? null,
+      subgraphId: subgraphIdOf(n.op),
+      library: n.op.startsWith("lib."),
+    };
+    // 只挪了位置的节点沿用上一轮的 data 对象：节点组件（OperatorNode）按引用比 data，
+    // 拖着几百个节点时每帧换一份新的 data，就是几百个节点每帧整个重渲
+    const prev = cache?.nodes.get(n.id)?.data;
     return {
       id: n.id,
       type: "operator" as const,
       position: n.ui?.position ?? { x: 0, y: 0 },
       selected: selection.nodes.has(n.id),
-      data: {
-        opId: n.op,
-        title: n.ui?.title ?? null,
-        collapsed: n.ui?.collapsed ?? false,
-        bypass: n.bypass === true,
-        anyType: anyTypes.get(n.id) ?? null,
-        subgraphId: subgraphIdOf(n.op),
-        library: n.op.startsWith("lib."),
-      },
+      data: prev && sameNodeData(prev, data) ? prev : data,
       ...(size ? { measured: size } : {}),
       ...(n.ui?.width != null ? { width: n.ui.width } : {}),
     };
   });
 
+  // 每条边要查两端的节点：先建一张表。原来逐条 doc.nodes.find，拖节点时每帧都是「边数 × 节点数」
+  const byId = new Map<string, GraphNode>();
+  for (const n of doc.nodes) byId.set(n.id, n);
   const edges: LyEdge[] = doc.edges.map((e) => {
-    const color = edgeColor(doc, ctx, e.from.node, e.from.port, anyTypes);
+    const color = edgeColor(byId, ctx, e.from.node, e.from.port, anyTypes);
     // 惰性边（ADR-0016）：目标输入端口 lazy===true，上游闭包不进初始计划，
     // 主路径成功时不跑。画成虚线；tooltip 由边组件按 data.lazy 挂（components/FlowEdge.tsx）。
-    const lazy = isLazyInput(doc, ctx, e.to.node, e.to.port);
+    const lazy = isLazyInput(byId, ctx, e.to.node, e.to.port);
     return {
       id: e.id,
       source: e.from.node,
@@ -156,13 +163,19 @@ function sameNode(a: LyNode, b: LyNode): boolean {
     a.position.y === b.position.y &&
     a.measured?.width === b.measured?.width &&
     a.measured?.height === b.measured?.height &&
-    a.data.opId === b.data.opId &&
-    a.data.title === b.data.title &&
-    a.data.collapsed === b.data.collapsed &&
-    a.data.bypass === b.data.bypass &&
-    a.data.anyType === b.data.anyType &&
-    a.data.subgraphId === b.data.subgraphId &&
-    a.data.library === b.data.library
+    sameNodeData(a.data, b.data)
+  );
+}
+
+function sameNodeData(a: OperatorNodeData, b: OperatorNodeData): boolean {
+  return (
+    a.opId === b.opId &&
+    a.title === b.title &&
+    a.collapsed === b.collapsed &&
+    a.bypass === b.bypass &&
+    a.anyType === b.anyType &&
+    a.subgraphId === b.subgraphId &&
+    a.library === b.library
   );
 }
 
@@ -184,13 +197,13 @@ function sameEdge(a: LyEdge, b: LyEdge): boolean {
 
 /** 连线颜色取自源端口的**实际**类型：串了 reroute 之后颜色也要跟着源变（E6）。 */
 function edgeColor(
-  doc: GraphDoc,
+  byId: ReadonlyMap<string, GraphNode>,
   ctx: GraphContext,
   nodeId: string,
   portName: string,
   anyTypes: AnyTypes,
 ): string {
-  const node = doc.nodes.find((n) => n.id === nodeId);
+  const node = byId.get(nodeId);
   const op = node ? ctx.operatorsById.get(node.op) : undefined;
   const port = findPort(op, portName, "output");
   if (!port) return "#6b7280";
@@ -201,12 +214,12 @@ function edgeColor(
 /** 一条边是不是惰性的，只看目标节点的目标输入端口（ADR-0016）：
  *  这个端口的上游闭包不进初始计划，算子 compute 返回 Demand 时才被调度。 */
 function isLazyInput(
-  doc: GraphDoc,
+  byId: ReadonlyMap<string, GraphNode>,
   ctx: GraphContext,
   nodeId: string,
   portName: string,
 ): boolean {
-  const node = doc.nodes.find((n) => n.id === nodeId);
+  const node = byId.get(nodeId);
   const op = node ? ctx.operatorsById.get(node.op) : undefined;
   return findPort(op, portName, "input")?.lazy === true;
 }

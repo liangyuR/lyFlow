@@ -3,8 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pinRun, unpinRun } from "../lib/cloudCache";
 import { exportCanvasPng } from "../lib/exportPng";
 import { takePeekCanvas } from "../lib/peekCanvas";
-import { usePeekSource, type PeekSource } from "../lib/peekSource";
+import { cloudPortsOf } from "../lib/basecloud";
+import { fullId, levelOf } from "../lib/subgraph";
+import { keepLastFrame, usePeekSource, type PeekSource } from "../lib/peekSource";
 import { defaultViewFor, viewsFor } from "../lib/viewRule";
+import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
 import {
   clampPeekScreen,
@@ -45,7 +48,8 @@ const VIEW_TITLE: Record<PeekView, string> = {
 };
 
 function boundsOf(el: HTMLElement | null) {
-  const canvas = el?.closest(".canvas");
+  // 预览最大化时画布是 0 宽：按它夹的话窗口只能贴在左边、一截在屏幕外
+  const canvas = el?.closest(useUiStore.getState().viewerMaximized ? ".app__body" : ".canvas");
   if (!canvas) return null;
   const r = canvas.getBoundingClientRect();
   return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
@@ -80,7 +84,13 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
   }, [win.locked, live]);
 
   const frozen = win.locked ? frozenRef.current : null;
-  const src = frozen ?? live;
+  // 正在重算这个节点：接着显示上一帧（角上写「正在计算…」），不把视图卸掉 —— 视角、测量都留着，画面不闪
+  const lastGoodRef = useRef<PeekSource | null>(null);
+  useEffect(() => {
+    if (!win.locked && live.status === null) lastGoodRef.current = live;
+  }, [win.locked, live]);
+  const held = frozen ? null : keepLastFrame(live, lastGoodRef.current);
+  const src = frozen ?? held ?? live;
   const lockedNoData = win.locked !== null && frozen === null;
 
   const typeColor = useManifestStore((s) =>
@@ -183,6 +193,7 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
 
   const gotoSource = useCallback(() => {
     const ui = useUiStore.getState();
+    ui.setViewerMaximized(false);
     if (!samePath(ui.path, win.path)) ui.setPath(win.path);
     ui.setSelection([win.from.node], []);
   }, [win.path, win.from.node]);
@@ -191,8 +202,16 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
     const ui = useUiStore.getState();
     if (!samePath(ui.path, win.path)) ui.setPath(win.path);
     ui.setPinnedNode(win.from.node);
+    // 带上端口：从接在 rest 上的线打开，主视图看的就是 rest（不是这个节点的第一个点云口）。
+    // 不是点云口（Record、整个 Bundle 的字段表）就不动：别把这个节点先前选好的那个口冲掉
+    const port = win.field ? `${win.from.port}.${win.field}` : win.from.port;
+    const node = levelOf(useGraphStore.getState().doc, win.path).nodes.find((n) => n.id === win.from.node);
+    const manifest = useManifestStore.getState();
+    if (node && cloudPortsOf(manifest.operatorsById, node.op, manifest.bundle?.bundles).includes(port)) {
+      ui.setViewerPortPick(fullId(win.path, win.from.node), port);
+    }
     ui.showToast(`主 3D 视图已钉住 ${live.label}`);
-  }, [win.path, win.from.node, live.label]);
+  }, [win.path, win.from.node, win.from.port, win.field, live.label]);
 
   const exportPng = useCallback(() => {
     const ui = useUiStore.getState();
@@ -366,7 +385,12 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
         </button>
       </div>
 
-      <div className="peek__body">
+      <div className="peek__body" data-busy={held ? "1" : undefined}>
+        {held && (
+          <span className="peek__busy" data-testid="peek-busy">
+            正在计算…
+          </span>
+        )}
         {lockedNoData ? (
           <p className="peek__status" data-testid="peek-status">
             这一份快照没有数据

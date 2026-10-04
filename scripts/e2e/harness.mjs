@@ -71,18 +71,54 @@ export function stagePackagedApp() {
   if (!fs.existsSync(exe)) {
     throw new Error(`找不到 ${exe} —— 先跑 \`pnpm tauri build\``);
   }
+  // DLL 取安装包实际打进去的那一份（tauri.conf.json 的 bundle.resources，bridge/build.rs 的 stage_bundle_core），
+  // 不取 target/release/ 里的：那里几个构建脚本（app、CLI）都往里拷，谁后拷谁说了算
+  const bundled = path.join(ROOT, "bridge", "target", "bundle-core");
+  if (!fs.existsSync(bundled)) {
+    throw new Error(`找不到 ${bundled} —— 先跑 \`pnpm tauri build\``);
+  }
   const dir = path.join(os.tmpdir(), `lyflow 安装目录 ${process.pid}`);
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
-  let dlls = 0;
   // CLI 也拷进去：无 GUI 机器上的验收跑的就是这一份（§6 第二条）
-  const exes = ["lyflow-app.exe", "lyflow.exe"];
-  for (const name of fs.readdirSync(release)) {
-    if (name.endsWith(".dll")) dlls += 1;
-    else if (!exes.includes(name)) continue;
-    fs.copyFileSync(path.join(release, name), path.join(dir, name));
+  for (const name of ["lyflow-app.exe", "lyflow.exe"]) {
+    if (fs.existsSync(path.join(release, name))) fs.copyFileSync(path.join(release, name), path.join(dir, name));
+  }
+  let dlls = 0;
+  for (const name of fs.readdirSync(bundled)) {
+    if (!name.toLowerCase().endsWith(".dll")) continue;
+    fs.copyFileSync(path.join(bundled, name), path.join(dir, name));
+    dlls += 1;
   }
   return { dir, exe: path.join(dir, "lyflow-app.exe"), cli: path.join(dir, "lyflow.exe"), dlls };
+}
+
+/** 没存过盘的图的自动备份（packages/editor/src/lib/autosave.ts）在 app data 里，验收用的是真的 app data。
+ *  验收搭的图都没存过盘，30 秒一拍会写下一份：跑之前把用户自己的那份挪开（不然开 app 时那一问会挡在脚本前面），
+ *  收尾时删掉跑出来的、再挪回去（不然用户下次开 app 会被问要不要恢复一张验收脚本搭的图）。 */
+export const UNTITLED_BACKUP = path.join(process.env.APPDATA ?? os.homedir(), "com.lyflow.app", "untitled.lyflow.json~");
+const UNTITLED_PARKED = `${UNTITLED_BACKUP}.e2e-parked`;
+
+function parkUntitledBackup() {
+  try {
+    // 上一回跑崩了没收尾：挪开的那份还在，现在这一份是验收留下的，收尾时会删
+    if (fs.existsSync(UNTITLED_BACKUP) && !fs.existsSync(UNTITLED_PARKED)) {
+      fs.renameSync(UNTITLED_BACKUP, UNTITLED_PARKED);
+    } else if (fs.existsSync(UNTITLED_BACKUP)) {
+      fs.rmSync(UNTITLED_BACKUP, { force: true });
+    }
+  } catch {
+    /* 挪不动就算了：最多开 app 时多问一句 */
+  }
+}
+
+function unparkUntitledBackup() {
+  try {
+    fs.rmSync(UNTITLED_BACKUP, { force: true });
+    if (fs.existsSync(UNTITLED_PARKED)) fs.renameSync(UNTITLED_PARKED, UNTITLED_BACKUP);
+  } catch {
+    /* 同上 */
+  }
 }
 
 /** 启动 app 并连上它的 WebView2。三种模式（默认 `tauri dev` / `packagedExe` /
@@ -91,6 +127,7 @@ export async function launchApp({ verbose = false, packagedExe = null } = {}) {
   const attach = process.env.LYFLOW_E2E_ATTACH === "1";
   let child = null;
   let killing = false;
+  if (!attach) parkUntitledBackup();
 
   if (packagedExe && !attach) {
     console.log(`启动已打包的 ${packagedExe}（CDP 端口 ${CDP_PORT}）`);
@@ -186,6 +223,7 @@ export async function launchApp({ verbose = false, packagedExe = null } = {}) {
         }
         await sleep(1500);
       }
+      if (!attach) unparkUntitledBackup();
     },
   };
 }

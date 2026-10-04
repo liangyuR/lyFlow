@@ -171,8 +171,15 @@ bool covers(const std::vector<PortEntry>& table, const std::vector<std::string>&
 bool readFile(const std::filesystem::path& file, std::string& out) {
   std::ifstream in(file, std::ios::binary);
   if (!in) return false;
-  out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-  return static_cast<bool>(in) || in.eof();
+  // 量好大小一次读完。原来用 istreambuf_iterator 逐字节走 streambuf、边读边扩容，
+  // 几十 MB 的点云缓存光读就要几百毫秒 —— 命中缓存反倒成了慢的那一步
+  in.seekg(0, std::ios::end);
+  const std::streamoff size = in.tellg();
+  if (size < 0) return false;
+  in.seekg(0, std::ios::beg);
+  out.resize(static_cast<std::size_t>(size));
+  if (size > 0 && !in.read(out.data(), static_cast<std::streamsize>(size))) return false;
+  return true;
 }
 
 /// cacheKey 本来就是十六进制；防一手别的字符进路径。

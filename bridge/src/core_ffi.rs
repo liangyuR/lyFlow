@@ -44,8 +44,12 @@ pub(crate) fn dll_file() -> PathBuf {
 }
 
 /// 开发期热重载的源头：`scripts/core-watch.ps1` 就往这里构建（ADR-0009）。
-/// 安装包里这个路径不存在，watcher 于是不启动。
+/// 只在 debug 构建里开：这个路径是编译时写死的，构建机上它一直在 —— 在那台机器上开打包出来的 app，
+/// 它会盯着开发目录，`build-core.ps1` 一编就把装好的 core 换成另一份（包都可能不一样）。
 pub fn watch_source() -> Option<PathBuf> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent()?;
     let path = repo.join("build").join("core").join("bin").join(DLL_NAME);
     path.exists().then_some(path)

@@ -3,6 +3,8 @@ import ReactDOM from "react-dom/client";
 
 import { LyFlowEditor, TauriTransport, StaticTransport, type Transport } from "@lyflow/editor";
 
+import { installBrowserGuard } from "./browserGuard";
+import { installCloseGuard } from "./closeGuard";
 import { installDevBridge } from "./devbridge";
 import { tauriDialogs } from "./dialogs";
 import { installWindowTitle } from "./title";
@@ -22,6 +24,9 @@ const transport: Transport = inTauri() ? new TauriTransport() : new StaticTransp
 // 免得脚本连上来时 store 的订阅还没建立、错过最早的几次状态变迁。
 installDevBridge(transport);
 installWindowTitle();
+void installCloseGuard();
+// 桌面壳里挡掉 WebView2 自己的刷新键与右键菜单（browserGuard.ts）；浏览器里不装
+if (inTauri()) installBrowserGuard(window, { dev: import.meta.env.DEV });
 
 ReactDOM.createRoot(root).render(
   <React.StrictMode>

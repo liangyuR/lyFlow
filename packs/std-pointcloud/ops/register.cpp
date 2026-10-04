@@ -36,7 +36,7 @@ void registerPackOps(Registry& r) {
   ops::registerEditTranslateRegion(r);
 
   // 写盘格式的知识只有本包有，core 的 C ABI 经这个钩子转交（ADR-0014）。
-  setCloudWriter(&ops::saveCloudToFile);
+  setCloudWriter(static_cast<CloudWriterFn>(&ops::saveCloudToFile));
 }
 
 }  // namespace lyflow::packs::std_pointcloud

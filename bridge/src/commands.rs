@@ -12,7 +12,8 @@ use tauri::{Manager, Runtime};
 use crate::core_ffi;
 use crate::library_settings;
 use crate::execution::{
-    encode_cloud, encode_image, encode_indices, encode_tensor, PreviewOptions, RunManager, StartOptions,
+    encode_cloud, encode_image, encode_indices, encode_tensor, PauseMode, PreviewOptions, RunManager,
+    StartOptions,
 };
 use crate::graph::GraphDoc;
 use crate::host::{self, HostConfig};
@@ -662,8 +663,9 @@ pub fn get_library_settings<R: Runtime>(app: tauri::AppHandle<R>) -> Result<Libr
 }
 
 /// 写设置里的额外目录并立刻重扫（设置界面「添加 / 删除」）。拿回新 manifest，与 refresh_library 同形。
+/// 三个库命令都是 async：重扫要等被抢占的运行退出，那可能是一个停不下来的算子（`rescan_library_paused`）。
 #[tauri::command]
-pub fn set_library_dirs<R: Runtime>(
+pub async fn set_library_dirs<R: Runtime>(
     app: tauri::AppHandle<R>,
     runs: tauri::State<'_, RunManager>,
     #[allow(non_snake_case)] extraDirs: Vec<String>,
@@ -672,11 +674,18 @@ pub fn set_library_dirs<R: Runtime>(
         return Err("库目录由宿主配置（HostConfig.library_dirs），在这里改不了".into());
     }
     library_settings::write_extra(&app_data_dir(&app)?, &extraDirs)?;
-    let status = rescan_library(&app, &runs)?;
-    Ok(LibraryRefresh {
-        status,
-        manifest: manifest_value()?,
-    })
+    let runs = runs.inner().clone();
+    off_main(move || rescan_library_paused(&app, &runs)).await
+}
+
+/// 在 Tauri 的阻塞线程池上跑：同步命令在主线程上执行，在那里等一个停不下来的算子，
+/// 整个窗口就跟着卡（ADR-0027：运行卡在 3 s 的算子里时「重扫库目录」让最轻的 IPC 等了 2.9 s）。
+async fn off_main<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|e| format!("后台任务没跑完: {e}"))?
 }
 
 /// 库目录里每个 `*.lyflow-op.json` 的（路径, 大小, 修改时间），排好序。
@@ -716,18 +725,45 @@ pub fn library_changed_since_scan(dirs: &[String]) -> bool {
     LAST_SCAN.lock().unwrap_or_else(|e| e.into_inner()).as_ref() != Some(&now)
 }
 
-/// 重扫一遍库目录。
-pub fn rescan_library<R: Runtime>(
-    app: &tauri::AppHandle<R>,
-    runs: &RunManager,
-) -> Result<LibraryStatus, String> {
-    rescan_library_dirs(runs, library_dirs(app)?)
+/// 启动时扫一遍库目录（host::setup）：那时还没有运行，也还在主线程上。之后一律走 `rescan_library_paused`。
+pub fn rescan_library<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<LibraryStatus, String> {
+    rescan_library_dirs(library_dirs(app)?)
 }
 
-/// 重建注册表之前只停活跃的 run，上一次跑完的留着（`RunManager::stop_active`）：
-/// 不换 DLL，结果仓里的数据照样有效；drop_all 是热重载的事（ADR-0009）。
-pub fn rescan_library_dirs(runs: &RunManager, dirs: Vec<String>) -> Result<LibraryStatus, String> {
-    runs.stop_active();
+/// 维护窗口里的重扫（ADR-0027）：停下运行、等它们退出、回到主线程重扫并取新 manifest、恢复 ——
+/// 窗口里发起的运行排着队，恢复后按最新的那个开跑。
+///
+/// 等的可能是一个停不下来的算子，所以**不在主线程上调**（库命令经 `off_main`，watcher 在自己的线程上）；
+/// 重扫这一步却要回到主线程：注册表在 core 里没有锁，validate / plan / manifest 这些同步命令都在主线程上读它，
+/// 在那里改才不会与它们交错。新 manifest 也在那里一并取 —— 放掉窗口之后再取，就可能撞上下一次重扫。
+pub fn rescan_library_paused<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    runs: &RunManager,
+) -> Result<LibraryRefresh, String> {
+    let dirs = library_dirs(app)?;
+    let mut paused = runs.pause(PauseMode::KeepResults);
+    paused.drain();
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let refresh = rescan_library_dirs(dirs).and_then(|status| {
+            Ok(LibraryRefresh {
+                status,
+                manifest: manifest_value()?,
+            })
+        });
+        let _ = tx.send(refresh);
+    })
+    .map_err(|e| format!("交给主线程重扫失败: {e}"))?;
+    let refresh = rx
+        .recv()
+        .map_err(|_| "重扫库目录没跑完：主线程已经退出".to_string())?;
+    drop(paused);
+    refresh
+}
+
+/// 重扫这几个目录、替换全部库算子（不碰运行）。调用方保证此刻没有运行握着算子描述、
+/// 也没有别的线程在读注册表：启动时直接调，之后在 `rescan_library_paused` 的窗口里、主线程上调。
+pub fn rescan_library_dirs(dirs: Vec<String>) -> Result<LibraryStatus, String> {
     // 扫之前取：扫的途中文件又变了的话，记下的是旧样子，watcher 会再扫一遍
     let seen = library_fingerprint(&dirs);
     let core = core_ffi::core()?;
@@ -772,15 +808,12 @@ pub struct LibraryRefresh {
 }
 
 #[tauri::command]
-pub fn refresh_library<R: Runtime>(
+pub async fn refresh_library<R: Runtime>(
     app: tauri::AppHandle<R>,
     runs: tauri::State<'_, RunManager>,
 ) -> Result<LibraryRefresh, String> {
-    let status = rescan_library(&app, &runs)?;
-    Ok(LibraryRefresh {
-        status,
-        manifest: manifest_value()?,
-    })
+    let runs = runs.inner().clone();
+    off_main(move || rescan_library_paused(&app, &runs)).await
 }
 
 #[derive(Deserialize)]
@@ -796,7 +829,7 @@ pub struct LibraryMeta {
 
 /// 把 doc 里的一个子图存成库文件。文件名就是 `<id>.lyflow-op.json`。
 #[tauri::command]
-pub fn save_as_library<R: Runtime>(
+pub async fn save_as_library<R: Runtime>(
     app: tauri::AppHandle<R>,
     runs: tauri::State<'_, RunManager>,
     doc: GraphDoc,
@@ -853,7 +886,8 @@ pub fn save_as_library<R: Runtime>(
     text.push('\n');
     std::fs::write(&file, text).map_err(|e| format!("写入 {} 失败: {e}", file.display()))?;
 
-    rescan_library(&app, &runs)
+    let runs = runs.inner().clone();
+    off_main(move || rescan_library_paused(&app, &runs).map(|refresh| refresh.status)).await
 }
 
 // ---- 最近文件与备份
@@ -974,6 +1008,16 @@ pub fn read_backup<R: Runtime>(
     path: String,
 ) -> Result<LoadedGraph, String> {
     load_graph_at(&backup_path(&host::resolve_path(&host::config(&app), &path)?))
+}
+
+/// 没存过盘的图的定时备份放在哪：`<app data>/untitled.lyflow.json`。这个文件本身从不存在，备份写的是
+/// 它旁边的 `~` —— 于是 write_backup / backup_status / read_backup / discard_backup 原样能用，「备份在、
+/// 正文不在」天然就是「备份比正文新」。同时开两个窗口、都在画没存过的图时只留后写的那一份。
+#[tauri::command]
+pub fn untitled_backup_path<R: Runtime>(app: tauri::AppHandle<R>) -> Result<String, String> {
+    let dir = app_data_dir(&app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 {} 失败: {e}", dir.display()))?;
+    Ok(dir.join("untitled.lyflow.json").to_string_lossy().into_owned())
 }
 
 #[tauri::command]

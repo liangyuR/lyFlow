@@ -136,7 +136,9 @@ cargo 会按 feature 集把 `lyflow-app` 建好几遍（app、lib 的 test、CLI
 包用 `file(COPY ...)` 往 `bin/` 里放的 DLL（`std-ml` 的 `onnxruntime.dll` 就是）
 不会因为下次不带那个包构建就消失。`std-ml` 默认开，所以这一条现在只在
 `LYFLOW_STD_PACKS=0` 与默认之间来回切时咬人：纯平台构建的 `bin/` 是另一个目录，
-但 `bridge/target/` 里那份共享拷贝会留着上一次的。
+但 `bridge/target/<profile>/` 里那份共享拷贝会留着上一次的。安装包取的是
+`bridge/target/bundle-core/`（`build.rs` 每次 release 构建整份换掉），不受那份共享拷贝影响；
+同一个构建目录里换包时 `bin/` 自己留下的旧 DLL 仍会跟着进去。
 
 ## 一个包长什么样
 

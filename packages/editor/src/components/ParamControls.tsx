@@ -3,16 +3,23 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useMenuPlacement } from "../hooks/useMenuPlacement";
+import { copyText, readClipboard } from "../lib/clipboard";
+import { stepFor } from "../lib/params";
 import { curveProblem } from "../lib/curve";
 import { dialogs } from "../lib/dialogs";
 import { joinBind, type GraphBinding } from "../lib/graphParams";
 import { fullId, type SubPath } from "../lib/subgraph";
+import { applyNumEdit, numEditNote, type NumApplied, type NumEdit } from "../lib/numExpr";
+import { cleanPathText } from "../lib/params";
+import { graphParamPreviewId } from "../lib/preview";
+import { joinPath } from "../lib/recipes";
 import { useGraphStore } from "../store/graph";
 import { useUiStore } from "../store/ui";
 import type { EnumOption, Param } from "../types/manifest";
 
 import { CurveControl } from "./CurveControl";
-import { dragStepOf, NumberInput, Slider } from "./NumberInput";
+import { NumberInput, Slider } from "./NumberInput";
 import { TransformControl } from "./TransformControl";
 
 import "../styles.params.css";
@@ -31,11 +38,35 @@ export interface ControlProps {
   promotedAs?: string | undefined;
   /** 这个参数最终由哪个顶层图参数提供（param-recipe P1.4）。右键菜单据此给「纳入配方」或「解除绑定」。 */
   graphBinding?: GraphBinding | null | undefined;
+  /** 多选一起改时给：相对改法（*2、+=5）按每个节点各自的值算（updater 拿到那个节点此刻的值）。 */
+  onChangeEach?: ((update: (cur: unknown) => unknown) => void) | undefined;
+  /** 这是顶层图参数的控件（不属于哪个节点）：拖动时预览它绑着的节点、松手补运行。 */
+  previewGraphParam?: string | undefined;
+}
+
+/** 多选时的相对改法：每个节点按自己的值改，夹住的统计起来说一声。 */
+function relativeEach(
+  onChangeEach: (update: (cur: unknown) => unknown) => void,
+  label: string,
+  lim: { integer: boolean; min?: number | undefined; max?: number | undefined },
+  map: (cur: unknown, apply: (n: number) => number) => unknown,
+) {
+  return (edit: Extract<NumEdit, { kind: "rel" }>) => {
+    const results: NumApplied[] = [];
+    const apply = (n: number) => {
+      const r = applyNumEdit(edit, n, lim);
+      results.push(r);
+      return r.value;
+    };
+    onChangeEach((cur) => map(cur, apply));
+    const note = numEditNote(label, results, lim);
+    if (note) useUiStore.getState().showToast(note, "warn");
+  };
 }
 
 // ---------------------------------------------------------------- 数值
 
-function NumberControl({ param, value, disabled, onChange, nodeId }: ControlProps) {
+function NumberControl({ param, value, disabled, onChange, nodeId, onChangeEach }: ControlProps) {
   const integer = param.type === "int";
   const num = typeof value === "number" ? value : 0;
   const sMin = param.softMin ?? param.min;
@@ -51,7 +82,15 @@ function NumberControl({ param, value, disabled, onChange, nodeId }: ControlProp
         min={param.min}
         max={param.max}
         step={param.step}
-        dragStep={dragStepOf(param, integer)}
+        label={param.label || param.name}
+        onRelative={
+          onChangeEach
+            ? relativeEach(onChangeEach, param.label || param.name, { integer, min: param.min, max: param.max }, (cur, apply) =>
+                typeof cur === "number" ? apply(cur) : cur,
+              )
+            : undefined
+        }
+        dragStep={(ref) => stepFor(param, integer, ref)}
         dragName={param.name}
         nodeId={nodeId}
         onCommit={onChange}
@@ -77,7 +116,7 @@ function NumberControl({ param, value, disabled, onChange, nodeId }: ControlProp
 
 const DEFAULT_COMPONENTS = ["X", "Y", "Z", "W"];
 
-function VectorControl({ param, value, disabled, onChange, nodeId }: ControlProps) {
+function VectorControl({ param, value, disabled, onChange, nodeId, onChangeEach }: ControlProps) {
   const size = param.type === "vec2f" ? 2 : param.type === "vec3f" ? 3 : 4;
   const vec = Array.isArray(value) ? (value as number[]) : new Array<number>(size).fill(0);
   const labels = param.componentLabels ?? DEFAULT_COMPONENTS;
@@ -104,7 +143,25 @@ function VectorControl({ param, value, disabled, onChange, nodeId }: ControlProp
               min={param.min}
               max={param.max}
               step={param.step}
-              dragStep={dragStepOf(param, false)}
+              label={`${param.label || param.name} ${labels[i] ?? DEFAULT_COMPONENTS[i]}`}
+              onRelative={
+                onChangeEach
+                  ? relativeEach(onChangeEach, `${param.label || param.name} ${labels[i] ?? DEFAULT_COMPONENTS[i]}`,
+                      { integer: false, min: param.min, max: param.max },
+                      (cur, apply) => {
+                        if (!Array.isArray(cur)) return cur;
+                        // 锁着：按改的那个分量算一次，其余分量跟它一样（与单选时锁着的行为一致）
+                        if (locked) {
+                          const c = cur[i];
+                          if (typeof c !== "number") return cur;
+                          const v = apply(c);
+                          return cur.map(() => v);
+                        }
+                        return cur.map((c, j) => (j === i && typeof c === "number" ? apply(c) : c));
+                      })
+                  : undefined
+              }
+              dragStep={(ref) => stepFor(param, false, ref)}
               dragName={`${param.name}-${i}`}
               nodeId={nodeId}
               onCommit={(v) => setComponent(i, v)}
@@ -194,16 +251,35 @@ function FlagsControl({ param, value, disabled, onChange }: ControlProps) {
   );
 }
 
-function TextishControl({ param, value, disabled, onChange }: ControlProps) {
+function TextishControl({
+  param,
+  value,
+  disabled,
+  onChange,
+  normalize,
+}: ControlProps & { normalize?: (text: string) => string }) {
   const [text, setText] = useState(String(value ?? ""));
   const editing = useRef(false);
+  /** Esc 撤回：接着的 blur 不提交（同 NumberInput —— onBlur 拿到的还是打进去的那个 text） */
+  const cancelled = useRef(false);
   useEffect(() => {
     if (!editing.current) setText(String(value ?? ""));
   }, [value]);
 
   const commit = () => {
     editing.current = false;
-    if (text !== value) onChange(text);
+    if (cancelled.current) {
+      cancelled.current = false;
+      setText(String(value ?? ""));
+      return;
+    }
+    // 没动过：照旧什么都不做。存着的值带空格、引号（老图、CLI --set）时点进去再点出来不该悄悄改掉它，
+    // 多选里更不该把第一个节点的值写给大家
+    if (text === value) return;
+    const next = normalize ? normalize(text) : text;
+    if (next !== text) setText(next);
+    // 收拾过的字与当前值一样也交出去：多选里各节点的值不一样时（显示的是第一个的），外面靠这一下统一
+    if (next !== value || next !== text) onChange(next);
   };
 
   const shared = {
@@ -229,8 +305,7 @@ function TextishControl({ param, value, disabled, onChange }: ControlProps) {
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
         if (e.key === "Escape") {
-          editing.current = false;
-          setText(String(value ?? ""));
+          cancelled.current = true;
           e.currentTarget.blur();
         }
       }}
@@ -239,18 +314,32 @@ function TextishControl({ param, value, disabled, onChange }: ControlProps) {
 }
 
 function PathControl({ param, value, disabled, onChange }: ControlProps) {
+  // 宿主给了文件对话框（桌面壳是原生的）才摆「浏览…」；没给的（浏览器宿主）路径手填或粘
+  const pickPath = dialogs().pickPath;
   const pick = async () => {
-    const pickPath = dialogs().pickPath;
-    if (!pickPath) {
-      useUiStore.getState().showToast("当前宿主没有文件对话框，请手动填路径", "warn");
-      return;
-    }
+    if (!pickPath) return;
     const filters = (param.filters ?? []).map((f) => ({ name: f.name, extensions: f.extensions }));
-    const picked = await pickPath({
-      mode: param.mode === "save" ? "save" : param.mode === "dir" ? "dir" : "open",
-      filters,
-    });
-    if (typeof picked === "string") onChange(picked);
+    // 对话框从框里的那个路径开：绝对路径照原样；相对路径是相对图文件所在目录的（gap-inspector-integration-design §2.8，
+    // 整个目录拷走不用改图）—— 拼上那个目录给它，没存过盘的图不给
+    const current = typeof value === "string" ? cleanPathText(value) : "";
+    const absolute = /^([A-Za-z]:[\\/]|[\\/])/.test(current);
+    const graphPath = useGraphStore.getState().filePath;
+    const cut = graphPath ? Math.max(graphPath.lastIndexOf("/"), graphPath.lastIndexOf("\\")) : -1;
+    const graphDir = graphPath && cut >= 0 ? graphPath.slice(0, cut + 1) : null;
+    const start = current === "" ? undefined : absolute ? current : graphDir ? joinPath(graphDir, current) : undefined;
+    try {
+      const picked = await pickPath({
+        mode: param.mode === "save" ? "save" : param.mode === "dir" ? "dir" : "open",
+        filters,
+        ...(start ? { defaultPath: start } : {}),
+      });
+      if (typeof picked !== "string" || picked === "") return;
+      // 原来是相对路径、选的又在图所在的目录下面：照旧存相对的（不然这一个节点换了目录就找不到，别的还找得到）
+      const keepRelative = current !== "" && !absolute && graphDir !== null && picked.toLowerCase().startsWith(graphDir.toLowerCase());
+      onChange(keepRelative ? picked.slice(graphDir.length).replace(/\\/g, "/") : picked);
+    } catch (e) {
+      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
+    }
   };
 
   return (
@@ -260,10 +349,13 @@ function PathControl({ param, value, disabled, onChange }: ControlProps) {
         value={value}
         disabled={disabled}
         onChange={onChange}
+        normalize={cleanPathText}
       />
-      <button type="button" className="ctl-btn" disabled={disabled} onClick={() => void pick()}>
-        浏览…
-      </button>
+      {pickPath && (
+        <button type="button" className="ctl-btn" disabled={disabled} onClick={() => void pick()}>
+          浏览…
+        </button>
+      )}
     </div>
   );
 }
@@ -278,20 +370,53 @@ function toHex(v: unknown): string {
   return `#${c(r)}${c(g)}${c(b)}`;
 }
 
+/** 取色器停手这么久就算选完了，记那一条撤销。 */
+const COLOR_SETTLE_MS = 400;
+
 function ColorControl({ param, value, disabled, onChange, nodeId }: ControlProps) {
   const arr = Array.isArray(value) ? (value as number[]) : [0, 0, 0];
   const hex = toHex(value);
   const alpha = arr.length === 4 ? (arr[3] ?? 1) : null;
+
+  // 取色器拖着选的时候一直发 input（React 的 onChange 就是它）：以前每一下都是一条撤销、一次校验。现在一段选色包成
+  // 一条：第一次 input 时 begin，原生 change（取色器关上）、失焦、卸载或者停手 400 ms 时 commit
+  const input = useRef<HTMLInputElement>(null);
+  const live = useRef(false);
+  const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finish = useCallback(() => {
+    if (settle.current) clearTimeout(settle.current);
+    settle.current = null;
+    if (!live.current) return;
+    live.current = false;
+    useGraphStore.getState().commit(`修改 ${param.label ?? param.name}`);
+  }, [param.label, param.name]);
+  useEffect(() => {
+    const el = input.current;
+    el?.addEventListener("change", finish);
+    return () => {
+      el?.removeEventListener("change", finish);
+      finish();
+    };
+  }, [finish]);
+
   return (
     <div className="ctl-row ctl-color">
       {/* 色块本身就是取色器；旁边写出十六进制，面板里扫一眼就对得上数 */}
       <input
+        ref={input}
         className="ctl ctl--color"
         type="color"
         disabled={disabled}
         value={hex}
         data-testid={`color-${param.name}`}
+        onBlur={finish}
         onChange={(e) => {
+          if (!live.current) {
+            live.current = true;
+            useGraphStore.getState().begin();
+          }
+          if (settle.current) clearTimeout(settle.current);
+          settle.current = setTimeout(finish, COLOR_SETTLE_MS);
           const next = e.target.value;
           const rgb = [1, 3, 5].map((i) => parseInt(next.slice(i, i + 2), 16) / 255);
           // 保留原有 alpha 分量，取色器只给 RGB
@@ -401,38 +526,6 @@ function coerceValue(param: Param, raw: unknown): Coerced {
   }
 }
 
-/** 剪贴板可能因为不安全上下文或没授权而不可用，一律吞掉异常返回失败。 */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return legacyCopy(text);
-  }
-}
-
-function legacyCopy(text: string): boolean {
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.cssText = "position:fixed;top:-1000px;opacity:0";
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    ta.remove();
-    return ok;
-  } catch {
-    return false;
-  }
-}
-
-async function readClipboard(): Promise<string | null> {
-  try {
-    return await navigator.clipboard.readText();
-  } catch {
-    return null;
-  }
-}
 
 function ParamMenu({
   param,
@@ -461,6 +554,7 @@ function ParamMenu({
   const path = at ?? uiPath;
   const inSubgraph = path.length > 0;
   const ref = useRef<HTMLDivElement>(null);
+  const placement = useMenuPlacement(ref, { x, y });
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -499,9 +593,15 @@ function ParamMenu({
       try {
         raw = JSON.parse(text) as unknown;
       } catch {
-        ui.showToast("粘贴失败：剪贴板内容不是合法 JSON", "warn");
-        return;
+        // 路径参数：资源管理器「复制文件地址」给的 "D:\data\x.pcd" 不是合法 JSON，按路径收
+        if (param.type !== "path") {
+          ui.showToast("粘贴失败：剪贴板内容不是合法 JSON", "warn");
+          return;
+        }
+        raw = cleanPathText(text);
       }
+      // "D:\track\frame.pcd" 恰好是合法 JSON，\t、\f 却解成了控制字符：按原文当路径收（「复制值」复制出来的是转义过的，解出来没有控制字符）
+      if (param.type === "path" && typeof raw === "string" && /[\u0000-\u001f]/.test(raw)) raw = cleanPathText(text);
       const r = coerceValue(param, raw);
       if (!r.ok) {
         ui.showToast(r.msg, "warn");
@@ -516,7 +616,7 @@ function ParamMenu({
       ref={ref}
       className="ctxmenu param-menu"
       data-testid="param-menu"
-      style={{ left: Math.max(4, Math.min(x, window.innerWidth - 180)), top: y }}
+      style={placement}
       onContextMenu={(e) => e.preventDefault()}
     >
       <button
@@ -656,8 +756,9 @@ export function ParamControl(props: ControlProps) {
   const uiPath = useUiStore((s) => s.path);
   // live preview 的目标是「相对当前层级」的 id：fire() 会再拼上 ui.path 的前缀。
   // 参数面板展开进子图定义的那几行在更深一层，这里把中间那几段实例补上
-  const previewId =
-    props.nodeId && props.path && props.path.length > uiPath.length
+  const previewId = props.previewGraphParam
+    ? graphParamPreviewId(props.previewGraphParam)
+    : props.nodeId && props.path && props.path.length > uiPath.length
       ? [...props.path.slice(uiPath.length).map((seg) => seg.nodeId), props.nodeId].join("/")
       : props.nodeId;
 

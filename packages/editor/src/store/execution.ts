@@ -4,10 +4,11 @@
 import { create } from "zustand";
 
 import { flashNodesLocate } from "../lib/motion";
-import { localIdOf, pathPrefix, type SubPath } from "../lib/subgraph";
+import { localIdOf, locateEventNode, pathPrefix, type SubPath } from "../lib/subgraph";
 import { transport } from "../transport";
 import { refreshCacheStats, useCacheStore } from "./cache";
-import { currentRecipeBlocker, runParamsOf } from "./recipe";
+import { currentRecipeBlocker, runParamsOf, useRecipeStore } from "./recipe";
+import { useRunHistoryStore } from "./runHistory";
 import { useUiStore } from "./ui";
 import type {
   Diagnostic,
@@ -32,6 +33,11 @@ export interface NodeExecution {
   stats?: NodeStats | undefined;
   /** 聚合出来的（子图节点）：内部一共几个节点、跑完了几个。 */
   children?: { total: number; finished: number } | undefined;
+  /** 聚合出来的（子图节点）：errors 里第一条来自哪个内部节点（事件里的完整路径 id）。
+   *  节点上的错误文字据此写明是谁、点进去直接打开到它（顶层原来只看得到「这个子图红了」）。 */
+  errorSource?: string | undefined;
+  /** 聚合出来的（子图节点）：errors 每一条来自哪个内部节点，与 errors 一一对应（检查器里逐条写明、可点）。 */
+  errorSources?: string[] | undefined;
 }
 
 export interface LogEntry {
@@ -88,8 +94,12 @@ interface ExecutionState {
   /** 还不知道该归给谁的事件：C++ 先起线程再返回句柄，事件可能比 `run_graph`
    *  的返回值先到。直接丢会让小图整场跑完而界面毫无反应，所以先攒着认领。 */
   orphans: ExecutionEvent[];
+  /** 取消已经发出去、run_finished 还没到（停不下来的算子要等它自己跑完）。工具栏这时写「取消中…」。 */
+  cancelling: boolean;
+  /** 这一次运行是按什么发起的（展开后的路径 id）：「↻ 重跑」照它再来一次。 */
+  request: RunRequest | null;
 
-  beginRun(runId: string, targets: string[], preview: boolean, isolate?: string[]): void;
+  beginRun(runId: string, targets: string[], preview: boolean, isolate?: string[], request?: RunRequest | null): void;
   failRun(message: string): void;
   apply(event: ExecutionEvent): void;
   markStale(): void;
@@ -170,6 +180,21 @@ function dropStaged(): void {
   latestSeq = -1;
 }
 
+/** 判定（NG / 边界 / ok）看的节点表。拖参数的预览运行（抽稀的）、节点表还不是这一次的（带 targets 的运行开跑前，
+ *  可能还是预览那次的）、松手自动补的那一次还在跑：都留着上一次正式运行的。工具栏的计数与查找节点的 is:ng 看同一份，
+ *  不然点「NG 1」列出来的是另一回事。 */
+let judgedNodes: ReadonlyMap<string, NodeExecution> = new Map();
+
+export function judgedNodesOf(s: Pick<ExecutionState, "nodes" | "preview" | "runId" | "resultRunId" | "runStatus" | "request">) {
+  const hold = s.preview || s.resultRunId !== s.runId || (s.runStatus === "running" && s.request?.auto === true);
+  if (!hold) judgedNodes = s.nodes;
+  return judgedNodes;
+}
+
+export function useJudgedNodes(): ReadonlyMap<string, NodeExecution> {
+  return useExecutionStore(judgedNodesOf);
+}
+
 export const useExecutionStore = create<ExecutionState>((set, get) => ({
   runId: null,
   resultRunId: null,
@@ -187,8 +212,10 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   lastSeq: -1,
   error: null,
   orphans: [],
+  cancelling: false,
+  request: null,
 
-  beginRun(runId, targets, preview, isolate = []) {
+  beginRun(runId, targets, preview, isolate = [], request = null) {
     const claimed = get()
       .orphans.filter((e) => e.runId === runId)
       .sort((a, b) => a.seq - b.seq);
@@ -218,6 +245,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       lastSeq: -1,
       error: null,
       orphans: [],
+      // 抢占了一个正在取消的：「取消中」到此为止
+      cancelling: false,
+      request,
     });
     // 认领在 run_graph 返回之前就到达的事件。
     for (const e of claimed) get().apply(e);
@@ -225,7 +255,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
 
   failRun(message) {
     dropStaged();
-    set({ runId: null, runStatus: "error", error: message, durationMs: null, orphans: [] });
+    set({ runId: null, runStatus: "error", error: message, durationMs: null, orphans: [], cancelling: false });
   },
 
   apply(event) {
@@ -251,6 +281,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       case "run_started": {
         // 真开跑了：从这一刻起节点表里的结果按这一次取（排队中的请求要等被抢占的那个退出，见 resultRunId）
         if (s.resultRunId !== event.runId) set({ resultRunId: event.runId });
+        useRunHistoryStore.getState().planned(event.runId, event.plan ?? []);
         if (s.isolate.length === 0 && s.targets.length > 0) {
           // 部分运行（运行到此、智能运行，V2）：计划里的节点照常先亮成「排队中」，
           // 计划外的留着上一次的样子，收场时再按 attached 决定留不留
@@ -354,6 +385,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         if (s.resultRunId !== event.runId) settleAbandoned();
         set({
           runStatus: event.status as RunStatus,
+          cancelling: false,
           durationMs: event.durationMs ?? null,
           lastSeq: event.seq,
           // ADR-0022：成败判定的权威在这一份上，前端只显示不重建。
@@ -362,6 +394,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         // 预览时不刷缓存统计：那是「事件到渲染」这条热路径上白多出来的一次 IPC
         if (!s.preview) void refreshCacheStats();
         if (s.isolate.length > 0) reportNotReady(event.diagnostics);
+        // 调参记录：这一次的状态、耗时与量测读数（预览不记，begin 时就没记它）
+        useRunHistoryStore.getState().finish(event.runId, event.status as RunStatus, event.durationMs ?? null, useExecutionStore.getState().nodes);
         break;
       }
       case "log": {
@@ -403,6 +437,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       lastSeq: -1,
       error: null,
       orphans: [],
+      cancelling: false,
+      request: null,
     });
   },
 }));
@@ -479,16 +515,19 @@ const RANK: Record<NodeState, number> = {
 
 /** 子图节点的状态 = 内部节点的归约：任一 error → error，任一 running → running，
  *  全 done/skipped → done（全 skipped 才算 skipped）。 */
-function reduceExecutions(list: readonly NodeExecution[]): NodeExecution {
+function reduceExecutions(list: readonly NodeExecution[], ids: readonly string[]): NodeExecution {
   let state: NodeState = "skipped";
   let duration = 0;
   let finished = 0;
   const errors: Diagnostic[] = [];
-  for (const n of list) {
+  const errorSources: string[] = [];
+  for (let i = 0; i < list.length; i += 1) {
+    const n = list[i]!;
     if (RANK[n.state] > RANK[state]) state = n.state;
     duration += n.durationMs ?? 0;
     if (n.state === "done" || n.state === "skipped") finished += 1;
     errors.push(...n.errors);
+    for (let k = 0; k < n.errors.length; k += 1) errorSources.push(n.errorSources?.[k] ?? ids[i]!);
   }
   // 全 done/skipped → done（全 skipped 才算 skipped）；有跑完的但还有没开始的 → pending
   if (state === "done" || state === "skipped") {
@@ -502,6 +541,8 @@ function reduceExecutions(list: readonly NodeExecution[]): NodeExecution {
     progress: list.length > 0 ? finished / list.length : undefined,
     errors,
     children: { total: list.length, finished },
+    errorSource: errorSources[0],
+    errorSources: errorSources.length > 0 ? errorSources : undefined,
   };
 }
 
@@ -515,7 +556,9 @@ function sameAggregate(a: NodeExecution | undefined, b: NodeExecution): boolean 
     a.message === b.message &&
     a.errors.length === b.errors.length &&
     a.children?.finished === b.children?.finished &&
-    a.children?.total === b.children?.total
+    a.children?.total === b.children?.total &&
+    a.errorSource === b.errorSource &&
+    a.errorSources?.join("|") === b.errorSources?.join("|")
   );
 }
 
@@ -535,22 +578,27 @@ export function aggregatedNodes(
   const cached = aggCache.get(path);
   if (cached && cached.nodes === nodes) return cached.result;
   const prefix = pathPrefix(path);
-  const groups = new Map<string, NodeExecution[]>();
+  const groups = new Map<string, { list: NodeExecution[]; ids: string[] }>();
   for (const [id, exec] of nodes) {
     if (prefix && !id.startsWith(prefix)) continue;
     const rest = id.slice(prefix.length);
     if (!rest) continue;
     const slash = rest.indexOf("/");
     const local = slash < 0 ? rest : rest.slice(0, slash);
-    const list = groups.get(local);
-    if (list) list.push(exec);
-    else groups.set(local, [exec]);
+    const group = groups.get(local);
+    if (group) {
+      group.list.push(exec);
+      group.ids.push(id);
+    } else {
+      groups.set(local, { list: [exec], ids: [id] });
+    }
   }
   const previous = cached?.result;
   const result = new Map<string, NodeExecution>();
-  for (const [local, list] of groups) {
-    // 叶子节点直接复用原对象，引用不变，节点组件就不会白重渲
-    const merged = list.length === 1 ? list[0]! : reduceExecutions(list);
+  for (const [local, { list, ids }] of groups) {
+    // 叶子节点直接复用原对象，引用不变，节点组件就不会白重渲。只有一个内部节点的子图也要归约 ——
+    // 否则它的错误不知道是谁的
+    const merged = list.length === 1 && ids[0] === prefix + local ? list[0]! : reduceExecutions(list, ids);
     const prev = previous?.get(local);
     result.set(local, prev && sameAggregate(prev, merged) ? prev : merged);
   }
@@ -631,10 +679,6 @@ export function setRunSceneId(next: string | null): void {
   sceneId = next;
 }
 
-export function runSceneId(): string | null {
-  return sceneId;
-}
-
 export interface RunRequest {
   targets?: string[] | undefined;
   /** 只运行这些节点（docs/node-run-plan.md R1），展开后的路径 id。给了它 targets 就不用再传。 */
@@ -647,6 +691,17 @@ export interface RunRequest {
   /** 顶层图参数的取值（param-recipe K3）。不给就用编辑器合成的「default + 当前配方覆盖」——
    *  界面上的每一次运行都是这样；给了就整份替换它（宿主或验收脚本要试一组别的值时用）。 */
   params?: Record<string, unknown> | undefined;
+  /** 不是人点的（拖参数之后补的那一次、切配方时的自动运行）：工具栏不因它换成「↻ 重跑」，拖参数时按钮不闪。 */
+  auto?: boolean | undefined;
+}
+
+/** 人点的运行（F5、▶、运行到这里、重跑）与切配方补的整图运行开跑前调一下：lib/preview 在这里撤掉攒着还没发的自动运行，
+ *  返回它们要算到的节点 —— 整图运行已经包含，不用；带 targets 的（isolate 的除外）并进这一次。不撤的话过一会儿
+ *  它会把这一次抢占掉。 */
+let beforeExplicitRun: ((doc: GraphDoc) => string[]) | null = null;
+
+export function setBeforeExplicitRun(fn: ((doc: GraphDoc) => string[]) | null): void {
+  beforeExplicitRun = fn;
 }
 
 export async function startRun(
@@ -658,6 +713,12 @@ export async function startRun(
   const ticket = ++runTicket;
   const preview = request.preview === true;
   const isolate = request.isolate ?? [];
+  const full = !preview && (request.targets?.length ?? 0) === 0 && isolate.length === 0;
+  let targets = request.targets;
+  if (!request.auto || full) {
+    const pending = beforeExplicitRun?.(doc) ?? [];
+    if (!full && isolate.length === 0 && targets && pending.length > 0) targets = [...new Set([...targets, ...pending])];
+  }
   try {
     // 当前配方有 ①–③ 失配时不能运行（P3.7）：配方里多出来的名字 core 根本看不见（只交声明着的），
     // 类型不符、越界的 core 会报 bad_param，但原因在配方文件里，这里先说清楚是哪个配方的哪几处。
@@ -666,18 +727,22 @@ export async function startRun(
       const blocker = currentRecipeBlocker(doc);
       if (blocker) throw new Error(blocker);
     }
+    const params = request.params ?? runParamsOf(doc);
     const runId = await transport.runGraph(doc, graphPath, {
-      targets: request.targets,
+      targets,
       isolate: isolate.length > 0 ? isolate : undefined,
       force: request.force && request.force.length > 0 ? request.force : undefined,
       mode: preview ? "preview" : "full",
       previewMaxPoints: request.previewMaxPoints,
-      params: request.params ?? runParamsOf(doc),
+      params,
       sceneId,
     });
     if (ticket !== runTicket) return; // 已经有更晚的一次运行发起了，这次的回复作废
+    // 调参记录：交给 core 的就是这份图与这组图参数（预览、单节点运行不记）
+    const recipes = useRecipeStore.getState();
+    useRunHistoryStore.getState().begin(runId, doc, params, recipes.current, request, recipes.currentId);
     // 给了 isolate 时 core 的 targets 就是同一组（R1），这边也照这个记
-    store.beginRun(runId, isolate.length > 0 ? isolate : (request.targets ?? []), preview, isolate);
+    store.beginRun(runId, isolate.length > 0 ? isolate : (request.targets ?? []), preview, isolate, request);
   } catch (e) {
     if (ticket !== runTicket) throw e;
     store.failRun(e instanceof Error ? e.message : String(e));
@@ -686,7 +751,45 @@ export async function startRun(
 }
 
 export async function cancelCurrentRun(): Promise<void> {
-  const { runId, runStatus } = useExecutionStore.getState();
-  if (!runId || runStatus !== "running") return;
-  await transport.cancelRun(runId);
+  const { runId, runStatus, cancelling } = useExecutionStore.getState();
+  // 已经在取消了：再按一次 Esc 不再发一遍
+  if (!runId || runStatus !== "running" || cancelling) return;
+  useExecutionStore.setState({ cancelling: true });
+  try {
+    await transport.cancelRun(runId);
+  } catch (e) {
+    if (useExecutionStore.getState().runId === runId) useExecutionStore.setState({ cancelling: false });
+    throw e;
+  }
+}
+
+/** 「↻ 重跑」：停掉这一次、按同样的范围重新开始（运行到此、单节点、强制重算的目标都照旧；被抢占的那次由桥接层取消，
+ *  ADR-0027）。目标节点在跑的时候被删掉了就退回运行整张图并说一声。没有在跑的就是一次普通的全图运行。 */
+export async function restartRun(doc: GraphDoc, graphPath: string | null): Promise<void> {
+  const { runStatus, request } = useExecutionStore.getState();
+  if (runStatus !== "running" || !request) return startRun(doc, graphPath, {});
+  const alive = (ids: string[] | undefined) => ids?.filter((id) => locateEventNode(doc, id) !== null);
+  const targets = alive(request.targets);
+  const isolate = alive(request.isolate);
+  const aimed = (request.targets?.length ?? 0) + (request.isolate?.length ?? 0) > 0;
+  const lost = aimed && (targets?.length ?? 0) + (isolate?.length ?? 0) === 0;
+  if (lost) {
+    useUiStore.getState().showToast("原来要跑到的节点已经删掉了，改成运行整张图", "warn");
+    return startRun(doc, graphPath, {});
+  }
+  return startRun(doc, graphPath, { ...request, targets, isolate, force: alive(request.force), auto: undefined });
+}
+
+/** 工具栏上运行 / 取消两个按钮此刻的样子。人发起的运行在跑时「运行」变「↻ 重跑」；预览与自动补的那一次不变（拖参数时不闪）。 */
+export function runControlsOf(s: {
+  runStatus: RunPhase;
+  preview: boolean;
+  cancelling: boolean;
+  request: RunRequest | null;
+}): { run: "run" | "rerun"; cancel: "off" | "on" | "cancelling" } {
+  const running = s.runStatus === "running";
+  return {
+    run: running && !s.preview && !s.request?.auto ? "rerun" : "run",
+    cancel: !running ? "off" : s.cancelling ? "cancelling" : "on",
+  };
 }

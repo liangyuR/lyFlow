@@ -9,7 +9,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::core_ffi;
-use crate::execution::RunManager;
+use crate::execution::{PauseMode, RunManager};
 
 /// manifest 换代了，前端应当替换 manifest store 并对当前 doc 重新校验。
 pub const EVENT_UPDATED: &str = "manifest-updated";
@@ -85,11 +85,15 @@ fn same_file_name(a: &Path, b: &Path) -> bool {
     a.file_name() == b.file_name()
 }
 
-/// 一轮换代。顺序不能变：先停活跃 run，再放掉全部 RunHandle，最后才换 Core ——
+/// 一轮换代，在维护窗口里做（ADR-0027）：期间来的运行只排队，换完代在新的一代上开跑。
+/// 顺序不能变：先停活跃 run、等它们退出并放掉全部 RunHandle（`drain`），最后才换 Core ——
 /// 旧 DLL 只要还有一个 Arc 就不会真的卸载，而缓存里的 Data 是旧 DLL 里的对象。
 fn reload<R: Runtime>(app: &AppHandle<R>, source: &Path) {
-    if let Some(runs) = app.try_state::<RunManager>() {
-        runs.drop_all();
+    let mut paused = app
+        .try_state::<RunManager>()
+        .map(|runs| runs.pause(PauseMode::ReleaseAll));
+    if let Some(p) = paused.as_mut() {
+        p.drain();
     }
     if let Ok(core) = core_ffi::core() {
         core.cache_clear();
@@ -123,6 +127,8 @@ fn reload<R: Runtime>(app: &AppHandle<R>, source: &Path) {
             emit_failed(app, e.lines().map(str::to_owned).collect());
         }
     }
+    // 恢复：窗口里排着队的那个开跑，开跑时取的是此刻（新的那一代）的 core
+    drop(paused);
 }
 
 /// 盯着库目录。库文件变了走的是和热重载同一条 `manifest-updated` 通路（ADR-0010）。
@@ -187,30 +193,22 @@ fn reload_library<R: Runtime>(app: &AppHandle<R>) {
     if !crate::commands::library_changed_since_scan(&dirs) {
         return;
     }
-    match crate::commands::rescan_library_dirs(&runs, dirs) {
-        Ok(status) => {
-            let payload = core_ffi::core()
-                .and_then(|c| c.manifest_json().map_err(|e| e.to_string()))
-                .and_then(|raw| {
-                    serde_json::from_str::<serde_json::Value>(&raw).map_err(|e| e.to_string())
-                });
-            match payload {
-                Ok(manifest) => {
-                    let count = manifest["operators"].as_array().map_or(0, Vec::len);
-                    println!("库算子已重扫：{} 个库算子", status.count);
-                    let _ = app.emit(
-                        EVENT_UPDATED,
-                        ReloadOk {
-                            generation: core_ffi::generation(),
-                            manifest,
-                            operator_count: count,
-                        },
-                    );
-                }
-                Err(e) => emit_failed(app, vec![e]),
-            }
-            if !status.problems.is_empty() {
-                emit_failed(app, status.problems);
+    // 维护窗口里重扫（ADR-0027）：以前这里先 stop_active 再扫，两步之间主线程上来的 run_graph 能当场开跑，
+    // 它手里的 OperatorDesc 指针随即被重建注册表释放掉
+    match crate::commands::rescan_library_paused(app, &runs) {
+        Ok(refresh) => {
+            let count = refresh.manifest["operators"].as_array().map_or(0, Vec::len);
+            println!("库算子已重扫：{} 个库算子", refresh.status.count);
+            let _ = app.emit(
+                EVENT_UPDATED,
+                ReloadOk {
+                    generation: core_ffi::generation(),
+                    manifest: refresh.manifest,
+                    operator_count: count,
+                },
+            );
+            if !refresh.status.problems.is_empty() {
+                emit_failed(app, refresh.status.problems);
             }
         }
         Err(e) => emit_failed(app, vec![e]),

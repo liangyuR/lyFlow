@@ -110,3 +110,52 @@ export function unconnectedRequiredInputs(
     .filter((p) => p.required !== false && !connected.has(p.name))
     .map((p) => ({ node: nodeId, port: p.name }));
 }
+
+/** 删掉 ids 这些节点时怎么把上下游接回去（Ctrl+Delete「删除并接通」）。规则与静音透传一致（m3-plan §1.3）：
+ *  被删节点的每个输出，取它**第一个类型兼容、已连线的输入**的来源；连着一串被删的节点就顺着往上找。
+ *  每条离开被删集合的线换成「来源 → 原来的下游」，在删完之后的图上判得过才接（不成环、输入没被占）。
+ *  unresolved 是接不回去的下游端口个数：被删的节点没有合适的来源（比如它本来就是源头）。 */
+export function healPlan(
+  ctx: GraphContext,
+  doc: GraphDoc,
+  ids: ReadonlySet<string>,
+): { wires: AutoWire[]; unresolved: number } {
+  const types = inferAnyTypes(ctx, doc);
+  const byId = new Map(doc.nodes.map((n) => [n.id, n]));
+  const sourceOf = (nodeId: string, outPort: string, seen: Set<string>): PortRef | null => {
+    if (seen.has(nodeId)) return null;
+    seen.add(nodeId);
+    const node = byId.get(nodeId);
+    const op = node ? ctx.operatorsById.get(node.op) : undefined;
+    const out = findPort(op, outPort, "output");
+    if (!op || !out) return null;
+    const outType = portType(out, nodeId, types);
+    for (const input of op.inputs) {
+      const e = doc.edges.find((x) => x.to.node === nodeId && x.to.port === input.name);
+      if (!e) continue;
+      const src = byId.get(e.from.node);
+      const srcPort = findPort(src ? ctx.operatorsById.get(src.op) : undefined, e.from.port, "output");
+      if (!srcPort || !typesCompatible(ctx, portType(srcPort, e.from.node, types), outType)) continue;
+      return ids.has(e.from.node) ? sourceOf(e.from.node, e.from.port, seen) : e.from;
+    }
+    return null;
+  };
+  let after: GraphDoc = {
+    ...doc,
+    nodes: doc.nodes.filter((n) => !ids.has(n.id)),
+    edges: doc.edges.filter((e) => !ids.has(e.from.node) && !ids.has(e.to.node)),
+  };
+  const wires: AutoWire[] = [];
+  let unresolved = 0;
+  for (const e of doc.edges) {
+    if (!ids.has(e.from.node) || ids.has(e.to.node)) continue;
+    const from = sourceOf(e.from.node, e.from.port, new Set());
+    if (!from || !canConnect(ctx, after, from, e.to).ok) {
+      unresolved += 1;
+      continue;
+    }
+    wires.push({ from, to: e.to });
+    after = { ...after, edges: [...after.edges, { id: `__heal${wires.length}`, from, to: e.to }] };
+  }
+  return { wires, unresolved };
+}
