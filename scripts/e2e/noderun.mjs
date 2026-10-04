@@ -400,6 +400,8 @@ async function suiteIsolateOnly(cdp, report) {
   const full = await runAndWait(cdp, () => pressF5(cdp));
   mustOk(full.status === "ok", "全图运行 ok", full.status);
 
+  // 要的是「a 改过、还没重跑」：关着自动运行改（开着的话改完就自动补跑了 a，ADR-0011 的 2026-10-04 修订），这一组结束放回去
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setAutoRun(false); return true;`);
   await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.a)}, 'pointCount', 23456); return true;`);
   const cache = await replan(cdp);
   report.ok("（前提）a 被标为 stale", cache.stale.includes(ids.a), JSON.stringify(cache.stale));
@@ -444,6 +446,7 @@ async function suiteIsolateOnly(cdp, report) {
   report.ok("a 没有被标红（它没有失败）", aNode !== "error", aNode);
   const head = await cdp.eval(`return getComputedStyle(document.querySelector('[data-testid="node-${ids.a}"] .node__head')).transform;`);
   report.ok("定位闪光不抖动（标题栏没有位移）", head === "none" || /matrix\(1, 0, 0, 1, 0, 0\)/.test(head), head);
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setAutoRun(true); return true;`);
 }
 
 // ------------------------------------------------- 验收 10：运行中停止与抢占
