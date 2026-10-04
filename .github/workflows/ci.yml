@@ -3,7 +3,8 @@
 # 这一版先上两个不需要 vcpkg 端口的门禁（PCL / OpenCV 那组依赖还没钉版本，钉之前上了 CI 也装不出本机那一套）：
 #   fast   前端（typecheck、单测、构建）、MCP、各份契约对着 schema、Rust 客户端脱开 bridge 单独构建
 #   native 纯平台 + dts 包（LYFLOW_STD_PACKS=0 LYFLOW_PACKS=dts）：core 编译与 doctest、manifest 自检、bridge 的 cargo test、
-#          headless CLI、嵌入 SDK 的安装布局与消费方工程，外加 dts-check 实际用的 `--no-default-features --features host`
+#          headless CLI、嵌入 SDK 的安装布局与消费方工程，外加只开 host 的 `--no-default-features --features host`
+#          （外部 Rust 宿主嵌编辑器用的那一份，别的步骤都没编过它；dts-check 眼下只用 core_ffi、不开任何 feature，CLI 那步已编到）
 # 默认包（PCL / OpenCV / ONNX Runtime）、gap 包、桌面与安装包 e2e 还在本地跑（`pnpm check`、`pnpm e2e`），见 docs/testing.md「CI」。
 
 name: CI
@@ -122,6 +123,6 @@ jobs:
         shell: pwsh
         run: ./scripts/check.ps1 -Steps core,manifest,bridge,cli,sdk
 
-      - name: dts-check 的组合（--no-default-features --features host）
+      - name: 只开 host（外部 Rust 宿主嵌编辑器的组合：--no-default-features --features host）
         working-directory: bridge
         run: cargo build --no-default-features --features host

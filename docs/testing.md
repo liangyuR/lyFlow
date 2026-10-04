@@ -23,7 +23,7 @@ CI 与本地走同一个入口 `scripts/check.ps1`，按 job 用 `-Steps` 点名
 | job | 本地复现 | 验什么 |
 |---|---|---|
 | fast | `pwsh scripts/check.ps1 -Steps schema,client,frontend,mcp` | 契约对着 schema、Rust 客户端脱开 bridge 单独构建、editor 的 typecheck 与单测、app 与 host-react 构建、MCP（集成冒烟找不到 CLI 记 skip） |
-| native | 设 `LYFLOW_STD_PACKS=0`、`LYFLOW_PACKS=dts`，先 `pnpm --filter lyflow-app build`，再 `pwsh scripts/check.ps1 -Steps core,manifest,bridge,cli,sdk`，外加 `bridge/` 下 `cargo build --no-default-features --features host` | 纯平台 + dts 的 core 与 doctest、manifest 自检、bridge 的 `cargo test`（要标准包的记 ignored）、headless CLI、嵌入 SDK，以及 dts-check 用的 `host` 组合 |
+| native | 设 `LYFLOW_STD_PACKS=0`、`LYFLOW_PACKS=dts`，先 `pnpm --filter lyflow-app build`，再 `pwsh scripts/check.ps1 -Steps core,manifest,bridge,cli,sdk`，外加 `bridge/` 下 `cargo build --no-default-features --features host` | 纯平台 + dts 的 core 与 doctest、manifest 自检、bridge 的 `cargo test`（要标准包的记 ignored）、headless CLI、嵌入 SDK，以及只开 `host` 的组合（外部 Rust 宿主嵌编辑器用的；dts-check 眼下只用 `core_ffi`、不开任何 feature，CLI 那步的 `--no-default-features` 已编到） |
 
 工具链钉在仓库里：Rust `rust-toolchain.toml`、Node `.nvmrc`、pnpm `package.json` 的 `packageManager`、Python `scripts/requirements.txt`。
 **还没进 CI、照旧在本地跑的**：默认包（PCL / OpenCV / ONNX Runtime 的 vcpkg 依赖还没钉版本）、gap 包、`pnpm e2e`（桌面）、
