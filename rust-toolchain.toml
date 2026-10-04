@@ -1,0 +1,6 @@
+# 本地与 CI（.github/workflows/ci.yml，GitHub 托管 runner）用同一个 Rust：版本一变，编译警告、clippy、生成的代码都可能跟着变。
+# 升级时改这里，跑一遍 `pnpm check` 再提交。
+[toolchain]
+channel = "1.97.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
