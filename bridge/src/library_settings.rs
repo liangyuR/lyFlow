@@ -32,8 +32,9 @@ pub(crate) fn read_extra(app_data: &Path) -> Vec<String> {
 }
 
 /// 写设置。先规整（去空白、去空串、去重），写临时文件再改名。返回写进去的那一份。
-/// 只有桌面的设置界面写它（`set_library_dirs`）；CLI 只读，不带 desktop 构建时不编。
-#[cfg(any(feature = "desktop", test))]
+/// 只有设置界面写它（`set_library_dirs`，在 IPC 层，跟着 host 走 —— 只开 host 的外部宿主也编它）；
+/// CLI 只读，不带 host 的构建不编。
+#[cfg(any(feature = "host", test))]
 pub(crate) fn write_extra(app_data: &Path, dirs: &[String]) -> Result<Vec<String>, String> {
     let dirs = normalize(dirs);
     std::fs::create_dir_all(app_data).map_err(|e| format!("创建 {} 失败: {e}", app_data.display()))?;
