@@ -14,6 +14,8 @@ export interface BaseCloud {
   label: string;
   /** 展开到叶子之后的路径 id + 端口，直接用于 getOutputCloud。 */
   resolved: { nodeId: string; port: string };
+  /** 就是接在它输入口上的那片云（直接接着的点云口，或直接接着的 Bundle 里的点云字段）；隔了几跳找到的是 false。 */
+  direct?: boolean;
 }
 
 /** 该算子的第一个 PointCloud 输出端口。没有时再看 Bundle 输出里的点云字段，返回
@@ -48,10 +50,32 @@ export function firstCloudPort(
   return null;
 }
 
-/** 一次搜索里的位置：哪一层、那一层的哪个节点。 */
+/** 该算子的全部点云输出：PointCloud 端口按声明顺序，再是 Bundle 输出里的点云字段（`<port>.<field>`）。
+ *  预览里选看哪一个（提取下标的 selected / rest、配准的 cloud / tplLeft / tplRight）就从这里列。 */
+export function cloudPortsOf(
+  ops: ReadonlyMap<string, OperatorDesc>,
+  opId: string,
+  bundles?: readonly BundleDesc[],
+): string[] {
+  const declared = ops.get(opId)?.outputs ?? [];
+  const out = declared.filter((p) => p.type === "PointCloud").map((p) => p.name);
+  for (const p of declared) {
+    const kind = bundleKindOf(p.type);
+    const desc = kind ? bundles?.find((b) => b.kind === kind) : undefined;
+    for (const f of desc?.fields ?? []) {
+      if (f.type === "PointCloud") out.push(`${p.name}.${f.name}`);
+    }
+  }
+  return out;
+}
+
+/** 一次搜索里的位置：哪一层、那一层的哪个节点；port 是走到它的那条边的源端口（从起点出发时没有）。 */
 interface Frame {
   path: SubPath;
   id: string;
+  port?: string;
+  /** 起点直接接着的那一圈。 */
+  first?: boolean;
 }
 
 function frameKey(frame: Frame): string {
@@ -66,20 +90,22 @@ function titleOf(node: GraphNode, ops: ReadonlyMap<string, OperatorDesc>): strin
   return node.ui?.title ?? ops.get(node.op)?.label ?? node.id;
 }
 
-/** 一个节点的直接上游，**按输入端口的声明顺序**排。多个输入时靠这个顺序定优先级。 */
+/** 一个节点的直接上游，**按输入端口的声明顺序**排。多个输入时靠这个顺序定优先级。给了 onlyPort 就只看那个输入口。 */
 function upstreamOf(
   doc: GraphDoc,
   path: SubPath,
   node: GraphNode,
   ops: ReadonlyMap<string, OperatorDesc>,
+  onlyPort?: string,
 ): Frame[] {
   const out: Frame[] = [];
   const level = levelOf(doc, path);
   for (const port of ops.get(node.op)?.inputs ?? []) {
+    if (onlyPort !== undefined && port.name !== onlyPort) continue;
     let linked = false;
     for (const e of level.edges) {
       if (e.to.node === node.id && e.to.port === port.name) {
-        out.push({ path, id: e.from.node });
+        out.push({ path, id: e.from.node, port: e.from.port });
         linked = true;
       }
     }
@@ -94,20 +120,22 @@ function upstreamOf(
     const parent = path.slice(0, -1);
     for (const e of levelOf(doc, parent).edges) {
       if (e.to.node === seg.nodeId && e.to.port === entry.name) {
-        out.push({ path: parent, id: e.from.node });
+        out.push({ path: parent, id: e.from.node, port: e.from.port });
       }
     }
   }
   return out;
 }
 
-/** 从 localId 出发，广度优先找最近的有点云输出的上游节点。找不到返回 null。 */
+/** 从 localId 出发，广度优先找最近的有点云输出的上游节点。找不到返回 null。
+ *  viaPort：先只从这个输入口往上找（出错的节点报错时指着的那个口）；这个口没接东西就照旧从全部输入口找。 */
 export function findBaseCloud(
   doc: GraphDoc,
   path: SubPath,
   localId: string,
   ops: ReadonlyMap<string, OperatorDesc>,
   bundles?: readonly BundleDesc[],
+  viaPort?: string,
 ): BaseCloud | null {
   const start = nodeAt(doc, path, localId);
   if (!start) return null;
@@ -122,7 +150,8 @@ export function findBaseCloud(
       queue.push(f);
     }
   };
-  push(upstreamOf(doc, path, start, ops));
+  const via = viaPort !== undefined ? upstreamOf(doc, path, start, ops, viaPort) : [];
+  push((via.length > 0 ? via : upstreamOf(doc, path, start, ops)).map((f) => ({ ...f, first: true })));
 
   // 队列是先进先出，所以先耗完同一层深度才往上走一层 —— 「最近的」由此保证，
   // 同深度之间的先后则来自 upstreamOf 的端口声明顺序。
@@ -130,11 +159,16 @@ export function findBaseCloud(
     const frame = queue.shift()!;
     const node = nodeAt(doc, frame.path, frame.id);
     if (!node) continue;
-    const port = firstCloudPort(ops, node.op, bundles);
+    // 接的就是一个点云口（几何节点接在提取下标的 rest 上）就用它，以前一律取第一个点云口，底图画成了 selected
+    const port =
+      frame.port && cloudPortsOf(ops, node.op, bundles).includes(frame.port)
+        ? frame.port
+        : firstCloudPort(ops, node.op, bundles);
     // 解不开的（库算子的定义在库文件里）不算数，继续往上找
     const resolved = port ? resolveOutput(doc, frame.path, node.id, port) : null;
     if (port && resolved) {
-      return { localId: node.id, label: titleOf(node, ops), resolved };
+      const direct = !!frame.first && !!frame.port && !!port && (port === frame.port || port.startsWith(`${frame.port}.`));
+      return { localId: node.id, label: titleOf(node, ops), resolved, direct };
     }
     push(upstreamOf(doc, frame.path, node, ops));
   }

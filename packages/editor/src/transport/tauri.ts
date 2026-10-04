@@ -237,6 +237,10 @@ export class TauriTransport implements Transport {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<void>("discard_backup", { path });
   }
+  async untitledBackupPath(): Promise<string> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<string>("untitled_backup_path");
+  }
   async listRecipeDir(dir: string): Promise<RecipeDirListing> {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<RecipeDirListing>("list_recipe_dir", { dir });

@@ -47,8 +47,22 @@ pub fn run() {
     }
 
     let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
-    host::attach(builder, host::HostConfig::default())
+    let app = host::attach(builder, host::HostConfig::default())
         .invoke_handler(crate::lyflow_handler![])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("启动 Tauri 失败");
+    open_main_window(&app).expect("打开主窗口失败");
+    app.run(|_, _| {});
+}
+
+/// 主窗口在这里开（tauri.conf.json 里 `create: false`），为的是放行剪贴板读取：不放行的话，
+/// 参数菜单的「粘贴值」一调 `navigator.clipboard.readText()`，WebView2 就弹一个浏览器式的
+/// 「想要查看复制到剪贴板的文本和图像」框。Ctrl+V 粘节点走的是 paste 事件，本来就不要这个权限。
+#[cfg(feature = "desktop")]
+fn open_main_window(app: &tauri::App) -> tauri::Result<()> {
+    let config = app.config().app.windows.first().cloned().expect("tauri.conf.json 里少了主窗口");
+    tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?
+        .enable_clipboard_access()
+        .build()?;
+    Ok(())
 }

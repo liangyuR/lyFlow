@@ -14,14 +14,17 @@ export interface PathPickRequest {
 }
 
 export interface EditorDialogs {
-  /** 参数表单的路径选择与 3D 导出用。没有它的宿主会退回浏览器下载/提示。 */
+  /** 参数表单的「浏览…」、3D / 查看器导出 PNG、库目录的「浏览…」用（桌面壳给的是原生对话框，2026-10-04 起）。
+   *  没有它的宿主：路径只能手填或粘（「浏览…」不摆），导出退回浏览器下载。 */
   pickPath?: ((request: PathPickRequest) => Promise<string | null>) | undefined;
   /** 返回 null 表示用户取消。 */
   pickOpenPath(): Promise<string | null>;
   pickSavePath(suggested: string): Promise<string | null>;
-  /** 有未保存改动时问一句。返回 true 表示可以继续。 */
-  confirmDiscard(dirty: boolean): Promise<boolean>;
-  /** 备份比正文新时问一句。返回 true 表示用户要恢复。 */
+  /** 不再调用：有没存的改动时改成编辑器自己画的「保存 / 不保存 / 取消」（lib/unsaved）。
+   *  留着只为旧宿主的实现照样通过类型检查。 */
+  confirmDiscard?: ((dirty: boolean) => Promise<boolean>) | undefined;
+  /** 备份比正文新时问一句。返回 true 表示用户要恢复。平时那一问是编辑器自己画的三选一（lib/autosave 的 openSourceFor），
+   *  这个只在编辑器整个卸掉、画不出对话框时才用。 */
   confirmRestore(path: string, message: string): Promise<boolean>;
   /** 可选：配方的导入（open）与导出（save）选文件（param-recipe P3.6）。不给就退回 pickPath，
    *  再没有就在编辑器里让人输一个路径。suggested 是导出时建议的文件名。 */
@@ -34,10 +37,6 @@ export const browserDialogs: EditorDialogs = {
   },
   async pickSavePath() {
     throw new NoDialogError();
-  },
-  async confirmDiscard(dirty) {
-    if (!dirty) return true;
-    return window.confirm("当前图有未保存的改动，确定放弃吗？");
   },
   async confirmRestore(_path, message) {
     return window.confirm(message);

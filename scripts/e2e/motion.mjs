@@ -16,6 +16,7 @@ import {
   newDoc,
   normalizeZoom,
   placeAtScreen,
+  setViewport,
   pressCtrl,
   pressF5,
   runAndWait,
@@ -192,8 +193,10 @@ async function suiteEnter(cdp, report) {
     { loaded, loadHits }, { loaded: 10, loadHits: [] });
   report.eq("loadDoc 10 节点：任何连线都没有生长标记", loadGrow, []);
 
-  // > 80 节点：编辑着搭出来（每个都标过进场），等窗口过期，再平移到另一半
+  // > 80 节点：编辑着搭出来（每个都标过进场），等窗口过期，再平移到另一半。视口先定死在 1:1：下面两段平移的距离
+  // 是照 1:1 算的，上一组（m4 的大图）留下 0.2 的缩放时一平移就越过了整张网格，一个新节点都进不来
   await newDoc(cdp);
+  await setViewport(cdp, { x: 0, y: 0, zoom: 1 });
   const big = await cdp.eval(`
     const g = () => window.__lyflow.stores.graph.getState();
     for (let i = 0; i < 96; i += 1) g().addNode('util.reroute', { x: (i % 24) * 260, y: Math.floor(i / 24) * 150 });
@@ -588,7 +591,8 @@ async function suiteHover(cdp, report) {
     { from: ["voxel", "cloud"], to: ["pass", "cloud"] },
     { from: ["g2", "cloud"], to: ["crop", "cloud"] },
   ]);
-  await normalizeZoom(cdp, 0.7);
+  // 缩放定死在 0.7（normalizeZoom 只往小里压：上一组留下 0.2 的话节点小得真鼠标 hover 不上）
+  await setViewport(cdp, { x: 0, y: 0, zoom: 0.7 });
   const box = await canvasBox(cdp);
   await placeAtScreen(cdp, {
     [ids.g1]: { x: 20, y: 30 },
@@ -603,11 +607,14 @@ async function suiteHover(cdp, report) {
     const find = (a, b) => d.edges.find((e) => e.from.node === a && e.to.node === b).id;
     return { a: find(${lit(ids.g1)}, ${lit(ids.voxel)}), b: find(${lit(ids.voxel)}, ${lit(ids.pass)}), c: find(${lit(ids.g2)}, ${lit(ids.crop)}) };
   `);
+  // 淡化看的是计算出来的 stroke-opacity（画布上的 data-node-hover 统一淡化不相关的边，styles.motion.css），
+  // 相关的看边自己的 is-related。等过渡走完再读（--lyflow-motion-fast 120 ms，调用方都睡了 200 ms）
   const relations = () => cdp.eval(`
     const out = {};
     for (const g of document.querySelectorAll('.react-flow__edge')) {
-      const cls = g.querySelector('.ly-edge').classList;
-      out[g.getAttribute('data-id')] = cls.contains('is-related') ? 'related' : cls.contains('is-dimmed') ? 'dimmed' : '';
+      const edge = g.querySelector('.ly-edge');
+      const dimmed = parseFloat(getComputedStyle(edge.querySelector('.react-flow__edge-path')).strokeOpacity) < 0.5;
+      out[g.getAttribute('data-id')] = edge.classList.contains('is-related') ? 'related' : dimmed ? 'dimmed' : '';
     }
     return out;
   `);
@@ -615,7 +622,7 @@ async function suiteHover(cdp, report) {
   await moveMouse(cdp, await centerOf(cdp, `[data-testid="node-${ids.voxel}"] .node__head`));
   await sleep(200);
   let rel = await relations();
-  report.eq("鼠标到 voxel 上：它的两条边 is-related、另一条 is-dimmed",
+  report.eq("鼠标到 voxel 上：它的两条边 is-related、另一条淡下去（stroke-opacity）",
     rel, { [edgeId.a]: "related", [edgeId.b]: "related", [edgeId.c]: "dimmed" });
 
   await moveMouse(cdp, await emptySpot(cdp));
@@ -691,20 +698,20 @@ async function suiteHover(cdp, report) {
     const y = Math.round(src.y + ((over.y - src.y) * i) / 14);
     await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, ...common });
     await sleep(16);
-    const s = await cdp.eval(`return { dimmed: document.querySelectorAll('.ly-edge.is-dimmed').length,
+    const s = await cdp.eval(`return { dimmed: document.querySelectorAll('.canvas[data-node-hover]').length,
       pending: !!window.__lyflow.stores.ui.getState().pendingFrom };`);
     seen.dimmed = Math.max(seen.dimmed, s.dimmed);
     seen.pending ||= s.pending;
   }
   await sleep(150);
   const onNode = await cdp.eval(`const u = window.__lyflow.stores.ui.getState();
-    return { dimmed: document.querySelectorAll('.ly-edge.is-dimmed').length, pending: !!u.pendingFrom, hover: u.hoverNodeId };`);
+    return { dimmed: document.querySelectorAll('.canvas[data-node-hover]').length, pending: !!u.pendingFrom, hover: u.hoverNodeId };`);
   const spot = await emptySpot(cdp);
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: spot.x, y: spot.y, ...common });
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: spot.x, y: spot.y, ...common });
   await sleep(200);
   await cdp.eval(`const u = window.__lyflow.stores.ui.getState(); u.closeSearch(); u.endConnection(); return true;`);
-  report.ok("拖连线途中经过节点（鼠标停在 voxel 上、hoverNodeId 已经记上），不出现 is-dimmed",
+  report.ok("拖连线途中经过节点（鼠标停在 voxel 上、hoverNodeId 已经记上），不淡化（画布上没有 data-node-hover）",
     seen.pending && onNode.pending && onNode.hover === ids.voxel && Math.max(seen.dimmed, onNode.dimmed) === 0,
     JSON.stringify({ seen, onNode }));
   await moveMouse(cdp, await emptySpot(cdp));

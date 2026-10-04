@@ -63,6 +63,90 @@
 
 .viewer__stage .viewer__empty { inset: 0; }
 
+/* 出错节点的画面是它的输入：状态挪到左下角，错误原文与「定位」照旧给，不盖住点 */
+.viewer__stage .viewer__empty.viewer__empty--docked {
+  inset: auto auto 8px 8px;
+  max-width: min(72%, 440px);
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 6px 10px;
+  text-align: left;
+  border: 1px solid color-mix(in srgb, var(--lyflow-danger) 50%, transparent);
+  border-radius: 6px;
+  background: rgba(17, 20, 26, 0.88);
+}
+.viewer__empty--docked [data-testid="viewer3d-status"] { color: var(--lyflow-danger); }
+.viewer__empty--docked .viewer__empty-actions { align-items: flex-start; }
+.viewer__empty-note { font-size: 11px; color: var(--lyflow-fg-2); }
+
+/* 参数改过、画面还是上一次的结果：左上角一条，不挡点（左下是重跑时的状态，右下是测量） */
+.viewer__stale {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 16px);
+  padding: 2px 3px 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--lyflow-warn) 60%, transparent);
+  border-radius: 4px;
+  background: rgba(17, 20, 26, 0.85);
+  color: var(--lyflow-warn);
+  font-size: 11px;
+  pointer-events: none;
+}
+.viewer__stale > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.viewer__stale button {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid var(--lyflow-border-strong);
+  border-radius: var(--lyflow-radius);
+  background: var(--lyflow-bg-2);
+  color: var(--lyflow-fg-0);
+  font-size: 11px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.viewer__stale button:hover { border-color: var(--lyflow-accent); }
+/* 值 / 图像盖满画布：角标在时它们往下让出一条，不压表头与「级别 / 通道 / 色带」那条栏，▶ 也不挡栏上的选择框 */
+.viewer__stage:has(> .viewer__stale) > .viewer__values,
+.viewer__stage:has(> .viewer__stale) > .viewer__image { top: 34px; }
+
+/* 网格一格多大：栏窄时排在尺寸之后让 */
+.viewer__grid {
+  min-width: 0;
+  flex-shrink: 5;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--lyflow-fg-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 标准视角的一组按钮：挤不下时整组换到下一行（工具栏会换行），不把钉住、对比挤出去 */
+.view-presets {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+}
+
+/* 最大化按钮：栏不换行，窄栏里它不能是被挤出去的那个 */
+.viewer__max { flex-shrink: 0; }
+
+/* 包围盒尺寸：栏窄时它最先让（省略号），全文在 title */
+.viewer__extent {
+  min-width: 0;
+  flex-shrink: 10;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--lyflow-fg-2);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 2D 拖框的模板切换条（m8-plan L20）：一次只处理一个模板槽的框。 */
 .viewer__bar--roi {
   border-bottom: 1px solid var(--lyflow-border);

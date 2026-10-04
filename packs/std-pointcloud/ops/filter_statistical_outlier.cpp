@@ -1,8 +1,13 @@
-#include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/search/kdtree.h>
+
+#include <cmath>
+#include <cstdint>
+#include <vector>
 
 #include "ops.h"
+#include "parallel.h"
 #include "lyflow_pcl/adapter.h"
 
 namespace lyflow::ops {
@@ -30,32 +35,62 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   ctx.progress(0.1f, "构建 KD 树");
   auto cloud = adapter::toPcl(in);
 
-  // 产出 Indices 而不是点云（adapter.h 的约定）：PCL 只认识 XYZ，
-  // 拿下标回来再走 PointCloud::select，通道搬运只在一处发生。
-  pcl::Indices kept;
-  pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
-  sor.setInputCloud(cloud);
-  sor.setMeanK(meanK);
-  sor.setStddevMulThresh(stddevMul);
-  sor.filter(kept);
+  // 与 pcl::StatisticalOutlierRemoval（vcpkg 的 1.12）逐点同一套：同一种不排序的 KD 树、K+1 近邻（第 0 个是自己）、
+  // 平均距离存成 float，非有限点记 0 且不计数。只是逐点那一圈按线程预算分段并行（parallel.h）——
+  // 它的 `#pragma omp` 在没开 OpenMP 的 PCL 里是单线程，200 万点 14 s。均值与标准差照它的顺序单线程累加，阈值逐位相同。
+  pcl::search::KdTree<pcl::PointXYZ> tree(false);
+  tree.setInputCloud(cloud);
+  if (ctx.cancelled()) return Status::Ok();
 
+  const std::size_t n = in.pointCount();
+  std::vector<float> meanDist(n, 0.0f);
+  std::vector<char> valid(n, 0);
+  ctx.progress(0.2f, "近邻距离");
+  parallelFor(n, ctx.threadBudget(), [&](std::size_t begin, std::size_t end) {
+    if (ctx.cancelled()) return false;
+    pcl::Indices nn(static_cast<std::size_t>(meanK) + 1);
+    std::vector<float> d2(static_cast<std::size_t>(meanK) + 1);
+    for (std::size_t i = begin; i < end; ++i) {
+      const pcl::PointXYZ& pt = (*cloud)[i];
+      if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z)) continue;
+      if (tree.nearestKSearch(static_cast<pcl::index_t>(i), meanK + 1, nn, d2) == 0) continue;
+      double sum = 0.0;
+      for (int k = 1; k < meanK + 1; ++k) sum += std::sqrt(d2[static_cast<std::size_t>(k)]);
+      meanDist[i] = static_cast<float>(sum / meanK);
+      valid[i] = 1;
+    }
+    return true;
+  });
   if (ctx.cancelled()) return Status::Ok();
   ctx.progress(0.9f);
 
-  const std::vector<std::int32_t> keep = adapter::fromPclIndices(kept);
-  PointCloud out = in.select(keep);
+  double sum = 0.0;
+  double sqSum = 0.0;
+  int validCount = 0;
+  for (std::size_t i = 0; i < n; ++i) {
+    const float d = meanDist[i];
+    sum += d;
+    sqSum += d * d;
+    validCount += valid[i];
+  }
+  const double mean = sum / static_cast<double>(validCount);
+  const double variance =
+      (sqSum - sum * sum / static_cast<double>(validCount)) / (static_cast<double>(validCount) - 1);
+  const double threshold = mean + stddevMul * std::sqrt(variance);
 
+  // 产出 Indices 而不是点云（adapter.h 的约定）：拿下标回来再走 PointCloud::select，通道搬运只在一处发生
+  std::vector<std::int32_t> keep;
+  keep.reserve(n);
   Indices removed;
   removed.sourceCloudId = in.id;
-  {
-    std::vector<bool> keptFlag(in.pointCount(), false);
-    for (std::int32_t i : keep) {
-      if (i >= 0 && static_cast<std::size_t>(i) < keptFlag.size()) keptFlag[static_cast<std::size_t>(i)] = true;
-    }
-    for (std::size_t i = 0; i < keptFlag.size(); ++i) {
-      if (!keptFlag[i]) removed.values.push_back(static_cast<std::int32_t>(i));
+  for (std::size_t i = 0; i < n; ++i) {
+    if (meanDist[i] > threshold) {
+      removed.values.push_back(static_cast<std::int32_t>(i));
+    } else {
+      keep.push_back(static_cast<std::int32_t>(i));
     }
   }
+  PointCloud out = in.select(keep);
 
   ctx.log(LogLevel::Info, "剔除 " + std::to_string(removed.values.size()) + " 个离群点");
   outputs.set("cloud", Data::cloud(std::move(out)));
@@ -103,7 +138,7 @@ void registerFilterStatisticalOutlier(Registry& r) {
 
   op.params = {meanK, stddev};
   // PCL 的 filter() 一旦进去就出不来，没有轮询点。如实申报 false。
-  op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
+  op.capabilities = {/*cancellable=*/true, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;
 
   r.addOperator(std::move(op));

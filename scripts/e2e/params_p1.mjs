@@ -24,8 +24,10 @@ import {
   openInspectorAdvanced,
   pressCtrl,
   pressF5,
+  restoreClipboard,
   runAndWait,
   select,
+  stubClipboard,
 } from "./page.mjs";
 
 // ------------------------------------------------------------ 页面侧的小工具
@@ -249,16 +251,31 @@ async function suiteIncludeTopLevel(cdp, report) {
   report.section("P1 验收 7：P1.6 三项 —— 复制路径名带 nodeId");
   await select(cdp, ids.cut);
   await sleep(200);
-  await cdp.eval(`
-    window.__lyCopied = null;
-    // 剪贴板在 WebView2 里未必授权：换成一个记录器，菜单走的还是它自己的那条 copyText
-    navigator.clipboard.writeText = async (t) => { window.__lyCopied = t; };
-    return true;
-  `);
+  // 主窗口放行了剪贴板读取（bridge/src/lib.rs 的 open_main_window）：真的 readText 马上回来，
+  // 不弹「想要查看剪贴板」的框、不挂住。只看它回没回来，不看内容
+  const realRead = await cdp.eval(`
+    return await Promise.race([
+      navigator.clipboard.readText().then(() => 'ok', (e) => 'err:' + (e && e.message)),
+      new Promise((r) => setTimeout(() => r('hang'), 1500)),
+    ]);`);
+  report.ok("读剪贴板不弹权限框、不挂住（桌面壳放行了剪贴板读取）", realRead !== "hang", realRead);
+  // 剪贴板换成页面里的桩（不动用户真的剪贴板），菜单走的还是它自己的那条 copyText / readClipboard
+  await stubClipboard(cdp);
   const copied = await paramMenu(cdp, "max", "param-menu-path");
   mustOk(copied === "ok", "右键 → 复制路径名", copied);
   await sleep(100);
-  report.eq("剪贴板里是「节点.参数」", await cdp.eval(`return window.__lyCopied;`), `${ids.cut}.max`);
+  report.eq("剪贴板里是「节点.参数」", await cdp.eval(`return window.__lyClip;`), `${ids.cut}.max`);
+  // 粘贴值：点菜单读剪贴板只能走 readText（桌面壳给主窗口放行了剪贴板读取，不弹「想要查看剪贴板」的框）
+  await cdp.eval(`window.__lyClip = '0.5'; return true;`);
+  const pastedValue = await paramMenu(cdp, "max", "param-menu-paste");
+  mustOk(pastedValue === "ok", "右键 → 粘贴值", pastedValue);
+  await sleep(100);
+  report.eq(
+    "粘贴值：剪贴板里的 JSON 写进了这个参数",
+    await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.find((n) => n.id === ${lit(ids.cut)}).params.max;`),
+    0.5,
+  );
+  await restoreClipboard(cdp);
 }
 
 // ------------------------------------------------------------ 验收 4

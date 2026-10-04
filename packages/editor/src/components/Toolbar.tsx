@@ -1,16 +1,25 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useDismiss } from "../hooks/useDismiss";
+import { usePendingChanges } from "../hooks/usePendingChanges";
 import { dialogs } from "../lib/dialogs";
-import { baseName, recentFiles } from "../lib/files";
+import { baseName, parentName, recentFiles } from "../lib/files";
+import { historyRows, jumpHistory, stepHistory } from "../lib/history";
 import { keyHint } from "../lib/keymap";
+import { revealError } from "../lib/revealError";
+import { cleanPathText } from "../lib/params";
+import { verdictTally, verdictTone } from "../lib/outputs";
+import { diffText, runReadingsOf } from "../lib/runHistory";
+import { augmentOperators, describeEventNode, fullId, levelOf, locateEventNode } from "../lib/subgraph";
 import { useCacheStore } from "../store/cache";
-import { summarize, useExecutionStore } from "../store/execution";
+import { runControlsOf, summarize, useExecutionStore, useJudgedNodes } from "../store/execution";
 import { useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
-import { useRecipesDirty } from "../store/recipe";
+import { useRecipeStore, useRecipesDirty } from "../store/recipe";
 import { useUiStore } from "../store/ui";
 import { transport, type LibraryRefresh, type LibrarySettings, type RecentEntry } from "../transport";
 
+import { CommitText } from "./CommitText";
 import { RecipeMenu } from "./RecipeMenu";
 
 export interface ToolbarActions {
@@ -20,6 +29,8 @@ export interface ToolbarActions {
   onSave: () => void;
   onSaveAs: () => void;
   onRun: () => void;
+  /** 运行中点「↻ 重跑」：同样的范围再来一次。F5 照旧是运行整张图。 */
+  onRerun: () => void;
   onCancel: () => void;
   onLayout: () => void;
 }
@@ -28,6 +39,8 @@ export interface ToolbarActions {
 function RecentMenu({ onPick }: { onPick: (path: string) => void }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<RecentEntry[]>([]);
+  const box = useRef<HTMLDivElement>(null);
+  useDismiss(open, box, useCallback(() => setOpen(false), []));
 
   useEffect(() => {
     if (!open) return;
@@ -35,7 +48,7 @@ function RecentMenu({ onPick }: { onPick: (path: string) => void }) {
   }, [open]);
 
   return (
-    <div className="toolbar__recent">
+    <div className="toolbar__recent" ref={box}>
       <button
         type="button"
         data-testid="recent-toggle"
@@ -59,6 +72,88 @@ function RecentMenu({ onPick }: { onPick: (path: string) => void }) {
               }}
             >
               {baseName(r.path)}
+              <span className="recent__dir">{parentName(r.path)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 撤销历史：撤销 / 重做旁边的 ▾。列出做过的每一步（新的在上），存盘的那一步标着，点一行一次走到那里。 */
+function HistoryMenu() {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  // 收起时焦点若丢了（掉回 body、或还在菜单里）就还给 ▾：键盘接着用，不用再去点
+  useDismiss(open, box, useCallback(() => {
+    setOpen(false);
+    const active = document.activeElement;
+    if (!active || active === document.body || box.current?.contains(active)) toggle.current?.focus();
+  }, []));
+  const past = useGraphStore((s) => s.past);
+  const future = useGraphStore((s) => s.future);
+  const doc = useGraphStore((s) => s.doc);
+  const savedDoc = useGraphStore((s) => s.savedDoc);
+  // 没存过盘的新图：savedDoc 是新建时的那一份，但它从没写进文件，不标「已保存」
+  const filePath = useGraphStore((s) => s.filePath);
+  const recipes = useRecipeStore((s) => s.set);
+  const savedRecipes = useRecipeStore((s) => s.saved);
+  const rows = open
+    ? historyRows(past, future, { doc, recipes }, savedDoc && filePath ? { doc: savedDoc, recipes: savedRecipes } : null)
+    : [];
+  const current = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (open) current.current?.scrollIntoView({ block: "nearest" });
+  }, [open]);
+
+  return (
+    <div className="toolbar__recent" ref={box}>
+      <button
+        ref={toggle}
+        type="button"
+        data-testid="history-toggle"
+        aria-expanded={open}
+        disabled={past.length === 0 && future.length === 0}
+        title="撤销历史：点一行一次走到那一步"
+        onClick={() => setOpen((v) => !v)}
+      >
+        ▾
+      </button>
+      {open && (
+        <div
+          className="toolbar__recentmenu history-menu"
+          data-testid="history-menu"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              setOpen(false);
+              toggle.current?.focus();
+            }
+          }}
+        >
+          {rows.map((r) => (
+            <button
+              // 按它在整条时间线上的位置给 key（走几步都不变）：点过的那一行不重新挂载，焦点留在它上面
+              key={past.length + r.steps}
+              ref={r.kind === "current" ? current : undefined}
+              type="button"
+              className={`history-menu__row is-${r.kind}`}
+              data-testid="history-row"
+              data-kind={r.kind}
+              data-steps={r.steps}
+              data-saved={r.saved ? "1" : undefined}
+              aria-current={r.kind === "current" ? "step" : undefined}
+              title={r.label}
+              // 现在这一行点了没用，但不用 disabled：刚点过的那一行变成「现在」时焦点不能丢
+              aria-disabled={r.steps === 0 || undefined}
+              onClick={() => {
+                if (r.steps !== 0) jumpHistory(r.steps, r.label);
+              }}
+            >
+              <span className="history-menu__label">{r.label}</span>
+              {r.saved && <span className="history-menu__saved">● 已保存</span>}
             </button>
           ))}
         </div>
@@ -92,7 +187,7 @@ function PreviewControls() {
   const previewing = useUiStore((s) => s.previewing);
   return (
     <>
-      <label className="toolbar__toggle" title="拖完参数自动补一次正式运行">
+      <label className="toolbar__toggle" title="改完参数就补一次正式运行：拖完松手、敲回车、选下拉框、勾选、↺ 重置、粘贴值、恢复、撤销都算（只补跑过的节点）。关掉时拖动只看抽稀的预览，按 F5 才正式跑">
         <input
           type="checkbox"
           data-testid="auto-run"
@@ -129,6 +224,8 @@ function LibraryMenu() {
   const [settings, setSettings] = useState<LibrarySettings | null>(null);
   const [draft, setDraft] = useState("");
   const [status, setStatus] = useState<{ count: number; problems: string[] } | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  useDismiss(open, box, useCallback(() => setOpen(false), []));
 
   const load = async () => {
     try {
@@ -165,7 +262,8 @@ function LibraryMenu() {
   };
   const save = (extra: string[]) => run(() => transport.setLibraryDirs(extra));
   const add = (dir: string) => {
-    const d = dir.trim();
+    // 资源管理器「复制文件地址」给的带引号，与路径参数同一个收拾法
+    const d = cleanPathText(dir);
     if (!d || !settings) return;
     setDraft("");
     void save([...settings.extraDirs, d]);
@@ -173,13 +271,17 @@ function LibraryMenu() {
   const pickPath = dialogs().pickPath;
   const browse = async () => {
     if (!pickPath) return;
-    const d = await pickPath({ mode: "dir" });
-    if (d) add(d);
+    try {
+      const d = await pickPath({ mode: "dir" });
+      if (d) add(d);
+    } catch (e) {
+      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
+    }
   };
 
   const editable = settings?.editable === true;
   return (
-    <div className="toolbar__recent">
+    <div className="toolbar__recent" ref={box}>
       <button
         type="button"
         data-testid="library-toggle"
@@ -310,8 +412,14 @@ function RunClock({ startedAt }: { startedAt: number }) {
   return <span className="toolbar__elapsed">{formatDuration(now - startedAt)}</span>;
 }
 
-function RunControls({ onRun, onCancel }: { onRun: () => void; onCancel: () => void }) {
+function RunControls({ onRun, onRerun, onCancel }: { onRun: () => void; onRerun: () => void; onCancel: () => void }) {
   const runStatus = useExecutionStore((s) => s.runStatus);
+  // 按字符串订阅：进度事件不让两个按钮重渲
+  const [runMode, cancelMode] = useExecutionStore((s) => {
+    const c = runControlsOf(s);
+    return `${c.run}|${c.cancel}`;
+  }).split("|");
+  const rerun = runMode === "rerun";
   const startedAt = useExecutionStore((s) => s.startedAt);
   const durationMs = useExecutionStore((s) => s.durationMs);
   const nodes = useExecutionStore((s) => s.nodes);
@@ -328,21 +436,24 @@ function RunControls({ onRun, onCancel }: { onRun: () => void; onCancel: () => v
         type="button"
         className="toolbar__run"
         data-testid="run-button"
-        onClick={onRun}
-        disabled={running || nodeCount === 0}
-        title="运行 (F5)"
+        data-mode={runMode}
+        onClick={rerun ? onRerun : onRun}
+        // 预览与自动补跑的那一次在跑时照旧不能点（拖参数时按钮不闪）
+        disabled={(running && !rerun) || nodeCount === 0}
+        title={rerun ? "重跑：停掉这一次、按同样的范围重新开始（F5 运行整张图）" : "运行 (F5)"}
       >
-        ▶ 运行
+        {rerun ? "↻ 重跑" : "▶ 运行"}
       </button>
       <button
         type="button"
         className="toolbar__cancel"
         data-testid="cancel-button"
+        data-cancelling={cancelMode === "cancelling" ? "1" : undefined}
         onClick={onCancel}
-        disabled={!running}
-        title="取消 (Esc)"
+        disabled={cancelMode !== "on"}
+        title={cancelMode === "cancelling" ? "已经发出取消，等正在算的那个算子停下来" : "取消 (Esc)"}
       >
-        ■ 取消
+        {cancelMode === "cancelling" ? "取消中…" : "■ 取消"}
       </button>
 
       {running && startedAt != null && <RunClock startedAt={startedAt} />}
@@ -359,18 +470,23 @@ function RunControls({ onRun, onCancel }: { onRun: () => void; onCancel: () => v
           {/* 「done 7 / error 1」—— 一眼看出这次跑成什么样，不用去数节点颜色 */}
           <span className="toolbar__stat toolbar__stat--done">done {summary.done}</span>
           {summary.error > 0 && (
-            <span className="toolbar__stat toolbar__stat--error">error {summary.error}</span>
+            <button
+              type="button"
+              className="toolbar__stat toolbar__stat--error toolbar__stat--link"
+              data-testid="run-summary-error"
+              title={`定位到第一个出错的节点（在子图里也打开进去）。${keyHint("nextError")} / ${keyHint("prevError")} 在出错的节点之间跳`}
+              onClick={() => revealError(0)}
+            >
+              error {summary.error}
+            </button>
           )}
           {summary.cancelled > 0 && (
             <span className="toolbar__stat toolbar__stat--cancelled">
               cancelled {summary.cancelled}
             </span>
           )}
-          {stale && (
-            <span className="toolbar__stat toolbar__stat--stale" title="运行之后图被改过，结果已过时">
-              已过时
-            </span>
-          )}
+          {stale && <StaleChip />}
+          <VerdictTallyChips />
         </span>
       )}
       <Recompute />
@@ -383,6 +499,73 @@ function RunControls({ onRun, onCancel }: { onRun: () => void; onCancel: () => v
   );
 }
 
+/** 这次运行的量测判定一共几个（「NG 2 · 边界 1 · ok 12」）：跑完一眼看出过没过，不用一个个点开节点、也不用进子图找。
+ *  点 NG / 边界 打开查找节点（is:ng / is:margin），回车打开到它、Alt+Enter 选上这一层的。拖参数的预览运行不算 ——
+ *  那是抽稀的，留着上一次正式运行的计数，不跟着一闪一闪。 */
+function VerdictTallyChips() {
+  // 拖参数的预览、松手自动补的那一次还在跑：看的是上一次正式运行的节点表（与查找节点的 is:ng 同一份）
+  const nodes = useJudgedNodes();
+  const doc = useGraphStore((s) => s.doc);
+  const baseOps = useManifestStore((s) => s.operatorsById);
+  const { tally, ng } = useMemo(() => {
+    const readings = runReadingsOf(nodes);
+    if (readings.length === 0) return { tally: verdictTally([]), ng: [] as string[] };
+    const ops = augmentOperators(baseOps, doc.subgraphs);
+    const ng = readings
+      .filter((r) => verdictTone(r.verdict) === "ng")
+      .map((r) => `${describeEventNode(doc, ops, r.id).names.join(" › ")}.${r.port}`);
+    // 没测出来、但接着的判定节点判了的（量测 → gap.judge）：判定那边已经记成 NG，这一个不再算一次「未测出」
+    const judged = new Set(readings.filter((r) => r.verdict).map((r) => r.id));
+    const feedsJudge = (r: { id: string; port: string }) => {
+      const at = locateEventNode(doc, r.id);
+      if (!at || fullId(at.path, at.localId) !== r.id) return false;
+      return levelOf(doc, at.path).edges.some(
+        (e) => e.from.node === at.localId && e.from.port === r.port && judged.has(fullId(at.path, e.to.node)),
+      );
+    };
+    const counted = readings.filter((r) => r.value !== null || r.verdict || !feedsJudge(r));
+    return { tally: verdictTally(counted), ng };
+  }, [nodes, doc, baseOps]);
+  if (tally.ng + tally.margin + tally.ok + tally.unmeasured === 0) return null;
+  const open = (seed: string) => useUiStore.getState().setFinderOpen(true, seed);
+  return (
+    <>
+      {tally.ng > 0 && (
+        <button
+          type="button"
+          className="toolbar__stat toolbar__stat--ng toolbar__stat--link"
+          data-testid="run-tally-ng"
+          title={`不合格：${ng.join("、")} —— 点一下列出来（回车打开到它）`}
+          onClick={() => open("is:ng ")}
+        >
+          NG {tally.ng}
+        </button>
+      )}
+      {tally.margin > 0 && (
+        <button
+          type="button"
+          className="toolbar__stat toolbar__stat--margin toolbar__stat--link"
+          data-testid="run-tally-margin"
+          title="接近边界 —— 点一下列出来"
+          onClick={() => open("is:margin ")}
+        >
+          边界 {tally.margin}
+        </button>
+      )}
+      {tally.ok > 0 && (
+        <span className="toolbar__stat toolbar__stat--ok" data-testid="run-tally-ok" title="量测判定合格的个数">
+          ok {tally.ok}
+        </span>
+      )}
+      {tally.unmeasured > 0 && (
+        <span className="toolbar__stat toolbar__stat--cancelled" data-testid="run-tally-unmeasured" title="没测出来的量测输出">
+          未测出 {tally.unmeasured}
+        </span>
+      )}
+    </>
+  );
+}
+
 export function Toolbar({
   onNew,
   onOpen,
@@ -390,11 +573,10 @@ export function Toolbar({
   onSave,
   onSaveAs,
   onRun,
+  onRerun,
   onCancel,
   onLayout,
 }: ToolbarActions) {
-  const undo = useGraphStore((s) => s.undo);
-  const redo = useGraphStore((s) => s.redo);
   // 选长度而不是调 canUndo()：函数引用不变，组件不会因为栈变化而重渲染。
   const pastLen = useGraphStore((s) => s.past.length);
   const futureLen = useGraphStore((s) => s.future.length);
@@ -406,7 +588,6 @@ export function Toolbar({
   const dirty = graphDirty || recipesDirty;
   const filePath = useGraphStore((s) => s.filePath);
   const name = useGraphStore((s) => s.doc.name);
-  const setName = useGraphStore((s) => s.setName);
 
   return (
     <header className="toolbar">
@@ -423,7 +604,7 @@ export function Toolbar({
         <button
           type="button"
           disabled={pastLen === 0}
-          onClick={undo}
+          onClick={() => stepHistory("undo")}
           aria-label="撤销"
           title={nextUndo ? `撤销：${nextUndo} (Ctrl+Z)` : "撤销 (Ctrl+Z)"}
         >
@@ -432,12 +613,13 @@ export function Toolbar({
         <button
           type="button"
           disabled={futureLen === 0}
-          onClick={redo}
+          onClick={() => stepHistory("redo")}
           aria-label="重做"
           title={nextRedo ? `重做：${nextRedo} (Ctrl+Shift+Z)` : "重做 (Ctrl+Shift+Z)"}
         >
           ↷<span className="toolbar__label"> 重做</span>
         </button>
+        <HistoryMenu />
       </div>
 
       <div className="toolbar__group">
@@ -464,21 +646,21 @@ export function Toolbar({
         </button>
       </div>
 
-      <RunControls onRun={onRun} onCancel={onCancel} />
+      <RunControls onRun={onRun} onRerun={onRerun} onCancel={onCancel} />
       <div className="toolbar__group toolbar__group--preview">
         <PreviewControls />
       </div>
 
       <div className="toolbar__doc">
         {/* 窄窗口下文件名收起，悬停图名看路径 */}
-        <input
+        <CommitText
           className="toolbar__name"
           data-testid="doc-name"
           value={name ?? ""}
           spellCheck={false}
           placeholder="未命名"
           title={filePath ?? undefined}
-          onChange={(e) => setName(e.target.value)}
+          onCommit={(text) => useGraphStore.getState().setName(text)}
         />
         {/* 脏标记：没有它用户不知道自己有没有存过（交互清单 P0 #13） */}
         {dirty && (
@@ -498,5 +680,33 @@ export function Toolbar({
         <RecipeMenu />
       </div>
     </header>
+  );
+}
+
+/** 结果过时了：改了参数（静音、增删节点）就写「改 N 处」（与「已过时」差不多宽：1280 宽的窗口里运行区挤满时
+ *  长了会被裁掉），悬停写全，点开调参页看是哪几处、能逐条改回；
+ *  只动了连线之类比不出来的照旧写「已过时」。 */
+function StaleChip() {
+  const pending = usePendingChanges();
+  if (!pending) {
+    return (
+      <span className="toolbar__stat toolbar__stat--stale" title="运行之后图被改过，结果已过时">
+        已过时
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="toolbar__stat toolbar__stat--stale toolbar__stat--link"
+      data-testid="run-pending-chip"
+      title={`运行之后改了 ${pending.count} 处、还没跑：${diffText(pending.diff, Infinity)}。点开调参页逐条看、改回`}
+      onClick={() => {
+        const ui = useUiStore.getState();
+        if (ui.drawer !== "runs") ui.toggleDrawer("runs");
+      }}
+    >
+      改 {pending.count} 处
+    </button>
   );
 }

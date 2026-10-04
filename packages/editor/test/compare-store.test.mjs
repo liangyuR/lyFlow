@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { matchShortcut } from "../src/lib/keymap.ts";
+import { matchShortcut, SHORTCUTS } from "../src/lib/keymap.ts";
 import {
   COMPARE_B_GONE,
   COMPARE_NO_NODE,
@@ -41,10 +41,46 @@ const state = () => {
   return { on: s.on, b: s.b?.nodeId ?? null, frozen: s.snapshot?.runId ?? null, toast: useUiStore.getState().toast?.text ?? null };
 };
 
-test("预览的两个快捷键不与画布的撞：Ctrl+Shift+D 对比 / Ctrl+D 原地复制，M 测量 / Ctrl+M 静音", () => {
-  const key = (k, ctrlKey, shiftKey = false) => ({ key: k, ctrlKey, metaKey: false, shiftKey, altKey: false });
-  const got = [key("D", true, true), key("d", true), key("m", false), key("m", true)].map((e) => matchShortcut(e)?.id);
-  assert.deepEqual(got, ["compare", "duplicate", "measure", "mute"]);
+test("预览的快捷键不与画布的撞：Ctrl+Shift+D 对比 / Ctrl+D 原地复制 / Shift+D 复制并保留输入，M 测量 / Ctrl+M 静音，P 钉住 / Ctrl+Shift+P 参数面板，Shift+Space 最大化 / Space 搜索，Alt+方向键沿连线走 / 方向键挪节点", () => {
+  const key = (k, ctrlKey, shiftKey = false, altKey = false) => ({ key: k, ctrlKey, metaKey: false, shiftKey, altKey });
+  const got = [key("D", true, true), key("d", true), key("D", false, true), key("m", false), key("m", true), key(" ", false, true), key(" ", false),
+    key("ArrowRight", false, false, true), key("ArrowUp", false, false, true), key("ArrowRight", false), key("ArrowRight", false, true, true),
+    key("1", false), key("4", false), key("1", true), key("!", false, true), key("p", false), key("P", true, true)]
+    .map((e) => matchShortcut(e)?.id ?? null);
+  assert.deepEqual(got, ["compare", "duplicate", "duplicateWired", "measure", "mute", "maximizeViewer", "search", "navDown", "navPrev", null, null,
+    "viewTop", "viewIso", null, null, "pin", "paramPanel"]);
+  // 表里每一个键位按下去都回到它自己：以后谁再加一个键撞上了前面的，这里先红
+  const collided = SHORTCUTS.flatMap((s) => s.keys.map((combo) => {
+    const parts = combo.split("+");
+    const last = parts[parts.length - 1];
+    const e = key(last === "Space" ? " " : last, parts.includes("Ctrl"), parts.includes("Shift") || last === "?", parts.includes("Alt"));
+    return matchShortcut(e)?.id === s.id ? null : `${combo} → ${matchShortcut(e)?.id}（应为 ${s.id}）`;
+  })).filter(Boolean);
+  assert.deepEqual(collided, []);
+});
+
+test("预览最大化：要动画布的动作先还原它（定位、打开参数面板、面板最大化），别的不动", () => {
+  const ui = () => useUiStore.getState();
+  const cases = [
+    // [说明, 动作, 之后还最大化着吗]
+    ["定位到节点（F8、查找节点、出错的链接）", () => ui().revealNode([], "n1"), false],
+    ["打开参数面板", () => ui().toggleParamPanel(true), false],
+    ["参数面板最大化", () => { ui().toggleParamPanel(true); ui().setViewerMaximized(true); ui().setParamPanelMaximized(true); }, false],
+    ["关参数面板", () => { ui().toggleParamPanel(true); ui().setViewerMaximized(true); ui().toggleParamPanel(false); }, true],
+    ["开测量", () => ui().setViewerMeasuring(true), true],
+    ["换层（连线查看器「在主 3D 视图打开」）", () => ui().setPath([]), true],
+  ];
+  for (const [name, act, still] of cases) {
+    useUiStore.setState({ viewerMaximized: true, viewerMeasuring: false, paramPanel: { ...ui().paramPanel, open: false, maximized: false } });
+    act();
+    assert.equal(ui().viewerMaximized, still, name);
+  }
+  // 面板开着（最大化时看不见）再点「参数」：是想看面板 —— 还原，面板照旧开着（以前把看不见的面板关掉了）
+  useUiStore.setState({ viewerMaximized: false, paramPanel: { ...ui().paramPanel, open: true, maximized: false } });
+  ui().setViewerMaximized(true);
+  ui().toggleParamPanel();
+  assert.deepEqual([ui().viewerMaximized, ui().paramPanel.open], [false, true], "最大化着点「参数」");
+  useUiStore.setState({ viewerMaximized: false, paramPanel: { ...ui().paramPanel, open: false, maximized: false } });
 });
 
 test("toggle：以当前节点进入，已有结果就冻住；再按一次退出", () => {

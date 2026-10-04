@@ -25,10 +25,20 @@ import {
   specDigest,
   writeRecipeAutosave,
   restoreRecipeAutosave,
+  autosaveTick,
+  viewportHandle,
+  untitledBackupPath,
+  findUntitledBackup,
+  restoreUntitled,
+  discardUntitledBackup,
+  resolveUnsaved,
   type RunRequest,
   type StateTransition,
   type Transport,
 } from "@lyflow/editor";
+
+import { closeGuard, shouldClose } from "./closeGuard";
+import { overridePickPath } from "./dialogs";
 
 interface DevBridge {
   version: string;
@@ -56,6 +66,23 @@ interface DevBridge {
     autosave(): Promise<void>;
     restoreAutosave(): Promise<boolean>;
   };
+  /** 定时备份（lib/autosave.ts）：立刻走一拍；没存过盘的图的那份备份 —— 找、换上、删（开 app 时那一问的
+   *  几步；界面上换上之前要经宿主的确认对话框，脚本直接调）。 */
+  autosave: {
+    tick(): Promise<void>;
+    untitledPath(): Promise<string | null>;
+    findUntitled(): Promise<{ path: string; nodes: number; savedAt: number | null } | null>;
+    restoreUntitled(): Promise<boolean>;
+    discardUntitled(): Promise<void>;
+  };
+  /** 壳自己的东西。关窗口前那一问（closeGuard.ts）：装上了没有；不点 × 直接走一遍「要不要关」——
+   *  弹的是编辑器里的「保存 / 不保存 / 取消」，脚本自己去点，等这个 Promise 拿结果。 */
+  shell: {
+    closeGuardInstalled(): boolean;
+    shouldClose(): Promise<{ asked: boolean; close: boolean }>;
+    /** 文件对话框（参数的「浏览…」、导出 PNG、库目录）换成脚本给的答案：原生对话框会挡住自动化。null 还原。 */
+    stubPickPath(fn: ((request: { mode: string; filters?: unknown; defaultPath?: string }) => Promise<string | null>) | null): void;
+  };
   /** 立刻编译一次，不等 debounce。验收脚本不想为 150ms 睡一觉。 */
   plan(): Promise<void>;
   /** 立刻校验一次（m8-plan L16 的实时校验走 debounce）。 */
@@ -67,6 +94,9 @@ interface DevBridge {
    *  来自**事件**而不是 store 快照 —— 16 ms 的合并窗口会把中间态吃掉。 */
   transitions: StateTransition[];
   clearTransitions(): void;
+  /** 画布视口（React Flow 的 x / y / zoom）：读，或者定死 —— 上一组留下的缩放别落到下一组头上。画布没挂载时是 null / 不动。 */
+  viewport(): { x: number; y: number; zoom: number } | null;
+  setViewport(v: { x: number; y: number; zoom: number }): void;
   /** 每次运行结束的时刻，live preview 的「跟手」断言靠它算延迟。 */
   runMarks: { runId: string; status: string; at: number }[];
   /** 图级命名输出（ADR-0017）。只读转发，不碰 store。 */
@@ -123,6 +153,33 @@ export function installDevBridge(transport: Transport): void {
       autosave: () => writeRecipeAutosave(),
       restoreAutosave: () => restoreRecipeAutosave(),
     },
+    autosave: {
+      tick: () => autosaveTick(),
+      untitledPath: () => untitledBackupPath(),
+      async findUntitled() {
+        const b = await findUntitledBackup();
+        return b ? { path: b.path, nodes: b.loaded.doc.nodes.length, savedAt: b.savedAt } : null;
+      },
+      async restoreUntitled() {
+        const b = await findUntitledBackup();
+        if (!b) return false;
+        restoreUntitled(b);
+        return true;
+      },
+      discardUntitled: () => discardUntitledBackup(),
+    },
+    shell: {
+      closeGuardInstalled: () => closeGuard.installed,
+      stubPickPath: (fn) => overridePickPath(fn),
+      async shouldClose() {
+        let asked = false;
+        const close = await shouldClose(() => {
+          asked = true;
+          return resolveUnsaved("关闭窗口");
+        });
+        return { asked, close };
+      },
+    },
     async plan() {
       const g = useGraphStore.getState();
       await requestPlan(g.doc, g.filePath);
@@ -139,6 +196,12 @@ export function installDevBridge(transport: Transport): void {
     clearTransitions() {
       transitions.length = 0;
       runMarks.length = 0;
+    },
+    viewport() {
+      return viewportHandle()?.get() ?? null;
+    },
+    setViewport(v) {
+      viewportHandle()?.set(v);
     },
     runMarks,
     async runOutputs(runId) {

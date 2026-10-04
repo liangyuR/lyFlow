@@ -2,6 +2,7 @@
 #include "exec/executor.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <ctime>
@@ -26,6 +27,23 @@ namespace lyflow::exec {
 namespace {
 
 using Clock = std::chrono::steady_clock;
+
+/// 整个进程此刻在算的节点数，跨所有 Run。线程预算按它分（threadBudgetNow）：编辑器里被抢占、
+/// 还在收尾的那次和新的一次同时在算，`lyflow eval --jobs` 同时跑好几次 —— 只按自己这次运行的
+/// 节点数分的话，每次运行都以为整台机器归它，几次加起来就是核数的好几倍。
+std::atomic<int>& runningNodes() {
+  static std::atomic<int> count{0};
+  return count;
+}
+
+/// 一个节点在算的这段时间计进 runningNodes。
+class CountedAsRunning {
+ public:
+  CountedAsRunning() { runningNodes().fetch_add(1, std::memory_order_relaxed); }
+  ~CountedAsRunning() { runningNodes().fetch_sub(1, std::memory_order_relaxed); }
+  CountedAsRunning(const CountedAsRunning&) = delete;
+  CountedAsRunning& operator=(const CountedAsRunning&) = delete;
+};
 
 double msSince(Clock::time_point t0) {
   return std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
@@ -550,7 +568,7 @@ class Scheduler {
             const RunOptions& options, ResultStore& store, int workers,
             const std::unordered_map<std::string, std::unordered_map<std::string, Data>>& injected)
       : plan_(plan), sink_(sink), cancelled_(cancelled), options_(options), store_(store),
-        injected_(injected), workers_(workers), threadBudget_(threadBudgetFor(workers)),
+        injected_(injected), workers_(workers),
         n_(plan.nodes.size()), remaining_(n_, 0), verdict_(n_, Verdict::Ok), done_(n_, 0),
         failure_(n_), releases_(n_) {
     // 惰性节点不进就绪队列，但它们的**非惰性**祖先仍要在 demand 发生前跑完 ——
@@ -693,7 +711,10 @@ class Scheduler {
         inflight_ += 1;
       }
 
-      const Verdict v = execute(index);
+      const Verdict v = [&] {
+        const CountedAsRunning counted;
+        return execute(index);
+      }();
       finish(index, v, /*releaseDownstream=*/true);
       cv_.notify_all();
     }
@@ -714,6 +735,12 @@ class Scheduler {
         if (--remaining_[di] == 0) ready_.push(di);
       }
     }
+  }
+
+  /// 本节点此刻能开几个线程（ExecContext::threadBudget）：核数按整个进程此刻在算的节点数分
+  /// （runningNodes，跨 Run），不只是这次运行里的。
+  int threadBudgetNow() const {
+    return threadBudgetFor(runningNodes().load(std::memory_order_relaxed));
   }
 
   Verdict verdictOf(std::size_t i) const {
@@ -849,7 +876,7 @@ class Scheduler {
         Inputs inputs(inputValues);
         Outputs outputs(outputValues);
         ParamView params(pixelScale > 1 ? scaledParams : node.params, options_.baseDir);
-        NodeContext ctx(sink_, cancelled_, node.id, options_.baseDir, threadBudget_);
+        NodeContext ctx(sink_, cancelled_, node.id, options_.baseDir, threadBudgetNow());
         try {
           status = node.op->compute(inputs, params, outputs, ctx);
         } catch (const std::exception& e) {
@@ -1214,7 +1241,6 @@ class Scheduler {
   ResultStore& store_;
   const std::unordered_map<std::string, std::unordered_map<std::string, Data>>& injected_;
   int workers_ = 1;
-  int threadBudget_ = 1;
   std::size_t n_ = 0;
 
   mutable std::mutex mu_;
@@ -1557,10 +1583,10 @@ int resolveMaxParallel(int requested) {
   return std::max(1, std::min<int>(4, cores == 0 ? 1 : static_cast<int>(cores)));
 }
 
-int threadBudgetFor(int maxParallel) {
+int threadBudgetFor(int concurrent) {
   const unsigned cores = std::thread::hardware_concurrency();
   const int total = cores == 0 ? 1 : static_cast<int>(cores);
-  return std::max(1, total / std::max(1, maxParallel));
+  return std::max(1, total / std::max(1, concurrent));
 }
 
 // --------------------------------------------------------------------- Run

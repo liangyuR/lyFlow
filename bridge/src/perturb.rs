@@ -1,8 +1,8 @@
 use serde_json::{json, Map, Value};
 
 use crate::cli::{
-    core, json_line, line, load_graph, parse_axis, Loaded, Parsed, Sink, EXIT_FAILED, EXIT_INVALID,
-    EXIT_USAGE,
+    core, json_line, line, load_graph, parse_axis, Loaded, Parsed, Sink, EXIT_CANCELLED,
+    EXIT_FAILED, EXIT_INVALID, EXIT_USAGE,
 };
 use crate::eval::{
     collect_samples, csv_text, parse_metric, Engine, EngineError, Grouping, MetricPath, ParamSet,
@@ -198,7 +198,7 @@ pub(crate) fn insert_after(
             };
         }
     }
-    for (_, out) in doc.outputs.iter_mut() {
+    for out in doc.outputs.values_mut() {
         if out.node == node && out.port == port {
             out.node = id.clone();
             out.port = "cloud".to_string();
@@ -518,6 +518,15 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         }
         None => DEFAULT_TOLERANCE,
     };
+    let (parallel, jobs) = match crate::cli::parallel_of(parsed)
+        .and_then(|p| Ok((p, crate::cli::jobs_of(parsed)?)))
+    {
+        Ok(v) => v,
+        Err(e) => {
+            line(err, &e);
+            return EXIT_USAGE;
+        }
+    };
 
     let samples = match collect_samples(parsed, err) {
         Ok(s) => s,
@@ -566,10 +575,6 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let loaded: Loaded = loaded;
 
     let param_sets = displacement_param_sets(&perturb_id, axis_index, &displacements);
-    let parallel = parsed
-        .one("parallel")
-        .and_then(|v| v.parse::<i32>().ok())
-        .unwrap_or(0);
 
     // pointFrom（docs/pointfrom-plan.md）：第一遍在未扰动的图上（位移 0，__perturb 恒等）逐样本读锚点，
     // 第二遍把这一帧的刀口写进样本的 set。锚点取自未扰动的运行，不会被刀口带着动；上游结果留在进程内
@@ -589,10 +594,14 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             parallel,
             no_cache: parsed.has("no-cache"),
             summary: false,
+            jobs,
         };
         let mut read: Vec<Vec<Option<f64>>> = vec![Vec::new(); samples.len()];
-        if let Err(e) = pre.run(&mut |row: &Row| read[row.sample] = row.metrics.clone()) {
-            return report_engine_error(e, err);
+        match pre.run(&mut |row: &Row| read[row.sample] = row.metrics.clone()) {
+            Err(e) => return report_engine_error(e, err),
+            // 读锚点那一遍就按了 Ctrl+C：不再跑第二遍（以前会接着把读到了锚点的样本全跑一遍）
+            Ok(EXIT_CANCELLED) => return EXIT_CANCELLED,
+            Ok(_) => {}
         }
         let base_point = match &region {
             Region::Halfspace { point, .. } => *point,
@@ -644,12 +653,15 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         no_cache: parsed.has("no-cache"),
         // perturb 报的是斜率，逐样本行不带 summary（要看收尾状态用 eval）
         summary: false,
+        jobs,
     };
 
     let mut rows: Vec<Row> = Vec::new();
-    let code = {
+    let mut progress = crate::eval::Progress::new(err, param_sets.len() * run_samples.len());
+    let result = {
         let mut on_row = |row: &Row| {
             let sample = &run_samples[row.sample];
+            progress.row(&crate::eval::progress_text(row, Some(&sample.id), param_sets.len() > 1));
             let mut m = Map::new();
             for (metric, value) in metrics.iter().zip(&row.metrics) {
                 m.insert(metric.raw.clone(), num(*value));
@@ -675,10 +687,12 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             kept.sample = index_of[row.sample];
             rows.push(kept);
         };
-        match engine.run(&mut on_row) {
-            Ok(c) => c,
-            Err(e) => return report_engine_error(e, err),
-        }
+        engine.run(&mut on_row)
+    };
+    progress.clear();
+    let code = match result {
+        Ok(c) => c,
+        Err(e) => return report_engine_error(e, err),
     };
 
     let mut worst = code;
@@ -763,6 +777,9 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             rows.len()
         ),
     );
+    if let Some(digest) = crate::eval::failure_digest(&rows) {
+        line(err, &digest);
+    }
     worst
 }
 

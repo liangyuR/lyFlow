@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { cloudCache, fetchCloud } from "../src/lib/cloudCache.ts";
+import { cloudCache, fetchCloud, putCache } from "../src/lib/cloudCache.ts";
 
 const payload = (n) => ({
   pointCount: n,
@@ -42,4 +42,27 @@ test("同一个键并发只取一次、取完进缓存；取失败不留占位�
   await assert.rejects(fetchCloud("run2|n|cloud|100", bad));
   await assert.rejects(fetchCloud("run2|n|cloud|100", bad));
   assert.equal(fails, 2, "失败的那次不留在进行中表里");
+});
+
+test("缓存按字节封顶，法线、颜色也算进去（各通道是同一个 IPC buffer 上的视图，记 buffer）", () => {
+  cloudCache.clear();
+  const n = 4_000_000; // 每片：坐标 48 MB + 法线 48 MB + 颜色 12 MB ≈ 108 MB
+  const big = () => {
+    const buf = new ArrayBuffer(n * 12 + n * 12 + n * 3);
+    return {
+      pointCount: n,
+      totalPoints: n,
+      bounds: new Float32Array(6),
+      xyz: new Float32Array(buf, 0, n * 3),
+      intensity: null,
+      normals: new Float32Array(buf, n * 12, n * 3),
+      rgb: new Uint8Array(buf, n * 24, n * 3),
+    };
+  };
+  putCache("r|a|cloud|0", big());
+  putCache("r|b|cloud|0", big());
+  putCache("r|c|cloud|0", big());
+  // 三片 324 MB 超过 256 MB 的预算：最早的那片让位。以前只算坐标（每片 48 MB），三片都留着
+  assert.deepEqual([...cloudCache.keys()], ["r|b|cloud|0", "r|c|cloud|0"]);
+  cloudCache.clear();
 });

@@ -29,14 +29,18 @@ M2 起改成了 **CMake 构建的 DLL + libloading 运行时加载**
 运行时 DLL，而且清单会随版本变 —— 在 build.rs 里手工复刻 vcpkg 的依赖解析
 是死路。CMake 已经知道答案，让它回答。
 
-`build.rs` 做三件事：
+`build.rs` 做四件事：
 
 1. 用 cmake crate 驱动 `core/CMakeLists.txt`，只构建 `lyflow_core` 这一个目标
    （两个 exe 归 `scripts/build-core.ps1` 管）。固定 `RelWithDebInfo`（D8）。
 2. 发 `cargo:rustc-env=LYFLOW_CORE_BIN=<build>/bin`，并把该目录里的
-   `.dll/.exe/.pdb` 拷到 `target/<profile>/` 和它的 `deps/`，给 `tauri build`
-   与打包用。
-3. 让 link.exe 给本包所有 exe（app、CLI、测试）贴 `core/lyflow-utf8.manifest`
+   `.dll/.exe/.pdb` 拷到 `target/<profile>/` 和它的 `deps/`（release 的 exe 从同目录加载）。
+3. 桌面构建再把这些 DLL 镜像到 `bridge/target/bundle-core/` —— `tauri.conf.json` 的 `bundle.resources`
+   指向这里，安装包里的 core 因此**就是这一次构建编出来的那一份**。release 每次整份换掉，
+   debug 只在还没有时放一份（tauri-build 在 debug 下也按 resources 拷文件，glob 空了要报错）。
+   以前 resources 指向 `build-core.ps1` 的 `build/core/bin`：另一棵构建树，
+   `LYFLOW_PACKS=gap;dts pnpm tauri build` 打出来的包里没有 gap（2026-10-01 实测）。
+4. 让 link.exe 给本包所有 exe（app、CLI、测试）贴 `core/lyflow-utf8.manifest`
    （D9：`activeCodePage=UTF-8`），lyflow-app 再合并 `lyflow-app.manifest`（Common-Controls v6）。
 
 **不发任何 `rustc-link-lib`。** DLL 在运行时才加载：**开发构建**
@@ -125,18 +129,20 @@ CMake + Ninja + vcpkg（PCL）。Ninja 通常不在 PATH 上，`build.rs` 会依
 变了就走一轮换代，**顺序不能变**（[ADR-0009](../docs/adr/0009-hot-reload-by-copy.md)）：
 
 ```
-取消活跃 run → RunManager::drop_all() → 清空结果仓
-  → 复制成 lyflow_core.gen<N>.dll → 加载 → 自检 → 换掉 Arc<Core>
+RunManager::pause(ReleaseAll) → drain（取消并等齐在算的，放掉全部 RunHandle）→ 清空结果仓
+  → 复制成 lyflow_core.gen<N>.dll → 加载 → 自检 → 换掉 Arc<Core> → 结束窗口（排队的请求在新的一代上开跑）
 ```
 
-- **必须先 `drop_all()`。** `RunHandle` 持有 `Arc<Core>`；不放掉的话旧 DLL 只是
-  「被顶下去」而不是被卸载，两代同时活着、两个结果仓，症状会非常离奇。
+- **必须先放掉全部 RunHandle（`drain`）。** `RunHandle` 持有 `Arc<Core>`；不放掉的话旧 DLL 只是
+  「被顶下去」而不是被卸载，两代同时活着、两个结果仓，症状会非常离奇。窗口里发起的运行只排队，
+  开跑时才取 core —— 以前排队的请求捕获的是提交时那一代。
 - **必须复制。** Windows 锁住已加载的 DLL，不复制的话第一次热重载之后 CMake
   就再也构建不了了。旧代的 gen 文件删不掉是常态，清理放在下次启动。
 - 自检（`manifest_problems` 为空 + manifest 可解析）不过就保留旧代，
   emit `core-reload-failed`。半坏的一代比旧的一代难查十倍。
-- `watch_source()` 靠 `env!("CARGO_MANIFEST_DIR")` 推路径，安装包里不存在 →
-  watcher 不启动，`get_core_info().hotReload` 是 false。
+- `watch_source()` 靠 `env!("CARGO_MANIFEST_DIR")` 推路径，**只在 debug 构建里开**：
+  release 构建（安装包）一律不启动 watcher，`get_core_info().hotReload` 是 false。
+  以前只靠「安装包里这个路径不存在」，而在构建机上它一直在 —— 那里开的打包产物会盯着开发目录换代。
 
 ### 运行的生命周期（`execution.rs`）
 
@@ -151,7 +157,9 @@ D3：同一时刻一个活跃 run，**新 run 抢占旧 run**。抢占**不阻�
   `pending` 已经作废、没有新的顶上来时，`draining` 也进 `finished` —— 编辑器的节点表还是它的结果；
 - `cancel` 命中排队中的请求时直接作废，补发一条 `run_finished(cancelled)`（seq 0）—— 前端拿到 runId 就进了「运行中」，等的就是它；
   被新请求顶掉的不补发（前端只认最后发起的那次）。排队的请求启动失败（只在内存不足时）补发 `run_finished(error)`；
-- `stop_active`（重扫库目录）与 `drop_all`（热重载）仍然等 `active` 与 `draining` 都退出：此后不能有 run 握着旧的算子描述或旧 DLL。
+- **维护窗口**（`pause`，重扫库目录与热重载）：在算的与排干中的取消掉，交给返回的 `Paused` 去等（`drain`，不在主线程上）；
+  窗口里来的请求只排队、只留最新一个，`Paused` 放掉时才开跑。同一时刻只有一个窗口。`KeepResults`（重扫）把被停掉的那一次留作
+  上一次完成的，`ReleaseAll`（热重载）连上一次完成的一起放掉。
 
 前端拿到新 runId 时，被抢占的那个可能还没发出它的 `run_finished(cancelled)`：前端按 runId 分流事件，
 对不上的当孤儿暂存、下一次 `beginRun` 清掉，晚到的无害。取数则按执行 store 的 `resultRunId`（节点表反映的那一次）：
@@ -271,7 +279,7 @@ lyflow eval <graph> <样本集>
                     [--param <名字>=<json>]...
                     --metric <path> [--metric <path>]...
                     [--holdout <tag>=<value>] [--group-by <tag>]
-                    [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--no-cache] [--set ...]
+                    [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--jobs <n>] [--no-cache] [--set ...]
 
 <样本集> 三选一（perturb 共用同一组）：
     --samples <samples.jsonl>
@@ -314,7 +322,16 @@ lyflow eval 4.lyflow.json --samples-dir kun10/sensor --sample-subdir 4 \
   `--split-half` 排序后前一半 `a`、后一半 `b`（奇数时前半多一个），配 `--holdout <key>=b`。
 - stdout 每行一个 `eval_row`，末尾每个（参数组 × 指标）一行 `eval_summary`
   （`n / ok / failCodes / mean / std / min / max / p2p`；`std` 是样本标准差，`n<2` 给 `null`）。
-- 样本之间**顺序跑**，`--parallel` 是传给 core 的节点并行度，与 `run` 同义。缓存默认开。
+- 样本之间默认**一次接一次**；`--jobs <n>`（eval / sweep / perturb）同时跑 n 次，行仍按原顺序交出、
+  除 `durationMs` 外逐行相同，停也停在同一行（某一行被 Ctrl+C 取消、某次运行内部出错）。
+  参数组在外层，同时在跑的几次多半是同一组参数的不同样本。内存大约是 n 倍；
+  core 的线程预算按整个进程在算的节点数分，几次加起来不超订。
+  4 核 8 线程的笔记本上：全是单线程算子的图约 1.8×，统计离群点这种自己就吃满核的图 1.3–1.5×。
+  `--parallel` 是传给 core 的节点并行度（一次运行里），与 `run` 同义。缓存默认开。
+- **进度行**：stdout 重定向到文件、stderr 还在终端上时（`lyflow eval … > rows.jsonl`），stderr 上原地刷新一行
+  `[k/总数] 样本 · 参数组 · 状态 · 耗时 · 还要约 …`，收场时清掉（`eval::Progress`）。`lyflow run` 同样有一行：
+  `[k/总数] 节点 · 正在算 … · 已过 …`（`cli::RunProgress`，靠 `RunRequest::on_event` 在 core 的线程上收事件）。`\r` 加补空格、
+  按控制台宽度截断，不靠 ANSI 转义；管道、MCP、`run_cli` 的测试里一个字节都不多（开关只在 `cli::main` 里设）。
 - `sweep` 现在是这套引擎上的一层壳，只负责轴展开与 `sweep_row` 的老形状；
   它的 `--metric nodeId:port.field` 老写法两个子命令都还认。
 
@@ -373,10 +390,12 @@ lyflow patch 4.lyflow.json --rewire n_fb_line:out=n_fit_base:line -o short.lyflo
 `watcher::spawn_library` 盯着它们，`*.lyflow-op.json` 变了就重扫并推一条
 `manifest-updated` —— 与热重载同一条通路，前端零改动。
 
-重扫会重建注册表，所以必须先 `RunManager::stop_active()`：正在跑的 run 握着 `OperatorDesc` 指针。
-上一次跑完的那个**留着** —— 重扫不换 DLL，它在结果仓里的数据照样有效；以前这里用的是 `drop_all()`，
-存库后 400 ms watcher 再扫一遍时放掉了刚跑完的 run，界面显示「完成」、按它的 runId 却取不到输出。
-`drop_all()` 只给热重载用（换 DLL，要连结果仓一起清空，ADR-0009）。
+重扫会重建注册表，所以在维护窗口里做（`commands::rescan_library_paused`）：正在跑的 run 握着 `OperatorDesc` 指针，
+而 `Registry::setLibraryOperators` 一扩容 `std::vector<OperatorDesc>`，**全部**算子的指针都悬空。窗口先停下运行、等它们退出
+（不在主线程上：`refresh_library` / `set_library_dirs` / `save_as_library` 是 async 命令，在线程池上等），
+再回到主线程重建注册表并取新 manifest（注册表在 core 里没有锁，validate / plan / manifest 这些同步命令都在主线程上读它）。
+上一次跑完的那个**留着** —— 重扫不换 DLL，它在结果仓里的数据照样有效；以前这里放掉过它，
+存库后 400 ms watcher 再扫一遍时界面显示「完成」、按它的 runId 却取不到输出。只有热重载连它一起放掉（ADR-0009）。
 watcher 扫之前先比一遍库文件的（路径, 大小, 修改时间）：存库、手动重扫已经扫过的那次写盘不再扫第二遍。
 
 ## 启动自检

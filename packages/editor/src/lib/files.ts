@@ -16,12 +16,6 @@ export async function pickSavePath(suggested: string): Promise<string | null> {
   return dialogs().pickSavePath(suggested);
 }
 
-/** 有未保存改动时问一句。返回 true 表示可以继续。 */
-export async function confirmDiscard(dirty: boolean): Promise<boolean> {
-  if (!dirty) return true;
-  return dialogs().confirmDiscard(dirty);
-}
-
 export async function saveDocTo(path: string, doc: GraphDoc): Promise<void> {
   await transport.saveGraph(path, doc);
 }
@@ -82,6 +76,12 @@ export async function confirmRestore(path: string): Promise<boolean> {
     `${baseName(path)} 有一份比正文更新的自动备份，` +
     `上次可能是异常退出的。要恢复备份吗？（选否则丢弃备份）`;
   return dialogs().confirmRestore(path, message);
+}
+
+/** 上级目录的名字：不同目录下的同名文件（demo.lyflow.json）在最近文件里靠它分清。没有上级时空串。 */
+export function parentName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts.length >= 2 ? (parts[parts.length - 2] ?? "") : "";
 }
 
 export function baseName(path: string): string {

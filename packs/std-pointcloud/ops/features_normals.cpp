@@ -1,11 +1,16 @@
+#include <pcl/common/centroid.h>
+#include <pcl/features/feature.h>
 #include <pcl/features/normal_3d.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/search/kdtree.h>
 
+#include <atomic>
 #include <cmath>
+#include <vector>
 
 #include "ops.h"
+#include "parallel.h"
 #include "lyflow_pcl/adapter.h"
 
 namespace lyflow::ops {
@@ -33,40 +38,58 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   ctx.progress(0.1f, "构建 KD 树");
   auto cloud = adapter::toPcl(in);
 
-  pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> ne;
-  ne.setInputCloud(cloud);
-  ne.setSearchMethod(pcl::make_shared<pcl::search::KdTree<pcl::PointXYZ>>());
-  if (byRadius) {
-    ne.setRadiusSearch(radius);
-  } else {
-    ne.setKSearch(kSearch);
-  }
-  if (flip) ne.setViewPoint(viewpoint[0], viewpoint[1], viewpoint[2]);
+  // 与 pcl::NormalEstimation（vcpkg 的 1.12）逐点同一套：同一种排序的 KD 树、K 近邻或半径邻域、
+  // 均值与协方差 → 最小特征值的特征向量。只是逐点那一圈按线程预算分段并行（parallel.h；NormalEstimationOMP 在
+  // 没开 OpenMP 的 PCL 里是单线程，200 万点 12 s）。
+  // 朝向：只在 flipTowardsViewpoint 开着时翻 —— PCL 的 NormalEstimation 不论如何都朝视点（没设就是原点）翻，
+  // 以前这个开关关掉也照翻
+  pcl::search::KdTree<pcl::PointXYZ> tree;
+  tree.setInputCloud(cloud);
+  if (ctx.cancelled()) return Status::Ok();
 
-  pcl::PointCloud<pcl::Normal> normals;
-  ne.compute(normals);
-
+  const std::size_t n = in.pointCount();
+  PointCloud out = in;
+  out.normals.assign(n * 3, 0.0f);
+  std::atomic<std::size_t> degenerateCount{0};
+  ctx.progress(0.2f, "估计法线");
+  parallelFor(n, ctx.threadBudget(), [&](std::size_t begin, std::size_t end) {
+    if (ctx.cancelled()) return false;
+    pcl::Indices nn;
+    std::vector<float> d2;
+    EIGEN_ALIGN16 Eigen::Matrix3f covariance;
+    Eigen::Vector4f centroid;
+    std::size_t bad = 0;
+    for (std::size_t i = begin; i < end; ++i) {
+      const pcl::PointXYZ& pt = (*cloud)[i];
+      const auto index = static_cast<pcl::index_t>(i);
+      const bool finitePoint = std::isfinite(pt.x) && std::isfinite(pt.y) && std::isfinite(pt.z);
+      const int found = !finitePoint ? 0
+                        : byRadius   ? tree.radiusSearch(index, radius, nn, d2, 0)
+                                     : tree.nearestKSearch(index, kSearch, nn, d2);
+      float nx = 0.0f, ny = 0.0f, nz = 0.0f, curvature = 0.0f;
+      if (found == 0 || nn.size() < 3 || pcl::computeMeanAndCovarianceMatrix(*cloud, nn, covariance, centroid) == 0) {
+        ++bad;
+        continue;
+      }
+      pcl::solvePlaneParameters(covariance, nx, ny, nz, curvature);
+      if (!std::isfinite(nx) || !std::isfinite(ny) || !std::isfinite(nz)) {
+        // 邻域退化时 PCL 填 NaN。这里置零而不是留着：NaN 流到下游，
+        // 体素栅格一做平均整片法线就全成了 NaN，再往下就是 3D 视图黑屏。
+        ++bad;
+        continue;
+      }
+      if (flip) pcl::flipNormalTowardsViewpoint(pt, viewpoint[0], viewpoint[1], viewpoint[2], nx, ny, nz);
+      out.normals[i * 3] = nx;
+      out.normals[i * 3 + 1] = ny;
+      out.normals[i * 3 + 2] = nz;
+    }
+    degenerateCount += bad;
+    return true;
+  });
   if (ctx.cancelled()) return Status::Ok();
   ctx.progress(0.9f);
+  const std::size_t degenerate = degenerateCount.load();
 
-  // 输出是「输入点云 + normals 通道」，所以从 in 拷一份而不是 adapter::fromPcl()——
-  // 后者只带 xyz，intensity/rgb 会凭空消失。
-  PointCloud out = in;
-  out.normals.assign(in.pointCount() * 3, 0.0f);
-  std::size_t degenerate = 0;
-  for (std::size_t i = 0; i < in.pointCount() && i < normals.size(); ++i) {
-    const auto& nrm = normals[i];
-    if (!std::isfinite(nrm.normal_x) || !std::isfinite(nrm.normal_y) ||
-        !std::isfinite(nrm.normal_z)) {
-      // 邻域不足时 PCL 填 NaN。这里置零而不是留着：NaN 流到下游，
-      // 体素栅格一做平均整片法线就全成了 NaN，再往下就是 3D 视图黑屏。
-      ++degenerate;
-      continue;
-    }
-    out.normals[i * 3] = nrm.normal_x;
-    out.normals[i * 3 + 1] = nrm.normal_y;
-    out.normals[i * 3 + 2] = nrm.normal_z;
-  }
   if (degenerate > 0) {
     ctx.log(LogLevel::Warn,
             std::to_string(degenerate) + " 个点的邻域不足，法线置零（把半径或 K 调大）");
@@ -142,7 +165,7 @@ void registerFeaturesNormals(Registry& r) {
   viewpoint.visibleWhen = Condition{"flipTowardsViewpoint", Value::boolean(true), {}};
 
   op.params = {mode, k, radius, flip, viewpoint};
-  op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
+  op.capabilities = {/*cancellable=*/true, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;
 
   r.addOperator(std::move(op));

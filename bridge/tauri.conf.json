@@ -13,6 +13,8 @@
   "app": {
     "windows": [
       {
+        "label": "main",
+        "create": false,
         "title": "LyFlow",
         "width": 1440,
         "height": 900,
@@ -30,7 +32,7 @@
     "active": true,
     "targets": "all",
     "resources": {
-      "../build/core/bin/*.dll": "./"
+      "target/bundle-core/*.dll": "./"
     },
     "icon": [
       "icons/32x32.png",

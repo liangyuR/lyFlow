@@ -1,7 +1,7 @@
 // 右侧检查器：选中节点的参数表单。字段、控件、范围、单位、分组、联动条件
 // 全部由 manifest 生成（ADR-0003），这个文件里没有任何算子的名字。
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   graphParamSpecOf,
@@ -11,8 +11,10 @@ import {
   type GraphBinding,
 } from "../lib/graphParams";
 import { groupParams, effectiveParams, isEnabled, isVisible, valueEquals } from "../lib/params";
+import { PARAM_DOCS_KEY, paramFacts } from "../lib/paramDoc";
+import { readStoredBool, writeStoredBool } from "../lib/prefs";
 import { frameKeyOfGroup, pickFrame, roiFramesOf } from "../lib/roiFrames";
-import { augmentOperators, levelOf, promotedBy } from "../lib/subgraph";
+import { augmentOperators, describeEventNode, fullId, levelOf, locateEventNode, nodeIndex, promotedBy } from "../lib/subgraph";
 import { useExecutionStore, useNodeExecution, useParamErrors } from "../store/execution";
 import { currentSubgraph, useGraphStore } from "../store/graph";
 import { useManifestStore } from "../store/manifest";
@@ -20,64 +22,47 @@ import { useGraphParamOverrides, useRecipeStore } from "../store/recipe";
 import { formatValue } from "../lib/recipes";
 import { useUiStore } from "../store/ui";
 import { useGraphParamValidation, useNodeValidation, useValidationStore } from "../store/validation";
-import type { OutputStat, OutputValue } from "../types/execution";
+import type { OutputStat } from "../types/execution";
 import type { OperatorDesc, Param } from "../types/manifest";
-import type { GraphNode, SubgraphDef } from "../types/graph";
+import { LIBRARY_OP_PREFIX, subgraphIdOf, type GraphNode, type SubgraphDef } from "../types/graph";
 
+import { CommitText } from "./CommitText";
 import { OperatorDetail, PortRow } from "./OperatorDetail";
 import { ParamControl } from "./ParamControls";
-import { num } from "../lib/format";
+import { MultiEditContext } from "./NumberInput";
+import { copyText } from "../lib/clipboard";
+import { formatOutputValue } from "../lib/outputs";
 
 /** 六位有效数字。2D 几何的坐标是米，原样打印会拖一串浮点噪声。 */
 // num 搬到了 lib/format（对比的差异表要在纯函数里用）；从这里转出，老的 import 不用改
 export { num } from "../lib/format";
+// formatOutputValue 搬到了 lib/outputs（节点底栏与运行收尾也要用）
+export { formatOutputValue } from "../lib/outputs";
 
-function pair(v: [number, number] | number | null | undefined): string {
-  return Array.isArray(v) ? `(${num(v[0])}, ${num(v[1])})` : "—";
-}
-
-/** 非点云输出的一行文本。类型未知时退回类型名，永远不抛。 */
-export function formatOutputValue(o: OutputStat): string {
-  const v: OutputValue | undefined = o.value;
-  if (!v) return `${o.elementCount} 个元素`;
-  // 图像算子的几何是像素坐标（docs/image-plan.md Q2）：值上写明，免得当成米读
-  const px = v.unit === "px" && v.kind !== "Measurement" ? " px" : "";
-  switch (v.kind) {
-    case "Measurement":
-      if (v.value === null || v.value === undefined) return v.message || "未测出";
-      return `${num(v.value)} ${v.unit ?? ""}`.trim();
-    case "Box2D":
-      return `${pair(v.min)} → ${pair(v.max)}${px}`;
-    case "Line2D":
-      return v.hasSegment
-        ? `${pair(v.start)} → ${pair(v.end)}${px}`
-        : `过 ${pair(v.point)} 方向 ${pair(v.dir)}${px}`;
-    case "Circle2D":
-      return `圆心 ${pair(v.center)} 半径 ${num(v.radius)}${px}`;
-    case "Point2D":
-      return `${pair(v.p)}${px}`;
-    case "Record":
-      return `${v.type ?? ""} ${JSON.stringify(v.data ?? {})}`.trim();
-    case "Plane":
-      return `n=(${(v.normal ?? []).map(num).join(", ")}) d=${num(v.d)}`;
-    case "Tensor":
-      return `[${(v.shape ?? []).join(", ")}] 均值 ${num(typeof v.mean === "number" ? v.mean : undefined)}`;
-    case "Image": {
-      const means = Array.isArray(v.mean) ? v.mean.map((m) => num(m ?? undefined)).join(", ") : "—";
-      return `${v.width ?? "?"}×${v.height ?? "?"}×${v.channels ?? "?"} ${v.depth ?? ""} · 均值 (${means})`;
-    }
-    default:
-      return `${o.elementCount} 个元素`;
-  }
-}
-
-/** 该节点这次运行的非点云输出。点云走 3D 视图，这里只显示能读的值。 */
-function OutputValues({ outputs }: { outputs: OutputStat[] }) {
+/** 该节点这次运行的输出：能读的值逐个列出；点云只列点数，点一下预览改看它（多个点云输出时，
+ *  提取下标的 rest 这类以前在预览里怎么都看不到）。 */
+function OutputValues({ outputs, nodeKey }: { outputs: OutputStat[]; nodeKey: string }) {
   const shown = outputs.filter((o) => o.value !== undefined);
-  if (shown.length === 0) return null;
+  const clouds = outputs.filter((o) => o.type === "PointCloud");
+  const pick = useUiStore((s) => s.viewerPortPick.get(nodeKey) ?? null);
+  if (shown.length === 0 && clouds.length < 2) return null;
   return (
     <section className="insp__group" data-testid="inspector-outputs">
       <h4 className="insp__group-title">输出</h4>
+      {clouds.length > 1 &&
+        clouds.map((o) => (
+          <button
+            type="button"
+            className={`insp-cloud${pick === o.port ? " is-picked" : ""}`}
+            key={o.port}
+            data-testid={`output-cloud-${o.port}`}
+            title="在预览里看这个输出"
+            onClick={() => useUiStore.getState().setViewerPortPick(nodeKey, o.port)}
+          >
+            <span className="insp-out__port">{o.port}</span>
+            <span className="insp-out__value">{o.elementCount.toLocaleString()} 点</span>
+          </button>
+        ))}
       {shown.map((o) => {
         const verdict = o.value?.kind === "Measurement" ? o.value.verdict : undefined;
         return (
@@ -104,6 +89,7 @@ function OutputValues({ outputs }: { outputs: OutputStat[] }) {
 function GraphOutputs() {
   const outputs = useGraphStore((s) => s.doc.outputs);
   const remove = useGraphStore((s) => s.removeGraphOutput);
+  const doc = useGraphStore((s) => s.doc);
   const nodes = useExecutionStore((s) => s.nodes);
   const names = Object.keys(outputs ?? {});
   if (names.length === 0) return null;
@@ -114,9 +100,18 @@ function GraphOutputs() {
       {names.map((name) => {
         const ref = outputs![name]!;
         const stat = nodes.get(ref.node)?.stats?.outputs?.find((o) => o.port === ref.port);
+        // 运行时取不到的：路径走不通（节点不在了）；走到普通算子了后面还有几段（只有库算子的里面留给 core）；
+        // 指着子图节点 / 库算子本身（core 展开之后没有这个 id）。标出来、✕ 照样能删
+        const at = locateEventNode(doc, ref.node);
+        const hit = at ? levelOf(doc, at.path).nodes.find((n) => n.id === at.localId) : undefined;
+        const isLib = hit?.op.startsWith(LIBRARY_OP_PREFIX) === true;
+        const exact = !!at && fullId(at.path, at.localId) === ref.node;
+        const onInstance = exact && !!hit && (subgraphIdOf(hit.op) !== null || isLib);
+        const missing = !at || (exact ? onInstance : !isLib);
         return (
           <div
-            className="insp-out"
+            className={`insp-out${missing ? " is-missing" : ""}`}
+            data-missing={missing ? "1" : undefined}
             key={name}
             data-testid={`graph-output-${name}`}
             data-node={ref.node}
@@ -127,7 +122,13 @@ function GraphOutputs() {
               {name}
             </span>
             <span className="insp-out__value">
-              {stat ? formatOutputValue(stat) : `${ref.node}.${ref.port}`}
+              {missing
+                ? onInstance
+                  ? `指着子图节点本身（${ref.node}），运行时取不到`
+                  : `节点已不在图里（${ref.node}）`
+                : stat
+                  ? formatOutputValue(stat)
+                  : `${ref.node}.${ref.port}`}
             </span>
             <button
               type="button"
@@ -222,6 +223,7 @@ function GraphParamRow({ name }: { name: string }) {
             param={spec}
             value={value}
             disabled={false}
+            previewGraphParam={name}
             onChange={(v) => {
               if (!valueEquals(v, value)) useGraphStore.getState().editGraphParamValue(name, v);
             }}
@@ -252,12 +254,32 @@ function GraphParamRow({ name }: { name: string }) {
   );
 }
 
-/** 节点的端口小节（M6 §3）：类型、契约、样例。折叠成 <details>，默认展开 ——
- *  没声明契约的算子照样列出来，type 和 doc 本来就有用，但收起来时不占地方。 */
+/** 端口小节开着还是收着，所有节点共用一份，记在 localStorage。 */
+const PORTS_OPEN_KEY = "lyflow.inspector.portsOpen";
+
+/** 节点的端口小节（M6 §3）：类型、契约、样例。排在参数后面（以前排在前面，gap 类算子在 900 高的窗口里
+ *  第一屏常常看不到一个参数）；收起来时只剩一行「端口 2 入 · 1 出」，开合记住。 */
 function NodePorts({ op }: { op: OperatorDesc }) {
+  const [open, setOpen] = useState(() => readStoredBool(PORTS_OPEN_KEY) ?? true);
   return (
-    <details className="insp__group insp__ports" data-testid="inspector-ports" open>
-      <summary className="insp__group-title">端口</summary>
+    <details
+      className="insp__group insp__ports"
+      data-testid="inspector-ports"
+      open={open}
+      // 读 currentTarget.open，不自己取反：浏览器已经切过了，取反会和它打架
+      onToggle={(e) => {
+        const next = e.currentTarget.open;
+        if (next === open) return;
+        setOpen(next);
+        writeStoredBool(PORTS_OPEN_KEY, next);
+      }}
+    >
+      <summary className="insp__group-title" data-testid="inspector-ports-toggle">
+        {open ? "▾ " : "▸ "}端口
+        <span className="insp__group-count">
+          {op.inputs.length} 入 · {op.outputs.length} 出
+        </span>
+      </summary>
       <div className="insp__ports-body">
         <div>
           <h5 className="insp__ports-label">输入</h5>
@@ -295,6 +317,7 @@ function ParamRow({
   error,
   def,
   binding,
+  showDoc,
 }: {
   param: Param;
   node: GraphNode;
@@ -303,6 +326,8 @@ function ParamRow({
   def?: SubgraphDef | undefined;
   /** 这个参数最终由哪个图参数提供（P1.4）。给了就显示图参数的有效值，编辑路由到图参数。 */
   binding: GraphBinding | null;
+  /** 「参数说明」开着：控件下面写说明、默认值、范围。 */
+  showDoc: boolean;
 }) {
   const setParam = useGraphStore((s) => s.setParam);
   const value = effective[param.name];
@@ -361,6 +386,8 @@ function ParamRow({
           nodeId={node.id}
           promotedAs={promoted?.name}
           graphBinding={binding}
+          // 这一行改的是图参数（「由图参数 X 提供」）：预览、松手补运行都按它绑着的全部节点算
+          previewGraphParam={binding?.graphParam}
           onChange={(v) => {
             if (!valueEquals(v, value)) setParam(node.id, param.name, v);
           }}
@@ -368,13 +395,51 @@ function ParamRow({
         {/* 错误消息直接贴在控件下面，而不是只做个红框 ——
             红框只说明「这里错了」，用户还得自己猜错在哪（P0 #15）。 */}
         {error && <p className="insp-param__error">{error}</p>}
+        {showDoc && (
+          <div className="insp-param__doc" data-testid={`param-doc-${param.name}`}>
+            {param.doc && <p className="insp-param__doc-text">{param.doc}</p>}
+            <p className="insp-param__facts">{paramFacts(param)}</p>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
+/** 「参数说明」的开关：每个参数下面写出说明、默认值、范围。默认收起，开合所有节点共用一份、记在 localStorage。 */
+function useParamDocs(): [boolean, () => void] {
+  const [on, setOn] = useState(() => readStoredBool(PARAM_DOCS_KEY) ?? false);
+  const toggle = () => {
+    setOn((v) => {
+      writeStoredBool(PARAM_DOCS_KEY, !v);
+      return !v;
+    });
+  };
+  return [on, toggle];
+}
+
+/** 节点 id，点一下复制：`lyflow run --to`、`--set <节点>.<参数>`、诊断里认的都是它（子图里是路径 id）。 */
+function NodeIdChip({ id }: { id: string }) {
+  return (
+    <button
+      type="button"
+      className="insp__nodeid"
+      data-testid="inspector-node-id"
+      title="节点 id，点一下复制：lyflow run --to、--set <节点>.<参数> 与诊断里认的都是它（子图里是路径 id）"
+      onClick={() => {
+        void copyText(id).then((ok) => {
+          useUiStore.getState().showToast(ok ? `已复制节点 id ${id}` : "剪贴板不可用，复制失败", ok ? "info" : "warn");
+        });
+      }}
+    >
+      #{id}
+    </button>
+  );
+}
+
 function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
   const setNodeUi = useGraphStore((s) => s.setNodeUi);
+  const [showDocs, toggleDocs] = useParamDocs();
   const runErrors = useParamErrors(node.id);
   // 编辑期的校验诊断（m8-plan L16）与上次运行的错误一起标到参数上；同一个参数两边都有时
   // 取校验的那一条 —— 它是对着当前的值说的，运行的那条可能已经过时了。
@@ -388,6 +453,7 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
   }, [runErrors, validation]);
   const exec = useNodeExecution(node.id);
   const doc = useGraphStore((s) => s.doc);
+  const operatorsById = useManifestStore((s) => s.operatorsById);
   const path = useUiStore((s) => s.path);
   const overrides = useGraphParamOverrides();
   const def = currentSubgraph(doc, path);
@@ -436,16 +502,18 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
   return (
     <div className="insp">
       <header className="insp__head">
-        <input
+        <CommitText
           className="insp__title"
+          data-testid="inspector-title"
           value={node.ui?.title ?? ""}
           placeholder={op.label}
           spellCheck={false}
-          onChange={(e) => setNodeUi(node.id, { title: e.target.value || null })}
+          onCommit={(text) => setNodeUi(node.id, { title: text || null })}
         />
         <div className="insp__meta">
           <code>{op.id}</code>
           <span className="tag tag--version">v{op.version}</span>
+          <NodeIdChip id={fullId(path, node.id)} />
         </div>
         {staleVersion && (
           <p className="insp__warn">
@@ -453,7 +521,7 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
             默认值或参数含义可能已变更。
           </p>
         )}
-        {op.doc && <p className="insp__doc">{op.doc}</p>}
+        {op.doc && <ClampedDoc key={op.id} text={op.doc} />}
       </header>
 
       {/* 该节点这次运行的全部诊断（D5）。带 paramPath 的会同时在下面标红框，
@@ -464,12 +532,31 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
             {exec.state === "cancelled" ? "未执行" : "执行出错"}
           </h4>
           <ul>
-            {exec.errors.map((e, i) => (
-              <li key={i}>
-                <code className="insp__errcode">{e.code}</code>
-                <span>{e.message}</span>
-              </li>
-            ))}
+            {exec.errors.map((e, i) => {
+              // 子图 / 库算子：这一条来自哪个内部节点（事件 id 是路径，ADR-0010）—— 写明、点了打开到它
+              const source = exec.errorSources?.[i];
+              const where = source ? describeEventNode(doc, operatorsById, source) : null;
+              return (
+                <li key={i}>
+                  <code className="insp__errcode">{e.code}</code>
+                  {where?.reveal && (
+                    <button
+                      type="button"
+                      className="insp__errsrc"
+                      data-testid="inspector-error-source"
+                      title="打开到这个内部节点"
+                      onClick={() => {
+                        const r = where.reveal!;
+                        useUiStore.getState().revealNode(r.path, r.localId, r.exact ? e.paramPath : undefined);
+                      }}
+                    >
+                      {where.names[where.names.length - 1]}
+                    </button>
+                  )}
+                  <span>{e.message}</span>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
@@ -488,10 +575,22 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
         </section>
       )}
 
-      {exec?.stats?.outputs && <OutputValues outputs={exec.stats.outputs} />}
+      {exec?.stats?.outputs && <OutputValues outputs={exec.stats.outputs} nodeKey={fullId(path, node.id)} />}
 
-      <NodePorts op={op} />
-
+      {op.params.length > 0 && (
+        <div className="insp__params-bar">
+          <button
+            type="button"
+            className={`insp__docs-toggle${showDocs ? " is-on" : ""}`}
+            data-testid="inspector-param-docs"
+            aria-pressed={showDocs}
+            title="每个参数下面写出说明、默认值与范围（开合所有节点共用、记住）"
+            onClick={toggleDocs}
+          >
+            {showDocs ? "▾ 参数说明" : "▸ 参数说明"}
+          </button>
+        </div>
+      )}
       {op.params.length === 0 ? (
         <p className="insp__none">此算子没有参数</p>
       ) : (
@@ -507,6 +606,7 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
               error={errors.get(p.name)}
               def={def}
               binding={resolveGraphBinding(doc, path, node.id, p.name)}
+              showDoc={showDocs}
             />
           ));
           const frame = accordion ? frameOfGroup[gi] : null;
@@ -578,7 +678,37 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
           );
         })
       )}
+
+      <NodePorts op={op} />
     </div>
+  );
+}
+
+/** 算子说明截成两行（整段写着契约、算法细节，以前不截，把参数挤到第一屏外）；放不下才给「展开」。 */
+function ClampedDoc({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [open, setOpen] = useState(false);
+  const [overflow, setOverflow] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || open) return;
+    const measure = () => setOverflow(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [text, open]);
+  return (
+    <>
+      <p ref={ref} className={`insp__doc${open ? " is-open" : ""}`} data-testid="inspector-doc">
+        {text}
+      </p>
+      {(overflow || open) && (
+        <button type="button" className="insp__doc-more" data-testid="inspector-doc-more" onClick={() => setOpen(!open)}>
+          {open ? "收起" : "展开说明"}
+        </button>
+      )}
+    </>
   );
 }
 
@@ -589,13 +719,13 @@ function SubgraphInspector({ subgraphId, def }: { subgraphId: string; def: Subgr
   return (
     <div className="insp" data-testid="subgraph-inspector">
       <header className="insp__head">
-        <input
+        <CommitText
           className="insp__title"
           data-testid="subgraph-name"
           value={def.name ?? ""}
           placeholder={subgraphId}
           spellCheck={false}
-          onChange={(e) => rename(subgraphId, e.target.value)}
+          onCommit={(text) => rename(subgraphId, text)}
         />
         <div className="insp__meta">
           <code>sub:{subgraphId}</code>
@@ -643,6 +773,158 @@ export function Inspector() {
   );
 }
 
+/** 多选时的检查器：选中的是同一种算子时一起改参数 —— 改一次写进每个节点，一条撤销（setParamMany）。
+ *  各节点值相同的参数显示那个值；不同的标「不同」，控件里先放第一个节点的值，改了就统一成新值。
+ *  不同算子混选时只列各有几个。 */
+function MultiInspector({ ids }: { ids: string[] }) {
+  const fullDoc = useGraphStore((s) => s.doc);
+  const path = useUiStore((s) => s.path);
+  const base = useManifestStore((s) => s.operatorsById);
+  const operatorsById = augmentOperators(base, fullDoc.subgraphs);
+  const level = levelOf(fullDoc, path);
+  // 查表不逐个 find：全选几百个节点再拖动时每帧都重渲，原来是平方级
+  const index = nodeIndex(level.nodes);
+  const nodes = ids.flatMap((id) => {
+    const n = index.get(id);
+    return n ? [n] : [];
+  });
+  const counts = new Map<string, number>();
+  for (const n of nodes) counts.set(n.op, (counts.get(n.op) ?? 0) + 1);
+  const op = counts.size === 1 && nodes[0] ? operatorsById.get(nodes[0].op) : undefined;
+  return (
+    <div className="insp insp--multi" data-testid="inspector-multi">
+      <header className="insp__head">
+        <p className="insp__multi-count">已选中 {ids.length} 个节点</p>
+        <ul className="insp__multi-ops">
+          {[...counts].map(([opId, n]) => (
+            <li key={opId}>
+              {counts.size > 1 ? (
+                // 混选了几种算子：点一种就把选区收窄成它，一起改参数的表单就出来了
+                <button
+                  type="button"
+                  className="insp__multi-pick"
+                  data-testid={`multi-pick-${opId}`}
+                  title="只留这一种算子，一起改参数"
+                  onClick={() => useUiStore.getState().setSelection(nodes.filter((x) => x.op === opId).map((x) => x.id), [])}
+                >
+                  {n} × {operatorsById.get(opId)?.label ?? opId}
+                </button>
+              ) : (
+                <>
+                  {n} × {operatorsById.get(opId)?.label ?? opId}
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      </header>
+      {op && op.params.length > 0 ? (
+        <MultiParams nodes={nodes} op={op} />
+      ) : (
+        <p className="insp__hint">
+          {op ? "此算子没有参数" : "选中的是同一种算子时，可以在这里一起改参数：点上面的一种，只留它。"}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function MultiParams({ nodes, op }: { nodes: GraphNode[]; op: OperatorDesc }) {
+  const doc = useGraphStore((s) => s.doc);
+  const path = useUiStore((s) => s.path);
+  const overrides = useGraphParamOverrides();
+  const def = currentSubgraph(doc, path);
+  const names = useMemo(() => op.params.map((p) => p.name), [op.params]);
+  // 每个节点各自的有效值（被图参数绑定的取图参数的值，与单个节点的检查器同一份）
+  const each = useMemo(
+    () => nodes.map((n) => effectiveParams(op, withBoundValues(doc, path, n, names, overrides))),
+    [nodes, op, doc, path, names, overrides],
+  );
+  const groups = useMemo(() => groupParams(op.params), [op.params]);
+  const ids = nodes.map((n) => n.id);
+  return (
+    <>
+      {groups.map((g) => {
+        // 联动条件按各节点自己的值判：有一个节点上看得见就列出来
+        const visible = g.params.filter((p) => each.some((e) => isVisible(p, e)));
+        if (visible.length === 0) return null;
+        return (
+          <section key={`${g.name}-${g.advanced}`} className="insp__group">
+            {(g.name || g.advanced) && (
+              <h4 className="insp__group-title">
+                {g.name || "高级"}
+                {g.advanced && g.name !== "高级" && <span className="insp__group-adv">高级</span>}
+              </h4>
+            )}
+            {visible.map((p) => {
+              const values = each.map((e) => e[p.name]);
+              // 已提升的内参只读、联动条件在哪个节点上不满足就禁用 —— 与单个节点的检查器同一规则
+              const locked = nodes.some(
+                (n) => promotedBy(def, n.id, p.name) !== undefined && !resolveGraphBinding(doc, path, n.id, p.name),
+              );
+              return (
+                <MultiParamRow
+                  key={p.name}
+                  param={p}
+                  ids={ids}
+                  values={values}
+                  disabled={locked || !each.every((e) => isEnabled(p, e))}
+                />
+              );
+            })}
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
+function MultiParamRow({
+  param,
+  ids,
+  values,
+  disabled,
+}: {
+  param: Param;
+  ids: string[];
+  values: unknown[];
+  disabled: boolean;
+}) {
+  const setParamMany = useGraphStore((s) => s.setParamMany);
+  const first = values[0];
+  const same = values.every((v) => valueEquals(v, first));
+  return (
+    <div
+      className={`insp-param${disabled ? " is-disabled" : ""}`}
+      data-testid={`multi-param-${param.name}`}
+      data-mixed={same ? undefined : "1"}
+    >
+      <div className="insp-param__label">
+        <span title={param.doc}>{param.label || param.name}</span>
+        {!same && (
+          <span className="insp-param__mixed" title="选中的节点里这个参数的值不一样；改了就统一成新值">
+            不同
+          </span>
+        )}
+      </div>
+      <div className="insp-param__control">
+        <MultiEditContext.Provider value={true}>
+          <ParamControl
+            param={param}
+            value={first}
+            disabled={disabled}
+            onChange={(v) => {
+              if (!same || !valueEquals(v, first)) setParamMany(ids, param.name, v);
+            }}
+            // 相对改法（*2、+=5）每个节点按自己的值改，不是都改成第一个的
+            onChangeEach={(update) => setParamMany(ids, param.name, (cur: unknown) => update(cur))}
+          />
+        </MultiEditContext.Provider>
+      </div>
+    </div>
+  );
+}
+
 function InspectorBody() {
   const selectedNodes = useUiStore((s) => s.selectedNodes);
   const inspectedOperator = useUiStore((s) => s.inspectedOperator);
@@ -668,14 +950,7 @@ function InspectorBody() {
     }
   }
 
-  if (selectedNodes.size > 1) {
-    return (
-      <div className="insp insp--multi">
-        <p>已选中 {selectedNodes.size} 个节点</p>
-        <p className="insp__hint">批量编辑参数是后续里程碑的事，M1 一次只编辑一个节点。</p>
-      </div>
-    );
-  }
+  if (selectedNodes.size > 1) return <MultiInspector ids={[...selectedNodes]} />;
 
   // 在子图里且没选中节点：显示子图自己的说明与提升出来的参数
   const last = path[path.length - 1];

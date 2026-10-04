@@ -1,5 +1,5 @@
 // dts 算子包的单测。跟 LyFlow core 共用同一个 doctest 目标（ADR-0013）。
-// 手法与 packs/gap/tests/test_gap_ops.cpp 相同：只注册本包的 Registry、NullContext、
+// 手法与 packs/gap/tests/test_gap_ops.cpp 相同：只注册本包的 Registry，用 test::OpCall（core/tests/helpers.h）
 // 铺 manifest 默认值再 override 直接调 compute —— 不经执行器，一步出错就停。
 //
 // 这里测的是「整条链在实测轮廓上跑得通、失败时错在该错的那一步」，
@@ -16,6 +16,7 @@
 
 #include "data/field_profiles.h"
 #include "data/real_profiles.h"
+#include "helpers.h"
 #include "lyflow/operator.h"
 #include "lyflow/registry.h"
 
@@ -29,18 +30,6 @@ using namespace lyflow;
 namespace td = lyflow::dts::testdata;
 
 /// 不取消、不记进度的最小 ExecContext。
-class NullContext final : public ExecContext {
- public:
-  bool cancelled() const override { return false; }
-  void progress(float, std::string_view) override {}
-  void log(LogLevel, std::string) override {}
-  const std::filesystem::path& baseDir() const override { return baseDir_; }
-  int threadBudget() const override { return 1; }
-
- private:
-  std::filesystem::path baseDir_;
-};
-
 const Registry& packRegistry() {
   static Registry r = [] {
     Registry reg;
@@ -51,27 +40,9 @@ const Registry& packRegistry() {
 }
 
 /// 直接调一个算子的 compute：参数先铺默认值，再用 overrides 覆盖。
-struct Call {
-  std::unordered_map<std::string, Data> inputs;
-  std::unordered_map<std::string, Data> outputs;
-  ParamMap params;
-  Status status;
-
-  Status run(const std::string& opId, const std::unordered_map<std::string, Value>& overrides = {}) {
-    const OperatorDesc* op = packRegistry().find(opId);
-    REQUIRE(op != nullptr);
-    for (const Param& p : op->params) params[p.name] = p.def;
-    for (const auto& [k, v] : overrides) params[k] = v;
-    NullContext ctx;
-    const std::filesystem::path base;
-    ParamView view(params, base);
-    Inputs in(inputs);
-    Outputs out(outputs);
-    status = op->compute(in, view, out, ctx);
-    return status;
-  }
-
-  const Data& out(const std::string& port) { return outputs[port]; }
+/// 直接调 compute（test::OpCall），只用本包的注册表。
+struct Call : test::OpCall {
+  Call() : OpCall(packRegistry()) {}
 };
 
 /// default.lyflow.json 那条链，一步一步手搓。一步出错就停在那里，

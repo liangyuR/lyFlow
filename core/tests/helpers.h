@@ -5,14 +5,19 @@
 #include <chrono>
 #include <filesystem>
 #include <memory>
+#include <set>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
+#include <doctest/doctest.h>
 #include <nlohmann/json.hpp>
 
 #include "exec/executor.h"
 #include "exec/result_store.h"
+#include "lyflow/operator.h"
 #include "lyflow/registry.h"
 
 namespace lyflow::test {
@@ -149,6 +154,74 @@ class Session {
  private:
   RunLog log_;
   std::unique_ptr<exec::Run> run_;
+};
+
+/// 直接调算子时给的 ExecContext：不取消、不报进度、日志丢掉；threadBudget 按构造时给的数（默认 1）。
+class StubContext final : public ExecContext {
+ public:
+  explicit StubContext(std::filesystem::path base = {}, int threads = 1)
+      : base_(std::move(base)), threads_(threads) {}
+  bool cancelled() const override { return false; }
+  void progress(float, std::string_view) override {}
+  void log(LogLevel, std::string) override {}
+  const std::filesystem::path& baseDir() const override { return base_; }
+  int threadBudget() const override { return threads_; }
+
+ private:
+  std::filesystem::path base_;
+  int threads_ = 1;
+};
+
+/// 直接调一个算子的 compute，不拼图、不过执行器 —— 输入里有 Box2D、Record、Bundle 这类拼图不方便造的值时用。
+/// 参数先铺 manifest 默认值，再盖上 overrides；每次 run 都从空的 outputs 开始。
+/// `threads` 是给算子的线程预算：并行算子的测试拿它验「换几个线程结果都一样」。
+/// 包测试原来各抄一份 NullContext + Call（七份），统一到这里；只注册了本包算子的私有注册表照样能传进来。
+struct OpCall {
+  explicit OpCall(const Registry& reg = ensureRegistry()) : registry(&reg) {}
+
+  const Registry* registry;
+  std::unordered_map<std::string, Data> inputs;
+  std::unordered_map<std::string, Data> outputs;
+  ParamMap params;
+  Status status;
+  std::filesystem::path base;
+  int threads = 1;
+
+  Status run(const std::string& opId, const std::unordered_map<std::string, Value>& overrides = {}) {
+    const OperatorDesc* op = find(opId);
+    params.clear();
+    outputs.clear();
+    for (const Param& p : op->params) params[p.name] = p.def;
+    for (const auto& [k, v] : overrides) params[k] = v;
+    StubContext ctx(base, threads);
+    ParamView view(params, base);
+    Inputs in(inputs);
+    Outputs out(outputs);
+    status = op->compute(in, view, out, ctx);
+    return status;
+  }
+
+  const Data& out(const std::string& port) { return outputs[port]; }
+
+  /// 调算子的 validate 钩子（J5）：参数同样先铺默认值，connected 是「已连上的输入端口」。
+  std::vector<Issue> validate(const std::string& opId,
+                              const std::unordered_map<std::string, Value>& overrides,
+                              const std::set<std::string>& connected) {
+    const OperatorDesc* op = find(opId);
+    REQUIRE(op->validate != nullptr);
+    params.clear();
+    for (const Param& p : op->params) params[p.name] = p.def;
+    for (const auto& [k, v] : overrides) params[k] = v;
+    ParamView view(params, base);
+    return op->validate(view, connected);
+  }
+
+ private:
+  const OperatorDesc* find(const std::string& opId) const {
+    const OperatorDesc* op = registry->find(opId);
+    REQUIRE_MESSAGE(op != nullptr, opId);
+    return op;
+  }
 };
 
 /// 只关心事件、不关心结果时的快捷方式。

@@ -25,6 +25,8 @@ export interface EvalInput extends SampleSelector {
   noCache?: boolean | undefined;
   /// 每行 eval_row 带一份 run summary（ADR-0022）。默认关：体积是逐行的。
   summary?: boolean | undefined;
+  /// 同时跑几次（CLI --jobs）。行的顺序与内容不变。
+  jobs?: number | undefined;
 }
 
 export interface PerturbInput extends SampleSelector {
@@ -39,6 +41,14 @@ export interface PerturbInput extends SampleSelector {
   baseDir?: string | undefined;
   set?: string[] | undefined;
   noCache?: boolean | undefined;
+  jobs?: number | undefined;
+}
+
+/** `--jobs`：1 是 CLI 的默认值，不必写出来。 */
+function jobsArgv(jobs: number | undefined): string[] {
+  if (jobs === undefined || jobs === 1) return [];
+  if (!Number.isInteger(jobs) || jobs < 1) throw new Error(`jobs 要一个正整数，收到 ${jobs}`);
+  return ["--jobs", String(jobs)];
 }
 
 const DIR_ONLY: (keyof SampleSelector)[] = [
@@ -105,6 +115,7 @@ export function evalArgv(input: EvalInput, paramsFile: string | null): string[] 
   if (input.recipe) argv.push("--recipe", input.recipe);
   if (input.noCache) argv.push("--no-cache");
   if (input.summary) argv.push("--summary");
+  argv.push(...jobsArgv(input.jobs));
   return argv;
 }
 
@@ -221,5 +232,6 @@ export function perturbArgv(input: PerturbInput): string[] {
   if (input.csv) argv.push("--csv", input.csv);
   for (const s of input.set ?? []) argv.push("--set", s);
   if (input.noCache) argv.push("--no-cache");
+  argv.push(...jobsArgv(input.jobs));
   return argv;
 }

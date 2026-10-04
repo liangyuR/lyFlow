@@ -22,7 +22,7 @@ noderun.mjs  节点运行按钮的分组（docs/node-run-plan.md §4 验收 7–
 params_p1.mjs 图参数成形的分组（docs/param-recipe-plan.md P1 验收 1–7：完整规格的往返与 core 校验、右键「纳入配方」、子图里的逐层提升链、被绑定行上编辑、RunOptions.params、P1.6 三项）
 params_p2.mjs 参数面板的分组（docs/param-recipe-plan.md P2 验收 9–15：开关 / 拖宽 / 最大化 / 宽度记忆与双向定位、14 种类型控件与 transform / curve 往返、advanced 折叠与联动条件、搜索与过滤 chip、子图定义共享与库算子只读、ROI 缩略图进拖框、1000 参数的性能）
 params_p3.mjs 配方的分组（docs/param-recipe-plan.md P3 验收 17–24：新建两个配方 Ctrl+S 落盘与重开还原、K6 ① ② ③ 与外部修改检测、K4 从基础重算、切配方后的缓存命中与自动运行、K7 撤销、矩阵三态 / 只看差异 / 单元格编辑 / 多选复制 / 越界阻止运行、四类失配与按建议修复、管理动作的磁盘结果与自动备份）
-params_p4.mjs 配方 P4 的分组（docs/param-recipe-plan.md P4 验收 26：真实 gap 图（KUN10 点 2）× 3 帧，编辑器选配方运行与 lyflow run --recipe 的 gap / flush 逐位相同、--param 覆盖配方；顺手修：1280 / 1366 / 1440 宽下工具栏图名框放下 8 个汉字）。数据在 LYFLOW_GAP_KUN10（缺省是本机的 luoshi 目录），CLI 用 bridge/target/debug/lyflow.exe（没带 gap 包时报失败并给出重编命令，不在 e2e 里现场编）
+params_p4.mjs 配方 P4 的分组（docs/param-recipe-plan.md P4 验收 26：真实 gap 图（KUN10 点 2）× 3 帧，编辑器选配方运行与 lyflow run --recipe 的 gap / flush 逐位相同、--param 覆盖配方；顺手修：1280 / 1366 / 1440 宽下工具栏图名框放下 8 个汉字 —— 接着验收 26 的状态，数据不在时自己用合成小图搭一个一样挤的，照样验）。数据在 LYFLOW_GAP_KUN10（缺省是本机的 luoshi 目录），CLI 用 bridge/target/debug/lyflow.exe（没带 gap 包时报失败并给出重编命令，不在 e2e 里现场编）
 record-noderun.mjs  节点运行按钮的演示截图（不接进 run.mjs）：七步各截一张到 docs/noderun-step-N.png
 record-params-p2.mjs 参数面板的验收截图（不接进 run.mjs）：docs/params-p2-panel.png 与 docs/params-p2-types.png
 record-params-p3.mjs 配方的验收截图（不接进 run.mjs）：docs/params-p3-toolbar-row.png、params-p3-matrix.png、params-p3-manage.png
@@ -30,7 +30,7 @@ http.mjs     e2e:http —— Node 桩服务器 + 系统 Chrome + examples/host-r
 ```
 
 CLI（m4-plan §3、m5-plan §1）不在这里：它没有界面，验收走 `cargo test`
-（`bridge/src/cli.rs` 与 `bridge/src/eval.rs` 的 `mod tests`），理由见 docs/m4-acceptance.md。
+（`bridge/src/cli/tests.rs` 与 `bridge/src/eval/tests.rs`），理由见 docs/m4-acceptance.md。
 `lyflow eval` 的批量评估也归这一档 —— 值路径解析、留出与分组统计、glob 生成样本
 都是纯逻辑，对着手算的数字断言比开浏览器便宜得多
 （[ADR-0020](../../docs/adr/0020-eval-and-perturb-as-cli.md)）。
@@ -52,7 +52,19 @@ fetch，所以 `cdp.mjs` 零依赖。
 ```bash
 pnpm e2e           # 自己起 tauri dev，跑完自己收尾
 pnpm e2e:packaged  # 同一套断言，跑 tauri build 产物在干净目录里的拷贝
+pnpm e2e --only m8b:suiteImagePreviewScale,noderun   # 只跑点名的（两种都能带）
 ```
+
+`--only` 逗号分隔，每一项是模块（文件名：`m3`、`peek`、`params_p2`…）、分组函数名（在哪个模块都算）
+或「模块:分组」。`run` 是 `run.mjs` 开头那五组（中文路径、演示 pipeline、validate、坏参数、取消）——
+它们彼此依赖，只能整块点。点了不存在的名字会在起 app 之前报错，并列出全部可选的。
+分组按函数名挑，所以 `xxxSuites` 数组里放具名函数，不放匿名的箭头函数（name 是空串，`--only` 挑不出来；
+几段共用一个夹具时包一层具名的，见 `m4.mjs` 的 `suiteCompose`）。
+
+挑出来的组照全量里的先后跑，但中间少了别的组，前一组留下的状态（视口缩放、hover 之类）会直接落到后一组头上。
+靠视口几何的组开头自己定死视口：`page.mjs` 的 `setViewport`（经窗口桥定 React Flow 的 x / y / zoom）；`normalizeZoom`
+只往小里压，上一组留下 0.2 的缩放它不管。以前记过的一处 —— `--only m4:suiteBigGraph,motion` 时 motion 的验收 2
+（平移之后有新节点进入视口）与验收 8 的拖连线那条挂掉 —— 就是这么来的，两组开头定死视口之后过了。
 
 调试脚本本身时，另开一个窗口跑
 
@@ -107,10 +119,12 @@ cargo build --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features
 
 ## 干净目录验收（`stagePackagedApp`）
 
-把 `tauri build` 的产物复刻成一个干净目录里的安装结果：拷 exe + 同目录的全部
-DLL —— 这正是两个安装包往 `$INSTDIR` 放的东西（NSIS 的 `SetOutPath $INSTDIR`，
-WiX 的 `INSTALLDIR`）。目的是验证「DLL 随包」和「从 exe 同目录加载」这条路径，
-而不是验证安装程序本身。
+把 `tauri build` 的产物复刻成一个干净目录里的安装结果：拷两个 exe（`target/release/`）+
+`bridge/target/bundle-core/` 里的全部 DLL —— 这正是两个安装包往 `$INSTDIR` 放的东西
+（`bundle.resources`；NSIS 的 `SetOutPath $INSTDIR`，WiX 的 `INSTALLDIR`）。目的是验证「DLL 随包」
+和「从 exe 同目录加载」这条路径，而不是验证安装程序本身。不取 `target/release/` 里的 DLL：
+app 与 CLI 的构建脚本都往那里拷，谁后拷谁说了算。「安装包」那一组还断言打包的 core 带着
+这次构建 `LYFLOW_PACKS` 要的包、热重载关着 —— 跑的时候环境变量要与 `tauri build` 那次一致。
 
 注意这**不等于**在一台干净机器上验证：这台机器有 MSVC 和 vcpkg，漏打包的 DLL
 仍然可能被系统从别处找到。

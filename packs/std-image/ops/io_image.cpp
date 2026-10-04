@@ -43,8 +43,14 @@ Status loadCompute(const Inputs&, const ParamView& params, Outputs& outputs, Exe
   }
   std::ifstream in(file, std::ios::binary);
   if (!in) return Status::Error(Phase::Execute, "io", "打不开: " + file.u8string(), "path");
-  const std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(in)),
-                                         std::istreambuf_iterator<char>());
+  // 量好大小一次读完：istreambuf_iterator 逐字节走 streambuf、边读边扩容，36 MB 的图光读文件就要几百毫秒
+  in.seekg(0, std::ios::end);
+  const std::streamoff size = in.tellg();
+  in.seekg(0, std::ios::beg);
+  std::vector<unsigned char> bytes(size > 0 ? static_cast<std::size_t>(size) : 0);
+  if (!bytes.empty() && !in.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) {
+    return Status::Error(Phase::Execute, "io", "读不完: " + file.u8string(), "path");
+  }
 
   const std::string& mode = params.choice("mode");
   int flags = cv::IMREAD_UNCHANGED;

@@ -9,6 +9,7 @@ import type { Viewport } from "./pick";
 import { RAMPS, writeRgbColors, type RampName } from "./ramps";
 import { disposeOverlay } from "./shapes2d";
 import type { CloudPayload } from "../types/execution";
+import { gridSpec, ISO_DIR, presetPosition, type GridSpec, type ViewPreset } from "./viewFit";
 
 export type ShadingMode = "intensity" | "height" | "normal" | "rgb" | "flat";
 /** 相机模式（G7）。2d = 正交俯视 XY，看剖面用。 */
@@ -34,6 +35,10 @@ export interface Scene {
   backdrop: THREE.Group;
   /** 测量的标记点与连线（measure-plan M6）。不属于任何一栏：两栏都画，同一个世界坐标。 */
   measure: THREE.Group;
+  /** 此刻的网格（跟着云走，lib/viewFit 的 gridSpec）。 */
+  grid: GridSpec | null;
+  /** 换网格：格子大小或格数变了才重建，位置每次都挪。null = 不动。 */
+  setGrid(spec: GridSpec | null): void;
   /** 每帧渲染前调一遍。RoiLayer 靠它把 DOM 框跟着相机摆位。 */
   frameListeners: Set<() => void>;
   /** 正交相机的可视半宽，随 fit 改变；aspect 变了要重算上下边。 */
@@ -73,12 +78,22 @@ export function createScene(host: HTMLDivElement): Scene {
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.12;
+  // 转心（target）写在 canvas 上：验收脚本看平移、双击设转心有没有生效（转视角不动它，平移才动）
+  controls.addEventListener("change", () => {
+    const c = controls.target;
+    renderer.domElement.dataset.target = [c.x, c.y, c.z].map((v) => Number(v.toPrecision(6))).join(",");
+  });
 
-  const grid = new THREE.GridHelper(4, 16, 0x33404f, 0x232a33);
-  grid.rotation.x = Math.PI / 2; // GridHelper 默认躺在 XZ 面上，转到 XY
-  scene.add(grid);
-  const axes = new THREE.AxesHelper(0.5);
+  // 网格跟着云走（setGrid）：先放一个与以前差不多的 4 m 网格，第一片云一到就换
+  let grid = new THREE.GridHelper(1, 2);
+  const axes = new THREE.AxesHelper(1);
   scene.add(axes);
+  const disposeHelper = (helper: THREE.LineSegments) => {
+    helper.geometry.dispose();
+    const m = helper.material;
+    if (Array.isArray(m)) m.forEach((x) => x.dispose());
+    else m.dispose();
+  };
   const overlays: [THREE.Group, THREE.Group] = [new THREE.Group(), new THREE.Group()];
   scene.add(overlays[0], overlays[1]);
   const backdrop = new THREE.Group();
@@ -142,7 +157,10 @@ export function createScene(host: HTMLDivElement): Scene {
     const paneH = state.views === 2 && state.split === "tb" ? height / 2 : height;
     camera.aspect = paneW / paneH;
     camera.updateProjectionMatrix();
+    // 2D 剖面与透视相机一样保住竖直方向的范围：变宽了多看一点，而不是把上下裁掉、整体放大
+    const prevAspect = state.aspect;
     state.aspect = paneW / paneH;
+    if (prevAspect > 0 && Number.isFinite(prevAspect)) state.halfWidth *= state.aspect / prevAspect;
     state.applyOrtho();
   };
 
@@ -182,6 +200,8 @@ export function createScene(host: HTMLDivElement): Scene {
       const target = state.controls.target;
       state.controls.object = state.active() as THREE.PerspectiveCamera;
       state.controls.enableRotate = mode === "3d";
+      // 2D 下左键拖改成平移：旋转关了之后左键原来什么也不干，只能右键拖着挪（俯视图里人人先拿左键拖）
+      state.controls.mouseButtons.LEFT = mode === "3d" ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN;
       if (mode === "2d") {
         ortho.position.set(target.x, target.y, target.z + 10);
         ortho.zoom = 1;
@@ -199,6 +219,28 @@ export function createScene(host: HTMLDivElement): Scene {
     },
     renderFrame() {
       render();
+    },
+    grid: null,
+    setGrid(spec) {
+      if (!spec) return;
+      const prev = state.grid;
+      if (!prev || prev.cell !== spec.cell || prev.divisions !== spec.divisions || !grid.parent) {
+        scene.remove(grid);
+        disposeHelper(grid);
+        // 中心不在原点了：中心线与别的线同一个颜色（不然像是坐标轴）
+        grid = new THREE.GridHelper(spec.cell * spec.divisions, spec.divisions, 0x232a33, 0x232a33);
+        grid.rotation.x = Math.PI / 2; // GridHelper 默认躺在 XZ 面上，转到 XY
+        // 永远先画、不写深度：2D 剖面里网格与最底下那层点的深度分不开（正交相机的深度精度不够），
+        // 后建的网格会压在点上，重跑时还一会儿压一会儿不压
+        grid.renderOrder = -1;
+        (grid.material as THREE.Material).depthWrite = false;
+        scene.add(grid);
+      }
+      grid.position.set(spec.center[0], spec.center[1], spec.z);
+      // 坐标轴还在原点，长 3 格：云离原点远时它在画面外，不挡事
+      axes.scale.setScalar(spec.cell * 3);
+      state.grid = spec;
+      renderer.domElement.dataset.grid = [spec.cell, spec.center[0], spec.center[1], spec.z].map((v) => Number(v.toPrecision(9))).join(",");
     },
     paneAt(clientX, clientY) {
       const r = renderer.domElement.getBoundingClientRect();
@@ -226,12 +268,8 @@ export function createScene(host: HTMLDivElement): Scene {
       disposeOverlay(measure);
       frameListeners.clear();
       // helper 自己也有 geometry 和 material。不放的话每次挂载都漏一份。
-      for (const helper of [grid, axes]) {
-        helper.geometry.dispose();
-        const m = helper.material;
-        if (Array.isArray(m)) m.forEach((x) => x.dispose());
-        else m.dispose();
-      }
+      disposeHelper(grid);
+      disposeHelper(axes);
       // renderer.dispose() **不释放 WebGL 上下文**（那是 forceContextLoss），
       // 少了它每次挂载/卸载漏一个，攒够十几个后视图突然全黑（见 README「踩过的坑」）。
       renderer.dispose();
@@ -239,6 +277,7 @@ export function createScene(host: HTMLDivElement): Scene {
       host.removeChild(renderer.domElement);
     },
   };
+  state.setGrid(gridSpec([-2, -2, 0, 2, 2, 0]));
   resize();
   const observer = new ResizeObserver(resize);
   observer.observe(host);
@@ -477,6 +516,72 @@ export function boundsAttr(bounds: ArrayLike<number> | null): string {
   return Array.from(bounds, round3).join(",");
 }
 
+/** 把视角的中心（OrbitControls 的 target）挪到 p 上：当前相机与 target 一起平移同一段，视线方向不变 ——
+ *  画面平移到 p 居中、之后转视角绕着它转（useFocusOnDoubleClick）。正交俯视时也是平移。 */
+export function focusOn(scene: Scene, p: [number, number, number]) {
+  const t = scene.controls.target;
+  const offset = new THREE.Vector3(p[0] - t.x, p[1] - t.y, p[2] - t.z);
+  scene.controls.object.position.add(offset);
+  t.add(offset);
+  scene.controls.update();
+}
+
+/** 转到一个标准视角（只管 3D 的透视相机：2D 剖面本来就是俯视，正交相机不碰）。先把阻尼没走完的那点转动走完 ——
+ *  不然刚甩了一下就按，相机会接着往外转。转心不动、距离不变。2D 时什么都不做、返回 false。 */
+export function applyViewPreset(scene: Scene, view: ViewPreset): boolean {
+  if (scene.mode === "2d") return false;
+  const c = scene.controls;
+  const damping = c.enableDamping;
+  c.enableDamping = false;
+  c.update();
+  c.enableDamping = damping;
+  const t = c.target;
+  const p = scene.camera.position;
+  const next = presetPosition(view, [t.x, t.y, t.z], [p.x, p.y, p.z]);
+  p.set(next[0], next[1], next[2]);
+  c.update();
+  return true;
+}
+
+/** 相机此刻的样子（两台相机与转心）。场景重建之后放回去：连线查看器在运行期间换成「正在计算…」会卸掉画布。 */
+export interface CameraView {
+  target: [number, number, number];
+  position: [number, number, number];
+  near: number;
+  far: number;
+  orthoPosition: [number, number, number];
+  orthoZoom: number;
+  halfWidth: number;
+}
+
+export function saveCameraView(scene: Scene): CameraView {
+  const t = scene.controls.target;
+  const p = scene.camera.position;
+  const o = scene.ortho.position;
+  return {
+    target: [t.x, t.y, t.z],
+    position: [p.x, p.y, p.z],
+    near: scene.camera.near,
+    far: scene.camera.far,
+    orthoPosition: [o.x, o.y, o.z],
+    orthoZoom: scene.ortho.zoom,
+    halfWidth: scene.halfWidth,
+  };
+}
+
+export function restoreCameraView(scene: Scene, view: CameraView): void {
+  scene.controls.target.set(...view.target);
+  scene.camera.position.set(...view.position);
+  scene.camera.near = view.near;
+  scene.camera.far = view.far;
+  scene.camera.updateProjectionMatrix();
+  scene.ortho.position.set(...view.orthoPosition);
+  scene.ortho.zoom = view.orthoZoom;
+  scene.halfWidth = view.halfWidth;
+  scene.applyOrtho();
+  scene.controls.update();
+}
+
 export function fitToBounds(scene: Scene, bounds: Float32Array) {
   const cx = (bounds[0]! + bounds[3]!) / 2;
   const cy = (bounds[1]! + bounds[4]!) / 2;
@@ -489,7 +594,7 @@ export function fitToBounds(scene: Scene, bounds: Float32Array) {
   );
   const d = size * 1.8;
   scene.controls.target.set(cx, cy, cz);
-  scene.camera.position.set(cx + d, cy - d, cz + d * 0.7);
+  scene.camera.position.set(cx + d * ISO_DIR[0], cy + d * ISO_DIR[1], cz + d * ISO_DIR[2]);
   scene.camera.near = size / 1000;
   scene.camera.far = size * 100;
   scene.camera.updateProjectionMatrix();
@@ -502,4 +607,5 @@ export function fitToBounds(scene: Scene, bounds: Float32Array) {
   scene.ortho.zoom = 1;
   scene.applyOrtho();
   scene.controls.update();
+  scene.setGrid(gridSpec(bounds));
 }

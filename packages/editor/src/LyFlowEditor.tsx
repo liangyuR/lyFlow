@@ -1,35 +1,41 @@
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { MotionConfig } from "motion/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { BottomDrawer } from "./components/BottomDrawer";
 import { GraphCanvas } from "./components/GraphCanvas";
 import { Inspector } from "./components/Inspector";
 import { NodePalette } from "./components/NodePalette";
 import { Modal } from "./components/Modal";
+import { NodeFinder } from "./components/NodeFinder";
 import { NodeSearch } from "./components/NodeSearch";
 import { ParamPanel } from "./components/ParamPanel";
 import { ShortcutPanel } from "./components/ShortcutPanel";
+import { StatusBar } from "./components/StatusBar";
+import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
 import { Viewer3D } from "./components/Viewer3D";
+import { usePaneLayout } from "./hooks/usePaneLayout";
 import { useShortcuts } from "./hooks/useShortcuts";
-import { rootOf } from "./lib/root";
 import {
-  backupStatus,
+  autosaveTick,
+  discardUntitledBackup,
+  findUntitledBackup,
+  restoreUntitled,
+  askRestoreUntitled,
+  openSourceFor,
+} from "./lib/autosave";
+import { autoRunOnCommit } from "./lib/preview";
+import { saveCurrent } from "./lib/saveFlow";
+import { resolveUnsaved } from "./lib/unsaved";
+import {
   BACKUP_INTERVAL_MS,
-  confirmDiscard,
-  confirmRestore,
-  discardBackup,
   loadDocFrom,
   pickOpenPath,
-  pickSavePath,
   readBackup,
   rememberFile,
-  saveDocTo,
-  suggestFileName,
-  writeBackup,
 } from "./lib/files";
-import { layoutGraph, needsInitialLayout } from "./lib/layout";
+import { initialLayout, layoutGraph, needsInitialLayout } from "./lib/layout";
 import {
   MotionEnabledContext,
   useMotionEnabled,
@@ -39,7 +45,6 @@ import {
 } from "./lib/motion";
 import { fullId, levelOf } from "./lib/subgraph";
 import {
-  formatBytes,
   refreshCacheStats,
   requestPlan,
   schedulePlan,
@@ -47,28 +52,27 @@ import {
 } from "./store/cache";
 import {
   cancelCurrentRun,
+  restartRun,
   setRunSceneId,
   startRun,
   subscribeExecutionEvents,
   useExecutionStore,
 } from "./store/execution";
-import { useGraphStore } from "./store/graph";
+import { onCommitted, useGraphStore } from "./store/graph";
 import { useManifestStore } from "./store/manifest";
 import { recipesDirty, useRecipeStore } from "./store/recipe";
 import {
-  commitRecipeSave,
-  discardRecipeAutosave,
   followGraphPath,
   loadRecipesFor,
-  prepareRecipeSave,
   restoreRecipeAutosave,
-  writeRecipeAutosave,
 } from "./store/recipeFiles";
 import { useUiStore } from "./store/ui";
 import { scheduleValidate } from "./store/validation";
+import { useRunHistoryStore } from "./store/runHistory";
 import { setTransport, transport, type Transport } from "./transport";
 import { setDialogs, type EditorDialogs } from "./lib/dialogs";
 import { hasRelativePathParam } from "./lib/params";
+import { branchSlot } from "./lib/placement";
 import { isMigration, type MigrationAction } from "./types/execution";
 import type { GraphDoc } from "./types/graph";
 
@@ -77,198 +81,29 @@ import "./styles.editor.css";
 import "./styles.peek.css";
 import "./styles.blocks.css";
 
-const kMinCanvasWidth = 320;
-/** 参数面板宽度记在 localStorage 的这个键下（P2.1「记住宽度」）。 */
-const PANEL_WIDTH_KEY = "lyflow.paramPanel.width";
-/** 左侧算子面板的宽度，同样拖了就记住。 */
-const PALETTE_WIDTH_KEY = "lyflow.palette.width";
-
-const TRANSPORT_LABEL: Record<string, string> = {
-  tauri: "Tauri · 实时",
-  http: "HTTP · 实时",
-  static: "静态快照",
-};
-
-const TRANSPORT_TITLE: Record<string, string> = {
-  tauri: "实时读取 C++ 注册表",
-  http: "经 HTTP 后端读取 C++ 注册表",
-  static: "静态模式：读的是 dump 出来的 manifest 快照，可能过期",
-};
-
-function StatusBar() {
-  const coreInfo = useManifestStore((s) => s.coreInfo);
-  const transportKind = useManifestStore((s) => s.transportKind);
-  const path = useUiStore((s) => s.path);
-  const doc = useGraphStore((s) => s.doc);
-  const level = levelOf(doc, path);
-  const nodeCount = level.nodes.length;
-  const edgeCount = level.edges.length;
-  const selected = useUiStore((s) => s.selectedNodes.size);
-  const stats = useCacheStore((s) => s.stats);
-  const [libraryCount, setLibraryCount] = useState(0);
-
-  useEffect(() => {
-    void transport
-      .getLibraryStatus()
-      .then((s) => setLibraryCount(s.count))
-      .catch(() => setLibraryCount(0));
-  }, []);
-
-  return (
-    <footer className="statusbar">
-      <span className="statusbar__milestone">M4 · 能扩展</span>
-      <span>{nodeCount} 节点</span>
-      <span>{edgeCount} 连线</span>
-      {libraryCount > 0 && (
-        <span data-testid="statusbar-library" title="库算子（app data 下的 library/）">
-          库 {libraryCount}
-        </span>
-      )}
-      {selected > 0 && <span>已选 {selected}</span>}
-      <span className="statusbar__spacer" />
-      {stats && (
-        <span
-          className="statusbar__cache"
-          data-testid="statusbar-cache"
-          title={`结果缓存 ${stats.entries} 条，预算 ${formatBytes(stats.budgetBytes)}`}
-        >
-          缓存 {formatBytes(stats.bytes)}
-        </span>
-      )}
-      {coreInfo && (
-        <>
-          <span>lyflow-core {coreInfo.version}</span>
-          <span data-testid="statusbar-operators">{coreInfo.operatorCount} 算子</span>
-          {coreInfo.hotReload && (
-            <span
-              className="statusbar__hot"
-              data-testid="statusbar-generation"
-              data-generation={coreInfo.generation ?? 0}
-              title="开发期热重载已开启：改 C++ 存盘即生效"
-            >
-              热重载 · 第 {coreInfo.generation ?? 0} 代
-            </span>
-          )}
-        </>
-      )}
-      <span
-        className={`statusbar__transport statusbar__transport--${transportKind}`}
-        title={
-          TRANSPORT_TITLE[transportKind]
-        }
-      >
-        {TRANSPORT_LABEL[transportKind]}
-      </span>
-    </footer>
-  );
-}
-
-/** 连线被拒绝的原因、保存成功之类的短提示。 */
-function Toast() {
-  const toast = useUiStore((s) => s.toast);
-  const hideToast = useUiStore((s) => s.hideToast);
-
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(hideToast, 2600);
-    return () => clearTimeout(t);
-  }, [toast, hideToast]);
-
-  if (!toast) return null;
-  return (
-    <div className={`toast toast--${toast.kind}`} data-testid="toast">
-      {toast.text}
-    </div>
-  );
-}
-
-/** 记住的宽度（localStorage）。读不到、被禁用、存的不是数都退回默认 —— 这只是个方便，不是状态。 */
-function storedWidth(key: string | undefined, fallback: number): number {
-  if (!key) return fallback;
-  try {
-    const v = Number(window.localStorage.getItem(key));
-    return Number.isFinite(v) && v > 0 ? v : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-/** 可拖分栏（右侧面板、左侧算子面板）。一条 4px 把手 + 全局 pointermove，
- *  不引分栏库 —— 一个库的成本是十几 KB 加一套 API，这里只要一个数字。
- *  给了 persistKey 就在松手时把宽度记进 localStorage，下次打开还是这个宽（参数面板，P2.1）。
- *  reserve 是拖动时要给其余部分留的宽度：左右两栏互相限制，所以在拖的那一刻才取。 */
-function useDragSplit(
-  initial: number,
-  min: number,
-  max: number,
-  container: React.RefObject<HTMLElement | null>,
-  reserve: () => number,
-  persistKey?: string,
-  side: "left" | "right" = "right",
-) {
-  const [width, setWidth] = useState(() => Math.max(min, Math.min(max, storedWidth(persistKey, initial))));
-  const dragging = useRef(false);
-  const latest = useRef(width);
-  latest.current = width;
-
-  useEffect(() => {
-    const move = (e: PointerEvent) => {
-      if (!dragging.current) return;
-      const rect = container.current?.getBoundingClientRect();
-      const limit = rect ? Math.max(min, Math.min(max, rect.width - reserve())) : max;
-      const next = side === "left" ? e.clientX - (rect ? rect.left : 0) : (rect ? rect.right : window.innerWidth) - e.clientX;
-      setWidth(Math.max(min, Math.min(limit, next)));
-    };
-    const up = () => {
-      if (dragging.current && persistKey) {
-        try {
-          window.localStorage.setItem(persistKey, String(Math.round(latest.current)));
-        } catch {
-          // 隐私模式、存储被禁：记不住就记不住，宽度这一次照样生效
-        }
-      }
-      dragging.current = false;
-      rootOf(container.current)?.classList.remove("lyflow-is-resizing");
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    return () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-  }, [container, min, max, reserve, persistKey, side]);
-
-  const onPointerDown = useCallback(() => {
-    dragging.current = true;
-    // 挂在这个编辑器的根上而不是 body：同一页面的别的东西不该跟着禁掉指针事件
-    rootOf(container.current)?.classList.add("lyflow-is-resizing");
-  }, [container]);
-
-  return { width, onPointerDown };
-}
-
 function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps) {
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, flowToScreenPosition, fitView, getNodes } = useReactFlow();
   const root = useRef<HTMLDivElement>(null);
   // 关动效时视口也一步到位（A4）：适配视图、整理之后的 fitView 都不带过渡
   const motionOn = useMotionEnabled();
   const fitMs = viewportMs(motionOn);
   const panel = useUiStore((s) => s.paramPanel);
-  // 三栏互相限制：拖哪一栏都给另外两栏（画布至少 kMinCanvasWidth）留够地方。宽度在拖的那一刻从 ref 取
-  const widths = useRef({ palette: 0, right: 0 });
-  const reserveForPalette = useCallback(() => widths.current.right + kMinCanvasWidth, []);
-  const reserveForRight = useCallback(() => widths.current.palette + kMinCanvasWidth, []);
-  const palettePane = useDragSplit(280, 180, 640, root, reserveForPalette, PALETTE_WIDTH_KEY, "left");
-  const rightPane = useDragSplit(380, 260, 900, root, reserveForRight);
-  // 参数面板（param-recipe P2.1）另有一份宽度：它比 Inspector 宽得多，两者来回切时各记各的
-  const panelPane = useDragSplit(640, 360, 1800, root, reserveForRight, PANEL_WIDTH_KEY);
-  const paletteWidth = palettePane.width;
-  widths.current = { palette: paletteWidth, right: panel.open ? panelPane.width : rightPane.width };
+  const viewerMax = useUiStore((s) => s.viewerMaximized);
+  const layout = usePaneLayout(root, panel);
 
   // 粘贴和搜索面板要知道往哪儿放。跟着鼠标走比总是放在画布中心自然得多。
   const cursor = useRef({ x: 0, y: 0 });
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     cursor.current = { x: e.clientX, y: e.clientY };
+  }, []);
+  /** 粘贴、Tab 搜索落在哪：鼠标在画布上就跟着鼠标；不在（停在检查器、工具栏上，或者还没动过）就落在画布中间。
+   *  以前一律照鼠标的位置算 —— 在检查器上按 Ctrl+V，节点粘到了检查器底下，画布上看不见。 */
+  const canvasPoint = useCallback(() => {
+    const c = cursor.current;
+    const pane = root.current?.querySelector(".react-flow")?.getBoundingClientRect();
+    if (!pane || pane.width === 0) return c;
+    const inside = c.x >= pane.left && c.x <= pane.right && c.y >= pane.top && c.y <= pane.bottom;
+    return inside ? c : { x: Math.round(pane.left + pane.width / 2), y: Math.round(pane.top + pane.height / 2) };
   }, []);
 
   const loadManifest = useManifestStore((s) => s.load);
@@ -323,6 +158,9 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     };
   }, []);
 
+  // -- 自动运行管所有改参数的方式（2026-10-04，修订 ADR-0011）：提交了一步就攒起来补一次正式运行 -------------
+  useEffect(() => onCommitted(autoRunOnCommit), []);
+
   // -- 精确 stale（ADR-0007）：doc 每次变就 debounce 重编一次 ------------------
   // 实时校验（m8-plan L16）跟着同一个信号走：错误在拼的时候就标出来，不必等跑完。
   useEffect(() => {
@@ -348,7 +186,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       const ui = useUiStore.getState();
       const exec = useExecutionStore.getState();
       if (!ui.autoRun || exec.runStatus === "idle" || exec.preview || g.doc.nodes.length === 0) return;
-      void startRun(g.doc, g.filePath, {}).catch((e: unknown) => {
+      void startRun(g.doc, g.filePath, { auto: true }).catch((e: unknown) => {
         ui.showToast(e instanceof Error ? e.message : String(e), "warn");
       });
     });
@@ -356,7 +194,19 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     // （第一次存盘）就只换目录。放在订阅里而不是 openPath 里：宿主与脚本直接 loadDoc 也一样生效
     void loadRecipesFor(graph.filePath);
     const stopFiles = useGraphStore.subscribe((state, prev) => {
-      if (state.epoch !== prev.epoch) void loadRecipesFor(state.filePath);
+      if (state.epoch !== prev.epoch) {
+        void loadRecipesFor(state.filePath);
+        // 换了一张图（打开、新建）：上一张图那次运行的范围不能拿来「↻ 重跑」这一张（节点 id 常常同名）
+        // 上一张图的运行结果（节点表、判定计数、「↻ 重跑」的范围）都不属于这一张：节点 id 常常同名，不清掉的话
+        // 工具栏的「NG 1」会指到这一张同名的节点上。还在跑的先取消（清掉 runId 之后就没法取消了）
+        const exec = useExecutionStore.getState();
+        if (exec.runStatus === "running") void cancelCurrentRun().catch(() => {});
+        exec.reset();
+        // 调参记录是这张图的：换图就清空，序号从头数
+        useRunHistoryStore.getState().clear();
+        // 打开之后要适配画布：预览最大化着（画布 0 宽）就先还原
+        useUiStore.getState().setViewerMaximized(false);
+      }
       else if (state.filePath !== prev.filePath) followGraphPath(state.filePath);
     });
     return () => {
@@ -378,20 +228,34 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     [],
   );
 
-  // -- 每 30 秒写一次 `<file>~` 备份 -----------------------------------------
-  // 配方有没存的改动时同一拍写 `<配方目录>/autosave~.json`（整个内存里的配方集合），并照样写一份
-  // `<file>~` —— 下次开图时「恢复备份」只问一次，图与配方一起回来（docs/recipe.md「自动备份」）
+  // -- 每 30 秒一次自动备份：存过盘的写 `<file>~`，没存过盘的写到 app data 里（lib/autosave.ts）-------
   useEffect(() => {
-    const t = setInterval(() => {
-      const graph = useGraphStore.getState();
-      const recipes = recipesDirty();
-      // 没存过盘的图没有 `<file>~` 可写；没改过的也不用写
-      if (!graph.filePath || (!graph.dirty && !recipes)) return;
-      void writeBackup(graph.filePath, graph.doc);
-      if (recipes) void writeRecipeAutosave();
-    }, BACKUP_INTERVAL_MS);
+    const t = setInterval(() => void autosaveTick(), BACKUP_INTERVAL_MS);
     return () => clearInterval(t);
   }, []);
+
+  // -- 开 app 时：上次有一张没存过盘的图没保存就退出了（崩溃、断电、被强杀），问一句要不要恢复 -----------
+  const offeredUntitled = useRef(false);
+  useEffect(() => {
+    if (manifestStatus !== "ready" || offeredUntitled.current) return;
+    offeredUntitled.current = true;
+    void (async () => {
+      const backup = await findUntitledBackup();
+      const blank = () => {
+        const g = useGraphStore.getState();
+        return !g.filePath && !g.dirty && g.doc.nodes.length === 0;
+      };
+      // 只在还是那张空白的新图时问：宿主可能一开就载入了别的图，那就不打扰（备份留到下次）
+      if (!backup || !blank()) return;
+      const answer = await askRestoreUntitled(backup);
+      if (answer === "discard") await discardUntitledBackup();
+      if (answer !== "restore") return;
+      if (!blank()) return;
+      restoreUntitled(backup);
+      setTimeout(() => void fitView({ duration: fitMs }), 50);
+      useUiStore.getState().showToast(`已恢复上次没存的图（${backup.loaded.doc.nodes.length} 个节点），记得保存`);
+    })();
+  }, [manifestStatus, fitView, fitMs]);
 
   // -- 打开文件的公共尾巴：迁移写回、缺坐标就布局、记最近文件 -----------------
   const afterOpen = useCallback(
@@ -401,20 +265,20 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       graph.loadDoc(doc, path);
       ui.clearSelection();
 
-      if (migrations.length > 0) {
-        // 一条撤销记录、置 dirty：用户可以撤销掉这次迁移再决定（ADR-0008）
-        const n = useGraphStore.getState().applyMigrations(migrations);
-        if (n > 0) ui.showToast(`已迁移 ${n} 个节点，保存后生效`);
-      }
-      // 脚本生成的图必须能打开（graph-doc.md 的承诺）。只在缺坐标时布局，
-      // 永远不覆盖用户摆好的位置（E8）。
-      if (needsInitialLayout(useGraphStore.getState().doc)) {
-        const moves = layoutGraph(useGraphStore.getState().doc);
-        useGraphStore.getState().applyLayout(moves);
+      // 脚本生成的图必须能打开（graph-doc.md 的承诺）。只排缺坐标的，永远不覆盖用户摆好的位置（E8）。
+      // 不记撤销、不算改动（2026-10-04 拍板）；排在迁移前面：迁移那一条撤销回去也是排好的样子
+      const loaded = useGraphStore.getState().doc;
+      const bare = loaded.nodes.length > 0 && loaded.nodes.every((n) => n.ui?.position == null);
+      if (needsInitialLayout(loaded)) {
+        useGraphStore.getState().layoutLoaded(initialLayout(loaded));
         setTimeout(() => void fitView({ duration: fitMs }), 50);
       }
+      // 一条撤销记录、置 dirty：用户可以撤销掉这次迁移再决定（ADR-0008）。一个坐标都没有的图迁移时加了节点：同一步里整张重排
+      const migrated =
+        migrations.length > 0 ? useGraphStore.getState().applyMigrations(migrations, bare ? (d) => layoutGraph(d) : undefined) : 0;
       await rememberFile(path);
-      ui.showToast(`已打开 ${doc.nodes.length} 个节点`);
+      // 迁移的那句并进来：以前两条分开弹，「已迁移」紧接着就被「已打开」顶掉
+      ui.showToast(`已打开 ${doc.nodes.length} 个节点${migrated > 0 ? `，迁移了 ${migrated} 个（保存后生效）` : ""}`);
     },
     [fitView, fitMs],
   );
@@ -423,23 +287,21 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     async (path: string) => {
       const ui = useUiStore.getState();
       try {
-        // 备份比正文新 = 上次是异常退出的，先问要不要恢复（§2.5）
-        const status = await backupStatus(path);
-        if (status.newer && (await confirmRestore(path))) {
+        // 备份比正文新：先问恢复 / 丢弃 / 取消（§2.5）。取消就不打开，备份留着
+        const from = await openSourceFor(path);
+        if (from === null) return;
+        if (from === "backup") {
           const restored = await readBackup(path);
           await afterOpen(
             restored.doc,
             path,
             restored.migrations.filter(isMigration),
           );
-          useGraphStore.getState().markSaved(path);
+          // 内容不在盘上：算没保存（以前 markSaved 成「已保存」—— 标题没有 *、关窗口也不问，恢复出来的又丢了）
+          useGraphStore.getState().markUnsaved();
           const recipes = await restoreRecipeAutosave();
           useUiStore.getState().showToast(recipes ? "已从自动备份恢复图与配方，记得保存" : "已从自动备份恢复，记得保存");
           return;
-        }
-        if (status.exists) {
-          await discardBackup(path);
-          await discardRecipeAutosave(path);
         }
 
         const loaded = await loadDocFrom(path);
@@ -452,59 +314,46 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   );
 
   // -- 文件操作 -------------------------------------------------------------
+  // 保存在 lib/saveFlow：「保存 / 不保存 / 取消」那一问选了保存，也走它
   const doSave = useCallback(async (forcePicker: boolean) => {
-    const graph = useGraphStore.getState();
-    const ui = useUiStore.getState();
-    try {
-      let path = graph.filePath;
-      if (!path || forcePicker) {
-        path = await pickSavePath(path ?? suggestFileName(graph.doc));
-        if (!path) return; // 用户取消
-      }
-      // 一次保存图与所有有改动的配方文件（K6 ③）。配方先查外部修改：用户选了取消，图也不存
-      const doc = graph.doc;
-      const recipes = await prepareRecipeSave(doc, path);
-      if (recipes === "cancelled") {
-        ui.showToast("已取消保存", "warn");
-        return;
-      }
-      await saveDocTo(path, doc);
-      // 记下的是真正写下去的那一份：撤销回到它时 dirty 复原（P1.6）
-      useGraphStore.getState().markSaved(path, doc);
-      if (recipes) await commitRecipeSave(recipes);
-      await rememberFile(path);
-      // 存过盘就没有「未保存的改动」了，备份留着只会在下次开图时误报
-      await discardBackup(path);
-      ui.showToast("已保存");
-    } catch (e) {
-      ui.showToast(e instanceof Error ? e.message : String(e), "warn");
-    }
+    await saveCurrent(forcePicker);
   }, []);
 
-  const doOpen = useCallback(async () => {
-    const graph = useGraphStore.getState();
-    const ui = useUiStore.getState();
-    try {
-      if (!(await confirmDiscard(graph.dirty || recipesDirty()))) return;
-      const path = await pickOpenPath();
-      if (!path) return;
-      await openPath(path);
-    } catch (e) {
-      ui.showToast(e instanceof Error ? e.message : String(e), "warn");
-    }
-  }, [openPath]);
-
-  const doOpenRecent = useCallback(
+  /** 打开一张图；被换掉的是没存过盘的那张时，它的备份也删掉（用户已经确认过放弃它）。 */
+  const openUnlessCancelled = useCallback(
     async (path: string) => {
-      if (!(await confirmDiscard(useGraphStore.getState().dirty || recipesDirty()))) return;
+      const wasUntitled = !useGraphStore.getState().filePath;
       await openPath(path);
+      if (wasUntitled && useGraphStore.getState().filePath === path) await discardUntitledBackup();
     },
     [openPath],
   );
 
+  const doOpen = useCallback(async () => {
+    const ui = useUiStore.getState();
+    try {
+      if (!(await resolveUnsaved("打开别的图"))) return;
+      const path = await pickOpenPath();
+      if (!path) return;
+      await openUnlessCancelled(path);
+    } catch (e) {
+      ui.showToast(e instanceof Error ? e.message : String(e), "warn");
+    }
+  }, [openUnlessCancelled]);
+
+  const doOpenRecent = useCallback(
+    async (path: string) => {
+      if (!(await resolveUnsaved("打开别的图"))) return;
+      await openUnlessCancelled(path);
+    },
+    [openUnlessCancelled],
+  );
+
   const doNew = useCallback(async () => {
+    if (!(await resolveUnsaved("新建"))) return;
+    // 问过之后再取：选了保存，没存过盘的图这时已经有了路径
     const graph = useGraphStore.getState();
-    if (!(await confirmDiscard(graph.dirty || recipesDirty()))) return;
+    if (!graph.filePath) void discardUntitledBackup();
     graph.newDoc();
     useUiStore.getState().clearSelection();
     useCacheStore.getState().reset();
@@ -548,6 +397,8 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   const doLayout = useCallback(() => {
     const graph = useGraphStore.getState();
     const ui = useUiStore.getState();
+    // 整理是给画布看的：预览最大化着就先还原
+    ui.setViewerMaximized(false);
     const level = levelOf(graph.doc, ui.path);
     const view = { ...graph.doc, nodes: level.nodes, edges: level.edges };
     const moves = layoutGraph(view, ui.selectedNodes.size > 1 ? { only: ui.selectedNodes } : {});
@@ -563,6 +414,17 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       onOpen: () => void doOpen(),
       onNew: () => void doNew(),
       onRun: () => void doRun(),
+      onRerun: () => {
+        const graph = useGraphStore.getState();
+        // 与 F5 同一道关：没存过盘的图里有相对路径参数，先说清楚，不让 core 报「文件不存在」
+        if (!graph.filePath && hasRelativePathParam(graph.doc, useManifestStore.getState().operatorsById)) {
+          useUiStore.getState().showToast("图里有相对路径参数，请先保存图（相对路径以图文件所在目录为基准）", "warn");
+          return;
+        }
+        void restartRun(graph.doc, graph.filePath).catch((e: unknown) => {
+          useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
+        });
+      },
       onCancel: () => void doCancel(),
       onRunToNode: (nodeId: string) => void doRun([nodeId]),
       onRunToSelected: () => {
@@ -575,10 +437,33 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       },
       onLayout: doLayout,
       onFitView: () => void fitView({ duration: fitMs }),
-      cursorFlowPosition: () => screenToFlowPosition(cursor.current),
-      cursorScreenPosition: () => cursor.current,
+      onFitSelection: () => {
+        const ids = [...useUiStore.getState().selectedNodes];
+        if (ids.length === 0) {
+          useUiStore.getState().showToast("先选中节点再按 F", "warn");
+          return;
+        }
+        // 只选了一个时别放大到糊满屏幕：maxZoom 与「打开到出错的节点」同一档
+        void fitView({ nodes: ids.map((id) => ({ id })), duration: fitMs, maxZoom: 1, padding: 0.4 });
+      },
+      cursorFlowPosition: () => screenToFlowPosition(canvasPoint()),
+      cursorScreenPosition: canvasPoint,
+      branchSlot: (nodeId: string, size?: { h: number }) => {
+        // 量过的大小优先；只渲染视野里的节点时视野外的没量过，按默认的估
+        const rect = (n: { position: { x: number; y: number }; measured?: { width?: number; height?: number } }) => ({
+          x: n.position.x,
+          y: n.position.y,
+          w: n.measured?.width ?? 220,
+          h: n.measured?.height ?? 90,
+        });
+        const nodes = getNodes();
+        const anchor = nodes.find((n) => n.id === nodeId);
+        if (!anchor) return null;
+        const flow = branchSlot(rect(anchor), nodes.filter((n) => n.id !== nodeId).map(rect), undefined, size);
+        return { flow, screen: flowToScreenPosition(flow) };
+      },
     }),
-    [doSave, doOpen, doNew, doRun, doCancel, doLayout, fitView, fitMs, screenToFlowPosition],
+    [doSave, doOpen, doNew, doRun, doCancel, doLayout, fitView, fitMs, screenToFlowPosition, flowToScreenPosition, getNodes, canvasPoint],
   );
 
   useShortcuts(handlers, root);
@@ -654,12 +539,16 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         onSave={handlers.onSave}
         onSaveAs={handlers.onSaveAs}
         onRun={handlers.onRun}
+        onRerun={handlers.onRerun}
         onCancel={handlers.onCancel}
         onLayout={handlers.onLayout}
       />
 
-      <main className={`app__body${panel.open && panel.maximized ? " is-panel-max" : ""}`}>
-        <aside className="app__sidebar" style={{ width: paletteWidth }}>
+      <main
+        className={`app__body${viewerMax ? " is-viewer-max" : panel.open && panel.maximized ? " is-panel-max" : ""}`}
+        data-viewer-max={viewerMax ? "1" : undefined}
+      >
+        <aside className="app__sidebar" style={{ width: layout.paletteWidth }}>
           {manifestStatus === "loading" && <p className="app__hint">正在读取算子描述…</p>}
           {manifestStatus === "error" && (
             <div className="app__error">
@@ -675,7 +564,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
 
         <div
           className="app__splitter app__splitter--left"
-          onPointerDown={palettePane.onPointerDown}
+          onPointerDown={layout.onPaletteSplitterDown}
           role="separator"
           aria-orientation="vertical"
           title="拖动调整算子面板宽度"
@@ -683,12 +572,12 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         />
 
         <section className="app__canvas">
-          <GraphCanvas onRunToNode={handlers.onRunToNode} />
+          <GraphCanvas onRunToNode={handlers.onRunToNode} onOpenRecent={(p) => void doOpenRecent(p)} onLayout={handlers.onLayout} />
         </section>
 
         <div
           className="app__splitter"
-          onPointerDown={panel.open ? panelPane.onPointerDown : rightPane.onPointerDown}
+          onPointerDown={layout.onRightSplitterDown}
           role="separator"
           aria-orientation="vertical"
           data-testid="right-splitter"
@@ -696,8 +585,9 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
 
         <aside
           className={`app__right${panel.open ? " app__right--panel" : ""}`}
-          style={{ width: panel.open ? panelPane.width : rightPane.width }}
+          style={{ width: layout.rightWidth }}
           data-testid="right-pane"
+          ref={layout.rightCol}
         >
           {/* 3D 视图在上、参数在下：视觉项目的核心闭环是「改参数 → 看结果」，
               两者离得越近越好（交互清单 P1 #30）。参数面板开着时视图收成一条标题栏
@@ -714,9 +604,24 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
               {panel.viewerOpen ? "▾" : "▸"} 预览
             </button>
           )}
-          <div className={`app__viewer${panel.open && !panel.viewerOpen ? " is-collapsed" : ""}`}>
-            <Viewer3D />
+          <div
+            className={`app__viewer${layout.viewer.shown || viewerMax ? "" : " is-collapsed"}`}
+            ref={layout.viewerBox}
+            style={layout.viewer.fraction !== null && !viewerMax ? { flexBasis: `${layout.viewer.fraction * 100}%` } : undefined}
+          >
+            <Viewer3D onRunToNode={handlers.onRunToNode} />
           </div>
+          {layout.viewer.shown && !viewerMax && (
+            <div
+              className="app__hsplit"
+              onPointerDown={layout.viewer.onPointerDown}
+              onDoubleClick={layout.viewer.reset}
+              role="separator"
+              aria-orientation="horizontal"
+              title="拖动调整预览高度，双击恢复默认"
+              data-testid="viewer-splitter"
+            />
+          )}
           {panel.open ? (
             <ParamPanel />
           ) : (
@@ -730,6 +635,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       <BottomDrawer />
       <StatusBar />
       <NodeSearch />
+      <NodeFinder />
       <ShortcutPanel />
       <Modal />
       <Toast />

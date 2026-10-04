@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { addPick, measureLines, NO_MEASURE, pickCount, pickNearest } from "../src/lib/pick.ts";
+import { addPick, countInRect, extentText, measureLines, NO_MEASURE, pickCount, pickNearest } from "../src/lib/pick.ts";
 
 // 单位阵（列主序）：x、y ∈ [-1, 1] 直接是 NDC，z 就是深度 —— 视口 100×100 时 (0, 0) 落在 (50, 50)
 const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -59,4 +59,30 @@ test("一组两点：第 3 次重新开始；readout 米 + 毫米并列、坐标
 
   m = addPick(m, p(1, 1, 1));
   assert.deepEqual([pickCount(m), m.p1?.xyz], [1, [1, 1, 1]], "第 3 次点 = 新一组的 P1");
+});
+
+// 预览栏上的包围盒尺寸：一组一个单位，最长边（取整后）不到 1 m 换成 mm；4 位有效数字同坐标
+test("extentText：包围盒尺寸的写法；countInRect：拖 2D 框时数框里有几个点（只看 x、y，含边）", () => {
+  const xyz = Float32Array.from([0, 0, 9, 1, 1, 9, 2, 2, 9, 1, 3, 9, NaN, 1, 0]);
+  assert.deepEqual(
+    [countInRect(xyz, [0, 0, 2, 2]), countInRect(xyz, [0.5, 0.5, 1.5, 3]), countInRect(xyz, [5, 5, 6, 6]), countInRect(null, [0, 0, 1, 1])],
+    [3, 2, 0, 0],
+  );
+  const cases = [
+    ["没有", null, null],
+    ["不够 6 个数", [0, 0, 0, 1, 1], null],
+    ["NaN", [NaN, 0, 0, 1, 1, 1], null],
+    ["空云（min > max）", [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity], null],
+    ["米", [0, 0, 0, 1.2, 0.5, 0.25], "1.2 × 0.5 × 0.25 m"],
+    ["小的换成 mm", [0, 0, 0, 0.0123, 0.0456, 0.0078], "12.3 × 45.6 × 7.8 mm"],
+    ["Float32 的尾巴不露出来", Float32Array.from([-0.1, -0.2, 0, 0.1, 0.2, 0.3]), "200 × 400 × 300 mm"],
+    ["取整之后再定单位", [0, 0, 0, 0.99996, 0.5, 0.1], "1 × 0.5 × 0.1 m"],
+    ["一个点", [1, 2, 3, 1, 2, 3], "0 × 0 × 0 mm"],
+    ["大的", [0, 0, 0, 12345.6, 1, 1], "12350 × 1 × 1 m"],
+  ];
+  const wrong = cases
+    .map(([name, b, want]) => [name, extentText(b)?.text ?? null, want])
+    .filter(([, got, want]) => got !== want);
+  assert.deepEqual(wrong, [], "说明 / 实际 / 期望");
+  assert.equal(extentText([0, 0, 0, 1.2, 0.5, 0.25]).title, "X 1.2 m · 1200 mm\nY 0.5 m · 500 mm\nZ 0.25 m · 250 mm");
 });

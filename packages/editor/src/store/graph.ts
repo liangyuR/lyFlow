@@ -4,11 +4,13 @@
 import { current, enablePatches, isDraft, produce } from "immer";
 import { create } from "zustand";
 
-import { planAutoConnect, unconnectedRequiredInputs, type AutoAmbiguity } from "../lib/autoconnect";
+import { healPlan, planAutoConnect, unconnectedRequiredInputs, type AutoAmbiguity } from "../lib/autoconnect";
 import {
+  graphParamBoundTo,
   graphParamNameProblem,
   graphParamValue,
   joinBind,
+  materializeBindings,
   resolveGraphBinding,
   specFromParam,
   splitBind,
@@ -36,13 +38,19 @@ import {
   composeSubgraph as composeInto,
   dissolveSubgraph as dissolveFrom,
   inlineLibraryNode,
+  levelKeyOf,
   levelOf,
   fullId,
+  mergeSubgraphs,
   pathIsValid,
   promotedBy,
+  remapGraphOutputs,
+  subgraphReaches,
+  subgraphsUsedBy,
   type ComposeResult,
   type SubPath,
 } from "../lib/subgraph";
+import { planReplace, type ReplacePlan } from "../lib/replace";
 import { canConnect, type ConnectVerdict, type GraphContext } from "../lib/typecheck";
 import type { MigrationAction, MigrationEdits } from "../types/execution";
 import type { OperatorDesc, Param, SnippetDesc } from "../types/manifest";
@@ -50,6 +58,7 @@ import {
   GRAPH_SCHEMA_VERSION,
   LIBRARY_OP_PREFIX,
   subgraphIdOf,
+  SUBGRAPH_OP_PREFIX,
   type GraphDoc,
   type GraphLevel,
   type GraphNode,
@@ -73,7 +82,7 @@ import { useUiStore } from "./ui";
 
 enablePatches();
 
-const MAX_HISTORY = 100;
+export const MAX_HISTORY = 100;
 
 /** 一条撤销记录：doc 与内存里的配方集合一起快照（param-recipe K7）—— 改配方值、新建删除配方与改图
  *  进同一个撤销栈，Ctrl+Z 只有一种直觉。当前选着哪个配方不在这里（切换配方不算一步撤销）。 */
@@ -105,6 +114,14 @@ function ctx(doc: GraphDoc): GraphContext {
     operatorsById: augmentOperators(m.operatorsById, doc.subgraphs),
     typesByName: m.typesByName,
   };
+}
+
+/** sub: 节点放进当前这一层会不会套进它自己（含更里面一层）：当前所在的这几层子图它都不能用到。 */
+function wouldRecurse(doc: GraphDoc, opId: string): boolean {
+  const sub = subgraphIdOf(opId);
+  if (sub === null) return false;
+  const around = new Set(useUiStore.getState().path.map((seg) => seg.subgraphId));
+  return around.size > 0 && subgraphReaches(doc.subgraphs, sub, around);
 }
 
 /** 当前层级。ui.path 是导航状态，改图的动作都作用在它指的那一层。 */
@@ -286,7 +303,17 @@ function promoteInDraft(
 
 export interface PasteResult {
   nodeIds: string[];
+  /** 原件 id → 副本 id（粘贴时剪贴板里的 id → 新 id）。 */
+  idMap: ReadonlyMap<string, string>;
+  /** 没粘的节点的算子 id：当前 core 里没有（子图节点没带定义、这张图里也没有的也算）。 */
+  missing: string[];
+  /** 没粘的子图节点：粘进去就成了它自己里面套它自己。 */
+  recursive: number;
+  /** 带来的子图定义与这张图里同 id 的内容不同、另起了 id 与名字的（lib/subgraph 的 mergeSubgraphs）。 */
+  renamed: { id: string; from: string; to: string }[];
 }
+
+const NOTHING_PASTED: PasteResult = { nodeIds: [], idMap: new Map(), missing: [], recursive: 0, renamed: [] };
 
 /** 拖入节点 / 插入片段之后自动连线的结果（m8-plan L13 / L14）。 */
 export interface AutoConnectResult {
@@ -324,7 +351,16 @@ interface GraphState {
   // -- 事务 ---------------------------------------------------------------
   /** 拖动/滑块这类连续操作：开始时拍一张，结束时整体记一条撤销。 */
   begin(): void;
-  commit(label: string): void;
+  /** 收尾一段事务。不给 label 就按这段里实际改了什么起名（「修改 体素 · 体素边长」「移动 3 个节点」）。 */
+  commit(label?: string): void;
+  /** 放弃这段事务：doc 与配方集合回到 begin 那一刻，不记撤销（拖框拖到一半按 Esc）。 */
+  abort(): void;
+  /** 一次走好几步（撤销历史列表里点一行）：负数撤销、正数重做，到头就停。返回实际走了几步（带符号）。 */
+  travel(steps: number): number;
+  /** 一个手势里的几个动作记成一条撤销（删掉选中的节点与连线、加节点再接上……）：fn 里照常调各个动作。
+   *  外面已经有事务（拖动中、外层的 batch）就并进那一条，由开它的那一方记；fn 里调 cancel() 撤回 fn
+   *  做的全部改动、不记撤销。以前这些手势记成好几条，Ctrl+Z 一次只撤回一半。 */
+  batch<T>(label: string, fn: (cancel: () => void) => T): T;
 
   // -- 语义化动作 ---------------------------------------------------------
   addNode(opId: string, position: { x: number; y: number }): string | null;
@@ -333,17 +369,44 @@ interface GraphState {
   addNodeAuto(opId: string, position: { x: number; y: number }): AutoConnectResult;
   /** 插入片段：带自动连线的粘贴（L14）。插完是普通节点，没有展开 / 收回。 */
   insertSnippet(snippet: SnippetDesc, at: { x: number; y: number }): AutoConnectResult;
-  deleteNodes(ids: readonly string[]): void;
+  /** 返回连带删掉的图级输出名（它们指着被删的节点）。 */
+  deleteNodes(ids: readonly string[]): string[];
+  /** 删节点并把上下游接回去（规则同静音透传，lib/autoconnect 的 healPlan）。一条撤销。 */
+  deleteNodesHealing(ids: readonly string[]): { wired: number; unresolved: number; dropped: string[] };
   moveNodes(moves: readonly { id: string; position: { x: number; y: number } }[]): void;
   /** at：节点所在的层级，不给 = 当前层级（ui.path）。参数面板展开进子图定义时给的是那一层的路径。 */
   setParam(nodeId: string, name: string, value: unknown, at?: SubPath): void;
+  /** 同一个参数一次写进几个节点（多选时的检查器）。每个节点照 setParam 的路由（被图参数绑定的改图参数、
+   *  选着配方时记一笔），整体一条撤销；已经在外层事务里（数字框拖动的 begin / commit）就并进去。 */
+  /** value 给函数时按每个节点此刻的值算（多选里的相对改法）：先全读出来再写 —— 两个节点绑着同一个图参数时只改一次。
+   *  算出来没变的节点不写；一个都没变就不记撤销。 */
+  setParamMany(nodeIds: readonly string[], name: string, value: unknown | ((cur: unknown, nodeId: string) => unknown)): void;
   setNodeUi(nodeId: string, patch: Partial<NodeUi>): void;
   connect(from: PortRef, to: PortRef): ConnectVerdict;
   disconnect(edgeIds: readonly string[]): void;
-  pasteNodes(payload: { nodes: GraphNode[]; edges: GraphDoc["edges"] }, at: { x: number; y: number }): PasteResult;
+  /** payload.subgraphs：剪贴板带来的子图定义（另一张图里复制的子图节点），按 mergeSubgraphs 并进来、与节点同一条撤销。 */
+  pasteNodes(
+    payload: { nodes: GraphNode[]; edges: GraphDoc["edges"]; subgraphs?: GraphDoc["subgraphs"] },
+    at: { x: number; y: number },
+  ): PasteResult;
 
   /** 静音（交互清单 P1 #25）。是执行语义，所以进 doc、进撤销栈。 */
   setBypass(ids: readonly string[], value: boolean): void;
+  /** 把参数恢复成 from 那一份里的（调参记录的「恢复这组参数」）：两边都有、算子没换的节点（子图定义里的按定义对上）
+   *  逐个参数按有效值恢复、恢复静音，图参数恢复基础值；那时绑着图参数、后来图参数删掉了的，把那时的值写回节点。
+   *  现在或那时由图参数 / 子图参数提供的参数不动（节点上写值会冲突，那时的值也不在节点上），算子已不声明的也不动 ——
+   *  这两种记在 skipped。节点不增不删、连线不动。run 是那次运行的图参数取值（params）与配方（recipeId，老记录只有名字
+   *  recipe；null 为基础）：给了 params 且那次就是现在选着的配方时，把该配方里的值改到让每个图参数的有效值与
+   *  run.params 一样（也计入 changed，一个图参数只算一处，与 doc 的改动同一条撤销）；否则配方不动。一条撤销；changed 为 0 时不记。 */
+  restoreParams(
+    from: GraphDoc,
+    label: string,
+    run?: {
+      params?: Readonly<Record<string, unknown>> | undefined;
+      recipe?: string | null | undefined;
+      recipeId?: string | null | undefined;
+    },
+  ): { changed: number; skipped: number };
   /** 折叠：只显示标题与已连端口。纯 UI，但存进文件里下次打开还在。 */
   setCollapsed(ids: readonly string[], value: boolean): void;
   renameNode(id: string, title: string | null): void;
@@ -353,16 +416,28 @@ interface GraphState {
   insertOnEdge(edgeId: string, nodeId: string, inPort: string, outPort: string): boolean;
   /** 自动布局的落点。整段算一条撤销记录（E8）。 */
   applyLayout(moves: readonly { id: string; position: { x: number; y: number } }[]): void;
-  /** 原地复制选中节点（Ctrl+D）。 */
-  duplicateNodes(ids: readonly string[]): PasteResult;
+  /** 打开文件时缺坐标的自动布局（E8）：不记撤销、不算改动 —— 当成文件本来就排成这样（2026-10-04 拍板：
+   *  打开时的自动布局不算一步撤销）。顶层的节点；只在刚 loadDoc 完、还没有别的改动时用。 */
+  layoutLoaded(moves: readonly { id: string; position: { x: number; y: number } }[]): void;
+  /** 原地复制选中节点（Ctrl+D）。keepInputs：副本的输入接到原件的同一个上游、输出空着（Shift+D，并排调两组参数比一比）；
+   *  在子图里，从子图入口进来的那几条（不是边，是 inputs[].to）也接上。一条撤销。 */
+  duplicateNodes(ids: readonly string[], opts?: { keepInputs?: boolean }): PasteResult;
   /** 把 C++ 给的迁移动作写回 doc（ADR-0008）。返回真正改动的节点数。 */
-  applyMigrations(actions: readonly MigrationAction[]): number;
+  /** relayout 给了、迁移又往图里加了节点时，在同一步里按它重排（打开一张一个坐标都没有的图时：加出来的节点按 near 摆，
+   *  会压在刚排好的那一列上）。 */
+  applyMigrations(
+    actions: readonly MigrationAction[],
+    relayout?: (doc: GraphDoc) => readonly { id: string; position: { x: number; y: number } }[],
+  ): number;
 
   // -- 子图（ADR-0010）-----------------------------------------------------
   /** 把选中的节点合成一个子图。返回新节点与子图的 id。 */
   composeSubgraph(ids: readonly string[]): ComposeResult | null;
   /** 解散一个子图节点，内容内联回本层。返回内联出来的节点 id。 */
   dissolveSubgraph(nodeId: string): string[];
+  /** 把这一层的一个节点换成别的算子（右键「换成别的算子…」）：id、位置、标题、静音照旧，连线、参数、绑定按
+   *  lib/replace 的规则能留的留下。一条撤销。换不了（子图出口会断、算子不存在）返回 null 并写 lastRejection。 */
+  replaceNodeOp(nodeId: string, opId: string): ReplacePlan | null;
   /** 库算子「展开为内联子图」：def 是 core 给的库定义（transport.getLibraryDefinition）。
    *  一条撤销。返回新子图的 id；不是库算子时 null、什么都不改。 */
   inlineLibrary(nodeId: string, def: SubgraphDef): string | null;
@@ -434,6 +509,8 @@ interface GraphState {
   loadDoc(doc: GraphDoc, path: string | null): void;
   /** 存盘成功。doc 是真正写下去的那一份（存盘是异步的，期间用户可能又改了）；不给就是当前的。 */
   markSaved(path: string, doc?: GraphDoc): void;
+  /** 从自动备份恢复出来的图：内容不在盘上，算没保存（标题带 *、关窗口会问）。保存点清空 —— 撤销回不到「已保存」。 */
+  markUnsaved(): void;
   setName(name: string): void;
   clearRejection(): void;
 }
@@ -441,9 +518,53 @@ interface GraphState {
 /** 改配方集合的一步：拿到改完的 doc（有的动作先改图再改配方，比如「写回基础」要新的 default 判稀疏）。 */
 type RecipeStep = (recipes: RecipeSet, doc: GraphDoc) => RecipeSet;
 
+/** 提交了一步：记进撤销栈的那一下（单步动作、拖动松手的 commit、batch），或者撤销 / 重做 / 跳到历史里某一步。
+ *  before / after 是这一步前后的 doc 与配方集合（after 时配方已经应用好了）。拖动的中间帧、没改动的 commit、
+ *  换图都不算。自动运行（lib/preview 的 autoRunOnCommit）靠它知道「改完了一处参数」。 */
+export interface CommittedChange {
+  kind: "edit" | "undo" | "redo" | "travel";
+  before: { doc: GraphDoc; recipes: RecipeSet };
+  after: { doc: GraphDoc; recipes: RecipeSet };
+}
+
+const committedListeners = new Set<(change: CommittedChange) => void>();
+
+/** 订阅「提交了一步」。返回取消订阅的函数。 */
+export function onCommitted(fn: (change: CommittedChange) => void): () => void {
+  committedListeners.add(fn);
+  return () => {
+    committedListeners.delete(fn);
+  };
+}
+
+function emitCommitted(change: CommittedChange): void {
+  for (const fn of [...committedListeners]) {
+    try {
+      fn(change);
+    } catch (e) {
+      // 订阅者出错不该让这一步编辑失败
+      console.error(e);
+    }
+  }
+}
+
 export const useGraphStore = create<GraphState>((set, get) => {
+  /** 正在跑的 batch 有几层。> 0 时 transact 只改不记，由 batch 合成一条。 */
+  let batchDepth = 0;
+  /** 这段事务里实际改了什么（拖动参数、挪节点每帧记一句、去重）：commit 不给名字时拿它起名，撤销历史里看得出是哪一步。 */
+  let hints: string[] = [];
+  const note = (h: string) => {
+    if (get().pendingSnapshot && !hints.includes(h)) hints.push(h);
+  };
+  const hintLabel = (): string | null =>
+    hints.length === 0 ? null : hints.length === 1 ? hints[0]! : `${hints[0]} 等 ${hints.length} 处`;
+
   /** 记一条撤销，然后应用变更。用于单步操作。recipes 给了就在同一步里改配方集合（K7）。 */
   const transact = (label: string, recipe: (draft: GraphDoc) => void, recipes?: RecipeStep) => {
+    if (batchDepth > 0) {
+      mutate(recipe, recipes);
+      return;
+    }
     const { doc, past } = get();
     const before = recipeSet();
     const next = produce(doc, recipe);
@@ -456,6 +577,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       dirty: next !== get().savedDoc,
     });
     applyRecipeSet(nextRecipes);
+    emitCommitted({ kind: "edit", before: { doc, recipes: before }, after: { doc: next, recipes: recipeSet() } });
   };
 
   /** 应用变更但不记撤销。用于事务进行中的中间状态（拖动的每一帧）。 */
@@ -512,30 +634,67 @@ export const useGraphStore = create<GraphState>((set, get) => {
     begin() {
       // 已经在事务里就不要覆盖起点 —— 嵌套 begin 应当是幂等的
       if (get().pendingSnapshot) return;
+      hints = [];
       set({ pendingSnapshot: get().doc, pendingRecipes: recipeSet() });
     },
 
     commit(label) {
       const { pendingSnapshot, pendingRecipes, doc, past } = get();
       if (!pendingSnapshot) return;
+      const named = label ?? hintLabel() ?? "编辑";
+      hints = [];
       const recipesBefore = pendingRecipes ?? recipeSet();
       if (pendingSnapshot === doc && recipesBefore === recipeSet()) {
         set({ pendingSnapshot: null, pendingRecipes: null }); // 拖了但没动，不记
         return;
       }
       set({
-        past: [...past, { label, doc: pendingSnapshot, recipes: recipesBefore }].slice(-MAX_HISTORY),
+        past: [...past, { label: named, doc: pendingSnapshot, recipes: recipesBefore }].slice(-MAX_HISTORY),
         future: [],
         pendingSnapshot: null,
         pendingRecipes: null,
         dirty: doc !== get().savedDoc,
       });
+      emitCommitted({ kind: "edit", before: { doc: pendingSnapshot, recipes: recipesBefore }, after: { doc, recipes: recipeSet() } });
+    },
+
+    abort() {
+      const { pendingSnapshot, pendingRecipes } = get();
+      if (!pendingSnapshot) return;
+      hints = [];
+      set({ doc: pendingSnapshot, pendingSnapshot: null, pendingRecipes: null, dirty: pendingSnapshot !== get().savedDoc });
+      if (pendingRecipes) applyRecipeSet(pendingRecipes);
+    },
+
+    batch(label, fn) {
+      const opened = get().pendingSnapshot === null;
+      if (opened) get().begin();
+      const start = { doc: get().doc, recipes: recipeSet() };
+      let cancelled = false;
+      batchDepth += 1;
+      try {
+        return fn(() => {
+          cancelled = true;
+        });
+      } finally {
+        batchDepth -= 1;
+        if (cancelled) {
+          set({ doc: start.doc, dirty: start.doc !== get().savedDoc });
+          applyRecipeSet(start.recipes);
+        }
+        // 没撤回、也没改动时 commit 自己不记
+        if (opened) get().commit(label);
+      }
     },
 
     addNode(opId, position) {
       const op = ctx(get().doc).operatorsById.get(opId);
       if (!op) {
         set({ lastRejection: `算子未注册：${opId}` });
+        return null;
+      }
+      if (wouldRecurse(get().doc, opId)) {
+        set({ lastRejection: "子图不能放进它自己里面" });
         return null;
       }
       const id = newLocalId("n", allIds(get().doc));
@@ -558,6 +717,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
       if (!op) {
         set({ lastRejection: `算子未注册：${opId}` });
         return { nodeIds: [], wired: 0, ambiguous: [], missing: [opId] };
+      }
+      if (wouldRecurse(doc, opId)) {
+        set({ lastRejection: "子图不能放进它自己里面" });
+        return { nodeIds: [], wired: 0, ambiguous: [], missing: [] };
       }
       const taken = allIds(doc);
       const id = newLocalId("n", taken);
@@ -654,14 +817,26 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     deleteNodes(ids) {
-      if (ids.length === 0) return;
+      if (ids.length === 0) return [];
       const kill = new Set(ids);
       const label = ids.length === 1 ? "删除节点" : `删除 ${ids.length} 个节点`;
+      const before = get().doc;
+      const key = levelKeyOf(useUiStore.getState().path);
+      let dropped: string[] = [];
       transact(label, (d) => {
+        // 图级输出指着被删的节点（或它里面的）：一并删掉，不然存盘、运行都报「指向不存在的节点」
+        dropped = remapGraphOutputs(d, before, key, (segs, k) => (kill.has(segs[k]!) ? null : undefined));
         const lvl = level(d);
         lvl.nodes = lvl.nodes.filter((n) => !kill.has(n.id));
         // 删节点自动清理相连边（交互清单 P0 #5）
         lvl.edges = lvl.edges.filter((e) => !kill.has(e.from.node) && !kill.has(e.to.node));
+        // 子图里：子图入口接到被删节点上的那几条（inputs[].to）也摘掉，以前留着，下次运行 core 报 unknown_port
+        if (lvl !== d) {
+          for (const input of (lvl as SubgraphDef).inputs ?? []) {
+            const kept = input.to.filter((t) => !kill.has(t.node));
+            if (kept.length !== input.to.length) input.to = kept;
+          }
+        }
         // 顶层图参数指着被删节点的 bind 一并摘掉，否则存下来就是一条 unknown_bind。
         // 图参数本身留着（可能还绑着别人，也可能用户马上要重新绑）
         if (lvl === d && d.params) {
@@ -671,18 +846,44 @@ export const useGraphStore = create<GraphState>((set, get) => {
           }
         }
       });
+      return dropped;
+    },
+
+    deleteNodesHealing(ids) {
+      if (ids.length === 0) return { wired: 0, unresolved: 0, dropped: [] };
+      const doc = get().doc;
+      const plan = healPlan(ctx(doc), levelDoc(doc), new Set(ids));
+      let wired = 0;
+      let dropped: string[] = [];
+      get().batch(ids.length === 1 ? "删除并接通" : `删除 ${ids.length} 个节点并接通`, () => {
+        dropped = get().deleteNodes(ids);
+        for (const w of plan.wires) if (get().connect(w.from, w.to).ok) wired += 1;
+      });
+      return { wired, unresolved: plan.unresolved + plan.wires.length - wired, dropped };
     },
 
     moveNodes(moves) {
       if (moves.length === 0) return;
       // 拖动过程中每帧都调，所以走 mutate 不记撤销；
       // 一次拖动的撤销由 begin/commit 包住整体记一条。
+      // 下标在原图（不是 draft）上查好，draft 上只碰挪了的那几个：不按挪动逐个 find（全选拖几百个节点时每帧平方级），
+      // 也不在 draft 上把节点挨个读一遍（immer 读一个就建一个代理，一千个节点的图上拖一个节点每帧上千个）
+      const index = new Map<string, number>();
+      level(get().doc).nodes.forEach((n, i) => index.set(n.id, i));
+      const at = moves.flatMap((m) => {
+        const i = index.get(m.id);
+        return i === undefined ? [] : [[i, m.position] as const];
+      });
+      if (at.length === 0) return;
+      if (get().pendingSnapshot) {
+        const one = at.length === 1 ? level(get().doc).nodes[at[0]![0]] : undefined;
+        note(one ? `移动 ${one.ui?.title ?? ctx(get().doc).operatorsById.get(one.op)?.label ?? one.id}` : `移动 ${at.length} 个节点`);
+      }
       mutate((d) => {
-        const lvl = level(d);
-        for (const m of moves) {
-          const node = lvl.nodes.find((n) => n.id === m.id);
-          if (!node) continue;
-          node.ui = { ...node.ui, position: m.position };
+        const nodes = level(d).nodes;
+        for (const [i, position] of at) {
+          const node = nodes[i]!;
+          node.ui = { ...node.ui, position };
         }
       });
     },
@@ -694,6 +895,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       // 的来路。Inspector、参数面板、2D 拖框、粘贴、重置都经这里，所以在这一处路由而不是各处各判一遍。
       const binding = resolveGraphBinding(doc, path, nodeId, name);
       if (binding) {
+        note(`修改图参数 ${doc.params?.[binding.graphParam]?.label ?? binding.graphParam}`);
         get().editGraphParamValue(binding.graphParam, value);
         return;
       }
@@ -701,6 +903,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
       if (!node) return;
       const op = ctx(doc).operatorsById.get(node.op);
       if (!op) return;
+      // 撤销记录里写节点的名字与参数的 label（以前是「修改 Voxel Grid.leafSize」「拖动参数」，几个同类节点分不出是哪个）
+      const what = `修改 ${node.ui?.title ?? op.label} · ${op.params.find((p) => p.name === name)?.label || name}`;
 
       // K6 ②：选着配方时改一个没纳入配方的参数 —— 照常改图（影响所有配方），行上记一笔，
       // 给「改为只在本配方生效」用（它要知道改之前的值）
@@ -724,8 +928,37 @@ export const useGraphStore = create<GraphState>((set, get) => {
       };
 
       // 滑块拖动时 setParam 每帧都来，靠外层 begin/commit 合成一条撤销。
-      if (get().pendingSnapshot) mutate(apply);
-      else transact(`修改 ${op.label}.${name}`, apply);
+      if (get().pendingSnapshot) {
+        note(what);
+        mutate(apply);
+      } else transact(what, apply);
+    },
+
+    setParamMany(nodeIds, name, value) {
+      if (nodeIds.length === 0) return;
+      let writes: { id: string; value: unknown }[] = nodeIds.map((id) => ({ id, value }));
+      if (typeof value === "function") {
+        const { doc } = get();
+        const path = useUiStore.getState().path;
+        const lvl = levelAt(doc, undefined);
+        const ops = ctx(doc).operatorsById;
+        const update = value as (cur: unknown, nodeId: string) => unknown;
+        writes = [];
+        for (const id of nodeIds) {
+          const binding = resolveGraphBinding(doc, path, id, name);
+          const node = lvl.nodes.find((n) => n.id === id);
+          const op = node ? ops.get(node.op) : undefined;
+          const cur = binding ? graphParamValue(doc, binding.graphParam, currentOverrides()) : node && op ? effectiveValue(op, node, name) : undefined;
+          if (cur === undefined) continue;
+          const next = update(cur, id);
+          if (!valueEquals(next, cur)) writes.push({ id, value: next });
+        }
+        if (writes.length === 0) return;
+      }
+      const outer = get().pendingSnapshot !== null;
+      if (!outer) get().begin();
+      for (const w of writes) get().setParam(w.id, name, w.value);
+      if (!outer) get().commit(`修改 ${nodeIds.length} 个节点的 ${name}`);
     },
 
     setNodeUi(nodeId, patch) {
@@ -759,9 +992,17 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     pasteNodes(payload, at) {
-      const taken = allIds(get().doc);
+      const doc = get().doc;
+      const taken = allIds(doc);
       const idMap = new Map<string, string>();
-      const manifest = ctx(get().doc).operatorsById;
+      // 剪贴板带来的子图定义：这张图里没有的加进来，同 id 不同内容的另起一个（不覆盖这张图里的）
+      const merge = mergeSubgraphs(doc.subgraphs, payload.subgraphs ?? {});
+      const subgraphs = Object.keys(merge.added).length > 0 ? { ...doc.subgraphs, ...merge.added } : doc.subgraphs;
+      const manifest = augmentOperators(useManifestStore.getState().operatorsById, subgraphs);
+      // 正在哪几层子图里：粘进来的子图节点（连同它里面）不能再用到它们，不然展开时没完没了
+      const around = new Set(useUiStore.getState().path.map((seg) => seg.subgraphId));
+      const missing: string[] = [];
+      let recursive = 0;
 
       // 粘贴的节点整体平移到目标位置，保持相对布局
       const origin = payload.nodes.reduce(
@@ -776,16 +1017,28 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
       const newNodes: GraphNode[] = [];
       for (const n of payload.nodes) {
-        const op = manifest.get(n.op);
-        if (!op) continue; // 剪贴板里的算子在当前 core 里不存在，跳过
+        const sub = subgraphIdOf(n.op);
+        const target = sub !== null ? (merge.ids.get(sub) ?? sub) : null;
+        const opId = target !== null ? SUBGRAPH_OP_PREFIX + target : n.op;
+        const op = manifest.get(opId);
+        if (!op) {
+          missing.push(n.op); // 剪贴板里的算子在当前 core 里不存在，跳过
+          continue;
+        }
+        if (target !== null && subgraphReaches(subgraphs, target, around)) {
+          recursive += 1;
+          continue;
+        }
         const id = newLocalId("n", taken);
         taken.add(id);
         idMap.set(n.id, id);
         newNodes.push({
           id,
-          op: n.op,
+          op: opId,
           opVersion: n.opVersion ?? op.version,
           params: pruneUnknownParams(op, n.params),
+          // 静音的节点粘出来还是静音的（以前丢了）
+          ...(n.bypass ? { bypass: true } : {}),
           ui: {
             ...n.ui,
             position: {
@@ -809,14 +1062,115 @@ export const useGraphStore = create<GraphState>((set, get) => {
           };
         });
 
-      if (newNodes.length === 0) return { nodeIds: [] };
+      if (newNodes.length === 0) return { ...NOTHING_PASTED, idMap, missing, recursive };
 
+      // 只加粘上了的节点用得到的那几份定义
+      const used = subgraphsUsedBy(newNodes, subgraphs);
+      const addDefs = Object.entries(merge.added).filter(([id]) => Object.hasOwn(used, id));
       transact(newNodes.length === 1 ? "粘贴节点" : `粘贴 ${newNodes.length} 个节点`, (d) => {
+        if (addDefs.length > 0) {
+          d.subgraphs ??= {};
+          for (const [id, def] of addDefs) d.subgraphs[id] = def;
+        }
         const lvl = level(d);
         lvl.nodes.push(...newNodes);
         lvl.edges.push(...newEdges);
       });
-      return { nodeIds: newNodes.map((n) => n.id) };
+      const renamed = merge.renamed.filter((r) => Object.hasOwn(used, r.id));
+      return { nodeIds: newNodes.map((n) => n.id), idMap, missing, recursive, renamed };
+    },
+
+    restoreParams(from, label, run) {
+      let changed = 0;
+      let skipped = 0;
+      const ops = ctx(get().doc).operatorsById;
+      // 那次运行用的就是现在选着的配方：配方里的值也改回去，让每个图参数的有效值与那次一样（同一条撤销）。
+      // 调的正是这些（选着配方时改图参数写进配方，不写 default）
+      const rs = useRecipeStore.getState();
+      const current = rs.current;
+      // 按 id 认：改过名的配方还是那一个（老记录没有 id，按名字）
+      const sameRecipe =
+        !!run?.params && current !== null && (run.recipeId != null ? run.recipeId === rs.currentId : run.recipe === current);
+      // 一个图参数只算一处：基础值与配方里的值都改了也是一处
+      const gpCounted = new Set<string>();
+      const recipeStep: RecipeStep | undefined = sameRecipe
+        ? (recipes, doc) => {
+            const entry = findRecipe(recipes, current!);
+            if (!entry) return recipes;
+            let next = entry;
+            for (const [name, want] of Object.entries(run!.params!)) {
+              const gp = doc.params?.[name];
+              if (!gp) continue;
+              const now = Object.hasOwn(next.values, name) ? next.values[name] : gp.default;
+              if (valueEquals(now, want)) continue;
+              next = withValue(next, doc, name, want);
+              if (!gpCounted.has(name)) changed += 1;
+            }
+            return next === entry ? recipes : replaceRecipe(recipes, current!, touch(next, doc, nowIso()));
+          }
+        : undefined;
+      transact(label, (d) => {
+        // 一对一对的层：顶层，再是每个子图定义（按定义 id 对上）
+        const pairs: [GraphLevel, GraphLevel | undefined, SubgraphDef | null, SubgraphDef | undefined][] = [[d, from, null, undefined]];
+        for (const [id, def] of Object.entries(d.subgraphs ?? {})) pairs.push([def, from.subgraphs?.[id], def, from.subgraphs?.[id]]);
+        for (const [now, then, defNow, defThen] of pairs) {
+          for (const n of now.nodes) {
+            const old = then?.nodes.find((x) => x.id === n.id && x.op === n.op);
+            if (!old) continue;
+            const op = ops.get(n.op);
+            if (op) {
+              // 按有效值逐个参数比：稀疏存储里写没写缺省值不算改；一处 = 一个参数（与「调参」页的那一行同一个数法）
+              for (const p of op.params) {
+                const want = effectiveValue(op, old, p.name);
+                if (valueEquals(effectiveValue(op, n, p.name), want)) continue;
+                const owned = defNow
+                  ? !!promotedBy(defNow, n.id, p.name) || !!promotedBy(defThen, n.id, p.name)
+                  : !!graphParamBoundTo(d, n.id, p.name) || !!graphParamBoundTo(from, n.id, p.name);
+                if (owned) {
+                  skipped += 1;
+                  continue;
+                }
+                n.params = sparseSet(op, n.params, p.name, plain(want));
+                changed += 1;
+              }
+              // 算子已不声明的键（子图接口改过）：那时的值写回去只会报 unknown_param
+              for (const key of Object.keys(old.params ?? {})) {
+                if (!op.params.some((p) => p.name === key) && !valueEquals(old.params?.[key], n.params?.[key])) skipped += 1;
+              }
+            } else if (!valueEquals(n.params ?? {}, old.params ?? {})) {
+              n.params = structuredClone(old.params ?? {});
+              changed += 1;
+            }
+            if ((n.bypass === true) !== (old.bypass === true)) {
+              if (old.bypass) n.bypass = true;
+              else delete n.bypass;
+              changed += 1;
+            }
+          }
+        }
+        for (const [name, gp] of Object.entries(d.params ?? {})) {
+          const old = from.params?.[name];
+          if (old && !valueEquals(gp.default, old.default)) {
+            gp.default = structuredClone(old.default);
+            gpCounted.add(name);
+            changed += 1;
+          }
+        }
+        // 那时绑着图参数、后来图参数删掉了（值写回了节点）：把那时的值写回去，不然节点退回算子默认 —— 哪一次都没用过的值
+        const boundNow = new Set(Object.values(d.params ?? {}).flatMap((gp) => gp.binds ?? []));
+        for (const old of Object.values(from.params ?? {})) {
+          for (const bind of old.binds ?? []) {
+            if (boundNow.has(bind)) continue;
+            const t = splitBind(bind);
+            const node = t ? d.nodes.find((x) => x.id === t.node) : undefined;
+            const op = node ? ops.get(node.op) : undefined;
+            if (!t || !node || !op || valueEquals(effectiveValue(op, node, t.param), old.default)) continue;
+            writeBack(d, ops, bind, old.default);
+            changed += 1;
+          }
+        }
+      }, recipeStep);
+      return { changed, skipped };
     },
 
     setBypass(ids, value) {
@@ -847,11 +1201,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     renameNode(id, title) {
+      // null = 回到 manifest 的 label。没变就什么都不做：不记撤销、不把文档标成改过
+      const next = title && title.trim() ? title : null;
+      const current = level(get().doc).nodes.find((n) => n.id === id);
+      if (!current || (current.ui?.title ?? null) === next) return;
       transact("重命名节点", (d) => {
         const node = level(d).nodes.find((n) => n.id === id);
         if (!node) return;
-        // null = 回到 manifest 的 label
-        node.ui = { ...node.ui, title: title && title.trim() ? title : null };
+        node.ui = { ...node.ui, title: next };
       });
     },
 
@@ -891,6 +1248,20 @@ export const useGraphStore = create<GraphState>((set, get) => {
       return true;
     },
 
+    layoutLoaded(moves) {
+      if (moves.length === 0) return;
+      const { doc, savedDoc } = get();
+      const next = produce(doc, (d) => {
+        for (const m of moves) {
+          const node = d.nodes.find((n) => n.id === m.id);
+          if (node) node.ui = { ...node.ui, position: m.position };
+        }
+      });
+      // 刚打开、与文件一致时：排好的这一份就算「文件里的样子」，标题不带 *、关窗口不问
+      const pristine = savedDoc === doc;
+      set({ doc: next, ...(pristine ? { savedDoc: next, dirty: false } : {}) });
+    },
+
     applyLayout(moves) {
       if (moves.length === 0) return;
       transact(moves.length === 1 ? "整理布局" : `整理 ${moves.length} 个节点的布局`, (d) => {
@@ -902,13 +1273,20 @@ export const useGraphStore = create<GraphState>((set, get) => {
       });
     },
 
-    duplicateNodes(ids) {
-      if (ids.length === 0) return { nodeIds: [] };
+    duplicateNodes(ids, opts) {
+      if (ids.length === 0) return NOTHING_PASTED;
       const { doc } = get();
       const lvl = level(doc);
       const kept = new Set(ids);
-      const nodes = lvl.nodes.filter((n) => kept.has(n.id));
-      if (nodes.length === 0) return { nodeIds: [] };
+      // 被图参数绑定的参数写成此刻的有效值：副本不带绑定，原来会悄悄回到算子默认值
+      const nodes = materializeBindings(
+        doc,
+        useUiStore.getState().path,
+        lvl.nodes.filter((n) => kept.has(n.id)),
+        ctx(doc).operatorsById,
+        currentOverrides(),
+      );
+      if (nodes.length === 0) return NOTHING_PASTED;
       const edges = lvl.edges.filter((e) => kept.has(e.from.node) && kept.has(e.to.node));
       const origin = nodes.reduce(
         (acc, n) => ({
@@ -918,13 +1296,37 @@ export const useGraphStore = create<GraphState>((set, get) => {
         { x: Infinity, y: Infinity },
       );
       // 偏移一点，否则复制出来的节点完全盖在原件上，用户以为什么都没发生
-      return get().pasteNodes(
-        { nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) },
-        { x: (Number.isFinite(origin.x) ? origin.x : 0) + 40, y: (Number.isFinite(origin.y) ? origin.y : 0) + 40 },
-      );
+      const paste = () =>
+        get().pasteNodes(
+          { nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) },
+          { x: (Number.isFinite(origin.x) ? origin.x : 0) + 40, y: (Number.isFinite(origin.y) ? origin.y : 0) + 40 },
+        );
+      if (!opts?.keepInputs) return paste();
+      const label = nodes.length === 1 ? "复制并保留输入" : `复制 ${nodes.length} 个节点并保留输入`;
+      return get().batch(label, () => {
+        const made = paste();
+        // 从选区外面进来的边：副本也接一条（选区里面的连线 pasteNodes 已经照着复制了）
+        for (const e of lvl.edges) {
+          const copy = made.idMap.get(e.to.node);
+          if (copy && !made.idMap.has(e.from.node)) get().connect(e.from, { node: copy, port: e.to.port });
+        }
+        // 在子图里：从子图入口进来的那几条不是边，是 inputs[].to，副本的端口也加进去
+        transact(label, (d) => {
+          const def = level(d);
+          if (def === d) return;
+          for (const input of (def as SubgraphDef).inputs ?? []) {
+            const extra = input.to.flatMap((t) => {
+              const copy = made.idMap.get(t.node);
+              return copy ? [{ node: copy, port: t.port }] : [];
+            });
+            if (extra.length > 0) input.to.push(...extra);
+          }
+        });
+        return made;
+      });
     },
 
-    applyMigrations(actions) {
+    applyMigrations(actions, relayout) {
       if (actions.length === 0) return 0;
       const byNode = new Map(actions.map((a) => [a.nodeId, a]));
       let changed = 0;
@@ -951,6 +1353,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
               applyMigrationEdits(d, action.nodeId, action.edits);
             }
           }
+          if (relayout && actions.some((a) => (a.edits?.addNodes.length ?? 0) > 0)) {
+            for (const m of relayout(current(d) as GraphDoc)) {
+              const node = d.nodes.find((n) => n.id === m.id);
+              if (node) node.ui = { ...node.ui, position: m.position };
+            }
+          }
         },
       );
       return changed;
@@ -960,8 +1368,16 @@ export const useGraphStore = create<GraphState>((set, get) => {
       if (ids.length === 0) return null;
       const path = useUiStore.getState().path;
       let result: ComposeResult | null = null;
+      const before = get().doc;
       transact(ids.length === 1 ? "合成子图" : `把 ${ids.length} 个节点合成子图`, (d) => {
         result = composeInto(ctx(d), d, path, ids, allIds(d));
+        const made = result as ComposeResult | null;
+        if (!made) return;
+        // 被收进去的节点上标着的图级输出：路径 id 里多一层新的子图节点
+        const picked = new Set(ids);
+        remapGraphOutputs(d, before, levelKeyOf(path), (segs, k, port) =>
+          picked.has(segs[k]!) ? { node: [...segs.slice(0, k), made.nodeId, ...segs.slice(k)].join("/"), port } : undefined,
+        );
       });
       return result;
     },
@@ -969,10 +1385,76 @@ export const useGraphStore = create<GraphState>((set, get) => {
     dissolveSubgraph(nodeId) {
       const path = useUiStore.getState().path;
       let inlined: string[] = [];
+      const before = get().doc;
+      const host = levelOf(before, path).nodes.find((n) => n.id === nodeId);
+      const sid = host ? subgraphIdOf(host.op) : null;
+      const def = sid ? before.subgraphs?.[sid] : undefined;
       transact("解散子图", (d) => {
         inlined = dissolveFrom(d, path, nodeId, allIds(d));
+        if (!def || inlined.length !== def.nodes.length) return;
+        // dissolveFrom 按定义里的顺序给内联出来的节点分新 id
+        const rename = new Map(def.nodes.map((n, i) => [n.id, inlined[i]!]));
+        remapGraphOutputs(d, before, levelKeyOf(path), (segs, k, port) => {
+          if (segs[k] !== nodeId) return undefined;
+          if (k === segs.length - 1) {
+            const from = def.outputs.find((o) => o.name === port)?.from;
+            const id = from ? rename.get(from.node) : undefined;
+            return from && id ? { node: [...segs.slice(0, k), id].join("/"), port: from.port } : null;
+          }
+          const id = rename.get(segs[k + 1]!);
+          return id ? { node: [...segs.slice(0, k), id, ...segs.slice(k + 2)].join("/"), port } : null;
+        });
       });
       return inlined;
+    },
+
+    replaceNodeOp(nodeId, opId) {
+      const { doc } = get();
+      const path = useUiStore.getState().path;
+      const c = ctx(doc);
+      const op = c.operatorsById.get(opId);
+      const plan = op ? planReplace(c, doc, path, nodeId, op) : null;
+      if (!op || !plan || plan.blocked) {
+        set({ lastRejection: plan?.blocked ?? `换不了：找不到算子 ${opId}` });
+        return null;
+      }
+      const dropEdges = new Set(plan.droppedEdges);
+      const unbind = new Set(plan.unbind);
+      const dropInputs = new Set(plan.droppedInputs.map((x) => `${x.input}\u0000${x.port}`));
+      transact(`换成 ${op.label}`, (d) => {
+        const lvl = level(d);
+        const node = lvl.nodes.find((n) => n.id === nodeId);
+        if (!node) return;
+        node.op = op.id;
+        // 写新算子的版本：留着旧的会被当成要迁移
+        node.opVersion = op.version;
+        node.params = { ...plan.params };
+        lvl.edges = lvl.edges.filter((e) => !dropEdges.has(e.id));
+        if (lvl === d) {
+          for (const gp of Object.values(d.params ?? {})) {
+            const kept = gp.binds.filter((b) => {
+              const dot = b.lastIndexOf(".");
+              return !(b.slice(0, dot) === nodeId && unbind.has(b.slice(dot + 1)));
+            });
+            if (kept.length !== gp.binds.length) gp.binds = kept;
+          }
+        } else {
+          const def = lvl as SubgraphDef;
+          for (const sp of def.params ?? []) {
+            const kept = (sp.binds ?? []).filter((b) => !(b.node === nodeId && unbind.has(b.param)));
+            if (kept.length !== (sp.binds ?? []).length) sp.binds = kept;
+          }
+          for (const input of def.inputs ?? []) {
+            const kept = input.to.filter((t) => t.node !== nodeId || !dropInputs.has(`${input.name}\u0000${t.port}`));
+            if (kept.length !== input.to.length) input.to = kept;
+          }
+        }
+        for (const name of plan.droppedOutputs) {
+          if (d.outputs) delete d.outputs[name];
+        }
+      });
+      for (const p of plan.droppedParams) clearBaseEdit(`${fullId(path, nodeId)}.${p}`);
+      return plan;
     },
 
     inlineLibrary(nodeId, def) {
@@ -1183,8 +1665,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
         if (into) into.default = plain(value);
       };
       // 滑块与数字框拖动时每帧都来，靠外层 begin/commit 合成一条撤销（同 setParam）
-      if (get().pendingSnapshot) mutate(apply);
-      else transact(`修改图参数 ${name}`, apply);
+      if (get().pendingSnapshot) {
+        note(`修改图参数 ${gp.label ?? name}`);
+        mutate(apply);
+      } else transact(`修改图参数 ${name}`, apply);
     },
 
     setGraphParamSpec(name, patch) {
@@ -1210,7 +1694,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     setRecipeValue(recipe, param, value) {
-      if (!get().doc.params?.[param]) return;
+      const gp = get().doc.params?.[param];
+      if (!gp) return;
+      note(`配方 ${recipe}：修改 ${gp.label ?? param}`);
       editRecipe(`配方 ${recipe}：修改 ${param}`, recipe, (e, doc) => withValue(e, doc, param, value));
     },
 
@@ -1413,6 +1899,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const { past, future, doc } = get();
       const entry = past[past.length - 1];
       if (!entry) return;
+      const before = { doc, recipes: recipeSet() };
       set({
         doc: entry.doc,
         past: past.slice(0, -1),
@@ -1423,12 +1910,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
         pendingRecipes: null,
       });
       applyRecipeSet(entry.recipes);
+      emitCommitted({ kind: "undo", before, after: { doc: entry.doc, recipes: recipeSet() } });
     },
 
     redo() {
       const { past, future, doc } = get();
       const entry = future[future.length - 1];
       if (!entry) return;
+      const before = { doc, recipes: recipeSet() };
       set({
         doc: entry.doc,
         future: future.slice(0, -1),
@@ -1438,6 +1927,32 @@ export const useGraphStore = create<GraphState>((set, get) => {
         pendingRecipes: null,
       });
       applyRecipeSet(entry.recipes);
+      emitCommitted({ kind: "redo", before, after: { doc: entry.doc, recipes: recipeSet() } });
+    },
+
+    travel(steps) {
+      if (steps === 0) return 0;
+      let { past, future, doc } = get();
+      let recipes = recipeSet();
+      const before = { doc, recipes };
+      past = past.slice();
+      future = future.slice();
+      const from = steps < 0 ? past : future;
+      const to = steps < 0 ? future : past;
+      let moved = 0;
+      while (moved < Math.abs(steps) && from.length > 0) {
+        const entry = from.pop()!;
+        to.push({ label: entry.label, doc, recipes });
+        doc = entry.doc;
+        recipes = entry.recipes;
+        moved += 1;
+      }
+      if (moved === 0) return 0;
+      hints = [];
+      set({ doc, past, future, dirty: doc !== get().savedDoc, pendingSnapshot: null, pendingRecipes: null });
+      applyRecipeSet(recipes);
+      emitCommitted({ kind: "travel", before, after: { doc, recipes: recipeSet() } });
+      return steps < 0 ? -moved : moved;
     },
 
     canUndo: () => get().past.length > 0,
@@ -1480,6 +1995,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
     markSaved(path, saved) {
       const doc = saved ?? get().doc;
       set({ filePath: path, savedDoc: doc, dirty: get().doc !== doc });
+    },
+
+    markUnsaved() {
+      set({ savedDoc: null, dirty: true });
     },
 
     setName(name) {

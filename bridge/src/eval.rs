@@ -1,13 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{mpsc, Arc};
 
 use serde_json::{json, Map, Value};
 
 use crate::cli::{
     core, defaults_by_op, diagnostics_of, execute, has_errors, json_line, line, load_graph,
-    parse_axis, component_count, Loaded, Parsed, RunRequest, Sink, EXIT_CANCELLED, EXIT_FAILED,
-    EXIT_INVALID, EXIT_OK, EXIT_USAGE,
+    parse_axis, component_count, Loaded, Parsed, RunGroup, RunRequest, Sink, EXIT_CANCELLED,
+    EXIT_FAILED, EXIT_INVALID, EXIT_OK, EXIT_USAGE,
 };
 use crate::core_ffi::Core;
 use crate::graph::GraphDoc;
@@ -834,6 +836,187 @@ pub(crate) struct Engine<'a> {
     /// 每行带一份 run summary（ADR-0022）。**默认关**，`--summary` 打开 ——
     /// 体积是逐行的，一维 bundle 就 6 KB（m6-plan §10 第 5 条）。
     pub summary: bool,
+    /// `--jobs`：同时跑几次。1 = 一次接一次。多于 1 时行仍按顺序交出（run_jobs）。
+    pub jobs: usize,
+}
+
+/// 终端里的一行进度：「[k/总数] 样本 · 状态 · 耗时 · 还要约 …」，同一行原地刷新（`\r` 加补空格，
+/// 不靠 ANSI 转义 —— 老的 Windows 控制台不认），收场时清掉。开不开看 `cli::progress_line()`：
+/// 关着的时候一个字都不写。
+pub(crate) struct Progress {
+    err: Sink,
+    on: bool,
+    total: usize,
+    done: usize,
+    started: std::time::Instant,
+    /// 上一次写出去的显示宽度：下一次比它短时补空格盖掉
+    width: usize,
+    /// 终端有多宽：写满一整行会折行（光标到了下一行，\r 回不去），所以最多写到 cols - 1 列
+    cols: Option<usize>,
+}
+
+impl Progress {
+    pub(crate) fn new(err: &Sink, total: usize) -> Self {
+        let on = crate::cli::progress_line();
+        Self::with(err, total, on, if on { crate::cli::stderr_width() } else { None })
+    }
+
+    fn with(err: &Sink, total: usize, on: bool, cols: Option<usize>) -> Self {
+        Self {
+            err: Arc::clone(err),
+            on,
+            total,
+            done: 0,
+            started: std::time::Instant::now(),
+            width: 0,
+            cols,
+        }
+    }
+
+    /// 又交出了一行。
+    pub(crate) fn row(&mut self, what: &str) {
+        if !self.on {
+            return;
+        }
+        self.done += 1;
+        let left = self.total.saturating_sub(self.done);
+        let eta = if left > 0 {
+            let per = self.started.elapsed().as_secs_f64() / self.done as f64;
+            format!(" · 还要约 {}", human_seconds(per * left as f64))
+        } else {
+            String::new()
+        };
+        self.show(&format!("[{}/{}] {what}{eta}", self.done, self.total));
+    }
+
+    /// 原地换成这一行（按终端宽度截断、比上一行短就补空格盖掉）。不计数 —— `lyflow run` 自己数节点。
+    pub(crate) fn show(&mut self, text: &str) {
+        if !self.on {
+            return;
+        }
+        let text = match self.cols {
+            Some(cols) => truncate_to_width(text, cols.saturating_sub(1)),
+            None => text.to_string(),
+        };
+        let width = display_width(&text);
+        let pad = " ".repeat(self.width.saturating_sub(width));
+        self.write(&format!("\r{text}{pad}"));
+        self.width = width;
+    }
+
+    /// 清掉进度行，光标回到行首 —— 之后的 stderr 照常一行行写。
+    pub(crate) fn clear(&mut self) {
+        if self.on && self.width > 0 {
+            self.write(&format!("\r{}\r", " ".repeat(self.width)));
+            self.width = 0;
+        }
+    }
+
+    fn write(&self, text: &str) {
+        if let Ok(mut w) = self.err.lock() {
+            let _ = w.write_all(text.as_bytes());
+            let _ = w.flush();
+        }
+    }
+}
+
+/// 进度行里的「样本 · 参数组 · 状态 · 耗时」。参数组只有一个时不写。
+pub(crate) fn progress_text(row: &Row, sample: Option<&str>, many_sets: bool) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(id) = sample {
+        parts.push(truncate_to_width(id, 32));
+    }
+    if many_sets {
+        parts.push(format!("参数组 {}", row.param_set));
+    }
+    parts.push(row.status.clone());
+    parts.push(format!("{:.0} ms", row.duration_ms));
+    parts.join(" · ")
+}
+
+/// 截到 max 列以内，截掉了就以「…」结尾。
+fn truncate_to_width(s: &str, max: usize) -> String {
+    if display_width(s) <= max {
+        return s.to_string();
+    }
+    const ELLIPSIS: char = '…';
+    let room = max.saturating_sub(char_width(ELLIPSIS));
+    let mut out = String::new();
+    let mut used = 0;
+    for c in s.chars() {
+        let w = char_width(c);
+        if used + w > room {
+            break;
+        }
+        out.push(c);
+        used += w;
+    }
+    out.push(ELLIPSIS);
+    out
+}
+
+/// 终端里的显示宽度。U+1100 以上一律按两格算：中日韩字符确实占两格，「…」这类在中文控制台里
+/// 也常画成两格 —— 宁可多算（多补几个空格、早一点截断），少算就会折行或留下残字。
+fn display_width(s: &str) -> usize {
+    s.chars().map(char_width).sum()
+}
+
+fn char_width(c: char) -> usize {
+    if (c as u32) >= 0x1100 {
+        2
+    } else {
+        1
+    }
+}
+
+fn human_seconds(s: f64) -> String {
+    let s = s.round().max(0.0) as u64;
+    match s {
+        0..=59 => format!("{s} 秒"),
+        60..=3599 => format!("{} 分 {} 秒", s / 60, s % 60),
+        _ => format!("{} 小时 {} 分", s / 3600, s % 3600 / 60),
+    }
+}
+
+/// 没成的那几次归成一行给 stderr：「没成的 10 次：failed 8（io × 5、bad_param × 3）、validation_failed 2（unknown_op × 2）」。
+/// 逐行的错误在 stdout 的行里，而 stdout 常被重定向进文件 —— 终端上原来只有「N 次 ok」，看不出其余的为什么没成。
+/// 一行有几个错误代码就各数一次；全都 ok 时是 None。
+pub(crate) fn failure_digest(rows: &[Row]) -> Option<String> {
+    let bad: Vec<&Row> = rows.iter().filter(|r| r.status != "ok").collect();
+    if bad.is_empty() {
+        return None;
+    }
+    let mut by_status: BTreeMap<&str, (usize, BTreeMap<&str, usize>)> = BTreeMap::new();
+    for r in &bad {
+        let (n, codes) = by_status.entry(r.status.as_str()).or_default();
+        *n += 1;
+        for c in &r.errors {
+            *codes.entry(c.as_str()).or_default() += 1;
+        }
+    }
+    let parts: Vec<String> = by_status
+        .iter()
+        .map(|(status, (n, codes))| {
+            if codes.is_empty() {
+                return format!("{status} {n}");
+            }
+            let mut list: Vec<(&str, usize)> = codes.iter().map(|(c, k)| (*c, *k)).collect();
+            list.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+            let codes: Vec<String> = list.iter().map(|(c, k)| format!("{c} × {k}")).collect();
+            format!("{status} {n}（{}）", codes.join("、"))
+        })
+        .collect();
+    Some(format!("没成的 {} 次：{}", bad.len(), parts.join("、")))
+}
+
+/// 一行的状态对应的退出码。
+fn row_exit(status: &str) -> i32 {
+    match status {
+        "ok" => EXIT_OK,
+        "validation_failed" => EXIT_INVALID,
+        "cancelled" => EXIT_CANCELLED,
+        _ => EXIT_FAILED,
+    }
 }
 
 struct Attempt {
@@ -883,6 +1066,7 @@ impl<'a> Engine<'a> {
         pi: usize,
         si: usize,
         enumerate: bool,
+        group: Option<&RunGroup>,
     ) -> Result<Attempt, String> {
         let ps = &self.param_sets[pi];
         let sample = &self.samples[si];
@@ -935,6 +1119,8 @@ impl<'a> Engine<'a> {
                 stream: None,
                 params_json: None,
                 inputs: &[],
+                group,
+                on_event: None,
             },
         )?;
         let wants_outputs = enumerate || self.metrics.iter().any(MetricPath::needs_outputs);
@@ -1010,15 +1196,20 @@ impl<'a> Engine<'a> {
         if self.param_sets.is_empty() || self.samples.is_empty() {
             return Err("没有参数组或样本，跑不了第一次运行".to_string());
         }
-        let a = self.attempt(0, 0, true)?;
+        let a = self.attempt(0, 0, true, None)?;
         Ok((a.row, a.available))
     }
 
+    /// 第 k 次运行是哪组参数 × 哪个样本。参数组在外层：同时在跑的几次多半是同一组参数的不同样本，
+    /// 与一次接一次时的顺序也一致。
+    fn split(&self, k: usize) -> (usize, usize) {
+        (k / self.samples.len(), k % self.samples.len())
+    }
+
     pub(crate) fn run(&self, on_row: &mut dyn FnMut(&Row)) -> Result<i32, EngineError> {
-        let mut worst = EXIT_OK;
         let mut first: Option<Attempt> = None;
         if !self.param_sets.is_empty() && !self.samples.is_empty() && !self.metrics.is_empty() {
-            let a = self.attempt(0, 0, true).map_err(EngineError::Failed)?;
+            let a = self.attempt(0, 0, true, None).map_err(EngineError::Failed)?;
             if a.row.status == "ok" {
                 let missing: Vec<String> = self
                     .metrics
@@ -1036,28 +1227,123 @@ impl<'a> Engine<'a> {
             }
             first = Some(a);
         }
-        for pi in 0..self.param_sets.len() {
-            for si in 0..self.samples.len() {
-                let attempt = match first.take() {
-                    Some(a) => a,
-                    None => self.attempt(pi, si, false).map_err(EngineError::Failed)?,
-                };
-                let code = match attempt.row.status.as_str() {
-                    "ok" => EXIT_OK,
-                    "validation_failed" => EXIT_INVALID,
-                    "cancelled" => EXIT_CANCELLED,
-                    _ => EXIT_FAILED,
-                };
-                if code == EXIT_CANCELLED {
-                    on_row(&attempt.row);
-                    return Ok(EXIT_CANCELLED);
+        let total = self.param_sets.len() * self.samples.len();
+        let mut worst = EXIT_OK;
+        // 交出一行。Some(退出码) = 到此为止：这一行被取消了（Ctrl+C），后面的不再跑
+        let mut emit = |row: &Row| -> Option<i32> {
+            on_row(row);
+            match row_exit(&row.status) {
+                EXIT_CANCELLED => Some(EXIT_CANCELLED),
+                code => {
+                    worst = worst.max(code);
+                    None
                 }
-                worst = worst.max(code);
-                on_row(&attempt.row);
+            }
+        };
+        let mut start = 0;
+        if let Some(a) = first.take() {
+            if let Some(code) = emit(&a.row) {
+                return Ok(code);
+            }
+            start = 1;
+        }
+        let stopped = if self.jobs > 1 && total.saturating_sub(start) > 1 {
+            self.run_jobs(start, total, &mut emit)?
+        } else {
+            let mut stopped = None;
+            for k in start..total {
+                let (pi, si) = self.split(k);
+                let a = self.attempt(pi, si, false, None).map_err(EngineError::Failed)?;
+                stopped = emit(&a.row);
+                if stopped.is_some() {
+                    break;
+                }
+            }
+            stopped
+        };
+        Ok(stopped.unwrap_or(worst))
+    }
+
+    /// `--jobs`：第 start..total 次分给 jobs 个线程跑，行仍按顺序交给 emit —— 输出与一次接一次时
+    /// 逐行相同（durationMs 除外）。core 允许几次运行同时在算，线程预算按整个进程在算的节点数分。
+    /// 有一次回来是 cancelled（Ctrl+C 把在跑的都取消了）就整批取消：之后才起的那次一登记就取消。
+    fn run_jobs(
+        &self,
+        start: usize,
+        total: usize,
+        emit: &mut dyn FnMut(&Row) -> Option<i32>,
+    ) -> Result<Option<i32>, EngineError> {
+        let group = RunGroup::default();
+        let work = |k: usize| -> Result<Attempt, String> {
+            let (pi, si) = self.split(k);
+            let a = self.attempt(pi, si, false, Some(&group))?;
+            if a.row.status == "cancelled" {
+                group.cancel();
+            }
+            Ok(a)
+        };
+        ordered_parallel(start..total, self.jobs, &group, &work, &mut |a: Attempt| emit(&a.row))
+            .map_err(EngineError::Failed)
+    }
+}
+
+/// 把 range 里的任务分给 jobs 个线程做，结果按序号顺序交给 take —— 交出的顺序与一个接一个做时相同。
+/// 收场也与一个接一个时停在同一处：
+/// - take 返回 Some（这一行被取消了）：不再起新的，group 里还在跑的取消，排在后面的结果丢掉。
+/// - 某个任务返回 Err：不再起新的；排在它前面、还在做的照常做完交出，然后返回这个 Err，
+///   排在它后面的取消、丢掉。
+fn ordered_parallel<T: Send, R>(
+    range: std::ops::Range<usize>,
+    jobs: usize,
+    group: &RunGroup,
+    work: &(dyn Fn(usize) -> Result<T, String> + Sync),
+    take: &mut dyn FnMut(T) -> Option<R>,
+) -> Result<Option<R>, String> {
+    let end = range.end;
+    let next = AtomicUsize::new(range.start);
+    let stop = AtomicBool::new(false);
+    let (tx, rx) = mpsc::channel::<(usize, Result<T, String>)>();
+    std::thread::scope(|scope| {
+        for _ in 0..jobs.min(range.len()) {
+            let tx = tx.clone();
+            let (next, stop) = (&next, &stop);
+            scope.spawn(move || {
+                while !stop.load(Ordering::SeqCst) && !group.cancelled() {
+                    let k = next.fetch_add(1, Ordering::SeqCst);
+                    if k >= end {
+                        break;
+                    }
+                    let result = work(k);
+                    if result.is_err() {
+                        stop.store(true, Ordering::SeqCst);
+                    }
+                    if tx.send((k, result)).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(tx);
+        let mut ready: BTreeMap<usize, Result<T, String>> = BTreeMap::new();
+        let mut want = range.start;
+        for (k, result) in rx.iter() {
+            ready.insert(k, result);
+            while let Some(result) = ready.remove(&want) {
+                want += 1;
+                let done = match result {
+                    Err(e) => Err(e),
+                    Ok(t) => match take(t) {
+                        Some(r) => Ok(Some(r)),
+                        None => continue,
+                    },
+                };
+                stop.store(true, Ordering::SeqCst);
+                group.cancel();
+                return done;
             }
         }
-        Ok(worst)
-    }
+        Ok(None)
+    })
 }
 
 fn csv_cell(v: &Value) -> String {
@@ -1238,6 +1524,15 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         holdout,
         group_by: parsed.one("group-by").map(str::to_string),
     };
+    let (parallel, jobs) = match crate::cli::parallel_of(parsed)
+        .and_then(|p| Ok((p, crate::cli::jobs_of(parsed)?)))
+    {
+        Ok(v) => v,
+        Err(e) => {
+            line(err, &e);
+            return EXIT_USAGE;
+        }
+    };
 
     let samples = match collect_samples(parsed, err) {
         Ok(s) => s,
@@ -1308,11 +1603,6 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let param_sets = combine_param_sets(explicit, axes);
     let pinned: Vec<String> = crate::cli::graph_param_specs(parsed).into_iter().cloned().collect();
 
-    let parallel = parsed
-        .one("parallel")
-        .and_then(|v| v.parse::<i32>().ok())
-        .unwrap_or(0);
-
     let engine = Engine {
         core: &core,
         base: &loaded,
@@ -1326,6 +1616,7 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         // 参数 2.5 MB —— 一个「每行都带上」的默认值会把 eval 的输出撑成不可读。
         // `--no-summary` 留着当 no-op：老脚本照样跑得过。
         summary: parsed.has("summary"),
+        jobs,
     };
 
     if list_only {
@@ -1333,9 +1624,11 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     }
 
     let mut rows: Vec<Row> = Vec::new();
-    let code = {
+    let mut progress = Progress::new(err, param_sets.len() * samples.len());
+    let result = {
         let mut on_row = |row: &Row| {
             let sample = &samples[row.sample];
+            progress.row(&progress_text(row, Some(&sample.id), param_sets.len() > 1));
             let mut m = Map::new();
             for (metric, value) in metrics.iter().zip(&row.metrics) {
                 m.insert(
@@ -1363,30 +1656,32 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             json_line(out, &line_json);
             rows.push(row.clone());
         };
-        match engine.run(&mut on_row) {
-            Ok(c) => c,
-            Err(EngineError::Failed(e)) => {
-                line(err, &e);
-                return EXIT_FAILED;
-            }
-            Err(EngineError::Usage(message, available)) => {
-                line(err, &message);
-                if available.is_empty() {
-                    line(err, "这张图跑完一次后没有任何标量路径可取");
-                } else {
-                    line(err, "这张图上可用的标量路径：");
-                    for p in available.iter().take(MAX_LISTED_PATHS) {
-                        line(err, &format!("  {p}"));
-                    }
-                    if available.len() > MAX_LISTED_PATHS {
-                        line(
-                            err,
-                            &format!("  …还有 {} 条", available.len() - MAX_LISTED_PATHS),
-                        );
-                    }
+        engine.run(&mut on_row)
+    };
+    progress.clear();
+    let code = match result {
+        Ok(c) => c,
+        Err(EngineError::Failed(e)) => {
+            line(err, &e);
+            return EXIT_FAILED;
+        }
+        Err(EngineError::Usage(message, available)) => {
+            line(err, &message);
+            if available.is_empty() {
+                line(err, "这张图跑完一次后没有任何标量路径可取");
+            } else {
+                line(err, "这张图上可用的标量路径：");
+                for p in available.iter().take(MAX_LISTED_PATHS) {
+                    line(err, &format!("  {p}"));
                 }
-                return EXIT_USAGE;
+                if available.len() > MAX_LISTED_PATHS {
+                    line(
+                        err,
+                        &format!("  …还有 {} 条", available.len() - MAX_LISTED_PATHS),
+                    );
+                }
             }
+            return EXIT_USAGE;
         }
     };
 
@@ -1434,6 +1729,9 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             ok
         ),
     );
+    if let Some(digest) = failure_digest(&rows) {
+        line(err, &digest);
+    }
     code
 }
 
@@ -1808,517 +2106,4 @@ pub(crate) fn collect_samples(parsed: &Parsed, err: &Sink) -> Result<Vec<Sample>
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn metric(spec: &str) -> MetricPath {
-        parse_metric(spec).unwrap_or_else(|e| panic!("{spec}: {e}"))
-    }
-
-    fn events() -> Vec<Value> {
-        vec![
-            json!({"kind": "run_started", "seq": 0}),
-            json!({
-                "kind": "node_state", "nodeId": "n_fit", "state": "done", "durationMs": 4.5,
-                "stats": {
-                    "elementCount": 12, "byteSize": 480,
-                    "outputs": [
-                        {"port": "line", "type": "Line2D", "elementCount": 1,
-                         "value": {"kind": "Line2D", "hasSegment": true}},
-                        {"port": "quality", "type": "Record", "elementCount": 1,
-                         "value": {"kind": "Record", "type": "fit",
-                                   "data": {"rmsResidualMm": 0.03, "inlierCount": 9}}}
-                    ]
-                }
-            }),
-            json!({
-                "kind": "node_state", "nodeId": "n_off", "state": "done", "durationMs": 0.2,
-                "stats": {
-                    "elementCount": 1, "byteSize": 8,
-                    "outputs": [
-                        {"port": "dx", "type": "Measurement", "elementCount": 1,
-                         "value": {"kind": "Measurement", "value": 1.25, "ok": true}},
-                        {"port": "at", "type": "Point2D", "elementCount": 1,
-                         "value": {"kind": "Point2D", "p": [0.5, -2.0]}}
-                    ]
-                }
-            }),
-            json!({"kind": "run_finished", "status": "ok", "durationMs": 9.75}),
-        ]
-    }
-
-    fn named() -> Value {
-        json!({
-            "gap": {"node": "n_off", "port": "dx", "type": "Measurement", "elementCount": 1,
-                    "value": {"kind": "Measurement", "value": 1.25, "ok": true}},
-            "bundle": {"node": "n_b", "port": "bundle", "type": "Record", "elementCount": 1,
-                       "value": {"kind": "Record", "type": "gap",
-                                 "data": {"point_counts": {"left": 640, "right": 512}}}},
-            "cloud": {"node": "n_c", "port": "cloud", "type": "PointCloud", "elementCount": 99}
-        })
-    }
-
-    #[test]
-    fn metric_paths_cover_outputs_nodes_and_run() {
-        let ev = events();
-        let out = named();
-        let view = RunView { events: &ev, outputs: Some(&out) };
-        assert_eq!(view.resolve(&metric("run.durationMs")), Some(9.75));
-        assert_eq!(view.resolve(&metric("nodes.n_fit.durationMs")), Some(4.5));
-        assert_eq!(view.resolve(&metric("nodes.n_fit.elementCount")), Some(12.0));
-        assert_eq!(view.resolve(&metric("nodes.n_fit.byteSize")), Some(480.0));
-        assert_eq!(view.resolve(&metric("nodes.n_fit.quality.rmsResidualMm")), Some(0.03));
-        assert_eq!(view.resolve(&metric("nodes.n_fit.line.elementCount")), Some(1.0));
-        assert_eq!(view.resolve(&metric("nodes.n_fit.line.hasSegment")), Some(1.0));
-        assert_eq!(view.resolve(&metric("nodes.n_off.dx")), Some(1.25));
-        assert_eq!(view.resolve(&metric("outputs.gap")), Some(1.25));
-        assert_eq!(view.resolve(&metric("outputs.gap.ok")), Some(1.0));
-        assert_eq!(view.resolve(&metric("outputs.bundle.point_counts.left")), Some(640.0));
-        assert_eq!(view.resolve(&metric("outputs.cloud")), None);
-        assert_eq!(view.resolve(&metric("outputs.nope")), None);
-        assert_eq!(view.resolve(&metric("nodes.n_fit.nope.x")), None);
-        // 数组按数字段取下标（pointFrom 拿 Point2D 的分量当锚点）
-        assert_eq!(view.resolve(&metric("nodes.n_off.at.p.1")), Some(-2.0));
-        assert_eq!(view.resolve(&metric("nodes.n_off.at.p.2")), None);
-        assert_eq!(view.resolve(&metric("nodes.n_off.at.p.x")), None);
-    }
-
-    #[test]
-    fn a_malformed_metric_path_is_rejected_up_front() {
-        for bad in ["gap", "stuff.gap", "run.elementCount", "nodes.n_fit", "outputs."] {
-            assert!(parse_metric(bad).is_err(), "{bad} 应当被拒");
-        }
-    }
-
-    #[test]
-    fn available_paths_lists_every_scalar_on_the_graph() {
-        let ev = events();
-        let out = named();
-        let paths = available_paths(&RunView { events: &ev, outputs: Some(&out) });
-        for want in [
-            "run.durationMs",
-            "nodes.n_fit.durationMs",
-            "nodes.n_fit.elementCount",
-            "nodes.n_fit.byteSize",
-            "nodes.n_fit.line.elementCount",
-            "nodes.n_fit.line.hasSegment",
-            "nodes.n_fit.quality.rmsResidualMm",
-            "nodes.n_fit.quality.inlierCount",
-            "nodes.n_off.dx",
-            "nodes.n_off.dx.value",
-            "outputs.gap",
-            "outputs.gap.ok",
-            "outputs.bundle.point_counts.left",
-            "outputs.bundle.point_counts.right",
-        ] {
-            assert!(paths.iter().any(|p| p == want), "少了 {want}: {paths:?}");
-        }
-        assert!(!paths.iter().any(|p| p == "outputs.cloud"));
-        assert!(!paths.iter().any(|p| p.contains(".data.")));
-    }
-
-    #[test]
-    fn the_old_sweep_metric_spelling_translates_into_a_path() {
-        assert_eq!(
-            parse_metric("v:cloud.elementCount").unwrap().kind,
-            MetricKind::NodePort {
-                node: "v".to_string(),
-                port: "cloud".to_string(),
-                rest: vec!["elementCount".to_string()],
-            }
-        );
-        assert_eq!(
-            parse_metric("v:cloud.durationMs").unwrap().kind,
-            MetricKind::NodeDuration("v".to_string())
-        );
-        assert_eq!(
-            parse_metric("v:cloud.byteSize").unwrap().kind,
-            MetricKind::NodeStat("v".to_string(), "byteSize".to_string())
-        );
-        assert!(parse_metric("v:cloud.nope").is_err());
-        assert_eq!(parse_metric("v:cloud.elementCount").unwrap().raw, "v:cloud.elementCount");
-    }
-
-    #[test]
-    fn samples_reject_scene_and_carry_tags() {
-        let text = concat!(
-            r#"{"id":"f1","set":{"n.path":"a.pcd"},"tags":{"half":"a"}}"#,
-            "\n",
-            r#"{"id":"f2","set":{"n.path":"b.pcd"}}"#,
-            "\n"
-        );
-        let s = parse_samples(text, "t.jsonl").unwrap();
-        assert_eq!(s.len(), 2);
-        assert_eq!(s[0].id, "f1");
-        assert_eq!(s[0].set, vec![("n.path".to_string(), json!("a.pcd"))]);
-        assert_eq!(s[0].tags.get("half").map(String::as_str), Some("a"));
-        assert!(s[1].tags.is_empty());
-
-        let e = parse_samples(concat!(r#"{"id":"f1","scene":"s1"}"#, "\n"), "t.jsonl").unwrap_err();
-        assert!(e.contains("scene"), "{e}");
-        assert!(parse_samples(concat!(r#"{"set":{}}"#, "\n"), "t.jsonl").is_err());
-        assert!(parse_samples(concat!(r#"{"id":"f","set":{"nodot":1}}"#, "\n"), "t.jsonl").is_err());
-    }
-
-    #[test]
-    fn glob_turns_matching_files_into_samples() {
-        let dir = std::env::temp_dir().join("lyflow-eval-glob");
-        let _ = std::fs::remove_dir_all(&dir);
-        for frame in ["f1", "f2"] {
-            let sub = dir.join(frame).join("p4");
-            std::fs::create_dir_all(&sub).unwrap();
-            std::fs::write(sub.join(format!("{frame}_master.pcd")), "x").unwrap();
-            std::fs::write(sub.join(format!("{frame}_slave.pcd")), "x").unwrap();
-        }
-        let root = dir.to_string_lossy().replace('\\', "/");
-        let files = glob_files(&format!("{root}/*/p4/*master.pcd")).unwrap();
-        assert_eq!(files.len(), 2, "{files:?}");
-        let samples = samples_from_files(&files, "n_load.primaryFile");
-        assert_eq!(samples[0].id, "f1_master");
-        assert_eq!(samples[1].id, "f2_master");
-        assert_eq!(samples[0].set.len(), 1);
-        assert_eq!(samples[0].set[0].0, "n_load.primaryFile");
-        assert!(samples[0].set[0].1.as_str().unwrap().ends_with("f1/p4/f1_master.pcd"));
-
-        assert!(glob_files(&format!("{root}/*/p4/*.tif")).is_err());
-        assert!(wildcard_match("*master*.pcd", "f1_master_0.pcd"));
-        assert!(!wildcard_match("*master*.pcd", "f1_slave_0.pcd"));
-        assert!(wildcard_match("a?c", "abc"));
-        // 文件名那份刻意不敏感：采集端写过 Master 也写过 master
-        assert!(wildcard_match("*Master*.pcd", "f1_master_0.pcd"));
-    }
-
-    /// 两份通配是两件事（m6-plan §10 第 6 条）：文件名不敏感、节点 id 敏感。
-    #[test]
-    fn node_id_globs_are_case_sensitive_but_file_globs_are_not() {
-        assert!(wildcard_match_cs("n_fb_*", "n_fb_line"));
-        assert!(!wildcard_match_cs("N_FB_*", "n_fb_line"));
-        assert!(!wildcard_match_cs("n_fb_*", "N_FB_LINE"));
-        assert!(wildcard_match_cs("b_*", "b_alt"));
-        assert!(!wildcard_match_cs("B_*", "b_alt"));
-        // 同一对输入在文件名那份上是匹配的 —— 差别只在这一条规则上
-        assert!(wildcard_match("N_FB_*", "n_fb_line"));
-    }
-
-    #[test]
-    fn glob_gives_colliding_stems_distinct_ids() {
-        let dir = std::env::temp_dir().join("lyflow-eval-glob-dup");
-        let _ = std::fs::remove_dir_all(&dir);
-        for frame in ["f1", "f2"] {
-            let sub = dir.join(frame);
-            std::fs::create_dir_all(&sub).unwrap();
-            std::fs::write(sub.join("scan.pcd"), "x").unwrap();
-        }
-        let root = dir.to_string_lossy().replace('\\', "/");
-        let files = glob_files(&format!("{root}/*/scan.pcd")).unwrap();
-        let samples = samples_from_files(&files, "n.path");
-        assert_eq!(samples[0].id, "f1/scan");
-        assert_eq!(samples[1].id, "f2/scan");
-    }
-
-    fn row(sample: usize, value: Option<f64>, status: &str, errors: &[&str]) -> Row {
-        Row {
-            param_set: 0,
-            sample,
-            status: status.to_string(),
-            metrics: vec![value],
-            errors: errors.iter().map(|s| (*s).to_string()).collect(),
-            duration_ms: 1.0,
-            skipped: Vec::new(),
-            summary: None,
-        }
-    }
-
-    fn sample(id: &str, tags: &[(&str, &str)]) -> Sample {
-        Sample {
-            id: id.to_string(),
-            set: Vec::new(),
-            tags: tags
-                .iter()
-                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
-                .collect(),
-        }
-    }
-
-    #[test]
-    fn holdout_and_group_statistics_are_the_hand_computed_numbers() {
-        let samples: Vec<Sample> = vec![
-            sample("s1", &[("half", "a")]),
-            sample("s2", &[("half", "a")]),
-            sample("s3", &[("half", "a")]),
-            sample("s4", &[("half", "a")]),
-            sample("s5", &[("half", "a")]),
-            sample("s6", &[("half", "b")]),
-            sample("s7", &[("half", "b")]),
-        ];
-        let rows = vec![
-            row(0, Some(2.0), "ok", &[]),
-            row(1, Some(4.0), "ok", &[]),
-            row(2, Some(4.0), "ok", &[]),
-            row(3, Some(4.0), "ok", &[]),
-            row(4, Some(5.0), "ok", &[]),
-            row(5, Some(7.0), "ok", &[]),
-            row(6, None, "failed", &["io"]),
-        ];
-        let grouping = Grouping {
-            holdout: Some(("half".to_string(), "b".to_string())),
-            group_by: None,
-        };
-        let g = summarize(&samples, &grouping, 0, &rows);
-        let train = &g["train"];
-        assert_eq!((train.n, train.ok), (5, 5));
-        assert_eq!(train.mean(), Some(3.8));
-        assert!((train.std().unwrap() - 1.2f64.sqrt()).abs() < 1e-12, "{:?}", train.std());
-        assert_eq!(train.min(), Some(2.0));
-        assert_eq!(train.max(), Some(5.0));
-        assert_eq!(train.to_json()["p2p"], json!(3.0));
-        assert!(train.fail_codes.is_empty());
-
-        let hold = &g["holdout"];
-        assert_eq!((hold.n, hold.ok), (2, 1));
-        assert_eq!(hold.mean(), Some(7.0));
-        assert_eq!(hold.std(), None);
-        assert_eq!(hold.fail_codes.get("io"), Some(&1));
-
-        let both = Grouping {
-            holdout: Some(("half".to_string(), "b".to_string())),
-            group_by: Some("half".to_string()),
-        };
-        let g2 = summarize(&samples, &both, 0, &rows);
-        assert_eq!(g2["train/a"].n, 5);
-        assert_eq!(g2["holdout/b"].n, 2);
-
-        let plain = Grouping { holdout: None, group_by: None };
-        assert_eq!(summarize(&samples, &plain, 0, &rows)["all"].n, 7);
-    }
-
-    #[test]
-    fn a_missing_metric_on_a_successful_run_counts_as_a_failure() {
-        let samples = vec![sample("s1", &[]), sample("s2", &[])];
-        let rows = vec![row(0, Some(1.0), "ok", &[]), row(1, None, "ok", &[])];
-        let grouping = Grouping { holdout: None, group_by: None };
-        let g = summarize(&samples, &grouping, 0, &rows);
-        assert_eq!((g["all"].n, g["all"].ok), (2, 1));
-        assert_eq!(g["all"].fail_codes.get("metric_missing"), Some(&1));
-    }
-
-    #[test]
-    fn explicit_param_sets_and_axes_multiply() {
-        let explicit = parse_param_file(r#"[{"a.x": 1}, {"a.x": 2}]"#, "p.json").unwrap();
-        assert_eq!(explicit.len(), 2);
-        let axis = |v: f64| ParamSet {
-            display: [("b.y".to_string(), json!(v))].into_iter().collect(),
-            writes: vec![("b".to_string(), "y".to_string(), json!(v))],
-            graph: Vec::new(),
-        };
-        let merged = combine_param_sets(explicit, vec![axis(10.0), axis(20.0)]);
-        assert_eq!(merged.len(), 4);
-        assert_eq!(merged[0].display["a.x"], json!(1));
-        assert_eq!(merged[0].display["b.y"], json!(10.0));
-        assert_eq!(merged[3].display["a.x"], json!(2));
-        assert_eq!(merged[3].display["b.y"], json!(20.0));
-        assert_eq!(merged[3].writes.len(), 2);
-        assert_eq!(combine_param_sets(Vec::new(), Vec::new()).len(), 1);
-    }
-
-    #[test]
-    fn holdout_needs_a_key_value_pair() {
-        assert_eq!(parse_holdout("half=b").unwrap(), ("half".to_string(), "b".to_string()));
-        assert!(parse_holdout("half").is_err());
-        assert!(parse_holdout("=b").is_err());
-    }
-
-    struct TempTree(PathBuf);
-
-    impl Drop for TempTree {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-
-    fn tree(tag: &str, frames: &[(&str, &[&str])], subdir: Option<&str>) -> TempTree {
-        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let root =
-            std::env::temp_dir().join(format!("lyflow-eval-{tag}-{}-{n}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        for (frame, files) in frames {
-            let dir = match subdir {
-                Some(sub) => root.join(frame).join(sub),
-                None => root.join(frame),
-            };
-            std::fs::create_dir_all(&dir).expect("建目录");
-            for f in *files {
-                std::fs::write(dir.join(f), b"").expect("建文件");
-            }
-        }
-        TempTree(root)
-    }
-
-    fn pair_spec(root: &Path, subdir: Option<&str>, split: Option<&str>, sort: SortBy) -> DirSpec {
-        DirSpec {
-            root: root.to_path_buf(),
-            subdir: subdir.map(str::to_string),
-            binds: vec![
-                "n_load.primaryFile".to_string(),
-                "n_load.secondaryFile".to_string(),
-            ],
-            patterns: vec!["*Master*.pcd".to_string(), "*Slave*.pcd".to_string()],
-            sort_by: sort,
-            split_half: split.map(str::to_string),
-        }
-    }
-
-    const MASTER: &str = "LaserProfile_L0_Master_4_x_0.pcd";
-    const SLAVE: &str = "LaserProfile_R1_Slave_4_x_0.pcd";
-
-    #[test]
-    fn a_samples_dir_pairs_two_globs_per_frame() {
-        let files: &[&str] = &[MASTER, SLAVE, "notes.txt"];
-        let t = tree(
-            "pair",
-            &[
-                ("vin_15-09-2026-08-00-00", files),
-                ("vin_15-09-2026-08-01-00", files),
-                ("vin_14-09-2026-03-44-38", files),
-            ],
-            Some("4"),
-        );
-        let (samples, note) =
-            samples_from_dir(&pair_spec(&t.0, Some("4"), None, SortBy::Name)).expect("配对");
-        assert!(note.is_none());
-        assert_eq!(samples.len(), 3);
-        assert_eq!(samples[0].id, "vin_14-09-2026-03-44-38");
-        assert_eq!(samples[2].id, "vin_15-09-2026-08-01-00");
-        assert_eq!(samples[0].set.len(), 2);
-        assert_eq!(samples[0].set[0].0, "n_load.primaryFile");
-        assert!(samples[0]
-            .set[0]
-            .1
-            .as_str()
-            .unwrap()
-            .ends_with(&format!("vin_14-09-2026-03-44-38/4/{MASTER}")));
-        assert_eq!(samples[0].set[1].0, "n_load.secondaryFile");
-        assert!(samples[0].set[1].1.as_str().unwrap().ends_with(SLAVE));
-        assert!(samples[0].tags.is_empty());
-    }
-
-    #[test]
-    fn the_timestamp_in_the_dir_name_beats_lexicographic_order() {
-        assert_eq!(
-            parse_dir_timestamp("12345678998765432_14-09-2026-03-44-38"),
-            Some([2026, 9, 14, 3, 44, 38])
-        );
-        assert_eq!(parse_dir_timestamp("frame-001"), None);
-        assert_eq!(parse_dir_timestamp("1-09-2026-03-44-38"), None);
-
-        let files: &[&str] = &[MASTER, SLAVE];
-        let t = tree(
-            "order",
-            &[
-                ("a_09-10-2026-08-00-00", files),
-                ("b_10-09-2026-08-00-00", files),
-            ],
-            None,
-        );
-        let (by_time, note) =
-            samples_from_dir(&pair_spec(&t.0, None, None, SortBy::Name)).expect("配对");
-        assert!(note.is_none());
-        assert_eq!(by_time[0].id, "b_10-09-2026-08-00-00");
-        assert_eq!(by_time[1].id, "a_09-10-2026-08-00-00");
-    }
-
-    #[test]
-    fn an_unparsable_dir_name_falls_back_to_lexicographic_and_says_so() {
-        let files: &[&str] = &[MASTER, SLAVE];
-        let t = tree("fallback", &[("frame-002", files), ("frame-001", files)], None);
-        let (samples, note) =
-            samples_from_dir(&pair_spec(&t.0, None, None, SortBy::Name)).expect("配对");
-        assert_eq!(samples[0].id, "frame-001");
-        assert_eq!(samples[1].id, "frame-002");
-        let note = note.expect("要在 stderr 说一句");
-        assert!(note.contains("dd-MM-yyyy-HH-mm-ss"), "{note}");
-    }
-
-    #[test]
-    fn split_half_tags_the_front_half_a_and_gives_it_the_odd_one() {
-        let files: &[&str] = &[MASTER, SLAVE];
-        let frames: Vec<String> = (0..5).map(|i| format!("f_15-09-2026-08-0{i}-00")).collect();
-        let spec: Vec<(&str, &[&str])> = frames.iter().map(|f| (f.as_str(), files)).collect();
-        let t = tree("half", &spec, None);
-        let (samples, _) =
-            samples_from_dir(&pair_spec(&t.0, None, Some("half"), SortBy::Name)).expect("配对");
-        let tags: Vec<&str> = samples
-            .iter()
-            .map(|s| s.tags.get("half").map(String::as_str).unwrap_or(""))
-            .collect();
-        assert_eq!(tags, vec!["a", "a", "a", "b", "b"]);
-    }
-
-    #[test]
-    fn zero_or_two_matches_name_the_frame_and_fail() {
-        let t = tree("zero", &[("f_15-09-2026-08-00-00", &[SLAVE])], None);
-        let e = samples_from_dir(&pair_spec(&t.0, None, None, SortBy::Name)).unwrap_err();
-        assert!(e.contains("f_15-09-2026-08-00-00"), "{e}");
-        assert!(e.contains("*Master*.pcd"), "{e}");
-
-        let t2 = tree(
-            "two",
-            &[(
-                "f_15-09-2026-08-00-00",
-                &["a_Master_1.pcd", "b_Master_2.pcd", SLAVE],
-            )],
-            None,
-        );
-        let e2 = samples_from_dir(&pair_spec(&t2.0, None, None, SortBy::Name)).unwrap_err();
-        assert!(e2.contains("f_15-09-2026-08-00-00"), "{e2}");
-        assert!(e2.contains("a_Master_1.pcd"), "{e2}");
-        assert!(e2.contains("b_Master_2.pcd"), "{e2}");
-    }
-
-    #[test]
-    fn a_single_bind_binds_one_glob_per_frame() {
-        let t = tree(
-            "single",
-            &[
-                ("f_15-09-2026-08-00-00", &[MASTER]),
-                ("f_15-09-2026-08-01-00", &[MASTER]),
-            ],
-            None,
-        );
-        let spec = DirSpec {
-            root: t.0.clone(),
-            subdir: None,
-            binds: vec!["r.path".to_string()],
-            patterns: vec!["*.pcd".to_string()],
-            sort_by: SortBy::Name,
-            split_half: None,
-        };
-        let (samples, _) = samples_from_dir(&spec).expect("配对");
-        assert_eq!(samples.len(), 2);
-        assert_eq!(samples[0].set.len(), 1);
-        assert_eq!(samples[0].set[0].0, "r.path");
-    }
-
-    #[test]
-    fn the_generated_sample_set_round_trips_through_jsonl() {
-        let files: &[&str] = &[MASTER, SLAVE];
-        let t = tree(
-            "jsonl",
-            &[
-                ("f_15-09-2026-08-00-00", files),
-                ("f_15-09-2026-08-01-00", files),
-            ],
-            None,
-        );
-        let (samples, _) =
-            samples_from_dir(&pair_spec(&t.0, None, Some("half"), SortBy::Name)).expect("配对");
-        let text = samples_jsonl(&samples);
-        let back = parse_samples(&text, "<mem>").expect("回读");
-        assert_eq!(back.len(), 2);
-        assert_eq!(back[0].id, samples[0].id);
-        assert_eq!(back[0].set, samples[0].set);
-        assert_eq!(back[0].tags.get("half").map(String::as_str), Some("a"));
-        assert_eq!(back[1].tags.get("half").map(String::as_str), Some("b"));
-    }
-}
+mod tests;

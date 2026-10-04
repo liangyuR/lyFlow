@@ -855,7 +855,7 @@ double GapDetection::detectFlush(const PointCloud &flush_base_cloud,
         CHECK_(gap_std::lineFit2D(line_cloud, &line, &second_line_indices, line_fit_distance / 3),
                side_name + " flush line fit failed at second time")
         int j = 0;
-        for (auto i : second_line_indices) line_indices[j++] = line_indices[i];
+        for (auto idx : second_line_indices) line_indices[j++] = line_indices[idx];
         line_indices.resize(second_line_indices.size());
       }
       recordLineQuality("flush_" + side, cloud, line, line_indices);
@@ -1006,7 +1006,7 @@ double GapDetection::detectGap(const PointCloud &gap_left_cloud,
         CHECK_(gap_std::lineFit2D(line_cloud, &line, &second_line_indices, line_fit_distance / 3),
                side_name + " gap line fit failed at second time")
         int j = 0;
-        for (auto i : second_line_indices) line_indices[j++] = line_indices[i];
+        for (auto idx : second_line_indices) line_indices[j++] = line_indices[idx];
         line_indices.resize(second_line_indices.size());
       }
       recordLineQuality("gap_" + side, cloud, line, line_indices);

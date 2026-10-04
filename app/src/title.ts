@@ -4,7 +4,8 @@
 import { recipesDirty, useGraphStore, useRecipeStore } from "@lyflow/editor";
 
 function baseName(path: string): string {
-  const parts = path.split(/[\/]/);
+  // 两种斜杠都认：Windows 对话框给的是反斜杠。以前写成 [\/]（只认 /），标题上显示的是整条路径
+  const parts = path.split(/[\\/]/);
   return parts[parts.length - 1] ?? path;
 }
 

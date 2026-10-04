@@ -76,6 +76,22 @@ export function layoutGraph(doc: GraphDoc, options: LayoutOptions = {}): LayoutM
   return moves;
 }
 
+/** 打开时的那次布局：一个坐标都没有的整张排；有的有、有的没有（脚本往排好的图里加了节点）只排没坐标的那几个，
+ *  放在已摆好的右边 —— 永远不动用户摆好的位置。 */
+export function initialLayout(doc: GraphDoc): LayoutMove[] {
+  const missing = doc.nodes.filter((n) => n.ui?.position == null);
+  if (missing.length === 0) return [];
+  const placed = doc.nodes.filter((n) => n.ui?.position != null);
+  if (placed.length === 0) return layoutGraph(doc);
+  return layoutGraph(doc, {
+    only: new Set(missing.map((n) => n.id)),
+    origin: {
+      x: Math.max(...placed.map((n) => n.ui!.position!.x)) + 300,
+      y: Math.min(...placed.map((n) => n.ui!.position!.y)),
+    },
+  });
+}
+
 /** 文档里有没有节点缺坐标。脚本生成的图必须能打开（docs/graph-doc.md 的承诺）。 */
 export function needsInitialLayout(doc: GraphDoc): boolean {
   return doc.nodes.length > 0 && doc.nodes.some((n) => n.ui?.position == null);

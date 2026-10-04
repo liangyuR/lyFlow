@@ -2,10 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import type { ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 import { evalArgv, listMetricsArgv, paramsArgv, patchArgv, perturbArgv, recipesArgv } from "./argv.js";
-import { DEFAULT_CLI_TIMEOUT_MS, runCli, stderrTail } from "./cli.js";
+import { DEFAULT_CLI_TIMEOUT_MS, runCli, stderrTail, type JsonLine } from "./cli.js";
 import { decodeCloud, decodeIndices, decodeTensor, summarizeCloud } from "./cloud.js";
 import { encodePng, fetchImage, levelToFit, toPicture } from "./image.js";
 import type { Config } from "./config.js";
@@ -195,6 +197,28 @@ function workRun(config: Config, prefix: string): string {
   return dir;
 }
 
+type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
+
+/** eval / perturb 的进度通知：客户端带了 progressToken 才发，CLI 每交出一行（kind = rowKind）发一条。
+ *  总数 CLI 事先不说（参数组 × 样本要跑起来才知道），所以只报第几行。发不出去不影响这次调用。 */
+function rowProgress(extra: ToolExtra, rowKind: string): ((line: JsonLine) => void) | undefined {
+  const token = extra._meta?.progressToken;
+  if (token === undefined) return undefined;
+  let rows = 0;
+  return (line) => {
+    if (line.value["kind"] !== rowKind) return;
+    rows += 1;
+    const sample = String(line.value["sample"] ?? "-");
+    const status = String(line.value["status"] ?? "");
+    extra
+      .sendNotification({
+        method: "notifications/progress",
+        params: { progressToken: token, progress: rows, message: `第 ${rows} 行：${sample} ${status}` },
+      })
+      .catch(() => {});
+  };
+}
+
 export function registerTools(server: McpServer, config: Config, http: LyFlowHttp): void {
   server.registerTool(
     "list_operators",
@@ -352,7 +376,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         timeoutMs: z.number().int().positive().optional().describe(`等 run_finished 的上限，默认 ${DEFAULT_RUN_TIMEOUT_MS}`),
       },
     },
-    async (args) => {
+    async (args, extra) => {
       let graph;
       try {
         graph = resolveGraph(args);
@@ -389,6 +413,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
             ...(recipe?.params ? { params: recipe.params } : {}),
           },
           args.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
+          extra.signal,
         );
         const events = summarizeRun(result.events);
         const summary = coreSummary(result.events);
@@ -631,6 +656,12 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
             "配方文件路径，作用于所有样本；叠加顺序 基础 → 配方 → params 里的参数组 → param。失配 ①–③ 时退出码 4",
           ),
         noCache: z.boolean().optional(),
+        jobs: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe("同时跑几次（CLI --jobs，默认 1）。行的顺序与内容不变，只是更快；内存大约是 jobs 倍"),
         summary: z
           .boolean()
           .optional()
@@ -640,7 +671,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           ),
       },
     },
-    async (args) => {
+    async (args, extra) => {
       if (!config.cli) return bad(CLI_MISSING);
       let dir: string;
       let argv: string[];
@@ -656,7 +687,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         return failed(e);
       }
 
-      const result = await runCli(config, argv);
+      const result = await runCli(config, argv, { signal: extra.signal, onLine: rowProgress(extra, "eval_row") });
       const rowsPath = path.join(dir, "rows.jsonl");
       const rows = result.lines.filter((l) => l.value["kind"] === "eval_row");
       writeLines(rowsPath, rows);
@@ -685,6 +716,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
       return ok({
         exitCode: result.code,
         timedOut: result.timedOut,
+        ...(result.cancelled ? { cancelled: true } : {}),
         argv,
         compact,
         summaries: compact ? compactSummaries(raw) : raw,
@@ -729,9 +761,15 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         baseDir: z.string().optional(),
         set: z.array(z.string()).optional(),
         noCache: z.boolean().optional(),
+        jobs: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe("同时跑几次（CLI --jobs，默认 1）。行的顺序与内容不变，只是更快；内存大约是 jobs 倍"),
       },
     },
-    async (args) => {
+    async (args, extra) => {
       if (!config.cli) return bad(CLI_MISSING);
       let dir: string;
       let argv: string[];
@@ -742,7 +780,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         return failed(e);
       }
 
-      const result = await runCli(config, argv);
+      const result = await runCli(config, argv, { signal: extra.signal, onLine: rowProgress(extra, "perturb_row") });
       const rowsPath = path.join(dir, "rows.jsonl");
       writeLines(rowsPath, result.lines);
 
@@ -758,6 +796,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
       return ok({
         exitCode: result.code,
         timedOut: result.timedOut,
+        ...(result.cancelled ? { cancelled: true } : {}),
         argv,
         summaries,
         sampleCount: samples.length,

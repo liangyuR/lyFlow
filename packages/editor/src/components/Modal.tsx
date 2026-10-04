@@ -3,12 +3,13 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { settleModal, useModalStore } from "../lib/modal";
+import { registerModalHost, settleModal, useModalStore } from "../lib/modal";
 
 import "../styles.recipe.css";
 
 export function Modal() {
   const current = useModalStore((s) => s.current);
+  useEffect(() => registerModalHost(), []);
   if (!current) return null;
   return (
     <div className="lf-modal__backdrop" data-testid="modal-backdrop" onPointerDown={(e) => e.stopPropagation()}>

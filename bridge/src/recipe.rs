@@ -735,7 +735,8 @@ fn curve_problem(value: &Value, min: Option<f64>, max: Option<f64>) -> Option<St
         if !(0.0..=1.0).contains(&x) {
             return Some(format!("{at}的 x 必须在 [0, 1] 内，实际是 {}", js_number(x)));
         }
-        if i > 0 && !(x > prev) {
+        // x 上一行已经夹在 [0, 1] 里（不会是 NaN），所以「不大于前一个」就是 <=
+        if i > 0 && x <= prev {
             return Some(format!("{at}的 x 必须大于前一个点（{}）", js_number(prev)));
         }
         if let Some(lo) = min {

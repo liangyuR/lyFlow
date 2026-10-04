@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
 import { findBaseCloud, firstCloudPort, type BaseCloud } from "../../lib/basecloud";
 import { cacheKey, cloudCache, dropOtherRuns, fetchCloud, putCache } from "../../lib/cloudCache";
 import {
+  applyViewPreset,
   boundsAttr,
   buildPoints,
   createScene,
@@ -11,13 +12,17 @@ import {
   fitToBounds,
   overlayBoundsOf,
   paintPoints,
+  restoreCameraView,
+  saveCameraView,
   setPoints,
   unionBounds,
   type CameraMode,
+  type CameraView,
   type Scene,
   type ShadingMode,
 } from "../../lib/cloudScene";
 import type { RampName } from "../../lib/ramps";
+import { clampPointSize, POINT_SIZE_MAX, POINT_SIZE_MIN } from "../../lib/viewPrefs";
 import { disposeOverlay, extentOf, shapesOf } from "../../lib/shapes2d";
 import { registerPeekCanvas } from "../../lib/peekCanvas";
 import { augmentOperators, levelOf, resolveOutput } from "../../lib/subgraph";
@@ -26,12 +31,14 @@ import { useManifestStore } from "../../store/manifest";
 import { PEEK_FROZEN, usePeekStore } from "../../store/peek";
 import { transport } from "../../transport";
 import { decodeCloud, type CloudPayload } from "../../types/execution";
+import { useFocusOnDoubleClick } from "../../hooks/useFocusOnDoubleClick";
 import { measureAttrs, useMeasure } from "../../hooks/useMeasure";
 import { MeasureReadout } from "../MeasureReadout";
+import { ViewPresetButtons, useViewPresetEvents } from "../ViewPresetButtons";
+import { gridSpec, sameFrame, type ViewPreset } from "../../lib/viewFit";
 import type { PeekViewProps } from "./types";
 
 const MAX_POINTS_CHOICES = [100_000, 200_000, 500_000, 2_000_000];
-const POINT_SIZE = 1.6;
 const FROZEN = PEEK_FROZEN;
 
 interface Display {
@@ -46,9 +53,17 @@ interface CloudTarget {
   base: BaseCloud | null;
 }
 
+/** 每个窗口最后的视角与那时取景量的范围。运行期间窗里换成「正在计算…」会卸掉画布，算完回来接着用 ——
+ *  不然每次重跑都被拉回全貌。窗口关掉之后下次存的时候清掉。 */
+const keptViews = new Map<string, { bounds: Float32Array; view: CameraView }>();
+
 export function CloudView({ win, src }: PeekViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const peekRoot = useRef<HTMLDivElement>(null);
+  const [gridText, setGridText] = useState<string | null>(null);
   const sceneRef = useRef<Scene | null>(null);
+  /** 上次取景量的范围（下面取景的 effect 用）。 */
+  const fitted = useRef<Float32Array | null>(null);
 
   const [display, setDisplay] = useState<Display>({
     runId: null,
@@ -74,7 +89,8 @@ export function CloudView({ win, src }: PeekViewProps) {
   const fromNode = win.from.node;
   const lockedRun = win.locked?.runId ?? null;
   const runId = lockedRun ?? src.runId;
-  const { maxPoints, shading, ramp } = win.opts;
+  const { maxPoints, shading, ramp, pointSize } = win.opts;
+  const pointSizeRef = useRef(pointSize);
   const cameraMode: CameraMode = win.view === "cloud2d" ? "2d" : "3d";
 
   // 自己有云就画自己的；没有就先看本节点还有没有别的点云口，再沿输入边往上游借最近的一片，
@@ -123,13 +139,17 @@ export function CloudView({ win, src }: PeekViewProps) {
     if (!host) return;
     const scene = createScene(host);
     sceneRef.current = scene;
+    fitted.current = null;
     setSceneHost(scene);
     return () => {
+      const open = new Set(usePeekStore.getState().windows.map((w) => w.id));
+      for (const id of keptViews.keys()) if (!open.has(id)) keptViews.delete(id);
+      if (fitted.current && open.has(win.id)) keptViews.set(win.id, { bounds: fitted.current, view: saveCameraView(scene) });
       scene.dispose();
       sceneRef.current = null;
       setSceneHost(null);
     };
-  }, []);
+  }, [win.id]);
 
   useEffect(
     () =>
@@ -202,8 +222,31 @@ export function CloudView({ win, src }: PeekViewProps) {
     const scene = sceneRef.current;
     if (!scene) return;
 
-    setPoints(scene, 0, buildPoints(cloud, POINT_SIZE));
+    setPoints(scene, 0, buildPoints(cloud, pointSizeRef.current));
   }, [cloud]);
+
+  // 点大小只改材质，不进上面那个几何 effect（拖一下就重建几何太亏）
+  useEffect(() => {
+    pointSizeRef.current = pointSize;
+    const points = sceneRef.current?.points[0];
+    if (points) (points.material as THREE.PointsMaterial).size = pointSize;
+  }, [pointSize]);
+
+  // 验收脚本读相机：拖过视角之后 ⤢ 能不能回到全貌
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const host = hostRef.current;
+    if (!scene || !host) return;
+    const write = () => {
+      const c = scene.active().position;
+      const text = [c.x, c.y, c.z].map((v) => Number(v.toFixed(3))).join(",");
+      if (host.dataset.cameraPos !== text) host.dataset.cameraPos = text;
+    };
+    scene.frameListeners.add(write);
+    return () => {
+      scene.frameListeners.delete(write);
+    };
+  }, []);
 
   // 换着色模式/色带只重写 color 属性，positions 和 boundingSphere 原样留着。
   useEffect(() => {
@@ -240,15 +283,33 @@ export function CloudView({ win, src }: PeekViewProps) {
     for (const line of shapesOf(shapeStat, color, span)) scene.overlay.add(line);
   }, [shapeStat, cloud, typesByName]);
 
-  // 换了云或换了几何就自动取景一次；同一份内容里调参数不该把视角拉回去。
+  // 换了云或换了几何时看一眼要不要取景：还在同一个坐标系里（sameFrame，与主预览同一条）就不动相机 ——
+  // 调参数重跑之后，在窗口里转好的视角、双击设好的转心都留着（运行期间画布卸掉过的，放回卸掉前的视角）。
+  // 以前每次重跑都拉回斜 45° 的全貌。第一片云、换到差得远的一片时照旧取景。
   // 必须排在上面那个 effect 之后：取景要量的是它刚建好的那一组线。
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
     setOverlayBounds(overlayBoundsOf(scene.overlay));
     const bounds = unionBounds(cloud, scene.overlay);
-    if (bounds) fitToBounds(scene, bounds);
-  }, [cloud, shapeStat]);
+    if (!bounds) {
+      setGridText(null);
+      return;
+    }
+    const kept = fitted.current ? null : keptViews.get(win.id);
+    if (kept && sameFrame(kept.bounds, bounds)) {
+      restoreCameraView(scene, kept.view);
+      fitted.current = kept.bounds;
+    }
+    if (fitted.current && sameFrame(fitted.current, bounds)) {
+      // 不重新取景：网格跟到这片云下面，格子能不换档就不换
+      scene.setGrid(gridSpec(bounds, scene.grid?.cell ?? null));
+    } else {
+      fitToBounds(scene, bounds);
+      fitted.current = bounds;
+    }
+    setGridText(scene.grid?.text ?? null);
+  }, [cloud, shapeStat, win.id]);
 
   useEffect(() => {
     sceneRef.current?.setMode(cameraMode);
@@ -262,9 +323,27 @@ export function CloudView({ win, src }: PeekViewProps) {
     [cloud, null],
     `${win.id}|${target.resolved?.nodeId ?? ""}|${target.resolved?.port ?? ""}`,
   );
+  // 双击一个点：转心挪到它上面（测量时不接）
+  useFocusOnDoubleClick(sceneHost, [cloud, null], measureOn);
 
   const setOpts = usePeekStore((s) => s.setOpts);
   const empty = !cloud && !shapeStat;
+  const pickPreset = useCallback((view: ViewPreset) => {
+    const scene = sceneRef.current;
+    return scene ? applyViewPreset(scene, view) : false;
+  }, []);
+  useViewPresetEvents(peekRoot, pickPreset);
+  const resize = (factor: number) =>
+    setOpts(win.id, { pointSize: clampPointSize(Math.round(pointSize * factor * 10) / 10) });
+  // 转过视角后回到全貌（与主预览的 ⤢ 同一个：底图云 + 叠画几何）
+  const fit = () => {
+    const scene = sceneRef.current;
+    const bounds = scene ? unionBounds(cloud, scene.overlay) : null;
+    if (scene && bounds) {
+      fitToBounds(scene, bounds);
+      setGridText(scene.grid?.text ?? null);
+    }
+  };
   const status = loading ? "正在取点云…" : display.status;
   const pointChoices = MAX_POINTS_CHOICES.includes(maxPoints)
     ? MAX_POINTS_CHOICES
@@ -272,10 +351,13 @@ export function CloudView({ win, src }: PeekViewProps) {
 
   return (
     <div
+      ref={peekRoot}
       className="peek-cloud"
+      data-view-presets={cameraMode === "3d" ? "1" : undefined}
       data-testid="peek-cloud"
       data-camera={cameraMode}
       data-shading={effectiveShading}
+      data-point-size={pointSize}
       data-run={display.runId ?? ""}
       data-base={display.base?.localId ?? ""}
       data-cloud-bounds={boundsAttr(cloud && cloud.pointCount > 0 ? cloud.bounds : null)}
@@ -296,6 +378,11 @@ export function CloudView({ win, src }: PeekViewProps) {
         {cloud && (
           <span className="peek-cloud__count" title="显示点数 / 总点数">
             {cloud.pointCount.toLocaleString()} / {cloud.totalPoints.toLocaleString()}
+          </span>
+        )}
+        {gridText && (
+          <span className="peek-cloud__count" data-testid="peek-grid" title="网格一格多大">
+            {gridText}
           </span>
         )}
         <span className="peek-cloud__spacer" />
@@ -346,6 +433,37 @@ export function CloudView({ win, src }: PeekViewProps) {
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          className="peek__btn"
+          data-testid="peek-point-smaller"
+          disabled={pointSize <= POINT_SIZE_MIN}
+          onClick={() => resize(1 / 1.25)}
+          title="点小一点"
+        >
+          −
+        </button>
+        <button
+          type="button"
+          className="peek__btn"
+          data-testid="peek-point-bigger"
+          disabled={pointSize >= POINT_SIZE_MAX}
+          onClick={() => resize(1.25)}
+          title="点大一点（降采样后只剩几千点时看得清）"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          className="peek__btn"
+          data-testid="peek-fit"
+          disabled={empty}
+          onClick={fit}
+          title="缩放到全部（底图云 + 叠画几何）"
+        >
+          ⤢
+        </button>
+        <ViewPresetButtons className="peek__btn" disabled={cameraMode !== "3d"} onPick={pickPreset} />
         <button
           type="button"
           className="peek__btn"

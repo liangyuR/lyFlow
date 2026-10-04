@@ -159,17 +159,17 @@ lyflow dump     graph.lyflow.json nodeId:port out.pcd [--format binary|ascii|bin
                                   # 图像输出写 out.lyim（LYIM 载荷原样落盘）
 lyflow sweep    graph.lyflow.json --param nodeId.param=start:end:steps [--param ...]
                                   --metric nodeId:port.elementCount|byteSize|durationMs
-                                  [--csv out.csv] [--base-dir d]
+                                  [--csv out.csv] [--base-dir d] [--jobs n]
 lyflow eval     graph.lyflow.json [<样本集>] [--params sets.json] [--param n.p=start:end:steps]...
                                   (--metric <值路径> [--metric ...] | --list-metrics)
                                   [--holdout tag=value] [--group-by tag] [--csv out.csv]
-                                  [--base-dir d] [--parallel n] [--no-cache]
+                                  [--base-dir d] [--parallel n] [--jobs n] [--no-cache]
                                   [--set ...] [--recipe ...] [--param name=<json>]... [--summary]
 lyflow perturb  graph.lyflow.json --after nodeId:port --region <选区 JSON>
                                   --axis x|y|z=start:end:steps [<样本集>]
                                   --metric <值路径> [--metric ...]
                                   [--expect slope] [--tolerance v] [--csv out.csv]
-                                  [--base-dir d] [--parallel n] [--no-cache] [--set ...]
+                                  [--base-dir d] [--parallel n] [--jobs n] [--no-cache] [--set ...]
 lyflow diff     a.lyflow.json b.lyflow.json [--json]
 lyflow recipes  graph.lyflow.json [--recipe r.lyflow-recipe.json]... [--json]
 lyflow patch    graph.lyflow.json [--remove-node id|glob]... [--add-node <json>]...
@@ -221,7 +221,7 @@ lyflow sweep demo.lyflow.json --param n_voxel.minPointsPerVoxel=1:5:5 \
 lyflow eval demo.lyflow.json --samples-dir kun10/sensor --sample-subdir 4 \
             --bind-pair n_load.primaryFile,n_load.secondaryFile \
             --pattern "*Master*.pcd,*Slave*.pcd" --split-half half \
-            --param n_fit.distThresh=0.2:0.8:4 --metric outputs.gap --holdout half=b
+            --param n_fit.distThresh=0.2:0.8:4 --metric outputs.gap --holdout half=b \n            --jobs 4   # 同时跑四次，行的顺序与内容不变；输出重定向到文件时终端上有一行进度
 
 # 合成位移：在源头之后插一个 edit.translate_region，看读数跟不跟得上
 lyflow perturb demo.lyflow.json --after n_frame_s:cloud \
@@ -300,6 +300,23 @@ M0–M7 已完成，之后的功能各有计划与验收文档，索引在 [road
   （[embedding.md](docs/embedding.md)）。
 - **第二个数据域 Image。** OpenCV 包 `std-image`；图像在连线查看器与主预览里可看、可拖像素框，
   MCP 能把中间结果当图片返回，深度图与点云互转（[image-plan.md](docs/image-plan.md)）。
+- **用着更顺手（2026-10-01）。** 编辑器：Ctrl+F 查找节点（连子图里面的，回车打开到那一层）、
+  F8 / Shift+F8 在出错的节点之间跳、子图内部出错直接定位到那个节点、多选同一种算子一起改参数、
+  右键「选中上游 / 下游」、加节点时最近用过的排在最前；抢占与重扫库目录不卡界面。
+  CLI：`eval / sweep / perturb --jobs` 同时跑几次、终端里有进度行与预计剩余时间、
+  失败的原因写在 stderr 上。MCP：调用被取消时后端那次运行跟着停、`eval` 逐行报进度。
+  算子：法线与两个离群点滤波分段并行、体素栅格换了查找表，线程预算按整个进程在算的节点数分。
+- **真鼠标、真按键磨过一遍（2026-10-02）。** 编辑器：框选修好；一个手势一条撤销（Delete 删框选、插 reroute、
+  拖线松手后加节点、拖到连线上插入、方向键挪节点、拖选区）；拖线松在节点身上就接到它唯一能接的端口；右键按在
+  节点上拖也平移；输入框里 Esc 撤回、打着字按 F5 / Ctrl+S 先提交、滚轮不改数字框、图名与标题敲完才记一条；
+  复制粘贴走系统剪贴板且不粘旧节点、不落到看不见的地方；右键菜单与下拉框 Esc / 点外面收起；预览里双击设转心、
+  2D 剖面左键平移；`?` 面板写着鼠标的用法；没存过盘的图也自动备份、关窗口前问一句，桌面壳挡掉 WebView2 的
+  刷新键（Ctrl+R 不再重载整个 app）与浏览器右键菜单。CLI：子命令 `--help`，dump / sweep / plan / import 说清楚
+  为什么没成。性能：ASCII PCD 读写快一个数量级（与 PCL 逐字节相同）、体素栅格按线程预算并行、读图与落盘缓存
+  命中 2–4×、大图上 hover 与全选拖动不再每帧重渲全部节点。
+  同一天后段：窗口窄了两侧面板让位（画布至少留 320）；框选之后选中的节点照样点得着，按着 Shift / Ctrl 框选是追加；
+  预览与检查器之间、底部抽屉的上沿能上下拖；提示按字数停留；右键菜单摆进窗口；数字框里方向键按参数步长走；
+  从算子面板拖到连线上就插到中间；F2 改名，改名框里没改不提交。
 
 **M4 —— 能扩展。** 图本身成了可复用、可脚本化、可交互探索的资产：
 

@@ -87,11 +87,6 @@ export function deltaOf(m: Measure): [number, number, number] | null {
   return [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
 }
 
-export function distanceOf(m: Measure): number | null {
-  const d = deltaOf(m);
-  return d ? Math.hypot(d[0], d[1], d[2]) : null;
-}
-
 /** 距离的写法：米 + 毫米并列（M5）。 */
 export function lengthText(v: number): string {
   return `${num(v)} m · ${num(v * 1000)} mm`;
@@ -102,6 +97,23 @@ export function lengthText(v: number): string {
 function short(x: number): string {
   if (!Number.isFinite(x)) return "—";
   return String(Number(x.toPrecision(4)));
+}
+
+/** 包围盒尺寸（预览栏）：X × Y × Z，4 位有效数字同坐标；最长边（取整后）不到 1 m 整组换成 mm（一组一个单位）。
+ *  title 逐轴写米 + 毫米。不是 6 个有限数、或 max < min（空云）→ null。 */
+export function extentText(
+  b: ArrayLike<number> | null | undefined,
+): { text: string; title: string; size: [number, number, number] } | null {
+  if (!b || b.length < 6) return null;
+  const size = [0, 1, 2].map((i) => b[i + 3]! - b[i]!) as [number, number, number];
+  if (!size.every((v) => Number.isFinite(v) && v >= 0)) return null;
+  // 取整之后再定单位：0.99996 写成「1 m」而不是「1000 mm」
+  const mm = Number(Math.max(...size).toPrecision(4)) < 1;
+  return {
+    size,
+    text: `${size.map((v) => short(mm ? v * 1000 : v)).join(" × ")} ${mm ? "mm" : "m"}`,
+    title: ["X", "Y", "Z"].map((a, i) => `${a} ${lengthText(size[i]!)}`).join("\n"),
+  };
 }
 
 function vec(v: readonly number[], sign = false): string {
@@ -126,3 +138,18 @@ export function measureLines(
   out.push({ key: "delta", label: "Δ", text: vec(d, true) });
   return out;
 }
+
+/** 一片点（xyz 三个一组）里落在矩形 [x0, y0, x1, y1]（米，含边）里的有几个，只看 x、y。拖 2D 框时写「N 点」：
+ *  「ROI 里是空的」是 gap / dts 出错的头号原因，以前得跑一遍才知道。 */
+export function countInRect(xyz: ArrayLike<number> | null | undefined, rect: readonly [number, number, number, number]): number {
+  if (!xyz) return 0;
+  const [x0, y0, x1, y1] = rect;
+  let n = 0;
+  for (let i = 0; i + 1 < xyz.length; i += 3) {
+    const x = xyz[i]!;
+    const y = xyz[i + 1]!;
+    if (x >= x0 && x <= x1 && y >= y0 && y <= y1) n += 1;
+  }
+  return n;
+}
+

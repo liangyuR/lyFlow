@@ -5,7 +5,7 @@ import { useReactFlow, useStore as useFlowStore } from "@xyflow/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { addNodeWithAutoConnect, insertSnippet } from "../lib/insert";
-import { FIELD_LABELS, searchOperators, type OperatorHit } from "../lib/search";
+import { FIELD_LABELS, searchOperators, searchSnippets, type OperatorHit } from "../lib/search";
 import { useManifestStore, useSnippets } from "../store/manifest";
 import { useUiStore } from "../store/ui";
 import type { OperatorDesc, SnippetDesc } from "../types/manifest";
@@ -62,10 +62,8 @@ function SnippetRow({ snippet }: { snippet: SnippetDesc }) {
 function SnippetBranch({ query }: { query: string }) {
   const snippets = useSnippets();
   const [open, setOpen] = useState(true);
-  const q = query.trim().toLowerCase();
-  const shown = q
-    ? snippets.filter((s) => `${s.label} ${s.id} ${s.category ?? ""}`.toLowerCase().includes(q))
-    : snippets;
+  // 与搜索弹层同一套模糊匹配：两处搜同一个词，片段一处有一处没有会让人以为没装上
+  const shown = query.trim() ? searchSnippets(snippets, query).map((h) => h.snippet) : snippets;
   if (shown.length === 0) return null;
   return (
     <div className="tree-branch tree-branch--snippets" data-testid="snippet-library" style={{ ["--depth" as string]: 0 }}>
@@ -80,6 +78,37 @@ function SnippetBranch({ query }: { query: string }) {
         <div className="tree-branch__body">
           {shown.map((s) => (
             <SnippetRow key={s.id} snippet={s} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 最近用过的算子（空查询时排在分类树前面）。一个都没有时不出现。 */
+function RecentBranch() {
+  const recentOps = useUiStore((s) => s.recentOps);
+  const operatorsById = useManifestStore((s) => s.operatorsById);
+  const inspected = useUiStore((s) => s.inspectedOperator);
+  const [open, setOpen] = useState(true);
+  const ops = recentOps.flatMap((id) => {
+    const op = operatorsById.get(id);
+    return op ? [op] : [];
+  });
+  if (ops.length === 0) return null;
+  return (
+    <div className="tree-branch tree-branch--recent" data-testid="palette-recent" style={{ ["--depth" as string]: 0 }}>
+      <button type="button" className="tree-branch__head" onClick={() => setOpen((v) => !v)}>
+        <span className={`tree-branch__caret${open ? " is-open" : ""}`} aria-hidden>
+          ▸
+        </span>
+        最近用过
+        <span className="tree-branch__count">{ops.length}</span>
+      </button>
+      {open && (
+        <div className="tree-branch__body">
+          {ops.map((op) => (
+            <OperatorRow key={op.id} op={op} active={op.id === inspected} />
           ))}
         </div>
       )}
@@ -282,9 +311,12 @@ export function NodePalette() {
             ))
           )
         ) : (
-          [...tree.children.values()].map((child) => (
-            <TreeBranch key={child.path} node={child} depth={0} />
-          ))
+          <>
+            <RecentBranch />
+            {[...tree.children.values()].map((child) => (
+              <TreeBranch key={child.path} node={child} depth={0} />
+            ))}
+          </>
         )}
       </div>
 

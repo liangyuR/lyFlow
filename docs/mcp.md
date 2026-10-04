@@ -246,6 +246,13 @@ MCP 第一次返回非文本内容：调用方拿到的是一张能直接看的�
 
 每个 glob 在一帧里要**恰好匹配到一个**文件，否则 `exitCode` 4 并在 `stderr` 里说是哪一帧。
 
+样本多时给 `jobs`（CLI `--jobs`）同时跑几次：行的顺序与内容不变，只是更快，内存大约是 `jobs` 倍。
+
+`eval` / `perturb` 跑得久：客户端带了 `progressToken` 时，CLI 每交出一行就发一条 `notifications/progress`
+（`progress` 是第几行，`message` 写着样本与状态；总数事先不知道，不给 `total`）。客户端取消这次调用时
+子进程跟着结束（以前会在后台一直跑完，最长 10 分钟），返回里带 `cancelled: true`。
+`run_graph` 同样：客户端取消时替它发 `POST /lyflow/cancel`，不再等 `run_finished`。
+
 CLI 的 `--samples-jsonl-out` 与 `--parallel` **MCP 不提供**，逐条对照见
 [agent-tuning.md](agent-tuning.md) §7。
 
@@ -284,6 +291,7 @@ CLI 的 `--samples-jsonl-out` 与 `--parallel` **MCP 不提供**，逐条对照�
   [agent-tuning.md](agent-tuning.md) §3。
 - 退出码 4（用法错，比如指标路径拼错）或者根本起不来时，额外带一个 `stderr` 字段放**全文** ——
   那里面有「这张图上可用的标量路径」这样必须看全的东西。其余情况只给 `stderrTail`。
+  有没成的那几次时，`stderrTail` 是 CLI 归好类的那一行：`没成的 10 次：failed 8（io × 5、bad_param × 3）、…`。
 
 ### `perturb` 的返回
 

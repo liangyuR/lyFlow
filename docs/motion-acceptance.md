@@ -179,7 +179,7 @@ $ grep -n '"motion"' packages/editor/package.json
    能触发。彻底的办法是把圆点画在 `::before` 上、只缩放伪元素（`getBoundingClientRect` 不含伪元素），这改了 A6
    允许的对象，没有自作主张，请定。已写进 `packages/editor/README.md` 的「踩过的坑」。
 3. **布局过渡只给用户触发的「自动布局」**（工具栏按钮、Ctrl+L、右键「整理选中的布局」），经
-   `withLayoutTransition()` 声明。`applyLayout` 本身不带过渡：打开缺坐标的文件时的初始布局属于「打开文件不该动」；
+   `withLayoutTransition()` 声明。`applyLayout` 本身不带过渡：打开缺坐标的文件时的初始布局属于「打开文件不该动」（2026-10-04 起它走 `layoutLoaded`，同样不过渡、也不记撤销）；
    验收脚本的 `placeAtScreen` 也用它摆位，紧接着就按屏幕坐标拖拽，位置还在飞会拖空。计划写的是
    「`applyLayout`（自动布局）」，我按「自动布局这个用户动作」理解；如果要所有 `applyLayout` 都过渡请说。
 4. **一次冒出来超过 80 个节点（或 160 条边）不播进场**，与虚拟化阈值、布局过渡的上限同一个数。计划只给删除残影

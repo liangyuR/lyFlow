@@ -23,8 +23,7 @@ impl Ran {
     fn node(&self, id: &str) -> Value {
         self.lines()
             .into_iter()
-            .filter(|l| l["kind"] == "node_state" && l["nodeId"] == id)
-            .last()
+            .rfind(|l| l["kind"] == "node_state" && l["nodeId"] == id)
             .unwrap_or_else(|| panic!("没有 {id} 的 node_state：{}", self.out))
     }
 }
