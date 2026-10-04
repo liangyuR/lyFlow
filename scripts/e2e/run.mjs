@@ -459,7 +459,7 @@ async function main() {
   const { cdp, consoleErrors } = app;
   // e2e 与开发中的 app 共用一份 WebView2 存储：你在 app 里存下的界面偏好（预览的着色 / 显示点数、检查器端口小节的
   // 开合）先挪开、各组从默认开始，跑完放回去。显示点数被记成 100K 时，各组比的点数全对不上
-  const PREF_KEYS = ["lyflow.viewer.display", "lyflow.inspector.portsOpen"];
+  const PREF_KEYS = ["lyflow.viewer.display", "lyflow.inspector.portsOpen", "lyflow.inspector.paramDocs"];
   const parkedPrefs = await cdp.eval(`
     const keys = ${lit(PREF_KEYS)};
     const saved = Object.fromEntries(keys.map((k) => [k, localStorage.getItem(k)]));

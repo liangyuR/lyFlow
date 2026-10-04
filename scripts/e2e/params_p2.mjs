@@ -175,6 +175,8 @@ async function suiteLayout(cdp, report) {
   // 端口小节收起来后换个节点、再回来都还收着（记在 localStorage，分组结束时放回原样）
   const PORTS_KEY = "lyflow.inspector.portsOpen";
   const portsStored = await cdp.eval(`const v = localStorage.getItem(${lit(PORTS_KEY)}); localStorage.removeItem(${lit(PORTS_KEY)}); return v;`);
+  const PARAM_DOCS_KEY = "lyflow.inspector.paramDocs";
+  const docsStored = await cdp.eval(`const v = localStorage.getItem(${lit(PARAM_DOCS_KEY)}); localStorage.removeItem(${lit(PARAM_DOCS_KEY)}); return v;`);
   try {
     await newDoc(cdp);
     const icp = await buildGraph(cdp, [{ key: "icp", op: "register.icp_2d" }, { key: "gen", op: "gen.synthetic" }], []);
@@ -211,10 +213,40 @@ async function suiteLayout(cdp, report) {
     await sleep(250);
     const c = await insp();
     report.ok("真鼠标收起端口小节：取消选中再选回来还收着，记进了 localStorage", c.open === false && c.stored === "0", JSON.stringify(c));
+
+    // 参数说明：默认收起；真点「参数说明」每个参数下面写出说明与「默认 … · 范围 …」，取消选中再选回来还开着；再点收起
+    const docs = () => cdp.eval(`
+      const rows = [...document.querySelectorAll('.app__inspector .insp-param')];
+      const blocks = rows.map((r) => r.querySelector('.insp-param__doc'));
+      return { rows: rows.length, shown: blocks.filter(Boolean).length,
+               facts: blocks.filter(Boolean).every((b) => /^默认 /.test(b.querySelector('.insp-param__facts')?.textContent ?? '')),
+               withDoc: blocks.filter((b) => b?.querySelector('.insp-param__doc-text')).length,
+               pressed: document.querySelector('[data-testid="inspector-param-docs"]')?.getAttribute('aria-pressed') ?? null,
+               stored: localStorage.getItem(${lit(PARAM_DOCS_KEY)}) };
+    `);
+    const d0 = await docs();
+    await cdp.eval(`document.querySelector('[data-testid="inspector-param-docs"]').scrollIntoView({ block: 'center' }); return true;`);
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="inspector-param-docs"]'));
+    await sleep(150);
+    await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([], []); return true;`);
+    await sleep(200);
+    await select(cdp, icp.icp);
+    await sleep(250);
+    const d1 = await docs();
+    await cdp.eval(`document.querySelector('[data-testid="inspector-param-docs"]').scrollIntoView({ block: 'center' }); return true;`);
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="inspector-param-docs"]'));
+    await sleep(150);
+    const d2 = await docs();
+    report.ok("参数说明默认收起；真点开：每个参数下面写说明与「默认 … · 范围 …」，取消选中再选回来还开着（记住）；再点收起",
+      d0.shown === 0 && d0.pressed === "false" && d1.rows > 0 && d1.shown === d1.rows && d1.facts && d1.withDoc > 0 &&
+        d1.pressed === "true" && d1.stored === "1" && d2.shown === 0 && d2.stored === "0",
+      JSON.stringify({ d0, d1, d2 }));
   } finally {
     await cdp.eval(`
       const v = ${lit(portsStored)};
       if (v === null) localStorage.removeItem(${lit(PORTS_KEY)}); else localStorage.setItem(${lit(PORTS_KEY)}, v);
+      const d = ${lit(docsStored)};
+      if (d === null) localStorage.removeItem(${lit(PARAM_DOCS_KEY)}); else localStorage.setItem(${lit(PARAM_DOCS_KEY)}, d);
       return true;
     `);
   }

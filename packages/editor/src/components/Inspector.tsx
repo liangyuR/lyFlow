@@ -11,6 +11,7 @@ import {
   type GraphBinding,
 } from "../lib/graphParams";
 import { groupParams, effectiveParams, isEnabled, isVisible, valueEquals } from "../lib/params";
+import { PARAM_DOCS_KEY, paramFacts } from "../lib/paramDoc";
 import { readStoredBool, writeStoredBool } from "../lib/prefs";
 import { frameKeyOfGroup, pickFrame, roiFramesOf } from "../lib/roiFrames";
 import { augmentOperators, describeEventNode, fullId, levelOf, locateEventNode, nodeIndex, promotedBy } from "../lib/subgraph";
@@ -316,6 +317,7 @@ function ParamRow({
   error,
   def,
   binding,
+  showDoc,
 }: {
   param: Param;
   node: GraphNode;
@@ -324,6 +326,8 @@ function ParamRow({
   def?: SubgraphDef | undefined;
   /** 这个参数最终由哪个图参数提供（P1.4）。给了就显示图参数的有效值，编辑路由到图参数。 */
   binding: GraphBinding | null;
+  /** 「参数说明」开着：控件下面写说明、默认值、范围。 */
+  showDoc: boolean;
 }) {
   const setParam = useGraphStore((s) => s.setParam);
   const value = effective[param.name];
@@ -391,9 +395,27 @@ function ParamRow({
         {/* 错误消息直接贴在控件下面，而不是只做个红框 ——
             红框只说明「这里错了」，用户还得自己猜错在哪（P0 #15）。 */}
         {error && <p className="insp-param__error">{error}</p>}
+        {showDoc && (
+          <div className="insp-param__doc" data-testid={`param-doc-${param.name}`}>
+            {param.doc && <p className="insp-param__doc-text">{param.doc}</p>}
+            <p className="insp-param__facts">{paramFacts(param)}</p>
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+/** 「参数说明」的开关：每个参数下面写出说明、默认值、范围。默认收起，开合所有节点共用一份、记在 localStorage。 */
+function useParamDocs(): [boolean, () => void] {
+  const [on, setOn] = useState(() => readStoredBool(PARAM_DOCS_KEY) ?? false);
+  const toggle = () => {
+    setOn((v) => {
+      writeStoredBool(PARAM_DOCS_KEY, !v);
+      return !v;
+    });
+  };
+  return [on, toggle];
 }
 
 /** 节点 id，点一下复制：`lyflow run --to`、`--set <节点>.<参数>`、诊断里认的都是它（子图里是路径 id）。 */
@@ -417,6 +439,7 @@ function NodeIdChip({ id }: { id: string }) {
 
 function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
   const setNodeUi = useGraphStore((s) => s.setNodeUi);
+  const [showDocs, toggleDocs] = useParamDocs();
   const runErrors = useParamErrors(node.id);
   // 编辑期的校验诊断（m8-plan L16）与上次运行的错误一起标到参数上；同一个参数两边都有时
   // 取校验的那一条 —— 它是对着当前的值说的，运行的那条可能已经过时了。
@@ -554,6 +577,20 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
 
       {exec?.stats?.outputs && <OutputValues outputs={exec.stats.outputs} nodeKey={fullId(path, node.id)} />}
 
+      {op.params.length > 0 && (
+        <div className="insp__params-bar">
+          <button
+            type="button"
+            className={`insp__docs-toggle${showDocs ? " is-on" : ""}`}
+            data-testid="inspector-param-docs"
+            aria-pressed={showDocs}
+            title="每个参数下面写出说明、默认值与范围（开合所有节点共用、记住）"
+            onClick={toggleDocs}
+          >
+            {showDocs ? "▾ 参数说明" : "▸ 参数说明"}
+          </button>
+        </div>
+      )}
       {op.params.length === 0 ? (
         <p className="insp__none">此算子没有参数</p>
       ) : (
@@ -569,6 +606,7 @@ function NodeInspector({ node, op }: { node: GraphNode; op: OperatorDesc }) {
               error={errors.get(p.name)}
               def={def}
               binding={resolveGraphBinding(doc, path, node.id, p.name)}
+              showDoc={showDocs}
             />
           ));
           const frame = accordion ? frameOfGroup[gi] : null;

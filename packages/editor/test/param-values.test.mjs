@@ -3,6 +3,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { paramFacts } from "../src/lib/paramDoc.ts";
+
 import {
   asCurve,
   curveProblem,
@@ -233,4 +235,21 @@ test("parseNumEdit / applyNumEdit：算式、相对改法、全角、夹住与�
     ["  plain.pcd\t", "plain.pcd"],
   ];
   for (const [raw, want] of paths) assert.equal(cleanPathText(raw), want, JSON.stringify(raw));
+});
+
+test("参数说明那一行（检查器「参数说明」开着时）：默认值、范围、常用范围、单位、枚举的可选项", () => {
+  const P = (over) => ({ name: "p", type: "float", default: 0, ...over });
+  const cases = [
+    ["数、上下限、单位", P({ default: 0.02, min: 0, max: 1, unit: "m" }), "默认 0.02 m · 范围 0 – 1 m"],
+    ["常用范围与范围不同才写", P({ default: 5, min: 0, max: 100, softMin: 0, softMax: 10 }), "默认 5 · 范围 0 – 100 · 常用 0 – 10"],
+    ["常用范围与范围一样不重复写", P({ default: 5, min: 0, max: 10, softMin: 0, softMax: 10 }), "默认 5 · 范围 0 – 10"],
+    ["只有下限", P({ type: "int", default: 1, min: 0 }), "默认 1 · 范围 ≥ 0"],
+    ["向量带单位", P({ type: "vec3f", default: [0.01, 0.01, 0.01], unit: "m" }), "默认 [0.01, 0.01, 0.01] m"],
+    ["开关", P({ type: "bool", default: false }), "默认 关"],
+    ["枚举写选项的名字", P({ type: "enum", default: "count", options: [{ value: "count", label: "Target Count" }, { value: "ratio", label: "Ratio" }] }),
+      "默认 Target Count · 可选 Target Count / Ratio"],
+    ["空字符串", P({ type: "path", default: "" }), "默认 空"],
+    ["不是数的参数也有单位：单独写", P({ type: "string", default: "x", unit: "mm" }), "默认 x · 单位 mm"],
+  ];
+  for (const [name, param, want] of cases) assert.equal(paramFacts(param), want, name);
 });

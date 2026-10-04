@@ -506,6 +506,40 @@
   color: var(--lyflow-accent);
 }
 
+/* 参数说明（默认收起）：控件下面一小段，说明在上、默认值与范围在下 */
+.insp__params-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin: -2px 0 6px;
+}
+.insp__docs-toggle {
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--lyflow-radius);
+  background: none;
+  color: var(--lyflow-fg-2);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.insp__docs-toggle:hover,
+.insp__docs-toggle.is-on {
+  border-color: var(--lyflow-border-strong);
+  color: var(--lyflow-fg-0);
+}
+.insp-param__doc {
+  margin-top: 3px;
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.insp-param__doc p {
+  margin: 0;
+}
+.insp-param__facts {
+  font-variant-numeric: tabular-nums;
+}
+
 /* -------------------------------------------------------------- controls */
 
 .ctl {
