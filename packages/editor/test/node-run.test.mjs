@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { autoRunTargetsReady, paramEditTargets } from "../src/lib/autoRun.ts";
 import { ancestorsOf, closureOf, previewTargets, stepAlong, upstreamToRun, willCompute } from "../src/lib/nodeRun.ts";
 
 //   a → b → d → e
@@ -75,6 +76,52 @@ test("closureOf：沿连线往上 / 往下走到头，含起点，按文档顺�
     ["m"], "S 不在下游：不带");
   assert.deepEqual(previewTargetsOf(gdoc, [], graphParamPreviewId("idle"), []), []);
   assert.deepEqual(previewTargetsOf(gdoc, inS, "p", []), ["S/p"], "节点参数照旧");
+});
+
+test("自动运行补谁（paramEditTargets）：参数有效值、静音、图参数取值变了的；缺省值写进稀疏存储、挪节点、改名、增删节点不算；子图定义里改的每个实例各一个", () => {
+  const ops = new Map([
+    ["t.f", { id: "t.f", label: "F", inputs: [], outputs: [], params: [{ name: "k", type: "float", default: 1 }] }],
+    ["sub:s", { id: "sub:s", label: "S", inputs: [], outputs: [], params: [] }],
+  ]);
+  const node = (id, params = {}, extra = {}) => ({ id, op: "t.f", params, ui: { position: { x: 0, y: 0 } }, ...extra });
+  const base = {
+    schemaVersion: 1, id: "d",
+    nodes: [node("a"), node("b"), { id: "L", op: "sub:s", params: {} }, { id: "R", op: "sub:s", params: {} }],
+    edges: [],
+    subgraphs: { s: { name: "S", nodes: [node("in")], edges: [], inputs: [], outputs: [], params: [] } },
+    params: { thr: { type: "float", default: 1, binds: ["a.k"] } },
+  };
+  const swap = (fn) => {
+    const d = structuredClone(base);
+    fn(d);
+    return d;
+  };
+  const p = { thr: 1 };
+  const cases = [
+    // [说明, 改后的图, 改后的图参数取值, 期望]
+    ["没改", base, p, { nodes: [], graphParams: [] }],
+    ["改了一个参数", swap((d) => { d.nodes[0].params.k = 2; }), p, { nodes: ["a"], graphParams: [] }],
+    ["写上缺省值不算改", swap((d) => { d.nodes[1].params.k = 1; }), p, { nodes: [], graphParams: [] }],
+    ["静音", swap((d) => { d.nodes[1].bypass = true; }), p, { nodes: ["b"], graphParams: [] }],
+    ["挪节点、改标题不算", swap((d) => { d.nodes[0].ui = { position: { x: 9, y: 9 }, title: "x" }; }), p, { nodes: [], graphParams: [] }],
+    ["加节点、删节点不算（结构上的改动）", swap((d) => { d.nodes.splice(1, 1); d.nodes.push(node("c", { k: 5 })); }), p, { nodes: [], graphParams: [] }],
+    ["子图定义里改：两个实例各一个", swap((d) => { d.subgraphs.s.nodes[0].params.k = 3; }), p, { nodes: ["L/in", "R/in"], graphParams: [] }],
+    ["图参数的取值变了（default 或配方）", base, { thr: 2 }, { nodes: [], graphParams: ["thr"] }],
+    ["纳入配方（值搬家：节点上的显式值删了、多出一个图参数）不算", swap((d) => {
+      d.nodes[1].params = {};
+      d.params.k2 = { type: "float", default: 3, binds: ["b.k"] };
+    }), { thr: 1, k2: 3 }, { nodes: [], graphParams: [] }],
+    ["提升成子图参数不算", swap((d) => { d.subgraphs.s.params = [{ name: "k", type: "float", default: 1, binds: [{ node: "in", param: "k" }] }]; }), p,
+      { nodes: [], graphParams: [] }],
+  ];
+  for (const [name, after, params, want] of cases) assert.deepEqual(paramEditTargets(base, after, p, params, ops), want, name);
+
+  // 只补跑过的：节点自己（子图节点看里面的）有过不是 idle 的状态；图参数看它绑着的节点
+  const edits = { nodes: ["a", "b", "L/in", "R"], graphParams: ["thr"] };
+  const states = (entries) => new Map(entries.map(([id, state]) => [id, { state }]));
+  assert.deepEqual(autoRunTargetsReady(base, edits, states([["a", "done"], ["b", "idle"], ["L/in", "error"], ["R/in", "skipped"]])),
+    { nodes: ["a", "L/in", "R"], graphParams: ["thr"] }, "b 还是 idle 不补；R 看它里面的 R/in");
+  assert.deepEqual(autoRunTargetsReady(base, edits, states([["b", "done"]])), { nodes: ["b"], graphParams: [] }, "thr 绑着的 a 没跑过");
 });
 
 test("stepAlong（Alt+方向键沿连线走）：上下游取最上面的；刚从那边过来先退回去；同级在同一组里挪、到头不绕回", () => {

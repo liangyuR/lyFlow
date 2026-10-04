@@ -1077,20 +1077,65 @@ async function suitePreview(cdp, report) {
     p1.targets.includes(pin.s2) && p1.s2 !== p0.s2 && p1.s2 != null && p1.s1 !== p0.s1 && !p1.stale && p1.node === pin.s2,
     JSON.stringify({ p0, p1 }));
 
-  // 敲数回车：不触发运行，钉住的 s2 过时了 —— 预览左上角说一声，点它的 ▶ 一次算到 s2
-  await clickAt(cdp, await centerOf(cdp, '[data-testid="param-drag-keepRatio"]'));
-  await sleep(100);
-  await pressCtrl(cdp, "a");
-  await cdp.send("Input.insertText", { text: "0.2" });
-  await pressKey(cdp, "Enter", 13);
+  // 开着自动运行敲数回车（2026-10-04 起自动运行管所有改参数的方式）：补一次正式运行，目标带着钉住的 s2，点数变成新的
+  const typeS1Ratio = async (text, enter = true) => {
+    // 点进数字框；跑完一次之后检查器会重排，偶尔第一下没点进去（焦点不在输入框里时 Ctrl+A 是全选节点）—— 再点一次
+    for (let i = 0; i < 3; i += 1) {
+      await clickAt(cdp, await centerOf(cdp, '[data-testid="param-drag-keepRatio"]'));
+      await sleep(150);
+      if (await cdp.eval(`return document.activeElement?.tagName === 'INPUT';`)) break;
+    }
+    await pressCtrl(cdp, "a");
+    await cdp.send("Input.insertText", { text });
+    if (enter) await pressKey(cdp, "Enter", 13);
+  };
+  const formalAfter = (runId, what) => cdp.waitFor(
+    `(() => { const s = window.__lyflow.stores.execution.getState();
+              return s.runId !== ${lit(runId)} && !s.preview && s.runStatus !== 'running' && s.runStatus !== 'idle'
+                ? { runId: s.runId, targets: s.targets, auto: s.request?.auto === true } : null; })()`,
+    { timeoutMs: 30_000, what },
+  ).catch((e) => ({ error: String(e) }));
+  await typeS1Ratio("0.2");
   await cdp.eval(`document.activeElement?.blur(); return true;`);
+  const typedRun = await formalAfter(p1.runId, "敲数回车之后补的正式运行");
   await replan(cdp);
   await sleep(200);
+  const pTyped = await pinState();
+  report.ok("开着自动运行敲数回车改上游：补一次正式运行（自动的，目标带着钉住的 s2），s2 的点数变成新的，预览没标过时",
+    typedRun.auto === true && typedRun.targets?.includes(pin.s2) && pTyped.s2 !== p1.s2 && pTyped.s2 != null && !pTyped.stale,
+    JSON.stringify({ typedRun, pTyped }));
+  // Ctrl+Z 也是改参数：撤回去之后照样补一次，回到拖完时的结果（缓存命中）
+  await pressCtrl(cdp, "z");
+  const undoRun = await formalAfter(pTyped.runId, "撤销之后补的正式运行");
+  await sleep(200);
+  const pUndo = await pinState();
+  report.ok("Ctrl+Z 撤回那一下：也补一次正式运行，s2 回到拖完时的点数",
+    undoRun.auto === true && pUndo.s2 === p1.s2, JSON.stringify({ undoRun, pUndo, was: p1.s2 }));
+  // 打着字直接按 F5：先提交、紧接着跑人按的那一次；攒着的自动运行撤掉了，不会过一会儿再跑一遍把它抢占
+  await typeS1Ratio("0.25", false);
+  const byF5 = await runAndWait(cdp, () => pressF5(cdp));
+  const afterF5 = await cdp.eval(`return window.__lyflow.stores.execution.getState().runId;`);
+  await sleep(700);
+  const later = await cdp.eval(`const s = window.__lyflow.stores.execution.getState(); return { runId: s.runId, auto: s.request?.auto === true };`);
+  await cdp.eval(`document.activeElement?.blur(); return true;`);
+  report.ok("打着字按 F5：只跑人按的那一次（整图），之后没有再补一次自动运行",
+    byF5.status === "ok" && later.runId === afterF5 && later.auto === false, JSON.stringify({ status: byF5.status, afterF5, later }));
+
+  // 关了自动运行敲数回车：不触发运行，钉住的 s2 过时了 —— 预览左上角说一声，点它的 ▶ 一次算到 s2
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setAutoRun(false); return true;`);
+  const p1off = await pinState();
+  await typeS1Ratio("0.3"); // 没跑过的值：0.2 上面自动跑过、缓存里有，那就不算过时
+  await cdp.eval(`document.activeElement?.blur(); return true;`);
+  await replan(cdp);
+  await sleep(400);
   const p2 = await pinState();
-  report.ok("敲数回车改了上游：钉住的 s2 在预览左上角标「参数改过了 · 画面是上一次的结果」，点数还是旧的",
-    p2.stale && p2.s2 === p1.s2 && p2.runId === p1.runId &&
+  const dbg2 = await cdp.eval(`const g = window.__lyflow.stores.graph.getState(); const ui = window.__lyflow.stores.ui.getState();
+    return { ratio: g.doc.nodes.find((n) => n.id === ${lit(pin.s1)})?.params.keepRatio ?? null, last: g.past.at(-1)?.label ?? null,
+             selected: [...ui.selectedNodes], autoRun: ui.autoRun, active: document.activeElement?.tagName ?? null };`);
+  report.ok("关了自动运行敲数回车改了上游：钉住的 s2 在预览左上角标「参数改过了 · 画面是上一次的结果」，点数还是旧的",
+    p2.stale && p2.s2 === p1off.s2 && p2.runId === p1off.runId &&
       /上一次的结果/.test(await cdp.eval(`return document.querySelector('[data-testid="viewer-stale"]')?.textContent ?? '';`)),
-    JSON.stringify(p2));
+    JSON.stringify({ p2, dbg2 }));
   const ranStale = await runAndWait(cdp, async () => clickAt(cdp, await centerOf(cdp, '[data-testid="viewer-stale-run"]')));
   await replan(cdp);
   await sleep(200);
@@ -1144,7 +1189,7 @@ async function suitePreview(cdp, report) {
     p4.pinned === null && p4.node === pin.s1 && /取消钉住/.test(p4.toast ?? ""), JSON.stringify(p4));
 
   // 抽屉的「调参」页：这张图打开以来每次正式运行一行，新的在上，写着比上一次改了什么；预览运行不记。
-  // 这一段跑了四次正式运行：F5、拖完补的、两次点角标上的 ▶（运行到 s2）
+  // 这一段跑了七次正式运行：F5、拖完补的、敲数回车补的、撤销补的、打着字按的 F5、两次点角标上的 ▶（运行到 s2）
   const drawerBeforeRuns = await cdp.eval(`return window.__lyflow.stores.ui.getState().drawer;`);
   await cdp.eval(`if (!window.__lyflow.stores.ui.getState().drawer) window.__lyflow.stores.ui.getState().toggleDrawer('log'); return true;`);
   await sleep(150);
@@ -1160,11 +1205,11 @@ async function suitePreview(cdp, report) {
     const n = window.__lyflow.stores.graph.getState().doc.nodes.find((x) => x.id === ${lit(pin.s1)});
     return n.ui?.title ?? window.__lyflow.stores.manifest.getState().operatorsById.get(n.op).label;
   `);
-  report.ok("「调参」页：四次正式运行一行一次、新的在上（预览不记）；第一次写「打开以来的第一次」，之后写 s1 的比例从多少改到多少；运行到 s2 的写着",
-    JSON.stringify(runRows.map((r) => [r.seq, r.status])) === JSON.stringify([[4, "ok"], [3, "ok"], [2, "ok"], [1, "ok"]]) &&
-      runRows[3].diff === "这张图打开以来的第一次" &&
-      runRows.slice(0, 3).every((r) => r.diff.startsWith(`${s1Name} · `) && / → /.test(r.diff)) &&
-      / → 0\.2$/.test(runRows[1].diff) && /运行到/.test(runRows[1].head) && /整张图/.test(runRows[3].head),
+  report.ok("「调参」页：七次正式运行一行一次、新的在上（预览不记）；第一次写「打开以来的第一次」，之后写 s1 的比例从多少改到多少；运行到 s2 的写着",
+    JSON.stringify(runRows.map((r) => [r.seq, r.status])) === JSON.stringify([7, 6, 5, 4, 3, 2, 1].map((n) => [n, "ok"])) &&
+      runRows[6].diff === "这张图打开以来的第一次" &&
+      runRows.slice(0, 6).every((r) => r.diff.startsWith(`${s1Name} · `) && / → /.test(r.diff)) &&
+      / → 0\.3$/.test(runRows[1].diff) && /运行到/.test(runRows[1].head) && /整张图/.test(runRows[6].head),
     JSON.stringify({ s1Name, runRows }));
 
   // 设为基准：点第 1 次那一行的「设为基准」—— 最上面钉一条基准，之后每一行多一行「比基准 #1：…」
@@ -1207,7 +1252,7 @@ async function suitePreview(cdp, report) {
       (await ratioNow()) === ratioBefore,
     JSON.stringify({ ratioBefore, restored }));
 
-  // 未运行的改动：敲数回车改两个节点的保留比例（不自动运行）—— 工具栏写「改 2 处」，调参页顶上一行列出两处；
+  // 未运行的改动（关着自动运行时才攒得下）：敲数回车改两个节点的保留比例 —— 工具栏写「改 2 处」，调参页顶上一行列出两处；
   // 点 s1 那一处的 ↩ 只改回它（一条撤销，Ctrl+Z 做不到：得连后面那处一起撤），剩 1 处；「全部改回」之后那一行收起
   const typeRatio = async (nodeId, value) => {
     await select(cdp, nodeId);
@@ -1219,6 +1264,10 @@ async function suitePreview(cdp, report) {
     await sleep(200);
   };
   const ratioOf = (id) => cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.find((n) => n.id === ${lit(id)}).params.keepRatio ?? 0.5;`);
+  // 恢复、撤回那两下开着自动运行，各补了一次：等它跑完再关
+  await sleep(400);
+  await cdp.waitFor(`window.__lyflow.stores.execution.getState().runStatus !== 'running'`, { timeoutMs: 30_000, what: "恢复与撤回补的运行跑完" });
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setAutoRun(false); return true;`);
   const ran = { s1: await ratioOf(pin.s1), s2: await ratioOf(pin.s2) };
   const pendingNow = () => cdp.eval(`
     return { chip: document.querySelector('[data-testid="run-pending-chip"]')?.textContent ?? null,
@@ -1252,6 +1301,7 @@ async function suitePreview(cdp, report) {
   await sleep(200);
   report.eq("「全部改回」：剩下那一处也改回到那次运行的值，那一行收起",
     { row: await cdp.eval(`return !!document.querySelector('[data-testid="run-pending"]');`), s2: await ratioOf(pin.s2) }, { row: false, s2: ran.s2 });
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setAutoRun(true); return true;`);
   await cdp.eval(`window.__lyflow.stores.ui.setState({ drawer: ${lit(drawerBeforeRuns)} }); return true;`);
 
   // 拖图参数：s1 的比例纳入配方之后，在检查器上面「图参数」那一行真拖滑块 —— 拖着的时候预览它绑着的 s1，
@@ -1267,6 +1317,9 @@ async function suitePreview(cdp, report) {
     });
     return true;
   `);
+  // 检查器长了（参数说明的开关、输出值）：滑块可能在可见区外面，先滚进来再量
+  await cdp.eval(`document.querySelector('[data-testid="graph-param-${gpName}"] [data-testid="param-slider-keepRatio"]')?.scrollIntoView({ block: 'center' }); return true;`);
+  await sleep(150);
   const gpSlider = await centerOf(cdp, `[data-testid="graph-param-${gpName}"] [data-testid="param-slider-keepRatio"]`);
   mustOk(gpSlider != null, "图参数那一行有滑块", JSON.stringify(gpSlider));
   {
@@ -1283,7 +1336,12 @@ async function suitePreview(cdp, report) {
     `(() => { const s = window.__lyflow.stores.execution.getState();
               return s.runId !== ${lit(gpBefore.runId)} && !s.preview && s.runStatus !== 'running' && s.runStatus !== 'idle'; })()`,
     { timeoutMs: 30_000, what: "拖图参数松手后补的正式运行结束" },
-  );
+  ).catch(async (e) => {
+    const s = await cdp.eval(`const s = window.__lyflow.stores.execution.getState(); const ui = window.__lyflow.stores.ui.getState();
+      return { runId: s.runId, status: s.runStatus, preview: s.preview, targets: s.targets, error: s.error ?? null,
+               previewing: ui.previewing, autoRun: ui.autoRun };`);
+    throw new Error(`${e} ${JSON.stringify({ before: gpBefore.runId, s })}`);
+  });
   const gpAfter = await pinState();
   const gpSeen = await cdp.eval(`window.__gpStop(); return window.__gpSeen.length;`);
   report.ok("拖图参数那一行的滑块：拖着有预览运行，松手补一次正式运行、算的是它绑着的 s1（点数变了）",

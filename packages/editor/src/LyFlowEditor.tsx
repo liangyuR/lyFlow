@@ -25,6 +25,7 @@ import {
   askRestoreUntitled,
   openSourceFor,
 } from "./lib/autosave";
+import { autoRunOnCommit } from "./lib/preview";
 import { saveCurrent } from "./lib/saveFlow";
 import { resolveUnsaved } from "./lib/unsaved";
 import {
@@ -57,7 +58,7 @@ import {
   subscribeExecutionEvents,
   useExecutionStore,
 } from "./store/execution";
-import { useGraphStore } from "./store/graph";
+import { onCommitted, useGraphStore } from "./store/graph";
 import { useManifestStore } from "./store/manifest";
 import { recipesDirty, useRecipeStore } from "./store/recipe";
 import {
@@ -156,6 +157,9 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       stopFail?.();
     };
   }, []);
+
+  // -- 自动运行管所有改参数的方式（2026-10-04，修订 ADR-0011）：提交了一步就攒起来补一次正式运行 -------------
+  useEffect(() => onCommitted(autoRunOnCommit), []);
 
   // -- 精确 stale（ADR-0007）：doc 每次变就 debounce 重编一次 ------------------
   // 实时校验（m8-plan L16）跟着同一个信号走：错误在拼的时候就标出来，不必等跑完。
@@ -261,15 +265,14 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       graph.loadDoc(doc, path);
       ui.clearSelection();
 
-      // 一条撤销记录、置 dirty：用户可以撤销掉这次迁移再决定（ADR-0008）
-      const migrated = migrations.length > 0 ? useGraphStore.getState().applyMigrations(migrations) : 0;
-      // 脚本生成的图必须能打开（graph-doc.md 的承诺）。只在缺坐标时布局，
-      // 永远不覆盖用户摆好的位置（E8）。
+      // 脚本生成的图必须能打开（graph-doc.md 的承诺）。只在缺坐标时布局，永远不覆盖用户摆好的位置（E8）。
+      // 不记撤销、不算改动（2026-10-04 拍板）；排在迁移前面：迁移那一条撤销回去也是排好的样子
       if (needsInitialLayout(useGraphStore.getState().doc)) {
-        const moves = layoutGraph(useGraphStore.getState().doc);
-        useGraphStore.getState().applyLayout(moves);
+        useGraphStore.getState().layoutLoaded(layoutGraph(useGraphStore.getState().doc));
         setTimeout(() => void fitView({ duration: fitMs }), 50);
       }
+      // 一条撤销记录、置 dirty：用户可以撤销掉这次迁移再决定（ADR-0008）
+      const migrated = migrations.length > 0 ? useGraphStore.getState().applyMigrations(migrations) : 0;
       await rememberFile(path);
       // 迁移的那句并进来：以前两条分开弹，「已迁移」紧接着就被「已打开」顶掉
       ui.showToast(`已打开 ${doc.nodes.length} 个节点${migrated > 0 ? `，迁移了 ${migrated} 个（保存后生效）` : ""}`);

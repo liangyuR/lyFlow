@@ -2047,6 +2047,24 @@ async function suitePanels(cdp, report, ws) {
   report.ok("选「丢弃备份，打开上次保存的」：备份删了，打开的是正文（没标改动）",
     !fs.existsSync(`${graphPath}~`) && (await cdp.eval(`return window.__lyflow.stores.graph.getState().dirty;`)) === false);
 
+  // 打开一张缺坐标的图（脚本生成的那种）：打开就排好；这一下不算一步撤销、不算改动（2026-10-04 拍板）
+  const openFromEmpty = async (file) => {
+    await newDoc(cdp);
+    await sleep(300);
+    await clickAt(cdp, await centerOf(cdp, `[data-testid="empty-recent-item"][title="${file.replace(/\\/g, "\\\\")}"]`));
+    await cdp.waitFor(`window.__lyflow.stores.graph.getState().filePath === ${lit(file)}`, { timeoutMs: 10_000, what: `打开 ${file}` });
+    await sleep(200);
+  };
+  const bare = path.join(path.dirname(graphPath), "无坐标.lyflow.json");
+  const bareDoc = await cdp.eval(`const d = structuredClone(window.__lyflow.stores.graph.getState().doc); for (const n of d.nodes) delete n.ui; return d;`);
+  fs.writeFileSync(bare, JSON.stringify(bareDoc, null, 2), "utf8");
+  await cdp.eval(`await window.__lyflow.transport.pushRecentFile(${lit(bare)}); return true;`);
+  await openFromEmpty(bare);
+  const laidOut = await cdp.eval(`const g = window.__lyflow.stores.graph.getState();
+    return { placed: g.doc.nodes.length > 0 && g.doc.nodes.every((n) => Number.isFinite(n.ui?.position?.x)), past: g.past.length, dirty: g.dirty };`);
+  report.eq("打开缺坐标的图：打开就排好，撤销栈是空的（不算一步撤销）、不算改动", laidOut, { placed: true, past: 0, dirty: false });
+  await openFromEmpty(graphPath);
+
   // 参数框里打了字、没失焦就按 Ctrl+S：先提交再存（以前 Ctrl+S 在输入框里不响应，打的字也没进文件）
   await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}], []); return true;`);
   await sleep(250);

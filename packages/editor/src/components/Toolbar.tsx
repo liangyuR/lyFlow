@@ -187,7 +187,7 @@ function PreviewControls() {
   const previewing = useUiStore((s) => s.previewing);
   return (
     <>
-      <label className="toolbar__toggle" title="拖完参数自动补一次正式运行">
+      <label className="toolbar__toggle" title="改完参数就补一次正式运行：拖完松手、敲回车、选下拉框、勾选、↺ 重置、粘贴值、恢复、撤销都算（只补跑过的节点）。关掉时拖动只看抽稀的预览，按 F5 才正式跑">
         <input
           type="checkbox"
           data-testid="auto-run"

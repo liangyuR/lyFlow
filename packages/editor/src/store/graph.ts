@@ -416,6 +416,9 @@ interface GraphState {
   insertOnEdge(edgeId: string, nodeId: string, inPort: string, outPort: string): boolean;
   /** 自动布局的落点。整段算一条撤销记录（E8）。 */
   applyLayout(moves: readonly { id: string; position: { x: number; y: number } }[]): void;
+  /** 打开文件时缺坐标的自动布局（E8）：不记撤销、不算改动 —— 当成文件本来就排成这样（2026-10-04 拍板：
+   *  打开时的自动布局不算一步撤销）。顶层的节点；只在刚 loadDoc 完、还没有别的改动时用。 */
+  layoutLoaded(moves: readonly { id: string; position: { x: number; y: number } }[]): void;
   /** 原地复制选中节点（Ctrl+D）。keepInputs：副本的输入接到原件的同一个上游、输出空着（Shift+D，并排调两组参数比一比）；
    *  在子图里，从子图入口进来的那几条（不是边，是 inputs[].to）也接上。一条撤销。 */
   duplicateNodes(ids: readonly string[], opts?: { keepInputs?: boolean }): PasteResult;
@@ -510,6 +513,36 @@ interface GraphState {
 /** 改配方集合的一步：拿到改完的 doc（有的动作先改图再改配方，比如「写回基础」要新的 default 判稀疏）。 */
 type RecipeStep = (recipes: RecipeSet, doc: GraphDoc) => RecipeSet;
 
+/** 提交了一步：记进撤销栈的那一下（单步动作、拖动松手的 commit、batch），或者撤销 / 重做 / 跳到历史里某一步。
+ *  before / after 是这一步前后的 doc 与配方集合（after 时配方已经应用好了）。拖动的中间帧、没改动的 commit、
+ *  换图都不算。自动运行（lib/preview 的 autoRunOnCommit）靠它知道「改完了一处参数」。 */
+export interface CommittedChange {
+  kind: "edit" | "undo" | "redo" | "travel";
+  before: { doc: GraphDoc; recipes: RecipeSet };
+  after: { doc: GraphDoc; recipes: RecipeSet };
+}
+
+const committedListeners = new Set<(change: CommittedChange) => void>();
+
+/** 订阅「提交了一步」。返回取消订阅的函数。 */
+export function onCommitted(fn: (change: CommittedChange) => void): () => void {
+  committedListeners.add(fn);
+  return () => {
+    committedListeners.delete(fn);
+  };
+}
+
+function emitCommitted(change: CommittedChange): void {
+  for (const fn of [...committedListeners]) {
+    try {
+      fn(change);
+    } catch (e) {
+      // 订阅者出错不该让这一步编辑失败
+      console.error(e);
+    }
+  }
+}
+
 export const useGraphStore = create<GraphState>((set, get) => {
   /** 正在跑的 batch 有几层。> 0 时 transact 只改不记，由 batch 合成一条。 */
   let batchDepth = 0;
@@ -539,6 +572,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       dirty: next !== get().savedDoc,
     });
     applyRecipeSet(nextRecipes);
+    emitCommitted({ kind: "edit", before: { doc, recipes: before }, after: { doc: next, recipes: recipeSet() } });
   };
 
   /** 应用变更但不记撤销。用于事务进行中的中间状态（拖动的每一帧）。 */
@@ -616,6 +650,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         pendingRecipes: null,
         dirty: doc !== get().savedDoc,
       });
+      emitCommitted({ kind: "edit", before: { doc: pendingSnapshot, recipes: recipesBefore }, after: { doc, recipes: recipeSet() } });
     },
 
     abort() {
@@ -1206,6 +1241,20 @@ export const useGraphStore = create<GraphState>((set, get) => {
         lvl.edges.push({ id: b, from: { node: nodeId, port: outPort }, to: { ...edge.to } });
       });
       return true;
+    },
+
+    layoutLoaded(moves) {
+      if (moves.length === 0) return;
+      const { doc, savedDoc } = get();
+      const next = produce(doc, (d) => {
+        for (const m of moves) {
+          const node = d.nodes.find((n) => n.id === m.id);
+          if (node) node.ui = { ...node.ui, position: m.position };
+        }
+      });
+      // 刚打开、与文件一致时：排好的这一份就算「文件里的样子」，标题不带 *、关窗口不问
+      const pristine = savedDoc === doc;
+      set({ doc: next, ...(pristine ? { savedDoc: next, dirty: false } : {}) });
     },
 
     applyLayout(moves) {
@@ -1839,6 +1888,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const { past, future, doc } = get();
       const entry = past[past.length - 1];
       if (!entry) return;
+      const before = { doc, recipes: recipeSet() };
       set({
         doc: entry.doc,
         past: past.slice(0, -1),
@@ -1849,12 +1899,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
         pendingRecipes: null,
       });
       applyRecipeSet(entry.recipes);
+      emitCommitted({ kind: "undo", before, after: { doc: entry.doc, recipes: recipeSet() } });
     },
 
     redo() {
       const { past, future, doc } = get();
       const entry = future[future.length - 1];
       if (!entry) return;
+      const before = { doc, recipes: recipeSet() };
       set({
         doc: entry.doc,
         future: future.slice(0, -1),
@@ -1864,12 +1916,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
         pendingRecipes: null,
       });
       applyRecipeSet(entry.recipes);
+      emitCommitted({ kind: "redo", before, after: { doc: entry.doc, recipes: recipeSet() } });
     },
 
     travel(steps) {
       if (steps === 0) return 0;
       let { past, future, doc } = get();
       let recipes = recipeSet();
+      const before = { doc, recipes };
       past = past.slice();
       future = future.slice();
       const from = steps < 0 ? past : future;
@@ -1886,6 +1940,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       hints = [];
       set({ doc, past, future, dirty: doc !== get().savedDoc, pendingSnapshot: null, pendingRecipes: null });
       applyRecipeSet(recipes);
+      emitCommitted({ kind: "travel", before, after: { doc, recipes: recipeSet() } });
       return steps < 0 ? -moved : moved;
     },
 

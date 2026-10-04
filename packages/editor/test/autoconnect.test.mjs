@@ -8,7 +8,7 @@ import { pasteNotice } from "../src/lib/editActions.ts";
 import { addNodeWithAutoConnect } from "../src/lib/insert.ts";
 import { decodeNodeClipboard, encodeNodeClipboard } from "../src/lib/nodeClipboard.ts";
 import { subgraphsUsedBy } from "../src/lib/subgraph.ts";
-import { useGraphStore } from "../src/store/graph.ts";
+import { onCommitted, useGraphStore } from "../src/store/graph.ts";
 import { useManifestStore } from "../src/store/manifest.ts";
 import { useUiStore } from "../src/store/ui.ts";
 
@@ -387,4 +387,45 @@ test("batch：一个手势里的几个动作一条撤销；拖动的事务里并
   useRecipeStore.setState({ set: { ...setBefore, recipes: [...(setBefore.recipes ?? [])] } });
   g().abort();
   assert.equal(useRecipeStore.getState().set, setBefore, "配方集合也回去");
+});
+
+test("提交了一步（onCommitted，自动运行靠它）：单步动作、拖动松手、batch 各一次；拖动中间帧、没改动、撤回、cancel 不算；撤销 / 重做 / 跳步带上是哪一种", () => {
+  reset();
+  const g = () => useGraphStore.getState();
+  const a = addNodeWithAutoConnect("t.read", { x: 0, y: 0 }).nodeIds[0];
+  const seen = [];
+  const stop = onCommitted((c) => seen.push({ kind: c.kind, changed: c.before.doc !== c.after.doc }));
+  const take = () => seen.splice(0).map((c) => c.kind).join(",");
+
+  g().setBypass([a], true);
+  assert.deepEqual(seen.splice(0), [{ kind: "edit", changed: true }], "单步动作：一次，前后两份 doc");
+  g().begin();
+  g().moveNodes([{ id: a, position: { x: 5, y: 5 } }]);
+  g().moveNodes([{ id: a, position: { x: 9, y: 9 } }]);
+  assert.equal(take(), "", "拖动中间帧不算");
+  g().commit("挪");
+  assert.equal(take(), "edit", "松手 commit 算一次");
+  g().begin();
+  g().commit("没动");
+  g().begin();
+  g().moveNodes([{ id: a, position: { x: 50, y: 50 } }]);
+  g().abort();
+  g().batch("撤回的", (cancel) => {
+    g().setBypass([a], false);
+    cancel();
+  });
+  g().setBypass([a], true); // 已经是 true：什么都没改
+  assert.equal(take(), "", "没改动的 commit、撤回、cancel、没改动的单步都不算");
+  g().batch("两步", () => {
+    g().setBypass([a], false);
+    g().addNode("t.reroute", { x: 0, y: 200 });
+  });
+  assert.equal(take(), "edit", "batch 合成一次");
+  g().undo();
+  g().redo();
+  g().travel(-2);
+  assert.equal(take(), "undo,redo,travel");
+  stop();
+  g().setBypass([a], true);
+  assert.equal(take(), "", "取消订阅之后不再收到");
 });

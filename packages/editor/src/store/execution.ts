@@ -695,11 +695,20 @@ export interface RunRequest {
   auto?: boolean | undefined;
 }
 
+/** 人点的运行（F5、▶、运行到这里、重跑）开跑前调一下：lib/preview 在这里撤掉攒着还没发的自动运行 ——
+ *  这一次读的就是现在的图，已经包含那几处改动；不撤的话过一会儿它会把人点的这一次抢占掉。 */
+let beforeExplicitRun: (() => void) | null = null;
+
+export function setBeforeExplicitRun(fn: (() => void) | null): void {
+  beforeExplicitRun = fn;
+}
+
 export async function startRun(
   doc: GraphDoc,
   graphPath: string | null,
   request: RunRequest = {},
 ): Promise<void> {
+  if (!request.auto) beforeExplicitRun?.();
   const store = useExecutionStore.getState();
   const ticket = ++runTicket;
   const preview = request.preview === true;

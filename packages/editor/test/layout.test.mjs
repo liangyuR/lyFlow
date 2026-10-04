@@ -27,11 +27,22 @@ test("坐标齐全的文档不布局，空文档也不布局", () => {
   assert.equal(needsInitialLayout({ schemaVersion: 1, id: "y", nodes: [], edges: [] }), false);
 });
 
-test("自动布局给每个节点一个落点，上游排在下游左边", () => {
+test("自动布局给每个节点一个落点，上游排在下游左边；打开时的那一次不记撤销、不算改动（layoutLoaded）", async () => {
   const moves = layoutGraph(chain(false));
   assert.equal(moves.length, 2);
   const at = Object.fromEntries(moves.map((m) => [m.id, m.position]));
   assert.ok(at.a.x < at.b.x, JSON.stringify(at));
+
+  // 2026-10-04 拍板：打开文件时缺坐标排出来的那一次不算一步撤销 —— 当成文件本来就排成这样
+  const { useGraphStore } = await import("../src/store/graph.ts");
+  const g = () => useGraphStore.getState();
+  g().loadDoc(chain(false), "c.lyflow.json");
+  g().layoutLoaded(moves);
+  assert.deepEqual([g().doc.nodes.map((n) => n.ui?.position), g().past.length, g().dirty, g().savedDoc === g().doc],
+    [[at.a, at.b], 0, false, true], "排好了、撤销栈是空的、标题不带 *");
+  // 手动「整理布局」（Ctrl+L）照旧是一步撤销
+  g().applyLayout([{ id: "a", position: { x: 999, y: 0 } }]);
+  assert.deepEqual([g().past.length, g().dirty], [1, true]);
 });
 
 // 三栏分宽度：窗口窄了两侧面板让位（右栏先缩），画布至少留 320。
