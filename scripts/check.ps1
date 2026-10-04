@@ -212,9 +212,13 @@ if (Want "mcp") {
 }
 
 # 纯平台构建里要标准包算子的用例不算通过，只是没跑：cargo 记 ignored、node --test 记 skip。
+# -Steps 只点了几步时，只提这一趟真跑了的那几处。
 if ($pureStd) {
-  Write-Host ("`n纯平台构建：要标准包算子的 Rust 测试记为 ignored、MCP 集成冒烟记为 skip（数目见上面两处汇总行）。" +
-              "这一趟只证明 core 零依赖，不替代默认的 pnpm check") -ForegroundColor Yellow
+  $notRun = @()
+  if (Want "bridge") { $notRun += "要标准包算子的 Rust 测试记为 ignored" }
+  if (Want "mcp") { $notRun += "MCP 集成冒烟记为 skip" }
+  $head = if ($notRun.Count) { "纯平台构建：$($notRun -join '、')（数目见上面的汇总行）。" } else { "纯平台构建：" }
+  Write-Host ("`n" + $head + "这一趟只证明 core 零依赖，不替代默认的 pnpm check") -ForegroundColor Yellow
 }
 if ($picked.Count -eq 0) { Write-Host "`n全链路绿" -ForegroundColor Green }
 else { Write-Host "`n点名的几步都绿：$($picked -join '、')" -ForegroundColor Green }

@@ -37,6 +37,10 @@ def make_validator(schema, schema_path):
 
 
 def main() -> int:
+    # stdout 是管道时 Python 按 ANSI 代码页编码：本机 936 能写中文，GitHub 托管 runner 是 1252，
+    # 「ok: … 符合 …」一 print 就 UnicodeEncodeError、退出码 1，check.ps1 还会报成「不符合 schema」。
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8")
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     each = "--each" in sys.argv[1:]
     expect_fail = "--expect-fail" in sys.argv[1:]

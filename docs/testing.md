@@ -17,7 +17,7 @@
 
 ## CI（GitHub Actions）
 
-`.github/workflows/ci.yml`，只用 GitHub 托管的 `windows-2022` runner；每个 PR、每次推 main 都跑，两个 job 都是必过的。
+`.github/workflows/ci.yml`，只用 GitHub 托管的 `windows-2022` runner；每个 PR、每次推 main 都跑这两个 job。合并前两个都要绿是约定：main 上还没设分支保护把它们列成 required check，红着也能点合并（要设的话，check 名就是 ci.yml 里 job 的 `name:`）。
 CI 与本地走同一个入口 `scripts/check.ps1`，按 job 用 `-Steps` 点名（不给就是全部，`pnpm check` 照旧）：
 
 | job | 本地复现 | 验什么 |
