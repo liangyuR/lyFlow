@@ -2,26 +2,29 @@
 // 以前说明只有悬停在名字上才看得到，默认值要去看 ↺ 的悬停提示，范围要把滑块拖到头才知道。
 
 import { num } from "./format";
+import { formatValue } from "./recipes";
 import type { Param } from "../types/manifest";
 
 /** 开着还是收着，所有节点共用一份（lib/prefs 的 "1" / "0"）。默认收起：检查器以调参为主，说明是要时才看。 */
 export const PARAM_DOCS_KEY = "lyflow.inspector.paramDocs";
 
+/** 默认值怎么写：与配方单元格同一套（transform 写成平移 / 旋转、curve 写点数、颜色写 #hex），
+ *  flags 写开着的那几项，空字符串写「空」。 */
 function valueText(param: Param, v: unknown): string {
-  if (param.options && (typeof v === "string" || typeof v === "number")) {
-    const opt = param.options.find((o) => o.value === v);
-    if (opt) return opt.label || String(opt.value);
+  if (v === "") return "空";
+  if (param.type === "flags" && typeof v === "number" && param.options) {
+    const on = param.options.filter((o) => typeof o.value === "number" && (v & o.value) !== 0).map((o) => o.label || String(o.value));
+    return on.length > 0 ? on.join(" + ") : "无";
   }
-  if (typeof v === "number") return num(v);
-  if (typeof v === "boolean") return v ? "开" : "关";
-  if (typeof v === "string") return v === "" ? "空" : v.length > 32 ? `${v.slice(0, 31)}…` : v;
-  if (Array.isArray(v)) return `[${v.map((x) => (typeof x === "number" ? num(x) : String(x))).join(", ")}]`;
-  if (v === undefined || v === null) return "无";
-  const text = JSON.stringify(v);
-  return text.length > 32 ? `${text.slice(0, 31)}…` : text;
+  return formatValue(v, param);
 }
 
-const numeric = (v: unknown): boolean => typeof v === "number" || (Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === "number"));
+/** 单位跟在默认值后面的那几种：数与数的向量（transform 的 unit 是平移的单位、颜色没有单位，另写）。 */
+function unitFollowsValue(param: Param): boolean {
+  if (param.type === "transform" || param.type === "color" || param.type === "curve") return false;
+  const v = param.default;
+  return typeof v === "number" || (Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === "number"));
+}
 
 function rangeText(lo: number | undefined, hi: number | undefined, unit: string): string | null {
   if (lo !== undefined && hi !== undefined) return `${num(lo)} – ${num(hi)}${unit}`;
@@ -31,15 +34,17 @@ function rangeText(lo: number | undefined, hi: number | undefined, unit: string)
 }
 
 /** 说明下面那一行：「默认 0.02 mm · 范围 0 – 1 mm · 常用 0 – 0.5 mm」；枚举再写「可选 A / B」。
- *  单位只跟在数（与数组）后面；没有范围的数照样写单位。 */
+ *  curve 的上下限管的是 y（写「y 范围」「画布 y」）；transform 的单位是平移的。 */
 export function paramFacts(param: Param): string {
   const unit = param.unit ? ` ${param.unit}` : "";
-  const parts = [`默认 ${valueText(param, param.default)}${numeric(param.default) ? unit : ""}`];
-  const hard = rangeText(param.min, param.max, unit);
-  if (hard) parts.push(`范围 ${hard}`);
-  const soft = rangeText(param.softMin, param.softMax, unit);
-  if (soft && soft !== hard) parts.push(`常用 ${soft}`);
-  if (param.unit && !numeric(param.default) && !hard && !soft) parts.push(`单位 ${param.unit}`);
+  const follows = unitFollowsValue(param);
+  const parts = [`默认 ${valueText(param, param.default)}${follows ? unit : ""}`];
+  const curve = param.type === "curve";
+  const hard = rangeText(param.min, param.max, follows ? unit : "");
+  if (hard) parts.push(`${curve ? "y 范围" : "范围"} ${hard}`);
+  const soft = rangeText(param.softMin, param.softMax, follows ? unit : "");
+  if (soft && soft !== hard) parts.push(`${curve ? "画布 y" : "常用"} ${soft}`);
+  if (param.unit && !follows) parts.push(param.type === "transform" ? `平移单位 ${param.unit}` : `单位 ${param.unit}`);
   if (param.options && param.options.length > 0) {
     parts.push(`可选 ${param.options.map((o) => o.label || String(o.value)).join(" / ")}`);
   }

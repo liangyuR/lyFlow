@@ -250,6 +250,15 @@ test("参数说明那一行（检查器「参数说明」开着时）：默认�
       "默认 Target Count · 可选 Target Count / Ratio"],
     ["空字符串", P({ type: "path", default: "" }), "默认 空"],
     ["不是数的参数也有单位：单独写", P({ type: "string", default: "x", unit: "mm" }), "默认 x · 单位 mm"],
+    ["颜色写 #hex、不带单位", P({ type: "color", default: [1, 0.5, 0] }), "默认 #ff8000"],
+    ["flags 写开着的那几项", P({ type: "flags", default: 5, options: [{ value: 1, label: "A" }, { value: 2, label: "B" }, { value: 4, label: "C" }] }),
+      "默认 A + C · 可选 A / B / C"],
+    ["flags 一项都没开", P({ type: "flags", default: 0, options: [{ value: 1, label: "A" }] }), "默认 无 · 可选 A"],
+    ["transform 的单位是平移的", P({ type: "transform", default: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], unit: "mm" }),
+      "默认 T[0, 0, 0] R[0, 0, 0]° · 平移单位 mm"],
   ];
   for (const [name, param, want] of cases) assert.equal(paramFacts(param), want, name);
+  // curve 的上下限管的是 y
+  assert.match(paramFacts(P({ type: "curve", default: { points: [[0, 0], [1, 1]], interp: "linear" }, min: 0, max: 1, softMin: 0, softMax: 0.5 })),
+    / · y 范围 0 – 1 · 画布 y 0 – 0\.5$/);
 });
