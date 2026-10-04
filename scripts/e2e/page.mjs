@@ -108,6 +108,13 @@ export const restoreClipboard = (cdp) =>
     return true;
   `);
 
+/** 下一次文件对话框（run.mjs 起 app 时装的桩）答这个路径；返回之前记下的请求条数，配合 pickRequests 看这一次要的是什么。 */
+export const answerPickPath = (cdp, answer) =>
+  cdp.eval(`window.__lyPickAnswer = ${JSON.stringify(answer)}; return window.__lyPicks.length;`);
+
+/** 从第 from 条起，文件对话框被要了哪几次（mode、filters、defaultPath）。 */
+export const pickRequests = (cdp, from = 0) => cdp.eval(`return window.__lyPicks.slice(${Number(from)});`);
+
 export const pressF5 = (cdp) => pressKey(cdp, "F5", 116);
 export const pressShiftF5 = (cdp) => pressKey(cdp, "F5", 116, ["shift"]);
 export const pressEscape = (cdp) => pressKey(cdp, "Escape", 27);

@@ -38,6 +38,7 @@ import {
 } from "@lyflow/editor";
 
 import { closeGuard, shouldClose } from "./closeGuard";
+import { overridePickPath } from "./dialogs";
 
 interface DevBridge {
   version: string;
@@ -79,6 +80,8 @@ interface DevBridge {
   shell: {
     closeGuardInstalled(): boolean;
     shouldClose(): Promise<{ asked: boolean; close: boolean }>;
+    /** 文件对话框（参数的「浏览…」、导出 PNG、库目录）换成脚本给的答案：原生对话框会挡住自动化。null 还原。 */
+    stubPickPath(fn: ((request: { mode: string; filters?: unknown; defaultPath?: string }) => Promise<string | null>) | null): void;
   };
   /** 立刻编译一次，不等 debounce。验收脚本不想为 150ms 睡一觉。 */
   plan(): Promise<void>;
@@ -167,6 +170,7 @@ export function installDevBridge(transport: Transport): void {
     },
     shell: {
       closeGuardInstalled: () => closeGuard.installed,
+      stubPickPath: (fn) => overridePickPath(fn),
       async shouldClose() {
         let asked = false;
         const close = await shouldClose(() => {

@@ -2,6 +2,7 @@
 // 与 M2 的分组共用一个 app 实例，helper 在 ./page.mjs。
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { sleep } from "./cdp.mjs";
@@ -34,6 +35,8 @@ import {
   selectAndReadViewer,
   viewerBounds,
   stubClipboard,
+  answerPickPath,
+  pickRequests,
 } from "./page.mjs";
 
 /** 一条三节点直链：生成 → 体素 → 透传。缓存与 stale 的分组都用它。 */
@@ -2431,17 +2434,18 @@ async function suiteViewerBody(cdp, report) {
     gridOk(gFar) && gridOk(gGen) && gFar.cx > 999 && Math.abs(gGen.cx) < 1 && gFar.text === gGen.text,
     JSON.stringify({ gFar, gGen }));
 
-  // 导出：真正的下载由浏览器接管，这里只点一下，抛异常会被控制台分组逮到
-  mustOk(
-    await cdp.eval(`
-      const btn = document.querySelector('[data-testid="viewer-export"]');
-      if (!btn) return false;
-      btn.click();
-      await new Promise(r => setTimeout(r, 300));
-      return true;
-    `),
-    "导出按钮点得到",
-  );
+  // 导出 PNG：弹原生的保存对话框（验收里是 run.mjs 装的桩，答一个临时文件），选了路径就写出那张图
+  const pngOut = path.join(os.tmpdir(), `lyflow-e2e-export-${Date.now().toString(36)}.png`);
+  const pngPicks = await answerPickPath(cdp, pngOut);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="viewer-export"]'));
+  await cdp.waitFor(`(window.__lyflow.stores.ui.getState().toast?.text ?? '').startsWith('已导出')`,
+    { what: "导出 PNG 写完", timeoutMs: 10_000 }).catch(() => {});
+  const [pngReq] = await pickRequests(cdp, pngPicks);
+  const pngSize = fs.existsSync(pngOut) ? fs.statSync(pngOut).size : -1;
+  fs.rmSync(pngOut, { force: true });
+  report.ok("预览的「PNG」：弹保存对话框（建议的文件名是 .png、按 PNG 过滤），选了路径就写出那张图",
+    pngReq?.mode === "save" && /\.png$/.test(pngReq?.defaultPath ?? "") && JSON.stringify(pngReq?.filters ?? []).includes("png") && pngSize > 1000,
+    JSON.stringify({ pngReq, pngSize }));
 
   // 预览选看哪个点云输出：提取下标有 selected / rest，以前固定第一个，rest 在预览里怎么都看不到
   await newDoc(cdp);

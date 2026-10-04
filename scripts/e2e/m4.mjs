@@ -27,6 +27,8 @@ import {
   select,
   selectAndReadViewer,
   stubClipboard,
+  answerPickPath,
+  pickRequests,
 } from "./page.mjs";
 
 /** 一条五节点直链：生成 → 裁剪 → 体素 → 去噪 → 直通。合成的对象是中间三个。 */
@@ -870,6 +872,22 @@ async function suiteLibrary(cdp, report) {
       await cdp.waitFor(`!window.__lyflow.stores.manifest.getState().operatorsById.has(${lit("lib." + extraId)})`,
         { what: "去掉目录后库算子消失", timeoutMs: 15_000 }).catch(() => {});
       report.eq("× 去掉目录：它的库算子从 manifest 里消失", await hasOp(`lib.${extraId}`), false);
+
+      // 「浏览…」选目录（原生的文件对话框，验收里是桩）：选了就加上、当场重扫；再 × 去掉
+      const libPicks = await answerPickPath(cdp, extraDir);
+      await cdp.eval(`document.querySelector('[data-testid="library-browse"]').click(); return true;`);
+      await cdp.waitFor(`window.__lyflow.stores.manifest.getState().operatorsById.has(${lit("lib." + extraId)})`,
+        { what: "浏览选的目录里的库算子进了 manifest", timeoutMs: 15_000 }).catch(() => {});
+      const [libReq] = await pickRequests(cdp, libPicks);
+      report.ok("库目录的「浏览…」：弹选目录的对话框，选的目录加上、它的库算子进了 manifest",
+        libReq?.mode === "dir" && (await hasOp(`lib.${extraId}`)), JSON.stringify({ libReq }));
+      await cdp.eval(`
+        const li = [...document.querySelectorAll('[data-testid="library-dir"]')].find((x) => x.getAttribute('title') === ${lit(extraDir)});
+        li?.querySelector('[data-testid="library-remove"]')?.click();
+        return true;
+      `);
+      await cdp.waitFor(`!window.__lyflow.stores.manifest.getState().operatorsById.has(${lit("lib." + extraId)})`,
+        { what: "去掉目录后库算子消失", timeoutMs: 15_000 }).catch(() => {});
     } finally {
       await cdp.eval(`
         const r = await window.__lyflow.transport.setLibraryDirs(${lit(original)});
@@ -1710,7 +1728,7 @@ async function suiteM3Tails(cdp, report, ws) {
   `);
   report.eq("自带颜色、没有强度的点云默认按 RGB 着色", rgb, { shading: "rgb", rgbEnabled: true });
 
-  // PNG 导出的落盘那一半：对话框是原生的，CDP 驱动不了，但写文件这一步可以验
+  // PNG 导出的落盘那一半：中文路径一字不差（真点「PNG」、保存框打桩的那条在 m3 的 suiteViewer）
   const target = path.join(ws.dir, "导出 视图.png");
   const wrote = await cdp.eval(`
     const bytes = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -1725,7 +1743,7 @@ async function suiteM3Tails(cdp, report, ws) {
   );
 
   // 路径框里粘一个资源管理器「复制文件地址」给的带引号、前后有空格的路径：存下的是去掉引号与空白的，跑得通。
-  // 以前原样存下、跑的时候才报「文件不存在」。桌面壳没有文件对话框：不摆一个点了只弹提示的「浏览…」
+  // 以前原样存下、跑的时候才报「文件不存在」。桌面壳的「浏览…」是原生的文件对话框（2026-10-04 起，验收里是 run.mjs 装的桩）
   const copy = path.join(ws.dir, "彩色 副本.pcd");
   fs.copyFileSync(colored, copy);
   await select(cdp, ids.rgb);
@@ -1744,11 +1762,25 @@ async function suiteM3Tails(cdp, report, ws) {
   const ranPasted = await runAndWait(cdp, () => pressF5(cdp));
   await pressCtrl(cdp, "z");
   await sleep(150);
-  report.ok("路径框里粘带引号、前后有空格的路径：存下的去掉了引号与空白、框里也是，跑得通；没有文件对话框时不摆「浏览…」；Ctrl+Z 回到原来的",
-    pasted.param === copy && pasted.shown === copy && !pasted.browse &&
+  report.ok("路径框里粘带引号、前后有空格的路径：存下的去掉了引号与空白、框里也是，跑得通；旁边摆着「浏览…」；Ctrl+Z 回到原来的",
+    pasted.param === copy && pasted.shown === copy && pasted.browse &&
       ["done", "skipped"].includes(ranPasted.nodes[ids.rgb]?.state) &&
       (await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.find((x) => x.id === ${lit(ids.rgb)}).params.path;`)) === colored,
     JSON.stringify({ pasted, state: ranPasted.nodes[ids.rgb]?.state, errors: ranPasted.nodes[ids.rgb]?.errors }));
+
+  // 真点「浏览…」：弹文件对话框 —— 从框里的那个路径开、按参数声明的类型过滤（打开 .pcd）；选了就写进参数，一条撤销
+  const picksBefore = await answerPickPath(cdp, copy);
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="param-path"] .ctl-btn'));
+  await sleep(250);
+  const [pickReq] = await pickRequests(cdp, picksBefore);
+  const browsed = await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.find((x) => x.id === ${lit(ids.rgb)}).params.path;`);
+  await pressCtrl(cdp, "z");
+  await sleep(150);
+  report.ok("真点路径参数的「浏览…」：弹文件对话框（打开、从框里的路径开、按 .pcd 过滤），选的路径写进参数；Ctrl+Z 回去",
+    browsed === copy && pickReq?.mode === "open" && pickReq?.defaultPath === colored &&
+      JSON.stringify(pickReq?.filters ?? []).includes("pcd") &&
+      (await cdp.eval(`return window.__lyflow.stores.graph.getState().doc.nodes.find((x) => x.id === ${lit(ids.rgb)}).params.path;`)) === colored,
+    JSON.stringify({ pickReq, browsed }));
 
   // 存着的路径带空格（老图、CLI --set 写进来的）：点进框里看一眼再点出来，不悄悄改掉它、不记撤销
   const spaced = `${colored} `;

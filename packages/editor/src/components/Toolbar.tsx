@@ -271,8 +271,12 @@ function LibraryMenu() {
   const pickPath = dialogs().pickPath;
   const browse = async () => {
     if (!pickPath) return;
-    const d = await pickPath({ mode: "dir" });
-    if (d) add(d);
+    try {
+      const d = await pickPath({ mode: "dir" });
+      if (d) add(d);
+    } catch (e) {
+      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
+    }
   };
 
   const editable = settings?.editable === true;

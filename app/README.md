@@ -39,7 +39,8 @@ const transport = inTauri() ? new TauriTransport() : new StaticTransport();
 不写 UI 单元测试（CLAUDE.md）。验收方式是 CDP 驱动真实运行的 Tauri app：
 `pnpm e2e`，脚本在 [`scripts/e2e/`](../scripts/e2e/)。
 `src/devbridge.ts` 把包里那五个 store 挂到 `window.__lyflow` 上供脚本读状态 ——
-它只读+转发，不放任何业务逻辑，应用代码一律不许 import 它。
+它只读+转发，不放任何业务逻辑，应用代码一律不许 import 它。唯一往里写的是 `shell.stubPickPath`：原生的文件对话框会挡住自动化，
+`scripts/e2e/run.mjs` 起 app 就经它把 `dialogs.ts` 的 `pickPath` 换成桩（`overridePickPath`，正常使用时是 null）。
 
 浏览器宿主那条线是 `pnpm e2e:http`（`examples/host-react` + Node 桩服务器）。
 

@@ -14,7 +14,8 @@ export interface PathPickRequest {
 }
 
 export interface EditorDialogs {
-  /** 参数表单的路径选择与 3D 导出用。没有它的宿主会退回浏览器下载/提示。 */
+  /** 参数表单的「浏览…」、3D / 查看器导出 PNG、库目录的「浏览…」用（桌面壳给的是原生对话框，2026-10-04 起）。
+   *  没有它的宿主：路径只能手填或粘（「浏览…」不摆），导出退回浏览器下载。 */
   pickPath?: ((request: PathPickRequest) => Promise<string | null>) | undefined;
   /** 返回 null 表示用户取消。 */
   pickOpenPath(): Promise<string | null>;

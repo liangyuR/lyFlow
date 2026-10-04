@@ -113,7 +113,7 @@ const dialogs: EditorDialogs = {
   pickOpenPath: () => …,          // 返回 null 表示用户取消
   pickSavePath: (suggested) => …,
   confirmRestore: (path, message) => …,
-  pickPath: (req) => …,           // 可选：参数表单的路径选择、3D 导出 PNG
+  pickPath: (req) => …,           // 可选：参数表单的「浏览…」、3D / 查看器导出 PNG、库目录（不给：浏览不摆、导出退回浏览器下载）
   pickRecipePath: (mode, name) => …, // 可选：配方的导入（open）/ 导出（save）
 };
 ```

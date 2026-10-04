@@ -459,6 +459,19 @@ async function main() {
   const { cdp, consoleErrors } = app;
   // e2e 与开发中的 app 共用一份 WebView2 存储：你在 app 里存下的界面偏好（预览的着色 / 显示点数、检查器端口小节的
   // 开合）先挪开、各组从默认开始，跑完放回去。显示点数被记成 100K 时，各组比的点数全对不上
+  // 文件对话框（参数的「浏览…」、导出 PNG、库目录）是原生的，弹出来就挡住脚本：起 app 就换成桩 —— 记下每次要的是什么，
+  // 答 window.__lyPickAnswer（用过一次就清掉；没放就是 null = 取消）。要路径的组先放答案，见 page.mjs 的 answerPickPath
+  await cdp.eval(`
+    window.__lyPicks = [];
+    window.__lyPickAnswer = null;
+    window.__lyflow.shell.stubPickPath(async (request) => {
+      window.__lyPicks.push(request);
+      const answer = window.__lyPickAnswer;
+      window.__lyPickAnswer = null;
+      return answer;
+    });
+    return true;
+  `).catch(() => null);
   const PREF_KEYS = ["lyflow.viewer.display", "lyflow.inspector.portsOpen", "lyflow.inspector.paramDocs"];
   const parkedPrefs = await cdp.eval(`
     const keys = ${lit(PREF_KEYS)};

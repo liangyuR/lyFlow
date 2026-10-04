@@ -313,16 +313,24 @@ function TextishControl({
 }
 
 function PathControl({ param, value, disabled, onChange }: ControlProps) {
-  // 宿主没给文件对话框（桌面壳现在就没给，param-recipe P3 决定 13）：不摆一个点了只弹「请手动填路径」的按钮
+  // 宿主给了文件对话框（桌面壳是原生的）才摆「浏览…」；没给的（浏览器宿主）路径手填或粘
   const pickPath = dialogs().pickPath;
   const pick = async () => {
     if (!pickPath) return;
     const filters = (param.filters ?? []).map((f) => ({ name: f.name, extensions: f.extensions }));
-    const picked = await pickPath({
-      mode: param.mode === "save" ? "save" : param.mode === "dir" ? "dir" : "open",
-      filters,
-    });
-    if (typeof picked === "string") onChange(picked);
+    // 框里已经是一个绝对路径：对话框从它那里开（相对路径是相对图文件的，对话框认不出来，不给）
+    const current = typeof value === "string" ? cleanPathText(value) : "";
+    const absolute = /^([A-Za-z]:[\\/]|[\\/])/.test(current);
+    try {
+      const picked = await pickPath({
+        mode: param.mode === "save" ? "save" : param.mode === "dir" ? "dir" : "open",
+        filters,
+        ...(absolute ? { defaultPath: current } : {}),
+      });
+      if (typeof picked === "string" && picked !== "") onChange(picked);
+    } catch (e) {
+      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
+    }
   };
 
   return (
