@@ -73,7 +73,11 @@ fn pcd_reader_agrees_with_io_load_pcd_on_all_three_formats() {
         assert_eq!(ours.xyz.len(), 777 * 3, "{format}");
         assert_eq!(ours.xyz.as_slice(), view.xyz(), "{format}: xyz");
         if view.has_intensity() {
-            assert_eq!(ours.intensity.as_slice(), view.intensity(), "{format}: intensity");
+            assert_eq!(
+                ours.intensity.as_slice(),
+                view.intensity(),
+                "{format}: intensity"
+            );
         }
     }
 }
@@ -103,7 +107,16 @@ fn input_injects_a_cloud_into_an_input_port() {
 
     let fa = format!("m.a={}", a.to_string_lossy());
     let fb = format!("m.b={}", b.to_string_lossy());
-    let r = cli(&["run", &graph, "--input", &fa, "--input", &fb, "--outputs", "--no-cache"]);
+    let r = cli(&[
+        "run",
+        &graph,
+        "--input",
+        &fa,
+        "--input",
+        &fb,
+        "--outputs",
+        "--no-cache",
+    ]);
     assert_eq!(r.code, EXIT_OK, "{}\n{}", r.err, r.out);
     let lines = r.lines();
     let done = lines
@@ -112,12 +125,25 @@ fn input_injects_a_cloud_into_an_input_port() {
         .expect("m 没有 done");
     // 输入注入：compute 真的跑了（不是 provided）
     assert!(done["stats"].get("provided").is_none(), "{done}");
-    let outputs = lines.iter().find(|e| e.get("merged").is_some()).expect("没有 --outputs 那一行");
+    let outputs = lines
+        .iter()
+        .find(|e| e.get("merged").is_some())
+        .expect("没有 --outputs 那一行");
     assert_eq!(outputs["merged"]["elementCount"], 5);
 
     // 端口名写错：执行期校验报 unknown_port，退出码 2；写法不对是参数错
     let wrong = format!("m.nope={}", a.to_string_lossy());
-    let r = cli(&["run", &graph, "--input", &fa, "--input", &fb, "--input", &wrong, "--no-cache"]);
+    let r = cli(&[
+        "run",
+        &graph,
+        "--input",
+        &fa,
+        "--input",
+        &fb,
+        "--input",
+        &wrong,
+        "--no-cache",
+    ]);
     assert_eq!(r.code, EXIT_FAILED, "{}", r.out);
     assert!(r.out.contains("unknown_port"), "{}", r.out);
     assert_eq!(cli(&["run", &graph, "--input", "m.a"]).code, EXIT_USAGE);
@@ -202,7 +228,10 @@ fn params_joins_defaults_and_marks_the_source() {
         }
     }
     assert!(rows.iter().any(|x| x["source"] == "default"), "{}", r.out);
-    assert!(rows.iter().all(|x| x["source"] != "bound"), "这张图没有子图");
+    assert!(
+        rows.iter().all(|x| x["source"] != "bound"),
+        "这张图没有子图"
+    );
 
     // --set 先应用再解析：问的是「这组 --set 之后生效值是什么」
     let after = cli(&["params", &graph, "--json", "--set", "g.seed=999"]);
@@ -230,7 +259,13 @@ fn params_filters_by_node_and_by_source() {
     let names: Vec<String> = explicit
         .lines()
         .iter()
-        .map(|x| format!("{}.{}", x["node"].as_str().unwrap(), x["param"].as_str().unwrap()))
+        .map(|x| {
+            format!(
+                "{}.{}",
+                x["node"].as_str().unwrap(),
+                x["param"].as_str().unwrap()
+            )
+        })
         .collect();
     assert_eq!(names, vec!["g.pointCount", "g.seed", "v.leafSize"]);
 
@@ -425,7 +460,11 @@ fn the_run_progress_line_counts_nodes_and_names_the_running_ones() {
     p.event(&json!({"kind": "node_state", "nodeId": "b", "state": "running"}));
     p.event(&json!({"kind": "node_state", "nodeId": "a", "state": "done"}));
     p.event(&json!({"kind": "node_state", "nodeId": "c", "state": "pending"}));
-    assert!(p.text().starts_with("[1/3] 节点 · 正在算 b · 已过 "), "{}", p.text());
+    assert!(
+        p.text().starts_with("[1/3] 节点 · 正在算 b · 已过 "),
+        "{}",
+        p.text()
+    );
     p.event(&json!({"kind": "node_state", "nodeId": "b", "state": "error"}));
     p.event(&json!({"kind": "node_state", "nodeId": "c", "state": "skipped"}));
     assert!(p.text().starts_with("[3/3] 节点 · 已过 "), "{}", p.text());
@@ -439,49 +478,170 @@ fn wrong_usage_is_rejected_with_its_exit_code_and_message() {
     let graph = chain(&dir, 309);
     // 纯平台构建里也成立的两张图：一个不存在的算子、一张空图
     let unknown = dir.join("unknown-op.lyflow.json");
-    std::fs::write(&unknown, r#"{"schemaVersion":1,"id":"u","nodes":[{"id":"a","op":"nope.op"}],"edges":[]}"#).unwrap();
+    std::fs::write(
+        &unknown,
+        r#"{"schemaVersion":1,"id":"u","nodes":[{"id":"a","op":"nope.op"}],"edges":[]}"#,
+    )
+    .unwrap();
     let unknown = unknown.to_string_lossy().into_owned();
     let empty = dir.join("empty.lyflow.json");
-    std::fs::write(&empty, r#"{"schemaVersion":1,"id":"e","nodes":[],"edges":[]}"#).unwrap();
+    std::fs::write(
+        &empty,
+        r#"{"schemaVersion":1,"id":"e","nodes":[],"edges":[]}"#,
+    )
+    .unwrap();
     let empty = empty.to_string_lossy().into_owned();
     let crop = crop_chain(&dir, 3403, 17007);
     let scene = samples_file(&dir, "scene.jsonl", &[r#"{"id":"a","scene":"sc_1"}"#]);
     let perturb = |after: &'static str, region: &'static str| {
-        vec!["perturb", crop.as_str(), "--after", after, "--region", region, "--axis", "x=0:1:2",
-             "--metric", "nodes.c.elementCount"]
+        vec![
+            "perturb",
+            crop.as_str(),
+            "--after",
+            after,
+            "--region",
+            region,
+            "--axis",
+            "x=0:1:2",
+            "--metric",
+            "nodes.c.elementCount",
+        ]
     };
     let cases: Vec<(Vec<&str>, i32, &str)> = vec![
         (vec![], EXIT_USAGE, "lyflow run"),
         (vec!["nope"], EXIT_USAGE, "不认识的子命令 nope"),
-        (vec!["run", "x.json", "--nope"], EXIT_USAGE, "不认识的选项 --nope"),
-        (vec!["sweep", &graph, "--param", "v.x=1:2", "--metric", "v:cloud.elementCount"], EXIT_USAGE,
-         "start:end:steps"),
+        (
+            vec!["run", "x.json", "--nope"],
+            EXIT_USAGE,
+            "不认识的选项 --nope",
+        ),
+        (
+            vec![
+                "sweep",
+                &graph,
+                "--param",
+                "v.x=1:2",
+                "--metric",
+                "v:cloud.elementCount",
+            ],
+            EXIT_USAGE,
+            "start:end:steps",
+        ),
         // 节点不存在是这张图套不上这条 --set，按「图不合法」报 1，不是写法错的 4
-        (vec!["run", &graph, "--set", "nope.x=1"], EXIT_INVALID, "没有节点"),
-        (vec!["eval", &graph, "--samples", &scene, "--metric", "nodes.v.elementCount"], EXIT_USAGE, "scene"),
+        (
+            vec!["run", &graph, "--set", "nope.x=1"],
+            EXIT_INVALID,
+            "没有节点",
+        ),
+        (
+            vec![
+                "eval",
+                &graph,
+                "--samples",
+                &scene,
+                "--metric",
+                "nodes.v.elementCount",
+            ],
+            EXIT_USAGE,
+            "scene",
+        ),
         (perturb("sub/g:cloud", HALFSPACE), EXIT_USAGE, "子图"),
-        (perturb("g:cloud", r#"{"kind":"sphere"}"#), EXIT_USAGE, "kind"),
+        (
+            perturb("g:cloud", r#"{"kind":"sphere"}"#),
+            EXIT_USAGE,
+            "kind",
+        ),
         (perturb("nope:cloud", HALFSPACE), EXIT_USAGE, "没有节点"),
         (vec!["patch", &graph], EXIT_USAGE, "至少给一个动作"),
         (vec!["patch"], EXIT_USAGE, "用法：lyflow patch"),
         // 数字选项写错：以前悄悄当成默认值
-        (vec!["run", &graph, "--parallel", "4x"], EXIT_USAGE, "--parallel 要一个非负整数，收到 4x"),
-        (vec!["run", &graph, "--preview-points", "-5"], EXIT_USAGE, "--preview-points"),
-        (vec!["eval", &graph, "--metric", "run.durationMs", "--parallel", "abc"], EXIT_USAGE, "--parallel"),
-        (vec!["eval", &graph, "--metric", "run.durationMs", "--jobs", "0"], EXIT_USAGE, "--jobs"),
-        (vec!["sweep", &graph, "--param", "v.minPointsPerVoxel=1:2:2", "--metric", "v:cloud.elementCount",
-              "--jobs", "two"], EXIT_USAGE, "--jobs"),
-        (perturb("g:cloud", HALFSPACE).into_iter().chain(["--jobs", "-1"]).collect(), EXIT_USAGE, "--jobs"),
+        (
+            vec!["run", &graph, "--parallel", "4x"],
+            EXIT_USAGE,
+            "--parallel 要一个非负整数，收到 4x",
+        ),
+        (
+            vec!["run", &graph, "--preview-points", "-5"],
+            EXIT_USAGE,
+            "--preview-points",
+        ),
+        (
+            vec![
+                "eval",
+                &graph,
+                "--metric",
+                "run.durationMs",
+                "--parallel",
+                "abc",
+            ],
+            EXIT_USAGE,
+            "--parallel",
+        ),
+        (
+            vec!["eval", &graph, "--metric", "run.durationMs", "--jobs", "0"],
+            EXIT_USAGE,
+            "--jobs",
+        ),
+        (
+            vec![
+                "sweep",
+                &graph,
+                "--param",
+                "v.minPointsPerVoxel=1:2:2",
+                "--metric",
+                "v:cloud.elementCount",
+                "--jobs",
+                "two",
+            ],
+            EXIT_USAGE,
+            "--jobs",
+        ),
+        (
+            perturb("g:cloud", HALFSPACE)
+                .into_iter()
+                .chain(["--jobs", "-1"])
+                .collect(),
+            EXIT_USAGE,
+            "--jobs",
+        ),
         // 失败的原因也写在 stderr 上：诊断在 stdout 的 JSON 行里，stdout 常被重定向进文件
-        (vec!["run", &unknown], EXIT_INVALID, "a：当前 core 没有注册算子 'nope.op'（unknown_op）"),
-        (vec!["validate", &unknown], EXIT_INVALID, "1 条错误：\n  a：当前 core 没有注册算子"),
-        (vec!["run", &empty, "--to", "zzz"], EXIT_FAILED, "目标不存在: zzz（unknown_node）"),
-        (vec!["dump", &graph, "v:cloud", "out.pcd", "--format", "asci"], EXIT_USAGE, "--format 只认 binary / ascii / binary_compressed，收到 asci"),
-        (vec!["dump", &empty, "zzz:cloud", "out.pcd"], EXIT_FAILED, "目标不存在: zzz（unknown_node）"),
+        (
+            vec!["run", &unknown],
+            EXIT_INVALID,
+            "a：当前 core 没有注册算子 'nope.op'（unknown_op）",
+        ),
+        (
+            vec!["validate", &unknown],
+            EXIT_INVALID,
+            "1 条错误：\n  a：当前 core 没有注册算子",
+        ),
+        (
+            vec!["run", &empty, "--to", "zzz"],
+            EXIT_FAILED,
+            "目标不存在: zzz（unknown_node）",
+        ),
+        (
+            vec!["dump", &graph, "v:cloud", "out.pcd", "--format", "asci"],
+            EXIT_USAGE,
+            "--format 只认 binary / ascii / binary_compressed，收到 asci",
+        ),
+        (
+            vec!["dump", &empty, "zzz:cloud", "out.pcd"],
+            EXIT_FAILED,
+            "目标不存在: zzz（unknown_node）",
+        ),
         // 端口写错、扫不存在的参数要一个真算子，在 dump_writes_the_output_to_disk / sweep_broadcasts_… 里
         // plan、import 没成也说为什么（以前只有「图当前不合法，编译不出计划」「导入失败」）
-        (vec!["plan", &graph, "--to", "zzz"], EXIT_INVALID, "目标不存在: zzz（unknown_node）"),
-        (vec!["import", &graph, "--kind", "nosuchkind"], EXIT_INVALID, "没有注册 'nosuchkind' 这种导入器"),
+        (
+            vec!["plan", &graph, "--to", "zzz"],
+            EXIT_INVALID,
+            "目标不存在: zzz（unknown_node）",
+        ),
+        (
+            vec!["import", &graph, "--kind", "nosuchkind"],
+            EXIT_INVALID,
+            "没有注册 'nosuchkind' 这种导入器",
+        ),
         // 子命令后面跟 --help：给这个子命令那一段用法、退出 0（以前是「少了 graph」的一句短用法，退出 4）
         (vec!["run", "--help"], EXIT_OK, "--preview-points"),
         (vec!["sweep", "--help"], EXIT_OK, "--jobs"),
@@ -489,7 +649,11 @@ fn wrong_usage_is_rejected_with_its_exit_code_and_message() {
     for (args, code, want) in &cases {
         let r = cli(args);
         assert_eq!(r.code, *code, "{args:?}: {}", r.err);
-        assert!(r.err.contains(want), "{args:?} 的 stderr 缺「{want}」：{}", r.err);
+        assert!(
+            r.err.contains(want),
+            "{args:?} 的 stderr 缺「{want}」：{}",
+            r.err
+        );
     }
 }
 
@@ -510,7 +674,12 @@ fn dump_writes_the_output_to_disk() {
     // 端口写错：说这个节点有哪些输出（以前只有「结果仓里没有 v.nope」）
     let r = cli(&["dump", &graph, "v:nope", "out.pcd"]);
     assert_eq!(r.code, EXIT_USAGE, "{}", r.err);
-    assert!(r.err.contains("节点 v 没有输出端口 nope（它的输出：cloud）"), "{}", r.err);
+    assert!(
+        r.err
+            .contains("节点 v 没有输出端口 nope（它的输出：cloud）"),
+        "{}",
+        r.err
+    );
 }
 
 /// m4-plan §3 的验收原话是「sweep 5 组 leafSize」——而 leafSize 是 vec3f。
@@ -548,13 +717,28 @@ fn sweep_broadcasts_a_scalar_onto_a_vector_param() {
     assert_eq!(reused, 4, "{}", r.out);
 
     let text = std::fs::read_to_string(&csv).unwrap();
-    assert!(text.starts_with("v.leafSize,v:cloud.elementCount"), "{text}");
+    assert!(
+        text.starts_with("v.leafSize,v:cloud.elementCount"),
+        "{text}"
+    );
     assert_eq!(text.lines().count(), 6);
 
     // 扫一个不存在的参数：每组都没过校验。以前 stderr 只有「扫了 2 组」
-    let r = cli(&["sweep", &graph, "--param", "v.nope=1:2:2", "--metric", "v:cloud.elementCount"]);
+    let r = cli(&[
+        "sweep",
+        &graph,
+        "--param",
+        "v.nope=1:2:2",
+        "--metric",
+        "v:cloud.elementCount",
+    ]);
     assert_eq!(r.code, EXIT_INVALID, "{}", r.err);
-    assert!(r.err.contains("没成的 2 次：validation_failed 2（unknown_param × 2）"), "{}", r.err);
+    assert!(
+        r.err
+            .contains("没成的 2 次：validation_failed 2（unknown_param × 2）"),
+        "{}",
+        r.err
+    );
 }
 
 /// §3 验收：只移动了节点的两份图，diff 输出为空。
@@ -586,7 +770,10 @@ fn diff_ignores_ui_and_catches_params() {
     assert_eq!(d["empty"], false);
     assert_eq!(d["nodesAdded"][0]["id"], "p");
     assert_eq!(d["nodesChanged"][0]["id"], "v");
-    assert_eq!(d["nodesChanged"][0]["params"]["leafSize"]["to"], json!([0.05, 0.05, 0.05]));
+    assert_eq!(
+        d["nodesChanged"][0]["params"]["leafSize"]["to"],
+        json!([0.05, 0.05, 0.05])
+    );
 }
 
 /// 稀疏存储：写一个等于默认值的参数不该被 diff 当成变化。
@@ -641,7 +828,9 @@ fn migrate_reports_and_optionally_writes() {
     assert_eq!(report["migrations"].as_array().unwrap().len(), 1);
     assert_eq!(report["written"], Value::Null);
     // 没有 --write 就一个字节都不许改
-    assert!(std::fs::read_to_string(&file).unwrap().contains("\"count\""));
+    assert!(std::fs::read_to_string(&file)
+        .unwrap()
+        .contains("\"count\""));
 
     let w = cli(&["migrate", &path, "--write"]);
     assert_eq!(w.code, EXIT_OK, "{}", w.err);
@@ -735,7 +924,10 @@ fn eval_reports_rows_and_per_group_statistics() {
     assert_eq!(r.code, EXIT_OK, "{}", r.err);
     let lines = r.lines();
     let rows: Vec<&Value> = lines.iter().filter(|l| l["kind"] == "eval_row").collect();
-    let summaries: Vec<&Value> = lines.iter().filter(|l| l["kind"] == "eval_summary").collect();
+    let summaries: Vec<&Value> = lines
+        .iter()
+        .filter(|l| l["kind"] == "eval_summary")
+        .collect();
     assert_eq!(rows.len(), 3);
     assert_eq!(summaries.len(), 2, "每个 metric 一行 summary");
 
@@ -751,7 +943,10 @@ fn eval_reports_rows_and_per_group_statistics() {
     assert_eq!(first["groups"]["train"]["n"], 2);
     assert_eq!(first["groups"]["train"]["ok"], 2);
     assert_eq!(first["groups"]["holdout"]["n"], 1);
-    assert!(first["groups"]["holdout"]["std"].is_null(), "n<2 时 std 是 null");
+    assert!(
+        first["groups"]["holdout"]["std"].is_null(),
+        "n<2 时 std 是 null"
+    );
     assert!(first["groups"]["train"]["std"].as_f64().unwrap() >= 0.0);
 
     let text = std::fs::read_to_string(&csv).unwrap();
@@ -814,7 +1009,10 @@ fn eval_rows_carry_the_run_summary_only_when_asked() {
             .collect();
         assert_eq!(rows.len(), 2);
         for row in &rows {
-            assert!(row["summary"].is_null(), "默认不该带 summary（{extra:?}）: {row}");
+            assert!(
+                row["summary"].is_null(),
+                "默认不该带 summary（{extra:?}）: {row}"
+            );
         }
     }
 }
@@ -888,7 +1086,10 @@ fn eval_crosses_parameter_sets_with_samples() {
     assert_eq!(rows[0]["params"]["v.minPointsPerVoxel"], 1.0);
     assert_eq!(rows[5]["paramSet"], 2);
     assert_eq!(rows[5]["params"]["v.minPointsPerVoxel"], 3.0);
-    let summaries: Vec<&Value> = lines.iter().filter(|l| l["kind"] == "eval_summary").collect();
+    let summaries: Vec<&Value> = lines
+        .iter()
+        .filter(|l| l["kind"] == "eval_summary")
+        .collect();
     assert_eq!(summaries.len(), 3);
     let mean = |s: &Value| s["groups"]["all"]["mean"].as_f64().unwrap();
     assert!(mean(summaries[2]) < mean(summaries[0]));
@@ -929,7 +1130,14 @@ fn eval_with_jobs_stops_at_the_same_row_as_without() {
             r#"{"id":"e","set":{"g.seed":3275}}"#,
         ],
     );
-    let args = ["eval", &graph, "--samples", &samples, "--metric", "nodes.v.elementCount"];
+    let args = [
+        "eval",
+        &graph,
+        "--samples",
+        &samples,
+        "--metric",
+        "nodes.v.elementCount",
+    ];
     let serial = cli(&args);
     let jobs = cli(&[&args[..], &["--jobs", "3"]].concat());
     for r in [&serial, &jobs] {
@@ -970,11 +1178,18 @@ fn eval_lists_the_available_paths_when_the_metric_is_wrong() {
     let listed = cli(&["eval", &graph, "--samples", &samples, "--list-metrics"]);
     assert_eq!(listed.code, EXIT_OK, "{}", listed.err);
     let first = &listed.lines()[0];
-    let paths: Vec<&str> = first["paths"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    let paths: Vec<&str> = first["paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
     assert!(
         first["kind"] == "metric_paths"
             && first["sample"] == "a"
-            && ["nodes.v.elementCount", "run.durationMs"].iter().all(|p| paths.contains(p)),
+            && ["nodes.v.elementCount", "run.durationMs"]
+                .iter()
+                .all(|p| paths.contains(p)),
         "{}",
         listed.out
     );
@@ -1092,9 +1307,12 @@ fn eval_without_samples_runs_the_graph_once() {
         .collect();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["sample"], "-");
-    assert!(rows[0]["metrics"]["v:cloud.elementCount"].as_f64().unwrap() > 0.0, "{}", rows[0]);
+    assert!(
+        rows[0]["metrics"]["v:cloud.elementCount"].as_f64().unwrap() > 0.0,
+        "{}",
+        rows[0]
+    );
 }
-
 
 fn crop_chain(dir: &Path, seed: i64, count: i64) -> String {
     let doc = json!({
@@ -1138,7 +1356,10 @@ fn perturb_inserts_the_node_and_reports_a_slope() {
     ]);
     assert_eq!(r.code, EXIT_OK, "{} / {}", r.out, r.err);
     let lines = r.lines();
-    let rows: Vec<&Value> = lines.iter().filter(|l| l["kind"] == "perturb_row").collect();
+    let rows: Vec<&Value> = lines
+        .iter()
+        .filter(|l| l["kind"] == "perturb_row")
+        .collect();
     assert_eq!(rows.len(), 5);
     assert!((rows[0]["displacement"].as_f64().unwrap() + 0.04).abs() < 1e-12);
     assert!(rows[2]["displacement"].as_f64().unwrap().abs() < 1e-12);
@@ -1240,7 +1461,11 @@ fn perturb_point_from_moves_the_cut_to_each_frames_anchor() {
         "--samples",
         &samples.to_string_lossy(),
     ]);
-    assert_eq!(r.code, EXIT_FAILED, "取不到锚点的样本判失败：{} / {}", r.out, r.err);
+    assert_eq!(
+        r.code, EXIT_FAILED,
+        "取不到锚点的样本判失败：{} / {}",
+        r.out, r.err
+    );
     let lines = r.lines();
     let anchor = |id: &str| {
         lines
@@ -1251,16 +1476,35 @@ fn perturb_point_from_moves_the_cut_to_each_frames_anchor() {
     };
     let f1 = anchor("f1");
     assert_eq!(f1["status"], "ok");
-    let point: Vec<f64> = f1["point"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
-    assert!((point[0] - 0.17003).abs() < 1e-9 && point[1] == 0.0 && point[2] == 0.0, "{point:?}");
+    let point: Vec<f64> = f1["point"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap())
+        .collect();
+    assert!(
+        (point[0] - 0.17003).abs() < 1e-9 && point[1] == 0.0 && point[2] == 0.0,
+        "{point:?}"
+    );
     assert_eq!(f1["paths"], json!(["nodes.g.elementCount"]));
     let bad = anchor("bad");
-    assert_eq!([&bad["status"], &bad["point"]], [&json!("anchor_missing"), &Value::Null]);
+    assert_eq!(
+        [&bad["status"], &bad["point"]],
+        [&json!("anchor_missing"), &Value::Null]
+    );
 
-    let rows: Vec<&Value> = lines.iter().filter(|l| l["kind"] == "perturb_row").collect();
+    let rows: Vec<&Value> = lines
+        .iter()
+        .filter(|l| l["kind"] == "perturb_row")
+        .collect();
     assert_eq!(rows.len(), 5, "只有取到锚点的 f1 跑第二遍");
     assert!(rows.iter().all(|r| r["sample"] == "f1"));
-    let per = |id: &str| lines.iter().find(|l| l["kind"] == "perturb_sample" && l["sample"] == id).unwrap();
+    let per = |id: &str| {
+        lines
+            .iter()
+            .find(|l| l["kind"] == "perturb_sample" && l["sample"] == id)
+            .unwrap()
+    };
     assert_eq!(per("f1")["slope"], 0.0, "刀口跟着锚点走到 0.17，读数不响应");
     assert_eq!(per("bad")["n"], 0);
 }
@@ -1308,7 +1552,10 @@ fn plan_keys(r: &Ran) -> BTreeMap<String, String> {
 }
 
 fn run_started_keys(events: &[Value]) -> BTreeMap<String, String> {
-    let started = events.iter().find(|e| e["kind"] == "run_started").expect("没有 run_started");
+    let started = events
+        .iter()
+        .find(|e| e["kind"] == "run_started")
+        .expect("没有 run_started");
     started["nodes"]
         .as_array()
         .unwrap()
@@ -1409,7 +1656,11 @@ fn abi_params_json_and_cli_param_agree() {
     )
     .unwrap();
     assert_eq!(bad.status, "error");
-    let finished = bad.events.iter().find(|e| e["kind"] == "run_finished").unwrap();
+    let finished = bad
+        .events
+        .iter()
+        .find(|e| e["kind"] == "run_finished")
+        .unwrap();
     assert_eq!(finished["error"]["code"], "unknown_param", "{finished}");
 }
 
@@ -1421,7 +1672,10 @@ fn set_on_a_bound_param_and_unknown_param_are_usage_errors() {
     assert_eq!(set.code, EXIT_USAGE, "{}", set.err);
     assert!(set.err.contains("param_conflict"), "{}", set.err);
     assert!(set.err.contains("--param count="), "{}", set.err);
-    assert_eq!(cli(&["params", &graph, "--set", "g.pointCount=5"]).code, EXIT_USAGE);
+    assert_eq!(
+        cli(&["params", &graph, "--set", "g.pointCount=5"]).code,
+        EXIT_USAGE
+    );
 
     let unknown = cli(&["validate", &graph, "--param", "nope=1"]);
     assert_eq!(unknown.code, EXIT_USAGE, "{}", unknown.err);
@@ -1434,7 +1688,12 @@ fn set_on_a_bound_param_and_unknown_param_are_usage_errors() {
     std::fs::write(&file, doc.to_string()).unwrap();
     let v = cli(&["validate", &file.to_string_lossy()]);
     assert_eq!(v.code, EXIT_INVALID, "{}", v.err);
-    assert!(v.first().as_array().unwrap().iter().any(|d| d["code"] == "param_conflict"));
+    assert!(v
+        .first()
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "param_conflict"));
 }
 
 #[test]
@@ -1454,10 +1713,18 @@ fn eval_takes_graph_params_next_to_sweep_axes() {
         "nodes.g.elementCount",
     ]);
     assert_eq!(r.code, EXIT_OK, "{}", r.err);
-    let rows: Vec<Value> = r.lines().into_iter().filter(|l| l["kind"] == "eval_row").collect();
+    let rows: Vec<Value> = r
+        .lines()
+        .into_iter()
+        .filter(|l| l["kind"] == "eval_row")
+        .collect();
     assert_eq!(rows.len(), 2, "{}", r.out);
     for row in &rows {
-        assert_eq!(row["metrics"]["nodes.g.elementCount"].as_f64(), Some(3000.0), "{row}");
+        assert_eq!(
+            row["metrics"]["nodes.g.elementCount"].as_f64(),
+            Some(3000.0),
+            "{row}"
+        );
     }
 }
 
@@ -1495,7 +1762,8 @@ fn write_recipe(graph: &str, name: &str, values: Value, graph_ref: Option<Value>
     let dir = recipe::recipe_dir_of(Path::new(graph));
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join(format!("{name}.lyflow-recipe.json"));
-    let g = graph_ref.unwrap_or_else(|| json!({"id": doc.id, "specDigest": recipe::spec_digest(&doc.params)}));
+    let g = graph_ref
+        .unwrap_or_else(|| json!({"id": doc.id, "specDigest": recipe::spec_digest(&doc.params)}));
     let body = json!({"schemaVersion": 1, "name": name, "graph": g, "values": values,
                       "updatedAt": "2026-09-25T00:00:00.000Z"});
     std::fs::write(&file, serde_json::to_string_pretty(&body).unwrap()).unwrap();
@@ -1509,40 +1777,87 @@ fn write_recipe(graph: &str, name: &str, values: Value, graph_ref: Option<Value>
 fn recipe_runs_like_the_same_values_given_as_param_and_param_wins() {
     let dir = workspace("recipe-run");
     let graph = recipe_chain(&dir, 7201);
-    let a = write_recipe(&graph, "车型A", json!({"count": 1234, "leaf": [0.05, 0.05, 0.05]}), None);
+    let a = write_recipe(
+        &graph,
+        "车型A",
+        json!({"count": 1234, "leaf": [0.05, 0.05, 0.05]}),
+        None,
+    );
 
     let r = cli(&["run", &graph, "--recipe", &a, "--no-cache"]);
     assert_eq!(r.code, EXIT_OK, "{}", r.err);
-    assert!(r.err.contains("配方「车型A」：2 个值，2 个与基础不同"), "{}", r.err);
+    assert!(
+        r.err.contains("配方「车型A」：2 个值，2 个与基础不同"),
+        "{}",
+        r.err
+    );
     let via_recipe = r.lines();
     assert_eq!(done_count(&via_recipe, "g"), Some(1234));
 
-    let p = cli(&["run", &graph, "--param", "count=1234", "--param", "leaf=[0.05,0.05,0.05]", "--no-cache"]);
+    let p = cli(&[
+        "run",
+        &graph,
+        "--param",
+        "count=1234",
+        "--param",
+        "leaf=[0.05,0.05,0.05]",
+        "--no-cache",
+    ]);
     assert_eq!(p.code, EXIT_OK, "{}", p.err);
     let via_param = p.lines();
     assert_eq!(run_started_keys(&via_recipe), run_started_keys(&via_param));
     assert_eq!(done_count(&via_recipe, "v"), done_count(&via_param, "v"));
 
     // --param 优先：配方里的 count 被盖掉，leaf 仍是配方的
-    let both = cli(&["run", &graph, "--recipe", &a, "--param", "count=777", "--no-cache"]);
+    let both = cli(&[
+        "run",
+        &graph,
+        "--recipe",
+        &a,
+        "--param",
+        "count=777",
+        "--no-cache",
+    ]);
     assert_eq!(both.code, EXIT_OK, "{}", both.err);
     assert_eq!(done_count(&both.lines(), "g"), Some(777));
     let plan_both = cli(&["plan", &graph, "--recipe", &a, "--param", "count=777"]);
-    let plan_param = cli(&["plan", &graph, "--param", "count=777", "--param", "leaf=[0.05,0.05,0.05]"]);
+    let plan_param = cli(&[
+        "plan",
+        &graph,
+        "--param",
+        "count=777",
+        "--param",
+        "leaf=[0.05,0.05,0.05]",
+    ]);
     assert_eq!(plan_keys(&plan_both), plan_keys(&plan_param));
     // 没绑到配方参数的 h 不受影响
-    assert_eq!(plan_keys(&plan_both)["h"], plan_keys(&cli(&["plan", &graph]))["h"]);
+    assert_eq!(
+        plan_keys(&plan_both)["h"],
+        plan_keys(&cli(&["plan", &graph]))["h"]
+    );
 
     let v = cli(&["validate", &graph, "--recipe", &a]);
     assert_eq!(v.code, EXIT_OK, "{}", v.err);
-    let params = cli(&["params", &graph, "--json", "--only", "graph", "--recipe", &a]);
+    let params = cli(&[
+        "params", &graph, "--json", "--only", "graph", "--recipe", &a,
+    ]);
     assert_eq!(params.code, EXIT_OK, "{}", params.err);
-    let row = params.lines().into_iter().find(|x| x["node"] == "v").expect("没有 v.leafSize");
+    let row = params
+        .lines()
+        .into_iter()
+        .find(|x| x["node"] == "v")
+        .expect("没有 v.leafSize");
     assert_eq!(row["value"], json!([0.05, 0.05, 0.05]));
     assert_eq!(row["graphParam"], "leaf");
 
-    assert_eq!(cli(&["run", &graph, "--recipe", &a, "--recipe", &a]).code, EXIT_USAGE);
-    let nowhere = dir.join("没有.lyflow-recipe.json").to_string_lossy().into_owned();
+    assert_eq!(
+        cli(&["run", &graph, "--recipe", &a, "--recipe", &a]).code,
+        EXIT_USAGE
+    );
+    let nowhere = dir
+        .join("没有.lyflow-recipe.json")
+        .to_string_lossy()
+        .into_owned();
     let missing = cli(&["run", &graph, "--recipe", &nowhere]);
     assert_eq!(missing.code, EXIT_USAGE, "{}", missing.err);
     assert!(missing.err.contains("bad_recipe"), "{}", missing.err);
@@ -1554,13 +1869,25 @@ fn recipe_runs_like_the_same_values_given_as_param_and_param_wins() {
 fn a_mismatched_recipe_stops_every_command_with_exit_4_and_the_report() {
     let dir = workspace("recipe-mismatch");
     let graph = recipe_chain(&dir, 7202);
-    let bad = write_recipe(&graph, "坏", json!({"count": 0, "leaf": "abc", "nope": 1}), None);
+    let bad = write_recipe(
+        &graph,
+        "坏",
+        json!({"count": 0, "leaf": "abc", "nope": 1}),
+        None,
+    );
     for args in [
         vec!["run", graph.as_str(), "--recipe", bad.as_str()],
         vec!["validate", graph.as_str(), "--recipe", bad.as_str()],
         vec!["plan", graph.as_str(), "--recipe", bad.as_str()],
         vec!["params", graph.as_str(), "--recipe", bad.as_str()],
-        vec!["eval", graph.as_str(), "--recipe", bad.as_str(), "--metric", "nodes.g.elementCount"],
+        vec![
+            "eval",
+            graph.as_str(),
+            "--recipe",
+            bad.as_str(),
+            "--metric",
+            "nodes.g.elementCount",
+        ],
     ] {
         let r = cli(&args);
         assert_eq!(r.code, EXIT_USAGE, "{args:?}: {}", r.err);
@@ -1577,10 +1904,18 @@ fn a_mismatched_recipe_stops_every_command_with_exit_4_and_the_report() {
     // 共享夹具：每一条都照 expected.json 的文案出现在 stderr 上
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../schema/fixtures/recipes");
     let expected: Value =
-        serde_json::from_str(&std::fs::read_to_string(fixtures.join("expected.json")).unwrap()).unwrap();
-    let fixture_graph = fixtures.join("graph.lyflow.json").to_string_lossy().into_owned();
+        serde_json::from_str(&std::fs::read_to_string(fixtures.join("expected.json")).unwrap())
+            .unwrap();
+    let fixture_graph = fixtures
+        .join("graph.lyflow.json")
+        .to_string_lossy()
+        .into_owned();
     for (file, want) in expected["recipes"].as_object().unwrap() {
-        let path = fixtures.join("graph.recipes").join(file).to_string_lossy().into_owned();
+        let path = fixtures
+            .join("graph.recipes")
+            .join(file)
+            .to_string_lossy()
+            .into_owned();
         let r = cli(&["validate", &fixture_graph, "--recipe", &path]);
         if want["blocking"].as_u64().unwrap() == 0 {
             // 没失配时交给 core 校验（夹具图的 test.param_showcase 只在 LYFLOW_TEST_OPS=1 时注册），退出码不是 4
@@ -1595,7 +1930,10 @@ fn a_mismatched_recipe_stops_every_command_with_exit_4_and_the_report() {
                 "range" => "越界",
                 _ => "规格变了",
             };
-            let (message, fix) = (item["message"].as_str().unwrap(), item["fixLabel"].as_str().unwrap());
+            let (message, fix) = (
+                item["message"].as_str().unwrap(),
+                item["fixLabel"].as_str().unwrap(),
+            );
             let line = match item["param"].as_str() {
                 Some(p) => format!("[{label}] {p}：{message} → {fix}"),
                 None => format!("[{label}] {message} → {fix}"),
@@ -1615,12 +1953,16 @@ fn a_recipe_written_for_another_graph_only_warns() {
         &graph,
         "别的图",
         json!({"count": 4321}),
-        Some(json!({"id": "01JSOMEOTHERGRAPH000000000", "specDigest": format!("sha256:{}", "0".repeat(64))})),
+        Some(
+            json!({"id": "01JSOMEOTHERGRAPH000000000", "specDigest": format!("sha256:{}", "0".repeat(64))}),
+        ),
     );
     let r = cli(&["run", &graph, "--recipe", &other, "--no-cache"]);
     assert_eq!(r.code, EXIT_OK, "{}", r.err);
     assert!(
-        r.err.contains("提示：配方「别的图」[规格变了] 图 id 不同（配方记的是 01JSOMEOTHERGRAPH000000000）"),
+        r.err.contains(
+            "提示：配方「别的图」[规格变了] 图 id 不同（配方记的是 01JSOMEOTHERGRAPH000000000）"
+        ),
         "{}",
         r.err
     );
@@ -1635,10 +1977,17 @@ fn eval_layers_base_recipe_paramsets_then_param() {
     let graph = recipe_chain(&dir, 7204);
     let a = write_recipe(&graph, "A", json!({"count": 1234}), None);
     let samples = dir.join("samples.jsonl");
-    std::fs::write(&samples, "{\"id\":\"s1\",\"set\":{\"h.seed\":1}}\n{\"id\":\"s2\",\"set\":{\"h.seed\":2}}\n").unwrap();
+    std::fs::write(
+        &samples,
+        "{\"id\":\"s1\",\"set\":{\"h.seed\":1}}\n{\"id\":\"s2\",\"set\":{\"h.seed\":2}}\n",
+    )
+    .unwrap();
     let sets = dir.join("sets.json");
     std::fs::write(&sets, r#"[{"count": 3000}, {"h.pointCount": 600}]"#).unwrap();
-    let (samples, sets) = (samples.to_string_lossy().into_owned(), sets.to_string_lossy().into_owned());
+    let (samples, sets) = (
+        samples.to_string_lossy().into_owned(),
+        sets.to_string_lossy().into_owned(),
+    );
     let rows = |r: &Ran| -> Vec<(u64, String, f64)> {
         r.lines()
             .into_iter()
@@ -1647,28 +1996,63 @@ fn eval_layers_base_recipe_paramsets_then_param() {
                 (
                     l["paramSet"].as_u64().unwrap(),
                     l["sample"].as_str().unwrap().to_string(),
-                    l["metrics"]["nodes.g.elementCount"].as_f64().unwrap_or(-1.0),
+                    l["metrics"]["nodes.g.elementCount"]
+                        .as_f64()
+                        .unwrap_or(-1.0),
                 )
             })
             .collect()
     };
-    let base = ["eval", graph.as_str(), "--samples", samples.as_str(), "--metric", "nodes.g.elementCount"];
+    let base = [
+        "eval",
+        graph.as_str(),
+        "--samples",
+        samples.as_str(),
+        "--metric",
+        "nodes.g.elementCount",
+    ];
 
     let only = cli(&[&base[..], &["--recipe", a.as_str()]].concat());
     assert_eq!(only.code, EXIT_OK, "{}", only.err);
-    assert_eq!(rows(&only), [(0, "s1".into(), 1234.0), (0, "s2".into(), 1234.0)]);
+    assert_eq!(
+        rows(&only),
+        [(0, "s1".into(), 1234.0), (0, "s2".into(), 1234.0)]
+    );
 
-    let layered = cli(&[&base[..], &["--recipe", a.as_str(), "--params", sets.as_str()]].concat());
+    let layered = cli(&[
+        &base[..],
+        &["--recipe", a.as_str(), "--params", sets.as_str()],
+    ]
+    .concat());
     assert_eq!(layered.code, EXIT_OK, "{}", layered.err);
     assert_eq!(
         rows(&layered),
-        [(0, "s1".into(), 3000.0), (0, "s2".into(), 3000.0), (1, "s1".into(), 1234.0), (1, "s2".into(), 1234.0)]
+        [
+            (0, "s1".into(), 3000.0),
+            (0, "s2".into(), 3000.0),
+            (1, "s1".into(), 1234.0),
+            (1, "s2".into(), 1234.0)
+        ]
     );
 
-    let pinned =
-        cli(&[&base[..], &["--recipe", a.as_str(), "--params", sets.as_str(), "--param", "count=500"]].concat());
+    let pinned = cli(&[
+        &base[..],
+        &[
+            "--recipe",
+            a.as_str(),
+            "--params",
+            sets.as_str(),
+            "--param",
+            "count=500",
+        ],
+    ]
+    .concat());
     assert_eq!(pinned.code, EXIT_OK, "{}", pinned.err);
-    assert!(rows(&pinned).iter().all(|(_, _, n)| *n == 500.0), "{:?}", rows(&pinned));
+    assert!(
+        rows(&pinned).iter().all(|(_, _, n)| *n == 500.0),
+        "{:?}",
+        rows(&pinned)
+    );
 
     let typo = dir.join("typo.json");
     std::fs::write(&typo, r#"[{"cuont": 1}]"#).unwrap();
@@ -1676,6 +2060,58 @@ fn eval_layers_base_recipe_paramsets_then_param() {
     let t = cli(&[&base[..], &["--params", typo.as_str()]].concat());
     assert_eq!(t.code, EXIT_USAGE, "{}", t.err);
     assert!(t.err.contains("unknown_param"), "{}", t.err);
+    let budget = cli(&[
+        &base[..],
+        &[
+            "--params",
+            sets.as_str(),
+            "--max-runs",
+            "1",
+            "--progress-json",
+        ],
+    ]
+    .concat());
+    assert_eq!(rows(&budget).len(), 1);
+    assert_eq!(
+        budget
+            .lines()
+            .iter()
+            .filter(|l| l["kind"] == "eval_started")
+            .count(),
+        1
+    );
+    let checkpoint = dir.join("partial.jsonl");
+    std::fs::write(&checkpoint, &budget.out).unwrap();
+    let resumed = cli(&[
+        &base[..],
+        &[
+            "--params",
+            sets.as_str(),
+            "--resume-rows",
+            checkpoint.to_str().unwrap(),
+        ],
+    ]
+    .concat());
+    assert_eq!(resumed.code, EXIT_OK, "{}", resumed.err);
+    assert_eq!(rows(&resumed).len(), 3);
+    let final_summary = resumed
+        .lines()
+        .into_iter()
+        .find(|l| l["kind"] == "eval_summary" && l["paramSet"] == 0)
+        .unwrap();
+    assert_eq!(final_summary["groups"]["all"]["n"], json!(2));
+    assert!(final_summary["groups"]["all"]["p95"].is_number());
+    std::fs::write(
+        &samples,
+        r#"{"id":"s1","graphParams":{"count":321},"tags":{"split":"train"}}"#,
+    )
+    .unwrap();
+    let per_sample = cli(&[&base[..], &["--param", "count=500"]].concat());
+    assert_eq!(rows(&per_sample)[0].2, 321.0);
+    std::fs::write(&samples, r#"{"id":"s1","set":{"g.pointCount":321}}"#).unwrap();
+    let conflict = cli(&base);
+    assert_eq!(conflict.code, EXIT_USAGE);
+    assert!(conflict.err.contains("param_conflict"));
 }
 
 /// patch --recipe：配方的值写回基础（等于对每一行「写回基础」），--param 排在后面；失配整体不写。
@@ -1684,21 +2120,53 @@ fn eval_layers_base_recipe_paramsets_then_param() {
 fn patch_recipe_writes_the_values_back_as_defaults() {
     let dir = workspace("recipe-patch");
     let graph = recipe_chain(&dir, 7205);
-    let a = write_recipe(&graph, "A", json!({"count": 1234, "leaf": [0.05, 0.05, 0.05]}), None);
+    let a = write_recipe(
+        &graph,
+        "A",
+        json!({"count": 1234, "leaf": [0.05, 0.05, 0.05]}),
+        None,
+    );
     let out = dir.join("baked.lyflow.json").to_string_lossy().into_owned();
-    let r = cli(&["patch", &graph, "--recipe", &a, "--param", "count=999", "-o", &out, "--json"]);
+    let r = cli(&[
+        "patch",
+        &graph,
+        "--recipe",
+        &a,
+        "--param",
+        "count=999",
+        "-o",
+        &out,
+        "--json",
+    ]);
     assert_eq!(r.code, EXIT_OK, "{}", r.err);
     assert_eq!(r.first()["applied"]["recipe"], json!(["count", "leaf"]));
     assert_eq!(r.first()["applied"]["param"], json!(["count"]));
     let changed = r.first()["diff"]["graphParams"].clone();
-    let count = changed.as_array().unwrap().iter().find(|p| p["name"] == "count").expect("diff 里没有 count");
+    let count = changed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "count")
+        .expect("diff 里没有 count");
     assert_eq!(count["from"], 20000, "{changed}");
     assert_eq!(count["to"], 999, "{changed}");
     let written: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
     assert_eq!(written["params"]["count"]["default"], 999);
-    assert_eq!(written["params"]["leaf"]["default"], json!([0.05, 0.05, 0.05]));
+    assert_eq!(
+        written["params"]["leaf"]["default"],
+        json!([0.05, 0.05, 0.05])
+    );
 
-    let again = cli(&["patch", &out, "--recipe", &a, "--param", "count=999", "--dry-run", "--json"]);
+    let again = cli(&[
+        "patch",
+        &out,
+        "--recipe",
+        &a,
+        "--param",
+        "count=999",
+        "--dry-run",
+        "--json",
+    ]);
     assert_eq!(again.code, EXIT_OK, "{}", again.err);
     assert_eq!(again.first()["diff"]["empty"], true);
 
@@ -1707,7 +2175,11 @@ fn patch_recipe_writes_the_values_back_as_defaults() {
     let b = cli(&["patch", &graph, "--recipe", &bad]);
     assert_eq!(b.code, EXIT_USAGE, "{}", b.err);
     assert!(b.err.contains("[越界] count"), "{}", b.err);
-    assert_eq!(std::fs::read_to_string(&graph).unwrap(), before, "失配时不该写图");
+    assert_eq!(
+        std::fs::read_to_string(&graph).unwrap(),
+        before,
+        "失配时不该写图"
+    );
 }
 
 /// `lyflow recipes`：列配方目录（index.json 的顺序与默认），每个配方的失配与夹具一致；
@@ -1715,9 +2187,13 @@ fn patch_recipe_writes_the_values_back_as_defaults() {
 #[test]
 fn recipes_lists_the_dir_with_reports_and_params() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../schema/fixtures/recipes");
-    let graph = fixtures.join("graph.lyflow.json").to_string_lossy().into_owned();
+    let graph = fixtures
+        .join("graph.lyflow.json")
+        .to_string_lossy()
+        .into_owned();
     let expected: Value =
-        serde_json::from_str(&std::fs::read_to_string(fixtures.join("expected.json")).unwrap()).unwrap();
+        serde_json::from_str(&std::fs::read_to_string(fixtures.join("expected.json")).unwrap())
+            .unwrap();
     let r = cli(&["recipes", &graph, "--json"]);
     assert_eq!(r.code, EXIT_OK, "{}", r.err);
     let lines = r.lines();
@@ -1728,7 +2204,11 @@ fn recipes_lists_the_dir_with_reports_and_params() {
         let file = format!("{}.lyflow-recipe.json", row["name"].as_str().unwrap());
         let want = &expected["recipes"][&file];
         assert_eq!(row["blocking"], want["blocking"], "{file}");
-        assert_eq!(row["items"].as_array().unwrap().len(), want["items"].as_array().unwrap().len(), "{file}");
+        assert_eq!(
+            row["items"].as_array().unwrap().len(),
+            want["items"].as_array().unwrap().len(),
+            "{file}"
+        );
         assert_eq!(row["default"], row["name"] == "ok");
         assert!(row.get("params").is_none());
     }
@@ -1737,7 +2217,10 @@ fn recipes_lists_the_dir_with_reports_and_params() {
     assert_eq!(tail[0]["count"], 6);
     assert_eq!(tail[0]["specDigest"], expected["specDigest"]);
 
-    let ok = fixtures.join("graph.recipes/ok.lyflow-recipe.json").to_string_lossy().into_owned();
+    let ok = fixtures
+        .join("graph.recipes/ok.lyflow-recipe.json")
+        .to_string_lossy()
+        .into_owned();
     let one = cli(&["recipes", &graph, "--recipe", &ok, "--json"]);
     assert_eq!(one.code, EXIT_OK, "{}", one.err);
     let row = one.first();
@@ -1785,19 +2268,26 @@ fn fit_line_band_without_ref_line_fails_at_validate() {
     let run = cli(&["run", &path]);
     assert_eq!(run.code, EXIT_INVALID, "{}", run.err);
     assert!(
-        !run.lines().iter().any(|e| e["kind"] == "node_state" || e["kind"] == "run_started"),
+        !run.lines()
+            .iter()
+            .any(|e| e["kind"] == "node_state" || e["kind"] == "run_started"),
         "校验没过就不该起跑：{}",
         run.out
     );
 
-    let gap_built = std::env::var("LYFLOW_PACKS").unwrap_or_default().contains("gap");
+    let gap_built = std::env::var("LYFLOW_PACKS")
+        .unwrap_or_default()
+        .contains("gap");
     let manifest = cli(&["manifest"]).first();
     let has_fit_line = manifest["operators"]
         .as_array()
         .unwrap()
         .iter()
         .any(|o| o["id"] == "gap.fit_line");
-    assert!(!gap_built || has_fit_line, "LYFLOW_PACKS 带了 gap，manifest 里却没有 gap.fit_line");
+    assert!(
+        !gap_built || has_fit_line,
+        "LYFLOW_PACKS 带了 gap，manifest 里却没有 gap.fit_line"
+    );
     if has_fit_line {
         let diags = v.first();
         let d = diags
@@ -1821,10 +2311,18 @@ fn import_defaults_to_blocks_and_fine_flag_gives_the_fine_graph() {
     let manifest = cli(&["manifest"]).first();
     let has_importer = manifest["importers"]
         .as_array()
-        .map(|a| a.iter().any(|i| i["kind"] == "StandardGap.yml:template:fine"))
+        .map(|a| {
+            a.iter()
+                .any(|i| i["kind"] == "StandardGap.yml:template:fine")
+        })
         .unwrap_or(false);
-    let gap_built = std::env::var("LYFLOW_PACKS").unwrap_or_default().contains("gap");
-    assert!(!gap_built || has_importer, "LYFLOW_PACKS 带了 gap，却没有细粒度导入器");
+    let gap_built = std::env::var("LYFLOW_PACKS")
+        .unwrap_or_default()
+        .contains("gap");
+    assert!(
+        !gap_built || has_importer,
+        "LYFLOW_PACKS 带了 gap，却没有细粒度导入器"
+    );
     if !has_importer {
         return;
     }
@@ -1842,27 +2340,63 @@ fn import_defaults_to_blocks_and_fine_flag_gives_the_fine_graph() {
     )
     .unwrap();
     let config = config.to_string_lossy().into_owned();
-    let blocks_path = dir.join("blocks.lyflow.json").to_string_lossy().into_owned();
+    let blocks_path = dir
+        .join("blocks.lyflow.json")
+        .to_string_lossy()
+        .into_owned();
     let fine_path = dir.join("fine.lyflow.json").to_string_lossy().into_owned();
 
-    let r = cli(&["import", &config, "--kind", "StandardGap.yml:template", "-o", &blocks_path]);
+    let r = cli(&[
+        "import",
+        &config,
+        "--kind",
+        "StandardGap.yml:template",
+        "-o",
+        &blocks_path,
+    ]);
     assert_eq!(r.code, EXIT_OK, "{}", r.err);
-    let r = cli(&["import", &config, "--kind", "StandardGap.yml:template", "--fine", "-o", &fine_path]);
+    let r = cli(&[
+        "import",
+        &config,
+        "--kind",
+        "StandardGap.yml:template",
+        "--fine",
+        "-o",
+        &fine_path,
+    ]);
     assert_eq!(r.code, EXIT_OK, "{}", r.err);
 
-    let read = |p: &str| -> Value { serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap() };
+    let read =
+        |p: &str| -> Value { serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap() };
     let ops = |doc: &Value| -> Vec<String> {
-        doc["nodes"].as_array().unwrap().iter().map(|n| n["op"].as_str().unwrap().to_string()).collect()
+        doc["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["op"].as_str().unwrap().to_string())
+            .collect()
     };
     let blocks = read(&blocks_path);
     let fine = read(&fine_path);
-    assert!(ops(&blocks).contains(&"gap.locate_template".to_string()), "{blocks}");
-    assert!(!ops(&blocks).contains(&"gap.fit_line".to_string()), "{blocks}");
+    assert!(
+        ops(&blocks).contains(&"gap.locate_template".to_string()),
+        "{blocks}"
+    );
+    assert!(
+        !ops(&blocks).contains(&"gap.fit_line".to_string()),
+        "{blocks}"
+    );
     assert!(ops(&blocks).len() <= 12, "{blocks}");
     assert!(ops(&fine).contains(&"gap.fit_line".to_string()), "{fine}");
-    assert!(ops(&fine).contains(&"gap.business_rois".to_string()), "{fine}");
+    assert!(
+        ops(&fine).contains(&"gap.business_rois".to_string()),
+        "{fine}"
+    );
     for doc in [&blocks, &fine] {
-        assert!(!ops(doc).contains(&"gap.measure_reference".to_string()), "{doc}");
+        assert!(
+            !ops(doc).contains(&"gap.measure_reference".to_string()),
+            "{doc}"
+        );
     }
     for p in [&blocks_path, &fine_path] {
         let v = cli(&["validate", p]);
@@ -1896,7 +2430,9 @@ fn import_defaults_to_blocks_and_fine_flag_gives_the_fine_graph() {
     let run = cli(&["run", &dragged_path]);
     assert_eq!(run.code, EXIT_INVALID, "{}", run.err);
     assert!(
-        !run.lines().iter().any(|e| e["kind"] == "node_state" || e["kind"] == "run_started"),
+        !run.lines()
+            .iter()
+            .any(|e| e["kind"] == "node_state" || e["kind"] == "run_started"),
         "校验没过就不该起跑：{}",
         run.out
     );

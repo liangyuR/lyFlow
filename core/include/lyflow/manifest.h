@@ -274,6 +274,11 @@ struct Param {
   std::string semantic;
   /// 只对 semantic == "roi" 有意义。
   RoiBackdrop roiBackdrop;
+  /// AI 调参角色：input / geometry 默认固定，detection 可搜索，acceptance 是产品规格。
+  /// 仅用于工具引导，不影响参数合法性或执行结果。
+  std::string tuningRole;
+  /// 动态单位的来源，例如 bead.info.unit；空时用 unit。
+  std::string unitSource;
 };
 
 struct Capabilities {

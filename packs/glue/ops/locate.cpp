@@ -123,6 +123,7 @@ void registerLocate(Registry& r) {
   Param tmpl;
   tmpl.name = "template";
   tmpl.type = ParamType::Path;
+  tmpl.tuningRole = "input";
   tmpl.label = "Template";
   tmpl.doc = "模板图像（示教时从示教图上裁下的一块）。相对路径相对于图文件所在目录。";
   tmpl.def = Value::text("");
@@ -142,6 +143,7 @@ void registerLocate(Registry& r) {
   minScore.min = -1.0;
   minScore.max = 1.0;
   op.params = {tmpl, anchor, radius, range, step, minScore};
+  op.params[1].tuningRole = "geometry";
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;
   op.externalKey = &externalKey;

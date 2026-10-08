@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
-import { evalArgv, listMetricsArgv, paramsArgv, patchArgv, perturbArgv, recipesArgv } from "./argv.js";
+import { listMetricsArgv, paramsArgv, patchArgv, perturbArgv, recipesArgv } from "./argv.js";
 import { DEFAULT_CLI_TIMEOUT_MS, runCli, stderrTail, type JsonLine } from "./cli.js";
 import { decodeCloud, decodeIndices, decodeTensor, summarizeCloud } from "./cloud.js";
 import { encodePng, fetchImage, levelToFit, toPicture } from "./image.js";
@@ -16,6 +17,12 @@ import { HttpError, LyFlowHttp } from "./http.js";
 import { coreSummary, parseDiagnostics, summarizeOutputs, summarizeRun } from "./run.js";
 import { firstSentence, matches, nearest } from "./text.js";
 import type { OutputInfo } from "./types.js";
+import { ArtifactStore } from "./artifacts.js";
+import { assessment, projectValue, type Projection } from "./summary.js";
+import { drawOverlays } from "./overlay.js";
+import { registerInspectionTools } from "./inspect.js";
+import { EvaluationStore } from "./evaluations.js";
+import { registerExperimentTools, sampleSchema, splitSchema } from "./experiments.js";
 
 const MAX_FAILURES = 20;
 const DEFAULT_RUN_TIMEOUT_MS = 300000;
@@ -26,10 +33,11 @@ const DEFAULT_IMAGE_EDGE = 768;
 type ToolResult = {
   content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[];
   isError?: boolean;
+  structuredContent?: Record<string, unknown>;
 };
 
 function ok(value: unknown): ToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(value) }] };
+  return { content: [{ type: "text", text: JSON.stringify(value) }], ...(value && typeof value === "object" && !Array.isArray(value) ? { structuredContent: value as Record<string, unknown> } : {}) };
 }
 
 function bad(message: string, extra?: Record<string, unknown>): ToolResult {
@@ -43,6 +51,9 @@ function failed(e: unknown): ToolResult {
 }
 
 const graphInput = {
+  graphParams: z.record(z.unknown()).optional().describe("顶层图参数取值：default ← recipe ← graphParams；绑定参数通过这里修改"),
+  set: z.record(z.unknown()).optional().describe("本次节点参数覆盖，键为 <节点>.<参数>；绑定参数请用 graphParams"),
+  recipe: z.string().optional().describe("配方文件路径；取值可由 graphParams 覆盖"),
   graph: z.record(z.unknown()).optional().describe("内联的 GraphDoc。与 graphPath 二选一"),
   graphPath: z
     .string()
@@ -119,6 +130,7 @@ function compactSummaries(summaries: Record<string, unknown>[]): Record<string, 
       }
       row["mean"] = g["mean"];
       row["std"] = g["std"];
+      for (const key of ["p50","p95","missing","min","max","unit","units","incomparableReason"]) row[key] = g[key];
       out.push(row);
     }
   }
@@ -191,7 +203,7 @@ async function recipeParams(
 function workRun(config: Config, prefix: string): string {
   const dir = path.join(
     config.workDir,
-    `${prefix}-${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}`,
+    `${prefix}-${crypto.randomUUID()}`,
   );
   fs.mkdirSync(dir, { recursive: true });
   return dir;
@@ -220,6 +232,18 @@ function rowProgress(extra: ToolExtra, rowKind: string): ((line: JsonLine) => vo
 }
 
 export function registerTools(server: McpServer, config: Config, http: LyFlowHttp): void {
+  const artifacts = new ArtifactStore(config.workDir);
+  const evaluations = new EvaluationStore(config,artifacts);
+  registerExperimentTools(server,evaluations);
+  registerInspectionTools(server, config, http, artifacts);
+  server.registerTool("read_artifact", {
+    title: "分页读取完整结果",
+    description: "用返回的 artifactId 读取完整结果；嵌套数组按 offset/limit 分页，fields 选择值路径。",
+    inputSchema: {
+      artifactId: z.string(), fields: z.array(z.string()).optional(),
+      offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(100).optional(),
+    }, annotations: { readOnlyHint: true },
+  }, async (args) => { try { return ok(await artifacts.read(args.artifactId, args)); } catch (e) { return failed(e); } });
   server.registerTool(
     "list_operators",
     {
@@ -319,7 +343,13 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
     async (args) => {
       try {
         const g = resolveGraph(args);
-        const diagnostics = await http.validate({ doc: g.doc, graphPath: g.graphPath });
+        let params = args.graphParams ?? {};
+        if (args.recipe) {
+          const checked = await recipeParams(config, g, args.graphPath, args.recipe);
+          if ("error" in checked) return checked.error;
+          params = { ...checked.row.params, ...params };
+        }
+        const diagnostics = await http.validate({ doc: g.doc, graphPath: g.graphPath, params });
         return ok({ diagnostics, ok: Array.isArray(diagnostics) && diagnostics.length === 0 });
       } catch (e) {
         return failed(e);
@@ -340,10 +370,17 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
     async (args) => {
       try {
         const g = resolveGraph(args);
+        let params = args.graphParams ?? {};
+        if (args.recipe) {
+          const checked = await recipeParams(config, g, args.graphPath, args.recipe);
+          if ("error" in checked) return checked.error;
+          params = { ...checked.row.params, ...params };
+        }
         const plan = await http.plan({
           doc: g.doc,
           graphPath: g.graphPath,
           targets: args.targets ?? null,
+          params,
         });
         return ok({ plan });
       } catch (e) {
@@ -372,6 +409,9 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           .optional()
           .describe('发送前改节点参数，键是 "<节点>.<参数>"，语义与 CLI --set 相同'),
         recipe: RECIPE_FIELD,
+        force: z.array(z.string()).optional().describe("这些节点跳过缓存重新计算，适合核对实际耗时"),
+        isolate: z.array(z.string()).optional().describe("仅执行这些节点；上游需要已有当前参数的缓存"),
+        detail: z.enum(["full", "compact"]).optional().describe("默认 full 保持兼容；compact 裁数组并保存完整结果 artifact"),
         mode: z.enum(["full", "preview"]).optional().describe("preview 下源算子先抽稀"),
         timeoutMs: z.number().int().positive().optional().describe(`等 run_finished 的上限，默认 ${DEFAULT_RUN_TIMEOUT_MS}`),
       },
@@ -410,7 +450,9 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
             previewMaxPoints: null,
             previewBudgetMs: null,
             sceneId: null,
-            ...(recipe?.params ? { params: recipe.params } : {}),
+            params: { ...recipe?.params, ...args.graphParams },
+            force: args.force ?? null,
+            isolate: args.isolate ?? null,
           },
           args.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
           extra.signal,
@@ -420,13 +462,17 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         if (summary) {
           return ok({
             runId: result.runId,
+            ...(result.cancellation ? {cancellation:result.cancellation} : {}),
             // 三态来自 core（H2）。超时是 MCP 这一侧的事，core 那边还没收尾。
-            status: result.timedOut ? "timeout" : summary.status,
+            status: result.cancelled ? "cancelled" : result.timedOut ? "timeout" : summary.status,
+            executionStatus: summary.status,
+            assessments: Object.fromEntries(Object.entries(summary.outputs).map(([name, output]) => [name, assessment(output.value)])),
             // run_finished 的 ok/error/cancelled。与 status 不是一回事，
             // 两个都留着，宿主想对照「为什么 ok 却 degraded」时有得看。
             runStatus: events.status,
             durationMs: summary.durationMs ?? events.durationMs,
-            outputs: summary.outputs,
+            outputs: args.detail === "compact" ? projectValue(summary.outputs).value : summary.outputs,
+            ...(args.detail === "compact" ? { artifact: artifacts.put(summary) } : {}),
             nodes: summary.nodes,
             decisions: summary.decisions,
             contractViolations: summary.contractViolations,
@@ -443,7 +489,8 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         }
         return ok({
           runId: result.runId,
-          status: result.timedOut ? "timeout" : events.status,
+          ...(result.cancellation ? {cancellation:result.cancellation} : {}),
+          status: result.cancelled ? "cancelled" : result.timedOut ? "timeout" : events.status,
           runStatus: events.status,
           durationMs: events.durationMs,
           outputs,
@@ -498,7 +545,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
       description:
         "点云给点数、包围盒、每通道 min/max/mean 与前几个点；张量给形状、统计量与前几个值；" +
         "下标给个数、指向哪片云与前几个下标；图像给尺寸、通道、位深与逐通道 min/max/mean；" +
-        "其余类型原样给值。统计在 MCP 进程里算，不搬点云给调用方。",
+        "Record/Bundle 可选字段、分页并给全量分布与 artifact。统计在 MCP 进程里算，不搬点云给调用方。",
       inputSchema: {
         runId: z.string(),
         nodeId: z.string(),
@@ -510,6 +557,9 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           .optional()
           .describe(`取点云时的抽稀上限，0 表示不抽稀，默认 ${DEFAULT_MAX_POINTS}`),
         head: z.number().int().nonnegative().optional().describe(`前几个值，默认 ${DEFAULT_HEAD}`),
+        fields: z.array(z.string()).optional().describe("Record/Bundle 选择字段，data 可省略"),
+        offset: z.number().int().nonnegative().optional(),
+        limit: z.number().int().min(0).max(100).optional().describe("复杂值每个数组的分页大小，默认 8"),
       },
     },
     async (args) => {
@@ -538,6 +588,9 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         if ((info.type === "Tensor" || info.type === "Indices") && head > 0) {
           return ok({ ...base, ...(await sliceSummary(http, args, info, head)) });
         }
+        if (info.type === "Record" || info.type.startsWith("Bundle<")) {
+          return ok({ ...base, kind: "value", ...projectValue(info.value, args as Projection), assessment: assessment(info.value), artifact: artifacts.put(info.value) });
+        }
         return ok({ ...base, ...nonCloudSummary(info) });
       } catch (e) {
         return failed(e);
@@ -558,6 +611,8 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         runId: z.string(),
         nodeId: z.string(),
         port: z.string(),
+        overlays: z.array(z.object({ nodeId: z.string(), port: z.string() })).max(16).optional().describe("本次 run 的 overlay2d 输出，画在原图像素坐标中"),
+        roi: z.tuple([z.number().nonnegative(), z.number().nonnegative(), z.number().positive(), z.number().positive()]).optional().describe("原图 [x,y,width,height]；返回 origin/pixelScale 供坐标换算"),
         maxEdge: z
           .number()
           .int()
@@ -582,13 +637,35 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         const maxEdge = args.maxEdge ?? DEFAULT_IMAGE_EDGE;
         const fullW = Number(info.value?.width ?? 0);
         const fullH = Number(info.value?.height ?? 0);
-        const level = levelToFit(fullW, fullH, maxEdge);
+        const level = args.roi ? 0 : levelToFit(fullW, fullH, maxEdge);
         // 按段取齐：服务端按 16 MB 收行数；HTTP 桩只给 level 0（帧头照实写）
         const { first, values } = await fetchImage(
           (lv, row) => http.image(args.runId, args.nodeId, args.port, lv, row, 0),
           level,
         );
-        const pic = toPicture(first.width, first.height, first.channels, first.depth, values, maxEdge);
+        const sourceScale = typeof info.value?.scale === "number" && info.value.scale > 1 ? info.value.scale : 1;
+        const inputScale: [number, number] = [2 ** first.level * sourceScale, 2 ** first.level * sourceScale];
+        let x0 = 0, y0 = 0, width = first.width, height = first.height;
+        if (args.roi) {
+          x0 = Math.floor(args.roi[0] / inputScale[0]); y0 = Math.floor(args.roi[1] / inputScale[1]);
+          width = Math.min(first.width - x0, Math.ceil((args.roi[0] + args.roi[2]) / inputScale[0]) - x0);
+          height = Math.min(first.height - y0, Math.ceil((args.roi[1] + args.roi[3]) / inputScale[1]) - y0);
+          if (width <= 0 || height <= 0) return bad("ROI 不在图像范围内");
+        }
+        const crop = new Float64Array(width * height * first.channels);
+        for (let y = 0; y < height; y += 1) crop.set(values.subarray(((y + y0) * first.width + x0) * first.channels, ((y + y0) * first.width + x0 + width) * first.channels), y * width * first.channels);
+        let pic = toPicture(width, height, first.channels, first.depth, crop, maxEdge);
+        const step = Math.max(1, Math.ceil(Math.max(width, height) / maxEdge));
+        const origin: [number, number] = [x0 * inputScale[0], y0 * inputScale[1]];
+        const pixelScale: [number, number] = [step * inputScale[0], step * inputScale[1]];
+        const overlays: unknown[] = [];
+        for (const ref of args.overlays ?? []) {
+          const output = (await http.nodeOutputs(args.runId, ref.nodeId)).find((o) => o.port === ref.port);
+          if (!output) return bad(`没有叠画输出 ${ref.nodeId}:${ref.port}`);
+          overlays.push(output.value);
+        }
+        const drawn = drawOverlays(pic, overlays, origin, pixelScale);
+        if (overlays.length) pic = drawn.picture;
         // 预览运行（mode: "preview"）里源头缩小过的图（ADR-0028）：size 报原图尺寸，坐标才与参数、几何同一套
         const scale = typeof info.value?.scale === "number" && info.value.scale > 1 ? info.value.scale : 1;
         const meta = {
@@ -601,7 +678,8 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           depth: first.depth === 1 ? "u8" : first.depth === 2 ? "u16" : "f32",
           shown: [pic.width, pic.height],
           range: pic.range,
-          note: "坐标：左上角原点、y 向下，原图像素；PNG 是缩小过的，按 size / shown 的比例换算",
+          origin, pixelScale, overlayItems: drawn.itemCount, labels: drawn.labels,
+          note: "坐标：左上角原点、y 向下；原图像素 = origin + PNG 像素 × pixelScale。缩放仅用于展示。编号文字见 labels。",
         };
         return {
           content: [
@@ -632,6 +710,13 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           .array(z.record(z.unknown()))
           .optional()
           .describe('显式参数组列表，例如 [{"n_fit.distThresh":0.1}]'),
+        graphParams: graphInput.graphParams,
+        samples: z.array(sampleSchema).optional().describe("带 graphParams/truth/tags 的样本；与 samplesPath/Glob/Dir 二选一"),
+        split: splitSchema.optional().describe("按工件或批次固定分组，保持多帧同组"),
+        partition: z.enum(["all","train","validation","holdout"]).optional(),
+        cachePolicy: z.enum(["cold","warm"]).optional().describe("默认 cold：跳过执行缓存，测算法时延；warm 是复用场景"),
+        timeoutMs: z.number().int().min(100).max(3600000).optional(),
+        maxRuns: z.number().int().positive().max(100000).optional(),
         param: z
           .array(z.string())
           .optional()
@@ -673,62 +758,17 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
     },
     async (args, extra) => {
       if (!config.cli) return bad(CLI_MISSING);
-      let dir: string;
-      let argv: string[];
       try {
-        dir = workRun(config, "eval");
-        let paramsFile: string | null = null;
-        if (args.params && args.params.length > 0) {
-          paramsFile = path.join(dir, "paramsets.json");
-          fs.writeFileSync(paramsFile, JSON.stringify(args.params), "utf8");
-        }
-        argv = evalArgv(args, paramsFile);
-      } catch (e) {
-        return failed(e);
-      }
-
-      const result = await runCli(config, argv, { signal: extra.signal, onLine: rowProgress(extra, "eval_row") });
-      const rowsPath = path.join(dir, "rows.jsonl");
-      const rows = result.lines.filter((l) => l.value["kind"] === "eval_row");
-      writeLines(rowsPath, rows);
-
-      const raw = result.lines
-        .filter((l) => l.value["kind"] === "eval_summary")
-        .map((l) => l.value);
-      const compact = args.compact ?? true;
-      const failures = rows
-        .filter((l) => l.value["status"] !== "ok")
-        .map((l) => {
-          // summary.outputs 直接跟着失败样本走（ADR-0022）：没有它就得回头翻
-          // rows.jsonl 才能分清「这一维本来就没有」和「本该有、崩了」。
-          const summary = l.value["summary"] as { outputs?: unknown; status?: unknown } | undefined;
-          return {
-            sample: l.value["sample"],
-            paramSet: l.value["paramSet"],
-            status: l.value["status"],
-            errors: l.value["errors"],
-            ...(summary?.status === undefined ? {} : { summaryStatus: summary.status }),
-            ...(summary?.outputs === undefined ? {} : { outputs: summary.outputs }),
-          };
-        });
-      const shown = limited(failures, args.failuresLimit ?? MAX_FAILURES);
-
-      return ok({
-        exitCode: result.code,
-        timedOut: result.timedOut,
-        ...(result.cancelled ? { cancelled: true } : {}),
-        argv,
-        compact,
-        summaries: compact ? compactSummaries(raw) : raw,
-        rowCount: rows.length,
-        rowsPath,
-        ...(args.csv ? { csvPath: args.csv } : {}),
-        failureCount: failures.length,
-        failures: shown.shown,
-        failuresTruncated: shown.truncated,
-        stderrTail: stderrTail(result.stderr),
-        ...(result.code === 4 || result.spawnError !== null ? { stderr: result.stderr } : {}),
-      });
+        const id = await evaluations.prepare(args, extra.signal);
+        const state = await evaluations.execute(id, extra.signal, rowProgress(extra, "eval_row"));
+        const report = await evaluations.describe(id, { failuresOnly: true, limit: args.failuresLimit ?? MAX_FAILURES });
+        const raw = report["summaries"] as Record<string,unknown>[];
+        return ok({ ...report, exitCode: state.exitCode, timedOut: state.status === "timeout", cancelled: state.status === "cancelled",
+          argv: state.argv, compact: args.compact ?? true, summaries: (args.compact ?? true) ? compactSummaries(raw) : raw,
+          rowsPath: path.join(evaluations.dir(id), "rows.jsonl"), failureCount: report["total"], failures: report["rows"],
+          ...(args.csv ? {csvPath:args.csv} : {}),
+          failuresTruncated: report["truncated"], stderrTail: stderrTail(state.stderr ?? ""), evaluationId: id });
+      } catch (e) { return failed(e); }
     },
   );
 
@@ -780,9 +820,8 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         return failed(e);
       }
 
-      const result = await runCli(config, argv, { signal: extra.signal, onLine: rowProgress(extra, "perturb_row") });
       const rowsPath = path.join(dir, "rows.jsonl");
-      writeLines(rowsPath, result.lines);
+      const result = await runCli(config, argv, { signal: extra.signal, outputPath:rowsPath, retainRows:false, onLine: rowProgress(extra, "perturb_row") });
 
       const summaries = result.lines
         .filter((l) => l.value["kind"] === "perturb_summary")
@@ -857,6 +896,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         set: z.array(z.string()).optional().describe("<节点>.<参数>=<json>，与 CLI --set 相同"),
         recipe: RECIPE_FIELD,
         baseDir: z.string().optional(),
+        graphParams: graphInput.graphParams,
       },
     },
     async (args) => {
@@ -902,7 +942,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
       description:
         "起本地 lyflow recipes：图文件旁 <图名>.recipes/ 目录里的每个配方 —— 名字、存了几个值、" +
         "失配摘要与修复建议、哪个是默认配方（index.json）。失配四类：extra 多出 / type 类型不符 / range 越界 " +
-        "三类阻止运行（runnable:false），spec 规格变了只提示。只读，MCP 不提供写配方的工具。" +
+        "三类阻止运行（runnable:false），spec 规格变了只提示。此工具只读；export_candidate 可导出已评估配方。" +
         "按某个配方跑：把它的 file 交给 run_graph / get_params 的 recipe。",
       inputSchema: {
         graphPath: z.string().describe("图文件路径，CLI 直接读它；配方目录按它的文件名找"),
@@ -964,6 +1004,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         set: z.array(z.string()).optional().describe("<节点>.<参数>=<json>，作用于这次运行"),
         recipe: RECIPE_FIELD,
         baseDir: z.string().optional(),
+        graphParams: graphInput.graphParams,
       },
     },
     async (args) => {
@@ -1022,6 +1063,8 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           ),
         set: z.array(z.string()).optional().describe("<节点>.<参数>=<json>，与 CLI --set 相同"),
         dryRun: z.boolean().optional().describe("默认 true：只算差异不写文件"),
+        graphParams: graphInput.graphParams,
+        recipe: RECIPE_FIELD,
         out: z.string().optional().describe("写到别的路径（要配 dryRun:false）；不给就原地覆写"),
         baseDir: z.string().optional(),
       },

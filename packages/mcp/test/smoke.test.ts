@@ -11,6 +11,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 import { findRepoRoot } from "../src/repo.js";
+import { encodePng, toPicture } from "../src/image.js";
 
 const ROOT = findRepoRoot();
 const CLI = ROOT ? path.join(ROOT, "bridge", "target", "debug", "lyflow.exe") : "";
@@ -106,6 +107,106 @@ function payload(result: unknown): Record<string, unknown> {
   return JSON.parse(content.map((c) => c.text ?? "").join("")) as Record<string, unknown>;
 }
 
+/** Real MCP calls cover the tuning lifecycle; synthetic image follows packs/glue/tests/test_glue.cpp. */
+async function tuningWorkflow(client:Client, workspace:string):Promise<void> {
+  const call = async (name:string, args:Record<string,unknown>={}) => {
+    const result=await client.callTool({name,arguments:args});
+    assert.notEqual(result.isError,true,`${name}: ${JSON.stringify(result)}`);
+    return payload(result);
+  };
+  const env=await call("get_environment");
+  assert.equal(env["compatible"],true,JSON.stringify(env));
+  assert.equal(env["buildVerified"],true,JSON.stringify(env));
+  const available=await call("list_operators",{query:"glue.bead_path"});
+  if (!(available["operators"] as {id:string}[]).some((o)=>o.id==="glue.bead_path")) {
+    assert.notEqual(process.env["LYFLOW_PACKS"]?.split(";").includes("glue"),true,"glue 构建不能跳过生命周期验收");
+    return;
+  }
+  const width=640,height=560,values=new Float64Array(width*height),u=[0.5,-Math.sqrt(3)/2];
+  for(let y=0;y<height;y++) for(let x=0;x<width;x++) {
+    const dx=x-150,dy=y-500,along=dx*u[0]!+dy*u[1]!,across=-dx*u[1]!+dy*u[0]!;
+    const flange=190+0.06*(x-320)-0.04*(y-280),outside=45+0.02*(x-320);
+    values[y*width+x]=dx*dx+dy*dy<=35*35?30:along>=0&&along<=470&&Math.abs(across)<=10?70:across<45?flange:outside;
+  }
+  const frame=path.join(workspace,"synthetic-glue.png");
+  fs.writeFileSync(frame,encodePng(toPicture(width,height,1,1,values,width)));
+  const pairs=[ ["n_load.image","n_path.image"], ["n_load.image","n_width.image"], ["n_path.path","n_width.path"],
+    ["n_width.bead","n_breaks.bead"], ["n_width.bead","n_judge.bead"], ["n_breaks.breaks","n_judge.breaks"] ];
+  const graph={schemaVersion:1,id:"mcp-glue-tuning",params:{breakMin:{type:"float",default:10,binds:["n_breaks.minLength"],min:0}},
+    nodes:[{id:"n_load",op:"io.load_image",params:{source:"file",path:frame}},{id:"n_path",op:"glue.bead_path",params:{nozzle:[150,500],sector:[-120,0]}},
+      {id:"n_width",op:"glue.bead_width",params:{form:"straight"}},{id:"n_breaks",op:"glue.bead_breaks"},{id:"n_judge",op:"glue.judge"}],
+    edges:pairs.map(([a,b],i)=>({id:`e${i}`,from:{node:a!.split(".")[0],port:a!.split(".")[1]},to:{node:b!.split(".")[0],port:b!.split(".")[1]}})),
+    outputs:{pathInfo:{node:"n_path",port:"path.info"},line:{node:"n_path",port:"path.line"},breaks:{node:"n_breaks",port:"breaks"},verdict:{node:"n_judge",port:"verdict"}}};
+  const graphPath=path.join(workspace,"glue-tuning.lyflow.json");fs.writeFileSync(graphPath,JSON.stringify(graph));
+  const inspected=await call("inspect_graph",{graphPath});
+  const params=inspected["params"] as {node:string;param:string;role:string;editPath:string}[];
+  assert.equal(params.find((p)=>p.node==="n_breaks"&&p.param==="minLength")?.editPath,"graphParams.breakMin");
+  assert.ok(params.filter((p)=>p.node==="n_judge").every((p)=>p.role==="acceptance"));
+  assert.equal((await call("validate_graph",{graphPath,graphParams:{breakMin:12}}))["ok"],true);
+  await call("plan_graph",{graphPath,graphParams:{breakMin:12}});
+  const truth={pose:{output:"pathInfo",ok:true},verdict:{output:"verdict",ok:true},breaks:{output:"breaks",coordinate:"path_s_px",intervals:[]}};
+  const samples=Array.from({length:6},(_,i)=>({id:`frame-${i}`,tags:{workpiece:`part-${i}`},truth}));
+  const split={groupTag:"workpiece",seed:"mcp-smoke",train:0.6,validation:0.2,holdout:0.2};
+  const objectives=[{metric:"run.durationMs",direction:"minimize",stat:"p95",weight:1}];
+  const search={graphPath,samples,split,objectives,space:{breakMin:[8,12]},maxRuns:1,timeoutMs:90000};
+  const locked=await client.callTool({name:"start_tuning",arguments:{...search,space:{"n_judge.maxBreak":[5]}}});
+  assert.equal(locked.isError,true);assert.match(String(payload(locked)["error"]),/acceptance.*锁定/);
+  const started=await call("start_tuning",search),jobId=started["jobId"] as string;
+  const waitJob=async()=>{
+    const deadline=Date.now()+90000;
+    while(Date.now()<deadline){const job=await call("get_job",{jobId});if(!["running","prepared"].includes(String(job["status"])))return job;await new Promise((r)=>setTimeout(r,100));}
+    throw new Error("调参任务未收尾");
+  };
+  const partial=await waitJob();assert.equal(partial["status"],"budget_exhausted",JSON.stringify(partial));assert.equal(partial["startedRuns"],1);
+  assert.equal((partial["ranking"] as unknown[]).length,0,"部分结果不能排成合格候选");
+  const originalFrame=fs.readFileSync(frame);fs.appendFileSync(frame,Buffer.from([0]));
+  const changed=await client.callTool({name:"resume_job",arguments:{jobId,additionalRuns:100}});
+  assert.equal(changed.isError,true);assert.match(String(payload(changed)["error"]),/冻结内容已变/);
+  fs.writeFileSync(frame,originalFrame);
+  await call("resume_job",{jobId,additionalRuns:100});
+  const finished=await waitJob();assert.equal(finished["status"],"complete",JSON.stringify(finished));
+  assert.ok((finished["ranking"] as unknown[]).length>0,JSON.stringify(finished));
+  const selected=finished["validationArgs"] as Record<string,unknown>;
+  const baseline=await call("eval",{...selected,params:[{}]}),candidate=await call("eval",selected);
+  assert.equal(candidate["status"],"complete",JSON.stringify(candidate));
+  const comparison=await call("compare_evaluations",{baselineId:baseline["evaluationId"],candidateId:candidate["evaluationId"],objectives});
+  assert.equal(comparison["comparable"],true);assert.equal((comparison["candidate"] as {qualified:boolean}).qualified,true);
+  const qualityComparison=await call("compare_evaluations",{baselineId:baseline["evaluationId"],candidateId:candidate["evaluationId"],
+    objectives:[{metric:"quality.productFalseAccept",direction:"minimize",stat:"mean",weight:1}]});
+  assert.equal(qualityComparison["degraded"],0,JSON.stringify(qualityComparison));
+  assert.ok(Number(qualityComparison["unchanged"])>0,"未请求的 quality 指标仍应有真实逐帧证据");
+  const changedSpec=await call("eval",{...selected,set:["n_judge.maxBreak=10"]});
+  const uncomparable=await client.callTool({name:"compare_evaluations",arguments:{baselineId:baseline["evaluationId"],candidateId:changedSpec["evaluationId"],objectives}});
+  assert.equal(uncomparable.isError,true);assert.match(String(payload(uncomparable)["error"]),/验收规格/);
+  const holdout=await call("eval",{...selected,partition:"holdout"});assert.equal(holdout["status"],"complete");
+  const badSamples=samples.map((s)=>({...s,truth:{...truth,verdict:{output:"verdict",ok:false}}}));
+  const faulty=await call("eval",{graphPath,samples:badSamples,metric:["quality.productFalseAccept"],cachePolicy:"cold"});
+  const failures=await call("get_evaluation",{evaluationId:faulty["evaluationId"],failuresOnly:true,limit:1});
+  assert.equal(failures["total"],6,JSON.stringify(failures));
+  const replay=(failures["rows"] as {replay:Record<string,unknown>}[])[0]!.replay;
+  const rerun=await call("run_graph",replay);assert.equal(rerun["status"],"ok");
+  const overlay=await client.callTool({name:"view_output_image",arguments:{runId:rerun["runId"],nodeId:"n_load",port:"image",overlays:[{nodeId:"n_path",port:"overlay"},{nodeId:"n_judge",port:"overlay"}],roi:[80,80,400,450],maxEdge:256}});
+  assert.notEqual(overlay.isError,true,JSON.stringify(overlay));
+  const content=overlay.content as {type:string;text?:string}[];assert.ok(content.some((c)=>c.type==="image"));
+  const pictureMeta=JSON.parse(content.find((c)=>c.type==="text")!.text!) as {origin:number[];overlayItems:number};
+  assert.deepEqual(pictureMeta.origin,[80,80]);assert.ok(pictureMeta.overlayItems>0);
+  const summary=await call("summarize_output",{runId:rerun["runId"],nodeId:"n_width",port:"bead",fields:["stations"],limit:2});
+  assert.ok(summary["artifact"]);const ref=summary["artifact"] as {artifactId:string};await call("read_artifact",{artifactId:ref.artifactId,limit:1});
+  const exported=await call("export_candidate",{evaluationId:holdout["evaluationId"],format:"graph",out:path.join(workspace,"selected.lyflow.json")});
+  assert.ok(fs.existsSync(String(exported["provenancePath"])));await call("validate_graph",{graphPath:exported["out"],baseDir:exported["baseDir"]});
+  const recipe=await call("export_candidate",{evaluationId:holdout["evaluationId"],format:"recipe",out:path.join(workspace,"selected.lyflow-recipe.json")});
+  const recipeRun=await call("run_graph",{graphPath:recipe["targetGraph"],baseDir:recipe["baseDir"],recipe:recipe["out"]});assert.equal(recipeRun["status"],"ok");
+  const slowGraphPath=path.join(workspace,"slow-glue.lyflow.json");
+  fs.writeFileSync(slowGraphPath,JSON.stringify({...graph,nodes:[...graph.nodes,{id:"stall",op:"test.stall",params:{ms:20000}}]}));
+  const slow=await call("start_tuning",{...search,graphPath:slowGraphPath,maxRuns:100});
+  const slowId=slow["jobId"],deadline=Date.now()+10000;
+  while(Number((await call("get_job",{jobId:slowId}))["startedRuns"])===0){assert.ok(Date.now()<deadline);await new Promise((r)=>setTimeout(r,50));}
+  assert.equal((await call("cancel_job",{jobId:slowId}))["cancellationRequested"],true);
+  let cancelled=await call("get_job",{jobId:slowId});
+  while(["prepared","running"].includes(String(cancelled["status"]))){assert.ok(Date.now()<deadline,"取消任务未及时收尾");await new Promise((r)=>setTimeout(r,50));cancelled=await call("get_job",{jobId:slowId});}
+  assert.equal(cancelled["status"],"cancelled",JSON.stringify(cancelled));
+}
+
 const reason = skipReason();
 if (reason) console.log(`# skip: ${reason}`);
 
@@ -138,6 +239,8 @@ test(
           ...(process.env as Record<string, string>),
           LYFLOW_HTTP_BASE: `http://127.0.0.1:${port}`,
           LYFLOW_CLI: CLI,
+          LYFLOW_TEST_OPS: "1",
+          LYFLOW_WORK_DIR: path.join(workspace,"mcp-work"),
         },
         stderr: "inherit",
       });
@@ -222,6 +325,20 @@ test(
         JSON.stringify(metrics),
       );
 
+      const axis="voxel.leafSize=0.01:0.05:5",axisMetric="nodes.voxel.cloud.elementCount";
+      const swept=payload(await client.callTool({name:"eval",arguments:{graphPath:graphFile,param:[axis],metric:[axisMetric]}}));
+      assert.equal(swept["exitCode"],0,String(swept["stderrTail"]));assert.equal(swept["failureCount"],0);
+      const sweptRows=payload(await client.callTool({name:"get_evaluation",arguments:{evaluationId:swept["evaluationId"],limit:10}}))["rows"] as {status:string;metrics:Record<string,unknown>;replay:{set:Record<string,unknown>}}[];
+      const legacy=cliJsonLines(["eval",graphFile,"--param",axis,"--metric",axisMetric,"--no-cache"]);
+      assert.equal(legacy.code,0);
+      const legacyRows=legacy.lines.filter((r)=>r["kind"]==="eval_row") as {metrics:Record<string,unknown>;params:Record<string,number>}[];
+      assert.equal(sweptRows.length,5);assert.equal(legacyRows.length,5);
+      sweptRows.forEach((r,i)=>{
+        assert.equal(r.status,"ok");assert.deepEqual(r.metrics,legacyRows[i]!.metrics);
+        const value=legacyRows[i]!.params["voxel.leafSize"]!;
+        assert.deepEqual(r.replay.set["voxel.leafSize"],[value,value,value]);
+      });
+
       // 下标（ADR-0019）：个数来自元数据；前几个下标走 indices 端点。参考桩服务器不实现它（501），
       // 取不到时要带上原因，而不是静默少一个 head
       const inliers = payload(
@@ -263,6 +380,7 @@ test(
       assert.deepEqual([...Buffer.from(picture?.data ?? "", "base64").subarray(1, 4)], [0x50, 0x4e, 0x47]);
       const meta = JSON.parse(viewed.content.find((c) => c.type === "text")?.text ?? "{}");
       assert.deepEqual([meta.size, meta.channels, meta.depth], [[64, 48], 1, "u8"]);
+      await tuningWorkflow(client, workspace);
 
       // 客户端取消 run_graph：MCP 替它发 /lyflow/cancel，后端几秒内收场 —— test.stall 本来要睡满 20 秒
       const stallFile = path.join(workspace, "stall.lyflow.json");
@@ -450,6 +568,29 @@ test(
       const base = cliJsonLines(["run", graphFile, "--outputs"]);
       const baseOutputs = base.lines[base.lines.length - 1] as Record<string, { elementCount?: number }>;
       assert.notEqual(baseOutputs["thinned"]?.elementCount, viaMcp);
+      // 同一 recipe + 显式 graphParams，经 HTTP 和每个 CLI 包装工具都取 123。
+      const chosen={graphPath:graphFile,recipe:fileA,graphParams:{count:123}};
+      const override=payload(await client.callTool({name:"run_graph",arguments:chosen}));
+      assert.equal(override["status"],"ok");
+      const overridePorts=payload(await client.callTool({name:"get_node_outputs",arguments:{runId:override["runId"],nodeId:"gen"}}))["outputs"] as {port:string;elementCount:number}[];
+      assert.equal(overridePorts.find((p)=>p.port==="cloud")?.elementCount,123);
+      for(const name of ["get_params","inspect_graph"]){const r=payload(await client.callTool({name,arguments:chosen}));
+        assert.equal((r["params"] as {node:string;param:string;value:unknown}[]).find((p)=>p.node==="gen"&&p.param==="pointCount")?.value,123);}
+      assert.equal(payload(await client.callTool({name:"validate_graph",arguments:chosen}))["ok"],true);
+      assert.notEqual((await client.callTool({name:"plan_graph",arguments:chosen})).isError,true);
+      const evaluated=payload(await client.callTool({name:"eval",arguments:{...chosen,metric:["nodes.gen.cloud.elementCount"]}}));
+      assert.equal((evaluated["summaries"] as {mean:number}[])[0]?.mean,123,JSON.stringify(evaluated));
+      const patchedFile=path.join(workspace,"override.lyflow.json");
+      const patched=await client.callTool({name:"patch_graph",arguments:{...chosen,dryRun:false,out:patchedFile}});assert.notEqual(patched.isError,true,JSON.stringify(patched));
+      assert.equal((JSON.parse(fs.readFileSync(patchedFile,"utf8")) as typeof RECIPE_DOC).params.count.default,123);
+      const paired=payload(await client.callTool({name:"eval",arguments:{graphPath:graphFile,params:[{count:123},{count:124}],metric:["nodes.gen.cloud.elementCount"],
+        samples:[{id:"a",tags:{batch:"A"}},{id:"b",tags:{batch:"B"}},{id:"missing"}],groupBy:"batch"}}));
+      const compare={baselineId:paired["evaluationId"],candidateId:paired["evaluationId"],baselineParamSet:0,candidateParamSet:1,
+        objectives:[{metric:"nodes.gen.cloud.elementCount",direction:"maximize"}],group:"A"};
+      const improved=payload(await client.callTool({name:"compare_evaluations",arguments:compare}));
+      assert.equal(improved["improved"],1,JSON.stringify(improved));assert.equal(improved["degraded"],0);
+      const degraded=payload(await client.callTool({name:"compare_evaluations",arguments:{...compare,baselineParamSet:1,candidateParamSet:0}}));
+      assert.equal(degraded["degraded"],1,JSON.stringify(degraded));assert.equal(degraded["improved"],0);
 
       // 失配的配方：不碰后端，报错里带条目
       const blocked = await client.callTool({

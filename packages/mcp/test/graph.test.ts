@@ -44,6 +44,8 @@ test("applySet：按 <节点>.<参数> 改 doc、别的参数留着；节点 id 
     [{ "gen.": 1 }, /<nodeId>\.<param>/],
   ];
   for (const [set, error] of bad) assert.throws(() => applySet(doc(), set), error, JSON.stringify(set));
+  const bound = doc(); bound["params"] = { count:{type:"int",default:100,binds:["gen.pointCount"]} };
+  assert.throws(() => applySet(bound,{"gen.pointCount":200}),/param_conflict.*graphParams.count/);
 });
 
 test("resolveGraph 不改调用方给的内联图", () => {

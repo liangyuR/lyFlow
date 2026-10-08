@@ -281,6 +281,7 @@ void registerStationCalipers(Registry& r) {
   Param stations;
   stations.name = "stations";
   stations.type = ParamType::Path;
+  stations.tuningRole = "input";
   stations.label = "Stations";
   stations.doc = "测量点文件（JSON：points[[x,y]]、normals[[nx,ny]]、可选 ids[]；示教图坐标，px）。宿主每个拍照点写一份。";
   stations.def = Value::text("");

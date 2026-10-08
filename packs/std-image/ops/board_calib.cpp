@@ -139,6 +139,7 @@ void registerBoardCalib(Registry& r) {
   square.unit = "mm";
   square.min = 0.01;
   op.params = {pattern, square};
+  for (auto& p : op.params) p.tuningRole = "geometry";
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;
   op.validate = &validate;

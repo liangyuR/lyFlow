@@ -24,7 +24,10 @@ fn vec3_of(v: Option<&Value>, what: &str) -> Result<[f64; 3], String> {
         return Err(format!("--region 的 {what} 要是一个三元数组"));
     };
     if a.len() != 3 {
-        return Err(format!("--region 的 {what} 要是一个三元数组，收到 {} 个", a.len()));
+        return Err(format!(
+            "--region 的 {what} 要是一个三元数组，收到 {} 个",
+            a.len()
+        ));
     }
     let mut out = [0.0f64; 3];
     for (i, item) in a.iter().enumerate() {
@@ -106,10 +109,14 @@ pub(crate) fn parse_point_from(text: &str) -> Result<Vec<Anchor>, String> {
         return Ok(Vec::new());
     };
     if value.get("kind").and_then(Value::as_str) != Some("halfspace") {
-        return Err("--region 的 pointFrom 只支持 halfspace：box 跟着锚点怎么动没有定义".to_string());
+        return Err(
+            "--region 的 pointFrom 只支持 halfspace：box 跟着锚点怎么动没有定义".to_string(),
+        );
     }
     let Some(obj) = spec.as_object().filter(|o| !o.is_empty()) else {
-        return Err("--region 的 pointFrom 要是一个对象，键是 x / y / z 里的一个或几个".to_string());
+        return Err(
+            "--region 的 pointFrom 要是一个对象，键是 x / y / z 里的一个或几个".to_string(),
+        );
     };
     let mut out = Vec::new();
     for (key, item) in obj {
@@ -117,10 +124,16 @@ pub(crate) fn parse_point_from(text: &str) -> Result<Vec<Anchor>, String> {
             "x" => 0,
             "y" => 1,
             "z" => 2,
-            other => return Err(format!("--region 的 pointFrom 只认 x / y / z，收到 {other}")),
+            other => {
+                return Err(format!(
+                    "--region 的 pointFrom 只认 x / y / z，收到 {other}"
+                ))
+            }
         };
         let Some(item) = item.as_object() else {
-            return Err(format!("--region 的 pointFrom.{key} 要是 {{path, scale?, offset?}}"));
+            return Err(format!(
+                "--region 的 pointFrom.{key} 要是 {{path, scale?, offset?}}"
+            ));
         };
         if let Some(extra) = item
             .keys()
@@ -291,10 +304,7 @@ pub(crate) fn least_squares(points: &[(f64, f64)]) -> Fit {
             ..Fit::default()
         };
     }
-    let sxy: f64 = points
-        .iter()
-        .map(|p| (p.0 - mean_x) * (p.1 - mean_y))
-        .sum();
+    let sxy: f64 = points.iter().map(|p| (p.0 - mean_x) * (p.1 - mean_y)).sum();
     let slope = sxy / sxx;
     let intercept = mean_y - slope * mean_x;
     let sse: f64 = points
@@ -392,12 +402,14 @@ pub(crate) fn summarize_fits(fits: &[SampleFit], tolerance: f64) -> Summary {
         pass: fits.iter().filter(|f| f.pass == Some(true)).count(),
         mean,
         std,
-        min: slopes.iter().cloned().fold(None, |a: Option<f64>, v| {
-            Some(a.map_or(v, |x| x.min(v)))
-        }),
-        max: slopes.iter().cloned().fold(None, |a: Option<f64>, v| {
-            Some(a.map_or(v, |x| x.max(v)))
-        }),
+        min: slopes
+            .iter()
+            .cloned()
+            .fold(None, |a: Option<f64>, v| Some(a.map_or(v, |x| x.min(v)))),
+        max: slopes
+            .iter()
+            .cloned()
+            .fold(None, |a: Option<f64>, v| Some(a.map_or(v, |x| x.max(v)))),
         non_responsive: slopes.iter().filter(|s| s.abs() < tolerance / 2.0).count(),
         sign_fold: fits
             .iter()
@@ -518,15 +530,14 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         }
         None => DEFAULT_TOLERANCE,
     };
-    let (parallel, jobs) = match crate::cli::parallel_of(parsed)
-        .and_then(|p| Ok((p, crate::cli::jobs_of(parsed)?)))
-    {
-        Ok(v) => v,
-        Err(e) => {
-            line(err, &e);
-            return EXIT_USAGE;
-        }
-    };
+    let (parallel, jobs) =
+        match crate::cli::parallel_of(parsed).and_then(|p| Ok((p, crate::cli::jobs_of(parsed)?))) {
+            Ok(v) => v,
+            Err(e) => {
+                line(err, &e);
+                return EXIT_USAGE;
+            }
+        };
 
     let samples = match collect_samples(parsed, err) {
         Ok(s) => s,
@@ -580,11 +591,16 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     // 第二遍把这一帧的刀口写进样本的 set。锚点取自未扰动的运行，不会被刀口带着动；上游结果留在进程内
     // 缓存里给第二遍用。取不到锚点的样本不跑第二遍、判失败 —— 不悄悄退回固定刀口。
     let (run_samples, index_of, anchor_missing) = if anchors.is_empty() {
-        (samples.clone(), (0..samples.len()).collect::<Vec<_>>(), 0usize)
+        (
+            samples.clone(),
+            (0..samples.len()).collect::<Vec<_>>(),
+            0usize,
+        )
     } else {
         let anchor_metrics: Vec<MetricPath> = anchors.iter().map(|a| a.metric.clone()).collect();
         let zero = displacement_param_sets(&perturb_id, axis_index, &[0.0]);
         let pre = Engine {
+            started: None,
             core: &core,
             base: &loaded,
             pinned: &[],
@@ -643,6 +659,7 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
 
     let engine = Engine {
+        started: None,
         core: &core,
         base: &loaded,
         pinned: &[],
@@ -661,7 +678,11 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let result = {
         let mut on_row = |row: &Row| {
             let sample = &run_samples[row.sample];
-            progress.row(&crate::eval::progress_text(row, Some(&sample.id), param_sets.len() > 1));
+            progress.row(&crate::eval::progress_text(
+                row,
+                Some(&sample.id),
+                param_sets.len() > 1,
+            ));
             let mut m = Map::new();
             for (metric, value) in metrics.iter().zip(&row.metrics) {
                 m.insert(metric.raw.clone(), num(*value));
@@ -957,9 +978,11 @@ mod tests {
         assert!(parse_region("not json").is_err());
 
         // pointFrom：按分量给锚点，换算显式；没写就是固定刀口
-        assert!(parse_point_from(r#"{"kind":"halfspace","point":[0,0,0],"normal":[1,0,0]}"#)
-            .unwrap()
-            .is_empty());
+        assert!(
+            parse_point_from(r#"{"kind":"halfspace","point":[0,0,0],"normal":[1,0,0]}"#)
+                .unwrap()
+                .is_empty()
+        );
         let anchors = parse_point_from(
             r#"{"kind":"halfspace","point":[0,0,0],"normal":[1,0,0],
                 "pointFrom":{"z":{"path":"nodes.g.point.p.1"},
@@ -972,7 +995,10 @@ mod tests {
             .collect();
         assert_eq!(
             got,
-            vec![(0, "nodes.n.quality.midXMm", 0.001, 0.5), (2, "nodes.g.point.p.1", 1.0, 0.0)],
+            vec![
+                (0, "nodes.n.quality.midXMm", 0.001, 0.5),
+                (2, "nodes.g.point.p.1", 1.0, 0.0)
+            ],
             "按轴排好、scale / offset 默认 1 / 0"
         );
         for bad in [

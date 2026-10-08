@@ -10,6 +10,8 @@
 | [`snippet.schema.json`](snippet.schema.json) | 包 / 用户 → 编辑器 | 片段文件 `*.lyflow-snippet.json`（M8b）。包随附的编进包、经 manifest 的 `snippets` 段下发；`pnpm check` 对着它校验 `packs/*/snippets/` 下的每一份。 |
 | [`recipe.schema.json`](recipe.schema.json) | 编辑器 / CLI ↔ 磁盘 | 参数配方 `<名字>.lyflow-recipe.json`（param-recipe P3）：顶层图参数的稀疏覆盖。格式、目录约定、specDigest 与四类失配见 [docs/recipe.md](../docs/recipe.md)。 |
 | [`recipe-index.schema.json`](recipe-index.schema.json) | 同上 | 配方目录里可选的 `index.json`：`{ default?, order? }`。 |
+| [`eval-sample.schema.json`](eval-sample.schema.json) | MCP / CLI ↔ 磁盘 | 评估样本 JSONL 的一行：图参数、工件标签和真值。CLI 另验 id 唯一、路径、单位与区间顺序。 |
+| [`overlay2d.schema.json`](overlay2d.schema.json) | core → 宿主 / MCP | 原图像素坐标中的叠画几何与标签。 |
 
 示例见 [`examples/`](examples/)，三个示例都已通过对应 schema 校验，
 `pnpm check` 每次都会重跑一遍。

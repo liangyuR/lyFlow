@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 
 import type { Config } from "./config.js";
 
@@ -27,6 +28,10 @@ export interface CliOptions {
   signal?: AbortSignal | undefined;
   /** stdout 每出一行完整的 JSON 就调一次（进度通知用）；返回值里的 lines 照样是全部。 */
   onLine?: ((line: JsonLine) => void) | undefined;
+  /** Persist complete JSON lines immediately; partial results survive cancellation or process failure. */
+  outputPath?: string | undefined;
+  /** Batch callers can keep summaries in memory and leave row payloads only on disk. */
+  retainRows?: boolean | undefined;
 }
 
 export function parseJsonLines(chunk: string): { lines: JsonLine[]; skipped: string[] } {
@@ -77,6 +82,7 @@ export function runCli(config: Config, argv: string[], options?: CliOptions): Pr
   const timeoutMs = options?.timeoutMs ?? DEFAULT_CLI_TIMEOUT_MS;
   const env: NodeJS.ProcessEnv = { ...process.env };
   if (config.packs) env["LYFLOW_PACKS"] = config.packs;
+  if (options?.outputPath) fs.writeFileSync(options.outputPath, "", "utf8");
 
   return new Promise<CliResult>((resolve) => {
     const child = spawn(exe, argv, {
@@ -84,13 +90,24 @@ export function runCli(config: Config, argv: string[], options?: CliOptions): Pr
       env,
       windowsHide: true,
     });
-    let stdout = "";
+    const lines: JsonLine[] = [];
+    const skipped: string[] = [];
     let stderr = "";
     let timedOut = false;
     let cancelled = false;
     let spawnError: string | null = null;
     // onLine 只看完整的行：一次 data 可能停在半行上，剩下的等下一次
     let pending = "";
+    const accept = (chunk: string) => {
+      const parsed = parseJsonLines(chunk);
+      skipped.push(...parsed.skipped);
+      if (skipped.length > 200) skipped.splice(0, skipped.length - 200);
+      for (const line of parsed.lines) {
+        if (options?.outputPath) fs.appendFileSync(options.outputPath, `${line.text}\n`, "utf8");
+        if (options?.retainRows !== false || !["eval_row", "perturb_row"].includes(String(line.value["kind"]))) lines.push(line);
+        options?.onLine?.(line);
+      }
+    };
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -106,19 +123,16 @@ export function runCli(config: Config, argv: string[], options?: CliOptions): Pr
 
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (c: string) => {
-      stdout += c;
-      const onLine = options?.onLine;
-      if (!onLine) return;
       pending += c;
       const cut = pending.lastIndexOf("\n");
       if (cut < 0) return;
       const complete = pending.slice(0, cut);
       pending = pending.slice(cut + 1);
-      for (const line of parseJsonLines(complete).lines) onLine(line);
+      try { accept(complete); } catch (e) { spawnError = String(e); child.kill(); }
     });
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (c: string) => {
-      stderr += c;
+      stderr = (stderr + c).slice(-1024 * 1024);
     });
     child.on("error", (e) => {
       spawnError = e instanceof Error ? e.message : String(e);
@@ -126,11 +140,11 @@ export function runCli(config: Config, argv: string[], options?: CliOptions): Pr
     child.on("close", (code) => {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
-      const parsed = parseJsonLines(stdout);
+      try { if (pending.trim()) accept(pending); } catch (e) { spawnError = String(e); }
       resolve({
         code: spawnError !== null ? -1 : (code ?? -1),
-        lines: parsed.lines,
-        skipped: parsed.skipped,
+        lines,
+        skipped,
         stderr: spawnError !== null ? `起 ${exe} 失败：${spawnError}\n${stderr}` : stderr,
         timedOut,
         cancelled,

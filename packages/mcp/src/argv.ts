@@ -10,7 +10,14 @@ export interface SampleSelector {
   splitHalf?: string | undefined;
 }
 
+export function graphParamsArgv(values: Record<string, unknown> | undefined): string[] {
+  return Object.entries(values ?? {}).flatMap(([name, value]) => ["--param", `${name}=${JSON.stringify(value)}`]);
+}
+
 export interface EvalInput extends SampleSelector {
+  progressJson?: boolean | undefined;
+  maxRuns?: number | undefined;
+  resumeRows?: string | undefined;
   graphPath: string;
   params?: Record<string, unknown>[] | undefined;
   param?: string[] | undefined;
@@ -27,6 +34,7 @@ export interface EvalInput extends SampleSelector {
   summary?: boolean | undefined;
   /// 同时跑几次（CLI --jobs）。行的顺序与内容不变。
   jobs?: number | undefined;
+  graphParams?: Record<string, unknown> | undefined;
 }
 
 export interface PerturbInput extends SampleSelector {
@@ -59,7 +67,7 @@ const DIR_ONLY: (keyof SampleSelector)[] = [
   "splitHalf",
 ];
 
-function samplesArgv(input: SampleSelector): string[] {
+export function samplesArgv(input: SampleSelector): string[] {
   const given = [input.samplesPath, input.samplesGlob, input.samplesDir].filter(Boolean).length;
   if (given > 1) {
     throw new Error("samplesPath / samplesGlob / samplesDir 只能给一个");
@@ -103,6 +111,9 @@ export function evalArgv(input: EvalInput, paramsFile: string | null): string[] 
     throw new Error("至少给一个 metric，例如 outputs.gap");
   }
   const argv = ["eval", input.graphPath];
+  if (input.resumeRows) argv.push("--resume-rows", input.resumeRows);
+  if (input.maxRuns !== undefined) argv.push("--max-runs", String(input.maxRuns));
+  if (input.progressJson) argv.push("--progress-json");
   if (input.baseDir) argv.push("--base-dir", input.baseDir);
   argv.push(...samplesArgv(input));
   if (paramsFile) argv.push("--params", paramsFile);
@@ -113,6 +124,7 @@ export function evalArgv(input: EvalInput, paramsFile: string | null): string[] 
   if (input.csv) argv.push("--csv", input.csv);
   for (const s of input.set ?? []) argv.push("--set", s);
   if (input.recipe) argv.push("--recipe", input.recipe);
+  argv.push(...graphParamsArgv(input.graphParams));
   if (input.noCache) argv.push("--no-cache");
   if (input.summary) argv.push("--summary");
   argv.push(...jobsArgv(input.jobs));
@@ -124,6 +136,7 @@ export interface ListMetricsInput extends SampleSelector {
   baseDir?: string | undefined;
   set?: string[] | undefined;
   recipe?: string | undefined;
+  graphParams?: Record<string, unknown> | undefined;
 }
 
 /** `lyflow eval --list-metrics`：样本集入参与 eval 同一套，列出来的路径正是 eval 认的。 */
@@ -133,6 +146,7 @@ export function listMetricsArgv(input: ListMetricsInput): string[] {
   argv.push(...samplesArgv(input));
   for (const s of input.set ?? []) argv.push("--set", s);
   if (input.recipe) argv.push("--recipe", input.recipe);
+  argv.push(...graphParamsArgv(input.graphParams));
   argv.push("--list-metrics");
   return argv;
 }
@@ -145,6 +159,7 @@ export interface ParamsInput {
   /// 配方文件路径（param-recipe P4）：图参数取「default ← 配方」之后的值。
   recipe?: string | undefined;
   baseDir?: string | undefined;
+  graphParams?: Record<string, unknown> | undefined;
 }
 
 export function paramsArgv(input: ParamsInput): string[] {
@@ -154,6 +169,7 @@ export function paramsArgv(input: ParamsInput): string[] {
   if (input.only) argv.push("--only", input.only);
   for (const s of input.set ?? []) argv.push("--set", s);
   if (input.recipe) argv.push("--recipe", input.recipe);
+  argv.push(...graphParamsArgv(input.graphParams));
   argv.push("--json");
   return argv;
 }
@@ -168,6 +184,7 @@ export function recipesArgv(graphPath: string, recipe?: string | undefined): str
 }
 
 export interface PatchInput {
+  recipe?: string | undefined;
   graphPath: string;
   removeNode?: string[] | undefined;
   addNode?: Record<string, unknown>[] | undefined;
@@ -177,6 +194,7 @@ export interface PatchInput {
   dryRun?: boolean | undefined;
   out?: string | undefined;
   baseDir?: string | undefined;
+  graphParams?: Record<string, unknown> | undefined;
 }
 
 export function patchArgv(input: PatchInput): string[] {
@@ -185,7 +203,7 @@ export function patchArgv(input: PatchInput): string[] {
   const rewire = input.rewire ?? [];
   const connect = input.connect ?? [];
   const set = input.set ?? [];
-  if (removeNode.length + addNode.length + rewire.length + connect.length + set.length === 0) {
+  if (removeNode.length + addNode.length + rewire.length + connect.length + set.length + Object.keys(input.graphParams ?? {}).length + (input.recipe ? 1 : 0) === 0) {
     throw new Error("至少给一个动作：removeNode / addNode / rewire / connect / set");
   }
   for (const [name, specs] of [["rewire", rewire], ["connect", connect]] as const) {
@@ -207,6 +225,8 @@ export function patchArgv(input: PatchInput): string[] {
   for (const r of rewire) argv.push("--rewire", r);
   for (const c of connect) argv.push("--connect", c);
   for (const s of set) argv.push("--set", s);
+  if (input.recipe) argv.push("--recipe", input.recipe);
+  argv.push(...graphParamsArgv(input.graphParams));
   if (dryRun) argv.push("--dry-run");
   if (input.out) argv.push("-o", input.out);
   argv.push("--json");

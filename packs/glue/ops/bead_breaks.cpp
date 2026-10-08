@@ -130,6 +130,7 @@ void registerBeadBreaks(Registry& r) {
   Param minLength = floatParam("minLength", "Min Length", 20.0, "px",
                                "连续无胶至少这么长才算断胶。接了标定时按 mm 解释（与 bead 的单位相同）。");
   minLength.min = 0.0;
+  minLength.unitSource = "bead.info.unit";
   Param atEnds = boolParam("countAtZoneEnds", "Count At Zone Ends", true,
                            "贴着检测区两端的无胶段算不算断胶。起胶、收胶那几帧可以关掉。", true);
   op.params = {minLength, atEnds};

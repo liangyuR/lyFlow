@@ -50,6 +50,11 @@ export function applySet(doc: GraphDoc, set: Record<string, unknown>): GraphDoc 
     const param = key.slice(dot + 1);
     const node = doc.nodes.find((n) => n.id === nodeId);
     if (!node) throw new Error(`图里没有节点 ${nodeId}`);
+    const definitions = doc["params"] as Record<string, { binds?: unknown }> | undefined;
+    const owner = Object.entries(definitions ?? {}).find(([, d]) =>
+      d && Array.isArray(d.binds) && d.binds.includes(key),
+    );
+    if (owner) throw new Error(`param_conflict: ${key} 由顶层参数 ${owner[0]} 绑定；改用 graphParams.${owner[0]}`);
     node.params = { ...(node.params ?? {}), [param]: value };
   }
   return doc;
@@ -60,6 +65,7 @@ export interface GraphInput {
   graphPath?: string | undefined;
   baseDir?: string | undefined;
   set?: Record<string, unknown> | undefined;
+  graphParams?: Record<string, unknown> | undefined;
 }
 
 export interface ResolvedGraph {

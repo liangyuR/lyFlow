@@ -4,6 +4,8 @@
 [MCP](https://modelcontextprotocol.io) 服务，让只拿得到工具、拿不到仓库源码的 Agent
 能读算子、改图、跑图、批量评估。
 
+glue 调参入口见 [MCP 随动/飞拍流程](mcp-glue-tuning.md)：环境核对、统一图参数、标注评分、冻结评估、预算搜索、失败叠画与候选导出。
+
 一句话：**它是 [HTTP 传输契约](http-transport.md) 的又一个消费方，不是第四种传输。**
 描述、校验、执行这些走 `/lyflow/*`（test-server 或阶段 B 的业务服务都行）；
 `eval` / `perturb` / `diff_graphs` / `get_params` / `patch_graph` / `list_recipes` / `list_metrics` 起本地 `lyflow` 可执行文件
@@ -47,7 +49,7 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 | `LYFLOW_HTTP_TOKEN` | 否 | 有它就每个请求带 `Authorization: Bearer`，WebSocket 走 `lyflow-token.<token>` 子协议 |
 | `LYFLOW_CLI` | 否 | 本地 `lyflow.exe` 路径。`eval` / `perturb` / `diff_graphs` / `get_params` / `patch_graph` / `list_recipes` / `list_metrics`，以及带 `recipe` 的 `run_graph` 用它；缺了就返回一句说得清的错，其余工具不受影响 |
 | `LYFLOW_PACKS` | 否 | 透传给 CLI 子进程。注意它在当前实现里是**构建期**变量（`scripts/build-core.ps1` 用它选算子包），运行期的 exe 已经带着自己那份算子表 |
-| `LYFLOW_WORK_DIR` | 否 | `eval` / `perturb` 的逐行结果落盘目录，默认 `os.tmpdir()/lyflow-mcp` |
+| `LYFLOW_WORK_DIR` | 否 | 评估快照、任务状态、artifact 与逐行结果目录，默认 `os.tmpdir()/lyflow-mcp`；跨重启续跑应配置持久目录 |
 | `LYFLOW_CACHE_DIR` | 否 | 结果缓存落盘目录，原样传给每次起的 CLI 子进程（CLI 自己认这个变量，等价于 `--cache-dir`）：MCP 每次工具调用都是一个新进程，配了它，读盘、滤波、ONNX 推理这类贵的上游在第二次调用起直接命中。默认不设 = 关。按构建指纹分目录，重编 core 后旧结果不再复用；占用用 `lyflow cache info --cache-dir <dir>` 看（[disk-cache-plan.md](disk-cache-plan.md)） |
 
 ### 4. 在 Claude Code 里配
@@ -76,11 +78,21 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 
 ## 工具
 
-输出**一律是压紧的 JSON 文本**，且刻意裁过：Agent 每一次调用都在花上下文，
+输出以压紧的 JSON 文本为主，常用工具同时返回 structuredContent；`view_output_image` 返回 PNG 和元信息。Agent 每一次调用都在花上下文，
 点云、逐行结果这些大东西要么变成统计量，要么落盘给路径。
 
 | 工具 | 输入 | 底下是什么 | 返回 |
 |---|---|---|---|
+| `get_environment` | — | HTTP core-info/manifest + CLI info/manifest | HTTP/CLI 清单与构建身份、包和一致性提示 |
+| `inspect_graph` | `graph \| graphPath` `baseDir?` `graphParams?` `set?` `recipe?` | CLI params/manifest | 生效值、角色、单位、绑定、拓扑、依赖与完整 artifact |
+| `read_artifact` | `artifactId` `fields?` `offset?` `limit?` | 封存本地文件 | 分页 JSON/JSONL 与全量数组分布 |
+| `get_evaluation` | `evaluationId` `offset?` `limit?` `failuresOnly?` `sample?` `paramSet?` | 冻结评估记录 | 身份、统计、分页样本与可直接运行的 replay |
+| `compare_evaluations` | `baselineId` `candidateId` `objectives` `constraints?` `group?` | CLI 评分结果 | 同身份/规格比较、质量约束与改善/退化样本 |
+| `export_candidate` | `evaluationId` `paramSet?` `format?` `out?` | CLI patch/recipes + 文件 | 新图/配方及 provenance，不覆盖已有文件 |
+| `start_tuning` | `graphPath` `samplesPath \| samples` `split` `space` `objectives` `constraints?` `maxRuns?` `timeoutMs?` | 后台 CLI eval | 冻结 train 搜索任务与 jobId |
+| `get_job` | `jobId` | 任务状态 | 预算、约束合格的训练候选、敏感度与 validationArgs |
+| `cancel_job` | `jobId` | 取消子进程 | 取消请求；随后查询收尾状态 |
+| `resume_job` | `jobId` `additionalRuns?` `additionalMs?` | 核对快照后 CLI resume-rows | 跳过完成行、保留候选与分组 |
 | `list_operators` | `pack?` `category?` `query?` | `GET /lyflow/manifest`（进程内缓存，`core-info.generation` 变了才重拉） | `{count, total, operators:[{id,label,category,pack?,doc}]}`，`doc` 只有第一句 |
 | `get_operator` | `id` | 同上 | 全量 `OperatorDesc`（含每个参数的 `doc` 与端口契约）；找不到时 `{error, nearest:[三个最接近的 id]}` |
 | `list_port_types` | — | 同上 | `{types:[…]}` |
@@ -101,8 +113,9 @@ pnpm --filter @lyflow/mcp build     # 产物 packages/mcp/dist/index.js
 ### 图怎么给
 
 `graph`（内联 GraphDoc）与 `graphPath`（本地图文件，MCP 进程读它）二选一。
-**MCP 不写图文件** —— 改完的图由 Agent 自己用文件系统存，
-唯一的例外是 `patch_graph` 且显式给了 `dryRun: false`（见下）。
+`patch_graph` 显式 `dryRun:false` 可写图，`export_candidate` 写新的已评估候选图/配方与 provenance。其余图工具只读原图；评估的冻结副本与结果写入工作目录。
+
+图工具都接受 `graphParams` 和 `recipe`。显式 graphParams 覆盖配方；绑定的节点参数不能通过 `set` 修改。CLI 包装工具用 `--param name=<JSON>` 表达同一个 graphParams，样本覆盖最后生效。完整优先级和字段对照见 [glue 流程](mcp-glue-tuning.md)。
 
 ### `patch_graph`：`dryRun` 默认 **true**
 
@@ -152,6 +165,7 @@ MCP 只在外面套了 `runId` / `runStatus` / `diagnostics`。
   要么拿到了值、要么本来就不要）/ `failed`（有一维本该有却崩了）。
   另有两个只属于这一层的值：校验没过（后端 400）时是 `invalid`，`runId` 为 `null`、
   `diagnostics` 里是诊断；等不到 `run_finished` 时是 `timeout`（默认等 300 s，`timeoutMs` 可改）。
+  请求取消时是 `cancelled`。timeout/cancelled 的 cancellation 分开报告后端确认接受与执行结束。
 - **`runStatus`** 是 `run_finished` 那个 `ok` / `error` / `cancelled`，与 `status` 不是一回事，
   所以两个都留着：带 fallback 的图「主路径炸了、备用接住了」是
   `runStatus: ok` + `status: degraded`。**判成败读 `status`。**
@@ -166,6 +180,7 @@ MCP 只在外面套了 `runId` / `runStatus` / `diagnostics`。
   看 `outputsAvailable`；`reason=not_demanded` 才是真的什么都没有。
   节点的完整诊断列表仍在事件流里，summary 每个节点只给一个 `code`。
 - 图级输出是点云时不带 `value`，**这里永远不返回点云本身**。
+- `detail:"full"` 默认保留原返回；`detail:"compact"` 裁复杂数组并保存完整 artifact。assessment 单列定位/量测有效性和产品 OK/NG；core 执行成功不能替代产品合格。
 - 接的是老 core（ABI < v9）时没有 summary，返回退回 M5 那套形状：`nodes` 是数组、
   没有 `decisions` / `contractViolations`、`status` 等于 `runStatus`。
 - `set` 的语义与 CLI `--set` 完全一样：键是 `<节点>.<参数>`，在发给后端之前改 doc。
@@ -208,6 +223,8 @@ MCP 第一次返回非文本内容：调用方拿到的是一张能直接看的�
 这时 MCP 自己再按最近邻缩到 `maxEdge` 以内。PNG 在 MCP 进程里用 Node 自带的 zlib 编，不加依赖。
 坐标约定写在元信息的 `note` 里：左上角原点、y 向下，原图像素 —— 与图像算子输出的几何（`unit: "px"`）同一套。
 
+`overlays:[{nodeId,port}]` 引用同一 run 的 `lyflow.overlay2d` 输出；`roi:[x,y,width,height]` 使用原图坐标。返回 origin/pixelScale、overlayItems 和编号 labels，按 `原图 = origin + PNG 像素 × pixelScale` 换算。缩放只用于显示。
+
 ### `summarize_output` 的返回
 
 点云（`maxPoints` 是抽稀上限，`0` 表示不抽稀；`bbox` 用的是**全量**点算的包围盒）：
@@ -228,6 +245,8 @@ MCP 第一次返回非文本内容：调用方拿到的是一张能直接看的�
 `{kind:"indices", count, sourceCloudId, head}`。`head` 走契约的 `tensors` / `indices` 切片端点
 （ADR-0019），只取前 `head` 个；后端没实现这两个端点时（参考桩服务器返回 501）没有 `head`，
 换成一句 `headUnavailable` 说明原因。`Measurement` 这类小值给 `{kind:"value", value}` 原样。
+
+Record/Bundle 支持 `fields` 点路径、`offset`、`limit`，返回有界数组、全量数值/类别分布、assessment 与完整 artifact。数组归约支持 count/valid/missing/min/max/mean/std/p50/p95；后续通过 `read_artifact` 分页读取封存值。
 
 ### `eval` / `perturb` 的样本集
 
@@ -253,7 +272,9 @@ MCP 第一次返回非文本内容：调用方拿到的是一张能直接看的�
 子进程跟着结束（以前会在后台一直跑完，最长 10 分钟），返回里带 `cancelled: true`。
 `run_graph` 同样：客户端取消时替它发 `POST /lyflow/cancel`，不再等 `run_finished`。
 
-CLI 的 `--samples-jsonl-out` 与 `--parallel` **MCP 不提供**，逐条对照见
+`eval` 还接受内联 `samples`、truth、固定 `split`/`partition`、`cachePolicy`、`timeoutMs`、`maxRuns`。默认 cold；完整数据集与划分进入快照，`get_evaluation` 可以核对。长搜索使用 start_tuning/get_job/cancel_job/resume_job。
+
+CLI 的 `--samples-jsonl-out` 与 `--parallel` 没有直接同名 MCP 字段；eval 的冻结 snapshotArtifact 保留生成样本，逐条对照见
 [agent-tuning.md](agent-tuning.md) §7。
 
 ### `eval` 的返回
@@ -274,19 +295,18 @@ CLI 的 `--samples-jsonl-out` 与 `--parallel` **MCP 不提供**，逐条对照�
  "stderrTail":"1 组参数 × 51 个样本 = 51 次运行，51 次 ok"}
 ```
 
-- `compact` 的字段是 `{paramSet, params, metric, group, n, ok, failCodes（非空才带）, mean, std}`。
+- `compact` 的字段是 `{paramSet, params, metric, group, n, ok, missing, failCodes（非空才带）, mean, std, min, max, p50, p95}`。
   `compact: false` 回原样的 `eval_summary`（`groups` 嵌套，带 `min` / `max` / `p2p`）。
   8 组参数 × 5 个指标 × 2 组在盲测里是 31 KB，压紧之后是它的几分之一。
 - 逐行的 `eval_row` **不进返回值**，整份写在 `rowsPath` 指的 JSON Lines 文件里。
   51 帧 × 8 组参数就是 408 行，那是给 `jq` 看的，不是给上下文窗口看的。
 - `csv` 给了路径就原样透给 CLI 的 `--csv`，返回里回一个 `csvPath`。
-- `failures` 是状态不是 `ok` 的样本，最多 `failuresLimit` 条（默认 20，`0` 表示一条都不回、
+- `failures` 包含执行失败和标注质量失败，最多 `failuresLimit` 条（默认 20，`0` 表示一条都不回、
   只给 `rowsPath`），超了 `failuresTruncated` 为 `true`。每条带
   `{sample, paramSet, status, errors, summaryStatus, outputs}` ——
   后两个来自那次运行的 run summary（[ADR-0022](adr/0022-run-summary-as-core-output.md)），
   `outputs` 是每一维的三态。**没有它就得回头翻 `rowsPath` 才分得清
-  「这一维本来就没有」和「本该有、崩了」。** `rowsPath` 里每行也带完整的 `summary`
-  （CLI 的 `--no-summary` 可以关掉，MCP 这边不提供这个开关 —— 落盘不占上下文）。
+  「这一维本来就没有」和「本该有、崩了」。** `summary:true` 才在 rowsPath 中保存完整 summary（默认 false），truth 评分和 replay 不依赖这个开关。
 - **读 summary 的顺序是先 `ok/n` 与 `failCodes`，再 `std`**，理由见
   [agent-tuning.md](agent-tuning.md) §3。
 - 退出码 4（用法错，比如指标路径拼错）或者根本起不来时，额外带一个 `stderr` 字段放**全文** ——
@@ -330,9 +350,12 @@ CLI 的 `--samples-jsonl-out` 与 `--parallel` **MCP 不提供**，逐条对照�
 | `lyflow://schema/operator-manifest` | `schema/operator-manifest.schema.json` |
 | `lyflow://schema/graph-doc` | `schema/graph-doc.schema.json` —— 手写图之前先看它 |
 | `lyflow://schema/execution-event` | `schema/execution-event.schema.json` |
+| `lyflow://schema/eval-sample` | 标注样本 JSONL 的每行契约 |
+| `lyflow://schema/overlay2d` | 原图像素叠画契约 |
 | `lyflow://examples/graph` | `schema/examples/graph.example.lyflow.json` |
 | `lyflow://docs/agent-tuning` | [agent-tuning.md](agent-tuning.md) |
 | `lyflow://docs/http-transport` | [http-transport.md](http-transport.md) |
+| `lyflow://docs/mcp-glue-tuning` | [随动/飞拍调参与验收](mcp-glue-tuning.md) |
 | `lyflow://packs/<name>/readme` | `packs/<name>/README.md`，可枚举 |
 
 除 `lyflow://manifest` 以外都读仓库里的文件（沿着模块路径往上找 `schema/operator-manifest.schema.json`
@@ -342,10 +365,9 @@ CLI 的 `--samples-jsonl-out` 与 `--parallel` **MCP 不提供**，逐条对照�
 
 ## 不做的事
 
-- **读写图文件。** Agent 有文件系统，`graphPath` 只用来读一份给后端，写回是 Agent 自己的事。
+- **自动替换在用图。** 搜索只写快照，候选通过 export_candidate 导出到新文件，采用候选由使用者决定。
 - **点云可视化。** 只给统计量；要图片用编辑器的 PNG 导出。
-- **任何自动调参。** 真实任务里的瓶颈是判断不是算力（单次 run 0.05 s，上万次也就几分钟），
-  平台把「测的是不是那条缝」变成可审计的一步，不替人拍板（m5-plan G13）。
+- **自动修改验收规格。** start_tuning 提供受角色与预算限制的有限搜索；accuracy 的真值、质量限额、留出集验收和现场采用仍需任务定义。
 - **编辑器 UI。** MCP 与编辑器是同一份契约的两个消费方，互不依赖 ——
   `@lyflow/mcp` 不依赖 `@lyflow/editor`（那边带 React）。
 - **第四种传输语义。** 没有新的端点、新的事件、新的错误码。契约变了，改的是
@@ -361,4 +383,4 @@ pnpm --filter @lyflow/mcp test
 点云统计、JSON Lines 解析容错）总是跑；集成冒烟自己起 test-server 与 MCP 子进程，跑
 `list_operators → get_operator → validate_graph → run_graph → get_node_outputs → summarize_output`，
 另一条走配方：`list_recipes → run_graph recipe`（点数与 `lyflow run --recipe --outputs` 相同）→ 失配的配方被拦 → 内联图带 recipe →
-`get_params recipe`。没有 `bridge/target/debug/lyflow.exe` 时它们 skip 并打出原因。`pnpm check` 里带着这一步。
+`get_params recipe`。glue 构建还覆盖环境核对、绑定入口、规格锁定、预算耗尽/续跑、输入漂移拒绝、验证与留出评估、基线比较、失败叠画、候选图/配方导出与后台取消。没有 `bridge/target/debug/lyflow.exe` 时集成测试 skip 并打出原因；显式 LYFLOW_PACKS=glue 时缺 glue 算子视为失败。`pnpm check` 里带着这一步。

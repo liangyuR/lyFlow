@@ -140,6 +140,8 @@ void writeParam(JsonWriter& w, const Param& p) {
   if (p.softMax) w.field("softMax", *p.softMax);
   if (p.step)    w.field("step", *p.step);
   w.fieldIfSet("unit", p.unit);
+  w.fieldIfSet("tuningRole", p.tuningRole);
+  w.fieldIfSet("unitSource", p.unitSource);
   if (p.absolute) w.field("absolute", true);
   w.fieldIfSet("componentLabels", p.componentLabels);
 
@@ -553,6 +555,10 @@ std::vector<std::string> Registry::validate() const {
     std::set<std::string> paramNames;
     for (const auto& p : op.params) {
       const std::string pwhere = where + " param '" + p.name + "'";
+      if (!p.tuningRole.empty() && p.tuningRole != "input" && p.tuningRole != "geometry" &&
+          p.tuningRole != "detection" && p.tuningRole != "acceptance") {
+        fail(pwhere + " tuningRole 不认识：" + p.tuningRole);
+      }
       if (p.name.empty()) fail(where + " has a param with empty name");
       if (!paramNames.insert(p.name).second) fail(where + " has duplicate param '" + p.name + "'");
       if (p.def.isNull()) {

@@ -7,8 +7,8 @@ use std::sync::{mpsc, Arc};
 use serde_json::{json, Map, Value};
 
 use crate::cli::{
-    core, defaults_by_op, diagnostics_of, execute, has_errors, json_line, line, load_graph,
-    parse_axis, component_count, Loaded, Parsed, RunGroup, RunRequest, Sink, EXIT_CANCELLED,
+    component_count, core, defaults_by_op, diagnostics_of, execute, has_errors, json_line, line,
+    load_graph, parse_axis, Loaded, Parsed, RunGroup, RunRequest, Sink, EXIT_CANCELLED,
     EXIT_FAILED, EXIT_INVALID, EXIT_OK, EXIT_USAGE,
 };
 use crate::core_ffi::Core;
@@ -16,9 +16,11 @@ use crate::graph::GraphDoc;
 
 const MAX_LEAF_DEPTH: usize = 6;
 const MAX_LISTED_PATHS: usize = 200;
+mod quality;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum MetricKind {
+    Quality(String),
     RunDuration,
     NodeDuration(String),
     NodeStat(String, String),
@@ -41,7 +43,10 @@ pub(crate) struct MetricPath {
 
 impl MetricPath {
     fn needs_outputs(&self) -> bool {
-        matches!(self.kind, MetricKind::Output { .. })
+        matches!(
+            self.kind,
+            MetricKind::Output { .. } | MetricKind::Quality(_)
+        )
     }
 }
 
@@ -91,6 +96,9 @@ fn path_metric(spec: &str) -> Result<MetricKind, String> {
     }
     let owned = |s: &[&str]| s.iter().map(|x| (*x).to_string()).collect::<Vec<String>>();
     match segs[0] {
+        "quality" if segs.len() == 2 && quality::METRICS.contains(&segs[1]) => {
+            Ok(MetricKind::Quality(segs[1].to_string()))
+        }
         "run" => {
             if segs.len() == 2 && segs[1] == "durationMs" {
                 Ok(MetricKind::RunDuration)
@@ -143,7 +151,13 @@ fn descend<'a>(start: &'a Value, rest: &[String]) -> Option<&'a Value> {
         let obj = cur.as_object()?;
         cur = match obj.get(key) {
             Some(v) => v,
-            None => obj.get("data")?.as_object()?.get(key)?,
+            None => obj.get("data").and_then(|d| d.get(key)).or_else(|| {
+                obj.get("fields")?
+                    .as_array()?
+                    .iter()
+                    .find(|f| f["name"] == key.as_str())?
+                    .get("value")
+            })?,
         };
     }
     Some(cur)
@@ -162,6 +176,47 @@ fn scalar_of(v: &Value) -> Option<f64> {
     }
 }
 
+fn quantile(values: &[f64], p: f64) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let index = (sorted.len() - 1) as f64 * p;
+    let lo = index.floor() as usize;
+    Some(sorted[lo] + (sorted[index.ceil() as usize] - sorted[lo]) * index.fract())
+}
+
+fn numeric_at(v: &Value, rest: &[String]) -> Option<f64> {
+    if let Some((last, path)) = rest.split_last() {
+        if let Some(array) = descend(v, path).and_then(Value::as_array) {
+            let values: Vec<f64> = array
+                .iter()
+                .filter_map(scalar_of)
+                .filter(|v| v.is_finite())
+                .collect();
+            let n = values.len();
+            let mean = || values.iter().sum::<f64>() / n as f64;
+            return match last.as_str() {
+                "count" => Some(array.len() as f64),
+                "valid" => Some(n as f64),
+                "missing" => Some((array.len() - n) as f64),
+                "mean" if n > 0 => Some(mean()),
+                "min" => values.iter().copied().reduce(f64::min),
+                "max" => values.iter().copied().reduce(f64::max),
+                "p50" => quantile(&values, 0.5),
+                "p95" => quantile(&values, 0.95),
+                "std" if n > 1 => Some(
+                    (values.iter().map(|v| (v - mean()).powi(2)).sum::<f64>() / (n - 1) as f64)
+                        .sqrt(),
+                ),
+                _ => scalar_of(descend(v, rest)?),
+            };
+        }
+    }
+    scalar_of(descend(v, rest)?)
+}
+
 impl<'a> RunView<'a> {
     fn node_states(&self, node: &str) -> impl Iterator<Item = &'a Value> {
         let node = node.to_string();
@@ -173,15 +228,16 @@ impl<'a> RunView<'a> {
 
     pub(crate) fn resolve(&self, metric: &MetricPath) -> Option<f64> {
         match &metric.kind {
+            MetricKind::Quality(_) => None, // Engine scores these against each sample's annotation.
             MetricKind::RunDuration => self
                 .events
                 .iter()
                 .rev()
                 .find(|e| e["kind"] == "run_finished")
                 .and_then(|e| e["durationMs"].as_f64()),
-            MetricKind::NodeDuration(node) => {
-                self.node_states(node).find_map(|e| e["durationMs"].as_f64())
-            }
+            MetricKind::NodeDuration(node) => self
+                .node_states(node)
+                .find_map(|e| e["durationMs"].as_f64()),
             MetricKind::NodeStat(node, field) => self
                 .node_states(node)
                 .find_map(|e| e["stats"][field.as_str()].as_f64()),
@@ -195,11 +251,11 @@ impl<'a> RunView<'a> {
                         return Some(v);
                     }
                 }
-                scalar_of(descend(entry.get("value")?, rest)?)
+                numeric_at(entry.get("value")?, rest)
             }),
             MetricKind::Output { name, rest } => {
                 let entry = self.outputs?.get(name.as_str())?;
-                scalar_of(descend(entry.get("value")?, rest)?)
+                numeric_at(entry.get("value")?, rest)
             }
         }
     }
@@ -221,6 +277,13 @@ fn collect_leaves(prefix: &str, v: &Value, depth: usize, out: &mut BTreeSet<Stri
         }
         leaf_or_recurse(prefix, k, x, depth, out);
     }
+    if let Some(fields) = obj.get("fields").and_then(Value::as_array) {
+        for f in fields {
+            if let (Some(name), Some(v)) = (f["name"].as_str(), f.get("value")) {
+                leaf_or_recurse(prefix, name, v, depth, out);
+            }
+        }
+    }
 }
 
 fn leaf_or_recurse(prefix: &str, key: &str, v: &Value, depth: usize, out: &mut BTreeSet<String>) {
@@ -230,6 +293,13 @@ fn leaf_or_recurse(prefix: &str, key: &str, v: &Value, depth: usize, out: &mut B
             out.insert(path);
         }
         Value::Object(_) => collect_leaves(&path, v, depth + 1, out),
+        Value::Array(a) if a.iter().all(|v| v.is_null() || scalar_of(v).is_some()) => {
+            for reducer in [
+                "count", "valid", "missing", "min", "max", "mean", "std", "p50", "p95",
+            ] {
+                out.insert(format!("{path}.{reducer}"));
+            }
+        }
         _ => {}
     }
 }
@@ -248,7 +318,9 @@ pub(crate) fn available_paths(view: &RunView) -> Vec<String> {
         if e["kind"] != "node_state" {
             continue;
         }
-        let Some(id) = e["nodeId"].as_str() else { continue };
+        let Some(id) = e["nodeId"].as_str() else {
+            continue;
+        };
         if seen.iter().any(|s| s == id) {
             continue;
         }
@@ -268,7 +340,9 @@ pub(crate) fn available_paths(view: &RunView) -> Vec<String> {
                 continue;
             };
             for o in outputs {
-                let Some(port) = o["port"].as_str() else { continue };
+                let Some(port) = o["port"].as_str() else {
+                    continue;
+                };
                 let prefix = format!("nodes.{id}.{port}");
                 if o["elementCount"].is_number() {
                     out.insert(format!("{prefix}.elementCount"));
@@ -302,6 +376,8 @@ pub(crate) struct Sample {
     pub id: String,
     pub set: Vec<(String, Value)>,
     pub tags: BTreeMap<String, String>,
+    pub graph_params: Map<String, Value>,
+    pub truth: Option<Value>,
 }
 
 impl Sample {
@@ -310,6 +386,8 @@ impl Sample {
             id: "-".to_string(),
             set: Vec::new(),
             tags: BTreeMap::new(),
+            graph_params: Map::new(),
+            truth: None,
         }
     }
 
@@ -333,14 +411,15 @@ fn tag_to_string(v: &Value) -> Option<String> {
 
 pub(crate) fn parse_samples(text: &str, origin: &str) -> Result<Vec<Sample>, String> {
     let mut out = Vec::new();
+    let mut ids = BTreeSet::new();
     for (i, raw) in text.lines().enumerate() {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
             continue;
         }
         let at = format!("{origin} 第 {} 行", i + 1);
-        let value: Value = serde_json::from_str(trimmed)
-            .map_err(|e| format!("{at} 不是合法 JSON: {e}"))?;
+        let value: Value =
+            serde_json::from_str(trimmed).map_err(|e| format!("{at} 不是合法 JSON: {e}"))?;
         let Some(obj) = value.as_object() else {
             return Err(format!("{at} 不是 JSON 对象"));
         };
@@ -352,6 +431,9 @@ pub(crate) fn parse_samples(text: &str, origin: &str) -> Result<Vec<Sample>, Str
         let Some(id) = obj.get("id").and_then(Value::as_str) else {
             return Err(format!("{at} 缺 id（字符串）"));
         };
+        if id.is_empty() || !ids.insert(id.to_string()) {
+            return Err(format!("{at} id 为空或重复: {id}"));
+        }
         let mut set = Vec::new();
         match obj.get("set") {
             None | Some(Value::Null) => {}
@@ -378,10 +460,23 @@ pub(crate) fn parse_samples(text: &str, origin: &str) -> Result<Vec<Sample>, Str
             }
             Some(_) => return Err(format!("{at} 的 tags 不是对象")),
         }
+        let graph_params = match obj.get("graphParams") {
+            None => Map::new(),
+            Some(v) => v
+                .as_object()
+                .cloned()
+                .ok_or_else(|| format!("{at} graphParams 需要对象"))?,
+        };
+        let truth = obj.get("truth").cloned();
+        if let Some(t) = &truth {
+            quality::validate(t).map_err(|e| format!("{at} {e}"))?;
+        }
         out.push(Sample {
             id: id.to_string(),
             set,
             tags,
+            graph_params,
+            truth,
         });
     }
     if out.is_empty() {
@@ -591,6 +686,8 @@ pub(crate) fn samples_from_files(files: &[PathBuf], bind: &str) -> Vec<Sample> {
                 Value::String(absolute(f).to_string_lossy().replace('\\', "/")),
             )],
             tags: BTreeMap::new(),
+            graph_params: Map::new(),
+            truth: None,
         });
     }
     out
@@ -699,9 +796,7 @@ pub(crate) fn combine_param_sets(explicit: Vec<ParamSet>, axes: Vec<ParamSet>) -
                 merged.display.insert(k.clone(), v.clone());
             }
             for (node, param, v) in &a.writes {
-                merged
-                    .writes
-                    .retain(|(n, p, _)| !(n == node && p == param));
+                merged.writes.retain(|(n, p, _)| !(n == node && p == param));
                 merged.writes.push((node.clone(), param.clone(), v.clone()));
             }
             out.push(merged);
@@ -716,9 +811,30 @@ pub(crate) struct GroupStats {
     pub ok: usize,
     pub fail_codes: BTreeMap<String, usize>,
     pub values: Vec<f64>,
+    measurement_units: BTreeSet<String>,
 }
 
 impl GroupStats {
+    fn include_measurement_units(&mut self, key: &str, quality: Option<&Value>) {
+        if !quality::MEASUREMENT_ERROR_METRICS.contains(&key) {
+            return;
+        }
+        for unit in quality
+            .and_then(|q| q["evidence"]["measurementErrorUnits"].as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
+            self.measurement_units.insert(unit.into());
+        }
+    }
+    fn enforce_measurement_units(&mut self) {
+        if self.measurement_units.len() > 1 {
+            self.values.clear();
+            self.ok = 0;
+            self.fail_codes.insert("mixed_units".into(), self.n);
+        }
+    }
     fn mean(&self) -> Option<f64> {
         if self.values.is_empty() {
             return None;
@@ -734,14 +850,16 @@ impl GroupStats {
         Some((sum / (self.values.len() - 1) as f64).sqrt())
     }
     fn min(&self) -> Option<f64> {
-        self.values.iter().cloned().fold(None, |a: Option<f64>, v| {
-            Some(a.map_or(v, |x| x.min(v)))
-        })
+        self.values
+            .iter()
+            .cloned()
+            .fold(None, |a: Option<f64>, v| Some(a.map_or(v, |x| x.min(v))))
     }
     fn max(&self) -> Option<f64> {
-        self.values.iter().cloned().fold(None, |a: Option<f64>, v| {
-            Some(a.map_or(v, |x| x.max(v)))
-        })
+        self.values
+            .iter()
+            .cloned()
+            .fold(None, |a: Option<f64>, v| Some(a.map_or(v, |x| x.max(v))))
     }
     fn to_json(&self) -> Value {
         let num = |v: Option<f64>| v.map(|x| json!(x)).unwrap_or(Value::Null);
@@ -753,7 +871,7 @@ impl GroupStats {
         for (k, v) in &self.fail_codes {
             codes.insert(k.clone(), json!(v));
         }
-        json!({
+        let mut result = json!({
             "n": self.n,
             "ok": self.ok,
             "failCodes": Value::Object(codes),
@@ -762,7 +880,20 @@ impl GroupStats {
             "min": num(self.min()),
             "max": num(self.max()),
             "p2p": p2p,
-        })
+            "p50": num(quantile(&self.values, 0.5)),
+            "p95": num(quantile(&self.values, 0.95)),
+            "missing": self.n - self.values.len(),
+        });
+        if !self.measurement_units.is_empty() {
+            result["units"] = json!(self.measurement_units);
+            result["unit"] = if self.measurement_units.len() == 1 {
+                json!(self.measurement_units.first().unwrap())
+            } else {
+                result["incomparableReason"] = json!("mixed_units");
+                Value::Null
+            };
+        }
+        result
     }
 }
 
@@ -780,14 +911,19 @@ impl Grouping {
         }
     }
     pub(crate) fn name_of(&self, s: &Sample) -> String {
-        let side = self
-            .holdout
-            .as_ref()
-            .map(|_| if self.is_holdout(s) { "holdout" } else { "train" });
-        let group = self
-            .group_by
-            .as_ref()
-            .map(|k| s.tags.get(k).cloned().unwrap_or_else(|| "(none)".to_string()));
+        let side = self.holdout.as_ref().map(|_| {
+            if self.is_holdout(s) {
+                "holdout"
+            } else {
+                "train"
+            }
+        });
+        let group = self.group_by.as_ref().map(|k| {
+            s.tags
+                .get(k)
+                .cloned()
+                .unwrap_or_else(|| "(none)".to_string())
+        });
         match (side, group) {
             (Some(a), Some(b)) => format!("{a}/{b}"),
             (Some(a), None) => a.to_string(),
@@ -815,6 +951,7 @@ pub(crate) struct Row {
     pub skipped: Vec<String>,
     /// 这一次运行的 run summary（ADR-0022）。没给 `--summary`、或校验就没过时是 None。
     pub summary: Option<Value>,
+    pub quality: Option<Value>,
 }
 
 pub(crate) enum EngineError {
@@ -823,6 +960,7 @@ pub(crate) enum EngineError {
 }
 
 pub(crate) struct Engine<'a> {
+    pub started: Option<&'a Sink>,
     pub core: &'a Arc<Core>,
     /// 已经叠好「基础 → --recipe → --param」的图（load_graph）。
     pub base: &'a Loaded,
@@ -858,7 +996,12 @@ pub(crate) struct Progress {
 impl Progress {
     pub(crate) fn new(err: &Sink, total: usize) -> Self {
         let on = crate::cli::progress_line();
-        Self::with(err, total, on, if on { crate::cli::stderr_width() } else { None })
+        Self::with(
+            err,
+            total,
+            on,
+            if on { crate::cli::stderr_width() } else { None },
+        )
     }
 
     fn with(err: &Sink, total: usize, on: bool, cols: Option<usize>) -> Self {
@@ -1042,7 +1185,14 @@ impl<'a> Engine<'a> {
                 crate::cli::apply_graph_param(&mut doc, spec)?;
             }
         }
+        // Sample inputs/geometry are applied last, just like sample.set. They are frozen by the evaluator.
+        for (name, value) in &sample.graph_params {
+            crate::cli::apply_graph_param(&mut doc, &format!("{name}={value}"))?;
+        }
         let mut write = |node_id: &str, param: &str, value: &Value| -> Result<(), String> {
+            if let Some(e) = crate::cli::set_conflict(&doc, node_id, param, "eval override") {
+                return Err(e);
+            }
             let node = doc
                 .nodes
                 .iter_mut()
@@ -1070,6 +1220,12 @@ impl<'a> Engine<'a> {
     ) -> Result<Attempt, String> {
         let ps = &self.param_sets[pi];
         let sample = &self.samples[si];
+        if let Some(out) = self.started {
+            json_line(
+                out,
+                &json!({"kind":"eval_started","paramSet":pi,"sample":sample.id}),
+            );
+        }
         let doc = self.variant(ps, sample)?;
         let graph_json = serde_json::to_string(&doc).map_err(|e| e.to_string())?;
         let loaded = Loaded {
@@ -1080,6 +1236,14 @@ impl<'a> Engine<'a> {
         };
         let diags = diagnostics_of(self.core, &loaded)?;
         if has_errors(&diags) {
+            let quality = quality::score(
+                &RunView {
+                    events: &[],
+                    outputs: None,
+                },
+                sample.truth.as_ref(),
+                "validation_failed",
+            );
             let mut errors: Vec<String> = Vec::new();
             for d in &diags {
                 if d["severity"] != "error" {
@@ -1096,11 +1260,19 @@ impl<'a> Engine<'a> {
                     param_set: pi,
                     sample: si,
                     status: "validation_failed".to_string(),
-                    metrics: vec![None; self.metrics.len()],
+                    metrics: self
+                        .metrics
+                        .iter()
+                        .map(|m| match &m.kind {
+                            MetricKind::Quality(k) => quality["metrics"][k.as_str()].as_f64(),
+                            _ => None,
+                        })
+                        .collect(),
                     errors,
                     duration_ms: 0.0,
                     skipped: Vec::new(),
                     summary: None,
+                    quality: Some(quality),
                 },
                 available: Vec::new(),
                 resolved: vec![false; self.metrics.len()],
@@ -1123,7 +1295,9 @@ impl<'a> Engine<'a> {
                 on_event: None,
             },
         )?;
-        let wants_outputs = enumerate || self.metrics.iter().any(MetricPath::needs_outputs);
+        let wants_outputs = enumerate
+            || sample.truth.is_some()
+            || self.metrics.iter().any(MetricPath::needs_outputs);
         let outputs: Option<Value> = if wants_outputs {
             self.core
                 .run_outputs(result.run_id())
@@ -1136,9 +1310,25 @@ impl<'a> Engine<'a> {
             events: &result.events,
             outputs: outputs.as_ref(),
         };
-        let values: Vec<Option<f64>> = self.metrics.iter().map(|m| view.resolve(m)).collect();
+        let quality = quality::score(&view, sample.truth.as_ref(), &result.status);
+        let values: Vec<Option<f64>> = self
+            .metrics
+            .iter()
+            .map(|m| match &m.kind {
+                MetricKind::Quality(k) => quality["metrics"][k.as_str()].as_f64(),
+                _ => view.resolve(m),
+            })
+            .collect();
         let available = if enumerate {
-            available_paths(&view)
+            let mut paths = available_paths(&view);
+            paths.extend(
+                quality["metrics"]
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .map(|k| format!("quality.{k}")),
+            );
+            paths
         } else {
             Vec::new()
         };
@@ -1183,6 +1373,7 @@ impl<'a> Engine<'a> {
                 } else {
                     None
                 },
+                quality: Some(quality),
             },
             available,
             resolved,
@@ -1207,15 +1398,35 @@ impl<'a> Engine<'a> {
     }
 
     pub(crate) fn run(&self, on_row: &mut dyn FnMut(&Row)) -> Result<i32, EngineError> {
+        self.run_remaining(on_row, &BTreeSet::new(), usize::MAX)
+    }
+
+    fn run_remaining(
+        &self,
+        on_row: &mut dyn FnMut(&Row),
+        completed: &BTreeSet<(usize, usize)>,
+        max_runs: usize,
+    ) -> Result<i32, EngineError> {
+        let indices: Vec<usize> = (0..self.param_sets.len() * self.samples.len())
+            .filter(|&k| !completed.contains(&self.split(k)))
+            .take(max_runs)
+            .collect();
         let mut first: Option<Attempt> = None;
-        if !self.param_sets.is_empty() && !self.samples.is_empty() && !self.metrics.is_empty() {
-            let a = self.attempt(0, 0, true, None).map_err(EngineError::Failed)?;
+        if let Some(&k) = indices.first() {
+            let (pi, si) = self.split(k);
+            let a = self
+                .attempt(pi, si, true, None)
+                .map_err(EngineError::Failed)?;
             if a.row.status == "ok" {
                 let missing: Vec<String> = self
                     .metrics
                     .iter()
                     .zip(&a.resolved)
-                    .filter(|(_, ok)| !**ok)
+                    .filter(|(m, ok)| {
+                        !**ok
+                            && !matches!(m.kind, MetricKind::Quality(_))
+                            && !a.available.contains(&m.raw)
+                    })
                     .map(|(m, _)| m.raw.clone())
                     .collect();
                 if !missing.is_empty() {
@@ -1227,7 +1438,7 @@ impl<'a> Engine<'a> {
             }
             first = Some(a);
         }
-        let total = self.param_sets.len() * self.samples.len();
+        let total = indices.len();
         let mut worst = EXIT_OK;
         // 交出一行。Some(退出码) = 到此为止：这一行被取消了（Ctrl+C），后面的不再跑
         let mut emit = |row: &Row| -> Option<i32> {
@@ -1248,12 +1459,14 @@ impl<'a> Engine<'a> {
             start = 1;
         }
         let stopped = if self.jobs > 1 && total.saturating_sub(start) > 1 {
-            self.run_jobs(start, total, &mut emit)?
+            self.run_jobs(&indices[start..], &mut emit)?
         } else {
             let mut stopped = None;
             for k in start..total {
-                let (pi, si) = self.split(k);
-                let a = self.attempt(pi, si, false, None).map_err(EngineError::Failed)?;
+                let (pi, si) = self.split(indices[k]);
+                let a = self
+                    .attempt(pi, si, false, None)
+                    .map_err(EngineError::Failed)?;
                 stopped = emit(&a.row);
                 if stopped.is_some() {
                     break;
@@ -1269,21 +1482,26 @@ impl<'a> Engine<'a> {
     /// 有一次回来是 cancelled（Ctrl+C 把在跑的都取消了）就整批取消：之后才起的那次一登记就取消。
     fn run_jobs(
         &self,
-        start: usize,
-        total: usize,
+        indices: &[usize],
         emit: &mut dyn FnMut(&Row) -> Option<i32>,
     ) -> Result<Option<i32>, EngineError> {
         let group = RunGroup::default();
         let work = |k: usize| -> Result<Attempt, String> {
-            let (pi, si) = self.split(k);
+            let (pi, si) = self.split(indices[k]);
             let a = self.attempt(pi, si, false, Some(&group))?;
             if a.row.status == "cancelled" {
                 group.cancel();
             }
             Ok(a)
         };
-        ordered_parallel(start..total, self.jobs, &group, &work, &mut |a: Attempt| emit(&a.row))
-            .map_err(EngineError::Failed)
+        ordered_parallel(
+            0..indices.len(),
+            self.jobs,
+            &group,
+            &work,
+            &mut |a: Attempt| emit(&a.row),
+        )
+        .map_err(EngineError::Failed)
     }
 }
 
@@ -1419,6 +1637,7 @@ pub(crate) fn summarize(
     samples: &[Sample],
     grouping: &Grouping,
     metric_index: usize,
+    metric: &MetricPath,
     rows: &[Row],
 ) -> BTreeMap<String, GroupStats> {
     let mut groups: BTreeMap<String, GroupStats> = BTreeMap::new();
@@ -1426,6 +1645,9 @@ pub(crate) fn summarize(
         let sample = &samples[row.sample];
         let entry = groups.entry(grouping.name_of(sample)).or_default();
         entry.n += 1;
+        if let MetricKind::Quality(key) = &metric.kind {
+            entry.include_measurement_units(key, row.quality.as_ref());
+        }
         let value = row.metrics.get(metric_index).copied().flatten();
         match (row.status.as_str(), value) {
             ("ok", Some(v)) => {
@@ -1449,6 +1671,9 @@ pub(crate) fn summarize(
             }
         }
     }
+    for stats in groups.values_mut() {
+        stats.enforce_measurement_units();
+    }
     groups
 }
 
@@ -1469,10 +1694,18 @@ fn list_metric_paths(engine: &Engine, samples: &[Sample], out: &Sink, err: &Sink
                 "第一次运行（参数组 0 × 样本 {}）没成功：{}{}，列不出路径",
                 samples[row.sample].id,
                 row.status,
-                if row.errors.is_empty() { String::new() } else { format!("（{}）", row.errors.join(", ")) }
+                if row.errors.is_empty() {
+                    String::new()
+                } else {
+                    format!("（{}）", row.errors.join(", "))
+                }
             ),
         );
-        return if row.status == "validation_failed" { EXIT_INVALID } else { EXIT_FAILED };
+        return if row.status == "validation_failed" {
+            EXIT_INVALID
+        } else {
+            EXIT_FAILED
+        };
     }
     json_line(
         out,
@@ -1483,13 +1716,23 @@ fn list_metric_paths(engine: &Engine, samples: &[Sample], out: &Sink, err: &Sink
             "paths": paths,
         }),
     );
-    line(err, &format!("{} 条标量路径（参数组 0 × 样本 {} 跑出来的）", paths.len(), samples[row.sample].id));
+    line(
+        err,
+        &format!(
+            "{} 条标量路径（参数组 0 × 样本 {} 跑出来的）",
+            paths.len(),
+            samples[row.sample].id
+        ),
+    );
     EXIT_OK
 }
 
 pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let Some(path) = parsed.positional.first().cloned() else {
-        line(err, "用法：lyflow eval <graph> --samples <samples.jsonl> --metric <path>");
+        line(
+            err,
+            "用法：lyflow eval <graph> --samples <samples.jsonl> --metric <path>",
+        );
         return EXIT_USAGE;
     };
 
@@ -1524,15 +1767,14 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         holdout,
         group_by: parsed.one("group-by").map(str::to_string),
     };
-    let (parallel, jobs) = match crate::cli::parallel_of(parsed)
-        .and_then(|p| Ok((p, crate::cli::jobs_of(parsed)?)))
-    {
-        Ok(v) => v,
-        Err(e) => {
-            line(err, &e);
-            return EXIT_USAGE;
-        }
-    };
+    let (parallel, jobs) =
+        match crate::cli::parallel_of(parsed).and_then(|p| Ok((p, crate::cli::jobs_of(parsed)?))) {
+            Ok(v) => v,
+            Err(e) => {
+                line(err, &e);
+                return EXIT_USAGE;
+            }
+        };
 
     let samples = match collect_samples(parsed, err) {
         Ok(s) => s,
@@ -1582,7 +1824,11 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         None => Vec::new(),
     };
     // --param 里左边带「.」的才是扫描轴；不带的是顶层图参数，load_graph 已经应用过。
-    let axes = match axis_param_sets(&loaded.doc, &defaults, &crate::cli::axis_param_specs(parsed)) {
+    let axes = match axis_param_sets(
+        &loaded.doc,
+        &defaults,
+        &crate::cli::axis_param_specs(parsed),
+    ) {
         Ok(v) => v,
         Err(e) => {
             line(err, &e);
@@ -1591,7 +1837,11 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
     // 参数组里写图参数的名字要是图声明过的：写错了是参数错（退出码 4），不是跑出来一排 validation_failed
     for (i, ps) in explicit.iter().enumerate() {
-        if let Some((name, _)) = ps.graph.iter().find(|(n, _)| !loaded.doc.params.contains_key(n)) {
+        if let Some((name, _)) = ps
+            .graph
+            .iter()
+            .find(|(n, _)| !loaded.doc.params.contains_key(n))
+        {
             let known: Vec<&String> = loaded.doc.params.keys().collect();
             line(
                 err,
@@ -1601,9 +1851,46 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         }
     }
     let param_sets = combine_param_sets(explicit, axes);
-    let pinned: Vec<String> = crate::cli::graph_param_specs(parsed).into_iter().cloned().collect();
+    for sample in &samples {
+        if let Some(name) = sample
+            .graph_params
+            .keys()
+            .find(|n| !loaded.doc.params.contains_key(*n))
+        {
+            line(
+                err,
+                &format!("unknown_param: 样本 {} 的 {name} 不是图参数", sample.id),
+            );
+            return EXIT_USAGE;
+        }
+        for (key, _) in &sample.set {
+            if let Ok((node, param)) = split_target(key, "sample") {
+                if let Some(e) = crate::cli::set_conflict(&loaded.doc, &node, &param, key) {
+                    line(err, &e);
+                    return EXIT_USAGE;
+                }
+            }
+        }
+    }
+    for ps in &param_sets {
+        for (node, param, _) in &ps.writes {
+            if let Some(e) = crate::cli::set_conflict(&loaded.doc, node, param, "params") {
+                line(err, &e);
+                return EXIT_USAGE;
+            }
+        }
+    }
+    let pinned: Vec<String> = crate::cli::graph_param_specs(parsed)
+        .into_iter()
+        .cloned()
+        .collect();
 
     let engine = Engine {
+        started: if !list_only && parsed.has("progress-json") {
+            Some(out)
+        } else {
+            None
+        },
         core: &core,
         base: &loaded,
         pinned: &pinned,
@@ -1623,7 +1910,25 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         return list_metric_paths(&engine, &samples, out, err);
     }
 
-    let mut rows: Vec<Row> = Vec::new();
+    let mut rows: Vec<Row> = match parsed.one("resume-rows") {
+        Some(file) => match resume_rows(file, &param_sets, &samples, &metrics) {
+            Ok(rows) => rows,
+            Err(e) => {
+                line(err, &e);
+                return EXIT_USAGE;
+            }
+        },
+        None => Vec::new(),
+    };
+    let completed: BTreeSet<(usize, usize)> =
+        rows.iter().map(|r| (r.param_set, r.sample)).collect();
+    let max_runs = match crate::cli::uint_opt(parsed, "max-runs", u32::MAX) {
+        Ok(n) => n as usize,
+        Err(e) => {
+            line(err, &e);
+            return EXIT_USAGE;
+        }
+    };
     let mut progress = Progress::new(err, param_sets.len() * samples.len());
     let result = {
         let mut on_row = |row: &Row| {
@@ -1647,6 +1952,9 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
                 "metrics": Value::Object(m),
                 "errors": row.errors,
                 "durationMs": row.duration_ms,
+                "quality": row.quality,
+                "split": sample.tags.get("split"),
+                "graphParams": sample.graph_params,
             });
             // summary 是这一行的结论（ADR-0022）：status 三态与每个图输出的三态。
             // 默认不带，`--summary` 才有；没跑到执行期时也没有。
@@ -1656,11 +1964,13 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             json_line(out, &line_json);
             rows.push(row.clone());
         };
-        engine.run(&mut on_row)
+        engine.run_remaining(&mut on_row, &completed, max_runs)
     };
     progress.clear();
     let code = match result {
-        Ok(c) => c,
+        Ok(c) => rows
+            .iter()
+            .fold(c, |worst, r| worst.max(row_exit(&r.status))),
         Err(EngineError::Failed(e)) => {
             line(err, &e);
             return EXIT_FAILED;
@@ -1685,13 +1995,32 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         }
     };
 
+    if rows.len() < param_sets.len() * samples.len()
+        && max_runs < param_sets.len() * samples.len() - completed.len()
+    {
+        json_line(
+            out,
+            &json!({"kind":"eval_budget","maxRuns":max_runs,"completed":rows.len(),"total":param_sets.len()*samples.len()}),
+        );
+    }
     for (pi, ps) in param_sets.iter().enumerate() {
         let of_set: Vec<Row> = rows.iter().filter(|r| r.param_set == pi).cloned().collect();
         if of_set.is_empty() {
             continue;
         }
         for (mi, metric) in metrics.iter().enumerate() {
-            let groups = summarize(&samples, &grouping, mi, &of_set);
+            // Annotation metrics include execution failures in their denominators.
+            let scored: Vec<Row> = of_set
+                .iter()
+                .cloned()
+                .map(|mut r| {
+                    if matches!(metric.kind, MetricKind::Quality(_)) {
+                        r.status = "ok".into();
+                    }
+                    r
+                })
+                .collect();
+            let groups = summarize(&samples, &grouping, mi, metric, &scored);
             let mut g = Map::new();
             for (name, stats) in &groups {
                 g.insert(name.clone(), stats.to_json());
@@ -1707,6 +2036,10 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
                 }),
             );
         }
+        json_line(
+            out,
+            &json!({"kind":"quality_summary","paramSet":pi,"groups":quality_groups(&samples,&grouping,&of_set)}),
+        );
     }
 
     if let Some(csv_path) = parsed.one("csv") {
@@ -1733,6 +2066,133 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         line(err, &digest);
     }
     code
+}
+
+fn resume_rows(
+    file: &str,
+    params: &[ParamSet],
+    samples: &[Sample],
+    metrics: &[MetricPath],
+) -> Result<Vec<Row>, String> {
+    let text = std::fs::read_to_string(file).map_err(|e| e.to_string())?;
+    let mut rows = BTreeMap::<(usize, usize), Row>::new();
+    for raw in text.lines().filter(|s| !s.trim().is_empty()) {
+        let v: Value = serde_json::from_str(raw).map_err(|e| format!("resume JSONL: {e}"))?;
+        if v["kind"] != "eval_row" || v["status"] == "cancelled" {
+            continue;
+        }
+        let pi = v["paramSet"].as_u64().ok_or("resume 缺 paramSet")? as usize;
+        let si = samples
+            .iter()
+            .position(|s| v["sample"].as_str() == Some(s.id.as_str()))
+            .ok_or("resume 样本不在当前冻结集")?;
+        let ps = params.get(pi).ok_or("resume 参数组不存在")?;
+        if v["params"] != Value::Object(ps.display.clone()) {
+            return Err("resume 参数组已改变".into());
+        }
+        if metrics.iter().any(|m| v["metrics"].get(&m.raw).is_none()) {
+            return Err("resume 指标集合已改变".into());
+        }
+        let row = Row {
+            param_set: pi,
+            sample: si,
+            status: v["status"].as_str().ok_or("resume 缺 status")?.into(),
+            metrics: metrics
+                .iter()
+                .map(|m| v["metrics"][&m.raw].as_f64())
+                .collect(),
+            errors: v["errors"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.as_str().map(str::to_string))
+                .collect(),
+            duration_ms: v["durationMs"].as_f64().unwrap_or(0.0),
+            skipped: Vec::new(),
+            summary: v.get("summary").cloned(),
+            quality: v.get("quality").cloned(),
+        };
+        if rows.insert((pi, si), row).is_some() {
+            return Err("resume 中样本与参数组组合重复".into());
+        }
+    }
+    Ok(rows.into_values().collect())
+}
+
+fn quality_groups(samples: &[Sample], grouping: &Grouping, rows: &[Row]) -> Value {
+    let mut groups: BTreeMap<String, Vec<&Row>> = BTreeMap::new();
+    for row in rows {
+        groups
+            .entry(grouping.name_of(&samples[row.sample]))
+            .or_default()
+            .push(row);
+    }
+    let mut out = Map::new();
+    for (name, rows) in groups {
+        let mut stats = Map::new();
+        for key in quality::METRICS {
+            let mut g = GroupStats {
+                n: rows.len(),
+                ..Default::default()
+            };
+            for r in &rows {
+                g.include_measurement_units(key, r.quality.as_ref());
+                if let Some(v) = r.quality.as_ref().and_then(|q| q["metrics"][*key].as_f64()) {
+                    g.ok += 1;
+                    g.values.push(v);
+                }
+            }
+            g.enforce_measurement_units();
+            if g.ok > 0 || !g.measurement_units.is_empty() {
+                stats.insert((*key).into(), g.to_json());
+            }
+        }
+        let sum = |key: &str| {
+            rows.iter()
+                .filter_map(|r| r.quality.as_ref()?.get("metrics")?.get(key)?.as_f64())
+                .sum::<f64>()
+        };
+        let expected = sum("defectTp") + sum("defectFn");
+        let ratio = |a: f64, b: f64| if b > 0.0 { json!(a / b) } else { Value::Null };
+        let mut missing = BTreeMap::<String, usize>::new();
+        for r in &rows {
+            for m in r
+                .quality
+                .as_ref()
+                .and_then(|q| q["missingReasons"].as_array())
+                .into_iter()
+                .flatten()
+            {
+                *missing
+                    .entry(m["reason"].as_str().unwrap_or("unknown").into())
+                    .or_default() += 1;
+            }
+        }
+        let negatives = rows
+            .iter()
+            .filter(|r| {
+                samples[r.sample]
+                    .truth
+                    .as_ref()
+                    .is_some_and(|t| t["verdict"]["ok"] == false)
+            })
+            .count();
+        let positives = rows
+            .iter()
+            .filter(|r| {
+                samples[r.sample]
+                    .truth
+                    .as_ref()
+                    .is_some_and(|t| t["verdict"]["ok"] == true)
+            })
+            .count();
+        out.insert(name,json!({"n":rows.len(),"metrics":stats,"missingReasons":missing,
+            "defectRecallMicro":ratio(sum("defectTp"),expected),"defectMissRateMicro":ratio(sum("defectFn"),expected),
+            "falsePositives":sum("defectFp"),"falseAcceptRate":ratio(sum("productFalseAccept"),negatives as f64),
+            "falseRejectRate":ratio(sum("productFalseReject"),positives as f64),
+            "productMissing":sum("productMissing"),"measurementMissing":sum("measurementMissing")}));
+    }
+    Value::Object(out)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1911,10 +2371,7 @@ pub(crate) fn samples_from_dir(spec: &DirSpec) -> Result<(Vec<Sample>, Option<St
             None => dir.clone(),
         };
         if !look.is_dir() {
-            return Err(format!(
-                "帧 {name}：找不到目录 {}",
-                look.display()
-            ));
+            return Err(format!("帧 {name}：找不到目录 {}", look.display()));
         }
         let mut set = Vec::new();
         for (bind, pattern) in spec.binds.iter().zip(&spec.patterns) {
@@ -1928,6 +2385,8 @@ pub(crate) fn samples_from_dir(spec: &DirSpec) -> Result<(Vec<Sample>, Option<St
             id: name.clone(),
             set,
             tags: BTreeMap::new(),
+            graph_params: Map::new(),
+            truth: None,
         });
     }
 
@@ -1951,6 +2410,12 @@ fn sample_to_json(s: &Sample) -> Value {
     o.insert("set".to_string(), Value::Object(set));
     if !s.tags.is_empty() {
         o.insert("tags".to_string(), s.tags_json());
+    }
+    if !s.graph_params.is_empty() {
+        o.insert("graphParams".into(), Value::Object(s.graph_params.clone()));
+    }
+    if let Some(t) = &s.truth {
+        o.insert("truth".into(), t.clone());
     }
     Value::Object(o)
 }
@@ -1999,8 +2464,7 @@ fn dir_spec(parsed: &Parsed, root: &str) -> Result<DirSpec, String> {
     }
     let Some(raw) = parsed.one("pattern") else {
         return Err(
-            "--samples-dir 要配 --pattern <glob>；两个相机时用逗号隔开两个 glob"
-                .to_string(),
+            "--samples-dir 要配 --pattern <glob>；两个相机时用逗号隔开两个 glob".to_string(),
         );
     };
     let patterns: Vec<String> = raw
@@ -2019,11 +2483,7 @@ fn dir_spec(parsed: &Parsed, root: &str) -> Result<DirSpec, String> {
     let sort_by = match parsed.one("sort-by") {
         None | Some("name") => SortBy::Name,
         Some("mtime") => SortBy::Mtime,
-        Some(other) => {
-            return Err(format!(
-                "--sort-by 只认 name 或 mtime，收到 {other}"
-            ))
-        }
+        Some(other) => return Err(format!("--sort-by 只认 name 或 mtime，收到 {other}")),
     };
     Ok(DirSpec {
         root: PathBuf::from(root),
@@ -2044,12 +2504,16 @@ pub(crate) fn collect_samples(parsed: &Parsed, err: &Sink) -> Result<Vec<Sample>
         .filter(|b| **b)
         .count();
     if given > 1 {
-        return Err(
-            "--samples / --samples-glob / --samples-dir 只能给一个".to_string(),
-        );
+        return Err("--samples / --samples-glob / --samples-dir 只能给一个".to_string());
     }
     if dir.is_none() {
-        for name in ["bind-pair", "pattern", "sample-subdir", "sort-by", "split-half"] {
+        for name in [
+            "bind-pair",
+            "pattern",
+            "sample-subdir",
+            "sort-by",
+            "split-half",
+        ] {
             if parsed.one(name).is_some() {
                 return Err(format!("--{name} 要和 --samples-dir 一起给"));
             }
@@ -2084,9 +2548,7 @@ pub(crate) fn collect_samples(parsed: &Parsed, err: &Sink) -> Result<Vec<Sample>
         samples
     } else {
         if !parsed.many("bind").is_empty() {
-            return Err(
-                "--bind 要和 --samples-glob 或 --samples-dir 一起给".to_string(),
-            );
+            return Err("--bind 要和 --samples-glob 或 --samples-dir 一起给".to_string());
         }
         vec![Sample::whole_graph()]
     };
@@ -2096,10 +2558,7 @@ pub(crate) fn collect_samples(parsed: &Parsed, err: &Sink) -> Result<Vec<Sample>
             .map_err(|e| format!("写入 {out} 失败: {e}"))?;
         line(
             err,
-            &format!(
-                "样本集写到 {out}（{} 个样本）",
-                samples.len()
-            ),
+            &format!("样本集写到 {out}（{} 个样本）", samples.len()),
         );
     }
     Ok(samples)

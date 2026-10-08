@@ -10,6 +10,7 @@ import { loadConfig } from "../src/config.js";
 import { createServer } from "../src/server.js";
 
 const TOOLS = [
+  "get_environment", "inspect_graph", "read_artifact", "get_evaluation", "compare_evaluations", "export_candidate", "start_tuning", "get_job", "cancel_job", "resume_job",
   "list_operators",
   "get_operator",
   "list_port_types",
@@ -51,7 +52,7 @@ test("loadConfig：LYFLOW_HTTP_BASE 必填、缺了说清楚；其余配置项�
   assert.equal(config.workDir, path.join(os.tmpdir(), "lyflow-mcp"));
 });
 
-test("工具面就是这 16 个，输入 schema 的必填项对得上", async () => {
+test("工具面和输入 schema 的必填项对得上", async () => {
   const client = await connect({ LYFLOW_HTTP_BASE: "http://127.0.0.1:1" });
   const listed = await client.listTools();
   assert.deepEqual(
@@ -64,6 +65,9 @@ test("工具面就是这 16 个，输入 schema 的必填项对得上", async ()
     ((byName.get(name)?.inputSchema as { required?: string[] } | undefined)?.required ?? []).sort();
 
   const want: Record<string, string[]> = {
+    get_environment: [], inspect_graph: [], read_artifact: ["artifactId"], get_evaluation: ["evaluationId"], get_job: ["jobId"],
+    cancel_job: ["jobId"], resume_job: ["jobId"], export_candidate: ["evaluationId"],
+    compare_evaluations: ["baselineId","candidateId","objectives"], start_tuning: ["graphPath","objectives","space","split"],
     get_operator: ["id"],
     list_operators: [],
     summarize_output: ["nodeId", "port", "runId"],
@@ -81,7 +85,7 @@ test("工具面就是这 16 个，输入 schema 的必填项对得上", async ()
   await client.close();
 });
 
-test("resource 清单里有 manifest、三份 schema、两篇文档与图样例", async () => {
+test("resource 清单里有 manifest、图/样本/叠画 schema、调参文档与图样例", async () => {
   const client = await connect({ LYFLOW_HTTP_BASE: "http://127.0.0.1:1" });
   const listed = await client.listResources();
   const uris = listed.resources.map((r) => r.uri);
@@ -90,12 +94,19 @@ test("resource 清单里有 manifest、三份 schema、两篇文档与图样例"
     "lyflow://schema/operator-manifest",
     "lyflow://schema/graph-doc",
     "lyflow://schema/execution-event",
+    "lyflow://schema/eval-sample",
+    "lyflow://schema/overlay2d",
+    "lyflow://docs/mcp-glue-tuning",
     "lyflow://examples/graph",
     "lyflow://docs/agent-tuning",
     "lyflow://docs/http-transport",
   ]) {
     assert.ok(uris.includes(uri), `缺 ${uri}，实际有 ${uris.join(", ")}`);
   }
+  const sample=await client.readResource({uri:"lyflow://schema/eval-sample"});
+  assert.match(String((sample.contents[0] as {text:string}).text),/LyFlowEvalSample/);
+  const workflow=await client.readResource({uri:"lyflow://docs/mcp-glue-tuning"});
+  assert.match(String((workflow.contents[0] as {text:string}).text),/start_tuning/);
   await client.close();
 });
 

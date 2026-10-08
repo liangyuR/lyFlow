@@ -68,6 +68,7 @@ void registerLoadCalib(Registry& r) {
   path.mode = "open";
   path.filters = {FileFilter{"JSON", {"json"}}, FileFilter{"All Files", {"*"}}};
   op.params = {path};
+  op.params.front().tuningRole = "input";
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;
   op.externalKey = &externalKey;

@@ -11,6 +11,11 @@ interface MappingRow {
 
 test("工具入参 → CLI argv 的映射（params / recipes / eval / perturb / patch）", () => {
   const rows: MappingRow[] = [
+    { name:"顶层参数按 JSON 透传，显式值在配方之后",argv:paramsArgv({graphPath:"g",recipe:"r",graphParams:{anchor:[10,20],template:"中文 t.png"}}),
+      want:["params","g","--recipe","r","--param","anchor=[10,20]","--param",'template="中文 t.png"',"--json"] },
+    { name:"评估顶层参数与预算/续跑",argv:evalArgv({graphPath:"g",metric:["quality.defectRecall"],graphParams:{limit:2},maxRuns:3,resumeRows:"partial.jsonl"},null),
+      want:["eval","g","--resume-rows","partial.jsonl","--max-runs","3","--metric","quality.defectRecall","--param","limit=2"] },
+    { name:"patch 图参数与配方",argv:patchArgv({graphPath:"g",recipe:"r",graphParams:{a:true}}),want:["patch","g","--recipe","r","--param","a=true","--dry-run","--json"] },
     // ---------------------------------------------------------------- params / recipes
     {
       name: "params 永远带 --json",

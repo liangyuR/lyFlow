@@ -118,6 +118,10 @@ if (Want "schema") {
   if ($LASTEXITCODE -ne 0) { throw "像素叠画样例不符合 schema" }
   python "$PSScriptRoot\validate_schema.py" (Join-Path $root "schema\examples\overlay2d.invalid.json") (Join-Path $root "schema\overlay2d.schema.json") --expect-fail
   if ($LASTEXITCODE -ne 0) { throw "像素叠画负例没有被拒绝" }
+  python "$PSScriptRoot\validate_schema.py" (Join-Path $root "schema\examples\eval-samples.example.json") (Join-Path $root "schema\eval-sample.schema.json") --each
+  if ($LASTEXITCODE -ne 0) { throw "标注样本不符合 schema" }
+  python "$PSScriptRoot\validate_schema.py" (Join-Path $root "schema\examples\eval-sample.invalid.json") (Join-Path $root "schema\eval-sample.schema.json") --expect-fail
+  if ($LASTEXITCODE -ne 0) { throw "标注样本负例没有被拒绝" }
 }
 
 if (Want "bridge") {

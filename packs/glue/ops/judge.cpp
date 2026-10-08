@@ -331,6 +331,7 @@ void registerJudge(Registry& r) {
                             "窄胶、宽胶、边距超差要连续这么长才算一处缺陷（一根卡尺偶发失手不报）。0 = 一站就算。");
   minLen.min = 0.0;
   op.params = {width, distance, maxBreak, minLen};
+  for (auto& p : op.params) { p.tuningRole = "acceptance"; p.unitSource = "bead.info.unit"; }
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;
   op.validate = &validate;

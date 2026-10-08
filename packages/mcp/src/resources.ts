@@ -13,6 +13,9 @@ interface FileResource {
 }
 
 const FILES: FileResource[] = [
+  { uri:"lyflow://schema/eval-sample", name:"schema-eval-sample", title:"标注样本 schema", description:"eval JSONL 每一行的 graphParams、工件标签、定位/量测/断口/判定真值。", mimeType:"application/json", relative:"schema/eval-sample.schema.json" },
+  { uri:"lyflow://schema/overlay2d", name:"schema-overlay2d", title:"像素叠画 schema", description:"core 输出的原图坐标 overlay2d Record。", mimeType:"application/json", relative:"schema/overlay2d.schema.json" },
+  { uri:"lyflow://docs/mcp-glue-tuning", name:"docs-mcp-glue-tuning", title:"glue MCP 调参流程", description:"随动/飞拍样本、冻结分组、质量约束、任务预算、失败叠画与候选导出。", mimeType:"text/markdown", relative:"docs/mcp-glue-tuning.md" },
   {
     uri: "lyflow://schema/operator-manifest",
     name: "schema-operator-manifest",
