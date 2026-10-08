@@ -1,0 +1,3 @@
+# scripts/validate_schema.py 用的（pnpm check 的 schema 几步；CI 装的也是这一份）
+jsonschema==4.26.0
+referencing==0.37.0

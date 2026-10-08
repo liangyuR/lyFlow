@@ -1,0 +1,128 @@
+# LyFlow 的 CI（只用 GitHub 托管 runner）。本地与 CI 走同一个入口：scripts/check.ps1 -Steps <几步>。
+#
+# 这一版先上两个不需要 vcpkg 端口的门禁（PCL / OpenCV 那组依赖还没钉版本，钉之前上了 CI 也装不出本机那一套）：
+#   fast   前端（typecheck、单测、构建）、MCP、各份契约对着 schema、Rust 客户端脱开 bridge 单独构建
+#   native 纯平台 + dts 包（LYFLOW_STD_PACKS=0 LYFLOW_PACKS=dts）：core 编译与 doctest、manifest 自检、bridge 的 cargo test、
+#          headless CLI、嵌入 SDK 的安装布局与消费方工程，外加只开 host 的 `--no-default-features --features host`
+#          （外部 Rust 宿主嵌编辑器用的那一份，别的步骤都没编过它；dts-check 眼下只用 core_ffi、不开任何 feature，CLI 那步已编到）
+# 默认包（PCL / OpenCV / ONNX Runtime）、gap 包、桌面与安装包 e2e 还在本地跑（`pnpm check`、`pnpm e2e`），见 docs/testing.md「CI」。
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # PR 上推新提交时取消还在跑的旧一轮；main 上的每一次都跑完
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  fast:
+    name: fast（前端 · MCP · schema · lyflow-client）
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # 版本取 package.json 的 packageManager
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
+
+      - name: Python 依赖
+        run: pip install -r scripts/requirements.txt
+
+      - name: Rust（rust-toolchain.toml 钉的那一版）
+        shell: pwsh
+        run: |
+          $channel = (Select-String -Path rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          rustup toolchain install $channel --profile minimal --component clippy,rustfmt
+          rustc --version
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/lyflow-client
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: check.ps1 -Steps schema,client,frontend,mcp
+        shell: pwsh
+        run: ./scripts/check.ps1 -Steps schema,client,frontend,mcp
+
+  native:
+    name: native（纯平台 + dts：core · bridge · CLI · SDK）
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      LYFLOW_STD_PACKS: "0"
+      LYFLOW_PACKS: dts
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
+
+      - name: Python 依赖
+        run: pip install -r scripts/requirements.txt
+
+      - name: Rust（rust-toolchain.toml 钉的那一版）
+        shell: pwsh
+        run: |
+          $channel = (Select-String -Path rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          rustup toolchain install $channel --profile minimal --component clippy,rustfmt
+          rustc --version
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: bridge
+          key: pure-dts
+
+      - name: vcpkg 工具链（纯平台不装任何端口，只要 vcpkg.cmake 在）
+        shell: pwsh
+        run: |
+          if (-not $env:VCPKG_INSTALLATION_ROOT) { throw "runner 上没有 VCPKG_INSTALLATION_ROOT" }
+          "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: 前端产物（桌面壳编译时把 app/dist 嵌进去，cargo test 要它）
+        run: pnpm --filter lyflow-app build
+
+      - name: check.ps1 -Steps core,manifest,bridge,cli,sdk
+        shell: pwsh
+        run: ./scripts/check.ps1 -Steps core,manifest,bridge,cli,sdk
+
+      - name: 只开 host（外部 Rust 宿主嵌编辑器的组合：--no-default-features --features host）
+        working-directory: bridge
+        run: cargo build --no-default-features --features host

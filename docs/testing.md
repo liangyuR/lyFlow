@@ -15,6 +15,20 @@
 | 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 971 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 34 条断言（精简前 58） | 几分钟 |
 
+## CI（GitHub Actions）
+
+`.github/workflows/ci.yml`，只用 GitHub 托管的 `windows-2022` runner；每个 PR、每次推 main 都跑这两个 job。合并前两个都要绿是约定：main 上还没设分支保护把它们列成 required check，红着也能点合并（要设的话，check 名就是 ci.yml 里 job 的 `name:`）。
+CI 与本地走同一个入口 `scripts/check.ps1`，按 job 用 `-Steps` 点名（不给就是全部，`pnpm check` 照旧）：
+
+| job | 本地复现 | 验什么 |
+|---|---|---|
+| fast | `pwsh scripts/check.ps1 -Steps schema,client,frontend,mcp` | 契约对着 schema、Rust 客户端脱开 bridge 单独构建、editor 的 typecheck 与单测、app 与 host-react 构建、MCP（集成冒烟找不到 CLI 记 skip） |
+| native | 设 `LYFLOW_STD_PACKS=0`、`LYFLOW_PACKS=dts`，先 `pnpm --filter lyflow-app build`，再 `pwsh scripts/check.ps1 -Steps core,manifest,bridge,cli,sdk`，外加 `bridge/` 下 `cargo build --no-default-features --features host` | 纯平台 + dts 的 core 与 doctest、manifest 自检、bridge 的 `cargo test`（要标准包的记 ignored）、headless CLI、嵌入 SDK，以及只开 `host` 的组合（外部 Rust 宿主嵌编辑器用的；dts-check 眼下只用 `core_ffi`、不开任何 feature，CLI 那步的 `--no-default-features` 已编到） |
+
+工具链钉在仓库里：Rust `rust-toolchain.toml`、Node `.nvmrc`、pnpm `package.json` 的 `packageManager`、Python `scripts/requirements.txt`。
+**还没进 CI、照旧在本地跑的**：默认包（PCL / OpenCV / ONNX Runtime 的 vcpkg 依赖还没钉版本）、gap 包、`pnpm e2e`（桌面）、
+`pnpm e2e:packaged`、`pnpm e2e:http`、KUN10 等真实数据。
+
 ## 放在哪一层
 
 - **算法、数值、执行语义、C ABI 契约** → C++ doctest。gap / dts 的测量数值只在这里钉，改动必须保留数值与容差。

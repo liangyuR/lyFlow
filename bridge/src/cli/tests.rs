@@ -477,12 +477,8 @@ fn wrong_usage_is_rejected_with_its_exit_code_and_message() {
         (vec!["validate", &unknown], EXIT_INVALID, "1 条错误：\n  a：当前 core 没有注册算子"),
         (vec!["run", &empty, "--to", "zzz"], EXIT_FAILED, "目标不存在: zzz（unknown_node）"),
         (vec!["dump", &graph, "v:cloud", "out.pcd", "--format", "asci"], EXIT_USAGE, "--format 只认 binary / ascii / binary_compressed，收到 asci"),
-        (vec!["dump", &graph, "zzz:cloud", "out.pcd"], EXIT_FAILED, "目标不存在: zzz（unknown_node）"),
-        // 端口写错：说这个节点有哪些输出（以前只有「结果仓里没有 v.nope」）
-        (vec!["dump", &graph, "v:nope", "out.pcd"], EXIT_USAGE, "节点 v 没有输出端口 nope（它的输出：cloud）"),
-        // 扫一个不存在的参数：每组都没过校验。以前 stderr 只有「扫了 2 组」
-        (vec!["sweep", &graph, "--param", "v.nope=1:2:2", "--metric", "v:cloud.elementCount"], EXIT_INVALID,
-         "没成的 2 次：validation_failed 2（unknown_param × 2）"),
+        (vec!["dump", &empty, "zzz:cloud", "out.pcd"], EXIT_FAILED, "目标不存在: zzz（unknown_node）"),
+        // 端口写错、扫不存在的参数要一个真算子，在 dump_writes_the_output_to_disk / sweep_broadcasts_… 里
         // plan、import 没成也说为什么（以前只有「图当前不合法，编译不出计划」「导入失败」）
         (vec!["plan", &graph, "--to", "zzz"], EXIT_INVALID, "目标不存在: zzz（unknown_node）"),
         (vec!["import", &graph, "--kind", "nosuchkind"], EXIT_INVALID, "没有注册 'nosuchkind' 这种导入器"),
@@ -510,6 +506,11 @@ fn dump_writes_the_output_to_disk() {
     let last = r.lines().last().cloned().unwrap();
     assert_eq!(last["kind"], "dump_written");
     assert!(last["elementCount"].as_f64().unwrap() > 0.0);
+
+    // 端口写错：说这个节点有哪些输出（以前只有「结果仓里没有 v.nope」）
+    let r = cli(&["dump", &graph, "v:nope", "out.pcd"]);
+    assert_eq!(r.code, EXIT_USAGE, "{}", r.err);
+    assert!(r.err.contains("节点 v 没有输出端口 nope（它的输出：cloud）"), "{}", r.err);
 }
 
 /// m4-plan §3 的验收原话是「sweep 5 组 leafSize」——而 leafSize 是 vec3f。
@@ -549,6 +550,11 @@ fn sweep_broadcasts_a_scalar_onto_a_vector_param() {
     let text = std::fs::read_to_string(&csv).unwrap();
     assert!(text.starts_with("v.leafSize,v:cloud.elementCount"), "{text}");
     assert_eq!(text.lines().count(), 6);
+
+    // 扫一个不存在的参数：每组都没过校验。以前 stderr 只有「扫了 2 组」
+    let r = cli(&["sweep", &graph, "--param", "v.nope=1:2:2", "--metric", "v:cloud.elementCount"]);
+    assert_eq!(r.code, EXIT_INVALID, "{}", r.err);
+    assert!(r.err.contains("没成的 2 次：validation_failed 2（unknown_param × 2）"), "{}", r.err);
 }
 
 /// §3 验收：只移动了节点的两份图，diff 输出为空。
