@@ -121,10 +121,22 @@ function lockedSpecs(snapshot:Snapshot, index:number):string {
   return digest([...parameterRoles(snapshot)].filter(([,r]) => r.role === "acceptance").map(([k,r]) => [k,
     r.bound ? snapshot.args.graphParams?.[r.bound] ?? candidate[r.bound] ?? r.value : candidate[k] ?? r.value]));
 }
+function comparisonMetric(row:Record<string,unknown>, metric:string):number|null {
+  const value=object(row["metrics"])[metric] ?? (metric.startsWith("quality.") ? object(object(row["quality"])["metrics"])[metric.slice(8)] : undefined);
+  return typeof value==="number" && Number.isFinite(value) ? value : null;
+}
+/** Match CLI Grouping::name_of, using the CLI's normalized tags and holdout decision. */
+function comparisonGroup(snapshot:Snapshot, row:Record<string,unknown>):string {
+  const side=snapshot.args.holdout ? row["holdout"]===true ? "holdout" : "train" : null;
+  const tag=snapshot.args.groupBy ? String(object(row["tags"])[snapshot.args.groupBy] ?? "(none)") : null;
+  return side!==null && tag!==null ? `${side}/${tag}` : side ?? tag ?? "all";
+}
 export async function compareEvaluations(store:EvaluationStore, a:string,b:string, ai:number,bi:number, objectives:Objective[], constraints:Constraint[], group?:string):Promise<Record<string,unknown>> {
   const before = store.load(a), after = store.load(b);
   const checks = ["datasetHash","manifestHash","cachePolicy"] as const;
   for (const key of checks) if (before.snapshot[key] !== after.snapshot[key]) throw new Error(`评估不可比较: ${key} 不同`);
+  const grouping=(s:Snapshot)=>({holdout:s.args.holdout || null,groupBy:s.args.groupBy || null});
+  if(digest(grouping(before.snapshot))!==digest(grouping(after.snapshot)))throw new Error("评估不可比较：统计分组规则不同");
   const cliBefore=object(before.snapshot.build["cliExecutable"])["sha256"],cliAfter=object(after.snapshot.build["cliExecutable"])["sha256"];
   if(typeof cliBefore!=="string"||cliBefore!==cliAfter)throw new Error("评估不可比较：CLI 执行或评分实现不同");
   if (before.snapshot.build["buildFingerprint"] !== after.snapshot.build["buildFingerprint"] || digest(before.snapshot.splitAssignment) !== digest(after.snapshot.splitAssignment)) throw new Error("评估不可比较：构建或样本分组不同");
@@ -137,16 +149,15 @@ export async function compareEvaluations(store:EvaluationStore, a:string,b:strin
   const baseline = assessCandidate(before.state as unknown as Record<string,unknown>,ai,selectedGroup,objectives,constraints);
   const candidate = assessCandidate(after.state as unknown as Record<string,unknown>,bi,selectedGroup,objectives,constraints);
   const map = new Map<string,Record<string,unknown>>();
-  const include = (r:Record<string,unknown>) => !after.snapshot.split || r["split"] === selectedGroup.split("/")[0];
-  await readRows(path.join(store.dir(a),"rows.jsonl"),(r) => { if (r["paramSet"] === ai && include(r)) map.set(String(r["sample"]),{metrics:r["metrics"],status:r["status"],errors:r["errors"],quality:projectValue(r["quality"],{limit:8}).value}); });
+  await readRows(path.join(store.dir(a),"rows.jsonl"),(r) => { if (r["paramSet"] === ai && comparisonGroup(before.snapshot,r)===selectedGroup) map.set(String(r["sample"]),{metrics:r["metrics"],status:r["status"],errors:r["errors"],quality:projectValue(r["quality"],{limit:8}).value}); });
   const pairs: Record<string,unknown>[] = []; let improved=0,degraded=0,unchanged=0,unpaired=0;
   await readRows(path.join(store.dir(b),"rows.jsonl"),(r) => {
-    if (r["paramSet"] !== bi || !include(r)) return;
+    if (r["paramSet"] !== bi || comparisonGroup(after.snapshot,r)!==selectedGroup) return;
     const old = map.get(String(r["sample"])); if (!old) { unpaired++; return; } map.delete(String(r["sample"]));
     const delta = objectives.map((o) => {
-      const x = object(old["metrics"])[o.metric], y = object(r["metrics"])[o.metric];
-      return {metric:o.metric,before:x ?? null,after:y ?? null,delta:typeof x === "number" && typeof y === "number" ? y-x : null,
-        gain:typeof x === "number" && typeof y === "number" ? (y-x)*o.weight*(o.direction === "maximize" ? 1 : -1) : null};
+      const x = comparisonMetric(old,o.metric), y = comparisonMetric(r,o.metric);
+      return {metric:o.metric,before:x,after:y,delta:x !== null && y !== null ? y-x : null,
+        gain:x !== null && y !== null ? (y-x)*o.weight*(o.direction === "maximize" ? 1 : -1) : null};
     });
     const missing = delta.some((d) => d.gain === null), gain = delta.reduce((n,d) => n+(d.gain ?? 0),0);
     const status = missing ? "missing" : gain > 1e-12 ? "improved" : gain < -1e-12 ? "degraded" : "unchanged";

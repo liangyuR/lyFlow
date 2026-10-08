@@ -20,6 +20,8 @@
 
 `validate_graph`、`plan_graph`、`run_graph` 使用相同的 `graphParams` / `set` / `recipe`。单图的 `set` 是解析过的对象；CLI 包装工具的 `set` 是 `node.param=<JSON>` 字符串数组。优先级为图默认值 → 配方 → 评估参数组 → 显式 graphParams → 样本 graphParams/set。扫描轴仍写 `param:["node.param=8:12:3"]`；顶层离散候选写 `params:[{"breakMin":8},{"breakMin":12}]`。
 
+冻结节点扫描轴时保留 CLI 的分量广播：例如 `voxel.leafSize=0.01:0.05:5` 每档冻结为三个相同分量，续跑、失败 replay 和导出均使用完整向量。分量数依次取图中当前数组、manifest 默认数组、局部子图参数默认数组。
+
 `unitSource` 表示参数单位取决于某个运行输出，例如 `bead.info.unit`。检查图时不假装已经解析成 mm；应先 full 运行，确认校准、输出单位和图像尺度。
 
 ## 2. 给样本和真值
@@ -82,6 +84,8 @@ glue 使用完整 u8 灰度/RGB/RGBA 图像和 `mode:"full"`；不从预览或�
 候选必须完整执行且 executionOk=1，定位/量测/判定输出缺失不能参与排名。有标注时，默认要求定位失败、FN、FP、误放行、误拒绝为零；标注给出量测 tolerance 或断口 endpointTolerance 时，默认要求相应 `WithinTolerance` 的 min=1，即每帧已匹配的标注全部满足容差。相应显式质量约束可以定义非零限额，或用 `WithinTolerance` 的 min 定义通过率及统计方式。欠约束的方向不能解除默认门槛，例如 defectFn 的 min 不替代其 max，WithinTolerance 的 max 不替代其 min。质量指标缺失不会被填成 0。defectRecall/defectMissRate 的 mean 是逐帧宏平均，quality_summary 另给按 TP/FN 汇总的微平均；productFalseAccept/Reject 是每帧 0/1，汇总 falseAcceptRate/falseRejectRate 分别以 NG/OK 真值样本为分母，必须同时读输出缺失数。训练集没有真值时只证明已声明的指标，不证明检测准确率。
 
 `get_job.validationArgs` 可直接交给 `eval`。另对相同 frozen graph / dataset / split 做一次 `params:[{}]` 基线验证，再 `compare_evaluations {baselineId,candidateId,objectives,constraints}`。默认比较 validation，给出满足约束情况、改善/退化/缺失样本和完整比较 artifact。同输入、构建、分组、缓存和验收规格是比较前提。
+
+使用 `groupBy` 或 CLI `holdout` 时，显式指定汇总中的完整 `group` 名，如 `A` 或 `holdout/A`；使用默认 split 分组时可指定 `validation`。逐样本计数、例子和 artifact 只包含该统计组，前后评估的分组规则也必须相同。比较 `quality.*` 时，未在原 eval 的 metric 中请求的指标仍读取每行自动保存的 `quality.metrics`；真实缺失保持 null。
 
 候选确定后将同一 eval 参数改成 `partition:"holdout"`，作为最后的独立验收。工具不会自动拿留出集排名；工作流中不应根据 holdout 结果再次挑参数。
 

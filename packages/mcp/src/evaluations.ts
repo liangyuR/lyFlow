@@ -9,7 +9,7 @@ import { readGraphDoc } from "./graph.js";
 import { digest } from "./inspect.js";
 import { object, projectValue } from "./summary.js";
 import { ArtifactStore, type ArtifactRef } from "./artifacts.js";
-import type { ManifestBundle } from "./types.js";
+import type { GraphDoc, ManifestBundle } from "./types.js";
 
 export interface SplitSpec {
   groupTag: string;
@@ -127,7 +127,18 @@ export function freezeSplits(samples: Record<string, unknown>[], spec?: SplitSpe
   for (const s of samples) s["tags"] = { ...object(s["tags"]), split: assignment[String(object(s["tags"])[spec.groupTag])] };
   return assignment;
 }
-function expandAxes(axes: string[] | undefined): Record<string, unknown>[] {
+/** Same arity precedence as CLI component_count: graph, manifest default, local subgraph. */
+function axisComponents(graph:GraphDoc, manifest:ManifestBundle, target:string):number {
+  const dot=target.lastIndexOf("."),nodeId=target.slice(0,dot),param=target.slice(dot+1);
+  const node=graph.nodes.find((n)=>n.id===nodeId);
+  if(!node)throw new Error(`图里没有节点 ${nodeId}`);
+  const declared=object(manifest.operators.find((o)=>o.id===node.op)?.params?.find((p)=>object(p)["name"]===param))["default"];
+  const subParams=node.op.startsWith("sub:") ? object(object(graph["subgraphs"])[node.op.slice(4)])["params"] : undefined;
+  const subDefault=Array.isArray(subParams) ? object(subParams.find((p)=>object(p)["name"]===param))["default"] : undefined;
+  const value=[node.params?.[param],declared,subDefault].find(Array.isArray);
+  return value?.length ?? 0;
+}
+export function expandAxes(axes: string[] | undefined, graph:GraphDoc, manifest:ManifestBundle): Record<string, unknown>[] {
   let groups: Record<string, unknown>[] = [{}];
   for (const axis of axes ?? []) {
     const m = /^(.+\.[^.=]+)=(-?[\d.eE+]+):(-?[\d.eE+]+):(\d+)$/.exec(axis);
@@ -135,7 +146,11 @@ function expandAxes(axes: string[] | undefined): Record<string, unknown>[] {
     const a = Number(m[2]), b = Number(m[3]), n = Number(m[4]);
     if (!Number.isFinite(a) || !Number.isFinite(b) || n < 1 || n > 1000) throw new Error("轴范围或档数无效（1–1000）");
     if (groups.length * n > 10000) throw new Error("候选组合超过 10000；请缩小搜索空间");
-    groups = groups.flatMap((g) => Array.from({ length: n }, (_, i) => ({ ...g, [m[1]!]: n === 1 ? a : a + (b - a) * i / (n - 1) })));
+    const components=axisComponents(graph,manifest,m[1]!);
+    groups = groups.flatMap((g) => Array.from({ length: n }, (_, i) => {
+      const value=n===1 ? a : a+(b-a)*(i/(n-1));
+      return {...g,[m[1]!]:components>0 ? Array(components).fill(value) : value};
+    }));
   }
   return groups;
 }
@@ -197,7 +212,7 @@ export class EvaluationStore {
     fs.writeFileSync(samplesPath, selected.map((s) => JSON.stringify(s)).join("\n") + "\n");
     fs.writeFileSync(path.join(dir, "dataset.json"), JSON.stringify(samples));
     fs.writeFileSync(path.join(dir,"dataset.jsonl"),samples.map((s) => JSON.stringify(s)).join("\n")+"\n");
-    const axes = expandAxes(input.param), explicit = input.params?.length ? input.params : [{}];
+    const axes = expandAxes(input.param,graph,manifest), explicit = input.params?.length ? input.params : [{}];
     const paramSets = explicit.flatMap((p) => axes.map((a) => ({ ...p, ...a })));
     const paramsPath = path.join(dir, "paramsets.json"); fs.writeFileSync(paramsPath, JSON.stringify(paramSets));
     const pathKeys = new Set(effective.filter((row) => {

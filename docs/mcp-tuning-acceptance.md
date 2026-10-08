@@ -36,6 +36,18 @@ Rust 首轮并发验证遇到原有一秒取消测试的 1.032 秒阈值失败�
 
 C++ 的两项失败分别是 `packs/std-pointcloud/tests/test_io_pcd.cpp` 的 ASCII PCD 写/读与 PCL 对照。未修改 main 独立复现了相同失败，本次没有改动这些算法；不能把全量 C++ 检查写成全绿。新增 metadata 和 glue 测试在上述 212 项通过范围内。
 
+## PR #7 审查修复回归
+
+三项问题均已在新增到现有用例的回归断言中复现并修复：
+
+| 问题 | 修复与证据 |
+|---|---|
+| 冻结向量扫描丢失广播 | 分量数按 CLI 的图当前值、manifest 默认值、局部子图默认值顺序确定，每档冻结完整向量。纯逻辑覆盖三种来源与标量；真实 MCP 的 voxel_grid 五档扫描与直接 CLI 的逐行点数完全一致，replay 保留三分量 |
+| 比较证据混入其他统计组 | 按 CLI 归一化 tags 和 holdout 布尔值重建完整组名，前后分组规则不同则拒绝比较。夹具覆盖 all、A/B、缺失标签、holdout、train/B、split、holdout/A 等组合，并核对 artifact 的样本集合；真实 MCP 按 A 组比较不计入 B 组 |
+| 未请求的质量目标被当作缺失 | 行指标缺省时从 quality.metrics 读取 quality.*，真实缺失保持 null。夹具验证误放行 1→0 计改善、反向计退化，artifact 包含真实差值；glue MCP 流程验证只请求执行指标后仍可比较自动质量指标 |
+
+修复后 MCP 全量 35 通过、0 失败、0 跳过，typecheck 与 build 通过。日志为 `work/mcp-review-tests-host.log`、`work/mcp-review-build.log`；修复前的回归失败分别保存在 `work/mcp-review-axes-before.log`、`work/mcp-review-group-before.log`、`work/mcp-review-regression-before.log`。本轮只修改 MCP 与对应文档、测试，未重跑未改动的 Rust/C++ 测试。
+
 ## 验收边界
 
 完整闭环的工具调用来自 MCP 客户端；测试准备阶段生成合成 PNG 与图，不借助 shell 实现工具步骤。断口数值、量测和失败语义另有底层合成夹具与标注正反例。

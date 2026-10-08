@@ -171,6 +171,10 @@ async function tuningWorkflow(client:Client, workspace:string):Promise<void> {
   assert.equal(candidate["status"],"complete",JSON.stringify(candidate));
   const comparison=await call("compare_evaluations",{baselineId:baseline["evaluationId"],candidateId:candidate["evaluationId"],objectives});
   assert.equal(comparison["comparable"],true);assert.equal((comparison["candidate"] as {qualified:boolean}).qualified,true);
+  const qualityComparison=await call("compare_evaluations",{baselineId:baseline["evaluationId"],candidateId:candidate["evaluationId"],
+    objectives:[{metric:"quality.productFalseAccept",direction:"minimize",stat:"mean",weight:1}]});
+  assert.equal(qualityComparison["degraded"],0,JSON.stringify(qualityComparison));
+  assert.ok(Number(qualityComparison["unchanged"])>0,"未请求的 quality 指标仍应有真实逐帧证据");
   const changedSpec=await call("eval",{...selected,set:["n_judge.maxBreak=10"]});
   const uncomparable=await client.callTool({name:"compare_evaluations",arguments:{baselineId:baseline["evaluationId"],candidateId:changedSpec["evaluationId"],objectives}});
   assert.equal(uncomparable.isError,true);assert.match(String(payload(uncomparable)["error"]),/验收规格/);
@@ -320,6 +324,20 @@ test(
         metricPaths.includes("nodes.voxel.elementCount") && metricPaths.includes("run.durationMs"),
         JSON.stringify(metrics),
       );
+
+      const axis="voxel.leafSize=0.01:0.05:5",axisMetric="nodes.voxel.cloud.elementCount";
+      const swept=payload(await client.callTool({name:"eval",arguments:{graphPath:graphFile,param:[axis],metric:[axisMetric]}}));
+      assert.equal(swept["exitCode"],0,String(swept["stderrTail"]));assert.equal(swept["failureCount"],0);
+      const sweptRows=payload(await client.callTool({name:"get_evaluation",arguments:{evaluationId:swept["evaluationId"],limit:10}}))["rows"] as {status:string;metrics:Record<string,unknown>;replay:{set:Record<string,unknown>}}[];
+      const legacy=cliJsonLines(["eval",graphFile,"--param",axis,"--metric",axisMetric,"--no-cache"]);
+      assert.equal(legacy.code,0);
+      const legacyRows=legacy.lines.filter((r)=>r["kind"]==="eval_row") as {metrics:Record<string,unknown>;params:Record<string,number>}[];
+      assert.equal(sweptRows.length,5);assert.equal(legacyRows.length,5);
+      sweptRows.forEach((r,i)=>{
+        assert.equal(r.status,"ok");assert.deepEqual(r.metrics,legacyRows[i]!.metrics);
+        const value=legacyRows[i]!.params["voxel.leafSize"]!;
+        assert.deepEqual(r.replay.set["voxel.leafSize"],[value,value,value]);
+      });
 
       // 下标（ADR-0019）：个数来自元数据；前几个下标走 indices 端点。参考桩服务器不实现它（501），
       // 取不到时要带上原因，而不是静默少一个 head
@@ -565,9 +583,10 @@ test(
       const patchedFile=path.join(workspace,"override.lyflow.json");
       const patched=await client.callTool({name:"patch_graph",arguments:{...chosen,dryRun:false,out:patchedFile}});assert.notEqual(patched.isError,true,JSON.stringify(patched));
       assert.equal((JSON.parse(fs.readFileSync(patchedFile,"utf8")) as typeof RECIPE_DOC).params.count.default,123);
-      const paired=payload(await client.callTool({name:"eval",arguments:{graphPath:graphFile,params:[{count:123},{count:124}],metric:["nodes.gen.cloud.elementCount"]}}));
+      const paired=payload(await client.callTool({name:"eval",arguments:{graphPath:graphFile,params:[{count:123},{count:124}],metric:["nodes.gen.cloud.elementCount"],
+        samples:[{id:"a",tags:{batch:"A"}},{id:"b",tags:{batch:"B"}},{id:"missing"}],groupBy:"batch"}}));
       const compare={baselineId:paired["evaluationId"],candidateId:paired["evaluationId"],baselineParamSet:0,candidateParamSet:1,
-        objectives:[{metric:"nodes.gen.cloud.elementCount",direction:"maximize"}]};
+        objectives:[{metric:"nodes.gen.cloud.elementCount",direction:"maximize"}],group:"A"};
       const improved=payload(await client.callTool({name:"compare_evaluations",arguments:compare}));
       assert.equal(improved["improved"],1,JSON.stringify(improved));assert.equal(improved["degraded"],0);
       const degraded=payload(await client.callTool({name:"compare_evaluations",arguments:{...compare,baselineParamSet:1,candidateParamSet:0}}));
