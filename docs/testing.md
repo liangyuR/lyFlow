@@ -11,7 +11,7 @@
 | C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 186 例；`LYFLOW_PACKS=dts` 194 例；`LYFLOW_PACKS=gap;dts` 276 例 | 分钟级（含编译） |
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 154（纯平台构建 95 通过 / 59 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
 | editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 161 | 秒级 |
-| MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 32 | 秒级 |
+| MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 35（2026-10-08） | 秒级 |
 | 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 971 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 34 条断言（精简前 58） | 几分钟 |
 
@@ -81,6 +81,8 @@ CI 与本地走同一个入口 `scripts/check.ps1`，按 job 用 `-Steps` 点名
 | 图结构编辑 `lyflow patch`（七个动作、幂等、改坏不落盘） | `bridge/src/patch/tests.rs` |
 | 指标路径（`eval` 写错时列出、`--list-metrics` 正向列出） | `bridge/src/cli/tests.rs` 的 `eval_lists_the_available_paths_when_the_metric_is_wrong`、`bridge/src/eval/tests.rs` 的 `available_paths_*` |
 | MCP 工具、argv 拼装、CLI 解析（含逐行回调、请求取消时结束子进程：`cli.test.ts` 用 node 当假 CLI；客户端取消 `run_graph` 时后端那次运行跟着取消：`smoke.test.ts` 里 `test.stall` 睡 20 秒、几秒内收到 cancelled） | `packages/mcp/test/*`（`smoke.test.ts` 是唯一跑通 MCP → CLI 的） |
+| MCP glue 完整流程、统一绑定值、规格锁定、冻结输入拒绝漂移、预算耗尽/续跑、后台取消、验证/留出评估、失败 ROI 叠画、比较与图/配方导出 | 现有 `packages/mcp/test/smoke.test.ts` 两条流程扩展；`run.test.ts` 三条新增覆盖 Record/Bundle 分页封存、工件分组、质量门槛与候选数量 |
+| 标注评分（单位不符/缺失、混合单位行和两种汇总拒绝、按单位分组、执行与产品状态、断口一对一匹配及图像真值投影）、数组归约、CLI 预算/续跑 | `bridge/src/eval/tests.rs` 的 `annotations_separate_failures_units_and_one_to_one_defects`；MCP `run.test.ts` 的现有排名测试覆盖 tolerance 默认门槛与显式通过率；CLI 的现有 `eval_layers_base_recipe_paramsets_then_param`；schema 的正负例进入 scripts/check.ps1 |
 | HTTP 传输、宿主嵌入（含用户片段、底图点云文件两个端点，图像端点的行切片） | `scripts/e2e/http.mjs` |
 | 外部 Rust/Tauri 宿主（`attach`、`lyflow_handler!`、`sceneId` 注入、工作区路径） | `bridge/tests/host.rs`（`MockRuntime` 跑真 IPC） |
 | 自动备份（存过盘的写 `<file>~`、没存过盘的写到传输层给的那一处、找回来、换上算没保存、删掉；没有那个口的传输不备份；读坏了的删掉；开图时备份比正文新问「恢复 / 丢弃 / 取消」—— 取消与 Esc 不打开、备份留着，没挂对话框退回原生的是 / 否） | `packages/editor/test/autosave.test.mjs`（内存里的假传输）；真按 Esc 关掉那一问、再点「丢弃」在 e2e `m3.mjs` 的 `suitePanels`（备份那一段）；真的 app data 位置与写盘在 e2e `m3.mjs` 的 `suitePanels` 末尾（harness 跑之前把用户自己的那份挪开、收尾时挪回去） |

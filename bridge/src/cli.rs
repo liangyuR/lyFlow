@@ -13,10 +13,10 @@ use serde_json::{json, Value};
 
 use crate::core_ffi::{self, Core, RunHandle, RunInput, RunSpec};
 use crate::eval;
+use crate::graph::GraphDoc;
 use crate::patch;
 use crate::perturb;
 use crate::recipe;
-use crate::graph::GraphDoc;
 use crate::ulid;
 
 pub const EXIT_OK: i32 = 0;
@@ -79,6 +79,10 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
         未知节点 / 未知参数按 unknown_node / unknown_param 报，退出码 4。
   lyflow migrate  <graph> [--write]
   lyflow manifest [--check]
+  lyflow info
+        当前 core 的版本、构建指纹、实际 DLL 路径与算子包，JSON Lines。
+  lyflow samples [--samples <jsonl> | --samples-glob <pat> --bind <n>.<p> | --samples-dir <root> ...]
+        使用 eval 的样本选择选项，输出规范化样本 JSONL，不执行图。
   lyflow dump     <graph> <nodeId>:<port> <out.pcd> [--format <binary|ascii|binary_compressed>]
                           图像输出写 <out.lyim>（LYIM 载荷原样落盘，docs/http-transport.md）
   lyflow sweep    <graph> --param <nodeId>.<param>=<start>:<end>:<steps> [--param ...]
@@ -90,7 +94,7 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                           [--holdout <tag>=<value>] [--group-by <tag>]
                           [--csv <out.csv>] [--base-dir <dir>] [--parallel <n>] [--jobs <n>] [--no-cache]
                           [--set <nodeId>.<param>=<json>]... [--recipe <配方文件>] [--param <名字>=<json>]...
-                          [--summary]
+                          [--summary] [--max-runs <n>] [--resume-rows <jsonl>] [--progress-json]
         --jobs <n>（eval / sweep / perturb）：同时跑 n 次（默认 1，一次接一次），输出仍按原顺序、
                  除 durationMs 外逐行相同；内存大约是 n 倍。--parallel 是一次运行里的节点并行度，与它无关。
                  Ctrl+C 一次取消全部在跑的。
@@ -98,7 +102,11 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                  stderr 上原地刷新一行「[k/总数] 样本 · 状态 · 耗时 · 还要约 …」（run 是「[k/总数] 节点 · 正在算 …」），
                  收场时清掉；管道里没有。
         --recipe 作用于所有样本；--params 的参数组里不含「.」的键写顶层图参数。
-        叠加顺序：基础（default）→ --recipe → 参数组 → --param。
+        叠加顺序：基础（default）→ --recipe → 参数组 → --param → 样本 graphParams/set。
+        绑定参数只能写顶层名，不能用 --set 绕过。样本 truth 定义见 schema/eval-sample.schema.json。
+        quality.* 指标由 CLI 对真值评分；输出数组支持 count/valid/missing/min/max/mean/std/p50/p95。
+        --max-runs 限制本次新增尝试；--resume-rows 跳过已完成行并把它们并入统计。
+        --progress-json 额外输出 eval_started，适合持久任务计数；默认 JSONL 顺序不变。
         每行 eval_row **默认不带** summary（ADR-0022）；--summary 打开。
         一维 bundle 就 6 KB，51 帧 × 8 组参数 2.5 MB，那不该是默认值。
         （--no-summary 还认，但已经是 no-op。）
@@ -166,7 +174,10 @@ pub(crate) struct Parsed {
 
 impl Parsed {
     pub(crate) fn one(&self, name: &str) -> Option<&str> {
-        self.values.get(name).and_then(|v| v.last()).map(String::as_str)
+        self.values
+            .get(name)
+            .and_then(|v| v.last())
+            .map(String::as_str)
     }
     pub(crate) fn many(&self, name: &str) -> &[String] {
         static EMPTY: &[String] = &[];
@@ -236,7 +247,11 @@ pub(crate) struct Loaded {
 }
 
 /// 哪个顶层图参数绑着 `节点.参数`。没有返回 None。
-pub(crate) fn binding_graph_param<'a>(doc: &'a GraphDoc, node: &str, param: &str) -> Option<&'a str> {
+pub(crate) fn binding_graph_param<'a>(
+    doc: &'a GraphDoc,
+    node: &str,
+    param: &str,
+) -> Option<&'a str> {
     let target = format!("{node}.{param}");
     doc.params.iter().find_map(|(name, decl)| {
         decl["binds"]
@@ -323,7 +338,12 @@ pub(crate) fn apply_graph_param(doc: &mut GraphDoc, spec: &str) -> Result<bool, 
 /// load_graph 失败时的退出码：`--param` / `--set` / `--recipe` 本身有问题是参数错（4），其余是图不合法（1）。
 /// 配方的失配 ①–③ 也归 4（`recipe_mismatch:`）：图没错，是这份取值不能用。
 pub(crate) fn load_exit(message: &str) -> i32 {
-    const USAGE_CODES: &[&str] = &["unknown_param:", "param_conflict:", "recipe_mismatch:", "bad_recipe:"];
+    const USAGE_CODES: &[&str] = &[
+        "unknown_param:",
+        "param_conflict:",
+        "recipe_mismatch:",
+        "bad_recipe:",
+    ];
     if USAGE_CODES.iter().any(|c| message.starts_with(c)) {
         EXIT_USAGE
     } else {
@@ -524,7 +544,10 @@ mod console {
 
     extern "system" {
         fn GetStdHandle(which: u32) -> *mut std::ffi::c_void;
-        fn GetConsoleScreenBufferInfo(console: *mut std::ffi::c_void, info: *mut ScreenBufferInfo) -> i32;
+        fn GetConsoleScreenBufferInfo(
+            console: *mut std::ffi::c_void,
+            info: *mut ScreenBufferInfo,
+        ) -> i32;
     }
 
     /// stderr 所在控制台窗口有多宽（列数）。不是控制台时 None。
@@ -534,7 +557,12 @@ mod console {
             size: Coord { x: 0, y: 0 },
             cursor: Coord { x: 0, y: 0 },
             attributes: 0,
-            window: SmallRect { left: 0, top: 0, right: 0, bottom: 0 },
+            window: SmallRect {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            },
             max_window: Coord { x: 0, y: 0 },
         };
         // SAFETY: GetStdHandle 不会失败到 UB；info 是本函数里的栈上对象，调用期间一直有效
@@ -606,7 +634,9 @@ impl RunResult {
             if e["kind"] != "node_state" {
                 continue;
             }
-            let Some(id) = e["nodeId"].as_str() else { continue };
+            let Some(id) = e["nodeId"].as_str() else {
+                continue;
+            };
             if !seen.insert(id.to_string()) {
                 continue;
             }
@@ -641,13 +671,16 @@ impl RunResult {
 
     /// 这个节点这次产出了哪些输出端口（最后一条带 stats 的 node_state）。节点没跑、没有 stats 时是 None。
     fn output_ports(&self, node_id: &str) -> Option<Vec<String>> {
-        let e = self
-            .events
-            .iter()
-            .rev()
-            .find(|e| e["kind"] == "node_state" && e["nodeId"] == node_id && e["stats"]["outputs"].is_array())?;
+        let e = self.events.iter().rev().find(|e| {
+            e["kind"] == "node_state" && e["nodeId"] == node_id && e["stats"]["outputs"].is_array()
+        })?;
         let ports = e["stats"]["outputs"].as_array()?;
-        Some(ports.iter().filter_map(|o| o["port"].as_str().map(str::to_string)).collect())
+        Some(
+            ports
+                .iter()
+                .filter_map(|o| o["port"].as_str().map(str::to_string))
+                .collect(),
+        )
     }
 
     pub(crate) fn duration_ms(&self) -> f64 {
@@ -684,11 +717,17 @@ impl RunResult {
             failed.push(e);
         }
         for e in failed.iter().take(MAX_EXPLAINED) {
-            let first = e["errors"].as_array().and_then(|a| a.first()).unwrap_or(&e["error"]);
+            let first = e["errors"]
+                .as_array()
+                .and_then(|a| a.first())
+                .unwrap_or(&e["error"]);
             out.push(explain_line(e["nodeId"].as_str(), first));
         }
         if failed.len() > MAX_EXPLAINED {
-            out.push(format!("  …还有 {} 个节点出错", failed.len() - MAX_EXPLAINED));
+            out.push(format!(
+                "  …还有 {} 个节点出错",
+                failed.len() - MAX_EXPLAINED
+            ));
         }
         out
     }
@@ -802,13 +841,22 @@ fn load_inputs(core: &Arc<Core>, parsed: &Parsed) -> Result<Vec<RunInput>, Strin
             }
         } else {
             // 其余格式（PLY）借 core 的 io.load_pcd：没有 rgb 通道
-            let view = read_cloud_file(core, &path, 0).map_err(|e| format!("--input {spec}: {e}"))?;
+            let view =
+                read_cloud_file(core, &path, 0).map_err(|e| format!("--input {spec}: {e}"))?;
             RunInput {
                 node_id: node.to_string(),
                 port: port.to_string(),
                 xyz: view.xyz().to_vec(),
-                intensity: if view.has_intensity() { view.intensity().to_vec() } else { Vec::new() },
-                normals: if view.has_normals() { view.normals().to_vec() } else { Vec::new() },
+                intensity: if view.has_intensity() {
+                    view.intensity().to_vec()
+                } else {
+                    Vec::new()
+                },
+                normals: if view.has_normals() {
+                    view.normals().to_vec()
+                } else {
+                    Vec::new()
+                },
                 rgb: Vec::new(),
             }
         };
@@ -884,12 +932,23 @@ pub(crate) fn has_errors(diags: &[Value]) -> bool {
 fn explain_line(node: Option<&str>, item: &Value) -> String {
     let mut at = node.unwrap_or_default().to_string();
     if let Some(p) = item["paramPath"].as_str() {
-        at = if at.is_empty() { p.to_string() } else { format!("{at}.{p}") };
+        at = if at.is_empty() {
+            p.to_string()
+        } else {
+            format!("{at}.{p}")
+        };
     } else if let Some(port) = item["portName"].as_str() {
-        at = if at.is_empty() { port.to_string() } else { format!("{at}:{port}") };
+        at = if at.is_empty() {
+            port.to_string()
+        } else {
+            format!("{at}:{port}")
+        };
     }
     let message = item["message"].as_str().unwrap_or_default();
-    let code = item["code"].as_str().map(|c| format!("（{c}）")).unwrap_or_default();
+    let code = item["code"]
+        .as_str()
+        .map(|c| format!("（{c}）"))
+        .unwrap_or_default();
     if at.is_empty() {
         format!("  {message}{code}")
     } else {
@@ -961,7 +1020,13 @@ fn cmd_plan(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
     let items: Vec<Value> = match serde_json::from_str(&raw) {
         Ok(v) => v,
-        Err(e) => return fail(err, &format!("core 返回的计划不是合法 JSON: {e}"), EXIT_FAILED),
+        Err(e) => {
+            return fail(
+                err,
+                &format!("core 返回的计划不是合法 JSON: {e}"),
+                EXIT_FAILED,
+            )
+        }
     };
     json_line(out, &Value::Array(items.clone()));
     // 校验没过时 core 返回的是诊断数组，靠有没有 cacheKey 区分（ADR-0007）
@@ -972,7 +1037,10 @@ fn cmd_plan(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         return EXIT_INVALID;
     }
     let recompute = items.iter().filter(|n| n["cached"] != true).count();
-    line(err, &format!("{} 个节点，其中 {recompute} 个要重算", items.len()));
+    line(
+        err,
+        &format!("{} 个节点，其中 {recompute} 个要重算", items.len()),
+    );
     EXIT_OK
 }
 
@@ -1029,14 +1097,18 @@ fn cmd_params(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         flags: HashSet::new(),
     };
     if let Some(dir) = parsed.one("base-dir") {
-        bare.values.insert("base-dir".to_string(), vec![dir.to_string()]);
+        bare.values
+            .insert("base-dir".to_string(), vec![dir.to_string()]);
     }
     let probe = match load_graph(&bare, &path, err) {
         Ok(l) => l,
         Err(e) => return fail(err, &e, EXIT_INVALID),
     };
     for spec in parsed.many("set") {
-        let Some(node_id) = spec.split_once('=').and_then(|(l, _)| l.rsplit_once('.')).map(|(n, _)| n)
+        let Some(node_id) = spec
+            .split_once('=')
+            .and_then(|(l, _)| l.rsplit_once('.'))
+            .map(|(n, _)| n)
         else {
             return fail(
                 err,
@@ -1086,7 +1158,13 @@ fn cmd_params(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     }
     let view: Value = match serde_json::from_str(&raw) {
         Ok(v) => v,
-        Err(e) => return fail(err, &format!("core 返回的参数视图不是合法 JSON: {e}"), EXIT_FAILED),
+        Err(e) => {
+            return fail(
+                err,
+                &format!("core 返回的参数视图不是合法 JSON: {e}"),
+                EXIT_FAILED,
+            )
+        }
     };
 
     let wanted: Vec<String> = parsed.many("node").to_vec();
@@ -1146,7 +1224,11 @@ fn cmd_params(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
                 .max()
                 .unwrap_or(0)
         };
-        let (wn, wo, wp) = (width("node", "节点"), width("op", "算子"), width("param", "参数"));
+        let (wn, wo, wp) = (
+            width("node", "节点"),
+            width("op", "算子"),
+            width("param", "参数"),
+        );
         line(
             out,
             &format!(
@@ -1169,7 +1251,11 @@ fn cmd_params(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
                     pad(r["param"].as_str().unwrap_or_default(), wp),
                     pad(r["source"].as_str().unwrap_or_default(), 8),
                     r["value"],
-                    if unit.is_empty() { String::new() } else { format!(" {unit}") },
+                    if unit.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" {unit}")
+                    },
                 ),
             );
         }
@@ -1195,7 +1281,11 @@ fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
     // migrate --write 写回的是读进来的整份 doc：带着配方读，就会把配方的值烙成基础
     if !parsed.many("recipe").is_empty() {
-        return fail(err, "migrate 不认 --recipe：迁移改的是图本身，与配方无关", EXIT_USAGE);
+        return fail(
+            err,
+            "migrate 不认 --recipe：迁移改的是图本身，与配方无关",
+            EXIT_USAGE,
+        );
     }
     let core = match core() {
         Ok(c) => c,
@@ -1227,7 +1317,11 @@ fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         };
         text.push('\n');
         if let Err(e) = std::fs::write(&loaded.path, text) {
-            return fail(err, &format!("写入 {} 失败: {e}", loaded.path.display()), EXIT_FAILED);
+            return fail(
+                err,
+                &format!("写入 {} 失败: {e}", loaded.path.display()),
+                EXIT_FAILED,
+            );
         }
         written = json!(loaded.path.to_string_lossy());
     }
@@ -1240,7 +1334,10 @@ fn cmd_migrate(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     for m in &migrations {
         for note in m["notes"].as_array().into_iter().flatten() {
             if let Some(note) = note.as_str() {
-                line(err, &format!("  {}：{note}", m["nodeId"].as_str().unwrap_or("?")));
+                line(
+                    err,
+                    &format!("  {}：{note}", m["nodeId"].as_str().unwrap_or("?")),
+                );
             }
         }
     }
@@ -1274,7 +1371,11 @@ fn cmd_manifest(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
                 json_line(out, &v);
                 EXIT_OK
             }
-            Err(e) => fail(err, &format!("core 返回的 manifest 不是合法 JSON: {e}"), EXIT_FAILED),
+            Err(e) => fail(
+                err,
+                &format!("core 返回的 manifest 不是合法 JSON: {e}"),
+                EXIT_FAILED,
+            ),
         },
         Err(e) => fail(err, &e.to_string(), EXIT_FAILED),
     }
@@ -1307,7 +1408,9 @@ impl RunProgress {
                 self.planned = e["plan"].as_array().map_or(0, Vec::len);
             }
             Some("node_state") => {
-                let Some(id) = e["nodeId"].as_str() else { return };
+                let Some(id) = e["nodeId"].as_str() else {
+                    return;
+                };
                 match e["state"].as_str() {
                     Some("running") => {
                         if !self.running.iter().any(|r| r == id) {
@@ -1331,7 +1434,10 @@ impl RunProgress {
         if !self.running.is_empty() {
             s.push_str(&format!(" · 正在算 {}", self.running.join("、")));
         }
-        s.push_str(&format!(" · 已过 {:.1} 秒", self.started.elapsed().as_secs_f64()));
+        s.push_str(&format!(
+            " · 已过 {:.1} 秒",
+            self.started.elapsed().as_secs_f64()
+        ));
         s
     }
 }
@@ -1341,12 +1447,11 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         line(err, "用法：lyflow run <graph>");
         return EXIT_USAGE;
     };
-    let (parallel, preview_points) = match parallel_of(parsed)
-        .and_then(|p| Ok((p, uint_opt(parsed, "preview-points", 0)?)))
-    {
-        Ok(v) => v,
-        Err(e) => return fail(err, &e, EXIT_USAGE),
-    };
+    let (parallel, preview_points) =
+        match parallel_of(parsed).and_then(|p| Ok((p, uint_opt(parsed, "preview-points", 0)?))) {
+            Ok(v) => v,
+            Err(e) => return fail(err, &e, EXIT_USAGE),
+        };
     let core = match core() {
         Ok(c) => c,
         Err(e) => return fail(err, &e, EXIT_FAILED),
@@ -1369,7 +1474,9 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(diags) => {
             let fed = |d: &Value| {
                 d["code"] == "missing_input"
-                    && inputs.iter().any(|i| d["nodeId"] == i.node_id.as_str() && d["portName"] == i.port.as_str())
+                    && inputs.iter().any(|i| {
+                        d["nodeId"] == i.node_id.as_str() && d["portName"] == i.port.as_str()
+                    })
             };
             let remaining: Vec<Value> = diags.into_iter().filter(|d| !fed(d)).collect();
             if has_errors(&remaining) {
@@ -1471,11 +1578,17 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
 /// `lyflow import --kind <kind> <file> [-o out.json]`。导入器由算子包注册（ADR-0017）。
 fn cmd_import(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let Some(path) = parsed.positional.first().cloned() else {
-        line(err, "用法：lyflow import --kind <kind> <file> [-o <out.lyflow.json>]");
+        line(
+            err,
+            "用法：lyflow import --kind <kind> <file> [-o <out.lyflow.json>]",
+        );
         return EXIT_USAGE;
     };
     let Some(kind) = parsed.one("kind") else {
-        line(err, "缺 --kind。可用的 kind 见 `lyflow manifest` 的 importers 段");
+        line(
+            err,
+            "缺 --kind。可用的 kind 见 `lyflow manifest` 的 importers 段",
+        );
         return EXIT_USAGE;
     };
     // --fine 是「同一种格式的细粒度那一版」：导入器把它注册成 `<kind>:fine`（m8-plan L12）。
@@ -1524,7 +1637,13 @@ fn cmd_import(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     // 导入器产出的图必须自己就是合法的 GraphDoc：坏图不该落盘
     let doc: GraphDoc = match serde_json::from_str(&graph_json) {
         Ok(d) => d,
-        Err(e) => return fail(err, &format!("导入器产出的不是合法 GraphDoc: {e}"), EXIT_FAILED),
+        Err(e) => {
+            return fail(
+                err,
+                &format!("导入器产出的不是合法 GraphDoc: {e}"),
+                EXIT_FAILED,
+            )
+        }
     };
     if let Err(e) = doc.validate_structure() {
         return fail(err, &e.to_string(), EXIT_FAILED);
@@ -1547,7 +1666,11 @@ fn cmd_import(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             }
             line(
                 err,
-                &format!("{target}  ({} 节点, {} 连线)", doc.nodes.len(), doc.edges.len()),
+                &format!(
+                    "{target}  ({} 节点, {} 连线)",
+                    doc.nodes.len(),
+                    doc.edges.len()
+                ),
             );
         }
         None => line(out, &pretty),
@@ -1557,7 +1680,10 @@ fn cmd_import(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
 
 fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     if parsed.positional.len() < 3 {
-        line(err, "用法：lyflow dump <graph> <nodeId>:<port> <out.pcd|out.lyim>");
+        line(
+            err,
+            "用法：lyflow dump <graph> <nodeId>:<port> <out.pcd|out.lyim>",
+        );
         return EXIT_USAGE;
     }
     let path = parsed.positional[0].clone();
@@ -1570,7 +1696,11 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     const FORMATS: &[&str] = &["binary", "ascii", "binary_compressed"];
     let format = parsed.one("format").unwrap_or("binary").to_string();
     if !FORMATS.contains(&format.as_str()) {
-        return fail(err, &format!("--format 只认 {}，收到 {format}", FORMATS.join(" / ")), EXIT_USAGE);
+        return fail(
+            err,
+            &format!("--format 只认 {}，收到 {format}", FORMATS.join(" / ")),
+            EXIT_USAGE,
+        );
     }
     let core = match core() {
         Ok(c) => c,
@@ -1610,7 +1740,8 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         return result.exit_code();
     }
     // dump 的目标路径按当前工作目录解析，不跟着图文件走 —— 命令行里的路径就该是命令行的
-    let run_id = result.events
+    let run_id = result
+        .events
         .first()
         .and_then(|e| e["runId"].as_str())
         .unwrap_or_default()
@@ -1618,8 +1749,16 @@ fn cmd_dump(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     // 端口写错：说这个节点有哪些输出（以前只有 core 那句「结果仓里没有 g.nope」）
     if let Some(ports) = result.output_ports(node_id) {
         if !ports.iter().any(|p| p == port) {
-            let have = if ports.is_empty() { "没有输出".to_string() } else { format!("它的输出：{}", ports.join("、")) };
-            return fail(err, &format!("节点 {node_id} 没有输出端口 {port}（{have}）"), EXIT_USAGE);
+            let have = if ports.is_empty() {
+                "没有输出".to_string()
+            } else {
+                format!("它的输出：{}", ports.join("、"))
+            };
+            return fail(
+                err,
+                &format!("节点 {node_id} 没有输出端口 {port}（{have}）"),
+                EXIT_USAGE,
+            );
         }
     }
     if let Err(e) = core.output_save(&run_id, node_id, port, &target_file, &format) {
@@ -1660,9 +1799,15 @@ pub(crate) fn parse_axis(spec: &str) -> Result<SweepAxis, String> {
     if parts.len() != 3 {
         return Err(format!("范围的写法是 start:end:steps，收到 {range}"));
     }
-    let start: f64 = parts[0].parse().map_err(|_| format!("start 不是数字: {}", parts[0]))?;
-    let end: f64 = parts[1].parse().map_err(|_| format!("end 不是数字: {}", parts[1]))?;
-    let steps: usize = parts[2].parse().map_err(|_| format!("steps 不是整数: {}", parts[2]))?;
+    let start: f64 = parts[0]
+        .parse()
+        .map_err(|_| format!("start 不是数字: {}", parts[0]))?;
+    let end: f64 = parts[1]
+        .parse()
+        .map_err(|_| format!("end 不是数字: {}", parts[1]))?;
+    let steps: usize = parts[2]
+        .parse()
+        .map_err(|_| format!("steps 不是整数: {}", parts[2]))?;
     if steps == 0 {
         return Err("steps 至少是 1".to_string());
     }
@@ -1751,7 +1896,8 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(d) => d,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
-    let param_sets = match eval::axis_param_sets(&loaded.doc, &defaults, &axis_param_specs(parsed)) {
+    let param_sets = match eval::axis_param_sets(&loaded.doc, &defaults, &axis_param_specs(parsed))
+    {
         Ok(v) => v,
         Err(e) => return fail(err, &e, EXIT_USAGE),
     };
@@ -1759,6 +1905,7 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let metrics = [metric];
     let samples = [eval::Sample::whole_graph()];
     let engine = eval::Engine {
+        started: None,
         core: &core,
         base: &loaded,
         pinned: &[],
@@ -1851,7 +1998,10 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
 // ---------------------------------------------------------------------- diff
 
 /// 合并默认值之后的参数。稀疏存储让「没写」和「写了个等于默认的值」在文件里长得不一样。
-fn effective_params(defaults: &BTreeMap<String, Value>, node: &crate::graph::Node) -> BTreeMap<String, Value> {
+fn effective_params(
+    defaults: &BTreeMap<String, Value>,
+    node: &crate::graph::Node,
+) -> BTreeMap<String, Value> {
     let mut out = defaults.clone();
     for (k, v) in &node.params {
         if out.contains_key(k) {
@@ -1861,12 +2011,20 @@ fn effective_params(defaults: &BTreeMap<String, Value>, node: &crate::graph::Nod
     out
 }
 
-pub(crate) fn defaults_by_op(core: &Arc<Core>) -> Result<BTreeMap<String, BTreeMap<String, Value>>, String> {
+pub(crate) fn defaults_by_op(
+    core: &Arc<Core>,
+) -> Result<BTreeMap<String, BTreeMap<String, Value>>, String> {
     let raw = core.manifest_json().map_err(|e| e.to_string())?;
     let manifest: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
     let mut out = BTreeMap::new();
-    for op in manifest["operators"].as_array().cloned().unwrap_or_default() {
-        let Some(id) = op["id"].as_str() else { continue };
+    for op in manifest["operators"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+    {
+        let Some(id) = op["id"].as_str() else {
+            continue;
+        };
         let mut defaults = BTreeMap::new();
         for p in op["params"].as_array().cloned().unwrap_or_default() {
             if let Some(name) = p["name"].as_str() {
@@ -1879,7 +2037,10 @@ pub(crate) fn defaults_by_op(core: &Arc<Core>) -> Result<BTreeMap<String, BTreeM
 }
 
 fn edge_key(e: &crate::graph::Edge) -> String {
-    format!("{}.{} -> {}.{}", e.from.node, e.from.port, e.to.node, e.to.port)
+    format!(
+        "{}.{} -> {}.{}",
+        e.from.node, e.from.port, e.to.node, e.to.port
+    )
 }
 
 fn cmd_diff(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
@@ -1942,7 +2103,10 @@ pub(crate) fn diff_docs(
                     fields.insert("op".into(), json!({ "from": old.op, "to": node.op }));
                 }
                 if old.bypass != node.bypass {
-                    fields.insert("bypass".into(), json!({ "from": old.bypass, "to": node.bypass }));
+                    fields.insert(
+                        "bypass".into(),
+                        json!({ "from": old.bypass, "to": node.bypass }),
+                    );
                 }
                 let d = defaults.get(&node.op).unwrap_or(&no_defaults);
                 let pa = effective_params(d, old);
@@ -2054,10 +2218,19 @@ pub(crate) fn render_diff(out: &Sink, diff: &Value) {
             }
         }
         if n["op"].is_object() {
-            line(out, &format!("    op: {} -> {}", n["op"]["from"], n["op"]["to"]));
+            line(
+                out,
+                &format!("    op: {} -> {}", n["op"]["from"], n["op"]["to"]),
+            );
         }
         if n["bypass"].is_object() {
-            line(out, &format!("    bypass: {} -> {}", n["bypass"]["from"], n["bypass"]["to"]));
+            line(
+                out,
+                &format!(
+                    "    bypass: {} -> {}",
+                    n["bypass"]["from"], n["bypass"]["to"]
+                ),
+            );
         }
     }
     for e in &edges_added {
@@ -2071,7 +2244,10 @@ pub(crate) fn render_diff(out: &Sink, diff: &Value) {
     }
     for p in &list("graphParams") {
         if p["change"] == "modified" {
-            line(out, &format!("~ 顶层参数 {}: {} -> {}", p["name"], p["from"], p["to"]));
+            line(
+                out,
+                &format!("~ 顶层参数 {}: {} -> {}", p["name"], p["from"], p["to"]),
+            );
         } else {
             line(out, &format!("~ 顶层参数 {} {}", p["name"], p["change"]));
         }
@@ -2086,15 +2262,63 @@ pub(crate) fn fail(err: &Sink, message: &str, code: i32) -> i32 {
 }
 
 const VALUE_OPTS: &[&str] = &[
-    "to", "set", "base-dir", "parallel", "jobs", "preview-points", "param", "metric", "csv", "format",
-    "kind", "output", "samples", "samples-glob", "bind", "params", "holdout", "group-by",
-    "after", "region", "axis", "expect", "tolerance", "samples-dir", "bind-pair", "pattern", "cache-dir",
-    "sample-subdir", "sort-by", "split-half", "samples-jsonl-out",
-    "remove-node", "add-node", "rewire", "connect", "node", "only", "input", "recipe",
+    "resume-rows",
+    "max-runs",
+    "to",
+    "set",
+    "base-dir",
+    "parallel",
+    "jobs",
+    "preview-points",
+    "param",
+    "metric",
+    "csv",
+    "format",
+    "kind",
+    "output",
+    "samples",
+    "samples-glob",
+    "bind",
+    "params",
+    "holdout",
+    "group-by",
+    "after",
+    "region",
+    "axis",
+    "expect",
+    "tolerance",
+    "samples-dir",
+    "bind-pair",
+    "pattern",
+    "cache-dir",
+    "sample-subdir",
+    "sort-by",
+    "split-half",
+    "samples-jsonl-out",
+    "remove-node",
+    "add-node",
+    "rewire",
+    "connect",
+    "node",
+    "only",
+    "input",
+    "recipe",
 ];
 const BOOL_OPTS: &[&str] = &[
-    "no-cache", "preview", "write", "check", "json", "help", "outputs", "dry-run",
-    "summary", "no-summary", "fine", "list-metrics", "stale",
+    "progress-json",
+    "no-cache",
+    "preview",
+    "write",
+    "check",
+    "json",
+    "help",
+    "outputs",
+    "dry-run",
+    "summary",
+    "no-summary",
+    "fine",
+    "list-metrics",
+    "stale",
 ];
 
 /// `lyflow <子命令> --help` 只给这个子命令在 USAGE 里的那一段（到下一个子命令、或不缩进的说明为止），外加退出码那一行。
@@ -2102,7 +2326,9 @@ const BOOL_OPTS: &[&str] = &[
 fn usage_of(command: &str) -> Option<String> {
     let lines: Vec<&str> = USAGE.lines().collect();
     let head = format!("  lyflow {command} ");
-    let start = lines.iter().position(|l| l.starts_with(&head) || l.trim_end() == head.trim_end())?;
+    let start = lines
+        .iter()
+        .position(|l| l.starts_with(&head) || l.trim_end() == head.trim_end())?;
     let end = lines[start + 1..]
         .iter()
         .position(|l| l.starts_with("  lyflow ") || (!l.is_empty() && !l.starts_with(' ')))
@@ -2150,6 +2376,42 @@ pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
         "params" => cmd_params(&parsed, out, err),
         "migrate" => cmd_migrate(&parsed, out, err),
         "manifest" => cmd_manifest(&parsed, out, err),
+        "samples" => match eval::collect_samples(&parsed, err) {
+            Ok(samples) => {
+                for s in eval::samples_jsonl(&samples).lines() {
+                    line(out, s);
+                }
+                EXIT_OK
+            }
+            Err(e) => {
+                line(err, &e);
+                EXIT_USAGE
+            }
+        },
+        "info" => {
+            match core().and_then(|c| {
+                Ok((
+                    c.manifest_json().map_err(|e| e.to_string())?,
+                    crate::disk_cache::fingerprint()?,
+                ))
+            }) {
+                Ok((manifest, fingerprint)) => {
+                    let m: Value = serde_json::from_str(&manifest).unwrap_or(Value::Null);
+                    json_line(
+                        out,
+                        &json!({ "kind": "core_info", "version": core_ffi::version(),
+                        "buildFingerprint": fingerprint, "corePath": core_ffi::dll_file(),
+                        "operatorCount": m["operators"].as_array().map_or(0, Vec::len),
+                        "generatedBy": m["generatedBy"], "libraryDirs": library_dirs() }),
+                    );
+                    EXIT_OK
+                }
+                Err(e) => {
+                    line(err, &e);
+                    EXIT_FAILED
+                }
+            }
+        }
         "import" => cmd_import(&parsed, out, err),
         "dump" => cmd_dump(&parsed, out, err),
         "sweep" => cmd_sweep(&parsed, out, err),
@@ -2230,7 +2492,10 @@ pub(crate) mod test_support {
 
     impl Write for SharedBuf {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(buf);
+            self.0
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .extend_from_slice(buf);
             Ok(buf.len())
         }
         fn flush(&mut self) -> std::io::Result<()> {

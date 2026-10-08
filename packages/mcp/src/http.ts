@@ -25,6 +25,7 @@ export interface RunWaitResult {
   timedOut: boolean;
   /** 调用方取消了（signal）：已经替它发了 POST /lyflow/cancel，没等 run_finished 就回来了。 */
   cancelled: boolean;
+  cancellation?: { requested: boolean; acknowledged: boolean; executionFinished: boolean; error?: string };
 }
 
 function eventsUrlOf(base: string): string {
@@ -58,6 +59,7 @@ export class LyFlowHttp {
     try {
       res = await fetch(`${this.base}${path}`, {
         ...init,
+        signal: init.signal ?? AbortSignal.timeout(30000),
         headers: this.#headers(init.headers as Record<string, string> | undefined),
       });
     } catch (e) {
@@ -120,7 +122,7 @@ export class LyFlowHttp {
     return bundle;
   }
 
-  validate(envelope: { doc: unknown; graphPath: string | null }): Promise<Diagnostic[]> {
+  validate(envelope: { doc: unknown; graphPath: string | null; params?: Record<string, unknown> }): Promise<Diagnostic[]> {
     return this.sendJson<Diagnostic[]>("POST", "/lyflow/validate", envelope);
   }
 
@@ -128,6 +130,7 @@ export class LyFlowHttp {
     doc: unknown;
     graphPath: string | null;
     targets: string[] | null;
+    params?: Record<string, unknown>;
   }): Promise<unknown[]> {
     return this.sendJson<unknown[]>("POST", "/lyflow/plan", envelope);
   }
@@ -224,6 +227,7 @@ export class LyFlowHttp {
     let runId: string | null = null;
     let finished = false;
     let cancelled = false;
+    let timedOut = false;
     let settle: () => void = () => {};
     const done = new Promise<void>((resolve) => {
       settle = resolve;
@@ -245,10 +249,20 @@ export class LyFlowHttp {
       }
     };
     socket.addEventListener("message", onMessage);
+    let cancelPromise: Promise<void> | null = null;
+    let cancellation: RunWaitResult["cancellation"];
+    const requestCancel = () => {
+      if (runId === null || finished || cancelPromise) return;
+      cancellation = { requested:true,acknowledged:false,executionFinished:false };
+      cancelPromise = this.sendJson("POST", "/lyflow/cancel", { runId }).then(() => {
+        cancellation!.acknowledged=true;
+      }).catch((e:unknown) => { cancellation!.error=String(e); });
+    };
     // runId 要等 POST /lyflow/run 回来才知道：那之前取消的，回来以后立刻补发
     const cancel = () => {
+      if (finished) return;
       cancelled = true;
-      if (runId !== null && !finished) void this.sendJson("POST", "/lyflow/cancel", { runId }).catch(() => {});
+      requestCancel();
       settle();
     };
     signal?.addEventListener("abort", cancel, { once: true });
@@ -261,14 +275,22 @@ export class LyFlowHttp {
         settle();
       }
       if (signal?.aborted) cancel();
-      const timer = setTimeout(() => settle(), timeoutMs);
+      const timer = setTimeout(() => {
+        if (finished) return;
+        timedOut = true;
+        requestCancel();
+        settle();
+      }, timeoutMs);
       await done;
       clearTimeout(timer);
+      if (cancelPromise) await cancelPromise;
+      if (cancellation) cancellation.executionFinished=finished;
       return {
         runId,
         events: frames.filter((f) => f.runId === runId),
-        timedOut: !finished && !cancelled,
-        cancelled: cancelled && !finished,
+        timedOut,
+        cancelled,
+        ...(cancellation ? {cancellation} : {}),
       };
     } finally {
       signal?.removeEventListener("abort", cancel);

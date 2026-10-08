@@ -197,6 +197,8 @@
         "softMax": { "type": "number", "description": "滑块范围，可手输超出。" },
         "step": { "type": "number" },
         "unit": { "type": "string" },
+        "tuningRole": { "enum": ["input", "geometry", "detection", "acceptance"], "description": "调参角色；input/geometry/acceptance 默认固定，detection 可搜索。" },
+        "unitSource": { "type": "string", "description": "运行期单位来源；非空时不把 unit 当作固定单位。" },
         "absolute": { "type": "boolean", "default": false, "description": "只对 unit = px 有意义：这是一个绝对的像素尺寸（例如输出图的宽高），不是输入图上的距离。预览缩小图像时不跟着换算；它生效（visibleWhen 成立）时，本算子输出的图像回到原图比例（ADR-0028）。" },
         "componentLabels": { "type": "array", "items": { "type": "string" }, "description": "vecNf 的分量名，默认 X/Y/Z/W。" },
         "options": {

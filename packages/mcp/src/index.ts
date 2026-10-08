@@ -13,6 +13,7 @@ async function main(): Promise<void> {
     return;
   }
   const server = createServer(config);
+  for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { void server.close(); });
   await server.connect(new StdioServerTransport());
   process.stderr.write(`lyflow-mcp: ${config.httpBase}${config.cli ? ` + ${config.cli}` : ""}\n`);
 }

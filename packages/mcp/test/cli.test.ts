@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { parseJsonLines, runCli, stderrTail } from "../src/cli.js";
 import { loadConfig } from "../src/config.js";
@@ -51,11 +54,13 @@ test("runCli：stdout 每出一行完整的 JSON 就回调一次；调用方取�
   const seen: string[] = [];
   const abort = new AbortController();
   const t0 = Date.now();
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"lyflow-cli-stream-")),outputPath=path.join(dir,"rows.jsonl");
   const result = await runCli(config, ["-e", script], {
     signal: abort.signal,
+    outputPath,
     onLine: (line) => {
       seen.push(String(line.value["sample"]));
-      if (seen.length === 2) abort.abort();
+      if (seen.length === 2) {assert.equal(fs.readFileSync(outputPath,"utf8").split("\n").filter(Boolean).length,2);abort.abort();}
     },
   });
   assert.deepEqual(seen, ["a", "b"]);
@@ -69,4 +74,10 @@ test("runCli：stdout 每出一行完整的 JSON 就回调一次；调用方取�
   assert.deepEqual([done.code, done.cancelled, done.lines.length], [0, false, 1]);
   const already = await runCli(config, ["-e", "setTimeout(() => {}, 60000)"], { signal: AbortSignal.abort() });
   assert.equal(already.cancelled, true);
+  const eof=await runCli(config,["-e",'process.stdout.write("{\\\"kind\\\":\\\"eval_row\\\"}")'],{outputPath,retainRows:false});
+  assert.equal(eof.lines.length,0);assert.match(fs.readFileSync(outputPath,"utf8"),/eval_row/);
+  const timeout=await runCli(config,["-e",'console.log(JSON.stringify({kind:"eval_row",sample:"partial"}));setTimeout(()=>{},60000)'],{outputPath,timeoutMs:1000});
+  assert.equal(timeout.timedOut,true);assert.equal(timeout.cancelled,false);
+  assert.match(fs.readFileSync(outputPath,"utf8"),/partial/);
+  assert.equal(path.dirname(path.resolve(dir)),path.resolve(os.tmpdir()));fs.rmSync(dir,{recursive:true});
 });

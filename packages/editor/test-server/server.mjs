@@ -255,7 +255,10 @@ async function manifest() {
 
 async function coreInfo() {
   const m = await manifest();
+  const result = await runCli(["info"]);
+  const info = lastJson(result.lines);
   return {
+    ...(info?.kind === "core_info" ? { buildFingerprint: info.buildFingerprint } : {}),
     version: (m.generatedBy ?? "unknown").split("/")[1] ?? "unknown",
     operatorCount: m.operators.length,
     typeCount: m.types.length,

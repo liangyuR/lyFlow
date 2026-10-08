@@ -1,0 +1,5 @@
+[
+  {"id":"follow-001","set":{"n_load.path":"frames/001.png"},"tags":{"workpiece":"part-001","batch":"A"},"truth":{"pose":{"output":"pathInfo","ok":true},"verdict":{"output":"verdict","ok":false},"measurements":[{"path":"outputs.bead.stations.width.mean","value":20,"unit":"px","unitPath":"outputs.bead.info.unit","tolerance":2}],"breaks":{"output":"breaks","coordinate":"image_px","lineOutput":"line","intervals":[{"start":[250,300],"end":[260,280]}],"minIou":0.5,"endpointTolerance":4,"maxProjectionDistance":10}}},
+  {"id":"follow-002","tags":{"workpiece":"part-002"},"truth":{"breaks":{"output":"breaks","intervals":[]},"verdict":{"output":"verdict","ok":true}}},
+  {"id":"fly-001","graphParams":{"template":"k0.png","anchor":[590,250],"stations":"k0.stations.json","calib":"plane_calib.json"},"tags":{"workpiece":"part-003","capture":0},"truth":{"pose":{"output":"pose","ok":true},"measurements":[{"path":"outputs.measure.width.0","value":5,"unit":"mm","unitPath":"outputs.measure.unit","tolerance":0.3}]}}
+]

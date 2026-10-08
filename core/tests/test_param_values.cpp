@@ -1,6 +1,7 @@
 // transform 与 curve 两种参数的值格式（param-recipe P2.6，docs/operator-manifest.md「transform 与 curve 的值」），
 // 以及参数面板的全类型示例算子 test.param_showcase 自己合不合规（P2.10）。
 #include <doctest/doctest.h>
+#include <algorithm>
 
 #include "exec/executor.h"
 #include "helpers.h"
@@ -87,6 +88,18 @@ TEST_CASE("manifest 导出：curve 的默认值是对象，flags 的选项值是
   const Json* pose = findParamIn(*op, "pose");
   REQUIRE(pose != nullptr);
   CHECK((*pose)["default"].size() == 16);
+  OperatorDesc tuned = *ensureRegistry().find("test.param_showcase");
+  tuned.params[0].tuningRole = "detection";
+  tuned.params[0].unitSource = "bead.info.unit";
+  Registry local;
+  local.addOperator(tuned);
+  const Json published = Json::parse(local.toManifestJson());
+  CHECK(published["operators"][0]["params"][0]["tuningRole"] == "detection");
+  CHECK(published["operators"][0]["params"][0]["unitSource"] == "bead.info.unit");
+  tuned.id = "test.bad_role"; tuned.params[0].tuningRole = "typo";
+  local.addOperator(tuned);
+  const auto issues = local.validate();
+  CHECK(std::any_of(issues.begin(),issues.end(),[](const std::string& s){return s.find("tuningRole") != std::string::npos;}));
 }
 
 TEST_CASE("curve / transform 的值：合法的通过，形状不对的报 bad_param 并说清楚哪里不对") {

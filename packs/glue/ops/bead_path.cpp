@@ -205,6 +205,9 @@ void registerBeadPath(Registry& r) {
                               true);
   op.params = {nozzle, zone,    sector,      source,      heading,  headingTol,
                widthMax, polarity, maxGap, minCoverage, contrastMin, sharpMin};
+  for (auto& p : op.params)
+    if (p.name == "nozzle" || p.name == "zone" || p.name == "sector" || p.name == "heading")
+      p.tuningRole = "geometry";
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;
   op.validate = &validate;

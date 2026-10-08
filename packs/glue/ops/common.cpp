@@ -318,6 +318,7 @@ Param floatParam(const char* name, const char* label, double def, const char* un
                  const char* doc, bool advanced) {
   Param p;
   p.name = name;
+  p.tuningRole = "detection";
   p.type = ParamType::Float;
   p.label = label;
   p.doc = doc;
@@ -331,6 +332,7 @@ Param vec2Param(const char* name, const char* label, double a, double b, const c
                 std::vector<std::string> components, const char* doc, bool advanced) {
   Param p;
   p.name = name;
+  p.tuningRole = "detection";
   p.type = ParamType::Vec2f;
   p.label = label;
   p.doc = doc;
@@ -345,6 +347,7 @@ Param enumParam(const char* name, const char* label, const char* def, const char
                 std::vector<EnumOption> options, bool advanced) {
   Param p;
   p.name = name;
+  p.tuningRole = "detection";
   p.type = ParamType::Enum;
   p.label = label;
   p.doc = doc;
@@ -357,6 +360,7 @@ Param enumParam(const char* name, const char* label, const char* def, const char
 Param boolParam(const char* name, const char* label, bool def, const char* doc, bool advanced) {
   Param p;
   p.name = name;
+  p.tuningRole = "detection";
   p.type = ParamType::Bool;
   p.label = label;
   p.doc = doc;

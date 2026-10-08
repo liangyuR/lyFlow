@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/liangyuR/lyFlow/schema/eval-sample.schema.json",
+  "title": "LyFlowEvalSample",
+  "description": "eval 样本 JSONL 的一行。id 在整个数据集唯一；范围、指标路径和单位匹配另由 CLI 校验。",
+  "type": "object",
+  "required": ["id"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "scene": false,
+    "set": {"type": ["object", "null"], "propertyNames": {"pattern": ".+\\..+"}},
+    "graphParams": {"type": "object"},
+    "tags": {"type": ["object", "null"], "additionalProperties": {"type": ["string", "number", "boolean"]}},
+    "truth": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "pose": {"$ref": "#/$defs/decision"},
+        "verdict": {"$ref": "#/$defs/decision"},
+        "measurements": {"type": "array", "items": {"$ref": "#/$defs/measurement"}},
+        "breaks": {"$ref": "#/$defs/breaks"}
+      }
+    }
+  },
+  "$defs": {
+    "decision": {"type": "object", "required": ["output", "ok"], "properties": {"output": {"type": "string", "minLength": 1}, "ok": {"type": "boolean"}}},
+    "measurement": {
+      "type": "object", "required": ["path", "value", "unit", "unitPath"],
+      "properties": {"path": {"type": "string", "minLength": 1}, "value": {"type": "number"}, "unit": {"type": "string", "minLength": 1}, "unitPath": {"type": "string", "minLength": 1}, "tolerance": {"type": "number", "minimum": 0}}
+    },
+    "point": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+    "breaks": {
+      "type": "object", "required": ["output", "intervals"],
+      "properties": {
+        "output": {"type": "string", "minLength": 1},
+        "coordinate": {"enum": ["path_s_px", "image_px"], "default": "path_s_px"},
+        "lineOutput": {"type": "string", "minLength": 1},
+        "minIou": {"type": "number", "minimum": 0, "maximum": 1},
+        "endpointTolerance": {"type": "number", "minimum": 0},
+        "maxProjectionDistance": {"type": "number", "minimum": 0},
+        "intervals": {"type": "array"}
+      },
+      "if": {"required": ["coordinate"], "properties": {"coordinate": {"const": "image_px"}}},
+      "then": {"required": ["lineOutput"], "properties": {"intervals": {"items": {"type": "object", "required": ["start", "end"], "properties": {"start": {"$ref": "#/$defs/point"}, "end": {"$ref": "#/$defs/point"}}}}}},
+      "else": {"properties": {"intervals": {"items": {"type": "object", "required": ["sStart", "sEnd"], "properties": {"sStart": {"type": "number"}, "sEnd": {"type": "number"}}}}}}
+    }
+  }
+}

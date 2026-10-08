@@ -13,6 +13,7 @@ import {
   summarizeCloud,
 } from "../src/cloud.js";
 import { IMAGE_MAGIC, decodeImage, encodePng, fetchImage, levelToFit, toPicture } from "../src/image.js";
+import { drawOverlays } from "../src/overlay.js";
 
 function encode(
   xyz: number[],
@@ -165,6 +166,13 @@ test("张量与下标的切片按契约解出来：形状是完整的、u64 的�
 });
 
 test("图像载荷（LYIM）解出来；u16 拉伸到 8 位、超过边长按最近邻缩；PNG 头与像素经 inflate 读回一致", async () => {
+  const canvas = toPicture(10,10,1,1,new Float64Array(100),10);
+  const overlay = {kind:"Record",type:"lyflow.overlay2d",data:{frame:"image",items:[{kind:"polyline",role:"break",points:[[100,200],[118,218]],label:"断口"}]}};
+  const drawn = drawOverlays(canvas,[overlay],[100,200],[2,2]);
+  assert.equal(drawn.itemCount,1);
+  assert.equal((drawn.labels[0] as {text:string})?.text,"断口");
+  assert.ok(drawn.picture.bytes.some((p) => p !== 0));
+  assert.throws(() => drawOverlays(canvas,[{...overlay,data:{...overlay.data,frame:"world"}}],[0,0],[1,1]),/image/);
   // 3x2 单通道 u16，第 1 行起的 2 行
   const buffer = new ArrayBuffer(48 + 12);
   const view = new DataView(buffer);

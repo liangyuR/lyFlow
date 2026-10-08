@@ -439,6 +439,8 @@ lyflow eval g.lyflow.json \
 
 ## 7. 用 MCP 时对应的工具名
 
+glue 图像的真值评分与冻结调参流程见 [mcp-glue-tuning.md](mcp-glue-tuning.md)，不使用下文点云 perturb 的位移模拟。
+
 同一件事换个名字而已，语义与上面各节一模一样，这里不重复解释。
 怎么起、每个工具的输出形状见 [mcp.md](mcp.md)。
 
@@ -477,7 +479,7 @@ CLI 上有的，MCP 上要么有同名字段，要么在这里写明不提供 �
 | `--split-half` | `splitHalf` | 同 | — |
 | `--samples-jsonl-out` | **MCP 不提供** | **MCP 不提供** | 要核对生成的样本集就跑一次 CLI；MCP 这边 `rowsPath` 里每行都带 `sample` 与 `tags` |
 | `--params <file>` | `params` | — | 直接给对象数组，MCP 自己落成临时文件 |
-| `--param` | `param` | — | 字符串数组 |
+| `--param` | `param` 扫描轴 / `graphParams` 顶层取值 | — | 轴是字符串数组，顶层值是 JSON 对象 |
 | `--metric` | `metric` | `metric` | 字符串数组 |
 | `--holdout` | `holdout` | — | `perturb` 不分组 |
 | `--group-by` | `groupBy` | — | 同上 |
@@ -488,6 +490,9 @@ CLI 上有的，MCP 上要么有同名字段，要么在这里写明不提供 �
 | `--no-cache` | `noCache` | `noCache` | 布尔 |
 | `--parallel` | **MCP 不提供** | **MCP 不提供** | 它是传给 core 的节点并行度，不在判断的关键路径上 |
 | `--jobs` | `jobs` | `jobs` | 同时跑几次（默认 1）；行的顺序与内容不变，只是更快 |
+| `--max-runs` | `maxRuns` | — | 本次新增尝试预算；后台搜索也使用它 |
+| `--resume-rows` | `resume_job` 自动生成 | — | 核对冻结内容后跳过已完成行，统计包括以前的行 |
+| `--progress-json` | 评估内部开启 | — | eval_started 逐次计数，不改变默认 CLI 的行序 |
 | `--after` | — | `after` | — |
 | `--region` | — | `region` | 给对象不给 JSON 字符串；`point` / `min` / `max` 是米 |
 | `--axis` | — | `axis` | 位移是米 |
@@ -498,6 +503,6 @@ CLI 上有的，MCP 上要么有同名字段，要么在这里写明不提供 �
 
 - **退出码变成返回值里的 `exitCode`。** 用法错（`4`）时额外带一个 `stderr` 全文 ——
   「这张图上可用的标量路径」在那里面。
-- **没有写图的工具。** 改完的图自己用文件系统存，再把路径交给 `validate_graph` / `run_graph`。
+- **改图可审查。** patch_graph 默认 dryRun；export_candidate 写已评估的新图/配方与 provenance，不覆盖现有文件。
 - **大结果一律落盘。** `eval` 的 `rowsPath`、`perturb` 的 `samplesPath` 与 `rowsPath`
   是本地文件路径，用 `jq` 去读；返回值里只有统计与被截断过的失败清单。

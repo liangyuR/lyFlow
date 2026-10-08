@@ -1,8 +1,70 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { coreSummary, parseDiagnostics, summarizeOutputs, summarizeRun } from "../src/run.js";
 import type { ExecutionEvent } from "../src/types.js";
+import { assessment, projectValue, valueAt } from "../src/summary.js";
+import { ArtifactStore } from "../src/artifacts.js";
+import { freezeSplits } from "../src/evaluations.js";
+import { assessCandidate, generateCandidates } from "../src/experiments.js";
+
+test("复杂记录分页保留全量分布，artifact 在原文件改变后仍可读取",async()=>{
+  const value={kind:"Record",type:"glue.StationMeasure",data:{count:4,counts:{ok:3,noBead:1},unit:"mm",width:[1,null,3,5]}};
+  const result=projectValue(value,{fields:["width"],offset:1,limit:2});
+  assert.deepEqual((result.value as {width:unknown[]}).width,[null,3]);
+  assert.equal(result.truncated,true);
+  assert.deepEqual(((result.arrays as Record<string,{statistics:unknown}>)?.["width"]?.statistics),{count:4,valid:3,missing:1,min:1,max:5,mean:3,p50:3,p95:4.8,std:2});
+  assert.equal(assessment(value)["measurementStatus"],"incomplete");
+  assert.equal(assessment({type:"glue.StationMeasure",data:{}})["measurementStatus"],"unknown");
+  assert.equal(assessment({type:"glue.Breaks",data:{count:0,pathOk:false}})["detectionStatus"],"invalid");
+  const bundle={kind:"Bundle",fields:[{name:"stations",value}]};
+  assert.equal(valueAt(bundle,"stations.width.2"),3);
+  assert.deepEqual(assessment(bundle),{stations:assessment(value)});
+  assert.deepEqual(projectValue({points:[[10,20],[30,40],[50,60]]},{offset:1,limit:1}).value,{points:[[30,40]]});
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"lyflow-artifact-")),file=path.join(dir,"rows.jsonl"),store=new ArtifactStore(dir);
+  fs.writeFileSync(file,JSON.stringify({id:"a",width:[1,null,3,5]})+"\n");
+  const ref=store.register(file,"jsonl");fs.writeFileSync(file,"{}");
+  const read=await store.read(ref.artifactId,{offset:0,limit:1});assert.equal((read["rows"] as {id:string}[])[0]?.id,"a");
+  assert.equal(read["total"],1);await assert.rejects(store.read("../rows"),/artifactId/);
+  assert.equal(path.dirname(path.resolve(dir)),path.resolve(os.tmpdir()));fs.rmSync(dir,{recursive:true});
+});
+
+test("工件分组划分与样本顺序无关，多帧不会泄漏到其他集合",()=>{
+  const samples=Array.from({length:12},(_,i)=>({id:String(i),tags:{workpiece:`p${i%6}`}}));
+  const spec={groupTag:"workpiece",seed:"fixed",train:0.6,validation:0.2,holdout:0.2};
+  const first=freezeSplits(samples,spec),second=freezeSplits([...structuredClone(samples)].reverse(),spec);
+  assert.deepEqual(first,second);assert.deepEqual(new Set(Object.values(first)),new Set(["train","validation","holdout"]));
+  for(let i=0;i<6;i++) assert.equal((samples[i]?.tags as Record<string,unknown>)["split"],(samples[i+6]?.tags as Record<string,unknown>)["split"]);
+  assert.throws(()=>freezeSplits([{id:"x",tags:{}}],spec),/分组标签/);
+  assert.throws(()=>freezeSplits([{id:"x"},{id:"x"}],undefined),/唯一/);
+});
+
+test("候选缺失或违反质量约束时不参与排名，搜索空间保留基线且受组合上限约束",()=>{
+  const objectives=[{metric:"run.durationMs",direction:"minimize" as const,stat:"p95" as const,weight:1}];
+  const state={status:"complete",summaries:[{paramSet:0,metric:"run.durationMs",groups:{train:{p95:2}}},{paramSet:0,metric:"quality.executionOk",groups:{train:{mean:1}}}],
+    qualitySummaries:[{paramSet:0,groups:{train:{metrics:{measurementMissing:{max:1}}}}}]};
+  assert.equal(assessCandidate(state,0,"train",objectives,[]).qualified,false);
+  assert.equal(assessCandidate({...state,qualitySummaries:[]},0,"train",objectives,[]).qualified,true);
+  const wrong={...state,qualitySummaries:[{paramSet:0,groups:{train:{metrics:{defectFn:{max:1}}}}}]};
+  assert.equal(assessCandidate(wrong,0,"train",objectives,[]).qualified,false);
+  assert.equal(assessCandidate(wrong,0,"train",objectives,[{metric:"quality.defectFn",max:1,stat:"max"}]).qualified,true);
+  for(const metric of ["measurementWithinTolerance","breakWithinTolerance"]){
+    const outsideTolerance={...state,qualitySummaries:[{paramSet:0,groups:{train:{metrics:{[metric]:{min:0.5,mean:0.75}}}}}]};
+    const rejected=assessCandidate(outsideTolerance,0,"train",objectives,[]);
+    assert.equal(rejected.qualified,false);
+    assert.equal(rejected.violations[0]?.["reason"],"default_annotation_tolerance_gate");
+    assert.equal(assessCandidate(outsideTolerance,0,"train",objectives,[{metric:`quality.${metric}`,max:1,stat:"mean"}]).qualified,false);
+    assert.equal(assessCandidate(outsideTolerance,0,"train",objectives,[{metric:`quality.${metric}`,min:0.7,stat:"mean"}]).qualified,true);
+    assert.equal(assessCandidate(outsideTolerance,0,"train",objectives,[{metric:`quality.${metric}`,min:0.8,stat:"mean"}]).qualified,false);
+  }
+  assert.equal(assessCandidate({...state,status:"timeout"},0,"train",objectives,[]).score,null);
+  assert.equal(assessCandidate(state,1,"train",objectives,[]).qualified,false);
+  const candidates=generateCandidates({a:[1,2],b:[3,4,5]},{a:1,b:3},"grid");assert.equal(candidates.length,7);assert.deepEqual(candidates[0],{});
+  assert.throws(()=>generateCandidates({a:[1,2],b:[3,4,5]},{},"grid",5),/超过/);
+});
 
 const events: ExecutionEvent[] = [
   { kind: "run_started", runId: "r1", seq: 0, nodeCount: 2 },

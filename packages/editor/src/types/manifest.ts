@@ -130,6 +130,10 @@ export interface Param {
   /** 只对 semantic=roi 有意义：框画在 `<dir 参数>/<files 参数的每个文件名>` 拼起来的云上
    *  （那片云自己的坐标系，例如模板坐标系）。不给 = 画在节点显示的那片数据云上。 */
   roiBackdrop?: RoiBackdrop;
+  /** MCP 搜索角色；未声明的参数由调用方固定。 */
+  tuningRole?: "input" | "geometry" | "detection" | "acceptance";
+  /** 参数单位依赖的运行输出，如 bead.info.unit；静态 unit 仍是默认展示值。 */
+  unitSource?: string;
 }
 
 export interface RoiBackdrop {
