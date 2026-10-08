@@ -1,0 +1,10 @@
+{
+  "kind": "Record",
+  "type": "lyflow.overlay2d",
+  "data": {
+    "frame": "image",
+    "items": [
+      { "kind": "box", "role": "roi", "min": [10, 20], "max": [50, 60], "unit": "m" }
+    ]
+  }
+}

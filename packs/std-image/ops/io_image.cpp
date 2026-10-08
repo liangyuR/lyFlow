@@ -35,7 +35,24 @@ cv::Mat swapRedBlue(const cv::Mat& m) {
   return out;
 }
 
-Status loadCompute(const Inputs&, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
+Status loadCompute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
+  if (params.choice("source") == "inputs") {
+    const Image* image = inputs.has("image") ? inputs.get("image").asImage() : nullptr;
+    if (!image || !image->consistent()) {
+      return Status::Error(Phase::Execute, "bad_input", "source=inputs 时需要宿主注入或上游连接 image", {}, "image");
+    }
+    cv::Mat m = cvx::view(*image), converted;
+    const std::string& mode = params.choice("mode");
+    if (mode == "gray" && image->channels != 1) {
+      cv::cvtColor(m, converted, image->channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
+    } else if (mode == "color" && image->channels != 3) {
+      cv::cvtColor(m, converted, image->channels == 1 ? cv::COLOR_GRAY2RGB : cv::COLOR_RGBA2RGB);
+    } else {
+      outputs.set("image", inputs.get("image"));
+      return Status::Ok();
+    }
+    return img::putMat(outputs, "image", std::move(converted));
+  }
   const std::filesystem::path file = params.path("path");
   std::error_code ec;
   if (!std::filesystem::exists(file, ec)) {
@@ -76,6 +93,7 @@ Status loadCompute(const Inputs&, const ParamView& params, Outputs& outputs, Exe
 
 /// 路径没变但文件被覆盖了也必须重算（同 io.load_pcd）。
 std::string loadExternalKey(const ParamView& params) {
+  if (params.choice("source") == "inputs") return {};
   const std::filesystem::path file = params.path("path");
   std::error_code ec;
   const auto size = std::filesystem::file_size(file, ec);
@@ -124,6 +142,8 @@ void registerIoLoadImage(Registry& r) {
   op.category = "输入输出/输入";
   op.keywords = {"load", "read", "open", "image", "png", "jpg", "tif", "读取", "图像", "图片"};
   op.doc = "从磁盘读取图像（PNG / JPEG / BMP / TIFF）。通道顺序转成 RGB(A)；16 位 PNG / TIFF 保留 u16。";
+  op.doc += " source=inputs 时使用宿主经 RunImageInput 注入或上游连接的 image，不读文件。";
+  op.inputs = {Port{"image", "Image", "Image", "source=inputs 时使用的图像。", false}};
   op.outputs = {img::imageOut("image", "读出的图像。")};
 
   Param path;
@@ -133,10 +153,14 @@ void registerIoLoadImage(Registry& r) {
   path.doc = "图像文件路径。相对路径相对于当前图文件所在目录。";
   path.def = Value::text("");
   path.mode = "open";
+  path.visibleWhen = img::when("source", Value::text("file"));
   path.filters = {FileFilter{"Image", {"png", "jpg", "jpeg", "bmp", "tif", "tiff"}},
                   FileFilter{"All Files", {"*"}}};
 
   op.params = {
+      img::enumParam("source", "Source", "file",
+                     {EnumOption{"file", "文件", "从 path 读取图像"},
+                      EnumOption{"inputs", "输入", "上游连接或宿主内存注入"}}, "图像来源。"),
       path,
       img::enumParam("mode", "Mode", "unchanged",
                      {EnumOption{"unchanged", "原样", "文件里是什么通道、什么位深就是什么"},

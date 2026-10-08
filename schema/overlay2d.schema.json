@@ -1,0 +1,255 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/liangyuR/lyFlow/schema/overlay2d.schema.json",
+  "title": "LyFlowOverlay2D",
+  "description": "图像像素叠画 Record：type=lyflow.overlay2d，data={frame:\"image\",items:[...] }。图像坐标 x 向右、y 向下。由 core/include/lyflow/overlay.h 构造，宿主决定颜色和线宽；与主线带 unit=px 的像素几何并存。",
+  "type": "object",
+  "required": [
+    "type",
+    "data"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "Record"
+    },
+    "type": {
+      "const": "lyflow.overlay2d"
+    },
+    "data": {
+      "$ref": "#/$defs/overlay"
+    }
+  },
+  "$defs": {
+    "overlay": {
+      "type": "object",
+      "required": [
+        "frame",
+        "items"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "frame": {
+          "const": "image",
+          "description": "坐标系。目前只有 image（图像像素），留着这个字段是为了以后不必猜。"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/item"
+          }
+        }
+      }
+    },
+    "px": {
+      "type": "array",
+      "description": "图像像素坐标 [x, y]。非有限值进不了 JSON：构造器把那几个点丢掉。",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "number"
+      }
+    },
+    "role": {
+      "type": "string",
+      "minLength": 1,
+      "description": "语义角色，例如 nozzle / path / edge.left / defect。前端按它挑颜色与线宽，不认识的用默认色。"
+    },
+    "label": {
+      "type": "string",
+      "description": "可选：画在这一项旁边的说明文字。"
+    },
+    "item": {
+      "description": "一项叠画。kind 决定几何字段：points / polyline / segments 用 points，circle 用 center + radius，box 用 min + max，text 用 text + at。",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/points"
+        },
+        {
+          "$ref": "#/$defs/polyline"
+        },
+        {
+          "$ref": "#/$defs/segments"
+        },
+        {
+          "$ref": "#/$defs/circle"
+        },
+        {
+          "$ref": "#/$defs/box"
+        },
+        {
+          "$ref": "#/$defs/text"
+        }
+      ]
+    },
+    "points": {
+      "type": "object",
+      "description": "一组离散的点（画成圆点还是十字由前端按 role 定）。",
+      "required": [
+        "kind",
+        "role",
+        "points"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "points"
+        },
+        "role": {
+          "$ref": "#/$defs/role"
+        },
+        "points": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/px"
+          }
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        }
+      }
+    },
+    "polyline": {
+      "type": "object",
+      "description": "折线；closed = true 时首尾相连（多边形）。",
+      "required": [
+        "kind",
+        "role",
+        "points"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "polyline"
+        },
+        "role": {
+          "$ref": "#/$defs/role"
+        },
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/px"
+          }
+        },
+        "closed": {
+          "type": "boolean"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        }
+      }
+    },
+    "segments": {
+      "type": "object",
+      "description": "一组互不相连的线段：points 两两一段（个数是偶数，构造器保证；末尾落单的一个点前端丢掉）。",
+      "required": [
+        "kind",
+        "role",
+        "points"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "segments"
+        },
+        "role": {
+          "$ref": "#/$defs/role"
+        },
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/px"
+          }
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        }
+      }
+    },
+    "circle": {
+      "type": "object",
+      "required": [
+        "kind",
+        "role",
+        "center",
+        "radius"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "circle"
+        },
+        "role": {
+          "$ref": "#/$defs/role"
+        },
+        "center": {
+          "$ref": "#/$defs/px"
+        },
+        "radius": {
+          "type": "number",
+          "minimum": 0,
+          "description": "半径，像素。"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        }
+      }
+    },
+    "box": {
+      "type": "object",
+      "description": "轴对齐的框，min ≤ max（构造器按两个角排好）。",
+      "required": [
+        "kind",
+        "role",
+        "min",
+        "max"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "box"
+        },
+        "role": {
+          "$ref": "#/$defs/role"
+        },
+        "min": {
+          "$ref": "#/$defs/px"
+        },
+        "max": {
+          "$ref": "#/$defs/px"
+        },
+        "label": {
+          "$ref": "#/$defs/label"
+        }
+      }
+    },
+    "text": {
+      "type": "object",
+      "description": "一段文字。at 是锚点：文字从这里向右写，竖直方向以它为基线。",
+      "required": [
+        "kind",
+        "role",
+        "text",
+        "at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "text"
+        },
+        "role": {
+          "$ref": "#/$defs/role"
+        },
+        "text": {
+          "type": "string"
+        },
+        "at": {
+          "$ref": "#/$defs/px"
+        }
+      }
+    }
+  }
+}
