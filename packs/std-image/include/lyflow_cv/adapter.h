@@ -20,6 +20,9 @@ int cvType(const Image& img);
 
 cv::Mat view(const Image& img);
 
+/// u8 灰度视图；RGB(A) 转灰度时返回自持有像素的 Mat。不支持的位深返回空，避免暗中改变测量阈值。
+cv::Mat gray8(const Image& img);
+
 /// 位深只认 8U / 16U / 32F、通道只认 1 / 3 / 4。别的返回 false（out 不动），调用方报 bad_input。
 bool fromMat(cv::Mat m, Image& out);
 

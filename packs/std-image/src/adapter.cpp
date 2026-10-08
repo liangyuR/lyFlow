@@ -3,6 +3,8 @@
 #include <memory>
 #include <utility>
 
+#include <opencv2/imgproc.hpp>
+
 namespace lyflow::cvx {
 
 int cvType(const Image& img) {
@@ -18,6 +20,15 @@ cv::Mat view(const Image& img) {
   // const_cast 只为满足 Mat 构造函数的签名；约定是只读（见头文件）
   return cv::Mat(img.height, img.width, cvType(img), const_cast<std::uint8_t*>(img.pixels.get()),
                  img.rowBytes());
+}
+
+cv::Mat gray8(const Image& img) {
+  if (img.depth != PixelDepth::U8 || !img.consistent()) return {};
+  if (img.channels == 1) return view(img);
+  if (img.channels != 3 && img.channels != 4) return {};
+  cv::Mat out;
+  cv::cvtColor(view(img), out, img.channels == 3 ? cv::COLOR_RGB2GRAY : cv::COLOR_RGBA2GRAY);
+  return out;
 }
 
 bool fromMat(cv::Mat m, Image& out) {

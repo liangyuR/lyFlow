@@ -197,9 +197,10 @@ foreach(_want IN LISTS LYFLOW_PACKS)
   endif()
 endforeach()
 # 提供公共设施的包排在前面：std-pointcloud 定义 lyflow_pcl_support 与 lyflow_std_algo，
-# std-ml 解析 LYFLOW_ONNXRUNTIME_ROOT。字母序会把 gap 排到它们前面，那时目标还不存在。
+# std-ml 解析 LYFLOW_ONNXRUNTIME_ROOT，std-image 定义 lyflow_opencv_support。
+# 字母序会把 gap / glue 排到它们前面，那时目标还不存在。
 # 点名构建（LYFLOW_STD_PACKS=0 LYFLOW_PACKS=std-pointcloud;dts）同样要这个顺序。
-set(_priority std-pointcloud std-ml)
+set(_priority std-pointcloud std-ml std-image)
 list(REVERSE _priority)
 foreach(_want IN LISTS _priority)
   foreach(d IN LISTS LYFLOW_STD_PACK_DIRS)

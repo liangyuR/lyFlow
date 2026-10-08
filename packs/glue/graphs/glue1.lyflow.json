@@ -1,0 +1,276 @@
+{
+  "schemaVersion": 1,
+  "id": "01JGLUE00000000000000GLUE1",
+  "name": "涂胶检测 · 直胶（演示数据 Glue1）",
+  "meta": {
+    "app": "lyflow/0.1.0",
+    "note": "海康三目演示图 Glue1（直胶，沿翻边边缘）的参数：喷嘴 (712, 598)，胶朝右上走（扇区 −130°…−10°），检测区 s ∈ [100, 400]。读图节点是 source=inputs（宿主逐帧注入 n_load.image）。拿文件跑：lyflow run <图> --input n_load.image=<帧>，或 lyflow eval <图> --set n_load.source='\"file\"' --samples-glob \"<目录>/Frame*_1.jpg\" --bind n_load.path；packs/glue/tools/ 下的脚本就是这么跑的（数据目录由 LYFLOW_GLUE_DATA 给，真实帧不进仓库）。"
+  },
+  "nodes": [
+    {
+      "id": "n_load",
+      "op": "io.load_image",
+      "opVersion": "1.0.0",
+      "params": {
+        "source": "inputs"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "title": "读图"
+      }
+    },
+    {
+      "id": "n_path",
+      "op": "glue.bead_path",
+      "opVersion": "1.0.0",
+      "params": {
+        "nozzle": [
+          712,
+          598
+        ],
+        "zone": [
+          100,
+          400
+        ],
+        "sector": [
+          -130,
+          -10
+        ]
+      },
+      "ui": {
+        "position": {
+          "x": 260,
+          "y": 0
+        },
+        "title": "定胶路"
+      }
+    },
+    {
+      "id": "n_width",
+      "op": "glue.bead_width",
+      "opVersion": "1.0.0",
+      "params": {
+        "form": "straight"
+      },
+      "ui": {
+        "position": {
+          "x": 520,
+          "y": 0
+        },
+        "title": "量胶宽"
+      }
+    },
+    {
+      "id": "n_breaks",
+      "op": "glue.bead_breaks",
+      "opVersion": "1.0.0",
+      "params": {
+        "minLength": 20
+      },
+      "ui": {
+        "position": {
+          "x": 780,
+          "y": -110
+        },
+        "title": "查断胶"
+      }
+    },
+    {
+      "id": "n_edge",
+      "op": "glue.edge_distance",
+      "opVersion": "1.0.0",
+      "params": {
+        "searchLength": 200
+      },
+      "ui": {
+        "position": {
+          "x": 780,
+          "y": 110
+        },
+        "title": "量边距"
+      }
+    },
+    {
+      "id": "n_judge",
+      "op": "glue.judge",
+      "opVersion": "1.0.0",
+      "params": {
+        "maxBreak": 0,
+        "minDefectLength": 20
+      },
+      "ui": {
+        "position": {
+          "x": 1040,
+          "y": 0
+        },
+        "title": "判定"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0",
+      "from": {
+        "node": "n_load",
+        "port": "image"
+      },
+      "to": {
+        "node": "n_path",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e1",
+      "from": {
+        "node": "n_load",
+        "port": "image"
+      },
+      "to": {
+        "node": "n_width",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "n_path",
+        "port": "path"
+      },
+      "to": {
+        "node": "n_width",
+        "port": "path"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "n_width",
+        "port": "bead"
+      },
+      "to": {
+        "node": "n_breaks",
+        "port": "bead"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "n_load",
+        "port": "image"
+      },
+      "to": {
+        "node": "n_edge",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e5",
+      "from": {
+        "node": "n_width",
+        "port": "bead"
+      },
+      "to": {
+        "node": "n_edge",
+        "port": "bead"
+      }
+    },
+    {
+      "id": "e6",
+      "from": {
+        "node": "n_width",
+        "port": "bead"
+      },
+      "to": {
+        "node": "n_judge",
+        "port": "bead"
+      }
+    },
+    {
+      "id": "e7",
+      "from": {
+        "node": "n_breaks",
+        "port": "breaks"
+      },
+      "to": {
+        "node": "n_judge",
+        "port": "breaks"
+      }
+    },
+    {
+      "id": "e8",
+      "from": {
+        "node": "n_edge",
+        "port": "edge"
+      },
+      "to": {
+        "node": "n_judge",
+        "port": "edge"
+      }
+    }
+  ],
+  "outputs": {
+    "ok": {
+      "node": "n_judge",
+      "port": "ok",
+      "label": "OK（1）/ NG（0）"
+    },
+    "verdict": {
+      "node": "n_judge",
+      "port": "verdict",
+      "label": "结论"
+    },
+    "pathInfo": {
+      "node": "n_path",
+      "port": "path.info",
+      "label": "胶路"
+    },
+    "coverage": {
+      "node": "n_width",
+      "port": "coverage",
+      "label": "有胶站占比"
+    },
+    "widthMean": {
+      "node": "n_width",
+      "port": "widthMean",
+      "label": "胶宽均值"
+    },
+    "widthMin": {
+      "node": "n_width",
+      "port": "widthMin",
+      "label": "胶宽最小"
+    },
+    "widthMax": {
+      "node": "n_width",
+      "port": "widthMax",
+      "label": "胶宽最大"
+    },
+    "breakCount": {
+      "node": "n_breaks",
+      "port": "count",
+      "label": "断胶处数"
+    },
+    "longestBreak": {
+      "node": "n_breaks",
+      "port": "longest",
+      "label": "最长断口"
+    },
+    "breaks": {
+      "node": "n_breaks",
+      "port": "breaks",
+      "label": "断口"
+    },
+    "distanceMean": {
+      "node": "n_edge",
+      "port": "distanceMean",
+      "label": "边距均值"
+    },
+    "overlay": {
+      "node": "n_judge",
+      "port": "overlay",
+      "label": "叠画"
+    }
+  }
+}

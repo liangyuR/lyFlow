@@ -108,6 +108,16 @@ if (Want "schema") {
     python "$PSScriptRoot\validate_schema.py" $snippet.FullName (Join-Path $root "schema\snippet.schema.json")
     if ($LASTEXITCODE -ne 0) { throw "片段 $($snippet.Name) 不符合 schema" }
   }
+
+  Step "glue 图与像素叠画 vs schema"
+  foreach ($graph in Get-ChildItem (Join-Path $root "packs\glue\graphs\*.lyflow.json")) {
+    python "$PSScriptRoot\validate_schema.py" $graph.FullName (Join-Path $root "schema\graph-doc.schema.json")
+    if ($LASTEXITCODE -ne 0) { throw "glue 图 $($graph.Name) 不符合 schema" }
+  }
+  python "$PSScriptRoot\validate_schema.py" (Join-Path $root "schema\examples\overlay2d.example.json") (Join-Path $root "schema\overlay2d.schema.json")
+  if ($LASTEXITCODE -ne 0) { throw "像素叠画样例不符合 schema" }
+  python "$PSScriptRoot\validate_schema.py" (Join-Path $root "schema\examples\overlay2d.invalid.json") (Join-Path $root "schema\overlay2d.schema.json") --expect-fail
+  if ($LASTEXITCODE -ne 0) { throw "像素叠画负例没有被拒绝" }
 }
 
 if (Want "bridge") {

@@ -20,6 +20,8 @@ void registerPackOps(Registry& r) {
   ops::registerTensorToImage(r);
   ops::registerCloudFromDepth(r);
   ops::registerCloudToDepthImage(r);
+  lyflow::std_image::registerBoardCalib(r);
+  lyflow::std_image::registerLoadCalib(r);
 }
 
 }  // namespace lyflow::packs::std_image

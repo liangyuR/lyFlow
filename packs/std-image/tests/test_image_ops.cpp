@@ -112,6 +112,31 @@ TEST_CASE("io.save_image → io.load_image 往返逐像素相同（RGB 顺序不
   std::filesystem::remove_all(dir, ec);
 }
 
+TEST_CASE("io.load_image source=inputs：原样共享、颜色转换保留位深、缺失输入有端口错误") {
+  Call c;
+  const Status missing = c.run("io.load_image", {{"source", Value::text("inputs")}});
+  CHECK(missing.code == "bad_input");
+  CHECK(missing.portName == "image");
+  for (const int type : {CV_8UC3, CV_16UC3, CV_32FC3}) {
+    CAPTURE(type);
+    Image rgb;
+    REQUIRE(cvx::fromMat(cv::Mat(3, 5, type, cv::Scalar(100, 20, 5)), rgb));
+    c.inputs["image"] = Data::image(rgb);
+    REQUIRE(c.run("io.load_image", {{"source", Value::text("inputs")}}).ok);
+    CHECK(c.image().pixels.get() == rgb.pixels.get());
+    REQUIRE(c.run("io.load_image", {{"source", Value::text("inputs")}, {"mode", Value::text("gray")}}).ok);
+    CHECK(c.image().depth == rgb.depth);
+    CHECK(c.image().channels == 1);
+    CHECK(c.image().at(0, 0, 0) == doctest::Approx(0.299 * 100 + 0.587 * 20 + 0.114 * 5).epsilon(0.02));
+    const Data gray = c.outputs["image"];
+    c.inputs["image"] = gray;
+    REQUIRE(c.run("io.load_image", {{"source", Value::text("inputs")}, {"mode", Value::text("color")}}).ok);
+    CHECK(c.image().depth == rgb.depth);
+    CHECK(c.image().channels == 3);
+    for (int ch = 0; ch < 3; ++ch) CHECK(c.image().at(0, 0, ch) == gray.asImage()->at(0, 0, 0));
+  }
+}
+
 TEST_CASE("image.to_gray / resize / crop：RGB 加权、灰度原样共享像素；尺寸；像素框裁剪，米制的框被拒；全宽裁剪不借上游的像素") {
   Call c;
   Image rgb = Image::allocate(4, 2, 3, PixelDepth::U8);

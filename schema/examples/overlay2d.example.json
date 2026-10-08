@@ -1,0 +1,16 @@
+{
+  "kind": "Record",
+  "type": "lyflow.overlay2d",
+  "data": {
+    "frame": "image",
+    "items": [
+      { "kind": "circle", "role": "nozzle", "center": [712, 598], "radius": 6, "label": "喷嘴" },
+      { "kind": "polyline", "role": "path", "points": [[712, 498], [760, 420], [820, 350], [880, 290]] },
+      { "kind": "polyline", "role": "sector", "points": [[712, 598], [812, 498], [862, 598]], "closed": true },
+      { "kind": "points", "role": "coarse", "points": [[760.5, 421.0], [819.5, 351.25]], "label": "粗找的胶点" },
+      { "kind": "segments", "role": "edge.left", "points": [[740, 410], [780, 430], [800, 340], [840, 360]] },
+      { "kind": "box", "role": "defect", "min": [790, 330], "max": [850, 380], "label": "断胶 32 px" },
+      { "kind": "text", "role": "verdict", "text": "NG：断胶 1 处", "at": [20, 30] }
+    ]
+  }
+}

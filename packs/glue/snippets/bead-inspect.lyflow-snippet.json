@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "glue.bead_inspect",
+  "label": "涂胶检测",
+  "category": "涂胶",
+  "doc": "读图 → 定胶路 → 量胶宽 → 查断胶 → 量边距 → 判定，6 个节点。插进来之后给读图节点一个文件（或让宿主注入 image），填写喷嘴像素坐标，运行。判定的限值默认只判断胶与无胶，胶宽、边距的上下限按工艺填。",
+  "nodes": [
+    { "id": "load", "op": "io.load_image",
+      "ui": { "position": { "x": 0, "y": 0 }, "title": "读图" } },
+    { "id": "path", "op": "glue.bead_path",
+      "ui": { "position": { "x": 260, "y": 0 }, "title": "定胶路" } },
+    { "id": "width", "op": "glue.bead_width",
+      "ui": { "position": { "x": 520, "y": 0 }, "title": "量胶宽" } },
+    { "id": "breaks", "op": "glue.bead_breaks",
+      "ui": { "position": { "x": 780, "y": -110 }, "title": "查断胶" } },
+    { "id": "edge", "op": "glue.edge_distance",
+      "ui": { "position": { "x": 780, "y": 110 }, "title": "量边距" } },
+    { "id": "judge", "op": "glue.judge",
+      "ui": { "position": { "x": 1040, "y": 0 }, "title": "判定" } }
+  ],
+  "edges": [
+    { "from": { "node": "load", "port": "image" }, "to": { "node": "path", "port": "image" } },
+    { "from": { "node": "load", "port": "image" }, "to": { "node": "width", "port": "image" } },
+    { "from": { "node": "path", "port": "path" }, "to": { "node": "width", "port": "path" } },
+    { "from": { "node": "width", "port": "bead" }, "to": { "node": "breaks", "port": "bead" } },
+    { "from": { "node": "load", "port": "image" }, "to": { "node": "edge", "port": "image" } },
+    { "from": { "node": "width", "port": "bead" }, "to": { "node": "edge", "port": "bead" } },
+    { "from": { "node": "width", "port": "bead" }, "to": { "node": "judge", "port": "bead" } },
+    { "from": { "node": "breaks", "port": "breaks" }, "to": { "node": "judge", "port": "breaks" } },
+    { "from": { "node": "edge", "port": "edge" }, "to": { "node": "judge", "port": "edge" } }
+  ],
+  "ports": {
+    "inputs": [],
+    "outputs": [
+      { "node": "judge", "port": "ok", "hint": "1 = OK、0 = NG" },
+      { "node": "judge", "port": "verdict", "hint": "结论与缺陷列表" },
+      { "node": "width", "port": "widthMean", "hint": "胶宽均值" },
+      { "node": "edge", "port": "distanceMean", "hint": "边距均值" }
+    ]
+  }
+}
