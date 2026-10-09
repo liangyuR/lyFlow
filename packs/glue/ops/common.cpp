@@ -26,15 +26,17 @@ void registerBundles(Registry& r) {
       kPathKind,
       "胶路",
       "glue.bead_path 定下的胶路：一条覆盖整个检测区的光滑折线（跨得过断口），与它是怎么找到的。"
-      "没找到胶时 info.ok = false，折线是沿选中方向的一条直线，下游照常跑出「全段无胶」。",
+      "没找到胶时 info.ok = false，折线是沿选中方向的一条直线，下游照常跑出「全段无胶」。"
+      "glue.taught_path 出同形的示教胶路：info.lineSource = taught、ok = true，搜索才有的字段是 null。",
       "",
       {BundleField{"line", "Record",
                    "glue.Polyline：points（图像像素）、s（从喷嘴沿胶路的弧长，px）、tangents（单位切向，"
                    "指向远离喷嘴的一侧），相邻两点 2 px。"},
        BundleField{"info", "Record",
                    "glue.PathInfo：ok、message、reason、heading（度，图像坐标）、headingSource"
-                   "（param | search）、coverage、sharpness、residual、zone、nozzle、polarity、widthMax、"
-                   "candidates（试过的方向）。"}}});
+                   "（param | search | taught）、coverage、sharpness、residual、zone、nozzle、polarity、widthMax、"
+                   "lineSource（fit | fallback | taught）、candidates（试过的方向）；示教胶路另有 tolerance、sharpMin、"
+                   "taughtCount、taughtLength。"}}});
   r.addBundle(BundleDesc{
       kBeadKind,
       "胶",
@@ -47,7 +49,8 @@ void registerBundles(Registry& r) {
                    "偏移，px）、left / right（两边的像素点）、width（按 unit）、widthPx、contrast。"},
        BundleField{"info", "Record",
                    "glue.BeadInfo：form、stationStep、unit（px | mm）、pathOk、message、zone、coverage、"
-                   "wRef、polarity、widthMax、calib（接了标定时的那一份 image.PlaneCalib，否则 null）。"}}});
+                   "wRef、polarity、widthMax、lineSource、calib（接了标定时的那一份 image.PlaneCalib，否则 null）；"
+                   "示教胶路另有 tolerance、offset、trackSupport、sharpness、reason。"}}});
 }
 
 // ------------------------------------------------------------------ 图像

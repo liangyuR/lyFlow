@@ -8,6 +8,7 @@ void registerPackOps(Registry& r) {
   registerBundles(r);
   // 顺序即面板里同分类下的排列顺序：一张检测图从左到右
   registerBeadPath(r);
+  registerTaughtPath(r);  // 示教胶路：与 bead_path 二选一，出同形的 glue.Path（glue-plan §6）
   registerBeadWidth(r);
   registerBeadBreaks(r);
   registerEdgeDistance(r);

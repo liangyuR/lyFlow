@@ -25,7 +25,7 @@ core 本身只有四个算子 —— `gen.synthetic`、`util.reroute`、`flow.fa
 | `std-pointcloud` | 0.1.0 | ON | 点云 / 2D 量测 / 编辑算子 | PCL |
 | `std-ml` | 0.1.0 | ON | `ml.onnx_run` | onnxruntime |
 | `std-image` | 0.1.0 | ON | 图像域：读写、灰度 / 缩放 / 裁剪 / 平滑 / 位深、二值化 / 形态学、找圆、区域统计、图像 ↔ 张量、深度图 ↔ 点云（[image-plan.md](image-plan.md)） | OpenCV 4（core / imgproc / imgcodecs / calib3d） |
-| `glue` | 0.1.0 | **OFF** | 胶路、胶宽、断胶、边距、判定、人造断胶、飞拍定位与逐点卡尺（[README](../packs/glue/README.md)） | std-image 的 `lyflow_opencv_support` |
+| `glue` | 0.1.0 | **OFF** | 胶路（自由搜索 / 示教）、胶宽、断胶、边距、判定、人造断胶、飞拍定位与逐点卡尺（[README](../packs/glue/README.md)） | std-image 的 `lyflow_opencv_support` |
 | `gap` | 0.2.0 | **OFF** | `gap.*` | PCL、yaml-cpp、onnxruntime |
 | `dts` | 0.1.0 | **OFF** | `dts.*` | 无（零第三方，不链 PCL） |
 
