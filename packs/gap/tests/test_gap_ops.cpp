@@ -2,6 +2,7 @@
 // 这里测算子自己定下的语义（截取方向、ROI 变换、固定半径、符号……），拟合本身是复用的库函数，不重测。
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -1366,6 +1367,24 @@ TEST_CASE("gap.fit_gap_circles 的参数与连线检查在 validate 里") {
   // sigma 是 0 时先验不生效，不查
   CHECK(call.validate("gap.fit_gap_circles", {{"leftRadiusPrior", Value::number(3.0)}}, plain)
             .empty());
+  // 配了高度带：always 档绕过先验要警告，guard 档先按带先验的拟合走，不警告
+  std::set<std::string> withRef = plain;
+  withRef.insert("refLine");
+  const auto priorWith = [&](const char* mode) {
+    return call.validate("gap.fit_gap_circles",
+                         {{"leftRadiusPrior", Value::number(1.0)},
+                          {"leftRadiusPriorSigma", Value::number(0.1)},
+                          {"leftCenterTol", Value::number(0.3)},
+                          {"leftCenterMode", Value::text(mode)}},
+                         withRef);
+  };
+  const auto warned = [](const std::vector<Issue>& issues) {
+    return std::any_of(issues.begin(), issues.end(), [](const Issue& i) {
+      return i.severity == Severity::Warning && i.status.paramPath == "leftRadiusPriorSigma";
+    });
+  };
+  CHECK(warned(priorWith("always")));
+  CHECK_FALSE(warned(priorWith("guard")));
   // 默认参数干净
   CHECK(call.validate("gap.fit_gap_circles", {}, plain).empty());
 }

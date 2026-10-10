@@ -333,8 +333,9 @@ bool fitCircle2D(const Cloud2D& cloud, Eigen::VectorXf* circle, pcl::Indices* in
 
   // 细化越界（或发散）。SACSegmentation 到这里会拿越界的圆去收内点、收到 0 个而失败；
   // RANSAC 那个圆本来是合格的。把半径钉在越过的界上，只重定圆心，再收一次。
+  // 发散先判：圆心算出非有限值、半径却还在界内时，不能落到下面按半径分界的分支里被当成 ClampedMin。
   double bound;
-  if (!std::isfinite(r)) {
+  if (!refined.allFinite()) {
     bound = coeff[2];
     out.radius = Circle2DRadiusOutcome::Unrefined;
   } else if (r > options.maxRadius) {

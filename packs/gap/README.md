@@ -120,7 +120,8 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
   的帧与改之前逐位相同（`std_pc::fitCircle2D` 照 `SACSegmentation` 逐步搭，测试拿它当参照）。
   另加逐侧的**半径软先验** `leftRadiusPrior` / `leftRadiusPriorSigma`（右侧同）：细化多一项
   `((r − prior) / sigma)²`，点残差按 `distThresh / 2` 归一 —— 弧长时听点的，弧短时往先验收，
-  结果连续、不贴界。默认 sigma 0 = 不加；只作用于不带圆心 / 方位带的那条路；`radiusMode: prior`。
+  结果连续、不贴界。默认 sigma 0 = 不加；作用于不带圆心 / 方位带的一侧，以及 guard 档先拟的那一次（在带内就留下），
+  always 档与 guard 出带后走的约束拟合不吃先验；`radiusMode: prior`。
 - **`gap.flush`**：`signed` 默认 true，输出带符号垂距：参考点在基准线**上方**（测量帧里 y 更小）
   为正，基准线竖直时在右侧（x 更大）为正。符号只看参考点在哪一侧，与拟合给出的方向正反无关
   （本包出端口的 `Line2D.dir` 一律朝 +x、竖直时朝 +y，`gap.flush` 自己也再统一一次）。

@@ -680,8 +680,8 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
             params.flag("leftRadiusFixed") ? params.number("leftRadiusValue") / kScale : 0.0};
   cfg[1] = {params.number("rightRadiusMin") / kScale, params.number("rightRadiusMax") / kScale,
             params.flag("rightRadiusFixed") ? params.number("rightRadiusValue") / kScale : 0.0};
-  // 半径软先验：sigma <= 0 不加。只作用于不带圆心 / 方位带的那条路（circleFit2D），
-  // 约束那条路自己跑 RANSAC，不吃先验。
+  // 半径软先验：sigma <= 0 不加。作用于 circleFit2D 那条路：不带圆心 / 方位带的一侧，
+  // 以及 guard 档先拟的那一次；always 档与 guard 出带后重来的约束那条路自己跑 RANSAC，不吃先验。
   cfg[0].prior = {params.number("leftRadiusPrior") / kScale,
                   params.number("leftRadiusPriorSigma") / kScale};
   cfg[1].prior = {params.number("rightRadiusPrior") / kScale,
@@ -1005,9 +1005,13 @@ std::vector<Issue> validateFitGapCircles(const ParamView& params,
         issues.push_back(Issue::warning("bad_param", "半径已经钉死，先验不起作用",
                                         s + "RadiusPriorSigma"));
       }
-      if (params.number(s + "CenterTol") > 0 || params.number(s + "ArcBearingTolDeg") > 0) {
+      // guard 档先按 circleFit2D（带先验）拟，在带内就留下这个结果，先验是生效的；
+      // 只有 always 档一律走带约束的拟合，先验才真的被绕过。
+      const bool constrained =
+          params.number(s + "CenterTol") > 0 || params.number(s + "ArcBearingTolDeg") > 0;
+      if (constrained && params.choice(s + "CenterMode") != "guard") {
         issues.push_back(Issue::warning(
-            "bad_param", "配了圆心高度带或方位角带的一侧走带约束的拟合，不吃半径先验",
+            "bad_param", "配了圆心高度带或方位角带（always 档）的一侧走带约束的拟合，不吃半径先验",
             s + "RadiusPriorSigma"));
       }
     }
