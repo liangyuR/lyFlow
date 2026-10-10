@@ -104,9 +104,12 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   const double maxBreak = params.number("maxBreak");
   const double minLen = params.number("minDefectLength");
 
+  // 一站都没量到胶与「胶路没找到」同样处理：只报一条 missing（T4）。示教胶路沿线没有胶就走这里 ——
+  // 胶路本身是示教的、info.ok 永远是 true，只看断胶的话 maxBreak < 0 时整段无胶也会判 OK
+  const bool found = pathOk && std::any_of(st.begin(), st.end(), [](const Station& x) { return x.present; });
   std::vector<Defect> defects;
   Json warnings = Json::array();
-  if (!pathOk) {
+  if (!found) {
     Defect d;
     d.type = "missing";
     d.sStart = z0;
@@ -200,7 +203,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   }
   const bool ok = defects.empty();
   std::string message = "OK";
-  if (!pathOk) {
+  if (!found) {
     message = kNoBeadMessage;
   } else if (!ok) {
     message = "NG：";
@@ -247,7 +250,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
 
   // 叠画：胶路、两条胶边、零件边点、全部缺陷、结论
   Overlay2D ov;
-  ov.polyline(pathOk ? "path" : "missing", pxList(bead.line.points));
+  ov.polyline(found ? "path" : "missing", pxList(bead.line.points));
   for (const auto& [a, b] : presentRuns(st)) {
     std::vector<Px> left, right;
     for (std::size_t i = a; i <= b; ++i) {
@@ -300,7 +303,7 @@ void registerJudge(Registry& r) {
   op.doc =
       "把断胶、窄胶、宽胶、边距过近 / 过远汇成一个 OK / NG。除断胶外都是「连续 ≥ minDefectLength 的同类站」"
       "才算一处缺陷（D7）；断胶由 bead_breaks 按它的 minLength 连好，比 maxBreak 长的判 NG。"
-      "胶路没找到时只报一条「检测区内没找到胶」。限值与 bead 同单位（没接标定 px，接了 mm）；"
+      "胶路没找到、或者一站都没量到胶（示教胶路沿线没有胶就是这样）时只报一条「检测区内没找到胶」，与 maxBreak 无关。限值与 bead 同单位（没接标定 px，接了 mm）；"
       "宽度、边距的限值 0 表示不判那一侧。\n"
       "ok 输出：value 1 = OK、0 = NG，verdict 字段 ok / ng，message 是结论那一句。";
   op.inputs = {

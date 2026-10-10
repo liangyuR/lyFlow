@@ -49,10 +49,19 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   Metric metric;
   if (Status s = metricFromInput(inputs, "calib", &metric); !s.ok) return s;
 
-  const StationSpec spec = specOf(params);
+  StationSpec spec = specOf(params);
   const bool pathOk = pathInfo.value("ok", false);
   const bool bright = pathInfo.value("polarity", std::string("dark")) == "bright";
   const int widthMax = pathInfo.value("widthMax", 90);
+  // 示教胶路（glue.taught_path，T3）：胶不一定正好在线上，期望中心逐站估；容差与 D15 的门槛由它带过来
+  const std::string lineSource = pathInfo.value("lineSource", std::string());
+  const bool taught = lineSource == "taught";
+  if (taught) {
+    const double tol = numOf(pathInfo.value("tolerance", Json()));
+    spec.lateralTol = std::isfinite(tol) && tol >= 0 ? tol : 20.0;
+    const double sharpMin = numOf(pathInfo.value("sharpMin", Json()));
+    spec.sharpMin = std::isfinite(sharpMin) ? sharpMin : 0.4;
+  }
   double zoneStart = line.s.front();
   double zoneEnd = line.s.back();
   if (const auto z = pathInfo.find("zone"); z != pathInfo.end() && z->is_array() && z->size() == 2) {
@@ -87,12 +96,14 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   }
 
   const std::string form = spec.swirl ? "swirl" : "straight";
+  // 示教胶路沿线一站都没量到胶，就是「检测区内没找到胶」（T4：与 bead_path 没找到胶同一句，judge 同样只报 missing）
+  const bool taughtNoBead = taught && pathOk && widths.empty();
   Json info;
   info["form"] = form;
   info["stationStep"] = spec.step;
   info["unit"] = metric.unit();
   info["pathOk"] = pathOk;
-  info["message"] = pathOk ? (widths.empty() ? "没有一站量到胶" : "") : kNoBeadMessage;
+  info["message"] = !pathOk || taughtNoBead ? kNoBeadMessage : (widths.empty() ? "没有一站量到胶" : "");
   info["zone"] = Json::array({zoneStart, zoneEnd});
   info["stations"] = st.size();
   info["present"] = widths.size();
@@ -100,14 +111,23 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   info["wRef"] = numOrNull(res.wRef, 3);
   info["peakRef"] = numOrNull(res.peakRef, 1);
   info["envelopeHalf"] = spec.swirl ? numOrNull(res.envelopeHalf, 3) : Json();
-  info["searchHalf"] = spec.searchHalf;
+  // 示教胶路的卡尺至少够得着「离线 tolerance 处最宽的胶」（与 measureStations 里同一条式子）
+  info["searchHalf"] =
+      taught ? std::max(spec.searchHalf, spec.lateralTol + 0.5 * spec.runs.widthMax) : spec.searchHalf;
   info["polarity"] = bright ? "bright" : "dark";
   info["widthMax"] = widthMax;
+  info["lineSource"] = lineSource.empty() ? Json() : Json(lineSource);
+  // 下面五个只有示教胶路才有（T3–T5），拟合的胶路是 null
+  info["tolerance"] = taught ? Json(spec.lateralTol) : Json();
+  info["offset"] = numOrNull(res.trackOffset, 2);
+  info["trackSupport"] = numOrNull(res.trackSupport, 4);
+  info["sharpness"] = numOrNull(res.trackSharpness, 3);
+  info["reason"] = taught && !res.trackReason.empty() ? Json(res.trackReason) : Json();
   info["calib"] = metric.calib ? std_image::planeCalibJson(*metric.calib) : Json();
   Json stations = stationsJson(st, spec.step, form, metric);
   outputs.set("bead", beadBundle(polylineRecord(line.s, line.points, line.tangents),
                                  std::move(stations), std::move(info)));
-  const std::string why = pathOk ? "没有一站量到胶" : kNoBeadMessage;
+  const std::string why = pathOk && !taught ? "没有一站量到胶" : kNoBeadMessage;
   outputs.set("widthMean", measurement(mean, metric.unit(), why));
   outputs.set("widthMin", measurement(lo, metric.unit(), why));
   outputs.set("widthMax", measurement(hi, metric.unit(), why));
@@ -115,7 +135,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   cov.value = coverage;
   cov.ok = true;
   cov.unit = "";
-  cov.message = pathOk ? "" : kNoBeadMessage;
+  cov.message = pathOk && !taughtNoBead ? "" : kNoBeadMessage;
   outputs.set("coverage", Data::measurement(std::move(cov)));
 
   // 叠画：胶路、有胶的站（两边连线）、无胶的站、两条胶边
@@ -183,10 +203,16 @@ void registerBeadWidth(Registry& r) {
       "有无胶逐站判（D16）：参考宽 / 参考峰值 = 全检测区候选暗段宽度 / 峰值的中位数；直胶要宽 ≥ presentRatio × 参考宽、"
       "中心偏离胶路 ≤ max(6, centerRatio × 参考宽)、峰值 ≥ contrastRatio × 参考峰值；螺旋胶（form = swirl）本站自己要有"
       "一个够宽、够浓、落在包络内的暗段，两边取 ±window/2 内所有暗段的并集（外包络，D5）。"
-      "胶路没找到（path.info.ok = false）时全部判无胶。";
+      "胶路没找到（path.info.ok = false）时全部判无胶。\n"
+      "胶路是示教的（glue.taught_path，info.lineSource = taught）时，胶不一定正好压在线上：期望的胶中心按"
+      "「偏移轨迹」逐站估 —— 离示教线不超过 tolerance 的暗段里投票定一个常数偏移（票数不低于最多那条一半的里取离示教线"
+      "最近的），再沿 s 取中位数细化（断口里按两头插值），上面 D16 的「中心偏离」量的是离这条轨迹多远；参考宽 / 参考峰值"
+      "只取落在轨迹上的站。卡尺半长至少 tolerance + widthRange 上限 / 2。轨迹上的站不到 3 站或 10%、或者轨迹上暗段边缘"
+      "陡度的 P25 低于 sharpMin（D15：压痕、阴影），就是沿示教线没有胶：全部判无胶，message 是「检测区内没找到胶」，"
+      "原因在 info.reason。";
   op.inputs = {
       Port{"image", "Image", "Image", "与 bead_path 同一帧。", true},
-      Port{"path", "Bundle<glue.Path>", "Path", "glue.bead_path 的胶路。", true},
+      Port{"path", "Bundle<glue.Path>", "Path", "glue.bead_path 找到的胶路，或 glue.taught_path 的示教胶路。", true},
       withContract(Port{"calib", "Record", "Calib",
                         "可选：image.PlaneCalib（图像 px → 工作平面 mm 的单应）。接了宽度出 mm。", false},
                    {{"recordType", std_image::kPlaneCalibType}}),
@@ -205,7 +231,7 @@ void registerBeadWidth(Registry& r) {
                           "认作胶的暗段宽度范围。上限别超过 bead_path 的 widthMax（结构元比胶窄，胶就没有响应）。");
   Param step = floatParam("stationStep", "Station Step", 4.0, "px", "相邻两站沿胶路的间隔。", true);
   step.min = 1.0;
-  Param searchHalf = floatParam("searchHalf", "Search Half", 60.0, "px", "卡尺沿法向往两侧各伸多长。", true);
+  Param searchHalf = floatParam("searchHalf", "Search Half", 60.0, "px", "卡尺沿法向往两侧各伸多长。示教胶路时至少取 tolerance + widthRange 上限 / 2。", true);
   searchHalf.min = 2.0;
   Param mergeGap = floatParam("mergeGap", "Merge Gap", 8.0, "px",
                               "两段暗段之间的缝不超过它就合并（粗胶中间的高光条）。", true);

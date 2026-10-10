@@ -4,6 +4,9 @@
 //
 // 两遍做（D1）：findBeadPath 在检测区里粗找胶点、稳健拟合一条跨得过断口的光滑胶路；
 // measureStations 再沿这条胶路布站、逐站卡尺精测。断胶 = 胶路上连续若干站无胶。
+// 示教胶路（glue-plan §6）不找：resampleTaught 把示教折线变成同形的胶路，measureStations 照样量，
+// 只是期望的胶中心从「就在胶路上」换成逐站估出来的偏移轨迹（T3）。
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -123,6 +126,18 @@ struct PolylineView {
   void at(double sq, P2* point, P2* tangent) const;
 };
 
+// ------------------------------------------------------------------ 示教胶路（T1 / T2）
+
+/// 折线的总长（相邻两点距离之和）。
+double polylineLength(const std::vector<P2>& pts);
+
+/// 示教折线（图像 px，从喷嘴一侧往外排）按弧长重采样成与 findBeadPath 同形的胶路：s 从第一个示教点量起，
+/// 只取 [zoneStart, zoneEnd] 那一段（两端各一个点），中间每 2 px 一个点；切向是相邻两点的中心差分。
+/// 相邻重合的示教点跳过。zoneEnd ≤ 0 表示到折线末端。点不到两个、有非有限值、总长为 0、
+/// zone 不在 [0, 总长] 里时返回 false，输出不动。
+bool resampleTaught(const std::vector<P2>& pts, double zoneStart, double zoneEnd,
+                    std::vector<double>* s, std::vector<P2>* points, std::vector<P2>* tangents);
+
 // ------------------------------------------------------------------ 量胶宽（D4 / D5 / D16）
 
 struct StationSpec {
@@ -133,6 +148,11 @@ struct StationSpec {
   double presentRatio = 0.5;
   double centerRatio = 0.3;
   double contrastRatio = 0.3;  ///< 一站的峰值至少是参考峰值（候选暗段峰值的中位数）的这么多倍
+  /// 示教胶路（T3）：≥ 0 时胶中心离示教线最远这么多 px，期望的胶中心按「偏移轨迹」逐站估（不是 0）。
+  /// < 0 = 胶路是 findBeadPath 从图里拟合出来的，胶就在胶路上，期望中心恒为 0（原来的做法，一位不差）。
+  double lateralTol = -1;
+  /// 示教胶路的 D15（T5）：轨迹上各站暗段边缘陡度的第 25 百分位低于它就算没有胶（像压痕、阴影）。
+  double sharpMin = 0.4;
   RunSpec runs;
 };
 
@@ -151,12 +171,20 @@ struct Station {
 
 struct StationResult {
   std::vector<Station> stations;
-  double wRef = 0;          ///< D16 的参考宽：全检测区候选暗段宽度的中位数
+  double wRef = 0;          ///< D16 的参考宽：全检测区候选暗段宽度的中位数（示教胶路：只取轨迹上的站）
   double peakRef = 0;       ///< 参考峰值：同一批候选暗段峰值的中位数
   double envelopeHalf = 0;  ///< 螺旋胶的包络半宽（直胶是 0）
+  /// 每站期望的胶中心（沿法向相对胶路的偏移，px）。从图里拟合的胶路恒为 0；示教胶路是偏移轨迹（T3）。
+  std::vector<double> expect;
+  // 下面几个只在示教胶路（spec.lateralTol ≥ 0）时有意义，否则是 NaN / 空
+  double trackSupport = std::numeric_limits<double>::quiet_NaN();    ///< 落在偏移轨迹上的站占比
+  double trackSharpness = std::numeric_limits<double>::quiet_NaN();  ///< 轨迹上暗段边缘陡度的 P25（T5）
+  double trackOffset = std::numeric_limits<double>::quiet_NaN();     ///< 轨迹上各站期望中心的中位数（px）
+  std::string trackReason;  ///< 沿示教线没认出胶时的原因（空 = 认出了）
 };
 
 /// pathOk = false（没找到胶）时一站都不量，全部判无胶 —— 「没有胶」本身就是结果（§2.3 失败语义）。
+/// 示教胶路（spec.lateralTol ≥ 0）沿示教线没认出胶（T4 / T5）时同样全部判无胶，原因写在 trackReason。
 StationResult measureStations(const cv::Mat& gray, const PolylineView& path, bool pathOk,
                               double zoneStart, double zoneEnd, bool bright, int responseWidthMax,
                               const StationSpec& spec);
