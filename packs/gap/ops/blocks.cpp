@@ -1022,7 +1022,7 @@ void registerBlockOps(Registry& r) {
   {
     OperatorDesc op;
     op.id = "gap.seam_circles";
-    op.version = "1.0.0";
+    op.version = "1.1.0";
     op.label = "拟合缝两侧圆";
     op.category = "间隙/积木";
     op.keywords = {"circle", "gap", "seam", "圆", "间隙", "积木"};

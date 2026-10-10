@@ -42,13 +42,26 @@ inline bool lineFit2D(const PointCloud &cloud, Eigen::VectorXf *line, pcl::Indic
                                        lineOptions(distThresh));
 }
 
+/// 半径软先验（米）。sigma <= 0 = 不加。
+struct RadiusPrior {
+  double radius = 0.0;
+  double sigma = 0.0;
+};
+
 inline bool circleFit2D(const PointCloud &cloud, Eigen::VectorXf *circle, pcl::Indices *inliers,
                         double distThresh = 0.00003, double minRadius = 0.0005,
-                        double maxRadius = 0.01, double fixedRadius = 0.0) {
-  const auto options = circleOptions(distThresh, minRadius, maxRadius);
+                        double maxRadius = 0.01, double fixedRadius = 0.0,
+                        RadiusPrior prior = {},
+                        lyflow::std_pc::Circle2DFitReport *report = nullptr) {
+  auto options = circleOptions(distThresh, minRadius, maxRadius);
+  // 半径钉死时先验没有意义（钉死那一步会把半径覆盖掉），只在自由半径时带上。
+  if (fixedRadius <= 0) {
+    options.radiusPrior = prior.radius;
+    options.radiusPriorSigma = prior.sigma;
+  }
   return fixedRadius > 0
              ? lyflow::std_pc::fitCircleFixedRadius2D(cloud, fixedRadius, circle, inliers, options)
-             : lyflow::std_pc::fitCircle2D(cloud, circle, inliers, options);
+             : lyflow::std_pc::fitCircle2D(cloud, circle, inliers, options, report);
 }
 
 /// 四边严格开区间（原 filterCloudByRoi 的语义）。roi.col(0) 是 min 角。

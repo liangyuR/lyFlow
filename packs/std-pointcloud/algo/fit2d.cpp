@@ -6,11 +6,14 @@
 #include <pcl/common/io.h>
 #include <pcl/filters/extract_indices.h>
 #include <pcl/sample_consensus/ransac.h>
+#include <pcl/sample_consensus/sac_model_circle.h>
 #include <pcl/sample_consensus/sac_model_line.h>
 #include <pcl/segmentation/sac_segmentation.h>
 
+#include <Eigen/Dense>
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <vector>
 
 namespace lyflow::std_pc {
@@ -50,6 +53,82 @@ void refineFixedRadiusCenter(const Cloud2D& cloud, const pcl::Indices& indices, 
       break;
     }
   }
+}
+
+/// 收内点，算术与 SampleConsensusModelCircle2D::selectWithinDistance 一致（float 平方比较），
+/// 只是不先查半径界 —— 钉在界上的半径转成 float 之后可能比 double 的界多出一个 ULP，
+/// PCL 那条会因此判模型非法、一个点都不收。
+void selectCircleInliers(const Cloud2D& cloud, const Eigen::VectorXf& c, double threshold,
+                         pcl::Indices* inliers) {
+  inliers->clear();
+  const float sqrInner = (c[2] <= threshold ? 0.0F : (c[2] - threshold) * (c[2] - threshold));
+  const float sqrOuter = (c[2] + threshold) * (c[2] + threshold);
+  for (std::size_t i = 0; i < cloud.size(); ++i) {
+    const float sqrDist = (cloud[i].x - c[0]) * (cloud[i].x - c[0]) +
+                          (cloud[i].y - c[1]) * (cloud[i].y - c[1]);
+    if (sqrDist <= sqrOuter && sqrDist >= sqrInner) inliers->push_back(static_cast<int>(i));
+  }
+}
+
+/// 带半径先验的几何细化（Levenberg–Marquardt）。最小化
+///   Σ ((|pᵢ − c| − r) / noise)² + ((r − prior) / sigma)²
+/// 初值是 RANSAC 的圆，点是它的内点 —— 与 PCL 的 optimizeModelCoefficients 同一个起点，
+/// 只是多一项先验。短弧上半径与圆心沿法向几乎可以互相抵消，点残差对 r 很平，先验项
+/// 就把 r 收向 prior；弧长时点残差对 r 很陡，先验项几乎不起作用。
+Eigen::VectorXf refineCircleWithPrior(const Cloud2D& cloud, const pcl::Indices& indices,
+                                      const Eigen::VectorXf& start, double noise, double prior,
+                                      double sigma) {
+  const auto cost = [&](const Eigen::Vector3d& p) {
+    double s = 0;
+    for (const int i : indices) {
+      const auto& q = cloud[static_cast<std::size_t>(i)];
+      const double e = (std::hypot(q.x - p[0], q.y - p[1]) - p[2]) / noise;
+      s += e * e;
+    }
+    const double e = (p[2] - prior) / sigma;
+    return s + e * e;
+  };
+  Eigen::Vector3d p(start[0], start[1], start[2]);
+  double current = cost(p);
+  double lambda = 1e-3;
+  for (int it = 0; it < 200; ++it) {
+    Eigen::Matrix3d h = Eigen::Matrix3d::Zero();
+    Eigen::Vector3d g = Eigen::Vector3d::Zero();
+    for (const int i : indices) {
+      const auto& q = cloud[static_cast<std::size_t>(i)];
+      const double dx = q.x - p[0], dy = q.y - p[1];
+      const double d = std::hypot(dx, dy);
+      if (!(d > 0)) continue;
+      const Eigen::Vector3d j(-dx / d / noise, -dy / d / noise, -1.0 / noise);
+      const double e = (d - p[2]) / noise;
+      h += j * j.transpose();
+      g += j * e;
+    }
+    const Eigen::Vector3d jp(0, 0, 1.0 / sigma);
+    h += jp * jp.transpose();
+    g += jp * ((p[2] - prior) / sigma);
+    bool improved = false;
+    Eigen::Vector3d step = Eigen::Vector3d::Zero();
+    for (int tries = 0; tries < 20 && !improved; ++tries) {
+      Eigen::Matrix3d damped = h;
+      damped.diagonal() *= 1.0 + lambda;
+      step = damped.ldlt().solve(-g);
+      const Eigen::Vector3d next = p + step;
+      const double c = cost(next);
+      if (std::isfinite(c) && c < current) {
+        p = next;
+        current = c;
+        lambda = std::max(lambda / 10.0, 1e-12);
+        improved = true;
+      } else {
+        lambda *= 10.0;
+      }
+    }
+    if (!improved || step.norm() < 1e-12) break;
+  }
+  Eigen::VectorXf out(3);
+  out << static_cast<float>(p[0]), static_cast<float>(p[1]), static_cast<float>(p[2]);
+  return out;
 }
 
 }  // namespace
@@ -203,24 +282,78 @@ bool fitAxisLine2D(const Cloud2D& cloud, Eigen::VectorXf* line, pcl::Indices* in
 }
 
 bool fitCircle2D(const Cloud2D& cloud, Eigen::VectorXf* circle, pcl::Indices* inliers,
-                 const Circle2DFitOptions& options) {
-  pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
-  pcl::PointIndices::Ptr pointInliers(new pcl::PointIndices());
-  pcl::SACSegmentation<Point2DT> seg(false);
-  seg.setOptimizeCoefficients(options.optimizeCoefficients);
-  seg.setModelType(pcl::SACMODEL_CIRCLE2D);
-  seg.setMethodType(pcl::SAC_RANSAC);
-  seg.setMaxIterations(options.maxIterations);
-  seg.setDistanceThreshold(options.distThresh);
-  seg.setRadiusLimits(options.minRadius, options.maxRadius);
-  seg.setInputCloud(cloud.makeShared());
-  seg.segment(*pointInliers, *coefficients);
-  *inliers = pointInliers->indices;
+                 const Circle2DFitOptions& options, Circle2DFitReport* report) {
+  // 下面一步一步照 pcl::SACSegmentation::segment（PCL 1.15）搭：同样的模型、同样的 RANSAC
+  // 参数（固定种子、概率 0.99、maxIterations）、同样的 LM 细化与重收内点，所以细化后
+  // 半径在界内的输入与原来那一行 seg.segment 逐位相同。拆开是为了接住它扔掉的那种情况。
+  inliers->clear();
+  if (cloud.size() < 3) return false;
+  const double threshold = options.distThresh;
+  auto model = std::make_shared<pcl::SampleConsensusModelCircle2D<Point2DT>>(cloud.makeShared(),
+                                                                             false);
+  model->setRadiusLimits(options.minRadius, options.maxRadius);
+  pcl::RandomSampleConsensus<Point2DT> sac(model, threshold);
+  sac.setMaxIterations(options.maxIterations);
+  if (!sac.computeModel(0)) return false;
+  pcl::Indices sampleInliers;
+  sac.getInliers(sampleInliers);
+  Eigen::VectorXf coeff;
+  sac.getModelCoefficients(coeff);
+  if (coeff.size() < 3) return false;
 
-  if (coefficients->values.size() < 3) return false;
-  if (pointInliers->indices.size() < 3) return false;
+  Circle2DFitReport local;
+  Circle2DFitReport& out = report != nullptr ? *report : local;
+  out = Circle2DFitReport{};
+
+  if (!options.optimizeCoefficients) {
+    *inliers = sampleInliers;
+    *circle = coeff;
+    out.unclampedRadius = coeff[2];
+    return inliers->size() >= 3;
+  }
+
+  const bool usePrior = options.radiusPriorSigma > 0;
+  Eigen::VectorXf refined(3);
+  if (usePrior) {
+    refined = refineCircleWithPrior(cloud, sampleInliers, coeff, threshold / 2.0,
+                                    options.radiusPrior, options.radiusPriorSigma);
+    out.radius = Circle2DRadiusOutcome::Prior;
+  } else {
+    model->optimizeModelCoefficients(sampleInliers, coeff, refined);
+  }
+  out.unclampedRadius = refined[2];
+
+  // isModelValid 的比较：float 系数提升成 double 再与 double 的界比。
+  const double r = refined[2];
+  if (refined.allFinite() && r >= options.minRadius && r <= options.maxRadius) {
+    model->selectWithinDistance(refined, threshold, *inliers);
+    *circle = refined;
+    return inliers->size() >= 3;
+  }
+
+  // 细化越界（或发散）。SACSegmentation 到这里会拿越界的圆去收内点、收到 0 个而失败；
+  // RANSAC 那个圆本来是合格的。把半径钉在越过的界上，只重定圆心，再收一次。
+  double bound;
+  if (!std::isfinite(r)) {
+    bound = coeff[2];
+    out.radius = Circle2DRadiusOutcome::Unrefined;
+  } else if (r > options.maxRadius) {
+    bound = options.maxRadius;
+    out.radius = Circle2DRadiusOutcome::ClampedMax;
+  } else {
+    bound = options.minRadius;
+    out.radius = Circle2DRadiusOutcome::ClampedMin;
+  }
+  double xc = coeff[0];
+  double yc = coeff[1];
+  if (out.radius != Circle2DRadiusOutcome::Unrefined) {
+    refineFixedRadiusCenter(cloud, sampleInliers, bound, &xc, &yc);
+  }
   *circle = Eigen::VectorXf(3);
-  for (int i = 0; i < 3; i++) (*circle)[i] = coefficients->values[static_cast<std::size_t>(i)];
+  (*circle)[0] = static_cast<float>(xc);
+  (*circle)[1] = static_cast<float>(yc);
+  (*circle)[2] = static_cast<float>(bound);
+  selectCircleInliers(cloud, *circle, threshold, inliers);
   return inliers->size() >= 3;
 }
 

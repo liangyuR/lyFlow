@@ -6,6 +6,7 @@
 #include <pcl/filters/radius_outlier_removal.h>
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/search/kdtree.h>
+#include <pcl/segmentation/sac_segmentation.h>
 
 #include <algorithm>
 #include <chrono>
@@ -16,6 +17,7 @@
 #include <numeric>
 #include <random>
 
+#include "algo/fit2d.h"
 #include "exec/result_store.h"
 #include "helpers.h"
 #include "lyflow/operator.h"
@@ -642,4 +644,125 @@ TEST_CASE("法线与两个离群点滤波：分段并行的结果与 PCL 原实�
   };
   CHECK(facingAway(true) == 0);
   CHECK(facingAway(false) > 0);
+}
+
+namespace {
+
+/// 圆心 (0, r) 往下看的一段弧：从正上方（y 最小）往 +x 转 spanDeg 度，加高斯噪声。米。
+std_pc::Cloud2D noisyArc(double r, double fromDeg, double spanDeg, int n, double noise,
+                         unsigned seed) {
+  std::mt19937 rng(seed);
+  std::normal_distribution<double> jitter(0.0, noise);
+  std_pc::Cloud2D cloud;
+  for (int i = 0; i < n; ++i) {
+    const double a = (fromDeg + spanDeg * i / (n - 1)) * 3.14159265358979323846 / 180.0;
+    std_pc::Point2DT p;
+    p.x = static_cast<float>(r * std::sin(a) + jitter(rng));
+    p.y = static_cast<float>(r - r * std::cos(a) + jitter(rng));
+    p.z = 0.0F;
+    cloud.push_back(p);
+  }
+  return cloud;
+}
+
+/// 改之前的那一行 seg.segment，当参照。
+bool referenceSegment(const std_pc::Cloud2D& cloud, const std_pc::Circle2DFitOptions& o,
+                      Eigen::VectorXf* circle, pcl::Indices* inliers) {
+  pcl::ModelCoefficients coefficients;
+  pcl::PointIndices pointInliers;
+  pcl::SACSegmentation<std_pc::Point2DT> seg(false);
+  seg.setOptimizeCoefficients(true);
+  seg.setModelType(pcl::SACMODEL_CIRCLE2D);
+  seg.setMethodType(pcl::SAC_RANSAC);
+  seg.setMaxIterations(o.maxIterations);
+  seg.setDistanceThreshold(o.distThresh);
+  seg.setRadiusLimits(o.minRadius, o.maxRadius);
+  seg.setInputCloud(cloud.makeShared());
+  seg.segment(pointInliers, coefficients);
+  *inliers = pointInliers.indices;
+  if (coefficients.values.size() < 3 || inliers->size() < 3) return false;
+  *circle = Eigen::VectorXf(3);
+  for (int i = 0; i < 3; ++i) (*circle)[i] = coefficients.values[static_cast<std::size_t>(i)];
+  return true;
+}
+
+std_pc::Circle2DFitOptions circleOpts(double minMm, double maxMm) {
+  std_pc::Circle2DFitOptions o;
+  o.distThresh = 0.00003F;
+  o.minRadius = minMm / 1000.0;
+  o.maxRadius = maxMm / 1000.0;
+  return o;
+}
+
+}  // namespace
+
+TEST_CASE("fitCircle2D：细化后半径在界内时与 SACSegmentation 逐位相同") {
+  // 弧长 / 短弧 / 噪声大小各一份。走的是同一套 PCL 对象与种子，圆与内点都要一模一样。
+  struct Row { double r, from, span; int n; double noise; unsigned seed; };
+  for (const Row row : {Row{0.0015, -60, 300, 120, 0.000005, 1}, Row{0.004, 10, 80, 60, 0.000015, 2},
+                        Row{0.0009, -30, 160, 40, 0.00001, 3}}) {
+    CAPTURE(row.r);
+    CAPTURE(row.span);
+    const auto cloud = noisyArc(row.r, row.from, row.span, row.n, row.noise, row.seed);
+    const auto o = circleOpts(0.5, 6.0);
+    Eigen::VectorXf want, got;
+    pcl::Indices wantIn, gotIn;
+    std_pc::Circle2DFitReport report;
+    REQUIRE(referenceSegment(cloud, o, &want, &wantIn));
+    REQUIRE(std_pc::fitCircle2D(cloud, &got, &gotIn, o, &report));
+    CHECK(report.radius == std_pc::Circle2DRadiusOutcome::Free);
+    for (int i = 0; i < 3; ++i) CHECK(got[i] == want[i]);
+    CHECK(gotIn == wantIn);
+  }
+}
+
+TEST_CASE("fitCircle2D：细化把半径推出界时钉在界上重定圆心，不再整个失败") {
+  // 真半径 5 mm、只看到 60° 的弧，上界给 4 mm：RANSAC 能找到界内的圆，LM 细化把它推回
+  // 5 mm 附近 —— SACSegmentation 拿越界的圆去收内点，收到 0 个而失败（现场天幕 R3/R5/R6
+  // 那四帧就是这样丢的）。
+  const auto cloud = noisyArc(0.005, 20, 60, 70, 0.000012, 7);
+  const auto o = circleOpts(3.0, 4.0);
+  Eigen::VectorXf ref, got;
+  pcl::Indices refIn, gotIn;
+  REQUIRE_FALSE(referenceSegment(cloud, o, &ref, &refIn));
+
+  std_pc::Circle2DFitReport report;
+  REQUIRE(std_pc::fitCircle2D(cloud, &got, &gotIn, o, &report));
+  CHECK(report.radius == std_pc::Circle2DRadiusOutcome::ClampedMax);
+  CHECK(report.unclampedRadius > o.maxRadius);
+  CHECK(got[2] == static_cast<float>(o.maxRadius));
+  CHECK(gotIn.size() >= 10);
+
+  SUBCASE("下界同理") {
+    const auto small = noisyArc(0.0012, 20, 60, 70, 0.000012, 8);
+    const auto lo = circleOpts(1.6, 3.0);
+    REQUIRE_FALSE(referenceSegment(small, lo, &ref, &refIn));
+    REQUIRE(std_pc::fitCircle2D(small, &got, &gotIn, lo, &report));
+    CHECK(report.radius == std_pc::Circle2DRadiusOutcome::ClampedMin);
+    CHECK(got[2] == static_cast<float>(lo.minRadius));
+  }
+}
+
+TEST_CASE("fitCircle2D 的半径先验：短弧往先验收，长弧几乎不动") {
+  auto o = circleOpts(1.0, 8.0);
+  Eigen::VectorXf free, withPrior;
+  pcl::Indices in;
+  std_pc::Circle2DFitReport report;
+
+  // 50° 的短弧、真半径 4 mm：自由拟合的半径被噪声带偏，先验（4 mm ± 0.3）把它拉回来。
+  const auto shortArc = noisyArc(0.004, 30, 50, 50, 0.000015, 11);
+  REQUIRE(std_pc::fitCircle2D(shortArc, &free, &in, o));
+  o.radiusPrior = 0.004;
+  o.radiusPriorSigma = 0.0003;
+  REQUIRE(std_pc::fitCircle2D(shortArc, &withPrior, &in, o, &report));
+  CHECK(report.radius == std_pc::Circle2DRadiusOutcome::Prior);
+  CAPTURE(free[2]);
+  CAPTURE(withPrior[2]);
+  CHECK(std::fabs(withPrior[2] - 0.004) < std::fabs(free[2] - 0.004));
+
+  // 300° 的长弧：先验故意给错 0.5 mm，读数几乎不受影响。
+  const auto longArc = noisyArc(0.004, -150, 300, 150, 0.000015, 12);
+  o.radiusPrior = 0.0045;
+  REQUIRE(std_pc::fitCircle2D(longArc, &withPrior, &in, o));
+  CHECK(withPrior[2] == doctest::Approx(0.004).epsilon(0.005));
 }
