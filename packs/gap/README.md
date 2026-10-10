@@ -113,6 +113,15 @@ yaml-cpp 来自 `C:\vcpkg`。缺哪个 configure 就直接报哪个，并打印�
   `segmentPoints: 0` 表示有意不截（方向基准线就是这样），不发。
 - **`gap.fit_gap_circles`**：`leftRadiusFixed` / `rightRadiusFixed` 在所有路径上都生效，
   包括圆心高度带约束的拟合与相机分开的回退。
+- **`gap.fit_gap_circles` 1.3.0**：细化（LM）把半径推出上下限时不再整侧失败。PCL 的
+  `SACSegmentation` 会拿越界的圆去重收内点、收到 0 个 —— RANSAC 找到的界内圆就这样被扔掉
+  （天幕 R3/R5/R6 的「gap_left 圆拟合失败」就是这个）。现在半径钉在越过的界上、只重定圆心，
+  再收一次内点；quality 里 `radiusMode: clamped`，另记 `radiusBeforeClampMm`。细化后本来就在界内
+  的帧与改之前逐位相同（`std_pc::fitCircle2D` 照 `SACSegmentation` 逐步搭，测试拿它当参照）。
+  另加逐侧的**半径软先验** `leftRadiusPrior` / `leftRadiusPriorSigma`（右侧同）：细化多一项
+  `((r − prior) / sigma)²`，点残差按 `distThresh / 2` 归一 —— 弧长时听点的，弧短时往先验收，
+  结果连续、不贴界。默认 sigma 0 = 不加；作用于不带圆心 / 方位带的一侧，以及 guard 档先拟的那一次（在带内就留下），
+  always 档与 guard 出带后走的约束拟合不吃先验；`radiusMode: prior`。
 - **`gap.flush`**：`signed` 默认 true，输出带符号垂距：参考点在基准线**上方**（测量帧里 y 更小）
   为正，基准线竖直时在右侧（x 更大）为正。符号只看参考点在哪一侧，与拟合给出的方向正反无关
   （本包出端口的 `Line2D.dir` 一律朝 +x、竖直时朝 +y，`gap.flush` 自己也再统一一次）。

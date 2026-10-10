@@ -2,6 +2,7 @@
 // 这里测算子自己定下的语义（截取方向、ROI 变换、固定半径、符号……），拟合本身是复用的库函数，不重测。
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -1289,6 +1290,49 @@ TEST_CASE("gap.fit_gap_circles 的圆心高度带把圆心按到参考线上方�
   CHECK(leftBand->out("left").asCircle2D()->center[1] == doctest::Approx(-0.0005).epsilon(0.05));
 }
 
+TEST_CASE("gap.fit_gap_circles 的左圆：细化越界钉在界上、先验，quality 都说得出来") {
+  // 左侧一段带锯齿噪声的 60° 短弧，真半径 1.5 mm。
+  const auto build = [] {
+    PointCloud merged;
+    for (int i = 0; i < 70; ++i) {
+      const double t = (250.0 + 60.0 * i / 69.0) * 3.14159265358979323846 / 180.0;
+      const double r = 0.0015 + ((i * 7) % 5 - 2) * 0.000006;
+      merged.push(static_cast<float>(-0.0035 + r * std::cos(t)),
+                  static_cast<float>(-0.0005 + r * std::sin(t)), 0.0f);
+    }
+    pushArc(merged, 0.0035, -0.0005, 0.0009, 200, 340, 60);
+    auto call = std::make_unique<Call>();
+    call->inputs["merged"] = Data::cloud(merged);
+    call->inputs["primary"] = Data::cloud(merged);
+    call->inputs["secondary"] = Data::cloud(merged);
+    call->inputs["boxLeft"] = Data::box2d(box(-0.006f, -0.004f, -0.001f, 0.002f));
+    call->inputs["boxRight"] = Data::box2d(box(0.001f, -0.004f, 0.006f, 0.002f));
+    return call;
+  };
+  const auto left = [](Call& c) { return c.out("quality").asRecord()->data["left"]; };
+
+  SUBCASE("上界卡在真半径下面：钉在 1.3，不失败，记下钉之前的半径") {
+    auto call = build();
+    const Status s = call->run("gap.fit_gap_circles", {{"leftRadiusMax", Value::number(1.3)},
+                                                       {"cameraFallback", Value::boolean(false)}});
+    CAPTURE(s.message);
+    REQUIRE(s.ok);
+    CHECK(call->out("left").asCircle2D()->radius == doctest::Approx(0.0013));
+    CHECK(left(*call)["radiusMode"] == "clamped");
+    CHECK(left(*call)["radiusBeforeClampMm"].get<double>() > 1.3);
+  }
+  SUBCASE("先验：radiusMode 记成 prior，没有钉之前的半径") {
+    auto call = build();
+    REQUIRE(call->run("gap.fit_gap_circles", {{"leftRadiusMax", Value::number(4.0)},
+                                              {"leftRadiusPrior", Value::number(1.5)},
+                                              {"leftRadiusPriorSigma", Value::number(0.2)}})
+                .ok);
+    CHECK(left(*call)["radiusMode"] == "prior");
+    CHECK_FALSE(left(*call).contains("radiusBeforeClampMm"));
+    CHECK(call->out("left").asCircle2D()->radius == doctest::Approx(0.0015).epsilon(0.05));
+  }
+}
+
 TEST_CASE("gap.fit_gap_circles 的参数与连线检查在 validate 里") {
   const std::set<std::string> plain = {"merged", "primary", "secondary", "boxLeft", "boxRight"};
   Call call;
@@ -1314,6 +1358,33 @@ TEST_CASE("gap.fit_gap_circles 的参数与连线检查在 validate 里") {
                                 {"rightRadiusValue", Value::number(5.0)}},
                                plain),
                  "bad_param", "rightRadiusValue"));
+  // 半径先验不在上下限之间
+  CHECK(hasError(call.validate("gap.fit_gap_circles",
+                               {{"leftRadiusPrior", Value::number(3.0)},
+                                {"leftRadiusPriorSigma", Value::number(0.2)}},
+                               plain),
+                 "bad_param", "leftRadiusPrior"));
+  // sigma 是 0 时先验不生效，不查
+  CHECK(call.validate("gap.fit_gap_circles", {{"leftRadiusPrior", Value::number(3.0)}}, plain)
+            .empty());
+  // 配了高度带：always 档绕过先验要警告，guard 档先按带先验的拟合走，不警告
+  std::set<std::string> withRef = plain;
+  withRef.insert("refLine");
+  const auto priorWith = [&](const char* mode) {
+    return call.validate("gap.fit_gap_circles",
+                         {{"leftRadiusPrior", Value::number(1.0)},
+                          {"leftRadiusPriorSigma", Value::number(0.1)},
+                          {"leftCenterTol", Value::number(0.3)},
+                          {"leftCenterMode", Value::text(mode)}},
+                         withRef);
+  };
+  const auto warned = [](const std::vector<Issue>& issues) {
+    return std::any_of(issues.begin(), issues.end(), [](const Issue& i) {
+      return i.severity == Severity::Warning && i.status.paramPath == "leftRadiusPriorSigma";
+    });
+  };
+  CHECK(warned(priorWith("always")));
+  CHECK_FALSE(warned(priorWith("guard")));
   // 默认参数干净
   CHECK(call.validate("gap.fit_gap_circles", {}, plain).empty());
 }

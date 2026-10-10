@@ -449,6 +449,7 @@ struct SideConfig {
   double rMin = 0;
   double rMax = 0;
   double rFixed = 0;
+  gap_std::RadiusPrior prior;
 };
 
 struct SideResult {
@@ -461,7 +462,11 @@ struct SideResult {
   std::array<Eigen::VectorXf, 2> candidates;
   std::array<pcl::Indices, 2> candidateIndices;
   std::array<GapCloud, 2> candidateClouds;
+  std::array<lyflow::std_pc::Circle2DFitReport, 2> candidateReports;
   std::string model = "circle";
+  /// 走 circleFit2D 那条路时它报回来的半径去向（先验 / 钉在界上）；约束那条路不填。
+  lyflow::std_pc::Circle2DFitReport report;
+  bool reported = false;
 };
 
 /// 内点覆盖的圆弧角度（度）。和 circleQualityJson 里报的是同一个量 —— 那边只是顺手
@@ -675,6 +680,12 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
             params.flag("leftRadiusFixed") ? params.number("leftRadiusValue") / kScale : 0.0};
   cfg[1] = {params.number("rightRadiusMin") / kScale, params.number("rightRadiusMax") / kScale,
             params.flag("rightRadiusFixed") ? params.number("rightRadiusValue") / kScale : 0.0};
+  // 半径软先验：sigma <= 0 不加。作用于 circleFit2D 那条路：不带圆心 / 方位带的一侧，
+  // 以及 guard 档先拟的那一次；always 档与 guard 出带后重来的约束那条路自己跑 RANSAC，不吃先验。
+  cfg[0].prior = {params.number("leftRadiusPrior") / kScale,
+                  params.number("leftRadiusPriorSigma") / kScale};
+  cfg[1].prior = {params.number("rightRadiusPrior") / kScale,
+                  params.number("rightRadiusPriorSigma") / kScale};
 
   // 逐侧选相机。默认 Both = 用合并云。两台锁在不同界面上时（夹胶玻璃），
   // 合并云里是相距一两毫米的两层点，拟出来的圆没有意义 —— 那种点位把这一侧钉到一台上。
@@ -716,13 +727,15 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
     const bool guardOnly = constrained && centerMode[i] == "guard";
     if (!constrained || guardOnly) {
       side.fitted = gap_std::circleFit2D(side.cloud, &side.circle, &side.indices, distThresh,
-                                     cfg[i].rMin, cfg[i].rMax, cfg[i].rFixed);
+                                     cfg[i].rMin, cfg[i].rMax, cfg[i].rFixed, cfg[i].prior,
+                                     &side.report);
       if (!side.fitted && retryDistanceMm > 0) {
         side.indices.clear();
         side.fitted = gap_std::circleFit2D(side.cloud, &side.circle, &side.indices,
                                        mmToM(retryDistanceMm), cfg[i].rMin, cfg[i].rMax,
-                                       cfg[i].rFixed);
+                                       cfg[i].rFixed, cfg[i].prior, &side.report);
       }
+      side.reported = true;
     }
     bool needBand = constrained && !guardOnly;
     if (guardOnly) {
@@ -739,6 +752,7 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
     }
     if (needBand) {
       side.indices.clear();
+      side.reported = false;
       side.fitted = circleFitConstrained(side.cloud, sideRefLine[i], centerAbove[i], centerTol[i],
                                          bearing[i], bearingTol[i], distThresh, cfg[i].rMin,
                                          cfg[i].rMax, cfg[i].rFixed, &side.circle, &side.indices);
@@ -801,11 +815,14 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
     const double separatedFixed = cfg[i].rFixed;
     Eigen::VectorXf primaryCircle, secondaryCircle;
     pcl::Indices primaryIndices, secondaryIndices;
-    const bool primaryOk = gap_std::circleFit2D(primaryRoi, &primaryCircle, &primaryIndices,
-                                            distThresh, cfg[i].rMin, cfg[i].rMax, separatedFixed);
+    lyflow::std_pc::Circle2DFitReport primaryReport, secondaryReport;
+    const bool primaryOk =
+        gap_std::circleFit2D(primaryRoi, &primaryCircle, &primaryIndices, distThresh,
+                             cfg[i].rMin, cfg[i].rMax, separatedFixed, cfg[i].prior, &primaryReport);
     const bool secondaryOk =
         gap_std::circleFit2D(secondaryRoi, &secondaryCircle, &secondaryIndices, distThresh,
-                         cfg[i].rMin, cfg[i].rMax, separatedFixed);
+                             cfg[i].rMin, cfg[i].rMax, separatedFixed, cfg[i].prior,
+                             &secondaryReport);
     const bool primaryEligible = primaryOk && primaryIndices.size() >= kMinimumCameraInliers;
     const bool secondaryEligible = secondaryOk && secondaryIndices.size() >= kMinimumCameraInliers;
     const bool consistent =
@@ -820,12 +837,15 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
       side.fitted = true;
       side.model = takePrimary ? "camera-separated-circle-primary"
                                : "camera-separated-circle-secondary";
+      side.report = takePrimary ? primaryReport : secondaryReport;
+      side.reported = true;
     };
     if (selectClosestNominal && primaryEligible && secondaryEligible) {
       side.deferred = true;
       side.candidates = {primaryCircle, secondaryCircle};
       side.candidateIndices = {primaryIndices, secondaryIndices};
       side.candidateClouds = {primaryRoi, secondaryRoi};
+      side.candidateReports = {primaryReport, secondaryReport};
       take(true);
     } else if (selectClosestNominal && primaryEligible) {
       take(true);
@@ -895,6 +915,7 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
       sides[i].circle = sides[i].candidates[picked[i]];
       sides[i].indices = sides[i].candidateIndices[picked[i]];
       sides[i].cloud = sides[i].candidateClouds[picked[i]];
+      sides[i].report = sides[i].candidateReports[picked[i]];
       sides[i].model = std::string("camera-separated-circle-") +
                        (picked[i] == 0 ? "primary" : "secondary") + "-closest-gap-nominal";
     }
@@ -924,13 +945,23 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
   static const char* kSides[2] = {"left", "right"};
   for (int i = 0; i < 2; ++i) {
     const bool isFixed = cfg[i].rFixed > 0;
-    const std::string radiusMode =
+    std::string radiusMode =
         sides[i].circle.size() >= 3
             ? utils::classifyRadiusMode(sides[i].circle[2], cfg[i].rMin, cfg[i].rMax, isFixed)
             : std::string();
+    using lyflow::std_pc::Circle2DRadiusOutcome;
+    const Circle2DRadiusOutcome outcome = sides[i].report.radius;
+    if (sides[i].reported && radiusMode == "free" && outcome == Circle2DRadiusOutcome::Prior) {
+      radiusMode = "prior";
+    }
     quality.data[kSides[i]] =
         circleQualityJson(sides[i].cloud, sides[i].circle, sides[i].indices, sides[i].model,
                           radiusMode);
+    // 细化把半径推出界、被钉回界上的那一下：记下钉之前的半径，复核时看得出它想去哪儿。
+    if (sides[i].reported && (outcome == Circle2DRadiusOutcome::ClampedMin ||
+                              outcome == Circle2DRadiusOutcome::ClampedMax)) {
+      quality.data[kSides[i]]["radiusBeforeClampMm"] = sides[i].report.unclampedRadius * kScale;
+    }
   }
   outputs.set("quality", Data::record(std::move(quality)));
   return Status::Ok();
@@ -962,6 +993,26 @@ std::vector<Issue> validateFitGapCircles(const ParamView& params,
       const double r = params.number(s + "RadiusValue");
       if (!(r > rMin && r < rMax)) {
         issues.push_back(Issue::error("bad_param", "固定半径必须落在上下限之间", s + "RadiusValue"));
+      }
+    }
+    if (params.number(s + "RadiusPriorSigma") > 0) {
+      const double prior = params.number(s + "RadiusPrior");
+      if (!(prior >= rMin && prior <= rMax)) {
+        issues.push_back(
+            Issue::error("bad_param", "半径先验必须落在上下限之间", s + "RadiusPrior"));
+      }
+      if (params.flag(s + "RadiusFixed")) {
+        issues.push_back(Issue::warning("bad_param", "半径已经钉死，先验不起作用",
+                                        s + "RadiusPriorSigma"));
+      }
+      // guard 档先按 circleFit2D（带先验）拟，在带内就留下这个结果，先验是生效的；
+      // 只有 always 档一律走带约束的拟合，先验才真的被绕过。
+      const bool constrained =
+          params.number(s + "CenterTol") > 0 || params.number(s + "ArcBearingTolDeg") > 0;
+      if (constrained && params.choice(s + "CenterMode") != "guard") {
+        issues.push_back(Issue::warning(
+            "bad_param", "配了圆心高度带或方位角带（always 档）的一侧走带约束的拟合，不吃半径先验",
+            s + "RadiusPriorSigma"));
       }
     }
   }
@@ -1231,7 +1282,7 @@ void registerFitLine(Registry& r) {
 void registerFitGapCircles(Registry& r) {
   OperatorDesc op;
   op.id = "gap.fit_gap_circles";
-  op.version = "1.2.0";
+  op.version = "1.3.0";
   op.label = "拟合间隙圆";
   op.category = "间隙/拟合";
   op.keywords = {"circle", "ransac", "圆", "拟合", "间隙"};
@@ -1288,10 +1339,22 @@ void registerFitGapCircles(Registry& r) {
       numParam("leftRadiusValue", "Left Radius", 1.0, "mm", "Left Radius", "固定的左圆半径。"),
       numParam("leftRadiusMin", "Left Min", 0.5, "mm", "Left Radius", "左圆半径下限。"),
       numParam("leftRadiusMax", "Left Max", 2.0, "mm", "Left Radius", "左圆半径上限。"),
+      numParam("leftRadiusPrior", "Left Prior", 0.0, "mm", "Left Radius",
+               "左圆半径的软先验（典型半径），配合 leftRadiusPriorSigma 使用。量一批弧够长的正常帧，"
+               "取半径中位数。"),
+      numParam("leftRadiusPriorSigma", "Left Prior Sigma", 0.0, "mm", "Left Radius",
+               "先验的宽度，<= 0 表示不加（默认）。细化的目标函数多一项 ((r − prior) / sigma)²，"
+               "点残差按 distThresh / 2 归一：弧长时听点的，弧短时半径往先验收，结果连续，"
+               "不再贴在上下限上。上下限仍然是硬兜底 —— 加先验时放宽到先验 ± 4 sigma 左右。"
+               "太窄等于把半径钉死（钉错会把误差逼到圆心上）。"),
       boolParam("rightRadiusFixed", "Right Fixed", false, "Right Radius", "固定右圆半径。"),
       numParam("rightRadiusValue", "Right Radius", 1.0, "mm", "Right Radius", "固定的右圆半径。"),
       numParam("rightRadiusMin", "Right Min", 0.3, "mm", "Right Radius", "右圆半径下限。"),
       numParam("rightRadiusMax", "Right Max", 1.8, "mm", "Right Radius", "右圆半径上限。"),
+      numParam("rightRadiusPrior", "Right Prior", 0.0, "mm", "Right Radius",
+               "右圆半径的软先验，含义同 leftRadiusPrior。"),
+      numParam("rightRadiusPriorSigma", "Right Prior Sigma", 0.0, "mm", "Right Radius",
+               "右圆先验的宽度，<= 0 表示不加。含义同 leftRadiusPriorSigma。"),
       boolParam("cameraFallback", "Camera Fallback", true, "Camera Fallback",
                 "合并云拟合失败时按相机分开再试。只在合并云失败后触发；被遮挡的那台若先给出"
                 "合格圆，读到的是它自己的阴影。"),
