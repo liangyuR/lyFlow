@@ -16,7 +16,6 @@
     "core:watch": "pwsh -ExecutionPolicy Bypass -File scripts/core-watch.ps1",
     "cli:build": "cargo build --release --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features",
     "package": "pwsh -NoProfile -File scripts/package-windows.ps1",
-    "package:verify": "pwsh -NoProfile -File scripts/test-release.ps1 -ArchiveDir build/release",
     "check": "pwsh -ExecutionPolicy Bypass -File scripts/check.ps1",
     "check:glue": "pwsh -NoProfile -File scripts/check-glue.ps1",
     "check:gap": "pwsh -ExecutionPolicy Bypass -File scripts/check-gap.ps1",

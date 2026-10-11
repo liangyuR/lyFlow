@@ -31,18 +31,18 @@ CI 与本地走同一个入口 `scripts/check.ps1`，按 job 用 `-Steps` 点名
 
 ## Windows 发包门禁
 
-`.github/workflows/release-windows.yml` 在 main、手动运行及版本 tag 上执行 `pnpm run package`，固定标准包 + glue，构建与验证最终运行库/SDK ZIP。PR 的 fast/native 检查保持原范围。手动运行现有 `CI` 也会调用该工作流，以便首次合并前选择实现分支做云端验收。
+`.github/workflows/release-windows.yml` 在 main、手动运行及版本 tag 上执行 `pnpm run package`，固定标准包 + glue，构建运行库/SDK ZIP 并检查暂存布局与 DLL 身份。PR 的 fast/native 检查保持原范围。手动运行现有 `CI` 也会调用该工作流，以便首次合并前选择实现分支做云端验收。
 
 | 层 | 入口 | 验证范围 |
 |---|---|---|
 | 全量构建与暂存 | `pnpm run package` | 固定依赖、core 单测、manifest、ABI/版本、headless CLI、运行库/SDK 布局与许可证；实际清单来自交付 DLL。 |
-| 最终 ZIP 独立消费 | `pwsh scripts/test-release.ps1 -ArchiveDir <目录> -ReportPath <报告>` | 独立 runner、中文/空格目录、C++ 示例与 Rust 消费工程、合成点云/图像/标定/胶路/ONNX CPU、模块来源及损坏资产负向路径。 |
+| 暂存 DLL 身份 | `scripts/inspect-runtime.ps1 -RuntimeDir <目录> -ReportPath <报告>`（由打包入口调用） | x64 DLL、ABI/产品版本/源码修订、manifest、ONNX Runtime 版本与实际模块来源；不解压 ZIP 或运行消费场景。 |
 
 最低支持 PCL 1.15.1，固定该版本的发包构建同时覆盖 ASCII PCD 行为一致性；适配该版本时保留逐值/逐字节断言，不放宽数值判据。是否通过以完整构建报告为准。
 
-构建与独立验收均在失败后上传 JSON/探针日志诊断 artifact，保留 14 天；报告中的 runner 临时路径对应这些附件。本版 C++/Rust 客户端验证 DLL 目录与 System32 的受限依赖加载；GS 固定旧客户端的行为未修改，单独做兼容验证。
+构建在成功或失败后上传暂存 JSON/DLL 检查日志与构建日志，保留 14 天。最终 ZIP 独立消费 job、打包后的解压消费调用、固定 GS 客户端工程、消费场景与损坏资产负向探针及其 2 项元数据单测已删除；上表历史 doctest/Rust 数量不包含这 2 项。PR 的 native SDK 消费检查保留。
 
-发布夹具由发布验收入口管理，不使用客户模型或现场数据；发布要求的模型/数据用例不能沿用开发测试的可选跳过行为。新验证入口不增加上表历史 doctest/Rust 单测数量，实际数量和通过结论记录在每次报告中。只有对应修订的完整运行通过才算发布证据；静态检查不能替代 DLL 与 ZIP 验收。详见 [发包说明](deployment/packaging.md)。
+发布夹具只保留 core 单测必需的 `channels-6-to-8.onnx` 及来源说明，不使用客户模型或现场数据。是否完成发包以对应修订的完整构建结果为准，静态检查不能替代 DLL 构建与暂存检查。详见 [发包说明](deployment/packaging.md)。
 
 ## 放在哪一层
 

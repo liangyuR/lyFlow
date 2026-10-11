@@ -5,7 +5,7 @@
 #   native 纯平台 + dts 包（LYFLOW_STD_PACKS=0 LYFLOW_PACKS=dts）：core 编译与 doctest、manifest 自检、bridge 的 cargo test、
 #          headless CLI、嵌入 SDK 的安装布局与消费方工程，外加只开 host 的 `--no-default-features --features host`
 #          （外部 Rust 宿主嵌编辑器用的那一份，别的步骤都没编过它；dts-check 眼下只用 core_ffi、不开任何 feature，CLI 那步已编到）
-# 标准包 + glue 的最终 ZIP 验收见 release-windows.yml；gap、桌面与安装包 e2e 仍在本地跑，见 docs/testing.md「CI」。
+# 标准包 + glue 的完整发包构建见 release-windows.yml；gap、桌面与安装包 e2e 仍在本地跑，见 docs/testing.md「CI」。
 
 name: CI
 

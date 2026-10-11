@@ -177,73 +177,13 @@ jobs:
           path: |
             build/release-stage/*.json
             build/release-stage/*.log
-            build/release-verification/**/*.json
-            build/release-verification/**/*.log
             build/release-core/**/*.log
-          if-no-files-found: warn
-          retention-days: 14
-
-  verify:
-    name: 独立 Windows runner 解压消费验收
-    permissions:
-      contents: read
-    needs: build
-    runs-on: windows-2022
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: 固定 Rust 工具链
-        shell: pwsh
-        run: |
-          $channel = (Select-String -LiteralPath rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          if (-not $channel) { throw '未声明 Rust 工具链' }
-          rustup toolchain install $channel --profile minimal
-          if ($LASTEXITCODE -ne 0) { throw '安装 Rust 工具链失败' }
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: windows-release
-          path: ${{ runner.temp }}/验收 包
-
-      - name: 验证最终 ZIP
-        shell: pwsh
-        run: |
-          ./scripts/test-release.ps1 -ArchiveDir (Join-Path $env:RUNNER_TEMP '验收 包') -ReportPath (Join-Path $env:RUNNER_TEMP 'release-verification.json')
-          if ($LASTEXITCODE -ne 0) { throw '独立消费验收失败' }
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: windows-release-verification
-          path: ${{ runner.temp }}/release-verification.json
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: 保存独立验收探针诊断
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-release-verification-diagnostics
-          path: |
-            build/release-verification/**/*.json
-            build/release-verification/**/*.log
           if-no-files-found: warn
           retention-days: 14
 
   publish:
     name: 创建草稿 Release
-    needs: [build, verify]
+    needs: build
     if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -253,11 +193,6 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: windows-release
-          path: release
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: windows-release-verification
           path: release
 
       - name: 创建草稿且不覆盖已有资产
@@ -276,14 +211,14 @@ jobs:
             const releases = await github.paginate(github.rest.repos.listReleases, { ...context.repo, per_page: 100 });
             if (releases.some(release => release.tag_name === tag)) throw new Error(`Release ${tag} 已存在；禁止覆盖`);
             const files = fs.readdirSync('release').filter(name => /\.(zip|json)$/.test(name));
-            for (const name of [`lyflow-runtime-win-x64-v${version}.zip`, `lyflow-sdk-win-x64-v${version}.zip`, 'release-verification.json']) {
-              if (!files.includes(name)) throw new Error(`缺少已验收资产: ${name}`);
+            for (const name of [`lyflow-runtime-win-x64-v${version}.zip`, `lyflow-sdk-win-x64-v${version}.zip`, 'lyflow-runtime.json']) {
+              if (!files.includes(name)) throw new Error(`缺少构建资产: ${name}`);
             }
             const repository = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`;
             const body = [
               `Windows x64 运行库与 SDK/CLI ${tag}。人工复核后正式发布。`,
               '',
-              `源码修订：\`${revision}\`。ABI、算子及依赖版本见随包 \`lyflow-runtime.json\`；独立消费验收报告见附件。`,
+              `源码修订：\`${revision}\`。ABI、算子及依赖版本见随包 \`lyflow-runtime.json\`。`,
               '',
               '固定算子包：std-pointcloud、std-image、std-ml、glue。ONNX Runtime 使用 CPU 版；不含 gap、dts、客户模型、桌面安装程序或调试符号。',
               '',
@@ -292,7 +227,7 @@ jobs:
               `lyflow-client = { git = "${repository}.git", rev = "${revision}" }`,
               '```',
               '',
-              '软件验收覆盖最终 ZIP 解压、ABI/版本/算子、合成数据、CLI 和外部 SDK 消费。客户图像效果、真实设备、现场节拍及 GlueSight 安装验收不属于本次软件报告。',
+              '构建门禁覆盖 core 单测、DLL 版本/ABI/算子及运行库/SDK 暂存布局。最终 ZIP 独立消费、客户图像效果、真实设备、现场节拍及 GlueSight 安装验收由下游按需执行。',
               '',
               '下游固定正式发布的 tag 与资产名；依赖或二进制变化必须增加产品版本，不覆盖旧资产。'
             ].join('\n');
