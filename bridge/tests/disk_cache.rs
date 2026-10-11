@@ -136,7 +136,7 @@ fn disk_cache_reuses_declared_builds_and_rejects_unidentified_builds() {
     let report = info.lines().into_iter().find(|l| l["kind"] == "cache_info").unwrap();
     let entries = report["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 1, "{report}");
-    assert!(entries[0]["buildIdentity"].as_str().unwrap().starts_with(&format!("lfc1-v{}-source-", lyflow_client::ABI_VERSION)));
+    assert!(entries[0]["buildIdentity"].as_str().unwrap().starts_with(&format!("lfc1-v{}-source-", lyflow_client::ABI_VERSION.replace('.', "_"))));
     assert!(entries[0].get("fingerprint").is_none());
     assert_eq!([&entries[0]["current"], &entries[0]["files"]], [&json!(true), &json!(2)]);
     assert!(entries[0]["bytes"].as_u64().unwrap() > 1_000_000);

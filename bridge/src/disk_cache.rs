@@ -28,7 +28,8 @@ fn identity_for(version: &str, revision: &str) -> Result<String, String> {
     if revision.len() != 40 || !revision.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
         return Err("跨进程缓存需要干净构建的明确源码修订；请先提交源码并重新构建".into());
     }
-    Ok(format!("{FORMAT}-v{version}-source-{revision}"))
+    let directory_version = version.replace('.', "_");
+    Ok(format!("{FORMAT}-v{directory_version}-source-{revision}"))
 }
 
 pub(crate) fn build_identity(core: &Core) -> Result<String, String> {
@@ -137,7 +138,7 @@ mod tests {
     fn build_identity_uses_explicit_version_and_revision() {
         let revision = "0123456789abcdef0123456789abcdef01234567";
         assert_eq!(identity_for(lyflow_client::ABI_VERSION, revision).unwrap(),
-            format!("lfc1-v{}-source-{revision}", lyflow_client::ABI_VERSION));
+            format!("lfc1-v{}-source-{revision}", lyflow_client::ABI_VERSION.replace('.', "_")));
         assert_ne!(identity_for(lyflow_client::ABI_VERSION, revision).unwrap(),
             identity_for(lyflow_client::ABI_VERSION, "1123456789abcdef0123456789abcdef01234567").unwrap());
     }
