@@ -1,8 +1,9 @@
 #ifndef LYFLOW_C_API_H
 #define LYFLOW_C_API_H
-// C ABI v15。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
+// C ABI 与产品版本字符串严格一致。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
 // 三条约定（char* 归属、异常不跨 ABI、只导出 C 函数）见 core/README.md「C ABI 约定」。
-#define LYFLOW_ABI_VERSION 15
+#include "lyflow/version.h"
+#define LYFLOW_ABI_VERSION LYFLOW_VERSION
 #include <stddef.h>
 #include <stdint.h>
 
@@ -24,7 +25,8 @@ extern "C" {
 
 // core 的版本号，形如 "0.1.0"。静态存储，不要释放。
 LYFLOW_API const char* lyflow_version(void);
-LYFLOW_API uint32_t lyflow_abi_version(void);
+LYFLOW_API const char* lyflow_abi_version_string(void);
+LYFLOW_API const char* lyflow_source_revision(void);
 
 // 全量算子描述，符合 schema/operator-manifest.schema.json。
 LYFLOW_API char* lyflow_manifest_json(void);
@@ -74,11 +76,11 @@ LYFLOW_API char* lyflow_plan_params(const char* graph_json, const char* base_dir
                                     const char* const* targets, size_t n,
                                     const char* params_json);
 
-// v14：落盘缓存（docs/disk-cache-plan.md）。dir 为 NULL / 空串 = 关（默认）。fingerprint 由宿主给
-// （构建指纹：core DLL 的内容哈希等），结果放在 <dir>/<fingerprint>/ 下，指纹变了整个目录不再复用 ——
-// cacheKey 只看算子版本，改了实现没升版本时靠它避开旧结果。缓存判定仍只归 core：内存里没有就查盘，
+// 落盘缓存（docs/disk-cache-plan.md）。dir 为 NULL / 空串 = 关（默认）。build_identity 由宿主用
+// 产品版本与明确源码修订组成，结果放在 <dir>/<build_identity>/ 下；修订为空时不能启用跨进程缓存。
+// 缓存判定仍只归 core：内存里没有就查盘，
 // 确定性、够贵（≥ 20 ms）、全部端口是点云、张量或图像的节点算完落盘。返回空串 = 成功，否则一句人话的原因。
-LYFLOW_API char* lyflow_cache_set_dir(const char* dir, const char* fingerprint);
+LYFLOW_API char* lyflow_cache_set_dir(const char* dir, const char* build_identity);
 
 // 进程级地丢掉全部缓存结果，别的 run 的结果也一并丢，所以调用方应当先取消。
 // 只想让某一次运行不吃缓存的，用 lyflow_run_options.no_reuse。

@@ -27,7 +27,7 @@
 
 namespace lyflow {
 
-constexpr int kClientAbiVersion = LYFLOW_ABI_VERSION;
+constexpr const char* kClientAbiVersion = LYFLOW_ABI_VERSION;
 
 class ClientError : public std::runtime_error {
  public:
@@ -402,6 +402,10 @@ class Client {
   Client& operator=(const Client&) = delete;
 
   std::string version() const { return fn_.version(); }
+  std::string sourceRevision() const {
+    const char* revision = fn_.source_revision();
+    return revision ? revision : "";
+  }
 
   std::string manifest() const { return owned(fn_.manifest_json()); }
 
@@ -542,6 +546,8 @@ class Client {
 
   struct Table {
     const char* (*version)() = nullptr;
+    const char* (*abi_version)() = nullptr;
+    const char* (*source_revision)() = nullptr;
     char* (*manifest_json)() = nullptr;
     char* (*manifest_problems)() = nullptr;
     void (*string_free)(char*) = nullptr;
@@ -598,7 +604,7 @@ class Client {
     slot = reinterpret_cast<T>(symbol(name));
     if (!slot) {
       throw ClientError(std::string("lyflow_core 里找不到符号 ") + name + "（" + where +
-                        " 的 ABI 与本头文件的 v" + std::to_string(kClientAbiVersion) + " 不匹配）");
+                        " 的 ABI 与本头文件的 v" + std::string(kClientAbiVersion) + " 不匹配）");
     }
   }
 
@@ -653,7 +659,13 @@ inline void Client::loadW(const std::wstring& dllPath) {
     throw ClientError("加载 lyflow_core.dll 失败，GetLastError=" +
                       std::to_string(static_cast<unsigned long>(::GetLastError())));
   }
-  bind("加载的 DLL");
+  try {
+    bind("加载的 DLL");
+  } catch (...) {
+    ::FreeLibrary(static_cast<HMODULE>(handle_));
+    handle_ = nullptr;
+    throw;
+  }
 }
 
 inline void Client::load(const std::string& dllPath) {
@@ -667,12 +679,28 @@ inline void Client::load(const std::string& dllPath) {
 inline void Client::load(const std::string& dllPath) {
   handle_ = ::dlopen(dllPath.c_str(), RTLD_NOW | RTLD_LOCAL);
   if (!handle_) throw ClientError(std::string("加载 lyflow core 失败: ") + ::dlerror());
-  bind("加载的共享库");
+  try {
+    bind("加载的共享库");
+  } catch (...) {
+    ::dlclose(handle_);
+    handle_ = nullptr;
+    throw;
+  }
 }
 #endif
 
 inline void Client::bind(const std::string& where) {
+  need(fn_.abi_version, "lyflow_abi_version_string", where);
   need(fn_.version, "lyflow_version", where);
+  const char* abi = fn_.abi_version();
+  const char* engine = fn_.version();
+  if (!abi || !engine || std::strcmp(abi, kClientAbiVersion) != 0 ||
+      std::strcmp(engine, kClientAbiVersion) != 0) {
+    throw ClientError(std::string("lyflow_core version mismatch: client=") + kClientAbiVersion +
+                      ", ABI=" + (abi ? abi : "<null>") + ", engine=" +
+                      (engine ? engine : "<null>"));
+  }
+  need(fn_.source_revision, "lyflow_source_revision", where);
   need(fn_.manifest_json, "lyflow_manifest_json", where);
   need(fn_.manifest_problems, "lyflow_manifest_problems", where);
   need(fn_.string_free, "lyflow_string_free", where);

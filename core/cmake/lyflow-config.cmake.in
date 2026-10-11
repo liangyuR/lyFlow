@@ -5,7 +5,12 @@
 # client.hpp 是 header-only 且只依赖 c_api.h，所以导入目标是 INTERFACE，不链任何库。
 
 set(LYFLOW_VERSION "@LYFLOW_INSTALL_VERSION@")
-set(LYFLOW_ABI_VERSION @LYFLOW_INSTALL_ABI_VERSION@)
+if(NOT "${lyflow_FIND_VERSION}" STREQUAL "${LYFLOW_VERSION}")
+  set(lyflow_FOUND FALSE)
+  set(lyflow_NOT_FOUND_MESSAGE "lyflow requires an explicit matching product version ${LYFLOW_VERSION}; requested '${lyflow_FIND_VERSION}'")
+  return()
+endif()
+set(LYFLOW_ABI_VERSION "@LYFLOW_INSTALL_ABI_VERSION@")
 # 产出这份安装目录的 LyFlow 源码 commit。宿主用它把依赖钉在一个已验收的版本上。
 set(LYFLOW_SOURCE_COMMIT "@LYFLOW_INSTALL_COMMIT@")
 

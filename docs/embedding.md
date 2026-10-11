@@ -13,13 +13,17 @@
   [前端编辑器](#前端编辑器lyfloweditor)。
 
 下面先说 C++ 那条。宿主只 include 一个头：`lyflow/client.hpp`。它是 header-only 的，
-只依赖同目录的 `lyflow/c_api.h`，不 include 任何 core 内部头，也不链接任何库 ——
+只依赖同目录的 `lyflow/c_api.h` 与 `lyflow/version.h`，不 include 任何 core 内部头，也不链接任何库 ——
 core 是运行时加载的 DLL（[ADR-0004](adr/0004-core-as-dll.md)）。
 
-契约版本是 **C ABI v15**（v9 的 run summary 见 [ADR-0022](adr/0022-run-summary-as-core-output.md)；
-v8 的张量与下标入口见 [ADR-0019](adr/0019-output-tensor-and-indices-over-abi.md)）。
-`lyflow::kClientAbiVersion` 与 core 的 `LYFLOW_ABI_VERSION` 必须一致；对不上时
-`Client` 的构造函数会抛 `ClientError`，而不是等到某次调用才崩。
+契约版本使用产品版本字符串 **1.1.0**。`LYFLOW_ABI_VERSION` 引用 `version.h` 的
+`LYFLOW_VERSION`，Rust 的 `ABI_VERSION` 引用 crate 产品版本。C++ 和 Rust 客户端在加载时先读取
+`lyflow_abi_version_string()` 与 `lyflow_version()`，两者必须与客户端版本完全相同，补丁版本也不兼容。
+只有源码树干净且 Git 修订可识别时，`lyflow_source_revision()` 返回完整提交标识；否则返回空串。
+C++ 的 `sourceRevision()` 和 Rust 的 `source_revision()` 提供该值，空值不能启用跨进程磁盘缓存。
+不匹配时在绑定业务函数前报错；旧整数 ABI 15 的 DLL 因缺少新的字符串导出而直接拒绝，不会按指针调用旧函数。
+
+下面 v8–v15 描述仅为结构演进历史，不再用作当前版本或兼容性判定。
 
 v10 在 `lyflow_run_options` 末尾加了 `const char* params_json`：顶层图参数的取值，
 见下面「[顶层图参数](#顶层图参数)」。
@@ -91,7 +95,7 @@ install(DIRECTORY "${LYFLOW_ROOT}/bin/" DESTINATION "backend/bin")
 ## CMake 消费方
 
 ```cmake
-find_package(lyflow CONFIG REQUIRED)     # -DCMAKE_PREFIX_PATH=<prefix>
+find_package(lyflow 1.1.0 EXACT CONFIG REQUIRED)     # -DCMAKE_PREFIX_PATH=<prefix>
 target_link_libraries(my_app PRIVATE lyflow::client)
 ```
 
@@ -104,7 +108,7 @@ target_link_libraries(my_app PRIVATE lyflow::client)
 | `LYFLOW_CORE_DLL` | `Client` 构造函数要的路径 |
 | `LYFLOW_CLI` | `lyflow.exe`，离线跑图/导入用 |
 | `LYFLOW_LIBRARY_DIR` | 库算子目录 |
-| `LYFLOW_ABI_VERSION` | 整数，与头文件里的常量对照 |
+| `LYFLOW_ABI_VERSION` | 产品版本字符串；与头文件、引擎、客户端严格相等 |
 | `LYFLOW_SOURCE_COMMIT` | 产出这份安装目录的 LyFlow commit（工作区脏时带 `-dirty`），宿主用来钉版本 |
 
 完整可编译的例子见 `examples/consumer/`（`pnpm check` 每次都会对着安装目录编它并跑一遍）。
@@ -524,14 +528,14 @@ use lyflow_client::{Core, RunSpec};
 let core = Core::load_from(Path::new("D:/lyflow-runtime/bin/lyflow_core.dll"))?;
 core.self_check().map_err(|e| /* 算子描述不干净，拒绝启动 */ e)?;
 
-assert_eq!(lyflow_client::ABI_VERSION, 15); // 与 core 的 LYFLOW_ABI_VERSION 对齐
+assert_eq!(core.abi_version(), lyflow_client::ABI_VERSION);
 
 // 顶层图参数：RunSpec 的 params_json: Option<&str>，或链式的 with_params_json
 let spec = RunSpec::new(&graph_json, &run_id, &base_dir, &[])
     .with_params_json(r#"{"gapOffset": 0.12}"#);
 ```
 
-`ABI_VERSION` 与 C++ 侧的 `lyflow::kClientAbiVersion` 是同一个数。轮廓 / 点云的运行时注入、
+`ABI_VERSION` 与 C++ 侧的 `lyflow::kClientAbiVersion` 是同一个产品版本字符串。轮廓 / 点云的运行时注入、
 不阻塞的 `RunHandle`、三种 View 的取数，与上面 C++ 各节一一对应。
 
 **进程级单例、DLL 路径解析与热重载不在这个 crate 里** —— 那三样是宿主自己的策略。

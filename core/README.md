@@ -62,6 +62,10 @@ M0/M1 时期这里写着「零第三方依赖是有意的」。M2 引入 PCL 之
 core 是 **CMake 构建的 DLL**（[ADR-0004](../docs/adr/0004-core-as-dll.md)），
 只导出 `c_api.h` 里那些 C 函数。Rust 侧用 libloading 在**运行时**加载它，
 既不链 import 库，也不再用 cc crate 逐个编 `.cpp`。
+C ABI 使用产品版本字符串：`LYFLOW_ABI_VERSION` 引用 `LYFLOW_VERSION`，通过
+`lyflow_abi_version_string()` 导出。客户端加载时要求 ABI、引擎版本与客户端版本完全相等，
+包括补丁版本；旧整数 ABI 导出已移除，旧 DLL 直接拒绝。SDK 的 CMake 消费方必须显式指定
+完整版本，例如 `find_package(lyflow 1.1.0 EXACT CONFIG REQUIRED)`。
 `bridge/build.rs` 调的就是这份 `CMakeLists.txt` —— 两条路径同源，
 不会出现「命令行能编、cargo 编不了」。
 
