@@ -21,19 +21,7 @@ if ($SkipDependencySetup) {
     $env:VCPKG_ROOT = Join-Path $root 'build/release-tools/vcpkg'
     $env:VCPKG_INSTALLED_DIR = Join-Path $root 'build/release-deps/vcpkg_installed'
     $env:VCPKG_MANIFEST_MODE = 'ON'
-    if (-not (Test-Path -LiteralPath (Join-Path $env:VCPKG_ROOT '.git'))) {
-        New-Item -ItemType Directory -Path $env:VCPKG_ROOT -Force | Out-Null
-        Invoke-Checked git @('init', $env:VCPKG_ROOT)
-        Invoke-Checked git @('-C', $env:VCPKG_ROOT, 'remote', 'add', 'origin', 'https://github.com/microsoft/vcpkg.git')
-    }
-    $revision = & git -C $env:VCPKG_ROOT rev-parse HEAD 2>$null
-    if ($LASTEXITCODE -ne 0 -or $revision -ne $config.vcpkgBaseline) {
-        Invoke-Checked git @('-C', $env:VCPKG_ROOT, 'fetch', '--depth=1', 'origin', $config.vcpkgBaseline)
-        Invoke-Checked git @('-C', $env:VCPKG_ROOT, 'checkout', '--detach', $config.vcpkgBaseline)
-    }
-    if (-not (Test-Path -LiteralPath (Join-Path $env:VCPKG_ROOT 'vcpkg.exe'))) {
-        Invoke-Checked (Join-Path $env:VCPKG_ROOT 'bootstrap-vcpkg.bat') @('-disableMetrics')
-    }
+    & (Join-Path $PSScriptRoot 'prepare-release-vcpkg.ps1') -ToolDir $env:VCPKG_ROOT -Baseline $config.vcpkgBaseline
     if (-not $env:VCPKG_DEFAULT_BINARY_CACHE) { $env:VCPKG_DEFAULT_BINARY_CACHE = Join-Path $root 'build/release-deps/binary-cache' }
     New-Item -ItemType Directory -Path $env:VCPKG_DEFAULT_BINARY_CACHE -Force | Out-Null
     Invoke-Checked (Join-Path $env:VCPKG_ROOT 'vcpkg.exe') @('install', "--x-manifest-root=$manifestRoot", "--x-install-root=$env:VCPKG_INSTALLED_DIR", "--triplet=$($config.triplet)", '--clean-after-build')

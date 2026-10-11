@@ -18,6 +18,7 @@
 #include "lyflow/json_writer.h"
 #include "lyflow/registry.h"
 #include "lyflow/version.h"
+#include "source_revision.h"
 
 namespace {
 
@@ -120,7 +121,8 @@ std::string fromC(const char* s) { return s ? std::string(s) : std::string(); }
 extern "C" {
 
 const char* lyflow_version(void) { return LYFLOW_VERSION; }
-uint32_t lyflow_abi_version(void) { return LYFLOW_ABI_VERSION; }
+const char* lyflow_abi_version_string(void) { return LYFLOW_ABI_VERSION; }
+const char* lyflow_source_revision(void) { return LYFLOW_SOURCE_REVISION; }
 
 char* lyflow_manifest_json(void) {
   try {
@@ -247,9 +249,9 @@ char* lyflow_effective_params(const char* graph_json, const char* base_dir) {
   }
 }
 
-char* lyflow_cache_set_dir(const char* dir, const char* fingerprint) {
+char* lyflow_cache_set_dir(const char* dir, const char* build_identity) {
   try {
-    return dup(lyflow::exec::DiskCache::instance().setDir(fromC(dir), fromC(fingerprint)));
+    return dup(lyflow::exec::DiskCache::instance().setDir(fromC(dir), fromC(build_identity)));
   } catch (const std::exception& e) {
     return dup(std::string("设置落盘缓存目录时内部异常: ") + e.what());
   } catch (...) {

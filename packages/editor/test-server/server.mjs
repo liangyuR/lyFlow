@@ -258,7 +258,7 @@ async function coreInfo() {
   const result = await runCli(["info"]);
   const info = lastJson(result.lines);
   return {
-    ...(info?.kind === "core_info" ? { buildFingerprint: info.buildFingerprint } : {}),
+    ...(info?.kind === "core_info" ? { buildIdentity: info.buildIdentity } : {}),
     version: (m.generatedBy ?? "unknown").split("/")[1] ?? "unknown",
     operatorCount: m.operators.length,
     typeCount: m.types.length,

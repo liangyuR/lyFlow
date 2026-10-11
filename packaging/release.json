@@ -16,5 +16,5 @@
     "boost-filesystem": "1.92.0",
     "eigen3": "5.0.1"
   },
-  "gsClientRevision": "5b796c35d6cafd441a24bc09e620aaae399ca5ac"
+  "gsClientRevision": "d4c54ee2a56b2c6f93f4fb1e6614f612a447d02b"
 }

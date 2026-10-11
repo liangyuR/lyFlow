@@ -7,6 +7,7 @@
 #include "exec/executor.h"
 #include "helpers.h"
 #include "lyflow/contract.h"
+#include "lyflow/client.hpp"
 #include "lyflow/registry.h"
 #include "test_ops.h"
 
@@ -214,6 +215,29 @@ TEST_CASE("契约自检：四种键之外的任何东西都过不了 manifest --
 
   // 注册表自检本身是干净的：包里声明的每一条契约都过得了这一关
   CHECK(ensureRegistry().validate().empty());
+}
+
+TEST_CASE("客户端在业务绑定前拒绝旧整数 ABI、补丁差异和空版本") {
+  struct Case { const char* path; const char* expected; };
+  const Case cases[] = {
+      {LYFLOW_FIXTURE_PATH_legacy, "lyflow_abi_version_string"},
+      {LYFLOW_FIXTURE_PATH_abi_patch, "version mismatch"},
+      {LYFLOW_FIXTURE_PATH_engine_patch, "version mismatch"},
+      {LYFLOW_FIXTURE_PATH_null_abi, "version mismatch"},
+      {LYFLOW_FIXTURE_PATH_matching, "lyflow_source_revision"},
+  };
+  for (const auto& item : cases) {
+    CAPTURE(item.path);
+    try {
+      Client client(item.path);
+      FAIL_CHECK("incomplete fixture must not load");
+    } catch (const ClientError& error) {
+      CHECK(std::string(error.what()).find(item.expected) != std::string::npos);
+    }
+#if defined(_WIN32)
+    CHECK(::GetModuleHandleA(item.path) == nullptr);
+#endif
+  }
 }
 
 }  // namespace lyflow::test

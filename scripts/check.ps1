@@ -177,6 +177,7 @@ if (Want "sdk") {
   if (-not (Test-Path $cmake)) { $cmake = "cmake" }
   if (-not (Test-Path $ninja)) { $ninja = "ninja" }
 
+  $consumerVersion = (Get-Content -LiteralPath (Join-Path $root "package.json") -Raw | ConvertFrom-Json).version
   $consumerSrc   = Join-Path $root "examples\consumer"
   $consumerBuild = Join-Path $env:TEMP "lyflow-consumer-build"
   if (Test-Path $consumerBuild) { Remove-Item -Recurse -Force $consumerBuild }
@@ -184,7 +185,7 @@ if (Want "sdk") {
   $line = "call `"$vcvars`" >nul 2>&1" +
           " && `"$cmake`" -S `"$consumerSrc`" -B `"$consumerBuild`" -G Ninja" +
           " -DCMAKE_MAKE_PROGRAM=`"$ninja`" -DCMAKE_BUILD_TYPE=RelWithDebInfo" +
-          " -DCMAKE_PREFIX_PATH=`"$($prefix -replace '\\', '/')`"" +
+          " -DLYFLOW_CONSUMER_VERSION=$consumerVersion -DCMAKE_PREFIX_PATH=`"$($prefix -replace '\\', '/')`"" +
           " && `"$cmake`" --build `"$consumerBuild`""
   cmd /c $line
   if ($LASTEXITCODE -ne 0) { throw "examples/consumer 编译失败" }

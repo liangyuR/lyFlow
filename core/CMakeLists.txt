@@ -15,6 +15,7 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
 endif()
 
 project(lyflow_core LANGUAGES CXX VERSION 1.1.0)
+option(LYFLOW_RELEASE_BUILD "Release dependency inputs were verified by package-windows.ps1" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -306,6 +307,24 @@ set(LYFLOW_E2E_OPS "${LYFLOW_TESTS}/e2e/register_e2e_ops.cpp")
 
 add_library(lyflow_core_obj OBJECT ${LYFLOW_CORE_SOURCES} "${LYFLOW_PACK_REGISTRAR}" "${LYFLOW_E2E_OPS}")
 lyflow_apply_common(lyflow_core_obj)
+set(_release_identity_packs "${LYFLOW_STD_PACK_NAMES}")
+list(SORT _release_identity_packs)
+set(LYFLOW_RELEASE_IDENTITY_ALLOWED FALSE)
+if(LYFLOW_RELEASE_BUILD AND WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND
+   CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" AND NOT LYFLOW_EXT_PACK_DIRS AND
+   NOT LYFLOW_EXT_PACK_NAMES AND
+   _release_identity_packs STREQUAL "glue;std-image;std-ml;std-pointcloud")
+  set(LYFLOW_RELEASE_IDENTITY_ALLOWED TRUE)
+endif()
+add_custom_target(lyflow-source-revision
+  COMMAND "${CMAKE_COMMAND}" "-DLYFLOW_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/.."
+          "-DLYFLOW_GENERATED_DIR=${CMAKE_BINARY_DIR}/generated"
+          "-DLYFLOW_RELEASE_IDENTITY_ALLOWED=${LYFLOW_RELEASE_IDENTITY_ALLOWED}"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/update-source-revision.cmake"
+  BYPRODUCTS "${CMAKE_BINARY_DIR}/generated/source_revision.h"
+  VERBATIM)
+add_dependencies(lyflow_core_obj lyflow-source-revision)
+target_include_directories(lyflow_core_obj PRIVATE "${CMAKE_BINARY_DIR}/generated")
 target_include_directories(lyflow_core_obj PRIVATE "${LYFLOW_TESTS}")
 
 # D1：core 是 DLL，只导出 C ABI。Rust 用 libloading 运行时加载。
@@ -345,6 +364,22 @@ if(MSVC)
 endif()
 target_link_libraries(lyflow-core-tests PRIVATE ${LYFLOW_PACK_LIBS})
 
+math(EXPR _fixture_next_patch "${PROJECT_VERSION_PATCH} + 1")
+set(_fixture_other_version "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${_fixture_next_patch}")
+foreach(fixture matching legacy abi_patch engine_patch null_abi)
+  add_library(lyflow-client-${fixture} SHARED "${LYFLOW_TESTS}/fixtures/client_version.cpp")
+  target_include_directories(lyflow-client-${fixture} PRIVATE "${LYFLOW_INCLUDE}")
+  target_compile_definitions(lyflow-client-${fixture} PRIVATE "LYFLOW_FIXTURE_${fixture}"
+    "LYFLOW_FIXTURE_OTHER_VERSION=\"${_fixture_other_version}\"")
+  set_target_properties(lyflow-client-${fixture} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/client-fixtures"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/client-fixtures"
+    MSVC_RUNTIME_LIBRARY "MultiThreaded")
+  add_dependencies(lyflow-core-tests lyflow-client-${fixture})
+  target_compile_definitions(lyflow-core-tests PRIVATE
+    "LYFLOW_FIXTURE_PATH_${fixture}=\"$<TARGET_FILE:lyflow-client-${fixture}>\"")
+endforeach()
+
 enable_testing()
 add_test(NAME lyflow-core-tests COMMAND lyflow-core-tests)
 
@@ -355,7 +390,7 @@ add_test(NAME lyflow-core-tests COMMAND lyflow-core-tests)
 include(CMakePackageConfigHelpers)
 
 set(LYFLOW_INSTALL_VERSION "${PROJECT_VERSION}")
-set(LYFLOW_INSTALL_ABI_VERSION 15)
+set(LYFLOW_INSTALL_ABI_VERSION "${PROJECT_VERSION}")
 set(LYFLOW_INSTALL_DLL_NAME "$<TARGET_FILE_NAME:lyflow_core>")
 
 execute_process(
@@ -408,7 +443,7 @@ configure_package_config_file(
 write_basic_package_version_file(
   "${CMAKE_CURRENT_BINARY_DIR}/lyflow-config-version.cmake"
   VERSION "${PROJECT_VERSION}"
-  COMPATIBILITY SameMajorVersion)
+  COMPATIBILITY ExactVersion)
 
 # DLL 名字里有生成器表达式，configure_package_config_file 展不开，所以再过一道 file(GENERATE)。
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/lyflow-config.cmake"

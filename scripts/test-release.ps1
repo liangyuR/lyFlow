@@ -50,7 +50,17 @@ function Invoke-Isolated([string]$Exe, [string[]]$Arguments, [string]$Name, [swi
 }
 function Build-Probe([string]$Kind) {
     $manifest = Join-Path $root "tests/release/$Kind/Cargo.toml"
+    if ($Kind -eq 'gs-probe') {
+        $description = & cargo metadata --locked --no-deps --format-version 1 --manifest-path $manifest | ConvertFrom-Json
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect the pinned GS client dependency.' }
+        $dependency = @($description.packages | Where-Object name -EQ 'lyflow-gs-release-probe' | ForEach-Object dependencies | Where-Object name -EQ 'lyflow-client')
+        $expectedSource = "git+https://github.com/liangyuR/lyFlow.git?rev=$($configuration.gsClientRevision)"
+        if ($dependency.Count -ne 1 -or $dependency[0].source -cne $expectedSource) { throw 'GS consumer dependency is not pinned to packaging/release.json.gsClientRevision.' }
+    }
     $target = Join-Path $root "build/release-probes/$Kind"
+    if ($Kind -eq 'probe') {
+        Invoke-Checked cargo @('test', '--locked', '--release', '--manifest-path', $manifest, '--target-dir', $target) | Out-Host
+    }
     Invoke-Checked cargo @('build', '--locked', '--release', '--manifest-path', $manifest, '--target-dir', $target)
     $name = if ($Kind -eq 'probe') { 'lyflow-release-probe.exe' } else { 'lyflow-gs-release-probe.exe' }
     return Join-Path $target "release/$name"
@@ -69,6 +79,10 @@ function Invoke-Probe([string]$Probe, [string]$Runtime, [string]$Name, [string]$
 }
 try {
     if (-not $IsWindows -or -not [Environment]::Is64BitProcess) { throw 'Release verification requires Windows x64 PowerShell.' }
+    $configuration = Get-Content -LiteralPath (Join-Path $root 'packaging/release.json') -Raw | ConvertFrom-Json
+    if (-not $InspectOnly -and ($configuration.gsClientRevision -isnot [string] -or $configuration.gsClientRevision -cnotmatch '^[0-9a-f]{40}$')) {
+        throw 'GS client revision is not pinned. Commit the product-version ABI client, then pin its real revision in packaging/release.json and tests/release/gs-probe before release verification.'
+    }
     if ($ArchiveDir) {
         if ($RuntimeDir -or $SdkDir -or $InspectOnly) { throw '-ArchiveDir cannot be combined with directory or inspection inputs.' }
         $archives = Get-ChildItem -LiteralPath $ArchiveDir -File
@@ -117,7 +131,7 @@ try {
     if (-not (Test-Path -LiteralPath $ninja)) { $ninja = (Get-Command ninja).Source }
     $consumer = Join-Path $work 'cpp consumer'
     $source = Join-Path $root 'examples/consumer'
-    $configure = "call `"$vcvars`" >nul && `"$cmake`" -S `"$source`" -B `"$consumer`" -G Ninja -DCMAKE_MAKE_PROGRAM=`"$ninja`" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=`"$SdkDir`" -DCMAKE_TOOLCHAIN_FILE= && `"$cmake`" --build `"$consumer`""
+    $configure = "call `"$vcvars`" >nul && `"$cmake`" -S `"$source`" -B `"$consumer`" -G Ninja -DCMAKE_MAKE_PROGRAM=`"$ninja`" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLYFLOW_CONSUMER_VERSION=$($runtime.engineVersion) -DCMAKE_PREFIX_PATH=`"$SdkDir`" -DCMAKE_TOOLCHAIN_FILE= && `"$cmake`" --build `"$consumer`""
     Invoke-Checked cmd @('/d', '/s', '/c', $configure)
     $graph = Join-Path $work 'synthetic-cloud.json'
     '{"schemaVersion":1,"id":"release-cloud","name":"release cloud","nodes":[{"id":"src","op":"gen.synthetic","params":{"pointCount":4096}},{"id":"pipe","op":"util.reroute"}],"edges":[{"id":"e","from":{"node":"src","port":"cloud"},"to":{"node":"pipe","port":"in"}}],"outputs":{"cloud":{"node":"pipe","port":"out"}}}' | Set-Content -LiteralPath $graph -Encoding utf8
@@ -126,7 +140,7 @@ try {
     Invoke-Isolated (Join-Path $consumer 'embed_concurrent.exe') @('--dll',$consumerDll,'--threads','2',$graph,$graph) 'cpp-concurrent'
     Invoke-Isolated (Join-Path $consumer 'embed_inject.exe') @('--dll',$consumerDll,'--node','src','--ports','cloud',$graph) 'cpp-inject'
     Invoke-Isolated (Join-Path $sdkBin 'lyflow.exe') @('run',$graph) 'cli-run'
-    $cases = @('missing-core','missing-onnx','wrong-abi','wrong-architecture','wrong-version','missing-listed-file')
+    $cases = @('missing-core','missing-onnx','wrong-abi-patch','legacy-numeric-abi','wrong-architecture','wrong-version','missing-listed-file')
     foreach ($case in $cases) {
         $negative = Join-Path $work $case
         Copy-Item -LiteralPath $RuntimeDir -Destination $negative -Recurse
@@ -135,7 +149,8 @@ try {
         switch ($case) {
             'missing-core' { Remove-Item -LiteralPath (Join-Path $negative 'lyflow_core.dll') }
             'missing-onnx' { Remove-Item -LiteralPath (Join-Path $negative 'onnxruntime.dll') }
-            'wrong-abi' { $metadata.abiVersion = [int]$metadata.abiVersion + 1 }
+            'wrong-abi-patch' { $parts = $metadata.abiVersion.Split('.'); $parts[2] = ([int]$parts[2] + 1).ToString(); $metadata.abiVersion = $parts -join '.' }
+            'legacy-numeric-abi' { $metadata.abiVersion = 15 }
             'wrong-architecture' { $metadata.architecture = 'x86' }
             'wrong-version' { $metadata.engineVersion = '0.0.0' }
             'missing-listed-file' { $metadata.files += [pscustomobject]@{ path = 'missing-required-license.txt' } }
@@ -149,9 +164,9 @@ try {
     }
     [ordered]@{
         status = 'passed'; engineVersion = $runtime.engineVersion; abiVersion = $runtime.abiVersion
-        sourceRevision = $runtimeMetadata.sourceRevision; checks = @($checks.ToArray())
+        sourceRevision = $runtimeMetadata.sourceRevision; localValidationOnly = [bool]$runtimeMetadata.localValidationOnly; checks = @($checks.ToArray())
         runtime = $runtime; sdk = $sdk; gsClient = $gs
-        gsClientRevision = '5b796c35d6cafd441a24bc09e620aaae399ca5ac'
+        gsClientRevision = $configuration.gsClientRevision
         evidenceDirectory = $work
         scope = 'Synthetic software verification; customer images, physical devices and field timing not covered.'
     } | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $ReportPath -Encoding utf8

@@ -20,7 +20,7 @@ use libloading::{Library, Symbol};
 pub type EventCb = unsafe extern "C" fn(*const c_char, *mut c_void);
 
 /// C ABI 的版本号。与 core/include/lyflow/c_api.h 的 LYFLOW_ABI_VERSION 必须一致。
-pub const ABI_VERSION: u32 = 15;
+pub const ABI_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// 运行时注入一个源节点的输出（v7）。缓冲由调用方持有到 `lyflow_run_start` 返回。
 #[repr(C)]
@@ -252,6 +252,12 @@ pub enum CoreError {
     Load(String),
     #[error("lyflow_core.dll 里找不到符号 {0}（DLL 版本与本程序不匹配）")]
     MissingSymbol(&'static str),
+    #[error("core 版本不匹配: client={client}, ABI={abi}, engine={engine}")]
+    VersionMismatch {
+        client: &'static str,
+        abi: String,
+        engine: String,
+    },
     #[error("core 返回了空指针（内存分配失败）")]
     NullReturn,
     #[error("core 返回的不是合法 UTF-8: {0}")]
@@ -357,6 +363,8 @@ type FnOutputSave = unsafe extern "C" fn(
 pub struct Core {
     // 顺序有意义：把 lib 放最后，让「DLL 先于函数指针卸载」在类型层面不可能发生。
     version: FnVersion,
+    abi_version: FnVersion,
+    source_revision: FnVersion,
     manifest_json: FnJson,
     manifest_problems: FnJson,
     string_free: FnStringFree,
@@ -429,8 +437,25 @@ impl Core {
         let lib = open_library(path)
             .map_err(|e| CoreError::Load(format!("{} —— {e}", path.display())))?;
 
+        let abi_version = sym!(lib, "lyflow_abi_version_string", FnVersion);
+        let version = sym!(lib, "lyflow_version", FnVersion);
+        let read_version = |function: FnVersion| -> Result<String, CoreError> {
+            let raw = unsafe { function() };
+            if raw.is_null() {
+                return Ok("<null>".to_owned());
+            }
+            Ok(unsafe { CStr::from_ptr(raw) }.to_str()?.to_owned())
+        };
+        let abi = read_version(abi_version)?;
+        let engine = read_version(version)?;
+        if abi != ABI_VERSION || engine != ABI_VERSION {
+            return Err(CoreError::VersionMismatch { client: ABI_VERSION, abi, engine });
+        }
+
         Ok(Core {
-            version: sym!(lib, "lyflow_version", FnVersion),
+            version,
+            abi_version,
+            source_revision: sym!(lib, "lyflow_source_revision", FnVersion),
             manifest_json: sym!(lib, "lyflow_manifest_json", FnJson),
             manifest_problems: sym!(lib, "lyflow_manifest_problems", FnJson),
             string_free: sym!(lib, "lyflow_string_free", FnStringFree),
@@ -485,6 +510,18 @@ impl Core {
                 .to_string_lossy()
                 .into_owned()
         }
+    }
+
+    pub fn abi_version(&self) -> String {
+        unsafe { CStr::from_ptr((self.abi_version)()).to_string_lossy().into_owned() }
+    }
+
+    pub fn source_revision(&self) -> String {
+        let raw = unsafe { (self.source_revision)() };
+        if raw.is_null() {
+            return String::new();
+        }
+        unsafe { CStr::from_ptr(raw) }.to_str().unwrap_or_default().to_owned()
     }
 
     pub fn manifest_json(&self) -> Result<String, CoreError> {
@@ -655,12 +692,12 @@ impl Core {
         unsafe { (self.library_count)() }
     }
 
-    /// 落盘缓存（v14，docs/disk-cache-plan.md）：结果放在 `<dir>/<fingerprint>/` 下，`dir` 空串 = 关。
-    /// `fingerprint` 是构建指纹 —— 变了整个目录不再复用。Err 里是一句人话的原因。
-    pub fn cache_set_dir(&self, dir: &str, fingerprint: &str) -> Result<(), String> {
+    /// 落盘缓存放在 `<dir>/<build_identity>/` 下，`dir` 空串 = 关。
+    /// `build_identity` 使用产品版本与明确源码修订；源码修订为空时不能启用跨进程缓存。
+    pub fn cache_set_dir(&self, dir: &str, build_identity: &str) -> Result<(), String> {
         let cs = |s: &str| CString::new(s).map_err(|e| e.to_string());
-        let (d, f) = (cs(dir)?, cs(fingerprint)?);
-        let message = unsafe { self.take_owned((self.cache_set_dir)(d.as_ptr(), f.as_ptr())) }
+        let (d, identity) = (cs(dir)?, cs(build_identity)?);
+        let message = unsafe { self.take_owned((self.cache_set_dir)(d.as_ptr(), identity.as_ptr())) }
             .map_err(|e| e.to_string())?;
         if message.is_empty() {
             Ok(())
@@ -1360,3 +1397,61 @@ impl Drop for RunHandle {
     }
 }
 
+
+#[cfg(test)]
+mod load_contract_tests {
+    use super::*;
+    use std::process::Command;
+
+    struct Fixtures(std::path::PathBuf);
+    impl Drop for Fixtures {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn rejects_incompatible_versions_before_binding_business_symbols() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let fixtures = Fixtures(std::env::temp_dir().join(format!("lyflow-abi-{}-{unique}", std::process::id())));
+        std::fs::create_dir_all(&fixtures.0).unwrap();
+        let (base, patch) = ABI_VERSION.rsplit_once('.').unwrap();
+        let next_patch = format!("{base}.{}", patch.parse::<u64>().unwrap() + 1);
+        let cases = [
+            ("legacy", None, ABI_VERSION),
+            ("abi_patch", Some(next_patch.as_str()), ABI_VERSION),
+            ("engine_patch", Some(ABI_VERSION), next_patch.as_str()),
+            ("legacy_string", Some("15"), ABI_VERSION),
+            ("null_abi", Some(""), ABI_VERSION),
+            ("matching", Some(ABI_VERSION), ABI_VERSION),
+        ];
+        for (name, abi, engine) in cases {
+            let abi_export = match abi {
+                None => "#[no_mangle] pub extern \"C\" fn lyflow_abi_version() -> u32 { 15 }".to_owned(),
+                Some("") => "#[no_mangle] pub extern \"C\" fn lyflow_abi_version_string() -> *const std::ffi::c_char { std::ptr::null() }".to_owned(),
+                Some(value) => format!("#[no_mangle] pub extern \"C\" fn lyflow_abi_version_string() -> *const std::ffi::c_char {{ b\"{value}\\0\".as_ptr().cast() }}"),
+            };
+            let source = format!("{abi_export}\n#[no_mangle] pub extern \"C\" fn lyflow_version() -> *const std::ffi::c_char {{ b\"{engine}\\0\".as_ptr().cast() }}");
+            let input = fixtures.0.join(format!("{name}.rs"));
+            let library = fixtures.0.join(format!("{name}.{}", std::env::consts::DLL_EXTENSION));
+            std::fs::write(&input, source).unwrap();
+            let mut compiler = Command::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()));
+            compiler.arg("--crate-type=cdylib").arg("--edition=2021").arg(&input).arg("-o").arg(&library);
+            #[cfg(windows)]
+            compiler.args(["-C", "target-feature=+crt-static"]);
+            let result = compiler.output().unwrap();
+            assert!(result.status.success(), "{name}: {}", String::from_utf8_lossy(&result.stderr));
+            let error = match Core::load_from(&library) {
+                Ok(_) => panic!("incomplete fixture unexpectedly loaded: {name}"),
+                Err(error) => error,
+            };
+            match name {
+                "legacy" => assert!(matches!(error, CoreError::MissingSymbol("lyflow_abi_version_string")), "{error}"),
+                "matching" => assert!(matches!(error, CoreError::MissingSymbol("lyflow_source_revision")), "{error}"),
+                _ => assert!(matches!(error, CoreError::VersionMismatch { .. }), "{name}: {error}"),
+            }
+            std::fs::remove_file(&library).expect("failed loads must release the DLL handle");
+        }
+    }
+}
