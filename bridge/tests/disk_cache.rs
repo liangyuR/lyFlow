@@ -16,7 +16,10 @@ struct Ran {
 
 impl Ran {
     fn lines(&self) -> Vec<Value> {
-        self.out.lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
+        self.out
+            .lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect()
     }
 
     /// 某个节点最后一条 node_state。
@@ -100,7 +103,11 @@ fn disk_cache_reuses_declared_builds_and_rejects_unidentified_builds() {
 
     let info = lyflow(&["info"], &[]);
     assert_eq!(info.code, 0, "{}", info.err);
-    let identity = info.lines().into_iter().find(|l| l["kind"] == "core_info").unwrap();
+    let identity = info
+        .lines()
+        .into_iter()
+        .find(|l| l["kind"] == "core_info")
+        .unwrap();
     if identity["buildIdentity"].is_null() {
         let rejected = lyflow(&["run", &g, "--cache-dir", &cache_s], &[]);
         assert_ne!(rejected.code, 0);
@@ -121,8 +128,16 @@ fn disk_cache_reuses_declared_builds_and_rejects_unidentified_builds() {
     assert_eq!(second.code, 0, "{} / {}", second.out, second.err);
     for id in ["g", "v"] {
         let n = second.node(id);
-        assert_eq!([&n["state"], &n["stats"]["cached"]], [&json!("skipped"), &json!(true)], "{id}: {n}");
-        assert_eq!(n["stats"]["elementCount"], first.node(id)["stats"]["elementCount"], "{id}");
+        assert_eq!(
+            [&n["state"], &n["stats"]["cached"]],
+            [&json!("skipped"), &json!(true)],
+            "{id}: {n}"
+        );
+        assert_eq!(
+            n["stats"]["elementCount"],
+            first.node(id)["stats"]["elementCount"],
+            "{id}"
+        );
     }
 
     // 环境变量与 --cache-dir 等价（MCP 起的 CLI 进程靠它）
@@ -133,17 +148,34 @@ fn disk_cache_reuses_declared_builds_and_rejects_unidentified_builds() {
     // cache info：一个构建身份目录、就是当前的、两个文件
     let info = lyflow(&["cache", "info", "--cache-dir", &cache_s], &[]);
     assert_eq!(info.code, 0, "{}", info.err);
-    let report = info.lines().into_iter().find(|l| l["kind"] == "cache_info").unwrap();
+    let report = info
+        .lines()
+        .into_iter()
+        .find(|l| l["kind"] == "cache_info")
+        .unwrap();
     let entries = report["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 1, "{report}");
-    assert!(entries[0]["buildIdentity"].as_str().unwrap().starts_with(&format!("lfc1-v{}-source-", lyflow_client::ABI_VERSION.replace('.', "_"))));
+    assert!(entries[0]["buildIdentity"]
+        .as_str()
+        .unwrap()
+        .starts_with(&format!(
+            "lfc1-v{}-source-",
+            lyflow_client::ABI_VERSION.replace('.', "_")
+        )));
     assert!(entries[0].get("fingerprint").is_none());
-    assert_eq!([&entries[0]["current"], &entries[0]["files"]], [&json!(true), &json!(2)]);
+    assert_eq!(
+        [&entries[0]["current"], &entries[0]["files"]],
+        [&json!(true), &json!(2)]
+    );
     assert!(entries[0]["bytes"].as_u64().unwrap() > 1_000_000);
 
     // 旧构建身份的目录（重编 core 之前留下的）：--stale 只删它，当前的留着
     std::fs::create_dir_all(cache.join("a14-0000000000000000").join("ab")).unwrap();
-    std::fs::write(cache.join("a14-0000000000000000").join("ab").join("x.lfc"), b"old").unwrap();
+    std::fs::write(
+        cache.join("a14-0000000000000000").join("ab").join("x.lfc"),
+        b"old",
+    )
+    .unwrap();
     let stale = lyflow(&["cache", "clear", "--stale", "--cache-dir", &cache_s], &[]);
     assert_eq!(stale.code, 0, "{}", stale.err);
     assert_eq!(lfc_files(&cache), 2, "当前构建身份的两个文件还在");

@@ -89,7 +89,10 @@ pub fn lzf_decompress(input: &[u8], out_len: usize) -> Result<Vec<u8>, String> {
         }
     }
     if out.len() != out_len {
-        return Err(format!("binary_compressed 解压出 {} 字节，头里写的是 {out_len}", out.len()));
+        return Err(format!(
+            "binary_compressed 解压出 {} 字节，头里写的是 {out_len}",
+            out.len()
+        ));
     }
     Ok(out)
 }
@@ -114,7 +117,9 @@ pub fn parse_pcd(bytes: &[u8]) -> Result<PcdCloud, String> {
             .position(|&b| b == b'\n')
             .map(|p| pos + p)
             .ok_or("头没有 DATA 行")?;
-        let line = std::str::from_utf8(&bytes[pos..end]).map_err(|_| "头不是文本")?.trim();
+        let line = std::str::from_utf8(&bytes[pos..end])
+            .map_err(|_| "头不是文本")?
+            .trim();
         pos = end + 1;
         if line.is_empty() || line.starts_with('#') {
             continue;
@@ -123,18 +128,31 @@ pub fn parse_pcd(bytes: &[u8]) -> Result<PcdCloud, String> {
         let key = it.next().unwrap_or("").to_ascii_uppercase();
         let rest: Vec<&str> = it.collect();
         let nums = |v: &[&str]| -> Result<Vec<usize>, String> {
-            v.iter().map(|s| s.parse::<usize>().map_err(|_| format!("{key} 里有非数字 {s}"))).collect()
+            v.iter()
+                .map(|s| {
+                    s.parse::<usize>()
+                        .map_err(|_| format!("{key} 里有非数字 {s}"))
+                })
+                .collect()
         };
         match key.as_str() {
             "FIELDS" => names = rest.iter().map(|s| s.to_string()).collect(),
             "SIZE" => sizes = nums(&rest)?,
-            "TYPE" => kinds = rest.iter().map(|s| s.chars().next().unwrap_or('F')).collect(),
+            "TYPE" => {
+                kinds = rest
+                    .iter()
+                    .map(|s| s.chars().next().unwrap_or('F'))
+                    .collect()
+            }
             "COUNT" => counts = nums(&rest)?,
             "WIDTH" => width = nums(&rest)?.first().copied().unwrap_or(0),
             "HEIGHT" => height = nums(&rest)?.first().copied().unwrap_or(1),
             "POINTS" => points = nums(&rest)?.first().copied(),
             "DATA" => {
-                data = rest.first().map(|s| s.to_ascii_lowercase()).unwrap_or_default();
+                data = rest
+                    .first()
+                    .map(|s| s.to_ascii_lowercase())
+                    .unwrap_or_default();
                 break;
             }
             _ => {}
@@ -147,7 +165,12 @@ pub fn parse_pcd(bytes: &[u8]) -> Result<PcdCloud, String> {
         return Err("FIELDS / SIZE / TYPE / COUNT 的个数对不上".into());
     }
     let fields: Vec<Field> = (0..names.len())
-        .map(|i| Field { name: names[i].clone(), size: sizes[i], kind: kinds[i], count: counts[i] })
+        .map(|i| Field {
+            name: names[i].clone(),
+            size: sizes[i],
+            kind: kinds[i],
+            count: counts[i],
+        })
         .collect();
     let n = points.unwrap_or(width * height);
     let find = |name: &str| fields.iter().position(|f| f.name == name);
@@ -170,7 +193,12 @@ pub fn parse_pcd(bytes: &[u8]) -> Result<PcdCloud, String> {
 
     if data == "ascii" {
         let text = std::str::from_utf8(body).map_err(|_| "ascii 数据不是文本")?;
-        for line in text.lines().map(str::trim).filter(|l| !l.is_empty()).take(n) {
+        for line in text
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .take(n)
+        {
             let tokens: Vec<&str> = line.split_whitespace().collect();
             // 每个字段的第一个分量在这一行里的下标
             let mut at = Vec::with_capacity(fields.len());
@@ -181,7 +209,10 @@ pub fn parse_pcd(bytes: &[u8]) -> Result<PcdCloud, String> {
             }
             // 直接按 f32 解析：先解成 f64 再截成 f32 是两次舍入，偶尔差最后一位
             let num = |f: usize| -> f32 {
-                tokens.get(at[f]).and_then(|t| t.parse::<f32>().ok()).unwrap_or(f32::NAN)
+                tokens
+                    .get(at[f])
+                    .and_then(|t| t.parse::<f32>().ok())
+                    .unwrap_or(f32::NAN)
             };
             cloud.xyz.extend([num(fx), num(fy), num(fz)]);
             if let Some(f) = fi {
@@ -202,7 +233,10 @@ pub fn parse_pcd(bytes: &[u8]) -> Result<PcdCloud, String> {
             }
         }
         if cloud.xyz.len() != n * 3 {
-            return Err(format!("ascii 数据只有 {} 个点，头里写的是 {n}", cloud.xyz.len() / 3));
+            return Err(format!(
+                "ascii 数据只有 {} 个点，头里写的是 {n}",
+                cloud.xyz.len() / 3
+            ));
         }
         return Ok(cloud);
     }
@@ -216,7 +250,9 @@ pub fn parse_pcd(bytes: &[u8]) -> Result<PcdCloud, String> {
             }
             let packed = u32::from_le_bytes(body[0..4].try_into().unwrap()) as usize;
             let raw = u32::from_le_bytes(body[4..8].try_into().unwrap()) as usize;
-            let chunk = body.get(8..8 + packed).ok_or("binary_compressed 数据被截断")?;
+            let chunk = body
+                .get(8..8 + packed)
+                .ok_or("binary_compressed 数据被截断")?;
             (lzf_decompress(chunk, raw)?, true)
         }
         other => return Err(format!("不认识的 DATA 格式 {other}")),
@@ -229,15 +265,25 @@ pub fn parse_pcd(bytes: &[u8]) -> Result<PcdCloud, String> {
         acc += if soa { f.bytes() * n } else { f.bytes() };
     }
     if buffer.len() < step * n {
-        return Err(format!("二进制数据 {} 字节，{n} 个点要 {} 字节", buffer.len(), step * n));
+        return Err(format!(
+            "二进制数据 {} 字节，{n} 个点要 {} 字节",
+            buffer.len(),
+            step * n
+        ));
     }
     let at = |f: usize, i: usize| -> &[u8] {
-        let off = if soa { starts[f] + i * fields[f].bytes() } else { i * step + starts[f] };
+        let off = if soa {
+            starts[f] + i * fields[f].bytes()
+        } else {
+            i * step + starts[f]
+        };
         &buffer[off..off + fields[f].size]
     };
     let num = |f: usize, i: usize| scalar(at(f, i), fields[f].kind, fields[f].size);
     for i in 0..n {
-        cloud.xyz.extend([num(fx, i) as f32, num(fy, i) as f32, num(fz, i) as f32]);
+        cloud
+            .xyz
+            .extend([num(fx, i) as f32, num(fy, i) as f32, num(fz, i) as f32]);
         if let Some(f) = fi {
             cloud.intensity.push(num(f, i) as f32);
         }
@@ -246,7 +292,11 @@ pub fn parse_pcd(bytes: &[u8]) -> Result<PcdCloud, String> {
         }
         if let Some(f) = frgb {
             let b = at(f, i);
-            let packed = if b.len() >= 4 { u32::from_le_bytes(b[..4].try_into().unwrap()) } else { 0 };
+            let packed = if b.len() >= 4 {
+                u32::from_le_bytes(b[..4].try_into().unwrap())
+            } else {
+                0
+            };
             unpack_rgb(packed, &mut cloud.rgb);
         }
     }
@@ -287,9 +337,10 @@ mod tests {
             body.extend((x * 2.0).to_le_bytes());
             body.extend(v.to_le_bytes());
         }
-        let mut file = b"VERSION 0.7\nFIELDS x y z rgb\nSIZE 4 4 4 4\nTYPE F F F U\nCOUNT 1 1 1 1\n\
+        let mut file =
+            b"VERSION 0.7\nFIELDS x y z rgb\nSIZE 4 4 4 4\nTYPE F F F U\nCOUNT 1 1 1 1\n\
 WIDTH 2\nHEIGHT 1\nPOINTS 2\nDATA binary\n"
-            .to_vec();
+                .to_vec();
         file.extend(body);
         let c = parse_pcd(&file).unwrap();
         assert_eq!(c.xyz, vec![0.5, 0.0, 1.0, -1.25, 0.0, -2.5]);

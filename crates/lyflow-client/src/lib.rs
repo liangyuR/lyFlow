@@ -276,12 +276,8 @@ type FnStringFree = unsafe extern "C" fn(*mut c_char);
 type FnValidate = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
 type FnValidateParams =
     unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> *mut c_char;
-type FnPlan = unsafe extern "C" fn(
-    *const c_char,
-    *const c_char,
-    *const *const c_char,
-    usize,
-) -> *mut c_char;
+type FnPlan =
+    unsafe extern "C" fn(*const c_char, *const c_char, *const *const c_char, usize) -> *mut c_char;
 type FnPlanParams = unsafe extern "C" fn(
     *const c_char,
     *const c_char,
@@ -336,8 +332,7 @@ type FnImageViewFree = unsafe extern "C" fn(*mut ImageViewRaw);
 type FnOutputInfo = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
 type FnRunOutputs = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type FnRunSummary = unsafe extern "C" fn(*const c_char) -> *mut c_char;
-type FnImport =
-    unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> *mut c_char;
+type FnImport = unsafe extern "C" fn(*const c_char, *const c_char, *const c_char) -> *mut c_char;
 type FnSetLibraryDirs = unsafe extern "C" fn(*const *const c_char, usize) -> *mut c_char;
 type FnLibraryCount = unsafe extern "C" fn() -> usize;
 type FnLibraryDefinition = unsafe extern "C" fn(*const c_char) -> *mut c_char;
@@ -423,7 +418,8 @@ fn open_library(path: &Path) -> Result<Library, libloading::Error> {
     } else {
         std::env::current_dir().unwrap_or_default().join(path)
     };
-    unsafe { WinLibrary::load_with_flags(&abs, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR) }.map(Library::from)
+    unsafe { WinLibrary::load_with_flags(&abs, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR) }
+        .map(Library::from)
 }
 
 #[cfg(not(windows))]
@@ -449,7 +445,11 @@ impl Core {
         let abi = read_version(abi_version)?;
         let engine = read_version(version)?;
         if abi != ABI_VERSION || engine != ABI_VERSION {
-            return Err(CoreError::VersionMismatch { client: ABI_VERSION, abi, engine });
+            return Err(CoreError::VersionMismatch {
+                client: ABI_VERSION,
+                abi,
+                engine,
+            });
         }
 
         Ok(Core {
@@ -513,7 +513,11 @@ impl Core {
     }
 
     pub fn abi_version(&self) -> String {
-        unsafe { CStr::from_ptr((self.abi_version)()).to_string_lossy().into_owned() }
+        unsafe {
+            CStr::from_ptr((self.abi_version)())
+                .to_string_lossy()
+                .into_owned()
+        }
     }
 
     pub fn source_revision(&self) -> String {
@@ -521,7 +525,10 @@ impl Core {
         if raw.is_null() {
             return String::new();
         }
-        unsafe { CStr::from_ptr(raw) }.to_str().unwrap_or_default().to_owned()
+        unsafe { CStr::from_ptr(raw) }
+            .to_str()
+            .unwrap_or_default()
+            .to_owned()
     }
 
     pub fn manifest_json(&self) -> Result<String, CoreError> {
@@ -635,7 +642,11 @@ impl Core {
             .map(|t| CString::new(t.as_str()))
             .collect::<Result<_, _>>()?;
         let ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
-        let head = if ptrs.is_empty() { std::ptr::null() } else { ptrs.as_ptr() };
+        let head = if ptrs.is_empty() {
+            std::ptr::null()
+        } else {
+            ptrs.as_ptr()
+        };
         unsafe {
             self.take_owned((self.cache_evict)(
                 g.as_ptr(),
@@ -657,10 +668,15 @@ impl Core {
     pub fn self_check(&self) -> Result<(), String> {
         let problems = self.manifest_problems().map_err(|e| e.to_string())?;
         if !problems.is_empty() {
-            return Err(format!("算子描述自检有 {} 条问题：
-  - {}", problems.len(),
-                               problems.join("
-  - ")));
+            return Err(format!(
+                "算子描述自检有 {} 条问题：
+  - {}",
+                problems.len(),
+                problems.join(
+                    "
+  - "
+                )
+            ));
         }
         let raw = self.manifest_json().map_err(|e| e.to_string())?;
         serde_json::from_str::<serde_json::Value>(&raw)
@@ -697,8 +713,9 @@ impl Core {
     pub fn cache_set_dir(&self, dir: &str, build_identity: &str) -> Result<(), String> {
         let cs = |s: &str| CString::new(s).map_err(|e| e.to_string());
         let (d, identity) = (cs(dir)?, cs(build_identity)?);
-        let message = unsafe { self.take_owned((self.cache_set_dir)(d.as_ptr(), identity.as_ptr())) }
-            .map_err(|e| e.to_string())?;
+        let message =
+            unsafe { self.take_owned((self.cache_set_dir)(d.as_ptr(), identity.as_ptr())) }
+                .map_err(|e| e.to_string())?;
         if message.is_empty() {
             Ok(())
         } else {
@@ -1230,8 +1247,7 @@ impl RunHandle {
             .iter()
             .map(|t| CString::new(t.as_str()))
             .collect::<Result<_, _>>()?;
-        let target_ptrs: Vec<*const c_char> =
-            target_cstrings.iter().map(|c| c.as_ptr()).collect();
+        let target_ptrs: Vec<*const c_char> = target_cstrings.iter().map(|c| c.as_ptr()).collect();
         let isolate_cstrings: Vec<CString> = spec
             .isolate
             .iter()
@@ -1250,7 +1266,12 @@ impl RunHandle {
         let input_names: Vec<(CString, CString)> = spec
             .inputs
             .iter()
-            .map(|i| Ok((CString::new(i.node_id.as_str())?, CString::new(i.port.as_str())?)))
+            .map(|i| {
+                Ok((
+                    CString::new(i.node_id.as_str())?,
+                    CString::new(i.port.as_str())?,
+                ))
+            })
             .collect::<Result<_, std::ffi::NulError>>()?;
         let input_raw: Vec<RunInputRaw> = spec
             .inputs
@@ -1283,7 +1304,12 @@ impl RunHandle {
         let image_names: Vec<(CString, CString)> = spec
             .image_inputs
             .iter()
-            .map(|i| Ok((CString::new(i.node_id.as_str())?, CString::new(i.port.as_str())?)))
+            .map(|i| {
+                Ok((
+                    CString::new(i.node_id.as_str())?,
+                    CString::new(i.port.as_str())?,
+                ))
+            })
             .collect::<Result<_, std::ffi::NulError>>()?;
         let image_raw: Vec<RunImageInputRaw> = spec
             .image_inputs
@@ -1397,7 +1423,6 @@ impl Drop for RunHandle {
     }
 }
 
-
 #[cfg(test)]
 mod load_contract_tests {
     use super::*;
@@ -1413,8 +1438,12 @@ mod load_contract_tests {
     #[test]
     fn rejects_incompatible_versions_before_binding_business_symbols() {
         let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let fixtures = Fixtures(std::env::temp_dir().join(format!("lyflow-abi-{}-{unique}", std::process::id())));
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let fixtures = Fixtures(
+            std::env::temp_dir().join(format!("lyflow-abi-{}-{unique}", std::process::id())),
+        );
         std::fs::create_dir_all(&fixtures.0).unwrap();
         let (base, patch) = ABI_VERSION.rsplit_once('.').unwrap();
         let next_patch = format!("{base}.{}", patch.parse::<u64>().unwrap() + 1);
@@ -1434,22 +1463,43 @@ mod load_contract_tests {
             };
             let source = format!("{abi_export}\n#[no_mangle] pub extern \"C\" fn lyflow_version() -> *const std::ffi::c_char {{ b\"{engine}\\0\".as_ptr().cast() }}");
             let input = fixtures.0.join(format!("{name}.rs"));
-            let library = fixtures.0.join(format!("{name}.{}", std::env::consts::DLL_EXTENSION));
+            let library = fixtures
+                .0
+                .join(format!("{name}.{}", std::env::consts::DLL_EXTENSION));
             std::fs::write(&input, source).unwrap();
-            let mut compiler = Command::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()));
-            compiler.arg("--crate-type=cdylib").arg("--edition=2021").arg(&input).arg("-o").arg(&library);
+            let mut compiler =
+                Command::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into()));
+            compiler
+                .arg("--crate-type=cdylib")
+                .arg("--edition=2021")
+                .arg(&input)
+                .arg("-o")
+                .arg(&library);
             #[cfg(windows)]
             compiler.args(["-C", "target-feature=+crt-static"]);
             let result = compiler.output().unwrap();
-            assert!(result.status.success(), "{name}: {}", String::from_utf8_lossy(&result.stderr));
+            assert!(
+                result.status.success(),
+                "{name}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
             let error = match Core::load_from(&library) {
                 Ok(_) => panic!("incomplete fixture unexpectedly loaded: {name}"),
                 Err(error) => error,
             };
             match name {
-                "legacy" => assert!(matches!(error, CoreError::MissingSymbol("lyflow_abi_version_string")), "{error}"),
-                "matching" => assert!(matches!(error, CoreError::MissingSymbol("lyflow_source_revision")), "{error}"),
-                _ => assert!(matches!(error, CoreError::VersionMismatch { .. }), "{name}: {error}"),
+                "legacy" => assert!(
+                    matches!(error, CoreError::MissingSymbol("lyflow_abi_version_string")),
+                    "{error}"
+                ),
+                "matching" => assert!(
+                    matches!(error, CoreError::MissingSymbol("lyflow_source_revision")),
+                    "{error}"
+                ),
+                _ => assert!(
+                    matches!(error, CoreError::VersionMismatch { .. }),
+                    "{name}: {error}"
+                ),
             }
             std::fs::remove_file(&library).expect("failed loads must release the DLL handle");
         }

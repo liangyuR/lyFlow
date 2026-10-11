@@ -10,13 +10,13 @@ use std::sync::{Mutex, RwLock};
 use tauri::{Manager, Runtime};
 
 use crate::core_ffi;
-use crate::library_settings;
 use crate::execution::{
-    encode_cloud, encode_image, encode_indices, encode_tensor, PauseMode, PreviewOptions, RunManager,
-    StartOptions,
+    encode_cloud, encode_image, encode_indices, encode_tensor, PauseMode, PreviewOptions,
+    RunManager, StartOptions,
 };
 use crate::graph::GraphDoc;
 use crate::host::{self, HostConfig};
+use crate::library_settings;
 
 /// 解析过的 manifest，连同它属于第几代 core。热重载换代后这份要作废（ADR-0009）。
 static MANIFEST: RwLock<Option<(u32, serde_json::Value)>> = RwLock::new(None);
@@ -154,7 +154,9 @@ pub(crate) fn params_json_of(
     params: Option<&serde_json::Map<String, serde_json::Value>>,
 ) -> Result<Option<String>, String> {
     match params {
-        Some(p) if !p.is_empty() => serde_json::to_string(p).map(Some).map_err(|e| e.to_string()),
+        Some(p) if !p.is_empty() => serde_json::to_string(p)
+            .map(Some)
+            .map_err(|e| e.to_string()),
         _ => Ok(None),
     }
 }
@@ -277,7 +279,12 @@ pub fn plan_graph<R: Runtime>(
     params: Option<serde_json::Map<String, serde_json::Value>>,
 ) -> Result<serde_json::Value, String> {
     let graph_path = resolve_opt(&host::config(&app), graphPath)?;
-    plan_graph_at(&doc, graph_path.as_deref(), &targets.unwrap_or_default(), params.as_ref())
+    plan_graph_at(
+        &doc,
+        graph_path.as_deref(),
+        &targets.unwrap_or_default(),
+        params.as_ref(),
+    )
 }
 
 /// `plan_graph` 去掉 Tauri 那一层。
@@ -291,7 +298,12 @@ fn plan_graph_at(
     let json = serde_json::to_string(doc).map_err(|e| e.to_string())?;
     let params_json = params_json_of(params)?;
     let raw = core
-        .plan_with_params(&json, &base_dir_of(graph_path), targets, params_json.as_deref())
+        .plan_with_params(
+            &json,
+            &base_dir_of(graph_path),
+            targets,
+            params_json.as_deref(),
+        )
         .map_err(|e| e.to_string())?;
     serde_json::from_str(&raw).map_err(|e| format!("core 返回的计划不是合法 JSON: {e}"))
 }
@@ -326,8 +338,8 @@ pub fn evict_cache<R: Runtime>(
             params_json.as_deref(),
         )
         .map_err(|e| e.to_string())?;
-    let value: serde_json::Value =
-        serde_json::from_str(&raw).map_err(|e| format!("core 返回的清缓存结果不是合法 JSON: {e}"))?;
+    let value: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| format!("core 返回的清缓存结果不是合法 JSON: {e}"))?;
     // 图编不过时 core 回的是诊断数组：清不了，把第一条说出来
     if let Some(diags) = value.as_array() {
         let first = diags
@@ -453,7 +465,9 @@ pub fn scan_snippets(dirs: &[String]) -> SnippetScan {
     let mut snippets = Vec::new();
     let mut problems = Vec::new();
     for dir in dirs {
-        let Ok(entries) = std::fs::read_dir(dir) else { continue };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
         let mut files: Vec<PathBuf> = entries
             .flatten()
             .map(|e| e.path())
@@ -463,7 +477,9 @@ pub fn scan_snippets(dirs: &[String]) -> SnippetScan {
         for file in files {
             let parsed = std::fs::read_to_string(&file)
                 .map_err(|e| e.to_string())
-                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).map_err(|e| e.to_string()));
+                .and_then(|t| {
+                    serde_json::from_str::<serde_json::Value>(&t).map_err(|e| e.to_string())
+                });
             match parsed {
                 Ok(mut v)
                     if v["id"].is_string() && v["label"].is_string() && v["nodes"].is_array() =>
@@ -507,7 +523,13 @@ pub fn get_output_tensor(
 ) -> Result<tauri::ipc::Response, String> {
     let core = core_ffi::core()?;
     let view = core
-        .output_tensor(&runId, &nodeId, &port, offset.unwrap_or(0), clamp_slice(count))
+        .output_tensor(
+            &runId,
+            &nodeId,
+            &port,
+            offset.unwrap_or(0),
+            clamp_slice(count),
+        )
         .map_err(|e| e.to_string())?;
     Ok(tauri::ipc::Response::new(encode_tensor(&view)))
 }
@@ -522,7 +544,13 @@ pub fn get_output_indices(
 ) -> Result<tauri::ipc::Response, String> {
     let core = core_ffi::core()?;
     let view = core
-        .output_indices(&runId, &nodeId, &port, offset.unwrap_or(0), clamp_slice(count))
+        .output_indices(
+            &runId,
+            &nodeId,
+            &port,
+            offset.unwrap_or(0),
+            clamp_slice(count),
+        )
         .map_err(|e| e.to_string())?;
     Ok(tauri::ipc::Response::new(encode_indices(&view)))
 }
@@ -643,7 +671,9 @@ pub struct LibrarySettings {
 }
 
 #[tauri::command]
-pub fn get_library_settings<R: Runtime>(app: tauri::AppHandle<R>) -> Result<LibrarySettings, String> {
+pub fn get_library_settings<R: Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<LibrarySettings, String> {
     if let Some(dirs) = host::config(&app).library_dirs.as_ref() {
         let mut all = dirs.iter().map(|d| d.to_string_lossy().into_owned());
         return Ok(LibrarySettings {
@@ -953,8 +983,11 @@ pub fn push_recent_file<R: Runtime>(
     );
     list.truncate(10);
     let file = recent_file(&app)?;
-    std::fs::write(&file, serde_json::to_string_pretty(&list).map_err(|e| e.to_string())?)
-        .map_err(|e| format!("写入 {} 失败: {e}", file.display()))?;
+    std::fs::write(
+        &file,
+        serde_json::to_string_pretty(&list).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("写入 {} 失败: {e}", file.display()))?;
     Ok(list)
 }
 
@@ -1007,7 +1040,10 @@ pub fn read_backup<R: Runtime>(
     app: tauri::AppHandle<R>,
     path: String,
 ) -> Result<LoadedGraph, String> {
-    load_graph_at(&backup_path(&host::resolve_path(&host::config(&app), &path)?))
+    load_graph_at(&backup_path(&host::resolve_path(
+        &host::config(&app),
+        &path,
+    )?))
 }
 
 /// 没存过盘的图的定时备份放在哪：`<app data>/untitled.lyflow.json`。这个文件本身从不存在，备份写的是
@@ -1017,7 +1053,10 @@ pub fn read_backup<R: Runtime>(
 pub fn untitled_backup_path<R: Runtime>(app: tauri::AppHandle<R>) -> Result<String, String> {
     let dir = app_data_dir(&app)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建 {} 失败: {e}", dir.display()))?;
-    Ok(dir.join("untitled.lyflow.json").to_string_lossy().into_owned())
+    Ok(dir
+        .join("untitled.lyflow.json")
+        .to_string_lossy()
+        .into_owned())
 }
 
 #[tauri::command]
@@ -1080,7 +1119,9 @@ fn plain_absolute(raw: &str) -> Result<PathBuf, String> {
     if !p.is_absolute() {
         return Err(format!("配方文件要给绝对路径：{raw}"));
     }
-    if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+    if p.components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
         return Err(format!("路径里不能有 ..：{raw}"));
     }
     Ok(p)
@@ -1102,7 +1143,9 @@ fn check_recipe_path(raw: &str, access: RecipeAccess) -> Result<PathBuf, String>
         .ok_or_else(|| format!("不是文件路径：{raw}"))?;
     let in_dir = p.parent().is_some_and(is_recipe_dir);
     let ok = match access {
-        RecipeAccess::ReadWrite => is_recipe_file_name(name) || (in_dir && is_recipe_aux_name(name)),
+        RecipeAccess::ReadWrite => {
+            is_recipe_file_name(name) || (in_dir && is_recipe_aux_name(name))
+        }
         RecipeAccess::InDir => in_dir && (is_recipe_file_name(name) || is_recipe_aux_name(name)),
     };
     if ok {
@@ -1119,25 +1162,38 @@ fn check_recipe_path(raw: &str, access: RecipeAccess) -> Result<PathBuf, String>
 pub fn list_recipe_dir(dir: String) -> Result<RecipeDirListing, String> {
     let p = plain_absolute(&dir)?;
     if !is_recipe_dir(&p) {
-        return Err(format!("不是配方目录（名字要以 {RECIPE_DIR_SUFFIX} 结尾）：{dir}"));
+        return Err(format!(
+            "不是配方目录（名字要以 {RECIPE_DIR_SUFFIX} 结尾）：{dir}"
+        ));
     }
     if !p.is_dir() {
-        return Ok(RecipeDirListing { exists: false, files: Vec::new() });
+        return Ok(RecipeDirListing {
+            exists: false,
+            files: Vec::new(),
+        });
     }
     let mut files = Vec::new();
     for entry in std::fs::read_dir(&p).map_err(|e| format!("读目录 {dir} 失败: {e}"))? {
         let entry = entry.map_err(|e| e.to_string())?;
-        let Some(name) = entry.file_name().to_str().map(str::to_owned) else { continue };
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
         if !(is_recipe_file_name(&name) || is_recipe_aux_name(&name)) {
             continue;
         }
         if !entry.file_type().is_ok_and(|t| t.is_file()) {
             continue;
         }
-        files.push(RecipeDirEntry { modified: modified_ms(&entry.path()), name });
+        files.push(RecipeDirEntry {
+            modified: modified_ms(&entry.path()),
+            name,
+        });
     }
     files.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(RecipeDirListing { exists: true, files })
+    Ok(RecipeDirListing {
+        exists: true,
+        files,
+    })
 }
 
 #[tauri::command]
@@ -1182,8 +1238,13 @@ pub fn delete_recipe_file(path: String) -> Result<(), String> {
 pub fn rename_recipe_file(from: String, to: String) -> Result<(), String> {
     let a = check_recipe_path(&from, RecipeAccess::InDir)?;
     let b = check_recipe_path(&to, RecipeAccess::InDir)?;
-    let names_ok = a.file_name().and_then(|n| n.to_str()).is_some_and(is_recipe_file_name)
-        && b.file_name().and_then(|n| n.to_str()).is_some_and(is_recipe_file_name);
+    let names_ok = a
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(is_recipe_file_name)
+        && b.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(is_recipe_file_name);
     if !names_ok {
         return Err("只有配方文件（*.lyflow-recipe.json）能改名".into());
     }
@@ -1234,7 +1295,10 @@ mod tests {
         let m = get_manifest().expect("get_manifest 失败");
         assert_eq!(m["schemaVersion"], 1);
         assert!(!m["operators"].as_array().unwrap().is_empty());
-        assert_eq!(info.operator_count, m["operators"].as_array().unwrap().len());
+        assert_eq!(
+            info.operator_count,
+            m["operators"].as_array().unwrap().len()
+        );
         assert_eq!(info.type_count, m["types"].as_array().unwrap().len());
         assert!(!info.version.is_empty());
     }
@@ -1345,7 +1409,8 @@ mod tests {
         let original: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let doc: GraphDoc = serde_json::from_str(&raw).unwrap();
 
-        let dir = std::env::temp_dir().join(format!("lyflow-test-graph-params-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("lyflow-test-graph-params-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("g.lyflow.json");
         save_graph_at(&path, &doc).expect("save_graph 失败");
@@ -1357,10 +1422,23 @@ mod tests {
             v.as_object().unwrap().keys().cloned().collect()
         };
         assert_eq!(keys(&back["params"]), keys(&original["params"]));
-        assert_eq!(keys(&back["params"]["leafSize"]), keys(&original["params"]["leafSize"]));
+        assert_eq!(
+            keys(&back["params"]["leafSize"]),
+            keys(&original["params"]["leafSize"])
+        );
         // 规格字段逐个在：label、限位、单位、分组、分量名、options、placeholder
         let leaf = &back["params"]["leafSize"];
-        for key in ["label", "min", "max", "softMin", "softMax", "step", "unit", "group", "componentLabels"] {
+        for key in [
+            "label",
+            "min",
+            "max",
+            "softMin",
+            "softMax",
+            "step",
+            "unit",
+            "group",
+            "componentLabels",
+        ] {
             assert!(leaf.get(key).is_some(), "leafSize 丢了 {key}");
         }
         assert_eq!(back["params"]["cutField"]["options"][2]["doc"], "竖直方向");
@@ -1398,13 +1476,23 @@ mod tests {
             serde_json::from_value(v).unwrap()
         };
 
-        assert_eq!(validate_graph_at(&doc, None, None).unwrap(), serde_json::json!([]));
-        let bad = validate_graph_at(&doc, None, Some(&values(serde_json::json!({"count": 9000}))))
-            .unwrap();
+        assert_eq!(
+            validate_graph_at(&doc, None, None).unwrap(),
+            serde_json::json!([])
+        );
+        let bad = validate_graph_at(
+            &doc,
+            None,
+            Some(&values(serde_json::json!({"count": 9000}))),
+        )
+        .unwrap();
         let d = &bad.as_array().unwrap()[0];
         assert_eq!(d["code"], "bad_param", "{bad}");
         assert_eq!(d["paramPath"], "count");
-        assert!(d.get("nodeId").map_or(true, |n| n == "" || n.is_null()), "{d}");
+        assert!(
+            d.get("nodeId").map_or(true, |n| n == "" || n.is_null()),
+            "{d}"
+        );
         // 空对象 = 全用 default，与不给一样
         assert_eq!(
             validate_graph_at(&doc, None, Some(&values(serde_json::json!({})))).unwrap(),
@@ -1412,29 +1500,63 @@ mod tests {
         );
 
         let key_of = |plan: &serde_json::Value, id: &str| -> String {
-            plan.as_array().unwrap().iter().find(|n| n["nodeId"] == id).unwrap()["cacheKey"]
+            plan.as_array()
+                .unwrap()
+                .iter()
+                .find(|n| n["nodeId"] == id)
+                .unwrap()["cacheKey"]
                 .as_str()
                 .unwrap()
                 .to_string()
         };
         let base = plan_graph_at(&doc, None, &[], None).unwrap();
-        let same = plan_graph_at(&doc, None, &[], Some(&values(serde_json::json!({"count": 3000}))))
-            .unwrap();
-        let other = plan_graph_at(&doc, None, &[], Some(&values(serde_json::json!({"count": 2500}))))
-            .unwrap();
-        assert_eq!(key_of(&base, "g"), key_of(&same, "g"), "传回 default 键不变");
-        assert_ne!(key_of(&base, "g"), key_of(&other, "g"), "被绑定节点的键跟着值变");
+        let same = plan_graph_at(
+            &doc,
+            None,
+            &[],
+            Some(&values(serde_json::json!({"count": 3000}))),
+        )
+        .unwrap();
+        let other = plan_graph_at(
+            &doc,
+            None,
+            &[],
+            Some(&values(serde_json::json!({"count": 2500}))),
+        )
+        .unwrap();
+        assert_eq!(
+            key_of(&base, "g"),
+            key_of(&same, "g"),
+            "传回 default 键不变"
+        );
+        assert_ne!(
+            key_of(&base, "g"),
+            key_of(&other, "g"),
+            "被绑定节点的键跟着值变"
+        );
         assert_ne!(key_of(&base, "v"), key_of(&other, "v"), "下游跟着变");
         // 越界值连计划都编不出来：返回诊断数组
-        let blocked = plan_graph_at(&doc, None, &[], Some(&values(serde_json::json!({"count": 1}))))
-            .unwrap();
+        let blocked = plan_graph_at(
+            &doc,
+            None,
+            &[],
+            Some(&values(serde_json::json!({"count": 1}))),
+        )
+        .unwrap();
         assert_eq!(blocked[0]["code"], "bad_param");
     }
 
     #[test]
     fn cache_stats_has_the_documented_shape() {
         let stats = cache_stats().expect("cache_stats 失败");
-        for key in ["entries", "bytes", "budgetBytes", "hits", "misses", "evictions"] {
+        for key in [
+            "entries",
+            "bytes",
+            "budgetBytes",
+            "hits",
+            "misses",
+            "evictions",
+        ] {
             assert!(stats[key].is_number(), "{key} 不是数字: {stats}");
         }
         assert!(stats["budgetBytes"].as_u64().unwrap() > 0);
@@ -1512,12 +1634,30 @@ mod tests {
         assert!(!listing.exists && listing.files.is_empty());
 
         let a = dir.join("车型A·左前门.lyflow-recipe.json");
-        write_recipe_file(s(&a), "{\"schemaVersion\":1,\"name\":\"车型A·左前门\",\"values\":{}}\n".into())
-            .expect("写配方失败");
-        write_recipe_file(s(&dir.join("index.json")), "{\"order\":[\"车型A·左前门\"]}\n".into()).unwrap();
+        write_recipe_file(
+            s(&a),
+            "{\"schemaVersion\":1,\"name\":\"车型A·左前门\",\"values\":{}}\n".into(),
+        )
+        .expect("写配方失败");
+        write_recipe_file(
+            s(&dir.join("index.json")),
+            "{\"order\":[\"车型A·左前门\"]}\n".into(),
+        )
+        .unwrap();
         std::fs::write(dir.join("别的文件.txt"), "x").unwrap();
-        let names: Vec<String> = list_recipe_dir(s(&dir)).unwrap().files.into_iter().map(|f| f.name).collect();
-        assert_eq!(names, vec!["index.json".to_string(), "车型A·左前门.lyflow-recipe.json".to_string()]);
+        let names: Vec<String> = list_recipe_dir(s(&dir))
+            .unwrap()
+            .files
+            .into_iter()
+            .map(|f| f.name)
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "index.json".to_string(),
+                "车型A·左前门.lyflow-recipe.json".to_string()
+            ]
+        );
         assert!(read_recipe_file(s(&a)).unwrap().contains("车型A·左前门"));
         // 没留下临时文件
         assert!(!dir.join("车型A·左前门.lyflow-recipe.json.tmp~").exists());
@@ -1527,7 +1667,9 @@ mod tests {
         assert!(!a.exists() && b.exists());
         // 目标已存在：拒绝
         write_recipe_file(s(&a), "{}".into()).unwrap();
-        assert!(rename_recipe_file(s(&a), s(&b)).unwrap_err().contains("已经存在"));
+        assert!(rename_recipe_file(s(&a), s(&b))
+            .unwrap_err()
+            .contains("已经存在"));
         // 只差大小写的改名放行
         let upper = dir.join("车型b.lyflow-recipe.json");
         rename_recipe_file(s(&b), s(&upper)).expect("大小写改名失败");
@@ -1550,14 +1692,23 @@ mod tests {
         assert!(write_recipe_file(s(&root.join("index.json")), "{}".into()).is_err());
         // 相对路径与 ..
         assert!(read_recipe_file("a.lyflow-recipe.json".into()).is_err());
-        assert!(write_recipe_file(s(&dir.join("..").join("x.lyflow-recipe.json")), "{}".into()).is_err());
+        assert!(
+            write_recipe_file(s(&dir.join("..").join("x.lyflow-recipe.json")), "{}".into())
+                .is_err()
+        );
         // 删与改名只在配方目录里
         assert!(delete_recipe_file(s(&root.join("x.lyflow-recipe.json"))).is_err());
-        assert!(rename_recipe_file(s(&dir.join("a.lyflow-recipe.json")), s(&root.join("b.lyflow-recipe.json"))).is_err());
+        assert!(rename_recipe_file(
+            s(&dir.join("a.lyflow-recipe.json")),
+            s(&root.join("b.lyflow-recipe.json"))
+        )
+        .is_err());
         assert!(list_recipe_dir(s(&root)).is_err());
         // 内容不是 JSON 对象
         assert!(write_recipe_file(s(&dir.join("a.lyflow-recipe.json")), "[1,2]".into()).is_err());
-        assert!(write_recipe_file(s(&dir.join("a.lyflow-recipe.json")), "not json".into()).is_err());
+        assert!(
+            write_recipe_file(s(&dir.join("a.lyflow-recipe.json")), "not json".into()).is_err()
+        );
         // 导出：任意位置的配方文件能写
         let out = root.join("导出").join("x.lyflow-recipe.json");
         write_recipe_file(s(&out), "{}".into()).expect("导出失败");

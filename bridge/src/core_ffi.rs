@@ -170,7 +170,10 @@ mod tests {
             .collect();
         for pack in ["std-pointcloud", "std-ml"] {
             if cfg!(std_packs_off) {
-                assert!(!packs.contains(pack), "LYFLOW_STD_PACKS=0，manifest 里却有 {pack} 的算子");
+                assert!(
+                    !packs.contains(pack),
+                    "LYFLOW_STD_PACKS=0，manifest 里却有 {pack} 的算子"
+                );
             } else {
                 assert!(
                     packs.contains(pack),
@@ -206,7 +209,11 @@ mod tests {
         for b in v["bundles"].as_array().into_iter().flatten() {
             for f in b["fields"].as_array().unwrap() {
                 let ty = f["type"].as_str().unwrap();
-                assert!(types.contains(&ty), "bundle {} 的字段类型 {ty} 不在类型表里", b["kind"]);
+                assert!(
+                    types.contains(&ty),
+                    "bundle {} 的字段类型 {ty} 不在类型表里",
+                    b["kind"]
+                );
             }
         }
         for op in ops {
@@ -304,7 +311,11 @@ mod tests {
     #[test]
     fn generation_dll_names_are_distinct_and_cleanup_is_safe() {
         assert_ne!(generation_path(1), generation_path(2));
-        let name = generation_path(7).file_name().unwrap().to_string_lossy().into_owned();
+        let name = generation_path(7)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         assert!(name.contains("gen7"), "{name}");
         // 同一个 deps/ 下可能有别的测试进程在换代，名字必须带 pid 才不会撞上
         assert!(name.contains(&format!("p{}", std::process::id())), "{name}");
