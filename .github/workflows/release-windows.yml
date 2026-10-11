@@ -77,9 +77,12 @@ jobs:
         run: |
           $configuration = Get-Content -LiteralPath packaging/release.json -Raw | ConvertFrom-Json
           $baseline = $configuration.vcpkgBaseline
+          $onnxVersion = $configuration.onnxruntimeVersion
           $toolset = "$env:VCToolsVersion".Trim().TrimEnd('\')
           if ($baseline -notmatch '^[0-9a-f]{40}$') { throw '发布配置缺少固定 vcpkg baseline' }
           if ($toolset -notmatch '^\d+\.\d+\.\d+$') { throw '无法识别当前 MSVC toolset' }
+          if ($onnxVersion -notmatch '^\d+\.\d+\.\d+$') { throw '发布配置缺少固定 ONNX Runtime 版本' }
+          "onnx-version=$onnxVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "baseline=$baseline" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "toolset=$toolset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
@@ -87,8 +90,13 @@ jobs:
         id: native-cache-restore
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-std-glue-v1-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-std-glue-v1-
+          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-std-glue-v2
+
+      - uses: actions/cache/restore@v4
+        id: onnx-cache-restore
+        with:
+          path: third_party/onnxruntime/onnxruntime-win-x64-${{ steps.native-cache.outputs.onnx-version }}
+          key: onnxruntime-win-x64-cpu-${{ steps.native-cache.outputs.onnx-version }}-v1
 
       - name: 固定 Rust 工具链
         shell: pwsh
@@ -102,6 +110,24 @@ jobs:
       - name: pnpm install
         run: pnpm install --frozen-lockfile
 
+      - name: 准备并验证固定发布依赖
+        shell: pwsh
+        run: ./scripts/prepare-release-deps.ps1
+
+      - name: 保存完整 vcpkg 缓存
+        uses: actions/cache/save@v4
+        if: steps.native-cache-restore.outputs.cache-hit != 'true'
+        with:
+          path: build/release-deps/binary-cache
+          key: ${{ steps.native-cache-restore.outputs.cache-primary-key }}
+
+      - name: 保存 ONNX Runtime 缓存
+        uses: actions/cache/save@v4
+        if: steps.onnx-cache-restore.outputs.cache-hit != 'true'
+        with:
+          path: third_party/onnxruntime/onnxruntime-win-x64-${{ steps.native-cache.outputs.onnx-version }}
+          key: ${{ steps.onnx-cache-restore.outputs.cache-primary-key }}
+
       - name: 同一本地入口构建、测试和打包
         shell: pwsh
         run: |
@@ -109,21 +135,6 @@ jobs:
           if ($env:GITHUB_REF_TYPE -eq 'tag') { $arguments += @('-ExpectedTag', $env:GITHUB_REF_NAME) }
           pnpm run package @arguments
           if ($LASTEXITCODE -ne 0) { throw 'Windows 发包门禁失败' }
-
-      - name: 检查可保存的依赖缓存
-        if: always()
-        id: native-cache-state
-        shell: pwsh
-        run: |
-          $cache = Join-Path $env:GITHUB_WORKSPACE 'build/release-deps/binary-cache'
-          $exists = (Test-Path -LiteralPath $cache -PathType Container) -and ($null -ne (Get-ChildItem -LiteralPath $cache -File -Recurse -Filter '*.zip' | Select-Object -First 1))
-          "exists=$($exists.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
-      - uses: actions/cache/save@v4
-        if: always() && steps.native-cache-state.outputs.exists == 'true' && steps.native-cache-restore.outputs.cache-primary-key != '' && steps.native-cache-restore.outputs.cache-hit != 'true'
-        with:
-          path: build/release-deps/binary-cache
-          key: ${{ steps.native-cache-restore.outputs.cache-primary-key }}
 
       - uses: actions/upload-artifact@v4
         with:
