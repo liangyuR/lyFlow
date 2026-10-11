@@ -21,7 +21,7 @@ void registerTensorToImage(Registry& r);
 void registerCloudFromDepth(Registry& r);
 void registerCloudToDepthImage(Registry& r);
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops
 
 namespace lyflow::std_image {
 void registerBoardCalib(Registry& r);

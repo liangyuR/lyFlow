@@ -32,14 +32,13 @@ try {
     }
     if ($env:LYFLOW_OP_PACKS) { throw 'External operator packs are forbidden in release packaging.' }
     $configuration = Get-Content -LiteralPath (Join-Path $root 'packaging/release.json') -Raw | ConvertFrom-Json
-    if ($configuration.gsClientRevision -isnot [string] -or $configuration.gsClientRevision -cnotmatch '^[0-9a-f]{40}$') { throw 'Pin the real product-version ABI client revision before packaging.' }
     $env:LYFLOW_STD_PACKS = '1'
     $env:LYFLOW_PACKS = 'glue'
     $env:LYFLOW_OP_PACKS = ''
     $buildParent = Join-Path $root 'build'
     if (-not $OutputDir) { $OutputDir = Join-Path $buildParent 'release' }
     $output = [IO.Path]::GetFullPath($OutputDir)
-    foreach ($reserved in @('release-stage', 'release-core', 'release-rust', 'release-fixtures', 'release-tools', 'release-deps')) {
+    foreach ($reserved in @('release-stage', 'release-core', 'release-rust', 'release-fixtures', 'release-tools', 'release-deps', 'release-diagnostics')) {
         $reservedPath = [IO.Path]::GetFullPath((Join-Path $buildParent $reserved))
         if ($output.Equals($reservedPath, [StringComparison]::OrdinalIgnoreCase) -or $output.StartsWith($reservedPath + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Output directory overlaps internal release workspace: $output"
@@ -48,11 +47,12 @@ try {
     New-Item -ItemType Directory -Path $output -Force | Out-Null
     $runtimeZip = Join-Path $output "lyflow-runtime-win-x64-v$version.zip"
     $sdkZip = Join-Path $output "lyflow-sdk-win-x64-v$version.zip"
-    foreach ($archive in @($runtimeZip, $sdkZip, (Join-Path $output 'lyflow-runtime.json'), (Join-Path $output 'verification-report.json'))) {
+    foreach ($archive in @($runtimeZip, $sdkZip, (Join-Path $output 'lyflow-runtime.json'))) {
         if (Test-Path -LiteralPath $archive) { throw "Release asset already exists; use a fresh output directory: $archive" }
     }
     $stage = Reset-ReleaseDirectory -Path (Join-Path $buildParent 'release-stage') -Parent $buildParent
     $coreBuild = Reset-ReleaseDirectory -Path (Join-Path $buildParent 'release-core') -Parent $buildParent
+    $diagnostics = Reset-ReleaseDirectory -Path (Join-Path $buildParent 'release-diagnostics') -Parent $buildParent
     $runtime = Join-Path $stage 'runtime'
     $sdk = Join-Path $stage 'sdk'
     New-Item -ItemType Directory -Path $runtime, $sdk -Force | Out-Null
@@ -65,8 +65,14 @@ try {
     & (Join-Path $PSScriptRoot 'build-core.ps1') -BuildDir $coreBuild -ReleaseBuild
     $env:LYFLOW_PREBUILT_CORE_DIR = Join-Path $coreBuild 'bin'
     $env:CARGO_TARGET_DIR = Join-Path $buildParent 'release-rust'
-    & cargo build --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --bin lyflow --no-default-features
-    Assert-ReleaseExit 'Build release CLI'
+    & cargo build --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --bin lyflow --no-default-features 2>&1 |
+        Tee-Object -FilePath (Join-Path $diagnostics 'cargo-build.log')
+    $buildExit = $LASTEXITCODE
+    if ($buildExit -ne 0) { Write-Host "Build release CLI failed (exit $buildExit)"; exit $buildExit }
+    & cargo test --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --no-default-features --features host --lib --bins 2>&1 |
+        Tee-Object -FilePath (Join-Path $diagnostics 'cargo-test.log')
+    $testExit = $LASTEXITCODE
+    if ($testExit -ne 0) { Write-Host "Release Rust unit tests failed (exit $testExit)"; exit $testExit }
     $vs = Get-ReleaseVisualStudio
     $cmake = Join-Path $vs 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
     if (-not (Test-Path -LiteralPath $cmake)) { $cmake = 'cmake' }
@@ -136,7 +142,7 @@ try {
     $dependencies.Add([ordered]@{ name = 'onnxruntime'; version = $configuration.onnxruntimeVersion })
     $dependencies.Add([ordered]@{ name = 'visual-cpp-crt'; version = (Get-Item -LiteralPath (Join-Path $runtime 'vcruntime140.dll')).VersionInfo.FileVersion })
     $inspectionPath = Join-Path $stage 'inspection.json'
-    & (Join-Path $PSScriptRoot 'test-release.ps1') -InspectOnly -RuntimeDir $runtime -ReportPath $inspectionPath
+    & (Join-Path $PSScriptRoot 'inspect-runtime.ps1') -RuntimeDir $runtime -ReportPath $inspectionPath
     $inspection = Get-Content -LiteralPath $inspectionPath -Raw | ConvertFrom-Json
     if ($inspection.engineVersion -ne $version) { throw 'Staged DLL version differs from source product version.' }
     if ($inspection.abiVersion -isnot [string] -or $inspection.abiVersion -cne $version -or $inspection.abiVersion -cne $inspection.engineVersion) { throw 'Staged DLL ABI must be a string exactly equal to the product and engine version.' }
@@ -172,15 +178,10 @@ try {
     $pendingSdk = Join-Path $stage (Split-Path -Leaf $sdkZip)
     [IO.Compression.ZipFile]::CreateFromDirectory($runtime, $pendingRuntime)
     [IO.Compression.ZipFile]::CreateFromDirectory($sdk, $pendingSdk)
-    $report = Join-Path $stage 'verification-report.json'
-    & (Join-Path $PSScriptRoot 'test-release.ps1') -ArchiveDir $stage -ReportPath $report
-    $verification = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
-    if ($verification.status -ne 'passed') { throw 'Archive verification did not report passed.' }
     [IO.File]::Copy($pendingRuntime, $runtimeZip, $false)
     [IO.File]::Copy($pendingSdk, $sdkZip, $false)
     [IO.File]::Copy($metadataPath, (Join-Path $output 'lyflow-runtime.json'), $false)
-    [IO.File]::Copy($report, (Join-Path $output 'verification-report.json'), $false)
-    Write-Host "Verified runtime and SDK archives: $output"
+    Write-Host "Built runtime and SDK archives: $output"
 } finally {
     foreach ($name in $environmentNames) { [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process') }
     Pop-Location

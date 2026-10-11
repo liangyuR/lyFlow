@@ -2,7 +2,7 @@
    暗色是节点编辑器的默认预期（ComfyUI / Blender / Houdini），点云在暗底上也更好看。 */
 
 /* 全部动效（时长变量、keyframes、hover）集中在一个文件里（docs/motion-plan.md A2） */
-@import "./styles.motion.css";
+@import './styles.motion.css';
 
 /* 定义在编辑器根元素上而不是 :root：宿主页面的其余部分不该被我们改色。
    宿主想换皮就在更外层或 `theme` prop 里覆盖同名变量。 */
@@ -26,7 +26,7 @@
   --lyflow-danger: #e5484d;
 
   --lyflow-radius: 6px;
-  --lyflow-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  --lyflow-mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
 
   color-scheme: dark;
 }
@@ -54,7 +54,12 @@
   min-height: 0;
   background: var(--lyflow-bg-0);
   color: var(--lyflow-fg-0);
-  font: 13px/1.55 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font:
+    13px/1.55 system-ui,
+    -apple-system,
+    'Segoe UI',
+    'Microsoft YaHei',
+    sans-serif;
   overflow: hidden;
   color-scheme: dark;
 }
@@ -106,7 +111,9 @@
 }
 
 /* 对比时两栏各只有一半宽，再加一张差异表：视图长高（compare-plan §1.2） */
-.app__viewer:has(> .viewer[data-compare="1"]) { flex-basis: 60%; }
+.app__viewer:has(> .viewer[data-compare='1']) {
+  flex-basis: 60%;
+}
 
 .app__inspector {
   flex: 1;
@@ -125,7 +132,7 @@
 }
 
 .app__splitter::after {
-  content: "";
+  content: '';
   position: absolute;
   inset: 0 3px;
   background: var(--lyflow-border);
@@ -166,7 +173,7 @@
 }
 
 .app__hsplit:hover::after {
-  content: "";
+  content: '';
   position: absolute;
   inset: 3px 0;
   background: var(--lyflow-accent);

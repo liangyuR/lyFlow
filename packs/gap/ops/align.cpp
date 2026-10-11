@@ -14,7 +14,7 @@ namespace dom = ::detection::domain;
 
 /// 只为了把 protected 的 registerCloud2DICPOutcome 露出来。run() 永远不会被调到。
 class PackAlignment final : public ::detection::Alignment {
- public:
+public:
   int64_t run(const GapCloud&, const GapCloud&) override { return 0; }
   using ::detection::Alignment::registerCloud2DICPOutcome;
 };
@@ -58,7 +58,8 @@ Eigen::Matrix3f applyTrustRegion(const Eigen::Matrix3f& reference, const Eigen::
   *clamped = false;
   const bool translationExceeds = translationMm > maxTranslationMm;
   const bool rotationExceeds = std::fabs(rotationDeg) > maxRotationDeg;
-  if (!translationExceeds && !rotationExceeds) return transform;
+  if (!translationExceeds && !rotationExceeds)
+    return transform;
 
   *clamped = true;
   Eigen::Vector2f clampedTranslation = delta.translation;
@@ -66,7 +67,8 @@ Eigen::Matrix3f applyTrustRegion(const Eigen::Matrix3f& reference, const Eigen::
     clampedTranslation *= static_cast<float>(maxTranslationMm / translationMm);
   }
   double clampedRotationDeg = rotationDeg;
-  if (rotationExceeds) clampedRotationDeg = std::copysign(maxRotationDeg, rotationDeg);
+  if (rotationExceeds)
+    clampedRotationDeg = std::copysign(maxRotationDeg, rotationDeg);
   return composeDelta(reference, clampedTranslation,
                       static_cast<float>(clampedRotationDeg * M_PI / 180.0));
 }
@@ -93,8 +95,10 @@ dom::AlignmentConfiguration configFromParams(const ParamView& p) {
 
 dom::InitialPoseMode poseModeFromParams(const ParamView& p) {
   const std::string mode = p.choice("initialPoseMode");
-  if (mode == "centroid") return dom::InitialPoseMode::kCentroidTranslation;
-  if (mode == "pca") return dom::InitialPoseMode::kPcaRigidCentroid;
+  if (mode == "centroid")
+    return dom::InitialPoseMode::kCentroidTranslation;
+  if (mode == "pca")
+    return dom::InitialPoseMode::kPcaRigidCentroid;
   return dom::InitialPoseMode::kEndpointMidpointTranslation;
 }
 
@@ -124,7 +128,7 @@ nlohmann::json sideJson(const SideOutcome& s) {
   };
 }
 
-}  // namespace
+} // namespace
 
 namespace fine {
 
@@ -189,7 +193,8 @@ Status alignTemplate(const Inputs& inputs, const ParamView& params, Outputs& out
     right = left;
     mirrored = true;
   } else if (!successGuide) {
-    if (left.outcome.success) right = evaluateSide(tplRight, sideInitialPose, trustReference);
+    if (left.outcome.success)
+      right = evaluateSide(tplRight, sideInitialPose, trustReference);
   } else if (left.outcome.success) {
     right = evaluateSide(tplRight, sideInitialPose, trustReference);
     if (!right.outcome.success) {
@@ -227,10 +232,9 @@ Status alignTemplate(const Inputs& inputs, const ParamView& params, Outputs& out
   // 只回放配置里的全局框 = config —— 与原算法的 quality.roi_source 同一个判据
   record.data["roisFrom"] = params.choice("roisFrom");
 
-  ctx.log(LogLevel::Info, "ICP " + params.text("templateId") + ": left=" +
-                              std::to_string(left.outcome.score) +
-                              " right=" + std::to_string(right.outcome.score) +
-                              (mirrored ? " (mirrored)" : ""));
+  ctx.log(LogLevel::Info,
+          "ICP " + params.text("templateId") + ": left=" + std::to_string(left.outcome.score) +
+              " right=" + std::to_string(right.outcome.score) + (mirrored ? " (mirrored)" : ""));
   outputs.set("alignment", Data::record(std::move(record)));
   return Status::Ok();
 }
@@ -239,7 +243,8 @@ Status selectAlignment(const Inputs& inputs, const ParamView& params, Outputs& o
                        ExecContext& ctx) {
   std::vector<const lyflow::Record*> candidates;
   for (const char* port : {"a", "b", "c", "d"}) {
-    if (!inputs.has(port)) continue;
+    if (!inputs.has(port))
+      continue;
     const lyflow::Record* rec = inputs.get(port).asRecord();
     if (!rec || rec->type != "GapAlignment") {
       return Status::Error(Phase::Execute, "bad_input", "输入不是 GapAlignment", {}, port);
@@ -264,7 +269,8 @@ Status selectAlignment(const Inputs& inputs, const ParamView& params, Outputs& o
   const auto picked = ::detection::utils::selectBestTemplateByIcp(scores, minScore);
   if (!picked) {
     double worst = scores.front().left;
-    if (std::isfinite(scores.front().right)) worst = std::min(worst, scores.front().right);
+    if (std::isfinite(scores.front().right))
+      worst = std::min(worst, scores.front().right);
     return Status::Error(Phase::Execute, "icp_score_low",
                          "所有候选模板的 ICP 分都低于 " + std::to_string(minScore) +
                              "（最好的一份是 " + std::to_string(worst) + "）");
@@ -274,7 +280,7 @@ Status selectAlignment(const Inputs& inputs, const ParamView& params, Outputs& o
   return Status::Ok();
 }
 
-}  // namespace fine
+} // namespace fine
 
 namespace {
 
@@ -288,8 +294,7 @@ Param intParam(const char* name, const char* label, std::int64_t def, const char
   return p;
 }
 
-Param numParam(const char* name, const char* label, double def, const char* unit,
-               const char* doc) {
+Param numParam(const char* name, const char* label, double def, const char* unit, const char* doc) {
   Param p;
   p.name = name;
   p.type = ParamType::Float;
@@ -327,7 +332,7 @@ Param roiParam(const char* name, const char* label) {
   return p;
 }
 
-}  // namespace
+} // namespace
 
 void registerAlignTemplate(Registry& r) {
   OperatorDesc op;
@@ -336,12 +341,11 @@ void registerAlignTemplate(Registry& r) {
   op.label = "配准模板";
   op.category = "间隙/配准";
   op.keywords = {"icp", "template", "align", "配准", "模板"};
-  op.doc =
-      "把一对模板配到当前样本上（evaluate_pair）：全局粗配 → 左右两侧 ICP、"
-      "信赖域钳制、退化方向锁定；模板两侧内容相同时右侧复用左侧的结果。\n"
-      "刚体 2D 配准，假定样本与模板之间只差一个小的平移加旋转：超出信赖域的部分被钳掉而不是"
-      "报错（quality 里记 trustClamped）；沿长直边滑动这类退化方向被锁定。分数低不判失败，"
-      "照样输出 GapAlignment —— 丢弃低分候选是 gap.select_alignment 的事。";
+  op.doc = "把一对模板配到当前样本上（evaluate_pair）：全局粗配 → 左右两侧 ICP、"
+           "信赖域钳制、退化方向锁定；模板两侧内容相同时右侧复用左侧的结果。\n"
+           "刚体 2D 配准，假定样本与模板之间只差一个小的平移加旋转：超出信赖域的部分被钳掉而不是"
+           "报错（quality 里记 trustClamped）；沿长直边滑动这类退化方向被锁定。分数低不判失败，"
+           "照样输出 GapAlignment —— 丢弃低分候选是 gap.select_alignment 的事。";
   op.inputs = {
       Port{"cloud", "PointCloud", "Cloud", "合并并滤波之后的测量帧点云。", true},
       Port{"tplLeft", "PointCloud", "Template Left", "左模板。", true},
@@ -413,10 +417,9 @@ void registerSelectAlignment(Registry& r) {
   op.label = "选择配准结果";
   op.category = "间隙/配准";
   op.keywords = {"template", "select", "best icp", "模板选择"};
-  op.doc =
-      "在候选模板里挑一个：先过滤左右都 ≥ minScore 的，"
-      "再按 min(l,r) 降、mean 降、配置顺序升、id 升排序取第一个；全打平时由 templateId 定，"
-      "与接在哪个端口无关。只挑不配；全部低于 minScore 时报 icp_score_low，不退而求其次。";
+  op.doc = "在候选模板里挑一个：先过滤左右都 ≥ minScore 的，"
+           "再按 min(l,r) 降、mean 降、配置顺序升、id 升排序取第一个；全打平时由 templateId 定，"
+           "与接在哪个端口无关。只挑不配；全部低于 minScore 时报 icp_score_low，不退而求其次。";
   // 四个候选端口都只吃 GapAlignment（compute 里本来就查，写成契约之后第一帧就报，
   // 而且带得出「实际是什么类型」——Status 的那句话带不出来）。
   const nlohmann::json isAlignment = {{"recordType", "GapAlignment"}};
@@ -434,4 +437,4 @@ void registerSelectAlignment(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

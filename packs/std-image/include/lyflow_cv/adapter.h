@@ -35,4 +35,4 @@ int cvDepthOf(const std::string& name);
 /// 这个位深的满量程：u8 255、u16 65535、f32 1。
 double fullScale(int cvDepth);
 
-}  // namespace lyflow::cvx
+} // namespace lyflow::cvx

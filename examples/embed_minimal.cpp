@@ -34,7 +34,7 @@ std::string defaultDll(const char* argv0) {
 #endif
 }
 
-}  // namespace
+} // namespace
 
 int main(int argc, char** argv) {
   const std::string dll = argc > 1 ? std::string(argv[1]) : defaultDll(argv[0]);
@@ -62,7 +62,8 @@ int main(int argc, char** argv) {
     std::cout << "run " << result.status << "，" << result.events.size() << " 条事件\n";
     std::cout << "outputs " << result.outputs << "\n";
     if (!result.ok()) {
-      for (const std::string& d : result.diagnostics) std::cerr << d << "\n";
+      for (const std::string& d : result.diagnostics)
+        std::cerr << d << "\n";
       return 1;
     }
     if (result.outputs.find("\"cloud\"") == std::string::npos) {

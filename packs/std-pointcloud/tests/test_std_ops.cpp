@@ -29,19 +29,29 @@ using namespace lyflow::test;
 
 TEST_CASE("包里的 19 个算子都注册了，且都带 pack 标记") {
   const auto problems = ensureRegistry().validate();
-  for (const auto& p : problems) MESSAGE(p);
+  for (const auto& p : problems)
+    MESSAGE(p);
   CHECK(problems.empty());
 
   const std::vector<std::string> expected = {
-      "io.load_pcd",           "io.save_pcd",
-      "filter.passthrough",    "filter.voxel_grid",
-      "filter.crop_box",       "filter.random_sample",
-      "filter.statistical_outlier", "filter.radius_outlier",
-      "features.normals",      "segment.ransac_plane",
-      "segment.extract_indices", "transform.make",
-      "transform.apply",       "util.merge",
-      "filter.crop_box2d",     "fit.line_2d",
-      "fit.circle_2d",         "register.icp_2d",
+      "io.load_pcd",
+      "io.save_pcd",
+      "filter.passthrough",
+      "filter.voxel_grid",
+      "filter.crop_box",
+      "filter.random_sample",
+      "filter.statistical_outlier",
+      "filter.radius_outlier",
+      "features.normals",
+      "segment.ransac_plane",
+      "segment.extract_indices",
+      "transform.make",
+      "transform.apply",
+      "util.merge",
+      "filter.crop_box2d",
+      "fit.line_2d",
+      "fit.circle_2d",
+      "register.icp_2d",
       "edit.translate_region",
   };
   for (const auto& id : expected) {
@@ -79,7 +89,8 @@ TEST_CASE("一条完整 pipeline 跑通：合成 → 裁剪 → 降采样 → �
   Session session(doc);
   RunLog& log = session.wait();
   for (const Json& e : log.ofKind("node_state")) {
-    if (e.value("state", "") == "error") MESSAGE(e.dump());
+    if (e.value("state", "") == "error")
+      MESSAGE(e.dump());
   }
   CHECK(log.runStatus() == "ok");
   CHECK(log.seqIsDense());
@@ -113,7 +124,7 @@ TEST_CASE("体素栅格：相距很远的点不会被折叠进同一个体素") 
   // 这里把一片只差巨大平移的点真的喂给 voxel_grid（默认叶大小 0.01），降采样后必须一点一格。
   PointCloud far;
   far.push(0.0f, 0.0f, 0.0f);
-  far.push(300000.0f, 0.0f, 0.0f);  // 3e5 / 0.01 = 3e7 个体素，远超旧键的 ±2^20
+  far.push(300000.0f, 0.0f, 0.0f); // 3e5 / 0.01 = 3e7 个体素，远超旧键的 ±2^20
   // 正好差 2^20、2^21 个体素（取体素中点，免得浮点落在格边上）：
   // 按 20 / 21 位打包的键绕回来恰好就落在原点那一格
   far.push(10485.765f, 0.0f, 0.0f);
@@ -122,16 +133,16 @@ TEST_CASE("体素栅格：相距很远的点不会被折叠进同一个体素") 
 
   // voxel_grid 的输入与输出端口同名（cloud），直接注入会被当成整节点注入、compute 被跳过；
   // 所以经 util.merge 的输入端口注入（另一侧给空云），让 voxel_grid 真跑一遍
-  const Json doc = makeGraph({{"m", "util.merge"}, {"v", "filter.voxel_grid"}},
-                             {{"m.cloud", "v.cloud"}});
-  std::vector<exec::InjectedInput> inputs{
-      exec::InjectedInput{"m", "a", Data::cloud(far)},
-      exec::InjectedInput{"m", "b", Data::cloud(PointCloud{})}};
+  const Json doc =
+      makeGraph({{"m", "util.merge"}, {"v", "filter.voxel_grid"}}, {{"m.cloud", "v.cloud"}});
+  std::vector<exec::InjectedInput> inputs{exec::InjectedInput{"m", "a", Data::cloud(far)},
+                                          exec::InjectedInput{"m", "b", Data::cloud(PointCloud{})}};
   Session s(doc, {}, {}, /*keepCache=*/false, /*maxParallel=*/0, /*noReuse=*/false,
             std::move(inputs));
   RunLog& log = s.wait();
   for (const Json& e : log.ofKind("node_state")) {
-    if (e.value("state", "") == "error") MESSAGE(e.dump());
+    if (e.value("state", "") == "error")
+      MESSAGE(e.dump());
   }
   REQUIRE(log.runStatus() == "ok");
   REQUIRE(log.finalState("v") == "done");
@@ -187,17 +198,20 @@ TEST_CASE("体素栅格 nearest 模式也响应取消") {
   const auto t0 = std::chrono::steady_clock::now();
   s.run().cancel();
   RunLog& log = s.wait();
-  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                           std::chrono::steady_clock::now() - t0)
-                           .count();
+  const auto elapsed =
+      std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0)
+          .count();
   CHECK(log.runStatus() == "cancelled");
   CHECK(elapsed < 2000);
 }
 
-TEST_CASE("体素栅格：按线程预算并行之后与原来的单线程写法逐字节相同（质心 / 最近点、全部通道与 NaN、1 / 3 / 8 个线程）") {
+TEST_CASE(
+    "体素栅格：按线程预算并行之后与原来的单线程写法逐字节相同（质心 / 最近点、全部通道与 NaN、1 / 3 / 8 个线程）") {
   // 参照就是改并行之前的那一版：按点的顺序一趟扫完，体素按第一次出现的顺序编号，累加都在 double 里
   test::OpCall gen;
-  REQUIRE(gen.run("gen.synthetic", {{"pointCount", Value::integer(60000)}, {"seed", Value::integer(11)}}).ok);
+  REQUIRE(gen.run("gen.synthetic",
+                  {{"pointCount", Value::integer(60000)}, {"seed", Value::integer(11)}})
+              .ok);
   PointCloud in = *gen.out("cloud").asCloud();
   const std::size_t n = in.pointCount();
   std::mt19937 rng(5);
@@ -208,14 +222,17 @@ TEST_CASE("体素栅格：按线程预算并行之后与原来的单线程写法
     in.normals[i] = unit(rng);
     in.rgb[i] = static_cast<std::uint8_t>(rng() & 0xFF);
   }
-  for (std::size_t k = 0; k < 20; ++k) in.xyz[((k * 997) % n) * 3 + 1] = std::numeric_limits<float>::quiet_NaN();
+  for (std::size_t k = 0; k < 20; ++k)
+    in.xyz[((k * 997) % n) * 3 + 1] = std::numeric_limits<float>::quiet_NaN();
 
   struct Key {
     std::int64_t i, j, k;
     bool operator==(const Key& o) const { return i == o.i && j == o.j && k == o.k; }
   };
   struct KeyHash {
-    std::size_t operator()(const Key& v) const { return std::hash<std::int64_t>()(v.i * 73856093 ^ v.j * 19349663 ^ v.k * 83492791); }
+    std::size_t operator()(const Key& v) const {
+      return std::hash<std::int64_t>()(v.i * 73856093 ^ v.j * 19349663 ^ v.k * 83492791);
+    }
   };
   struct Acc {
     double sx = 0, sy = 0, sz = 0, si = 0, snx = 0, sny = 0, snz = 0, sr = 0, sg = 0, sb = 0;
@@ -231,21 +248,31 @@ TEST_CASE("体素栅格：按线程预算并行之后与原来的单线程写法
     std::vector<Acc> acc;
     for (std::size_t p = 0; p < n; ++p) {
       const float x = in.xyz[p * 3], y = in.xyz[p * 3 + 1], z = in.xyz[p * 3 + 2];
-      if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) continue;
+      if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
+        continue;
       const auto [it, fresh] = index.try_emplace(keyOf(x, y, z, leaf), acc.size());
-      if (fresh) acc.emplace_back();
+      if (fresh)
+        acc.emplace_back();
       Acc& v = acc[it->second];
-      v.sx += x; v.sy += y; v.sz += z; v.count += 1;
+      v.sx += x;
+      v.sy += y;
+      v.sz += z;
+      v.count += 1;
       v.si += in.intensity[p];
-      v.snx += in.normals[p * 3]; v.sny += in.normals[p * 3 + 1]; v.snz += in.normals[p * 3 + 2];
-      v.sr += in.rgb[p * 3]; v.sg += in.rgb[p * 3 + 1]; v.sb += in.rgb[p * 3 + 2];
+      v.snx += in.normals[p * 3];
+      v.sny += in.normals[p * 3 + 1];
+      v.snz += in.normals[p * 3 + 2];
+      v.sr += in.rgb[p * 3];
+      v.sg += in.rgb[p * 3 + 1];
+      v.sb += in.rgb[p * 3 + 2];
     }
     if (nearest) {
       std::vector<std::int32_t> best(acc.size(), -1);
       std::vector<double> bestDist(acc.size(), 1e300);
       for (std::size_t p = 0; p < n; ++p) {
         const float x = in.xyz[p * 3], y = in.xyz[p * 3 + 1], z = in.xyz[p * 3 + 2];
-        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) continue;
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
+          continue;
         const std::size_t vi = index.at(keyOf(x, y, z, leaf));
         const Acc& v = acc[vi];
         const double cx = v.sx / v.count, cy = v.sy / v.count, cz = v.sz / v.count;
@@ -257,19 +284,26 @@ TEST_CASE("体素栅格：按线程预算并行之后与原来的单线程写法
       }
       std::vector<std::int32_t> keep;
       for (std::size_t vi = 0; vi < acc.size(); ++vi) {
-        if (acc[vi].count >= minPts && best[vi] >= 0) keep.push_back(best[vi]);
+        if (acc[vi].count >= minPts && best[vi] >= 0)
+          keep.push_back(best[vi]);
       }
       return in.select(keep);
     }
     PointCloud out;
     for (const Acc& v : acc) {
-      if (v.count < minPts) continue;
+      if (v.count < minPts)
+        continue;
       const double inv = 1.0 / v.count;
-      out.push(static_cast<float>(v.sx * inv), static_cast<float>(v.sy * inv), static_cast<float>(v.sz * inv));
+      out.push(static_cast<float>(v.sx * inv), static_cast<float>(v.sy * inv),
+               static_cast<float>(v.sz * inv));
       out.intensity.push_back(static_cast<float>(v.si * inv));
       double nx = v.snx * inv, ny = v.sny * inv, nz = v.snz * inv;
       const double len = std::sqrt(nx * nx + ny * ny + nz * nz);
-      if (len > 1e-9) { nx /= len; ny /= len; nz /= len; }
+      if (len > 1e-9) {
+        nx /= len;
+        ny /= len;
+        nz /= len;
+      }
       out.normals.push_back(static_cast<float>(nx));
       out.normals.push_back(static_cast<float>(ny));
       out.normals.push_back(static_cast<float>(nz));
@@ -280,7 +314,8 @@ TEST_CASE("体素栅格：按线程预算并行之后与原来的单线程写法
     return out;
   };
   const auto sameBytes = [](const auto& a, const auto& b) {
-    return a.size() == b.size() && (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(a[0])) == 0);
+    return a.size() == b.size() &&
+           (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(a[0])) == 0);
   };
 
   // 叶大小按这片云自己的尺寸取：细的（体素多、多数只有一两个点）与粗的（每个体素几十个点）各一档
@@ -289,7 +324,8 @@ TEST_CASE("体素栅格：按线程预算并行之后与原来的单线程写法
     float lo = std::numeric_limits<float>::max(), hi = -lo;
     for (std::size_t i = 0; i < n; ++i) {
       const float v = in.xyz[i * 3 + axis];
-      if (!std::isfinite(v)) continue;
+      if (!std::isfinite(v))
+        continue;
       lo = std::min(lo, v);
       hi = std::max(hi, v);
     }
@@ -309,9 +345,10 @@ TEST_CASE("体素栅格：按线程预算并行之后与原来的单线程写法
           test::OpCall call;
           call.threads = threads;
           call.inputs["cloud"] = Data::cloud(in);
-          REQUIRE(call.run("filter.voxel_grid", {{"leafSize", Value::vec({leaf, leaf, leaf})},
-                                                 {"minPointsPerVoxel", Value::integer(minPts)},
-                                                 {"representative", Value::text(nearest ? "nearest" : "centroid")}})
+          REQUIRE(call.run("filter.voxel_grid",
+                           {{"leafSize", Value::vec({leaf, leaf, leaf})},
+                            {"minPointsPerVoxel", Value::integer(minPts)},
+                            {"representative", Value::text(nearest ? "nearest" : "centroid")}})
                       .ok);
           const PointCloud& got = *call.out("cloud").asCloud();
           CHECK(sameBytes(got.xyz, want.xyz));
@@ -374,7 +411,8 @@ TEST_CASE("迁移链：v1 的 random_sample 图产出 migration 诊断") {
   REQUIRE(diags.is_array());
   Json migration;
   for (const Json& d : diags) {
-    if (d.value("kind", "") == "migration") migration = d;
+    if (d.value("kind", "") == "migration")
+      migration = d;
   }
   REQUIRE_FALSE(migration.is_null());
   CHECK(migration["nodeId"] == "s");
@@ -465,8 +503,8 @@ TEST_CASE("edit.translate_region：盒选区是闭区间，盒外的点一动不
   std::size_t moved = 0, kept = 0;
   for (std::size_t i = 0; i < a.pointCount(); ++i) {
     const float x = a.xyz[i * 3], y = a.xyz[i * 3 + 1], z = a.xyz[i * 3 + 2];
-    const bool inside = x >= -0.2f && x <= 0.2f && y >= -0.2f && y <= 0.2f && z >= -0.2f &&
-                        z <= 0.2f;
+    const bool inside =
+        x >= -0.2f && x <= 0.2f && y >= -0.2f && y <= 0.2f && z >= -0.2f && z <= 0.2f;
     if (inside) {
       ++moved;
       CHECK(b.xyz[i * 3] == doctest::Approx(x + 1.5f));
@@ -503,7 +541,9 @@ TEST_CASE("edit.translate_region：零法向是 bad_param") {
 // 参照就是原来的做法（同一个种子的部分 Fisher-Yates，再 std::sort）：两条路、两种模式都要逐点相同
 TEST_CASE("随机采样：标记表与排序两条路给出与原实现逐点相同的结果") {
   test::OpCall gen;
-  REQUIRE(gen.run("gen.synthetic", {{"pointCount", Value::integer(50000)}, {"seed", Value::integer(8)}}).ok);
+  REQUIRE(
+      gen.run("gen.synthetic", {{"pointCount", Value::integer(50000)}, {"seed", Value::integer(8)}})
+          .ok);
   const PointCloud& in = *gen.out("cloud").asCloud();
   const std::size_t n = in.pointCount();
   const auto reference = [&](std::size_t want, std::uint32_t seed) {
@@ -525,7 +565,9 @@ TEST_CASE("随机采样：标记表与排序两条路给出与原实现逐点相
     std::size_t want;
   };
   // 1000 个（want × 16 < n：排序那条路）、一半与九成（标记表那条路）、全留（不抽）
-  const Case cases[] = {{"count", 1000, 0.0, 1000}, {"ratio", 0, 0.5, n / 2}, {"ratio", 0, 0.9, n * 9 / 10},
+  const Case cases[] = {{"count", 1000, 0.0, 1000},
+                        {"ratio", 0, 0.5, n / 2},
+                        {"ratio", 0, 0.9, n * 9 / 10},
                         {"count", static_cast<std::int64_t>(n) + 5, 0.0, n}};
   for (const Case& c : cases) {
     for (std::int64_t seed : {1, 42}) {
@@ -545,7 +587,7 @@ TEST_CASE("随机采样：标记表与排序两条路给出与原实现逐点相
         CHECK(got.xyz == want.xyz);
         CHECK(got.intensity == want.intensity);
       } else {
-        CHECK(got.xyz == in.xyz);  // 全留：不抽
+        CHECK(got.xyz == in.xyz); // 全留：不抽
       }
     }
   }
@@ -555,10 +597,13 @@ TEST_CASE("随机采样：标记表与排序两条路给出与原实现逐点相
 // PCL 实现，200 万点上 12 s / 14 s / 7 s）。参照就是原来直接调的那三个 PCL 类：逐点结果要相同，换几个线程也一样
 TEST_CASE("法线与两个离群点滤波：分段并行的结果与 PCL 原实现逐点相同，与线程数无关") {
   test::OpCall gen;
-  REQUIRE(gen.run("gen.synthetic", {{"pointCount", Value::integer(60000)}, {"seed", Value::integer(5)}}).ok);
+  REQUIRE(
+      gen.run("gen.synthetic", {{"pointCount", Value::integer(60000)}, {"seed", Value::integer(5)}})
+          .ok);
   // 两份云：原样的（is_dense，半径离群点走 K 近邻那一支），与掺了 NaN 点的（三个算子都走「非有限点」那一支）
   PointCloud withNaN = *gen.out("cloud").asCloud();
-  for (std::size_t i = 0; i < withNaN.pointCount(); i += 997) withNaN.xyz[i * 3] = std::numeric_limits<float>::quiet_NaN();
+  for (std::size_t i = 0; i < withNaN.pointCount(); i += 997)
+    withNaN.xyz[i * 3] = std::numeric_limits<float>::quiet_NaN();
   for (const Data& cloud : {gen.out("cloud"), Data::cloud(std::move(withNaN))}) {
     const PointCloud& in = *cloud.asCloud();
     const auto pc = ops::adapter::toPcl(in);
@@ -591,14 +636,16 @@ TEST_CASE("法线与两个离群点滤波：分段并行的结果与 PCL 原实�
     }
     const auto keptOf = [&](const test::OpCall& c) {
       std::vector<char> removed(in.pointCount(), 0);
-      for (std::int32_t i : c.outputs.at("removed").asIndices()->values) removed[static_cast<std::size_t>(i)] = 1;
+      for (std::int32_t i : c.outputs.at("removed").asIndices()->values)
+        removed[static_cast<std::size_t>(i)] = 1;
       pcl::Indices kept;
       for (std::size_t i = 0; i < removed.size(); ++i) {
-        if (!removed[i]) kept.push_back(static_cast<pcl::index_t>(i));
+        if (!removed[i])
+          kept.push_back(static_cast<pcl::index_t>(i));
       }
       return kept;
     };
-    REQUIRE(sorKept.size() < in.pointCount());  // 参照本身确实剔掉了离群点，下面的比较才有意义
+    REQUIRE(sorKept.size() < in.pointCount()); // 参照本身确实剔掉了离群点，下面的比较才有意义
     REQUIRE(rorKept.size() < in.pointCount());
 
     for (int threads : {1, 3, 8}) {
@@ -606,9 +653,13 @@ TEST_CASE("法线与两个离群点滤波：分段并行的结果与 PCL 原实�
       test::OpCall c;
       c.threads = threads;
       c.inputs["cloud"] = cloud;
-      REQUIRE(c.run("filter.statistical_outlier", {{"meanK", Value::integer(30)}, {"stddevMul", Value::number(1.0)}}).ok);
+      REQUIRE(c.run("filter.statistical_outlier",
+                    {{"meanK", Value::integer(30)}, {"stddevMul", Value::number(1.0)}})
+                  .ok);
       CHECK(keptOf(c) == sorKept);
-      REQUIRE(c.run("filter.radius_outlier", {{"radius", Value::number(0.05)}, {"minNeighbors", Value::integer(5)}}).ok);
+      REQUIRE(c.run("filter.radius_outlier",
+                    {{"radius", Value::number(0.05)}, {"minNeighbors", Value::integer(5)}})
+                  .ok);
       CHECK(keptOf(c) == rorKept);
 
       REQUIRE(c.run("features.normals", {{"kSearch", Value::integer(20)}}).ok);
@@ -620,7 +671,8 @@ TEST_CASE("法线与两个离群点滤波：分段并行的结果与 PCL 原实�
         for (int a = 0; a < 3; ++a) {
           // 邻域退化（或点本身不是有限的）时 PCL 填 NaN，算子置零
           const float want = std::isfinite(r.normal[a]) ? r.normal[a] : 0.0f;
-          worst = std::max(worst, std::abs(got.normals[i * 3 + static_cast<std::size_t>(a)] - want));
+          worst =
+              std::max(worst, std::abs(got.normals[i * 3 + static_cast<std::size_t>(a)] - want));
         }
       }
       CHECK(worst == 0.0f);
@@ -632,13 +684,16 @@ TEST_CASE("法线与两个离群点滤波：分段并行的结果与 PCL 原实�
   const auto facingAway = [&](bool flip) {
     test::OpCall c;
     c.inputs["cloud"] = gen.out("cloud");
-    REQUIRE(c.run("features.normals", {{"kSearch", Value::integer(20)}, {"flipTowardsViewpoint", Value::boolean(flip)}}).ok);
+    REQUIRE(c.run("features.normals",
+                  {{"kSearch", Value::integer(20)}, {"flipTowardsViewpoint", Value::boolean(flip)}})
+                .ok);
     const PointCloud& got = *c.out("cloud").asCloud();
     std::size_t away = 0;
     for (std::size_t i = 0; i < got.pointCount(); ++i) {
       const float* p = &got.xyz[i * 3];
       const float* n = &got.normals[i * 3];
-      if (-p[0] * n[0] - p[1] * n[1] - p[2] * n[2] < 0.0f) ++away;
+      if (-p[0] * n[0] - p[1] * n[1] - p[2] * n[2] < 0.0f)
+        ++away;
     }
     return away;
   };
@@ -680,9 +735,11 @@ bool referenceSegment(const std_pc::Cloud2D& cloud, const std_pc::Circle2DFitOpt
   seg.setInputCloud(cloud.makeShared());
   seg.segment(pointInliers, coefficients);
   *inliers = pointInliers.indices;
-  if (coefficients.values.size() < 3 || inliers->size() < 3) return false;
+  if (coefficients.values.size() < 3 || inliers->size() < 3)
+    return false;
   *circle = Eigen::VectorXf(3);
-  for (int i = 0; i < 3; ++i) (*circle)[i] = coefficients.values[static_cast<std::size_t>(i)];
+  for (int i = 0; i < 3; ++i)
+    (*circle)[i] = coefficients.values[static_cast<std::size_t>(i)];
   return true;
 }
 
@@ -694,13 +751,19 @@ std_pc::Circle2DFitOptions circleOpts(double minMm, double maxMm) {
   return o;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("fitCircle2D：细化后半径在界内时与 SACSegmentation 逐位相同") {
   // 弧长 / 短弧 / 噪声大小各一份。走的是同一套 PCL 对象与种子，圆与内点都要一模一样。
-  struct Row { double r, from, span; int n; double noise; unsigned seed; };
-  for (const Row row : {Row{0.0015, -60, 300, 120, 0.000005, 1}, Row{0.004, 10, 80, 60, 0.000015, 2},
-                        Row{0.0009, -30, 160, 40, 0.00001, 3}}) {
+  struct Row {
+    double r, from, span;
+    int n;
+    double noise;
+    unsigned seed;
+  };
+  for (const Row row :
+       {Row{0.0015, -60, 300, 120, 0.000005, 1}, Row{0.004, 10, 80, 60, 0.000015, 2},
+        Row{0.0009, -30, 160, 40, 0.00001, 3}}) {
     CAPTURE(row.r);
     CAPTURE(row.span);
     const auto cloud = noisyArc(row.r, row.from, row.span, row.n, row.noise, row.seed);
@@ -711,7 +774,8 @@ TEST_CASE("fitCircle2D：细化后半径在界内时与 SACSegmentation 逐位�
     REQUIRE(referenceSegment(cloud, o, &want, &wantIn));
     REQUIRE(std_pc::fitCircle2D(cloud, &got, &gotIn, o, &report));
     CHECK(report.radius == std_pc::Circle2DRadiusOutcome::Free);
-    for (int i = 0; i < 3; ++i) CHECK(got[i] == want[i]);
+    for (int i = 0; i < 3; ++i)
+      CHECK(got[i] == want[i]);
     CHECK(gotIn == wantIn);
   }
 }

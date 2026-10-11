@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process";
-import fs from "node:fs";
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 
-import type { Config } from "./config.js";
+import type { Config } from './config.js';
 
 export const DEFAULT_CLI_TIMEOUT_MS = 600000;
 
@@ -40,7 +40,7 @@ export function parseJsonLines(chunk: string): { lines: JsonLine[]; skipped: str
   for (const raw of chunk.split(/\r?\n/)) {
     const text = raw.trim();
     if (!text) continue;
-    if (text[0] !== "{" && text[0] !== "[") {
+    if (text[0] !== '{' && text[0] !== '[') {
       skipped.push(text);
       continue;
     }
@@ -51,7 +51,7 @@ export function parseJsonLines(chunk: string): { lines: JsonLine[]; skipped: str
       skipped.push(text);
       continue;
     }
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
       skipped.push(text);
       continue;
     }
@@ -62,7 +62,7 @@ export function parseJsonLines(chunk: string): { lines: JsonLine[]; skipped: str
 
 export function stderrTail(stderr: string): string {
   const lines = stderr.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  return lines.length > 0 ? (lines[lines.length - 1] as string) : "";
+  return lines.length > 0 ? (lines[lines.length - 1] as string) : '';
 }
 
 export function runCli(config: Config, argv: string[], options?: CliOptions): Promise<CliResult> {
@@ -73,16 +73,16 @@ export function runCli(config: Config, argv: string[], options?: CliOptions): Pr
       lines: [],
       skipped: [],
       stderr:
-        "没有配置 LYFLOW_CLI：eval / perturb / diff_graphs 需要一个本地 lyflow 可执行文件的路径",
+        '没有配置 LYFLOW_CLI：eval / perturb / diff_graphs 需要一个本地 lyflow 可执行文件的路径',
       timedOut: false,
       cancelled: false,
-      spawnError: "LYFLOW_CLI 未配置",
+      spawnError: 'LYFLOW_CLI 未配置',
     });
   }
   const timeoutMs = options?.timeoutMs ?? DEFAULT_CLI_TIMEOUT_MS;
   const env: NodeJS.ProcessEnv = { ...process.env };
-  if (config.packs) env["LYFLOW_PACKS"] = config.packs;
-  if (options?.outputPath) fs.writeFileSync(options.outputPath, "", "utf8");
+  if (config.packs) env['LYFLOW_PACKS'] = config.packs;
+  if (options?.outputPath) fs.writeFileSync(options.outputPath, '', 'utf8');
 
   return new Promise<CliResult>((resolve) => {
     const child = spawn(exe, argv, {
@@ -92,19 +92,23 @@ export function runCli(config: Config, argv: string[], options?: CliOptions): Pr
     });
     const lines: JsonLine[] = [];
     const skipped: string[] = [];
-    let stderr = "";
+    let stderr = '';
     let timedOut = false;
     let cancelled = false;
     let spawnError: string | null = null;
     // onLine 只看完整的行：一次 data 可能停在半行上，剩下的等下一次
-    let pending = "";
+    let pending = '';
     const accept = (chunk: string) => {
       const parsed = parseJsonLines(chunk);
       skipped.push(...parsed.skipped);
       if (skipped.length > 200) skipped.splice(0, skipped.length - 200);
       for (const line of parsed.lines) {
-        if (options?.outputPath) fs.appendFileSync(options.outputPath, `${line.text}\n`, "utf8");
-        if (options?.retainRows !== false || !["eval_row", "perturb_row"].includes(String(line.value["kind"]))) lines.push(line);
+        if (options?.outputPath) fs.appendFileSync(options.outputPath, `${line.text}\n`, 'utf8');
+        if (
+          options?.retainRows !== false ||
+          !['eval_row', 'perturb_row'].includes(String(line.value['kind']))
+        )
+          lines.push(line);
         options?.onLine?.(line);
       }
     };
@@ -119,28 +123,37 @@ export function runCli(config: Config, argv: string[], options?: CliOptions): Pr
     };
     const signal = options?.signal;
     if (signal?.aborted) onAbort();
-    else signal?.addEventListener("abort", onAbort, { once: true });
+    else signal?.addEventListener('abort', onAbort, { once: true });
 
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (c: string) => {
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (c: string) => {
       pending += c;
-      const cut = pending.lastIndexOf("\n");
+      const cut = pending.lastIndexOf('\n');
       if (cut < 0) return;
       const complete = pending.slice(0, cut);
       pending = pending.slice(cut + 1);
-      try { accept(complete); } catch (e) { spawnError = String(e); child.kill(); }
+      try {
+        accept(complete);
+      } catch (e) {
+        spawnError = String(e);
+        child.kill();
+      }
     });
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (c: string) => {
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (c: string) => {
       stderr = (stderr + c).slice(-1024 * 1024);
     });
-    child.on("error", (e) => {
+    child.on('error', (e) => {
       spawnError = e instanceof Error ? e.message : String(e);
     });
-    child.on("close", (code) => {
+    child.on('close', (code) => {
       clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-      try { if (pending.trim()) accept(pending); } catch (e) { spawnError = String(e); }
+      signal?.removeEventListener('abort', onAbort);
+      try {
+        if (pending.trim()) accept(pending);
+      } catch (e) {
+        spawnError = String(e);
+      }
       resolve({
         code: spawnError !== null ? -1 : (code ?? -1),
         lines,

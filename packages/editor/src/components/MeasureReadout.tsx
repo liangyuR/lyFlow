@@ -1,7 +1,7 @@
 // 测量的读数框（docs/measure-plan.md M6）：右下角固定一小块，鼠标穿过它落到画布上（只有「清除」接鼠标）。
 // 主预览与连线查看器共用。
 
-import { measureLines, pickCount, type Measure } from "../lib/pick";
+import { measureLines, pickCount, type Measure } from '../lib/pick';
 
 export function MeasureReadout({
   measure,
@@ -11,7 +11,7 @@ export function MeasureReadout({
   onClear,
 }: {
   measure: Measure;
-  mode: "3d" | "2d";
+  mode: '3d' | '2d';
   /** 对比模式：点位后面标 A / B。 */
   compare?: boolean;
   /** 画面上显示的点数（拾取只吸附到它们）。 */
@@ -37,7 +37,9 @@ export function MeasureReadout({
         </div>
       )}
       <div className="measure-readout__foot">
-        <span>{n === 0 ? "单击画面选一个点" : n === 1 ? "再点一个点量距离" : "再点一次重新开始"}</span>
+        <span>
+          {n === 0 ? '单击画面选一个点' : n === 1 ? '再点一个点量距离' : '再点一次重新开始'}
+        </span>
         <button
           type="button"
           className="viewer__btn"

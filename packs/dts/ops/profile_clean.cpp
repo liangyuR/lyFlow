@@ -11,7 +11,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   const int width = static_cast<int>(params.integer("smoothPoints"));
   const double minIntensity = params.number("minIntensity");
   const std::size_t n = in.pointCount();
-  if (n == 0) return Status::Error(Phase::Execute, "bad_input", "空轮廓", {}, "profile");
+  if (n == 0)
+    return Status::Error(Phase::Execute, "bad_input", "空轮廓", {}, "profile");
 
   std::vector<float> z(n);
   const bool hasIntensity = in.hasIntensity();
@@ -27,7 +28,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   std::vector<float> intensity;
   intensity.reserve(n);
   for (std::size_t i = 0; i < n; ++i) {
-    if (!std::isfinite(zs[i])) continue;
+    if (!std::isfinite(zs[i]))
+      continue;
     out.push(in.xyz[3 * i], 0.0f, zs[i]);
     intensity.push_back(hasIntensity ? in.intensity[i] : 1.0f);
   }
@@ -40,7 +42,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerProfileClean(Registry& r) {
   OperatorDesc op;
@@ -49,9 +51,8 @@ void registerProfileClean(Registry& r) {
   op.label = "轮廓清理";
   op.category = "DTS/预处理";
   op.keywords = {"clean", "median", "smooth", "清理", "中值", "平滑"};
-  op.doc =
-      "丢掉无效点（亮度低于阈值或 z 非有限），其余点做一次忽略无效邻居的滑动中值。\n"
-      "**保持列序**：切片靠相邻列判断，按 x 排序会把重叠面交错起来。";
+  op.doc = "丢掉无效点（亮度低于阈值或 z 非有限），其余点做一次忽略无效邻居的滑动中值。\n"
+           "**保持列序**：切片靠相邻列判断，按 x 排序会把重叠面交错起来。";
   op.inputs = {Port{"profile", "PointCloud", "Profile", "原始轮廓。", true}};
   op.outputs = {Port{"clean", "PointCloud", "Clean", "去掉无效点、已平滑的轮廓，列序不变。", true}};
 
@@ -78,4 +79,4 @@ void registerProfileClean(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::dts
+} // namespace lyflow::dts

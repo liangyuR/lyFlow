@@ -11,8 +11,8 @@ Status compute(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecCon
   // 变成一句人话，而不是越界跳过后「结果少一半点却没人报错」。
   if (indices.sourceCloudId != cloud.id) {
     return Status::Error(Phase::Execute, "bad_input",
-                         "这组下标不是从当前输入点云上取的（中间可能插了一个会重建点云的算子）",
-                         {}, "indices");
+                         "这组下标不是从当前输入点云上取的（中间可能插了一个会重建点云的算子）", {},
+                         "indices");
   }
 
   outputs.set("selected", Data::cloud(cloud.select(indices.values)));
@@ -20,7 +20,7 @@ Status compute(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecCon
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerSegmentExtractIndices(Registry& r) {
   OperatorDesc op;
@@ -32,14 +32,14 @@ void registerSegmentExtractIndices(Registry& r) {
   op.doc = "按下标把点云一分为二。两个输出端口同时给出，不需要 negative 参数。";
 
   op.inputs = {
-      Port{"cloud",   "PointCloud", "Cloud",   "源点云。", true},
-      Port{"indices", "Indices",    "Indices", "要提取的点下标。", true},
+      Port{"cloud", "PointCloud", "Cloud", "源点云。", true},
+      Port{"indices", "Indices", "Indices", "要提取的点下标。", true},
   };
   // 两个输出而不是一个「negative」开关：调试时你几乎总想同时看两边，
   // 一个开关会逼用户复制一份节点、反着设一次参数，还得记住它们要同步改。
   op.outputs = {
       Port{"selected", "PointCloud", "Selected", "下标选中的点。", true},
-      Port{"rest",     "PointCloud", "Rest",     "其余的点。", true},
+      Port{"rest", "PointCloud", "Rest", "其余的点。", true},
   };
 
   op.capabilities = {/*cancellable=*/true, /*previewable=*/true, /*deterministic=*/true};
@@ -48,4 +48,4 @@ void registerSegmentExtractIndices(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

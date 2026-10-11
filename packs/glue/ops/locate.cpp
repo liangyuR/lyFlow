@@ -15,10 +15,12 @@ namespace {
 
 Status loadTemplate(const ParamView& params, cv::Mat* out) {
   std::ifstream in(params.path("template"), std::ios::binary);
-  if (!in) return Status::Error(Phase::Execute, "io", "打不开模板图像", "template");
+  if (!in)
+    return Status::Error(Phase::Execute, "io", "打不开模板图像", "template");
   const std::vector<uchar> bytes(std::istreambuf_iterator<char>(in), {});
   try {
-    if (!bytes.empty()) *out = cv::imdecode(bytes, cv::IMREAD_GRAYSCALE | cv::IMREAD_ANYDEPTH);
+    if (!bytes.empty())
+      *out = cv::imdecode(bytes, cv::IMREAD_GRAYSCALE | cv::IMREAD_ANYDEPTH);
   } catch (const cv::Exception&) {
     return Status::Error(Phase::Execute, "bad_param", "模板不是可解码的图像", "template");
   }
@@ -31,10 +33,14 @@ Status loadTemplate(const ParamView& params, cv::Mat* out) {
 Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
   const cv::Mat gray = grayOf(inputs.get("image"));
   if (gray.empty()) {
-    return Status::Error(Phase::Execute, "bad_input", "需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行", {}, "image");
+    return Status::Error(
+        Phase::Execute, "bad_input",
+        "需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行", {},
+        "image");
   }
   cv::Mat tmpl;
-  if (Status s = loadTemplate(params, &tmpl); !s.ok) return s;
+  if (Status s = loadTemplate(params, &tmpl); !s.ok)
+    return s;
 
   LocateSpec spec;
   const auto anchor = params.vec2("anchor");
@@ -70,10 +76,12 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     corners.push_back(Px{p.x, p.y});
   }
   Overlay2D ov;
-  const std::string label = "定位 " + fmt(pose.score, 2) + (pose.ok ? "" : "（低于 " + fmt(spec.minScore, 2) + "）");
+  const std::string label =
+      "定位 " + fmt(pose.score, 2) + (pose.ok ? "" : "（低于 " + fmt(spec.minScore, 2) + "）");
   ov.polyline(pose.ok ? "station" : "missing", corners, /*closed=*/true, label);
   ov.points(pose.ok ? "part" : "outlier", {Px{pose.center.x, pose.center.y}});
-  if (!pose.ok) ov.text("ng", "定位失败", Px{pose.center.x, pose.center.y});
+  if (!pose.ok)
+    ov.text("ng", "定位失败", Px{pose.center.x, pose.center.y});
   outputs.set("overlay", ov.data());
   return Status::Ok();
 }
@@ -83,9 +91,11 @@ std::string externalKey(const ParamView& params) {
   std::error_code ec;
   const auto file = params.path("template");
   const auto size = std::filesystem::file_size(file, ec);
-  if (ec) return {};
+  if (ec)
+    return {};
   const auto mtime = std::filesystem::last_write_time(file, ec);
-  if (ec) return {};
+  if (ec)
+    return {};
   return std::to_string(size) + ":" + std::to_string(mtime.time_since_epoch().count());
 }
 
@@ -97,7 +107,7 @@ std::vector<Issue> validate(const ParamView& params, const std::set<std::string>
   return issues;
 }
 
-}  // namespace
+} // namespace
 
 void registerLocate(Registry& r) {
   OperatorDesc op;
@@ -114,9 +124,10 @@ void registerLocate(Registry& r) {
       "宿主据此报定位失败。";
   op.inputs = {Port{"image", "Image", "Image", "这一帧。", true}};
   op.outputs = {
-      Port{"pose", "Record", "Pose",
-           "glue.Pose2D：ok、score、angle（度，屏幕上顺时针为正）、center、teachCenter、offset、templateSize。",
-           true},
+      Port{
+          "pose", "Record", "Pose",
+          "glue.Pose2D：ok、score、angle（度，屏幕上顺时针为正）、center、teachCenter、offset、templateSize。",
+          true},
       Port{"score", "Measurement", "Score", "归一化互相关的分数（−1…1）。", true},
       Port{"overlay", "Record", "Overlay", "lyflow.overlay2d：模板框按位姿映射到这一帧。", true},
   };
@@ -132,12 +143,15 @@ void registerLocate(Registry& r) {
                   FileFilter{"All Files", {"*"}}};
   Param anchor = vec2Param("anchor", "Anchor", 0, 0, "px", {"X", "Y"},
                            "模板左上角像素在示教图上的位置（裁模板时的偏移）。");
-  Param radius = floatParam("searchRadius", "Search Radius", 80.0, "px", "模板中心最多偏开示教位置这么远。");
+  Param radius =
+      floatParam("searchRadius", "Search Radius", 80.0, "px", "模板中心最多偏开示教位置这么远。");
   radius.min = 1.0;
-  Param range = floatParam("angleRange", "Angle Range", 3.0, "°", "角度扫描范围 ±range；0 = 只找平移。", true);
+  Param range = floatParam("angleRange", "Angle Range", 3.0, "°",
+                           "角度扫描范围 ±range；0 = 只找平移。", true);
   range.min = 0.0;
   range.max = 45.0;
-  Param step = floatParam("angleStep", "Angle Step", 0.5, "°", "角度扫描步长（结果按抛物线插值到步长以下）。", true);
+  Param step = floatParam("angleStep", "Angle Step", 0.5, "°",
+                          "角度扫描步长（结果按抛物线插值到步长以下）。", true);
   step.min = 0.05;
   Param minScore = floatParam("minScore", "Min Score", 0.6, "", "分数低于它判定位失败。");
   minScore.min = -1.0;
@@ -151,4 +165,4 @@ void registerLocate(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

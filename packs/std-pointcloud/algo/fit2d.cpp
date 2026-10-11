@@ -64,9 +64,10 @@ void selectCircleInliers(const Cloud2D& cloud, const Eigen::VectorXf& c, double 
   const float sqrInner = (c[2] <= threshold ? 0.0F : (c[2] - threshold) * (c[2] - threshold));
   const float sqrOuter = (c[2] + threshold) * (c[2] + threshold);
   for (std::size_t i = 0; i < cloud.size(); ++i) {
-    const float sqrDist = (cloud[i].x - c[0]) * (cloud[i].x - c[0]) +
-                          (cloud[i].y - c[1]) * (cloud[i].y - c[1]);
-    if (sqrDist <= sqrOuter && sqrDist >= sqrInner) inliers->push_back(static_cast<int>(i));
+    const float sqrDist =
+        (cloud[i].x - c[0]) * (cloud[i].x - c[0]) + (cloud[i].y - c[1]) * (cloud[i].y - c[1]);
+    if (sqrDist <= sqrOuter && sqrDist >= sqrInner)
+      inliers->push_back(static_cast<int>(i));
   }
 }
 
@@ -98,7 +99,8 @@ Eigen::VectorXf refineCircleWithPrior(const Cloud2D& cloud, const pcl::Indices& 
       const auto& q = cloud[static_cast<std::size_t>(i)];
       const double dx = q.x - p[0], dy = q.y - p[1];
       const double d = std::hypot(dx, dy);
-      if (!(d > 0)) continue;
+      if (!(d > 0))
+        continue;
       const Eigen::Vector3d j(-dx / d / noise, -dy / d / noise, -1.0 / noise);
       const double e = (d - p[2]) / noise;
       h += j * j.transpose();
@@ -124,14 +126,15 @@ Eigen::VectorXf refineCircleWithPrior(const Cloud2D& cloud, const pcl::Indices& 
         lambda *= 10.0;
       }
     }
-    if (!improved || step.norm() < 1e-12) break;
+    if (!improved || step.norm() < 1e-12)
+      break;
   }
   Eigen::VectorXf out(3);
   out << static_cast<float>(p[0]), static_cast<float>(p[1]), static_cast<float>(p[2]);
   return out;
 }
 
-}  // namespace
+} // namespace
 
 bool fitLine2D(const Cloud2D& cloud, Eigen::VectorXf* line, pcl::Indices* inliers,
                const Line2DFitOptions& options) {
@@ -159,10 +162,12 @@ bool fitLine2D(const Cloud2D& cloud, Eigen::VectorXf* line, pcl::Indices* inlier
     lineRansac.setDistanceThreshold(distThresh);
     lineRansac.computeModel();
     lineRansac.getInliers(*inliers);
-    if (inliers->size() < 2) return false;
+    if (inliers->size() < 2)
+      return false;
     Eigen::VectorXf lineRes;
     lineRansac.getModelCoefficients(lineRes);
-    if (lineRes.size() == 0) return false;
+    if (lineRes.size() == 0)
+      return false;
     if (options.optimize) {
       modelLine->optimizeModelCoefficients(*inliers, lineRes, *line);
     } else {
@@ -229,7 +234,8 @@ bool fitLine2D(const Cloud2D& cloud, Eigen::VectorXf* line, pcl::Indices* inlier
     // line1 的法线，朝 +y，所以正的 offset 表示「在上面」
     Eigen::Vector2f n(-d1.y(), d1.x());
     n.normalize();
-    if (n.y() < 0) n = -n;
+    if (n.y() < 0)
+      n = -n;
     const Eigen::Vector2f p1(coeff1[0], coeff1[1]);
     const Eigen::Vector2f p2(coeff2[0], coeff2[1]);
     const float offset = n.dot(p2 - p1);
@@ -253,7 +259,8 @@ bool fitLine2D(const Cloud2D& cloud, Eigen::VectorXf* line, pcl::Indices* inlier
   } else {
     *line = winnerRaw;
   }
-  if (line->size() == 0) return false;
+  if (line->size() == 0)
+    return false;
   // 下游（截取、端点、质量指标）要的是精化方向上的配置接受带
   modelLine->selectWithinDistance(*line, distThresh, *inliers);
   return inliers->size() >= 2;
@@ -274,7 +281,8 @@ bool fitAxisLine2D(const Cloud2D& cloud, Eigen::VectorXf* line, pcl::Indices* in
     extract.setKeepOrganized(true);
     extract.filter(*lineCloud);
 
-    if (!fitLine2D(*lineCloud, line, indicesPtr.get(), options)) return false;
+    if (!fitLine2D(*lineCloud, line, indicesPtr.get(), options))
+      return false;
     meetDirection = std::fabs((*line)[3 + flag]) > std::fabs((*line)[4 - flag]);
   } while (!meetDirection);
   inliers->assign(indicesPtr->begin(), indicesPtr->end());
@@ -287,19 +295,22 @@ bool fitCircle2D(const Cloud2D& cloud, Eigen::VectorXf* circle, pcl::Indices* in
   // 参数（固定种子、概率 0.99、maxIterations）、同样的 LM 细化与重收内点，所以细化后
   // 半径在界内的输入与原来那一行 seg.segment 逐位相同。拆开是为了接住它扔掉的那种情况。
   inliers->clear();
-  if (cloud.size() < 3) return false;
+  if (cloud.size() < 3)
+    return false;
   const double threshold = options.distThresh;
-  auto model = std::make_shared<pcl::SampleConsensusModelCircle2D<Point2DT>>(cloud.makeShared(),
-                                                                             false);
+  auto model =
+      std::make_shared<pcl::SampleConsensusModelCircle2D<Point2DT>>(cloud.makeShared(), false);
   model->setRadiusLimits(options.minRadius, options.maxRadius);
   pcl::RandomSampleConsensus<Point2DT> sac(model, threshold);
   sac.setMaxIterations(options.maxIterations);
-  if (!sac.computeModel(0)) return false;
+  if (!sac.computeModel(0))
+    return false;
   pcl::Indices sampleInliers;
   sac.getInliers(sampleInliers);
   Eigen::VectorXf coeff;
   sac.getModelCoefficients(coeff);
-  if (coeff.size() < 3) return false;
+  if (coeff.size() < 3)
+    return false;
 
   Circle2DFitReport local;
   Circle2DFitReport& out = report != nullptr ? *report : local;
@@ -360,8 +371,10 @@ bool fitCircle2D(const Cloud2D& cloud, Eigen::VectorXf* circle, pcl::Indices* in
 
 bool fitCircleFixedRadius2D(const Cloud2D& cloud, double fixedRadius, Eigen::VectorXf* circle,
                             pcl::Indices* inliers, const Circle2DFitOptions& options) {
-  if (!fitCircle2D(cloud, circle, inliers, options)) return false;
-  if (fixedRadius <= 0) return true;
+  if (!fitCircle2D(cloud, circle, inliers, options))
+    return false;
+  if (fixedRadius <= 0)
+    return true;
 
   double xc = (*circle)[0];
   double yc = (*circle)[1];
@@ -381,4 +394,4 @@ bool fitCircleFixedRadius2D(const Cloud2D& cloud, double fixedRadius, Eigen::Vec
   return inliers->size() >= 3;
 }
 
-}  // namespace lyflow::std_pc
+} // namespace lyflow::std_pc

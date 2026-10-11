@@ -1,11 +1,11 @@
 // 子图在前端的三件事（ADR-0010）：把定义合成成 OperatorDesc 让节点画得出来、
 // 按当前路径取出该渲染的那一层、以及合成/解散两个 change 动作。
 
-import { graphParamBoundTo, joinBind } from "./graphParams";
-import { newLocalId } from "./ids";
-import { valueEquals } from "./params";
-import { ANY, findPort, inferAnyTypes, type GraphContext } from "./typecheck";
-import type { OperatorDesc, Param, Port } from "../types/manifest";
+import { graphParamBoundTo, joinBind } from './graphParams';
+import { newLocalId } from './ids';
+import { valueEquals } from './params';
+import { ANY, findPort, inferAnyTypes, type GraphContext } from './typecheck';
+import type { OperatorDesc, Param, Port } from '../types/manifest';
 import {
   LIBRARY_OP_PREFIX,
   subgraphIdOf,
@@ -17,7 +17,7 @@ import {
   type PortRef,
   type SubgraphDef,
   type SubParam,
-} from "../types/graph";
+} from '../types/graph';
 
 /** 当前所在的子图栈。nodeId 用来拼事件路径，subgraphId 用来在 doc 里取定义。 */
 export interface PathSegment {
@@ -29,7 +29,7 @@ export type SubPath = readonly PathSegment[];
 
 /** 事件里的路径前缀（F2）。顶层是空串。 */
 export function pathPrefix(path: SubPath): string {
-  return path.length === 0 ? "" : path.map((p) => p.nodeId).join("/") + "/";
+  return path.length === 0 ? '' : path.map((p) => p.nodeId).join('/') + '/';
 }
 
 /** 某个本层节点在事件里的完整 id。 */
@@ -43,7 +43,7 @@ export function localIdOf(path: SubPath, eventId: string): string | null {
   if (!eventId.startsWith(prefix)) return null;
   const rest = eventId.slice(prefix.length);
   if (!rest) return null;
-  const slash = rest.indexOf("/");
+  const slash = rest.indexOf('/');
   return slash < 0 ? rest : rest.slice(0, slash);
 }
 
@@ -75,7 +75,7 @@ export function locateEventNode(
   doc: GraphDoc,
   eventId: string,
 ): { path: PathSegment[]; localId: string } | null {
-  const parts = eventId.split("/");
+  const parts = eventId.split('/');
   const path: PathSegment[] = [];
   let level: GraphLevel = doc;
   for (let i = 0; i < parts.length; i += 1) {
@@ -92,9 +92,18 @@ export function locateEventNode(
 }
 
 /** 节点在界面上叫什么：起过标题用标题，子图节点用子图的名字，其余用算子名。 */
-export function nodeTitle(doc: GraphDoc, node: GraphNode, ops: ReadonlyMap<string, OperatorDesc>): string {
+export function nodeTitle(
+  doc: GraphDoc,
+  node: GraphNode,
+  ops: ReadonlyMap<string, OperatorDesc>,
+): string {
   const sub = subgraphIdOf(node.op);
-  return node.ui?.title ?? (sub ? doc.subgraphs?.[sub]?.name : undefined) ?? ops.get(node.op)?.label ?? node.id;
+  return (
+    node.ui?.title ??
+    (sub ? doc.subgraphs?.[sub]?.name : undefined) ??
+    ops.get(node.op)?.label ??
+    node.id
+  );
 }
 
 /** 事件 id 指着的节点：一层层的名字（最后一个是它自己）与 locateEventNode 的结果。
@@ -137,14 +146,14 @@ export function synthesizeOperator(subgraphId: string, def: SubgraphDef): Operat
     name: i.name,
     type: i.type,
     label: i.label ?? i.name,
-    doc: i.doc ?? "",
+    doc: i.doc ?? '',
     required: (i.to?.length ?? 0) > 0,
   }));
   const outputs: Port[] = (def.outputs ?? []).map((o) => ({
     name: o.name,
     type: o.type,
     label: o.label ?? o.name,
-    doc: o.doc ?? "",
+    doc: o.doc ?? '',
   }));
   const params: Param[] = (def.params ?? []).map((p) => {
     const { binds: _binds, ...rest } = p;
@@ -152,11 +161,11 @@ export function synthesizeOperator(subgraphId: string, def: SubgraphDef): Operat
   });
   return {
     id: SUBGRAPH_OP_PREFIX + subgraphId,
-    version: def.version ?? "1.0.0",
+    version: def.version ?? '1.0.0',
     label: def.name || subgraphId,
-    category: def.category || "Subgraph",
+    category: def.category || 'Subgraph',
     keywords: def.keywords ?? [],
-    doc: def.doc ?? "",
+    doc: def.doc ?? '',
     inputs,
     outputs,
     params: params.length > 0 ? params : NO_PARAMS,
@@ -169,7 +178,7 @@ const augmentCache = new WeakMap<object, WeakMap<object, ReadonlyMap<string, Ope
 /** manifest 的算子表 + 本文档里的 `sub:` 合成项。按对象身份缓存，doc 不变就不重建。 */
 export function augmentOperators(
   base: ReadonlyMap<string, OperatorDesc>,
-  subgraphs: GraphDoc["subgraphs"],
+  subgraphs: GraphDoc['subgraphs'],
 ): ReadonlyMap<string, OperatorDesc> {
   if (!subgraphs || Object.keys(subgraphs).length === 0) return base;
   let perBase = augmentCache.get(base as object);
@@ -216,7 +225,7 @@ function boundaryOf(
   picked: ReadonlySet<string>,
 ): Boundary {
   const anyTypes = inferAnyTypes(ctx, { ...doc, nodes: level.nodes, edges: level.edges });
-  const typeOf = (ref: PortRef, side: "input" | "output"): string => {
+  const typeOf = (ref: PortRef, side: 'input' | 'output'): string => {
     const node = level.nodes.find((n) => n.id === ref.node);
     const op = node ? ctx.operatorsById.get(node.op) : undefined;
     const port = findPort(op, ref.port, side);
@@ -226,8 +235,8 @@ function boundaryOf(
 
   const inputNames = new Set<string>();
   const outputNames = new Set<string>();
-  const inputs: Boundary["inputs"] = [];
-  const outputs: Boundary["outputs"] = [];
+  const inputs: Boundary['inputs'] = [];
+  const outputs: Boundary['outputs'] = [];
 
   for (const edge of level.edges) {
     const fromIn = picked.has(edge.from.node);
@@ -244,7 +253,7 @@ function boundaryOf(
       }
       inputs.push({
         name: uniqueName(inputNames, edge.to.port),
-        type: typeOf(edge.to, "input"),
+        type: typeOf(edge.to, 'input'),
         to: [{ ...edge.to }],
         from: { ...edge.from },
       });
@@ -258,7 +267,7 @@ function boundaryOf(
       }
       outputs.push({
         name: uniqueName(outputNames, edge.from.port),
-        type: typeOf(edge.from, "output"),
+        type: typeOf(edge.from, 'output'),
         from: { ...edge.from },
         to: [{ ...edge.to }],
       });
@@ -288,8 +297,8 @@ export function composeSubgraph(
   const inner = level.nodes.filter((n) => picked.has(n.id));
   const innerEdges = level.edges.filter((e) => picked.has(e.from.node) && picked.has(e.to.node));
 
-  const subgraphId = newLocalId("sg", new Set(Object.keys(doc.subgraphs ?? {})));
-  const nodeId = newLocalId("n", taken);
+  const subgraphId = newLocalId('sg', new Set(Object.keys(doc.subgraphs ?? {})));
+  const nodeId = newLocalId('n', taken);
   taken.add(nodeId);
 
   // 落点取选区的中心，不然新节点会跑到原点去
@@ -316,13 +325,17 @@ export function composeSubgraph(
   if (path.length === 0) {
     for (const gp of Object.values(doc.params ?? {})) {
       gp.binds = gp.binds.map((bind) => {
-        const dot = bind.lastIndexOf(".");
+        const dot = bind.lastIndexOf('.');
         const target = { node: bind.slice(0, dot), param: bind.slice(dot + 1) };
         if (dot <= 0 || !picked.has(target.node)) return bind;
         const node = inner.find((n) => n.id === target.node);
-        const decl = node ? ctx.operatorsById.get(node.op)?.params.find((p) => p.name === target.param) : undefined;
+        const decl = node
+          ? ctx.operatorsById.get(node.op)?.params.find((p) => p.name === target.param)
+          : undefined;
         const name = uniqueName(new Set(def.params.map((p) => p.name)), target.param);
-        const copy = JSON.parse(JSON.stringify(decl ?? { type: gp.type ?? "float" })) as Partial<Param>;
+        const copy = JSON.parse(
+          JSON.stringify(decl ?? { type: gp.type ?? 'float' }),
+        ) as Partial<Param>;
         delete copy.roiBackdrop;
         def.params.push({
           ...(copy as Param),
@@ -339,13 +352,13 @@ export function composeSubgraph(
 
   const newEdges: GraphEdge[] = [];
   for (const i of boundary.inputs) {
-    const id = newLocalId("e", taken);
+    const id = newLocalId('e', taken);
     taken.add(id);
     newEdges.push({ id, from: { ...i.from }, to: { node: nodeId, port: i.name } });
   }
   for (const o of boundary.outputs) {
     for (const t of o.to) {
-      const id = newLocalId("e", taken);
+      const id = newLocalId('e', taken);
       taken.add(id);
       newEdges.push({ id, from: { node: nodeId, port: o.name }, to: { ...t } });
     }
@@ -357,7 +370,7 @@ export function composeSubgraph(
   host.nodes.push({
     id: nodeId,
     op: SUBGRAPH_OP_PREFIX + subgraphId,
-    opVersion: def.version ?? "1.0.0",
+    opVersion: def.version ?? '1.0.0',
     params: {},
     ui: { position },
   });
@@ -378,7 +391,7 @@ export function inlineLibraryNode(
 ): string | null {
   const node = levelOf(doc, path).nodes.find((n) => n.id === nodeId);
   if (!node || !node.op.startsWith(LIBRARY_OP_PREFIX)) return null;
-  const subgraphId = newLocalId("sg", new Set(Object.keys(doc.subgraphs ?? {})));
+  const subgraphId = newLocalId('sg', new Set(Object.keys(doc.subgraphs ?? {})));
   const copy = JSON.parse(JSON.stringify(def)) as SubgraphDef & { id?: unknown };
   delete copy.id;
   copy.name = copy.name ?? node.op.slice(LIBRARY_OP_PREFIX.length);
@@ -405,7 +418,7 @@ export function dissolveSubgraph(
   // 内部 id 在本层可能已经被占，统一重新分配
   const rename = new Map<string, string>();
   for (const n of def.nodes) {
-    const id = newLocalId("n", taken);
+    const id = newLocalId('n', taken);
     taken.add(id);
     rename.set(n.id, id);
   }
@@ -446,7 +459,7 @@ export function dissolveSubgraph(
 
   const newEdges: GraphEdge[] = [];
   for (const e of def.edges) {
-    const id = newLocalId("e", taken);
+    const id = newLocalId('e', taken);
     taken.add(id);
     newEdges.push({
       id,
@@ -459,7 +472,7 @@ export function dissolveSubgraph(
     if (edge.to.node === nodeId) {
       const port = def.inputs.find((i) => i.name === edge.to.port);
       for (const t of port?.to ?? []) {
-        const id = newLocalId("e", taken);
+        const id = newLocalId('e', taken);
         taken.add(id);
         newEdges.push({
           id,
@@ -470,7 +483,7 @@ export function dissolveSubgraph(
     } else if (edge.from.node === nodeId) {
       const port = def.outputs.find((o) => o.name === edge.from.port);
       if (!port) continue;
-      const id = newLocalId("e", taken);
+      const id = newLocalId('e', taken);
       taken.add(id);
       newEdges.push({
         id,
@@ -504,8 +517,8 @@ export function resolveOutput(
 ): { nodeId: string; port: string } | null {
   // `<port>.<field>`（Bundle 的一个字段，m8-plan L3）：端口名里不会有点，先把字段拆下来，
   // 按端口走完子图边界再接回去 —— 子图对外输出只认端口名。
-  const dot = port.indexOf(".");
-  const field = dot < 0 ? "" : port.slice(dot);
+  const dot = port.indexOf('.');
+  const field = dot < 0 ? '' : port.slice(dot);
   let prefix = pathPrefix(path);
   let level = levelOf(doc, path);
   let node = level.nodes.find((n) => n.id === localId);
@@ -545,7 +558,7 @@ export function promotedBy(
 
 /** 一个层级的钥匙：顶层是 ""，子图定义是定义 id（同一个定义的几个实例共用它）。 */
 export function levelKeyOf(path: SubPath): string {
-  return path.length === 0 ? "" : path[path.length - 1]!.subgraphId;
+  return path.length === 0 ? '' : path[path.length - 1]!.subgraphId;
 }
 
 /** 按层改写图级输出（路径 id 指着的节点）。删节点、合成、解散都会让路径 id 失效：存下来 bridge 报「指向不存在的节点」，
@@ -555,14 +568,18 @@ export function remapGraphOutputs(
   doc: GraphDoc,
   before: GraphDoc,
   levelKey: string,
-  fn: (segs: string[], k: number, port: string) => { node: string; port: string } | null | undefined,
+  fn: (
+    segs: string[],
+    k: number,
+    port: string,
+  ) => { node: string; port: string } | null | undefined,
 ): string[] {
   const dropped: string[] = [];
   if (!doc.outputs) return dropped;
   for (const [name, out] of Object.entries(before.outputs ?? {})) {
-    const segs = out.node.split("/");
+    const segs = out.node.split('/');
     let level: GraphLevel | undefined = before;
-    let key = "";
+    let key = '';
     for (let k = 0; k < segs.length && level; k += 1) {
       if (key === levelKey) {
         const next = fn(segs, k, out.port);
@@ -579,7 +596,7 @@ export function remapGraphOutputs(
       const node: GraphNode | undefined = level.nodes.find((n) => n.id === segs[k]);
       const sid: string | null = node ? subgraphIdOf(node.op) : null;
       level = sid ? before.subgraphs?.[sid] : undefined;
-      key = sid ?? "";
+      key = sid ?? '';
     }
   }
   return dropped;
@@ -590,7 +607,7 @@ export function remapGraphOutputs(
 /** 这些节点用到的子图定义，连同定义里面再用到的。复制节点时一起带走：粘进另一张图里 sub: 节点才认得出来。 */
 export function subgraphsUsedBy(
   nodes: readonly GraphNode[],
-  subgraphs: GraphDoc["subgraphs"],
+  subgraphs: GraphDoc['subgraphs'],
 ): Record<string, SubgraphDef> {
   const out: Record<string, SubgraphDef> = {};
   const visit = (list: readonly GraphNode[]): void => {
@@ -608,7 +625,7 @@ export function subgraphsUsedBy(
 
 /** 从 from 这份定义往里走（含它自己）碰得到 targets 里的哪一个吗。粘贴时防「子图放进它自己里面」。 */
 export function subgraphReaches(
-  subgraphs: GraphDoc["subgraphs"],
+  subgraphs: GraphDoc['subgraphs'],
   from: string,
   targets: ReadonlySet<string>,
 ): boolean {
@@ -654,12 +671,14 @@ function suffixedLabel(taken: Set<string>, base: string): string {
 /** 剪贴板带来的子图定义怎么并进这张图：同 id 同内容的就用这张图里的；同 id 不同内容的另起一个 id、名字加个号；
  *  这张图里没有的照原 id 加进来。「同内容」也看它里面用到的子图：里面那一份另起了，外面这份也得另起。 */
 export function mergeSubgraphs(
-  existing: GraphDoc["subgraphs"],
+  existing: GraphDoc['subgraphs'],
   incoming: Readonly<Record<string, SubgraphDef>>,
 ): SubgraphMerge {
   const have = existing ?? {};
   const differs = new Set(
-    Object.keys(incoming).filter((id) => Object.hasOwn(have, id) && !sameDefinition(have[id]!, incoming[id]!)),
+    Object.keys(incoming).filter(
+      (id) => Object.hasOwn(have, id) && !sameDefinition(have[id]!, incoming[id]!),
+    ),
   );
   for (let grew = true; grew; ) {
     grew = false;
@@ -678,9 +697,10 @@ export function mergeSubgraphs(
   const takenIds = new Set([...Object.keys(have), ...Object.keys(incoming)]);
   const takenNames = new Set(Object.values(have).flatMap((d) => (d.name ? [d.name] : [])));
   const ids = new Map<string, string>();
-  for (const id of Object.keys(incoming)) ids.set(id, differs.has(id) ? uniqueName(takenIds, id) : id);
+  for (const id of Object.keys(incoming))
+    ids.set(id, differs.has(id) ? uniqueName(takenIds, id) : id);
   const added: Record<string, SubgraphDef> = {};
-  const renamed: SubgraphMerge["renamed"] = [];
+  const renamed: SubgraphMerge['renamed'] = [];
   for (const [id, def] of Object.entries(incoming)) {
     const to = ids.get(id)!;
     if (Object.hasOwn(have, to)) continue; // 用这张图里的那一份
@@ -699,4 +719,3 @@ export function mergeSubgraphs(
   }
   return { ids, added, renamed };
 }
-

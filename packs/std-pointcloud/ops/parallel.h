@@ -23,10 +23,10 @@ constexpr std::size_t kParallelBlock = 8192;
 /// body 返回 false 表示看到了取消：别的线程领完手上这一段就停。threads ≤ 1 或只有一段时就在当前线程跑。
 /// body 里抛的异常在这里收齐、回到调用线程上再抛 —— 从工作线程逃出去就是 std::terminate。
 /// 逐点的循环用下面那个（block = kParallelBlock）；已经切成几十份粗块的（ASCII PCD 的行段）传 block = 1。
-template <class Body>
-void parallelFor(std::size_t n, int threads, std::size_t block, Body&& body) {
+template <class Body> void parallelFor(std::size_t n, int threads, std::size_t block, Body&& body) {
   const std::size_t blocks = (n + block - 1) / block;
-  const std::size_t count = std::min<std::size_t>(static_cast<std::size_t>(std::max(1, threads)), blocks);
+  const std::size_t count =
+      std::min<std::size_t>(static_cast<std::size_t>(std::max(1, threads)), blocks);
   std::atomic<std::size_t> next{0};
   std::atomic<bool> stop{false};
   std::exception_ptr error;
@@ -35,27 +35,33 @@ void parallelFor(std::size_t n, int threads, std::size_t block, Body&& body) {
     try {
       while (!stop.load(std::memory_order_relaxed)) {
         const std::size_t b = next.fetch_add(1, std::memory_order_relaxed);
-        if (b >= blocks) return;
+        if (b >= blocks)
+          return;
         const std::size_t begin = b * block;
-        if (!body(begin, std::min(n, begin + block))) stop.store(true, std::memory_order_relaxed);
+        if (!body(begin, std::min(n, begin + block)))
+          stop.store(true, std::memory_order_relaxed);
       }
     } catch (...) {
       std::lock_guard<std::mutex> lock(errorMu);
-      if (!error) error = std::current_exception();
+      if (!error)
+        error = std::current_exception();
       stop.store(true, std::memory_order_relaxed);
     }
   };
   std::vector<std::thread> pool;
-  if (count > 1) pool.reserve(count - 1);
-  for (std::size_t t = 1; t < count; ++t) pool.emplace_back(work);
+  if (count > 1)
+    pool.reserve(count - 1);
+  for (std::size_t t = 1; t < count; ++t)
+    pool.emplace_back(work);
   work();
-  for (auto& th : pool) th.join();
-  if (error) std::rethrow_exception(error);
+  for (auto& th : pool)
+    th.join();
+  if (error)
+    std::rethrow_exception(error);
 }
 
-template <class Body>
-void parallelFor(std::size_t n, int threads, Body&& body) {
+template <class Body> void parallelFor(std::size_t n, int threads, Body&& body) {
   parallelFor(n, threads, kParallelBlock, std::forward<Body>(body));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

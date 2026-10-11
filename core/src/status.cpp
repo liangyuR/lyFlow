@@ -6,17 +6,22 @@ namespace lyflow {
 
 const char* toString(Phase p) {
   switch (p) {
-    case Phase::Validate: return "validate";
-    case Phase::Compile:  return "compile";
-    case Phase::Execute:  return "execute";
+  case Phase::Validate:
+    return "validate";
+  case Phase::Compile:
+    return "compile";
+  case Phase::Execute:
+    return "execute";
   }
   return "execute";
 }
 
 const char* toString(Severity s) {
   switch (s) {
-    case Severity::Error:   return "error";
-    case Severity::Warning: return "warning";
+  case Severity::Error:
+    return "error";
+  case Severity::Warning:
+    return "warning";
   }
   return "error";
 }
@@ -24,7 +29,8 @@ const char* toString(Severity s) {
 std::vector<Diagnostic> Diagnostics::forNode(const std::string& nodeId) const {
   std::vector<Diagnostic> out;
   for (const auto& d : items_) {
-    if (d.nodeId == nodeId) out.push_back(d);
+    if (d.nodeId == nodeId)
+      out.push_back(d);
   }
   return out;
 }
@@ -61,4 +67,4 @@ std::string Diagnostics::toJson() const {
   return w.str();
 }
 
-}  // namespace lyflow
+} // namespace lyflow

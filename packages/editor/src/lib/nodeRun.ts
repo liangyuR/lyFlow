@@ -5,25 +5,25 @@
 // 修订一之后主操作是**智能运行**：单击 = `targets: [id]`（运行到此的语义），系统自己算出最少要跑
 // 哪些节点；Shift+单击再加 `force: [id]`；「仅此节点」（isolate）降为右键里的次级操作。
 
-import { hasRelativePathParam } from "./params";
-import { augmentOperators, fullId, levelOf, localIdOf, nodeIndex, type SubPath } from "./subgraph";
-import { staleLocalIds, useCacheStore } from "../store/cache";
+import { hasRelativePathParam } from './params';
+import { augmentOperators, fullId, levelOf, localIdOf, nodeIndex, type SubPath } from './subgraph';
+import { staleLocalIds, useCacheStore } from '../store/cache';
 import {
   aggregatedNodes,
   cancelCurrentRun,
   startRun,
   useExecutionStore,
   type NodeExecution,
-} from "../store/execution";
-import { useGraphStore } from "../store/graph";
-import { useManifestStore } from "../store/manifest";
-import { useUiStore } from "../store/ui";
-import type { PlanNode } from "../types/execution";
-import type { GraphDoc, GraphEdge, GraphLevel } from "../types/graph";
-import type { OperatorDesc } from "../types/manifest";
+} from '../store/execution';
+import { useGraphStore } from '../store/graph';
+import { useManifestStore } from '../store/manifest';
+import { useUiStore } from '../store/ui';
+import type { PlanNode } from '../types/execution';
+import type { GraphDoc, GraphEdge, GraphLevel } from '../types/graph';
+import type { OperatorDesc } from '../types/manifest';
 
 /** 按钮的 `data-run-state`（U6，V5 起 disabled 只剩「本节点有校验错误」一种）。 */
-export type NodeRunState = "idle" | "running" | "done" | "error" | "disabled";
+export type NodeRunState = 'idle' | 'running' | 'done' | 'error' | 'disabled';
 
 // ------------------------------------------------------------------ 图结构
 
@@ -98,21 +98,28 @@ export function ancestorsOf(level: GraphLevel, nodeId: string): readonly string[
   return result;
 }
 
-export type NavDir = "up" | "down" | "prev" | "next";
+export type NavDir = 'up' | 'down' | 'prev' | 'next';
 
 /** 沿连线走的上一步：从 from 往 via 那边走到了 to。同级之间挪、往回退都看它。 */
 export interface NavHop {
   from: string;
-  via: "up" | "down";
+  via: 'up' | 'down';
   to: string;
 }
 
 /** 这一层里 id 在 via 那边直接相连的节点（去重、不含自己），按位置从上到下、从左到右排（同位置按文档顺序）。 */
-function neighboursOf(level: GraphLevel, id: string, via: "up" | "down"): string[] {
+function neighboursOf(level: GraphLevel, id: string, via: 'up' | 'down'): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const e of level.edges) {
-    const other = via === "up" ? (e.to.node === id ? e.from.node : null) : e.from.node === id ? e.to.node : null;
+    const other =
+      via === 'up'
+        ? e.to.node === id
+          ? e.from.node
+          : null
+        : e.from.node === id
+          ? e.to.node
+          : null;
     if (!other || other === id || seen.has(other)) continue;
     seen.add(other);
     out.push(other);
@@ -120,7 +127,9 @@ function neighboursOf(level: GraphLevel, id: string, via: "up" | "down"): string
   const index = nodeIndex(level.nodes);
   const order = new Map(level.nodes.map((n, i) => [n.id, i]));
   const pos = (n: string) => index.get(n)?.ui?.position ?? { x: 0, y: 0 };
-  return out.sort((a, b) => pos(a).y - pos(b).y || pos(a).x - pos(b).x || order.get(a)! - order.get(b)!);
+  return out.sort(
+    (a, b) => pos(a).y - pos(b).y || pos(a).x - pos(b).x || order.get(a)! - order.get(b)!,
+  );
 }
 
 /** 键盘沿连线走一步（Alt+方向键）。up / down：刚从那一边过来就先退回去（→ 再 ← 回到出发的那个），否则取最上面那个；
@@ -133,7 +142,7 @@ export function stepAlong(
 ): { id: string; hop: NavHop } | null {
   if (!level.nodes.some((n) => n.id === cur)) return null;
   const came = last && last.to === cur ? last : null;
-  if (dir === "up" || dir === "down") {
+  if (dir === 'up' || dir === 'down') {
     const list = neighboursOf(level, cur, dir);
     if (list.length === 0) return null;
     const back = came && came.via !== dir && list.includes(came.from) ? came.from : null;
@@ -141,30 +150,34 @@ export function stepAlong(
     return { id, hop: { from: cur, via: dir, to: id } };
   }
   let from: string | null = came ? came.from : null;
-  let via: "up" | "down" = came ? came.via : "down";
+  let via: 'up' | 'down' = came ? came.via : 'down';
   if (!from) {
-    const ups = neighboursOf(level, cur, "up");
-    const downs = ups.length > 0 ? [] : neighboursOf(level, cur, "down");
+    const ups = neighboursOf(level, cur, 'up');
+    const downs = ups.length > 0 ? [] : neighboursOf(level, cur, 'down');
     from = ups[0] ?? downs[0] ?? null;
-    via = ups.length > 0 ? "down" : "up";
+    via = ups.length > 0 ? 'down' : 'up';
   }
   if (!from) return null;
   const siblings = neighboursOf(level, from, via);
   const at = siblings.indexOf(cur);
-  const next = at < 0 ? -1 : dir === "next" ? at + 1 : at - 1;
+  const next = at < 0 ? -1 : dir === 'next' ? at + 1 : at - 1;
   if (next < 0 || next >= siblings.length) return null;
   return { id: siblings[next]!, hop: { from, via, to: siblings[next]! } };
 }
 
 /** 当前层里从 start 出发沿连线能到的全部节点（含 start 自己）：up = 往上游走，down = 往下游走。
  *  按 level.nodes 的顺序返回。右键「选中上游 / 选中下游」用：选上一整条链再合成、静音、整理、复制。 */
-export function closureOf(level: GraphLevel, start: readonly string[], dir: "up" | "down"): string[] {
+export function closureOf(
+  level: GraphLevel,
+  start: readonly string[],
+  dir: 'up' | 'down',
+): string[] {
   const seen = new Set(start.filter((id) => level.nodes.some((n) => n.id === id)));
   let frontier = [...seen];
   while (frontier.length > 0) {
     const next: string[] = [];
     for (const e of level.edges) {
-      const [from, to] = dir === "up" ? [e.to.node, e.from.node] : [e.from.node, e.to.node];
+      const [from, to] = dir === 'up' ? [e.to.node, e.from.node] : [e.from.node, e.to.node];
       if (frontier.includes(from) && !seen.has(to)) {
         seen.add(to);
         next.push(to);
@@ -188,10 +201,16 @@ export function previewTargets(
 ): string[] {
   const out = [fullId(path, nodeId)];
   for (const w of watched) {
-    if (!w || w.path.length > path.length || !w.path.every((seg, i) => seg.nodeId === path[i]!.nodeId)) continue;
-    const from = w.path.length < path.length ? path[w.path.length]!.nodeId : nodeId.split("/")[0]!;
+    if (
+      !w ||
+      w.path.length > path.length ||
+      !w.path.every((seg, i) => seg.nodeId === path[i]!.nodeId)
+    )
+      continue;
+    const from = w.path.length < path.length ? path[w.path.length]!.nodeId : nodeId.split('/')[0]!;
     const id = fullId(w.path, w.nodeId);
-    if (!out.includes(id) && closureOf(levelOf(doc, w.path), [from], "down").includes(w.nodeId)) out.push(id);
+    if (!out.includes(id) && closureOf(levelOf(doc, w.path), [from], 'down').includes(w.nodeId))
+      out.push(id);
   }
   return out;
 }
@@ -202,7 +221,7 @@ export function previewTargets(
  *  子图节点的聚合状态不带 stats，done / skipped 已经说明内部全跑完了。 */
 export function hasUsableResult(exec: NodeExecution | undefined, stale: boolean): boolean {
   if (!exec || stale) return false;
-  if (exec.state !== "done" && exec.state !== "skipped") return false;
+  if (exec.state !== 'done' && exec.state !== 'skipped') return false;
   return exec.stats?.outputsAvailable !== false;
 }
 
@@ -280,17 +299,17 @@ export function nodeRunState(
   invalid: boolean,
   ownRunning: boolean,
 ): NodeRunState {
-  if (ownRunning || exec?.state === "running") return "running";
-  if (invalid) return "disabled";
-  if (exec && hasUsableResult(exec, false)) return "done";
-  if (exec?.state === "error") return "error";
-  return "idle";
+  if (ownRunning || exec?.state === 'running') return 'running';
+  if (invalid) return 'disabled';
+  if (exec && hasUsableResult(exec, false)) return 'done';
+  if (exec?.state === 'error') return 'error';
+  return 'idle';
 }
 
-export const TITLE_RUN = "运行此节点";
-export const TITLE_UP_TO_DATE = "已是最新（命中缓存）—— Shift+点击强制重算";
-export const TITLE_STOP = "停止";
-export const TITLE_INVALID = "此节点有校验错误，先修正参数再运行";
+export const TITLE_RUN = '运行此节点';
+export const TITLE_UP_TO_DATE = '已是最新（命中缓存）—— Shift+点击强制重算';
+export const TITLE_STOP = '停止';
+export const TITLE_INVALID = '此节点有校验错误，先修正参数再运行';
 
 /** 按钮的 title（V5）。names 是将一并运行的上游给人看的名字。 */
 export function nodeRunTitle(opts: {
@@ -299,16 +318,16 @@ export function nodeRunTitle(opts: {
   upstream: readonly string[];
   upToDate: boolean;
 }): string {
-  if (opts.own && opts.state === "running") return TITLE_STOP;
-  if (opts.state === "disabled") return TITLE_INVALID;
-  if (opts.upstream.length > 0) return `${TITLE_RUN}（将一并运行上游 ${opts.upstream.join("、")}）`;
+  if (opts.own && opts.state === 'running') return TITLE_STOP;
+  if (opts.state === 'disabled') return TITLE_INVALID;
+  if (opts.upstream.length > 0) return `${TITLE_RUN}（将一并运行上游 ${opts.upstream.join('、')}）`;
   if (opts.upToDate) return TITLE_UP_TO_DATE;
   return TITLE_RUN;
 }
 
 /** 「仅此节点」不可用时的说明（沿用 U4 的文案）。 */
 export function isolateUnavailableTitle(names: readonly string[]): string {
-  return `上游 ${names.join("、")} 还没有可用结果 —— 先运行它们，或用『运行到此』`;
+  return `上游 ${names.join('、')} 还没有可用结果 —— 先运行它们，或用『运行到此』`;
 }
 
 /** 节点给人看的名字：改过名就用改的，否则是算子的 label，都没有就是 id。 */
@@ -323,9 +342,11 @@ export function nodeLabel(
 }
 
 /** 不走 hook 的一次性判定：右键「仅此节点」打开那一刻用（直接上游都得有结果）。 */
-export function nodeRunAvailability(
-  localId: string,
-): { missing: string[]; names: string[]; available: boolean } {
+export function nodeRunAvailability(localId: string): {
+  missing: string[];
+  names: string[];
+  available: boolean;
+} {
   const doc: GraphDoc = useGraphStore.getState().doc;
   const path: SubPath = useUiStore.getState().path;
   const operatorsById = augmentOperators(useManifestStore.getState().operatorsById, doc.subgraphs);
@@ -335,7 +356,11 @@ export function nodeRunAvailability(
   if (!node || !op) return { missing: [], names: [], available: false };
   const execs = aggregatedNodes(path, useExecutionStore.getState().nodes);
   const { plan, ranWith } = useCacheStore.getState();
-  const missing = missingUpstream(runUpstreamOf(level, localId, op), execs, staleLocalIds(path, plan, ranWith));
+  const missing = missingUpstream(
+    runUpstreamOf(level, localId, op),
+    execs,
+    staleLocalIds(path, plan, ranWith),
+  );
   return {
     missing,
     names: missing.map((id) => nodeLabel(level, id, operatorsById)),
@@ -348,22 +373,29 @@ export function nodeRunAvailability(
 /** 与工具栏的运行共用那道前置检查：没保存却带相对路径就跑不了。 */
 function blockedByRelativePaths(): boolean {
   const graph = useGraphStore.getState();
-  if (graph.filePath || !hasRelativePathParam(graph.doc, useManifestStore.getState().operatorsById)) {
+  if (
+    graph.filePath ||
+    !hasRelativePathParam(graph.doc, useManifestStore.getState().operatorsById)
+  ) {
     return false;
   }
   useUiStore
     .getState()
-    .showToast("图里有相对路径参数，请先保存图（相对路径以图文件所在目录为基准）", "warn");
+    .showToast('图里有相对路径参数，请先保存图（相对路径以图文件所在目录为基准）', 'warn');
   return true;
 }
 
-async function launch(request: { targets?: string[]; isolate?: string[]; force?: string[] }): Promise<void> {
+async function launch(request: {
+  targets?: string[];
+  isolate?: string[];
+  force?: string[];
+}): Promise<void> {
   if (blockedByRelativePaths()) return;
   const graph = useGraphStore.getState();
   try {
     await startRun(graph.doc, graph.filePath, request);
   } catch (e) {
-    useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
+    useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), 'warn');
   }
 }
 
@@ -383,11 +415,11 @@ export function runNodeOnly(localId: string): Promise<void> {
 export async function toggleNodeRun(localId: string, force = false): Promise<void> {
   const exec = useExecutionStore.getState();
   const full = fullId(useUiStore.getState().path, localId);
-  if (exec.runStatus === "running" && isOwnRun(exec.targets, full)) {
+  if (exec.runStatus === 'running' && isOwnRun(exec.targets, full)) {
     try {
       await cancelCurrentRun();
     } catch (e) {
-      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
+      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), 'warn');
     }
     return;
   }

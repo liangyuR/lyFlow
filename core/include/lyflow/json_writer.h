@@ -8,7 +8,7 @@
 namespace lyflow {
 
 class JsonWriter {
- public:
+public:
   JsonWriter() = default;
 
   // 容器
@@ -47,12 +47,12 @@ class JsonWriter {
 
   std::string str() const { return out_; }
 
- private:
+private:
   void prepareValue();
   void newlineIndent();
 
   std::string out_;
-  std::vector<bool> stack_;      // true = array, false = object
+  std::vector<bool> stack_; // true = array, false = object
   bool needComma_ = false;
   bool afterKey_ = false;
   int indentWidth_ = 2;
@@ -66,4 +66,4 @@ std::string jsonEscape(const std::string& s);
 // JS 侧被误当成整数（前端要靠 param.type 而不是值的形态来判断类型）。
 std::string jsonNumber(double v);
 
-}  // namespace lyflow
+} // namespace lyflow

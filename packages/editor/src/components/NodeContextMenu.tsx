@@ -1,10 +1,10 @@
 // 节点的右键菜单（交互清单 P1 #24 #25 #27 + P2 #31）。开、收、Esc / 点外面收起在 GraphCanvas，
 // 这里是菜单本身：每一项与它要的派生值（作用于谁、能不能「仅此节点」、哪些端口能标成图级输出）。
 
-import { useReactFlow } from "@xyflow/react";
-import { useCallback, useMemo, useRef } from "react";
+import { useReactFlow } from '@xyflow/react';
+import { useCallback, useMemo, useRef } from 'react';
 
-import { useMenuPlacement } from "../hooks/useMenuPlacement";
+import { useMenuPlacement } from '../hooks/useMenuPlacement';
 
 import {
   copyNodes,
@@ -15,27 +15,27 @@ import {
   pasteParams,
   resetParams,
   selectSameOp,
-} from "../lib/editActions";
-import { keyHint } from "../lib/keymap";
-import { layoutGraph } from "../lib/layout";
-import { useMotionEnabled, viewportMs, withLayoutTransition } from "../lib/motion";
+} from '../lib/editActions';
+import { keyHint } from '../lib/keymap';
+import { layoutGraph } from '../lib/layout';
+import { useMotionEnabled, viewportMs, withLayoutTransition } from '../lib/motion';
 import {
   closureOf,
   isolateUnavailableTitle,
   nodeRunAvailability,
   runNodeOnly,
   runNodeSmart,
-} from "../lib/nodeRun";
-import { canPasteParams, planParamReset } from "../lib/paramClipboard";
-import { fullId, resolveOutput } from "../lib/subgraph";
-import { evictNodeCache } from "../store/cache";
-import { useCompareStore } from "../store/compare";
-import { useExecutionStore } from "../store/execution";
-import { useGraphStore } from "../store/graph";
-import { useUiStore } from "../store/ui";
-import { transport } from "../transport";
-import { LIBRARY_OP_PREFIX, subgraphIdOf, type GraphDoc } from "../types/graph";
-import type { OperatorDesc } from "../types/manifest";
+} from '../lib/nodeRun';
+import { canPasteParams, planParamReset } from '../lib/paramClipboard';
+import { fullId, resolveOutput } from '../lib/subgraph';
+import { evictNodeCache } from '../store/cache';
+import { useCompareStore } from '../store/compare';
+import { useExecutionStore } from '../store/execution';
+import { useGraphStore } from '../store/graph';
+import { useUiStore } from '../store/ui';
+import { transport } from '../transport';
+import { LIBRARY_OP_PREFIX, subgraphIdOf, type GraphDoc } from '../types/graph';
+import type { OperatorDesc } from '../types/manifest';
 
 export interface ContextMenuState {
   nodeId: string;
@@ -69,7 +69,7 @@ export function NodeContextMenu({
   const path = useUiStore((s) => s.path);
   const paramClip = useUiStore((s) => s.paramClipboard);
   const docNow = useGraphStore((s) => s.doc);
-  const running = useExecutionStore((s) => s.runStatus === "running");
+  const running = useExecutionStore((s) => s.runStatus === 'running');
   const declaredOutputs = useGraphStore((s) => s.doc.outputs);
   const { fitView } = useReactFlow();
   const motionOn = useMotionEnabled();
@@ -81,11 +81,11 @@ export function NodeContextMenu({
   }, [menu]);
 
   const selectClosure = useCallback(
-    (dir: "up" | "down") => {
+    (dir: 'up' | 'down') => {
       const ids = closureOf(view, menuTargets(), dir);
       const ui = useUiStore.getState();
       ui.setSelection(ids, []);
-      ui.showToast(`已选中${dir === "up" ? "上游" : "下游"}（含自己）${ids.length} 个节点`);
+      ui.showToast(`已选中${dir === 'up' ? '上游' : '下游'}（含自己）${ids.length} 个节点`);
       onClose();
     },
     [view, menuTargets, onClose],
@@ -96,7 +96,7 @@ export function NodeContextMenu({
   const menuRunOnly = nodeRunAvailability(menu.nodeId);
   const menuOp = menuNode ? operatorsById.get(menuNode.op) : undefined;
   const menuSubgraphId = menuNode ? subgraphIdOf(menuNode.op) : null;
-  const menuIsLibrary = menuNode?.op.startsWith("lib.") === true;
+  const menuIsLibrary = menuNode?.op.startsWith('lib.') === true;
 
   // 图级输出（ADR-0017）：outputs 里存的是**展开后**的路径 id，
   // 所以在子图里标输出也说得清是哪一个端口。
@@ -110,7 +110,9 @@ export function NodeContextMenu({
     return op.outputs.flatMap((port) => {
       const ref = resolveOutput(docNow, path, menuNode.id, port.name);
       if (!ref) return [];
-      const hit = Object.entries(declared).find(([, o]) => o.node === ref.nodeId && o.port === ref.port);
+      const hit = Object.entries(declared).find(
+        ([, o]) => o.node === ref.nodeId && o.port === ref.port,
+      );
       return [{ port: port.name, ref, name: hit?.[0] }];
     });
   }, [menuNode, operatorsById, declaredOutputs, path]);
@@ -134,7 +136,7 @@ export function NodeContextMenu({
       useUiStore.getState().setSelection(inlined, []);
       useUiStore.getState().showToast(`已解散，内联了 ${inlined.length} 个节点`);
     } else {
-      useUiStore.getState().showToast("这个节点不是子图", "warn");
+      useUiStore.getState().showToast('这个节点不是子图', 'warn');
     }
     onClose();
   }, [menu, onClose]);
@@ -157,7 +159,7 @@ export function NodeContextMenu({
           useUiStore.getState().setRenamingNode(menu.nodeId);
         }}
       >
-        改名 <kbd>{keyHint("rename")}</kbd>
+        改名 <kbd>{keyHint('rename')}</kbd>
       </button>
       <button
         type="button"
@@ -167,7 +169,7 @@ export function NodeContextMenu({
           onClose();
         }}
       >
-        复制 <kbd>{keyHint("copy")}</kbd>
+        复制 <kbd>{keyHint('copy')}</kbd>
       </button>
       <button
         type="button"
@@ -178,7 +180,7 @@ export function NodeContextMenu({
           onClose();
         }}
       >
-        原地复制 <kbd>{keyHint("duplicate")}</kbd>
+        原地复制 <kbd>{keyHint('duplicate')}</kbd>
       </button>
       <button
         type="button"
@@ -190,12 +192,16 @@ export function NodeContextMenu({
           onClose();
         }}
       >
-        复制并保留输入 <kbd>{keyHint("duplicateWired")}</kbd>
+        复制并保留输入 <kbd>{keyHint('duplicateWired')}</kbd>
       </button>
       <button
         type="button"
         data-testid="ctx-disconnect"
-        disabled={!view.edges.some((e) => menuTargets().includes(e.from.node) || menuTargets().includes(e.to.node))}
+        disabled={
+          !view.edges.some(
+            (e) => menuTargets().includes(e.from.node) || menuTargets().includes(e.to.node),
+          )
+        }
         onClick={() => {
           disconnectAll(menuTargets());
           onClose();
@@ -232,7 +238,11 @@ export function NodeContextMenu({
         type="button"
         data-testid="ctx-paste-params"
         disabled={!canPasteParams(docNow, paramClip, menuNode?.op)}
-        title={paramClip ? `来自「${paramClip.from}」，写进选中的同一种算子` : "先在一个同类节点上「复制参数」"}
+        title={
+          paramClip
+            ? `来自「${paramClip.from}」，写进选中的同一种算子`
+            : '先在一个同类节点上「复制参数」'
+        }
         onClick={() => {
           pasteParams(menuTargets());
           onClose();
@@ -276,7 +286,7 @@ export function NodeContextMenu({
           onClose();
         }}
       >
-        删除并接通上下游 <kbd>{keyHint("deleteHeal")}</kbd>
+        删除并接通上下游 <kbd>{keyHint('deleteHeal')}</kbd>
       </button>
       <button
         type="button"
@@ -287,19 +297,23 @@ export function NodeContextMenu({
           onClose();
         }}
       >
-        删除 <kbd>{keyHint("delete")}</kbd>
+        删除 <kbd>{keyHint('delete')}</kbd>
       </button>
       <hr className="ctxmenu__sep" />
       <button
         type="button"
         data-testid="run-to-node"
-        title={running ? "取消正在进行的运行，改跑到此节点（与 Shift+F5、节点上的运行按钮一样是抢占）" : undefined}
+        title={
+          running
+            ? '取消正在进行的运行，改跑到此节点（与 Shift+F5、节点上的运行按钮一样是抢占）'
+            : undefined
+        }
         onClick={() => {
           onRunToNode(menu.nodeId);
           onClose();
         }}
       >
-        运行到此节点 <kbd>{keyHint("runToNode")}</kbd>
+        运行到此节点 <kbd>{keyHint('runToNode')}</kbd>
       </button>
       {/* 与标题栏按钮同一组动作（修订一 V6）：运行到此 = 单击，强制重算 = Shift+单击 */}
       <button
@@ -317,10 +331,10 @@ export function NodeContextMenu({
         type="button"
         data-testid="ctx-run-node-only"
         disabled={!menuRunOnly?.available}
-        data-run-reason={menuRunOnly?.missing.join(",") || undefined}
+        data-run-reason={menuRunOnly?.missing.join(',') || undefined}
         title={
           menuRunOnly?.available
-            ? "只跑此节点，上游一律用已有结果（不补跑）"
+            ? '只跑此节点，上游一律用已有结果（不补跑）'
             : menuRunOnly && menuRunOnly.missing.length > 0
               ? isolateUnavailableTitle(menuRunOnly.names)
               : undefined
@@ -346,7 +360,7 @@ export function NodeContextMenu({
                 .showToast(`清掉 ${r.removed} 条缓存（${r.nodes.length} 个节点）`),
             )
             .catch((e: unknown) =>
-              useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn"),
+              useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), 'warn'),
             );
           onClose();
         }}
@@ -370,7 +384,7 @@ export function NodeContextMenu({
         type="button"
         data-testid="ctx-select-upstream"
         title="从这个节点（或选中的这些）沿连线往上游走，把整条链都选上"
-        onClick={() => selectClosure("up")}
+        onClick={() => selectClosure('up')}
       >
         选中上游
       </button>
@@ -378,16 +392,12 @@ export function NodeContextMenu({
         type="button"
         data-testid="ctx-select-downstream"
         title="从这个节点（或选中的这些）沿连线往下游走，把整条链都选上"
-        onClick={() => selectClosure("down")}
+        onClick={() => selectClosure('down')}
       >
         选中下游
       </button>
-      <button
-        type="button"
-        data-testid="ctx-compose"
-        onClick={doCompose}
-      >
-        合成子图 <kbd>{keyHint("compose")}</kbd>
+      <button type="button" data-testid="ctx-compose" onClick={doCompose}>
+        合成子图 <kbd>{keyHint('compose')}</kbd>
       </button>
       {menuSubgraphId && (
         <>
@@ -402,7 +412,7 @@ export function NodeContextMenu({
             进入子图
           </button>
           <button type="button" data-testid="ctx-dissolve" onClick={doDissolve}>
-            解散子图 <kbd>{keyHint("dissolve")}</kbd>
+            解散子图 <kbd>{keyHint('dissolve')}</kbd>
           </button>
           <button
             type="button"
@@ -423,22 +433,22 @@ export function NodeContextMenu({
           title="把库算子的定义拷进这张图、换成可编辑的子图；之后与库文件脱钩，改库文件不影响这张图"
           onClick={() => {
             const nodeId = menu.nodeId;
-            const opId = menuNode?.op ?? "";
+            const opId = menuNode?.op ?? '';
             onClose();
             void transport
               .getLibraryDefinition(opId)
               .then((def) => {
                 const ui = useUiStore.getState();
                 if (!def) {
-                  ui.showToast(`取不到 ${opId} 的定义：库文件可能已经删了，刷新库后再试`, "warn");
+                  ui.showToast(`取不到 ${opId} 的定义：库文件可能已经删了，刷新库后再试`, 'warn');
                   return;
                 }
                 if (!useGraphStore.getState().inlineLibrary(nodeId, def)) return;
                 ui.setSelection([nodeId], []);
-                ui.showToast("已展开为子图，双击进入编辑；库文件不受影响");
+                ui.showToast('已展开为子图，双击进入编辑；库文件不受影响');
               })
               .catch((e: unknown) =>
-                useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn"),
+                useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), 'warn'),
               );
           }}
         >
@@ -450,7 +460,7 @@ export function NodeContextMenu({
           key={o.port}
           type="button"
           data-testid={`ctx-mark-output-${o.port}`}
-          data-marked={o.name ? "1" : "0"}
+          data-marked={o.name ? '1' : '0'}
           onClick={() => {
             const graph = useGraphStore.getState();
             if (o.name) {
@@ -475,7 +485,7 @@ export function NodeContextMenu({
           onClose();
         }}
       >
-        {menuNode?.bypass ? "取消静音" : "静音"} <kbd>{keyHint("mute")}</kbd>
+        {menuNode?.bypass ? '取消静音' : '静音'} <kbd>{keyHint('mute')}</kbd>
       </button>
       <button
         type="button"
@@ -486,7 +496,7 @@ export function NodeContextMenu({
           onClose();
         }}
       >
-        {menuNode?.ui?.collapsed ? "展开" : "折叠"} <kbd>{keyHint("collapse")}</kbd>
+        {menuNode?.ui?.collapsed ? '展开' : '折叠'} <kbd>{keyHint('collapse')}</kbd>
       </button>
       <button
         type="button"
@@ -502,7 +512,7 @@ export function NodeContextMenu({
           onClose();
         }}
       >
-        整理选中的布局 <kbd>{keyHint("layout")}</kbd>
+        整理选中的布局 <kbd>{keyHint('layout')}</kbd>
       </button>
       <button
         type="button"
@@ -518,7 +528,7 @@ export function NodeContextMenu({
           onClose();
         }}
       >
-        对准选中的节点 <kbd>{keyHint("fitSelection")}</kbd>
+        对准选中的节点 <kbd>{keyHint('fitSelection')}</kbd>
       </button>
       <button
         type="button"
@@ -528,7 +538,7 @@ export function NodeContextMenu({
           onClose();
         }}
       >
-        适配视图 <kbd>{keyHint("fitView")}</kbd>
+        适配视图 <kbd>{keyHint('fitView')}</kbd>
       </button>
     </div>
   );

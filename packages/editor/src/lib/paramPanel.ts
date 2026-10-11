@@ -13,9 +13,9 @@ import {
   resolveGraphBinding,
   withBoundValues,
   type GraphBinding,
-} from "./graphParams";
-import { effectiveParams, groupParams, isEnabled, isVisible, valueEquals } from "./params";
-import { fullId, pathPrefix, promotedBy, type SubPath } from "./subgraph";
+} from './graphParams';
+import { effectiveParams, groupParams, isEnabled, isVisible, valueEquals } from './params';
+import { fullId, pathPrefix, promotedBy, type SubPath } from './subgraph';
 import {
   LIBRARY_OP_PREFIX,
   subgraphIdOf,
@@ -23,11 +23,11 @@ import {
   type GraphLevel,
   type GraphNode,
   type GraphParam,
-} from "../types/graph";
-import type { OperatorDesc, Param, ParamType } from "../types/manifest";
+} from '../types/graph';
+import type { OperatorDesc, Param, ParamType } from '../types/manifest';
 
 export interface RowDiag {
-  severity: "error" | "warning";
+  severity: 'error' | 'warning';
   message: string;
   code?: string | undefined;
 }
@@ -55,7 +55,7 @@ interface RowBase {
 }
 
 export interface GraphParamRow extends RowBase {
-  kind: "gp";
+  kind: 'gp';
   name: string;
   gp: GraphParam;
   spec: Param | null;
@@ -63,7 +63,7 @@ export interface GraphParamRow extends RowBase {
 }
 
 export interface NodeParamRow extends RowBase {
-  kind: "param";
+  kind: 'param';
   /** 节点所在的层级（ui.path 或更深：展开进子图定义的那几行）。 */
   path: SubPath;
   node: GraphNode;
@@ -118,11 +118,11 @@ const MAX_DEPTH = 8;
 
 /** 值的文本（搜索用）。字符串原样，其余 JSON。 */
 function valueText(v: unknown): string {
-  if (typeof v === "string") return v;
+  if (typeof v === 'string') return v;
   try {
-    return JSON.stringify(v) ?? "";
+    return JSON.stringify(v) ?? '';
   } catch {
-    return "";
+    return '';
   }
 }
 
@@ -152,14 +152,20 @@ export interface BuildInput {
 
 const NO_DIAGS: readonly RowDiag[] = [];
 
-export function buildPanelModel({ doc, ops, path, overrides, diagnostics }: BuildInput): PanelModel {
+export function buildPanelModel({
+  doc,
+  ops,
+  path,
+  overrides,
+  diagnostics,
+}: BuildInput): PanelModel {
   const graphRows: GraphParamRow[] = [];
   for (const [name, gp] of Object.entries(doc.params ?? {})) {
     const spec = graphParamSpecOf(doc, name, gp, ops);
     const value = graphParamValue(doc, name, overrides);
     const decl = boundDecl(doc, gp, ops);
     graphRows.push({
-      kind: "gp",
+      kind: 'gp',
       key: `gp:${name}`,
       name,
       gp,
@@ -169,11 +175,18 @@ export function buildPanelModel({ doc, ops, path, overrides, diagnostics }: Buil
       modified: decl ? !valueEquals(value, decl.default) : false,
       recipe: true,
       diags: diagnostics.byGraphParam.get(name) ?? NO_DIAGS,
-      haystack: [name, gp.label ?? "", gp.binds.join(" "), valueText(value), "图参数"].join(" ").toLowerCase(),
+      haystack: [name, gp.label ?? '', gp.binds.join(' '), valueText(value), '图参数']
+        .join(' ')
+        .toLowerCase(),
     });
   }
 
-  const sectionsOf = (level: GraphLevel, at: SubPath, depth: number, shared: number): NodeSection[] => {
+  const sectionsOf = (
+    level: GraphLevel,
+    at: SubPath,
+    depth: number,
+    shared: number,
+  ): NodeSection[] => {
     const def = at.length > 0 ? doc.subgraphs?.[at[at.length - 1]!.subgraphId] : undefined;
     return level.nodes.map((node) => {
       const op = ops.get(node.op);
@@ -193,7 +206,7 @@ export function buildPanelModel({ doc, ops, path, overrides, diagnostics }: Buil
             const promoted = promotedBy(def, node.id, param.name)?.name ?? null;
             const value = effective[param.name];
             rows.push({
-              kind: "param",
+              kind: 'param',
               key: `${full}.${param.name}`,
               path: at,
               node,
@@ -204,7 +217,8 @@ export function buildPanelModel({ doc, ops, path, overrides, diagnostics }: Buil
               effective,
               enabled: isEnabled(param, effective),
               // 已提升的内参在内部只读（F4）；整条链通到图参数的例外，改它 = 改图参数（P1 的取舍 5）
-              readOnly: promoted && !binding ? `已提升为子图参数 ${promoted}，在外层实例上改` : null,
+              readOnly:
+                promoted && !binding ? `已提升为子图参数 ${promoted}，在外层实例上改` : null,
               binding,
               promoted,
               shared,
@@ -216,7 +230,9 @@ export function buildPanelModel({ doc, ops, path, overrides, diagnostics }: Buil
               recipe: binding !== null,
               diags: diagMap?.get(param.name) ?? NO_DIAGS,
               // 节点 id 用展开后的全路径：子图定义里的行按实例（`s2/in1`）也搜得到
-              haystack: [param.name, param.label ?? "", title, full, valueText(value)].join(" ").toLowerCase(),
+              haystack: [param.name, param.label ?? '', title, full, valueText(value)]
+                .join(' ')
+                .toLowerCase(),
             });
           }
         }
@@ -225,8 +241,12 @@ export function buildPanelModel({ doc, ops, path, overrides, diagnostics }: Buil
       const inner = subgraphId ? doc.subgraphs?.[subgraphId] : undefined;
       const children =
         inner && depth < MAX_DEPTH
-          ? sectionsOf(inner, [...at, { nodeId: node.id, subgraphId: subgraphId! }], depth + 1,
-              instanceCount(doc, subgraphId!))
+          ? sectionsOf(
+              inner,
+              [...at, { nodeId: node.id, subgraphId: subgraphId! }],
+              depth + 1,
+              instanceCount(doc, subgraphId!),
+            )
           : [];
       return {
         key,
@@ -247,7 +267,10 @@ export function buildPanelModel({ doc, ops, path, overrides, diagnostics }: Buil
 
   const level: GraphLevel =
     path.length === 0 ? doc : (doc.subgraphs?.[path[path.length - 1]!.subgraphId] ?? doc);
-  return { graphRows, sections: sectionsOf(level, path, 0, path.length === 0 ? 0 : sharedOf(doc, path)) };
+  return {
+    graphRows,
+    sections: sectionsOf(level, path, 0, path.length === 0 ? 0 : sharedOf(doc, path)),
+  };
 }
 
 /** 当前层级本身就在子图定义里（进了子图）时，这一层被几个实例共享。 */
@@ -258,7 +281,7 @@ function sharedOf(doc: GraphDoc, path: SubPath): number {
 
 // ------------------------------------------------------------ 过滤与压平
 
-export type PanelChip = "all" | "modified" | "recipe" | "diag";
+export type PanelChip = 'all' | 'modified' | 'recipe' | 'diag';
 
 export interface PanelFilter {
   query: string;
@@ -269,10 +292,10 @@ export interface PanelFilter {
 }
 
 export type PanelItem =
-  | { kind: "gp-head"; key: string; open: boolean; count: number; errors: number }
-  | { kind: "gp-row"; key: string; row: GraphParamRow }
+  | { kind: 'gp-head'; key: string; open: boolean; count: number; errors: number }
+  | { kind: 'gp-row'; key: string; row: GraphParamRow }
   | {
-      kind: "node-head";
+      kind: 'node-head';
       key: string;
       section: NodeSection;
       open: boolean;
@@ -281,10 +304,25 @@ export type PanelItem =
       /** 过滤生效时这一节里命中的行数（含展开进去的定义）。 */
       matched: number | null;
     }
-  | { kind: "group-head"; key: string; name: string; advanced: boolean; open: boolean; count: number; depth: number }
-  | { kind: "def-head"; key: string; section: NodeSection; open: boolean; shared: number; nodes: number }
-  | { kind: "row"; key: string; row: NodeParamRow }
-  | { kind: "empty"; key: string; text: string };
+  | {
+      kind: 'group-head';
+      key: string;
+      name: string;
+      advanced: boolean;
+      open: boolean;
+      count: number;
+      depth: number;
+    }
+  | {
+      kind: 'def-head';
+      key: string;
+      section: NodeSection;
+      open: boolean;
+      shared: number;
+      nodes: number;
+    }
+  | { kind: 'row'; key: string; row: NodeParamRow }
+  | { kind: 'empty'; key: string; text: string };
 
 export interface PanelCounts {
   all: number;
@@ -304,13 +342,13 @@ export interface PanelView {
 
 function chipHolds(row: PanelRow, chip: PanelChip): boolean {
   switch (chip) {
-    case "all":
+    case 'all':
       return true;
-    case "modified":
+    case 'modified':
       return row.modified;
-    case "recipe":
+    case 'recipe':
       return row.recipe;
-    case "diag":
+    case 'diag':
       return row.diags.length > 0;
   }
 }
@@ -337,7 +375,10 @@ export function allRows(model: PanelModel): PanelRow[] {
   return out;
 }
 
-export function countRows(model: PanelModel, filter: Pick<PanelFilter, "query" | "chip">): PanelCounts {
+export function countRows(
+  model: PanelModel,
+  filter: Pick<PanelFilter, 'query' | 'chip'>,
+): PanelCounts {
   const terms = queryTerms(filter.query);
   const counts: PanelCounts = { all: 0, modified: 0, recipe: 0, diag: 0, byType: {} };
   for (const row of allRows(model)) {
@@ -346,31 +387,47 @@ export function countRows(model: PanelModel, filter: Pick<PanelFilter, "query" |
     if (row.modified) counts.modified += 1;
     if (row.recipe) counts.recipe += 1;
     if (row.diags.length > 0) counts.diag += 1;
-    if (row.type && chipHolds(row, filter.chip)) counts.byType[row.type] = (counts.byType[row.type] ?? 0) + 1;
+    if (row.type && chipHolds(row, filter.chip))
+      counts.byType[row.type] = (counts.byType[row.type] ?? 0) + 1;
   }
   return counts;
 }
 
 export function flattenPanel(model: PanelModel, filter: PanelFilter): PanelView {
   const terms = queryTerms(filter.query);
-  const filtering = terms.length > 0 || filter.chip !== "all" || filter.type !== null;
+  const filtering = terms.length > 0 || filter.chip !== 'all' || filter.type !== null;
   const passes = (row: PanelRow) =>
-    queryHolds(row, terms) && chipHolds(row, filter.chip) && (filter.type === null || row.type === filter.type);
+    queryHolds(row, terms) &&
+    chipHolds(row, filter.chip) &&
+    (filter.type === null || row.type === filter.type);
   // 折叠：键在 toggled 里就与默认相反；过滤生效时全部展开（命中的行不能藏在收起的组里）
-  const isOpen = (key: string, byDefault: boolean) => filtering || (filter.toggled[key] ? !byDefault : byDefault);
+  const isOpen = (key: string, byDefault: boolean) =>
+    filtering || (filter.toggled[key] ? !byDefault : byDefault);
 
   const items: PanelItem[] = [];
 
   const gpRows = model.graphRows.filter(passes);
   if (gpRows.length > 0) {
-    const open = isOpen("gp", true);
-    const errors = model.graphRows.filter((r) => r.diags.some((d) => d.severity === "error")).length;
-    items.push({ kind: "gp-head", key: "gp", open, count: filtering ? gpRows.length : model.graphRows.length, errors });
-    if (open) for (const row of gpRows) items.push({ kind: "gp-row", key: row.key, row });
+    const open = isOpen('gp', true);
+    const errors = model.graphRows.filter((r) =>
+      r.diags.some((d) => d.severity === 'error'),
+    ).length;
+    items.push({
+      kind: 'gp-head',
+      key: 'gp',
+      open,
+      count: filtering ? gpRows.length : model.graphRows.length,
+      errors,
+    });
+    if (open) for (const row of gpRows) items.push({ kind: 'gp-row', key: row.key, row });
   } else if (!filtering && model.graphRows.length === 0) {
     // 还没有图参数：分组照样在最上面，告诉人怎么往里放
-    items.push({ kind: "gp-head", key: "gp", open: true, count: 0, errors: 0 });
-    items.push({ kind: "empty", key: "gp-empty", text: "还没有图参数：点参数行右端的书签「纳入配方」" });
+    items.push({ kind: 'gp-head', key: 'gp', open: true, count: 0, errors: 0 });
+    items.push({
+      kind: 'empty',
+      key: 'gp-empty',
+      text: '还没有图参数：点参数行右端的书签「纳入配方」',
+    });
   }
 
   /** 一节（及其展开进去的定义）里命中的行数。 */
@@ -382,7 +439,7 @@ export function flattenPanel(model: PanelModel, filter: PanelFilter): PanelView 
     if (filtering && matched === 0) return;
     const open = isOpen(s.key, true);
     items.push({
-      kind: "node-head",
+      kind: 'node-head',
       key: s.key,
       section: s,
       open,
@@ -396,7 +453,7 @@ export function flattenPanel(model: PanelModel, filter: PanelFilter): PanelView 
     let groupOpen = true;
     for (let i = 0; i < rows.length; i += 1) {
       const row = rows[i]!;
-      const gkey = `${s.key}|g:${row.group}|${row.advanced ? "a" : "b"}`;
+      const gkey = `${s.key}|g:${row.group}|${row.advanced ? 'a' : 'b'}`;
       if (gkey !== group) {
         group = gkey;
         groupOpen = isOpen(gkey, !row.advanced);
@@ -406,7 +463,7 @@ export function flattenPanel(model: PanelModel, filter: PanelFilter): PanelView 
             (r) => r.group === row.group && r.advanced === row.advanced,
           ).length;
           items.push({
-            kind: "group-head",
+            kind: 'group-head',
             key: gkey,
             name: row.group,
             advanced: row.advanced,
@@ -418,7 +475,7 @@ export function flattenPanel(model: PanelModel, filter: PanelFilter): PanelView 
           groupOpen = true;
         }
       }
-      if (groupOpen) items.push({ kind: "row", key: row.key, row });
+      if (groupOpen) items.push({ kind: 'row', key: row.key, row });
     }
     if (s.subgraphId && s.children.length > 0) {
       const dkey = `${s.key}|def`;
@@ -426,7 +483,7 @@ export function flattenPanel(model: PanelModel, filter: PanelFilter): PanelView 
       if (filtering && childMatched === 0) return;
       const dopen = isOpen(dkey, false);
       items.push({
-        kind: "def-head",
+        kind: 'def-head',
         key: dkey,
         section: s,
         open: dopen,
@@ -438,11 +495,11 @@ export function flattenPanel(model: PanelModel, filter: PanelFilter): PanelView 
   };
   for (const s of model.sections) emit(s);
 
-  if (items.every((it) => it.kind === "gp-head" || it.kind === "empty")) {
+  if (items.every((it) => it.kind === 'gp-head' || it.kind === 'empty')) {
     items.push({
-      kind: "empty",
-      key: "empty",
-      text: filtering ? "没有符合条件的参数" : "当前层级没有节点",
+      kind: 'empty',
+      key: 'empty',
+      text: filtering ? '没有符合条件的参数' : '当前层级没有节点',
     });
   }
   return { items, counts: countRows(model, filter), filtering };

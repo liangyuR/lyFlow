@@ -1,19 +1,19 @@
 // 极简 WebSocket 服务端：够用来往浏览器推 JSON 文本帧。零依赖，
 // 与 scripts/e2e/cdp.mjs 的取舍一样 —— 桩服务器不该带一棵依赖树。
 
-import crypto from "node:crypto";
+import crypto from 'node:crypto';
 
-const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 function accept(key) {
   return crypto
-    .createHash("sha1")
+    .createHash('sha1')
     .update(key + GUID)
-    .digest("base64");
+    .digest('base64');
 }
 
 function frame(text) {
-  const payload = Buffer.from(text, "utf8");
+  const payload = Buffer.from(text, 'utf8');
   const n = payload.length;
   let header;
   if (n < 126) {
@@ -63,45 +63,45 @@ export class WsHub {
 
   /** 挂到 http server 的 upgrade 事件上。authorize 返回 false 就拒握手。 */
   attach(server, path, authorize) {
-    server.on("upgrade", (req, socket) => {
-      const url = new URL(req.url ?? "/", "http://localhost");
+    server.on('upgrade', (req, socket) => {
+      const url = new URL(req.url ?? '/', 'http://localhost');
       if (url.pathname !== path) {
         socket.destroy();
         return;
       }
-      const protocols = (req.headers["sec-websocket-protocol"] ?? "")
-        .split(",")
+      const protocols = (req.headers['sec-websocket-protocol'] ?? '')
+        .split(',')
         .map((p) => p.trim())
         .filter(Boolean);
       if (!authorize(protocols)) {
-        socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
         return;
       }
-      const key = req.headers["sec-websocket-key"];
+      const key = req.headers['sec-websocket-key'];
       if (!key) {
         socket.destroy();
         return;
       }
       const lines = [
-        "HTTP/1.1 101 Switching Protocols",
-        "Upgrade: websocket",
-        "Connection: Upgrade",
+        'HTTP/1.1 101 Switching Protocols',
+        'Upgrade: websocket',
+        'Connection: Upgrade',
         `Sec-WebSocket-Accept: ${accept(key)}`,
       ];
-      if (protocols.includes("lyflow.v1")) lines.push("Sec-WebSocket-Protocol: lyflow.v1");
-      socket.write(`${lines.join("\r\n")}\r\n\r\n`);
+      if (protocols.includes('lyflow.v1')) lines.push('Sec-WebSocket-Protocol: lyflow.v1');
+      socket.write(`${lines.join('\r\n')}\r\n\r\n`);
       socket.setNoDelay(true);
       this.#clients.add(socket);
-      socket.on("data", (chunk) => {
+      socket.on('data', (chunk) => {
         for (const opcode of readOpcodes(chunk)) {
           if (opcode === 0x8) socket.destroy();
           else if (opcode === 0x9) socket.write(Buffer.from([0x8a, 0x00]));
         }
       });
       const drop = () => this.#clients.delete(socket);
-      socket.on("close", drop);
-      socket.on("error", drop);
+      socket.on('close', drop);
+      socket.on('error', drop);
     });
   }
 

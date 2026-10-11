@@ -15,16 +15,19 @@ bool clipLineToBox(const Line2D& line, const Box2D& box, float out[2][2]) {
   for (int i = 0; i < 2; ++i) {
     const double lo = box.min[i], hi = box.max[i];
     if (std::fabs(d[i]) < 1e-12) {
-      if (p[i] < lo || p[i] > hi) return false;
+      if (p[i] < lo || p[i] > hi)
+        return false;
       continue;
     }
     double t0 = (lo - p[i]) / d[i];
     double t1 = (hi - p[i]) / d[i];
-    if (t0 > t1) std::swap(t0, t1);
+    if (t0 > t1)
+      std::swap(t0, t1);
     tLo = std::max(tLo, t0);
     tHi = std::min(tHi, t1);
   }
-  if (tLo > tHi || tLo <= -1e30 || tHi >= 1e30) return false;
+  if (tLo > tHi || tLo <= -1e30 || tHi >= 1e30)
+    return false;
   for (int i = 0; i < 2; ++i) {
     out[0][i] = static_cast<float>(p[i] + tLo * d[i]);
     out[1][i] = static_cast<float>(p[i] + tHi * d[i]);
@@ -32,8 +35,7 @@ bool clipLineToBox(const Line2D& line, const Box2D& box, float out[2][2]) {
   return true;
 }
 
-Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
-               ExecContext& ctx) {
+Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   const PointCloud& in = *inputs.get("cloud").asCloud();
   if (in.pointCount() < 2) {
     return Status::Error(Phase::Execute, "bad_input", "点太少，拟合不了直线", {}, "cloud");
@@ -79,12 +81,13 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
   Indices out;
   out.sourceCloudId = in.id;
   out.values.reserve(indices.size());
-  for (auto i : indices) out.values.push_back(static_cast<std::int32_t>(i));
+  for (auto i : indices)
+    out.values.push_back(static_cast<std::int32_t>(i));
   outputs.set("inliers", Data::indices(std::move(out)));
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerFitLine2D(Registry& r) {
   OperatorDesc op;
@@ -93,10 +96,9 @@ void registerFitLine2D(Registry& r) {
   op.label = "拟合直线 2D";
   op.category = "拟合/直线";
   op.keywords = {"line", "ransac", "fit", "2d", "直线", "拟合"};
-  op.doc =
-      "在 XY 平面上拟合一条直线（z 不参与）。RANSAC 的 random 关掉，同输入同结果。\n"
-      "线扫剖面常带两条近平行的迹线：假设选择用 1/3 阈值隔出单条，"
-      "再在补集里搜一次伴线，两条平行且间距合理时取靠上那条。";
+  op.doc = "在 XY 平面上拟合一条直线（z 不参与）。RANSAC 的 random 关掉，同输入同结果。\n"
+           "线扫剖面常带两条近平行的迹线：假设选择用 1/3 阈值隔出单条，"
+           "再在补集里搜一次伴线，两条平行且间距合理时取靠上那条。";
   op.inputs = {
       Port{"cloud", "PointCloud", "Cloud", "待拟合的点云，只看 XY。", true},
       Port{"clipTo", "Box2D", "Clip To", "可选：拿这个框截出线段的两个端点。", false},
@@ -139,4 +141,4 @@ void registerFitLine2D(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

@@ -12,7 +12,8 @@ bool invertAffine(const float m[16], float out[16]) {
   const double d = m[4], e = m[5], f = m[6];
   const double g = m[8], h = m[9], i = m[10];
   const double det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
-  if (std::fabs(det) < 1e-12) return false;
+  if (std::fabs(det) < 1e-12)
+    return false;
   const double inv = 1.0 / det;
 
   const double r[9] = {
@@ -22,18 +23,18 @@ bool invertAffine(const float m[16], float out[16]) {
   };
   const double tx = m[3], ty = m[7], tz = m[11];
   for (int row = 0; row < 3; ++row) {
-    for (int col = 0; col < 3; ++col) out[row * 4 + col] = static_cast<float>(r[row * 3 + col]);
+    for (int col = 0; col < 3; ++col)
+      out[row * 4 + col] = static_cast<float>(r[row * 3 + col]);
   }
-  out[3]  = static_cast<float>(-(r[0] * tx + r[1] * ty + r[2] * tz));
-  out[7]  = static_cast<float>(-(r[3] * tx + r[4] * ty + r[5] * tz));
+  out[3] = static_cast<float>(-(r[0] * tx + r[1] * ty + r[2] * tz));
+  out[7] = static_cast<float>(-(r[3] * tx + r[4] * ty + r[5] * tz));
   out[11] = static_cast<float>(-(r[6] * tx + r[7] * ty + r[8] * tz));
   out[12] = out[13] = out[14] = 0.0f;
   out[15] = 1.0f;
   return true;
 }
 
-Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
-               ExecContext& ctx) {
+Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   const PointCloud& in = *inputs.get("cloud").asCloud();
   const std::array<float, 3> lo = params.vec3("min");
   const std::array<float, 3> hi = params.vec3("max");
@@ -55,8 +56,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
   if (inputs.has("pose")) {
     const Transform* t = inputs.get("pose").asTransform();
     if (t && !invertAffine(t->m, toLocal)) {
-      return Status::Error(Phase::Execute, "bad_input", "输入的变换不可逆（旋转/缩放部分退化）",
-                           {}, "pose");
+      return Status::Error(Phase::Execute, "bad_input", "输入的变换不可逆（旋转/缩放部分退化）", {},
+                           "pose");
     }
     hasPose = t != nullptr;
   }
@@ -66,25 +67,30 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
   keep.reserve(n);
   Ticker ticker(ctx, n);
   for (std::size_t p = 0; p < n; ++p) {
-    if (ticker.tick(p)) return Status::Ok();
+    if (ticker.tick(p))
+      return Status::Ok();
     float x = in.xyz[p * 3], y = in.xyz[p * 3 + 1], z = in.xyz[p * 3 + 2];
-    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) continue;
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z))
+      continue;
     if (hasPose) {
       const float lx = toLocal[0] * x + toLocal[1] * y + toLocal[2] * z + toLocal[3];
       const float ly = toLocal[4] * x + toLocal[5] * y + toLocal[6] * z + toLocal[7];
       const float lz = toLocal[8] * x + toLocal[9] * y + toLocal[10] * z + toLocal[11];
-      x = lx; y = ly; z = lz;
+      x = lx;
+      y = ly;
+      z = lz;
     }
-    const bool inside = x >= lo[0] && x <= hi[0] && y >= lo[1] && y <= hi[1] && z >= lo[2] &&
-                        z <= hi[2];
-    if (inside != invert) keep.push_back(static_cast<std::int32_t>(p));
+    const bool inside =
+        x >= lo[0] && x <= hi[0] && y >= lo[1] && y <= hi[1] && z >= lo[2] && z <= hi[2];
+    if (inside != invert)
+      keep.push_back(static_cast<std::int32_t>(p));
   }
 
   outputs.set("cloud", Data::cloud(in.select(keep)));
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerFilterCropBox(Registry& r) {
   OperatorDesc op;
@@ -97,7 +103,7 @@ void registerFilterCropBox(Registry& r) {
 
   op.inputs = {
       Port{"cloud", "PointCloud", "Cloud", "待裁剪的点云。", true},
-      Port{"pose",  "Transform",  "Pose",  "可选：盒子的姿态。不接则用世界坐标系。", false},
+      Port{"pose", "Transform", "Pose", "可选：盒子的姿态。不接则用世界坐标系。", false},
   };
   op.outputs = {Port{"cloud", "PointCloud", "Cloud", "盒内的点。", true}};
 
@@ -131,4 +137,4 @@ void registerFilterCropBox(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

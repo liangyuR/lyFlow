@@ -14,12 +14,12 @@ export async function copyText(text: string): Promise<boolean> {
 
 function legacyCopy(text: string): boolean {
   try {
-    const ta = document.createElement("textarea");
+    const ta = document.createElement('textarea');
     ta.value = text;
-    ta.style.cssText = "position:fixed;top:-1000px;opacity:0";
+    ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
     document.body.appendChild(ta);
     ta.select();
-    const ok = document.execCommand("copy");
+    const ok = document.execCommand('copy');
     ta.remove();
     return ok;
   } catch {

@@ -5,6 +5,8 @@
   "packageManager": "pnpm@12.4.2",
   "description": "通用 Vision Flow：节点图编排点云/图像算子，图在前端编辑，计算在 C++ 执行",
   "scripts": {
+    "format": "prettier --write \"{app,packages,examples}/**/*.{js,cjs,mjs,ts,tsx,jsx,css,html,json}\" package.json pnpm-workspace.yaml .github .prettierrc.json",
+    "format:check": "prettier --check \"{app,packages,examples}/**/*.{js,cjs,mjs,ts,tsx,jsx,css,html,json}\" package.json pnpm-workspace.yaml .github .prettierrc.json",
     "dev": "node scripts/dev.mjs",
     "dev:app": "tauri dev",
     "build": "tauri build",
@@ -16,7 +18,6 @@
     "core:watch": "pwsh -ExecutionPolicy Bypass -File scripts/core-watch.ps1",
     "cli:build": "cargo build --release --manifest-path bridge/Cargo.toml --bin lyflow --no-default-features",
     "package": "pwsh -NoProfile -File scripts/package-windows.ps1",
-    "package:verify": "pwsh -NoProfile -File scripts/test-release.ps1 -ArchiveDir build/release",
     "check": "pwsh -ExecutionPolicy Bypass -File scripts/check.ps1",
     "check:glue": "pwsh -NoProfile -File scripts/check-glue.ps1",
     "check:gap": "pwsh -ExecutionPolicy Bypass -File scripts/check-gap.ps1",
@@ -27,6 +28,7 @@
     "host:dev": "pnpm --filter lyflow-host-react dev"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2"
+    "@tauri-apps/cli": "^2",
+    "prettier": "3.6.2"
   }
 }

@@ -30,7 +30,8 @@ StationSpec specOf(const ParamView& params) {
 std::vector<Px> pxList(const std::vector<P2>& pts) {
   std::vector<Px> out;
   out.reserve(pts.size());
-  for (const P2& p : pts) out.push_back(Px{p.x, p.y});
+  for (const P2& p : pts)
+    out.push_back(Px{p.x, p.y});
   return out;
 }
 
@@ -39,7 +40,10 @@ Px px(P2 p) { return Px{p.x, p.y}; }
 Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
   const cv::Mat gray = grayOf(inputs.get("image"));
   if (gray.empty()) {
-    return Status::Error(Phase::Execute, "bad_input", "需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行", {}, "image");
+    return Status::Error(
+        Phase::Execute, "bad_input",
+        "需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行", {},
+        "image");
   }
   Polyline line;
   Json pathInfo;
@@ -47,7 +51,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     return Status::Error(Phase::Execute, "bad_input", "path 不是完整的 glue.Path", {}, "path");
   }
   Metric metric;
-  if (Status s = metricFromInput(inputs, "calib", &metric); !s.ok) return s;
+  if (Status s = metricFromInput(inputs, "calib", &metric); !s.ok)
+    return s;
 
   const StationSpec spec = specOf(params);
   const bool pathOk = pathInfo.value("ok", false);
@@ -55,7 +60,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   const int widthMax = pathInfo.value("widthMax", 90);
   double zoneStart = line.s.front();
   double zoneEnd = line.s.back();
-  if (const auto z = pathInfo.find("zone"); z != pathInfo.end() && z->is_array() && z->size() == 2) {
+  if (const auto z = pathInfo.find("zone");
+      z != pathInfo.end() && z->is_array() && z->size() == 2) {
     zoneStart = numOf((*z)[0]);
     zoneEnd = numOf((*z)[1]);
   }
@@ -65,14 +71,17 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
 
   std::vector<double> widths;
   for (const Station& x : st) {
-    if (!x.present) continue;
+    if (!x.present)
+      continue;
     const double w = metric.distance(x.left(), x.right());
-    if (std::isfinite(w)) widths.push_back(w);
+    if (std::isfinite(w))
+      widths.push_back(w);
   }
-  const double coverage = st.empty() ? 0.0
-                                     : static_cast<double>(std::count_if(st.begin(), st.end(),
-                                                                         [](const Station& x) { return x.present; })) /
-                                           static_cast<double>(st.size());
+  const double coverage =
+      st.empty() ? 0.0
+                 : static_cast<double>(std::count_if(st.begin(), st.end(),
+                                                     [](const Station& x) { return x.present; })) /
+                       static_cast<double>(st.size());
   double mean = kNaN, lo = kNaN, hi = kNaN;
   if (!widths.empty()) {
     double sum = 0;
@@ -131,7 +140,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     }
   }
   ov.segments("station", present);
-  ov.segments("missing", missing, missing.empty() ? "" : "无胶 " + std::to_string(missing.size()) + " 站");
+  ov.segments("missing", missing,
+              missing.empty() ? "" : "无胶 " + std::to_string(missing.size()) + " 站");
   for (const auto& [a, b] : presentRuns(st)) {
     std::vector<Px> left, right;
     for (std::size_t i = a; i <= b; ++i) {
@@ -150,24 +160,24 @@ std::vector<Issue> validate(const ParamView& params, const std::set<std::string>
   const auto range = params.vec2("widthRange");
   if (!(range[0] >= 0) || !(range[1] > range[0])) {
     issues.push_back(Issue::error("bad_param",
-                                  "widthRange 要满足 0 ≤ 下限 < 上限（现在是 [" + fmt(range[0]) + ", " +
-                                      fmt(range[1]) + "]）",
+                                  "widthRange 要满足 0 ≤ 下限 < 上限（现在是 [" + fmt(range[0]) +
+                                      ", " + fmt(range[1]) + "]）",
                                   "widthRange"));
   }
   const double half = params.number("searchHalf");
   if (half < 0.5 * range[1]) {
-    issues.push_back(Issue::warning("bad_param",
-                                    "searchHalf 比 widthRange 上限的一半还小：最宽的胶在卡尺里放不下",
-                                    "searchHalf"));
+    issues.push_back(Issue::warning(
+        "bad_param", "searchHalf 比 widthRange 上限的一半还小：最宽的胶在卡尺里放不下",
+        "searchHalf"));
   }
   if (params.choice("form") == "swirl" && params.number("window") < params.number("stationStep")) {
-    issues.push_back(Issue::warning("bad_param", "window 比 stationStep 还短：外包络只取到本站自己",
-                                    "window"));
+    issues.push_back(
+        Issue::warning("bad_param", "window 比 stationStep 还短：外包络只取到本站自己", "window"));
   }
   return issues;
 }
 
-}  // namespace
+} // namespace
 
 void registerBeadWidth(Registry& r) {
   OperatorDesc op;
@@ -188,7 +198,8 @@ void registerBeadWidth(Registry& r) {
       Port{"image", "Image", "Image", "与 bead_path 同一帧。", true},
       Port{"path", "Bundle<glue.Path>", "Path", "glue.bead_path 的胶路。", true},
       withContract(Port{"calib", "Record", "Calib",
-                        "可选：image.PlaneCalib（图像 px → 工作平面 mm 的单应）。接了宽度出 mm。", false},
+                        "可选：image.PlaneCalib（图像 px → 工作平面 mm 的单应）。接了宽度出 mm。",
+                        false},
                    {{"recordType", std_image::kPlaneCalibType}}),
   };
   op.outputs = {
@@ -197,22 +208,27 @@ void registerBeadWidth(Registry& r) {
       Port{"widthMin", "Measurement", "Width Min", "有胶各站宽度的最小值。", true},
       Port{"widthMax", "Measurement", "Width Max", "有胶各站宽度的最大值。", true},
       Port{"coverage", "Measurement", "Coverage", "有胶的站占全部站的比例（0–1）。", true},
-      Port{"overlay", "Record", "Overlay", "lyflow.overlay2d：每站两边（有胶 / 无胶两种 role）与两条胶边。", true},
+      Port{"overlay", "Record", "Overlay",
+           "lyflow.overlay2d：每站两边（有胶 / 无胶两种 role）与两条胶边。", true},
   };
-  Param form = enumParam("form", "Form", "straight", "直胶还是螺旋胶。螺旋胶的宽度取外包络。",
-                         {EnumOption{"straight", "直胶", ""}, EnumOption{"swirl", "螺旋胶", "取外包络。"}});
-  Param range = vec2Param("widthRange", "Width Range", 4.0, 90.0, "px", {"Min", "Max"},
-                          "认作胶的暗段宽度范围。上限别超过 bead_path 的 widthMax（结构元比胶窄，胶就没有响应）。");
+  Param form =
+      enumParam("form", "Form", "straight", "直胶还是螺旋胶。螺旋胶的宽度取外包络。",
+                {EnumOption{"straight", "直胶", ""}, EnumOption{"swirl", "螺旋胶", "取外包络。"}});
+  Param range = vec2Param(
+      "widthRange", "Width Range", 4.0, 90.0, "px", {"Min", "Max"},
+      "认作胶的暗段宽度范围。上限别超过 bead_path 的 widthMax（结构元比胶窄，胶就没有响应）。");
   Param step = floatParam("stationStep", "Station Step", 4.0, "px", "相邻两站沿胶路的间隔。", true);
   step.min = 1.0;
-  Param searchHalf = floatParam("searchHalf", "Search Half", 60.0, "px", "卡尺沿法向往两侧各伸多长。", true);
+  Param searchHalf =
+      floatParam("searchHalf", "Search Half", 60.0, "px", "卡尺沿法向往两侧各伸多长。", true);
   searchHalf.min = 2.0;
   Param mergeGap = floatParam("mergeGap", "Merge Gap", 8.0, "px",
                               "两段暗段之间的缝不超过它就合并（粗胶中间的高光条）。", true);
   mergeGap.min = 0.0;
-  Param window = visibleWhen(floatParam("window", "Window", 30.0, "px",
-                                        "螺旋胶取外包络的窗口长度（沿胶路，本站两侧各一半）。约一个螺距。", true),
-                             "form", "swirl");
+  Param window = visibleWhen(
+      floatParam("window", "Window", 30.0, "px",
+                 "螺旋胶取外包络的窗口长度（沿胶路，本站两侧各一半）。约一个螺距。", true),
+      "form", "swirl");
   window.min = 0.0;
   Param contrastMin = floatParam("contrastMin", "Contrast Min", 16.0, "",
                                  "卡尺上一段响应的峰值至少这么高才算胶（灰度级）。", true);
@@ -221,8 +237,9 @@ void registerBeadWidth(Registry& r) {
                                   "D16：一站的胶至少要有参考宽的这么多倍宽才算有胶。", true);
   presentRatio.min = 0.0;
   presentRatio.max = 1.0;
-  Param centerRatio = floatParam("centerRatio", "Center Ratio", 0.3, "",
-                                 "D16（直胶）：胶的中心偏离胶路不超过 max(6 px, 它 × 参考宽)。", true);
+  Param centerRatio =
+      floatParam("centerRatio", "Center Ratio", 0.3, "",
+                 "D16（直胶）：胶的中心偏离胶路不超过 max(6 px, 它 × 参考宽)。", true);
   centerRatio.min = 0.0;
   Param contrastRatio = floatParam(
       "contrastRatio", "Contrast Ratio", 0.3, "",
@@ -231,12 +248,12 @@ void registerBeadWidth(Registry& r) {
       true);
   contrastRatio.min = 0.0;
   contrastRatio.max = 1.0;
-  op.params = {form,        range,        step,         searchHalf,   mergeGap,
-               window,      contrastMin,  presentRatio, centerRatio,  contrastRatio};
+  op.params = {form,   range,       step,         searchHalf,  mergeGap,
+               window, contrastMin, presentRatio, centerRatio, contrastRatio};
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;
   op.validate = &validate;
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

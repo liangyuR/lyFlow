@@ -1,30 +1,25 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import * as THREE from "three";
+import { useEffect, useMemo, useRef, useState } from 'react';
+import * as THREE from 'three';
 
-import { num } from "../Inspector";
-import { registerPeekCanvas } from "../../lib/peekCanvas";
-import { RAMPS, type RampName } from "../../lib/ramps";
-import {
-  PEEK_FROZEN,
-  usePeekStore,
-  type PeekOpts,
-  type TensorLayout,
-} from "../../store/peek";
-import { transport } from "../../transport";
-import { decodeTensor, type OutputValue, type TensorPayload } from "../../types/execution";
-import type { PeekViewProps } from "./types";
+import { num } from '../Inspector';
+import { registerPeekCanvas } from '../../lib/peekCanvas';
+import { RAMPS, type RampName } from '../../lib/ramps';
+import { PEEK_FROZEN, usePeekStore, type PeekOpts, type TensorLayout } from '../../store/peek';
+import { transport } from '../../transport';
+import { decodeTensor, type OutputValue, type TensorPayload } from '../../types/execution';
+import type { PeekViewProps } from './types';
 
-import "../../styles.peek.tensor.css";
+import '../../styles.peek.tensor.css';
 
 const MAX_SLICE_ELEMENTS = 4_194_304;
 const MAX_EDGE = 8192;
-const RAMP_NAMES: RampName[] = ["viridis", "gray", "jet"];
-const LAYOUT_NAMES: TensorLayout[] = ["auto", "HWC", "CHW", "NHWC", "NCHW"];
-const LINE_COLOR = "#4a9eff";
-const ZERO_COLOR = "#454d5c";
-const BAD_COLOR = "#ff00ff";
+const RAMP_NAMES: RampName[] = ['viridis', 'gray', 'jet'];
+const LAYOUT_NAMES: TensorLayout[] = ['auto', 'HWC', 'CHW', 'NHWC', 'NCHW'];
+const LINE_COLOR = '#4a9eff';
+const ZERO_COLOR = '#454d5c';
+const BAD_COLOR = '#ff00ff';
 
-type TensorKind = "image" | "line" | "none";
+type TensorKind = 'image' | 'line' | 'none';
 
 interface SlicePlan {
   kind: TensorKind;
@@ -46,7 +41,7 @@ interface SlicePlan {
 
 function dim(shape: readonly number[], i: number): number {
   const v = shape[i];
-  if (typeof v !== "number" || !Number.isFinite(v) || v < 0) return 0;
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return 0;
   return Math.floor(v);
 }
 
@@ -56,27 +51,27 @@ function isChannelish(v: number): boolean {
 
 function inferLayout(shape: readonly number[]): string {
   const rank = shape.length;
-  if (rank === 1) return "1D";
-  if (rank === 2) return "HW";
+  if (rank === 1) return '1D';
+  if (rank === 2) return 'HW';
   if (rank === 3) {
-    if (isChannelish(dim(shape, 2))) return "HWC";
-    if (isChannelish(dim(shape, 0))) return "CHW";
-    return "NHW";
+    if (isChannelish(dim(shape, 2))) return 'HWC';
+    if (isChannelish(dim(shape, 0))) return 'CHW';
+    return 'NHW';
   }
-  if (rank === 4) return isChannelish(dim(shape, 3)) ? "NHWC" : "NCHW";
-  return "none";
+  if (rank === 4) return isChannelish(dim(shape, 3)) ? 'NHWC' : 'NCHW';
+  return 'none';
 }
 
 function effectiveLayout(shape: readonly number[], choice: TensorLayout): string {
   const inferred = inferLayout(shape);
-  if (choice === "auto") return inferred;
-  const wanted = choice === "HWC" || choice === "CHW" ? 3 : 4;
+  if (choice === 'auto') return inferred;
+  const wanted = choice === 'HWC' || choice === 'CHW' ? 3 : 4;
   return shape.length === wanted ? choice : inferred;
 }
 
 function emptyPlan(rank: number, layout: string): SlicePlan {
   return {
-    kind: "none",
+    kind: 'none',
     layout,
     rank,
     w: 0,
@@ -98,17 +93,17 @@ function makePlan(
   shape: readonly number[] | null,
   choice: TensorLayout,
   sliceIndex: number,
-  channelOpt: number | "rgb",
+  channelOpt: number | 'rgb',
 ): SlicePlan {
-  if (!shape || shape.length === 0) return emptyPlan(shape?.length ?? 0, "none");
+  if (!shape || shape.length === 0) return emptyPlan(shape?.length ?? 0, 'none');
   const layout = effectiveLayout(shape, choice);
   const rank = shape.length;
-  if (layout === "none") return emptyPlan(rank, "none");
+  if (layout === 'none') return emptyPlan(rank, 'none');
 
-  if (layout === "1D") {
+  if (layout === '1D') {
     const len = dim(shape, 0);
     return {
-      kind: "line",
+      kind: 'line',
       layout,
       rank,
       w: len,
@@ -131,23 +126,23 @@ function makePlan(
   let h = 1;
   let w = 1;
   let interleaved = false;
-  if (layout === "HW") {
+  if (layout === 'HW') {
     h = dim(shape, 0);
     w = dim(shape, 1);
-  } else if (layout === "HWC") {
+  } else if (layout === 'HWC') {
     h = dim(shape, 0);
     w = dim(shape, 1);
     c = dim(shape, 2);
     interleaved = true;
-  } else if (layout === "CHW") {
+  } else if (layout === 'CHW') {
     c = dim(shape, 0);
     h = dim(shape, 1);
     w = dim(shape, 2);
-  } else if (layout === "NHW") {
+  } else if (layout === 'NHW') {
     n = dim(shape, 0);
     h = dim(shape, 1);
     w = dim(shape, 2);
-  } else if (layout === "NHWC") {
+  } else if (layout === 'NHWC') {
     n = dim(shape, 0);
     h = dim(shape, 1);
     w = dim(shape, 2);
@@ -162,8 +157,8 @@ function makePlan(
 
   const plane = w * h;
   const slice = n > 0 ? Math.min(Math.max(0, Math.floor(sliceIndex)), n - 1) : 0;
-  const rgb = channelOpt === "rgb" && c >= 3;
-  const asked = typeof channelOpt === "number" ? Math.floor(channelOpt) : 0;
+  const rgb = channelOpt === 'rgb' && c >= 3;
+  const asked = typeof channelOpt === 'number' ? Math.floor(channelOpt) : 0;
   const channel = rgb ? 0 : Math.min(Math.max(0, asked), Math.max(0, c - 1));
 
   let offset = slice * plane;
@@ -187,7 +182,7 @@ function makePlan(
   }
 
   return {
-    kind: "image",
+    kind: 'image',
     layout,
     rank,
     w,
@@ -214,7 +209,7 @@ function sliceExtent(payload: TensorPayload, plan: SlicePlan): { lo: number; hi:
   const data = payload.data;
   let lo = Infinity;
   let hi = -Infinity;
-  if (plan.kind === "line") {
+  if (plan.kind === 'line') {
     for (let i = 0; i < data.length; i += 1) {
       const v = data[i] ?? NaN;
       if (!Number.isFinite(v)) continue;
@@ -253,7 +248,7 @@ function drawImage(
   if (w < 1 || h < 1) return;
   canvas.width = w;
   canvas.height = h;
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const img = ctx.createImageData(w, h);
   const px = img.data;
@@ -312,7 +307,7 @@ function drawLine(
   const h = Math.max(1, Math.floor(stageH));
   canvas.width = w;
   canvas.height = h;
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext('2d');
   if (!ctx) return;
   ctx.clearRect(0, 0, w, h);
   const data = payload.data;
@@ -382,12 +377,12 @@ function drawLine(
   }
 }
 
-function statScalar(v: OutputValue["min"] | OutputValue["mean"]): number | undefined {
-  return typeof v === "number" ? v : undefined;
+function statScalar(v: OutputValue['min'] | OutputValue['mean']): number | undefined {
+  return typeof v === 'number' ? v : undefined;
 }
 
 function shapeText(shape: readonly number[] | null): string {
-  return shape && shape.length > 0 ? `(${shape.join(", ")})` : "—";
+  return shape && shape.length > 0 ? `(${shape.join(', ')})` : '—';
 }
 
 export function TensorView({ win, src }: PeekViewProps) {
@@ -409,22 +404,22 @@ export function TensorView({ win, src }: PeekViewProps) {
   const blocked = src.status !== null;
   const lockedRun = win.locked?.runId ?? null;
   const runId = lockedRun ?? src.runId;
-  const nodeId = src.resolved?.nodeId ?? "";
-  const port = src.resolved?.port ?? "";
+  const nodeId = src.resolved?.nodeId ?? '';
+  const port = src.resolved?.port ?? '';
   const tooBig = plan.count > MAX_SLICE_ELEMENTS;
-  const tooWide = plan.kind === "image" && (plan.w > MAX_EDGE || plan.h > MAX_EDGE);
-  const showStage = !blocked && shape !== null && plan.kind !== "none";
+  const tooWide = plan.kind === 'image' && (plan.w > MAX_EDGE || plan.h > MAX_EDGE);
+  const showStage = !blocked && shape !== null && plan.kind !== 'none';
   const canFetch =
     showStage &&
     plan.count > 0 &&
     !tooBig &&
     !tooWide &&
     runId !== null &&
-    nodeId !== "" &&
-    port !== "";
+    nodeId !== '' &&
+    port !== '';
 
   const { offset, count } = plan;
-  const fetchKey = `${runId ?? ""}|${nodeId}|${port}|${offset}|${count}`;
+  const fetchKey = `${runId ?? ''}|${nodeId}|${port}|${offset}|${count}`;
 
   useEffect(() => {
     if (!canFetch || runId === null) {
@@ -472,14 +467,14 @@ export function TensorView({ win, src }: PeekViewProps) {
   }, [showStage]);
 
   const extent = useMemo(() => (payload ? sliceExtent(payload, plan) : null), [payload, plan]);
-  const auto = range === "auto";
+  const auto = range === 'auto';
   const lo = auto ? (extent?.lo ?? 0) : range[0];
   const hi = auto ? (extent?.hi ?? 1) : range[1];
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !payload || !showStage) return;
-    if (plan.kind === "line") drawLine(canvas, payload, stage.w, stage.h, lo, hi);
+    if (plan.kind === 'line') drawLine(canvas, payload, stage.w, stage.h, lo, hi);
     else drawImage(canvas, payload, plan, lo, hi, ramp);
   }, [payload, plan, lo, hi, ramp, stage.w, stage.h, showStage]);
 
@@ -488,11 +483,11 @@ export function TensorView({ win, src }: PeekViewProps) {
   };
 
   const rootProps = {
-    className: "peek-tensor",
-    "data-testid": "peek-tensor",
-    "data-rank": plan.rank,
-    "data-layout": plan.layout,
-    "data-slice-count": plan.count,
+    className: 'peek-tensor',
+    'data-testid': 'peek-tensor',
+    'data-rank': plan.rank,
+    'data-layout': plan.layout,
+    'data-slice-count': plan.count,
   };
 
   if (blocked) {
@@ -526,7 +521,7 @@ export function TensorView({ win, src }: PeekViewProps) {
   }
 
   const value = src.stat.value;
-  if (plan.kind === "none") {
+  if (plan.kind === 'none') {
     return (
       <div {...rootProps}>
         <div className="peek-tensor__stats" data-testid="peek-tensor-stats">
@@ -538,7 +533,7 @@ export function TensorView({ win, src }: PeekViewProps) {
               </tr>
               <tr>
                 <th scope="row">count</th>
-                <td>{typeof value?.count === "number" ? value.count : "—"}</td>
+                <td>{typeof value?.count === 'number' ? value.count : '—'}</td>
               </tr>
               <tr>
                 <th scope="row">min</th>
@@ -565,9 +560,9 @@ export function TensorView({ win, src }: PeekViewProps) {
   let overlay: string | null = null;
   if (tooBig) overlay = `这一片太大（${plan.count} 个元素），缩小切片或换通道`;
   else if (tooWide) overlay = `这一片的边长太大（${plan.w}×${plan.h}），画不下`;
-  else if (plan.count === 0) overlay = "这一片是空的";
+  else if (plan.count === 0) overlay = '这一片是空的';
   else if (error !== null) overlay = error;
-  else if (payload === null) overlay = loading ? "正在取张量…" : "还没取到这一片";
+  else if (payload === null) overlay = loading ? '正在取张量…' : '还没取到这一片';
 
   const total = payload?.total ?? shape.reduce((a, b) => a * b, 1);
   const got = payload?.count ?? 0;
@@ -582,7 +577,7 @@ export function TensorView({ win, src }: PeekViewProps) {
             data-testid="peek-tensor-layout"
             value={layoutOpt}
             disabled={lockedRun !== null}
-            title={lockedRun ? PEEK_FROZEN : "按这个布局解读形状"}
+            title={lockedRun ? PEEK_FROZEN : '按这个布局解读形状'}
             onChange={(e) => setOpts({ layout: e.target.value as TensorLayout })}
           >
             {LAYOUT_NAMES.map((name) => (
@@ -607,7 +602,7 @@ export function TensorView({ win, src }: PeekViewProps) {
               max={plan.sliceCount - 1}
               value={plan.slice}
               disabled={lockedRun !== null}
-              title={lockedRun ? PEEK_FROZEN : "第几张切片"}
+              title={lockedRun ? PEEK_FROZEN : '第几张切片'}
               onChange={(e) => {
                 const v = Number.parseInt(e.target.value, 10);
                 if (!Number.isFinite(v)) return;
@@ -626,12 +621,12 @@ export function TensorView({ win, src }: PeekViewProps) {
             <select
               className="peek-tensor__select"
               data-testid="peek-tensor-channel"
-              value={plan.rgb ? "rgb" : String(plan.channel)}
+              value={plan.rgb ? 'rgb' : String(plan.channel)}
               disabled={lockedRun !== null}
-              title={lockedRun ? PEEK_FROZEN : "看哪个通道"}
+              title={lockedRun ? PEEK_FROZEN : '看哪个通道'}
               onChange={(e) =>
                 setOpts({
-                  channel: e.target.value === "rgb" ? "rgb" : Number(e.target.value),
+                  channel: e.target.value === 'rgb' ? 'rgb' : Number(e.target.value),
                 })
               }
             >
@@ -645,7 +640,7 @@ export function TensorView({ win, src }: PeekViewProps) {
           </span>
         )}
 
-        {plan.kind === "image" && !plan.rgb && (
+        {plan.kind === 'image' && !plan.rgb && (
           <span className="peek-tensor__field">
             <span>色带</span>
             <select
@@ -669,9 +664,7 @@ export function TensorView({ win, src }: PeekViewProps) {
               type="checkbox"
               data-testid="peek-tensor-auto"
               checked={auto}
-              onChange={(e) =>
-                setOpts({ range: e.target.checked ? "auto" : [lo, hi] })
-              }
+              onChange={(e) => setOpts({ range: e.target.checked ? 'auto' : [lo, hi] })}
             />
             <span>自动归一化</span>
           </label>
@@ -684,7 +677,7 @@ export function TensorView({ win, src }: PeekViewProps) {
                 key={`lo-${lo}`}
                 defaultValue={lo}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") e.currentTarget.blur();
+                  if (e.key === 'Enter') e.currentTarget.blur();
                 }}
                 onBlur={(e) => {
                   const v = Number.parseFloat(e.target.value);
@@ -698,7 +691,7 @@ export function TensorView({ win, src }: PeekViewProps) {
                 key={`hi-${hi}`}
                 defaultValue={hi}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") e.currentTarget.blur();
+                  if (e.key === 'Enter') e.currentTarget.blur();
                 }}
                 onBlur={(e) => {
                   const v = Number.parseFloat(e.target.value);
@@ -727,7 +720,7 @@ export function TensorView({ win, src }: PeekViewProps) {
       </div>
 
       <div className="peek-tensor__foot" data-testid="peek-tensor-foot">
-        {shapeText(shape)} · 本片 min {num(extent?.lo)} / max {num(extent?.hi)} · 取了 {got} /{" "}
+        {shapeText(shape)} · 本片 min {num(extent?.lo)} / max {num(extent?.hi)} · 取了 {got} /{' '}
         {total} 个元素
       </div>
     </div>

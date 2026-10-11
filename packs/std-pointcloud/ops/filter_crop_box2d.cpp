@@ -4,8 +4,7 @@
 namespace lyflow::ops {
 namespace {
 
-Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
-               ExecContext& ctx) {
+Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   const PointCloud& in = *inputs.get("cloud").asCloud();
   const Box2D& box = *inputs.get("box").asBox2D();
   const std_pc::Bounds2D bounds =
@@ -17,7 +16,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
   keep.reserve(in.pointCount());
   Ticker ticker(ctx, in.pointCount());
   for (std::size_t i = 0; i < in.pointCount(); ++i) {
-    if (ticker.tick(i)) return Status::Ok();
+    if (ticker.tick(i))
+      return Status::Ok();
     if (std_pc::insideBox2D(in.xyz[i * 3], in.xyz[i * 3 + 1], lo, hi, bounds)) {
       keep.push_back(static_cast<std::int32_t>(i));
     }
@@ -29,7 +29,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerFilterCropBox2D(Registry& r) {
   OperatorDesc op;
@@ -38,10 +38,9 @@ void registerFilterCropBox2D(Registry& r) {
   op.label = "裁剪框 2D";
   op.category = "过滤/裁剪";
   op.keywords = {"crop", "box", "roi", "2d", "裁剪", "感兴趣区域"};
-  op.doc =
-      "按 Box2D 在 XY 平面上裁剪（z 不参与）。\n"
-      "Bounds 选 open 就是四边严格不等 —— 线扫量测域的既有语义，"
-      "落在边上的点会被丢掉，非有限点也因为比较恒假而一并丢掉。裁空报 roi_empty。";
+  op.doc = "按 Box2D 在 XY 平面上裁剪（z 不参与）。\n"
+           "Bounds 选 open 就是四边严格不等 —— 线扫量测域的既有语义，"
+           "落在边上的点会被丢掉，非有限点也因为比较恒假而一并丢掉。裁空报 roi_empty。";
   op.inputs = {
       Port{"cloud", "PointCloud", "Cloud", "待裁剪的点云。", true},
       Port{"box", "Box2D", "Box", "裁剪框。", true},
@@ -64,4 +63,4 @@ void registerFilterCropBox2D(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

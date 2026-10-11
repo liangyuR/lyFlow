@@ -33,7 +33,7 @@ Json pairGraph(const char* mode) {
                    {E{"n_pair.pair", "n_take.pair"}});
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("Bundle：manifest 带 bundles 段，端口类型写作 Bundle<kind>") {
   ensureTestOps();
@@ -41,7 +41,8 @@ TEST_CASE("Bundle：manifest 带 bundles 段，端口类型写作 Bundle<kind>")
   REQUIRE(m.contains("bundles"));
   bool found = false;
   for (const Json& b : m["bundles"]) {
-    if (b["kind"] != "test.Pair") continue;
+    if (b["kind"] != "test.Pair")
+      continue;
     found = true;
     REQUIRE(b["fields"].size() == 2);
     CHECK(b["fields"][0]["name"] == "cloud");
@@ -56,8 +57,12 @@ TEST_CASE("Bundle：manifest 带 bundles 段，端口类型写作 Bundle<kind>")
 
 TEST_CASE("Bundle：声明写错了 Registry::validate 就拒") {
   Registry r;
-  for (const auto& t : ensureRegistry().types()) r.addType(t);
-  r.addBundle(BundleDesc{"x.Bad", "", "", "",
+  for (const auto& t : ensureRegistry().types())
+    r.addType(t);
+  r.addBundle(BundleDesc{"x.Bad",
+                         "",
+                         "",
+                         "",
                          {BundleField{"a", "Any", ""}, BundleField{"b", "Bundle<x.Bad>", ""},
                           BundleField{"c.d", "Box2D", ""}, BundleField{"e", "Nope", ""}}});
   OperatorDesc op;
@@ -71,7 +76,8 @@ TEST_CASE("Bundle：声明写错了 Registry::validate 就拒") {
   op.outputs = {Port{"out", "Bundle<x.Bad>", "", "", true}};
   r.addOperator(op);
   std::string all;
-  for (const auto& p : r.validate()) all += p + "\n";
+  for (const auto& p : r.validate())
+    all += p + "\n";
   CHECK(all.find("field 'a' 的类型不能是 Any") != std::string::npos);
   CHECK(all.find("field 'b' 的类型不能是 Bundle<x.Bad>") != std::string::npos);
   CHECK(all.find("field 'c.d'") != std::string::npos);
@@ -134,18 +140,17 @@ TEST_CASE("Bundle：Bundle<test.Other> 接 Bundle<test.Pair> 报 type_mismatch�
   CHECK(mismatch);
 
   // Bundle 与普通类型之间也不隐式转换
-  const Json bad2 = makeGraph({N{"n_pair", "test.make_pair", Json::object()},
-                               N{"n_thin", "test.thin", Json::object()}},
-                              {E{"n_pair.pair", "n_thin.cloud"}});
+  const Json bad2 = makeGraph(
+      {N{"n_pair", "test.make_pair", Json::object()}, N{"n_thin", "test.thin", Json::object()}},
+      {E{"n_pair.pair", "n_thin.cloud"}});
   CHECK(exec::validateGraphJson(bad2.dump(), {}).find("type_mismatch") != std::string::npos);
 
   // flow.fallback 的 Any 端口推导成 Bundle<test.Pair>，下游照常收到
-  const Json ok = makeGraph({N{"n_a", "test.make_pair", Json{{"pointCount", 4}}},
-                             N{"n_b", "test.make_pair", Json{{"pointCount", 9}}},
-                             N{"n_fb", "flow.fallback", Json::object()},
-                             N{"n_take", "test.take_pair", Json::object()}},
-                            {E{"n_a.pair", "n_fb.a"}, E{"n_b.pair", "n_fb.b"},
-                             E{"n_fb.out", "n_take.pair"}});
+  const Json ok = makeGraph(
+      {N{"n_a", "test.make_pair", Json{{"pointCount", 4}}},
+       N{"n_b", "test.make_pair", Json{{"pointCount", 9}}},
+       N{"n_fb", "flow.fallback", Json::object()}, N{"n_take", "test.take_pair", Json::object()}},
+      {E{"n_a.pair", "n_fb.a"}, E{"n_b.pair", "n_fb.b"}, E{"n_fb.out", "n_take.pair"}});
   Session s(ok);
   RunLog& log = s.wait();
   CHECK(log.runStatus() == "ok");
@@ -194,7 +199,8 @@ TEST_CASE("Bundle：结果仓、C ABI、事件按 <port>.<field> 寻址") {
   CHECK(outs[2]["port"] == "pair.box");
 
   // 缓存命中时事件照样带字段
-  RunLog again = runGraphCached(makeGraph({N{"n_pair", "test.make_pair", Json{{"pointCount", 5}}}}, {}));
+  RunLog again =
+      runGraphCached(makeGraph({N{"n_pair", "test.make_pair", Json{{"pointCount", 5}}}}, {}));
   const Json skipped = again.nodeEvent("n_pair", "skipped");
   REQUIRE(skipped.contains("stats"));
   CHECK(skipped["stats"]["outputs"].size() == 3);
@@ -237,4 +243,4 @@ TEST_CASE("Bundle：图输出可以指向字段，summary 与 lyflow_run_outputs
   CHECK(exec::validateGraphJson(notBundle.dump(), {}).find("不是 Bundle") != std::string::npos);
 }
 
-}  // namespace lyflow::test
+} // namespace lyflow::test

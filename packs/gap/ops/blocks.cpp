@@ -20,8 +20,8 @@ constexpr int kTemplateSlots = 4;
 
 Status badBundle(const char* port) {
   return Status::Error(Phase::Execute, "bad_input",
-                       std::string("端口 ") + port + " 上的 Bundle 缺字段（执行器应当已经查过）", {},
-                       port);
+                       std::string("端口 ") + port + " 上的 Bundle 缺字段（执行器应当已经查过）",
+                       {}, port);
 }
 
 Param enumParam(const char* name, const char* label, const char* def, const char* doc,
@@ -63,8 +63,8 @@ Param textParam(const char* name, const char* label, const std::string& def, con
 
 /// 模板坐标系里的一个角色框。slot 是它画在哪个模板槽的左右模板上（m8-plan L15 的 2D 拖框），
 /// 同一槽的四个框在编辑器的切换条上叫「模板 k · <Id>」（L20）。
-Param roiParam(const std::string& name, const char* label, const char* doc, const std::string& group,
-               bool advanced, int slot) {
+Param roiParam(const std::string& name, const char* label, const char* doc,
+               const std::string& group, bool advanced, int slot) {
   Param p;
   p.name = name;
   p.type = ParamType::Vec4f;
@@ -107,8 +107,7 @@ MmBox mmBoxOf(const ParamView& params, const std::string& name) {
 
 // ================================================================ gap.read_scan
 
-Status readScan(const Inputs& inputs, const ParamView& params, Outputs& outputs,
-                ExecContext& ctx) {
+Status readScan(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   Data primary;
   Data secondary;
   // L18：两个输入接上了（或被宿主注入了）就直接用它们，不读目录 —— source 只决定
@@ -125,7 +124,8 @@ Status readScan(const Inputs& inputs, const ParamView& params, Outputs& outputs,
     // 整体框的中位数本来就跳过非有限点，所以两条路都吃这一份。
     Step load("gap.load_profile_pair", &fine::loadPair);
     load.copyAll(params).set("dropNonFinite", Value::boolean(false));
-    if (Status s = load.run(ctx, "读 PCD"); !s.ok) return s;
+    if (Status s = load.run(ctx, "读 PCD"); !s.ok)
+      return s;
     primary = load.out("primary");
     secondary = load.out("secondary");
   }
@@ -136,25 +136,29 @@ Status readScan(const Inputs& inputs, const ParamView& params, Outputs& outputs,
   for (int i = 0; i < 2; ++i) {
     Step frame("gap.to_measurement_frame", &fine::toMeasurementFrame);
     frame.in("cloud", *raw[i]);
-    if (Status s = frame.run(ctx, "换轴", i == 0 ? "primary" : "secondary"); !s.ok) return s;
+    if (Status s = frame.run(ctx, "换轴", i == 0 ? "primary" : "secondary"); !s.ok)
+      return s;
     frames[i] = frame.out("cloud");
     Step drop("gap.drop_non_finite", &fine::dropNonFinite);
     drop.in("cloud", frames[i]);
-    if (Status s = drop.run(ctx, "剔 NaN"); !s.ok) return s;
+    if (Status s = drop.run(ctx, "剔 NaN"); !s.ok)
+      return s;
     finite[i] = drop.out("cloud");
   }
 
   // 合并：secondary 在前、primary 在后，与细粒度图的 util.merge 同一个接法。
   Step merge("util.merge");
   merge.in("a", finite[1]).in("b", finite[0]);
-  if (Status s = merge.run(ctx, "合并"); !s.ok) return s;
+  if (Status s = merge.run(ctx, "合并"); !s.ok)
+    return s;
   Data merged = merge.out("cloud");
   if (params.flag("removeOutliers")) {
     Step filter("filter.radius_outlier");
     filter.in("cloud", merged)
         .set("radius", Value::number(params.number("outlierRadiusMm") / 1000.0))
         .set("minNeighbors", Value::integer(params.integer("outlierNeighbors")));
-    if (Status s = filter.run(ctx, "半径离群"); !s.ok) return s;
+    if (Status s = filter.run(ctx, "半径离群"); !s.ok)
+      return s;
     merged = filter.out("cloud");
   }
   outputs.set("scan", scanPairOf(frames[0], frames[1], merged));
@@ -162,7 +166,8 @@ Status readScan(const Inputs& inputs, const ParamView& params, Outputs& outputs,
 }
 
 std::string readScanKey(const ParamView& params) {
-  if (params.choice("source") == "inputs") return {};
+  if (params.choice("source") == "inputs")
+    return {};
   return fine::profilePairKey(params);
 }
 
@@ -174,11 +179,12 @@ std::vector<Issue> validateReadScan(const ParamView&, const std::set<std::string
   const bool p = connected.count("primary") != 0;
   const bool s = connected.count("secondary") != 0;
   if (p != s) {
-    issues.push_back(Issue::error("missing_input",
-                                  std::string("primary 与 secondary 要么都接（或都注入），要么都不接；"
-                                              "现在只有 ") +
-                                      (p ? "primary" : "secondary"),
-                                  "source", p ? "secondary" : "primary"));
+    issues.push_back(
+        Issue::error("missing_input",
+                     std::string("primary 与 secondary 要么都接（或都注入），要么都不接；"
+                                 "现在只有 ") +
+                         (p ? "primary" : "secondary"),
+                     "source", p ? "secondary" : "primary"));
   }
   return issues;
 }
@@ -189,7 +195,7 @@ std::vector<Issue> validateReadScan(const ParamView&, const std::set<std::string
 constexpr const char* kSlotRoles[4] = {"Datum", "Target", "SeamLeft", "SeamRight"};
 
 struct Slot {
-  int index = 0;  // 1..4
+  int index = 0; // 1..4
   std::string prefix;
 };
 
@@ -200,7 +206,8 @@ std::vector<Slot> slotsOf(const ParamView& params) {
     Slot s;
     s.index = k;
     s.prefix = "template" + std::to_string(k);
-    if (k == 1 || params.flag(s.prefix + "Enabled")) slots.push_back(s);
+    if (k == 1 || params.flag(s.prefix + "Enabled"))
+      slots.push_back(s);
   }
   return slots;
 }
@@ -223,7 +230,8 @@ std::string slotName(const ParamView& params, const Slot& s) {
 Status locateTemplate(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                       ExecContext& ctx) {
   ScanView scan;
-  if (!readScanPair(inputs.get("scan"), &scan)) return badBundle("scan");
+  if (!readScanPair(inputs.get("scan"), &scan))
+    return badBundle("scan");
 
   Step overall("gap.overall_roi", &fine::overallRoi);
   overall.in("primary", *scan.primary)
@@ -231,7 +239,8 @@ Status locateTemplate(const Inputs& inputs, const ParamView& params, Outputs& ou
       .set("roi", params.raw().at("overallRoi"))
       .set("mode", params.raw().at("overallMode"))
       .set("usingCamera", params.raw().at("overallCamera"));
-  if (Status s = overall.run(ctx, "整体框", "scan"); !s.ok) return s;
+  if (Status s = overall.run(ctx, "整体框", "scan"); !s.ok)
+    return s;
   const Data box = overall.out("box");
 
   Data cropped[3];
@@ -240,7 +249,8 @@ Status locateTemplate(const Inputs& inputs, const ParamView& params, Outputs& ou
   for (int i = 0; i < 3; ++i) {
     Step crop("filter.crop_box2d");
     crop.in("cloud", *clouds[i]).in("box", box).set("bounds", Value::text("open"));
-    if (Status s = crop.run(ctx, kCropLabels[i], "scan"); !s.ok) return s;
+    if (Status s = crop.run(ctx, kCropLabels[i], "scan"); !s.ok)
+      return s;
     cropped[i] = crop.out("cloud");
   }
 
@@ -254,7 +264,8 @@ Status locateTemplate(const Inputs& inputs, const ParamView& params, Outputs& ou
     tpl.set("dir", params.raw().at("templateDir"))
         .set("left", params.raw().at(slot.prefix + "Left"))
         .set("right", params.raw().at(slot.prefix + "Right"));
-    if (Status s = tpl.run(ctx, "模板 " + id); !s.ok) return s;
+    if (Status s = tpl.run(ctx, "模板 " + id); !s.ok)
+      return s;
 
     const SlotRois rois = roisOf(slot);
     Step align("gap.align_template", &fine::alignTemplate);
@@ -269,28 +280,31 @@ Status locateTemplate(const Inputs& inputs, const ParamView& params, Outputs& ou
         .set("roiGapLeft", params.raw().at(rois.seamLeft))
         .set("roiGapRight", params.raw().at(rois.seamRight))
         .set("roisFrom", params.raw().at(slot.prefix + "RoisFrom"));
-    if (Status s = align.run(ctx, "ICP " + id, "scan"); !s.ok) return s;
+    if (Status s = align.run(ctx, "ICP " + id, "scan"); !s.ok)
+      return s;
     alignments.push_back(align.out("alignment"));
   }
 
   Step select("gap.select_alignment", &fine::selectAlignment);
   static const char* kPorts[kTemplateSlots] = {"a", "b", "c", "d"};
-  for (std::size_t i = 0; i < alignments.size(); ++i) select.in(kPorts[i], alignments[i]);
+  for (std::size_t i = 0; i < alignments.size(); ++i)
+    select.in(kPorts[i], alignments[i]);
   select.copy(params, {"minScore"});
-  if (Status s = select.run(ctx, "选模板"); !s.ok) return s;
+  if (Status s = select.run(ctx, "选模板"); !s.ok)
+    return s;
   const Data alignment = select.out("alignment");
 
   // 基准件在哪一侧由选中模板坐标系里的框推出（L7），business_rois 与 info 用同一个判据。
   Step business("gap.business_rois", &fine::businessRois);
   business.in("alignment", alignment).set("datumSide", Value::text("auto"));
-  if (Status s = business.run(ctx, "业务框"); !s.ok) return s;
+  if (Status s = business.run(ctx, "业务框"); !s.ok)
+    return s;
 
   const lyflow::Record& rec = *alignment.asRecord();
   bool datumRight = false;
   datumOnRightInRecord(rec.data, &datumRight);
-  nlohmann::json info =
-      roiInfo(datumRight, rec.data.value("roisFrom", std::string("template")), rec.data,
-              box.asBox2D(), nlohmann::json());
+  nlohmann::json info = roiInfo(datumRight, rec.data.value("roisFrom", std::string("template")),
+                                rec.data, box.asBox2D(), nlohmann::json());
   outputs.set("rois", roiSetOf(business.out("flushBase"), business.out("flushRef"),
                                business.out("gapLeft"), business.out("gapRight"), std::move(info)));
   outputs.set("alignment", alignment);
@@ -300,7 +314,8 @@ Status locateTemplate(const Inputs& inputs, const ParamView& params, Outputs& ou
 
 std::string locateTemplateKey(const ParamView& params) {
   const fs::path dir = params.path("templateDir");
-  if (dir.empty()) return {};
+  if (dir.empty())
+    return {};
   std::string key;
   for (const Slot& s : slotsOf(params)) {
     key += fileStamp(dir / params.text(s.prefix + "Left")) + "|" +
@@ -318,19 +333,21 @@ std::vector<Issue> validateLocateTemplate(const ParamView& params, const std::se
   for (const Slot& slot : slotsOf(params)) {
     const SlotRois names = roisOf(slot);
     const std::string where = slotName(params, slot) + "：";
-    const std::pair<const std::string*, const char*> all[4] = {
-        {&names.datum, "datum"}, {&names.target, "target"},
-        {&names.seamLeft, "seamLeft"}, {&names.seamRight, "seamRight"}};
+    const std::pair<const std::string*, const char*> all[4] = {{&names.datum, "datum"},
+                                                               {&names.target, "target"},
+                                                               {&names.seamLeft, "seamLeft"},
+                                                               {&names.seamRight, "seamRight"}};
     bool degenerate = false;
     for (const auto& [name, role] : all) {
       const MmBox b = mmBoxOf(params, *name);
       if (!(b.x1 > b.x0) || !(b.y1 > b.y0)) {
-        issues.push_back(Issue::error("bad_param",
-                                      where + role + " 框退化（max 必须大于 min）", *name));
+        issues.push_back(
+            Issue::error("bad_param", where + role + " 框退化（max 必须大于 min）", *name));
         degenerate = true;
       }
     }
-    if (degenerate) continue;
+    if (degenerate)
+      continue;
     const MmBox datum = mmBoxOf(params, names.datum);
     const MmBox target = mmBoxOf(params, names.target);
     const MmBox left = mmBoxOf(params, names.seamLeft);
@@ -345,11 +362,10 @@ std::vector<Issue> validateLocateTemplate(const ParamView& params, const std::se
     const bool datumRight = datum.cx() > seamX;
     const bool targetRight = target.cx() > seamX;
     if (datumRight == targetRight) {
-      issues.push_back(Issue::error(
-          "bad_param",
-          where + "datum 与 target 落在缝的同一侧（都在" + (datumRight ? "右" : "左") +
-              "边）—— 段差要两侧各取一个面",
-          names.datum));
+      issues.push_back(Issue::error("bad_param",
+                                    where + "datum 与 target 落在缝的同一侧（都在" +
+                                        (datumRight ? "右" : "左") + "边）—— 段差要两侧各取一个面",
+                                    names.datum));
       continue;
     }
     if (firstSide < 0) {
@@ -372,11 +388,13 @@ nlohmann::json migrateLocateTemplateFromV1(const nlohmann::json& params) {
   // 没有任何 v1 才有的参数（节点其实已经是 v2 的写法，只是 opVersion 标旧了）就原样返回：
   // 下面的改写对 v2 参数不是幂等的（会把各槽自己的框换成不存在的公共框）。
   bool v1Shape = params.contains("template1Enabled");
-  for (const char* g : kGlobal) v1Shape = v1Shape || params.contains(g);
+  for (const char* g : kGlobal)
+    v1Shape = v1Shape || params.contains(g);
   for (int k = 1; k <= kTemplateSlots; ++k) {
     v1Shape = v1Shape || params.contains("template" + std::to_string(k) + "Override");
   }
-  if (!v1Shape) return params;
+  if (!v1Shape)
+    return params;
   auto v1Enabled = [&](int k) {
     const std::string key = "template" + std::to_string(k) + "Enabled";
     return params.contains(key) && params[key].is_boolean() ? params[key].get<bool>() : k == 1;
@@ -385,7 +403,8 @@ nlohmann::json migrateLocateTemplateFromV1(const nlohmann::json& params) {
   int from[kTemplateSlots + 1] = {0, 1, 2, 3, 4};
   if (!v1Enabled(1)) {
     for (int k = 2; k <= kTemplateSlots; ++k) {
-      if (!v1Enabled(k)) continue;
+      if (!v1Enabled(k))
+        continue;
       from[1] = k;
       from[k] = 1;
       break;
@@ -394,10 +413,13 @@ nlohmann::json migrateLocateTemplateFromV1(const nlohmann::json& params) {
   nlohmann::json out = nlohmann::json::object();
   for (auto it = params.begin(); it != params.end(); ++it) {
     const std::string& key = it.key();
-    if (key.rfind("template", 0) == 0 && key != "templateDir") continue;
+    if (key.rfind("template", 0) == 0 && key != "templateDir")
+      continue;
     bool global = false;
-    for (const char* g : kGlobal) global = global || key == g;
-    if (!global) out[key] = it.value();
+    for (const char* g : kGlobal)
+      global = global || key == g;
+    if (!global)
+      out[key] = it.value();
   }
   for (int k = 1; k <= kTemplateSlots; ++k) {
     const int old = from[k];
@@ -417,12 +439,14 @@ nlohmann::json migrateLocateTemplateFromV1(const nlohmann::json& params) {
         out[now + field] = def;
       }
     }
-    if (k > 1 && v1Enabled(old)) out[now + "Enabled"] = true;
+    if (k > 1 && v1Enabled(old))
+      out[now + "Enabled"] = true;
     const std::string over = was + "Override";
     const bool own = params.contains(over) && params[over].is_boolean() && params[over].get<bool>();
     for (int r = 0; r < 4; ++r) {
       const std::string src = own ? was + kSlotRoles[r] + "Roi" : std::string(kGlobal[r]);
-      if (params.contains(src)) out[now + kSlotRoles[r] + "Roi"] = params[src];
+      if (params.contains(src))
+        out[now + kSlotRoles[r] + "Roi"] = params[src];
     }
   }
   return out;
@@ -433,7 +457,8 @@ nlohmann::json migrateLocateTemplateFromV1(const nlohmann::json& params) {
 Status locateModel(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                    ExecContext& ctx) {
   ScanView scan;
-  if (!readScanPair(inputs.get("scan"), &scan)) return badBundle("scan");
+  if (!readScanPair(inputs.get("scan"), &scan))
+    return badBundle("scan");
 
   // 模型要原始 1280 槽的传感器帧：ScanPair 的 primary/secondary 是换过轴的同一批槽，
   // 再换一次就回到传感器帧（换轴是交换 y、z，对有限点是精确的，NaN 槽原样留着）。
@@ -442,38 +467,44 @@ Status locateModel(const Inputs& inputs, const ParamView& params, Outputs& outpu
   for (int i = 0; i < 2; ++i) {
     Step frame("gap.to_measurement_frame", &fine::toMeasurementFrame);
     frame.in("cloud", *measured[i]);
-    if (Status s = frame.run(ctx, "换回传感器帧", "scan"); !s.ok) return s;
+    if (Status s = frame.run(ctx, "换回传感器帧", "scan"); !s.ok)
+      return s;
     sensor[i] = frame.out("cloud");
   }
 
   Step tensor("gap.profile_tensor", &fine::profileTensor);
   tensor.in("primary", sensor[0]).in("secondary", sensor[1]);
-  if (Status s = tensor.run(ctx, "剖面张量", "scan"); !s.ok) return s;
+  if (Status s = tensor.run(ctx, "剖面张量", "scan"); !s.ok)
+    return s;
 
   Step infer("ml.onnx_run");
   infer.in("input", tensor.out("tensor"))
       .set("modelPath", Value::text(params.path("modelPath").u8string()));
   if (Status s = infer.run(ctx, "ONNX 推理"); !s.ok) {
-    if (s.paramPath == "modelPath" || s.paramPath.empty()) s.paramPath = "modelPath";
+    if (s.paramPath == "modelPath" || s.paramPath.empty())
+      s.paramPath = "modelPath";
     return s;
   }
 
   Step labels("gap.labels_from_logits", &fine::labelsFromLogits);
   labels.in("tensor", infer.out("output"));
-  if (Status s = labels.run(ctx, "逐槽 argmax"); !s.ok) return s;
+  if (Status s = labels.run(ctx, "逐槽 argmax"); !s.ok)
+    return s;
 
   Step boxes("gap.roi_from_labels", &fine::roiFromLabels);
   boxes.in("primary", sensor[0])
       .in("secondary", sensor[1])
       .in("labels", labels.out("labels"))
       .copyAll(params);
-  if (Status s = boxes.run(ctx, "模型四框"); !s.ok) return s;
+  if (Status s = boxes.run(ctx, "模型四框"); !s.ok)
+    return s;
 
   Data finite[2];
   for (int i = 0; i < 2; ++i) {
     Step drop("gap.drop_non_finite", &fine::dropNonFinite);
     drop.in("cloud", *measured[i]);
-    if (Status s = drop.run(ctx, "剔 NaN"); !s.ok) return s;
+    if (Status s = drop.run(ctx, "剔 NaN"); !s.ok)
+      return s;
     finite[i] = drop.out("cloud");
   }
 
@@ -489,23 +520,22 @@ Status locateModel(const Inputs& inputs, const ParamView& params, Outputs& outpu
       .set("maxRollBoxHeight", params.raw().at("cropMaxRollBoxHeight"))
       .set("minPointsKept", params.raw().at("cropMinPointsKept"))
       .set("usingCamera", params.raw().at("cropUsingCamera"));
-  if (Status s = roll.run(ctx, "跟随零件的裁剪窗"); !s.ok) return s;
+  if (Status s = roll.run(ctx, "跟随零件的裁剪窗"); !s.ok)
+    return s;
 
   const lyflow::Box2D& flushBase = *boxes.out("flushBase").asBox2D();
   const lyflow::Box2D& gapLeft = *boxes.out("gapLeft").asBox2D();
   const lyflow::Box2D& gapRight = *boxes.out("gapRight").asBox2D();
-  nlohmann::json info = roiInfo(datumOnRight(flushBase, gapLeft, gapRight), "model",
-                                nlohmann::json(), roll.out("window").asBox2D(),
-                                roll.out("status").asRecord()->data);
-  outputs.set("rois", roiSetOf(boxes.out("flushBase"), boxes.out("flushRef"),
-                               boxes.out("gapLeft"), boxes.out("gapRight"), std::move(info)));
+  nlohmann::json info =
+      roiInfo(datumOnRight(flushBase, gapLeft, gapRight), "model", nlohmann::json(),
+              roll.out("window").asBox2D(), roll.out("status").asRecord()->data);
+  outputs.set("rois", roiSetOf(boxes.out("flushBase"), boxes.out("flushRef"), boxes.out("gapLeft"),
+                               boxes.out("gapRight"), std::move(info)));
   outputs.set("scan", scanPairOf(roll.out("primary"), roll.out("secondary"), roll.out("merged")));
   return Status::Ok();
 }
 
-std::string locateModelKey(const ParamView& params) {
-  return fileStamp(params.path("modelPath"));
-}
+std::string locateModelKey(const ParamView& params) { return fileStamp(params.path("modelPath")); }
 
 // ================================================================= gap.role_line
 
@@ -514,9 +544,11 @@ Status fitRoleLine(const ScanView& scan, const RoiView& rois, const std::string&
                    const Data& refLine, const ParamView& params, ExecContext& ctx, Step* fit) {
   const Data& box = rois.role(role);
   Step crop("filter.crop_box2d");
-  crop.in("cloud", scan.pick(params.choice("cloud"))).in("box", box).set("bounds",
-                                                                          Value::text("open"));
-  if (Status s = crop.run(ctx, "裁 " + role, "rois"); !s.ok) return s;
+  crop.in("cloud", scan.pick(params.choice("cloud")))
+      .in("box", box)
+      .set("bounds", Value::text("open"));
+  if (Status s = crop.run(ctx, "裁 " + role, "rois"); !s.ok)
+    return s;
   const lyflow::Box2D toward = seamTowardBox(*rois.seamLeft->asBox2D(), *rois.seamRight->asBox2D());
   fit->in("cloud", crop.out("cloud"))
       .in("box", box)
@@ -529,11 +561,13 @@ Status fitRoleLine(const ScanView& scan, const RoiView& rois, const std::string&
 Status roleLine(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   ScanView scan;
   RoiView rois;
-  if (!readScanPair(inputs.get("scan"), &scan)) return badBundle("scan");
-  if (!readRoiSet(inputs.get("rois"), &rois)) return badBundle("rois");
+  if (!readScanPair(inputs.get("scan"), &scan))
+    return badBundle("scan");
+  if (!readRoiSet(inputs.get("rois"), &rois))
+    return badBundle("rois");
   Step fit("gap.fit_line", &fine::fitLine);
-  if (Status s = fitRoleLine(scan, rois, params.choice("role"), inputs.get("refLine"), params, ctx,
-                             &fit);
+  if (Status s =
+          fitRoleLine(scan, rois, params.choice("role"), inputs.get("refLine"), params, ctx, &fit);
       !s.ok) {
     return s;
   }
@@ -564,14 +598,17 @@ Data pointQuality(const std::string& method, std::size_t pointCount) {
 Status refPoint(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   ScanView scan;
   RoiView rois;
-  if (!readScanPair(inputs.get("scan"), &scan)) return badBundle("scan");
-  if (!readRoiSet(inputs.get("rois"), &rois)) return badBundle("rois");
+  if (!readScanPair(inputs.get("scan"), &scan))
+    return badBundle("scan");
+  if (!readRoiSet(inputs.get("rois"), &rois))
+    return badBundle("rois");
   const std::string method = params.choice("method");
   const std::string role = params.choice("role");
 
   if (method == "line_end") {
     Step fit("gap.fit_line", &fine::fitLine);
-    if (Status s = fitRoleLine(scan, rois, role, Data(), params, ctx, &fit); !s.ok) return s;
+    if (Status s = fitRoleLine(scan, rois, role, Data(), params, ctx, &fit); !s.ok)
+      return s;
     outputs.set("point", fit.out("innerEnd"));
     outputs.set("line", fit.out("line"));
     outputs.set("quality", fit.out("quality"));
@@ -584,7 +621,8 @@ Status refPoint(const Inputs& inputs, const ParamView& params, Outputs& outputs,
     const Data& cloud = scan.pick(params.choice("cloud"));
     Step pick("gap.selected_point", &fine::selectedPoint);
     pick.in("cloud", cloud).in("box", box);
-    if (Status s = pick.run(ctx, "选点", "scan"); !s.ok) return s;
+    if (Status s = pick.run(ctx, "选点", "scan"); !s.ok)
+      return s;
     outputs.set("point", pick.out("point"));
     outputs.set("line", placeholderLine(pick.out("point")));
     outputs.set("quality", pointQuality(method, cloud.asCloud()->pointCount()));
@@ -593,19 +631,23 @@ Status refPoint(const Inputs& inputs, const ParamView& params, Outputs& outputs,
 
   // nearest_point：框里离基准线垂距最小的那个点
   Step crop("filter.crop_box2d");
-  crop.in("cloud", scan.pick(params.choice("cloud"))).in("box", box).set("bounds",
-                                                                          Value::text("open"));
-  if (Status s = crop.run(ctx, "裁 " + role, "rois"); !s.ok) return s;
+  crop.in("cloud", scan.pick(params.choice("cloud")))
+      .in("box", box)
+      .set("bounds", Value::text("open"));
+  if (Status s = crop.run(ctx, "裁 " + role, "rois"); !s.ok)
+    return s;
   Step nearest("gap.nearest_to_line", &fine::nearestToLine);
   nearest.in("cloud", crop.out("cloud")).in("line", inputs.get("baseLine"));
-  if (Status s = nearest.run(ctx, "最近点", "baseLine"); !s.ok) return s;
+  if (Status s = nearest.run(ctx, "最近点", "baseLine"); !s.ok)
+    return s;
   outputs.set("point", nearest.out("point"));
   outputs.set("line", placeholderLine(nearest.out("point")));
   outputs.set("quality", pointQuality(method, crop.out("cloud").asCloud()->pointCount()));
   return Status::Ok();
 }
 
-std::vector<Issue> validateRefPoint(const ParamView& params, const std::set<std::string>& connected) {
+std::vector<Issue> validateRefPoint(const ParamView& params,
+                                    const std::set<std::string>& connected) {
   std::vector<Issue> issues;
   if (params.choice("method") == "nearest_point" && !connected.count("baseLine")) {
     issues.push_back(Issue::error("missing_input", "method=nearest_point 要接 baseLine（基准线）",
@@ -620,8 +662,10 @@ Status seamCircles(const Inputs& inputs, const ParamView& params, Outputs& outpu
                    ExecContext& ctx) {
   ScanView scan;
   RoiView rois;
-  if (!readScanPair(inputs.get("scan"), &scan)) return badBundle("scan");
-  if (!readRoiSet(inputs.get("rois"), &rois)) return badBundle("rois");
+  if (!readScanPair(inputs.get("scan"), &scan))
+    return badBundle("scan");
+  if (!readRoiSet(inputs.get("rois"), &rois))
+    return badBundle("rois");
   Step fit("gap.fit_gap_circles", &fine::fitGapCircles);
   fit.in("merged", *scan.merged)
       .in("primary", *scan.primary)
@@ -631,7 +675,8 @@ Status seamCircles(const Inputs& inputs, const ParamView& params, Outputs& outpu
       .in("refLine", inputs.get("refLine"))
       .in("refLineRight", inputs.get("refLineRight"))
       .copyAll(params);
-  if (Status s = fit.run(ctx, "拟合缝两侧圆", "rois"); !s.ok) return s;
+  if (Status s = fit.run(ctx, "拟合缝两侧圆", "rois"); !s.ok)
+    return s;
   outputs.set("left", fit.out("left"));
   outputs.set("right", fit.out("right"));
   outputs.set("quality", fit.out("quality"));
@@ -644,8 +689,10 @@ Status datumDirection(const Inputs& inputs, const ParamView& params, Outputs& ou
                       ExecContext& ctx) {
   ScanView scan;
   RoiView rois;
-  if (!readScanPair(inputs.get("scan"), &scan)) return badBundle("scan");
-  if (!readRoiSet(inputs.get("rois"), &rois)) return badBundle("rois");
+  if (!readScanPair(inputs.get("scan"), &scan))
+    return badBundle("scan");
+  if (!readRoiSet(inputs.get("rois"), &rois))
+    return badBundle("rois");
   // 长面在角色框背离缝的那一侧：datum 取 info.datumSide，target 取另一侧。x 锚在同侧的缝框上
   // （模型对缝的定位最稳），y 锚在角色框上（长面就在它上下几毫米内）。
   const std::string role = params.choice("role");
@@ -657,11 +704,13 @@ Status datumDirection(const Inputs& inputs, const ParamView& params, Outputs& ou
       .in("heightAnchor", rois.role(role))
       .set("side", Value::text(right ? "right" : "left"))
       .copy(params, {"startMm", "lengthMm", "heightMm"});
-  if (Status s = window.run(ctx, "方向基准窗"); !s.ok) return s;
+  if (Status s = window.run(ctx, "方向基准窗"); !s.ok)
+    return s;
 
   Step crop("filter.crop_box2d");
   crop.in("cloud", *scan.merged).in("box", window.out("box")).set("bounds", Value::text("open"));
-  if (Status s = crop.run(ctx, "裁方向基准窗", "scan"); !s.ok) return s;
+  if (Status s = crop.run(ctx, "裁方向基准窗", "scan"); !s.ok)
+    return s;
 
   Step fit("gap.fit_line", &fine::fitLine);
   fit.in("cloud", crop.out("cloud"))
@@ -670,7 +719,8 @@ Status datumDirection(const Inputs& inputs, const ParamView& params, Outputs& ou
       .set("segmentPoints", Value::integer(0))
       .set("endpoints", Value::text("inlier_ends"))
       .copy(params, {"distThresh", "minInliers"});
-  if (Status s = fit.run(ctx, "拟合方向基准线", "scan"); !s.ok) return s;
+  if (Status s = fit.run(ctx, "拟合方向基准线", "scan"); !s.ok)
+    return s;
   outputs.set("line", fit.out("line"));
   outputs.set("quality", fit.out("quality"));
   return Status::Ok();
@@ -696,7 +746,7 @@ Param cloudChoice() {
                    /*advanced=*/true);
 }
 
-}  // namespace
+} // namespace
 
 void registerBlockOps(Registry& r) {
   // ------------------------------------------------------------ gap.read_scan
@@ -708,13 +758,12 @@ void registerBlockOps(Registry& r) {
     op.label = "读剖面";
     op.category = "间隙/积木";
     op.keywords = {"read", "scan", "pcd", "剖面", "测点", "积木"};
-    op.doc =
-        "读一个测点的双头线扫剖面，换到测量帧，出一个 ScanPair。primary / secondary 保留原始"
-        "1280 个槽（NaN 槽不剔，模型定位要靠槽号）；merged 是两片有限点合并（secondary 在前）"
-        "之后、按需做过半径离群剔除的云。\n"
-        "primary / secondary 两个输入接上了（或被宿主注入了）就直接用它们、不读目录；"
-        "宿主注入内存里的两片云就注入这个节点的这两个输入端口（C ABI 的 run inputs、"
-        "CLI 的 --input n_scan.primary=<pcd>）。不想配目录时把 source 设成 inputs。";
+    op.doc = "读一个测点的双头线扫剖面，换到测量帧，出一个 ScanPair。primary / secondary 保留原始"
+             "1280 个槽（NaN 槽不剔，模型定位要靠槽号）；merged 是两片有限点合并（secondary 在前）"
+             "之后、按需做过半径离群剔除的云。\n"
+             "primary / secondary 两个输入接上了（或被宿主注入了）就直接用它们、不读目录；"
+             "宿主注入内存里的两片云就注入这个节点的这两个输入端口（C ABI 的 run inputs、"
+             "CLI 的 --input n_scan.primary=<pcd>）。不想配目录时把 source 设成 inputs。";
     op.inputs = {
         Port{"primary", "PointCloud", "Primary",
              "传感器帧的 Master 云（原始槽，NaN 可留着）。接上或被注入时压过 source。", false},
@@ -724,10 +773,10 @@ void registerBlockOps(Registry& r) {
     op.outputs = {Port{"scan", "Bundle<gap.ScanPair>", "Scan", "测量帧的剖面对。", true}};
 
     Param source = paramOf(r, "gap.load_profile_pair", "source");
-    source.doc =
-        "没给 primary / secondary 时去哪读：目录里按前缀配对，或直接指两个文件。"
-        "inputs = 不读盘，两片云只从输入来（接线或宿主注入）。";
-    source.options.push_back(EnumOption{"inputs", "只用两个输入", "宿主注入或上游已经读好的两片云。"});
+    source.doc = "没给 primary / secondary 时去哪读：目录里按前缀配对，或直接指两个文件。"
+                 "inputs = 不读盘，两片云只从输入来（接线或宿主注入）。";
+    source.options.push_back(
+        EnumOption{"inputs", "只用两个输入", "宿主注入或上游已经读好的两片云。"});
     Param removeOutliers =
         boolParam("removeOutliers", "Remove Outliers", false,
                   "在合并云上做一次半径离群剔除（common_settings.filter.using_removal）。");
@@ -805,10 +854,11 @@ void registerBlockOps(Registry& r) {
     std::vector<Param> params = {dir, paramOf(r, "gap.align_template", "minScore", 0)};
     // 默认值是一个大到不裁的框：空白画布上拼出来的图不填高级参数也得能跑（细粒度算子的默认
     // [-1, -1, 1, 1] 会把整片剖面裁没）。导入器总是显式写这一项，导入的图不受影响。
-    Param overallRoi = withDefault(
-        renamed(paramOf(r, "gap.overall_roi", "roi", 1, "整体框"), "overallRoi"),
-        Value::vec({-1000.0, -1000.0, 1000.0, 1000.0}));
-    overallRoi.doc = "整体 ROI（测量帧，毫米）。默认大到不裁；配置里的 overall_roi 由导入器写进来。";
+    Param overallRoi =
+        withDefault(renamed(paramOf(r, "gap.overall_roi", "roi", 1, "整体框"), "overallRoi"),
+                    Value::vec({-1000.0, -1000.0, 1000.0, 1000.0}));
+    overallRoi.doc =
+        "整体 ROI（测量帧，毫米）。默认大到不裁；配置里的 overall_roi 由导入器写进来。";
     Param overallMode = renamed(paramOf(r, "gap.overall_roi", "mode", 1, "整体框"), "overallMode");
     Param overallCamera =
         renamed(paramOf(r, "gap.overall_roi", "usingCamera", 1, "整体框"), "overallCamera");
@@ -904,7 +954,8 @@ void registerBlockOps(Registry& r) {
     model.name = "modelPath";
     model.type = ParamType::Path;
     model.label = "Model";
-    model.doc = "ONNX 模型文件（setting.yml 的 model_roi.model_path），通常绑到顶层参数 modelPath。";
+    model.doc =
+        "ONNX 模型文件（setting.yml 的 model_roi.model_path），通常绑到顶层参数 modelPath。";
     model.def = Value::text("");
     model.mode = "open";
     model.filters = {FileFilter{"ONNX", {"onnx"}}};
@@ -914,9 +965,12 @@ void registerBlockOps(Registry& r) {
       params.push_back(paramOf(r, "gap.roi_from_labels", name, 1, "细化"));
     }
     const std::pair<const char*, const char*> crop[6] = {
-        {"enabled", "cropEnabled"},       {"halfWidth", "cropHalfWidth"},
-        {"halfHeight", "cropHalfHeight"}, {"maxRollBoxHeight", "cropMaxRollBoxHeight"},
-        {"minPointsKept", "cropMinPointsKept"}, {"usingCamera", "cropUsingCamera"}};
+        {"enabled", "cropEnabled"},
+        {"halfWidth", "cropHalfWidth"},
+        {"halfHeight", "cropHalfHeight"},
+        {"maxRollBoxHeight", "cropMaxRollBoxHeight"},
+        {"minPointsKept", "cropMinPointsKept"},
+        {"usingCamera", "cropUsingCamera"}};
     for (const auto& [from, to] : crop) {
       params.push_back(renamed(paramOf(r, "gap.roll_anchored_crop", from, 1, "跟随裁剪"), to));
     }
@@ -1026,10 +1080,9 @@ void registerBlockOps(Registry& r) {
     op.label = "拟合缝两侧圆";
     op.category = "间隙/积木";
     op.keywords = {"circle", "gap", "seam", "圆", "间隙", "积木"};
-    op.doc =
-        "在 RoiSet 的两个缝框里各拟一个圆（gap.fit_gap_circles）：合并云优先，失败退到两台相机"
-        "各拟一个。固定半径、逐侧相机、圆心高度带、弱拟合地板都在「高级」里；配了高度带就接 "
-        "refLine（右侧要比另一条面时再接 refLineRight）。";
+    op.doc = "在 RoiSet 的两个缝框里各拟一个圆（gap.fit_gap_circles）：合并云优先，失败退到两台相机"
+             "各拟一个。固定半径、逐侧相机、圆心高度带、弱拟合地板都在「高级」里；配了高度带就接 "
+             "refLine（右侧要比另一条面时再接 refLineRight）。";
     op.inputs = {
         scanIn("定位之后的剖面对。"),
         roisIn("定位给出的角色框。"),
@@ -1045,7 +1098,7 @@ void registerBlockOps(Registry& r) {
     };
     const OperatorDesc* circles = r.find("gap.fit_gap_circles");
     std::vector<Param> params;
-    const std::set<std::string> visible = {"distThresh",    "nominal",       "leftRadiusMin",
+    const std::set<std::string> visible = {"distThresh",    "nominal",        "leftRadiusMin",
                                            "leftRadiusMax", "rightRadiusMin", "rightRadiusMax"};
     for (const Param& p : circles ? circles->params : std::vector<Param>{}) {
       Param copy = p;
@@ -1093,4 +1146,4 @@ void registerBlockOps(Registry& r) {
   }
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

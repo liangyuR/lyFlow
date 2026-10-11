@@ -2,15 +2,15 @@
 // 钩子在里面），诊断按节点挂到画布与 Inspector 上。判定全在 C++，这里只存结论 —— 与 stale 同一条路
 // （ADR-0007），前端不重新实现任何一条校验。
 
-import { useMemo } from "react";
-import { create } from "zustand";
+import { useMemo } from 'react';
+import { create } from 'zustand';
 
-import { pathPrefix, type SubPath } from "../lib/subgraph";
-import { transport } from "../transport";
-import { runParamsOf } from "./recipe";
-import { useUiStore } from "./ui";
-import type { GraphDiagnostic } from "../types/execution";
-import type { GraphDoc } from "../types/graph";
+import { pathPrefix, type SubPath } from '../lib/subgraph';
+import { transport } from '../transport';
+import { runParamsOf } from './recipe';
+import { useUiStore } from './ui';
+import type { GraphDiagnostic } from '../types/execution';
+import type { GraphDoc } from '../types/graph';
 
 /** 拖框时每帧都改参数，攒一下再问；比 plan 的 150 ms 稍长，拖动停下来之后一眨眼就出结果。 */
 const DEBOUNCE_MS = 200;
@@ -38,7 +38,7 @@ export const useValidationStore = create<ValidationState>((set) => ({
     const byNode = new Map<string, GraphDiagnostic[]>();
     const graphLevel: GraphDiagnostic[] = [];
     for (const d of diags) {
-      if (d.kind === "migration") continue;
+      if (d.kind === 'migration') continue;
       if (!d.nodeId) {
         graphLevel.push(d);
         continue;
@@ -63,7 +63,7 @@ let ticket = 0;
 
 /** doc 变了就重新校验。晚发的那次赢，与 schedulePlan 同一套 debounce + ticket。 */
 export function scheduleValidate(doc: GraphDoc, graphPath: string | null): void {
-  if (transport.kind === "static") return;
+  if (transport.kind === 'static') return;
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {
     timer = null;
@@ -72,7 +72,7 @@ export function scheduleValidate(doc: GraphDoc, graphPath: string | null): void 
 }
 
 export async function requestValidate(doc: GraphDoc, graphPath: string | null): Promise<void> {
-  if (transport.kind === "static") return;
+  if (transport.kind === 'static') return;
   const mine = ++ticket;
   try {
     // 校验合并后的有效值（K5）：诊断说的是当前配方下的这张图，不是 doc 里的 default
@@ -103,7 +103,7 @@ export function validationAt(
     if (prefix && !id.startsWith(prefix)) continue;
     const rest = id.slice(prefix.length);
     if (!rest) continue;
-    const slash = rest.indexOf("/");
+    const slash = rest.indexOf('/');
     const local = slash < 0 ? rest : rest.slice(0, slash);
     const merged = result.get(local);
     if (merged) merged.push(...list);
@@ -122,7 +122,7 @@ export function useNodeValidation(localId: string): GraphDiagnostic[] {
 }
 
 export function errorsOf(diags: readonly GraphDiagnostic[]): GraphDiagnostic[] {
-  return diags.filter((d) => d.severity === "error");
+  return diags.filter((d) => d.severity === 'error');
 }
 
 /** 某个顶层图参数身上的校验诊断（nodeId 为空、paramPath 是它的名字）。 */

@@ -47,7 +47,8 @@ double median(std::vector<double>* v) {
 bool heightInZ(const lyflow::PointCloud& cloud) {
   for (std::size_t i = 0; i < cloud.pointCount(); ++i) {
     const float y = cloud.xyz[3 * i + 1];
-    if (std::isfinite(y) && y != 0.0F) return false;
+    if (std::isfinite(y) && y != 0.0F)
+      return false;
   }
   return true;
 }
@@ -69,7 +70,8 @@ Profile profileOf(const lyflow::PointCloud& cloud) {
   for (std::size_t i = 0; i < cloud.pointCount(); ++i) {
     const float px = cloud.xyz[3 * i];
     const float ph = cloud.xyz[3 * i + (inZ ? 2 : 1)];
-    if (!std::isfinite(px) || !std::isfinite(ph)) continue;
+    if (!std::isfinite(px) || !std::isfinite(ph))
+      continue;
     out.x.push_back(px);
     out.h.push_back(ph);
   }
@@ -80,9 +82,11 @@ Profile profileOf(const lyflow::PointCloud& cloud) {
 bool medianHeightAt(const Profile& profile, float x, float half, double* out) {
   std::vector<double> hs;
   for (std::size_t i = 0; i < profile.x.size(); ++i) {
-    if (profile.x[i] > x - half && profile.x[i] < x + half) hs.push_back(profile.h[i]);
+    if (profile.x[i] > x - half && profile.x[i] < x + half)
+      hs.push_back(profile.h[i]);
   }
-  if (hs.empty()) return false;
+  if (hs.empty())
+    return false;
   *out = median(&hs);
   return true;
 }
@@ -151,10 +155,11 @@ Status cameraGuard(const Inputs& inputs, const ParamView& params, Outputs& outpu
 
   std::vector<double> magnitude;
   magnitude.reserve(diffs.size());
-  for (const double d : diffs) magnitude.push_back(std::fabs(d));
+  for (const double d : diffs)
+    magnitude.push_back(std::fabs(d));
   const double deltaMedian = median(&magnitude);
   auto signedCopy = diffs;
-  const double signedMedian = median(&signedCopy);  // + = primary 更深 / 更远离传感器
+  const double signedMedian = median(&signedCopy); // + = primary 更深 / 更远离传感器
   const bool exceeded = deltaMedian > maxDeltaMm;
 
   quality.data["evaluated"] = true;
@@ -190,8 +195,7 @@ Status cameraGuard(const Inputs& inputs, const ParamView& params, Outputs& outpu
                        {}, "primary");
 }
 
-Param numParam(const char* name, const char* label, double def, const char* unit,
-               const char* doc) {
+Param numParam(const char* name, const char* label, double def, const char* unit, const char* doc) {
   Param p;
   p.name = name;
   p.type = ParamType::Float;
@@ -202,7 +206,7 @@ Param numParam(const char* name, const char* label, double def, const char* unit
   return p;
 }
 
-}  // namespace
+} // namespace
 
 void registerCameraGuard(Registry& r) {
   OperatorDesc op;
@@ -211,19 +215,18 @@ void registerCameraGuard(Registry& r) {
   op.label = "双相机闸";
   op.category = "间隙/质量";
   op.keywords = {"camera", "guard", "consistency", "双相机", "一致性", "二次反射"};
-  op.doc =
-      "比两台线扫在重叠段上的高度，判断它们看到的是不是同一个面；不是的话把不可信的那台"
-      "挡在模型之前。**串在 gap.load_profile_pair 与下游之间**，两台一致时原样透传，"
-      "下游完全无感。\n"
-      "判据是重叠段上逐点高度差的**绝对值中位数**，不需要 ROI —— 正因为不需要，它才能站在"
-      "模型前面。高度在 y 还是 z 自己认（传感器帧在 z，测量帧在 y），不用填。\n"
-      "`onDisagree` 决定超限时怎么办：`fail` 判这一帧测不了；`keepPrimary` / `keepSecondary` "
-      "把可信那台的云送到**两个**输出端口上；`record` 只记录、照常透传；`off` 连算都不算。\n"
-      "**为什么「只用一台」要填两个端口**：模型输入张量是 [2, 6, 1280]、一台一行，形状是训练时"
-      "定死的，单行喂不进去；填两遍等于告诉模型「两个视角一致，就是这个视角」。"
-      "代价是合并云里这一台的点算了两遍，比例类判据不受影响，但 point_count 会翻倍。\n"
-      "罗石天幕 R2 实测：正常帧中位差 0.083 mm（最大 0.143），二次反射的 12 帧 1.03~5.6 mm，"
-      "中间空了 7 倍；而那 12 帧的拟合残差只有 0.013 mm，从别的质量指标上根本看不出来。";
+  op.doc = "比两台线扫在重叠段上的高度，判断它们看到的是不是同一个面；不是的话把不可信的那台"
+           "挡在模型之前。**串在 gap.load_profile_pair 与下游之间**，两台一致时原样透传，"
+           "下游完全无感。\n"
+           "判据是重叠段上逐点高度差的**绝对值中位数**，不需要 ROI —— 正因为不需要，它才能站在"
+           "模型前面。高度在 y 还是 z 自己认（传感器帧在 z，测量帧在 y），不用填。\n"
+           "`onDisagree` 决定超限时怎么办：`fail` 判这一帧测不了；`keepPrimary` / `keepSecondary` "
+           "把可信那台的云送到**两个**输出端口上；`record` 只记录、照常透传；`off` 连算都不算。\n"
+           "**为什么「只用一台」要填两个端口**：模型输入张量是 [2, 6, 1280]、一台一行，形状是训练时"
+           "定死的，单行喂不进去；填两遍等于告诉模型「两个视角一致，就是这个视角」。"
+           "代价是合并云里这一台的点算了两遍，比例类判据不受影响，但 point_count 会翻倍。\n"
+           "罗石天幕 R2 实测：正常帧中位差 0.083 mm（最大 0.143），二次反射的 12 帧 1.03~5.6 mm，"
+           "中间空了 7 倍；而那 12 帧的拟合残差只有 0.013 mm，从别的质量指标上根本看不出来。";
   op.inputs = {
       Port{"primary", "PointCloud", "Primary", "第一台相机的云。", true},
       Port{"secondary", "PointCloud", "Secondary", "第二台相机的云。", true},
@@ -267,4 +270,4 @@ void registerCameraGuard(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

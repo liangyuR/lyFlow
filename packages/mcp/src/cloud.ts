@@ -80,7 +80,7 @@ export interface CloudPoint {
 }
 
 export interface CloudSummary {
-  kind: "cloud";
+  kind: 'cloud';
   pointCount: number;
   totalPoints: number;
   bbox: { min: [number, number, number]; max: [number, number, number] };
@@ -94,17 +94,17 @@ export function summarizeCloud(payload: CloudPayload, head: number): CloudSummar
     y: statOf(payload.xyz, 3, 1),
     z: statOf(payload.xyz, 3, 2),
   };
-  if (payload.intensity) channels["intensity"] = statOf(payload.intensity, 1, 0);
+  if (payload.intensity) channels['intensity'] = statOf(payload.intensity, 1, 0);
   if (payload.normals) {
-    channels["nx"] = statOf(payload.normals, 3, 0);
-    channels["ny"] = statOf(payload.normals, 3, 1);
-    channels["nz"] = statOf(payload.normals, 3, 2);
+    channels['nx'] = statOf(payload.normals, 3, 0);
+    channels['ny'] = statOf(payload.normals, 3, 1);
+    channels['nz'] = statOf(payload.normals, 3, 2);
   }
   if (payload.rgb) {
     const rgb = Float32Array.from(payload.rgb);
-    channels["r"] = statOf(rgb, 3, 0);
-    channels["g"] = statOf(rgb, 3, 1);
-    channels["b"] = statOf(rgb, 3, 2);
+    channels['r'] = statOf(rgb, 3, 0);
+    channels['g'] = statOf(rgb, 3, 1);
+    channels['b'] = statOf(rgb, 3, 2);
   }
 
   const points: CloudPoint[] = [];
@@ -134,7 +134,7 @@ export function summarizeCloud(payload: CloudPayload, head: number): CloudSummar
   }
 
   return {
-    kind: "cloud",
+    kind: 'cloud',
     pointCount: payload.pointCount,
     totalPoints: payload.totalPoints,
     bbox: {

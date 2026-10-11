@@ -147,7 +147,10 @@ pub fn spawn_library<R: Runtime>(app: AppHandle<R>) {
         };
         let mut watching = 0;
         for dir in &dirs {
-            if watcher.watch(Path::new(dir), RecursiveMode::NonRecursive).is_ok() {
+            if watcher
+                .watch(Path::new(dir), RecursiveMode::NonRecursive)
+                .is_ok()
+            {
                 watching += 1;
             }
         }

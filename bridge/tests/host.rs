@@ -145,15 +145,17 @@ fn invoke(
         },
     );
     match res {
-        Ok(body) => Ok(body.deserialize::<serde_json::Value>().expect("回包不是 JSON")),
+        Ok(body) => Ok(body
+            .deserialize::<serde_json::Value>()
+            .expect("回包不是 JSON")),
         Err(e) => Err(e.to_string()),
     }
 }
 
 fn dts_default_graph() -> serde_json::Value {
     let path = repo_root().join("packs/dts/graphs/default.lyflow.json");
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("读不到 {}: {e}", path.display()));
+    let text =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("读不到 {}: {e}", path.display()));
     serde_json::from_str(&text).expect("default.lyflow.json 不是合法 JSON")
 }
 
@@ -178,10 +180,7 @@ fn wait_for_finish(events: &Events, run_id: &str) -> serde_json::Value {
     }
 }
 
-fn events_of<'a>(
-    all: &'a [serde_json::Value],
-    run_id: &str,
-) -> Vec<&'a serde_json::Value> {
+fn events_of<'a>(all: &'a [serde_json::Value], run_id: &str) -> Vec<&'a serde_json::Value> {
     all.iter().filter(|e| e["runId"] == run_id).collect()
 }
 
@@ -244,8 +243,12 @@ fn run_graph_injects_the_host_profile() {
 
     // 图级命名输出的键集合只由图决定，不由运行结果决定（ADR-0017）——
     // 所以 flush 一定在，missing 与否不在本测试的关心范围内。
-    let outputs = invoke(&view, "get_run_outputs", serde_json::json!({ "runId": run_id }))
-        .expect("get_run_outputs 失败");
+    let outputs = invoke(
+        &view,
+        "get_run_outputs",
+        serde_json::json!({ "runId": run_id }),
+    )
+    .expect("get_run_outputs 失败");
     assert!(
         outputs.get("flush").is_some(),
         "图输出里没有 flush: {outputs:#?}"
@@ -357,7 +360,10 @@ fn resolve_path_joins_relative_paths_onto_the_root() {
         ..HostConfig::default()
     };
     let got = host::resolve_path(&cfg, "graphs/a.lyflow.json").unwrap();
-    assert_eq!(got, Path::new(root_str()).join("graphs").join("a.lyflow.json"));
+    assert_eq!(
+        got,
+        Path::new(root_str()).join("graphs").join("a.lyflow.json")
+    );
     // `.` 与中间的 `..` 只要没逃出去就正常解析
     let got = host::resolve_path(&cfg, "./graphs/../a.json").unwrap();
     assert_eq!(got, Path::new(root_str()).join("a.json"));

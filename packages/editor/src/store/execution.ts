@@ -1,15 +1,15 @@
 // 执行状态 store。运行时状态不进 GraphDoc、不进撤销栈；runId 对不上的事件先攒进 orphans。
 // M4：node_state / node_progress 按 16 ms 批量落库，事件 id 是路径、按层聚合（F2）。
 
-import { create } from "zustand";
+import { create } from 'zustand';
 
-import { flashNodesLocate } from "../lib/motion";
-import { localIdOf, locateEventNode, pathPrefix, type SubPath } from "../lib/subgraph";
-import { transport } from "../transport";
-import { refreshCacheStats, useCacheStore } from "./cache";
-import { currentRecipeBlocker, runParamsOf, useRecipeStore } from "./recipe";
-import { useRunHistoryStore } from "./runHistory";
-import { useUiStore } from "./ui";
+import { flashNodesLocate } from '../lib/motion';
+import { localIdOf, locateEventNode, pathPrefix, type SubPath } from '../lib/subgraph';
+import { transport } from '../transport';
+import { refreshCacheStats, useCacheStore } from './cache';
+import { currentRecipeBlocker, runParamsOf, useRecipeStore } from './recipe';
+import { useRunHistoryStore } from './runHistory';
+import { useUiStore } from './ui';
 import type {
   Diagnostic,
   ExecutionEvent,
@@ -19,8 +19,8 @@ import type {
   NodeStats,
   RunStatus,
   RunSummary,
-} from "../types/execution";
-import type { GraphDoc } from "../types/graph";
+} from '../types/execution';
+import type { GraphDoc } from '../types/graph';
 
 // 可选字段一律写成 `?: T | undefined`：tsconfig 开了 exactOptionalPropertyTypes，
 // 展开赋值时那些字段的类型本来就是 T | undefined。
@@ -42,7 +42,7 @@ export interface NodeExecution {
 
 export interface LogEntry {
   seq: number;
-  level: "debug" | "info" | "warn" | "error";
+  level: 'debug' | 'info' | 'warn' | 'error';
   nodeId?: string | undefined;
   message: string;
 }
@@ -56,7 +56,7 @@ const ORPHAN_LIMIT = 2000;
 /** 事件合并窗口（§4）。一帧一次 set，三百个节点的图才不会每条事件重渲一遍。 */
 const BATCH_MS = 16;
 
-export type RunPhase = "idle" | "running" | "ok" | "error" | "cancelled";
+export type RunPhase = 'idle' | 'running' | 'ok' | 'error' | 'cancelled';
 
 interface ExecutionState {
   runId: string | null;
@@ -99,14 +99,20 @@ interface ExecutionState {
   /** 这一次运行是按什么发起的（展开后的路径 id）：「↻ 重跑」照它再来一次。 */
   request: RunRequest | null;
 
-  beginRun(runId: string, targets: string[], preview: boolean, isolate?: string[], request?: RunRequest | null): void;
+  beginRun(
+    runId: string,
+    targets: string[],
+    preview: boolean,
+    isolate?: string[],
+    request?: RunRequest | null,
+  ): void;
   failRun(message: string): void;
   apply(event: ExecutionEvent): void;
   markStale(): void;
   reset(): void;
 }
 
-const emptyNode = (): NodeExecution => ({ state: "idle", errors: [] });
+const emptyNode = (): NodeExecution => ({ state: 'idle', errors: [] });
 
 /** 事件里的 nodeId 在不在 isolate 里：精确命中，或落在某个子图节点之下（R1 的前缀展开）。 */
 export function inIsolate(isolate: readonly string[], nodeId: string): boolean {
@@ -185,8 +191,13 @@ function dropStaged(): void {
  *  不然点「NG 1」列出来的是另一回事。 */
 let judgedNodes: ReadonlyMap<string, NodeExecution> = new Map();
 
-export function judgedNodesOf(s: Pick<ExecutionState, "nodes" | "preview" | "runId" | "resultRunId" | "runStatus" | "request">) {
-  const hold = s.preview || s.resultRunId !== s.runId || (s.runStatus === "running" && s.request?.auto === true);
+export function judgedNodesOf(
+  s: Pick<ExecutionState, 'nodes' | 'preview' | 'runId' | 'resultRunId' | 'runStatus' | 'request'>,
+) {
+  const hold =
+    s.preview ||
+    s.resultRunId !== s.runId ||
+    (s.runStatus === 'running' && s.request?.auto === true);
   if (!hold) judgedNodes = s.nodes;
   return judgedNodes;
 }
@@ -198,7 +209,7 @@ export function useJudgedNodes(): ReadonlyMap<string, NodeExecution> {
 export const useExecutionStore = create<ExecutionState>((set, get) => ({
   runId: null,
   resultRunId: null,
-  runStatus: "idle",
+  runStatus: 'idle',
   preview: false,
   startedAt: null,
   durationMs: null,
@@ -229,7 +240,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       runId,
       // 全图运行清空节点表，结果当场就归新的这次；带 targets 的留着上一次的，等它的 run_started 再换
       resultRunId: only ? get().resultRunId : runId,
-      runStatus: "running",
+      runStatus: 'running',
       preview,
       startedAt: Date.now(),
       durationMs: null,
@@ -255,7 +266,14 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
 
   failRun(message) {
     dropStaged();
-    set({ runId: null, runStatus: "error", error: message, durationMs: null, orphans: [], cancelling: false });
+    set({
+      runId: null,
+      runStatus: 'error',
+      error: message,
+      durationMs: null,
+      orphans: [],
+      cancelling: false,
+    });
   },
 
   apply(event) {
@@ -278,7 +296,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     latestSeq = event.seq;
 
     switch (event.kind) {
-      case "run_started": {
+      case 'run_started': {
         // 真开跑了：从这一刻起节点表里的结果按这一次取（排队中的请求要等被抢占的那个退出，见 resultRunId）
         if (s.resultRunId !== event.runId) set({ resultRunId: event.runId });
         useRunHistoryStore.getState().planned(event.runId, event.plan ?? []);
@@ -289,7 +307,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
           const at = Date.now();
           for (const id of event.plan ?? []) {
             nodes.set(id, emptyNode());
-            for (const fn of transitionListeners) fn({ nodeId: id, state: "idle", at });
+            for (const fn of transitionListeners) fn({ nodeId: id, state: 'idle', at });
           }
           staged = nodes;
           useCacheStore.getState().extendRanWith(event.nodes ?? []);
@@ -310,7 +328,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
           nodes.set(id, emptyNode());
           // 计划里的节点先全部亮成「排队中」。这一下也是一次状态变化，
           // 流水账里少了它，「节点依次变色」的序列就从 pending 开始了。
-          for (const fn of transitionListeners) fn({ nodeId: id, state: "idle", at });
+          for (const fn of transitionListeners) fn({ nodeId: id, state: 'idle', at });
         }
         staged = nodes;
         useCacheStore.getState().setRanWith(event.nodes ?? []);
@@ -318,7 +336,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         set({ targets: event.targets ?? [], outputs: event.outputs ?? [] });
         break;
       }
-      case "plan_extended": {
+      case 'plan_extended': {
         // 惰性闭包被 demand 了（ADR-0016）。这些节点不在 run_started 里，
         // 现在才进节点表；cacheKey 也要补进 ranWith，否则 stale 会漏判。
         const nodes = stage();
@@ -326,22 +344,22 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         for (const n of event.nodes) {
           if (nodes.has(n.id)) continue;
           nodes.set(n.id, emptyNode());
-          for (const fn of transitionListeners) fn({ nodeId: n.id, state: "idle", at });
+          for (const fn of transitionListeners) fn({ nodeId: n.id, state: 'idle', at });
         }
         useCacheStore.getState().extendRanWith(event.nodes);
         scheduleFlush();
         break;
       }
-      case "node_state": {
+      case 'node_state': {
         if (s.isolate.length > 0 && !inIsolate(s.isolate, event.nodeId)) {
           // 单节点运行里其余节点只是去取了一趟缓存（R2）：它们的显示不跟着这次运行走，
           // 否则一次「只跑 b」会把 a 刷成「已缓存」、耗时清零。唯一要看的是执行期才发现的
           // upstream_not_ready（被 demand 的惰性上游），攒着留给 run_finished 提示
-          if (event.state === "error" && event.errors?.[0]?.code === "upstream_not_ready") {
+          if (event.state === 'error' && event.errors?.[0]?.code === 'upstream_not_ready') {
             notReady.push(event.nodeId);
           }
           if (
-            (event.state === "done" || event.state === "skipped") &&
+            (event.state === 'done' || event.state === 'skipped') &&
             event.stats?.outputsAvailable !== false
           ) {
             served.add(event.nodeId);
@@ -360,21 +378,21 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
           // 追加只会在重跑时留下上一轮的幽灵红框。
           errors: event.errors ?? (event.error ? [event.error] : []),
           // 进入 running 时清掉上一轮的进度，否则进度条会从 100% 开始倒着走
-          progress: event.state === "running" ? 0 : prev.progress,
+          progress: event.state === 'running' ? 0 : prev.progress,
         });
         const t: StateTransition = { nodeId: event.nodeId, state: event.state, at: Date.now() };
         for (const fn of transitionListeners) fn(t);
         scheduleFlush();
         break;
       }
-      case "node_progress": {
+      case 'node_progress': {
         const nodes = stage();
         const prev = nodes.get(event.nodeId) ?? emptyNode();
         nodes.set(event.nodeId, { ...prev, progress: event.progress, message: event.message });
         scheduleFlush();
         break;
       }
-      case "run_finished": {
+      case 'run_finished': {
         flushNow();
         if (s.targets.length > 0 && Array.isArray(event.attached)) {
           // 挂了过期旧结果的（修订二）也留着：输出取得到，stale 虚线框由 cache store 按键画
@@ -395,10 +413,17 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         if (!s.preview) void refreshCacheStats();
         if (s.isolate.length > 0) reportNotReady(event.diagnostics);
         // 调参记录：这一次的状态、耗时与量测读数（预览不记，begin 时就没记它）
-        useRunHistoryStore.getState().finish(event.runId, event.status as RunStatus, event.durationMs ?? null, useExecutionStore.getState().nodes);
+        useRunHistoryStore
+          .getState()
+          .finish(
+            event.runId,
+            event.status as RunStatus,
+            event.durationMs ?? null,
+            useExecutionStore.getState().nodes,
+          );
         break;
       }
-      case "log": {
+      case 'log': {
         const logs = s.logs.concat({
           seq: event.seq,
           level: event.level,
@@ -413,7 +438,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
 
   markStale() {
     // 没跑过就无所谓过期。runStatus idle 时置 stale 会让节点无故变淡。
-    if (get().runStatus === "idle" || get().stale) return;
+    if (get().runStatus === 'idle' || get().stale) return;
     set({ stale: true });
   },
 
@@ -423,7 +448,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     set({
       runId: null,
       resultRunId: null,
-      runStatus: "idle",
+      runStatus: 'idle',
       preview: false,
       startedAt: null,
       durationMs: null,
@@ -453,11 +478,12 @@ function dropUnreachable(isolate: readonly string[], attached: readonly string[]
   let next: Map<string, NodeExecution> | null = null;
   const at = Date.now();
   for (const [id, exec] of current) {
-    if (exec.state === "idle" || inIsolate(isolate, id) || served.has(id) || touched.has(id)) continue;
+    if (exec.state === 'idle' || inIsolate(isolate, id) || served.has(id) || touched.has(id))
+      continue;
     if (keep.has(id)) continue;
     next ??= new Map(current);
     next.set(id, emptyNode());
-    for (const fn of transitionListeners) fn({ nodeId: id, state: "idle", at });
+    for (const fn of transitionListeners) fn({ nodeId: id, state: 'idle', at });
   }
   served = new Set();
   touched = new Set();
@@ -471,10 +497,10 @@ function settleAbandoned(): void {
   let next: Map<string, NodeExecution> | null = null;
   const at = Date.now();
   for (const [id, exec] of current) {
-    if (exec.state !== "running" && exec.state !== "pending") continue;
+    if (exec.state !== 'running' && exec.state !== 'pending') continue;
     next ??= new Map(current);
-    next.set(id, { ...exec, state: "cancelled" });
-    for (const fn of transitionListeners) fn({ nodeId: id, state: "cancelled", at });
+    next.set(id, { ...exec, state: 'cancelled' });
+    for (const fn of transitionListeners) fn({ nodeId: id, state: 'cancelled', at });
   }
   if (next) useExecutionStore.setState({ nodes: next });
 }
@@ -483,9 +509,9 @@ function settleAbandoned(): void {
  *  缺结果的上游在当前层各闪一下红光（不抖）。 */
 function reportNotReady(diagnostics: readonly GraphDiagnostic[] | undefined): void {
   const ids = [
-    ...(diagnostics ?? []).filter((d) => d.code === "upstream_not_ready").map((d) => d.nodeId),
+    ...(diagnostics ?? []).filter((d) => d.code === 'upstream_not_ready').map((d) => d.nodeId),
     ...notReady,
-  ].filter((id, i, all) => id !== "" && all.indexOf(id) === i);
+  ].filter((id, i, all) => id !== '' && all.indexOf(id) === i);
   notReady = [];
   if (ids.length === 0) return;
   // 与 core 那句同一个模板（R2）。不直接用 run_finished.error：执行期才发现的那种，
@@ -493,9 +519,9 @@ function reportNotReady(diagnostics: readonly GraphDiagnostic[] | undefined): vo
   const text =
     ids.length === 1
       ? `上游 ${ids[0]} 还没有可用结果，先运行它或运行到此`
-      : `上游 ${ids.join("、")} 还没有可用结果，先运行它们或运行到此`;
+      : `上游 ${ids.join('、')} 还没有可用结果，先运行它们或运行到此`;
   const ui = useUiStore.getState();
-  ui.showToast(text, "warn");
+  ui.showToast(text, 'warn');
   const path = ui.path;
   const local = ids.map((id) => localIdOf(path, id)).filter((id): id is string => id !== null);
   flashNodesLocate([...new Set(local)]);
@@ -516,7 +542,7 @@ const RANK: Record<NodeState, number> = {
 /** 子图节点的状态 = 内部节点的归约：任一 error → error，任一 running → running，
  *  全 done/skipped → done（全 skipped 才算 skipped）。 */
 function reduceExecutions(list: readonly NodeExecution[], ids: readonly string[]): NodeExecution {
-  let state: NodeState = "skipped";
+  let state: NodeState = 'skipped';
   let duration = 0;
   let finished = 0;
   const errors: Diagnostic[] = [];
@@ -525,15 +551,15 @@ function reduceExecutions(list: readonly NodeExecution[], ids: readonly string[]
     const n = list[i]!;
     if (RANK[n.state] > RANK[state]) state = n.state;
     duration += n.durationMs ?? 0;
-    if (n.state === "done" || n.state === "skipped") finished += 1;
+    if (n.state === 'done' || n.state === 'skipped') finished += 1;
     errors.push(...n.errors);
     for (let k = 0; k < n.errors.length; k += 1) errorSources.push(n.errorSources?.[k] ?? ids[i]!);
   }
   // 全 done/skipped → done（全 skipped 才算 skipped）；有跑完的但还有没开始的 → pending
-  if (state === "done" || state === "skipped") {
-    state = list.every((n) => n.state === "skipped") ? "skipped" : "done";
-  } else if (state === "idle" && finished > 0) {
-    state = "pending";
+  if (state === 'done' || state === 'skipped') {
+    state = list.every((n) => n.state === 'skipped') ? 'skipped' : 'done';
+  } else if (state === 'idle' && finished > 0) {
+    state = 'pending';
   }
   return {
     state,
@@ -558,17 +584,20 @@ function sameAggregate(a: NodeExecution | undefined, b: NodeExecution): boolean 
     a.children?.finished === b.children?.finished &&
     a.children?.total === b.children?.total &&
     a.errorSource === b.errorSource &&
-    a.errorSources?.join("|") === b.errorSources?.join("|")
+    a.errorSources?.join('|') === b.errorSources?.join('|')
   );
 }
 
 /** 每个路径各缓存一份：对比模式下 A、B 可能在不同层级（compare-plan §1.7），单槽缓存会让两边
  *  轮流把对方挤掉 —— 子图节点每次都合并出新对象，订阅它的 selector 就每次拿到新引用。
  *  路径数组的引用是稳定的（ui.path、对比槽里存的那份），WeakMap 随它回收。 */
-const aggCache = new WeakMap<SubPath, {
-  nodes: ReadonlyMap<string, NodeExecution>;
-  result: Map<string, NodeExecution>;
-}>();
+const aggCache = new WeakMap<
+  SubPath,
+  {
+    nodes: ReadonlyMap<string, NodeExecution>;
+    result: Map<string, NodeExecution>;
+  }
+>();
 
 /** 当前层级的「本地 id → 执行状态」。按对象身份缓存，一次事件批只算一遍。 */
 export function aggregatedNodes(
@@ -583,7 +612,7 @@ export function aggregatedNodes(
     if (prefix && !id.startsWith(prefix)) continue;
     const rest = id.slice(prefix.length);
     if (!rest) continue;
-    const slash = rest.indexOf("/");
+    const slash = rest.indexOf('/');
     const local = slash < 0 ? rest : rest.slice(0, slash);
     const group = groups.get(local);
     if (group) {
@@ -598,7 +627,8 @@ export function aggregatedNodes(
   for (const [local, { list, ids }] of groups) {
     // 叶子节点直接复用原对象，引用不变，节点组件就不会白重渲。只有一个内部节点的子图也要归约 ——
     // 否则它的错误不知道是谁的
-    const merged = list.length === 1 && ids[0] === prefix + local ? list[0]! : reduceExecutions(list, ids);
+    const merged =
+      list.length === 1 && ids[0] === prefix + local ? list[0]! : reduceExecutions(list, ids);
     const prev = previous?.get(local);
     result.set(local, prev && sameAggregate(prev, merged) ? prev : merged);
   }
@@ -645,10 +675,10 @@ export function summarize(nodes: ReadonlyMap<string, NodeExecution>): {
   let cancelled = 0;
   let running = 0;
   for (const n of nodes.values()) {
-    if (n.state === "done" || n.state === "skipped") done += 1;
-    else if (n.state === "error") error += 1;
-    else if (n.state === "cancelled") cancelled += 1;
-    else if (n.state === "running") running += 1;
+    if (n.state === 'done' || n.state === 'skipped') done += 1;
+    else if (n.state === 'error') error += 1;
+    else if (n.state === 'cancelled') cancelled += 1;
+    else if (n.state === 'running') running += 1;
   }
   return { done, error, cancelled, running, total: nodes.size };
 }
@@ -717,7 +747,8 @@ export async function startRun(
   let targets = request.targets;
   if (!request.auto || full) {
     const pending = beforeExplicitRun?.(doc) ?? [];
-    if (!full && isolate.length === 0 && targets && pending.length > 0) targets = [...new Set([...targets, ...pending])];
+    if (!full && isolate.length === 0 && targets && pending.length > 0)
+      targets = [...new Set([...targets, ...pending])];
   }
   try {
     // 当前配方有 ①–③ 失配时不能运行（P3.7）：配方里多出来的名字 core 根本看不见（只交声明着的），
@@ -732,7 +763,7 @@ export async function startRun(
       targets,
       isolate: isolate.length > 0 ? isolate : undefined,
       force: request.force && request.force.length > 0 ? request.force : undefined,
-      mode: preview ? "preview" : "full",
+      mode: preview ? 'preview' : 'full',
       previewMaxPoints: request.previewMaxPoints,
       params,
       sceneId,
@@ -740,9 +771,17 @@ export async function startRun(
     if (ticket !== runTicket) return; // 已经有更晚的一次运行发起了，这次的回复作废
     // 调参记录：交给 core 的就是这份图与这组图参数（预览、单节点运行不记）
     const recipes = useRecipeStore.getState();
-    useRunHistoryStore.getState().begin(runId, doc, params, recipes.current, request, recipes.currentId);
+    useRunHistoryStore
+      .getState()
+      .begin(runId, doc, params, recipes.current, request, recipes.currentId);
     // 给了 isolate 时 core 的 targets 就是同一组（R1），这边也照这个记
-    store.beginRun(runId, isolate.length > 0 ? isolate : (request.targets ?? []), preview, isolate, request);
+    store.beginRun(
+      runId,
+      isolate.length > 0 ? isolate : (request.targets ?? []),
+      preview,
+      isolate,
+      request,
+    );
   } catch (e) {
     if (ticket !== runTicket) throw e;
     store.failRun(e instanceof Error ? e.message : String(e));
@@ -753,12 +792,13 @@ export async function startRun(
 export async function cancelCurrentRun(): Promise<void> {
   const { runId, runStatus, cancelling } = useExecutionStore.getState();
   // 已经在取消了：再按一次 Esc 不再发一遍
-  if (!runId || runStatus !== "running" || cancelling) return;
+  if (!runId || runStatus !== 'running' || cancelling) return;
   useExecutionStore.setState({ cancelling: true });
   try {
     await transport.cancelRun(runId);
   } catch (e) {
-    if (useExecutionStore.getState().runId === runId) useExecutionStore.setState({ cancelling: false });
+    if (useExecutionStore.getState().runId === runId)
+      useExecutionStore.setState({ cancelling: false });
     throw e;
   }
 }
@@ -767,17 +807,24 @@ export async function cancelCurrentRun(): Promise<void> {
  *  ADR-0027）。目标节点在跑的时候被删掉了就退回运行整张图并说一声。没有在跑的就是一次普通的全图运行。 */
 export async function restartRun(doc: GraphDoc, graphPath: string | null): Promise<void> {
   const { runStatus, request } = useExecutionStore.getState();
-  if (runStatus !== "running" || !request) return startRun(doc, graphPath, {});
-  const alive = (ids: string[] | undefined) => ids?.filter((id) => locateEventNode(doc, id) !== null);
+  if (runStatus !== 'running' || !request) return startRun(doc, graphPath, {});
+  const alive = (ids: string[] | undefined) =>
+    ids?.filter((id) => locateEventNode(doc, id) !== null);
   const targets = alive(request.targets);
   const isolate = alive(request.isolate);
   const aimed = (request.targets?.length ?? 0) + (request.isolate?.length ?? 0) > 0;
   const lost = aimed && (targets?.length ?? 0) + (isolate?.length ?? 0) === 0;
   if (lost) {
-    useUiStore.getState().showToast("原来要跑到的节点已经删掉了，改成运行整张图", "warn");
+    useUiStore.getState().showToast('原来要跑到的节点已经删掉了，改成运行整张图', 'warn');
     return startRun(doc, graphPath, {});
   }
-  return startRun(doc, graphPath, { ...request, targets, isolate, force: alive(request.force), auto: undefined });
+  return startRun(doc, graphPath, {
+    ...request,
+    targets,
+    isolate,
+    force: alive(request.force),
+    auto: undefined,
+  });
 }
 
 /** 工具栏上运行 / 取消两个按钮此刻的样子。人发起的运行在跑时「运行」变「↻ 重跑」；预览与自动补的那一次不变（拖参数时不闪）。 */
@@ -786,10 +833,10 @@ export function runControlsOf(s: {
   preview: boolean;
   cancelling: boolean;
   request: RunRequest | null;
-}): { run: "run" | "rerun"; cancel: "off" | "on" | "cancelling" } {
-  const running = s.runStatus === "running";
+}): { run: 'run' | 'rerun'; cancel: 'off' | 'on' | 'cancelling' } {
+  const running = s.runStatus === 'running';
   return {
-    run: running && !s.preview && !s.request?.auto ? "rerun" : "run",
-    cancel: !running ? "off" : s.cancelling ? "cancelling" : "on",
+    run: running && !s.preview && !s.request?.auto ? 'rerun' : 'run',
+    cancel: !running ? 'off' : s.cancelling ? 'cancelling' : 'on',
   };
 }

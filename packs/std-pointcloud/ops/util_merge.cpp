@@ -34,22 +34,28 @@ Status compute(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecCon
   PointCloud out;
   const std::size_t total = a.pointCount() + b.pointCount();
   out.xyz.reserve(total * 3);
-  if (intensity) out.intensity.reserve(total);
-  if (normals) out.normals.reserve(total * 3);
-  if (rgb) out.rgb.reserve(total * 3);
+  if (intensity)
+    out.intensity.reserve(total);
+  if (normals)
+    out.normals.reserve(total * 3);
+  if (rgb)
+    out.rgb.reserve(total * 3);
 
   for (const PointCloud* src : {&a, &b}) {
     out.xyz.insert(out.xyz.end(), src->xyz.begin(), src->xyz.end());
-    if (intensity) out.intensity.insert(out.intensity.end(), src->intensity.begin(), src->intensity.end());
-    if (normals) out.normals.insert(out.normals.end(), src->normals.begin(), src->normals.end());
-    if (rgb) out.rgb.insert(out.rgb.end(), src->rgb.begin(), src->rgb.end());
+    if (intensity)
+      out.intensity.insert(out.intensity.end(), src->intensity.begin(), src->intensity.end());
+    if (normals)
+      out.normals.insert(out.normals.end(), src->normals.begin(), src->normals.end());
+    if (rgb)
+      out.rgb.insert(out.rgb.end(), src->rgb.begin(), src->rgb.end());
   }
 
   outputs.set("cloud", Data::cloud(std::move(out)));
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerUtilMerge(Registry& r) {
   OperatorDesc op;
@@ -74,4 +80,4 @@ void registerUtilMerge(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

@@ -42,14 +42,18 @@ std::vector<Px> arc(P2 center, double r, double a0, double a1) {
 std::vector<Px> pxList(const std::vector<P2>& pts) {
   std::vector<Px> out;
   out.reserve(pts.size());
-  for (const P2& p : pts) out.push_back(Px{p.x, p.y});
+  for (const P2& p : pts)
+    out.push_back(Px{p.x, p.y});
   return out;
 }
 
 Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
   const cv::Mat gray = grayOf(inputs.get("image"));
   if (gray.empty()) {
-    return Status::Error(Phase::Execute, "bad_input", "需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行", {}, "image");
+    return Status::Error(
+        Phase::Execute, "bad_input",
+        "需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行", {},
+        "image");
   }
   const PathSpec spec = specOf(params);
   const BeadPath path = findBeadPath(gray, spec);
@@ -80,7 +84,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
                          {"score", numOrNull(c.score, 4)}});
   }
   info["candidates"] = std::move(cands);
-  outputs.set("path", pathBundle(polylineRecord(path.s, path.points, path.tangents), std::move(info)));
+  outputs.set("path",
+              pathBundle(polylineRecord(path.s, path.points, path.tangents), std::move(info)));
 
   // 叠画：喷嘴、搜索的扇区、检测区两端的弧、粗找到的胶点、胶路
   Overlay2D ov;
@@ -126,15 +131,15 @@ std::vector<Issue> validate(const ParamView& params, const std::set<std::string>
     const auto sector = params.vec2("sector");
     if (!(sector[1] > sector[0]) || sector[1] - sector[0] > 360.0 + 1e-6) {
       issues.push_back(Issue::error("bad_param",
-                                    "sector 要从小到大、跨度不超过 360°（现在是 [" + fmt(sector[0], 0) +
-                                        ", " + fmt(sector[1], 0) + "]）",
+                                    "sector 要从小到大、跨度不超过 360°（现在是 [" +
+                                        fmt(sector[0], 0) + ", " + fmt(sector[1], 0) + "]）",
                                     "sector"));
     }
   }
   return issues;
 }
 
-}  // namespace
+} // namespace
 
 void registerBeadPath(Registry& r) {
   OperatorDesc op;
@@ -162,35 +167,42 @@ void registerBeadPath(Registry& r) {
            "lyflow.overlay2d：喷嘴、扇区、检测区两端的弧、粗找到的胶点、胶路。", true},
   };
 
-  Param nozzle = vec2Param("nozzle", "Nozzle", 640.0, 512.0, "px", {"X", "Y"},
-                           "喷嘴出胶点，图像像素坐标。相机装在胶枪上，它在图里是固定的：在图像视图里点一下。");
-  Param zone = vec2Param("zone", "Zone", 100.0, 400.0, "px", {"Start", "End"},
-                         "检测区：从喷嘴沿胶路的弧长 s 的一段。start 离开喷嘴（默认 100 px），粗找从 start 开始。");
+  Param nozzle =
+      vec2Param("nozzle", "Nozzle", 640.0, 512.0, "px", {"X", "Y"},
+                "喷嘴出胶点，图像像素坐标。相机装在胶枪上，它在图里是固定的：在图像视图里点一下。");
+  Param zone = vec2Param(
+      "zone", "Zone", 100.0, 400.0, "px", {"Start", "End"},
+      "检测区：从喷嘴沿胶路的弧长 s 的一段。start 离开喷嘴（默认 100 px），粗找从 start 开始。");
   zone.min = 0.0;
-  Param sector = vec2Param("sector", "Sector", -180.0, 180.0, "deg", {"From", "To"},
-                           "没给 heading 时胶离开喷嘴的方向范围（度，图像坐标：0° 朝右、−90° 朝上）。"
-                           "默认整圈；知道胶大致朝哪边走时收窄它，扇形搜索更不容易被别的暗带带偏。");
+  Param sector =
+      vec2Param("sector", "Sector", -180.0, 180.0, "deg", {"From", "To"},
+                "没给 heading 时胶离开喷嘴的方向范围（度，图像坐标：0° 朝右、−90° 朝上）。"
+                "默认整圈；知道胶大致朝哪边走时收窄它，扇形搜索更不容易被别的暗带带偏。");
   Param source = enumParam(
       "headingSource", "Heading Source", "search",
       "search = 在 sector 里扇形搜索；param = 只在 heading ± headingTol 里找（G3 由机器人经顶层图参数逐帧给）。",
       {EnumOption{"search", "扇形搜索", ""}, EnumOption{"param", "用 heading 参数", ""}}, true);
-  Param heading = visibleWhen(floatParam("heading", "Heading", -90.0, "deg",
-                                         "胶的方向（度，图像坐标）。headingSource = param 时生效。", true),
-                              "headingSource", "param");
+  Param heading =
+      visibleWhen(floatParam("heading", "Heading", -90.0, "deg",
+                             "胶的方向（度，图像坐标）。headingSource = param 时生效。", true),
+                  "headingSource", "param");
   Param headingTol = visibleWhen(
       floatParam("headingTol", "Heading Tol", 15.0, "deg", "heading 两侧各放宽多少度。", true),
       "headingSource", "param");
   headingTol.min = 1.0;
-  Param widthMax = floatParam("widthMax", "Width Max", 90.0, "px",
-                              "期望的最大胶宽。黑顶帽的结构元直径 = 它 + 1，比它宽的暗带不会有响应。", true);
+  Param widthMax =
+      floatParam("widthMax", "Width Max", 90.0, "px",
+                 "期望的最大胶宽。黑顶帽的结构元直径 = 它 + 1，比它宽的暗带不会有响应。", true);
   widthMax.min = 4.0;
   widthMax.max = 400.0;
-  Param polarity = enumParam("polarity", "Polarity", "dark", "胶比背景暗（dark，黑顶帽）还是亮（bright，白顶帽）。",
-                             {EnumOption{"dark", "暗胶", ""}, EnumOption{"bright", "亮胶", ""}}, true);
-  Param maxGap = floatParam("maxGap", "Max Gap", 120.0, "px",
-                            "粗找时连续没找到胶的最长距离：超过它就不再接受新的胶点，后面的胶路按已找到的胶点外推"
-                            "（免得在长断口里滑到别的暗带上）。比它短的断口照样跨得过去。",
-                            true);
+  Param polarity = enumParam(
+      "polarity", "Polarity", "dark", "胶比背景暗（dark，黑顶帽）还是亮（bright，白顶帽）。",
+      {EnumOption{"dark", "暗胶", ""}, EnumOption{"bright", "亮胶", ""}}, true);
+  Param maxGap = floatParam(
+      "maxGap", "Max Gap", 120.0, "px",
+      "粗找时连续没找到胶的最长距离：超过它就不再接受新的胶点，后面的胶路按已找到的胶点外推"
+      "（免得在长断口里滑到别的暗带上）。比它短的断口照样跨得过去。",
+      true);
   maxGap.min = 0.0;
   Param minCoverage = floatParam("minCoverage", "Min Coverage", 0.3, "",
                                  "粗找找到胶的步数占比低于它就算没找到胶。", true);
@@ -199,11 +211,12 @@ void registerBeadPath(Registry& r) {
   Param contrastMin = floatParam("contrastMin", "Contrast Min", 16.0, "",
                                  "粗找时卡尺上一段响应的峰值至少这么高才算胶（灰度级）。", true);
   contrastMin.min = 1.0;
-  Param sharpMin = floatParam("sharpMin", "Sharp Min", 0.4, "",
-                              "D15：暗带边缘陡度的第 25 百分位至少这么高才算像胶。直胶实测 0.84–1.20、"
-                              "螺旋胶 0.64–0.80，零件上的压痕 ≤ 0。",
-                              true);
-  op.params = {nozzle, zone,    sector,      source,      heading,  headingTol,
+  Param sharpMin =
+      floatParam("sharpMin", "Sharp Min", 0.4, "",
+                 "D15：暗带边缘陡度的第 25 百分位至少这么高才算像胶。直胶实测 0.84–1.20、"
+                 "螺旋胶 0.64–0.80，零件上的压痕 ≤ 0。",
+                 true);
+  op.params = {nozzle,   zone,     sector, source,      heading,     headingTol,
                widthMax, polarity, maxGap, minCoverage, contrastMin, sharpMin};
   for (auto& p : op.params)
     if (p.name == "nozzle" || p.name == "zone" || p.name == "sector" || p.name == "heading")
@@ -214,4 +227,4 @@ void registerBeadPath(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

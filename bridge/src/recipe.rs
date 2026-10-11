@@ -68,7 +68,8 @@ pub fn js_number(x: f64) -> String {
 
 /// JS 对象里「数组下标」那样的键（0 .. 2^32-2 的规范十进制）排在其它键前面。
 fn index_key(k: &str) -> Option<u64> {
-    if k.is_empty() || (k.len() > 1 && k.starts_with('0')) || !k.bytes().all(|b| b.is_ascii_digit()) {
+    if k.is_empty() || (k.len() > 1 && k.starts_with('0')) || !k.bytes().all(|b| b.is_ascii_digit())
+    {
         return None;
     }
     k.parse::<u64>().ok().filter(|n| *n < 4_294_967_295)
@@ -100,8 +101,10 @@ fn write_js_json(v: &Value, out: &mut String) {
         }
         Value::Object(o) => {
             let mut keys: Vec<&String> = o.keys().collect();
-            let mut indexed: Vec<(u64, &String)> =
-                keys.iter().filter_map(|k| index_key(k).map(|n| (n, *k))).collect();
+            let mut indexed: Vec<(u64, &String)> = keys
+                .iter()
+                .filter_map(|k| index_key(k).map(|n| (n, *k)))
+                .collect();
             indexed.sort();
             keys.retain(|k| index_key(k).is_none());
             out.push('{');
@@ -127,7 +130,13 @@ fn js_string(v: &Value) -> String {
         Value::String(s) => s.clone(),
         Value::Array(a) => a
             .iter()
-            .map(|x| if x.is_null() { String::new() } else { js_string(x) })
+            .map(|x| {
+                if x.is_null() {
+                    String::new()
+                } else {
+                    js_string(x)
+                }
+            })
             .collect::<Vec<_>>()
             .join(","),
         Value::Object(_) => "[object Object]".to_string(),
@@ -310,8 +319,10 @@ pub struct RecipeFile {
 pub fn recipe_stem(file_name: &str) -> Option<&str> {
     let n = file_name.len();
     let ext = RECIPE_EXT.len();
-    (n > ext && file_name.is_char_boundary(n - ext) && file_name[n - ext..].eq_ignore_ascii_case(RECIPE_EXT))
-        .then(|| &file_name[..n - ext])
+    (n > ext
+        && file_name.is_char_boundary(n - ext)
+        && file_name[n - ext..].eq_ignore_ascii_case(RECIPE_EXT))
+    .then(|| &file_name[..n - ext])
 }
 
 /// 宽松地读一个配方（与编辑器的 parseRecipeText 同一套）：缺的字段补上并记一笔；真读不出来
@@ -349,8 +360,19 @@ pub fn parse_recipe_text(text: &str, name: &str, path: &Path) -> Result<RecipeFi
             spec_digest: g.get("specDigest")?.as_str()?.to_string(),
         })
     });
-    const KNOWN: &[&str] = &["schemaVersion", "name", "graph", "values", "note", "updatedAt"];
-    let extra: Vec<&str> = o.keys().map(String::as_str).filter(|k| !KNOWN.contains(k)).collect();
+    const KNOWN: &[&str] = &[
+        "schemaVersion",
+        "name",
+        "graph",
+        "values",
+        "note",
+        "updatedAt",
+    ];
+    let extra: Vec<&str> = o
+        .keys()
+        .map(String::as_str)
+        .filter(|k| !KNOWN.contains(k))
+        .collect();
     if !extra.is_empty() {
         notes.push(format!("不认识的字段 {}", extra.join("、")));
     }
@@ -360,15 +382,22 @@ pub fn parse_recipe_text(text: &str, name: &str, path: &Path) -> Result<RecipeFi
         values,
         note: o.get("note").and_then(Value::as_str).map(str::to_owned),
         graph,
-        updated_at: o.get("updatedAt").and_then(Value::as_str).map(str::to_owned),
+        updated_at: o
+            .get("updatedAt")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         notes,
     })
 }
 
 pub fn read_recipe_file(path: &Path) -> Result<RecipeFile, String> {
-    let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let name = recipe_stem(&file_name).unwrap_or(&file_name).to_string();
-    let text = std::fs::read_to_string(path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?;
+    let text =
+        std::fs::read_to_string(path).map_err(|e| format!("读取 {} 失败：{e}", path.display()))?;
     parse_recipe_text(&text, &name, path)
 }
 
@@ -376,7 +405,10 @@ pub fn read_recipe_file(path: &Path) -> Result<RecipeFile, String> {
 
 /// 图文件同目录的 `<图文件名去扩展名>.recipes/`：`.lyflow.json` 整个去掉，其它文件去最后一个扩展名。
 pub fn recipe_dir_of(graph: &Path) -> PathBuf {
-    let file = graph.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let file = graph
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     const GRAPH_EXT: &str = ".lyflow.json";
     let n = file.len();
     let stem = if n >= GRAPH_EXT.len()
@@ -408,7 +440,12 @@ pub fn parse_index(text: &str) -> RecipeIndex {
         order: v
             .get("order")
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
             .unwrap_or_default(),
     }
 }
@@ -445,10 +482,14 @@ pub fn list_recipe_dir(dir: &Path) -> RecipeDir {
         }
         let file = entry.file_name().to_string_lossy().into_owned();
         if file.eq_ignore_ascii_case(RECIPE_INDEX) {
-            index = std::fs::read_to_string(&path).map(|t| parse_index(&t)).unwrap_or_default();
+            index = std::fs::read_to_string(&path)
+                .map(|t| parse_index(&t))
+                .unwrap_or_default();
             continue;
         }
-        let Some(stem) = recipe_stem(&file) else { continue };
+        let Some(stem) = recipe_stem(&file) else {
+            continue;
+        };
         match read_recipe_file(&path) {
             Ok(mut r) => {
                 r.name = stem.to_string();
@@ -458,14 +499,17 @@ pub fn list_recipe_dir(dir: &Path) -> RecipeDir {
         }
     }
     let rank = |name: &str| index.order.iter().position(|n| n == name);
-    out.recipes.sort_by(|a, b| match (rank(&a.name), rank(&b.name)) {
-        (Some(x), Some(y)) => x.cmp(&y),
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => a.name.cmp(&b.name),
-    });
+    out.recipes
+        .sort_by(|a, b| match (rank(&a.name), rank(&b.name)) {
+            (Some(x), Some(y)) => x.cmp(&y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.name.cmp(&b.name),
+        });
     out.problems.sort();
-    out.default = index.default.filter(|d| out.recipes.iter().any(|r| &r.name == d));
+    out.default = index
+        .default
+        .filter(|d| out.recipes.iter().any(|r| &r.name == d));
     out.order = index.order;
     out
 }
@@ -546,8 +590,18 @@ impl Mismatch {
     /// stderr 上的一行：`[越界] cutMax：不能大于 5 → 夹到限位：5`。
     pub fn describe(&self) -> String {
         match &self.param {
-            Some(p) => format!("[{}] {p}：{} → {}", self.kind.label(), self.message, self.fix_label),
-            None => format!("[{}] {} → {}", self.kind.label(), self.message, self.fix_label),
+            Some(p) => format!(
+                "[{}] {p}：{} → {}",
+                self.kind.label(),
+                self.message,
+                self.fix_label
+            ),
+            None => format!(
+                "[{}] {} → {}",
+                self.kind.label(),
+                self.message,
+                self.fix_label
+            ),
         }
     }
 }
@@ -659,7 +713,11 @@ fn clamp_num(x: f64, min: Option<f64>, max: Option<f64>, integer: bool) -> f64 {
 /// 数（或每个分量）越过 min / max 的第一处；都在界内返回 None。文案与 core 的 checkRange 一致。
 fn range_problem(xs: &[f64], min: Option<f64>, max: Option<f64>) -> Option<String> {
     for (i, x) in xs.iter().enumerate() {
-        let at = if xs.len() > 1 { format!("第 {} 个分量", i + 1) } else { String::new() };
+        let at = if xs.len() > 1 {
+            format!("第 {} 个分量", i + 1)
+        } else {
+            String::new()
+        };
         if let Some(lo) = min {
             if *x < lo {
                 return Some(format!("{at}不能小于 {}", js_number(lo)));
@@ -701,7 +759,9 @@ fn range_check(message: String, clamped: Value) -> Option<Check> {
 }
 
 fn all_numbers(a: &[Value]) -> Option<Vec<f64>> {
-    a.iter().map(|x| if x.is_number() { num(x) } else { None }).collect()
+    a.iter()
+        .map(|x| if x.is_number() { num(x) } else { None })
+        .collect()
 }
 
 /// 同 core 的 checkCurveValue（编辑器 lib/curve.ts 的 curveProblem）：合法返回 None，否则一句原因。
@@ -719,7 +779,11 @@ fn curve_problem(value: &Value, min: Option<f64>, max: Option<f64>) -> Option<St
             return Some("interp 只能是 \"linear\" 或 \"smooth\"".to_string());
         }
     }
-    let Some(points) = o.get("points").and_then(Value::as_array).filter(|p| p.len() >= 2) else {
+    let Some(points) = o
+        .get("points")
+        .and_then(Value::as_array)
+        .filter(|p| p.len() >= 2)
+    else {
         return Some("points 至少要有两个控制点".to_string());
     };
     let mut prev = 0.0;
@@ -733,7 +797,10 @@ fn curve_problem(value: &Value, min: Option<f64>, max: Option<f64>) -> Option<St
             return Some(format!("{at}应当是 [x, y] 两个数"));
         };
         if !(0.0..=1.0).contains(&x) {
-            return Some(format!("{at}的 x 必须在 [0, 1] 内，实际是 {}", js_number(x)));
+            return Some(format!(
+                "{at}的 x 必须在 [0, 1] 内，实际是 {}",
+                js_number(x)
+            ));
         }
         // x 上一行已经夹在 [0, 1] 里（不会是 NaN），所以「不大于前一个」就是 <=
         if i > 0 && x <= prev {
@@ -763,7 +830,11 @@ fn hex_color(s: &str) -> Option<Vec<f64>> {
     }
     (0..hex.len())
         .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok().map(|b| f64::from(b) / 255.0))
+        .map(|i| {
+            u8::from_str_radix(&hex[i..i + 2], 16)
+                .ok()
+                .map(|b| f64::from(b) / 255.0)
+        })
         .collect()
 }
 
@@ -780,22 +851,36 @@ fn check_value(gp: &Value, v: &Value) -> Option<Check> {
                 return None;
             }
             let b = match v {
-                Value::Number(_) if num(v) == Some(0.0) || num(v) == Some(1.0) => Some(num(v) == Some(1.0)),
+                Value::Number(_) if num(v) == Some(0.0) || num(v) == Some(1.0) => {
+                    Some(num(v) == Some(1.0))
+                }
                 Value::String(s) => {
                     let t = js_trim(s).to_ascii_lowercase();
                     (t == "true" || t == "false").then(|| t == "true")
                 }
                 _ => None,
             };
-            type_check(format!("应当是 true / false，实际是 {}", short(v)), b.map(Value::Bool))
+            type_check(
+                format!("应当是 true / false，实际是 {}", short(v)),
+                b.map(Value::Bool),
+            )
         }
         "int" | "flags" => {
-            if let Some(x) = v.is_number().then(|| num(v)).flatten().filter(|x| x.fract() == 0.0) {
+            if let Some(x) = v
+                .is_number()
+                .then(|| num(v))
+                .flatten()
+                .filter(|x| x.fract() == 0.0)
+            {
                 return range_problem(&[x], min, max)
                     .and_then(|p| range_check(p, num_value(clamp_num(x, min, max, true))));
             }
             let n = if v.is_boolean() { None } else { as_number(v) };
-            let what = if ty == "flags" { "整数位掩码" } else { "整数" };
+            let what = if ty == "flags" {
+                "整数位掩码"
+            } else {
+                "整数"
+            };
             type_check(
                 format!("应当是{what}，实际是 {}", short(v)),
                 n.map(|n| num_value(clamp_num(round_half_away(n), min, max, true))),
@@ -821,24 +906,42 @@ fn check_value(gp: &Value, v: &Value) -> Option<Check> {
                 _ => 16,
             };
             let ok_len = |len: usize| len == n || (color && len == 4);
-            let clamp_all = |xs: &[f64]| Value::Array(xs.iter().map(|x| num_value(clamp_num(*x, min, max, false))).collect());
+            let clamp_all = |xs: &[f64]| {
+                Value::Array(
+                    xs.iter()
+                        .map(|x| num_value(clamp_num(*x, min, max, false)))
+                        .collect(),
+                )
+            };
             if let Some(a) = v.as_array() {
                 if let Some(xs) = all_numbers(a).filter(|xs| ok_len(xs.len())) {
-                    return range_problem(&xs, min, max).and_then(|p| range_check(p, clamp_all(&xs)));
+                    return range_problem(&xs, min, max)
+                        .and_then(|p| range_check(p, clamp_all(&xs)));
                 }
             }
             let keep = if color { 4 } else { n };
             let conv: Option<Vec<f64>> = if v.is_number() && ty != "transform" {
                 num(v).map(|x| vec![x; n])
-            } else if let Some(xs) = v.as_array().and_then(|a| all_numbers(a)).filter(|xs| xs.len() > keep) {
+            } else if let Some(xs) = v
+                .as_array()
+                .and_then(|a| all_numbers(a))
+                .filter(|xs| xs.len() > keep)
+            {
                 Some(xs[..keep].to_vec())
             } else if let (true, Some(s)) = (color, v.as_str()) {
                 hex_color(s)
             } else {
                 None
             };
-            let want = if color { "3 或 4 个数（RGB / RGBA）".to_string() } else { format!("{n} 个数") };
-            type_check(format!("应当是 {want}的数组，实际是 {}", short(v)), conv.map(|xs| clamp_all(&xs)))
+            let want = if color {
+                "3 或 4 个数（RGB / RGBA）".to_string()
+            } else {
+                format!("{n} 个数")
+            };
+            type_check(
+                format!("应当是 {want}的数组，实际是 {}", short(v)),
+                conv.map(|xs| clamp_all(&xs)),
+            )
         }
         "enum" => {
             let options: Vec<Option<&Value>> = gp
@@ -853,7 +956,11 @@ fn check_value(gp: &Value, v: &Value) -> Option<Check> {
                 }
                 let listed: Vec<String> = options
                     .iter()
-                    .map(|o| o.filter(|x| !x.is_null()).map(js_string).unwrap_or_default())
+                    .map(|o| {
+                        o.filter(|x| !x.is_null())
+                            .map(js_string)
+                            .unwrap_or_default()
+                    })
                     .collect();
                 return Some(Check {
                     kind: Kind::Range,
@@ -865,7 +972,8 @@ fn check_value(gp: &Value, v: &Value) -> Option<Check> {
             let s = (v.is_number() || v.is_boolean()).then(|| js_string(v));
             type_check(
                 format!("应当是选项里的字符串，实际是 {}", short(v)),
-                s.filter(|s| options.is_empty() || includes(s)).map(Value::String),
+                s.filter(|s| options.is_empty() || includes(s))
+                    .map(Value::String),
             )
         }
         "string" | "text" | "path" => {
@@ -873,7 +981,10 @@ fn check_value(gp: &Value, v: &Value) -> Option<Check> {
                 return None;
             }
             let s = (v.is_number() || v.is_boolean()).then(|| js_string(v));
-            type_check(format!("应当是字符串，实际是 {}", short(v)), s.map(Value::String))
+            type_check(
+                format!("应当是字符串，实际是 {}", short(v)),
+                s.map(Value::String),
+            )
         }
         "curve" => {
             if let Some(shape) = curve_problem(v, None, None) {
@@ -907,11 +1018,17 @@ fn check_value(gp: &Value, v: &Value) -> Option<Check> {
 
 /// 运行时交给 core 的 `{名字: 值}`：图里声明着的每个图参数取「配方的值，没有就 default」（K4）。
 /// 配方里多出来的名字不进来（那是失配 ①）。宿主拼 `params_json` 就是这一步。
-pub fn effective_params(params: &Map<String, Value>, values: &Map<String, Value>) -> Map<String, Value> {
+pub fn effective_params(
+    params: &Map<String, Value>,
+    values: &Map<String, Value>,
+) -> Map<String, Value> {
     params
         .iter()
         .map(|(name, gp)| {
-            let v = values.get(name).cloned().unwrap_or_else(|| gp.get("default").cloned().unwrap_or(Value::Null));
+            let v = values
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| gp.get("default").cloned().unwrap_or(Value::Null));
             (name.clone(), v)
         })
         .collect()
@@ -953,13 +1070,20 @@ pub fn blocking_text(recipe: &RecipeFile, report: &Report) -> String {
 /// `--recipe <文件>`（run / validate / plan / params / eval，以及同样经 load_graph 的 dump / sweep /
 /// perturb）：读配方、对着这张图查失配，①–③ 返回 Err（退出码 4，整段报告），④ 只在 stderr 提示；
 /// 然后把配方里的值写成对应图参数的 default。之后 load_graph 才应用 `--param`，所以 `--param` 优先。
-pub(crate) fn apply_recipe_option(doc: &mut GraphDoc, parsed: &Parsed, err: &Sink) -> Result<(), String> {
+pub(crate) fn apply_recipe_option(
+    doc: &mut GraphDoc,
+    parsed: &Parsed,
+    err: &Sink,
+) -> Result<(), String> {
     let specs = parsed.many("recipe");
     let Some(file) = specs.last() else {
         return Ok(());
     };
     if specs.len() > 1 {
-        return Err(format!("bad_recipe: --recipe 只能给一个（收到 {} 个）：配方之间不叠加（K4）", specs.len()));
+        return Err(format!(
+            "bad_recipe: --recipe 只能给一个（收到 {} 个）：配方之间不叠加（K4）",
+            specs.len()
+        ));
     }
     let recipe = load_checked(doc, Path::new(file))?;
     let changed = write_as_defaults(doc, &recipe.values);
@@ -970,7 +1094,11 @@ pub(crate) fn apply_recipe_option(doc: &mut GraphDoc, parsed: &Parsed, err: &Sin
             recipe.name,
             recipe.values.len(),
             changed.len(),
-            if changed.is_empty() { String::new() } else { format!("（{}）", changed.join("、")) }
+            if changed.is_empty() {
+                String::new()
+            } else {
+                format!("（{}）", changed.join("、"))
+            }
         ),
     );
     if let Some(spec) = report_of(doc, &recipe).spec() {
@@ -981,7 +1109,8 @@ pub(crate) fn apply_recipe_option(doc: &mut GraphDoc, parsed: &Parsed, err: &Sin
 
 /// 读配方并查 ①–③。读不出来是 `bad_recipe:`，有 ①–③ 是 `recipe_mismatch:`（两者都是退出码 4）。
 pub(crate) fn load_checked(doc: &GraphDoc, file: &Path) -> Result<RecipeFile, String> {
-    let recipe = read_recipe_file(file).map_err(|e| format!("bad_recipe: 读不出配方文件 {}：{e}", file.display()))?;
+    let recipe = read_recipe_file(file)
+        .map_err(|e| format!("bad_recipe: 读不出配方文件 {}：{e}", file.display()))?;
     let report = report_of(doc, &recipe);
     if report.blocking > 0 {
         return Err(blocking_text(&recipe, &report));
@@ -1024,7 +1153,10 @@ fn recipe_json(doc: &GraphDoc, r: &RecipeFile, default: Option<&str>, with_param
         obj.insert("notes".to_string(), json!(r.notes));
     }
     if with_params {
-        obj.insert("params".to_string(), Value::Object(effective_params(&doc.params, &r.values)));
+        obj.insert(
+            "params".to_string(),
+            Value::Object(effective_params(&doc.params, &r.values)),
+        );
     }
     row
 }
@@ -1034,7 +1166,10 @@ fn recipe_json(doc: &GraphDoc, r: &RecipeFile, default: Option<&str>, with_param
 /// 给了 --recipe 时每个配方另带 `params`（合成好的图参数取值，MCP 的 run_graph 拿它交给后端）。
 pub(crate) fn cmd_recipes(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let Some(path) = parsed.positional.first().cloned() else {
-        line(err, "用法：lyflow recipes <graph> [--recipe <文件>]... [--json]");
+        line(
+            err,
+            "用法：lyflow recipes <graph> [--recipe <文件>]... [--json]",
+        );
         return EXIT_USAGE;
     };
     let text = match std::fs::read_to_string(&path) {
@@ -1043,7 +1178,13 @@ pub(crate) fn cmd_recipes(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
     let doc: GraphDoc = match serde_json::from_str(&text) {
         Ok(d) => d,
-        Err(e) => return fail(err, &format!("{path} 不是合法的 GraphDoc: {e}"), EXIT_INVALID),
+        Err(e) => {
+            return fail(
+                err,
+                &format!("{path} 不是合法的 GraphDoc: {e}"),
+                EXIT_INVALID,
+            )
+        }
     };
     let dir = recipe_dir_of(&std::path::absolute(&path).unwrap_or_else(|_| PathBuf::from(&path)));
     let listed = list_recipe_dir(&dir);
@@ -1055,13 +1196,22 @@ pub(crate) fn cmd_recipes(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         for f in files {
             match read_recipe_file(Path::new(f)) {
                 Ok(r) => v.push(r),
-                Err(e) => return fail(err, &format!("bad_recipe: 读不出配方文件 {f}：{e}"), EXIT_USAGE),
+                Err(e) => {
+                    return fail(
+                        err,
+                        &format!("bad_recipe: 读不出配方文件 {f}：{e}"),
+                        EXIT_USAGE,
+                    )
+                }
             }
         }
         v
     };
     let default = listed.default.as_deref();
-    let rows: Vec<Value> = chosen.iter().map(|r| recipe_json(&doc, r, default, !files.is_empty())).collect();
+    let rows: Vec<Value> = chosen
+        .iter()
+        .map(|r| recipe_json(&doc, r, default, !files.is_empty()))
+        .collect();
     let summary = json!({
         "kind": "recipe_dir",
         "graph": path,
@@ -1081,16 +1231,33 @@ pub(crate) fn cmd_recipes(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         json_line(out, &summary);
     } else {
         for row in &rows {
-            let star = if row["default"] == true { " ★默认" } else { "" };
+            let star = if row["default"] == true {
+                " ★默认"
+            } else {
+                ""
+            };
             let blocking = row["blocking"].as_u64().unwrap_or(0);
-            let state = if blocking > 0 { format!("{blocking} 处失配，不能运行") } else { "可以运行".to_string() };
+            let state = if blocking > 0 {
+                format!("{blocking} 处失配，不能运行")
+            } else {
+                "可以运行".to_string()
+            };
             line(
                 out,
-                &format!("{}{star}  {} 个值  {state}", row["name"].as_str().unwrap_or_default(), row["values"]),
+                &format!(
+                    "{}{star}  {} 个值  {state}",
+                    row["name"].as_str().unwrap_or_default(),
+                    row["values"]
+                ),
             );
             for item in row["items"].as_array().into_iter().flatten() {
-                let label = Kind::from_code(item["kind"].as_str().unwrap_or_default()).map(Kind::label).unwrap_or("?");
-                let param = item["param"].as_str().map(|p| format!("{p}：")).unwrap_or_default();
+                let label = Kind::from_code(item["kind"].as_str().unwrap_or_default())
+                    .map(Kind::label)
+                    .unwrap_or("?");
+                let param = item["param"]
+                    .as_str()
+                    .map(|p| format!("{p}："))
+                    .unwrap_or_default();
                 line(
                     out,
                     &format!(
@@ -1110,8 +1277,16 @@ pub(crate) fn cmd_recipes(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         &format!(
             "{} 个配方（{}）{}",
             rows.len(),
-            if listed.exists { dir.display().to_string() } else { format!("{} 不存在", dir.display()) },
-            listed.default.as_ref().map(|d| format!("，默认「{d}」")).unwrap_or_default()
+            if listed.exists {
+                dir.display().to_string()
+            } else {
+                format!("{} 不存在", dir.display())
+            },
+            listed
+                .default
+                .as_ref()
+                .map(|d| format!("，默认「{d}」"))
+                .unwrap_or_default()
         ),
     );
     EXIT_OK
@@ -1175,8 +1350,12 @@ mod tests {
 
     #[test]
     fn js_json_puts_index_keys_first_like_json_stringify() {
-        let v: Value = serde_json::from_str(r#"{"b":1,"10":2,"a":[1.0,"é\u0001"],"2":null,"01":3}"#).unwrap();
-        assert_eq!(js_json(&v), r#"{"2":null,"10":2,"b":1,"a":[1,"é\u0001"],"01":3}"#);
+        let v: Value =
+            serde_json::from_str(r#"{"b":1,"10":2,"a":[1.0,"é\u0001"],"2":null,"01":3}"#).unwrap();
+        assert_eq!(
+            js_json(&v),
+            r#"{"2":null,"10":2,"b":1,"a":[1,"é\u0001"],"01":3}"#
+        );
     }
 
     /// 与编辑器同一个数：expected.json 里的规范形与摘要是编辑器单测断言过的。
@@ -1184,8 +1363,14 @@ mod tests {
     fn spec_digest_matches_the_shared_fixture_byte_for_byte() {
         let expected = read_json(&fixtures().join("expected.json"));
         let doc = fixture_doc();
-        assert_eq!(spec_canonical(&doc.params), expected["specCanonical"].as_str().unwrap());
-        assert_eq!(spec_digest(&doc.params), expected["specDigest"].as_str().unwrap());
+        assert_eq!(
+            spec_canonical(&doc.params),
+            expected["specCanonical"].as_str().unwrap()
+        );
+        assert_eq!(
+            spec_digest(&doc.params),
+            expected["specDigest"].as_str().unwrap()
+        );
         // 没有图参数也有确定的摘要（空数组的 SHA-256）
         assert_eq!(spec_canonical(&Map::new()), "[]");
     }
@@ -1193,15 +1378,23 @@ mod tests {
     #[test]
     fn spec_digest_ignores_cosmetics_and_orders_by_code_point() {
         let params = |v: Value| v.as_object().unwrap().clone();
-        let a = params(json!({ "x": {"type": "float", "min": 0, "max": 1, "default": 0.5, "binds": ["n.a"]},
-                              "y": {"type": "int", "default": 1, "binds": ["n.b"]} }));
-        let b = params(json!({ "y": {"type": "int", "default": 9, "binds": ["n.b"], "advanced": true},
+        let a = params(
+            json!({ "x": {"type": "float", "min": 0, "max": 1, "default": 0.5, "binds": ["n.a"]},
+                              "y": {"type": "int", "default": 1, "binds": ["n.b"]} }),
+        );
+        let b = params(
+            json!({ "y": {"type": "int", "default": 9, "binds": ["n.b"], "advanced": true},
                               "x": {"type": "float", "min": 0, "max": 1, "label": "别的", "unit": "mm",
                                     "softMin": 0.2, "softMax": 0.8, "step": 0.1, "group": "g", "doc": "…",
-                                    "default": 0.7, "binds": ["m.b"]} }));
+                                    "default": 0.7, "binds": ["m.b"]} }),
+        );
         assert_eq!(spec_digest(&a), spec_digest(&b));
-        let e1 = params(json!({ "m": {"type": "enum", "options": [{"value": "a", "label": "A"}, {"value": "b"}], "binds": []} }));
-        let e2 = params(json!({ "m": {"type": "enum", "options": [{"value": "b", "label": "乙"}, {"value": "a"}], "binds": []} }));
+        let e1 = params(
+            json!({ "m": {"type": "enum", "options": [{"value": "a", "label": "A"}, {"value": "b"}], "binds": []} }),
+        );
+        let e2 = params(
+            json!({ "m": {"type": "enum", "options": [{"value": "b", "label": "乙"}, {"value": "a"}], "binds": []} }),
+        );
         assert_eq!(spec_digest(&e1), spec_digest(&e2));
         // 老格式：只有名字算数
         assert_eq!(
@@ -1209,8 +1402,13 @@ mod tests {
             spec_digest(&params(json!({ "x": {"default": 2} })))
         );
         // BMP 外的字符按码点排在 U+FF5E 后面（UTF-16 码元序正好相反）；数用 ECMAScript 的格式
-        let c = spec_canonical(&params(json!({ "\u{1F600}": {"type": "float"}, "\u{FF5E}": {"type": "float", "min": 0.1, "max": 1e21} })));
-        assert!(c.starts_with("[[\"\u{FF5E}\",\"float\",0.1,1e+21,null]"), "{c}");
+        let c = spec_canonical(&params(
+            json!({ "\u{1F600}": {"type": "float"}, "\u{FF5E}": {"type": "float", "min": 0.1, "max": 1e21} }),
+        ));
+        assert!(
+            c.starts_with("[[\"\u{FF5E}\",\"float\",0.1,1e+21,null]"),
+            "{c}"
+        );
     }
 
     /// P4.1 的一致性断言：夹具目录里每个配方文件的报告与 expected.json 逐条相同 ——
@@ -1227,22 +1425,41 @@ mod tests {
             .map(|r| r.path.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
         files.sort();
-        let mut want_files: Vec<String> = expected["recipes"].as_object().unwrap().keys().cloned().collect();
+        let mut want_files: Vec<String> = expected["recipes"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect();
         want_files.sort();
         assert_eq!(files, want_files, "夹具目录与 expected.json 列的文件对不上");
         for r in &listed.recipes {
             let file = r.path.file_name().unwrap().to_string_lossy().into_owned();
             let want = &expected["recipes"][file.as_str()];
             let report = report_of(&doc, r);
-            assert_eq!(report.blocking as u64, want["blocking"].as_u64().unwrap(), "{file} 的 blocking");
+            assert_eq!(
+                report.blocking as u64,
+                want["blocking"].as_u64().unwrap(),
+                "{file} 的 blocking"
+            );
             let got: Vec<Value> = report.items.iter().map(Mismatch::to_json).collect();
             let want_items = want["items"].as_array().unwrap();
-            assert_eq!(got.len(), want_items.len(), "{file}：{}", Value::Array(got.clone()));
+            assert_eq!(
+                got.len(),
+                want_items.len(),
+                "{file}：{}",
+                Value::Array(got.clone())
+            );
             for (g, w) in got.iter().zip(want_items) {
                 for key in ["kind", "param", "message", "fixLabel"] {
                     assert_eq!(g[key], w[key], "{file} {} 的 {key}", w["param"]);
                 }
-                assert_eq!(js_json(&g["fix"]), js_json(&w["fix"]), "{file} {} 的 fix", w["param"]);
+                assert_eq!(
+                    js_json(&g["fix"]),
+                    js_json(&w["fix"]),
+                    "{file} {} 的 fix",
+                    w["param"]
+                );
             }
         }
         // index.json：默认是 ok，顺序照 order
@@ -1270,10 +1487,17 @@ mod tests {
                     Fix::Rebase => {}
                 }
             }
-            let graph = GraphRef { id: doc.id.clone(), spec_digest: spec_digest(&doc.params) };
+            let graph = GraphRef {
+                id: doc.id.clone(),
+                spec_digest: spec_digest(&doc.params),
+            };
             let after = recipe_report(&doc.id, &doc.params, &values, Some(&graph));
             assert!(after.items.is_empty(), "{}：{:?}", r.name, after.items);
-            let touched: Vec<&str> = before.items.iter().filter_map(|m| m.param.as_deref()).collect();
+            let touched: Vec<&str> = before
+                .items
+                .iter()
+                .filter_map(|m| m.param.as_deref())
+                .collect();
             for (k, v) in &r.values {
                 if !touched.contains(&k.as_str()) {
                     assert_eq!(values.get(k), Some(v), "{}：{k} 不在报告里却被改了", r.name);
@@ -1285,22 +1509,46 @@ mod tests {
     #[test]
     fn names_that_look_like_object_builtins_are_still_extra() {
         let doc = fixture_doc();
-        let values = json!({ "constructor": 1, "toString": 2, "__proto__": 3 }).as_object().unwrap().clone();
+        let values = json!({ "constructor": 1, "toString": 2, "__proto__": 3 })
+            .as_object()
+            .unwrap()
+            .clone();
         let r = recipe_report(&doc.id, &doc.params, &values, None);
-        let kinds: Vec<(&str, Option<&str>)> = r.items.iter().map(|m| (m.kind.code(), m.param.as_deref())).collect();
+        let kinds: Vec<(&str, Option<&str>)> = r
+            .items
+            .iter()
+            .map(|m| (m.kind.code(), m.param.as_deref()))
+            .collect();
         assert_eq!(
             kinds,
-            [("spec", None), ("extra", Some("__proto__")), ("extra", Some("constructor")), ("extra", Some("toString"))]
+            [
+                ("spec", None),
+                ("extra", Some("__proto__")),
+                ("extra", Some("constructor")),
+                ("extra", Some("toString"))
+            ]
         );
     }
 
     #[test]
     fn recipe_dir_follows_the_graph_file_name() {
         let base = Path::new("D:/work");
-        assert_eq!(recipe_dir_of(&base.join("车门缝隙.lyflow.json")), base.join("车门缝隙.recipes"));
-        assert_eq!(recipe_dir_of(&base.join("demo.LYFLOW.JSON")), base.join("demo.recipes"));
-        assert_eq!(recipe_dir_of(&base.join("demo.json")), base.join("demo.recipes"));
-        assert_eq!(recipe_dir_of(&base.join(".hidden")), base.join(".hidden.recipes"));
+        assert_eq!(
+            recipe_dir_of(&base.join("车门缝隙.lyflow.json")),
+            base.join("车门缝隙.recipes")
+        );
+        assert_eq!(
+            recipe_dir_of(&base.join("demo.LYFLOW.JSON")),
+            base.join("demo.recipes")
+        );
+        assert_eq!(
+            recipe_dir_of(&base.join("demo.json")),
+            base.join("demo.recipes")
+        );
+        assert_eq!(
+            recipe_dir_of(&base.join(".hidden")),
+            base.join(".hidden.recipes")
+        );
         assert_eq!(recipe_stem("A.lyflow-recipe.json"), Some("A"));
         assert_eq!(recipe_stem("车型A.LYFLOW-RECIPE.JSON"), Some("车型A"));
         assert_eq!(recipe_stem(".lyflow-recipe.json"), None);
@@ -1314,15 +1562,22 @@ mod tests {
         assert_eq!(r.name, "x");
         assert!(r.graph.is_none());
         assert_eq!(r.notes.len(), 3, "{:?}", r.notes);
-        assert!(parse_recipe_text("[]", "x", p).unwrap_err().contains("对象"));
+        assert!(parse_recipe_text("[]", "x", p)
+            .unwrap_err()
+            .contains("对象"));
         assert!(parse_recipe_text("{", "x", p).unwrap_err().contains("JSON"));
-        assert!(parse_recipe_text(r#"{"schemaVersion": 2}"#, "x", p).unwrap_err().contains("新"));
+        assert!(parse_recipe_text(r#"{"schemaVersion": 2}"#, "x", p)
+            .unwrap_err()
+            .contains("新"));
     }
 
     #[test]
     fn effective_params_are_default_under_the_recipe() {
         let doc = fixture_doc();
-        let values = json!({ "cutMax": 2.5, "voxelSize": 1 }).as_object().unwrap().clone();
+        let values = json!({ "cutMax": 2.5, "voxelSize": 1 })
+            .as_object()
+            .unwrap()
+            .clone();
         let p = effective_params(&doc.params, &values);
         assert_eq!(p.len(), doc.params.len());
         assert_eq!(p["cutMax"], json!(2.5));

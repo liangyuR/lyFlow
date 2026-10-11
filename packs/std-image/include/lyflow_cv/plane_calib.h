@@ -24,7 +24,8 @@ struct PlaneCalib {
   /// 像素 (x, y) → 工作平面 (X, Y)。齐次分量接近 0（点在地平线上）或结果非有限时返回 false。
   bool map(double x, double y, double* X, double* Y) const {
     const double w = H[6] * x + H[7] * y + H[8];
-    if (!std::isfinite(w) || std::fabs(w) < 1e-12) return false;
+    if (!std::isfinite(w) || std::fabs(w) < 1e-12)
+      return false;
     *X = (H[0] * x + H[1] * y + H[2]) / w;
     *Y = (H[3] * x + H[4] * y + H[5]) / w;
     return std::isfinite(*X) && std::isfinite(*Y);
@@ -44,24 +45,30 @@ struct PlaneCalib {
 /// 不合格时返回 false，why 里是给人看的原因。
 inline bool parsePlaneCalib(const nlohmann::json& data, PlaneCalib* out, std::string* why) {
   auto fail = [&](const std::string& m) {
-    if (why) *why = m;
+    if (why)
+      *why = m;
     return false;
   };
-  if (!data.is_object()) return fail("image.PlaneCalib 的 data 不是对象");
+  if (!data.is_object())
+    return fail("image.PlaneCalib 的 data 不是对象");
   const auto h = data.find("H");
-  if (h == data.end() || !h->is_array() || h->size() != 9) return fail("H 要是 9 个数（行主序的 3×3）");
+  if (h == data.end() || !h->is_array() || h->size() != 9)
+    return fail("H 要是 9 个数（行主序的 3×3）");
   PlaneCalib c;
   for (std::size_t i = 0; i < 9; ++i) {
     const auto& v = (*h)[i];
-    if (!v.is_number() || !std::isfinite(v.get<double>())) return fail("H 里有不是有限数的元素");
+    if (!v.is_number() || !std::isfinite(v.get<double>()))
+      return fail("H 里有不是有限数的元素");
     c.H[i] = v.get<double>();
   }
   const auto& m = c.H;
   const double det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) +
                      m[2] * (m[3] * m[7] - m[4] * m[6]);
-  if (!std::isfinite(det) || std::fabs(det) < 1e-18) return fail("H 是奇异的（行列式为 0）");
+  if (!std::isfinite(det) || std::fabs(det) < 1e-18)
+    return fail("H 是奇异的（行列式为 0）");
   if (const auto u = data.find("unit"); u != data.end()) {
-    if (!u->is_string() || u->get<std::string>().empty()) return fail("unit 要是非空字符串");
+    if (!u->is_string() || u->get<std::string>().empty())
+      return fail("unit 要是非空字符串");
     c.unit = u->get<std::string>();
   }
   *out = c;
@@ -72,4 +79,4 @@ inline nlohmann::json planeCalibJson(const PlaneCalib& c) {
   return nlohmann::json{{"H", c.H}, {"unit", c.unit}};
 }
 
-}  // namespace lyflow::std_image
+} // namespace lyflow::std_image

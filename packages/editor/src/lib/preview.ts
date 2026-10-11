@@ -3,22 +3,22 @@
 // 2026-10-04 起自动运行管所有改参数的方式：敲回车、下拉框、勾选框、↺、粘贴值、恢复、撤销……提交了一步就补
 // （autoRunOnCommit，攒 AUTO_RUN_DEBOUNCE_MS 再发，只补跑过的节点）。
 
-import { autoRunTargetsReady, paramEditTargets } from "./autoRun";
-import { useCompareStore } from "../store/compare";
-import { setBeforeExplicitRun, startRun, useExecutionStore } from "../store/execution";
-import { useGraphStore, type CommittedChange } from "../store/graph";
-import { useManifestStore } from "../store/manifest";
-import { useRecipeStore } from "../store/recipe";
-import { useUiStore } from "../store/ui";
-import { transport } from "../transport";
-import { effectiveGraphValues, splitBind } from "./graphParams";
-import { closureOf, previewTargets } from "./nodeRun";
-import { augmentOperators, fullId, locateEventNode, type SubPath } from "./subgraph";
-import type { GraphDoc } from "../types/graph";
+import { autoRunTargetsReady, paramEditTargets } from './autoRun';
+import { useCompareStore } from '../store/compare';
+import { setBeforeExplicitRun, startRun, useExecutionStore } from '../store/execution';
+import { useGraphStore, type CommittedChange } from '../store/graph';
+import { useManifestStore } from '../store/manifest';
+import { useRecipeStore } from '../store/recipe';
+import { useUiStore } from '../store/ui';
+import { transport } from '../transport';
+import { effectiveGraphValues, splitBind } from './graphParams';
+import { closureOf, previewTargets } from './nodeRun';
+import { augmentOperators, fullId, locateEventNode, type SubPath } from './subgraph';
+import type { GraphDoc } from '../types/graph';
 
 /** 拖的是顶层图参数（图参数那一行、配方矩阵里正在用的那一格）时交给预览的「节点 id」：跑它绑着的那几个顶层节点。
  *  以前这些控件没有节点 id，拖着不预览、松手也不补运行 —— 偏偏 gapOffset、纳入配方的阈值都在这里调。 */
-const GRAPH_PARAM = "\u0001gp:";
+const GRAPH_PARAM = '\u0001gp:';
 
 export function graphParamPreviewId(name: string): string {
   return GRAPH_PARAM + name;
@@ -37,8 +37,10 @@ export function previewTargetsOf(
   const bound = binds.map((b) => splitBind(b)?.node).filter((id): id is string => !!id);
   const out = new Set(bound.flatMap((id) => previewTargets(doc, [], id, watched)));
   // 看着的在子图里（进了子图拖上面的图参数）：previewTargets 只认同层与外层的，按包着它的顶层子图节点在不在下游算
-  const down = closureOf(doc, bound, "down");
-  for (const w of watched) if (w && w.path.length > 0 && down.includes(w.path[0]!.nodeId)) out.add(fullId(w.path, w.nodeId));
+  const down = closureOf(doc, bound, 'down');
+  for (const w of watched)
+    if (w && w.path.length > 0 && down.includes(w.path[0]!.nodeId))
+      out.add(fullId(w.path, w.nodeId));
   return [...out];
 }
 
@@ -61,7 +63,10 @@ function watchedNodes(): ({ path: SubPath; nodeId: string } | null)[] {
   const compare = useCompareStore.getState();
   const selected = ui.selectedNodes.size === 1 ? [...ui.selectedNodes][0]! : null;
   const active = ui.pinnedNode ?? selected;
-  return [active ? { path: ui.path, nodeId: active } : null, compare.on && !compare.snapshot ? compare.b : null];
+  return [
+    active ? { path: ui.path, nodeId: active } : null,
+    compare.on && !compare.snapshot ? compare.b : null,
+  ];
 }
 
 // -- 提交了一步就补的自动运行：改过的节点（完整 id）与图参数先攒着，停手 AUTO_RUN_DEBOUNCE_MS 再一起发 ----------
@@ -91,7 +96,8 @@ function pendingTargets(doc: GraphDoc, extra: string | null): string[] {
     if (at) for (const t of previewTargetsOf(doc, at.path, at.localId, watched)) out.add(t);
   }
   for (const name of autoParams) {
-    if (doc.params?.[name]) for (const t of previewTargetsOf(doc, [], graphParamPreviewId(name), watched)) out.add(t);
+    if (doc.params?.[name])
+      for (const t of previewTargetsOf(doc, [], graphParamPreviewId(name), watched)) out.add(t);
   }
   return [...out];
 }
@@ -115,20 +121,34 @@ function fireFormal(extra: string | null): void {
  *  拖动松手那一下 commit 时还在预览态：这里照样攒（共用的子图定义里改的，每个实例都在里面），紧接着的 endPreview 一起发、撤掉计时；
  *  只补跑过的节点 —— 从空白开始拼、新接的分支还没跑过时不替人开第一次（与拖框、切配方同一条）。 */
 export function autoRunOnCommit(change: CommittedChange): void {
-  if (transport.kind === "static") return;
+  if (transport.kind === 'static') return;
   const ui = useUiStore.getState();
   if (!ui.autoRun) return;
   const exec = useExecutionStore.getState();
-  if (exec.runStatus === "idle") return;
+  if (exec.runStatus === 'idle') return;
   const { before, after } = change;
-  const ops = augmentOperators(useManifestStore.getState().operatorsById, { ...before.doc.subgraphs, ...after.doc.subgraphs });
+  const ops = augmentOperators(useManifestStore.getState().operatorsById, {
+    ...before.doc.subgraphs,
+    ...after.doc.subgraphs,
+  });
   // 图参数的取值叠着当前配方：前后各按那时的配方集合算。按 id 认当前配方 —— 改名、撤销改名时前后的名字不一样
   const currentId = useRecipeStore.getState().currentId;
-  const values = (doc: GraphDoc, recipes: CommittedChange["before"]["recipes"]) =>
-    effectiveGraphValues(doc, (currentId === null ? undefined : recipes.recipes.find((r) => r.id === currentId))?.values ?? {});
-  const edits = paramEditTargets(before.doc, after.doc, values(before.doc, before.recipes), values(after.doc, after.recipes), ops);
+  const values = (doc: GraphDoc, recipes: CommittedChange['before']['recipes']) =>
+    effectiveGraphValues(
+      doc,
+      (currentId === null ? undefined : recipes.recipes.find((r) => r.id === currentId))?.values ??
+        {},
+    );
+  const edits = paramEditTargets(
+    before.doc,
+    after.doc,
+    values(before.doc, before.recipes),
+    values(after.doc, after.recipes),
+    ops,
+  );
   // 正在跑的那一次里排着的节点开跑时先回到 idle（与 RoiLayer 拖框松手同一条）：跑着的时候不按状态筛
-  const ready = exec.runStatus === "running" ? edits : autoRunTargetsReady(after.doc, edits, exec.nodes);
+  const ready =
+    exec.runStatus === 'running' ? edits : autoRunTargetsReady(after.doc, edits, exec.nodes);
   if (ready.nodes.length === 0 && ready.graphParams.length === 0) return;
   for (const id of ready.nodes) autoNodes.add(id);
   for (const name of ready.graphParams) autoParams.add(name);
@@ -148,7 +168,10 @@ export function skipAutoRunFor(fullNodeId: string): void {
 // 人点的运行（与切配方的整图运行）读的就是现在的图：整图的已经包含攒着的那几处，撤掉；带 targets 的把它们并进来
 // （不然「运行到这里」跑的是别处，改的那几处就没人跑了）
 setBeforeExplicitRun((doc) => {
-  const pending = autoTimer !== null || autoNodes.size > 0 || autoParams.size > 0 ? pendingTargets(doc, null) : [];
+  const pending =
+    autoTimer !== null || autoNodes.size > 0 || autoParams.size > 0
+      ? pendingTargets(doc, null)
+      : [];
   dropAutoRun();
   return pending;
 });
@@ -179,7 +202,7 @@ function fire(nodeId: string, preview: boolean): void {
 
 /** 拖完一下（2D 框）松手：开着自动运行就补一次正式运行，与拖滑块松手一样。拖框时不预览：底图是模板，每帧重跑没有可看的。 */
 export function runAfterDrag(nodeId: string): void {
-  if (transport.kind === "static" || !useUiStore.getState().autoRun) return;
+  if (transport.kind === 'static' || !useUiStore.getState().autoRun) return;
   cancelPending();
   // 松手那一下的 commit 刚把这个框攒进了自动运行：合成这一次发，不跑两遍
   fireFormal(nodeId);
@@ -194,14 +217,14 @@ function nothingToPreview(nodeId: string): boolean {
 
 /** 参数开始拖动。进入预览态，节点上的状态条会标出来。 */
 export function beginPreview(nodeId: string): void {
-  if (transport.kind === "static" || nothingToPreview(nodeId)) return;
+  if (transport.kind === 'static' || nothingToPreview(nodeId)) return;
   lastNode = nodeId;
   useUiStore.getState().setPreviewing(true);
 }
 
 /** 值变了：debounce 一次 preview run，目标是这个节点（和正看着的下游节点）。 */
 export function schedulePreview(nodeId: string): void {
-  if (transport.kind === "static") return;
+  if (transport.kind === 'static') return;
   if (!useUiStore.getState().previewing) return;
   lastNode = nodeId;
   cancelPending();
@@ -213,7 +236,7 @@ export function schedulePreview(nodeId: string): void {
 
 /** 松手。开了自动运行就补一次正式 run —— 预览结果是抽稀过的，不能当结论。 */
 export function endPreview(nodeId?: string): void {
-  if (transport.kind === "static") return;
+  if (transport.kind === 'static') return;
   const ui = useUiStore.getState();
   if (!ui.previewing) return;
   cancelPending();

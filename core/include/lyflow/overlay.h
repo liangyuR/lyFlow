@@ -27,7 +27,7 @@ using Px = std::array<double, 2>;
 /// 非有限的坐标（NaN / Inf）进不了 JSON：点集里的那几个点被丢掉，几何本身不成立的那一项整个不加
 /// （点集为空、折线不到两个点、圆心或半径非有限、半径为负）—— 叠画是给人看的，缺一笔好过整份坏掉。
 class Overlay2D {
- public:
+public:
   /// 一组离散的点（画成圆点还是十字由前端按 role 定）。
   Overlay2D& points(const std::string& role, const std::vector<Px>& pts,
                     const std::string& label = {});
@@ -57,8 +57,8 @@ class Overlay2D {
   /// 直接写进端口：`outputs.set("overlay", overlay.data())`。
   Data data() const;
 
- private:
+private:
   nlohmann::json items_ = nlohmann::json::array();
 };
 
-}  // namespace lyflow
+} // namespace lyflow

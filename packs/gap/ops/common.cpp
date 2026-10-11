@@ -65,7 +65,8 @@ void removeNonFinite(GapCloud* cloud) {
   finite.sensor_orientation_ = cloud->sensor_orientation_;
   finite.points.reserve(cloud->size());
   for (const auto& point : *cloud) {
-    if (pcl::isFinite(point)) finite.points.push_back(point);
+    if (pcl::isFinite(point))
+      finite.points.push_back(point);
   }
   finite.width = static_cast<std::uint32_t>(finite.points.size());
   finite.height = 1;
@@ -91,14 +92,16 @@ lyflow::Box2D boxFromMm(double xMin, double yMin, double xMax, double yMax) {
 std::vector<double> transformToJson(const Eigen::Matrix3f& m) {
   std::vector<double> out(9);
   for (int r = 0; r < 3; ++r) {
-    for (int c = 0; c < 3; ++c) out[static_cast<std::size_t>(r * 3 + c)] = m(r, c);
+    for (int c = 0; c < 3; ++c)
+      out[static_cast<std::size_t>(r * 3 + c)] = m(r, c);
   }
   return out;
 }
 
 Eigen::Matrix3f transformFromJson(const nlohmann::json& j) {
   Eigen::Matrix3f m = Eigen::Matrix3f::Identity();
-  if (!j.is_array() || j.size() != 9) return m;
+  if (!j.is_array() || j.size() != 9)
+    return m;
   for (int r = 0; r < 3; ++r) {
     for (int c = 0; c < 3; ++c) {
       m(r, c) = j[static_cast<std::size_t>(r * 3 + c)].get<float>();
@@ -108,11 +111,13 @@ Eigen::Matrix3f transformFromJson(const nlohmann::json& j) {
 }
 
 std::string fileStamp(const std::filesystem::path& p) {
-  if (p.empty()) return {};
+  if (p.empty())
+    return {};
   std::error_code ec;
   const auto size = std::filesystem::file_size(p, ec);
   const auto time = std::filesystem::last_write_time(p, ec);
-  if (ec) return {};
+  if (ec)
+    return {};
   return std::to_string(size) + ":" + std::to_string(time.time_since_epoch().count());
 }
 
@@ -125,7 +130,8 @@ const ::gap::ml::OnnxRoiPredictor* predictorFor(const std::filesystem::path& mod
   const std::string key = model.string() + "|" + fileStamp(model);
   std::lock_guard<std::mutex> lock(mu);
   auto it = cache.find(key);
-  if (it != cache.end()) return it->second.get();
+  if (it != cache.end())
+    return it->second.get();
   try {
     auto made = std::make_shared<::gap::ml::OnnxRoiPredictor>(model);
     return cache.emplace(key, std::move(made)).first->second.get();
@@ -136,7 +142,8 @@ const ::gap::ml::OnnxRoiPredictor* predictorFor(const std::filesystem::path& mod
 }
 
 bool profileRowOf(const lyflow::PointCloud& cloud, ::gap::ml::ProfileRow* out) {
-  if (cloud.pointCount() != ::gap::ml::kProfileSlots) return false;
+  if (cloud.pointCount() != ::gap::ml::kProfileSlots)
+    return false;
   *out = ::gap::ml::profileRowsFromSensorXzCloud(toPcl(cloud));
   return true;
 }
@@ -151,4 +158,4 @@ void setMeasurement(Outputs& outputs, const char* port, double valueMm, bool ok,
   outputs.set(port, Data::measurement(std::move(m)));
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

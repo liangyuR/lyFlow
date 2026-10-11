@@ -2,7 +2,7 @@
 // 「现在要不要动」的判定，以及画布差分与节点/连线组件之间传话的两条小通道。
 // 别处不散写时长 —— 调手感、换库、关动效都只改这里和 styles.motion.css。
 
-import { createContext, useContext, useSyncExternalStore } from "react";
+import { createContext, useContext, useSyncExternalStore } from 'react';
 
 /** 三档时长（毫秒）。CSS 那边的 `--lyflow-motion-*` 必须与它一致（styles.motion.css）。 */
 export const MOTION_MS = { fast: 120, base: 200, slow: 320 } as const;
@@ -34,7 +34,7 @@ export const HEAD_SHAKE = {
 };
 export const HEAD_SHAKE_MS = 300;
 /** 删除残影：淡出 + 轻微缩小。残影不是 React Flow 节点，缩放不碍量测（A6）。 */
-export const GHOST_EXIT = { opacity: [1, 0], transform: ["scale(1)", "scale(0.96)"] };
+export const GHOST_EXIT = { opacity: [1, 0], transform: ['scale(1)', 'scale(0.96)'] };
 
 /** 一次删掉超过这么多节点就不出残影（N3）：大批删除时残影只是噪音。 */
 export const GHOST_MAX = 30;
@@ -45,10 +45,10 @@ export const MOTION_NODE_LIMIT = 80;
 
 // ------------------------------------------------------------ 启用判定（A4）
 
-const REDUCE_QUERY = "(prefers-reduced-motion: reduce)";
+const REDUCE_QUERY = '(prefers-reduced-motion: reduce)';
 
 function reduceMedia(): MediaQueryList | null {
-  return typeof window !== "undefined" && typeof window.matchMedia === "function"
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
     ? window.matchMedia(REDUCE_QUERY)
     : null;
 }
@@ -56,8 +56,8 @@ function reduceMedia(): MediaQueryList | null {
 function subscribeReduce(onChange: () => void): () => void {
   const mq = reduceMedia();
   if (!mq) return () => {};
-  mq.addEventListener("change", onChange);
-  return () => mq.removeEventListener("change", onChange);
+  mq.addEventListener('change', onChange);
+  return () => mq.removeEventListener('change', onChange);
 }
 
 /** 系统是不是要求减少动效。CDP 的 Emulation.setEmulatedMedia 也走这条（会触发 change）。 */
@@ -91,15 +91,15 @@ const entering = new Map<string, number>();
 /** 标记之后多久内挂载才算进场。比 base 宽一点，给一次较重的首帧渲染留余量。 */
 const ENTER_WINDOW_MS = MOTION_MS.base + 250;
 
-const enterKey = (kind: "node" | "edge", id: string) => `${kind}:${id}`;
+const enterKey = (kind: 'node' | 'edge', id: string) => `${kind}:${id}`;
 
-export function markEntering(kind: "node" | "edge", ids: readonly string[]): void {
+export function markEntering(kind: 'node' | 'edge', ids: readonly string[]): void {
   const now = performance.now();
   for (const [key, until] of entering) if (until <= now) entering.delete(key);
   for (const id of ids) entering.set(enterKey(kind, id), now + ENTER_WINDOW_MS);
 }
 
-export function isEntering(kind: "node" | "edge", id: string): boolean {
+export function isEntering(kind: 'node' | 'edge', id: string): boolean {
   const until = entering.get(enterKey(kind, id));
   return until !== undefined && until > performance.now();
 }

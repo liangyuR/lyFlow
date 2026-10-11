@@ -68,9 +68,11 @@ cv::Rect inflate(cv::Rect r, int pad) {
 
 /// 一组点的主方向（PCA），朝向与 fallback 同侧。不到 3 个点返回 fallback。
 P2 principalDirection(const std::vector<P2>& pts, P2 fallback) {
-  if (pts.size() < 3) return fallback;
+  if (pts.size() < 3)
+    return fallback;
   P2 m(0, 0);
-  for (const P2& p : pts) m += p;
+  for (const P2& p : pts)
+    m += p;
   m *= 1.0 / static_cast<double>(pts.size());
   double sxx = 0, sxy = 0, syy = 0;
   for (const P2& p : pts) {
@@ -86,7 +88,8 @@ P2 principalDirection(const std::vector<P2>& pts, P2 fallback) {
   const double lambda = 0.5 * tr + disc;
   P2 v = std::fabs(sxy) > 1e-12 ? P2(lambda - syy, sxy) : (sxx >= syy ? P2(1, 0) : P2(0, 1));
   v = unit(v);
-  if (dot(v, fallback) < 0) v = -v;
+  if (dot(v, fallback) < 0)
+    v = -v;
   return v;
 }
 
@@ -109,7 +112,7 @@ PathCandidate coarseTrack(const Field& R, const Field& g, const PathSpec& spec, 
   double s = spec.zoneStart;
   double lastFound = -std::numeric_limits<double>::infinity();
   bool stopped = false;
-  int stepsAtLastFound = 0;  // 最近一次找到胶时已经走了几步（断口之前那一段的覆盖率）
+  int stepsAtLastFound = 0; // 最近一次找到胶时已经走了几步（断口之前那一段的覆盖率）
   std::vector<double> sharp, widths, peaks;
   while (s <= spec.zoneEnd + 1e-6) {
     cand.steps += 1;
@@ -133,8 +136,10 @@ PathCandidate coarseTrack(const Field& R, const Field& g, const PathSpec& spec, 
           const bool steady = percentile(widths, 75) - percentile(widths, 25) < 0.3 * wMed;
           rs.erase(std::remove_if(rs.begin(), rs.end(),
                                   [&](const Run& x) {
-                                    if (!afterGap) return std::fabs(x.mid()) > std::max(0.5 * wMed, 8.0);
-                                    if (x.peak < 0.5 * pMed || (steady && x.width() < 0.5 * wMed)) return true;
+                                    if (!afterGap)
+                                      return std::fabs(x.mid()) > std::max(0.5 * wMed, 8.0);
+                                    if (x.peak < 0.5 * pMed || (steady && x.width() < 0.5 * wMed))
+                                      return true;
                                     const double sh = runSharpness(g, q, nq, x);
                                     return std::isfinite(sh) && sh < spec.sharpMin;
                                   }),
@@ -164,8 +169,10 @@ PathCandidate coarseTrack(const Field& R, const Field& g, const PathSpec& spec, 
       // 距离不到 0.75·s（沿着检测区的圆弧横着走），跟的就不是胶了 —— 零件上一条纹理边能把粗找一路带偏。
       // 演示数据满胶段的胶路上处处是 距离 / s ≥ 0.98
       const auto plausible = [&](P2 q) {
-        if (length(q - spec.nozzle) < 0.75 * s) return false;
-        if (fanHi - fanLo >= 360.0 - 1e-6) return true;
+        if (length(q - spec.nozzle) < 0.75 * s)
+          return false;
+        if (fanHi - fanLo >= 360.0 - 1e-6)
+          return true;
         const double b = degOf(q - spec.nozzle);
         const double mid = 0.5 * (fanLo + fanHi);
         return angleDiffDeg(b, mid) <= 0.5 * (fanHi - fanLo) + 20.0;
@@ -176,24 +183,29 @@ PathCandidate coarseTrack(const Field& R, const Field& g, const PathSpec& spec, 
         widths.push_back(r->width());
         peaks.push_back(r->peak);
         const double sh = runSharpness(g, at, nAt, *r);
-        if (std::isfinite(sh)) sharp.push_back(sh);
+        if (std::isfinite(sh))
+          sharp.push_back(sh);
         lastFound = s;
         stepsAtLastFound = cand.steps;
         found = true;
         // 在那条射线上接上的：方向也回到它，断口前的方向不作数了
-        if (onFanRay) d = dirOfDeg(headingDeg);
+        if (onFanRay)
+          d = dirOfDeg(headingDeg);
       }
     }
     std::vector<P2> recent;
     for (const auto& [ss, q] : cand.coarse) {
-      if (ss >= s - spec.dirWindow) recent.push_back(q);
+      if (ss >= s - spec.dirWindow)
+        recent.push_back(q);
     }
-    if (recent.size() >= 3) d = principalDirection(recent, d);
+    if (recent.size() >= 3)
+      d = principalDirection(recent, d);
     p = (found ? c : p) + d * spec.coarseStep;
     s += spec.coarseStep;
     // 在长断口里一直顺着预测方向滑下去，迟早会滑到别的暗带上：已经找到过胶、又连续 maxGap
     // 没找到，就不再接受新的胶点，后面的胶路交给拟合按已有的胶点外推
-    if (!cand.coarse.empty() && s - lastFound > spec.maxGap) stopped = true;
+    if (!cand.coarse.empty() && s - lastFound > spec.maxGap)
+      stopped = true;
   }
   cand.coverage = cand.steps > 0 ? static_cast<double>(cand.coarse.size()) / cand.steps : 0.0;
   cand.sharpness = sharp.size() >= 3 ? percentile(sharp, 25.0) : -1.0;
@@ -219,14 +231,16 @@ std::vector<P2> localLinearFit(const std::vector<std::pair<double, P2>>& centers
       const double s0 = grid[gi];
       std::vector<std::size_t> pick;
       for (std::size_t i = 0; i < n; ++i) {
-        if (std::fabs(centers[i].first - s0) <= window) pick.push_back(i);
+        if (std::fabs(centers[i].first - s0) <= window)
+          pick.push_back(i);
       }
       if (pick.size() < 3) {
         std::iota(order.begin(), order.end(), std::size_t{0});
         std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
           return std::fabs(centers[a].first - s0) < std::fabs(centers[b].first - s0);
         });
-        const std::size_t k = std::min<std::size_t>(n, std::max<std::size_t>(3, std::min<std::size_t>(8, n)));
+        const std::size_t k =
+            std::min<std::size_t>(n, std::max<std::size_t>(3, std::min<std::size_t>(8, n)));
         pick.assign(order.begin(), order.begin() + static_cast<std::ptrdiff_t>(k));
       }
       // 法方程：Σ w²·[1, ds]ᵀ[1, ds]·[a, b]ᵀ = Σ w²·[1, ds]ᵀ·x
@@ -251,13 +265,16 @@ std::vector<P2> localLinearFit(const std::vector<std::pair<double, P2>>& centers
     }
     for (std::size_t i = 0; i < n; ++i) {
       double best = std::numeric_limits<double>::infinity();
-      for (const P2& f : fits) best = std::min(best, length(f - centers[i].second));
+      for (const P2& f : fits)
+        best = std::min(best, length(f - centers[i].second));
       resid[i] = best;
     }
     const double mad = median(resid) + 1e-6;
-    for (std::size_t i = 0; i < n; ++i) w[i] = resid[i] < 3.0 * mad + 2.0 ? 1.0 : 0.1;
+    for (std::size_t i = 0; i < n; ++i)
+      w[i] = resid[i] < 3.0 * mad + 2.0 ? 1.0 : 0.1;
   }
-  if (residualOut) *residualOut = median(resid);
+  if (residualOut)
+    *residualOut = median(resid);
   return fits;
 }
 
@@ -297,13 +314,15 @@ void resampleByArcLength(const std::vector<P2>& dense, P2 nozzle, double zoneSta
   std::vector<double> arc{0.0};
   for (std::size_t i = k0; i < dense.size(); ++i) {
     const double step = length(dense[i] - pts.back());
-    if (step < 1e-9) continue;
+    if (step < 1e-9)
+      continue;
     arc.push_back(arc.back() + step);
     pts.push_back(dense[i]);
   }
   const double total = zoneEnd - zoneStart;
   std::vector<double> targets;
-  for (double t = 0.0; t < total - 1e-9; t += 2.0) targets.push_back(t);
+  for (double t = 0.0; t < total - 1e-9; t += 2.0)
+    targets.push_back(t);
   targets.push_back(total);
   P2 endTangent = pts.size() >= 2 ? unit(pts.back() - pts[pts.size() - 2]) : P2(1, 0);
   out.s.clear();
@@ -314,7 +333,8 @@ void resampleByArcLength(const std::vector<P2>& dense, P2 nozzle, double zoneSta
     if (t >= arc.back()) {
       q = pts.back() + endTangent * (t - arc.back());
     } else {
-      while (seg + 1 < arc.size() && arc[seg + 1] < t) ++seg;
+      while (seg + 1 < arc.size() && arc[seg + 1] < t)
+        ++seg;
       const double span = arc[seg + 1] - arc[seg];
       const double f = span > 1e-12 ? (t - arc[seg]) / span : 0.0;
       q = pts[seg] + (pts[seg + 1] - pts[seg]) * f;
@@ -336,9 +356,11 @@ void straightPath(P2 nozzle, double headingDeg, double zoneStart, double zoneEnd
   out.s.clear();
   out.points.clear();
   const double total = zoneEnd - zoneStart;
-  for (double t = 0.0; t < total - 1e-9; t += 2.0) out.s.push_back(zoneStart + t);
+  for (double t = 0.0; t < total - 1e-9; t += 2.0)
+    out.s.push_back(zoneStart + t);
   out.s.push_back(zoneEnd);
-  for (double s : out.s) out.points.push_back(nozzle + d * s);
+  for (double s : out.s)
+    out.points.push_back(nozzle + d * s);
   out.tangents.assign(out.points.size(), d);
 }
 
@@ -348,22 +370,25 @@ std::string fmt2(double v) {
   return buf;
 }
 
-}  // namespace
+} // namespace
 
 // ------------------------------------------------------------------ 小工具
 
 double median(std::vector<double> v) {
-  if (v.empty()) return kNaN;
+  if (v.empty())
+    return kNaN;
   const std::size_t mid = v.size() / 2;
   std::nth_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(mid), v.end());
   const double hi = v[mid];
-  if (v.size() % 2 == 1) return hi;
+  if (v.size() % 2 == 1)
+    return hi;
   const double lo = *std::max_element(v.begin(), v.begin() + static_cast<std::ptrdiff_t>(mid));
   return 0.5 * (lo + hi);
 }
 
 double percentile(std::vector<double> v, double q) {
-  if (v.empty()) return kNaN;
+  if (v.empty())
+    return kNaN;
   std::sort(v.begin(), v.end());
   const double pos = (q / 100.0) * static_cast<double>(v.size() - 1);
   const std::size_t i = static_cast<std::size_t>(std::floor(pos));
@@ -375,7 +400,8 @@ double percentile(std::vector<double> v, double q) {
 
 Field responseField(const cv::Mat& gray, bool bright, int widthMax, cv::Rect roi) {
   const cv::Rect inner = roi & imageRect(gray);
-  if (inner.empty()) return {};
+  if (inner.empty())
+    return {};
   const Octagon o = octagon(widthMax + 1);
   // 闭运算里膨胀与腐蚀各走一次结构元，再加上 5×5 的高斯：外扩两倍半径 + 4 之后，inner 里的值
   // 与整幅图算出来的一样（外扩碰到图像边界时两边的边界规则也一样）
@@ -394,12 +420,14 @@ Field responseField(const cv::Mat& gray, bool bright, int widthMax, cv::Rect roi
 
 Field smoothGrayField(const cv::Mat& gray, bool bright, cv::Rect roi) {
   const cv::Rect inner = roi & imageRect(gray);
-  if (inner.empty()) return {};
+  if (inner.empty())
+    return {};
   const cv::Rect outer = inflate(inner, 4) & imageRect(gray);
   cv::Mat g;
   gray(outer).convertTo(g, CV_32F);
   cv::GaussianBlur(g, g, cv::Size(5, 5), 1.0);
-  if (bright) g = 255.0 - g;
+  if (bright)
+    g = 255.0 - g;
   return Field(g, outer.tl(), inner);
 }
 
@@ -427,21 +455,24 @@ std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, con
       continue;
     }
     int j = i;
-    while (j + 1 < count && ok[j + 1] && v[j + 1] > thr) ++j;
+    while (j + 1 < count && ok[j + 1] && v[j + 1] > thr)
+      ++j;
     double peak = 0;
-    for (int k = i; k <= j; ++k) peak = std::max(peak, v[k]);
+    for (int k = i; k <= j; ++k)
+      peak = std::max(peak, v[k]);
     if (peak >= spec.contrastMin) {
       // D4：半高处取边，按这一段自己的峰值
       const double lvl = 0.5 * peak;
       int a = i;
-      while (a < j && v[a] < lvl) ++a;
+      while (a < j && v[a] < lvl)
+        ++a;
       int b = j;
-      while (b > i && v[b] < lvl) --b;
+      while (b > i && v[b] < lvl)
+        --b;
       const double la =
           a > 0 ? tAt(a) - (v[a] - lvl) / std::max(v[a] - v[a - 1], 1e-6) * kRes : tAt(a);
-      const double lb = b < count - 1
-                            ? tAt(b) + (v[b] - lvl) / std::max(v[b] - v[b + 1], 1e-6) * kRes
-                            : tAt(b);
+      const double lb =
+          b < count - 1 ? tAt(b) + (v[b] - lvl) / std::max(v[b] - v[b + 1], 1e-6) * kRes : tAt(b);
       raw.push_back(Run{la, lb, peak});
     }
     i = j + 1;
@@ -459,7 +490,8 @@ std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, con
   }
   std::vector<Run> out;
   for (const Run& r : merged) {
-    if (r.width() >= spec.widthMin && r.width() <= spec.widthMax) out.push_back(r);
+    if (r.width() >= spec.widthMin && r.width() <= spec.widthMax)
+      out.push_back(r);
   }
   return out;
 }
@@ -467,7 +499,8 @@ std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, con
 const Run* nearestRun(const std::vector<Run>& runs, double expect) {
   const Run* best = nullptr;
   for (const Run& r : runs) {
-    if (!best || std::fabs(r.mid() - expect) < std::fabs(best->mid() - expect)) best = &r;
+    if (!best || std::fabs(r.mid() - expect) < std::fabs(best->mid() - expect))
+      best = &r;
   }
   return best;
 }
@@ -480,11 +513,13 @@ double runSharpness(const Field& g, P2 c, P2 n, const Run& run) {
   double inside = 0;
   for (int k = 0; k < 5; ++k) {
     const double v = at(run.lo + 0.25 * w + (0.5 * w) * k / 4.0);
-    if (v < 0) return kNaN;
+    if (v < 0)
+      return kNaN;
     inside += v;
   }
   for (double v : samples) {
-    if (v < 0) return kNaN;
+    if (v < 0)
+      return kNaN;
   }
   inside /= 5.0;
   const double dl = samples[0] - samples[1];
@@ -511,7 +546,7 @@ BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec) {
   const double lo = spec.useHeading ? spec.headingDeg - spec.headingTolDeg : spec.sectorFromDeg;
   const double hi = spec.useHeading ? spec.headingDeg + spec.headingTolDeg : spec.sectorToDeg;
   const double fanLen = std::min(spec.fanLength, spec.zoneEnd - spec.zoneStart);
-  std::vector<std::pair<double, double>> fan;  // (score, angle)
+  std::vector<std::pair<double, double>> fan; // (score, angle)
   for (double a = lo; a <= hi + 1e-6; a += 1.0) {
     const P2 d = dirOfDeg(a);
     int total = 0, bad = 0;
@@ -534,10 +569,13 @@ BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec) {
   for (const auto& f : fan) {
     bool far = true;
     for (const auto& p : picks) {
-      if (angleDiffDeg(p.second, f.second) <= spec.fanSeparationDeg) far = false;
+      if (angleDiffDeg(p.second, f.second) <= spec.fanSeparationDeg)
+        far = false;
     }
-    if (far) picks.push_back(f);
-    if (picks.size() == 3) break;
+    if (far)
+      picks.push_back(f);
+    if (picks.size() == 3)
+      break;
   }
 
   // 前三个峰各粗找一遍，按「覆盖率 ×（像胶 ? 1 : 0.1）」留一个（D15）。射线本身几乎没有响应（不到最强那条的
@@ -548,7 +586,8 @@ BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec) {
   for (const auto& pk : picks) {
     PathCandidate c = coarseTrack(R, g, spec, pk.second, lo, hi);
     c.fanScore = pk.first;
-    if (fanMax > 0 && pk.first < 0.25 * fanMax) c.score *= 0.5;
+    if (fanMax > 0 && pk.first < 0.25 * fanMax)
+      c.score *= 0.5;
     out.candidates.push_back(std::move(c));
     const PathCandidate& cc = out.candidates.back();
     if (best < 0 || cc.score > out.candidates[static_cast<std::size_t>(best)].score) {
@@ -567,7 +606,8 @@ BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec) {
   out.coverage = chosen.coverage;
   out.sharpness = chosen.sharpness;
   out.beadlike = chosen.beadlike;
-  for (const auto& c : chosen.coarse) out.coarse.push_back(c.second);
+  for (const auto& c : chosen.coarse)
+    out.coarse.push_back(c.second);
 
   if (chosen.coverage < spec.minCoverage) {
     out.reason = "覆盖率 " + fmt2(chosen.coverage) + " 低于 minCoverage " + fmt2(spec.minCoverage);
@@ -586,14 +626,16 @@ BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec) {
   // 拟合网格往两头各多走一截（局部线性拟合在那里就是沿端点切向外推）：起点要落在「离喷嘴 zoneStart」
   // 的那一处，终点要够得着 zoneEnd，下面的高斯平滑也不能让两头的截断影响到检测区里
   std::vector<double> grid;
-  for (double s = spec.zoneStart - 48.0; s <= spec.zoneEnd + 56.0 + 1e-6; s += 1.0) grid.push_back(s);
+  for (double s = spec.zoneStart - 48.0; s <= spec.zoneEnd + 56.0 + 1e-6; s += 1.0)
+    grid.push_back(s);
   std::vector<P2> dense = localLinearFit(chosen.coarse, grid, spec.smoothWindow, nullptr);
   // 检测区开头一段没找到胶（断口正好落在那里）：局部线性拟合会沿后面几个胶点的切向往回外推，拐错了方向
   // 就是一条横着的胶路。胶是从喷嘴出来的 —— 第一个胶点之前的那一段取喷嘴到它的连线
   const double sFirst = chosen.coarse.front().first;
   if (sFirst > spec.zoneStart + 2.0 * spec.coarseStep) {
     std::size_t k = 0;
-    while (k + 1 < grid.size() && grid[k] < sFirst) ++k;
+    while (k + 1 < grid.size() && grid[k] < sFirst)
+      ++k;
     const P2 anchor = dense[k];
     for (std::size_t i = 0; i < k; ++i) {
       dense[i] = spec.nozzle + (anchor - spec.nozzle) * (grid[i] / sFirst);
@@ -609,7 +651,8 @@ BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec) {
     double wsum = 0;
     for (int k = -kHalf; k <= kHalf; ++k) {
       const std::ptrdiff_t j = static_cast<std::ptrdiff_t>(i) + k;
-      if (j < 0 || j >= static_cast<std::ptrdiff_t>(dense.size())) continue;
+      if (j < 0 || j >= static_cast<std::ptrdiff_t>(dense.size()))
+        continue;
       const double w = std::exp(-0.5 * k * k / (kSigma * kSigma));
       acc += dense[static_cast<std::size_t>(j)] * w;
       wsum += w;
@@ -620,7 +663,8 @@ BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec) {
   std::vector<double> resid;
   for (const P2& q : out.coarse) {
     double bestD = std::numeric_limits<double>::infinity();
-    for (const P2& p : out.points) bestD = std::min(bestD, length(p - q));
+    for (const P2& p : out.points)
+      bestD = std::min(bestD, length(p - q));
     resid.push_back(bestD);
   }
   out.residual = median(resid);
@@ -658,7 +702,8 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
                               double zoneStart, double zoneEnd, bool bright, int responseWidthMax,
                               const StationSpec& spec) {
   StationResult out;
-  if (!path.valid()) return out;
+  if (!path.valid())
+    return out;
   for (double s = zoneStart; s <= zoneEnd + 1e-6; s += spec.step) {
     Station st;
     st.s = s;
@@ -666,7 +711,8 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
     st.n = perp(st.t);
     out.stations.push_back(std::move(st));
   }
-  if (!pathOk) return out;
+  if (!pathOk)
+    return out;
 
   // 响应图只算胶路两侧卡尺够得着的那一块
   double x0 = std::numeric_limits<double>::infinity(), y0 = x0, x1 = -x0, y1 = -x0;
@@ -681,7 +727,8 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
                      static_cast<int>(std::ceil(x1 - x0 + 2 * pad)) + 1,
                      static_cast<int>(std::ceil(y1 - y0 + 2 * pad)) + 1);
   const Field R = responseField(gray, bright, responseWidthMax, roi);
-  for (Station& st : out.stations) st.runs = lateralRuns(R, st.c, st.n, spec.searchHalf, spec.runs);
+  for (Station& st : out.stations)
+    st.runs = lateralRuns(R, st.c, st.n, spec.searchHalf, spec.runs);
 
   // D16：参考宽取全检测区候选暗段宽度的中位数（断口里的局部窗口会被零件表面的拉丝纹主导）
   std::vector<double> widths, peaks;
@@ -720,15 +767,18 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
   std::vector<std::vector<const Run*>> pools(out.stations.size());
   for (std::size_t i = 0; i < out.stations.size(); ++i) {
     for (const Station& y : out.stations) {
-      if (std::fabs(y.s - out.stations[i].s) > half) continue;
+      if (std::fabs(y.s - out.stations[i].s) > half)
+        continue;
       for (const Run& r : y.runs) {
-        if (std::fabs(r.mid()) < poolReach) pools[i].push_back(&r);
+        if (std::fabs(r.mid()) < poolReach)
+          pools[i].push_back(&r);
       }
     }
   }
   std::vector<double> env;
   for (const auto& pool : pools) {
-    if (pool.empty()) continue;
+    if (pool.empty())
+      continue;
     double lo = std::numeric_limits<double>::infinity(), hi = -lo;
     for (const Run* r : pool) {
       lo = std::min(lo, r->lo);
@@ -745,11 +795,14 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
     // 有无胶按本站自己判（窗口只用来算外包络）：按窗口判会把比窗口短的断口整个抹掉。
     // 对比度的一致性只卡「本站有没有胶」，不卡外包络：螺圈外沿的那几股本来就淡一些
     bool own = false;
-    for (const Run& r : st.runs) own = own || (qualifies(r) && r.peak >= minPeak);
-    if (!own || widths.empty()) continue;
+    for (const Run& r : st.runs)
+      own = own || (qualifies(r) && r.peak >= minPeak);
+    if (!own || widths.empty())
+      continue;
     double lo = std::numeric_limits<double>::infinity(), hi = -lo, peak = 0;
     for (const Run* r : pools[i]) {
-      if (!qualifies(*r)) continue;
+      if (!qualifies(*r))
+        continue;
       lo = std::min(lo, r->lo);
       hi = std::max(hi, r->hi);
       peak = std::max(peak, r->peak);
@@ -762,4 +815,4 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
   return out;
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

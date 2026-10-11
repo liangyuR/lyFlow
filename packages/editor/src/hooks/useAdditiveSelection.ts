@@ -3,9 +3,9 @@
 // 这里在按下的那一刻记住当时的选中，到松手为止 React Flow 发来的「取消选中它们」都不认（GraphCanvas 的
 // applySelectChanges）。顺带按着 Shift / Ctrl 单击空白处也不再清掉选中。
 
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef, type RefObject } from 'react';
 
-import { useUiStore } from "../store/ui";
+import { useUiStore } from '../store/ui';
 
 export interface KeptSelection {
   nodes: ReadonlySet<string>;
@@ -13,7 +13,9 @@ export interface KeptSelection {
 }
 
 /** 返回的 ref 在按着 Shift / Ctrl 按下空白处到松手之间是那一刻的选中，其余时候是 null。 */
-export function useAdditiveSelection(wrapper: RefObject<HTMLElement | null>): RefObject<KeptSelection | null> {
+export function useAdditiveSelection(
+  wrapper: RefObject<HTMLElement | null>,
+): RefObject<KeptSelection | null> {
   const kept = useRef<KeptSelection | null>(null);
 
   useEffect(() => {
@@ -21,7 +23,7 @@ export function useAdditiveSelection(wrapper: RefObject<HTMLElement | null>): Re
     if (!el) return;
     // 捕获阶段：赶在 React Flow 在画布上开框（它也在捕获阶段）之前
     const down = (e: PointerEvent) => {
-      const onPane = e.target instanceof Element && e.target.classList.contains("react-flow__pane");
+      const onPane = e.target instanceof Element && e.target.classList.contains('react-flow__pane');
       if (e.button !== 0 || !onPane || !(e.shiftKey || e.ctrlKey)) {
         kept.current = null;
         return;
@@ -33,13 +35,13 @@ export function useAdditiveSelection(wrapper: RefObject<HTMLElement | null>): Re
     const up = () => {
       kept.current = null;
     };
-    el.addEventListener("pointerdown", down, true);
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
+    el.addEventListener('pointerdown', down, true);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
     return () => {
-      el.removeEventListener("pointerdown", down, true);
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
+      el.removeEventListener('pointerdown', down, true);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
     };
   }, [wrapper]);
 

@@ -1,19 +1,19 @@
 // 左侧算子面板。分类树完全由 manifest 的 category 推导，前端不硬编码分类名。
 // 三种加节点的方式：拖到画布、双击、画布上双击搜索 —— 因为三种人都会试。
 
-import { useReactFlow, useStore as useFlowStore } from "@xyflow/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useReactFlow, useStore as useFlowStore } from '@xyflow/react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { addNodeWithAutoConnect, insertSnippet } from "../lib/insert";
-import { FIELD_LABELS, searchOperators, searchSnippets, type OperatorHit } from "../lib/search";
-import { useManifestStore, useSnippets } from "../store/manifest";
-import { useUiStore } from "../store/ui";
-import type { OperatorDesc, SnippetDesc } from "../types/manifest";
+import { addNodeWithAutoConnect, insertSnippet } from '../lib/insert';
+import { FIELD_LABELS, searchOperators, searchSnippets, type OperatorHit } from '../lib/search';
+import { useManifestStore, useSnippets } from '../store/manifest';
+import { useUiStore } from '../store/ui';
+import type { OperatorDesc, SnippetDesc } from '../types/manifest';
 
 /** 拖到画布时用的 MIME。GraphCanvas 的 onDrop 读它。 */
-export const OPERATOR_DND_MIME = "application/lyflow-operator";
+export const OPERATOR_DND_MIME = 'application/lyflow-operator';
 /** 片段（m8-plan L14）拖到画布时用的 MIME，值是片段 id。 */
-export const SNIPPET_DND_MIME = "application/lyflow-snippet";
+export const SNIPPET_DND_MIME = 'application/lyflow-snippet';
 
 /** 画布可视区中心的画布坐标。双击添加时落在这里，比写死原点合理。 */
 function useViewportCenter() {
@@ -21,7 +21,7 @@ function useViewportCenter() {
   // 这个编辑器自己的画布：document.querySelector 在一页有两个画布时会拿到第一个
   const flowRoot = useFlowStore((s) => s.domNode);
   return () => {
-    const pane = flowRoot?.querySelector(".react-flow__pane");
+    const pane = flowRoot?.querySelector('.react-flow__pane');
     const rect = pane?.getBoundingClientRect();
     if (!rect) return { x: 0, y: 0 };
     return screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
@@ -30,20 +30,22 @@ function useViewportCenter() {
 
 function SnippetRow({ snippet }: { snippet: SnippetDesc }) {
   const viewportCenter = useViewportCenter();
-  const missing = useManifestStore((s) => snippet.nodes.filter((n) => !s.operatorsById.has(n.op)).length);
+  const missing = useManifestStore(
+    (s) => snippet.nodes.filter((n) => !s.operatorsById.has(n.op)).length,
+  );
   return (
     <button
       type="button"
-      className={`op-row op-row--snippet${missing > 0 ? " is-missing" : ""}`}
+      className={`op-row op-row--snippet${missing > 0 ? ' is-missing' : ''}`}
       data-snippet-id={snippet.id}
       data-testid={`snippet-${snippet.id}`}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData(SNIPPET_DND_MIME, snippet.id);
-        e.dataTransfer.effectAllowed = "copy";
+        e.dataTransfer.effectAllowed = 'copy';
       }}
       onDoubleClick={() => insertSnippet(snippet, viewportCenter())}
-      title={`${snippet.doc ?? ""}${missing > 0 ? `\n（${missing} 个节点的算子当前 core 没有）` : ""}`}
+      title={`${snippet.doc ?? ''}${missing > 0 ? `\n（${missing} 个节点的算子当前 core 没有）` : ''}`}
     >
       <span className="op-row__label">
         <span className="op-row__glyph" aria-hidden>
@@ -52,7 +54,8 @@ function SnippetRow({ snippet }: { snippet: SnippetDesc }) {
         {snippet.label}
       </span>
       <span className="op-row__id">
-        {snippet.nodes.length} 节点{snippet.source ? " · 用户" : snippet.pack ? ` · ${snippet.pack}` : ""}
+        {snippet.nodes.length} 节点
+        {snippet.source ? ' · 用户' : snippet.pack ? ` · ${snippet.pack}` : ''}
       </span>
     </button>
   );
@@ -66,9 +69,13 @@ function SnippetBranch({ query }: { query: string }) {
   const shown = query.trim() ? searchSnippets(snippets, query).map((h) => h.snippet) : snippets;
   if (shown.length === 0) return null;
   return (
-    <div className="tree-branch tree-branch--snippets" data-testid="snippet-library" style={{ ["--depth" as string]: 0 }}>
+    <div
+      className="tree-branch tree-branch--snippets"
+      data-testid="snippet-library"
+      style={{ ['--depth' as string]: 0 }}
+    >
       <button type="button" className="tree-branch__head" onClick={() => setOpen((v) => !v)}>
-        <span className={`tree-branch__caret${open ? " is-open" : ""}`} aria-hidden>
+        <span className={`tree-branch__caret${open ? ' is-open' : ''}`} aria-hidden>
           ▸
         </span>
         片段
@@ -97,9 +104,13 @@ function RecentBranch() {
   });
   if (ops.length === 0) return null;
   return (
-    <div className="tree-branch tree-branch--recent" data-testid="palette-recent" style={{ ["--depth" as string]: 0 }}>
+    <div
+      className="tree-branch tree-branch--recent"
+      data-testid="palette-recent"
+      style={{ ['--depth' as string]: 0 }}
+    >
       <button type="button" className="tree-branch__head" onClick={() => setOpen((v) => !v)}>
-        <span className={`tree-branch__caret${open ? " is-open" : ""}`} aria-hidden>
+        <span className={`tree-branch__caret${open ? ' is-open' : ''}`} aria-hidden>
           ▸
         </span>
         最近用过
@@ -128,11 +139,11 @@ function emptyNode(name: string, path: string): TreeNode {
 }
 
 function buildTree(operators: readonly OperatorDesc[]): TreeNode {
-  const root = emptyNode("", "");
+  const root = emptyNode('', '');
   for (const op of operators) {
-    const segments = op.category.split("/").filter(Boolean);
+    const segments = op.category.split('/').filter(Boolean);
     let cursor = root;
-    let path = "";
+    let path = '';
     for (const segment of segments) {
       path = path ? `${path}/${segment}` : segment;
       let child = cursor.children.get(segment);
@@ -151,13 +162,13 @@ function Highlight({ text, indices }: { text: string; indices: readonly number[]
   if (indices.length === 0) return <>{text}</>;
   const marked = new Set(indices);
   const parts: React.ReactNode[] = [];
-  let buffer = "";
+  let buffer = '';
   let bufferMarked = false;
 
   const flush = (key: number) => {
     if (!buffer) return;
     parts.push(bufferMarked ? <mark key={key}>{buffer}</mark> : <span key={key}>{buffer}</span>);
-    buffer = "";
+    buffer = '';
   };
 
   for (let i = 0; i < text.length; i++) {
@@ -188,12 +199,12 @@ function OperatorRow({
   return (
     <button
       type="button"
-      className={`op-row${active ? " is-active" : ""}`}
+      className={`op-row${active ? ' is-active' : ''}`}
       data-op-id={op.id}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData(OPERATOR_DND_MIME, op.id);
-        e.dataTransfer.effectAllowed = "copy";
+        e.dataTransfer.effectAllowed = 'copy';
       }}
       onClick={() => setInspected(op.id)}
       onDoubleClick={() => {
@@ -219,9 +230,9 @@ function TreeBranch({ node, depth }: { node: TreeNode; depth: number }) {
   const childBranches = [...node.children.values()];
 
   return (
-    <div className="tree-branch" style={{ ["--depth" as string]: depth }}>
+    <div className="tree-branch" style={{ ['--depth' as string]: depth }}>
       <button type="button" className="tree-branch__head" onClick={() => setOpen((v) => !v)}>
-        <span className={`tree-branch__caret${open ? " is-open" : ""}`} aria-hidden>
+        <span className={`tree-branch__caret${open ? ' is-open' : ''}`} aria-hidden>
           ▸
         </span>
         {node.name}
@@ -243,7 +254,7 @@ function TreeBranch({ node, depth }: { node: TreeNode; depth: number }) {
 
 export function NodePalette() {
   const operators = useManifestStore((s) => s.bundle?.operators);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -259,24 +270,24 @@ export function NodePalette() {
     if (!id) return;
     listRef.current
       ?.querySelector(`[data-op-id="${CSS.escape(id)}"]`)
-      ?.scrollIntoView({ block: "nearest" });
+      ?.scrollIntoView({ block: 'nearest' });
   }, [cursor, hits, query]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!query.trim() || hits.length === 0) return;
-    if (e.key === "ArrowDown") {
+    if (e.key === 'ArrowDown') {
       e.preventDefault();
       setCursor((c) => Math.min(c + 1, hits.length - 1));
-    } else if (e.key === "ArrowUp") {
+    } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setCursor((c) => Math.max(c - 1, 0));
-    } else if (e.key === "Enter") {
+    } else if (e.key === 'Enter') {
       e.preventDefault();
       const hit = hits[Math.min(cursor, hits.length - 1)];
       if (hit) useUiStore.getState().setInspectedOperator(hit.op.id);
-    } else if (e.key === "Escape") {
+    } else if (e.key === 'Escape') {
       e.preventDefault();
-      setQuery("");
+      setQuery('');
     }
   };
 

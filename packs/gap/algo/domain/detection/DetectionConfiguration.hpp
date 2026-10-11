@@ -260,4 +260,4 @@ struct DetectionConfiguration {
   std::string roi_override_source = "override";
 };
 
-}  // namespace detection::domain
+} // namespace detection::domain

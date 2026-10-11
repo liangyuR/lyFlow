@@ -8,13 +8,13 @@
 #include <stdint.h>
 
 #if defined(_WIN32)
-#  if defined(LYFLOW_BUILDING_DLL)
-#    define LYFLOW_API __declspec(dllexport)
-#  else
-#    define LYFLOW_API __declspec(dllimport)
-#  endif
+#if defined(LYFLOW_BUILDING_DLL)
+#define LYFLOW_API __declspec(dllexport)
 #else
-#  define LYFLOW_API __attribute__((visibility("default")))
+#define LYFLOW_API __declspec(dllimport)
+#endif
+#else
+#define LYFLOW_API __attribute__((visibility("default")))
 #endif
 
 #ifdef __cplusplus
@@ -73,8 +73,7 @@ LYFLOW_API char* lyflow_plan(const char* graph_json, const char* base_dir,
 // 同 lyflow_plan，另带顶层图参数的取值（同 lyflow_validate_params）。cacheKey 与 cached
 // 反映的是这组取值：切配方之后「哪些节点会重算」靠它（v11 里追加）。
 LYFLOW_API char* lyflow_plan_params(const char* graph_json, const char* base_dir,
-                                    const char* const* targets, size_t n,
-                                    const char* params_json);
+                                    const char* const* targets, size_t n, const char* params_json);
 
 // 落盘缓存（docs/disk-cache-plan.md）。dir 为 NULL / 空串 = 关（默认）。build_identity 由宿主用
 // 产品版本与明确源码修订组成，结果放在 <dir>/<build_identity>/ 下；修订为空时不能启用跨进程缓存。
@@ -117,12 +116,12 @@ typedef struct lyflow_run lyflow_run;
 typedef struct {
   const char* node_id;
   const char* port;
-  int32_t kind;                    /* 目前只支持 LYFLOW_INPUT_POINT_CLOUD */
-  uint32_t count;                  /* 点数 */
-  const float* xyz;                /* 3 * count */
-  const float* intensity;          /* count，或 NULL */
-  const float* normals;            /* 3 * count，或 NULL */
-  const uint8_t* rgb;              /* 3 * count，或 NULL */
+  int32_t kind;           /* 目前只支持 LYFLOW_INPUT_POINT_CLOUD */
+  uint32_t count;         /* 点数 */
+  const float* xyz;       /* 3 * count */
+  const float* intensity; /* count，或 NULL */
+  const float* normals;   /* 3 * count，或 NULL */
+  const uint8_t* rgb;     /* 3 * count，或 NULL */
 } lyflow_run_input;
 
 #define LYFLOW_INPUT_POINT_CLOUD 0
@@ -136,25 +135,26 @@ typedef struct {
   const char* port;
   uint32_t width;
   uint32_t height;
-  uint32_t channels;               /* 1 / 3 / 4 */
-  uint32_t depth;                  /* 每通道字节数：1 = u8，2 = u16，4 = f32 */
-  uint32_t row_bytes;              /* 一行的字节数，0 = 紧排（width * channels * depth）；可以更大（带行填充的相机缓冲） */
+  uint32_t channels; /* 1 / 3 / 4 */
+  uint32_t depth;    /* 每通道字节数：1 = u8，2 = u16，4 = f32 */
+  uint32_t
+      row_bytes; /* 一行的字节数，0 = 紧排（width * channels * depth）；可以更大（带行填充的相机缓冲） */
   uint32_t reserved;
-  const uint8_t* pixels;           /* row_bytes * height 字节 */
+  const uint8_t* pixels; /* row_bytes * height 字节 */
 } lyflow_run_image_input;
 
 typedef struct {
-  const char* run_id;              /* 由调用方分配（Rust 用 ULID），事件里原样回传 */
-  const char* base_dir;            /* 相对路径参数的基准目录，可为 NULL */
-  const char* const* targets;      /* Run to node 的目标节点，NULL/0 表示跑全图 */
+  const char* run_id;         /* 由调用方分配（Rust 用 ULID），事件里原样回传 */
+  const char* base_dir;       /* 相对路径参数的基准目录，可为 NULL */
+  const char* const* targets; /* Run to node 的目标节点，NULL/0 表示跑全图 */
   size_t target_count;
-  int32_t max_parallel;            /* 同时跑几个节点。0 = min(4, 核数)，1 = 顺序执行 */
-  uint64_t cache_budget_bytes;     /* 结果仓字节预算。0 = min(8 GB, 物理内存 40%) */
-  int32_t mode;                    /* 0 = full，1 = preview（源算子输出先抽稀，ADR-0011） */
-  uint32_t preview_max_points;     /* preview 的点数上限。0 = 200000 */
-  uint32_t preview_budget_ms;      /* 超过它发一条 warn 日志。0 = 300 */
-  int32_t no_reuse;                /* 非 0 = 本次运行不复用结果仓里的旧结果 */
-  const lyflow_run_input* inputs;  /* v7：运行时注入的源数据，NULL/0 表示没有 */
+  int32_t max_parallel;           /* 同时跑几个节点。0 = min(4, 核数)，1 = 顺序执行 */
+  uint64_t cache_budget_bytes;    /* 结果仓字节预算。0 = min(8 GB, 物理内存 40%) */
+  int32_t mode;                   /* 0 = full，1 = preview（源算子输出先抽稀，ADR-0011） */
+  uint32_t preview_max_points;    /* preview 的点数上限。0 = 200000 */
+  uint32_t preview_budget_ms;     /* 超过它发一条 warn 日志。0 = 300 */
+  int32_t no_reuse;               /* 非 0 = 本次运行不复用结果仓里的旧结果 */
+  const lyflow_run_input* inputs; /* v7：运行时注入的源数据，NULL/0 表示没有 */
   size_t input_count;
   /* v10：顶层图参数的取值，JSON 对象 { 名字: 值 }（GraphDoc 顶层 params）。
      NULL/空串 = 全用图里的 default。图没声明的名字在校验阶段报 unknown_param。 */
@@ -183,8 +183,7 @@ typedef struct {
 
 // 立即返回句柄，执行在后台线程。opts/cb 允许为 NULL（cb 为 NULL 时事件丢弃）。
 // 返回 NULL 表示连线程都没起来（内存不足），调用方应当当作运行失败。
-LYFLOW_API lyflow_run* lyflow_run_start(const char* graph_json,
-                                        const lyflow_run_options* opts,
+LYFLOW_API lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* opts,
                                         lyflow_event_cb cb, void* user);
 
 // 协作式取消。可重复调用，也可在 join 之后调用（无操作）。
@@ -205,9 +204,9 @@ LYFLOW_API void lyflow_run_free(lyflow_run* run);
 // `<port>.<field>`：取 Bundle 端口里的一个字段，例如 "scan.merged"（m8-plan L3，
 // 加在 v10 里，签名不变、ABI 号不变）。字段本身又是什么类型，就按那个类型的规矩取。
 typedef struct {
-  uint32_t point_count;   /* 抽样后的点数 */
-  uint32_t total_points;  /* 抽样前的点数 */
-  uint32_t flags;         /* bit0: 带 intensity；bit1: 带 normals；bit2: 带 rgb（v12） */
+  uint32_t point_count;  /* 抽样后的点数 */
+  uint32_t total_points; /* 抽样前的点数 */
+  uint32_t flags;        /* bit0: 带 intensity；bit1: 带 normals；bit2: 带 rgb（v12） */
   uint32_t reserved;
   float bounds[6];        /* minx,miny,minz,maxx,maxy,maxz；空云时全 0 */
   const float* xyz;       /* 3 * point_count */
@@ -232,12 +231,12 @@ LYFLOW_API void lyflow_cloud_view_free(lyflow_cloud_view* view);
 // shape/data 直接指进结果仓里那一份，handle 一释放就失效。
 typedef struct {
   uint32_t rank;
-  uint32_t count;         /* 本次返回的元素数 */
-  uint64_t offset;        /* 本次切片的起始元素下标 */
-  uint64_t total;         /* 张量总元素数 */
-  const int64_t* shape;   /* rank 个，永远是完整形状，不随 offset/count 变 */
-  const float* data;      /* count 个 */
-  void* handle;           /* 内部持有，勿动 */
+  uint32_t count;       /* 本次返回的元素数 */
+  uint64_t offset;      /* 本次切片的起始元素下标 */
+  uint64_t total;       /* 张量总元素数 */
+  const int64_t* shape; /* rank 个，永远是完整形状，不随 offset/count 变 */
+  const float* data;    /* count 个 */
+  void* handle;         /* 内部持有，勿动 */
 } lyflow_tensor_view;
 
 // offset 越界返回 count=0；count=0 表示「从 offset 取到末尾」。
@@ -249,11 +248,11 @@ LYFLOW_API void lyflow_tensor_view_free(lyflow_tensor_view* view);
 
 // v8：点下标集合，同样零拷贝按切片取。
 typedef struct {
-  uint32_t count;            /* 本次返回的下标个数 */
-  uint32_t total;            /* 下标总数 */
-  uint64_t source_cloud_id;  /* 指向哪片云；前端只显示，不校验 */
-  const int32_t* values;     /* count 个 */
-  void* handle;              /* 内部持有，勿动 */
+  uint32_t count;           /* 本次返回的下标个数 */
+  uint32_t total;           /* 下标总数 */
+  uint64_t source_cloud_id; /* 指向哪片云；前端只显示，不校验 */
+  const int32_t* values;    /* count 个 */
+  void* handle;             /* 内部持有，勿动 */
 } lyflow_indices_view;
 
 // 越界与返回码的约定与 lyflow_output_tensor 完全一致，1 表示该输出不是下标集合。
@@ -267,18 +266,18 @@ LYFLOW_API void lyflow_indices_view_free(lyflow_indices_view* view);
 // level = k 是 2^k 倍的块均值缩小（边上不满一块的按实际像素数平均），core 现算一份放进 handle。
 // 缩小不是抽稀：隔行取样得到的是另一张图（ADR-0019），块均值是「离远了看同一张图」。
 typedef struct {
-  uint32_t width;         /* 这一级的宽高（完整尺寸，不随行切片变） */
+  uint32_t width; /* 这一级的宽高（完整尺寸，不随行切片变） */
   uint32_t height;
-  uint32_t channels;      /* 1 / 3 / 4，顺序 RGB(A) */
-  uint32_t depth;         /* 每通道字节数：1 = u8，2 = u16，4 = f32 */
-  uint32_t level;         /* 实际给出的级别：要的太大时收到「长边缩到 1 像素」那一级 */
-  uint32_t full_width;    /* 原图（level 0）的宽高 */
+  uint32_t channels;   /* 1 / 3 / 4，顺序 RGB(A) */
+  uint32_t depth;      /* 每通道字节数：1 = u8，2 = u16，4 = f32 */
+  uint32_t level;      /* 实际给出的级别：要的太大时收到「长边缩到 1 像素」那一级 */
+  uint32_t full_width; /* 原图（level 0）的宽高 */
   uint32_t full_height;
-  uint32_t row_offset;    /* 本次切片的起始行 */
-  uint32_t row_count;     /* 本次返回的行数 */
-  uint32_t row_bytes;     /* 一行的字节数 = width * channels * depth（行紧排） */
-  const uint8_t* pixels;  /* row_count * row_bytes 字节，指向 row_offset 那一行 */
-  void* handle;           /* 内部持有，勿动 */
+  uint32_t row_offset;   /* 本次切片的起始行 */
+  uint32_t row_count;    /* 本次返回的行数 */
+  uint32_t row_bytes;    /* 一行的字节数 = width * channels * depth（行紧排） */
+  const uint8_t* pixels; /* row_count * row_bytes 字节，指向 row_offset 那一行 */
+  void* handle;          /* 内部持有，勿动 */
 } lyflow_image_view;
 
 // row_offset 越界返回成功、row_count = 0；row_count = 0 表示「从 row_offset 取到最后一行」。
@@ -329,7 +328,7 @@ LYFLOW_API char* lyflow_output_save(const char* run_id, const char* node_id, con
                                     const char* path, const char* format);
 
 #ifdef __cplusplus
-}  // extern "C"
+} // extern "C"
 #endif
 
-#endif  // LYFLOW_C_API_H
+#endif // LYFLOW_C_API_H

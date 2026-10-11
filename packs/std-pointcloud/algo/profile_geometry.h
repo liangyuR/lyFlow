@@ -15,8 +15,8 @@ struct PointToPlaneJacobian2D {
 };
 
 /// 邻域的最小特征向量。点少于 2 个返回 nullopt。
-std::optional<Eigen::Vector2d> estimateNormalFromNeighborhood(
-    const std::vector<Eigen::Vector2d>& neighborhood);
+std::optional<Eigen::Vector2d>
+estimateNormalFromNeighborhood(const std::vector<Eigen::Vector2d>& neighborhood);
 
 /// 逐点 knn 邻域的法线。点少于 2 个时全是零向量。
 std::vector<Eigen::Vector2d> estimateProfileNormals(const std::vector<Eigen::Vector2d>& points,
@@ -25,4 +25,4 @@ std::vector<Eigen::Vector2d> estimateProfileNormals(const std::vector<Eigen::Vec
 PointToPlaneJacobian2D computePointToPlaneJacobian(const Eigen::Vector2d& point,
                                                    const Eigen::Vector2d& normal);
 
-}  // namespace lyflow::std_pc
+} // namespace lyflow::std_pc

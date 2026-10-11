@@ -2,11 +2,11 @@
 // 选了保存之后要知道到底存没存成：另存为对话框取消了、配方的外部修改那一问选了取消、写盘出错，都算没存成，
 // 后面的打开 / 新建 / 关窗口就不做。
 
-import { discardUntitledBackup } from "./autosave";
-import { discardBackup, pickSavePath, rememberFile, saveDocTo, suggestFileName } from "./files";
-import { useGraphStore } from "../store/graph";
-import { commitRecipeSave, prepareRecipeSave } from "../store/recipeFiles";
-import { useUiStore } from "../store/ui";
+import { discardUntitledBackup } from './autosave';
+import { discardBackup, pickSavePath, rememberFile, saveDocTo, suggestFileName } from './files';
+import { useGraphStore } from '../store/graph';
+import { commitRecipeSave, prepareRecipeSave } from '../store/recipeFiles';
+import { useUiStore } from '../store/ui';
 
 /** 存成了返回 true。forcePicker = 另存为。 */
 export async function saveCurrent(forcePicker: boolean): Promise<boolean> {
@@ -22,8 +22,8 @@ export async function saveCurrent(forcePicker: boolean): Promise<boolean> {
     // 一次保存图与所有有改动的配方文件（K6 ③）。配方先查外部修改：用户选了取消，图也不存
     const doc = graph.doc;
     const recipes = await prepareRecipeSave(doc, path);
-    if (recipes === "cancelled") {
-      ui.showToast("已取消保存", "warn");
+    if (recipes === 'cancelled') {
+      ui.showToast('已取消保存', 'warn');
       return false;
     }
     await saveDocTo(path, doc);
@@ -34,10 +34,10 @@ export async function saveCurrent(forcePicker: boolean): Promise<boolean> {
     // 存过盘就没有「未保存的改动」了，备份留着只会在下次开图时误报
     await discardBackup(path);
     if (wasUntitled) await discardUntitledBackup();
-    ui.showToast("已保存");
+    ui.showToast('已保存');
     return true;
   } catch (e) {
-    ui.showToast(e instanceof Error ? e.message : String(e), "warn");
+    ui.showToast(e instanceof Error ? e.message : String(e), 'warn');
     return false;
   }
 }

@@ -17,16 +17,21 @@ namespace showcase {
 /// 「core 收到的就是编辑器写下去的」。curve 在 core 里是 JSON 文本，按名字认出来再解析。
 inline nlohmann::json echoValue(const std::string& name, const Value& v) {
   switch (v.kind()) {
-    case Value::Kind::Null:     return nullptr;
-    case Value::Kind::Bool:     return v.boolValue();
-    case Value::Kind::Int:      return v.intValue();
-    case Value::Kind::Float:    return v.floatValue();
-    case Value::Kind::FloatVec: return v.vecValue();
-    case Value::Kind::String:
-      if (name == "response" || name == "falloff") {
-        return nlohmann::json::parse(v.stringValue(), nullptr, false);
-      }
-      return v.stringValue();
+  case Value::Kind::Null:
+    return nullptr;
+  case Value::Kind::Bool:
+    return v.boolValue();
+  case Value::Kind::Int:
+    return v.intValue();
+  case Value::Kind::Float:
+    return v.floatValue();
+  case Value::Kind::FloatVec:
+    return v.vecValue();
+  case Value::Kind::String:
+    if (name == "response" || name == "falloff") {
+      return nlohmann::json::parse(v.stringValue(), nullptr, false);
+    }
+    return v.stringValue();
   }
   return nullptr;
 }
@@ -41,7 +46,8 @@ inline Status compute(const Inputs& inputs, const ParamView& params, Outputs& ou
   }
   Record echo;
   echo.type = "ParamShowcase";
-  for (const auto& [name, value] : params.raw()) echo.data["params"][name] = echoValue(name, value);
+  for (const auto& [name, value] : params.raw())
+    echo.data["params"][name] = echoValue(name, value);
   // 曲线在几个 x 上的取值：core 的 evaluateCurve 与编辑器画的线同一套算法
   const nlohmann::json response = echo.data["params"].value("response", nlohmann::json());
   for (double x : {0.0, 0.25, 0.5, 0.75, 1.0}) {
@@ -73,14 +79,15 @@ inline EnumOption option(const char* value, const char* label, const char* doc =
   return EnumOption{value, label, doc};
 }
 
-}  // namespace showcase
+} // namespace showcase
 
 /// 注册 test.param_showcase。已经注册过就什么都不做（doctest 与 LYFLOW_TEST_OPS 可能都来一次）。
 inline void registerParamShowcase(Registry& r) {
   using showcase::make;
   using showcase::option;
   using showcase::when;
-  if (r.find("test.param_showcase")) return;
+  if (r.find("test.param_showcase"))
+    return;
 
   OperatorDesc op;
   op.id = "test.param_showcase";
@@ -90,7 +97,8 @@ inline void registerParamShowcase(Registry& r) {
   op.keywords = {"showcase", "params", "test", "参数", "示例"};
   op.doc = "只在测试里注册：14 种参数类型各一个以上，参数面板与配方的验收素材。"
            "点云原样透传，echo 回显 core 收到的全部参数值。";
-  op.inputs = {Port{"cloud", "PointCloud", "Cloud", "可选：有就原样透传，给 2D 拖框当底图。", false}};
+  op.inputs = {
+      Port{"cloud", "PointCloud", "Cloud", "可选：有就原样透传，给 2D 拖框当底图。", false}};
   op.outputs = {Port{"cloud", "PointCloud", "Cloud", "输入的点云（没接输入时是空云）。", true},
                 Port{"echo", "Record", "Echo", "core 收到的参数值（ParamShowcase）。", true}};
 
@@ -111,7 +119,8 @@ inline void registerParamShowcase(Registry& r) {
   gain.softMax = 2.0;
   gain.step = 0.01;
   gain.unit = "×";
-  Param custom = make("customFactor", ParamType::Float, "Custom Factor", Value::number(0.5), "基础");
+  Param custom =
+      make("customFactor", ParamType::Float, "Custom Factor", Value::number(0.5), "基础");
   custom.doc = "只在 Mode = 自定义时出现（visibleWhen）。";
   custom.visibleWhen = when("mode", Value::text("custom"));
   Param tolerance = make("tolerance", ParamType::Float, "Tolerance", Value::number(0.001), "基础");
@@ -147,9 +156,9 @@ inline void registerParamShowcase(Registry& r) {
   Param overlay =
       make("overlay", ParamType::Color, "Overlay", Value::vec({1.0, 0.5, 0.1, 0.6}), "外观");
   overlay.alpha = true;
-  Param response = make("response", ParamType::Curve, "Response",
-                        Value::text(R"({"interp":"smooth","points":[[0,0],[0.5,0.35],[1,1]]})"),
-                        "外观");
+  Param response =
+      make("response", ParamType::Curve, "Response",
+           Value::text(R"({"interp":"smooth","points":[[0,0],[0.5,0.35],[1,1]]})"), "外观");
   response.doc = "输入强度 → 输出强度。x、y 都是 0–1。";
   response.min = 0.0;
   response.max = 1.0;
@@ -185,12 +194,12 @@ inline void registerParamShowcase(Registry& r) {
   falloff.min = 0.0;
   falloff.max = 1.0;
 
-  op.params = {enabled, mode,    iterations, gain,   custom,    tolerance,  offset,
-               scale,   weights, roi,        pose,   tint,      overlay,    response,
-               tag,     note,    writeFile,  exportPath, features, seed, precision, falloff};
+  op.params = {enabled,   mode,       iterations, gain, custom,    tolerance, offset, scale,
+               weights,   roi,        pose,       tint, overlay,   response,  tag,    note,
+               writeFile, exportPath, features,   seed, precision, falloff};
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &showcase::compute;
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::test
+} // namespace lyflow::test

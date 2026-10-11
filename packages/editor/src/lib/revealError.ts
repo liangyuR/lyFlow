@@ -1,20 +1,20 @@
 // 在出错的节点之间跳（工具栏的「error N」、F8 / Shift+F8）。错误挂在展开后的路径 id 上（ADR-0010）：
 // 子图里的那个也要打开到它所在的一层（describeEventNode），参数上标红框。
 
-import { describeEventNode, fullId, levelOf, type SubPath } from "./subgraph";
-import { aggregatedNodes, useExecutionStore, type NodeExecution } from "../store/execution";
-import { useGraphStore } from "../store/graph";
-import { useManifestStore } from "../store/manifest";
-import { useUiStore } from "../store/ui";
-import type { NodeState } from "../types/execution";
-import type { GraphDoc, GraphEdge } from "../types/graph";
+import { describeEventNode, fullId, levelOf, type SubPath } from './subgraph';
+import { aggregatedNodes, useExecutionStore, type NodeExecution } from '../store/execution';
+import { useGraphStore } from '../store/graph';
+import { useManifestStore } from '../store/manifest';
+import { useUiStore } from '../store/ui';
+import type { NodeState } from '../types/execution';
+import type { GraphDoc, GraphEdge } from '../types/graph';
 
 /** 这次运行里出错的节点（error 状态、带诊断），按事件到达的顺序。上游失败连带的是 cancelled
  *  （core 的 upstream_failed），不在这里 —— 第一个就是根因。 */
 export function errorNodeIds(): string[] {
   const out: string[] = [];
   for (const [id, n] of useExecutionStore.getState().nodes) {
-    if (n.state === "error" && n.errors.length > 0) out.push(id);
+    if (n.state === 'error' && n.errors.length > 0) out.push(id);
   }
   return out;
 }
@@ -36,10 +36,16 @@ export function revealError(step: 0 | 1 | -1): boolean {
 
 /** 定位到事件里的这个节点（展开后的路径 id）：打开到它所在的一层、选中，错误带参数路径就标到那一行。 */
 function revealEventNode(id: string): boolean {
-  const d = describeEventNode(useGraphStore.getState().doc, useManifestStore.getState().operatorsById, id);
+  const d = describeEventNode(
+    useGraphStore.getState().doc,
+    useManifestStore.getState().operatorsById,
+    id,
+  );
   if (!d.reveal) return false;
   const { path, localId, exact } = d.reveal;
-  const paramPath = exact ? useExecutionStore.getState().nodes.get(id)?.errors[0]?.paramPath : undefined;
+  const paramPath = exact
+    ? useExecutionStore.getState().nodes.get(id)?.errors[0]?.paramPath
+    : undefined;
   useUiStore.getState().revealNode(path, localId, paramPath);
   return true;
 }
@@ -67,8 +73,8 @@ export function failedUpstream(
         if (e.to.node !== id || seen.has(e.from.node)) continue;
         seen.add(e.from.node);
         const state = stateOf(e.from.node);
-        if (state === "error") return e.from.node;
-        if (state === "cancelled") next.push(e.from.node);
+        if (state === 'error') return e.from.node;
+        if (state === 'cancelled') next.push(e.from.node);
       }
     }
     frontier = next;

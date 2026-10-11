@@ -25,7 +25,7 @@ std::vector<std::string> validatePortContract(const nlohmann::json& contract,
 /// **contract 为空对象时立刻返回 true，一次遍历都不做**（m6-plan §9 的「默认零开销」）。
 /// 不符时填 expected / actual（原样进 summary 的 contractViolations）与一句
 /// 带期望和实际的人话（进 Status::message）。
-bool checkPortContract(const nlohmann::json& contract, const Data& value,
-                       nlohmann::json& expected, nlohmann::json& actual, std::string& message);
+bool checkPortContract(const nlohmann::json& contract, const Data& value, nlohmann::json& expected,
+                       nlohmann::json& actual, std::string& message);
 
-}  // namespace lyflow
+} // namespace lyflow

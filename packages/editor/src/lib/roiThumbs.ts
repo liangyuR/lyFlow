@@ -2,9 +2,9 @@
 // 底图的包围盒只有 3D 视图取过那片云之后才知道，所以视图每显示一片云就在这里记一笔（按展开后的节点 id）；
 // 没记过的节点，缩略图退回用同组几个框的并集当范围。纯 UI 旁路缓存，不进任何 store。
 
-import { roiFramesOf } from "./roiFrames";
-import type { GraphNode } from "../types/graph";
-import type { OperatorDesc } from "../types/manifest";
+import { roiFramesOf } from './roiFrames';
+import type { GraphNode } from '../types/graph';
+import type { OperatorDesc } from '../types/manifest';
 
 /** [xMin, yMin, xMax, yMax]，米。 */
 export type Rect = [number, number, number, number];
@@ -70,7 +70,7 @@ export function roiThumb(
   for (const p of params) {
     const v = effective[p.name];
     if (!Array.isArray(v) || v.length !== 4) continue;
-    const s = p.unit === "mm" ? 0.001 : 1;
+    const s = p.unit === 'mm' ? 0.001 : 1;
     const r = (v as number[]).map((x) => Number(x) * s) as Rect;
     if (!(r[2] > r[0]) || !(r[3] > r[1])) continue;
     boxes.push({ param: p.name, rect: r, current: p.name === param });

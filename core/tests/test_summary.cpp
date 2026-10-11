@@ -30,15 +30,15 @@ Json summaryOf(Session& s, RunLog& log) {
   return fromEvent;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("summary：全绿的一轮是 ok，声明输出是 value") {
   ensureTestOps();
-  const Json doc = withOutputs(
-      {N{"n_src", "test.counted", Json{{"pointCount", 6}}},
-       N{"n_thin", "test.thin", Json{{"leaf", Json::array({0.01, 0.01, 0.01})}}}},
-      {E{"n_src.cloud", "n_thin.cloud"}},
-      Json{{"cloud", Json{{"node", "n_thin"}, {"port", "cloud"}}}});
+  const Json doc =
+      withOutputs({N{"n_src", "test.counted", Json{{"pointCount", 6}}},
+                   N{"n_thin", "test.thin", Json{{"leaf", Json::array({0.01, 0.01, 0.01})}}}},
+                  {E{"n_src.cloud", "n_thin.cloud"}},
+                  Json{{"cloud", Json{{"node", "n_thin"}, {"port", "cloud"}}}});
   Session s(doc);
   RunLog& log = s.wait();
   CHECK(log.runStatus() == "ok");
@@ -64,12 +64,11 @@ TEST_CASE("summary：有节点失败但声明输出都拿到了值 → degraded"
   ensureTestOps();
   // 主路径炸了，fallback 走 b 把结果量出来：run_finished 是 ok，
   // 但「这一轮有东西坏了」必须说出来 —— 这正是 degraded 存在的理由（H2）。
-  const Json doc = withOutputs(
-      {N{"n_a", "test.fail", Json{{"message", "主路径炸了"}}},
-       N{"n_b", "test.counted", Json{{"pointCount", 5}}},
-       N{"n_fb", "flow.fallback", Json::object()}},
-      {E{"n_a.cloud", "n_fb.a"}, E{"n_b.cloud", "n_fb.b"}},
-      Json{{"result", Json{{"node", "n_fb"}, {"port", "out"}}}});
+  const Json doc = withOutputs({N{"n_a", "test.fail", Json{{"message", "主路径炸了"}}},
+                                N{"n_b", "test.counted", Json{{"pointCount", 5}}},
+                                N{"n_fb", "flow.fallback", Json::object()}},
+                               {E{"n_a.cloud", "n_fb.a"}, E{"n_b.cloud", "n_fb.b"}},
+                               Json{{"result", Json{{"node", "n_fb"}, {"port", "out"}}}});
   Session s(doc);
   RunLog& log = s.wait();
   CHECK(log.runStatus() == "ok");
@@ -90,14 +89,14 @@ TEST_CASE("summary：有节点失败但声明输出都拿到了值 → degraded"
         std::string::npos);
 }
 
-TEST_CASE("summary：声明输出崩了 → failed，from 沿边回溯到最近的 error 节点；只有一个错时 root 就是 from") {
+TEST_CASE(
+    "summary：声明输出崩了 → failed，from 沿边回溯到最近的 error 节点；只有一个错时 root 就是 from") {
   ensureTestOps();
   // n_a 失败 → n_t1 → n_t2 连坐（cancelled/upstream_failed）。
   // 输出挂在 n_t2 上，from 必须指回真正出错的 n_a 而不是它自己。
   const Json doc = withOutputs(
       {N{"n_a", "test.fail", Json{{"code", "insufficient_points"}, {"message", "点太少"}}},
-       N{"n_t1", "test.thin", Json::object()},
-       N{"n_t2", "test.thin", Json::object()}},
+       N{"n_t1", "test.thin", Json::object()}, N{"n_t2", "test.thin", Json::object()}},
       {E{"n_a.cloud", "n_t1.cloud"}, E{"n_t1.cloud", "n_t2.cloud"}},
       Json{{"flush", Json{{"node", "n_t2"}, {"port", "cloud"}}}});
   Session s(doc);
@@ -128,11 +127,10 @@ TEST_CASE("summary：from 是最近的出错节点，root 是失败链上拓扑�
   const Json doc = withOutputs(
       {N{"n_a", "test.fail", Json{{"code", "insufficient_points"}, {"message", "主路径点太少"}}},
        N{"n_b", "test.fail", Json{{"code", "icp_score_low"}, {"message", "模板配不上"}}},
-       N{"n_t1", "test.thin", Json::object()},
-       N{"n_t2", "test.thin", Json::object()},
+       N{"n_t1", "test.thin", Json::object()}, N{"n_t2", "test.thin", Json::object()},
        N{"n_fb", "flow.fallback", Json::object()}},
-      {E{"n_a.cloud", "n_t1.cloud"}, E{"n_b.cloud", "n_t2.cloud"},
-       E{"n_t1.cloud", "n_fb.a"}, E{"n_t2.cloud", "n_fb.b"}},
+      {E{"n_a.cloud", "n_t1.cloud"}, E{"n_b.cloud", "n_t2.cloud"}, E{"n_t1.cloud", "n_fb.a"},
+       E{"n_t2.cloud", "n_fb.b"}},
       Json{{"gap", Json{{"node", "n_fb"}, {"port", "out"}}}});
   Session s(doc);
   RunLog& log = s.wait();
@@ -158,13 +156,12 @@ TEST_CASE("summary：没被 demand 的惰性分支上的输出是 inactive，不
   ensureTestOps();
   // 主路径成功 → b 的闭包一次都不跑。挂在 b 上的那一维「本来就没有」，
   // 与「本该有、崩了」是两件事（H3）。
-  const Json doc = withOutputs(
-      {N{"n_a", "test.counted", Json{{"pointCount", 4}}},
-       N{"n_b", "test.counted", Json{{"pointCount", 7}}},
-       N{"n_fb", "flow.fallback", Json::object()}},
-      {E{"n_a.cloud", "n_fb.a"}, E{"n_b.cloud", "n_fb.b"}},
-      Json{{"gap", Json{{"node", "n_fb"}, {"port", "out"}}},
-           {"flush", Json{{"node", "n_b"}, {"port", "cloud"}}}});
+  const Json doc = withOutputs({N{"n_a", "test.counted", Json{{"pointCount", 4}}},
+                                N{"n_b", "test.counted", Json{{"pointCount", 7}}},
+                                N{"n_fb", "flow.fallback", Json::object()}},
+                               {E{"n_a.cloud", "n_fb.a"}, E{"n_b.cloud", "n_fb.b"}},
+                               Json{{"gap", Json{{"node", "n_fb"}, {"port", "out"}}},
+                                    {"flush", Json{{"node", "n_b"}, {"port", "cloud"}}}});
   Session s(doc);
   RunLog& log = s.wait();
   CHECK(log.runStatus() == "ok");
@@ -184,10 +181,8 @@ TEST_CASE("summary：decisions 收全图每一个 FallbackChoice") {
   ensureTestOps();
   // 两级 fallback：第一级走 b（主路径炸了），第二级走 a（上一级给出了结果）。
   const Json doc = withOutputs(
-      {N{"n_a", "test.fail", Json::object()},
-       N{"n_b", "test.counted", Json{{"pointCount", 3}}},
-       N{"n_fb1", "flow.fallback", Json::object()},
-       N{"n_r", "util.reroute", Json::object()},
+      {N{"n_a", "test.fail", Json::object()}, N{"n_b", "test.counted", Json{{"pointCount", 3}}},
+       N{"n_fb1", "flow.fallback", Json::object()}, N{"n_r", "util.reroute", Json::object()},
        N{"n_c", "test.counted", Json{{"pointCount", 9}}},
        N{"n_fb2", "flow.fallback", Json::object()}},
       {E{"n_a.cloud", "n_fb1.a"}, E{"n_b.cloud", "n_fb1.b"}, E{"n_fb1.out", "n_r.in"},
@@ -219,9 +214,9 @@ TEST_CASE("summary：图没声明 outputs 时，有节点 error 就是 failed") 
 
 TEST_CASE("summary：run 结束之前取不到，free 之后也取不到") {
   ensureTestOps();
-  const Json doc = makeGraph({N{"n_b", "test.block", Json::object()},
-                              N{"n_src", "test.counted", Json{{"pointCount", 2}}}},
-                             {E{"n_src.cloud", "n_b.cloud"}});
+  const Json doc = makeGraph(
+      {N{"n_b", "test.block", Json::object()}, N{"n_src", "test.counted", Json{{"pointCount", 2}}}},
+      {E{"n_src.cloud", "n_b.cloud"}});
   ops::blockEntered().store(false);
   std::string raw;
   std::string runId;
@@ -245,4 +240,4 @@ TEST_CASE("summary：run 结束之前取不到，free 之后也取不到") {
   CHECK_FALSE(exec::runSummaryJson(runId, raw));
 }
 
-}  // namespace lyflow::test
+} // namespace lyflow::test

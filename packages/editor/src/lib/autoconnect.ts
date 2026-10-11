@@ -2,8 +2,16 @@
 // 没有任何运行时的隐式上下文。规则只有一条 —— 未连的输入在图里「恰好有一个」类型兼容的
 // 输出就连上，多个就不连、把候选报给界面去高亮。
 
-import type { GraphDoc, PortRef } from "../types/graph";
-import { ANY, canConnect, findPort, inferAnyTypes, portType, typesCompatible, type GraphContext } from "./typecheck";
+import type { GraphDoc, PortRef } from '../types/graph';
+import {
+  ANY,
+  canConnect,
+  findPort,
+  inferAnyTypes,
+  portType,
+  typesCompatible,
+  type GraphContext,
+} from './typecheck';
 
 export interface AutoWire {
   from: PortRef;
@@ -26,7 +34,11 @@ const key = (r: PortRef) => `${r.node}:${r.port}`;
  *  同一种类型 —— 那个节点的输出取代了它。例子：read_scan.scan 接进 locate_template，后者也出
  *  ScanPair，于是往下游再拖节点时只剩 locate_template.scan 一个候选。不这么做的话，模板路径
  *  上每一步都会重新产出 ScanPair，「恰好一个候选」在任何一张真实的图里都不成立。 */
-function shadowedOutputs(ctx: GraphContext, doc: GraphDoc, anyTypes: ReturnType<typeof inferAnyTypes>): Set<string> {
+function shadowedOutputs(
+  ctx: GraphContext,
+  doc: GraphDoc,
+  anyTypes: ReturnType<typeof inferAnyTypes>,
+): Set<string> {
   const out = new Set<string>();
   const typesOut = new Map<string, Set<string>>();
   const outputTypesOf = (nodeId: string): Set<string> => {
@@ -42,7 +54,7 @@ function shadowedOutputs(ctx: GraphContext, doc: GraphDoc, anyTypes: ReturnType<
   for (const e of doc.edges) {
     const node = doc.nodes.find((n) => n.id === e.from.node);
     const op = node ? ctx.operatorsById.get(node.op) : undefined;
-    const port = findPort(op, e.from.port, "output");
+    const port = findPort(op, e.from.port, 'output');
     if (!port) continue;
     const type = portType(port, e.from.node, anyTypes);
     if (type === ANY) continue;
@@ -82,7 +94,7 @@ export function planAutoConnect(
     if (connected.has(key(to))) continue;
     const node = doc.nodes.find((n) => n.id === to.node);
     const op = node ? ctx.operatorsById.get(node.op) : undefined;
-    const port = findPort(op, to.port, "input");
+    const port = findPort(op, to.port, 'input');
     if (!port) continue;
     const inType = portType(port, to.node, anyTypes);
     // Any 输入（flow.fallback 的 a / b 这类）谁都能接，猜就是瞎猜
@@ -127,15 +139,20 @@ export function healPlan(
     seen.add(nodeId);
     const node = byId.get(nodeId);
     const op = node ? ctx.operatorsById.get(node.op) : undefined;
-    const out = findPort(op, outPort, "output");
+    const out = findPort(op, outPort, 'output');
     if (!op || !out) return null;
     const outType = portType(out, nodeId, types);
     for (const input of op.inputs) {
       const e = doc.edges.find((x) => x.to.node === nodeId && x.to.port === input.name);
       if (!e) continue;
       const src = byId.get(e.from.node);
-      const srcPort = findPort(src ? ctx.operatorsById.get(src.op) : undefined, e.from.port, "output");
-      if (!srcPort || !typesCompatible(ctx, portType(srcPort, e.from.node, types), outType)) continue;
+      const srcPort = findPort(
+        src ? ctx.operatorsById.get(src.op) : undefined,
+        e.from.port,
+        'output',
+      );
+      if (!srcPort || !typesCompatible(ctx, portType(srcPort, e.from.node, types), outType))
+        continue;
       return ids.has(e.from.node) ? sourceOf(e.from.node, e.from.port, seen) : e.from;
     }
     return null;

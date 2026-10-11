@@ -21,7 +21,7 @@ namespace {
 const Json kSmall = Json{{"pointCount", 2000}};
 const Json kBadLeaf = Json{{"leaf", {0.0, 0.01, 0.01}}};
 
-}  // namespace
+} // namespace
 
 TEST_CASE("两节点图：事件顺序与 seq 连续") {
   ensureTestOps();
@@ -240,13 +240,13 @@ TEST_CASE("取消：在第 k 个节点生效，join 在 1 秒内返回") {
   const auto t0 = std::chrono::steady_clock::now();
   s.run().cancel();
   RunLog& log = s.wait();
-  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                           std::chrono::steady_clock::now() - t0)
-                           .count();
+  const auto elapsed =
+      std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0)
+          .count();
 
   CHECK(elapsed < 1000);
   CHECK(log.seqIsDense());
-  CHECK(log.finalState("g") == "done");   // 取消之前已经跑完的节点保持 done
+  CHECK(log.finalState("g") == "done"); // 取消之前已经跑完的节点保持 done
   CHECK(log.finalState("b") == "cancelled");
   CHECK(log.finalState("p") == "cancelled");
   CHECK(log.runStatus() == "cancelled");
@@ -256,12 +256,12 @@ TEST_CASE("线程预算按整个进程里在算的节点数分：另一次运行
   ensureTestOps();
   const Json probe = makeGraph({{"t", "test.budget"}}, {});
   REQUIRE(runGraph(probe).runStatus() == "ok");
-  CHECK(ops::lastBudget().load() == exec::threadBudgetFor(1));  // 只有它在算：全部核
+  CHECK(ops::lastBudget().load() == exec::threadBudgetFor(1)); // 只有它在算：全部核
 
   // 另一次运行卡在 test.block 里（编辑器里被抢占、还在收尾的那次就是这样，eval --jobs 也是）
   ops::blockEntered().store(false);
-  Session other(makeGraph({{"g", "gen.synthetic", kSmall}, {"b", "test.block"}},
-                          {{"g.cloud", "b.cloud"}}));
+  Session other(
+      makeGraph({{"g", "gen.synthetic", kSmall}, {"b", "test.block"}}, {{"g.cloud", "b.cloud"}}));
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
   while (!ops::blockEntered().load() && std::chrono::steady_clock::now() < deadline) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -288,7 +288,7 @@ TEST_CASE("Run to node：只执行目标的上游闭包") {
   CHECK(log.runStatus() == "ok");
   CHECK(log.finalState("g") == "done");
   CHECK(log.finalState("v") == "done");
-  CHECK(log.finalState("p").empty());  // 压根没进计划
+  CHECK(log.finalState("p").empty()); // 压根没进计划
   CHECK(log.events.front()["targets"][0] == "v");
 }
 
@@ -314,9 +314,10 @@ TEST_CASE("溢出的数字字面量在解析期就被挡住，不会变成 inf �
       const std::string token = std::string(lead) + bad;
       const std::size_t at = manifest.find(token);
       // 后面紧跟字母/数字的是某个名字的前缀（比如 "info"），不是数字字面量
-      const bool isLiteral = at != std::string::npos &&
-                             (at + token.size() >= manifest.size() ||
-                              !std::isalnum(static_cast<unsigned char>(manifest[at + token.size()])));
+      const bool isLiteral =
+          at != std::string::npos &&
+          (at + token.size() >= manifest.size() ||
+           !std::isalnum(static_cast<unsigned char>(manifest[at + token.size()])));
       CHECK_MESSAGE(!isLiteral, "manifest 里有非有限数字: " << token);
     }
   }

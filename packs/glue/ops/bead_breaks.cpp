@@ -10,7 +10,8 @@ namespace {
 std::vector<Px> pxList(const std::vector<P2>& pts) {
   std::vector<Px> out;
   out.reserve(pts.size());
-  for (const P2& p : pts) out.push_back(Px{p.x, p.y});
+  for (const P2& p : pts)
+    out.push_back(Px{p.x, p.y});
   return out;
 }
 
@@ -23,7 +24,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   const Metric metric = metricFromInfo(bead.info);
   const double step = bead.info.value("stationStep", 4.0);
   double z0 = bead.line.s.front(), z1 = bead.line.s.back();
-  if (const auto z = bead.info.find("zone"); z != bead.info.end() && z->is_array() && z->size() == 2) {
+  if (const auto z = bead.info.find("zone");
+      z != bead.info.end() && z->is_array() && z->size() == 2) {
     z0 = numOf((*z)[0]);
     z1 = numOf((*z)[1]);
   }
@@ -41,7 +43,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     }
     const std::size_t first = i;
     std::size_t last = i;
-    while (last + 1 < st.size() && !st[last + 1].present) ++last;
+    while (last + 1 < st.size() && !st[last + 1].present)
+      ++last;
     i = last + 1;
     // 断口在两个有胶站之间：头尾各让出半个站距，再夹在检测区里
     const double sStart = std::max(z0, st[first].s - 0.5 * step);
@@ -67,7 +70,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     if (!atEnds && (atStart || atEnd)) {
       b["reason"] = "贴着检测区的端点，countAtZoneEnds = false 不计";
       ignored.push_back(std::move(b));
-      ov.polyline("coarse", pxList(along), false, "端点处无胶 " + fmt(len) + " " + metric.unit() + "（不计）");
+      ov.polyline("coarse", pxList(along), false,
+                  "端点处无胶 " + fmt(len) + " " + metric.unit() + "（不计）");
       continue;
     }
     longest = std::max(longest, len);
@@ -105,7 +109,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerBeadBreaks(Registry& r) {
   OperatorDesc op;
@@ -121,14 +125,17 @@ void registerBeadBreaks(Registry& r) {
       "countAtZoneEnds = false 时贴着检测区端点的那几段不计（起胶、收胶帧）。";
   op.inputs = {Port{"bead", "Bundle<glue.Bead>", "Bead", "glue.bead_width 的逐站结果。", true}};
   op.outputs = {
-      Port{"breaks", "Record", "Breaks",
-           "glue.Breaks：count、longest、unit、breaks（每段 sStart、sEnd、length、start / end 两端点）。", true},
+      Port{
+          "breaks", "Record", "Breaks",
+          "glue.Breaks：count、longest、unit、breaks（每段 sStart、sEnd、length、start / end 两端点）。",
+          true},
       Port{"count", "Measurement", "Count", "断胶几处。", true},
       Port{"longest", "Measurement", "Longest", "最长的一处有多长（没有就是 0）。", true},
       Port{"overlay", "Record", "Overlay", "lyflow.overlay2d：每处断口沿胶路画一段。", true},
   };
-  Param minLength = floatParam("minLength", "Min Length", 20.0, "px",
-                               "连续无胶至少这么长才算断胶。接了标定时按 mm 解释（与 bead 的单位相同）。");
+  Param minLength =
+      floatParam("minLength", "Min Length", 20.0, "px",
+                 "连续无胶至少这么长才算断胶。接了标定时按 mm 解释（与 bead 的单位相同）。");
   minLength.min = 0.0;
   minLength.unitSource = "bead.info.unit";
   Param atEnds = boolParam("countAtZoneEnds", "Count At Zone Ends", true,
@@ -139,4 +146,4 @@ void registerBeadBreaks(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

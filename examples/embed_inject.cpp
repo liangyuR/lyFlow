@@ -15,7 +15,8 @@ namespace {
 
 std::string readAll(const std::string& path) {
   std::ifstream in(path, std::ios::binary);
-  if (!in) return {};
+  if (!in)
+    return {};
   std::ostringstream buffer;
   buffer << in.rdbuf();
   return buffer.str();
@@ -31,12 +32,13 @@ std::vector<std::string> split(const std::string& text, char sep) {
   std::string item;
   std::istringstream in(text);
   while (std::getline(in, item, sep)) {
-    if (!item.empty()) out.push_back(item);
+    if (!item.empty())
+      out.push_back(item);
   }
   return out;
 }
 
-}  // namespace
+} // namespace
 
 int main(int argc, char** argv) {
   std::string dll;
@@ -100,8 +102,10 @@ int main(int argc, char** argv) {
         in.port = port;
         const std::size_t n = view.pointCount();
         in.xyz.assign(view.xyz(), view.xyz() + n * 3);
-        if (view.intensity()) in.intensity.assign(view.intensity(), view.intensity() + n);
-        if (view.normals()) in.normals.assign(view.normals(), view.normals() + n * 3);
+        if (view.intensity())
+          in.intensity.assign(view.intensity(), view.intensity() + n);
+        if (view.normals())
+          in.normals.assign(view.normals(), view.normals() + n * 3);
         injected.inputs.push_back(std::move(in));
       }
       if (missing) {

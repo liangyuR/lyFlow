@@ -27,15 +27,15 @@ Box2D box(float xMin, float yMin, float xMax, float yMax) {
   return b;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("filter.crop_box2d 的开闭区间在边界点上分得开") {
   PointCloud cloud;
-  cloud.push(0.0f, 0.0f, 0.0f);    // 角上
-  cloud.push(1.0f, 0.5f, 0.0f);    // 右边上
-  cloud.push(0.5f, 0.5f, 0.0f);    // 正中间
-  cloud.push(2.0f, 2.0f, 0.0f);    // 框外
-  cloud.push(std::nanf(""), 0.5f, 0.0f);  // 非有限：两种口径都丢
+  cloud.push(0.0f, 0.0f, 0.0f);          // 角上
+  cloud.push(1.0f, 0.5f, 0.0f);          // 右边上
+  cloud.push(0.5f, 0.5f, 0.0f);          // 正中间
+  cloud.push(2.0f, 2.0f, 0.0f);          // 框外
+  cloud.push(std::nanf(""), 0.5f, 0.0f); // 非有限：两种口径都丢
 
   SUBCASE("closed 留下边界点") {
     Call c;
@@ -83,7 +83,7 @@ TEST_CASE("fit.line_2d 找回合成直线的方向与内点") {
   REQUIRE(line != nullptr);
   const float slope = line->dir[1] / line->dir[0];
   CHECK(std::fabs(slope) == doctest::Approx(0.5).epsilon(0.01));
-  CHECK_FALSE(line->hasSegment);  // 没接 clipTo 就不带端点
+  CHECK_FALSE(line->hasSegment); // 没接 clipTo 就不带端点
 
   const Indices* inliers = c.outputs["inliers"].asIndices();
   REQUIRE(inliers != nullptr);

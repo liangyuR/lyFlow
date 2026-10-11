@@ -2,20 +2,28 @@
 // 存储格式照 manifest 的约定（16 个数、行主序，lib/transform.ts）；带缩放或切变的矩阵拆不成 T·R，
 // 只能在矩阵视图里改。参数面板与 Inspector 用的都是这一份（ParamControls 的映射表）。
 
-import { useState } from "react";
+import { useState } from 'react';
 
-import { asMatrix, clean, compose, decompose, IDENTITY, isRigid, summarize } from "../lib/transform";
-import { valueEquals } from "../lib/params";
-import type { ControlProps } from "./ParamControls";
-import { NumberInput } from "./NumberInput";
+import {
+  asMatrix,
+  clean,
+  compose,
+  decompose,
+  IDENTITY,
+  isRigid,
+  summarize,
+} from '../lib/transform';
+import { valueEquals } from '../lib/params';
+import type { ControlProps } from './ParamControls';
+import { NumberInput } from './NumberInput';
 
-const AXES = ["X", "Y", "Z"];
+const AXES = ['X', 'Y', 'Z'];
 
 export function TransformControl({ param, value, disabled, onChange, nodeId }: ControlProps) {
   const m = asMatrix(value);
   const rigid = isRigid(m);
-  const [view, setView] = useState<"tr" | "matrix">(rigid ? "tr" : "matrix");
-  const shown = rigid ? view : "matrix";
+  const [view, setView] = useState<'tr' | 'matrix'>(rigid ? 'tr' : 'matrix');
+  const shown = rigid ? view : 'matrix';
   const tr = rigid ? decompose(m) : null;
   const step = param.step ?? 0.001;
 
@@ -48,10 +56,10 @@ export function TransformControl({ param, value, disabled, onChange, nodeId }: C
           className="ctl-btn"
           data-testid={`transform-view-${param.name}`}
           disabled={!rigid}
-          title={rigid ? "在 平移/旋转 与 4×4 矩阵 之间切换" : "含缩放或切变，只能按矩阵改"}
-          onClick={() => setView(shown === "tr" ? "matrix" : "tr")}
+          title={rigid ? '在 平移/旋转 与 4×4 矩阵 之间切换' : '含缩放或切变，只能按矩阵改'}
+          onClick={() => setView(shown === 'tr' ? 'matrix' : 'tr')}
         >
-          {shown === "tr" ? "4×4" : "T·R"}
+          {shown === 'tr' ? '4×4' : 'T·R'}
         </button>
         <button
           type="button"
@@ -63,9 +71,9 @@ export function TransformControl({ param, value, disabled, onChange, nodeId }: C
           单位阵
         </button>
       </div>
-      {shown === "tr" && tr ? (
+      {shown === 'tr' && tr ? (
         <div className="ctl-tf__tr">
-          <span className="ctl-tf__label">T{param.unit ? ` (${param.unit})` : ""}</span>
+          <span className="ctl-tf__label">T{param.unit ? ` (${param.unit})` : ''}</span>
           {tr.t.map((v, i) => (
             <label key={`t${i}`} className="ctl-vec__item">
               <span className="ctl-vec__axis">{AXES[i]}</span>
@@ -81,7 +89,10 @@ export function TransformControl({ param, value, disabled, onChange, nodeId }: C
               />
             </label>
           ))}
-          <span className="ctl-tf__label" title="内旋 X→Y→Z（R = Rz·Ry·Rx），与 transform.make 同一约定">
+          <span
+            className="ctl-tf__label"
+            title="内旋 X→Y→Z（R = Rz·Ry·Rx），与 transform.make 同一约定"
+          >
             R (°)
           </span>
           {tr.r.map((v, i) => (

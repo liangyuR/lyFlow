@@ -3,12 +3,12 @@
 
 export class NoDialogError extends Error {
   constructor() {
-    super("当前宿主没有提供文件对话框");
+    super('当前宿主没有提供文件对话框');
   }
 }
 
 export interface PathPickRequest {
-  mode: "open" | "save" | "dir";
+  mode: 'open' | 'save' | 'dir';
   filters?: { name: string; extensions: string[] }[];
   defaultPath?: string;
 }
@@ -28,7 +28,9 @@ export interface EditorDialogs {
   confirmRestore(path: string, message: string): Promise<boolean>;
   /** 可选：配方的导入（open）与导出（save）选文件（param-recipe P3.6）。不给就退回 pickPath，
    *  再没有就在编辑器里让人输一个路径。suggested 是导出时建议的文件名。 */
-  pickRecipePath?: ((mode: "open" | "save", suggested?: string) => Promise<string | null>) | undefined;
+  pickRecipePath?:
+    | ((mode: 'open' | 'save', suggested?: string) => Promise<string | null>)
+    | undefined;
 }
 
 export const browserDialogs: EditorDialogs = {

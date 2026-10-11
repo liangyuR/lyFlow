@@ -1,9 +1,9 @@
 // 自动布局（E8）。只在两种时机触发：文档缺 ui.position 时打开即布局，
 // 以及用户主动点「整理」。永远不自动覆盖用户摆好的位置。
 
-import dagre from "@dagrejs/dagre";
+import dagre from '@dagrejs/dagre';
 
-import type { GraphDoc } from "../types/graph";
+import type { GraphDoc } from '../types/graph';
 
 /** 没量到真实尺寸时的兜底。节点宽度基本固定，高度按端口数变。 */
 const DEFAULT_SIZE = { width: 220, height: 90 };
@@ -30,7 +30,7 @@ export function layoutGraph(doc: GraphDoc, options: LayoutOptions = {}): LayoutM
   if (nodes.length === 0) return [];
 
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: "LR", nodesep: 40, ranksep: 90, marginx: 20, marginy: 20 });
+  g.setGraph({ rankdir: 'LR', nodesep: 40, ranksep: 90, marginx: 20, marginy: 20 });
   g.setDefaultEdgeLabel(() => ({}));
 
   const ids = new Set(nodes.map((n) => n.id));

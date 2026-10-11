@@ -26,9 +26,9 @@ struct Pose2D {
 };
 
 struct LocateSpec {
-  P2 anchor{0, 0};           ///< 模板左上角像素在示教图上的位置
-  double searchRadius = 80;  ///< 模板中心最多偏开这么远（px）
-  double angleRange = 3;     ///< 角度扫描 ±range（度）
+  P2 anchor{0, 0};          ///< 模板左上角像素在示教图上的位置
+  double searchRadius = 80; ///< 模板中心最多偏开这么远（px）
+  double angleRange = 3;    ///< 角度扫描 ±range（度）
   double angleStep = 0.5;
   double minScore = 0.6;
 };
@@ -41,14 +41,14 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
 // ------------------------------------------------------------------ 逐点卡尺（K3）
 
 struct CaliperSpec {
-  double searchHalf = 48;    ///< 卡尺沿法向 ±searchHalf（px）
-  double caliperWidth = 5;   ///< 沿切向平均的宽度（px）
-  double innerFrom = -40;    ///< 内边只在 t ∈ [innerFrom, innerTo] 里找
+  double searchHalf = 48;  ///< 卡尺沿法向 ±searchHalf（px）
+  double caliperWidth = 5; ///< 沿切向平均的宽度（px）
+  double innerFrom = -40;  ///< 内边只在 t ∈ [innerFrom, innerTo] 里找
   double innerTo = -3;
-  double beadFrom = -15;     ///< 胶只在 t ∈ [max(内边 + 1, beadFrom), beadTo] 里找
+  double beadFrom = -15; ///< 胶只在 t ∈ [max(内边 + 1, beadFrom), beadTo] 里找
   double beadTo = 40;
-  bool innerDarkToBright = true;  ///< 沿法向看内边：开口暗 → 翻边亮（默认）
-  bool innerNearest = true;       ///< 有几条内边时取离胶最近的；false = 取最强的
+  bool innerDarkToBright = true; ///< 沿法向看内边：开口暗 → 翻边亮（默认）
+  bool innerNearest = true;      ///< 有几条内边时取离胶最近的；false = 取最强的
   bool beadDark = true;
   double contrastMin = 25;
   double widthMin = 3;
@@ -56,7 +56,7 @@ struct CaliperSpec {
 
 /// 一个站的结果。偏移都是沿法向、相对站点的 t（px）；找不到的是 NaN。
 struct CaliperStation {
-  std::string status = "ok";  ///< ok / no_inner / no_bead / incomplete_bead / out_of_image
+  std::string status = "ok"; ///< ok / no_inner / no_bead / incomplete_bead / out_of_image
   double inner = 0;
   double nearEdge = 0;
   double farEdge = 0;
@@ -67,4 +67,4 @@ struct CaliperStation {
 /// 站点 c、法向 n（单位向量，指向翻边）上量一次。
 CaliperStation measureCaliper(const cv::Mat& gray, P2 c, P2 n, const CaliperSpec& spec);
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

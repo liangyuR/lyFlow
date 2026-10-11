@@ -10,7 +10,8 @@ namespace {
 
 std::string asString(const nlohmann::json& j, const char* key) {
   auto it = j.find(key);
-  if (it == j.end() || !it->is_string()) return {};
+  if (it == j.end() || !it->is_string())
+    return {};
   return it->get<std::string>();
 }
 
@@ -32,9 +33,11 @@ bool readNode(const nlohmann::json& jn, RawNode& node, std::string& why) {
     return false;
   }
   auto bypassIt = jn.find("bypass");
-  if (bypassIt != jn.end() && bypassIt->is_boolean()) node.bypass = bypassIt->get<bool>();
+  if (bypassIt != jn.end() && bypassIt->is_boolean())
+    node.bypass = bypassIt->get<bool>();
   auto paramsIt = jn.find("params");
-  if (paramsIt != jn.end() && paramsIt->is_object()) node.params = *paramsIt;
+  if (paramsIt != jn.end() && paramsIt->is_object())
+    node.params = *paramsIt;
   return true;
 }
 
@@ -59,9 +62,11 @@ bool readEdge(const nlohmann::json& je, RawEdge& edge, std::string& why) {
 
 void readStringList(const nlohmann::json& j, const char* key, std::vector<std::string>& out) {
   auto it = j.find(key);
-  if (it == j.end() || !it->is_array()) return;
+  if (it == j.end() || !it->is_array())
+    return;
   for (const auto& e : *it) {
-    if (e.is_string()) out.push_back(e.get<std::string>());
+    if (e.is_string())
+      out.push_back(e.get<std::string>());
   }
 }
 
@@ -108,10 +113,11 @@ bool parseGraphParam(const std::string& name, const nlohmann::json& j, GraphPara
   return true;
 }
 
-}  // namespace
+} // namespace
 
 bool applyGraphParamValues(const nlohmann::json& values, RawGraph& graph, Diagnostics& diags) {
-  if (values.is_null()) return true;
+  if (values.is_null())
+    return true;
   if (!values.is_object()) {
     diags.error("", Phase::Validate, "bad_input", "顶层参数的取值必须是 JSON 对象 { 名字: 值 }");
     return false;
@@ -140,12 +146,15 @@ bool parseSubgraphDef(const nlohmann::json& j, const std::string& id, SubgraphDe
   }
   out.id = id;
   out.name = asString(j, "name");
-  if (out.name.empty()) out.name = asString(j, "label");
-  if (out.name.empty()) out.name = id;
+  if (out.name.empty())
+    out.name = asString(j, "label");
+  if (out.name.empty())
+    out.name = id;
   out.doc = asString(j, "doc");
   out.category = asString(j, "category");
   const std::string version = asString(j, "version");
-  if (!version.empty()) out.version = version;
+  if (!version.empty())
+    out.version = version;
   readStringList(j, "keywords", out.keywords);
 
   std::set<std::string> nodeIds;
@@ -341,8 +350,7 @@ bool parseGraph(const std::string& json, RawGraph& out, Diagnostics& diags) {
       // 「哪条边赢」就成了隐式的求值顺序，是 bug 温床。
       if (!occupiedInputs.insert({edge.toNode, edge.toPort}).second) {
         diags.error(edge.toNode, Phase::Validate, "multi_input",
-                    "输入端口 " + edge.toPort + " 上有多条边（输入端口是单连接）", {},
-                    edge.toPort);
+                    "输入端口 " + edge.toPort + " 上有多条边（输入端口是单连接）", {}, edge.toPort);
         continue;
       }
       out.edges.push_back(std::move(edge));
@@ -415,4 +423,4 @@ bool parseGraph(const std::string& json, RawGraph& out, Diagnostics& diags) {
   return !diags.hasErrors();
 }
 
-}  // namespace lyflow::exec
+} // namespace lyflow::exec

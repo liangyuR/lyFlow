@@ -17,7 +17,8 @@ fs::path findByPrefix(const fs::path& dir, const std::string& prefix) {
   std::vector<fs::path> hits;
   std::error_code ec;
   for (const auto& entry : fs::directory_iterator(dir, ec)) {
-    if (!entry.is_regular_file(ec)) continue;
+    if (!entry.is_regular_file(ec))
+      continue;
     const std::string name = entry.path().filename().string();
     if (name.rfind(prefix, 0) == 0 && entry.path().extension() == ".pcd") {
       hits.push_back(entry.path());
@@ -30,19 +31,22 @@ fs::path findByPrefix(const fs::path& dir, const std::string& prefix) {
 /// 指定了文件就用文件，否则在目录里按前缀找。给脚本用的是前者（清单里写死了路径），
 /// 手在界面上连图用的是后者。
 fs::path resolveProfile(const ParamView& params, const char* fileParam, const char* prefixParam) {
-  if (params.choice("source") == "files") return params.path(fileParam);
+  if (params.choice("source") == "files")
+    return params.path(fileParam);
   const fs::path dir = params.path("dir");
-  if (dir.empty()) return {};
+  if (dir.empty())
+    return {};
   return findByPrefix(dir, params.text(prefixParam));
 }
 
-}  // namespace
+} // namespace
 
 namespace fine {
 std::string profilePairKey(const ParamView& params) {
   const fs::path a = resolveProfile(params, "primaryFile", "primaryPrefix");
   const fs::path b = resolveProfile(params, "secondaryFile", "secondaryPrefix");
-  if (a.empty() || b.empty()) return {};
+  if (a.empty() || b.empty())
+    return {};
   return fileStamp(a) + "|" + fileStamp(b);
 }
 
@@ -79,7 +83,8 @@ Status loadPair(const Inputs&, const ParamView& params, Outputs& outputs, ExecCo
       conv::swapCloudAxis(cloud, &sensor, conv::kY, conv::kZ);
       cloud = std::move(sensor);
     }
-    if (drop) removeNonFinite(&cloud);
+    if (drop)
+      removeNonFinite(&cloud);
     outputs.set(side.port, Data::cloud(fromPcl(cloud)));
   }
   return Status::Ok();
@@ -94,17 +99,18 @@ Status toMeasurementFrame(const Inputs& inputs, const ParamView&, Outputs& outpu
   return Status::Ok();
 }
 
-}  // namespace fine
+} // namespace fine
 
 namespace {
 
 std::string templateKey(const ParamView& params) {
   const fs::path dir = params.path("dir");
-  if (dir.empty()) return {};
+  if (dir.empty())
+    return {};
   return fileStamp(dir / params.text("left")) + "|" + fileStamp(dir / params.text("right"));
 }
 
-}  // namespace
+} // namespace
 
 namespace fine {
 
@@ -135,7 +141,7 @@ Status loadTemplate(const Inputs&, const ParamView& params, Outputs& outputs, Ex
   return Status::Ok();
 }
 
-}  // namespace fine
+} // namespace fine
 
 namespace {
 
@@ -160,7 +166,7 @@ Param textParam(const char* name, const char* label, const char* def, const char
   return p;
 }
 
-}  // namespace
+} // namespace
 
 void registerLoadProfilePair(Registry& r) {
   OperatorDesc op;
@@ -169,14 +175,13 @@ void registerLoadProfilePair(Registry& r) {
   op.label = "加载剖面对";
   op.category = "间隙/输入输出";
   op.keywords = {"pcd", "profile", "master", "slave", "线扫", "测点"};
-  op.doc =
-      "读一个测点目录下的双头线扫剖面：Master 是 primary，Slave 是 secondary。"
-      "输出恒为传感器 XZ 帧的米（x=u, y=0, z=h）；归档成剖面布局（x=u, y=h, z=0）的 PCD "
-      "用 layout=profile 声明，读入时把 y 搬到 z、y 置 0，其他通道原样 —— 不声明的话下游"
-      "整条链的高度方向是错的。\n"
-      "目录模式下同一目录有多次采集时按文件名排序取第一个，要指定某一次用 source=files。"
-      "dropNonFinite 默认开；模型路径靠槽号与标签对齐，必须关掉，改在换轴之后接 "
-      "gap.drop_non_finite。";
+  op.doc = "读一个测点目录下的双头线扫剖面：Master 是 primary，Slave 是 secondary。"
+           "输出恒为传感器 XZ 帧的米（x=u, y=0, z=h）；归档成剖面布局（x=u, y=h, z=0）的 PCD "
+           "用 layout=profile 声明，读入时把 y 搬到 z、y 置 0，其他通道原样 —— 不声明的话下游"
+           "整条链的高度方向是错的。\n"
+           "目录模式下同一目录有多次采集时按文件名排序取第一个，要指定某一次用 source=files。"
+           "dropNonFinite 默认开；模型路径靠槽号与标签对齐，必须关掉，改在换轴之后接 "
+           "gap.drop_non_finite。";
   op.outputs = {
       Port{"primary", "PointCloud", "Primary", "Master（L0）那一片。", true},
       Port{"secondary", "PointCloud", "Secondary", "Slave（R1）那一片。", true},
@@ -193,9 +198,8 @@ void registerLoadProfilePair(Registry& r) {
   layout.name = "layout";
   layout.type = ParamType::Enum;
   layout.label = "Layout";
-  layout.doc =
-      "归档 PCD 的坐标布局。sensor 是现场直出的传感器布局（x=u, y=0, z=h），"
-      "profile 是把剖面拍平存成 x=u, y=h, z=0 的那一份，读入后换成传感器布局。";
+  layout.doc = "归档 PCD 的坐标布局。sensor 是现场直出的传感器布局（x=u, y=0, z=h），"
+               "profile 是把剖面拍平存成 x=u, y=h, z=0 的那一份，读入后换成传感器布局。";
   layout.def = Value::text("sensor");
   layout.options = {EnumOption{"sensor", "Sensor（x=u, y=0, z=h）", ""},
                     EnumOption{"profile", "Profile（x=u, y=h, z=0）", ""}};
@@ -243,9 +247,8 @@ void registerToMeasurementFrame(Registry& r) {
   op.label = "转换到测量帧";
   op.category = "间隙/预处理";
   op.keywords = {"axis", "swap", "frame", "换轴", "测量帧"};
-  op.doc =
-      "传感器 XZ 帧 → 测量 XY 帧：交换 y 与 z（swapCloudAxis）。这是反射不是旋转，手性会翻，"
-      "不要拿它当刚体变换用；已经在测量帧里的云（比如模板）再走一遍会把高度搬回 z。";
+  op.doc = "传感器 XZ 帧 → 测量 XY 帧：交换 y 与 z（swapCloudAxis）。这是反射不是旋转，手性会翻，"
+           "不要拿它当刚体变换用；已经在测量帧里的云（比如模板）再走一遍会把高度搬回 z。";
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "传感器帧的点云。", true}};
   op.outputs = {Port{"cloud", "PointCloud", "Cloud", "测量帧的点云。", true}};
   op.capabilities = {false, true, true};
@@ -260,9 +263,8 @@ void registerLoadTemplate(Registry& r) {
   op.label = "加载模板";
   op.category = "间隙/输入输出";
   op.keywords = {"template", "模板", "pcd"};
-  op.doc =
-      "读一对模板 PCD。模板已经在测量 XY 帧里（z=0），不要再接 gap.to_measurement_frame。"
-      "模板必须与当前样本出自同一个配置：对不上时 ICP 照样给分，只是配到了别的形状上。";
+  op.doc = "读一对模板 PCD。模板已经在测量 XY 帧里（z=0），不要再接 gap.to_measurement_frame。"
+           "模板必须与当前样本出自同一个配置：对不上时 ICP 照样给分，只是配到了别的形状上。";
   op.outputs = {
       Port{"left", "PointCloud", "Left", "左模板。", true},
       Port{"right", "PointCloud", "Right", "右模板。", true},
@@ -278,4 +280,4 @@ void registerLoadTemplate(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

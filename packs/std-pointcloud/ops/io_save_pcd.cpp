@@ -25,13 +25,14 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs&, ExecCont
   const PointCloud& cloud = *inputs.get("cloud").asCloud();
   const std::filesystem::path file = params.path("path");
   const Status s = saveCloudToFile(cloud, file, params.choice("format"), ctx.threadBudget());
-  if (!s.ok) return s;
+  if (!s.ok)
+    return s;
   ctx.log(LogLevel::Info,
           "写出 " + std::to_string(cloud.pointCount()) + " 个点 -> " + file.u8string());
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 Status saveCloudToFile(const PointCloud& cloud, const std::filesystem::path& file,
                        const std::string& format) {
@@ -131,4 +132,4 @@ void registerIoSavePcd(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

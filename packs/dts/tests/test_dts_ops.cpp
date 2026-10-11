@@ -55,29 +55,35 @@ struct Chain {
 
   bool run(PointCloud raw) {
     clean.inputs["profile"] = Data::cloud(std::move(raw));
-    if (!step(clean, "dts.profile_clean", cleanOverrides)) return false;
+    if (!step(clean, "dts.profile_clean", cleanOverrides))
+      return false;
 
     faces.inputs["clean"] = clean.out("clean");
-    if (!step(faces, "dts.split_faces")) return false;
+    if (!step(faces, "dts.split_faces"))
+      return false;
 
     dome.inputs["clean"] = clean.out("clean");
     dome.inputs["faces"] = faces.out("faces");
-    if (!step(dome, "dts.seal_dome")) return false;
+    if (!step(dome, "dts.seal_dome"))
+      return false;
 
     metal.inputs["clean"] = clean.out("clean");
     metal.inputs["faces"] = faces.out("faces");
     metal.inputs["dome"] = dome.out("dome");
-    if (!step(metal, "dts.pick_metal")) return false;
+    if (!step(metal, "dts.pick_metal"))
+      return false;
 
     root.inputs["clean"] = clean.out("clean");
     root.inputs["faces"] = faces.out("faces");
     root.inputs["dome"] = dome.out("dome");
     root.inputs["pick"] = metal.out("pick");
-    if (!step(root, "dts.seal_root")) return false;
+    if (!step(root, "dts.seal_root"))
+      return false;
 
     flush.inputs["root"] = root.out("root");
     flush.inputs["metal"] = metal.out("metal");
-    if (!step(flush, "dts.flush")) return false;
+    if (!step(flush, "dts.flush"))
+      return false;
 
     bundle.inputs["faces"] = faces.out("faces");
     bundle.inputs["dome"] = dome.out("dome");
@@ -91,11 +97,11 @@ struct Chain {
 
   double flushMm() { return flush.out("flush").asMeasurement()->value; }
 
- private:
-  bool step(Call& c, const char* id,
-            const std::unordered_map<std::string, Value>& overrides = {}) {
+private:
+  bool step(Call& c, const char* id, const std::unordered_map<std::string, Value>& overrides = {}) {
     status = c.run(id, overrides);
-    if (!status.ok) failedOp = id;
+    if (!status.ok)
+      failedOp = id;
     return status.ok;
   }
 };
@@ -104,7 +110,8 @@ struct Chain {
 PointCloud cloudOf(const float* x, const float* z, int n) {
   PointCloud c;
   c.reserve(static_cast<std::size_t>(n));
-  for (int i = 0; i < n; ++i) c.push(x[i], 0.0f, z[i]);
+  for (int i = 0; i < n; ++i)
+    c.push(x[i], 0.0f, z[i]);
   c.intensity.assign(static_cast<std::size_t>(n), 1.0f);
   return c;
 }
@@ -125,7 +132,7 @@ PointCloud resampled(const float* z, const unsigned char* intensity) {
 
 std::size_t cleanCount(Chain& c) { return c.clean.out("clean").asCloud()->pointCount(); }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("dts 整条链在两条实测轮廓上跑到底") {
   struct Case {
@@ -138,8 +145,8 @@ TEST_CASE("dts 整条链在两条实测轮廓上跑到底") {
     const std::string name(c.name);
     CAPTURE(name);
     Chain chain;
-    REQUIRE_MESSAGE(chain.run(resampled(c.z, nullptr)), chain.failedOp << ": "
-                                                                      << chain.status.message);
+    REQUIRE_MESSAGE(chain.run(resampled(c.z, nullptr)),
+                    chain.failedOp << ": " << chain.status.message);
 
     // 清理只会丢点，不会造点；丢光了 profile_clean 自己就报错了，所以这里必 > 0。
     const std::size_t kept = cleanCount(chain);
@@ -175,7 +182,7 @@ TEST_CASE("dts 整条链在两条实测轮廓上跑到底") {
     // 判定不在图里（dts.flush 的 doc），所以 verdict 必须是空的。
     CHECK(m->verdict.empty());
     MESSAGE(name << " 面差 = " << m->value << " mm，面 " << faces->data["faces"].size()
-                   << " 块，清理后 " << kept << " 点");
+                 << " 块，清理后 " << kept << " 点");
 
     const Record* bundle = chain.bundle.out("bundle").asRecord();
     REQUIRE(bundle != nullptr);
@@ -207,7 +214,7 @@ TEST_CASE("profile_clean 的 minIntensity 按亮度裁点") {
   const std::size_t few = strict.out("clean").asCloud()->pointCount();
   CHECK(few < kept);
   MESSAGE("亮度门限 0.5 留 " << kept << " 点，门限 140 留 " << few << " 点，亮度一律 1.0 时留 "
-                              << all);
+                             << all);
 
   // 出去的云仍带亮度通道，且与点数等长 —— 下游 seal_dome 走的是同一片云。
   const PointCloud* out = defaulted.out("clean").asCloud();
@@ -229,8 +236,8 @@ TEST_CASE("现场样本：整条链跑得通，并打印与宿主 Python 旧算�
     CHECK(std::isfinite(m->value));
     const double delta = m->value - fp.flushPyMm;
     MESSAGE(tag << "（" << std::string(fp.ply) << "，Python 参数组 " << std::string(fp.paramSet)
-                << "） dts = " << m->value << " mm，Python = " << fp.flushPyMm << " mm，Δ = "
-                << delta << " mm");
+                << "） dts = " << m->value << " mm，Python = " << fp.flushPyMm
+                << " mm，Δ = " << delta << " mm");
   }
 }
 
@@ -243,7 +250,8 @@ TEST_CASE("现场样本 A / B 与 Python 旧算法差在 0.3 mm 以内") {
   for (int i = 0; i < td::kFieldProfileCount; ++i) {
     const td::FieldProfile& fp = td::kFieldProfiles[i];
     const std::string tag(fp.tag);
-    if (tag == "D") continue;
+    if (tag == "D")
+      continue;
     CAPTURE(tag);
     Chain chain;
     REQUIRE(chain.run(cloudOf(fp.x, fp.z, fp.n)));

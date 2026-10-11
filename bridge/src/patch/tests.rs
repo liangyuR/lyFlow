@@ -293,7 +293,11 @@ fn dry_run_prints_the_same_diff_and_touches_nothing() {
     assert_eq!(wrote.code, EXIT_OK, "{}", wrote.err);
     let d = cli(&["diff", &path, out_path.to_str().unwrap()]);
     assert_eq!(d.out, human.out);
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), before, "-o 时不动原图");
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        before,
+        "-o 时不动原图"
+    );
 }
 
 #[test]
@@ -329,7 +333,13 @@ fn a_patch_that_breaks_the_shape_is_not_written() {
     assert!(loop_.err.contains("rewire 之后"), "{}", loop_.err);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), before, "不该写盘");
 
-    let bad = cli(&["patch", &path, "--set", "a.leafSize=[0,0.01,0.01]", "--json"]);
+    let bad = cli(&[
+        "patch",
+        &path,
+        "--set",
+        "a.leafSize=[0,0.01,0.01]",
+        "--json",
+    ]);
     assert_eq!(bad.code, EXIT_INVALID, "{}", bad.out);
     assert_eq!(bad.lines()[0][0]["code"], "bad_param");
     assert!(bad.err.contains("没有写任何文件"), "{}", bad.err);
@@ -359,10 +369,14 @@ fn connect_wires_a_node_added_in_the_same_patch_and_is_idempotent() {
         "--json",
     ]);
     assert_eq!(first.code, EXIT_OK, "{}", first.err);
-    assert_eq!(ids(&first.result()["applied"]["connected"]), vec!["g:cloud=v2:cloud"]);
+    assert_eq!(
+        ids(&first.result()["applied"]["connected"]),
+        vec!["g:cloud=v2:cloud"]
+    );
     let doc = read(&path);
     let wired = doc["edges"].as_array().unwrap().iter().any(|e| {
-        e["from"] == json!({"node": "g", "port": "cloud"}) && e["to"] == json!({"node": "v2", "port": "cloud"})
+        e["from"] == json!({"node": "g", "port": "cloud"})
+            && e["to"] == json!({"node": "v2", "port": "cloud"})
     });
     assert!(wired, "{}", doc["edges"]);
     let after_first = std::fs::read_to_string(&path).unwrap();
@@ -403,11 +417,26 @@ fn node_globs_are_case_sensitive() {
     assert_eq!(ids(&res["applied"]["removed"]), vec!["b_alt"]);
     assert_eq!(res["wrote"].as_str().unwrap(), path);
     assert_eq!(res["diff"]["nodesRemoved"][0]["id"], "b_alt");
-    assert_eq!(res["diff"]["edgesRemoved"], json!(["g.cloud -> b_alt.cloud"]), "{}", lower.out);
+    assert_eq!(
+        res["diff"]["edgesRemoved"],
+        json!(["g.cloud -> b_alt.cloud"]),
+        "{}",
+        lower.out
+    );
     let doc = read(&path);
-    let node_ids: Vec<&str> = doc["nodes"].as_array().unwrap().iter().map(|n| n["id"].as_str().unwrap()).collect();
+    let node_ids: Vec<&str> = doc["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["id"].as_str().unwrap())
+        .collect();
     assert_eq!(node_ids, ["g", "a", "sink"]);
-    let edge_ids: Vec<&str> = doc["edges"].as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
+    let edge_ids: Vec<&str> = doc["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["id"].as_str().unwrap())
+        .collect();
     assert_eq!(edge_ids, ["e1", "e2"]);
 }
 

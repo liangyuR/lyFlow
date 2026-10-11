@@ -1,6 +1,6 @@
 // 图像载荷（LYIM，docs/http-transport.md「图像」）的解码，与给 agent 看的 PNG（docs/image-plan.md §5.5）。
 // PNG 用 Node 自带的 zlib 手写，不加依赖：只要 8 位的灰度 / RGB / RGBA 三种，过滤器一律 None。
-import zlib from "node:zlib";
+import zlib from 'node:zlib';
 
 export const IMAGE_MAGIC = 0x4d49594c;
 export const IMAGE_HEADER_BYTES = 48;
@@ -30,7 +30,8 @@ export function decodeImage(buffer: ArrayBuffer): ImageSlice {
     throw new Error(`图像载荷的 magic 不对（0x${u(0).toString(16)}），多半不是图像数据`);
   }
   const depth = u(4);
-  if (depth !== 1 && depth !== 2 && depth !== 4) throw new Error(`图像载荷的位深不认识（${depth}）`);
+  if (depth !== 1 && depth !== 2 && depth !== 4)
+    throw new Error(`图像载荷的位深不认识（${depth}）`);
   const width = u(1);
   const channels = u(3);
   const rowCount = u(9);
@@ -44,7 +45,11 @@ export function decodeImage(buffer: ArrayBuffer): ImageSlice {
   for (let i = 0; i < n; i += 1) {
     const at = IMAGE_HEADER_BYTES + i * depth;
     values[i] =
-      depth === 1 ? view.getUint8(at) : depth === 2 ? view.getUint16(at, true) : view.getFloat32(at, true);
+      depth === 1
+        ? view.getUint8(at)
+        : depth === 2
+          ? view.getUint16(at, true)
+          : view.getFloat32(at, true);
   }
   return {
     width,
@@ -81,7 +86,10 @@ export async function fetchImage(
 /** 长边不超过 maxEdge 的最小级别（与 core 的缩小同一个取整：向上取整）。 */
 export function levelToFit(width: number, height: number, maxEdge: number): number {
   let level = 0;
-  while (Math.max(Math.ceil(width / 2 ** level), Math.ceil(height / 2 ** level)) > maxEdge && level < 30) {
+  while (
+    Math.max(Math.ceil(width / 2 ** level), Math.ceil(height / 2 ** level)) > maxEdge &&
+    level < 30
+  ) {
     level += 1;
   }
   return level;
@@ -128,11 +136,13 @@ export function toPicture(
   const span = hi - lo;
   for (let y = 0; y < h; y += 1) {
     for (let x = 0; x < w; x += 1) {
-      const src = ((y * step) * width + x * step) * channels;
+      const src = (y * step * width + x * step) * channels;
       const dst = (y * w + x) * channels;
       for (let c = 0; c < channels; c += 1) {
         const v = values[src + c]!;
-        bytes[dst + c] = Number.isFinite(v) ? Math.round(Math.min(1, Math.max(0, (v - lo) / span)) * 255) : 0;
+        bytes[dst + c] = Number.isFinite(v)
+          ? Math.round(Math.min(1, Math.max(0, (v - lo) / span)) * 255)
+          : 0;
       }
     }
   }
@@ -158,7 +168,7 @@ function crc32(bytes: Uint8Array): number {
 function chunk(type: string, data: Uint8Array): Buffer {
   const out = Buffer.alloc(12 + data.length);
   out.writeUInt32BE(data.length, 0);
-  out.write(type, 4, "ascii");
+  out.write(type, 4, 'ascii');
   Buffer.from(data).copy(out, 8);
   out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
   return out;
@@ -177,12 +187,15 @@ export function encodePng(p: Picture): Buffer {
   const raw = Buffer.alloc((stride + 1) * p.height);
   for (let y = 0; y < p.height; y += 1) {
     raw[y * (stride + 1)] = 0; // 过滤器 None
-    Buffer.from(p.bytes.buffer, p.bytes.byteOffset + y * stride, stride).copy(raw, y * (stride + 1) + 1);
+    Buffer.from(p.bytes.buffer, p.bytes.byteOffset + y * stride, stride).copy(
+      raw,
+      y * (stride + 1) + 1,
+    );
   }
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", ihdr),
-    chunk("IDAT", zlib.deflateSync(raw)),
-    chunk("IEND", new Uint8Array(0)),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', zlib.deflateSync(raw)),
+    chunk('IEND', new Uint8Array(0)),
   ]);
 }

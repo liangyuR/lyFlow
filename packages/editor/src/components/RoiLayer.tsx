@@ -2,16 +2,16 @@
 // 拖四个角是拉伸，松手写回参数（整段拖动一条撤销）。框是叠在 WebGL 画布上的 DOM —— 命中、光标、
 // 验收脚本的真实鼠标事件都是现成的；位置每帧按正交相机重新投影，平移缩放时跟着走。
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import * as THREE from "three";
+import { useCallback, useEffect, useRef, useState } from 'react';
+import * as THREE from 'three';
 
-import { num } from "../lib/format";
-import { runAfterDrag, skipAutoRunFor } from "../lib/preview";
-import { fullId } from "../lib/subgraph";
-import { placeLabels, type LabelBox } from "../lib/roiFrames";
-import { aggregatedNodes, useExecutionStore } from "../store/execution";
-import { useGraphStore } from "../store/graph";
-import { useUiStore } from "../store/ui";
+import { num } from '../lib/format';
+import { runAfterDrag, skipAutoRunFor } from '../lib/preview';
+import { fullId } from '../lib/subgraph';
+import { placeLabels, type LabelBox } from '../lib/roiFrames';
+import { aggregatedNodes, useExecutionStore } from '../store/execution';
+import { useGraphStore } from '../store/graph';
+import { useUiStore } from '../store/ui';
 
 /** Viewer3D 的场景里 RoiLayer 用得到的那几样。 */
 export interface RoiHost {
@@ -34,9 +34,9 @@ export interface RoiItem {
   placeholder: [number, number, number, number];
 }
 
-const CORNERS = ["nw", "ne", "sw", "se"] as const;
+const CORNERS = ['nw', 'ne', 'sw', 'se'] as const;
 type Corner = (typeof CORNERS)[number];
-type Mode = "move" | Corner;
+type Mode = 'move' | Corner;
 
 export function isDegenerate(v: readonly number[]): boolean {
   return !(v[2]! > v[0]!) || !(v[3]! > v[1]!);
@@ -69,9 +69,9 @@ function metersPerPixel(host: RoiHost): number {
 /** 框的读数：坐标（参数自己的单位）、宽 × 高、框里有几个点。 */
 export function roiTagText(item: RoiItem, count: number | null): string {
   const [x0, y0, x1, y1] = item.value;
-  const unit = item.scale === 0.001 ? " mm" : item.scale === 1 ? " m" : "";
+  const unit = item.scale === 0.001 ? ' mm' : item.scale === 1 ? ' m' : '';
   const size = `${num(x1 - x0)} × ${num(y1 - y0)}${unit}`;
-  return `(${num(x0)}, ${num(y0)}) → (${num(x1)}, ${num(y1)})${unit} · ${size}${count === null ? "" : ` · ${count} 点`}`;
+  return `(${num(x0)}, ${num(y0)}) → (${num(x1)}, ${num(y1)})${unit} · ${size}${count === null ? '' : ` · ${count} 点`}`;
 }
 
 export function RoiLayer({
@@ -113,8 +113,8 @@ export function RoiLayer({
       const p0 = toScreen(host, 0, 0);
       const p1 = toScreen(host, 1, 1);
       layerRef.current?.setAttribute(
-        "data-map",
-        [p1.x - p0.x, p0.x, p1.y - p0.y, p0.y].map((v) => v.toFixed(3)).join(","),
+        'data-map',
+        [p1.x - p0.x, p0.x, p1.y - p0.y, p0.y].map((v) => v.toFixed(3)).join(','),
       );
       const boxes: LabelBox[] = [];
       const labels: HTMLElement[] = [];
@@ -132,9 +132,16 @@ export function RoiLayer({
         el.style.top = `${top}px`;
         el.style.width = `${width}px`;
         el.style.height = `${height}px`;
-        const label = el.querySelector<HTMLElement>(".roi-box__label");
+        const label = el.querySelector<HTMLElement>('.roi-box__label');
         if (!label) continue;
-        boxes.push({ left, top, width, height, labelWidth: label.offsetWidth, labelHeight: label.offsetHeight });
+        boxes.push({
+          left,
+          top,
+          width,
+          height,
+          labelWidth: label.offsetWidth,
+          labelHeight: label.offsetHeight,
+        });
         labels.push(label);
       }
       // L21：相邻框的标签互不遮挡 —— 默认放在框上方，撞上别的标签就挪到框内侧或上下错开
@@ -160,7 +167,7 @@ export function RoiLayer({
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       // 焦点给框：方向键微调、拖到一半按 Esc 放弃都靠它收到按键
       boxRefs.current.get(item.param)?.focus({ preventScroll: true });
-      layerRef.current?.setAttribute("data-dragging", "1");
+      layerRef.current?.setAttribute('data-dragging', '1');
       host.controls.enabled = false;
       setActive(item.param);
       useGraphStore.getState().begin();
@@ -186,15 +193,15 @@ export function RoiLayer({
       const dx = (e.clientX - d.start.x) * mpp;
       const dy = -(e.clientY - d.start.y) * mpp;
       let [x0, y0, x1, y1] = d.rect;
-      if (d.mode === "move") {
+      if (d.mode === 'move') {
         x0 += dx;
         x1 += dx;
         y0 += dy;
         y1 += dy;
       } else {
-        if (d.mode === "nw" || d.mode === "sw") x0 += dx;
+        if (d.mode === 'nw' || d.mode === 'sw') x0 += dx;
         else x1 += dx;
-        if (d.mode === "nw" || d.mode === "ne") y1 += dy;
+        if (d.mode === 'nw' || d.mode === 'ne') y1 += dy;
         else y0 += dy;
       }
       const lo = (a: number, b: number) => Math.min(a, b);
@@ -217,7 +224,7 @@ export function RoiLayer({
       const d = drag.current;
       if (!d) return;
       drag.current = null;
-      layerRef.current?.removeAttribute("data-dragging");
+      layerRef.current?.removeAttribute('data-dragging');
       const el = e.currentTarget as HTMLElement;
       if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
       if (host) host.controls.enabled = true;
@@ -230,7 +237,8 @@ export function RoiLayer({
       const complete = !itemsRef.current.some((i) => isDegenerate(i.value));
       // 这一组还没画齐：commit 那一下刚为它攒的自动运行也撤掉
       if (d.moved && !complete) skipAutoRunFor(fullId(ui.path, nodeId));
-      if (d.moved && complete && ((ran && ran !== "idle") || exec.runStatus === "running")) runAfterDrag(nodeId);
+      if (d.moved && complete && ((ran && ran !== 'idle') || exec.runStatus === 'running'))
+        runAfterDrag(nodeId);
     },
     [host, nodeId],
   );
@@ -238,25 +246,30 @@ export function RoiLayer({
   // 方向键微调最近动过的那个框（一格是吸附的 0.1 mm，Shift ×10，每按一下一条撤销）；拖到一半按 Esc 放弃这一段
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLElement>, item: RoiItem) => {
-      if (e.key === "Escape" && drag.current) {
+      if (e.key === 'Escape' && drag.current) {
         e.preventDefault();
         e.stopPropagation();
         drag.current = null;
-        layerRef.current?.removeAttribute("data-dragging");
+        layerRef.current?.removeAttribute('data-dragging');
         if (host) host.controls.enabled = true;
         useGraphStore.getState().abort();
         return;
       }
-      const dir = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[e.key];
+      const dir = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[
+        e.key
+      ];
       if (!dir || drag.current || isDegenerate(item.value)) return;
       e.preventDefault();
       e.stopPropagation();
       const step = (0.0001 / item.scale) * (e.shiftKey ? 10 : 1);
       const [dx, dy] = [dir[0]! * step, dir[1]! * step];
       const [x0, y0, x1, y1] = item.value;
-      useGraphStore.getState().setParam(nodeId, item.param, [x0 + dx, y0 + dy, x1 + dx, y1 + dy].map(round));
+      useGraphStore
+        .getState()
+        .setParam(nodeId, item.param, [x0 + dx, y0 + dy, x1 + dx, y1 + dy].map(round));
       // 这一组还有没设置的框：这一下攒的自动运行撤掉（core 的校验必然拒掉）
-      if (itemsRef.current.some((i) => isDegenerate(i.value))) skipAutoRunFor(fullId(useUiStore.getState().path, nodeId));
+      if (itemsRef.current.some((i) => isDegenerate(i.value)))
+        skipAutoRunFor(fullId(useUiStore.getState().path, nodeId));
       setActive(item.param);
     },
     [host, nodeId],
@@ -279,13 +292,13 @@ export function RoiLayer({
               if (el) boxRefs.current.set(item.param, el);
               else boxRefs.current.delete(item.param);
             }}
-            className={`roi-box${unset ? " is-unset" : ""}${active === item.param ? " is-active" : ""}`}
-            style={{ ["--roi-color" as string]: item.color }}
+            className={`roi-box${unset ? ' is-unset' : ''}${active === item.param ? ' is-active' : ''}`}
+            style={{ ['--roi-color' as string]: item.color }}
             data-testid={`roi-box-${item.param}`}
-            data-roi={item.value.join(",")}
-            data-unset={unset ? "1" : "0"}
+            data-roi={item.value.join(',')}
+            data-unset={unset ? '1' : '0'}
             tabIndex={0}
-            onPointerDown={(e) => onPointerDown(e, item, "move")}
+            onPointerDown={(e) => onPointerDown(e, item, 'move')}
             onPointerMove={onPointerMove}
             onPointerUp={endDrag}
             onPointerCancel={endDrag}
@@ -294,7 +307,7 @@ export function RoiLayer({
           >
             <span className="roi-box__label" data-testid={`roi-label-${item.param}`}>
               {item.label}
-              {unset ? "（未设置）" : ""}
+              {unset ? '（未设置）' : ''}
             </span>
             {/* 最近动过的那个框写出读数：坐标、宽 × 高、框里有几个点（拖的时候一直跟着变） */}
             {active === item.param && !unset && (

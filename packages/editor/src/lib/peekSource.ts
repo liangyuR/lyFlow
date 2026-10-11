@@ -1,12 +1,12 @@
-import { useMemo } from "react";
+import { useMemo } from 'react';
 
-import { augmentOperators, levelOf, resolveOutput, type SubPath } from "./subgraph";
-import { useExecutionStore, type RunPhase } from "../store/execution";
-import { useGraphStore } from "../store/graph";
-import { useManifestStore } from "../store/manifest";
-import type { NodeState, OutputStat } from "../types/execution";
-import { bundleKindOf, type BundleDesc, type OperatorDesc } from "../types/manifest";
-import type { GraphDoc, PortRef } from "../types/graph";
+import { augmentOperators, levelOf, resolveOutput, type SubPath } from './subgraph';
+import { useExecutionStore, type RunPhase } from '../store/execution';
+import { useGraphStore } from '../store/graph';
+import { useManifestStore } from '../store/manifest';
+import type { NodeState, OutputStat } from '../types/execution';
+import { bundleKindOf, type BundleDesc, type OperatorDesc } from '../types/manifest';
+import type { GraphDoc, PortRef } from '../types/graph';
 
 export interface PeekSource {
   /** 取数用的节点与端口。看 Bundle 字段时 port 是 `<port>.<field>`（m8-plan L3），
@@ -33,7 +33,9 @@ export interface PeekSource {
 export function keepLastFrame(live: PeekSource, last: PeekSource | null): PeekSource | null {
   if (!live.busy || !last || last.status !== null || !last.resolved || !live.resolved) return null;
   const same =
-    last.resolved.nodeId === live.resolved.nodeId && last.resolved.port === live.resolved.port && last.field === live.field;
+    last.resolved.nodeId === live.resolved.nodeId &&
+    last.resolved.port === live.resolved.port &&
+    last.field === live.field;
   return same ? last : null;
 }
 
@@ -65,21 +67,26 @@ function build(
   // 字段只在端口真的是 Bundle、且字段在声明里时才算数；否则退回看整个端口
   const fieldDecl = field && bundle ? bundle.fields.find((f) => f.name === field) : undefined;
   const activeField = fieldDecl ? field : null;
-  const resolved = base && activeField ? { nodeId: base.nodeId, port: `${base.port}.${activeField}` } : base;
+  const resolved =
+    base && activeField ? { nodeId: base.nodeId, port: `${base.port}.${activeField}` } : base;
   const declared = fieldDecl ? fieldDecl.type : portType;
   const stat = resolved ? leafOutputs?.find((o) => o.port === resolved.port) : undefined;
   const type = stat?.type ?? declared;
 
   let status: string | null = null;
-  if (!resolved) status = "这个算子的内部结果查不到（库算子的定义在库文件里）";
-  else if (!runId || runStatus === "idle") status = "未运行";
-  else if (leafState === "error") status = "该节点运行出错";
-  else if (leafState !== "done" && leafState !== "skipped")
-    status = leafState === "running" ? "正在计算…" : "该节点尚未产出结果";
-  else if (!stat) status = "该节点尚未产出结果";
-  else if (type === null || type === "Any") status = "未运行";
+  if (!resolved) status = '这个算子的内部结果查不到（库算子的定义在库文件里）';
+  else if (!runId || runStatus === 'idle') status = '未运行';
+  else if (leafState === 'error') status = '该节点运行出错';
+  else if (leafState !== 'done' && leafState !== 'skipped')
+    status = leafState === 'running' ? '正在计算…' : '该节点尚未产出结果';
+  else if (!stat) status = '该节点尚未产出结果';
+  else if (type === null || type === 'Any') status = '未运行';
   const busy =
-    runStatus === "running" && leafState !== "error" && leafState !== "done" && leafState !== "skipped" && leafState !== "cancelled";
+    runStatus === 'running' &&
+    leafState !== 'error' &&
+    leafState !== 'done' &&
+    leafState !== 'skipped' &&
+    leafState !== 'cancelled';
 
   return {
     resolved,
@@ -120,7 +127,11 @@ export function peekSourceOf(
   );
 }
 
-export function usePeekSource(path: SubPath, from: PortRef, field: string | null = null): PeekSource {
+export function usePeekSource(
+  path: SubPath,
+  from: PortRef,
+  field: string | null = null,
+): PeekSource {
   const doc = useGraphStore((s) => s.doc);
   const operatorsById = useManifestStore((s) => s.operatorsById);
   const bundles = useManifestStore((s) => s.bundle?.bundles);
@@ -128,10 +139,7 @@ export function usePeekSource(path: SubPath, from: PortRef, field: string | null
   const runId = useExecutionStore((s) => s.resultRunId);
   const runStatus = useExecutionStore((s) => s.runStatus);
 
-  const resolved = useMemo(
-    () => resolveOutput(doc, path, from.node, from.port),
-    [doc, path, from],
-  );
+  const resolved = useMemo(() => resolveOutput(doc, path, from.node, from.port), [doc, path, from]);
 
   const leafId = resolved?.nodeId;
   const leafState = useExecutionStore((s) => (leafId ? s.nodes.get(leafId)?.state : undefined));
@@ -154,6 +162,18 @@ export function usePeekSource(path: SubPath, from: PortRef, field: string | null
         leafState,
         leafOutputs,
       ),
-    [doc, path, from, field, operatorsById, bundles, resolved, runId, runStatus, leafState, leafOutputs],
+    [
+      doc,
+      path,
+      from,
+      field,
+      operatorsById,
+      bundles,
+      resolved,
+      runId,
+      runStatus,
+      leafState,
+      leafOutputs,
+    ],
   );
 }

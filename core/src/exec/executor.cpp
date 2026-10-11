@@ -38,7 +38,7 @@ std::atomic<int>& runningNodes() {
 
 /// 一个节点在算的这段时间计进 runningNodes。
 class CountedAsRunning {
- public:
+public:
   CountedAsRunning() { runningNodes().fetch_add(1, std::memory_order_relaxed); }
   ~CountedAsRunning() { runningNodes().fetch_sub(1, std::memory_order_relaxed); }
   CountedAsRunning(const CountedAsRunning&) = delete;
@@ -52,7 +52,8 @@ double msSince(Clock::time_point t0) {
 std::string isoNow() {
   const auto now = std::chrono::system_clock::now();
   const auto t = std::chrono::system_clock::to_time_t(now);
-  const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+  const auto ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
   std::tm tm{};
 #if defined(_WIN32)
   gmtime_s(&tm, &t);
@@ -69,16 +70,27 @@ std::string isoNow() {
 /// 参数的生效值。与 canonicalParamsJson 同一套形态，只是这里带缩进控制权在外面。
 void writeParamValue(JsonWriter& w, const Value& v) {
   switch (v.kind()) {
-    case Value::Kind::Null:   w.valueNull(); break;
-    case Value::Kind::Bool:   w.value(v.boolValue()); break;
-    case Value::Kind::Int:    w.value(v.intValue()); break;
-    case Value::Kind::Float:  w.value(v.floatValue()); break;
-    case Value::Kind::String: w.value(v.stringValue()); break;
-    case Value::Kind::FloatVec:
-      w.beginArray();
-      for (double d : v.vecValue()) w.value(d);
-      w.endArray();
-      break;
+  case Value::Kind::Null:
+    w.valueNull();
+    break;
+  case Value::Kind::Bool:
+    w.value(v.boolValue());
+    break;
+  case Value::Kind::Int:
+    w.value(v.intValue());
+    break;
+  case Value::Kind::Float:
+    w.value(v.floatValue());
+    break;
+  case Value::Kind::String:
+    w.value(v.stringValue());
+    break;
+  case Value::Kind::FloatVec:
+    w.beginArray();
+    for (double d : v.vecValue())
+      w.value(d);
+    w.endArray();
+    break;
   }
 }
 
@@ -96,9 +108,9 @@ void writeError(JsonWriter& w, const Status& s) {
 /// 那三处（nodeFinished / nodeFailed / nodeNotDemanded）正是「这个节点最终
 /// 怎么样了」唯一被决定的地方，从事件流反推只会漏。
 struct NodeOutcome {
-  std::string state;   ///< done / skipped / error / cancelled
-  std::string code;    ///< 失败时 errors[0].code
-  std::string reason;  ///< skipped 的机器可读原因，目前只有 not_demanded
+  std::string state;  ///< done / skipped / error / cancelled
+  std::string code;   ///< 失败时 errors[0].code
+  std::string reason; ///< skipped 的机器可读原因，目前只有 not_demanded
   double durationMs = -1;
   bool cached = false;
   bool bypassed = false;
@@ -108,7 +120,7 @@ struct NodeOutcome {
 
 /// 事件序列化 + 回调。seq 全局单调，多个 worker 同时发事件所以整个入口加锁（E2）。
 class EventSink {
- public:
+public:
   EventSink(std::string runId, lyflow_event_cb cb, void* user)
       : runId_(std::move(runId)), cb_(cb), user_(user) {}
 
@@ -121,38 +133,45 @@ class EventSink {
     std::lock_guard<std::mutex> lock(mu_);
     std::size_t eager = 0;
     for (const auto& n : plan.nodes) {
-      if (!n.deferred) eager += 1;
+      if (!n.deferred)
+        eager += 1;
     }
     begin(w, "run_started");
     w.field("nodeCount", static_cast<std::int64_t>(eager));
     w.field("maxParallel", static_cast<std::int64_t>(maxParallel));
     w.field("mode", std::string(preview ? "preview" : "full"));
-    if (preview) w.field("previewMaxPoints", static_cast<std::int64_t>(previewMaxPoints));
+    if (preview)
+      w.field("previewMaxPoints", static_cast<std::int64_t>(previewMaxPoints));
     w.key("plan");
     w.beginArray();
     for (const auto& n : plan.nodes) {
-      if (!n.deferred) w.value(n.id);
+      if (!n.deferred)
+        w.value(n.id);
     }
     w.endArray();
     w.key("targets");
     w.beginArray();
-    for (const auto& t : targets) w.value(t);
+    for (const auto& t : targets)
+      w.value(t);
     w.endArray();
     // 单节点运行（node-run R5）：编辑器与 MCP 靠它认出「这次只跑了这几个」。空 = 普通运行。
     w.key("isolate");
     w.beginArray();
-    for (const auto& t : isolate) w.value(t);
+    for (const auto& t : isolate)
+      w.value(t);
     w.endArray();
     // 强制重算的那几个（修订一 V1）。空 = 都照常查缓存。
     w.key("force");
     w.beginArray();
-    for (const auto& t : force) w.value(t);
+    for (const auto& t : force)
+      w.value(t);
     w.endArray();
     // 前端的精确 stale 标记与「将重算 N 个节点」全靠这一段（ADR-0007）。
     w.key("nodes");
     w.beginArray();
     for (const auto& n : plan.nodes) {
-      if (n.deferred) continue;
+      if (n.deferred)
+        continue;
       writePlanNode(w, n);
     }
     w.endArray();
@@ -181,7 +200,8 @@ class EventSink {
     w.field("port", port);
     w.key("nodes");
     w.beginArray();
-    for (std::size_t i : added) writePlanNode(w, plan.nodes[i]);
+    for (std::size_t i : added)
+      writePlanNode(w, plan.nodes[i]);
     w.endArray();
     end(w);
   }
@@ -240,9 +260,12 @@ class EventSink {
     w.beginObject();
     w.field("elementCount", static_cast<std::int64_t>(elementCount));
     w.field("byteSize", static_cast<std::int64_t>(byteSize));
-    if (cached) w.field("cached", true);
-    if (bypassed) w.field("bypassed", true);
-    if (provided) w.field("provided", true);
+    if (cached)
+      w.field("cached", true);
+    if (bypassed)
+      w.field("bypassed", true);
+    if (provided)
+      w.field("provided", true);
     w.field("outputsAvailable", true);
     w.key("outputs");
     w.beginArray();
@@ -264,25 +287,28 @@ class EventSink {
   }
 
   /// 失败/取消。errors 是**全部**诊断，error 是 errors[0] 的快捷方式（D5）。
-  void nodeFailed(const std::string& nodeId, const char* state,
-                  const std::vector<Status>& errors, double durationMs) {
+  void nodeFailed(const std::string& nodeId, const char* state, const std::vector<Status>& errors,
+                  double durationMs) {
     JsonWriter w;
     std::lock_guard<std::mutex> lock(mu_);
     NodeOutcome& outcome = outcomes_[nodeId];
     outcome = NodeOutcome{};
     outcome.state = state;
     outcome.durationMs = durationMs;
-    if (!errors.empty()) outcome.code = errors.front().code;
+    if (!errors.empty())
+      outcome.code = errors.front().code;
     begin(w, "node_state");
     w.field("nodeId", nodeId);
     w.field("state", std::string(state));
-    if (durationMs >= 0) w.field("durationMs", durationMs);
+    if (durationMs >= 0)
+      w.field("durationMs", durationMs);
     if (!errors.empty()) {
       w.key("error");
       writeError(w, errors.front());
       w.key("errors");
       w.beginArray();
-      for (const auto& e : errors) writeError(w, e);
+      for (const auto& e : errors)
+        writeError(w, e);
       w.endArray();
     }
     end(w);
@@ -346,13 +372,15 @@ class EventSink {
     if (attached) {
       w.key("attached");
       w.beginArray();
-      for (const std::string& id : *attached) w.value(id);
+      for (const std::string& id : *attached)
+        w.value(id);
       w.endArray();
     }
     if (attachedStale) {
       w.key("attachedStale");
       w.beginArray();
-      for (const std::string& id : *attachedStale) w.value(id);
+      for (const std::string& id : *attachedStale)
+        w.value(id);
       w.endArray();
     }
     if (!summaryJson.empty()) {
@@ -369,20 +397,21 @@ class EventSink {
   void contractViolation(std::string node, std::string port, nlohmann::json expected,
                          nlohmann::json actual) {
     std::lock_guard<std::mutex> lock(mu_);
-    violations_.push_back(
-        ContractViolation{std::move(node), std::move(port), std::move(expected), std::move(actual)});
+    violations_.push_back(ContractViolation{std::move(node), std::move(port), std::move(expected),
+                                            std::move(actual)});
   }
 
   /// 本轮全部契约违反。顺序是撞上的先后，进 summary 之前会按拓扑序重排。
   const std::vector<ContractViolation>& contractViolations() const { return violations_; }
 
- private:
+private:
   static void writePlanNode(JsonWriter& w, const PlanNode& n) {
     w.beginObject();
     w.field("id", n.id);
     w.field("cacheKey", n.cacheKey);
     w.field("level", static_cast<std::int64_t>(n.level));
-    if (n.bypass) w.field("bypass", true);
+    if (n.bypass)
+      w.field("bypass", true);
     w.endObject();
   }
 
@@ -397,7 +426,8 @@ class EventSink {
   }
   void end(JsonWriter& w) {
     w.endObject();
-    if (!cb_) return;
+    if (!cb_)
+      return;
     const std::string json = w.str();
     cb_(json.c_str(), user_);
   }
@@ -417,7 +447,7 @@ class EventSink {
 
 /// 算子看到的 ExecContext。每个节点一份，所以本身不用加锁。
 class NodeContext final : public ExecContext {
- public:
+public:
   NodeContext(EventSink& sink, const std::atomic<bool>& cancelled, std::string nodeId,
               const std::filesystem::path& baseDir, int threadBudget)
       : sink_(sink), cancelled_(cancelled), nodeId_(std::move(nodeId)), baseDir_(baseDir),
@@ -444,7 +474,7 @@ class NodeContext final : public ExecContext {
   const std::filesystem::path& baseDir() const override { return baseDir_; }
   int threadBudget() const override { return threadBudget_; }
 
- private:
+private:
   EventSink& sink_;
   const std::atomic<bool>& cancelled_;
   std::string nodeId_;
@@ -455,7 +485,8 @@ class NodeContext final : public ExecContext {
 
 const Port* findPortByName(const std::vector<Port>& ports, const std::string& name) {
   for (const Port& p : ports) {
-    if (p.name == name) return &p;
+    if (p.name == name)
+      return &p;
   }
   return nullptr;
 }
@@ -463,7 +494,8 @@ const Port* findPortByName(const std::vector<Port>& ports, const std::string& na
 std::vector<std::string> outputPortNames(const OperatorDesc& op) {
   std::vector<std::string> names;
   names.reserve(op.outputs.size());
-  for (const Port& p : op.outputs) names.push_back(p.name);
+  for (const Port& p : op.outputs)
+    names.push_back(p.name);
   return names;
 }
 
@@ -482,7 +514,8 @@ PointCloud decimateCloud(const PointCloud& src, std::size_t maxPoints) {
 
 /// 预览结果的缓存命名空间（F5）。full 模式返回空串，键与 M3 完全一致。
 std::string previewNamespace(const RunOptions& o) {
-  if (o.mode != RunMode::Preview) return {};
+  if (o.mode != RunMode::Preview)
+    return {};
   const std::uint32_t cap = o.previewMaxPoints ? o.previewMaxPoints : kDefaultPreviewMaxPoints;
   return "preview:" + std::to_string(cap);
 }
@@ -506,10 +539,10 @@ std::vector<Diagnostic> missingUpstream(const Plan& plan, const RunOptions& opti
   std::vector<Diagnostic> out;
   for (const PlanNode& n : plan.nodes) {
     // 强制重算的上游本来就要跑（修订一 V1：force 与 isolate 组合时 force 说了算）
-    if (n.isolated || n.forced || n.deferred || !n.valid || !n.op || n.bypass || n.provided) continue;
+    if (n.isolated || n.forced || n.deferred || !n.valid || !n.op || n.bypass || n.provided)
+      continue;
     const bool reusable = !options.noReuse && n.op->capabilities.deterministic &&
-                          !n.op->outputs.empty() &&
-                          store.peek(n.cacheKey, outputPortNames(*n.op));
+                          !n.op->outputs.empty() && store.peek(n.cacheKey, outputPortNames(*n.op));
     if (!reusable) {
       out.push_back(Diagnostic{n.id, Severity::Error, upstreamNotReady(n.id), nullptr});
     }
@@ -526,12 +559,16 @@ std::vector<std::string> attachStale(const Plan& full, const std::string& runId,
                                      const std::vector<std::string>& attached, ResultStore& store) {
   std::vector<std::string> out;
   const std::string prev = store.lastCompletedBefore(runId);
-  if (prev.empty()) return out;
+  if (prev.empty())
+    return out;
   const std::set<std::string> done(attached.begin(), attached.end());
   for (const PlanNode& n : full.nodes) {
-    if (!n.op || n.provided || n.op->outputs.empty()) continue;
-    if (outcomes.count(n.id) || done.count(n.id)) continue;
-    if (store.attachFromRun(prev, runId, n.id)) out.push_back(n.id);
+    if (!n.op || n.provided || n.op->outputs.empty())
+      continue;
+    if (outcomes.count(n.id) || done.count(n.id))
+      continue;
+    if (store.attachFromRun(prev, runId, n.id))
+      out.push_back(n.id);
   }
   return out;
 }
@@ -549,9 +586,12 @@ std::vector<std::string> attachUnplanned(const Plan& full, const std::string& ru
                                          ResultStore& store) {
   std::vector<std::string> out;
   for (const PlanNode& n : full.nodes) {
-    if (!n.op || !n.valid || n.provided || n.op->outputs.empty()) continue;
-    if (!n.op->capabilities.deterministic || outcomes.count(n.id)) continue;
-    if (store.attach(runId, n.id, n.cacheKey, outputPortNames(*n.op))) out.push_back(n.id);
+    if (!n.op || !n.valid || n.provided || n.op->outputs.empty())
+      continue;
+    if (!n.op->capabilities.deterministic || outcomes.count(n.id))
+      continue;
+    if (store.attach(runId, n.id, n.cacheKey, outputPortNames(*n.op)))
+      out.push_back(n.id);
   }
   return out;
 }
@@ -563,14 +603,13 @@ enum class Verdict { Ok, Failed, Cancelled };
 /// 依赖计数驱动的线程池（E2）。没有层同步屏障 —— 屏障会让一层里最慢的节点
 /// 拖住全部，而依赖计数天然就是最优调度。
 class Scheduler {
- public:
+public:
   Scheduler(Plan& plan, EventSink& sink, const std::atomic<bool>& cancelled,
             const RunOptions& options, ResultStore& store, int workers,
             const std::unordered_map<std::string, std::unordered_map<std::string, Data>>& injected)
       : plan_(plan), sink_(sink), cancelled_(cancelled), options_(options), store_(store),
-        injected_(injected), workers_(workers),
-        n_(plan.nodes.size()), remaining_(n_, 0), verdict_(n_, Verdict::Ok), done_(n_, 0),
-        failure_(n_), releases_(n_) {
+        injected_(injected), workers_(workers), n_(plan.nodes.size()), remaining_(n_, 0),
+        verdict_(n_, Verdict::Ok), done_(n_, 0), failure_(n_), releases_(n_) {
     // 惰性节点不进就绪队列，但它们的**非惰性**祖先仍要在 demand 发生前跑完 ——
     // 否则 satisfyDemand 会撞上一个还没轮到的普通节点。所以每个非惰性节点的依赖
     // 是「直接上游穿过惰性节点后落到的那圈非惰性节点」（ADR-0016）。
@@ -586,28 +625,35 @@ class Scheduler {
     };
     for (std::size_t i = 0; i < n_; ++i) {
       std::set<int> deps;
-      for (int u : plan_.nodes[i].upstream) absorb(deps, u);
+      for (int u : plan_.nodes[i].upstream)
+        absorb(deps, u);
       if (plan_.nodes[i].deferred) {
         frontier[i].assign(deps.begin(), deps.end());
         continue;
       }
       remaining_[i] = static_cast<int>(deps.size());
-      for (int d : deps) releases_[static_cast<std::size_t>(d)].push_back(static_cast<int>(i));
-      if (deps.empty()) ready_.push(i);
+      for (int d : deps)
+        releases_[static_cast<std::size_t>(d)].push_back(static_cast<int>(i));
+      if (deps.empty())
+        ready_.push(i);
     }
   }
 
   void run() {
-    if (n_ == 0) return;
+    if (n_ == 0)
+      return;
     const int count = std::max(1, std::min<int>(workers_, static_cast<int>(n_)));
     std::vector<std::thread> pool;
     pool.reserve(static_cast<std::size_t>(count) - 1);
-    for (int i = 1; i < count; ++i) pool.emplace_back([this] { worker(); });
+    for (int i = 1; i < count; ++i)
+      pool.emplace_back([this] { worker(); });
     worker();
-    for (auto& t : pool) t.join();
+    for (auto& t : pool)
+      t.join();
 
     for (std::size_t i = 0; i < n_; ++i) {
-      if (done_[i]) continue;
+      if (done_[i])
+        continue;
       // 没被 demand 的惰性闭包：这不是错误，是它该有的结局（ADR-0016）。
       if (plan_.nodes[i].deferred) {
         sink_.nodeNotDemanded(plan_.nodes[i].id);
@@ -629,7 +675,7 @@ class Scheduler {
   bool decimatedCloud() const { return decimatedCloud_.load(); }
   std::int32_t imageScale() const { return imageScale_.load(); }
 
- private:
+private:
   void notePreviewImageScale(std::int32_t s) {
     std::int32_t seen = imageScale_.load();
     while (s > seen && !imageScale_.compare_exchange_weak(seen, s)) {
@@ -643,10 +689,13 @@ class Scheduler {
     const std::size_t cap =
         options_.previewMaxPoints ? options_.previewMaxPoints : kDefaultPreviewMaxPoints;
     for (const auto& o : infos) {
-      if (o.type == "PointCloud" && o.elementCount >= cap) decimatedCloud_ = true;
-      if (o.type != "Image" || o.valueJson.empty()) continue;
+      if (o.type == "PointCloud" && o.elementCount >= cap)
+        decimatedCloud_ = true;
+      if (o.type != "Image" || o.valueJson.empty())
+        continue;
       const nlohmann::json v = nlohmann::json::parse(o.valueJson, nullptr, false);
-      if (v.is_object()) notePreviewImageScale(v.value("scale", 1));
+      if (v.is_object())
+        notePreviewImageScale(v.value("scale", 1));
     }
   }
 
@@ -661,7 +710,8 @@ class Scheduler {
     std::vector<std::vector<Edge>> consumers(n_);
     for (std::size_t i = 0; i < n_; ++i) {
       for (const InputBinding& b : plan_.nodes[i].inputs) {
-        if (b.fromNode < 0) continue;
+        if (b.fromNode < 0)
+          continue;
         consumers[static_cast<std::size_t>(b.fromNode)].push_back(Edge{i, b.acceptsError});
       }
     }
@@ -670,11 +720,14 @@ class Scheduler {
     // acceptsError 端口，整条级联都算被接住（ADR-0016）。
     std::vector<char> absorbed(n_, 0);
     for (std::size_t k = n_; k-- > 0;) {
-      if (!done_[k] || verdict_[k] != Verdict::Failed) continue;
-      if (consumers[k].empty()) continue;
+      if (!done_[k] || verdict_[k] != Verdict::Failed)
+        continue;
+      if (consumers[k].empty())
+        continue;
       bool all = true;
       for (const Edge& e : consumers[k]) {
-        if (e.acceptsError) continue;
+        if (e.acceptsError)
+          continue;
         if (verdict_[e.consumer] == Verdict::Failed && done_[e.consumer] && absorbed[e.consumer]) {
           continue;
         }
@@ -684,13 +737,15 @@ class Scheduler {
       absorbed[k] = all ? 1 : 0;
     }
     for (std::size_t i = 0; i < n_; ++i) {
-      if (!done_[i] || verdict_[i] == Verdict::Ok) continue;
+      if (!done_[i] || verdict_[i] == Verdict::Ok)
+        continue;
       if (verdict_[i] == Verdict::Cancelled) {
         sawCancel_ = true;
         failed_ += 1;
         continue;
       }
-      if (absorbed[i]) continue;
+      if (absorbed[i])
+        continue;
       anyError_ = true;
       failed_ += 1;
     }
@@ -703,7 +758,7 @@ class Scheduler {
         std::unique_lock<std::mutex> lock(mu_);
         cv_.wait(lock, [this] { return !ready_.empty() || inflight_ == 0; });
         if (ready_.empty()) {
-          cv_.notify_all();  // 叫醒其余 worker 一起收工
+          cv_.notify_all(); // 叫醒其余 worker 一起收工
           return;
         }
         index = ready_.top();
@@ -727,12 +782,14 @@ class Scheduler {
       std::lock_guard<std::mutex> lock(mu_);
       verdict_[index] = v;
       done_[index] = 1;
-      if (releaseDownstream) inflight_ -= 1;
+      if (releaseDownstream)
+        inflight_ -= 1;
       // 惰性闭包里的节点从不是别人的 blocker（frontier 只收非惰性节点），
       // releases_ 为空，所以这一段对它们天然是空转。
       for (int d : releases_[index]) {
         const auto di = static_cast<std::size_t>(d);
-        if (--remaining_[di] == 0) ready_.push(di);
+        if (--remaining_[di] == 0)
+          ready_.push(di);
       }
     }
   }
@@ -778,7 +835,8 @@ class Scheduler {
     // 一次看到所有能看到的（D5 的执行期对应物）。
     if (!node.valid || !node.op) {
       std::vector<Status> errors;
-      for (const auto& d : node.errors) errors.push_back(d.status);
+      for (const auto& d : node.errors)
+        errors.push_back(d.status);
       if (errors.empty()) {
         errors.push_back(Status::Error(Phase::Validate, "internal", "节点校验未通过"));
       }
@@ -807,9 +865,11 @@ class Scheduler {
         node.op->capabilities.deterministic && !node.op->outputs.empty()) {
       std::vector<OutputInfo> infos;
       if (store_.reuse(options_.runId, node.id, node.cacheKey, outputPortNames(*node.op), infos)) {
-        if (options_.mode == RunMode::Preview && node.inputs.empty()) notePreviewSourceReused(infos);
+        if (options_.mode == RunMode::Preview && node.inputs.empty())
+          notePreviewSourceReused(infos);
         std::size_t bytes = 0;
-        for (const auto& o : infos) bytes += o.byteSize;
+        for (const auto& o : infos)
+          bytes += o.byteSize;
         const std::size_t primary = infos.empty() ? 0 : infos.front().elementCount;
         sink_.nodeFinished(node.id, "skipped", msSince(nodeStart), primary, bytes, infos,
                            /*cached=*/true, /*bypassed=*/false);
@@ -833,14 +893,16 @@ class Scheduler {
     std::unordered_map<std::string, Data> inputValues;
     std::unordered_map<std::string, Data> outputValues;
     bool bypassed = false;
-    std::int32_t pixelScale = 1;  // 这个节点在多大比例的图上算（ADR-0028），只有 compute 那条路会改它
+    std::int32_t pixelScale =
+        1; // 这个节点在多大比例的图上算（ADR-0028），只有 compute 那条路会改它
     Status status = Status::Ok();
 
     if (node.provided) {
       // 宿主注入：整个 compute 被跳过，输出直接从注入数据装配（ADR-0017）。
       auto it = injected_.find(node.id);
       if (it != injected_.end()) {
-        for (const auto& kv : it->second) outputValues[kv.first] = kv.second;
+        for (const auto& kv : it->second)
+          outputValues[kv.first] = kv.second;
       }
     } else if (node.bypass) {
       bypassed = true;
@@ -855,7 +917,8 @@ class Scheduler {
       // 上限按惰性端口个数 +1 —— 一个算子最多把每个惰性端口 demand 一遍。
       int budget = 1;
       for (const Port& p : node.op->inputs) {
-        if (p.lazy) budget += 1;
+        if (p.lazy)
+          budget += 1;
       }
       for (int attempt = 0; attempt < budget; ++attempt) {
         inputValues.clear();
@@ -871,7 +934,8 @@ class Scheduler {
         ParamMap scaledParams;
         if (pixelScale > 1) {
           scaledParams = scalePixelParams(*node.op, node.params, pixelScale);
-          for (auto& kv : inputValues) kv.second = toNodeScale(kv.second, pixelScale);
+          for (auto& kv : inputValues)
+            kv.second = toNodeScale(kv.second, pixelScale);
         }
         Inputs inputs(inputValues);
         Outputs outputs(outputValues);
@@ -882,16 +946,17 @@ class Scheduler {
         } catch (const std::exception& e) {
           // 算子抛出的任何异常都在这里兜住。绝不让它穿到 C ABI ——
           // 跨 DLL 边界抛异常一旦有 Rust 栈帧介入就是未定义行为。
-          status = Status::Error(Phase::Execute, "internal",
-                                 std::string("算子内部异常: ") + e.what());
+          status =
+              Status::Error(Phase::Execute, "internal", std::string("算子内部异常: ") + e.what());
         } catch (...) {
           status = Status::Error(Phase::Execute, "internal", "算子内部异常（未知类型）");
         }
-        if (!status.isDemand()) break;
+        if (!status.isDemand())
+          break;
         if (attempt + 1 >= budget) {
-          status = Status::Error(Phase::Execute, "internal",
-                                 "算子反复 demand 同一批端口，超过 " + std::to_string(budget) +
-                                     " 次");
+          status =
+              Status::Error(Phase::Execute, "internal",
+                            "算子反复 demand 同一批端口，超过 " + std::to_string(budget) + " 次");
           break;
         }
         if (const Status bad = satisfyDemand(i, status.portName); !bad.ok) {
@@ -937,16 +1002,18 @@ class Scheduler {
     // 预览抽稀只在源头做一次：无输入的节点抽完，整条链自然都变快（F5）。
     // 图像按 2 的幂缩到 4 MP 以内（ADR-0028）：下游的像素参数按它的 scale 换算，算子不知道自己在预览。
     if (options_.mode == RunMode::Preview && node.inputs.empty()) {
-      const std::size_t cap = options_.previewMaxPoints ? options_.previewMaxPoints
-                                                        : kDefaultPreviewMaxPoints;
+      const std::size_t cap =
+          options_.previewMaxPoints ? options_.previewMaxPoints : kDefaultPreviewMaxPoints;
       for (auto& kv : outputValues) {
         if (const PointCloud* c = kv.second.asCloud()) {
-          if (c->pointCount() <= cap) continue;
+          if (c->pointCount() <= cap)
+            continue;
           kv.second = Data::cloud(decimateCloud(*c, cap));
           decimatedCloud_ = true;
         } else if (const Image* img = kv.second.asImage()) {
           const unsigned level = previewLevel(*img, kPreviewMaxPixels);
-          if (level == 0) continue;
+          if (level == 0)
+            continue;
           Image small = shrinkImage(*img, level);
           notePreviewImageScale(small.scale);
           kv.second = Data::image(std::move(small));
@@ -960,7 +1027,8 @@ class Scheduler {
     bool first = true;
     for (const Port& p : node.op->outputs) {
       auto it = outputValues.find(p.name);
-      if (it == outputValues.end() || it->second.empty()) continue;  // bypass 找不到源
+      if (it == outputValues.end() || it->second.empty())
+        continue; // bypass 找不到源
       Data& d = it->second;
       totalBytes += d.byteSize();
       if (first) {
@@ -990,7 +1058,8 @@ class Scheduler {
         }
         ports.emplace_back(p.name, it->second);
       }
-      if (all) disk.store(node.cacheKey, ports);
+      if (all)
+        disk.store(node.cacheKey, ports);
     }
 
     sink_.nodeFinished(node.id, bypassed ? "skipped" : "done", durationMs, primaryElements,
@@ -1021,18 +1090,23 @@ class Scheduler {
     while (!stack.empty()) {
       const std::size_t id = stack.back();
       stack.pop_back();
-      if (seen[id]) continue;
+      if (seen[id])
+        continue;
       seen[id] = 1;
-      if (doneOf(id)) continue;
+      if (doneOf(id))
+        continue;
       closure.push_back(id);
-      for (int u : plan_.nodes[id].upstream) stack.push_back(static_cast<std::size_t>(u));
+      for (int u : plan_.nodes[id].upstream)
+        stack.push_back(static_cast<std::size_t>(u));
     }
-    if (closure.empty()) return Status::Ok();
+    if (closure.empty())
+      return Status::Ok();
     // Plan::nodes 本身是拓扑序，下标升序就是执行顺序。
     std::sort(closure.begin(), closure.end());
     sink_.planExtended(plan_, closure, node.id, port);
     for (std::size_t id : closure) {
-      if (doneOf(id)) continue;
+      if (doneOf(id))
+        continue;
       finish(id, execute(id), /*releaseDownstream=*/false);
     }
     return Status::Ok();
@@ -1042,17 +1116,21 @@ class Scheduler {
   /// 否则填 poison 并说明是取消还是失败连坐。
   bool upstreamOk(const PlanNode& node, Status& poison, bool& byCancel) const {
     for (const InputBinding& b : node.inputs) {
-      if (b.fromNode < 0) continue;
+      if (b.fromNode < 0)
+        continue;
       const auto ui = static_cast<std::size_t>(b.fromNode);
-      if (!doneOf(ui)) continue;  // 惰性且尚未 demand：端口缺席，不是失败
+      if (!doneOf(ui))
+        continue; // 惰性且尚未 demand：端口缺席，不是失败
       const Verdict v = verdictOf(ui);
-      if (v == Verdict::Ok) continue;
-      if (v == Verdict::Failed && b.acceptsError) continue;
+      if (v == Verdict::Ok)
+        continue;
+      if (v == Verdict::Failed && b.acceptsError)
+        continue;
       byCancel = v == Verdict::Cancelled;
-      poison = byCancel ? Status::Error(Phase::Execute, "cancelled", "运行已取消")
-                        : Status::Error(Phase::Execute, "upstream_failed",
-                                        "上游节点 " + plan_.nodes[ui].id + " 失败，未执行", {},
-                                        b.port);
+      poison = byCancel
+                   ? Status::Error(Phase::Execute, "cancelled", "运行已取消")
+                   : Status::Error(Phase::Execute, "upstream_failed",
+                                   "上游节点 " + plan_.nodes[ui].id + " 失败，未执行", {}, b.port);
       return false;
     }
     return true;
@@ -1060,10 +1138,12 @@ class Scheduler {
 
   Status collectInputs(const PlanNode& node, std::unordered_map<std::string, Data>& values) const {
     for (const InputBinding& b : node.inputs) {
-      if (b.fromNode < 0) continue;
+      if (b.fromNode < 0)
+        continue;
       const auto ui = static_cast<std::size_t>(b.fromNode);
       // 惰性上游还没被 demand：端口就是缺席的，算子据此返回 Status::Demand。
-      if (!doneOf(ui)) continue;
+      if (!doneOf(ui))
+        continue;
       // 失败的上游落在 acceptsError 端口上：这里把那条 Status 变成一个 Error Data。
       if (verdictOf(ui) == Verdict::Failed && b.acceptsError) {
         values[b.port] = Data::error(failureOf(ui));
@@ -1074,12 +1154,11 @@ class Scheduler {
       if (!store_.get(options_.runId, up.id, b.fromPort, d)) {
         // 上游是被静音的节点、而它那个输出没找到可透传的源（E5）。
         const bool bypassSource = up.bypass;
-        return Status::Error(
-            Phase::Execute, bypassSource ? "bypassed_no_source" : "internal",
-            bypassSource ? "上游 " + up.id + " 已静音，且它的 " + b.fromPort +
-                               " 端口找不到类型兼容的输入可以透传"
-                         : "上游 " + up.id + "." + b.fromPort + " 没有产出结果",
-            {}, b.port);
+        return Status::Error(Phase::Execute, bypassSource ? "bypassed_no_source" : "internal",
+                             bypassSource ? "上游 " + up.id + " 已静音，且它的 " + b.fromPort +
+                                                " 端口找不到类型兼容的输入可以透传"
+                                          : "上游 " + up.id + "." + b.fromPort + " 没有产出结果",
+                             {}, b.port);
       }
       // 声明类型编译期查过了，但流过来的 Data 是什么 Kind 还没人查。Any 端口会让
       // 声明层面的检查全过，而算子里的 asCloud() 返回 nullptr，解引用是 SEH，兜不住。
@@ -1116,12 +1195,15 @@ class Scheduler {
     if (!node.injectedInputs.empty()) {
       auto byNode = injected_.find(node.id);
       for (const std::string& port : node.injectedInputs) {
-        if (byNode == injected_.end()) break;
+        if (byNode == injected_.end())
+          break;
         auto hit = byNode->second.find(port);
-        if (hit == byNode->second.end()) continue;
+        if (hit == byNode->second.end())
+          continue;
         const Data& d = hit->second;
         const Port* declared = findPortByName(node.op->inputs, port);
-        if (!declared) continue;
+        if (!declared)
+          continue;
         const Data::Kind expected = kindFromTypeName(declared->type);
         if (expected != Data::Kind::None && d.kind() != expected) {
           return Status::Error(Phase::Execute, "type_mismatch",
@@ -1159,9 +1241,12 @@ class Scheduler {
       const Data::Kind wantKind = kindFromTypeName(want);
       for (const InputBinding& b : node.inputs) {
         auto it = inputs.find(b.port);
-        if (it == inputs.end() || it->second.empty()) continue;
-        if (wantKind != Data::Kind::None && it->second.kind() != wantKind) continue;
-        if (wantKind == Data::Kind::Bundle && want != it->second.typeName()) continue;
+        if (it == inputs.end() || it->second.empty())
+          continue;
+        if (wantKind != Data::Kind::None && it->second.kind() != wantKind)
+          continue;
+        if (wantKind == Data::Kind::Bundle && want != it->second.typeName())
+          continue;
         outputs[out.name] = it->second;
         break;
       }
@@ -1174,7 +1259,8 @@ class Scheduler {
       auto it = values.find(p.name);
       if (it == values.end() || it->second.empty()) {
         // 静音节点找不到源时该输出就是空的，报错留给下游（E5）。
-        if (bypassed) continue;
+        if (bypassed)
+          continue;
         // 算子必须把声明过的输出端口都填上。少填了是算子的 bug，早点炸在这里，
         // 好过让下游收到一个空 Data 再报「上游没有产出」。
         return Status::Error(Phase::Execute, "output_not_written",
@@ -1199,8 +1285,8 @@ class Scheduler {
       }
       if (expected != Data::Kind::None && it->second.kind() != expected) {
         return Status::Error(Phase::Execute, "internal",
-                             std::string("输出端口 '") + p.name + "' 声明为 " + want +
-                                 "，实际是 " + it->second.typeName(),
+                             std::string("输出端口 '") + p.name + "' 声明为 " + want + "，实际是 " +
+                                 it->second.typeName(),
                              {}, p.name);
       }
       if (const PointCloud* c = it->second.asCloud()) {
@@ -1229,7 +1315,8 @@ class Scheduler {
     const Plan* plan;
     bool operator()(std::size_t a, std::size_t b) const {
       const int la = plan->nodes[a].level, lb = plan->nodes[b].level;
-      if (la != lb) return la > lb;  // 小的先出队
+      if (la != lb)
+        return la > lb; // 小的先出队
       return a > b;
     }
   };
@@ -1283,8 +1370,10 @@ std::string traceBackToError(const Plan& plan, std::size_t start,
       std::size_t best = n;
       for (std::size_t i : frontier) {
         auto it = outcomes.find(plan.nodes[i].id);
-        if (it == outcomes.end() || it->second.state != want) continue;
-        if (i < best) best = i;
+        if (it == outcomes.end() || it->second.state != want)
+          continue;
+        if (i < best)
+          best = i;
       }
       if (best < n) {
         codeOut = outcomes.at(plan.nodes[best].id).code;
@@ -1294,7 +1383,8 @@ std::string traceBackToError(const Plan& plan, std::size_t start,
       for (std::size_t i : frontier) {
         for (int u : plan.nodes[i].upstream) {
           const auto ui = static_cast<std::size_t>(u);
-          if (seen[ui]) continue;
+          if (seen[ui])
+            continue;
           seen[ui] = 1;
           next.push_back(ui);
         }
@@ -1316,9 +1406,11 @@ std::string traceRootError(const Plan& plan, const std::string& fromId,
                            const std::map<std::string, NodeOutcome>& outcomes,
                            std::string& codeOut) {
   std::unordered_map<std::string, std::size_t> indexOf;
-  for (std::size_t i = 0; i < plan.nodes.size(); ++i) indexOf[plan.nodes[i].id] = i;
+  for (std::size_t i = 0; i < plan.nodes.size(); ++i)
+    indexOf[plan.nodes[i].id] = i;
   auto at = indexOf.find(fromId);
-  if (at == indexOf.end()) return {};
+  if (at == indexOf.end())
+    return {};
 
   auto stateOf = [&](std::size_t i) -> const std::string* {
     auto it = outcomes.find(plan.nodes[i].id);
@@ -1335,23 +1427,28 @@ std::string traceRootError(const Plan& plan, const std::string& fromId,
     const std::size_t i = stack.back();
     stack.pop_back();
     const std::string* state = stateOf(i);
-    if (state == nullptr) continue;
+    if (state == nullptr)
+      continue;
     if (*state == "error") {
-      if (i < bestError) bestError = i;
+      if (i < bestError)
+        bestError = i;
     } else if (*state == "cancelled") {
-      if (i < bestCancelled) bestCancelled = i;
+      if (i < bestCancelled)
+        bestCancelled = i;
     } else {
-      continue;  // 跑成功的节点不是这条失败链的一环
+      continue; // 跑成功的节点不是这条失败链的一环
     }
     for (int u : plan.nodes[i].upstream) {
       const auto ui = static_cast<std::size_t>(u);
-      if (seen[ui]) continue;
+      if (seen[ui])
+        continue;
       seen[ui] = 1;
       stack.push_back(ui);
     }
   }
   const std::size_t best = bestError < n ? bestError : bestCancelled;
-  if (best >= n) return {};
+  if (best >= n)
+    return {};
   codeOut = outcomes.at(plan.nodes[best].id).code;
   return plan.nodes[best].id;
 }
@@ -1364,12 +1461,15 @@ nlohmann::json collectDecisions(const Plan& plan,
   nlohmann::json out = nlohmann::json::object();
   for (const PlanNode& n : plan.nodes) {
     auto it = outcomes.find(n.id);
-    if (it == outcomes.end() || !it->second.outputsAvailable || !n.op) continue;
+    if (it == outcomes.end() || !it->second.outputsAvailable || !n.op)
+      continue;
     for (const Port& p : n.op->outputs) {
       Data d;
-      if (!store.get(runId, n.id, p.name, d)) continue;
+      if (!store.get(runId, n.id, p.name, d))
+        continue;
       const Record* r = d.asRecord();
-      if (!r || r->type != "FallbackChoice") continue;
+      if (!r || r->type != "FallbackChoice")
+        continue;
       nlohmann::json item = r->data.is_object() ? r->data : nlohmann::json::object();
       item["port"] = p.name;
       item["type"] = r->type;
@@ -1385,27 +1485,30 @@ nlohmann::json collectDecisions(const Plan& plan,
 /// 整个 run summary（ADR-0022 / m6-plan §1）。执行器手上有全部节点状态、
 /// 声明输出与结果仓，所以只能在这一层拼 —— 消费者从事件流重建必错。
 std::string buildSummaryJson(const std::string& runId, const Plan& plan,
-                             const std::map<std::string, NodeOutcome>& outcomes,
-                             double durationMs, bool forceFailed, ResultStore* store,
+                             const std::map<std::string, NodeOutcome>& outcomes, double durationMs,
+                             bool forceFailed, ResultStore* store,
                              const std::vector<ContractViolation>& violations) {
   std::unordered_map<std::string, std::size_t> indexOf;
-  for (std::size_t i = 0; i < plan.nodes.size(); ++i) indexOf[plan.nodes[i].id] = i;
+  for (std::size_t i = 0; i < plan.nodes.size(); ++i)
+    indexOf[plan.nodes[i].id] = i;
 
   bool anyError = false;
   bool anyCancelled = false;
   for (const auto& kv : outcomes) {
-    if (kv.second.state == "error") anyError = true;
-    if (kv.second.state == "cancelled") anyCancelled = true;
+    if (kv.second.state == "error")
+      anyError = true;
+    if (kv.second.state == "cancelled")
+      anyCancelled = true;
   }
 
   // 先把每个声明输出定成三态（H3），status 要靠它们（H2）。
   struct OutputState {
     const PlanOutput* decl = nullptr;
-    std::string state;   ///< value / inactive / failed
-    std::string reason;  ///< inactive 的原因
-    std::string from;    ///< failed 时回溯到的**最近**出错节点
-    std::string code;    ///< from 的错误码
-    std::string root;    ///< 沿失败链继续追到的、拓扑序最早的出错节点
+    std::string state;  ///< value / inactive / failed
+    std::string reason; ///< inactive 的原因
+    std::string from;   ///< failed 时回溯到的**最近**出错节点
+    std::string code;   ///< from 的错误码
+    std::string root;   ///< 沿失败链继续追到的、拓扑序最早的出错节点
     std::string rootCode;
     bool hasInfo = false;
     OutputInfo info;
@@ -1436,7 +1539,8 @@ std::string buildSummaryJson(const std::string& runId, const Plan& plan,
     } else {
       s.state = "failed";
       auto at = indexOf.find(o.nodeId);
-      if (at != indexOf.end()) s.from = traceBackToError(plan, at->second, outcomes, s.code);
+      if (at != indexOf.end())
+        s.from = traceBackToError(plan, at->second, outcomes, s.code);
       if (s.from.empty()) {
         s.from = o.nodeId;
         s.code = oc->second.code.empty() ? std::string("no_result") : oc->second.code;
@@ -1454,7 +1558,8 @@ std::string buildSummaryJson(const std::string& runId, const Plan& plan,
 
   bool anyOutputFailed = false;
   for (const auto& s : outputs) {
-    if (s.state == "failed") anyOutputFailed = true;
+    if (s.state == "failed")
+      anyOutputFailed = true;
   }
 
   // H2 的三态。forceFailed 是额外一条：整轮被取消、或图根本没编译过 ——
@@ -1481,10 +1586,14 @@ std::string buildSummaryJson(const std::string& runId, const Plan& plan,
     w.field("state", o.state);
     w.fieldIfSet("code", o.code);
     w.fieldIfSet("reason", o.reason);
-    if (o.durationMs >= 0) w.field("durationMs", o.durationMs);
-    if (o.state == "done" || o.state == "skipped") w.field("cached", o.cached);
-    if (o.bypassed) w.field("bypassed", true);
-    if (o.provided) w.field("provided", true);
+    if (o.durationMs >= 0)
+      w.field("durationMs", o.durationMs);
+    if (o.state == "done" || o.state == "skipped")
+      w.field("cached", o.cached);
+    if (o.bypassed)
+      w.field("bypassed", true);
+    if (o.provided)
+      w.field("provided", true);
     w.field("outputsAvailable", o.outputsAvailable);
     w.endObject();
   };
@@ -1492,12 +1601,14 @@ std::string buildSummaryJson(const std::string& runId, const Plan& plan,
   std::set<std::string> written;
   for (const PlanNode& n : plan.nodes) {
     auto it = outcomes.find(n.id);
-    if (it == outcomes.end()) continue;
+    if (it == outcomes.end())
+      continue;
     writeNode(n.id, it->second);
     written.insert(n.id);
   }
   for (const auto& kv : outcomes) {
-    if (written.count(kv.first)) continue;
+    if (written.count(kv.first))
+      continue;
     writeNode(kv.first, kv.second);
   }
   w.endObject();
@@ -1543,7 +1654,8 @@ std::string buildSummaryJson(const std::string& runId, const Plan& plan,
   {
     std::vector<const ContractViolation*> sorted;
     sorted.reserve(violations.size());
-    for (const auto& v : violations) sorted.push_back(&v);
+    for (const auto& v : violations)
+      sorted.push_back(&v);
     const std::size_t end = plan.nodes.size();
     auto rank = [&](const ContractViolation* v) {
       auto it = indexOf.find(v->node);
@@ -1552,8 +1664,10 @@ std::string buildSummaryJson(const std::string& runId, const Plan& plan,
     std::sort(sorted.begin(), sorted.end(),
               [&](const ContractViolation* a, const ContractViolation* b) {
                 const auto ra = rank(a), rb = rank(b);
-                if (ra != rb) return ra < rb;
-                if (a->node != b->node) return a->node < b->node;
+                if (ra != rb)
+                  return ra < rb;
+                if (a->node != b->node)
+                  return a->node < b->node;
                 return a->port < b->port;
               });
     for (const ContractViolation* v : sorted) {
@@ -1573,12 +1687,13 @@ std::string buildSummaryJson(const std::string& runId, const Plan& plan,
   return w.str();
 }
 
-}  // namespace
+} // namespace
 
 // ------------------------------------------------------------------ 并行度
 
 int resolveMaxParallel(int requested) {
-  if (requested > 0) return requested;
+  if (requested > 0)
+    return requested;
   const unsigned cores = std::thread::hardware_concurrency();
   return std::max(1, std::min<int>(4, cores == 0 ? 1 : static_cast<int>(cores)));
 }
@@ -1595,7 +1710,8 @@ Run::Run(std::string graphJson, RunOptions options, lyflow_event_cb cb, void* us
     : graphJson_(std::move(graphJson)), options_(std::move(options)), cb_(cb), user_(user) {
   // 给了 isolate 就用同一组 id 当 targets（node-run R1）：编译要它们的上游闭包来算 cacheKey，
   // 下游一概不进计划（R4）。调用方不必重复传，传了别的也以 isolate 为准。
-  if (!options_.isolate.empty()) options_.targets = options_.isolate;
+  if (!options_.isolate.empty())
+    options_.targets = options_.isolate;
   thread_ = std::thread([this] { work(); });
 }
 
@@ -1611,8 +1727,10 @@ void Run::join() {
   // 必须自己加锁：并发 join 是数据竞争，重复 join 已 join 过的 thread 是 UB。
   // C ABI 不能把正确性押在「调用方一定加了锁」上。
   std::lock_guard<std::mutex> lock(joinMutex_);
-  if (joined_) return;
-  if (thread_.joinable()) thread_.join();
+  if (joined_)
+    return;
+  if (thread_.joinable())
+    thread_.join();
   joined_ = true;
 }
 
@@ -1623,8 +1741,8 @@ void Run::work() {
     workImpl();
   } catch (const std::exception& e) {
     EventSink sink(options_.runId, cb_, user_);
-    Status s = Status::Error(Phase::Execute, "internal",
-                             std::string("执行器内部异常: ") + e.what());
+    Status s =
+        Status::Error(Phase::Execute, "internal", std::string("执行器内部异常: ") + e.what());
     sink.runFinished("error", 0.0, &s);
   } catch (...) {
     EventSink sink(options_.runId, cb_, user_);
@@ -1651,7 +1769,8 @@ void Run::workImpl() {
   {
     std::map<std::string, Hasher> digests;
     for (const InjectedInput& in : options_.inputs) {
-      if (in.nodeId.empty() || in.port.empty()) continue;
+      if (in.nodeId.empty() || in.port.empty())
+        continue;
       injected[in.nodeId][in.port] = in.data;
       injectedPorts[in.nodeId].insert(in.port);
       Hasher& h = digests[in.nodeId];
@@ -1666,10 +1785,12 @@ void Run::workImpl() {
       } else if (const Image* img = in.data.asImage()) {
         h.add(std::to_string(img->width) + "x" + std::to_string(img->height) + "x" +
               std::to_string(img->channels) + ":" + pixelDepthName(img->depth));
-        if (img->pixels) h.addBytes(img->pixels.get(), img->byteSize());
+        if (img->pixels)
+          h.addBytes(img->pixels.get(), img->byteSize());
       }
     }
-    for (auto& kv : digests) providedDigest[kv.first] = kv.second.hex();
+    for (auto& kv : digests)
+      providedDigest[kv.first] = kv.second.hex();
   }
 
   // 预览与单节点运行不组合（node-run R5）：预览结果在另一个缓存命名空间里，拿它去探
@@ -1706,13 +1827,13 @@ void Run::workImpl() {
   const int workers = resolveMaxParallel(options_.maxParallel);
   const bool preview = options_.mode == RunMode::Preview;
   sink.runStarted(plan, options_.targets, options_.isolate, options_.force, workers, preview,
-                  options_.previewMaxPoints ? options_.previewMaxPoints
-                                            : kDefaultPreviewMaxPoints);
+                  options_.previewMaxPoints ? options_.previewMaxPoints : kDefaultPreviewMaxPoints);
 
   // warning 与迁移走 log 通道：不阻断执行，但用户必须看得见。
   // 静默的兼容性降级（「默认值悄悄变了」）是最难排查的一类问题。
   for (const auto& d : diags.items()) {
-    if (d.severity == Severity::Warning) sink.log("warn", d.nodeId, d.status.message);
+    if (d.severity == Severity::Warning)
+      sink.log("warn", d.nodeId, d.status.message);
   }
 
   if (!plan.ok) {
@@ -1720,7 +1841,8 @@ void Run::workImpl() {
     // 节点级诊断照样按节点发出去，前端还能标红。
     std::unordered_map<std::string, std::vector<Status>> byNode;
     for (const auto& d : diags.items()) {
-      if (d.severity == Severity::Error && !d.nodeId.empty()) byNode[d.nodeId].push_back(d.status);
+      if (d.severity == Severity::Error && !d.nodeId.empty())
+        byNode[d.nodeId].push_back(d.status);
     }
     for (const auto& kv : byNode) {
       sink.nodeState(kv.first, "pending");
@@ -1728,13 +1850,16 @@ void Run::workImpl() {
     }
     Status first = Status::Error(Phase::Compile, "internal", "图无法编译");
     for (const auto& d : diags.items()) {
-      if (d.severity == Severity::Error) { first = d.status; break; }
+      if (d.severity == Severity::Error) {
+        first = d.status;
+        break;
+      }
     }
     // 编译就没过也给一份 summary：宿主的「这次到底成没成」只读这一个对象（H1）。
     const double failedAt = msSince(t0);
-    const std::string summary = buildSummaryJson(options_.runId, plan, sink.outcomes(), failedAt,
-                                                 /*forceFailed=*/true, /*store=*/nullptr,
-                                                 sink.contractViolations());
+    const std::string summary =
+        buildSummaryJson(options_.runId, plan, sink.outcomes(), failedAt,
+                         /*forceFailed=*/true, /*store=*/nullptr, sink.contractViolations());
     ResultStore::instance().setSummary(options_.runId, summary);
     sink.runFinished("error", failedAt, &first, summary);
     return;
@@ -1752,9 +1877,9 @@ void Run::workImpl() {
       const std::vector<std::string> attached =
           attachUnplanned(fullPlan, options_.runId, sink.outcomes(), shelf);
       const double failedAt = msSince(t0);
-      const std::string summary = buildSummaryJson(options_.runId, plan, sink.outcomes(), failedAt,
-                                                   /*forceFailed=*/true, &shelf,
-                                                   sink.contractViolations());
+      const std::string summary =
+          buildSummaryJson(options_.runId, plan, sink.outcomes(), failedAt,
+                           /*forceFailed=*/true, &shelf, sink.contractViolations());
       shelf.setSummary(options_.runId, summary);
       // 过期的旧结果在 summary 之后才挂：summary 说的是这一次，不能把旧值当成这次的结果报出去
       const std::vector<std::string> stale =
@@ -1766,13 +1891,15 @@ void Run::workImpl() {
   }
 
   ResultStore& store = ResultStore::instance();
-  if (options_.cacheBudgetBytes) store.setBudget(options_.cacheBudgetBytes);
+  if (options_.cacheBudgetBytes)
+    store.setBudget(options_.cacheBudgetBytes);
 
   // 图级命名输出：编译完就登记，宿主 join 之后按名字取（ADR-0017）。
   {
     std::vector<NamedOutput> named;
     named.reserve(plan.outputs.size());
-    for (const auto& o : plan.outputs) named.push_back(NamedOutput{o.name, o.nodeId, o.port});
+    for (const auto& o : plan.outputs)
+      named.push_back(NamedOutput{o.name, o.nodeId, o.port});
     store.setNamedOutputs(options_.runId, std::move(named));
   }
 
@@ -1780,7 +1907,8 @@ void Run::workImpl() {
   std::vector<std::string> keys;
   keys.reserve(plan.nodes.size());
   for (const auto& n : plan.nodes) {
-    if (!n.cacheKey.empty()) keys.push_back(n.cacheKey);
+    if (!n.cacheKey.empty())
+      keys.push_back(n.cacheKey);
   }
   CachePin pinned(store, std::move(keys));
 
@@ -1807,13 +1935,15 @@ void Run::workImpl() {
       if (slowest) {
         std::string op;
         for (const auto& n : plan.nodes) {
-          if (n.id == *slowest && n.op) op = n.op->id;
+          if (n.id == *slowest && n.op)
+            op = n.op->id;
         }
         message += "；最慢的是 " + *slowest + (op.empty() ? "" : "（" + op) + "，" +
                    std::to_string(static_cast<long long>(slowestMs)) + " ms" +
                    (op.empty() ? "" : "）");
       }
-      if (scheduler.decimatedCloud()) message += "；可以降低预览点数";
+      if (scheduler.decimatedCloud())
+        message += "；可以降低预览点数";
       if (scheduler.imageScale() > 1) {
         message += "；图像已按 1/" + std::to_string(scheduler.imageScale()) + " 预览";
       }
@@ -1824,7 +1954,8 @@ void Run::workImpl() {
   // 修订一 V2：凡是带 targets 的运行（运行到此、智能运行、isolate）都挂
   std::vector<std::string> attached;
   const bool partial = !options_.targets.empty();
-  if (partial) attached = attachUnplanned(fullPlan, options_.runId, sink.outcomes(), store);
+  if (partial)
+    attached = attachUnplanned(fullPlan, options_.runId, sink.outcomes(), store);
   const std::vector<std::string>* attachedOut = partial ? &attached : nullptr;
   const bool cancelled = scheduler.sawCancel() || cancelled_.load(std::memory_order_relaxed);
   // summary 在发 run_finished 之前登记：宿主 join 返回时 lyflow_run_summary
@@ -1834,7 +1965,8 @@ void Run::workImpl() {
   store.setSummary(options_.runId, summary);
   // 过期的旧结果在 summary 之后才挂（修订二）：summary 说的是这一次
   std::vector<std::string> stale;
-  if (partial) stale = attachStale(fullPlan, options_.runId, sink.outcomes(), attached, store);
+  if (partial)
+    stale = attachStale(fullPlan, options_.runId, sink.outcomes(), attached, store);
   const std::vector<std::string>* staleOut = partial ? &stale : nullptr;
 
   if (cancelled) {
@@ -1846,7 +1978,8 @@ void Run::workImpl() {
     sink.runFinished("error", total, &s, summary, nullptr, attachedOut, staleOut);
   } else {
     // 顺利收场的正式运行才能当下一次部分运行的「上一次」：预览是抽稀过的，出错 / 取消的缺节点
-    if (options_.mode != RunMode::Preview) store.noteCompleted(options_.runId);
+    if (options_.mode != RunMode::Preview)
+      store.noteCompleted(options_.runId);
     sink.runFinished("ok", total, nullptr, summary, nullptr, attachedOut, staleOut);
   }
 }
@@ -1856,7 +1989,8 @@ void Run::workImpl() {
 bool prepareGraph(const std::string& graphJson, RawGraph& out, Diagnostics& diags,
                   const std::string& paramsJson) {
   RawGraph parsed;
-  if (!parseGraph(graphJson, parsed, diags)) return false;
+  if (!parseGraph(graphJson, parsed, diags))
+    return false;
   if (!paramsJson.empty()) {
     nlohmann::json values;
     try {
@@ -1866,14 +2000,15 @@ bool prepareGraph(const std::string& graphJson, RawGraph& out, Diagnostics& diag
                   std::string("顶层参数的取值不是合法 JSON: ") + e.what());
       return false;
     }
-    if (!applyGraphParamValues(values, parsed, diags)) return false;
+    if (!applyGraphParamValues(values, parsed, diags))
+      return false;
   }
-  if (!expandGraph(parsed, out, diags)) return false;
+  if (!expandGraph(parsed, out, diags))
+    return false;
   return true;
 }
 
-std::string validateGraphJson(const std::string& graphJson,
-                              const std::filesystem::path& baseDir,
+std::string validateGraphJson(const std::string& graphJson, const std::filesystem::path& baseDir,
                               const std::string& paramsJson) {
   Diagnostics diags;
   RawGraph raw;
@@ -1890,25 +2025,27 @@ std::string validateGraphJson(const std::string& graphJson,
 // ---------------------------------------------------------------------- plan
 
 std::string planGraphJson(const std::string& graphJson, const std::filesystem::path& baseDir,
-                          const std::vector<std::string>& targets,
-                          const std::string& paramsJson) {
+                          const std::vector<std::string>& targets, const std::string& paramsJson) {
   Diagnostics diags;
   RawGraph raw;
   Plan plan;
-  if (!prepareGraph(graphJson, raw, diags, paramsJson)) return diags.toJson();
+  if (!prepareGraph(graphJson, raw, diags, paramsJson))
+    return diags.toJson();
 
   BuildOptions build;
   build.runId = "plan";
   build.baseDir = baseDir;
   build.targets = targets;
   buildPlan(ensureRegistry(), raw, build, plan, diags);
-  if (diags.hasErrors() || !plan.ok) return diags.toJson();
+  if (diags.hasErrors() || !plan.ok)
+    return diags.toJson();
 
   ResultStore& store = ResultStore::instance();
   std::vector<char> cached(plan.nodes.size(), 0);
   for (std::size_t i = 0; i < plan.nodes.size(); ++i) {
     const PlanNode& n = plan.nodes[i];
-    if (!n.op || n.op->outputs.empty() || !n.op->capabilities.deterministic || n.bypass) continue;
+    if (!n.op || n.op->outputs.empty() || !n.op->capabilities.deterministic || n.bypass)
+      continue;
     cached[i] = store.peek(n.cacheKey, outputPortNames(*n.op)) ? 1 : 0;
   }
 
@@ -1925,7 +2062,8 @@ std::string planGraphJson(const std::string& graphJson, const std::filesystem::p
   std::vector<std::vector<Consumer>> consumersOf(nodeCount);
   for (std::size_t i = 0; i < nodeCount; ++i) {
     for (const InputBinding& b : plan.nodes[i].inputs) {
-      if (b.fromNode < 0) continue;
+      if (b.fromNode < 0)
+        continue;
       consumersOf[static_cast<std::size_t>(b.fromNode)].push_back(Consumer{i, b.port, b.lazy});
     }
   }
@@ -1947,7 +2085,10 @@ std::string planGraphJson(const std::string& graphJson, const std::filesystem::p
     const PlanNode& n = plan.nodes[i];
     bool upstreamMissing = false;
     for (int u : n.upstream) {
-      if (!cached[static_cast<std::size_t>(u)]) { upstreamMissing = true; break; }
+      if (!cached[static_cast<std::size_t>(u)]) {
+        upstreamMissing = true;
+        break;
+      }
     }
     w.beginObject();
     w.field("nodeId", n.id);
@@ -1960,7 +2101,8 @@ std::string planGraphJson(const std::string& graphJson, const std::filesystem::p
     w.field("lazy", n.deferred);
     w.key("demandedBy");
     w.beginArray();
-    for (const std::string& g : gates[i]) w.value(g);
+    for (const std::string& g : gates[i])
+      w.value(g);
     w.endArray();
     w.endObject();
   }
@@ -1976,13 +2118,15 @@ std::string evictNodesJson(const std::string& graphJson, const std::filesystem::
   Diagnostics diags;
   RawGraph raw;
   Plan plan;
-  if (!prepareGraph(graphJson, raw, diags, paramsJson)) return diags.toJson();
+  if (!prepareGraph(graphJson, raw, diags, paramsJson))
+    return diags.toJson();
 
   BuildOptions build;
   build.runId = "evict";
   build.baseDir = baseDir;
   buildPlan(ensureRegistry(), raw, build, plan, diags);
-  if (diags.hasErrors() || !plan.ok) return diags.toJson();
+  if (diags.hasErrors() || !plan.ok)
+    return diags.toJson();
 
   // id 语义同 targets：子图节点的 id 等于它展开后的全部内部节点（路径前缀，F2）
   const auto matches = [&](const std::string& id) {
@@ -1995,11 +2139,13 @@ std::string evictNodesJson(const std::string& graphJson, const std::filesystem::
     return false;
   };
   std::vector<char> picked(plan.nodes.size(), 0);
-  for (std::size_t i = 0; i < plan.nodes.size(); ++i) picked[i] = matches(plan.nodes[i].id) ? 1 : 0;
+  for (std::size_t i = 0; i < plan.nodes.size(); ++i)
+    picked[i] = matches(plan.nodes[i].id) ? 1 : 0;
   if (downstream) {
     // plan.nodes 是拓扑序：上游总在前面，一趟就能把下游闭包传完
     for (std::size_t i = 0; i < plan.nodes.size(); ++i) {
-      if (picked[i]) continue;
+      if (picked[i])
+        continue;
       for (int u : plan.nodes[i].upstream) {
         if (picked[static_cast<std::size_t>(u)]) {
           picked[i] = 1;
@@ -2012,9 +2158,11 @@ std::string evictNodesJson(const std::string& graphJson, const std::filesystem::
   std::vector<std::string> keys;
   std::vector<std::string> ids;
   for (std::size_t i = 0; i < plan.nodes.size(); ++i) {
-    if (!picked[i]) continue;
+    if (!picked[i])
+      continue;
     ids.push_back(plan.nodes[i].id);
-    if (!plan.nodes[i].cacheKey.empty()) keys.push_back(plan.nodes[i].cacheKey);
+    if (!plan.nodes[i].cacheKey.empty())
+      keys.push_back(plan.nodes[i].cacheKey);
   }
   std::size_t skippedPinned = 0;
   const std::size_t removed = ResultStore::instance().evict(keys, &skippedPinned);
@@ -2026,7 +2174,8 @@ std::string evictNodesJson(const std::string& graphJson, const std::filesystem::
   w.field("skippedPinned", static_cast<std::int64_t>(skippedPinned));
   w.key("nodes");
   w.beginArray();
-  for (const std::string& id : ids) w.value(id);
+  for (const std::string& id : ids)
+    w.value(id);
   w.endArray();
   w.endObject();
   return w.str();
@@ -2034,19 +2183,20 @@ std::string evictNodesJson(const std::string& graphJson, const std::filesystem::
 
 // --------------------------------------------------------------- 生效参数视图
 
-std::string effectiveParamsJson(const std::string& graphJson,
-                                const std::filesystem::path& baseDir,
+std::string effectiveParamsJson(const std::string& graphJson, const std::filesystem::path& baseDir,
                                 const std::string& paramsJson) {
   Diagnostics diags;
   RawGraph raw;
   Plan plan;
-  if (!prepareGraph(graphJson, raw, diags, paramsJson)) return diags.toJson();
+  if (!prepareGraph(graphJson, raw, diags, paramsJson))
+    return diags.toJson();
 
   BuildOptions build;
   build.runId = "params";
   build.baseDir = baseDir;
   buildPlan(ensureRegistry(), raw, build, plan, diags);
-  if (diags.hasErrors() || !plan.ok) return diags.toJson();
+  if (diags.hasErrors() || !plan.ok)
+    return diags.toJson();
 
   JsonWriter w;
   w.setIndent(0);
@@ -2054,7 +2204,8 @@ std::string effectiveParamsJson(const std::string& graphJson,
   w.key("nodes");
   w.beginArray();
   for (const PlanNode& n : plan.nodes) {
-    if (!n.op) continue;
+    if (!n.op)
+      continue;
     w.beginObject();
     w.field("node", n.id);
     w.field("op", n.op->id);
@@ -2064,7 +2215,8 @@ std::string effectiveParamsJson(const std::string& graphJson,
       // 生效值来自 Plan：合并默认值、规整类型、跑完迁移之后的那一份。
       // 在 Rust 里重算一遍必然与执行器漂开，那正是 `params` 要消掉的问题。
       auto it = n.params.find(p.name);
-      if (it == n.params.end()) continue;
+      if (it == n.params.end())
+        continue;
       const char* source = "default";
       auto viaGraph = n.graphParams.find(p.name);
       if (viaGraph != n.graphParams.end()) {
@@ -2079,11 +2231,14 @@ std::string effectiveParamsJson(const std::string& graphJson,
       w.key("value");
       writeParamValue(w, it->second);
       w.field("source", std::string(source));
-      if (viaGraph != n.graphParams.end()) w.field("graphParam", viaGraph->second);
+      if (viaGraph != n.graphParams.end())
+        w.field("graphParam", viaGraph->second);
       w.fieldIfSet("label", p.label);
       w.fieldIfSet("unit", p.unit);
-      if (p.min) w.field("min", *p.min);
-      if (p.max) w.field("max", *p.max);
+      if (p.min)
+        w.field("min", *p.min);
+      if (p.max)
+        w.field("max", *p.max);
       w.endObject();
     }
     w.endArray();
@@ -2145,8 +2300,8 @@ std::string importGraphJson(const std::string& kind, const std::string& text,
   };
   const ImporterDesc* importer = ensureRegistry().findImporter(kind);
   if (!importer || !importer->fn) {
-    return asDiagnostics(Status::Error(Phase::Validate, "unknown_importer",
-                                       "没有注册 '" + kind + "' 这种导入器"));
+    return asDiagnostics(
+        Status::Error(Phase::Validate, "unknown_importer", "没有注册 '" + kind + "' 这种导入器"));
   }
   std::string graphJson;
   Status s = Status::Ok();
@@ -2157,7 +2312,8 @@ std::string importGraphJson(const std::string& kind, const std::string& text,
   } catch (...) {
     s = Status::Error(Phase::Validate, "internal", "导入时内部异常（未知类型）");
   }
-  if (!s.ok) return asDiagnostics(s);
+  if (!s.ok)
+    return asDiagnostics(s);
   if (graphJson.empty() || graphJson.front() != '{') {
     return asDiagnostics(Status::Error(Phase::Validate, "internal",
                                        "导入器 '" + kind + "' 没有产出一个 GraphDoc 对象"));
@@ -2165,4 +2321,4 @@ std::string importGraphJson(const std::string& kind, const std::string& text,
   return graphJson;
 }
 
-}  // namespace lyflow::exec
+} // namespace lyflow::exec

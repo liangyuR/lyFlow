@@ -1,5 +1,5 @@
-import type { CoreInfo, OperatorManifestBundle } from "../types/manifest";
-import type { GraphDoc, SubgraphDef } from "../types/graph";
+import type { CoreInfo, OperatorManifestBundle } from '../types/manifest';
+import type { GraphDoc, SubgraphDef } from '../types/graph';
 import type {
   CacheStats,
   EvictResult,
@@ -8,7 +8,7 @@ import type {
   OutputInfo,
   RunOutputs,
   PlanNode,
-} from "../types/execution";
+} from '../types/execution';
 import type {
   BackupStatus,
   CoreReloadFailed,
@@ -25,35 +25,35 @@ import type {
   Transport,
   TransportKind,
   Unlisten,
-} from "./types";
+} from './types';
 
 /** Tauri 壳里的传输：每个方法对应一条 `#[tauri::command]`。 */
 export class TauriTransport implements Transport {
-  readonly kind: TransportKind = "tauri";
+  readonly kind: TransportKind = 'tauri';
 
   async getManifest(): Promise<OperatorManifestBundle> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<OperatorManifestBundle>("get_manifest");
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<OperatorManifestBundle>('get_manifest');
   }
   async getCoreInfo(): Promise<CoreInfo> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<CoreInfo>("get_core_info");
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<CoreInfo>('get_core_info');
   }
   async saveGraph(path: string, doc: GraphDoc): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<void>("save_graph", { path, doc });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<void>('save_graph', { path, doc });
   }
   async loadGraph(path: string): Promise<LoadedGraph> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<LoadedGraph>("load_graph", { path });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<LoadedGraph>('load_graph', { path });
   }
   async validateGraph(
     doc: GraphDoc,
     graphPath: string | null,
     params?: Record<string, unknown>,
   ): Promise<GraphDiagnostic[]> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<GraphDiagnostic[]>("validate_graph", { doc, graphPath, params: params ?? null });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<GraphDiagnostic[]>('validate_graph', { doc, graphPath, params: params ?? null });
   }
   async planGraph(
     doc: GraphDoc,
@@ -61,8 +61,8 @@ export class TauriTransport implements Transport {
     targets?: string[],
     params?: Record<string, unknown>,
   ): Promise<PlanNode[]> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const out = await invoke<PlanNode[] | GraphDiagnostic[]>("plan_graph", {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const out = await invoke<PlanNode[] | GraphDiagnostic[]>('plan_graph', {
       doc,
       graphPath,
       targets: targets ?? null,
@@ -71,12 +71,12 @@ export class TauriTransport implements Transport {
     // 校验没过时 core 返回的是诊断数组而不是计划数组（ADR-0007）。
     // 两者靠 cacheKey 字段区分：诊断里永远没有它。
     const items = out as { cacheKey?: unknown }[];
-    if (items.some((n) => typeof n.cacheKey !== "string")) return [];
+    if (items.some((n) => typeof n.cacheKey !== 'string')) return [];
     return out as PlanNode[];
   }
   async clearCache(): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<void>("clear_cache");
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<void>('clear_cache');
   }
   async evictCache(
     doc: GraphDoc,
@@ -85,26 +85,22 @@ export class TauriTransport implements Transport {
     downstream: boolean,
     params?: Record<string, unknown>,
   ): Promise<EvictResult> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<EvictResult>("evict_cache", { doc, graphPath, nodeIds, downstream, params });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<EvictResult>('evict_cache', { doc, graphPath, nodeIds, downstream, params });
   }
   async cacheStats(): Promise<CacheStats> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<CacheStats>("cache_stats");
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<CacheStats>('cache_stats');
   }
-  async runGraph(
-    doc: GraphDoc,
-    graphPath: string | null,
-    options?: RunOptions,
-  ): Promise<string> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<string>("run_graph", {
+  async runGraph(doc: GraphDoc, graphPath: string | null, options?: RunOptions): Promise<string> {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<string>('run_graph', {
       doc,
       graphPath,
       targets: options?.targets ?? null,
       isolate: options?.isolate ?? null,
       force: options?.force ?? null,
-      mode: options?.mode ?? "full",
+      mode: options?.mode ?? 'full',
       previewMaxPoints: options?.previewMaxPoints ?? null,
       previewBudgetMs: options?.previewBudgetMs ?? null,
       sceneId: options?.sceneId ?? null,
@@ -112,16 +108,16 @@ export class TauriTransport implements Transport {
     });
   }
   async cancelRun(runId: string): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<void>("cancel_run", { runId });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<void>('cancel_run', { runId });
   }
   async getOutputInfo(runId: string, nodeId: string): Promise<OutputInfo[]> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<OutputInfo[]>("get_output_info", { runId, nodeId });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<OutputInfo[]>('get_output_info', { runId, nodeId });
   }
   async getRunOutputs(runId: string): Promise<RunOutputs> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<RunOutputs>("get_run_outputs", { runId });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<RunOutputs>('get_run_outputs', { runId });
   }
   async getOutputCloud(
     runId: string,
@@ -129,10 +125,10 @@ export class TauriTransport implements Transport {
     port: string,
     maxPoints: number,
   ): Promise<ArrayBuffer> {
-    const { invoke } = await import("@tauri-apps/api/core");
+    const { invoke } = await import('@tauri-apps/api/core');
     // Tauri 的 ipc::Response 在 JS 侧到手是 ArrayBuffer；某些版本给的是
     // Uint8Array，两种都接住 —— 差别只在一次 .buffer。
-    const raw = await invoke<ArrayBuffer | Uint8Array>("get_output_cloud", {
+    const raw = await invoke<ArrayBuffer | Uint8Array>('get_output_cloud', {
       runId,
       nodeId,
       port,
@@ -149,8 +145,8 @@ export class TauriTransport implements Transport {
     offset: number,
     count: number,
   ): Promise<ArrayBuffer> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const raw = await invoke<ArrayBuffer | Uint8Array>("get_output_tensor", {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const raw = await invoke<ArrayBuffer | Uint8Array>('get_output_tensor', {
       runId,
       nodeId,
       port,
@@ -169,8 +165,8 @@ export class TauriTransport implements Transport {
     row: number,
     rows: number,
   ): Promise<ArrayBuffer> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const raw = await invoke<ArrayBuffer | Uint8Array>("get_output_image", {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const raw = await invoke<ArrayBuffer | Uint8Array>('get_output_image', {
       runId,
       nodeId,
       port,
@@ -189,8 +185,8 @@ export class TauriTransport implements Transport {
     offset: number,
     count: number,
   ): Promise<ArrayBuffer> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const raw = await invoke<ArrayBuffer | Uint8Array>("get_output_indices", {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const raw = await invoke<ArrayBuffer | Uint8Array>('get_output_indices', {
       runId,
       nodeId,
       port,
@@ -202,109 +198,109 @@ export class TauriTransport implements Transport {
     return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
   }
   async onExecutionEvent(cb: (e: ExecutionEvent) => void): Promise<Unlisten> {
-    const { listen } = await import("@tauri-apps/api/event");
-    return listen<ExecutionEvent>("execution-event", (e) => cb(e.payload));
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen<ExecutionEvent>('execution-event', (e) => cb(e.payload));
   }
   async onManifestUpdated(cb: (e: ManifestUpdated) => void): Promise<Unlisten> {
-    const { listen } = await import("@tauri-apps/api/event");
-    return listen<ManifestUpdated>("manifest-updated", (e) => cb(e.payload));
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen<ManifestUpdated>('manifest-updated', (e) => cb(e.payload));
   }
   async onCoreReloadFailed(cb: (e: CoreReloadFailed) => void): Promise<Unlisten> {
-    const { listen } = await import("@tauri-apps/api/event");
-    return listen<CoreReloadFailed>("core-reload-failed", (e) => cb(e.payload));
+    const { listen } = await import('@tauri-apps/api/event');
+    return listen<CoreReloadFailed>('core-reload-failed', (e) => cb(e.payload));
   }
   async getRecentFiles(): Promise<RecentEntry[]> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<RecentEntry[]>("get_recent_files");
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<RecentEntry[]>('get_recent_files');
   }
   async pushRecentFile(path: string): Promise<RecentEntry[]> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<RecentEntry[]>("push_recent_file", { path });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<RecentEntry[]>('push_recent_file', { path });
   }
   async writeBackup(path: string, doc: GraphDoc): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<void>("write_backup", { path, doc });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<void>('write_backup', { path, doc });
   }
   async backupStatus(path: string): Promise<BackupStatus> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<BackupStatus>("backup_status", { path });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<BackupStatus>('backup_status', { path });
   }
   async readBackup(path: string): Promise<LoadedGraph> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<LoadedGraph>("read_backup", { path });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<LoadedGraph>('read_backup', { path });
   }
   async discardBackup(path: string): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<void>("discard_backup", { path });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<void>('discard_backup', { path });
   }
   async untitledBackupPath(): Promise<string> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<string>("untitled_backup_path");
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<string>('untitled_backup_path');
   }
   async listRecipeDir(dir: string): Promise<RecipeDirListing> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<RecipeDirListing>("list_recipe_dir", { dir });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<RecipeDirListing>('list_recipe_dir', { dir });
   }
   async readRecipeFile(path: string): Promise<string> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<string>("read_recipe_file", { path });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<string>('read_recipe_file', { path });
   }
   async writeRecipeFile(path: string, text: string): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<void>("write_recipe_file", { path, text });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<void>('write_recipe_file', { path, text });
   }
   async deleteRecipeFile(path: string): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<void>("delete_recipe_file", { path });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<void>('delete_recipe_file', { path });
   }
   async renameRecipeFile(from: string, to: string): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<void>("rename_recipe_file", { from, to });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<void>('rename_recipe_file', { from, to });
   }
   async writeFileBytes(path: string, contents: Uint8Array): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core");
+    const { invoke } = await import('@tauri-apps/api/core');
     // Tauri 的 command 参数走 JSON，Uint8Array 要拍成普通数组
-    return invoke<void>("write_file_bytes", { path, contents: Array.from(contents) });
+    return invoke<void>('write_file_bytes', { path, contents: Array.from(contents) });
   }
   async getLibraryDefinition(opId: string): Promise<SubgraphDef | null> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<SubgraphDef | null>("get_library_definition", { opId });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<SubgraphDef | null>('get_library_definition', { opId });
   }
   async getLibrarySettings(): Promise<LibrarySettings> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<LibrarySettings>("get_library_settings");
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<LibrarySettings>('get_library_settings');
   }
   async setLibraryDirs(extraDirs: string[]): Promise<LibraryRefresh> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<LibraryRefresh>("set_library_dirs", { extraDirs });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<LibraryRefresh>('set_library_dirs', { extraDirs });
   }
   async getLibraryStatus(): Promise<LibraryStatus> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<LibraryStatus>("get_library_status");
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<LibraryStatus>('get_library_status');
   }
   async refreshLibrary(): Promise<LibraryRefresh> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<LibraryRefresh>("refresh_library");
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<LibraryRefresh>('refresh_library');
   }
   async saveAsLibrary(
     doc: GraphDoc,
     subgraphId: string,
     meta: LibraryMeta,
   ): Promise<LibraryStatus> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<LibraryStatus>("save_as_library", { doc, subgraphId, meta });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<LibraryStatus>('save_as_library', { doc, subgraphId, meta });
   }
   async importGraph(kind: string, text: string, baseDir: string | null): Promise<GraphDoc> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<GraphDoc>("import_graph", { kind, text, baseDir });
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<GraphDoc>('import_graph', { kind, text, baseDir });
   }
   async loadCloudFile(
     path: string,
     graphPath: string | null,
     maxPoints: number,
   ): Promise<ArrayBuffer> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const raw = await invoke<ArrayBuffer | Uint8Array>("load_cloud_file", {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const raw = await invoke<ArrayBuffer | Uint8Array>('load_cloud_file', {
       path,
       graphPath,
       maxPoints,
@@ -314,7 +310,7 @@ export class TauriTransport implements Transport {
     return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
   }
   async listSnippets(): Promise<SnippetScan> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<SnippetScan>("list_snippets");
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<SnippetScan>('list_snippets');
   }
 }

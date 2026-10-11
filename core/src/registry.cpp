@@ -20,31 +20,44 @@ constexpr const char* kAnyTypeName = "Any";
 bool defaultKindMatches(ParamType t, const Value& v) {
   using K = Value::Kind;
   switch (t) {
-    case ParamType::Bool:      return v.kind() == K::Bool;
-    case ParamType::Int:       return v.kind() == K::Int;
-    case ParamType::Float:     return v.kind() == K::Float || v.kind() == K::Int;
-    case ParamType::Vec2f:     return v.kind() == K::FloatVec && v.vecValue().size() == 2;
-    case ParamType::Vec3f:     return v.kind() == K::FloatVec && v.vecValue().size() == 3;
-    case ParamType::Vec4f:     return v.kind() == K::FloatVec && v.vecValue().size() == 4;
-    case ParamType::Color:     return v.kind() == K::FloatVec &&
-                                      (v.vecValue().size() == 3 || v.vecValue().size() == 4);
-    case ParamType::Transform: return v.kind() == K::FloatVec && v.vecValue().size() == 16;
-    case ParamType::Enum:      return v.kind() == K::String || v.kind() == K::Int;
-    case ParamType::Flags:     return v.kind() == K::Int;
-    case ParamType::String:
-    case ParamType::Text:
-    case ParamType::Path:      return v.kind() == K::String;
-    // 存的是 JSON 文本；形状（checkCurveValue）在 validate() 里另查，那里有 Param 的限位
-    case ParamType::Curve:     return v.kind() == K::String;
+  case ParamType::Bool:
+    return v.kind() == K::Bool;
+  case ParamType::Int:
+    return v.kind() == K::Int;
+  case ParamType::Float:
+    return v.kind() == K::Float || v.kind() == K::Int;
+  case ParamType::Vec2f:
+    return v.kind() == K::FloatVec && v.vecValue().size() == 2;
+  case ParamType::Vec3f:
+    return v.kind() == K::FloatVec && v.vecValue().size() == 3;
+  case ParamType::Vec4f:
+    return v.kind() == K::FloatVec && v.vecValue().size() == 4;
+  case ParamType::Color:
+    return v.kind() == K::FloatVec && (v.vecValue().size() == 3 || v.vecValue().size() == 4);
+  case ParamType::Transform:
+    return v.kind() == K::FloatVec && v.vecValue().size() == 16;
+  case ParamType::Enum:
+    return v.kind() == K::String || v.kind() == K::Int;
+  case ParamType::Flags:
+    return v.kind() == K::Int;
+  case ParamType::String:
+  case ParamType::Text:
+  case ParamType::Path:
+    return v.kind() == K::String;
+  // 存的是 JSON 文本；形状（checkCurveValue）在 validate() 里另查，那里有 Param 的限位
+  case ParamType::Curve:
+    return v.kind() == K::String;
   }
   return false;
 }
 
 /// flags 选项的位：一串十进制数字。认不出来返回 false，原样按字符串导出。
 bool parseBit(const std::string& text, std::int64_t& out) {
-  if (text.empty() || text.size() > 18) return false;
+  if (text.empty() || text.size() > 18)
+    return false;
   for (char c : text) {
-    if (c < '0' || c > '9') return false;
+    if (c < '0' || c > '9')
+      return false;
   }
   out = std::stoll(text);
   return true;
@@ -62,30 +75,49 @@ int majorOf(const std::string& version) {
 
 void writeValue(JsonWriter& w, const Value& v) {
   switch (v.kind()) {
-    case Value::Kind::Null:     w.valueNull(); break;
-    case Value::Kind::Bool:     w.value(v.boolValue()); break;
-    case Value::Kind::Int:      w.value(v.intValue()); break;
-    case Value::Kind::Float:    w.value(v.floatValue()); break;
-    case Value::Kind::String:   w.value(v.stringValue()); break;
-    case Value::Kind::FloatVec:
-      w.beginArray();
-      for (double d : v.vecValue()) w.value(d);
-      w.endArray();
-      break;
+  case Value::Kind::Null:
+    w.valueNull();
+    break;
+  case Value::Kind::Bool:
+    w.value(v.boolValue());
+    break;
+  case Value::Kind::Int:
+    w.value(v.intValue());
+    break;
+  case Value::Kind::Float:
+    w.value(v.floatValue());
+    break;
+  case Value::Kind::String:
+    w.value(v.stringValue());
+    break;
+  case Value::Kind::FloatVec:
+    w.beginArray();
+    for (double d : v.vecValue())
+      w.value(d);
+    w.endArray();
+    break;
   }
 }
 
 void writeCondition(JsonWriter& w, const std::string& key, const Condition& c) {
-  if (!c.isSet()) return;
+  if (!c.isSet())
+    return;
   w.key(key);
   w.beginObject();
   w.field("param", c.param);
-  if (!c.eq.isNull()) { w.key("eq"); writeValue(w, c.eq); }
-  if (!c.ne.isNull()) { w.key("ne"); writeValue(w, c.ne); }
+  if (!c.eq.isNull()) {
+    w.key("eq");
+    writeValue(w, c.eq);
+  }
+  if (!c.ne.isNull()) {
+    w.key("ne");
+    writeValue(w, c.ne);
+  }
   if (!c.in.empty()) {
     w.key("in");
     w.beginArray();
-    for (const auto& v : c.in) writeValue(w, v);
+    for (const auto& v : c.in)
+      writeValue(w, v);
     w.endArray();
   }
   w.endObject();
@@ -98,9 +130,12 @@ void writePort(JsonWriter& w, const Port& p, bool isInput) {
   w.fieldIfSet("label", p.label);
   w.fieldIfSet("doc", p.doc);
   // required / acceptsError / lazy 只对输入端口有意义，schema 也是这么说的。
-  if (isInput && !p.required) w.field("required", false);
-  if (isInput && p.acceptsError) w.field("acceptsError", true);
-  if (isInput && p.lazy) w.field("lazy", true);
+  if (isInput && !p.required)
+    w.field("required", false);
+  if (isInput && p.acceptsError)
+    w.field("acceptsError", true);
+  if (isInput && p.lazy)
+    w.field("lazy", true);
   // 契约（ADR-0024）与样例（m6-plan H8）两端口都可以有：契约在输入端被执行器检查，
   // 写在输出端上是给读图的人看「这一维保证是什么」。空的一律不出现。
   if (p.contract.is_object() && !p.contract.empty()) {
@@ -132,17 +167,24 @@ void writeParam(JsonWriter& w, const Param& p) {
     writeValue(w, p.def);
   }
   w.fieldIfSet("group", p.group);
-  if (p.advanced) w.field("advanced", true);
+  if (p.advanced)
+    w.field("advanced", true);
 
-  if (p.min)     w.field("min", *p.min);
-  if (p.max)     w.field("max", *p.max);
-  if (p.softMin) w.field("softMin", *p.softMin);
-  if (p.softMax) w.field("softMax", *p.softMax);
-  if (p.step)    w.field("step", *p.step);
+  if (p.min)
+    w.field("min", *p.min);
+  if (p.max)
+    w.field("max", *p.max);
+  if (p.softMin)
+    w.field("softMin", *p.softMin);
+  if (p.softMax)
+    w.field("softMax", *p.softMax);
+  if (p.step)
+    w.field("step", *p.step);
   w.fieldIfSet("unit", p.unit);
   w.fieldIfSet("tuningRole", p.tuningRole);
   w.fieldIfSet("unitSource", p.unitSource);
-  if (p.absolute) w.field("absolute", true);
+  if (p.absolute)
+    w.field("absolute", true);
   w.fieldIfSet("componentLabels", p.componentLabels);
 
   if (!p.options.empty()) {
@@ -167,7 +209,8 @@ void writeParam(JsonWriter& w, const Param& p) {
 
   w.fieldIfSet("placeholder", p.placeholder);
   w.fieldIfSet("pattern", p.pattern);
-  if (p.rows) w.field("rows", static_cast<std::int64_t>(*p.rows));
+  if (p.rows)
+    w.field("rows", static_cast<std::int64_t>(*p.rows));
 
   if (!p.filters.empty()) {
     w.key("filters");
@@ -177,7 +220,8 @@ void writeParam(JsonWriter& w, const Param& p) {
       w.field("name", f.name);
       w.key("extensions");
       w.beginArray();
-      for (const auto& e : f.extensions) w.value(e);
+      for (const auto& e : f.extensions)
+        w.value(e);
       w.endArray();
       w.endObject();
     }
@@ -185,7 +229,8 @@ void writeParam(JsonWriter& w, const Param& p) {
   }
 
   w.fieldIfSet("mode", p.mode);
-  if (p.alpha) w.field("alpha", *p.alpha);
+  if (p.alpha)
+    w.field("alpha", *p.alpha);
 
   writeCondition(w, "visibleWhen", p.visibleWhen);
   writeCondition(w, "enabledWhen", p.enabledWhen);
@@ -204,14 +249,16 @@ void writeParam(JsonWriter& w, const Param& p) {
 }
 
 bool typesCompatibleIn(const Registry& r, const std::string& from, const std::string& to) {
-  if (from == to || from == kAnyTypeName || to == kAnyTypeName) return true;
+  if (from == to || from == kAnyTypeName || to == kAnyTypeName)
+    return true;
   const PortType* t = r.findType(from);
   return t && std::find(t->castableTo.begin(), t->castableTo.end(), to) != t->castableTo.end();
 }
 
 const Port* portNamed(const std::vector<Port>& ports, const std::string& name) {
   for (const auto& p : ports) {
-    if (p.name == name) return &p;
+    if (p.name == name)
+      return &p;
   }
   return nullptr;
 }
@@ -225,9 +272,12 @@ std::vector<std::string> checkSnippet(const Registry& r, const nlohmann::json& b
     auto it = j.find(key);
     return it != j.end() && it->is_string() ? it->get<std::string>() : std::string();
   };
-  if (b.value("schemaVersion", 0) != 1) out.push_back("schemaVersion 必须是 1");
-  if (str(b, "id").empty()) out.push_back("没有 id");
-  if (str(b, "label").empty()) out.push_back("没有 label");
+  if (b.value("schemaVersion", 0) != 1)
+    out.push_back("schemaVersion 必须是 1");
+  if (str(b, "id").empty())
+    out.push_back("没有 id");
+  if (str(b, "label").empty())
+    out.push_back("没有 label");
   const json nodes = b.value("nodes", json::array());
   if (!nodes.is_array() || nodes.empty()) {
     out.push_back("nodes 为空");
@@ -241,9 +291,11 @@ std::vector<std::string> checkSnippet(const Registry& r, const nlohmann::json& b
       out.push_back("有一个节点没有 id");
       continue;
     }
-    if (ops.count(id)) out.push_back("节点 id 重复: " + id);
+    if (ops.count(id))
+      out.push_back("节点 id 重复: " + id);
     const OperatorDesc* op = r.find(opId);
-    if (!op) out.push_back("节点 " + id + " 的算子 '" + opId + "' 没有注册");
+    if (!op)
+      out.push_back("节点 " + id + " 的算子 '" + opId + "' 没有注册");
     ops[id] = op;
     if (op && n.contains("params")) {
       if (!n["params"].is_object()) {
@@ -265,7 +317,8 @@ std::vector<std::string> checkSnippet(const Registry& r, const nlohmann::json& b
       out.push_back(what + " 指向片段里没有的节点 '" + node + "'");
       return nullptr;
     }
-    if (!it->second) return nullptr;  // 算子缺失已经报过
+    if (!it->second)
+      return nullptr; // 算子缺失已经报过
     const Port* p = portNamed(input ? it->second->inputs : it->second->outputs, port);
     if (!p) {
       out.push_back(what + " 指向 " + node + " 没有的" + (input ? "输入" : "输出") + "端口 '" +
@@ -279,23 +332,24 @@ std::vector<std::string> checkSnippet(const Registry& r, const nlohmann::json& b
     const Port* to = endpoint(e.value("to", json::object()), true, "边");
     const std::string target = str(e.value("to", json::object()), "node") + "." +
                                str(e.value("to", json::object()), "port");
-    if (!fed.insert(target).second) out.push_back("输入端口 " + target + " 接了不止一条边");
+    if (!fed.insert(target).second)
+      out.push_back("输入端口 " + target + " 接了不止一条边");
     if (from && to && !typesCompatibleIn(r, from->type, to->type)) {
       out.push_back("边 → " + target + " 类型接不上：" + from->type + " → " + to->type);
     }
   }
   const json ports = b.value("ports", json::object());
   for (const json& p : ports.value("inputs", json::array())) {
-    if (endpoint(p, true, "对外输入") &&
-        fed.count(str(p, "node") + "." + str(p, "port"))) {
+    if (endpoint(p, true, "对外输入") && fed.count(str(p, "node") + "." + str(p, "port"))) {
       out.push_back("对外输入 " + str(p, "node") + "." + str(p, "port") + " 在片段里已经接了边");
     }
   }
-  for (const json& p : ports.value("outputs", json::array())) endpoint(p, false, "对外输出");
+  for (const json& p : ports.value("outputs", json::array()))
+    endpoint(p, false, "对外输出");
   return out;
 }
 
-}  // namespace
+} // namespace
 
 Registry& Registry::instance() {
   static Registry r;
@@ -312,7 +366,8 @@ Registry& ensureRegistry() {
 void Registry::addType(PortType type) { types_.push_back(std::move(type)); }
 
 void Registry::addBundle(BundleDesc bundle) {
-  if (bundle.pack.empty()) bundle.pack = currentPack_;
+  if (bundle.pack.empty())
+    bundle.pack = currentPack_;
   for (auto& existing : bundles_) {
     if (existing.kind == bundle.kind) {
       existing = std::move(bundle);
@@ -325,18 +380,21 @@ void Registry::addBundle(BundleDesc bundle) {
 void Registry::setCurrentPack(std::string pack) { currentPack_ = std::move(pack); }
 
 void Registry::addOperator(OperatorDesc op) {
-  if (op.pack.empty()) op.pack = currentPack_;
+  if (op.pack.empty())
+    op.pack = currentPack_;
   operators_.push_back(std::move(op));
   builtinCount_ = operators_.size();
 }
 
 void Registry::setLibraryOperators(std::vector<OperatorDesc> ops) {
   operators_.resize(builtinCount_);
-  for (auto& op : ops) operators_.push_back(std::move(op));
+  for (auto& op : ops)
+    operators_.push_back(std::move(op));
 }
 
 void Registry::addImporter(ImporterDesc importer) {
-  if (importer.pack.empty()) importer.pack = currentPack_;
+  if (importer.pack.empty())
+    importer.pack = currentPack_;
   for (auto& existing : importers_) {
     if (existing.kind == importer.kind) {
       existing = std::move(importer);
@@ -347,7 +405,8 @@ void Registry::addImporter(ImporterDesc importer) {
 }
 
 void Registry::addSnippet(SnippetDesc snippet) {
-  if (snippet.pack.empty()) snippet.pack = currentPack_;
+  if (snippet.pack.empty())
+    snippet.pack = currentPack_;
   for (auto& existing : snippets_) {
     if (!snippet.id.empty() && existing.id == snippet.id) {
       existing = std::move(snippet);
@@ -368,66 +427,79 @@ void Registry::clear() {
 
 const OperatorDesc* Registry::find(const std::string& id) const {
   for (const auto& op : operators_) {
-    if (op.id == id) return &op;
-    if (std::find(op.aliases.begin(), op.aliases.end(), id) != op.aliases.end()) return &op;
+    if (op.id == id)
+      return &op;
+    if (std::find(op.aliases.begin(), op.aliases.end(), id) != op.aliases.end())
+      return &op;
   }
   return nullptr;
 }
 
 const ImporterDesc* Registry::findImporter(const std::string& kind) const {
   for (const auto& i : importers_) {
-    if (i.kind == kind) return &i;
+    if (i.kind == kind)
+      return &i;
   }
   return nullptr;
 }
 
 const PortType* Registry::findType(const std::string& name) const {
   for (const auto& t : types_) {
-    if (t.name == name) return &t;
+    if (t.name == name)
+      return &t;
   }
   return nullptr;
 }
 
 const BundleDesc* Registry::findBundle(const std::string& kind) const {
   for (const auto& b : bundles_) {
-    if (b.kind == kind) return &b;
+    if (b.kind == kind)
+      return &b;
   }
   return nullptr;
 }
 
 bool Registry::knowsType(const std::string& typeName) const {
   std::string kind;
-  if (parseBundleType(typeName, &kind)) return findBundle(kind) != nullptr;
+  if (parseBundleType(typeName, &kind))
+    return findBundle(kind) != nullptr;
   return findType(typeName) != nullptr;
 }
 
 std::string Registry::checkBundle(const std::string& declaredType, const Data& value,
                                   nlohmann::json* expected, nlohmann::json* actual) const {
   std::string kind;
-  if (!parseBundleType(declaredType, &kind)) return "端口类型 '" + declaredType + "' 不是 Bundle<kind>";
+  if (!parseBundleType(declaredType, &kind))
+    return "端口类型 '" + declaredType + "' 不是 Bundle<kind>";
   const BundleDesc* desc = findBundle(kind);
   const Bundle* got = value.asBundle();
   if (expected) {
     nlohmann::json want = nlohmann::json::object();
     if (desc) {
-      for (const BundleField& f : desc->fields) want[f.name] = f.type;
+      for (const BundleField& f : desc->fields)
+        want[f.name] = f.type;
     }
     *expected = {{"bundle", kind}, {"fields", want}};
   }
   if (actual) {
     nlohmann::json have = nlohmann::json::object();
     if (got) {
-      for (const auto& f : got->fields) have[f.first] = f.second.typeName();
+      for (const auto& f : got->fields)
+        have[f.first] = f.second.typeName();
     }
     *actual = got ? nlohmann::json{{"bundle", got->kind}, {"fields", have}}
                   : nlohmann::json{{"type", value.typeName()}};
   }
-  if (!desc) return "Bundle kind '" + kind + "' 没有在 manifest 里声明";
-  if (!got) return std::string("应当是 ") + declaredType + "，实际是 " + value.typeName();
-  if (got->kind != kind) return "应当是 " + declaredType + "，实际是 " + got->typeName;
+  if (!desc)
+    return "Bundle kind '" + kind + "' 没有在 manifest 里声明";
+  if (!got)
+    return std::string("应当是 ") + declaredType + "，实际是 " + value.typeName();
+  if (got->kind != kind)
+    return "应当是 " + declaredType + "，实际是 " + got->typeName;
   for (const BundleField& f : desc->fields) {
     const Data* d = got->field(f.name);
-    if (!d || d->empty()) return declaredType + " 缺字段 '" + f.name + "'";
+    if (!d || d->empty())
+      return declaredType + " 缺字段 '" + f.name + "'";
     const Data::Kind want = kindFromTypeName(f.type);
     if (want != Data::Kind::None && d->kind() != want) {
       return declaredType + " 的字段 '" + f.name + "' 应当是 " + f.type + "，实际是 " +
@@ -437,9 +509,13 @@ std::string Registry::checkBundle(const std::string& declaredType, const Data& v
   for (const auto& f : got->fields) {
     bool declared = false;
     for (const BundleField& df : desc->fields) {
-      if (df.name == f.first) { declared = true; break; }
+      if (df.name == f.first) {
+        declared = true;
+        break;
+      }
     }
-    if (!declared) return declaredType + " 多了一个没声明的字段 '" + f.first + "'";
+    if (!declared)
+      return declaredType + " 多了一个没声明的字段 '" + f.first + "'";
   }
   return {};
 }
@@ -451,9 +527,12 @@ std::vector<std::string> Registry::validate() const {
   // 类型表自身
   std::set<std::string> typeNames;
   for (const auto& t : types_) {
-    if (t.name.empty()) fail("port type with empty name");
-    if (!typeNames.insert(t.name).second) fail("duplicate port type: " + t.name);
-    if (t.color.empty()) fail("port type '" + t.name + "' has no color");
+    if (t.name.empty())
+      fail("port type with empty name");
+    if (!typeNames.insert(t.name).second)
+      fail("duplicate port type: " + t.name);
+    if (t.color.empty())
+      fail("port type '" + t.name + "' has no color");
   }
   for (const auto& t : types_) {
     for (const auto& c : t.castableTo) {
@@ -471,14 +550,18 @@ std::vector<std::string> Registry::validate() const {
     if (b.kind.empty() || b.kind.find_first_of("<> ") != std::string::npos) {
       fail("bundle with bad kind '" + b.kind + "'（不能为空，不能含 < > 空格）");
     }
-    if (!bundleKinds.insert(b.kind).second) fail("duplicate bundle kind: " + b.kind);
-    if (b.fields.empty()) fail(where + " declares no fields");
+    if (!bundleKinds.insert(b.kind).second)
+      fail("duplicate bundle kind: " + b.kind);
+    if (b.fields.empty())
+      fail(where + " declares no fields");
     std::set<std::string> names;
     for (const auto& f : b.fields) {
       if (f.name.empty() || f.name.find('.') != std::string::npos) {
-        fail(where + " field '" + f.name + "' 名字不能为空也不能含 '.'（`<port>.<field>` 靠它分隔）");
+        fail(where + " field '" + f.name +
+             "' 名字不能为空也不能含 '.'（`<port>.<field>` 靠它分隔）");
       }
-      if (!names.insert(f.name).second) fail(where + " has duplicate field '" + f.name + "'");
+      if (!names.insert(f.name).second)
+        fail(where + " has duplicate field '" + f.name + "'");
       if (f.type == kAnyTypeName || f.type == "Error" || parseBundleType(f.type, nullptr)) {
         fail(where + " field '" + f.name + "' 的类型不能是 " + f.type);
       } else if (!typeNames.count(f.type)) {
@@ -488,21 +571,28 @@ std::vector<std::string> Registry::validate() const {
   }
   auto portTypeKnown = [&](const std::string& type) {
     std::string kind;
-    if (parseBundleType(type, &kind)) return bundleKinds.count(kind) != 0;
+    if (parseBundleType(type, &kind))
+      return bundleKinds.count(kind) != 0;
     return typeNames.count(type) != 0;
   };
 
   std::set<std::string> opIds;
   for (const auto& op : operators_) {
     const std::string where = "operator '" + op.id + "'";
-    if (op.id.empty())       fail("operator with empty id");
-    if (op.version.empty())  fail(where + " has no version");
-    if (op.label.empty())    fail(where + " has no label");
-    if (op.category.empty()) fail(where + " has no category");
-    if (!opIds.insert(op.id).second) fail("duplicate operator id: " + op.id);
+    if (op.id.empty())
+      fail("operator with empty id");
+    if (op.version.empty())
+      fail(where + " has no version");
+    if (op.label.empty())
+      fail(where + " has no label");
+    if (op.category.empty())
+      fail(where + " has no category");
+    if (!opIds.insert(op.id).second)
+      fail("duplicate operator id: " + op.id);
     // 「有描述没实现」的算子只会在用户画完整张图、点了运行之后才暴露。
     // 挡在启动自检里，代价是一行。
-    if (!op.compute) fail(where + " has no compute function");
+    if (!op.compute)
+      fail(where + " has no compute function");
     if (op.outputs.empty() && op.inputs.empty()) {
       fail(where + " has neither inputs nor outputs");
     }
@@ -511,15 +601,16 @@ std::vector<std::string> Registry::validate() const {
       const bool isInput = std::string(kind) == "input";
       std::set<std::string> seen;
       for (const auto& p : ports) {
-        if (p.name.empty()) fail(where + " has a " + kind + " port with empty name");
+        if (p.name.empty())
+          fail(where + " has a " + kind + " port with empty name");
         if (!seen.insert(p.name).second) {
           fail(where + " has duplicate " + kind + " port '" + p.name + "'");
         }
         if (p.type == "Bundle") {
-          fail(where + " " + kind + " port '" + p.name + "' 写的是裸的 Bundle，应当写成 Bundle<kind>");
-        } else if (!portTypeKnown(p.type)) {
           fail(where + " " + kind + " port '" + p.name +
-               "' uses unknown type '" + p.type + "'");
+               "' 写的是裸的 Bundle，应当写成 Bundle<kind>");
+        } else if (!portTypeKnown(p.type)) {
+          fail(where + " " + kind + " port '" + p.name + "' uses unknown type '" + p.type + "'");
         }
         if (!isInput && (p.acceptsError || p.lazy)) {
           fail(where + " output port '" + p.name + "' sets acceptsError/lazy (inputs only)");
@@ -535,7 +626,8 @@ std::vector<std::string> Registry::validate() const {
           // 只会在第一次真跑的时候变成一个莫名其妙的 contract_violation。
           if (p.contract.contains("shape") && p.type != "Tensor" && p.type != "Image" &&
               p.type != kAnyTypeName) {
-            fail(portWhere + " contract: shape 只对 Tensor / Image 端口有意义，这个端口是 " + p.type);
+            fail(portWhere + " contract: shape 只对 Tensor / Image 端口有意义，这个端口是 " +
+                 p.type);
           }
           if (p.contract.contains("recordType") && p.type != "Record" && p.type != kAnyTypeName) {
             fail(portWhere + " contract: recordType 只对 Record 端口有意义，这个端口是 " + p.type);
@@ -544,7 +636,8 @@ std::vector<std::string> Registry::validate() const {
               p.type != "Image" && p.type != "Measurement" && p.type != kAnyTypeName) {
             fail(portWhere +
                  " contract: finite 只对 PointCloud / Tensor / Image / Measurement 端口有意义，"
-                 "这个端口是 " + p.type);
+                 "这个端口是 " +
+                 p.type);
           }
         }
       }
@@ -559,8 +652,10 @@ std::vector<std::string> Registry::validate() const {
           p.tuningRole != "detection" && p.tuningRole != "acceptance") {
         fail(pwhere + " tuningRole 不认识：" + p.tuningRole);
       }
-      if (p.name.empty()) fail(where + " has a param with empty name");
-      if (!paramNames.insert(p.name).second) fail(where + " has duplicate param '" + p.name + "'");
+      if (p.name.empty())
+        fail(where + " has a param with empty name");
+      if (!paramNames.insert(p.name).second)
+        fail(where + " has duplicate param '" + p.name + "'");
       if (p.def.isNull()) {
         fail(pwhere + " has no default (schema requires one; GraphDoc 稀疏存储以它为基准)");
       } else if (!defaultKindMatches(p.type, p.def)) {
@@ -572,11 +667,16 @@ std::vector<std::string> Registry::validate() const {
       if (p.type == ParamType::Enum && p.def.kind() == Value::Kind::String) {
         bool found = false;
         for (const auto& o : p.options) {
-          if (o.value == p.def.stringValue()) { found = true; break; }
+          if (o.value == p.def.stringValue()) {
+            found = true;
+            break;
+          }
         }
-        if (!found) fail(pwhere + " default '" + p.def.stringValue() + "' is not among its options");
+        if (!found)
+          fail(pwhere + " default '" + p.def.stringValue() + "' is not among its options");
       }
-      if (p.min && p.max && *p.min > *p.max) fail(pwhere + " has min > max");
+      if (p.min && p.max && *p.min > *p.max)
+        fail(pwhere + " has min > max");
       if (p.type == ParamType::Curve && p.def.kind() == Value::Kind::String) {
         const nlohmann::json j = nlohmann::json::parse(p.def.stringValue(), nullptr, false);
         std::string message;
@@ -602,13 +702,16 @@ std::vector<std::string> Registry::validate() const {
     for (const auto& p : op.params) {
       const std::string pwhere = where + " param '" + p.name + "'";
       // 绝对尺寸只对像素参数有意义：执行器只换算 unit=px 的参数（ADR-0028）
-      if (p.absolute && p.unit != "px") fail(pwhere + " absolute 只能标在 unit=px 的参数上");
+      if (p.absolute && p.unit != "px")
+        fail(pwhere + " absolute 只能标在 unit=px 的参数上");
       if (p.semantic.empty()) {
-        if (p.roiBackdrop.isSet()) fail(pwhere + " 给了 roiBackdrop 却没有 semantic=roi");
+        if (p.roiBackdrop.isSet())
+          fail(pwhere + " 给了 roiBackdrop 却没有 semantic=roi");
         continue;
       }
       bool known = false;
-      for (const char* s : kParamSemantics) known = known || p.semantic == s;
+      for (const char* s : kParamSemantics)
+        known = known || p.semantic == s;
       if (!known) {
         fail(pwhere + " semantic '" + p.semantic + "' 不认识");
         continue;
@@ -619,12 +722,16 @@ std::vector<std::string> Registry::validate() const {
       if (p.semantic == "roi" && p.unit == "px") {
         // 像素框（docs/image-plan.md 阶段 3）画在本算子输入的那张图上：要有 Image 输入，不另给底图
         bool hasImageIn = false;
-        for (const Port& in : op.inputs) hasImageIn = hasImageIn || in.type == "Image";
-        if (!hasImageIn) fail(pwhere + " unit=px 的 roi 画在输入图像上，算子要有一个 Image 输入端口");
-        if (p.roiBackdrop.isSet()) fail(pwhere + " unit=px 的 roi 不另给 roiBackdrop（底图就是输入图像）");
+        for (const Port& in : op.inputs)
+          hasImageIn = hasImageIn || in.type == "Image";
+        if (!hasImageIn)
+          fail(pwhere + " unit=px 的 roi 画在输入图像上，算子要有一个 Image 输入端口");
+        if (p.roiBackdrop.isSet())
+          fail(pwhere + " unit=px 的 roi 不另给 roiBackdrop（底图就是输入图像）");
         continue;
       }
-      if (!p.roiBackdrop.isSet()) continue;
+      if (!p.roiBackdrop.isSet())
+        continue;
       if (!p.roiBackdrop.inputPorts.empty()) {
         // 底图取自输入端口的上游结果：与 dir/files 二选一，端口必须是本算子的 PointCloud 输入
         if (!p.roiBackdrop.dirParam.empty() || !p.roiBackdrop.fileParams.empty()) {
@@ -633,21 +740,25 @@ std::vector<std::string> Registry::validate() const {
         for (const std::string& name : p.roiBackdrop.inputPorts) {
           const Port* in = nullptr;
           for (const Port& candidate : op.inputs) {
-            if (candidate.name == name) in = &candidate;
+            if (candidate.name == name)
+              in = &candidate;
           }
           if (!in || in->type != "PointCloud") {
-            fail(pwhere + " roiBackdrop.inputs 里的 '" + name + "' 要指向本算子的一个 PointCloud 输入端口");
+            fail(pwhere + " roiBackdrop.inputs 里的 '" + name +
+                 "' 要指向本算子的一个 PointCloud 输入端口");
           }
         }
       } else {
         const Param* dir = findParam(op, p.roiBackdrop.dirParam);
         if (!dir || dir->type != ParamType::Path) {
-          fail(pwhere + " roiBackdrop.dir '" + p.roiBackdrop.dirParam + "' 要指向本算子的一个 path 参数");
+          fail(pwhere + " roiBackdrop.dir '" + p.roiBackdrop.dirParam +
+               "' 要指向本算子的一个 path 参数");
         }
         for (const std::string& f : p.roiBackdrop.fileParams) {
           const Param* fp = findParam(op, f);
           if (!fp || (fp->type != ParamType::String && fp->type != ParamType::Path)) {
-            fail(pwhere + " roiBackdrop.files 里的 '" + f + "' 要指向本算子的一个 string / path 参数");
+            fail(pwhere + " roiBackdrop.files 里的 '" + f +
+                 "' 要指向本算子的一个 string / path 参数");
           }
         }
       }
@@ -665,11 +776,11 @@ std::vector<std::string> Registry::validate() const {
     const int major = majorOf(op.version);
     std::set<int> steps;
     for (const auto& m : op.migrations) {
-      if (!m.apply && !m.topology) fail(where + " migration from major " +
-                                        std::to_string(m.fromMajor) + " has no function");
+      if (!m.apply && !m.topology)
+        fail(where + " migration from major " + std::to_string(m.fromMajor) + " has no function");
       if (m.fromMajor < 1 || m.fromMajor >= major) {
-        fail(where + " migration fromMajor " + std::to_string(m.fromMajor) +
-             " is outside 1.." + std::to_string(major - 1));
+        fail(where + " migration fromMajor " + std::to_string(m.fromMajor) + " is outside 1.." +
+             std::to_string(major - 1));
       }
       if (!steps.insert(m.fromMajor).second) {
         fail(where + " has two migrations from major " + std::to_string(m.fromMajor));
@@ -685,9 +796,12 @@ std::vector<std::string> Registry::validate() const {
 
   std::set<std::string> importerKinds;
   for (const auto& i : importers_) {
-    if (i.kind.empty()) fail("importer with empty kind");
-    if (!i.fn) fail("importer '" + i.kind + "' has no function");
-    if (!importerKinds.insert(i.kind).second) fail("duplicate importer kind: " + i.kind);
+    if (i.kind.empty())
+      fail("importer with empty kind");
+    if (!i.fn)
+      fail("importer '" + i.kind + "' has no function");
+    if (!importerKinds.insert(i.kind).second)
+      fail("duplicate importer kind: " + i.kind);
   }
 
   for (const auto& s : snippets_) {
@@ -698,7 +812,8 @@ std::vector<std::string> Registry::validate() const {
       continue;
     }
     try {
-      for (const std::string& problem : checkSnippet(*this, s.body)) fail(where + ": " + problem);
+      for (const std::string& problem : checkSnippet(*this, s.body))
+        fail(where + ": " + problem);
     } catch (const std::exception& e) {
       // 字段类型写错（比如 ports 写成数组）时 nlohmann 的 value() 会抛
       fail(where + ": 结构不对（" + e.what() + "）");
@@ -766,17 +881,20 @@ std::string Registry::toManifestJson() const {
 
     w.key("inputs");
     w.beginArray();
-    for (const auto& p : op.inputs) writePort(w, p, /*isInput=*/true);
+    for (const auto& p : op.inputs)
+      writePort(w, p, /*isInput=*/true);
     w.endArray();
 
     w.key("outputs");
     w.beginArray();
-    for (const auto& p : op.outputs) writePort(w, p, /*isInput=*/false);
+    for (const auto& p : op.outputs)
+      writePort(w, p, /*isInput=*/false);
     w.endArray();
 
     w.key("params");
     w.beginArray();
-    for (const auto& p : op.params) writeParam(w, p);
+    for (const auto& p : op.params)
+      writeParam(w, p);
     w.endArray();
 
     w.key("capabilities");
@@ -807,12 +925,14 @@ std::string Registry::toManifestJson() const {
 
   // 片段（m8-plan L14）。坏的那几份（解析失败）不进 manifest，自检另报。没有就整段不出现。
   bool anySnippet = false;
-  for (const auto& s : snippets_) anySnippet = anySnippet || s.parseError.empty();
+  for (const auto& s : snippets_)
+    anySnippet = anySnippet || s.parseError.empty();
   if (anySnippet) {
     w.key("snippets");
     w.beginArray();
     for (const auto& s : snippets_) {
-      if (!s.parseError.empty()) continue;
+      if (!s.parseError.empty())
+        continue;
       w.beginObject();
       w.field("id", s.id);
       w.field("label", s.label.empty() ? s.id : s.label);
@@ -821,7 +941,8 @@ std::string Registry::toManifestJson() const {
       w.fieldIfSet("pack", s.pack);
       for (const char* key : {"nodes", "edges", "ports"}) {
         auto it = s.body.find(key);
-        if (it == s.body.end()) continue;
+        if (it == s.body.end())
+          continue;
         w.key(key);
         w.raw(it->dump());
       }
@@ -834,4 +955,4 @@ std::string Registry::toManifestJson() const {
   return w.str();
 }
 
-}  // namespace lyflow
+} // namespace lyflow

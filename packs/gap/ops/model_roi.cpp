@@ -22,31 +22,34 @@ namespace ml = ::gap::ml;
 /// 八类固定色表。下标即类 id：0/1/4/7 是背景与未用类，2/3/5/6 是契约里的四段
 /// （left_surface / left_roll / right_roll / right_surface）。
 constexpr std::uint8_t kClassColors[8][3] = {
-    {60, 60, 60},     // 0 背景
-    {120, 120, 120},  // 1 未用
-    {60, 170, 255},   // 2 left_surface
-    {255, 190, 40},   // 3 left_roll
-    {120, 120, 120},  // 4 未用
-    {255, 90, 60},    // 5 right_roll
-    {90, 220, 120},   // 6 right_surface
-    {200, 90, 220},   // 7 未用
+    {60, 60, 60},    // 0 背景
+    {120, 120, 120}, // 1 未用
+    {60, 170, 255},  // 2 left_surface
+    {255, 190, 40},  // 3 left_roll
+    {120, 120, 120}, // 4 未用
+    {255, 90, 60},   // 5 right_roll
+    {90, 220, 120},  // 6 right_surface
+    {200, 90, 220},  // 7 未用
 };
 
 /// Record 里的一行标签。缺字段或长度不对返回 false。
 bool readLabelRow(const lyflow::Record& record, const char* key, std::vector<int>* out) {
-  if (record.type != "GapLabels" || !record.data.contains(key)) return false;
+  if (record.type != "GapLabels" || !record.data.contains(key))
+    return false;
   const auto& row = record.data[key];
-  if (!row.is_array() || row.size() != ml::kProfileSlots) return false;
+  if (!row.is_array() || row.size() != ml::kProfileSlots)
+    return false;
   out->clear();
   out->reserve(row.size());
-  for (const auto& v : row) out->push_back(v.get<int>());
+  for (const auto& v : row)
+    out->push_back(v.get<int>());
   return true;
 }
 
 // --------------------------------------------------- profile_tensor / labels_from_logits
 
 /// 两片原始剖面 -> 模型输入张量 [2, 6, 1280]。通道构造是领域约定（T6）。
-}  // namespace
+} // namespace
 
 namespace fine {
 
@@ -82,12 +85,12 @@ Status profileTensor(const Inputs& inputs, const ParamView&, Outputs& outputs, E
   return Status::Ok();
 }
 
-}  // namespace fine
+} // namespace fine
 
 namespace {
 
 /// 逐槽 argmax。严格的 > 让并列时留下最小的类 id，与 np.argmax 一致。
-}  // namespace
+} // namespace
 
 namespace fine {
 
@@ -133,7 +136,8 @@ Status labelsFromLogits(const Inputs& inputs, const ParamView&, Outputs& outputs
   std::array<int, 8> histogram{};
   for (const auto& row : labels) {
     for (int label : row) {
-      if (label >= 0 && label < 8) histogram[static_cast<std::size_t>(label)] += 1;
+      if (label >= 0 && label < 8)
+        histogram[static_cast<std::size_t>(label)] += 1;
     }
   }
   ctx.log(LogLevel::Info, "labels: left_surface=" + std::to_string(histogram[2]) +
@@ -143,13 +147,13 @@ Status labelsFromLogits(const Inputs& inputs, const ParamView&, Outputs& outputs
   return Status::Ok();
 }
 
-}  // namespace fine
+} // namespace fine
 
 namespace {
 
 // ------------------------------------------------------------------ roi_from_labels
 
-}  // namespace
+} // namespace
 
 namespace fine {
 
@@ -184,7 +188,8 @@ Status roiFromLabels(const Inputs& inputs, const ParamView& params, Outputs& out
   ml::MaskRefineOptions options;
   options.enabled = params.flag("refine");
   options.split_step_mm = params.number("splitStepMm");
-  options.split_slot_gap = static_cast<std::size_t>(std::max<std::int64_t>(0, params.integer("splitSlotGap")));
+  options.split_slot_gap =
+      static_cast<std::size_t>(std::max<std::int64_t>(0, params.integer("splitSlotGap")));
   options.link_mm = params.number("linkMm");
   options.min_component_slots =
       static_cast<std::size_t>(std::max<std::int64_t>(0, params.integer("minComponentSlots")));
@@ -219,7 +224,8 @@ Status roiFromLabels(const Inputs& inputs, const ParamView& params, Outputs& out
   if (!result.missing_segments.empty()) {
     std::string joined;
     for (const auto& s : result.missing_segments) {
-      if (!joined.empty()) joined += ", ";
+      if (!joined.empty())
+        joined += ", ";
       joined += s;
     }
     return Status::Error(Phase::Execute, "model_roi_failed", "模型没标出这些段: " + joined);
@@ -238,11 +244,12 @@ Status roiFromLabels(const Inputs& inputs, const ParamView& params, Outputs& out
   }
   outputs.set("seam", Data::box2d(seamTowardBox(made[1], made[3])));
   const std::string text = ml::describeRefinements(result.refinements);
-  if (!text.empty()) ctx.log(LogLevel::Info, "refine: " + text);
+  if (!text.empty())
+    ctx.log(LogLevel::Info, "refine: " + text);
   return Status::Ok();
 }
 
-}  // namespace fine
+} // namespace fine
 
 namespace {
 
@@ -272,7 +279,8 @@ Status labelsToCloud(const Inputs& inputs, const ParamView& params, Outputs& out
   // 不给强度通道的话这个「只为了看」的算子在视图里什么也看不出来。
   out.intensity.assign(out.pointCount(), 0.0f);
   for (std::size_t i = 0; i < labels.size(); ++i) {
-    const std::size_t cls = labels[i] >= 0 && labels[i] < 8 ? static_cast<std::size_t>(labels[i]) : 0;
+    const std::size_t cls =
+        labels[i] >= 0 && labels[i] < 8 ? static_cast<std::size_t>(labels[i]) : 0;
     out.rgb[i * 3] = kClassColors[cls][0];
     out.rgb[i * 3 + 1] = kClassColors[cls][1];
     out.rgb[i * 3 + 2] = kClassColors[cls][2];
@@ -285,7 +293,7 @@ Status labelsToCloud(const Inputs& inputs, const ParamView& params, Outputs& out
 
 // ------------------------------------------------------------------ drop_non_finite
 
-}  // namespace
+} // namespace
 
 namespace fine {
 
@@ -303,7 +311,7 @@ Status dropNonFinite(const Inputs& inputs, const ParamView&, Outputs& outputs, E
   return Status::Ok();
 }
 
-}  // namespace fine
+} // namespace fine
 
 namespace {
 
@@ -343,7 +351,8 @@ lyflow::Box2D boundsOf(const lyflow::PointCloud& a, const lyflow::PointCloud& b)
     }
   }
   lyflow::Box2D box;
-  if (lo[0] > hi[0]) return box;
+  if (lo[0] > hi[0])
+    return box;
   box.min[0] = lo[0];
   box.min[1] = lo[1];
   box.max[0] = hi[0];
@@ -351,7 +360,7 @@ lyflow::Box2D boundsOf(const lyflow::PointCloud& a, const lyflow::PointCloud& b)
   return box;
 }
 
-}  // namespace
+} // namespace
 
 namespace fine {
 
@@ -361,8 +370,10 @@ Status rollAnchoredCrop(const Inputs& inputs, const ParamView& params, Outputs& 
   const lyflow::PointCloud& secondary = *inputs.get("secondary").asCloud();
   // 合并云跟着同一个窗裁（m8-plan：去噪挪到了 gap.read_scan，合并云在裁剪之前就有了）。
   // 没接就出一片空云 —— 声明过的输出端口必须写。
-  const lyflow::PointCloud* merged = inputs.has("merged") ? inputs.get("merged").asCloud() : nullptr;
-  if (!merged) outputs.set("merged", Data::cloud(lyflow::PointCloud{}));
+  const lyflow::PointCloud* merged =
+      inputs.has("merged") ? inputs.get("merged").asCloud() : nullptr;
+  if (!merged)
+    outputs.set("merged", Data::cloud(lyflow::PointCloud{}));
 
   ::detection::domain::RollAnchoredCropConfiguration config;
   config.enabled = params.flag("enabled");
@@ -408,7 +419,8 @@ Status rollAnchoredCrop(const Inputs& inputs, const ParamView& params, Outputs& 
       window = candidate;
       outputs.set("primary", Data::cloud(primary.select(keepP)));
       outputs.set("secondary", Data::cloud(secondary.select(keepS)));
-      if (merged) outputs.set("merged", Data::cloud(merged->select(insideStrict(*merged, candidate))));
+      if (merged)
+        outputs.set("merged", Data::cloud(merged->select(insideStrict(*merged, candidate))));
       keptPrimary = keepP.size();
       keptSecondary = keepS.size();
     }
@@ -420,7 +432,8 @@ Status rollAnchoredCrop(const Inputs& inputs, const ParamView& params, Outputs& 
     // 原样透传，窗退成两片云真正的包围盒 —— 无界框画在视图里没有意义。
     outputs.set("primary", Data::cloud(primary));
     outputs.set("secondary", Data::cloud(secondary));
-    if (merged) outputs.set("merged", inputs.get("merged"));
+    if (merged)
+      outputs.set("merged", inputs.get("merged"));
     window = boundsOf(primary, secondary);
     keptPrimary = primary.pointCount();
     keptSecondary = secondary.pointCount();
@@ -446,7 +459,7 @@ Status rollAnchoredCrop(const Inputs& inputs, const ParamView& params, Outputs& 
   return Status::Ok();
 }
 
-}  // namespace fine
+} // namespace fine
 
 namespace {
 
@@ -485,7 +498,7 @@ Param intParam(const char* name, const char* label, std::int64_t def, const char
   return p;
 }
 
-}  // namespace
+} // namespace
 
 void registerProfileTensor(Registry& r) {
   OperatorDesc op;
@@ -494,12 +507,11 @@ void registerProfileTensor(Registry& r) {
   op.label = "剖面张量";
   op.category = "间隙/模型";
   op.keywords = {"onnx", "tensor", "channels", "剖面", "张量"};
-  op.doc =
-      "把两片**原始 1280 槽**剖面拼成模型输入张量 [2, 6, 1280]。"
-      "六个通道是 z_norm / x_diff / normal_angle / curvature / intensity_norm / valid，"
-      "逐条对着 ml_handoff 的 build_channels 契约 —— 训练侧改了通道定义，这里要跟着改。\n"
-      "输入必须保留 NaN 槽（load 时把 dropNonFinite 关掉），点数不是 1280 直接报错。"
-      "推理本身是通用的，接 ml.onnx_run（T6）。";
+  op.doc = "把两片**原始 1280 槽**剖面拼成模型输入张量 [2, 6, 1280]。"
+           "六个通道是 z_norm / x_diff / normal_angle / curvature / intensity_norm / valid，"
+           "逐条对着 ml_handoff 的 build_channels 契约 —— 训练侧改了通道定义，这里要跟着改。\n"
+           "输入必须保留 NaN 槽（load 时把 dropNonFinite 关掉），点数不是 1280 直接报错。"
+           "推理本身是通用的，接 ml.onnx_run（T6）。";
   // 空槽 bug 的那条不变量（ADR-0024）：槽数必须正好 1280，值一到端口上就查。
   // **刻意不写 finite** —— 这个算子要的恰恰是**保留了 NaN 空槽**的原始剖面，
   // 声明 finite:true 会把它唯一正确的输入判成违反。
@@ -525,17 +537,15 @@ void registerLabelsFromLogits(Registry& r) {
   op.label = "由 Logits 得到标签";
   op.category = "间隙/模型";
   op.keywords = {"argmax", "labels", "logits", "分割", "类别"};
-  op.doc =
-      "逐槽 argmax：[2, 类别数, 1280] 的 logits -> 两行各 1280 个类 id。"
-      "并列时留最小的类 id（与 np.argmax 一致）。行 0 是 primary、行 1 是 secondary。"
-      "只做 argmax、不看置信度：模型对整帧都没把握时照样给出满满一行标签。";
+  op.doc = "逐槽 argmax：[2, 类别数, 1280] 的 logits -> 两行各 1280 个类 id。"
+           "并列时留最小的类 id（与 np.argmax 一致）。行 0 是 primary、行 1 是 secondary。"
+           "只做 argmax、不看置信度：模型对整帧都没把握时照样给出满满一行标签。";
   // [2, 类别数, 1280]：批与槽是定死的，类别数随模型走，所以中间那一维是 -1。
-  op.inputs = {withContract(
-      Port{"tensor", "Tensor", "Logits", "ml.onnx_run 的输出。", true},
-      {{"shape", {2, -1, static_cast<std::int64_t>(ml::kProfileSlots)}}})};
-  op.outputs = {withExample(
-      Port{"labels", "Record", "Labels", "GapLabels：两行各 1280 个类 id。", true},
-      examples::labels())};
+  op.inputs = {withContract(Port{"tensor", "Tensor", "Logits", "ml.onnx_run 的输出。", true},
+                            {{"shape", {2, -1, static_cast<std::int64_t>(ml::kProfileSlots)}}})};
+  op.outputs = {
+      withExample(Port{"labels", "Record", "Labels", "GapLabels：两行各 1280 个类 id。", true},
+                  examples::labels())};
   op.capabilities = {false, false, true};
   op.compute = &fine::labelsFromLogits;
   r.addOperator(std::move(op));
@@ -548,19 +558,18 @@ void registerRoiFromLabels(Registry& r) {
   op.label = "由标签得到 ROI";
   op.category = "间隙/模型";
   op.keywords = {"roi", "boxes", "refine", "模型框"};
-  op.doc =
-      "逐槽标签 → 四个业务 ROI。框在这里就换成测量帧的米（x→x, z→y, /1000），"
-      "下游的裁剪与叠画零改动（H3）。有 missing_segments 就报 model_roi_failed。\n"
-      "可选的 backdrop 接一片**测量帧**的同帧云（通常是 gap.labels_to_cloud 的输出），"
-      "原样透传到同名输出：这样选中本节点时四个框就叠在自己的剖面底图上，"
-      "而不是靠底图规则去上游借一片传感器帧的云（那一片在 2D 剖面里退化成一条线）。";
+  op.doc = "逐槽标签 → 四个业务 ROI。框在这里就换成测量帧的米（x→x, z→y, /1000），"
+           "下游的裁剪与叠画零改动（H3）。有 missing_segments 就报 model_roi_failed。\n"
+           "可选的 backdrop 接一片**测量帧**的同帧云（通常是 gap.labels_to_cloud 的输出），"
+           "原样透传到同名输出：这样选中本节点时四个框就叠在自己的剖面底图上，"
+           "而不是靠底图规则去上游借一片传感器帧的云（那一片在 2D 剖面里退化成一条线）。";
   // 槽号与标签一一对应 —— 上游删过点就全错位了，所以两片剖面都查槽数（ADR-0024）。
   const nlohmann::json slots = {{"elementCount", {{"eq", ml::kProfileSlots}}}};
   op.inputs = {
       withContract(Port{"primary", "PointCloud", "Primary", "原始 1280 槽的 Master 剖面。", true},
                    slots),
-      withContract(Port{"secondary", "PointCloud", "Secondary", "原始 1280 槽的 Slave 剖面。", true},
-                   slots),
+      withContract(
+          Port{"secondary", "PointCloud", "Secondary", "原始 1280 槽的 Slave 剖面。", true}, slots),
       withContract(Port{"labels", "Record", "Labels", "gap.onnx_segment 的输出。", true},
                    {{"recordType", "GapLabels"}}),
       Port{"backdrop", "PointCloud", "Backdrop",
@@ -571,9 +580,10 @@ void registerRoiFromLabels(Registry& r) {
       Port{"gapLeft", "Box2D", "Gap Left", "间隙左侧 ROI（模型的 left_roll）。", true},
       Port{"flushRef", "Box2D", "Flush Ref", "段差参考面 ROI。", true},
       Port{"gapRight", "Box2D", "Gap Right", "间隙右侧 ROI（模型的 right_roll）。", true},
-      Port{"seam", "Box2D", "Seam",
-           "两个间隙框中心连线的中点（零尺寸框），「靠缝那一端」的朝向：接 gap.fit_line 的 toward。",
-           true},
+      Port{
+          "seam", "Box2D", "Seam",
+          "两个间隙框中心连线的中点（零尺寸框），「靠缝那一端」的朝向：接 gap.fit_line 的 toward。",
+          true},
       withExample(Port{"refinements", "Record", "Refinements", "掩膜精修的诊断。", true},
                   examples::refinements()),
       Port{"backdrop", "PointCloud", "Backdrop", "backdrop 输入的原样透传；没接就是空云。", true},
@@ -606,12 +616,11 @@ void registerLabelsToCloud(Registry& r) {
   op.label = "标签映射到点云";
   op.category = "间隙/模型";
   op.keywords = {"labels", "color", "着色", "分割结果"};
-  op.doc =
-      "按类别给点上色，只为了在 3D 视图里看分割结果。八类固定色表写进 rgb，"
-      "同时把类 id 写进 intensity —— 视图没有 rgb 着色模式，靠强度才看得见。\n"
-      "接**测量帧**的云（gap.to_measurement_frame 之后、gap.drop_non_finite 之前）："
-      "换轴只换轴不删点，槽位与标签仍一一对应，而 2D 剖面俯视 XY 才看得出形状；"
-      "删过点的云槽位会错位，所以槽数不是 1280 直接报 bad_input。";
+  op.doc = "按类别给点上色，只为了在 3D 视图里看分割结果。八类固定色表写进 rgb，"
+           "同时把类 id 写进 intensity —— 视图没有 rgb 着色模式，靠强度才看得见。\n"
+           "接**测量帧**的云（gap.to_measurement_frame 之后、gap.drop_non_finite 之前）："
+           "换轴只换轴不删点，槽位与标签仍一一对应，而 2D 剖面俯视 XY 才看得出形状；"
+           "删过点的云槽位会错位，所以槽数不是 1280 直接报 bad_input。";
   op.inputs = {
       withContract(Port{"cloud", "PointCloud", "Cloud",
                         "与标签同序的 1280 槽剖面，通常是 gap.to_measurement_frame 的输出。", true},
@@ -644,11 +653,10 @@ void registerDropNonFinite(Registry& r) {
   op.category = "间隙/预处理";
   // 关键词不能出现小写的 n-a-n：core 的 manifest 序列化用例是子串匹配（test_executor.cpp:419）
   op.keywords = {"NaN", "finite", "剔除", "无效槽"};
-  op.doc =
-      "剔除非有限点，对应 NonFinitePointPolicy::kRemove。只看坐标是否有限，不做离群点剔除。"
-      "模型路径里 load 必须保留 NaN 槽，所以这一步单独拿出来。\n"
-      "删点会打乱槽号：按槽号与标签或张量对齐的算子（gap.profile_tensor、"
-      "gap.labels_to_cloud、gap.roi_from_labels）都要接在它之前 —— 它们的输入契约会查槽数。";
+  op.doc = "剔除非有限点，对应 NonFinitePointPolicy::kRemove。只看坐标是否有限，不做离群点剔除。"
+           "模型路径里 load 必须保留 NaN 槽，所以这一步单独拿出来。\n"
+           "删点会打乱槽号：按槽号与标签或张量对齐的算子（gap.profile_tensor、"
+           "gap.labels_to_cloud、gap.roi_from_labels）都要接在它之前 —— 它们的输入契约会查槽数。";
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "可能带 NaN 槽的点云。", true}};
   op.outputs = {Port{"cloud", "PointCloud", "Cloud", "只剩有限点。", true}};
   op.capabilities = {false, true, true};
@@ -663,12 +671,11 @@ void registerRollAnchoredCrop(Registry& r) {
   op.label = "随动裁剪";
   op.category = "间隙/模型";
   op.keywords = {"crop", "roll", "window", "跟随零件"};
-  op.doc =
-      "跟随零件的整体裁剪窗：中心取两个 roll 框中心的中点，半宽半高来自参数。"
-      "窗恒为轴对齐，不随零件姿态旋转。五种失效保护（disabled / bad_config / "
-      "degenerate_roll_box / roll_box_height / span）都让两片云原样透传；裁后点数不足 "
-      "minPointsKept 时丢掉窗、回退无界框 —— 下游拿到的是没裁过的云，不是空云。"
-      "走了哪一支看 status。";
+  op.doc = "跟随零件的整体裁剪窗：中心取两个 roll 框中心的中点，半宽半高来自参数。"
+           "窗恒为轴对齐，不随零件姿态旋转。五种失效保护（disabled / bad_config / "
+           "degenerate_roll_box / roll_box_height / span）都让两片云原样透传；裁后点数不足 "
+           "minPointsKept 时丢掉窗、回退无界框 —— 下游拿到的是没裁过的云，不是空云。"
+           "走了哪一支看 status。";
   op.inputs = {
       Port{"primary", "PointCloud", "Primary", "测量帧的 Master 云（已剔非有限点）。", true},
       Port{"secondary", "PointCloud", "Secondary", "测量帧的 Slave 云。", true},
@@ -712,4 +719,4 @@ void registerRollAnchoredCrop(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

@@ -20,7 +20,8 @@ PointCloud makeCloud(std::size_t n, bool intensity, bool normals, bool rgb) {
   for (std::size_t i = 0; i < n; ++i) {
     const float f = static_cast<float>(i);
     c.push(f, f * 2.0f, f * 3.0f);
-    if (intensity) c.intensity.push_back(f * 0.5f);
+    if (intensity)
+      c.intensity.push_back(f * 0.5f);
     if (normals) {
       c.normals.push_back(1.0f);
       c.normals.push_back(0.0f);
@@ -35,7 +36,7 @@ PointCloud makeCloud(std::size_t n, bool intensity, bool normals, bool rgb) {
   return c;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("select / selectInverse：搬全通道、不造通道、越界跳过、互为补集") {
   SUBCASE("保留全部通道") {
@@ -109,7 +110,7 @@ TEST_CASE("Data 的类型标签与 manifest 端口类型一一对应，2D 载荷
     CHECK(kindFromTypeName("Plane") == Data::Kind::Plane);
     // Any 不约束具体载荷，所以映射成 None 而不是某个具体 Kind
     CHECK(kindFromTypeName("Any") == Data::Kind::None);
-    CHECK(kindFromTypeName("PointCloudXYZI") == Data::Kind::None);  // D10：这个类型已删除
+    CHECK(kindFromTypeName("PointCloudXYZI") == Data::Kind::None); // D10：这个类型已删除
 
     const Data d = Data::cloud(makeCloud(4, true, false, false));
     CHECK(std::string(d.typeName()) == "PointCloud");
@@ -131,7 +132,8 @@ TEST_CASE("Data 的类型标签与 manifest 端口类型一一对应，2D 载荷
 
 // ------------------------------------------- 2D 量测域的六种载荷（ADR-0013）
 
-TEST_CASE("valueJson：Box2D / Point2D / Circle2D / Record 各写各的字段，点云与 Indices 不走 valueJson") {
+TEST_CASE(
+    "valueJson：Box2D / Point2D / Circle2D / Record 各写各的字段，点云与 Indices 不走 valueJson") {
   SUBCASE("Box2D / Point2D") {
     Box2D b;
     b.min[0] = -0.5f;
@@ -210,7 +212,7 @@ TEST_CASE("Measurement 的非有限值写成 null 而不是把整份 JSON 弄坏
   CHECK(bad["ok"] == false);
   CHECK(bad["message"] == "gap_left 圆拟合失败");
   CHECK(bad["unit"] == "mm");
-  CHECK_FALSE(bad.contains("nominal"));  // 没设上下限就不写，免得前端以为判过了
+  CHECK_FALSE(bad.contains("nominal")); // 没设上下限就不写，免得前端以为判过了
 
   m.value = 6.4138;
   m.ok = true;
@@ -273,7 +275,8 @@ TEST_CASE("jsonNumber 对非有限值给出合法 JSON") {
 
 // ------------------------------------------- 图像（docs/image-plan.md §1）
 
-TEST_CASE("Image：类型名往返、元素数是像素数、valueJson 逐通道统计只算有限值且只算一次、像素不进 JSON") {
+TEST_CASE(
+    "Image：类型名往返、元素数是像素数、valueJson 逐通道统计只算有限值且只算一次、像素不进 JSON") {
   CHECK(kindFromTypeName("Image") == Data::Kind::Image);
   CHECK(std::string(typeNameFromKind(Data::Kind::Image)) == "Image");
 
@@ -320,7 +323,7 @@ TEST_CASE("Image：类型名往返、元素数是像素数、valueJson 逐通道
     const Data a = Data::image(std::move(once));
     const std::string first = a.valueJson();
     raw[1] = 250;
-    const Data b = a;  // 浅拷贝
+    const Data b = a; // 浅拷贝
     CHECK(b.valueJson() == first);
     CHECK(nlohmann::json::parse(first)["max"] == nlohmann::json::array({30}));
   }
@@ -335,11 +338,13 @@ TEST_CASE("Image：类型名往返、元素数是像素数、valueJson 逐通道
   CHECK(Image::allocate(1, 1, 4, PixelDepth::U8).consistent());
 }
 
-TEST_CASE("shrinkImage：2^level 块均值，尺寸向上取整、边上的半块按实际像素平均，u8 四舍五入，f32 跳过 NaN") {
+TEST_CASE(
+    "shrinkImage：2^level 块均值，尺寸向上取整、边上的半块按实际像素平均，u8 四舍五入，f32 跳过 NaN") {
   // 5x3 的单通道 u8，值 = x + 10y
   Image img = Image::allocate(5, 3, 1, PixelDepth::U8);
   for (int y = 0; y < 3; ++y) {
-    for (int x = 0; x < 5; ++x) img.mutablePixels()[y * 5 + x] = static_cast<std::uint8_t>(x + 10 * y);
+    for (int x = 0; x < 5; ++x)
+      img.mutablePixels()[y * 5 + x] = static_cast<std::uint8_t>(x + 10 * y);
   }
   const Image half = shrinkImage(img, 1);
   REQUIRE(half.width == 3);
@@ -348,7 +353,7 @@ TEST_CASE("shrinkImage：2^level 块均值，尺寸向上取整、边上的半�
   CHECK(half.at(0, 0, 0) == 6.0);
   CHECK(half.at(2, 0, 0) == 9.0);
   CHECK(half.at(2, 1, 0) == 24.0);
-  CHECK(half.at(0, 1, 0) == 21.0);  // {20,21} → 20.5 → 21
+  CHECK(half.at(0, 1, 0) == 21.0); // {20,21} → 20.5 → 21
 
   // level 0 原样返回、共享像素
   CHECK(shrinkImage(img, 0).pixels.get() == img.pixels.get());

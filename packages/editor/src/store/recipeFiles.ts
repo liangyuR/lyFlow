@@ -2,7 +2,7 @@
 // （改名、删除、index.json 一起）、存盘前检测文件是否被外部修改、30 s 自动备份、导入导出。
 // 格式与判定都在 lib/recipes.ts（纯函数）；这里只有 I/O 与簿记（recipe store 的 saved / savedFiles / diskText）。
 
-import { askChoice, askText } from "../lib/modal";
+import { askChoice, askText } from '../lib/modal';
 import {
   baseNameOf,
   EMPTY_SET,
@@ -22,11 +22,11 @@ import {
   serializeRecipe,
   type RecipeEntry,
   type RecipeSet,
-} from "../lib/recipes";
-import { transport } from "../transport";
-import type { GraphDoc } from "../types/graph";
-import { rebaseHistoryRecipes, useGraphStore } from "./graph";
-import { applyRecipeSet, recipeSet, resetRecipes, selectRecipe, useRecipeStore } from "./recipe";
+} from '../lib/recipes';
+import { transport } from '../transport';
+import type { GraphDoc } from '../types/graph';
+import { rebaseHistoryRecipes, useGraphStore } from './graph';
+import { applyRecipeSet, recipeSet, resetRecipes, selectRecipe, useRecipeStore } from './recipe';
 
 let loadTicket = 0;
 let loading: Promise<void> = Promise.resolve();
@@ -48,8 +48,8 @@ async function readOrNull(path: string): Promise<string | null> {
  *  或静态模式就只清不读。读完后有 index.json 的 default 就选它（P3.3），否则停在「基础」。 */
 export function loadRecipesFor(graphPath: string | null): Promise<void> {
   const mine = ++loadTicket;
-  const dir = graphPath && transport.kind !== "static" ? recipeDirOf(graphPath) : null;
-  resetRecipes(dir, dir ? "loading" : "none");
+  const dir = graphPath && transport.kind !== 'static' ? recipeDirOf(graphPath) : null;
+  resetRecipes(dir, dir ? 'loading' : 'none');
   const before = recipeSet();
   if (!dir) {
     loading = Promise.resolve();
@@ -78,17 +78,17 @@ export function loadRecipesFor(graphPath: string | null): Promise<void> {
         if (!stem) continue; // autosave~.json 不是配方
         const text = await readOrNull(joinPath(dir, f.name));
         if (text === null) {
-          problems.push({ file: f.name, message: "读不出来" });
+          problems.push({ file: f.name, message: '读不出来' });
           continue;
         }
         diskText.set(f.name, text);
         const parsed = parseRecipeText(text, stem);
-        if ("error" in parsed) {
+        if ('error' in parsed) {
           problems.push({ file: f.name, message: parsed.error });
           continue;
         }
         if (seen.has(stem.toLowerCase())) {
-          problems.push({ file: f.name, message: "与另一个配方的名字只差大小写，跳过" });
+          problems.push({ file: f.name, message: '与另一个配方的名字只差大小写，跳过' });
           continue;
         }
         seen.add(stem.toLowerCase());
@@ -101,15 +101,18 @@ export function loadRecipesFor(graphPath: string | null): Promise<void> {
       const recipes = orderEntries(entries, index.order);
       const set: RecipeSet = {
         recipes,
-        defaultName: index.defaultName && recipes.some((r) => r.name === index.defaultName) ? index.defaultName : null,
+        defaultName:
+          index.defaultName && recipes.some((r) => r.name === index.defaultName)
+            ? index.defaultName
+            : null,
       };
-      useRecipeStore.setState({ set, saved: set, savedFiles, diskText, problems, status: "ready" });
+      useRecipeStore.setState({ set, saved: set, savedFiles, diskText, problems, status: 'ready' });
       rebaseHistoryRecipes(before, set);
-      if (set.defaultName) selectRecipe(set.defaultName, "auto");
+      if (set.defaultName) selectRecipe(set.defaultName, 'auto');
     } catch (e) {
       if (mine !== loadTicket) return;
       useRecipeStore.setState({
-        status: "error",
+        status: 'error',
         problems: [{ file: baseNameOf(dir), message: e instanceof Error ? e.message : String(e) }],
       });
     }
@@ -121,10 +124,15 @@ export function loadRecipesFor(graphPath: string | null): Promise<void> {
  *  有配方的情况由 saveRecipes 自己处理（另存为：全部写进新目录）。 */
 export function followGraphPath(graphPath: string | null): void {
   const rs = useRecipeStore.getState();
-  const dir = graphPath && transport.kind !== "static" ? recipeDirOf(graphPath) : null;
+  const dir = graphPath && transport.kind !== 'static' ? recipeDirOf(graphPath) : null;
   if (rs.dir === dir) return;
   if (rs.set.recipes.length === 0 && rs.saved.recipes.length === 0) {
-    useRecipeStore.setState({ dir, status: dir ? "ready" : "none", savedFiles: new Map(), diskText: new Map() });
+    useRecipeStore.setState({
+      dir,
+      status: dir ? 'ready' : 'none',
+      savedFiles: new Map(),
+      diskText: new Map(),
+    });
   }
 }
 
@@ -151,7 +159,16 @@ function planSave(doc: GraphDoc, dir: string): SavePlan | null {
   const savedFiles = relocated ? new Map<string, string>() : rs.savedFiles;
   if (set === saved) return null;
   const savedById = new Map(saved.recipes.map((e) => [e.id, e]));
-  const plan: SavePlan = { dir, set, doc, deletes: [], renames: [], writes: [], indexText: null, relocated };
+  const plan: SavePlan = {
+    dir,
+    set,
+    doc,
+    deletes: [],
+    renames: [],
+    writes: [],
+    indexText: null,
+    relocated,
+  };
   for (const entry of set.recipes) {
     const file = recipeFileName(entry.name);
     const old = savedFiles.get(entry.id);
@@ -160,19 +177,21 @@ function planSave(doc: GraphDoc, dir: string): SavePlan | null {
       continue;
     }
     if (old !== file) plan.renames.push({ id: entry.id, from: old, to: file });
-    if (entry !== savedById.get(entry.id) || old !== file) plan.writes.push({ entry, file, fresh: false });
+    if (entry !== savedById.get(entry.id) || old !== file)
+      plan.writes.push({ entry, file, fresh: false });
   }
   const alive = new Set(set.recipes.map((e) => e.id));
   for (const [id, file] of savedFiles) if (!alive.has(id)) plan.deletes.push({ id, file });
   const indexText = serializeIndex(set);
   const known = relocated ? undefined : rs.diskText.get(RECIPE_INDEX);
-  if (known !== indexText && (set.recipes.length > 0 || known !== undefined)) plan.indexText = indexText;
+  if (known !== indexText && (set.recipes.length > 0 || known !== undefined))
+    plan.indexText = indexText;
   return plan;
 }
 
 interface Conflict {
   file: string;
-  why: "modified" | "deleted" | "exists";
+  why: 'modified' | 'deleted' | 'exists';
 }
 
 /** 存盘前看一眼：要动的文件是不是在上次读 / 写之后被别人改过（不做合并，只检测，计划「不做」一节）。 */
@@ -185,15 +204,15 @@ async function findConflicts(plan: SavePlan): Promise<Conflict[]> {
   const check = async (file: string) => {
     const was = known.get(file);
     if (was === undefined) {
-      if (present.has(file)) out.push({ file, why: "exists" });
+      if (present.has(file)) out.push({ file, why: 'exists' });
       return;
     }
     if (!present.has(file)) {
-      out.push({ file, why: "deleted" });
+      out.push({ file, why: 'deleted' });
       return;
     }
     const now = await readOrNull(joinPath(plan.dir, file));
-    if (now !== was) out.push({ file, why: "modified" });
+    if (now !== was) out.push({ file, why: 'modified' });
   };
   const leaving = new Set([...plan.deletes.map((d) => d.file), ...plan.renames.map((r) => r.from)]);
   for (const d of plan.deletes) await check(d.file);
@@ -205,16 +224,17 @@ async function findConflicts(plan: SavePlan): Promise<Conflict[]> {
     await check(w.file);
   }
   for (const r of plan.renames) {
-    if (!leaving.has(r.to) && present.has(r.to) && known.get(r.to) === undefined) out.push({ file: r.to, why: "exists" });
+    if (!leaving.has(r.to) && present.has(r.to) && known.get(r.to) === undefined)
+      out.push({ file: r.to, why: 'exists' });
   }
   if (plan.indexText !== null) await check(RECIPE_INDEX);
   return out;
 }
 
-const WHY: Record<Conflict["why"], string> = {
-  modified: "在编辑器外被修改过",
-  deleted: "在编辑器外被删除了",
-  exists: "目录里已经有同名文件（不是这个编辑器写的）",
+const WHY: Record<Conflict['why'], string> = {
+  modified: '在编辑器外被修改过',
+  deleted: '在编辑器外被删除了',
+  exists: '目录里已经有同名文件（不是这个编辑器写的）',
 };
 
 /** 「重新载入」：这几个文件以磁盘为准，替换内存里对应的配方（一步撤销，撤销就回到编辑器里的版本）。 */
@@ -249,7 +269,7 @@ async function reloadConflicts(plan: SavePlan, conflicts: readonly Conflict[]): 
     savedRecipes = savedRecipes.filter((e) => e.id !== id);
     if (id) savedFiles.delete(id);
     const parsed = text === null ? null : parseRecipeText(text, stem);
-    if (text === null || !parsed || "error" in parsed) {
+    if (text === null || !parsed || 'error' in parsed) {
       diskText.delete(c.file);
       continue;
     }
@@ -271,8 +291,11 @@ async function reloadConflicts(plan: SavePlan, conflicts: readonly Conflict[]): 
 
 /** 存盘的第一步：算要做什么、查外部修改、问用户。返回 null = 没有要写的；"cancelled" = 用户取消了
  *  （调用方连图一起不存）。第二步 commitRecipeSave 在图写完之后做。 */
-export async function prepareRecipeSave(doc: GraphDoc, graphPath: string): Promise<SavePlan | null | "cancelled"> {
-  if (transport.kind === "static") return null;
+export async function prepareRecipeSave(
+  doc: GraphDoc,
+  graphPath: string,
+): Promise<SavePlan | null | 'cancelled'> {
+  if (transport.kind === 'static') return null;
   await loading;
   const dir = recipeDirOf(graphPath);
   let plan = planSave(doc, dir);
@@ -283,22 +306,23 @@ export async function prepareRecipeSave(doc: GraphDoc, graphPath: string): Promi
     const items = conflicts.map((c) => `${c.file}：${WHY[c.why]}`);
     const choices = plan.relocated
       ? [
-          { id: "overwrite", label: "覆盖", tone: "danger" as const },
-          { id: "cancel", label: "取消保存" },
+          { id: 'overwrite', label: '覆盖', tone: 'danger' as const },
+          { id: 'cancel', label: '取消保存' },
         ]
       : [
-          { id: "overwrite", label: "覆盖（写编辑器里的版本）", tone: "danger" as const },
-          { id: "reload", label: "重新载入这些文件", tone: "primary" as const },
-          { id: "cancel", label: "取消保存" },
+          { id: 'overwrite', label: '覆盖（写编辑器里的版本）', tone: 'danger' as const },
+          { id: 'reload', label: '重新载入这些文件', tone: 'primary' as const },
+          { id: 'cancel', label: '取消保存' },
         ];
     const answer = await askChoice({
-      title: "配方文件已被外部修改",
-      message: "保存会覆盖下面这些文件。重新载入 = 这几个以磁盘上的为准（可以 Ctrl+Z 回到编辑器里的版本），其余照常保存。",
+      title: '配方文件已被外部修改',
+      message:
+        '保存会覆盖下面这些文件。重新载入 = 这几个以磁盘上的为准（可以 Ctrl+Z 回到编辑器里的版本），其余照常保存。',
       items,
       choices,
     });
-    if (answer === "overwrite") return plan;
-    if (answer !== "reload") return "cancelled";
+    if (answer === 'overwrite') return plan;
+    if (answer !== 'reload') return 'cancelled';
     await reloadConflicts(plan, conflicts);
     plan = planSave(useGraphStore.getState().doc, dir);
     if (!plan) return null;
@@ -313,7 +337,8 @@ export async function commitRecipeSave(plan: SavePlan): Promise<void> {
   const savedFiles = new Map(plan.relocated ? [] : rs.savedFiles);
   const diskText = new Map(plan.relocated ? [] : rs.diskText);
   const at = (f: string) => joinPath(plan.dir, f);
-  const flush = () => useRecipeStore.setState({ savedFiles: new Map(savedFiles), diskText: new Map(diskText) });
+  const flush = () =>
+    useRecipeStore.setState({ savedFiles: new Map(savedFiles), diskText: new Map(diskText) });
   try {
     for (const d of plan.deletes) {
       await transport.deleteRecipeFile(at(d.file));
@@ -346,7 +371,7 @@ export async function commitRecipeSave(plan: SavePlan): Promise<void> {
   }
   useRecipeStore.setState({
     dir: plan.dir,
-    status: "ready",
+    status: 'ready',
     saved: plan.set,
     savedFiles,
     diskText,
@@ -360,7 +385,7 @@ export async function commitRecipeSave(plan: SavePlan): Promise<void> {
  *  时连它一起恢复。每个配方记着它对应的磁盘文件，恢复后改名 / 删除照样认得出来。 */
 export async function writeRecipeAutosave(): Promise<void> {
   const rs = useRecipeStore.getState();
-  if (!rs.dir || rs.set === rs.saved || transport.kind === "static") return;
+  if (!rs.dir || rs.set === rs.saved || transport.kind === 'static') return;
   const payload = {
     schemaVersion: 1,
     savedAt: new Date().toISOString(),
@@ -399,21 +424,27 @@ export async function restoreRecipeAutosave(): Promise<boolean> {
   for (const [id, f] of rs.savedFiles) idOfFile.set(f, id);
   const recipes: RecipeEntry[] = [];
   for (const item of raw.recipes as Record<string, unknown>[]) {
-    if (typeof item?.["name"] !== "string") continue;
-    const file = typeof item["file"] === "string" ? item["file"] : null;
-    const g = item["graph"] as { id?: unknown; specDigest?: unknown } | null | undefined;
+    if (typeof item?.['name'] !== 'string') continue;
+    const file = typeof item['file'] === 'string' ? item['file'] : null;
+    const g = item['graph'] as { id?: unknown; specDigest?: unknown } | null | undefined;
     recipes.push({
       id: (file && idOfFile.get(file)) || newRecipeId(),
-      name: item["name"],
-      values: (item["values"] as Record<string, unknown>) ?? {},
-      note: typeof item["note"] === "string" ? item["note"] : undefined,
-      graph: g && typeof g.id === "string" && typeof g.specDigest === "string" ? { id: g.id, specDigest: g.specDigest } : null,
-      updatedAt: typeof item["updatedAt"] === "string" ? item["updatedAt"] : null,
+      name: item['name'],
+      values: (item['values'] as Record<string, unknown>) ?? {},
+      note: typeof item['note'] === 'string' ? item['note'] : undefined,
+      graph:
+        g && typeof g.id === 'string' && typeof g.specDigest === 'string'
+          ? { id: g.id, specDigest: g.specDigest }
+          : null,
+      updatedAt: typeof item['updatedAt'] === 'string' ? item['updatedAt'] : null,
     });
   }
   const set: RecipeSet = {
     recipes,
-    defaultName: typeof raw.defaultName === "string" && recipes.some((r) => r.name === raw.defaultName) ? raw.defaultName : null,
+    defaultName:
+      typeof raw.defaultName === 'string' && recipes.some((r) => r.name === raw.defaultName)
+        ? raw.defaultName
+        : null,
   };
   const before = recipeSet();
   applyRecipeSet(set);
@@ -423,7 +454,7 @@ export async function restoreRecipeAutosave(): Promise<boolean> {
 
 export async function discardRecipeAutosave(graphPath?: string): Promise<void> {
   const dir = graphPath ? recipeDirOf(graphPath) : useRecipeStore.getState().dir;
-  if (!dir || transport.kind === "static") return;
+  if (!dir || transport.kind === 'static') return;
   try {
     await transport.deleteRecipeFile(joinPath(dir, RECIPE_AUTOSAVE));
   } catch {
@@ -438,7 +469,7 @@ export async function readRecipeForImport(path: string): Promise<RecipeEntry> {
   const text = await transport.readRecipeFile(path);
   const stem = recipeStem(baseNameOf(path)) ?? baseNameOf(path);
   const parsed = parseRecipeText(text, stem);
-  if ("error" in parsed) throw new Error(`${baseNameOf(path)}：${parsed.error}`);
+  if ('error' in parsed) throw new Error(`${baseNameOf(path)}：${parsed.error}`);
   return entryFromParsed(parsed);
 }
 
@@ -449,10 +480,10 @@ export async function importRecipeFrom(path: string, name?: string): Promise<str
   const problem = recipeNameProblem(recipeSet(), final);
   if (problem) {
     const answer = await askText({
-      title: "导入配方：换个名字",
+      title: '导入配方：换个名字',
       message: `${problem}。给导入的这一份起个名字：`,
       value: final,
-      okLabel: "导入",
+      okLabel: '导入',
       validate: (v) => recipeNameProblem(recipeSet(), v),
     });
     if (!answer) return null;

@@ -16,4 +16,4 @@ int loadPcd(const std::string& file, pcl::PCLPointCloud2& cloud, int threads = 1
 /// 等同 `pcl::io::savePCDFile(file, cloud, 原点 0, 单位朝向, binary_mode=false)`：写出的文件逐字节相同。
 int savePcdAscii(const std::string& file, const pcl::PCLPointCloud2& cloud, int threads = 1);
 
-}  // namespace lyflow::ops::io
+} // namespace lyflow::ops::io

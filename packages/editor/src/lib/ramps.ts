@@ -1,6 +1,6 @@
-import * as THREE from "three";
+import * as THREE from 'three';
 
-export type RampName = "viridis" | "gray" | "jet";
+export type RampName = 'viridis' | 'gray' | 'jet';
 
 /** matplotlib viridis 的 11 个采样点，线性插值就够看。 */
 export const VIRIDIS: [number, number, number][] = [

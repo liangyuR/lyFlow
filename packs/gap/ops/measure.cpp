@@ -90,7 +90,8 @@ Status gapValue(const Inputs& inputs, const ParamView& params, Outputs& outputs,
     }
     Eigen::Vector2f u(base.end[0] - base.start[0], base.end[1] - base.start[1]);
     u.normalize();
-    if (u.x() < 0) u = -u;  // 从左板指向右板
+    if (u.x() < 0)
+      u = -u; // 从左板指向右板
     const Eigen::Vector2f c1(left.center[0], left.center[1]);
     const Eigen::Vector2f c2(right.center[0], right.center[1]);
     const float gapA = (c2 - c1).dot(u) - left.radius - right.radius;
@@ -151,7 +152,8 @@ constexpr double kPi = 3.14159265358979323846;
 /// 一条带端点的线段里离顶点远的那一端 —— 用来定「这条翼面从顶点往哪边走」。
 /// 没有端点就退回 line.point，它总落在拟合用的那段点云中间。
 Eigen::Vector2f farEndOf(const lyflow::Line2D& line, const Eigen::Vector2f& vertex) {
-  if (!line.hasSegment) return Eigen::Vector2f(line.point[0], line.point[1]);
+  if (!line.hasSegment)
+    return Eigen::Vector2f(line.point[0], line.point[1]);
   const Eigen::Vector2f a(line.start[0], line.start[1]);
   const Eigen::Vector2f b(line.end[0], line.end[1]);
   return (a - vertex).squaredNorm() >= (b - vertex).squaredNorm() ? a : b;
@@ -210,10 +212,12 @@ Status cornerVertex(const Inputs& inputs, const ParamView& params, Outputs& outp
   if (inputs.has("baseLine")) {
     const lyflow::Line2D& base = *inputs.get("baseLine").asLine2D();
     const Eigen::Vector2f b(base.dir[0], base.dir[1]);
-    if (b.norm() > 0) u = b;
+    if (b.norm() > 0)
+      u = b;
   }
   u.normalize();
-  if (u.x() < 0) u = -u;
+  if (u.x() < 0)
+    u = -u;
   const Eigen::Vector2f nrm(-u.y(), u.x());
 
   // 金件顶点是模板坐标系里的常数（和四个业务 ROI 一样），用 ICP 变换搬到当前样本上。
@@ -265,8 +269,7 @@ Status cornerVertex(const Inputs& inputs, const ParamView& params, Outputs& outp
   outputs.set("quality", Data::record(std::move(quality)));
 
   ctx.log(LogLevel::Info, "corner: 顶点 (" + degText(mToMm(vertex.x())) + ", " +
-                              degText(mToMm(vertex.y())) + ") mm，夹角 " + degText(angleDeg) +
-                              "°");
+                              degText(mToMm(vertex.y())) + ") mm，夹角 " + degText(angleDeg) + "°");
   return Status::Ok();
 }
 
@@ -290,7 +293,7 @@ std::vector<Issue> validateGap(const ParamView& params, const std::set<std::stri
   return issues;
 }
 
-}  // namespace
+} // namespace
 
 void registerFlush(Registry& r) {
   OperatorDesc op;
@@ -299,10 +302,9 @@ void registerFlush(Registry& r) {
   op.label = "面差";
   op.category = "间隙/测量";
   op.keywords = {"flush", "段差", "面差"};
-  op.doc =
-      "段差 = 参考点到基准线的带符号垂距 × scale + offset（参考点在基准线上方为正；"
-      "signed 关掉时取绝对值）。"
-      "基准线的方向完全来自上游拟合：基准面拟歪了，垂距连带 scale 一起错。";
+  op.doc = "段差 = 参考点到基准线的带符号垂距 × scale + offset（参考点在基准线上方为正；"
+           "signed 关掉时取绝对值）。"
+           "基准线的方向完全来自上游拟合：基准面拟歪了，垂距连带 scale 一起错。";
   op.inputs = {
       Port{"baseLine", "Line2D", "Base Line", "基准面拟合出的直线。", true},
       Port{"refPoint", "Point2D", "Ref Point", "参考面那一侧取到的点。", true},
@@ -317,10 +319,9 @@ void registerFlush(Registry& r) {
   flushScale.name = "scale";
   flushScale.type = ParamType::Float;
   flushScale.label = "Scale";
-  flushScale.doc =
-      "读数增益：value = 垂距 × scale + offset。量的是垂距，要别的方向（比如水平开口）"
-      "就用它折算，算子本身不知道该往哪个方向折 —— 罗石 点 7 要的是水平开口，而基准线"
-      "倾斜 29°，水平量 = 垂距 / |n_x| = 垂距 × 2.06。";
+  flushScale.doc = "读数增益：value = 垂距 × scale + offset。量的是垂距，要别的方向（比如水平开口）"
+                   "就用它折算，算子本身不知道该往哪个方向折 —— 罗石 点 7 要的是水平开口，而基准线"
+                   "倾斜 29°，水平量 = 垂距 / |n_x| = 垂距 × 2.06。";
   flushScale.def = Value::number(1.0);
 
   Param flushSigned;
@@ -367,8 +368,7 @@ void registerGap(Registry& r) {
   definition.type = ParamType::Enum;
   definition.label = "Definition";
   definition.def = Value::text("B");
-  definition.options = {EnumOption{"B", "B（圆心连线）", ""},
-                        EnumOption{"A", "A（切线距离）", ""}};
+  definition.options = {EnumOption{"B", "B（圆心连线）", ""}, EnumOption{"A", "A（切线距离）", ""}};
 
   op.params = {definition, numParam("offset", "Offset", 0.0, "加在绝对值上的偏置。")};
   op.capabilities = {false, true, true};
@@ -384,20 +384,19 @@ void registerCornerVertex(Registry& r) {
   op.label = "软装夹角";
   op.category = "间隙/测量";
   op.keywords = {"corner", "vertex", "夹角", "软装", "间隙"};
-  op.doc =
-      "两件软装贴合成一个夹角时的间隙。两侧翼面各给一条拟合直线，取交点作虚拟顶点 V，"
-      "间隙 = V 相对金件顶点沿基准面方向的位移。相对「两侧圆拟合」的好处是 V 由几十个点的"
-      "直线拟合决定，不依赖缝边那几个受遮挡影响最大的点。\n"
-      "夹角接近 90° 时 V 只能沿基准线滑动，flush 与 gap 成定比、不可分辨 —— 这一路请用 "
-      "gap.judge 的 patrol 模式只出值不判定。";
+  op.doc = "两件软装贴合成一个夹角时的间隙。两侧翼面各给一条拟合直线，取交点作虚拟顶点 V，"
+           "间隙 = V 相对金件顶点沿基准面方向的位移。相对「两侧圆拟合」的好处是 V 由几十个点的"
+           "直线拟合决定，不依赖缝边那几个受遮挡影响最大的点。\n"
+           "夹角接近 90° 时 V 只能沿基准线滑动，flush 与 gap 成定比、不可分辨 —— 这一路请用 "
+           "gap.judge 的 patrol 模式只出值不判定。";
   op.inputs = {
       Port{"lineLeft", "Line2D", "Left Flank", "基准件翼面拟合出的直线。", true},
       Port{"lineRight", "Line2D", "Right Flank", "另一件翼面拟合出的直线。", true},
       Port{"baseLine", "Line2D", "Base Line", "基准面直线，只取方向定 u。缺省用左翼面。", false},
-      withContract(
-          Port{"alignment", "Record", "Alignment",
-               "GapAlignment：把模板坐标系里的金件顶点搬到当前样本上。不接就当单位变换。", false},
-          {{"recordType", "GapAlignment"}}),
+      withContract(Port{"alignment", "Record", "Alignment",
+                        "GapAlignment：把模板坐标系里的金件顶点搬到当前样本上。不接就当单位变换。",
+                        false},
+                   {{"recordType", "GapAlignment"}}),
   };
   op.outputs = {
       Port{"vertex", "Point2D", "Vertex", "两条翼面线的交点。", true},
@@ -414,9 +413,8 @@ void registerCornerVertex(Registry& r) {
   scale.name = "scale";
   scale.type = ParamType::Float;
   scale.label = "Scale";
-  scale.doc =
-      "读数增益：gap = Δ·u × scale + offset。顶点位移比真实间隙大一个与夹角有关的倍数，"
-      "用金件加已知位移标定；没标定过的 gap 只是相对量。";
+  scale.doc = "读数增益：gap = Δ·u × scale + offset。顶点位移比真实间隙大一个与夹角有关的倍数，"
+              "用金件加已知位移标定；没标定过的 gap 只是相对量。";
   scale.def = Value::number(1.0);
 
   Param minAngle;
@@ -455,10 +453,9 @@ void registerJudge(Registry& r) {
   op.label = "判定";
   op.category = "间隙/测量";
   op.keywords = {"judge", "tolerance", "判定", "公差"};
-  op.doc =
-      "按标称值与上下偏差判定，不做任何统计；上游 ok=false 或值非有限一律判 fail。"
-      "margin 是「接近边界」的宽度，patrol 是巡检模式：超差只标 margin，不判 NG —— "
-      "那时 verdict 里分不出「接近边界」和「已经超差」。";
+  op.doc = "按标称值与上下偏差判定，不做任何统计；上游 ok=false 或值非有限一律判 fail。"
+           "margin 是「接近边界」的宽度，patrol 是巡检模式：超差只标 margin，不判 NG —— "
+           "那时 verdict 里分不出「接近边界」和「已经超差」。";
   op.inputs = {Port{"value", "Measurement", "Value", "待判定的测量值。", true}};
   op.outputs = {Port{"value", "Measurement", "Value", "带判定字段的测量值。", true}};
 
@@ -481,4 +478,4 @@ void registerJudge(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

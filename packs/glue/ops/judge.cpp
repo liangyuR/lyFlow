@@ -10,7 +10,7 @@ namespace lyflow::packs::glue {
 namespace {
 
 struct Defect {
-  std::string type;  // missing / break / narrow / wide / near / far
+  std::string type; // missing / break / narrow / wide / near / far
   double sStart = 0;
   double sEnd = 0;
   double length = 0;
@@ -22,7 +22,7 @@ struct Defect {
 
 const char* typeName(const std::string& type) {
   static const std::map<std::string, const char*> kNames = {
-      {"missing", "无胶"}, {"break", "断胶"}, {"narrow", "窄胶"},
+      {"missing", "无胶"}, {"break", "断胶"},    {"narrow", "窄胶"},
       {"wide", "宽胶"},    {"near", "边距过近"}, {"far", "边距过远"}};
   const auto it = kNames.find(type);
   return it == kNames.end() ? "缺陷" : it->second;
@@ -31,7 +31,8 @@ const char* typeName(const std::string& type) {
 std::vector<Px> pxList(const std::vector<P2>& pts) {
   std::vector<Px> out;
   out.reserve(pts.size());
-  for (const P2& p : pts) out.push_back(Px{p.x, p.y});
+  for (const P2& p : pts)
+    out.push_back(Px{p.x, p.y});
   return out;
 }
 
@@ -64,7 +65,8 @@ void runsOutOf(const Series& x, bool below, double limit, const std::string& typ
     const double sEnd = std::min(z1, x.s[j] + 0.5 * step);
     const double len = metric.calib ? metric.length(line.between(sStart, sEnd)) : sEnd - sStart;
     i = j + 1;
-    if (len < minLen) continue;
+    if (len < minLen)
+      continue;
     Defect d;
     d.type = type;
     d.sStart = sStart;
@@ -73,9 +75,9 @@ void runsOutOf(const Series& x, bool below, double limit, const std::string& typ
     d.value = worst;
     d.limit = limit;
     d.unit = unit;
-    d.message = std::string(typeName(type)) + (below ? " 最小 " : " 最大 ") + fmt(worst) + " " + unit +
-                (below ? " < " : " > ") + fmt(limit) + " " + unit + "（s " + fmt(sStart, 0) + "–" +
-                fmt(sEnd, 0) + "，长 " + fmt(len) + " " + unit + "）";
+    d.message = std::string(typeName(type)) + (below ? " 最小 " : " 最大 ") + fmt(worst) + " " +
+                unit + (below ? " < " : " > ") + fmt(limit) + " " + unit + "（s " + fmt(sStart, 0) +
+                "–" + fmt(sEnd, 0) + "，长 " + fmt(len) + " " + unit + "）";
     out->push_back(std::move(d));
   }
 }
@@ -87,7 +89,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     return Status::Error(Phase::Execute, "bad_input", "bead 不是完整的 glue.Bead", {}, "bead");
   }
   const Record* breaks = inputs.get("breaks").asRecord();
-  if (!breaks) return Status::Error(Phase::Execute, "bad_input", "breaks 不是 Record", {}, "breaks");
+  if (!breaks)
+    return Status::Error(Phase::Execute, "bad_input", "breaks 不是 Record", {}, "breaks");
   const Record* edge = inputs.has("edge") ? inputs.get("edge").asRecord() : nullptr;
 
   const Metric metric = metricFromInfo(bead.info);
@@ -95,7 +98,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   const bool pathOk = bead.info.value("pathOk", false);
   const double step = bead.info.value("stationStep", 4.0);
   double z0 = bead.line.s.front(), z1 = bead.line.s.back();
-  if (const auto z = bead.info.find("zone"); z != bead.info.end() && z->is_array() && z->size() == 2) {
+  if (const auto z = bead.info.find("zone");
+      z != bead.info.end() && z->is_array() && z->size() == 2) {
     z0 = numOf((*z)[0]);
     z1 = numOf((*z)[1]);
   }
@@ -123,7 +127,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     if (maxBreak >= 0) {
       for (const Json& b : breaks->data.value("breaks", Json::array())) {
         const double len = numOf(b.value("length", Json()));
-        if (!(len > maxBreak)) continue;
+        if (!(len > maxBreak))
+          continue;
         Defect d;
         d.type = "break";
         d.sStart = numOf(b.value("sStart", Json()));
@@ -145,8 +150,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
       width.v.push_back(st[i].present && i < jw.size() ? numOf(jw[i]) : std::nan(""));
     }
     if (widthLimits[0] > 0) {
-      runsOutOf(width, true, widthLimits[0], "narrow", step, z0, z1, minLen, metric, bead.line, unit,
-                &defects);
+      runsOutOf(width, true, widthLimits[0], "narrow", step, z0, z1, minLen, metric, bead.line,
+                unit, &defects);
     }
     if (widthLimits[1] > 0) {
       runsOutOf(width, false, widthLimits[1], "wide", step, z0, z1, minLen, metric, bead.line, unit,
@@ -182,7 +187,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   // 结论：缺陷按类型数一遍，一句话写清楚
   const char* order[] = {"missing", "break", "narrow", "wide", "near", "far"};
   Json counts = Json::object();
-  for (const char* t : order) counts[t] = 0;
+  for (const char* t : order)
+    counts[t] = 0;
   Json list = Json::array();
   for (const Defect& d : defects) {
     counts[d.type] = counts[d.type].get<int>() + 1;
@@ -207,14 +213,17 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     bool firstPart = true;
     for (const char* t : order) {
       const int n = counts[t].get<int>();
-      if (n == 0) continue;
-      if (!firstPart) message += "；";
+      if (n == 0)
+        continue;
+      if (!firstPart)
+        message += "；";
       firstPart = false;
       message += std::string(typeName(t)) + " " + std::to_string(n) + " 处";
       if (std::string(t) == "break") {
         double longest = 0;
         for (const Defect& d : defects) {
-          if (d.type == "break") longest = std::max(longest, d.length);
+          if (d.type == "break")
+            longest = std::max(longest, d.length);
         }
         message += "（最长 " + fmt(longest) + " " + unit + "）";
       }
@@ -262,12 +271,14 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     const Json& je = edge->data.value("edge", Json::array());
     const Json& jst = edge->data.value("status", Json::array());
     for (std::size_t i = 0; i < je.size() && i < jst.size(); ++i) {
-      if (jst[i] == "ok") part.push_back(px(pxOf(je[i])));
+      if (jst[i] == "ok")
+        part.push_back(px(pxOf(je[i])));
     }
     ov.points("part", part);
   }
   for (const Defect& d : defects) {
-    if (d.type == "missing") continue;
+    if (d.type == "missing")
+      continue;
     ov.polyline("defect", pxList(bead.line.between(d.sStart, d.sEnd)), false, d.message);
   }
   ov.text(ok ? "ok" : "ng", message, Px{10.0, 22.0});
@@ -280,7 +291,8 @@ std::vector<Issue> validate(const ParamView& params, const std::set<std::string>
   for (const char* name : {"widthLimits", "distanceLimits"}) {
     const auto v = params.vec2(name);
     if (v[0] < 0 || v[1] < 0) {
-      issues.push_back(Issue::error("bad_param", std::string(name) + " 不能是负数（0 = 不判那一侧）", name));
+      issues.push_back(
+          Issue::error("bad_param", std::string(name) + " 不能是负数（0 = 不判那一侧）", name));
     } else if (v[0] > 0 && v[1] > 0 && v[1] <= v[0]) {
       issues.push_back(Issue::error("bad_param", std::string(name) + " 的上限要大于下限", name));
     }
@@ -288,7 +300,7 @@ std::vector<Issue> validate(const ParamView& params, const std::set<std::string>
   return issues;
 }
 
-}  // namespace
+} // namespace
 
 void registerJudge(Registry& r) {
   OperatorDesc op;
@@ -307,16 +319,19 @@ void registerJudge(Registry& r) {
       Port{"bead", "Bundle<glue.Bead>", "Bead", "glue.bead_width 的逐站结果。", true},
       withContract(Port{"breaks", "Record", "Breaks", "glue.bead_breaks 的断口。", true},
                    {{"recordType", kBreaksType}}),
-      withContract(Port{"edge", "Record", "Edge", "可选：glue.edge_distance 的边距。不接就不判边距。", false},
+      withContract(Port{"edge", "Record", "Edge",
+                        "可选：glue.edge_distance 的边距。不接就不判边距。", false},
                    {{"recordType", kEdgeType}}),
   };
   op.outputs = {
-      Port{"verdict", "Record", "Verdict",
-           "glue.Verdict：ok、message、defectCount、counts（按类型）、defects（type / sStart / sEnd / length / value / "
-           "limit / unit / message）。",
-           true},
+      Port{
+          "verdict", "Record", "Verdict",
+          "glue.Verdict：ok、message、defectCount、counts（按类型）、defects（type / sStart / sEnd / length / value / "
+          "limit / unit / message）。",
+          true},
       Port{"ok", "Measurement", "OK", "1 = OK、0 = NG。", true},
-      Port{"overlay", "Record", "Overlay", "lyflow.overlay2d：胶路、两边、零件边点、全部缺陷与结论。", true},
+      Port{"overlay", "Record", "Overlay",
+           "lyflow.overlay2d：胶路、两边、零件边点、全部缺陷与结论。", true},
   };
   Param width = vec2Param("widthLimits", "Width Limits", 0.0, 0.0, "px", {"Min", "Max"},
                           "胶宽的下限与上限（与 bead 同单位）。0 = 不判那一侧。");
@@ -324,18 +339,23 @@ void registerJudge(Registry& r) {
   Param distance = vec2Param("distanceLimits", "Distance Limits", 0.0, 0.0, "px", {"Min", "Max"},
                              "边距的下限与上限（与 edge 同单位）。0 = 不判那一侧；要接 edge。");
   distance.min = 0.0;
-  Param maxBreak = floatParam("maxBreak", "Max Break", 0.0, "px",
-                              "允许的断口长度：比它长的断口判 NG。0 = 一处都不允许（bead_breaks 报出来的每一段都判 NG），"
-                              "负数 = 不判断胶。");
-  Param minLen = floatParam("minDefectLength", "Min Defect Length", 20.0, "px",
-                            "窄胶、宽胶、边距超差要连续这么长才算一处缺陷（一根卡尺偶发失手不报）。0 = 一站就算。");
+  Param maxBreak = floatParam(
+      "maxBreak", "Max Break", 0.0, "px",
+      "允许的断口长度：比它长的断口判 NG。0 = 一处都不允许（bead_breaks 报出来的每一段都判 NG），"
+      "负数 = 不判断胶。");
+  Param minLen = floatParam(
+      "minDefectLength", "Min Defect Length", 20.0, "px",
+      "窄胶、宽胶、边距超差要连续这么长才算一处缺陷（一根卡尺偶发失手不报）。0 = 一站就算。");
   minLen.min = 0.0;
   op.params = {width, distance, maxBreak, minLen};
-  for (auto& p : op.params) { p.tuningRole = "acceptance"; p.unitSource = "bead.info.unit"; }
+  for (auto& p : op.params) {
+    p.tuningRole = "acceptance";
+    p.unitSource = "bead.info.unit";
+  }
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;
   op.validate = &validate;
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

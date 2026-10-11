@@ -70,7 +70,7 @@ int threadBudgetFor(int concurrent);
 int resolveMaxParallel(int requested);
 
 class Run {
- public:
+public:
   Run(std::string graphJson, RunOptions options, lyflow_event_cb cb, void* user);
   ~Run();
 
@@ -82,7 +82,7 @@ class Run {
 
   const std::string& runId() const { return options_.runId; }
 
- private:
+private:
   /// 线程函数体。只负责兜住异常，真正的活在 workImpl 里。
   void work();
   void workImpl();
@@ -99,8 +99,7 @@ class Run {
 
 /// 只校验不执行，同步。返回诊断 JSON 数组（含迁移动作）。
 /// paramsJson 与 RunOptions::paramsJson 同义：顶层图参数的取值，空串 = 全用 default。
-std::string validateGraphJson(const std::string& graphJson,
-                              const std::filesystem::path& baseDir,
+std::string validateGraphJson(const std::string& graphJson, const std::filesystem::path& baseDir,
                               const std::string& paramsJson = {});
 
 /// parse + 盖上顶层参数取值 + expand 一步到位。任一步失败都返回 false，诊断已写进 diags。
@@ -125,8 +124,7 @@ std::string evictNodesJson(const std::string& graphJson, const std::filesystem::
 /// 校验有错时返回诊断数组（以 '[' 开头），与 planGraphJson 同一套区分办法。
 /// source 四种：`default`（图里没写）/ `explicit`（图里写了）/ `bound`（子图提升参数灌进来的）/
 /// `graph`（顶层图参数灌进来的，另带 graphParam 说是哪一个）。
-std::string effectiveParamsJson(const std::string& graphJson,
-                                const std::filesystem::path& baseDir,
+std::string effectiveParamsJson(const std::string& graphJson, const std::filesystem::path& baseDir,
                                 const std::string& paramsJson = {});
 
 /// 某次运行的图级命名输出（ADR-0017）。返回
@@ -142,4 +140,4 @@ bool runSummaryJson(const std::string& runId, std::string& out);
 std::string importGraphJson(const std::string& kind, const std::string& text,
                             const std::filesystem::path& baseDir);
 
-}  // namespace lyflow::exec
+} // namespace lyflow::exec

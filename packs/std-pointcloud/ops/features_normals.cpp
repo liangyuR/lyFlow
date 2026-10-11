@@ -45,7 +45,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   // 以前这个开关关掉也照翻
   pcl::search::KdTree<pcl::PointXYZ> tree;
   tree.setInputCloud(cloud);
-  if (ctx.cancelled()) return Status::Ok();
+  if (ctx.cancelled())
+    return Status::Ok();
 
   const std::size_t n = in.pointCount();
   PointCloud out = in;
@@ -53,7 +54,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   std::atomic<std::size_t> degenerateCount{0};
   ctx.progress(0.2f, "估计法线");
   parallelFor(n, ctx.threadBudget(), [&](std::size_t begin, std::size_t end) {
-    if (ctx.cancelled()) return false;
+    if (ctx.cancelled())
+      return false;
     pcl::Indices nn;
     std::vector<float> d2;
     EIGEN_ALIGN16 Eigen::Matrix3f covariance;
@@ -67,7 +69,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
                         : byRadius   ? tree.radiusSearch(index, radius, nn, d2, 0)
                                      : tree.nearestKSearch(index, kSearch, nn, d2);
       float nx = 0.0f, ny = 0.0f, nz = 0.0f, curvature = 0.0f;
-      if (found == 0 || nn.size() < 3 || pcl::computeMeanAndCovarianceMatrix(*cloud, nn, covariance, centroid) == 0) {
+      if (found == 0 || nn.size() < 3 ||
+          pcl::computeMeanAndCovarianceMatrix(*cloud, nn, covariance, centroid) == 0) {
         ++bad;
         continue;
       }
@@ -78,7 +81,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
         ++bad;
         continue;
       }
-      if (flip) pcl::flipNormalTowardsViewpoint(pt, viewpoint[0], viewpoint[1], viewpoint[2], nx, ny, nz);
+      if (flip)
+        pcl::flipNormalTowardsViewpoint(pt, viewpoint[0], viewpoint[1], viewpoint[2], nx, ny, nz);
       out.normals[i * 3] = nx;
       out.normals[i * 3 + 1] = ny;
       out.normals[i * 3 + 2] = nz;
@@ -86,7 +90,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     degenerateCount += bad;
     return true;
   });
-  if (ctx.cancelled()) return Status::Ok();
+  if (ctx.cancelled())
+    return Status::Ok();
   ctx.progress(0.9f);
   const std::size_t degenerate = degenerateCount.load();
 
@@ -99,7 +104,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerFeaturesNormals(Registry& r) {
   OperatorDesc op;
@@ -171,4 +176,4 @@ void registerFeaturesNormals(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

@@ -11,8 +11,7 @@
 namespace lyflow::test {
 namespace stall {
 
-inline Status stallCompute(const Inputs&, const ParamView& params, Outputs& outputs,
-                           ExecContext&) {
+inline Status stallCompute(const Inputs&, const ParamView& params, Outputs& outputs, ExecContext&) {
   // 故意不看 ctx.cancelled()：这正是它要模拟的
   std::this_thread::sleep_for(std::chrono::milliseconds(params.integer("ms")));
   Measurement slept;
@@ -23,11 +22,12 @@ inline Status stallCompute(const Inputs&, const ParamView& params, Outputs& outp
   return Status::Ok();
 }
 
-}  // namespace stall
+} // namespace stall
 
 /// 注册 test.stall。已经注册过就什么都不做。
 inline void registerStallTestOp(Registry& r) {
-  if (r.find("test.stall")) return;
+  if (r.find("test.stall"))
+    return;
   OperatorDesc op;
   op.id = "test.stall";
   op.version = "1.0.0";
@@ -51,4 +51,4 @@ inline void registerStallTestOp(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::test
+} // namespace lyflow::test

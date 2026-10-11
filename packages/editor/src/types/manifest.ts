@@ -2,11 +2,20 @@
 // 一致。改动顺序永远是：schema → C++ → 这里。
 
 export type ParamType =
-  | "bool" | "int" | "float"
-  | "vec2f" | "vec3f" | "vec4f"
-  | "enum" | "flags"
-  | "string" | "text" | "path"
-  | "color" | "transform" | "curve";
+  | 'bool'
+  | 'int'
+  | 'float'
+  | 'vec2f'
+  | 'vec3f'
+  | 'vec4f'
+  | 'enum'
+  | 'flags'
+  | 'string'
+  | 'text'
+  | 'path'
+  | 'color'
+  | 'transform'
+  | 'curve';
 
 export interface PortType {
   name: string;
@@ -118,7 +127,7 @@ export interface Param {
   pattern?: string;
   rows?: number;
   filters?: FileFilter[];
-  mode?: "open" | "save" | "dir";
+  mode?: 'open' | 'save' | 'dir';
   alpha?: boolean;
 
   visibleWhen?: Condition;
@@ -126,12 +135,12 @@ export interface Param {
 
   /** 语义标记（m8-plan L15），只有编辑器读。roi = vec4f 的 [xMin, yMin, xMax, yMax]，
    *  XY 平面上的一个框，单位按 unit；2D 剖面视图里画成可拖、可拉伸的框。 */
-  semantic?: "roi";
+  semantic?: 'roi';
   /** 只对 semantic=roi 有意义：框画在 `<dir 参数>/<files 参数的每个文件名>` 拼起来的云上
    *  （那片云自己的坐标系，例如模板坐标系）。不给 = 画在节点显示的那片数据云上。 */
   roiBackdrop?: RoiBackdrop;
   /** MCP 搜索角色；未声明的参数由调用方固定。 */
-  tuningRole?: "input" | "geometry" | "detection" | "acceptance";
+  tuningRole?: 'input' | 'geometry' | 'detection' | 'acceptance';
   /** 参数单位依赖的运行输出，如 bead.info.unit；静态 unit 仍是默认展示值。 */
   unitSource?: string;
 }

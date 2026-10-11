@@ -1,130 +1,152 @@
-import assert from "node:assert/strict";
-import os from "node:os";
-import path from "node:path";
-import test from "node:test";
+import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
-import { loadConfig } from "../src/config.js";
-import { createServer } from "../src/server.js";
+import { loadConfig } from '../src/config.js';
+import { createServer } from '../src/server.js';
 
 const TOOLS = [
-  "get_environment", "inspect_graph", "read_artifact", "get_evaluation", "compare_evaluations", "export_candidate", "start_tuning", "get_job", "cancel_job", "resume_job",
-  "list_operators",
-  "get_operator",
-  "list_port_types",
-  "validate_graph",
-  "plan_graph",
-  "run_graph",
-  "get_node_outputs",
-  "summarize_output",
-  "view_output_image",
-  "eval",
-  "perturb",
-  "diff_graphs",
-  "get_params",
-  "list_recipes",
-  "list_metrics",
-  "patch_graph",
+  'get_environment',
+  'inspect_graph',
+  'read_artifact',
+  'get_evaluation',
+  'compare_evaluations',
+  'export_candidate',
+  'start_tuning',
+  'get_job',
+  'cancel_job',
+  'resume_job',
+  'list_operators',
+  'get_operator',
+  'list_port_types',
+  'validate_graph',
+  'plan_graph',
+  'run_graph',
+  'get_node_outputs',
+  'summarize_output',
+  'view_output_image',
+  'eval',
+  'perturb',
+  'diff_graphs',
+  'get_params',
+  'list_recipes',
+  'list_metrics',
+  'patch_graph',
 ];
 
 async function connect(env: NodeJS.ProcessEnv): Promise<Client> {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const server = createServer(loadConfig(env));
   await server.connect(serverTransport);
-  const client = new Client({ name: "test", version: "0.0.0" });
+  const client = new Client({ name: 'test', version: '0.0.0' });
   await client.connect(clientTransport);
   return client;
 }
 
 function text(result: unknown): string {
   const content = (result as { content?: { type: string; text?: string }[] }).content ?? [];
-  return content.map((c) => c.text ?? "").join("");
+  return content.map((c) => c.text ?? '').join('');
 }
 
-test("loadConfig：LYFLOW_HTTP_BASE 必填、缺了说清楚；其余配置项的默认值", () => {
+test('loadConfig：LYFLOW_HTTP_BASE 必填、缺了说清楚；其余配置项的默认值', () => {
   assert.throws(() => loadConfig({}), /LYFLOW_HTTP_BASE/);
-  const config = loadConfig({ LYFLOW_HTTP_BASE: "http://127.0.0.1:8787/" });
-  assert.equal(config.httpBase, "http://127.0.0.1:8787");
+  const config = loadConfig({ LYFLOW_HTTP_BASE: 'http://127.0.0.1:8787/' });
+  assert.equal(config.httpBase, 'http://127.0.0.1:8787');
   assert.equal(config.token, undefined);
   assert.equal(config.cli, undefined);
-  assert.equal(config.workDir, path.join(os.tmpdir(), "lyflow-mcp"));
+  assert.equal(config.workDir, path.join(os.tmpdir(), 'lyflow-mcp'));
 });
 
-test("工具面和输入 schema 的必填项对得上", async () => {
-  const client = await connect({ LYFLOW_HTTP_BASE: "http://127.0.0.1:1" });
+test('工具面和输入 schema 的必填项对得上', async () => {
+  const client = await connect({ LYFLOW_HTTP_BASE: 'http://127.0.0.1:1' });
   const listed = await client.listTools();
-  assert.deepEqual(
-    listed.tools.map((t) => t.name).sort(),
-    [...TOOLS].sort(),
-  );
+  assert.deepEqual(listed.tools.map((t) => t.name).sort(), [...TOOLS].sort());
 
   const byName = new Map(listed.tools.map((t) => [t.name, t]));
   const required = (name: string): string[] =>
     ((byName.get(name)?.inputSchema as { required?: string[] } | undefined)?.required ?? []).sort();
 
   const want: Record<string, string[]> = {
-    get_environment: [], inspect_graph: [], read_artifact: ["artifactId"], get_evaluation: ["evaluationId"], get_job: ["jobId"],
-    cancel_job: ["jobId"], resume_job: ["jobId"], export_candidate: ["evaluationId"],
-    compare_evaluations: ["baselineId","candidateId","objectives"], start_tuning: ["graphPath","objectives","space","split"],
-    get_operator: ["id"],
+    get_environment: [],
+    inspect_graph: [],
+    read_artifact: ['artifactId'],
+    get_evaluation: ['evaluationId'],
+    get_job: ['jobId'],
+    cancel_job: ['jobId'],
+    resume_job: ['jobId'],
+    export_candidate: ['evaluationId'],
+    compare_evaluations: ['baselineId', 'candidateId', 'objectives'],
+    start_tuning: ['graphPath', 'objectives', 'space', 'split'],
+    get_operator: ['id'],
     list_operators: [],
-    summarize_output: ["nodeId", "port", "runId"],
-    view_output_image: ["nodeId", "port", "runId"],
+    summarize_output: ['nodeId', 'port', 'runId'],
+    view_output_image: ['nodeId', 'port', 'runId'],
     run_graph: [],
-    eval: ["graphPath", "metric"],
-    perturb: ["after", "axis", "graphPath", "metric", "region"],
-    diff_graphs: ["a", "b"],
-    get_params: ["graphPath"],
-    list_recipes: ["graphPath"],
-    list_metrics: ["graphPath"],
-    patch_graph: ["graphPath"],
+    eval: ['graphPath', 'metric'],
+    perturb: ['after', 'axis', 'graphPath', 'metric', 'region'],
+    diff_graphs: ['a', 'b'],
+    get_params: ['graphPath'],
+    list_recipes: ['graphPath'],
+    list_metrics: ['graphPath'],
+    patch_graph: ['graphPath'],
   };
   for (const [name, fields] of Object.entries(want)) assert.deepEqual(required(name), fields, name);
   await client.close();
 });
 
-test("resource 清单里有 manifest、图/样本/叠画 schema、调参文档与图样例", async () => {
-  const client = await connect({ LYFLOW_HTTP_BASE: "http://127.0.0.1:1" });
+test('resource 清单里有 manifest、图/样本/叠画 schema、调参文档与图样例', async () => {
+  const client = await connect({ LYFLOW_HTTP_BASE: 'http://127.0.0.1:1' });
   const listed = await client.listResources();
   const uris = listed.resources.map((r) => r.uri);
   for (const uri of [
-    "lyflow://manifest",
-    "lyflow://schema/operator-manifest",
-    "lyflow://schema/graph-doc",
-    "lyflow://schema/execution-event",
-    "lyflow://schema/eval-sample",
-    "lyflow://schema/overlay2d",
-    "lyflow://docs/mcp-glue-tuning",
-    "lyflow://examples/graph",
-    "lyflow://docs/agent-tuning",
-    "lyflow://docs/http-transport",
+    'lyflow://manifest',
+    'lyflow://schema/operator-manifest',
+    'lyflow://schema/graph-doc',
+    'lyflow://schema/execution-event',
+    'lyflow://schema/eval-sample',
+    'lyflow://schema/overlay2d',
+    'lyflow://docs/mcp-glue-tuning',
+    'lyflow://examples/graph',
+    'lyflow://docs/agent-tuning',
+    'lyflow://docs/http-transport',
   ]) {
-    assert.ok(uris.includes(uri), `缺 ${uri}，实际有 ${uris.join(", ")}`);
+    assert.ok(uris.includes(uri), `缺 ${uri}，实际有 ${uris.join(', ')}`);
   }
-  const sample=await client.readResource({uri:"lyflow://schema/eval-sample"});
-  assert.match(String((sample.contents[0] as {text:string}).text),/LyFlowEvalSample/);
-  const workflow=await client.readResource({uri:"lyflow://docs/mcp-glue-tuning"});
-  assert.match(String((workflow.contents[0] as {text:string}).text),/start_tuning/);
+  const sample = await client.readResource({ uri: 'lyflow://schema/eval-sample' });
+  assert.match(String((sample.contents[0] as { text: string }).text), /LyFlowEvalSample/);
+  const workflow = await client.readResource({ uri: 'lyflow://docs/mcp-glue-tuning' });
+  assert.match(String((workflow.contents[0] as { text: string }).text), /start_tuning/);
   await client.close();
 });
 
-test("没配 LYFLOW_CLI 时 eval / perturb / diff_graphs / list_recipes / list_metrics / 带 recipe 的 run_graph 给一句说得清的错", async () => {
-  const client = await connect({ LYFLOW_HTTP_BASE: "http://127.0.0.1:1" });
+test('没配 LYFLOW_CLI 时 eval / perturb / diff_graphs / list_recipes / list_metrics / 带 recipe 的 run_graph 给一句说得清的错', async () => {
+  const client = await connect({ LYFLOW_HTTP_BASE: 'http://127.0.0.1:1' });
   for (const [name, args] of [
-    ["eval", { graphPath: "g.json", metric: ["outputs.gap"] }],
+    ['eval', { graphPath: 'g.json', metric: ['outputs.gap'] }],
     [
-      "perturb",
-      { graphPath: "g.json", after: "n:cloud", region: {}, axis: "x=0:1:2", metric: ["outputs.gap"] },
+      'perturb',
+      {
+        graphPath: 'g.json',
+        after: 'n:cloud',
+        region: {},
+        axis: 'x=0:1:2',
+        metric: ['outputs.gap'],
+      },
     ],
-    ["diff_graphs", { a: "a.json", b: "b.json" }],
-    ["list_recipes", { graphPath: "g.json" }],
-    ["list_metrics", { graphPath: "g.json" }],
+    ['diff_graphs', { a: 'a.json', b: 'b.json' }],
+    ['list_recipes', { graphPath: 'g.json' }],
+    ['list_metrics', { graphPath: 'g.json' }],
     // 带 recipe 的 run_graph 要 CLI 查失配：没配 CLI 时在碰后端之前就说清楚
     [
-      "run_graph",
-      { graph: { schemaVersion: 1, id: "g", nodes: [], edges: [] }, recipe: "A.lyflow-recipe.json" },
+      'run_graph',
+      {
+        graph: { schemaVersion: 1, id: 'g', nodes: [], edges: [] },
+        recipe: 'A.lyflow-recipe.json',
+      },
     ],
   ] as const) {
     const result = await client.callTool({ name, arguments: args });
@@ -134,21 +156,21 @@ test("没配 LYFLOW_CLI 时 eval / perturb / diff_graphs / list_recipes / list_m
   await client.close();
 });
 
-test("后端连不上时工具报错而不是挂住", async () => {
-  const client = await connect({ LYFLOW_HTTP_BASE: "http://127.0.0.1:1" });
-  const result = await client.callTool({ name: "list_operators", arguments: {} });
+test('后端连不上时工具报错而不是挂住', async () => {
+  const client = await connect({ LYFLOW_HTTP_BASE: 'http://127.0.0.1:1' });
+  const result = await client.callTool({ name: 'list_operators', arguments: {} });
   assert.equal(result.isError, true);
   assert.match(text(result), /连不上/);
   await client.close();
 });
 
-test("图给得不对时 run_graph 不去碰后端", async () => {
-  const client = await connect({ LYFLOW_HTTP_BASE: "http://127.0.0.1:1" });
+test('图给得不对时 run_graph 不去碰后端', async () => {
+  const client = await connect({ LYFLOW_HTTP_BASE: 'http://127.0.0.1:1' });
   const result = await client.callTool({
-    name: "run_graph",
+    name: 'run_graph',
     arguments: {
-      graph: { schemaVersion: 1, id: "g", nodes: [{ id: "a", op: "x" }], edges: [] },
-      set: { "nope.p": 1 },
+      graph: { schemaVersion: 1, id: 'g', nodes: [{ id: 'a', op: 'x' }], edges: [] },
+      set: { 'nope.p': 1 },
     },
   });
   assert.equal(result.isError, true);
@@ -156,11 +178,11 @@ test("图给得不对时 run_graph 不去碰后端", async () => {
   await client.close();
 });
 
-test("图缺 GraphDoc 必填字段时当场说清楚，而不是让后端回一个空诊断数组", async () => {
-  const client = await connect({ LYFLOW_HTTP_BASE: "http://127.0.0.1:1" });
+test('图缺 GraphDoc 必填字段时当场说清楚，而不是让后端回一个空诊断数组', async () => {
+  const client = await connect({ LYFLOW_HTTP_BASE: 'http://127.0.0.1:1' });
   const result = await client.callTool({
-    name: "validate_graph",
-    arguments: { graph: { schemaVersion: 1, nodes: [{ id: "a", op: "x" }] } },
+    name: 'validate_graph',
+    arguments: { graph: { schemaVersion: 1, nodes: [{ id: 'a', op: 'x' }] } },
   });
   assert.equal(result.isError, true);
   assert.match(text(result), /id/);

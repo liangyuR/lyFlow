@@ -11,8 +11,8 @@ namespace {
 
 Status compute(const Inputs&, const ParamView& params, Outputs& outputs, ExecContext&) {
   if (params.choice("source") == "injected") {
-    return Status::Error(Phase::Execute, "bad_input",
-                         "来源是「宿主注入」，但这次运行没有注入轮廓", "source");
+    return Status::Error(Phase::Execute, "bad_input", "来源是「宿主注入」，但这次运行没有注入轮廓",
+                         "source");
   }
   const std::filesystem::path file = params.path("path");
   std::ifstream in(file);
@@ -23,14 +23,18 @@ Status compute(const Inputs&, const ParamView& params, Outputs& outputs, ExecCon
   std::vector<float> intensity;
   std::string line;
   while (std::getline(in, line)) {
-    if (line.empty() || line[0] == '#') continue;
+    if (line.empty() || line[0] == '#')
+      continue;
     for (char& c : line) {
-      if (c == ',' || c == ';' || c == '\t') c = ' ';
+      if (c == ',' || c == ';' || c == '\t')
+        c = ' ';
     }
     std::istringstream ss(line);
     double x = 0, z = 0, it = 1.0;
-    if (!(ss >> x >> z)) continue;
-    if (!(ss >> it)) it = 1.0;
+    if (!(ss >> x >> z))
+      continue;
+    if (!(ss >> it))
+      it = 1.0;
     cloud.push(static_cast<float>(x), 0.0f, static_cast<float>(z));
     intensity.push_back(static_cast<float>(it));
   }
@@ -43,19 +47,22 @@ Status compute(const Inputs&, const ParamView& params, Outputs& outputs, ExecCon
 }
 
 std::string externalKey(const ParamView& params) {
-  if (params.choice("source") == "injected") return {};
+  if (params.choice("source") == "injected")
+    return {};
   const std::filesystem::path file = params.path("path");
-  if (file.empty()) return {};
+  if (file.empty())
+    return {};
   std::error_code ec;
   const auto size = std::filesystem::file_size(file, ec);
-  if (ec) return {};
+  if (ec)
+    return {};
   const auto mtime = std::filesystem::last_write_time(file, ec);
-  if (ec) return {};
-  return std::to_string(size) + ":" +
-         std::to_string(mtime.time_since_epoch().count());
+  if (ec)
+    return {};
+  return std::to_string(size) + ":" + std::to_string(mtime.time_since_epoch().count());
 }
 
-}  // namespace
+} // namespace
 
 void registerProfileIn(Registry& r) {
   OperatorDesc op;
@@ -64,9 +71,8 @@ void registerProfileIn(Registry& r) {
   op.label = "轮廓输入";
   op.category = "DTS/输入";
   op.keywords = {"profile", "input", "轮廓", "输入"};
-  op.doc =
-      "一条激光轮廓。产线上由宿主把传感器的那一条注入进来（节点整个 compute 不跑）；\n"
-      "离线调图时从 path 指的 CSV 读，每行 `x,z[,亮度]`，单位 mm，亮度 0 表示无效点。";
+  op.doc = "一条激光轮廓。产线上由宿主把传感器的那一条注入进来（节点整个 compute 不跑）；\n"
+           "离线调图时从 path 指的 CSV 读，每行 `x,z[,亮度]`，单位 mm，亮度 0 表示无效点。";
   op.outputs = {Port{"profile", "PointCloud", "Profile", "剖面点，y 恒为 0，x/z 单位 mm。", true}};
 
   Param source;
@@ -95,4 +101,4 @@ void registerProfileIn(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::dts
+} // namespace lyflow::dts

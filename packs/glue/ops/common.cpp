@@ -12,12 +12,13 @@ namespace {
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 
 double roundTo(double v, int decimals) {
-  if (!std::isfinite(v)) return v;
+  if (!std::isfinite(v))
+    return v;
   const double k = std::pow(10.0, decimals);
   return std::round(v * k) / k;
 }
 
-}  // namespace
+} // namespace
 
 // ------------------------------------------------------------------ Bundle 声明（M8a L2）
 
@@ -28,13 +29,15 @@ void registerBundles(Registry& r) {
       "glue.bead_path 定下的胶路：一条覆盖整个检测区的光滑折线（跨得过断口），与它是怎么找到的。"
       "没找到胶时 info.ok = false，折线是沿选中方向的一条直线，下游照常跑出「全段无胶」。",
       "",
-      {BundleField{"line", "Record",
-                   "glue.Polyline：points（图像像素）、s（从喷嘴沿胶路的弧长，px）、tangents（单位切向，"
-                   "指向远离喷嘴的一侧），相邻两点 2 px。"},
-       BundleField{"info", "Record",
-                   "glue.PathInfo：ok、message、reason、heading（度，图像坐标）、headingSource"
-                   "（param | search）、coverage、sharpness、residual、zone、nozzle、polarity、widthMax、"
-                   "candidates（试过的方向）。"}}});
+      {BundleField{
+           "line", "Record",
+           "glue.Polyline：points（图像像素）、s（从喷嘴沿胶路的弧长，px）、tangents（单位切向，"
+           "指向远离喷嘴的一侧），相邻两点 2 px。"},
+       BundleField{
+           "info", "Record",
+           "glue.PathInfo：ok、message、reason、heading（度，图像坐标）、headingSource"
+           "（param | search）、coverage、sharpness、residual、zone、nozzle、polarity、widthMax、"
+           "candidates（试过的方向）。"}}});
   r.addBundle(BundleDesc{
       kBeadKind,
       "胶",
@@ -42,12 +45,14 @@ void registerBundles(Registry& r) {
       "所以把胶路折线本身也带着。",
       "",
       {BundleField{"line", "Record", "glue.Polyline：与 glue.Path 的 line 相同。"},
-       BundleField{"stations", "Record",
-                   "glue.Stations：数组形式的逐站数据 —— s、center、normal、present、lo / hi（两边沿法向的"
-                   "偏移，px）、left / right（两边的像素点）、width（按 unit）、widthPx、contrast。"},
-       BundleField{"info", "Record",
-                   "glue.BeadInfo：form、stationStep、unit（px | mm）、pathOk、message、zone、coverage、"
-                   "wRef、polarity、widthMax、calib（接了标定时的那一份 image.PlaneCalib，否则 null）。"}}});
+       BundleField{
+           "stations", "Record",
+           "glue.Stations：数组形式的逐站数据 —— s、center、normal、present、lo / hi（两边沿法向的"
+           "偏移，px）、left / right（两边的像素点）、width（按 unit）、widthPx、contrast。"},
+       BundleField{
+           "info", "Record",
+           "glue.BeadInfo：form、stationStep、unit（px | mm）、pathOk、message、zone、coverage、"
+           "wRef、polarity、widthMax、calib（接了标定时的那一份 image.PlaneCalib，否则 null）。"}}});
 }
 
 // ------------------------------------------------------------------ 图像
@@ -63,7 +68,8 @@ cv::Mat grayOf(const Data& image) {
 double round3(double v) { return roundTo(v, 3); }
 
 Json pxJson(P2 p) {
-  if (!finite(p)) return Json();
+  if (!finite(p))
+    return Json();
   return Json::array({round3(p.x), round3(p.y)});
 }
 
@@ -75,7 +81,8 @@ P2 pxOf(const Json& j) {
 }
 
 Json numOrNull(double v, int decimals) {
-  if (!std::isfinite(v)) return Json();
+  if (!std::isfinite(v))
+    return Json();
   return roundTo(v, decimals);
 }
 
@@ -85,13 +92,15 @@ double numOf(const Json& j) { return j.is_number() ? j.get<double>() : kNaN; }
 
 std::vector<P2> Polyline::between(double s0, double s1) const {
   std::vector<P2> out;
-  if (s.empty() || s1 < s0) return out;
+  if (s.empty() || s1 < s0)
+    return out;
   const PolylineView v = view();
   P2 p, t;
   v.at(s0, &p, &t);
   out.push_back(p);
   for (std::size_t i = 0; i < s.size(); ++i) {
-    if (s[i] > s0 + 1e-9 && s[i] < s1 - 1e-9) out.push_back(points[i]);
+    if (s[i] > s0 + 1e-9 && s[i] < s1 - 1e-9)
+      out.push_back(points[i]);
   }
   v.at(s1, &p, &t);
   out.push_back(p);
@@ -120,7 +129,8 @@ Data polylineRecord(const std::vector<double>& s, const std::vector<P2>& points,
 
 bool readPolyline(const Data& d, Polyline* out) {
   const Record* rec = d.asRecord();
-  if (!rec) return false;
+  if (!rec)
+    return false;
   const Json& j = rec->data;
   const auto s = j.find("s");
   const auto p = j.find("points");
@@ -134,8 +144,10 @@ bool readPolyline(const Data& d, Polyline* out) {
     line.s.push_back(numOf((*s)[i]));
     line.points.push_back(pxOf((*p)[i]));
     line.tangents.push_back(unit(pxOf((*t)[i])));
-    if (!std::isfinite(line.s.back()) || !finite(line.points.back())) return false;
-    if (i > 0 && line.s[i] < line.s[i - 1]) return false;
+    if (!std::isfinite(line.s.back()) || !finite(line.points.back()))
+      return false;
+    if (i > 0 && line.s[i] < line.s[i - 1])
+      return false;
   }
   *out = std::move(line);
   return true;
@@ -155,10 +167,12 @@ Data pathBundle(Data line, Json info) {
 
 bool readPath(const Data& d, Polyline* line, Json* info) {
   const Bundle* b = d.asBundle();
-  if (!b || b->kind != kPathKind) return false;
+  if (!b || b->kind != kPathKind)
+    return false;
   const Data* l = b->field("line");
   const Data* i = b->field("info");
-  if (!l || !i || !i->asRecord() || !readPolyline(*l, line)) return false;
+  if (!l || !i || !i->asRecord() || !readPolyline(*l, line))
+    return false;
   *info = i->asRecord()->data;
   return true;
 }
@@ -179,12 +193,15 @@ Data beadBundle(Data line, Json stations, Json info) {
 
 bool readBead(const Data& d, BeadView* out) {
   const Bundle* b = d.asBundle();
-  if (!b || b->kind != kBeadKind) return false;
+  if (!b || b->kind != kBeadKind)
+    return false;
   const Data* l = b->field("line");
   const Data* s = b->field("stations");
   const Data* i = b->field("info");
-  if (!l || !s || !i || !s->asRecord() || !i->asRecord()) return false;
-  if (!readPolyline(*l, &out->line)) return false;
+  if (!l || !s || !i || !s->asRecord() || !i->asRecord())
+    return false;
+  if (!readPolyline(*l, &out->line))
+    return false;
   out->stations = s->asRecord()->data;
   out->info = i->asRecord()->data;
   return true;
@@ -216,7 +233,8 @@ Json stationsJson(const std::vector<Station>& stations, double step, const std::
       widthPx.push_back(round3(st.width()));
       contrast.push_back(roundTo(st.peak, 1));
     } else {
-      for (Json* a : {&lo, &hi, &left, &right, &width, &widthPx, &contrast}) a->push_back(Json());
+      for (Json* a : {&lo, &hi, &left, &right, &width, &widthPx, &contrast})
+        a->push_back(Json());
     }
   }
   j["s"] = std::move(s);
@@ -238,9 +256,12 @@ bool readStations(const Json& j, std::vector<Station>* out) {
   std::size_t n = 0;
   for (std::size_t k = 0; k < std::size(keys); ++k) {
     const auto it = j.find(keys[k]);
-    if (it == j.end() || !it->is_array()) return false;
-    if (k == 0) n = it->size();
-    if (it->size() != n) return false;
+    if (it == j.end() || !it->is_array())
+      return false;
+    if (k == 0)
+      n = it->size();
+    if (it->size() != n)
+      return false;
   }
   std::vector<Station> st(n);
   for (std::size_t i = 0; i < n; ++i) {
@@ -248,15 +269,17 @@ bool readStations(const Json& j, std::vector<Station>* out) {
     x.s = numOf(j["s"][i]);
     x.c = pxOf(j["center"][i]);
     x.n = unit(pxOf(j["normal"][i]));
-    x.t = P2(x.n.y, -x.n.x);  // n = (−t.y, t.x) 反过来
+    x.t = P2(x.n.y, -x.n.x); // n = (−t.y, t.x) 反过来
     x.present = j["present"][i].is_boolean() && j["present"][i].get<bool>();
     if (x.present) {
       x.lo = numOf(j["lo"][i]);
       x.hi = numOf(j["hi"][i]);
       x.peak = numOf(j["contrast"][i]);
-      if (!std::isfinite(x.lo) || !std::isfinite(x.hi)) x.present = false;
+      if (!std::isfinite(x.lo) || !std::isfinite(x.hi))
+        x.present = false;
     }
-    if (!std::isfinite(x.s) || !finite(x.c)) return false;
+    if (!std::isfinite(x.s) || !finite(x.c))
+      return false;
   }
   *out = std::move(st);
   return true;
@@ -265,22 +288,27 @@ bool readStations(const Json& j, std::vector<Station>* out) {
 // ------------------------------------------------------------------ 标定
 
 double Metric::distance(P2 a, P2 b) const {
-  if (!finite(a) || !finite(b)) return kNaN;
-  if (!calib) return glue::length(b - a);
+  if (!finite(a) || !finite(b))
+    return kNaN;
+  if (!calib)
+    return glue::length(b - a);
   return calib->distance(a.x, a.y, b.x, b.y);
 }
 
 double Metric::length(const std::vector<P2>& pts) const {
   double total = 0;
-  for (std::size_t i = 1; i < pts.size(); ++i) total += distance(pts[i - 1], pts[i]);
+  for (std::size_t i = 1; i < pts.size(); ++i)
+    total += distance(pts[i - 1], pts[i]);
   return total;
 }
 
 Status metricFromInput(const Inputs& inputs, const char* port, Metric* out) {
   out->calib.reset();
-  if (!inputs.has(port)) return Status::Ok();
+  if (!inputs.has(port))
+    return Status::Ok();
   const Record* rec = inputs.get(port).asRecord();
-  if (!rec) return Status::Error(Phase::Execute, "bad_input", "calib 不是 Record", {}, port);
+  if (!rec)
+    return Status::Error(Phase::Execute, "bad_input", "calib 不是 Record", {}, port);
   std_image::PlaneCalib c;
   std::string why;
   if (!std_image::parsePlaneCalib(rec->data, &c, &why)) {
@@ -296,7 +324,8 @@ Metric metricFromInfo(const Json& info) {
   const auto it = info.find("calib");
   if (it != info.end() && it->is_object()) {
     std_image::PlaneCalib c;
-    if (std_image::parsePlaneCalib(*it, &c, nullptr)) m.calib = c;
+    if (std_image::parsePlaneCalib(*it, &c, nullptr))
+      m.calib = c;
   }
   return m;
 }
@@ -308,7 +337,8 @@ Data measurement(double value, const std::string& unitName, const std::string& m
   m.value = value;
   m.ok = std::isfinite(value);
   m.unit = unitName;
-  if (!m.ok) m.message = messageIfMissing;
+  if (!m.ok)
+    m.message = messageIfMissing;
   return Data::measurement(std::move(m));
 }
 
@@ -385,7 +415,8 @@ std::vector<std::pair<std::size_t, std::size_t>> presentRuns(const std::vector<S
       continue;
     }
     std::size_t j = i;
-    while (j + 1 < st.size() && st[j + 1].present) ++j;
+    while (j + 1 < st.size() && st[j + 1].present)
+      ++j;
     out.emplace_back(i, j);
     i = j + 1;
   }
@@ -393,10 +424,11 @@ std::vector<std::pair<std::size_t, std::size_t>> presentRuns(const std::vector<S
 }
 
 std::string fmt(double v, int decimals) {
-  if (!std::isfinite(v)) return "—";
+  if (!std::isfinite(v))
+    return "—";
   char buf[48];
   std::snprintf(buf, sizeof(buf), "%.*f", decimals, v);
   return buf;
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

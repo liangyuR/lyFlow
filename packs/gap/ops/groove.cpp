@@ -23,9 +23,9 @@ nlohmann::json lineQualityJson(const GapCloud& cloud, const Eigen::VectorXf& lin
   q["model"] = "line";
   q["pointCount"] = cloud.size();
   q["inlierCount"] = inliers.size();
-  q["inlierRatio"] =
-      cloud.empty() ? nlohmann::json()
-                    : nlohmann::json(static_cast<double>(inliers.size()) / cloud.size());
+  q["inlierRatio"] = cloud.empty()
+                         ? nlohmann::json()
+                         : nlohmann::json(static_cast<double>(inliers.size()) / cloud.size());
   double pointX = kNaN;
   double pointY = kNaN;
   double dirX = kNaN;
@@ -55,7 +55,8 @@ nlohmann::json lineQualityJson(const GapCloud& cloud, const Eigen::VectorXf& lin
     std::size_t valid = 0;
     if (norm > 0) {
       for (const auto index : inliers) {
-        if (index < 0 || static_cast<std::size_t>(index) >= cloud.size()) continue;
+        if (index < 0 || static_cast<std::size_t>(index) >= cloud.size())
+          continue;
         const auto& point = cloud[index];
         const double residual =
             std::fabs((point.x - line[0]) * dy - (point.y - line[1]) * dx) / norm * kScale;
@@ -107,7 +108,8 @@ struct CameraFit {
 GapCloud windowOf(const GapCloud& cloud, double lo, double hi) {
   GapCloud out;
   for (const auto& p : cloud) {
-    if (p.x > lo && p.x < hi) out.push_back(p);
+    if (p.x > lo && p.x < hi)
+      out.push_back(p);
   }
   out.width = static_cast<std::uint32_t>(out.size());
   out.height = 1;
@@ -117,22 +119,27 @@ GapCloud windowOf(const GapCloud& cloud, double lo, double hi) {
 WindowFit fitWindow(const GapCloud& window, double xc, std::size_t minPoints, float distThresh) {
   WindowFit f;
   f.pointCount = window.size();
-  if (f.pointCount < minPoints) return f;
+  if (f.pointCount < minPoints)
+    return f;
   Eigen::VectorXf coefficients;
   pcl::Indices inliers;
-  if (!gap_std::lineFit2D(window, &coefficients, &inliers, distThresh)) return f;
-  if (coefficients.size() < 5) return f;
+  if (!gap_std::lineFit2D(window, &coefficients, &inliers, distThresh))
+    return f;
+  if (coefficients.size() < 5)
+    return f;
   double dx = coefficients[3];
   double dy = coefficients[4];
   const double norm = std::hypot(dx, dy);
-  if (!(norm > 0)) return f;
+  if (!(norm > 0))
+    return f;
   dx /= norm;
   dy /= norm;
   if (dx < 0) {
     dx = -dx;
     dy = -dy;
   }
-  if (std::fabs(dx) < 1e-9) return f;
+  if (std::fabs(dx) < 1e-9)
+    return f;
   f.k = dy / dx;
   f.y = static_cast<double>(coefficients[1]) + (xc - static_cast<double>(coefficients[0])) * f.k;
   f.inlierCount = inliers.size();
@@ -153,11 +160,13 @@ pcl::Indices residualInliers(const GapCloud& cloud, const Eigen::VectorXf& line,
   const double dx = line[3];
   const double dy = line[4];
   const double norm = std::hypot(dx, dy);
-  if (!(norm > 0)) return out;
+  if (!(norm > 0))
+    return out;
   for (std::size_t i = 0; i < cloud.size(); ++i) {
     const double residual =
         std::fabs((cloud[i].x - line[0]) * dy - (cloud[i].y - line[1]) * dx) / norm;
-    if (residual <= thresh) out.push_back(static_cast<pcl::index_t>(i));
+    if (residual <= thresh)
+      out.push_back(static_cast<pcl::index_t>(i));
   }
   return out;
 }
@@ -184,8 +193,10 @@ Status grooveJoint(const Inputs& inputs, const ParamView& params, Outputs& outpu
 
   GapCloud merged;
   merged.reserve(primary.size() + secondary.size());
-  for (const auto& p : secondary) merged.push_back(p);
-  for (const auto& p : primary) merged.push_back(p);
+  for (const auto& p : secondary)
+    merged.push_back(p);
+  for (const auto& p : primary)
+    merged.push_back(p);
   std::stable_sort(merged.points.begin(), merged.points.end(),
                    [](const GapPoint& a, const GapPoint& b) { return a.x < b.x; });
   merged.width = static_cast<std::uint32_t>(merged.size());
@@ -225,7 +236,8 @@ Status grooveJoint(const Inputs& inputs, const ParamView& params, Outputs& outpu
                          "primary");
   }
   n0 /= n0Norm;
-  if (n0.y() < 0) n0 = -n0;
+  if (n0.y() < 0)
+    n0 = -n0;
   const Eigen::Vector2d p0(coarse[0], coarse[1]);
 
   std::vector<double> depth(merged.size());
@@ -234,7 +246,8 @@ Status grooveJoint(const Inputs& inputs, const ParamView& params, Outputs& outpu
   }
   std::vector<std::size_t> deep;
   for (std::size_t i = 0; i < depth.size(); ++i) {
-    if (depth[i] > depthMinM) deep.push_back(i);
+    if (depth[i] > depthMinM)
+      deep.push_back(i);
   }
   if (deep.size() < 3) {
     return Status::Error(Phase::Execute, "groove_not_found",
@@ -247,10 +260,11 @@ Status grooveJoint(const Inputs& inputs, const ParamView& params, Outputs& outpu
   const std::size_t taken = std::min(deepestCount, deep.size());
   std::vector<double> xs;
   xs.reserve(taken);
-  for (std::size_t i = 0; i < taken; ++i) xs.push_back(merged[deep[i]].x);
+  for (std::size_t i = 0; i < taken; ++i)
+    xs.push_back(merged[deep[i]].x);
   std::sort(xs.begin(), xs.end());
-  const double xc = (xs.size() % 2 == 1) ? xs[xs.size() / 2]
-                                         : 0.5 * (xs[xs.size() / 2 - 1] + xs[xs.size() / 2]);
+  const double xc =
+      (xs.size() % 2 == 1) ? xs[xs.size() / 2] : 0.5 * (xs[xs.size() / 2 - 1] + xs[xs.size() / 2]);
   const double grooveDepth = depth[deep[0]];
   const GapPoint& deepest = merged[deep[0]];
 
@@ -266,7 +280,8 @@ Status grooveJoint(const Inputs& inputs, const ParamView& params, Outputs& outpu
     const GapCloud rightWindow = windowOf(*cameras[i], rightLo, rightHi);
     fits[i].left.pointCount = leftWindow.size();
     fits[i].right.pointCount = rightWindow.size();
-    if (leftWindow.size() < minLinePoints || rightWindow.size() < minLinePoints) continue;
+    if (leftWindow.size() < minLinePoints || rightWindow.size() < minLinePoints)
+      continue;
     fits[i].left = fitWindow(leftWindow, xc, minLinePoints, static_cast<float>(lineDistM));
     fits[i].right = fitWindow(rightWindow, xc, minLinePoints, static_cast<float>(lineDistM));
     fits[i].valid = fits[i].left.ok && fits[i].right.ok;
@@ -278,7 +293,8 @@ Status grooveJoint(const Inputs& inputs, const ParamView& params, Outputs& outpu
   double kRight = 0;
   int validCount = 0;
   for (const CameraFit& f : fits) {
-    if (!f.valid) continue;
+    if (!f.valid)
+      continue;
     yLeft += f.left.y;
     kLeft += f.left.k;
     yRight += f.right.y;
@@ -311,7 +327,8 @@ Status grooveJoint(const Inputs& inputs, const ParamView& params, Outputs& outpu
   std::size_t edgeRight = kNone;
   for (std::size_t i = 0; i < merged.size(); ++i) {
     const Eigen::Vector2d q(merged[i].x, merged[i].y);
-    if (!((q - pB).dot(nB) > -levelM)) continue;
+    if (!((q - pB).dot(nB) > -levelM))
+      continue;
     if (q.x() < xc) {
       edgeLeft = i;
     } else if (q.x() > xc && edgeRight == kNone) {
@@ -320,8 +337,8 @@ Status grooveJoint(const Inputs& inputs, const ParamView& params, Outputs& outpu
   }
   if (edgeLeft == kNone || edgeRight == kNone) {
     return Status::Error(Phase::Execute, "slot_edge_not_found",
-                         "在低面下方 " + mmText(gapDepthMm) + " mm 的水平面上，槽的一侧没有边",
-                         {}, "primary");
+                         "在低面下方 " + mmText(gapDepthMm) + " mm 的水平面上，槽的一侧没有边", {},
+                         "primary");
   }
   const double widthRawM = static_cast<double>(merged[edgeRight].x) - merged[edgeLeft].x;
   const double gapMm = mToMm(widthRawM) * scale + gapOffset;
@@ -350,8 +367,8 @@ Status grooveJoint(const Inputs& inputs, const ParamView& params, Outputs& outpu
   outputs.set("gapSegment",
               Data::line2d(segmentOf(Eigen::Vector2d(merged[edgeLeft].x, merged[edgeLeft].y),
                                      Eigen::Vector2d(merged[edgeRight].x, merged[edgeRight].y))));
-  outputs.set("flushSegment", Data::line2d(segmentOf(Eigen::Vector2d(xc, yBase),
-                                                     Eigen::Vector2d(xc, yRef))));
+  outputs.set("flushSegment",
+              Data::line2d(segmentOf(Eigen::Vector2d(xc, yBase), Eigen::Vector2d(xc, yRef))));
 
   lyflow::Point2D groove;
   groove.p[0] = static_cast<float>(xc);
@@ -398,16 +415,14 @@ Status grooveJoint(const Inputs& inputs, const ParamView& params, Outputs& outpu
 
   lyflow::Record qualityRef;
   qualityRef.type = "GapFitQuality";
-  qualityRef.data =
-      lineQualityJson(refCloud, refCoefficients, residualInliers(refCloud, refCoefficients,
-                                                                lineDistM));
+  qualityRef.data = lineQualityJson(refCloud, refCoefficients,
+                                    residualInliers(refCloud, refCoefficients, lineDistM));
   outputs.set("qualityRef", Data::record(std::move(qualityRef)));
 
-  ctx.log(LogLevel::Info, "groove: 槽心 x " + mmText(mToMm(xc)) + " mm，深度 " +
-                              mmText(mToMm(grooveDepth)) + " mm，两侧边 x " +
-                              mmText(mToMm(merged[edgeLeft].x)) + " / " +
-                              mmText(mToMm(merged[edgeRight].x)) + " mm，flush " +
-                              mmText(flushMm) + " mm");
+  ctx.log(LogLevel::Info,
+          "groove: 槽心 x " + mmText(mToMm(xc)) + " mm，深度 " + mmText(mToMm(grooveDepth)) +
+              " mm，两侧边 x " + mmText(mToMm(merged[edgeLeft].x)) + " / " +
+              mmText(mToMm(merged[edgeRight].x)) + " mm，flush " + mmText(flushMm) + " mm");
   return Status::Ok();
 }
 
@@ -436,7 +451,7 @@ Param intParam(const char* name, const char* label, std::int64_t def, const char
   return p;
 }
 
-}  // namespace
+} // namespace
 
 void registerGrooveJoint(Registry& r) {
   OperatorDesc op;
@@ -445,17 +460,16 @@ void registerGrooveJoint(Registry& r) {
   op.label = "软装对接缝";
   op.category = "间隙/测量";
   op.keywords = {"groove", "slot", "seam", "对接缝", "软装", "间隙"};
-  op.doc =
-      "两件软装对接、中间留一条窄槽时的槽宽与面差。\n"
-      "槽心由整体粗拟合面下方最深的那几个点定位（取它们 x 的中位数），不依赖模板与 ICP。\n"
-      "两侧的面各在**避开圆角边**的窗口里拟合，且**每台相机分开拟合再平均** —— "
-      "软材料靠近缝边时两台相机能差 0.1~0.3 mm，平均掉这份系统偏差比合并后一次拟合稳。\n"
-      "flush = 参考面相对基准面在槽心处的垂距，+ = 参考面更高 / 更靠传感器。\n"
-      "gap = 槽在「低面下方 gapDepth」这个水平面上的宽度：两侧最内侧的浅点之间的水平距离。"
-      "gapDepth 必须落在两侧圆角/台阶之下、槽底之上 —— 罗石 点 2 实测可用带 ≈ 1.3~1.7 mm，"
-      "太浅会咬到圆角把槽读宽，太深会掉进槽底把槽读窄。\n"
-      "假定缝底有一条比两侧面都深的槽；缝闭合、两圆边直接相碰时没有这条槽，那种缝用 "
-      "gap.notch_width。两台相机都凑不够 minLinePoints 时整帧失败。";
+  op.doc = "两件软装对接、中间留一条窄槽时的槽宽与面差。\n"
+           "槽心由整体粗拟合面下方最深的那几个点定位（取它们 x 的中位数），不依赖模板与 ICP。\n"
+           "两侧的面各在**避开圆角边**的窗口里拟合，且**每台相机分开拟合再平均** —— "
+           "软材料靠近缝边时两台相机能差 0.1~0.3 mm，平均掉这份系统偏差比合并后一次拟合稳。\n"
+           "flush = 参考面相对基准面在槽心处的垂距，+ = 参考面更高 / 更靠传感器。\n"
+           "gap = 槽在「低面下方 gapDepth」这个水平面上的宽度：两侧最内侧的浅点之间的水平距离。"
+           "gapDepth 必须落在两侧圆角/台阶之下、槽底之上 —— 罗石 点 2 实测可用带 ≈ 1.3~1.7 mm，"
+           "太浅会咬到圆角把槽读宽，太深会掉进槽底把槽读窄。\n"
+           "假定缝底有一条比两侧面都深的槽；缝闭合、两圆边直接相碰时没有这条槽，那种缝用 "
+           "gap.notch_width。两台相机都凑不够 minLinePoints 时整帧失败。";
   op.inputs = {
       Port{"primary", "PointCloud", "Primary", "整体 ROI 裁过的 Master 云（测量帧）。", true},
       Port{"secondary", "PointCloud", "Secondary", "整体 ROI 裁过的 Slave 云（测量帧）。", true},
@@ -521,4 +535,4 @@ void registerGrooveJoint(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

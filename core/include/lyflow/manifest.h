@@ -85,7 +85,7 @@ struct Migration {
 
 // ------------------------------- Value —— 参数默认值（只覆盖 param.default 的形态）
 class Value {
- public:
+public:
   enum class Kind { Null, Bool, Int, Float, String, FloatVec };
 
   Value() = default;
@@ -105,7 +105,7 @@ class Value {
   const std::string& stringValue() const { return string_; }
   const std::vector<double>& vecValue() const { return vec_; }
 
- private:
+private:
   Kind kind_ = Kind::Null;
   bool bool_ = false;
   std::int64_t int_ = 0;
@@ -117,17 +117,17 @@ class Value {
 // ---------------------------------------------------------------------- 端口类型表
 struct PortType {
   std::string name;
-  std::string color;                      // 端口与连线着色，前端直接用
-  std::vector<std::string> castableTo;    // 可隐式转换到的类型
+  std::string color;                   // 端口与连线着色，前端直接用
+  std::vector<std::string> castableTo; // 可隐式转换到的类型
   std::string doc;
 };
 
 struct Port {
-  std::string name;                       // 用名字不用序号，增删端口老图不错位
-  std::string type;                       // 必须存在于类型表中，startup 时自检
+  std::string name; // 用名字不用序号，增删端口老图不错位
+  std::string type; // 必须存在于类型表中，startup 时自检
   std::string label;
   std::string doc;
-  bool required = true;                   // 仅对 inputs 有意义
+  bool required = true; // 仅对 inputs 有意义
   // 下面两条只对 inputs 有意义，语义见 ADR-0016。新字段一律追加在末尾：
   // 现有算子用聚合初始化写了前五个成员，插在中间会静默改掉它们的 required。
   bool acceptsError = false;
@@ -157,11 +157,11 @@ struct BundleField {
 /// 执行器在算子写出这种端口之后按它查字段齐不齐、类型对不对（不符报 contract_violation）；
 /// 编辑器与 MCP 读同一份字段表。
 struct BundleDesc {
-  std::string kind;                       // 全局唯一，用 . 分命名空间，例如 gap.ScanPair
+  std::string kind; // 全局唯一，用 . 分命名空间，例如 gap.ScanPair
   std::string label;
   std::string doc;
-  std::string pack;                       // 与 OperatorDesc::pack 同一口径
-  std::vector<BundleField> fields;        // 有序：Edge Peek 与 valueJson 按这个顺序列
+  std::string pack;                // 与 OperatorDesc::pack 同一口径
+  std::vector<BundleField> fields; // 有序：Edge Peek 与 valueJson 按这个顺序列
 };
 
 /// 端口契约的四种键。Registry::validate() 与 schema 都照着它。
@@ -183,8 +183,20 @@ struct ContractViolation {
 
 // --------------------------------------------------------------------------- 参数
 enum class ParamType {
-  Bool, Int, Float, Vec2f, Vec3f, Vec4f, Enum, Flags,
-  String, Text, Path, Color, Transform, Curve,
+  Bool,
+  Int,
+  Float,
+  Vec2f,
+  Vec3f,
+  Vec4f,
+  Enum,
+  Flags,
+  String,
+  Text,
+  Path,
+  Color,
+  Transform,
+  Curve,
 };
 
 // 与 schema 的 param.type enum 一一对应。新增类型要同步改 schema 和前端控件表。
@@ -203,9 +215,9 @@ struct EnumOption {
 // 需要更复杂的逻辑通常说明这个算子该拆了。三个判据同时给时按 eq → ne → in 的顺序取第一个，
 // 与 schema、编辑器的 isConditionMet 一致（param-recipe P1.6）。
 struct Condition {
-  std::string param;             // 空 = 未设置条件
-  Value eq;                      // Kind::Null = 未设置
-  Value ne;                      // Kind::Null = 未设置
+  std::string param; // 空 = 未设置条件
+  Value eq;          // Kind::Null = 未设置
+  Value ne;          // Kind::Null = 未设置
   std::vector<Value> in;
 
   bool isSet() const { return !param.empty(); }
@@ -227,14 +239,14 @@ inline constexpr const char* kParamSemantics[] = {"roi"};
 /// 给了 inputPorts = 画在这几个输入端口上游的结果上（gap.align_template 的模板是输入端口，不是文件）。
 /// 两种二选一。
 struct RoiBackdrop {
-  std::string dirParam;                   // Path 参数（mode=dir）
-  std::vector<std::string> fileParams;    // String / Path 参数
+  std::string dirParam;                // Path 参数（mode=dir）
+  std::vector<std::string> fileParams; // String / Path 参数
   /// PointCloud 输入端口名。编辑器沿边取上游那一次运行的结果当底图，所以要先跑过一次。
   std::vector<std::string> inputPorts;
   /// 同一底图的一组框在编辑器切换条上的名字（m8-plan L20），例如「模板 2」；
   /// labelParam 给了就在后面接上那个参数的当前值（「模板 2 · f2」）。都是可选的。
   std::string label;
-  std::string labelParam;                 // String 参数
+  std::string labelParam; // String 参数
 
   bool isSet() const { return !dirParam.empty() || !fileParams.empty() || !inputPorts.empty(); }
 };
@@ -244,13 +256,13 @@ struct Param {
   ParamType type = ParamType::Float;
   std::string label;
   std::string doc;
-  Value def;                              // 必填。GraphDoc 稀疏存储以此为基准
+  Value def; // 必填。GraphDoc 稀疏存储以此为基准
   std::string group;
   bool advanced = false;
 
-  std::optional<double> min;              // 硬边界，超出即非法
+  std::optional<double> min; // 硬边界，超出即非法
   std::optional<double> max;
-  std::optional<double> softMin;          // 滑块范围，可手输超出
+  std::optional<double> softMin; // 滑块范围，可手输超出
   std::optional<double> softMax;
   std::optional<double> step;
   std::string unit;
@@ -258,14 +270,14 @@ struct Param {
   /// 预览缩小时不跟着换算；它生效（visibleWhen 成立）时，本算子输出的图像回到原图比例（ADR-0028）。
   bool absolute = false;
 
-  std::vector<std::string> componentLabels;  // vecNf 分量名，默认 X/Y/Z/W
-  std::vector<EnumOption> options;           // enum / flags
+  std::vector<std::string> componentLabels; // vecNf 分量名，默认 X/Y/Z/W
+  std::vector<EnumOption> options;          // enum / flags
   std::string placeholder;
   std::string pattern;
-  std::optional<int> rows;                   // text
-  std::vector<FileFilter> filters;           // path
-  std::string mode;                          // path: open | save | dir
-  std::optional<bool> alpha;                 // color
+  std::optional<int> rows;         // text
+  std::vector<FileFilter> filters; // path
+  std::string mode;                // path: open | save | dir
+  std::optional<bool> alpha;       // color
 
   Condition visibleWhen;
   Condition enabledWhen;
@@ -282,18 +294,18 @@ struct Param {
 };
 
 struct Capabilities {
-  bool cancellable = false;     // 支持中途取消 -> 可用于 live preview
-  bool previewable = false;     // 支持降级质量的快速预览
-  bool deterministic = true;    // 同输入同输出 -> 可参与缓存
+  bool cancellable = false;  // 支持中途取消 -> 可用于 live preview
+  bool previewable = false;  // 支持降级质量的快速预览
+  bool deterministic = true; // 同输入同输出 -> 可参与缓存
 };
 
 struct OperatorDesc {
-  std::string id;                         // 全局唯一，用 . 分命名空间
-  std::string version;                    // semver
-  std::string pack;                       // 来自哪个算子包，「名字」或「名字@版本」；core 自带的留空
-  std::vector<std::string> aliases;       // 旧 id，重命名后自动重定向
+  std::string id;                   // 全局唯一，用 . 分命名空间
+  std::string version;              // semver
+  std::string pack;                 // 来自哪个算子包，「名字」或「名字@版本」；core 自带的留空
+  std::vector<std::string> aliases; // 旧 id，重命名后自动重定向
   std::string label;
-  std::string category;                   // 用 / 分层，决定搜索面板树形结构
+  std::string category; // 用 / 分层，决定搜索面板树形结构
   std::vector<std::string> keywords;
   std::string doc;
 
@@ -363,4 +375,4 @@ struct ImporterDesc {
   ImportFn fn = nullptr;
 };
 
-}  // namespace lyflow
+} // namespace lyflow

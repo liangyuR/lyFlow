@@ -2,16 +2,16 @@
 // 不走宿主的 EditorDialogs：那一套只有文件选择与是 / 否两种，而这里要输入框、校验和多个选项；
 // 画在编辑器里也让 e2e 能像点别的按钮一样点它们。Promise 形式，调用方 await 结果。
 
-import { create } from "zustand";
+import { create } from 'zustand';
 
 export interface ModalChoice {
   id: string;
   label: string;
-  tone?: "primary" | "danger" | "plain" | undefined;
+  tone?: 'primary' | 'danger' | 'plain' | undefined;
 }
 
 export interface TextRequest {
-  kind: "text";
+  kind: 'text';
   title: string;
   message?: string | undefined;
   value: string;
@@ -24,7 +24,7 @@ export interface TextRequest {
 }
 
 export interface ChoiceRequest {
-  kind: "choice";
+  kind: 'choice';
   title: string;
   message?: string | undefined;
   /** 列在正文下面的条目（被外部修改的文件名之类）。 */
@@ -68,17 +68,17 @@ function open(p: Pending): void {
   useModalStore.setState({ current: p });
 }
 
-export function askText(req: Omit<TextRequest, "kind">): Promise<TextAnswer | null> {
+export function askText(req: Omit<TextRequest, 'kind'>): Promise<TextAnswer | null> {
   return new Promise((resolve) => {
     seq += 1;
-    open({ ...req, kind: "text", id: seq, resolve });
+    open({ ...req, kind: 'text', id: seq, resolve });
   });
 }
 
-export function askChoice(req: Omit<ChoiceRequest, "kind">): Promise<string | null> {
+export function askChoice(req: Omit<ChoiceRequest, 'kind'>): Promise<string | null> {
   return new Promise((resolve) => {
     seq += 1;
-    open({ ...req, kind: "choice", id: seq, resolve });
+    open({ ...req, kind: 'choice', id: seq, resolve });
   });
 }
 

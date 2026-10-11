@@ -10,7 +10,11 @@ body,
 body {
   background: #0e1013;
   color: #cfd6e4;
-  font: 13px/1.55 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font:
+    13px/1.55 system-ui,
+    'Segoe UI',
+    'Microsoft YaHei',
+    sans-serif;
   overflow: hidden;
 }
 

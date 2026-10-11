@@ -44,9 +44,9 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     for (const MetalPick& q : rejected) {
       rj.push_back({{"faceIndex", q.faceIndex}, {"gapMm", q.gapMm}, {"relDeg", q.relDeg}});
     }
-    return Status::Error(Phase::Execute, "no_metal_face",
-                         "钣金侧没有角度合格的面（候选 " + std::to_string(rejected.size()) + " 块）",
-                         {}, "faces");
+    return Status::Error(
+        Phase::Execute, "no_metal_face",
+        "钣金侧没有角度合格的面（候选 " + std::to_string(rejected.size()) + " 块）", {}, "faces");
   }
   Line2D line;
   line.point[0] = static_cast<float>(pick.line.px);
@@ -59,27 +59,36 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   const double a = pp.sealSign > 0 ? pick.edgeX - half : pick.edgeX;
   const double b = pp.sealSign > 0 ? pick.edgeX : pick.edgeX + half;
   line.start[0] = static_cast<float>(a);
-  line.start[1] = static_cast<float>(pick.line.pz + (a - pick.line.px) * pick.line.dz / pick.line.dx);
+  line.start[1] =
+      static_cast<float>(pick.line.pz + (a - pick.line.px) * pick.line.dz / pick.line.dx);
   line.end[0] = static_cast<float>(b);
   line.end[1] = static_cast<float>(pick.line.pz + (b - pick.line.px) * pick.line.dz / pick.line.dx);
   outputs.set("metal", Data::line2d(line));
 
   nlohmann::json rj = nlohmann::json::array();
   for (const MetalPick& q : rejected) {
-    rj.push_back({{"faceIndex", q.faceIndex}, {"gapMm", q.gapMm}, {"relDeg", q.relDeg},
+    rj.push_back({{"faceIndex", q.faceIndex},
+                  {"gapMm", q.gapMm},
+                  {"relDeg", q.relDeg},
                   {"reason", "角度或侧别不符"}});
   }
-  nlohmann::json j{{"faceIndex", pick.faceIndex}, {"gapMm", pick.gapMm},
-                   {"relDeg", pick.relDeg},       {"edgeX", pick.edgeX},
-                   {"angleDeg", pick.line.angleDeg()}, {"rmsMm", pick.line.rms},
-                   {"nInliers", pick.line.n},     {"faceX0", f.x0}, {"faceX1", f.x1},
-                   {"faceLenMm", f.lenMm},        {"sealSign", pp.sealSign},
+  nlohmann::json j{{"faceIndex", pick.faceIndex},
+                   {"gapMm", pick.gapMm},
+                   {"relDeg", pick.relDeg},
+                   {"edgeX", pick.edgeX},
+                   {"angleDeg", pick.line.angleDeg()},
+                   {"rmsMm", pick.line.rms},
+                   {"nInliers", pick.line.n},
+                   {"faceX0", f.x0},
+                   {"faceX1", f.x1},
+                   {"faceLenMm", f.lenMm},
+                   {"sealSign", pp.sealSign},
                    {"rejected", rj}};
   outputs.set("pick", Data::record(Record{"DtsMetalPick", std::move(j)}));
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerPickMetal(Registry& r) {
   OperatorDesc op;
@@ -88,12 +97,11 @@ void registerPickMetal(Registry& r) {
   op.label = "挑钣金基准面";
   op.category = "DTS/钣金";
   op.keywords = {"metal", "reference", "钣金", "基准"};
-  op.doc =
-      "在胶条钣金侧的面里挑基准面：与顶点轴的夹角落在容差内、离胶条最近的那一块，\n"
-      "基准线只在该面朝胶条那一端取一小段拟合 —— 整块面可能几十毫米长且远端微弯，\n"
-      "拿整块拟合会把弯曲摊进基准线里。\n"
-      "同一截面上钣金侧常有两族面（实测夹角差约 70°，是同一道屋脊的两侧），\n"
-      "`angleToApexDeg` 决定取哪一族。";
+  op.doc = "在胶条钣金侧的面里挑基准面：与顶点轴的夹角落在容差内、离胶条最近的那一块，\n"
+           "基准线只在该面朝胶条那一端取一小段拟合 —— 整块面可能几十毫米长且远端微弯，\n"
+           "拿整块拟合会把弯曲摊进基准线里。\n"
+           "同一截面上钣金侧常有两族面（实测夹角差约 70°，是同一道屋脊的两侧），\n"
+           "`angleToApexDeg` 决定取哪一族。";
   op.inputs = {Port{"clean", "PointCloud", "Clean", "清理过的轮廓。", true},
                Port{"faces", "Record", "Faces", "面表。", true},
                Port{"dome", "Record", "Dome", "胶条主体。", true}};
@@ -141,4 +149,4 @@ void registerPickMetal(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::dts
+} // namespace lyflow::dts

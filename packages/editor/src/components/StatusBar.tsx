@@ -1,25 +1,25 @@
 // 底部状态栏：这一层的节点 / 连线数、选中、库算子、缓存、core 版本与热重载、传输方式。
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from 'react';
 
-import { docNodeKey, listGraphNodes } from "../lib/findNodes";
-import { levelOf } from "../lib/subgraph";
-import { formatBytes, useCacheStore } from "../store/cache";
-import { useGraphStore } from "../store/graph";
-import { useManifestStore } from "../store/manifest";
-import { useUiStore } from "../store/ui";
-import { transport } from "../transport";
+import { docNodeKey, listGraphNodes } from '../lib/findNodes';
+import { levelOf } from '../lib/subgraph';
+import { formatBytes, useCacheStore } from '../store/cache';
+import { useGraphStore } from '../store/graph';
+import { useManifestStore } from '../store/manifest';
+import { useUiStore } from '../store/ui';
+import { transport } from '../transport';
 
 const TRANSPORT_LABEL: Record<string, string> = {
-  tauri: "Tauri · 实时",
-  http: "HTTP · 实时",
-  static: "静态快照",
+  tauri: 'Tauri · 实时',
+  http: 'HTTP · 实时',
+  static: '静态快照',
 };
 
 const TRANSPORT_TITLE: Record<string, string> = {
-  tauri: "实时读取 C++ 注册表",
-  http: "经 HTTP 后端读取 C++ 注册表",
-  static: "静态模式：读的是 dump 出来的 manifest 快照，可能过期",
+  tauri: '实时读取 C++ 注册表',
+  http: '经 HTTP 后端读取 C++ 注册表',
+  static: '静态模式：读的是 dump 出来的 manifest 快照，可能过期',
 };
 
 export function StatusBar() {
@@ -36,7 +36,11 @@ export function StatusBar() {
   // 静音的节点（连子图里面的）：忘了取消的静音会悄悄改掉结果，而节点上的斜纹在大图里常常不在视野里
   // 子图定义是共用的：两个实例里的同一个节点只算一个（静音的是文档里那一个节点）
   const muted = useMemo(() => {
-    const keys = new Set(listGraphNodes(doc, ops).filter((e) => e.muted).map(docNodeKey));
+    const keys = new Set(
+      listGraphNodes(doc, ops)
+        .filter((e) => e.muted)
+        .map(docNodeKey),
+    );
     return { total: keys.size, here: level.nodes.filter((n) => n.bypass === true).length };
   }, [doc, ops, level]);
   const [libraryCount, setLibraryCount] = useState(0);
@@ -65,9 +69,9 @@ export function StatusBar() {
           className="statusbar__muted"
           data-testid="statusbar-muted"
           title={`静音的节点不参与计算、输出直通上游：这一层 ${muted.here} 个${
-            muted.total > muted.here ? `，别的层 ${muted.total - muted.here} 个` : ""
+            muted.total > muted.here ? `，别的层 ${muted.total - muted.here} 个` : ''
           } —— 点一下列出来（Alt+Enter 选上这一层的）`}
-          onClick={() => useUiStore.getState().setFinderOpen(true, "is:muted ")}
+          onClick={() => useUiStore.getState().setFinderOpen(true, 'is:muted ')}
         >
           静音 {muted.total}
         </button>
@@ -98,7 +102,10 @@ export function StatusBar() {
           )}
         </>
       )}
-      <span className={`statusbar__transport statusbar__transport--${transportKind}`} title={TRANSPORT_TITLE[transportKind]}>
+      <span
+        className={`statusbar__transport statusbar__transport--${transportKind}`}
+        title={TRANSPORT_TITLE[transportKind]}
+      >
         {TRANSPORT_LABEL[transportKind]}
       </span>
     </footer>

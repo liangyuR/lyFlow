@@ -15,7 +15,7 @@ using img::badParam;
 Status toGrayCompute(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecContext&) {
   const Image& in = *inputs.get("image").asImage();
   if (in.channels == 1) {
-    outputs.set("image", inputs.get("image"));  // 已经是灰度：原样传下去，不拷贝
+    outputs.set("image", inputs.get("image")); // 已经是灰度：原样传下去，不拷贝
     return Status::Ok();
   }
   cv::Mat out;
@@ -27,9 +27,12 @@ Status toGrayCompute(const Inputs& inputs, const ParamView&, Outputs& outputs, E
 // --------------------------------------------------------------- image.resize
 
 int interpolationOf(const std::string& name) {
-  if (name == "nearest") return cv::INTER_NEAREST;
-  if (name == "linear") return cv::INTER_LINEAR;
-  if (name == "cubic") return cv::INTER_CUBIC;
+  if (name == "nearest")
+    return cv::INTER_NEAREST;
+  if (name == "linear")
+    return cv::INTER_LINEAR;
+  if (name == "cubic")
+    return cv::INTER_CUBIC;
   return cv::INTER_AREA;
 }
 
@@ -43,12 +46,14 @@ Status resizeCompute(const Inputs& inputs, const ParamView& params, Outputs& out
     h = static_cast<int>(params.integer("height"));
   } else {
     const double s = params.number("scale");
-    if (!(s > 0)) return badParam("缩放倍数要大于 0", "scale");
+    if (!(s > 0))
+      return badParam("缩放倍数要大于 0", "scale");
     w = std::max(1, static_cast<int>(std::lround(in.width * s)));
     h = std::max(1, static_cast<int>(std::lround(in.height * s)));
   }
   cv::Mat out;
-  cv::resize(cvx::view(in), out, cv::Size(w, h), 0, 0, interpolationOf(params.choice("interpolation")));
+  cv::resize(cvx::view(in), out, cv::Size(w, h), 0, 0,
+             interpolationOf(params.choice("interpolation")));
   return img::putMat(outputs, "image", std::move(out));
 }
 
@@ -90,13 +95,15 @@ Status cropCompute(const Inputs& inputs, const ParamView& params, Outputs& outpu
 Status blurCompute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
   const Image& in = *inputs.get("image").asImage();
   const int k = static_cast<int>(params.integer("ksize"));
-  if (k % 2 == 0) return badParam("核大小要是奇数", "ksize");
+  if (k % 2 == 0)
+    return badParam("核大小要是奇数", "ksize");
   const std::string& method = params.choice("method");
   cv::Mat out;
   if (method == "median") {
     // 中值滤波在 OpenCV 里 ksize > 5 时只收 u8
     if (k > 5 && in.depth != PixelDepth::U8) {
-      return badParam("核大于 5 的中值滤波只支持 u8 图像；先接 image.normalize 或把核改小", "ksize");
+      return badParam("核大于 5 的中值滤波只支持 u8 图像；先接 image.normalize 或把核改小",
+                      "ksize");
     }
     cv::medianBlur(cvx::view(in), out, k);
   } else if (method == "box") {
@@ -120,7 +127,7 @@ Status normalizeCompute(const Inputs& inputs, const ParamView& params, Outputs& 
     std::vector<cv::Mat> planes;
     cv::split(src, planes);
     for (cv::Mat& p : planes) {
-      cv::Mat mask = p == p;  // 非 NaN
+      cv::Mat mask = p == p; // 非 NaN
       double lo = 0, hi = 0;
       cv::minMaxLoc(p, &lo, &hi, nullptr, nullptr, mask);
       const double span = hi - lo;
@@ -136,7 +143,7 @@ Status normalizeCompute(const Inputs& inputs, const ParamView& params, Outputs& 
   return img::putMat(outputs, "image", std::move(out));
 }
 
-}  // namespace
+} // namespace
 
 void registerImageToGray(Registry& r) {
   OperatorDesc op;
@@ -163,9 +170,10 @@ void registerImageResize(Registry& r) {
   op.doc = "按倍数或指定尺寸缩放。缩小默认用区域平均（不出摩尔纹），放大建议线性或三次。";
   op.inputs = {img::imageIn()};
   op.outputs = {img::imageOut()};
-  Param mode = img::enumParam("mode", "Mode", "scale",
-                              {EnumOption{"scale", "按倍数", ""}, EnumOption{"size", "指定尺寸", ""}},
-                              "按倍数，还是给定输出的宽高。");
+  Param mode =
+      img::enumParam("mode", "Mode", "scale",
+                     {EnumOption{"scale", "按倍数", ""}, EnumOption{"size", "指定尺寸", ""}},
+                     "按倍数，还是给定输出的宽高。");
   Param scale = img::floatParam("scale", "Scale", 0.5, "宽高各乘这个倍数。");
   scale.min = 0.0001;
   scale.softMin = 0.1;
@@ -181,12 +189,12 @@ void registerImageResize(Registry& r) {
   height.unit = "px";
   height.absolute = true;
   height.visibleWhen = img::when("mode", Value::text("size"));
-  Param interp = img::enumParam("interpolation", "Interpolation", "area",
-                                {EnumOption{"area", "区域平均", "缩小首选"},
-                                 EnumOption{"linear", "线性", ""},
-                                 EnumOption{"cubic", "三次", "放大更锐"},
-                                 EnumOption{"nearest", "最近邻", "掩膜 / 标签图用它，不会插出中间值"}},
-                                "插值方式。");
+  Param interp =
+      img::enumParam("interpolation", "Interpolation", "area",
+                     {EnumOption{"area", "区域平均", "缩小首选"}, EnumOption{"linear", "线性", ""},
+                      EnumOption{"cubic", "三次", "放大更锐"},
+                      EnumOption{"nearest", "最近邻", "掩膜 / 标签图用它，不会插出中间值"}},
+                     "插值方式。");
   op.params = {mode, scale, width, height, interp};
   op.capabilities = {false, false, true};
   op.compute = &resizeCompute;
@@ -231,10 +239,11 @@ void registerImageBlur(Registry& r) {
   op.doc = "高斯 / 中值 / 均值平滑。中值对椒盐噪声最好、保边；高斯最通用。";
   op.inputs = {img::imageIn()};
   op.outputs = {img::imageOut()};
-  Param method = img::enumParam("method", "Method", "gaussian",
-                                {EnumOption{"gaussian", "高斯", ""}, EnumOption{"median", "中值", "保边"},
-                                 EnumOption{"box", "均值", ""}},
-                                "平滑方式。");
+  Param method =
+      img::enumParam("method", "Method", "gaussian",
+                     {EnumOption{"gaussian", "高斯", ""}, EnumOption{"median", "中值", "保边"},
+                      EnumOption{"box", "均值", ""}},
+                     "平滑方式。");
   Param k = img::intParam("ksize", "Kernel", 5, 1, 99, "核大小，奇数。");
   k.unit = "px";
   k.step = 2;
@@ -270,4 +279,4 @@ void registerImageNormalize(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

@@ -22,8 +22,8 @@ using img::badParam;
 /// 这里按位深走裸指针。逐值的算术与原来一字不差（double 乘 scale、减 mean、除 std，最后截成 float），
 /// 所以张量逐位不变。
 template <typename P>
-void toTensorRows(const Image& in, double scale, const std::array<double, 3>& mean, const std::array<double, 3>& stdv,
-                  bool planar, float* out) {
+void toTensorRows(const Image& in, double scale, const std::array<double, 3>& mean,
+                  const std::array<double, 3>& stdv, bool planar, float* out) {
   const std::int64_t h = in.height, w = in.width, ch = in.channels;
   const std::uint8_t* base = in.pixels.get();
   const std::size_t rowBytes = in.rowBytes();
@@ -52,22 +52,33 @@ Status toTensorCompute(const Inputs& inputs, const ParamView& params, Outputs& o
   const auto mean = params.vec3("mean");
   const auto stdv = params.vec3("std");
   for (int c = 0; c < 3; ++c) {
-    if (!(stdv[c] > 0)) return badParam("std 的每一项都要大于 0", "std");
+    if (!(stdv[c] > 0))
+      return badParam("std 的每一项都要大于 0", "std");
   }
   const std::int64_t h = in.height, w = in.width, ch = in.channels;
   Tensor t;
-  if (layout == "NCHW") t.shape = {1, ch, h, w};
-  else if (layout == "NHWC") t.shape = {1, h, w, ch};
-  else if (layout == "CHW") t.shape = {ch, h, w};
-  else t.shape = {h, w, ch};
+  if (layout == "NCHW")
+    t.shape = {1, ch, h, w};
+  else if (layout == "NHWC")
+    t.shape = {1, h, w, ch};
+  else if (layout == "CHW")
+    t.shape = {ch, h, w};
+  else
+    t.shape = {h, w, ch};
   t.data.resize(static_cast<std::size_t>(h * w * ch));
   const bool planar = layout == "NCHW" || layout == "CHW";
   const std::array<double, 3> m{mean[0], mean[1], mean[2]};
   const std::array<double, 3> s{stdv[0], stdv[1], stdv[2]};
   switch (in.depth) {
-    case PixelDepth::U8: toTensorRows<std::uint8_t>(in, scale, m, s, planar, t.data.data()); break;
-    case PixelDepth::U16: toTensorRows<std::uint16_t>(in, scale, m, s, planar, t.data.data()); break;
-    case PixelDepth::F32: toTensorRows<float>(in, scale, m, s, planar, t.data.data()); break;
+  case PixelDepth::U8:
+    toTensorRows<std::uint8_t>(in, scale, m, s, planar, t.data.data());
+    break;
+  case PixelDepth::U16:
+    toTensorRows<std::uint16_t>(in, scale, m, s, planar, t.data.data());
+    break;
+  case PixelDepth::F32:
+    toTensorRows<float>(in, scale, m, s, planar, t.data.data());
+    break;
   }
   outputs.set("tensor", Data::tensor(std::move(t)));
   return Status::Ok();
@@ -81,31 +92,62 @@ bool readLayout(const std::vector<std::int64_t>& s, const std::string& layout, s
   n = 1;
   c = 1;
   interleaved = false;
-  if (layout == "HW" && s.size() == 2) { h = s[0]; w = s[1]; return true; }
-  if (layout == "HWC" && s.size() == 3) { h = s[0]; w = s[1]; c = s[2]; interleaved = true; return true; }
-  if (layout == "CHW" && s.size() == 3) { c = s[0]; h = s[1]; w = s[2]; return true; }
-  if (layout == "NHWC" && s.size() == 4) {
-    n = s[0]; h = s[1]; w = s[2]; c = s[3]; interleaved = true; return true;
+  if (layout == "HW" && s.size() == 2) {
+    h = s[0];
+    w = s[1];
+    return true;
   }
-  if (layout == "NCHW" && s.size() == 4) { n = s[0]; c = s[1]; h = s[2]; w = s[3]; return true; }
+  if (layout == "HWC" && s.size() == 3) {
+    h = s[0];
+    w = s[1];
+    c = s[2];
+    interleaved = true;
+    return true;
+  }
+  if (layout == "CHW" && s.size() == 3) {
+    c = s[0];
+    h = s[1];
+    w = s[2];
+    return true;
+  }
+  if (layout == "NHWC" && s.size() == 4) {
+    n = s[0];
+    h = s[1];
+    w = s[2];
+    c = s[3];
+    interleaved = true;
+    return true;
+  }
+  if (layout == "NCHW" && s.size() == 4) {
+    n = s[0];
+    c = s[1];
+    h = s[2];
+    w = s[3];
+    return true;
+  }
   return false;
 }
 
 /// auto：与连线查看器的张量视图同一套猜法（末维 1/3/4 是交错的通道，否则首维是）。
 std::string guessLayout(const std::vector<std::int64_t>& s) {
   const auto channelish = [](std::int64_t v) { return v == 1 || v == 3 || v == 4; };
-  if (s.size() == 2) return "HW";
-  if (s.size() == 3) return channelish(s[2]) ? "HWC" : "CHW";
-  if (s.size() == 4) return channelish(s[3]) ? "NHWC" : "NCHW";
+  if (s.size() == 2)
+    return "HW";
+  if (s.size() == 3)
+    return channelish(s[2]) ? "HWC" : "CHW";
+  if (s.size() == 4)
+    return channelish(s[3]) ? "NHWC" : "NCHW";
   return "";
 }
 
 Status toImageCompute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
                       ExecContext&) {
   const Tensor& t = *inputs.get("tensor").asTensor();
-  if (!t.consistent()) return badInput("张量的数据与形状对不上", "tensor");
+  if (!t.consistent())
+    return badInput("张量的数据与形状对不上", "tensor");
   std::string layout = params.choice("layout");
-  if (layout == "auto") layout = guessLayout(t.shape);
+  if (layout == "auto")
+    layout = guessLayout(t.shape);
   std::int64_t n = 0, c = 0, h = 0, w = 0;
   bool interleaved = false;
   if (!readLayout(t.shape, layout, n, c, h, w, interleaved)) {
@@ -121,15 +163,17 @@ Status toImageCompute(const Inputs& inputs, const ParamView& params, Outputs& ou
   }
   const std::int64_t slice = params.integer("slice");
   if (slice < 0 || slice >= n) {
-    return badParam("批里只有 " + std::to_string(n) + " 张，第 " + std::to_string(slice) + " 张不存在",
+    return badParam("批里只有 " + std::to_string(n) + " 张，第 " + std::to_string(slice) +
+                        " 张不存在",
                     "slice");
   }
   const std::size_t plane = static_cast<std::size_t>(h * w);
   const std::size_t base = static_cast<std::size_t>(slice) * plane * static_cast<std::size_t>(c);
   const auto valueAt = [&](std::int64_t x, std::int64_t y, std::int64_t k) {
     const std::size_t p = static_cast<std::size_t>(y * w + x);
-    return t.data[base + (interleaved ? p * static_cast<std::size_t>(c) + static_cast<std::size_t>(k)
-                                      : static_cast<std::size_t>(k) * plane + p)];
+    return t
+        .data[base + (interleaved ? p * static_cast<std::size_t>(c) + static_cast<std::size_t>(k)
+                                  : static_cast<std::size_t>(k) * plane + p)];
   };
 
   const bool toU8 = params.choice("depth") == "u8";
@@ -140,14 +184,19 @@ Status toImageCompute(const Inputs& inputs, const ParamView& params, Outputs& ou
     hi = -lo;
     for (std::size_t i = 0; i < plane * static_cast<std::size_t>(c); ++i) {
       const float v = t.data[base + i];
-      if (!std::isfinite(v)) continue;
+      if (!std::isfinite(v))
+        continue;
       lo = std::min(lo, v);
       hi = std::max(hi, v);
     }
-    if (!(hi > lo)) { lo = 0; hi = 1; }
+    if (!(hi > lo)) {
+      lo = 0;
+      hi = 1;
+    }
   }
-  Image img = Image::allocate(static_cast<std::int32_t>(w), static_cast<std::int32_t>(h),
-                              static_cast<std::int32_t>(c), toU8 ? PixelDepth::U8 : PixelDepth::F32);
+  Image img =
+      Image::allocate(static_cast<std::int32_t>(w), static_cast<std::int32_t>(h),
+                      static_cast<std::int32_t>(c), toU8 ? PixelDepth::U8 : PixelDepth::F32);
   // 逐值的写法与原来一字不差（(v - lo) / (hi - lo) * 255 在 float 里算、lround、截断）；
   // 只是 u8 / f32 与交错 / 分平面不再每个值判一次
   const auto fill = [&](auto&& put) {
@@ -177,7 +226,7 @@ Status toImageCompute(const Inputs& inputs, const ParamView& params, Outputs& ou
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerImageToTensor(Registry& r) {
   OperatorDesc op;
@@ -223,8 +272,9 @@ void registerTensorToImage(Registry& r) {
   op.label = "张量转图像";
   op.category = "图像/转换";
   op.keywords = {"tensor", "image", "mask", "张量", "图像", "分割结果"};
-  op.doc = "把张量（分割掩膜、热力图、生成的图）读成图像。批里取一张；u8 时按这一张的范围拉到 0..255，"
-           "f32 原值保留。通道要是 1 / 3 / 4。";
+  op.doc =
+      "把张量（分割掩膜、热力图、生成的图）读成图像。批里取一张；u8 时按这一张的范围拉到 0..255，"
+      "f32 原值保留。通道要是 1 / 3 / 4。";
   op.inputs = {Port{"tensor", "Tensor", "Tensor", "要读成图像的张量。", true}};
   op.outputs = {img::imageOut()};
   op.params = {
@@ -244,4 +294,4 @@ void registerTensorToImage(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

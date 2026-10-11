@@ -36,8 +36,8 @@ struct Run {
 };
 
 struct RunSpec {
-  double contrastMin = 16;  ///< 段内峰值至少这么高才算
-  double mergeGap = 8;      ///< 两段之间的缝不超过它、合并后仍不宽于 widthMax 就合并（高光条）
+  double contrastMin = 16; ///< 段内峰值至少这么高才算
+  double mergeGap = 8;     ///< 两段之间的缝不超过它、合并后仍不宽于 widthMax 就合并（高光条）
   double widthMin = 4;
   double widthMax = 90;
 };
@@ -57,18 +57,19 @@ double runSharpness(const Field& g, P2 c, P2 n, const Run& run);
 
 struct PathSpec {
   P2 nozzle{0, 0};
-  double zoneStart = 100;  ///< D2：检测区离开喷嘴，粗找从这里开始
+  double zoneStart = 100; ///< D2：检测区离开喷嘴，粗找从这里开始
   double zoneEnd = 400;
-  bool bright = false;     ///< polarity = bright：胶比背景亮
-  int widthMax = 90;       ///< 期望最大胶宽，决定结构元
-  bool useHeading = false; ///< 给了方向（G3 由机器人经顶层图参数喂进来）就只在 heading ± headingTol 里找
+  bool bright = false; ///< polarity = bright：胶比背景亮
+  int widthMax = 90;   ///< 期望最大胶宽，决定结构元
+  bool useHeading =
+      false; ///< 给了方向（G3 由机器人经顶层图参数喂进来）就只在 heading ± headingTol 里找
   double headingDeg = 0;
   double headingTolDeg = 15;
-  double sectorFromDeg = -180;  ///< 没给方向时扇形搜索的范围（图像坐标，y 向下，−90° 朝上）
+  double sectorFromDeg = -180; ///< 没给方向时扇形搜索的范围（图像坐标，y 向下，−90° 朝上）
   double sectorToDeg = 180;
   double minCoverage = 0.3;
   double sharpMin = 0.4;
-  double maxGap = 120;     ///< 粗找连续没找到胶的最长距离，超过就停，后面的胶路按已有胶点外推
+  double maxGap = 120; ///< 粗找连续没找到胶的最长距离，超过就停，后面的胶路按已有胶点外推
   double contrastMin = 16;
   // 下面几个是参考实现定下的内部常数，不开参数
   double coarseStep = 8;
@@ -82,31 +83,31 @@ struct PathSpec {
 /// 一个试过的方向（D6 的「前三个峰各试一遍」）。
 struct PathCandidate {
   double headingDeg = 0;
-  double fanScore = 0;     ///< 扇形搜索里这条射线上响应的均值
-  double coverage = 0;     ///< 粗找找到胶的步数 / 总步数
-  double sharpness = 0;    ///< 各暗段边缘陡度的第 25 百分位（NaN = 暗段不到 3 个）
-  bool beadlike = false;   ///< sharpness ≥ sharpMin
-  double score = 0;        ///< coverage ×（像胶 ? 1 : 0.1）
+  double fanScore = 0;   ///< 扇形搜索里这条射线上响应的均值
+  double coverage = 0;   ///< 粗找找到胶的步数 / 总步数
+  double sharpness = 0;  ///< 各暗段边缘陡度的第 25 百分位（NaN = 暗段不到 3 个）
+  bool beadlike = false; ///< sharpness ≥ sharpMin
+  double score = 0;      ///< coverage ×（像胶 ? 1 : 0.1）
   int steps = 0;
-  std::vector<std::pair<double, P2>> coarse;  ///< (s, 胶点)
+  std::vector<std::pair<double, P2>> coarse; ///< (s, 胶点)
 };
 
 struct BeadPath {
   bool ok = false;
-  std::string reason;          ///< 没找到时的原因（给人看的）
-  std::string headingSource;   ///< param | search
-  double headingDeg = 0;       ///< 选中的方向
+  std::string reason;        ///< 没找到时的原因（给人看的）
+  std::string headingSource; ///< param | search
+  double headingDeg = 0;     ///< 选中的方向
   double coverage = 0;
   double sharpness = 0;
   bool beadlike = false;
-  double residual = 0;         ///< 粗找胶点到胶路的距离中位数（px），没拟合时 NaN
-  bool fallback = true;        ///< true = 没拟合出胶路，下面的折线是沿选中方向的一条直线
+  double residual = 0;  ///< 粗找胶点到胶路的距离中位数（px），没拟合时 NaN
+  bool fallback = true; ///< true = 没拟合出胶路，下面的折线是沿选中方向的一条直线
   std::vector<PathCandidate> candidates;
-  std::vector<P2> coarse;      ///< 选中方向粗找到的胶点
+  std::vector<P2> coarse; ///< 选中方向粗找到的胶点
   /// 胶路：s 从喷嘴沿胶路的弧长（第一个点离喷嘴 zoneStart），相邻两点 2 px，覆盖整个检测区
   std::vector<double> s;
   std::vector<P2> points;
-  std::vector<P2> tangents;    ///< 单位向量，指向远离喷嘴的方向
+  std::vector<P2> tangents; ///< 单位向量，指向远离喷嘴的方向
 };
 
 BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec);
@@ -126,23 +127,23 @@ struct PolylineView {
 // ------------------------------------------------------------------ 量胶宽（D4 / D5 / D16）
 
 struct StationSpec {
-  bool swirl = false;      ///< form = swirl：胶两边取窗口内所有暗段的并集（外包络，D5）
+  bool swirl = false; ///< form = swirl：胶两边取窗口内所有暗段的并集（外包络，D5）
   double step = 4;
   double searchHalf = 60;
   double window = 30;
   double presentRatio = 0.5;
   double centerRatio = 0.3;
-  double contrastRatio = 0.3;  ///< 一站的峰值至少是参考峰值（候选暗段峰值的中位数）的这么多倍
+  double contrastRatio = 0.3; ///< 一站的峰值至少是参考峰值（候选暗段峰值的中位数）的这么多倍
   RunSpec runs;
 };
 
 struct Station {
   double s = 0;
-  P2 c, t, n;               ///< 胶路上的点、切向、法向
+  P2 c, t, n; ///< 胶路上的点、切向、法向
   bool present = false;
-  double lo = 0, hi = 0;    ///< 胶两边沿法向的偏移（px），只在 present 时有意义
-  double peak = 0;          ///< 对比度：这一站胶的响应峰值
-  std::vector<Run> runs;    ///< 这一站卡尺上的全部暗段
+  double lo = 0, hi = 0; ///< 胶两边沿法向的偏移（px），只在 present 时有意义
+  double peak = 0;       ///< 对比度：这一站胶的响应峰值
+  std::vector<Run> runs; ///< 这一站卡尺上的全部暗段
   P2 left() const { return c + n * lo; }
   P2 right() const { return c + n * hi; }
   double width() const { return hi - lo; }
@@ -151,9 +152,9 @@ struct Station {
 
 struct StationResult {
   std::vector<Station> stations;
-  double wRef = 0;          ///< D16 的参考宽：全检测区候选暗段宽度的中位数
-  double peakRef = 0;       ///< 参考峰值：同一批候选暗段峰值的中位数
-  double envelopeHalf = 0;  ///< 螺旋胶的包络半宽（直胶是 0）
+  double wRef = 0;         ///< D16 的参考宽：全检测区候选暗段宽度的中位数
+  double peakRef = 0;      ///< 参考峰值：同一批候选暗段峰值的中位数
+  double envelopeHalf = 0; ///< 螺旋胶的包络半宽（直胶是 0）
 };
 
 /// pathOk = false（没找到胶）时一站都不量，全部判无胶 —— 「没有胶」本身就是结果（§2.3 失败语义）。
@@ -166,4 +167,4 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
 double median(std::vector<double> v);
 double percentile(std::vector<double> v, double q);
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

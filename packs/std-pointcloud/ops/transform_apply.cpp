@@ -14,13 +14,15 @@ Status compute(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecCon
   out.xyz.resize(n * 3);
   out.intensity = in.intensity;
   out.rgb = in.rgb;
-  if (in.hasNormals()) out.normals.resize(n * 3);
+  if (in.hasNormals())
+    out.normals.resize(n * 3);
 
   Ticker ticker(ctx, n);
   for (std::size_t i = 0; i < n; ++i) {
-    if (ticker.tick(i)) return Status::Ok();
+    if (ticker.tick(i))
+      return Status::Ok();
     const float x = in.xyz[i * 3], y = in.xyz[i * 3 + 1], z = in.xyz[i * 3 + 2];
-    out.xyz[i * 3]     = t.m[0] * x + t.m[1] * y + t.m[2] * z + t.m[3];
+    out.xyz[i * 3] = t.m[0] * x + t.m[1] * y + t.m[2] * z + t.m[3];
     out.xyz[i * 3 + 1] = t.m[4] * x + t.m[5] * y + t.m[6] * z + t.m[7];
     out.xyz[i * 3 + 2] = t.m[8] * x + t.m[9] * y + t.m[10] * z + t.m[11];
 
@@ -32,7 +34,11 @@ Status compute(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecCon
       float oy = t.m[4] * nx + t.m[5] * ny + t.m[6] * nz;
       float oz = t.m[8] * nx + t.m[9] * ny + t.m[10] * nz;
       const float len = std::sqrt(ox * ox + oy * oy + oz * oz);
-      if (len > 1e-9f) { ox /= len; oy /= len; oz /= len; }
+      if (len > 1e-9f) {
+        ox /= len;
+        oy /= len;
+        oz /= len;
+      }
       out.normals[i * 3] = ox;
       out.normals[i * 3 + 1] = oy;
       out.normals[i * 3 + 2] = oz;
@@ -43,7 +49,7 @@ Status compute(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecCon
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerTransformApply(Registry& r) {
   OperatorDesc op;
@@ -55,8 +61,8 @@ void registerTransformApply(Registry& r) {
   op.doc = "把 4x4 变换作用到点云上。法线同时被旋转并重新归一化。";
 
   op.inputs = {
-      Port{"cloud",     "PointCloud", "Cloud",     "输入点云。", true},
-      Port{"transform", "Transform",  "Transform", "要作用的变换。", true},
+      Port{"cloud", "PointCloud", "Cloud", "输入点云。", true},
+      Port{"transform", "Transform", "Transform", "要作用的变换。", true},
   };
   op.outputs = {Port{"cloud", "PointCloud", "Cloud", "变换后的点云。", true}};
 
@@ -66,4 +72,4 @@ void registerTransformApply(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

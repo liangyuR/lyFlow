@@ -4,9 +4,9 @@
 pub mod cli;
 pub mod core_ffi;
 mod disk_cache;
-pub mod library_settings;
 mod eval;
 pub mod graph;
+pub mod library_settings;
 mod patch;
 pub mod pcd;
 mod perturb;
@@ -60,7 +60,13 @@ pub fn run() {
 /// 「想要查看复制到剪贴板的文本和图像」框。Ctrl+V 粘节点走的是 paste 事件，本来就不要这个权限。
 #[cfg(feature = "desktop")]
 fn open_main_window(app: &tauri::App) -> tauri::Result<()> {
-    let config = app.config().app.windows.first().cloned().expect("tauri.conf.json 里少了主窗口");
+    let config = app
+        .config()
+        .app
+        .windows
+        .first()
+        .cloned()
+        .expect("tauri.conf.json 里少了主窗口");
     tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?
         .enable_clipboard_access()
         .build()?;

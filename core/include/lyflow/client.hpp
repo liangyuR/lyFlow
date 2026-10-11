@@ -14,15 +14,15 @@
 #include "lyflow/c_api.h"
 
 #if defined(_WIN32)
-#  ifndef WIN32_LEAN_AND_MEAN
-#    define WIN32_LEAN_AND_MEAN
-#  endif
-#  ifndef NOMINMAX
-#    define NOMINMAX
-#  endif
-#  include <windows.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #else
-#  include <dlfcn.h>
+#include <dlfcn.h>
 #endif
 
 namespace lyflow {
@@ -30,7 +30,7 @@ namespace lyflow {
 constexpr const char* kClientAbiVersion = LYFLOW_ABI_VERSION;
 
 class ClientError : public std::runtime_error {
- public:
+public:
   explicit ClientError(const std::string& what) : std::runtime_error(what) {}
 };
 
@@ -107,7 +107,7 @@ class Client;
 
 /// 借来的点云缓冲，析构时还给 core。
 class CloudView {
- public:
+public:
   CloudView() = default;
   ~CloudView() { reset(); }
   CloudView(const CloudView&) = delete;
@@ -137,7 +137,7 @@ class CloudView {
   }
   const float* bounds() const { return view_.bounds; }
 
- private:
+private:
   friend class Client;
   void reset();
   void steal(CloudView& other) {
@@ -152,7 +152,7 @@ class CloudView {
 };
 
 class TensorView {
- public:
+public:
   TensorView() = default;
   ~TensorView() { reset(); }
   TensorView(const TensorView&) = delete;
@@ -174,7 +174,7 @@ class TensorView {
   const std::int64_t* shape() const { return view_.shape; }
   const float* data() const { return view_.data; }
 
- private:
+private:
   friend class Client;
   void reset();
   void steal(TensorView& other) {
@@ -190,7 +190,7 @@ class TensorView {
 
 /// 一张图像的一级、一段行（ABI v15）。level 0 零拷贝借用，释放前别让 RunResult 析构。
 class ImageView {
- public:
+public:
   ImageView() = default;
   ~ImageView() { reset(); }
   ImageView(const ImageView&) = delete;
@@ -217,7 +217,7 @@ class ImageView {
   std::uint32_t rowBytes() const { return view_.row_bytes; }
   const std::uint8_t* pixels() const { return view_.pixels; }
 
- private:
+private:
   friend class Client;
   void reset();
   void steal(ImageView& other) {
@@ -232,7 +232,7 @@ class ImageView {
 };
 
 class IndicesView {
- public:
+public:
   IndicesView() = default;
   ~IndicesView() { reset(); }
   IndicesView(const IndicesView&) = delete;
@@ -252,7 +252,7 @@ class IndicesView {
   std::uint64_t sourceCloudId() const { return view_.source_cloud_id; }
   const std::int32_t* values() const { return view_.values; }
 
- private:
+private:
   friend class Client;
   void reset();
   void steal(IndicesView& other) {
@@ -274,7 +274,8 @@ struct EventSink {
 
 inline void dispatchEvent(const char* eventJson, void* user) {
   auto* sink = static_cast<EventSink*>(user);
-  if (sink && sink->fn && eventJson) (*sink->fn)(eventJson);
+  if (sink && sink->fn && eventJson)
+    (*sink->fn)(eventJson);
 }
 
 struct RunState {
@@ -303,14 +304,15 @@ struct RunState {
       std::lock_guard<std::mutex> lock(mutex);
       diagnostics.push_back(text);
     }
-    if (onEvent) onEvent(eventJson);
+    if (onEvent)
+      onEvent(eventJson);
   }
 };
 
-}  // namespace detail
+} // namespace detail
 
 class RunHandle {
- public:
+public:
   RunHandle() = default;
   ~RunHandle() { join(); }
 
@@ -344,18 +346,18 @@ class RunHandle {
   CloudView cloud(const std::string& nodeId, const std::string& port,
                   std::uint32_t maxPoints = 0) const;
 
-  TensorView tensor(const std::string& nodeId, const std::string& port,
-                    std::uint64_t offset = 0, std::uint32_t count = 0) const;
+  TensorView tensor(const std::string& nodeId, const std::string& port, std::uint64_t offset = 0,
+                    std::uint32_t count = 0) const;
 
-  IndicesView indices(const std::string& nodeId, const std::string& port,
-                      std::uint64_t offset = 0, std::uint32_t count = 0) const;
+  IndicesView indices(const std::string& nodeId, const std::string& port, std::uint64_t offset = 0,
+                      std::uint32_t count = 0) const;
 
   ImageView image(const std::string& nodeId, const std::string& port, std::uint32_t level = 0,
                   std::uint32_t rowOffset = 0, std::uint32_t rowCount = 0) const;
 
   RunResult result();
 
- private:
+private:
   friend class Client;
 
   void reset() {
@@ -382,7 +384,7 @@ class RunHandle {
 };
 
 class Client {
- public:
+public:
   explicit Client(const std::string& dllPath) { load(dllPath); }
 #if defined(_WIN32)
   explicit Client(const std::wstring& dllPath) { loadW(dllPath); }
@@ -424,7 +426,8 @@ class Client {
                    const std::vector<std::string>& targets = {},
                    const std::string& paramsJson = {}) const {
     std::vector<const char*> ptrs;
-    for (const std::string& t : targets) ptrs.push_back(t.c_str());
+    for (const std::string& t : targets)
+      ptrs.push_back(t.c_str());
     return owned(fn_.plan_params(graphJson.c_str(), baseDir.c_str(),
                                  ptrs.empty() ? nullptr : ptrs.data(), ptrs.size(),
                                  paramsJson.empty() ? nullptr : paramsJson.c_str()));
@@ -439,9 +442,8 @@ class Client {
   /// 同步跑一张图。回调版是 runAsync，不阻塞的是 startRun。
   RunResult run(const std::string& graphJson, const RunOptions& options = {}) const {
     std::vector<std::string> events;
-    RunHandle handle = startRun(graphJson, options, [&events](const char* eventJson) {
-      events.emplace_back(eventJson);
-    });
+    RunHandle handle = startRun(
+        graphJson, options, [&events](const char* eventJson) { events.emplace_back(eventJson); });
     RunResult result = handle.result();
     result.events = std::move(events);
     return result;
@@ -461,8 +463,8 @@ class Client {
   CloudView cloud(const std::string& runId, const std::string& nodeId, const std::string& port,
                   std::uint32_t maxPoints = 0) const {
     CloudView out;
-    const int rc = fn_.output_cloud(runId.c_str(), nodeId.c_str(), port.c_str(), maxPoints,
-                                    &out.view_);
+    const int rc =
+        fn_.output_cloud(runId.c_str(), nodeId.c_str(), port.c_str(), maxPoints, &out.view_);
     if (rc != 0) {
       std::memset(&out.view_, 0, sizeof(out.view_));
       return out;
@@ -474,8 +476,8 @@ class Client {
   TensorView tensor(const std::string& runId, const std::string& nodeId, const std::string& port,
                     std::uint64_t offset = 0, std::uint32_t count = 0) const {
     TensorView out;
-    const int rc = fn_.output_tensor(runId.c_str(), nodeId.c_str(), port.c_str(), offset, count,
-                                     &out.view_);
+    const int rc =
+        fn_.output_tensor(runId.c_str(), nodeId.c_str(), port.c_str(), offset, count, &out.view_);
     if (rc != 0) {
       std::memset(&out.view_, 0, sizeof(out.view_));
       return out;
@@ -487,8 +489,8 @@ class Client {
   IndicesView indices(const std::string& runId, const std::string& nodeId, const std::string& port,
                       std::uint64_t offset = 0, std::uint32_t count = 0) const {
     IndicesView out;
-    const int rc = fn_.output_indices(runId.c_str(), nodeId.c_str(), port.c_str(), offset, count,
-                                      &out.view_);
+    const int rc =
+        fn_.output_indices(runId.c_str(), nodeId.c_str(), port.c_str(), offset, count, &out.view_);
     if (rc != 0) {
       std::memset(&out.view_, 0, sizeof(out.view_));
       return out;
@@ -520,10 +522,10 @@ class Client {
   /// 把某个输出整份写盘（点云 PCD/PLY 按扩展名，图像 .lyim）。失败时抛 ClientError。
   void save(const std::string& runId, const std::string& nodeId, const std::string& port,
             const std::string& path, const std::string& format = {}) const {
-    const std::string message =
-        owned(fn_.output_save(runId.c_str(), nodeId.c_str(), port.c_str(), path.c_str(),
-                              format.c_str()));
-    if (!message.empty()) throw ClientError(message);
+    const std::string message = owned(
+        fn_.output_save(runId.c_str(), nodeId.c_str(), port.c_str(), path.c_str(), format.c_str()));
+    if (!message.empty())
+      throw ClientError(message);
   }
 
   void clearCache() const { fn_.cache_clear(); }
@@ -533,15 +535,15 @@ class Client {
                          bool includeDownstream = false, const std::string& baseDir = {},
                          const std::string& paramsJson = {}) const {
     std::vector<const char*> ptrs;
-    for (const std::string& id : nodeIds) ptrs.push_back(id.c_str());
-    return owned(fn_.cache_evict(graphJson.c_str(), baseDir.c_str(),
-                                 ptrs.empty() ? nullptr : ptrs.data(), ptrs.size(),
-                                 includeDownstream ? 1 : 0,
-                                 paramsJson.empty() ? nullptr : paramsJson.c_str()));
+    for (const std::string& id : nodeIds)
+      ptrs.push_back(id.c_str());
+    return owned(fn_.cache_evict(
+        graphJson.c_str(), baseDir.c_str(), ptrs.empty() ? nullptr : ptrs.data(), ptrs.size(),
+        includeDownstream ? 1 : 0, paramsJson.empty() ? nullptr : paramsJson.c_str()));
   }
   std::string cacheStats() const { return owned(fn_.cache_stats()); }
 
- private:
+private:
   friend class RunHandle;
 
   struct Table {
@@ -581,8 +583,7 @@ class Client {
                         lyflow_image_view*) = nullptr;
     void (*image_view_free)(lyflow_image_view*) = nullptr;
     char* (*output_info)(const char*, const char*) = nullptr;
-    char* (*output_save)(const char*, const char*, const char*, const char*,
-                         const char*) = nullptr;
+    char* (*output_save)(const char*, const char*, const char*, const char*, const char*) = nullptr;
   };
 
   void load(const std::string& dllPath);
@@ -599,8 +600,7 @@ class Client {
 #endif
   }
 
-  template <typename T>
-  void need(T& slot, const char* name, const std::string& where) {
+  template <typename T> void need(T& slot, const char* name, const std::string& where) {
     slot = reinterpret_cast<T>(symbol(name));
     if (!slot) {
       throw ClientError(std::string("lyflow_core 里找不到符号 ") + name + "（" + where +
@@ -609,7 +609,8 @@ class Client {
   }
 
   std::string owned(char* raw) const {
-    if (!raw) return {};
+    if (!raw)
+      return {};
     std::string out(raw);
     fn_.string_free(raw);
     return out;
@@ -622,25 +623,29 @@ class Client {
 // ------------------------------------------------------------------ 实现
 
 inline void CloudView::reset() {
-  if (free_ && view_.handle) free_(&view_);
+  if (free_ && view_.handle)
+    free_(&view_);
   std::memset(&view_, 0, sizeof(view_));
   free_ = nullptr;
 }
 
 inline void TensorView::reset() {
-  if (free_ && view_.handle) free_(&view_);
+  if (free_ && view_.handle)
+    free_(&view_);
   std::memset(&view_, 0, sizeof(view_));
   free_ = nullptr;
 }
 
 inline void ImageView::reset() {
-  if (free_ && view_.handle) free_(&view_);
+  if (free_ && view_.handle)
+    free_(&view_);
   std::memset(&view_, 0, sizeof(view_));
   free_ = nullptr;
 }
 
 inline void IndicesView::reset() {
-  if (free_ && view_.handle) free_(&view_);
+  if (free_ && view_.handle)
+    free_(&view_);
   std::memset(&view_, 0, sizeof(view_));
   free_ = nullptr;
 }
@@ -648,13 +653,14 @@ inline void IndicesView::reset() {
 #if defined(_WIN32)
 inline void Client::loadW(const std::wstring& dllPath) {
   const DWORD needed = ::GetFullPathNameW(dllPath.c_str(), 0, nullptr, nullptr);
-  if (!needed) throw ClientError("无法解析 DLL 绝对路径");
+  if (!needed)
+    throw ClientError("无法解析 DLL 绝对路径");
   std::wstring absolute(needed, L'\0');
   const DWORD length = ::GetFullPathNameW(dllPath.c_str(), needed, absolute.data(), nullptr);
-  if (!length || length >= needed) throw ClientError("无法解析 DLL 绝对路径");
+  if (!length || length >= needed)
+    throw ClientError("无法解析 DLL 绝对路径");
   absolute.resize(length);
-  handle_ = ::LoadLibraryExW(absolute.c_str(), nullptr,
-                            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR);
+  handle_ = ::LoadLibraryExW(absolute.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR);
   if (!handle_) {
     throw ClientError("加载 lyflow_core.dll 失败，GetLastError=" +
                       std::to_string(static_cast<unsigned long>(::GetLastError())));
@@ -670,7 +676,8 @@ inline void Client::loadW(const std::wstring& dllPath) {
 
 inline void Client::load(const std::string& dllPath) {
   const int wide = ::MultiByteToWideChar(CP_UTF8, 0, dllPath.c_str(), -1, nullptr, 0);
-  if (wide <= 0) throw ClientError("DLL 路径不是合法 UTF-8: " + dllPath);
+  if (wide <= 0)
+    throw ClientError("DLL 路径不是合法 UTF-8: " + dllPath);
   std::wstring buffer(static_cast<std::size_t>(wide - 1), L'\0');
   ::MultiByteToWideChar(CP_UTF8, 0, dllPath.c_str(), -1, buffer.data(), wide);
   loadW(buffer);
@@ -678,7 +685,8 @@ inline void Client::load(const std::string& dllPath) {
 #else
 inline void Client::load(const std::string& dllPath) {
   handle_ = ::dlopen(dllPath.c_str(), RTLD_NOW | RTLD_LOCAL);
-  if (!handle_) throw ClientError(std::string("加载 lyflow core 失败: ") + ::dlerror());
+  if (!handle_)
+    throw ClientError(std::string("加载 lyflow core 失败: ") + ::dlerror());
   try {
     bind("加载的共享库");
   } catch (...) {
@@ -697,8 +705,8 @@ inline void Client::bind(const std::string& where) {
   if (!abi || !engine || std::strcmp(abi, kClientAbiVersion) != 0 ||
       std::strcmp(engine, kClientAbiVersion) != 0) {
     throw ClientError(std::string("lyflow_core version mismatch: client=") + kClientAbiVersion +
-                      ", ABI=" + (abi ? abi : "<null>") + ", engine=" +
-                      (engine ? engine : "<null>"));
+                      ", ABI=" + (abi ? abi : "<null>") +
+                      ", engine=" + (engine ? engine : "<null>"));
   }
   need(fn_.source_revision, "lyflow_source_revision", where);
   need(fn_.manifest_json, "lyflow_manifest_json", where);
@@ -731,60 +739,70 @@ inline void Client::bind(const std::string& where) {
 }
 
 inline void RunHandle::cancel() const {
-  if (run_ && client_) client_->fn_.run_cancel(static_cast<lyflow_run*>(run_.get()));
+  if (run_ && client_)
+    client_->fn_.run_cancel(static_cast<lyflow_run*>(run_.get()));
 }
 
 inline void RunHandle::join() {
-  if (joined_ || !run_ || !client_) return;
+  if (joined_ || !run_ || !client_)
+    return;
   client_->fn_.run_join(static_cast<lyflow_run*>(run_.get()));
   joined_ = true;
 }
 
 inline std::string RunHandle::status() const {
-  if (!state_) return std::string("error");
+  if (!state_)
+    return std::string("error");
   std::lock_guard<std::mutex> lock(state_->mutex);
   return state_->status;
 }
 
 inline std::vector<std::string> RunHandle::diagnostics() const {
-  if (!state_) return {};
+  if (!state_)
+    return {};
   std::lock_guard<std::mutex> lock(state_->mutex);
   return state_->diagnostics;
 }
 
 inline std::string RunHandle::outputs() const {
-  if (!client_) return {};
+  if (!client_)
+    return {};
   return client_->owned(client_->fn_.run_outputs(runId_.c_str()));
 }
 
 inline std::string RunHandle::runSummary() const {
-  if (!client_) return {};
+  if (!client_)
+    return {};
   // run 结束之前 core 返回 NULL，owned() 把它变成空串（ADR-0022）。
   return client_->owned(client_->fn_.run_summary(runId_.c_str()));
 }
 
 inline CloudView RunHandle::cloud(const std::string& nodeId, const std::string& port,
                                   std::uint32_t maxPoints) const {
-  if (!client_) return CloudView();
+  if (!client_)
+    return CloudView();
   return client_->cloud(runId_, nodeId, port, maxPoints);
 }
 
 inline TensorView RunHandle::tensor(const std::string& nodeId, const std::string& port,
                                     std::uint64_t offset, std::uint32_t count) const {
-  if (!client_) return TensorView();
+  if (!client_)
+    return TensorView();
   return client_->tensor(runId_, nodeId, port, offset, count);
 }
 
 inline IndicesView RunHandle::indices(const std::string& nodeId, const std::string& port,
                                       std::uint64_t offset, std::uint32_t count) const {
-  if (!client_) return IndicesView();
+  if (!client_)
+    return IndicesView();
   return client_->indices(runId_, nodeId, port, offset, count);
 }
 
 inline ImageView RunHandle::image(const std::string& nodeId, const std::string& port,
                                   std::uint32_t level, std::uint32_t rowOffset,
                                   std::uint32_t rowCount) const {
-  if (!client_) return ImageView();
+  if (!client_)
+    return ImageView();
   return client_->image(runId_, nodeId, port, level, rowOffset, rowCount);
 }
 
@@ -816,7 +834,8 @@ inline RunHandle Client::startRun(const std::string& graphJson, const RunOptions
   state->sink.fn = &state->tap;
 
   std::vector<const char*> targets;
-  for (const std::string& t : options.targets) targets.push_back(t.c_str());
+  for (const std::string& t : options.targets)
+    targets.push_back(t.c_str());
 
   std::vector<lyflow_run_input> inputs;
   inputs.reserve(options.inputs.size());
@@ -865,17 +884,18 @@ inline RunHandle Client::startRun(const std::string& graphJson, const RunOptions
   opts.image_input_count = images.size();
   opts.params_json = options.paramsJson.empty() ? nullptr : options.paramsJson.c_str();
 
-  lyflow_run* run =
-      fn_.run_start(graphJson.c_str(), &opts, &detail::dispatchEvent, &state->sink);
-  if (!run) throw ClientError("lyflow_run_start 返回空句柄（内存不足）");
+  lyflow_run* run = fn_.run_start(graphJson.c_str(), &opts, &detail::dispatchEvent, &state->sink);
+  if (!run)
+    throw ClientError("lyflow_run_start 返回空句柄（内存不足）");
 
   auto freeRun = fn_.run_free;
   handle.run_ = std::shared_ptr<void>(run, [freeRun](void* p) {
-    if (p) freeRun(static_cast<lyflow_run*>(p));
+    if (p)
+      freeRun(static_cast<lyflow_run*>(p));
   });
   return handle;
 }
 
-}  // namespace lyflow
+} // namespace lyflow
 
-#endif  // LYFLOW_CLIENT_HPP
+#endif // LYFLOW_CLIENT_HPP

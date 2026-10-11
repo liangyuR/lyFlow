@@ -77,7 +77,8 @@ inline Status thinCompute(const Inputs& inputs, const ParamView& params, Outputs
   keep.reserve(cloud.pointCount() / stride + 1);
   Ticker ticker(ctx, cloud.pointCount());
   for (std::size_t i = 0; i < cloud.pointCount(); i += stride) {
-    if (ticker.tick(i)) return Status::Ok();
+    if (ticker.tick(i))
+      return Status::Ok();
     keep.push_back(static_cast<std::int32_t>(i));
   }
   outputs.set("cloud", Data::cloud(cloud.select(keep)));
@@ -85,8 +86,7 @@ inline Status thinCompute(const Inputs& inputs, const ParamView& params, Outputs
 }
 
 // ------------------------------------------------------------ test.merge2
-inline Status mergeCompute(const Inputs& inputs, const ParamView&, Outputs& outputs,
-                           ExecContext&) {
+inline Status mergeCompute(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecContext&) {
   const PointCloud& a = *inputs.get("a").asCloud();
   PointCloud out;
   out.xyz = a.xyz;
@@ -119,8 +119,7 @@ inline Status halfIndicesCompute(const Inputs& inputs, const ParamView&, Outputs
 }
 
 // ------------------------------------------------------------ test.split
-inline Status splitCompute(const Inputs& inputs, const ParamView&, Outputs& outputs,
-                           ExecContext&) {
+inline Status splitCompute(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecContext&) {
   const PointCloud& cloud = *inputs.get("cloud").asCloud();
   const Indices& indices = *inputs.get("indices").asIndices();
   if (indices.sourceCloudId != cloud.id) {
@@ -133,12 +132,12 @@ inline Status splitCompute(const Inputs& inputs, const ParamView&, Outputs& outp
 }
 
 // ------------------------------------------------------------ test.sink
-inline Status sinkCompute(const Inputs& inputs, const ParamView& params, Outputs&,
-                          ExecContext&) {
+inline Status sinkCompute(const Inputs& inputs, const ParamView& params, Outputs&, ExecContext&) {
   const PointCloud& cloud = *inputs.get("cloud").asCloud();
   const std::filesystem::path file = params.path("path");
   std::ofstream out(file, std::ios::binary | std::ios::trunc);
-  if (!out) return Status::Error(Phase::Execute, "io", "打不开 " + file.u8string(), "path");
+  if (!out)
+    return Status::Error(Phase::Execute, "io", "打不开 " + file.u8string(), "path");
   out << cloud.pointCount();
   return Status::Ok();
 }
@@ -271,7 +270,8 @@ inline Status failCompute(const Inputs&, const ParamView& params, Outputs&, Exec
 /// 算子自己抛异常：执行器 compute 外那层 catch 转成 internal 的唯一入口。
 /// kind=std 抛 std::runtime_error(message)，别的值抛一个 int（走 catch(...)）。
 inline Status throwCompute(const Inputs&, const ParamView& params, Outputs&, ExecContext&) {
-  if (params.text("kind") == "std") throw std::runtime_error(params.text("message"));
+  if (params.text("kind") == "std")
+    throw std::runtime_error(params.text("message"));
   throw 42;
 }
 
@@ -300,7 +300,8 @@ inline Status makeTensorCompute(const Inputs&, const ParamView& params, Outputs&
   Tensor t;
   for (const char* key : {"dim0", "dim1", "dim2"}) {
     const auto d = params.integer(key);
-    if (d > 0) t.shape.push_back(d);
+    if (d > 0)
+      t.shape.push_back(d);
   }
   t.data.assign(t.elementCount(), 1.0F);
   if (params.flag("injectNaN") && !t.data.empty()) {
@@ -374,7 +375,8 @@ inline Status makePairCompute(const Inputs&, const ParamView& params, Outputs& o
   } else if (mode != "missing") {
     b.set("box", Data::box2d(box));
   }
-  if (mode == "extra") b.set("surplus", Data::box2d(box));
+  if (mode == "extra")
+    b.set("surplus", Data::box2d(box));
   outputs.set("pair", Data::bundle(std::move(b)));
   return Status::Ok();
 }
@@ -392,12 +394,13 @@ inline Status takePairCompute(const Inputs& inputs, const ParamView&, Outputs& o
                               ExecContext&) {
   const Bundle* b = inputs.get("pair").asBundle();
   const Data* cloud = b ? b->field("cloud") : nullptr;
-  if (!cloud) return Status::Error(Phase::Execute, "bad_input", "没有 cloud 字段", {}, "pair");
+  if (!cloud)
+    return Status::Error(Phase::Execute, "bad_input", "没有 cloud 字段", {}, "pair");
   outputs.set("cloud", *cloud);
   return Status::Ok();
 }
 
-}  // namespace ops
+} // namespace ops
 
 /// 把 test.* 全部注册进进程内那份注册表。多次调用只生效一次。
 inline void ensureTestOps() {
@@ -407,7 +410,7 @@ inline void ensureTestOps() {
     const Port cloudIn{"cloud", "PointCloud", "Cloud", "", true};
     const Port cloudOut{"cloud", "PointCloud", "Cloud", "", true};
 
-    {  // 一直阻塞到收到取消为止：让「运行中取消」成为确定性事件
+    { // 一直阻塞到收到取消为止：让「运行中取消」成为确定性事件
       OperatorDesc op;
       op.id = "test.block";
       op.version = "1.0.0";
@@ -420,7 +423,7 @@ inline void ensureTestOps() {
       op.compute = &ops::blockCompute;
       r.addOperator(std::move(op));
     }
-    {  // Any → Any：「声明类型全通过、实际载荷对不上」这条路径的唯一入口
+    { // Any → Any：「声明类型全通过、实际载荷对不上」这条路径的唯一入口
       OperatorDesc op;
       op.id = "test.any_pass";
       op.version = "1.0.0";
@@ -446,7 +449,7 @@ inline void ensureTestOps() {
       op.compute = &ops::noOutputCompute;
       r.addOperator(std::move(op));
     }
-    {  // 并行验收要的是墙钟时间这一个可观测量，真算子的耗时随机器浮动
+    { // 并行验收要的是墙钟时间这一个可观测量，真算子的耗时随机器浮动
       OperatorDesc op;
       op.id = "test.sleep";
       op.version = "1.0.0";
@@ -466,7 +469,7 @@ inline void ensureTestOps() {
       op.compute = &ops::sleepCompute;
       r.addOperator(std::move(op));
     }
-    {  // 降采样的形状：leaf 越大留下的点越少，leaf 非法就在校验期红
+    { // 降采样的形状：leaf 越大留下的点越少，leaf 非法就在校验期红
       OperatorDesc op;
       op.id = "test.thin";
       op.version = "1.0.0";
@@ -487,21 +490,20 @@ inline void ensureTestOps() {
       op.compute = &ops::thinCompute;
       r.addOperator(std::move(op));
     }
-    {  // 两个输入端口：环检测与单连接规则都要它
+    { // 两个输入端口：环检测与单连接规则都要它
       OperatorDesc op;
       op.id = "test.merge2";
       op.version = "1.0.0";
       op.label = "Merge Two";
       op.category = "Test";
       op.doc = "只在测试里注册：把两片点云首尾相接。b 可选，用来测「可选输入没连不报错」。";
-      op.inputs = {Port{"a", "PointCloud", "A", "", true},
-                   Port{"b", "PointCloud", "B", "", false}};
+      op.inputs = {Port{"a", "PointCloud", "A", "", true}, Port{"b", "PointCloud", "B", "", false}};
       op.outputs = {cloudOut};
       op.capabilities = {true, true, true};
       op.compute = &ops::mergeCompute;
       r.addOperator(std::move(op));
     }
-    {  // 唯一一个产出 Indices 的测试算子
+    { // 唯一一个产出 Indices 的测试算子
       OperatorDesc op;
       op.id = "test.half_indices";
       op.version = "1.0.0";
@@ -514,7 +516,7 @@ inline void ensureTestOps() {
       op.compute = &ops::halfIndicesCompute;
       r.addOperator(std::move(op));
     }
-    {  // cloud + indices → 两片云：静音找不到同类型源、下标对不上账都要它
+    { // cloud + indices → 两片云：静音找不到同类型源、下标对不上账都要它
       OperatorDesc op;
       op.id = "test.split";
       op.version = "1.0.0";
@@ -528,7 +530,7 @@ inline void ensureTestOps() {
       op.compute = &ops::splitCompute;
       r.addOperator(std::move(op));
     }
-    {  // 没有输出端口 → 纯副作用，永远不该被缓存跳过
+    { // 没有输出端口 → 纯副作用，永远不该被缓存跳过
       OperatorDesc op;
       op.id = "test.sink";
       op.version = "1.0.0";
@@ -547,7 +549,7 @@ inline void ensureTestOps() {
       op.compute = &ops::sinkCompute;
       r.addOperator(std::move(op));
     }
-    {  // 主版本 2，带一条 1 → 2 的参数改名迁移（ADR-0008）
+    { // 主版本 2，带一条 1 → 2 的参数改名迁移（ADR-0008）
       OperatorDesc op;
       op.id = "test.migrated";
       op.version = "2.0.0";
@@ -562,7 +564,7 @@ inline void ensureTestOps() {
       op.migrations = {Migration{1, &ops::migrateV1}};
       r.addOperator(std::move(op));
     }
-    {  // 数自己被调了几次。惰性端口的「没被 demand 就绝不调 compute」全靠它钉住
+    { // 数自己被调了几次。惰性端口的「没被 demand 就绝不调 compute」全靠它钉住
       OperatorDesc op;
       op.id = "test.counted";
       op.version = "1.0.0";
@@ -575,19 +577,20 @@ inline void ensureTestOps() {
       op.compute = &ops::countedCompute;
       r.addOperator(std::move(op));
     }
-    {  // 把自己拿到的线程预算记下来；不确定性，每次都真跑
+    { // 把自己拿到的线程预算记下来；不确定性，每次都真跑
       OperatorDesc op;
       op.id = "test.budget";
       op.version = "1.0.0";
       op.label = "Thread Budget";
       op.category = "Test";
-      op.doc = "只在测试里注册：把本节点拿到的 ctx.threadBudget() 记进全局变量，也作为 Measurement 输出。";
+      op.doc =
+          "只在测试里注册：把本节点拿到的 ctx.threadBudget() 记进全局变量，也作为 Measurement 输出。";
       op.outputs = {Port{"threads", "Measurement", "Threads", "", true}};
       op.capabilities = {false, false, false};
       op.compute = &ops::budgetCompute;
       r.addOperator(std::move(op));
     }
-    {  // 按 tag 数自己被调了几次、而且确定性（能命中缓存）：单节点运行的执行计数断言靠它
+    { // 按 tag 数自己被调了几次、而且确定性（能命中缓存）：单节点运行的执行计数断言靠它
       OperatorDesc op;
       op.id = "test.tally";
       op.version = "1.0.0";
@@ -602,7 +605,7 @@ inline void ensureTestOps() {
       r.addOperator(std::move(op));
     }
     // -------------------------------------------- 端口契约（ADR-0024）
-    {  // 带一个可选 NaN 的源：finite 那一条只有它喂得出反例
+    { // 带一个可选 NaN 的源：finite 那一条只有它喂得出反例
       OperatorDesc op;
       op.id = "test.nonfinite_cloud";
       op.version = "1.0.0";
@@ -644,8 +647,8 @@ inline void ensureTestOps() {
       op.compute = &ops::makeRecordCompute;
       r.addOperator(std::move(op));
     }
-    {  // 四种契约各一个端口。uncontracted 是同一组端口去掉 contract 的对照组：
-       // 「没声明就一行检查都不跑」这条只能靠一个对照组钉住。
+    { // 四种契约各一个端口。uncontracted 是同一组端口去掉 contract 的对照组：
+      // 「没声明就一行检查都不跑」这条只能靠一个对照组钉住。
       const Port count{"count", "PointCloud", "Count", "", true};
       const Port finite{"finite", "PointCloud", "Finite", "", false};
       const Port tensor{"tensor", "Tensor", "Tensor", "", false};
@@ -665,14 +668,13 @@ inline void ensureTestOps() {
       };
       make("test.contracted", "只在测试里注册：四种端口契约各一条。",
            {withContract(count, {{"elementCount", {{"eq", 6}}}}),
-            withContract(finite, {{"finite", true}}),
-            withContract(tensor, {{"shape", {2, -1, 4}}}),
+            withContract(finite, {{"finite", true}}), withContract(tensor, {{"shape", {2, -1, 4}}}),
             withContract(rec, {{"recordType", "Wanted"}})});
       make("test.uncontracted",
            "只在测试里注册：与 test.contracted 同一组端口，但一条契约都不声明。",
            {count, finite, tensor, rec});
     }
-    {  // 加载期校验的钩子（J5）
+    { // 加载期校验的钩子（J5）
       OperatorDesc op;
       op.id = "test.validated";
       op.version = "1.0.0";
@@ -688,9 +690,16 @@ inline void ensureTestOps() {
       r.addOperator(std::move(op));
     }
     // -------------------------------------------- Bundle（m8-plan L1–L3）
-    r.addBundle(BundleDesc{"test.Pair", "Test Pair", "只在测试里声明：一片云 + 一个框。", "",
-                           {BundleField{"cloud", "PointCloud", ""}, BundleField{"box", "Box2D", ""}}});
-    r.addBundle(BundleDesc{"test.Other", "Test Other", "只在测试里声明：一个点。", "",
+    r.addBundle(
+        BundleDesc{"test.Pair",
+                   "Test Pair",
+                   "只在测试里声明：一片云 + 一个框。",
+                   "",
+                   {BundleField{"cloud", "PointCloud", ""}, BundleField{"box", "Box2D", ""}}});
+    r.addBundle(BundleDesc{"test.Other",
+                           "Test Other",
+                           "只在测试里声明：一个点。",
+                           "",
                            {BundleField{"point", "Point2D", ""}}});
     {
       OperatorDesc op;
@@ -730,7 +739,7 @@ inline void ensureTestOps() {
       op.compute = &ops::takePairCompute;
       r.addOperator(std::move(op));
     }
-    {  // 一定失败：acceptsError 与 upstream_failed 两条路都要它
+    { // 一定失败：acceptsError 与 upstream_failed 两条路都要它
       OperatorDesc op;
       op.id = "test.fail";
       op.version = "1.0.0";
@@ -743,7 +752,7 @@ inline void ensureTestOps() {
       op.compute = &ops::failCompute;
       r.addOperator(std::move(op));
     }
-    {  // 一定抛异常：执行器把它兜成 internal，而不是让异常穿过 ABI
+    { // 一定抛异常：执行器把它兜成 internal，而不是让异常穿过 ABI
       OperatorDesc op;
       op.id = "test.throw";
       op.version = "1.0.0";
@@ -763,4 +772,4 @@ inline void ensureTestOps() {
   });
 }
 
-}  // namespace lyflow::test
+} // namespace lyflow::test

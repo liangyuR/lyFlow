@@ -49,23 +49,30 @@ struct Rigid {
 };
 
 bool inOpening(double x, double y) {
-  if (x >= 560 && x <= 580 && y > 300) return false;  // 内边被抹掉的一段
+  if (x >= 560 && x <= 580 && y > 300)
+    return false; // 内边被抹掉的一段
   const double x0 = 120, x1 = 780, y0 = 100, y1 = 330, r = 60;
-  if (x < x0 || x > x1 || y < y0 || y > y1) return false;
+  if (x < x0 || x > x1 || y < y0 || y > y1)
+    return false;
   const double cx = std::clamp(x, x0 + r, x1 - r), cy = std::clamp(y, y0 + r, y1 - r);
   return std::hypot(x - cx, y - cy) <= r;
 }
 
 double sceneValue(double x, double y, bool part) {
   const double flange = 190.0 + 0.05 * (x - 450.0) - 0.03 * (y - 350.0);
-  if (!part) return flange;
-  if (inOpening(x, y)) return 35.0;
+  if (!part)
+    return flange;
+  if (inOpening(x, y))
+    return 35.0;
   for (const P2 h : {P2(220, 460), P2(660, 480)}) {
-    if (std::hypot(x - h.x, y - h.y) <= 18) return 50.0;
+    if (std::hypot(x - h.x, y - h.y) <= 18)
+      return 50.0;
   }
   // 胶条外侧卡尺窗口里的一个暗斑（比胶还暗）：逐点卡尺不能把它当成胶
-  if (std::hypot(x - 300, y - 382) <= 8) return 45.0;
-  if (x >= 180 && x <= 720 && std::fabs(y - 350.0) <= 8.0 && !(x >= 400 && x <= 420)) return 70.0;
+  if (std::hypot(x - 300, y - 382) <= 8)
+    return 45.0;
+  if (x >= 180 && x <= 720 && std::fabs(y - 350.0) <= 8.0 && !(x >= 400 && x <= 420))
+    return 70.0;
   return flange;
 }
 
@@ -117,21 +124,24 @@ Files teach() {
   const cv::Mat teachImg = render(Rigid{});
   std::vector<uchar> bytes;
   REQUIRE(cv::imencode(".png", teachImg(cv::Rect(590, 250, 220, 260)), bytes));
-  std::ofstream(f.tmpl, std::ios::binary).write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+  std::ofstream(f.tmpl, std::ios::binary)
+      .write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
   Json pts = Json::array(), nrm = Json::array(), ids = Json::array();
   for (int x = 200, j = 0; x <= 700; x += 4, ++j) {
     pts.push_back({x, 350});
     nrm.push_back({0, 1});
     ids.push_back(1000 + j);
   }
-  std::ofstream(f.stations, std::ios::binary) << Json{{"points", pts}, {"normals", nrm}, {"ids", ids}}.dump();
+  std::ofstream(f.stations, std::ios::binary)
+      << Json{{"points", pts}, {"normals", nrm}, {"ids", ids}}.dump();
   return f;
 }
 
 Json flyshotGraph(const Files& f, bool withCalib) {
   std::vector<N> nodes = {
       N{"n_load", "io.load_image", Json{{"source", "inputs"}}},
-      N{"n_loc", "glue.locate", Json{{"template", f.tmpl.u8string()}, {"anchor", {kAnchor.x, kAnchor.y}}}},
+      N{"n_loc", "glue.locate",
+        Json{{"template", f.tmpl.u8string()}, {"anchor", {kAnchor.x, kAnchor.y}}}},
       N{"n_cal", "glue.station_calipers", Json{{"stations", f.stations.u8string()}}},
   };
   std::vector<E> edges = {E{"n_load.image", "n_loc.image"}, E{"n_load.image", "n_cal.image"},
@@ -149,13 +159,15 @@ struct Out {
 };
 
 Out run(const Json& doc, const cv::Mat& gray) {
-  Session s(doc, {}, {}, false, 0, false, {exec::InjectedInput{"n_load", "image", Data::image(imageOf(gray))}});
+  Session s(doc, {}, {}, false, 0, false,
+            {exec::InjectedInput{"n_load", "image", Data::image(imageOf(gray))}});
   RunLog& log = s.wait();
   Out o;
   o.status = log.runStatus();
   if (o.status != "ok") {
     for (const Json& e : log.ofKind("node_state")) {
-      if (e.value("state", "") == "error") MESSAGE(e.dump());
+      if (e.value("state", "") == "error")
+        MESSAGE(e.dump());
     }
     return o;
   }
@@ -176,9 +188,12 @@ double median(std::vector<double> v) {
 /// 站的 x（示教图坐标）落在哪一类：断口、内边被抹掉、离它们都远的正常段。边界附近两站不判。
 enum class Zone { Normal, Gap, NoInner, Edge };
 Zone zoneOf(double x) {
-  if (x >= 404 && x <= 416) return Zone::Gap;
-  if (x >= 564 && x <= 576) return Zone::NoInner;
-  if ((x > 392 && x < 428) || (x > 552 && x < 588)) return Zone::Edge;
+  if (x >= 404 && x <= 416)
+    return Zone::Gap;
+  if (x >= 564 && x <= 576)
+    return Zone::NoInner;
+  if ((x > 392 && x < 428) || (x > 552 && x < 588))
+    return Zone::Edge;
   return Zone::Normal;
 }
 
@@ -190,30 +205,30 @@ void checkStations(const Json& m, double tolPx) {
     const double x = 200 + 4.0 * i;
     const std::string st = m["status"][i];
     switch (zoneOf(x)) {
-      case Zone::Gap:
-        if (st != "no_bead") {
-          ++wrong;
-          MESSAGE("x=" << x << " 应 no_bead，得 " << st);
-        }
+    case Zone::Gap:
+      if (st != "no_bead") {
+        ++wrong;
+        MESSAGE("x=" << x << " 应 no_bead，得 " << st);
+      }
+      break;
+    case Zone::NoInner:
+      if (st != "no_inner") {
+        ++wrong;
+        MESSAGE("x=" << x << " 应 no_inner，得 " << st);
+      }
+      break;
+    case Zone::Normal:
+      if (st != "ok") {
+        ++wrong;
+        MESSAGE("x=" << x << " 应 ok，得 " << st);
         break;
-      case Zone::NoInner:
-        if (st != "no_inner") {
-          ++wrong;
-          MESSAGE("x=" << x << " 应 no_inner，得 " << st);
-        }
-        break;
-      case Zone::Normal:
-        if (st != "ok") {
-          ++wrong;
-          MESSAGE("x=" << x << " 应 ok，得 " << st);
-          break;
-        }
-        innerNear.push_back(m["innerNearPx"][i]);
-        innerCenter.push_back(m["innerCenterPx"][i]);
-        width.push_back(m["widthPx"][i]);
-        break;
-      case Zone::Edge:
-        break;
+      }
+      innerNear.push_back(m["innerNearPx"][i]);
+      innerCenter.push_back(m["innerCenterPx"][i]);
+      width.push_back(m["widthPx"][i]);
+      break;
+    case Zone::Edge:
+      break;
     }
   }
   CHECK(wrong == 0);
@@ -222,9 +237,10 @@ void checkStations(const Json& m, double tolPx) {
   CHECK(std::fabs(median(width) - 16.0) <= tolPx);
 }
 
-}  // namespace
+} // namespace
 
-TEST_CASE("glue 飞拍：恒等位姿 —— 定位分数 ≥ 0.9、位姿≈0；逐点卡尺的距离中位误差 ≤ 0.3 px，断口 no_bead、抹掉的内边 no_inner") {
+TEST_CASE(
+    "glue 飞拍：恒等位姿 —— 定位分数 ≥ 0.9、位姿≈0；逐点卡尺的距离中位误差 ≤ 0.3 px，断口 no_bead、抹掉的内边 no_inner") {
   const Files f = teach();
   const Out o = run(flyshotGraph(f, false), render(Rigid{}));
   REQUIRE(o.status == "ok");
@@ -263,16 +279,20 @@ TEST_CASE("glue 飞拍：模板在图上根本没有 —— pose.ok = false，�
   REQUIRE(o.status == "ok");
   CHECK(o.pose["ok"] == false);
   CHECK(o.measure["poseOk"] == false);
-  for (const Json& st : o.measure["status"]) CHECK(st == "pose_fail");
+  for (const Json& st : o.measure["status"])
+    CHECK(st == "pose_fail");
   CHECK(o.measure["counts"]["poseFail"] == o.measure["count"]);
 }
 
-TEST_CASE("glue 飞拍：接 image.load_calib 的合成单应 —— 内边→胶中线、内边→近边出 mm，误差 ≤ 0.02 mm") {
+TEST_CASE(
+    "glue 飞拍：接 image.load_calib 的合成单应 —— 内边→胶中线、内边→近边出 mm，误差 ≤ 0.02 mm") {
   const Files f = teach();
   std_image::PlaneCalib calib;
   calib.H = {0.05, 0.002, 1.0, 0.001, 0.05, 2.0, 1e-6, 2e-6, 1.0};
-  std::ofstream(f.calib, std::ios::binary)
-      << Json{{"kind", "Record"}, {"type", "image.PlaneCalib"}, {"data", std_image::planeCalibJson(calib)}}.dump();
+  std::ofstream(f.calib, std::ios::binary) << Json{
+      {"kind", "Record"},
+      {"type", "image.PlaneCalib"},
+      {"data", std_image::planeCalibJson(calib)}}.dump();
   const Rigid T{12, -9, 1.0};
   const Out o = run(flyshotGraph(f, true), render(T));
   REQUIRE(o.status == "ok");
@@ -281,7 +301,8 @@ TEST_CASE("glue 飞拍：接 image.load_calib 的合成单应 —— 内边→�
   int checked = 0;
   for (std::size_t i = 0; i < m["count"].get<std::size_t>(); ++i) {
     const double x = 200 + 4.0 * i;
-    if (zoneOf(x) != Zone::Normal) continue;
+    if (zoneOf(x) != Zone::Normal)
+      continue;
     REQUIRE(m["status"][i] == "ok");
     const P2 inner = T.apply(P2(x, 330)), mid = T.apply(P2(x, 350)), nearE = T.apply(P2(x, 342));
     const double wantCenter = calib.distance(inner.x, inner.y, mid.x, mid.y);
@@ -300,23 +321,27 @@ TEST_CASE("glue 飞拍：加载期校验 —— innerSearch / beadSearch 倒了�
                                {E{"n_load.image", "n_cal.image"}});
     std::vector<std::string> paths;
     for (const Json& d : Json::parse(exec::validateGraphJson(doc.dump(), {}))) {
-      if (d.value("severity", "") == "error") paths.push_back(d.value("paramPath", ""));
+      if (d.value("severity", "") == "error")
+        paths.push_back(d.value("paramPath", ""));
     }
     return paths;
   };
-  auto with = [](const char* key, Json value) { return Json{{"stations", "x.json"}, {key, std::move(value)}}; };
+  auto with = [](const char* key, Json value) {
+    return Json{{"stations", "x.json"}, {key, std::move(value)}};
+  };
   CHECK(errors(Json{{"stations", "x.json"}}).empty());
   CHECK(errors(with("innerSearch", {-3, -40})) == std::vector<std::string>{"innerSearch"});
   CHECK(errors(with("beadSearch", {40, -15})) == std::vector<std::string>{"beadSearch"});
   CHECK(errors(with("searchHalf", 30)) == std::vector<std::string>{"searchHalf"});
 }
 
-
-TEST_CASE("glue 飞拍：searchRadius 是硬边界 —— 真实偏移超出它时，匹配中心不出这个范围、分数明显低于真匹配") {
+TEST_CASE(
+    "glue 飞拍：searchRadius 是硬边界 —— 真实偏移超出它时，匹配中心不出这个范围、分数明显低于真匹配") {
   const Files f = teach();
   Json doc = flyshotGraph(f, false);
   for (Json& n : doc["nodes"]) {
-    if (n["id"] == "n_loc") n["params"]["searchRadius"] = 20;
+    if (n["id"] == "n_loc")
+      n["params"]["searchRadius"] = 20;
   }
   const Out o = run(doc, render(Rigid{40, 12, 0.0}));
   REQUIRE(o.status == "ok");
@@ -346,10 +371,10 @@ TEST_CASE("glue 飞拍：没有完整胶边时不能返回 ok 或编造窗口边
   frame.rowRange(72, 94).setTo(70);
   cv::GaussianBlur(frame, frame, cv::Size(0, 0), 1.0);
   lyflow::packs::glue::CaliperSpec spec;
-  spec.beadTo = 10;  // 胶远边在 t=14，已经落在找胶窗口之外
+  spec.beadTo = 10; // 胶远边在 t=14，已经落在找胶窗口之外
   auto measured = lyflow::packs::glue::measureCaliper(frame, P2(20, 80), P2(0, 1), spec);
   CHECK(measured.status == "incomplete_bead");
-  spec.beadFrom = -3;  // 近边 t=-8 被裁掉，远边在窗口内
+  spec.beadFrom = -3; // 近边 t=-8 被裁掉，远边在窗口内
   spec.beadTo = 40;
   measured = lyflow::packs::glue::measureCaliper(frame, P2(20, 80), P2(0, 1), spec);
   CHECK(measured.status == "incomplete_bead");
@@ -386,17 +411,23 @@ TEST_CASE("glue 飞拍：随包产线图经 C ABI 接收带行填充的相机帧
   std_image::PlaneCalib calib;
   calib.H = {0.05, 0, 0, 0, 0.05, 0, 0, 0, 1};
   std::ofstream(f.calib, std::ios::binary) << std_image::planeCalibJson(calib).dump();
-  std::ifstream in(std::filesystem::path(__FILE__).parent_path().parent_path() / "graphs/flyshot.lyflow.json");
+  std::ifstream in(std::filesystem::path(__FILE__).parent_path().parent_path() /
+                   "graphs/flyshot.lyflow.json");
   REQUIRE(in.good());
   const std::string graph(std::istreambuf_iterator<char>(in), {});
-  const std::string params = Json{{"template", f.tmpl.u8string()}, {"anchor", {590, 250}},
-                                  {"stations", f.stations.u8string()}, {"calib", f.calib.u8string()}}.dump();
+  const std::string params = Json{
+      {"template", f.tmpl.u8string()},
+      {"anchor", {590, 250}},
+      {"stations", f.stations.u8string()},
+      {"calib",
+       f.calib.u8string()}}.dump();
   // 同一张图、同一组参数连续注入不同内容，第二帧不能命中第一帧的图像缓存。
   for (bool part : {true, false}) {
     const cv::Mat frame = render(Rigid{}, part);
     const unsigned stride = frame.cols + 16;
     std::vector<uint8_t> pixels(stride * frame.rows, 255);
-    for (int y = 0; y < frame.rows; ++y) std::memcpy(pixels.data() + y * stride, frame.ptr(y), frame.cols);
+    for (int y = 0; y < frame.rows; ++y)
+      std::memcpy(pixels.data() + y * stride, frame.ptr(y), frame.cols);
     lyflow_run_image_input input{};
     input.node_id = "n_load";
     input.port = "image";
@@ -411,8 +442,12 @@ TEST_CASE("glue 飞拍：随包产线图经 C ABI 接收带行填充的相机帧
     opts.params_json = params.c_str();
     opts.image_inputs = &input;
     opts.image_input_count = 1;
-    const auto cleanup = [](lyflow_run* run) { lyflow_run_join(run); lyflow_run_free(run); };
-    std::unique_ptr<lyflow_run, decltype(cleanup)> handle(lyflow_run_start(graph.c_str(), &opts, nullptr, nullptr), cleanup);
+    const auto cleanup = [](lyflow_run* run) {
+      lyflow_run_join(run);
+      lyflow_run_free(run);
+    };
+    std::unique_ptr<lyflow_run, decltype(cleanup)> handle(
+        lyflow_run_start(graph.c_str(), &opts, nullptr, nullptr), cleanup);
     REQUIRE(handle != nullptr);
     lyflow_run_join(handle.get());
     char* raw = lyflow_run_outputs(opts.run_id);
@@ -437,8 +472,9 @@ TEST_CASE("glue 飞拍：随包产线图经 C ABI 接收带行填充的相机帧
 TEST_CASE("glue 飞拍：坏的站点文件以 bad_param 指向 stations，空点表不能算成功") {
   const Files f = teach();
   const cv::Mat frame = render(Rigid{});
-  for (const Json& data : {Json::array(), Json{{"points", Json::array()}, {"normals", Json::array()}},
-                           Json{{"points", {{20, 30}}}, {"normals", {{0, 0}}}}}) {
+  for (const Json& data :
+       {Json::array(), Json{{"points", Json::array()}, {"normals", Json::array()}},
+        Json{{"points", {{20, 30}}}, {"normals", {{0, 0}}}}}) {
     std::ofstream(f.stations, std::ios::binary) << data.dump();
     Session s(flyshotGraph(f, false), {}, {}, false, 0, false,
               {exec::InjectedInput{"n_load", "image", Data::image(imageOf(frame))}});
