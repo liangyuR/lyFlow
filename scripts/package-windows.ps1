@@ -38,7 +38,7 @@ try {
     $buildParent = Join-Path $root 'build'
     if (-not $OutputDir) { $OutputDir = Join-Path $buildParent 'release' }
     $output = [IO.Path]::GetFullPath($OutputDir)
-    foreach ($reserved in @('release-stage', 'release-core', 'release-rust', 'release-fixtures', 'release-tools', 'release-deps')) {
+    foreach ($reserved in @('release-stage', 'release-core', 'release-rust', 'release-fixtures', 'release-tools', 'release-deps', 'release-diagnostics')) {
         $reservedPath = [IO.Path]::GetFullPath((Join-Path $buildParent $reserved))
         if ($output.Equals($reservedPath, [StringComparison]::OrdinalIgnoreCase) -or $output.StartsWith($reservedPath + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Output directory overlaps internal release workspace: $output"
@@ -52,6 +52,7 @@ try {
     }
     $stage = Reset-ReleaseDirectory -Path (Join-Path $buildParent 'release-stage') -Parent $buildParent
     $coreBuild = Reset-ReleaseDirectory -Path (Join-Path $buildParent 'release-core') -Parent $buildParent
+    $diagnostics = Reset-ReleaseDirectory -Path (Join-Path $buildParent 'release-diagnostics') -Parent $buildParent
     $runtime = Join-Path $stage 'runtime'
     $sdk = Join-Path $stage 'sdk'
     New-Item -ItemType Directory -Path $runtime, $sdk -Force | Out-Null
@@ -64,8 +65,14 @@ try {
     & (Join-Path $PSScriptRoot 'build-core.ps1') -BuildDir $coreBuild -ReleaseBuild
     $env:LYFLOW_PREBUILT_CORE_DIR = Join-Path $coreBuild 'bin'
     $env:CARGO_TARGET_DIR = Join-Path $buildParent 'release-rust'
-    & cargo build --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --bin lyflow --no-default-features
-    Assert-ReleaseExit 'Build release CLI'
+    & cargo build --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --bin lyflow --no-default-features 2>&1 |
+        Tee-Object -FilePath (Join-Path $diagnostics 'cargo-build.log')
+    $buildExit = $LASTEXITCODE
+    if ($buildExit -ne 0) { Write-Host "Build release CLI failed (exit $buildExit)"; exit $buildExit }
+    & cargo test --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --no-default-features --features host --lib --bins 2>&1 |
+        Tee-Object -FilePath (Join-Path $diagnostics 'cargo-test.log')
+    $testExit = $LASTEXITCODE
+    if ($testExit -ne 0) { Write-Host "Release Rust unit tests failed (exit $testExit)"; exit $testExit }
     $vs = Get-ReleaseVisualStudio
     $cmake = Join-Path $vs 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
     if (-not (Test-Path -LiteralPath $cmake)) { $cmake = 'cmake' }

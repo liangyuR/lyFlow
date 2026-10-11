@@ -156,7 +156,7 @@ jobs:
           $arguments = @('-OutputDir', (Join-Path $env:RUNNER_TEMP 'lyflow-release'))
           if ($env:GITHUB_REF_TYPE -eq 'tag') { $arguments += @('-ExpectedTag', $env:GITHUB_REF_NAME) }
           pnpm run package @arguments
-          if ($LASTEXITCODE -ne 0) { throw 'Windows 发包门禁失败' }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -175,9 +175,11 @@ jobs:
           path: |
             build/release-stage/*.json
             build/release-stage/*.log
+            build/release-diagnostics/*.log
             build/release-core/**/*.log
+            build/release-core/ctest-results.xml
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 7
 
   publish:
     name: 创建草稿 Release
@@ -225,7 +227,7 @@ jobs:
               `lyflow-client = { git = "${repository}.git", rev = "${revision}" }`,
               '```',
               '',
-              '构建门禁覆盖 core 单测、DLL 版本/ABI/算子及运行库/SDK 暂存布局。最终 ZIP 独立消费、客户图像效果、真实设备、现场节拍及 GlueSight 安装验收由下游按需执行。',
+              '构建门禁覆盖 core 与完整标准包的 Rust 单测、DLL 版本/ABI/算子及运行库/SDK 暂存布局。最终 ZIP 独立消费、客户图像效果、真实设备、现场节拍及 GlueSight 安装验收由下游按需执行。',
               '',
               '下游固定正式发布的 tag 与资产名；依赖或二进制变化必须增加产品版本，不覆盖旧资产。'
             ].join('\n');

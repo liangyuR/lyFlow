@@ -17,10 +17,11 @@
 
 ## CI（GitHub Actions）
 
-`.github/workflows/ci.yml` 在 PR、main push 和手动运行时执行两个 job，均使用 GitHub 托管的 `windows-2022`。日常 CI 只做编译、单元测试、类型与格式检查，每个步骤直接展示该语言的标准命令。
+`.github/workflows/ci.yml` 在 PR、main push 和手动运行时执行三个 job。格式与 workflow 检查使用 GitHub 托管的 `ubuntu-24.04`，编译与单测使用 `windows-2022`。日常 CI 只做编译、单元测试、类型、格式与 workflow 静态检查，每个步骤直接展示标准命令。
 
 | job | 步骤与标准入口 |
 |---|---|
+| quality | 固定 actionlint 1.7.12 检查所有 workflow；`pnpm format:check` 使用 Prettier 3.6.2 检查前端/MCP 与 workflow 配置；clang-format 20.1.8 以 `--dry-run --Werror` 检查跟踪的 C/C++ 源码。 |
 | fast | `cargo fmt --check` 检查 bridge、客户端和运行库探针；`cargo build` / `cargo test --lib` 验证 Rust 客户端；前端与 MCP 使用 `pnpm ... typecheck`、`pnpm ... build`、`pnpm ... test`（MCP 使用 `test:unit`）。 |
 | native | `cmake -S core -B build/core ...` 配置纯平台 + dts，`cmake --build` 编译，`ctest --test-dir build/core --output-on-failure --no-tests=error` 运行已注册的 doctest；Rust 使用 `cargo build` 编译桌面应用与 CLI，再以 `cargo test --lib --bins` 运行单元测试。 |
 
@@ -28,7 +29,11 @@ C++ doctest 已在 `core/CMakeLists.txt` 中通过 `enable_testing()` 和 `add_t
 
 纯平台 + dts 不需要 vcpkg 端口；CI 显式禁用 vcpkg 工具链。需要标准算子包的 Rust 单元测试仍记为 ignored，不能据此宣称标准包测试通过。MCP 的 `test:unit` 选择所有非 `smoke.test.js` 测试文件；原有 `pnpm --filter @lyflow/mcp test` 仍保留完整测试入口。
 
-日常 CI 不运行 SDK 安装消费、Rust `bridge/tests/` 集成、额外 feature 组合、schema 样例校验、桌面/浏览器 e2e 或完整发包。这些本地检查仍可通过 `pnpm check`、`pnpm e2e` 等原有入口运行，测试实现未删除。格式基线已由单独的 Rust 格式提交统一。
+日常 CI 不运行 SDK 安装消费、Rust `bridge/tests/` 集成、额外 feature 组合、schema 样例校验、桌面/浏览器 e2e 或完整发包。这些本地检查仍可通过 `pnpm check`、`pnpm e2e` 等原有入口运行，测试实现未删除。Rust、前端/MCP 与 C++ 格式基线使用独立格式提交。
+
+前端/MCP 本地使用 `pnpm format` 自动格式化、`pnpm format:check` 检查；范围为 `app`、`packages`、`examples` 下的 JS/TS/CSS/HTML/JSON 以及根配置和 workflow。`.prettierignore` 排除生成产物。C++ 使用 `.clang-format`，通过 `python -m pip install -r scripts/requirements-format.txt` 安装固定版本；对 `git ls-files` 列出的 C/C++ 文件运行 `clang-format -i` 或 `clang-format --dry-run --Werror`。`.clang-format-ignore` 排除第三方、生成的采样数组和构建产物。两种格式工具均不自动排序 import/include。
+
+日常 CI 在失败时上传单测日志与 native 的 CTest JUnit、`Testing/Temporary/*.log`（含 `LastTest.log`）、CMake 配置日志，保留 7 天。CTest 直接以 `--output-junit` 生成报告；Rust、editor 与 MCP 的单测输出同时写入日志，命令失败仍使 job 失败。GitHub 自身保留各步骤的标准输出，包括编译错误。
 
 工具链仍固定在 `rust-toolchain.toml`、`.nvmrc` 与 `package.json`。完整 Windows 发包只在其独立工作流手动运行或推送 `v*` tag 时执行。
 
@@ -40,12 +45,14 @@ C++ doctest 已在 `core/CMakeLists.txt` 中通过 `enable_testing()` 和 `add_t
 
 | 层 | 入口 | 验证范围 |
 |---|---|---|
-| 全量构建与暂存 | `pnpm run package` | 固定依赖、core 单测、manifest、ABI/版本、headless CLI、运行库/SDK 布局与许可证；实际清单来自交付 DLL。 |
+| 全量构建与暂存 | `pnpm run package` | 固定依赖、core 与标准包 Rust 单测、manifest、ABI/版本、headless CLI、运行库/SDK 布局与许可证；实际清单来自交付 DLL。 |
 | 暂存 DLL 身份 | `scripts/inspect-runtime.ps1 -RuntimeDir <目录> -ReportPath <报告>`（由打包入口调用） | x64 DLL、ABI/产品版本/源码修订、manifest、ONNX Runtime 版本与实际模块来源；不解压 ZIP 或运行消费场景。 |
 
 最低支持 PCL 1.15.1，固定该版本的发包构建同时覆盖 ASCII PCD 行为一致性；适配该版本时保留逐值/逐字节断言，不放宽数值判据。是否通过以完整构建报告为准。
 
-构建在成功或失败后上传暂存 JSON/DLL 检查日志与构建日志，保留 14 天。最终 ZIP 独立消费 job、打包后的解压消费调用、固定 GS 客户端工程、消费场景与损坏资产负向探针及其 2 项元数据单测已删除；上表历史 doctest/Rust 数量不包含这 2 项。SDK 消费检查保留在本地完整检查入口，日常 CI 不执行。
+完整发包在 core 构建后复用其 DLL，运行 `cargo test --locked --release --manifest-path bridge/Cargo.toml --no-default-features --features host --lib --bins`。启用 `host` 覆盖 IPC/执行层单测；`LYFLOW_STD_PACKS=1` 使日常因缺标准包而 ignored 的 59 项正常执行。无需桌面前端或 ZIP 消费场景，单测失败即停止打包。
+
+构建在成功或失败后上传暂存 JSON/DLL 检查日志、Cargo 编译/单测日志、CTest JUnit/日志与构建日志，保留 7 天；最终 ZIP 与清单仍保留 14 天。最终 ZIP 独立消费 job、打包后的解压消费调用、固定 GS 客户端工程、消费场景与损坏资产负向探针及其 2 项元数据单测已删除；上表历史 doctest/Rust 数量不包含这 2 项。SDK 消费检查保留在本地完整检查入口，日常 CI 不执行。
 
 发布夹具只保留 core 单测必需的 `channels-6-to-8.onnx` 及来源说明，不使用客户模型或现场数据。是否完成发包以对应修订的完整构建结果为准，静态检查不能替代 DLL 构建与暂存检查。详见 [发包说明](deployment/packaging.md)。
 

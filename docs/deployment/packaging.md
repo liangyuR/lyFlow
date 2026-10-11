@@ -31,7 +31,7 @@ pnpm run package -OutputDir C:\release\lyflow
 
 入口准备固定版本依赖、构建 core 与 CLI、运行构建门禁、检查暂存目录并生成 ZIP。vcpkg manifest 固定 baseline；构建不从相邻项目复制依赖。vcpkg 工具和安装树分别位于 `build/release-tools/vcpkg`、`build/release-deps/vcpkg_installed`，二进制缓存位于 `build/release-deps/binary-cache`。ONNX Runtime 位于 `third_party/onnxruntime/onnxruntime-win-x64-1.19.2`。GitHub 分别缓存 vcpkg 工具、vcpkg 二进制缓存和解压后的 ONNX Runtime。工具缓存包含固定 baseline 的 Git 仓库（含 `.git`、ports、versions、scripts、triplets）和 `vcpkg.exe`，排除 `downloads`、`buildtrees`、`packages`、`installed`；键为 `vcpkg-tool-windows-x64-<baseline>-v1`，不包含运行编号或 MSVC 版本，不跨 baseline 恢复。命中后仍核对实际 Git 修订、已跟踪源码状态，以及可执行文件版本是否与 baseline 内声明的工具发布版本一致；未命中时浅拉取固定提交并 bootstrap，修订或工具版本不符、缺失可执行文件时重新准备工具，验证失败即停止。vcpkg 二进制缓存使用 `windows-2022`、x64、完整 MSVC toolset 版本、vcpkg baseline 和发布组合修订 `std-glue-v2` 构成稳定键；同一身份不再按运行编号重复保存，也不跨身份前缀恢复。调整依赖 features、triplet 或发布组合时必须同步更新缓存身份；`v2` 隔离旧的可能不完整缓存。ONNX Runtime 按 Windows x64、CPU 版和 `onnxruntimeVersion` 精确缓存。恢复后仍运行固定依赖版本和必需文件检查；所有依赖准备成功后立即保存未命中的缓存，再执行同一个 `pnpm run package` 完整构建及暂存检查。依赖准备失败不保存不完整缓存，后续软件门禁失败不影响已保存依赖。缺缓存时仍须能从固定输入完整构建。
 
-工作流在成功或失败后保存 `windows-release-build-diagnostics`，保留 14 天；收集构建日志、暂存清单及 DLL 检查的 JSON/日志。最终资产只有两个 ZIP 与 `lyflow-runtime.json`，不生成 ZIP 消费验收报告。
+工作流在成功或失败后保存 `windows-release-build-diagnostics`，保留 7 天；收集构建日志、Cargo 编译/单测日志、CTest JUnit/日志、暂存清单及 DLL 检查的 JSON/日志。最终两个 ZIP 与 `lyflow-runtime.json` 保留 14 天，不生成 ZIP 消费验收报告。
 
 ## GitHub 门禁与正式发布
 
@@ -51,7 +51,9 @@ pnpm run package -OutputDir C:\release\lyflow
 
 ## 验收范围与证据
 
-发布门禁覆盖固定依赖、core 单测、manifest 自检、headless CLI 构建、暂存 DLL 的 ABI/产品版本/源码修订、x64 架构、算子组合、ONNX Runtime 版本与实际模块来源，以及运行库/SDK 布局、许可证和测试模型/调试符号排除。打包时仍生成原有 core 单测要求的合成 ONNX 模型，缺少夹具即失败。
+发布门禁覆盖固定依赖、core 单测、完整标准包的 Rust 单测、manifest 自检、headless CLI 构建、暂存 DLL 的 ABI/产品版本/源码修订、x64 架构、算子组合、ONNX Runtime 版本与实际模块来源，以及运行库/SDK 布局、许可证和测试模型/调试符号排除。打包时仍生成原有 core 单测要求的合成 ONNX 模型，缺少夹具即失败。
+
+Rust 单测复用本轮 `build/release-core/bin` 的 DLL，使用 `cargo test --locked --release --manifest-path bridge/Cargo.toml --no-default-features --features host --lib --bins`；固定 `LYFLOW_STD_PACKS=1`，执行日常纯平台构建中因缺少标准包而忽略的测试。`host` 启用 IPC/执行层测试而无需桌面资源。CLI 产物仍由无默认特性的 `cargo build --release --bin lyflow` 生成。单测失败保留 Cargo 退出码与日志并停止，不进入暂存及 ZIP 生成。
 
 已删除打包入口中的 ZIP 解压消费验收、独立 runner 验收 job、`package:verify` 入口、固定 GS 客户端消费工程及专用合成场景/损坏资产负向探针。DLL 身份读取由 `scripts/inspect-runtime.ps1` 和本地 Rust 探针完成，不解压 ZIP，不运行外部 C++/Rust 消费场景。SDK 消费工程保留在本地 `pnpm check`，日常 CI 仅编译与单元测试。
 
