@@ -3,7 +3,7 @@
 # -> cargo test（DLL 加载、执行事件、二进制输出、中文路径）-> 前端 strict typecheck + build。
 param(
   # 只跑这几步（逗号分隔）：core、manifest、schema、bridge、client、cli、sdk、frontend、mcp。不给 = 全部，
-  # 本地照旧一条命令验全链路。CI（.github/workflows/ci.yml）按 job 分着点名，与本地走同一个入口
+  # 本地完整检查入口；日常 CI 直接调用语言标准命令。
   [string[]]$Steps
 )
 $ErrorActionPreference = "Stop"

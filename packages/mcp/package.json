@@ -19,7 +19,8 @@
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
     "build": "tsc -p tsconfig.json",
     "test": "tsc -p tsconfig.test.json && node --test build-test/test/*.test.js",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test:unit": "tsc -p tsconfig.test.json && node --test \"build-test/test/!(smoke).test.js\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

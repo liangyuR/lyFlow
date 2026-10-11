@@ -37,16 +37,15 @@ pnpm run package -OutputDir C:\release\lyflow
 
 | 触发 | 行为 |
 |---|---|
-| PR | 原有 CI 的 `fast`、`native` 不变。 |
-| main push | 原有 CI 加完整 Windows 发包；不创建 Release。 |
+| PR / main push / 手动 `CI` | 仅编译、单元测试、类型与格式检查，不运行完整发包。 |
 | 手动 `Windows release` | 可选择实现分支，运行完整门禁，保存 ZIP 和清单 14 天；不创建 Release。 |
 | `vX.Y.Z` tag push | tag 必须与源码产品版本一致，且提交位于 main 历史；门禁成功后创建草稿 Release，人工正式发布。 |
 
 完整构建使用 GitHub 托管 `windows-2022`，编译 job 仅有 `contents: read`。发布 job 依赖构建成功，下载两个 ZIP 与清单，再以 `contents: write` 创建草稿并上传；不在持有写权限时编译或运行库代码。
 
-首次合并前，可从已经注册的 `CI` 工作流选择实现分支手动触发；它调用同一套完整发包流程。这个仅负责调用的 job 声明 `contents: write` 作为可重用工作流权限上限，实际 build job 显式保持只读；手动事件不进入 publish job。新增工作流尚未进入默认分支时，可用 `gh workflow run ci.yml --ref <实现分支>` 验证。
+`Windows release` 独立运行，不再由日常 `CI` 调用，也不在 main push 时自动运行。需要发包时手动选择分支，或推送与产品版本匹配的 `vX.Y.Z` tag。
 
-正式发布顺序：先合并经过审查的版本改动并确认 main 门禁成功，再推送匹配版本的 tag；检查草稿资产、ABI、算子组合及源码修订，最后人工发布。GS 仅引用已正式发布的固定 tag 和资产名，不使用 `latest`。签名和自动更新不属于首版。
+正式发布顺序：先合并经过审查的版本改动并确认日常 CI 成功，再推送匹配版本的 tag；检查草稿资产、ABI、算子组合及源码修订，最后人工发布。GS 仅引用已正式发布的固定 tag 和资产名，不使用 `latest`。签名和自动更新不属于首版。
 
 工作流拒绝任何已存在同版本 Release，包括草稿，不覆盖旧资产。若上传中断，保留草稿供排查，禁止通过重跑覆盖；采用新产品版本重新发包。源码、依赖或交付文件改变，都必须增加产品版本。
 
@@ -54,7 +53,7 @@ pnpm run package -OutputDir C:\release\lyflow
 
 发布门禁覆盖固定依赖、core 单测、manifest 自检、headless CLI 构建、暂存 DLL 的 ABI/产品版本/源码修订、x64 架构、算子组合、ONNX Runtime 版本与实际模块来源，以及运行库/SDK 布局、许可证和测试模型/调试符号排除。打包时仍生成原有 core 单测要求的合成 ONNX 模型，缺少夹具即失败。
 
-已删除打包入口中的 ZIP 解压消费验收、独立 runner 验收 job、`package:verify` 入口、固定 GS 客户端消费工程及专用合成场景/损坏资产负向探针。DLL 身份读取由 `scripts/inspect-runtime.ps1` 和本地 Rust 探针完成，不解压 ZIP，不运行外部 C++/Rust 消费场景。PR 的 native 检查继续覆盖原有纯平台 + dts 的 SDK 消费工程。
+已删除打包入口中的 ZIP 解压消费验收、独立 runner 验收 job、`package:verify` 入口、固定 GS 客户端消费工程及专用合成场景/损坏资产负向探针。DLL 身份读取由 `scripts/inspect-runtime.ps1` 和本地 Rust 探针完成，不解压 ZIP，不运行外部 C++/Rust 消费场景。SDK 消费工程保留在本地 `pnpm check`，日常 CI 仅编译与单元测试。
 
 本文件描述实现契约，不构成任何一次构建的通过证据。实际通过以对应源码修订的 GitHub 构建运行与随包清单为准；静态检查不代表干净 runner 的完整构建通过。
 

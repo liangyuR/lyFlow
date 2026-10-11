@@ -91,8 +91,9 @@ $dump = Join-Path $bin "lyflow-dump-manifest.exe"
 if ($LASTEXITCODE -ne 0) { throw "算子描述自检失败" }
 
 if ($runTests) {
-  $tests = Join-Path $bin "lyflow-core-tests.exe"
-  & $tests
+  $ctest = Join-Path $vsPath "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\ctest.exe"
+  if (-not (Test-Path -LiteralPath $ctest)) { $ctest = "ctest" }
+  & $ctest --test-dir $build -C $config --output-on-failure --no-tests=error
   if ($LASTEXITCODE -ne 0) { throw "core 测试失败" }
 }
 

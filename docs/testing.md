@@ -17,21 +17,26 @@
 
 ## CI（GitHub Actions）
 
-`.github/workflows/ci.yml`，只用 GitHub 托管的 `windows-2022` runner；每个 PR、每次推 main 都跑这两个 job。合并前两个都要绿是约定：main 上还没设分支保护把它们列成 required check，红着也能点合并（要设的话，check 名就是 ci.yml 里 job 的 `name:`）。
-CI 与本地走同一个入口 `scripts/check.ps1`，按 job 用 `-Steps` 点名（不给就是全部，`pnpm check` 照旧）：
+`.github/workflows/ci.yml` 在 PR、main push 和手动运行时执行两个 job，均使用 GitHub 托管的 `windows-2022`。日常 CI 只做编译、单元测试、类型与格式检查，每个步骤直接展示该语言的标准命令。
 
-| job | 本地复现 | 验什么 |
-|---|---|---|
-| fast | `pwsh scripts/check.ps1 -Steps schema,client,frontend,mcp` | 契约对着 schema、Rust 客户端脱开 bridge 单独构建、editor 的 typecheck 与单测、app 与 host-react 构建、MCP（集成冒烟找不到 CLI 记 skip） |
-| native | 设 `LYFLOW_STD_PACKS=0`、`LYFLOW_PACKS=dts`，先 `pnpm --filter lyflow-app build`，再 `pwsh scripts/check.ps1 -Steps core,manifest,bridge,cli,sdk`，外加 `bridge/` 下 `cargo build --no-default-features --features host` | 纯平台 + dts 的 core 与 doctest、manifest 自检、bridge 的 `cargo test`（要标准包的记 ignored）、headless CLI、嵌入 SDK，以及只开 `host` 的组合（外部 Rust 宿主嵌编辑器用的；dts-check 眼下只用 `core_ffi`、不开任何 feature，CLI 那步的 `--no-default-features` 已编到） |
+| job | 步骤与标准入口 |
+|---|---|
+| fast | `cargo fmt --check` 检查 bridge、客户端和运行库探针；`cargo build` / `cargo test --lib` 验证 Rust 客户端；前端与 MCP 使用 `pnpm ... typecheck`、`pnpm ... build`、`pnpm ... test`（MCP 使用 `test:unit`）。 |
+| native | `cmake -S core -B build/core ...` 配置纯平台 + dts，`cmake --build` 编译，`ctest --test-dir build/core --output-on-failure --no-tests=error` 运行已注册的 doctest；Rust 使用 `cargo build` 编译桌面应用与 CLI，再以 `cargo test --lib --bins` 运行单元测试。 |
 
-工具链钉在仓库里：Rust `rust-toolchain.toml`、Node `.nvmrc`、pnpm `package.json` 的 `packageManager`、Python `scripts/requirements.txt`。
-**还没进 CI、照旧在本地跑的**：gap 包、`pnpm e2e`（桌面）、
-`pnpm e2e:packaged`、`pnpm e2e:http`、KUN10 等真实数据。
+C++ doctest 已在 `core/CMakeLists.txt` 中通过 `enable_testing()` 和 `add_test(NAME lyflow-core-tests ...)` 注册。CTest 的一个条目执行该构建组合的全部 doctest 用例；CTest 条目数不等于单元测试例数。Rust 通过 `LYFLOW_PREBUILT_CORE_DIR` 复用本 job 的 `build/core/bin`，不在 Cargo 阶段再次编译 C++。
+
+纯平台 + dts 不需要 vcpkg 端口；CI 显式禁用 vcpkg 工具链。需要标准算子包的 Rust 单元测试仍记为 ignored，不能据此宣称标准包测试通过。MCP 的 `test:unit` 选择所有非 `smoke.test.js` 测试文件；原有 `pnpm --filter @lyflow/mcp test` 仍保留完整测试入口。
+
+日常 CI 不运行 SDK 安装消费、Rust `bridge/tests/` 集成、额外 feature 组合、schema 样例校验、桌面/浏览器 e2e 或完整发包。这些本地检查仍可通过 `pnpm check`、`pnpm e2e` 等原有入口运行，测试实现未删除。格式基线已由单独的 Rust 格式提交统一。
+
+工具链仍固定在 `rust-toolchain.toml`、`.nvmrc` 与 `package.json`。完整 Windows 发包只在其独立工作流手动运行或推送 `v*` tag 时执行。
+
+2026-10-11 本轮本地按新 CI 入口验证：纯平台 + dts 的 CTest 通过（1 个条目，内含 153 项 doctest / 4165 项断言）；Rust bridge 单元测试 98 通过、59 ignored，客户端 1 通过；editor 161 通过、MCP 单元测试 33 通过，均无失败。桌面/CLI、前端/MCP 编译、类型检查、Rust 格式检查及 actionlint 通过。以上不是标准算子包或完整发包的通过证据。
 
 ## Windows 发包门禁
 
-`.github/workflows/release-windows.yml` 在 main、手动运行及版本 tag 上执行 `pnpm run package`，固定标准包 + glue，构建运行库/SDK ZIP 并检查暂存布局与 DLL 身份。PR 的 fast/native 检查保持原范围。手动运行现有 `CI` 也会调用该工作流，以便首次合并前选择实现分支做云端验收。
+`.github/workflows/release-windows.yml` 在手动运行及版本 tag 上执行 `pnpm run package`，固定标准包 + glue，构建运行库/SDK ZIP 并检查暂存布局与 DLL 身份。日常 `CI` 不调用发包工作流；需要时手动运行 `Windows release` 并选择分支。
 
 | 层 | 入口 | 验证范围 |
 |---|---|---|
@@ -40,7 +45,7 @@ CI 与本地走同一个入口 `scripts/check.ps1`，按 job 用 `-Steps` 点名
 
 最低支持 PCL 1.15.1，固定该版本的发包构建同时覆盖 ASCII PCD 行为一致性；适配该版本时保留逐值/逐字节断言，不放宽数值判据。是否通过以完整构建报告为准。
 
-构建在成功或失败后上传暂存 JSON/DLL 检查日志与构建日志，保留 14 天。最终 ZIP 独立消费 job、打包后的解压消费调用、固定 GS 客户端工程、消费场景与损坏资产负向探针及其 2 项元数据单测已删除；上表历史 doctest/Rust 数量不包含这 2 项。PR 的 native SDK 消费检查保留。
+构建在成功或失败后上传暂存 JSON/DLL 检查日志与构建日志，保留 14 天。最终 ZIP 独立消费 job、打包后的解压消费调用、固定 GS 客户端工程、消费场景与损坏资产负向探针及其 2 项元数据单测已删除；上表历史 doctest/Rust 数量不包含这 2 项。SDK 消费检查保留在本地完整检查入口，日常 CI 不执行。
 
 发布夹具只保留 core 单测必需的 `channels-6-to-8.onnx` 及来源说明，不使用客户模型或现场数据。是否完成发包以对应修订的完整构建结果为准，静态检查不能替代 DLL 构建与暂存检查。详见 [发包说明](deployment/packaging.md)。
 

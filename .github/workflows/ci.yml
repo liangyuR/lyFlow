@@ -1,12 +1,3 @@
-# LyFlow 的 CI（只用 GitHub 托管 runner）。本地与 CI 走同一个入口：scripts/check.ps1 -Steps <几步>。
-#
-# PR 保留两个轻量门禁；main 的完整发包验证由 release-windows.yml 承担：
-#   fast   前端（typecheck、单测、构建）、MCP、各份契约对着 schema、Rust 客户端脱开 bridge 单独构建
-#   native 纯平台 + dts 包（LYFLOW_STD_PACKS=0 LYFLOW_PACKS=dts）：core 编译与 doctest、manifest 自检、bridge 的 cargo test、
-#          headless CLI、嵌入 SDK 的安装布局与消费方工程，外加只开 host 的 `--no-default-features --features host`
-#          （外部 Rust 宿主嵌编辑器用的那一份，别的步骤都没编过它；dts-check 眼下只用 core_ffi、不开任何 feature，CLI 那步已编到）
-# 标准包 + glue 的完整发包构建见 release-windows.yml；gap、桌面与安装包 e2e 仍在本地跑，见 docs/testing.md「CI」。
-
 name: CI
 
 on:
@@ -20,62 +11,17 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  # PR 上推新提交时取消还在跑的旧一轮；main 上的每一次都跑完
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: "0"
+  CARGO_INCREMENTAL: '0'
 
 jobs:
   fast:
-    name: fast（前端 · MCP · schema · lyflow-client）
+    name: 前端 / MCP / Rust 客户端：编译、单元测试与格式
     runs-on: windows-2022
     timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4 # 版本取 package.json 的 packageManager
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: scripts/requirements.txt
-
-      - name: Python 依赖
-        run: pip install -r scripts/requirements.txt
-
-      - name: Rust（rust-toolchain.toml 钉的那一版）
-        shell: pwsh
-        run: |
-          $channel = (Select-String -Path rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          rustup toolchain install $channel --profile minimal --component clippy,rustfmt
-          rustc --version
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates/lyflow-client
-
-      - name: pnpm install
-        run: pnpm install --frozen-lockfile
-
-      - name: check.ps1 -Steps schema,client,frontend,mcp
-        shell: pwsh
-        run: ./scripts/check.ps1 -Steps schema,client,frontend,mcp
-
-  native:
-    name: native（纯平台 + dts：core · bridge · CLI · SDK）
-    runs-on: windows-2022
-    timeout-minutes: 90
-    env:
-      LYFLOW_STD_PACKS: "0"
-      LYFLOW_PACKS: dts
     steps:
       - uses: actions/checkout@v4
 
@@ -86,50 +32,104 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: scripts/requirements.txt
-
-      - name: Python 依赖
-        run: pip install -r scripts/requirements.txt
-
-      - name: Rust（rust-toolchain.toml 钉的那一版）
+      - name: 安装 Rust 工具链
         shell: pwsh
         run: |
-          $channel = (Select-String -Path rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          rustup toolchain install $channel --profile minimal --component clippy,rustfmt
-          rustc --version
+          $channel = (Select-String -LiteralPath rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          rustup toolchain install $channel --profile minimal --component rustfmt
+          if ($LASTEXITCODE -ne 0) { throw 'Rust 工具链安装失败' }
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/lyflow-client
+
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: Rust 格式检查（bridge 与客户端）
+        run: cargo fmt --manifest-path bridge/Cargo.toml --all -- --check
+
+      - name: Rust 格式检查（运行库探针）
+        run: cargo fmt --manifest-path tests/release/probe/Cargo.toml -- --check
+
+      - name: Rust 客户端编译
+        run: cargo build --locked --manifest-path crates/lyflow-client/Cargo.toml
+
+      - name: Rust 客户端单元测试
+        run: cargo test --locked --manifest-path crates/lyflow-client/Cargo.toml --lib
+
+      - name: 前端类型检查
+        run: pnpm --filter @lyflow/editor typecheck
+
+      - name: 前端编译（桌面应用）
+        run: pnpm --filter lyflow-app build
+
+      - name: 前端编译（React 宿主）
+        run: pnpm --filter lyflow-host-react build
+
+      - name: 前端单元测试
+        run: pnpm --filter @lyflow/editor test
+
+      - name: MCP 类型检查
+        run: pnpm --filter @lyflow/mcp typecheck
+
+      - name: MCP 编译
+        run: pnpm --filter @lyflow/mcp build
+
+      - name: MCP 单元测试
+        run: pnpm --filter @lyflow/mcp test:unit
+
+  native:
+    name: C++ / Rust：编译与单元测试
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      LYFLOW_STD_PACKS: '0'
+      LYFLOW_PACKS: dts
+      LYFLOW_PREBUILT_CORE_DIR: ${{ github.workspace }}/build/core/bin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: 安装 Rust 工具链
+        shell: pwsh
+        run: |
+          $channel = (Select-String -LiteralPath rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          rustup toolchain install $channel --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'Rust 工具链安装失败' }
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: bridge
           key: pure-dts
 
-      - name: vcpkg 工具链（纯平台不装任何端口，只要 vcpkg.cmake 在）
-        shell: pwsh
-        run: |
-          if (-not $env:VCPKG_INSTALLATION_ROOT) { throw "runner 上没有 VCPKG_INSTALLATION_ROOT" }
-          "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: pnpm install
+      - name: 安装前端依赖
         run: pnpm install --frozen-lockfile
 
-      - name: 前端产物（桌面壳编译时把 app/dist 嵌进去，cargo test 要它）
+      - name: 桌面前端编译
         run: pnpm --filter lyflow-app build
 
-      - name: check.ps1 -Steps core,manifest,bridge,cli,sdk
-        shell: pwsh
-        run: ./scripts/check.ps1 -Steps core,manifest,bridge,cli,sdk
+      - name: C++ 配置（纯平台 + dts）
+        run: cmake -S core -B build/core -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF -DLYFLOW_PACKS=dts
 
-      - name: 只开 host（外部 Rust 宿主嵌编辑器的组合：--no-default-features --features host）
-        working-directory: bridge
-        run: cargo build --no-default-features --features host
+      - name: C++ 编译
+        run: cmake --build build/core --config RelWithDebInfo --parallel
 
-  release-validation:
-    name: 手动完整发包验收
-    if: github.event_name == 'workflow_dispatch'
-    permissions:
-      contents: write
-    uses: ./.github/workflows/release-windows.yml
+      - name: C++ 单元测试（CTest / doctest）
+        run: ctest --test-dir build/core -C RelWithDebInfo --output-on-failure --no-tests=error
+
+      - name: Rust 编译（桌面应用与 CLI）
+        run: cargo build --locked --manifest-path bridge/Cargo.toml
+
+      - name: Rust 单元测试
+        run: cargo test --locked --manifest-path bridge/Cargo.toml --lib --bins
