@@ -10,6 +10,13 @@
     "std-ml",
     "glue"
   ],
+  "requiredOperators": [
+    "io.load_image",
+    "image.board_calib",
+    "image.load_calib",
+    "glue.taught_path",
+    "glue.bead_width"
+  ],
   "vcpkgVersions": {
     "pcl": "1.15.1#1",
     "opencv4": "4.12.0#9",

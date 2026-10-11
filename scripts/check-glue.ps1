@@ -24,7 +24,7 @@ try {
 } finally {
   [Console]::OutputEncoding = $consoleEncoding
 }
-foreach ($op in @("glue.bead_path", "glue.bead_width", "glue.bead_breaks", "glue.edge_distance", "glue.judge", "glue.synth_break", "glue.locate", "glue.station_calipers", "image.board_calib", "image.load_calib")) {
+foreach ($op in @("glue.bead_path", "glue.taught_path", "glue.bead_width", "glue.bead_breaks", "glue.edge_distance", "glue.judge", "glue.synth_break", "glue.locate", "glue.station_calipers", "image.board_calib", "image.load_calib")) {
   if ($op -notin $manifest.operators.id) { throw "构建中缺少 $op，不能视为 glue 验收通过" }
 }
 
