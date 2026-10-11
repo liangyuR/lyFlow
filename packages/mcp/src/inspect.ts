@@ -28,15 +28,15 @@ export async function environment(config: Config, http: LyFlowHttp): Promise<Rec
   const remoteHash = digest(remote);
   const localHash = manifest ? digest(manifest) : null;
   const sameManifest = localHash === remoteHash;
-  const a = object(remoteInfo)["buildFingerprint"], b = cliInfo?.["buildFingerprint"];
+  const a = object(remoteInfo)["buildIdentity"], b = cliInfo?.["buildIdentity"];
   return {
     http: { base: config.httpBase, ...remoteInfo, manifestHash: remoteHash },
     cli: { executable: config.cli ?? null, available: local?.code === 0, manifestHash: localHash, ...cliInfo },
-    compatible: sameManifest, buildVerified: typeof a === "string" && a === b,
+    compatible: sameManifest, buildVerified: typeof a === "string" && a.length > 0 && a === b,
     warnings: [
       ...(!config.cli ? ["LYFLOW_CLI 未配置，批评估与参数查询不可用"] : []),
       ...(manifest && !sameManifest ? ["HTTP 与 CLI 的 manifest 不一致，单图与批评估不可比较"] : []),
-      ...(!(typeof a === "string" && a === b) ? ["未验证 HTTP/CLI 构建指纹相同；manifest 一致也不能证明算法实现相同"] : []),
+      ...(!(typeof a === "string" && a.length > 0 && a === b) ? ["未验证 HTTP/CLI 构建身份相同；manifest 一致也不能证明算法实现相同"] : []),
     ],
     packs: [...new Set(remote.operators.map((o) => o.pack ?? "core"))],
     workDir: config.workDir,
@@ -47,7 +47,7 @@ export function registerInspectionTools(server: McpServer, config: Config, http:
   const ok = (v: Record<string, unknown>) => ({ content: [{ type: "text" as const, text: JSON.stringify(v) }], structuredContent: v });
   const fail = (e: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify({ error: e instanceof Error ? e.message : String(e) }) }], isError: true });
   server.registerTool("get_environment", {
-    title: "检查执行环境", description: "核对 HTTP/CLI 算子清单、构建指纹与启用的包；不返回鉴权凭据。",
+    title: "检查执行环境", description: "核对 HTTP/CLI 算子清单、构建身份与启用的包；不返回鉴权凭据。",
     inputSchema: {}, annotations: { readOnlyHint: true },
   }, async () => { try { return ok(await environment(config, http)); } catch (e) { return fail(e); } });
 

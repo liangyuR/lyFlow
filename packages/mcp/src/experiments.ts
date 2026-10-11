@@ -139,7 +139,7 @@ export async function compareEvaluations(store:EvaluationStore, a:string,b:strin
   if(digest(grouping(before.snapshot))!==digest(grouping(after.snapshot)))throw new Error("评估不可比较：统计分组规则不同");
   const cliBefore=object(before.snapshot.build["cliExecutable"])["sha256"],cliAfter=object(after.snapshot.build["cliExecutable"])["sha256"];
   if(typeof cliBefore!=="string"||cliBefore!==cliAfter)throw new Error("评估不可比较：CLI 执行或评分实现不同");
-  if (before.snapshot.build["buildFingerprint"] !== after.snapshot.build["buildFingerprint"] || digest(before.snapshot.splitAssignment) !== digest(after.snapshot.splitAssignment)) throw new Error("评估不可比较：构建或样本分组不同");
+  if (typeof before.snapshot.build["buildIdentity"] !== "string" || !before.snapshot.build["buildIdentity"] || typeof after.snapshot.build["buildIdentity"] !== "string" || !after.snapshot.build["buildIdentity"] || before.snapshot.build["buildIdentity"] !== after.snapshot.build["buildIdentity"] || digest(before.snapshot.splitAssignment) !== digest(after.snapshot.splitAssignment)) throw new Error("评估不可比较：构建或样本分组不同");
   if (lockedSpecs(before.snapshot,ai) !== lockedSpecs(after.snapshot,bi)) throw new Error("验收规格不同；不能作为检测参数优化结果比较");
   if (before.state.integrity?.length || after.state.integrity?.length) throw new Error("评估期间输入或构建改变，结果不可比较");
   // Input identities must agree even if the paths are identical.

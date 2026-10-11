@@ -32,6 +32,7 @@ try {
     }
     if ($env:LYFLOW_OP_PACKS) { throw 'External operator packs are forbidden in release packaging.' }
     $configuration = Get-Content -LiteralPath (Join-Path $root 'packaging/release.json') -Raw | ConvertFrom-Json
+    if ($configuration.gsClientRevision -isnot [string] -or $configuration.gsClientRevision -cnotmatch '^[0-9a-f]{40}$') { throw 'Pin the real product-version ABI client revision before packaging.' }
     $env:LYFLOW_STD_PACKS = '1'
     $env:LYFLOW_PACKS = 'glue'
     $env:LYFLOW_OP_PACKS = ''
@@ -61,7 +62,7 @@ try {
     Assert-ReleaseExit 'Generate release fixtures'
     $env:LYFLOW_TEST_ONNX_MODEL = Join-Path $fixtures 'channels-6-to-8.onnx'
     if (-not (Test-Path -LiteralPath $env:LYFLOW_TEST_ONNX_MODEL)) { throw 'Release ONNX fixture is missing.' }
-    & (Join-Path $PSScriptRoot 'build-core.ps1') -BuildDir $coreBuild
+    & (Join-Path $PSScriptRoot 'build-core.ps1') -BuildDir $coreBuild -ReleaseBuild
     $env:LYFLOW_PREBUILT_CORE_DIR = Join-Path $coreBuild 'bin'
     $env:CARGO_TARGET_DIR = Join-Path $buildParent 'release-rust'
     & cargo build --locked --release --manifest-path (Join-Path $root 'bridge/Cargo.toml') --bin lyflow --no-default-features
@@ -138,8 +139,8 @@ try {
     & (Join-Path $PSScriptRoot 'test-release.ps1') -InspectOnly -RuntimeDir $runtime -ReportPath $inspectionPath
     $inspection = Get-Content -LiteralPath $inspectionPath -Raw | ConvertFrom-Json
     if ($inspection.engineVersion -ne $version) { throw 'Staged DLL version differs from source product version.' }
-    $abiHeader = Get-Content -LiteralPath (Join-Path $root 'core/include/lyflow/c_api.h') -Raw
-    if ($abiHeader -notmatch '#define\s+LYFLOW_ABI_VERSION\s+(\d+)' -or [int]$Matches[1] -ne $inspection.abiVersion) { throw 'Staged DLL ABI differs from source declaration.' }
+    if ($inspection.abiVersion -isnot [string] -or $inspection.abiVersion -cne $version -or $inspection.abiVersion -cne $inspection.engineVersion) { throw 'Staged DLL ABI must be a string exactly equal to the product and engine version.' }
+    if ($inspection.sourceRevision -isnot [string] -or ($inspection.sourceRevision -cne $revision -and -not ($AllowDirty -and $inspection.sourceRevision -ceq ''))) { throw 'Staged DLL source revision differs from HEAD. Only -AllowDirty diagnostics may use an empty compiled source revision.' }
     $packs = @($inspection.manifest.operators | Where-Object { $_.PSObject.Properties.Name -contains 'pack' -and $_.pack } | ForEach-Object pack | Sort-Object -Unique | ForEach-Object {
         $parts = $_ -split '@', 2
         if ($parts.Count -ne 2) { throw "Versioned operator pack required: $_" }

@@ -39,7 +39,7 @@ export interface ManifestBundle {
 }
 
 export interface CoreInfo {
-  buildFingerprint?: string;
+  buildIdentity?: string | null;
   version?: string;
   operatorCount?: number;
   typeCount?: number;

@@ -38,7 +38,7 @@ fn dll_path() -> PathBuf {
     exe_dir().join(DLL_NAME)
 }
 
-/// CLI 实际加载的那个 core DLL（落盘缓存的构建指纹按它的内容算）。
+/// CLI 实际加载的 core DLL。
 pub(crate) fn dll_file() -> PathBuf {
     dll_path()
 }

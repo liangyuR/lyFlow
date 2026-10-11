@@ -2392,15 +2392,15 @@ pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
             match core().and_then(|c| {
                 Ok((
                     c.manifest_json().map_err(|e| e.to_string())?,
-                    crate::disk_cache::fingerprint()?,
+                    crate::disk_cache::build_identity(&c).ok(),
                 ))
             }) {
-                Ok((manifest, fingerprint)) => {
+                Ok((manifest, build_identity)) => {
                     let m: Value = serde_json::from_str(&manifest).unwrap_or(Value::Null);
                     json_line(
                         out,
                         &json!({ "kind": "core_info", "version": core_ffi::version(),
-                        "buildFingerprint": fingerprint, "corePath": core_ffi::dll_file(),
+                        "buildIdentity": build_identity, "corePath": core_ffi::dll_file(),
                         "operatorCount": m["operators"].as_array().map_or(0, Vec::len),
                         "generatedBy": m["generatedBy"], "libraryDirs": library_dirs() }),
                     );

@@ -108,7 +108,7 @@ test("候选排名和比较保留质量门槛、完整统计分组与逐样本�
         const errorRate=selected.reduce((n,r)=>n+r.quality.metrics.productFalseAccept,0)/selected.length;
         const snapshot:Snapshot={id,createdAt:"2026-10-08T00:00:00Z",sourceGraph:"fixture",sourceOverrides:{set:[],graphParams:{},recipe:null},graphPath:"fixture",baseDir:dir,
           graphHash:"graph",datasetHash:"dataset",split:c.split?{groupTag:"workpiece",seed:"fixed",train:0.6,validation:0.2,holdout:0.2}:null,
-          splitAssignment:{},partition:"all",build:{buildFingerprint:"core",cliExecutable:{sha256:"cli"}},manifest:{schemaVersion:1,types:[],operators:[]},manifestHash:"manifest",
+          splitAssignment:{},partition:"all",build:{buildIdentity:"core",cliExecutable:{sha256:"cli"}},manifest:{schemaVersion:1,types:[],operators:[]},manifestHash:"manifest",
           dependencies:[],effectiveParams:[],args:{graphPath:"fixture",metric:["run.durationMs"],groupBy:c.groupBy,holdout:c.holdout},sampleCount:facts.length,paramSets:[{}],snapshotFiles:[],cachePolicy:"cold"};
         fs.mkdirSync(store.dir(id),{recursive:true});
         fs.writeFileSync(path.join(store.dir(id),"snapshot.json"),JSON.stringify(snapshot));

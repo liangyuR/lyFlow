@@ -195,7 +195,7 @@ export class EvaluationStore {
     }
     const graph = readGraphDoc(graphPath);
     const info = (await cli(this.config, ["info"], signal)).find((v) => v["kind"] === "core_info");
-    if (!info || !info["buildFingerprint"]) throw new Error("CLI 缺构建身份，请使用带 info 的版本");
+    if (!info || !info["buildIdentity"]) throw new Error("CLI 缺构建身份，请使用带 info 的版本");
     const build={...info,cliExecutable:cliIdentity(this.config.cli)};
     const manifest = (await cli(this.config, ["manifest"], signal))[0] as unknown as ManifestBundle;
     if (!Array.isArray(manifest?.operators)) throw new Error("CLI manifest 不合法");
@@ -257,7 +257,7 @@ export class EvaluationStore {
       const frozenCli=object(snapshot.build["cliExecutable"])["sha256"];
       if(!this.config.cli || typeof frozenCli!=="string" || cliIdentity(this.config.cli).sha256!==frozenCli)changed.push("cli.executable");
       const info = (await cli(this.config,["info"])).find((v) => v["kind"] === "core_info");
-      if (info?.["buildFingerprint"] !== snapshot.build["buildFingerprint"]) changed.push("core.buildFingerprint");
+      if (info?.["buildIdentity"] !== snapshot.build["buildIdentity"]) changed.push("core.buildIdentity");
       const manifest = (await cli(this.config,["manifest"]))[0];
       if (digest(manifest) !== snapshot.manifestHash) changed.push("core.manifest");
     } catch (e) { changed.push(`build: ${String(e)}`); }

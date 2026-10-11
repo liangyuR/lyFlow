@@ -85,7 +85,7 @@ v11 再加的 `isolate`（只运行某几个节点）与 `force`（强制重算�
 
 `generation` 是热重载换代计数（ADR-0009）。后端不支持热重载就恒为 0、`hotReload: false`。
 
-后端可另给 `buildFingerprint`，与本地 `lyflow info` 的 core 指纹核对。参考 test-server 返回其实际调用的 CLI 指纹；旧后端省略时 MCP 报告 buildVerified:false，manifest 相同不视为构建实现相同。
+后端可另给 `buildIdentity`，与本地 `lyflow info` 的 core 构建身份核对。参考 test-server 返回其实际调用的 CLI 构建身份；旧后端省略时 MCP 报告 buildVerified:false，manifest 相同不视为构建实现相同。
 
 ---
 
@@ -305,7 +305,7 @@ magic 对不上时编辑器会当成「响应不是点云」直接报错，所�
 
 ### `GET /lyflow/runs/:runId/images/:nodeId/:port?level=&row=&rows=`
 
-`Content-Type: application/octet-stream`，载荷是 `lyflow_output_image` 的视图（ABI v15，[image-plan.md](image-plan.md) §5；
+`Content-Type: application/octet-stream`，载荷是 `lyflow_output_image` 的视图（ABI 与产品版本严格一致，[image-plan.md](image-plan.md) §5；
 编码在 `bridge/src/execution.rs` 的 `encode_image`）。**小端**，帧头 12 个 `u32`：
 
 | 偏移 | 类型 | 含义 |

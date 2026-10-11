@@ -4,6 +4,7 @@
 param(
   [string]$Configuration = "RelWithDebInfo",
   [switch]$NoTests,
+  [switch]$ReleaseBuild,
   [string]$BuildDir
 )
 $ErrorActionPreference = "Stop"
@@ -65,7 +66,8 @@ if ($repoPacks) { Write-Host "仓库内包: $repoPacks" -ForegroundColor Cyan }
 
 # 必须在 vcvars 之后调 cmake，所以整条命令交给一个 cmd 进程。
 # 用 && 而不是 ^ 续行：换行已被 PowerShell 吃掉，^ 会转义掉下一行的首字符。
-$releaseArgs = ""
+$releaseBuildFlag = if ($ReleaseBuild) { "ON" } else { "OFF" }
+$releaseArgs = " -DLYFLOW_RELEASE_BUILD=$releaseBuildFlag"
 foreach ($name in @('VCPKG_MANIFEST_DIR', 'VCPKG_INSTALLED_DIR', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'LYFLOW_ONNXRUNTIME_ROOT')) {
   $value = [Environment]::GetEnvironmentVariable($name)
   if ($value) { $releaseArgs += " -D$name=`"$($value.Replace('\', '/'))`"" }

@@ -201,27 +201,41 @@ fn files(root: &Path, path: &Path, out: &mut BTreeSet<String>) -> Result<()> {
     }
     Ok(())
 }
+fn version_identity_matches(metadata: &Value, engine: &str, abi: &str) -> bool {
+    engine == ABI_VERSION
+        && abi == ABI_VERSION
+        && metadata["engineVersion"].as_str() == Some(ABI_VERSION)
+        && metadata["abiVersion"].as_str() == Some(ABI_VERSION)
+}
+
+fn source_revision_matches(metadata: &Value, source: &str) -> bool {
+    metadata["sourceRevision"].as_str().is_some_and(|declared| {
+        declared.len() == 40
+            && declared.bytes().all(|c| c.is_ascii_hexdigit())
+            && (source == declared
+                || (source.is_empty() && metadata["localValidationOnly"] == true))
+    })
+}
+
 fn validate_metadata(
     root: &Path,
     version: &str,
-    abi: u32,
+    abi: &str,
+    source_revision: &str,
     manifest: &Value,
     sdk: bool,
 ) -> Result<()> {
     let m: Value = serde_json::from_slice(&fs::read(root.join("lyflow-runtime.json"))?)?;
     require(
         m["schemaVersion"] == 1
-            && m["engineVersion"] == version
-            && m["abiVersion"] == abi
+            && version_identity_matches(&m, version, abi)
             && m["architecture"] == "x64"
             && m["buildConfiguration"] == "RelWithDebInfo",
         "metadata identity/ABI/architecture mismatch",
     )?;
     require(
-        m["sourceRevision"]
-            .as_str()
-            .is_some_and(|s| s.len() == 40 && s.chars().all(|c| c.is_ascii_hexdigit())),
-        "invalid source revision",
+        source_revision_matches(&m, source_revision),
+        "compiled source revision differs from package metadata",
     )?;
     let mut expected = BTreeSet::new();
     for file in m["files"].as_array().ok_or("missing file list")? {
@@ -473,13 +487,32 @@ fn main() -> Result<()> {
         "manifest self-check failed",
     )?;
     let library = unsafe { libloading::Library::new(&dll)? };
-    let abi = unsafe { library.get::<unsafe extern "C" fn() -> u32>(b"lyflow_abi_version\0")?() };
+    let abi_pointer = unsafe {
+        library.get::<unsafe extern "C" fn() -> *const c_char>(b"lyflow_abi_version_string\0")?()
+    };
+    require(!abi_pointer.is_null(), "DLL ABI string is null")?;
+    let abi = unsafe { std::ffi::CStr::from_ptr(abi_pointer).to_str()? };
     require(
         abi == ABI_VERSION,
         format!("client ABI {ABI_VERSION} != runtime ABI {abi}"),
     )?;
+    let revision_pointer = unsafe {
+        library.get::<unsafe extern "C" fn() -> *const c_char>(b"lyflow_source_revision\0")?()
+    };
+    require(!revision_pointer.is_null(), "DLL source revision is null")?;
+    let source_revision = unsafe { std::ffi::CStr::from_ptr(revision_pointer).to_str()? };
+    require(
+        source_revision.is_empty()
+            || (source_revision.len() == 40
+                && source_revision.bytes().all(|c| c.is_ascii_hexdigit())),
+        "invalid compiled source revision",
+    )?;
     let manifest: Value = serde_json::from_str(&core.manifest_json()?)?;
     let version = core.version();
+    require(
+        version == ABI_VERSION,
+        "engine version must exactly equal client ABI/product version",
+    )?;
     let checks = if args[3] == "inspect" {
         vec![]
     } else {
@@ -487,6 +520,7 @@ fn main() -> Result<()> {
             &root,
             &version,
             abi,
+            source_revision,
             &manifest,
             args.get(5).is_some_and(|v| v == "sdk"),
         )?;
@@ -509,7 +543,70 @@ fn main() -> Result<()> {
         format!("unexpected ONNX Runtime {ort_version}"),
     )?;
     let loaded = modules(&root)?;
-    let report = json!({"status":"passed","engineVersion":version,"abiVersion":abi,"manifest":manifest,"checks":checks,"loadedModules":loaded,"onnxRuntimeVersion":ort_version});
+    let report = json!({"status":"passed","engineVersion":version,"abiVersion":abi,"sourceRevision":source_revision,"manifest":manifest,"checks":checks,"loadedModules":loaded,"onnxRuntimeVersion":ort_version});
     fs::write(&args[2], serde_json::to_string_pretty(&report)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn package_source_revision_requires_exact_identity_or_explicit_local_diagnostics() {
+        let revision = "a".repeat(40);
+        let mut metadata = json!({"sourceRevision":revision,"localValidationOnly":false});
+        assert!(source_revision_matches(&metadata, &revision));
+        assert!(!source_revision_matches(&metadata, &"b".repeat(40)));
+        assert!(!source_revision_matches(&metadata, ""));
+        metadata["localValidationOnly"] = json!(true);
+        assert!(source_revision_matches(&metadata, ""));
+        assert!(!source_revision_matches(&metadata, &"b".repeat(40)));
+        metadata["sourceRevision"] = json!("unknown");
+        assert!(!source_revision_matches(&metadata, ""));
+    }
+
+    #[test]
+    fn package_version_identity_rejects_patch_mismatch_and_legacy_numeric_abi() {
+        let mut components: Vec<u32> = ABI_VERSION
+            .split('.')
+            .map(|part| part.parse().unwrap())
+            .collect();
+        components[2] += 1;
+        let next_patch = components
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(".");
+        let metadata = json!({"engineVersion":ABI_VERSION,"abiVersion":ABI_VERSION});
+        assert!(version_identity_matches(
+            &metadata,
+            ABI_VERSION,
+            ABI_VERSION
+        ));
+        for invalid in [json!(15), json!("15"), json!(next_patch), Value::Null] {
+            let mut candidate = metadata.clone();
+            candidate["abiVersion"] = invalid;
+            assert!(
+                !version_identity_matches(&candidate, ABI_VERSION, ABI_VERSION),
+                "{candidate}"
+            );
+        }
+        assert!(!version_identity_matches(
+            &metadata,
+            ABI_VERSION,
+            &next_patch
+        ));
+        assert!(!version_identity_matches(
+            &metadata,
+            &next_patch,
+            ABI_VERSION
+        ));
+        let candidate = json!({"engineVersion":next_patch,"abiVersion":ABI_VERSION});
+        assert!(!version_identity_matches(
+            &candidate,
+            ABI_VERSION,
+            ABI_VERSION
+        ));
+    }
 }

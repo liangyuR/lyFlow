@@ -66,6 +66,9 @@ C ABI 使用产品版本字符串：`LYFLOW_ABI_VERSION` 引用 `LYFLOW_VERSION`
 `lyflow_abi_version_string()` 导出。客户端加载时要求 ABI、引擎版本与客户端版本完全相等，
 包括补丁版本；旧整数 ABI 导出已移除，旧 DLL 直接拒绝。SDK 的 CMake 消费方必须显式指定
 完整版本，例如 `find_package(lyflow 1.1.0 EXACT CONFIG REQUIRED)`。
+`LYFLOW_RELEASE_BUILD` 默认关闭，仅由统一打包入口在验证固定依赖后启用。只有该受控发布构建、
+固定四个发布算子包、无外部包、Windows x64 RelWithDebInfo 且干净 Git 修订时，
+`lyflow_source_revision()` 才提供可用于跨进程缓存的修订；其他构建返回空串。
 `bridge/build.rs` 调的就是这份 `CMakeLists.txt` —— 两条路径同源，
 不会出现「命令行能编、cargo 编不了」。
 

@@ -1416,10 +1416,12 @@ mod load_contract_tests {
             .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
         let fixtures = Fixtures(std::env::temp_dir().join(format!("lyflow-abi-{}-{unique}", std::process::id())));
         std::fs::create_dir_all(&fixtures.0).unwrap();
+        let (base, patch) = ABI_VERSION.rsplit_once('.').unwrap();
+        let next_patch = format!("{base}.{}", patch.parse::<u64>().unwrap() + 1);
         let cases = [
             ("legacy", None, ABI_VERSION),
-            ("abi_patch", Some("1.1.1"), ABI_VERSION),
-            ("engine_patch", Some(ABI_VERSION), "1.1.1"),
+            ("abi_patch", Some(next_patch.as_str()), ABI_VERSION),
+            ("engine_patch", Some(ABI_VERSION), next_patch.as_str()),
             ("legacy_string", Some("15"), ABI_VERSION),
             ("null_abi", Some(""), ABI_VERSION),
             ("matching", Some(ABI_VERSION), ABI_VERSION),
