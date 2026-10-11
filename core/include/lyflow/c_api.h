@@ -24,6 +24,7 @@ extern "C" {
 
 // core 的版本号，形如 "0.1.0"。静态存储，不要释放。
 LYFLOW_API const char* lyflow_version(void);
+LYFLOW_API uint32_t lyflow_abi_version(void);
 
 // 全量算子描述，符合 schema/operator-manifest.schema.json。
 LYFLOW_API char* lyflow_manifest_json(void);

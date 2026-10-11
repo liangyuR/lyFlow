@@ -1,11 +1,11 @@
 # LyFlow 的 CI（只用 GitHub 托管 runner）。本地与 CI 走同一个入口：scripts/check.ps1 -Steps <几步>。
 #
-# 这一版先上两个不需要 vcpkg 端口的门禁（PCL / OpenCV 那组依赖还没钉版本，钉之前上了 CI 也装不出本机那一套）：
+# PR 保留两个轻量门禁；main 的完整发包验证由 release-windows.yml 承担：
 #   fast   前端（typecheck、单测、构建）、MCP、各份契约对着 schema、Rust 客户端脱开 bridge 单独构建
 #   native 纯平台 + dts 包（LYFLOW_STD_PACKS=0 LYFLOW_PACKS=dts）：core 编译与 doctest、manifest 自检、bridge 的 cargo test、
 #          headless CLI、嵌入 SDK 的安装布局与消费方工程，外加只开 host 的 `--no-default-features --features host`
 #          （外部 Rust 宿主嵌编辑器用的那一份，别的步骤都没编过它；dts-check 眼下只用 core_ffi、不开任何 feature，CLI 那步已编到）
-# 默认包（PCL / OpenCV / ONNX Runtime）、gap 包、桌面与安装包 e2e 还在本地跑（`pnpm check`、`pnpm e2e`），见 docs/testing.md「CI」。
+# 标准包 + glue 的最终 ZIP 验收见 release-windows.yml；gap、桌面与安装包 e2e 仍在本地跑，见 docs/testing.md「CI」。
 
 name: CI
 
@@ -126,3 +126,10 @@ jobs:
       - name: 只开 host（外部 Rust 宿主嵌编辑器的组合：--no-default-features --features host）
         working-directory: bridge
         run: cargo build --no-default-features --features host
+
+  release-validation:
+    name: 手动完整发包验收
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-windows.yml

@@ -2,7 +2,7 @@
 # 同时是全仓库唯一一处 find_package(PCL)：别的包链 lyflow_pcl_support 就好。
 
 set(LYFLOW_PCL_COMPONENTS common io filters kdtree search segmentation sample_consensus features)
-find_package(PCL 1.12 REQUIRED COMPONENTS ${LYFLOW_PCL_COMPONENTS})
+find_package(PCL 1.15.1 REQUIRED COMPONENTS ${LYFLOW_PCL_COMPONENTS})
 
 # PCL::common 与 pcl_common 两种目标名都认，都没有时退回 ${PCL_LIBRARIES}。
 # 为什么不能硬写一种见 core/README.md「构建」。

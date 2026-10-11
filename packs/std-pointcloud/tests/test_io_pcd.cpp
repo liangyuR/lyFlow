@@ -336,7 +336,7 @@ TEST_CASE("ASCII PCD 写：与 PCL 的 savePCDFile 逐字节相同") {
     requireSameRead(dir.file("organized.pcl.pcd"));
   }
 
-  SUBCASE("空云：两边都报错、都不留文件") {
+  SUBCASE("空云：与 PCL 一样成功写出头") {
     pcl::PCLPointCloud2 c;
     c.fields = {field("x", 0, pcl::PCLPointField::FLOAT32, 1)};
     c.point_step = 4;
@@ -346,8 +346,7 @@ TEST_CASE("ASCII PCD 写：与 PCL 的 savePCDFile 逐字节相同") {
 
 TEST_CASE("ASCII PCD 读：与 PCL 的 loadPCDFile 逐字节相同（怪文件、怪词）") {
   AsciiTempDir dir;
-  // PCL 1.12 的怪癖：第一个数走 istringstream（正确舍入成 float），之后的数都落到 atof 再截成 float
-  // （先按 double 舍入一次）。这个词恰好是两种舍入结果不同的那种（1 与 1 + 2^-23 正中间往上一点点）
+  // PCL 1.15 每个词独立舍入到 float；先转 double 再转 float 会让这个临界值差 1 ulp。
   const std::string tie = "1.0000000596046447753906250001";
   const std::string longDigits(70, '7');
 
@@ -393,9 +392,7 @@ TEST_CASE("ASCII PCD 读：与 PCL 的 loadPCDFile 逐字节相同（怪文件�
        header("x y z", "4 4 4", "F F F", "1 1 1", 3, 1, 3) + "1 2 3\n\x1a" "4 5 6\n7 8 9\n"},
       {"POINTS 0", header("x y z", "4 4 4", "F F F", "1 1 1", 0, 1, 0)},
       {"有序云", header("x y", "4 4", "F F", "1 1", 2, 2, 4) + "1 2\n3 4\n5 6\n7 8\n"},
-      // 去掉首尾空白后是空串：boost::split 给一个空词（不是零个），单字段时词数刚好对上 —— 那个空词
-      // 还用掉了 PCL 的流，所以紧跟着的临界值已经走 atof
-      {"单字段的全空白行：一个空词，还用掉了 PCL 的流",
+      {"单字段的全空白行：保留占位，后续临界值独立舍入",
        header("x", "4", "F", "1", 3, 1, 3) + "   \n" + tie + "\n3\n"},
   };
   for (const Case& c : cases) {

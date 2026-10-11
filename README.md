@@ -50,6 +50,7 @@ C++ 生成的 `OperatorManifest`，Rust 转发给前端。**加新算子只改 C
 | 文档 | 内容 |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | 三层职责边界、数据流、执行状态机 |
+| [docs/deployment/packaging.md](docs/deployment/packaging.md) | Windows x64 运行库与 SDK/CLI 发包、版本契约、GitHub 草稿 Release 与验收边界 |
 | [docs/graph-doc.md](docs/graph-doc.md) | GraphDoc 数据模型与序列化格式 |
 | [docs/operator-manifest.md](docs/operator-manifest.md) | 算子描述格式、参数控件映射、端口类型系统 |
 | [docs/interaction-checklist.md](docs/interaction-checklist.md) | 交互清单（P0/P1/P2），对照 ComfyUI 与 Blender Geometry Nodes |
@@ -91,7 +92,7 @@ scripts/  构建与门禁脚本；scripts/e2e 是 CDP 验收
 ## 快速开始
 
 需要 Visual Studio（含 C++ 工具集）、Rust、Node + pnpm、**PowerShell 7**（`pwsh`，
-脚本不支持系统自带的 Windows PowerShell 5.1）、**vcpkg 装的 PCL 与 OpenCV**，以及 `pnpm check` 校验契约用的
+脚本不支持系统自带的 Windows PowerShell 5.1）、**vcpkg 装的 PCL 1.15.1 或更高版本与 OpenCV**，以及 `pnpm check` 校验契约用的
 Python 3 + `jsonschema`（`python -m pip install jsonschema`；缺了门禁直接失败，不会悄悄跳过）。
 CMake 与 Ninja 用 VS 自带的即可。
 

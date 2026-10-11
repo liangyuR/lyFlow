@@ -81,8 +81,8 @@ fn find_ninja() -> Option<PathBuf> {
     if install.is_empty() {
         return None;
     }
-    let ninja = PathBuf::from(install)
-        .join("Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe");
+    let ninja =
+        PathBuf::from(install).join("Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe");
     ninja.is_file().then_some(ninja)
 }
 
@@ -203,49 +203,90 @@ fn main() {
         for f in pf.iter().chain(pd.iter()) {
             println!("cargo:rerun-if-changed={}", f.display());
         }
-        println!("cargo:rerun-if-changed={}", path.join("lyflow_op_pack.cmake").display());
+        println!(
+            "cargo:rerun-if-changed={}",
+            path.join("lyflow_op_pack.cmake").display()
+        );
     }
 
-    let mut cfg = cmake::Config::new(&core);
-    // D8：core 永远 RelWithDebInfo，不跟 cargo profile 走。
-    // Rust 总是 /MD 而 vcpkg 的 debug 库是 /MDd，混用会在无关的地方崩。
-    cfg.profile("RelWithDebInfo")
-        .define("CMAKE_BUILD_TYPE", "RelWithDebInfo")
-        // 只构建 lyflow_core：core 没有 install 规则，两个 exe 归 build-core.ps1 管。
-        // vcpkg 的 applocal 对 SHARED 目标同样生效，PCL 的依赖 DLL 照样落到 bin/。
-        .build_target("lyflow_core")
-        .define("LYFLOW_OP_PACKS", &packs)
-        .define("LYFLOW_STD_PACKS", &std_packs)
-        .define("LYFLOW_PACKS", &repo_packs)
-        .define("LYFLOW_ONNXRUNTIME_ROOT", &ort_root);
-    let ninja = find_ninja();
-    if let Some(ninja) = &ninja {
-        cfg.generator("Ninja").define("CMAKE_MAKE_PROGRAM", ninja);
+    println!("cargo:rerun-if-env-changed=LYFLOW_PREBUILT_CORE_DIR");
+    let bin = if let Some(path) =
+        std::env::var_os("LYFLOW_PREBUILT_CORE_DIR").filter(|p| !p.is_empty())
+    {
+        let bin = PathBuf::from(path);
+        assert!(bin.is_absolute(), "LYFLOW_PREBUILT_CORE_DIR 必须是绝对路径");
+        assert!(
+            bin.join("lyflow_core.dll").is_file(),
+            "预构建目录缺少 lyflow_core.dll"
+        );
+        println!("cargo:rerun-if-changed={}", bin.display());
+        for entry in std::fs::read_dir(&bin).expect("读取预构建 core 目录失败") {
+            let path = entry.expect("读取预构建 core 文件失败").path();
+            if path.is_file() {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+        }
+        bin
     } else {
-        println!("cargo:warning=没找到 ninja，退回 CMake 默认生成器（会慢不少）");
-    }
-    let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
-    drop_incompatible_cache(
-        &out_dir.join("build"),
-        ninja.as_ref().map(|_| "Ninja"),
-    );
-    if let Some(toolchain) = vcpkg_toolchain() {
-        cfg.define("CMAKE_TOOLCHAIN_FILE", &toolchain);
-    } else {
-        println!("cargo:warning=没找到 vcpkg 工具链，CMake 将自行寻找 PCL");
-    }
-    let out = cfg.build();
+        let mut cfg = cmake::Config::new(&core);
+        // D8：core 永远 RelWithDebInfo，不跟 cargo profile 走。
+        // Rust 总是 /MD 而 vcpkg 的 debug 库是 /MDd，混用会在无关的地方崩。
+        cfg.profile("RelWithDebInfo")
+            .define("CMAKE_BUILD_TYPE", "RelWithDebInfo")
+            // 只构建 lyflow_core：core 没有 install 规则，两个 exe 归 build-core.ps1 管。
+            // vcpkg 的 applocal 对 SHARED 目标同样生效，PCL 的依赖 DLL 照样落到 bin/。
+            .build_target("lyflow_core")
+            .define("LYFLOW_OP_PACKS", &packs)
+            .define("LYFLOW_STD_PACKS", &std_packs)
+            .define("LYFLOW_PACKS", &repo_packs)
+            .define("LYFLOW_ONNXRUNTIME_ROOT", &ort_root);
+        let ninja = find_ninja();
+        if let Some(ninja) = &ninja {
+            cfg.generator("Ninja").define("CMAKE_MAKE_PROGRAM", ninja);
+        } else {
+            println!("cargo:warning=没找到 ninja，退回 CMake 默认生成器（会慢不少）");
+        }
+        let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
+        drop_incompatible_cache(&out_dir.join("build"), ninja.as_ref().map(|_| "Ninja"));
+        if let Some(toolchain) = vcpkg_toolchain() {
+            cfg.define("CMAKE_TOOLCHAIN_FILE", &toolchain);
+        } else {
+            println!("cargo:warning=没找到 vcpkg 工具链，CMake 将自行寻找 PCL");
+        }
+        for name in [
+            "VCPKG_MANIFEST_DIR",
+            "VCPKG_INSTALLED_DIR",
+            "VCPKG_MANIFEST_MODE",
+            "VCPKG_MANIFEST_INSTALL",
+            "VCPKG_TARGET_TRIPLET",
+        ] {
+            println!("cargo:rerun-if-env-changed={name}");
+            if let Ok(value) = std::env::var(name) {
+                if !value.is_empty() {
+                    cfg.define(name, value);
+                }
+            }
+        }
+        let out = cfg.build();
 
-    // CMake 的产物都在 <build>/bin。开发构建直接从这里加载（下面这个 LYFLOW_CORE_BIN），
-    // 再整目录拷到共享的 target/<profile>/ 与 deps/，供 tauri build 与打包取用。
-    let bin = out.join("build").join("bin");
-    let bin = if bin.exists() { bin } else { out.join("bin") };
+        // CMake 的产物都在 <build>/bin。开发构建直接从这里加载（下面这个 LYFLOW_CORE_BIN），
+        // 再整目录拷到共享的 target/<profile>/ 与 deps/，供 tauri build 与打包取用。
+        let bin = out.join("build").join("bin");
+        if bin.exists() {
+            bin
+        } else {
+            out.join("bin")
+        }
+    };
     println!("cargo:rustc-env=LYFLOW_CORE_BIN={}", bin.display());
 
     let target_dir = target_profile_dir();
     for dest in [target_dir.clone(), target_dir.join("deps")] {
         if let Err(e) = copy_dir_contents(&bin, &dest) {
-            println!("cargo:warning=拷贝 core 运行时到 {} 失败: {e}", dest.display());
+            println!(
+                "cargo:warning=拷贝 core 运行时到 {} 失败: {e}",
+                dest.display()
+            );
         }
     }
     #[cfg(feature = "desktop")]
@@ -276,7 +317,10 @@ fn utf8_manifest_step(manifest: &Path) {
     println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
     let app_manifest = app_manifest_path();
     println!("cargo:rerun-if-changed={}", app_manifest.display());
-    println!("cargo:rustc-link-arg-tests=/MANIFESTINPUT:{}", app_manifest.display());
+    println!(
+        "cargo:rustc-link-arg-tests=/MANIFESTINPUT:{}",
+        app_manifest.display()
+    );
 }
 
 fn app_manifest_path() -> PathBuf {
@@ -291,7 +335,10 @@ fn app_manifest_path() -> PathBuf {
 #[cfg(feature = "desktop")]
 fn tauri_step() {
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
-        println!("cargo:rustc-link-arg-bin=lyflow-app=/MANIFESTINPUT:{}", app_manifest_path().display());
+        println!(
+            "cargo:rustc-link-arg-bin=lyflow-app=/MANIFESTINPUT:{}",
+            app_manifest_path().display()
+        );
     }
     let windows = tauri_build::WindowsAttributes::new_without_app_manifest();
     tauri_build::try_build(tauri_build::Attributes::new().windows_attributes(windows))
@@ -317,7 +364,12 @@ fn stage_bundle_core(bin: &Path) {
         .join("bundle-core");
     let is_dll = |p: &Path| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("dll"));
     let staged: Vec<PathBuf> = std::fs::read_dir(&staging)
-        .map(|d| d.flatten().map(|e| e.path()).filter(|p| is_dll(p)).collect())
+        .map(|d| {
+            d.flatten()
+                .map(|e| e.path())
+                .filter(|p| is_dll(p))
+                .collect()
+        })
         .unwrap_or_default();
     let release = std::env::var("PROFILE").as_deref() == Ok("release");
     if !release && !staged.is_empty() {
@@ -337,7 +389,10 @@ fn stage_bundle_core(bin: &Path) {
         Ok(())
     })();
     if let Err(e) = result {
-        println!("cargo:warning=准备安装包里的 core 运行时（{}）失败: {e}", staging.display());
+        println!(
+            "cargo:warning=准备安装包里的 core 运行时（{}）失败: {e}",
+            staging.display()
+        );
     }
 }
 
@@ -372,7 +427,10 @@ fn copy_dir_contents(from: &Path, to: &Path) -> std::io::Result<()> {
             if e.kind() != std::io::ErrorKind::PermissionDenied {
                 return Err(e);
             }
-            println!("cargo:warning=被占用，没能覆盖 {}（那里还是旧的一份）", dst.display());
+            println!(
+                "cargo:warning=被占用，没能覆盖 {}（那里还是旧的一份）",
+                dst.display()
+            );
         }
     }
     Ok(())

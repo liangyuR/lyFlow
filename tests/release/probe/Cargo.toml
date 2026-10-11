@@ -1,0 +1,12 @@
+[package]
+name = "lyflow-release-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+lyflow-client = { path = "../../../crates/lyflow-client" }
+serde_json = "1"
+libloading = "0.8.9"

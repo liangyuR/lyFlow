@@ -120,6 +120,7 @@ std::string fromC(const char* s) { return s ? std::string(s) : std::string(); }
 extern "C" {
 
 const char* lyflow_version(void) { return LYFLOW_VERSION; }
+uint32_t lyflow_abi_version(void) { return LYFLOW_ABI_VERSION; }
 
 char* lyflow_manifest_json(void) {
   try {
