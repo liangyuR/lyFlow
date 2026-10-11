@@ -33,6 +33,16 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
+if(MSVC)
+  set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+  set(CMAKE_INSTALL_OPENMP_LIBRARIES TRUE)
+  include(InstallRequiredSystemLibraries)
+  if(NOT CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS)
+    message(FATAL_ERROR "Visual C++ runtime redistributables not found")
+  endif()
+  file(COPY ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS} DESTINATION "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+endif()
+
 # ADR-0014：core 零第三方依赖。PCL 的 find_package 归 packs/std-pointcloud/。
 set(LYFLOW_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(LYFLOW_SRC     "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -382,7 +392,8 @@ install(DIRECTORY "${LYFLOW_INCLUDE}/lyflow"
         DESTINATION include
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_minimal.cpp"
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/lyflow-utf8.manifest"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_minimal.cpp"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_concurrent.cpp"
               "${CMAKE_CURRENT_SOURCE_DIR}/../examples/embed_inject.cpp"
         DESTINATION examples)

@@ -9,7 +9,9 @@
 | `lyflow-runtime-win-x64-vX.Y.Z.zip` | 根目录包含 `lyflow_core.dll`、必要依赖及 VC++ CRT、`lyflow-runtime.json`、许可证。解压目录可作为 GlueSight 的 `-LyFlowRuntime` 输入。 |
 | `lyflow-sdk-win-x64-vX.Y.Z.zip` | `bin/` 包含同一份运行库及 `lyflow.exe`；另含头文件、导入库、CMake 配置、示例和 `library/`。 |
 
-算子组合固定为 `std-pointcloud`、`std-image`、`std-ml`、`glue`，不接受环境变量追加 `gap`、`dts` 或外部算子。ONNX Runtime 使用 CPU 版 `1.19.2`。core 使用 RelWithDebInfo 与动态 CRT；CLI 使用 Rust Release 和 `--no-default-features`。SDK 从同一份 core 暂存文件生成，避免两套资产实际包含不同引擎。
+算子组合固定为 `std-pointcloud`、`std-image`、`std-ml`、`glue`，不接受环境变量追加 `gap`、`dts` 或外部算子。ONNX Runtime 使用 CPU 版 `1.19.2`。PCL 最低支持版本为 `1.15.1`，发包清单固定到 `1.15.1#1`。core 使用 RelWithDebInfo 与动态 CRT；CLI 使用 Rust Release 和 `--no-default-features`。SDK 从同一份 core 暂存文件生成，避免两套资产实际包含不同引擎。
+
+本版 SDK 的 C++ 客户端与同一发布修订的 Rust 客户端，在 Windows 上只从指定 DLL 所在目录和 System32 解析依赖，不读取 PATH，也不从当前工作目录补齐。宿主需把所有非系统依赖部署在 DLL 目录中；缺依赖时应明确失败。GS 当前固定旧修订客户端的加载行为没有被本次修改，旧客户端兼容性测试不代表它获得了这项加载限制。
 
 产品版本统一为 `X.Y.Z`，ABI 独立编号。`lyflow-runtime.json` 记录 `engineVersion`、`abiVersion`、`sourceRevision`、架构、构建配置、算子包及版本、实际算子、依赖版本和相对文件清单。最终 DLL 查询结果必须与声明一致。不使用内容哈希或指纹建立包身份、匹配或校验；Git 提交标识仅用于源码修订。
 
@@ -27,7 +29,7 @@ pnpm run package -OutputDir C:\release\lyflow
 
 源码必须干净且有有效 Git 修订；不要在正在编辑的工作树里制作正式产物。正式 tag 构建可加 `-ExpectedTag vX.Y.Z`；脚本校验版本，不自动修改源码版本。输出目录应位于仓外或仓内已忽略的构建目录；默认是 `build/release`。已有同名产物时拒绝覆盖，复验构建须选新输出目录。`-AllowDirty`、`-SkipDependencySetup` 只用于本地诊断，tag 发布禁止使用。
 
-入口准备固定版本依赖、构建 core 与 CLI、运行门禁、生成暂存目录和 ZIP，并验证解压后的交付物。vcpkg manifest 固定 baseline；构建不从相邻项目复制依赖。vcpkg 工具和安装树分别位于 `build/release-tools/vcpkg`、`build/release-deps/vcpkg_installed`，二进制缓存位于 `build/release-deps/binary-cache`。ONNX Runtime 位于 `third_party/onnxruntime/onnxruntime-win-x64-1.19.2`。GitHub 缓存只保存 vcpkg 二进制缓存，按 `windows-2022`、x64、完整 MSVC toolset 版本、vcpkg baseline 和发布组合版本隔离，不跨 toolset 回退。缺缓存时仍须能从固定输入完整构建。
+入口准备固定版本依赖、构建 core 与 CLI、运行门禁、生成暂存目录和 ZIP，并验证解压后的交付物。vcpkg manifest 固定 baseline；构建不从相邻项目复制依赖。vcpkg 工具和安装树分别位于 `build/release-tools/vcpkg`、`build/release-deps/vcpkg_installed`，二进制缓存位于 `build/release-deps/binary-cache`。ONNX Runtime 位于 `third_party/onnxruntime/onnxruntime-win-x64-1.19.2`。GitHub 缓存只保存 vcpkg 二进制缓存，按 `windows-2022`、x64、完整 MSVC toolset 版本、vcpkg baseline 和发布组合版本隔离，仅恢复相同完整身份下的缓存，不跨 toolset 回退。每次运行用独立缓存条目保存已完成依赖，即使后续软件验收失败也能复用已编译部分。缺缓存时仍须能从固定输入完整构建。
 
 独立复验已有 ZIP：
 
@@ -35,7 +37,7 @@ pnpm run package -OutputDir C:\release\lyflow
 pwsh -NoProfile -File scripts/test-release.ps1 -ArchiveDir 'C:\验收 包' -ReportPath 'C:\验收 包\release-verification.json'
 ```
 
-独立验收不要求 vcpkg 安装树。缺失必测依赖、夹具或模型即失败，不把跳过算作成功。失败报告与 CI 日志要保留，不能只保留成功日志。
+独立验收不要求 vcpkg 安装树。缺失必测依赖、夹具或模型即失败，不把跳过算作成功。失败报告与 CI 日志要保留，不能只保留成功日志。工作流在成功或失败后均保存 `windows-release-build-diagnostics` 和 `windows-release-verification-diagnostics`，保留 14 天；只收集 JSON/日志，不上传解压 DLL 或重复 ZIP。报告中的 `evidenceDirectory` 是临时 runner 路径，对应的探针 JSON 和日志可从诊断 artifact 中取得，避免 runner 销毁后丢失证据。若工具安装等前置步骤失败、尚未产生报告，则以该次 Actions 日志为准。
 
 ## GitHub 门禁与正式发布
 

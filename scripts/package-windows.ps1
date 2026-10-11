@@ -82,7 +82,10 @@ try {
     foreach ($file in Get-ChildItem -LiteralPath $crtDirectories[0].FullName -Filter '*.dll' -File) {
         Copy-Item -LiteralPath $file.FullName -Destination $runtime -Force
     }
-    foreach ($required in @('lyflow_core.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll')) {
+    $openmpDirectories = @(Get-ChildItem -LiteralPath (Join-Path $redistVersions[0].FullName 'x64') -Directory | Where-Object Name -Match '^Microsoft\.VC\d+\.OpenMP$')
+    if ($openmpDirectories.Count -ne 1) { throw 'Expected one x64 Visual C++ OpenMP runtime directory.' }
+    Copy-Item -LiteralPath (Join-Path $openmpDirectories[0].FullName 'vcomp140.dll') -Destination $runtime -Force
+    foreach ($required in @('lyflow_core.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'vcomp140.dll')) {
         if (-not (Test-Path -LiteralPath (Join-Path $runtime $required))) { throw "Runtime missing $required" }
     }
     $licenses = Join-Path $runtime 'licenses'

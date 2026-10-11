@@ -22,7 +22,7 @@ function Invoke-Checked([string]$Exe, [string[]]$Arguments) {
     & $Exe @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Exe failed with exit code $LASTEXITCODE" }
 }
-function Invoke-Isolated([string]$Exe, [string[]]$Arguments, [string]$Name, [switch]$ExpectFailure) {
+function Invoke-Isolated([string]$Exe, [string[]]$Arguments, [string]$Name, [switch]$ExpectFailure, [string]$DependencyPath) {
     $info = [Diagnostics.ProcessStartInfo]::new()
     $info.FileName = $Exe
     $info.WorkingDirectory = $cwd
@@ -31,7 +31,7 @@ function Invoke-Isolated([string]$Exe, [string[]]$Arguments, [string]$Name, [swi
     $info.RedirectStandardOutput = $true
     $info.RedirectStandardError = $true
     foreach ($argument in $Arguments) { $info.ArgumentList.Add($argument) }
-    $info.Environment['PATH'] = "$env:SystemRoot\System32;$env:SystemRoot"
+    $info.Environment['PATH'] = "$env:SystemRoot\System32;$env:SystemRoot;$DependencyPath"
     foreach ($key in @($info.Environment.Keys)) { if ($key -like 'LYFLOW_*') { $info.Environment.Remove($key) | Out-Null } }
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $info
@@ -55,7 +55,7 @@ function Build-Probe([string]$Kind) {
     $name = if ($Kind -eq 'probe') { 'lyflow-release-probe.exe' } else { 'lyflow-gs-release-probe.exe' }
     return Join-Path $target "release/$name"
 }
-function Invoke-Probe([string]$Probe, [string]$Runtime, [string]$Name, [string]$Mode = 'full', [switch]$Sdk, [switch]$ExpectFailure) {
+function Invoke-Probe([string]$Probe, [string]$Runtime, [string]$Name, [string]$Mode = 'full', [switch]$Sdk, [switch]$ExpectFailure, [string]$DependencyPath) {
     $target = Join-Path $Runtime '__lyflow_release_probe.exe'
     if (Test-Path -LiteralPath $target) { throw 'Reserved release probe filename already exists in package.' }
     Copy-Item -LiteralPath $Probe -Destination $target
@@ -63,7 +63,7 @@ function Invoke-Probe([string]$Probe, [string]$Runtime, [string]$Name, [string]$
         $output = Join-Path $work "$Name.json"
         $arguments = @($Runtime, $output, $Mode, $fixtures)
         if ($Sdk) { $arguments += 'sdk' }
-        Invoke-Isolated $target $arguments $Name -ExpectFailure:$ExpectFailure
+        Invoke-Isolated $target $arguments $Name -ExpectFailure:$ExpectFailure -DependencyPath $DependencyPath
         if (-not $ExpectFailure) { return Get-Content -LiteralPath $output -Raw | ConvertFrom-Json }
     } finally { Remove-Item -LiteralPath $target -Force }
 }
@@ -101,6 +101,9 @@ try {
     foreach ($field in @('engineVersion','abiVersion','sourceRevision','architecture','buildConfiguration')) {
         if ($runtimeMetadata.$field -ne $sdkMetadata.$field) { throw "SDK/runtime $field mismatch" }
     }
+    $expectedRevision = & git -C $root rev-parse HEAD
+    if ($LASTEXITCODE -ne 0 -or $runtimeMetadata.sourceRevision -ne $expectedRevision.Trim()) { throw 'Package source revision differs from the verified checkout.' }
+    if ($ArchiveDir -and $runtimeArchive[0].Name -ne "lyflow-runtime-win-x64-v$($runtime.engineVersion).zip") { throw 'Archive filename version differs from runtime version.' }
     Invoke-Isolated (Join-Path $sdkBin 'lyflow.exe') @('manifest','--check') 'cli-manifest'
     $gsProbe = Build-Probe 'gs-probe'
     $gs = Invoke-Probe $gsProbe $RuntimeDir 'gs-fixed-client'
@@ -138,7 +141,11 @@ try {
             'missing-listed-file' { $metadata.files += [pscustomobject]@{ path = 'missing-required-license.txt' } }
         }
         $metadata | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $metadataPath -Encoding utf8
-        Invoke-Probe $probe $negative $case -ExpectFailure
+        if ($case -in @('missing-core','missing-onnx')) {
+            Invoke-Probe $probe $negative $case 'load-only' -ExpectFailure -DependencyPath $RuntimeDir
+        } else {
+            Invoke-Probe $probe $negative $case -ExpectFailure
+        }
     }
     [ordered]@{
         status = 'passed'; engineVersion = $runtime.engineVersion; abiVersion = $runtime.abiVersion

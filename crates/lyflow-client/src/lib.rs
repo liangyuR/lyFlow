@@ -406,17 +406,16 @@ macro_rules! sym {
     }};
 }
 
-/// Windows：绝对路径 + LOAD_WITH_ALTERED_SEARCH_PATH，PCL / yaml-cpp 那些依赖
-/// 从 DLL 自己的目录解析，而不是 exe 目录 —— 开发期这两处装的不是同一套。
+/// Windows 仅从 DLL 所在目录解析非系统运行依赖。
 #[cfg(windows)]
 fn open_library(path: &Path) -> Result<Library, libloading::Error> {
-    use libloading::os::windows::{Library as WinLibrary, LOAD_WITH_ALTERED_SEARCH_PATH};
+    use libloading::os::windows::{Library as WinLibrary, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR};
     let abs = if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir().unwrap_or_default().join(path)
     };
-    unsafe { WinLibrary::load_with_flags(&abs, LOAD_WITH_ALTERED_SEARCH_PATH) }.map(Library::from)
+    unsafe { WinLibrary::load_with_flags(&abs, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR) }.map(Library::from)
 }
 
 #[cfg(not(windows))]

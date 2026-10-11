@@ -641,7 +641,14 @@ inline void IndicesView::reset() {
 
 #if defined(_WIN32)
 inline void Client::loadW(const std::wstring& dllPath) {
-  handle_ = ::LoadLibraryExW(dllPath.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+  const DWORD needed = ::GetFullPathNameW(dllPath.c_str(), 0, nullptr, nullptr);
+  if (!needed) throw ClientError("无法解析 DLL 绝对路径");
+  std::wstring absolute(needed, L'\0');
+  const DWORD length = ::GetFullPathNameW(dllPath.c_str(), needed, absolute.data(), nullptr);
+  if (!length || length >= needed) throw ClientError("无法解析 DLL 绝对路径");
+  absolute.resize(length);
+  handle_ = ::LoadLibraryExW(absolute.c_str(), nullptr,
+                            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR);
   if (!handle_) {
     throw ClientError("加载 lyflow_core.dll 失败，GetLastError=" +
                       std::to_string(static_cast<unsigned long>(::GetLastError())));

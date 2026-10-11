@@ -83,10 +83,12 @@ jobs:
           "baseline=$baseline" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "toolset=$toolset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: native-cache-restore
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-std-glue-v1
+          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-std-glue-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-std-glue-v1-
 
       - name: 固定 Rust 工具链
         shell: pwsh
@@ -108,6 +110,21 @@ jobs:
           pnpm run package @arguments
           if ($LASTEXITCODE -ne 0) { throw 'Windows 发包门禁失败' }
 
+      - name: 检查可保存的依赖缓存
+        if: always()
+        id: native-cache-state
+        shell: pwsh
+        run: |
+          $cache = Join-Path $env:GITHUB_WORKSPACE 'build/release-deps/binary-cache'
+          $exists = (Test-Path -LiteralPath $cache -PathType Container) -and ($null -ne (Get-ChildItem -LiteralPath $cache -File -Recurse -Filter '*.zip' | Select-Object -First 1))
+          "exists=$($exists.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - uses: actions/cache/save@v4
+        if: always() && steps.native-cache-state.outputs.exists == 'true' && steps.native-cache-restore.outputs.cache-primary-key != '' && steps.native-cache-restore.outputs.cache-hit != 'true'
+        with:
+          path: build/release-deps/binary-cache
+          key: ${{ steps.native-cache-restore.outputs.cache-primary-key }}
+
       - uses: actions/upload-artifact@v4
         with:
           name: windows-release
@@ -115,6 +132,20 @@ jobs:
             ${{ runner.temp }}/lyflow-release/*.zip
             ${{ runner.temp }}/lyflow-release/*.json
           if-no-files-found: error
+          retention-days: 14
+
+      - name: 保存构建与暂存诊断
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-build-diagnostics
+          path: |
+            build/release-stage/*.json
+            build/release-stage/*.log
+            build/release-verification/**/*.json
+            build/release-verification/**/*.log
+            build/release-core/**/*.log
+          if-no-files-found: warn
           retention-days: 14
 
   verify:
@@ -162,6 +193,17 @@ jobs:
           name: windows-release-verification
           path: ${{ runner.temp }}/release-verification.json
           if-no-files-found: error
+          retention-days: 14
+
+      - name: 保存独立验收探针诊断
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-verification-diagnostics
+          path: |
+            build/release-verification/**/*.json
+            build/release-verification/**/*.log
+          if-no-files-found: warn
           retention-days: 14
 
   publish:

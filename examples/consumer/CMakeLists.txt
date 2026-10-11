@@ -14,6 +14,7 @@ foreach(sample embed_minimal embed_concurrent embed_inject)
   target_link_libraries(${sample} PRIVATE lyflow::client)
   if(MSVC)
     target_compile_options(${sample} PRIVATE /EHsc /W4 /utf-8 /permissive-)
+    target_link_options(${sample} PRIVATE /MANIFEST:EMBED "/MANIFESTINPUT:${LYFLOW_EXAMPLES_DIR}/lyflow-utf8.manifest")
   endif()
 endforeach()
 
