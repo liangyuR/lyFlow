@@ -28,9 +28,9 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     return Status::Error(Phase::Execute, "bad_input", "拟合平面至少需要 3 个点", {}, "cloud");
   }
   if (useAxis) {
-    const double len = std::sqrt(static_cast<double>(axis[0]) * axis[0] +
-                                 static_cast<double>(axis[1]) * axis[1] +
-                                 static_cast<double>(axis[2]) * axis[2]);
+    const double len =
+        std::sqrt(static_cast<double>(axis[0]) * axis[0] + static_cast<double>(axis[1]) * axis[1] +
+                  static_cast<double>(axis[2]) * axis[2]);
     if (len < 1e-6) {
       return Status::Error(Phase::Execute, "bad_param", "轴约束的方向向量不能是零向量", "axis");
     }
@@ -57,7 +57,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   pcl::ModelCoefficients coefficients;
   seg.segment(inliers, coefficients);
 
-  if (ctx.cancelled()) return Status::Ok();
+  if (ctx.cancelled())
+    return Status::Ok();
   ctx.progress(0.9f);
 
   if (inliers.indices.empty() || coefficients.values.size() < 4) {
@@ -84,7 +85,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerSegmentRansacPlane(Registry& r) {
   OperatorDesc op;
@@ -93,12 +94,13 @@ void registerSegmentRansacPlane(Registry& r) {
   op.label = "RANSAC 平面";
   op.category = "分割";
   op.keywords = {"plane", "ransac", "ground", "segmentation", "平面", "地面", "分割"};
-  op.doc = "用 RANSAC 拟合最大平面，输出内点下标与平面方程。接 Extract Indices 就能把地面分离出去。";
+  op.doc =
+      "用 RANSAC 拟合最大平面，输出内点下标与平面方程。接 Extract Indices 就能把地面分离出去。";
 
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "输入点云。", true}};
   op.outputs = {
       Port{"inliers", "Indices", "Inliers", "落在平面上的点下标。", true},
-      Port{"plane",   "Plane",   "Plane",   "平面方程 n·p + d = 0。", true},
+      Port{"plane", "Plane", "Plane", "平面方程 n·p + d = 0。", true},
   };
 
   Param dist;
@@ -164,4 +166,4 @@ void registerSegmentRansacPlane(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

@@ -20,4 +20,4 @@ void registerPackOps(Registry& r) {
   registerSnippets(r);
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

@@ -37,9 +37,20 @@
         "iterations": 25,
         "offset": [0.01, -0.02],
         "roi": [-0.35, -0.25, 0.25, 0.3],
-        "pose": [0.9659258263, -0.2588190451, 0, 0.1, 0.2588190451, 0.9659258263, 0, 0, 0, 0, 1, 0.05, 0, 0, 0, 1],
+        "pose": [
+          0.9659258263, -0.2588190451, 0, 0.1, 0.2588190451, 0.9659258263, 0, 0, 0, 0, 1, 0.05, 0,
+          0, 0, 1
+        ],
         "tint": [0.95, 0.45, 0.2],
-        "response": { "interp": "smooth", "points": [[0, 0], [0.3, 0.12], [0.7, 0.8], [1, 1]] },
+        "response": {
+          "interp": "smooth",
+          "points": [
+            [0, 0],
+            [0.3, 0.12],
+            [0.7, 0.8],
+            [1, 1]
+          ]
+        },
         "tag": "demo",
         "features": 7
       },
@@ -47,9 +58,21 @@
     }
   ],
   "edges": [
-    { "id": "e1", "from": { "node": "n_gen", "port": "cloud" }, "to": { "node": "n_pre_a", "port": "cloud" } },
-    { "id": "e2", "from": { "node": "n_gen", "port": "cloud" }, "to": { "node": "n_pre_b", "port": "cloud" } },
-    { "id": "e3", "from": { "node": "n_pre_a", "port": "cloud" }, "to": { "node": "n_show", "port": "cloud" } }
+    {
+      "id": "e1",
+      "from": { "node": "n_gen", "port": "cloud" },
+      "to": { "node": "n_pre_a", "port": "cloud" }
+    },
+    {
+      "id": "e2",
+      "from": { "node": "n_gen", "port": "cloud" },
+      "to": { "node": "n_pre_b", "port": "cloud" }
+    },
+    {
+      "id": "e3",
+      "from": { "node": "n_pre_a", "port": "cloud" },
+      "to": { "node": "n_show", "port": "cloud" }
+    }
   ],
   "groups": [],
   "subgraphs": {
@@ -69,10 +92,20 @@
       ],
       "edges": [],
       "inputs": [
-        { "name": "cloud", "type": "PointCloud", "label": "Cloud", "to": [{ "node": "s_voxel", "port": "cloud" }] }
+        {
+          "name": "cloud",
+          "type": "PointCloud",
+          "label": "Cloud",
+          "to": [{ "node": "s_voxel", "port": "cloud" }]
+        }
       ],
       "outputs": [
-        { "name": "cloud", "type": "PointCloud", "label": "Cloud", "from": { "node": "s_voxel", "port": "cloud" } }
+        {
+          "name": "cloud",
+          "type": "PointCloud",
+          "label": "Cloud",
+          "from": { "node": "s_voxel", "port": "cloud" }
+        }
       ],
       "params": []
     }

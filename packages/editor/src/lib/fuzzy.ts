@@ -13,7 +13,7 @@ const SCORE_CAMEL_START = 10;
 const PENALTY_GAP = -1;
 
 function isWordSeparator(c: string): boolean {
-  return c === " " || c === "." || c === "_" || c === "-" || c === "/";
+  return c === ' ' || c === '.' || c === '_' || c === '-' || c === '/';
 }
 
 function isUpper(c: string): boolean {
@@ -53,7 +53,7 @@ export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
       score += Math.max(PENALTY_GAP * (found - lastHit - 1), -6);
     }
 
-    const prev = found > 0 ? text[found - 1]! : "";
+    const prev = found > 0 ? text[found - 1]! : '';
     if (found === 0 || isWordSeparator(prev)) {
       score += SCORE_WORD_START;
     } else if (isUpper(text[found]!) && !isUpper(prev)) {

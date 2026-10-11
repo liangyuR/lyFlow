@@ -39,17 +39,17 @@ struct Scene {
   P2 nozzle{150, 500};
   double headingDeg = -60;
   bool swirl = false;
-  double beadWidth = 20;  ///< 直胶是胶宽；螺旋胶是外包络的宽度
-  double rope = 0;        ///< 螺旋胶：一股胶沿法向的宽度
-  double amp = 0;         ///< 螺旋胶：这股胶左右摆的幅度（外包络 = 2·amp + rope）
+  double beadWidth = 20; ///< 直胶是胶宽；螺旋胶是外包络的宽度
+  double rope = 0;       ///< 螺旋胶：一股胶沿法向的宽度
+  double amp = 0;        ///< 螺旋胶：这股胶左右摆的幅度（外包络 = 2·amp + rope）
   double pitch = 24;
-  double phase = 2;       ///< 摆动的极值落在 s ≡ 0 (mod 4) 上，与站对齐
-  double edgeGap = 35;    ///< 胶的近边 → 零件边
-  int partSide = +1;      ///< 零件边在胶的哪一侧（+1 = 法向那一侧）
-  std::vector<std::pair<double, double>> breaks;  ///< 沿胶路的断口 [a, b]
+  double phase = 2;                              ///< 摆动的极值落在 s ≡ 0 (mod 4) 上，与站对齐
+  double edgeGap = 35;                           ///< 胶的近边 → 零件边
+  int partSide = +1;                             ///< 零件边在胶的哪一侧（+1 = 法向那一侧）
+  std::vector<std::pair<double, double>> breaks; ///< 沿胶路的断口 [a, b]
   bool bead = true;
-  bool dent = false;      ///< 没有胶，只有一条边缘很缓的暗带（零件上的压痕）
-  double noise = 2;       ///< 高斯噪声的 σ（灰度级）；真实帧的翻边是过曝的 255，胶上的 JPEG 噪声约这么大
+  bool dent = false; ///< 没有胶，只有一条边缘很缓的暗带（零件上的压痕）
+  double noise = 2;  ///< 高斯噪声的 σ（灰度级）；真实帧的翻边是过曝的 255，胶上的 JPEG 噪声约这么大
   double blur = 1.0;
   unsigned seed = 7;
 };
@@ -69,7 +69,7 @@ Scene swirlScene(double W) {
     s.amp = 4.8;
     s.rope = W - 2 * s.amp;
   }
-  s.partSide = -1;  // 螺旋胶的零件边放在另一侧：「自动判侧」两侧都要验到
+  s.partSide = -1; // 螺旋胶的零件边放在另一侧：「自动判侧」两侧都要验到
   return s;
 }
 
@@ -79,7 +79,8 @@ double sceneValue(const Scene& sc, double x, double y) {
   const P2 d(x - sc.nozzle.x, y - sc.nozzle.y);
   const double along = glue::dot(d, u);
   const double across = glue::dot(d, v);
-  if (d.x * d.x + d.y * d.y <= 35.0 * 35.0) return 30.0;  // 喷嘴的阴影
+  if (d.x * d.x + d.y * d.y <= 35.0 * 35.0)
+    return 30.0; // 喷嘴的阴影
   const double flange = 190.0 + 0.06 * (x - 320.0) - 0.04 * (y - 280.0);
   const double outside = 45.0 + 0.02 * (x - 320.0);
   const double edgeAt = 0.5 * sc.beadWidth + sc.edgeGap;
@@ -88,9 +89,11 @@ double sceneValue(const Scene& sc, double x, double y) {
     // 压痕 / 阴影：一条高斯剖面（σ = 20 px，半深宽约 47 px）的暗带，暗 70 个灰度，边缘是缓的
     value -= 70.0 * std::exp(-0.5 * across * across / 400.0);
   }
-  if (!sc.bead || along < 0 || along > 470) return value;
+  if (!sc.bead || along < 0 || along > 470)
+    return value;
   for (const auto& [a, b] : sc.breaks) {
-    if (along >= a && along <= b) return value;
+    if (along >= a && along <= b)
+      return value;
   }
   bool inBead;
   if (sc.swirl) {
@@ -143,15 +146,15 @@ struct Params {
 };
 
 Json inspectGraph(const Params& p) {
-  return makeGraph(
-      {N{"n_load", "io.load_image", Json{{"source", "inputs"}}}, N{"n_path", "glue.bead_path", p.path},
-       N{"n_width", "glue.bead_width", p.width}, N{"n_breaks", "glue.bead_breaks", p.breaks},
-       N{"n_edge", "glue.edge_distance", p.edge}, N{"n_judge", "glue.judge", p.judge}},
-      {E{"n_load.image", "n_path.image"}, E{"n_load.image", "n_width.image"},
-       E{"n_path.path", "n_width.path"}, E{"n_width.bead", "n_breaks.bead"},
-       E{"n_load.image", "n_edge.image"}, E{"n_width.bead", "n_edge.bead"},
-       E{"n_width.bead", "n_judge.bead"}, E{"n_breaks.breaks", "n_judge.breaks"},
-       E{"n_edge.edge", "n_judge.edge"}});
+  return makeGraph({N{"n_load", "io.load_image", Json{{"source", "inputs"}}},
+                    N{"n_path", "glue.bead_path", p.path}, N{"n_width", "glue.bead_width", p.width},
+                    N{"n_breaks", "glue.bead_breaks", p.breaks},
+                    N{"n_edge", "glue.edge_distance", p.edge}, N{"n_judge", "glue.judge", p.judge}},
+                   {E{"n_load.image", "n_path.image"}, E{"n_load.image", "n_width.image"},
+                    E{"n_path.path", "n_width.path"}, E{"n_width.bead", "n_breaks.bead"},
+                    E{"n_load.image", "n_edge.image"}, E{"n_width.bead", "n_edge.bead"},
+                    E{"n_width.bead", "n_judge.bead"}, E{"n_breaks.breaks", "n_judge.breaks"},
+                    E{"n_edge.edge", "n_judge.edge"}});
 }
 
 Params sceneParams(const Scene& sc) {
@@ -188,7 +191,8 @@ Result run(const Json& doc, const cv::Mat& gray, std::vector<exec::InjectedInput
   r.status = log.runStatus();
   if (r.status != "ok") {
     for (const Json& e : log.ofKind("node_state")) {
-      if (e.value("state", "") == "error") MESSAGE(e.dump());
+      if (e.value("state", "") == "error")
+        MESSAGE(e.dump());
     }
     return r;
   }
@@ -215,7 +219,8 @@ Result run(const Json& doc, const cv::Mat& gray, std::vector<exec::InjectedInput
 std::vector<double> numbers(const Json& arr) {
   std::vector<double> out;
   for (const Json& v : arr) {
-    if (v.is_number()) out.push_back(v.get<double>());
+    if (v.is_number())
+      out.push_back(v.get<double>());
   }
   return out;
 }
@@ -226,7 +231,7 @@ double medianOf(std::vector<double> v) { return glue::median(std::move(v)); }
 const std::vector<std::pair<double, double>> kBreaks = {
     {142, 152}, {182, 202}, {234, 274}, {306, 386}};
 
-}  // namespace
+} // namespace
 
 TEST_CASE("glue：合成直胶与螺旋胶，宽度 {8, 20, 40, 70} px 的胶宽、边距中位误差 ≤ 1.0 px，零误报") {
   for (const bool swirl : {false, true}) {
@@ -240,11 +245,12 @@ TEST_CASE("glue：合成直胶与螺旋胶，宽度 {8, 20, 40, 70} px 的胶宽
       CHECK(r.pathInfo.value("ok", false));
       CHECK(r.pathInfo.value("beadlike", false));
       const std::vector<double> widths = numbers(r.stations["width"]);
-      REQUIRE(widths.size() == r.stations["count"].get<std::size_t>());  // 每一站都有胶
+      REQUIRE(widths.size() == r.stations["count"].get<std::size_t>()); // 每一站都有胶
       const double wMed = medianOf(widths);
       CHECK(std::fabs(wMed - W) <= 1.0);
-      MESSAGE("form=" << std::string(swirl ? "swirl" : "straight") << " W=" << W << " 胶宽中位 " << wMed
-                      << " 边距中位 " << medianOf(numbers(r.edge["distance"])) << " 侧 " << r.edge["side"]);
+      MESSAGE("form=" << std::string(swirl ? "swirl" : "straight") << " W=" << W << " 胶宽中位 "
+                      << wMed << " 边距中位 " << medianOf(numbers(r.edge["distance"])) << " 侧 "
+                      << r.edge["side"]);
       CHECK(r.edge["side"] == (sc.partSide > 0 ? "right" : "left"));
       const double dMed = medianOf(numbers(r.edge["distance"]));
       CHECK(std::fabs(dMed - sc.edgeGap) <= 1.0);
@@ -264,7 +270,8 @@ TEST_CASE("glue：合成直胶与螺旋胶，宽度 {8, 20, 40, 70} px 的胶宽
   }
 }
 
-TEST_CASE("glue：合成断口 {10, 20, 40, 80} px —— minLength=20 恰好报出 ≥ 20 的那几段，起止误差 ≤ stationStep，其余零误报") {
+TEST_CASE(
+    "glue：合成断口 {10, 20, 40, 80} px —— minLength=20 恰好报出 ≥ 20 的那几段，起止误差 ≤ stationStep，其余零误报") {
   // 一帧一个断口（产线上一帧里一般至多一处），两端落在两站正中间（s ≡ 2 mod 4）
   for (const bool swirl : {false, true}) {
     for (const double W : {8.0, 20.0, 40.0, 70.0}) {
@@ -280,9 +287,10 @@ TEST_CASE("glue：合成断口 {10, 20, 40, 80} px —— minLength=20 恰好报
         REQUIRE(r.pathInfo.value("ok", false));
         const Json& got = r.breaks["breaks"];
         std::string seen;
-        for (const Json& b : got) seen += "[" + b["sStart"].dump() + ", " + b["sEnd"].dump() + "] ";
-        MESSAGE("form=" << std::string(swirl ? "swirl" : "straight") << " W=" << W << " 断口 [" << truth.first
-                        << ", " << truth.second << "] 报出 " << seen);
+        for (const Json& b : got)
+          seen += "[" + b["sStart"].dump() + ", " + b["sEnd"].dump() + "] ";
+        MESSAGE("form=" << std::string(swirl ? "swirl" : "straight") << " W=" << W << " 断口 ["
+                        << truth.first << ", " << truth.second << "] 报出 " << seen);
         const bool expected = truth.second - truth.first >= 20.0;
         REQUIRE(got.size() == (expected ? 1u : 0u));
         if (expected) {
@@ -292,7 +300,7 @@ TEST_CASE("glue：合成断口 {10, 20, 40, 80} px —— minLength=20 恰好报
           CHECK(r.verdict["counts"]["break"] == 1);
           CHECK(r.verdict["message"].get<std::string>().rfind("NG：断胶 1 处", 0) == 0);
         } else {
-          CHECK(r.verdict["ok"] == true);  // 短于 minLength 的不报，也不判 NG
+          CHECK(r.verdict["ok"] == true); // 短于 minLength 的不报，也不判 NG
         }
       }
     }
@@ -334,7 +342,8 @@ TEST_CASE("glue：一片空白（连暗带都没有）也是「检测区内没�
   CHECK(r.verdict["message"] == glue::kNoBeadMessage);
 }
 
-TEST_CASE("glue：calib 接上合成单应（0.1 mm/px 加一点透视）—— 宽度、边距、断口长度按映射后两点的距离出 mm") {
+TEST_CASE(
+    "glue：calib 接上合成单应（0.1 mm/px 加一点透视）—— 宽度、边距、断口长度按映射后两点的距离出 mm") {
   // [X, Y, W] = H·[x, y, 1]：0.1 mm/px 的缩放，外加随 x、y 变化的透视（图的两头差约 4%）
   const std::array<double, 9> H = {0.1, 0.004, -3.0, -0.002, 0.1, 5.0, 4e-5, 3e-5, 1.0};
   std_image::PlaneCalib calib;
@@ -346,7 +355,7 @@ TEST_CASE("glue：calib 接上合成单应（0.1 mm/px 加一点透视）—— 
   sc.beadWidth = 40;
   sc.breaks = {{234, 274}};
   Params p = sceneParams(sc);
-  p.breaks = Json{{"minLength", 2.0}};  // 接了标定，minLength 跟着 bead 的单位走：mm
+  p.breaks = Json{{"minLength", 2.0}}; // 接了标定，minLength 跟着 bead 的单位走：mm
   const std::vector<exec::InjectedInput> inject = {
       exec::InjectedInput{"n_width", "calib", Data::record(rec)},
       exec::InjectedInput{"n_edge", "calib", Data::record(rec)}};
@@ -361,12 +370,14 @@ TEST_CASE("glue：calib 接上合成单应（0.1 mm/px 加一点透视）—— 
   // 宽度：每站 = 两边的像素点映射之后的距离（独立算一遍对照）
   std::size_t checked = 0;
   for (std::size_t i = 0; i < r.stations["count"].get<std::size_t>(); ++i) {
-    if (!r.stations["present"][i].get<bool>()) continue;
+    if (!r.stations["present"][i].get<bool>())
+      continue;
     const P2 a = glue::pxOf(r.stations["left"][i]);
     const P2 b = glue::pxOf(r.stations["right"][i]);
     CHECK(r.stations["width"][i].get<double>() == doctest::Approx(mapDist(a, b)).epsilon(1e-3));
     // 与 px 宽度差一个随位置变的比例，量级是 0.1 mm/px
-    const double ratio = r.stations["width"][i].get<double>() / r.stations["widthPx"][i].get<double>();
+    const double ratio =
+        r.stations["width"][i].get<double>() / r.stations["widthPx"][i].get<double>();
     CHECK(ratio > 0.08);
     CHECK(ratio < 0.12);
     ++checked;
@@ -375,7 +386,8 @@ TEST_CASE("glue：calib 接上合成单应（0.1 mm/px 加一点透视）—— 
   // 边距：量起点 → 零件边点，映射之后的距离
   checked = 0;
   for (std::size_t i = 0; i < r.edge["count"].get<std::size_t>(); ++i) {
-    if (r.edge["status"][i] != "ok") continue;
+    if (r.edge["status"][i] != "ok")
+      continue;
     const P2 a = glue::pxOf(r.edge["from"][i]);
     const P2 b = glue::pxOf(r.edge["edge"][i]);
     CHECK(r.edge["distance"][i].get<double>() == doctest::Approx(mapDist(a, b)).epsilon(1e-3));
@@ -418,7 +430,8 @@ TEST_CASE("glue：加载期校验 —— zone / sector / widthRange 填反了、
   auto errors = [](const Json& doc) {
     std::vector<std::string> paths;
     for (const Json& d : Json::parse(exec::validateGraphJson(doc.dump(), {}))) {
-      if (d.value("severity", "") == "error") paths.push_back(d.value("paramPath", ""));
+      if (d.value("severity", "") == "error")
+        paths.push_back(d.value("paramPath", ""));
     }
     return paths;
   };
@@ -428,7 +441,7 @@ TEST_CASE("glue：加载期校验 —— zone / sector / widthRange 填反了、
   CHECK(errors(inspectGraph(p)) == std::vector<std::string>{"zone"});
   p.path = Json{{"sector", {10, -10}}};
   CHECK(errors(inspectGraph(p)) == std::vector<std::string>{"sector"});
-  p.path = Json{{"sector", {10, -10}}, {"headingSource", "param"}};  // 给了方向就不看扇区
+  p.path = Json{{"sector", {10, -10}}, {"headingSource", "param"}}; // 给了方向就不看扇区
   CHECK(errors(inspectGraph(p)).empty());
   p.path = Json::object();
   p.width = Json{{"widthRange", {60, 20}}};
@@ -444,34 +457,36 @@ TEST_CASE("glue：响应图只算一块（ROI）时，块里的值与整幅图�
   Scene sc;
   const cv::Mat gray = render(sc);
   const cv::Rect roi(200, 150, 180, 160);
-  const glue::Field whole = glue::responseField(gray, false, 90, cv::Rect(0, 0, gray.cols, gray.rows));
+  const glue::Field whole =
+      glue::responseField(gray, false, 90, cv::Rect(0, 0, gray.cols, gray.rows));
   const glue::Field part = glue::responseField(gray, false, 90, roi);
   double maxDiff = 0;
   for (int y = roi.y; y < roi.y + roi.height - 1; y += 3) {
     for (int x = roi.x; x < roi.x + roi.width - 1; x += 3) {
-      maxDiff = std::max(maxDiff, std::fabs(whole.at(x + 0.25, y + 0.5) - part.at(x + 0.25, y + 0.5)));
+      maxDiff =
+          std::max(maxDiff, std::fabs(whole.at(x + 0.25, y + 0.5) - part.at(x + 0.25, y + 0.5)));
     }
   }
   CHECK(maxDiff == 0.0);
-  CHECK(part.at(roi.x - 1.0, roi.y + 5.0) == glue::kInvalid);  // 块外不可信
+  CHECK(part.at(roi.x - 1.0, roi.y + 5.0) == glue::kInvalid); // 块外不可信
 }
 
 TEST_CASE("glue：人造断胶 —— 源带取干净的一侧，另一条检测链查得出，起止误差 ≤ 5 px") {
   Scene sc;
   sc.beadWidth = 30;
-  const Json doc = makeGraph(
-      {N{"n_load", "io.load_image", Json{{"source", "inputs"}}},
-       N{"n_path", "glue.bead_path", sceneParams(sc).path},
-       N{"n_width", "glue.bead_width", Json::object()},
-       N{"n_synth", "glue.synth_break", Json{{"sStart", 202}, {"length", 60}}},
-       N{"n_path2", "glue.bead_path", sceneParams(sc).path},
-       N{"n_width2", "glue.bead_width", Json::object()},
-       N{"n_breaks2", "glue.bead_breaks", Json::object()}},
-      {E{"n_load.image", "n_path.image"}, E{"n_load.image", "n_width.image"},
-       E{"n_path.path", "n_width.path"}, E{"n_load.image", "n_synth.image"},
-       E{"n_width.bead", "n_synth.bead"}, E{"n_synth.image", "n_path2.image"},
-       E{"n_synth.image", "n_width2.image"}, E{"n_path2.path", "n_width2.path"},
-       E{"n_width2.bead", "n_breaks2.bead"}});
+  const Json doc =
+      makeGraph({N{"n_load", "io.load_image", Json{{"source", "inputs"}}},
+                 N{"n_path", "glue.bead_path", sceneParams(sc).path},
+                 N{"n_width", "glue.bead_width", Json::object()},
+                 N{"n_synth", "glue.synth_break", Json{{"sStart", 202}, {"length", 60}}},
+                 N{"n_path2", "glue.bead_path", sceneParams(sc).path},
+                 N{"n_width2", "glue.bead_width", Json::object()},
+                 N{"n_breaks2", "glue.bead_breaks", Json::object()}},
+                {E{"n_load.image", "n_path.image"}, E{"n_load.image", "n_width.image"},
+                 E{"n_path.path", "n_width.path"}, E{"n_load.image", "n_synth.image"},
+                 E{"n_width.bead", "n_synth.bead"}, E{"n_synth.image", "n_path2.image"},
+                 E{"n_synth.image", "n_width2.image"}, E{"n_path2.path", "n_width2.path"},
+                 E{"n_width2.bead", "n_breaks2.bead"}});
   std::vector<exec::InjectedInput> inject = {
       exec::InjectedInput{"n_load", "image", Data::image(imageOf(render(sc)))}};
   Session s(doc, {}, {}, false, 0, false, std::move(inject));
@@ -483,7 +498,7 @@ TEST_CASE("glue：人造断胶 —— 源带取干净的一侧，另一条检测
   const Json in = info.asRecord()->data;
   MESSAGE(in.dump());
   CHECK(in["ok"] == true);
-  CHECK(in["side"] == "left");  // 零件边在右侧：右边的源带里有零件边的暗区，不干净
+  CHECK(in["side"] == "left"); // 零件边在右侧：右边的源带里有零件边的暗区，不干净
   CHECK(image.asImage()->channels == 1);
   const Json& got = breaks.asRecord()->data["breaks"];
   REQUIRE(got.size() == 1);
@@ -500,7 +515,8 @@ TEST_CASE("glue：叠画是合格的 lyflow.overlay2d（顺手写一份样例给
   REQUIRE(r.overlay.is_object());
   CHECK(r.overlay["frame"] == "image");
   std::set<std::string> roles;
-  for (const Json& item : r.overlay["items"]) roles.insert(item.value("role", ""));
+  for (const Json& item : r.overlay["items"])
+    roles.insert(item.value("role", ""));
   for (const char* want : {"path", "edge.left", "edge.right", "part", "defect", "ng"}) {
     CHECK_MESSAGE(roles.count(want) == 1, "缺 role " << want);
   }

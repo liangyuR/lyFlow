@@ -19,4 +19,4 @@ void setCloudWriter(CloudWriterFn fn);
 Status saveCloudToFile(const PointCloud& cloud, const std::filesystem::path& file,
                        const std::string& format);
 
-}  // namespace lyflow
+} // namespace lyflow

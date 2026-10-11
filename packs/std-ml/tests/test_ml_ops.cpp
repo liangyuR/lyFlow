@@ -48,12 +48,13 @@ bool testModel(std::filesystem::path& model) {
   return true;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("ml.onnx_run 注册了，且带 pack 标记") {
   // 裸注册表里没有类型表，所以校验的是全局那一份
   const auto problems = ensureRegistry().validate();
-  for (const auto& p : problems) MESSAGE(p);
+  for (const auto& p : problems)
+    MESSAGE(p);
   CHECK(problems.empty());
   const OperatorDesc* op = ensureRegistry().find("ml.onnx_run");
   REQUIRE(op != nullptr);
@@ -78,7 +79,8 @@ TEST_CASE("ml.onnx_run 没给模型时报 bad_param 而不是崩") {
 
 TEST_CASE("ml.onnx_run 对 [2,6,1280] 零张量给出 [2,8,1280]") {
   std::filesystem::path model;
-  if (!testModel(model)) return;
+  if (!testModel(model))
+    return;
   Call c;
   Tensor t;
   t.shape = {2, 6, 1280};
@@ -95,7 +97,8 @@ TEST_CASE("ml.onnx_run 对 [2,6,1280] 零张量给出 [2,8,1280]") {
 
 TEST_CASE("ml.onnx_run 形状不符时报 bad_input 并指回输入端口") {
   std::filesystem::path model;
-  if (!testModel(model)) return;
+  if (!testModel(model))
+    return;
   Call c;
   Tensor t;
   t.shape = {2, 3, 7};

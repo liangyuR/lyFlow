@@ -1,9 +1,9 @@
 // 连线的右键菜单：插入算子、查看内容、在此插入 Reroute、删除连线。
 
-import { useRef } from "react";
+import { useRef } from 'react';
 
-import { useMenuPlacement } from "../hooks/useMenuPlacement";
-import { useGraphStore } from "../store/graph";
+import { useMenuPlacement } from '../hooks/useMenuPlacement';
+import { useGraphStore } from '../store/graph';
 
 export interface EdgeMenuState {
   edgeId: string;
@@ -29,7 +29,13 @@ export function EdgeContextMenu({
   const style = useMenuPlacement(box, { x: menu.x, y: menu.y });
   const at = { x: menu.x, y: menu.y };
   return (
-    <div ref={box} className="ctxmenu" style={style} data-testid="edge-context-menu" onClick={(e) => e.stopPropagation()}>
+    <div
+      ref={box}
+      className="ctxmenu"
+      style={style}
+      data-testid="edge-context-menu"
+      onClick={(e) => e.stopPropagation()}
+    >
       <button
         type="button"
         data-testid="edge-ctx-insert"

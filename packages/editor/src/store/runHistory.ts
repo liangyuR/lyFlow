@@ -1,12 +1,12 @@
 // 调参记录的 store（纯函数在 lib/runHistory）。startRun 拿到 runId 时记下交给 core 的那份图与图参数；
 // run_started 补上这次算了哪几个节点；收场（不是预览）时补上状态、耗时与量测读数。只在本次会话里，换一张图（打开、新建）就清空。
 
-import { create } from "zustand";
+import { create } from 'zustand';
 
-import { runReadingsOf, type RunRecord } from "../lib/runHistory";
-import type { NodeExecution, RunRequest } from "./execution";
-import type { RunStatus } from "../types/execution";
-import type { GraphDoc } from "../types/graph";
+import { runReadingsOf, type RunRecord } from '../lib/runHistory';
+import type { NodeExecution, RunRequest } from './execution';
+import type { RunStatus } from '../types/execution';
+import type { GraphDoc } from '../types/graph';
 
 /** 留最近这么多次。更早的调参过程回头看的少。 */
 export const MAX_RUN_RECORDS = 50;
@@ -28,7 +28,12 @@ interface RunHistoryState {
   ): void;
   /** run_started 的计划（完整 id）：运行到某个节点时只有这些是这一次算的，读数只记它们。 */
   planned(runId: string, plan: readonly string[]): void;
-  finish(runId: string, status: RunStatus, durationMs: number | null, nodes: ReadonlyMap<string, NodeExecution>): void;
+  finish(
+    runId: string,
+    status: RunStatus,
+    durationMs: number | null,
+    nodes: ReadonlyMap<string, NodeExecution>,
+  ): void;
   clear(): void;
 }
 
@@ -47,8 +52,8 @@ export const useRunHistoryStore = create<RunHistoryState>((set, get) => ({
   begin(runId, doc, params, recipe, request, recipeId = null) {
     // 被这一次顶掉的（抢占、排队时被取消）收不到自己的收场：还挂着「运行中」的记成取消 —— 预览、单节点运行也会顶掉它
     const prev = get().records;
-    const settled = prev.some((r) => r.status === "running")
-      ? prev.map((r) => (r.status === "running" ? { ...r, status: "cancelled" as const } : r))
+    const settled = prev.some((r) => r.status === 'running')
+      ? prev.map((r) => (r.status === 'running' ? { ...r, status: 'cancelled' as const } : r))
       : prev;
     // 预览是抽稀过的，读数不能当结论；单节点运行（isolate）只算一个节点，与前后两次比不出东西
     if (request.preview || (request.isolate?.length ?? 0) > 0) {
@@ -65,7 +70,7 @@ export const useRunHistoryStore = create<RunHistoryState>((set, get) => ({
       recipe,
       recipeId,
       targets: request.targets ?? [],
-      status: "running",
+      status: 'running',
       durationMs: null,
       readings: [],
     };
@@ -73,7 +78,10 @@ export const useRunHistoryStore = create<RunHistoryState>((set, get) => ({
     // 留最近的 50 条；基准被挤到外面的话占掉第 50 个位置
     const baseline = get().baseline;
     const keep = all.slice(0, MAX_RUN_RECORDS);
-    const base = baseline && !keep.some((r) => r.runId === baseline) ? all.find((r) => r.runId === baseline) : undefined;
+    const base =
+      baseline && !keep.some((r) => r.runId === baseline)
+        ? all.find((r) => r.runId === baseline)
+        : undefined;
     const records = base ? [...keep.slice(0, MAX_RUN_RECORDS - 1), base] : keep;
     for (const dropped of all) if (!records.includes(dropped)) plans.delete(dropped.runId);
     set({ seq, records });

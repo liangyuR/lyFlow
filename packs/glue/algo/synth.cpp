@@ -28,8 +28,10 @@ bool insideQuad(const P2 q[4], P2 p) {
   int pos = 0, neg = 0;
   for (int i = 0; i < 4; ++i) {
     const double c = cross(q[(i + 1) % 4] - q[i], p - q[i]);
-    if (c > 1e-9) pos += 1;
-    if (c < -1e-9) neg += 1;
+    if (c > 1e-9)
+      pos += 1;
+    if (c < -1e-9)
+      neg += 1;
   }
   return pos == 0 || neg == 0;
 }
@@ -40,7 +42,7 @@ std::string pct(double v) {
   return buf;
 }
 
-}  // namespace
+} // namespace
 
 SynthResult synthBreak(const cv::Mat& gray, const PolylineView& path,
                        const std::vector<Station>& stations, double stationStep, bool bright,
@@ -56,7 +58,8 @@ SynthResult synthBreak(const cv::Mat& gray, const PolylineView& path,
 
   std::vector<const Station*> rows;
   for (const Station& st : stations) {
-    if (st.present && st.s >= res.sFrom - 1e-6 && st.s < res.sTo - 1e-6) rows.push_back(&st);
+    if (st.present && st.s >= res.sFrom - 1e-6 && st.s < res.sTo - 1e-6)
+      rows.push_back(&st);
   }
   res.stations = static_cast<int>(rows.size());
   const int need = std::max(2, static_cast<int>(spec.length / std::max(stationStep, 1e-6)) - 1);
@@ -77,12 +80,14 @@ SynthResult synthBreak(const cv::Mat& gray, const PolylineView& path,
     sec.n = perp(t);
     const Station* near = rows.front();
     for (const Station* st : rows) {
-      if (std::fabs(st->s - sq) < std::fabs(near->s - sq)) near = st;
+      if (std::fabs(st->s - sq) < std::fabs(near->s - sq))
+        near = st;
     }
     sec.lo = near->lo - spec.margin;
     sec.hi = near->hi + spec.margin;
     sections.push_back(sec);
-    if (sq >= res.sTo) break;
+    if (sq >= res.sTo)
+      break;
   }
 
   // 源带干不干净：两侧各看一遍响应
@@ -96,7 +101,8 @@ SynthResult synthBreak(const cv::Mat& gray, const PolylineView& path,
     span = std::max(span, std::max(std::fabs(sec.lo), std::fabs(sec.hi)));
   }
   const double reach = 3.0 * span + 2.0 * spec.shiftExtra + 8.0;
-  const cv::Rect roi(static_cast<int>(std::floor(x0 - reach)), static_cast<int>(std::floor(y0 - reach)),
+  const cv::Rect roi(static_cast<int>(std::floor(x0 - reach)),
+                     static_cast<int>(std::floor(y0 - reach)),
                      static_cast<int>(std::ceil(x1 - x0 + 2 * reach)) + 1,
                      static_cast<int>(std::ceil(y1 - y0 + 2 * reach)) + 1);
   const Field R = responseField(gray, bright, widthMax, roi);
@@ -107,7 +113,8 @@ SynthResult synthBreak(const cv::Mat& gray, const PolylineView& path,
     double best = std::numeric_limits<double>::infinity();
     double offset = std::numeric_limits<double>::quiet_NaN();
     for (std::size_t i = 0; i < stations.size(); ++i) {
-      if (!edges.stations[i].kept) continue;
+      if (!edges.stations[i].kept)
+        continue;
       const double d = std::fabs(stations[i].s - s);
       if (d < best) {
         best = d;
@@ -129,7 +136,8 @@ SynthResult synthBreak(const cv::Mat& gray, const PolylineView& path,
         const double v = R.at(sec.c + sec.n * t);
         total += 1;
         // 图外也算脏：那里没有背景可搬
-        if (crossesEdge || v < 0 || v > spec.contrastMin) dirty += 1;
+        if (crossesEdge || v < 0 || v > spec.contrastMin)
+          dirty += 1;
       }
     }
     return total > 0 ? static_cast<double>(dirty) / total : 1.0;
@@ -172,9 +180,11 @@ SynthResult synthBreak(const cv::Mat& gray, const PolylineView& path,
     for (int y = iy0; y <= iy1; ++y) {
       for (int x = ix0; x <= ix1; ++x) {
         const P2 p(x, y);
-        if (!insideQuad(q, p)) continue;
+        if (!insideQuad(q, p))
+          continue;
         const double v = srcField.at(p + shift);
-        if (v < 0) continue;
+        if (v < 0)
+          continue;
         acc.at<float>(y, x) = 1.0F;
         val.at<float>(y, x) = static_cast<float>(v);
       }
@@ -192,9 +202,9 @@ SynthResult synthBreak(const cv::Mat& gray, const PolylineView& path,
   cv::divide(fillNum, den, fill);
   cv::Mat keep = 1.0 - soft;
   cv::Mat blended = src.mul(keep) + fill.mul(soft);
-  blended.convertTo(out, CV_8U);  // convertTo 自带四舍五入与 0–255 截断
+  blended.convertTo(out, CV_8U); // convertTo 自带四舍五入与 0–255 截断
   res.ok = true;
   return res;
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

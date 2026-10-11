@@ -1,10 +1,15 @@
 // 图 store —— GraphDoc 是唯一真实数据源（ADR-0002）：改图只能走这里的语义化动作。
 // M4 起动作作用于**当前层级**（ui.path），撤销栈仍然是整份 doc 快照（ADR-0010）。
 
-import { current, enablePatches, isDraft, produce } from "immer";
-import { create } from "zustand";
+import { current, enablePatches, isDraft, produce } from 'immer';
+import { create } from 'zustand';
 
-import { healPlan, planAutoConnect, unconnectedRequiredInputs, type AutoAmbiguity } from "../lib/autoconnect";
+import {
+  healPlan,
+  planAutoConnect,
+  unconnectedRequiredInputs,
+  type AutoAmbiguity,
+} from '../lib/autoconnect';
 import {
   graphParamBoundTo,
   graphParamNameProblem,
@@ -15,8 +20,8 @@ import {
   specFromParam,
   splitBind,
   uniqueGraphParamName,
-} from "../lib/graphParams";
-import { newDocId, newLocalId } from "../lib/ids";
+} from '../lib/graphParams';
+import { newDocId, newLocalId } from '../lib/ids';
 import {
   applyFixes,
   findRecipe,
@@ -31,8 +36,8 @@ import {
   type Mismatch,
   type RecipeEntry,
   type RecipeSet,
-} from "../lib/recipes";
-import { effectiveValue, pruneUnknownParams, sparseSet, valueEquals } from "../lib/params";
+} from '../lib/recipes';
+import { effectiveValue, pruneUnknownParams, sparseSet, valueEquals } from '../lib/params';
 import {
   augmentOperators,
   composeSubgraph as composeInto,
@@ -49,11 +54,11 @@ import {
   subgraphsUsedBy,
   type ComposeResult,
   type SubPath,
-} from "../lib/subgraph";
-import { planReplace, type ReplacePlan } from "../lib/replace";
-import { canConnect, type ConnectVerdict, type GraphContext } from "../lib/typecheck";
-import type { MigrationAction, MigrationEdits } from "../types/execution";
-import type { OperatorDesc, Param, SnippetDesc } from "../types/manifest";
+} from '../lib/subgraph';
+import { planReplace, type ReplacePlan } from '../lib/replace';
+import { canConnect, type ConnectVerdict, type GraphContext } from '../lib/typecheck';
+import type { MigrationAction, MigrationEdits } from '../types/execution';
+import type { OperatorDesc, Param, SnippetDesc } from '../types/manifest';
 import {
   GRAPH_SCHEMA_VERSION,
   LIBRARY_OP_PREFIX,
@@ -67,8 +72,8 @@ import {
   type PortRef,
   type SubgraphDef,
   type SubParam,
-} from "../types/graph";
-import { useManifestStore } from "./manifest";
+} from '../types/graph';
+import { useManifestStore } from './manifest';
 import {
   applyRecipeSet,
   clearBaseEdit,
@@ -76,9 +81,9 @@ import {
   noteBaseEdit,
   recipeSet,
   useRecipeStore,
-} from "./recipe";
-import { useCompareStore } from "./compare";
-import { useUiStore } from "./ui";
+} from './recipe';
+import { useCompareStore } from './compare';
+import { useUiStore } from './ui';
 
 enablePatches();
 
@@ -98,7 +103,7 @@ export function emptyDoc(): GraphDoc {
   return {
     schemaVersion: GRAPH_SCHEMA_VERSION,
     id: newDocId(),
-    name: "未命名",
+    name: '未命名',
     nodes: [],
     edges: [],
     groups: [],
@@ -174,7 +179,7 @@ function applyMigrationEdits(d: GraphDoc, nodeId: string, edits: MigrationEdits)
     });
   });
   for (const e of edits.addEdges) {
-    const base = e.id ?? "m";
+    const base = e.id ?? 'm';
     let id = base;
     for (let k = 2; d.edges.some((x) => x.id === id); k += 1) id = `${base}_${k}`;
     d.edges.push({ id, from: { ...e.from }, to: { ...e.to } });
@@ -189,7 +194,7 @@ function plain<T>(x: T): T {
 
 /** 节点在界面上叫什么：用户起的标题，其次算子 label。 */
 function titleOf(node: GraphNode | undefined, ops: ReadonlyMap<string, OperatorDesc>): string {
-  if (!node) return "?";
+  if (!node) return '?';
   return node.ui?.title || ops.get(node.op)?.label || node.id;
 }
 
@@ -205,11 +210,21 @@ function graphParamLabel(
   const titles: string[] = [];
   let lvl: GraphLevel = doc;
   for (const seg of path) {
-    titles.push(titleOf(lvl.nodes.find((n) => n.id === seg.nodeId), ops));
+    titles.push(
+      titleOf(
+        lvl.nodes.find((n) => n.id === seg.nodeId),
+        ops,
+      ),
+    );
     lvl = doc.subgraphs?.[seg.subgraphId] ?? lvl;
   }
-  titles.push(titleOf(lvl.nodes.find((n) => n.id === nodeId), ops));
-  return `${titles.join(" / ")} · ${decl.label || decl.name}`;
+  titles.push(
+    titleOf(
+      lvl.nodes.find((n) => n.id === nodeId),
+      ops,
+    ),
+  );
+  return `${titles.join(' / ')} · ${decl.label || decl.name}`;
 }
 
 /** K2 的逐层提升链，在 draft 上做：从当前层的 `nodeId.<decl.name>` 往外，哪一层还没提升就在
@@ -313,7 +328,13 @@ export interface PasteResult {
   renamed: { id: string; from: string; to: string }[];
 }
 
-const NOTHING_PASTED: PasteResult = { nodeIds: [], idMap: new Map(), missing: [], recursive: 0, renamed: [] };
+const NOTHING_PASTED: PasteResult = {
+  nodeIds: [],
+  idMap: new Map(),
+  missing: [],
+  recursive: 0,
+  renamed: [],
+};
 
 /** 拖入节点 / 插入片段之后自动连线的结果（m8-plan L13 / L14）。 */
 export interface AutoConnectResult {
@@ -372,7 +393,11 @@ interface GraphState {
   /** 返回连带删掉的图级输出名（它们指着被删的节点）。 */
   deleteNodes(ids: readonly string[]): string[];
   /** 删节点并把上下游接回去（规则同静音透传，lib/autoconnect 的 healPlan）。一条撤销。 */
-  deleteNodesHealing(ids: readonly string[]): { wired: number; unresolved: number; dropped: string[] };
+  deleteNodesHealing(ids: readonly string[]): {
+    wired: number;
+    unresolved: number;
+    dropped: string[];
+  };
   moveNodes(moves: readonly { id: string; position: { x: number; y: number } }[]): void;
   /** at：节点所在的层级，不给 = 当前层级（ui.path）。参数面板展开进子图定义时给的是那一层的路径。 */
   setParam(nodeId: string, name: string, value: unknown, at?: SubPath): void;
@@ -380,13 +405,17 @@ interface GraphState {
    *  选着配方时记一笔），整体一条撤销；已经在外层事务里（数字框拖动的 begin / commit）就并进去。 */
   /** value 给函数时按每个节点此刻的值算（多选里的相对改法）：先全读出来再写 —— 两个节点绑着同一个图参数时只改一次。
    *  算出来没变的节点不写；一个都没变就不记撤销。 */
-  setParamMany(nodeIds: readonly string[], name: string, value: unknown | ((cur: unknown, nodeId: string) => unknown)): void;
+  setParamMany(
+    nodeIds: readonly string[],
+    name: string,
+    value: unknown | ((cur: unknown, nodeId: string) => unknown),
+  ): void;
   setNodeUi(nodeId: string, patch: Partial<NodeUi>): void;
   connect(from: PortRef, to: PortRef): ConnectVerdict;
   disconnect(edgeIds: readonly string[]): void;
   /** payload.subgraphs：剪贴板带来的子图定义（另一张图里复制的子图节点），按 mergeSubgraphs 并进来、与节点同一条撤销。 */
   pasteNodes(
-    payload: { nodes: GraphNode[]; edges: GraphDoc["edges"]; subgraphs?: GraphDoc["subgraphs"] },
+    payload: { nodes: GraphNode[]; edges: GraphDoc['edges']; subgraphs?: GraphDoc['subgraphs'] },
     at: { x: number; y: number },
   ): PasteResult;
 
@@ -522,7 +551,7 @@ type RecipeStep = (recipes: RecipeSet, doc: GraphDoc) => RecipeSet;
  *  before / after 是这一步前后的 doc 与配方集合（after 时配方已经应用好了）。拖动的中间帧、没改动的 commit、
  *  换图都不算。自动运行（lib/preview 的 autoRunOnCommit）靠它知道「改完了一处参数」。 */
 export interface CommittedChange {
-  kind: "edit" | "undo" | "redo" | "travel";
+  kind: 'edit' | 'undo' | 'redo' | 'travel';
   before: { doc: GraphDoc; recipes: RecipeSet };
   after: { doc: GraphDoc; recipes: RecipeSet };
 }
@@ -557,7 +586,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
     if (get().pendingSnapshot && !hints.includes(h)) hints.push(h);
   };
   const hintLabel = (): string | null =>
-    hints.length === 0 ? null : hints.length === 1 ? hints[0]! : `${hints[0]} 等 ${hints.length} 处`;
+    hints.length === 0
+      ? null
+      : hints.length === 1
+        ? hints[0]!
+        : `${hints[0]} 等 ${hints.length} 处`;
 
   /** 记一条撤销，然后应用变更。用于单步操作。recipes 给了就在同一步里改配方集合（K7）。 */
   const transact = (label: string, recipe: (draft: GraphDoc) => void, recipes?: RecipeStep) => {
@@ -577,7 +610,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
       dirty: next !== get().savedDoc,
     });
     applyRecipeSet(nextRecipes);
-    emitCommitted({ kind: "edit", before: { doc, recipes: before }, after: { doc: next, recipes: recipeSet() } });
+    emitCommitted({
+      kind: 'edit',
+      before: { doc, recipes: before },
+      after: { doc: next, recipes: recipeSet() },
+    });
   };
 
   /** 应用变更但不记撤销。用于事务进行中的中间状态（拖动的每一帧）。 */
@@ -589,7 +626,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
   };
 
   /** 只改一个配方的一步（改值、恢复基础、修失配）。配方不存在时什么都不做。 */
-  const editRecipe = (label: string, name: string, fn: (e: RecipeEntry, doc: GraphDoc) => RecipeEntry) => {
+  const editRecipe = (
+    label: string,
+    name: string,
+    fn: (e: RecipeEntry, doc: GraphDoc) => RecipeEntry,
+  ) => {
     const step: RecipeStep = (recipes, doc) => {
       const entry = findRecipe(recipes, name);
       if (!entry) return recipes;
@@ -605,7 +646,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     const { doc } = get();
     const path = at ?? useUiStore.getState().path;
     if (!pathIsValid(doc, path)) {
-      set({ lastRejection: "当前层级已失效，回到顶层再试" });
+      set({ lastRejection: '当前层级已失效，回到顶层再试' });
       return null;
     }
     const ops = ctx(doc).operatorsById;
@@ -641,7 +682,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     commit(label) {
       const { pendingSnapshot, pendingRecipes, doc, past } = get();
       if (!pendingSnapshot) return;
-      const named = label ?? hintLabel() ?? "编辑";
+      const named = label ?? hintLabel() ?? '编辑';
       hints = [];
       const recipesBefore = pendingRecipes ?? recipeSet();
       if (pendingSnapshot === doc && recipesBefore === recipeSet()) {
@@ -649,20 +690,31 @@ export const useGraphStore = create<GraphState>((set, get) => {
         return;
       }
       set({
-        past: [...past, { label: named, doc: pendingSnapshot, recipes: recipesBefore }].slice(-MAX_HISTORY),
+        past: [...past, { label: named, doc: pendingSnapshot, recipes: recipesBefore }].slice(
+          -MAX_HISTORY,
+        ),
         future: [],
         pendingSnapshot: null,
         pendingRecipes: null,
         dirty: doc !== get().savedDoc,
       });
-      emitCommitted({ kind: "edit", before: { doc: pendingSnapshot, recipes: recipesBefore }, after: { doc, recipes: recipeSet() } });
+      emitCommitted({
+        kind: 'edit',
+        before: { doc: pendingSnapshot, recipes: recipesBefore },
+        after: { doc, recipes: recipeSet() },
+      });
     },
 
     abort() {
       const { pendingSnapshot, pendingRecipes } = get();
       if (!pendingSnapshot) return;
       hints = [];
-      set({ doc: pendingSnapshot, pendingSnapshot: null, pendingRecipes: null, dirty: pendingSnapshot !== get().savedDoc });
+      set({
+        doc: pendingSnapshot,
+        pendingSnapshot: null,
+        pendingRecipes: null,
+        dirty: pendingSnapshot !== get().savedDoc,
+      });
       if (pendingRecipes) applyRecipeSet(pendingRecipes);
     },
 
@@ -694,10 +746,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
         return null;
       }
       if (wouldRecurse(get().doc, opId)) {
-        set({ lastRejection: "子图不能放进它自己里面" });
+        set({ lastRejection: '子图不能放进它自己里面' });
         return null;
       }
-      const id = newLocalId("n", allIds(get().doc));
+      const id = newLocalId('n', allIds(get().doc));
       transact(`添加 ${op.label}`, (d) => {
         level(d).nodes.push({
           id,
@@ -719,22 +771,29 @@ export const useGraphStore = create<GraphState>((set, get) => {
         return { nodeIds: [], wired: 0, ambiguous: [], missing: [opId] };
       }
       if (wouldRecurse(doc, opId)) {
-        set({ lastRejection: "子图不能放进它自己里面" });
+        set({ lastRejection: '子图不能放进它自己里面' });
         return { nodeIds: [], wired: 0, ambiguous: [], missing: [] };
       }
       const taken = allIds(doc);
-      const id = newLocalId("n", taken);
+      const id = newLocalId('n', taken);
       taken.add(id);
-      const node: GraphNode = { id, op: op.id, opVersion: op.version, params: {}, ui: { position } };
+      const node: GraphNode = {
+        id,
+        op: op.id,
+        opVersion: op.version,
+        params: {},
+        ui: { position },
+      };
       const view = levelDoc(doc);
       const withNode: GraphDoc = { ...view, nodes: [...view.nodes, node] };
       const plan = planAutoConnect(c, withNode, unconnectedRequiredInputs(c, withNode, id));
       const edges = plan.wires.map((w) => {
-        const eid = newLocalId("e", taken);
+        const eid = newLocalId('e', taken);
         taken.add(eid);
         return { id: eid, from: { ...w.from }, to: { ...w.to } };
       });
-      const label = edges.length > 0 ? `添加 ${op.label}（自动连 ${edges.length} 条）` : `添加 ${op.label}`;
+      const label =
+        edges.length > 0 ? `添加 ${op.label}（自动连 ${edges.length} 条）` : `添加 ${op.label}`;
       transact(label, (d) => {
         const lvl = level(d);
         lvl.nodes.push(node);
@@ -767,14 +826,20 @@ export const useGraphStore = create<GraphState>((set, get) => {
           missing.push(n.op);
           continue;
         }
-        const id = newLocalId("n", taken);
+        const id = newLocalId('n', taken);
         taken.add(id);
         idMap.set(n.id, id);
         const ui: NodeUi = {
           position: { x: (n.ui?.position?.x ?? 0) + dx, y: (n.ui?.position?.y ?? 0) + dy },
         };
         if (n.ui?.title) ui.title = n.ui.title;
-        nodes.push({ id, op: op.id, opVersion: op.version, params: pruneUnknownParams(op, n.params), ui });
+        nodes.push({
+          id,
+          op: op.id,
+          opVersion: op.version,
+          params: pruneUnknownParams(op, n.params),
+          ui,
+        });
       }
       if (nodes.length === 0) {
         set({ lastRejection: `片段 ${snippet.label} 里的算子当前 core 一个都没有` });
@@ -783,7 +848,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const inner = (snippet.edges ?? [])
         .filter((e) => idMap.has(e.from.node) && idMap.has(e.to.node))
         .map((e) => {
-          const eid = newLocalId("e", taken);
+          const eid = newLocalId('e', taken);
           taken.add(eid);
           return {
             id: eid,
@@ -793,16 +858,22 @@ export const useGraphStore = create<GraphState>((set, get) => {
         });
 
       const view = levelDoc(doc);
-      const merged: GraphDoc = { ...view, nodes: [...view.nodes, ...nodes], edges: [...view.edges, ...inner] };
+      const merged: GraphDoc = {
+        ...view,
+        nodes: [...view.nodes, ...nodes],
+        edges: [...view.edges, ...inner],
+      };
       // 对外端口提示给了就按它接（可选输入也接，比如 result_bundle 的 rois / scan），没给就接
       // 片段里所有没连上的必需输入。候选只在插入之前就在图里的那些节点里找。
       const hinted = snippet.ports?.inputs;
       const targets = hinted
-        ? hinted.filter((h) => idMap.has(h.node)).map((h) => ({ node: idMap.get(h.node)!, port: h.port }))
+        ? hinted
+            .filter((h) => idMap.has(h.node))
+            .map((h) => ({ node: idMap.get(h.node)!, port: h.port }))
         : nodes.flatMap((n) => unconnectedRequiredInputs(c, merged, n.id));
       const plan = planAutoConnect(c, merged, targets, new Set(nodes.map((n) => n.id)));
       const wires = plan.wires.map((w) => {
-        const eid = newLocalId("e", taken);
+        const eid = newLocalId('e', taken);
         taken.add(eid);
         return { id: eid, from: { ...w.from }, to: { ...w.to } };
       });
@@ -813,19 +884,26 @@ export const useGraphStore = create<GraphState>((set, get) => {
         lvl.edges.push(...inner, ...wires);
       });
       useUiStore.getState().setAutoHint(plan.ambiguous);
-      return { nodeIds: nodes.map((n) => n.id), wired: wires.length, ambiguous: plan.ambiguous, missing };
+      return {
+        nodeIds: nodes.map((n) => n.id),
+        wired: wires.length,
+        ambiguous: plan.ambiguous,
+        missing,
+      };
     },
 
     deleteNodes(ids) {
       if (ids.length === 0) return [];
       const kill = new Set(ids);
-      const label = ids.length === 1 ? "删除节点" : `删除 ${ids.length} 个节点`;
+      const label = ids.length === 1 ? '删除节点' : `删除 ${ids.length} 个节点`;
       const before = get().doc;
       const key = levelKeyOf(useUiStore.getState().path);
       let dropped: string[] = [];
       transact(label, (d) => {
         // 图级输出指着被删的节点（或它里面的）：一并删掉，不然存盘、运行都报「指向不存在的节点」
-        dropped = remapGraphOutputs(d, before, key, (segs, k) => (kill.has(segs[k]!) ? null : undefined));
+        dropped = remapGraphOutputs(d, before, key, (segs, k) =>
+          kill.has(segs[k]!) ? null : undefined,
+        );
         const lvl = level(d);
         lvl.nodes = lvl.nodes.filter((n) => !kill.has(n.id));
         // 删节点自动清理相连边（交互清单 P0 #5）
@@ -841,7 +919,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         // 图参数本身留着（可能还绑着别人，也可能用户马上要重新绑）
         if (lvl === d && d.params) {
           for (const gp of Object.values(d.params)) {
-            const kept = gp.binds.filter((b) => !kill.has(splitBind(b)?.node ?? ""));
+            const kept = gp.binds.filter((b) => !kill.has(splitBind(b)?.node ?? ''));
             if (kept.length !== gp.binds.length) gp.binds = kept;
           }
         }
@@ -855,7 +933,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const plan = healPlan(ctx(doc), levelDoc(doc), new Set(ids));
       let wired = 0;
       let dropped: string[] = [];
-      get().batch(ids.length === 1 ? "删除并接通" : `删除 ${ids.length} 个节点并接通`, () => {
+      get().batch(ids.length === 1 ? '删除并接通' : `删除 ${ids.length} 个节点并接通`, () => {
         dropped = get().deleteNodes(ids);
         for (const w of plan.wires) if (get().connect(w.from, w.to).ok) wired += 1;
       });
@@ -877,7 +955,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
       if (at.length === 0) return;
       if (get().pendingSnapshot) {
         const one = at.length === 1 ? level(get().doc).nodes[at[0]![0]] : undefined;
-        note(one ? `移动 ${one.ui?.title ?? ctx(get().doc).operatorsById.get(one.op)?.label ?? one.id}` : `移动 ${at.length} 个节点`);
+        note(
+          one
+            ? `移动 ${one.ui?.title ?? ctx(get().doc).operatorsById.get(one.op)?.label ?? one.id}`
+            : `移动 ${at.length} 个节点`,
+        );
       }
       mutate((d) => {
         const nodes = level(d).nodes;
@@ -937,7 +1019,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     setParamMany(nodeIds, name, value) {
       if (nodeIds.length === 0) return;
       let writes: { id: string; value: unknown }[] = nodeIds.map((id) => ({ id, value }));
-      if (typeof value === "function") {
+      if (typeof value === 'function') {
         const { doc } = get();
         const path = useUiStore.getState().path;
         const lvl = levelAt(doc, undefined);
@@ -948,7 +1030,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
           const binding = resolveGraphBinding(doc, path, id, name);
           const node = lvl.nodes.find((n) => n.id === id);
           const op = node ? ops.get(node.op) : undefined;
-          const cur = binding ? graphParamValue(doc, binding.graphParam, currentOverrides()) : node && op ? effectiveValue(op, node, name) : undefined;
+          const cur = binding
+            ? graphParamValue(doc, binding.graphParam, currentOverrides())
+            : node && op
+              ? effectiveValue(op, node, name)
+              : undefined;
           if (cur === undefined) continue;
           const next = update(cur, id);
           if (!valueEquals(next, cur)) writes.push({ id, value: next });
@@ -962,7 +1048,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     setNodeUi(nodeId, patch) {
-      transact("修改节点外观", (d) => {
+      transact('修改节点外观', (d) => {
         const node = level(d).nodes.find((n) => n.id === nodeId);
         if (node) node.ui = { ...node.ui, ...patch };
       });
@@ -975,8 +1061,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
         set({ lastRejection: verdict.reason });
         return verdict;
       }
-      const id = newLocalId("e", allIds(doc));
-      transact("连线", (d) => {
+      const id = newLocalId('e', allIds(doc));
+      transact('连线', (d) => {
         level(d).edges.push({ id, from: { ...from }, to: { ...to } });
       });
       return verdict;
@@ -985,7 +1071,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     disconnect(edgeIds) {
       if (edgeIds.length === 0) return;
       const kill = new Set(edgeIds);
-      transact(edgeIds.length === 1 ? "断开连线" : `断开 ${edgeIds.length} 条连线`, (d) => {
+      transact(edgeIds.length === 1 ? '断开连线' : `断开 ${edgeIds.length} 条连线`, (d) => {
         const lvl = level(d);
         lvl.edges = lvl.edges.filter((e) => !kill.has(e.id));
       });
@@ -997,7 +1083,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const idMap = new Map<string, string>();
       // 剪贴板带来的子图定义：这张图里没有的加进来，同 id 不同内容的另起一个（不覆盖这张图里的）
       const merge = mergeSubgraphs(doc.subgraphs, payload.subgraphs ?? {});
-      const subgraphs = Object.keys(merge.added).length > 0 ? { ...doc.subgraphs, ...merge.added } : doc.subgraphs;
+      const subgraphs =
+        Object.keys(merge.added).length > 0 ? { ...doc.subgraphs, ...merge.added } : doc.subgraphs;
       const manifest = augmentOperators(useManifestStore.getState().operatorsById, subgraphs);
       // 正在哪几层子图里：粘进来的子图节点（连同它里面）不能再用到它们，不然展开时没完没了
       const around = new Set(useUiStore.getState().path.map((seg) => seg.subgraphId));
@@ -1029,7 +1116,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
           recursive += 1;
           continue;
         }
-        const id = newLocalId("n", taken);
+        const id = newLocalId('n', taken);
         taken.add(id);
         idMap.set(n.id, id);
         newNodes.push({
@@ -1053,7 +1140,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const newEdges = payload.edges
         .filter((e) => idMap.has(e.from.node) && idMap.has(e.to.node))
         .map((e) => {
-          const id = newLocalId("e", taken);
+          const id = newLocalId('e', taken);
           taken.add(id);
           return {
             id,
@@ -1067,7 +1154,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       // 只加粘上了的节点用得到的那几份定义
       const used = subgraphsUsedBy(newNodes, subgraphs);
       const addDefs = Object.entries(merge.added).filter(([id]) => Object.hasOwn(used, id));
-      transact(newNodes.length === 1 ? "粘贴节点" : `粘贴 ${newNodes.length} 个节点`, (d) => {
+      transact(newNodes.length === 1 ? '粘贴节点' : `粘贴 ${newNodes.length} 个节点`, (d) => {
         if (addDefs.length > 0) {
           d.subgraphs ??= {};
           for (const [id, def] of addDefs) d.subgraphs[id] = def;
@@ -1090,7 +1177,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const current = rs.current;
       // 按 id 认：改过名的配方还是那一个（老记录没有 id，按名字）
       const sameRecipe =
-        !!run?.params && current !== null && (run.recipeId != null ? run.recipeId === rs.currentId : run.recipe === current);
+        !!run?.params &&
+        current !== null &&
+        (run.recipeId != null ? run.recipeId === rs.currentId : run.recipe === current);
       // 一个图参数只算一处：基础值与配方里的值都改了也是一处
       const gpCounted = new Set<string>();
       const recipeStep: RecipeStep | undefined = sameRecipe
@@ -1106,70 +1195,88 @@ export const useGraphStore = create<GraphState>((set, get) => {
               next = withValue(next, doc, name, want);
               if (!gpCounted.has(name)) changed += 1;
             }
-            return next === entry ? recipes : replaceRecipe(recipes, current!, touch(next, doc, nowIso()));
+            return next === entry
+              ? recipes
+              : replaceRecipe(recipes, current!, touch(next, doc, nowIso()));
           }
         : undefined;
-      transact(label, (d) => {
-        // 一对一对的层：顶层，再是每个子图定义（按定义 id 对上）
-        const pairs: [GraphLevel, GraphLevel | undefined, SubgraphDef | null, SubgraphDef | undefined][] = [[d, from, null, undefined]];
-        for (const [id, def] of Object.entries(d.subgraphs ?? {})) pairs.push([def, from.subgraphs?.[id], def, from.subgraphs?.[id]]);
-        for (const [now, then, defNow, defThen] of pairs) {
-          for (const n of now.nodes) {
-            const old = then?.nodes.find((x) => x.id === n.id && x.op === n.op);
-            if (!old) continue;
-            const op = ops.get(n.op);
-            if (op) {
-              // 按有效值逐个参数比：稀疏存储里写没写缺省值不算改；一处 = 一个参数（与「调参」页的那一行同一个数法）
-              for (const p of op.params) {
-                const want = effectiveValue(op, old, p.name);
-                if (valueEquals(effectiveValue(op, n, p.name), want)) continue;
-                const owned = defNow
-                  ? !!promotedBy(defNow, n.id, p.name) || !!promotedBy(defThen, n.id, p.name)
-                  : !!graphParamBoundTo(d, n.id, p.name) || !!graphParamBoundTo(from, n.id, p.name);
-                if (owned) {
-                  skipped += 1;
-                  continue;
+      transact(
+        label,
+        (d) => {
+          // 一对一对的层：顶层，再是每个子图定义（按定义 id 对上）
+          const pairs: [
+            GraphLevel,
+            GraphLevel | undefined,
+            SubgraphDef | null,
+            SubgraphDef | undefined,
+          ][] = [[d, from, null, undefined]];
+          for (const [id, def] of Object.entries(d.subgraphs ?? {}))
+            pairs.push([def, from.subgraphs?.[id], def, from.subgraphs?.[id]]);
+          for (const [now, then, defNow, defThen] of pairs) {
+            for (const n of now.nodes) {
+              const old = then?.nodes.find((x) => x.id === n.id && x.op === n.op);
+              if (!old) continue;
+              const op = ops.get(n.op);
+              if (op) {
+                // 按有效值逐个参数比：稀疏存储里写没写缺省值不算改；一处 = 一个参数（与「调参」页的那一行同一个数法）
+                for (const p of op.params) {
+                  const want = effectiveValue(op, old, p.name);
+                  if (valueEquals(effectiveValue(op, n, p.name), want)) continue;
+                  const owned = defNow
+                    ? !!promotedBy(defNow, n.id, p.name) || !!promotedBy(defThen, n.id, p.name)
+                    : !!graphParamBoundTo(d, n.id, p.name) ||
+                      !!graphParamBoundTo(from, n.id, p.name);
+                  if (owned) {
+                    skipped += 1;
+                    continue;
+                  }
+                  n.params = sparseSet(op, n.params, p.name, plain(want));
+                  changed += 1;
                 }
-                n.params = sparseSet(op, n.params, p.name, plain(want));
+                // 算子已不声明的键（子图接口改过）：那时的值写回去只会报 unknown_param
+                for (const key of Object.keys(old.params ?? {})) {
+                  if (
+                    !op.params.some((p) => p.name === key) &&
+                    !valueEquals(old.params?.[key], n.params?.[key])
+                  )
+                    skipped += 1;
+                }
+              } else if (!valueEquals(n.params ?? {}, old.params ?? {})) {
+                n.params = structuredClone(old.params ?? {});
                 changed += 1;
               }
-              // 算子已不声明的键（子图接口改过）：那时的值写回去只会报 unknown_param
-              for (const key of Object.keys(old.params ?? {})) {
-                if (!op.params.some((p) => p.name === key) && !valueEquals(old.params?.[key], n.params?.[key])) skipped += 1;
+              if ((n.bypass === true) !== (old.bypass === true)) {
+                if (old.bypass) n.bypass = true;
+                else delete n.bypass;
+                changed += 1;
               }
-            } else if (!valueEquals(n.params ?? {}, old.params ?? {})) {
-              n.params = structuredClone(old.params ?? {});
-              changed += 1;
-            }
-            if ((n.bypass === true) !== (old.bypass === true)) {
-              if (old.bypass) n.bypass = true;
-              else delete n.bypass;
-              changed += 1;
             }
           }
-        }
-        for (const [name, gp] of Object.entries(d.params ?? {})) {
-          const old = from.params?.[name];
-          if (old && !valueEquals(gp.default, old.default)) {
-            gp.default = structuredClone(old.default);
-            gpCounted.add(name);
-            changed += 1;
+          for (const [name, gp] of Object.entries(d.params ?? {})) {
+            const old = from.params?.[name];
+            if (old && !valueEquals(gp.default, old.default)) {
+              gp.default = structuredClone(old.default);
+              gpCounted.add(name);
+              changed += 1;
+            }
           }
-        }
-        // 那时绑着图参数、后来图参数删掉了（值写回了节点）：把那时的值写回去，不然节点退回算子默认 —— 哪一次都没用过的值
-        const boundNow = new Set(Object.values(d.params ?? {}).flatMap((gp) => gp.binds ?? []));
-        for (const old of Object.values(from.params ?? {})) {
-          for (const bind of old.binds ?? []) {
-            if (boundNow.has(bind)) continue;
-            const t = splitBind(bind);
-            const node = t ? d.nodes.find((x) => x.id === t.node) : undefined;
-            const op = node ? ops.get(node.op) : undefined;
-            if (!t || !node || !op || valueEquals(effectiveValue(op, node, t.param), old.default)) continue;
-            writeBack(d, ops, bind, old.default);
-            changed += 1;
+          // 那时绑着图参数、后来图参数删掉了（值写回了节点）：把那时的值写回去，不然节点退回算子默认 —— 哪一次都没用过的值
+          const boundNow = new Set(Object.values(d.params ?? {}).flatMap((gp) => gp.binds ?? []));
+          for (const old of Object.values(from.params ?? {})) {
+            for (const bind of old.binds ?? []) {
+              if (boundNow.has(bind)) continue;
+              const t = splitBind(bind);
+              const node = t ? d.nodes.find((x) => x.id === t.node) : undefined;
+              const op = node ? ops.get(node.op) : undefined;
+              if (!t || !node || !op || valueEquals(effectiveValue(op, node, t.param), old.default))
+                continue;
+              writeBack(d, ops, bind, old.default);
+              changed += 1;
+            }
           }
-        }
-      }, recipeStep);
+        },
+        recipeStep,
+      );
       return { changed, skipped };
     },
 
@@ -1177,8 +1284,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
       if (ids.length === 0) return;
       const target = new Set(ids);
       const label = value
-        ? ids.length === 1 ? "静音节点" : `静音 ${ids.length} 个节点`
-        : ids.length === 1 ? "取消静音" : `取消静音 ${ids.length} 个节点`;
+        ? ids.length === 1
+          ? '静音节点'
+          : `静音 ${ids.length} 个节点`
+        : ids.length === 1
+          ? '取消静音'
+          : `取消静音 ${ids.length} 个节点`;
       transact(label, (d) => {
         for (const n of level(d).nodes) {
           if (!target.has(n.id)) continue;
@@ -1192,7 +1303,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     setCollapsed(ids, value) {
       if (ids.length === 0) return;
       const target = new Set(ids);
-      transact(value ? "折叠节点" : "展开节点", (d) => {
+      transact(value ? '折叠节点' : '展开节点', (d) => {
         for (const n of level(d).nodes) {
           if (!target.has(n.id)) continue;
           n.ui = { ...n.ui, collapsed: value };
@@ -1205,7 +1316,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const next = title && title.trim() ? title : null;
       const current = level(get().doc).nodes.find((n) => n.id === id);
       if (!current || (current.ui?.title ?? null) === next) return;
-      transact("重命名节点", (d) => {
+      transact('重命名节点', (d) => {
         const node = level(d).nodes.find((n) => n.id === id);
         if (!node) return;
         node.ui = { ...node.ui, title: next };
@@ -1216,15 +1327,18 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const { doc } = get();
       const lvl = level(doc);
       const edge = lvl.edges.find((e) => e.id === edgeId);
-      if (!edge) return { ok: false, reason: "连线不存在" };
+      if (!edge) return { ok: false, reason: '连线不存在' };
       // 先把老边摘掉再判：不然「重连到同一个端口」会撞上「输入端口已有连线」
-      const without: GraphDoc = { ...levelDoc(doc), edges: lvl.edges.filter((e) => e.id !== edgeId) };
+      const without: GraphDoc = {
+        ...levelDoc(doc),
+        edges: lvl.edges.filter((e) => e.id !== edgeId),
+      };
       const verdict = canConnect(ctx(doc), without, edge.from, to);
       if (!verdict.ok) {
         set({ lastRejection: verdict.reason });
         return verdict;
       }
-      transact("改接连线", (d) => {
+      transact('改接连线', (d) => {
         const target = level(d).edges.find((e) => e.id === edgeId);
         if (target) target.to = { ...to };
       });
@@ -1236,10 +1350,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const edge = level(doc).edges.find((e) => e.id === edgeId);
       if (!edge) return false;
       const taken = allIds(doc);
-      const a = newLocalId("e", taken);
+      const a = newLocalId('e', taken);
       taken.add(a);
-      const b = newLocalId("e", taken);
-      transact("插入到连线中间", (d) => {
+      const b = newLocalId('e', taken);
+      transact('插入到连线中间', (d) => {
         const lvl = level(d);
         lvl.edges = lvl.edges.filter((e) => e.id !== edgeId);
         lvl.edges.push({ id: a, from: { ...edge.from }, to: { node: nodeId, port: inPort } });
@@ -1264,7 +1378,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     applyLayout(moves) {
       if (moves.length === 0) return;
-      transact(moves.length === 1 ? "整理布局" : `整理 ${moves.length} 个节点的布局`, (d) => {
+      transact(moves.length === 1 ? '整理布局' : `整理 ${moves.length} 个节点的布局`, (d) => {
         const lvl = level(d);
         for (const m of moves) {
           const node = lvl.nodes.find((n) => n.id === m.id);
@@ -1299,16 +1413,20 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const paste = () =>
         get().pasteNodes(
           { nodes: JSON.parse(JSON.stringify(nodes)), edges: JSON.parse(JSON.stringify(edges)) },
-          { x: (Number.isFinite(origin.x) ? origin.x : 0) + 40, y: (Number.isFinite(origin.y) ? origin.y : 0) + 40 },
+          {
+            x: (Number.isFinite(origin.x) ? origin.x : 0) + 40,
+            y: (Number.isFinite(origin.y) ? origin.y : 0) + 40,
+          },
         );
       if (!opts?.keepInputs) return paste();
-      const label = nodes.length === 1 ? "复制并保留输入" : `复制 ${nodes.length} 个节点并保留输入`;
+      const label = nodes.length === 1 ? '复制并保留输入' : `复制 ${nodes.length} 个节点并保留输入`;
       return get().batch(label, () => {
         const made = paste();
         // 从选区外面进来的边：副本也接一条（选区里面的连线 pasteNodes 已经照着复制了）
         for (const e of lvl.edges) {
           const copy = made.idMap.get(e.to.node);
-          if (copy && !made.idMap.has(e.from.node)) get().connect(e.from, { node: copy, port: e.to.port });
+          if (copy && !made.idMap.has(e.from.node))
+            get().connect(e.from, { node: copy, port: e.to.port });
         }
         // 在子图里：从子图入口进来的那几条不是边，是 inputs[].to，副本的端口也加进去
         transact(label, (d) => {
@@ -1330,37 +1448,34 @@ export const useGraphStore = create<GraphState>((set, get) => {
       if (actions.length === 0) return 0;
       const byNode = new Map(actions.map((a) => [a.nodeId, a]));
       let changed = 0;
-      transact(
-        actions.length === 1 ? "迁移 1 个节点" : `迁移 ${actions.length} 个节点`,
-        (d) => {
-          // 迁移诊断的 nodeId 是路径，顶层节点的路径就是它自己
-          const apply = (nodes: GraphNode[]) => {
-            for (const node of nodes) {
-              const action = byNode.get(node.id);
-              if (!action) continue;
-              node.op = action.op;
-              node.opVersion = action.opVersion;
-              // params 是**完整**对象而不是补丁：改名参数没法用补丁表达
-              node.params = { ...action.params };
-              changed += 1;
-            }
-          };
-          apply(d.nodes);
-          for (const def of Object.values(d.subgraphs ?? {})) apply(def.nodes);
-          // 连线改写只落在顶层（ADR-0025）：与 lyflow migrate --write 同一套语义
-          for (const action of actions) {
-            if (action.edits && d.nodes.some((n) => n.id === action.nodeId)) {
-              applyMigrationEdits(d, action.nodeId, action.edits);
-            }
+      transact(actions.length === 1 ? '迁移 1 个节点' : `迁移 ${actions.length} 个节点`, (d) => {
+        // 迁移诊断的 nodeId 是路径，顶层节点的路径就是它自己
+        const apply = (nodes: GraphNode[]) => {
+          for (const node of nodes) {
+            const action = byNode.get(node.id);
+            if (!action) continue;
+            node.op = action.op;
+            node.opVersion = action.opVersion;
+            // params 是**完整**对象而不是补丁：改名参数没法用补丁表达
+            node.params = { ...action.params };
+            changed += 1;
           }
-          if (relayout && actions.some((a) => (a.edits?.addNodes.length ?? 0) > 0)) {
-            for (const m of relayout(current(d) as GraphDoc)) {
-              const node = d.nodes.find((n) => n.id === m.id);
-              if (node) node.ui = { ...node.ui, position: m.position };
-            }
+        };
+        apply(d.nodes);
+        for (const def of Object.values(d.subgraphs ?? {})) apply(def.nodes);
+        // 连线改写只落在顶层（ADR-0025）：与 lyflow migrate --write 同一套语义
+        for (const action of actions) {
+          if (action.edits && d.nodes.some((n) => n.id === action.nodeId)) {
+            applyMigrationEdits(d, action.nodeId, action.edits);
           }
-        },
-      );
+        }
+        if (relayout && actions.some((a) => (a.edits?.addNodes.length ?? 0) > 0)) {
+          for (const m of relayout(current(d) as GraphDoc)) {
+            const node = d.nodes.find((n) => n.id === m.id);
+            if (node) node.ui = { ...node.ui, position: m.position };
+          }
+        }
+      });
       return changed;
     },
 
@@ -1369,14 +1484,16 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const path = useUiStore.getState().path;
       let result: ComposeResult | null = null;
       const before = get().doc;
-      transact(ids.length === 1 ? "合成子图" : `把 ${ids.length} 个节点合成子图`, (d) => {
+      transact(ids.length === 1 ? '合成子图' : `把 ${ids.length} 个节点合成子图`, (d) => {
         result = composeInto(ctx(d), d, path, ids, allIds(d));
         const made = result as ComposeResult | null;
         if (!made) return;
         // 被收进去的节点上标着的图级输出：路径 id 里多一层新的子图节点
         const picked = new Set(ids);
         remapGraphOutputs(d, before, levelKeyOf(path), (segs, k, port) =>
-          picked.has(segs[k]!) ? { node: [...segs.slice(0, k), made.nodeId, ...segs.slice(k)].join("/"), port } : undefined,
+          picked.has(segs[k]!)
+            ? { node: [...segs.slice(0, k), made.nodeId, ...segs.slice(k)].join('/'), port }
+            : undefined,
         );
       });
       return result;
@@ -1389,7 +1506,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const host = levelOf(before, path).nodes.find((n) => n.id === nodeId);
       const sid = host ? subgraphIdOf(host.op) : null;
       const def = sid ? before.subgraphs?.[sid] : undefined;
-      transact("解散子图", (d) => {
+      transact('解散子图', (d) => {
         inlined = dissolveFrom(d, path, nodeId, allIds(d));
         if (!def || inlined.length !== def.nodes.length) return;
         // dissolveFrom 按定义里的顺序给内联出来的节点分新 id
@@ -1399,10 +1516,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
           if (k === segs.length - 1) {
             const from = def.outputs.find((o) => o.name === port)?.from;
             const id = from ? rename.get(from.node) : undefined;
-            return from && id ? { node: [...segs.slice(0, k), id].join("/"), port: from.port } : null;
+            return from && id
+              ? { node: [...segs.slice(0, k), id].join('/'), port: from.port }
+              : null;
           }
           const id = rename.get(segs[k + 1]!);
-          return id ? { node: [...segs.slice(0, k), id, ...segs.slice(k + 2)].join("/"), port } : null;
+          return id
+            ? { node: [...segs.slice(0, k), id, ...segs.slice(k + 2)].join('/'), port }
+            : null;
         });
       });
       return inlined;
@@ -1433,7 +1554,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         if (lvl === d) {
           for (const gp of Object.values(d.params ?? {})) {
             const kept = gp.binds.filter((b) => {
-              const dot = b.lastIndexOf(".");
+              const dot = b.lastIndexOf('.');
               return !(b.slice(0, dot) === nodeId && unbind.has(b.slice(dot + 1)));
             });
             if (kept.length !== gp.binds.length) gp.binds = kept;
@@ -1441,11 +1562,15 @@ export const useGraphStore = create<GraphState>((set, get) => {
         } else {
           const def = lvl as SubgraphDef;
           for (const sp of def.params ?? []) {
-            const kept = (sp.binds ?? []).filter((b) => !(b.node === nodeId && unbind.has(b.param)));
+            const kept = (sp.binds ?? []).filter(
+              (b) => !(b.node === nodeId && unbind.has(b.param)),
+            );
             if (kept.length !== (sp.binds ?? []).length) sp.binds = kept;
           }
           for (const input of def.inputs ?? []) {
-            const kept = input.to.filter((t) => t.node !== nodeId || !dropInputs.has(`${input.name}\u0000${t.port}`));
+            const kept = input.to.filter(
+              (t) => t.node !== nodeId || !dropInputs.has(`${input.name}\u0000${t.port}`),
+            );
             if (kept.length !== input.to.length) input.to = kept;
           }
         }
@@ -1462,7 +1587,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const node = levelOf(get().doc, path).nodes.find((n) => n.id === nodeId);
       if (!node || !node.op.startsWith(LIBRARY_OP_PREFIX)) return null;
       let subgraphId: string | null = null;
-      transact("展开库算子", (d) => {
+      transact('展开库算子', (d) => {
         subgraphId = inlineLibraryNode(d, path, nodeId, def);
       });
       return subgraphId;
@@ -1473,7 +1598,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const path = at ?? useUiStore.getState().path;
       const last = path[path.length - 1];
       if (!last) {
-        set({ lastRejection: "只有在子图里才能提升参数" });
+        set({ lastRejection: '只有在子图里才能提升参数' });
         return null;
       }
       const def = doc.subgraphs?.[last.subgraphId];
@@ -1482,7 +1607,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const param = op?.params.find((p) => p.name === paramName);
       if (!def || !node || !param) return null;
       if (promotedBy(def, nodeId, paramName)) {
-        set({ lastRejection: "这个参数已经提升过了" });
+        set({ lastRejection: '这个参数已经提升过了' });
         return null;
       }
       const taken = new Set(def.params.map((p) => p.name));
@@ -1584,7 +1709,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
       // 规格以图参数为准（控件、第一道校验），被绑定目标自己的规格 core 照样查（P1.2）：
       // 类型都对不上的话两道校验必有一道永远不过，不如在这里就拦下
       if (gp.type && gp.type !== decl.type) {
-        set({ lastRejection: `类型不同：图参数 ${name} 是 ${gp.type}，${paramName} 是 ${decl.type}` });
+        set({
+          lastRejection: `类型不同：图参数 ${name} 是 ${gp.type}，${paramName} 是 ${decl.type}`,
+        });
         return false;
       }
       let done = false;
@@ -1678,7 +1805,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         if (!into) return;
         for (const [k, v] of Object.entries(patch)) {
           // binds / default / type 各有各的动作，规格补丁不许顺手改它们
-          if (k === "binds" || k === "default" || k === "type") continue;
+          if (k === 'binds' || k === 'default' || k === 'type') continue;
           if (v === undefined) delete into[k];
           else into[k] = plain(v);
         }
@@ -1697,7 +1824,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
       const gp = get().doc.params?.[param];
       if (!gp) return;
       note(`配方 ${recipe}：修改 ${gp.label ?? param}`);
-      editRecipe(`配方 ${recipe}：修改 ${param}`, recipe, (e, doc) => withValue(e, doc, param, value));
+      editRecipe(`配方 ${recipe}：修改 ${param}`, recipe, (e, doc) =>
+        withValue(e, doc, param, value),
+      );
     },
 
     clearRecipeValue(recipe, param) {
@@ -1706,7 +1835,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
 
     writeRecipeValueToBase(recipe, param) {
       const entry = findRecipe(recipeSet(), recipe);
-      if (!entry || !Object.prototype.hasOwnProperty.call(entry.values, param) || !get().doc.params?.[param]) return;
+      if (
+        !entry ||
+        !Object.prototype.hasOwnProperty.call(entry.values, param) ||
+        !get().doc.params?.[param]
+      )
+        return;
       const value = entry.values[param];
       transact(
         `写回基础 ${param}（来自配方 ${recipe}）`,
@@ -1716,7 +1850,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
         },
         (recipes, doc) => {
           const e = findRecipe(recipes, recipe);
-          return e ? replaceRecipe(recipes, recipe, touch(withoutValue(e, param), doc, nowIso())) : recipes;
+          return e
+            ? replaceRecipe(recipes, recipe, touch(withoutValue(e, param), doc, nowIso()))
+            : recipes;
         },
       );
     },
@@ -1734,8 +1870,10 @@ export const useGraphStore = create<GraphState>((set, get) => {
         next = after;
       }
       if (changed === 0) return 0;
-      transact(`复制 ${changed} 格到配方 ${target}`, () => {}, (recipes, d) =>
-        replaceRecipe(recipes, target, touch(next, d, nowIso())),
+      transact(
+        `复制 ${changed} 格到配方 ${target}`,
+        () => {},
+        (recipes, d) => replaceRecipe(recipes, target, touch(next, d, nowIso())),
       );
       return changed;
     },
@@ -1743,7 +1881,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     createRecipe(name, copyFrom) {
       const recipes = recipeSet();
       if (useRecipeStore.getState().dir === null) {
-        set({ lastRejection: "图还没存过盘：先保存图，配方存在图文件旁边的 <图名>.recipes/ 里" });
+        set({ lastRejection: '图还没存过盘：先保存图，配方存在图文件旁边的 <图名>.recipes/ 里' });
         return false;
       }
       const problem = recipeNameProblem(recipes, name);
@@ -1761,10 +1899,14 @@ export const useGraphStore = create<GraphState>((set, get) => {
         graph: graphRefOf(doc),
         updatedAt: nowIso(),
       };
-      transact(source ? `复制配方 ${source.name} → ${name}` : `新建配方 ${name}`, () => {}, (r) => ({
-        ...r,
-        recipes: [...r.recipes, entry],
-      }));
+      transact(
+        source ? `复制配方 ${source.name} → ${name}` : `新建配方 ${name}`,
+        () => {},
+        (r) => ({
+          ...r,
+          recipes: [...r.recipes, entry],
+        }),
+      );
       return true;
     },
 
@@ -1779,31 +1921,41 @@ export const useGraphStore = create<GraphState>((set, get) => {
         return false;
       }
       // 当前配方改了名照样是当前配方：recipe store 按内存 id 认它
-      transact(`重命名配方 ${name} → ${next}`, () => {}, (r, doc) =>
-        replaceRecipe(r, name, touch({ ...entry, name: next }, doc, nowIso())),
+      transact(
+        `重命名配方 ${name} → ${next}`,
+        () => {},
+        (r, doc) => replaceRecipe(r, name, touch({ ...entry, name: next }, doc, nowIso())),
       );
       return true;
     },
 
     deleteRecipe(name) {
       if (!findRecipe(recipeSet(), name)) return;
-      transact(`删除配方 ${name}`, () => {}, (r) => ({
-        recipes: r.recipes.filter((e) => e.name !== name),
-        defaultName: r.defaultName === name ? null : r.defaultName,
-      }));
+      transact(
+        `删除配方 ${name}`,
+        () => {},
+        (r) => ({
+          recipes: r.recipes.filter((e) => e.name !== name),
+          defaultName: r.defaultName === name ? null : r.defaultName,
+        }),
+      );
     },
 
     setDefaultRecipe(name) {
       const recipes = recipeSet();
       if (name !== null && !findRecipe(recipes, name)) return;
       if (recipes.defaultName === name) return;
-      transact(name ? `设 ${name} 为默认配方` : "取消默认配方", () => {}, (r) => ({ ...r, defaultName: name }));
+      transact(
+        name ? `设 ${name} 为默认配方` : '取消默认配方',
+        () => {},
+        (r) => ({ ...r, defaultName: name }),
+      );
     },
 
     addImportedRecipe(entry) {
       const recipes = recipeSet();
       if (useRecipeStore.getState().dir === null) {
-        set({ lastRejection: "图还没存过盘：先保存图，配方存在图文件旁边的 <图名>.recipes/ 里" });
+        set({ lastRejection: '图还没存过盘：先保存图，配方存在图文件旁边的 <图名>.recipes/ 里' });
         return false;
       }
       const problem = recipeNameProblem(recipes, entry.name);
@@ -1811,24 +1963,39 @@ export const useGraphStore = create<GraphState>((set, get) => {
         set({ lastRejection: problem });
         return false;
       }
-      transact(`导入配方 ${entry.name}`, () => {}, (r) => ({ ...r, recipes: [...r.recipes, entry] }));
+      transact(
+        `导入配方 ${entry.name}`,
+        () => {},
+        (r) => ({ ...r, recipes: [...r.recipes, entry] }),
+      );
       return true;
     },
 
     fixRecipe(name, items) {
       if (items.length === 0) return;
       if (!findRecipe(recipeSet(), name)) return;
-      const label = items.length === 1 ? `修复配方 ${name} 的失配` : `修复配方 ${name} 的 ${items.length} 处失配`;
-      transact(label, () => {}, (recipes, doc) => {
-        const e = findRecipe(recipes, name);
-        if (!e) return recipes;
-        const next = applyFixes(e, items, doc, nowIso());
-        return next === e ? recipes : replaceRecipe(recipes, name, next);
-      });
+      const label =
+        items.length === 1
+          ? `修复配方 ${name} 的失配`
+          : `修复配方 ${name} 的 ${items.length} 处失配`;
+      transact(
+        label,
+        () => {},
+        (recipes, doc) => {
+          const e = findRecipe(recipes, name);
+          if (!e) return recipes;
+          const next = applyFixes(e, items, doc, nowIso());
+          return next === e ? recipes : replaceRecipe(recipes, name, next);
+        },
+      );
     },
 
     replaceRecipes(label, next) {
-      transact(label, () => {}, () => next);
+      transact(
+        label,
+        () => {},
+        () => next,
+      );
     },
 
     moveBaseEditToRecipe(key) {
@@ -1854,7 +2021,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
         (recipes, next) => {
           const e = findRecipe(recipes, current);
           if (!e || !next.params?.[name]) return recipes;
-          return replaceRecipe(recipes, current, touch(withValue(e, next, name, edit.after), next, nowIso()));
+          return replaceRecipe(
+            recipes,
+            current,
+            touch(withValue(e, next, name, edit.after), next, nowIso()),
+          );
         },
       );
       if (!done) return null;
@@ -1863,7 +2034,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     renameSubgraph(subgraphId, name) {
-      transact("重命名子图", (d) => {
+      transact('重命名子图', (d) => {
         const def = d.subgraphs?.[subgraphId];
         if (def) def.name = name;
       });
@@ -1910,7 +2081,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         pendingRecipes: null,
       });
       applyRecipeSet(entry.recipes);
-      emitCommitted({ kind: "undo", before, after: { doc: entry.doc, recipes: recipeSet() } });
+      emitCommitted({ kind: 'undo', before, after: { doc: entry.doc, recipes: recipeSet() } });
     },
 
     redo() {
@@ -1927,7 +2098,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
         pendingRecipes: null,
       });
       applyRecipeSet(entry.recipes);
-      emitCommitted({ kind: "redo", before, after: { doc: entry.doc, recipes: recipeSet() } });
+      emitCommitted({ kind: 'redo', before, after: { doc: entry.doc, recipes: recipeSet() } });
     },
 
     travel(steps) {
@@ -1949,9 +2120,16 @@ export const useGraphStore = create<GraphState>((set, get) => {
       }
       if (moved === 0) return 0;
       hints = [];
-      set({ doc, past, future, dirty: doc !== get().savedDoc, pendingSnapshot: null, pendingRecipes: null });
+      set({
+        doc,
+        past,
+        future,
+        dirty: doc !== get().savedDoc,
+        pendingSnapshot: null,
+        pendingRecipes: null,
+      });
       applyRecipeSet(recipes);
-      emitCommitted({ kind: "travel", before, after: { doc, recipes: recipeSet() } });
+      emitCommitted({ kind: 'travel', before, after: { doc, recipes: recipeSet() } });
       return steps < 0 ? -moved : moved;
     },
 
@@ -2002,7 +2180,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     setName(name) {
-      transact("重命名", (d) => {
+      transact('重命名', (d) => {
         d.name = name;
       });
     },
@@ -2018,7 +2196,9 @@ export const useGraphStore = create<GraphState>((set, get) => {
 export function rebaseHistoryRecipes(from: RecipeSet, to: RecipeSet): void {
   const s = useGraphStore.getState();
   const fix = (list: HistoryEntry[]) =>
-    list.some((e) => e.recipes === from) ? list.map((e) => (e.recipes === from ? { ...e, recipes: to } : e)) : list;
+    list.some((e) => e.recipes === from)
+      ? list.map((e) => (e.recipes === from ? { ...e, recipes: to } : e))
+      : list;
   const past = fix(s.past);
   const future = fix(s.future);
   if (past !== s.past || future !== s.future) useGraphStore.setState({ past, future });

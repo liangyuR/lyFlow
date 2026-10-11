@@ -6,8 +6,7 @@
 namespace lyflow::ops {
 namespace {
 
-Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
-               ExecContext& ctx) {
+Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   const PointCloud& in = *inputs.get("cloud").asCloud();
   const std::string& field = params.choice("field");
   const double lo = params.number("min");
@@ -19,8 +18,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
   // 声明范围，看不出 min 和 max 之间的关系。带上 paramPath 前端才能标红框。
   if (lo >= hi) {
     return Status::Error(Phase::Execute, "bad_param",
-                         "Min 必须小于 Max（当前 " + jsonNumber(lo) + " ≥ " + jsonNumber(hi) +
-                             "）",
+                         "Min 必须小于 Max（当前 " + jsonNumber(lo) + " ≥ " + jsonNumber(hi) + "）",
                          "min");
   }
   if (field == "intensity" && !in.hasIntensity()) {
@@ -30,19 +28,25 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
 
   const std::size_t n = in.pointCount();
   int axis = 2;
-  if (field == "x") axis = 0;
-  else if (field == "y") axis = 1;
-  else if (field == "z") axis = 2;
-  else axis = -1;  // intensity
+  if (field == "x")
+    axis = 0;
+  else if (field == "y")
+    axis = 1;
+  else if (field == "z")
+    axis = 2;
+  else
+    axis = -1; // intensity
 
   std::vector<std::int32_t> keep;
   keep.reserve(n);
   Ticker ticker(ctx, n);
   for (std::size_t i = 0; i < n; ++i) {
-    if (ticker.tick(i)) return Status::Ok();
+    if (ticker.tick(i))
+      return Status::Ok();
     const float v = axis >= 0 ? in.xyz[i * 3 + static_cast<std::size_t>(axis)] : in.intensity[i];
     const bool inside = v >= lo && v <= hi;
-    if (inside != invert) keep.push_back(static_cast<std::int32_t>(i));
+    if (inside != invert)
+      keep.push_back(static_cast<std::int32_t>(i));
   }
 
   PointCloud out;
@@ -55,10 +59,12 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
     out.rgb = in.rgb;
 
     std::vector<bool> kept(n, false);
-    for (std::int32_t idx : keep) kept[static_cast<std::size_t>(idx)] = true;
+    for (std::int32_t idx : keep)
+      kept[static_cast<std::size_t>(idx)] = true;
     const float nan = std::numeric_limits<float>::quiet_NaN();
     for (std::size_t i = 0; i < n; ++i) {
-      if (kept[i]) continue;
+      if (kept[i])
+        continue;
       out.xyz[i * 3] = nan;
       out.xyz[i * 3 + 1] = nan;
       out.xyz[i * 3 + 2] = nan;
@@ -76,7 +82,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerFilterPassthrough(Registry& r) {
   OperatorDesc op;
@@ -89,8 +95,8 @@ void registerFilterPassthrough(Registry& r) {
 
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "待裁剪的点云。", true}};
   op.outputs = {
-      Port{"cloud",   "PointCloud", "Cloud",   "保留下来的点。", true},
-      Port{"indices", "Indices",    "Indices", "保留点在输入点云中的下标。", true},
+      Port{"cloud", "PointCloud", "Cloud", "保留下来的点。", true},
+      Port{"indices", "Indices", "Indices", "保留点在输入点云中的下标。", true},
   };
 
   Param field;
@@ -152,4 +158,4 @@ void registerFilterPassthrough(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

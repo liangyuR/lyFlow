@@ -35,7 +35,7 @@ Json fallbackGraph(bool primaryFails) {
       Json{{"result", Json{{"node", "n_fb"}, {"port", "out"}}}});
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("主路径成功时备用闭包一次 compute 都不调") {
   ensureTestOps();
@@ -60,7 +60,8 @@ TEST_CASE("主路径成功时备用闭包一次 compute 都不调") {
   const Json started = log.ofKind("run_started").front();
   CHECK(started["nodeCount"] == 2);
   std::vector<std::string> planned;
-  for (const auto& id : started["plan"]) planned.push_back(id.get<std::string>());
+  for (const auto& id : started["plan"])
+    planned.push_back(id.get<std::string>());
   CHECK(std::find(planned.begin(), planned.end(), "n_b") == planned.end());
   CHECK(std::find(planned.begin(), planned.end(), "n_a") != planned.end());
 }
@@ -74,7 +75,8 @@ TEST_CASE("plan 标出惰性节点与「谁的哪个惰性端口在管着它」"
       Json::parse(exec::planGraphJson(fallbackGraph(/*primaryFails=*/false).dump(), {}, {}));
   REQUIRE(plan.is_array());
   std::map<std::string, Json> byId;
-  for (const Json& n : plan) byId[n["nodeId"].get<std::string>()] = n;
+  for (const Json& n : plan)
+    byId[n["nodeId"].get<std::string>()] = n;
   REQUIRE(byId.size() == 4);
 
   CHECK(byId["n_a"]["lazy"] == false);
@@ -94,13 +96,14 @@ TEST_CASE("plan 标出惰性节点与「谁的哪个惰性端口在管着它」"
   for (const auto& kv : byId) {
     const bool lazy = kv.second["lazy"].get<bool>();
     const Json skipped = log.nodeEvent(kv.first, "skipped");
-    const bool notDemanded = skipped.contains("stats") &&
-                             skipped["stats"].value("reason", "") == "not_demanded";
+    const bool notDemanded =
+        skipped.contains("stats") && skipped["stats"].value("reason", "") == "not_demanded";
     CHECK(lazy == notDemanded);
   }
 }
 
-TEST_CASE("主路径失败时 demand 备用闭包，plan_extended 与 run_started.nodes 同构；acceptsError 端口收到 Error Data 而不是被连坐") {
+TEST_CASE(
+    "主路径失败时 demand 备用闭包，plan_extended 与 run_started.nodes 同构；acceptsError 端口收到 Error Data 而不是被连坐") {
   ensureTestOps();
   ops::computeCalls().store(0);
   Session s(fallbackGraph(/*primaryFails=*/true));
@@ -108,7 +111,7 @@ TEST_CASE("主路径失败时 demand 备用闭包，plan_extended 与 run_starte
 
   CHECK(log.runStatus() == "ok");
   CHECK(log.seqIsDense());
-  CHECK(ops::computeCalls().load() == 1);  // 这次只有 n_b 被调
+  CHECK(ops::computeCalls().load() == 1); // 这次只有 n_b 被调
   CHECK(log.finalState("n_a") == "error");
   CHECK(log.finalState("n_b") == "done");
   CHECK(log.finalState("n_b2") == "done");
@@ -153,13 +156,11 @@ TEST_CASE("失败先连坐几个中间节点、最后撞上 acceptsError，整�
   // n_a 失败 → n_t1 → n_t2 连坐 → 才落到 fallback 的 acceptsError 端口上。
   // 这条级联整个算被接住，run_finished 不该因此变成 error（ADR-0016）。
   const Json doc = makeGraph(
-      {N{"n_a", "test.fail", Json::object()},
-       N{"n_t1", "test.thin", Json::object()},
-       N{"n_t2", "test.thin", Json::object()},
-       N{"n_b", "test.counted", Json{{"pointCount", 5}}},
+      {N{"n_a", "test.fail", Json::object()}, N{"n_t1", "test.thin", Json::object()},
+       N{"n_t2", "test.thin", Json::object()}, N{"n_b", "test.counted", Json{{"pointCount", 5}}},
        N{"n_fb", "flow.fallback", Json::object()}},
-      {E{"n_a.cloud", "n_t1.cloud"}, E{"n_t1.cloud", "n_t2.cloud"},
-       E{"n_t2.cloud", "n_fb.a"}, E{"n_b.cloud", "n_fb.b"}});
+      {E{"n_a.cloud", "n_t1.cloud"}, E{"n_t1.cloud", "n_t2.cloud"}, E{"n_t2.cloud", "n_fb.a"},
+       E{"n_b.cloud", "n_fb.b"}});
   Session s(doc);
   RunLog& log = s.wait();
 
@@ -176,16 +177,14 @@ TEST_CASE("失败先连坐几个中间节点、最后撞上 acceptsError，整�
 
 TEST_CASE("两条都失败时 fallback 自己报错，并带上两边的信息") {
   ensureTestOps();
-  const Json doc = makeGraph(
-      {N{"n_a", "test.fail", Json{{"message", "主路径炸了"}}},
-       N{"n_b", "test.fail", Json{{"message", "备用也炸了"}}},
-       N{"n_fb", "flow.fallback", Json::object()}},
-      {E{"n_a.cloud", "n_fb.a"}, E{"n_b.cloud", "n_fb.b"}});
+  const Json doc = makeGraph({N{"n_a", "test.fail", Json{{"message", "主路径炸了"}}},
+                              N{"n_b", "test.fail", Json{{"message", "备用也炸了"}}},
+                              N{"n_fb", "flow.fallback", Json::object()}},
+                             {E{"n_a.cloud", "n_fb.a"}, E{"n_b.cloud", "n_fb.b"}});
   RunLog log = runGraph(doc);
   CHECK(log.runStatus() == "error");
   CHECK(log.finalState("n_fb") == "error");
-  const std::string message =
-      log.nodeEvent("n_fb", "error")["error"]["message"].get<std::string>();
+  const std::string message = log.nodeEvent("n_fb", "error")["error"]["message"].get<std::string>();
   CHECK(message.find("主路径炸了") != std::string::npos);
   CHECK(message.find("备用也炸了") != std::string::npos);
 }
@@ -232,8 +231,7 @@ TEST_CASE("运行时注入：源节点的 compute 被跳过，输出就是注入
   const Json doc = graphWithOutputs(
       {N{"n_src", "test.counted", Json{{"pointCount", 5}}},
        N{"n_t", "test.thin", Json{{"leaf", Json::array({0.01, 0.01, 0.01})}}}},
-      {E{"n_src.cloud", "n_t.cloud"}},
-      Json{{"thinned", Json{{"node", "n_t"}, {"port", "cloud"}}}});
+      {E{"n_src.cloud", "n_t.cloud"}}, Json{{"thinned", Json{{"node", "n_t"}, {"port", "cloud"}}}});
 
   PointCloud injected;
   for (int i = 0; i < 3; ++i) {
@@ -248,26 +246,28 @@ TEST_CASE("运行时注入：源节点的 compute 被跳过，输出就是注入
   RunLog& log = s.wait();
 
   CHECK(log.runStatus() == "ok");
-  CHECK(ops::computeCalls().load() == 0);  // 注入的节点整个 compute 都没跑
+  CHECK(ops::computeCalls().load() == 0); // 注入的节点整个 compute 都没跑
   CHECK(log.nodeEvent("n_src", "done")["stats"]["provided"] == true);
 
   const Json outputs = Json::parse(exec::runOutputsJson(s.runId()));
   CHECK(outputs["thinned"]["elementCount"] == 3);
 }
 
-TEST_CASE("注入摘要带上点云的 normals / rgb：同样的 xyz 换一份颜色不命中旧缓存（修前命中、下游拿到旧颜色）") {
+TEST_CASE(
+    "注入摘要带上点云的 normals / rgb：同样的 xyz 换一份颜色不命中旧缓存（修前命中、下游拿到旧颜色）") {
   ensureTestOps();
-  const Json doc = makeGraph(
-      {N{"n_src", "test.counted", Json{{"pointCount", 5}}},
-       N{"n_t", "test.thin", Json{{"leaf", Json::array({0.01, 0.01, 0.01})}}}},
-      {E{"n_src.cloud", "n_t.cloud"}});
+  const Json doc =
+      makeGraph({N{"n_src", "test.counted", Json{{"pointCount", 5}}},
+                 N{"n_t", "test.thin", Json{{"leaf", Json::array({0.01, 0.01, 0.01})}}}},
+                {E{"n_src.cloud", "n_t.cloud"}});
   auto colored = [](std::uint8_t r) {
     PointCloud c;
     for (int i = 0; i < 3; ++i) {
       c.push(static_cast<float>(i), 0.0F, 0.0F);
       c.rgb.insert(c.rgb.end(), {r, 0, 0});
     }
-    return std::vector<exec::InjectedInput>{exec::InjectedInput{"n_src", "cloud", Data::cloud(std::move(c))}};
+    return std::vector<exec::InjectedInput>{
+        exec::InjectedInput{"n_src", "cloud", Data::cloud(std::move(c))}};
   };
   {
     Session s(doc, {}, {}, /*keepCache=*/false, 0, false, colored(10));
@@ -283,16 +283,18 @@ TEST_CASE("注入摘要带上点云的 normals / rgb：同样的 xyz 换一份�
 
 namespace {
 
-void collectInto(const char* json, void* user) { static_cast<RunLog*>(user)->events.push_back(Json::parse(json)); }
+void collectInto(const char* json, void* user) {
+  static_cast<RunLog*>(user)->events.push_back(Json::parse(json));
+}
 
-}  // namespace
+} // namespace
 
 TEST_CASE("C ABI 注入图像（v15）：带行填充的缓冲拷成紧排；描述不合法时报在那个节点上") {
   ensureTestOps();
   ResultStore::instance().clear();
-  const Json doc = makeGraph({N{"n_src", "test.make_image", Json::object()},
-                              N{"n_g", "test.take_gray", Json::object()}},
-                             {E{"n_src.image", "n_g.image"}});
+  const Json doc = makeGraph(
+      {N{"n_src", "test.make_image", Json::object()}, N{"n_g", "test.take_gray", Json::object()}},
+      {E{"n_src.image", "n_g.image"}});
   const std::string graph = doc.dump();
   // 3x2 灰度 u8，每行 3 个像素 + 1 字节填充
   const std::uint8_t padded[8] = {1, 2, 3, 99, 4, 5, 6, 99};
@@ -323,7 +325,8 @@ TEST_CASE("C ABI 注入图像（v15）：带行填充的缓冲拷成紧排；描
   lyflow_image_view v{};
   REQUIRE(lyflow_output_image("abi-image", "n_src", "image", 0, 0, 0, &v) == 0);
   CHECK(v.row_bytes == 3u);
-  CHECK(std::vector<std::uint8_t>(v.pixels, v.pixels + 6) == std::vector<std::uint8_t>{1, 2, 3, 4, 5, 6});
+  CHECK(std::vector<std::uint8_t>(v.pixels, v.pixels + 6) ==
+        std::vector<std::uint8_t>{1, 2, 3, 4, 5, 6});
   lyflow_image_view_free(&v);
   lyflow_run_free(run);
 
@@ -332,7 +335,8 @@ TEST_CASE("C ABI 注入图像（v15）：带行填充的缓冲拷成紧排；描
   RunLog badLog;
   lyflow_run* badRun = runWith(bad, "abi-image-bad", badLog);
   CHECK(badLog.runStatus() == "error");
-  CHECK(badLog.nodeEvent("n_src", "error")["error"]["code"] == "bad_input");  // 宿主给错了，不是 internal
+  CHECK(badLog.nodeEvent("n_src", "error")["error"]["code"] ==
+        "bad_input"); // 宿主给错了，不是 internal
   lyflow_run_free(badRun);
 }
 
@@ -340,11 +344,12 @@ namespace {
 
 PointCloud lineCloud(int n, float y) {
   PointCloud c;
-  for (int i = 0; i < n; ++i) c.push(static_cast<float>(i), y, 0.0F);
+  for (int i = 0; i < n; ++i)
+    c.push(static_cast<float>(i), y, 0.0F);
   return c;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("输入注入（m8-plan L18）：port 只是输入端口时 compute 照常跑，端口值取注入数据") {
   ensureTestOps();
@@ -367,15 +372,16 @@ TEST_CASE("输入注入（m8-plan L18）：port 只是输入端口时 compute �
 
   // 必填输入没有连线也不报 missing_input —— 注入就是它的来源
   CHECK(log.ofKind("node_state").size() > 0);
-  for (const Json& e : log.ofKind("node_state")) CHECK(e.value("state", "") != "error");
+  for (const Json& e : log.ofKind("node_state"))
+    CHECK(e.value("state", "") != "error");
 }
 
 TEST_CASE("输入注入：端口上已有连线、端口名不存在、与输出注入混用都在校验期报错") {
   ensureTestOps();
   {
-    const Json doc = makeGraph({N{"g", "gen.synthetic", Json{{"pointCount", 10}}},
-                                N{"m", "test.merge2", Json::object()}},
-                               {E{"g.cloud", "m.a"}});
+    const Json doc = makeGraph(
+        {N{"g", "gen.synthetic", Json{{"pointCount", 10}}}, N{"m", "test.merge2", Json::object()}},
+        {E{"g.cloud", "m.a"}});
     std::vector<exec::InjectedInput> inputs{
         exec::InjectedInput{"m", "a", Data::cloud(lineCloud(3, 0.0F))},
         exec::InjectedInput{"m", "b", Data::cloud(lineCloud(2, 1.0F))}};
@@ -449,11 +455,10 @@ TEST_CASE("并发：八个 run 同时跑，事件按 runId 隔离，结果与串
   ResultStore::instance().clear();
   constexpr int kRuns = 8;
 
-  const Json doc = makeGraph(
-      {N{"g", "gen.synthetic", Json{{"pointCount", 20000}}},
-       N{"t", "test.thin", Json{{"leaf", Json::array({0.03, 0.03, 0.03})}}},
-       N{"m", "test.merge2", Json::object()}},
-      {E{"g.cloud", "t.cloud"}, E{"t.cloud", "m.a"}, E{"g.cloud", "m.b"}});
+  const Json doc = makeGraph({N{"g", "gen.synthetic", Json{{"pointCount", 20000}}},
+                              N{"t", "test.thin", Json{{"leaf", Json::array({0.03, 0.03, 0.03})}}},
+                              N{"m", "test.merge2", Json::object()}},
+                             {E{"g.cloud", "t.cloud"}, E{"t.cloud", "m.a"}, E{"g.cloud", "m.b"}});
 
   // 先串行跑一遍拿基准
   std::size_t expected = 0;
@@ -477,7 +482,8 @@ TEST_CASE("并发：八个 run 同时跑，事件按 runId 隔离，结果与串
     CHECK(log.runStatus() == "ok");
     CHECK(log.seqIsDense());
     // 每条事件的 runId 都必须是自己的
-    for (const Json& e : log.events) CHECK(e["runId"] == s->runId());
+    for (const Json& e : log.events)
+      CHECK(e["runId"] == s->runId());
     Data d;
     REQUIRE(ResultStore::instance().get(s->runId(), "m", "cloud", d));
     CHECK(d.asCloud()->pointCount() == expected);
@@ -534,11 +540,10 @@ TEST_CASE("缓存命中的 fallback 不会去 demand 备用闭包") {
   ensureTestOps();
   ResultStore::instance().clear();
   // test.counted 是 deterministic=false，换个确定性的源才能命中缓存
-  const Json doc = makeGraph(
-      {N{"n_a", "gen.synthetic", Json{{"pointCount", 16}}},
-       N{"n_b", "test.counted", Json{{"pointCount", 21}}},
-       N{"n_fb", "flow.fallback", Json::object()}},
-      {E{"n_a.cloud", "n_fb.a"}, E{"n_b.cloud", "n_fb.b"}});
+  const Json doc = makeGraph({N{"n_a", "gen.synthetic", Json{{"pointCount", 16}}},
+                              N{"n_b", "test.counted", Json{{"pointCount", 21}}},
+                              N{"n_fb", "flow.fallback", Json::object()}},
+                             {E{"n_a.cloud", "n_fb.a"}, E{"n_b.cloud", "n_fb.b"}});
 
   ops::computeCalls().store(0);
   CHECK(runGraphCached(doc).runStatus() == "ok");
@@ -549,4 +554,4 @@ TEST_CASE("缓存命中的 fallback 不会去 demand 备用闭包") {
   CHECK(ops::computeCalls().load() == 0);
 }
 
-}  // namespace lyflow::test
+} // namespace lyflow::test

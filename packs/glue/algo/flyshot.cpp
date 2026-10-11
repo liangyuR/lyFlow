@@ -14,13 +14,15 @@ constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 /// 三点抛物线的顶点相对中点的偏移（−0.5 … 0.5）。不是尖峰（开口朝上或平）时返回 0。
 double parabolaPeak(double a, double b, double c) {
   const double den = a - 2.0 * b + c;
-  if (!(den < 0.0)) return 0.0;
+  if (!(den < 0.0))
+    return 0.0;
   return std::clamp(0.5 * (a - c) / den, -0.5, 0.5);
 }
 
 /// 双线性采样；落出图外返回 NaN。
 double sample(const cv::Mat& g, double x, double y) {
-  if (!(x >= 0.0 && y >= 0.0 && x <= g.cols - 1.0 && y <= g.rows - 1.0)) return kNaN;
+  if (!(x >= 0.0 && y >= 0.0 && x <= g.cols - 1.0 && y <= g.rows - 1.0))
+    return kNaN;
   const int x0 = std::min(static_cast<int>(x), g.cols - 2);
   const int y0 = std::min(static_cast<int>(y), g.rows - 2);
   const double ax = x - x0, ay = y - y0;
@@ -31,7 +33,7 @@ double sample(const cv::Mat& g, double x, double y) {
   return top + ay * (bottom - top);
 }
 
-}  // namespace
+} // namespace
 
 P2 Pose2D::rotate(P2 v) const {
   const double a = angleDeg * CV_PI / 180.0;
@@ -45,7 +47,8 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
                       std::string* why) {
   Pose2D pose;
   auto fail = [&](const char* m) {
-    if (why) *why = m;
+    if (why)
+      *why = m;
     return pose;
   };
   if (gray.empty() || tmpl.empty() || gray.type() != CV_8UC1 || tmpl.type() != CV_8UC1) {
@@ -57,7 +60,8 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
   cv::Scalar mean, deviation;
   cv::meanStdDev(tmpl, mean, deviation);
   // OpenCV 对常量模板的 TM_CCOEFF_NORMED 返回 1；没有纹理不能作为成功定位的证据。
-  if (deviation[0] < 1.0) return fail("模板对比度不足，请选择含边缘或纹理的模板");
+  if (deviation[0] < 1.0)
+    return fail("模板对比度不足，请选择含边缘或纹理的模板");
   // 模板旋转后外接圆的半径 + 搜索半径：任何允许的位姿下模板都完整落在这一块里
   const double half = spec.searchRadius + 0.5 * std::hypot(tw, th) + 4.0;
   const cv::Rect want(static_cast<int>(std::floor(pose.teachCenter.x - half)),
@@ -65,7 +69,8 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
                       static_cast<int>(std::ceil(2.0 * half)) + 1,
                       static_cast<int>(std::ceil(2.0 * half)) + 1);
   const cv::Rect roi = want & cv::Rect(0, 0, gray.cols, gray.rows);
-  if (roi.width < tw + 2 || roi.height < th + 2) return fail("搜索区落在图外，或者比模板还小");
+  if (roi.width < tw + 2 || roi.height < th + 2)
+    return fail("搜索区落在图外，或者比模板还小");
   const cv::Mat sub = gray(roi);
   const P2 rc((roi.width - 1) / 2.0, (roi.height - 1) / 2.0);
 
@@ -113,13 +118,15 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
   };
 
   const double step = std::max(spec.angleStep, 0.01);
-  const int n = spec.angleRange > 0 ? static_cast<int>(std::floor(spec.angleRange / step + 1e-9)) : 0;
+  const int n =
+      spec.angleRange > 0 ? static_cast<int>(std::floor(spec.angleRange / step + 1e-9)) : 0;
   std::vector<double> scores(2 * n + 1);
   int bestI = n;
   P2 loc;
   for (int i = -n; i <= n; ++i) {
     scores[i + n] = matchAt(i * step, &loc);
-    if (scores[i + n] > scores[bestI]) bestI = i + n;
+    if (scores[i + n] > scores[bestI])
+      bestI = i + n;
   }
   double phi = (bestI - n) * step;
   if (n > 0) {
@@ -131,7 +138,8 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
     int bestK = 2;
     for (int k = -2; k <= 2; ++k) {
       fineScores[k + 2] = k == 0 ? best : matchAt(phi + k * fine, &loc);
-      if (fineScores[k + 2] > fineScores[bestK]) bestK = k + 2;
+      if (fineScores[k + 2] > fineScores[bestK])
+        bestK = k + 2;
     }
     phi += (bestK - 2) * fine;
     if (bestK > 0 && bestK < 4) {
@@ -148,7 +156,8 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
   pose.center = p + P2(roi.x, roi.y);
   pose.angleDeg = -phi;
   pose.ok = pose.score >= spec.minScore;
-  if (!pose.ok && why) *why = "匹配分数低于 minScore";
+  if (!pose.ok && why)
+    *why = "匹配分数低于 minScore";
   return pose;
 }
 
@@ -160,7 +169,7 @@ CaliperStation measureCaliper(const cv::Mat& gray, P2 c, P2 n, const CaliperSpec
     return st;
   }
   const double half = std::max(spec.searchHalf, 8.0);
-  const int m = static_cast<int>(std::round(4.0 * half)) + 1;  // 0.5 px 一步
+  const int m = static_cast<int>(std::round(4.0 * half)) + 1; // 0.5 px 一步
   auto tOf = [&](int i) { return -half + 0.5 * i; };
   auto iOf = [&](double t) { return static_cast<int>(std::ceil((t + half) * 2.0 - 1e-9)); };
 
@@ -186,12 +195,14 @@ CaliperStation measureCaliper(const cv::Mat& gray, P2 c, P2 n, const CaliperSpec
   {
     constexpr int r = 4;
     double kernel[2 * r + 1];
-    for (int k = -r; k <= r; ++k) kernel[k + r] = std::exp(-0.5 * (k * k) / 4.0);
+    for (int k = -r; k <= r; ++k)
+      kernel[k + r] = std::exp(-0.5 * (k * k) / 4.0);
     for (int i = 0; i < m; ++i) {
       double acc = 0, wsum = 0;
       for (int k = -r; k <= r; ++k) {
         const int j = i + k;
-        if (j < 0 || j >= m) continue;
+        if (j < 0 || j >= m)
+          continue;
         acc += kernel[k + r] * raw[j];
         wsum += kernel[k + r];
       }
@@ -215,7 +226,8 @@ CaliperStation measureCaliper(const cv::Mat& gray, P2 c, P2 n, const CaliperSpec
   double pickE = 0;
   for (int i = a; i <= b; ++i) {
     const double e = edgeAt(i);
-    if (e < spec.contrastMin || e < edgeAt(i - 1) || e <= edgeAt(i + 1)) continue;
+    if (e < spec.contrastMin || e < edgeAt(i - 1) || e <= edgeAt(i + 1))
+      continue;
     if (pick < 0 || (spec.innerNearest ? i > pick : e > pickE)) {
       pick = i;
       pickE = e;
@@ -237,7 +249,8 @@ CaliperStation measureCaliper(const cv::Mat& gray, P2 c, P2 n, const CaliperSpec
   }
   std::vector<double> d(v.begin() + i0, v.begin() + i1 + 1);
   if (!spec.beadDark) {
-    for (double& x : d) x = 255.0 - x;
+    for (double& x : d)
+      x = 255.0 - x;
   }
   std::vector<double> sorted = d;
   const std::size_t q80 = (sorted.size() * 4) / 5;
@@ -247,8 +260,10 @@ CaliperStation measureCaliper(const cv::Mat& gray, P2 c, P2 n, const CaliperSpec
   const int nd = static_cast<int>(d.size());
   int valley = -1;
   for (int j = 1; j + 1 < nd; ++j) {
-    if (d[j] > d[j - 1] || d[j] >= d[j + 1] || bg - d[j] < spec.contrastMin) continue;
-    if (valley < 0 || std::fabs(tOf(i0 + j)) < std::fabs(tOf(i0 + valley))) valley = j;
+    if (d[j] > d[j - 1] || d[j] >= d[j + 1] || bg - d[j] < spec.contrastMin)
+      continue;
+    if (valley < 0 || std::fabs(tOf(i0 + j)) < std::fabs(tOf(i0 + valley)))
+      valley = j;
   }
   if (valley < 0) {
     st.status = "no_bead";
@@ -259,8 +274,10 @@ CaliperStation measureCaliper(const cv::Mat& gray, P2 c, P2 n, const CaliperSpec
   {
     const double level0 = 0.5 * (bg + d[valley]);
     int a = valley, b = valley;
-    while (a > 0 && d[a - 1] < level0) --a;
-    while (b + 1 < nd && d[b + 1] < level0) ++b;
+    while (a > 0 && d[a - 1] < level0)
+      --a;
+    while (b + 1 < nd && d[b + 1] < level0)
+      ++b;
     mi = static_cast<int>(std::min_element(d.begin() + a, d.begin() + b + 1) - d.begin());
   }
   st.beadContrast = bg - d[mi];
@@ -290,4 +307,4 @@ CaliperStation measureCaliper(const cv::Mat& gray, P2 c, P2 n, const CaliperSpec
   return st;
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

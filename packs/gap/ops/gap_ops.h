@@ -36,9 +36,11 @@ inline float mmToMRoi(double mm) { return static_cast<float>(mm) / 1000.0F; }
 /// 走这里 —— RANSAC 给出的系数方向是随机的。
 inline Eigen::Vector2d canonicalLineDir(double dx, double dy) {
   const double len = std::hypot(dx, dy);
-  if (!(len > 0)) return Eigen::Vector2d(1.0, 0.0);
+  if (!(len > 0))
+    return Eigen::Vector2d(1.0, 0.0);
   Eigen::Vector2d u(dx / len, dy / len);
-  if (u.x() < 0 || (u.x() == 0 && u.y() < 0)) u = -u;
+  if (u.x() < 0 || (u.x() == 0 && u.y() < 0))
+    u = -u;
   return u;
 }
 
@@ -96,7 +98,7 @@ nlohmann::json grooveQuality();
 nlohmann::json notchQuality();
 nlohmann::json cameraConsistency();
 nlohmann::json resultBundle();
-}  // namespace examples
+} // namespace examples
 
 // ------------------------------------------------------------------ 注册函数
 void registerLoadProfilePair(Registry& r);
@@ -129,4 +131,4 @@ void registerRollAnchoredCrop(Registry& r);
 void registerResultBundle(Registry& r);
 void registerStandardGapImporter(Registry& r);
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

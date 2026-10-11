@@ -30,7 +30,7 @@ constexpr double kInvalid = -1.0;
 /// 图像坐标里的一块 CV_32F 场。data 的 (0, 0) 在图像坐标 origin 处；只有 valid 里的值可信
 /// （外扩出来算卷积、形态学用的那一圈不算）。
 class Field {
- public:
+public:
   Field() = default;
   Field(cv::Mat data, cv::Point origin, cv::Rect valid)
       : data_(std::move(data)), origin_(origin), valid_(valid) {}
@@ -40,7 +40,8 @@ class Field {
 
   /// 双线性采样。四个邻点有一个不在可信区里就返回 kInvalid。
   double at(double x, double y) const {
-    if (empty() || !std::isfinite(x) || !std::isfinite(y)) return kInvalid;
+    if (empty() || !std::isfinite(x) || !std::isfinite(y))
+      return kInvalid;
     const double fx = std::floor(x);
     const double fy = std::floor(y);
     const int x0 = static_cast<int>(fx);
@@ -59,10 +60,10 @@ class Field {
   }
   double at(P2 p) const { return at(p.x, p.y); }
 
- private:
+private:
   cv::Mat data_;
   cv::Point origin_;
   cv::Rect valid_;
 };
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

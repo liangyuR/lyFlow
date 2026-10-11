@@ -4,28 +4,28 @@
 // 单击选中、Ctrl 加选、Shift 连选；「复制选中 N 格 → 配方」让目标配方里这些参数的有效值等于选中格的值。
 // 改值、复制都经 graph store 的动作（一次撤销，K7）；列的隐藏、选中、只看差异是纯 UI 状态。
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { graphParamSpecOf } from "../lib/graphParams";
-import { valueEquals } from "../lib/params";
-import { BASE_LABEL, formatValue, KIND_LABEL } from "../lib/recipes";
-import { augmentOperators } from "../lib/subgraph";
-import { useGraphStore } from "../store/graph";
-import { useManifestStore } from "../store/manifest";
-import { selectRecipe, useRecipeReports, useRecipeStore } from "../store/recipe";
-import { useUiStore } from "../store/ui";
-import type { GraphParam } from "../types/graph";
-import type { Param, ParamType } from "../types/manifest";
+import { graphParamSpecOf } from '../lib/graphParams';
+import { valueEquals } from '../lib/params';
+import { BASE_LABEL, formatValue, KIND_LABEL } from '../lib/recipes';
+import { augmentOperators } from '../lib/subgraph';
+import { useGraphStore } from '../store/graph';
+import { useManifestStore } from '../store/manifest';
+import { selectRecipe, useRecipeReports, useRecipeStore } from '../store/recipe';
+import { useUiStore } from '../store/ui';
+import type { GraphParam } from '../types/graph';
+import type { Param, ParamType } from '../types/manifest';
 
-import { ParamControl } from "./ParamControls";
-import { newRecipeInteractive } from "./recipeActions";
+import { ParamControl } from './ParamControls';
+import { newRecipeInteractive } from './recipeActions';
 
 /** 基础列的列键。配方名不会是它（配方名里不能有 `:`）。 */
-const BASE = ":base";
+const BASE = ':base';
 
-const INLINE: ReadonlySet<ParamType> = new Set(["bool", "int", "float", "enum", "string", "path"]);
+const INLINE: ReadonlySet<ParamType> = new Set(['bool', 'int', 'float', 'enum', 'string', 'path']);
 
-type CellState = "base" | "inherit" | "override" | "invalid";
+type CellState = 'base' | 'inherit' | 'override' | 'invalid';
 
 interface MatrixRow {
   name: string;
@@ -57,7 +57,7 @@ export function RecipeMatrix() {
     () =>
       Object.entries(doc.params ?? {}).map(([name, gp]) => {
         const spec = graphParamSpecOf(doc, name, gp, ops);
-        return { name, gp, spec, group: spec?.group ?? gp.group ?? "" };
+        return { name, gp, spec, group: spec?.group ?? gp.group ?? '' };
       }),
     [doc, ops],
   );
@@ -69,14 +69,19 @@ export function RecipeMatrix() {
 
   const stateOf = useCallback(
     (row: MatrixRow, col: string): { state: CellState; value: unknown; reason?: string } => {
-      if (col === BASE) return { state: "base", value: row.gp.default };
+      if (col === BASE) return { state: 'base', value: row.gp.default };
       const entry = entries.get(col);
       const bad = reports.get(col)?.byParam.get(row.name);
-      if (bad) return { state: "invalid", value: entry?.values[row.name], reason: `${KIND_LABEL[bad.kind]}：${bad.message}` };
+      if (bad)
+        return {
+          state: 'invalid',
+          value: entry?.values[row.name],
+          reason: `${KIND_LABEL[bad.kind]}：${bad.message}`,
+        };
       if (entry && Object.prototype.hasOwnProperty.call(entry.values, row.name)) {
-        return { state: "override", value: entry.values[row.name] };
+        return { state: 'override', value: entry.values[row.name] };
       }
-      return { state: "inherit", value: row.gp.default };
+      return { state: 'inherit', value: row.gp.default };
     },
     [entries, reports],
   );
@@ -85,12 +90,13 @@ export function RecipeMatrix() {
   const shown = useMemo(
     () =>
       onlyDiff
-        ? rows.filter((r) => columns.some((c) => c !== BASE && stateOf(r, c).state !== "inherit"))
+        ? rows.filter((r) => columns.some((c) => c !== BASE && stateOf(r, c).state !== 'inherit'))
         : rows,
     [rows, columns, onlyDiff, stateOf],
   );
   const diffCount = useMemo(
-    () => rows.filter((r) => set.recipes.some((e) => stateOf(r, e.name).state !== "inherit")).length,
+    () =>
+      rows.filter((r) => set.recipes.some((e) => stateOf(r, e.name).state !== 'inherit')).length,
     [rows, set, stateOf],
   );
 
@@ -110,7 +116,8 @@ export function RecipeMatrix() {
       const next = new Set<string>();
       const [r0, r1] = [Math.min(anchor.row, ri), Math.max(anchor.row, ri)];
       const [c0, c1] = [Math.min(anchor.col, ci), Math.max(anchor.col, ci)];
-      for (let r = r0; r <= r1; r += 1) for (let c = c0; c <= c1; c += 1) next.add(cellKey(shown[r]!.name, columns[c]!));
+      for (let r = r0; r <= r1; r += 1)
+        for (let c = c0; c <= c1; c += 1) next.add(cellKey(shown[r]!.name, columns[c]!));
       setSelected(next);
       return;
     }
@@ -132,11 +139,13 @@ export function RecipeMatrix() {
     setCopyOpen(false);
     const byParam = new Map<string, unknown>();
     for (const key of selected) {
-      const [param, col] = key.split("\u0000") as [string, string];
+      const [param, col] = key.split('\u0000') as [string, string];
       const row = rows.find((r) => r.name === param);
       if (!row) continue;
       if (byParam.has(param)) {
-        useUiStore.getState().showToast(`参数 ${param} 选了不止一格：一个参数只能复制一个值`, "warn");
+        useUiStore
+          .getState()
+          .showToast(`参数 ${param} 选了不止一格：一个参数只能复制一个值`, 'warn');
         return;
       }
       byParam.set(param, stateOf(row, col).value);
@@ -145,7 +154,9 @@ export function RecipeMatrix() {
       [...byParam].map(([param, value]) => ({ param, value })),
       target,
     );
-    useUiStore.getState().showToast(n > 0 ? `已复制 ${n} 格到配方 ${target}` : `配方 ${target} 里这些值本来就一样`);
+    useUiStore
+      .getState()
+      .showToast(n > 0 ? `已复制 ${n} 格到配方 ${target}` : `配方 ${target} 里这些值本来就一样`);
   };
 
   const commit = (row: MatrixRow, col: string, v: unknown) => {
@@ -157,7 +168,9 @@ export function RecipeMatrix() {
   if (rows.length === 0) {
     return (
       <div className="ppanel__body mx" data-testid="recipe-matrix">
-        <p className="pp-empty">还没有图参数：在「按节点」页点参数行右端的书签「纳入配方」，它们才会出现在这里。</p>
+        <p className="pp-empty">
+          还没有图参数：在「按节点」页点参数行右端的书签「纳入配方」，它们才会出现在这里。
+        </p>
       </div>
     );
   }
@@ -169,7 +182,7 @@ export function RecipeMatrix() {
       <div className="mx-bar">
         <button
           type="button"
-          className={`ctl-chip pp-chip${onlyDiff ? " is-on" : ""}`}
+          className={`ctl-chip pp-chip${onlyDiff ? ' is-on' : ''}`}
           data-testid="mx-diff"
           aria-pressed={onlyDiff}
           onClick={() => setOnlyDiff(true)}
@@ -178,7 +191,7 @@ export function RecipeMatrix() {
         </button>
         <button
           type="button"
-          className={`ctl-chip pp-chip${!onlyDiff ? " is-on" : ""}`}
+          className={`ctl-chip pp-chip${!onlyDiff ? ' is-on' : ''}`}
           data-testid="mx-all"
           aria-pressed={!onlyDiff}
           onClick={() => setOnlyDiff(false)}
@@ -186,14 +199,24 @@ export function RecipeMatrix() {
           全部 <span className="pp-count">{rows.length}</span>
         </button>
         {hiddenCount > 0 && (
-          <button type="button" className="ctl-chip pp-chip" data-testid="mx-unhide" onClick={() => setHidden(new Set())}>
+          <button
+            type="button"
+            className="ctl-chip pp-chip"
+            data-testid="mx-unhide"
+            onClick={() => setHidden(new Set())}
+          >
             显示隐藏的 {hiddenCount} 列
           </button>
         )}
         <span className="ppanel__spacer" />
         {!dir && <span className="insp__hint">图还没存过盘：先保存图才能建配方</span>}
         {dir && set.recipes.length === 0 && (
-          <button type="button" className="lf-btn" data-testid="mx-new" onClick={() => void newRecipeInteractive(null)}>
+          <button
+            type="button"
+            className="lf-btn"
+            data-testid="mx-new"
+            onClick={() => void newRecipeInteractive(null)}
+          >
             + 新建配方
           </button>
         )}
@@ -236,22 +259,33 @@ export function RecipeMatrix() {
                 return (
                   <th
                     key={c}
-                    className={`mx-th${c === current || (c === BASE && current === null) ? " is-current" : ""}`}
-                    data-testid={`mx-col-${c === BASE ? "base" : c}`}
+                    className={`mx-th${c === current || (c === BASE && current === null) ? ' is-current' : ''}`}
+                    data-testid={`mx-col-${c === BASE ? 'base' : c}`}
                     data-col={c}
                   >
                     <button
                       type="button"
                       className="mx-th__name"
-                      title={c === BASE ? "基础：图参数的默认值（点一下切到基础）" : `点一下切到配方「${c}」`}
+                      title={
+                        c === BASE
+                          ? '基础：图参数的默认值（点一下切到基础）'
+                          : `点一下切到配方「${c}」`
+                      }
                       onClick={() => selectRecipe(c === BASE ? null : c)}
                     >
-                      {(c === current || (c === BASE && current === null)) && <span className="mx-th__dot">●</span>}
+                      {(c === current || (c === BASE && current === null)) && (
+                        <span className="mx-th__dot">●</span>
+                      )}
                       {c === BASE ? BASE_LABEL : c}
-                      {entry && set.defaultName === c && <span className="recipe-menu__star">★</span>}
+                      {entry && set.defaultName === c && (
+                        <span className="recipe-menu__star">★</span>
+                      )}
                     </button>
                     {bad > 0 && (
-                      <span className="recipe-badge recipe-badge--bad" title="失配数：这个配方不能运行">
+                      <span
+                        className="recipe-badge recipe-badge--bad"
+                        title="失配数：这个配方不能运行"
+                      >
                         {bad}
                       </span>
                     )}
@@ -276,7 +310,7 @@ export function RecipeMatrix() {
               const head =
                 row.group !== lastGroup ? (
                   <tr key={`g:${row.group}:${ri}`} className="mx-group">
-                    <td colSpan={columns.length + 1}>{row.group || "未分组"}</td>
+                    <td colSpan={columns.length + 1}>{row.group || '未分组'}</td>
                   </tr>
                 ) : null;
               lastGroup = row.group;
@@ -294,19 +328,19 @@ export function RecipeMatrix() {
                     return (
                       <td
                         key={c}
-                        className={`mx-td mx-cell is-${cell.state}${selected.has(key) ? " is-selected" : ""}`}
-                        data-testid={`mx-cell-${row.name}-${c === BASE ? "base" : c}`}
+                        className={`mx-td mx-cell is-${cell.state}${selected.has(key) ? ' is-selected' : ''}`}
+                        data-testid={`mx-cell-${row.name}-${c === BASE ? 'base' : c}`}
                         data-param={row.name}
-                        data-col={c === BASE ? "" : c}
+                        data-col={c === BASE ? '' : c}
                         data-state={cell.state}
-                        data-selected={selected.has(key) ? "1" : undefined}
+                        data-selected={selected.has(key) ? '1' : undefined}
                         title={
                           cell.reason ??
-                          (cell.state === "inherit"
-                            ? "沿用基础（这个配方没存这个值）。双击编辑"
-                            : cell.state === "override"
-                              ? "这个配方存的值。双击编辑"
-                              : "基础（default）。双击编辑")
+                          (cell.state === 'inherit'
+                            ? '沿用基础（这个配方没存这个值）。双击编辑'
+                            : cell.state === 'override'
+                              ? '这个配方存的值。双击编辑'
+                              : '基础（default）。双击编辑')
                         }
                         onClick={(e) => clickCell(e, ri, ci)}
                         onDoubleClick={() => row.spec && setEditing({ param: row.name, col: c })}
@@ -317,18 +351,23 @@ export function RecipeMatrix() {
                             value={cell.value}
                             inline={INLINE.has(row.spec.type)}
                             previewGraphParam={
-                              c === (current ?? BASE) || (c === BASE && !Object.hasOwn(overrides, row.name)) ? row.name : undefined
+                              c === (current ?? BASE) ||
+                              (c === BASE && !Object.hasOwn(overrides, row.name))
+                                ? row.name
+                                : undefined
                             }
                             onCommit={(v) => commit(row, c, v)}
                             onReset={
-                              c !== BASE && cell.state !== "inherit"
+                              c !== BASE && cell.state !== 'inherit'
                                 ? () => useGraphStore.getState().clearRecipeValue(c, row.name)
                                 : undefined
                             }
                             onClose={() => setEditing(null)}
                           />
                         ) : (
-                          <span className="mx-cell__text">{formatValue(cell.value, row.spec ?? undefined)}</span>
+                          <span className="mx-cell__text">
+                            {formatValue(cell.value, row.spec ?? undefined)}
+                          </span>
                         )}
                       </td>
                     );
@@ -342,7 +381,8 @@ export function RecipeMatrix() {
       <p className="mx-legend">
         <span className="mx-legend__item is-inherit">灰字</span> 沿用基础（不存）
         <span className="mx-legend__item is-override">橙</span> 配方存的值
-        <span className="mx-legend__item is-invalid">红</span> 越界或非法（悬停看原因；这个配方不能运行）
+        <span className="mx-legend__item is-invalid">红</span>{' '}
+        越界或非法（悬停看原因；这个配方不能运行）
       </p>
     </div>
   );
@@ -373,10 +413,10 @@ function CellEditor({
     const away = (e: PointerEvent) => {
       if (box.current && !box.current.contains(e.target as Node)) setTimeout(onClose, 0);
     };
-    window.addEventListener("pointerdown", away, true);
-    const first = box.current?.querySelector<HTMLElement>("input, select, textarea");
+    window.addEventListener('pointerdown', away, true);
+    const first = box.current?.querySelector<HTMLElement>('input, select, textarea');
     first?.focus();
-    return () => window.removeEventListener("pointerdown", away, true);
+    return () => window.removeEventListener('pointerdown', away, true);
   }, [onClose]);
   // 就地编辑不画滑块（格子太窄）：限位不在控件上夹，越界的值照样写进去、单元格标红，由失配报告说原因
   let param = spec;
@@ -387,28 +427,47 @@ function CellEditor({
   return (
     <div
       ref={box}
-      className={inline ? "mx-edit mx-edit--inline" : "mx-edit mx-edit--pop"}
+      className={inline ? 'mx-edit mx-edit--inline' : 'mx-edit mx-edit--pop'}
       data-testid="mx-editor"
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
-        if (e.key === "Escape") {
+        if (e.key === 'Escape') {
           e.stopPropagation();
           (document.activeElement as HTMLElement | null)?.blur();
           setTimeout(onClose, 0);
         }
-        if (e.key === "Enter" && inline) setTimeout(onClose, 0);
+        if (e.key === 'Enter' && inline) setTimeout(onClose, 0);
       }}
     >
-      <ParamControl param={param} value={value} disabled={false} onChange={onCommit} previewGraphParam={previewGraphParam} />
+      <ParamControl
+        param={param}
+        value={value}
+        disabled={false}
+        onChange={onCommit}
+        previewGraphParam={previewGraphParam}
+      />
       {!inline && (
         <div className="mx-edit__buttons">
           {onReset && (
-            <button type="button" className="prow__textbtn" data-testid="mx-edit-reset" onClick={() => { onReset(); onClose(); }}>
+            <button
+              type="button"
+              className="prow__textbtn"
+              data-testid="mx-edit-reset"
+              onClick={() => {
+                onReset();
+                onClose();
+              }}
+            >
               恢复基础
             </button>
           )}
-          <button type="button" className="lf-btn" data-testid="mx-edit-done" onClick={() => setTimeout(onClose, 0)}>
+          <button
+            type="button"
+            className="lf-btn"
+            data-testid="mx-edit-done"
+            onClick={() => setTimeout(onClose, 0)}
+          >
             完成
           </button>
         </div>

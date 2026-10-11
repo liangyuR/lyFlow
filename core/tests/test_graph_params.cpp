@@ -12,21 +12,23 @@ namespace {
 
 /// src(test.counted) → thin(test.thin) → tail(test.thin)，外加一支不相干的 side(test.counted)。
 /// 顶层参数 count 绑 src.pointCount。
-Json paramGraph(const Json& params = Json{{"count", {{"default", 40}, {"binds", {"src.pointCount"}}}}}) {
-  Json doc = makeGraph({N{"src", "test.counted", Json::object()},
-                        N{"thin", "test.thin", Json::object()},
-                        N{"tail", "test.thin", Json::object()},
-                        N{"side", "test.counted", Json{{"pointCount", 7}}}},
-                       {E{"src.cloud", "thin.cloud"}, E{"thin.cloud", "tail.cloud"}});
+Json paramGraph(const Json& params = Json{
+                    {"count", {{"default", 40}, {"binds", {"src.pointCount"}}}}}) {
+  Json doc = makeGraph(
+      {N{"src", "test.counted", Json::object()}, N{"thin", "test.thin", Json::object()},
+       N{"tail", "test.thin", Json::object()}, N{"side", "test.counted", Json{{"pointCount", 7}}}},
+      {E{"src.cloud", "thin.cloud"}, E{"thin.cloud", "tail.cloud"}});
   doc["params"] = params;
   return doc;
 }
 
 Json rowOf(const Json& view, const std::string& node, const std::string& param) {
   for (const Json& n : view["nodes"]) {
-    if (n["node"] != node) continue;
+    if (n["node"] != node)
+      continue;
     for (const Json& p : n["params"]) {
-      if (p["param"] == param) return p;
+      if (p["param"] == param)
+        return p;
     }
   }
   FAIL("没有 ", node, ".", param, "：", view.dump());
@@ -44,12 +46,13 @@ std::map<std::string, std::string> keysOf(const std::string& planJson) {
 
 bool hasDiag(const Json& diags, const std::string& code, const std::string& node = {}) {
   for (const Json& d : diags) {
-    if (d.value("code", "") == code && (node.empty() || d.value("nodeId", "") == node)) return true;
+    if (d.value("code", "") == code && (node.empty() || d.value("nodeId", "") == node))
+      return true;
   }
   return false;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("顶层参数：绑定在展开期写进节点，生效值与 source=graph 由 core 说") {
   ensureTestOps();
@@ -146,7 +149,8 @@ Json specGraph(const Json& value = 40) {
                            {"binds", {"src.pointCount"}}}}});
 }
 
-TEST_CASE("图参数规格：default 越过硬限位报 bad_param，paramPath 是名字、nodeId 为空；与节点的错一次报全") {
+TEST_CASE(
+    "图参数规格：default 越过硬限位报 bad_param，paramPath 是名字、nodeId 为空；与节点的错一次报全") {
   ensureTestOps();
   CHECK(Json::parse(exec::validateGraphJson(specGraph().dump(), {})).empty());
 
@@ -162,7 +166,7 @@ TEST_CASE("图参数规格：default 越过硬限位报 bad_param，paramPath �
 
   // 图参数的错与节点的错一次报全
   Json both = specGraph(500);
-  both["nodes"][3]["params"]["pointCount"] = -3;  // side 自己也错
+  both["nodes"][3]["params"]["pointCount"] = -3; // side 自己也错
   const Json bothDiags = Json::parse(exec::validateGraphJson(both.dump(), {}));
   CHECK(findDiag(bothDiags, "bad_param", "", "count") != nullptr);
   CHECK(findDiag(bothDiags, "bad_param", "side", "pointCount") != nullptr);
@@ -218,8 +222,7 @@ TEST_CASE("图参数规格：params_json 传入越界值同样报错，合法值
 TEST_CASE("图参数规格：类型与 options 也按图参数自己的规格查") {
   ensureTestOps();
   SUBCASE("类型不符") {
-    const Json diags =
-        Json::parse(exec::validateGraphJson(specGraph(Json("forty")).dump(), {}));
+    const Json diags = Json::parse(exec::validateGraphJson(specGraph(Json("forty")).dump(), {}));
     CHECK(findDiag(diags, "bad_param", "", "count") != nullptr);
   }
   SUBCASE("整数写成小数") {
@@ -227,9 +230,9 @@ TEST_CASE("图参数规格：类型与 options 也按图参数自己的规格查
     CHECK(findDiag(diags, "bad_param", "", "count") != nullptr);
   }
   SUBCASE("enum 不在 options 里") {
-    Json doc = makeGraph({N{"src", "test.counted", Json::object()},
-                          N{"chk", "test.validated", Json::object()}},
-                         {E{"src.cloud", "chk.cloud"}, E{"src.cloud", "chk.ref"}});
+    Json doc = makeGraph(
+        {N{"src", "test.counted", Json::object()}, N{"chk", "test.validated", Json::object()}},
+        {E{"src.cloud", "chk.cloud"}, E{"src.cloud", "chk.ref"}});
     doc["params"] = Json{{"mode",
                           {{"type", "enum"},
                            {"options", Json::array({Json{{"value", "ok"}, {"label", "OK"}},
@@ -248,7 +251,8 @@ TEST_CASE("图参数规格：类型与 options 也按图参数自己的规格查
 TEST_CASE("图参数规格：没有 type 的老图参数跳过第一步，照常运行") {
   ensureTestOps();
   // 老格式里写 min/max 也不算数：没有 type 就不是一份规格
-  Json doc = paramGraph(Json{{"count", {{"default", 500}, {"max", 100}, {"binds", {"src.pointCount"}}}}});
+  Json doc =
+      paramGraph(Json{{"count", {{"default", 500}, {"max", 100}, {"binds", {"src.pointCount"}}}}});
   CHECK(Json::parse(exec::validateGraphJson(doc.dump(), {})).empty());
   const RunLog log = runGraph(doc);
   CHECK(log.runStatus() == "ok");
@@ -264,25 +268,29 @@ TEST_CASE("顶层参数绑到子图实例：里面的节点也报 source=graph")
   Json doc;
   doc["schemaVersion"] = 1;
   doc["id"] = "01GRAPHPARAMSUB";
-  doc["nodes"] = Json::array({Json{{"id", "src"}, {"op", "test.counted"}}, Json{{"id", "s"}, {"op", "sub:clean"}}});
+  doc["nodes"] = Json::array(
+      {Json{{"id", "src"}, {"op", "test.counted"}}, Json{{"id", "s"}, {"op", "sub:clean"}}});
   doc["edges"] = Json::array({Json{{"id", "e1"},
                                    {"from", {{"node", "src"}, {"port", "cloud"}}},
                                    {"to", {{"node", "s"}, {"port", "cloud"}}}}});
   doc["subgraphs"]["clean"] = Json{
       {"nodes", Json::array({Json{{"id", "v"}, {"op", "test.thin"}}})},
       {"edges", Json::array()},
-      {"inputs", Json::array({Json{{"name", "cloud"},
-                                   {"type", "PointCloud"},
-                                   {"to", Json::array({Json{{"node", "v"}, {"port", "cloud"}}})}}})},
+      {"inputs",
+       Json::array({Json{{"name", "cloud"},
+                         {"type", "PointCloud"},
+                         {"to", Json::array({Json{{"node", "v"}, {"port", "cloud"}}})}}})},
       {"outputs", Json::array({Json{{"name", "cloud"},
                                     {"type", "PointCloud"},
                                     {"from", {{"node", "v"}, {"port", "cloud"}}}}})},
-      {"params", Json::array({Json{{"name", "leaf"},
-                                   {"type", "vec3f"},
-                                   {"default", Json::array({0.02, 0.02, 0.02})},
-                                   {"binds", Json::array({Json{{"node", "v"}, {"param", "leaf"}}})}}})},
+      {"params",
+       Json::array({Json{{"name", "leaf"},
+                         {"type", "vec3f"},
+                         {"default", Json::array({0.02, 0.02, 0.02})},
+                         {"binds", Json::array({Json{{"node", "v"}, {"param", "leaf"}}})}}})},
   };
-  doc["params"] = Json{{"leafAll", {{"default", Json::array({0.05, 0.05, 0.05})}, {"binds", {"s.leaf"}}}}};
+  doc["params"] =
+      Json{{"leafAll", {{"default", Json::array({0.05, 0.05, 0.05})}, {"binds", {"s.leaf"}}}}};
   const Json view = Json::parse(exec::effectiveParamsJson(doc.dump(), {}));
   const Json row = rowOf(view, "s/v", "leaf");
   CHECK(row["source"] == "graph");
@@ -332,9 +340,10 @@ TEST_CASE("validate 钩子：error 进 Validate 诊断且节点不执行，warni
   CHECK(ran.runStatus() == "ok");
   bool logged = false;
   for (const Json& e : ran.ofKind("log")) {
-    if (e.value("level", "") == "warn" && e.value("nodeId", "") == "chk") logged = true;
+    if (e.value("level", "") == "warn" && e.value("nodeId", "") == "chk")
+      logged = true;
   }
   CHECK(logged);
 }
 
-}  // namespace lyflow::test
+} // namespace lyflow::test

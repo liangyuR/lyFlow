@@ -3,13 +3,14 @@
 // contextmenu 在右键**松开**时才发，松在哪个节点 / 连线上就弹哪个的菜单 —— 拖着平移完一松手，冒出来一个菜单。
 // 这里：右键按在节点 / 连线上时自己平移；右键拖过几像素之后的那一次 contextmenu 吞掉（空白处、节点上都是）。
 
-import { useReactFlow } from "@xyflow/react";
-import { useEffect, type RefObject } from "react";
+import { useReactFlow } from '@xyflow/react';
+import { useEffect, type RefObject } from 'react';
 
 /** 右键按下后挪了超过这么多才算拖动；短于它是一次右键单击，照常弹菜单。 */
 const DRAG_PX = 4;
 /** 这些上面按下右键时自己平移；空白处（.react-flow__pane）d3-zoom 自己会。 */
-const MANUAL_PAN_ON = ".react-flow__node, .react-flow__edge, .react-flow__edgeupdater, .react-flow__nodesselection";
+const MANUAL_PAN_ON =
+  '.react-flow__node, .react-flow__edge, .react-flow__edgeupdater, .react-flow__nodesselection';
 
 export function useRightDragPan(wrapper: RefObject<HTMLElement | null>): void {
   const { getViewport, setViewport } = useReactFlow();
@@ -17,16 +18,23 @@ export function useRightDragPan(wrapper: RefObject<HTMLElement | null>): void {
   useEffect(() => {
     const el = wrapper.current;
     if (!el) return;
-    let gesture: { x: number; y: number; vx: number; vy: number; zoom: number; manual: boolean; moved: boolean } | null =
-      null;
+    let gesture: {
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      zoom: number;
+      manual: boolean;
+      moved: boolean;
+    } | null = null;
     let swallowMenu = false;
 
     const end = () => {
       if (gesture?.moved) swallowMenu = true;
       gesture = null;
-      window.removeEventListener("pointermove", onMove, true);
-      window.removeEventListener("pointerup", onUp, true);
-      window.removeEventListener("pointercancel", onUp, true);
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onUp, true);
     };
     const onMove = (e: PointerEvent) => {
       if (!gesture) return;
@@ -46,10 +54,10 @@ export function useRightDragPan(wrapper: RefObject<HTMLElement | null>): void {
       if (e.button === 2 || (e.buttons & 2) === 0) end();
     };
     const onDown = (e: PointerEvent) => {
-      if (e.button !== 2 || e.pointerType === "touch") return;
+      if (e.button !== 2 || e.pointerType === 'touch') return;
       swallowMenu = false;
       const target = e.target instanceof Element ? e.target : null;
-      if (!target?.closest(".react-flow")) return;
+      if (!target?.closest('.react-flow')) return;
       const vp = getViewport();
       gesture = {
         x: e.clientX,
@@ -60,9 +68,9 @@ export function useRightDragPan(wrapper: RefObject<HTMLElement | null>): void {
         manual: target.closest(MANUAL_PAN_ON) !== null,
         moved: false,
       };
-      window.addEventListener("pointermove", onMove, true);
-      window.addEventListener("pointerup", onUp, true);
-      window.addEventListener("pointercancel", onUp, true);
+      window.addEventListener('pointermove', onMove, true);
+      window.addEventListener('pointerup', onUp, true);
+      window.addEventListener('pointercancel', onUp, true);
     };
     // 捕获阶段、挂在画布外层：比 React Flow 节点 / 连线上的 onContextMenu（React 在根上冒泡时才分发）先到
     const onContextMenu = (e: MouseEvent) => {
@@ -72,11 +80,11 @@ export function useRightDragPan(wrapper: RefObject<HTMLElement | null>): void {
       e.stopPropagation();
     };
 
-    el.addEventListener("pointerdown", onDown, true);
-    el.addEventListener("contextmenu", onContextMenu, true);
+    el.addEventListener('pointerdown', onDown, true);
+    el.addEventListener('contextmenu', onContextMenu, true);
     return () => {
-      el.removeEventListener("pointerdown", onDown, true);
-      el.removeEventListener("contextmenu", onContextMenu, true);
+      el.removeEventListener('pointerdown', onDown, true);
+      el.removeEventListener('contextmenu', onContextMenu, true);
       end();
       swallowMenu = false;
     };

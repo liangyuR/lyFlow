@@ -1,0 +1,8 @@
+node_modules/
+dist/
+build/
+target/
+**/build-test/
+bridge/gen/
+third_party/
+vcpkg_installed/

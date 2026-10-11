@@ -22,24 +22,27 @@ std::optional<Eigen::Vector2f> robustCloudCenter(const lyflow::PointCloud& cloud
   for (std::size_t i = 0; i < n; ++i) {
     const float x = cloud.xyz[i * 3];
     const float y = cloud.xyz[i * 3 + 1];
-    if (!std::isfinite(x) || !std::isfinite(y)) continue;
+    if (!std::isfinite(x) || !std::isfinite(y))
+      continue;
     xs.push_back(x);
     ys.push_back(y);
   }
-  if (xs.empty()) return std::nullopt;
+  if (xs.empty())
+    return std::nullopt;
 
   const auto median = [](std::vector<float>* values) {
     const auto middle = values->begin() + static_cast<std::ptrdiff_t>(values->size() / 2);
     std::nth_element(values->begin(), middle, values->end());
     const float upper = *middle;
-    if (values->size() % 2 != 0) return upper;
+    if (values->size() % 2 != 0)
+      return upper;
     const auto lower = std::max_element(values->begin(), middle);
     return (*lower + upper) * 0.5F;
   };
   return Eigen::Vector2f{median(&xs), median(&ys)};
 }
 
-}  // namespace
+} // namespace
 
 namespace fine {
 
@@ -69,39 +72,42 @@ Status overallRoi(const Inputs& inputs, const ParamView& params, Outputs& output
       const double cx = static_cast<double>(center->x()) * kScale;
       const double cy = static_cast<double>(center->y()) * kScale;
       resolved = {cx - halfWidth, cy - halfHeight, cx + halfWidth, cy + halfHeight};
-      ctx.log(LogLevel::Info, "auto_center: 中心 (" + std::to_string(cx) + ", " +
-                                  std::to_string(cy) + ") mm");
+      ctx.log(LogLevel::Info,
+              "auto_center: 中心 (" + std::to_string(cx) + ", " + std::to_string(cy) + ") mm");
     }
   }
   outputs.set("box", Data::box2d(boxFromMm(resolved[0], resolved[1], resolved[2], resolved[3])));
   return Status::Ok();
 }
 
-}  // namespace fine
+} // namespace fine
 
 namespace {
 
 /// Record 里那四个 ROI（毫米）。缺字段时返回 false。
 bool readRois(const nlohmann::json& data, std::array<std::array<double, 4>, 4>& out) {
   static const char* kKeys[4] = {"flushBase", "gapLeft", "flushRef", "gapRight"};
-  if (!data.contains("rois")) return false;
+  if (!data.contains("rois"))
+    return false;
   const auto& rois = data["rois"];
   for (int i = 0; i < 4; ++i) {
-    if (!rois.contains(kKeys[i])) return false;
+    if (!rois.contains(kKeys[i]))
+      return false;
     const auto& v = rois[kKeys[i]];
-    if (!v.is_array() || v.size() != 4) return false;
-    for (int j = 0; j < 4; ++j) out[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)] =
-        v[static_cast<std::size_t>(j)].get<double>();
+    if (!v.is_array() || v.size() != 4)
+      return false;
+    for (int j = 0; j < 4; ++j)
+      out[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)] =
+          v[static_cast<std::size_t>(j)].get<double>();
   }
   return true;
 }
 
-}  // namespace
+} // namespace
 
 namespace fine {
 
-Status businessRois(const Inputs& inputs, const ParamView& params, Outputs& outputs,
-                    ExecContext&) {
+Status businessRois(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
   const lyflow::Record* record = inputs.get("alignment").asRecord();
   if (!record || record->type != "GapAlignment") {
     return Status::Error(Phase::Execute, "bad_input", "输入不是 GapAlignment", {}, "alignment");
@@ -120,7 +126,8 @@ Status businessRois(const Inputs& inputs, const ParamView& params, Outputs& outp
   // 是同一个判据。
   const std::string side = params.choice("datumSide");
   bool datumRight = side == "right";
-  if (side == "auto") datumOnRightInRecord(record->data, &datumRight);
+  if (side == "auto")
+    datumOnRightInRecord(record->data, &datumRight);
   const Eigen::Matrix3f* kTransforms[4] = {datumRight ? &tRight : &tLeft, &tLeft,
                                            datumRight ? &tLeft : &tRight, &tRight};
   const char* kPorts[4] = {"flushBase", "gapLeft", "flushRef", "gapRight"};
@@ -193,14 +200,14 @@ Status nearestToLine(const Inputs& inputs, const ParamView&, Outputs& outputs, E
   return Status::Ok();
 }
 
-}  // namespace fine
+} // namespace fine
 
 namespace {
 
 /// 方向基准窗：把一个锚框沿 side 的方向推出去一条长窗，高度以锚框的 y 范围为中心撑开。
 /// 之所以不是「把锚框加宽」：基准面常常是一道很窄的台肩，它和外面那张长面之间有台阶，
 /// 加宽会让拟合横跨台阶；这里要的是**另一张面**，所以窗口整个挪出去。
-}  // namespace
+} // namespace
 
 namespace fine {
 
@@ -235,7 +242,7 @@ std::vector<Issue> validateDatumWindow(const ParamView& params, const std::set<s
   return issues;
 }
 
-}  // namespace fine
+} // namespace fine
 
 namespace {
 
@@ -263,7 +270,7 @@ Param vec4Mm(const char* name, const char* label, const char* doc) {
   return p;
 }
 
-}  // namespace
+} // namespace
 
 void registerDatumWindow(Registry& r) {
   OperatorDesc op;
@@ -272,21 +279,20 @@ void registerDatumWindow(Registry& r) {
   op.label = "方向基准窗";
   op.category = "间隙/预处理";
   op.keywords = {"roi", "datum", "方向", "基准", "长面"};
-  op.doc =
-      "由一个锚框推出一条长窗，用来在**旁边那张长面**上拟一条方向基准线。\n"
-      "基准面是一道很窄的台肩时（天幕 L4 只有 2 mm），它自己拟出来的方向基本是噪声；"
-      "而台肩外面那张面往往有十几毫米长、几百个点，方向稳得多。两张面之间有固定的相对"
-      "倾角，量一次写进 dirNominalDeg 就行 —— 见 gap.fit_line 的方向约束。\n"
-      "窗口整个挪到锚框外面、不含锚框本身（startMm 是给台阶过渡带的让开量），恒为轴对齐，"
-      "位置完全由锚框决定：锚框跑偏时窗口跟着跑到没有点的地方，下游拟合不一定失败，"
-      "所以给它配上最少内点数。";
+  op.doc = "由一个锚框推出一条长窗，用来在**旁边那张长面**上拟一条方向基准线。\n"
+           "基准面是一道很窄的台肩时（天幕 L4 只有 2 mm），它自己拟出来的方向基本是噪声；"
+           "而台肩外面那张面往往有十几毫米长、几百个点，方向稳得多。两张面之间有固定的相对"
+           "倾角，量一次写进 dirNominalDeg 就行 —— 见 gap.fit_line 的方向约束。\n"
+           "窗口整个挪到锚框外面、不含锚框本身（startMm 是给台阶过渡带的让开量），恒为轴对齐，"
+           "位置完全由锚框决定：锚框跑偏时窗口跟着跑到没有点的地方，下游拟合不一定失败，"
+           "所以给它配上最少内点数。";
   op.inputs = {
       Port{"anchor", "Box2D", "Anchor",
            "定 x 的锚框。取模型定位最稳的那个 —— 通常是缝的 ROI，而不是基准面 ROI："
-           "很窄的基准面框偶尔会整个跑偏，拿它当 x 锚，窗口会跟着飞出去。", true},
+           "很窄的基准面框偶尔会整个跑偏，拿它当 x 锚，窗口会跟着飞出去。",
+           true},
       Port{"heightAnchor", "Box2D", "Height Anchor",
-           "定 y 的锚框，不接就用 anchor。通常接基准面 ROI —— 长面就在它上下几毫米内。",
-           false},
+           "定 y 的锚框，不接就用 anchor。通常接基准面 ROI —— 长面就在它上下几毫米内。", false},
   };
   op.outputs = {Port{"box", "Box2D", "Box", "推出去的长窗。", true}};
 
@@ -296,7 +302,8 @@ void registerDatumWindow(Registry& r) {
   side.label = "Side";
   side.doc = "长面在锚框的哪一侧。取背离缝隙的那一侧。";
   side.def = Value::text("left");
-  side.options = {EnumOption{"left", "Left", "锚框左边。"}, EnumOption{"right", "Right", "锚框右边。"}};
+  side.options = {EnumOption{"left", "Left", "锚框左边。"},
+                  EnumOption{"right", "Right", "锚框右边。"}};
 
   op.params = {
       side,
@@ -317,9 +324,8 @@ void registerOverallRoi(Registry& r) {
   op.label = "整体 ROI";
   op.category = "间隙/预处理";
   op.keywords = {"roi", "auto center", "整体", "裁剪框"};
-  op.doc =
-      "整体 ROI 框（轴对齐，宽高来自配置）。auto_center 保留配置的宽高，中心跟着两片云"
-      "各自的稳健中心（逐坐标中位数）的中点走 —— 视野里有大片背景或另一件零件时中心会被拖走。";
+  op.doc = "整体 ROI 框（轴对齐，宽高来自配置）。auto_center 保留配置的宽高，中心跟着两片云"
+           "各自的稳健中心（逐坐标中位数）的中点走 —— 视野里有大片背景或另一件零件时中心会被拖走。";
   op.inputs = {
       Port{"primary", "PointCloud", "Primary", "测量帧的 Master 云。", true},
       Port{"secondary", "PointCloud", "Secondary", "测量帧的 Slave 云。", true},
@@ -363,11 +369,10 @@ void registerBusinessRois(Registry& r) {
   op.label = "业务 ROI";
   op.category = "间隙/配准";
   op.keywords = {"roi", "business", "业务框"};
-  op.doc =
-      "把选中模板的四个业务 ROI 按 ICP 变换搬到当前样本上：框中心按变换搬过去，"
-      "宽高保持配置里的原值，仍是轴对齐框。\n"
-      "假定四个框是模板坐标系里的常数、样本与模板之间的差异能被一次刚体变换吃掉；"
-      "转角只影响框中心的位置，不改变框的尺寸 —— 零件转得厉害时框里的特征会相对框转动。";
+  op.doc = "把选中模板的四个业务 ROI 按 ICP 变换搬到当前样本上：框中心按变换搬过去，"
+           "宽高保持配置里的原值，仍是轴对齐框。\n"
+           "假定四个框是模板坐标系里的常数、样本与模板之间的差异能被一次刚体变换吃掉；"
+           "转角只影响框中心的位置，不改变框的尺寸 —— 零件转得厉害时框里的特征会相对框转动。";
   op.inputs = {withContract(Port{"alignment", "Record", "Alignment", "GapAlignment。", true},
                             {{"recordType", "GapAlignment"}})};
   op.outputs = {
@@ -375,9 +380,10 @@ void registerBusinessRois(Registry& r) {
       Port{"gapLeft", "Box2D", "Gap Left", "间隙左侧 ROI（左侧变换）。", true},
       Port{"flushRef", "Box2D", "Flush Ref", "段差参考面 ROI。", true},
       Port{"gapRight", "Box2D", "Gap Right", "间隙右侧 ROI（右侧变换）。", true},
-      Port{"seam", "Box2D", "Seam",
-           "两个间隙框中心连线的中点（零尺寸框），「靠缝那一端」的朝向：接 gap.fit_line 的 toward。",
-           true},
+      Port{
+          "seam", "Box2D", "Seam",
+          "两个间隙框中心连线的中点（零尺寸框），「靠缝那一端」的朝向：接 gap.fit_line 的 toward。",
+          true},
   };
 
   Param datumSide;
@@ -406,9 +412,8 @@ void registerSelectedPoint(Registry& r) {
   op.label = "选点";
   op.category = "间隙/拟合";
   op.keywords = {"selected point", "选点"};
-  op.doc =
-      "取离 ROI 的 min 角最近的点。取自**整片云**、不裁 ROI：框外更近的点照样会被选中；"
-      "框的大小不影响结果。";
+  op.doc = "取离 ROI 的 min 角最近的点。取自**整片云**、不裁 ROI：框外更近的点照样会被选中；"
+           "框的大小不影响结果。";
   op.inputs = {
       Port{"cloud", "PointCloud", "Cloud", "整片云（合并后的那一份）。", true},
       Port{"box", "Box2D", "Box", "业务 ROI，只用它的 min 角。", true},
@@ -426,9 +431,8 @@ void registerNearestToLine(Registry& r) {
   op.label = "最近点到直线";
   op.category = "间隙/拟合";
   op.keywords = {"nearest point", "最近点"};
-  op.doc =
-      "取离给定直线垂距最小的那个云点，对应配置里的 ref_type: nearest point。"
-      "不要求点落在线段两端之间，所以输入云要先按业务 ROI 裁过；垂距相同时取点序靠前的。";
+  op.doc = "取离给定直线垂距最小的那个云点，对应配置里的 ref_type: nearest point。"
+           "不要求点落在线段两端之间，所以输入云要先按业务 ROI 裁过；垂距相同时取点序靠前的。";
   op.inputs = {
       Port{"cloud", "PointCloud", "Cloud", "已经按业务 ROI 裁过的点云。", true},
       Port{"line", "Line2D", "Line", "基准线。", true},
@@ -439,4 +443,4 @@ void registerNearestToLine(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

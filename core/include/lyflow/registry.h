@@ -9,7 +9,7 @@
 namespace lyflow {
 
 class Registry {
- public:
+public:
   static Registry& instance();
 
   void addType(PortType type);
@@ -62,7 +62,7 @@ class Registry {
   /// 一个隔离的注册表比「往全局塞个坏算子再想办法收拾」安全得多。
   Registry() = default;
 
- private:
+private:
   std::vector<PortType> types_;
   std::vector<BundleDesc> bundles_;
   std::vector<OperatorDesc> operators_;
@@ -86,4 +86,4 @@ void registerExternalPacks(Registry& registry);
 // C ABI 入口、执行器、dump 工具、测试都从这里拿，避免两条路径各自初始化的竞态。
 Registry& ensureRegistry();
 
-}  // namespace lyflow
+} // namespace lyflow

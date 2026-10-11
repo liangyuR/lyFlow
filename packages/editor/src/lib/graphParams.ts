@@ -4,13 +4,13 @@
 // 有效值 = default ← 当前配方的覆盖（K3/K4：总是从基础重新叠，不叠在上一个配方上）。
 // P1 里覆盖恒为空，但每个读值的地方都经 effectiveGraphValues 拿，P3 接上配方时不用改调用方。
 
-import type { GraphDoc, GraphNode, GraphParam, ParamSpec } from "../types/graph";
-import type { OperatorDesc, Param } from "../types/manifest";
-import type { SubPath } from "./subgraph";
+import type { GraphDoc, GraphNode, GraphParam, ParamSpec } from '../types/graph';
+import type { OperatorDesc, Param } from '../types/manifest';
+import type { SubPath } from './subgraph';
 
 /** `<节点>.<参数>`，按**最后一个** `.` 切：节点 id 可以含 `.`，参数名不含。 */
 export function splitBind(bind: string): { node: string; param: string } | null {
-  const dot = bind.lastIndexOf(".");
+  const dot = bind.lastIndexOf('.');
   if (dot <= 0 || dot === bind.length - 1) return null;
   return { node: bind.slice(0, dot), param: bind.slice(dot + 1) };
 }
@@ -20,7 +20,11 @@ export function joinBind(node: string, param: string): string {
 }
 
 /** 哪个顶层图参数绑着顶层节点的这个参数。只看顶层：binds 的目标只能是顶层节点（含子图实例）。 */
-export function graphParamBoundTo(doc: GraphDoc, nodeId: string, param: string): string | undefined {
+export function graphParamBoundTo(
+  doc: GraphDoc,
+  nodeId: string,
+  param: string,
+): string | undefined {
   const target = joinBind(nodeId, param);
   for (const [name, gp] of Object.entries(doc.params ?? {})) {
     if (gp.binds?.includes(target)) return name;
@@ -90,7 +94,7 @@ export function effectiveGraphValues(
  *  - visibleWhen / enabledWhen、roiBackdrop 不抄：它们指的是**同一算子**的其它参数名，
  *    到了图这一层对不上（与子图提升时丢 roiBackdrop 同一个理由），semantic 照抄；
  *  - label 写成调用方给的「节点标题 · 参数 label」，在参数面板里一眼认得出是谁。 */
-export function specFromParam(decl: Param, label: string): ParamSpec & Pick<GraphParam, "type"> {
+export function specFromParam(decl: Param, label: string): ParamSpec & Pick<GraphParam, 'type'> {
   const {
     name: _name,
     default: _default,
@@ -99,7 +103,7 @@ export function specFromParam(decl: Param, label: string): ParamSpec & Pick<Grap
     roiBackdrop: _backdrop,
     ...rest
   } = decl as Param & { binds?: unknown };
-  const spec = { ...rest, label } as ParamSpec & Pick<GraphParam, "type"> & { binds?: unknown };
+  const spec = { ...rest, label } as ParamSpec & Pick<GraphParam, 'type'> & { binds?: unknown };
   delete spec.binds; // 从子图参数（SubParam）抄的时候它带着内部的 binds
   return spec;
 }
@@ -107,17 +111,17 @@ export function specFromParam(decl: Param, label: string): ParamSpec & Pick<Grap
 /** 图参数名为什么不能用。null = 能用。名字是宿主、CLI `--param`、配方文件引用它的键：
  *  不能空、不能含 `.`（CLI 的 eval 靠「左边有没有 `.`」区分图参数与扫描轴）、不能含 `=`。 */
 export function graphParamNameProblem(doc: GraphDoc, name: string, self?: string): string | null {
-  if (!name.trim()) return "名字不能为空";
-  if (name !== name.trim()) return "名字首尾不能有空格";
-  if (name.includes(".")) return "名字不能含 .（CLI 用它区分图参数与 <节点>.<参数>）";
-  if (name.includes("=")) return "名字不能含 =";
+  if (!name.trim()) return '名字不能为空';
+  if (name !== name.trim()) return '名字首尾不能有空格';
+  if (name.includes('.')) return '名字不能含 .（CLI 用它区分图参数与 <节点>.<参数>）';
+  if (name.includes('=')) return '名字不能含 =';
   if (name !== self && doc.params?.[name] !== undefined) return `已经有图参数 ${name}`;
   return null;
 }
 
 /** 以 base 为底起一个不重名的图参数名：base、base_2、base_3……（与子图提升参数同一条规则）。 */
 export function uniqueGraphParamName(doc: GraphDoc, base: string): string {
-  const clean = base.replace(/[.=\s]/g, "_") || "param";
+  const clean = base.replace(/[.=\s]/g, '_') || 'param';
   let name = clean;
   for (let i = 2; doc.params?.[name] !== undefined; i += 1) name = `${clean}_${i}`;
   return name;
@@ -188,7 +192,9 @@ export function promotedValue(
   const at = (i: number, node: string, name: string): unknown => {
     if (i === 0) {
       const gp = graphParamBoundTo(doc, node, name);
-      return gp ? graphParamValue(doc, gp, overrides) : doc.nodes.find((n) => n.id === node)?.params?.[name];
+      return gp
+        ? graphParamValue(doc, gp, overrides)
+        : doc.nodes.find((n) => n.id === node)?.params?.[name];
     }
     const sp = spOf(i, node, name);
     if (!sp) return defAt(i)?.nodes.find((n) => n.id === node)?.params?.[name];
@@ -228,5 +234,7 @@ export function graphParamSpecOf(
     return { ...spec, name, type: gp.type } as Param;
   }
   const decl = boundDecl(doc, gp, ops);
-  return decl ? { ...decl, name, label: gp.label ?? decl.label ?? name, default: gp.default } : null;
+  return decl
+    ? { ...decl, name, label: gp.label ?? decl.label ?? name, default: gp.default }
+    : null;
 }

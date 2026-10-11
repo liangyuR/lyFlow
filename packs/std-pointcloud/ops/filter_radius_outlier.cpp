@@ -33,7 +33,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   // 却不用把半径内的点全列出来；有非有限点时退回半径搜索。只是逐点那一圈按线程预算分段并行（parallel.h）。
   pcl::search::KdTree<pcl::PointXYZ> tree(false);
   tree.setInputCloud(cloud);
-  if (ctx.cancelled()) return Status::Ok();
+  if (ctx.cancelled())
+    return Status::Ok();
 
   const std::size_t n = in.pointCount();
   const int meanK = minNeighbors + 1;
@@ -41,7 +42,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   std::vector<char> keptFlag(n, 0);
   ctx.progress(0.2f, "数邻居");
   parallelFor(n, ctx.threadBudget(), [&](std::size_t begin, std::size_t end) {
-    if (ctx.cancelled()) return false;
+    if (ctx.cancelled())
+      return false;
     pcl::Indices nn(static_cast<std::size_t>(meanK));
     std::vector<float> d2(static_cast<std::size_t>(meanK));
     for (std::size_t i = begin; i < end; ++i) {
@@ -58,7 +60,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     }
     return true;
   });
-  if (ctx.cancelled()) return Status::Ok();
+  if (ctx.cancelled())
+    return Status::Ok();
   ctx.progress(0.9f);
 
   std::vector<std::int32_t> keep;
@@ -77,7 +80,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerFilterRadiusOutlier(Registry& r) {
   OperatorDesc op;
@@ -86,12 +89,13 @@ void registerFilterRadiusOutlier(Registry& r) {
   op.label = "半径离群点剔除";
   op.category = "过滤/离群点";
   op.keywords = {"outlier", "radius", "noise", "半径", "离群", "去噪"};
-  op.doc = "半径内邻居数不足的点被认为是孤立噪点。比统计法更直观：直接说「多远之内至少要有几个同伴」。";
+  op.doc =
+      "半径内邻居数不足的点被认为是孤立噪点。比统计法更直观：直接说「多远之内至少要有几个同伴」。";
 
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "输入点云。", true}};
   op.outputs = {
-      Port{"cloud",   "PointCloud", "Cloud",   "保留下来的点。", true},
-      Port{"removed", "Indices",    "Removed", "被剔除的点下标。", true},
+      Port{"cloud", "PointCloud", "Cloud", "保留下来的点。", true},
+      Port{"removed", "Indices", "Removed", "被剔除的点下标。", true},
   };
 
   Param radius;
@@ -123,4 +127,4 @@ void registerFilterRadiusOutlier(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

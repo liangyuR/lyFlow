@@ -57,9 +57,9 @@ cv::Mat grayOf(const Data& image);
 /// 坐标保留三位小数：下游拿它再算，0.001 px 的舍入无所谓，事件里的 JSON 却小一半。
 double round3(double v);
 Json pxJson(P2 p);
-P2 pxOf(const Json& j);  ///< 不是两个数的数组时返回 (NaN, NaN)
+P2 pxOf(const Json& j); ///< 不是两个数的数组时返回 (NaN, NaN)
 Json numOrNull(double v, int decimals = 3);
-double numOf(const Json& j);  ///< null / 缺 → NaN
+double numOf(const Json& j); ///< null / 缺 → NaN
 
 // ------------------------------------------------------------------ 胶路（glue.Polyline）
 
@@ -122,8 +122,8 @@ Data measurement(double value, const std::string& unit, const std::string& messa
 
 // ------------------------------------------------------------------ 参数
 
-Param floatParam(const char* name, const char* label, double def, const char* unit,
-                 const char* doc, bool advanced = false);
+Param floatParam(const char* name, const char* label, double def, const char* unit, const char* doc,
+                 bool advanced = false);
 Param vec2Param(const char* name, const char* label, double a, double b, const char* unit,
                 std::vector<std::string> components, const char* doc, bool advanced = false);
 Param enumParam(const char* name, const char* label, const char* def, const char* doc,
@@ -138,4 +138,4 @@ Param visibleWhen(Param p, const char* param, const char* eq);
 std::vector<std::pair<std::size_t, std::size_t>> presentRuns(const std::vector<Station>& st);
 std::string fmt(double v, int decimals = 1);
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

@@ -1,8 +1,8 @@
 // `?` 快捷键面板。整张表从 lib/keymap.ts 生成（E7）——
 // 手抄一份说明必然和实际按键漂移，而用户只会相信面板上写的那个。
 
-import { keyLabel, groupedShortcuts, MOUSE_GESTURES, SCOPE_LABEL } from "../lib/keymap";
-import { useUiStore } from "../store/ui";
+import { keyLabel, groupedShortcuts, MOUSE_GESTURES, SCOPE_LABEL } from '../lib/keymap';
+import { useUiStore } from '../store/ui';
 
 export function ShortcutPanel() {
   const open = useUiStore((s) => s.helpOpen);

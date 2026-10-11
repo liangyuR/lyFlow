@@ -19,11 +19,12 @@ namespace fs = std::filesystem;
 std::string fileStamp(const fs::path& p) {
   std::error_code ec;
   const auto size = fs::file_size(p, ec);
-  if (ec) return {};
+  if (ec)
+    return {};
   const auto mtime = fs::last_write_time(p, ec);
-  if (ec) return {};
-  return std::to_string(size) + ":" +
-         std::to_string(mtime.time_since_epoch().count());
+  if (ec)
+    return {};
+  return std::to_string(size) + ":" + std::to_string(mtime.time_since_epoch().count());
 }
 
 /// 一个缓存住的会话。名字取自模型自己的第 0 个输入/输出，参数留空时用它们。
@@ -32,7 +33,7 @@ struct Cached {
   Ort::AllocatorWithDefaultOptions allocator;
   std::string inputName;
   std::string outputName;
-  std::mutex mutex;  // Ort::Session::Run 不是并发安全的
+  std::mutex mutex; // Ort::Session::Run 不是并发安全的
 
   Cached(Ort::Env& env, const fs::path& model, int threads)
       : session(makeSession(env, model, threads)) {
@@ -70,7 +71,8 @@ Cached* sessionFor(const fs::path& model, int threads, std::string* message) {
   static std::unordered_map<std::string, std::unique_ptr<Cached>> cache;
   std::lock_guard<std::mutex> lock(cacheMutex());
   auto it = cache.find(key);
-  if (it != cache.end()) return it->second.get();
+  if (it != cache.end())
+    return it->second.get();
   try {
     auto made = std::make_unique<Cached>(sharedEnv(), model, threads);
     return cache.emplace(key, std::move(made)).first->second.get();
@@ -82,8 +84,7 @@ Cached* sessionFor(const fs::path& model, int threads, std::string* message) {
 
 std::string externalKey(const ParamView& params) { return fileStamp(params.path("modelPath")); }
 
-Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
-               ExecContext& ctx) {
+Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   const fs::path model = params.path("modelPath");
   if (model.empty()) {
     return Status::Error(Phase::Execute, "bad_param", "没有给模型文件", "modelPath");
@@ -103,8 +104,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
     return Status::Error(Phase::Execute, "bad_input", "输入张量没有形状", {}, "input");
   }
 
-  const int threads =
-      static_cast<int>(std::max<std::int64_t>(1, params.integer("intraOpThreads")));
+  const int threads = static_cast<int>(std::max<std::int64_t>(1, params.integer("intraOpThreads")));
   std::string message;
   Cached* cached = sessionFor(model, threads, &message);
   if (cached == nullptr) {
@@ -118,9 +118,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
 
   Tensor out;
   try {
-    const Ort::MemoryInfo memory =
-        Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    std::vector<float> data = in->data;  // CreateTensor 要非 const 指针，且不拷贝
+    const Ort::MemoryInfo memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+    std::vector<float> data = in->data; // CreateTensor 要非 const 指针，且不拷贝
     Ort::Value input = Ort::Value::CreateTensor<float>(memory, data.data(), data.size(),
                                                        in->shape.data(), in->shape.size());
     const char* inNames[] = {inName.c_str()};
@@ -161,7 +160,7 @@ Param textParam(const char* name, const char* label, const char* doc) {
   return p;
 }
 
-}  // namespace
+} // namespace
 
 void registerMlOnnxRun(Registry& r) {
   OperatorDesc op;
@@ -171,11 +170,10 @@ void registerMlOnnxRun(Registry& r) {
   op.category = "机器学习/推理";
   // 关键词里不能出现小写的 i-n-f：manifest 的序列化用例是子串匹配（test_executor.cpp:252）
   op.keywords = {"onnx", "Inference", "model", "tensor", "推理", "模型"};
-  op.doc =
-      "跑一次 ONNX 前向：float32 张量进、float32 张量出。"
-      "会话按「模型路径 + mtime + 线程数」缓存，改模型文件会自动重载。\n"
-      "输入输出名留空就用模型自己的第 0 个。形状不符时报 bad_input，"
-      "错误消息是 onnxruntime 的原话。";
+  op.doc = "跑一次 ONNX 前向：float32 张量进、float32 张量出。"
+           "会话按「模型路径 + mtime + 线程数」缓存，改模型文件会自动重载。\n"
+           "输入输出名留空就用模型自己的第 0 个。形状不符时报 bad_input，"
+           "错误消息是 onnxruntime 的原话。";
 
   op.inputs = {Port{"input", "Tensor", "Input", "喂给模型的张量。", true}};
   op.outputs = {Port{"output", "Tensor", "Output", "模型的输出张量。", true}};
@@ -193,8 +191,7 @@ void registerMlOnnxRun(Registry& r) {
   threads.name = "intraOpThreads";
   threads.type = ParamType::Int;
   threads.label = "Intra-op Threads";
-  threads.doc =
-      "算子内并行的线程数，同时用作 inter-op。默认 1 —— 归约顺序固定，同输入逐位可复现。";
+  threads.doc = "算子内并行的线程数，同时用作 inter-op。默认 1 —— 归约顺序固定，同输入逐位可复现。";
   threads.def = Value::integer(1);
   threads.min = 1.0;
 
@@ -211,4 +208,4 @@ void registerMlOnnxRun(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

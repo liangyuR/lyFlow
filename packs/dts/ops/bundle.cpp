@@ -24,20 +24,23 @@ Status compute(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecCon
   j["pick"] = *pj;
   j["faces"] = (*fj)["faces"];
   j["pieces"] = (*fj)["pieces"];
-  j["metal"] = {{"x0", metal->start[0]}, {"z0", metal->start[1]},
-                {"x1", metal->end[0]},   {"z1", metal->end[1]},
-                {"angleDeg", std::atan2(metal->dir[1], metal->dir[0]) * 180.0 /
-                                 3.14159265358979323846},
-                {"rmsMm", (*pj).value("rmsMm", 0.0)}};
+  j["metal"] = {
+      {"x0", metal->start[0]},
+      {"z0", metal->start[1]},
+      {"x1", metal->end[0]},
+      {"z1", metal->end[1]},
+      {"angleDeg", std::atan2(metal->dir[1], metal->dir[0]) * 180.0 / 3.14159265358979323846},
+      {"rmsMm", (*pj).value("rmsMm", 0.0)}};
   if (inputs.has("foot")) {
     const Point2D* f = inputs.get("foot").asPoint2D();
-    if (f != nullptr) j["perpendicular"] = {{"x", f->p[0]}, {"z", f->p[1]}};
+    if (f != nullptr)
+      j["perpendicular"] = {{"x", f->p[0]}, {"z", f->p[1]}};
   }
   outputs.set("bundle", Data::record(Record{"DtsProfileBundle", std::move(j)}));
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerProfileBundle(Registry& r) {
   OperatorDesc op;
@@ -60,4 +63,4 @@ void registerProfileBundle(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::dts
+} // namespace lyflow::dts

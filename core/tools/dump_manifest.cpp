@@ -27,13 +27,14 @@ int main(int argc, char** argv) {
   const auto problems = r.validate();
   if (!problems.empty()) {
     std::fprintf(stderr, "manifest self-check failed (%zu problem(s)):\n", problems.size());
-    for (const auto& p : problems) std::fprintf(stderr, "  - %s\n", p.c_str());
+    for (const auto& p : problems)
+      std::fprintf(stderr, "  - %s\n", p.c_str());
     return 1;
   }
 
   if (checkOnly) {
-    std::fprintf(stderr, "ok: %zu operator(s), %zu port type(s)\n",
-                 r.operators().size(), r.types().size());
+    std::fprintf(stderr, "ok: %zu operator(s), %zu port type(s)\n", r.operators().size(),
+                 r.types().size());
     return 0;
   }
 

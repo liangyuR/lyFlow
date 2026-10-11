@@ -193,10 +193,21 @@ struct Bundle;
 
 /// 端口上流动的值。类型标签必须和 manifest 的端口类型对得上。
 class Data {
- public:
+public:
   enum class Kind {
-    None, PointCloud, Indices, Transform, Plane,
-    Box2D, Line2D, Circle2D, Point2D, Measurement, Record, Tensor, Error,
+    None,
+    PointCloud,
+    Indices,
+    Transform,
+    Plane,
+    Box2D,
+    Line2D,
+    Circle2D,
+    Point2D,
+    Measurement,
+    Record,
+    Tensor,
+    Error,
     /// 一组有名字的字段（m8-plan L1）。端口类型写作 `Bundle<kind>`，追加在末尾不打乱既有序号。
     Bundle,
     /// 2D 图像（docs/image-plan.md），同样追加在末尾。
@@ -206,7 +217,9 @@ class Data {
   Data() = default;
 
   static Data cloud(std::shared_ptr<const PointCloud> c);
-  static Data cloud(PointCloud c) { return cloud(std::make_shared<const PointCloud>(std::move(c))); }
+  static Data cloud(PointCloud c) {
+    return cloud(std::make_shared<const PointCloud>(std::move(c)));
+  }
   static Data indices(std::shared_ptr<const Indices> i);
   static Data indices(Indices i) { return indices(std::make_shared<const Indices>(std::move(i))); }
   static Data transform(std::shared_ptr<const Transform> t);
@@ -275,7 +288,7 @@ class Data {
   /// 图像的逐通道统计要扫整张图：只算一次，同一份 Data 的浅拷贝共用结果（Image 不可变）。
   std::string valueJson() const;
 
- private:
+private:
   /// 图像 valueJson 的一次性缓存（PR #1 review 留下的一条：结果仓在锁里一遍遍重算整图统计）。
   struct ValueCache;
   std::string valueJsonUncached() const;
@@ -329,4 +342,4 @@ std::string bundleTypeName(const std::string& bundleKind);
 /// Data::Kind -> manifest 端口类型名。
 const char* typeNameFromKind(Data::Kind kind);
 
-}  // namespace lyflow
+} // namespace lyflow

@@ -3,7 +3,7 @@
 
 /** 6 位有效数字，去掉末尾的 0。非有限值显示成「—」。 */
 export function num(v: number | undefined | null): string {
-  if (v === undefined || v === null || !Number.isFinite(v)) return "—";
+  if (v === undefined || v === null || !Number.isFinite(v)) return '—';
   return String(Number(v.toPrecision(6)));
 }
 
@@ -15,6 +15,6 @@ export function signed(v: number): string {
 
 /** 整数按三位分组，组间一个空格：2 000 000。不走 toLocaleString，免得跟着系统区域变。 */
 export function grouped(n: number): string {
-  const sign = n < 0 ? "-" : "";
-  return sign + String(Math.abs(Math.round(n))).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  const sign = n < 0 ? '-' : '';
+  return sign + String(Math.abs(Math.round(n))).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }

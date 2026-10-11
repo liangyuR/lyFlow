@@ -30,7 +30,7 @@ struct Icp2DResult {
 };
 
 class Icp2D {
- public:
+public:
   explicit Icp2D(const Icp2DOptions& options);
 
   void setTarget(const Cloud2D& target);
@@ -42,7 +42,7 @@ class Icp2D {
 
   const Icp2DOptions& options() const { return options_; }
 
- private:
+private:
   Icp2DOptions options_;
   Eigen::Matrix3d targetInTargetMean_ = Eigen::Matrix3d::Identity();
   std::vector<Eigen::Vector2d> targetPoints_;
@@ -53,4 +53,4 @@ class Icp2D {
   std::vector<double> lastSquaredDistances_;
 };
 
-}  // namespace lyflow::std_pc
+} // namespace lyflow::std_pc

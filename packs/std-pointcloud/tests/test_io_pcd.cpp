@@ -26,7 +26,7 @@ namespace {
 
 /// 临时目录，名字里带中文和空格。析构时整个删掉。
 class ChineseTempDir {
- public:
+public:
   ChineseTempDir() {
     std::error_code ec;
     path_ = std::filesystem::temp_directory_path(ec) /
@@ -40,20 +40,20 @@ class ChineseTempDir {
   }
   const std::filesystem::path& path() const { return path_; }
 
- private:
+private:
   std::filesystem::path path_;
 };
 
-}  // namespace
+} // namespace
 
 TEST_CASE("中文目录下 save_pcd → load_pcd 往返：中文文件名、ASCII 文件名、binary_compressed") {
   struct Case {
     const char* name;
-    std::string relative;  // 相对路径 + baseDir：这正是图文件放在中文目录下时的真实形态
+    std::string relative; // 相对路径 + baseDir：这正是图文件放在中文目录下时的真实形态
     const char* format;
     Json genParams;
     std::size_t points;
-    int intensity;  // 1 = 读回来要有 intensity，0 = 要没有，-1 = 不看
+    int intensity; // 1 = 读回来要有 intensity，0 = 要没有，-1 = 不看
   };
   const std::vector<Case> cases = {
       // 合成云带 intensity，PCD 里应当有 intensity 字段，读回来还在
@@ -61,8 +61,8 @@ TEST_CASE("中文目录下 save_pcd → load_pcd 往返：中文文件名、ASCI
        Json{{"pointCount", 3000}, {"seed", 3}}, 3000, 1},
       {"中文路径 ASCII 文件名也要能往返", "ascii-name.pcd", "ascii",
        Json{{"pointCount", 500}, {"withIntensity", false}}, 500, 0},
-      {"binary_compressed 也能往返", u8"压缩.pcd", "binary_compressed",
-       Json{{"pointCount", 4000}}, 4000, -1},
+      {"binary_compressed 也能往返", u8"压缩.pcd", "binary_compressed", Json{{"pointCount", 4000}},
+       4000, -1},
   };
   for (const Case& c : cases) {
     CAPTURE(c.name);
@@ -79,7 +79,8 @@ TEST_CASE("中文目录下 save_pcd → load_pcd 往返：中文文件名、ASCI
           {{"g.cloud", "w.cloud"}});
       const RunLog log = runGraph(doc, dir.path());
       for (const Json& e : log.ofKind("node_state")) {
-        if (e.value("state", "") == "error") MESSAGE(e.dump());
+        if (e.value("state", "") == "error")
+          MESSAGE(e.dump());
       }
       CHECK(log.runStatus() == "ok");
     }
@@ -93,14 +94,16 @@ TEST_CASE("中文目录下 save_pcd → load_pcd 往返：中文文件名、ASCI
     Session s(doc, dir.path());
     RunLog& log = s.wait();
     for (const Json& e : log.ofKind("node_state")) {
-      if (e.value("state", "") == "error") MESSAGE(e.dump());
+      if (e.value("state", "") == "error")
+        MESSAGE(e.dump());
     }
     REQUIRE(log.runStatus() == "ok");
 
     exec::CloudPreview p;
     REQUIRE(exec::ResultStore::instance().previewCloud(s.runId(), "r", "cloud", 0, p));
     CHECK(p.totalPoints == c.points);
-    if (c.intensity >= 0) CHECK(p.hasIntensity == (c.intensity == 1));
+    if (c.intensity >= 0)
+      CHECK(p.hasIntensity == (c.intensity == 1));
   }
 }
 
@@ -125,7 +128,7 @@ namespace pio = lyflow::ops::io;
 
 /// 纯 ASCII 名字的临时目录：窄字符串就是 .string()，PCL 与我们拿到的是同一个路径。
 class AsciiTempDir {
- public:
+public:
   AsciiTempDir() {
     std::error_code ec;
     path_ = std::filesystem::temp_directory_path(ec) / "lyflow-pcd-ascii-test";
@@ -138,7 +141,7 @@ class AsciiTempDir {
   }
   std::filesystem::path file(const std::string& name) const { return path_ / name; }
 
- private:
+private:
   std::filesystem::path path_;
 };
 
@@ -204,7 +207,8 @@ void requireSameRead(const std::filesystem::path& file) {
 }
 
 /// 同一份 cloud：PCL 写一个文件、savePcdAscii 写一个，返回值与每个字节都一样。
-void requireSameWrite(const pcl::PCLPointCloud2& cloud, const AsciiTempDir& dir, const std::string& name) {
+void requireSameWrite(const pcl::PCLPointCloud2& cloud, const AsciiTempDir& dir,
+                      const std::string& name) {
   const std::filesystem::path a = dir.file(name + ".pcl.pcd");
   const int rcWant = pcl::io::savePCDFile(a.string(), cloud, Eigen::Vector4f::Zero(),
                                           Eigen::Quaternionf::Identity(), /*binary_mode=*/false);
@@ -215,15 +219,17 @@ void requireSameWrite(const pcl::PCLPointCloud2& cloud, const AsciiTempDir& dir,
     const int rcGot = pio::savePcdAscii(b.string(), cloud, threads);
     CHECK(rcGot == rcWant);
     REQUIRE(std::filesystem::exists(b) == std::filesystem::exists(a));
-    if (!std::filesystem::exists(a)) continue;
+    if (!std::filesystem::exists(a))
+      continue;
     const std::string fb = readBytes(b);
-    if (fa == fb) continue;
+    if (fa == fb)
+      continue;
     const auto diff = std::mismatch(fa.begin(), fa.end(), fb.begin(), fb.end());
     const std::size_t at = static_cast<std::size_t>(diff.first - fa.begin());
     const std::size_t lineStart = at == 0 ? std::string::npos : fa.rfind('\n', at - 1);
     const std::size_t from = lineStart == std::string::npos ? 0 : lineStart + 1;
-    FAIL_CHECK("第 " << at << " 字节起不同。PCL 那一行：" << fa.substr(from, 120) << "\n我们那一行："
-                     << fb.substr(from, 120));
+    FAIL_CHECK("第 " << at << " 字节起不同。PCL 那一行：" << fa.substr(from, 120)
+                     << "\n我们那一行：" << fb.substr(from, 120));
   }
 }
 
@@ -232,12 +238,16 @@ std::string header(const std::string& fields, const std::string& size, const std
                    const char* eol = "\n") {
   std::string h = "# .PCD v0.7 - Point Cloud Data file format";
   h += eol;
-  const std::vector<std::string> lines = {
-      "VERSION 0.7",          "FIELDS " + fields,
-      "SIZE " + size,         "TYPE " + type,
-      "COUNT " + count,       "WIDTH " + std::to_string(width),
-      "HEIGHT " + std::to_string(height), "VIEWPOINT 0 0 0 1 0 0 0",
-      "POINTS " + std::to_string(points), "DATA ascii"};
+  const std::vector<std::string> lines = {"VERSION 0.7",
+                                          "FIELDS " + fields,
+                                          "SIZE " + size,
+                                          "TYPE " + type,
+                                          "COUNT " + count,
+                                          "WIDTH " + std::to_string(width),
+                                          "HEIGHT " + std::to_string(height),
+                                          "VIEWPOINT 0 0 0 1 0 0 0",
+                                          "POINTS " + std::to_string(points),
+                                          "DATA ascii"};
   for (const std::string& line : lines) {
     h += line;
     h += eol;
@@ -247,15 +257,32 @@ std::string header(const std::string& fields, const std::string& size, const std
 
 /// 浮点的「特殊值」：PCL 写成 nan / inf / -0 / 次正规数 / 第 9 位上恰好逢五的那些。
 const std::vector<float>& specialFloats() {
-  static const std::vector<float> v = {
-      0.0f, -0.0f, 1.0f, -1.0f, 0.1f, 1e-45f, -1e-45f, 1.17549435e-38f, 3.40282347e38f, -3.40282347e38f,
-      std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(),
-      std::numeric_limits<float>::quiet_NaN(), 0.000732421875f /* 3·2^-12：第 9 位是 5 */, 16777217.0f,
-      123456.789f, 1e10f, 1e-10f, 9.99999999e7f, 0.5f, 2.5f, 1.25e-5f};
+  static const std::vector<float> v = {0.0f,
+                                       -0.0f,
+                                       1.0f,
+                                       -1.0f,
+                                       0.1f,
+                                       1e-45f,
+                                       -1e-45f,
+                                       1.17549435e-38f,
+                                       3.40282347e38f,
+                                       -3.40282347e38f,
+                                       std::numeric_limits<float>::infinity(),
+                                       -std::numeric_limits<float>::infinity(),
+                                       std::numeric_limits<float>::quiet_NaN(),
+                                       0.000732421875f /* 3·2^-12：第 9 位是 5 */,
+                                       16777217.0f,
+                                       123456.789f,
+                                       1e10f,
+                                       1e-10f,
+                                       9.99999999e7f,
+                                       0.5f,
+                                       2.5f,
+                                       1.25e-5f};
   return v;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("ASCII PCD 写：与 PCL 的 savePCDFile 逐字节相同") {
   AsciiTempDir dir;
@@ -280,14 +307,14 @@ TEST_CASE("ASCII PCD 写：与 PCL 的 savePCDFile 逐字节相同") {
                 field("d", 56, pcl::PCLPointField::FLOAT64, 2),
                 field("_", 72, pcl::PCLPointField::FLOAT32, 1)};
     c.point_step = 76;
-    c.width = 30000;  // 跨四块（每块 8192 点），并行格式化才真的分得开
+    c.width = 30000; // 跨四块（每块 8192 点），并行格式化才真的分得开
     c.height = 1;
     c.row_step = c.point_step * c.width;
     c.data.resize(static_cast<std::size_t>(c.row_step));
     const auto& sp = specialFloats();
     for (std::uint32_t i = 0; i < c.width; ++i) {
       std::uint8_t* p = &c.data[static_cast<std::size_t>(i) * c.point_step];
-      for (int k = 0; k < 19; ++k) {  // 先整个填随机位模式：整数、rgb 与填充维都是任意值
+      for (int k = 0; k < 19; ++k) { // 先整个填随机位模式：整数、rgb 与填充维都是任意值
         const std::uint32_t r = rng();
         std::memcpy(p + 4 * k, &r, 4);
       }
@@ -322,7 +349,8 @@ TEST_CASE("ASCII PCD 写：与 PCL 的 savePCDFile 逐字节相同") {
 
   SUBCASE("有序云（height > 1）") {
     pcl::PCLPointCloud2 c;
-    c.fields = {field("x", 0, pcl::PCLPointField::FLOAT32, 1), field("y", 4, pcl::PCLPointField::FLOAT32, 1)};
+    c.fields = {field("x", 0, pcl::PCLPointField::FLOAT32, 1),
+                field("y", 4, pcl::PCLPointField::FLOAT32, 1)};
     c.point_step = 8;
     c.width = 3;
     c.height = 2;
@@ -363,7 +391,8 @@ TEST_CASE("ASCII PCD 读：与 PCL 的 loadPCDFile 逐字节相同（怪文件�
            "nan NaN -nan inf -inf +1.5\n"
            "1e39 -1e39 1e-50 1e-40 .5 -.5\n"
            "5. 1e5 1E+05 0x10 1.5abc 007\n"
-           "-0 0.0 1,5 " + tie + " " + longDigits + " 1\v\n"},
+           "-0 0.0 1,5 " +
+           tie + " " + longDigits + " 1\v\n"},
       {"第一个词就是双重舍入的临界值，后面再来一个",
        header("x", "4", "F", "1", 3, 1, 3) + tie + "\n" + tie + "\n0.1\n"},
       {"整数字段：越界、负数进无符号、小数、nan、带 + 号、科学计数",
@@ -388,8 +417,9 @@ TEST_CASE("ASCII PCD 读：与 PCL 的 loadPCDFile 逐字节相同（怪文件�
       {"最后一行没有换行符", header("x y z", "4 4 4", "F F F", "1 1 1", 2, 1, 2) + "1 2 3\n4 5 6"},
       {"词数不对的行照样占一个点",
        header("x y z", "4 4 4", "F F F", "1 1 1", 3, 1, 3) + "1 2\n4 5 6\n7 8 9 10\n"},
-      {"Ctrl+Z：文本模式读到它就当文件结束",
-       header("x y z", "4 4 4", "F F F", "1 1 1", 3, 1, 3) + "1 2 3\n\x1a" "4 5 6\n7 8 9\n"},
+      {"Ctrl+Z：文本模式读到它就当文件结束", header("x y z", "4 4 4", "F F F", "1 1 1", 3, 1, 3) +
+                                                 "1 2 3\n\x1a"
+                                                 "4 5 6\n7 8 9\n"},
       {"POINTS 0", header("x y z", "4 4 4", "F F F", "1 1 1", 0, 1, 0)},
       {"有序云", header("x y", "4 4", "F F", "1 1", 2, 2, 4) + "1 2\n3 4\n5 6\n7 8\n"},
       {"单字段的全空白行：保留占位，后续临界值独立舍入",
@@ -435,10 +465,12 @@ TEST_CASE("ASCII PCD 读：与 PCL 的 loadPCDFile 逐字节相同（怪文件�
           const int digits = 1 + static_cast<int>(rng() % 25);
           const int dot = static_cast<int>(rng() % static_cast<unsigned>(digits + 1));
           for (int j = 0; j < digits; ++j) {
-            if (j == dot) s += '.';
+            if (j == dot)
+              s += '.';
             s += static_cast<char>('0' + rng() % 10);
           }
-          if (rng() % 2) s += "e" + std::to_string(static_cast<int>(rng() % 90) - 45);
+          if (rng() % 2)
+            s += "e" + std::to_string(static_cast<int>(rng() % 90) - 45);
           tok[k] = s;
         } else {
           double v;
@@ -477,7 +509,8 @@ TEST_CASE("小数点是逗号的 C locale：读写仍与 PCL 相同（快路径�
   requireSameRead(file);
 
   pcl::PCLPointCloud2 c;
-  c.fields = {field("x", 0, pcl::PCLPointField::FLOAT32, 1), field("y", 4, pcl::PCLPointField::FLOAT64, 1)};
+  c.fields = {field("x", 0, pcl::PCLPointField::FLOAT32, 1),
+              field("y", 4, pcl::PCLPointField::FLOAT64, 1)};
   c.point_step = 12;
   c.width = 4;
   c.height = 1;

@@ -2,14 +2,14 @@
 // 每个请求起一次 `lyflow` CLI —— 桩服务器不常驻 core，所以缓存统计恒为 0，
 // 取点云会重跑一次图。真正的业务服务应该用 core/include/lyflow/client.hpp 常驻。
 
-import { spawn } from "node:child_process";
-import fs from "node:fs";
-import http from "node:http";
-import os from "node:os";
-import path from "node:path";
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 
-import { encodeCloudFromPcd } from "./pcd.mjs";
-import { WsHub } from "./ws.mjs";
+import { encodeCloudFromPcd } from './pcd.mjs';
+import { WsHub } from './ws.mjs';
 
 // ------------------------------------------------------------------ 配置
 
@@ -17,14 +17,14 @@ function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
-    if (!a.startsWith("--")) continue;
+    if (!a.startsWith('--')) continue;
     const key = a.slice(2);
     const next = argv[i + 1];
-    if (next && !next.startsWith("--")) {
+    if (next && !next.startsWith('--')) {
       out[key] = next;
       i += 1;
     } else {
-      out[key] = "1";
+      out[key] = '1';
     }
   }
   return out;
@@ -32,30 +32,30 @@ function parseArgs(argv) {
 
 const args = parseArgs(process.argv.slice(2));
 const PORT = Number(args.port ?? process.env.LYFLOW_HTTP_PORT ?? 8787);
-const TOKEN = args.token ?? process.env.LYFLOW_HTTP_TOKEN ?? "";
+const TOKEN = args.token ?? process.env.LYFLOW_HTTP_TOKEN ?? '';
 const ROOT = path.resolve(args.root ?? process.env.LYFLOW_HTTP_ROOT ?? process.cwd());
 const CLI = path.resolve(
   args.cli ??
     process.env.LYFLOW_CLI ??
-    path.join(process.cwd(), "bridge", "target", "debug", "lyflow.exe"),
+    path.join(process.cwd(), 'bridge', 'target', 'debug', 'lyflow.exe'),
 );
-const SCRATCH = fs.mkdtempSync(path.join(os.tmpdir(), "lyflow-http-"));
+const SCRATCH = fs.mkdtempSync(path.join(os.tmpdir(), 'lyflow-http-'));
 
 // ------------------------------------------------------------------ CLI
 
 function runCli(argv, { onLine } = {}) {
   return new Promise((resolve) => {
     const child = spawn(CLI, argv, { cwd: ROOT });
-    let stdout = "";
-    let stderr = "";
-    let pending = "";
+    let stdout = '';
+    let stderr = '';
+    let pending = '';
     const lines = [];
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
       stdout += chunk;
       pending += chunk;
       let nl;
-      while ((nl = pending.indexOf("\n")) >= 0) {
+      while ((nl = pending.indexOf('\n')) >= 0) {
         const line = pending.slice(0, nl).trim();
         pending = pending.slice(nl + 1);
         if (!line) continue;
@@ -63,12 +63,12 @@ function runCli(argv, { onLine } = {}) {
         onLine?.(line);
       }
     });
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk) => {
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => {
       stderr += chunk;
     });
-    child.on("error", (e) => resolve({ code: -1, lines, stdout, stderr: String(e), child }));
-    child.on("close", (code) => {
+    child.on('error', (e) => resolve({ code: -1, lines, stdout, stderr: String(e), child }));
+    child.on('close', (code) => {
       const rest = pending.trim();
       if (rest) {
         lines.push(rest);
@@ -82,29 +82,29 @@ function runCli(argv, { onLine } = {}) {
 /** 起 CLI 并立刻把 child 交出来，调用方自己等 done（run 要能中途 cancel）。 */
 function startCli(argv, onLine) {
   const child = spawn(CLI, argv, { cwd: ROOT });
-  let pending = "";
-  let stderr = "";
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
+  let pending = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => {
     pending += chunk;
     let nl;
-    while ((nl = pending.indexOf("\n")) >= 0) {
+    while ((nl = pending.indexOf('\n')) >= 0) {
       const line = pending.slice(0, nl).trim();
       pending = pending.slice(nl + 1);
       if (line) onLine(line);
     }
   });
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk) => {
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk) => {
     stderr += chunk;
   });
   const done = new Promise((resolve) => {
-    child.on("close", (code) => {
+    child.on('close', (code) => {
       const rest = pending.trim();
       if (rest) onLine(rest);
       resolve({ code, stderr });
     });
-    child.on("error", (e) => resolve({ code: -1, stderr: String(e) }));
+    child.on('error', (e) => resolve({ code: -1, stderr: String(e) }));
   });
   return { child, done };
 }
@@ -128,10 +128,10 @@ function lastJson(lines) {
 function isExecutionEvent(value) {
   return (
     value !== null &&
-    typeof value === "object" &&
-    typeof value.kind === "string" &&
-    typeof value.runId === "string" &&
-    typeof value.seq === "number"
+    typeof value === 'object' &&
+    typeof value.kind === 'string' &&
+    typeof value.runId === 'string' &&
+    typeof value.seq === 'number'
   );
 }
 
@@ -147,23 +147,26 @@ function scratchFile(suffix) {
 /** 图文档落成临时文件。graphPath 只用来定 base-dir，相对路径参数照它解析。 */
 function materialize(doc, graphPath) {
   const baseDir = graphPath ? path.dirname(resolveWorkspace(graphPath)) : ROOT;
-  const file = scratchFile(".lyflow.json");
-  fs.writeFileSync(file, JSON.stringify(doc), "utf8");
+  const file = scratchFile('.lyflow.json');
+  fs.writeFileSync(file, JSON.stringify(doc), 'utf8');
   return { file, baseDir };
 }
 
 /** 信封里的 params（编辑器合成的「default + 当前配方覆盖」，param-recipe K3）→ CLI 的
  *  `--param <名字>=<json>`。CLI 按 JSON 解析值，与 C ABI 的 params_json 给出同一个结果。 */
 function paramArgs(params) {
-  if (!params || typeof params !== "object") return [];
-  return Object.entries(params).flatMap(([name, value]) => ["--param", `${name}=${JSON.stringify(value)}`]);
+  if (!params || typeof params !== 'object') return [];
+  return Object.entries(params).flatMap(([name, value]) => [
+    '--param',
+    `${name}=${JSON.stringify(value)}`,
+  ]);
 }
 
 /** 工作区外的路径一律拒绝：桩服务器也是服务器，不该被当成任意文件读写口。 */
 function resolveWorkspace(p) {
   const full = path.resolve(ROOT, p);
   const rel = path.relative(ROOT, full);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
     throw Object.assign(new Error(`路径不在工作区里：${p}`), { status: 403 });
   }
   return full;
@@ -174,13 +177,13 @@ function resolveWorkspace(p) {
 // 配方目录（名字以 .recipes 结尾）里的 *.lyflow-recipe.json、index.json、autosave~.json 可读写删，
 // *.lyflow-recipe.json 之间可改名；任意位置（工作区内）的 *.lyflow-recipe.json 可读写（导入 / 导出）。
 
-const RECIPE_EXT = ".lyflow-recipe.json";
-const RECIPE_AUX = ["index.json", "autosave~.json"];
+const RECIPE_EXT = '.lyflow-recipe.json';
+const RECIPE_AUX = ['index.json', 'autosave~.json'];
 
 const endsWithCi = (s, suffix) => s.length > suffix.length && s.toLowerCase().endsWith(suffix);
 const isRecipeFile = (name) => endsWithCi(name, RECIPE_EXT);
 const isRecipeAux = (name) => RECIPE_AUX.includes(name.toLowerCase());
-const isRecipeDir = (dir) => endsWithCi(path.basename(dir), ".recipes");
+const isRecipeDir = (dir) => endsWithCi(path.basename(dir), '.recipes');
 
 function refuse(message) {
   return Object.assign(new Error(message), { status: 403 });
@@ -188,12 +191,18 @@ function refuse(message) {
 
 /** access = "rw"（读写：配方目录里的三种，或任意位置的配方文件）| "dir"（删、改名：只在配方目录里）。 */
 function recipePath(p, access) {
-  if (String(p).split(/[\\/]/).includes("..")) throw refuse(`路径里不能有 ..：${p}`);
+  if (String(p).split(/[\\/]/).includes('..')) throw refuse(`路径里不能有 ..：${p}`);
   const full = resolveWorkspace(p);
   const name = path.basename(full);
   const inDir = isRecipeDir(path.dirname(full));
-  const ok = access === "rw" ? isRecipeFile(name) || (inDir && isRecipeAux(name)) : inDir && (isRecipeFile(name) || isRecipeAux(name));
-  if (!ok) throw refuse(`这里只能读写配方文件（*${RECIPE_EXT}，或 *.recipes/ 里的 index.json、autosave~.json）：${p}`);
+  const ok =
+    access === 'rw'
+      ? isRecipeFile(name) || (inDir && isRecipeAux(name))
+      : inDir && (isRecipeFile(name) || isRecipeAux(name));
+  if (!ok)
+    throw refuse(
+      `这里只能读写配方文件（*${RECIPE_EXT}，或 *.recipes/ 里的 index.json、autosave~.json）：${p}`,
+    );
   return full;
 }
 
@@ -216,10 +225,12 @@ function notePlanNodes(state, nodes) {
 }
 
 function noteEvent(state, value) {
-  if (value.kind === "run_started" || value.kind === "plan_extended") notePlanNodes(state, value.nodes);
-  if (value.kind !== "node_state") return;
-  if (["done", "skipped", "error", "cancelled"].includes(value.state)) state.touched.add(value.nodeId);
-  if (value.state !== "done" && value.state !== "skipped") return;
+  if (value.kind === 'run_started' || value.kind === 'plan_extended')
+    notePlanNodes(state, value.nodes);
+  if (value.kind !== 'node_state') return;
+  if (['done', 'skipped', 'error', 'cancelled'].includes(value.state))
+    state.touched.add(value.nodeId);
+  if (value.state !== 'done' && value.state !== 'skipped') return;
   if (value.stats?.outputsAvailable === false) return;
   const key = state.keys.get(value.nodeId);
   if (!key) return;
@@ -246,7 +257,7 @@ let stubSeq = 0;
 
 async function manifest() {
   if (manifestCache) return manifestCache;
-  const r = await runCli(["manifest"]);
+  const r = await runCli(['manifest']);
   const v = lastJson(r.lines);
   if (!v) throw new Error(`lyflow manifest 失败：${r.stderr}`);
   manifestCache = v;
@@ -255,11 +266,11 @@ async function manifest() {
 
 async function coreInfo() {
   const m = await manifest();
-  const result = await runCli(["info"]);
+  const result = await runCli(['info']);
   const info = lastJson(result.lines);
   return {
-    ...(info?.kind === "core_info" ? { buildIdentity: info.buildIdentity } : {}),
-    version: (m.generatedBy ?? "unknown").split("/")[1] ?? "unknown",
+    ...(info?.kind === 'core_info' ? { buildIdentity: info.buildIdentity } : {}),
+    version: (m.generatedBy ?? 'unknown').split('/')[1] ?? 'unknown',
     operatorCount: m.operators.length,
     typeCount: m.types.length,
     generation: 0,
@@ -273,12 +284,12 @@ async function coreInfo() {
  *  上游会被桩重算一遍；编辑器只认 isolate 里节点的事件，界面上看不出差别。 */
 async function isolateVerdict(body, file, baseDir) {
   const isolate = body.isolate;
-  const argv = ["plan", file, "--base-dir", baseDir, ...paramArgs(body.params)];
-  for (const t of isolate) argv.push("--to", t);
+  const argv = ['plan', file, '--base-dir', baseDir, ...paramArgs(body.params)];
+  for (const t of isolate) argv.push('--to', t);
   const r = await runCli(argv);
   const plan = lastJson(r.lines);
   // 编不出计划（图有错）：交给真正的运行去报诊断
-  if (!Array.isArray(plan) || plan.some((n) => typeof n.cacheKey !== "string")) return null;
+  if (!Array.isArray(plan) || plan.some((n) => typeof n.cacheKey !== 'string')) return null;
   const missing = plan.filter(
     (n) => !inIsolate(isolate, n.nodeId) && !n.lazy && !n.bypass && !produced.has(n.cacheKey),
   );
@@ -287,10 +298,12 @@ async function isolateVerdict(body, file, baseDir) {
 
 /** 全图的 cacheKey（R7 / 修订一 V2）：计划外节点「现在该有的键」。 */
 async function fullKeysOf(file, baseDir, params) {
-  const whole = lastJson((await runCli(["plan", file, "--base-dir", baseDir, ...paramArgs(params)])).lines);
+  const whole = lastJson(
+    (await runCli(['plan', file, '--base-dir', baseDir, ...paramArgs(params)])).lines,
+  );
   return new Map(
     Array.isArray(whole)
-      ? whole.filter((n) => typeof n.cacheKey === "string").map((n) => [n.nodeId, n.cacheKey])
+      ? whole.filter((n) => typeof n.cacheKey === 'string').map((n) => [n.nodeId, n.cacheKey])
       : [],
   );
 }
@@ -301,28 +314,50 @@ function rejectNotReady(body, verdict) {
   const eager = verdict.plan.filter((n) => !n.lazy);
   const diagnostics = verdict.missing.map((n) => ({
     nodeId: n.nodeId,
-    severity: "error",
-    phase: "execute",
-    code: "upstream_not_ready",
+    severity: 'error',
+    phase: 'execute',
+    code: 'upstream_not_ready',
     message: `上游 ${n.nodeId} 还没有可用结果，先运行它或运行到此`,
   }));
   const at = new Date().toISOString();
   const started = {
-    schemaVersion: 1, runId, seq: 0, at, kind: "run_started",
-    nodeCount: eager.length, maxParallel: 1, mode: "full",
-    plan: eager.map((n) => n.nodeId), targets: body.isolate, isolate: body.isolate, force: body.force ?? [],
+    schemaVersion: 1,
+    runId,
+    seq: 0,
+    at,
+    kind: 'run_started',
+    nodeCount: eager.length,
+    maxParallel: 1,
+    mode: 'full',
+    plan: eager.map((n) => n.nodeId),
+    targets: body.isolate,
+    isolate: body.isolate,
+    force: body.force ?? [],
     nodes: eager.map((n) => ({ id: n.nodeId, cacheKey: n.cacheKey, level: n.level })),
   };
   const first = diagnostics[0];
   const finished = {
-    schemaVersion: 1, runId, seq: 1, at, kind: "run_finished", status: "error", durationMs: 0,
+    schemaVersion: 1,
+    runId,
+    seq: 1,
+    at,
+    kind: 'run_finished',
+    status: 'error',
+    durationMs: 0,
     error: { phase: first.phase, code: first.code, message: first.message },
     diagnostics,
   };
   const state = {
-    id: runId, events: [started, finished], outputs: {}, cancelled: false, lastSeq: 1,
-    keys: new Map(), done: Promise.resolve({ code: 1 }),
-    touched: new Set(), fullKeys: verdict.fullKeys, attachedInfo: new Map(),
+    id: runId,
+    events: [started, finished],
+    outputs: {},
+    cancelled: false,
+    lastSeq: 1,
+    keys: new Map(),
+    done: Promise.resolve({ code: 1 }),
+    touched: new Set(),
+    fullKeys: verdict.fullKeys,
+    attachedInfo: new Map(),
   };
   finished.attached = attachUnplanned(state);
   runs.set(runId, state);
@@ -334,24 +369,26 @@ function rejectNotReady(body, verdict) {
 async function startRun(body) {
   const { file, baseDir } = materialize(body.doc, body.graphPath ?? null);
   const isolate = Array.isArray(body.isolate) && body.isolate.length > 0 ? body.isolate : null;
-  if (isolate && body.mode === "preview") {
-    throw Object.assign(new Error("预览模式不能与「只运行此节点」（isolate）同时使用"), { status: 400 });
+  if (isolate && body.mode === 'preview') {
+    throw Object.assign(new Error('预览模式不能与「只运行此节点」（isolate）同时使用'), {
+      status: 400,
+    });
   }
   let verdict = null;
   if (isolate) {
     verdict = await isolateVerdict(body, file, baseDir);
     if (verdict && verdict.missing.length > 0) return rejectNotReady(body, verdict);
   }
-  const argv = ["run", file, "--base-dir", baseDir, "--outputs", ...paramArgs(body.params)];
+  const argv = ['run', file, '--base-dir', baseDir, '--outputs', ...paramArgs(body.params)];
   const scope = isolate ?? body.targets ?? [];
-  for (const t of scope) argv.push("--to", t);
+  for (const t of scope) argv.push('--to', t);
   // 带 targets 的运行都要挂结果（修订一 V2），先把全图的键拿到
   const fullKeys =
     verdict?.fullKeys ?? (scope.length > 0 ? await fullKeysOf(file, baseDir, body.params) : null);
   // force（V1）不用管：桩每次都是新进程、没有跨运行的缓存，本来就是真算
-  if (body.mode === "preview") {
-    argv.push("--preview");
-    if (body.previewMaxPoints) argv.push("--preview-points", String(body.previewMaxPoints));
+  if (body.mode === 'preview') {
+    argv.push('--preview');
+    if (body.previewMaxPoints) argv.push('--preview-points', String(body.previewMaxPoints));
   }
 
   const state = {
@@ -385,14 +422,14 @@ async function startRun(body) {
         resolveId(state.id);
       }
       // CLI 不认 isolate / force：把这次的范围补回 run_started，编辑器靠它认出单节点运行
-      if (isolate && value.kind === "run_started") {
+      if (isolate && value.kind === 'run_started') {
         value.isolate = isolate;
         value.targets = isolate;
       }
-      if (value.kind === "run_started") value.force = body.force ?? [];
+      if (value.kind === 'run_started') value.force = body.force ?? [];
       noteEvent(state, value);
       // 进程里的 core 也会算 attached，但它的结果仓是这一个进程的、永远是空的：按记账覆盖
-      if (fullKeys && value.kind === "run_finished") value.attached = attachUnplanned(state);
+      if (fullKeys && value.kind === 'run_finished') value.attached = attachUnplanned(state);
       state.events.push(value);
       state.lastSeq = value.seq;
       hub.broadcast(value);
@@ -410,8 +447,8 @@ async function startRun(body) {
         schemaVersion: 1,
         runId: state.id,
         seq: state.lastSeq + 1,
-        kind: "run_finished",
-        status: "cancelled",
+        kind: 'run_finished',
+        status: 'cancelled',
       };
       state.events.push(event);
       hub.broadcast(event);
@@ -422,7 +459,7 @@ async function startRun(body) {
   const finished = state.done.then(() => null);
   const id = await Promise.race([runId, finished]);
   if (!id) {
-    const detail = state.diagnostics ? JSON.stringify(state.diagnostics) : "校验失败，没有执行";
+    const detail = state.diagnostics ? JSON.stringify(state.diagnostics) : '校验失败，没有执行';
     throw Object.assign(new Error(detail), { status: 400 });
   }
   return { runId: id };
@@ -432,8 +469,8 @@ async function startRun(body) {
 function summaryOf(state) {
   for (let i = state.events.length - 1; i >= 0; i -= 1) {
     const e = state.events[i];
-    if (e.kind !== "run_finished") continue;
-    return e.summary && typeof e.summary === "object" ? e.summary : null;
+    if (e.kind !== 'run_finished') continue;
+    return e.summary && typeof e.summary === 'object' ? e.summary : null;
   }
   return null;
 }
@@ -441,7 +478,8 @@ function summaryOf(state) {
 function outputInfoOf(state, nodeId) {
   let latest = state.attachedInfo?.get(nodeId) ?? null;
   for (const e of state.events) {
-    if (e.kind === "node_state" && e.nodeId === nodeId && e.stats?.outputs) latest = e.stats.outputs;
+    if (e.kind === 'node_state' && e.nodeId === nodeId && e.stats?.outputs)
+      latest = e.stats.outputs;
   }
   return latest ?? [];
 }
@@ -454,25 +492,27 @@ async function cloudFileOf(p, graphPath, maxPoints) {
     full = resolveWorkspace(p);
   } else {
     if (!graphPath) {
-      throw Object.assign(new Error(`${p} 是相对路径，图还没保存，不知道相对哪个目录`), { status: 400 });
+      throw Object.assign(new Error(`${p} 是相对路径，图还没保存，不知道相对哪个目录`), {
+        status: 400,
+      });
     }
     full = resolveWorkspace(path.join(path.dirname(resolveWorkspace(graphPath)), p));
   }
   if (!fs.existsSync(full)) throw Object.assign(new Error(`文件不存在 ${p}`), { status: 404 });
-  const graphFile = scratchFile(".lyflow.json");
+  const graphFile = scratchFile('.lyflow.json');
   fs.writeFileSync(
     graphFile,
     JSON.stringify({
       schemaVersion: 1,
-      id: "load-cloud-file",
-      nodes: [{ id: "load", op: "io.load_pcd", params: { path: full } }],
+      id: 'load-cloud-file',
+      nodes: [{ id: 'load', op: 'io.load_pcd', params: { path: full } }],
       edges: [],
     }),
-    "utf8",
+    'utf8',
   );
-  const pcd = scratchFile(".pcd");
+  const pcd = scratchFile('.pcd');
   try {
-    const r = await runCli(["dump", graphFile, "load:cloud", pcd, "--format", "ascii"]);
+    const r = await runCli(['dump', graphFile, 'load:cloud', pcd, '--format', 'ascii']);
     if (!fs.existsSync(pcd)) {
       throw Object.assign(new Error(`读不了 ${p}：${r.stderr.trim()}`), { status: 400 });
     }
@@ -486,8 +526,8 @@ async function cloudFileOf(p, graphPath, maxPoints) {
 /** 用户片段：工作区的 `snippets/` 与 LYFLOW_SNIPPET_DIRS（分号分隔）里的每个 *.lyflow-snippet.json。
  *  与 bridge 的 `scan_snippets` 同一套最低要求：是 JSON 对象、有 id / label / nodes。 */
 function scanSnippets() {
-  const dirs = [path.join(ROOT, "snippets")];
-  for (const d of (process.env.LYFLOW_SNIPPET_DIRS ?? "").split(";")) if (d) dirs.push(d);
+  const dirs = [path.join(ROOT, 'snippets')];
+  for (const d of (process.env.LYFLOW_SNIPPET_DIRS ?? '').split(';')) if (d) dirs.push(d);
   const snippets = [];
   const problems = [];
   for (const dir of dirs) {
@@ -497,16 +537,16 @@ function scanSnippets() {
     } catch {
       continue;
     }
-    for (const name of names.filter((n) => n.endsWith(".lyflow-snippet.json")).sort()) {
+    for (const name of names.filter((n) => n.endsWith('.lyflow-snippet.json')).sort()) {
       const file = path.join(dir, name);
       let v;
       try {
-        v = JSON.parse(fs.readFileSync(file, "utf8"));
+        v = JSON.parse(fs.readFileSync(file, 'utf8'));
       } catch (e) {
         problems.push(`${file}：${e instanceof Error ? e.message : String(e)}`);
         continue;
       }
-      if (v && typeof v.id === "string" && typeof v.label === "string" && Array.isArray(v.nodes)) {
+      if (v && typeof v.id === 'string' && typeof v.label === 'string' && Array.isArray(v.nodes)) {
         snippets.push({ ...v, source: file });
       } else {
         problems.push(`${file}：缺 id / label / nodes`);
@@ -517,16 +557,16 @@ function scanSnippets() {
 }
 
 async function cloudOf(state, nodeId, port, maxPoints) {
-  const pcd = scratchFile(".pcd");
+  const pcd = scratchFile('.pcd');
   const r = await runCli([
-    "dump",
+    'dump',
     state.graphFile,
     `${nodeId}:${port}`,
     pcd,
-    "--base-dir",
+    '--base-dir',
     state.baseDir,
-    "--format",
-    "ascii",
+    '--format',
+    'ascii',
     ...paramArgs(state.params),
   ]);
   if (!fs.existsSync(pcd)) {
@@ -544,13 +584,13 @@ async function cloudOf(state, nodeId, port, maxPoints) {
 // 图像（docs/http-transport.md「图像」）：`lyflow dump` 写出 .lyim（就是 LYIM 载荷、level 0、全部行），
 // 这里只按行切。缩小（level > 0）不做 —— 帧头的 level 照实写 0，调用方按它解释尺寸。
 async function imageOf(state, nodeId, port, row, rows) {
-  const file = scratchFile(".lyim");
+  const file = scratchFile('.lyim');
   const r = await runCli([
-    "dump",
+    'dump',
     state.graphFile,
     `${nodeId}:${port}`,
     file,
-    "--base-dir",
+    '--base-dir',
     state.baseDir,
     ...paramArgs(state.params),
   ]);
@@ -584,20 +624,20 @@ async function imageOf(state, nodeId, port, row, rows) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on("data", (c) => chunks.push(c));
-    req.on("end", () => resolve(Buffer.concat(chunks)));
-    req.on("error", reject);
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
   });
 }
 
 function send(res, status, value) {
-  const body = value === undefined ? "" : JSON.stringify(value);
+  const body = value === undefined ? '' : JSON.stringify(value);
   res.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Content-Length": Buffer.byteLength(body),
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(body),
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
   });
   res.end(body);
 }
@@ -610,35 +650,36 @@ function authorized(req) {
 async function route(req, res, url) {
   const p = url.pathname;
   const q = url.searchParams;
-  const json = async () => JSON.parse((await readBody(req)).toString("utf8") || "{}");
+  const json = async () => JSON.parse((await readBody(req)).toString('utf8') || '{}');
   const runOf = (id) => {
     const state = runs.get(id);
     if (!state) throw Object.assign(new Error(`没有这次运行：${id}`), { status: 404 });
     return state;
   };
 
-  if (req.method === "GET" && p === "/lyflow/manifest") return send(res, 200, await manifest());
-  if (req.method === "GET" && p === "/lyflow/core-info") return send(res, 200, await coreInfo());
+  if (req.method === 'GET' && p === '/lyflow/manifest') return send(res, 200, await manifest());
+  if (req.method === 'GET' && p === '/lyflow/core-info') return send(res, 200, await coreInfo());
 
-  if (req.method === "POST" && p === "/lyflow/validate") {
+  if (req.method === 'POST' && p === '/lyflow/validate') {
     const body = await json();
     const { file, baseDir } = materialize(body.doc, body.graphPath ?? null);
-    const r = await runCli(["validate", file, "--base-dir", baseDir, ...paramArgs(body.params)]);
+    const r = await runCli(['validate', file, '--base-dir', baseDir, ...paramArgs(body.params)]);
     return send(res, 200, lastJson(r.lines) ?? []);
   }
 
-  if (req.method === "POST" && p === "/lyflow/plan") {
+  if (req.method === 'POST' && p === '/lyflow/plan') {
     const body = await json();
     const { file, baseDir } = materialize(body.doc, body.graphPath ?? null);
-    const argv = ["plan", file, "--base-dir", baseDir, ...paramArgs(body.params)];
-    for (const t of body.targets ?? []) argv.push("--to", t);
+    const argv = ['plan', file, '--base-dir', baseDir, ...paramArgs(body.params)];
+    for (const t of body.targets ?? []) argv.push('--to', t);
     const r = await runCli(argv);
     return send(res, 200, lastJson(r.lines) ?? []);
   }
 
-  if (req.method === "POST" && p === "/lyflow/run") return send(res, 200, await startRun(await json()));
+  if (req.method === 'POST' && p === '/lyflow/run')
+    return send(res, 200, await startRun(await json()));
 
-  if (req.method === "POST" && p === "/lyflow/cancel") {
+  if (req.method === 'POST' && p === '/lyflow/cancel') {
     const { runId } = await json();
     const state = runs.get(runId);
     if (state?.child && state.child.exitCode === null) {
@@ -649,7 +690,7 @@ async function route(req, res, url) {
   }
 
   let m = /^\/lyflow\/runs\/([^/]+)\/outputs$/.exec(p);
-  if (req.method === "GET" && m) {
+  if (req.method === 'GET' && m) {
     const state = runOf(decodeURIComponent(m[1]));
     await state.done;
     return send(res, 200, state.outputs ?? {});
@@ -658,101 +699,101 @@ async function route(req, res, url) {
   // ADR-0022：与 run_finished 事件里那个 summary 是同一个对象。
   // 还没有（run 没结束，或者接的是老 core）就是 404 —— 不能压成 {}。
   m = /^\/lyflow\/runs\/([^/]+)\/summary$/.exec(p);
-  if (req.method === "GET" && m) {
+  if (req.method === 'GET' && m) {
     const state = runOf(decodeURIComponent(m[1]));
     await state.done;
     const summary = summaryOf(state);
     if (!summary) {
-      return send(res, 404, { error: "这次运行没有 run summary（core 的 ABI < v9？）" });
+      return send(res, 404, { error: '这次运行没有 run summary（core 的 ABI < v9？）' });
     }
     return send(res, 200, summary);
   }
 
   m = /^\/lyflow\/runs\/([^/]+)\/nodes\/([^/]+)\/outputs$/.exec(p);
-  if (req.method === "GET" && m) {
+  if (req.method === 'GET' && m) {
     const state = runOf(decodeURIComponent(m[1]));
     await state.done;
     return send(res, 200, outputInfoOf(state, decodeURIComponent(m[2])));
   }
 
   m = /^\/lyflow\/runs\/([^/]+)\/clouds\/([^/]+)\/([^/]+)$/.exec(p);
-  if (req.method === "GET" && m) {
+  if (req.method === 'GET' && m) {
     const state = runOf(decodeURIComponent(m[1]));
     await state.done;
     const buf = await cloudOf(
       state,
       decodeURIComponent(m[2]),
       decodeURIComponent(m[3]),
-      Number(q.get("maxPoints") ?? 0),
+      Number(q.get('maxPoints') ?? 0),
     );
     res.writeHead(200, {
-      "Content-Type": "application/octet-stream",
-      "Content-Length": buf.length,
-      "Access-Control-Allow-Origin": "*",
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': buf.length,
+      'Access-Control-Allow-Origin': '*',
     });
     return res.end(buf);
   }
 
-  if (req.method === "GET" && p === "/lyflow/files/cloud") {
+  if (req.method === 'GET' && p === '/lyflow/files/cloud') {
     const buf = await cloudFileOf(
-      q.get("path") ?? "",
-      q.get("graphPath"),
-      Number(q.get("maxPoints") ?? 0),
+      q.get('path') ?? '',
+      q.get('graphPath'),
+      Number(q.get('maxPoints') ?? 0),
     );
     res.writeHead(200, {
-      "Content-Type": "application/octet-stream",
-      "Content-Length": buf.length,
-      "Access-Control-Allow-Origin": "*",
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': buf.length,
+      'Access-Control-Allow-Origin': '*',
     });
     return res.end(buf);
   }
 
-  if (req.method === "GET" && p === "/lyflow/snippets") return send(res, 200, scanSnippets());
+  if (req.method === 'GET' && p === '/lyflow/snippets') return send(res, 200, scanSnippets());
 
   m = /^\/lyflow\/runs\/([^/]+)\/tensors\/([^/]+)\/([^/]+)$/.exec(p);
-  if (req.method === "GET" && m) {
+  if (req.method === 'GET' && m) {
     throw Object.assign(
-      new Error("桩服务器不支持取张量（没有常驻结果仓），见 docs/http-transport.md"),
+      new Error('桩服务器不支持取张量（没有常驻结果仓），见 docs/http-transport.md'),
       { status: 501 },
     );
   }
 
   m = /^\/lyflow\/runs\/([^/]+)\/images\/([^/]+)\/([^/]+)$/.exec(p);
-  if (req.method === "GET" && m) {
+  if (req.method === 'GET' && m) {
     const state = runOf(decodeURIComponent(m[1]));
     await state.done;
     const buf = await imageOf(
       state,
       decodeURIComponent(m[2]),
       decodeURIComponent(m[3]),
-      Number(q.get("row") ?? 0),
-      Number(q.get("rows") ?? 0),
+      Number(q.get('row') ?? 0),
+      Number(q.get('rows') ?? 0),
     );
     res.writeHead(200, {
-      "Content-Type": "application/octet-stream",
-      "Content-Length": buf.length,
-      "Access-Control-Allow-Origin": "*",
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': buf.length,
+      'Access-Control-Allow-Origin': '*',
     });
     return res.end(buf);
   }
 
   m = /^\/lyflow\/runs\/([^/]+)\/indices\/([^/]+)\/([^/]+)$/.exec(p);
-  if (req.method === "GET" && m) {
+  if (req.method === 'GET' && m) {
     throw Object.assign(
-      new Error("桩服务器不支持取下标（没有常驻结果仓），见 docs/http-transport.md"),
+      new Error('桩服务器不支持取下标（没有常驻结果仓），见 docs/http-transport.md'),
       { status: 501 },
     );
   }
 
-  if (req.method === "POST" && p === "/lyflow/cache/evict") {
+  if (req.method === 'POST' && p === '/lyflow/cache/evict') {
     // 桩服务器没有常驻结果仓：没有东西可清，回一个形状对的空结果
     const body = await json();
     return send(res, 200, { removed: 0, skippedPinned: 0, nodes: body.nodeIds ?? [] });
   }
 
-  if (p === "/lyflow/cache") {
+  if (p === '/lyflow/cache') {
     // 桩服务器每次请求都是新进程，进程间没有共享缓存
-    if (req.method === "DELETE") return send(res, 200, {});
+    if (req.method === 'DELETE') return send(res, 200, {});
     return send(res, 200, {
       entries: 0,
       bytes: 0,
@@ -763,36 +804,36 @@ async function route(req, res, url) {
     });
   }
 
-  if (req.method === "GET" && p === "/lyflow/library") {
+  if (req.method === 'GET' && p === '/lyflow/library') {
     return send(res, 200, { dirs: [], count: 0, problems: [] });
   }
-  if (req.method === "POST" && p === "/lyflow/library/refresh") {
+  if (req.method === 'POST' && p === '/lyflow/library/refresh') {
     manifestCache = null;
     return send(res, 200, {
       status: { dirs: [], count: 0, problems: [] },
       manifest: await manifest(),
     });
   }
-  if (req.method === "POST" && p === "/lyflow/library/save") {
-    throw Object.assign(new Error("桩服务器不支持保存到库"), { status: 501 });
+  if (req.method === 'POST' && p === '/lyflow/library/save') {
+    throw Object.assign(new Error('桩服务器不支持保存到库'), { status: 501 });
   }
-  if (req.method === "GET" && p === "/lyflow/library/settings") {
+  if (req.method === 'GET' && p === '/lyflow/library/settings') {
     // 桩服务器没有库目录：只读的空设置，界面上显示「宿主不支持」
-    return send(res, 200, { defaultDir: "", extraDirs: [], envDirs: [], editable: false });
+    return send(res, 200, { defaultDir: '', extraDirs: [], envDirs: [], editable: false });
   }
-  if (req.method === "POST" && p === "/lyflow/library/dirs") {
-    throw Object.assign(new Error("桩服务器没有库目录，设置不了"), { status: 501 });
+  if (req.method === 'POST' && p === '/lyflow/library/dirs') {
+    throw Object.assign(new Error('桩服务器没有库目录，设置不了'), { status: 501 });
   }
-  if (req.method === "GET" && p === "/lyflow/library/definition") {
-    throw Object.assign(new Error("桩服务器没有库目录，取不到库算子的定义"), { status: 501 });
+  if (req.method === 'GET' && p === '/lyflow/library/definition') {
+    throw Object.assign(new Error('桩服务器没有库目录，取不到库算子的定义'), { status: 501 });
   }
 
-  if (req.method === "POST" && p === "/lyflow/import") {
+  if (req.method === 'POST' && p === '/lyflow/import') {
     const body = await json();
-    const file = scratchFile(".import");
-    fs.writeFileSync(file, body.text ?? "", "utf8");
-    const argv = ["import", file, "--kind", body.kind];
-    if (body.baseDir) argv.push("--base-dir", resolveWorkspace(body.baseDir));
+    const file = scratchFile('.import');
+    fs.writeFileSync(file, body.text ?? '', 'utf8');
+    const argv = ['import', file, '--kind', body.kind];
+    if (body.baseDir) argv.push('--base-dir', resolveWorkspace(body.baseDir));
     const r = await runCli(argv);
     const v = lastJson(r.lines);
     if (r.code !== 0 || !v || Array.isArray(v)) {
@@ -801,23 +842,23 @@ async function route(req, res, url) {
     return send(res, 200, v);
   }
 
-  if (p === "/lyflow/files/graph") {
-    const file = resolveWorkspace(q.get("path") ?? "");
-    if (req.method === "GET") {
-      const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (p === '/lyflow/files/graph') {
+    const file = resolveWorkspace(q.get('path') ?? '');
+    if (req.method === 'GET') {
+      const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
       return send(res, 200, { doc, migrations: [] });
     }
-    if (req.method === "PUT") {
+    if (req.method === 'PUT') {
       const body = await json();
       fs.mkdirSync(path.dirname(file), { recursive: true });
-      fs.writeFileSync(file, `${JSON.stringify(body.doc, null, 2)}\n`, "utf8");
+      fs.writeFileSync(file, `${JSON.stringify(body.doc, null, 2)}\n`, 'utf8');
       return send(res, 200, {});
     }
   }
 
-  if (p === "/lyflow/files/backup" || p === "/lyflow/files/backup/status") {
-    const file = `${resolveWorkspace(q.get("path") ?? "")}~`;
-    if (p.endsWith("/status")) {
+  if (p === '/lyflow/files/backup' || p === '/lyflow/files/backup/status') {
+    const file = `${resolveWorkspace(q.get('path') ?? '')}~`;
+    if (p.endsWith('/status')) {
       const main = file.slice(0, -1);
       const exists = fs.existsSync(file);
       const backupModified = exists ? fs.statSync(file).mtimeMs : null;
@@ -829,41 +870,45 @@ async function route(req, res, url) {
         fileModified,
       });
     }
-    if (req.method === "GET") {
-      return send(res, 200, { doc: JSON.parse(fs.readFileSync(file, "utf8")), migrations: [] });
+    if (req.method === 'GET') {
+      return send(res, 200, { doc: JSON.parse(fs.readFileSync(file, 'utf8')), migrations: [] });
     }
-    if (req.method === "PUT") {
+    if (req.method === 'PUT') {
       const body = await json();
-      fs.writeFileSync(file, JSON.stringify(body.doc), "utf8");
+      fs.writeFileSync(file, JSON.stringify(body.doc), 'utf8');
       return send(res, 200, {});
     }
-    if (req.method === "DELETE") {
+    if (req.method === 'DELETE') {
       fs.rmSync(file, { force: true });
       return send(res, 200, {});
     }
   }
 
-  if (req.method === "GET" && p === "/lyflow/files/recipes") {
-    const raw = q.get("dir") ?? "";
-    if (raw.split(/[\\/]/).includes("..")) throw refuse(`路径里不能有 ..：${raw}`);
+  if (req.method === 'GET' && p === '/lyflow/files/recipes') {
+    const raw = q.get('dir') ?? '';
+    if (raw.split(/[\\/]/).includes('..')) throw refuse(`路径里不能有 ..：${raw}`);
     const dir = resolveWorkspace(raw);
     if (!isRecipeDir(dir)) throw refuse(`不是配方目录（名字要以 .recipes 结尾）：${raw}`);
-    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return send(res, 200, { exists: false, files: [] });
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory())
+      return send(res, 200, { exists: false, files: [] });
     const files = fs
       .readdirSync(dir, { withFileTypes: true })
       .filter((e) => e.isFile() && (isRecipeFile(e.name) || isRecipeAux(e.name)))
-      .map((e) => ({ name: e.name, modified: Math.round(fs.statSync(path.join(dir, e.name)).mtimeMs) }))
+      .map((e) => ({
+        name: e.name,
+        modified: Math.round(fs.statSync(path.join(dir, e.name)).mtimeMs),
+      }))
       .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     return send(res, 200, { exists: true, files });
   }
 
-  if (p === "/lyflow/files/recipe") {
-    if (req.method === "GET") {
-      const file = recipePath(q.get("path") ?? "", "rw");
-      return send(res, 200, { text: fs.readFileSync(file, "utf8") });
+  if (p === '/lyflow/files/recipe') {
+    if (req.method === 'GET') {
+      const file = recipePath(q.get('path') ?? '', 'rw');
+      return send(res, 200, { text: fs.readFileSync(file, 'utf8') });
     }
-    if (req.method === "PUT") {
-      const file = recipePath(q.get("path") ?? "", "rw");
+    if (req.method === 'PUT') {
+      const file = recipePath(q.get('path') ?? '', 'rw');
       const { text } = await json();
       let value;
       try {
@@ -871,29 +916,29 @@ async function route(req, res, url) {
       } catch (e) {
         throw Object.assign(new Error(`内容不是合法 JSON：${e.message}`), { status: 400 });
       }
-      if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        throw Object.assign(new Error("内容应当是一个 JSON 对象"), { status: 400 });
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        throw Object.assign(new Error('内容应当是一个 JSON 对象'), { status: 400 });
       }
       fs.mkdirSync(path.dirname(file), { recursive: true });
       const tmp = `${file}.tmp~`;
-      fs.writeFileSync(tmp, text, "utf8");
+      fs.writeFileSync(tmp, text, 'utf8');
       fs.renameSync(tmp, file);
       return send(res, 200, {});
     }
-    if (req.method === "DELETE") {
-      fs.rmSync(recipePath(q.get("path") ?? "", "dir"), { force: true });
+    if (req.method === 'DELETE') {
+      fs.rmSync(recipePath(q.get('path') ?? '', 'dir'), { force: true });
       return send(res, 200, {});
     }
   }
 
-  if (req.method === "POST" && p === "/lyflow/files/recipe/rename") {
+  if (req.method === 'POST' && p === '/lyflow/files/recipe/rename') {
     const body = await json();
-    const from = recipePath(body.from ?? "", "dir");
-    const to = recipePath(body.to ?? "", "dir");
+    const from = recipePath(body.from ?? '', 'dir');
+    const to = recipePath(body.to ?? '', 'dir');
     if (!isRecipeFile(path.basename(from)) || !isRecipeFile(path.basename(to))) {
-      throw refuse("只有配方文件（*.lyflow-recipe.json）能改名");
+      throw refuse('只有配方文件（*.lyflow-recipe.json）能改名');
     }
-    if (path.dirname(from) !== path.dirname(to)) throw refuse("改名只能在同一个配方目录里");
+    if (path.dirname(from) !== path.dirname(to)) throw refuse('改名只能在同一个配方目录里');
     if (fs.existsSync(to) && from.toLowerCase() !== to.toLowerCase()) {
       throw Object.assign(new Error(`${body.to} 已经存在`), { status: 409 });
     }
@@ -901,16 +946,16 @@ async function route(req, res, url) {
     return send(res, 200, {});
   }
 
-  if (req.method === "PUT" && p === "/lyflow/files/bytes") {
-    const file = resolveWorkspace(q.get("path") ?? "");
+  if (req.method === 'PUT' && p === '/lyflow/files/bytes') {
+    const file = resolveWorkspace(q.get('path') ?? '');
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, await readBody(req));
     return send(res, 200, {});
   }
 
-  if (p === "/lyflow/recent") {
-    if (req.method === "GET") return send(res, 200, recent);
-    if (req.method === "POST") {
+  if (p === '/lyflow/recent') {
+    if (req.method === 'GET') return send(res, 200, recent);
+    if (req.method === 'POST') {
       const { path: entry } = await json();
       const at = Date.now();
       const kept = recent.filter((r) => r.path !== entry);
@@ -924,25 +969,25 @@ async function route(req, res, url) {
 }
 
 const server = http.createServer((req, res) => {
-  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-  if (req.method === "OPTIONS") return send(res, 204, undefined);
-  if (!authorized(req)) return send(res, 401, { error: "缺 Authorization: Bearer <token>" });
+  const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+  if (req.method === 'OPTIONS') return send(res, 204, undefined);
+  if (!authorized(req)) return send(res, 401, { error: '缺 Authorization: Bearer <token>' });
   route(req, res, url).catch((e) => {
     if (res.headersSent) return;
     send(res, e.status ?? 500, { error: e instanceof Error ? e.message : String(e) });
   });
 });
 
-hub.attach(server, "/lyflow/events", (protocols) => {
+hub.attach(server, '/lyflow/events', (protocols) => {
   if (!TOKEN) return true;
   return protocols.includes(`lyflow-token.${TOKEN}`);
 });
 
-server.listen(PORT, "127.0.0.1", () => {
+server.listen(PORT, '127.0.0.1', () => {
   console.log(`lyflow test-server: http://127.0.0.1:${PORT}`);
   console.log(`  工作区 ${ROOT}`);
   console.log(`  CLI    ${CLI}`);
-  console.log(`  鉴权   ${TOKEN ? "开（Bearer token）" : "关"}`);
+  console.log(`  鉴权   ${TOKEN ? '开（Bearer token）' : '关'}`);
 });
 
 function shutdown() {
@@ -952,8 +997,8 @@ function shutdown() {
   setTimeout(() => process.exit(0), 500).unref();
 }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
-process.on("message", (m) => {
-  if (m === "shutdown") shutdown();
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+process.on('message', (m) => {
+  if (m === 'shutdown') shutdown();
 });

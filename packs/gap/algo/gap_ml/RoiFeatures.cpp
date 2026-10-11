@@ -33,7 +33,8 @@ std::vector<double> sanitize(const std::vector<double>& a, const std::vector<std
 std::vector<double> edgePadDiff(const std::vector<double>& a) {
   std::vector<double> d(a.size());
   d[0] = 0.0;
-  for (std::size_t i = 1; i < a.size(); ++i) d[i] = a[i] - a[i - 1];
+  for (std::size_t i = 1; i < a.size(); ++i)
+    d[i] = a[i] - a[i - 1];
   return d;
 }
 
@@ -41,18 +42,20 @@ std::vector<double> edgePadDiff(const std::vector<double>& a) {
 std::vector<double> centralDiff(const std::vector<double>& a) {
   const std::size_t n = a.size();
   std::vector<double> central(n);
-  if (n == 0) return central;
+  if (n == 0)
+    return central;
   if (n == 1) {
     central[0] = 0.0;
     return central;
   }
   central[0] = a[1] - a[0];
-  for (std::size_t i = 1; i + 1 < n; ++i) central[i] = a[i + 1] - a[i - 1];
+  for (std::size_t i = 1; i + 1 < n; ++i)
+    central[i] = a[i + 1] - a[i - 1];
   central[n - 1] = a[n - 1] - a[n - 2];
   return central;
 }
 
-}  // namespace
+} // namespace
 
 std::vector<float> buildChannels(const ProfileRow& row) {
   requireSlotCount(row.x_mm.size(), "x_mm");
@@ -94,7 +97,8 @@ std::vector<float> buildChannels(const ProfileRow& row) {
   z_std = z_std > 1e-6 ? z_std : 1.0;
 
   std::vector<double> z_norm(n);
-  for (std::size_t i = 0; i < n; ++i) z_norm[i] = (z[i] - z_mean) / z_std;
+  for (std::size_t i = 0; i < n; ++i)
+    z_norm[i] = (z[i] - z_mean) / z_std;
   z_norm = sanitize(z_norm, valid);
 
   const std::vector<double> x_diff = sanitize(edgePadDiff(x), valid);
@@ -102,30 +106,35 @@ std::vector<float> buildChannels(const ProfileRow& row) {
   const std::vector<double> dz = centralDiff(z);
   const std::vector<double> dx = centralDiff(x);
   std::vector<double> normal_angle(n);
-  for (std::size_t i = 0; i < n; ++i) normal_angle[i] = std::atan2(dz[i], dx[i]);
+  for (std::size_t i = 0; i < n; ++i)
+    normal_angle[i] = std::atan2(dz[i], dx[i]);
   normal_angle = sanitize(normal_angle, valid);
 
   std::vector<double> curvature(n, 0.0);
-  for (std::size_t i = 1; i + 1 < n; ++i) curvature[i] = z[i + 1] - 2.0 * z[i] + z[i - 1];
+  for (std::size_t i = 1; i + 1 < n; ++i)
+    curvature[i] = z[i + 1] - 2.0 * z[i] + z[i - 1];
   curvature = sanitize(curvature, valid);
 
   std::vector<double> intensity_norm(n);
-  for (std::size_t i = 0; i < n; ++i) intensity_norm[i] = row.intensity[i] / 255.0;
+  for (std::size_t i = 0; i < n; ++i)
+    intensity_norm[i] = row.intensity[i] / 255.0;
   intensity_norm = sanitize(intensity_norm, valid);
 
   std::vector<float> channels(kNumChannels * n);
   auto writeChannel = [&](std::size_t channel_index, const std::vector<double>& values) {
     const std::size_t base = channel_index * n;
-    for (std::size_t i = 0; i < n; ++i) channels[base + i] = static_cast<float>(values[i]);
+    for (std::size_t i = 0; i < n; ++i)
+      channels[base + i] = static_cast<float>(values[i]);
   };
   writeChannel(0, z_norm);
   writeChannel(1, x_diff);
   writeChannel(2, normal_angle);
   writeChannel(3, curvature);
   writeChannel(4, intensity_norm);
-  for (std::size_t i = 0; i < n; ++i) channels[5 * n + i] = valid[i] ? 1.0F : 0.0F;
+  for (std::size_t i = 0; i < n; ++i)
+    channels[5 * n + i] = valid[i] ? 1.0F : 0.0F;
 
   return channels;
 }
 
-}  // namespace gap::ml
+} // namespace gap::ml

@@ -2,11 +2,20 @@
 // 行高不一（curve 一百多像素、bool 一行），先按类型估一个，挂上之后 ResizeObserver 量出真值再修正；
 // 视口上方的行高变了就把 scrollTop 补上同样的差，看着的那一行不跳。不引虚拟化库：要的只有这么多。
 
-import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Ref,
+} from 'react';
 
 export interface VirtualListHandle {
   /** 把 key 那一项滚到视口顶上（留 8px）。找不到返回 false。 */
-  scrollToKey(key: string, align?: "start" | "nearest"): boolean;
+  scrollToKey(key: string, align?: 'start' | 'nearest'): boolean;
   /** 当前挂着的键（验收脚本断言虚拟化用）。 */
   mountedKeys(): string[];
   element(): HTMLDivElement | null;
@@ -24,7 +33,16 @@ interface Props<T> {
   handle?: Ref<VirtualListHandle>;
 }
 
-export function VirtualList<T>({ items, keyOf, estimate, render, overscan = 400, className, testId, handle }: Props<T>) {
+export function VirtualList<T>({
+  items,
+  keyOf,
+  estimate,
+  render,
+  overscan = 400,
+  className,
+  testId,
+  handle,
+}: Props<T>) {
   const scroller = useRef<HTMLDivElement>(null);
   const heights = useRef(new Map<string, number>());
   const [scrollTop, setScrollTop] = useState(0);
@@ -65,7 +83,7 @@ export function VirtualList<T>({ items, keyOf, estimate, render, overscan = 400,
   keysRef.current = keys;
   const observer = useMemo(
     () =>
-      typeof ResizeObserver === "undefined"
+      typeof ResizeObserver === 'undefined'
         ? null
         : new ResizeObserver((entries) => {
             let changed = false;
@@ -83,7 +101,8 @@ export function VirtualList<T>({ items, keyOf, estimate, render, overscan = 400,
               const old = heights.current.get(key);
               if (old === h) continue;
               const i = keysRef.current.indexOf(key);
-              const before = old ?? (i >= 0 ? offsetsRef.current[i + 1]! - offsetsRef.current[i]! : h);
+              const before =
+                old ?? (i >= 0 ? offsetsRef.current[i + 1]! - offsetsRef.current[i]! : h);
               heights.current.set(key, h);
               changed = true;
               if (i >= 0 && offsetsRef.current[i + 1]! <= top) above += h - before;
@@ -124,13 +143,14 @@ export function VirtualList<T>({ items, keyOf, estimate, render, overscan = 400,
   useImperativeHandle(
     handle,
     () => ({
-      scrollToKey(key, align = "start") {
+      scrollToKey(key, align = 'start') {
         const el = scroller.current;
         const i = keysRef.current.indexOf(key);
         if (!el || i < 0) return false;
         const top = offsetsRef.current[i]!;
         const bottom = offsetsRef.current[i + 1]!;
-        if (align === "nearest" && top >= el.scrollTop && bottom <= el.scrollTop + el.clientHeight) return true;
+        if (align === 'nearest' && top >= el.scrollTop && bottom <= el.scrollTop + el.clientHeight)
+          return true;
         el.scrollTop = Math.max(0, top - 8);
         setScrollTop(el.scrollTop);
         return true;
@@ -154,7 +174,7 @@ export function VirtualList<T>({ items, keyOf, estimate, render, overscan = 400,
       data-mounted={last - first}
       onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
     >
-      <div className="vlist__spacer" style={{ height: total, position: "relative" }}>
+      <div className="vlist__spacer" style={{ height: total, position: 'relative' }}>
         {items.slice(first, last).map((item, k) => {
           const i = first + k;
           const key = keys[i]!;
@@ -164,7 +184,7 @@ export function VirtualList<T>({ items, keyOf, estimate, render, overscan = 400,
               ref={measure}
               data-vkey={key}
               className="vlist__item"
-              style={{ position: "absolute", top: offsets[i], left: 0, right: 0 }}
+              style={{ position: 'absolute', top: offsets[i], left: 0, right: 0 }}
             >
               {render(item)}
             </div>

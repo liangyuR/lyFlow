@@ -10,23 +10,23 @@
 namespace lyflow::test {
 namespace {
 
-Json paramsOf(const Json& doc) {
-  return Json::parse(exec::effectiveParamsJson(doc.dump(), {}));
-}
+Json paramsOf(const Json& doc) { return Json::parse(exec::effectiveParamsJson(doc.dump(), {})); }
 
 /// node → param → 那一行。找不到时 REQUIRE 失败，不静默返回空。
 Json rowOf(const Json& view, const std::string& node, const std::string& param) {
   for (const Json& n : view["nodes"]) {
-    if (n["node"] != node) continue;
+    if (n["node"] != node)
+      continue;
     for (const Json& p : n["params"]) {
-      if (p["param"] == param) return p;
+      if (p["param"] == param)
+        return p;
     }
   }
   FAIL("没有 ", node, ".", param, "：", view.dump());
   return Json::object();
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("params：图里写了的是 explicit，没写的是 default 且等于 manifest 默认值") {
   ensureTestOps();
@@ -94,16 +94,18 @@ TEST_CASE("params：子图提升参数灌进来的内参是 bound") {
       {"edges", Json::array({Json{{"id", "ei"},
                                   {"from", {{"node", "v"}, {"port", "cloud"}}},
                                   {"to", {{"node", "p"}, {"port", "cloud"}}}}})},
-      {"inputs", Json::array({Json{{"name", "cloud"},
-                                   {"type", "PointCloud"},
-                                   {"to", Json::array({Json{{"node", "v"}, {"port", "cloud"}}})}}})},
+      {"inputs",
+       Json::array({Json{{"name", "cloud"},
+                         {"type", "PointCloud"},
+                         {"to", Json::array({Json{{"node", "v"}, {"port", "cloud"}}})}}})},
       {"outputs", Json::array({Json{{"name", "cloud"},
                                     {"type", "PointCloud"},
                                     {"from", {{"node", "p"}, {"port", "cloud"}}}}})},
-      {"params", Json::array({Json{{"name", "leaf"},
-                                   {"type", "vec3f"},
-                                   {"default", Json::array({0.02, 0.02, 0.02})},
-                                   {"binds", Json::array({Json{{"node", "v"}, {"param", "leaf"}}})}}})},
+      {"params",
+       Json::array({Json{{"name", "leaf"},
+                         {"type", "vec3f"},
+                         {"default", Json::array({0.02, 0.02, 0.02})},
+                         {"binds", Json::array({Json{{"node", "v"}, {"param", "leaf"}}})}}})},
   };
   const Json view = paramsOf(doc);
 
@@ -116,7 +118,8 @@ TEST_CASE("params：子图提升参数灌进来的内参是 bound") {
   CHECK(inner["value"] == Json::array({0.01, 0.01, 0.01}));
 
   // 子图节点本身不在视图里：展开之后执行器看不见它，params 也不该看见（F1）
-  for (const Json& n : view["nodes"]) CHECK(n["node"] != "s");
+  for (const Json& n : view["nodes"])
+    CHECK(n["node"] != "s");
 }
 
 TEST_CASE("params：图不合法时返回诊断数组，未知参数照样是 unknown_param") {
@@ -129,4 +132,4 @@ TEST_CASE("params：图不合法时返回诊断数组，未知参数照样是 un
   CHECK(out[0]["severity"] == "error");
 }
 
-}  // namespace lyflow::test
+} // namespace lyflow::test

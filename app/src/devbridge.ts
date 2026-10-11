@@ -35,10 +35,10 @@ import {
   type RunRequest,
   type StateTransition,
   type Transport,
-} from "@lyflow/editor";
+} from '@lyflow/editor';
 
-import { closeGuard, shouldClose } from "./closeGuard";
-import { overridePickPath } from "./dialogs";
+import { closeGuard, shouldClose } from './closeGuard';
+import { overridePickPath } from './dialogs';
 
 interface DevBridge {
   version: string;
@@ -81,7 +81,15 @@ interface DevBridge {
     closeGuardInstalled(): boolean;
     shouldClose(): Promise<{ asked: boolean; close: boolean }>;
     /** 文件对话框（参数的「浏览…」、导出 PNG、库目录）换成脚本给的答案：原生对话框会挡住自动化。null 还原。 */
-    stubPickPath(fn: ((request: { mode: string; filters?: unknown; defaultPath?: string }) => Promise<string | null>) | null): void;
+    stubPickPath(
+      fn:
+        | ((request: {
+            mode: string;
+            filters?: unknown;
+            defaultPath?: string;
+          }) => Promise<string | null>)
+        | null,
+    ): void;
   };
   /** 立刻编译一次，不等 debounce。验收脚本不想为 150ms 睡一觉。 */
   plan(): Promise<void>;
@@ -112,19 +120,19 @@ declare global {
 }
 
 export function installDevBridge(transport: Transport): void {
-  if (typeof window === "undefined" || window.__lyflow) return;
+  if (typeof window === 'undefined' || window.__lyflow) return;
 
   const transitions: StateTransition[] = [];
   onNodeTransition((t) => transitions.push(t));
 
   const runMarks: { runId: string; status: string; at: number }[] = [];
-  let lastStatus = "idle";
+  let lastStatus = 'idle';
   useExecutionStore.subscribe((state) => {
     if (state.runStatus === lastStatus) return;
     lastStatus = state.runStatus;
-    if (state.runStatus === "running" || state.runStatus === "idle") return;
+    if (state.runStatus === 'running' || state.runStatus === 'idle') return;
     runMarks.push({
-      runId: state.runId ?? "",
+      runId: state.runId ?? '',
       status: state.runStatus,
       at: performance.now(),
     });
@@ -132,7 +140,7 @@ export function installDevBridge(transport: Transport): void {
   });
 
   window.__lyflow = {
-    version: "m4",
+    version: 'm4',
     transport,
     stores: {
       graph: useGraphStore,
@@ -175,7 +183,7 @@ export function installDevBridge(transport: Transport): void {
         let asked = false;
         const close = await shouldClose(() => {
           asked = true;
-          return resolveUnsaved("关闭窗口");
+          return resolveUnsaved('关闭窗口');
         });
         return { asked, close };
       },

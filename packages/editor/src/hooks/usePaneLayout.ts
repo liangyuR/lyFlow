@@ -1,12 +1,12 @@
 // 编辑器的三栏（算子面板 | 画布 | 右栏）与右栏里预览的高度：拖分栏、记住宽度、窗口窄了两侧让位（lib/panes.ts）。
 // 原来都写在 Workspace 里，和打开、保存、执行事件那些搅在一起。
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
-import { fitSidePanes } from "../lib/panes";
-import { readStoredNumber, writeStoredNumber } from "../lib/prefs";
-import { rootOf } from "../lib/root";
-import { useDragFraction } from "./useDragFraction";
+import { fitSidePanes } from '../lib/panes';
+import { readStoredNumber, writeStoredNumber } from '../lib/prefs';
+import { rootOf } from '../lib/root';
+import { useDragFraction } from './useDragFraction';
 
 const kMinCanvasWidth = 320;
 /** 两条分栏把手一共占的宽（styles.css 的 .app__splitter：右边那条净占 4px，左边那条压在面板边框上）。 */
@@ -15,12 +15,12 @@ const kPaletteMin = 180;
 const kInspectorMin = 260;
 const kPanelMin = 360;
 /** 参数面板宽度记在 localStorage 的这个键下（P2.1「记住宽度」）。 */
-const PANEL_WIDTH_KEY = "lyflow.paramPanel.width";
+const PANEL_WIDTH_KEY = 'lyflow.paramPanel.width';
 /** 左侧算子面板的宽度，同样拖了就记住。 */
-const PALETTE_WIDTH_KEY = "lyflow.palette.width";
+const PALETTE_WIDTH_KEY = 'lyflow.palette.width';
 /** 右栏里预览占多高（占右栏的比例）：检查器模式与参数面板模式各一个。没拖过时用样式表的默认。 */
-const VIEWER_FRACTION_KEY = "lyflow.viewer.fraction";
-const PANEL_VIEWER_FRACTION_KEY = "lyflow.viewer.fraction.panel";
+const VIEWER_FRACTION_KEY = 'lyflow.viewer.fraction';
+const PANEL_VIEWER_FRACTION_KEY = 'lyflow.viewer.fraction.panel';
 
 /** 记住的宽度（localStorage）。读不到、存的不是正数都退回默认 —— 这只是个方便，不是状态。 */
 function storedWidth(key: string | undefined, fallback: number): number {
@@ -39,9 +39,11 @@ function useDragSplit(
   container: RefObject<HTMLElement | null>,
   reserve: () => number,
   persistKey?: string,
-  side: "left" | "right" = "right",
+  side: 'left' | 'right' = 'right',
 ) {
-  const [width, setWidth] = useState(() => Math.max(min, Math.min(max, storedWidth(persistKey, initial))));
+  const [width, setWidth] = useState(() =>
+    Math.max(min, Math.min(max, storedWidth(persistKey, initial))),
+  );
   const dragging = useRef(false);
   const latest = useRef(width);
   latest.current = width;
@@ -51,26 +53,29 @@ function useDragSplit(
       if (!dragging.current) return;
       const rect = container.current?.getBoundingClientRect();
       const limit = rect ? Math.max(min, Math.min(max, rect.width - reserve())) : max;
-      const next = side === "left" ? e.clientX - (rect ? rect.left : 0) : (rect ? rect.right : window.innerWidth) - e.clientX;
+      const next =
+        side === 'left'
+          ? e.clientX - (rect ? rect.left : 0)
+          : (rect ? rect.right : window.innerWidth) - e.clientX;
       setWidth(Math.max(min, Math.min(limit, next)));
     };
     const up = () => {
       if (dragging.current && persistKey) writeStoredNumber(persistKey, Math.round(latest.current));
       dragging.current = false;
-      rootOf(container.current)?.classList.remove("lyflow-is-resizing");
+      rootOf(container.current)?.classList.remove('lyflow-is-resizing');
     };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
     return () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
     };
   }, [container, min, max, reserve, persistKey, side]);
 
   const onPointerDown = useCallback(() => {
     dragging.current = true;
     // 挂在这个编辑器的根上而不是 body：同一页面的别的东西不该跟着禁掉指针事件
-    rootOf(container.current)?.classList.add("lyflow-is-resizing");
+    rootOf(container.current)?.classList.add('lyflow-is-resizing');
   }, [container]);
 
   return { width, onPointerDown };
@@ -91,7 +96,7 @@ function useRowWidth(container: RefObject<HTMLElement | null>, wanted: number): 
       setTight(width.current < wantedRef.current ? width.current : null);
     };
     measure();
-    if (typeof ResizeObserver === "undefined") return;
+    if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
@@ -124,15 +129,34 @@ export function usePaneLayout(
 ): PaneLayout {
   // 三栏互相限制：拖哪一栏都给另外两栏（画布至少 kMinCanvasWidth）留够地方。宽度在拖的那一刻从 ref 取
   const widths = useRef({ palette: 0, right: 0 });
-  const reserveForPalette = useCallback(() => widths.current.right + kMinCanvasWidth + kSplittersWidth, []);
-  const reserveForRight = useCallback(() => widths.current.palette + kMinCanvasWidth + kSplittersWidth, []);
-  const palettePane = useDragSplit(280, kPaletteMin, 640, root, reserveForPalette, PALETTE_WIDTH_KEY, "left");
+  const reserveForPalette = useCallback(
+    () => widths.current.right + kMinCanvasWidth + kSplittersWidth,
+    [],
+  );
+  const reserveForRight = useCallback(
+    () => widths.current.palette + kMinCanvasWidth + kSplittersWidth,
+    [],
+  );
+  const palettePane = useDragSplit(
+    280,
+    kPaletteMin,
+    640,
+    root,
+    reserveForPalette,
+    PALETTE_WIDTH_KEY,
+    'left',
+  );
   const rightPane = useDragSplit(380, kInspectorMin, 900, root, reserveForRight);
   // 参数面板（param-recipe P2.1）另有一份宽度：它比 Inspector 宽得多，两者来回切时各记各的
   const panelPane = useDragSplit(640, kPanelMin, 1800, root, reserveForRight, PANEL_WIDTH_KEY);
   const leftWanted = { width: palettePane.width, min: kPaletteMin };
-  const rightWanted = panel.open ? { width: panelPane.width, min: kPanelMin } : { width: rightPane.width, min: kInspectorMin };
-  const rowWidth = useRowWidth(root, leftWanted.width + rightWanted.width + kMinCanvasWidth + kSplittersWidth);
+  const rightWanted = panel.open
+    ? { width: panelPane.width, min: kPanelMin }
+    : { width: rightPane.width, min: kInspectorMin };
+  const rowWidth = useRowWidth(
+    root,
+    leftWanted.width + rightWanted.width + kMinCanvasWidth + kSplittersWidth,
+  );
   // 窗口窄了两侧先让（右栏先缩），画布至少留 kMinCanvasWidth；拖分栏时的上限也按让过之后的宽算
   const fitted = fitSidePanes(rowWidth - kSplittersWidth, leftWanted, rightWanted, kMinCanvasWidth);
   widths.current = { palette: fitted.left, right: fitted.right };
@@ -143,10 +167,20 @@ export function usePaneLayout(
   const getRightCol = useCallback(() => rightCol.current, []);
   const getViewerBox = useCallback(() => viewerBox.current, []);
   const inspectorViewer = useDragFraction({
-    column: getRightCol, pane: getViewerBox, edge: "top", minPx: 160, restMinPx: 160, persistKey: VIEWER_FRACTION_KEY,
+    column: getRightCol,
+    pane: getViewerBox,
+    edge: 'top',
+    minPx: 160,
+    restMinPx: 160,
+    persistKey: VIEWER_FRACTION_KEY,
   });
   const panelViewer = useDragFraction({
-    column: getRightCol, pane: getViewerBox, edge: "top", minPx: 160, restMinPx: 200, persistKey: PANEL_VIEWER_FRACTION_KEY,
+    column: getRightCol,
+    pane: getViewerBox,
+    edge: 'top',
+    minPx: 160,
+    restMinPx: 200,
+    persistKey: PANEL_VIEWER_FRACTION_KEY,
   });
   const viewerSplit = panel.open ? panelViewer : inspectorViewer;
 

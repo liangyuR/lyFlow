@@ -18,12 +18,14 @@ void seedOutputs(const std::string& runId) {
   Tensor t;
   t.shape = {2, 3, 4};
   t.data.resize(24);
-  for (std::size_t i = 0; i < t.data.size(); ++i) t.data[i] = static_cast<float>(i);
+  for (std::size_t i = 0; i < t.data.size(); ++i)
+    t.data[i] = static_cast<float>(i);
   store.put(runId, "n", "tensor", runId + "-tensor", Data::tensor(std::move(t)));
 
   Indices ix;
   ix.sourceCloudId = 4242;
-  for (int i = 0; i < 10; ++i) ix.values.push_back(i * 3);
+  for (int i = 0; i < 10; ++i)
+    ix.values.push_back(i * 3);
   store.put(runId, "n", "indices", runId + "-indices", Data::indices(std::move(ix)));
 
   PointCloud cloud;
@@ -31,7 +33,7 @@ void seedOutputs(const std::string& runId) {
   store.put(runId, "n", "cloud", runId + "-cloud", Data::cloud(std::move(cloud)));
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("lyflow_output_tensor 切出第二片，shape 仍是完整的 (2,3,4)") {
   const std::string run = "tensor-slice";
@@ -65,7 +67,8 @@ TEST_CASE("lyflow_output_tensor 切出第二片，shape 仍是完整的 (2,3,4)"
   CHECK(view.count == 0u);
 }
 
-TEST_CASE("lyflow_output_tensor 的尾部：count=0 取到末尾、超出剩余元素数时截断，offset 越界是空切片而不是错误") {
+TEST_CASE(
+    "lyflow_output_tensor 的尾部：count=0 取到末尾、超出剩余元素数时截断，offset 越界是空切片而不是错误") {
   SUBCASE("count=0 取到末尾，超出剩余元素数时截断") {
     const std::string run = "tensor-tail";
     seedOutputs(run);
@@ -114,7 +117,8 @@ TEST_CASE("lyflow_output_tensor 的尾部：count=0 取到末尾、超出剩余�
   }
 }
 
-TEST_CASE("lyflow_output_tensor / lyflow_output_indices 的返回码：没有结果与类型不对都是 1，out 为空是 2") {
+TEST_CASE(
+    "lyflow_output_tensor / lyflow_output_indices 的返回码：没有结果与类型不对都是 1，out 为空是 2") {
   SUBCASE("tensor") {
     const std::string run = "tensor-codes";
     seedOutputs(run);
@@ -179,7 +183,8 @@ TEST_CASE("lyflow_output_indices：sourceCloudId 原样带出，offset/count 分
   lyflow_indices_view_free(&past);
 }
 
-TEST_CASE("lyflow_output_cloud 带 rgb（v12）：flags 第 3 位，抽样后与 xyz 同一组下标；没有 rgb 时为 NULL") {
+TEST_CASE(
+    "lyflow_output_cloud 带 rgb（v12）：flags 第 3 位，抽样后与 xyz 同一组下标；没有 rgb 时为 NULL") {
   exec::ResultStore& store = exec::ResultStore::instance();
   store.clear();
   PointCloud colored;
@@ -238,7 +243,8 @@ TEST_CASE("视图的 handle 让借来的数据活过结果仓的清空") {
 
 // ------------------------------------------- 图像（ABI v15，docs/image-plan.md §5.1）
 
-TEST_CASE("lyflow_output_image：level 0 零拷贝按行切片；level 1 块均值缩小；级别过大收到 1 像素那级；越界是空切片；返回码") {
+TEST_CASE(
+    "lyflow_output_image：level 0 零拷贝按行切片；level 1 块均值缩小；级别过大收到 1 像素那级；越界是空切片；返回码") {
   exec::ResultStore& store = exec::ResultStore::instance();
   store.clear();
   // 6x4 RGB u8，像素值 = (x + 10y, 100, 200)
@@ -272,8 +278,8 @@ TEST_CASE("lyflow_output_image：level 0 零拷贝按行切片；level 1 块均�
     Data stored;
     REQUIRE(store.get("img", "n", "image", stored));
     CHECK(v.pixels == stored.asImage()->pixels.get() + 18);
-    CHECK(v.pixels[0] == 10);                  // (0,1) 的 R
-    CHECK(v.pixels[18 + 5 * 3] == 25);         // (5,2) 的 R
+    CHECK(v.pixels[0] == 10);          // (0,1) 的 R
+    CHECK(v.pixels[18 + 5 * 3] == 25); // (5,2) 的 R
     // 结果仓清空之后借来的像素还活着（handle 持有）
     store.clear();
     CHECK(v.pixels[18 + 5 * 3 + 2] == 200);
@@ -291,7 +297,7 @@ TEST_CASE("lyflow_output_image：level 0 零拷贝按行切片；level 1 块均�
     CHECK(v.full_width == 6u);
     CHECK(v.row_count == 2u);
     CHECK(v.row_bytes == 9u);
-    CHECK(v.pixels[0] == 6);  // 5.5 四舍五入
+    CHECK(v.pixels[0] == 6); // 5.5 四舍五入
     CHECK(v.pixels[1] == 100);
     lyflow_image_view_free(&v);
   }

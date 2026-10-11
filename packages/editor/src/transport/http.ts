@@ -1,5 +1,5 @@
-import type { CoreInfo, OperatorManifestBundle } from "../types/manifest";
-import type { GraphDoc, SubgraphDef } from "../types/graph";
+import type { CoreInfo, OperatorManifestBundle } from '../types/manifest';
+import type { GraphDoc, SubgraphDef } from '../types/graph';
 import type {
   CacheStats,
   EvictResult,
@@ -8,7 +8,7 @@ import type {
   OutputInfo,
   RunOutputs,
   PlanNode,
-} from "../types/execution";
+} from '../types/execution';
 import type {
   BackupStatus,
   CoreReloadFailed,
@@ -25,11 +25,11 @@ import type {
   Transport,
   TransportKind,
   Unlisten,
-} from "./types";
+} from './types';
 
 /** WebSocket 上除 ExecutionEvent 以外的两种控制帧。见 docs/http-transport.md。 */
-const MANIFEST_UPDATED = "manifest_updated";
-const CORE_RELOAD_FAILED = "core_reload_failed";
+const MANIFEST_UPDATED = 'manifest_updated';
+const CORE_RELOAD_FAILED = 'core_reload_failed';
 
 /** 断线后的重连退避，毫秒。 */
 const RECONNECT_MS = [200, 500, 1000, 2000, 4000];
@@ -37,7 +37,7 @@ const RECONNECT_MS = [200, 500, 1000, 2000, 4000];
 type Listener = (frame: Record<string, unknown>) => void;
 
 function joinUrl(base: string, path: string): string {
-  return `${base.replace(/\/+$/, "")}${path}`;
+  return `${base.replace(/\/+$/, '')}${path}`;
 }
 
 /** 走 HTTP/WebSocket 后端的传输。契约见 docs/http-transport.md，
@@ -53,7 +53,7 @@ export interface HttpTransportOptions {
 }
 
 export class HttpTransport implements Transport {
-  readonly kind: TransportKind = "http";
+  readonly kind: TransportKind = 'http';
   readonly baseUrl: string;
   readonly token: string | undefined;
   readonly eventsUrl: string;
@@ -65,10 +65,10 @@ export class HttpTransport implements Transport {
   #attempt = 0;
 
   constructor(baseUrl: string, token?: string, options?: HttpTransportOptions) {
-    this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.baseUrl = baseUrl.replace(/\/+$/, '');
     this.token = token;
     this.eventsUrl =
-      options?.eventsUrl ?? joinUrl(this.baseUrl, "/lyflow/events").replace(/^http/, "ws");
+      options?.eventsUrl ?? joinUrl(this.baseUrl, '/lyflow/events').replace(/^http/, 'ws');
     this.eventsProtocols = options?.eventsProtocols;
   }
 
@@ -76,7 +76,7 @@ export class HttpTransport implements Transport {
 
   #headers(extra?: Record<string, string>): Record<string, string> {
     const h: Record<string, string> = { ...extra };
-    if (this.token) h["Authorization"] = `Bearer ${this.token}`;
+    if (this.token) h['Authorization'] = `Bearer ${this.token}`;
     return h;
   }
 
@@ -86,15 +86,15 @@ export class HttpTransport implements Transport {
       headers: this.#headers(init.headers as Record<string, string> | undefined),
     });
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
+      const text = await res.text().catch(() => '');
       let message = text;
       try {
         const parsed = JSON.parse(text) as { error?: string };
-        if (typeof parsed.error === "string") message = parsed.error;
+        if (typeof parsed.error === 'string') message = parsed.error;
       } catch {
         /* 不是 JSON 就原样用 */
       }
-      throw new Error(message || `${init.method ?? "GET"} ${path} 失败（HTTP ${res.status}）`);
+      throw new Error(message || `${init.method ?? 'GET'} ${path} 失败（HTTP ${res.status}）`);
     }
     return res;
   }
@@ -107,7 +107,7 @@ export class HttpTransport implements Transport {
   async #send<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await this.#request(path, {
       method,
-      headers: body === undefined ? {} : { "Content-Type": "application/json" },
+      headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     if (res.status === 204) return undefined as T;
@@ -118,10 +118,10 @@ export class HttpTransport implements Transport {
   // ---- 描述 ---------------------------------------------------------------
 
   getManifest(): Promise<OperatorManifestBundle> {
-    return this.#get<OperatorManifestBundle>("/lyflow/manifest");
+    return this.#get<OperatorManifestBundle>('/lyflow/manifest');
   }
   getCoreInfo(): Promise<CoreInfo> {
-    return this.#get<CoreInfo>("/lyflow/core-info");
+    return this.#get<CoreInfo>('/lyflow/core-info');
   }
 
   // ---- 校验、计划、执行 -----------------------------------------------------
@@ -131,7 +131,7 @@ export class HttpTransport implements Transport {
     graphPath: string | null,
     params?: Record<string, unknown>,
   ): Promise<GraphDiagnostic[]> {
-    return this.#send<GraphDiagnostic[]>("POST", "/lyflow/validate", {
+    return this.#send<GraphDiagnostic[]>('POST', '/lyflow/validate', {
       doc,
       graphPath,
       params: params ?? null,
@@ -144,7 +144,7 @@ export class HttpTransport implements Transport {
     targets?: string[],
     params?: Record<string, unknown>,
   ): Promise<PlanNode[]> {
-    const out = await this.#send<PlanNode[] | GraphDiagnostic[]>("POST", "/lyflow/plan", {
+    const out = await this.#send<PlanNode[] | GraphDiagnostic[]>('POST', '/lyflow/plan', {
       doc,
       graphPath,
       targets: targets ?? null,
@@ -152,22 +152,18 @@ export class HttpTransport implements Transport {
     });
     // 与 Tauri 一致：校验没过时后端返回诊断数组，靠 cacheKey 区分（ADR-0007）
     const items = out as { cacheKey?: unknown }[];
-    if (items.some((n) => typeof n.cacheKey !== "string")) return [];
+    if (items.some((n) => typeof n.cacheKey !== 'string')) return [];
     return out as PlanNode[];
   }
 
-  async runGraph(
-    doc: GraphDoc,
-    graphPath: string | null,
-    options?: RunOptions,
-  ): Promise<string> {
-    const out = await this.#send<{ runId: string }>("POST", "/lyflow/run", {
+  async runGraph(doc: GraphDoc, graphPath: string | null, options?: RunOptions): Promise<string> {
+    const out = await this.#send<{ runId: string }>('POST', '/lyflow/run', {
       doc,
       graphPath,
       targets: options?.targets ?? null,
       isolate: options?.isolate ?? null,
       force: options?.force ?? null,
-      mode: options?.mode ?? "full",
+      mode: options?.mode ?? 'full',
       previewMaxPoints: options?.previewMaxPoints ?? null,
       previewBudgetMs: options?.previewBudgetMs ?? null,
       sceneId: options?.sceneId ?? null,
@@ -177,7 +173,7 @@ export class HttpTransport implements Transport {
   }
 
   async cancelRun(runId: string): Promise<void> {
-    await this.#send<void>("POST", "/lyflow/cancel", { runId });
+    await this.#send<void>('POST', '/lyflow/cancel', { runId });
   }
 
   getOutputInfo(runId: string, nodeId: string): Promise<OutputInfo[]> {
@@ -210,14 +206,14 @@ export class HttpTransport implements Transport {
     maxPoints: number,
   ): Promise<ArrayBuffer> {
     const q = new URLSearchParams({ path, maxPoints: String(maxPoints) });
-    if (graphPath) q.set("graphPath", graphPath);
+    if (graphPath) q.set('graphPath', graphPath);
     const res = await this.#request(`/lyflow/files/cloud?${q.toString()}`);
     return res.arrayBuffer();
   }
 
   /** 服务端目录里的用户片段（m8-plan L14）。 */
   listSnippets(): Promise<SnippetScan> {
-    return this.#get<SnippetScan>("/lyflow/snippets");
+    return this.#get<SnippetScan>('/lyflow/snippets');
   }
 
   async getOutputTensor(
@@ -265,7 +261,7 @@ export class HttpTransport implements Transport {
   }
 
   clearCache(): Promise<void> {
-    return this.#send<void>("DELETE", "/lyflow/cache");
+    return this.#send<void>('DELETE', '/lyflow/cache');
   }
   evictCache(
     doc: GraphDoc,
@@ -274,7 +270,7 @@ export class HttpTransport implements Transport {
     downstream: boolean,
     params?: Record<string, unknown>,
   ): Promise<EvictResult> {
-    return this.#send<EvictResult>("POST", "/lyflow/cache/evict", {
+    return this.#send<EvictResult>('POST', '/lyflow/cache/evict', {
       doc,
       graphPath,
       nodeIds,
@@ -283,7 +279,7 @@ export class HttpTransport implements Transport {
     });
   }
   cacheStats(): Promise<CacheStats> {
-    return this.#get<CacheStats>("/lyflow/cache");
+    return this.#get<CacheStats>('/lyflow/cache');
   }
 
   // ---- 事件（WebSocket）----------------------------------------------------
@@ -294,15 +290,17 @@ export class HttpTransport implements Transport {
     // token 走子协议而不是查询串：查询串会进日志和 Referer
     const protocols =
       this.eventsProtocols ??
-      (this.token ? ["lyflow.v1", `lyflow-token.${this.token}`] : ["lyflow.v1"]);
+      (this.token ? ['lyflow.v1', `lyflow-token.${this.token}`] : ['lyflow.v1']);
     const socket =
-      protocols.length > 0 ? new WebSocket(this.eventsUrl, protocols) : new WebSocket(this.eventsUrl);
+      protocols.length > 0
+        ? new WebSocket(this.eventsUrl, protocols)
+        : new WebSocket(this.eventsUrl);
     this.#socket = socket;
-    socket.addEventListener("open", () => {
+    socket.addEventListener('open', () => {
       this.#attempt = 0;
     });
-    socket.addEventListener("message", (e: MessageEvent) => {
-      if (typeof e.data !== "string") return;
+    socket.addEventListener('message', (e: MessageEvent) => {
+      if (typeof e.data !== 'string') return;
       let frame: Record<string, unknown>;
       try {
         frame = JSON.parse(e.data) as Record<string, unknown>;
@@ -311,14 +309,14 @@ export class HttpTransport implements Transport {
       }
       for (const fn of [...this.#listeners]) fn(frame);
     });
-    socket.addEventListener("close", () => {
+    socket.addEventListener('close', () => {
       this.#socket = null;
       if (this.#closed || this.#listeners.size === 0) return;
       const delay = RECONNECT_MS[Math.min(this.#attempt, RECONNECT_MS.length - 1)] ?? 4000;
       this.#attempt += 1;
       setTimeout(() => this.#ensureSocket(), delay);
     });
-    socket.addEventListener("error", () => {
+    socket.addEventListener('error', () => {
       /* close 会紧跟着来，重连逻辑放那里一处 */
     });
   }
@@ -333,7 +331,7 @@ export class HttpTransport implements Transport {
 
   async onExecutionEvent(cb: (e: ExecutionEvent) => void): Promise<Unlisten> {
     return this.#subscribe((frame) => {
-      const kind = frame["kind"];
+      const kind = frame['kind'];
       if (kind === MANIFEST_UPDATED || kind === CORE_RELOAD_FAILED) return;
       cb(frame as unknown as ExecutionEvent);
     });
@@ -341,14 +339,14 @@ export class HttpTransport implements Transport {
 
   async onManifestUpdated(cb: (e: ManifestUpdated) => void): Promise<Unlisten> {
     return this.#subscribe((frame) => {
-      if (frame["kind"] !== MANIFEST_UPDATED) return;
+      if (frame['kind'] !== MANIFEST_UPDATED) return;
       cb(frame as unknown as ManifestUpdated);
     });
   }
 
   async onCoreReloadFailed(cb: (e: CoreReloadFailed) => void): Promise<Unlisten> {
     return this.#subscribe((frame) => {
-      if (frame["kind"] !== CORE_RELOAD_FAILED) return;
+      if (frame['kind'] !== CORE_RELOAD_FAILED) return;
       cb(frame as unknown as CoreReloadFailed);
     });
   }
@@ -364,13 +362,13 @@ export class HttpTransport implements Transport {
   // ---- 工作区文件 ----------------------------------------------------------
 
   async saveGraph(path: string, doc: GraphDoc): Promise<void> {
-    await this.#send<void>("PUT", `/lyflow/files/graph?path=${encodeURIComponent(path)}`, { doc });
+    await this.#send<void>('PUT', `/lyflow/files/graph?path=${encodeURIComponent(path)}`, { doc });
   }
   loadGraph(path: string): Promise<LoadedGraph> {
     return this.#get<LoadedGraph>(`/lyflow/files/graph?path=${encodeURIComponent(path)}`);
   }
   async writeBackup(path: string, doc: GraphDoc): Promise<void> {
-    await this.#send<void>("PUT", `/lyflow/files/backup?path=${encodeURIComponent(path)}`, { doc });
+    await this.#send<void>('PUT', `/lyflow/files/backup?path=${encodeURIComponent(path)}`, { doc });
   }
   backupStatus(path: string): Promise<BackupStatus> {
     return this.#get<BackupStatus>(`/lyflow/files/backup/status?path=${encodeURIComponent(path)}`);
@@ -379,12 +377,12 @@ export class HttpTransport implements Transport {
     return this.#get<LoadedGraph>(`/lyflow/files/backup?path=${encodeURIComponent(path)}`);
   }
   async discardBackup(path: string): Promise<void> {
-    await this.#send<void>("DELETE", `/lyflow/files/backup?path=${encodeURIComponent(path)}`);
+    await this.#send<void>('DELETE', `/lyflow/files/backup?path=${encodeURIComponent(path)}`);
   }
   async writeFileBytes(path: string, contents: Uint8Array): Promise<void> {
     await this.#request(`/lyflow/files/bytes?path=${encodeURIComponent(path)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/octet-stream" },
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
       body: contents as unknown as BodyInit,
     });
   }
@@ -393,46 +391,52 @@ export class HttpTransport implements Transport {
     return this.#get<RecipeDirListing>(`/lyflow/files/recipes?dir=${encodeURIComponent(dir)}`);
   }
   async readRecipeFile(path: string): Promise<string> {
-    const out = await this.#get<{ text: string }>(`/lyflow/files/recipe?path=${encodeURIComponent(path)}`);
+    const out = await this.#get<{ text: string }>(
+      `/lyflow/files/recipe?path=${encodeURIComponent(path)}`,
+    );
     return out.text;
   }
   async writeRecipeFile(path: string, text: string): Promise<void> {
-    await this.#send<void>("PUT", `/lyflow/files/recipe?path=${encodeURIComponent(path)}`, { text });
+    await this.#send<void>('PUT', `/lyflow/files/recipe?path=${encodeURIComponent(path)}`, {
+      text,
+    });
   }
   async deleteRecipeFile(path: string): Promise<void> {
-    await this.#send<void>("DELETE", `/lyflow/files/recipe?path=${encodeURIComponent(path)}`);
+    await this.#send<void>('DELETE', `/lyflow/files/recipe?path=${encodeURIComponent(path)}`);
   }
   async renameRecipeFile(from: string, to: string): Promise<void> {
-    await this.#send<void>("POST", "/lyflow/files/recipe/rename", { from, to });
+    await this.#send<void>('POST', '/lyflow/files/recipe/rename', { from, to });
   }
   getRecentFiles(): Promise<RecentEntry[]> {
-    return this.#get<RecentEntry[]>("/lyflow/recent");
+    return this.#get<RecentEntry[]>('/lyflow/recent');
   }
   pushRecentFile(path: string): Promise<RecentEntry[]> {
-    return this.#send<RecentEntry[]>("POST", "/lyflow/recent", { path });
+    return this.#send<RecentEntry[]>('POST', '/lyflow/recent', { path });
   }
 
   // ---- 库算子与导入 --------------------------------------------------------
 
   getLibraryStatus(): Promise<LibraryStatus> {
-    return this.#get<LibraryStatus>("/lyflow/library");
+    return this.#get<LibraryStatus>('/lyflow/library');
   }
   getLibrarySettings(): Promise<LibrarySettings> {
-    return this.#get<LibrarySettings>("/lyflow/library/settings");
+    return this.#get<LibrarySettings>('/lyflow/library/settings');
   }
   setLibraryDirs(extraDirs: string[]): Promise<LibraryRefresh> {
-    return this.#send<LibraryRefresh>("POST", "/lyflow/library/dirs", { extraDirs });
+    return this.#send<LibraryRefresh>('POST', '/lyflow/library/dirs', { extraDirs });
   }
   getLibraryDefinition(opId: string): Promise<SubgraphDef | null> {
-    return this.#get<SubgraphDef | null>(`/lyflow/library/definition?op=${encodeURIComponent(opId)}`);
+    return this.#get<SubgraphDef | null>(
+      `/lyflow/library/definition?op=${encodeURIComponent(opId)}`,
+    );
   }
   refreshLibrary(): Promise<LibraryRefresh> {
-    return this.#send<LibraryRefresh>("POST", "/lyflow/library/refresh");
+    return this.#send<LibraryRefresh>('POST', '/lyflow/library/refresh');
   }
   saveAsLibrary(doc: GraphDoc, subgraphId: string, meta: LibraryMeta): Promise<LibraryStatus> {
-    return this.#send<LibraryStatus>("POST", "/lyflow/library/save", { doc, subgraphId, meta });
+    return this.#send<LibraryStatus>('POST', '/lyflow/library/save', { doc, subgraphId, meta });
   }
   importGraph(kind: string, text: string, baseDir: string | null): Promise<GraphDoc> {
-    return this.#send<GraphDoc>("POST", "/lyflow/import", { kind, text, baseDir });
+    return this.#send<GraphDoc>('POST', '/lyflow/import', { kind, text, baseDir });
   }
 }

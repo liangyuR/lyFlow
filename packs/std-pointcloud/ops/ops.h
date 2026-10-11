@@ -39,4 +39,4 @@ Status saveCloudToFile(const PointCloud& cloud, const std::filesystem::path& fil
 Status saveCloudToFile(const PointCloud& cloud, const std::filesystem::path& file,
                        const std::string& format, int threads);
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

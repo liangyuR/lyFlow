@@ -1,18 +1,18 @@
 // manifest store —— **算子描述存这里，不存进节点**：节点只记 op id、渲染时现查。
 // 这是 M3 热重载的前提；快照进节点热重载就永久失效（docs/operator-manifest.md）。
 
-import { create } from "zustand";
+import { create } from 'zustand';
 
-import { transport, type TransportKind } from "../transport";
+import { transport, type TransportKind } from '../transport';
 import type {
   CoreInfo,
   OperatorDesc,
   OperatorManifestBundle,
   PortType,
   SnippetDesc,
-} from "../types/manifest";
+} from '../types/manifest';
 
-export type LoadStatus = "idle" | "loading" | "ready" | "error";
+export type LoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 interface ManifestState {
   status: LoadStatus;
@@ -47,13 +47,13 @@ function index(bundle: OperatorManifestBundle) {
   for (const t of bundle.types) typesByName.set(t.name, t);
   // 每个声明了的 Bundle kind 也登记成一个类型名（`Bundle<kind>`），颜色取类型表里的 Bundle：
   // 端口着色、连线校验都按类型名查表，这样不必在每个查表的地方另认一遍这种写法。
-  const bundleType = typesByName.get("Bundle");
+  const bundleType = typesByName.get('Bundle');
   for (const b of bundle.bundles ?? []) {
     const name = `Bundle<${b.kind}>`;
     const doc = b.label ?? b.doc;
     typesByName.set(name, {
       name,
-      color: bundleType?.color ?? "#c8a86b",
+      color: bundleType?.color ?? '#c8a86b',
       ...(doc !== undefined ? { doc } : {}),
     });
   }
@@ -61,34 +61,34 @@ function index(bundle: OperatorManifestBundle) {
 }
 
 export const useManifestStore = create<ManifestState>((set, get) => ({
-  status: "idle",
+  status: 'idle',
   error: null,
   bundle: null,
   coreInfo: null,
   // 真正的种类在 load 里补 —— store 建起来时宿主还没装上传输。
-  transportKind: "static",
+  transportKind: 'static',
   operatorsById: new Map(),
   typesByName: new Map(),
   userSnippets: [],
   snippetProblems: [],
 
   load: async () => {
-    set({ status: "loading", error: null, transportKind: transport.kind });
+    set({ status: 'loading', error: null, transportKind: transport.kind });
     try {
       const [bundle, coreInfo] = await Promise.all([
         transport.getManifest(),
         transport.getCoreInfo(),
       ]);
-      set({ status: "ready", bundle, coreInfo, ...index(bundle) });
+      set({ status: 'ready', bundle, coreInfo, ...index(bundle) });
     } catch (e) {
-      set({ status: "error", error: e instanceof Error ? e.message : String(e) });
+      set({ status: 'error', error: e instanceof Error ? e.message : String(e) });
       return;
     }
     await get().loadUserSnippets();
   },
 
   loadUserSnippets: async () => {
-    if (typeof transport.listSnippets !== "function") return;
+    if (typeof transport.listSnippets !== 'function') return;
     try {
       const scan = await transport.listSnippets();
       set({ userSnippets: scan.snippets, snippetProblems: scan.problems });
@@ -99,7 +99,7 @@ export const useManifestStore = create<ManifestState>((set, get) => ({
 
   replaceBundle: (bundle, generation) => {
     set((prev) => ({
-      status: "ready",
+      status: 'ready',
       error: null,
       bundle,
       coreInfo: prev.coreInfo
@@ -127,14 +127,14 @@ export function missingOperators(ops: readonly string[]): Set<string> {
 }
 
 const NO_SNIPPETS: SnippetDesc[] = [];
-let snippetCache: { pack: SnippetDesc[] | undefined; user: SnippetDesc[]; all: SnippetDesc[] } | null =
-  null;
+let snippetCache: {
+  pack: SnippetDesc[] | undefined;
+  user: SnippetDesc[];
+  all: SnippetDesc[];
+} | null = null;
 
 /** 片段库的全部条目：算子包随附的在前，用户目录的在后；同 id 时用户的那份覆盖包里的。 */
-export function allSnippets(
-  pack: SnippetDesc[] | undefined,
-  user: SnippetDesc[],
-): SnippetDesc[] {
+export function allSnippets(pack: SnippetDesc[] | undefined, user: SnippetDesc[]): SnippetDesc[] {
   if (snippetCache && snippetCache.pack === pack && snippetCache.user === user) {
     return snippetCache.all;
   }
@@ -164,5 +164,5 @@ export function useOperator(id: string): OperatorDesc | undefined {
 
 /** 端口类型的颜色。查不到时给个显眼的灰，比静默失败好。 */
 export function usePortColor(typeName: string): string {
-  return useManifestStore((s) => s.typesByName.get(typeName)?.color ?? "#6b7280");
+  return useManifestStore((s) => s.typesByName.get(typeName)?.color ?? '#6b7280');
 }

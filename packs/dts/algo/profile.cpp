@@ -11,20 +11,24 @@ namespace {
 bool isValid(float v) { return std::isfinite(v); }
 
 double median(std::vector<double>& v) {
-  if (v.empty()) return std::numeric_limits<double>::quiet_NaN();
+  if (v.empty())
+    return std::numeric_limits<double>::quiet_NaN();
   const std::size_t h = v.size() / 2;
   std::nth_element(v.begin(), v.begin() + h, v.end());
   const double hi = v[h];
-  if (v.size() % 2 == 1) return hi;
+  if (v.size() % 2 == 1)
+    return hi;
   std::nth_element(v.begin(), v.begin() + h - 1, v.end());
   return 0.5 * (v[h - 1] + hi);
 }
 
-}  // namespace
+} // namespace
 
 double normalizeDeg(double a) {
-  while (a <= -180.0) a += 360.0;
-  while (a > 180.0) a -= 360.0;
+  while (a <= -180.0)
+    a += 360.0;
+  while (a > 180.0)
+    a -= 360.0;
   return a;
 }
 
@@ -65,18 +69,22 @@ int View::upperBound(double xv) const {
 }
 
 std::vector<float> movingMedian(const std::vector<float>& z, int width) {
-  if (width <= 1) return z;
+  if (width <= 1)
+    return z;
   const int n = static_cast<int>(z.size());
   const int h = width / 2;
   std::vector<float> out(z.size(), std::numeric_limits<float>::quiet_NaN());
   std::vector<double> win;
   win.reserve(static_cast<std::size_t>(2 * h + 1));
   for (int i = 0; i < n; ++i) {
-    if (!isValid(z[i])) continue;
+    if (!isValid(z[i]))
+      continue;
     win.clear();
     for (int j = i - h; j <= i + h; ++j) {
-      if (j < 0 || j >= n) continue;
-      if (isValid(z[j])) win.push_back(z[j]);
+      if (j < 0 || j >= n)
+        continue;
+      if (isValid(z[j]))
+        win.push_back(z[j]);
     }
     out[i] = static_cast<float>(median(win));
   }
@@ -86,13 +94,16 @@ std::vector<float> movingMedian(const std::vector<float>& z, int width) {
 std::vector<Piece> splitPieces(const Profile& p, double gapMm, double jumpMm, int minPoints) {
   std::vector<Piece> out;
   const int n = static_cast<int>(p.size());
-  if (n == 0) return out;
+  if (n == 0)
+    return out;
   int start = 0;
   for (int i = 1; i <= n; ++i) {
-    const bool brk = i == n || std::fabs(p.x[i] - p.x[i - 1]) > gapMm ||
-                     std::fabs(p.z[i] - p.z[i - 1]) > jumpMm;
-    if (!brk) continue;
-    if (i - start >= minPoints) out.push_back(Piece{start, i - 1});
+    const bool brk =
+        i == n || std::fabs(p.x[i] - p.x[i - 1]) > gapMm || std::fabs(p.z[i] - p.z[i - 1]) > jumpMm;
+    if (!brk)
+      continue;
+    if (i - start >= minPoints)
+      out.push_back(Piece{start, i - 1});
     start = i;
   }
   return out;
@@ -101,7 +112,8 @@ std::vector<Piece> splitPieces(const Profile& p, double gapMm, double jumpMm, in
 View pieceView(const Profile& p, const Piece& piece) {
   std::vector<int> idx;
   idx.reserve(static_cast<std::size_t>(piece.i1 - piece.i0 + 1));
-  for (int i = piece.i0; i <= piece.i1; ++i) idx.push_back(i);
+  for (int i = piece.i0; i <= piece.i1; ++i)
+    idx.push_back(i);
   std::stable_sort(idx.begin(), idx.end(), [&](int a, int b) { return p.x[a] < p.x[b]; });
   return View(p, std::move(idx));
 }
@@ -109,7 +121,8 @@ View pieceView(const Profile& p, const Piece& piece) {
 View mergedView(const Profile& p, const std::vector<Piece>& pieces) {
   std::vector<int> idx;
   for (const Piece& q : pieces) {
-    for (int i = q.i0; i <= q.i1; ++i) idx.push_back(i);
+    for (int i = q.i0; i <= q.i1; ++i)
+      idx.push_back(i);
   }
   std::stable_sort(idx.begin(), idx.end(), [&](int a, int b) { return p.x[a] < p.x[b]; });
   return View(p, std::move(idx));
@@ -117,7 +130,8 @@ View mergedView(const Profile& p, const std::vector<Piece>& pieces) {
 
 bool fitLine(const View& v, int k0, int k1, Line& out) {
   const int n = k1 - k0 + 1;
-  if (n < 2) return false;
+  if (n < 2)
+    return false;
   double sx = 0, sz = 0;
   for (int k = k0; k <= k1; ++k) {
     sx += v.x(k);
@@ -147,7 +161,8 @@ bool fitLine(const View& v, int k0, int k1, Line& out) {
     dz = 1;
   }
   const double norm = std::hypot(dx, dz);
-  if (!(norm > 0)) return false;
+  if (!(norm > 0))
+    return false;
   dx /= norm;
   dz /= norm;
   if (dx < 0) {
@@ -169,10 +184,10 @@ bool fitLine(const View& v, int k0, int k1, Line& out) {
   return true;
 }
 
-bool fitCircle(const View& v, int k0, int k1, double bulgeSign, double& cx, double& cz,
-               double& r) {
+bool fitCircle(const View& v, int k0, int k1, double bulgeSign, double& cx, double& cz, double& r) {
   const int n = k1 - k0 + 1;
-  if (n < 3) return false;
+  if (n < 3)
+    return false;
   double a11 = 0, a12 = 0, a13 = 0, a22 = 0, a23 = 0, a33 = 0;
   double b1 = 0, b2 = 0, b3 = 0;
   for (int k = k0; k <= k1; ++k) {
@@ -194,7 +209,8 @@ bool fitCircle(const View& v, int k0, int k1, double bulgeSign, double& cx, doub
   const double det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
                      m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
                      m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
-  if (std::fabs(det) < 1e-12) return false;
+  if (std::fabs(det) < 1e-12)
+    return false;
   const double inv[3][3] = {
       {(m[1][1] * m[2][2] - m[1][2] * m[2][1]) / det, (m[0][2] * m[2][1] - m[0][1] * m[2][2]) / det,
        (m[0][1] * m[1][2] - m[0][2] * m[1][1]) / det},
@@ -217,9 +233,11 @@ std::vector<Face> splitFaces(const Profile& p, const std::vector<Piece>& pieces,
   for (const Piece& piece : pieces) {
     const View v = pieceView(p, piece);
     const int n = v.size();
-    if (n < 12) continue;
+    if (n < 12)
+      continue;
     const double lo = v.x(0), hi = v.x(n - 1);
-    if (hi - lo < fp.fitLenMm) continue;
+    if (hi - lo < fp.fitLenMm)
+      continue;
     const double step = std::max(fp.fitLenMm * 0.2, 0.25);
 
     struct Window {
@@ -270,7 +288,8 @@ std::vector<Face> splitFaces(const Profile& p, const std::vector<Piece>& pieces,
         }
       }
       run.clear();
-      if (w.flat) run.push_back(w);
+      if (w.flat)
+        run.push_back(w);
     }
   }
   std::stable_sort(faces.begin(), faces.end(),
@@ -278,25 +297,28 @@ std::vector<Face> splitFaces(const Profile& p, const std::vector<Piece>& pieces,
   return faces;
 }
 
-bool findDome(const Profile& p, const std::vector<Piece>& pieces, const DomeParams& dp,
-              Dome& out) {
+bool findDome(const Profile& p, const std::vector<Piece>& pieces, const DomeParams& dp, Dome& out) {
   bool found = false;
   double bestScore = -1.0;
   for (const Piece& piece : pieces) {
     const View v = pieceView(p, piece);
     const int n = v.size();
-    if (n < 20) continue;
+    if (n < 20)
+      continue;
     std::vector<double> zb(static_cast<std::size_t>(n));
-    for (int k = 0; k < n; ++k) zb[k] = dp.bulgeSign * v.z(k);
+    for (int k = 0; k < n; ++k)
+      zb[k] = dp.bulgeSign * v.z(k);
     const int kw = 9, h = kw / 2;
     std::vector<double> zs(static_cast<std::size_t>(n), 0.0);
     for (int k = 0; k < n; ++k) {
       double acc = 0;
-      for (int j = k - h; j <= k + h; ++j) acc += zb[std::clamp(j, 0, n - 1)];
+      for (int j = k - h; j <= k + h; ++j)
+        acc += zb[std::clamp(j, 0, n - 1)];
       zs[k] = acc / kw;
     }
     for (int pk = 1; pk < n - 1; ++pk) {
-      if (!(zs[pk] > zs[pk - 1] && zs[pk] >= zs[pk + 1])) continue;
+      if (!(zs[pk] > zs[pk - 1] && zs[pk] >= zs[pk + 1]))
+        continue;
       int lo = pk;
       double runMin = zs[pk];
       while (lo > 0 && zs[lo - 1] <= runMin + dp.walkTolMm) {
@@ -311,26 +333,33 @@ bool findDome(const Profile& p, const std::vector<Piece>& pieces, const DomePara
       }
       int loEnd = lo, hiEnd = pk;
       for (int k = lo; k <= pk; ++k) {
-        if (zs[k] < zs[loEnd]) loEnd = k;
+        if (zs[k] < zs[loEnd])
+          loEnd = k;
       }
       for (int k = pk; k <= hi; ++k) {
-        if (zs[k] < zs[hiEnd]) hiEnd = k;
+        if (zs[k] < zs[hiEnd])
+          hiEnd = k;
       }
       const double base = std::max(zs[loEnd], zs[hiEnd]);
       const double height = zs[pk] - base;
       const double width = v.x(hiEnd) - v.x(loEnd);
-      if (height < dp.minHeightMm || width < dp.minLenMm || width > dp.maxLenMm) continue;
+      if (height < dp.minHeightMm || width < dp.minLenMm || width > dp.maxLenMm)
+        continue;
       const double top = base + 0.9 * height;
       int a = pk;
-      while (a > loEnd && zs[a] > top) --a;
+      while (a > loEnd && zs[a] > top)
+        --a;
       int b = pk;
-      while (b < hiEnd && zs[b] > top) ++b;
+      while (b < hiEnd && zs[b] > top)
+        ++b;
       if (b - a >= 8) {
         double cx = 0, cz = 0, r = 0;
-        if (fitCircle(v, a, b, dp.bulgeSign, cx, cz, r) && r > dp.maxRadiusMm) continue;
+        if (fitCircle(v, a, b, dp.bulgeSign, cx, cz, r) && r > dp.maxRadiusMm)
+          continue;
       }
       const double score = height * height * width;
-      if (score <= bestScore) continue;
+      if (score <= bestScore)
+        continue;
       bestScore = score;
       found = true;
       out.xPeak = v.x(pk);
@@ -347,10 +376,13 @@ bool apexAxis(const View& all, const Dome& dome, double halfMm, double rMin, dou
               ApexAxis& out) {
   const int k0 = all.lowerBound(dome.xPeak - halfMm);
   const int k1 = all.upperBound(dome.xPeak + halfMm) - 1;
-  if (k1 - k0 + 1 < 12) return false;
+  if (k1 - k0 + 1 < 12)
+    return false;
   double cx = 0, cz = 0, r = 0;
-  if (!fitCircle(all, k0, k1, 1.0, cx, cz, r)) return false;
-  if (r < rMin || r > rMax) return false;
+  if (!fitCircle(all, k0, k1, 1.0, cx, cz, r))
+    return false;
+  if (r < rMin || r > rMax)
+    return false;
   out.cx = cx;
   out.cz = cz;
   out.radius = r;
@@ -367,11 +399,14 @@ int sealSide(const View& all, const Dome& dome) {
 std::vector<Extremum> zigzag(const std::vector<double>& v, double prom) {
   std::vector<Extremum> out;
   const int n = static_cast<int>(v.size());
-  if (n < 3) return out;
+  if (n < 3)
+    return out;
   int lo = 0, hi = 0, mode = 0;
   for (int i = 1; i < n; ++i) {
-    if (v[i] > v[hi]) hi = i;
-    if (v[i] < v[lo]) lo = i;
+    if (v[i] > v[hi])
+      hi = i;
+    if (v[i] < v[lo])
+      lo = i;
     if (mode >= 0 && v[hi] - v[i] >= prom) {
       out.push_back(Extremum{hi, true});
       mode = -1;
@@ -387,26 +422,32 @@ std::vector<Extremum> zigzag(const std::vector<double>& v, double prom) {
 
 bool findRoot(const View& all, double lo, double hi, int sealSign, double bulgeSign,
               double promSmall, double promMetal, double bumpLimitX, RootPoint& out) {
-  if (lo > hi) std::swap(lo, hi);
+  if (lo > hi)
+    std::swap(lo, hi);
   const int k0 = all.lowerBound(lo);
   const int k1 = all.upperBound(hi) - 1;
   const int n = k1 - k0 + 1;
-  if (n < 8) return false;
+  if (n < 8)
+    return false;
   std::vector<double> v(static_cast<std::size_t>(n));
-  for (int k = 0; k < n; ++k) v[k] = bulgeSign * all.z(k0 + k);
+  for (int k = 0; k < n; ++k)
+    v[k] = bulgeSign * all.z(k0 + k);
   const std::vector<Extremum> ext = zigzag(v, promSmall);
   int bestK = -1;
   double bestScore = -1e30, bestMetal = 0, bestDome = 0;
   int nBumps = 0;
   for (std::size_t e = 1; e + 1 < ext.size(); ++e) {
-    if (!ext[e].isMax) continue;
+    if (!ext[e].isMax)
+      continue;
     const int i = ext[e].k;
     const double dropLeft = v[i] - v[ext[e - 1].k];
     const double dropRight = v[i] - v[ext[e + 1].k];
     const double metalDrop = sealSign > 0 ? dropLeft : dropRight;
     const double domeDrop = sealSign > 0 ? dropRight : dropLeft;
-    if (metalDrop < promMetal || domeDrop < promSmall) continue;
-    if (all.x(k0 + i) * sealSign < bumpLimitX * sealSign) continue;
+    if (metalDrop < promMetal || domeDrop < promSmall)
+      continue;
+    if (all.x(k0 + i) * sealSign < bumpLimitX * sealSign)
+      continue;
     ++nBumps;
     const double score = all.x(k0 + i) * sealSign;
     if (score > bestScore) {
@@ -428,7 +469,8 @@ bool findRoot(const View& all, double lo, double hi, int sealSign, double bulgeS
   }
   int argmin = 0;
   for (int k = 1; k < n; ++k) {
-    if (v[k] < v[argmin]) argmin = k;
+    if (v[k] < v[argmin])
+      argmin = k;
   }
   out.index = k0 + argmin;
   out.x = all.x(out.index);
@@ -447,11 +489,13 @@ bool pickMetal(const std::vector<Face>& faces, const Dome& dome, const ApexAxis&
     const Face& f = faces[i];
     double gap = 0, edge = 0;
     if (pp.sealSign > 0) {
-      if (f.x1 > dome.xLo + 0.5) continue;
+      if (f.x1 > dome.xLo + 0.5)
+        continue;
       gap = dome.xLo - f.x1;
       edge = f.x1;
     } else {
-      if (f.x0 < dome.xHi - 0.5) continue;
+      if (f.x0 < dome.xHi - 0.5)
+        continue;
       gap = f.x0 - dome.xHi;
       edge = f.x0;
     }
@@ -473,13 +517,15 @@ bool pickMetal(const std::vector<Face>& faces, const Dome& dome, const ApexAxis&
       rejected->push_back(r);
     }
   }
-  if (best < 0) return false;
+  if (best < 0)
+    return false;
   const double lo = pp.sealSign > 0 ? out.edgeX - pp.fitLenMm : out.edgeX;
   const double hi = pp.sealSign > 0 ? out.edgeX : out.edgeX + pp.fitLenMm;
   const int k0 = all.lowerBound(lo);
   const int k1 = all.upperBound(hi) - 1;
-  if (k1 - k0 + 1 < 12) return false;
+  if (k1 - k0 + 1 < 12)
+    return false;
   return fitLine(all, k0, k1, out.line);
 }
 
-}  // namespace lyflow::dts
+} // namespace lyflow::dts

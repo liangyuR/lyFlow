@@ -117,4 +117,4 @@ bool applyGraphParamValues(const nlohmann::json& values, RawGraph& graph, Diagno
 bool parseSubgraphDef(const nlohmann::json& j, const std::string& id, SubgraphDef& out,
                       std::string& error);
 
-}  // namespace lyflow::exec
+} // namespace lyflow::exec

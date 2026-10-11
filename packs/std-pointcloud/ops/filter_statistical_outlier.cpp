@@ -40,28 +40,34 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   // 它的 `#pragma omp` 在没开 OpenMP 的 PCL 里是单线程，200 万点 14 s。均值与标准差照它的顺序单线程累加，阈值逐位相同。
   pcl::search::KdTree<pcl::PointXYZ> tree(false);
   tree.setInputCloud(cloud);
-  if (ctx.cancelled()) return Status::Ok();
+  if (ctx.cancelled())
+    return Status::Ok();
 
   const std::size_t n = in.pointCount();
   std::vector<float> meanDist(n, 0.0f);
   std::vector<char> valid(n, 0);
   ctx.progress(0.2f, "近邻距离");
   parallelFor(n, ctx.threadBudget(), [&](std::size_t begin, std::size_t end) {
-    if (ctx.cancelled()) return false;
+    if (ctx.cancelled())
+      return false;
     pcl::Indices nn(static_cast<std::size_t>(meanK) + 1);
     std::vector<float> d2(static_cast<std::size_t>(meanK) + 1);
     for (std::size_t i = begin; i < end; ++i) {
       const pcl::PointXYZ& pt = (*cloud)[i];
-      if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z)) continue;
-      if (tree.nearestKSearch(static_cast<pcl::index_t>(i), meanK + 1, nn, d2) == 0) continue;
+      if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z))
+        continue;
+      if (tree.nearestKSearch(static_cast<pcl::index_t>(i), meanK + 1, nn, d2) == 0)
+        continue;
       double sum = 0.0;
-      for (int k = 1; k < meanK + 1; ++k) sum += std::sqrt(d2[static_cast<std::size_t>(k)]);
+      for (int k = 1; k < meanK + 1; ++k)
+        sum += std::sqrt(d2[static_cast<std::size_t>(k)]);
       meanDist[i] = static_cast<float>(sum / meanK);
       valid[i] = 1;
     }
     return true;
   });
-  if (ctx.cancelled()) return Status::Ok();
+  if (ctx.cancelled())
+    return Status::Ok();
   ctx.progress(0.9f);
 
   double sum = 0.0;
@@ -98,7 +104,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerFilterStatisticalOutlier(Registry& r) {
   OperatorDesc op;
@@ -111,8 +117,8 @@ void registerFilterStatisticalOutlier(Registry& r) {
 
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "输入点云。", true}};
   op.outputs = {
-      Port{"cloud",   "PointCloud", "Cloud",   "保留下来的点。", true},
-      Port{"removed", "Indices",    "Removed", "被剔除的点下标，可接 Extract Indices 查看。", true},
+      Port{"cloud", "PointCloud", "Cloud", "保留下来的点。", true},
+      Port{"removed", "Indices", "Removed", "被剔除的点下标，可接 Extract Indices 查看。", true},
   };
 
   Param meanK;
@@ -144,4 +150,4 @@ void registerFilterStatisticalOutlier(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

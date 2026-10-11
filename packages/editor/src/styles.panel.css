@@ -65,7 +65,7 @@
 }
 
 .ppanel__icon:hover,
-.ppanel__icon[aria-pressed="true"] {
+.ppanel__icon[aria-pressed='true'] {
   border-color: var(--lyflow-border-strong);
   color: var(--lyflow-fg-0);
 }
@@ -336,7 +336,7 @@
   white-space: nowrap;
 }
 
-.prow[data-modified="1"] .prow__name {
+.prow[data-modified='1'] .prow__name {
   color: var(--lyflow-fg-0);
 }
 
@@ -550,7 +550,8 @@
 
 /* 预览最大化：画布、算子面板、检查器 / 参数面板都收起，预览占满工作区。只是藏起来、不卸载 ——
    打到一半的字、滚动位置、节点量测都还在；WebGL 跟着 ResizeObserver 变大 */
-.app__body.is-viewer-max :is(.app__sidebar, .app__splitter, .app__hsplit, .app__viewer-toggle, .app__inspector, .ppanel) {
+.app__body.is-viewer-max
+  :is(.app__sidebar, .app__splitter, .app__hsplit, .app__viewer-toggle, .app__inspector, .ppanel) {
   display: none;
 }
 

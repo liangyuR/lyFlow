@@ -65,8 +65,8 @@ PointCloud profile(double x0Mm, double stepMm, double zMm) {
   PointCloud c;
   c.rgb.reserve(kSlots * 3);
   for (std::size_t i = 0; i < kSlots; ++i) {
-    c.push(static_cast<float>((x0Mm + stepMm * static_cast<double>(i)) / 1000.0),
-           0.0F, static_cast<float>(zMm / 1000.0));
+    c.push(static_cast<float>((x0Mm + stepMm * static_cast<double>(i)) / 1000.0), 0.0F,
+           static_cast<float>(zMm / 1000.0));
     c.rgb.push_back(120);
     c.rgb.push_back(120);
     c.rgb.push_back(120);
@@ -76,7 +76,8 @@ PointCloud profile(double x0Mm, double stepMm, double zMm) {
 
 /// 一行标签：把 [from, to) 这些槽标成 cls，其余是 0（背景）。
 void paint(std::vector<int>& labels, std::size_t from, std::size_t to, int cls) {
-  for (std::size_t i = from; i < to && i < labels.size(); ++i) labels[i] = cls;
+  for (std::size_t i = from; i < to && i < labels.size(); ++i)
+    labels[i] = cls;
 }
 
 Record labelsRecord(const std::vector<int>& row0, const std::vector<int>& row1) {
@@ -94,7 +95,7 @@ std::string cropStatus(Call& call) {
   return record->data["status"].get<std::string>();
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("gap.roll_anchored_crop 的五种 skip_reason") {
   // 一对合理的 roll 框：x 跨度 10 mm（在 [2, 40] 内），各自 z 高 2 mm。
@@ -140,8 +141,8 @@ TEST_CASE("gap.roll_anchored_crop 生效时按窗裁，点数不够就回退") {
   // 云在 y=169 mm 上、x = 0..19 mm，严格开区间 -> 留下 x = 2..8 共 7 个点。
   const Box2D left = boxMm(0.0, 168.0, 3.0, 170.0);
   const Box2D right = boxMm(7.0, 168.0, 10.0, 170.0);
-  const std::unordered_map<std::string, Value> window{
-      {"halfWidth", Value::number(4.0)}, {"halfHeight", Value::number(3.0)}};
+  const std::unordered_map<std::string, Value> window{{"halfWidth", Value::number(4.0)},
+                                                      {"halfHeight", Value::number(3.0)}};
 
   Call applied;
   applied.inputs["primary"] = Data::cloud(rowCloud(20, 0.0F, 169.0F));
@@ -149,7 +150,7 @@ TEST_CASE("gap.roll_anchored_crop 生效时按窗裁，点数不够就回退") {
   applied.inputs["gapLeft"] = Data::box2d(left);
   applied.inputs["gapRight"] = Data::box2d(right);
   auto params = window;
-  params["minPointsKept"] = Value::integer(10);  // 7 + 7 = 14 >= 10
+  params["minPointsKept"] = Value::integer(10); // 7 + 7 = 14 >= 10
   REQUIRE(applied.run("gap.roll_anchored_crop", params).ok);
   CHECK(cropStatus(applied) == "applied");
   CHECK(applied.out("primary").asCloud()->pointCount() == 7);
@@ -164,7 +165,7 @@ TEST_CASE("gap.roll_anchored_crop 生效时按窗裁，点数不够就回退") {
   reverted.inputs["secondary"] = Data::cloud(rowCloud(20, 0.0F, 169.0F));
   reverted.inputs["gapLeft"] = Data::box2d(left);
   reverted.inputs["gapRight"] = Data::box2d(right);
-  params["minPointsKept"] = Value::integer(15);  // 14 < 15 -> 丢掉窗
+  params["minPointsKept"] = Value::integer(15); // 14 < 15 -> 丢掉窗
   REQUIRE(reverted.run("gap.roll_anchored_crop", params).ok);
   CHECK(cropStatus(reverted) == "reverted:min_points");
   CHECK(reverted.out("primary").asCloud()->pointCount() == 20);
@@ -184,11 +185,10 @@ TEST_CASE("gap.roll_anchored_crop 的点数保护按 usingCamera 分") {
     call.inputs["secondary"] = Data::cloud(rowCloud(20, 0.0F, 189.0F));
     call.inputs["gapLeft"] = Data::box2d(boxMm(0.0, 168.0, 3.0, 170.0));
     call.inputs["gapRight"] = Data::box2d(boxMm(7.0, 168.0, 10.0, 170.0));
-    REQUIRE(call.run("gap.roll_anchored_crop",
-                     {{"halfWidth", Value::number(4.0)},
-                      {"halfHeight", Value::number(3.0)},
-                      {"minPointsKept", Value::integer(minimum)},
-                      {"usingCamera", Value::text(camera)}})
+    REQUIRE(call.run("gap.roll_anchored_crop", {{"halfWidth", Value::number(4.0)},
+                                                {"halfHeight", Value::number(3.0)},
+                                                {"minPointsKept", Value::integer(minimum)},
+                                                {"usingCamera", Value::text(camera)}})
                 .ok);
     return call;
   };
@@ -203,7 +203,8 @@ TEST_CASE("gap.roll_anchored_crop 的点数保护按 usingCamera 分") {
   CHECK(cropStatus(left) == "applied");
 }
 
-TEST_CASE("gap.roi_from_labels 把框换成测量帧的米，段缺失时报 model_roi_failed，输入点数必须是 1280") {
+TEST_CASE(
+    "gap.roi_from_labels 把框换成测量帧的米，段缺失时报 model_roi_failed，输入点数必须是 1280") {
   SUBCASE("换成测量帧的米，段缺失时报 model_roi_failed") {
     // 两片剖面：x 每槽 0.1 mm，z 分别在 168 / 175 mm。标签只标 row0。
     PointCloud primary = profile(-64.0, 0.1, 168.0);
@@ -296,8 +297,8 @@ TEST_CASE("gap.roi_from_labels 的 backdrop 零拷贝透传，没接就是空云
 
 TEST_CASE("gap.labels_to_cloud 按类上色") {
   std::vector<int> row0(kSlots, 0);
-  paint(row0, 0, 100, 2);    // left_surface
-  paint(row0, 100, 200, 3);  // left_roll
+  paint(row0, 0, 100, 2);   // left_surface
+  paint(row0, 100, 200, 3); // left_roll
   std::vector<int> row1(kSlots, 5);
 
   Call call;
@@ -355,11 +356,12 @@ TEST_CASE("gap.drop_non_finite 只丢非有限点，其余通道跟着搬") {
 
 // -------------------------------------------------- ONNX 三步的头尾两步（T6）
 
-TEST_CASE("gap.profile_tensor 出 [2, 6, 1280]，valid 通道认得出 NaN 槽；点数不是 1280 时报 bad_input") {
+TEST_CASE(
+    "gap.profile_tensor 出 [2, 6, 1280]，valid 通道认得出 NaN 槽；点数不是 1280 时报 bad_input") {
   SUBCASE("出 [2, 6, 1280]，valid 通道认得出 NaN 槽") {
     PointCloud primary = profile(-30.0, 0.05, 100.0);
     PointCloud secondary = profile(-30.0, 0.05, 101.0);
-    primary.xyz[0] = std::nanf("");  // 第 0 槽无效
+    primary.xyz[0] = std::nanf(""); // 第 0 槽无效
 
     Call call;
     call.inputs["primary"] = Data::cloud(primary);
@@ -425,4 +427,3 @@ TEST_CASE("gap.labels_from_logits 逐槽 argmax，并列时留最小的类 id；
     CHECK(s.portName == "tensor");
   }
 }
-

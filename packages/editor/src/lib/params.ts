@@ -1,8 +1,8 @@
 // 参数值的读写规则。核心是**稀疏存储**（docs/graph-doc.md，理由见 README「参数的稀疏存储」）：
 // 读 = manifest 默认值 ← 节点覆盖值；写回默认值时必须**删键**，而不是存一个等于默认的副本。
 
-import type { GraphDoc, GraphNode } from "../types/graph";
-import type { Condition, OperatorDesc, Param } from "../types/manifest";
+import type { GraphDoc, GraphNode } from '../types/graph';
+import type { Condition, OperatorDesc, Param } from '../types/manifest';
 
 /** 深比较。参数值是标量、字符串、数字数组（vec/color/transform），或 curve 那样的普通对象
  *  （{points, interp}）—— 对象按键比，与键的书写顺序无关（core 的 cacheKey 也不看顺序）。 */
@@ -20,7 +20,7 @@ export function valueEquals(a: unknown, b: unknown): boolean {
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
 export function defaultParams(op: OperatorDesc): Record<string, unknown> {
@@ -32,7 +32,7 @@ export function defaultParams(op: OperatorDesc): Record<string, unknown> {
 /** 节点当前的完整参数值 = manifest 默认值 ← 节点覆盖值。 */
 export function effectiveParams(
   op: OperatorDesc,
-  node: Pick<GraphNode, "params">,
+  node: Pick<GraphNode, 'params'>,
 ): Record<string, unknown> {
   const out = defaultParams(op);
   for (const [k, v] of Object.entries(node.params ?? {})) {
@@ -45,7 +45,7 @@ export function effectiveParams(
 
 export function effectiveValue(
   op: OperatorDesc,
-  node: Pick<GraphNode, "params">,
+  node: Pick<GraphNode, 'params'>,
   paramName: string,
 ): unknown {
   const override = node.params?.[paramName];
@@ -117,10 +117,16 @@ export function stepFor(param: Param, integer: boolean, ref?: number): number {
   const lo = param.softMin ?? param.min;
   const hi = param.softMax ?? param.max;
   let raw: number;
-  if (lo !== undefined && hi !== undefined && Number.isFinite(lo) && Number.isFinite(hi) && hi > lo) {
+  if (
+    lo !== undefined &&
+    hi !== undefined &&
+    Number.isFinite(lo) &&
+    Number.isFinite(hi) &&
+    hi > lo
+  ) {
     raw = (hi - lo) / 200;
   } else {
-    const fallback = typeof param.default === "number" ? Math.abs(param.default) : 0;
+    const fallback = typeof param.default === 'number' ? Math.abs(param.default) : 0;
     const v = ref !== undefined && Number.isFinite(ref) && ref !== 0 ? Math.abs(ref) : fallback;
     raw = v > 0 ? 10 ** (Math.floor(Math.log10(v)) - 2) : 0.01;
   }
@@ -150,7 +156,7 @@ export function groupParams(params: readonly Param[]): ParamGroup[] {
 
   for (const p of params) {
     const target = p.advanced ? advanced : basic;
-    const key = p.group ?? "";
+    const key = p.group ?? '';
     const list = target.get(key);
     if (list) list.push(p);
     else target.set(key, [p]);
@@ -159,7 +165,7 @@ export function groupParams(params: readonly Param[]): ParamGroup[] {
   const out: ParamGroup[] = [];
   for (const [name, list] of basic) out.push({ name, advanced: false, params: list });
   for (const [name, list] of advanced) {
-    out.push({ name: name || "高级", advanced: true, params: list });
+    out.push({ name: name || '高级', advanced: true, params: list });
   }
   return out;
 }
@@ -168,7 +174,12 @@ export function groupParams(params: readonly Param[]): ParamGroup[] {
 
 /** Windows 盘符、UNC，以及 POSIX 的绝对路径。 */
 /** 包着路径的那一对引号：直的、弯的（中文输入法）都认，两头得配成对。 */
-const QUOTE_PAIRS: Record<string, string> = { '"': '"', "'": "'", "\u201c": "\u201d", "\u2018": "\u2019" };
+const QUOTE_PAIRS: Record<string, string> = {
+  '"': '"',
+  "'": "'",
+  '\u201c': '\u201d',
+  '\u2018': '\u2019',
+};
 
 /** 路径框里粘进来的字：去掉首尾空白，再去掉包着的一对引号（资源管理器「复制文件地址」给的是 "D:\x.pcd"，
  *  以前原样存下、跑的时候才报「文件不存在」）。只去一对、两头得配成对；中间的引号不动。 */
@@ -179,7 +190,7 @@ export function cleanPathText(text: string): string {
 }
 
 function isAbsolutePath(p: string): boolean {
-  return /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith("\\\\") || p.startsWith("/");
+  return /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith('\\\\') || p.startsWith('/');
 }
 
 /** 图里有没有用到相对路径的参数。相对路径按**图文件所在目录**解析（C++ 侧的 baseDir），
@@ -195,9 +206,9 @@ export function hasRelativePathParam(
     const op = operatorsById.get(node.op);
     if (!op) continue;
     for (const param of op.params) {
-      if (param.type !== "path") continue;
+      if (param.type !== 'path') continue;
       const value = effectiveValue(op, node, param.name);
-      if (typeof value === "string" && value !== "" && !isAbsolutePath(value)) return true;
+      if (typeof value === 'string' && value !== '' && !isAbsolutePath(value)) return true;
     }
   }
   return false;

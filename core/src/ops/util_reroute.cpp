@@ -8,7 +8,7 @@ Status compute(const Inputs& inputs, const ParamView&, Outputs& outputs, ExecCon
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerUtilReroute(Registry& r) {
   OperatorDesc op;
@@ -28,4 +28,4 @@ void registerUtilReroute(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

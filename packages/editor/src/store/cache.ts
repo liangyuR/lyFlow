@@ -1,14 +1,14 @@
 // 缓存与计划 store（ADR-0007）。**判定全在 C++**：这里只存 plan_graph 的结论，
 // 一个字节的推导都不做 —— 前端算不出 IO 算子的 externalKey，自己推一定会错。
 
-import { create } from "zustand";
+import { create } from 'zustand';
 
-import { localIdOf, type SubPath } from "../lib/subgraph";
-import { transport } from "../transport";
-import { runParamsOf } from "./recipe";
-import { useUiStore } from "./ui";
-import type { CacheStats, EvictResult, PlanNode } from "../types/execution";
-import type { GraphDoc } from "../types/graph";
+import { localIdOf, type SubPath } from '../lib/subgraph';
+import { transport } from '../transport';
+import { runParamsOf } from './recipe';
+import { useUiStore } from './ui';
+import type { CacheStats, EvictResult, PlanNode } from '../types/execution';
+import type { GraphDoc } from '../types/graph';
 
 /** doc 每次变都重新编译一次代价太大，攒一下再问。 */
 const DEBOUNCE_MS = 150;
@@ -75,8 +75,12 @@ export function staleLocalIds(
   plan: ReadonlyMap<string, PlanNode>,
   ranWith: ReadonlyMap<string, string>,
 ): ReadonlySet<string> {
-  if (staleCache && staleCache.path === path && staleCache.plan === plan &&
-      staleCache.ranWith === ranWith) {
+  if (
+    staleCache &&
+    staleCache.path === path &&
+    staleCache.plan === plan &&
+    staleCache.ranWith === ranWith
+  ) {
     return staleCache.result;
   }
   const out = new Set<string>();
@@ -104,7 +108,7 @@ export function useNodeStale(localId: string): boolean {
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
+  const units = ['KB', 'MB', 'GB', 'TB'];
   let value = bytes / 1024;
   let i = 0;
   while (value >= 1024 && i < units.length - 1) {
@@ -122,7 +126,7 @@ let ticket = 0;
 /** doc 变了就重新编译一次。debounce + ticket：拖滑块时每帧一次编译既浪费，
  *  回复顺序也不保证等于发起顺序，晚发的那次必须赢。 */
 export function schedulePlan(doc: GraphDoc, graphPath: string | null): void {
-  if (transport.kind !== "tauri") return;
+  if (transport.kind !== 'tauri') return;
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {
     void requestPlan(doc, graphPath);
@@ -130,7 +134,7 @@ export function schedulePlan(doc: GraphDoc, graphPath: string | null): void {
 }
 
 export async function requestPlan(doc: GraphDoc, graphPath: string | null): Promise<void> {
-  if (transport.kind !== "tauri") return;
+  if (transport.kind !== 'tauri') return;
   // 显式的这一次顶替还没触发的 debounce：调用方给的都是当前的 doc，那次编的是同一份。不取消的话它
   // 晚到一步拿走 ticket，这次的结果被丢掉，等这次的人（验收脚本的 replan、右键清缓存）读到的还是旧计划
   if (timer) {
@@ -150,7 +154,7 @@ export async function requestPlan(doc: GraphDoc, graphPath: string | null): Prom
 }
 
 export async function refreshCacheStats(): Promise<void> {
-  if (transport.kind !== "tauri") return;
+  if (transport.kind !== 'tauri') return;
   try {
     useCacheStore.getState().setStats(await transport.cacheStats());
   } catch {

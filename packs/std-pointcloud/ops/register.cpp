@@ -39,4 +39,4 @@ void registerPackOps(Registry& r) {
   setCloudWriter(static_cast<CloudWriterFn>(&ops::saveCloudToFile));
 }
 
-}  // namespace lyflow::packs::std_pointcloud
+} // namespace lyflow::packs::std_pointcloud

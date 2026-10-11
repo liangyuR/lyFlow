@@ -36,12 +36,13 @@ Outcome runAndInspect(const Json& doc, const char* nodeId) {
   RunLog& log = s.wait();
   Outcome out;
   const Json state = log.nodeEvent(nodeId, "error");
-  if (state.contains("error")) out.nodeError = state["error"];
+  if (state.contains("error"))
+    out.nodeError = state["error"];
   out.violations = summaryOf(log)["contractViolations"];
   return out;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("契约：elementCount.eq —— 点数不对，第一帧就报 contract_violation") {
   ensureTestOps();
@@ -66,10 +67,10 @@ TEST_CASE("契约：elementCount.eq —— 点数不对，第一帧就报 contra
 
 TEST_CASE("契约：finite —— 一个 NaN 坐标就够") {
   ensureTestOps();
-  const Json doc =
-      makeGraph({okCount(), N{"n_nan", "test.nonfinite_cloud", Json{{"pointCount", 6}, {"badAt", 2}}},
-                 N{"n_c", "test.contracted", Json::object()}},
-                {E{"n_count.cloud", "n_c.count"}, E{"n_nan.cloud", "n_c.finite"}});
+  const Json doc = makeGraph(
+      {okCount(), N{"n_nan", "test.nonfinite_cloud", Json{{"pointCount", 6}, {"badAt", 2}}},
+       N{"n_c", "test.contracted", Json::object()}},
+      {E{"n_count.cloud", "n_c.count"}, E{"n_nan.cloud", "n_c.finite"}});
   const Outcome out = runAndInspect(doc, "n_c");
   REQUIRE(out.nodeError.is_object());
   CHECK(out.nodeError["code"] == "contract_violation");
@@ -95,8 +96,7 @@ TEST_CASE("契约：shape —— -1 的那一维随便，定死的那两维必�
   // 声明是 [2, -1, 4]。[2, 9, 4] 过，[2, 3, 5] 不过。
   auto graphWith = [](int d1, int d2) {
     return makeGraph({okCount(),
-                      N{"n_t", "test.make_tensor",
-                        Json{{"dim0", 2}, {"dim1", d1}, {"dim2", d2}}},
+                      N{"n_t", "test.make_tensor", Json{{"dim0", 2}, {"dim1", d1}, {"dim2", d2}}},
                       N{"n_c", "test.contracted", Json::object()}},
                      {E{"n_count.cloud", "n_c.count"}, E{"n_t.tensor", "n_c.tensor"}});
   };
@@ -115,12 +115,14 @@ TEST_CASE("契约：shape —— -1 的那一维随便，定死的那两维必�
   CHECK(out.violations[0]["actual"]["shape"] == Json::array({2, 3, 5}));
 }
 
-TEST_CASE("契约：shape 用在图像上按 [高, 宽, 通道] 读 —— 要灰度图的端口接了 RGB 图就报（docs/image-plan.md I7）") {
+TEST_CASE(
+    "契约：shape 用在图像上按 [高, 宽, 通道] 读 —— 要灰度图的端口接了 RGB 图就报（docs/image-plan.md I7）") {
   ensureTestOps();
   auto graphWith = [](int channels) {
-    return makeGraph({N{"n_img", "test.make_image", Json{{"width", 8}, {"height", 5}, {"channels", channels}}},
-                      N{"n_g", "test.take_gray", Json::object()}},
-                     {E{"n_img.image", "n_g.image"}});
+    return makeGraph(
+        {N{"n_img", "test.make_image", Json{{"width", 8}, {"height", 5}, {"channels", channels}}},
+         N{"n_g", "test.take_gray", Json::object()}},
+        {E{"n_img.image", "n_g.image"}});
   };
   {
     Session s(graphWith(1));
@@ -153,14 +155,14 @@ TEST_CASE("契约：不声明就零开销 —— 同一批坏数据在无契约�
   ensureTestOps();
   // test.uncontracted 与 test.contracted 是同一组端口，差别只有 contract。
   // 四份数据全是上面几个用例里被拒掉的那些，这里必须一条违反都没有。
-  const Json doc = makeGraph(
-      {N{"n_count", "test.counted", Json{{"pointCount", 5}}},
-       N{"n_nan", "test.nonfinite_cloud", Json{{"pointCount", 6}, {"badAt", 0}}},
-       N{"n_t", "test.make_tensor", Json{{"dim0", 7}, {"dim1", 1}, {"dim2", 1}}},
-       N{"n_r", "test.make_record", Json{{"type", "Other"}}},
-       N{"n_u", "test.uncontracted", Json::object()}},
-      {E{"n_count.cloud", "n_u.count"}, E{"n_nan.cloud", "n_u.finite"},
-       E{"n_t.tensor", "n_u.tensor"}, E{"n_r.rec", "n_u.rec"}});
+  const Json doc =
+      makeGraph({N{"n_count", "test.counted", Json{{"pointCount", 5}}},
+                 N{"n_nan", "test.nonfinite_cloud", Json{{"pointCount", 6}, {"badAt", 0}}},
+                 N{"n_t", "test.make_tensor", Json{{"dim0", 7}, {"dim1", 1}, {"dim2", 1}}},
+                 N{"n_r", "test.make_record", Json{{"type", "Other"}}},
+                 N{"n_u", "test.uncontracted", Json::object()}},
+                {E{"n_count.cloud", "n_u.count"}, E{"n_nan.cloud", "n_u.finite"},
+                 E{"n_t.tensor", "n_u.tensor"}, E{"n_r.rec", "n_u.rec"}});
   Session s(doc);
   RunLog& log = s.wait();
   CHECK(log.runStatus() == "ok");
@@ -218,7 +220,10 @@ TEST_CASE("契约自检：四种键之外的任何东西都过不了 manifest --
 }
 
 TEST_CASE("客户端在业务绑定前拒绝旧整数 ABI、补丁差异和空版本") {
-  struct Case { const char* path; const char* expected; };
+  struct Case {
+    const char* path;
+    const char* expected;
+  };
   const Case cases[] = {
       {LYFLOW_FIXTURE_PATH_legacy, "lyflow_abi_version_string"},
       {LYFLOW_FIXTURE_PATH_abi_patch, "version mismatch"},
@@ -240,4 +245,4 @@ TEST_CASE("客户端在业务绑定前拒绝旧整数 ABI、补丁差异和空�
   }
 }
 
-}  // namespace lyflow::test
+} // namespace lyflow::test

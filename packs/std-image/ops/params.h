@@ -100,8 +100,8 @@ inline Status putMat(Outputs& outputs, const char* port, cv::Mat m) {
   Image out;
   if (!cvx::fromMat(cvx::toSupportedDepth(m), out)) {
     return Status::Error(Phase::Execute, "internal",
-                         std::string("算子产出的图像 core 接不住（") + std::to_string(m.channels()) +
-                             " 通道）",
+                         std::string("算子产出的图像 core 接不住（") +
+                             std::to_string(m.channels()) + " 通道）",
                          {}, port);
   }
   outputs.set(port, Data::image(std::move(out)));
@@ -113,4 +113,4 @@ inline Status fromCvError(const cv::Exception& e, const char* param = "") {
   return Status::Error(Phase::Execute, "bad_param", std::string("OpenCV：") + e.what(), param);
 }
 
-}  // namespace lyflow::ops::img
+} // namespace lyflow::ops::img

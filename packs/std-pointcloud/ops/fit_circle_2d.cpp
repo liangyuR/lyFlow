@@ -4,8 +4,7 @@
 namespace lyflow::ops {
 namespace {
 
-Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
-               ExecContext& ctx) {
+Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   const PointCloud& in = *inputs.get("cloud").asCloud();
   if (in.pointCount() < 3) {
     return Status::Error(Phase::Execute, "bad_input", "点太少，拟合不了圆", {}, "cloud");
@@ -27,10 +26,9 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
   const std_pc::Cloud2D cloud = std_pc::toCloud2D(in);
   Eigen::VectorXf coefficients;
   pcl::Indices indices;
-  const bool ok = fixedRadius > 0
-                      ? std_pc::fitCircleFixedRadius2D(cloud, fixedRadius, &coefficients, &indices,
-                                                       options)
-                      : std_pc::fitCircle2D(cloud, &coefficients, &indices, options);
+  const bool ok = fixedRadius > 0 ? std_pc::fitCircleFixedRadius2D(cloud, fixedRadius,
+                                                                   &coefficients, &indices, options)
+                                  : std_pc::fitCircle2D(cloud, &coefficients, &indices, options);
   if (!ok) {
     return Status::Error(Phase::Execute, "fit_failed", "圆拟合失败（内点不足）", {}, "cloud");
   }
@@ -44,7 +42,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
   Indices out;
   out.sourceCloudId = in.id;
   out.values.reserve(indices.size());
-  for (auto i : indices) out.values.push_back(static_cast<std::int32_t>(i));
+  for (auto i : indices)
+    out.values.push_back(static_cast<std::int32_t>(i));
   outputs.set("inliers", Data::indices(std::move(out)));
   ctx.log(LogLevel::Info, "圆心 (" + std::to_string(circle.center[0]) + ", " +
                               std::to_string(circle.center[1]) + ") 半径 " +
@@ -66,7 +65,7 @@ Param numParam(const char* name, const char* label, double def, const char* doc)
   return p;
 }
 
-}  // namespace
+} // namespace
 
 void registerFitCircle2D(Registry& r) {
   OperatorDesc op;
@@ -75,10 +74,9 @@ void registerFitCircle2D(Registry& r) {
   op.label = "拟合圆 2D";
   op.category = "拟合/圆";
   op.keywords = {"circle", "ransac", "fit", "2d", "圆", "拟合"};
-  op.doc =
-      "在 XY 平面上拟合一个圆（PCL 的 SACMODEL_CIRCLE2D）。\n"
-      "Fixed Radius 大于 0 时半径被钉死：先按上下限拟合一次，"
-      "再用定半径最小二乘重定圆心并按新圆重筛内点。";
+  op.doc = "在 XY 平面上拟合一个圆（PCL 的 SACMODEL_CIRCLE2D）。\n"
+           "Fixed Radius 大于 0 时半径被钉死：先按上下限拟合一次，"
+           "再用定半径最小二乘重定圆心并按新圆重筛内点。";
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "待拟合的点云，只看 XY。", true}};
   op.outputs = {
       Port{"circle", "Circle2D", "Circle", "拟合出的圆。", true},
@@ -106,4 +104,4 @@ void registerFitCircle2D(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

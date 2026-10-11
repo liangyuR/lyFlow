@@ -10,7 +10,7 @@
 // 问的是编辑器画的「保存 / 不保存 / 取消」（@lyflow/editor 的 resolveUnsaved）：以前是原生的「关闭 / 取消」，
 // 想保住改动只能先取消、存盘、再点一次 ×。
 
-import { modalHostReady, recipesDirty, resolveUnsaved, useGraphStore } from "@lyflow/editor";
+import { modalHostReady, recipesDirty, resolveUnsaved, useGraphStore } from '@lyflow/editor';
 
 /** 装上了没有（验收脚本经 devbridge 读）。 */
 export const closeGuard = { installed: false };
@@ -25,19 +25,19 @@ export async function shouldClose(decide: () => Promise<boolean> = askUnsaved): 
 /** 平时问编辑器画的那一问。编辑器整个没了（渲染出错卸掉了根）时它弹不出来、永远等不到答案，
  *  窗口就再也关不掉 —— 那时退回原生的「关闭 / 取消」。 */
 async function askUnsaved(): Promise<boolean> {
-  if (modalHostReady()) return resolveUnsaved("关闭窗口");
-  const { ask } = await import("@tauri-apps/plugin-dialog");
-  return ask("当前图有未保存的改动，关闭窗口会丢掉它们。确定关闭吗？", {
-    title: "LyFlow",
-    kind: "warning",
-    okLabel: "关闭",
-    cancelLabel: "取消",
+  if (modalHostReady()) return resolveUnsaved('关闭窗口');
+  const { ask } = await import('@tauri-apps/plugin-dialog');
+  return ask('当前图有未保存的改动，关闭窗口会丢掉它们。确定关闭吗？', {
+    title: 'LyFlow',
+    kind: 'warning',
+    okLabel: '关闭',
+    cancelLabel: '取消',
   });
 }
 
 export async function installCloseGuard(): Promise<void> {
-  if (!("__TAURI_INTERNALS__" in window)) return;
-  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  if (!('__TAURI_INTERNALS__' in window)) return;
+  const { getCurrentWindow } = await import('@tauri-apps/api/window');
   let asking = false;
   await getCurrentWindow().onCloseRequested(async (event) => {
     // 对话框还开着又点了一次 ×：不叠第二个框

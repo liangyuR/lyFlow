@@ -35,11 +35,11 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     return Status::Error(Phase::Execute, "no_apex_axis",
                          "顶部圆拟合失败或半径超出范围（胶条半径是硬判据）", {}, "clean");
   }
-  nlohmann::json j{{"xPeak", dome.xPeak}, {"zPeak", dome.zPeak}, {"xLo", dome.xLo},
-                   {"xHi", dome.xHi},     {"heightMm", dome.heightMm},
-                   {"widthMm", dome.xHi - dome.xLo},
-                   {"radiusMm", axis.radius}, {"centerX", axis.cx}, {"centerZ", axis.cz},
-                   {"apexAngleDeg", axis.angleDeg}};
+  nlohmann::json j{{"xPeak", dome.xPeak},       {"zPeak", dome.zPeak},
+                   {"xLo", dome.xLo},           {"xHi", dome.xHi},
+                   {"heightMm", dome.heightMm}, {"widthMm", dome.xHi - dome.xLo},
+                   {"radiusMm", axis.radius},   {"centerX", axis.cx},
+                   {"centerZ", axis.cz},        {"apexAngleDeg", axis.angleDeg}};
   outputs.set("dome", Data::record(Record{"DtsDome", std::move(j)}));
 
   Line2D apex;
@@ -57,7 +57,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerSealDome(Registry& r) {
   OperatorDesc op;
@@ -66,10 +66,9 @@ void registerSealDome(Registry& r) {
   op.label = "胶条主体";
   op.category = "DTS/胶条";
   op.keywords = {"seal", "dome", "circle", "胶条", "凸起", "圆"};
-  op.doc =
-      "找胶条主体那个凸起：宽高合适、顶部圆拟合半径落在范围内的最显著凸包。\n"
-      "顶点轴 = 圆心 → 顶点，是挑钣金面时量角度的参照。实测它比两端脊点的连线稳一个数量级\n"
-      "（绝对角 std 1.9° 对 14.8°），因为圆拟合吃的是顶部两百多个点，不由两个端点决定。";
+  op.doc = "找胶条主体那个凸起：宽高合适、顶部圆拟合半径落在范围内的最显著凸包。\n"
+           "顶点轴 = 圆心 → 顶点，是挑钣金面时量角度的参照。实测它比两端脊点的连线稳一个数量级\n"
+           "（绝对角 std 1.9° 对 14.8°），因为圆拟合吃的是顶部两百多个点，不由两个端点决定。";
   op.inputs = {Port{"clean", "PointCloud", "Clean", "清理过的轮廓。", true},
                Port{"faces", "Record", "Faces", "dts.split_faces 的输出，取其中的分片。", true}};
   op.outputs = {Port{"dome", "Record", "Dome", "胶条主体（DtsDome）。", true},
@@ -110,4 +109,4 @@ void registerSealDome(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::dts
+} // namespace lyflow::dts

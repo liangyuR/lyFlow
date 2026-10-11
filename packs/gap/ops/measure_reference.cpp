@@ -18,7 +18,8 @@ namespace fs = std::filesystem;
 
 std::string configKey(const ParamView& params) {
   const std::string config = fileStamp(params.path("configPath"));
-  if (config.empty()) return {};
+  if (config.empty())
+    return {};
   return config + "|" + (params.flag("useModel") ? fileStamp(params.path("modelPath")) : "");
 }
 
@@ -35,15 +36,17 @@ std::string applyModelRoi(const ::gap::ml::OnnxRoiPredictor& predictor,
   }
   ::gap::ml::RoiBoxesResult prediction;
   try {
-    prediction = predictor.predict(::gap::ml::profileRowsFromSensorXzCloud(request.primary_cloud),
-                                   ::gap::ml::profileRowsFromSensorXzCloud(request.secondary_cloud));
+    prediction =
+        predictor.predict(::gap::ml::profileRowsFromSensorXzCloud(request.primary_cloud),
+                          ::gap::ml::profileRowsFromSensorXzCloud(request.secondary_cloud));
   } catch (const std::exception& e) {
     return std::string("模型 ROI 推理失败: ") + e.what();
   }
   if (!prediction.missing_segments.empty()) {
     std::string joined;
     for (const auto& segment : prediction.missing_segments) {
-      if (!joined.empty()) joined += ", ";
+      if (!joined.empty())
+        joined += ", ";
       joined += segment;
     }
     return "模型没标出这些段: " + joined;
@@ -65,7 +68,8 @@ std::string qualityJson(const ::gap::core::MeasurementResult& result) {
   for (const auto& [name, box] : result.quality.effective_roi) {
     w.key(name);
     w.beginArray();
-    for (double v : box) w.value(v);
+    for (double v : box)
+      w.value(v);
     w.endArray();
   }
   w.endObject();
@@ -81,7 +85,8 @@ std::string qualityJson(const ::gap::core::MeasurementResult& result) {
     w.field("bidirectional", icp.bidirectional);
     w.key("transform");
     w.beginArray();
-    for (double v : transformToJson(icp.transform)) w.value(v);
+    for (double v : transformToJson(icp.transform))
+      w.value(v);
     w.endArray();
     w.endObject();
   }
@@ -118,10 +123,10 @@ void emit(Outputs& outputs, const char* port, const ::gap::core::MeasurementValu
   } else {
     m.value = std::numeric_limits<double>::quiet_NaN();
     m.ok = false;
-    m.message = value.failure ? value.failure.message
-                              : (value.status == ::gap::core::MeasurementStatus::kInactive
-                                     ? "未启用"
-                                     : "没有结果");
+    m.message =
+        value.failure
+            ? value.failure.message
+            : (value.status == ::gap::core::MeasurementStatus::kInactive ? "未启用" : "没有结果");
   }
   outputs.set(port, Data::measurement(std::move(m)));
 }
@@ -138,16 +143,17 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   try {
     YAML::Node node = YAML::LoadFile(config.string());
     // 模板目录：不给就按 gap_batch_runner 的规则从配置文件名推（<父目录>/<主名>）。
-    fs::path templateDir = params.flag("deriveTemplateDir") ? fs::path{}
-                                                            : params.path("templateDir");
-    if (templateDir.empty()) templateDir = config.parent_path() / config.stem();
+    fs::path templateDir =
+        params.flag("deriveTemplateDir") ? fs::path{} : params.path("templateDir");
+    if (templateDir.empty())
+      templateDir = config.parent_path() / config.stem();
     if (node["common_settings"] && fs::is_directory(templateDir, ec)) {
       node["common_settings"]["save_template_path"] = templateDir.lexically_normal().string();
     }
     configuration = ::detection::parseDetectionConfiguration(node);
   } catch (const std::exception& e) {
-    return Status::Error(Phase::Execute, "bad_param",
-                         std::string("配置读不了: ") + e.what(), "configPath");
+    return Status::Error(Phase::Execute, "bad_param", std::string("配置读不了: ") + e.what(),
+                         "configPath");
   }
   // 这个算子只测量，不许它往磁盘写模板或对齐结果。
   configuration.common.save_template = false;
@@ -191,7 +197,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerMeasureReference(Registry& r) {
   OperatorDesc op;
@@ -200,11 +206,10 @@ void registerMeasureReference(Registry& r) {
   op.label = "测量（参考）";
   op.category = "间隙/参考";
   op.keywords = {"reference", "blackbox", "对照", "基线"};
-  op.doc =
-      "整条主路径的黑盒实现：直接调 MeasurementEngine::measure，日志里带一份 quality JSON。"
-      "历史对拍用：拆分算子的行为已有意偏离它，图上改任何上游算子都不影响它，只有 "
-      "configPath 与两片输入云算数。输入必须是传感器 XZ 帧的原始剖面；save_template 与 "
-      "save_result 被强制关掉，它不写模板也不存对齐结果。";
+  op.doc = "整条主路径的黑盒实现：直接调 MeasurementEngine::measure，日志里带一份 quality JSON。"
+           "历史对拍用：拆分算子的行为已有意偏离它，图上改任何上游算子都不影响它，只有 "
+           "configPath 与两片输入云算数。输入必须是传感器 XZ 帧的原始剖面；save_template 与 "
+           "save_result 被强制关掉，它不写模板也不存对齐结果。";
   op.inputs = {
       Port{"primary", "PointCloud", "Primary", "Master 剖面，传感器 XZ 帧。", true},
       Port{"secondary", "PointCloud", "Secondary", "Slave 剖面，传感器 XZ 帧。", true},
@@ -281,4 +286,4 @@ void registerMeasureReference(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

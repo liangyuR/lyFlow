@@ -71,7 +71,8 @@ struct RunLog {
   std::vector<Json> ofKind(const std::string& kind) const {
     std::vector<Json> out;
     for (const Json& e : events) {
-      if (e.value("kind", "") == kind) out.push_back(e);
+      if (e.value("kind", "") == kind)
+        out.push_back(e);
     }
     return out;
   }
@@ -105,7 +106,8 @@ struct RunLog {
   /// seq 从 0 开始且连续。丢一条事件前端就会漏掉一个状态，所以每个测试都值得查一次。
   bool seqIsDense() const {
     for (std::size_t i = 0; i < events.size(); ++i) {
-      if (events[i].value("seq", -1) != static_cast<int>(i)) return false;
+      if (events[i].value("seq", -1) != static_cast<int>(i))
+        return false;
     }
     return true;
   }
@@ -118,20 +120,20 @@ inline void collect(const char* json, void* user) {
   log->events.push_back(Json::parse(json));
 }
 
-}  // namespace detail
+} // namespace detail
 
 /// 跑一张图的完整上下文。结果仓的索引挂在 Run 上（析构即 freeRun），
 /// 所以想断言输出的测试必须让 Run 活着 —— Run 和事件日志捆在同一个对象里。
 class Session {
- public:
+public:
   /// keepCache=false 时先清空结果仓。缓存是进程级的，不清的话「第二个用同一张图的
   /// 测试」会拿到 skipped 而不是 done —— 那是真实行为，但会让断言测的是运行顺序。
   Session(const Json& doc, std::filesystem::path baseDir = {},
-          std::vector<std::string> targets = {}, bool keepCache = false,
-          int maxParallel = 0, bool noReuse = false,
-          std::vector<exec::InjectedInput> inputs = {}) {
+          std::vector<std::string> targets = {}, bool keepCache = false, int maxParallel = 0,
+          bool noReuse = false, std::vector<exec::InjectedInput> inputs = {}) {
     static std::atomic<int> counter{0};
-    if (!keepCache) exec::ResultStore::instance().clear();
+    if (!keepCache)
+      exec::ResultStore::instance().clear();
     log_.runId = "test-run-" + std::to_string(counter.fetch_add(1));
     exec::RunOptions options;
     options.runId = log_.runId;
@@ -151,14 +153,14 @@ class Session {
   }
   const std::string& runId() const { return log_.runId; }
 
- private:
+private:
   RunLog log_;
   std::unique_ptr<exec::Run> run_;
 };
 
 /// 直接调算子时给的 ExecContext：不取消、不报进度、日志丢掉；threadBudget 按构造时给的数（默认 1）。
 class StubContext final : public ExecContext {
- public:
+public:
   explicit StubContext(std::filesystem::path base = {}, int threads = 1)
       : base_(std::move(base)), threads_(threads) {}
   bool cancelled() const override { return false; }
@@ -167,7 +169,7 @@ class StubContext final : public ExecContext {
   const std::filesystem::path& baseDir() const override { return base_; }
   int threadBudget() const override { return threads_; }
 
- private:
+private:
   std::filesystem::path base_;
   int threads_ = 1;
 };
@@ -187,12 +189,15 @@ struct OpCall {
   std::filesystem::path base;
   int threads = 1;
 
-  Status run(const std::string& opId, const std::unordered_map<std::string, Value>& overrides = {}) {
+  Status run(const std::string& opId,
+             const std::unordered_map<std::string, Value>& overrides = {}) {
     const OperatorDesc* op = find(opId);
     params.clear();
     outputs.clear();
-    for (const Param& p : op->params) params[p.name] = p.def;
-    for (const auto& [k, v] : overrides) params[k] = v;
+    for (const Param& p : op->params)
+      params[p.name] = p.def;
+    for (const auto& [k, v] : overrides)
+      params[k] = v;
     StubContext ctx(base, threads);
     ParamView view(params, base);
     Inputs in(inputs);
@@ -210,13 +215,15 @@ struct OpCall {
     const OperatorDesc* op = find(opId);
     REQUIRE(op->validate != nullptr);
     params.clear();
-    for (const Param& p : op->params) params[p.name] = p.def;
-    for (const auto& [k, v] : overrides) params[k] = v;
+    for (const Param& p : op->params)
+      params[p.name] = p.def;
+    for (const auto& [k, v] : overrides)
+      params[k] = v;
     ParamView view(params, base);
     return op->validate(view, connected);
   }
 
- private:
+private:
   const OperatorDesc* find(const std::string& opId) const {
     const OperatorDesc* op = registry->find(opId);
     REQUIRE_MESSAGE(op != nullptr, opId);
@@ -243,4 +250,4 @@ inline RunLog runGraphNoReuse(const Json& doc, const std::filesystem::path& base
   return s.wait();
 }
 
-}  // namespace lyflow::test
+} // namespace lyflow::test

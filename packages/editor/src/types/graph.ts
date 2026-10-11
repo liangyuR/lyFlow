@@ -1,7 +1,7 @@
 // GraphDoc 的 TypeScript 镜像，契约在 schema/graph-doc.schema.json。
 // ADR-0002：这是**唯一数据模型**，React Flow 的 Node/Edge 只是渲染派生产物。
 
-import type { Param, ParamType } from "./manifest";
+import type { Param, ParamType } from './manifest';
 
 export const GRAPH_SCHEMA_VERSION = 1;
 
@@ -82,9 +82,9 @@ export interface SubgraphDef {
 }
 
 /** `sub:` 前缀标记一个引用图内子图定义的节点。 */
-export const SUBGRAPH_OP_PREFIX = "sub:";
+export const SUBGRAPH_OP_PREFIX = 'sub:';
 /** 库算子的 id 前缀，由 C++ 扫描库目录时注册。 */
-export const LIBRARY_OP_PREFIX = "lib.";
+export const LIBRARY_OP_PREFIX = 'lib.';
 
 export function subgraphIdOf(opId: string): string | null {
   return opId.startsWith(SUBGRAPH_OP_PREFIX) ? opId.slice(SUBGRAPH_OP_PREFIX.length) : null;
@@ -112,7 +112,7 @@ export interface GraphDoc {
 
 /** 参数规格：manifest 的 param 去掉 name（图参数的名字是它在 `params` 里的键）。
  *  schema 里同一份定义（operator-manifest.schema.json 的 paramSpec），不抄第二份。 */
-export type ParamSpec = Omit<Param, "name" | "type" | "default">;
+export type ParamSpec = Omit<Param, 'name' | 'type' | 'default'>;
 
 /** 一个顶层图参数 = 完整参数规格 + binds（param-recipe P1.1）。老格式 `{type?, default, binds, doc?}`
  *  是它的子集。`binds` 每项是 `<节点>.<参数>`，以最后一个 `.` 分隔。`default` 就是配方的「基础」值。 */

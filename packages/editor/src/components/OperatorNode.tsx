@@ -1,23 +1,23 @@
 // 画布上的算子节点。按 op id 现查 manifest，不把算子描述塞进节点 data ——
 // 这是热重载的前提：推一份新 manifest 进 store，节点外观自动跟着变。
 
-import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
-import { memo, useEffect, useRef, useState } from "react";
+import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
+import { memo, useEffect, useRef, useState } from 'react';
 
-import { augmentOperators, describeEventNode } from "../lib/subgraph";
-import { ANY } from "../lib/typecheck";
-import type { OperatorNodeData } from "../lib/mapping";
-import { MAX_NODE_READINGS, readingsOf } from "../lib/outputs";
-import { useNodeStale } from "../store/cache";
-import { useNodeExecution } from "../store/execution";
-import { useGraphStore } from "../store/graph";
-import { useManifestStore } from "../store/manifest";
-import { useUiStore } from "../store/ui";
-import { errorsOf, useNodeValidation } from "../store/validation";
-import type { NodeStats } from "../types/execution";
-import type { Port } from "../types/manifest";
-import { NodeRunButton } from "./NodeRunButton";
-import { useNodeMotion } from "./useNodeMotion";
+import { augmentOperators, describeEventNode } from '../lib/subgraph';
+import { ANY } from '../lib/typecheck';
+import type { OperatorNodeData } from '../lib/mapping';
+import { MAX_NODE_READINGS, readingsOf } from '../lib/outputs';
+import { useNodeStale } from '../store/cache';
+import { useNodeExecution } from '../store/execution';
+import { useGraphStore } from '../store/graph';
+import { useManifestStore } from '../store/manifest';
+import { useUiStore } from '../store/ui';
+import { errorsOf, useNodeValidation } from '../store/validation';
+import type { NodeStats } from '../types/execution';
+import type { Port } from '../types/manifest';
+import { NodeRunButton } from './NodeRunButton';
+import { useNodeMotion } from './useNodeMotion';
 
 /** 「12.3 万点」比「123456」好读得多，而节点上的空间只有一行。 */
 function formatCount(n: number): string {
@@ -29,7 +29,7 @@ function formatCount(n: number): string {
 /** 节点底栏的规模：图像是「宽×高」（像素数读成「25.6 万」没有意义），其余是元素数。 */
 function formatSize(stats: NodeStats): string {
   const first = stats.outputs?.[0];
-  if (first?.type === "Image" && first.value?.width !== undefined) {
+  if (first?.type === 'Image' && first.value?.width !== undefined) {
     return `${first.value.width}×${first.value.height}`;
   }
   return formatCount(stats.elementCount ?? 0);
@@ -43,7 +43,7 @@ function formatDuration(ms: number): string {
 interface PortHandleProps {
   nodeId: string;
   port: Port;
-  side: "input" | "output";
+  side: 'input' | 'output';
   index: number;
   /** Any 端口推导出的实际类型，null = 还推不出来（E6）。 */
   anyType: string | null;
@@ -51,63 +51,63 @@ interface PortHandleProps {
 
 function PortHandle({ nodeId, port, side, index, anyType }: PortHandleProps) {
   const type = port.type === ANY ? (anyType ?? ANY) : port.type;
-  const color = useManifestStore((s) => s.typesByName.get(type)?.color ?? "#6b7280");
+  const color = useManifestStore((s) => s.typesByName.get(type)?.color ?? '#6b7280');
   // 拖线中的兼容性可视化（交互清单 P1 #20）：能落的高亮，不能落的置灰；已接着线、松上去会换掉来源的标「替换」
   const verdict = useUiStore((s) => {
-    if (!s.pendingFrom) return "";
+    if (!s.pendingFrom) return '';
     const key = `${nodeId}:${port.name}`;
-    if (s.pendingFrom.side === side) return "";
-    if (s.compatiblePorts.has(key)) return "compatible";
-    return s.replacePorts.has(key) ? "replace" : "incompatible";
+    if (s.pendingFrom.side === side) return '';
+    if (s.compatiblePorts.has(key)) return 'compatible';
+    return s.replacePorts.has(key) ? 'replace' : 'incompatible';
   });
   // 自动连线没能唯一确定（m8-plan L13）：没连上的输入与它的每个候选输出都亮出来
   const auto = useUiStore((s) => {
     const hint = s.autoHint;
-    if (!hint) return "";
+    if (!hint) return '';
     const key = `${nodeId}:${port.name}`;
-    if (side === "input" && hint.targets.has(key)) return "target";
-    if (side === "output" && hint.candidates.has(key)) return "candidate";
-    return "";
+    if (side === 'input' && hint.targets.has(key)) return 'target';
+    if (side === 'output' && hint.candidates.has(key)) return 'candidate';
+    return '';
   });
   // 鼠标指着的连线的一端（docs/motion-plan.md H3）
   const edgeEnd = useUiStore((s) => {
     const e = s.hoverEdge;
     if (!e) return false;
-    const end = side === "input" ? e.to : e.from;
+    const end = side === 'input' ? e.to : e.from;
     return end.node === nodeId && end.port === port.name;
   });
-  const isInput = side === "input";
+  const isInput = side === 'input';
   const optional = isInput && port.required === false;
   // 两条端口级执行语义（ADR-0016）。用角标而不是换颜色：颜色是类型的语言。
   const acceptsError = isInput && port.acceptsError === true;
   const lazy = isInput && port.lazy === true;
-  const marks = [acceptsError ? "接受上游的错误值" : "", lazy ? "惰性：被 demand 时才调度" : ""]
+  const marks = [acceptsError ? '接受上游的错误值' : '', lazy ? '惰性：被 demand 时才调度' : '']
     .filter(Boolean)
-    .join("；");
+    .join('；');
 
   return (
     <div
-      className={`node-port node-port--${side}${verdict ? ` node-port--${verdict}` : ""}${
-        auto ? ` node-port--auto-${auto}` : ""
-      }${edgeEnd ? " node-port--edge-end" : ""}`}
-      style={{ ["--i" as string]: index }}
+      className={`node-port node-port--${side}${verdict ? ` node-port--${verdict}` : ''}${
+        auto ? ` node-port--auto-${auto}` : ''
+      }${edgeEnd ? ' node-port--edge-end' : ''}`}
+      style={{ ['--i' as string]: index }}
       data-port-verdict={verdict || undefined}
       data-auto-hint={auto || undefined}
-      data-port-accepts-error={acceptsError ? "1" : undefined}
-      data-port-lazy={lazy ? "1" : undefined}
+      data-port-accepts-error={acceptsError ? '1' : undefined}
+      data-port-lazy={lazy ? '1' : undefined}
       data-testid={`port-${nodeId}-${port.name}`}
     >
       <Handle
         id={port.name}
-        type={isInput ? "target" : "source"}
+        type={isInput ? 'target' : 'source'}
         position={isInput ? Position.Left : Position.Right}
         className="node-port__handle"
         // --lyflow-port-color 给 hover 光晕用（H4）：box-shadow 要用端口自己的类型色
-        style={{ background: color, borderColor: color, ["--lyflow-port-color" as string]: color }}
+        style={{ background: color, borderColor: color, ['--lyflow-port-color' as string]: color }}
       />
       <span
         className="node-port__label"
-        title={`${type}${port.doc ? " — " + port.doc : ""}${marks ? ` (${marks})` : ""}`}
+        title={`${type}${port.doc ? ' — ' + port.doc : ''}${marks ? ` (${marks})` : ''}`}
       >
         {port.label || port.name}
         {optional && <em className="node-port__opt">?</em>}
@@ -149,8 +149,8 @@ function TitleEditor({ id, title, label }: { id: string; title: string | null; l
       onBlur={commit}
       onKeyDown={(e) => {
         e.stopPropagation();
-        if (e.key === "Enter") commit();
-        if (e.key === "Escape") onDone();
+        if (e.key === 'Enter') commit();
+        if (e.key === 'Escape') onDone();
       }}
       onDoubleClick={(e) => e.stopPropagation()}
     />
@@ -158,8 +158,7 @@ function TitleEditor({ id, title, label }: { id: string; title: string | null; l
 }
 
 function OperatorNodeImpl({ id, data, selected }: NodeProps) {
-  const { opId, title, collapsed, bypass, anyType, subgraphId, library } =
-    data as OperatorNodeData;
+  const { opId, title, collapsed, bypass, anyType, subgraphId, library } = data as OperatorNodeData;
   const base = useManifestStore((s) => s.operatorsById);
   const subgraphs = useGraphStore((s) => s.doc.subgraphs);
   const op = augmentOperators(base, subgraphs).get(opId);
@@ -188,7 +187,7 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   const root = useRef<HTMLDivElement>(null);
   const fx = useRef<HTMLSpanElement>(null);
   const head = useRef<HTMLDivElement>(null);
-  useNodeMotion(id, exec?.state ?? "idle", { root, fx, head });
+  useNodeMotion(id, exec?.state ?? 'idle', { root, fx, head });
   // 子图 / 库算子节点上的错误来自内部的某个节点（ADR-0010 的路径 id）：写明是谁，点了打开到它。
   // selector 只在有错误来源时才去解析，返回的是一个字符串 —— 节点不会因为文档的别处变了而重渲。
   // 同样放在早退之前（hook 的个数不能变：算子缺失 ↔ 有算子之间切换时 React 会直接崩）
@@ -204,7 +203,7 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   if (!op) {
     return (
       <div
-        className={`node node--missing${selected ? " is-selected" : ""}`}
+        className={`node node--missing${selected ? ' is-selected' : ''}`}
         data-node-state="missing"
         data-testid={`node-${id}`}
       >
@@ -218,58 +217,61 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
   }
 
   const rows = Math.max(op.inputs.length, op.outputs.length);
-  const state = exec?.state ?? "idle";
+  const state = exec?.state ?? 'idle';
   const errorText = exec?.errors[0]?.message;
   const revealError = () => {
     if (!errorSource) return;
     const r = describeEventNode(useGraphStore.getState().doc, base, errorSource).reveal;
-    if (r) useUiStore.getState().revealNode(r.path, r.localId, r.exact ? exec?.errors[0]?.paramPath : undefined);
+    if (r)
+      useUiStore
+        .getState()
+        .revealNode(r.path, r.localId, r.exact ? exec?.errors[0]?.paramPath : undefined);
   };
   // 只被惰性端口依赖、这次没被 demand（ADR-0016）。画成半透明，与「命中缓存」区分开。
-  const notDemanded = exec?.stats?.reason === "not_demanded";
+  const notDemanded = exec?.stats?.reason === 'not_demanded';
   const classes = [
-    "node",
-    selected ? "is-selected" : "",
-    state !== "idle" ? `node--${state}` : "",
+    'node',
+    selected ? 'is-selected' : '',
+    state !== 'idle' ? `node--${state}` : '',
     // stale 是虚线框，不是换颜色：颜色已经被状态占满了，再加一种就没人分得清
-    stale ? "is-stale" : "",
+    stale ? 'is-stale' : '',
     // 静音整体半透明加斜纹，一眼看得出这个节点这次不算
-    bypass ? "is-bypassed" : "",
-    notDemanded ? "is-not-demanded" : "",
-    subgraphId || library ? "node--sub" : "",
-    invalid.length > 0 ? "is-invalid" : "",
-    edgeEnd ? "is-edge-end" : "",
+    bypass ? 'is-bypassed' : '',
+    notDemanded ? 'is-not-demanded' : '',
+    subgraphId || library ? 'node--sub' : '',
+    invalid.length > 0 ? 'is-invalid' : '',
+    edgeEnd ? 'is-edge-end' : '',
   ]
     .filter(Boolean)
-    .join(" ");
+    .join(' ');
 
   const cached = exec?.stats?.cached === true;
   // 出错 / 取消 / 运行中的事件不带 stats，节点表里留着的是上一次的（单节点运行不清节点表）：那时不写读数与判定 ——
   // 一个刚出错的节点旁边挂着上一次的「6.414 mm OK」比元素数还误导
-  const readings = state === "done" || state === "skipped" ? readingsOf(exec?.stats?.outputs) : [];
+  const readings = state === 'done' || state === 'skipped' ? readingsOf(exec?.stats?.outputs) : [];
   // 输出能不能取，认 outputsAvailable 而不是认 state：skipped 既可能是「算过了，输出照样在」
   // 也可能是「这一支根本没被需要，什么都没有」。老 core 不带这个字段，按 not_demanded 兜底。
   const outputsAvailable = exec?.stats?.outputsAvailable ?? !notDemanded;
-  const skipLabel = !outputsAvailable ? "未被需要" : cached ? "已缓存" : "静音";
+  const skipLabel = !outputsAvailable ? '未被需要' : cached ? '已缓存' : '静音';
   const skipReason = !outputsAvailable
-    ? "未被需要：这一支这次没被 demand，没有输出可取"
+    ? '未被需要：这一支这次没被 demand，没有输出可取'
     : cached
-      ? "已缓存：命中缓存未重算，输出可取"
+      ? '已缓存：命中缓存未重算，输出可取'
       : bypass
-        ? "已静音：输入直接透传，输出可取"
-        : "输出可取";
+        ? '已静音：输入直接透传，输出可取'
+        : '输出可取';
 
   return (
     <div
       ref={root}
       className={classes}
       data-node-state={state}
-      data-stale={stale ? "1" : "0"}
-      data-bypass={bypass ? "1" : "0"}
-      data-not-demanded={notDemanded ? "1" : "0"}
+      data-stale={stale ? '1' : '0'}
+      data-bypass={bypass ? '1' : '0'}
+      data-not-demanded={notDemanded ? '1' : '0'}
       data-subgraph={subgraphId ?? undefined}
-      data-library={library ? "1" : undefined}
-      data-invalid={invalid.length > 0 ? "1" : "0"}
+      data-library={library ? '1' : undefined}
+      data-invalid={invalid.length > 0 ? '1' : '0'}
       data-testid={`node-${id}`}
     >
       {/* 光晕层：进场与状态闪光都画在它身上，不去动 .node 自己的 box-shadow（那是选中/状态的） */}
@@ -292,21 +294,25 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
           <span
             className="node__badge node__badge--sub"
             data-testid={`node-subbadge-${id}`}
-            title={subgraphId ? "子图：双击进入" : "库算子：右键可展开为内联子图"}
+            title={subgraphId ? '子图：双击进入' : '库算子：右键可展开为内联子图'}
           >
-            {subgraphId ? "⧉" : "L"}
+            {subgraphId ? '⧉' : 'L'}
           </span>
         )}
-        {bypass && <span className="node__badge node__badge--mute" title="已静音 (Ctrl+M)">M</span>}
+        {bypass && (
+          <span className="node__badge node__badge--mute" title="已静音 (Ctrl+M)">
+            M
+          </span>
+        )}
         {/* 运行此节点（docs/node-run-plan.md U1 / 修订一 V3）：排在徽标之后，折叠了也在；缺失算子的节点没有 */}
         <NodeRunButton id={id} exec={exec} invalid={invalid.length > 0} />
-        {state === "running" && exec?.progress != null && (
-          <span className="node__progress" style={{ ["--p" as string]: exec.progress }} />
+        {state === 'running' && exec?.progress != null && (
+          <span className="node__progress" style={{ ['--p' as string]: exec.progress }} />
         )}
       </div>
 
       {!collapsed && (
-        <div className="node__body" style={{ ["--rows" as string]: rows }}>
+        <div className="node__body" style={{ ['--rows' as string]: rows }}>
           <div className="node__col node__col--in">
             {op.inputs.map((p, i) => (
               <PortHandle
@@ -339,9 +345,9 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
         <div
           className="node__invalid"
           data-testid={`node-invalid-${id}`}
-          data-codes={invalid.map((d) => d.code).join(",")}
-          data-params={invalid.map((d) => d.paramPath ?? "").join(",")}
-          title={invalid.map((d) => d.message).join("\n")}
+          data-codes={invalid.map((d) => d.code).join(',')}
+          data-params={invalid.map((d) => d.paramPath ?? '').join(',')}
+          title={invalid.map((d) => d.message).join('\n')}
         >
           <span className="node__invalid-mark">!</span>
           <span className="node__invalid-text">{invalid[0]!.message}</span>
@@ -350,14 +356,14 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
       )}
 
       {/* 状态条：点数与耗时。没跑过时整行不渲染，节点保持原来的高度。 */}
-      {state !== "idle" && (
+      {state !== 'idle' && (
         <div className="node__stats" data-testid={`node-stats-${id}`}>
           <span className={`node__dot node__dot--${state}`} />
-          {state === "skipped" && (
+          {state === 'skipped' && (
             <span
               className="node__skip"
               data-testid={`node-skip-${id}`}
-              data-outputs-available={outputsAvailable ? "1" : "0"}
+              data-outputs-available={outputsAvailable ? '1' : '0'}
               title={skipReason}
             >
               {skipLabel}
@@ -375,17 +381,27 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
                   title={r.title}
                 >
                   <span className="node__reading-value">{r.text}</span>
-                  {r.verdict && <span className={`insp-out__verdict is-${r.verdict}`}>{r.verdict}</span>}
+                  {r.verdict && (
+                    <span className={`insp-out__verdict is-${r.verdict}`}>{r.verdict}</span>
+                  )}
                 </span>
               ))}
               {readings.length > MAX_NODE_READINGS && (
-                <span className="node__reading-more" title={readings.slice(MAX_NODE_READINGS).map((r) => r.title).join("\n")}>
+                <span
+                  className="node__reading-more"
+                  title={readings
+                    .slice(MAX_NODE_READINGS)
+                    .map((r) => r.title)
+                    .join('\n')}
+                >
                   +{readings.length - MAX_NODE_READINGS}
                 </span>
               )}
             </span>
           ) : (
-            exec?.stats?.elementCount != null && <span className="node__count">{formatSize(exec.stats)}</span>
+            exec?.stats?.elementCount != null && (
+              <span className="node__count">{formatSize(exec.stats)}</span>
+            )
           )}
           {exec?.children && (
             <span className="node__count" data-testid={`node-children-${id}`}>
@@ -409,7 +425,11 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
               {errorWho}：{errorText}
             </button>
           ) : (
-            errorText && <span className="node__err" title={errorText}>{errorText}</span>
+            errorText && (
+              <span className="node__err" title={errorText}>
+                {errorText}
+              </span>
+            )
           )}
         </div>
       )}
@@ -448,7 +468,7 @@ function sameNodeProps(a: NodeProps, b: NodeProps): boolean {
   const keys = Object.keys(a) as (keyof NodeProps)[];
   if (keys.length !== Object.keys(b).length) return false;
   for (const k of keys) {
-    if (k === "positionAbsoluteX" || k === "positionAbsoluteY") continue;
+    if (k === 'positionAbsoluteX' || k === 'positionAbsoluteY') continue;
     if (a[k] !== b[k]) return false;
   }
   return true;

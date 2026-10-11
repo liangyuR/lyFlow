@@ -7,7 +7,9 @@
   row-gap: 2px;
 }
 
-.viewer__label { color: var(--lyflow-fg-2); }
+.viewer__label {
+  color: var(--lyflow-fg-2);
+}
 
 .viewer__pinned {
   max-width: 120px;
@@ -49,9 +51,15 @@
   padding: 1px 6px;
 }
 
-.viewer__btn:disabled { opacity: 0.45; cursor: default; }
+.viewer__btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 
-.viewer__btn[data-pinned="1"] { border-color: #8fb8ff; color: #8fb8ff; }
+.viewer__btn[data-pinned='1'] {
+  border-color: #8fb8ff;
+  color: #8fb8ff;
+}
 
 /* 空态文案要盖住画布而不是压住工具栏；老规则写死的 inset:28px 在两行栏下会错位。 */
 .viewer__stage {
@@ -61,7 +69,9 @@
   min-height: 0;
 }
 
-.viewer__stage .viewer__empty { inset: 0; }
+.viewer__stage .viewer__empty {
+  inset: 0;
+}
 
 /* 出错节点的画面是它的输入：状态挪到左下角，错误原文与「定位」照旧给，不盖住点 */
 .viewer__stage .viewer__empty.viewer__empty--docked {
@@ -76,9 +86,16 @@
   border-radius: 6px;
   background: rgba(17, 20, 26, 0.88);
 }
-.viewer__empty--docked [data-testid="viewer3d-status"] { color: var(--lyflow-danger); }
-.viewer__empty--docked .viewer__empty-actions { align-items: flex-start; }
-.viewer__empty-note { font-size: 11px; color: var(--lyflow-fg-2); }
+.viewer__empty--docked [data-testid='viewer3d-status'] {
+  color: var(--lyflow-danger);
+}
+.viewer__empty--docked .viewer__empty-actions {
+  align-items: flex-start;
+}
+.viewer__empty-note {
+  font-size: 11px;
+  color: var(--lyflow-fg-2);
+}
 
 /* 参数改过、画面还是上一次的结果：左上角一条，不挡点（左下是重跑时的状态，右下是测量） */
 .viewer__stale {
@@ -98,7 +115,11 @@
   font-size: 11px;
   pointer-events: none;
 }
-.viewer__stale > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.viewer__stale > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .viewer__stale button {
   flex: none;
   padding: 1px 8px;
@@ -110,10 +131,14 @@
   cursor: pointer;
   pointer-events: auto;
 }
-.viewer__stale button:hover { border-color: var(--lyflow-accent); }
+.viewer__stale button:hover {
+  border-color: var(--lyflow-accent);
+}
 /* 值 / 图像盖满画布：角标在时它们往下让出一条，不压表头与「级别 / 通道 / 色带」那条栏，▶ 也不挡栏上的选择框 */
 .viewer__stage:has(> .viewer__stale) > .viewer__values,
-.viewer__stage:has(> .viewer__stale) > .viewer__image { top: 34px; }
+.viewer__stage:has(> .viewer__stale) > .viewer__image {
+  top: 34px;
+}
 
 /* 网格一格多大：栏窄时排在尺寸之后让 */
 .viewer__grid {
@@ -134,7 +159,9 @@
 }
 
 /* 最大化按钮：栏不换行，窄栏里它不能是被挤出去的那个 */
-.viewer__max { flex-shrink: 0; }
+.viewer__max {
+  flex-shrink: 0;
+}
 
 /* 包围盒尺寸：栏窄时它最先让（省略号），全文在 title */
 .viewer__extent {
@@ -180,7 +207,9 @@
   background: var(--lyflow-bg-0);
 }
 
-.viewer__value + .viewer__value { border-top: 1px solid var(--lyflow-border-strong); }
+.viewer__value + .viewer__value {
+  border-top: 1px solid var(--lyflow-border-strong);
+}
 
 /* 图像内容（docs/image-plan.md 阶段 3）：同样盖在画布上，里面是与连线查看器共用的 ImageCanvas。 */
 .viewer__image {
@@ -211,12 +240,20 @@
   font-size: 12px;
 }
 
-.viewer__value-type { color: var(--lyflow-fg-2); }
+.viewer__value-type {
+  color: var(--lyflow-fg-2);
+}
 
 /* 连线查看器里值视图自己滚动、原始 JSON 限高；这里整块一起滚 */
-.viewer__values .peek-value { flex: none; }
-.viewer__values .peek-value__scroll { overflow: visible; }
-.viewer__values .peek-value__raw { max-height: none; }
+.viewer__values .peek-value {
+  flex: none;
+}
+.viewer__values .peek-value__scroll {
+  overflow: visible;
+}
+.viewer__values .peek-value__raw {
+  max-height: none;
+}
 
 /* ---------------------------------------------- 两节点输出并排对比（交互清单 #35）
    两栏盖在同一块画布上（一个场景、两个 scissor 视口）：标签条以外不接鼠标，拖动落到画布上两栏一起转。 */
@@ -228,8 +265,12 @@
   pointer-events: none;
 }
 
-.compare-stage--lr { flex-direction: row; }
-.compare-stage--tb { flex-direction: column; }
+.compare-stage--lr {
+  flex-direction: row;
+}
+.compare-stage--tb {
+  flex-direction: column;
+}
 
 .compare-pane {
   position: relative;
@@ -240,8 +281,12 @@
   flex-direction: column;
 }
 
-.compare-stage--lr .compare-pane--a { border-right: 1px solid var(--lyflow-border-strong); }
-.compare-stage--tb .compare-pane--a { border-bottom: 1px solid var(--lyflow-border-strong); }
+.compare-stage--lr .compare-pane--a {
+  border-right: 1px solid var(--lyflow-border-strong);
+}
+.compare-stage--tb .compare-pane--a {
+  border-bottom: 1px solid var(--lyflow-border-strong);
+}
 
 .compare-pane__bar {
   display: flex;
@@ -255,8 +300,14 @@
   pointer-events: auto;
 }
 
-.compare-pane__side { font-weight: 600; white-space: nowrap; color: #8fb8ff; }
-.compare-pane--b .compare-pane__side { color: #fbbf24; }
+.compare-pane__side {
+  font-weight: 600;
+  white-space: nowrap;
+  color: #8fb8ff;
+}
+.compare-pane--b .compare-pane__side {
+  color: #fbbf24;
+}
 
 .compare-pane__label {
   min-width: 0;
@@ -265,7 +316,10 @@
   text-overflow: ellipsis;
 }
 
-.compare-pane__freeze.is-on { border-color: #7dd3fc; color: #7dd3fc; }
+.compare-pane__freeze.is-on {
+  border-color: #7dd3fc;
+  color: #7dd3fc;
+}
 
 .compare-pane__status {
   position: absolute;
@@ -289,7 +343,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-.compare-pane .viewer__values { inset: 24px 0 0; pointer-events: auto; }
+.compare-pane .viewer__values {
+  inset: 24px 0 0;
+  pointer-events: auto;
+}
 
 .compare-diff {
   flex: 0 0 auto;
@@ -318,9 +375,16 @@
   cursor: pointer;
 }
 
-.compare-diff__summary { color: var(--lyflow-fg-2); }
-.compare-diff__summary b { font-weight: 500; color: var(--lyflow-fg-1); }
-.compare-diff__summary b.is-changed { color: var(--lyflow-accent); }
+.compare-diff__summary {
+  color: var(--lyflow-fg-2);
+}
+.compare-diff__summary b {
+  font-weight: 500;
+  color: var(--lyflow-fg-1);
+}
+.compare-diff__summary b.is-changed {
+  color: var(--lyflow-accent);
+}
 
 .compare-diff__badge {
   padding: 0 4px;
@@ -329,12 +393,22 @@
   color: var(--lyflow-warn);
 }
 
-.compare-diff__filter { display: flex; align-items: center; gap: 3px; color: var(--lyflow-fg-2); }
+.compare-diff__filter {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--lyflow-fg-2);
+}
 
-.compare-diff__scroll { overflow: auto; min-height: 0; }
+.compare-diff__scroll {
+  overflow: auto;
+  min-height: 0;
+}
 
 /* 一侧来自预览运行：数字不可比，整表变淡（§2.3 modeMismatch） */
-.compare-diff.is-mismatch .compare-diff__scroll { opacity: 0.55; }
+.compare-diff.is-mismatch .compare-diff__scroll {
+  opacity: 0.55;
+}
 
 .compare-diff__table {
   width: 100%;
@@ -361,13 +435,25 @@
   vertical-align: top;
 }
 
-.compare-diff__table td.compare-diff__key { white-space: nowrap; }
+.compare-diff__table td.compare-diff__key {
+  white-space: nowrap;
+}
 
-.compare-diff__table tr.is-changed td:first-child { box-shadow: inset 2px 0 0 var(--lyflow-accent); }
-.compare-diff__table tr.is-changed .compare-diff__delta { color: var(--lyflow-accent); }
-.compare-diff__table tr.is-only td { color: var(--lyflow-fg-2); opacity: 0.7; }
+.compare-diff__table tr.is-changed td:first-child {
+  box-shadow: inset 2px 0 0 var(--lyflow-accent);
+}
+.compare-diff__table tr.is-changed .compare-diff__delta {
+  color: var(--lyflow-accent);
+}
+.compare-diff__table tr.is-only td {
+  color: var(--lyflow-fg-2);
+  opacity: 0.7;
+}
 
-.compare-diff__empty { padding: 6px 8px; color: var(--lyflow-fg-2); }
+.compare-diff__empty {
+  padding: 6px 8px;
+  color: var(--lyflow-fg-2);
+}
 
 /* ---------------------------------------------- 测量（docs/measure-plan.md）：读数放右下角的固定小框
    只是读数，鼠标穿过它落到画布上 —— 两栏上下叠时它正好压在 B 栏上，挡住就点不了 B 栏的点 */
@@ -387,7 +473,9 @@
   pointer-events: none;
 }
 
-.measure-readout button { pointer-events: auto; }
+.measure-readout button {
+  pointer-events: auto;
+}
 
 .measure-readout__row {
   display: flex;
@@ -396,13 +484,29 @@
   font-variant-numeric: tabular-nums;
 }
 
-.measure-readout__label { flex: none; width: 40px; color: var(--lyflow-fg-2); }
-.measure-readout__row[data-key="p1"] .measure-readout__label { color: #34d399; }
-.measure-readout__row[data-key="p2"] .measure-readout__label { color: #f472b6; }
-.measure-readout__row[data-key="dist"] .measure-readout__value { color: var(--lyflow-fg-0); font-weight: 500; }
-.measure-readout__value { overflow-wrap: anywhere; }
+.measure-readout__label {
+  flex: none;
+  width: 40px;
+  color: var(--lyflow-fg-2);
+}
+.measure-readout__row[data-key='p1'] .measure-readout__label {
+  color: #34d399;
+}
+.measure-readout__row[data-key='p2'] .measure-readout__label {
+  color: #f472b6;
+}
+.measure-readout__row[data-key='dist'] .measure-readout__value {
+  color: var(--lyflow-fg-0);
+  font-weight: 500;
+}
+.measure-readout__value {
+  overflow-wrap: anywhere;
+}
 
-.measure-readout__stale { margin-top: 2px; color: var(--lyflow-warn); }
+.measure-readout__stale {
+  margin-top: 2px;
+  color: var(--lyflow-warn);
+}
 
 .measure-readout__foot {
   display: flex;

@@ -26,16 +26,22 @@ Json flatGraph(int seed) {
   doc["schemaVersion"] = 1;
   doc["id"] = "01FLAT";
   doc["nodes"] = Json::array({
-      Json{{"id", "g"}, {"op", "gen.synthetic"}, {"params", {{"pointCount", 20000}, {"seed", seed}}}},
+      Json{{"id", "g"},
+           {"op", "gen.synthetic"},
+           {"params", {{"pointCount", 20000}, {"seed", seed}}}},
       Json{{"id", "v"},
            {"op", "test.thin"},
            {"params", {{"leaf", Json::array({0.02, 0.02, 0.02})}}}},
-      Json{{"id", "p"}, {"op", "test.thin"}, {"params", {{"leaf", Json::array({0.01, 0.01, 0.01})}}}},
+      Json{{"id", "p"},
+           {"op", "test.thin"},
+           {"params", {{"leaf", Json::array({0.01, 0.01, 0.01})}}}},
   });
   doc["edges"] = Json::array({
-      Json{{"id", "e1"}, {"from", {{"node", "g"}, {"port", "cloud"}}},
+      Json{{"id", "e1"},
+           {"from", {{"node", "g"}, {"port", "cloud"}}},
            {"to", {{"node", "v"}, {"port", "cloud"}}}},
-      Json{{"id", "e2"}, {"from", {{"node", "v"}, {"port", "cloud"}}},
+      Json{{"id", "e2"},
+           {"from", {{"node", "v"}, {"port", "cloud"}}},
            {"to", {{"node", "p"}, {"port", "cloud"}}}},
   });
   return doc;
@@ -47,13 +53,16 @@ Json subgraphGraph(int seed, double leaf = 0.02) {
   doc["schemaVersion"] = 1;
   doc["id"] = "01SUB";
   doc["nodes"] = Json::array({
-      Json{{"id", "g"}, {"op", "gen.synthetic"}, {"params", {{"pointCount", 20000}, {"seed", seed}}}},
+      Json{{"id", "g"},
+           {"op", "gen.synthetic"},
+           {"params", {{"pointCount", 20000}, {"seed", seed}}}},
       Json{{"id", "s"},
            {"op", "sub:clean"},
            {"params", {{"leaf", Json::array({leaf, leaf, leaf})}}}},
   });
   doc["edges"] = Json::array({
-      Json{{"id", "e1"}, {"from", {{"node", "g"}, {"port", "cloud"}}},
+      Json{{"id", "e1"},
+           {"from", {{"node", "g"}, {"port", "cloud"}}},
            {"to", {{"node", "s"}, {"port", "cloud"}}}},
   });
   doc["subgraphs"] = Json::object();
@@ -68,24 +77,27 @@ Json subgraphGraph(int seed, double leaf = 0.02) {
       {"edges", Json::array({Json{{"id", "ei"},
                                   {"from", {{"node", "v"}, {"port", "cloud"}}},
                                   {"to", {{"node", "p"}, {"port", "cloud"}}}}})},
-      {"inputs", Json::array({Json{{"name", "cloud"},
-                                   {"type", "PointCloud"},
-                                   {"to", Json::array({Json{{"node", "v"}, {"port", "cloud"}}})}}})},
+      {"inputs",
+       Json::array({Json{{"name", "cloud"},
+                         {"type", "PointCloud"},
+                         {"to", Json::array({Json{{"node", "v"}, {"port", "cloud"}}})}}})},
       {"outputs", Json::array({Json{{"name", "cloud"},
                                     {"type", "PointCloud"},
                                     {"from", {{"node", "p"}, {"port", "cloud"}}}}})},
-      {"params", Json::array({Json{{"name", "leaf"},
-                                   {"type", "vec3f"},
-                                   {"default", Json::array({0.02, 0.02, 0.02})},
-                                   {"min", 0.0001},
-                                   {"binds", Json::array({Json{{"node", "v"}, {"param", "leaf"}}})}}})},
+      {"params",
+       Json::array({Json{{"name", "leaf"},
+                         {"type", "vec3f"},
+                         {"default", Json::array({0.02, 0.02, 0.02})},
+                         {"min", 0.0001},
+                         {"binds", Json::array({Json{{"node", "v"}, {"param", "leaf"}}})}}})},
   };
   return doc;
 }
 
 std::size_t elementCountOf(const RunLog& log, const std::string& nodeId) {
   const Json e = log.nodeEvent(nodeId, "done");
-  if (e.contains("stats")) return e["stats"].value("elementCount", 0);
+  if (e.contains("stats"))
+    return e["stats"].value("elementCount", 0);
   const Json s = log.nodeEvent(nodeId, "skipped");
   return s.contains("stats") ? s["stats"].value("elementCount", 0) : 0;
 }
@@ -94,12 +106,14 @@ std::vector<std::string> planIds(const RunLog& log) {
   std::vector<std::string> out;
   // ofKind 返回临时 vector：range-for 不会延长它的寿命，必须先落地成局部变量
   const std::vector<Json> started = log.ofKind("run_started");
-  if (started.empty()) return out;
-  for (const Json& n : started.front()["nodes"]) out.push_back(n["id"].get<std::string>());
+  if (started.empty())
+    return out;
+  for (const Json& n : started.front()["nodes"])
+    out.push_back(n["id"].get<std::string>());
   return out;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("子图展开：结果与平图逐点一致") {
   ensureTestOps();
@@ -130,12 +144,13 @@ TEST_CASE("子图参数：外参覆盖内参，一个外参可绑多个内参") 
 
   // 一个外参绑两个内参：两级抽稀都跟着它走
   Json doc = subgraphGraph(13, 0.04);
-  doc["subgraphs"]["clean"]["nodes"].push_back(
-      Json{{"id", "v2"}, {"op", "test.thin"}});
+  doc["subgraphs"]["clean"]["nodes"].push_back(Json{{"id", "v2"}, {"op", "test.thin"}});
   doc["subgraphs"]["clean"]["edges"] = Json::array({
-      Json{{"id", "ei"}, {"from", {{"node", "v"}, {"port", "cloud"}}},
+      Json{{"id", "ei"},
+           {"from", {{"node", "v"}, {"port", "cloud"}}},
            {"to", {{"node", "v2"}, {"port", "cloud"}}}},
-      Json{{"id", "ej"}, {"from", {{"node", "v2"}, {"port", "cloud"}}},
+      Json{{"id", "ej"},
+           {"from", {{"node", "v2"}, {"port", "cloud"}}},
            {"to", {{"node", "p"}, {"port", "cloud"}}}},
   });
   doc["subgraphs"]["clean"]["params"][0]["binds"].push_back(
@@ -156,9 +171,10 @@ TEST_CASE("子图嵌套两层：cacheKey 稳定，重跑全部 skipped") {
       {"name", "外层"},
       {"nodes", Json::array({Json{{"id", "inner"}, {"op", "sub:clean"}}})},
       {"edges", Json::array()},
-      {"inputs", Json::array({Json{{"name", "cloud"},
-                                   {"type", "PointCloud"},
-                                   {"to", Json::array({Json{{"node", "inner"}, {"port", "cloud"}}})}}})},
+      {"inputs",
+       Json::array({Json{{"name", "cloud"},
+                         {"type", "PointCloud"},
+                         {"to", Json::array({Json{{"node", "inner"}, {"port", "cloud"}}})}}})},
       {"outputs", Json::array({Json{{"name", "cloud"},
                                     {"type", "PointCloud"},
                                     {"from", {{"node", "inner"}, {"port", "cloud"}}}}})},
@@ -190,8 +206,8 @@ TEST_CASE("prepareGraph 挡下的子图错误：递归引用、不存在的定�
     const char* name;
     Json doc;
     const char* code;
-    const char* nodeId;     // 空 = 不看
-    const char* paramPath;  // 空 = 不看
+    const char* nodeId;    // 空 = 不看
+    const char* paramPath; // 空 = 不看
   };
   Json recursive = subgraphGraph(15);
   recursive["subgraphs"]["clean"]["nodes"].push_back(Json{{"id", "self"}, {"op", "sub:clean"}});
@@ -211,9 +227,12 @@ TEST_CASE("prepareGraph 挡下的子图错误：递归引用、不存在的定�
     CHECK_FALSE(exec::prepareGraph(c.doc.dump(), raw, diags));
     bool found = false;
     for (const auto& d : diags.items()) {
-      if (d.status.code != c.code) continue;
-      if (*c.nodeId && d.nodeId != c.nodeId) continue;
-      if (*c.paramPath && d.status.paramPath != c.paramPath) continue;
+      if (d.status.code != c.code)
+        continue;
+      if (*c.nodeId && d.nodeId != c.nodeId)
+        continue;
+      if (*c.paramPath && d.status.paramPath != c.paramPath)
+        continue;
       found = true;
     }
     CHECK(found);
@@ -357,7 +376,7 @@ TEST_CASE("preview 超预算会发一条 warn 日志") {
   opts.runId = "preview-budget";
   opts.mode = exec::RunMode::Preview;
   opts.previewMaxPoints = 200000;
-  opts.previewBudgetMs = 1;  // 一定超
+  opts.previewBudgetMs = 1; // 一定超
   RunLog log;
   log.runId = opts.runId;
   {

@@ -1,12 +1,12 @@
 // id 生成。节点/边 id 只需单图内唯一，短且可读比全局唯一重要（它们进 git diff）。
 // 图本身的 id 用 ULID：单调递增、可排序、重命名文件后仍能追踪同一张图。
 
-const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"; // Crockford base32，去掉 ILOU
+const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'; // Crockford base32，去掉 ILOU
 
 function randomChars(n: number): string {
   const bytes = new Uint8Array(n);
   crypto.getRandomValues(bytes);
-  let out = "";
+  let out = '';
   for (const b of bytes) out += ALPHABET[b % ALPHABET.length];
   return out;
 }
@@ -14,7 +14,7 @@ function randomChars(n: number): string {
 /** ULID：48 位时间戳 + 80 位随机。同一毫秒内创建的图也不会撞。 */
 export function newDocId(): string {
   let time = Date.now();
-  let ts = "";
+  let ts = '';
   for (let i = 0; i < 10; i++) {
     ts = ALPHABET[time % 32] + ts;
     time = Math.floor(time / 32);

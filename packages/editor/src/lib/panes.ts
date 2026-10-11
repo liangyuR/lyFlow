@@ -12,7 +12,12 @@ export interface SidePane {
  *  以前两侧都不缩：1024 宽的窗口打开参数面板，画布挤成 0，面板右边一截跑到窗口外面点不着。
  *  两侧都到了最窄还放不下时就停在最窄，剩下的由画布让（桌面窗口最小 900，放得下）。
  *  total 不大于 0（还没量到）时原样返回。 */
-export function fitSidePanes(total: number, left: SidePane, right: SidePane, canvasMin: number): { left: number; right: number } {
+export function fitSidePanes(
+  total: number,
+  left: SidePane,
+  right: SidePane,
+  canvasMin: number,
+): { left: number; right: number } {
   const over = left.width + right.width + canvasMin - total;
   if (!(total > 0) || over <= 0) return { left: left.width, right: right.width };
   const fromRight = Math.max(0, Math.min(over, right.width - right.min));

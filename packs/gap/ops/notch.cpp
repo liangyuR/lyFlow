@@ -47,7 +47,8 @@ struct Sample {
 };
 
 nlohmann::json sampleMm(const Sample& s) {
-  if (!std::isfinite(s.x) || !std::isfinite(s.y)) return nlohmann::json();
+  if (!std::isfinite(s.x) || !std::isfinite(s.y))
+    return nlohmann::json();
   return nlohmann::json::array({mToMm(s.x), mToMm(s.y)});
 }
 
@@ -75,20 +76,20 @@ struct CameraNotch {
   std::size_t pointCount = 0;
   Sample anchor;
   double anchorDepth = kNaN;
-  double levelY = kNaN;  // 水平刀口的高度（米）= 基准侧穿出点的 y
-  Sample start;          // 两圆边相碰的角：参照点到锚点之间相对基准线最深的点
+  double levelY = kNaN; // 水平刀口的高度（米）= 基准侧穿出点的 y
+  Sample start;         // 两圆边相碰的角：参照点到锚点之间相对基准线最深的点
   int iterations = 0;
   bool baseOk = false;
   FlankLine base;
   Sample left;
   Sample right;
-  double width = kNaN;  // 米
+  double width = kNaN; // 米
   // 面差：另一侧翼面线（参照 B 点一侧的窗口）相对基准线在缝心处的垂距。
   bool refOk = false;
   std::string refError;
   FlankLine ref;
-  double xMid = kNaN;      // 缝心 = A、B 中点的 x（米）
-  double flushRaw = kNaN;  // 米，+ = 非 flushBase 那一侧更高
+  double xMid = kNaN;     // 缝心 = A、B 中点的 x（米）
+  double flushRaw = kNaN; // 米，+ = 非 flushBase 那一侧更高
 };
 
 struct NotchParams {
@@ -100,7 +101,7 @@ struct NotchParams {
   double lineDistM = 0.0;
   std::size_t minLinePoints = 8;
   int confirm = 2;
-  bool flushBaseLeft = true;  // 面差以哪一侧为基准
+  bool flushBaseLeft = true; // 面差以哪一侧为基准
   double refNearM = 0.0;
   double refFarM = 0.0;
 };
@@ -116,7 +117,8 @@ CameraNotch measureCamera(const GapCloud& cloud, const NotchParams& P) {
   std::vector<Sample> pts;
   pts.reserve(cloud.size());
   for (const auto& q : cloud) {
-    if (std::isfinite(q.x) && std::isfinite(q.y)) pts.push_back({q.x, q.y});
+    if (std::isfinite(q.x) && std::isfinite(q.y))
+      pts.push_back({q.x, q.y});
   }
   std::sort(pts.begin(), pts.end(), [](const Sample& a, const Sample& b) { return a.x < b.x; });
   r.pointCount = pts.size();
@@ -133,12 +135,14 @@ CameraNotch measureCamera(const GapCloud& cloud, const NotchParams& P) {
                     [&](std::size_t a, std::size_t b) { return pts[a].y > pts[b].y; });
   std::vector<double> xs;
   xs.reserve(k);
-  for (std::size_t i = 0; i < k; ++i) xs.push_back(pts[order[i]].x);
+  for (std::size_t i = 0; i < k; ++i)
+    xs.push_back(pts[order[i]].x);
   std::sort(xs.begin(), xs.end());
   const double xMed = (k % 2 == 1) ? xs[k / 2] : 0.5 * (xs[k / 2 - 1] + xs[k / 2]);
   std::size_t i0 = order[0];
   for (std::size_t i = 0; i < k; ++i) {
-    if (std::fabs(pts[order[i]].x - xMed) < std::fabs(pts[i0].x - xMed)) i0 = order[i];
+    if (std::fabs(pts[order[i]].x - xMed) < std::fabs(pts[i0].x - xMed))
+      i0 = order[i];
   }
   r.anchor = pts[i0];
 
@@ -204,7 +208,8 @@ CameraNotch measureCamera(const GapCloud& cloud, const NotchParams& P) {
       return false;
     }
     d.normalize();
-    if (d.x() < 0) d = -d;
+    if (d.x() < 0)
+      d = -d;
     if (std::fabs(d.x()) < 1e-3) {
       *error = "invalid_geometry";
       *message = "翼面近乎竖直，定不了深度方向";
@@ -213,13 +218,15 @@ CameraNotch measureCamera(const GapCloud& cloud, const NotchParams& P) {
     line->p = Eigen::Vector2d(coef[0], coef[1]);
     line->d = d;
     line->n = Eigen::Vector2d(-d.y(), d.x());
-    if (line->n.y() < 0) line->n = -line->n;
+    if (line->n.y() < 0)
+      line->n = -line->n;
     line->inlierCount = inliers.size();
     double squareSum = 0.0;
     double worst = 0.0;
     std::size_t valid = 0;
     for (const auto index : inliers) {
-      if (index < 0 || static_cast<std::size_t>(index) >= window.size()) continue;
+      if (index < 0 || static_cast<std::size_t>(index) >= window.size())
+        continue;
       const auto& q = window[static_cast<std::size_t>(index)];
       const double residual = std::fabs(line->depth({q.x, q.y})) * kScale;
       squareSum += residual * residual;
@@ -236,7 +243,8 @@ CameraNotch measureCamera(const GapCloud& cloud, const NotchParams& P) {
     std::string error;
     std::string message;
     r.baseOk = fitFlank(refX, P.baseLeft, P.nearM, P.farM, &r.base, &error, &message);
-    if (!r.baseOk) fail(r, error.c_str(), "基准" + message);
+    if (!r.baseOk)
+      fail(r, error.c_str(), "基准" + message);
     return r.baseOk;
   };
 
@@ -258,7 +266,8 @@ CameraNotch measureCamera(const GapCloud& cloud, const NotchParams& P) {
     auto lastDeep = i;
     while (true) {
       const auto j = i + dir;
-      if (j < 0 || j >= n) return false;
+      if (j < 0 || j >= n)
+        return false;
       if (deep(static_cast<std::size_t>(j))) {
         i = j;
         lastDeep = j;
@@ -267,7 +276,8 @@ CameraNotch measureCamera(const GapCloud& cloud, const NotchParams& P) {
       bool confirmed = true;
       for (int c = 1; c < P.confirm; ++c) {
         const auto jj = j + dir * c;
-        if (jj < 0 || jj >= n) break;
+        if (jj < 0 || jj >= n)
+          break;
         if (deep(static_cast<std::size_t>(jj))) {
           confirmed = false;
           break;
@@ -277,7 +287,7 @@ CameraNotch measureCamera(const GapCloud& cloud, const NotchParams& P) {
         *out = cross(static_cast<std::size_t>(lastDeep), static_cast<std::size_t>(j));
         return true;
       }
-      i = j;  // 孤立的浅点：噪声，跳过
+      i = j; // 孤立的浅点：噪声，跳过
     }
   };
 
@@ -291,7 +301,8 @@ CameraNotch measureCamera(const GapCloud& cloud, const NotchParams& P) {
   r.iterations = 0;
   for (int iter = 0; iter < 4; ++iter) {
     ++r.iterations;
-    if (!fitBase(refX)) return r;
+    if (!fitBase(refX))
+      return r;
     iStart = rangeLo;
     for (auto i = rangeLo; i <= rangeHi; ++i) {
       if (r.base.depth(pts[static_cast<std::size_t>(i)]) >
@@ -310,7 +321,8 @@ CameraNotch measureCamera(const GapCloud& cloud, const NotchParams& P) {
       fail(r, "notch_edge_not_found", "从缝角向基准侧走到框边，轮廓都没有穿出 levelDepth");
       return r;
     }
-    if (std::isfinite(prevEdgeX) && std::fabs(edgeBase.x - prevEdgeX) < 0.00002) break;
+    if (std::isfinite(prevEdgeX) && std::fabs(edgeBase.x - prevEdgeX) < 0.00002)
+      break;
     prevEdgeX = edgeBase.x;
     refX = edgeBase.x;
   }
@@ -384,7 +396,8 @@ nlohmann::json cameraJson(const CameraNotch& c) {
   ref["inlierCount"] = c.ref.inlierCount;
   ref["windowMm"] = nlohmann::json::array({mToMm(c.ref.lo), mToMm(c.ref.hi)});
   ref["slope"] = numberOrNull(c.refOk ? c.ref.slope() : kNaN);
-  ref["yAtMidMm"] = numberOrNull(c.refOk && std::isfinite(c.xMid) ? mToMm(c.ref.yAt(c.xMid)) : kNaN);
+  ref["yAtMidMm"] =
+      numberOrNull(c.refOk && std::isfinite(c.xMid) ? mToMm(c.ref.yAt(c.xMid)) : kNaN);
   ref["rmsResidualMm"] = numberOrNull(c.ref.rmsMm);
   ref["maxResidualMm"] = numberOrNull(c.ref.maxMm);
   j["ref"] = std::move(ref);
@@ -483,16 +496,19 @@ Status notchWidth(const Inputs& inputs, const ParamView& params, Outputs& output
   int validCount = 0;
   const CameraNotch* shown = nullptr;
   for (const int i : use) {
-    if (!cams[i].valid) continue;
+    if (!cams[i].valid)
+      continue;
     sum += cams[i].width;
     ++validCount;
-    if (shown == nullptr) shown = &cams[i];
+    if (shown == nullptr)
+      shown = &cams[i];
   }
   if (validCount == 0) {
     const CameraNotch& first = cams[use.front()];
     std::string message;
     for (const int i : use) {
-      if (!message.empty()) message += "；";
+      if (!message.empty())
+        message += "；";
       message += std::string(kCameraNames[i]) + ": " + cams[i].message;
     }
     return Status::Error(Phase::Execute, first.error.empty() ? "notch_not_found" : first.error,
@@ -506,15 +522,18 @@ Status notchWidth(const Inputs& inputs, const ParamView& params, Outputs& output
   const CameraNotch* flushShown = nullptr;
   std::string flushError;
   for (const int i : use) {
-    if (!cams[i].valid) continue;
+    if (!cams[i].valid)
+      continue;
     if (!cams[i].refOk) {
-      if (!flushError.empty()) flushError += "；";
+      if (!flushError.empty())
+        flushError += "；";
       flushError += std::string(kCameraNames[i]) + ": " + cams[i].refError;
       continue;
     }
     flushSum += cams[i].flushRaw;
     ++flushCount;
-    if (flushShown == nullptr) flushShown = &cams[i];
+    if (flushShown == nullptr)
+      flushShown = &cams[i];
   }
   const double flushRawMm = flushCount > 0 ? mToMm(flushSum / flushCount) : kNaN;
   const double flushMm = flushCount > 0 ? flushRawMm + flushOffset : kNaN;
@@ -563,7 +582,8 @@ Status notchWidth(const Inputs& inputs, const ParamView& params, Outputs& output
   quality.data["flushRawMm"] = numberOrNull(flushRawMm);
   quality.data["flushCameras"] = flushCount;
   quality.data["scale"] = scale;
-  for (int i = 0; i < 2; ++i) quality.data["cameras"][kCameraNames[i]] = cameraJson(cams[i]);
+  for (int i = 0; i < 2; ++i)
+    quality.data["cameras"][kCameraNames[i]] = cameraJson(cams[i]);
   outputs.set("quality", Data::record(std::move(quality)));
 
   lyflow::Record qualityBase;
@@ -579,8 +599,8 @@ Status notchWidth(const Inputs& inputs, const ParamView& params, Outputs& output
   return Status::Ok();
 }
 
-Param numParam(const char* name, const char* label, double def, const char* unit,
-               const char* group, const char* doc) {
+Param numParam(const char* name, const char* label, double def, const char* unit, const char* group,
+               const char* doc) {
   Param p;
   p.name = name;
   p.type = ParamType::Float;
@@ -604,7 +624,7 @@ Param intParam(const char* name, const char* label, std::int64_t def, const char
   return p;
 }
 
-}  // namespace
+} // namespace
 
 void registerNotchWidth(Registry& r) {
   OperatorDesc op;
@@ -638,10 +658,11 @@ void registerNotchWidth(Registry& r) {
            true},
       Port{"baseLine", "Line2D", "Base Line", "基准翼面直线（带窗口两端），取自第一台有效相机。",
            true},
-      Port{"refLine", "Line2D", "Ref Line", "对面翼面直线（带窗口两端）。面差无效时不输出。", false},
-      Port{"gapSegment", "Line2D", "Gap Segment", "两个穿出点之间的那一段。", true},
-      Port{"flushSegment", "Line2D", "Flush Segment", "缝心处基准线到对面线的那一段。面差无效时不输出。",
+      Port{"refLine", "Line2D", "Ref Line", "对面翼面直线（带窗口两端）。面差无效时不输出。",
            false},
+      Port{"gapSegment", "Line2D", "Gap Segment", "两个穿出点之间的那一段。", true},
+      Port{"flushSegment", "Line2D", "Flush Segment",
+           "缝心处基准线到对面线的那一段。面差无效时不输出。", false},
       Port{"anchor", "Point2D", "Anchor", "锚点：最深的那几个点里靠中间的一个。", true},
       withExample(Port{"quality", "Record", "Quality",
                        "GapNotchQuality：逐相机的锚点、基准线、穿出点与宽度。", true},
@@ -680,9 +701,8 @@ void registerNotchWidth(Registry& r) {
   camera.name = "camera";
   camera.type = ParamType::Enum;
   camera.label = "Camera";
-  camera.doc =
-      "用哪几台相机。both 是有效相机的平均；被遮挡看不到缝底的那一台会量出自己的阴影，"
-      "这时只选看得见的那台。";
+  camera.doc = "用哪几台相机。both 是有效相机的平均；被遮挡看不到缝底的那一台会量出自己的阴影，"
+               "这时只选看得见的那台。";
   camera.def = Value::text("both");
   camera.options = {EnumOption{"both", "Both（有效相机平均）", ""},
                     EnumOption{"primary", "Primary（Master）", ""},
@@ -725,4 +745,4 @@ void registerNotchWidth(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

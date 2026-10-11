@@ -17,7 +17,10 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   const Image* img = inputs.get("image").asImage();
   const cv::Mat gray = img && img->scale == 1 ? cvx::gray8(*img) : cv::Mat{};
   if (gray.empty()) {
-    return Status::Error(Phase::Execute, "bad_input", "标定需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行", {}, "image");
+    return Status::Error(
+        Phase::Execute, "bad_input",
+        "标定需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行", {},
+        "image");
   }
   const auto pattern = params.vec2("pattern");
   const int cols = static_cast<int>(std::lround(pattern[0]));
@@ -25,8 +28,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   const double square = params.number("square");
 
   std::vector<cv::Point2f> corners;
-  const bool found = cv::findChessboardCornersSB(gray, cv::Size(cols, rows), corners,
-                                                 cv::CALIB_CB_NORMALIZE_IMAGE | cv::CALIB_CB_ACCURACY);
+  const bool found = cv::findChessboardCornersSB(
+      gray, cv::Size(cols, rows), corners, cv::CALIB_CB_NORMALIZE_IMAGE | cv::CALIB_CB_ACCURACY);
   if (!found || corners.size() != static_cast<std::size_t>(cols * rows)) {
     return Status::Error(Phase::Execute, "no_board",
                          "没找到 " + std::to_string(cols) + "×" + std::to_string(rows) +
@@ -36,14 +39,16 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   // 角点按行排（先沿一行的 cols 个，再下一行）；板上坐标原点在第一个角点，单位 mm
   std::vector<cv::Point2f> board;
   for (int j = 0; j < rows; ++j) {
-    for (int i = 0; i < cols; ++i) board.emplace_back(static_cast<float>(i * square), static_cast<float>(j * square));
+    for (int i = 0; i < cols; ++i)
+      board.emplace_back(static_cast<float>(i * square), static_cast<float>(j * square));
   }
   const cv::Mat Hm = cv::findHomography(corners, board, 0);
   if (Hm.empty()) {
     return Status::Error(Phase::Execute, "no_board", "角点退化，算不出单应", "pattern");
   }
   PlaneCalib calib;
-  for (int k = 0; k < 9; ++k) calib.H[k] = Hm.at<double>(k / 3, k % 3);
+  for (int k = 0; k < 9; ++k)
+    calib.H[k] = Hm.at<double>(k / 3, k % 3);
   calib.unit = "mm";
 
   double sumSq = 0, maxErr = 0, spacingPx = 0;
@@ -61,7 +66,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   }
   const double rms = std::sqrt(sumSq / corners.size());
   const double mmPerPx = spacingN ? square / (spacingPx / spacingN) : 0;
-  ctx.log(LogLevel::Info, "标定残差 RMS " + std::to_string(rms) + " mm，约 " + std::to_string(mmPerPx) + " mm/px");
+  ctx.log(LogLevel::Info,
+          "标定残差 RMS " + std::to_string(rms) + " mm，约 " + std::to_string(mmPerPx) + " mm/px");
 
   nlohmann::json data = planeCalibJson(calib);
   data["rms"] = rms;
@@ -83,7 +89,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
 
   Overlay2D ov;
   std::vector<Px> pts;
-  for (const auto& c : corners) pts.push_back(Px{c.x, c.y});
+  for (const auto& c : corners)
+    pts.push_back(Px{c.x, c.y});
   ov.points("part", pts, std::to_string(cols) + "×" + std::to_string(rows) + " 角点");
   ov.points("nozzle", {pts.front()}, "原点");
   outputs.set("overlay", ov.data());
@@ -100,7 +107,7 @@ std::vector<Issue> validate(const ParamView& params, const std::set<std::string>
   return {};
 }
 
-}  // namespace
+} // namespace
 
 void registerBoardCalib(Registry& r) {
   OperatorDesc op;
@@ -108,15 +115,17 @@ void registerBoardCalib(Registry& r) {
   op.version = "1.0.0";
   op.label = "标定板标定";
   op.category = "图像/标定";
-  op.keywords = {"calib", "calibration", "chessboard", "homography", "标定", "棋盘格", "单应", "毫米"};
-  op.doc =
-      "棋盘格图 → 工作平面标定 image.PlaneCalib（图像 px → 板面 mm 的 3×3 单应）。"
-      "findChessboardCornersSB 找内角点，全部角点一起求单应，报残差 RMS 与平均 mm/px。"
-      "板要放在要量的那个平面上（涂胶飞拍：内边所在的高度）。原点在第一个角点。\n"
-      "图里找不到棋盘是执行错误 no_board（这是一次性的离线步骤，要人去看）。";
+  op.keywords = {"calib", "calibration", "chessboard", "homography",
+                 "标定",  "棋盘格",      "单应",       "毫米"};
+  op.doc = "棋盘格图 → 工作平面标定 image.PlaneCalib（图像 px → 板面 mm 的 3×3 单应）。"
+           "findChessboardCornersSB 找内角点，全部角点一起求单应，报残差 RMS 与平均 mm/px。"
+           "板要放在要量的那个平面上（涂胶飞拍：内边所在的高度）。原点在第一个角点。\n"
+           "图里找不到棋盘是执行错误 no_board（这是一次性的离线步骤，要人去看）。";
   op.inputs = {Port{"image", "Image", "Image", "标定板图。三通道先转灰度。", true}};
   op.outputs = {
-      Port{"calib", "Record", "Calib", "image.PlaneCalib：H、unit，另有 rms、maxError、mmPerPx、pattern、square、imageSize。", true},
+      Port{"calib", "Record", "Calib",
+           "image.PlaneCalib：H、unit，另有 rms、maxError、mmPerPx、pattern、square、imageSize。",
+           true},
       Port{"rms", "Measurement", "RMS", "角点映射回板面的残差 RMS（mm）。", true},
       Port{"overlay", "Record", "Overlay", "lyflow.overlay2d：找到的角点与原点。", true},
   };
@@ -139,11 +148,12 @@ void registerBoardCalib(Registry& r) {
   square.unit = "mm";
   square.min = 0.01;
   op.params = {pattern, square};
-  for (auto& p : op.params) p.tuningRole = "geometry";
+  for (auto& p : op.params)
+    p.tuningRole = "geometry";
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;
   op.validate = &validate;
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::std_image
+} // namespace lyflow::std_image

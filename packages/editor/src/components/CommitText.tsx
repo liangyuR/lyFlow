@@ -2,9 +2,12 @@
 // onChange 直接写 store，每敲一个字就是一条撤销 —— 中文输入法拼音没上屏的那几下也算，Ctrl+Z 得一个字一个字地
 // 退回去，退的路上还有拼音。
 
-import { useEffect, useRef, useState, type InputHTMLAttributes } from "react";
+import { useEffect, useRef, useState, type InputHTMLAttributes } from 'react';
 
-type Passthrough = Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "onBlur" | "onFocus" | "onKeyDown">;
+type Passthrough = Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  'value' | 'onChange' | 'onBlur' | 'onFocus' | 'onKeyDown'
+>;
 
 export function CommitText({
   value,
@@ -41,8 +44,8 @@ export function CommitText({
       }}
       onBlur={commit}
       onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-        if (e.key === "Escape") {
+        if (e.key === 'Enter') e.currentTarget.blur();
+        if (e.key === 'Escape') {
           cancelled.current = true;
           e.currentTarget.blur();
         }

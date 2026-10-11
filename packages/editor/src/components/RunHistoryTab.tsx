@@ -2,30 +2,42 @@
 // 点读数打开到那个节点；「恢复这组参数」把参数改回那一次的（一条撤销）。调参的循环（改阈值 → 跑 → 看 gap 变了多少）
 // 以前上一次是多少全靠脑子记，回到读数最好的那一组只能一个个参数凭记忆改回去。
 
-import { useMemo } from "react";
+import { useMemo } from 'react';
 
-import { num } from "../lib/format";
-import { verdictTone } from "../lib/outputs";
-import { diffRuns, diffText, previousChain, readingBefore, shortValue, type RunRecord } from "../lib/runHistory";
-import { canRevert, revertChange, usePendingChanges, type PendingChanges } from "../hooks/usePendingChanges";
-import { augmentOperators, describeEventNode } from "../lib/subgraph";
-import { findRecipe } from "../lib/recipes";
-import { useGraphStore } from "../store/graph";
-import { useManifestStore } from "../store/manifest";
-import { runParamsOf, useRecipeStore } from "../store/recipe";
-import { useRunHistoryStore } from "../store/runHistory";
-import { useUiStore } from "../store/ui";
+import { num } from '../lib/format';
+import { verdictTone } from '../lib/outputs';
+import {
+  diffRuns,
+  diffText,
+  previousChain,
+  readingBefore,
+  shortValue,
+  type RunRecord,
+} from '../lib/runHistory';
+import {
+  canRevert,
+  revertChange,
+  usePendingChanges,
+  type PendingChanges,
+} from '../hooks/usePendingChanges';
+import { augmentOperators, describeEventNode } from '../lib/subgraph';
+import { findRecipe } from '../lib/recipes';
+import { useGraphStore } from '../store/graph';
+import { useManifestStore } from '../store/manifest';
+import { runParamsOf, useRecipeStore } from '../store/recipe';
+import { useRunHistoryStore } from '../store/runHistory';
+import { useUiStore } from '../store/ui';
 
 const STATUS_LABEL: Record<string, string> = {
-  running: "运行中",
-  ok: "完成",
-  error: "出错",
-  cancelled: "取消",
+  running: '运行中',
+  ok: '完成',
+  error: '出错',
+  cancelled: '取消',
 };
 
 function clock(at: number): string {
   const d = new Date(at);
-  const two = (n: number) => String(n).padStart(2, "0");
+  const two = (n: number) => String(n).padStart(2, '0');
   return `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
 }
 
@@ -38,7 +50,7 @@ function deltaText(now: number | null, before: number | null): string | null {
   if (now === null || before === null) return null;
   const d = now - before;
   if (Math.abs(d) < 1e-9 * Math.max(1, Math.abs(now))) return null;
-  return `${d > 0 ? "+" : ""}${num(d)}`;
+  return `${d > 0 ? '+' : ''}${num(d)}`;
 }
 
 export function RunHistoryTab() {
@@ -56,7 +68,11 @@ export function RunHistoryTab() {
     () =>
       records.map((r, i) => {
         const prev = chain[i + 1];
-        const ops = augmentOperators(baseOps, { ...prev?.doc.subgraphs, ...baseline?.doc.subgraphs, ...r.doc.subgraphs });
+        const ops = augmentOperators(baseOps, {
+          ...prev?.doc.subgraphs,
+          ...baseline?.doc.subgraphs,
+          ...r.doc.subgraphs,
+        });
         const diff = prev ? diffRuns(prev, r, ops) : null;
         const vsBase = baseline && baseline !== r ? diffRuns(baseline, r, ops) : null;
         return { r, i, diff, vsBase };
@@ -69,7 +85,7 @@ export function RunHistoryTab() {
   const baseText = (b: RunRecord) =>
     b.readings.map(
       (rd) =>
-        `${describeEventNode(doc, ops, rd.id).names.join(" › ")}.${rd.port} ${rd.value === null ? "未测出" : `${num(rd.value)}${rd.unit ? ` ${rd.unit}` : ""}`}`,
+        `${describeEventNode(doc, ops, rd.id).names.join(' › ')}.${rd.port} ${rd.value === null ? '未测出' : `${num(rd.value)}${rd.unit ? ` ${rd.unit}` : ''}`}`,
     );
 
   if (records.length === 0) {
@@ -85,33 +101,47 @@ export function RunHistoryTab() {
       {baseline && (
         // 基准钉在最上面：调了几次之后要回头看的就是它
         <div className="runs__base" data-testid="run-baseline-bar">
-          <span className="runs__base-text" title={baseText(baseline).join("\n")}>
+          <span className="runs__base-text" title={baseText(baseline).join('\n')}>
             基准 #{baseline.seq} · {clock(baseline.at)}
-            {baseline.readings.length > 0 && ` · ${baseText(baseline).join("，")}`}
+            {baseline.readings.length > 0 && ` · ${baseText(baseline).join('，')}`}
           </span>
-          <button type="button" className="runs__restore" onClick={() => useRunHistoryStore.getState().setBaseline(null)}>
+          <button
+            type="button"
+            className="runs__restore"
+            onClick={() => useRunHistoryStore.getState().setBaseline(null)}
+          >
             取消基准
           </button>
         </div>
       )}
-      {pending && <PendingRow pending={pending} onRestoreAll={() => restoreRun(pending.base, baseOps)} />}
+      {pending && (
+        <PendingRow pending={pending} onRestoreAll={() => restoreRun(pending.base, baseOps)} />
+      )}
       <ol className="runs" data-testid="run-history">
         {rows.map(({ r, i, diff, vsBase }) => (
           <RunRow
             key={r.runId}
             record={r}
             // 更早的记录被 50 条的上限挤掉了时说清楚，不冒充「第一次」
-            diffLine={diff ? diffText(diff) : r.seq === 1 ? "这张图打开以来的第一次" : "更早的记录已不保留，比不出改了什么"}
-            diffTitle={diff ? diffText(diff, Infinity) : ""}
+            diffLine={
+              diff
+                ? diffText(diff)
+                : r.seq === 1
+                  ? '这张图打开以来的第一次'
+                  : '更早的记录已不保留，比不出改了什么'
+            }
+            diffTitle={diff ? diffText(diff, Infinity) : ''}
             baseLine={vsBase && baseline ? `比基准 #${baseline.seq}：${diffText(vsBase)}` : null}
-            baseTitle={vsBase ? diffText(vsBase, Infinity) : ""}
+            baseTitle={vsBase ? diffText(vsBase, Infinity) : ''}
             isBaseline={baseline === r}
             // 读数的变化：定了基准就与基准比，不然与上一次比
             before={(rd) => readingBefore(chain, i, r, baseline, rd).reading}
-            beforeLabel={baseline && baseline !== r ? `基准 #${baseline.seq}` : "上一次"}
+            beforeLabel={baseline && baseline !== r ? `基准 #${baseline.seq}` : '上一次'}
             describe={(id) => describeEventNode(doc, ops, id)}
             onRestore={() => restoreRun(r, baseOps)}
-            onBaseline={() => useRunHistoryStore.getState().setBaseline(baseline === r ? null : r.runId)}
+            onBaseline={() =>
+              useRunHistoryStore.getState().setBaseline(baseline === r ? null : r.runId)
+            }
           />
         ))}
       </ol>
@@ -121,16 +151,22 @@ export function RunHistoryTab() {
 
 /** 「恢复这组参数」：改回那一次的参数，说清楚哪些没能恢复（后来删掉的节点、那时还没有的、配方里的值）。 */
 function restoreRun(r: RunRecord, baseOps: Parameters<typeof augmentOperators>[0]): void {
-  const { changed, skipped } = useGraphStore.getState().restoreParams(r.doc, `恢复第 ${r.seq} 次运行的参数`, {
-    params: r.params,
-    recipe: r.recipe,
-    recipeId: r.recipeId,
-  });
+  const { changed, skipped } = useGraphStore
+    .getState()
+    .restoreParams(r.doc, `恢复第 ${r.seq} 次运行的参数`, {
+      params: r.params,
+      recipe: r.recipe,
+      recipeId: r.recipeId,
+    });
   const rs = useRecipeStore.getState();
   const current = rs.current;
-  const where = (name: string | null) => (name ? `配方「${name}」` : "基础");
+  const where = (name: string | null) => (name ? `配方「${name}」` : '基础');
   // 那次的配方现在叫什么（改过名的按 id 找到新名字）；找不到就是删掉了
-  const thenEntry = r.recipeId ? rs.set.recipes.find((e) => e.id === r.recipeId) : r.recipe ? findRecipe(rs.set, r.recipe) : undefined;
+  const thenEntry = r.recipeId
+    ? rs.set.recipes.find((e) => e.id === r.recipeId)
+    : r.recipe
+      ? findRecipe(rs.set, r.recipe)
+      : undefined;
   const thenName = thenEntry?.name ?? null;
   const sameRecipe = r.recipeId != null ? r.recipeId === rs.currentId : r.recipe === current;
   const after = useGraphStore.getState().doc;
@@ -141,8 +177,8 @@ function restoreRun(r: RunRecord, baseOps: Parameters<typeof augmentOperators>[0
   );
   // 图参数只在一边有（后来加的、删掉的）：不怪配方
   const onBoth = (id: string) => !!r.doc.params?.[id.slice(3)] && !!after.params?.[id.slice(3)];
-  const gpOneSide = left.changes.filter((c) => c.id.startsWith("gp:") && !onBoth(c.id)).length;
-  const recipeDiffs = left.changes.filter((c) => c.id.startsWith("gp:") && onBoth(c.id)).length;
+  const gpOneSide = left.changes.filter((c) => c.id.startsWith('gp:') && !onBoth(c.id)).length;
+  const recipeDiffs = left.changes.filter((c) => c.id.startsWith('gp:') && onBoth(c.id)).length;
   const notes = [
     left.removed.length > 0 ? `${left.removed.length} 个节点后来删掉了` : null,
     left.added.length > 0 ? `${left.added.length} 个节点那时还没有` : null,
@@ -156,19 +192,31 @@ function restoreRun(r: RunRecord, baseOps: Parameters<typeof augmentOperators>[0
           : `那一次是在${where(thenName)}下跑的、现在是${where(current)}：配方里的 ${recipeDiffs} 处没动（切到${where(thenName)}再恢复）`
       : null,
   ].filter(Boolean);
-  const tail = notes.length > 0 ? `；${notes.join("，")}` : "";
+  const tail = notes.length > 0 ? `；${notes.join('，')}` : '';
   const ui = useUiStore.getState();
   // 什么都没改就没有撤销可撤：不说「Ctrl+Z 撤回」（按了会撤掉别的一步）
   if (changed === 0) {
-    ui.showToast(notes.length === 0 ? `参数与第 ${r.seq} 次运行时一样` : `没有可恢复的参数${tail}`, notes.length > 0 ? "warn" : "info");
+    ui.showToast(
+      notes.length === 0 ? `参数与第 ${r.seq} 次运行时一样` : `没有可恢复的参数${tail}`,
+      notes.length > 0 ? 'warn' : 'info',
+    );
     return;
   }
-  ui.showToast(`已恢复第 ${r.seq} 次运行时的参数（${changed} 处，Ctrl+Z 撤回）${tail}`, notes.length > 0 ? "warn" : "info");
+  ui.showToast(
+    `已恢复第 ${r.seq} 次运行时的参数（${changed} 处，Ctrl+Z 撤回）${tail}`,
+    notes.length > 0 ? 'warn' : 'info',
+  );
 }
 
 /** 「未运行的改动」：屏幕上那次结果之后改了哪几处，参数一处一个、各带一个 ↩ 单独改回（Ctrl+Z 是线性的：
  *  撤第一处得把后面几处一起撤掉）。「全部改回」就是那一次的「恢复这组参数」。 */
-function PendingRow({ pending, onRestoreAll }: { pending: PendingChanges; onRestoreAll: () => void }) {
+function PendingRow({
+  pending,
+  onRestoreAll,
+}: {
+  pending: PendingChanges;
+  onRestoreAll: () => void;
+}) {
   const { base, diff } = pending;
   const others = [
     ...diff.muted.map((n) => `静音 ${n}`),
@@ -178,11 +226,18 @@ function PendingRow({ pending, onRestoreAll }: { pending: PendingChanges; onRest
   ];
   return (
     <div className="runs__pending" data-testid="run-pending">
-      <span className="runs__pending-title" title={`与第 ${base.seq} 次运行（屏幕上那次结果）比；按 F5 跑`}>
+      <span
+        className="runs__pending-title"
+        title={`与第 ${base.seq} 次运行（屏幕上那次结果）比；按 F5 跑`}
+      >
         未运行的改动 · 比 #{base.seq}
       </span>
       {diff.changes.map((c) => (
-        <span key={`${c.id}\u0001${c.name}`} className="runs__chip" data-testid="run-pending-change">
+        <span
+          key={`${c.id}\u0001${c.name}`}
+          className="runs__chip"
+          data-testid="run-pending-change"
+        >
           {c.where} · {c.param} {shortValue(c.from)} → {shortValue(c.to)}
           {canRevert(c) && (
             <button
@@ -237,37 +292,47 @@ function RunRow({
   baseTitle: string;
   isBaseline: boolean;
   /** 读数比的那一次的同一个读数：基准，或上一次（没被取消、有这个读数的最近一次）。 */
-  before: (rd: RunRecord["readings"][number]) => RunRecord["readings"][number] | null;
+  before: (rd: RunRecord['readings'][number]) => RunRecord['readings'][number] | null;
   beforeLabel: string;
   describe: (id: string) => ReturnType<typeof describeEventNode>;
   onRestore: () => void;
   onBaseline: () => void;
 }) {
   // 写全路径：同一个子图用了两次时，只写节点自己的名字分不出是哪一个
-  const scope = r.targets.length > 0 ? `运行到 ${r.targets.map((t) => describe(t).names.join(" › ")).join("、")}` : "整张图";
+  const scope =
+    r.targets.length > 0
+      ? `运行到 ${r.targets.map((t) => describe(t).names.join(' › ')).join('、')}`
+      : '整张图';
   return (
-    <li className={`runs__row${isBaseline ? " is-baseline" : ""}`} data-testid="run-record" data-seq={r.seq} data-status={r.status}
-      data-baseline={isBaseline ? "1" : undefined}>
+    <li
+      className={`runs__row${isBaseline ? ' is-baseline' : ''}`}
+      data-testid="run-record"
+      data-seq={r.seq}
+      data-status={r.status}
+      data-baseline={isBaseline ? '1' : undefined}
+    >
       <div className="runs__head">
         <span className="runs__seq">#{r.seq}</span>
         <span className="runs__time">{clock(r.at)}</span>
-        <span className={`runs__status runs__status--${r.status}`}>{STATUS_LABEL[r.status] ?? r.status}</span>
+        <span className={`runs__status runs__status--${r.status}`}>
+          {STATUS_LABEL[r.status] ?? r.status}
+        </span>
         {r.durationMs !== null && <span className="runs__time">{duration(r.durationMs)}</span>}
         <span className="runs__scope">{scope}</span>
         {r.recipe && <span className="runs__scope">配方 {r.recipe}</span>}
         <span className="runs__spacer" />
-        {r.status !== "running" && (
+        {r.status !== 'running' && (
           <button
             type="button"
-            className={`runs__restore${isBaseline ? " is-on" : ""}`}
+            className={`runs__restore${isBaseline ? ' is-on' : ''}`}
             data-testid="run-baseline"
-            title={isBaseline ? "取消基准" : "设为基准：之后每一次都与它比（改了什么、读数差多少）"}
+            title={isBaseline ? '取消基准' : '设为基准：之后每一次都与它比（改了什么、读数差多少）'}
             onClick={onBaseline}
           >
-            {isBaseline ? "基准 ✓" : "设为基准"}
+            {isBaseline ? '基准 ✓' : '设为基准'}
           </button>
         )}
-        {r.status !== "running" && (
+        {r.status !== 'running' && (
           <button
             type="button"
             className="runs__restore"
@@ -300,17 +365,21 @@ function RunRow({
                 className="runs__reading"
                 data-testid="run-reading"
                 data-tone={verdictTone(rd.verdict) ?? undefined}
-                title={`${d.names.join(" › ")}.${rd.port}${before ? `；${beforeLabel} ${before.value === null ? "未测出" : num(before.value)}` : ""}${d.reveal ? " —— 点此打开到它" : ""}`}
+                title={`${d.names.join(' › ')}.${rd.port}${before ? `；${beforeLabel} ${before.value === null ? '未测出' : num(before.value)}` : ''}${d.reveal ? ' —— 点此打开到它' : ''}`}
                 disabled={!d.reveal}
                 onClick={() => {
                   if (d.reveal) useUiStore.getState().revealNode(d.reveal.path, d.reveal.localId);
                 }}
               >
-                <span className="runs__reading-name">{d.names.join(" › ")}.{rd.port}</span>
-                <span className="runs__reading-value">
-                  {rd.value === null ? "未测出" : `${num(rd.value)}${rd.unit ? ` ${rd.unit}` : ""}`}
+                <span className="runs__reading-name">
+                  {d.names.join(' › ')}.{rd.port}
                 </span>
-                {rd.verdict && <span className={`insp-out__verdict is-${rd.verdict}`}>{rd.verdict}</span>}
+                <span className="runs__reading-value">
+                  {rd.value === null ? '未测出' : `${num(rd.value)}${rd.unit ? ` ${rd.unit}` : ''}`}
+                </span>
+                {rd.verdict && (
+                  <span className={`insp-out__verdict is-${rd.verdict}`}>{rd.verdict}</span>
+                )}
                 {delta && <span className="runs__delta">{delta}</span>}
               </button>
             );

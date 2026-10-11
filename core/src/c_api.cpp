@@ -47,10 +47,12 @@ lyflow::Image copyImageInput(const lyflow_run_image_input& in) {
                        in.height <= (1u << 20) &&
                        (in.channels == 1 || in.channels == 3 || in.channels == 4) &&
                        (in.depth == 1 || in.depth == 2 || in.depth == 4);
-  if (!shapeOk || in.pixels == nullptr) return img;
+  if (!shapeOk || in.pixels == nullptr)
+    return img;
   const std::size_t tight = img.rowBytes();
   const std::size_t stride = in.row_bytes == 0 ? tight : in.row_bytes;
-  if (stride < tight) return img;
+  if (stride < tight)
+    return img;
   lyflow::Image out = lyflow::Image::allocate(img.width, img.height, img.channels, img.depth);
   for (std::uint32_t y = 0; y < in.height; ++y) {
     std::memcpy(out.mutablePixels() + y * tight, in.pixels + y * stride, tight);
@@ -59,40 +61,42 @@ lyflow::Image copyImageInput(const lyflow_run_image_input& in) {
 }
 
 /// LYIM 载荷的 48 字节头（docs/http-transport.md「图像」）。`.lyim` 文件与 HTTP 响应同一布局。
-constexpr std::uint32_t kImageMagic = 0x4D49594Cu;  // 'LYIM' 小端
+constexpr std::uint32_t kImageMagic = 0x4D49594Cu; // 'LYIM' 小端
 
 /// lyflow_output_image 的 handle：持有这一级的图像（level 0 就是结果仓里那一份的浅拷贝）。
 struct ImageHold {
   lyflow::Image image;
 };
 
-
 /// 图像整张写成 `.lyim`：LYIM 载荷原样落盘（level 0、全部行）。别的扩展名拒掉 ——
 /// PNG 这类要编解码器的格式归 std-image 的 io.save_image，core 不带。
 std::string saveImageLyim(const lyflow::Image& img, const std::string& file) {
   const std::filesystem::path p = std::filesystem::u8path(file);
   std::string ext = p.extension().u8string();
-  for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  for (char& c : ext)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   if (ext != ".lyim") {
     return "图像输出只能存成 .lyim（PNG 等格式请在图里接 io.save_image），收到的是 '" + ext + "'";
   }
-  if (!img.consistent()) return "图像不完整，没有可写的像素";
+  if (!img.consistent())
+    return "图像不完整，没有可写的像素";
   const std::uint32_t head[12] = {
       kImageMagic,
       static_cast<std::uint32_t>(img.width),
       static_cast<std::uint32_t>(img.height),
       static_cast<std::uint32_t>(img.channels),
       static_cast<std::uint32_t>(img.depth),
-      0u,  // level
+      0u, // level
       static_cast<std::uint32_t>(img.width),
       static_cast<std::uint32_t>(img.height),
-      0u,  // row_offset
+      0u, // row_offset
       static_cast<std::uint32_t>(img.height),
       static_cast<std::uint32_t>(img.rowBytes()),
       0u,
   };
   std::ofstream f(p, std::ios::binary | std::ios::trunc);
-  if (!f) return "打不开输出文件: " + file;
+  if (!f)
+    return "打不开输出文件: " + file;
   f.write(reinterpret_cast<const char*>(head), sizeof head);
   f.write(reinterpret_cast<const char*>(img.pixels.get()),
           static_cast<std::streamsize>(img.byteSize()));
@@ -100,15 +104,16 @@ std::string saveImageLyim(const lyflow::Image& img, const std::string& file) {
   const std::size_t pad = (4 - img.byteSize() % 4) % 4;
   const char zeros[4] = {0, 0, 0, 0};
   f.write(zeros, static_cast<std::streamsize>(pad));
-  if (!f) return "写输出文件失败: " + file;
+  if (!f)
+    return "写输出文件失败: " + file;
   return std::string();
 }
-
 
 // 用 malloc 而不是 new[]：跨 ABI 边界的内存必须能被 C 侧的 free 释放。
 char* dup(const std::string& s) {
   char* out = static_cast<char*>(std::malloc(s.size() + 1));
-  if (!out) return nullptr;
+  if (!out)
+    return nullptr;
   std::memcpy(out, s.data(), s.size());
   out[s.size()] = '\0';
   return out;
@@ -116,7 +121,7 @@ char* dup(const std::string& s) {
 
 std::string fromC(const char* s) { return s ? std::string(s) : std::string(); }
 
-}  // namespace
+} // namespace
 
 extern "C" {
 
@@ -137,7 +142,8 @@ char* lyflow_manifest_problems(void) {
     const auto problems = registry().validate();
     std::string joined;
     for (const auto& p : problems) {
-      if (!joined.empty()) joined.push_back('\n');
+      if (!joined.empty())
+        joined.push_back('\n');
       joined += p;
     }
     return dup(joined);
@@ -154,12 +160,14 @@ char* lyflow_set_library_dirs(const char* const* dirs, size_t n) {
     std::vector<std::filesystem::path> paths;
     for (std::size_t i = 0; dirs && i < n; ++i) {
       const std::string d = fromC(dirs[i]);
-      if (!d.empty()) paths.push_back(std::filesystem::u8path(d));
+      if (!d.empty())
+        paths.push_back(std::filesystem::u8path(d));
     }
     const auto problems = lyflow::exec::Library::instance().setDirs(paths);
     std::string joined;
     for (const auto& p : problems) {
-      if (!joined.empty()) joined += "\n";
+      if (!joined.empty())
+        joined += "\n";
       joined += p;
     }
     return dup(joined);
@@ -193,7 +201,7 @@ char* lyflow_validate(const char* graph_json, const char* base_dir) {
 char* lyflow_validate_params(const char* graph_json, const char* base_dir,
                              const char* params_json) {
   try {
-    registry();  // 确保注册表已填充
+    registry(); // 确保注册表已填充
     const std::string base = fromC(base_dir);
     return dup(lyflow::exec::validateGraphJson(
         fromC(graph_json), base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base),
@@ -218,11 +226,11 @@ char* lyflow_plan_params(const char* graph_json, const char* base_dir, const cha
     registry();
     const std::string base = fromC(base_dir);
     std::vector<std::string> ts;
-    for (std::size_t i = 0; targets && i < n; ++i) ts.push_back(fromC(targets[i]));
+    for (std::size_t i = 0; targets && i < n; ++i)
+      ts.push_back(fromC(targets[i]));
     return dup(lyflow::exec::planGraphJson(
-        fromC(graph_json),
-        base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base), ts,
-        fromC(params_json)));
+        fromC(graph_json), base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base),
+        ts, fromC(params_json)));
   } catch (const std::exception& e) {
     lyflow::Diagnostics d;
     d.error("", lyflow::Phase::Compile, "internal", std::string("编译时内部异常: ") + e.what());
@@ -237,8 +245,7 @@ char* lyflow_effective_params(const char* graph_json, const char* base_dir) {
     registry();
     const std::string base = fromC(base_dir);
     return dup(lyflow::exec::effectiveParamsJson(
-        fromC(graph_json),
-        base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base)));
+        fromC(graph_json), base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base)));
   } catch (const std::exception& e) {
     lyflow::Diagnostics d;
     d.error("", lyflow::Phase::Compile, "internal",
@@ -266,18 +273,17 @@ void lyflow_cache_clear(void) {
   }
 }
 
-char* lyflow_cache_evict(const char* graph_json, const char* base_dir,
-                         const char* const* node_ids, size_t n, int include_downstream,
-                         const char* params_json) {
+char* lyflow_cache_evict(const char* graph_json, const char* base_dir, const char* const* node_ids,
+                         size_t n, int include_downstream, const char* params_json) {
   try {
     registry();
     const std::string base = fromC(base_dir);
     std::vector<std::string> ids;
-    for (std::size_t i = 0; node_ids && i < n; ++i) ids.push_back(fromC(node_ids[i]));
+    for (std::size_t i = 0; node_ids && i < n; ++i)
+      ids.push_back(fromC(node_ids[i]));
     return dup(lyflow::exec::evictNodesJson(
-        fromC(graph_json),
-        base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base), ids,
-        include_downstream != 0, fromC(params_json)));
+        fromC(graph_json), base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base),
+        ids, include_downstream != 0, fromC(params_json)));
   } catch (const std::exception& e) {
     lyflow::Diagnostics d;
     d.error("", lyflow::Phase::Compile, "internal", std::string("清缓存时内部异常: ") + e.what());
@@ -313,7 +319,8 @@ lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* o
     if (opts) {
       options.runId = fromC(opts->run_id);
       const std::string base = fromC(opts->base_dir);
-      if (!base.empty()) options.baseDir = std::filesystem::u8path(base);
+      if (!base.empty())
+        options.baseDir = std::filesystem::u8path(base);
       for (std::size_t i = 0; opts->targets && i < opts->target_count; ++i) {
         options.targets.push_back(fromC(opts->targets[i]));
       }
@@ -333,7 +340,8 @@ lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* o
       options.paramsJson = fromC(opts->params_json);
       for (std::size_t i = 0; opts->inputs && i < opts->input_count; ++i) {
         const lyflow_run_input& in = opts->inputs[i];
-        if (in.kind != LYFLOW_INPUT_POINT_CLOUD) continue;
+        if (in.kind != LYFLOW_INPUT_POINT_CLOUD)
+          continue;
         lyflow::PointCloud cloud;
         // 调用方的缓冲只保证活到本函数返回，所以在这里就拷成 core 自己的。
         if (in.xyz && in.count) {
@@ -357,7 +365,8 @@ lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* o
             lyflow::Data::image(copyImageInput(opts->image_inputs[i]))});
       }
     }
-    if (options.runId.empty()) options.runId = "run";
+    if (options.runId.empty())
+      options.runId = "run";
     return reinterpret_cast<lyflow_run*>(
         new lyflow::exec::Run(fromC(graph_json), std::move(options), cb, user));
   } catch (...) {
@@ -366,7 +375,8 @@ lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* o
 }
 
 void lyflow_run_cancel(lyflow_run* run) {
-  if (!run) return;
+  if (!run)
+    return;
   try {
     reinterpret_cast<lyflow::exec::Run*>(run)->cancel();
   } catch (...) {
@@ -374,7 +384,8 @@ void lyflow_run_cancel(lyflow_run* run) {
 }
 
 void lyflow_run_join(lyflow_run* run) {
-  if (!run) return;
+  if (!run)
+    return;
   try {
     reinterpret_cast<lyflow::exec::Run*>(run)->join();
   } catch (...) {
@@ -382,7 +393,8 @@ void lyflow_run_join(lyflow_run* run) {
 }
 
 void lyflow_run_free(lyflow_run* run) {
-  if (!run) return;
+  if (!run)
+    return;
   try {
     delete reinterpret_cast<lyflow::exec::Run*>(run);
   } catch (...) {
@@ -391,12 +403,13 @@ void lyflow_run_free(lyflow_run* run) {
 
 int lyflow_output_cloud(const char* run_id, const char* node_id, const char* port,
                         uint32_t max_points, lyflow_cloud_view* out) {
-  if (!out) return 2;
+  if (!out)
+    return 2;
   std::memset(out, 0, sizeof(*out));
   try {
     auto preview = new lyflow::exec::CloudPreview();
     if (!lyflow::exec::ResultStore::instance().previewCloud(fromC(run_id), fromC(node_id),
-                                                           fromC(port), max_points, *preview)) {
+                                                            fromC(port), max_points, *preview)) {
       delete preview;
       return 1;
     }
@@ -418,14 +431,16 @@ int lyflow_output_cloud(const char* run_id, const char* node_id, const char* por
 }
 
 void lyflow_cloud_view_free(lyflow_cloud_view* view) {
-  if (!view || !view->handle) return;
+  if (!view || !view->handle)
+    return;
   delete reinterpret_cast<lyflow::exec::CloudPreview*>(view->handle);
   std::memset(view, 0, sizeof(*view));
 }
 
-int lyflow_output_tensor(const char* run_id, const char* node_id, const char* port,
-                         uint64_t offset, uint32_t count, lyflow_tensor_view* out) {
-  if (!out) return 2;
+int lyflow_output_tensor(const char* run_id, const char* node_id, const char* port, uint64_t offset,
+                         uint32_t count, lyflow_tensor_view* out) {
+  if (!out)
+    return 2;
   std::memset(out, 0, sizeof(*out));
   try {
     lyflow::Data data;
@@ -434,7 +449,8 @@ int lyflow_output_tensor(const char* run_id, const char* node_id, const char* po
       return 1;
     }
     const lyflow::Tensor* tensor = data.asTensor();
-    if (!tensor) return 1;
+    if (!tensor)
+      return 1;
 
     const std::uint64_t total = static_cast<std::uint64_t>(tensor->data.size());
     const std::uint64_t begin = offset > total ? total : offset;
@@ -442,7 +458,8 @@ int lyflow_output_tensor(const char* run_id, const char* node_id, const char* po
     std::uint64_t take = (count == 0 || static_cast<std::uint64_t>(count) > avail)
                              ? avail
                              : static_cast<std::uint64_t>(count);
-    if (take > 0xFFFFFFFFull) take = 0xFFFFFFFFull;
+    if (take > 0xFFFFFFFFull)
+      take = 0xFFFFFFFFull;
 
     auto* held = new lyflow::Data(data);
     out->rank = static_cast<uint32_t>(tensor->shape.size());
@@ -459,16 +476,16 @@ int lyflow_output_tensor(const char* run_id, const char* node_id, const char* po
 }
 
 void lyflow_tensor_view_free(lyflow_tensor_view* view) {
-  if (!view || !view->handle) return;
+  if (!view || !view->handle)
+    return;
   delete reinterpret_cast<lyflow::Data*>(view->handle);
   std::memset(view, 0, sizeof(*view));
 }
 
-
-int lyflow_output_image(const char* run_id, const char* node_id, const char* port,
-                        uint32_t level, uint32_t row_offset, uint32_t row_count,
-                        lyflow_image_view* out) {
-  if (!out) return 2;
+int lyflow_output_image(const char* run_id, const char* node_id, const char* port, uint32_t level,
+                        uint32_t row_offset, uint32_t row_count, lyflow_image_view* out) {
+  if (!out)
+    return 2;
   std::memset(out, 0, sizeof(*out));
   try {
     lyflow::Data data;
@@ -477,13 +494,15 @@ int lyflow_output_image(const char* run_id, const char* node_id, const char* por
       return 1;
     }
     const lyflow::Image* src = data.asImage();
-    if (!src || !src->consistent()) return 1;
+    if (!src || !src->consistent())
+      return 1;
 
     // 要的级别太大时给「长边缩到 1 像素」那一级，而不是报错：前端按窗口大小算级别，算大了是常事
     // 尺寸向上取整，所以 2^level >= 长边时就是 1 像素
     const auto longest = static_cast<std::uint64_t>(std::max(src->width, src->height));
     unsigned maxLevel = 0;
-    while ((std::uint64_t{1} << maxLevel) < longest) ++maxLevel;
+    while ((std::uint64_t{1} << maxLevel) < longest)
+      ++maxLevel;
     const unsigned lv = std::min<unsigned>(level, maxLevel);
     auto* held = new ImageHold{lyflow::shrinkImage(*src, lv)};
     const lyflow::Image& img = held->image;
@@ -512,14 +531,16 @@ int lyflow_output_image(const char* run_id, const char* node_id, const char* por
 }
 
 void lyflow_image_view_free(lyflow_image_view* view) {
-  if (!view || !view->handle) return;
+  if (!view || !view->handle)
+    return;
   delete reinterpret_cast<ImageHold*>(view->handle);
   std::memset(view, 0, sizeof(*view));
 }
 
 int lyflow_output_indices(const char* run_id, const char* node_id, const char* port,
                           uint64_t offset, uint32_t count, lyflow_indices_view* out) {
-  if (!out) return 2;
+  if (!out)
+    return 2;
   std::memset(out, 0, sizeof(*out));
   try {
     lyflow::Data data;
@@ -528,7 +549,8 @@ int lyflow_output_indices(const char* run_id, const char* node_id, const char* p
       return 1;
     }
     const lyflow::Indices* indices = data.asIndices();
-    if (!indices) return 1;
+    if (!indices)
+      return 1;
 
     const std::uint64_t total = static_cast<std::uint64_t>(indices->values.size());
     const std::uint64_t begin = offset > total ? total : offset;
@@ -536,7 +558,8 @@ int lyflow_output_indices(const char* run_id, const char* node_id, const char* p
     std::uint64_t take = (count == 0 || static_cast<std::uint64_t>(count) > avail)
                              ? avail
                              : static_cast<std::uint64_t>(count);
-    if (take > 0xFFFFFFFFull) take = 0xFFFFFFFFull;
+    if (take > 0xFFFFFFFFull)
+      take = 0xFFFFFFFFull;
 
     auto* held = new lyflow::Data(data);
     out->count = static_cast<uint32_t>(take);
@@ -551,14 +574,16 @@ int lyflow_output_indices(const char* run_id, const char* node_id, const char* p
 }
 
 void lyflow_indices_view_free(lyflow_indices_view* view) {
-  if (!view || !view->handle) return;
+  if (!view || !view->handle)
+    return;
   delete reinterpret_cast<lyflow::Data*>(view->handle);
   std::memset(view, 0, sizeof(*view));
 }
 
 char* lyflow_output_info(const char* run_id, const char* node_id) {
   try {
-    const auto infos = lyflow::exec::ResultStore::instance().outputsOf(fromC(run_id), fromC(node_id));
+    const auto infos =
+        lyflow::exec::ResultStore::instance().outputsOf(fromC(run_id), fromC(node_id));
     lyflow::JsonWriter w;
     w.beginArray();
     for (const auto& i : infos) {
@@ -593,7 +618,8 @@ char* lyflow_run_summary(const char* run_id) {
     std::string summary;
     // run 还没结束（或者已经被 free）时没有这一份：返回 NULL 而不是空对象 ——
     // "{}" 会被消费方当成「跑完了、什么都没有」，那是另一件事。
-    if (!lyflow::exec::runSummaryJson(fromC(run_id), summary)) return nullptr;
+    if (!lyflow::exec::runSummaryJson(fromC(run_id), summary))
+      return nullptr;
     return dup(summary);
   } catch (...) {
     return nullptr;
@@ -604,9 +630,9 @@ char* lyflow_import(const char* kind, const char* text, const char* base_dir) {
   try {
     registry();
     const std::string base = fromC(base_dir);
-    return dup(lyflow::exec::importGraphJson(
-        fromC(kind), fromC(text),
-        base.empty() ? std::filesystem::path{} : std::filesystem::u8path(base)));
+    return dup(lyflow::exec::importGraphJson(fromC(kind), fromC(text),
+                                             base.empty() ? std::filesystem::path{}
+                                                          : std::filesystem::u8path(base)));
   } catch (const std::exception& e) {
     lyflow::Diagnostics d;
     d.error("", lyflow::Phase::Validate, "internal", std::string("导入时内部异常: ") + e.what());
@@ -616,12 +642,12 @@ char* lyflow_import(const char* kind, const char* text, const char* base_dir) {
   }
 }
 
-
 char* lyflow_output_save(const char* run_id, const char* node_id, const char* port,
                          const char* path, const char* format) {
   try {
     const std::string file = fromC(path);
-    if (file.empty()) return dup(std::string("没有给输出路径"));
+    if (file.empty())
+      return dup(std::string("没有给输出路径"));
     lyflow::Data data;
     if (!lyflow::exec::ResultStore::instance().get(fromC(run_id), fromC(node_id), fromC(port),
                                                    data)) {
@@ -632,11 +658,12 @@ char* lyflow_output_save(const char* run_id, const char* node_id, const char* po
     }
     const lyflow::PointCloud* cloud = data.asCloud();
     if (!cloud) {
-      return dup(std::string("端口 ") + fromC(port) + " 不是点云或图像（是 " + data.typeName() + "）");
+      return dup(std::string("端口 ") + fromC(port) + " 不是点云或图像（是 " + data.typeName() +
+                 "）");
     }
     const std::string fmt = fromC(format);
-    const lyflow::Status s = lyflow::saveCloudToFile(
-        *cloud, std::filesystem::u8path(file), fmt.empty() ? std::string("binary") : fmt);
+    const lyflow::Status s = lyflow::saveCloudToFile(*cloud, std::filesystem::u8path(file),
+                                                     fmt.empty() ? std::string("binary") : fmt);
     return dup(s.ok ? std::string() : s.message);
   } catch (const std::exception& e) {
     return dup(std::string("写盘时内部异常: ") + e.what());
@@ -645,4 +672,4 @@ char* lyflow_output_save(const char* run_id, const char* node_id, const char* po
   }
 }
 
-}  // extern "C"
+} // extern "C"

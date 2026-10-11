@@ -1,7 +1,7 @@
 // 预览里的选点与测距（docs/measure-plan.md）。纯函数，不依赖 three：矩阵按 16 个数传进来，
 // node:test 直接测。
 
-import { num } from "./format";
+import { num } from './format';
 
 export interface Viewport {
   x: number;
@@ -95,7 +95,7 @@ export function lengthText(v: number): string {
 /** 坐标与 Δ 只给 4 位有效数字：readout 在矮小的预览里，6 位的三元组一行放不下；
  *  要精读的是距离，距离照旧 6 位（lengthText）。 */
 function short(x: number): string {
-  if (!Number.isFinite(x)) return "—";
+  if (!Number.isFinite(x)) return '—';
   return String(Number(x.toPrecision(4)));
 }
 
@@ -111,37 +111,41 @@ export function extentText(
   const mm = Number(Math.max(...size).toPrecision(4)) < 1;
   return {
     size,
-    text: `${size.map((v) => short(mm ? v * 1000 : v)).join(" × ")} ${mm ? "mm" : "m"}`,
-    title: ["X", "Y", "Z"].map((a, i) => `${a} ${lengthText(size[i]!)}`).join("\n"),
+    text: `${size.map((v) => short(mm ? v * 1000 : v)).join(' × ')} ${mm ? 'mm' : 'm'}`,
+    title: ['X', 'Y', 'Z'].map((a, i) => `${a} ${lengthText(size[i]!)}`).join('\n'),
   };
 }
 
 function vec(v: readonly number[], sign = false): string {
-  return `(${v.map((x) => (sign && x > 0 ? `+${short(x)}` : short(x))).join(", ")}) m`;
+  return `(${v.map((x) => (sign && x > 0 ? `+${short(x)}` : short(x))).join(', ')}) m`;
 }
 
 /** readout 的几行。compare = 对比模式，点位后面标 A / B；2D 剖面多一行 XY 平面距离。 */
 export function measureLines(
   m: Measure,
-  mode: "3d" | "2d",
+  mode: '3d' | '2d',
   compare = false,
 ): { key: string; label: string; text: string }[] {
-  const pane = (p: Pick) => (compare ? ` · ${p.pane === 0 ? "A" : "B"}` : "");
+  const pane = (p: Pick) => (compare ? ` · ${p.pane === 0 ? 'A' : 'B'}` : '');
   const out: { key: string; label: string; text: string }[] = [];
   if (!m.p1) return out;
-  out.push({ key: "p1", label: `P1${pane(m.p1)}`, text: vec(m.p1.xyz) });
+  out.push({ key: 'p1', label: `P1${pane(m.p1)}`, text: vec(m.p1.xyz) });
   if (!m.p2) return out;
-  out.push({ key: "p2", label: `P2${pane(m.p2)}`, text: vec(m.p2.xyz) });
+  out.push({ key: 'p2', label: `P2${pane(m.p2)}`, text: vec(m.p2.xyz) });
   const d = deltaOf(m)!;
-  out.push({ key: "dist", label: "|d|", text: lengthText(Math.hypot(d[0], d[1], d[2])) });
-  if (mode === "2d") out.push({ key: "distXY", label: "|d| XY", text: lengthText(Math.hypot(d[0], d[1])) });
-  out.push({ key: "delta", label: "Δ", text: vec(d, true) });
+  out.push({ key: 'dist', label: '|d|', text: lengthText(Math.hypot(d[0], d[1], d[2])) });
+  if (mode === '2d')
+    out.push({ key: 'distXY', label: '|d| XY', text: lengthText(Math.hypot(d[0], d[1])) });
+  out.push({ key: 'delta', label: 'Δ', text: vec(d, true) });
   return out;
 }
 
 /** 一片点（xyz 三个一组）里落在矩形 [x0, y0, x1, y1]（米，含边）里的有几个，只看 x、y。拖 2D 框时写「N 点」：
  *  「ROI 里是空的」是 gap / dts 出错的头号原因，以前得跑一遍才知道。 */
-export function countInRect(xyz: ArrayLike<number> | null | undefined, rect: readonly [number, number, number, number]): number {
+export function countInRect(
+  xyz: ArrayLike<number> | null | undefined,
+  rect: readonly [number, number, number, number],
+): number {
   if (!xyz) return 0;
   const [x0, y0, x1, y1] = rect;
   let n = 0;
@@ -152,4 +156,3 @@ export function countInRect(xyz: ArrayLike<number> | null | undefined, rect: rea
   }
   return n;
 }
-

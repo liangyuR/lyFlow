@@ -59,7 +59,7 @@
   opacity: 0.75;
 }
 
-.insp__errors--validate li[data-severity="warning"] {
+.insp__errors--validate li[data-severity='warning'] {
   color: #e0a030;
 }
 
@@ -124,8 +124,13 @@
   font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
-.roi-box:focus { outline: none; }
-.roi-box:focus-visible { outline: 1px dashed var(--roi-color); outline-offset: 2px; }
+.roi-box:focus {
+  outline: none;
+}
+.roi-box:focus-visible {
+  outline: 1px dashed var(--roi-color);
+  outline-offset: 2px;
+}
 
 .roi-box__label {
   position: absolute;
@@ -142,9 +147,9 @@
   pointer-events: none;
 }
 
-.roi-box__label[data-pos="inside"],
-.roi-box__label[data-pos="stack"],
-.roi-box__label[data-pos="below"] {
+.roi-box__label[data-pos='inside'],
+.roi-box__label[data-pos='stack'],
+.roi-box__label[data-pos='below'] {
   border-radius: 3px;
 }
 
@@ -157,10 +162,26 @@
   border: 1px solid #11141a;
   border-radius: 2px;
 }
-.roi-box__handle--nw { left: -5px; top: -5px; cursor: nwse-resize; }
-.roi-box__handle--ne { right: -5px; top: -5px; cursor: nesw-resize; }
-.roi-box__handle--sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
-.roi-box__handle--se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+.roi-box__handle--nw {
+  left: -5px;
+  top: -5px;
+  cursor: nwse-resize;
+}
+.roi-box__handle--ne {
+  right: -5px;
+  top: -5px;
+  cursor: nesw-resize;
+}
+.roi-box__handle--sw {
+  left: -5px;
+  bottom: -5px;
+  cursor: nesw-resize;
+}
+.roi-box__handle--se {
+  right: -5px;
+  bottom: -5px;
+  cursor: nwse-resize;
+}
 
 /* 拖框时状态文案缩到左下角，不盖住模板底图 */
 .viewer__stage .viewer__empty.viewer__empty--corner {

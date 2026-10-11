@@ -16,7 +16,7 @@ import {
   type RunRequest,
   type StateTransition,
   type Transport,
-} from "@lyflow/editor";
+} from '@lyflow/editor';
 
 interface HostBridge {
   version: string;
@@ -46,13 +46,13 @@ declare global {
 }
 
 export function installHostBridge(transport: Transport): void {
-  if (typeof window === "undefined" || window.__lyflow) return;
+  if (typeof window === 'undefined' || window.__lyflow) return;
 
   const transitions: StateTransition[] = [];
   onNodeTransition((t) => transitions.push(t));
 
   window.__lyflow = {
-    version: "host-react",
+    version: 'host-react',
     transport,
     stores: {
       graph: useGraphStore,

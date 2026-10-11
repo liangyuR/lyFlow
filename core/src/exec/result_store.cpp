@@ -6,8 +6,8 @@
 #include <algorithm>
 
 #if defined(_WIN32)
-#  define WIN32_LEAN_AND_MEAN
-#  include <windows.h>
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #endif
 
 namespace lyflow::exec {
@@ -19,11 +19,12 @@ std::string entryKey(const std::string& cacheKey, const std::string& port) {
   return cacheKey + ":" + port;
 }
 
-}  // namespace
+} // namespace
 
 bool splitFieldAddress(const std::string& address, std::string* port, std::string* field) {
   const std::size_t dot = address.rfind('.');
-  if (dot == std::string::npos || dot == 0 || dot + 1 >= address.size()) return false;
+  if (dot == std::string::npos || dot == 0 || dot + 1 >= address.size())
+    return false;
   *port = address.substr(0, dot);
   *field = address.substr(dot + 1);
   return true;
@@ -32,7 +33,8 @@ bool splitFieldAddress(const std::string& address, std::string* port, std::strin
 void appendBundleFieldInfos(const std::string& port, const Data& data,
                             std::vector<OutputInfo>& out) {
   const Bundle* b = data.asBundle();
-  if (!b) return;
+  if (!b)
+    return;
   for (const auto& f : b->fields) {
     out.push_back(OutputInfo{port + "." + f.first, f.second.typeName(), f.second.elementCount(),
                              f.second.byteSize(), f.second.valueJson()});
@@ -53,16 +55,20 @@ std::uint64_t defaultCacheBudget() {
 
 CachePin::CachePin(ResultStore& store, std::vector<std::string> keys)
     : store_(&store), keys_(std::move(keys)) {
-  for (const auto& k : keys_) store_->pin(k);
+  for (const auto& k : keys_)
+    store_->pin(k);
 }
 
 CachePin::~CachePin() {
-  if (!store_) return;
-  for (const auto& k : keys_) store_->unpin(k);
+  if (!store_)
+    return;
+  for (const auto& k : keys_)
+    store_->unpin(k);
 }
 
 void CachePin::add(const std::string& cacheKey) {
-  if (!store_) return;
+  if (!store_)
+    return;
   store_->pin(cacheKey);
   keys_.push_back(cacheKey);
 }
@@ -91,13 +97,16 @@ void ResultStore::pin(const std::string& cacheKey) {
 void ResultStore::unpin(const std::string& cacheKey) {
   std::lock_guard<std::mutex> lock(mu_);
   auto it = pins_.find(cacheKey);
-  if (it == pins_.end()) return;
-  if (--it->second <= 0) pins_.erase(it);
+  if (it == pins_.end())
+    return;
+  if (--it->second <= 0)
+    pins_.erase(it);
 }
 
 void ResultStore::touchLocked(const std::string& key) {
   auto it = byKey_.find(key);
-  if (it == byKey_.end()) return;
+  if (it == byKey_.end())
+    return;
   lru_.erase(it->second.lru);
   lru_.push_back(key);
   it->second.lru = std::prev(lru_.end());
@@ -148,7 +157,7 @@ void ResultStore::put(const std::string& runId, const std::string& nodeId, const
     touchLocked(key);
     evictLocked();
   } else {
-    touchLocked(key);  // 已经在仓里就是同一份内容，保留原来那个 shared_ptr
+    touchLocked(key); // 已经在仓里就是同一份内容，保留原来那个 shared_ptr
   }
   index_[runId][nodeId][port] = key;
 }
@@ -156,14 +165,18 @@ void ResultStore::put(const std::string& runId, const std::string& nodeId, const
 bool ResultStore::get(const std::string& runId, const std::string& nodeId, const std::string& port,
                       Data& out) const {
   std::lock_guard<std::mutex> lock(mu_);
-  if (getLocked(runId, nodeId, port, out)) return true;
+  if (getLocked(runId, nodeId, port, out))
+    return true;
   std::string bundlePort, field;
-  if (!splitFieldAddress(port, &bundlePort, &field)) return false;
+  if (!splitFieldAddress(port, &bundlePort, &field))
+    return false;
   Data whole;
-  if (!getLocked(runId, nodeId, bundlePort, whole)) return false;
+  if (!getLocked(runId, nodeId, bundlePort, whole))
+    return false;
   const Bundle* b = whole.asBundle();
   const Data* d = b ? b->field(field) : nullptr;
-  if (!d) return false;
+  if (!d)
+    return false;
   out = *d;
   return true;
 }
@@ -171,13 +184,17 @@ bool ResultStore::get(const std::string& runId, const std::string& nodeId, const
 bool ResultStore::getLocked(const std::string& runId, const std::string& nodeId,
                             const std::string& port, Data& out) const {
   auto run = index_.find(runId);
-  if (run == index_.end()) return false;
+  if (run == index_.end())
+    return false;
   auto node = run->second.find(nodeId);
-  if (node == run->second.end()) return false;
+  if (node == run->second.end())
+    return false;
   auto p = node->second.find(port);
-  if (p == node->second.end()) return false;
+  if (p == node->second.end())
+    return false;
   auto data = byKey_.find(p->second);
-  if (data == byKey_.end()) return false;
+  if (data == byKey_.end())
+    return false;
   out = data->second.data;
   return true;
 }
@@ -185,14 +202,16 @@ bool ResultStore::getLocked(const std::string& runId, const std::string& nodeId,
 bool ResultStore::completeLocked(const std::string& cacheKey,
                                  const std::vector<std::string>& ports) const {
   for (const auto& port : ports) {
-    if (!byKey_.count(entryKey(cacheKey, port))) return false;
+    if (!byKey_.count(entryKey(cacheKey, port)))
+      return false;
   }
   return true;
 }
 
 void ResultStore::insertLocked(const std::string& cacheKey, const std::string& port, Data data) {
   const std::string key = entryKey(cacheKey, port);
-  if (byKey_.count(key)) return;
+  if (byKey_.count(key))
+    return;
   Entry e;
   e.bytes = data.byteSize();
   e.cacheKey = cacheKey;
@@ -207,13 +226,15 @@ void ResultStore::noteCompleted(const std::string& runId) {
   std::lock_guard<std::mutex> lock(mu_);
   completed_.erase(std::remove(completed_.begin(), completed_.end(), runId), completed_.end());
   completed_.push_back(runId);
-  if (completed_.size() > 8) completed_.erase(completed_.begin());
+  if (completed_.size() > 8)
+    completed_.erase(completed_.begin());
 }
 
 std::string ResultStore::lastCompletedBefore(const std::string& runId) const {
   std::lock_guard<std::mutex> lock(mu_);
   for (auto it = completed_.rbegin(); it != completed_.rend(); ++it) {
-    if (*it != runId && index_.count(*it)) return *it;
+    if (*it != runId && index_.count(*it))
+      return *it;
   }
   return std::string();
 }
@@ -222,13 +243,16 @@ bool ResultStore::attachFromRun(const std::string& fromRun, const std::string& r
                                 const std::string& nodeId) {
   std::lock_guard<std::mutex> lock(mu_);
   auto run = index_.find(fromRun);
-  if (run == index_.end()) return false;
+  if (run == index_.end())
+    return false;
   auto node = run->second.find(nodeId);
-  if (node == run->second.end() || node->second.empty()) return false;
+  if (node == run->second.end() || node->second.empty())
+    return false;
   for (const auto& [port, key] : node->second) {
-    if (!byKey_.count(key)) return false;
+    if (!byKey_.count(key))
+      return false;
   }
-  const PortMap ports = node->second;  // 先拷一份：下面往 index_ 里插新键可能让迭代器失效
+  const PortMap ports = node->second; // 先拷一份：下面往 index_ 里插新键可能让迭代器失效
   for (const auto& [port, key] : ports) {
     touchLocked(key);
     index_[runId][nodeId][port] = key;
@@ -236,12 +260,13 @@ bool ResultStore::attachFromRun(const std::string& fromRun, const std::string& r
   return true;
 }
 
-bool ResultStore::peek(const std::string& cacheKey,
-                       const std::vector<std::string>& ports) const {
-  if (cacheKey.empty() || ports.empty()) return false;
+bool ResultStore::peek(const std::string& cacheKey, const std::vector<std::string>& ports) const {
+  if (cacheKey.empty() || ports.empty())
+    return false;
   {
     std::lock_guard<std::mutex> lock(mu_);
-    if (completeLocked(cacheKey, ports)) return true;
+    if (completeLocked(cacheKey, ports))
+      return true;
   }
   // 落盘缓存（docs/disk-cache-plan.md）：plan 的 cached 预测与执行器同一个判据，盘上有也算
   return DiskCache::instance().has(cacheKey, ports);
@@ -275,7 +300,8 @@ bool ResultStore::reuse(const std::string& runId, const std::string& nodeId,
     return false;
   }
   std::lock_guard<std::mutex> lock(mu_);
-  for (auto& [port, data] : fromDisk) insertLocked(cacheKey, port, std::move(data));
+  for (auto& [port, data] : fromDisk)
+    insertLocked(cacheKey, port, std::move(data));
   if (!completeLocked(cacheKey, ports)) {
     counters_.misses += 1;
     return false;
@@ -297,11 +323,13 @@ bool ResultStore::reuse(const std::string& runId, const std::string& nodeId,
 
 bool ResultStore::attach(const std::string& runId, const std::string& nodeId,
                          const std::string& cacheKey, const std::vector<std::string>& ports) {
-  if (cacheKey.empty() || ports.empty()) return false;
+  if (cacheKey.empty() || ports.empty())
+    return false;
   std::lock_guard<std::mutex> lock(mu_);
   // 全有才挂：半份结果比没有更糟（与 reuse 同一条理由）
   for (const auto& port : ports) {
-    if (!byKey_.count(entryKey(cacheKey, port))) return false;
+    if (!byKey_.count(entryKey(cacheKey, port)))
+      return false;
   }
   for (const auto& port : ports) {
     const std::string key = entryKey(cacheKey, port);
@@ -316,12 +344,15 @@ std::vector<OutputInfo> ResultStore::outputsOf(const std::string& runId,
   std::lock_guard<std::mutex> lock(mu_);
   std::vector<OutputInfo> out;
   auto run = index_.find(runId);
-  if (run == index_.end()) return out;
+  if (run == index_.end())
+    return out;
   auto node = run->second.find(nodeId);
-  if (node == run->second.end()) return out;
+  if (node == run->second.end())
+    return out;
   for (const auto& kv : node->second) {
     auto data = byKey_.find(kv.second);
-    if (data == byKey_.end()) continue;
+    if (data == byKey_.end())
+      continue;
     out.push_back(OutputInfo{kv.first, data->second.data.typeName(),
                              data->second.data.elementCount(), data->second.bytes,
                              data->second.data.valueJson()});
@@ -335,13 +366,16 @@ bool ResultStore::outputInfo(const std::string& runId, const std::string& nodeId
   {
     std::lock_guard<std::mutex> lock(mu_);
     auto run = index_.find(runId);
-    if (run == index_.end()) return false;
+    if (run == index_.end())
+      return false;
     auto node = run->second.find(nodeId);
-    if (node == run->second.end()) return false;
+    if (node == run->second.end())
+      return false;
     auto entry = node->second.find(port);
     if (entry != node->second.end()) {
       auto data = byKey_.find(entry->second);
-      if (data == byKey_.end()) return false;
+      if (data == byKey_.end())
+        return false;
       out = OutputInfo{port, data->second.data.typeName(), data->second.data.elementCount(),
                        data->second.bytes, data->second.data.valueJson()};
       return true;
@@ -349,9 +383,10 @@ bool ResultStore::outputInfo(const std::string& runId, const std::string& nodeId
   }
   // `<port>.<field>`：图输出与 summary 指向 Bundle 字段时走这里（m8-plan L3）。
   Data field;
-  if (port.find('.') == std::string::npos || !get(runId, nodeId, port, field)) return false;
-  out = OutputInfo{port, field.typeName(), field.elementCount(), field.byteSize(),
-                   field.valueJson()};
+  if (port.find('.') == std::string::npos || !get(runId, nodeId, port, field))
+    return false;
+  out =
+      OutputInfo{port, field.typeName(), field.elementCount(), field.byteSize(), field.valueJson()};
   return true;
 }
 
@@ -374,7 +409,8 @@ void ResultStore::setSummary(const std::string& runId, std::string json) {
 bool ResultStore::summary(const std::string& runId, std::string& out) const {
   std::lock_guard<std::mutex> lock(mu_);
   auto it = summaries_.find(runId);
-  if (it == summaries_.end()) return false;
+  if (it == summaries_.end())
+    return false;
   out = it->second;
   return true;
 }
@@ -383,9 +419,11 @@ bool ResultStore::previewCloud(const std::string& runId, const std::string& node
                                const std::string& port, std::uint32_t maxPoints,
                                CloudPreview& out) const {
   Data data;
-  if (!get(runId, nodeId, port, data)) return false;
+  if (!get(runId, nodeId, port, data))
+    return false;
   const PointCloud* cloud = data.asCloud();
-  if (!cloud) return false;
+  if (!cloud)
+    return false;
 
   const std::size_t total = cloud->pointCount();
   // 等步长而不是随机抽样：同一份数据两次预览必须长得一样，
@@ -404,15 +442,19 @@ bool ResultStore::previewCloud(const std::string& runId, const std::string& node
   out.normals.clear();
   out.rgb.clear();
   out.xyz.reserve((total / step + 1) * 3);
-  if (out.hasIntensity) out.intensity.reserve(total / step + 1);
-  if (out.hasNormals) out.normals.reserve((total / step + 1) * 3);
-  if (out.hasRgb) out.rgb.reserve((total / step + 1) * 3);
+  if (out.hasIntensity)
+    out.intensity.reserve(total / step + 1);
+  if (out.hasNormals)
+    out.normals.reserve((total / step + 1) * 3);
+  if (out.hasRgb)
+    out.rgb.reserve((total / step + 1) * 3);
 
   for (std::size_t i = 0; i < total; i += step) {
     out.xyz.push_back(cloud->xyz[i * 3]);
     out.xyz.push_back(cloud->xyz[i * 3 + 1]);
     out.xyz.push_back(cloud->xyz[i * 3 + 2]);
-    if (out.hasIntensity) out.intensity.push_back(cloud->intensity[i]);
+    if (out.hasIntensity)
+      out.intensity.push_back(cloud->intensity[i]);
     if (out.hasNormals) {
       out.normals.push_back(cloud->normals[i * 3]);
       out.normals.push_back(cloud->normals[i * 3 + 1]);
@@ -468,7 +510,8 @@ std::size_t ResultStore::evict(const std::vector<std::string>& cacheKeys,
     it = lru_.erase(it);
     ++removed;
   }
-  if (skippedPinned) *skippedPinned = pinned;
+  if (skippedPinned)
+    *skippedPinned = pinned;
   return removed;
 }
 
@@ -500,4 +543,4 @@ CacheStats ResultStore::stats() const {
   return s;
 }
 
-}  // namespace lyflow::exec
+} // namespace lyflow::exec

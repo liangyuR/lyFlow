@@ -4,7 +4,7 @@
 export function readStoredNumber(key: string): number | null {
   try {
     const raw = globalThis.localStorage?.getItem(key);
-    if (raw == null || raw === "") return null;
+    if (raw == null || raw === '') return null;
     const v = Number(raw);
     return Number.isFinite(v) ? v : null;
   } catch {
@@ -24,7 +24,7 @@ export function writeStoredNumber(key: string, value: number): void {
 export function readStoredBool(key: string): boolean | null {
   try {
     const raw = globalThis.localStorage?.getItem(key);
-    return raw === "1" ? true : raw === "0" ? false : null;
+    return raw === '1' ? true : raw === '0' ? false : null;
   } catch {
     return null;
   }
@@ -32,7 +32,7 @@ export function readStoredBool(key: string): boolean | null {
 
 export function writeStoredBool(key: string, value: boolean): void {
   try {
-    globalThis.localStorage?.setItem(key, value ? "1" : "0");
+    globalThis.localStorage?.setItem(key, value ? '1' : '0');
   } catch {
     // 记不住就记不住，这一次照样生效
   }

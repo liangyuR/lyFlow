@@ -10,11 +10,11 @@
 // - 子图出口从这个节点出去的（outputs[].from）：新算子没有那个输出就整个不换 —— 摘掉它会连带断开每个实例外面的线。
 // - 图级命名输出（doc.outputs）指着这个节点的一个输出、新算子没有那个输出的：删掉那一条。
 
-import { locateEventNode, levelOf, type SubPath } from "./subgraph";
-import { canConnect, type GraphContext } from "./typecheck";
-import { valueEquals } from "./params";
-import type { GraphDoc, GraphEdge, SubgraphDef } from "../types/graph";
-import type { OperatorDesc, Param } from "../types/manifest";
+import { locateEventNode, levelOf, type SubPath } from './subgraph';
+import { canConnect, type GraphContext } from './typecheck';
+import { valueEquals } from './params';
+import type { GraphDoc, GraphEdge, SubgraphDef } from '../types/graph';
+import type { OperatorDesc, Param } from '../types/manifest';
 
 export interface ReplacePlan {
   /** 新的稀疏参数。 */
@@ -37,7 +37,13 @@ export interface ReplacePlan {
 
 /** 这次换会丢掉多少东西（搜索弹层的行尾、换完之后的提示都用它）。 */
 export function replaceLosses(plan: ReplacePlan): number {
-  return plan.droppedEdges.length + plan.droppedParams.length + plan.unbind.length + plan.droppedInputs.length + plan.droppedOutputs.length;
+  return (
+    plan.droppedEdges.length +
+    plan.droppedParams.length +
+    plan.unbind.length +
+    plan.droppedInputs.length +
+    plan.droppedOutputs.length
+  );
 }
 
 function sameShape(value: unknown, def: unknown): boolean {
@@ -66,9 +72,9 @@ export function carryParams(
       dropped.push(name);
       continue;
     }
-    const lo = typeof decl.min === "number" ? decl.min : -Infinity;
-    const hi = typeof decl.max === "number" ? decl.max : Infinity;
-    const clampOne = (x: unknown) => (typeof x === "number" ? Math.min(hi, Math.max(lo, x)) : x);
+    const lo = typeof decl.min === 'number' ? decl.min : -Infinity;
+    const hi = typeof decl.max === 'number' ? decl.max : Infinity;
+    const clampOne = (x: unknown) => (typeof x === 'number' ? Math.min(hi, Math.max(lo, x)) : x);
     const next = Array.isArray(value) ? value.map(clampOne) : clampOne(value);
     if (!valueEquals(next, value)) clamped.push(name);
     if (!valueEquals(next, decl.default)) out[name] = next;
@@ -83,18 +89,24 @@ function paramFits(oldOp: OperatorDesc | undefined, newOp: OperatorDesc, name: s
   return !old || old.type === decl.type;
 }
 
-export function portFits(newOp: OperatorDesc, side: "inputs" | "outputs", name: string, type: string): boolean {
+export function portFits(
+  newOp: OperatorDesc,
+  side: 'inputs' | 'outputs',
+  name: string,
+  type: string,
+): boolean {
   const port = newOp[side].find((p) => p.name === name);
-  return !!port && (port.type === type || port.type === "Any" || type === "Any");
+  return !!port && (port.type === type || port.type === 'Any' || type === 'Any');
 }
 
 /** 一个绑定的值放到新算子的参数上还合不合法（枚举值在不在新选项里、数在不在新范围里）。 */
 function valueFits(decl: Param, value: unknown): boolean {
   if (value === undefined) return true;
-  if (decl.options && decl.options.length > 0 && decl.type === "enum") return decl.options.some((o) => o.value === value);
-  const lo = typeof decl.min === "number" ? decl.min : -Infinity;
-  const hi = typeof decl.max === "number" ? decl.max : Infinity;
-  const ok = (x: unknown) => typeof x !== "number" || (x >= lo && x <= hi);
+  if (decl.options && decl.options.length > 0 && decl.type === 'enum')
+    return decl.options.some((o) => o.value === value);
+  const lo = typeof decl.min === 'number' ? decl.min : -Infinity;
+  const hi = typeof decl.max === 'number' ? decl.max : Infinity;
+  const ok = (x: unknown) => typeof x !== 'number' || (x >= lo && x <= hi);
   return Array.isArray(value) ? value.every(ok) : ok(value);
 }
 
@@ -124,7 +136,9 @@ export function planReplace(
   mine.sort((a, b) => (a.to.node === nodeId ? 0 : 1) - (b.to.node === nodeId ? 0 : 1));
   const probe: GraphDoc = {
     ...doc,
-    nodes: level.nodes.map((n) => (n.id === nodeId ? { ...n, op: newOp.id, params: carried.params } : n)),
+    nodes: level.nodes.map((n) =>
+      n.id === nodeId ? { ...n, op: newOp.id, params: carried.params } : n,
+    ),
     edges: level.edges.filter((e) => e.from.node !== nodeId && e.to.node !== nodeId),
   };
   const keptEdges: string[] = [];
@@ -133,7 +147,9 @@ export function planReplace(
     const otherId = e.to.node === nodeId ? e.from.node : e.to.node;
     const other = level.nodes.find((n) => n.id === otherId);
     const ownPortOk =
-      e.to.node === nodeId ? newOp.inputs.some((p) => p.name === e.to.port) : newOp.outputs.some((p) => p.name === e.from.port);
+      e.to.node === nodeId
+        ? newOp.inputs.some((p) => p.name === e.to.port)
+        : newOp.outputs.some((p) => p.name === e.from.port);
     const judgeable = !!other && ops.has(other.op);
     const ok = judgeable ? canConnect(probeCtx, probe, e.from, e.to).ok : ownPortOk;
     if (ok) {
@@ -156,8 +172,9 @@ export function planReplace(
   if (path.length === 0) {
     for (const gp of Object.values(doc.params ?? {})) {
       for (const b of gp.binds) {
-        const dot = b.lastIndexOf(".");
-        if (b.slice(0, dot) === nodeId && !keepsBind(b.slice(dot + 1), gp.default)) unbind.add(b.slice(dot + 1));
+        const dot = b.lastIndexOf('.');
+        if (b.slice(0, dot) === nodeId && !keepsBind(b.slice(dot + 1), gp.default))
+          unbind.add(b.slice(dot + 1));
       }
     }
   } else {
@@ -172,11 +189,12 @@ export function planReplace(
   let blocked: string | null = null;
   for (const input of def?.inputs ?? []) {
     for (const t of input.to) {
-      if (t.node === nodeId && !portFits(newOp, "inputs", t.port, input.type)) droppedInputs.push({ input: input.name, port: t.port });
+      if (t.node === nodeId && !portFits(newOp, 'inputs', t.port, input.type))
+        droppedInputs.push({ input: input.name, port: t.port });
     }
   }
   for (const output of def?.outputs ?? []) {
-    if (output.from.node === nodeId && !portFits(newOp, "outputs", output.from.port, output.type)) {
+    if (output.from.node === nodeId && !portFits(newOp, 'outputs', output.from.port, output.type)) {
       blocked = `子图输出 ${output.name} 接的是 ${output.from.port}，${newOp.label} 没有这个输出：先改子图的输出再换`;
     }
   }
@@ -189,11 +207,13 @@ export function planReplace(
     const loc = locateEventNode(doc, o.node);
     if (!loc) continue;
     if (loc.localId === nodeId && defOf(loc.path) === here) {
-      const port = o.port.split(".")[0]!;
+      const port = o.port.split('.')[0]!;
       if (!newOp.outputs.some((p) => p.name === port)) droppedOutputs.push(name);
       continue;
     }
-    const inside = loc.path.some((seg, k) => seg.nodeId === nodeId && defOf(loc.path.slice(0, k)) === here);
+    const inside = loc.path.some(
+      (seg, k) => seg.nodeId === nodeId && defOf(loc.path.slice(0, k)) === here,
+    );
     if (inside) droppedOutputs.push(name);
   }
 

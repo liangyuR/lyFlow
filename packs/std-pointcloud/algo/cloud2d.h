@@ -14,4 +14,4 @@ using Cloud2D = pcl::PointCloud<Point2DT>;
 /// LyFlow 点云 → Cloud2D。intensity 进 r/g/b 三个通道（与 gap 的 toPcl 同一约定）。
 Cloud2D toCloud2D(const lyflow::PointCloud& cloud);
 
-}  // namespace lyflow::std_pc
+} // namespace lyflow::std_pc

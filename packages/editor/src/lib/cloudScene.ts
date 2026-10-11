@@ -2,20 +2,20 @@
 // 一块画布；对比模式下 views = 2，同一台相机按两个 scissor 视口各画一遍（C4）—— 相机同步不用「镜像」，
 // 本来就是同一台，WebGL 上下文数也不变。views = 1 时与抽出来之前逐行同一行为。
 
-import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
-import type { Viewport } from "./pick";
-import { RAMPS, writeRgbColors, type RampName } from "./ramps";
-import { disposeOverlay } from "./shapes2d";
-import type { CloudPayload } from "../types/execution";
-import { gridSpec, ISO_DIR, presetPosition, type GridSpec, type ViewPreset } from "./viewFit";
+import type { Viewport } from './pick';
+import { RAMPS, writeRgbColors, type RampName } from './ramps';
+import { disposeOverlay } from './shapes2d';
+import type { CloudPayload } from '../types/execution';
+import { gridSpec, ISO_DIR, presetPosition, type GridSpec, type ViewPreset } from './viewFit';
 
-export type ShadingMode = "intensity" | "height" | "normal" | "rgb" | "flat";
+export type ShadingMode = 'intensity' | 'height' | 'normal' | 'rgb' | 'flat';
 /** 相机模式（G7）。2d = 正交俯视 XY，看剖面用。 */
-export type CameraMode = "3d" | "2d";
+export type CameraMode = '3d' | '2d';
 /** 两栏怎么摆：左右（默认）或上下（容器太窄时）。 */
-export type SplitMode = "lr" | "tb";
+export type SplitMode = 'lr' | 'tb';
 
 export interface Scene {
   renderer: THREE.WebGLRenderer;
@@ -55,7 +55,10 @@ export interface Scene {
   /** 立刻画一帧（导出 PNG 前用：没开 preserveDrawingBuffer，读缓冲前得先画）。 */
   renderFrame(): void;
   /** 屏幕坐标落在哪一栏、那一栏在画布里的矩形（CSS px，左上为原点）。落在画布外返回 null。 */
-  paneAt(clientX: number, clientY: number): { pane: 0 | 1; viewport: Viewport; local: { x: number; y: number } } | null;
+  paneAt(
+    clientX: number,
+    clientY: number,
+  ): { pane: 0 | 1; viewport: Viewport; local: { x: number; y: number } } | null;
   dispose(): void;
 }
 
@@ -79,9 +82,11 @@ export function createScene(host: HTMLDivElement): Scene {
   controls.enableDamping = true;
   controls.dampingFactor = 0.12;
   // 转心（target）写在 canvas 上：验收脚本看平移、双击设转心有没有生效（转视角不动它，平移才动）
-  controls.addEventListener("change", () => {
+  controls.addEventListener('change', () => {
     const c = controls.target;
-    renderer.domElement.dataset.target = [c.x, c.y, c.z].map((v) => Number(v.toPrecision(6))).join(",");
+    renderer.domElement.dataset.target = [c.x, c.y, c.z]
+      .map((v) => Number(v.toPrecision(6)))
+      .join(',');
   });
 
   // 网格跟着云走（setGrid）：先放一个与以前差不多的 4 m 网格，第一片云一到就换
@@ -108,7 +113,7 @@ export function createScene(host: HTMLDivElement): Scene {
 
   /** 第 i 栏的视口，CSS 像素、左下角为原点（three 的 setViewport 就是这么数的）。 */
   const paneRect = (i: 0 | 1): [number, number, number, number] => {
-    if (state.split === "lr") {
+    if (state.split === 'lr') {
       const w = width / 2;
       return [i * w, 0, w, height];
     }
@@ -153,8 +158,8 @@ export function createScene(host: HTMLDivElement): Scene {
     width = host.clientWidth || 1;
     height = host.clientHeight || 1;
     renderer.setSize(width, height, false);
-    const paneW = state.views === 2 && state.split === "lr" ? width / 2 : width;
-    const paneH = state.views === 2 && state.split === "tb" ? height / 2 : height;
+    const paneW = state.views === 2 && state.split === 'lr' ? width / 2 : width;
+    const paneH = state.views === 2 && state.split === 'tb' ? height / 2 : height;
     camera.aspect = paneW / paneH;
     camera.updateProjectionMatrix();
     // 2D 剖面与透视相机一样保住竖直方向的范围：变宽了多看一点，而不是把上下裁掉、整体放大
@@ -170,7 +175,7 @@ export function createScene(host: HTMLDivElement): Scene {
     camera,
     ortho,
     controls,
-    mode: "3d",
+    mode: '3d',
     points: [null, null],
     overlays,
     overlay: overlays[0],
@@ -180,9 +185,9 @@ export function createScene(host: HTMLDivElement): Scene {
     halfWidth: 2,
     aspect: 1,
     views: 1,
-    split: "lr",
+    split: 'lr',
     active() {
-      return state.mode === "2d" ? state.ortho : state.camera;
+      return state.mode === '2d' ? state.ortho : state.camera;
     },
     applyOrtho() {
       const h = state.halfWidth / Math.max(state.aspect, 1e-3);
@@ -199,10 +204,10 @@ export function createScene(host: HTMLDivElement): Scene {
       // 2D 下关掉旋转，否则一拖就离开了 XY 平面，那这个模式就没意义了。
       const target = state.controls.target;
       state.controls.object = state.active() as THREE.PerspectiveCamera;
-      state.controls.enableRotate = mode === "3d";
+      state.controls.enableRotate = mode === '3d';
       // 2D 下左键拖改成平移：旋转关了之后左键原来什么也不干，只能右键拖着挪（俯视图里人人先拿左键拖）
-      state.controls.mouseButtons.LEFT = mode === "3d" ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN;
-      if (mode === "2d") {
+      state.controls.mouseButtons.LEFT = mode === '3d' ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN;
+      if (mode === '2d') {
         ortho.position.set(target.x, target.y, target.z + 10);
         ortho.zoom = 1;
         state.applyOrtho();
@@ -240,14 +245,17 @@ export function createScene(host: HTMLDivElement): Scene {
       // 坐标轴还在原点，长 3 格：云离原点远时它在画面外，不挡事
       axes.scale.setScalar(spec.cell * 3);
       state.grid = spec;
-      renderer.domElement.dataset.grid = [spec.cell, spec.center[0], spec.center[1], spec.z].map((v) => Number(v.toPrecision(9))).join(",");
+      renderer.domElement.dataset.grid = [spec.cell, spec.center[0], spec.center[1], spec.z]
+        .map((v) => Number(v.toPrecision(9)))
+        .join(',');
     },
     paneAt(clientX, clientY) {
       const r = renderer.domElement.getBoundingClientRect();
       const local = { x: clientX - r.left, y: clientY - r.top };
       if (local.x < 0 || local.y < 0 || local.x > r.width || local.y > r.height) return null;
-      if (state.views === 1) return { pane: 0, viewport: { x: 0, y: 0, w: r.width, h: r.height }, local };
-      if (state.split === "lr") {
+      if (state.views === 1)
+        return { pane: 0, viewport: { x: 0, y: 0, w: r.width, h: r.height }, local };
+      if (state.split === 'lr') {
         const w = r.width / 2;
         const pane = local.x < w ? 0 : 1;
         return { pane, viewport: { x: pane * w, y: 0, w, h: r.height }, local };
@@ -291,7 +299,10 @@ export function createScene(host: HTMLDivElement): Scene {
 const MEASURE_COLORS = [0x34d399, 0xf472b6];
 
 /** 重画测量标记：点固定像素大小、不被点云遮挡（depthTest 关、renderOrder 压在底图之上）。 */
-export function setMeasureMarks(scene: Scene, points: readonly (readonly [number, number, number])[]): void {
+export function setMeasureMarks(
+  scene: Scene,
+  points: readonly (readonly [number, number, number])[],
+): void {
   disposeOverlay(scene.measure);
   if (points.length === 0) return;
   const pos = new Float32Array(points.flat());
@@ -303,20 +314,30 @@ export function setMeasureMarks(scene: Scene, points: readonly (readonly [number
   });
   if (points.length >= 2) {
     const lineGeom = new THREE.BufferGeometry();
-    lineGeom.setAttribute("position", new THREE.BufferAttribute(pos.slice(0, 6), 3));
+    lineGeom.setAttribute('position', new THREE.BufferAttribute(pos.slice(0, 6), 3));
     const line = new THREE.Line(
       lineGeom,
-      new THREE.LineBasicMaterial({ color: 0xf5f5f5, depthTest: false, transparent: true, opacity: 0.9 }),
+      new THREE.LineBasicMaterial({
+        color: 0xf5f5f5,
+        depthTest: false,
+        transparent: true,
+        opacity: 0.9,
+      }),
     );
     line.renderOrder = 9;
     scene.measure.add(line);
   }
   const geom = new THREE.BufferGeometry();
-  geom.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-  geom.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geom.setAttribute('color', new THREE.BufferAttribute(col, 3));
   const marks = new THREE.Points(
     geom,
-    new THREE.PointsMaterial({ size: 9, sizeAttenuation: false, vertexColors: true, depthTest: false }),
+    new THREE.PointsMaterial({
+      size: 9,
+      sizeAttenuation: false,
+      vertexColors: true,
+      depthTest: false,
+    }),
   );
   marks.renderOrder = 10;
   scene.measure.add(marks);
@@ -326,7 +347,9 @@ export function setMeasureMarks(scene: Scene, points: readonly (readonly [number
 export function pickMatrixOf(scene: Scene): Float32Array {
   const cam = scene.active() as THREE.PerspectiveCamera | THREE.OrthographicCamera;
   cam.updateMatrixWorld();
-  return Float32Array.from(new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse).elements);
+  return Float32Array.from(
+    new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse).elements,
+  );
 }
 
 // ------------------------------------------------------------ 点云几何与着色
@@ -335,7 +358,7 @@ export function pickMatrixOf(scene: Scene): Float32Array {
 export function buildPoints(cloud: CloudPayload | null, size: number): THREE.Points | null {
   if (!cloud || cloud.pointCount === 0) return null;
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(cloud.xyz, 3));
+  geometry.setAttribute('position', new THREE.BufferAttribute(cloud.xyz, 3));
   // 自己算 boundingSphere：让 three 从 attribute 里算一遍是白花的钱，
   // 而且 bounds 是全量点云的，比抽样后的更准。
   const cx = (cloud.bounds[0]! + cloud.bounds[3]!) / 2;
@@ -383,15 +406,15 @@ export function paintPoints(points: THREE.Points, cloud: CloudPayload, paint: Pa
   const geometry = points.geometry;
   const material = points.material as THREE.PointsMaterial;
 
-  if (paint.shading === "flat") {
-    geometry.deleteAttribute("color");
+  if (paint.shading === 'flat') {
+    geometry.deleteAttribute('color');
     material.vertexColors = false;
     material.color.setHex(0x8fb8ff);
     material.needsUpdate = true;
     return;
   }
 
-  const prev = geometry.getAttribute("color");
+  const prev = geometry.getAttribute('color');
   const reuse =
     prev instanceof THREE.BufferAttribute &&
     prev.count === cloud.pointCount &&
@@ -399,11 +422,11 @@ export function paintPoints(points: THREE.Points, cloud: CloudPayload, paint: Pa
       ? prev
       : null;
   const arr = reuse ? (reuse.array as Float32Array) : new Float32Array(cloud.pointCount * 3);
-  if (paint.shading === "normal") writeNormalColors(arr, cloud);
-  else if (paint.shading === "rgb") writeRgbColors(arr, cloud.rgb, cloud.pointCount);
+  if (paint.shading === 'normal') writeNormalColors(arr, cloud);
+  else if (paint.shading === 'rgb') writeRgbColors(arr, cloud.rgb, cloud.pointCount);
   else writeColors(arr, cloud, paint.shading, paint.ramp, paint.lo, paint.hi);
   if (reuse) reuse.needsUpdate = true;
-  else geometry.setAttribute("color", new THREE.BufferAttribute(arr, 3));
+  else geometry.setAttribute('color', new THREE.BufferAttribute(arr, 3));
   material.vertexColors = true;
   material.color.setHex(0xffffff);
   material.needsUpdate = true;
@@ -411,7 +434,7 @@ export function paintPoints(points: THREE.Points, cloud: CloudPayload, paint: Pa
 
 /** 着色用的标量：强度模式取强度通道，其余取 Z。 */
 function shadingValue(cloud: CloudPayload, mode: ShadingMode, i: number): number {
-  if (mode === "intensity" && cloud.intensity) return cloud.intensity[i]!;
+  if (mode === 'intensity' && cloud.intensity) return cloud.intensity[i]!;
   return cloud.xyz[i * 3 + 2]!;
 }
 
@@ -449,7 +472,7 @@ export function writeColors(
 /** 该模式下数据的实际取值范围，「自动」按钮和范围输入框的初值都用它。 */
 export function dataRangeOf(cloud: CloudPayload | null, mode: ShadingMode): [number, number] {
   if (!cloud || cloud.pointCount === 0) return [0, 1];
-  if (mode === "intensity" && cloud.intensity) {
+  if (mode === 'intensity' && cloud.intensity) {
     let lo = Infinity;
     let hi = -Infinity;
     for (let i = 0; i < cloud.pointCount; i += 1) {
@@ -512,8 +535,8 @@ export function overlayBoundsOf(overlay: THREE.Group): Float32Array | null {
 
 /** 包围盒 → data- 属性上的六个数。null 是空串。 */
 export function boundsAttr(bounds: ArrayLike<number> | null): string {
-  if (!bounds) return "";
-  return Array.from(bounds, round3).join(",");
+  if (!bounds) return '';
+  return Array.from(bounds, round3).join(',');
 }
 
 /** 把视角的中心（OrbitControls 的 target）挪到 p 上：当前相机与 target 一起平移同一段，视线方向不变 ——
@@ -529,7 +552,7 @@ export function focusOn(scene: Scene, p: [number, number, number]) {
 /** 转到一个标准视角（只管 3D 的透视相机：2D 剖面本来就是俯视，正交相机不碰）。先把阻尼没走完的那点转动走完 ——
  *  不然刚甩了一下就按，相机会接着往外转。转心不动、距离不变。2D 时什么都不做、返回 false。 */
 export function applyViewPreset(scene: Scene, view: ViewPreset): boolean {
-  if (scene.mode === "2d") return false;
+  if (scene.mode === '2d') return false;
   const c = scene.controls;
   const damping = c.enableDamping;
   c.enableDamping = false;

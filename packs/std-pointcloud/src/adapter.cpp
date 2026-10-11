@@ -11,15 +11,20 @@ namespace {
 /// 一个 PCD 字段占几个字节。
 std::uint32_t fieldWidth(std::uint8_t datatype) {
   switch (datatype) {
-    case pcl::PCLPointField::INT8:
-    case pcl::PCLPointField::UINT8:   return 1;
-    case pcl::PCLPointField::INT16:
-    case pcl::PCLPointField::UINT16:  return 2;
-    case pcl::PCLPointField::INT32:
-    case pcl::PCLPointField::UINT32:
-    case pcl::PCLPointField::FLOAT32: return 4;
-    case pcl::PCLPointField::FLOAT64: return 8;
-    default: return 0;
+  case pcl::PCLPointField::INT8:
+  case pcl::PCLPointField::UINT8:
+    return 1;
+  case pcl::PCLPointField::INT16:
+  case pcl::PCLPointField::UINT16:
+    return 2;
+  case pcl::PCLPointField::INT32:
+  case pcl::PCLPointField::UINT32:
+  case pcl::PCLPointField::FLOAT32:
+    return 4;
+  case pcl::PCLPointField::FLOAT64:
+    return 8;
+  default:
+    return 0;
   }
 }
 
@@ -34,15 +39,48 @@ struct FieldReader {
   double read(const std::uint8_t* p) const {
     const std::uint8_t* q = p + offset;
     switch (datatype) {
-      case pcl::PCLPointField::INT8:   { std::int8_t v;   std::memcpy(&v, q, 1); return v; }
-      case pcl::PCLPointField::UINT8:  { std::uint8_t v;  std::memcpy(&v, q, 1); return v; }
-      case pcl::PCLPointField::INT16:  { std::int16_t v;  std::memcpy(&v, q, 2); return v; }
-      case pcl::PCLPointField::UINT16: { std::uint16_t v; std::memcpy(&v, q, 2); return v; }
-      case pcl::PCLPointField::INT32:  { std::int32_t v;  std::memcpy(&v, q, 4); return v; }
-      case pcl::PCLPointField::UINT32: { std::uint32_t v; std::memcpy(&v, q, 4); return v; }
-      case pcl::PCLPointField::FLOAT32:{ float v;         std::memcpy(&v, q, 4); return v; }
-      case pcl::PCLPointField::FLOAT64:{ double v;        std::memcpy(&v, q, 8); return v; }
-      default: return 0.0;
+    case pcl::PCLPointField::INT8: {
+      std::int8_t v;
+      std::memcpy(&v, q, 1);
+      return v;
+    }
+    case pcl::PCLPointField::UINT8: {
+      std::uint8_t v;
+      std::memcpy(&v, q, 1);
+      return v;
+    }
+    case pcl::PCLPointField::INT16: {
+      std::int16_t v;
+      std::memcpy(&v, q, 2);
+      return v;
+    }
+    case pcl::PCLPointField::UINT16: {
+      std::uint16_t v;
+      std::memcpy(&v, q, 2);
+      return v;
+    }
+    case pcl::PCLPointField::INT32: {
+      std::int32_t v;
+      std::memcpy(&v, q, 4);
+      return v;
+    }
+    case pcl::PCLPointField::UINT32: {
+      std::uint32_t v;
+      std::memcpy(&v, q, 4);
+      return v;
+    }
+    case pcl::PCLPointField::FLOAT32: {
+      float v;
+      std::memcpy(&v, q, 4);
+      return v;
+    }
+    case pcl::PCLPointField::FLOAT64: {
+      double v;
+      std::memcpy(&v, q, 8);
+      return v;
+    }
+    default:
+      return 0.0;
     }
   }
 
@@ -60,15 +98,17 @@ struct FieldReader {
 FieldReader findField(const pcl::PCLPointCloud2& blob, const char* name) {
   FieldReader r;
   for (const auto& f : blob.fields) {
-    if (f.name != name) continue;
+    if (f.name != name)
+      continue;
     const std::uint32_t w = fieldWidth(f.datatype);
-    if (w == 0) return r;
+    if (w == 0)
+      return r;
     // count > 1 的字段（比如打包成数组的描述子）这里只读第一个分量，
     // 但仍然要按整段长度算边界。
-    const std::uint64_t end =
-        static_cast<std::uint64_t>(f.offset) + static_cast<std::uint64_t>(w) *
-                                                   (f.count == 0 ? 1u : f.count);
-    if (end > blob.point_step) return r;
+    const std::uint64_t end = static_cast<std::uint64_t>(f.offset) +
+                              static_cast<std::uint64_t>(w) * (f.count == 0 ? 1u : f.count);
+    if (end > blob.point_step)
+      return r;
     r.present = true;
     r.offset = f.offset;
     r.width = w;
@@ -88,7 +128,7 @@ void addField(pcl::PCLPointCloud2& blob, const char* name, std::uint32_t offset,
   blob.fields.push_back(f);
 }
 
-}  // namespace
+} // namespace
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr toPcl(const PointCloud& cloud) {
   auto out = pcl::make_shared<pcl::PointCloud<pcl::PointXYZ>>();
@@ -115,7 +155,8 @@ std::vector<std::int32_t> fromPclIndices(const pcl::PointIndices& indices) {
 std::vector<std::int32_t> fromPclIndices(const pcl::Indices& indices) {
   std::vector<std::int32_t> out;
   out.reserve(indices.size());
-  for (const auto i : indices) out.push_back(static_cast<std::int32_t>(i));
+  for (const auto i : indices)
+    out.push_back(static_cast<std::int32_t>(i));
   return out;
 }
 
@@ -135,30 +176,37 @@ PointCloud fromBlob(const pcl::PCLPointCloud2& blob) {
   const FieldReader fx = findField(blob, "x");
   const FieldReader fy = findField(blob, "y");
   const FieldReader fz = findField(blob, "z");
-  if (!fx.present || !fy.present || !fz.present) return out;
+  if (!fx.present || !fy.present || !fz.present)
+    return out;
 
   const FieldReader fi = findField(blob, "intensity");
   const FieldReader fnx = findField(blob, "normal_x");
   const FieldReader fny = findField(blob, "normal_y");
   const FieldReader fnz = findField(blob, "normal_z");
   FieldReader frgb = findField(blob, "rgb");
-  if (!frgb.present) frgb = findField(blob, "rgba");
+  if (!frgb.present)
+    frgb = findField(blob, "rgba");
 
   const bool hasNormals = fnx.present && fny.present && fnz.present;
   const std::size_t n = static_cast<std::size_t>(blob.width) * blob.height;
   const std::size_t step = blob.point_step;
-  if (step == 0 || blob.data.size() < n * step) return out;
+  if (step == 0 || blob.data.size() < n * step)
+    return out;
 
   out.xyz.reserve(n * 3);
-  if (fi.present) out.intensity.reserve(n);
-  if (hasNormals) out.normals.reserve(n * 3);
-  if (frgb.present) out.rgb.reserve(n * 3);
+  if (fi.present)
+    out.intensity.reserve(n);
+  if (hasNormals)
+    out.normals.reserve(n * 3);
+  if (frgb.present)
+    out.rgb.reserve(n * 3);
 
   for (std::size_t i = 0; i < n; ++i) {
     const std::uint8_t* p = blob.data.data() + i * step;
     out.push(static_cast<float>(fx.read(p)), static_cast<float>(fy.read(p)),
              static_cast<float>(fz.read(p)));
-    if (fi.present) out.intensity.push_back(static_cast<float>(fi.read(p)));
+    if (fi.present)
+      out.intensity.push_back(static_cast<float>(fi.read(p)));
     if (hasNormals) {
       out.normals.push_back(static_cast<float>(fnx.read(p)));
       out.normals.push_back(static_cast<float>(fny.read(p)));
@@ -178,17 +226,23 @@ void toBlob(const PointCloud& cloud, pcl::PCLPointCloud2& blob) {
   const std::size_t n = cloud.pointCount();
   blob.fields.clear();
   std::uint32_t offset = 0;
-  addField(blob, "x", offset, pcl::PCLPointField::FLOAT32); offset += 4;
-  addField(blob, "y", offset, pcl::PCLPointField::FLOAT32); offset += 4;
-  addField(blob, "z", offset, pcl::PCLPointField::FLOAT32); offset += 4;
+  addField(blob, "x", offset, pcl::PCLPointField::FLOAT32);
+  offset += 4;
+  addField(blob, "y", offset, pcl::PCLPointField::FLOAT32);
+  offset += 4;
+  addField(blob, "z", offset, pcl::PCLPointField::FLOAT32);
+  offset += 4;
   if (cloud.hasIntensity()) {
     addField(blob, "intensity", offset, pcl::PCLPointField::FLOAT32);
     offset += 4;
   }
   if (cloud.hasNormals()) {
-    addField(blob, "normal_x", offset, pcl::PCLPointField::FLOAT32); offset += 4;
-    addField(blob, "normal_y", offset, pcl::PCLPointField::FLOAT32); offset += 4;
-    addField(blob, "normal_z", offset, pcl::PCLPointField::FLOAT32); offset += 4;
+    addField(blob, "normal_x", offset, pcl::PCLPointField::FLOAT32);
+    offset += 4;
+    addField(blob, "normal_y", offset, pcl::PCLPointField::FLOAT32);
+    offset += 4;
+    addField(blob, "normal_z", offset, pcl::PCLPointField::FLOAT32);
+    offset += 4;
   }
   if (cloud.hasRgb()) {
     // 写成 float32 而不是 uint32：PCL 自己的点类型就是这么定义的，
@@ -222,7 +276,8 @@ void toBlob(const PointCloud& cloud, pcl::PCLPointCloud2& blob) {
     putFloat(cloud.xyz[i * 3]);
     putFloat(cloud.xyz[i * 3 + 1]);
     putFloat(cloud.xyz[i * 3 + 2]);
-    if (cloud.hasIntensity()) putFloat(cloud.intensity[i]);
+    if (cloud.hasIntensity())
+      putFloat(cloud.intensity[i]);
     if (cloud.hasNormals()) {
       putFloat(cloud.normals[i * 3]);
       putFloat(cloud.normals[i * 3 + 1]);
@@ -239,4 +294,4 @@ void toBlob(const PointCloud& cloud, pcl::PCLPointCloud2& blob) {
   }
 }
 
-}  // namespace lyflow::ops::adapter
+} // namespace lyflow::ops::adapter

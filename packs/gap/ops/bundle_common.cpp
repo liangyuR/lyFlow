@@ -46,14 +46,17 @@ Data scanPairOf(Data primary, Data secondary, Data merged) {
 }
 
 const Data& ScanView::pick(const std::string& which) const {
-  if (which == "primary") return *primary;
-  if (which == "secondary") return *secondary;
+  if (which == "primary")
+    return *primary;
+  if (which == "secondary")
+    return *secondary;
   return *merged;
 }
 
 bool readScanPair(const Data& d, ScanView* out) {
   const Bundle* b = d.asBundle();
-  if (!b || b->kind != kScanPairKind) return false;
+  if (!b || b->kind != kScanPairKind)
+    return false;
   out->primary = b->field("primary");
   out->secondary = b->field("secondary");
   out->merged = b->field("merged");
@@ -73,7 +76,8 @@ bool RoiView::datumRight() const {
 
 bool readRoiSet(const Data& d, RoiView* out) {
   const Bundle* b = d.asBundle();
-  if (!b || b->kind != kRoiSetKind) return false;
+  if (!b || b->kind != kRoiSetKind)
+    return false;
   out->datum = b->field("datum");
   out->target = b->field("target");
   out->seamLeft = b->field("seamLeft");
@@ -81,7 +85,8 @@ bool readRoiSet(const Data& d, RoiView* out) {
   const Data* info = b->field("info");
   out->info = info ? info->asRecord() : nullptr;
   for (const Data* box : {out->datum, out->target, out->seamLeft, out->seamRight}) {
-    if (!box || !box->asBox2D()) return false;
+    if (!box || !box->asBox2D())
+      return false;
   }
   return out->info != nullptr;
 }
@@ -130,14 +135,17 @@ bool datumOnRight(const lyflow::Box2D& datum, const lyflow::Box2D& seamLeft,
 
 bool datumOnRightInRecord(const nlohmann::json& alignmentData, bool* right) {
   const auto rois = alignmentData.find("rois");
-  if (rois == alignmentData.end() || !rois->is_object()) return false;
+  if (rois == alignmentData.end() || !rois->is_object())
+    return false;
   std::array<std::array<double, 4>, 3> boxes{};
   const char* keys[3] = {"flushBase", "gapLeft", "gapRight"};
   for (int i = 0; i < 3; ++i) {
     const auto it = rois->find(keys[i]);
-    if (it == rois->end() || !it->is_array() || it->size() != 4) return false;
+    if (it == rois->end() || !it->is_array() || it->size() != 4)
+      return false;
     for (std::size_t j = 0; j < 4; ++j) {
-      if (!(*it)[j].is_number()) return false;
+      if (!(*it)[j].is_number())
+        return false;
       boxes[static_cast<std::size_t>(i)][j] = (*it)[j].get<double>();
     }
   }
@@ -161,13 +169,16 @@ lyflow::Box2D seamTowardBox(const lyflow::Box2D& seamLeft, const lyflow::Box2D& 
 Step::Step(const char* opId, ComputeFn fn) : opId_(opId), fn_(fn) {
   desc_ = ensureRegistry().find(opId_);
   if (desc_) {
-    for (const Param& p : desc_->params) params_[p.name] = p.def;
-    if (!fn_) fn_ = desc_->compute;
+    for (const Param& p : desc_->params)
+      params_[p.name] = p.def;
+    if (!fn_)
+      fn_ = desc_->compute;
   }
 }
 
 Step& Step::in(const char* port, const Data& value) {
-  if (!value.empty()) inputs_[port] = value;
+  if (!value.empty())
+    inputs_[port] = value;
   return *this;
 }
 
@@ -179,16 +190,19 @@ Step& Step::set(const char* param, Value value) {
 Step& Step::copy(const ParamView& from, std::initializer_list<const char*> names) {
   for (const char* n : names) {
     const auto it = from.raw().find(n);
-    if (it != from.raw().end()) params_[n] = it->second;
+    if (it != from.raw().end())
+      params_[n] = it->second;
   }
   return *this;
 }
 
 Step& Step::copyAll(const ParamView& from) {
-  if (!desc_) return *this;
+  if (!desc_)
+    return *this;
   for (const Param& p : desc_->params) {
     const auto it = from.raw().find(p.name);
-    if (it != from.raw().end()) params_[p.name] = it->second;
+    if (it != from.raw().end())
+      params_[p.name] = it->second;
   }
   return *this;
 }
@@ -228,11 +242,14 @@ Param paramOf(const Registry& r, const char* opId, const char* name, int advance
               const char* group) {
   const OperatorDesc* op = r.find(opId);
   const Param* p = op ? findParam(*op, name) : nullptr;
-  if (!p) throw std::logic_error(std::string("paramOf: ") + opId + " 没有参数 " + name);
+  if (!p)
+    throw std::logic_error(std::string("paramOf: ") + opId + " 没有参数 " + name);
   Param copy = *p;
-  if (advanced >= 0) copy.advanced = advanced != 0;
-  if (group) copy.group = group;
+  if (advanced >= 0)
+    copy.advanced = advanced != 0;
+  if (group)
+    copy.group = group;
   return copy;
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

@@ -20,7 +20,7 @@ using ParamMap = std::unordered_map<std::string, Value>;
 /// 参数读取视图。取不到值属于执行器的 bug，会抛异常而不是返回默认值 ——
 /// 静默返回 0 会让一个 manifest 笔误表现成「算法结果不对」，那是最贵的一类 bug。
 class ParamView {
- public:
+public:
   ParamView(const ParamMap& values, const std::filesystem::path& baseDir)
       : values_(&values), baseDir_(&baseDir) {}
 
@@ -44,7 +44,7 @@ class ParamView {
   /// 给 externalKey 钩子用：拿到原始参数集合本身。
   const ParamMap& raw() const { return *values_; }
 
- private:
+private:
   const Value& lookup(std::string_view name) const;
 
   const ParamMap* values_;
@@ -53,7 +53,7 @@ class ParamView {
 
 /// 输入端口上的值。未连的可选端口 has() 返回 false。
 class Inputs {
- public:
+public:
   explicit Inputs(const std::unordered_map<std::string, Data>& values) : values_(&values) {}
 
   bool has(std::string_view name) const;
@@ -61,16 +61,16 @@ class Inputs {
   /// 可选端口应当先 has() 再 get()。
   const Data& get(std::string_view name) const;
 
- private:
+private:
   const std::unordered_map<std::string, Data>* values_;
 };
 
 class Outputs {
- public:
+public:
   explicit Outputs(std::unordered_map<std::string, Data>& values) : values_(&values) {}
   void set(std::string_view name, Data value);
 
- private:
+private:
   std::unordered_map<std::string, Data>* values_;
 };
 
@@ -80,7 +80,7 @@ const char* toString(LogLevel l);
 /// 算子与执行器之间的回边：取消、进度、日志。
 /// 取消是协作式的 —— 抢占式杀线程在有 PCL 时是纯粹的未定义行为来源。
 class ExecContext {
- public:
+public:
   virtual ~ExecContext() = default;
 
   /// 在长循环里每隔几千个点问一次。返回 true 就尽快 return Status::Ok()
@@ -103,20 +103,22 @@ class ExecContext {
 /// 长循环里的取消轮询 + 进度上报。按 8192 个点问一次：
 /// 每点一次会让原子读成为热点循环的瓶颈，而晚 8192 个点响应取消人感觉不到。
 class Ticker {
- public:
+public:
   Ticker(ExecContext& ctx, std::size_t total) : ctx_(ctx), total_(total ? total : 1) {}
 
   /// 返回 true 表示应当立刻退出。
   bool tick(std::size_t i) {
-    if ((i & 0x1FFF) != 0) return false;
-    if (ctx_.cancelled()) return true;
+    if ((i & 0x1FFF) != 0)
+      return false;
+    if (ctx_.cancelled())
+      return true;
     ctx_.progress(static_cast<float>(static_cast<double>(i) / static_cast<double>(total_)));
     return false;
   }
 
- private:
+private:
   ExecContext& ctx_;
   std::size_t total_;
 };
 
-}  // namespace lyflow
+} // namespace lyflow

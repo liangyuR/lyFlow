@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as THREE from "three";
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as THREE from 'three';
 
-import { findBaseCloud, firstCloudPort, type BaseCloud } from "../../lib/basecloud";
-import { cacheKey, cloudCache, dropOtherRuns, fetchCloud, putCache } from "../../lib/cloudCache";
+import { findBaseCloud, firstCloudPort, type BaseCloud } from '../../lib/basecloud';
+import { cacheKey, cloudCache, dropOtherRuns, fetchCloud, putCache } from '../../lib/cloudCache';
 import {
   applyViewPreset,
   boundsAttr,
@@ -20,23 +20,23 @@ import {
   type CameraView,
   type Scene,
   type ShadingMode,
-} from "../../lib/cloudScene";
-import type { RampName } from "../../lib/ramps";
-import { clampPointSize, POINT_SIZE_MAX, POINT_SIZE_MIN } from "../../lib/viewPrefs";
-import { disposeOverlay, extentOf, shapesOf } from "../../lib/shapes2d";
-import { registerPeekCanvas } from "../../lib/peekCanvas";
-import { augmentOperators, levelOf, resolveOutput } from "../../lib/subgraph";
-import { useGraphStore } from "../../store/graph";
-import { useManifestStore } from "../../store/manifest";
-import { PEEK_FROZEN, usePeekStore } from "../../store/peek";
-import { transport } from "../../transport";
-import { decodeCloud, type CloudPayload } from "../../types/execution";
-import { useFocusOnDoubleClick } from "../../hooks/useFocusOnDoubleClick";
-import { measureAttrs, useMeasure } from "../../hooks/useMeasure";
-import { MeasureReadout } from "../MeasureReadout";
-import { ViewPresetButtons, useViewPresetEvents } from "../ViewPresetButtons";
-import { gridSpec, sameFrame, type ViewPreset } from "../../lib/viewFit";
-import type { PeekViewProps } from "./types";
+} from '../../lib/cloudScene';
+import type { RampName } from '../../lib/ramps';
+import { clampPointSize, POINT_SIZE_MAX, POINT_SIZE_MIN } from '../../lib/viewPrefs';
+import { disposeOverlay, extentOf, shapesOf } from '../../lib/shapes2d';
+import { registerPeekCanvas } from '../../lib/peekCanvas';
+import { augmentOperators, levelOf, resolveOutput } from '../../lib/subgraph';
+import { useGraphStore } from '../../store/graph';
+import { useManifestStore } from '../../store/manifest';
+import { PEEK_FROZEN, usePeekStore } from '../../store/peek';
+import { transport } from '../../transport';
+import { decodeCloud, type CloudPayload } from '../../types/execution';
+import { useFocusOnDoubleClick } from '../../hooks/useFocusOnDoubleClick';
+import { measureAttrs, useMeasure } from '../../hooks/useMeasure';
+import { MeasureReadout } from '../MeasureReadout';
+import { ViewPresetButtons, useViewPresetEvents } from '../ViewPresetButtons';
+import { gridSpec, sameFrame, type ViewPreset } from '../../lib/viewFit';
+import type { PeekViewProps } from './types';
 
 const MAX_POINTS_CHOICES = [100_000, 200_000, 500_000, 2_000_000];
 const FROZEN = PEEK_FROZEN;
@@ -91,12 +91,12 @@ export function CloudView({ win, src }: PeekViewProps) {
   const runId = lockedRun ?? src.runId;
   const { maxPoints, shading, ramp, pointSize } = win.opts;
   const pointSizeRef = useRef(pointSize);
-  const cameraMode: CameraMode = win.view === "cloud2d" ? "2d" : "3d";
+  const cameraMode: CameraMode = win.view === 'cloud2d' ? '2d' : '3d';
 
   // 自己有云就画自己的；没有就先看本节点还有没有别的点云口，再沿输入边往上游借最近的一片，
   // 几何叠在它上面 —— 只输出 Box2D/Line2D 的节点若显示成空白，用户就看不出框压在剖面的哪里。
   const target: CloudTarget = useMemo(() => {
-    if (src.type === "PointCloud" && src.resolved) return { resolved: src.resolved, base: null };
+    if (src.type === 'PointCloud' && src.resolved) return { resolved: src.resolved, base: null };
     const node = levelOf(doc, path).nodes.find((n) => n.id === fromNode);
     if (!node) return { resolved: null, base: null };
     const own = firstCloudPort(ops, node.op);
@@ -118,21 +118,18 @@ export function CloudView({ win, src }: PeekViewProps) {
   // 下拉框写着强度、画面却是高度，用户只会以为强度数据本身有问题。没有强度但自带颜色的
   // （模型分割的类别色、PCD 里的 rgb）先退到 RGB：那本来就是给人看的颜色
   const effectiveShading: ShadingMode =
-    shading === "intensity" && !hasIntensity
+    shading === 'intensity' && !hasIntensity
       ? hasRgb
-        ? "rgb"
-        : "height"
-      : (shading === "normal" && !hasNormals) || (shading === "rgb" && !hasRgb)
-        ? "height"
+        ? 'rgb'
+        : 'height'
+      : (shading === 'normal' && !hasNormals) || (shading === 'rgb' && !hasRgb)
+        ? 'height'
         : shading;
-  const isFlat = effectiveShading === "flat";
-  const isRgbShading = effectiveShading === "rgb";
+  const isFlat = effectiveShading === 'flat';
+  const isRgbShading = effectiveShading === 'rgb';
   // 色带与范围只对「标量 → 颜色」的着色有意义
   const noRamp = isFlat || isRgbShading;
-  const [lo, hi] = useMemo(
-    () => dataRangeOf(cloud, effectiveShading),
-    [cloud, effectiveShading],
-  );
+  const [lo, hi] = useMemo(() => dataRangeOf(cloud, effectiveShading), [cloud, effectiveShading]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -144,7 +141,8 @@ export function CloudView({ win, src }: PeekViewProps) {
     return () => {
       const open = new Set(usePeekStore.getState().windows.map((w) => w.id));
       for (const id of keptViews.keys()) if (!open.has(id)) keptViews.delete(id);
-      if (fitted.current && open.has(win.id)) keptViews.set(win.id, { bounds: fitted.current, view: saveCameraView(scene) });
+      if (fitted.current && open.has(win.id))
+        keptViews.set(win.id, { bounds: fitted.current, view: saveCameraView(scene) });
       scene.dispose();
       sceneRef.current = null;
       setSceneHost(null);
@@ -180,7 +178,7 @@ export function CloudView({ win, src }: PeekViewProps) {
     const resolved = target.resolved;
     if (!runId || !resolved) {
       setLoading(false);
-      show(resolved ? "未运行" : "该端口无点云，上游也没有可当底图的点云");
+      show(resolved ? '未运行' : '该端口无点云，上游也没有可当底图的点云');
       return;
     }
 
@@ -191,7 +189,7 @@ export function CloudView({ win, src }: PeekViewProps) {
       // 命中也要 delete+set 一下，否则 LRU 的「最近使用」永远不更新
       putCache(key, hit);
       setLoading(false);
-      show(hit.pointCount === 0 ? "该端口的点云是空的" : null, hit, target.base);
+      show(hit.pointCount === 0 ? '该端口的点云是空的' : null, hit, target.base);
       return;
     }
 
@@ -199,10 +197,12 @@ export function CloudView({ win, src }: PeekViewProps) {
     void (async () => {
       try {
         const payload = await fetchCloud(key, async () =>
-          decodeCloud(await transport.getOutputCloud(runId, resolved.nodeId, resolved.port, maxPoints)),
+          decodeCloud(
+            await transport.getOutputCloud(runId, resolved.nodeId, resolved.port, maxPoints),
+          ),
         );
         if (cancelled) return;
-        show(payload.pointCount === 0 ? "该端口的点云是空的" : null, payload, target.base);
+        show(payload.pointCount === 0 ? '该端口的点云是空的' : null, payload, target.base);
       } catch (e) {
         show(lockedRun ? FROZEN : e instanceof Error ? e.message : String(e));
       } finally {
@@ -239,7 +239,7 @@ export function CloudView({ win, src }: PeekViewProps) {
     if (!scene || !host) return;
     const write = () => {
       const c = scene.active().position;
-      const text = [c.x, c.y, c.z].map((v) => Number(v.toFixed(3))).join(",");
+      const text = [c.x, c.y, c.z].map((v) => Number(v.toFixed(3))).join(',');
       if (host.dataset.cameraPos !== text) host.dataset.cameraPos = text;
     };
     scene.frameListeners.add(write);
@@ -257,7 +257,7 @@ export function CloudView({ win, src }: PeekViewProps) {
 
   // -- 2D 几何叠画（G7）：整组重建，线与端口同色 -----------------------------
   const shapeStat = useMemo(
-    () => (src.type !== "PointCloud" && src.stat?.value !== undefined ? src.stat : null),
+    () => (src.type !== 'PointCloud' && src.stat?.value !== undefined ? src.stat : null),
     [src.type, src.stat],
   );
 
@@ -278,7 +278,7 @@ export function CloudView({ win, src }: PeekViewProps) {
           1e-3,
         )
       : Math.max(extentOf(shapeStat), 1e-3);
-    const hex = typesByName.get(shapeStat.type)?.color ?? "#6b7280";
+    const hex = typesByName.get(shapeStat.type)?.color ?? '#6b7280';
     const color = new THREE.Color(hex).getHex();
     for (const line of shapesOf(shapeStat, color, span)) scene.overlay.add(line);
   }, [shapeStat, cloud, typesByName]);
@@ -321,7 +321,7 @@ export function CloudView({ win, src }: PeekViewProps) {
     sceneHost,
     measureOn,
     [cloud, null],
-    `${win.id}|${target.resolved?.nodeId ?? ""}|${target.resolved?.port ?? ""}`,
+    `${win.id}|${target.resolved?.nodeId ?? ''}|${target.resolved?.port ?? ''}`,
   );
   // 双击一个点：转心挪到它上面（测量时不接）
   useFocusOnDoubleClick(sceneHost, [cloud, null], measureOn);
@@ -344,7 +344,7 @@ export function CloudView({ win, src }: PeekViewProps) {
       setGridText(scene.grid?.text ?? null);
     }
   };
-  const status = loading ? "正在取点云…" : display.status;
+  const status = loading ? '正在取点云…' : display.status;
   const pointChoices = MAX_POINTS_CHOICES.includes(maxPoints)
     ? MAX_POINTS_CHOICES
     : [...MAX_POINTS_CHOICES, maxPoints].sort((a, b) => a - b);
@@ -353,13 +353,13 @@ export function CloudView({ win, src }: PeekViewProps) {
     <div
       ref={peekRoot}
       className="peek-cloud"
-      data-view-presets={cameraMode === "3d" ? "1" : undefined}
+      data-view-presets={cameraMode === '3d' ? '1' : undefined}
       data-testid="peek-cloud"
       data-camera={cameraMode}
       data-shading={effectiveShading}
       data-point-size={pointSize}
-      data-run={display.runId ?? ""}
-      data-base={display.base?.localId ?? ""}
+      data-run={display.runId ?? ''}
+      data-base={display.base?.localId ?? ''}
       data-cloud-bounds={boundsAttr(cloud && cloud.pointCount > 0 ? cloud.bounds : null)}
       data-overlay-bounds={boundsAttr(overlayBounds)}
       {...measureAttrs(measureOn, measure)}
@@ -392,18 +392,22 @@ export function CloudView({ win, src }: PeekViewProps) {
           value={effectiveShading}
           onChange={(e) => setOpts(win.id, { shading: e.target.value as ShadingMode })}
           title={
-            shading === effectiveShading ? "着色方式" : "这片点云没有该通道，已换成它实际有的着色"
+            shading === effectiveShading ? '着色方式' : '这片点云没有该通道，已换成它实际有的着色'
           }
         >
           <option value="intensity" disabled={!hasIntensity}>
-            强度{hasIntensity ? "" : "（无）"}
+            强度{hasIntensity ? '' : '（无）'}
           </option>
           <option value="height">高度</option>
           <option value="normal" disabled={!hasNormals}>
-            法线{hasNormals ? "" : "（无）"}
+            法线{hasNormals ? '' : '（无）'}
           </option>
-          <option value="rgb" disabled={!hasRgb} title="点云自带的颜色（PCD 的 rgb、模型分割的类别色）">
-            RGB{hasRgb ? "" : "（无）"}
+          <option
+            value="rgb"
+            disabled={!hasRgb}
+            title="点云自带的颜色（PCD 的 rgb、模型分割的类别色）"
+          >
+            RGB{hasRgb ? '' : '（无）'}
           </option>
           <option value="flat">单色</option>
         </select>
@@ -425,7 +429,7 @@ export function CloudView({ win, src }: PeekViewProps) {
           value={maxPoints}
           onChange={(e) => setOpts(win.id, { maxPoints: Number(e.target.value) })}
           disabled={lockedRun !== null}
-          title={lockedRun ? FROZEN : "最多显示多少点（抽样在 C++ 侧做）"}
+          title={lockedRun ? FROZEN : '最多显示多少点（抽样在 C++ 侧做）'}
         >
           {pointChoices.map((n) => (
             <option key={n} value={n}>
@@ -463,15 +467,19 @@ export function CloudView({ win, src }: PeekViewProps) {
         >
           ⤢
         </button>
-        <ViewPresetButtons className="peek__btn" disabled={cameraMode !== "3d"} onPick={pickPreset} />
+        <ViewPresetButtons
+          className="peek__btn"
+          disabled={cameraMode !== '3d'}
+          onPick={pickPreset}
+        />
         <button
           type="button"
           className="peek__btn"
           data-testid="peek-measure"
-          data-on={measureOn ? "1" : "0"}
+          data-on={measureOn ? '1' : '0'}
           disabled={!cloud || cloud.pointCount === 0}
           onClick={() => setMeasuring(!measuring)}
-          title={measuring ? "关掉测量" : "测量：单击选点看坐标，再点一个量距离；拖动照旧转视角"}
+          title={measuring ? '关掉测量' : '测量：单击选点看坐标，再点一个量距离；拖动照旧转视角'}
         >
           测量
         </button>

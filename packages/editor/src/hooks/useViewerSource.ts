@@ -2,21 +2,26 @@
 // 订阅它的状态与输出统计、决定显示点云还是值、取点云（自己的，或沿输入边借上游的当底图）。
 // 普通模式调一次（A）；对比模式调两次（A、B）。B 冻结时给 frozen，原样返回快照，不订阅结果、不发请求。
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from 'react';
 
-import { cloudPortsOf, findBaseCloud, firstCloudPort, type BaseCloud } from "../lib/basecloud";
-import { cacheKey, cloudCache, dropOtherRuns, fetchCloud, putCache } from "../lib/cloudCache";
-import { augmentOperators, levelOf, resolveOutput } from "../lib/subgraph";
-import { viewerContentFor, type ViewerContent } from "../lib/viewRule";
-import { transport } from "../transport";
-import type { CompareSlot, CompareSnapshot } from "../store/compare";
-import { aggregatedNodes, useExecutionStore } from "../store/execution";
-import { useGraphStore } from "../store/graph";
-import { useManifestStore } from "../store/manifest";
-import { useUiStore } from "../store/ui";
-import { decodeCloud, type CloudPayload, type NodeState, type OutputStat } from "../types/execution";
-import type { GraphNode } from "../types/graph";
-import type { OperatorDesc } from "../types/manifest";
+import { cloudPortsOf, findBaseCloud, firstCloudPort, type BaseCloud } from '../lib/basecloud';
+import { cacheKey, cloudCache, dropOtherRuns, fetchCloud, putCache } from '../lib/cloudCache';
+import { augmentOperators, levelOf, resolveOutput } from '../lib/subgraph';
+import { viewerContentFor, type ViewerContent } from '../lib/viewRule';
+import { transport } from '../transport';
+import type { CompareSlot, CompareSnapshot } from '../store/compare';
+import { aggregatedNodes, useExecutionStore } from '../store/execution';
+import { useGraphStore } from '../store/graph';
+import { useManifestStore } from '../store/manifest';
+import { useUiStore } from '../store/ui';
+import {
+  decodeCloud,
+  type CloudPayload,
+  type NodeState,
+  type OutputStat,
+} from '../types/execution';
+import type { GraphNode } from '../types/graph';
+import type { OperatorDesc } from '../types/manifest';
 
 /** 当前展示的东西。永远一起换：拆成几个 useState 的话，切换节点时会出现「标题是新节点、
  *  点云还是旧节点」的中间态 —— 肉眼看不见，但验收脚本会稳定读到它。 */
@@ -68,7 +73,14 @@ export interface ViewerSource {
   cloudPorts: readonly string[];
 }
 
-export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = null, frozen }: ViewerSourceInput): ViewerSource {
+export function useViewerSource({
+  slot,
+  idleText,
+  maxPoints,
+  pick,
+  portPick = null,
+  frozen,
+}: ViewerSourceInput): ViewerSource {
   const path = slot?.path;
   const nodeId = slot?.nodeId ?? null;
   const doc = useGraphStore((s) => s.doc);
@@ -107,7 +119,10 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = nu
   );
   const bundles = useManifestStore((s) => s.bundle?.bundles);
   const op = node ? ops.get(node.op) : undefined;
-  const cloudPorts = useMemo(() => (node ? cloudPortsOf(ops, node.op, bundles) : []), [ops, node, bundles]);
+  const cloudPorts = useMemo(
+    () => (node ? cloudPortsOf(ops, node.op, bundles) : []),
+    [ops, node, bundles],
+  );
 
   const outputs = frozen ? frozen.outputs : liveOutputs;
   // 显示点云场景还是值的表格（lib/viewRule）。类型取这次运行的实际类型，没跑过就用声明的 ——
@@ -120,7 +135,7 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = nu
             bundles,
             op.inputs.map((i) => i.type),
           )
-        : "cloud",
+        : 'cloud',
     [op, outputs, bundles],
   );
   const content: ViewerContent = frozen ? frozen.content : (pick ?? autoContent);
@@ -129,13 +144,13 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = nu
     nodeId: null,
     runId: null,
     cloud: null,
-    status: "未运行",
+    status: '未运行',
     base: null,
     port: null,
     preview: false,
   });
   const [loading, setLoading] = useState(false);
-  const notRun = !runId || runStatus === "idle";
+  const notRun = !runId || runStatus === 'idle';
 
   // -- 取点云 ---------------------------------------------------------------
   useEffect(() => {
@@ -148,7 +163,16 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = nu
       port: string | null = null,
     ) => {
       if (cancelled) return;
-      setDisplay({ nodeId, runId: runId ?? null, cloud: payload, status, base, port, preview: isPreview, content });
+      setDisplay({
+        nodeId,
+        runId: runId ?? null,
+        cloud: payload,
+        status,
+        base,
+        port,
+        preview: isPreview,
+        content,
+      });
     };
 
     if (!node || !path) {
@@ -158,7 +182,7 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = nu
     }
     if (notRun || !runId) {
       setLoading(false);
-      show("未运行");
+      show('未运行');
       return;
     }
     // 取一片云来画（自己的输出，或借来的底图 / 出错节点的输入）。failed 给了就是出错节点的输入：状态一直是它，
@@ -169,7 +193,8 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = nu
       port: string | null,
       failed: string | null,
     ) => {
-      const statusOf = (p: CloudPayload) => failed ?? (p.pointCount === 0 ? "该节点的点云是空的" : null);
+      const statusOf = (p: CloudPayload) =>
+        failed ?? (p.pointCount === 0 ? '该节点的点云是空的' : null);
       const shown = (status: string | null, payload: CloudPayload | null) => {
         if (cancelled) return;
         setDisplay({
@@ -214,41 +239,51 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = nu
       })();
     };
 
-    if (liveState === "error") {
+    if (liveState === 'error') {
       // 出错多半是数据的问题（点太少、ROI 里是空的）：把它的输入画出来 —— 报错指着哪个输入口就画那个口接的云，
       // 没指就沿输入边往上找最近的一片。以前整块盖上「该节点运行出错」，要自己去找输入边、开连线查看器
       // 只输出值的量测节点也画（值反正没出来）；图像由 ImagePane 自己管
-      const input = content !== "image" ? findBaseCloud(doc, path, node.id, ops, bundles, liveErrorPort) : null;
+      const input =
+        content !== 'image' ? findBaseCloud(doc, path, node.id, ops, bundles, liveErrorPort) : null;
       if (!input) {
         setLoading(false);
-        show("该节点运行出错");
+        show('该节点运行出错');
         return;
       }
-      fetchAndShow(input.resolved, input, null, "该节点运行出错");
+      fetchAndShow(input.resolved, input, null, '该节点运行出错');
       return () => {
         cancelled = true;
       };
     }
-    if (liveState === "cancelled" && liveCode === "upstream_failed") {
+    if (liveState === 'cancelled' && liveCode === 'upstream_failed') {
       setLoading(false);
-      show("上游节点出错，这个节点没有执行");
+      show('上游节点出错，这个节点没有执行');
       return;
     }
-    if (liveState !== "done" && liveState !== "skipped") {
+    if (liveState !== 'done' && liveState !== 'skipped') {
       setLoading(false);
-      const text = liveState === "running" ? "正在计算…" : "该节点尚未产出结果";
+      const text = liveState === 'running' ? '正在计算…' : '该节点尚未产出结果';
       // 同一个节点、同一种内容重跑：留着上一片云（图像模式的 lastGood 同一个意思），状态缩到角上。以前一重跑就摘掉
       // 点、盖上整块「正在计算…」，拖参数时每 30 ms 一次的预览让画面一闪一闪。runId 仍是屏幕上那片云的那次运行
       setDisplay((prev) =>
         prev.nodeId === nodeId && prev.cloud && prev.content === content
           ? { ...prev, status: text, busy: true }
-          : { nodeId, runId: runId ?? null, cloud: null, status: text, base: null, port: null, preview: isPreview, content },
+          : {
+              nodeId,
+              runId: runId ?? null,
+              cloud: null,
+              status: text,
+              base: null,
+              port: null,
+              preview: isPreview,
+              content,
+            },
       );
       return;
     }
     // 显示值时不取云：值就在事件里（stats.outputs），底图也用不上。
     // 图像由 ImagePane 自己按级别取（docs/image-plan.md 阶段 3），这里同样不取云
-    if (content === "value" || content === "image") {
+    if (content === 'value' || content === 'image') {
       setLoading(false);
       show(null);
       return;
@@ -257,13 +292,15 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = nu
     // 只输出 Box2D/Line2D 的节点若显示成空白，用户就看不出框压在剖面的哪里。
     // Bundle 里的点云字段也算「自己的云」（`<port>.<field>`，m8-plan L3）。
     const port =
-      portPick && cloudPorts.includes(portPick) ? portPick : firstCloudPort(ops, node.op, bundles, liveOutputs);
+      portPick && cloudPorts.includes(portPick)
+        ? portPick
+        : firstCloudPort(ops, node.op, bundles, liveOutputs);
     let base: BaseCloud | null = null;
     // 子图节点的结果在内部那个叶子上，按路径查结果仓（F2）
     let resolved = port ? resolveOutput(doc, path, node.id, port) : null;
     if (port && !resolved) {
       setLoading(false);
-      show("这个算子的内部结果查不到（库算子的定义在库文件里）");
+      show('这个算子的内部结果查不到（库算子的定义在库文件里）');
       return;
     }
     if (!port) {
@@ -272,7 +309,7 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = nu
     }
     if (!resolved) {
       setLoading(false);
-      show("该节点无点云输出，上游也没有可当底图的点云");
+      show('该节点无点云输出，上游也没有可当底图的点云');
       return;
     }
 
@@ -282,8 +319,28 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = nu
       cancelled = true;
     };
     // 依赖的是「还没运行」这个布尔值而不是 runStatus 本身：running → ok 不该让取数重来一遍
-  }, [frozen, node, nodeId, idleText, runId, notRun, liveState, liveCode, liveErrorPort, maxPoints, doc, path,
-      isPreview, previewMaxPoints, ops, bundles, liveOutputs, content, portPick, cloudPorts]);
+  }, [
+    frozen,
+    node,
+    nodeId,
+    idleText,
+    runId,
+    notRun,
+    liveState,
+    liveCode,
+    liveErrorPort,
+    maxPoints,
+    doc,
+    path,
+    isPreview,
+    previewMaxPoints,
+    ops,
+    bundles,
+    liveOutputs,
+    content,
+    portPick,
+    cloudPorts,
+  ]);
 
   const frozenDisplay = useMemo<Display | null>(
     () =>
@@ -306,7 +363,7 @@ export function useViewerSource({ slot, idleText, maxPoints, pick, portPick = nu
     loading: frozen ? false : loading,
     node,
     op,
-    state: frozen ? "done" : liveState,
+    state: frozen ? 'done' : liveState,
     outputs,
     content,
     autoContent,

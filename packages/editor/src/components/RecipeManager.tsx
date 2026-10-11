@@ -3,11 +3,11 @@
 // 每条一个彩色类别徽标 + 描述 + 建议修复按钮，底部「全部按建议修复」（一次撤销）。
 // 管理动作都改内存里的配方集合、进撤销栈，Ctrl+S 时才落盘（导出除外：它立即写）。
 
-import { useEffect, useState } from "react";
+import { useEffect, useState } from 'react';
 
-import { baseNameOf, KIND_LABEL, recipeFileName, type Mismatch } from "../lib/recipes";
-import { useGraphStore } from "../store/graph";
-import { selectRecipe, useRecipeReports, useRecipeStore } from "../store/recipe";
+import { baseNameOf, KIND_LABEL, recipeFileName, type Mismatch } from '../lib/recipes';
+import { useGraphStore } from '../store/graph';
+import { selectRecipe, useRecipeReports, useRecipeStore } from '../store/recipe';
 
 import {
   deleteRecipeInteractive,
@@ -16,7 +16,7 @@ import {
   importRecipeInteractive,
   newRecipeInteractive,
   renameRecipeInteractive,
-} from "./recipeActions";
+} from './recipeActions';
 
 export function RecipeManager() {
   const doc = useGraphStore((s) => s.doc);
@@ -46,7 +46,13 @@ export function RecipeManager() {
     <div className="ppanel__body mg" data-testid="recipe-manager">
       <aside className="mg-side">
         <div className="mg-tools">
-          <button type="button" className="lf-btn" data-testid="mg-new" disabled={!dir} onClick={() => void choose(newRecipeInteractive(null))}>
+          <button
+            type="button"
+            className="lf-btn"
+            data-testid="mg-new"
+            disabled={!dir}
+            onClick={() => void choose(newRecipeInteractive(null))}
+          >
             + 新建
           </button>
           <button
@@ -58,14 +64,22 @@ export function RecipeManager() {
           >
             复制
           </button>
-          <button type="button" className="lf-btn" data-testid="mg-import" disabled={!dir} onClick={() => void choose(importRecipeInteractive())}>
+          <button
+            type="button"
+            className="lf-btn"
+            data-testid="mg-import"
+            disabled={!dir}
+            onClick={() => void choose(importRecipeInteractive())}
+          >
             导入…
           </button>
         </div>
         <ul className="mg-list" data-testid="mg-list">
           {set.recipes.length === 0 && (
             <li className="mg-empty">
-              {dir ? "还没有配方。「+ 新建」建一个空配方，所有值先沿用基础。" : "图还没存过盘：先保存图（Ctrl+S），配方存在图文件旁边。"}
+              {dir
+                ? '还没有配方。「+ 新建」建一个空配方，所有值先沿用基础。'
+                : '图还没存过盘：先保存图（Ctrl+S），配方存在图文件旁边。'}
             </li>
           )}
           {set.recipes.map((r) => {
@@ -75,40 +89,52 @@ export function RecipeManager() {
               <li key={r.id}>
                 <button
                   type="button"
-                  className={`mg-item${r.name === picked ? " is-picked" : ""}${r.name === current ? " is-current" : ""}`}
+                  className={`mg-item${r.name === picked ? ' is-picked' : ''}${r.name === current ? ' is-current' : ''}`}
                   data-testid="mg-item"
                   data-name={r.name}
                   onClick={() => setPicked(r.name)}
                   onDoubleClick={() => selectRecipe(r.name)}
                   title="单击看详情；双击切到这个配方"
                 >
-                  <span className={`mg-item__star${set.defaultName === r.name ? " is-on" : ""}`} title="默认配方">
+                  <span
+                    className={`mg-item__star${set.defaultName === r.name ? ' is-on' : ''}`}
+                    title="默认配方"
+                  >
                     ★
                   </span>
                   <span className="mg-item__name">{r.name}</span>
                   {unsaved && <span className="recipe-menu__dirty" title="没存的改动" />}
                   <span className="mg-item__count">{Object.keys(r.values).length} 个值</span>
                   {(rep?.blocking ?? 0) > 0 && (
-                    <span className="recipe-badge recipe-badge--bad" data-testid="mg-item-bad" title="失配数：这个配方不能运行">
+                    <span
+                      className="recipe-badge recipe-badge--bad"
+                      data-testid="mg-item-bad"
+                      title="失配数：这个配方不能运行"
+                    >
                       {rep!.blocking}
                     </span>
                   )}
-                  {rep?.items.some((m) => m.kind === "spec") && (
-                    <span className="recipe-badge recipe-badge--spec" title="规格变了（只提示，不阻止运行）">④</span>
+                  {rep?.items.some((m) => m.kind === 'spec') && (
+                    <span
+                      className="recipe-badge recipe-badge--spec"
+                      title="规格变了（只提示，不阻止运行）"
+                    >
+                      ④
+                    </span>
                   )}
                 </button>
               </li>
             );
           })}
         </ul>
-        <footer className="mg-dir" data-testid="mg-dir" title={dir ?? ""}>
+        <footer className="mg-dir" data-testid="mg-dir" title={dir ?? ''}>
           {dir ? (
             <>
               配方目录 <code>{baseNameOf(dir)}/</code>
-              {status === "loading" && " · 正在读…"}
+              {status === 'loading' && ' · 正在读…'}
             </>
           ) : (
-            "图还没存过盘，没有配方目录"
+            '图还没存过盘，没有配方目录'
           )}
           {problems.length > 0 && (
             <ul className="mg-problems" data-testid="mg-problems">
@@ -131,18 +157,28 @@ export function RecipeManager() {
               <div className="mg-head__title">
                 <h3 data-testid="mg-title">
                   {entry.name}
-                  {set.defaultName === entry.name && <span className="recipe-menu__star"> ★ 默认</span>}
+                  {set.defaultName === entry.name && (
+                    <span className="recipe-menu__star"> ★ 默认</span>
+                  )}
                   {entry.name === current && <span className="mg-tag">当前</span>}
-                  {!saved.recipes.includes(entry) && <span className="mg-tag mg-tag--dirty">未保存</span>}
+                  {!saved.recipes.includes(entry) && (
+                    <span className="mg-tag mg-tag--dirty">未保存</span>
+                  )}
                 </h3>
                 <p className="mg-head__meta">
-                  <code>{recipeFileName(entry.name)}</code> · {Object.keys(entry.values).length} 个值
-                  {entry.updatedAt && ` · 改于 ${entry.updatedAt.replace("T", " ").slice(0, 19)}`}
+                  <code>{recipeFileName(entry.name)}</code> · {Object.keys(entry.values).length}{' '}
+                  个值
+                  {entry.updatedAt && ` · 改于 ${entry.updatedAt.replace('T', ' ').slice(0, 19)}`}
                 </p>
               </div>
               <div className="mg-head__actions">
                 {entry.name !== current && (
-                  <button type="button" className="lf-btn" data-testid="mg-use" onClick={() => selectRecipe(entry.name)}>
+                  <button
+                    type="button"
+                    className="lf-btn"
+                    data-testid="mg-use"
+                    onClick={() => selectRecipe(entry.name)}
+                  >
                     切到它
                   </button>
                 )}
@@ -151,18 +187,35 @@ export function RecipeManager() {
                   className="lf-btn"
                   data-testid="mg-default"
                   onClick={() =>
-                    useGraphStore.getState().setDefaultRecipe(set.defaultName === entry.name ? null : entry.name)
+                    useGraphStore
+                      .getState()
+                      .setDefaultRecipe(set.defaultName === entry.name ? null : entry.name)
                   }
                 >
-                  {set.defaultName === entry.name ? "取消默认" : "设为默认"}
+                  {set.defaultName === entry.name ? '取消默认' : '设为默认'}
                 </button>
-                <button type="button" className="lf-btn" data-testid="mg-rename" onClick={() => void choose(renameRecipeInteractive(entry.name))}>
+                <button
+                  type="button"
+                  className="lf-btn"
+                  data-testid="mg-rename"
+                  onClick={() => void choose(renameRecipeInteractive(entry.name))}
+                >
                   重命名
                 </button>
-                <button type="button" className="lf-btn" data-testid="mg-export" onClick={() => void exportRecipeInteractive(entry.name)}>
+                <button
+                  type="button"
+                  className="lf-btn"
+                  data-testid="mg-export"
+                  onClick={() => void exportRecipeInteractive(entry.name)}
+                >
                   导出…
                 </button>
-                <button type="button" className="lf-btn lf-btn--danger" data-testid="mg-delete" onClick={() => void deleteRecipeInteractive(entry.name)}>
+                <button
+                  type="button"
+                  className="lf-btn lf-btn--danger"
+                  data-testid="mg-delete"
+                  onClick={() => void deleteRecipeInteractive(entry.name)}
+                >
                   删除
                 </button>
               </div>
@@ -170,11 +223,13 @@ export function RecipeManager() {
 
             <h4 className="mg-section">失配报告</h4>
             {!report || report.items.length === 0 ? (
-              <p className="mg-ok" data-testid="mg-no-mismatch">没有失配：配方里每个值都对得上当前图的图参数规格。</p>
+              <p className="mg-ok" data-testid="mg-no-mismatch">
+                没有失配：配方里每个值都对得上当前图的图参数规格。
+              </p>
             ) : (
               <ul className="mg-report" data-testid="mg-report">
                 {report.items.map((m, i) => (
-                  <MismatchRow key={`${m.kind}:${m.param ?? ""}:${i}`} recipe={entry.name} m={m} />
+                  <MismatchRow key={`${m.kind}:${m.param ?? ''}:${i}`} recipe={entry.name} m={m} />
                 ))}
               </ul>
             )}
@@ -182,8 +237,8 @@ export function RecipeManager() {
               <footer className="mg-foot">
                 <span className="mg-foot__note">
                   {report.blocking > 0
-                    ? "有失配时这个配方不能运行；其余配方不受影响。"
-                    : "只有「规格变了」的提示：不阻止运行。"}
+                    ? '有失配时这个配方不能运行；其余配方不受影响。'
+                    : '只有「规格变了」的提示：不阻止运行。'}
                 </span>
                 <button
                   type="button"
@@ -204,7 +259,7 @@ export function RecipeManager() {
 
 function MismatchRow({ recipe, m }: { recipe: string; m: Mismatch }) {
   return (
-    <li className="mg-mm" data-testid="mg-mismatch" data-kind={m.kind} data-param={m.param ?? ""}>
+    <li className="mg-mm" data-testid="mg-mismatch" data-kind={m.kind} data-param={m.param ?? ''}>
       <span className={`mg-kind mg-kind--${m.kind}`}>{KIND_LABEL[m.kind]}</span>
       <div className="mg-mm__body">
         {m.param && <code className="mg-mm__param">{m.param}</code>}

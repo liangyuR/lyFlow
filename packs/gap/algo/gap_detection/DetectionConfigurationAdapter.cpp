@@ -16,12 +16,14 @@ namespace detection {
 namespace {
 
 void RequireMap(const YAML::Node& node, const std::string& name) {
-  if (!node || !node.IsMap()) throw std::runtime_error(name + " must be a map");
+  if (!node || !node.IsMap())
+    throw std::runtime_error(name + " must be a map");
 }
 
 domain::Roi parseRoi(const YAML::Node& node, const std::string& name) {
   const auto values = node.as<std::vector<double>>();
-  if (values.size() != 4) throw std::runtime_error(name + " must contain four values");
+  if (values.size() != 4)
+    throw std::runtime_error(name + " must contain four values");
   return {{{values[0], values[1], values[2], values[3]}}};
 }
 
@@ -39,10 +41,11 @@ domain::CircleRadiusConfiguration parseRadiusConfiguration(const YAML::Node& nod
           node[side + "_circle_radius"].as<double>()};
 }
 
-domain::CircleCompensationConfiguration parseCircleCompensationConfiguration(
-    const YAML::Node& gap, const std::string& side) {
+domain::CircleCompensationConfiguration
+parseCircleCompensationConfiguration(const YAML::Node& gap, const std::string& side) {
   const auto compensation = gap["compensation"];
-  if (!compensation || !compensation[side]) return {};
+  if (!compensation || !compensation[side])
+    return {};
 
   const auto node = compensation[side];
   RequireMap(node, "gap.compensation." + side);
@@ -66,7 +69,8 @@ domain::CircleCompensationConfiguration parseCircleCompensationConfiguration(
 
 domain::InitialPoseMode parseInitialPoseMode(const YAML::Node& align) {
   const auto node = align["initial_pose_mode"];
-  if (!node) return domain::InitialPoseMode::kEndpointMidpointTranslation;
+  if (!node)
+    return domain::InitialPoseMode::kEndpointMidpointTranslation;
   if (!node.IsScalar()) {
     throw std::runtime_error("align.initial_pose_mode must be a scalar");
   }
@@ -74,22 +78,27 @@ domain::InitialPoseMode parseInitialPoseMode(const YAML::Node& align) {
   if (mode == "endpoint_midpoint_translation") {
     return domain::InitialPoseMode::kEndpointMidpointTranslation;
   }
-  if (mode == "centroid_translation") return domain::InitialPoseMode::kCentroidTranslation;
-  if (mode == "pca_rigid_centroid") return domain::InitialPoseMode::kPcaRigidCentroid;
-  throw std::runtime_error(
-      "align.initial_pose_mode must be endpoint_midpoint_translation, "
-      "centroid_translation, or pca_rigid_centroid");
+  if (mode == "centroid_translation")
+    return domain::InitialPoseMode::kCentroidTranslation;
+  if (mode == "pca_rigid_centroid")
+    return domain::InitialPoseMode::kPcaRigidCentroid;
+  throw std::runtime_error("align.initial_pose_mode must be endpoint_midpoint_translation, "
+                           "centroid_translation, or pca_rigid_centroid");
 }
 
 domain::ConsistencyMode parseConsistencyMode(const YAML::Node& node) {
-  if (!node) return domain::ConsistencyMode::kShadow;
+  if (!node)
+    return domain::ConsistencyMode::kShadow;
   if (!node.IsScalar()) {
     throw std::runtime_error("align.robustness.consistency.mode must be a scalar");
   }
   const auto mode = node.as<std::string>();
-  if (mode == "off") return domain::ConsistencyMode::kOff;
-  if (mode == "shadow") return domain::ConsistencyMode::kShadow;
-  if (mode == "enforce") return domain::ConsistencyMode::kEnforce;
+  if (mode == "off")
+    return domain::ConsistencyMode::kOff;
+  if (mode == "shadow")
+    return domain::ConsistencyMode::kShadow;
+  if (mode == "enforce")
+    return domain::ConsistencyMode::kEnforce;
   throw std::runtime_error("align.robustness.consistency.mode must be off, shadow, or enforce");
 }
 
@@ -98,7 +107,8 @@ domain::ConsistencyMode parseConsistencyMode(const YAML::Node& node) {
 domain::RobustnessConfiguration parseRobustnessConfiguration(const YAML::Node& align) {
   domain::RobustnessConfiguration configuration;
   const auto node = align["robustness"];
-  if (!node) return configuration;
+  if (!node)
+    return configuration;
   RequireMap(node, "align.robustness");
   if (node["degenerate_ratio"]) {
     configuration.degenerate_ratio = node["degenerate_ratio"].as<double>();
@@ -150,10 +160,14 @@ domain::RobustnessConfiguration parseRobustnessConfiguration(const YAML::Node& a
 domain::RollAnchoredCropConfiguration parseRollAnchoredCropConfiguration(const YAML::Node& common) {
   domain::RollAnchoredCropConfiguration configuration;
   const auto node = common["roll_anchored_crop"];
-  if (!node || !node.IsMap()) return configuration;
-  if (node["enabled"]) configuration.enabled = node["enabled"].as<bool>();
-  if (node["half_width_mm"]) configuration.half_width_mm = node["half_width_mm"].as<double>();
-  if (node["half_height_mm"]) configuration.half_height_mm = node["half_height_mm"].as<double>();
+  if (!node || !node.IsMap())
+    return configuration;
+  if (node["enabled"])
+    configuration.enabled = node["enabled"].as<bool>();
+  if (node["half_width_mm"])
+    configuration.half_width_mm = node["half_width_mm"].as<double>();
+  if (node["half_height_mm"])
+    configuration.half_height_mm = node["half_height_mm"].as<double>();
   if (node["min_points_kept"]) {
     configuration.min_points_kept = node["min_points_kept"].as<std::size_t>();
   }
@@ -180,13 +194,17 @@ domain::RollAnchoredCropConfiguration parseRollAnchoredCropConfiguration(const Y
 domain::IntensityGateConfiguration parseIntensityGateConfiguration(const YAML::Node& common) {
   domain::IntensityGateConfiguration configuration;
   const auto node = common["intensity_gate"];
-  if (!node || !node.IsMap()) return configuration;
-  if (node["using_gate"]) configuration.enabled = node["using_gate"].as<bool>();
+  if (!node || !node.IsMap())
+    return configuration;
+  if (node["using_gate"])
+    configuration.enabled = node["using_gate"].as<bool>();
   if (node["relative_threshold"]) {
     configuration.relative_threshold = node["relative_threshold"].as<double>();
   }
-  if (node["min_counts"]) configuration.min_counts = node["min_counts"].as<double>();
-  if (node["max_drop_ratio"]) configuration.max_drop_ratio = node["max_drop_ratio"].as<double>();
+  if (node["min_counts"])
+    configuration.min_counts = node["min_counts"].as<double>();
+  if (node["max_drop_ratio"])
+    configuration.max_drop_ratio = node["max_drop_ratio"].as<double>();
   if (node["min_points_kept"]) {
     configuration.min_points_kept = node["min_points_kept"].as<std::size_t>();
   }
@@ -196,8 +214,10 @@ domain::IntensityGateConfiguration parseIntensityGateConfiguration(const YAML::N
   if (node["apply_flush_ref"]) {
     configuration.apply_flush_ref = node["apply_flush_ref"].as<bool>();
   }
-  if (node["apply_gap_left"]) configuration.apply_gap_left = node["apply_gap_left"].as<bool>();
-  if (node["apply_gap_right"]) configuration.apply_gap_right = node["apply_gap_right"].as<bool>();
+  if (node["apply_gap_left"])
+    configuration.apply_gap_left = node["apply_gap_left"].as<bool>();
+  if (node["apply_gap_right"])
+    configuration.apply_gap_right = node["apply_gap_right"].as<bool>();
   if (!std::isfinite(configuration.relative_threshold) || configuration.relative_threshold < 0 ||
       configuration.relative_threshold >= 1) {
     throw std::runtime_error("common_settings.intensity_gate.relative_threshold must be in [0, 1)");
@@ -239,12 +259,14 @@ bool isSafeBasename(const std::string& value) {
 
 void validateLegacyTemplateSelectionMode(const YAML::Node& align) {
   const auto node = align["template_selection_mode"];
-  if (!node) return;
+  if (!node)
+    return;
   if (!node.IsScalar()) {
     throw std::runtime_error("align.template_selection_mode must be a scalar");
   }
   const auto mode = node.as<std::string>();
-  if (mode == "primary_only" || mode == "primary_then_fallback" || mode == "best_icp") return;
+  if (mode == "primary_only" || mode == "primary_then_fallback" || mode == "best_icp")
+    return;
   throw std::runtime_error(
       "align.template_selection_mode must be primary_only, primary_then_fallback, or "
       "best_icp");
@@ -265,7 +287,8 @@ domain::TemplateRoiConfiguration parseTemplateRois(const YAML::Node& node,
 
 std::optional<std::string> parseLegacyPrimaryTemplateId(const YAML::Node& align) {
   const auto node = align["primary_template_id"];
-  if (!node) return std::nullopt;
+  if (!node)
+    return std::nullopt;
   if (!node.IsScalar()) {
     throw std::runtime_error("align.primary_template_id must be a scalar");
   }
@@ -289,7 +312,8 @@ std::vector<domain::TemplateCandidate> parseTemplateCandidates(const YAML::Node&
     candidates.push_back({id, "left_template.pcd", "right_template.pcd"});
     ids.insert(id);
   }
-  if (!node) return candidates;
+  if (!node)
+    return candidates;
   for (const auto& item : node) {
     RequireMap(item, "align.template_candidates item");
     if (!item["id"] || !item["id"].IsScalar() || !item["left"] || !item["left"].IsScalar() ||
@@ -318,14 +342,15 @@ std::vector<domain::TemplateCandidate> parseTemplateCandidates(const YAML::Node&
   return candidates;
 }
 
-}  // namespace
+} // namespace
 
 domain::AlignmentConfiguration parseAlignmentConfiguration(const YAML::Node& node) {
   const auto common = node["common_settings"];
   const auto align = node["align"];
   const auto camera_selection =
       ::domain::config::ParseCameraSelection(common["using_camera"].as<std::string>());
-  if (!camera_selection) throw std::runtime_error("using_camera must be Both, Left, or Right");
+  if (!camera_selection)
+    throw std::runtime_error("using_camera must be Both, Left, or Right");
   domain::AlignmentConfiguration configuration{
       parseRoi(common["overall_roi"], "overall_roi"),
       std::string(::domain::config::CameraSelectionStorageValue(*camera_selection)),
@@ -429,7 +454,8 @@ domain::DetectionConfiguration parseDetectionConfiguration(const YAML::Node& nod
   const auto validate_compensation = [&](const domain::CircleCompensationConfiguration& value,
                                          const domain::CircleRadiusConfiguration& circle_radius,
                                          const std::string& side) {
-    if (!value.enabled) return;
+    if (!value.enabled)
+      return;
     const auto prefix = "gap.compensation." + side;
     if (!circle_radius.fixed || !std::isfinite(circle_radius.value) || circle_radius.value <= 0) {
       throw std::runtime_error(prefix + " requires a positive fixed circle radius");
@@ -460,9 +486,8 @@ domain::DetectionConfiguration parseDetectionConfiguration(const YAML::Node& nod
   if (configuration.gap.circle_fit_retry_distance != 0 &&
       (!std::isfinite(configuration.gap.circle_fit_retry_distance) ||
        configuration.gap.circle_fit_retry_distance <= configuration.common.circle_fit_distance)) {
-    throw std::runtime_error(
-        "gap.circle_fit_retry_distance must be greater than "
-        "common_settings.circle_fit_distance");
+    throw std::runtime_error("gap.circle_fit_retry_distance must be greater than "
+                             "common_settings.circle_fit_distance");
   }
   if (!::domain::config::ParseCameraSelection(
           configuration.gap.camera_separated_preferred_camera)) {
@@ -470,15 +495,13 @@ domain::DetectionConfiguration parseDetectionConfiguration(const YAML::Node& nod
   }
   if (configuration.gap.camera_separated_preferred_camera != "Both" &&
       !configuration.gap.camera_separated_circle_fallback) {
-    throw std::runtime_error(
-        "gap.camera_separated_preferred_camera requires "
-        "gap.camera_separated_circle_fallback");
+    throw std::runtime_error("gap.camera_separated_preferred_camera requires "
+                             "gap.camera_separated_circle_fallback");
   }
   if (configuration.gap.camera_separated_select_closest_nominal) {
     if (!configuration.gap.camera_separated_circle_fallback) {
-      throw std::runtime_error(
-          "gap.camera_separated_select_closest_nominal requires "
-          "gap.camera_separated_circle_fallback");
+      throw std::runtime_error("gap.camera_separated_select_closest_nominal requires "
+                               "gap.camera_separated_circle_fallback");
     }
     if (configuration.gap.camera_separated_preferred_camera != "Both") {
       throw std::runtime_error(
@@ -524,11 +547,13 @@ domain::CalibrationConfiguration parseCalibrationConfiguration(const YAML::Node&
   const bool valid_roi = std::all_of(roi_values.begin(), roi_values.end(),
                                      [](double value) { return std::isfinite(value); }) &&
                          roi_values[0] < roi_values[2] && roi_values[1] < roi_values[3];
-  if (!valid_roi) throw std::runtime_error("alignment.overall_roi_mm is invalid");
+  if (!valid_roi)
+    throw std::runtime_error("alignment.overall_roi_mm is invalid");
   if (!::domain::config::ParseCameraSelection(using_camera)) {
     throw std::runtime_error("alignment.using_camera must be Both, Left, or Right");
   }
-  if (method != "ICP") throw std::runtime_error("alignment.method must be ICP");
+  if (method != "ICP")
+    throw std::runtime_error("alignment.method must be ICP");
 
   if (!std::isfinite(fit_distance_mm) || fit_distance_mm <= 0) {
     throw std::runtime_error("cylinder.fit_distance_mm must be positive");
@@ -586,4 +611,4 @@ void GapDetection::setParams(const YAML::Node& params) {
   setConfiguration(parseDetectionConfiguration(params));
 }
 
-}  // namespace detection
+} // namespace detection

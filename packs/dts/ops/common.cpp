@@ -18,14 +18,17 @@ PointCloud cloudFromProfile(const Profile& p, const std::vector<float>& intensit
   PointCloud c;
   const std::size_t n = p.size();
   c.reserve(n);
-  for (std::size_t i = 0; i < n; ++i) c.push(p.x[i], 0.0f, p.z[i]);
-  if (intensity.size() == n) c.intensity = intensity;
+  for (std::size_t i = 0; i < n; ++i)
+    c.push(p.x[i], 0.0f, p.z[i]);
+  if (intensity.size() == n)
+    c.intensity = intensity;
   return c;
 }
 
 std::vector<Piece> piecesFromJson(const nlohmann::json& faces) {
   std::vector<Piece> out;
-  if (!faces.contains("pieces")) return out;
+  if (!faces.contains("pieces"))
+    return out;
   for (const auto& j : faces["pieces"]) {
     out.push_back(Piece{j.value("i0", 0), j.value("i1", 0)});
   }
@@ -34,7 +37,8 @@ std::vector<Piece> piecesFromJson(const nlohmann::json& faces) {
 
 std::vector<Face> facesFromJson(const nlohmann::json& faces) {
   std::vector<Face> out;
-  if (!faces.contains("faces")) return out;
+  if (!faces.contains("faces"))
+    return out;
   for (const auto& j : faces["faces"]) {
     Face f;
     f.x0 = j.value("x0", 0.0);
@@ -57,17 +61,19 @@ std::vector<Face> facesFromJson(const nlohmann::json& faces) {
 }
 
 nlohmann::json faceToJson(const Face& f) {
-  return nlohmann::json{{"x0", f.x0},           {"x1", f.x1},   {"z0", f.z0},
-                        {"z1", f.z1},           {"lenMm", f.lenMm}, {"angleDeg", f.angleDeg},
-                        {"rmsMm", f.rmsMm},     {"n", f.n},     {"px", f.line.px},
-                        {"pz", f.line.pz},      {"dx", f.line.dx}, {"dz", f.line.dz}};
+  return nlohmann::json{{"x0", f.x0},       {"x1", f.x1},       {"z0", f.z0},
+                        {"z1", f.z1},       {"lenMm", f.lenMm}, {"angleDeg", f.angleDeg},
+                        {"rmsMm", f.rmsMm}, {"n", f.n},         {"px", f.line.px},
+                        {"pz", f.line.pz},  {"dx", f.line.dx},  {"dz", f.line.dz}};
 }
 
 const nlohmann::json* recordData(const Data& d, const char* type) {
   const Record* r = d.asRecord();
-  if (r == nullptr) return nullptr;
-  if (type != nullptr && r->type != type) return nullptr;
+  if (r == nullptr)
+    return nullptr;
+  if (type != nullptr && r->type != type)
+    return nullptr;
   return &r->data;
 }
 
-}  // namespace lyflow::dts
+} // namespace lyflow::dts

@@ -5,8 +5,7 @@
 namespace lyflow::ops {
 namespace {
 
-Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
-               ExecContext& ctx) {
+Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
   const PointCloud& in = *inputs.get("cloud").asCloud();
   const std::string& kind = params.choice("regionKind");
   const std::array<float, 3> t = params.vec3("translation");
@@ -16,11 +15,11 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
     point = params.vec3("point");
     normal = params.vec3("normal");
     const double len = std::sqrt(static_cast<double>(normal[0]) * normal[0] +
-                                static_cast<double>(normal[1]) * normal[1] +
-                                static_cast<double>(normal[2]) * normal[2]);
+                                 static_cast<double>(normal[1]) * normal[1] +
+                                 static_cast<double>(normal[2]) * normal[2]);
     if (!(len > 1e-9)) {
-      return Status::Error(Phase::Execute, "bad_param",
-                           "半空间的法向是零向量，分不出哪一侧", "normal");
+      return Status::Error(Phase::Execute, "bad_param", "半空间的法向是零向量，分不出哪一侧",
+                           "normal");
     }
   } else {
     lo = params.vec3("boxMin");
@@ -44,7 +43,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
 
   Ticker ticker(ctx, n);
   for (std::size_t p = 0; p < n; ++p) {
-    if (ticker.tick(p)) return Status::Ok();
+    if (ticker.tick(p))
+      return Status::Ok();
     const float x = in.xyz[p * 3], y = in.xyz[p * 3 + 1], z = in.xyz[p * 3 + 2];
     bool selected;
     if (kind == "halfspace") {
@@ -55,7 +55,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
     } else {
       selected = x >= lo[0] && x <= hi[0] && y >= lo[1] && y <= hi[1] && z >= lo[2] && z <= hi[2];
     }
-    if (!selected) continue;
+    if (!selected)
+      continue;
     out.xyz[p * 3] = x + t[0];
     out.xyz[p * 3 + 1] = y + t[1];
     out.xyz[p * 3 + 2] = z + t[2];
@@ -74,18 +75,17 @@ void registerEditTranslateRegion(Registry& r) {
   op.label = "平移选区";
   op.category = "编辑";
   op.keywords = {"translate", "region", "perturb", "halfspace", "box",
-                 "平移", "选区", "扰动", "半空间", "合成位移"};
-  op.doc =
-      "把几何选区内的点整体平移，其余点原样。选区是半空间（点 + 法向，取 dot(p-point, "
-      "normal) > 0 的一侧）或轴对齐盒（闭区间）。平移量与选区参数（point / boxMin / boxMax）"
-      "和输入云同帧同单位，都是米 —— 传感器帧与测量帧都是米（gap.to_measurement_frame "
-      "只交换 y 与 z，不换单位），只有 Measurement 那类读数是毫米，所以 lyflow perturb 的 "
-      "--expect 写 ±1000 而不是 ±1。点数与点序不变，intensity / rgb / normals 原样带过。"
-      "主要用途是合成位移：把缝的一侧推开若干毫米，看读数跟不跟得上（lyflow perturb）。"
-      "法向通道不跟着转：只做平移，不做旋转。\n"
-      "选区是**纯几何**的，不认识缝、壁、锚点这些语义：切分面穿过一面近竖直的壁时，壁上一半"
-      "的点会跟着动；压在下游要用的锚点上时，锚点跟着动而读出「完美跟随」—— 选区必须先在"
-      "剖面上核对。";
+                 "平移",      "选区",   "扰动",    "半空间",    "合成位移"};
+  op.doc = "把几何选区内的点整体平移，其余点原样。选区是半空间（点 + 法向，取 dot(p-point, "
+           "normal) > 0 的一侧）或轴对齐盒（闭区间）。平移量与选区参数（point / boxMin / boxMax）"
+           "和输入云同帧同单位，都是米 —— 传感器帧与测量帧都是米（gap.to_measurement_frame "
+           "只交换 y 与 z，不换单位），只有 Measurement 那类读数是毫米，所以 lyflow perturb 的 "
+           "--expect 写 ±1000 而不是 ±1。点数与点序不变，intensity / rgb / normals 原样带过。"
+           "主要用途是合成位移：把缝的一侧推开若干毫米，看读数跟不跟得上（lyflow perturb）。"
+           "法向通道不跟着转：只做平移，不做旋转。\n"
+           "选区是**纯几何**的，不认识缝、壁、锚点这些语义：切分面穿过一面近竖直的壁时，壁上一半"
+           "的点会跟着动；压在下游要用的锚点上时，锚点跟着动而读出「完美跟随」—— 选区必须先在"
+           "剖面上核对。";
 
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "待扰动的点云。", true}};
   op.outputs = {Port{"cloud", "PointCloud", "Cloud", "选区内已平移的点云。", true}};

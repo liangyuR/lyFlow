@@ -1,8 +1,8 @@
 // 传输层抽象：让 UI 代码不知道自己跑在 Tauri 里、浏览器里还是 HTTP 后端上。
 // 三个实现（tauri / http / static）各自一个文件，这里只有契约。
 
-import type { CoreInfo, OperatorManifestBundle, SnippetDesc } from "../types/manifest";
-import type { GraphDoc, SubgraphDef } from "../types/graph";
+import type { CoreInfo, OperatorManifestBundle, SnippetDesc } from '../types/manifest';
+import type { GraphDoc, SubgraphDef } from '../types/graph';
 import type {
   CacheStats,
   EvictResult,
@@ -11,9 +11,9 @@ import type {
   OutputInfo,
   RunOutputs,
   PlanNode,
-} from "../types/execution";
+} from '../types/execution';
 
-export type TransportKind = "tauri" | "http" | "static";
+export type TransportKind = 'tauri' | 'http' | 'static';
 
 export type Unlisten = () => void;
 
@@ -51,7 +51,7 @@ export interface RunOptions {
   /** 强制重算这些节点（修订一 V1）：跳过缓存、真跑、结果覆盖写回。id 语义同 targets，
    *  可与 targets、isolate、preview 组合。 */
   force?: string[] | undefined;
-  mode?: "full" | "preview" | undefined;
+  mode?: 'full' | 'preview' | undefined;
   previewMaxPoints?: number | undefined;
   previewBudgetMs?: number | undefined;
   /** 宿主已经加载好的点云会话 id。给了它，后端就把那对云注入

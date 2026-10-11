@@ -15,7 +15,10 @@ Px px(P2 p) { return Px{p.x, p.y}; }
 Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
   const cv::Mat gray = grayOf(inputs.get("image"));
   if (gray.empty()) {
-    return Status::Error(Phase::Execute, "bad_input", "需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行", {}, "image");
+    return Status::Error(
+        Phase::Execute, "bad_input",
+        "需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行", {},
+        "image");
   }
   BeadView bead;
   std::vector<Station> st;
@@ -23,7 +26,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     return Status::Error(Phase::Execute, "bad_input", "bead 不是完整的 glue.Bead", {}, "bead");
   }
   Metric metric;
-  if (Status s = metricFromInput(inputs, "calib", &metric); !s.ok) return s;
+  if (Status s = metricFromInput(inputs, "calib", &metric); !s.ok)
+    return s;
 
   EdgeSpec spec;
   spec.searchLength = params.number("searchLength");
@@ -61,7 +65,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
       const double d = metric.distance(es.from, es.edge);
       distance.push_back(numOrNull(d));
       status.push_back("ok");
-      if (std::isfinite(d)) kept.push_back(d);
+      if (std::isfinite(d))
+        kept.push_back(d);
       partPts.push_back(px(es.edge));
       segs.push_back({px(es.from), px(es.edge)});
     } else {
@@ -107,7 +112,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   outputs.set("distanceMax", measurement(hi, metric.unit(), why));
 
   ov.segments("distance", segs);
-  ov.points("part", partPts, er.side == 0 ? "" : (er.side > 0 ? "零件边（右侧）" : "零件边（左侧）"));
+  ov.points("part", partPts,
+            er.side == 0 ? "" : (er.side > 0 ? "零件边（右侧）" : "零件边（左侧）"));
   ov.points("outlier", outliers);
   outputs.set("overlay", ov.data());
   return Status::Ok();
@@ -116,12 +122,13 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
 std::vector<Issue> validate(const ParamView& params, const std::set<std::string>&) {
   std::vector<Issue> issues;
   if (params.number("searchLength") < params.number("farRun") + 10.0) {
-    issues.push_back(Issue::error("bad_param", "searchLength 要比 farRun 至少长 10 px", "searchLength"));
+    issues.push_back(
+        Issue::error("bad_param", "searchLength 要比 farRun 至少长 10 px", "searchLength"));
   }
   return issues;
 }
 
-}  // namespace
+} // namespace
 
 void registerEdgeDistance(Registry& r) {
   OperatorDesc op;
@@ -139,13 +146,15 @@ void registerEdgeDistance(Registry& r) {
   op.inputs = {
       Port{"image", "Image", "Image", "与 bead_width 同一帧。", true},
       Port{"bead", "Bundle<glue.Bead>", "Bead", "glue.bead_width 的逐站结果。", true},
-      withContract(Port{"calib", "Record", "Calib", "可选：image.PlaneCalib。接了距离出 mm。", false},
-                   {{"recordType", std_image::kPlaneCalibType}}),
+      withContract(
+          Port{"calib", "Record", "Calib", "可选：image.PlaneCalib。接了距离出 mm。", false},
+          {{"recordType", std_image::kPlaneCalibType}}),
   };
   op.outputs = {
-      Port{"edge", "Record", "Edge",
-           "glue.Edge：side（right | left | none）、每站的零件边点、量起点、距离与状态（ok / outlier / none / nobead）。",
-           true},
+      Port{
+          "edge", "Record", "Edge",
+          "glue.Edge：side（right | left | none）、每站的零件边点、量起点、距离与状态（ok / outlier / none / nobead）。",
+          true},
       Port{"distanceMean", "Measurement", "Distance Mean", "各站边距的均值。", true},
       Port{"distanceMin", "Measurement", "Distance Min", "各站边距的最小值。", true},
       Port{"distanceMax", "Measurement", "Distance Max", "各站边距的最大值。", true},
@@ -154,21 +163,21 @@ void registerEdgeDistance(Registry& r) {
   Param searchLength = floatParam("searchLength", "Search Length", 200.0, "px",
                                   "从胶边外 3 px 起沿法向往外找零件边的距离。");
   searchLength.min = 20.0;
-  Param reference = enumParam("reference", "Reference", "bead_edge",
-                              "边距从哪里量：胶靠零件边那一侧的边（默认），或胶的中线。",
-                              {EnumOption{"bead_edge", "胶的近边", ""},
-                               EnumOption{"bead_center", "胶的中线", ""}},
-                              true);
-  Param polarity = enumParam("edgePolarity", "Edge Polarity", "bright_to_dark",
-                             "从胶往外看零件边是 亮 → 暗（默认：翻边亮、外面暗）还是 暗 → 亮。",
-                             {EnumOption{"bright_to_dark", "亮 → 暗", ""},
-                              EnumOption{"dark_to_bright", "暗 → 亮", ""}},
-                             true);
+  Param reference = enumParam(
+      "reference", "Reference", "bead_edge",
+      "边距从哪里量：胶靠零件边那一侧的边（默认），或胶的中线。",
+      {EnumOption{"bead_edge", "胶的近边", ""}, EnumOption{"bead_center", "胶的中线", ""}}, true);
+  Param polarity = enumParam(
+      "edgePolarity", "Edge Polarity", "bright_to_dark",
+      "从胶往外看零件边是 亮 → 暗（默认：翻边亮、外面暗）还是 暗 → 亮。",
+      {EnumOption{"bright_to_dark", "亮 → 暗", ""}, EnumOption{"dark_to_bright", "暗 → 亮", ""}},
+      true);
   Param contrastMin = floatParam("contrastMin", "Contrast Min", 40.0, "",
                                  "零件边两侧的灰度差至少这么大（灰度级）。", true);
   contrastMin.min = 1.0;
-  Param farRun = floatParam("farRun", "Far Run", 12.0, "px",
-                            "零件边的远侧要持续这么长都暗下去（翻边上细的划痕、反光条过不了这一关）。", true);
+  Param farRun =
+      floatParam("farRun", "Far Run", 12.0, "px",
+                 "零件边的远侧要持续这么长都暗下去（翻边上细的划痕、反光条过不了这一关）。", true);
   farRun.min = 1.0;
   op.params = {searchLength, reference, polarity, contrastMin, farRun};
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
@@ -177,4 +186,4 @@ void registerEdgeDistance(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

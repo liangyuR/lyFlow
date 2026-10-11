@@ -22,17 +22,21 @@ struct StationList {
 Status loadStations(const ParamView& params, StationList* out) {
   const std::filesystem::path file = params.path("stations");
   auto bad = [&](const std::string& m) {
-    return Status::Error(Phase::Execute, "bad_param", "stations 文件 " + file.u8string() + "：" + m, "stations");
+    return Status::Error(Phase::Execute, "bad_param", "stations 文件 " + file.u8string() + "：" + m,
+                         "stations");
   };
   std::ifstream in(file, std::ios::binary);
-  if (!in) return Status::Error(Phase::Execute, "io_error", "打不开 stations 文件：" + file.u8string(), "stations");
+  if (!in)
+    return Status::Error(Phase::Execute, "io_error", "打不开 stations 文件：" + file.u8string(),
+                         "stations");
   Json doc;
   try {
     doc = Json::parse(std::string(std::istreambuf_iterator<char>(in), {}));
   } catch (const std::exception& e) {
     return bad(std::string("不是合法的 JSON（") + e.what() + "）");
   }
-  if (!doc.is_object()) return bad("需要包含 points 与 normals 的对象");
+  if (!doc.is_object())
+    return bad("需要包含 points 与 normals 的对象");
   const Json& pts = doc.value("points", Json());
   const Json& nrm = doc.value("normals", Json());
   if (!pts.is_array() || !nrm.is_array() || pts.empty() || pts.size() != nrm.size()) {
@@ -48,10 +52,12 @@ Status loadStations(const ParamView& params, StationList* out) {
     out->normals.push_back(unit(n));
   }
   if (doc.contains("ids")) {
-    if (!doc["ids"].is_array() || doc["ids"].size() != pts.size()) return bad("ids 要与 points 等长");
+    if (!doc["ids"].is_array() || doc["ids"].size() != pts.size())
+      return bad("ids 要与 points 等长");
     out->ids = doc["ids"];
   } else {
-    for (std::size_t i = 0; i < pts.size(); ++i) out->ids.push_back(i);
+    for (std::size_t i = 0; i < pts.size(); ++i)
+      out->ids.push_back(i);
   }
   return Status::Ok();
 }
@@ -60,7 +66,8 @@ Status loadStations(const ParamView& params, StationList* out) {
 Status poseFromInput(const Inputs& inputs, Pose2D* pose, bool* given) {
   *given = inputs.has("pose");
   pose->ok = true;
-  if (!*given) return Status::Ok();
+  if (!*given)
+    return Status::Ok();
   const Record* rec = inputs.get("pose").asRecord();
   if (!rec || rec->type != kPoseType) {
     return Status::Error(Phase::Execute, "bad_input", "pose 不是 glue.Pose2D", {}, "pose");
@@ -73,8 +80,10 @@ Status poseFromInput(const Inputs& inputs, Pose2D* pose, bool* given) {
   pose->angleDeg = numOf(d.value("angle", Json()));
   pose->center = pxOf(d.value("center", Json()));
   pose->teachCenter = pxOf(d.value("teachCenter", Json()));
-  if (pose->ok && (!std::isfinite(pose->angleDeg) || !finite(pose->center) || !finite(pose->teachCenter))) {
-    return Status::Error(Phase::Execute, "bad_input", "pose 缺 angle / center / teachCenter", {}, "pose");
+  if (pose->ok &&
+      (!std::isfinite(pose->angleDeg) || !finite(pose->center) || !finite(pose->teachCenter))) {
+    return Status::Error(Phase::Execute, "bad_input", "pose 缺 angle / center / teachCenter", {},
+                         "pose");
   }
   return Status::Ok();
 }
@@ -82,15 +91,21 @@ Status poseFromInput(const Inputs& inputs, Pose2D* pose, bool* given) {
 Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
   const cv::Mat gray = grayOf(inputs.get("image"));
   if (gray.empty()) {
-    return Status::Error(Phase::Execute, "bad_input", "需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行", {}, "image");
+    return Status::Error(
+        Phase::Execute, "bad_input",
+        "需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行", {},
+        "image");
   }
   StationList list;
-  if (Status s = loadStations(params, &list); !s.ok) return s;
+  if (Status s = loadStations(params, &list); !s.ok)
+    return s;
   Pose2D pose;
   bool poseGiven = false;
-  if (Status s = poseFromInput(inputs, &pose, &poseGiven); !s.ok) return s;
+  if (Status s = poseFromInput(inputs, &pose, &poseGiven); !s.ok)
+    return s;
   Metric metric;
-  if (Status s = metricFromInput(inputs, "calib", &metric); !s.ok) return s;
+  if (Status s = metricFromInput(inputs, "calib", &metric); !s.ok)
+    return s;
 
   CaliperSpec spec;
   spec.searchHalf = params.number("searchHalf");
@@ -108,9 +123,10 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   spec.widthMin = params.number("widthMin");
 
   Json point = Json::array(), normal = Json::array(), status = Json::array(), inner = Json::array(),
-       nearE = Json::array(), farE = Json::array(), innerNear = Json::array(), innerCenter = Json::array(),
-       width = Json::array(), innerNearPx = Json::array(), innerCenterPx = Json::array(),
-       widthPx = Json::array(), innerContrast = Json::array(), beadContrast = Json::array();
+       nearE = Json::array(), farE = Json::array(), innerNear = Json::array(),
+       innerCenter = Json::array(), width = Json::array(), innerNearPx = Json::array(),
+       innerCenterPx = Json::array(), widthPx = Json::array(), innerContrast = Json::array(),
+       beadContrast = Json::array();
   int okCount = 0, noInner = 0, noBead = 0, incomplete = 0, poseFail = 0, outside = 0;
   double centerSum = 0;
   int centerCount = 0;
@@ -143,7 +159,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     if (ok && (!std::isfinite(metric.distance(at(st.inner), at(st.nearEdge))) ||
                !std::isfinite(metric.distance(at(st.inner), at(mid))) ||
                !std::isfinite(metric.distance(at(st.nearEdge), at(st.farEdge))))) {
-      return Status::Error(Phase::Execute, "bad_input", "标定无法映射当前测量点（投影接近无穷远）", {}, "calib");
+      return Status::Error(Phase::Execute, "bad_input", "标定无法映射当前测量点（投影接近无穷远）",
+                           {}, "calib");
     }
     innerNear.push_back(numOrNull(ok ? metric.distance(at(st.inner), at(st.nearEdge)) : kNaN));
     innerCenter.push_back(numOrNull(ok ? metric.distance(at(st.inner), at(mid)) : kNaN));
@@ -159,20 +176,27 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
         centerSum += d;
         ++centerCount;
       }
-      good.push_back({px(at(st.inner)), px(at(std::isfinite(st.farEdge) ? st.farEdge : st.nearEdge))});
+      good.push_back(
+          {px(at(st.inner)), px(at(std::isfinite(st.farEdge) ? st.farEdge : st.nearEdge))});
       innerPts.push_back(px(at(st.inner)));
       nearPts.push_back(px(at(st.nearEdge)));
-      if (std::isfinite(st.farEdge)) farPts.push_back(px(at(st.farEdge)));
+      if (std::isfinite(st.farEdge))
+        farPts.push_back(px(at(st.farEdge)));
     } else if (st.status == "no_inner") {
       ++noInner;
       innerLost.push_back({px(at(-spec.searchHalf)), px(at(spec.searchHalf))});
     } else {
-      if (st.status == "no_bead") ++noBead;
-      else if (st.status == "incomplete_bead") ++incomplete;
-      else if (st.status == "pose_fail") ++poseFail;
-      else ++outside;
+      if (st.status == "no_bead")
+        ++noBead;
+      else if (st.status == "incomplete_bead")
+        ++incomplete;
+      else if (st.status == "pose_fail")
+        ++poseFail;
+      else
+        ++outside;
       missing.push_back({px(at(-spec.searchHalf)), px(at(spec.searchHalf))});
-      if (std::isfinite(st.inner)) innerPts.push_back(px(at(st.inner)));
+      if (std::isfinite(st.inner))
+        innerPts.push_back(px(at(st.inner)));
     }
   }
 
@@ -182,8 +206,9 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   rec["unit"] = metric.unit();
   rec["poseGiven"] = poseGiven;
   rec["poseOk"] = pose.ok;
-  rec["counts"] = Json{{"ok", okCount}, {"noInner", noInner}, {"noBead", noBead},
-                        {"incompleteBead", incomplete}, {"poseFail", poseFail}, {"outOfImage", outside}};
+  rec["counts"] = Json{{"ok", okCount},        {"noInner", noInner},
+                       {"noBead", noBead},     {"incompleteBead", incomplete},
+                       {"poseFail", poseFail}, {"outOfImage", outside}};
   rec["ids"] = list.ids;
   rec["point"] = std::move(point);
   rec["normal"] = std::move(normal);
@@ -205,8 +230,10 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   out.data = std::move(rec);
   outputs.set("measure", Data::record(std::move(out)));
   const std::string why = poseGiven && !pose.ok ? "定位失败" : "没有一站量成";
-  outputs.set("coverage", measurement(count ? static_cast<double>(okCount) / count : kNaN, "", why));
-  outputs.set("distanceMean", measurement(centerCount ? centerSum / centerCount : kNaN, metric.unit(), why));
+  outputs.set("coverage",
+              measurement(count ? static_cast<double>(okCount) / count : kNaN, "", why));
+  outputs.set("distanceMean",
+              measurement(centerCount ? centerSum / centerCount : kNaN, metric.unit(), why));
 
   ov.segments("station", good);
   ov.segments("missing", missing);
@@ -225,9 +252,11 @@ std::string externalKey(const ParamView& params) {
   std::error_code ec;
   const auto file = params.path("stations");
   const auto size = std::filesystem::file_size(file, ec);
-  if (ec) return {};
+  if (ec)
+    return {};
   const auto mtime = std::filesystem::last_write_time(file, ec);
-  if (ec) return {};
+  if (ec)
+    return {};
   return std::to_string(size) + ":" + std::to_string(mtime.time_since_epoch().count());
 }
 
@@ -236,16 +265,20 @@ std::vector<Issue> validate(const ParamView& params, const std::set<std::string>
   const auto inner = params.vec2("innerSearch");
   const auto bead = params.vec2("beadSearch");
   const double half = params.number("searchHalf");
-  if (inner[0] >= inner[1]) issues.push_back(Issue::error("bad_param", "innerSearch 的起点要小于终点", "innerSearch"));
-  if (bead[0] >= bead[1]) issues.push_back(Issue::error("bad_param", "beadSearch 的起点要小于终点", "beadSearch"));
-  const double reach = std::max({std::fabs(inner[0]), std::fabs(inner[1]), std::fabs(bead[0]), std::fabs(bead[1])});
+  if (inner[0] >= inner[1])
+    issues.push_back(Issue::error("bad_param", "innerSearch 的起点要小于终点", "innerSearch"));
+  if (bead[0] >= bead[1])
+    issues.push_back(Issue::error("bad_param", "beadSearch 的起点要小于终点", "beadSearch"));
+  const double reach =
+      std::max({std::fabs(inner[0]), std::fabs(inner[1]), std::fabs(bead[0]), std::fabs(bead[1])});
   if (reach > half - 4.0) {
-    issues.push_back(Issue::error("bad_param", "searchHalf 要比 innerSearch / beadSearch 的最远端再长 4 px", "searchHalf"));
+    issues.push_back(Issue::error(
+        "bad_param", "searchHalf 要比 innerSearch / beadSearch 的最远端再长 4 px", "searchHalf"));
   }
   return issues;
 }
 
-}  // namespace
+} // namespace
 
 void registerStationCalipers(Registry& r) {
   OperatorDesc op;
@@ -253,7 +286,8 @@ void registerStationCalipers(Registry& r) {
   op.version = "1.0.0";
   op.label = "逐点卡尺";
   op.category = "涂胶/飞拍";
-  op.keywords = {"glue", "caliper", "station", "inner edge", "flyshot", "涂胶", "卡尺", "内边", "飞拍", "测量点"};
+  op.keywords = {"glue", "caliper", "station", "inner edge", "flyshot",
+                 "涂胶", "卡尺",    "内边",    "飞拍",       "测量点"};
   op.doc =
       "固定相机飞拍：在宿主给的名义胶路测量点上逐点卡尺，量内边与胶条两条边（glue-plan K1 / K3）。"
       "站点在名义胶条中线上，法向从内边（开口一侧）指向翻边，卡尺上 t < 0 是内边一侧。\n"
@@ -266,49 +300,60 @@ void registerStationCalipers(Registry& r) {
       Port{"image", "Image", "Image", "这一帧。", true},
       withContract(Port{"pose", "Record", "Pose", "可选：glue.locate 的位姿。", false},
                    {{"recordType", kPoseType}}),
-      withContract(Port{"calib", "Record", "Calib", "可选：image.PlaneCalib。接了距离出 mm。", false},
-                   {{"recordType", std_image::kPlaneCalibType}}),
+      withContract(
+          Port{"calib", "Record", "Calib", "可选：image.PlaneCalib。接了距离出 mm。", false},
+          {{"recordType", std_image::kPlaneCalibType}}),
   };
   op.outputs = {
-      Port{"measure", "Record", "Measure",
-           "glue.StationMeasure：逐站 point、normal、status（ok / no_inner / no_bead / incomplete_bead / pose_fail / out_of_image）、"
-           "inner / near / far（沿法向的偏移，px）、innerNear / innerCenter / width（按 unit）及其 px 版本、对比度。",
-           true},
+      Port{
+          "measure", "Record", "Measure",
+          "glue.StationMeasure：逐站 point、normal、status（ok / no_inner / no_bead / incomplete_bead / pose_fail / out_of_image）、"
+          "inner / near / far（沿法向的偏移，px）、innerNear / innerCenter / width（按 unit）及其 px 版本、对比度。",
+          true},
       Port{"coverage", "Measurement", "Coverage", "量成的站占比。", true},
       Port{"distanceMean", "Measurement", "Distance Mean", "内边→胶中线的均值。", true},
-      Port{"overlay", "Record", "Overlay", "lyflow.overlay2d：每站的卡尺、内边点、胶的两条边。", true},
+      Port{"overlay", "Record", "Overlay", "lyflow.overlay2d：每站的卡尺、内边点、胶的两条边。",
+           true},
   };
   Param stations;
   stations.name = "stations";
   stations.type = ParamType::Path;
   stations.tuningRole = "input";
   stations.label = "Stations";
-  stations.doc = "测量点文件（JSON：points[[x,y]]、normals[[nx,ny]]、可选 ids[]；示教图坐标，px）。宿主每个拍照点写一份。";
+  stations.doc =
+      "测量点文件（JSON：points[[x,y]]、normals[[nx,ny]]、可选 ids[]；示教图坐标，px）。宿主每个拍照点写一份。";
   stations.def = Value::text("");
   stations.mode = "open";
   stations.filters = {FileFilter{"JSON", {"json"}}, FileFilter{"All Files", {"*"}}};
-  Param half = floatParam("searchHalf", "Search Half", 48.0, "px", "卡尺沿法向 ±searchHalf，要比 innerSearch / beadSearch 的最远端再长 4 px。");
+  Param half =
+      floatParam("searchHalf", "Search Half", 48.0, "px",
+                 "卡尺沿法向 ±searchHalf，要比 innerSearch / beadSearch 的最远端再长 4 px。");
   half.min = 8.0;
-  Param widthP = floatParam("caliperWidth", "Caliper Width", 5.0, "px", "沿切向平均的宽度（压噪声）。", true);
+  Param widthP =
+      floatParam("caliperWidth", "Caliper Width", 5.0, "px", "沿切向平均的宽度（压噪声）。", true);
   widthP.min = 1.0;
   Param innerSearch = vec2Param("innerSearch", "Inner Search", -40, -3, "px", {"From", "To"},
                                 "内边只在卡尺上 t ∈ [From, To] 里找（t < 0 是内边一侧）。");
   Param beadSearch = vec2Param("beadSearch", "Bead Search", -15, 40, "px", {"From", "To"},
                                "胶只在内边之后、t ≤ To 且 t ≥ From 的范围里找。");
-  Param innerPolarity = enumParam("innerPolarity", "Inner Polarity", "dark_to_bright",
-                                  "沿法向（开口 → 翻边）看内边：暗 → 亮（默认：开口暗）或 亮 → 暗。",
-                                  {EnumOption{"dark_to_bright", "暗 → 亮", ""},
-                                   EnumOption{"bright_to_dark", "亮 → 暗", ""}});
-  Param innerSelect = enumParam("innerSelect", "Inner Select", "nearest",
-                                "能看到几条内边（拔模斜度的上沿、下沿）时取哪条：离胶最近的，或最强的。",
-                                {EnumOption{"nearest", "离胶最近", ""}, EnumOption{"strongest", "最强", ""}});
-  Param beadPolarity = enumParam("beadPolarity", "Bead Polarity", "dark", "胶比翻边暗（默认）还是亮。",
-                                 {EnumOption{"dark", "暗胶", ""}, EnumOption{"bright", "亮胶", ""}}, true);
-  Param contrastMin = floatParam("contrastMin", "Contrast Min", 25.0, "", "内边跳变与胶的对比度至少这么大（灰度级）。", true);
+  Param innerPolarity = enumParam(
+      "innerPolarity", "Inner Polarity", "dark_to_bright",
+      "沿法向（开口 → 翻边）看内边：暗 → 亮（默认：开口暗）或 亮 → 暗。",
+      {EnumOption{"dark_to_bright", "暗 → 亮", ""}, EnumOption{"bright_to_dark", "亮 → 暗", ""}});
+  Param innerSelect =
+      enumParam("innerSelect", "Inner Select", "nearest",
+                "能看到几条内边（拔模斜度的上沿、下沿）时取哪条：离胶最近的，或最强的。",
+                {EnumOption{"nearest", "离胶最近", ""}, EnumOption{"strongest", "最强", ""}});
+  Param beadPolarity =
+      enumParam("beadPolarity", "Bead Polarity", "dark", "胶比翻边暗（默认）还是亮。",
+                {EnumOption{"dark", "暗胶", ""}, EnumOption{"bright", "亮胶", ""}}, true);
+  Param contrastMin = floatParam("contrastMin", "Contrast Min", 25.0, "",
+                                 "内边跳变与胶的对比度至少这么大（灰度级）。", true);
   contrastMin.min = 1.0;
   Param widthMin = floatParam("widthMin", "Width Min", 3.0, "px", "比它窄的暗段不算胶。", true);
   widthMin.min = 0.0;
-  op.params = {stations, half, widthP, innerSearch, beadSearch, innerPolarity, innerSelect, beadPolarity, contrastMin, widthMin};
+  op.params = {stations,      half,        widthP,       innerSearch, beadSearch,
+               innerPolarity, innerSelect, beadPolarity, contrastMin, widthMin};
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;
   op.externalKey = &externalKey;
@@ -316,4 +361,4 @@ void registerStationCalipers(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::glue
+} // namespace lyflow::packs::glue

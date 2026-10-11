@@ -1,8 +1,8 @@
 // 3D 点云预览（交互清单 P1 #30）。three.js 随包打、**不走 CDN**：桌面应用断网也得能用。
 // 点云走二进制 IPC，`decodeCloud` 给的 Float32Array 是缓冲上的**视图**，全程零拷贝（ADR-0006）。
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import * as THREE from "three";
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as THREE from 'three';
 
 import {
   applyViewPreset,
@@ -20,19 +20,19 @@ import {
   type Scene,
   type ShadingMode,
   type SplitMode,
-} from "../lib/cloudScene";
-import { diffSides, type CompareSide } from "../lib/compareDiff";
-import { withBoundValues } from "../lib/graphParams";
-import { effectiveParams } from "../lib/params";
-import type { RampName } from "../lib/ramps";
-import { copyFrameWrites, pickFrame, roiFramesOf } from "../lib/roiFrames";
-import { rememberRoiBounds } from "../lib/roiThumbs";
-import { disposeOverlay, extentOf, shapesOf } from "../lib/shapes2d";
-import { countInRect, extentText } from "../lib/pick";
-import { fullId, levelOf, resolveOutput } from "../lib/subgraph";
-import { compareContentFor } from "../lib/viewRule";
-import { gridSpec, sameFrame } from "../lib/viewFit";
-import { exportCanvasPng } from "../lib/exportPng";
+} from '../lib/cloudScene';
+import { diffSides, type CompareSide } from '../lib/compareDiff';
+import { withBoundValues } from '../lib/graphParams';
+import { effectiveParams } from '../lib/params';
+import type { RampName } from '../lib/ramps';
+import { copyFrameWrites, pickFrame, roiFramesOf } from '../lib/roiFrames';
+import { rememberRoiBounds } from '../lib/roiThumbs';
+import { disposeOverlay, extentOf, shapesOf } from '../lib/shapes2d';
+import { countInRect, extentText } from '../lib/pick';
+import { fullId, levelOf, resolveOutput } from '../lib/subgraph';
+import { compareContentFor } from '../lib/viewRule';
+import { gridSpec, sameFrame } from '../lib/viewFit';
+import { exportCanvasPng } from '../lib/exportPng';
 import {
   MAX_POINTS_CHOICES,
   rangeDigits,
@@ -41,40 +41,39 @@ import {
   withRangeAuto,
   withRangeEnd,
   type ManualRanges,
-} from "../lib/viewPrefs";
-import { transport } from "../transport";
-import { useCompareStore, type CompareSlot, type CompareSnapshot } from "../store/compare";
-import { useExecutionStore } from "../store/execution";
-import { useGraphStore } from "../store/graph";
-import { useManifestStore } from "../store/manifest";
-import { useGraphParamOverrides } from "../store/recipe";
-import { useUiStore } from "../store/ui";
-import { decodeCloud, type CloudPayload, type OutputStat } from "../types/execution";
-import { CompareDiff } from "./CompareDiff";
-import { CompareStage } from "./CompareStage";
-import { ImagePane } from "./ImagePane";
-import { StaleBadge, ViewerStatus } from "./ViewerStatus";
-import { keyHint } from "../lib/keymap";
-import { MeasureReadout } from "./MeasureReadout";
-import { RoiLayer, type RoiItem } from "./RoiLayer";
-import { ValuePane } from "./ValuePane";
-import { useFocusOnDoubleClick } from "../hooks/useFocusOnDoubleClick";
-import { measureAttrs, useMeasure } from "../hooks/useMeasure";
-import { useViewerSource, type ViewerSource } from "../hooks/useViewerSource";
-import "../styles.viewer.css";
-import type { ViewPreset } from "../lib/viewFit";
-import { ViewPresetButtons, useViewPresetEvents } from "./ViewPresetButtons";
+} from '../lib/viewPrefs';
+import { transport } from '../transport';
+import { useCompareStore, type CompareSlot, type CompareSnapshot } from '../store/compare';
+import { useExecutionStore } from '../store/execution';
+import { useGraphStore } from '../store/graph';
+import { useManifestStore } from '../store/manifest';
+import { useGraphParamOverrides } from '../store/recipe';
+import { useUiStore } from '../store/ui';
+import { decodeCloud, type CloudPayload, type OutputStat } from '../types/execution';
+import { CompareDiff } from './CompareDiff';
+import { CompareStage } from './CompareStage';
+import { ImagePane } from './ImagePane';
+import { StaleBadge, ViewerStatus } from './ViewerStatus';
+import { keyHint } from '../lib/keymap';
+import { MeasureReadout } from './MeasureReadout';
+import { RoiLayer, type RoiItem } from './RoiLayer';
+import { ValuePane } from './ValuePane';
+import { useFocusOnDoubleClick } from '../hooks/useFocusOnDoubleClick';
+import { measureAttrs, useMeasure } from '../hooks/useMeasure';
+import { useViewerSource, type ViewerSource } from '../hooks/useViewerSource';
+import '../styles.viewer.css';
+import type { ViewPreset } from '../lib/viewFit';
+import { ViewPresetButtons, useViewPresetEvents } from './ViewPresetButtons';
 
-export type { ShadingMode, CameraMode } from "../lib/cloudScene";
-export type { RampName } from "../lib/ramps";
-
+export type { ShadingMode, CameraMode } from '../lib/cloudScene';
+export type { RampName } from '../lib/ramps';
 
 // ------------------------------------------------------------ 2D 拖框（L15）
 
 /** 四个角色框各一种颜色；多于四个时轮着用。 */
-const ROI_COLORS = ["#34d399", "#f472b6", "#60a5fa", "#fbbf24", "#a78bfa", "#f87171"];
+const ROI_COLORS = ['#34d399', '#f472b6', '#60a5fa', '#fbbf24', '#a78bfa', '#f87171'];
 
-const NO_BACKDROP = { key: "", bounds: null, count: 0, error: null };
+const NO_BACKDROP = { key: '', bounds: null, count: 0, error: null };
 
 /** 没填过的框画在哪：底图（或数据云）的包围盒里一字排开，拖一下就落成真值。 */
 function placeholderOf(
@@ -103,7 +102,9 @@ const COMPARE_MIN_LR_WIDTH = 480;
  *  判据与 Edge Peek 的锁定条件相同：状态文字为空且不在取数（EdgePeek.tsx:76）。 */
 /** 对比里出错的那一侧不画它的输入：并排时那一栏整个盖着「出错」，画了也看不见，还会算进两栏的取景与差异表。 */
 function withoutFailedInput(src: ViewerSource): ViewerSource {
-  return src.display.failed ? { ...src, display: { ...src.display, cloud: null, base: null, failed: false } } : src;
+  return src.display.failed
+    ? { ...src, display: { ...src.display, cloud: null, base: null, failed: false } }
+    : src;
 }
 
 function snapshotOf(src: ViewerSource, label: string, maxPoints: number): CompareSnapshot | null {
@@ -136,22 +137,29 @@ function drawShapes(
     ? Math.max(cloud.bounds[3]! - cloud.bounds[0]!, cloud.bounds[4]! - cloud.bounds[1]!, 1e-3)
     : Math.max(...shapes.map(extentOf), 1e-3);
   for (const out of shapes) {
-    const hex = typesByName.get(out.type)?.color ?? "#6b7280";
+    const hex = typesByName.get(out.type)?.color ?? '#6b7280';
     const color = new THREE.Color(hex).getHex();
     for (const line of shapesOf(out, color, span)) group.add(line);
   }
 }
 
 function sideOf(src: ViewerSource): CompareSide {
-  return { outputs: src.outputs, cloud: src.display.cloud, cloudPort: src.display.port, preview: src.display.preview };
+  return {
+    outputs: src.outputs,
+    cloud: src.display.cloud,
+    cloudPort: src.display.port,
+    preview: src.display.preview,
+  };
 }
 
 /** 栏标题：节点标题优先，其次算子 label（与「底图：xxx」同一条规则）。 */
 function nodeLabel(src: ViewerSource, fallback: string | null): string {
-  return src.node?.ui?.title ?? src.op?.label ?? src.node?.id ?? fallback ?? "";
+  return src.node?.ui?.title ?? src.op?.label ?? src.node?.id ?? fallback ?? '';
 }
 
-export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => void) | undefined } = {}) {
+export function Viewer3D({
+  onRunToNode,
+}: { onRunToNode?: ((nodeId: string) => void) | undefined } = {}) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<Scene | null>(null);
 
@@ -196,22 +204,31 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   const contentPick = useUiStore((s) => s.viewerContentPick);
   const setContentPick = useUiStore((s) => s.setViewerContentPick);
   const slotA = useMemo(() => (activeId ? { path, nodeId: activeId } : null), [path, activeId]);
-  const portPick = useUiStore((s) => (activeKey ? (s.viewerPortPick.get(activeKey) ?? null) : null));
+  const portPick = useUiStore((s) =>
+    activeKey ? (s.viewerPortPick.get(activeKey) ?? null) : null,
+  );
   const setPortPick = useUiStore((s) => s.setViewerPortPick);
   const compareOn = useCompareStore((s) => s.on);
   // 取数（hooks/useViewerSource）：状态、输出统计、显示点云还是值、取云或借上游的底图
   const sourceA = useViewerSource({
     slot: slotA,
-    idleText: selected.size > 1 ? "选中了多个节点" : "选中一个节点查看它的输出",
+    idleText: selected.size > 1 ? '选中了多个节点' : '选中一个节点查看它的输出',
     maxPoints,
     pick: contentPick && contentPick.nodeId === activeKey ? contentPick.content : null,
     portPick,
     frozen: null,
   });
   const source = compareOn ? withoutFailedInput(sourceA) : sourceA;
-  const { display, loading, node: activeNode, op: activeOp, outputs: activeOutputs, autoContent } = source;
+  const {
+    display,
+    loading,
+    node: activeNode,
+    op: activeOp,
+    outputs: activeOutputs,
+    autoContent,
+  } = source;
   // 20：出错节点画的是它的输入（failed 只在取到云时才置）：哪怕节点自己只输出值，栏与工具也按点云场景给
-  const content = display.failed ? "cloud" : source.content;
+  const content = display.failed ? 'cloud' : source.content;
   const { cloud } = display;
   const extent = cloud && cloud.pointCount > 0 ? extentText(cloud.bounds) : null;
 
@@ -219,12 +236,14 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   const compareB = useCompareStore((s) => s.b);
   const frozenB = useCompareStore((s) => s.snapshot);
   const portPickB = useUiStore((s) =>
-    compareOn && compareB ? (s.viewerPortPick.get(fullId(compareB.path, compareB.nodeId)) ?? null) : null,
+    compareOn && compareB
+      ? (s.viewerPortPick.get(fullId(compareB.path, compareB.nodeId)) ?? null)
+      : null,
   );
   const sourceB = withoutFailedInput(
     useViewerSource({
       slot: compareOn ? compareB : null,
-      idleText: "",
+      idleText: '',
       maxPoints,
       pick: null,
       portPick: portPickB,
@@ -235,7 +254,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   // 一侧可画就两栏都是点云场景；两侧都只有值才换成两张值表格（§1.6）
   const stageContent = compareOn ? compareContentFor(content, sourceB.content) : content;
   const labelA = nodeLabel(source, activeId);
-  const labelB = compareOn ? nodeLabel(sourceB, compareB?.nodeId ?? null) : "";
+  const labelB = compareOn ? nodeLabel(sourceB, compareB?.nodeId ?? null) : '';
   const diff = useMemo(
     () => (compareOn ? diffSides(sideOf(source), sideOf(sourceB)) : null),
     // source / sourceB 每次渲染都是新对象；差异只随这四样变
@@ -245,7 +264,9 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   // 进入对比时顺手冻住 B（C2）：store 的 toggle 调这里，拿 A 此刻显示着的结果
   const captureRef = useRef<(slot: CompareSlot) => CompareSnapshot | null>(() => null);
   captureRef.current = (slot) =>
-    slot.path === path && slot.nodeId === display.nodeId ? snapshotOf(source, labelA, maxPoints) : null;
+    slot.path === path && slot.nodeId === display.nodeId
+      ? snapshotOf(source, labelA, maxPoints)
+      : null;
   useEffect(() => {
     useCompareStore.getState().setCapture((slot) => captureRef.current(slot));
     return () => useCompareStore.getState().setCapture(null);
@@ -271,7 +292,13 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   const roiNode = useMemo(
     () =>
       activeNode && activeOp
-        ? withBoundValues(doc, path, activeNode, activeOp.params.map((p) => p.name), overrides)
+        ? withBoundValues(
+            doc,
+            path,
+            activeNode,
+            activeOp.params.map((p) => p.name),
+            overrides,
+          )
         : activeNode,
     [doc, path, activeNode, activeOp, overrides],
   );
@@ -303,35 +330,39 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
     });
   }, [roi, activeNode, doc, path]);
   // 对比模式下没有拖框，也就不要底图（C8）
-  const backdropKey =
-    compareOn
-      ? ""
-      : roi && roi.files.length > 0
+  const backdropKey = compareOn
+    ? ''
+    : roi && roi.files.length > 0
       ? JSON.stringify({ files: roi.files, graphPath })
       : roi && portSources
-        ? JSON.stringify({ ports: portSources, inputs: roi.inputs, runId: runId ?? null, runStatus })
-        : "";
+        ? JSON.stringify({
+            ports: portSources,
+            inputs: roi.inputs,
+            runId: runId ?? null,
+            runStatus,
+          })
+        : '';
 
   // 对比时按两侧都有才算有（C5）：A 有强度 B 没有，两栏都退到高度 —— 同一个值涂同一种颜色
   const drawn = compareOn ? [cloud, cloudB].filter((c) => c && c.pointCount > 0) : [cloud];
-  const allHave = (channel: "intensity" | "normals" | "rgb") =>
+  const allHave = (channel: 'intensity' | 'normals' | 'rgb') =>
     drawn.length > 0 && drawn.every((c) => c?.[channel] != null);
-  const hasIntensity = allHave("intensity");
-  const hasNormals = allHave("normals");
-  const hasRgb = allHave("rgb");
+  const hasIntensity = allHave('intensity');
+  const hasNormals = allHave('normals');
+  const hasRgb = allHave('rgb');
   // 选了「强度」但这片云没有强度通道时实际走别的着色，那就让下拉框也显示实际那一种 ——
   // 下拉框写着强度、画面却是高度，用户只会以为强度数据本身有问题。没有强度但自带颜色的
   // （模型分割的类别色、PCD 里的 rgb）先退到 RGB：那本来就是给人看的颜色
   const effectiveShading: ShadingMode =
-    shading === "intensity" && !hasIntensity
+    shading === 'intensity' && !hasIntensity
       ? hasRgb
-        ? "rgb"
-        : "height"
-      : (shading === "normal" && !hasNormals) || (shading === "rgb" && !hasRgb)
-        ? "height"
+        ? 'rgb'
+        : 'height'
+      : (shading === 'normal' && !hasNormals) || (shading === 'rgb' && !hasRgb)
+        ? 'height'
         : shading;
-  const isFlat = effectiveShading === "flat";
-  const isRgbShading = effectiveShading === "rgb";
+  const isFlat = effectiveShading === 'flat';
+  const isRgbShading = effectiveShading === 'rgb';
   // 色带与范围只对「标量 → 颜色」的着色有意义
   const noRamp = isFlat || isRgbShading;
 
@@ -343,12 +374,16 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
     if (!cloud || cloud.pointCount === 0) return b;
     return [Math.min(a[0], b[0]), Math.max(a[1], b[1])];
   }, [cloud, cloudB, effectiveShading]);
-  const { range: shownRange, auto: rangeAuto } = rangeFor(manualRanges, effectiveShading, dataRange);
+  const { range: shownRange, auto: rangeAuto } = rangeFor(
+    manualRanges,
+    effectiveShading,
+    dataRange,
+  );
   const [lo, hi] = shownRange;
   const rangeDigitsNow = rangeDigits(lo, hi);
 
   const pinnedLabel = useMemo(() => {
-    if (!pinnedId) return "";
+    if (!pinnedId) return '';
     return nodes.find((n) => n.id === pinnedId)?.ui?.title ?? pinnedId;
   }, [pinnedId, nodes]);
 
@@ -383,7 +418,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
     observer.observe(host);
     return () => observer.disconnect();
   }, [compareOn]);
-  const split: SplitMode = narrow ? "tb" : "lr";
+  const split: SplitMode = narrow ? 'tb' : 'lr';
   useEffect(() => {
     sceneRef.current?.setViews(compareOn ? 2 : 1, split);
   }, [compareOn, split]);
@@ -394,7 +429,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
     if (!scene || !host) return;
     const write = () => {
       const c = scene.active().position;
-      const text = [c.x, c.y, c.z].map(round3).join(",");
+      const text = [c.x, c.y, c.z].map(round3).join(',');
       if (host.dataset.cameraPos !== text) host.dataset.cameraPos = text;
     };
     scene.frameListeners.add(write);
@@ -449,7 +484,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
     let n = 0;
     for (const o of overlayShapes) {
       const k = o.value?.kind;
-      if (k === "Box2D" || k === "Line2D" || k === "Circle2D" || k === "Point2D") n += 1;
+      if (k === 'Box2D' || k === 'Line2D' || k === 'Circle2D' || k === 'Point2D') n += 1;
     }
     return n;
   }, [overlayShapes]);
@@ -487,7 +522,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
       inputs?: string[];
       runId?: string | null;
     };
-    if (spec.files && typeof transport.loadCloudFile !== "function") {
+    if (spec.files && typeof transport.loadCloudFile !== 'function') {
       setBackdrop(NO_BACKDROP);
       return;
     }
@@ -502,10 +537,12 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
       const inputs = spec.inputs ?? [];
       const unwired = inputs.filter((_, i) => !spec.ports?.[i]);
       if (unwired.length > 0) {
-        return Promise.reject(new Error(`底图取自输入 ${unwired.join(" / ")} 的上游，但它没接上`));
+        return Promise.reject(new Error(`底图取自输入 ${unwired.join(' / ')} 的上游，但它没接上`));
       }
       if (!spec.runId) {
-        return Promise.reject(new Error(`先运行一次：底图取自输入 ${inputs.join(" / ")} 上游的结果`));
+        return Promise.reject(
+          new Error(`先运行一次：底图取自输入 ${inputs.join(' / ')} 上游的结果`),
+        );
       }
       return Promise.all(
         (spec.ports ?? []).map((src) =>
@@ -531,7 +568,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
         const geometry = new THREE.BufferGeometry();
         const flat = new Float32Array(xyz);
         backdropXyz.current = flat;
-        geometry.setAttribute("position", new THREE.BufferAttribute(flat, 3));
+        geometry.setAttribute('position', new THREE.BufferAttribute(flat, 3));
         geometry.computeBoundingBox();
         geometry.computeBoundingSphere();
         const material = new THREE.PointsMaterial({
@@ -587,15 +624,15 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
         // 颜色按组内位置取：每个槽的 datum 都是同一种颜色，切槽时不换色
         color: ROI_COLORS[i % ROI_COLORS.length]!,
         value: [value[0]!, value[1]!, value[2]!, value[3]!],
-        scale: param.unit === "mm" ? 0.001 : 1,
+        scale: param.unit === 'mm' ? 0.001 : 1,
         placeholder: placeholderOf(i, n, bounds),
       };
     });
   }, [roi, activeOp, roiNode, backdrop.bounds, cloud]);
   const roiEditing =
     !compareOn &&
-    content === "cloud" &&
-    cameraMode === "2d" &&
+    content === 'cloud' &&
+    cameraMode === '2d' &&
     roiItems.length > 0 &&
     activeNode !== undefined;
   // 切换条只给带底图的组（有名字的）；数据坐标系那一组只有一组，不需要切
@@ -605,7 +642,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
   const measuring = useUiStore((s) => s.viewerMeasuring);
   const setMeasuring = useUiStore((s) => s.setViewerMeasuring);
   // 只在点云场景里、且不在拖框时可用：拖框独占指针（M7）
-  const measureOn = measuring && stageContent === "cloud" && !roiEditing;
+  const measureOn = measuring && stageContent === 'cloud' && !roiEditing;
   useEffect(() => {
     if (measuring && roiEditing) setMeasuring(false);
   }, [measuring, roiEditing]);
@@ -613,10 +650,14 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
     sceneHost,
     measureOn,
     [cloud, cloudB],
-    `${display.nodeId ?? ""}|${compareB?.nodeId ?? ""}`,
+    `${display.nodeId ?? ''}|${compareB?.nodeId ?? ''}`,
   );
   // 双击一个点：转心挪到它上面（测量、拖框时不接）
-  useFocusOnDoubleClick(sceneHost, [cloud, cloudB], measureOn || roiEditing || stageContent !== "cloud");
+  useFocusOnDoubleClick(
+    sceneHost,
+    [cloud, cloudB],
+    measureOn || roiEditing || stageContent !== 'cloud',
+  );
 
   /** 把当前这组框原样写进其它启用的组（L20「复制到其它槽」），整个算一条撤销。 */
   const copyFrameToOthers = () => {
@@ -626,7 +667,7 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
     const g = useGraphStore.getState();
     g.begin();
     for (const w of writes) useGraphStore.getState().setParam(activeNode.id, w.param, w.value);
-    useGraphStore.getState().commit(`把${roi.label || "当前"}的框复制到其它槽`);
+    useGraphStore.getState().commit(`把${roi.label || '当前'}的框复制到其它槽`);
   };
 
   // 换了云或换了几何时看一眼要不要取景：还在同一个坐标系里（sameFrame）就不动相机 —— 调参数重跑、在链上逐个点节点时，
@@ -639,7 +680,12 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
     if (!scene) return;
     setOverlayBounds(overlayBoundsOf(scene.overlay));
     // 对比时按 A ∪ B 取景（§1.3）：同一台相机，两栏里的东西都要装得下
-    const bounds = unionBounds([cloud, cloudB], scene.overlays[0], scene.overlays[1], scene.backdrop);
+    const bounds = unionBounds(
+      [cloud, cloudB],
+      scene.overlays[0],
+      scene.overlays[1],
+      scene.backdrop,
+    );
     if (!bounds) {
       setGridText(null);
       return;
@@ -665,7 +711,9 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
     const v = Number(raw);
     if (!Number.isFinite(v)) return;
     // 另一个界取框里看得到的那个数（自动时显示的是取整过的）：填完一个界，另一个框里的数不该跟着跳
-    const shown: [number, number] = rangeAuto ? [roundTo(lo, rangeDigitsNow), roundTo(hi, rangeDigitsNow)] : [lo, hi];
+    const shown: [number, number] = rangeAuto
+      ? [roundTo(lo, rangeDigitsNow), roundTo(hi, rangeDigitsNow)]
+      : [lo, hi];
     setManualRanges((m) => withRangeEnd(m, effectiveShading, end, v, shown));
   };
 
@@ -675,7 +723,9 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
     // 读 buffer 前立刻重画一帧：换成 preserveDrawingBuffer 的话每一帧都要多付一次代价。
     scene.renderFrame();
     // 对比时一块画布就是两栏，导出的天然是一张并排图（C4）
-    const name = compareOn ? `${display.nodeId ?? "A"}_vs_${compareB?.nodeId ?? "B"}` : (display.nodeId ?? "view");
+    const name = compareOn
+      ? `${display.nodeId ?? 'A'}_vs_${compareB?.nodeId ?? 'B'}`
+      : (display.nodeId ?? 'view');
     await exportCanvasPng(scene.renderer.domElement, name);
   };
 
@@ -683,28 +733,28 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
     <div
       ref={viewerRoot}
       className="viewer"
-      data-view-presets={stageContent === "cloud" && cameraMode === "3d" ? "1" : undefined}
+      data-view-presets={stageContent === 'cloud' && cameraMode === '3d' ? '1' : undefined}
       // 验收脚本靠这两个属性判断「视图已经切到这个节点了」，
       // 而不是去猜多久之后 React 会渲染完（scripts/e2e）。
-      data-node={display.nodeId ?? ""}
+      data-node={display.nodeId ?? ''}
       data-view={
         loading
-          ? "loading"
-          : (content === "value" || content === "image") && !display.status
+          ? 'loading'
+          : (content === 'value' || content === 'image') && !display.status
             ? content
             : cloud
-              ? "cloud"
-              : "empty"
+              ? 'cloud'
+              : 'empty'
       }
       data-content={content}
       data-shading={effectiveShading}
-      data-pinned={pinnedId ? "1" : "0"}
-      data-run={display.runId ?? ""}
-      data-busy={display.busy ? "1" : undefined}
-      data-preview={isPreview ? "1" : "0"}
+      data-pinned={pinnedId ? '1' : '0'}
+      data-run={display.runId ?? ''}
+      data-busy={display.busy ? '1' : undefined}
+      data-preview={isPreview ? '1' : '0'}
       data-camera={cameraMode}
       data-overlay={overlayCount}
-      data-base={display.base?.localId ?? ""}
+      data-base={display.base?.localId ?? ''}
       data-cloud-bounds={boundsAttr(cloud && cloud.pointCount > 0 ? cloud.bounds : null)}
       data-overlay-bounds={boundsAttr(overlayBounds)}
       data-roi-edit={roiEditing ? roiItems.length : 0}
@@ -712,11 +762,11 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
       data-backdrop={backdrop.count}
       data-backdrop-bounds={boundsAttr(backdrop.bounds)}
       data-backdrop-error={backdrop.error ?? undefined}
-      data-compare={compareOn ? "1" : "0"}
-      data-compare-a={compareOn ? (activeKey ?? "") : undefined}
+      data-compare={compareOn ? '1' : '0'}
+      data-compare-a={compareOn ? (activeKey ?? '') : undefined}
       data-compare-b={compareOn && compareB ? fullId(compareB.path, compareB.nodeId) : undefined}
-      data-compare-frozen={compareOn ? (frozenB ? "1" : "0") : undefined}
-      data-compare-run-b={compareOn ? (sourceB.display.runId ?? "") : undefined}
+      data-compare-frozen={compareOn ? (frozenB ? '1' : '0') : undefined}
+      data-compare-run-b={compareOn ? (sourceB.display.runId ?? '') : undefined}
       data-split={compareOn ? split : undefined}
       {...measureAttrs(measureOn, measure)}
     >
@@ -740,16 +790,21 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
                 : `该节点没有点云输出，底图取自上游最近的一片云（${display.base.localId}）`
             }
           >
-            {display.failed ? (display.base.direct ? "输入" : "上游") : "底图"}：{display.base.label}
+            {display.failed ? (display.base.direct ? '输入' : '上游') : '底图'}：
+            {display.base.label}
           </span>
         )}
-        {!compareOn && content === "cloud" && activeKey && source.cloudPorts.length > 1 && (
+        {!compareOn && content === 'cloud' && activeKey && source.cloudPorts.length > 1 && (
           // 多个点云输出（提取下标的 selected / rest……）：选看哪一个。以前固定第一个，rest 怎么都看不到
           <select
             className="viewer__select"
             data-testid="viewer-port"
             // 选过就显示选的那个：没跑过、出错时 display.port 是空的，框不该跳回第一个
-            value={portPick && source.cloudPorts.includes(portPick) ? portPick : (display.port ?? source.cloudPorts[0])}
+            value={
+              portPick && source.cloudPorts.includes(portPick)
+                ? portPick
+                : (display.port ?? source.cloudPorts[0])
+            }
             onChange={(e) => setPortPick(activeKey, e.target.value)}
             title="看这个节点的哪个点云输出（按节点记着，换节点再回来还是它）"
           >
@@ -758,25 +813,29 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
               return (
                 <option key={p} value={p}>
                   {p}
-                  {n !== undefined ? `（${n.toLocaleString()} 点）` : ""}
+                  {n !== undefined ? `（${n.toLocaleString()} 点）` : ''}
                 </option>
               );
             })}
           </select>
         )}
-        {!compareOn && content === "cloud" && extent && (
+        {!compareOn && content === 'cloud' && extent && (
           // 包围盒尺寸：看一眼就知道这片云多大、单位对不对（全量云的，不随显示点数抽样变）
           <span
             className="viewer__extent"
             data-testid="viewer-extent"
-            data-size={extent.size.map(round3).join(",")}
-            title={`包围盒尺寸${display.base ? `（底图 ${display.base.label}）` : ""}\n${extent.title}`}
+            data-size={extent.size.map(round3).join(',')}
+            title={`包围盒尺寸${display.base ? `（底图 ${display.base.label}）` : ''}\n${extent.title}`}
           >
             {extent.text}
           </span>
         )}
-        {content === "cloud" && gridText && (
-          <span className="viewer__grid" data-testid="viewer-grid" title="网格一格多大（跟着云取 1 / 2 / 5 × 10ⁿ，铺在云的最低处）">
+        {content === 'cloud' && gridText && (
+          <span
+            className="viewer__grid"
+            data-testid="viewer-grid"
+            title="网格一格多大（跟着云取 1 / 2 / 5 × 10ⁿ，铺在云的最低处）"
+          >
             {gridText}
           </span>
         )}
@@ -789,28 +848,29 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
         <select
           className="viewer__select"
           data-testid="viewer-camera"
-          value={content === "value" || content === "image" ? content : cameraMode}
+          value={content === 'value' || content === 'image' ? content : cameraMode}
           onChange={(e) => {
             const v = e.target.value;
-            if (v === "value" || v === "image") {
+            if (v === 'value' || v === 'image') {
               if (activeKey) setContentPick({ nodeId: activeKey, content: v });
               return;
             }
             setCameraMode(v as CameraMode);
-            if (activeKey && content !== "cloud") setContentPick({ nodeId: activeKey, content: "cloud" });
+            if (activeKey && content !== 'cloud')
+              setContentPick({ nodeId: activeKey, content: 'cloud' });
           }}
           title="3D 自由视角 / 2D 正交俯视 XY（剖面）/ 图像（图像域的节点）/ 输出值的表格。默认按节点的输入输出类型选，换节点就回到默认"
         >
           <option value="3d">3D</option>
           <option value="2d">2D 剖面</option>
-          <option value="image" disabled={!activeKey || autoContent !== "image"}>
+          <option value="image" disabled={!activeKey || autoContent !== 'image'}>
             图像
           </option>
           <option value="value" disabled={!activeKey}>
             值
           </option>
         </select>
-        {content === "cloud" && (
+        {content === 'cloud' && (
           <>
             <select
               className="viewer__select"
@@ -840,7 +900,12 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
               onClick={() => {
                 const scene = sceneRef.current;
                 const bounds = scene
-                  ? unionBounds([cloud, cloudB], scene.overlays[0], scene.overlays[1], scene.backdrop)
+                  ? unionBounds(
+                      [cloud, cloudB],
+                      scene.overlays[0],
+                      scene.overlays[1],
+                      scene.backdrop,
+                    )
                   : null;
                 if (scene && bounds) {
                   fitToBounds(scene, bounds);
@@ -861,14 +926,18 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
           data-testid="viewer-maximize"
           aria-pressed={viewerMax}
           onClick={() => setViewerMax(!viewerMax)}
-          title={viewerMax ? "还原（Esc / Shift+Space）" : "最大化预览：画布与两侧面板收起（Shift+Space，Esc 还原）"}
+          title={
+            viewerMax
+              ? '还原（Esc / Shift+Space）'
+              : '最大化预览：画布与两侧面板收起（Shift+Space，Esc 还原）'
+          }
         >
-          {viewerMax ? "❐" : "□"}
+          {viewerMax ? '❐' : '□'}
         </button>
       </div>
 
       <div className="viewer__bar viewer__bar--tools">
-        {content === "cloud" && (
+        {content === 'cloud' && (
           <>
             <span className="viewer__label">着色</span>
             <select
@@ -878,19 +947,23 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
               onChange={(e) => setPrefs({ shading: e.target.value as ShadingMode })}
               title={
                 shading === effectiveShading
-                  ? "着色方式"
-                  : "这片点云没有该通道，已换成它实际有的着色"
+                  ? '着色方式'
+                  : '这片点云没有该通道，已换成它实际有的着色'
               }
             >
               <option value="intensity" disabled={!hasIntensity}>
-                强度{hasIntensity ? "" : "（无）"}
+                强度{hasIntensity ? '' : '（无）'}
               </option>
               <option value="height">高度</option>
               <option value="normal" disabled={!hasNormals} title="需要点云带法线通道">
-                法线{hasNormals ? "" : "（无）"}
+                法线{hasNormals ? '' : '（无）'}
               </option>
-              <option value="rgb" disabled={!hasRgb} title="点云自带的颜色（PCD 的 rgb、模型分割的类别色）">
-                RGB{hasRgb ? "" : "（无）"}
+              <option
+                value="rgb"
+                disabled={!hasRgb}
+                title="点云自带的颜色（PCD 的 rgb、模型分割的类别色）"
+              >
+                RGB{hasRgb ? '' : '（无）'}
               </option>
               <option value="flat">单色</option>
             </select>
@@ -939,8 +1012,12 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
           </>
         )}
         <span className="viewer__spacer" />
-        {stageContent === "cloud" && (
-          <ViewPresetButtons className="viewer__btn" disabled={cameraMode !== "3d"} onPick={pickPreset} />
+        {stageContent === 'cloud' && (
+          <ViewPresetButtons
+            className="viewer__btn"
+            disabled={cameraMode !== '3d'}
+            onPick={pickPreset}
+          />
         )}
         {pinnedId && (
           <span className="viewer__pinned" title={`已钉住 ${pinnedId}`}>
@@ -951,48 +1028,48 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
           type="button"
           className="viewer__btn"
           data-testid="viewer-pin"
-          data-pinned={pinnedId ? "1" : "0"}
+          data-pinned={pinnedId ? '1' : '0'}
           onClick={() => setPinnedId(pinnedId ? null : selectedId)}
           disabled={!pinnedId && !selectedId}
-          title={`${pinnedId ? "取消钉住，重新跟随选中" : "钉住当前节点，选别的节点也不切换"}（${keyHint("pin")}）`}
+          title={`${pinnedId ? '取消钉住，重新跟随选中' : '钉住当前节点，选别的节点也不切换'}（${keyHint('pin')}）`}
         >
-          {pinnedId ? "已钉住" : "钉住"}
+          {pinnedId ? '已钉住' : '钉住'}
         </button>
         <button
           type="button"
           className="viewer__btn"
           data-testid="viewer-compare"
-          data-on={compareOn ? "1" : "0"}
+          data-on={compareOn ? '1' : '0'}
           onClick={() => useCompareStore.getState().toggle()}
           disabled={!compareOn && !activeId}
           title={
             compareOn
-              ? "退出对比（Ctrl+Shift+D）"
-              : "与基准对比（Ctrl+Shift+D）：B 冻结在当前结果上，之后改参数重跑只有 A 变"
+              ? '退出对比（Ctrl+Shift+D）'
+              : '与基准对比（Ctrl+Shift+D）：B 冻结在当前结果上，之后改参数重跑只有 A 变'
           }
         >
-          {compareOn ? "退出对比" : "对比"}
+          {compareOn ? '退出对比' : '对比'}
         </button>
-        {stageContent === "cloud" && (
+        {stageContent === 'cloud' && (
           <button
             type="button"
             className="viewer__btn"
             data-testid="viewer-measure"
-            data-on={measureOn ? "1" : "0"}
+            data-on={measureOn ? '1' : '0'}
             onClick={() => setMeasuring(!measuring)}
             disabled={roiEditing}
             title={
               roiEditing
-                ? "拖框时不能测量"
+                ? '拖框时不能测量'
                 : measuring
-                  ? "关掉测量（M）"
-                  : "测量（M）：单击选点看坐标，再点一个量距离；拖动照旧转视角"
+                  ? '关掉测量（M）'
+                  : '测量（M）：单击选点看坐标，再点一个量距离；拖动照旧转视角'
             }
           >
-            {measuring ? "测量中" : "测量"}
+            {measuring ? '测量中' : '测量'}
           </button>
         )}
-        {stageContent === "cloud" && (
+        {stageContent === 'cloud' && (
           <button
             type="button"
             className="viewer__btn"
@@ -1012,10 +1089,10 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
               key={f.key}
               type="button"
               role="tab"
-              className={`viewer__tab${f.key === roi.key ? " is-active" : ""}`}
+              className={`viewer__tab${f.key === roi.key ? ' is-active' : ''}`}
               data-testid="roi-frame-tab"
               data-frame={f.key}
-              data-active={f.key === roi.key ? "1" : "0"}
+              data-active={f.key === roi.key ? '1' : '0'}
               aria-selected={f.key === roi.key}
               onClick={() => setRoiFrame(activeNode.id, f.key)}
               title={`只显示${f.label}的模板与它的 ${f.params.length} 个框`}
@@ -1062,10 +1139,10 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
             onExit={() => useCompareStore.getState().exit()}
           />
         )}
-        {!compareOn && content === "value" && !display.status && !loading && (
+        {!compareOn && content === 'value' && !display.status && !loading && (
           <ValuePane outputs={activeOutputs} />
         )}
-        {!compareOn && content === "image" && activeNode && activeOp && roiNode && (
+        {!compareOn && content === 'image' && activeNode && activeOp && roiNode && (
           // 状态（未运行 / 正在计算…）由 ImagePane 自己画：运行中它继续显示上一次的图，状态缩在角上
           <ImagePane
             doc={doc}
@@ -1098,23 +1175,35 @@ export function Viewer3D({ onRunToNode }: { onRunToNode?: ((nodeId: string) => v
             }
           />
         )}
-        {!compareOn && !(content === "image" && activeNode && activeOp && roiNode) && (display.status || loading || (roiEditing && backdrop.error)) && (
-          // 拖框时底图（模板）已经画出来了，状态只缩在角上，不盖住画面。底图取不到的原因也在这里说
-          // （它比「未运行」有用：说的是要先跑哪一段）。说的是节点运行状态时跟着给下一步（运行到此、定位出错处）
-          <ViewerStatus
-            corner={roiEditing || !!display.busy}
-            docked={!!display.failed && !display.busy && !loading}
-            note={
-              display.failed && display.base && cloud && !display.busy && !loading
-                ? `画面是${display.base.direct ? "它的输入" : "上游最近的一片云"}（取自「${display.base.label}」` +
-                  (cloud.totalPoints === 0 ? "）：是空的 —— 根因多半在上游" : `，${cloud.totalPoints.toLocaleString()} 点）`)
-                : null
-            }
-            text={loading ? "正在取点云…" : roiEditing && backdrop.error ? backdrop.error : (display.status ?? "")}
-            nodeId={activeNode && !loading && !(roiEditing && backdrop.error) ? display.nodeId : null}
-            onRunToNode={onRunToNode}
-          />
-        )}
+        {!compareOn &&
+          !(content === 'image' && activeNode && activeOp && roiNode) &&
+          (display.status || loading || (roiEditing && backdrop.error)) && (
+            // 拖框时底图（模板）已经画出来了，状态只缩在角上，不盖住画面。底图取不到的原因也在这里说
+            // （它比「未运行」有用：说的是要先跑哪一段）。说的是节点运行状态时跟着给下一步（运行到此、定位出错处）
+            <ViewerStatus
+              corner={roiEditing || !!display.busy}
+              docked={!!display.failed && !display.busy && !loading}
+              note={
+                display.failed && display.base && cloud && !display.busy && !loading
+                  ? `画面是${display.base.direct ? '它的输入' : '上游最近的一片云'}（取自「${display.base.label}」` +
+                    (cloud.totalPoints === 0
+                      ? '）：是空的 —— 根因多半在上游'
+                      : `，${cloud.totalPoints.toLocaleString()} 点）`)
+                  : null
+              }
+              text={
+                loading
+                  ? '正在取点云…'
+                  : roiEditing && backdrop.error
+                    ? backdrop.error
+                    : (display.status ?? '')
+              }
+              nodeId={
+                activeNode && !loading && !(roiEditing && backdrop.error) ? display.nodeId : null
+              }
+              onRunToNode={onRunToNode}
+            />
+          )}
         {!compareOn && activeId && !display.status && !loading && (
           // 画面上有结果、但参数改过还没重跑：左上角说一声，给「运行到此节点」
           <StaleBadge nodeId={activeId} onRunToNode={onRunToNode} />

@@ -1,7 +1,7 @@
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
-import { loadConfig } from "./config.js";
-import { createServer } from "./server.js";
+import { loadConfig } from './config.js';
+import { createServer } from './server.js';
 
 async function main(): Promise<void> {
   let config;
@@ -13,9 +13,12 @@ async function main(): Promise<void> {
     return;
   }
   const server = createServer(config);
-  for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => { void server.close(); });
+  for (const signal of ['SIGINT', 'SIGTERM'] as const)
+    process.once(signal, () => {
+      void server.close();
+    });
   await server.connect(new StdioServerTransport());
-  process.stderr.write(`lyflow-mcp: ${config.httpBase}${config.cli ? ` + ${config.cli}` : ""}\n`);
+  process.stderr.write(`lyflow-mcp: ${config.httpBase}${config.cli ? ` + ${config.cli}` : ''}\n`);
 }
 
 void main();

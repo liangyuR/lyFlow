@@ -44,11 +44,13 @@ Status pointOffset(const Inputs& inputs, const ParamView& params, Outputs& outpu
   const double dyOffset = params.number("dyOffset");
 
   double dx = static_cast<double>(pb.x() - pa.x()) * kScale * scaleDx;
-  if (absDx) dx = std::fabs(dx);
+  if (absDx)
+    dx = std::fabs(dx);
   dx += dxOffset;
 
   double dy = static_cast<double>(pb.y() - pa.y()) * kScale * scaleDy;
-  if (absDy) dy = std::fabs(dy);
+  if (absDy)
+    dy = std::fabs(dy);
   dy += dyOffset;
 
   const double distanceMm = static_cast<double>((pb - pa).norm()) * kScale;
@@ -83,7 +85,7 @@ Param numParam(const char* name, const char* label, double def, const char* doc)
   return p;
 }
 
-}  // namespace
+} // namespace
 
 void registerPointOffset(Registry& r) {
   OperatorDesc op;
@@ -92,12 +94,11 @@ void registerPointOffset(Registry& r) {
   op.label = "两点分量";
   op.category = "间隙/测量";
   op.keywords = {"offset", "dx", "dy", "两点", "分量", "面板边"};
-  op.doc =
-      "把 b 相对 a 的位移分解到测量帧的两个轴上：dx 沿 x（+ = b 在 a 右侧），"
-      "dy 沿 y（+ = b 更远离传感器 / 更低）。用于面板边与翻边平台这类「缝是横着的」工况"
-      "（罗石 点 5）：a 取立壁最低可见点、b 取平台外端点，dy 就是竖向开口、dx 就是横向错位。\n"
-      "分量沿**测量帧坐标轴**，不沿任何拟合出来的面；零件整体转过一个角度，两个分量会一起变。"
-      "a、b 由上游选点给定，本算子不检查它们是不是同一条缝的两侧。";
+  op.doc = "把 b 相对 a 的位移分解到测量帧的两个轴上：dx 沿 x（+ = b 在 a 右侧），"
+           "dy 沿 y（+ = b 更远离传感器 / 更低）。用于面板边与翻边平台这类「缝是横着的」工况"
+           "（罗石 点 5）：a 取立壁最低可见点、b 取平台外端点，dy 就是竖向开口、dx 就是横向错位。\n"
+           "分量沿**测量帧坐标轴**，不沿任何拟合出来的面；零件整体转过一个角度，两个分量会一起变。"
+           "a、b 由上游选点给定，本算子不检查它们是不是同一条缝的两侧。";
   op.inputs = {
       Port{"a", "Point2D", "A", "起点。", true},
       Port{"b", "Point2D", "B", "终点。", true},
@@ -123,4 +124,4 @@ void registerPointOffset(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

@@ -15,13 +15,13 @@ import {
   type FinalConnectionState,
   type NodeChange,
   type OnNodeDrag,
-} from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+} from '@xyflow/react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { useAdditiveSelection } from "../hooks/useAdditiveSelection";
-import { useRightDragPan } from "../hooks/useRightDragPan";
-import { useMotionEnabled, viewportMs } from "../lib/motion";
-import { registerViewportHandle } from "../lib/viewportHandle";
+import { useAdditiveSelection } from '../hooks/useAdditiveSelection';
+import { useRightDragPan } from '../hooks/useRightDragPan';
+import { useMotionEnabled, viewportMs } from '../lib/motion';
+import { registerViewportHandle } from '../lib/viewportHandle';
 import {
   createMappingCache,
   distanceToSegment,
@@ -30,10 +30,10 @@ import {
   segmentHitsRect,
   toReactFlow,
   type LyNode,
-} from "../lib/mapping";
-import { peekSourceOf } from "../lib/peekSource";
-import { defaultViewFor } from "../lib/viewRule";
-import { augmentOperators, levelOf, nodeIndex, pathIsValid } from "../lib/subgraph";
+} from '../lib/mapping';
+import { peekSourceOf } from '../lib/peekSource';
+import { defaultViewFor } from '../lib/viewRule';
+import { augmentOperators, levelOf, nodeIndex, pathIsValid } from '../lib/subgraph';
 import {
   canConnectReplacing,
   compatibleSources,
@@ -46,33 +46,28 @@ import {
   type ConnectVerdict,
   type DropOnNode,
   type GraphContext,
-} from "../lib/typecheck";
-import { keyHint } from "../lib/keymap";
-import { useGraphStore } from "../store/graph";
-import { useManifestStore } from "../store/manifest";
-import {
-  clampPeekScreen,
-  findWindowForEdge,
-  usePeekStore,
-  PEEK_DEFAULT_SIZE,
-} from "../store/peek";
-import { useUiStore } from "../store/ui";
-import { transport, type RecentEntry } from "../transport";
-import { subgraphIdOf, type GraphDoc, type PortRef } from "../types/graph";
+} from '../lib/typecheck';
+import { keyHint } from '../lib/keymap';
+import { useGraphStore } from '../store/graph';
+import { useManifestStore } from '../store/manifest';
+import { clampPeekScreen, findWindowForEdge, usePeekStore, PEEK_DEFAULT_SIZE } from '../store/peek';
+import { useUiStore } from '../store/ui';
+import { transport, type RecentEntry } from '../transport';
+import { subgraphIdOf, type GraphDoc, type PortRef } from '../types/graph';
 
-import { baseName, parentName, recentFiles } from "../lib/files";
-import { addNodeWithAutoConnect, insertIntoEdge, insertSnippetById } from "../lib/insert";
-import { revealShift } from "../lib/placement";
-import { EdgePeekLayer } from "./EdgePeekLayer";
-import { FlowEdge } from "./FlowEdge";
-import { OPERATOR_DND_MIME, SNIPPET_DND_MIME } from "./NodePalette";
-import { EdgeContextMenu, type EdgeMenuState } from "./EdgeContextMenu";
-import { NodeContextMenu, type ContextMenuState } from "./NodeContextMenu";
-import { PaneContextMenu, type PaneMenuState } from "./PaneContextMenu";
-import { OperatorNode } from "./OperatorNode";
-import { useCanvasMotion } from "./useCanvasMotion";
+import { baseName, parentName, recentFiles } from '../lib/files';
+import { addNodeWithAutoConnect, insertIntoEdge, insertSnippetById } from '../lib/insert';
+import { revealShift } from '../lib/placement';
+import { EdgePeekLayer } from './EdgePeekLayer';
+import { FlowEdge } from './FlowEdge';
+import { OPERATOR_DND_MIME, SNIPPET_DND_MIME } from './NodePalette';
+import { EdgeContextMenu, type EdgeMenuState } from './EdgeContextMenu';
+import { NodeContextMenu, type ContextMenuState } from './NodeContextMenu';
+import { PaneContextMenu, type PaneMenuState } from './PaneContextMenu';
+import { OperatorNode } from './OperatorNode';
+import { useCanvasMotion } from './useCanvasMotion';
 
-import "@xyflow/react/dist/style.css";
+import '@xyflow/react/dist/style.css';
 
 const nodeTypes = { operator: OperatorNode };
 
@@ -90,7 +85,7 @@ const GUIDE_TOLERANCE = 4;
  *  这个半径只是给「擦着边过去」留一点余量。 */
 const EDGE_HIT_RADIUS = 12;
 /** 插入用的透传算子。它是普通算子不是特殊节点类型（E5）。 */
-const REROUTE_OP = "util.reroute";
+const REROUTE_OP = 'util.reroute';
 /** 超过这个节点数就只渲染可见的那些（§4）。小图下全量渲染的手感更好。 */
 const VIRTUALIZE_ABOVE = 80;
 
@@ -98,12 +93,12 @@ const VIRTUALIZE_ABOVE = 80;
 // 按**引用**比较它跟踪的那批 props（`defaultEdgeOptions` 就在里面），内联对象每次渲染
 // 都是新引用，effect 于是每帧跑满一遍并往 store 里写一次、通知一遍所有订阅者。
 // 剩下几个虽然不在跟踪表里，但一样会白白透传给内层组件。
-const MULTI_SELECTION_KEYS = ["Shift", "Control"];
+const MULTI_SELECTION_KEYS = ['Shift', 'Control'];
 /** 中键与右键平移。左键留给框选。 */
 const PAN_BUTTONS = [1, 2];
 const PRO_OPTIONS = { hideAttribution: false };
-const CONNECTION_LINE_STYLE = { stroke: "#4a9eff", strokeWidth: 2 };
-const DEFAULT_EDGE_OPTIONS = { type: "default" };
+const CONNECTION_LINE_STYLE = { stroke: '#4a9eff', strokeWidth: 2 };
+const DEFAULT_EDGE_OPTIONS = { type: 'default' };
 
 export interface CanvasActions {
   /** 只跑到某个节点（交互清单 P1 #27）。 */
@@ -119,12 +114,12 @@ const PEEK_FLASH_MS = 200;
 function flashPeek(root: HTMLElement | null, id: string): void {
   const el = root?.querySelector(`[data-peek-id="${id}"]`);
   if (!el) return;
-  el.classList.add("is-flash");
-  setTimeout(() => el.classList.remove("is-flash"), PEEK_FLASH_MS);
+  el.classList.add('is-flash');
+  setTimeout(() => el.classList.remove('is-flash'), PEEK_FLASH_MS);
 }
 
 interface Guide {
-  axis: "x" | "y";
+  axis: 'x' | 'y';
   at: number;
 }
 
@@ -145,35 +140,41 @@ function resolveDropOnNode(
   ctx: GraphContext,
   current: GraphDoc,
   ref: PortRef,
-  side: "output" | "input",
+  side: 'output' | 'input',
   point: { x: number; y: number },
   owner: Document,
 ): DropOnNode {
   const hit = owner.elementFromPoint(point.x, point.y);
-  const handle = hit?.closest(".react-flow__handle");
-  const handleNode = handle?.getAttribute("data-nodeid");
-  const handlePort = handle?.getAttribute("data-handleid");
+  const handle = hit?.closest('.react-flow__handle');
+  const handleNode = handle?.getAttribute('data-nodeid');
+  const handlePort = handle?.getAttribute('data-handleid');
   if (handle && handleNode && handlePort) {
-    const targetSide = handle.classList.contains("source") ? "output" : "input";
+    const targetSide = handle.classList.contains('source') ? 'output' : 'input';
     return dropOnPort(ctx, current, ref, side, { node: handleNode, port: handlePort }, targetSide);
   }
-  const nodeId = hit?.closest(".react-flow__node")?.getAttribute("data-id");
-  return nodeId ? dropOnNode(ctx, current, ref, side, nodeId) : { kind: "none" };
+  const nodeId = hit?.closest('.react-flow__node')?.getAttribute('data-id');
+  return nodeId ? dropOnNode(ctx, current, ref, side, nodeId) : { kind: 'none' };
 }
 
 /** 指针底下的那条连线（FlowEdge 的命中路径 20 px 宽）。只认这个画布里的。 */
 function edgeAt(canvas: HTMLElement | null, point: { x: number; y: number }): string | null {
   if (!canvas) return null;
   for (const el of canvas.ownerDocument.elementsFromPoint(point.x, point.y)) {
-    const edge = el.closest(".react-flow__edge");
-    if (edge && canvas.contains(edge)) return edge.getAttribute("data-id");
+    const edge = el.closest('.react-flow__edge');
+    if (edge && canvas.contains(edge)) return edge.getAttribute('data-id');
   }
   return null;
 }
 
 /** 空画布的提示：第一次打开就是一片空白，看不出从哪开始。三种加节点的方式都写上（算子面板拖、双击、键盘搜），
  *  不挡鼠标（双击照样落到画布上），这一层有了节点就消失。 */
-function EmptyHint({ inSubgraph, onOpenRecent }: { inSubgraph: boolean; onOpenRecent?: ((path: string) => void) | undefined }) {
+function EmptyHint({
+  inSubgraph,
+  onOpenRecent,
+}: {
+  inSubgraph: boolean;
+  onOpenRecent?: ((path: string) => void) | undefined;
+}) {
   // 还没打开文件的空白新图：把最近打开的几个直接列在这里（以前藏在工具栏 16 px 宽的 ▾ 里，每次开 app 都是一张空图）
   const filePath = useGraphStore((s) => s.filePath);
   const showRecent = !inSubgraph && !filePath && onOpenRecent !== undefined;
@@ -190,9 +191,9 @@ function EmptyHint({ inSubgraph, onOpenRecent }: { inSubgraph: boolean; onOpenRe
   }, [showRecent]);
   return (
     <div className="canvas__empty" data-testid="canvas-empty-hint">
-      <p className="canvas__empty-title">{inSubgraph ? "这个子图还是空的" : "从一个算子开始"}</p>
+      <p className="canvas__empty-title">{inSubgraph ? '这个子图还是空的' : '从一个算子开始'}</p>
       <p>
-        从左侧算子面板拖一个进来，或在空白处双击、按 <kbd>{keyHint("search")}</kbd> 搜索算子
+        从左侧算子面板拖一个进来，或在空白处双击、按 <kbd>{keyHint('search')}</kbd> 搜索算子
       </p>
       {inSubgraph ? (
         <p>
@@ -200,15 +201,25 @@ function EmptyHint({ inSubgraph, onOpenRecent }: { inSubgraph: boolean; onOpenRe
         </p>
       ) : (
         <p>
-          已有的图按 <kbd>{keyHint("open")}</kbd> 打开
+          已有的图按 <kbd>{keyHint('open')}</kbd> 打开
         </p>
       )}
       {showRecent && recent.length > 0 && (
         // 只有这一块接鼠标：别处的双击照样落到画布上开算子搜索
-        <div className="canvas__recent" data-testid="empty-recent" onDoubleClick={(e) => e.stopPropagation()}>
+        <div
+          className="canvas__recent"
+          data-testid="empty-recent"
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
           <p className="canvas__recent-title">最近打开</p>
           {recent.map((r) => (
-            <button key={r.path} type="button" data-testid="empty-recent-item" title={r.path} onClick={() => onOpenRecent?.(r.path)}>
+            <button
+              key={r.path}
+              type="button"
+              data-testid="empty-recent-item"
+              title={r.path}
+              onClick={() => onOpenRecent?.(r.path)}
+            >
               {baseName(r.path)}
               <span className="recent__dir">{parentName(r.path)}</span>
             </button>
@@ -229,7 +240,7 @@ function levelView(): GraphDoc {
 /** 顶掉 occupant 那条线、接上 from → to（松在已接着线的输入上 = 换来源），一条撤销。接不上就整个不算。 */
 function replaceInto(occupant: string, from: PortRef, to: PortRef): ConnectVerdict {
   const graph = useGraphStore.getState();
-  return graph.batch("替换连线", (cancel) => {
+  return graph.batch('替换连线', (cancel) => {
     graph.disconnect([occupant]);
     const verdict = graph.connect(from, to);
     if (!verdict.ok) cancel();
@@ -267,16 +278,10 @@ function Breadcrumb() {
 }
 
 /** 保存到库的小表单。id 决定文件名与算子 id，所以必须让人自己填。 */
-function LibraryDialog({
-  subgraphId,
-  onClose,
-}: {
-  subgraphId: string;
-  onClose: () => void;
-}) {
+function LibraryDialog({ subgraphId, onClose }: { subgraphId: string; onClose: () => void }) {
   const def = useGraphStore((s) => s.doc.subgraphs?.[subgraphId]);
-  const [id, setId] = useState((def?.name || subgraphId).replace(/[^\w.-]+/g, "_"));
-  const [category, setCategory] = useState(def?.category?.replace(/^Library\//, "") || "General");
+  const [id, setId] = useState((def?.name || subgraphId).replace(/[^\w.-]+/g, '_'));
+  const [category, setCategory] = useState(def?.category?.replace(/^Library\//, '') || 'General');
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
@@ -288,12 +293,10 @@ function LibraryDialog({
       });
       const refreshed = await transport.refreshLibrary();
       useManifestStore.getState().replaceBundle(refreshed.manifest, 0);
-      useUiStore
-        .getState()
-        .showToast(`已保存到库：lib.${id}（库里现在有 ${status.count} 个算子）`);
+      useUiStore.getState().showToast(`已保存到库：lib.${id}（库里现在有 ${status.count} 个算子）`);
       onClose();
     } catch (e) {
-      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
+      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), 'warn');
       setBusy(false);
     }
   };
@@ -343,20 +346,20 @@ function LibraryDialog({
  *  keep 里的不取消选中：按着 Shift / Ctrl 框选时那一刻已经选着的（useAdditiveSelection）。 */
 function applySelectChanges(
   changes: readonly { type: string; id?: string; selected?: boolean }[],
-  kind: "nodes" | "edges",
+  kind: 'nodes' | 'edges',
   keep?: ReadonlySet<string>,
 ) {
   let touched = false;
   const ui = useUiStore.getState();
-  const next = new Set(kind === "nodes" ? ui.selectedNodes : ui.selectedEdges);
+  const next = new Set(kind === 'nodes' ? ui.selectedNodes : ui.selectedEdges);
   for (const c of changes) {
-    if (c.type !== "select" || c.id === undefined) continue;
+    if (c.type !== 'select' || c.id === undefined) continue;
     touched = true;
     if (c.selected) next.add(c.id);
     else if (!keep?.has(c.id)) next.delete(c.id);
   }
   if (!touched) return;
-  if (kind === "nodes") ui.setSelection([...next], [...ui.selectedEdges]);
+  if (kind === 'nodes') ui.setSelection([...next], [...ui.selectedEdges]);
   else ui.setSelection([...ui.selectedNodes], [...next]);
 }
 
@@ -480,82 +483,90 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
   );
 
   // -- 节点变更 ------------------------------------------------------------
-  const onNodesChange = useCallback((changes: NodeChange<LyNode>[]) => {
-    const graph = useGraphStore.getState();
+  const onNodesChange = useCallback(
+    (changes: NodeChange<LyNode>[]) => {
+      const graph = useGraphStore.getState();
 
-    const moves = extractMoves(changes as { type: string; id: string; position?: { x: number; y: number } }[]);
-    if (moves.length > 0) {
-      // 拖动（拖节点、拖框选出来的那个选区）由 onNodeDragStart / onSelectionDragStart 的 begin 与 Stop 的
-      // commit 包成一条撤销。不在事务里的挪动 —— React Flow 的键盘挪动（选中节点按方向键）—— 各自记一条：
-      // 以前直接写进 doc、撤销栈里没有，Ctrl+Z 撤掉的是上一步
-      const inTransaction = graph.pendingSnapshot !== null;
-      if (!inTransaction) graph.begin();
-      graph.moveNodes(moves);
-      if (!inTransaction) graph.commit();
-    }
-
-    const removed = changes.filter((c) => c.type === "remove").map((c) => c.id);
-    if (removed.length > 0) graph.deleteNodes(removed);
-
-    // 量测尺寸：不进 GraphDoc，但要回流到节点对象上供 MiniMap 使用（见上面 measured 的注释）。
-    // 只在尺寸真的变了时才 bump，否则会和 React Flow 的重新量测互相触发。
-    // 严格 !== 曾经假设 ResizeObserver 两次量出的同一个稳定尺寸会是完全相等的浮点数，
-    // 但 Windows 下的分数 DPI 缩放会让同一个节点连续两次量出例如 142.3999939 / 142.4000015
-    // 这种差 0.001px 的"抖动"，永远不会严格相等 -> sizeChanged 永远是 true -> 计数器无限自增
-    // -> 触发 React Flow 自己的 setNodes 重新量测 -> 再抖一次，构成"Maximum update depth
-    // exceeded" 的死循环。改成容差比较：小于半个像素的差异视为同一个尺寸，不再触发。
-    const SIZE_EPSILON_PX = 0.5;
-    let sizeChanged = false;
-    for (const s of extractSizes(
-      changes as { type: string; id: string; dimensions?: { width: number; height: number } }[],
-    )) {
-      const prev = measured.current.get(s.id);
-      if (
-        !prev ||
-        Math.abs(prev.width - s.width) > SIZE_EPSILON_PX ||
-        Math.abs(prev.height - s.height) > SIZE_EPSILON_PX
-      ) {
-        measured.current.set(s.id, { width: s.width, height: s.height });
-        sizeChanged = true;
+      const moves = extractMoves(
+        changes as { type: string; id: string; position?: { x: number; y: number } }[],
+      );
+      if (moves.length > 0) {
+        // 拖动（拖节点、拖框选出来的那个选区）由 onNodeDragStart / onSelectionDragStart 的 begin 与 Stop 的
+        // commit 包成一条撤销。不在事务里的挪动 —— React Flow 的键盘挪动（选中节点按方向键）—— 各自记一条：
+        // 以前直接写进 doc、撤销栈里没有，Ctrl+Z 撤掉的是上一步
+        const inTransaction = graph.pendingSnapshot !== null;
+        if (!inTransaction) graph.begin();
+        graph.moveNodes(moves);
+        if (!inTransaction) graph.commit();
       }
-    }
-    // 容差挡不住的情况依然存在（比如画布在挂载瞬间跟着 Splitter/Segmented 一起被重新
-    // 布局，量出的宽高每次都真的差好几像素，不是浮点抖动）。这里再加一道熔断：同一阵
-    // "还在变"的连续触发超过 MAX_SIZE_BUMPS_PER_BURST 次就不再 setState 了 —— 尺寸缓存
-    // 仍然照量到的最新值更新（下次真正需要用到时不会是陈旧值），只是不再拿它去触发
-    // React Flow 重新渲染，从而不管抖动多大都不可能撞上 React 的嵌套更新上限。等一帧
-    // 没有新的尺寸变化，计数器复位，不影响之后用户手动拖拽调整节点大小之类的正常场景。
-    if (sizeChanged) {
-      const burst = sizeBurst.current;
-      burst.count += 1;
-      if (burst.resetHandle !== null) cancelAnimationFrame(burst.resetHandle);
-      burst.resetHandle = requestAnimationFrame(() => {
-        sizeBurst.current.count = 0;
-        sizeBurst.current.resetHandle = null;
-      });
-      const MAX_SIZE_BUMPS_PER_BURST = 8;
-      if (burst.count <= MAX_SIZE_BUMPS_PER_BURST) {
-        setMeasuredTick((t) => t + 1);
-      } else if (burst.count === MAX_SIZE_BUMPS_PER_BURST + 1) {
-        console.warn(
-          "[LyFlow] 节点尺寸连续多次变化未收敛，已停止跟随重渲染以避免死循环（Maximum update depth exceeded）。",
-        );
+
+      const removed = changes.filter((c) => c.type === 'remove').map((c) => c.id);
+      if (removed.length > 0) graph.deleteNodes(removed);
+
+      // 量测尺寸：不进 GraphDoc，但要回流到节点对象上供 MiniMap 使用（见上面 measured 的注释）。
+      // 只在尺寸真的变了时才 bump，否则会和 React Flow 的重新量测互相触发。
+      // 严格 !== 曾经假设 ResizeObserver 两次量出的同一个稳定尺寸会是完全相等的浮点数，
+      // 但 Windows 下的分数 DPI 缩放会让同一个节点连续两次量出例如 142.3999939 / 142.4000015
+      // 这种差 0.001px 的"抖动"，永远不会严格相等 -> sizeChanged 永远是 true -> 计数器无限自增
+      // -> 触发 React Flow 自己的 setNodes 重新量测 -> 再抖一次，构成"Maximum update depth
+      // exceeded" 的死循环。改成容差比较：小于半个像素的差异视为同一个尺寸，不再触发。
+      const SIZE_EPSILON_PX = 0.5;
+      let sizeChanged = false;
+      for (const s of extractSizes(
+        changes as { type: string; id: string; dimensions?: { width: number; height: number } }[],
+      )) {
+        const prev = measured.current.get(s.id);
+        if (
+          !prev ||
+          Math.abs(prev.width - s.width) > SIZE_EPSILON_PX ||
+          Math.abs(prev.height - s.height) > SIZE_EPSILON_PX
+        ) {
+          measured.current.set(s.id, { width: s.width, height: s.height });
+          sizeChanged = true;
+        }
       }
-    }
+      // 容差挡不住的情况依然存在（比如画布在挂载瞬间跟着 Splitter/Segmented 一起被重新
+      // 布局，量出的宽高每次都真的差好几像素，不是浮点抖动）。这里再加一道熔断：同一阵
+      // "还在变"的连续触发超过 MAX_SIZE_BUMPS_PER_BURST 次就不再 setState 了 —— 尺寸缓存
+      // 仍然照量到的最新值更新（下次真正需要用到时不会是陈旧值），只是不再拿它去触发
+      // React Flow 重新渲染，从而不管抖动多大都不可能撞上 React 的嵌套更新上限。等一帧
+      // 没有新的尺寸变化，计数器复位，不影响之后用户手动拖拽调整节点大小之类的正常场景。
+      if (sizeChanged) {
+        const burst = sizeBurst.current;
+        burst.count += 1;
+        if (burst.resetHandle !== null) cancelAnimationFrame(burst.resetHandle);
+        burst.resetHandle = requestAnimationFrame(() => {
+          sizeBurst.current.count = 0;
+          sizeBurst.current.resetHandle = null;
+        });
+        const MAX_SIZE_BUMPS_PER_BURST = 8;
+        if (burst.count <= MAX_SIZE_BUMPS_PER_BURST) {
+          setMeasuredTick((t) => t + 1);
+        } else if (burst.count === MAX_SIZE_BUMPS_PER_BURST + 1) {
+          console.warn(
+            '[LyFlow] 节点尺寸连续多次变化未收敛，已停止跟随重渲染以避免死循环（Maximum update depth exceeded）。',
+          );
+        }
+      }
 
-    // select / dragging 是 UI 运行时状态，不进 GraphDoc。选中只认这里（与 onEdgesChange）的 select 变更：
-    // 受控模式下点选、框选、点空白处取消，React Flow 都经它们发出来，ui store 是唯一的来源。
-    // 以前还有一个 onSelectionChange「兜底」，它报的是 React Flow 自己那份、比 props 慢一拍的选中 ——
-    // 框选时它与这里一来一回地改连线的选中（[] ↔ [e]），StoreUpdater 撞上「Maximum update depth exceeded」，
-    // 框选只选上第一个碰到的节点、选区也不出现。
-    applySelectChanges(changes, "nodes", keepSelected.current?.nodes);
-  }, [keepSelected]);
+      // select / dragging 是 UI 运行时状态，不进 GraphDoc。选中只认这里（与 onEdgesChange）的 select 变更：
+      // 受控模式下点选、框选、点空白处取消，React Flow 都经它们发出来，ui store 是唯一的来源。
+      // 以前还有一个 onSelectionChange「兜底」，它报的是 React Flow 自己那份、比 props 慢一拍的选中 ——
+      // 框选时它与这里一来一回地改连线的选中（[] ↔ [e]），StoreUpdater 撞上「Maximum update depth exceeded」，
+      // 框选只选上第一个碰到的节点、选区也不出现。
+      applySelectChanges(changes, 'nodes', keepSelected.current?.nodes);
+    },
+    [keepSelected],
+  );
 
-  const onEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => {
-    const removed = changes.filter((c) => c.type === "remove").map((c) => c.id);
-    if (removed.length > 0) useGraphStore.getState().disconnect(removed);
-    applySelectChanges(changes, "edges", keepSelected.current?.edges);
-  }, [keepSelected]);
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange<Edge>[]) => {
+      const removed = changes.filter((c) => c.type === 'remove').map((c) => c.id);
+      if (removed.length > 0) useGraphStore.getState().disconnect(removed);
+      applySelectChanges(changes, 'edges', keepSelected.current?.edges);
+    },
+    [keepSelected],
+  );
 
   // -- 拖动：整段拖动只记一条撤销 + 对齐参考线（交互清单 P1 #22）-------------
   const onNodeDragStart: OnNodeDrag<LyNode> = useCallback(
@@ -571,7 +582,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
 
   const onNodeDrag: OnNodeDrag<LyNode> = useCallback((e, node) => {
     // Shift 临时关掉吸附与参考线：需要摆一个「差一点」的位置时总得有出路
-    const shift = "shiftKey" in e && e.shiftKey;
+    const shift = 'shiftKey' in e && e.shiftKey;
     setSnapping(!shift);
     if (shift) {
       setGuides([]);
@@ -580,7 +591,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
     const current = levelView();
     const me = rectOf(current, node.id, measured.current);
     const found: Guide[] = [];
-    const pairs = (axis: "x" | "y", mine: number[], theirs: number[]) => {
+    const pairs = (axis: 'x' | 'y', mine: number[], theirs: number[]) => {
       for (let i = 0; i < mine.length; i += 1) {
         const a = mine[i] as number;
         const b = theirs[i] as number;
@@ -590,8 +601,8 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
     for (const other of current.nodes) {
       if (other.id === node.id) continue;
       const r = rectOf(current, other.id, measured.current);
-      pairs("x", [me.x, me.x + me.w / 2, me.x + me.w], [r.x, r.x + r.w / 2, r.x + r.w]);
-      pairs("y", [me.y, me.y + me.h / 2, me.y + me.h], [r.y, r.y + r.h / 2, r.y + r.h]);
+      pairs('x', [me.x, me.x + me.w / 2, me.x + me.w], [r.x, r.x + r.w / 2, r.x + r.w]);
+      pairs('y', [me.y, me.y + me.h / 2, me.y + me.h], [r.y, r.y + r.h / 2, r.y + r.h]);
     }
     setGuides(found.slice(0, 4));
   }, []);
@@ -615,7 +626,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
       const current = levelView();
       const me = rectOf(current, nodeId, measured.current);
       const center = { x: me.x + me.w / 2, y: me.y + me.h / 2 };
-      const op = ctx.operatorsById.get(current.nodes.find((n) => n.id === nodeId)?.op ?? "");
+      const op = ctx.operatorsById.get(current.nodes.find((n) => n.id === nodeId)?.op ?? '');
       if (!op) return false;
       // 已经有连线的节点不参与插入：它多半只是被挪到了别的连线附近
       if (current.edges.some((e) => e.from.node === nodeId || e.to.node === nodeId)) return false;
@@ -651,9 +662,9 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
       const inserted =
         selection.size <= 1 &&
         dragged.current === node.id &&
-        graph.batch("插入到连线中间", () => insertOnHoveredEdge(node.id));
-      graph.commit(inserted ? "插入到连线中间" : undefined);
-      if (inserted) useUiStore.getState().showToast("已插入到连线中间");
+        graph.batch('插入到连线中间', () => insertOnHoveredEdge(node.id));
+      graph.commit(inserted ? '插入到连线中间' : undefined);
+      if (inserted) useUiStore.getState().showToast('已插入到连线中间');
       dragged.current = null;
     },
     [insertOnHoveredEdge],
@@ -667,9 +678,12 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
       const to = { node: c.target, port: c.targetHandle };
       // 松在已接着线的输入上：给它换来源（顶掉原来那条），一条撤销
       const replacing = canConnectReplacing(ctx, levelView(), from, to);
-      const verdict = replacing.ok && replacing.replaces ? replaceInto(replacing.replaces, from, to) : useGraphStore.getState().connect(from, to);
+      const verdict =
+        replacing.ok && replacing.replaces
+          ? replaceInto(replacing.replaces, from, to)
+          : useGraphStore.getState().connect(from, to);
       if (!verdict.ok) {
-        useUiStore.getState().showToast(verdict.reason, "warn");
+        useUiStore.getState().showToast(verdict.reason, 'warn');
       } else {
         // 人自己接了一条：自动连线留下的候选高亮就完成了使命
         useUiStore.getState().clearAutoHint();
@@ -686,13 +700,13 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
     ) => {
       if (!params.nodeId || !params.handleId) return;
       const current = levelView();
-      const fromOutput = params.handleType === "source";
+      const fromOutput = params.handleType === 'source';
       const ref = { node: params.nodeId, port: params.handleId };
       const compatible = fromOutput
         ? compatibleTargets(ctx, current, ref)
         : compatibleSources(ctx, current, ref);
       useUiStore.getState().beginConnection(
-        { ...ref, side: fromOutput ? "output" : "input" },
+        { ...ref, side: fromOutput ? 'output' : 'input' },
         compatible,
         // 从输出往外拖时，已接着线的输入松上去是换来源
         fromOutput ? replaceableTargets(ctx, current, ref) : undefined,
@@ -709,7 +723,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
       ui.endConnection();
       if (reconnecting.current || state.isValid || !pending) return;
       const point =
-        "clientX" in event
+        'clientX' in event
           ? { x: event.clientX, y: event.clientY }
           : { x: event.changedTouches[0]?.clientX ?? 0, y: event.changedTouches[0]?.clientY ?? 0 };
       const ref = { node: pending.node, port: pending.port };
@@ -717,16 +731,32 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
       const snapped = state.toHandle;
       const drop =
         snapped?.id && snapped.nodeId
-          ? dropOnPort(ctx, levelView(), ref, pending.side, { node: snapped.nodeId, port: snapped.id }, snapped.type === "source" ? "output" : "input")
-          : resolveDropOnNode(ctx, levelView(), ref, pending.side, point, wrapper.current?.ownerDocument ?? document);
-      if (drop.kind === "connect") {
-        const verdict = drop.replaces ? replaceInto(drop.replaces, drop.from, drop.to) : useGraphStore.getState().connect(drop.from, drop.to);
+          ? dropOnPort(
+              ctx,
+              levelView(),
+              ref,
+              pending.side,
+              { node: snapped.nodeId, port: snapped.id },
+              snapped.type === 'source' ? 'output' : 'input',
+            )
+          : resolveDropOnNode(
+              ctx,
+              levelView(),
+              ref,
+              pending.side,
+              point,
+              wrapper.current?.ownerDocument ?? document,
+            );
+      if (drop.kind === 'connect') {
+        const verdict = drop.replaces
+          ? replaceInto(drop.replaces, drop.from, drop.to)
+          : useGraphStore.getState().connect(drop.from, drop.to);
         if (verdict.ok) ui.clearAutoHint();
-        else ui.showToast(verdict.reason, "warn");
+        else ui.showToast(verdict.reason, 'warn');
         return;
       }
-      if (drop.kind === "reject") ui.showToast(drop.reason, "warn");
-      if (drop.kind !== "none") return;
+      if (drop.kind === 'reject') ui.showToast(drop.reason, 'warn');
+      if (drop.kind !== 'none') return;
       ui.openSearch({
         screen: point,
         flow: screenToFlowPosition(point),
@@ -753,7 +783,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
       const replacing = from ? canConnectReplacing(ctx, levelView(), from, to) : null;
       const occupant = replacing?.ok ? replacing.replaces : null;
       const verdict = occupant
-        ? graph.batch("改接连线", (cancel) => {
+        ? graph.batch('改接连线', (cancel) => {
             graph.disconnect([occupant]);
             const v = graph.reconnectEdge(oldEdge.id, to);
             if (!v.ok) cancel();
@@ -761,7 +791,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
           })
         : graph.reconnectEdge(oldEdge.id, to);
       if (verdict.ok) reconnected.current = true;
-      else useUiStore.getState().showToast(verdict.reason, "warn");
+      else useUiStore.getState().showToast(verdict.reason, 'warn');
     },
     [ctx],
   );
@@ -777,28 +807,35 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
       const graph = useGraphStore.getState();
       const from = levelView().edges.find((e) => e.id === edge.id)?.from;
       // 松在一个节点身上：改接到它唯一能接的那个端口（断开与接上一条撤销）；接不上、松回原处就不动原来那条
-      if (from && "clientX" in event) {
+      if (from && 'clientX' in event) {
         const at = { x: event.clientX, y: event.clientY };
-        const drop = resolveDropOnNode(ctx, levelView(), from, "output", at, wrapper.current?.ownerDocument ?? document);
-        if (drop.kind === "connect") {
-          graph.batch("改接连线", () => {
+        const drop = resolveDropOnNode(
+          ctx,
+          levelView(),
+          from,
+          'output',
+          at,
+          wrapper.current?.ownerDocument ?? document,
+        );
+        if (drop.kind === 'connect') {
+          graph.batch('改接连线', () => {
             // 松在已接着线的输入上：那条也顶掉（换来源）
             graph.disconnect(drop.replaces ? [edge.id, drop.replaces] : [edge.id]);
             graph.connect(drop.from, drop.to);
           });
           return;
         }
-        if (drop.kind === "reject") useUiStore.getState().showToast(drop.reason, "warn");
-        if (drop.kind !== "none") return;
+        if (drop.kind === 'reject') useUiStore.getState().showToast(drop.reason, 'warn');
+        if (drop.kind !== 'none') return;
       }
       graph.disconnect([edge.id]);
-      if (!from || !("clientX" in event)) return;
+      if (!from || !('clientX' in event)) return;
       const point = { x: event.clientX, y: event.clientY };
       useUiStore.getState().openSearch({
         screen: point,
         flow: screenToFlowPosition(point),
         pendingFrom: from,
-        pendingSide: "output",
+        pendingSide: 'output',
       });
     },
     [ctx, screenToFlowPosition],
@@ -808,10 +845,10 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
    *  权威校验仍然在 C++ 侧（docs/architecture.md）。 */
   const isValidConnection = useCallback(
     (c: Connection | Edge) => {
-      const source = "source" in c ? c.source : null;
-      const target = "target" in c ? c.target : null;
-      const sourceHandle = "sourceHandle" in c ? c.sourceHandle : null;
-      const targetHandle = "targetHandle" in c ? c.targetHandle : null;
+      const source = 'source' in c ? c.source : null;
+      const target = 'target' in c ? c.target : null;
+      const sourceHandle = 'sourceHandle' in c ? c.sourceHandle : null;
+      const targetHandle = 'targetHandle' in c ? c.targetHandle : null;
       if (!source || !target || !sourceHandle || !targetHandle) return false;
       // 已接着线的输入也算能落：松上去是换来源（onConnect 顶掉原来那条）
       return canConnectReplacing(
@@ -847,14 +884,18 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
   // 开关一次 GraphCanvas 整个重渲染不值得；状态没变时也不碰 DOM（每次写属性都会让样式重算）
   useEffect(() => {
     let on = false;
-    const apply = (s: { hoverNodeId: string | null; pendingFrom: unknown; hoverPaused: boolean }) => {
+    const apply = (s: {
+      hoverNodeId: string | null;
+      pendingFrom: unknown;
+      hoverPaused: boolean;
+    }) => {
       const next = s.hoverNodeId != null && !s.pendingFrom && !s.hoverPaused;
       if (next === on) return;
       on = next;
       const el = wrapper.current;
       if (!el) return;
-      if (on) el.setAttribute("data-node-hover", "");
-      else el.removeAttribute("data-node-hover");
+      if (on) el.setAttribute('data-node-hover', '');
+      else el.removeAttribute('data-node-hover');
     };
     apply(useUiStore.getState());
     return useUiStore.subscribe(apply);
@@ -880,7 +921,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
   const onDoubleClick = useCallback(
     (e: React.MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (!target.classList.contains("react-flow__pane")) return;
+      if (!target.classList.contains('react-flow__pane')) return;
       useUiStore.getState().openSearch({
         screen: { x: e.clientX, y: e.clientY },
         flow: screenToFlowPosition({ x: e.clientX, y: e.clientY }),
@@ -889,16 +930,19 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
     [screenToFlowPosition],
   );
 
-  const enterSubgraph = useCallback((nodeId: string) => {
-    const current = levelView();
-    const node = current.nodes.find((n) => n.id === nodeId);
-    const subgraphId = node ? subgraphIdOf(node.op) : null;
-    if (!subgraphId) return false;
-    useUiStore.getState().enterSubgraph({ nodeId, subgraphId });
-    setTimeout(() => void fitView({ duration: viewportMs(motionOn) }), 60);
-    return true;
-    // fitView 的引用是稳定的（useReactFlow 返回的都是），列进依赖只是为了 lint
-  }, [fitView, motionOn]);
+  const enterSubgraph = useCallback(
+    (nodeId: string) => {
+      const current = levelView();
+      const node = current.nodes.find((n) => n.id === nodeId);
+      const subgraphId = node ? subgraphIdOf(node.op) : null;
+      if (!subgraphId) return false;
+      useUiStore.getState().enterSubgraph({ nodeId, subgraphId });
+      setTimeout(() => void fitView({ duration: viewportMs(motionOn) }), 60);
+      return true;
+      // fitView 的引用是稳定的（useReactFlow 返回的都是），列进依赖只是为了 lint
+    },
+    [fitView, motionOn],
+  );
 
   // 诊断、子图节点上的错误文字点进来（ui.revealNode）：等这一层画出来，把那个节点移进视野。
   // 不放大过 1:1 —— 只框一个节点的话 fitView 会把它放得满屏
@@ -921,22 +965,40 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
       const rect = rectOf(levelView(), id, measured.current);
       // 上一次的平移还在动画里：按它的终点算，不按半路上的那一帧（不然算出来不用挪，等它停下新节点反倒出了视野）
       const view = followTarget.current ?? getViewport();
-      const inset = { top: 40 + (useUiStore.getState().path.length > 0 ? 32 : 0), right: 40, bottom: 40, left: 40 };
+      const inset = {
+        top: 40 + (useUiStore.getState().path.length > 0 ? 32 : 0),
+        right: 40,
+        bottom: 40,
+        left: 40,
+      };
       let center = revealShift(view, pane, rect, inset);
       // 右下角的小地图不透明：挪完压在它底下就再往上让一让
-      const mm = host.querySelector(".react-flow__minimap")?.getBoundingClientRect();
+      const mm = host.querySelector('.react-flow__minimap')?.getBoundingClientRect();
       if (mm && mm.width > 0) {
-        const final = center ? { x: pane.width / 2 - center.x * view.zoom, y: pane.height / 2 - center.y * view.zoom } : view;
+        const final = center
+          ? { x: pane.width / 2 - center.x * view.zoom, y: pane.height / 2 - center.y * view.zoom }
+          : view;
         const sx = rect.x * view.zoom + final.x;
         const sy = rect.y * view.zoom + final.y;
-        const hit = sx < mm.right - box.left && sx + rect.w * view.zoom > mm.left - box.left &&
-          sy < mm.bottom - box.top && sy + rect.h * view.zoom > mm.top - box.top;
-        if (hit) center = revealShift(view, pane, rect, { ...inset, bottom: Math.max(inset.bottom, box.bottom - mm.top + 8) });
+        const hit =
+          sx < mm.right - box.left &&
+          sx + rect.w * view.zoom > mm.left - box.left &&
+          sy < mm.bottom - box.top &&
+          sy + rect.h * view.zoom > mm.top - box.top;
+        if (hit)
+          center = revealShift(view, pane, rect, {
+            ...inset,
+            bottom: Math.max(inset.bottom, box.bottom - mm.top + 8),
+          });
       }
       let cancelled = false;
       void (async () => {
         if (center) {
-          const target = { x: pane.width / 2 - center.x * view.zoom, y: pane.height / 2 - center.y * view.zoom, zoom: view.zoom };
+          const target = {
+            x: pane.width / 2 - center.x * view.zoom,
+            y: pane.height / 2 - center.y * view.zoom,
+            zoom: view.zoom,
+          };
           followTarget.current = target;
           await setCenter(center.x, center.y, { zoom: view.zoom, duration: viewportMs(motionOn) });
           if (followTarget.current === target) followTarget.current = null;
@@ -945,8 +1007,15 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
           // 这期间焦点被别的接走了（开了搜索、查找节点、改名框）：不抢回来。落回编辑器根元素（画布的祖先）的不算 ——
           // 搜索弹层选完一关，焦点先掉回 body、再被根元素收回去
           const active = doc.activeElement;
-          if (active !== focusedBefore && active !== doc.body && !(active && (host.contains(active) || active.contains(host)))) return;
-          const el = host.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
+          if (
+            active !== focusedBefore &&
+            active !== doc.body &&
+            !(active && (host.contains(active) || active.contains(host)))
+          )
+            return;
+          const el = host.querySelector<HTMLElement>(
+            `.react-flow__node[data-id="${CSS.escape(id)}"]`,
+          );
           if (el) {
             el.focus({ preventScroll: true });
             // 刚加的节点量出大小之前是 visibility: hidden，focus 不生效：下一帧再试
@@ -960,7 +1029,12 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
       };
     }
     const timer = setTimeout(() => {
-      void fitView({ nodes: [{ id: revealRequest.nodeId }], duration: viewportMs(motionOn), maxZoom: 1, padding: 0.6 });
+      void fitView({
+        nodes: [{ id: revealRequest.nodeId }],
+        duration: viewportMs(motionOn),
+        maxZoom: 1,
+        padding: 0.6,
+      });
     }, 60);
     return () => clearTimeout(timer);
   }, [revealRequest, fitView, motionOn, getViewport, setCenter, levelView]);
@@ -978,9 +1052,9 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
       const graph = useGraphStore.getState();
       const at = screenToFlowPosition(screen);
       // 加节点与插进连线一条撤销（以前两条：Ctrl+Z 一次，连线回来了、reroute 还孤零零地留着）
-      const id = graph.batch("插入 Reroute", (cancel) => {
+      const id = graph.batch('插入 Reroute', (cancel) => {
         const added = graph.addNode(REROUTE_OP, { x: at.x - 40, y: at.y - 20 });
-        if (added && !graph.insertOnEdge(edgeId, added, "in", "out")) {
+        if (added && !graph.insertOnEdge(edgeId, added, 'in', 'out')) {
           cancel();
           return null;
         }
@@ -1027,7 +1101,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
     e.preventDefault();
     // 右键的节点如果不在选区里，就先把它选上 —— 否则菜单里的动作作用于谁很含糊
     const ui = useUiStore.getState();
-    let before: ContextMenuState["before"] = null;
+    let before: ContextMenuState['before'] = null;
     if (!ui.selectedNodes.has(node.id)) {
       before = { nodes: [...ui.selectedNodes], edges: [...ui.selectedEdges] };
       ui.setSelection([node.id], []);
@@ -1047,7 +1121,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
   /** 空白处右键：React Flow 在「右键拖平移」模式下自己吞掉了这个 contextmenu（只 preventDefault、不往下发），
    *  冒泡到外层这里再接。右键拖过平移之后的那一次 useRightDragPan 在捕获阶段就吞掉了，到不了这里。 */
   const onCanvasContextMenu = useCallback((e: React.MouseEvent) => {
-    if (!(e.target instanceof Element) || !e.target.classList.contains("react-flow__pane")) return;
+    if (!(e.target instanceof Element) || !e.target.classList.contains('react-flow__pane')) return;
     e.preventDefault();
     setMenu(null);
     setEdgeMenu(null);
@@ -1077,9 +1151,10 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
   useEffect(() => {
     if (!menuOpen) return;
     const owner = wrapper.current?.ownerDocument ?? document;
-    const outside = (target: EventTarget | null) => !(target instanceof Element && target.closest(".ctxmenu"));
+    const outside = (target: EventTarget | null) =>
+      !(target instanceof Element && target.closest('.ctxmenu'));
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== 'Escape') return;
       e.preventDefault();
       e.stopPropagation();
       closeMenu();
@@ -1090,23 +1165,22 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
     const onWheel = (e: WheelEvent) => {
       if (outside(e.target)) closeMenu();
     };
-    owner.addEventListener("keydown", onKey, true);
-    owner.addEventListener("pointerdown", onPointer, true);
-    owner.addEventListener("wheel", onWheel, true);
+    owner.addEventListener('keydown', onKey, true);
+    owner.addEventListener('pointerdown', onPointer, true);
+    owner.addEventListener('wheel', onWheel, true);
     return () => {
-      owner.removeEventListener("keydown", onKey, true);
-      owner.removeEventListener("pointerdown", onPointer, true);
-      owner.removeEventListener("wheel", onWheel, true);
+      owner.removeEventListener('keydown', onKey, true);
+      owner.removeEventListener('pointerdown', onPointer, true);
+      owner.removeEventListener('wheel', onWheel, true);
     };
   }, [menuOpen, closeMenu]);
-
 
   // -- 从面板拖算子 / 片段进来 ------------------------------------------------
   const onDragOver = useCallback((e: React.DragEvent) => {
     const types = e.dataTransfer.types;
     if (!types.includes(OPERATOR_DND_MIME) && !types.includes(SNIPPET_DND_MIME)) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
+    e.dataTransfer.dropEffect = 'copy';
   }, []);
 
   const onDrop = useCallback(
@@ -1126,7 +1200,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
       const edgeId = edgeAt(wrapper.current, { x: e.clientX, y: e.clientY });
       // 插不进（没有唯一的一对端口）就照旧加节点、自动连线
       if (edgeId && insertIntoEdge(opId, edgeId, position)) {
-        useUiStore.getState().showToast("已插入到连线中间");
+        useUiStore.getState().showToast('已插入到连线中间');
         return;
       }
       addNodeWithAutoConnect(opId, position);
@@ -1146,12 +1220,14 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
         closeMenu();
         setLibraryFor(null);
       }}
-      data-snapping={snapping ? "1" : "0"}
+      data-snapping={snapping ? '1' : '0'}
       data-depth={path.length}
-      data-layout-moving={override ? "1" : undefined}
+      data-layout-moving={override ? '1' : undefined}
     >
       <Breadcrumb />
-      {view.nodes.length === 0 && <EmptyHint inSubgraph={path.length > 0} onOpenRecent={onOpenRecent} />}
+      {view.nodes.length === 0 && (
+        <EmptyHint inSubgraph={path.length > 0} onOpenRecent={onOpenRecent} />
+      )}
       <ReactFlow
         // 预览最大化时画布看不见：React Flow 自己的方向键挪节点（框选的选区还拿着焦点时）也关掉
         disableKeyboardA11y={viewerMax}
@@ -1220,11 +1296,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
         {/* 参考线自绘：React Flow 没有这个能力，而它是「摆得整齐」的全部来源。
             ViewportPortal 让这几条线活在画布坐标系里，跟着平移缩放走。 */}
         <ViewportPortal>
-          <div
-            className="canvas__guides"
-            data-testid="align-guides"
-            data-count={guides.length}
-          >
+          <div className="canvas__guides" data-testid="align-guides" data-count={guides.length}>
             {guides.map((g, i) => (
               <div
                 key={`${g.axis}${i}`}
@@ -1232,7 +1304,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
                 data-axis={g.axis}
                 data-at={g.at}
                 style={
-                  g.axis === "x"
+                  g.axis === 'x'
                     ? { left: g.at, top: -10000, height: 20000 }
                     : { top: g.at, left: -10000, width: 20000 }
                 }
@@ -1250,7 +1322,9 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
         <EdgeContextMenu
           menu={edgeMenu}
           onInsertOp={(edgeId, at) =>
-            useUiStore.getState().openSearch({ screen: at, flow: screenToFlowPosition(at), insertEdge: edgeId })
+            useUiStore
+              .getState()
+              .openSearch({ screen: at, flow: screenToFlowPosition(at), insertEdge: edgeId })
           }
           onPeek={openPeek}
           onReroute={insertReroute}
@@ -1261,8 +1335,15 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
       {paneMenu && (
         <PaneContextMenu
           menu={paneMenu}
-          onAddOperator={(at) => useUiStore.getState().openSearch({ screen: at, flow: screenToFlowPosition(at) })}
-          onSelectAll={() => useUiStore.getState().setSelection(levelView().nodes.map((n) => n.id), [])}
+          onAddOperator={(at) =>
+            useUiStore.getState().openSearch({ screen: at, flow: screenToFlowPosition(at) })
+          }
+          onSelectAll={() =>
+            useUiStore.getState().setSelection(
+              levelView().nodes.map((n) => n.id),
+              [],
+            )
+          }
           onLayout={onLayout}
           onFitView={() => void fitView({ duration: viewportMs(motionOn) })}
           onHelp={() => useUiStore.getState().setHelpOpen(true)}
@@ -1283,9 +1364,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
         />
       )}
 
-      {libraryFor && (
-        <LibraryDialog subgraphId={libraryFor} onClose={() => setLibraryFor(null)} />
-      )}
+      {libraryFor && <LibraryDialog subgraphId={libraryFor} onClose={() => setLibraryFor(null)} />}
     </div>
   );
 }

@@ -35,11 +35,13 @@ cv::Mat swapRedBlue(const cv::Mat& m) {
   return out;
 }
 
-Status loadCompute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext& ctx) {
+Status loadCompute(const Inputs& inputs, const ParamView& params, Outputs& outputs,
+                   ExecContext& ctx) {
   if (params.choice("source") == "inputs") {
     const Image* image = inputs.has("image") ? inputs.get("image").asImage() : nullptr;
     if (!image || !image->consistent()) {
-      return Status::Error(Phase::Execute, "bad_input", "source=inputs 时需要宿主注入或上游连接 image", {}, "image");
+      return Status::Error(Phase::Execute, "bad_input",
+                           "source=inputs 时需要宿主注入或上游连接 image", {}, "image");
     }
     cv::Mat m = cvx::view(*image), converted;
     const std::string& mode = params.choice("mode");
@@ -59,20 +61,24 @@ Status loadCompute(const Inputs& inputs, const ParamView& params, Outputs& outpu
     return Status::Error(Phase::Execute, "io", "文件不存在: " + file.u8string(), "path");
   }
   std::ifstream in(file, std::ios::binary);
-  if (!in) return Status::Error(Phase::Execute, "io", "打不开: " + file.u8string(), "path");
+  if (!in)
+    return Status::Error(Phase::Execute, "io", "打不开: " + file.u8string(), "path");
   // 量好大小一次读完：istreambuf_iterator 逐字节走 streambuf、边读边扩容，36 MB 的图光读文件就要几百毫秒
   in.seekg(0, std::ios::end);
   const std::streamoff size = in.tellg();
   in.seekg(0, std::ios::beg);
   std::vector<unsigned char> bytes(size > 0 ? static_cast<std::size_t>(size) : 0);
-  if (!bytes.empty() && !in.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) {
+  if (!bytes.empty() &&
+      !in.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) {
     return Status::Error(Phase::Execute, "io", "读不完: " + file.u8string(), "path");
   }
 
   const std::string& mode = params.choice("mode");
   int flags = cv::IMREAD_UNCHANGED;
-  if (mode == "gray") flags = cv::IMREAD_GRAYSCALE | cv::IMREAD_ANYDEPTH;
-  if (mode == "color") flags = cv::IMREAD_COLOR | cv::IMREAD_ANYDEPTH;
+  if (mode == "gray")
+    flags = cv::IMREAD_GRAYSCALE | cv::IMREAD_ANYDEPTH;
+  if (mode == "color")
+    flags = cv::IMREAD_COLOR | cv::IMREAD_ANYDEPTH;
   cv::Mat m = cv::imdecode(bytes, flags);
   if (m.empty()) {
     return Status::Error(Phase::Execute, "io",
@@ -93,13 +99,16 @@ Status loadCompute(const Inputs& inputs, const ParamView& params, Outputs& outpu
 
 /// 路径没变但文件被覆盖了也必须重算（同 io.load_pcd）。
 std::string loadExternalKey(const ParamView& params) {
-  if (params.choice("source") == "inputs") return {};
+  if (params.choice("source") == "inputs")
+    return {};
   const std::filesystem::path file = params.path("path");
   std::error_code ec;
   const auto size = std::filesystem::file_size(file, ec);
-  if (ec) return {};
+  if (ec)
+    return {};
   const auto mtime = std::filesystem::last_write_time(file, ec);
-  if (ec) return {};
+  if (ec)
+    return {};
   return std::to_string(size) + ":" + std::to_string(mtime.time_since_epoch().count());
 }
 
@@ -111,7 +120,8 @@ Status saveCompute(const Inputs& inputs, const ParamView& params, Outputs&, Exec
     return img::badParam("输出路径要带扩展名（.png / .jpg / .bmp / .tif）", "path");
   }
   if (image.depth == PixelDepth::F32 && ext != ".tif" && ext != ".tiff") {
-    return img::badParam("f32 图像只能存 .tif；要存 PNG 先接 image.normalize 转成 u8 / u16", "path");
+    return img::badParam("f32 图像只能存 .tif；要存 PNG 先接 image.normalize 转成 u8 / u16",
+                         "path");
   }
   std::vector<unsigned char> bytes;
   try {
@@ -123,16 +133,20 @@ Status saveCompute(const Inputs& inputs, const ParamView& params, Outputs&, Exec
     return img::fromCvError(e, "path");
   }
   std::error_code ec;
-  if (!file.parent_path().empty()) std::filesystem::create_directories(file.parent_path(), ec);
+  if (!file.parent_path().empty())
+    std::filesystem::create_directories(file.parent_path(), ec);
   std::ofstream out(file, std::ios::binary | std::ios::trunc);
-  if (!out) return Status::Error(Phase::Execute, "io", "打不开输出文件: " + file.u8string(), "path");
-  out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-  if (!out) return Status::Error(Phase::Execute, "io", "写入失败: " + file.u8string(), "path");
+  if (!out)
+    return Status::Error(Phase::Execute, "io", "打不开输出文件: " + file.u8string(), "path");
+  out.write(reinterpret_cast<const char*>(bytes.data()),
+            static_cast<std::streamsize>(bytes.size()));
+  if (!out)
+    return Status::Error(Phase::Execute, "io", "写入失败: " + file.u8string(), "path");
   ctx.log(LogLevel::Info, "写出 " + std::to_string(bytes.size()) + " 字节 -> " + file.u8string());
   return Status::Ok();
 }
 
-}  // namespace
+} // namespace
 
 void registerIoLoadImage(Registry& r) {
   OperatorDesc op;
@@ -141,7 +155,8 @@ void registerIoLoadImage(Registry& r) {
   op.label = "加载图像";
   op.category = "输入输出/输入";
   op.keywords = {"load", "read", "open", "image", "png", "jpg", "tif", "读取", "图像", "图片"};
-  op.doc = "从磁盘读取图像（PNG / JPEG / BMP / TIFF）。通道顺序转成 RGB(A)；16 位 PNG / TIFF 保留 u16。";
+  op.doc =
+      "从磁盘读取图像（PNG / JPEG / BMP / TIFF）。通道顺序转成 RGB(A)；16 位 PNG / TIFF 保留 u16。";
   op.doc += " source=inputs 时使用宿主经 RunImageInput 注入或上游连接的 image，不读文件。";
   op.inputs = {Port{"image", "Image", "Image", "source=inputs 时使用的图像。", false}};
   op.outputs = {img::imageOut("image", "读出的图像。")};
@@ -160,7 +175,8 @@ void registerIoLoadImage(Registry& r) {
   op.params = {
       img::enumParam("source", "Source", "file",
                      {EnumOption{"file", "文件", "从 path 读取图像"},
-                      EnumOption{"inputs", "输入", "上游连接或宿主内存注入"}}, "图像来源。"),
+                      EnumOption{"inputs", "输入", "上游连接或宿主内存注入"}},
+                     "图像来源。"),
       path,
       img::enumParam("mode", "Mode", "unchanged",
                      {EnumOption{"unchanged", "原样", "文件里是什么通道、什么位深就是什么"},
@@ -201,4 +217,4 @@ void registerIoSaveImage(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::ops
+} // namespace lyflow::ops

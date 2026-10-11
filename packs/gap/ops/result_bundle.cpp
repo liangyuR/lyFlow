@@ -11,13 +11,12 @@ namespace {
 
 nlohmann::json pick(const nlohmann::json& src, const char* key) {
   const auto it = src.find(key);
-  if (it == src.end()) return nlohmann::json();
+  if (it == src.end())
+    return nlohmann::json();
   return *it;
 }
 
-std::size_t asCount(const nlohmann::json& v) {
-  return v.is_number() ? v.get<std::size_t>() : 0;
-}
+std::size_t asCount(const nlohmann::json& v) { return v.is_number() ? v.get<std::size_t>() : 0; }
 
 nlohmann::json fitEntry(const std::string& component, const nlohmann::json& q) {
   nlohmann::json out;
@@ -41,8 +40,8 @@ nlohmann::json fitEntry(const std::string& component, const nlohmann::json& q) {
 }
 
 nlohmann::json boxMm(const lyflow::Box2D& box) {
-  return nlohmann::json::array({mToMm(box.min[0]), mToMm(box.min[1]), mToMm(box.max[0]),
-                                mToMm(box.max[1])});
+  return nlohmann::json::array(
+      {mToMm(box.min[0]), mToMm(box.min[1]), mToMm(box.max[0]), mToMm(box.max[1])});
 }
 
 nlohmann::json measurementJson(const lyflow::Measurement* m) {
@@ -81,15 +80,16 @@ nlohmann::json icpSide(const nlohmann::json& side, const std::string& component,
 std::vector<std::string> packVersions() {
   std::vector<std::string> packs;
   for (const OperatorDesc& op : ensureRegistry().operators()) {
-    if (op.pack.empty()) continue;
-    if (std::find(packs.begin(), packs.end(), op.pack) == packs.end()) packs.push_back(op.pack);
+    if (op.pack.empty())
+      continue;
+    if (std::find(packs.begin(), packs.end(), op.pack) == packs.end())
+      packs.push_back(op.pack);
   }
   std::sort(packs.begin(), packs.end());
   return packs;
 }
 
-Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outputs,
-                    ExecContext&) {
+Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
   nlohmann::json bundle;
   bundle["gap"] = measurementJson(inputs.get("gap").asMeasurement());
   // 没有面差需求的测点（HUD/Audio、V 缝开口）可以不接 flush，汇总里记 inactive。
@@ -103,9 +103,11 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
   static const char* kLineComponents[2] = {"flush_base", "flush_ref"};
   static const char* kLineCountKeys[2] = {"flush_base_roi", "flush_ref_roi"};
   for (int i = 0; i < 2; ++i) {
-    if (!inputs.has(kLinePorts[i])) continue;
+    if (!inputs.has(kLinePorts[i]))
+      continue;
     const lyflow::Record* rec = inputs.get(kLinePorts[i]).asRecord();
-    if (rec == nullptr) continue;
+    if (rec == nullptr)
+      continue;
     nlohmann::json entry = fitEntry(kLineComponents[i], rec->data);
     pointCounts[kLineCountKeys[i]] = entry["point_count"];
     fits.push_back(std::move(entry));
@@ -119,7 +121,8 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
       static const char* kCountKeys[2] = {"gap_left_roi", "gap_right_roi"};
       for (int i = 0; i < 2; ++i) {
         const auto it = rec->data.find(kSides[i]);
-        if (it == rec->data.end() || !it->is_object()) continue;
+        if (it == rec->data.end() || !it->is_object())
+          continue;
         nlohmann::json entry = fitEntry(kComponents[i], *it);
         pointCounts[kCountKeys[i]] = entry["point_count"];
         fits.push_back(std::move(entry));
@@ -134,7 +137,8 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
   const bool haveRois = inputs.has("rois") && readRoiSet(inputs.get("rois"), &rois);
   const nlohmann::json* info = haveRois ? &rois.info->data : nullptr;
   auto infoField = [&](const char* key) -> const nlohmann::json* {
-    if (!info) return nullptr;
+    if (!info)
+      return nullptr;
     const auto it = info->find(key);
     return it == info->end() || it->is_null() ? nullptr : &*it;
   };
@@ -142,7 +146,8 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
   nlohmann::json effectiveRoi = nlohmann::json::object();
   if (inputs.has("roiOverall")) {
     const lyflow::Box2D* box = inputs.get("roiOverall").asBox2D();
-    if (box != nullptr) effectiveRoi["overall"] = boxMm(*box);
+    if (box != nullptr)
+      effectiveRoi["overall"] = boxMm(*box);
   } else if (const nlohmann::json* overall = infoField("overallMm")) {
     effectiveRoi["overall"] = *overall;
   }
@@ -156,11 +161,13 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
 
   nlohmann::json icp = nlohmann::json::array();
   std::string roiSource = params.text("roiSource");
-  if (roiSource.empty() && info) roiSource = info->value("source", std::string());
+  if (roiSource.empty() && info)
+    roiSource = info->value("source", std::string());
   const nlohmann::json* alignment = nullptr;
   if (inputs.has("alignment")) {
     const lyflow::Record* rec = inputs.get("alignment").asRecord();
-    if (rec != nullptr) alignment = &rec->data;
+    if (rec != nullptr)
+      alignment = &rec->data;
   } else {
     alignment = infoField("alignment");
   }
@@ -175,7 +182,8 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
     }
     if (a.value("globalCoarse", false)) {
       pointCounts[templateId + "_global_coarse_attempted"] = 1;
-      pointCounts[templateId + "_global_coarse_succeeded"] = a.value("globalSucceeded", false) ? 1 : 0;
+      pointCounts[templateId + "_global_coarse_succeeded"] =
+          a.value("globalSucceeded", false) ? 1 : 0;
     }
     if (roiSource.empty()) {
       roiSource = a.value("roisFrom", std::string(a.contains("rois") ? "template" : "config"));
@@ -187,7 +195,8 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
   const nlohmann::json* crop = nullptr;
   if (inputs.has("cropStatus")) {
     const lyflow::Record* rec = inputs.get("cropStatus").asRecord();
-    if (rec != nullptr) crop = &rec->data;
+    if (rec != nullptr)
+      crop = &rec->data;
   } else {
     crop = infoField("cropStatus");
   }
@@ -195,7 +204,8 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
     cropStatus = crop->value("status", std::string());
     pointCounts["roll_crop_applied"] = crop->value("applied", false) ? 1 : 0;
     pointCounts["roll_crop_reverted"] = cropStatus.rfind("reverted", 0) == 0 ? 1 : 0;
-    if (roiSource.empty()) roiSource = "model";
+    if (roiSource.empty())
+      roiSource = "model";
   }
   bundle["crop_status"] = cropStatus;
 
@@ -206,10 +216,12 @@ Status resultBundle(const Inputs& inputs, const ParamView& params, Outputs& outp
       fallback = rec->data;
       const std::string reason = rec->data.value("reason", std::string());
       bundle["fallback_reason"] = reason.empty() ? nlohmann::json() : nlohmann::json(reason);
-      if (rec->data.value("choice", std::string("a")) == "b") roiSource = "template";
+      if (rec->data.value("choice", std::string("a")) == "b")
+        roiSource = "template";
     }
   }
-  if (!bundle.contains("fallback_reason")) bundle["fallback_reason"] = nlohmann::json();
+  if (!bundle.contains("fallback_reason"))
+    bundle["fallback_reason"] = nlohmann::json();
   bundle["fallback"] = std::move(fallback);
   bundle["roi_source"] = roiSource;
 
@@ -283,14 +295,16 @@ Port optionalRecord(const char* name, const char* label, const char* doc, const 
 
 const MigrationInput* inputOn(const std::vector<MigrationInput>& inputs, const char* port) {
   for (const MigrationInput& in : inputs) {
-    if (in.port == port) return &in;
+    if (in.port == port)
+      return &in;
   }
   return nullptr;
 }
 
 std::string joinNames(const std::vector<std::string>& names) {
   std::string out;
-  for (const std::string& n : names) out += (out.empty() ? "" : "、") + n;
+  for (const std::string& n : names)
+    out += (out.empty() ? "" : "、") + n;
   return out;
 }
 
@@ -310,22 +324,33 @@ TopologyEdit migrateResultBundleFromV1(const nlohmann::json&,
     const char* lost;
   };
   static const Group kGroups[2] = {
-      {"scan", "gap.make_scan_pair", "scan", {"cloudPrimary", "cloudSecondary", "cloudMerged", ""},
-       {"primary", "secondary", "merged", ""}, 3,
+      {"scan",
+       "gap.make_scan_pair",
+       "scan",
+       {"cloudPrimary", "cloudSecondary", "cloudMerged", ""},
+       {"primary", "secondary", "merged", ""},
+       3,
        "point_counts 的 input_* / preprocess_* / filter_after_*、input_point_count、"
        "preprocessed_point_count、left_point_count / right_point_count 从此记 0 或缺省"},
-      {"rois", "gap.make_roi_set", "rois", {"roiFlushBase", "roiFlushRef", "roiGapLeft", "roiGapRight"},
-       {"datum", "target", "seamLeft", "seamRight"}, 4,
+      {"rois",
+       "gap.make_roi_set",
+       "rois",
+       {"roiFlushBase", "roiFlushRef", "roiGapLeft", "roiGapRight"},
+       {"datum", "target", "seamLeft", "seamRight"},
+       4,
        "effective_roi 里对应的框从此不再记录"},
   };
   const bool cropStatus = inputOn(inputs, "cropStatus") != nullptr;
   for (const Group& g : kGroups) {
     std::vector<std::string> present;
     for (std::size_t k = 0; k < g.size; ++k) {
-      if (inputOn(inputs, g.oldPorts[k])) present.push_back(g.oldPorts[k]);
+      if (inputOn(inputs, g.oldPorts[k]))
+        present.push_back(g.oldPorts[k]);
     }
-    if (present.empty()) continue;
-    for (const std::string& p : present) edit.dropInputs.push_back(p);
+    if (present.empty())
+      continue;
+    for (const std::string& p : present)
+      edit.dropInputs.push_back(p);
     const bool complete = present.size() == g.size;
     if (complete && !inputOn(inputs, g.target)) {
       TopologyEdit::NewNode node;
@@ -342,7 +367,8 @@ TopologyEdit migrateResultBundleFromV1(const nlohmann::json&,
       edit.addNodes.push_back(std::move(node));
       for (std::size_t k = 0; k < g.size; ++k) {
         const MigrationInput* in = inputOn(inputs, g.oldPorts[k]);
-        edit.addEdges.push_back({in->fromNode, in->fromPort, std::string("@new:") + g.key, g.fields[k]});
+        edit.addEdges.push_back(
+            {in->fromNode, in->fromPort, std::string("@new:") + g.key, g.fields[k]});
       }
       // 模板路径上 roi_source 按选中槽的 roisFrom 分 template / config，datumSide 也按对齐记录推：
       // bundle 原来那条 alignment 输入同时接给新插的 make_roi_set，与细粒度图的接法一致
@@ -365,7 +391,7 @@ TopologyEdit migrateResultBundleFromV1(const nlohmann::json&,
   return edit;
 }
 
-}  // namespace
+} // namespace
 
 void registerResultBundle(Registry& r) {
   OperatorDesc op;
@@ -390,7 +416,8 @@ void registerResultBundle(Registry& r) {
       "*_global_coarse_* 只有选中候选的那一条；原算法的逐圆诊断键。";
   op.inputs = {
       Port{"gap", "Measurement", "Gap", "间隙测量值。", true},
-      optional("flush", "Measurement", "Flush", "段差测量值。没有面差需求的测点可以不接，记 inactive。"),
+      optional("flush", "Measurement", "Flush",
+               "段差测量值。没有面差需求的测点可以不接，记 inactive。"),
       optional("rois", "Bundle<gap.RoiSet>", "ROIs",
                "定位给出的角色框（生效的那一份）。整体框、对齐结果、裁剪状态也从它的 info 里取。"),
       optional("scan", "Bundle<gap.ScanPair>", "Scan", "量测真正用的那一对云，用来数点。"),
@@ -427,4 +454,4 @@ void registerResultBundle(Registry& r) {
   r.addOperator(std::move(op));
 }
 
-}  // namespace lyflow::packs::gap
+} // namespace lyflow::packs::gap

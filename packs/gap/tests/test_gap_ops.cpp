@@ -69,7 +69,7 @@ PointCloud lineCloud(std::size_t n, bool ascend) {
   return c;
 }
 
-}  // namespace
+} // namespace
 
 // gap.crop_box 已删除：生成的图改用 filter.crop_box2d(bounds=open)，
 // 开闭区间的断言随之搬到 packs/std-pointcloud/tests/test_2d_ops.cpp。
@@ -90,10 +90,11 @@ TEST_CASE("gap.fit_line 按 toward 截取与取 innerEnd，与点序无关") {
     call.inputs["box"] = Data::box2d(box(-1.0f, 0.0f, 1.0f, 1.0f));
     call.inputs["toward"] = Data::box2d(c.towardLeft ? box(-0.010f, 0.4f, -0.005f, 0.6f)
                                                      : box(0.105f, 0.4f, 0.110f, 0.6f));
-    REQUIRE(call.run("gap.fit_line", {
-                                         {"distThresh", Value::number(0.5)},
-                                         {"segmentPoints", Value::integer(10)},
-                                     })
+    REQUIRE(call.run("gap.fit_line",
+                     {
+                         {"distThresh", Value::number(0.5)},
+                         {"segmentPoints", Value::integer(10)},
+                     })
                 .ok);
     const Indices* inliers = call.out("inliers").asIndices();
     REQUIRE(inliers != nullptr);
@@ -115,8 +116,8 @@ TEST_CASE("gap.fit_line 内点不多于 segmentPoints 时不截取，quality 说
   call.inputs["cloud"] = Data::cloud(lineCloud(20, true));
   call.inputs["box"] = Data::box2d(box(-1.0f, 0.0f, 1.0f, 1.0f));
   call.inputs["toward"] = Data::box2d(box(0.05f, 0.4f, 0.06f, 0.6f));
-  REQUIRE(call.run("gap.fit_line", {{"distThresh", Value::number(0.5)},
-                                    {"segmentPoints", Value::integer(500)}})
+  REQUIRE(call.run("gap.fit_line",
+                   {{"distThresh", Value::number(0.5)}, {"segmentPoints", Value::integer(500)}})
               .ok);
   CHECK(call.out("inliers").asIndices()->values.size() == 20);
   CHECK(call.out("quality").asRecord()->data["segmentApplied"] == false);
@@ -126,14 +127,14 @@ TEST_CASE("gap.fit_line 内点不多于 segmentPoints 时不截取，quality 说
 
 TEST_CASE("gap.flush 默认给带符号垂距，signed=false 才取绝对值；scale 与 offset 是线性的") {
   SUBCASE("带 offset 时两侧的符号与 signed=false") {
-    Line2D base;           // y = 0 那条线
+    Line2D base; // y = 0 那条线
     base.point[0] = 0.0f;
     base.point[1] = 0.0f;
     base.dir[0] = 1.0f;
     base.dir[1] = 0.0f;
     Point2D ref;
     ref.p[0] = 0.5f;
-    ref.p[1] = -0.002f;    // 线上方 2 mm（测量帧里 y 越小越高）
+    ref.p[1] = -0.002f; // 线上方 2 mm（测量帧里 y 越小越高）
 
     // 不写 signed：带符号
     Call above;
@@ -144,7 +145,7 @@ TEST_CASE("gap.flush 默认给带符号垂距，signed=false 才取绝对值；s
     REQUIRE(m != nullptr);
     CHECK(m->value == doctest::Approx(2.4));
 
-    ref.p[1] = 0.002f;     // 线下方 2 mm：符号翻过来
+    ref.p[1] = 0.002f; // 线下方 2 mm：符号翻过来
     Call below;
     below.inputs["baseLine"] = Data::line2d(base);
     below.inputs["refPoint"] = Data::point2d(ref);
@@ -155,9 +156,9 @@ TEST_CASE("gap.flush 默认给带符号垂距，signed=false 才取绝对值；s
     Call folded;
     folded.inputs["baseLine"] = Data::line2d(base);
     folded.inputs["refPoint"] = Data::point2d(ref);
-    REQUIRE(folded.run("gap.flush", {{"offset", Value::number(0.4)},
-                                     {"signed", Value::boolean(false)}})
-                .ok);
+    REQUIRE(
+        folded.run("gap.flush", {{"offset", Value::number(0.4)}, {"signed", Value::boolean(false)}})
+            .ok);
     CHECK(folded.out("value").asMeasurement()->value == doctest::Approx(2.4));
   }
 
@@ -171,7 +172,7 @@ TEST_CASE("gap.flush 默认给带符号垂距，signed=false 才取绝对值；s
     call.inputs["baseLine"] = Data::line2d(base);
     Point2D below;
     below.p[0] = 0.0f;
-    below.p[1] = 0.002f;  // y 更大 = 基准线下方
+    below.p[1] = 0.002f; // y 更大 = 基准线下方
     Point2D above;
     above.p[0] = 0.0f;
     above.p[1] = -0.002f;
@@ -201,13 +202,14 @@ TEST_CASE("gap.flush 默认给带符号垂距，signed=false 才取绝对值；s
     base.dir[1] = 0.0f;
     Point2D ref;
     ref.p[0] = 0.0f;
-    ref.p[1] = 0.002f;  // 2 mm
+    ref.p[1] = 0.002f; // 2 mm
     Call call;
     call.inputs["baseLine"] = Data::line2d(base);
     call.inputs["refPoint"] = Data::point2d(ref);
     REQUIRE(call.run("gap.flush").ok);
     CHECK(call.out("value").asMeasurement()->value == doctest::Approx(-2.0).epsilon(1e-6));
-    REQUIRE(call.run("gap.flush", {{"scale", Value::number(2.06)}, {"offset", Value::number(-0.1)}}).ok);
+    REQUIRE(call.run("gap.flush", {{"scale", Value::number(2.06)}, {"offset", Value::number(-0.1)}})
+                .ok);
     CHECK(call.out("value").asMeasurement()->value ==
           doctest::Approx(-2.0 * 2.06 - 0.1).epsilon(1e-6));
   }
@@ -234,9 +236,8 @@ TEST_CASE("gap.gap definition A 沿基准线方向量切线距离") {
   call.inputs["left"] = Data::circle2d(left);
   call.inputs["right"] = Data::circle2d(right);
   call.inputs["baseLine"] = Data::line2d(base);
-  REQUIRE(call.run("gap.gap", {{"definition", Value::text("A")},
-                               {"offset", Value::number(0.4)}})
-              .ok);
+  REQUIRE(
+      call.run("gap.gap", {{"definition", Value::text("A")}, {"offset", Value::number(0.4)}}).ok);
   // (0.01 - 0) - 0.002 - 0.003 = 0.005 m = 5 mm，加 offset
   CHECK(call.out("value").asMeasurement()->value == doctest::Approx(5.4));
 
@@ -246,8 +247,7 @@ TEST_CASE("gap.gap definition A 沿基准线方向量切线距离") {
   flipped.inputs["left"] = Data::circle2d(left);
   flipped.inputs["right"] = Data::circle2d(right);
   flipped.inputs["baseLine"] = Data::line2d(base);
-  REQUIRE(flipped.run("gap.gap", {{"definition", Value::text("A")},
-                                  {"offset", Value::number(0.4)}})
+  REQUIRE(flipped.run("gap.gap", {{"definition", Value::text("A")}, {"offset", Value::number(0.4)}})
               .ok);
   CHECK(flipped.out("value").asMeasurement()->value == doctest::Approx(5.4));
 }
@@ -350,7 +350,7 @@ void checkBox(const Box2D& got, const Box2D& want) {
   CHECK(got.max[1] == doctest::Approx(want.max[1]).epsilon(1e-5));
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("gap.business_rois 只搬框中心、宽高不变，datumSide 决定 base ROI 用哪侧变换") {
   SUBCASE("左单位、右转 30° 再平移") {
@@ -404,9 +404,11 @@ TEST_CASE("gap.business_rois 只搬框中心、宽高不变，datumSide 决定 b
 
 TEST_CASE("gap.overall_roi 的 auto_center 保留宽高、中心取两片云中位数的中点") {
   PointCloud a;
-  for (int i = 0; i < 5; ++i) a.push(0.01f * static_cast<float>(i), 0.1f, 0.0f);
+  for (int i = 0; i < 5; ++i)
+    a.push(0.01f * static_cast<float>(i), 0.1f, 0.0f);
   PointCloud b;
-  for (int i = 0; i < 5; ++i) b.push(0.1f + 0.01f * static_cast<float>(i), 0.2f, 0.0f);
+  for (int i = 0; i < 5; ++i)
+    b.push(0.1f + 0.01f * static_cast<float>(i), 0.2f, 0.0f);
 
   Call call;
   call.inputs["primary"] = Data::cloud(std::move(a));
@@ -445,13 +447,13 @@ Line2D seg(float x0, float y0, float x1, float y1) {
   return l;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("gap.corner_vertex 交点相对金件顶点沿基准面方向分解") {
   // 左翼面 y = 0.17 那条横线，右翼面 x = 0.01 那条竖线 → 交点 (0.01, 0.17)
   const Line2D left = seg(-0.005f, 0.17f, 0.005f, 0.17f);
   const Line2D right = seg(0.01f, 0.17f, 0.01f, 0.19f);
-  Line2D base = left;  // u = +x
+  Line2D base = left; // u = +x
 
   Call call;
   call.inputs["lineLeft"] = Data::line2d(left);
@@ -474,9 +476,10 @@ TEST_CASE("gap.corner_vertex 交点相对金件顶点沿基准面方向分解") 
   // scale 是读数增益：顶点位移比真实间隙大，标定用
   Call scaled;
   scaled.inputs = call.inputs;
-  REQUIRE(scaled.run("gap.corner_vertex", {{"originX", Value::number(8.0)},
-                                           {"originY", Value::number(170.0)},
-                                           {"scale", Value::number(0.5)}})
+  REQUIRE(scaled
+              .run("gap.corner_vertex", {{"originX", Value::number(8.0)},
+                                         {"originY", Value::number(170.0)},
+                                         {"scale", Value::number(0.5)}})
               .ok);
   CHECK(scaled.out("gap").asMeasurement()->value == doctest::Approx(1.0));
 }
@@ -545,9 +548,10 @@ Point2D pt(float x, float y) {
   return p;
 }
 
-}  // namespace
+} // namespace
 
-TEST_CASE("gap.point_offset 把 b 相对 a 的位移分解到 x/y 两个轴：交换翻符号、abs 拉正、scale 与 offset 线性") {
+TEST_CASE(
+    "gap.point_offset 把 b 相对 a 的位移分解到 x/y 两个轴：交换翻符号、abs 拉正、scale 与 offset 线性") {
   SUBCASE("分解到 x/y 两个轴") {
     const Point2D a = pt(0.010f, 0.190f);
     const Point2D b = pt(0.0125f, 0.1915f);
@@ -616,9 +620,7 @@ constexpr double kGrooveSlopeK = 0.5;
 
 PointCloud grooveCloud(double gapHalfMm, double flushMm) {
   PointCloud c;
-  const auto baseY = [](double xMm) {
-    return kGrooveY0Mm + kGrooveSlopeK * (xMm - kGrooveXcMm);
-  };
+  const auto baseY = [](double xMm) { return kGrooveY0Mm + kGrooveSlopeK * (xMm - kGrooveXcMm); };
   for (int i = 0; i <= 200; ++i) {
     const double xMm = kGrooveXcMm - 10.0 + 0.1 * i;
     if (xMm < kGrooveXcMm - gapHalfMm) {
@@ -658,11 +660,9 @@ PointCloud shiftedInY(const PointCloud& src, double dyMm) {
   return c;
 }
 
-double nominalFlushMm(double flushMm) {
-  return -flushMm * std::cos(std::atan(kGrooveSlopeK));
-}
+double nominalFlushMm(double flushMm) { return -flushMm * std::cos(std::atan(kGrooveSlopeK)); }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("gap.groove_joint 量出槽宽与面差：换基准侧、单相机、两相机整体差、scale 与 offset") {
   SUBCASE("量出槽宽与面差") {
@@ -776,7 +776,8 @@ PointCloud notchCloud(double openMm, bool withWall = true, double raiseMm = 0.0)
   for (int i = 0; i <= 100; ++i) {
     const double xMm = kNotchXcMm - 10.0 + 0.1 * i;
     const double edge = xMm > kNotchXcMm - 1.0 ? kNotchEdgeDrop * (xMm - (kNotchXcMm - 1.0)) : 0.0;
-    if (!withWall && xMm > kNotchXcMm - 0.3) continue;
+    if (!withWall && xMm > kNotchXcMm - 0.3)
+      continue;
     c.push(notchMm(xMm), notchMm(yA(xMm) + edge), 0.0f);
   }
   const double yCorner = yA(kNotchXcMm) + kNotchEdgeDrop - raiseMm;
@@ -798,7 +799,7 @@ double notchNominalMm(double levelMm, double openMm) {
   return (1.0 - levelMm / kNotchEdgeDrop) + openMm;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("gap.flush 的符号只看参考点在哪一侧，基准线方向取反结果不变") {
   // 同一条直线的两种 dir（RANSAC 给哪一种是随机的）。参考点在上方（y 更小）为正。
@@ -816,7 +817,10 @@ TEST_CASE("gap.flush 的符号只看参考点在哪一侧，基准线方向取�
     // 沿法线往「上方」（竖直线时往右）挪 0.8 mm 的点
     // 朝 +x（竖直时朝 +y）的那个方向 u，「上方 / 右侧」就是法线 (u.y, -u.x)
     double ux = base.dir[0], uy = base.dir[1];
-    if (ux < 0 || (ux == 0 && uy < 0)) { ux = -ux; uy = -uy; }
+    if (ux < 0 || (ux == 0 && uy < 0)) {
+      ux = -ux;
+      uy = -uy;
+    }
     Point2D ref;
     ref.p[0] = static_cast<float>(0.01 + 0.0008 * uy + 0.002 * ux);
     ref.p[1] = static_cast<float>(0.17 - 0.0008 * ux + 0.002 * uy);
@@ -840,7 +844,8 @@ TEST_CASE("gap.fit_line 输出的方向统一朝 +x，与拟合给的正反无�
   const auto fit = [](double refDeg) {
     auto call = std::make_unique<Call>();
     PointCloud cloud;
-    for (int i = 0; i < 40; ++i) cloud.push(0.0001f * static_cast<float>(i), 0.17f, 0.0f);
+    for (int i = 0; i < 40; ++i)
+      cloud.push(0.0001f * static_cast<float>(i), 0.17f, 0.0f);
     call->inputs["cloud"] = Data::cloud(cloud);
     call->inputs["box"] = Data::box2d(box(-0.001f, 0.16f, 0.005f, 0.18f));
     call->inputs["toward"] = Data::box2d(box(0.006f, 0.16f, 0.007f, 0.18f));
@@ -864,7 +869,7 @@ TEST_CASE("gap.fit_line 输出的方向统一朝 +x，与拟合给的正反无�
 
   Point2D ref;
   ref.p[0] = 0.002f;
-  ref.p[1] = 0.169f;  // 基准线上方约 1 mm
+  ref.p[1] = 0.169f; // 基准线上方约 1 mm
   double values[2];
   int k = 0;
   for (const Line2D* line : {&la, &lb}) {
@@ -899,7 +904,8 @@ TEST_CASE("gap.notch_width 闭合缝读出圆边固有宽度，张开多少就�
   }
 }
 
-TEST_CASE("gap.notch_width 的读数随 levelDepth、scale / gapOffset 变，对面翼面拟不出来时面差无效、开口照常") {
+TEST_CASE(
+    "gap.notch_width 的读数随 levelDepth、scale / gapOffset 变，对面翼面拟不出来时面差无效、开口照常") {
   SUBCASE("换 levelDepth 沿圆边滑动，读数按 1/坡度 变") {
     Call call;
     call.inputs["primary"] = Data::cloud(notchCloud(0.0));
@@ -925,7 +931,9 @@ TEST_CASE("gap.notch_width 的读数随 levelDepth、scale / gapOffset 变，对
     Call call;
     call.inputs["primary"] = Data::cloud(notchCloud(0.0));
     call.inputs["secondary"] = Data::cloud(notchCloud(0.0));
-    REQUIRE(call.run("gap.notch_width", {{"refNear", Value::number(20.0)}, {"refFar", Value::number(25.0)}}).ok);
+    REQUIRE(call.run("gap.notch_width",
+                     {{"refNear", Value::number(20.0)}, {"refFar", Value::number(25.0)}})
+                .ok);
     CHECK(call.out("gap").asMeasurement()->ok);
     CHECK_FALSE(call.out("flush").asMeasurement()->ok);
     CHECK(call.out("refLine").asLine2D() != nullptr);
@@ -1041,15 +1049,17 @@ PointCloud flatCloud(double hMm, bool inZ = true) {
   PointCloud c;
   for (int i = 0; i <= 100; ++i) {
     const float x = mmf(0.1 * i);
-    if (inZ) c.push(x, 0.0f, mmf(hMm));
-    else c.push(x, mmf(hMm), 0.0f);
+    if (inZ)
+      c.push(x, 0.0f, mmf(hMm));
+    else
+      c.push(x, mmf(hMm), 0.0f);
   }
   return c;
 }
 
 const Record* guardQuality(Call& call) { return call.out("quality").asRecord(); }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("gap.camera_guard 两台一致时原样透传两路") {
   Call call;
@@ -1177,11 +1187,9 @@ TEST_CASE("gap.camera_guard 接了 box 就只比那一段") {
 namespace {
 
 /// 圆弧点：角度 [from, to] 度，落在测量帧里。r 与坐标都是米。
-void pushArc(PointCloud& c, double cx, double cy, double r, double from, double to,
-             std::size_t n) {
+void pushArc(PointCloud& c, double cx, double cy, double r, double from, double to, std::size_t n) {
   for (std::size_t i = 0; i < n; ++i) {
-    const double t = (from + (to - from) * static_cast<double>(i) /
-                                 static_cast<double>(n - 1)) *
+    const double t = (from + (to - from) * static_cast<double>(i) / static_cast<double>(n - 1)) *
                      3.14159265358979323846 / 180.0;
     c.push(static_cast<float>(cx + r * std::cos(t)), static_cast<float>(cy + r * std::sin(t)),
            0.0f);
@@ -1194,7 +1202,7 @@ void pushLeftArc(PointCloud& c) { pushArc(c, -0.0035, -0.0005, 0.0015, 200, 340,
 Line2D flatLine() {
   Line2D l;
   l.dir[0] = 1.0f;
-  return l;  // 过原点、水平
+  return l; // 过原点、水平
 }
 
 /// 水平线，过 (0, y)。y 越大越深（测量帧里 y 越小越高）。
@@ -1208,7 +1216,7 @@ Line2D flatLineAt(double y) {
 /// 右圆的圆心 y（米）。测量帧里 y 越小越高。
 double rightCenterY(Call& call) { return call.out("right").asCircle2D()->center[1]; }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("gap.fit_gap_circles 的 rightCamera 把右圆钉到指定那台相机") {
   // 两台各锁在相距 1 mm 的两个界面上（夹胶玻璃那种）。合并云里是两层点。
@@ -1236,7 +1244,8 @@ TEST_CASE("gap.fit_gap_circles 的 rightCamera 把右圆钉到指定那台相机
   CHECK(rightCenterY(*slave) == doctest::Approx(-0.0015).epsilon(0.02));
 }
 
-TEST_CASE("gap.fit_gap_circles 的圆心高度带把圆心按到参考线上方，refLineRight 让右侧比另一条参考线") {
+TEST_CASE(
+    "gap.fit_gap_circles 的圆心高度带把圆心按到参考线上方，refLineRight 让右侧比另一条参考线") {
   // 右 ROI 里两段弧：y=-0.0005 点少、y=+0.0005 点多，不加约束时 RANSAC 选点多的那段。
   // refLine 过原点，refLineRight 在原点下方 1 mm，所以同一段弧相对两条线的高度差 1 mm ——
   // 要选中同一段弧，两种接法需要填不同的 rightCenterAbove。
@@ -1256,7 +1265,8 @@ TEST_CASE("gap.fit_gap_circles 的圆心高度带把圆心按到参考线上方�
     call->inputs["boxLeft"] = Data::box2d(box(-0.006f, -0.004f, -0.001f, 0.002f));
     call->inputs["boxRight"] = Data::box2d(box(0.001f, -0.004f, 0.006f, 0.002f));
     call->inputs["refLine"] = Data::line2d(flatLine());
-    if (withRight) call->inputs["refLineRight"] = Data::line2d(flatLineAt(0.001));
+    if (withRight)
+      call->inputs["refLineRight"] = Data::line2d(flatLineAt(0.001));
     return call;
   };
 
@@ -1268,24 +1278,24 @@ TEST_CASE("gap.fit_gap_circles 的圆心高度带把圆心按到参考线上方�
   // 接了 refLineRight：那段弧相对它高 1.5 mm。
   auto split = build(true);
   REQUIRE(split
-              ->run("gap.fit_gap_circles",
-                    {{"rightCenterAbove", Value::number(1.5)}, {"rightCenterTol", Value::number(0.3)}})
+              ->run("gap.fit_gap_circles", {{"rightCenterAbove", Value::number(1.5)},
+                                            {"rightCenterTol", Value::number(0.3)}})
               .ok);
   CHECK(rightCenterY(*split) == doctest::Approx(-0.0005).epsilon(0.05));
 
   // 不接就退回 refLine：同一段弧相对原点只高 0.5 mm。
   auto shared = build(false);
   REQUIRE(shared
-              ->run("gap.fit_gap_circles",
-                    {{"rightCenterAbove", Value::number(0.5)}, {"rightCenterTol", Value::number(0.3)}})
+              ->run("gap.fit_gap_circles", {{"rightCenterAbove", Value::number(0.5)},
+                                            {"rightCenterTol", Value::number(0.3)}})
               .ok);
   CHECK(rightCenterY(*shared) == doctest::Approx(-0.0005).epsilon(0.05));
 
   // 左侧的带仍然比 refLine —— 右侧那条线不该影响左侧。
   auto leftBand = build(true);
   REQUIRE(leftBand
-              ->run("gap.fit_gap_circles",
-                    {{"leftCenterAbove", Value::number(0.5)}, {"leftCenterTol", Value::number(0.3)}})
+              ->run("gap.fit_gap_circles", {{"leftCenterAbove", Value::number(0.5)},
+                                            {"leftCenterTol", Value::number(0.3)}})
               .ok);
   CHECK(leftBand->out("left").asCircle2D()->center[1] == doctest::Approx(-0.0005).epsilon(0.05));
 }
@@ -1337,21 +1347,23 @@ TEST_CASE("gap.fit_gap_circles 的参数与连线检查在 validate 里") {
   const std::set<std::string> plain = {"merged", "primary", "secondary", "boxLeft", "boxRight"};
   Call call;
   // 配了右侧高度带却没接任何参考线
-  CHECK(hasError(call.validate("gap.fit_gap_circles", {{"rightCenterTol", Value::number(0.3)}}, plain),
-                 "bad_param", "rightCenterTol"));
+  CHECK(hasError(
+      call.validate("gap.fit_gap_circles", {{"rightCenterTol", Value::number(0.3)}}, plain),
+      "bad_param", "rightCenterTol"));
   // 接了 refLineRight 就够右侧用；左侧仍然要 refLine
   std::set<std::string> withRight = plain;
   withRight.insert("refLineRight");
   CHECK(call.validate("gap.fit_gap_circles", {{"rightCenterTol", Value::number(0.3)}}, withRight)
             .empty());
-  CHECK(hasError(call.validate("gap.fit_gap_circles", {{"leftCenterTol", Value::number(0.3)}}, withRight),
-                 "bad_param", "leftCenterTol"));
+  CHECK(hasError(
+      call.validate("gap.fit_gap_circles", {{"leftCenterTol", Value::number(0.3)}}, withRight),
+      "bad_param", "leftCenterTol"));
   // 半径上下限倒置
-  CHECK(hasError(call.validate("gap.fit_gap_circles",
-                               {{"leftRadiusMin", Value::number(2.0)},
-                                {"leftRadiusMax", Value::number(1.0)}},
-                               plain),
-                 "bad_param", "leftRadiusMax"));
+  CHECK(hasError(
+      call.validate("gap.fit_gap_circles",
+                    {{"leftRadiusMin", Value::number(2.0)}, {"leftRadiusMax", Value::number(1.0)}},
+                    plain),
+      "bad_param", "leftRadiusMax"));
   // 固定半径不在上下限之间
   CHECK(hasError(call.validate("gap.fit_gap_circles",
                                {{"rightRadiusFixed", Value::boolean(true)},
@@ -1424,7 +1436,7 @@ TEST_CASE("gap.fit_gap_circles 的固定半径在相机分开的回退里也生�
   pushArc(primary, 0.0035, -0.0005, 0.0009, 200, 340, 60);
   pushArc(secondary, 0.0035, -0.0005, 0.0009, 200, 340, 60);
   Call call;
-  call.inputs["merged"] = Data::cloud(merged);   // 右侧没有点：合并云这条路必然失败
+  call.inputs["merged"] = Data::cloud(merged); // 右侧没有点：合并云这条路必然失败
   call.inputs["primary"] = Data::cloud(primary);
   call.inputs["secondary"] = Data::cloud(secondary);
   call.inputs["boxLeft"] = Data::box2d(box(-0.006f, -0.004f, -0.001f, 0.002f));
@@ -1469,7 +1481,7 @@ double dirDeg(const Line2D& l) {
   return std::atan2(l.dir[1], l.dir[0]) * 180.0 / 3.14159265358979323846;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("gap.datum_window 把窗推到锚框外面，不含锚框本身") {
   const auto run = [](const char* side) {
@@ -1486,7 +1498,7 @@ TEST_CASE("gap.datum_window 把窗推到锚框外面，不含锚框本身") {
   // 右边界贴在锚框左边界往外 0.5 mm，再往左 13 mm
   CHECK(left.max[0] == doctest::Approx(-0.0145).epsilon(1e-3));
   CHECK(left.min[0] == doctest::Approx(-0.0275).epsilon(1e-3));
-  CHECK(left.max[0] < -0.014f);            // 不含锚框
+  CHECK(left.max[0] < -0.014f); // 不含锚框
   CHECK(left.min[1] == doctest::Approx(0.1413).epsilon(1e-4));
   CHECK(left.max[1] == doctest::Approx(0.1468).epsilon(1e-4));
 
@@ -1498,7 +1510,7 @@ TEST_CASE("gap.datum_window 把窗推到锚框外面，不含锚框本身") {
 
 TEST_CASE("gap.fit_line 的 dirMode=fixed 把方向钉在 refLine + 标称上") {
   Call call;
-  call.inputs["cloud"] = Data::cloud(slopedLine(40, 25.0));   // 点本身是 25°
+  call.inputs["cloud"] = Data::cloud(slopedLine(40, 25.0)); // 点本身是 25°
   call.inputs["box"] = Data::box2d(box(-0.001f, -0.001f, 0.005f, 0.004f));
   call.inputs["refLine"] = Data::line2d(lineAt(0.0));
   call.inputs["toward"] = Data::box2d(box(0.006f, -0.001f, 0.007f, 0.001f));
@@ -1539,7 +1551,8 @@ TEST_CASE("gap.fit_line 的 dirMode=band 只在方向出界时才钉，合规时
   CHECK(dirDeg(*fit(30.0, "free")->out("line").asLine2D()) == doctest::Approx(30.0).epsilon(0.05));
 }
 
-TEST_CASE("validate 钩子：gap.fit_line 的 dirMode、gap.datum_window 的 lengthMm、gap.gap 的 definition A") {
+TEST_CASE(
+    "validate 钩子：gap.fit_line 的 dirMode、gap.datum_window 的 lengthMm、gap.gap 的 definition A") {
   SUBCASE("gap.fit_line 的 dirMode 不是 free 却没接 refLine") {
     Call call;
     const std::set<std::string> ports = {"cloud", "box", "toward"};
@@ -1555,13 +1568,15 @@ TEST_CASE("validate 钩子：gap.fit_line 的 dirMode、gap.datum_window 的 len
 
   SUBCASE("gap.datum_window 的 lengthMm 与 gap.gap 的 definition A") {
     Call call;
-    CHECK(hasError(call.validate("gap.datum_window", {{"lengthMm", Value::number(0.0)}}, {"anchor"}),
-                   "bad_param", "lengthMm"));
+    CHECK(
+        hasError(call.validate("gap.datum_window", {{"lengthMm", Value::number(0.0)}}, {"anchor"}),
+                 "bad_param", "lengthMm"));
     CHECK(call.validate("gap.datum_window", {}, {"anchor"}).empty());
     CHECK(hasError(call.validate("gap.gap", {{"definition", Value::text("A")}}, {"left", "right"}),
                    "bad_param", "definition"));
-    CHECK(call.validate("gap.gap", {{"definition", Value::text("A")}}, {"left", "right", "baseLine"})
-              .empty());
+    CHECK(
+        call.validate("gap.gap", {{"definition", Value::text("A")}}, {"left", "right", "baseLine"})
+            .empty());
   }
 }
 
@@ -1615,7 +1630,7 @@ TEST_CASE("圆拟合的弱地板：钉死的那台弧太短就退回合并云") 
     pushLeftArc(secondary);
     pushLeftArc(merged);
     pushArc(primary, 0.0035, -0.0005, 0.0009, 200, 340, 60);
-    pushArc(secondary, 0.0035, -0.0005, 0.0009, 330, 340, 6);   // 只有 10°
+    pushArc(secondary, 0.0035, -0.0005, 0.0009, 330, 340, 6); // 只有 10°
     pushArc(merged, 0.0035, -0.0005, 0.0009, 200, 340, 60);
     auto call = std::make_unique<Call>();
     call->inputs["merged"] = Data::cloud(merged);
@@ -1639,11 +1654,13 @@ TEST_CASE("圆拟合的弱地板：钉死的那台弧太短就退回合并云") 
   auto both = build();
   REQUIRE(both->run("gap.fit_gap_circles").ok);
   CHECK(floored->out("right").asCircle2D()->radius == both->out("right").asCircle2D()->radius);
-  CHECK(floored->out("right").asCircle2D()->center[0] == both->out("right").asCircle2D()->center[0]);
+  CHECK(floored->out("right").asCircle2D()->center[0] ==
+        both->out("right").asCircle2D()->center[0]);
   CHECK(looseR != both->out("right").asCircle2D()->radius);
 }
 
-TEST_CASE("gap.fit_gap_circles 的方位角带挑内点落在圆左上的那一个；guard 带内结果不变，出带才重拟") {
+TEST_CASE(
+    "gap.fit_gap_circles 的方位角带挑内点落在圆左上的那一个；guard 带内结果不变，出带才重拟") {
   SUBCASE("方位角带挑内点落在圆左上的那一个") {
     // 右 ROI 里两段弧，半径一样：真实的那段内点落在圆的左上（方位角约 140°），点少；
     // 另一段的内点落在圆的左下（约 -140°），点多一倍 —— 不加约束时 RANSAC 选点多的那段。
@@ -1651,8 +1668,8 @@ TEST_CASE("gap.fit_gap_circles 的方位角带挑内点落在圆左上的那一�
     const auto build = [] {
       PointCloud cloud;
       pushLeftArc(cloud);
-      pushArc(cloud, 0.0035, -0.0005, 0.0009, 180, 260, 40);   // 内点在左上
-      pushArc(cloud, 0.0035, 0.0015, 0.0009, 100, 180, 90);    // 内点在左下，点更多
+      pushArc(cloud, 0.0035, -0.0005, 0.0009, 180, 260, 40); // 内点在左上
+      pushArc(cloud, 0.0035, 0.0015, 0.0009, 100, 180, 90);  // 内点在左下，点更多
       auto call = std::make_unique<Call>();
       call->inputs["merged"] = Data::cloud(cloud);
       call->inputs["primary"] = Data::cloud(cloud);
@@ -1667,8 +1684,9 @@ TEST_CASE("gap.fit_gap_circles 的方位角带挑内点落在圆左上的那一�
 
     // 方位角带不需要 refLine —— 这是它和圆心高度带的区别。
     auto banded = build();
-    REQUIRE(banded->run("gap.fit_gap_circles", {{"rightArcBearingDeg", Value::number(140.0)},
-                                                {"rightArcBearingTolDeg", Value::number(40.0)}})
+    REQUIRE(banded
+                ->run("gap.fit_gap_circles", {{"rightArcBearingDeg", Value::number(140.0)},
+                                              {"rightArcBearingTolDeg", Value::number(40.0)}})
                 .ok);
     CHECK(rightCenterY(*banded) == doctest::Approx(-0.0005).epsilon(0.05));
   }
@@ -1707,7 +1725,7 @@ TEST_CASE("gap.fit_gap_circles 的方位角带挑内点落在圆左上的那一�
 TEST_CASE("圆拟合的弱地板：合并云也弱就报失败，不给一个错的数") {
   PointCloud cloud;
   pushLeftArc(cloud);
-  pushArc(cloud, 0.0035, -0.0005, 0.0009, 330, 340, 6);   // 两边都只有 10°
+  pushArc(cloud, 0.0035, -0.0005, 0.0009, 330, 340, 6); // 两边都只有 10°
   Call call;
   call.inputs["merged"] = Data::cloud(cloud);
   call.inputs["primary"] = Data::cloud(cloud);

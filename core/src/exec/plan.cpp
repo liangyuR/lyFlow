@@ -24,7 +24,8 @@ Semver parseSemver(const std::string& s) {
   std::size_t idx = 0, start = 0;
   for (std::size_t i = 0; i <= s.size() && idx < 3; ++i) {
     if (i == s.size() || s[i] == '.') {
-      if (i == start) return v;
+      if (i == start)
+        return v;
       try {
         parts[idx++] = std::stoi(s.substr(start, i - start));
       } catch (...) {
@@ -35,7 +36,8 @@ Semver parseSemver(const std::string& s) {
       return v;
     }
   }
-  if (idx != 3) return v;
+  if (idx != 3)
+    return v;
   v.major = parts[0];
   v.minor = parts[1];
   v.patch = parts[2];
@@ -43,7 +45,7 @@ Semver parseSemver(const std::string& s) {
   return v;
 }
 
-}  // namespace
+} // namespace
 
 // -------------------------------------------------------------- 参数规整
 // 这两个不在匿名命名空间里：顶层图参数的取值在展开期要按图参数自己的规格先查一遍
@@ -80,63 +82,96 @@ bool coerceParam(const Param& p, const nlohmann::json& j, Value& out, std::strin
   };
 
   switch (p.type) {
-    case ParamType::Bool:
-      if (!j.is_boolean()) { message = "应当是 true / false"; return false; }
-      out = Value::boolean(j.get<bool>());
-      return true;
-
-    case ParamType::Int: {
-      if (!j.is_number()) { message = "应当是整数"; return false; }
-      const double d = j.get<double>();
-      if (std::floor(d) != d) { message = "应当是整数，实际带小数"; return false; }
-      out = Value::integer(static_cast<std::int64_t>(d));
-      return true;
-    }
-
-    case ParamType::Float: {
-      if (!j.is_number()) { message = "应当是数字"; return false; }
-      const double d = j.get<double>();
-      // 手改过的文件里 1e400 会被解析成 inf，而 inf 通得过任何 min/max 检查，
-      // 一路流进算子变成 NaN 结果，最后表现成「3D 视图一片空白」。
-      if (!std::isfinite(d)) { message = "必须是有限的数字"; return false; }
-      out = Value::number(d);
-      return true;
-    }
-
-    case ParamType::Vec2f:     return numbers(2, false, 0);
-    case ParamType::Vec3f:     return numbers(3, false, 0);
-    case ParamType::Vec4f:     return numbers(4, false, 0);
-    case ParamType::Color:     return numbers(3, true, 4);
-    case ParamType::Transform: return numbers(16, false, 0);
-
-    case ParamType::Enum: {
-      if (!j.is_string()) { message = "应当是选项里的字符串"; return false; }
-      const std::string v = j.get<std::string>();
-      for (const auto& o : p.options) {
-        if (o.value == v) { out = Value::text(v); return true; }
-      }
-      message = "'" + v + "' 不在选项里";
+  case ParamType::Bool:
+    if (!j.is_boolean()) {
+      message = "应当是 true / false";
       return false;
     }
+    out = Value::boolean(j.get<bool>());
+    return true;
 
-    case ParamType::Flags:
-      if (!j.is_number_integer()) { message = "应当是整数位掩码"; return false; }
-      out = Value::integer(j.get<std::int64_t>());
-      return true;
+  case ParamType::Int: {
+    if (!j.is_number()) {
+      message = "应当是整数";
+      return false;
+    }
+    const double d = j.get<double>();
+    if (std::floor(d) != d) {
+      message = "应当是整数，实际带小数";
+      return false;
+    }
+    out = Value::integer(static_cast<std::int64_t>(d));
+    return true;
+  }
 
-    case ParamType::String:
-    case ParamType::Text:
-    case ParamType::Path:
-      if (!j.is_string()) { message = "应当是字符串"; return false; }
-      out = Value::text(j.get<std::string>());
-      return true;
+  case ParamType::Float: {
+    if (!j.is_number()) {
+      message = "应当是数字";
+      return false;
+    }
+    const double d = j.get<double>();
+    // 手改过的文件里 1e400 会被解析成 inf，而 inf 通得过任何 min/max 检查，
+    // 一路流进算子变成 NaN 结果，最后表现成「3D 视图一片空白」。
+    if (!std::isfinite(d)) {
+      message = "必须是有限的数字";
+      return false;
+    }
+    out = Value::number(d);
+    return true;
+  }
 
-    case ParamType::Curve:
-      // 值格式见 manifest.h 的 checkCurveValue（param-recipe P2.6）。y 的限位也在那里查：
-      // 存下来的是 JSON 文本，checkRange 看不见里面的数。dump 的键是排好序的，cacheKey 与书写顺序无关
-      if (!checkCurveValue(j, p, message)) return false;
-      out = Value::text(j.dump());
-      return true;
+  case ParamType::Vec2f:
+    return numbers(2, false, 0);
+  case ParamType::Vec3f:
+    return numbers(3, false, 0);
+  case ParamType::Vec4f:
+    return numbers(4, false, 0);
+  case ParamType::Color:
+    return numbers(3, true, 4);
+  case ParamType::Transform:
+    return numbers(16, false, 0);
+
+  case ParamType::Enum: {
+    if (!j.is_string()) {
+      message = "应当是选项里的字符串";
+      return false;
+    }
+    const std::string v = j.get<std::string>();
+    for (const auto& o : p.options) {
+      if (o.value == v) {
+        out = Value::text(v);
+        return true;
+      }
+    }
+    message = "'" + v + "' 不在选项里";
+    return false;
+  }
+
+  case ParamType::Flags:
+    if (!j.is_number_integer()) {
+      message = "应当是整数位掩码";
+      return false;
+    }
+    out = Value::integer(j.get<std::int64_t>());
+    return true;
+
+  case ParamType::String:
+  case ParamType::Text:
+  case ParamType::Path:
+    if (!j.is_string()) {
+      message = "应当是字符串";
+      return false;
+    }
+    out = Value::text(j.get<std::string>());
+    return true;
+
+  case ParamType::Curve:
+    // 值格式见 manifest.h 的 checkCurveValue（param-recipe P2.6）。y 的限位也在那里查：
+    // 存下来的是 JSON 文本，checkRange 看不见里面的数。dump 的键是排好序的，cacheKey 与书写顺序无关
+    if (!checkCurveValue(j, p, message))
+      return false;
+    out = Value::text(j.dump());
+    return true;
   }
   message = "未知参数类型";
   return false;
@@ -156,15 +191,18 @@ bool checkRange(const Param& p, const Value& v, std::string& message) {
     return true;
   };
   switch (v.kind()) {
-    case Value::Kind::Int:   return one(static_cast<double>(v.intValue()));
-    case Value::Kind::Float: return one(v.floatValue());
-    case Value::Kind::FloatVec:
-      for (double d : v.vecValue()) {
-        if (!one(d)) return false;
-      }
-      return true;
-    default:
-      return true;
+  case Value::Kind::Int:
+    return one(static_cast<double>(v.intValue()));
+  case Value::Kind::Float:
+    return one(v.floatValue());
+  case Value::Kind::FloatVec:
+    for (double d : v.vecValue()) {
+      if (!one(d))
+        return false;
+    }
+    return true;
+  default:
+    return true;
   }
 }
 
@@ -175,25 +213,31 @@ namespace {
 constexpr const char* kAnyType = "Any";
 
 bool typesCompatible(const Registry& r, const std::string& from, const std::string& to) {
-  if (from == to) return true;
-  if (from == "Any" || to == "Any") return true;
+  if (from == to)
+    return true;
+  if (from == "Any" || to == "Any")
+    return true;
   // Bundle<kind> 只认 kind 相等（m8-plan L1）：两种 Bundle 之间、Bundle 与普通类型之间都不隐式转换。
-  if (parseBundleType(from, nullptr) || parseBundleType(to, nullptr)) return false;
+  if (parseBundleType(from, nullptr) || parseBundleType(to, nullptr))
+    return false;
   const PortType* t = r.findType(from);
-  if (!t) return false;
+  if (!t)
+    return false;
   return std::find(t->castableTo.begin(), t->castableTo.end(), to) != t->castableTo.end();
 }
 
 const Port* findPort(const std::vector<Port>& ports, const std::string& name) {
   for (const auto& p : ports) {
-    if (p.name == name) return &p;
+    if (p.name == name)
+      return &p;
   }
   return nullptr;
 }
 
 const Migration* findMigration(const OperatorDesc& op, int fromMajor) {
   for (const Migration& m : op.migrations) {
-    if (m.fromMajor == fromMajor && (m.apply || m.topology)) return &m;
+    if (m.fromMajor == fromMajor && (m.apply || m.topology))
+      return &m;
   }
   return nullptr;
 }
@@ -213,7 +257,8 @@ struct NodeMigration {
 
 bool chainComplete(const OperatorDesc& op, int fromMajor, int toMajor) {
   for (int m = fromMajor; m < toMajor; ++m) {
-    if (!findMigration(op, m)) return false;
+    if (!findMigration(op, m))
+      return false;
   }
   return true;
 }
@@ -221,10 +266,12 @@ bool chainComplete(const OperatorDesc& op, int fromMajor, int toMajor) {
 std::vector<MigrationInput> inputsOf(const Registry& registry, const RawGraph& graph,
                                      const std::string& nodeId) {
   std::unordered_map<std::string, const RawNode*> byId;
-  for (const RawNode& n : graph.nodes) byId[n.id] = &n;
+  for (const RawNode& n : graph.nodes)
+    byId[n.id] = &n;
   std::vector<MigrationInput> out;
   for (const RawEdge& e : graph.edges) {
-    if (e.toNode != nodeId) continue;
+    if (e.toNode != nodeId)
+      continue;
     MigrationInput in{e.toPort, e.fromNode, e.fromPort, {}};
     auto it = byId.find(e.fromNode);
     if (it != byId.end()) {
@@ -247,16 +294,20 @@ NodeMigration migrateNode(const Registry& registry, const RawGraph& graph, const
     m.migrated = true;
   }
   const Semver current = parseSemver(op.version);
-  if (!current.valid) return m;
+  if (!current.valid)
+    return m;
   int from = 0;
   const bool unversioned = rn.opVersion.empty();
   if (unversioned) {
-    if (current.major > 1 && chainComplete(op, 1, current.major)) from = 1;
+    if (current.major > 1 && chainComplete(op, 1, current.major))
+      from = 1;
   } else {
     const Semver saved = parseSemver(rn.opVersion);
-    if (saved.valid && saved.major < current.major) from = saved.major;
+    if (saved.valid && saved.major < current.major)
+      from = saved.major;
   }
-  if (from == 0) return m;
+  if (from == 0)
+    return m;
 
   std::vector<std::string> notes;
   for (int major = from; major < current.major; ++major) {
@@ -268,10 +319,14 @@ NodeMigration migrateNode(const Registry& registry, const RawGraph& graph, const
     try {
       if (step->topology) {
         TopologyEdit e = step->topology(m.params, inputsOf(registry, graph, rn.id));
-        for (auto& p : e.dropInputs) m.edits.dropInputs.push_back(std::move(p));
-        for (auto& n : e.addNodes) m.edits.addNodes.push_back(std::move(n));
-        for (auto& x : e.addEdges) m.edits.addEdges.push_back(std::move(x));
-        for (auto& note : e.notes) notes.push_back(std::move(note));
+        for (auto& p : e.dropInputs)
+          m.edits.dropInputs.push_back(std::move(p));
+        for (auto& n : e.addNodes)
+          m.edits.addNodes.push_back(std::move(n));
+        for (auto& x : e.addEdges)
+          m.edits.addEdges.push_back(std::move(x));
+        for (auto& note : e.notes)
+          notes.push_back(std::move(note));
       }
       if (step->apply) {
         nlohmann::json next = step->apply(m.params);
@@ -288,9 +343,12 @@ NodeMigration migrateNode(const Registry& registry, const RawGraph& graph, const
     notes.push_back("v" + std::to_string(major) + " → v" + std::to_string(major + 1) +
                     (step->apply ? "：参数已按迁移规则改写" : "：连线已按迁移规则改写"));
   }
-  if (unversioned && m.params == rn.params && m.edits.empty()) return m;
-  if (unversioned) m.notes.push_back("节点没有记 opVersion，按 v1 的写法迁移");
-  for (auto& note : notes) m.notes.push_back(std::move(note));
+  if (unversioned && m.params == rn.params && m.edits.empty())
+    return m;
+  if (unversioned)
+    m.notes.push_back("节点没有记 opVersion，按 v1 的写法迁移");
+  for (auto& note : notes)
+    m.notes.push_back(std::move(note));
   m.migrated = true;
   return m;
 }
@@ -302,12 +360,14 @@ void applyTopology(const Registry& registry, RawGraph& graph, const std::string&
   std::map<std::string, std::string> newIds;
   for (const auto& n : edits.addNodes) {
     std::string id = nodeId + "_" + n.key;
-    for (int k = 2; ids.count(id); ++k) id = nodeId + "_" + n.key + "_" + std::to_string(k);
+    for (int k = 2; ids.count(id); ++k)
+      id = nodeId + "_" + n.key + "_" + std::to_string(k);
     ids.insert(id);
     newIds[n.key] = id;
   }
   auto resolve = [&](const std::string& ref) {
-    if (ref == "@self") return nodeId;
+    if (ref == "@self")
+      return nodeId;
     if (ref.rfind("@new:", 0) == 0) {
       auto it = newIds.find(ref.substr(5));
       return it == newIds.end() ? ref : it->second;
@@ -367,31 +427,43 @@ void applyTopology(const Registry& registry, RawGraph& graph, const std::string&
 // ------------------------------------------------------------------ 参数联动
 
 bool valueEquals(const Value& a, const Value& b) {
-  if (a.kind() != b.kind()) return false;
+  if (a.kind() != b.kind())
+    return false;
   switch (a.kind()) {
-    case Value::Kind::Null:     return true;
-    case Value::Kind::Bool:     return a.boolValue() == b.boolValue();
-    case Value::Kind::Int:      return a.intValue() == b.intValue();
-    case Value::Kind::Float:    return a.floatValue() == b.floatValue();
-    case Value::Kind::String:   return a.stringValue() == b.stringValue();
-    case Value::Kind::FloatVec: return a.vecValue() == b.vecValue();
+  case Value::Kind::Null:
+    return true;
+  case Value::Kind::Bool:
+    return a.boolValue() == b.boolValue();
+  case Value::Kind::Int:
+    return a.intValue() == b.intValue();
+  case Value::Kind::Float:
+    return a.floatValue() == b.floatValue();
+  case Value::Kind::String:
+    return a.stringValue() == b.stringValue();
+  case Value::Kind::FloatVec:
+    return a.vecValue() == b.vecValue();
   }
   return false;
 }
 
-}  // namespace
+} // namespace
 
 /// 条件未设置视为成立。引用了不存在的参数也视为成立 —— 那是 Registry::validate()
 /// 的活，校验期不该因为算子描述的笔误把用户的图判成非法。
 bool conditionHolds(const Condition& c, const ParamMap& params) {
-  if (!c.isSet()) return true;
+  if (!c.isSet())
+    return true;
   auto it = params.find(c.param);
-  if (it == params.end()) return true;
-  if (!c.eq.isNull()) return valueEquals(it->second, c.eq);
-  if (!c.ne.isNull()) return !valueEquals(it->second, c.ne);
+  if (it == params.end())
+    return true;
+  if (!c.eq.isNull())
+    return valueEquals(it->second, c.eq);
+  if (!c.ne.isNull())
+    return !valueEquals(it->second, c.ne);
   if (!c.in.empty()) {
     for (const Value& v : c.in) {
-      if (valueEquals(it->second, v)) return true;
+      if (valueEquals(it->second, v))
+        return true;
     }
     return false;
   }
@@ -413,7 +485,8 @@ std::string canonicalParamsJson(const ParamMap& params) {
   // 否则同一张图存两次就可能算出两个不同的键。
   std::vector<const std::string*> keys;
   keys.reserve(params.size());
-  for (const auto& kv : params) keys.push_back(&kv.first);
+  for (const auto& kv : params)
+    keys.push_back(&kv.first);
   std::sort(keys.begin(), keys.end(),
             [](const std::string* a, const std::string* b) { return *a < *b; });
 
@@ -424,16 +497,27 @@ std::string canonicalParamsJson(const ParamMap& params) {
     const Value& v = params.at(*k);
     w.key(*k);
     switch (v.kind()) {
-      case Value::Kind::Null:   w.valueNull(); break;
-      case Value::Kind::Bool:   w.value(v.boolValue()); break;
-      case Value::Kind::Int:    w.value(v.intValue()); break;
-      case Value::Kind::Float:  w.value(v.floatValue()); break;
-      case Value::Kind::String: w.value(v.stringValue()); break;
-      case Value::Kind::FloatVec:
-        w.beginArray();
-        for (double d : v.vecValue()) w.value(d);
-        w.endArray();
-        break;
+    case Value::Kind::Null:
+      w.valueNull();
+      break;
+    case Value::Kind::Bool:
+      w.value(v.boolValue());
+      break;
+    case Value::Kind::Int:
+      w.value(v.intValue());
+      break;
+    case Value::Kind::Float:
+      w.value(v.floatValue());
+      break;
+    case Value::Kind::String:
+      w.value(v.stringValue());
+      break;
+    case Value::Kind::FloatVec:
+      w.beginArray();
+      for (double d : v.vecValue())
+        w.value(d);
+      w.endArray();
+      break;
     }
   }
   w.endObject();
@@ -455,7 +539,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
   bool anyTopology = false;
   for (const RawNode& rn : input.nodes) {
     const OperatorDesc* op = registry.find(rn.op);
-    if (!op) continue;
+    if (!op)
+      continue;
     NodeMigration m = migrateNode(registry, input, rn, *op);
     anyTopology = anyTopology || (m.migrated && !m.broken && !m.edits.empty());
     migrations.emplace(rn.id, std::move(m));
@@ -465,7 +550,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
   if (anyTopology) {
     migratedGraph = input;
     std::set<std::string> ids;
-    for (const RawNode& rn : input.nodes) ids.insert(rn.id);
+    for (const RawNode& rn : input.nodes)
+      ids.insert(rn.id);
     for (const RawNode& rn : input.nodes) {
       auto it = migrations.find(rn.id);
       if (it == migrations.end() || !it->second.migrated || it->second.broken ||
@@ -479,7 +565,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
 
   const std::size_t n = graph.nodes.size();
   std::unordered_map<std::string, std::size_t> indexById;
-  for (std::size_t i = 0; i < n; ++i) indexById[graph.nodes[i].id] = i;
+  for (std::size_t i = 0; i < n; ++i)
+    indexById[graph.nodes[i].id] = i;
 
   // -- 逐节点校验（D5：不早退）--------------------------------------------
   struct Prepared {
@@ -495,8 +582,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
   };
   std::vector<Prepared> prepared(n);
 
-  auto fail = [&](std::size_t i, std::string code, std::string message,
-                  std::string paramPath = {}, std::string portName = {}) {
+  auto fail = [&](std::size_t i, std::string code, std::string message, std::string paramPath = {},
+                  std::string portName = {}) {
     Status s = Status::Error(Phase::Validate, std::move(code), std::move(message),
                              std::move(paramPath), std::move(portName));
     prepared[i].valid = false;
@@ -537,7 +624,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
         }
       }
     }
-    if (mig != migrations.end() && !mig->second.broken) params = mig->second.params;
+    if (mig != migrations.end() && !mig->second.broken)
+      params = mig->second.params;
     if (mig != migrations.end() && mig->second.migrated && !mig->second.broken &&
         prepared[i].valid) {
       MigrationPlan plan;
@@ -546,14 +634,17 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
       // 被顶层图参数绑定的参数不写回节点：那个值是图参数注入进来的，写回就成了节点上的显式值，
       // 违反「一处定义」（param_conflict）。值照旧归图参数管。
       nlohmann::json written = params;
-      for (const auto& bound : rn.graphParams) written.erase(bound.first);
+      for (const auto& bound : rn.graphParams)
+        written.erase(bound.first);
       plan.paramsJson = written.dump();
       plan.notes = mig->second.notes;
       auto edits = editsJsonOf.find(rn.id);
-      if (edits != editsJsonOf.end()) plan.editsJson = edits->second;
-      diags.migration(rn.id, "节点已从 " + rn.op + " v" +
-                                 (rn.opVersion.empty() ? std::string("?") : rn.opVersion) +
-                                 " 迁移到 " + op->id + " v" + op->version,
+      if (edits != editsJsonOf.end())
+        plan.editsJson = edits->second;
+      diags.migration(rn.id,
+                      "节点已从 " + rn.op + " v" +
+                          (rn.opVersion.empty() ? std::string("?") : rn.opVersion) + " 迁移到 " +
+                          op->id + " v" + op->version,
                       std::move(plan));
     }
 
@@ -580,7 +671,7 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
         std::string message;
         if (!coerceParam(p, *it, v, message)) {
           fail(i, "bad_param", (p.label.empty() ? p.name : p.label) + "：" + message, p.name);
-          v = p.def;  // 用默认值占位，后面的检查还能继续跑
+          v = p.def; // 用默认值占位，后面的检查还能继续跑
         }
       }
       std::string rangeMessage;
@@ -592,8 +683,10 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     // 必填只对**可见**的参数成立（1.6）：被 visibleWhen 藏起来的 path 参数
     // 用户根本没机会选文件，为它标红只会让人找不到那个红框在哪。
     for (const Param& p : op->params) {
-      if (p.type != ParamType::Path) continue;
-      if (!conditionHolds(p.visibleWhen, prepared[i].params)) continue;
+      if (p.type != ParamType::Path)
+        continue;
+      if (!conditionHolds(p.visibleWhen, prepared[i].params))
+        continue;
       const Value& v = prepared[i].params[p.name];
       if (v.kind() == Value::Kind::String && v.stringValue().empty()) {
         fail(i, "bad_param", (p.label.empty() ? p.name : p.label) + "：还没有选择文件", p.name);
@@ -621,7 +714,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     const std::size_t ti = indexById.at(e.toNode);
     const OperatorDesc* fromOp = prepared[fi].op;
     const OperatorDesc* toOp = prepared[ti].op;
-    if (!fromOp || !toOp) continue;  // unknown_op 已经报过，不再叠加噪声
+    if (!fromOp || !toOp)
+      continue; // unknown_op 已经报过，不再叠加噪声
 
     const Port* outPort = findPort(fromOp->outputs, e.fromPort);
     const Port* inPort = findPort(toOp->inputs, e.toPort);
@@ -641,7 +735,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
   std::vector<std::map<int, std::string>> anyType(n);
   static const std::string kEmpty;
   auto concreteType = [&](std::size_t node, const Port* port) -> const std::string& {
-    if (port->type != kAnyType) return port->type;
+    if (port->type != kAnyType)
+      return port->type;
     auto it = anyType[node].find(port->anyGroup);
     return it == anyType[node].end() ? kEmpty : it->second;
   };
@@ -658,7 +753,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
         changed = true;
       }
     }
-    if (!changed) break;
+    if (!changed)
+      break;
   }
 
   // -- 类型兼容（按推导后的实际类型）+ 装配输入绑定 -------------------------
@@ -686,10 +782,12 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
   std::vector<std::set<std::string>> injectedInputsOf(n);
   for (const auto& [nodeId, ports] : options.injectedPorts) {
     auto it = indexById.find(nodeId);
-    if (it == indexById.end()) continue;
+    if (it == indexById.end())
+      continue;
     const std::size_t i = it->second;
     const OperatorDesc* op = prepared[i].op;
-    if (!op) continue;
+    if (!op)
+      continue;
     bool outputs = false;
     for (const std::string& port : ports) {
       if (findPort(op->outputs, port)) {
@@ -697,8 +795,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
       } else if (findPort(op->inputs, port)) {
         injectedInputsOf[i].insert(port);
       } else {
-        fail(i, "unknown_port", "注入的端口 '" + port + "' 既不是这个算子的输出，也不是它的输入", {},
-             port);
+        fail(i, "unknown_port", "注入的端口 '" + port + "' 既不是这个算子的输出，也不是它的输入",
+             {}, port);
       }
     }
     if (outputs) {
@@ -720,11 +818,12 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
   }
 
   for (std::size_t i = 0; i < n; ++i) {
-    if (!prepared[i].op) continue;
+    if (!prepared[i].op)
+      continue;
     for (const Port& p : prepared[i].op->inputs) {
       if (p.required && !connectedInputs[i].count(p.name)) {
-        fail(i, "missing_input", "必填输入端口 '" + (p.label.empty() ? p.name : p.label) +
-                                     "' 没有连线", {}, p.name);
+        fail(i, "missing_input",
+             "必填输入端口 '" + (p.label.empty() ? p.name : p.label) + "' 没有连线", {}, p.name);
       }
     }
   }
@@ -732,7 +831,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
   // -- 算子的加载期校验（J5）：参数已解析、连线已知，数据一概不给。----------
   for (std::size_t i = 0; i < n; ++i) {
     const OperatorDesc* op = prepared[i].op;
-    if (!op || !op->validate || !prepared[i].paramsOk) continue;
+    if (!op || !op->validate || !prepared[i].paramsOk)
+      continue;
     std::vector<Issue> issues;
     try {
       ParamView view(prepared[i].params, options.baseDir);
@@ -748,7 +848,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
       Status s = std::move(issue.status);
       s.ok = false;
       s.phase = Phase::Validate;
-      if (s.code.empty()) s.code = "bad_param";
+      if (s.code.empty())
+        s.code = "bad_param";
       if (issue.severity == Severity::Error) {
         fail(i, s.code, s.message, s.paramPath, s.portName);
       } else {
@@ -770,7 +871,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
   order.reserve(n);
   std::vector<std::size_t> queue;
   for (std::size_t i = 0; i < n; ++i) {
-    if (indegree[i] == 0) queue.push_back(i);
+    if (indegree[i] == 0)
+      queue.push_back(i);
   }
   // 用下标顺序而不是 set：同一张图两次编译必须得到同一个拓扑序，
   // 否则 cacheKey 稳定但事件顺序会飘，测试就没法断言。
@@ -781,13 +883,15 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     order.push_back(id);
     for (std::size_t next : downstream[id]) {
       level[next] = std::max(level[next], level[id] + 1);
-      if (--indegree[next] == 0) queue.push_back(next);
+      if (--indegree[next] == 0)
+        queue.push_back(next);
     }
   }
   if (order.size() != n) {
     for (std::size_t i = 0; i < n; ++i) {
       if (indegree[i] > 0) {
-        diags.error(graph.nodes[i].id, Phase::Compile, "cycle", "此节点在一个环上，无法排出执行顺序");
+        diags.error(graph.nodes[i].id, Phase::Compile, "cycle",
+                    "此节点在一个环上，无法排出执行顺序");
       }
     }
     return false;
@@ -830,9 +934,11 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     while (!stack.empty()) {
       const std::size_t id = stack.back();
       stack.pop_back();
-      if (keep[id]) continue;
+      if (keep[id])
+        continue;
       keep[id] = true;
-      for (std::size_t up : upstream[id]) stack.push_back(up);
+      for (std::size_t up : upstream[id])
+        stack.push_back(up);
     }
   }
 
@@ -844,7 +950,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
       diags.error("", Phase::Compile, "unknown_node", "要单独运行的节点不存在: " + t);
       return false;
     }
-    for (std::size_t i : hit) isolatedNode[i] = 1;
+    for (std::size_t i : hit)
+      isolatedNode[i] = 1;
   }
   std::vector<char> forcedNode(n, 0);
   for (const std::string& t : options.force) {
@@ -853,7 +960,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
       diags.error("", Phase::Compile, "unknown_node", "要强制重算的节点不存在: " + t);
       return false;
     }
-    for (std::size_t i : hit) forcedNode[i] = 1;
+    for (std::size_t i : hit)
+      forcedNode[i] = 1;
   }
 
   // -- 惰性闭包（ADR-0016）：只被惰性端口依赖的节点标 deferred，不进初始拓扑序。
@@ -865,16 +973,19 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
   };
   std::vector<std::vector<Consumer>> consumersByNode(n);
   for (std::size_t j = 0; j < n; ++j) {
-    if (!keep[j]) continue;
+    if (!keep[j])
+      continue;
     for (const InputBinding& b : inputsOf[j]) {
-      if (b.fromNode < 0 || !keep[static_cast<std::size_t>(b.fromNode)]) continue;
+      if (b.fromNode < 0 || !keep[static_cast<std::size_t>(b.fromNode)])
+        continue;
       consumersByNode[static_cast<std::size_t>(b.fromNode)].push_back(Consumer{j, b.lazy});
     }
   }
   std::vector<char> demandedEagerly(n, 0);
   for (std::size_t k = order.size(); k-- > 0;) {
     const std::size_t id = order[k];
-    if (!keep[id]) continue;
+    if (!keep[id])
+      continue;
     if (consumersByNode[id].empty() || targetSet.count(graph.nodes[id].id)) {
       demandedEagerly[id] = 1;
       continue;
@@ -890,7 +1001,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
   // -- 装配 Plan ------------------------------------------------------------
   std::vector<int> planIndex(n, -1);
   for (std::size_t id : order) {
-    if (!keep[id]) continue;
+    if (!keep[id])
+      continue;
     planIndex[id] = static_cast<int>(out.nodes.size());
     PlanNode pn;
     pn.id = graph.nodes[id].id;
@@ -909,19 +1021,23 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     // 子图提升参数灌进来的那些。只留下确实还在的键 —— 迁移改过名的那一个，
     // 「它是不是外参绑的」已经没有可靠答案，宁可报 explicit 也不要报错的 bound。
     for (const std::string& b : graph.nodes[id].boundParams) {
-      if (pn.explicitParams.count(b)) pn.boundParams.insert(b);
+      if (pn.explicitParams.count(b))
+        pn.boundParams.insert(b);
     }
     for (const auto& g : graph.nodes[id].graphParams) {
-      if (pn.explicitParams.count(g.first)) pn.graphParams.insert(g);
+      if (pn.explicitParams.count(g.first))
+        pn.graphParams.insert(g);
     }
     if (pn.op) {
       for (const Port& p : pn.op->inputs) {
         const std::string& t = concreteType(id, &p);
-        if (p.type == kAnyType && !t.empty()) pn.inputTypes[p.name] = t;
+        if (p.type == kAnyType && !t.empty())
+          pn.inputTypes[p.name] = t;
       }
       for (const Port& p : pn.op->outputs) {
         const std::string& t = concreteType(id, &p);
-        if (p.type == kAnyType && !t.empty()) pn.outputTypes[p.name] = t;
+        if (p.type == kAnyType && !t.empty())
+          pn.outputTypes[p.name] = t;
       }
     }
     for (const InputBinding& b : inputsOf[id]) {
@@ -930,13 +1046,15 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
       pn.inputs.push_back(std::move(remapped));
     }
     // 消费者数只统计留在计划里的下游 —— Run to node 时被裁掉的下游不算数
-    for (const auto& kv : consumersOf[id]) pn.consumers[kv.first] = 0;
+    for (const auto& kv : consumersOf[id])
+      pn.consumers[kv.first] = 0;
     out.nodes.push_back(std::move(pn));
   }
   for (const RawEdge& e : graph.edges) {
     const int fi = planIndex[indexById.at(e.fromNode)];
     const int ti = planIndex[indexById.at(e.toNode)];
-    if (fi < 0 || ti < 0) continue;
+    if (fi < 0 || ti < 0)
+      continue;
     out.nodes[static_cast<std::size_t>(fi)].consumers[e.fromPort] += 1;
   }
 
@@ -945,15 +1063,18 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
   for (std::size_t i = 0; i < out.nodes.size(); ++i) {
     std::set<int> ups;
     for (const InputBinding& b : out.nodes[i].inputs) {
-      if (b.fromNode >= 0) ups.insert(b.fromNode);
+      if (b.fromNode >= 0)
+        ups.insert(b.fromNode);
     }
     out.nodes[i].upstream.assign(ups.begin(), ups.end());
-    for (int u : ups) out.nodes[static_cast<std::size_t>(u)].downstream.push_back(static_cast<int>(i));
+    for (int u : ups)
+      out.nodes[static_cast<std::size_t>(u)].downstream.push_back(static_cast<int>(i));
   }
 
   // -- cacheKey：内容寻址（D4）--------------------------------------------
   for (PlanNode& pn : out.nodes) {
-    if (!pn.op || !pn.valid) continue;
+    if (!pn.op || !pn.valid)
+      continue;
     Hasher h;
     // 预览命名空间：preview 的结果与正式结果永不互相命中（F5）。
     h.add(options.cacheNamespace);
@@ -975,7 +1096,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     }
     // 上游按端口名排序：输入的书写顺序不该影响键
     std::vector<const InputBinding*> sorted;
-    for (const auto& b : pn.inputs) sorted.push_back(&b);
+    for (const auto& b : pn.inputs)
+      sorted.push_back(&b);
     std::sort(sorted.begin(), sorted.end(),
               [](const InputBinding* a, const InputBinding* b) { return a->port < b->port; });
     for (const InputBinding* b : sorted) {
@@ -985,7 +1107,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
                              : std::string{});
     }
     // 不确定性算子（比如带随机种子却不暴露 seed 的）永远不该命中缓存
-    if (!pn.op->capabilities.deterministic) h.add(options.runId);
+    if (!pn.op->capabilities.deterministic)
+      h.add(options.runId);
     pn.cacheKey = h.hex();
   }
 
@@ -1002,8 +1125,8 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
       // `<port>.<field>`：指向 Bundle 端口里的一个字段（m8-plan L3）。
       std::string problem;
       const std::size_t dot = g.port.find('.');
-      const Port* bundlePort = dot == std::string::npos ? nullptr
-                                                        : findPort(op->outputs, g.port.substr(0, dot));
+      const Port* bundlePort =
+          dot == std::string::npos ? nullptr : findPort(op->outputs, g.port.substr(0, dot));
       std::string bundleKind;
       if (!bundlePort) {
         problem = "图输出 '" + g.name + "' 指向的节点没有输出端口 '" + g.port + "'";
@@ -1015,10 +1138,12 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
         const std::string field = g.port.substr(dot + 1);
         bool found = false;
         for (const BundleField& f : desc ? desc->fields : std::vector<BundleField>{}) {
-          if (f.name == field) found = true;
+          if (f.name == field)
+            found = true;
         }
         if (!found) {
-          problem = "图输出 '" + g.name + "' 指向的 " + bundlePort->type + " 没有字段 '" + field + "'";
+          problem =
+              "图输出 '" + g.name + "' 指向的 " + bundlePort->type + " 没有字段 '" + field + "'";
         }
       }
       if (!problem.empty()) {
@@ -1031,10 +1156,11 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
 
   // 顶层图参数的取值不合它自己的规格（P1.2）：诊断在展开期已经报过（nodeId 为空）。
   // 节点照常规整、诊断照常收齐 —— 编辑期校验要一次看到全部问题 —— 但这份计划不能跑。
-  if (!graph.paramValuesOk) return false;
+  if (!graph.paramValuesOk)
+    return false;
 
   out.ok = true;
   return true;
 }
 
-}  // namespace lyflow::exec
+} // namespace lyflow::exec

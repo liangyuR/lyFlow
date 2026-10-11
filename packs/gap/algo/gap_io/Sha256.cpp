@@ -25,13 +25,14 @@ std::uint32_t rotateRight(std::uint32_t value, unsigned count) {
   return (value >> count) | (value << (32 - count));
 }
 
-}  // namespace
+} // namespace
 
 std::string sha256(const std::string& bytes) {
   std::vector<std::uint8_t> data(bytes.begin(), bytes.end());
   const auto bit_length = static_cast<std::uint64_t>(data.size()) * 8;
   data.push_back(0x80);
-  while ((data.size() % 64) != 56) data.push_back(0);
+  while ((data.size() % 64) != 56)
+    data.push_back(0);
   for (int shift = 56; shift >= 0; shift -= 8) {
     data.push_back(static_cast<std::uint8_t>((bit_length >> shift) & 0xff));
   }
@@ -90,17 +91,20 @@ std::string sha256(const std::string& bytes) {
 
   std::ostringstream output;
   output << std::hex << std::setfill('0');
-  for (const auto value : hash) output << std::setw(8) << value;
+  for (const auto value : hash)
+    output << std::setw(8) << value;
   return output.str();
 }
 
 std::string sha256File(const std::filesystem::path& path) {
   std::ifstream input(path, std::ios::binary);
-  if (!input) throw std::runtime_error("file missing for SHA-256: " + path.string());
+  if (!input)
+    throw std::runtime_error("file missing for SHA-256: " + path.string());
   std::ostringstream bytes;
   bytes << input.rdbuf();
-  if (input.bad()) throw std::runtime_error("failed to hash file: " + path.string());
+  if (input.bad())
+    throw std::runtime_error("failed to hash file: " + path.string());
   return sha256(bytes.str());
 }
 
-}  // namespace gap::io
+} // namespace gap::io

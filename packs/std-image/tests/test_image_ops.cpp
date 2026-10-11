@@ -48,22 +48,24 @@ bool samePixels(const Image& a, const Image& b) {
          a.depth == b.depth && std::memcmp(a.pixels.get(), b.pixels.get(), a.byteSize()) == 0;
 }
 
-}  // namespace
+} // namespace
 
-TEST_CASE("adapter：view 与 fromMat 都不拷贝像素；不连续的子矩阵先 clone；core 不认的位深 / 通道拒掉") {
+TEST_CASE(
+    "adapter：view 与 fromMat 都不拷贝像素；不连续的子矩阵先 clone；core 不认的位深 / 通道拒掉") {
   const Image src = makeRgb(8, 4);
   const cv::Mat v = cvx::view(src);
   CHECK(v.data == src.pixels.get());
   CHECK(v.type() == CV_8UC3);
-  CHECK(v.at<cv::Vec3b>(2, 5)[1] == static_cast<unsigned char>(test::image::testImageValue(PixelDepth::U8, 5, 2, 1)));
+  CHECK(v.at<cv::Vec3b>(2, 5)[1] ==
+        static_cast<unsigned char>(test::image::testImageValue(PixelDepth::U8, 5, 2, 1)));
 
   cv::Mat owned(3, 5, CV_16UC1, cv::Scalar(1234));
   const std::uint8_t* raw = owned.data;
   Image img;
   REQUIRE(cvx::fromMat(owned, img));
-  CHECK(img.pixels.get() == raw);  // 零拷贝：别名 shared_ptr 持有 Mat
+  CHECK(img.pixels.get() == raw); // 零拷贝：别名 shared_ptr 持有 Mat
   owned.release();
-  CHECK(img.at(4, 2, 0) == 1234.0);  // Mat 那边放手了，像素还活着
+  CHECK(img.at(4, 2, 0) == 1234.0); // Mat 那边放手了，像素还活着
 
   cv::Mat big(10, 10, CV_8UC1, cv::Scalar(7));
   Image sub;
@@ -77,7 +79,8 @@ TEST_CASE("adapter：view 与 fromMat 都不拷贝像素；不连续的子矩阵
   CHECK(cvx::toSupportedDepth(cv::Mat(2, 2, CV_64FC1)).depth() == CV_32F);
 }
 
-TEST_CASE("io.save_image → io.load_image 往返逐像素相同（RGB 顺序不被 BGR 颠倒、u16 保留）；中文路径；f32 存 PNG 被拒") {
+TEST_CASE(
+    "io.save_image → io.load_image 往返逐像素相同（RGB 顺序不被 BGR 颠倒、u16 保留）；中文路径；f32 存 PNG 被拒") {
   const std::filesystem::path dir =
       std::filesystem::temp_directory_path() / std::filesystem::u8path("lyflow-图像-测试");
   std::filesystem::create_directories(dir);
@@ -97,7 +100,9 @@ TEST_CASE("io.save_image → io.load_image 往返逐像素相同（RGB 顺序不
     c.inputs["image"] = Data::image(g16);
     REQUIRE(c.run("io.save_image", {{"path", Value::text("深度.png")}}).ok);
     c.inputs.clear();
-    REQUIRE(c.run("io.load_image", {{"path", Value::text("深度.png")}, {"mode", Value::text("gray")}}).ok);
+    REQUIRE(
+        c.run("io.load_image", {{"path", Value::text("深度.png")}, {"mode", Value::text("gray")}})
+            .ok);
     CHECK(samePixels(c.image(), g16));
   }
   SUBCASE("f32 不能存 PNG；文件不存在报 io") {
@@ -124,24 +129,31 @@ TEST_CASE("io.load_image source=inputs：原样共享、颜色转换保留位深
     c.inputs["image"] = Data::image(rgb);
     REQUIRE(c.run("io.load_image", {{"source", Value::text("inputs")}}).ok);
     CHECK(c.image().pixels.get() == rgb.pixels.get());
-    REQUIRE(c.run("io.load_image", {{"source", Value::text("inputs")}, {"mode", Value::text("gray")}}).ok);
+    REQUIRE(
+        c.run("io.load_image", {{"source", Value::text("inputs")}, {"mode", Value::text("gray")}})
+            .ok);
     CHECK(c.image().depth == rgb.depth);
     CHECK(c.image().channels == 1);
-    CHECK(c.image().at(0, 0, 0) == doctest::Approx(0.299 * 100 + 0.587 * 20 + 0.114 * 5).epsilon(0.02));
+    CHECK(c.image().at(0, 0, 0) ==
+          doctest::Approx(0.299 * 100 + 0.587 * 20 + 0.114 * 5).epsilon(0.02));
     const Data gray = c.outputs["image"];
     c.inputs["image"] = gray;
-    REQUIRE(c.run("io.load_image", {{"source", Value::text("inputs")}, {"mode", Value::text("color")}}).ok);
+    REQUIRE(
+        c.run("io.load_image", {{"source", Value::text("inputs")}, {"mode", Value::text("color")}})
+            .ok);
     CHECK(c.image().depth == rgb.depth);
     CHECK(c.image().channels == 3);
-    for (int ch = 0; ch < 3; ++ch) CHECK(c.image().at(0, 0, ch) == gray.asImage()->at(0, 0, 0));
+    for (int ch = 0; ch < 3; ++ch)
+      CHECK(c.image().at(0, 0, ch) == gray.asImage()->at(0, 0, 0));
   }
 }
 
-TEST_CASE("image.to_gray / resize / crop：RGB 加权、灰度原样共享像素；尺寸；像素框裁剪，米制的框被拒；全宽裁剪不借上游的像素") {
+TEST_CASE(
+    "image.to_gray / resize / crop：RGB 加权、灰度原样共享像素；尺寸；像素框裁剪，米制的框被拒；全宽裁剪不借上游的像素") {
   Call c;
   Image rgb = Image::allocate(4, 2, 3, PixelDepth::U8);
   for (std::size_t i = 0; i < 8; ++i) {
-    rgb.mutablePixels()[i * 3 + 0] = 200;  // R
+    rgb.mutablePixels()[i * 3 + 0] = 200; // R
     rgb.mutablePixels()[i * 3 + 1] = 0;
     rgb.mutablePixels()[i * 3 + 2] = 0;
   }
@@ -159,8 +171,10 @@ TEST_CASE("image.to_gray / resize / crop：RGB 加权、灰度原样共享像素
   REQUIRE(c.run("image.resize", {{"scale", Value::number(0.5)}}).ok);
   CHECK(c.image().width == 50);
   CHECK(c.image().height == 30);
-  REQUIRE(c.run("image.resize", {{"mode", Value::text("size")}, {"width", Value::integer(7)},
-                                 {"height", Value::integer(3)}}).ok);
+  REQUIRE(c.run("image.resize", {{"mode", Value::text("size")},
+                                 {"width", Value::integer(7)},
+                                 {"height", Value::integer(3)}})
+              .ok);
   CHECK(c.image().width == 7);
 
   REQUIRE(c.run("image.crop", {{"roi", Value::vec({10, 5, 30, 13})}}).ok);
@@ -169,7 +183,7 @@ TEST_CASE("image.to_gray / resize / crop：RGB 加权、灰度原样共享像素
   Box2D box;
   box.min[0] = 90;
   box.min[1] = 50;
-  box.max[0] = 200;  // 超出图像的部分截掉
+  box.max[0] = 200; // 超出图像的部分截掉
   box.max[1] = 55;
   box.unit = Unit2D::Pixel;
   c.inputs["box"] = Data::box2d(box);
@@ -191,7 +205,8 @@ TEST_CASE("image.to_gray / resize / crop：RGB 加权、灰度原样共享像素
     REQUIRE(c.run("image.crop", {{"roi", Value::vec(roi)}}).ok);
     const Data out = c.outputs["image"];
     const std::uint8_t* p = out.asImage()->pixels.get();
-    CHECK_MESSAGE((p < lo || p >= hi), "裁剪输出借着输入的像素：roi = ", roi[0], ",", roi[1], ",", roi[2], ",", roi[3]);
+    CHECK_MESSAGE((p < lo || p >= hi), "裁剪输出借着输入的像素：roi = ", roi[0], ",", roi[1], ",",
+                  roi[2], ",", roi[3]);
     c.inputs.clear();
     in = Data();
     c.outputs.clear();
@@ -205,7 +220,8 @@ TEST_CASE("image.threshold：Otsu 分开两块灰度；单通道契约拦住 RGB
   lyflow::test::ensureTestOps();
   Image g = Image::allocate(20, 10, 1, PixelDepth::U8);
   for (int y = 0; y < 10; ++y) {
-    for (int x = 0; x < 20; ++x) g.mutablePixels()[y * 20 + x] = x < 8 ? 40 : 210;
+    for (int x = 0; x < 20; ++x)
+      g.mutablePixels()[y * 20 + x] = x < 8 ? 40 : 210;
   }
   Call c;
   c.inputs["image"] = Data::image(g);
@@ -217,7 +233,9 @@ TEST_CASE("image.threshold：Otsu 分开两块灰度；单通道契约拦住 RGB
 
   c.inputs["image"] = Data::image(test::image::makeTestImage(8, 8, 1, PixelDepth::U16));
   CHECK(c.run("image.threshold").code == "bad_input");
-  CHECK(c.run("image.threshold", {{"method", Value::text("fixed")}, {"thresh", Value::number(1000)}}).ok);
+  CHECK(
+      c.run("image.threshold", {{"method", Value::text("fixed")}, {"thresh", Value::number(1000)}})
+          .ok);
 
   // 契约在执行器里查：接一张 RGB 图报 contract_violation，期望 / 实际形状都记下
   const Json doc = test::makeGraph(
@@ -229,7 +247,8 @@ TEST_CASE("image.threshold：Otsu 分开两块灰度；单通道契约拦住 RGB
   CHECK(log.nodeEvent("bin", "error")["error"]["code"] == "contract_violation");
 }
 
-TEST_CASE("image.find_circle：画一个圆找回来（像素坐标、unit = px 进 valueJson）；没有圆报 circle_not_found") {
+TEST_CASE(
+    "image.find_circle：画一个圆找回来（像素坐标、unit = px 进 valueJson）；没有圆报 circle_not_found") {
   cv::Mat m(200, 240, CV_8UC1, cv::Scalar(0));
   cv::circle(m, cv::Point(130, 90), 40, cv::Scalar(255), 3);
   cv::GaussianBlur(m, m, cv::Size(5, 5), 1.5);
@@ -237,7 +256,9 @@ TEST_CASE("image.find_circle：画一个圆找回来（像素坐标、unit = px 
   REQUIRE(cvx::fromMat(m, img));
   Call c;
   c.inputs["image"] = Data::image(img);
-  REQUIRE(c.run("image.find_circle", {{"minRadius", Value::number(20)}, {"maxRadius", Value::number(60)}}).ok);
+  REQUIRE(c.run("image.find_circle",
+                {{"minRadius", Value::number(20)}, {"maxRadius", Value::number(60)}})
+              .ok);
   const Circle2D* circle = c.outputs["circle"].asCircle2D();
   REQUIRE(circle != nullptr);
   CHECK(circle->center[0] == doctest::Approx(130).epsilon(0.03));
@@ -247,22 +268,26 @@ TEST_CASE("image.find_circle：画一个圆找回来（像素坐标、unit = px 
   CHECK(Json::parse(c.outputs["circle"].valueJson())["unit"] == "px");
   // 预览把半径缩小之后可能不足 1（4 倍预览里的 3 → 0.75）：截断成 0 对 OpenCV 是「不限」，会找回这个半径 40 的圆。
   // 四舍五入、正数至少 1 —— 半径上限 1 找不到它（review 第二轮）
-  CHECK(c.run("image.find_circle", {{"maxRadius", Value::number(0.75)}}).code == "circle_not_found");
+  CHECK(c.run("image.find_circle", {{"maxRadius", Value::number(0.75)}}).code ==
+        "circle_not_found");
 
   c.inputs["image"] = Data::image(Image::allocate(64, 64, 1, PixelDepth::U8));
   const Status none = c.run("image.find_circle");
   CHECK(none.code == "circle_not_found");
 }
 
-TEST_CASE("image.region_stats：掩膜内的均值、面积、外接框（像素，可直接接 crop）；掩膜尺寸不对或多通道报 bad_input；f32 掩膜的小正值也算前景") {
+TEST_CASE(
+    "image.region_stats：掩膜内的均值、面积、外接框（像素，可直接接 crop）；掩膜尺寸不对或多通道报 bad_input；f32 掩膜的小正值也算前景") {
   const Image g = test::image::makeTestImage(30, 20, 1, PixelDepth::U8);
   Image mask = Image::allocate(30, 20, 1, PixelDepth::U8);
   for (int y = 5; y < 9; ++y) {
-    for (int x = 10; x < 16; ++x) mask.mutablePixels()[y * 30 + x] = 255;
+    for (int x = 10; x < 16; ++x)
+      mask.mutablePixels()[y * 30 + x] = 255;
   }
   double sum = 0;
   for (int y = 5; y < 9; ++y) {
-    for (int x = 10; x < 16; ++x) sum += test::image::testImageValue(PixelDepth::U8, x, y, 0);
+    for (int x = 10; x < 16; ++x)
+      sum += test::image::testImageValue(PixelDepth::U8, x, y, 0);
   }
   Call c;
   c.inputs["image"] = Data::image(g);
@@ -276,7 +301,8 @@ TEST_CASE("image.region_stats：掩膜内的均值、面积、外接框（像素
         std::vector<float>{10, 5, 16, 9});
 
   // 不接掩膜：区域就是整张图（不造全 255 的掩膜、直接算的那条路），与接一张全 255 的掩膜逐位相同
-  for (const auto& [channels, depth] : {std::pair{1, PixelDepth::U8}, std::pair{3, PixelDepth::U16}}) {
+  for (const auto& [channels, depth] :
+       {std::pair{1, PixelDepth::U8}, std::pair{3, PixelDepth::U16}}) {
     CAPTURE(channels);
     Call whole;
     whole.inputs["image"] = Data::image(test::image::makeTestImage(30, 20, channels, depth));
@@ -291,28 +317,32 @@ TEST_CASE("image.region_stats：掩膜内的均值、面积、外接框（像素
     CHECK(whole.outputs["area"].asMeasurement()->value == 600.0);
     CHECK(whole.outputs["mean"].asMeasurement()->value == maskedMean);
     const Box2D* wb = whole.outputs["bbox"].asBox2D();
-    CHECK(std::vector<float>{wb->min[0], wb->min[1], wb->max[0], wb->max[1]} == std::vector<float>{0, 0, 30, 20});
+    CHECK(std::vector<float>{wb->min[0], wb->min[1], wb->max[0], wb->max[1]} ==
+          std::vector<float>{0, 0, 30, 20});
   }
 
   c.inputs["mask"] = Data::image(Image::allocate(3, 3, 1, PixelDepth::U8));
   CHECK(c.run("image.region_stats").code == "bad_input");
   c.inputs["mask"] = Data::image(Image::allocate(30, 20, 3, PixelDepth::U8));
-  CHECK(c.run("image.region_stats").code == "bad_input");  // 修前 OpenCV 抛异常、报成 internal
+  CHECK(c.run("image.region_stats").code == "bad_input"); // 修前 OpenCV 抛异常、报成 internal
 
   Image fmask = Image::allocate(30, 20, 1, PixelDepth::F32);
   float* fp = reinterpret_cast<float*>(fmask.mutablePixels());
-  fp[0] = 0.3f;  // 修前先转 u8 被舍成 0、当成背景
-  fp[1] = std::numeric_limits<float>::quiet_NaN();  // NaN 不算
+  fp[0] = 0.3f;                                    // 修前先转 u8 被舍成 0、当成背景
+  fp[1] = std::numeric_limits<float>::quiet_NaN(); // NaN 不算
   c.inputs["mask"] = Data::image(fmask);
   REQUIRE(c.run("image.region_stats").ok);
   CHECK(c.outputs["area"].asMeasurement()->value == 1.0);
 }
 
-TEST_CASE("image.to_tensor ↔ tensor.to_image：NCHW 的 (v·scale − mean)/std；CHW 张量读回 f32 原值；u8 按范围拉伸") {
+TEST_CASE(
+    "image.to_tensor ↔ tensor.to_image：NCHW 的 (v·scale − mean)/std；CHW 张量读回 f32 原值；u8 按范围拉伸") {
   const Image rgb = makeRgb(5, 3);
   Call c;
   c.inputs["image"] = Data::image(rgb);
-  REQUIRE(c.run("image.to_tensor", {{"mean", Value::vec({0.5, 0.0, 0.0})}, {"std", Value::vec({0.5, 1.0, 1.0})}}).ok);
+  REQUIRE(c.run("image.to_tensor",
+                {{"mean", Value::vec({0.5, 0.0, 0.0})}, {"std", Value::vec({0.5, 1.0, 1.0})}})
+              .ok);
   const Tensor* t = c.outputs["tensor"].asTensor();
   REQUIRE(t != nullptr);
   CHECK(t->shape == std::vector<std::int64_t>{1, 3, 3, 5});
@@ -323,7 +353,8 @@ TEST_CASE("image.to_tensor ↔ tensor.to_image：NCHW 的 (v·scale − mean)/st
   CHECK(t->data[(1 * 3 + 1) * 5 + 2] ==
         doctest::Approx(test::image::testImageValue(PixelDepth::U8, 2, 1, 1) / 255.0));
 
-  REQUIRE(c.run("image.to_tensor", {{"layout", Value::text("CHW")}, {"scale", Value::number(1.0)}}).ok);
+  REQUIRE(
+      c.run("image.to_tensor", {{"layout", Value::text("CHW")}, {"scale", Value::number(1.0)}}).ok);
   c.inputs.clear();
   c.inputs["tensor"] = c.outputs["tensor"];
   REQUIRE(c.run("tensor.to_image").ok);
@@ -335,19 +366,21 @@ TEST_CASE("image.to_tensor ↔ tensor.to_image：NCHW 的 (v·scale − mean)/st
   CHECK(c.image().depth == PixelDepth::U8);
 
   Tensor bad;
-  bad.shape = {2, 5, 5};  // 首维 2 不是通道数
+  bad.shape = {2, 5, 5}; // 首维 2 不是通道数
   bad.data.assign(50, 0.0f);
   c.inputs["tensor"] = Data::tensor(bad);
   CHECK(c.run("tensor.to_image").code == "bad_input");
 }
 
-TEST_CASE("image.to_tensor / tensor.to_image 与逐值的参照（Image::at 那一版）逐位相同：三种位深 × 1/3/4 通道 × 四种布局") {
+TEST_CASE(
+    "image.to_tensor / tensor.to_image 与逐值的参照（Image::at 那一版）逐位相同：三种位深 × 1/3/4 通道 × 四种布局") {
   // 参照就是改写之前的写法：每个值 Image::at、double 运算、最后截成 float；读回图像时 float 里拉伸、lround
   const double scale = 0.0123;
   const float mean[3] = {static_cast<float>(0.1), static_cast<float>(0.2), static_cast<float>(0.3)};
-  const float sd[3] = {static_cast<float>(0.229), static_cast<float>(0.224), static_cast<float>(0.225)};
-  const auto refToImage = [](const Tensor& t, bool interleaved, std::int64_t c, std::int64_t h, std::int64_t w,
-                             bool toU8) {
+  const float sd[3] = {static_cast<float>(0.229), static_cast<float>(0.224),
+                       static_cast<float>(0.225)};
+  const auto refToImage = [](const Tensor& t, bool interleaved, std::int64_t c, std::int64_t h,
+                             std::int64_t w, bool toU8) {
     const std::size_t plane = static_cast<std::size_t>(h * w);
     const auto valueAt = [&](std::int64_t x, std::int64_t y, std::int64_t k) {
       const std::size_t p = static_cast<std::size_t>(y * w + x);
@@ -360,11 +393,15 @@ TEST_CASE("image.to_tensor / tensor.to_image 与逐值的参照（Image::at 那�
       hi = -lo;
       for (std::size_t i = 0; i < plane * static_cast<std::size_t>(c); ++i) {
         const float v = t.data[i];
-        if (!std::isfinite(v)) continue;
+        if (!std::isfinite(v))
+          continue;
         lo = std::min(lo, v);
         hi = std::max(hi, v);
       }
-      if (!(hi > lo)) { lo = 0; hi = 1; }
+      if (!(hi > lo)) {
+        lo = 0;
+        hi = 1;
+      }
     }
     std::vector<std::uint8_t> out(plane * static_cast<std::size_t>(c) * (toU8 ? 1 : sizeof(float)));
     for (std::int64_t y = 0; y < h; ++y) {
@@ -384,7 +421,8 @@ TEST_CASE("image.to_tensor / tensor.to_image 与逐值的参照（Image::at 那�
     return out;
   };
   const auto sameBytes = [](const Image& img, const std::vector<std::uint8_t>& want) {
-    return img.byteSize() == want.size() && std::memcmp(img.pixels.get(), want.data(), want.size()) == 0;
+    return img.byteSize() == want.size() &&
+           std::memcmp(img.pixels.get(), want.data(), want.size()) == 0;
   };
 
   for (const PixelDepth depth : {PixelDepth::U8, PixelDepth::U16, PixelDepth::F32}) {
@@ -394,7 +432,8 @@ TEST_CASE("image.to_tensor / tensor.to_image 与逐值的参照（Image::at 那�
         CAPTURE(ch);
         CAPTURE(layout);
         const std::int64_t w = 37, h = 23;
-        const Image img = test::image::makeTestImage(static_cast<std::int32_t>(w), static_cast<std::int32_t>(h), ch, depth);
+        const Image img = test::image::makeTestImage(static_cast<std::int32_t>(w),
+                                                     static_cast<std::int32_t>(h), ch, depth);
         Call c;
         c.inputs["image"] = Data::image(img);
         REQUIRE(c.run("image.to_tensor", {{"layout", Value::text(layout)},
@@ -426,7 +465,9 @@ TEST_CASE("image.to_tensor / tensor.to_image 与逐值的参照（Image::at 那�
         c.inputs["tensor"] = Data::tensor(t);
         for (const char* d : {"f32", "u8"}) {
           CAPTURE(d);
-          REQUIRE(c.run("tensor.to_image", {{"layout", Value::text(layout)}, {"depth", Value::text(d)}}).ok);
+          REQUIRE(
+              c.run("tensor.to_image", {{"layout", Value::text(layout)}, {"depth", Value::text(d)}})
+                  .ok);
           CHECK(sameBytes(c.image(), refToImage(t, !planar, ch, h, w, std::string(d) == "u8")));
         }
       }
@@ -440,7 +481,8 @@ TEST_CASE("image.to_tensor / tensor.to_image 与逐值的参照（Image::at 那�
     const std::int64_t c = 3, h = 4, w = 5;
     t.shape = interleaved ? std::vector<std::int64_t>{h, w, c} : std::vector<std::int64_t>{c, h, w};
     t.data.resize(static_cast<std::size_t>(c * h * w));
-    for (std::size_t i = 0; i < t.data.size(); ++i) t.data[i] = static_cast<float>(i) * 0.37f - 3.0f;
+    for (std::size_t i = 0; i < t.data.size(); ++i)
+      t.data[i] = static_cast<float>(i) * 0.37f - 3.0f;
     t.data[3] = std::numeric_limits<float>::quiet_NaN();
     t.data[7] = std::numeric_limits<float>::infinity();
     t.data[11] = -std::numeric_limits<float>::infinity();
@@ -448,13 +490,16 @@ TEST_CASE("image.to_tensor / tensor.to_image 与逐值的参照（Image::at 那�
     c2.inputs["tensor"] = Data::tensor(t);
     for (const char* d : {"f32", "u8"}) {
       CAPTURE(d);
-      REQUIRE(c2.run("tensor.to_image", {{"layout", Value::text(interleaved ? "HWC" : "CHW")}, {"depth", Value::text(d)}}).ok);
+      REQUIRE(c2.run("tensor.to_image", {{"layout", Value::text(interleaved ? "HWC" : "CHW")},
+                                         {"depth", Value::text(d)}})
+                  .ok);
       CHECK(sameBytes(c2.image(), refToImage(t, interleaved, c, h, w, std::string(d) == "u8")));
     }
   }
 }
 
-TEST_CASE("image.normalize / blur：u16 拉伸到 u8 满量程；不拉伸按 scale 截断；大核中值滤波不收 u16") {
+TEST_CASE(
+    "image.normalize / blur：u16 拉伸到 u8 满量程；不拉伸按 scale 截断；大核中值滤波不收 u16") {
   Image g = Image::allocate(4, 1, 1, PixelDepth::U16);
   const std::uint16_t vals[4] = {1000, 2000, 3000, 5000};
   std::memcpy(g.mutablePixels(), vals, sizeof vals);
@@ -464,12 +509,15 @@ TEST_CASE("image.normalize / blur：u16 拉伸到 u8 满量程；不拉伸按 sc
   CHECK(c.image().depth == PixelDepth::U8);
   CHECK(c.image().at(0, 0, 0) == 0.0);
   CHECK(c.image().at(3, 0, 0) == 255.0);
-  REQUIRE(c.run("image.normalize", {{"stretch", Value::boolean(false)}, {"scale", Value::number(0.1)}}).ok);
+  REQUIRE(
+      c.run("image.normalize", {{"stretch", Value::boolean(false)}, {"scale", Value::number(0.1)}})
+          .ok);
   CHECK(c.image().at(1, 0, 0) == 200.0);
-  CHECK(c.image().at(3, 0, 0) == 255.0);  // 500 截断到 255
+  CHECK(c.image().at(3, 0, 0) == 255.0); // 500 截断到 255
 
-  CHECK(c.run("image.blur", {{"method", Value::text("median")}, {"ksize", Value::integer(7)}}).code ==
-        "bad_param");
+  CHECK(
+      c.run("image.blur", {{"method", Value::text("median")}, {"ksize", Value::integer(7)}}).code ==
+      "bad_param");
   CHECK(c.run("image.blur", {{"ksize", Value::integer(4)}}).code == "bad_param");
   REQUIRE(c.run("image.blur").ok);
   CHECK(c.image().depth == PixelDepth::U16);
@@ -483,20 +531,26 @@ Image depthU16(int w, int h, const std::function<std::uint16_t(int, int)>& value
   Image d = Image::allocate(w, h, 1, PixelDepth::U16);
   auto* p = reinterpret_cast<std::uint16_t*>(d.mutablePixels());
   for (int y = 0; y < h; ++y) {
-    for (int x = 0; x < w; ++x) p[y * w + x] = value(x, y);
+    for (int x = 0; x < w; ++x)
+      p[y * w + x] = value(x, y);
   }
   return d;
 }
 
 std::unordered_map<std::string, Value> intrinsics(double fx, double fy, double cx, double cy) {
-  return {{"fx", Value::number(fx)}, {"fy", Value::number(fy)}, {"cx", Value::number(cx)}, {"cy", Value::number(cy)}};
+  return {{"fx", Value::number(fx)},
+          {"fy", Value::number(fy)},
+          {"cx", Value::number(cx)},
+          {"cy", Value::number(cy)}};
 }
 
-}  // namespace
+} // namespace
 
-TEST_CASE("cloud.from_depth：针孔反投影（x 右、y 下、z 前）；0 与范围外不出点；step 隔点取；彩色图按像素上色；尺寸不对 / 内参非法报错") {
+TEST_CASE(
+    "cloud.from_depth：针孔反投影（x 右、y 下、z 前）；0 与范围外不出点；step 隔点取；彩色图按像素上色；尺寸不对 / 内参非法报错") {
   // 4×3，(u, v) 处深度 = 1000 + 100u + 10v 毫米，(0, 0) 是 0（没测到）
-  const Image d = depthU16(4, 3, [](int x, int y) { return x == 0 && y == 0 ? 0 : 1000 + 100 * x + 10 * y; });
+  const Image d =
+      depthU16(4, 3, [](int x, int y) { return x == 0 && y == 0 ? 0 : 1000 + 100 * x + 10 * y; });
   Call c;
   c.inputs["depth"] = Data::image(d);
   auto k = intrinsics(2.0, 4.0, 1.5, 1.0);
@@ -520,7 +574,7 @@ TEST_CASE("cloud.from_depth：针孔反投影（x 右、y 下、z 前）；0 与
   auto stepped = k;
   stepped["step"] = Value::integer(2);
   REQUIRE(c.run("cloud.from_depth", stepped).ok);
-  CHECK(c.outputs["cloud"].asCloud()->pointCount() == 3);  // (0,0) 无效，(2,0) (0,2) (2,2)
+  CHECK(c.outputs["cloud"].asCloud()->pointCount() == 3); // (0,0) 无效，(2,0) (0,2) (2,2)
 
   // 彩色图：u8 原样；u16 取高 8 位
   Image rgb = Image::allocate(4, 3, 3, PixelDepth::U8);
@@ -534,9 +588,9 @@ TEST_CASE("cloud.from_depth：针孔反投影（x 右、y 下、z 前）；0 与
   const PointCloud* colored = c.outputs["cloud"].asCloud();
   REQUIRE(colored->hasRgb());
   CHECK(std::vector<std::uint8_t>(colored->rgb.begin(), colored->rgb.begin() + 3) ==
-        std::vector<std::uint8_t>{10, 7, 200});  // 第一个点是像素 1
+        std::vector<std::uint8_t>{10, 7, 200}); // 第一个点是像素 1
   Image rgb16 = Image::allocate(4, 3, 3, PixelDepth::U16);
-  reinterpret_cast<std::uint16_t*>(rgb16.mutablePixels())[3] = 0xAB12;  // 像素 1 的 R
+  reinterpret_cast<std::uint16_t*>(rgb16.mutablePixels())[3] = 0xAB12; // 像素 1 的 R
   c.inputs["color"] = Data::image(rgb16);
   REQUIRE(c.run("cloud.from_depth", k).ok);
   CHECK(c.outputs["cloud"].asCloud()->rgb[0] == 0xAB);
@@ -544,8 +598,8 @@ TEST_CASE("cloud.from_depth：针孔反投影（x 右、y 下、z 前）；0 与
   // f32 的 RGBA 彩色图：0..1 映射到 0..255，alpha 不用
   Image rgbaF = Image::allocate(4, 3, 4, PixelDepth::F32);
   float* fp = reinterpret_cast<float*>(rgbaF.mutablePixels());
-  fp[4] = 0.5f;  // 像素 1 的 R
-  fp[5] = 2.0f;  // 超出 1 截到 255
+  fp[4] = 0.5f; // 像素 1 的 R
+  fp[5] = 2.0f; // 超出 1 截到 255
   c.inputs["color"] = Data::image(rgbaF);
   REQUIRE(c.run("cloud.from_depth", k).ok);
   const auto& rgbF = c.outputs["cloud"].asCloud()->rgb;
@@ -554,7 +608,7 @@ TEST_CASE("cloud.from_depth：针孔反投影（x 右、y 下、z 前）；0 与
   c.inputs["color"] = Data::image(Image::allocate(5, 3, 3, PixelDepth::U8));
   CHECK(c.run("cloud.from_depth", k).code == "bad_input");
   c.inputs["color"] = Data::image(Image::allocate(4, 3, 1, PixelDepth::U8));
-  CHECK(c.run("cloud.from_depth", k).code == "bad_input");  // 单通道不是彩色图
+  CHECK(c.run("cloud.from_depth", k).code == "bad_input"); // 单通道不是彩色图
   c.inputs.erase("color");
   auto bad = k;
   bad["fx"] = Value::number(0);
@@ -562,10 +616,12 @@ TEST_CASE("cloud.from_depth：针孔反投影（x 右、y 下、z 前）；0 与
   auto flipped = k;
   flipped["minDepth"] = Value::number(2.0);
   flipped["maxDepth"] = Value::number(1.0);
-  CHECK(c.run("cloud.from_depth", flipped).code == "bad_param");  // 修前：静默出一片空云（review 修正 PR #2）
+  CHECK(c.run("cloud.from_depth", flipped).code ==
+        "bad_param"); // 修前：静默出一片空云（review 修正 PR #2）
 }
 
-TEST_CASE("深度图 → cloud.from_depth → cloud.to_depth_image 来回一趟：u16 与 f32 都逐像素相同（无效像素仍是 0）；z 缓冲取最近") {
+TEST_CASE(
+    "深度图 → cloud.from_depth → cloud.to_depth_image 来回一趟：u16 与 f32 都逐像素相同（无效像素仍是 0）；z 缓冲取最近") {
   const int W = 64, H = 48;
   const auto k = intrinsics(80.0, 82.0, 31.5, 23.0);
   SUBCASE("u16 毫米") {
@@ -588,7 +644,8 @@ TEST_CASE("深度图 → cloud.from_depth → cloud.to_depth_image 来回一趟�
   SUBCASE("f32 米") {
     Image d = Image::allocate(W, H, 1, PixelDepth::F32);
     auto* p = reinterpret_cast<float*>(d.mutablePixels());
-    for (int i = 0; i < W * H; ++i) p[i] = i % 13 == 0 ? 0.0f : 0.4f + 0.001f * static_cast<float>(i % 500);
+    for (int i = 0; i < W * H; ++i)
+      p[i] = i % 13 == 0 ? 0.0f : 0.4f + 0.001f * static_cast<float>(i % 500);
     Call c;
     c.inputs["depth"] = Data::image(d);
     auto m = k;
@@ -622,16 +679,18 @@ TEST_CASE("深度图 → cloud.from_depth → cloud.to_depth_image 来回一趟�
     CHECK(out.at(32, 23, 0) == 1500.0);
     double nonzero = 0;
     for (int y = 0; y < H; ++y) {
-      for (int x = 0; x < W; ++x) nonzero += out.at(x, y, 0) != 0 ? 1 : 0;
+      for (int x = 0; x < W; ++x)
+        nonzero += out.at(x, y, 0) != 0 ? 1 : 0;
     }
     CHECK(nonzero == 1);
   }
   SUBCASE("投影超出 32 位的点丢掉，不落进第 0 列；u16 量程外的点不占像素（review 修正 PR #2）") {
     PointCloud cloud;
-    cloud.push(0.0f, 0.0f, 1.2f);     // 主点，1.2 m
-    cloud.push(0.0f, 0.0f, 0.0003f);  // 同一像素，0.3 mm：u16 取整成 0，修前抢下像素写成 0
-    cloud.push(100.0f, 0.0f, 1e-6f);  // u = 80·100/1e-6 = 8e9：修前 MSVC 的 lround 返回 0，落进 (0, 23)
-    cloud.push(0.0f, 5.0f, 80.0f);    // 80 m = 80000 mm > 65535：修前截成 65535 冒充合法深度
+    cloud.push(0.0f, 0.0f, 1.2f);    // 主点，1.2 m
+    cloud.push(0.0f, 0.0f, 0.0003f); // 同一像素，0.3 mm：u16 取整成 0，修前抢下像素写成 0
+    cloud.push(100.0f, 0.0f,
+               1e-6f); // u = 80·100/1e-6 = 8e9：修前 MSVC 的 lround 返回 0，落进 (0, 23)
+    cloud.push(0.0f, 5.0f, 80.0f); // 80 m = 80000 mm > 65535：修前截成 65535 冒充合法深度
     Call c;
     c.inputs["cloud"] = Data::cloud(std::move(cloud));
     auto back = k;
@@ -641,17 +700,18 @@ TEST_CASE("深度图 → cloud.from_depth → cloud.to_depth_image 来回一趟�
     const Image& u16 = c.image("depth");
     CHECK(u16.at(32, 23, 0) == 1200.0);
     CHECK(u16.at(0, 23, 0) == 0.0);
-    CHECK(u16.at(32, 28, 0) == 0.0);  // 80 m 那个点投到 v = 82·5/80 + 23 ≈ 28
+    CHECK(u16.at(32, 28, 0) == 0.0); // 80 m 那个点投到 v = 82·5/80 + 23 ≈ 28
     back["depth"] = Value::text("f32");
     REQUIRE(c.run("cloud.to_depth_image", back).ok);
     const Image& f32 = c.image("depth");
-    CHECK(f32.at(0, 23, 0) == 0.0);  // 修前这里是 1e-6 的假深度
-    CHECK(f32.at(32, 23, 0) == doctest::Approx(0.0003));  // f32 没有量程问题：最近的就是它
+    CHECK(f32.at(0, 23, 0) == 0.0);                      // 修前这里是 1e-6 的假深度
+    CHECK(f32.at(32, 23, 0) == doctest::Approx(0.0003)); // f32 没有量程问题：最近的就是它
     CHECK(f32.at(32, 28, 0) == doctest::Approx(80.0));
   }
 }
 
-TEST_CASE("推理链路：图像 → image.to_tensor（CHW）→ ml.onnx_run → tensor.to_image，形状一路对上（要 LYFLOW_TEST_ONNX_MODEL）") {
+TEST_CASE(
+    "推理链路：图像 → image.to_tensor（CHW）→ ml.onnx_run → tensor.to_image，形状一路对上（要 LYFLOW_TEST_ONNX_MODEL）") {
   // 模型是 [N, 6, 1280] → [N, 8, 1280] 的剖面模型（std-ml 的测试同一个前提）：拿一张 1280×6 的单通道图当 [1, 6, 1280] 喂进去。
   // 验的是链路通、形状对，不是视觉语义（image-plan §4.1）
   const char* model = std::getenv("LYFLOW_TEST_ONNX_MODEL");
@@ -666,7 +726,8 @@ TEST_CASE("推理链路：图像 → image.to_tensor（CHW）→ ml.onnx_run →
   }
   lyflow::test::ensureTestOps();
   const Json doc = test::makeGraph(
-      {test::N{"img", "test.make_image", Json{{"width", 1280}, {"height", 6}, {"channels", 1}, {"depth", "f32"}}},
+      {test::N{"img", "test.make_image",
+               Json{{"width", 1280}, {"height", 6}, {"channels", 1}, {"depth", "f32"}}},
        test::N{"tensor", "image.to_tensor", Json{{"layout", "CHW"}, {"scale", 0.001}}},
        test::N{"infer", "ml.onnx_run", Json{{"modelPath", std::string(model)}}},
        test::N{"back", "tensor.to_image", Json::object()}},
@@ -680,11 +741,12 @@ TEST_CASE("推理链路：图像 → image.to_tensor（CHW）→ ml.onnx_run →
   CHECK(tensor.asTensor()->shape == std::vector<std::int64_t>{1, 8, 1280});
   Data image;
   REQUIRE(exec::ResultStore::instance().get(s.runId(), "back", "image", image));
-  CHECK(std::vector<int>{image.asImage()->width, image.asImage()->height, image.asImage()->channels} ==
-        std::vector<int>{1280, 8, 1});
+  CHECK(std::vector<int>{image.asImage()->width, image.asImage()->height,
+                         image.asImage()->channels} == std::vector<int>{1280, 8, 1});
 }
 
-TEST_CASE("大图预览（ADR-0028）：源头缩一级，找圆与区域统计换回原图坐标后与正式运行对得上；resize 到指定宽高后的张量形状不变") {
+TEST_CASE(
+    "大图预览（ADR-0028）：源头缩一级，找圆与区域统计换回原图坐标后与正式运行对得上；resize 到指定宽高后的张量形状不变") {
   test::ensureTestOps();
   const std::filesystem::path dir =
       std::filesystem::temp_directory_path() / std::filesystem::u8path("lyflow-大图预览");
@@ -702,7 +764,8 @@ TEST_CASE("大图预览（ADR-0028）：源头缩一级，找圆与区域统计�
   const Json doc = test::makeGraph(
       {test::N{"load", "io.load_image", Json{{"path", "圆.png"}, {"mode", "gray"}}},
        test::N{"blur", "image.blur", Json{{"ksize", 9}}},
-       test::N{"circle", "image.find_circle", Json{{"minRadius", 300}, {"maxRadius", 700}, {"minDist", 400}}},
+       test::N{"circle", "image.find_circle",
+               Json{{"minRadius", 300}, {"maxRadius", 700}, {"minDist", 400}}},
        test::N{"bin", "image.threshold", Json::object()},
        test::N{"stats", "image.region_stats", Json::object()},
        test::N{"fit", "image.resize", Json{{"mode", "size"}, {"width", 640}, {"height", 480}}},
@@ -733,9 +796,11 @@ TEST_CASE("大图预览（ADR-0028）：源头缩一级，找圆与区域统计�
   const auto value = [](const test::RunLog& log, const char* node, const char* port) {
     const Json done = log.nodeEvent(node, "done");
     const auto stats = done.find("stats");
-    if (stats == done.end()) return Json();
+    if (stats == done.end())
+      return Json();
     for (const Json& o : stats->value("outputs", Json::array())) {
-      if (o.value("port", "") == port) return o.value("value", Json());
+      if (o.value("port", "") == port)
+        return o.value("value", Json());
     }
     return Json();
   };
@@ -775,8 +840,10 @@ TEST_CASE("大图预览（ADR-0028）：源头缩一级，找圆与区域统计�
 
   // 经过张量转回来的掩膜也记着比例（review 第二轮）：修前它被当成原图比例、又缩一遍，与原图「不一样大」
   CHECK(value(preview, "back", "image")["scale"] == 2);
-  REQUIRE_MESSAGE(preview.finalState("stats2") == "done", preview.nodeEvent("stats2", "error").dump());
-  CHECK(value(preview, "stats2", "area")["value"].get<double>() == doctest::Approx(fa).epsilon(0.02));
+  REQUIRE_MESSAGE(preview.finalState("stats2") == "done",
+                  preview.nodeEvent("stats2", "error").dump());
+  CHECK(value(preview, "stats2", "area")["value"].get<double>() ==
+        doctest::Approx(fa).epsilon(0.02));
 
   // resize 到指定宽高是绝对尺寸：预览里照旧 640 × 480，推理的输入形状不变
   CHECK(value(preview, "tensor", "tensor")["shape"] == value(full, "tensor", "tensor")["shape"]);
