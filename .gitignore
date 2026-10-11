@@ -52,3 +52,5 @@ __pycache__/
 /samples/out/
 /logs/
 /work/
+
+/vcpkg_installed/

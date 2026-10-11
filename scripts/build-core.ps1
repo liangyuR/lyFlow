@@ -1,6 +1,11 @@
 #Requires -Version 7.0
 # 单独构建 C++ core，跑算子自检 + doctest 测试。与 bridge/build.rs 同一条 CMake 路径。
 # 用法：build-core.ps1 [RelWithDebInfo] [-NoTests]
+param(
+  [string]$Configuration = "RelWithDebInfo",
+  [switch]$NoTests,
+  [string]$BuildDir
+)
 $ErrorActionPreference = "Stop"
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -19,17 +24,13 @@ if (-not (Test-Path $ninja)) { $ninja = "ninja" }
 
 $root   = Split-Path -Parent $PSScriptRoot
 $source = Join-Path $root "core"
-$build  = Join-Path $root "build\core"
+$build  = if ($BuildDir) { [IO.Path]::GetFullPath($BuildDir) } else { Join-Path $root "build\core" }
 
 # D8：固定 RelWithDebInfo，不跟 cargo profile 联动。
 # Rust 永远用 /MD，vcpkg 的 debug 库是 /MDd，混用会在完全无关的地方崩。
-$config = "RelWithDebInfo"
-$runTests = $true
-foreach ($a in $args) {
-  if ($a -eq "-NoTests") { $runTests = $false }
-  elseif ($a -like "-*") { throw "未知参数: $a" }
-  else { $config = $a }
-}
+$config = $Configuration
+if ($config -notin @("Release", "RelWithDebInfo")) { throw "core 仅支持 Release 或 RelWithDebInfo（/MD）" }
+$runTests = -not $NoTests
 
 # vcpkg 工具链只在首次 configure 时生效，缓存里没有它的话之后怎么传都不管用
 # （症状是「找不到 PCLConfig.cmake」）。所以发现不一致就直接重配。
@@ -43,7 +44,9 @@ if (Test-Path $cache) {
   $cached = @(Get-Content $cache | Where-Object { $_ -like 'CMAKE_TOOLCHAIN_FILE:*vcpkg.cmake*' })
   if ($cached.Count -eq 0) {
     Write-Host "旧的 CMake 缓存没有 vcpkg 工具链，重新配置" -ForegroundColor Yellow
-    Remove-Item -Recurse -Force $build
+    $allowed = [IO.Path]::GetFullPath((Join-Path $root "build")) + [IO.Path]::DirectorySeparatorChar
+    if (-not $build.StartsWith($allowed, [StringComparison]::OrdinalIgnoreCase)) { throw "拒绝清理仓库 build 目录外的缓存：$build" }
+    Remove-Item -LiteralPath $build -Recurse -Force
   }
 }
 
@@ -62,12 +65,17 @@ if ($repoPacks) { Write-Host "仓库内包: $repoPacks" -ForegroundColor Cyan }
 
 # 必须在 vcvars 之后调 cmake，所以整条命令交给一个 cmd 进程。
 # 用 && 而不是 ^ 续行：换行已被 PowerShell 吃掉，^ 会转义掉下一行的首字符。
+$releaseArgs = ""
+foreach ($name in @('VCPKG_MANIFEST_DIR', 'VCPKG_INSTALLED_DIR', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'LYFLOW_ONNXRUNTIME_ROOT')) {
+  $value = [Environment]::GetEnvironmentVariable($name)
+  if ($value) { $releaseArgs += " -D$name=`"$($value.Replace('\', '/'))`"" }
+}
 $line = "call `"$vcvars`" >nul 2>&1" +
         " && `"$cmake`" -S `"$source`" -B `"$build`" -G Ninja" +
         " -DCMAKE_MAKE_PROGRAM=`"$ninja`" -DCMAKE_BUILD_TYPE=$config" +
         " -DCMAKE_TOOLCHAIN_FILE=`"$toolchain`"" +
         " -DLYFLOW_OP_PACKS=`"$packs`" -DLYFLOW_STD_PACKS=`"$stdPacks`"" +
-        " -DLYFLOW_PACKS=`"$repoPacks`"" +
+        " -DLYFLOW_PACKS=`"$repoPacks`"" + $releaseArgs +
         " && `"$cmake`" --build `"$build`""
 
 cmd /c $line

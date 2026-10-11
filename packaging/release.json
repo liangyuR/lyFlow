@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "architecture": "x64",
+  "triplet": "x64-windows",
+  "vcpkgBaseline": "04a9d8e5212d01ee1dd9478eadd9caade4f8b0d4",
+  "onnxruntimeVersion": "1.19.2",
+  "packs": [
+    "std-pointcloud",
+    "std-image",
+    "std-ml",
+    "glue"
+  ],
+  "vcpkgVersions": {
+    "pcl": "1.15.1#1",
+    "opencv4": "4.12.0#9",
+    "boost-filesystem": "1.92.0",
+    "eigen3": "5.0.1"
+  },
+  "gsClientRevision": "5b796c35d6cafd441a24bc09e620aaae399ca5ac"
+}

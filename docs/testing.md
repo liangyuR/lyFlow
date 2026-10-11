@@ -26,8 +26,19 @@ CI 与本地走同一个入口 `scripts/check.ps1`，按 job 用 `-Steps` 点名
 | native | 设 `LYFLOW_STD_PACKS=0`、`LYFLOW_PACKS=dts`，先 `pnpm --filter lyflow-app build`，再 `pwsh scripts/check.ps1 -Steps core,manifest,bridge,cli,sdk`，外加 `bridge/` 下 `cargo build --no-default-features --features host` | 纯平台 + dts 的 core 与 doctest、manifest 自检、bridge 的 `cargo test`（要标准包的记 ignored）、headless CLI、嵌入 SDK，以及只开 `host` 的组合（外部 Rust 宿主嵌编辑器用的；dts-check 眼下只用 `core_ffi`、不开任何 feature，CLI 那步的 `--no-default-features` 已编到） |
 
 工具链钉在仓库里：Rust `rust-toolchain.toml`、Node `.nvmrc`、pnpm `package.json` 的 `packageManager`、Python `scripts/requirements.txt`。
-**还没进 CI、照旧在本地跑的**：默认包（PCL / OpenCV / ONNX Runtime 的 vcpkg 依赖还没钉版本）、gap 包、`pnpm e2e`（桌面）、
+**还没进 CI、照旧在本地跑的**：gap 包、`pnpm e2e`（桌面）、
 `pnpm e2e:packaged`、`pnpm e2e:http`、KUN10 等真实数据。
+
+## Windows 发包门禁
+
+`.github/workflows/release-windows.yml` 在 main、手动运行及版本 tag 上执行 `pnpm run package`，固定标准包 + glue，构建与验证最终运行库/SDK ZIP。PR 的 fast/native 检查保持原范围。手动运行现有 `CI` 也会调用该工作流，以便首次合并前选择实现分支做云端验收。
+
+| 层 | 入口 | 验证范围 |
+|---|---|---|
+| 全量构建与暂存 | `pnpm run package` | 固定依赖、core 单测、manifest、ABI/版本、headless CLI、运行库/SDK 布局与许可证；实际清单来自交付 DLL。 |
+| 最终 ZIP 独立消费 | `pwsh scripts/test-release.ps1 -ArchiveDir <目录> -ReportPath <报告>` | 独立 runner、中文/空格目录、C++ 示例与 Rust 消费工程、合成点云/图像/标定/胶路/ONNX CPU、模块来源及损坏资产负向路径。 |
+
+发布夹具由发布验收入口管理，不使用客户模型或现场数据；发布要求的模型/数据用例不能沿用开发测试的可选跳过行为。新验证入口不增加上表历史 doctest/Rust 单测数量，实际数量和通过结论记录在每次报告中。只有对应修订的完整运行通过才算发布证据；静态检查不能替代 DLL 与 ZIP 验收。详见 [发包说明](deployment/packaging.md)。
 
 ## 放在哪一层
 

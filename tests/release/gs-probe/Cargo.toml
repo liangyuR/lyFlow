@@ -1,0 +1,16 @@
+[package]
+name = "lyflow-gs-release-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "lyflow-gs-release-probe"
+path = "../probe/src/main.rs"
+
+[dependencies]
+lyflow-client = { git = "https://github.com/liangyuR/lyFlow.git", rev = "5b796c35d6cafd441a24bc09e620aaae399ca5ac" }
+serde_json = "1"
+libloading = "0.8.9"

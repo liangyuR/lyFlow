@@ -1,10 +1,4 @@
-// ASCII PCD 的快读快写（pcd_ascii.h）。照着 vcpkg 装的 PCL 1.12.0 的 PCDReader::read / readBodyASCII 与
-// PCDWriter::writeASCII 一行行搬过来，只换掉逐个数的转换；哪里和 PCL 不一样就是 bug（tests/test_io_pcd.cpp 对照）。
-//
-// 读这边有个 1.12 的怪癖要照抄：detail::copyStringValue 换词时不 is.clear()，第一个数读到串尾就置上
-// eofbit，之后每个数的 `is >> value` 都直接失败、落到 `static_cast<T>(atof(词))` —— 也就是先按 double
-// 舍入一次、再截成 float。所以这里的快路径是 from_chars<double> 再 static_cast，不是 from_chars<float>
-// （两者在极少数临界值上差 1 ulp）。atof 认 C locale 的小数点，所以小数点不是 '.' 时整个退回 PCL 的写法。
+// ASCII PCD 的快读快写，与固定 PCL 1.15 的读写逐字节对照。
 #include "lyflow_pcl/pcd_ascii.h"
 
 #include <pcl/console/print.h>
@@ -112,7 +106,7 @@ bool isSpaceClassic(char c) {
 }
 
 /// `boost::trim(line); boost::split(st, line, boost::is_any_of("\t\r "), boost::token_compress_on)` 的
-/// string_view 版：先去首尾空白；去完是空串时 boost::split 给的是一个空词（不是零个）。
+/// string_view 版：先去首尾空白；空白行与 PCL 一样没有词。
 void splitLine(std::vector<std::string_view>& out, std::string_view line) {
   out.clear();
   std::size_t b = 0;
@@ -120,10 +114,7 @@ void splitLine(std::vector<std::string_view>& out, std::string_view line) {
   while (b < e && isSpaceClassic(line[b])) ++b;
   while (e > b && isSpaceClassic(line[e - 1])) --e;
   line = line.substr(b, e - b);
-  if (line.empty()) {
-    out.emplace_back();
-    return;
-  }
+  if (line.empty()) return;
   const char* delims = "\t\r ";
   std::size_t start = 0;
   while (true) {
@@ -144,35 +135,29 @@ void store(pcl::PCLPointCloud2& cloud, unsigned idx, unsigned d, unsigned c, T v
               &value, sizeof(T));
 }
 
-/// PCL 落到的那句 `static_cast<T>(atof(词))` 的逐位等价：普通十进制数、转得过去（不越界）才写，否则返回 false。
 template <typename T>
 bool fastStore(std::string_view tok, pcl::PCLPointCloud2& cloud, unsigned idx, unsigned d, unsigned c) {
-  double v = 0;
-  if (!plainDouble(tok, v)) return false;
-  if constexpr (std::is_floating_point_v<T>) {
-    if (!std::is_same_v<T, double> && std::fabs(v) > std::numeric_limits<float>::max()) return false;
-    store(cloud, idx, d, c, static_cast<T>(v));
-  } else if constexpr (sizeof(T) == 1) {
-    // int8 / uint8：PCL 先 static_cast<int>(atof) 再截断
-    if (!(v > -2147483649.0 && v < 2147483648.0)) return false;
-    store(cloud, idx, d, c, static_cast<T>(static_cast<int>(v)));
+  if (!plainNumber(tok)) return false;
+  if constexpr (std::is_same_v<T, double>) {
+    double value = 0;
+    if (!plainDouble(tok, value)) return false;
+    store(cloud, idx, d, c, value);
   } else {
-    // 截断后落在 T 的范围里才转：越界的 static_cast 是未定义行为，交回 PCL
-    if (!(v > static_cast<double>(std::numeric_limits<T>::lowest()) - 1.0 &&
-          v < static_cast<double>(std::numeric_limits<T>::max()) + 1.0)) {
-      return false;
-    }
-    store(cloud, idx, d, c, static_cast<T>(v));
+    using Parsed = std::conditional_t<sizeof(T) == 1, int, T>;
+    Parsed value{};
+    const char* end = tok.data() + tok.size();
+    const auto [ptr, ec] = std::from_chars(tok.data(), end, value);
+    if (ec != std::errc() || ptr != end) return false;
+    store(cloud, idx, d, c, static_cast<T>(value));
   }
   return true;
 }
 
-/// 顺序读的一个词。流还好着（文件里头一两个数）或词不普通：原样调 PCL 的 copyStringValue，
-/// 连 `is` 的状态都跟着它变；否则就是 PCL 落到的那句 atof。
+/// 普通完整数值直接转换到字段类型；其余保留 PCL 的流解析与 atof 回退。
 template <typename T>
 void copyToken(std::string_view tok, pcl::PCLPointCloud2& cloud, unsigned idx, unsigned d, unsigned c,
                std::istringstream& is, bool fast) {
-  if (fast && !is.good() && fastStore<T>(tok, cloud, idx, d, c)) return;
+  if (fast && fastStore<T>(tok, cloud, idx, d, c)) return;
   pcl::copyStringValue<T>(std::string(tok), cloud, static_cast<pcl::index_t>(idx), d, c, is);
 }
 
@@ -181,12 +166,12 @@ bool isNan(std::string_view t) {
   return t.size() == 3 && (t[0] | 0x20) == 'n' && (t[1] | 0x20) == 'a' && (t[2] | 0x20) == 'n';
 }
 
-/// 流坏了以后（并行段）的一个词：nan 自己写、记在 sawNan 里 —— PCL 那一支会写 cloud.is_dense，
+/// 并行段的 nan 自己写、记在 sawNan 里 —— PCL 那一支会写 cloud.is_dense，
 /// 几个线程一起写就是数据竞争；int8 / uint8 的特化里没有 nan 那一支，照样交给 PCL。
-/// 其余不普通的词交给 PCL，`failed` 是一个已经失败的流，它就落到 atof（与顺序读时一模一样）。
+/// 其余不普通的词交给 PCL；每个线程使用自己的流。
 template <typename T>
-void copyTokenAfterStream(std::string_view tok, pcl::PCLPointCloud2& cloud, unsigned idx, unsigned d, unsigned c,
-                          std::istringstream& failed, bool& sawNan) {
+void copyTokenParallel(std::string_view tok, pcl::PCLPointCloud2& cloud, unsigned idx, unsigned d, unsigned c,
+                          std::istringstream& is, bool& sawNan) {
   if constexpr (sizeof(T) != 1) {
     if (isNan(tok)) {
       store(cloud, idx, d, c, std::numeric_limits<T>::quiet_NaN());
@@ -195,7 +180,7 @@ void copyTokenAfterStream(std::string_view tok, pcl::PCLPointCloud2& cloud, unsi
     }
   }
   if (fastStore<T>(tok, cloud, idx, d, c)) return;
-  pcl::copyStringValue<T>(std::string(tok), cloud, static_cast<pcl::index_t>(idx), d, c, failed);
+  pcl::copyStringValue<T>(std::string(tok), cloud, static_cast<pcl::index_t>(idx), d, c, is);
 }
 
 template <typename T>
@@ -247,8 +232,7 @@ void warnMalformed(unsigned point, std::size_t got, unsigned want) {
 
 /// readBodyASCII 的搬运。fs 已经 seek 到正文开头（文本模式打开，CRLF 由 CRT 换成 LF，与 PCL 相同）。
 ///
-/// 并行：PCL 的流坏掉之前（通常就是第一个数）一行一行地读；坏掉之后每个数都是 atof，与读到哪了无关，
-/// 剩下的行就分给 threads 个线程 —— 一行占哪个点只看它前面有几个非空行（词数不对的也占），
+/// 每个数独立转换，完整行分给 threads 个线程；词数不对的行也占一个点。
 /// 所以每块先数非空行、前缀和定起点，再各自写自己那些点。warning 收齐了按行的顺序打。
 int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
   const unsigned nr_points = cloud.width * cloud.height;
@@ -284,7 +268,7 @@ int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
     return idx < nr_points;
   };
 
-  // 流坏了以后的一段完整的行（每行以 '\n' 结尾，最后一行可以没有）：切成几十块并行
+  // 一段完整的行（每行以 '\n' 结尾，最后一行可以没有）：切成几十块并行
   struct Piece {
     std::size_t begin = 0, end = 0;
     unsigned lines = 0;
@@ -340,9 +324,8 @@ int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
     parallelFor(pieces.size(), threads, 1, [&](std::size_t b, std::size_t e) {
       std::vector<std::string_view> words;
       words.reserve(elems_per_line);
-      std::istringstream failed;
-      failed.imbue(std::locale::classic());
-      failed.setstate(std::ios::failbit);
+      std::istringstream is;
+      is.imbue(std::locale::classic());
       for (std::size_t k = b; k < e; ++k) {
         Piece& piece = pieces[k];
         unsigned i = first[k];
@@ -351,7 +334,7 @@ int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
           if (i >= nr_points) return false;
           const bool ok = forEachToken(l, cloud, elems_per_line, words, [&](auto tag, std::string_view t, unsigned d, unsigned c) {
             using T = typename decltype(tag)::type;
-            copyTokenAfterStream<T>(t, cloud, i, d, c, failed, piece.sawNan);
+            copyTokenParallel<T>(t, cloud, i, d, c, is, piece.sawNan);
           });
           if (!ok) piece.malformed.emplace_back(i + 1, words.size());
           ++i;
@@ -372,7 +355,7 @@ int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
     std::vector<char> buf(std::size_t{8} << 20);
     std::string carry;
     bool more = true;
-    bool split = false;  // 流已经坏了、往后并行
+    bool split = false;
     while (more) {
       fs.read(buf.data(), static_cast<std::streamsize>(buf.size()));
       const std::size_t got = static_cast<std::size_t>(fs.gcount());
@@ -390,7 +373,7 @@ int readBodyAscii(std::istream& fs, pcl::PCLPointCloud2& cloud, int threads) {
           carry.clear();
         }
         pos = nl + 1;
-        split = canSplit && !is.good();
+        split = canSplit;
       }
       if (more && split) {
         // 上一块留下的半行先接上、单独读（它不在这一块的连续内存里），这一块里剩下的完整行并行
@@ -502,10 +485,6 @@ int loadPcd(const std::string& file, pcl::PCLPointCloud2& cloud, int threads) {
 
 int savePcdAscii(const std::string& file, const pcl::PCLPointCloud2& cloud, int threads) {
   constexpr int precision = 8;  // PCDWriter::write(…, binary=false) 传的就是 8
-  if (cloud.data.empty()) {
-    PCL_ERROR("[pcl::PCDWriter::writeASCII] Input point cloud has no data!\n");
-    return -1;
-  }
   std::ofstream fs;
   fs.open(file.c_str(), std::ios::binary);
   if (!fs.is_open() || fs.fail()) {
