@@ -11,7 +11,7 @@
 
 算子组合固定为 `std-pointcloud`、`std-image`、`std-ml`、`glue`，不接受环境变量追加 `gap`、`dts` 或外部算子。ONNX Runtime 使用 CPU 版 `1.19.2`。PCL 最低支持版本为 `1.15.1`，发包清单固定到 `1.15.1#1`。core 使用 RelWithDebInfo 与动态 CRT；CLI 使用 Rust Release 和 `--no-default-features`。SDK 从同一份 core 暂存文件生成，避免两套资产实际包含不同引擎。
 
-本版 SDK 的 C++ 客户端与同一发布修订的 Rust 客户端，在 Windows 上只从指定 DLL 所在目录和 System32 解析依赖，不读取 PATH，也不从当前工作目录补齐。宿主需把所有非系统依赖部署在 DLL 目录中；缺依赖时应明确失败。GS 当前固定旧修订客户端的加载行为没有被本次修改，旧客户端兼容性测试不代表它获得了这项加载限制。
+本版 SDK 的 C++ 客户端与同一发布修订的 Rust 客户端，在 Windows 上将依赖搜索目录限制为指定 DLL 所在目录，不读取 PATH，也不从当前工作目录或 System32 补齐第三方运行库。Windows KnownDLL 与 API Set 系统组件仍由操作系统解析。宿主需把所有非系统依赖部署在 DLL 目录中；缺依赖时应明确失败。GS 当前固定旧修订客户端的加载行为没有被本次修改，旧客户端兼容性测试不代表它获得了这项加载限制。
 
 产品版本统一为 `X.Y.Z`，ABI 独立编号。`lyflow-runtime.json` 记录 `engineVersion`、`abiVersion`、`sourceRevision`、架构、构建配置、算子包及版本、实际算子、依赖版本和相对文件清单。最终 DLL 查询结果必须与声明一致。不使用内容哈希或指纹建立包身份、匹配或校验；Git 提交标识仅用于源码修订。
 
