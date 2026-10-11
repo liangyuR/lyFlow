@@ -86,6 +86,18 @@ jobs:
           "baseline=$baseline" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "toolset=$toolset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
+      - name: 恢复固定版本 vcpkg 工具
+        uses: actions/cache/restore@v4
+        id: vcpkg-tool-cache-restore
+        with:
+          path: |
+            build/release-tools/vcpkg/*
+            !build/release-tools/vcpkg/downloads/**
+            !build/release-tools/vcpkg/buildtrees/**
+            !build/release-tools/vcpkg/packages/**
+            !build/release-tools/vcpkg/installed/**
+          key: vcpkg-tool-windows-x64-${{ steps.native-cache.outputs.baseline }}-v1
+
       - uses: actions/cache/restore@v4
         id: native-cache-restore
         with:
@@ -113,6 +125,18 @@ jobs:
       - name: 准备并验证固定发布依赖
         shell: pwsh
         run: ./scripts/prepare-release-deps.ps1
+
+      - name: 保存已验证的 vcpkg 工具
+        uses: actions/cache/save@v4
+        if: steps.vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
+        with:
+          path: |
+            build/release-tools/vcpkg/*
+            !build/release-tools/vcpkg/downloads/**
+            !build/release-tools/vcpkg/buildtrees/**
+            !build/release-tools/vcpkg/packages/**
+            !build/release-tools/vcpkg/installed/**
+          key: ${{ steps.vcpkg-tool-cache-restore.outputs.cache-primary-key }}
 
       - name: 保存完整 vcpkg 缓存
         uses: actions/cache/save@v4
