@@ -1,0 +1,314 @@
+{
+  "schemaVersion": 1,
+  "id": "01JGLUE0000000000000TAUGHT",
+  "name": "涂胶检测 · 示教胶路（逐拍照点）",
+  "meta": {
+    "app": "lyflow/0.1.0",
+    "note": "胶枪相机、逐拍照点单帧检测（glue-plan §6）：每个拍照点示教一条胶的中心线（图像像素折线），宿主逐帧注入 n_load.image，并经顶层参数给这一拍照点的 points、zone、tolerance、胶宽范围等。图不找胶路，沿示教线逐站量胶宽、查断胶、判 OK / NG。默认没有示教线（points = []），不给就跑不起来。要出 mm：加一个 image.load_calib 节点接到 n_width.calib，断口 minLength 与判定限值随之按 mm 解释。拿文件跑：lyflow run <图> --set n_load.source='\"file\"' --set n_load.path='\"<帧.jpg>\"' --param points='\"[[1003,471],[800,380],[600,300]]\"' --outputs。"
+  },
+  "nodes": [
+    {
+      "id": "n_load",
+      "op": "io.load_image",
+      "opVersion": "1.0.0",
+      "params": {
+        "source": "inputs"
+      },
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "title": "读图"
+      }
+    },
+    {
+      "id": "n_path",
+      "op": "glue.taught_path",
+      "opVersion": "1.0.0",
+      "params": {},
+      "ui": {
+        "position": {
+          "x": 0,
+          "y": 180
+        },
+        "title": "示教胶路"
+      }
+    },
+    {
+      "id": "n_width",
+      "op": "glue.bead_width",
+      "opVersion": "1.0.0",
+      "params": {
+        "form": "straight"
+      },
+      "ui": {
+        "position": {
+          "x": 260,
+          "y": 60
+        },
+        "title": "量胶宽"
+      }
+    },
+    {
+      "id": "n_breaks",
+      "op": "glue.bead_breaks",
+      "opVersion": "1.0.0",
+      "params": {
+        "minLength": 20
+      },
+      "ui": {
+        "position": {
+          "x": 520,
+          "y": 0
+        },
+        "title": "查断胶"
+      }
+    },
+    {
+      "id": "n_judge",
+      "op": "glue.judge",
+      "opVersion": "1.0.0",
+      "params": {
+        "maxBreak": 0,
+        "minDefectLength": 20
+      },
+      "ui": {
+        "position": {
+          "x": 780,
+          "y": 60
+        },
+        "title": "判定"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0",
+      "from": {
+        "node": "n_load",
+        "port": "image"
+      },
+      "to": {
+        "node": "n_width",
+        "port": "image"
+      }
+    },
+    {
+      "id": "e1",
+      "from": {
+        "node": "n_path",
+        "port": "path"
+      },
+      "to": {
+        "node": "n_width",
+        "port": "path"
+      }
+    },
+    {
+      "id": "e2",
+      "from": {
+        "node": "n_width",
+        "port": "bead"
+      },
+      "to": {
+        "node": "n_breaks",
+        "port": "bead"
+      }
+    },
+    {
+      "id": "e3",
+      "from": {
+        "node": "n_width",
+        "port": "bead"
+      },
+      "to": {
+        "node": "n_judge",
+        "port": "bead"
+      }
+    },
+    {
+      "id": "e4",
+      "from": {
+        "node": "n_breaks",
+        "port": "breaks"
+      },
+      "to": {
+        "node": "n_judge",
+        "port": "breaks"
+      }
+    }
+  ],
+  "outputs": {
+    "ok": {
+      "node": "n_judge",
+      "port": "ok",
+      "label": "OK（1）/ NG（0）"
+    },
+    "verdict": {
+      "node": "n_judge",
+      "port": "verdict",
+      "label": "结论"
+    },
+    "pathInfo": {
+      "node": "n_path",
+      "port": "path.info",
+      "label": "示教胶路"
+    },
+    "beadInfo": {
+      "node": "n_width",
+      "port": "bead.info",
+      "label": "逐站汇总"
+    },
+    "coverage": {
+      "node": "n_width",
+      "port": "coverage",
+      "label": "有胶站占比"
+    },
+    "widthMean": {
+      "node": "n_width",
+      "port": "widthMean",
+      "label": "胶宽均值"
+    },
+    "widthMin": {
+      "node": "n_width",
+      "port": "widthMin",
+      "label": "胶宽最小"
+    },
+    "widthMax": {
+      "node": "n_width",
+      "port": "widthMax",
+      "label": "胶宽最大"
+    },
+    "breakCount": {
+      "node": "n_breaks",
+      "port": "count",
+      "label": "断胶处数"
+    },
+    "longestBreak": {
+      "node": "n_breaks",
+      "port": "longest",
+      "label": "最长断口"
+    },
+    "breaks": {
+      "node": "n_breaks",
+      "port": "breaks",
+      "label": "断口"
+    },
+    "overlay": {
+      "node": "n_judge",
+      "port": "overlay",
+      "label": "叠画"
+    }
+  },
+  "params": {
+    "points": {
+      "type": "text",
+      "label": "示教胶路",
+      "doc": "这一拍照点示教的胶中心线：JSON 数组 [[x, y], …]（图像像素），从喷嘴一侧往外排，至少两个点。",
+      "default": "[]",
+      "binds": [
+        "n_path.points"
+      ],
+      "rows": 4
+    },
+    "zone": {
+      "type": "vec2f",
+      "label": "检测区",
+      "doc": "沿示教线从第一个点量起的弧长 s 的一段（px）；end = 0 表示到折线末端。",
+      "default": [
+        0,
+        0
+      ],
+      "binds": [
+        "n_path.zone"
+      ],
+      "unit": "px",
+      "componentLabels": [
+        "Start",
+        "End"
+      ],
+      "min": 0
+    },
+    "tolerance": {
+      "type": "float",
+      "label": "偏差容限",
+      "doc": "胶中心最远离示教线多少还算这条胶（px）。",
+      "default": 20,
+      "binds": [
+        "n_path.tolerance"
+      ],
+      "unit": "px",
+      "min": 0,
+      "max": 400
+    },
+    "widthMax": {
+      "type": "float",
+      "label": "最大胶宽（响应）",
+      "doc": "黑顶帽结构元的直径 − 1：比它宽的胶团没有响应。",
+      "default": 90,
+      "binds": [
+        "n_path.widthMax"
+      ],
+      "unit": "px",
+      "min": 4,
+      "max": 400,
+      "advanced": true
+    },
+    "form": {
+      "type": "enum",
+      "label": "胶形",
+      "default": "straight",
+      "binds": [
+        "n_width.form"
+      ],
+      "options": [
+        {
+          "value": "straight",
+          "label": "直胶"
+        },
+        {
+          "value": "swirl",
+          "label": "螺旋胶"
+        }
+      ]
+    },
+    "widthRange": {
+      "type": "vec2f",
+      "label": "胶宽范围",
+      "doc": "认作胶的暗段宽度范围（px）。下限按示教时的胶宽收紧（约一半），旁边更窄的零件暗边、阴影就进不来。",
+      "default": [
+        4,
+        90
+      ],
+      "binds": [
+        "n_width.widthRange"
+      ],
+      "unit": "px",
+      "componentLabels": [
+        "Min",
+        "Max"
+      ],
+      "min": 0
+    },
+    "minLength": {
+      "type": "float",
+      "label": "断口最短",
+      "doc": "连续无胶至少这么长才算一处断胶（接了标定按 mm）。",
+      "default": 20,
+      "binds": [
+        "n_breaks.minLength"
+      ],
+      "min": 0
+    },
+    "maxBreak": {
+      "type": "float",
+      "label": "允许断口",
+      "doc": "比它长的断口判 NG；0 = 一处都不许，负数 = 不判断胶（整段没胶照样 NG）。",
+      "default": 0,
+      "binds": [
+        "n_judge.maxBreak"
+      ]
+    }
+  }
+}

@@ -38,6 +38,7 @@ inline constexpr const char* kNoBeadMessage = "检测区内没找到胶";
 
 void registerBundles(Registry& r);
 void registerBeadPath(Registry& r);
+void registerTaughtPath(Registry& r);
 void registerBeadWidth(Registry& r);
 void registerBeadBreaks(Registry& r);
 void registerEdgeDistance(Registry& r);

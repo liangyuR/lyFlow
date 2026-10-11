@@ -11,6 +11,9 @@ io.load_image → glue.bead_path → glue.bead_width → glue.bead_breaks ─┐
                                                       量边距            判定
 ```
 
+拍照点固定、胶该在哪里事先知道的（相机装在胶枪上，逐拍照点检测），把 `glue.bead_path` 换成
+**`glue.taught_path` 示教胶路**：胶路不从图里找，由示教的折线给定，下游一个不改（[§ 示教胶路](#示教胶路glue-plan-6g5)）。
+
 本包已适配主线 Image ABI v15，复用 `lyflow::cvx`。完整运行接受 **u8 灰度、RGB、RGBA**；其他位深先经 `image.normalize`。
 缩小预览图无法与示教模板、站点文件及标定对齐，会明确报错，请用完整运行。
 包机制见 [docs/op-packs.md](../../docs/op-packs.md)，迁移及验收见 [集成记录](../../docs/glue-integration.md)。
@@ -20,10 +23,10 @@ io.load_image → glue.bead_path → glue.bead_width → glue.bead_breaks ─┐
 ```
 packs/glue/
   algo/      算法内核（D1–D16）：响应图、卡尺、定胶路、逐站、零件边、人造断胶。纯函数，吃 cv::Mat
-  ops/       8 个算子 + 两种 Bundle + 片段注册；Record / Bundle 的读写在 common.cpp
+  ops/       9 个算子 + 两种 Bundle + 片段注册；Record / Bundle 的读写在 common.cpp
   tests/     doctest（合成图：已知宽度、断口、边距、标定，§4 第 13 条）
   snippets/  随包的片段「涂胶检测」（glue.bead_inspect）
-  graphs/    glue1 / glue2（随动单帧检测）、flyshot（飞拍定位 + 逐点卡尺）
+  graphs/    glue1 / glue2（随动单帧检测）、taught（逐拍照点示教胶路）、flyshot（飞拍定位 + 逐点卡尺）
   tools/     真实帧的批量评估、人造断胶数据集、叠画缩略图（只调 lyflow CLI，D14）
 ```
 
@@ -59,13 +62,15 @@ configure 时没有这个目标就 FATAL（`LYFLOW_STD_PACKS=0` 的纯平台构�
 | id | 输入 → 输出 | 人要填的（其余在「高级」） |
 |---|---|---|
 | `glue.bead_path` 定胶路 | `image` → `path: Bundle<glue.Path>`、`overlay` | `nozzle`（喷嘴像素坐标）、`zone`、`sector`；高级：`headingSource`/`heading`/`headingTol`、`widthMax`、`polarity`、`maxGap`、`minCoverage`、`contrastMin`、`sharpMin` |
+| `glue.taught_path` 示教胶路 | （无输入）→ `path: Bundle<glue.Path>`、`overlay` | `points`（示教折线，JSON `[[x, y], …]`）、`zone`、`tolerance`（20 px）；高级：`widthMax`、`polarity`、`sharpMin` |
 | `glue.bead_width` 量胶宽 | `image`、`path`、`calib?` → `bead: Bundle<glue.Bead>`、`widthMean`、`widthMin`、`widthMax`、`coverage`、`overlay` | `form`（straight / swirl）、`widthRange`；高级：`stationStep`、`searchHalf`、`mergeGap`、`window`、`contrastMin`、`presentRatio`、`centerRatio`、`contrastRatio` |
 | `glue.bead_breaks` 查断胶 | `bead` → `breaks: Record<glue.Breaks>`、`count`、`longest`、`overlay` | `minLength`（20 px）；高级：`countAtZoneEnds` |
 | `glue.edge_distance` 量边距 | `image`、`bead`、`calib?` → `edge: Record<glue.Edge>`、`distanceMean`、`distanceMin`、`distanceMax`、`overlay` | `searchLength`（200）；高级：`reference`、`edgePolarity`、`contrastMin`（40）、`farRun`（12） |
 | `glue.judge` 判定 | `bead`、`breaks`、`edge?` → `verdict: Record<glue.Verdict>`、`ok`、`overlay` | `widthLimits`、`distanceLimits`（0 = 不判那一侧）、`maxBreak`（允许的断口长度，0 = 一处都不许，负数 = 不判断胶）、`minDefectLength`（20） |
 | `glue.synth_break` 人造断胶（工具） | `image`、`bead` → `image`、`info: Record<glue.SynthBreak>`、`overlay` | `sStart`、`length`；高级：`margin`、`shiftExtra`、`dirtyMax`、`contrastMin`、`feather` |
 
-加载期校验（`validate`）：`zone` 起止倒了、`sector` 从大到小或跨度超过 360°（只在扇形搜索时查）、`widthRange` 倒了、
+加载期校验（`validate`）：`zone` 起止倒了、`sector` 从大到小或跨度超过 360°（只在扇形搜索时查）、示教折线不到两个点 / 有非数 /
+总长不到 8 px（指到 `points`）、示教胶路的 `zone` 超出折线（指到 `zone`）、`widthRange` 倒了、
 `searchLength` 不比 `farRun` 长 10 px、判定的上下限倒了或是负数 —— 图根本跑不起来，诊断指到那个参数。
 `searchHalf` 放不下最宽的胶、螺旋胶的 `window` 比站距还短是警告。
 
@@ -79,15 +84,15 @@ configure 时没有这个目标就 FATAL（`LYFLOW_STD_PACKS=0` 的纯平台构�
 | type | data |
 |---|---|
 | `glue.Polyline` | `count`、`spacing`（2）、`s[]`、`points[[x,y]]`、`tangents[[tx,ty]]`（单位向量） |
-| `glue.PathInfo` | `ok`、`message`（没找到胶时是「检测区内没找到胶」）、`reason`（为什么，给人看）、`heading`（度）、`headingSource`（search / param）、`coverage`、`sharpness`（D15 的 P25）、`beadlike`、`residual`、`zone`、`nozzle`、`polarity`、`widthMax`、`lineSource`（fit / fallback）、`coarseCount`、`candidates[{heading, fanScore, coverage, sharpness, beadlike, score}]` |
+| `glue.PathInfo` | `ok`、`message`（没找到胶时是「检测区内没找到胶」）、`reason`（为什么，给人看）、`heading`（度）、`headingSource`（search / param / taught）、`coverage`、`sharpness`（D15 的 P25）、`beadlike`、`residual`、`zone`、`nozzle`、`polarity`、`widthMax`、`lineSource`（fit / fallback / taught）、`coarseCount`、`candidates[{heading, fanScore, coverage, sharpness, beadlike, score}]`；示教胶路另有 `tolerance`、`sharpMin`、`taughtCount`、`taughtLength`，搜索才有的 `heading`、`coverage`、`sharpness`、`beadlike`、`residual`、`nozzle` 是 `null`、`candidates` 是空 |
 | `glue.Stations` | 数组形式，逐站对齐：`s[]`、`center[]`、`normal[]`、`present[]`、`lo[]` / `hi[]`（沿法向的偏移，px）、`left[]` / `right[]`（像素点）、`width[]`（按 `unit`）、`widthPx[]`、`contrast[]`；另有 `count`、`step`、`form`、`unit`。无胶的站这些字段是 `null` |
-| `glue.BeadInfo` | `form`、`stationStep`、`unit`、`pathOk`、`message`、`zone`、`stations`、`present`、`coverage`、`wRef`、`peakRef`、`envelopeHalf`、`searchHalf`、`polarity`、`widthMax`、`calib`（接了标定时那一份，否则 `null`） |
+| `glue.BeadInfo` | `form`、`stationStep`、`unit`、`pathOk`、`message`、`zone`、`stations`、`present`、`coverage`、`wRef`、`peakRef`、`envelopeHalf`、`searchHalf`（实际用的卡尺半长）、`polarity`、`widthMax`、`lineSource`（照抄 PathInfo）、`calib`（接了标定时那一份，否则 `null`）；示教胶路另有 `tolerance`、`offset`（胶相对示教线的偏移，轨迹上的中位数，px）、`trackSupport`（落在偏移轨迹上的站占比）、`sharpness`（轨迹上暗段边缘陡度 P25）、`reason`（沿线没认出胶的原因），拟合的胶路这几个是 `null` |
 | `glue.Breaks` | `count`、`longest`、`unit`、`minLength`、`stationStep`、`countAtZoneEnds`、`pathOk`、`breaks[{sStart, sEnd, length, lengthPx, start, end, stations, atZoneStart, atZoneEnd}]`、`ignored[]`（countAtZoneEnds = false 时贴着端点的）、`shortGaps` |
 | `glue.Edge` | `side`（right / left / none）、`votes{right, left}`、`reference`、`edgePolarity`、`unit`、`count` / `searched` / `found` / `kept`，逐站 `s[]`、`edge[]`、`from[]`、`distance[]`（按 `unit`）、`distancePx[]`、`status[]`（ok / outlier / none / nobead） |
 | `glue.Verdict` | `ok`、`message`、`unit`、`pathOk`、`defectCount`、`counts{missing, break, narrow, wide, near, far}`、`defects[{type, sStart, sEnd, length, value, limit, unit, start, end, message}]`、`warnings[]`、`limits` |
 | `glue.SynthBreak` | `ok`、`reason`、`side`（源带在哪一侧）、`dirtyRight` / `dirtyLeft`、`stations`、`sStart` / `sEnd` / `length`（断口的真值，原帧胶路的 s）、`start` / `end`（断口两端在图上的点） |
 
-**判定的约定**：`verdict.message` 是一句话 —— 全部合格是 `OK`；胶路没找到时**恰好是**「检测区内没找到胶」（只报这一条
+**判定的约定**：`verdict.message` 是一句话 —— 全部合格是 `OK`；胶路没找到、或者一站都没量到胶（示教胶路沿线没有胶）时**恰好是**「检测区内没找到胶」（只报这一条
 `missing`，整段无胶这件事不再重复报成断胶）；否则是 `NG：断胶 1 处（最长 32.0 px）；窄胶 2 处` 这样按类型数一遍。
 缺陷的 `type` 六种：`missing` / `break` / `narrow` / `wide` / `near` / `far`。断胶以外都是「连续 ≥ minDefectLength 的同类站」
 （D7）；断胶由 `bead_breaks` 按它的 `minLength` 连好，比 `maxBreak` 长的判 NG。设了边距限值却没接 `edge`、或两侧都没找到
@@ -98,6 +103,50 @@ configure 时没有这个目标就 FATAL（`LYFLOW_STD_PACKS=0` 的纯平台构�
 **失败语义**（ADR-0016 错误即值）：没有胶本身就是一个 NG 结果，不是执行错误 —— `bead_path` 覆盖率低于 `minCoverage`
 或不像胶（D15）时 `info.ok = false`，折线是沿选中方向的一条直线；下游照常跑：`bead_width` 全部判无胶、`bead_breaks`
 报出整个检测区一段、`judge` 报「检测区内没找到胶」。
+
+## 示教胶路（glue-plan §6，G5）
+
+GlueSight 一期：相机装在胶枪上，机器人走到每个拍照点拍一帧、逐帧独立判。拍照点固定，胶在图里该在哪里事先就知道 ——
+**每个拍照点示教一条胶的中心线**（图像像素折线，现场原有系统也是这么做的），`glue.taught_path` 把它变成同形的 `glue.Path`：
+
+```
+io.load_image ──────────────→ glue.bead_width → glue.bead_breaks → glue.judge
+glue.taught_path（示教折线）──↗   ↖ image.load_calib（可选：出 mm）
+```
+
+示例图 `graphs/taught.lyflow.json`（读图 `source = inputs`），顶层参数 `points`、`zone`、`tolerance`、`widthMax`、`form`、
+`widthRange`、`minLength`、`maxBreak` 由宿主逐拍照点给；默认没有示教线（`points = []`），不给图就跑不起来。要出 mm 时加一个
+`image.load_calib` 接 `n_width.calib`（断口 `minLength`、判定限值随之按 mm 解释）。
+
+**为什么不用 `bead_path`**：自由搜索在直胶、缓弯上可用，但缺胶时会顺着旁边零件翻边的暗边走（断口位置报错，原则上还可能放行），
+胶团、急弯、起胶收胶段跟不住。示教胶路不找：胶路就是示教线，断口只能落在示教线上。
+
+**参数**：
+
+- `points`（text）：JSON `[[x, y], …]`，从喷嘴一侧往外排，至少两个点、总长 ≥ 8 px。s 从第一个示教点沿折线量起（px）；
+  示教时第一个点点在喷嘴出胶处，s 就与 bead_path 的一样是「离喷嘴的弧长」。弯道多点几个（相邻两段夹角最好 ≤ 15°：卡尺沿折线的法向布）。
+- `zone`：[start, end]，s 的一段，`end = 0` 表示到折线末端；起胶、收胶、胶头不检的那几段截掉。
+- `tolerance`（20 px）：胶中心最远离示教线多少还算这条胶（机器人 / 工件偏差加示教误差）。比它远的暗段不算胶。
+- 高级：`widthMax`（黑顶帽结构元，与 bead_path 同义，比它宽的胶团没有响应）、`polarity`、`sharpMin`（D15 用在整条示教线上）。
+
+**`bead_width` 怎么接示教线**（`path.info.lineSource = taught` 时，同一个 `measureStations`，T3–T5）：
+
+- 胶不一定正好压在线上。离示教线不超过 `tolerance` 的暗段里**投票**定一个常数偏移（每个暗段的中心各是一个假设，票数 = 离它不到
+  max(6, centerRatio × 胶宽中位数) 有暗段的站数；票数不低于最多那个一半的里取**离示教线最近**的 —— 旁边一条更长的平行暗边拽不走它），
+  再沿 s 取 ±40 px 的中位数逐站细化，直到落在轨迹上的站不再变（最多 8 遍；一遍最多挪一个 gate，弯道上慢慢偏开示教线的胶
+  跟得上，跳到旁边一条暗线上去却不行；断口里没有暗段落在轨迹上，按两头线性插值）。这条**偏移轨迹**取代原来「胶就在胶路上（偏移 0）」：
+  D16 的「中心偏离」量的是离轨迹多远，参考宽 / 参考峰值只取落在轨迹上的站。卡尺半长取 max(`searchHalf`, `tolerance` + `widthRange` 上限 / 2)。
+- 落在轨迹上的站不到 3 站或 10%、或者轨迹上暗段边缘陡度的 P25 低于 `sharpMin`（压痕、阴影），就是**沿示教线没有胶**：全部判无胶，
+  `bead.info.message` =「检测区内没找到胶」、原因在 `bead.info.reason`。
+- 从图里拟合的胶路（`bead_path`）不走这几步：期望中心恒为 0，结果与原来一位不差。
+
+**失败语义**：示教胶路本身总是 `ok = true`（它没有「找不到」）。胶整段没有 → `bead_breaks` 报整个检测区一段、`judge` 只报一条
+`missing`「检测区内没找到胶」，与 `maxBreak` 无关（负数不判断胶时也是 NG）；断了一截 → 断口按示教线的 s 报，起止误差 ≤ 一个站距。
+示教折线不合格是加载期错误（指到 `points` / `zone`），不是运行结果。
+
+**宿主的配方逐拍照点要存**：`points`（示教折线）、`zone`、`tolerance`、胶宽范围 `widthRange`（下限按示教时的胶宽取一半左右 ——
+比胶窄得多的零件暗边、阴影就进不来）、`widthMax`（≥ 这一点最宽的胶团）、`form`（螺旋胶 swirl）、标定（PlaneCalib 文件），
+以及「不检 / 只检存在」这类开关（盘圈、大胶堆的点）。
 
 ## 固定相机飞拍后检（glue-plan §5，G4）
 
@@ -135,6 +184,7 @@ io.load_image ─→ glue.locate ─→ glue.station_calipers ←─ image.load_
 | 积木 | role |
 |---|---|
 | bead_path | `nozzle`（喷嘴圆）、`sector`（扇区的两条边）、`zone`（检测区两端的弧）、`coarse`（粗找到的胶点）、`path`（胶路）；没找到胶时 `missing`（那条直线）+ `ng`（文字） |
+| taught_path | `taught`（整条示教折线与示教点）、`path`（检测区那一段）、`zone`（检测区两端各一道 ± tolerance 的横杠） |
 | bead_width | `path`、`station`（有胶的站：左边 → 右边）、`missing`（无胶的站）、`edge.left` / `edge.right`（两条胶边） |
 | bead_breaks | `break`（每处断口沿胶路一段，label「断胶 32 px」）、`coarse`（countAtZoneEnds = false 时不计的端点段） |
 | edge_distance | `distance`（量起点 → 零件边）、`part`（零件边点）、`outlier`（被中值 + MAD 剔掉的点） |
@@ -178,6 +228,15 @@ io.load_image ─→ glue.locate ─→ glue.station_calipers ←─ image.load_
   图级输出：`ok`、`verdict`、`pathInfo`、`coverage`、`widthMean` / `widthMin` / `widthMax`、`breakCount`、`longestBreak`、
   `breaks`、`distanceMean`、`overlay`（判定的叠画）。没找到胶的帧里胶宽、边距是 `null` —— `lyflow eval` 在第一个样本上
   取不到值的指标路径会报错退出，逐帧的胶宽、断口位置从 `--summary` 的图级输出读（tools 就是这么做的）。
+- **示例图** `graphs/taught.lyflow.json`（逐拍照点示教胶路，见上面「示教胶路」）：读图 → 示教胶路 → 量胶宽 → 查断胶 → 判定，
+  不量边距、不接标定；顶层参数逐拍照点给，`points` 没有默认值。拿文件跑：
+
+  ```powershell
+  lyflow run packs\glue\graphs\taught.lyflow.json --set 'n_load.source="file"' --set 'n_load.path="<帧.jpg>"' `
+      --param points='"[[1003,471],[800,380],[600,300]]"' --param widthRange='[16,90]' --outputs
+  ```
+
+  图级输出比 glue1 多一个 `beadInfo`（`offset`、`trackSupport`、`reason` 在这里），没有 `distanceMean`。
 
 ## 工具（`tools/`，D14：只调 lyflow CLI，不自己做检测）
 
@@ -205,6 +264,11 @@ python packs\glue\tools\glue_thumbs.py    # 第 17 条：每帧画上判定的�
   零误报；断口 {10, 20, 40, 80} 一帧一个，`minLength = 20` 恰好报出 ≥ 20 的，起止误差 ≤ 4 px；没有胶、只有压痕 → 「检测区内
   没找到胶」；合成单应下宽度 / 边距 / 断口长度按映射后两点的距离；坏的标定是 `bad_input`；加载期校验；响应图分块与整幅
   逐位相同；人造断胶挑干净的一侧、另一条链查得出；判定的叠画写一份样例给 `pnpm check` 对着 schema 校验。
+  **示教胶路**（同一个文件，场景加了圆弧中心线、胶的横向偏移、一条平行暗线）：直线与半径 400 px 的圆弧上，胶偏开示教线
+  {0, +12, −15} px、宽 {20, 40} 时每站有胶、胶宽与胶中心的中位误差 ≤ 1 px、`offset` 对得上，40 / 80 px 的断口按示教线的 s 报出、
+  起止误差 ≤ 4 px；示教线绕喷嘴偏 4°（偏移沿 s 线性变到 28 px）时逐站的胶中心误差 ≤ 1.5 px、断口照样报对；没有胶、只有压痕（D15）、只有一条平行暗线（tolerance 之外，或之内但比 `widthRange` 下限窄）、胶偏出
+  tolerance 都是「检测区内没找到胶」，`maxBreak = −1` 也不判 OK；胶断一截、旁边一条更长的平行暗线一直在（tolerance 之外 30 px，
+  或放宽 tolerance 后之内 −27 px）时断口照样报在 [234, 314]；`points` / `zone` 的加载期校验与折线重采样。
 - **飞拍宿主链路**（`tests/test_flyshot.cpp`）：实际载入随包产线图，C ABI 注入带行填充的相机帧、绑定图参数、读取毫米点表，并验证换帧不会误用旧缓存。
 - **标定**（`packs/std-image/tests/test_calib.cpp`）：棋盘真值、中文路径往返、非法角点参数和错误 Record 类型。
 
@@ -215,3 +279,10 @@ python packs\glue\tools\glue_thumbs.py    # 第 17 条：每帧画上判定的�
 - **螺旋胶的断口起点**：断口从一个螺圈的外沿开始时，前一站的外包络里还有回卷过来的胶，起点会报晚；人造断胶里 60 px 的断口
   最多晚 20 px（不到一个螺距，统计见验收记录）。
 - 只做单帧；整条胶的拼接、深度学习分割、胶高、起胶收胶段的自动屏蔽都不在 G2（glue-plan §2.4）。
+- **示教胶路**：tolerance 之内、与胶一样宽一样暗的平行暗线，在胶大半段都缺的帧里会被当成胶（票数过半让位的规则挡不住）——
+  靠示教时收紧 `widthRange` 下限与 `tolerance`；比 `widthMax` 宽的胶团（大胶堆、盘圈）没有响应，要么把这一点的 `widthMax`
+  调到最宽的胶团以上，要么这一点只检存在 / 不检；螺旋胶在示教线上的断口起点同上一条。
+  卡尺沿示教线的法向布：急弯处胶的走向与示教线差得多时（两件之间弯道的位置不一样），卡尺斜着穿过胶，量出的宽度变大、
+  超过 `widthRange` 上限就成了「断口」。示教线只在胶在图里的位置件与件之间稳定的拍照点上可靠 —— MX11 现场有几个拍照点两件之间
+  胶的位置差 20–100 px（[集成记录](../../docs/glue-integration.md)「示教胶路」），那些点要么放宽 tolerance 并收紧胶宽范围，
+  要么先配准（还没有）。

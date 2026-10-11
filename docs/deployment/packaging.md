@@ -51,7 +51,7 @@ pnpm run package -OutputDir C:\release\lyflow
 
 ## 验收范围与证据
 
-发布门禁覆盖固定依赖、core 单测、完整标准包的 Rust 单测、manifest 自检、headless CLI 构建、暂存 DLL 的 ABI/产品版本/源码修订、x64 架构、算子组合、ONNX Runtime 版本与实际模块来源，以及运行库/SDK 布局、许可证和测试模型/调试符号排除。打包时仍生成原有 core 单测要求的合成 ONNX 模型，缺少夹具即失败。
+发布门禁覆盖固定依赖、core 单测、完整标准包的 Rust 单测、manifest 自检、headless CLI 构建、暂存 DLL 的 ABI/产品版本/源码修订、x64 架构、算子组合及 packaging/release.json 声明的必需算子、ONNX Runtime 版本与实际模块来源，以及运行库/SDK 布局、许可证和测试模型/调试符号排除。打包时仍生成原有 core 单测要求的合成 ONNX 模型，缺少夹具即失败。
 
 Rust 单测复用本轮 `build/release-core/bin` 的 DLL，使用 `cargo test --locked --release --manifest-path bridge/Cargo.toml --no-default-features --features host --lib --bins`；固定 `LYFLOW_STD_PACKS=1`，执行日常纯平台构建中因缺少标准包而忽略的测试。`host` 启用 IPC/执行层测试而无需桌面资源。CLI 产物仍由无默认特性的 `cargo build --release --bin lyflow` 生成。单测失败保留 Cargo 退出码与日志并停止，不进入暂存及 ZIP 生成。
 
@@ -63,4 +63,4 @@ GlueSight 安装包与静默安装验收由 GS 工作流负责。最终 ZIP 消�
 
 正式构建在固定依赖准备通过后显式启用 `LYFLOW_RELEASE_BUILD`，并只允许 Windows x64、RelWithDebInfo、固定四个算子包且无外部包的干净源码构建导出可复用源码修订。普通开发或外部算子构建返回空修订，不能启用跨进程磁盘缓存，也不能冒充正式依赖包。
 
-本轮 ABI 迁移验收边界：当前主线缺少 GlueSight 必需的 `glue.taught_path`。GS 的 4 项真实 DLL 视觉测试因缺少该算子被阻断。本轮不接入该算子，不宣称已得到可用于 GS 示教业务的运行库或安装包。
+2026-10-11 的 main 构建 `c625155c` 虽通过编译、单测与 DLL 身份检查，但不含 GlueSight 必需的 `glue.taught_path`，不能作为 GS 示教业务依赖。后续修复移植原 PR #8 的示教胶路算子及其配套测量行为，并在 `packaging/release.json` 声明发布包必需算子；暂存 DLL 检查会拒绝缺少任一必需算子的包。新包是否满足 GS 软件契约仍以实际 DLL 检查和现有测量测试为准，不能用新算子注册或合成图通过替代现场准确率验收。

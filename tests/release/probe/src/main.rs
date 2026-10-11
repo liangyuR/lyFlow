@@ -178,6 +178,20 @@ fn main() -> Result<()> {
         "invalid compiled source revision",
     )?;
     let manifest: Value = serde_json::from_str(&core.manifest_json()?)?;
+    let release: Value = serde_json::from_str(include_str!("../../../../packaging/release.json"))?;
+    let required = release["requiredOperators"]
+        .as_array()
+        .ok_or("release configuration missing required operators")?;
+    let operators = manifest["operators"]
+        .as_array()
+        .ok_or("runtime manifest missing operators")?;
+    for required in required {
+        let id = required.as_str().ok_or("invalid required operator ID")?;
+        require(
+            operators.iter().any(|op| op["id"].as_str() == Some(id)),
+            format!("release runtime missing required operator: {id}"),
+        )?;
+    }
     let version = core.version();
     require(
         version == ABI_VERSION,
