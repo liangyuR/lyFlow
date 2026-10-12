@@ -1343,6 +1343,50 @@ TEST_CASE("gap.fit_gap_circles 的左圆：细化越界钉在界上、先验，q
   }
 }
 
+TEST_CASE("gap.fit_gap_circles 的相切带：圆顶压在面线上的拐角圆，压过缝里点更多的深处那段弧") {
+  // 面线 y = 0（flatLine，测量帧里 y 越大越深）。拐角圆 r 1.6 mm、圆顶正好在 y = 0，只给 40 个点；
+  // 深处那段弧 r 1.0 mm、圆顶在面下 1.5 mm，给 70 个点 —— 不加约束时 RANSAC 选点多的那段。
+  // 两个圆的圆心高度是 -1.6 与 -2.5，圆心高度带要分开它们得把带开得很窄，相切带一条就分开。
+  const auto build = [] {
+    PointCloud merged;
+    pushArc(merged, 0.0, 0.0016, 0.0016, 270, 360, 40);
+    pushArc(merged, 0.0005, 0.0025, 0.0010, 200, 340, 70);
+    pushArc(merged, 0.0040, -0.0005, 0.0009, 200, 340, 60);
+    auto call = std::make_unique<Call>();
+    call->inputs["merged"] = Data::cloud(merged);
+    call->inputs["primary"] = Data::cloud(merged);
+    call->inputs["secondary"] = Data::cloud(merged);
+    call->inputs["boxLeft"] = Data::box2d(box(-0.003f, -0.001f, 0.0022f, 0.004f));
+    call->inputs["boxRight"] = Data::box2d(box(0.0028f, -0.004f, 0.006f, 0.002f));
+    call->inputs["refLine"] = Data::line2d(flatLine());
+    return call;
+  };
+  const auto leftR = [](Call& c) { return c.out("left").asCircle2D()->radius; };
+
+  auto loose = build();
+  REQUIRE(loose->run("gap.fit_gap_circles", {{"leftRadiusMax", Value::number(2.0)}}).ok);
+  CHECK(leftR(*loose) == doctest::Approx(0.0010).epsilon(0.05));
+  // 接了参考线，quality 报圆心与圆顶相对它的高度：深处那段弧的圆顶在面下 1.5 mm
+  const auto looseQ = loose->out("quality").asRecord()->data["left"];
+  CHECK(looseQ["topAboveRefMm"].get<double>() == doctest::Approx(-1.5).epsilon(0.05));
+  CHECK(looseQ["centerAboveRefMm"].get<double>() == doctest::Approx(-2.5).epsilon(0.05));
+
+  for (const char* mode : {"always", "guard"}) {
+    CAPTURE(mode);
+    auto tangent = build();
+    REQUIRE(tangent
+                ->run("gap.fit_gap_circles", {{"leftRadiusMax", Value::number(2.0)},
+                                              {"leftTangentAbove", Value::number(0.0)},
+                                              {"leftTangentTol", Value::number(0.25)},
+                                              {"leftCenterMode", Value::text(mode)}})
+                .ok);
+    CHECK(leftR(*tangent) == doctest::Approx(0.0016).epsilon(0.05));
+    const auto q = tangent->out("quality").asRecord()->data["left"];
+    CHECK(std::fabs(q["topAboveRefMm"].get<double>()) < 0.05);
+    CHECK(q["model"] == "circle-tangent-band");
+  }
+}
+
 TEST_CASE("gap.fit_gap_circles 的参数与连线检查在 validate 里") {
   const std::set<std::string> plain = {"merged", "primary", "secondary", "boxLeft", "boxRight"};
   Call call;
@@ -1370,6 +1414,11 @@ TEST_CASE("gap.fit_gap_circles 的参数与连线检查在 validate 里") {
                                 {"rightRadiusValue", Value::number(5.0)}},
                                plain),
                  "bad_param", "rightRadiusValue"));
+  // 配了相切带却没接参考线
+  CHECK(hasError(call.validate("gap.fit_gap_circles", {{"leftTangentTol", Value::number(0.25)}}, plain),
+                 "bad_param", "leftTangentTol"));
+  CHECK(hasError(call.validate("gap.fit_gap_circles", {{"rightTangentTol", Value::number(0.25)}}, plain),
+                 "bad_param", "rightTangentTol"));
   // 半径先验不在上下限之间
   CHECK(hasError(call.validate("gap.fit_gap_circles",
                                {{"leftRadiusPrior", Value::number(3.0)},

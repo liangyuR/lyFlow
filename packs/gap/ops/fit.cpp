@@ -547,32 +547,39 @@ Eigen::Vector2d refineCenterFixedRadius(const GapCloud& cloud, const pcl::Indice
   return center;
 }
 
-/// 带约束的圆拟合：圆心高度带（要 line）和内点方位角带，两条都可以单独开。
+/// 带约束的圆拟合：圆心高度带、相切带（都要 line）和内点方位角带，各条都可以单独开。
+/// 相切带比的是圆顶（圆心高度 + 半径）：圆角从平面圆滑拐下去时圆顶就压在面线上，
+/// 而缝里更深处那段弧上拟出来的圆半径小、圆心高度却差不多，只有圆顶悬在面下面分得开。
 /// 共用的 gap_std::circleFit2D 不带这些判据，所以这里自己跑一遍 RANSAC，只在配了约束时走。
 /// 采样用固定种子，同样的输入永远给同样的输出（算子声明了 deterministic）。
 ///
-/// `line` 为空表示不查圆心高度；`bearingTolDeg <= 0` 表示不查方位角。
+/// `line` 为空表示不查圆心高度与圆顶；`tolM` / `topTolM <= 0` 各自不查；`bearingTolDeg <= 0` 表示不查方位角。
 /// `rFixed > 0` 时半径钉死：两点加半径定圆心（每对点两个解），细化也只动圆心。
 bool circleFitConstrained(const GapCloud& cloud, const lyflow::Line2D* line, double aboveM,
-                          double tolM, double bearingDeg, double bearingTolDeg, double distThresh,
-                          double rMin, double rMax, double rFixed, Eigen::VectorXf* circle,
-                          pcl::Indices* inliers) {
+                          double tolM, double topAboveM, double topTolM, double bearingDeg,
+                          double bearingTolDeg, double distThresh, double rMin, double rMax,
+                          double rFixed, Eigen::VectorXf* circle, pcl::Indices* inliers) {
   const std::size_t n = cloud.size();
   if (n < 3)
     return false;
   const bool fixedRadius = rFixed > 0;
   const bool checkCenter = line != nullptr && tolM > 0;
+  const bool checkTop = line != nullptr && topTolM > 0;
   const bool checkBearing = bearingTolDeg > 0;
-  // 方位角要先有内点才能算，所以它在下面按候选的内点集单独查；这里只查半径和圆心高度。
+  // 方位角要先有内点才能算，所以它在下面按候选的内点集单独查；这里只查半径、圆心高度与圆顶。
   const auto ok = [&](double cx, double cy, double r) {
     if (!(r >= rMin && r <= rMax))
       return false;
-    if (!checkCenter)
+    if (!checkCenter && !checkTop)
       return true;
     Eigen::VectorXf probe(3);
     probe << static_cast<float>(cx), static_cast<float>(cy), static_cast<float>(r);
     const double above = centerAboveLine(probe, *line);
-    return std::isfinite(above) && std::fabs(above - aboveM) <= tolM;
+    if (!std::isfinite(above))
+      return false;
+    if (checkCenter && std::fabs(above - aboveM) > tolM)
+      return false;
+    return !checkTop || std::fabs(above + r - topAboveM) <= topTolM;
   };
   const auto bearingOk = [&](const Eigen::Vector3d& c, const pcl::Indices& idx) {
     if (!checkBearing)
@@ -738,6 +745,11 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
                                params.number("rightCenterTol") / kScale};
   const std::string centerMode[2] = {params.choice("leftCenterMode"),
                                      params.choice("rightCenterMode")};
+  // 相切带：圆顶（圆心高度 + 半径）相对 refLine 的高度。tol <= 0 表示不启用。档位跟 *CenterMode 走。
+  const double tangentAbove[2] = {params.number("leftTangentAbove") / kScale,
+                                  params.number("rightTangentAbove") / kScale};
+  const double tangentTol[2] = {params.number("leftTangentTol") / kScale,
+                                params.number("rightTangentTol") / kScale};
   // 弱拟合的地板。圆拟合本身只要 3 个内点就算成功，短弧上拟出来的圆心可以跑到点云外面去，
   // 而残差照样很小 —— 这两个量是唯一看得出来的。
   const std::size_t minInliers[2] = {static_cast<std::size_t>(params.integer("leftMinInliers")),
@@ -766,7 +778,7 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
   // 相同，所以给「本来就拟得对」的点位挂一条宽带纯属保险）；always 一律走约束。
   // 抽成 lambda 是为了「弱了就换合并云再来一次」能原样重跑。
   const auto fitOneSide = [&](SideResult& side, int i) {
-    const bool constrained = centerTol[i] > 0 || bearingTol[i] > 0;
+    const bool constrained = centerTol[i] > 0 || tangentTol[i] > 0 || bearingTol[i] > 0;
     const bool guardOnly = constrained && centerMode[i] == "guard";
     if (!constrained || guardOnly) {
       side.fitted =
@@ -788,6 +800,10 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
         const double above = centerAboveLine(side.circle, *sideRefLine[i]);
         needBand = !std::isfinite(above) || std::fabs(above - centerAbove[i]) > centerTol[i];
       }
+      if (!needBand && tangentTol[i] > 0) {
+        const double top = centerAboveLine(side.circle, *sideRefLine[i]) + side.circle[2];
+        needBand = !std::isfinite(top) || std::fabs(top - tangentAbove[i]) > tangentTol[i];
+      }
       if (!needBand && bearingTol[i] > 0) {
         const double b = inlierBearingDeg(side.cloud, side.circle, side.indices);
         needBand = !std::isfinite(b) || bearingDeltaDeg(b, bearing[i]) > bearingTol[i];
@@ -797,19 +813,26 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
       side.indices.clear();
       side.reported = false;
       side.fitted = circleFitConstrained(side.cloud, sideRefLine[i], centerAbove[i], centerTol[i],
-                                         bearing[i], bearingTol[i], distThresh, cfg[i].rMin,
-                                         cfg[i].rMax, cfg[i].rFixed, &side.circle, &side.indices);
+                                         tangentAbove[i], tangentTol[i], bearing[i], bearingTol[i],
+                                         distThresh, cfg[i].rMin, cfg[i].rMax, cfg[i].rFixed,
+                                         &side.circle, &side.indices);
       if (!side.fitted && retryDistanceMm > 0) {
         side.indices.clear();
         side.fitted =
             circleFitConstrained(side.cloud, sideRefLine[i], centerAbove[i], centerTol[i],
-                                 bearing[i], bearingTol[i], mmToM(retryDistanceMm), cfg[i].rMin,
-                                 cfg[i].rMax, cfg[i].rFixed, &side.circle, &side.indices);
+                                 tangentAbove[i], tangentTol[i], bearing[i], bearingTol[i],
+                                 mmToM(retryDistanceMm), cfg[i].rMin, cfg[i].rMax, cfg[i].rFixed,
+                                 &side.circle, &side.indices);
       }
       if (side.fitted) {
-        side.model = centerTol[i] > 0
-                         ? (bearingTol[i] > 0 ? "circle-center-bearing-band" : "circle-center-band")
-                         : "circle-bearing-band";
+        std::string tag = "circle";
+        if (centerTol[i] > 0)
+          tag += "-center";
+        if (tangentTol[i] > 0)
+          tag += "-tangent";
+        if (bearingTol[i] > 0)
+          tag += "-bearing";
+        side.model = tag + "-band";
       }
     }
     return side.fitted;
@@ -1008,6 +1031,14 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
                               outcome == Circle2DRadiusOutcome::ClampedMax)) {
       quality.data[kSides[i]]["radiusBeforeClampMm"] = sides[i].report.unclampedRadius * kScale;
     }
+    // 接了参考线就报圆心与圆顶相对它的高度：调圆心高度带、相切带时直接拿这两个量看分布。
+    if (sideRefLine[i] != nullptr && sides[i].circle.size() >= 3) {
+      const double above = centerAboveLine(sides[i].circle, *sideRefLine[i]);
+      if (std::isfinite(above)) {
+        quality.data[kSides[i]]["centerAboveRefMm"] = above * kScale;
+        quality.data[kSides[i]]["topAboveRefMm"] = (above + sides[i].circle[2]) * kScale;
+      }
+    }
   }
   outputs.set("quality", Data::record(std::move(quality)));
   return Status::Ok();
@@ -1026,6 +1057,15 @@ std::vector<Issue> validateFitGapCircles(const ParamView& params,
     issues.push_back(Issue::error("bad_param",
                                   "配了右侧圆心高度带就必须接 refLineRight 或 refLine（参考线）",
                                   "rightCenterTol", "refLineRight"));
+  }
+  if (params.number("leftTangentTol") > 0 && !refLeft) {
+    issues.push_back(Issue::error("bad_param", "配了左侧相切带就必须接 refLine（参考线）",
+                                  "leftTangentTol", "refLine"));
+  }
+  if (params.number("rightTangentTol") > 0 && !refRight) {
+    issues.push_back(Issue::error("bad_param",
+                                  "配了右侧相切带就必须接 refLineRight 或 refLine（参考线）",
+                                  "rightTangentTol", "refLineRight"));
   }
   for (const char* side : {"left", "right"}) {
     const std::string s(side);
@@ -1054,11 +1094,13 @@ std::vector<Issue> validateFitGapCircles(const ParamView& params,
       }
       // guard 档先按 circleFit2D（带先验）拟，在带内就留下这个结果，先验是生效的；
       // 只有 always 档一律走带约束的拟合，先验才真的被绕过。
-      const bool constrained =
-          params.number(s + "CenterTol") > 0 || params.number(s + "ArcBearingTolDeg") > 0;
+      const bool constrained = params.number(s + "CenterTol") > 0 ||
+                               params.number(s + "TangentTol") > 0 ||
+                               params.number(s + "ArcBearingTolDeg") > 0;
       if (constrained && params.choice(s + "CenterMode") != "guard") {
         issues.push_back(Issue::warning(
-            "bad_param", "配了圆心高度带或方位角带（always 档）的一侧走带约束的拟合，不吃半径先验",
+            "bad_param",
+            "配了圆心高度带、相切带或方位角带（always 档）的一侧走带约束的拟合，不吃半径先验",
             s + "RadiusPriorSigma"));
       }
     }
@@ -1156,8 +1198,8 @@ Param centerModeParam(const char* name, const char* label, const char* group) {
   p.type = ParamType::Enum;
   p.label = label;
   p.doc =
-      "圆心高度带怎么用。always 一律走带约束的拟合；guard 先按原样拟，只有圆心落到带外"
-      "才重来 —— 带内的帧结果与不加带相同，所以「本来就拟得对、只是想上个保险」的点位该用 guard。";
+      "圆心高度带（以及同侧的相切带、方位角带）怎么用。always 一律走带约束的拟合；guard 先按原样拟，"
+      "只有落到带外才重来 —— 带内的帧结果与不加带相同，所以「本来就拟得对、只是想上个保险」的点位该用 guard。";
   p.def = Value::text("always");
   p.group = group;
   p.advanced = true;
@@ -1323,7 +1365,7 @@ void registerFitLine(Registry& r) {
 void registerFitGapCircles(Registry& r) {
   OperatorDesc op;
   op.id = "gap.fit_gap_circles";
-  op.version = "1.3.0";
+  op.version = "1.4.0";
   op.label = "拟合间隙圆";
   op.category = "间隙/拟合";
   op.keywords = {"circle", "ransac", "圆", "拟合", "间隙"};
@@ -1415,6 +1457,18 @@ void registerFitGapCircles(Registry& r) {
       numParam("rightCenterTol", "Right Center Tol", 0.0, "mm", "Right Radius",
                "圆心高度的容差，<= 0 表示不加这个约束。含义同 leftCenterTol。"),
       centerModeParam("rightCenterMode", "Right Center Mode", "Right Radius"),
+      numParam("leftTangentAbove", "Left Tangent Above", 0.0, "mm", "Left Radius",
+               "左圆圆顶（圆心高度 + 半径）应当高出 refLine 多少，配合 leftTangentTol 使用。0 = 圆顶正好"
+               "压在面线上，即圆角从这张面圆滑拐下去、与面相切。"),
+      numParam("leftTangentTol", "Left Tangent Tol", 0.0, "mm", "Left Radius",
+               "相切带的容差，<= 0 表示不加（默认）。缝里更深处还有一段弧时（翻边、胶），拟到那上面的圆"
+               "半径小、圆心高度却和拐角圆差不多，圆心高度带拦不住，只有圆顶悬在面下面分得开。"
+               "档位跟 leftCenterMode 走；refLine 要接这一侧自己那张面的线。先量一批正常帧的 "
+               "quality.topAboveRefMm 再定。"),
+      numParam("rightTangentAbove", "Right Tangent Above", 0.0, "mm", "Right Radius",
+               "右圆圆顶应当高出参考线多少（refLineRight，不接就用 refLine），含义同 leftTangentAbove。"),
+      numParam("rightTangentTol", "Right Tangent Tol", 0.0, "mm", "Right Radius",
+               "右侧相切带的容差，<= 0 表示不加。含义同 leftTangentTol。"),
       bearingParam("leftArcBearingDeg", "Left Arc Bearing", "Left Radius"),
       bearingTolParam("leftArcBearingTolDeg", "Left Arc Bearing Tol", "Left Radius"),
       bearingParam("rightArcBearingDeg", "Right Arc Bearing", "Right Radius"),
