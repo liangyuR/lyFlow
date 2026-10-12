@@ -33,7 +33,9 @@ try {
     if ($env:LYFLOW_OP_PACKS) { throw 'External operator packs are forbidden in release packaging.' }
     $configuration = Get-Content -LiteralPath (Join-Path $root 'packaging/release.json') -Raw | ConvertFrom-Json
     $env:LYFLOW_STD_PACKS = '1'
-    $env:LYFLOW_PACKS = 'glue'
+    # 发布组合以 packaging/release.json 为准：std-* 随 LYFLOW_STD_PACKS 编入，其余（默认关的仓库内包）按名点开。
+    $releasePacks = @($configuration.packs | Sort-Object)
+    $env:LYFLOW_PACKS = (@($releasePacks | Where-Object { $_ -notlike 'std-*' }) -join ';')
     $env:LYFLOW_OP_PACKS = ''
     $buildParent = Join-Path $root 'build'
     if (-not $OutputDir) { $OutputDir = Join-Path $buildParent 'release' }
@@ -47,7 +49,8 @@ try {
     New-Item -ItemType Directory -Path $output -Force | Out-Null
     $runtimeZip = Join-Path $output "lyflow-runtime-win-x64-v$version.zip"
     $sdkZip = Join-Path $output "lyflow-sdk-win-x64-v$version.zip"
-    foreach ($archive in @($runtimeZip, $sdkZip, (Join-Path $output 'lyflow-runtime.json'))) {
+    $editorTgz = Join-Path $output "lyflow-editor-v$version.tgz"
+    foreach ($archive in @($runtimeZip, $sdkZip, $editorTgz, (Join-Path $output 'lyflow-runtime.json'))) {
         if (Test-Path -LiteralPath $archive) { throw "Release asset already exists; use a fresh output directory: $archive" }
     }
     $stage = Reset-ReleaseDirectory -Path (Join-Path $buildParent 'release-stage') -Parent $buildParent
@@ -152,8 +155,7 @@ try {
         if ($parts.Count -ne 2) { throw "Versioned operator pack required: $_" }
         [ordered]@{ name = $parts[0]; version = $parts[1] }
     })
-    $expectedPacks = @('glue', 'std-image', 'std-ml', 'std-pointcloud')
-    if (@(Compare-Object -ReferenceObject $expectedPacks -DifferenceObject @($packs | ForEach-Object { $_.name })).Count) { throw 'Staged DLL operator packs differ from the release contract.' }
+    if (@(Compare-Object -ReferenceObject $releasePacks -DifferenceObject @($packs | ForEach-Object { $_.name })).Count) { throw 'Staged DLL operator packs differ from the release contract.' }
     $operators = @($inspection.manifest.operators | Sort-Object id | ForEach-Object {
         [ordered]@{ id = $_.id; version = $_.version; pack = $(if ($_.PSObject.Properties.Name -contains 'pack') { $_.pack } else { 'core' }) }
     })
@@ -180,8 +182,19 @@ try {
     [IO.Compression.ZipFile]::CreateFromDirectory($sdk, $pendingSdk)
     [IO.File]::Copy($pendingRuntime, $runtimeZip, $false)
     [IO.File]::Copy($pendingSdk, $sdkZip, $false)
+    # 编辑器以 TypeScript 源码包随版本发布（宿主用自己的打包器编译），版本必须与产品版本一致。
+    $editorDir = Join-Path $root 'packages/editor'
+    $editorVersion = (Get-Content -LiteralPath (Join-Path $editorDir 'package.json') -Raw | ConvertFrom-Json).version
+    if ($editorVersion -cne $version) { throw "@lyflow/editor version $editorVersion differs from product version $version." }
+    $editorStage = Join-Path $stage 'editor'
+    New-Item -ItemType Directory -Path $editorStage -Force | Out-Null
+    & npm pack $editorDir --pack-destination $editorStage --silent
+    Assert-ReleaseExit 'Pack @lyflow/editor'
+    $editorPacked = @(Get-ChildItem -LiteralPath $editorStage -Filter '*.tgz' -File)
+    if ($editorPacked.Count -ne 1) { throw 'npm pack did not produce exactly one editor tarball.' }
     [IO.File]::Copy($metadataPath, (Join-Path $output 'lyflow-runtime.json'), $false)
-    Write-Host "Built runtime and SDK archives: $output"
+    [IO.File]::Copy($editorPacked[0].FullName, $editorTgz, $false)
+    Write-Host "Built runtime, SDK and editor archives: $output"
 } finally {
     foreach ($name in $environmentNames) { [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name], 'Process') }
     Pop-Location

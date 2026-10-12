@@ -100,7 +100,7 @@ jobs:
         id: native-cache-restore
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-std-glue-v2
+          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-std-glue-gap-v1
 
       - uses: actions/cache/restore@v4
         id: onnx-cache-restore
@@ -164,6 +164,7 @@ jobs:
           path: |
             ${{ runner.temp }}/lyflow-release/*.zip
             ${{ runner.temp }}/lyflow-release/*.json
+            ${{ runner.temp }}/lyflow-release/*.tgz
           if-no-files-found: error
           retention-days: 14
 
@@ -210,17 +211,19 @@ jobs:
             if (context.ref !== `refs/tags/${tag}`) throw new Error('tag 与构建版本不一致');
             const releases = await github.paginate(github.rest.repos.listReleases, { ...context.repo, per_page: 100 });
             if (releases.some(release => release.tag_name === tag)) throw new Error(`Release ${tag} 已存在；禁止覆盖`);
-            const files = fs.readdirSync('release').filter(name => /\.(zip|json)$/.test(name));
-            for (const name of [`lyflow-runtime-win-x64-v${version}.zip`, `lyflow-sdk-win-x64-v${version}.zip`, 'lyflow-runtime.json']) {
+            const files = fs.readdirSync('release').filter(name => /\.(zip|json|tgz)$/.test(name));
+            for (const name of [`lyflow-runtime-win-x64-v${version}.zip`, `lyflow-sdk-win-x64-v${version}.zip`, `lyflow-editor-v${version}.tgz`, 'lyflow-runtime.json']) {
               if (!files.includes(name)) throw new Error(`缺少构建资产: ${name}`);
             }
             const repository = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`;
             const body = [
-              `Windows x64 运行库与 SDK/CLI ${tag}。人工复核后正式发布。`,
+              `Windows x64 运行库、SDK/CLI 与节点图编辑器 ${tag}。人工复核后正式发布。`,
               '',
               `源码修订：\`${revision}\`。ABI、算子及依赖版本见随包 \`lyflow-runtime.json\`。`,
               '',
-              '固定算子包：std-pointcloud、std-image、std-ml、glue。ONNX Runtime 使用 CPU 版；不含 gap、dts、客户模型、桌面安装程序或调试符号。',
+              '固定算子包：std-pointcloud、std-image、std-ml、glue、gap。ONNX Runtime 使用 CPU 版；不含 dts、客户模型、桌面安装程序或调试符号。',
+              '',
+              `\`lyflow-editor-v${version}.tgz\` 是 \`@lyflow/editor\` 的 TypeScript 源码包（npm pack），宿主按 tarball 依赖安装、用自己的打包器编译。`,
               '',
               'Rust 客户端使用同一修订：',
               '```toml',

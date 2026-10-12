@@ -2,6 +2,9 @@
 
 版本 0.2.0，**默认关闭**（ADR-0015）。打开它：`$env:LYFLOW_PACKS = "gap"`。
 
+日常构建默认关闭；**正式发布包（`pnpm run package` / `Windows release`）固定编入 gap**，组合见 `packaging/release.json`，
+下游（xyz-gap-inspector）直接用发布的 SDK，不必自己编。见 [docs/deployment/packaging.md](../../docs/deployment/packaging.md)。
+
 把线扫双头剖面的测量主路径拆成 `gap.*` 算子，每个中间阶段（裁剪、ICP、
 分割、有效 ROI、拟合）都能在画布上点开看。两条路径都在：
 

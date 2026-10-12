@@ -8,19 +8,26 @@
     "std-pointcloud",
     "std-image",
     "std-ml",
-    "glue"
+    "glue",
+    "gap"
   ],
   "requiredOperators": [
     "io.load_image",
     "image.board_calib",
     "image.load_calib",
     "glue.taught_path",
-    "glue.bead_width"
+    "glue.bead_width",
+    "gap.load_profile_pair",
+    "gap.roi_from_labels",
+    "gap.fit_line",
+    "gap.fit_gap_circles",
+    "gap.flush"
   ],
   "vcpkgVersions": {
     "pcl": "1.15.1#1",
     "opencv4": "4.12.0#9",
     "boost-filesystem": "1.92.0",
-    "eigen3": "5.0.1"
+    "eigen3": "5.0.1",
+    "yaml-cpp": "0.9.0#1"
   }
 }

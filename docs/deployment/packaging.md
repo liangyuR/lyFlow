@@ -2,14 +2,15 @@
 
 ## 发布契约
 
-`pnpm run package` 从当前源码构建两个 ZIP 并检查暂存布局与 DLL 身份。本地入口不上传文件；GitHub 的 `Windows release` 工作流使用同一入口。首版交付运行库和 headless CLI/SDK，不生成桌面安装程序，不包含客户模型、客户图像、配方、历史记录或调试符号。
+`pnpm run package` 从当前源码构建两个 ZIP 与编辑器 tarball，并检查暂存布局与 DLL 身份。本地入口不上传文件；GitHub 的 `Windows release` 工作流使用同一入口。首版交付运行库和 headless CLI/SDK，不生成桌面安装程序，不包含客户模型、客户图像、配方、历史记录或调试符号。
 
 | 资产 | 布局与消费方式 |
 |---|---|
 | `lyflow-runtime-win-x64-vX.Y.Z.zip` | 根目录包含 `lyflow_core.dll`、必要依赖及 VC++ CRT、`lyflow-runtime.json`、许可证。满足 GlueSight 必需算子及其独立验收后，解压目录可作为 `-LyFlowRuntime` 输入。 |
 | `lyflow-sdk-win-x64-vX.Y.Z.zip` | `bin/` 包含同一份运行库及 `lyflow.exe`；另含头文件、导入库、CMake 配置、示例和 `library/`。 |
+| `lyflow-editor-vX.Y.Z.tgz` | `npm pack packages/editor` 的产物：`@lyflow/editor` 的 TypeScript 源码包，版本必须等于产品版本。宿主以 tarball 依赖安装（例如 `"@lyflow/editor": "file:<路径>/lyflow-editor-vX.Y.Z.tgz"`），用自己的打包器编译；不发布到 npm registry。 |
 
-算子组合固定为 `std-pointcloud`、`std-image`、`std-ml`、`glue`，不接受环境变量追加 `gap`、`dts` 或外部算子。ONNX Runtime 使用 CPU 版 `1.19.2`。PCL 最低支持版本为 `1.15.1`，发包清单固定到 `1.15.1#1`。core 使用 RelWithDebInfo 与动态 CRT；CLI 使用 Rust Release 和 `--no-default-features`。SDK 从同一份 core 暂存文件生成，避免两套资产实际包含不同引擎。
+算子组合以 `packaging/release.json` 的 `packs` 为唯一来源，当前固定为 `std-pointcloud`、`std-image`、`std-ml`、`glue`、`gap`：`std-*` 随 `LYFLOW_STD_PACKS=1` 编入，其余按名写进 `LYFLOW_PACKS`；不接受环境变量追加 `dts` 或外部算子。gap 包依赖 yaml-cpp，随 vcpkg manifest 固定到 `0.9.0#1`。ONNX Runtime 使用 CPU 版 `1.19.2`。PCL 最低支持版本为 `1.15.1`，发包清单固定到 `1.15.1#1`。core 使用 RelWithDebInfo 与动态 CRT；CLI 使用 Rust Release 和 `--no-default-features`。SDK 从同一份 core 暂存文件生成，避免两套资产实际包含不同引擎。
 
 本版 SDK 的 C++ 客户端与同一发布修订的 Rust 客户端，在 Windows 上将依赖搜索目录限制为指定 DLL 所在目录，不读取 PATH，也不从当前工作目录或 System32 补齐第三方运行库。Windows KnownDLL 与 API Set 系统组件仍由操作系统解析。宿主需把所有非系统依赖部署在 DLL 目录中；缺依赖时应明确失败。GS 必须升级到采用相同产品版本 ABI 的客户端；旧数字 ABI 客户端不再列为兼容对象。
 
@@ -29,9 +30,9 @@ pnpm run package -OutputDir C:\release\lyflow
 
 源码必须干净且有有效 Git 修订；不要在正在编辑的工作树里制作正式产物。正式 tag 构建可加 `-ExpectedTag vX.Y.Z`；脚本校验版本，不自动修改源码版本。输出目录应位于仓外或仓内已忽略的构建目录；默认是 `build/release`。已有同名产物时拒绝覆盖，复验构建须选新输出目录。`-AllowDirty`、`-SkipDependencySetup` 只用于本地诊断，tag 发布禁止使用。
 
-入口准备固定版本依赖、构建 core 与 CLI、运行构建门禁、检查暂存目录并生成 ZIP。vcpkg manifest 固定 baseline；构建不从相邻项目复制依赖。vcpkg 工具和安装树分别位于 `build/release-tools/vcpkg`、`build/release-deps/vcpkg_installed`，二进制缓存位于 `build/release-deps/binary-cache`。ONNX Runtime 位于 `third_party/onnxruntime/onnxruntime-win-x64-1.19.2`。GitHub 分别缓存 vcpkg 工具、vcpkg 二进制缓存和解压后的 ONNX Runtime。工具缓存包含固定 baseline 的 Git 仓库（含 `.git`、ports、versions、scripts、triplets）和 `vcpkg.exe`，排除 `downloads`、`buildtrees`、`packages`、`installed`；键为 `vcpkg-tool-windows-x64-<baseline>-v1`，不包含运行编号或 MSVC 版本，不跨 baseline 恢复。命中后仍核对实际 Git 修订、已跟踪源码状态，以及可执行文件版本是否与 baseline 内声明的工具发布版本一致；未命中时浅拉取固定提交并 bootstrap，修订或工具版本不符、缺失可执行文件时重新准备工具，验证失败即停止。vcpkg 二进制缓存使用 `windows-2022`、x64、完整 MSVC toolset 版本、vcpkg baseline 和发布组合修订 `std-glue-v2` 构成稳定键；同一身份不再按运行编号重复保存，也不跨身份前缀恢复。调整依赖 features、triplet 或发布组合时必须同步更新缓存身份；`v2` 隔离旧的可能不完整缓存。ONNX Runtime 按 Windows x64、CPU 版和 `onnxruntimeVersion` 精确缓存。恢复后仍运行固定依赖版本和必需文件检查；所有依赖准备成功后立即保存未命中的缓存，再执行同一个 `pnpm run package` 完整构建及暂存检查。依赖准备失败不保存不完整缓存，后续软件门禁失败不影响已保存依赖。缺缓存时仍须能从固定输入完整构建。
+入口准备固定版本依赖、构建 core 与 CLI、运行构建门禁、检查暂存目录并生成 ZIP。vcpkg manifest 固定 baseline；构建不从相邻项目复制依赖。vcpkg 工具和安装树分别位于 `build/release-tools/vcpkg`、`build/release-deps/vcpkg_installed`，二进制缓存位于 `build/release-deps/binary-cache`。ONNX Runtime 位于 `third_party/onnxruntime/onnxruntime-win-x64-1.19.2`。GitHub 分别缓存 vcpkg 工具、vcpkg 二进制缓存和解压后的 ONNX Runtime。工具缓存包含固定 baseline 的 Git 仓库（含 `.git`、ports、versions、scripts、triplets）和 `vcpkg.exe`，排除 `downloads`、`buildtrees`、`packages`、`installed`；键为 `vcpkg-tool-windows-x64-<baseline>-v1`，不包含运行编号或 MSVC 版本，不跨 baseline 恢复。命中后仍核对实际 Git 修订、已跟踪源码状态，以及可执行文件版本是否与 baseline 内声明的工具发布版本一致；未命中时浅拉取固定提交并 bootstrap，修订或工具版本不符、缺失可执行文件时重新准备工具，验证失败即停止。vcpkg 二进制缓存使用 `windows-2022`、x64、完整 MSVC toolset 版本、vcpkg baseline 和发布组合修订 `std-glue-gap-v1` 构成稳定键；同一身份不再按运行编号重复保存，也不跨身份前缀恢复。调整依赖 features、triplet 或发布组合时必须同步更新缓存身份；加入 gap（新增 yaml-cpp）时改为 `std-glue-gap-v1`，不复用缺 yaml-cpp 的旧缓存。ONNX Runtime 按 Windows x64、CPU 版和 `onnxruntimeVersion` 精确缓存。恢复后仍运行固定依赖版本和必需文件检查；所有依赖准备成功后立即保存未命中的缓存，再执行同一个 `pnpm run package` 完整构建及暂存检查。依赖准备失败不保存不完整缓存，后续软件门禁失败不影响已保存依赖。缺缓存时仍须能从固定输入完整构建。
 
-工作流在成功或失败后保存 `windows-release-build-diagnostics`，保留 7 天；收集构建日志、Cargo 编译/单测日志、CTest JUnit/日志、暂存清单及 DLL 检查的 JSON/日志。最终两个 ZIP 与 `lyflow-runtime.json` 保留 14 天，不生成 ZIP 消费验收报告。
+工作流在成功或失败后保存 `windows-release-build-diagnostics`，保留 7 天；收集构建日志、Cargo 编译/单测日志、CTest JUnit/日志、暂存清单及 DLL 检查的 JSON/日志。最终两个 ZIP、编辑器 tarball 与 `lyflow-runtime.json` 保留 14 天，不生成 ZIP 消费验收报告。
 
 ## GitHub 门禁与正式发布
 
@@ -41,7 +42,7 @@ pnpm run package -OutputDir C:\release\lyflow
 | 手动 `Windows release` | 可选择实现分支，运行完整门禁，保存 ZIP 和清单 14 天；不创建 Release。 |
 | `vX.Y.Z` tag push | tag 必须与源码产品版本一致，且提交位于 main 历史；门禁成功后创建草稿 Release，人工正式发布。 |
 
-完整构建使用 GitHub 托管 `windows-2022`，编译 job 仅有 `contents: read`。发布 job 依赖构建成功，下载两个 ZIP 与清单，再以 `contents: write` 创建草稿并上传；不在持有写权限时编译或运行库代码。
+完整构建使用 GitHub 托管 `windows-2022`，编译 job 仅有 `contents: read`。发布 job 依赖构建成功，下载两个 ZIP、编辑器 tarball 与清单，再以 `contents: write` 创建草稿并上传；不在持有写权限时编译或运行库代码。
 
 `Windows release` 独立运行，不再由日常 `CI` 调用，也不在 main push 时自动运行。需要发包时手动选择分支，或推送与产品版本匹配的 `vX.Y.Z` tag。
 
@@ -61,6 +62,8 @@ Rust 单测复用本轮 `build/release-core/bin` 的 DLL，使用 `cargo test --
 
 GlueSight 安装包与静默安装验收由 GS 工作流负责。最终 ZIP 消费、客户图像效果、真实设备、现场驱动、节拍和长期稳定性由下游按需验收，构建成功不能代替这些结果。
 
-正式构建在固定依赖准备通过后显式启用 `LYFLOW_RELEASE_BUILD`，并只允许 Windows x64、RelWithDebInfo、固定四个算子包且无外部包的干净源码构建导出可复用源码修订。普通开发或外部算子构建返回空修订，不能启用跨进程磁盘缓存，也不能冒充正式依赖包。
+正式构建在固定依赖准备通过后显式启用 `LYFLOW_RELEASE_BUILD`，并只允许 Windows x64、RelWithDebInfo、固定的 `release.json` 算子包组合（`core/CMakeLists.txt` 的发布身份与之逐字一致）且无外部包的干净源码构建导出可复用源码修订。普通开发或外部算子构建返回空修订，不能启用跨进程磁盘缓存，也不能冒充正式依赖包。
 
 2026-10-11 的 main 构建 `c625155c` 虽通过编译、单测与 DLL 身份检查，但不含 GlueSight 必需的 `glue.taught_path`，不能作为 GS 示教业务依赖。后续修复移植原 PR #8 的示教胶路算子及其配套测量行为，并在 `packaging/release.json` 声明发布包必需算子；暂存 DLL 检查会拒绝缺少任一必需算子的包。新包是否满足 GS 软件契约仍以实际 DLL 检查和现有测量测试为准，不能用新算子注册或合成图通过替代现场准确率验收。
+
+2026-10-12 起 gap 包并入主发布包（`packaging/release.json` 加 `gap` 与 5 个必需的 gap 算子，vcpkg manifest 加 yaml-cpp），同时发布 `@lyflow/editor` 的 tarball。xyz-gap-inspector 由此可以只钉发布版本与资产校验和，不再以 submodule 钉提交、本地编 core。gap 算子的现场准确率仍由 xyz-gap-inspector 的回放与复核验收，发包门禁只覆盖 gap 包单测与算子注册。
