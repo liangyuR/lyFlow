@@ -253,6 +253,7 @@ jobs:
             ${{ runner.temp }}/lyflow-release/*.zip
             ${{ runner.temp }}/lyflow-release/*.json
             ${{ runner.temp }}/lyflow-release/*.tgz
+            ${{ runner.temp }}/lyflow-release/*.nupkg
           if-no-files-found: error
           retention-days: 14
 
@@ -299,8 +300,8 @@ jobs:
             if (context.ref !== `refs/tags/${tag}`) throw new Error('tag 与构建版本不一致');
             const releases = await github.paginate(github.rest.repos.listReleases, { ...context.repo, per_page: 100 });
             if (releases.some(release => release.tag_name === tag)) throw new Error(`Release ${tag} 已存在；禁止覆盖`);
-            const files = fs.readdirSync('release').filter(name => /\.(zip|json|tgz)$/.test(name));
-            for (const name of [`lyflow-runtime-win-x64-v${version}.zip`, `lyflow-sdk-win-x64-v${version}.zip`, `lyflow-editor-v${version}.tgz`, 'lyflow-runtime.json']) {
+            const files = fs.readdirSync('release').filter(name => /\.(zip|json|tgz|nupkg)$/.test(name));
+            for (const name of [`lyflow-runtime-win-x64-v${version}.zip`, `lyflow-sdk-win-x64-v${version}.zip`, `lyflow-editor-v${version}.tgz`, `LyFlow.Runtime.win-x64.${version}.nupkg`, 'lyflow-runtime.json']) {
               if (!files.includes(name)) throw new Error(`缺少构建资产: ${name}`);
             }
             const repository = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`;

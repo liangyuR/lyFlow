@@ -9,6 +9,7 @@
 | `lyflow-runtime-win-x64-vX.Y.Z.zip` | 根目录包含 `lyflow_core.dll`、必要依赖及 VC++ CRT、`lyflow-runtime.json`、许可证。满足 GlueSight 必需算子及其独立验收后，解压目录可作为 `-LyFlowRuntime` 输入。 |
 | `lyflow-sdk-win-x64-vX.Y.Z.zip` | `bin/` 包含同一份运行库及 `lyflow.exe`；另含头文件、导入库、CMake 配置、示例和 `library/`。 |
 | `lyflow-editor-vX.Y.Z.tgz` | `npm pack packages/editor` 的产物：`@lyflow/editor` 的 TypeScript 源码包，版本必须等于产品版本。宿主以 tarball 依赖安装（例如 `"@lyflow/editor": "file:<路径>/lyflow-editor-vX.Y.Z.tgz"`），用自己的打包器编译；不发布到 npm registry。 |
+| `LyFlow.Runtime.win-x64.X.Y.Z.nupkg` | 与运行库 ZIP 使用同一份正式暂存内容，统一置于 `runtimes/win-x64/native/`；包含全部 DLL、`lyflow-runtime.json` 和许可证树。根 nuspec 的 repository commit 记录源码修订。诊断构建不生成正式 NuGet 包。 |
 
 算子组合以 `packaging/release.json` 的 `packs` 为唯一来源，当前固定为 `std-pointcloud`、`std-image`、`std-ml`、`glue`、`gap`：`std-*` 随 `LYFLOW_STD_PACKS=1` 编入，其余按名写进 `LYFLOW_PACKS`；不接受环境变量追加 `dts` 或外部算子。gap 包依赖 yaml-cpp，随 vcpkg manifest 固定到 `0.9.0#1`。ONNX Runtime 使用 CPU 版 `1.19.2`。PCL 最低支持版本为 `1.15.1`，发包清单固定到 `1.15.1#1`。core 使用 RelWithDebInfo 与动态 CRT；CLI 使用 Rust Release 和 `--no-default-features`。SDK 从同一份 core 暂存文件生成，避免两套资产实际包含不同引擎。
 
@@ -32,7 +33,25 @@ pnpm run package -OutputDir C:\release\lyflow
 
 入口准备固定版本依赖、构建 core 与 CLI、运行构建门禁、检查暂存目录并生成 ZIP。vcpkg manifest 固定 baseline；构建不从相邻项目复制依赖。vcpkg 工具和安装树分别位于 `build/release-tools/vcpkg`、`build/release-deps/vcpkg_installed`，二进制缓存位于 `build/release-deps/binary-cache`。ONNX Runtime 位于 `third_party/onnxruntime/onnxruntime-win-x64-1.19.2`。GitHub 分别缓存 vcpkg 工具、vcpkg 二进制缓存和解压后的 ONNX Runtime。工具缓存包含固定 baseline 的 Git 仓库（含 `.git`、ports、versions、scripts、triplets）和 `vcpkg.exe`，排除 `downloads`、`buildtrees`、`packages`、`installed`；键为 `vcpkg-tool-windows-x64-<baseline>-v1`，不包含运行编号或 MSVC 版本，不跨 baseline 恢复。命中后仍核对实际 Git 修订、已跟踪源码状态，以及可执行文件版本是否与 baseline 内声明的工具发布版本一致；未命中时浅拉取固定提交并 bootstrap，修订或工具版本不符、缺失可执行文件时重新准备工具，验证失败即停止。vcpkg 二进制缓存使用 `windows-2022`、x64、完整 MSVC toolset 版本、vcpkg baseline 和发布组合修订 `std-glue-gap-v1` 构成稳定键；同一身份不再按运行编号重复保存。精确键未命中时按 `restore-keys` 退回同 toolset、同 baseline 的最近一份：vcpkg 按每个包的 ABI 哈希取缓存，哈希不符的包自行重编、不会误用，所以调整发布组合时只编新增或变化的包。调整依赖 features、triplet 或发布组合时仍须同步更新缓存身份（当前 `std-glue-gap-v1`），让新组合另存一份。ONNX Runtime 按 Windows x64、CPU 版和 `onnxruntimeVersion` 精确缓存。恢复后仍运行固定依赖版本和必需文件检查；依赖准备与缓存保存在独立的 `deps` job 里完成，`build` job 恢复同一缓存后再执行同一个 `pnpm run package` 完整构建及暂存检查。依赖准备失败不保存不完整缓存，后续软件门禁失败不影响已保存依赖。缺缓存时仍须能从固定输入完整构建。
 
-工作流在成功或失败后保存 `windows-release-build-diagnostics`，保留 7 天；收集构建日志、Cargo 编译/单测日志、CTest JUnit/日志、暂存清单及 DLL 检查的 JSON/日志。最终两个 ZIP、编辑器 tarball 与 `lyflow-runtime.json` 保留 14 天，不生成 ZIP 消费验收报告。
+工作流在成功或失败后保存 `windows-release-build-diagnostics`，保留 7 天；收集构建日志、Cargo 编译/单测日志、CTest JUnit/日志、暂存清单及 DLL 检查的 JSON/日志。最终两个 ZIP、编辑器 tarball、NuGet 包与 `lyflow-runtime.json` 保留 14 天，不生成 ZIP 消费验收报告。
+
+## 正式运行库 NuGet 分发
+
+`LyFlow.Runtime.win-x64` 是下游直接消费的正式运行库包，与下面 vcpkg 编译缓存用途独立。版本跟随完整产品版本；已经存在的版本禁止覆盖，推送发生版本冲突时明确失败。包由固定官方 `nuget.exe 6.14.0` 的 `pack` 命令生成，不重新编译引擎，也不使用内容哈希作为包身份或校验。
+
+`Publish native runtime NuGet` 工作流在 Release 人工正式发布后触发。也可在 Actions 手动输入已正式发布的 tag，为现有 `v1.1.0` 制作首包。两种方式均从当前默认分支检出受信任脚本，只下载选定正式 Release 的运行库 ZIP；拒绝草稿、预发布、元数据/实际 DLL 身份不符及缺少必需算子的资产。独立的 PowerShell C ABI 探针按目标版本核对实际 DLL，不绑定当前 Rust 客户端，因此可以补发先前正式版本；不运行 Release tag 内的源码脚本。普通打包继续使用现有客户端探针作为当前版本构建门禁。ZIP 与 NuGet 包都来自同一份运行库文件；NuGet 不另行编译或拼接依赖。
+
+本机制作并验证包而不上传：
+
+```powershell
+./scripts/publish-runtime-nuget.ps1 -Tag v1.1.0 -PackageOnly -OutputDir C:\release\lyflow-nuget
+```
+
+去掉 `-PackageOnly` 才会上传。认证依次使用 `LYFLOW_NUGET_TOKEN`、`NUGET_AUTH_TOKEN` 或 `-CredentialFile`（本机默认 `C:\Users\11601\.ssh\github_nuget_auth.txt`，内容为单个令牌）。临时 NuGet 配置只引用环境变量，不保存令牌值，不进入包或 Actions 缓存；失败输出会遮盖令牌。Release API 可使用 `GH_TOKEN`，公开资产本机可匿名下载。CI 用当前仓库的 `github.token`，仅 NuGet 发布 job 获得 `packages: write`；nuspec repository 关联 `liangyuR/lyFlow`。下游仓库需获得包的 Actions 读取授权，本机读取需 `read:packages`。
+
+下游可固定兼容系列后显式选取系列内正式补丁版本，但每次构建必须锁定完整 NuGet 版本及源码修订，并使用同一修订的 Rust 客户端。`1.1.x` 系列选择不放宽运行时完整 ABI/产品版本必须一致的限制。包元数据清单、目录、架构、实际 DLL 版本/修订和算子仍须校验，缓存命中不能替代验证。
+
+独立契约回归：`pwsh -NoProfile -File tests/release/test-runtime-nuget.ps1`，覆盖正式输入、错误版本/ABI/修订/架构、诊断包、旧内容摘要字段、缺算子、异常文件、x86 DLL 和压缩包路径穿越。真实 DLL 检查及首包验证需另外执行上述本机入口。
 
 ## 依赖二进制源（GitHub Packages）
 

@@ -65,6 +65,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: 运行库 NuGet 契约检查
+        shell: pwsh
+        run: |
+          ./tests/release/test-runtime-nuget.ps1
+          ./tests/release/test-runtime-nuget-publish.ps1
+
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
