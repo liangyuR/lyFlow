@@ -24,6 +24,10 @@ if ($SkipDependencySetup) {
     & (Join-Path $PSScriptRoot 'prepare-release-vcpkg.ps1') -ToolDir $env:VCPKG_ROOT -Baseline $config.vcpkgBaseline
     if (-not $env:VCPKG_DEFAULT_BINARY_CACHE) { $env:VCPKG_DEFAULT_BINARY_CACHE = Join-Path $root 'build/release-deps/binary-cache' }
     New-Item -ItemType Directory -Path $env:VCPKG_DEFAULT_BINARY_CACHE -Force | Out-Null
+    # 有令牌时再挂上 GitHub Packages 的 NuGet 源：本地缓存没有的包先去那下载，仍没有才编。
+    # 写权限只给工作流的依赖 job（LYFLOW_VCPKG_FEED_MODE=readwrite），编译 job 与开发机都是只读。
+    $feedMode = if ($env:LYFLOW_VCPKG_FEED_MODE) { $env:LYFLOW_VCPKG_FEED_MODE } else { 'read' }
+    & (Join-Path $PSScriptRoot 'use-vcpkg-feed.ps1') -VcpkgRoot $env:VCPKG_ROOT -Mode $feedMode
     Invoke-Checked (Join-Path $env:VCPKG_ROOT 'vcpkg.exe') @('install', "--x-manifest-root=$manifestRoot", "--x-install-root=$env:VCPKG_INSTALLED_DIR", "--triplet=$($config.triplet)", '--clean-after-build')
 }
 $env:VCPKG_MANIFEST_DIR = $manifestRoot

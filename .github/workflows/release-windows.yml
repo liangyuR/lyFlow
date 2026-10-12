@@ -4,6 +4,11 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      rebuild_deps:
+        description: 不恢复 Actions 依赖缓存，全部依赖重编并推送到 NuGet 二进制源（给源补全用）
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -17,10 +22,109 @@ env:
   CARGO_INCREMENTAL: '0'
 
 jobs:
-  build:
-    name: 完整 Windows x64 构建
+  deps:
+    name: 固定发布依赖（vcpkg 二进制缓存）
+    # 只装固定基线的 vcpkg 端口、不编译或运行库代码，所以只有这个 job 拿 packages: write，
+    # 把编好的依赖推到 GitHub Packages 的 NuGet 源；编译 job 仍然只读。
     permissions:
       contents: read
+      packages: write
+    runs-on: windows-2022
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: 依赖缓存身份
+        id: native-cache
+        shell: pwsh
+        run: |
+          $configuration = Get-Content -LiteralPath packaging/release.json -Raw | ConvertFrom-Json
+          $baseline = $configuration.vcpkgBaseline
+          $onnxVersion = $configuration.onnxruntimeVersion
+          $toolset = "$env:VCToolsVersion".Trim().TrimEnd('\')
+          if ($baseline -notmatch '^[0-9a-f]{40}$') { throw '发布配置缺少固定 vcpkg baseline' }
+          if ($toolset -notmatch '^\d+\.\d+\.\d+$') { throw '无法识别当前 MSVC toolset' }
+          if ($onnxVersion -notmatch '^\d+\.\d+\.\d+$') { throw '发布配置缺少固定 ONNX Runtime 版本' }
+          "onnx-version=$onnxVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "baseline=$baseline" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "toolset=$toolset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: 恢复固定版本 vcpkg 工具
+        uses: actions/cache/restore@v4
+        id: vcpkg-tool-cache-restore
+        with:
+          path: |
+            build/release-tools/vcpkg/*
+            !build/release-tools/vcpkg/downloads/**
+            !build/release-tools/vcpkg/buildtrees/**
+            !build/release-tools/vcpkg/packages/**
+            !build/release-tools/vcpkg/installed/**
+          key: vcpkg-tool-windows-x64-${{ steps.native-cache.outputs.baseline }}-v1
+
+      - uses: actions/cache/restore@v4
+        id: native-cache-restore
+        if: ${{ !inputs.rebuild_deps }}
+        with:
+          path: build/release-deps/binary-cache
+          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-std-glue-gap-v1
+          # 组合变了（加包、改 features）时退回同工具集、同基线的最近一份：vcpkg 按每个包的 ABI 哈希取缓存，
+          # 对不上的包自己重编，不会用错二进制；于是只编新增或变化的那几个包。
+          restore-keys: |
+            windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-
+
+      - uses: actions/cache/restore@v4
+        id: onnx-cache-restore
+        with:
+          path: third_party/onnxruntime/onnxruntime-win-x64-${{ steps.native-cache.outputs.onnx-version }}
+          key: onnxruntime-win-x64-cpu-${{ steps.native-cache.outputs.onnx-version }}-v1
+
+      - name: 准备并验证固定发布依赖
+        shell: pwsh
+        env:
+          LYFLOW_VCPKG_FEED_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LYFLOW_VCPKG_FEED_USER: ${{ github.actor }}
+          LYFLOW_VCPKG_FEED_MODE: readwrite
+        run: ./scripts/prepare-release-deps.ps1
+
+      - name: 保存已验证的 vcpkg 工具
+        uses: actions/cache/save@v4
+        if: steps.vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
+        with:
+          path: |
+            build/release-tools/vcpkg/*
+            !build/release-tools/vcpkg/downloads/**
+            !build/release-tools/vcpkg/buildtrees/**
+            !build/release-tools/vcpkg/packages/**
+            !build/release-tools/vcpkg/installed/**
+          key: ${{ steps.vcpkg-tool-cache-restore.outputs.cache-primary-key }}
+
+      - name: 保存完整 vcpkg 缓存
+        uses: actions/cache/save@v4
+        if: steps.native-cache-restore.outputs.cache-hit != 'true'
+        with:
+          path: build/release-deps/binary-cache
+          key: ${{ steps.native-cache-restore.outputs.cache-primary-key }}
+
+      - name: 保存 ONNX Runtime 缓存
+        uses: actions/cache/save@v4
+        if: steps.onnx-cache-restore.outputs.cache-hit != 'true'
+        with:
+          path: third_party/onnxruntime/onnxruntime-win-x64-${{ steps.native-cache.outputs.onnx-version }}
+          key: ${{ steps.onnx-cache-restore.outputs.cache-primary-key }}
+
+  build:
+    name: 完整 Windows x64 构建
+    needs: deps
+    permissions:
+      contents: read
+      packages: read
     runs-on: windows-2022
     timeout-minutes: 350
     outputs:
@@ -101,6 +205,10 @@ jobs:
         with:
           path: build/release-deps/binary-cache
           key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-std-glue-gap-v1
+          # 组合变了（加包、改 features）时退回同工具集、同基线的最近一份：vcpkg 按每个包的 ABI 哈希取缓存，
+          # 对不上的包自己重编，不会用错二进制；于是只编新增或变化的那几个包。
+          restore-keys: |
+            windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-
 
       - uses: actions/cache/restore@v4
         id: onnx-cache-restore
@@ -122,36 +230,16 @@ jobs:
 
       - name: 准备并验证固定发布依赖
         shell: pwsh
+        env:
+          LYFLOW_VCPKG_FEED_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LYFLOW_VCPKG_FEED_USER: ${{ github.actor }}
         run: ./scripts/prepare-release-deps.ps1
-
-      - name: 保存已验证的 vcpkg 工具
-        uses: actions/cache/save@v4
-        if: steps.vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
-        with:
-          path: |
-            build/release-tools/vcpkg/*
-            !build/release-tools/vcpkg/downloads/**
-            !build/release-tools/vcpkg/buildtrees/**
-            !build/release-tools/vcpkg/packages/**
-            !build/release-tools/vcpkg/installed/**
-          key: ${{ steps.vcpkg-tool-cache-restore.outputs.cache-primary-key }}
-
-      - name: 保存完整 vcpkg 缓存
-        uses: actions/cache/save@v4
-        if: steps.native-cache-restore.outputs.cache-hit != 'true'
-        with:
-          path: build/release-deps/binary-cache
-          key: ${{ steps.native-cache-restore.outputs.cache-primary-key }}
-
-      - name: 保存 ONNX Runtime 缓存
-        uses: actions/cache/save@v4
-        if: steps.onnx-cache-restore.outputs.cache-hit != 'true'
-        with:
-          path: third_party/onnxruntime/onnxruntime-win-x64-${{ steps.native-cache.outputs.onnx-version }}
-          key: ${{ steps.onnx-cache-restore.outputs.cache-primary-key }}
 
       - name: 同一本地入口构建、测试和打包
         shell: pwsh
+        env:
+          LYFLOW_VCPKG_FEED_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LYFLOW_VCPKG_FEED_USER: ${{ github.actor }}
         run: |
           $arguments = @('-OutputDir', (Join-Path $env:RUNNER_TEMP 'lyflow-release'))
           if ($env:GITHUB_REF_TYPE -eq 'tag') { $arguments += @('-ExpectedTag', $env:GITHUB_REF_NAME) }
