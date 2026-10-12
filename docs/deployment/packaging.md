@@ -30,9 +30,23 @@ pnpm run package -OutputDir C:\release\lyflow
 
 源码必须干净且有有效 Git 修订；不要在正在编辑的工作树里制作正式产物。正式 tag 构建可加 `-ExpectedTag vX.Y.Z`；脚本校验版本，不自动修改源码版本。输出目录应位于仓外或仓内已忽略的构建目录；默认是 `build/release`。已有同名产物时拒绝覆盖，复验构建须选新输出目录。`-AllowDirty`、`-SkipDependencySetup` 只用于本地诊断，tag 发布禁止使用。
 
-入口准备固定版本依赖、构建 core 与 CLI、运行构建门禁、检查暂存目录并生成 ZIP。vcpkg manifest 固定 baseline；构建不从相邻项目复制依赖。vcpkg 工具和安装树分别位于 `build/release-tools/vcpkg`、`build/release-deps/vcpkg_installed`，二进制缓存位于 `build/release-deps/binary-cache`。ONNX Runtime 位于 `third_party/onnxruntime/onnxruntime-win-x64-1.19.2`。GitHub 分别缓存 vcpkg 工具、vcpkg 二进制缓存和解压后的 ONNX Runtime。工具缓存包含固定 baseline 的 Git 仓库（含 `.git`、ports、versions、scripts、triplets）和 `vcpkg.exe`，排除 `downloads`、`buildtrees`、`packages`、`installed`；键为 `vcpkg-tool-windows-x64-<baseline>-v1`，不包含运行编号或 MSVC 版本，不跨 baseline 恢复。命中后仍核对实际 Git 修订、已跟踪源码状态，以及可执行文件版本是否与 baseline 内声明的工具发布版本一致；未命中时浅拉取固定提交并 bootstrap，修订或工具版本不符、缺失可执行文件时重新准备工具，验证失败即停止。vcpkg 二进制缓存使用 `windows-2022`、x64、完整 MSVC toolset 版本、vcpkg baseline 和发布组合修订 `std-glue-gap-v1` 构成稳定键；同一身份不再按运行编号重复保存，也不跨身份前缀恢复。调整依赖 features、triplet 或发布组合时必须同步更新缓存身份；加入 gap（新增 yaml-cpp）时改为 `std-glue-gap-v1`，不复用缺 yaml-cpp 的旧缓存。ONNX Runtime 按 Windows x64、CPU 版和 `onnxruntimeVersion` 精确缓存。恢复后仍运行固定依赖版本和必需文件检查；所有依赖准备成功后立即保存未命中的缓存，再执行同一个 `pnpm run package` 完整构建及暂存检查。依赖准备失败不保存不完整缓存，后续软件门禁失败不影响已保存依赖。缺缓存时仍须能从固定输入完整构建。
+入口准备固定版本依赖、构建 core 与 CLI、运行构建门禁、检查暂存目录并生成 ZIP。vcpkg manifest 固定 baseline；构建不从相邻项目复制依赖。vcpkg 工具和安装树分别位于 `build/release-tools/vcpkg`、`build/release-deps/vcpkg_installed`，二进制缓存位于 `build/release-deps/binary-cache`。ONNX Runtime 位于 `third_party/onnxruntime/onnxruntime-win-x64-1.19.2`。GitHub 分别缓存 vcpkg 工具、vcpkg 二进制缓存和解压后的 ONNX Runtime。工具缓存包含固定 baseline 的 Git 仓库（含 `.git`、ports、versions、scripts、triplets）和 `vcpkg.exe`，排除 `downloads`、`buildtrees`、`packages`、`installed`；键为 `vcpkg-tool-windows-x64-<baseline>-v1`，不包含运行编号或 MSVC 版本，不跨 baseline 恢复。命中后仍核对实际 Git 修订、已跟踪源码状态，以及可执行文件版本是否与 baseline 内声明的工具发布版本一致；未命中时浅拉取固定提交并 bootstrap，修订或工具版本不符、缺失可执行文件时重新准备工具，验证失败即停止。vcpkg 二进制缓存使用 `windows-2022`、x64、完整 MSVC toolset 版本、vcpkg baseline 和发布组合修订 `std-glue-gap-v1` 构成稳定键；同一身份不再按运行编号重复保存。精确键未命中时按 `restore-keys` 退回同 toolset、同 baseline 的最近一份：vcpkg 按每个包的 ABI 哈希取缓存，哈希不符的包自行重编、不会误用，所以调整发布组合时只编新增或变化的包。调整依赖 features、triplet 或发布组合时仍须同步更新缓存身份（当前 `std-glue-gap-v1`），让新组合另存一份。ONNX Runtime 按 Windows x64、CPU 版和 `onnxruntimeVersion` 精确缓存。恢复后仍运行固定依赖版本和必需文件检查；依赖准备与缓存保存在独立的 `deps` job 里完成，`build` job 恢复同一缓存后再执行同一个 `pnpm run package` 完整构建及暂存检查。依赖准备失败不保存不完整缓存，后续软件门禁失败不影响已保存依赖。缺缓存时仍须能从固定输入完整构建。
 
 工作流在成功或失败后保存 `windows-release-build-diagnostics`，保留 7 天；收集构建日志、Cargo 编译/单测日志、CTest JUnit/日志、暂存清单及 DLL 检查的 JSON/日志。最终两个 ZIP、编辑器 tarball 与 `lyflow-runtime.json` 保留 14 天，不生成 ZIP 消费验收报告。
+
+## 依赖二进制源（GitHub Packages）
+
+Actions 缓存之外，vcpkg 还挂一个常驻的二进制源：`https://nuget.pkg.github.com/liangyuR/index.json`（NuGet）。它不受 Actions 缓存 7 天未用即清、仓库 10 GB 上限的影响。`scripts/use-vcpkg-feed.ps1` 把它接到当前进程的 `VCPKG_BINARY_SOURCES`：本地 `files` 缓存在前，源在后，都没有才编译。`prepare-release-deps.ps1` 在设置了 `LYFLOW_VCPKG_FEED_TOKEN` 时自动调用它；没有令牌时行为与以前相同。
+
+| 使用方 | 令牌 | 模式 |
+|---|---|---|
+| 发布工作流 `deps` job | 工作流自带 `GITHUB_TOKEN`，job 权限 `packages: write` | `readwrite` |
+| 发布工作流 `build` job | `GITHUB_TOKEN`，`packages: read` | `read` |
+| 开发机 | classic PAT，`read:packages`（要上传则 `write:packages`）；GitHub Packages 的 NuGet 不认 fine-grained 令牌 | `read`（默认） |
+
+开发机配置：`gh auth refresh -h github.com -s read:packages` 后把 `gh auth token` 存进用户环境变量 `LYFLOW_VCPKG_FEED_TOKEN`；或在 GitHub 设置里新建 classic PAT。任何 vcpkg（包括下游项目自己的 `C:cpkg`）都可以用：`pwsh -File scripts/use-vcpkg-feed.ps1 -VcpkgRoot C:cpkg` 之后在同一进程里 `vcpkg install`。令牌只写进 `build/vcpkg-feed/nuget.config`（已忽略），不进仓库、URL 或日志。
+
+命中要求三元组、vcpkg baseline 与 MSVC 工具集版本都和写入方相同：vcpkg 的包 ABI 哈希包含编译器版本。CI 的 `windows-2022` 与装了更新 Visual Studio 的开发机工具集不同时，开发机下不到 CI 编的包，只会退回本地编译；工具集相同的开发机之间可以用 `write:packages` 令牌和 `-Mode readwrite` 互相共享。
 
 ## GitHub 门禁与正式发布
 
@@ -42,7 +56,7 @@ pnpm run package -OutputDir C:\release\lyflow
 | 手动 `Windows release` | 可选择实现分支，运行完整门禁，保存 ZIP 和清单 14 天；不创建 Release。 |
 | `vX.Y.Z` tag push | tag 必须与源码产品版本一致，且提交位于 main 历史；门禁成功后创建草稿 Release，人工正式发布。 |
 
-完整构建使用 GitHub 托管 `windows-2022`，编译 job 仅有 `contents: read`。发布 job 依赖构建成功，下载两个 ZIP、编辑器 tarball 与清单，再以 `contents: write` 创建草稿并上传；不在持有写权限时编译或运行库代码。
+完整构建使用 GitHub 托管 `windows-2022`。`deps` job 只安装固定 baseline 的 vcpkg 端口，持有 `packages: write` 以写入依赖二进制源；编译 job 仅有 `contents: read` 与 `packages: read`。发布 job 依赖构建成功，下载两个 ZIP、编辑器 tarball 与清单，再以 `contents: write` 创建草稿并上传；不在持有写权限时编译或运行库代码。
 
 `Windows release` 独立运行，不再由日常 `CI` 调用，也不在 main push 时自动运行。需要发包时手动选择分支，或推送与产品版本匹配的 `vX.Y.Z` tag。
 
