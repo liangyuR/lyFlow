@@ -46,6 +46,8 @@ Actions 缓存之外，vcpkg 还挂一个常驻的二进制源：`https://nuget.
 
 开发机配置：`gh auth refresh -h github.com -s read:packages` 后把 `gh auth token` 存进用户环境变量 `LYFLOW_VCPKG_FEED_TOKEN`；或在 GitHub 设置里新建 classic PAT。任何 vcpkg（包括下游项目自己的 `C:cpkg`）都可以用：`pwsh -File scripts/use-vcpkg-feed.ps1 -VcpkgRoot C:cpkg` 之后在同一进程里 `vcpkg install`。令牌只写进 `build/vcpkg-feed/nuget.config`（已忽略），不进仓库、URL 或日志。
 
+vcpkg 只把本次现编的包推到源里，从 Actions 缓存恢复的包不会再推。给源补全（或换 baseline / toolset 后预热）时，手动运行 `Windows release` 并勾选 `rebuild_deps`：`deps` job 跳过 Actions 依赖缓存，全部重编并推送。
+
 命中要求三元组、vcpkg baseline 与 MSVC 工具集版本都和写入方相同：vcpkg 的包 ABI 哈希包含编译器版本。CI 的 `windows-2022` 与装了更新 Visual Studio 的开发机工具集不同时，开发机下不到 CI 编的包，只会退回本地编译；工具集相同的开发机之间可以用 `write:packages` 令牌和 `-Mode readwrite` 互相共享。
 
 ## GitHub 门禁与正式发布
