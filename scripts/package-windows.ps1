@@ -50,7 +50,7 @@ try {
     $runtimeZip = Join-Path $output "lyflow-runtime-win-x64-v$version.zip"
     $sdkZip = Join-Path $output "lyflow-sdk-win-x64-v$version.zip"
     $editorTgz = Join-Path $output "lyflow-editor-v$version.tgz"
-    foreach ($archive in @($runtimeZip, $sdkZip, $editorTgz, (Join-Path $output 'lyflow-runtime.json'))) {
+    foreach ($archive in @($runtimeZip, $sdkZip, $editorTgz, (Join-Path $output 'lyflow-runtime.json'), (Join-Path $output "LyFlow.Runtime.win-x64.$version.nupkg"))) {
         if (Test-Path -LiteralPath $archive) { throw "Release asset already exists; use a fresh output directory: $archive" }
     }
     $stage = Reset-ReleaseDirectory -Path (Join-Path $buildParent 'release-stage') -Parent $buildParent
@@ -176,6 +176,9 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $sdk $relative))) { throw "SDK missing $relative" }
     }
     if (@(Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object Extension -In @('.pdb', '.onnx')).Count) { throw 'Debug symbols or test models leaked into staging.' }
+    if (-not $AllowDirty -and -not $SkipDependencySetup) {
+        & (Join-Path $PSScriptRoot 'package-runtime-nuget.ps1') -RuntimeDir $runtime -OutputDir $output -ExpectedVersion $version -ExpectedRevision $revision
+    }
     $pendingRuntime = Join-Path $stage (Split-Path -Leaf $runtimeZip)
     $pendingSdk = Join-Path $stage (Split-Path -Leaf $sdkZip)
     [IO.Compression.ZipFile]::CreateFromDirectory($runtime, $pendingRuntime)

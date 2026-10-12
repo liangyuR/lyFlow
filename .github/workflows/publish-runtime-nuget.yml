@@ -1,0 +1,56 @@
+name: Publish native runtime NuGet
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 已正式发布的版本，例如 v1.1.0
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-nuget-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: 验证正式 Release 并发布固定版本运行库
+    runs-on: windows-2022
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: 发布正式运行库，不覆盖已有版本
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          LYFLOW_NUGET_TOKEN: ${{ github.token }}
+        run: ./scripts/publish-runtime-nuget.ps1 -Tag $env:RELEASE_TAG -OutputDir "${{ runner.temp }}/runtime-nuget"
+
+      - name: 保存已验证运行库包
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-nuget
+          path: |
+            ${{ runner.temp }}/runtime-nuget/*.nupkg
+            ${{ runner.temp }}/runtime-nuget/*.json
+            ${{ runner.temp }}/runtime-nuget/*.log
+          if-no-files-found: warn
+          retention-days: 14
