@@ -1,6 +1,38 @@
 # 测试地图
 
+[文档首页](README.md) · [环境准备](getting-started.md) · [Windows 发包](deployment/packaging.md)
+
 **写新测试之前先查这里。** 要验的行为多半已经有测试：能在已有用例里加一行（表驱动的一行、一个 SUBCASE、同一流程里多断言一句）就别新开用例；能在更低一层测的就别放到 e2e。
+
+## 选择验证入口
+
+从仓库根目录使用 PowerShell 7 执行；环境准备见 [快速开始](getting-started.md)。`pnpm check` 按当前算子包配置运行完整开发门禁，桌面 e2e 与发包验收另有入口。
+
+| 要验证的内容 | 命令 | 范围与前提 |
+|---|---|---|
+| 完整开发门禁 | `pnpm check` | core、manifest、schema、Rust bridge/客户端、CLI、C++ SDK、前端与 MCP；按 `LYFLOW_STD_PACKS`、`LYFLOW_PACKS` 选择包。 |
+| C++ core 与算子包 | `pnpm core:build` | 编译并运行 doctest；算子数值与 C ABI 契约的主要入口。 |
+| editor 纯逻辑 | `pnpm --filter @lyflow/editor test` | node:test，不启动桌面壳。 |
+| MCP | `pnpm --filter @lyflow/mcp test` | node:test；集成冒烟需要已构建的 CLI。完整 typecheck/build/test 可用 `pwsh scripts/check.ps1 -Steps mcp`。 |
+| glue 开发门禁 | `pnpm check:glue` | 固定标准包 + glue，另查必需算子；设置 `LYFLOW_GLUE_DATA` 才跑真实帧评估，人造断胶只报告。 |
+| gap 开发门禁 | `pnpm check:gap` | 带 gap 的完整开发门禁；`LYFLOW_GAP_AB=1` 追加历史对拍，其结果只供参考。 |
+| 桌面 app e2e | `pnpm e2e` | 通过 CDP 驱动 Tauri/WebView2；完整范围须带 `gap;dts`。 |
+| 桌面打包产物 e2e | `pnpm e2e:packaged` | 同一套断言验证桌面构建产物；与运行库/SDK ZIP 发包是两个入口。 |
+| 浏览器宿主 e2e | `pnpm e2e:http` | HTTP 传输与 React 宿主的完整链路。 |
+| Windows 发布产物 | `pnpm run package` | 固定标准包 + glue + gap，生成运行库/SDK ZIP、编辑器 tarball 与正式运行库 NuGet 包；检查暂存 DLL 身份，详见 [发包说明](deployment/packaging.md)。 |
+
+桌面完整验收示例：
+
+```powershell
+$env:LYFLOW_PACKS = 'gap;dts'
+pnpm e2e
+```
+
+按模块或分组复验可用 `pnpm e2e --only m8b:suiteImagePreviewScale,noderun`，规则见 [e2e 跑法](../scripts/e2e/README.md)。测试数量、跳过项与耗时以本次运行输出为准；历史验收记录见 [易用性与性能验收](usability-perf-acceptance.md)，不能作为当前修订的通过证据。
+
+## 历史规模与耗时
+
+以下数量是对应日期的验证记录，不代表当前修订的通过证据。
 
 2026-09-26 按四路审计做过一次合并精简（提交 test/prune），数字是那之后的：
 
@@ -17,7 +49,7 @@
 
 ## CI（GitHub Actions）
 
-`.github/workflows/ci.yml` 在 PR、main push 和手动运行时执行三个 job。格式与 workflow 检查使用 GitHub 托管的 `ubuntu-24.04`，编译与单测使用 `windows-2022`。日常 CI 只做编译、单元测试、类型、格式与 workflow 静态检查，每个步骤直接展示标准命令。
+[ci.yml](../.github/workflows/ci.yml) 在 PR、main push 和手动运行时执行三个 job。格式与 workflow 检查使用 GitHub 托管的 `ubuntu-24.04`，编译与单测使用 `windows-2022`。日常 CI 只做编译、单元测试、类型、格式与 workflow 静态检查，每个步骤直接展示标准命令。
 
 | job | 步骤与标准入口 |
 |---|---|
@@ -41,7 +73,7 @@ C++ doctest 已在 `core/CMakeLists.txt` 中通过 `enable_testing()` 和 `add_t
 
 ## Windows 发包门禁
 
-`.github/workflows/release-windows.yml` 在手动运行及版本 tag 上执行 `pnpm run package`，固定标准包 + glue，构建运行库/SDK ZIP 并检查暂存布局与 DLL 身份。日常 `CI` 不调用发包工作流；需要时手动运行 `Windows release` 并选择分支。
+[release-windows.yml](../.github/workflows/release-windows.yml) 在手动运行及版本 tag 上执行 `pnpm run package`，固定标准包 + glue + gap，生成运行库/SDK ZIP、编辑器 tarball 与正式运行库 NuGet 包，并检查暂存布局与 DLL 身份。日常 `CI` 不调用发包工作流；需要时手动运行 `Windows release` 并选择分支。
 
 | 层 | 入口 | 验证范围 |
 |---|---|---|

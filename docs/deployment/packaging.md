@@ -1,17 +1,20 @@
 # Windows x64 运行库与 SDK 发包
 
+[文档首页](../README.md) · [环境准备](../getting-started.md) · [测试地图](../testing.md)
+
 ## 发布契约
 
-`pnpm run package` 从当前源码构建两个 ZIP 与编辑器 tarball，并检查暂存布局与 DLL 身份。本地入口不上传文件；GitHub 的 `Windows release` 工作流使用同一入口。首版交付运行库和 headless CLI/SDK，不生成桌面安装程序，不包含客户模型、客户图像、配方、历史记录或调试符号。
+`pnpm run package` 通过 [package-windows.ps1](../../scripts/package-windows.ps1) 从当前源码构建两个 ZIP、编辑器 tarball 与正式运行库 NuGet 包，并检查暂存布局与 DLL 身份。本地入口不上传文件；GitHub 的 [Windows release](../../.github/workflows/release-windows.yml) 工作流使用同一入口。交付运行库、headless CLI/SDK 与编辑器源码包，不生成桌面安装程序，不包含客户模型、客户图像、配方、历史记录或调试符号。桌面构建与安装包验证见 [测试地图](../testing.md)。
 
 | 资产 | 布局与消费方式 |
 |---|---|
 | `lyflow-runtime-win-x64-vX.Y.Z.zip` | 根目录包含 `lyflow_core.dll`、必要依赖及 VC++ CRT、`lyflow-runtime.json`、许可证。满足 GlueSight 必需算子及其独立验收后，解压目录可作为 `-LyFlowRuntime` 输入。 |
 | `lyflow-sdk-win-x64-vX.Y.Z.zip` | `bin/` 包含同一份运行库及 `lyflow.exe`；另含头文件、导入库、CMake 配置、示例和 `library/`。 |
 | `lyflow-editor-vX.Y.Z.tgz` | `npm pack packages/editor` 的产物：`@lyflow/editor` 的 TypeScript 源码包，版本必须等于产品版本。宿主以 tarball 依赖安装（例如 `"@lyflow/editor": "file:<路径>/lyflow-editor-vX.Y.Z.tgz"`），用自己的打包器编译；不发布到 npm registry。 |
+| `lyflow-runtime.json` | 输出目录中的随包清单副本，便于在解压前检查版本、ABI、算子和依赖。 |
 | `LyFlow.Runtime.win-x64.X.Y.Z.nupkg` | 与运行库 ZIP 使用同一份正式暂存内容，统一置于 `runtimes/win-x64/native/`；包含全部 DLL、`lyflow-runtime.json` 和许可证树。根 nuspec 的 repository commit 记录源码修订。诊断构建不生成正式 NuGet 包。 |
 
-算子组合以 `packaging/release.json` 的 `packs` 为唯一来源，当前固定为 `std-pointcloud`、`std-image`、`std-ml`、`glue`、`gap`：`std-*` 随 `LYFLOW_STD_PACKS=1` 编入，其余按名写进 `LYFLOW_PACKS`；不接受环境变量追加 `dts` 或外部算子。gap 包依赖 yaml-cpp，随 vcpkg manifest 固定到 `0.9.0#1`。ONNX Runtime 使用 CPU 版 `1.19.2`。PCL 最低支持版本为 `1.15.1`，发包清单固定到 `1.15.1#1`。core 使用 RelWithDebInfo 与动态 CRT；CLI 使用 Rust Release 和 `--no-default-features`。SDK 从同一份 core 暂存文件生成，避免两套资产实际包含不同引擎。
+算子组合以 [release.json](../../packaging/release.json) 的 `packs` 为唯一来源，当前固定为 `std-pointcloud`、`std-image`、`std-ml`、`glue`、`gap`：`std-*` 随 `LYFLOW_STD_PACKS=1` 编入，其余按名写进 `LYFLOW_PACKS`；不接受环境变量追加 `dts` 或外部算子。gap 包依赖 yaml-cpp，随 vcpkg manifest 固定到 `0.9.0#1`。ONNX Runtime 使用 CPU 版 `1.19.2`。PCL 最低支持版本为 `1.15.1`，发包清单固定到 `1.15.1#1`。core 使用 RelWithDebInfo 与动态 CRT；CLI 使用 Rust Release 和 `--no-default-features`。SDK 从同一份 core 暂存文件生成，避免两套资产实际包含不同引擎。
 
 本版 SDK 的 C++ 客户端与同一发布修订的 Rust 客户端，在 Windows 上将依赖搜索目录限制为指定 DLL 所在目录，不读取 PATH，也不从当前工作目录或 System32 补齐第三方运行库。Windows KnownDLL 与 API Set 系统组件仍由操作系统解析。宿主需把所有非系统依赖部署在 DLL 目录中；缺依赖时应明确失败。GS 必须升级到采用相同产品版本 ABI 的客户端；旧数字 ABI 客户端不再列为兼容对象。
 
