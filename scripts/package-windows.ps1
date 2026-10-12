@@ -164,7 +164,7 @@ try {
     $metadata = [ordered]@{
         schemaVersion = 1; engineVersion = $inspection.engineVersion; abiVersion = $inspection.abiVersion
         sourceRevision = $revision; architecture = 'x64'; buildConfiguration = 'RelWithDebInfo'
-        packs = $packs; operators = $operators; dependencies = @($dependencies | Sort-Object name -Unique)
+        packs = $packs; operators = $operators; dependencies = @($dependencies | Sort-Object { $_.name } -Unique)
         files = @($fileNames | ForEach-Object { [ordered]@{ path = $_ } })
         localValidationOnly = [bool]($AllowDirty -or $SkipDependencySetup)
         licenseStatus = 'Project license not declared in source repository'
