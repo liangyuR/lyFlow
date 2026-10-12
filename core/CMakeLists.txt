@@ -313,7 +313,7 @@ set(LYFLOW_RELEASE_IDENTITY_ALLOWED FALSE)
 if(LYFLOW_RELEASE_BUILD AND WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND
    CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" AND NOT LYFLOW_EXT_PACK_DIRS AND
    NOT LYFLOW_EXT_PACK_NAMES AND
-   _release_identity_packs STREQUAL "glue;std-image;std-ml;std-pointcloud")
+   _release_identity_packs STREQUAL "gap;glue;std-image;std-ml;std-pointcloud")
   set(LYFLOW_RELEASE_IDENTITY_ALLOWED TRUE)
 endif()
 add_custom_target(lyflow-source-revision
