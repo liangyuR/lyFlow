@@ -818,11 +818,10 @@ Status fitGapCircles(const Inputs& inputs, const ParamView& params, Outputs& out
                                          &side.circle, &side.indices);
       if (!side.fitted && retryDistanceMm > 0) {
         side.indices.clear();
-        side.fitted =
-            circleFitConstrained(side.cloud, sideRefLine[i], centerAbove[i], centerTol[i],
-                                 tangentAbove[i], tangentTol[i], bearing[i], bearingTol[i],
-                                 mmToM(retryDistanceMm), cfg[i].rMin, cfg[i].rMax, cfg[i].rFixed,
-                                 &side.circle, &side.indices);
+        side.fitted = circleFitConstrained(side.cloud, sideRefLine[i], centerAbove[i], centerTol[i],
+                                           tangentAbove[i], tangentTol[i], bearing[i],
+                                           bearingTol[i], mmToM(retryDistanceMm), cfg[i].rMin,
+                                           cfg[i].rMax, cfg[i].rFixed, &side.circle, &side.indices);
       }
       if (side.fitted) {
         std::string tag = "circle";
@@ -1457,16 +1456,19 @@ void registerFitGapCircles(Registry& r) {
       numParam("rightCenterTol", "Right Center Tol", 0.0, "mm", "Right Radius",
                "圆心高度的容差，<= 0 表示不加这个约束。含义同 leftCenterTol。"),
       centerModeParam("rightCenterMode", "Right Center Mode", "Right Radius"),
-      numParam("leftTangentAbove", "Left Tangent Above", 0.0, "mm", "Left Radius",
-               "左圆圆顶（圆心高度 + 半径）应当高出 refLine 多少，配合 leftTangentTol 使用。0 = 圆顶正好"
-               "压在面线上，即圆角从这张面圆滑拐下去、与面相切。"),
-      numParam("leftTangentTol", "Left Tangent Tol", 0.0, "mm", "Left Radius",
-               "相切带的容差，<= 0 表示不加（默认）。缝里更深处还有一段弧时（翻边、胶），拟到那上面的圆"
-               "半径小、圆心高度却和拐角圆差不多，圆心高度带拦不住，只有圆顶悬在面下面分得开。"
-               "档位跟 leftCenterMode 走；refLine 要接这一侧自己那张面的线。先量一批正常帧的 "
-               "quality.topAboveRefMm 再定。"),
-      numParam("rightTangentAbove", "Right Tangent Above", 0.0, "mm", "Right Radius",
-               "右圆圆顶应当高出参考线多少（refLineRight，不接就用 refLine），含义同 leftTangentAbove。"),
+      numParam(
+          "leftTangentAbove", "Left Tangent Above", 0.0, "mm", "Left Radius",
+          "左圆圆顶（圆心高度 + 半径）应当高出 refLine 多少，配合 leftTangentTol 使用。0 = 圆顶正好"
+          "压在面线上，即圆角从这张面圆滑拐下去、与面相切。"),
+      numParam(
+          "leftTangentTol", "Left Tangent Tol", 0.0, "mm", "Left Radius",
+          "相切带的容差，<= 0 表示不加（默认）。缝里更深处还有一段弧时（翻边、胶），拟到那上面的圆"
+          "半径小、圆心高度却和拐角圆差不多，圆心高度带拦不住，只有圆顶悬在面下面分得开。"
+          "档位跟 leftCenterMode 走；refLine 要接这一侧自己那张面的线。先量一批正常帧的 "
+          "quality.topAboveRefMm 再定。"),
+      numParam(
+          "rightTangentAbove", "Right Tangent Above", 0.0, "mm", "Right Radius",
+          "右圆圆顶应当高出参考线多少（refLineRight，不接就用 refLine），含义同 leftTangentAbove。"),
       numParam("rightTangentTol", "Right Tangent Tol", 0.0, "mm", "Right Radius",
                "右侧相切带的容差，<= 0 表示不加。含义同 leftTangentTol。"),
       bearingParam("leftArcBearingDeg", "Left Arc Bearing", "Left Radius"),

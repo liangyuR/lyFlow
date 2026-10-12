@@ -1415,10 +1415,12 @@ TEST_CASE("gap.fit_gap_circles 的参数与连线检查在 validate 里") {
                                plain),
                  "bad_param", "rightRadiusValue"));
   // 配了相切带却没接参考线
-  CHECK(hasError(call.validate("gap.fit_gap_circles", {{"leftTangentTol", Value::number(0.25)}}, plain),
-                 "bad_param", "leftTangentTol"));
-  CHECK(hasError(call.validate("gap.fit_gap_circles", {{"rightTangentTol", Value::number(0.25)}}, plain),
-                 "bad_param", "rightTangentTol"));
+  CHECK(hasError(
+      call.validate("gap.fit_gap_circles", {{"leftTangentTol", Value::number(0.25)}}, plain),
+      "bad_param", "leftTangentTol"));
+  CHECK(hasError(
+      call.validate("gap.fit_gap_circles", {{"rightTangentTol", Value::number(0.25)}}, plain),
+      "bad_param", "rightTangentTol"));
   // 半径先验不在上下限之间
   CHECK(hasError(call.validate("gap.fit_gap_circles",
                                {{"leftRadiusPrior", Value::number(3.0)},
