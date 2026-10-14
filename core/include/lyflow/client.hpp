@@ -29,6 +29,33 @@ namespace lyflow {
 
 constexpr const char* kClientAbiVersion = LYFLOW_ABI_VERSION;
 
+/// "主.次"；不是 数字.数字 开头时返回空串。
+inline std::string abi_series(const char* version) {
+  if (!version)
+    return {};
+  const std::string text(version);
+  const auto major_end = text.find('.');
+  if (major_end == 0 || major_end == std::string::npos)
+    return {};
+  auto minor_end = text.find('.', major_end + 1);
+  if (minor_end == std::string::npos)
+    minor_end = text.size();
+  if (minor_end == major_end + 1)
+    return {};
+  const std::string series = text.substr(0, minor_end);
+  for (char c : series) {
+    if (c != '.' && (c < '0' || c > '9'))
+      return {};
+  }
+  return series;
+}
+
+/// 同一 主.次 系列的 core 与本头文件兼容；补丁版本不破坏 C ABI。
+inline bool abi_compatible(const char* version) {
+  const std::string series = abi_series(version);
+  return !series.empty() && series == abi_series(kClientAbiVersion);
+}
+
 class ClientError : public std::runtime_error {
 public:
   explicit ClientError(const std::string& what) : std::runtime_error(what) {}
@@ -702,8 +729,7 @@ inline void Client::bind(const std::string& where) {
   need(fn_.version, "lyflow_version", where);
   const char* abi = fn_.abi_version();
   const char* engine = fn_.version();
-  if (!abi || !engine || std::strcmp(abi, kClientAbiVersion) != 0 ||
-      std::strcmp(engine, kClientAbiVersion) != 0) {
+  if (!abi_compatible(abi) || !abi_compatible(engine)) {
     throw ClientError(std::string("lyflow_core version mismatch: client=") + kClientAbiVersion +
                       ", ABI=" + (abi ? abi : "<null>") +
                       ", engine=" + (engine ? engine : "<null>"));

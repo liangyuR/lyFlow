@@ -18,9 +18,9 @@
 
 本版 SDK 的 C++ 客户端与同一发布修订的 Rust 客户端，在 Windows 上将依赖搜索目录限制为指定 DLL 所在目录，不读取 PATH，也不从当前工作目录或 System32 补齐第三方运行库。Windows KnownDLL 与 API Set 系统组件仍由操作系统解析。宿主需把所有非系统依赖部署在 DLL 目录中；缺依赖时应明确失败。GS 必须升级到采用相同产品版本 ABI 的客户端；旧数字 ABI 客户端不再列为兼容对象。
 
-产品版本与 ABI 统一为同一个完整字符串 `X.Y.Z`，例如 `"1.1.0"`。引擎、C++/Rust 客户端、SDK 和包元数据必须逐字一致；补丁版本也不放宽兼容。`abiVersion` 必须是 JSON 字符串，旧数字 `15` 及旧数字 ABI 导出不再支持。DLL 通过 `lyflow_abi_version_string()` 报告 ABI，新客户端缺少该符号或收到不同版本时在任何后续 ABI 调用前拒绝加载。`lyflow-runtime.json` 记录 `engineVersion`、`abiVersion`、`sourceRevision`、架构、构建配置、算子包及版本、实际算子、依赖版本和相对文件清单。最终 DLL 查询结果必须与声明一致。`lyflow_source_revision()` 仅对受控发布组合的干净源码返回构建提交；正式包要求它与当前 HEAD 和元数据 `sourceRevision` 完全相同。脏源码或未知修订返回空字符串，仅允许在显式 `-AllowDirty` 的本地诊断包中使用，并将清单标为 `localValidationOnly`；这种产物不能作为正式发布交付。不使用内容哈希或指纹建立包身份、匹配或校验；Git 提交标识仅用于源码修订。
+产品版本与 ABI 统一为同一个完整字符串 `X.Y.Z`，例如 `"1.1.0"`。运行时兼容按 主.次 系列判定：同一 `X.Y` 系列的补丁版本必须保持 C ABI 兼容，C++/Rust 客户端加载同系列任一补丁版本的引擎；跨次版本拒绝加载。包元数据内的各版本字段仍须与该次发布逐字一致。`abiVersion` 必须是 JSON 字符串，旧数字 `15` 及旧数字 ABI 导出不再支持。DLL 通过 `lyflow_abi_version_string()` 报告 ABI，新客户端缺少该符号或收到不同版本时在任何后续 ABI 调用前拒绝加载。`lyflow-runtime.json` 记录 `engineVersion`、`abiVersion`、`sourceRevision`、架构、构建配置、算子包及版本、实际算子、依赖版本和相对文件清单。最终 DLL 查询结果必须与声明一致。`lyflow_source_revision()` 仅对受控发布组合的干净源码返回构建提交；正式包要求它与当前 HEAD 和元数据 `sourceRevision` 完全相同。脏源码或未知修订返回空字符串，仅允许在显式 `-AllowDirty` 的本地诊断包中使用，并将清单标为 `localValidationOnly`；这种产物不能作为正式发布交付。不使用内容哈希或指纹建立包身份、匹配或校验；Git 提交标识仅用于源码修订。
 
-Rust 客户端继续从同一发布提交引用，不附进 ZIP、不发布 crates.io。Release 提供完整 `rev` 的 Cargo 示例。GS 客户端集成与运行库消费验证由 GS 负责，发包不再绑定独立 GS 消费工程或客户端修订。ABI 不兼容时必须更新客户端，不能宣称运行库可直接替换。SDK 消费方必须声明完整产品版本并使用 `find_package(lyflow X.Y.Z EXACT CONFIG REQUIRED)`。下游应保留已验收运行库及随包 CRT，不能无条件用其他版本覆盖。
+Rust 客户端继续从同一发布提交引用，不附进 ZIP、不发布 crates.io。Release 提供完整 `rev` 的 Cargo 示例。GS 客户端集成与运行库消费验证由 GS 负责，发包不再绑定独立 GS 消费工程或客户端修订。同系列补丁版本的运行库可直接替换；破坏 C ABI 的改动必须提升次版本号，并同步更新客户端。SDK 消费方必须声明完整产品版本并使用 `find_package(lyflow X.Y.Z EXACT CONFIG REQUIRED)`。下游应保留已验收运行库及随包 CRT，不能无条件用其他版本覆盖。
 
 ## 本地入口
 
@@ -52,7 +52,7 @@ pnpm run package -OutputDir C:\release\lyflow
 
 去掉 `-PackageOnly` 才会上传。认证依次使用 `LYFLOW_NUGET_TOKEN`、`NUGET_AUTH_TOKEN` 或 `-CredentialFile`（本机默认 `C:\Users\11601\.ssh\github_nuget_auth.txt`，内容为单个令牌）。临时 NuGet 配置只引用环境变量，不保存令牌值，不进入包或 Actions 缓存；失败输出会遮盖令牌。Release API 可使用 `GH_TOKEN`，公开资产本机可匿名下载。CI 用当前仓库的 `github.token`，仅 NuGet 发布 job 获得 `packages: write`；nuspec repository 关联 `liangyuR/lyFlow`。下游仓库需获得包的 Actions 读取授权，本机读取需 `read:packages`。
 
-下游可固定兼容系列后显式选取系列内正式补丁版本，但每次构建必须锁定完整 NuGet 版本及源码修订，并使用同一修订的 Rust 客户端。`1.1.x` 系列选择不放宽运行时完整 ABI/产品版本必须一致的限制。包元数据清单、目录、架构、实际 DLL 版本/修订和算子仍须校验，缓存命中不能替代验证。
+下游可固定兼容系列后显式选取系列内正式补丁版本，但每次构建必须锁定完整 NuGet 版本及源码修订，并使用同一修订的 Rust 客户端。运行时允许同一 `1.1.x` 系列内的客户端与运行库补丁版本不同，兼容由发布方保证补丁版本不破坏 C ABI。包元数据清单、目录、架构、实际 DLL 版本/修订和算子仍须校验，缓存命中不能替代验证。
 
 独立契约回归：`pwsh -NoProfile -File tests/release/test-runtime-nuget.ps1`，覆盖正式输入、错误版本/ABI/修订/架构、诊断包、旧内容摘要字段、缺算子、异常文件、x86 DLL 和压缩包路径穿越。真实 DLL 检查及首包验证需另外执行上述本机入口。
 

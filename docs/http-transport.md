@@ -305,7 +305,7 @@ magic 对不上时编辑器会当成「响应不是点云」直接报错，所�
 
 ### `GET /lyflow/runs/:runId/images/:nodeId/:port?level=&row=&rows=`
 
-`Content-Type: application/octet-stream`，载荷是 `lyflow_output_image` 的视图（ABI 与产品版本严格一致，[image-plan.md](image-plan.md) §5；
+`Content-Type: application/octet-stream`，载荷是 `lyflow_output_image` 的视图（ABI 按产品版本 主.次 系列兼容，[image-plan.md](image-plan.md) §5；
 编码在 `bridge/src/execution.rs` 的 `encode_image`）。**小端**，帧头 12 个 `u32`：
 
 | 偏移 | 类型 | 含义 |
