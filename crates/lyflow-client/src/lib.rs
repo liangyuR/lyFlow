@@ -3,7 +3,7 @@
 //!
 //! 这是 `lyflow/client.hpp`（C++ header-only 客户端，见 docs/embedding.md）的 Rust 对应物：
 //! 不构建 core、不链接任何库、不含 build.rs，core 是运行时按给定路径加载的 DLL（ADR-0004）。
-//! `ABI_VERSION` 必须与 core 的 `LYFLOW_ABI_VERSION` 一致。
+//! core 的 `LYFLOW_ABI_VERSION` 与引擎版本必须与 `ABI_VERSION` 属于同一 主.次 系列：补丁版本不破坏 C ABI。
 //!
 //! 进程级单例、DLL 路径解析与热重载**不在这里** —— 那是宿主自己的事，桥接层的那一份在
 //! `bridge/src/core_ffi.rs`。
@@ -19,8 +19,18 @@ use libloading::{Library, Symbol};
 
 pub type EventCb = unsafe extern "C" fn(*const c_char, *mut c_void);
 
-/// C ABI 的版本号。与 core/include/lyflow/c_api.h 的 LYFLOW_ABI_VERSION 必须一致。
+/// 客户端的产品版本。core 的 LYFLOW_ABI_VERSION（core/include/lyflow/c_api.h）与它同属一个 主.次 系列才能加载。
 pub const ABI_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn series(version: &str) -> Option<(u64, u64)> {
+    let mut parts = version.split('.');
+    Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
+}
+
+/// 同一 主.次 系列的 core 与本客户端兼容；补丁版本不破坏 C ABI。
+pub fn abi_compatible(version: &str) -> bool {
+    series(version).is_some() && series(version) == series(ABI_VERSION)
+}
 
 /// 运行时注入一个源节点的输出（v7）。缓冲由调用方持有到 `lyflow_run_start` 返回。
 #[repr(C)]
@@ -444,7 +454,7 @@ impl Core {
         };
         let abi = read_version(abi_version)?;
         let engine = read_version(version)?;
-        if abi != ABI_VERSION || engine != ABI_VERSION {
+        if !abi_compatible(&abi) || !abi_compatible(&engine) {
             return Err(CoreError::VersionMismatch {
                 client: ABI_VERSION,
                 abi,
@@ -1447,10 +1457,14 @@ mod load_contract_tests {
         std::fs::create_dir_all(&fixtures.0).unwrap();
         let (base, patch) = ABI_VERSION.rsplit_once('.').unwrap();
         let next_patch = format!("{base}.{}", patch.parse::<u64>().unwrap() + 1);
+        let (major, minor) = base.split_once('.').unwrap();
+        let next_minor = format!("{major}.{}.0", minor.parse::<u64>().unwrap() + 1);
         let cases = [
             ("legacy", None, ABI_VERSION),
             ("abi_patch", Some(next_patch.as_str()), ABI_VERSION),
             ("engine_patch", Some(ABI_VERSION), next_patch.as_str()),
+            ("abi_minor", Some(next_minor.as_str()), ABI_VERSION),
+            ("engine_minor", Some(ABI_VERSION), next_minor.as_str()),
             ("legacy_string", Some("15"), ABI_VERSION),
             ("null_abi", Some(""), ABI_VERSION),
             ("matching", Some(ABI_VERSION), ABI_VERSION),
@@ -1492,9 +1506,9 @@ mod load_contract_tests {
                     matches!(error, CoreError::MissingSymbol("lyflow_abi_version_string")),
                     "{error}"
                 ),
-                "matching" => assert!(
+                "matching" | "abi_patch" | "engine_patch" => assert!(
                     matches!(error, CoreError::MissingSymbol("lyflow_source_revision")),
-                    "{error}"
+                    "{name}: {error}"
                 ),
                 _ => assert!(
                     matches!(error, CoreError::VersionMismatch { .. }),

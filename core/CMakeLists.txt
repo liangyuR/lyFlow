@@ -366,11 +366,14 @@ target_link_libraries(lyflow-core-tests PRIVATE ${LYFLOW_PACK_LIBS})
 
 math(EXPR _fixture_next_patch "${PROJECT_VERSION_PATCH} + 1")
 set(_fixture_other_version "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${_fixture_next_patch}")
-foreach(fixture matching legacy abi_patch engine_patch null_abi)
+math(EXPR _fixture_next_minor "${PROJECT_VERSION_MINOR} + 1")
+set(_fixture_other_minor "${PROJECT_VERSION_MAJOR}.${_fixture_next_minor}.0")
+foreach(fixture matching legacy abi_patch engine_patch abi_minor engine_minor null_abi)
   add_library(lyflow-client-${fixture} SHARED "${LYFLOW_TESTS}/fixtures/client_version.cpp")
   target_include_directories(lyflow-client-${fixture} PRIVATE "${LYFLOW_INCLUDE}")
   target_compile_definitions(lyflow-client-${fixture} PRIVATE "LYFLOW_FIXTURE_${fixture}"
-    "LYFLOW_FIXTURE_OTHER_VERSION=\"${_fixture_other_version}\"")
+    "LYFLOW_FIXTURE_OTHER_VERSION=\"${_fixture_other_version}\""
+    "LYFLOW_FIXTURE_OTHER_MINOR=\"${_fixture_other_minor}\"")
   set_target_properties(lyflow-client-${fixture} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/client-fixtures"
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/client-fixtures"

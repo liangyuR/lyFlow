@@ -1,6 +1,6 @@
 #ifndef LYFLOW_C_API_H
 #define LYFLOW_C_API_H
-// C ABI 与产品版本字符串严格一致。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
+// C ABI 版本号即产品版本字符串；同一 主.次 系列内的补丁版本保持 C ABI 兼容，客户端按系列校验。Rust 桥接层与嵌入宿主（include/lyflow/client.hpp）只看见这个头文件。
 // 三条约定（char* 归属、异常不跨 ABI、只导出 C 函数）见 core/README.md「C ABI 约定」。
 #include "lyflow/version.h"
 #define LYFLOW_ABI_VERSION LYFLOW_VERSION

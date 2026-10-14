@@ -18,7 +18,7 @@ core 是运行时加载的 DLL（[ADR-0004](adr/0004-core-as-dll.md)）。
 
 契约版本使用产品版本字符串 **1.1.0**。`LYFLOW_ABI_VERSION` 引用 `version.h` 的
 `LYFLOW_VERSION`，Rust 的 `ABI_VERSION` 引用 crate 产品版本。C++ 和 Rust 客户端在加载时先读取
-`lyflow_abi_version_string()` 与 `lyflow_version()`，两者必须与客户端版本完全相同，补丁版本也不兼容。
+`lyflow_abi_version_string()` 与 `lyflow_version()`，两者必须与客户端版本属于同一 主.次 系列；同系列的补丁版本保持 C ABI 兼容，可以直接替换运行库。
 只有统一打包入口验证固定依赖并声明 `LYFLOW_RELEASE_BUILD=ON`，且实际为 Windows x64、
 RelWithDebInfo、固定四包（std-pointcloud、std-image、std-ml、glue）、无外部算子包、源码树干净
 且 Git 修订可识别时，`lyflow_source_revision()` 才返回完整提交标识；否则返回空串。

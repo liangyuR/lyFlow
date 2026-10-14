@@ -11,6 +11,8 @@ EXPORT unsigned lyflow_abi_version() { return 15; }
 EXPORT const char* lyflow_abi_version_string() {
 #if defined(LYFLOW_FIXTURE_abi_patch)
   return LYFLOW_FIXTURE_OTHER_VERSION;
+#elif defined(LYFLOW_FIXTURE_abi_minor)
+  return LYFLOW_FIXTURE_OTHER_MINOR;
 #elif defined(LYFLOW_FIXTURE_null_abi)
   return nullptr;
 #else
@@ -22,6 +24,8 @@ EXPORT const char* lyflow_abi_version_string() {
 EXPORT const char* lyflow_version() {
 #if defined(LYFLOW_FIXTURE_engine_patch)
   return LYFLOW_FIXTURE_OTHER_VERSION;
+#elif defined(LYFLOW_FIXTURE_engine_minor)
+  return LYFLOW_FIXTURE_OTHER_MINOR;
 #else
   return LYFLOW_VERSION;
 #endif

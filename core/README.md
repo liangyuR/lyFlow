@@ -63,8 +63,8 @@ core 是 **CMake 构建的 DLL**（[ADR-0004](../docs/adr/0004-core-as-dll.md)�
 只导出 `c_api.h` 里那些 C 函数。Rust 侧用 libloading 在**运行时**加载它，
 既不链 import 库，也不再用 cc crate 逐个编 `.cpp`。
 C ABI 使用产品版本字符串：`LYFLOW_ABI_VERSION` 引用 `LYFLOW_VERSION`，通过
-`lyflow_abi_version_string()` 导出。客户端加载时要求 ABI、引擎版本与客户端版本完全相等，
-包括补丁版本；旧整数 ABI 导出已移除，旧 DLL 直接拒绝。SDK 的 CMake 消费方必须显式指定
+`lyflow_abi_version_string()` 导出。客户端加载时要求 ABI、引擎版本与客户端版本属于同一 主.次 系列，
+补丁版本之间保持 C ABI 兼容；旧整数 ABI 导出已移除，旧 DLL 直接拒绝。SDK 的 CMake 消费方必须显式指定
 完整版本，例如 `find_package(lyflow 1.1.0 EXACT CONFIG REQUIRED)`。
 `LYFLOW_RELEASE_BUILD` 默认关闭，仅由统一打包入口在验证固定依赖后启用。只有该受控发布构建、
 固定四个发布算子包、无外部包、Windows x64 RelWithDebInfo 且干净 Git 修订时，

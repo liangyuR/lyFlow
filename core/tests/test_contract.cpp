@@ -219,15 +219,17 @@ TEST_CASE("契约自检：四种键之外的任何东西都过不了 manifest --
   CHECK(ensureRegistry().validate().empty());
 }
 
-TEST_CASE("客户端在业务绑定前拒绝旧整数 ABI、补丁差异和空版本") {
+TEST_CASE("客户端拒绝旧整数 ABI、跨次版本和空版本，接受同系列补丁版本") {
   struct Case {
     const char* path;
     const char* expected;
   };
   const Case cases[] = {
       {LYFLOW_FIXTURE_PATH_legacy, "lyflow_abi_version_string"},
-      {LYFLOW_FIXTURE_PATH_abi_patch, "version mismatch"},
-      {LYFLOW_FIXTURE_PATH_engine_patch, "version mismatch"},
+      {LYFLOW_FIXTURE_PATH_abi_patch, "lyflow_source_revision"},
+      {LYFLOW_FIXTURE_PATH_engine_patch, "lyflow_source_revision"},
+      {LYFLOW_FIXTURE_PATH_abi_minor, "version mismatch"},
+      {LYFLOW_FIXTURE_PATH_engine_minor, "version mismatch"},
       {LYFLOW_FIXTURE_PATH_null_abi, "version mismatch"},
       {LYFLOW_FIXTURE_PATH_matching, "lyflow_source_revision"},
   };
