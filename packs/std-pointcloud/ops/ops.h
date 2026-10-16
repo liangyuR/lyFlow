@@ -30,6 +30,7 @@ void registerFitLine2D(Registry& r);
 void registerFitCircle2D(Registry& r);
 void registerRegisterIcp2D(Registry& r);
 void registerFilterCropBox2D(Registry& r);
+void registerSegmentRegionGrowing2D(Registry& r);
 
 /// 把一片点云写到磁盘（按扩展名选 PCD 或 PLY）。装进 core 的 setCloudWriter，
 /// C ABI 的 lyflow_output_save 与 CLI 的 `lyflow dump` 都经它落盘（单线程）。

@@ -18,7 +18,7 @@ pnpm check            # core 只剩 gen.synthetic 与 util.reroute，DLL 里没�
 
 ## 算子
 
-19 个。前 14 个的 id / 版本 / 参数 / 分类与它们还在 `core/src/ops/` 时逐字相同。
+20 个。前 14 个的 id / 版本 / 参数 / 分类与它们还在 `core/src/ops/` 时逐字相同。
 
 | id | 分类 | 名字 | 端口 |
 |---|---|---|---|
@@ -53,6 +53,16 @@ pnpm check            # core 只剩 gen.synthetic 与 util.reroute，DLL 里没�
 |---|---|---|---|
 | `edit.translate_region` | 编辑 | 平移选区 | cloud → cloud |
 
+分割域一个（标定的左右分割，替代 xyz-gap-inspector 里的过渡实现 `calibration/split.rs`）：
+
+| id | 分类 | 名字 | 端口 |
+|---|---|---|---|
+| `segment.region_growing_2d` | 分割 | 区域生长 2D | cloud → left, right, result |
+
+XY 平面上按法线夹角的区域生长（PCL `RegionGrowing` 平滑模式 + 二维协方差法线），取点数最多的两簇、
+x 均值小的从 `left` 出。与 split.rs 逐位一致（`test_2d_ops.cpp` 拿它生成的期望值比对），
+剩下不到两簇报 `split_failed`。
+
 长度参数一律是**米**，与点云同单位。
 
 ## 目录
@@ -73,12 +83,14 @@ algo/
   icp2d.*                       2D point-to-plane ICP
   profile_geometry.*            剖面法线估计
   crop2d.*                      XY 盒裁剪（开/闭区间）
+  region_growing2d.*            XY 区域生长 + 最大两簇分左右（不依赖 PCL）
 src/
   adapter.cpp、pcl_path.cpp     上面两个头的实现
 tests/
   test_std_ops.cpp              算子语义（体素键、通道保留、迁移链…）
   test_io_pcd.cpp               中文路径下的 PCD 往返
-  test_2d_ops.cpp               2D 四个算子（开闭区间、拟合、ICP 恢复平移）
+  test_2d_ops.cpp               2D 算子（开闭区间、拟合、ICP 恢复平移、区域生长与 split.rs 逐位对拍）
+  data/region_growing_2d_cases.h  split.rs 生成的输入与期望下标（勿手改）
 ```
 
 ## `lyflow_pcl_support`
@@ -113,6 +125,7 @@ lyflow_op_pack(NAME mypack LINK lyflow_std_algo ...)
 #include "algo/fit2d.h"   // lyflow::std_pc::fitLine2D / fitCircle2D / fitCircleFixedRadius2D
 #include "algo/icp2d.h"   // lyflow::std_pc::Icp2D
 #include "algo/crop2d.h"  // lyflow::std_pc::insideBox2D / cropBox2D
+#include "algo/region_growing2d.h"  // lyflow::std_pc::regionGrowing2D
 ```
 
 `algo/` 里的 2D 算法一律吃 `pcl::PointCloud<pcl::PointXYZRGB>`（迁移时沿用的点类型）。

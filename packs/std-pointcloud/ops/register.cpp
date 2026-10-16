@@ -35,6 +35,9 @@ void registerPackOps(Registry& r) {
 
   ops::registerEditTranslateRegion(r);
 
+  // 之后新增的算子一律追加在这里，既有算子在 manifest 里的位置不动。
+  ops::registerSegmentRegionGrowing2D(r);
+
   // 写盘格式的知识只有本包有，core 的 C ABI 经这个钩子转交（ADR-0014）。
   setCloudWriter(static_cast<CloudWriterFn>(&ops::saveCloudToFile));
 }
