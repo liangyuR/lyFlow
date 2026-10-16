@@ -27,7 +27,7 @@
 using namespace lyflow;
 using namespace lyflow::test;
 
-TEST_CASE("包里的 19 个算子都注册了，且都带 pack 标记") {
+TEST_CASE("包里的 20 个算子都注册了，且都带 pack 标记") {
   const auto problems = ensureRegistry().validate();
   for (const auto& p : problems)
     MESSAGE(p);
@@ -53,6 +53,7 @@ TEST_CASE("包里的 19 个算子都注册了，且都带 pack 标记") {
       "fit.circle_2d",
       "register.icp_2d",
       "edit.translate_region",
+      "segment.region_growing_2d",
   };
   for (const auto& id : expected) {
     CAPTURE(id);

@@ -1,13 +1,16 @@
-// 2D 量测域四个算子的测试（ADR-0015）。这些算子的输入里有 Box2D / Transform，
+// 2D 量测域算子的测试（ADR-0015）。这些算子的输入里有 Box2D / Transform，
 // 拼图跑不方便，所以直接调 compute。
 #include <doctest/doctest.h>
 
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include "algo/region_growing2d.h"
+#include "data/region_growing_2d_cases.h"
 #include "helpers.h"
 #include "lyflow/operator.h"
 #include "lyflow/registry.h"
@@ -25,6 +28,18 @@ Box2D box(float xMin, float yMin, float xMax, float yMax) {
   b.max[0] = xMax;
   b.max[1] = yMax;
   return b;
+}
+
+float fromBits(std::uint32_t bits) {
+  float value;
+  std::memcpy(&value, &bits, sizeof value);
+  return value;
+}
+
+std::uint32_t toBits(float value) {
+  std::uint32_t bits;
+  std::memcpy(&bits, &value, sizeof bits);
+  return bits;
 }
 
 } // namespace
@@ -205,4 +220,91 @@ TEST_CASE("register.icp_2d 对空云报 bad_input 而不是崩") {
   CHECK_FALSE(s.ok);
   CHECK(s.code == "bad_input");
   CHECK(s.portName == "source");
+}
+
+TEST_CASE("segment.region_growing_2d 与 xyz-gap-inspector 的 split.rs 逐位一致") {
+  // 期望值由 split.rs（标定左右分割的行为基准，与 PCL RegionGrowing 等价）对同一批输入跑出：
+  // split.rs 自己的单元测试输入 + 现场标定圆柱两个头（经 filter.crop_box2d 同一条裁剪）在几组参数下。
+  namespace rg = lyflow::test::region_growing_2d;
+  for (const rg::Case& tc : rg::kCases) {
+    CAPTURE(tc.name);
+    std::vector<float> xy(2 * tc.pointCount);
+    PointCloud cloud;
+    for (std::size_t i = 0; i < tc.pointCount; ++i) {
+      xy[2 * i] = fromBits(tc.xy[2 * i]);
+      xy[2 * i + 1] = fromBits(tc.xy[2 * i + 1]);
+      cloud.push(xy[2 * i], xy[2 * i + 1], 0.0f);
+      cloud.intensity.push_back(static_cast<float>(i));
+    }
+
+    std_pc::RegionGrowing2DOptions options;
+    options.neighbors = tc.neighbor;
+    options.angleThresholdDeg = tc.angleDeg;
+    const std_pc::RegionGrowing2DResult result =
+        std_pc::regionGrowing2D(xy.data(), tc.pointCount, options);
+    CHECK(result.clusters.size() == static_cast<std::size_t>(tc.clusterCount));
+    CHECK(result.left == std::vector<std::int32_t>(tc.left, tc.left + tc.leftCount));
+    CHECK(result.right == std::vector<std::int32_t>(tc.right, tc.right + tc.rightCount));
+
+    Call c;
+    c.inputs["cloud"] = Data::cloud(cloud);
+    const Status s =
+        c.run("segment.region_growing_2d", {{"neighbors", Value::integer(tc.neighbor)},
+                                            {"angleThresh", Value::number(tc.angleDeg)}});
+    if (tc.clusterCount < 2) {
+      CHECK_FALSE(s.ok);
+      CHECK(s.code == (tc.neighbor < 2 ? "bad_param" : "split_failed"));
+      continue;
+    }
+    CAPTURE(s.message);
+    REQUIRE(s.ok);
+    // 算子输出的两片云是输入按下标取的子集：坐标逐位相同，通道（这里用强度记原下标）跟着走。
+    struct Side {
+      const char* port;
+      const std::int32_t* expected;
+      std::size_t count;
+    };
+    for (const Side side :
+         {Side{"left", tc.left, tc.leftCount}, Side{"right", tc.right, tc.rightCount}}) {
+      CAPTURE(side.port);
+      const PointCloud* out = c.outputs[side.port].asCloud();
+      REQUIRE(out != nullptr);
+      REQUIRE(out->pointCount() == side.count);
+      for (std::size_t m = 0; m < side.count; ++m) {
+        const auto i = static_cast<std::size_t>(side.expected[m]);
+        CHECK(toBits(out->xyz[3 * m]) == tc.xy[2 * i]);
+        CHECK(toBits(out->xyz[3 * m + 1]) == tc.xy[2 * i + 1]);
+        CHECK(out->intensity[m] == static_cast<float>(i));
+      }
+    }
+    const Record* record = c.outputs["result"].asRecord();
+    REQUIRE(record != nullptr);
+    CHECK(record->type == "RegionGrowing2DResult");
+    CHECK(record->data["clusterCount"] == tc.clusterCount);
+    CHECK(record->data["leftCount"] == tc.leftCount);
+    CHECK(record->data["rightCount"] == tc.rightCount);
+  }
+}
+
+TEST_CASE("segment.region_growing_2d 的 eigen22 保留 PCL 对角分支的原样，参数反了报 bad_param") {
+  // 互协方差近 0 时恒取 else：特征值 = 互协方差、向量 (0, 1)（split.rs 的同名用例）。
+  const double diagonal[4] = {4.0, 0.0, 0.0, 1.0};
+  double vector[2];
+  CHECK(std_pc::eigen22(diagonal, vector) == 0.0);
+  CHECK(vector[0] == 0.0);
+  CHECK(vector[1] == 1.0);
+  const double general[4] = {2.0, 1.0, 1.0, 2.0};
+  CHECK(std_pc::eigen22(general, vector) == doctest::Approx(1.0).epsilon(1e-12));
+  CHECK(std::abs(std::abs(vector[0] - vector[1]) - std::sqrt(2.0)) < 1e-12);
+
+  Call c;
+  PointCloud cloud;
+  for (int i = 0; i < 10; ++i)
+    cloud.push(static_cast<float>(i) * 0.001f, 0.0f, 0.0f);
+  c.inputs["cloud"] = Data::cloud(cloud);
+  const Status s = c.run("segment.region_growing_2d", {{"minClusterSize", Value::integer(50)},
+                                                       {"maxClusterSize", Value::integer(10)}});
+  CHECK_FALSE(s.ok);
+  CHECK(s.code == "bad_param");
+  CHECK(s.paramPath == "maxClusterSize");
 }
