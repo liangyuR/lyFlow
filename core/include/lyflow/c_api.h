@@ -181,6 +181,24 @@ typedef struct {
 #define LYFLOW_RUN_MODE_FULL 0
 #define LYFLOW_RUN_MODE_PREVIEW 1
 
+/* 1.1.3：带运行时注入的计划与按节点清缓存。注入的数据进 cacheKey（ADR-0017），所以「注入点云再跑」
+   之后，不带注入的 lyflow_plan_params 看不到这些结果（cached 恒为 false），lyflow_cache_evict 也清不掉
+   （removed 恒为 0）。给出与那次运行**同一份** inputs / image_inputs（结构与规则同 lyflow_run_options，
+   缓冲只需活到函数返回），算出来的就是那次运行的键。其余参数与返回值分别同 lyflow_plan_params、
+   lyflow_cache_evict；inputs 与 image_inputs 都为 NULL/0 时与它们完全相同。
+   1.1.3 之前的运行库没有这两个符号：宿主应当把它们当可选符号加载，缺了就退回老入口。 */
+LYFLOW_API char* lyflow_plan_inputs(const char* graph_json, const char* base_dir,
+                                    const char* const* targets, size_t n, const char* params_json,
+                                    const lyflow_run_input* inputs, size_t input_count,
+                                    const lyflow_run_image_input* image_inputs,
+                                    size_t image_input_count);
+LYFLOW_API char* lyflow_cache_evict_inputs(const char* graph_json, const char* base_dir,
+                                           const char* const* node_ids, size_t n,
+                                           int include_downstream, const char* params_json,
+                                           const lyflow_run_input* inputs, size_t input_count,
+                                           const lyflow_run_image_input* image_inputs,
+                                           size_t image_input_count);
+
 // 立即返回句柄，执行在后台线程。opts/cb 允许为 NULL（cb 为 NULL 时事件丢弃）。
 // 返回 NULL 表示连线程都没起来（内存不足），调用方应当当作运行失败。
 LYFLOW_API lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* opts,

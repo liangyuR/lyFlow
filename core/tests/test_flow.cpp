@@ -281,6 +281,50 @@ TEST_CASE(
   CHECK(s.wait().finalState("n_t") == "done");
 }
 
+TEST_CASE("带注入的计划与按节点清缓存（1.1.3）：给同一份注入才算得出那次运行的键") {
+  ensureTestOps();
+  const Json doc =
+      makeGraph({N{"n_src", "test.counted", Json{{"pointCount", 5}}},
+                 N{"n_t", "test.thin", Json{{"leaf", Json::array({0.01, 0.01, 0.01})}}}},
+                {E{"n_src.cloud", "n_t.cloud"}});
+  auto injected = [] {
+    PointCloud c;
+    for (int i = 0; i < 3; ++i)
+      c.push(static_cast<float>(i), 0.0F, 0.0F);
+    return std::vector<exec::InjectedInput>{
+        exec::InjectedInput{"n_src", "cloud", Data::cloud(std::move(c))}};
+  };
+  {
+    Session s(doc, {}, {}, /*keepCache=*/false, 0, false, injected());
+    CHECK(s.wait().finalState("n_t") == "done");
+  }
+  const auto cached = [&](const std::vector<exec::InjectedInput>& inputs) {
+    std::set<std::string> out;
+    for (const Json& n : Json::parse(exec::planGraphJson(doc.dump(), {}, {}, {}, inputs))) {
+      if (n["cached"].get<bool>())
+        out.insert(n["nodeId"].get<std::string>());
+    }
+    return out;
+  };
+  // 不带注入：键里没有注入摘要，对不上那次运行（修前宿主只能这样问，于是永远「没缓存」）
+  CHECK(cached({}).count("n_t") == 0);
+  CHECK(cached(injected()).count("n_t") == 1);
+
+  // 清缓存同理：不带注入清不掉，带上同一份才清得掉
+  const Json miss = Json::parse(exec::evictNodesJson(doc.dump(), {}, {"n_t"}, false));
+  CHECK(miss["removed"] == 0);
+  CHECK(cached(injected()).count("n_t") == 1);
+  const Json hit =
+      Json::parse(exec::evictNodesJson(doc.dump(), {}, {"n_t"}, false, {}, injected()));
+  CHECK(hit["removed"].get<int>() >= 1);
+  CHECK(hit["nodes"] == Json::array({"n_t"}));
+  CHECK(cached(injected()).count("n_t") == 0);
+
+  // 清掉之后再跑同一份注入：n_t 真算了一遍
+  Session s(doc, {}, {}, /*keepCache=*/true, 0, false, injected());
+  CHECK(s.wait().finalState("n_t") == "done");
+}
+
 namespace {
 
 void collectInto(const char* json, void* user) {

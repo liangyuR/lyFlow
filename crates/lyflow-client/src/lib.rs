@@ -189,6 +189,100 @@ impl RunImageInput {
     }
 }
 
+/// `RunInput` / `RunImageInput` 摊成 C ABI 的两个数组。指针借的是调用方的缓冲与这里的 CString，
+/// 所以它活着指针才有效；core 在调用里就拷走，调用返回后即可丢。运行、带注入的计划与清缓存共用它，
+/// 三处交给 core 的是同一种摊法，core 算出的注入摘要（进 cacheKey）才一致。
+struct RawInputs<'a> {
+    // 顺序有意义：clouds / images 里的指针指向 names 的 CString，先丢指针。
+    clouds: Vec<RunInputRaw>,
+    images: Vec<RunImageInputRaw>,
+    #[allow(dead_code)]
+    names: Vec<CString>,
+    _borrow: std::marker::PhantomData<&'a [RunInput]>,
+}
+
+impl<'a> RawInputs<'a> {
+    fn new(
+        inputs: &'a [RunInput],
+        images: &'a [RunImageInput],
+    ) -> Result<Self, std::ffi::NulError> {
+        let mut names = Vec::with_capacity(2 * (inputs.len() + images.len()));
+        // CString 的缓冲在堆上，Vec 扩容只搬句柄，指针不失效。
+        let mut name = |text: &str| -> Result<*const c_char, std::ffi::NulError> {
+            let owned = CString::new(text)?;
+            let ptr = owned.as_ptr();
+            names.push(owned);
+            Ok(ptr)
+        };
+        let or_null = |empty: bool, ptr: *const f32| if empty { std::ptr::null() } else { ptr };
+        let mut clouds = Vec::with_capacity(inputs.len());
+        for i in inputs {
+            clouds.push(RunInputRaw {
+                node_id: name(&i.node_id)?,
+                port: name(&i.port)?,
+                kind: INPUT_POINT_CLOUD,
+                count: (i.xyz.len() / 3) as u32,
+                xyz: i.xyz.as_ptr(),
+                intensity: or_null(i.intensity.is_empty(), i.intensity.as_ptr()),
+                normals: or_null(i.normals.is_empty(), i.normals.as_ptr()),
+                rgb: if i.rgb.is_empty() {
+                    std::ptr::null()
+                } else {
+                    i.rgb.as_ptr()
+                },
+            });
+        }
+        let mut raw_images = Vec::with_capacity(images.len());
+        for i in images {
+            raw_images.push(RunImageInputRaw {
+                node_id: name(&i.node_id)?,
+                port: name(&i.port)?,
+                width: i.width,
+                height: i.height,
+                channels: i.channels,
+                depth: i.depth,
+                row_bytes: 0,
+                reserved: 0,
+                pixels: i.pixels_ptr(),
+            });
+        }
+        Ok(RawInputs {
+            clouds,
+            images: raw_images,
+            names,
+            _borrow: std::marker::PhantomData,
+        })
+    }
+
+    fn is_empty(&self) -> bool {
+        self.clouds.is_empty() && self.images.is_empty()
+    }
+
+    fn clouds_ptr(&self) -> *const RunInputRaw {
+        if self.clouds.is_empty() {
+            std::ptr::null()
+        } else {
+            self.clouds.as_ptr()
+        }
+    }
+
+    fn cloud_count(&self) -> usize {
+        self.clouds.len()
+    }
+
+    fn images_ptr(&self) -> *const RunImageInputRaw {
+        if self.images.is_empty() {
+            std::ptr::null()
+        } else {
+            self.images.as_ptr()
+        }
+    }
+
+    fn image_count(&self) -> usize {
+        self.images.len()
+    }
+}
+
 /// 一次运行的全部选项（C ABI v7）。写成位置参数就没人读得懂了。
 #[derive(Clone)]
 pub struct RunSpec<'a> {
@@ -355,6 +449,31 @@ type FnCacheEvict = unsafe extern "C" fn(
     c_int,
     *const c_char,
 ) -> *mut c_char;
+/// 1.1.3：`lyflow_plan_inputs`。
+type FnPlanInputs = unsafe extern "C" fn(
+    *const c_char,
+    *const c_char,
+    *const *const c_char,
+    usize,
+    *const c_char,
+    *const RunInputRaw,
+    usize,
+    *const RunImageInputRaw,
+    usize,
+) -> *mut c_char;
+/// 1.1.3：`lyflow_cache_evict_inputs`。
+type FnCacheEvictInputs = unsafe extern "C" fn(
+    *const c_char,
+    *const c_char,
+    *const *const c_char,
+    usize,
+    c_int,
+    *const c_char,
+    *const RunInputRaw,
+    usize,
+    *const RunImageInputRaw,
+    usize,
+) -> *mut c_char;
 type FnOutputSave = unsafe extern "C" fn(
     *const c_char,
     *const c_char,
@@ -402,6 +521,10 @@ pub struct Core {
     library_count: FnLibraryCount,
     library_definition: FnLibraryDefinition,
     cache_set_dir: FnCacheSetDir,
+    // 1.1.3 起才有：同系列的老运行库缺这两个符号也照样加载（补丁版可直接替换运行库），
+    // 用到时才报 MissingSymbol。
+    plan_inputs: Option<FnPlanInputs>,
+    cache_evict_inputs: Option<FnCacheEvictInputs>,
     #[allow(dead_code)]
     lib: Library,
 }
@@ -416,6 +539,14 @@ macro_rules! sym {
         let s: Symbol<$ty> = unsafe { $lib.get(concat!($name, "\0").as_bytes()) }
             .map_err(|_| CoreError::MissingSymbol($name))?;
         unsafe { *s.into_raw() }
+    }};
+}
+
+/// 同系列较新的补丁版才加的符号：找不到是 None，不算加载失败。
+macro_rules! sym_opt {
+    ($lib:expr, $name:literal, $ty:ty) => {{
+        let s: Option<Symbol<$ty>> = unsafe { $lib.get(concat!($name, "\0").as_bytes()) }.ok();
+        s.map(|s| unsafe { *s.into_raw() })
     }};
 }
 
@@ -499,6 +630,8 @@ impl Core {
             library_count: sym!(lib, "lyflow_library_count", FnLibraryCount),
             library_definition: sym!(lib, "lyflow_library_definition", FnLibraryDefinition),
             cache_set_dir: sym!(lib, "lyflow_cache_set_dir", FnCacheSetDir),
+            plan_inputs: sym_opt!(lib, "lyflow_plan_inputs", FnPlanInputs),
+            cache_evict_inputs: sym_opt!(lib, "lyflow_cache_evict_inputs", FnCacheEvictInputs),
             lib,
         })
     }
@@ -665,6 +798,114 @@ impl Core {
                 ptrs.len(),
                 c_int::from(include_downstream),
                 p.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+            ))
+        }
+    }
+
+    /// 运行库认不认带注入的计划与清缓存（1.1.3 起有）。
+    pub fn supports_injected_plan(&self) -> bool {
+        self.plan_inputs.is_some() && self.cache_evict_inputs.is_some()
+    }
+
+    /// 1.1.3：同 [`Core::plan_with_params`]，另带运行时注入。注入的数据进 cacheKey（ADR-0017），
+    /// 「注入点云再跑」之后要给那次运行的**同一份** `inputs` / `image_inputs`，cacheKey 与 cached
+    /// 才对得上；两者都空时就是 `plan_with_params`。运行库早于 1.1.3 而又给了注入时报
+    /// `MissingSymbol("lyflow_plan_inputs")`。
+    pub fn plan_with_inputs(
+        &self,
+        graph_json: &str,
+        base_dir: &str,
+        targets: &[String],
+        params_json: Option<&str>,
+        inputs: &[RunInput],
+        image_inputs: &[RunImageInput],
+    ) -> Result<String, CoreError> {
+        let raw = RawInputs::new(inputs, image_inputs)?;
+        if raw.is_empty() {
+            return self.plan_with_params(graph_json, base_dir, targets, params_json);
+        }
+        let plan_inputs = self
+            .plan_inputs
+            .ok_or(CoreError::MissingSymbol("lyflow_plan_inputs"))?;
+        let g = CString::new(graph_json)?;
+        let b = CString::new(base_dir)?;
+        let p = params_json.map(CString::new).transpose()?;
+        let owned: Vec<CString> = targets
+            .iter()
+            .map(|t| CString::new(t.as_str()))
+            .collect::<Result<_, _>>()?;
+        let ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
+        let head = if ptrs.is_empty() {
+            std::ptr::null()
+        } else {
+            ptrs.as_ptr()
+        };
+        unsafe {
+            self.take_owned(plan_inputs(
+                g.as_ptr(),
+                b.as_ptr(),
+                head,
+                ptrs.len(),
+                p.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+                raw.clouds_ptr(),
+                raw.cloud_count(),
+                raw.images_ptr(),
+                raw.image_count(),
+            ))
+        }
+    }
+
+    /// 1.1.3：同 [`Core::cache_evict`]，另带运行时注入，规则同 [`Core::plan_with_inputs`]：
+    /// 「注入再跑」的结果只有给同一份注入才清得掉。两者都空时就是 `cache_evict`。
+    #[allow(clippy::too_many_arguments)]
+    pub fn cache_evict_with_inputs(
+        &self,
+        graph_json: &str,
+        base_dir: &str,
+        node_ids: &[String],
+        include_downstream: bool,
+        params_json: Option<&str>,
+        inputs: &[RunInput],
+        image_inputs: &[RunImageInput],
+    ) -> Result<String, CoreError> {
+        let raw = RawInputs::new(inputs, image_inputs)?;
+        if raw.is_empty() {
+            return self.cache_evict(
+                graph_json,
+                base_dir,
+                node_ids,
+                include_downstream,
+                params_json,
+            );
+        }
+        let cache_evict_inputs = self
+            .cache_evict_inputs
+            .ok_or(CoreError::MissingSymbol("lyflow_cache_evict_inputs"))?;
+        let g = CString::new(graph_json)?;
+        let b = CString::new(base_dir)?;
+        let p = params_json.map(CString::new).transpose()?;
+        let owned: Vec<CString> = node_ids
+            .iter()
+            .map(|t| CString::new(t.as_str()))
+            .collect::<Result<_, _>>()?;
+        let ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
+        let head = if ptrs.is_empty() {
+            std::ptr::null()
+        } else {
+            ptrs.as_ptr()
+        };
+        unsafe {
+            self.take_owned(cache_evict_inputs(
+                g.as_ptr(),
+                b.as_ptr(),
+                head,
+                ptrs.len(),
+                c_int::from(include_downstream),
+                p.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+                raw.clouds_ptr(),
+                raw.cloud_count(),
+                raw.images_ptr(),
+                raw.image_count(),
             ))
         }
     }
@@ -1273,70 +1514,7 @@ impl RunHandle {
         let force_ptrs: Vec<*const c_char> = force_cstrings.iter().map(|c| c.as_ptr()).collect();
 
         // node_id / port 的 CString 与点云缓冲都必须活到 run_start 返回：core 在里面拷贝。
-        let input_names: Vec<(CString, CString)> = spec
-            .inputs
-            .iter()
-            .map(|i| {
-                Ok((
-                    CString::new(i.node_id.as_str())?,
-                    CString::new(i.port.as_str())?,
-                ))
-            })
-            .collect::<Result<_, std::ffi::NulError>>()?;
-        let input_raw: Vec<RunInputRaw> = spec
-            .inputs
-            .iter()
-            .zip(input_names.iter())
-            .map(|(i, (node, port))| RunInputRaw {
-                node_id: node.as_ptr(),
-                port: port.as_ptr(),
-                kind: INPUT_POINT_CLOUD,
-                count: (i.xyz.len() / 3) as u32,
-                xyz: i.xyz.as_ptr(),
-                intensity: if i.intensity.is_empty() {
-                    std::ptr::null()
-                } else {
-                    i.intensity.as_ptr()
-                },
-                normals: if i.normals.is_empty() {
-                    std::ptr::null()
-                } else {
-                    i.normals.as_ptr()
-                },
-                rgb: if i.rgb.is_empty() {
-                    std::ptr::null()
-                } else {
-                    i.rgb.as_ptr()
-                },
-            })
-            .collect();
-
-        let image_names: Vec<(CString, CString)> = spec
-            .image_inputs
-            .iter()
-            .map(|i| {
-                Ok((
-                    CString::new(i.node_id.as_str())?,
-                    CString::new(i.port.as_str())?,
-                ))
-            })
-            .collect::<Result<_, std::ffi::NulError>>()?;
-        let image_raw: Vec<RunImageInputRaw> = spec
-            .image_inputs
-            .iter()
-            .zip(image_names.iter())
-            .map(|(i, (node, port))| RunImageInputRaw {
-                node_id: node.as_ptr(),
-                port: port.as_ptr(),
-                width: i.width,
-                height: i.height,
-                channels: i.channels,
-                depth: i.depth,
-                row_bytes: 0,
-                reserved: 0,
-                pixels: i.pixels_ptr(),
-            })
-            .collect();
+        let raw_inputs = RawInputs::new(spec.inputs, spec.image_inputs)?;
 
         let params_c = spec.params_json.map(CString::new).transpose()?;
         let options = RunOptionsRaw {
@@ -1354,12 +1532,8 @@ impl RunHandle {
             preview_max_points: spec.preview_max_points,
             preview_budget_ms: spec.preview_budget_ms,
             no_reuse: i32::from(spec.no_reuse),
-            inputs: if input_raw.is_empty() {
-                std::ptr::null()
-            } else {
-                input_raw.as_ptr()
-            },
-            input_count: input_raw.len(),
+            inputs: raw_inputs.clouds_ptr(),
+            input_count: raw_inputs.cloud_count(),
             params_json: params_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
             isolate: if isolate_ptrs.is_empty() {
                 std::ptr::null()
@@ -1373,12 +1547,8 @@ impl RunHandle {
                 force_ptrs.as_ptr()
             },
             force_count: force_ptrs.len(),
-            image_inputs: if image_raw.is_empty() {
-                std::ptr::null()
-            } else {
-                image_raw.as_ptr()
-            },
-            image_input_count: image_raw.len(),
+            image_inputs: raw_inputs.images_ptr(),
+            image_input_count: raw_inputs.image_count(),
         };
 
         let user_ptr = Box::into_raw(user) as *mut c_void;

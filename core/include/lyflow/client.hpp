@@ -336,6 +336,50 @@ struct RunState {
   }
 };
 
+/// InputCloud / InputImage 摊成 C ABI 的两个数组。指针借的是调用方向量里的缓冲，所以它不能活得比
+/// 那两个向量久；core 在调用里就拷走，调用返回后即可丢。运行、带注入的计划与清缓存共用它。
+class RawInputs {
+public:
+  RawInputs(const std::vector<InputCloud>& inputs, const std::vector<InputImage>& images) {
+    clouds_.reserve(inputs.size());
+    for (const InputCloud& in : inputs) {
+      lyflow_run_input raw{};
+      raw.node_id = in.nodeId.c_str();
+      raw.port = in.port.c_str();
+      raw.kind = LYFLOW_INPUT_POINT_CLOUD;
+      raw.count = static_cast<std::uint32_t>(in.xyz.size() / 3);
+      raw.xyz = in.xyz.empty() ? nullptr : in.xyz.data();
+      raw.intensity = in.intensity.empty() ? nullptr : in.intensity.data();
+      raw.normals = in.normals.empty() ? nullptr : in.normals.data();
+      raw.rgb = in.rgb.empty() ? nullptr : in.rgb.data();
+      clouds_.push_back(raw);
+    }
+    images_.reserve(images.size());
+    for (const InputImage& in : images) {
+      lyflow_run_image_input raw{};
+      raw.node_id = in.nodeId.c_str();
+      raw.port = in.port.c_str();
+      raw.width = in.width;
+      raw.height = in.height;
+      raw.channels = in.channels;
+      raw.depth = in.depth;
+      raw.row_bytes = in.rowBytes;
+      raw.pixels = in.pixels;
+      images_.push_back(raw);
+    }
+  }
+  const lyflow_run_input* clouds() const { return clouds_.empty() ? nullptr : clouds_.data(); }
+  std::size_t cloudCount() const { return clouds_.size(); }
+  const lyflow_run_image_input* images() const {
+    return images_.empty() ? nullptr : images_.data();
+  }
+  std::size_t imageCount() const { return images_.size(); }
+
+private:
+  std::vector<lyflow_run_input> clouds_;
+  std::vector<lyflow_run_image_input> images_;
+};
+
 } // namespace detail
 
 class RunHandle {
@@ -460,6 +504,29 @@ public:
                                  paramsJson.empty() ? nullptr : paramsJson.c_str()));
   }
 
+  /// 1.1.3：带运行时注入的计划。注入的数据进 cacheKey，「注入再跑」之后要给那次运行的同一份
+  /// inputs / imageInputs 才算得出它的键（cached 才对）。两者都空时同上面的 plan。
+  /// 运行库早于 1.1.3（没有 lyflow_plan_inputs）而又给了注入时抛 ClientError。
+  std::string plan(const std::string& graphJson, const std::string& baseDir,
+                   const std::vector<std::string>& targets, const std::string& paramsJson,
+                   const std::vector<InputCloud>& inputs,
+                   const std::vector<InputImage>& imageInputs = {}) const {
+    if (inputs.empty() && imageInputs.empty())
+      return plan(graphJson, baseDir, targets, paramsJson);
+    requireInjected(fn_.plan_inputs, "lyflow_plan_inputs");
+    std::vector<const char*> ptrs;
+    for (const std::string& t : targets)
+      ptrs.push_back(t.c_str());
+    const detail::RawInputs raw(inputs, imageInputs);
+    return owned(fn_.plan_inputs(graphJson.c_str(), baseDir.c_str(),
+                                 ptrs.empty() ? nullptr : ptrs.data(), ptrs.size(),
+                                 paramsJson.empty() ? nullptr : paramsJson.c_str(), raw.clouds(),
+                                 raw.cloudCount(), raw.images(), raw.imageCount()));
+  }
+
+  /// 运行库认不认带注入的 plan / evictCache（1.1.3 起有）。
+  bool supportsInjectedPlan() const { return fn_.plan_inputs && fn_.cache_evict_inputs; }
+
   /// 文本 → 图。成功返回 GraphDoc 对象文本（'{' 开头），失败返回诊断数组（'[' 开头）。
   std::string import(const std::string& kind, const std::string& text,
                      const std::string& baseDir = {}) const {
@@ -568,6 +635,24 @@ public:
         graphJson.c_str(), baseDir.c_str(), ptrs.empty() ? nullptr : ptrs.data(), ptrs.size(),
         includeDownstream ? 1 : 0, paramsJson.empty() ? nullptr : paramsJson.c_str()));
   }
+  /// 1.1.3：带运行时注入的按节点清缓存，规则同带注入的 plan —— 「注入再跑」的结果，只有给同一份
+  /// 注入才清得掉。两者都空时同上面的 evictCache。
+  std::string evictCache(const std::string& graphJson, const std::vector<std::string>& nodeIds,
+                         bool includeDownstream, const std::string& baseDir,
+                         const std::string& paramsJson, const std::vector<InputCloud>& inputs,
+                         const std::vector<InputImage>& imageInputs = {}) const {
+    if (inputs.empty() && imageInputs.empty())
+      return evictCache(graphJson, nodeIds, includeDownstream, baseDir, paramsJson);
+    requireInjected(fn_.cache_evict_inputs, "lyflow_cache_evict_inputs");
+    std::vector<const char*> ptrs;
+    for (const std::string& id : nodeIds)
+      ptrs.push_back(id.c_str());
+    const detail::RawInputs raw(inputs, imageInputs);
+    return owned(fn_.cache_evict_inputs(
+        graphJson.c_str(), baseDir.c_str(), ptrs.empty() ? nullptr : ptrs.data(), ptrs.size(),
+        includeDownstream ? 1 : 0, paramsJson.empty() ? nullptr : paramsJson.c_str(), raw.clouds(),
+        raw.cloudCount(), raw.images(), raw.imageCount()));
+  }
   std::string cacheStats() const { return owned(fn_.cache_stats()); }
 
 private:
@@ -611,6 +696,13 @@ private:
     void (*image_view_free)(lyflow_image_view*) = nullptr;
     char* (*output_info)(const char*, const char*) = nullptr;
     char* (*output_save)(const char*, const char*, const char*, const char*, const char*) = nullptr;
+    // 1.1.3 起才有：可选符号（maybe），老运行库缺了不妨碍加载。
+    char* (*plan_inputs)(const char*, const char*, const char* const*, size_t, const char*,
+                         const lyflow_run_input*, size_t, const lyflow_run_image_input*,
+                         size_t) = nullptr;
+    char* (*cache_evict_inputs)(const char*, const char*, const char* const*, size_t, int,
+                                const char*, const lyflow_run_input*, size_t,
+                                const lyflow_run_image_input*, size_t) = nullptr;
   };
 
   void load(const std::string& dllPath);
@@ -625,6 +717,18 @@ private:
 #else
     return ::dlsym(handle_, name);
 #endif
+  }
+
+  /// 同系列较新的补丁版才加的符号：找不到就留空，用到时由 requireInjected 报清楚。
+  template <typename T> void maybe(T& slot, const char* name) {
+    slot = reinterpret_cast<T>(symbol(name));
+  }
+
+  template <typename T> static void requireInjected(T slot, const char* name) {
+    if (!slot) {
+      throw ClientError(std::string("这个 lyflow_core 运行库没有 ") + name +
+                        "（1.1.3 起才有），带注入的计划与清缓存需要更新运行库");
+    }
   }
 
   template <typename T> void need(T& slot, const char* name, const std::string& where) {
@@ -744,6 +848,8 @@ inline void Client::bind(const std::string& where) {
   need(fn_.plan_params, "lyflow_plan_params", where);
   need(fn_.cache_clear, "lyflow_cache_clear", where);
   need(fn_.cache_evict, "lyflow_cache_evict", where);
+  maybe(fn_.plan_inputs, "lyflow_plan_inputs");
+  maybe(fn_.cache_evict_inputs, "lyflow_cache_evict_inputs");
   need(fn_.cache_stats, "lyflow_cache_stats", where);
   need(fn_.run_start, "lyflow_run_start", where);
   need(fn_.run_cancel, "lyflow_run_cancel", where);
@@ -863,35 +969,7 @@ inline RunHandle Client::startRun(const std::string& graphJson, const RunOptions
   for (const std::string& t : options.targets)
     targets.push_back(t.c_str());
 
-  std::vector<lyflow_run_input> inputs;
-  inputs.reserve(options.inputs.size());
-  for (const InputCloud& in : options.inputs) {
-    lyflow_run_input raw{};
-    raw.node_id = in.nodeId.c_str();
-    raw.port = in.port.c_str();
-    raw.kind = LYFLOW_INPUT_POINT_CLOUD;
-    raw.count = static_cast<std::uint32_t>(in.xyz.size() / 3);
-    raw.xyz = in.xyz.empty() ? nullptr : in.xyz.data();
-    raw.intensity = in.intensity.empty() ? nullptr : in.intensity.data();
-    raw.normals = in.normals.empty() ? nullptr : in.normals.data();
-    raw.rgb = in.rgb.empty() ? nullptr : in.rgb.data();
-    inputs.push_back(raw);
-  }
-
-  std::vector<lyflow_run_image_input> images;
-  images.reserve(options.imageInputs.size());
-  for (const InputImage& in : options.imageInputs) {
-    lyflow_run_image_input raw{};
-    raw.node_id = in.nodeId.c_str();
-    raw.port = in.port.c_str();
-    raw.width = in.width;
-    raw.height = in.height;
-    raw.channels = in.channels;
-    raw.depth = in.depth;
-    raw.row_bytes = in.rowBytes;
-    raw.pixels = in.pixels;
-    images.push_back(raw);
-  }
+  const detail::RawInputs raw(options.inputs, options.imageInputs);
 
   lyflow_run_options opts{};
   opts.run_id = handle.runId_.c_str();
@@ -904,10 +982,10 @@ inline RunHandle Client::startRun(const std::string& graphJson, const RunOptions
   opts.preview_max_points = options.previewMaxPoints;
   opts.preview_budget_ms = options.previewBudgetMs;
   opts.no_reuse = options.noReuse ? 1 : 0;
-  opts.inputs = inputs.empty() ? nullptr : inputs.data();
-  opts.input_count = inputs.size();
-  opts.image_inputs = images.empty() ? nullptr : images.data();
-  opts.image_input_count = images.size();
+  opts.inputs = raw.clouds();
+  opts.input_count = raw.cloudCount();
+  opts.image_inputs = raw.images();
+  opts.image_input_count = raw.imageCount();
   opts.params_json = options.paramsJson.empty() ? nullptr : options.paramsJson.c_str();
 
   lyflow_run* run = fn_.run_start(graphJson.c_str(), &opts, &detail::dispatchEvent, &state->sink);
