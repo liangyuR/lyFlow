@@ -60,6 +60,14 @@ v15 是第二个数据域 **Image**（[image-plan.md](image-plan.md)）：
   `client.hpp` 是 `RunOptions::imageInputs`（`InputImage`），Rust 是 `RunSpec::image_inputs`。**BGR 的相机缓冲要宿主先转成 RGB。**
 - `lyflow_output_save` 对图像输出写 `.lyim`（与 HTTP 的 LYIM 载荷同一布局）；PNG 等格式在图里接 `io.save_image`。
 
+1.1.3 加了两个带运行时注入的入口：`lyflow_plan_inputs` 与 `lyflow_cache_evict_inputs`，参数是
+`lyflow_plan_params` / `lyflow_cache_evict` 的全部，再加与 `lyflow_run_options` 同一套的 `inputs` / `image_inputs`。
+注入的数据进 cacheKey（ADR-0017），所以宿主「注入点云再跑」之后，不带注入的计划永远说「没缓存」、按节点清缓存
+永远 `removed: 0` —— 给出与那次运行**同一份**注入，算出来的才是那次运行的键。注入都为空时与老入口完全相同。
+这是同系列的纯增量：1.1.3 的客户端把两个符号当可选符号加载，配 1.1.2 及更早的运行库照样能用，只是带注入的
+计划与清缓存报缺符号。`client.hpp` 是 `Client::plan` / `Client::evictCache` 多带 `inputs` / `imageInputs` 的重载与
+`supportsInjectedPlan()`，Rust 是 `Core::plan_with_inputs` / `Core::cache_evict_with_inputs` / `supports_injected_plan`。
+
 v9 加的那一个入口是 `lyflow_run_summary(runId)`：一次运行的结构化收尾。
 `RunResult::summary` 就是它的原文，`RunHandle::runSummary()` 也能单独取。
 **宿主的成败判定读 `summary.status`（`ok` / `degraded` / `failed`），

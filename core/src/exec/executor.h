@@ -5,8 +5,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "exec/graph.h"
@@ -27,6 +29,15 @@ struct InjectedInput {
   std::string port;
   Data data;
 };
+
+/// 注入在 cacheKey 里留下的东西：被注入节点 → 数据摘要，被注入节点 → 端口名（见 BuildOptions）。
+/// 运行、计划、按节点清缓存三处都从这里取 —— 带注入跑出来的结果，只有带同一份注入编的计划
+/// 才算得出同一批键（宿主「注入点云再跑」之后的计划与清缓存就靠它）。
+struct InjectionKeys {
+  std::unordered_map<std::string, std::string> providedDigest;
+  std::unordered_map<std::string, std::set<std::string>> injectedPorts;
+};
+InjectionKeys injectionKeysOf(const std::vector<InjectedInput>& inputs);
 
 struct RunOptions {
   std::string runId;
@@ -108,16 +119,20 @@ bool prepareGraph(const std::string& graphJson, RawGraph& out, Diagnostics& diag
 
 /// 编译一次并报告每个节点的 cacheKey / 是否已缓存（ADR-0007）。
 /// 校验有错时返回诊断数组而不是计划数组，两者靠 kind 字段区分。
+/// inputs 是这次要对照的运行时注入（1.1.3）：注入的数据进 cacheKey，带注入跑出来的结果只有带同一份
+/// 注入才查得到；空 = 不带注入的运行（老行为）。
 std::string planGraphJson(const std::string& graphJson, const std::filesystem::path& baseDir,
                           const std::vector<std::string>& targets,
-                          const std::string& paramsJson = {});
+                          const std::string& paramsJson = {},
+                          const std::vector<InjectedInput>& inputs = {});
 
 /// 按「图 + 节点」清缓存（lyflow_cache_evict，v12）。全图、完整模式编一次计划，nodeIds 按路径前缀
 /// 匹配（同 targets），downstream 时连同全部下游；返回 { removed, skippedPinned, nodes }，
-/// 校验有错时返回诊断数组（与 planGraphJson 同一套区分办法）。
+/// 校验有错时返回诊断数组（与 planGraphJson 同一套区分办法）。inputs 同 planGraphJson（1.1.3）。
 std::string evictNodesJson(const std::string& graphJson, const std::filesystem::path& baseDir,
                            const std::vector<std::string>& nodeIds, bool downstream,
-                           const std::string& paramsJson = {});
+                           const std::string& paramsJson = {},
+                           const std::vector<InjectedInput>& inputs = {});
 
 /// 每节点每参数的生效值与来源（m6-plan §2）。返回
 /// `{ nodes: [ { node, op, params: [ { param, value, source, label?, unit?, min?, max? } ] } ] }`；

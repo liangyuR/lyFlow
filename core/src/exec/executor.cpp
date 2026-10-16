@@ -1689,6 +1689,36 @@ std::string buildSummaryJson(const std::string& runId, const Plan& plan,
 
 } // namespace
 
+// ------------------------------------------------------------------ 注入与 cacheKey
+
+InjectionKeys injectionKeysOf(const std::vector<InjectedInput>& inputs) {
+  InjectionKeys out;
+  std::map<std::string, Hasher> digests;
+  for (const InjectedInput& in : inputs) {
+    if (in.nodeId.empty() || in.port.empty())
+      continue;
+    out.injectedPorts[in.nodeId].insert(in.port);
+    Hasher& h = digests[in.nodeId];
+    h.add(in.port);
+    h.add(std::string(in.data.typeName()));
+    if (const PointCloud* c = in.data.asCloud()) {
+      // 每个通道各是一段（addBytes 自带分隔）：同样的 xyz 换一份法向或颜色，键就不同
+      h.addBytes(c->xyz.data(), c->xyz.size() * sizeof(float));
+      h.addBytes(c->intensity.data(), c->intensity.size() * sizeof(float));
+      h.addBytes(c->normals.data(), c->normals.size() * sizeof(float));
+      h.addBytes(c->rgb.data(), c->rgb.size());
+    } else if (const Image* img = in.data.asImage()) {
+      h.add(std::to_string(img->width) + "x" + std::to_string(img->height) + "x" +
+            std::to_string(img->channels) + ":" + pixelDepthName(img->depth));
+      if (img->pixels)
+        h.addBytes(img->pixels.get(), img->byteSize());
+    }
+  }
+  for (auto& kv : digests)
+    out.providedDigest[kv.first] = kv.second.hex();
+  return out;
+}
+
 // ------------------------------------------------------------------ 并行度
 
 int resolveMaxParallel(int requested) {
@@ -1762,36 +1792,14 @@ void Run::workImpl() {
   // 单节点运行时的全图计划（R7），只用它的 cacheKey。
   Plan fullPlan;
 
-  // 注入的数据按节点归拢，顺手算出进 cacheKey 的摘要（ADR-0017）。
+  // 注入的数据按节点归拢；进 cacheKey 的摘要与 plan / evict 同一个 injectionKeysOf（ADR-0017）。
   std::unordered_map<std::string, std::unordered_map<std::string, Data>> injected;
-  std::unordered_map<std::string, std::string> providedDigest;
-  std::unordered_map<std::string, std::set<std::string>> injectedPorts;
-  {
-    std::map<std::string, Hasher> digests;
-    for (const InjectedInput& in : options_.inputs) {
-      if (in.nodeId.empty() || in.port.empty())
-        continue;
-      injected[in.nodeId][in.port] = in.data;
-      injectedPorts[in.nodeId].insert(in.port);
-      Hasher& h = digests[in.nodeId];
-      h.add(in.port);
-      h.add(std::string(in.data.typeName()));
-      if (const PointCloud* c = in.data.asCloud()) {
-        // 每个通道各是一段（addBytes 自带分隔）：同样的 xyz 换一份法向或颜色，键就不同
-        h.addBytes(c->xyz.data(), c->xyz.size() * sizeof(float));
-        h.addBytes(c->intensity.data(), c->intensity.size() * sizeof(float));
-        h.addBytes(c->normals.data(), c->normals.size() * sizeof(float));
-        h.addBytes(c->rgb.data(), c->rgb.size());
-      } else if (const Image* img = in.data.asImage()) {
-        h.add(std::to_string(img->width) + "x" + std::to_string(img->height) + "x" +
-              std::to_string(img->channels) + ":" + pixelDepthName(img->depth));
-        if (img->pixels)
-          h.addBytes(img->pixels.get(), img->byteSize());
-      }
-    }
-    for (auto& kv : digests)
-      providedDigest[kv.first] = kv.second.hex();
+  for (const InjectedInput& in : options_.inputs) {
+    if (in.nodeId.empty() || in.port.empty())
+      continue;
+    injected[in.nodeId][in.port] = in.data;
   }
+  const InjectionKeys injection = injectionKeysOf(options_.inputs);
 
   // 预览与单节点运行不组合（node-run R5）：预览结果在另一个缓存命名空间里，拿它去探
   // 「上游有没有结果」只会把刚跑过正式运行的上游误判成缺。参数错误，整图级失败。
@@ -1809,8 +1817,8 @@ void Run::workImpl() {
     build.isolate = options_.isolate;
     build.force = options_.force;
     build.cacheNamespace = previewNamespace(options_);
-    build.providedDigest = providedDigest;
-    build.injectedPorts = injectedPorts;
+    build.providedDigest = injection.providedDigest;
+    build.injectedPorts = injection.injectedPorts;
     buildPlan(ensureRegistry(), raw, build, plan, diags);
     // R7 / V2：部分运行另编一份全图计划，只为拿到计划外节点的当前 cacheKey。诊断丢掉 ——
     // 该报的都在上面那份里报过了，这份不执行
@@ -2025,7 +2033,8 @@ std::string validateGraphJson(const std::string& graphJson, const std::filesyste
 // ---------------------------------------------------------------------- plan
 
 std::string planGraphJson(const std::string& graphJson, const std::filesystem::path& baseDir,
-                          const std::vector<std::string>& targets, const std::string& paramsJson) {
+                          const std::vector<std::string>& targets, const std::string& paramsJson,
+                          const std::vector<InjectedInput>& inputs) {
   Diagnostics diags;
   RawGraph raw;
   Plan plan;
@@ -2036,6 +2045,9 @@ std::string planGraphJson(const std::string& graphJson, const std::filesystem::p
   build.runId = "plan";
   build.baseDir = baseDir;
   build.targets = targets;
+  InjectionKeys injection = injectionKeysOf(inputs);
+  build.providedDigest = std::move(injection.providedDigest);
+  build.injectedPorts = std::move(injection.injectedPorts);
   buildPlan(ensureRegistry(), raw, build, plan, diags);
   if (diags.hasErrors() || !plan.ok)
     return diags.toJson();
@@ -2114,7 +2126,8 @@ std::string planGraphJson(const std::string& graphJson, const std::filesystem::p
 
 std::string evictNodesJson(const std::string& graphJson, const std::filesystem::path& baseDir,
                            const std::vector<std::string>& nodeIds, bool downstream,
-                           const std::string& paramsJson) {
+                           const std::string& paramsJson,
+                           const std::vector<InjectedInput>& inputs) {
   Diagnostics diags;
   RawGraph raw;
   Plan plan;
@@ -2124,6 +2137,9 @@ std::string evictNodesJson(const std::string& graphJson, const std::filesystem::
   BuildOptions build;
   build.runId = "evict";
   build.baseDir = baseDir;
+  InjectionKeys injection = injectionKeysOf(inputs);
+  build.providedDigest = std::move(injection.providedDigest);
+  build.injectedPorts = std::move(injection.injectedPorts);
   buildPlan(ensureRegistry(), raw, build, plan, diags);
   if (diags.hasErrors() || !plan.ok)
     return diags.toJson();
