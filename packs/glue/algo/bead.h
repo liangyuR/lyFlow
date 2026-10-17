@@ -34,6 +34,7 @@ struct Run {
   double lo = 0;
   double hi = 0;
   double peak = 0;
+  bool completeEdges = true;
   double width() const { return hi - lo; }
   double mid() const { return 0.5 * (lo + hi); }
 };
@@ -47,7 +48,8 @@ struct RunSpec {
 
 /// 沿 c + t·n（t ∈ [−half, half]，0.5 px 一步）取响应，响应 > contrastMin / 2 的连成一段、峰值 ≥ contrastMin
 /// 才算，按半高找每一段的两条边（每段按自己的峰值自适应），缝小的相邻段合并，再按宽度筛。
-std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, const RunSpec& spec);
+std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, const RunSpec& spec,
+                             std::vector<Run>* candidates = nullptr);
 
 /// 中心离 expect 最近的那一段；没有返回 nullptr。
 const Run* nearestRun(const std::vector<Run>& runs, double expect = 0.0);
@@ -163,6 +165,9 @@ struct Station {
   bool present = false;
   double lo = 0, hi = 0; ///< 胶两边沿法向的偏移（px），只在 present 时有意义
   double peak = 0;       ///< 对比度：这一站胶的响应峰值
+  double candidateLo = std::numeric_limits<double>::quiet_NaN();
+  double candidateHi = std::numeric_limits<double>::quiet_NaN();
+  std::vector<Run> candidates;
   std::vector<Run> runs; ///< 这一站卡尺上的全部暗段
   P2 left() const { return c + n * lo; }
   P2 right() const { return c + n * hi; }

@@ -221,12 +221,18 @@ Json stationsJson(const std::vector<Station>& stations, double step, const std::
   j["unit"] = metric.unit();
   Json s = Json::array(), center = Json::array(), normal = Json::array(), present = Json::array(),
        lo = Json::array(), hi = Json::array(), left = Json::array(), right = Json::array(),
-       width = Json::array(), widthPx = Json::array(), contrast = Json::array();
+       width = Json::array(), widthPx = Json::array(), contrast = Json::array(),
+       candidateLo = Json::array(), candidateHi = Json::array(), candidateWidthPx = Json::array();
   for (const Station& st : stations) {
     s.push_back(round3(st.s));
     center.push_back(pxJson(st.c));
     normal.push_back(Json::array({roundTo(st.n.x, 5), roundTo(st.n.y, 5)}));
     present.push_back(st.present);
+    const double diagnosticLo = st.present ? st.lo : st.candidateLo;
+    const double diagnosticHi = st.present ? st.hi : st.candidateHi;
+    candidateLo.push_back(numOrNull(diagnosticLo));
+    candidateHi.push_back(numOrNull(diagnosticHi));
+    candidateWidthPx.push_back(numOrNull(diagnosticHi - diagnosticLo));
     if (st.present) {
       lo.push_back(round3(st.lo));
       hi.push_back(round3(st.hi));
@@ -251,6 +257,9 @@ Json stationsJson(const std::vector<Station>& stations, double step, const std::
   j["width"] = std::move(width);
   j["widthPx"] = std::move(widthPx);
   j["contrast"] = std::move(contrast);
+  j["candidateLo"] = std::move(candidateLo);
+  j["candidateHi"] = std::move(candidateHi);
+  j["candidateWidthPx"] = std::move(candidateWidthPx);
   return j;
 }
 
