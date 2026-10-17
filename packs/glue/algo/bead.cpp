@@ -606,8 +606,9 @@ std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, con
           a > 0 ? tAt(a) - (v[a] - lvl) / std::max(v[a] - v[a - 1], 1e-6) * kRes : tAt(a);
       const double lb =
           b < count - 1 ? tAt(b) + (v[b] - lvl) / std::max(v[b] - v[b + 1], 1e-6) * kRes : tAt(b);
-      raw.push_back(Run{la, lb, peak, a > 0 && b < count - 1 && ok[a - 1] &&
-                                        ok[b + 1] && v[a - 1] < lvl && v[b + 1] < lvl});
+      raw.push_back(Run{la, lb, peak,
+                        a > 0 && b < count - 1 && ok[a - 1] && ok[b + 1] && v[a - 1] < lvl &&
+                            v[b + 1] < lvl});
     }
     i = j + 1;
   }
