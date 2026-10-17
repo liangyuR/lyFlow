@@ -716,6 +716,79 @@ TEST_CASE(
   CHECK(std::fabs(r.breaks["breaks"][0]["sEnd"].get<double>() - kBreaks[2].second) <= 4.0);
 }
 
+TEST_CASE("glue：示教胶旁暗带由浅谷相连 -> 全站量到胶且宽度不含旁侧暗带") {
+  for (double gap : {6.0, 18.0}) {
+    for (double widthMax : {70.0, 100.0}) {
+      CAPTURE(gap);
+      CAPTURE(widthMax);
+      cv::Mat image(420, 520, CV_8U, cv::Scalar(220));
+      for (int y = 0; y < image.rows; ++y) {
+        for (int x = 0; x < image.cols; ++x) {
+          const double localGap = x >= 180 && x < 300 ? gap : 18;
+          if (y >= 185 && y < 215)
+            image.at<unsigned char>(y, x) = 40;
+          else if (y >= 215 && y < 215 + localGap)
+            image.at<unsigned char>(y, x) = 180;
+          else if (y >= 215 + localGap && y < 265 + localGap)
+            image.at<unsigned char>(y, x) = 60;
+        }
+      }
+      Params p;
+      p.path = Json{{"points", "[[80,200],[440,200]]"},
+                    {"zone", {0, 0}},
+                    {"tolerance", 100},
+                    {"widthMax", 100}};
+      p.width = Json{{"form", "straight"},
+                     {"widthRange", {10, widthMax}},
+                     {"searchHalf", 150},
+                     {"stationStep", 10},
+                     {"mergeGap", 8}};
+      const Result r = run(taughtGraph(p), image);
+      REQUIRE(r.status == "ok");
+      const auto widths = numbers(r.stations["widthPx"]);
+      REQUIRE(widths.size() == r.stations["count"].get<std::size_t>());
+      for (double width : widths)
+        CHECK(std::fabs(width - 30) <= 1.0);
+      for (double mid : mids(r.stations))
+        CHECK(std::fabs(mid) <= 1.0);
+    }
+  }
+}
+
+TEST_CASE("glue：示教胶内窄高光 -> 保留完整胶宽而非半条胶") {
+  for (const auto& [shift, highlight] :
+       std::vector<std::pair<double, double>>{{0, 0}, {12, 0}, {12, 4}, {12, 8}}) {
+    CAPTURE(shift);
+    CAPTURE(highlight);
+    cv::Mat image(420, 520, CV_8U, cv::Scalar(220));
+    for (int y = 0; y < image.rows; ++y) {
+      for (int x = 0; x < image.cols; ++x) {
+        const double across = y - 200 - shift;
+        if (across >= -20 && across < 20)
+          image.at<unsigned char>(y, x) = 40;
+        if (across >= highlight - 3 && across < highlight + 3)
+          image.at<unsigned char>(y, x) = 180;
+      }
+    }
+    Params p;
+    p.path = Json{
+        {"points", "[[80,200],[440,200]]"}, {"zone", {0, 0}}, {"tolerance", 30}, {"widthMax", 100}};
+    p.width = Json{{"form", "straight"},
+                   {"widthRange", {10, 100}},
+                   {"searchHalf", 100},
+                   {"stationStep", 10},
+                   {"mergeGap", 8}};
+    const Result r = run(taughtGraph(p), image);
+    REQUIRE(r.status == "ok");
+    const auto widths = numbers(r.stations["widthPx"]);
+    REQUIRE(widths.size() == r.stations["count"].get<std::size_t>());
+    for (double width : widths)
+      CHECK(std::fabs(width - 40) <= 1.0);
+    for (double mid : mids(r.stations))
+      CHECK(std::fabs(mid - shift) <= 1.0);
+  }
+}
+
 TEST_CASE(
     "glue：示教胶路 —— 没有胶、只有压痕、只有平行暗线、胶偏出 tolerance：都是「检测区内没找到胶」，从不判 OK") {
   SUBCASE("一片干净的背景") {

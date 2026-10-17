@@ -47,9 +47,10 @@ struct RunSpec {
 };
 
 /// 沿 c + t·n（t ∈ [−half, half]，0.5 px 一步）取响应，响应 > contrastMin / 2 的连成一段、峰值 ≥ contrastMin
-/// 才算，按半高找每一段的两条边（每段按自己的峰值自适应），缝小的相邻段合并，再按宽度筛。
+/// 才算，按半高找每一段的两条边，缝小的相邻段合并，再按宽度筛。
+/// separatePeaks 分离半高子段，合并前的子段保留在 candidates，供示教直胶按已有轨迹消歧。
 std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, const RunSpec& spec,
-                             std::vector<Run>* candidates = nullptr);
+                             std::vector<Run>* candidates = nullptr, bool separatePeaks = false);
 
 /// 中心离 expect 最近的那一段；没有返回 nullptr。
 const Run* nearestRun(const std::vector<Run>& runs, double expect = 0.0);
