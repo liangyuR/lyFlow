@@ -940,8 +940,8 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
       const double expect = useTrack ? out.expect[i] : 0.0;
       const Run* best = nullptr;
       for (const Run& r : st.candidates) {
-        if (r.lo < -spec.searchHalf || r.hi > spec.searchHalf || r.lo > expect ||
-            r.hi < expect || std::fabs(r.mid() - expect) > gate)
+        if (r.lo < -spec.searchHalf || r.hi > spec.searchHalf || r.lo > expect || r.hi < expect ||
+            std::fabs(r.mid() - expect) > gate)
           continue;
         if (!best || std::fabs(r.mid() - expect) < std::fabs(best->mid() - expect))
           best = &r;
