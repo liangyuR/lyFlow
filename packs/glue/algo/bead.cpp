@@ -931,16 +931,27 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
   const Field R = responseField(gray, bright, responseWidthMax, roi);
   for (Station& st : out.stations)
     st.runs = lateralRuns(R, st.c, st.n, half, spec.runs, &st.candidates);
-  const auto retainCandidates = [&]() {
+  const auto retainCandidates = [&](double referenceWidth, bool useTrack) {
+    const double gate = std::max(6.0, spec.centerRatio * referenceWidth);
     for (std::size_t i = 0; i < out.stations.size(); ++i) {
       Station& st = out.stations[i];
-      if (const Run* r = nearestRun(st.candidates, out.expect[i])) {
-        st.candidateLo = r->lo;
-        st.candidateHi = r->hi;
+      st.candidateLo = st.candidateHi = kNaN;
+      const double expect = useTrack ? out.expect[i] : 0.0;
+      const Run* best = nullptr;
+      for (const Run& r : st.candidates) {
+        if (r.lo < -spec.searchHalf || r.hi > spec.searchHalf || r.lo > expect ||
+            r.hi < expect || std::fabs(r.mid() - expect) > gate)
+          continue;
+        if (!best || std::fabs(r.mid() - expect) < std::fabs(best->mid() - expect))
+          best = &r;
+      }
+      if (best) {
+        st.candidateLo = best->lo;
+        st.candidateHi = best->hi;
       }
     }
   };
-  retainCandidates();
+  retainCandidates(spec.runs.widthMax, false);
 
   // 每站拿哪一段去算参考宽 / 参考峰值：拟合的胶路取离胶路最近的那一段（原来的做法）；
   // 示教胶路只取落在偏移轨迹上的那一段（断口里、轨迹外的暗段不进参考）
@@ -951,7 +962,6 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
   } else {
     Track tr = trackOffsets(out.stations, spec.lateralTol, spec.centerRatio);
     out.expect = tr.expect;
-    retainCandidates();
     out.trackSupport = tr.support;
     std::vector<double> sharp, onTrackExpect;
     if (tr.count > 0) {
@@ -977,6 +987,12 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
       out.trackReason = tr.reason;
       return out; // 全部判无胶（T4）
     }
+    std::vector<double> trackWidths;
+    for (const Run* r : tr.onTrack) {
+      if (r)
+        trackWidths.push_back(r->width());
+    }
+    retainCandidates(median(trackWidths), true);
     refRun = tr.onTrack;
   }
 
