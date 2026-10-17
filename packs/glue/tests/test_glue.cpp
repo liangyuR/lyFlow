@@ -721,7 +721,11 @@ TEST_CASE(
   SUBCASE("一片干净的背景") {
     Scene sc;
     sc.bead = false;
-    checkNoBead(run(taughtGraph(taughtParams(sc)), render(sc)));
+    const Result r = run(taughtGraph(taughtParams(sc)), render(sc));
+    checkNoBead(r);
+    CHECK(numbers(r.stations["candidateWidthPx"]).empty());
+    CHECK(numbers(r.stations["candidateLo"]).empty());
+    CHECK(numbers(r.stations["candidateHi"]).empty());
     // 不判断胶（maxBreak < 0）也照样是 NG：整段没胶不靠断胶来判
     Params p = taughtParams(sc);
     p.judge = Json{{"maxBreak", -1}};
@@ -735,6 +739,17 @@ TEST_CASE(
     MESSAGE("reason: " << r.beadInfo["reason"] << " sharpness=" << r.beadInfo["sharpness"]);
     checkNoBead(r);
     CHECK(r.beadInfo["reason"].get<std::string>().find("太缓") != std::string::npos);
+    CHECK_FALSE(numbers(r.stations["candidateWidthPx"]).empty());
+    CHECK(numbers(r.stations["widthPx"]).empty());
+    CHECK(r.beadInfo["coverage"] == 0);
+    for (std::size_t i = 0; i < r.stations["count"].get<std::size_t>(); ++i) {
+      if (r.stations["candidateWidthPx"][i].is_null())
+        continue;
+      CHECK_FALSE(r.stations["present"][i].get<bool>());
+      CHECK(r.stations["candidateWidthPx"][i].get<double>() ==
+            doctest::Approx(r.stations["candidateHi"][i].get<double>() -
+                            r.stations["candidateLo"][i].get<double>()).epsilon(0.001));
+    }
   }
   SUBCASE("只有一条平行的暗线，离示教线 30 px（tolerance 20 之外、卡尺之内）") {
     Scene sc;
@@ -748,7 +763,10 @@ TEST_CASE(
     sc.lineAt = -12;
     Params p = taughtParams(sc);
     p.width["widthRange"] = {12, 90};
-    checkNoBead(run(taughtGraph(p), render(sc)));
+    const Result r = run(taughtGraph(p), render(sc));
+    checkNoBead(r);
+    CHECK_FALSE(numbers(r.stations["candidateWidthPx"]).empty());
+    CHECK(numbers(r.stations["widthPx"]).empty());
   }
   SUBCASE("胶偏开示教线 35 px，超出 tolerance 20：不算这条胶") {
     Scene sc;

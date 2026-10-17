@@ -565,7 +565,8 @@ Field smoothGrayField(const cv::Mat& gray, bool bright, cv::Rect roi) {
 
 // ------------------------------------------------------------------ 卡尺
 
-std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, const RunSpec& spec) {
+std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, const RunSpec& spec,
+                             std::vector<Run>* candidates) {
   constexpr double kRes = 0.5;
   const int count = static_cast<int>(std::floor(2.0 * half / kRes + 1e-9)) + 1;
   std::vector<double> v(static_cast<std::size_t>(std::max(count, 0)));
@@ -605,7 +606,8 @@ std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, con
           a > 0 ? tAt(a) - (v[a] - lvl) / std::max(v[a] - v[a - 1], 1e-6) * kRes : tAt(a);
       const double lb =
           b < count - 1 ? tAt(b) + (v[b] - lvl) / std::max(v[b] - v[b + 1], 1e-6) * kRes : tAt(b);
-      raw.push_back(Run{la, lb, peak});
+      raw.push_back(Run{la, lb, peak, a > 0 && b < count - 1 && ok[a - 1] &&
+                                        ok[b + 1] && v[a - 1] < lvl && v[b + 1] < lvl});
     }
     i = j + 1;
   }
@@ -614,10 +616,18 @@ std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, con
   for (const Run& r : raw) {
     if (!merged.empty() && r.lo - merged.back().hi <= spec.mergeGap &&
         r.hi - merged.back().lo <= spec.widthMax) {
+      merged.back().completeEdges = merged.back().completeEdges && r.completeEdges;
       merged.back().hi = r.hi;
       merged.back().peak = std::max(merged.back().peak, r.peak);
     } else {
       merged.push_back(r);
+    }
+  }
+  if (candidates) {
+    candidates->clear();
+    for (const Run& r : merged) {
+      if (r.completeEdges && r.lo > -half && r.hi < half && r.hi > r.lo)
+        candidates->push_back(r);
     }
   }
   std::vector<Run> out;
@@ -920,7 +930,17 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
                      static_cast<int>(std::ceil(y1 - y0 + 2 * pad)) + 1);
   const Field R = responseField(gray, bright, responseWidthMax, roi);
   for (Station& st : out.stations)
-    st.runs = lateralRuns(R, st.c, st.n, half, spec.runs);
+    st.runs = lateralRuns(R, st.c, st.n, half, spec.runs, &st.candidates);
+  const auto retainCandidates = [&]() {
+    for (std::size_t i = 0; i < out.stations.size(); ++i) {
+      Station& st = out.stations[i];
+      if (const Run* r = nearestRun(st.candidates, out.expect[i])) {
+        st.candidateLo = r->lo;
+        st.candidateHi = r->hi;
+      }
+    }
+  };
+  retainCandidates();
 
   // 每站拿哪一段去算参考宽 / 参考峰值：拟合的胶路取离胶路最近的那一段（原来的做法）；
   // 示教胶路只取落在偏移轨迹上的那一段（断口里、轨迹外的暗段不进参考）
@@ -931,6 +951,7 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
   } else {
     Track tr = trackOffsets(out.stations, spec.lateralTol, spec.centerRatio);
     out.expect = tr.expect;
+    retainCandidates();
     out.trackSupport = tr.support;
     std::vector<double> sharp, onTrackExpect;
     if (tr.count > 0) {

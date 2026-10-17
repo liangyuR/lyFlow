@@ -85,3 +85,9 @@ pwsh -NoProfile -File scripts/check-glue.ps1 -Steps manifest,schema
 - 主线编辑器对 `lyflow.overlay2d` 的渲染和点选示教；本轮保留数据与离线叠画工具，不迁入旧编辑器。
 - 示教胶路：两件之间胶的位置不稳定的拍照点（MX11 #2、7、19、45、47–50）要逐帧对胶本身配准，并加边缘陡度 / 纹理判据挡零件折边的暗影。
 - ly-TuJiaoVision 更新依赖到合并后的提交，构建启用 glue 的 core，并移除 `IMAGE_INPUT_UNSUPPORTED`、恢复宿主 `RunImageInput`。其现有默认分支不在本 PR 中改动。
+
+## 未通过站位的候选胶宽
+
+`glue.bead_width` 的 `bead.stations` 增加与 `count` 等长的 `candidateLo`、`candidateHi`、`candidateWidthPx` 数组。前两项是相对该站 `center` 沿 `normal` 的像素偏移，后一项是两者之差，始终以 px 表示。
+
+通过站位与正式 `lo`、`hi`、`widthPx` 一致。未通过站位保留当前卡尺内离期望中心最近的响应段半高边缘，包括被宽度范围、轨迹或边缘陡度判据拒绝的候选；没有完整双边时三项均为 null。候选可能来自压痕或阴影，只作诊断显示，不能当作合格胶宽。候选不参与参考宽度、coverage、present、断胶或 NG 判定，也不以邻站插值制造宽度。原正式宽度字段在未通过站位仍为 null。
