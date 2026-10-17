@@ -748,7 +748,8 @@ TEST_CASE(
       CHECK_FALSE(r.stations["present"][i].get<bool>());
       CHECK(r.stations["candidateWidthPx"][i].get<double>() ==
             doctest::Approx(r.stations["candidateHi"][i].get<double>() -
-                            r.stations["candidateLo"][i].get<double>()).epsilon(0.001));
+                            r.stations["candidateLo"][i].get<double>())
+                .epsilon(0.001));
     }
   }
   SUBCASE("只有一条平行的暗线，离示教线 30 px（tolerance 20 之外、卡尺之内）") {
