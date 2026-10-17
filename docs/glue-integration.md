@@ -90,4 +90,4 @@ pwsh -NoProfile -File scripts/check-glue.ps1 -Steps manifest,schema
 
 `glue.bead_width` 的 `bead.stations` 增加与 `count` 等长的 `candidateLo`、`candidateHi`、`candidateWidthPx` 数组。前两项是相对该站 `center` 沿 `normal` 的像素偏移，后一项是两者之差，始终以 px 表示。
 
-通过站位与正式 `lo`、`hi`、`widthPx` 一致。未通过站位保留当前卡尺内离期望中心最近的响应段半高边缘，包括被宽度范围、轨迹或边缘陡度判据拒绝的候选；没有完整双边时三项均为 null。候选可能来自压痕或阴影，只作诊断显示，不能当作合格胶宽。候选不参与参考宽度、coverage、present、断胶或 NG 判定，也不以邻站插值制造宽度。原正式宽度字段在未通过站位仍为 null。
+通过站位与正式 `lo`、`hi`、`widthPx` 一致。未通过站位的候选必须有完整半高双边、双边位于配置的 `searchHalf` 内且包围期望中心，中心偏差不超过 `max(6 px, centerRatio × 参考宽)`。存在可信示教偏移轨迹时使用轨迹中心及轨迹参考宽，否则使用示教中心与 `widthRange` 上限。满足这些位置条件的候选取最近者，宽度超限仍可保留，不把它改成合格宽度；没有可信双边时三项均为 null。候选只作诊断显示，不能当作合格胶宽，也不能保证排除所有阴影。候选不参与参考宽度、coverage、present、断胶或 NG 判定，也不以邻站插值制造宽度。原正式宽度字段在未通过站位仍为 null。

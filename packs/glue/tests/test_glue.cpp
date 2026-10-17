@@ -766,8 +766,31 @@ TEST_CASE(
     p.width["widthRange"] = {12, 90};
     const Result r = run(taughtGraph(p), render(sc));
     checkNoBead(r);
-    CHECK_FALSE(numbers(r.stations["candidateWidthPx"]).empty());
+    CHECK(numbers(r.stations["candidateWidthPx"]).empty());
     CHECK(numbers(r.stations["widthPx"]).empty());
+  }
+  SUBCASE("离线窄暗带和跨越示教线的宽阴影不作为失败站候选，居中超宽仍可诊断") {
+    for (const auto& [offset, width] :
+         std::vector<std::pair<double, double>>{{12, 6}, {-35, 90}, {0, 30}}) {
+      CAPTURE(offset);
+      CAPTURE(width);
+      Scene sc;
+      sc.bead = false;
+      sc.lineAt = offset;
+      sc.lineWidth = width;
+      sc.noise = 0;
+      Params p = taughtParams(sc);
+      p.path["widthMax"] = 120;
+      p.width["widthRange"] = {12, 20};
+      p.width["searchHalf"] = 100;
+      const Result r = run(taughtGraph(p), render(sc));
+      checkNoBead(r);
+      CHECK(numbers(r.stations["widthPx"]).empty());
+      if (offset == 0)
+        CHECK_FALSE(numbers(r.stations["candidateWidthPx"]).empty());
+      else
+        CHECK(numbers(r.stations["candidateWidthPx"]).empty());
+    }
   }
   SUBCASE("胶偏开示教线 35 px，超出 tolerance 20：不算这条胶") {
     Scene sc;
