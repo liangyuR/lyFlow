@@ -22,7 +22,10 @@ namespace lyflow::packs::glue {
 /// 再做一次 5×5、σ=1.2 的高斯。结构元是近似圆盘的正八边形（方形 + 两条对角线段的闵可夫斯基和），
 /// 比 OpenCV 的椭圆核快三十多倍（整幅 1280×1024 约 4 ms 对 120 ms）。
 /// roi 是要用到的那一块（图像坐标）；内部按两倍结构元半径外扩着算，roi 里的值与整幅图算出来的相同。
-Field responseField(const cv::Mat& gray, bool bright, int widthMax, cv::Rect roi);
+/// level 不为空时另给一张同样高斯过的局部亮度：暗胶取闭运算（胶两旁的背景），亮胶取原图（胶本身），
+/// 即顶帽两项里亮的那一项，处处 ≥ 响应。
+Field responseField(const cv::Mat& gray, bool bright, int widthMax, cv::Rect roi,
+                    Field* level = nullptr);
 
 /// D15 的边缘陡度用的平滑灰度（5×5、σ=1.0）。bright 时取反（255 − g）：陡度的符号约定就只有「暗胶」一种。
 Field smoothGrayField(const cv::Mat& gray, bool bright, cv::Rect roi);
@@ -151,7 +154,8 @@ struct StationSpec {
   double window = 30;
   double presentRatio = 0.5;
   double centerRatio = 0.3;
-  double contrastRatio = 0.3; ///< 一站的峰值至少是参考峰值（候选暗段峰值的中位数）的这么多倍
+  /// 一站的峰值至少是参考峰值（候选暗段峰值的中位数）的这么多倍；示教胶路比的是峰值 / 局部亮度
+  double contrastRatio = 0.3;
   /// 示教胶路（T3）：≥ 0 时胶中心离示教线最远这么多 px，期望的胶中心按「偏移轨迹」逐站估（不是 0）。
   /// < 0 = 胶路是 findBeadPath 从图里拟合出来的，胶就在胶路上，期望中心恒为 0（原来的做法，一位不差）。
   double lateralTol = -1;

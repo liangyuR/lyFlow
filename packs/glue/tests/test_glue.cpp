@@ -817,6 +817,33 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "glue：示教胶长断口里有一条与胶同宽的淡带（同一背景上响应只有胶的一到两成）-> 报出完整断口") {
+  for (const auto& [faint, lo] :
+       std::vector<std::pair<int, int>>{{190, 185}, {175, 185}, {175, 235}}) {
+    CAPTURE(faint);
+    CAPTURE(lo);
+    cv::Mat image(420, 520, CV_8U, cv::Scalar(220));
+    for (int y = 185; y < 215; ++y) {
+      for (int x = 0; x < image.cols; ++x)
+        image.at<unsigned char>(y, x) = x >= lo && x < 385 ? faint : 30;
+    }
+    Params p;
+    p.path = Json{
+        {"points", "[[40,200],[480,200]]"}, {"zone", {0, 0}}, {"tolerance", 30}, {"widthMax", 60}};
+    p.width = Json{{"form", "straight"},
+                   {"widthRange", {10, 60}},
+                   {"searchHalf", 60},
+                   {"stationStep", 10},
+                   {"mergeGap", 8}};
+    const Result r = run(taughtGraph(p), image);
+    REQUIRE(r.status == "ok");
+    REQUIRE(r.breaks["breaks"].size() == 1);
+    CHECK(std::fabs(r.breaks["breaks"][0]["sStart"].get<double>() - (lo - 40)) <= 1.0);
+    CHECK(std::fabs(r.breaks["breaks"][0]["sEnd"].get<double>() - 345) <= 1.0);
+  }
+}
+
+TEST_CASE(
     "glue：示教胶边外隔一条窄缝、时有时无地贴着一条淡肩（峰值只有胶的一成）-> 胶宽不把淡肩并进来") {
   cv::Mat image(420, 520, CV_8U, cv::Scalar(220));
   for (int y = 0; y < image.rows; ++y) {

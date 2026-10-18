@@ -376,12 +376,6 @@ constexpr double kTrackWindow = 40.0; ///< 偏移轨迹逐站细化时沿 s 取�
 constexpr double kTrackMinSupport =
     0.1;                        ///< 落在轨迹上的站不到这个比例（或不到 3 站）= 沿示教线没有胶
 constexpr int kTrackPasses = 8; ///< 逐站细化最多几遍（落在轨迹上的那些站不再变就停）
-constexpr double kContrastWindow = 120.0;     ///< 局部参考峰值沿 s 的半窗下限（px）
-constexpr double kContrastWindowWidths = 6.0; ///< 局部参考峰值的半窗至少这么多个参考宽
-constexpr int kContrastMinLocal = 5;          ///< 窗里参考站不到这么多就只用全检测区的参考峰值
-constexpr double kContrastMinShare = 0.6;     ///< 窗里参考站至少占窗里站数的这么多
-constexpr double kContrastWidthTol =
-    0.3; ///< 参考站的宽与参考宽相差不超过参考宽的这么多倍才算「像胶」
 constexpr double kMergePeakRatio =
     0.4; ///< 示教直胶合并相邻子段时，较淡一段的峰值至少是较浓一段的这么多倍
 
@@ -538,8 +532,10 @@ double percentile(std::vector<double> v, double q) {
 
 // ------------------------------------------------------------------ 响应图
 
-Field responseField(const cv::Mat& gray, bool bright, int widthMax, cv::Rect roi) {
+Field responseField(const cv::Mat& gray, bool bright, int widthMax, cv::Rect roi, Field* level) {
   const cv::Rect inner = roi & imageRect(gray);
+  if (level)
+    *level = Field();
   if (inner.empty())
     return {};
   const Octagon o = octagon(widthMax + 1);
@@ -555,6 +551,12 @@ Field responseField(const cv::Mat& gray, bool bright, int widthMax, cv::Rect roi
     cv::subtract(morph, src, r, cv::noArray(), CV_32F);
   }
   cv::GaussianBlur(r, r, cv::Size(5, 5), 1.2);
+  if (level) {
+    cv::Mat l;
+    (bright ? src : morph).convertTo(l, CV_32F);
+    cv::GaussianBlur(l, l, cv::Size(5, 5), 1.2);
+    *level = Field(l, outer.tl(), inner);
+  }
   return Field(r, outer.tl(), inner);
 }
 
@@ -963,7 +965,8 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
   const cv::Rect roi(static_cast<int>(std::floor(x0 - pad)), static_cast<int>(std::floor(y0 - pad)),
                      static_cast<int>(std::ceil(x1 - x0 + 2 * pad)) + 1,
                      static_cast<int>(std::ceil(y1 - y0 + 2 * pad)) + 1);
-  const Field R = responseField(gray, bright, responseWidthMax, roi);
+  Field level;
+  const Field R = responseField(gray, bright, responseWidthMax, roi, taught ? &level : nullptr);
   for (Station& st : out.stations)
     st.runs = lateralRuns(R, st.c, st.n, half, spec.runs, &st.candidates, taught && !spec.swirl);
   const auto retainCandidates = [&](double referenceWidth, bool useTrack) {
@@ -1075,33 +1078,24 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
   out.peakRef = peaks.empty() ? 0.0 : median(peaks);
   const double minWidth = spec.presentRatio * out.wRef;
   // 对比度也要一致：断口两头模糊出来的「胶的残影」宽度对、位置对，只是淡（真实满胶帧上每站的峰值都在
-  // 中位数的 0.72 倍以上）。示教胶路照明不均时（亮法兰旁 / 暗背景旁）胶的顶帽响应沿线能差三四倍，只用全检测区
-  // 的中位数会把暗处整段胶当成残影：参考峰值再看本站前、后各一个窗，取最低的那个。分前后两窗是为了明暗交界处
-  // 不被另一边拉高；窗里宽度像胶的参考站要够数、还得占窗里站数的大半才算 —— 断口一侧的窗里没有几站胶，
-  // 断口里零散的淡纹理拉不低参考，残影照样按另一侧的胶比。拟合的胶路不变（原来的做法）
-  std::vector<double> minPeak(out.stations.size(), spec.contrastRatio * out.peakRef);
-  if (taught) {
-    const double reach = std::max(kContrastWindow, kContrastWindowWidths * out.wRef);
-    for (std::size_t i = 0; i < out.stations.size(); ++i) {
-      double ref = out.peakRef;
-      for (const double side : {-1.0, 1.0}) {
-        std::vector<double> local;
-        int inWindow = 0;
-        for (std::size_t j = 0; j < out.stations.size(); ++j) {
-          const double ds = side * (out.stations[j].s - out.stations[i].s);
-          if (ds < 0.0 || ds > reach)
-            continue;
-          ++inWindow;
-          if (refRun[j] && std::fabs(refRun[j]->width() - out.wRef) <= kContrastWidthTol * out.wRef)
-            local.push_back(refRun[j]->peak);
-        }
-        const int n = static_cast<int>(local.size());
-        if (n >= kContrastMinLocal && n >= kContrastMinShare * inWindow)
-          ref = std::min(ref, median(std::move(local)));
-      }
-      minPeak[i] = spec.contrastRatio * ref;
-    }
+  // 中位数的 0.72 倍以上）。示教胶路照明不均时（亮法兰旁 / 暗背景旁）胶的顶帽响应沿线能差三四倍，直接比峰值会把
+  // 暗处整段胶当成残影：改比峰值 / 段内最亮的局部亮度，胶旁背景暗下去多少就按多少放宽。参考仍取全检测区的
+  // 中位数、不用局部窗口 —— 断口里一条与胶同宽的淡带（薄胶膜、残胶、浅槽）同样背景上比胶淡得多，
+  // 局部窗口会被它占满，参考跟着它降下来就把它当成胶了。拟合的胶路不变（原来的做法）
+  const auto contrastOf = [&](const Station& st, const Run& r) {
+    if (!taught)
+      return r.peak;
+    double lv = level.at(st.c + st.n * r.hi);
+    for (double t = r.lo; t < r.hi; t += 1.0)
+      lv = std::max(lv, level.at(st.c + st.n * t));
+    return r.peak / std::max(lv, 1.0);
+  };
+  std::vector<double> contrasts;
+  for (std::size_t i = 0; i < out.stations.size(); ++i) {
+    if (refRun[i])
+      contrasts.push_back(contrastOf(out.stations[i], *refRun[i]));
   }
+  const double minContrast = contrasts.empty() ? 0.0 : spec.contrastRatio * median(contrasts);
 
   if (!spec.swirl) {
     const double maxOffset = std::max(6.0, spec.centerRatio * out.wRef);
@@ -1111,7 +1105,7 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
       const double e = out.expect[i];
       const Run* r = nearestRun(st.runs, e);
       if (!r || widths.empty() || r->width() < minWidth || std::fabs(r->mid() - e) > maxOffset ||
-          r->peak < minPeak[i]) {
+          contrastOf(st, *r) < minContrast) {
         continue;
       }
       st.present = true;
@@ -1158,7 +1152,7 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
     // 对比度的一致性只卡「本站有没有胶」，不卡外包络：螺圈外沿的那几股本来就淡一些
     bool own = false;
     for (const Run& r : st.runs)
-      own = own || (qualifies(r) && r.peak >= minPeak[i]);
+      own = own || (qualifies(r) && contrastOf(st, r) >= minContrast);
     if (!own || widths.empty())
       continue;
     double lo = std::numeric_limits<double>::infinity(), hi = -lo, peak = 0;
