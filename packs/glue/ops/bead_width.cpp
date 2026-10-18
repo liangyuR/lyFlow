@@ -219,7 +219,7 @@ void registerBeadWidth(Registry& r) {
       "胶路是示教的（glue.taught_path，info.lineSource = taught）时，胶不一定正好压在线上：期望的胶中心按"
       "「偏移轨迹」逐站估 —— 离示教线不超过 tolerance 的暗段里投票定一个常数偏移（票数不低于最多那条一半的里取离示教线"
       "最近的），再沿 s 取中位数细化（断口里按两头插值），上面 D16 的「中心偏离」量的是离这条轨迹多远；参考宽 / 参考峰值"
-      "只取落在轨迹上的站。卡尺半长至少 tolerance + widthRange 上限 / 2。轨迹上的站不到 3 站或 10%、或者轨迹上暗段边缘"
+      "只取落在轨迹上的站，对比度比的是峰值 / 局部亮度。卡尺半长至少 tolerance + widthRange 上限 / 2。轨迹上的站不到 3 站或 10%、或者轨迹上暗段边缘"
       "陡度的 P25 低于 sharpMin（D15：压痕、阴影），就是沿示教线没有胶：全部判无胶，message 是「检测区内没找到胶」，"
       "原因在 info.reason。";
   op.inputs = {
@@ -252,8 +252,11 @@ void registerBeadWidth(Registry& r) {
       "searchHalf", "Search Half", 60.0, "px",
       "卡尺沿法向往两侧各伸多长。示教胶路时至少取 tolerance + widthRange 上限 / 2。", true);
   searchHalf.min = 2.0;
-  Param mergeGap = floatParam("mergeGap", "Merge Gap", 8.0, "px",
-                              "两段暗段之间的缝不超过它就合并（粗胶中间的高光条）。", true);
+  Param mergeGap = floatParam(
+      "mergeGap", "Merge Gap", 8.0, "px",
+      "两段暗段之间的缝不超过它就合并（粗胶中间的高光条）。示教直胶还要两段一样浓：较淡一段的"
+      "峰值不到较浓一段的 0.4 倍就不并（紧贴胶边的淡肩）。",
+      true);
   mergeGap.min = 0.0;
   Param window = visibleWhen(
       floatParam("window", "Window", 30.0, "px",
@@ -274,7 +277,9 @@ void registerBeadWidth(Registry& r) {
   Param contrastRatio = floatParam(
       "contrastRatio", "Contrast Ratio", 0.3, "",
       "一站的胶至少要有参考峰值（全检测区候选暗段峰值的中位数）的这么多倍对比度才算有胶：断口两头模糊出来的"
-      "残影宽度、位置都对，只是淡。演示数据满胶段每站都在 0.72 倍以上；定得太高，羽化过的断口两头会多算进去一站。",
+      "残影宽度、位置都对，只是淡。演示数据满胶段每站都在 0.72 倍以上；定得太高，羽化过的断口两头会多算进去一站。"
+      "示教胶路比的是峰值 / 局部亮度（暗胶取胶旁背景），参考取它在全检测区的中位数：照明不均时暗处的胶不被当成"
+      "残影，同一背景上比胶淡得多的淡带也不被当成胶。",
       true);
   contrastRatio.min = 0.0;
   contrastRatio.max = 1.0;
