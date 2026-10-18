@@ -376,6 +376,14 @@ constexpr double kTrackWindow = 40.0; ///< 偏移轨迹逐站细化时沿 s 取�
 constexpr double kTrackMinSupport =
     0.1;                        ///< 落在轨迹上的站不到这个比例（或不到 3 站）= 沿示教线没有胶
 constexpr int kTrackPasses = 8; ///< 逐站细化最多几遍（落在轨迹上的那些站不再变就停）
+constexpr double kContrastWindow = 120.0;     ///< 局部参考峰值沿 s 的半窗下限（px）
+constexpr double kContrastWindowWidths = 6.0; ///< 局部参考峰值的半窗至少这么多个参考宽
+constexpr int kContrastMinLocal = 5;          ///< 窗里参考站不到这么多就只用全检测区的参考峰值
+constexpr double kContrastMinShare = 0.6;     ///< 窗里参考站至少占窗里站数的这么多
+constexpr double kContrastWidthTol =
+    0.3; ///< 参考站的宽与参考宽相差不超过参考宽的这么多倍才算「像胶」
+constexpr double kMergePeakRatio =
+    0.4; ///< 示教直胶合并相邻子段时，较淡一段的峰值至少是较浓一段的这么多倍
 
 struct Track {
   std::vector<double> expect;      ///< 每站期望的胶中心（px）
@@ -626,11 +634,15 @@ std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, con
     }
     i = j + 1;
   }
-  // 高光条会把一条胶劈成两段（教训 3）：缝不超过 mergeGap、合并后不宽于 widthMax 就并回去
+  // 高光条会把一条胶劈成两段（教训 3）：缝不超过 mergeGap、合并后不宽于 widthMax 就并回去。
+  // 分离半高子段时（示教直胶）两段还得一样浓：胶被高光劈开的两半都是胶，峰值相近；紧贴胶边的一条淡肩
+  // （法兰过渡、浅阴影）峰值只有胶的零头，并进来胶宽就时宽时窄
   std::vector<Run> merged;
   for (const Run& r : raw) {
     if (!merged.empty() && r.lo - merged.back().hi <= spec.mergeGap &&
-        r.hi - merged.back().lo <= spec.widthMax) {
+        r.hi - merged.back().lo <= spec.widthMax &&
+        (!separatePeaks || std::min(r.peak, merged.back().peak) >=
+                               kMergePeakRatio * std::max(r.peak, merged.back().peak))) {
       merged.back().completeEdges = merged.back().completeEdges && r.completeEdges;
       merged.back().hi = r.hi;
       merged.back().peak = std::max(merged.back().peak, r.peak);
@@ -1063,8 +1075,33 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
   out.peakRef = peaks.empty() ? 0.0 : median(peaks);
   const double minWidth = spec.presentRatio * out.wRef;
   // 对比度也要一致：断口两头模糊出来的「胶的残影」宽度对、位置对，只是淡（真实满胶帧上每站的峰值都在
-  // 中位数的 0.72 倍以上）
-  const double minPeak = spec.contrastRatio * out.peakRef;
+  // 中位数的 0.72 倍以上）。示教胶路照明不均时（亮法兰旁 / 暗背景旁）胶的顶帽响应沿线能差三四倍，只用全检测区
+  // 的中位数会把暗处整段胶当成残影：参考峰值再看本站前、后各一个窗，取最低的那个。分前后两窗是为了明暗交界处
+  // 不被另一边拉高；窗里宽度像胶的参考站要够数、还得占窗里站数的大半才算 —— 断口一侧的窗里没有几站胶，
+  // 断口里零散的淡纹理拉不低参考，残影照样按另一侧的胶比。拟合的胶路不变（原来的做法）
+  std::vector<double> minPeak(out.stations.size(), spec.contrastRatio * out.peakRef);
+  if (taught) {
+    const double reach = std::max(kContrastWindow, kContrastWindowWidths * out.wRef);
+    for (std::size_t i = 0; i < out.stations.size(); ++i) {
+      double ref = out.peakRef;
+      for (const double side : {-1.0, 1.0}) {
+        std::vector<double> local;
+        int inWindow = 0;
+        for (std::size_t j = 0; j < out.stations.size(); ++j) {
+          const double ds = side * (out.stations[j].s - out.stations[i].s);
+          if (ds < 0.0 || ds > reach)
+            continue;
+          ++inWindow;
+          if (refRun[j] && std::fabs(refRun[j]->width() - out.wRef) <= kContrastWidthTol * out.wRef)
+            local.push_back(refRun[j]->peak);
+        }
+        const int n = static_cast<int>(local.size());
+        if (n >= kContrastMinLocal && n >= kContrastMinShare * inWindow)
+          ref = std::min(ref, median(std::move(local)));
+      }
+      minPeak[i] = spec.contrastRatio * ref;
+    }
+  }
 
   if (!spec.swirl) {
     const double maxOffset = std::max(6.0, spec.centerRatio * out.wRef);
@@ -1074,7 +1111,7 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
       const double e = out.expect[i];
       const Run* r = nearestRun(st.runs, e);
       if (!r || widths.empty() || r->width() < minWidth || std::fabs(r->mid() - e) > maxOffset ||
-          r->peak < minPeak) {
+          r->peak < minPeak[i]) {
         continue;
       }
       st.present = true;
@@ -1121,7 +1158,7 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
     // 对比度的一致性只卡「本站有没有胶」，不卡外包络：螺圈外沿的那几股本来就淡一些
     bool own = false;
     for (const Run& r : st.runs)
-      own = own || (qualifies(r) && r.peak >= minPeak);
+      own = own || (qualifies(r) && r.peak >= minPeak[i]);
     if (!own || widths.empty())
       continue;
     double lo = std::numeric_limits<double>::infinity(), hi = -lo, peak = 0;

@@ -790,6 +790,60 @@ TEST_CASE("glue：示教胶内窄高光 -> 保留完整胶宽而非半条胶") {
 }
 
 TEST_CASE(
+    "glue：示教胶沿线照明不均（一段旁边是暗背景，顶帽响应只剩亮处的两成）-> 暗处仍全站量到胶") {
+  cv::Mat image(420, 520, CV_8U, cv::Scalar(220));
+  for (int y = 0; y < image.rows; ++y) {
+    for (int x = 0; x < image.cols; ++x) {
+      if (x >= 300)
+        image.at<unsigned char>(y, x) = 70;
+      if (y >= 185 && y < 215)
+        image.at<unsigned char>(y, x) = 30;
+    }
+  }
+  Params p;
+  p.path = Json{
+      {"points", "[[80,200],[440,200]]"}, {"zone", {0, 0}}, {"tolerance", 30}, {"widthMax", 60}};
+  p.width = Json{{"form", "straight"},
+                 {"widthRange", {10, 60}},
+                 {"searchHalf", 60},
+                 {"stationStep", 10},
+                 {"mergeGap", 8}};
+  const Result r = run(taughtGraph(p), image);
+  REQUIRE(r.status == "ok");
+  const auto widths = numbers(r.stations["widthPx"]);
+  REQUIRE(widths.size() == r.stations["count"].get<std::size_t>());
+  for (double width : widths)
+    CHECK(std::fabs(width - 30) <= 1.5);
+}
+
+TEST_CASE(
+    "glue：示教胶边外隔一条窄缝、时有时无地贴着一条淡肩（峰值只有胶的一成）-> 胶宽不把淡肩并进来") {
+  cv::Mat image(420, 520, CV_8U, cv::Scalar(220));
+  for (int y = 0; y < image.rows; ++y) {
+    for (int x = 0; x < image.cols; ++x) {
+      if (y >= 185 && y < 215)
+        image.at<unsigned char>(y, x) = 40;
+      else if ((x / 20) % 3 == 0 && y >= 221 && y < 232)
+        image.at<unsigned char>(y, x) = 200;
+    }
+  }
+  Params p;
+  p.path = Json{
+      {"points", "[[80,200],[440,200]]"}, {"zone", {0, 0}}, {"tolerance", 30}, {"widthMax", 80}};
+  p.width = Json{{"form", "straight"},
+                 {"widthRange", {10, 80}},
+                 {"searchHalf", 80},
+                 {"stationStep", 10},
+                 {"mergeGap", 8}};
+  const Result r = run(taughtGraph(p), image);
+  REQUIRE(r.status == "ok");
+  const auto widths = numbers(r.stations["widthPx"]);
+  REQUIRE(widths.size() == r.stations["count"].get<std::size_t>());
+  for (double width : widths)
+    CHECK(std::fabs(width - 30) <= 1.5);
+}
+
+TEST_CASE(
     "glue：示教胶路 —— 没有胶、只有压痕、只有平行暗线、胶偏出 tolerance：都是「检测区内没找到胶」，从不判 OK") {
   SUBCASE("一片干净的背景") {
     Scene sc;

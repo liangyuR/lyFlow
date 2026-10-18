@@ -252,8 +252,11 @@ void registerBeadWidth(Registry& r) {
       "searchHalf", "Search Half", 60.0, "px",
       "卡尺沿法向往两侧各伸多长。示教胶路时至少取 tolerance + widthRange 上限 / 2。", true);
   searchHalf.min = 2.0;
-  Param mergeGap = floatParam("mergeGap", "Merge Gap", 8.0, "px",
-                              "两段暗段之间的缝不超过它就合并（粗胶中间的高光条）。", true);
+  Param mergeGap = floatParam(
+      "mergeGap", "Merge Gap", 8.0, "px",
+      "两段暗段之间的缝不超过它就合并（粗胶中间的高光条）。示教直胶还要两段一样浓：较淡一段的"
+      "峰值不到较浓一段的 0.4 倍就不并（紧贴胶边的淡肩）。",
+      true);
   mergeGap.min = 0.0;
   Param window = visibleWhen(
       floatParam("window", "Window", 30.0, "px",
@@ -274,7 +277,8 @@ void registerBeadWidth(Registry& r) {
   Param contrastRatio = floatParam(
       "contrastRatio", "Contrast Ratio", 0.3, "",
       "一站的胶至少要有参考峰值（全检测区候选暗段峰值的中位数）的这么多倍对比度才算有胶：断口两头模糊出来的"
-      "残影宽度、位置都对，只是淡。演示数据满胶段每站都在 0.72 倍以上；定得太高，羽化过的断口两头会多算进去一站。",
+      "残影宽度、位置都对，只是淡。演示数据满胶段每站都在 0.72 倍以上；定得太高，羽化过的断口两头会多算进去一站。"
+      "示教胶路的参考峰值再看本站前、后各一窗里像胶的站，取最低的：照明不均时暗处的胶不被当成残影。",
       true);
   contrastRatio.min = 0.0;
   contrastRatio.max = 1.0;
