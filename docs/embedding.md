@@ -106,7 +106,7 @@ install(DIRECTORY "${LYFLOW_ROOT}/bin/" DESTINATION "backend/bin")
 ## CMake 消费方
 
 ```cmake
-find_package(lyflow 1.1.3 EXACT CONFIG REQUIRED)     # -DCMAKE_PREFIX_PATH=<prefix>
+find_package(lyflow 1.1.4 EXACT CONFIG REQUIRED)     # -DCMAKE_PREFIX_PATH=<prefix>
 target_link_libraries(my_app PRIVATE lyflow::client)
 ```
 
