@@ -382,6 +382,7 @@ constexpr std::size_t kShiftMinStations = 3; ///< 胶整体横移的一段至少
 constexpr double kShiftCover = 0.6;          ///< 横移段里落在同一相对偏移上的站至少占这么多
 constexpr double kShiftFlankShare =
     0.3; ///< 两侧正常段里同一相对偏移处也有胶样暗段的站超过这个比例 = 一直伴着胶的平行暗线
+constexpr double kShiftRampMinWidth = 0.5; ///< 横跳过渡处斜着的胶至少这么宽（× 轨迹胶宽）
 
 struct Track {
   std::vector<double> expect;      ///< 每站期望的胶中心（px）
@@ -395,6 +396,9 @@ struct Track {
 /// 没落在轨迹上的连续几站里，大多数站在同一个相对偏移（相对轨迹的期望）上有宽度接近轨迹胶宽的暗段，
 /// 而两侧落在轨迹上的站在同一相对偏移处没有 —— 不是一直伴着胶的平行暗线（零件翻边、阴影）—— 就认作胶横移了，
 /// 这几站的轨迹跟过去，下游按位置偏移判。过渡处斜着的那一两站仍不在轨迹上。
+/// 两头还要接得上（真横移在过渡处有斜着的胶）：从两侧轨迹的最后一站到横移段的第一站，中间每一站都有一段胶，中心落在
+/// 横移前（那一站的轨迹期望）与横移后（横移段起头几站的胶中心）之间、离两头各至少半个 gate，不比两头并起来还宽；
+/// 没有中间站时，这两站至少一站的胶已经斜过去。接不上的（真断口旁只在这一段出现的孔、槽、紧固件阴影）仍按断口报。
 void followShifts(const std::vector<Station>& st, double tol, double gate, Track& tr) {
   const std::size_t n = st.size();
   std::vector<double> widths;
@@ -460,8 +464,44 @@ void followShifts(const std::vector<Station>& st, double tol, double gate, Track
       look(k);
     if (flank < kShiftMinStations || static_cast<double>(parallel) > kShiftFlankShare * flank)
       continue;
+    std::vector<const Run*> moved(len, nullptr);
+    std::size_t first = b, last = a;
     for (std::size_t k = a; k < b; ++k) {
-      if (const Run* r = near(st[k], tr.expect[k] + delta)) {
+      if ((moved[k - a] = near(st[k], tr.expect[k] + delta))) {
+        first = std::min(first, k);
+        last = k;
+      }
+    }
+    const auto linked = [&](std::size_t onTrackEnd, std::size_t shiftedEnd) {
+      std::vector<double> ahead;
+      for (std::size_t k = shiftedEnd; k >= a && k < b && ahead.size() < kShiftMinStations;
+           k = shiftedEnd > onTrackEnd ? k + 1 : k - 1) {
+        if (moved[k - a])
+          ahead.push_back(moved[k - a]->mid());
+      }
+      const double from = tr.expect[onTrackEnd], to = median(ahead), jump = std::fabs(to - from);
+      const auto slanted = [&](std::size_t k) {
+        return std::any_of(st[k].runs.begin(), st[k].runs.end(), [&](const Run& r) {
+          const double along = (r.mid() - from) * (to > from ? 1.0 : -1.0);
+          return std::fabs(r.mid()) <= tol && along >= 0.5 * gate && along <= jump - 0.5 * gate &&
+                 r.width() >= kShiftRampMinWidth * wRef && r.width() <= wRef + jump - gate;
+        });
+      };
+      const std::size_t lo = std::min(onTrackEnd, shiftedEnd),
+                        hi = std::max(onTrackEnd, shiftedEnd);
+      bool any = false;
+      for (std::size_t k = lo; k <= hi; ++k) {
+        const bool s = slanted(k);
+        if (!s && k != lo && k != hi)
+          return false;
+        any = any || s;
+      }
+      return any;
+    };
+    if ((a > 0 && !linked(a - 1, first)) || (b < n && !linked(b, last)))
+      continue;
+    for (std::size_t k = a; k < b; ++k) {
+      if (const Run* r = moved[k - a]) {
         tr.onTrack[k] = r;
         tr.expect[k] = r->mid();
       }

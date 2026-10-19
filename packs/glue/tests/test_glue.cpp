@@ -1046,6 +1046,31 @@ TEST_CASE(
   }
 }
 
+TEST_CASE("glue：示教胶真断了一截、断口旁有一块只在这段出现的同宽暗块（孔、槽、紧固件阴影）-> "
+          "断口照报，不当整段横移跟过去") {
+  // 暗块与胶同宽、同样暗，相对示教线的偏移在 tolerance 以内，两侧轨迹上没有它；它和两头的胶之间没有斜着连过去的胶
+  struct Case {
+    int at, from, to, gapFrom, gapTo;
+  };
+  for (const Case& c : std::vector<Case>{
+           {30, 225, 325, 230, 320}, {-40, 250, 310, 230, 320}, {55, 245, 280, 240, 290}}) {
+    CAPTURE(c.at);
+    CAPTURE(c.from);
+    CAPTURE(c.gapFrom);
+    cv::Mat image = shiftedBead([](int) { return 0.0; });
+    image(cv::Range(185, 216), cv::Range(c.gapFrom, c.gapTo + 1)).setTo(220);
+    image(cv::Range(186 + c.at, 215 + c.at), cv::Range(c.from, c.to + 1)).setTo(40);
+    const Result r = run(taughtGraph(shiftedParams()), image);
+    REQUIRE(r.status == "ok");
+    const Json& got = r.breaks["breaks"];
+    REQUIRE(got.size() == 1);
+    CHECK(std::fabs(got[0]["sStart"].get<double>() - (c.gapFrom - 40)) <= 10.0);
+    CHECK(std::fabs(got[0]["sEnd"].get<double>() - (c.gapTo - 40)) <= 10.0);
+    CHECK(r.verdict["ok"] == false);
+    CHECK(r.verdict["counts"]["break"] == 1);
+  }
+}
+
 TEST_CASE(
     "glue：示教胶路的加载期校验 —— points 不到两个 / 不是数 / 退化成一点、zone 超出折线，诊断指到参数") {
   auto errors = [](const Json& path) {
