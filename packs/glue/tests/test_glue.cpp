@@ -6,8 +6,10 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -955,15 +957,17 @@ TEST_CASE(
 
 TEST_CASE(
     "glue：示教胶路 —— 胶断了一截、旁边一条平行暗线一直在：断口照样报在示教线上，不被暗线接上") {
-  // 断口 [234, 314]（80 px）。暗线宽 6 px、与胶一样暗：一条在 tolerance 20 之外 30 px；另一条在 tolerance 放宽到 30
+  // 断口 [234, 314]（80 px）。暗线与胶一样暗：宽 6 px 的一条在 tolerance 20 之外 30 px；另一条在 tolerance 放宽到 30
   // 之后的 −27 px，进了轨迹的候选，而且比断了一截的胶还长（票数更多）—— 投票让示教线附近的胶优先，断口里它离轨迹
-  // 太远不算胶
-  for (const auto& lt : std::vector<std::pair<double, double>>{{30, 20}, {-27, 30}}) {
-    const double lineAt = lt.first, tolerance = lt.second;
+  // 太远不算胶；与胶同宽（20 px）的一条在 −45 px：断口里它像整段横移的胶，但两侧轨迹上也一直有它，不当横移跟过去
+  for (const auto& [lineAt, tolerance, lineWidth] :
+       std::vector<std::tuple<double, double, double>>{{30, 20, 6}, {-27, 30, 6}, {-45, 50, 20}}) {
     CAPTURE(lineAt);
     CAPTURE(tolerance);
+    CAPTURE(lineWidth);
     Scene sc;
     sc.lineAt = lineAt;
+    sc.lineWidth = lineWidth;
     sc.breaks = {{234, 314}};
     const Result r = run(taughtGraph(taughtParams(sc, tolerance)), render(sc));
     REQUIRE(r.status == "ok");
@@ -980,6 +984,65 @@ TEST_CASE(
     CHECK(std::fabs(medianOf(numbers(r.stations["width"])) - sc.beadWidth) <= 1.0);
     CHECK(r.verdict["ok"] == false);
     CHECK(r.verdict["counts"]["break"] == 1);
+  }
+}
+
+/// 示教直胶：沿 x 走、宽 30 px；shift(x) 是胶中心相对示教线 y = 200 的横向偏移。
+cv::Mat shiftedBead(const std::function<double(int)>& shift) {
+  cv::Mat image(420, 520, CV_8U, cv::Scalar(220));
+  for (int x = 0; x < image.cols; ++x) {
+    for (int y = 0; y < image.rows; ++y) {
+      if (std::fabs(y - 200 - shift(x)) < 15)
+        image.at<unsigned char>(y, x) = 40;
+    }
+  }
+  return image;
+}
+
+Params shiftedParams() {
+  Params p;
+  p.path = Json{
+      {"points", "[[40,200],[480,200]]"}, {"zone", {0, 0}}, {"tolerance", 70}, {"widthMax", 60}};
+  p.width = Json{{"form", "straight"},
+                 {"widthRange", {10, 60}},
+                 {"searchHalf", 100},
+                 {"stationStep", 10},
+                 {"mergeGap", 8}};
+  return p;
+}
+
+TEST_CASE(
+    "glue：示教胶有一段在一个胶宽内整体横跳 26 / 52 px -> 这段照样量到胶、报横移后的中心，不当断胶") {
+  for (const double jump : {26.0, 52.0}) {
+    CAPTURE(jump);
+    const auto shift = [&](int x) {
+      if (x < 174 || x > 356)
+        return 0.0;
+      if (x < 200)
+        return jump * (x - 174) / 26.0;
+      if (x > 330)
+        return jump * (356 - x) / 26.0;
+      return jump;
+    };
+    const Result r = run(taughtGraph(shiftedParams()), shiftedBead(shift));
+    REQUIRE(r.status == "ok");
+    std::size_t missing = 0;
+    for (std::size_t i = 0; i < r.stations["count"].get<std::size_t>(); ++i) {
+      const double x = 40 + r.stations["s"][i].get<double>();
+      CAPTURE(x);
+      if (!r.stations["present"][i].get<bool>()) {
+        CHECK((x > 170 && x < 360));
+        ++missing;
+        continue;
+      }
+      const double mid =
+          0.5 * (r.stations["lo"][i].get<double>() + r.stations["hi"][i].get<double>());
+      if (x >= 205 && x <= 325)
+        CHECK(std::fabs(mid - jump) <= 1.5);
+      else if (x < 170 || x > 360)
+        CHECK(std::fabs(mid) <= 1.5);
+    }
+    CHECK(missing <= 4);
   }
 }
 
