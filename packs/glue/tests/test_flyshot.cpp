@@ -5,6 +5,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -287,9 +288,13 @@ TEST_CASE("glue 飞拍：平移 ±40 px、旋转 ±2° —— 位姿误差 ≤ 0
   }
 }
 
-TEST_CASE("glue 飞拍：只加噪声（σ≈6）不转 —— 看得出角度的模板估出的角度 < 0.1°，中心不被假角度带偏") {
+TEST_CASE(
+    "glue 飞拍：只加噪声（σ≈6）或只平移半个像素、不转 —— 看得出角度的模板估出的角度 < 0.1°，中心不被假角度带偏") {
   // 防的回归：1.0.0 在 0° 直接用原图、别的角度经双线性插值，插值相当于轻微平滑，噪声下非零角度的 NCC 反而更高：
-  // 这一帧报 0.25°（2026-10-17 样本集 σ = 6 时中位 0.63°），杠杆臂末端偏出零点几 mm，比不定位还差
+  // 噪声帧报 0.25°（2026-10-17 样本集 σ = 6 时中位 0.63°），杠杆臂末端偏出零点几 mm，比不定位还差。
+  // 半像素帧防的是亚像素相位：NCC 只在整像素上取分，物体落在半像素上时 0° 的分数被压低，别的角度转过去的
+  // 小数部分不同、压低得少，假角度把中心带偏（上一版这一帧中心偏 0.12 px；96 px 的合成模板只平移半像素、
+  // 不转时报 0.25…0.44°，复拍对 S001→S034 报 0.49°）
   const Files f = teach();
   cv::Mat noisy;
   render(Rigid{}).convertTo(noisy, CV_32F);
@@ -298,14 +303,67 @@ TEST_CASE("glue 飞拍：只加噪声（σ≈6）不转 —— 看得出角度�
   rng.fill(noise, cv::RNG::NORMAL, 0.0, 6.0);
   noisy += noise;
   noisy.convertTo(noisy, CV_8U);
-  const Out o = run(flyshotGraph(f, false), noisy);
-  REQUIRE(o.status == "ok");
-  INFO(o.pose.dump());
-  CHECK(o.pose["ok"] == true);
-  CHECK(o.pose["angleObservable"] == true); // 角度是估出来的，不是「看不出」被置 0
-  CHECK(std::fabs(o.pose["angle"].get<double>()) < 0.1);
-  CHECK(std::fabs(o.pose["offset"][0].get<double>()) <= 0.1);
-  CHECK(std::fabs(o.pose["offset"][1].get<double>()) <= 0.1);
+  const Rigid half{0.5, 0.5, 0.0};
+  for (const auto& [frame, shift] :
+       {std::pair{noisy, P2(0, 0)}, std::pair{render(half), P2(half.tx, half.ty)}}) {
+    CAPTURE(shift.x);
+    const Out o = run(flyshotGraph(f, false), frame);
+    REQUIRE(o.status == "ok");
+    INFO(o.pose.dump());
+    CHECK(o.pose["ok"] == true);
+    CHECK(o.pose["angleObservable"] == true); // 角度是估出来的，不是「看不出」被置 0
+    CHECK(std::fabs(o.pose["angle"].get<double>()) < 0.1);
+    CHECK(std::fabs(o.pose["offset"][0].get<double>() - shift.x) <= 0.1);
+    CHECK(std::fabs(o.pose["offset"][1].get<double>() - shift.y) <= 0.1);
+  }
+}
+
+TEST_CASE("glue 飞拍：模板里唯一的特征贴着框边（离框边 < 4 px）—— 平移照样准，不漂 1…2 px") {
+  // 防的回归：上一版预平滑后把模板四边各裁 4 px，贴着框边的细条整个被裁掉，只剩平滑的尾巴，
+  // 平移漂 1.2…1.9 px、分数 0.95 以上照常成功（不裁的 1.0.0 是 0.01…0.13 px）
+  constexpr int kAx = 100, kAy = 80, kBox = 40;
+  // 均匀背景上一个 L 形暗角：两条 2 px 宽的条落在模板局部 x = 1…2、y = 1…2，往框外延伸
+  auto frame = [&](double tx, double ty, int seed) {
+    cv::Mat img(260, 320, CV_32F);
+    constexpr int kSub = 4;
+    for (int y = 0; y < img.rows; ++y) {
+      for (int x = 0; x < img.cols; ++x) {
+        double acc = 0;
+        for (int j = 0; j < kSub; ++j) {
+          for (int i = 0; i < kSub; ++i) {
+            const double px = x - 0.5 + (i + 0.5) / kSub - tx - kAx;
+            const double py = y - 0.5 + (j + 0.5) / kSub - ty - kAy;
+            const bool bar = (px >= 0.5 && px < 2.5 && py >= 0.5 && py < 150) ||
+                             (py >= 0.5 && py < 2.5 && px >= 0.5 && px < 150);
+            acc += bar ? 40.0 : 150.0;
+          }
+        }
+        img.at<float>(y, x) = static_cast<float>(acc / (kSub * kSub));
+      }
+    }
+    cv::Mat noise(img.size(), CV_32F);
+    cv::RNG rng(seed);
+    rng.fill(noise, cv::RNG::NORMAL, 0.0, 4.0);
+    img += noise;
+    cv::Mat out;
+    img.convertTo(out, CV_8U);
+    return out;
+  };
+  lyflow::packs::glue::LocateSpec spec;
+  spec.anchor = P2(kAx, kAy);
+  spec.searchRadius = 20;
+  spec.angleRange = 0;
+  const cv::Mat tmpl = frame(0, 0, 1)(cv::Rect(kAx, kAy, kBox, kBox)).clone();
+  const P2 teachCenter = P2(kAx, kAy) + P2((kBox - 1) / 2.0, (kBox - 1) / 2.0);
+  for (const P2 t : {P2(0, 0), P2(4.5, 3.15), P2(-6.3, -4.41), P2(9.2, 6.44)}) {
+    CAPTURE(t.x);
+    const auto pose = lyflow::packs::glue::locateTemplate(frame(t.x, t.y, 7), tmpl, spec);
+    INFO("score " << pose.score << " reason " << pose.reason << " center " << pose.center.x << ", "
+                  << pose.center.y);
+    CHECK(pose.ok);
+    CHECK(std::hypot(pose.center.x - teachCenter.x - t.x, pose.center.y - teachCenter.y - t.y) <=
+          0.3);
+  }
 }
 
 TEST_CASE("glue 飞拍：模板在图上根本没有 —— pose.ok = false，全部站 pose_fail，不是执行错误") {
@@ -410,6 +468,71 @@ TEST_CASE(
   CHECK(outside.pose["score"].get<double>() >= 0.6);
   CHECK(outside.pose["ok"] == false);
   CHECK(outside.pose["reason"] == "at_angle_edge");
+
+  // angleRange 比 angleStep（默认 0.5°）还小：上一版一个角度都不扫，转 1° 也报成功、angle 0、angleObservable = true
+  const Json small = withLocate(flyshotGraph(f, false), {{"angleRange", 0.4}});
+  const Out smallIn = run(small, render(Rigid{0, 0, 0.3}));
+  REQUIRE(smallIn.status == "ok");
+  INFO(smallIn.pose.dump());
+  CHECK(smallIn.pose["ok"] == true);
+  CHECK(smallIn.pose["angleObservable"] == true);
+  CHECK(std::fabs(smallIn.pose["angle"].get<double>() - 0.3) <= 0.1);
+  const Out smallOut = run(small, render(Rigid{0, 0, 1.0}));
+  REQUIRE(smallOut.status == "ok");
+  INFO(smallOut.pose.dump());
+  CHECK(smallOut.pose["ok"] == false);
+  CHECK(smallOut.pose["reason"] == "at_angle_edge");
+}
+
+TEST_CASE(
+    "glue 飞拍：角度约束弱、看不出角度的模板转出 angleRange —— 判 at_angle_edge，不按 0° 的平移报成功") {
+  // 防的回归：看不出角度时直接取 0° 上的平移，从不判 at_angle_edge；真实转角在范围外时 0° 上的平移也跟着偏，
+  // 上一版这几帧都报成功、中心偏 3.4…4 px（2026-10-17 样本集 +4° 时 1–2/36 张报成功、偏 7.5…12.7 px）。
+  // 场景：三团很软的明暗斑（σ 21…37 px），各角度分数差 < 0.004；整图绕模板外的 (200, 150) 转
+  constexpr double kPx = 200, kPy = 150;
+  auto frame = [&](double deg, double sigma, int seed) {
+    const double a = -deg * kPi / 180.0, c = std::cos(a), s = std::sin(a);
+    cv::Mat img(400, 500, CV_32F);
+    for (int y = 0; y < img.rows; ++y) {
+      for (int x = 0; x < img.cols; ++x) {
+        const double dx = x - kPx, dy = y - kPy;
+        const double u = c * dx - s * dy + kPx, v = s * dx + c * dy + kPy;
+        double value = 128;
+        for (const auto& [bx, by, bs, amp] :
+             {std::array{351.0, 308.0, 37.0, -21.0}, std::array{390.0, 230.0, 21.0, -54.0},
+              std::array{338.0, 326.0, 34.0, 31.0}}) {
+          const double r2 = (u - bx) * (u - bx) + (v - by) * (v - by);
+          value += amp * std::exp(-0.5 * r2 / (bs * bs));
+        }
+        img.at<float>(y, x) = static_cast<float>(value);
+      }
+    }
+    cv::Mat noise(img.size(), CV_32F);
+    cv::RNG rng(seed);
+    rng.fill(noise, cv::RNG::NORMAL, 0.0, sigma);
+    img += noise;
+    cv::Mat out;
+    img.convertTo(out, CV_8U);
+    return out;
+  };
+  lyflow::packs::glue::LocateSpec spec;
+  spec.anchor = P2(300, 220);
+  spec.searchRadius = 40;
+  spec.angleRange = 3;
+  const cv::Mat tmpl = frame(0, 0.0, 1)(cv::Rect(300, 220, 96, 96)).clone();
+  for (const double deg : {4.0, -4.0, 4.5}) {
+    CAPTURE(deg);
+    const auto pose = lyflow::packs::glue::locateTemplate(frame(deg, 2.0, 9), tmpl, spec);
+    INFO("score " << pose.score << " angle " << pose.angleDeg << " observable "
+                  << pose.angleObservable);
+    CHECK_FALSE(pose.angleObservable); // 走的确实是看不出角度的分支
+    CHECK_FALSE(pose.ok);
+    CHECK(pose.reason == "at_angle_edge");
+  }
+  // 范围内照旧：看不出角度、报成功（0° 的平移，宿主按「转角没补偿」处理）
+  const auto inRange = lyflow::packs::glue::locateTemplate(frame(0, 2.0, 9), tmpl, spec);
+  CHECK(inRange.ok);
+  CHECK_FALSE(inRange.angleObservable);
 }
 
 TEST_CASE(

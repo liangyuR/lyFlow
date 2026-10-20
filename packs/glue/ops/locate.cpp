@@ -127,16 +127,19 @@ void registerLocate(Registry& r) {
   op.doc =
       "固定相机飞拍：按示教时从示教图上裁下的模板，求这一帧相对示教图的刚体位姿"
       "（T(p) = R(angle)·(p − teachCenter) + center，glue-plan K2）。只在模板外扩 searchRadius 的一块里做"
-      "归一化互相关，角度在 ±angleRange 里按 angleStep 扫描（两端外各多扫一步作护栏）后抛物线插值。"
-      "搜索区与模板先做同样的 σ = 1 px 高斯平滑，每个角度（含 0°）走同一条三次插值旋转，噪声不会把角度推离 0。\n"
+      "归一化互相关，角度在 ±angleRange 里按 angleStep 扫描（两端外各多扫一步作护栏；angleRange 小于 angleStep 时"
+      "按 angleRange 一步扫）后抛物线插值。搜索区与模板先做同样的 σ = 1 px 高斯平滑（模板整块平滑、不裁边），"
+      "每个角度（含 0°）走同一条三次插值旋转，并对齐到同一个亚像素相位、按插值到亚像素的峰顶比分，"
+      "噪声和半像素的平移不会把角度推离 0。\n"
       "看不出角度时（各角度分数差不出来：圆孔这类旋转对称的模板，或真实图上角度约束太弱的小窗）angle 报 0、"
-      "angleObservable = false，center 是 0° 上最好的平移 —— 位姿只补了平移、没补转角。"
+      "angleObservable = false，center 是 0° 上最好的平移（与 angleRange = 0 的结果相同）—— 位姿只补了平移、"
+      "没补转角；但最高分落在护栏角度上、又比 0° 明显高时（分数朝扫描范围外升上去）判 at_angle_edge。"
       "杠杆臂长（模板离测量点远）的宿主必须把 angleObservable = false 当作「转角没补偿」处理，"
       "不能当成「零件没转」；angleRange = 0 时不扫角度，angleObservable 恒为 true。\n"
       "质量门按顺序判，先命中的为准：模板没纹理（flat_template）；示教框离图边不到 2 px 或搜索区落出图外"
       "（out_of_image）；分数低于 minScore（low_score）；主峰离搜索窗边 ≤ 1 px（at_search_edge，真实位置可能"
-      "超出 searchRadius，实际可用的偏移约 searchRadius − 2）；细扫后的转角超出 ±angleRange（at_angle_edge，"
-      "看不出角度时不判）；peakRatio > maxPeakRatio（ambiguous，搜索区里还有一处"
+      "超出 searchRadius，实际可用的偏移约 searchRadius − 2）；细扫后的转角超出 ±angleRange，或看不出角度但"
+      "最高分落在护栏上、比 0° 明显高（at_angle_edge）；peakRatio > maxPeakRatio（ambiguous，搜索区里还有一处"
       "几乎一样像的地方）。peakRatio = 最终角度的搜索窗里主峰之外最高的独立峰（突起度 ≥ 0.02 的局部极大）/ "
       "主峰分数，主峰自己的侧坡不算。\n"
       "任一门不过 pose.ok = false、reason 给原因码（错误即值）：下游 glue.station_calipers 全部站判 pose_fail，"
@@ -179,7 +182,7 @@ void registerLocate(Registry& r) {
   range.min = 0.0;
   range.max = 45.0;
   Param step = floatParam("angleStep", "Angle Step", 0.5, "°",
-                          "角度扫描步长（结果按抛物线插值到步长以下）。", true);
+                          "角度扫描步长（结果按抛物线插值到步长以下）；大于 angleRange 时按 angleRange 扫。", true);
   step.min = 0.05;
   Param minScore = floatParam("minScore", "Min Score", 0.6, "", "分数低于它判定位失败。");
   minScore.min = -1.0;
