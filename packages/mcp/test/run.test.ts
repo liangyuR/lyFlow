@@ -37,6 +37,20 @@ test('复杂记录分页保留全量分布，artifact 在原文件改变后仍�
     assessment({ type: 'glue.Breaks', data: { count: 0, pathOk: false } })['detectionStatus'],
     'invalid',
   );
+  // 定位失败要能按原因码区分（贴边、歧义……），不能只给中文说明
+  assert.deepEqual(
+    assessment({
+      type: 'glue.Pose2D',
+      data: { ok: false, reason: 'ambiguous', message: '位置不唯一', score: 0.98, peakRatio: 0.99 },
+    }),
+    {
+      detectionStatus: 'invalid',
+      reason: 'ambiguous',
+      message: '位置不唯一',
+      score: 0.98,
+      peakRatio: 0.99,
+    },
+  );
   const bundle = { kind: 'Bundle', fields: [{ name: 'stations', value }] };
   assert.equal(valueAt(bundle, 'stations.width.2'), 3);
   assert.deepEqual(assessment(bundle), { stations: assessment(value) });

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numeric>
 
 #include <opencv2/imgproc.hpp>
 
@@ -10,6 +11,18 @@ namespace lyflow::packs::glue {
 namespace {
 
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
+/// 峰离搜索窗边 ≤ 1 px 判贴边，所以示教框至少要离图边这么远（px）。
+constexpr double kBorderMin = 2.0;
+/// 看不看得出角度：粗扫各角度（含护栏）里最高分与最低分之差，要超过这一帧本身的失配（1 − 最高分）的
+/// kAngleContrastGain 倍，夹在 [kAngleContrastMin, kAngleContrastMax] 里。圆孔这类旋转对称的模板差值与噪声同级
+/// （合成图实测差 ≤ 0.0031、失配 0.0013…0.0039）；2026-10-17 样本集上 96 px 模板转 3.4° 时差 0.0055…0.10、
+/// 失配 ≤ 0.0005。
+/// 差值过了上限总算看得出：转角远超范围时分数掉得多、失配也大，不能让它按比例躲过 at_angle_edge。
+constexpr double kAngleContrastGain = 4.0;
+constexpr double kAngleContrastMin = 0.004;
+constexpr double kAngleContrastMax = 0.02;
+/// peakRatio 只认突起度不低于它的峰：噪声在宽峰侧坡上起的小疙瘩不算第二个峰。
+constexpr double kPeakProminenceMin = 0.02;
 
 /// 三点抛物线的顶点相对中点的偏移（−0.5 … 0.5）。不是尖峰（开口朝上或平）时返回 0。
 double parabolaPeak(double a, double b, double c) {
@@ -31,6 +44,63 @@ double sample(const cv::Mat& g, double x, double y) {
   const double top = r0[0] + ax * (r0[1] - r0[0]);
   const double bottom = r1[0] + ax * (r1[1] - r1[0]);
   return top + ay * (bottom - top);
+}
+
+struct Peak {
+  int x = 0, y = 0;
+  double value = 0;
+};
+
+/// 响应图里突起度 ≥ minProminence 的局部极大（8 邻域；整张图最高的那个突起度算无穷大，总在里面）。
+/// 按值从高到低把像素逐个加进来、用并查集合并相邻的块：两块相遇时峰较低的那块到此为止，
+/// 它的突起度 = 峰顶 − 相遇处的值。
+std::vector<Peak> prominentPeaks(const cv::Mat& response, double minProminence) {
+  const int w = response.cols, h = response.rows, count = w * h;
+  std::vector<float> v(static_cast<std::size_t>(count));
+  for (int y = 0; y < h; ++y) {
+    const float* row = response.ptr<float>(y);
+    for (int x = 0; x < w; ++x) // NaN 会打乱排序，当成最低
+      v[static_cast<std::size_t>(y) * w + x] = std::isfinite(row[x]) ? row[x] : -1.0f;
+  }
+  std::vector<int> order(static_cast<std::size_t>(count));
+  std::iota(order.begin(), order.end(), 0);
+  std::sort(order.begin(), order.end(),
+            [&](int a, int b) { return v[a] > v[b] || (v[a] == v[b] && a < b); });
+  std::vector<int> parent(static_cast<std::size_t>(count), -1); // -1 = 还没加进来
+  std::vector<int> top(static_cast<std::size_t>(count));         // 块的根上记这块的峰顶
+  auto find = [&](int i) {
+    while (parent[i] != i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  };
+  std::vector<Peak> peaks;
+  for (const int i : order) {
+    parent[i] = top[i] = i;
+    const int x = i % w, y = i / w;
+    for (int dy = -1; dy <= 1; ++dy) {
+      for (int dx = -1; dx <= 1; ++dx) {
+        const int nx = x + dx, ny = y + dy;
+        if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= w || ny >= h ||
+            parent[ny * w + nx] < 0)
+          continue;
+        int a = find(i), b = find(ny * w + nx);
+        if (a == b)
+          continue;
+        if (v[top[a]] < v[top[b]] || (v[top[a]] == v[top[b]] && top[a] > top[b]))
+          std::swap(a, b);
+        if (v[top[b]] - v[i] >= minProminence)
+          peaks.push_back(Peak{top[b] % w, top[b] / w, v[top[b]]});
+        parent[b] = a;
+      }
+    }
+  }
+  for (int i = 0; i < count; ++i) {
+    if (parent[i] == i)
+      peaks.push_back(Peak{top[i] % w, top[i] / w, v[top[i]]});
+  }
+  return peaks;
 }
 
 } // namespace
@@ -65,6 +135,12 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
   // OpenCV 对常量模板的 TM_CCOEFF_NORMED 返回 1；没有纹理不能作为成功定位的证据。
   if (deviation[0] < 1.0)
     return fail("flat_template", "模板对比度不足，请选择含边缘或纹理的模板");
+  // 示教框离图边不到 2 px 时，零位移的峰就落在搜索窗边的贴边带里，与「真值在图外、峰被图边挡住」分不开，
+  // 贴边门会让它永远失败；直接说清楚是示教框放得不对
+  if (spec.anchor.x < kBorderMin || spec.anchor.y < kBorderMin ||
+      spec.anchor.x + tw > gray.cols - kBorderMin || spec.anchor.y + th > gray.rows - kBorderMin) {
+    return fail("out_of_image", "模板示教框离图边不到 2 px：零件往外一动模板就出图，请示教时离图边留出余量");
+  }
   // 模板旋转后外接圆的半径 + 搜索半径：任何允许的位姿下模板都完整落在这一块里
   const double half = spec.searchRadius + 0.5 * std::hypot(tw, th) + 4.0;
   const cv::Rect want(static_cast<int>(std::floor(pose.teachCenter.x - half)),
@@ -83,8 +159,7 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
     double score = 0;
     P2 loc;            ///< 最高点，含亚像素插值（转过的图里模板左上角）
     bool atEdge = true; ///< 最高点离搜索窗边 ≤ 1 px；没有搜索窗也算
-    int u0 = 0, v0 = 0; ///< 搜索窗左上角在转过的图里的位置
-    cv::Mat window;    ///< 搜索窗里的响应；与 full 共享缓冲
+    cv::Mat window;    ///< 搜索窗里的响应
   };
 
   // 把搜索区转 phi 度（绕它的中心），在转过的图里做 NCC：物体在原图里就是转了 −phi
@@ -117,8 +192,6 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
       m.loc = want;
       return m;
     }
-    m.u0 = u0;
-    m.v0 = v0;
     m.window = full(cv::Rect(u0, v0, u1 - u0 + 1, v1 - v0 + 1));
     const cv::Mat& res = m.window;
     double best = 0;
@@ -141,17 +214,20 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
   const double step = std::max(spec.angleStep, 0.01);
   const int n =
       spec.angleRange > 0 ? static_cast<int>(std::floor(spec.angleRange / step + 1e-9)) : 0;
-  std::vector<Match> coarse;
-  coarse.reserve(2 * n + 1);
-  std::vector<double> scores(2 * n + 1);
-  int bestI = n;
-  for (int i = -n; i <= n; ++i) {
-    coarse.push_back(matchAt(i * step));
-    scores[i + n] = coarse.back().score;
-    if (scores[i + n] > scores[bestI])
-      bestI = i + n;
+  // 扫角度时两端各多扫一步（±(n + 1)·step，护栏）：真实转角贴着 ±angleRange 时最好的粗扫角度落在端点很正常，
+  // 不能凭端点判贴边；细扫后的角度出了 ±angleRange 才算（见下面的 at_angle_edge）
+  const int g = n > 0 ? n + 1 : 0;
+  std::vector<double> scores(2 * g + 1);
+  for (int i = -g; i <= g; ++i)
+    scores[i + g] = matchAt(i * step).score;
+  int bestI = g; // 分数一样时取 0°
+  for (int i = 0; i <= 2 * g; ++i) {
+    if (scores[i] > scores[bestI])
+      bestI = i;
   }
-  double phi = (bestI - n) * step;
+  const double lowest = *std::min_element(scores.begin(), scores.end());
+  double phi = (bestI - g) * step;
+  bool angleOff = false; // 细扫后的角度出了 ±angleRange，且这个模板看得出角度
   if (n > 0) {
     // 粗扫的峰附近再按 step/4 细扫五个角度，取最好的三个做抛物线
     const double fine = step / 4.0;
@@ -168,44 +244,40 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
     if (bestK > 0 && bestK < 4) {
       phi += fine * parabolaPeak(fineScores[bestK - 1], fineScores[bestK], fineScores[bestK + 1]);
     }
-    phi = std::clamp(phi, -n * step, n * step);
+    // 圆孔这类旋转对称的模板看不出角度：各角度分数几乎一样，噪声挑哪个都行，不能据此判贴边，
+    // 角度夹回 ±angleRange 里照常输出
+    const bool angleObservable =
+        best - lowest >= std::clamp(kAngleContrastGain * (1.0 - best), kAngleContrastMin,
+                                    kAngleContrastMax);
+    if (std::fabs(phi) > spec.angleRange && angleObservable)
+      angleOff = true;
+    else
+      phi = std::clamp(phi, -spec.angleRange, spec.angleRange);
   }
   const Match final = matchAt(phi);
   pose.score = final.score;
 
-  // 转过 phiDeg 的图里的点 q 与原图坐标互换（绕搜索区中心转）
+  // 转过 phiDeg 的图里的点 q 换回原图坐标（绕搜索区中心转）
   auto toImage = [&](double phiDeg, P2 q) {
     Pose2D back;
     back.angleDeg = -phiDeg;
     return back.rotate(q - rc) + rc + P2(roi.x, roi.y);
   };
-  auto toRotated = [&](double phiDeg, P2 p) {
-    Pose2D fwd;
-    fwd.angleDeg = phiDeg;
-    return fwd.rotate(p - P2(roi.x, roi.y) - rc) + rc;
-  };
   const P2 halfT((tw - 1) / 2.0, (th - 1) / 2.0);
   pose.center = toImage(phi, final.loc + halfT);
   pose.angleDeg = -phi;
 
-  // peakRatio：所有粗扫角度的搜索窗里，模板中心离主峰超过 exclusion（原图距离）的最强响应 / 主峰分数。
-  // 主峰的侧坡、邻近角度上的同一个峰都落在 exclusion 里，不算第二个峰。
-  // 旋转保距：把主峰中心转进每个角度的图里比距离，不必逐点转回原图。
-  if (pose.score > 0) {
-    const double exclusion = std::max(3.0, std::max(tw, th) / 4.0);
+  // peakRatio：最终角度的搜索窗里，主峰之外最高的「独立峰」/ 主峰分数。
+  // 独立峰 = 突起度（峰顶减去通往更高峰的路上必经的最低点）≥ kPeakProminenceMin 的局部极大。
+  // 真实图上峰很宽，侧坡离开主峰几十 px 仍有 0.95 以上，按固定半径排除会把侧坡当成第二个峰；
+  // 模板里有大片明暗渐变时整个窗口都是 0.9 左右的高台，按「主峰半高连通」排除又会把高台上的第二个孔一起吞掉。
+  // 突起度两头都不受影响。只看最终角度：别的角度上同一个零件的峰会顺着边挪开十几 px，分不清是不是第二处。
+  if (pose.score > 0 && !final.window.empty()) {
     double second = 0;
-    for (const Match& m : coarse) {
-      const P2 c = toRotated(m.phi, pose.center) - halfT - P2(m.u0, m.v0); // 窗口坐标
-      for (int y = 0; y < m.window.rows; ++y) {
-        const float* row = m.window.ptr<float>(y);
-        for (int x = 0; x < m.window.cols; ++x) {
-          const double v = row[x];
-          if (v > second && std::hypot(x - c.x, y - c.y) > exclusion)
-            second = v;
-        }
-      }
-    }
-    // 粗扫上别处的峰可能略高于细扫后的主峰分数；比 1 大没有更多信息，夹到 1，maxPeakRatio = 1 时门永远不开
+    const std::vector<Peak> peaks = prominentPeaks(final.window, kPeakProminenceMin);
+    // 最后一个是整窗最高的峰（突起度无穷大），就是主峰本身
+    for (std::size_t i = 0; i + 1 < peaks.size(); ++i)
+      second = std::max(second, peaks[i].value);
     pose.peakRatio = std::min(1.0, second / pose.score);
   }
 
@@ -213,8 +285,8 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
     return fail("low_score", "匹配分数低于 minScore");
   if (final.atEdge)
     return fail("at_search_edge", "匹配峰贴在搜索窗边上：真实位置可能超出 searchRadius");
-  if (n > 0 && (bestI == 0 || bestI == 2 * n))
-    return fail("at_angle_edge", "最佳角度在扫描范围的端点上：真实转角可能超出 angleRange");
+  if (angleOff)
+    return fail("at_angle_edge", "细扫后的转角超出 angleRange：真实转角可能在扫描范围之外");
   if (pose.peakRatio > spec.maxPeakRatio) {
     return fail("ambiguous", "搜索区里还有一处几乎一样像的匹配（peakRatio 超过 maxPeakRatio），位置不唯一");
   }

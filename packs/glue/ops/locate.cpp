@@ -126,16 +126,18 @@ void registerLocate(Registry& r) {
   op.doc =
       "固定相机飞拍：按示教时从示教图上裁下的模板，求这一帧相对示教图的刚体位姿"
       "（T(p) = R(angle)·(p − teachCenter) + center，glue-plan K2）。只在模板外扩 searchRadius 的一块里做"
-      "归一化互相关，角度在 ±angleRange 里按 angleStep 扫描后抛物线插值。\n"
-      "质量门按顺序判，先命中的为准：分数低于 minScore（low_score）；主峰离搜索窗边 ≤ 1 px（at_search_edge，"
-      "真实位置可能超出 searchRadius）；angleRange > 0 时最佳粗扫角度是扫描端点（at_angle_edge，真实转角可能超出 "
-      "angleRange）；peakRatio > maxPeakRatio（ambiguous，搜索区里还有一处几乎一样像的地方）。另有模板没纹理"
-      "（flat_template）、搜索区落出图外（out_of_image）。peakRatio = 主峰邻域（半径 max(3, 模板长边 / 4) px）"
-      "之外最强的响应 / 主峰分数，取遍所有粗扫角度。\n"
+      "归一化互相关，角度在 ±angleRange 里按 angleStep 扫描（两端外各多扫一步作护栏）后抛物线插值。\n"
+      "质量门按顺序判，先命中的为准：模板没纹理（flat_template）；示教框离图边不到 2 px 或搜索区落出图外"
+      "（out_of_image）；分数低于 minScore（low_score）；主峰离搜索窗边 ≤ 1 px（at_search_edge，真实位置可能"
+      "超出 searchRadius，实际可用的偏移约 searchRadius − 2）；细扫后的转角超出 ±angleRange（at_angle_edge，"
+      "圆孔这类看不出角度的模板不判，角度夹回范围内）；peakRatio > maxPeakRatio（ambiguous，搜索区里还有一处"
+      "几乎一样像的地方）。peakRatio = 最终角度的搜索窗里主峰之外最高的独立峰（突起度 ≥ 0.02 的局部极大）/ "
+      "主峰分数，主峰自己的侧坡不算。\n"
       "任一门不过 pose.ok = false、reason 给原因码（错误即值）：下游 glue.station_calipers 全部站判 pose_fail，"
       "宿主据此报定位失败。\n"
       "1.1.0：新增 peakRatio、reason 输出与 maxPeakRatio 参数（默认 1 = 不判，结果与 1.0.0 一致）；"
-      "两道贴边门总是开着 —— 1.0.0 下峰贴边、分数够就算成功的帧，现在判 at_search_edge / at_angle_edge。";
+      "两道贴边门总是开着 —— 1.0.0 下峰贴边、分数够就算成功的帧，现在判 at_search_edge / at_angle_edge；"
+      "示教框贴着图边（< 2 px）的现在判 out_of_image；searchRadius 下限从 1 提到 3。";
   op.inputs = {Port{"image", "Image", "Image", "这一帧。", true}};
   op.outputs = {
       Port{
@@ -158,9 +160,11 @@ void registerLocate(Registry& r) {
                   FileFilter{"All Files", {"*"}}};
   Param anchor = vec2Param("anchor", "Anchor", 0, 0, "px", {"X", "Y"},
                            "模板左上角像素在示教图上的位置（裁模板时的偏移）。");
-  Param radius =
-      floatParam("searchRadius", "Search Radius", 80.0, "px", "模板中心最多偏开示教位置这么远。");
-  radius.min = 1.0;
+  Param radius = floatParam(
+      "searchRadius", "Search Radius", 80.0, "px",
+      "模板中心最多偏开示教位置这么远。峰离搜索窗边 ≤ 1 px 判 at_search_edge，实际可用约 searchRadius − 2。");
+  // 太小的窗里没有不贴边的位置，每帧都会判 at_search_edge；3 至少留出 ±1 px 的不贴边带
+  radius.min = 3.0;
   Param range = floatParam("angleRange", "Angle Range", 3.0, "°",
                            "角度扫描范围 ±range；0 = 只找平移。", true);
   range.min = 0.0;
@@ -172,7 +176,7 @@ void registerLocate(Registry& r) {
   minScore.min = -1.0;
   minScore.max = 1.0;
   Param maxPeak = floatParam("maxPeakRatio", "Max Peak Ratio", 1.0, "",
-                             "peakRatio（主峰之外最强响应 / 主峰分数）超过它判 ambiguous；1 = 不判。",
+                             "peakRatio（主峰之外最高的独立峰 / 主峰分数）超过它判 ambiguous；1 = 不判。",
                              true);
   maxPeak.min = 0.0;
   maxPeak.max = 1.0;

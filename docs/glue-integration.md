@@ -85,12 +85,16 @@ GlueSight「特征定位 + 示教胶路判胶偏」的 L1：定位失败要说�
 
 ### 本轮实现
 
-- `glue.Pose2D` 增加 `peakRatio`（主峰邻域 max(3, 模板长边 / 4) px 之外、所有粗扫角度搜索窗里最强响应 / 主峰分数；主峰分数 ≤ 0 时为 1，
-  搜索窗比邻域还小时为 0）、`reason`（成功为空）、`maxPeakRatio`；`message` 仍是给人看的中文。
+- `glue.Pose2D` 增加 `peakRatio`（最终角度的搜索窗里主峰之外最高的独立峰 / 主峰分数；独立峰 = 突起度 ≥ 0.02 的局部极大，
+  主峰自己的侧坡再宽也不算；没有别的独立峰时为 0，主峰分数 ≤ 0 时为 1）、`reason`（成功为空）、`maxPeakRatio`；`message` 仍是给人看的中文。
 - 新参数 `maxPeakRatio`（0…1，默认 1 = 不判）：`peakRatio` 超过它判 `ambiguous`。
-- 两道贴边门总是开着：峰离搜索窗边 ≤ 1 px 判 `at_search_edge`；`angleRange > 0`（且至少扫两个角度）时最佳粗扫角度是端点判 `at_angle_edge`。
-  搜索窗形状不变。原因码按 `flat_template → out_of_image → low_score → at_search_edge → at_angle_edge → ambiguous` 取先命中的。
-- **行为变化**：1.0.0 下峰贴边、分数够的帧算成功（合成图上真值出窗 4 px 时贴边匹配分数 0.98），1.1.0 判失败。其余默认结果与 1.0.0 相同。
+- 两道贴边门总是开着：峰离搜索窗边 ≤ 1 px 判 `at_search_edge`（实际可用偏移约 `searchRadius` − 2）；角度在 ±`angleRange` 两端外各多扫一步作护栏，
+  细扫后的转角超出 ±`angleRange` 判 `at_angle_edge`。圆孔这类旋转对称的模板各角度分数差不出来（最高与最低分之差 < clamp(4 ×（1 − 最高分）, 0.004, 0.02)），
+  不判 `at_angle_edge`，角度夹回范围内。搜索窗形状不变。原因码按 `flat_template → out_of_image → low_score → at_search_edge → at_angle_edge → ambiguous` 取先命中的。
+- 示教框离图边不到 2 px 判 `out_of_image`：这时连零位移的峰都落在被图边裁过的窗边上，与真值出图分不开。宿主保存夹具时应拦下这种框。
+- `searchRadius` 下限从 1 提到 3：1 左右的窗里没有不贴边的位置，每帧都会判 `at_search_edge`；低于 3 的图加载期就报参数越界。
+- **行为变化**：1.0.0 下峰贴边、分数够的帧算成功（合成图上真值出窗 4 px 时贴边匹配分数 0.98），1.1.0 判失败；示教框贴着图边的判 `out_of_image`；
+  转角超出 ±`angleRange` 不再截在端点上报成功。其余默认结果与 1.0.0 相同。
   存了 `opVersion: "1.0.0"` 的图照常加载运行，只出 `version_mismatch` 警告（次版本不同）；随包 `flyshot.lyflow.json` 仍记 1.0.0，经 C ABI 的用例照常通过。
 
 ### 复现
@@ -106,13 +110,27 @@ pwsh -NoProfile -File scripts/check-glue.ps1 -Steps manifest,schema
 
 ### 验证记录（2026-10-20）
 
-- 飞拍 doctest 14 例全过；新增 / 改写 3 例，各自防的回归：真值刚出搜索窗、贴边分数仍过线 → `at_search_edge`（改写原「searchRadius 是硬边界」）；
-  转角 4.5° 超出 3° → `at_angle_edge`；搜索区里两个一样的孔 → `peakRatio` ≥ 0.95、`maxPeakRatio = 0.9` 判 `ambiguous`，默认不判，
-  只有一个孔时 `peakRatio` ≤ 0.7（实测 0.23）照常成功。把三道门去掉后这 3 例全部失败。
-- glue、飞拍、标定、std-image 专项：54 例 / 7739 条断言全过。全量 core（`LYFLOW_STD_PACKS=0`、`LYFLOW_PACKS=std-image;glue`）200 例中 199 过，
-  失败的是 `test_cache.cpp`「原图重跑总耗时 < 50 ms」（并行构建负载下 128 ms），单独重跑 22 例全过，与本改动无关。
-- `check-glue.ps1 -Steps manifest,schema` 通过；manifest 里 `glue.locate` 为 1.1.0、含 `maxPeakRatio`。
-- 真实帧上的 `peakRatio` 分布、耗时不在本轮：由 GlueSight P0 的离线评测在阶段 0 样本集上统计（MX11 数据不作依据）。
+- 飞拍 doctest 17 例全过；与质量门有关的 6 例，各自防的回归：
+  - 真值刚出搜索窗、贴边分数仍过线 → `at_search_edge`（改写原「searchRadius 是硬边界」）；
+  - 转角 2.8° 贴着 3° 照常成功、角度误差 ≤ 0.1°，4.5° 超出 → `at_angle_edge`（只看粗扫端点时 2.8° 被误判）；
+  - 圆孔模板在 ±1.75° 内的小转角、平移帧上照常成功、中心误差 ≤ 0.3 px（只看粗扫端点时大半帧误判 `at_angle_edge`）；
+  - 搜索区里两个一样的孔 → `peakRatio` ≥ 0.95、`maxPeakRatio = 0.9` 判 `ambiguous`；不写 `maxPeakRatio` 时按算子默认不判；只有一个孔时 `peakRatio` ≤ 0.7；
+  - 两头渐隐的软暗条（主峰沿条很宽）`peakRatio` ≤ 0.5、照常成功（按固定半径排除时 0.96，被判 `ambiguous`）；以明暗渐变为主的模板，
+    整窗 0.9 上下的高台上有第二个孔时仍 ≥ 0.95、判 `ambiguous`（防按「主峰半高连通」排除把它吞掉）；
+  - 示教框离图边 0 / 1 px → `out_of_image`，2 px → 成功（原来示教图本身都判 `at_search_edge`）。
+  把内核换回上一版后，改写 / 新增的 4 例（转角边界、圆孔、宽峰、贴图边）全部失败。
+- glue、飞拍、标定、std-image 专项：57 例 / 7789 条断言全过；全量 core ctest（`LYFLOW_STD_PACKS=0`、`LYFLOW_PACKS=std-image;glue`，203 例）通过。
+  MCP：`glue.Pose2D` 的 assessment 里 `reason` 给原因码、`message` 给中文说明、带 `peakRatio`，`packages/mcp` 单测 33 例全过。
+- `check-glue.ps1 -Steps manifest,schema` 通过；manifest 里 `glue.locate` 为 1.1.0、含 `maxPeakRatio`、`searchRadius` 下限 3。
+- 2026-10-17 样本集只读复核（MX11 数据不作依据；把本分支的内核编进临时程序直接调）：
+  - 复拍三对（S001→S034、S002→S035、S003→S036）上 80 px、标准差 ≥ 15 的网格窗口 154 个，默认参数全部成功、偏移 ≤ 2.3 px；
+    `peakRatio` 中位 0.63、P90 0.85，≥ 0.9 的 11 个（按固定半径排除时中位 0.98、≥ 0.9 的 132 个）。≥ 0.9 的多是以一条软边为主的窗口，
+    沿边方向本来就定不住，作为模板筛掉是对的。
+  - S001–S009 各取最有纹理的 96 px 窗口，把整帧按已知角度转过去：2.8°、2.9° 9/9 成功、角度误差 ≤ 0.05°；3.4°、4.5° 9/9 判 `at_angle_edge`。
+  - 合成圆孔模板，±2° 内 17 个转角 × 4 个亚像素平移共 68 帧：全部成功（上一版 17 帧成功，其余判 `at_angle_edge`）。
+- 已知局限：复拍对上 80 px 真实窗口的角度只有很弱的约束（各角度分数差 0.001…0.014，与失配同级），细扫角度在 ±1° 内漂；
+  这类模板多被判成「看不出角度」，不判 `at_angle_edge`，但输出的角度不可信。杠杆臂 L 大的夹具要选看得出角度的特征（角点、多个孔），
+  这一点由 GlueSight 的示教检查与离线评测把关。
 
 ## 仍属后续范围
 

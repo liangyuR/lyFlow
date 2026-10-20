@@ -155,7 +155,7 @@ G3 的 `heading` 把方向钉在 ±`headingTol` 以内就不会再选到它；�
 | # | 决定 | 理由 |
 |---|---|---|
 | K1 | **名义胶路逐点卡尺**，不从图像里找胶路：测量点由宿主给（示教图坐标下的位置 + 法向），`glue.station_calipers` 逐点量 | 一件分多帧，断胶要按弧长跨帧合并，站必须是宿主结果表里的格子；D1 的找胶路在飞拍里既不需要也不稳（胶条贴着内边，内边本身是强边） |
-| K2 | **定位 = 模板归一化互相关 + 小角度扫描**（`glue.locate`），输出刚体位姿 Record `glue.Pose2D`（示教图 → 当前图：`T(p) = R(angle)·(p − teachCenter) + center`）；分数低于 `minScore` 时 `ok = false`（错误即值），下游全部站判 `pose_fail`，宿主据此报定位失败。**1.1.0 质量门**：峰离搜索窗边 ≤ 1 px（`at_search_edge`）、`angleRange > 0` 时最佳粗扫角度是扫描端点（`at_angle_edge`）也判失败；输出 `peakRatio`（主峰邻域 max(3, 模板长边 / 4) px 之外、所有粗扫角度上最强响应 / 主峰分数），超过 `maxPeakRatio`（默认 1 = 不判）判 `ambiguous`；Pose2D 加 `reason`（成功为空，否则 `low_score / ambiguous / at_search_edge / at_angle_edge / flat_template / out_of_image`，按此顺序先命中的为准，模板/图的前置检查最先） | 机器人重复定位误差只有几毫米、零点几度，不需要形状匹配；角度按抛物线插值到步长以下。贴边的峰说明真值可能在扫描范围之外，分数再高也不可信（合成图上真值出窗 4 px 时贴边匹配分数 0.98）；搜索区里有同样的第二处特征时 NCC 随便挑一处，位置可能差一个特征间距 |
+| K2 | **定位 = 模板归一化互相关 + 小角度扫描**（`glue.locate`），输出刚体位姿 Record `glue.Pose2D`（示教图 → 当前图：`T(p) = R(angle)·(p − teachCenter) + center`）；分数低于 `minScore` 时 `ok = false`（错误即值），下游全部站判 `pose_fail`，宿主据此报定位失败。**1.1.0 质量门**：示教框离图边不到 2 px 判 `out_of_image`；峰离搜索窗边 ≤ 1 px 判 `at_search_edge`（实际可用偏移约 `searchRadius` − 2，`searchRadius` 下限 3）；角度在 ±`angleRange` 两端外各多扫一步作护栏，细扫后的转角超出 ±`angleRange` 判 `at_angle_edge`（圆孔这类各角度分数差不出来的模板不判，角度夹回范围内）；输出 `peakRatio`（最终角度的搜索窗里主峰之外最高的独立峰 —— 突起度 ≥ 0.02 的局部极大 —— / 主峰分数），超过 `maxPeakRatio`（默认 1 = 不判）判 `ambiguous`；Pose2D 加 `reason`（成功为空，否则 `flat_template / out_of_image / low_score / at_search_edge / at_angle_edge / ambiguous`，按此顺序先命中的为准） | 机器人重复定位误差只有几毫米、零点几度，不需要形状匹配；角度按抛物线插值到步长以下。贴边的峰说明真值可能在扫描范围之外，分数再高也不可信（合成图上真值出窗 4 px 时贴边匹配分数 0.98）；搜索区里有同样的第二处特征时 NCC 随便挑一处，位置可能差一个特征间距。按「最佳粗扫角度是端点」判角度贴边会把离 ±`angleRange` 不到半步的真值、看不出角度的圆孔误判；真实帧上峰很宽，按固定半径找第二个峰会把主峰侧坡当成第二个峰（2026-10-17 样本集 154 个窗口里 132 个 ≥ 0.9，改按突起度后 11 个） |
 | K3 | **站的约定**：点在名义胶条中线上，法向从内边（开口一侧）指向翻边，卡尺上 `t < 0` 是内边一侧。内边在 `innerSearch` 区间里按极性找跳变（±3 px 两侧均值差 ≥ `contrastMin`），有几条时按 `innerSelect` 取（`nearest` = 离胶最近，对应现场「内边取上沿」的约定；`strongest` = 最强）；胶在内边之后、`beadSearch` 之内取**离站点最近的暗谷**（窗口里可能还有安装孔、阴影这类更暗的东西），按本站的半高定两条边（与 D4 同一思路） | 铸件内壁有拔模斜度时俯视能看到两条边，取哪条由宿主按 CMM 对齐后定，不写死；半高边对模糊对称，不偏 |
 | K4 | **输出三条边沿法向的偏移**（px）与每站状态 `ok / no_inner / no_bead / pose_fail`；接了 `calib` 再出 内边→近边、内边→胶中线、胶宽 三个距离（按映射后两点的距离，§2.1 的尺子）。中心线 / 近边两种测量模式由宿主判定时选，图里不分支 | 模式切换不重跑视觉；宿主的离线重判要能换模式 |
 | K5 | **测量点经文件传**：参数 `stations`（Path，JSON：`points[[x,y]]`、`normals[[nx,ny]]`、可选 `ids[]`），宿主发布配方时每个拍照点写一份，逐帧经顶层图参数换路径；`externalKey` 取文件大小与 mtime | 几百个点不适合塞进参数；文件静态、改了就重读 |
@@ -175,8 +175,9 @@ G3 的 `heading` 把方向钉在 ±`headingTol` 以内就不会再选到它；�
 ### 5.3 验收
 
 21. 合成图：平移 ±40 px、旋转 ±2° 时 `glue.locate` 位姿误差 ≤ 0.3 px / 0.1°（角度误差只让站沿边滑动，距离在同一根卡尺里量，不受它影响；0.1° 在 110 px 半径上约 0.2 px），分数 ≥ 0.9；模板在图上根本没有时 `ok = false`，下游全部 `pose_fail`。
-    1.1.0：真值出搜索窗（分数仍过线）→ `at_search_edge`；转角超出 `angleRange` → `at_angle_edge`；搜索区里两个一样的孔时
-    `peakRatio` ≥ 0.95、`maxPeakRatio = 0.9` 判 `ambiguous`，只有一个孔时 `peakRatio` ≤ 0.7 照常成功，默认 `maxPeakRatio` 不判。
+    1.1.0：真值出搜索窗（分数仍过线）→ `at_search_edge`；转角 4.5° 超出 3° → `at_angle_edge`，2.8° 贴着 3° 照常成功；圆孔模板在小转角、平移的帧上照常成功；
+    搜索区里两个一样的孔时 `peakRatio` ≥ 0.95、`maxPeakRatio = 0.9` 判 `ambiguous`，只有一个孔时 `peakRatio` ≤ 0.7 照常成功，不写 `maxPeakRatio` 时不判；
+    主峰很宽（两头渐隐的软暗条）时 `peakRatio` ≤ 0.5；示教框离图边不到 2 px 判 `out_of_image`。
 22. 卡尺：内边→近边、内边→胶中线中位误差 ≤ 0.3 px；接合成单应出 mm，误差 ≤ 0.02 mm；断口处 `no_bead`、内边被抹掉处 `no_inner`，其余零误报。
 23. `image.board_calib`：已知单应画出的棋盘，恢复出的单应量任意两点距离误差 ≤ 0.05 mm；图里没有棋盘是执行错误 `no_board`；`image.load_calib` 读回的与写入的逐位相同（中文路径可读）。
 24. `LYFLOW_PACKS=glue` 下 `pnpm core:build` 的自检与 doctest 全绿。

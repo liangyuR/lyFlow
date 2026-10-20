@@ -18,8 +18,8 @@ struct Pose2D {
   bool ok = false;
   double score = 0;
   double angleDeg = 0;
-  /// 主峰之外最强的响应 / 主峰分数（所有粗扫角度、搜索窗内；主峰邻域半径 max(3, 模板长边 / 4) px 不算）。
-  /// 接近 1 说明搜索区里还有一处几乎一样像的地方，位置不唯一。主峰分数 ≤ 0 时为 1。
+  /// 最终角度的搜索窗里，主峰之外最高的独立峰（突起度 ≥ 0.02 的局部极大）/ 主峰分数；没有别的独立峰时为 0。
+  /// 主峰自己的侧坡再宽也不算。接近 1 说明搜索区里还有一处几乎一样像的地方，位置不唯一。主峰分数 ≤ 0 时为 1。
   double peakRatio = 1;
   /// 失败原因码：成功时为空，否则是 low_score / ambiguous / at_search_edge / at_angle_edge /
   /// flat_template / out_of_image 之一。
@@ -33,7 +33,7 @@ struct Pose2D {
 
 struct LocateSpec {
   P2 anchor{0, 0};          ///< 模板左上角像素在示教图上的位置
-  double searchRadius = 80; ///< 模板中心最多偏开这么远（px）
+  double searchRadius = 80; ///< 模板中心最多偏开这么远（px）；峰离窗边 ≤ 1 px 判贴边，实际可用约 searchRadius − 2
   double angleRange = 3;    ///< 角度扫描 ±range（度）
   double angleStep = 0.5;
   double minScore = 0.6;
@@ -41,10 +41,13 @@ struct LocateSpec {
 };
 
 /// 在 anchor 附近找模板。只在「模板外扩 searchRadius 与旋转余量」那一块里算。
+/// 角度在 ±angleRange 外各多扫一步（护栏），细扫后抛物线插值。
 /// 失败时 ok = false，reason 给原因码，why 写给人看的原因。几道门按顺序判，先命中的为准：
-/// 模板没纹理（flat_template）、搜索区落出图外或比模板还小（out_of_image）、分数低于 minScore（low_score）、
-/// 主峰离搜索窗边 ≤ 1 px（at_search_edge）、angleRange > 0 时最佳粗扫角度是第一个或最后一个（at_angle_edge）、
+/// 模板没纹理（flat_template）；示教框离图边不到 2 px、搜索区落出图外或比模板还小（out_of_image）；
+/// 分数低于 minScore（low_score）；主峰离搜索窗边 ≤ 1 px（at_search_edge）；细扫后的转角超出 ±angleRange
+/// 且这个模板看得出角度（at_angle_edge；圆孔这类旋转对称的模板各角度分数差不出来，不判，角度夹回范围内）；
 /// peakRatio 超过 maxPeakRatio（ambiguous）。贴边的峰说明真值可能在扫描范围之外，分数再高也不可信。
+/// searchRadius 太小（1 左右）时窗口里没有不贴边的位置，每帧都判 at_search_edge；算子把它的下限设成 3。
 Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec& spec,
                       std::string* why = nullptr);
 

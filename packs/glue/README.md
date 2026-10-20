@@ -181,10 +181,11 @@ io.load_image ─→ glue.locate ─→ glue.station_calipers ←─ image.load_
 | `glue.Pose2D` | `ok`、`reason`（成功为空）、`message`、`score`、`peakRatio`、`angle`（度，屏幕上顺时针为正）、`center`、`teachCenter`、`offset`、`templateSize`、`minScore`、`maxPeakRatio`；`T(p) = R(angle)·(p − teachCenter) + center` 把示教图坐标映射到这一帧 |
 | `glue.StationMeasure` | `count`、`unit`、`poseGiven`、`poseOk`、`counts{ok, noInner, noBead, incompleteBead, poseFail, outOfImage}`、`calib`，逐站对齐：`ids[]`、`point[]`、`normal[]`（这一帧里的）、`status[]`（ok / no_inner / no_bead / incomplete_bead / pose_fail / out_of_image）、`inner[]` / `near[]` / `far[]`（沿法向的偏移 px）、`innerNear[]` / `innerCenter[]` / `width[]`（按 `unit`）、`innerNearPx[]` / `innerCenterPx[]` / `widthPx[]`、`innerContrast[]`、`beadContrast[]`；不成立的是 `null` |
 
-**失败语义**：定位不过质量门时 `pose.ok = false`，`reason` 按顺序取先命中的：`flat_template`（模板没纹理）、`out_of_image`（搜索区落出图外）、
-`low_score`（低于 `minScore`）、`at_search_edge`（峰离搜索窗边 ≤ 1 px，真值可能超出 `searchRadius`）、`at_angle_edge`（`angleRange > 0` 时最佳粗扫角度是扫描端点）、
-`ambiguous`（`peakRatio` > `maxPeakRatio`）。`peakRatio` = 主峰邻域（半径 max(3, 模板长边 / 4) px）之外、所有粗扫角度搜索窗里最强的响应 / 主峰分数；
-搜索窗比这个邻域还小时没有可比的位置，为 0。1.1.0 起两道贴边门总是开着（1.0.0 下贴边、分数够的帧算成功），`maxPeakRatio` 默认 1 不判。
+**失败语义**：定位不过质量门时 `pose.ok = false`，`reason` 按顺序取先命中的：`flat_template`（模板没纹理）、`out_of_image`（示教框离图边不到 2 px，或搜索区落出图外）、
+`low_score`（低于 `minScore`）、`at_search_edge`（峰离搜索窗边 ≤ 1 px，真值可能超出 `searchRadius`；实际可用偏移约 `searchRadius` − 2，下限 3）、
+`at_angle_edge`（细扫后的转角超出 ±`angleRange`；角度两端外各多扫一步作护栏，圆孔这类看不出角度的模板不判、角度夹回范围内）、
+`ambiguous`（`peakRatio` > `maxPeakRatio`）。`peakRatio` = 最终角度的搜索窗里主峰之外最高的独立峰（突起度 ≥ 0.02 的局部极大）/ 主峰分数，
+主峰自己的侧坡再宽也不算；没有别的独立峰时为 0。1.1.0 起两道贴边门总是开着（1.0.0 下贴边、分数够的帧算成功），`maxPeakRatio` 默认 1 不判。
 逐点卡尺全部 `pose_fail`（错误即值，宿主报定位失败）；
 内边没找到是 `no_inner`（测不了），找到内边但没有胶是 `no_bead`（断胶的证据）。胶边被窗口截断是 `incomplete_bead`，宿主应作为无效量测处理，不能算断胶或 OK。纯色/低对比度模板返回 `pose.ok=false`。
 

@@ -372,48 +372,147 @@ TEST_CASE(
   CHECK(near.pose["score"].get<double>() >= 0.9);
 }
 
-TEST_CASE("glue 飞拍：真实转角超出 angleRange —— 最佳角度停在扫描端点，判 at_angle_edge") {
-  // 防的回归：转角超范围时粗扫停在端点、分数仍过线，1.0.0 报成功但角度被截在 angleRange 上
+TEST_CASE(
+    "glue 飞拍：angleRange 是转角的边界 —— 2.8° 贴着 3° 照常成功、角度不截断；4.5° 超出判 at_angle_edge") {
+  // 防的回归：只看「最佳粗扫角度是不是端点」时，真值离 ±angleRange 不到半步（2.8° 离 3° 端点最近）也判贴边；
+  // 转角真超范围时 1.0.0 报成功、角度被截在 angleRange 上
   const Files f = teach();
-  const Out o = run(flyshotGraph(f, false), render(Rigid{0, 0, 4.5})); // 默认 angleRange = 3°
-  REQUIRE(o.status == "ok");
-  INFO(o.pose.dump());
-  CHECK(o.pose["score"].get<double>() >= 0.6);
-  CHECK(o.pose["ok"] == false);
-  CHECK(o.pose["reason"] == "at_angle_edge");
+  const Out inside = run(flyshotGraph(f, false), render(Rigid{0, 0, 2.8})); // 默认 angleRange = 3°
+  REQUIRE(inside.status == "ok");
+  INFO(inside.pose.dump());
+  CHECK(inside.pose["ok"] == true);
+  CHECK(std::fabs(inside.pose["angle"].get<double>() - 2.8) <= 0.1);
+
+  const Out outside = run(flyshotGraph(f, false), render(Rigid{0, 0, 4.5}));
+  REQUIRE(outside.status == "ok");
+  INFO(outside.pose.dump());
+  CHECK(outside.pose["score"].get<double>() >= 0.6);
+  CHECK(outside.pose["ok"] == false);
+  CHECK(outside.pose["reason"] == "at_angle_edge");
+}
+
+TEST_CASE("glue 飞拍：圆孔模板看不出角度 —— 小转角、平移的帧照常成功，不判 at_angle_edge，中心准") {
+  // 防的回归：旋转对称的模板各角度分数几乎一样，噪声挑到扫描端点就判 at_angle_edge（合成图上大半帧失败），
+  // 而设计里定位特征首选的就是孔
+  const Files f = teach();
+  const auto hole = f.dir / "hole.png";
+  writeTemplate(hole, render(Rigid{}), cv::Rect(620, 440, 80, 80)); // (660, 480) 的孔
+  const Json doc =
+      withLocate(flyshotGraph(f, false), {{"template", hole.u8string()}, {"anchor", {620, 440}}});
+  const P2 teachCenter(620 + 79 / 2.0, 440 + 79 / 2.0);
+  for (const Rigid T : {Rigid{3.3, -2.6, -1.75}, Rigid{-4.2, 1.7, -0.75}, Rigid{2.6, 3.4, 0.5},
+                        Rigid{-1.3, -3.8, 1.5}}) {
+    CAPTURE(T.deg);
+    const Out o = run(doc, render(T));
+    REQUIRE(o.status == "ok");
+    INFO(o.pose.dump());
+    CHECK(o.pose["ok"] == true);
+    const P2 want = T.apply(teachCenter);
+    CHECK(std::fabs(o.pose["center"][0].get<double>() - want.x) <= 0.3);
+    CHECK(std::fabs(o.pose["center"][1].get<double>() - want.y) <= 0.3);
+  }
 }
 
 TEST_CASE(
     "glue 飞拍：搜索区里有两个一样的孔 —— peakRatio≈1，maxPeakRatio = 0.9 时判 ambiguous；只有一个孔时 peakRatio 明显低、照常成功") {
   // 防的回归：模板在搜索区里还有一处同样的特征时，NCC 随便挑一处报成功，位置可能差一个孔距。
-  // 默认 maxPeakRatio = 1 不判，1.0.0 存下的图结果不变。
+  // 不写 maxPeakRatio 时按算子默认（1 = 不判），1.0.0 存下的图结果不变。
   const Files f = teach();
   const auto hole = f.dir / "hole.png";
   writeTemplate(hole, render(Rigid{}), cv::Rect(620, 440, 80, 80)); // (660, 480) 的孔
-  auto graph = [&](double maxPeakRatio) {
-    return withLocate(flyshotGraph(f, false), {{"template", hole.u8string()},
-                                               {"anchor", {620, 440}},
-                                               {"searchRadius", 100},
-                                               {"maxPeakRatio", maxPeakRatio}});
+  auto graph = [&](const Json& extra) {
+    Json params = {{"template", hole.u8string()}, {"anchor", {620, 440}}, {"searchRadius", 100}};
+    params.update(extra);
+    return withLocate(flyshotGraph(f, false), params);
   };
   const cv::Mat twinFrame = render(Rigid{}, true, /*twinHole=*/true);
-  const Out twin = run(graph(0.9), twinFrame);
+  const Out twin = run(graph({{"maxPeakRatio", 0.9}}), twinFrame);
   REQUIRE(twin.status == "ok");
   INFO(twin.pose.dump());
   CHECK(twin.pose["peakRatio"].get<double>() >= 0.95);
   CHECK(twin.pose["ok"] == false);
   CHECK(twin.pose["reason"] == "ambiguous");
 
-  const Out byDefault = run(graph(1.0), twinFrame);
+  const Out byDefault = run(graph(Json::object()), twinFrame);
   REQUIRE(byDefault.status == "ok");
   CHECK(byDefault.pose["ok"] == true);
 
-  const Out unique = run(graph(0.9), render(Rigid{}));
+  const Out unique = run(graph({{"maxPeakRatio", 0.9}}), render(Rigid{}));
   REQUIRE(unique.status == "ok");
   INFO(unique.pose.dump());
   CHECK(unique.pose["ok"] == true);
   CHECK(unique.pose["reason"] == "");
   CHECK(unique.pose["peakRatio"].get<double>() <= 0.7);
+}
+
+TEST_CASE(
+    "glue 飞拍：peakRatio 只认独立的第二个峰 —— 主峰再宽也不算；整窗高台上的第二个孔照样判 ambiguous") {
+  // 防的回归：真实帧上峰很宽，按固定半径排除时主峰自己的侧坡（离开 20 px 仍 0.96）被当成第二个峰，
+  // maxPeakRatio = 0.9 把唯一的特征判 ambiguous；反过来按「主峰半高连通」排除时，模板以明暗渐变为主、
+  // 整个窗口都在 0.9 上下，高台上的第二个孔和主峰连成一片被一起排除，peakRatio 变成 0
+  auto frame = [](double slope, double barSigma, bool twin, double tx, double ty, int seed) {
+    cv::Mat img(400, 400, CV_32F);
+    for (int y = 0; y < img.rows; ++y) {
+      for (int x = 0; x < img.cols; ++x) {
+        const double px = x - tx, py = y - ty;
+        double v = 120.0 + slope * (px - 200.0);
+        const double bx = (px - 200) / std::max(barSigma, 1.0), by = (py - 200) / 6;
+        if (barSigma > 0) // 两头渐隐的软暗条：沿 x 很宽，沿 y 窄
+          v -= 100.0 * std::exp(-0.5 * (bx * bx + by * by));
+        else if (std::hypot(px - 200, py - 200) <= 6 ||
+                 (twin && std::hypot(px - 200, py - 250) <= 6))
+          v -= 40.0;
+        img.at<float>(y, x) = static_cast<float>(v);
+      }
+    }
+    cv::GaussianBlur(img, img, cv::Size(0, 0), 1.0);
+    cv::Mat noise(img.size(), CV_32F);
+    cv::RNG rng(seed);
+    rng.fill(noise, cv::RNG::NORMAL, 0.0, 2.0);
+    img += noise;
+    cv::Mat out;
+    img.convertTo(out, CV_8U);
+    return out;
+  };
+  lyflow::packs::glue::LocateSpec spec;
+  spec.anchor = P2(160, 160);
+  spec.searchRadius = 70;
+  spec.maxPeakRatio = 0.9;
+  const cv::Rect box(160, 160, 80, 80);
+
+  const cv::Mat barTeach = frame(0.05, 40, false, 0, 0, 1);
+  const auto bar = lyflow::packs::glue::locateTemplate(frame(0.05, 40, false, 4.3, -2.7, 9),
+                                                       barTeach(box).clone(), spec);
+  INFO("bar peakRatio " << bar.peakRatio << " reason " << bar.reason);
+  CHECK(bar.ok);
+  CHECK(bar.peakRatio <= 0.5);
+
+  const cv::Mat rampTeach = frame(0.6, 0, true, 0, 0, 1);
+  const auto ramp = lyflow::packs::glue::locateTemplate(frame(0.6, 0, true, 4.3, -2.7, 9),
+                                                        rampTeach(box).clone(), spec);
+  INFO("ramp peakRatio " << ramp.peakRatio << " reason " << ramp.reason);
+  CHECK(ramp.peakRatio >= 0.95);
+  CHECK(ramp.reason == "ambiguous");
+}
+
+TEST_CASE("glue 飞拍：示教框离图边不到 2 px —— 判 out_of_image，不是永远判 at_search_edge") {
+  // 防的回归：示教框贴着图边时，连示教图本身（零位移、分数 1）的峰都落在被图边裁过的窗边上，
+  // 贴边门让这个夹具永远失败、原因还指向 searchRadius
+  cv::Mat img(200, 300, CV_8UC1);
+  cv::RNG rng(3);
+  rng.fill(img, cv::RNG::UNIFORM, 40, 220);
+  cv::GaussianBlur(img, img, cv::Size(0, 0), 2.0);
+  lyflow::packs::glue::LocateSpec spec;
+  spec.searchRadius = 30;
+  for (const int x : {0, 1, 300 - 70 - 1, 2, 300 - 70 - 2}) {
+    CAPTURE(x);
+    spec.anchor = P2(x, 60);
+    const auto pose =
+        lyflow::packs::glue::locateTemplate(img, img(cv::Rect(x, 60, 70, 70)).clone(), spec);
+    const bool tooClose = x < 2 || x + 70 > 300 - 2;
+    CHECK(pose.ok == !tooClose);
+    CHECK(pose.reason == (tooClose ? "out_of_image" : ""));
+  }
 }
 
 TEST_CASE("glue 飞拍：纯色模板不能产生成功位姿") {
