@@ -267,15 +267,23 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
     return m;
   };
 
-  // angleRange 比 angleStep 还小时按 angleRange 一步扫：不然一个角度都不扫，也就判不了 at_angle_edge，
+  // angleRange 比 angleStep 还小时范围内按 angleRange 一步扫：不然一个角度都不扫，也就判不了 at_angle_edge，
   // 却报 angleObservable = true（宿主要了转角补偿，拿到的 0° 会被当成「零件没转」）
-  const double step = spec.angleRange > 0 ? std::min(std::max(spec.angleStep, 0.01), spec.angleRange)
-                                          : std::max(spec.angleStep, 0.01);
+  const double angleStep = std::max(spec.angleStep, 0.01);
+  const double step = spec.angleRange > 0 ? std::min(angleStep, spec.angleRange) : angleStep;
   const int n =
       spec.angleRange > 0 ? static_cast<int>(std::floor(spec.angleRange / step + 1e-9)) : 0;
-  // 扫角度时两端各多扫一步（±(n + 1)·step，护栏）：真实转角贴着 ±angleRange 时最好的粗扫角度落在端点很正常，
-  // 不能凭端点判贴边；细扫后的角度出了 ±angleRange 才算（见下面的 at_angle_edge）
+  // 扫角度时两端各多扫一步（护栏）：真实转角贴着 ±angleRange 时最好的粗扫角度落在端点很正常，
+  // 不能凭端点判贴边；细扫后的角度出了 ±angleRange 才算（见下面的 at_angle_edge）。
+  // 护栏在 ±(n·step + angleStep)，总比范围端点多出一个 angleStep：angleRange ≥ angleStep 时就是 ±(n + 1)·step；
+  // angleRange 更小时也不跟着缩。看不看得出角度的门限是绝对的（kAngleContrastMin），扫的范围跟着缩到 ±2·angleRange 时，
+  // 角度约束很强的模板分数也差不出 0.004（220 px 合成模板 angleRange = 0.1° 时判看不出，转 ±1.1…2° 照报成功、中心偏 1.2…2.6 px）
   const int g = n > 0 ? n + 1 : 0;
+  auto coarseAngle = [&](int i) {
+    if (std::abs(i) <= n)
+      return i * step;
+    return (i > 0 ? 1.0 : -1.0) * (n * step + angleStep);
+  };
   // 扫角度前先在 0° 上找一次平移，粗扫的各角度都按它对齐亚像素相位（见 matchAt）；不扫角度时不需要
   P2 p0;
   const P2* expect = nullptr;
@@ -292,7 +300,7 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
   std::vector<double> scores(2 * g + 1);
   std::vector<P2> locs(2 * g + 1);
   for (int i = -g; i <= g; ++i) {
-    const Match m = matchAt(i * step, expect);
+    const Match m = matchAt(coarseAngle(i), expect);
     scores[i + g] = m.peak;
     locs[i + g] = m.loc;
   }
@@ -302,30 +310,35 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
       bestI = i;
   }
   const double lowest = *std::min_element(scores.begin(), scores.end());
-  double phi = (bestI - g) * step;
+  double phi = coarseAngle(bestI - g);
   bool angleOff = false; // 细扫后的角度出了 ±angleRange，或看不出角度但分数朝扫描范围外升上去
   if (n > 0) {
     // 细扫与最终匹配改按粗扫最好的角度上的位置对齐相位：零件转了时 0° 上的位置估得偏一点，各角度的失配
     // 一样大也会偏向峰钝的角度（峰越尖、同样的失配扣分越多），离真实角度最近的粗扫角度上的位置更准
     p0 = unrotate(phi, locs[bestI] + halfT) - halfT;
-    // 粗扫的峰附近再按 step/4 细扫五个角度，取最好的三个做抛物线
+    // 粗扫的峰附近再按 step/4 细扫五个角度（k = −2…2），取最好的那个和左右两个做抛物线。
+    // 中间那个也按新的 p0 重算：粗扫的分数是按 0° 上的位置对齐的相位，与另外四个混着比会偏 bestK 和抛物线（≤ 0.02°）。
+    // 最好的落在窗口两端（k = ±2）时往外再补一个（k = ±3）再做抛物线：真实转角离粗扫角度 0.375…0.5 步时
+    // 不补就停在 ±2 上，角度量化成 ±0.5 步（默认步长时整整差 0.05°）
     const double fine = step / 4.0;
-    // 第一轮就会和中间角度比较，必须先填入粗扫分数，不能读未初始化的栈内存。
     const double best = scores[bestI];
-    double fineScores[5] = {0, 0, best, 0, 0};
-    int bestK = 2;
-    for (int k = -2; k <= 2; ++k) {
-      fineScores[k + 2] = k == 0 ? best : matchAt(phi + k * fine, expect).peak;
-      if (fineScores[k + 2] > fineScores[bestK])
-        bestK = k + 2;
+    double fineScores[7] = {0, 0, 0, 0, 0, 0, 0}; // k = −3…3
+    int bestK = 3;
+    for (int k = -2; k <= 2; ++k)
+      fineScores[k + 3] = matchAt(phi + k * fine, expect).peak;
+    for (int i = 1; i <= 5; ++i) { // 分数一样时取中间、再取靠前的
+      if (fineScores[i] > fineScores[bestK])
+        bestK = i;
     }
-    phi += (bestK - 2) * fine;
-    if (bestK > 0 && bestK < 4) {
-      phi += fine * parabolaPeak(fineScores[bestK - 1], fineScores[bestK], fineScores[bestK + 1]);
+    if (bestK == 1 || bestK == 5) {
+      const int k = bestK == 1 ? -3 : 3;
+      fineScores[k + 3] = matchAt(phi + k * fine, expect).peak;
     }
+    phi += (bestK - 3) * fine;
+    phi += fine * parabolaPeak(fineScores[bestK - 1], fineScores[bestK], fineScores[bestK + 1]);
     // 圆孔这类旋转对称的模板、或角度约束太弱的模板看不出角度：各角度分数几乎一样，挑出来的角度是随机的。
     // 不报这个角度：角度报 0、angleObservable = false，位置取 0° 上最好的平移。
-    // 例外是最高分落在护栏上（±(n + 1)·step，已出 ±angleRange）、又比 0° 高出一截（见 kOffScanFraction）：
+    // 例外是最高分落在护栏上（±(n·step + angleStep)，已出 ±angleRange）、又比 0° 高出一截（见 kOffScanFraction）：
     // 分数是朝扫描范围外一路升上去的，不是平的，真实转角多半在范围外，0° 上的平移也跟着偏（样本集 +4° 时偏 7…13 px），
     // 判 at_angle_edge（angle 报细扫出的角度）
     const double contrastMin = std::clamp(kAngleContrastGain * (1.0 - best), kAngleContrastMin,

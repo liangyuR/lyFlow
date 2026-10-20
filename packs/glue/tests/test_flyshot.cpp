@@ -292,9 +292,11 @@ TEST_CASE(
     "glue 飞拍：只加噪声（σ≈6）或只平移半个像素、不转 —— 看得出角度的模板估出的角度 < 0.1°，中心不被假角度带偏") {
   // 防的回归：1.0.0 在 0° 直接用原图、别的角度经双线性插值，插值相当于轻微平滑，噪声下非零角度的 NCC 反而更高：
   // 噪声帧报 0.25°（2026-10-17 样本集 σ = 6 时中位 0.63°），杠杆臂末端偏出零点几 mm，比不定位还差。
-  // 半像素帧防的是亚像素相位：NCC 只在整像素上取分，物体落在半像素上时 0° 的分数被压低，别的角度转过去的
-  // 小数部分不同、压低得少，假角度把中心带偏（上一版这一帧中心偏 0.12 px；96 px 的合成模板只平移半像素、
-  // 不转时报 0.25…0.44°，复拍对 S001→S034 报 0.49°）
+  // 半像素帧防的是平移的峰值锁定：NCC 只在整像素上取分，半像素处的峰按三点抛物线插值会偏向整像素，
+  // 上一版这一帧中心偏 0.12 px（angleRange = 0、根本不扫角度时也一样，角度≈0，与假角度无关）。
+  // 扫角度时最终匹配按估计的位置挪亚像素相位，让峰落在整像素上，这一偏差没了；
+  // angleRange = 0 与看不出角度的帧最终匹配不挪相位，仍有约 0.12 px（与 1.0.0 相同）。
+  // 半像素相位造成的假角度在这个 220 px 模板上不明显，由下面 96 px 模板那一例防
   const Files f = teach();
   cv::Mat noisy;
   render(Rigid{}).convertTo(noisy, CV_32F);
@@ -315,6 +317,44 @@ TEST_CASE(
     CHECK(std::fabs(o.pose["angle"].get<double>()) < 0.1);
     CHECK(std::fabs(o.pose["offset"][0].get<double>() - shift.x) <= 0.1);
     CHECK(std::fabs(o.pose["offset"][1].get<double>() - shift.y) <= 0.1);
+  }
+}
+
+TEST_CASE(
+    "glue 飞拍：96 px 模板、只平移半个像素、不转 —— 看得出角度时估出的角度 < 0.15°") {
+  // 防的回归：各角度不在同一个亚像素相位上比时，物体落在半像素上 0° 的分数被压低得多、别的角度转过去的小数部分
+  // 不同、压低得少，最好的角度被推到恰好对齐整像素的那个。这个框（开口右边的竖边与胶条的一端）上
+  // 1ffdc06 报 0.61°，只去掉相位对齐报 0.32°，这一版 ≤ 0.07°（复拍对 S001→S034 的 0.49° 也是这个原因）
+  const cv::Rect box(700, 260, 96, 96);
+  const cv::Mat tmpl = render(Rigid{})(box).clone();
+  lyflow::packs::glue::LocateSpec spec;
+  spec.anchor = P2(box.x, box.y);
+  spec.searchRadius = 40;
+  for (const P2 s : {P2(0.5, 0.5), P2(0.5, 0), P2(0, 0.5)}) {
+    CAPTURE(s.x);
+    CAPTURE(s.y);
+    const auto pose = lyflow::packs::glue::locateTemplate(render(Rigid{s.x, s.y, 0.0}), tmpl, spec);
+    INFO("score " << pose.score << " angle " << pose.angleDeg << " observable "
+                  << pose.angleObservable);
+    CHECK(pose.ok);
+    CHECK(pose.angleObservable); // 角度是估出来的，不是「看不出」被置 0
+    CHECK(std::fabs(pose.angleDeg) < 0.15);
+  }
+}
+
+TEST_CASE(
+    "glue 飞拍：真实转角离最近的粗扫角度约 0.4 步（−1.3°、0.2°）或 0.6° —— 角度误差 ≤ 0.02°") {
+  // 防的回归：细扫五个角度里最好的落在窗口两端时不做抛物线，角度停在粗扫角度 ± 0.5 步上，
+  // −1.3°、0.2° 整整差 0.05°；细扫中间那个沿用粗扫的分数（按 0° 上的位置对齐的相位）、与另外四个混着比，
+  // 0.6° 差 0.023°
+  const Files f = teach();
+  for (const double deg : {-1.3, 0.2, 0.6}) {
+    CAPTURE(deg);
+    const Out o = run(flyshotGraph(f, false), render(Rigid{12, -7, deg}));
+    REQUIRE(o.status == "ok");
+    INFO(o.pose.dump());
+    CHECK(o.pose["ok"] == true);
+    CHECK(std::fabs(o.pose["angle"].get<double>() - deg) <= 0.02);
   }
 }
 
@@ -482,6 +522,17 @@ TEST_CASE(
   INFO(smallOut.pose.dump());
   CHECK(smallOut.pose["ok"] == false);
   CHECK(smallOut.pose["reason"] == "at_angle_edge");
+  // angleRange = 0.1°：上一版护栏跟着缩到 ±0.2°，这么窄的范围里分数差不出 0.004，这个模板也判看不出角度，
+  // 转 1.1°、1.5° 照报成功（只补平移，中心偏 1.2…1.8 px）。护栏放在 ±(angleRange + angleStep)
+  const Json tiny = withLocate(flyshotGraph(f, false), {{"angleRange", 0.1}});
+  for (const double deg : {1.1, 1.5}) {
+    CAPTURE(deg);
+    const Out tinyOut = run(tiny, render(Rigid{0, 0, deg}));
+    REQUIRE(tinyOut.status == "ok");
+    INFO(tinyOut.pose.dump());
+    CHECK(tinyOut.pose["ok"] == false);
+    CHECK(tinyOut.pose["reason"] == "at_angle_edge");
+  }
 }
 
 TEST_CASE(

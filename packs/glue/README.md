@@ -185,7 +185,8 @@ io.load_image ─→ glue.locate ─→ glue.station_calipers ←─ image.load_
 `low_score`（低于 `minScore`）、`at_search_edge`（峰离搜索窗边 ≤ 1 px，真值可能超出 `searchRadius`；实际可用偏移约 `searchRadius` − 2，下限 3）、
 `at_angle_edge`（细扫后的转角超出 ±`angleRange`；角度两端外各多扫一步作护栏；看不出角度的模板只在最高分落在护栏上、又比 0° 明显高时判）、
 `ambiguous`（`peakRatio` > `maxPeakRatio`）。`peakRatio` = 最终角度的搜索窗里主峰之外最高的独立峰（突起度 ≥ 0.02 的局部极大）/ 主峰分数，
-主峰自己的侧坡再宽也不算；没有别的独立峰时为 0。1.1.0 起两道贴边门总是开着（1.0.0 下贴边、分数够的帧算成功），`maxPeakRatio` 默认 1 不判。
+主峰自己的侧坡再宽也不算；没有别的独立峰时为 0。1.1.0 起两道贴边门总是开着（1.0.0 下贴边、分数够的帧算成功），`maxPeakRatio` 默认 1 不判；
+`angleRange` 小于 `angleStep` 时 1.0.0 一个角度都不扫（只找平移、`angle` 0），1.1.0 扫 ±`angleRange`、转出范围判 `at_angle_edge`。
 逐点卡尺全部 `pose_fail`（错误即值，宿主报定位失败）；
 内边没找到是 `no_inner`（测不了），找到内边但没有胶是 `no_bead`（断胶的证据）。胶边被窗口截断是 `incomplete_bead`，宿主应作为无效量测处理，不能算断胶或 OK。纯色/低对比度模板返回 `pose.ok=false`。
 
@@ -194,12 +195,14 @@ io.load_image ─→ glue.locate ─→ glue.station_calipers ←─ image.load_
 转过的图按估出的模板位置挪到同一个亚像素相位上，各角度按插值到亚像素的峰顶比分：噪声和半像素的平移都不会把角度推离 0
 （1.1.0 之前 0° 用原图、别的角度经双线性插值，插值的平滑让噪声下非零角度分数更高：2026-10-17 样本集只加 σ = 6 噪声时角度中位 0.63°；
 只统一插值路径时，NCC 只在整像素上取分，物体落在半像素上时各角度被压低的程度不同，无噪声、只平移半像素的帧仍报 0.25…0.44°）。
-`angleRange` 小于 `angleStep` 时按 `angleRange` 一步扫（否则一个角度都不扫）。
+`angleRange` 小于 `angleStep` 时范围内按 `angleRange` 一步扫（否则一个角度都不扫），护栏仍在 ±(`angleRange` + `angleStep`)：
+护栏跟着缩到 ±2·`angleRange` 时扫的范围太窄，角度约束很强的模板分数也差不出来，转出范围的帧被当成「看不出角度」报成功。
+细扫最好的角度落在细扫窗口两端时往外再补一个角度做抛物线，不量化到窗口端点。
 各角度分数差不出来时（粗扫最高与最低分之差 < clamp(4 ×（1 − 最高分）, 0.004, 0.02)：圆孔这类旋转对称的模板，或真实图上角度约束太弱的小窗）
 `angle` 报 0、`angleObservable = false`，`center` 是 0° 上最好的平移（与 `angleRange = 0` 的结果相同）。**杠杆臂长（模板离测量点远）的宿主必须把 `angleObservable = false`
 当作「转角没补偿」处理**（例如报定位不足、或只在杠杆臂允许的转角误差内采信），不能当成「零件没转」：这类模板真转了时，0° 上的平移本身也会偏几个像素。
-例外：最高分落在护栏角度上、又比 0° 高出差值门限的 1/8 以上时（分数朝扫描范围外升上去），判 `at_angle_edge`。`angleRange = 0`（只找平移）时不扫角度，
-`angleObservable` 恒为 true。
+例外：最高分落在护栏角度上、又比 0° 高出差值门限的 1/8 以上时（分数朝扫描范围外升上去），判 `at_angle_edge`，`angle` 报细扫出的角度。`angleRange = 0`（只找平移）时不扫角度，
+`angleObservable` 恒为 true。`angleRange = 0` 与看不出角度时最终匹配不挪亚像素相位，物体落在半像素上时 `center` 约有 0.1 px 的峰值锁定偏差（1.0.0 也有）。
 
 ## 叠画（lyflow.overlay2d 的 role）
 

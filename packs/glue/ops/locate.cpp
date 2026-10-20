@@ -128,12 +128,14 @@ void registerLocate(Registry& r) {
       "固定相机飞拍：按示教时从示教图上裁下的模板，求这一帧相对示教图的刚体位姿"
       "（T(p) = R(angle)·(p − teachCenter) + center，glue-plan K2）。只在模板外扩 searchRadius 的一块里做"
       "归一化互相关，角度在 ±angleRange 里按 angleStep 扫描（两端外各多扫一步作护栏；angleRange 小于 angleStep 时"
-      "按 angleRange 一步扫）后抛物线插值。搜索区与模板先做同样的 σ = 1 px 高斯平滑（模板整块平滑、不裁边），"
+      "范围内按 angleRange 一步扫，护栏仍在 ±(angleRange + angleStep)）后抛物线插值。搜索区与模板先做同样的 σ = 1 px 高斯平滑（模板整块平滑、不裁边），"
       "每个角度（含 0°）走同一条三次插值旋转，并对齐到同一个亚像素相位、按插值到亚像素的峰顶比分，"
       "噪声和半像素的平移不会把角度推离 0。\n"
       "看不出角度时（各角度分数差不出来：圆孔这类旋转对称的模板，或真实图上角度约束太弱的小窗）angle 报 0、"
       "angleObservable = false，center 是 0° 上最好的平移（与 angleRange = 0 的结果相同）—— 位姿只补了平移、"
-      "没补转角；但最高分落在护栏角度上、又比 0° 明显高时（分数朝扫描范围外升上去）判 at_angle_edge。"
+      "没补转角；但最高分落在护栏角度上、又比 0° 明显高时（分数朝扫描范围外升上去）判 at_angle_edge，"
+      "这时 angle 报细扫出的角度。angleRange = 0 与看不出角度时最终匹配不挪亚像素相位，物体落在半像素上时"
+      "center 约有 0.1 px 的峰值锁定偏差（1.0.0 也有）。"
       "杠杆臂长（模板离测量点远）的宿主必须把 angleObservable = false 当作「转角没补偿」处理，"
       "不能当成「零件没转」；angleRange = 0 时不扫角度，angleObservable 恒为 true。\n"
       "质量门按顺序判，先命中的为准：模板没纹理（flat_template）；示教框离图边不到 2 px 或搜索区落出图外"
@@ -146,14 +148,16 @@ void registerLocate(Registry& r) {
       "宿主据此报定位失败。\n"
       "1.1.0：新增 peakRatio、reason、angleObservable 输出与 maxPeakRatio 参数（默认 1 = 不判）；"
       "两道贴边门总是开着 —— 1.0.0 下峰贴边、分数够就算成功的帧，现在判 at_search_edge / at_angle_edge；"
-      "示教框贴着图边（< 2 px）的现在判 out_of_image；searchRadius 下限从 1 提到 3。"
+      "示教框贴着图边（< 2 px）的现在判 out_of_image；searchRadius 下限从 1 提到 3；"
+      "angleRange 小于 angleStep 时 1.0.0 一个角度都不扫（只找平移、angle 0），现在扫 ±angleRange，"
+      "转出范围判 at_angle_edge。"
       "匹配前的预平滑让 score 比 1.0.0 略高（噪声被平滑掉一部分），看不出角度的模板 angle 从随机值变成 0。";
   op.inputs = {Port{"image", "Image", "Image", "这一帧。", true}};
   op.outputs = {
       Port{
           "pose", "Record", "Pose",
           "glue.Pose2D：ok、reason（成功为空）、message、score、peakRatio、angle（度，屏幕上顺时针为正）、"
-          "angleObservable（false = 看不出角度，angle 报 0、转角没补偿）、center、teachCenter、offset、"
+          "angleObservable（false = 看不出角度，angle 报 0、转角没补偿；判 at_angle_edge 的除外）、center、teachCenter、offset、"
           "templateSize、minScore、maxPeakRatio。",
           true},
       Port{"score", "Measurement", "Score", "归一化互相关的分数（−1…1）。", true},

@@ -20,6 +20,7 @@ struct Pose2D {
   double angleDeg = 0;
   /// 这个模板在这一帧上看不看得出角度。false：各角度的分数差不出来（圆孔这类旋转对称的模板，或真实图上
   /// 角度约束太弱的小窗），angleDeg 报 0，center 是 0° 上最好的平移 —— 位姿只补了平移、没补转角。
+  /// 例外：最高分落在护栏角度上、又比 0° 明显高时判 at_angle_edge（ok = false），这时 angleDeg 是细扫出的角度。
   /// angleRange = 0（只找平移）时不扫角度，恒为 true。
   bool angleObservable = true;
   /// 最终角度的搜索窗里，主峰之外最高的独立峰（突起度 ≥ 0.02 的局部极大）/ 主峰分数；没有别的独立峰时为 0。
@@ -45,13 +46,18 @@ struct LocateSpec {
 };
 
 /// 在 anchor 附近找模板。只在「模板外扩 searchRadius 与旋转余量」那一块里算。
-/// 搜索区与模板先做同样的 σ = 1 px 高斯平滑，每个角度（含 0°）都经同一条三次插值旋转再算 NCC，
-/// 噪声不会把角度推离 0。角度在 ±angleRange 外各多扫一步（护栏），细扫后抛物线插值；
-/// 各角度分数差不出来时角度报 0、angleObservable = false，位置取 0° 上最好的平移。
+/// 搜索区与模板先做同样的 σ = 1 px 高斯平滑（模板整块平滑、不裁边），每个角度（含 0°）都经同一条三次插值旋转再算 NCC，
+/// 噪声不会把角度推离 0。扫角度时先在 0° 上找一次平移，各角度把转过的图挪到同一个亚像素相位上，
+/// 并按两个方向三点抛物线插值到亚像素的峰顶比分（score 仍报整像素上的值），半像素的平移不会把角度推离 0。
+/// 角度在 ±angleRange 里按 angleStep 粗扫（angleRange 小于 angleStep 时按 angleRange 一步），两端外各多扫一个
+/// 护栏角度 ±(n·step + angleStep)（范围再小，护栏也比端点多出一个 angleStep）；粗扫最好的角度附近按 step/4 细扫，
+/// 最好的细扫角度与左右两个做抛物线（落在细扫窗口两端时往外再补一个）。
+/// 各角度分数差不出来时角度报 0、angleObservable = false，位置取 0° 上最好的平移（与 angleRange = 0 相同）。
+/// angleRange = 0 与看不出角度时最终匹配不挪相位：物体落在半像素上时中心有约 0.1 px 的峰值锁定偏差（1.0.0 也有）。
 /// 失败时 ok = false，reason 给原因码，why 写给人看的原因。几道门按顺序判，先命中的为准：
 /// 模板没纹理（flat_template）；示教框离图边不到 2 px、搜索区落出图外或比模板还小（out_of_image）；
-/// 分数低于 minScore（low_score）；主峰离搜索窗边 ≤ 1 px（at_search_edge）；细扫后的转角超出 ±angleRange
-/// 且这个模板看得出角度（at_angle_edge；看不出角度时不判）；
+/// 分数低于 minScore（low_score）；主峰离搜索窗边 ≤ 1 px（at_search_edge）；at_angle_edge：看得出角度时
+/// 细扫后的转角超出 ±angleRange，看不出角度时最高分落在护栏角度上、又比 0° 高出差值门限的 1/8（angleDeg 报细扫出的角度）；
 /// peakRatio 超过 maxPeakRatio（ambiguous）。贴边的峰说明真值可能在扫描范围之外，分数再高也不可信。
 /// searchRadius 太小（1 左右）时窗口里没有不贴边的位置，每帧都判 at_search_edge；算子把它的下限设成 3。
 Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec& spec,
