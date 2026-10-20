@@ -49,19 +49,23 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   spec.angleRange = params.number("angleRange");
   spec.angleStep = params.number("angleStep");
   spec.minScore = params.number("minScore");
+  spec.maxPeakRatio = params.number("maxPeakRatio");
   std::string why;
   const Pose2D pose = locateTemplate(gray, tmpl, spec, &why);
 
   Json rec;
   rec["ok"] = pose.ok;
   rec["message"] = pose.ok ? "" : why;
+  rec["reason"] = pose.reason;
   rec["score"] = round3(pose.score);
+  rec["peakRatio"] = round3(pose.peakRatio);
   rec["angle"] = round3(pose.angleDeg);
   rec["center"] = pxJson(pose.center);
   rec["teachCenter"] = pxJson(pose.teachCenter);
   rec["offset"] = pxJson(pose.center - pose.teachCenter);
   rec["templateSize"] = Json::array({tmpl.cols, tmpl.rows});
   rec["minScore"] = spec.minScore;
+  rec["maxPeakRatio"] = spec.maxPeakRatio;
   Record out;
   out.type = kPoseType;
   out.data = std::move(rec);
@@ -77,7 +81,10 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   }
   Overlay2D ov;
   const std::string label =
-      "定位 " + fmt(pose.score, 2) + (pose.ok ? "" : "（低于 " + fmt(spec.minScore, 2) + "）");
+      "定位 " + fmt(pose.score, 2) +
+      (pose.ok                       ? ""
+       : pose.reason == "low_score" ? "（低于 " + fmt(spec.minScore, 2) + "）"
+                                     : "（" + pose.reason + "）");
   ov.polyline(pose.ok ? "station" : "missing", corners, /*closed=*/true, label);
   ov.points(pose.ok ? "part" : "outlier", {Px{pose.center.x, pose.center.y}});
   if (!pose.ok)
@@ -112,7 +119,7 @@ std::vector<Issue> validate(const ParamView& params, const std::set<std::string>
 void registerLocate(Registry& r) {
   OperatorDesc op;
   op.id = "glue.locate";
-  op.version = "1.0.0";
+  op.version = "1.1.0";
   op.label = "定位";
   op.category = "涂胶/飞拍";
   op.keywords = {"glue", "locate", "template", "match", "pose", "涂胶", "定位", "模板", "飞拍"};
@@ -120,13 +127,21 @@ void registerLocate(Registry& r) {
       "固定相机飞拍：按示教时从示教图上裁下的模板，求这一帧相对示教图的刚体位姿"
       "（T(p) = R(angle)·(p − teachCenter) + center，glue-plan K2）。只在模板外扩 searchRadius 的一块里做"
       "归一化互相关，角度在 ±angleRange 里按 angleStep 扫描后抛物线插值。\n"
-      "分数低于 minScore 时 pose.ok = false（错误即值）：下游 glue.station_calipers 全部站判 pose_fail，"
-      "宿主据此报定位失败。";
+      "质量门按顺序判，先命中的为准：分数低于 minScore（low_score）；主峰离搜索窗边 ≤ 1 px（at_search_edge，"
+      "真实位置可能超出 searchRadius）；angleRange > 0 时最佳粗扫角度是扫描端点（at_angle_edge，真实转角可能超出 "
+      "angleRange）；peakRatio > maxPeakRatio（ambiguous，搜索区里还有一处几乎一样像的地方）。另有模板没纹理"
+      "（flat_template）、搜索区落出图外（out_of_image）。peakRatio = 主峰邻域（半径 max(3, 模板长边 / 4) px）"
+      "之外最强的响应 / 主峰分数，取遍所有粗扫角度。\n"
+      "任一门不过 pose.ok = false、reason 给原因码（错误即值）：下游 glue.station_calipers 全部站判 pose_fail，"
+      "宿主据此报定位失败。\n"
+      "1.1.0：新增 peakRatio、reason 输出与 maxPeakRatio 参数（默认 1 = 不判，结果与 1.0.0 一致）；"
+      "两道贴边门总是开着 —— 1.0.0 下峰贴边、分数够就算成功的帧，现在判 at_search_edge / at_angle_edge。";
   op.inputs = {Port{"image", "Image", "Image", "这一帧。", true}};
   op.outputs = {
       Port{
           "pose", "Record", "Pose",
-          "glue.Pose2D：ok、score、angle（度，屏幕上顺时针为正）、center、teachCenter、offset、templateSize。",
+          "glue.Pose2D：ok、reason（成功为空）、message、score、peakRatio、angle（度，屏幕上顺时针为正）、"
+          "center、teachCenter、offset、templateSize、minScore、maxPeakRatio。",
           true},
       Port{"score", "Measurement", "Score", "归一化互相关的分数（−1…1）。", true},
       Port{"overlay", "Record", "Overlay", "lyflow.overlay2d：模板框按位姿映射到这一帧。", true},
@@ -156,7 +171,12 @@ void registerLocate(Registry& r) {
   Param minScore = floatParam("minScore", "Min Score", 0.6, "", "分数低于它判定位失败。");
   minScore.min = -1.0;
   minScore.max = 1.0;
-  op.params = {tmpl, anchor, radius, range, step, minScore};
+  Param maxPeak = floatParam("maxPeakRatio", "Max Peak Ratio", 1.0, "",
+                             "peakRatio（主峰之外最强响应 / 主峰分数）超过它判 ambiguous；1 = 不判。",
+                             true);
+  maxPeak.min = 0.0;
+  maxPeak.max = 1.0;
+  op.params = {tmpl, anchor, radius, range, step, minScore, maxPeak};
   op.params[1].tuningRole = "geometry";
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;

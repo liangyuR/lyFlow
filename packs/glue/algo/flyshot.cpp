@@ -46,13 +46,16 @@ P2 Pose2D::apply(P2 p) const { return rotate(p - teachCenter) + center; }
 Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec& spec,
                       std::string* why) {
   Pose2D pose;
-  auto fail = [&](const char* m) {
+  auto fail = [&](const char* code, const char* m) {
+    pose.ok = false;
+    pose.reason = code;
     if (why)
       *why = m;
     return pose;
   };
   if (gray.empty() || tmpl.empty() || gray.type() != CV_8UC1 || tmpl.type() != CV_8UC1) {
-    return fail("图像和模板需要非空 u8 灰度图");
+    // 算子在进来之前已经把这种输入拒成执行错误；直接调内核时没有图可搜，归到 out_of_image
+    return fail("out_of_image", "图像和模板需要非空 u8 灰度图");
   }
   const int tw = tmpl.cols, th = tmpl.rows;
   pose.teachCenter = spec.anchor + P2((tw - 1) / 2.0, (th - 1) / 2.0);
@@ -61,7 +64,7 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
   cv::meanStdDev(tmpl, mean, deviation);
   // OpenCV 对常量模板的 TM_CCOEFF_NORMED 返回 1；没有纹理不能作为成功定位的证据。
   if (deviation[0] < 1.0)
-    return fail("模板对比度不足，请选择含边缘或纹理的模板");
+    return fail("flat_template", "模板对比度不足，请选择含边缘或纹理的模板");
   // 模板旋转后外接圆的半径 + 搜索半径：任何允许的位姿下模板都完整落在这一块里
   const double half = spec.searchRadius + 0.5 * std::hypot(tw, th) + 4.0;
   const cv::Rect want(static_cast<int>(std::floor(pose.teachCenter.x - half)),
@@ -70,12 +73,24 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
                       static_cast<int>(std::ceil(2.0 * half)) + 1);
   const cv::Rect roi = want & cv::Rect(0, 0, gray.cols, gray.rows);
   if (roi.width < tw + 2 || roi.height < th + 2)
-    return fail("搜索区落在图外，或者比模板还小");
+    return fail("out_of_image", "搜索区落在图外，或者比模板还小");
   const cv::Mat sub = gray(roi);
   const P2 rc((roi.width - 1) / 2.0, (roi.height - 1) / 2.0);
 
+  /// 一个角度上的匹配：搜索窗（转过的图里、按模板左上角计）里的 NCC 响应与其中的最高点。
+  struct Match {
+    double phi = 0;
+    double score = 0;
+    P2 loc;            ///< 最高点，含亚像素插值（转过的图里模板左上角）
+    bool atEdge = true; ///< 最高点离搜索窗边 ≤ 1 px；没有搜索窗也算
+    int u0 = 0, v0 = 0; ///< 搜索窗左上角在转过的图里的位置
+    cv::Mat window;    ///< 搜索窗里的响应；与 full 共享缓冲
+  };
+
   // 把搜索区转 phi 度（绕它的中心），在转过的图里做 NCC：物体在原图里就是转了 −phi
-  auto matchAt = [&](double phiDeg, P2* loc) {
+  auto matchAt = [&](double phiDeg) {
+    Match m;
+    m.phi = phiDeg;
     // rot 不能先指向 sub：warpAffine 会写进共享的缓冲区，把输入图本身改掉
     cv::Mat rot;
     if (phiDeg == 0.0) {
@@ -99,10 +114,13 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
     const int u1 = std::min(full.cols - 1, static_cast<int>(std::ceil(want.x + spec.searchRadius)));
     const int v1 = std::min(full.rows - 1, static_cast<int>(std::ceil(want.y + spec.searchRadius)));
     if (u1 < u0 || v1 < v0) {
-      *loc = want;
-      return 0.0;
+      m.loc = want;
+      return m;
     }
-    const cv::Mat res = full(cv::Rect(u0, v0, u1 - u0 + 1, v1 - v0 + 1));
+    m.u0 = u0;
+    m.v0 = v0;
+    m.window = full(cv::Rect(u0, v0, u1 - u0 + 1, v1 - v0 + 1));
+    const cv::Mat& res = m.window;
     double best = 0;
     cv::Point at;
     cv::minMaxLoc(res, nullptr, &best, nullptr, &at);
@@ -113,18 +131,23 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
     if (at.y > 0 && at.y + 1 < res.rows) {
       dy = parabolaPeak(res.at<float>(at.y - 1, at.x), best, res.at<float>(at.y + 1, at.x));
     }
-    *loc = P2(u0 + at.x + dx, v0 + at.y + dy);
-    return std::isfinite(best) ? best : 0.0;
+    // 搜索窗被图边裁过时，裁出来的边同样是边：模板再往外就出图了
+    m.atEdge = at.x <= 1 || at.y <= 1 || at.x >= res.cols - 2 || at.y >= res.rows - 2;
+    m.loc = P2(u0 + at.x + dx, v0 + at.y + dy);
+    m.score = std::isfinite(best) ? best : 0.0;
+    return m;
   };
 
   const double step = std::max(spec.angleStep, 0.01);
   const int n =
       spec.angleRange > 0 ? static_cast<int>(std::floor(spec.angleRange / step + 1e-9)) : 0;
+  std::vector<Match> coarse;
+  coarse.reserve(2 * n + 1);
   std::vector<double> scores(2 * n + 1);
   int bestI = n;
-  P2 loc;
   for (int i = -n; i <= n; ++i) {
-    scores[i + n] = matchAt(i * step, &loc);
+    coarse.push_back(matchAt(i * step));
+    scores[i + n] = coarse.back().score;
     if (scores[i + n] > scores[bestI])
       bestI = i + n;
   }
@@ -137,7 +160,7 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
     double fineScores[5] = {0, 0, best, 0, 0};
     int bestK = 2;
     for (int k = -2; k <= 2; ++k) {
-      fineScores[k + 2] = k == 0 ? best : matchAt(phi + k * fine, &loc);
+      fineScores[k + 2] = k == 0 ? best : matchAt(phi + k * fine).score;
       if (fineScores[k + 2] > fineScores[bestK])
         bestK = k + 2;
     }
@@ -147,17 +170,55 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
     }
     phi = std::clamp(phi, -n * step, n * step);
   }
-  pose.score = matchAt(phi, &loc);
+  const Match final = matchAt(phi);
+  pose.score = final.score;
 
-  const P2 q = loc + P2((tw - 1) / 2.0, (th - 1) / 2.0);
-  Pose2D back;
-  back.angleDeg = -phi;
-  const P2 p = back.rotate(q - rc) + rc;
-  pose.center = p + P2(roi.x, roi.y);
+  // 转过 phiDeg 的图里的点 q 与原图坐标互换（绕搜索区中心转）
+  auto toImage = [&](double phiDeg, P2 q) {
+    Pose2D back;
+    back.angleDeg = -phiDeg;
+    return back.rotate(q - rc) + rc + P2(roi.x, roi.y);
+  };
+  auto toRotated = [&](double phiDeg, P2 p) {
+    Pose2D fwd;
+    fwd.angleDeg = phiDeg;
+    return fwd.rotate(p - P2(roi.x, roi.y) - rc) + rc;
+  };
+  const P2 halfT((tw - 1) / 2.0, (th - 1) / 2.0);
+  pose.center = toImage(phi, final.loc + halfT);
   pose.angleDeg = -phi;
-  pose.ok = pose.score >= spec.minScore;
-  if (!pose.ok && why)
-    *why = "匹配分数低于 minScore";
+
+  // peakRatio：所有粗扫角度的搜索窗里，模板中心离主峰超过 exclusion（原图距离）的最强响应 / 主峰分数。
+  // 主峰的侧坡、邻近角度上的同一个峰都落在 exclusion 里，不算第二个峰。
+  // 旋转保距：把主峰中心转进每个角度的图里比距离，不必逐点转回原图。
+  if (pose.score > 0) {
+    const double exclusion = std::max(3.0, std::max(tw, th) / 4.0);
+    double second = 0;
+    for (const Match& m : coarse) {
+      const P2 c = toRotated(m.phi, pose.center) - halfT - P2(m.u0, m.v0); // 窗口坐标
+      for (int y = 0; y < m.window.rows; ++y) {
+        const float* row = m.window.ptr<float>(y);
+        for (int x = 0; x < m.window.cols; ++x) {
+          const double v = row[x];
+          if (v > second && std::hypot(x - c.x, y - c.y) > exclusion)
+            second = v;
+        }
+      }
+    }
+    // 粗扫上别处的峰可能略高于细扫后的主峰分数；比 1 大没有更多信息，夹到 1，maxPeakRatio = 1 时门永远不开
+    pose.peakRatio = std::min(1.0, second / pose.score);
+  }
+
+  if (pose.score < spec.minScore)
+    return fail("low_score", "匹配分数低于 minScore");
+  if (final.atEdge)
+    return fail("at_search_edge", "匹配峰贴在搜索窗边上：真实位置可能超出 searchRadius");
+  if (n > 0 && (bestI == 0 || bestI == 2 * n))
+    return fail("at_angle_edge", "最佳角度在扫描范围的端点上：真实转角可能超出 angleRange");
+  if (pose.peakRatio > spec.maxPeakRatio) {
+    return fail("ambiguous", "搜索区里还有一处几乎一样像的匹配（peakRatio 超过 maxPeakRatio），位置不唯一");
+  }
+  pose.ok = true;
   return pose;
 }
 

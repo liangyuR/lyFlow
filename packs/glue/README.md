@@ -170,7 +170,7 @@ io.load_image ─→ glue.locate ─→ glue.station_calipers ←─ image.load_
 
 | id | 输入 → 输出 | 人要填的（其余在「高级」） |
 |---|---|---|
-| `glue.locate` 定位 | `image` → `pose: Record<glue.Pose2D>`、`score`、`overlay` | `template`（Path）、`anchor`（point）、`searchRadius`（80 px）、`minScore`（0.6）；高级：`angleRange`（3°）、`angleStep`（0.5°） |
+| `glue.locate` 定位 | `image` → `pose: Record<glue.Pose2D>`、`score`、`overlay` | `template`（Path）、`anchor`（point）、`searchRadius`（80 px）、`minScore`（0.6）；高级：`angleRange`（3°）、`angleStep`（0.5°）、`maxPeakRatio`（1 = 不判） |
 | `glue.station_calipers` 逐点卡尺 | `image`、`pose?`、`calib?` → `measure: Record<glue.StationMeasure>`、`coverage`、`distanceMean`、`overlay` | `stations`（Path）、`searchHalf`（48 px）、`innerSearch`（[−40, −3]）、`beadSearch`（[−15, 40]）、`innerPolarity`、`innerSelect`；高级：`caliperWidth`、`beadPolarity`、`contrastMin`（25）、`widthMin`（3 px） |
 
 **站的约定**（K3）：站点在名义胶条中线上，法向从内边（开口一侧）指向翻边，卡尺上 `t < 0` 是内边一侧。
@@ -178,10 +178,14 @@ io.load_image ─→ glue.locate ─→ glue.station_calipers ←─ image.load_
 
 | type | data |
 |---|---|
-| `glue.Pose2D` | `ok`、`message`、`score`、`angle`（度，屏幕上顺时针为正）、`center`、`teachCenter`、`offset`、`templateSize`、`minScore`；`T(p) = R(angle)·(p − teachCenter) + center` 把示教图坐标映射到这一帧 |
+| `glue.Pose2D` | `ok`、`reason`（成功为空）、`message`、`score`、`peakRatio`、`angle`（度，屏幕上顺时针为正）、`center`、`teachCenter`、`offset`、`templateSize`、`minScore`、`maxPeakRatio`；`T(p) = R(angle)·(p − teachCenter) + center` 把示教图坐标映射到这一帧 |
 | `glue.StationMeasure` | `count`、`unit`、`poseGiven`、`poseOk`、`counts{ok, noInner, noBead, incompleteBead, poseFail, outOfImage}`、`calib`，逐站对齐：`ids[]`、`point[]`、`normal[]`（这一帧里的）、`status[]`（ok / no_inner / no_bead / incomplete_bead / pose_fail / out_of_image）、`inner[]` / `near[]` / `far[]`（沿法向的偏移 px）、`innerNear[]` / `innerCenter[]` / `width[]`（按 `unit`）、`innerNearPx[]` / `innerCenterPx[]` / `widthPx[]`、`innerContrast[]`、`beadContrast[]`；不成立的是 `null` |
 
-**失败语义**：定位分数低于 `minScore` 时 `pose.ok = false`，逐点卡尺全部 `pose_fail`（错误即值，宿主报定位失败）；
+**失败语义**：定位不过质量门时 `pose.ok = false`，`reason` 按顺序取先命中的：`flat_template`（模板没纹理）、`out_of_image`（搜索区落出图外）、
+`low_score`（低于 `minScore`）、`at_search_edge`（峰离搜索窗边 ≤ 1 px，真值可能超出 `searchRadius`）、`at_angle_edge`（`angleRange > 0` 时最佳粗扫角度是扫描端点）、
+`ambiguous`（`peakRatio` > `maxPeakRatio`）。`peakRatio` = 主峰邻域（半径 max(3, 模板长边 / 4) px）之外、所有粗扫角度搜索窗里最强的响应 / 主峰分数；
+搜索窗比这个邻域还小时没有可比的位置，为 0。1.1.0 起两道贴边门总是开着（1.0.0 下贴边、分数够的帧算成功），`maxPeakRatio` 默认 1 不判。
+逐点卡尺全部 `pose_fail`（错误即值，宿主报定位失败）；
 内边没找到是 `no_inner`（测不了），找到内边但没有胶是 `no_bead`（断胶的证据）。胶边被窗口截断是 `incomplete_bead`，宿主应作为无效量测处理，不能算断胶或 OK。纯色/低对比度模板返回 `pose.ok=false`。
 
 ## 叠画（lyflow.overlay2d 的 role）

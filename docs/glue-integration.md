@@ -79,6 +79,41 @@ pwsh -NoProfile -File scripts/check-glue.ps1 -Steps manifest,schema
 （与胶一样宽、一样暗，只是边缘缓）当成胶。按零件特征配准（`glue.locate`）更差 —— 胶粘在喷嘴后面，不随零件刚体移动。
 这些点要可靠，需要逐帧对胶本身配准，并加边缘陡度 / 纹理判据，列入后续。
 
+## 定位质量门（2026-10-20，`glue.locate` 1.1.0，glue-plan K2）
+
+GlueSight「特征定位 + 示教胶路判胶偏」的 L1：定位失败要说得出原因，贴边、歧义的匹配不能当成功。
+
+### 本轮实现
+
+- `glue.Pose2D` 增加 `peakRatio`（主峰邻域 max(3, 模板长边 / 4) px 之外、所有粗扫角度搜索窗里最强响应 / 主峰分数；主峰分数 ≤ 0 时为 1，
+  搜索窗比邻域还小时为 0）、`reason`（成功为空）、`maxPeakRatio`；`message` 仍是给人看的中文。
+- 新参数 `maxPeakRatio`（0…1，默认 1 = 不判）：`peakRatio` 超过它判 `ambiguous`。
+- 两道贴边门总是开着：峰离搜索窗边 ≤ 1 px 判 `at_search_edge`；`angleRange > 0`（且至少扫两个角度）时最佳粗扫角度是端点判 `at_angle_edge`。
+  搜索窗形状不变。原因码按 `flat_template → out_of_image → low_score → at_search_edge → at_angle_edge → ambiguous` 取先命中的。
+- **行为变化**：1.0.0 下峰贴边、分数够的帧算成功（合成图上真值出窗 4 px 时贴边匹配分数 0.98），1.1.0 判失败。其余默认结果与 1.0.0 相同。
+  存了 `opVersion: "1.0.0"` 的图照常加载运行，只出 `version_mismatch` 警告（次版本不同）；随包 `flyshot.lyflow.json` 仍记 1.0.0，经 C ABI 的用例照常通过。
+
+### 复现
+
+```powershell
+$env:CL = '/utf-8'            # 本机 VS 2019 + 代码页 936：tests/fixtures/client_version.cpp 没有 /utf-8，version.h 的中文注释会吞掉宏
+$env:LYFLOW_STD_PACKS = '0'
+$env:LYFLOW_PACKS = 'std-image;glue'
+pnpm core:build
+& .\build\core\bin\lyflow-core-tests.exe '--source-file=*test_flyshot.cpp,*test_calib.cpp,*test_glue.cpp,*test_image_ops.cpp'
+pwsh -NoProfile -File scripts/check-glue.ps1 -Steps manifest,schema
+```
+
+### 验证记录（2026-10-20）
+
+- 飞拍 doctest 14 例全过；新增 / 改写 3 例，各自防的回归：真值刚出搜索窗、贴边分数仍过线 → `at_search_edge`（改写原「searchRadius 是硬边界」）；
+  转角 4.5° 超出 3° → `at_angle_edge`；搜索区里两个一样的孔 → `peakRatio` ≥ 0.95、`maxPeakRatio = 0.9` 判 `ambiguous`，默认不判，
+  只有一个孔时 `peakRatio` ≤ 0.7（实测 0.23）照常成功。把三道门去掉后这 3 例全部失败。
+- glue、飞拍、标定、std-image 专项：54 例 / 7739 条断言全过。全量 core（`LYFLOW_STD_PACKS=0`、`LYFLOW_PACKS=std-image;glue`）200 例中 199 过，
+  失败的是 `test_cache.cpp`「原图重跑总耗时 < 50 ms」（并行构建负载下 128 ms），单独重跑 22 例全过，与本改动无关。
+- `check-glue.ps1 -Steps manifest,schema` 通过；manifest 里 `glue.locate` 为 1.1.0、含 `maxPeakRatio`。
+- 真实帧上的 `peakRatio` 分布、耗时不在本轮：由 GlueSight P0 的离线评测在阶段 0 样本集上统计（MX11 数据不作依据）。
+
 ## 仍属后续范围
 
 - 三目相机选择、机器人方向和真实 NG 的现场验收（G3）。本轮合成图验证不能替代它。

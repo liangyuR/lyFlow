@@ -18,6 +18,12 @@ struct Pose2D {
   bool ok = false;
   double score = 0;
   double angleDeg = 0;
+  /// 主峰之外最强的响应 / 主峰分数（所有粗扫角度、搜索窗内；主峰邻域半径 max(3, 模板长边 / 4) px 不算）。
+  /// 接近 1 说明搜索区里还有一处几乎一样像的地方，位置不唯一。主峰分数 ≤ 0 时为 1。
+  double peakRatio = 1;
+  /// 失败原因码：成功时为空，否则是 low_score / ambiguous / at_search_edge / at_angle_edge /
+  /// flat_template / out_of_image 之一。
+  std::string reason;
   P2 teachCenter{0, 0};
   P2 center{0, 0};
 
@@ -31,10 +37,14 @@ struct LocateSpec {
   double angleRange = 3;    ///< 角度扫描 ±range（度）
   double angleStep = 0.5;
   double minScore = 0.6;
+  double maxPeakRatio = 1; ///< peakRatio 超过它判 ambiguous；1 = 不判
 };
 
 /// 在 anchor 附近找模板。只在「模板外扩 searchRadius 与旋转余量」那一块里算。
-/// 搜索区落出图外、比模板还小时返回 ok = false，why 写原因。
+/// 失败时 ok = false，reason 给原因码，why 写给人看的原因。几道门按顺序判，先命中的为准：
+/// 模板没纹理（flat_template）、搜索区落出图外或比模板还小（out_of_image）、分数低于 minScore（low_score）、
+/// 主峰离搜索窗边 ≤ 1 px（at_search_edge）、angleRange > 0 时最佳粗扫角度是第一个或最后一个（at_angle_edge）、
+/// peakRatio 超过 maxPeakRatio（ambiguous）。贴边的峰说明真值可能在扫描范围之外，分数再高也不可信。
 Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec& spec,
                       std::string* why = nullptr);
 

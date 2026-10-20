@@ -1,6 +1,6 @@
 // 固定相机飞拍后检（glue-plan §5，第 21 / 22 条）：合成图上的定位与逐点卡尺。
 // 场景（示教图坐标）：圆角矩形的暗开口，下沿 y = 330 是内边；翻边是亮的渐变；胶条中线在 y = 350、宽 16 px；
-// 翻边上两个安装孔给模板当特征；(300, 382) 有个比胶还暗的斑落在卡尺的找胶窗口里。x ∈ [400, 420] 没胶（断口），x ∈ [560, 580] 的内边被抹到 y = 300（找不到内边）。
+// 翻边上两个安装孔给模板当特征（twinHole 时 (580, 480) 再多一个一样的孔，给定位的歧义门用）；(300, 382) 有个比胶还暗的斑落在卡尺的找胶窗口里。x ∈ [400, 420] 没胶（断口），x ∈ [560, 580] 的内边被抹到 y = 300（找不到内边）。
 // 当前帧 = 示教场景经已知刚体变换 T 画出来，位姿、距离都有真值（D12 / K8）。
 #include <doctest/doctest.h>
 
@@ -58,7 +58,7 @@ bool inOpening(double x, double y) {
   return std::hypot(x - cx, y - cy) <= r;
 }
 
-double sceneValue(double x, double y, bool part) {
+double sceneValue(double x, double y, bool part, bool twinHole) {
   const double flange = 190.0 + 0.05 * (x - 450.0) - 0.03 * (y - 350.0);
   if (!part)
     return flange;
@@ -68,6 +68,8 @@ double sceneValue(double x, double y, bool part) {
     if (std::hypot(x - h.x, y - h.y) <= 18)
       return 50.0;
   }
+  if (twinHole && std::hypot(x - 580, y - 480) <= 18)
+    return 50.0;
   // 胶条外侧卡尺窗口里的一个暗斑（比胶还暗）：逐点卡尺不能把它当成胶
   if (std::hypot(x - 300, y - 382) <= 8)
     return 45.0;
@@ -76,7 +78,7 @@ double sceneValue(double x, double y, bool part) {
   return flange;
 }
 
-cv::Mat render(const Rigid& T, bool part = true) {
+cv::Mat render(const Rigid& T, bool part = true, bool twinHole = false) {
   cv::Mat img(700, 900, CV_32F);
   // 4×4 超采样：采样点落不到整数坐标上，场景里 y = 330、342 这类整数边界画出来不偏
   constexpr int kSub = 4;
@@ -86,7 +88,7 @@ cv::Mat render(const Rigid& T, bool part = true) {
       for (int j = 0; j < kSub; ++j) {
         for (int i = 0; i < kSub; ++i) {
           const P2 p = T.inverse(P2(x - 0.5 + (i + 0.5) / kSub, y - 0.5 + (j + 0.5) / kSub));
-          acc += sceneValue(p.x, p.y, part);
+          acc += sceneValue(p.x, p.y, part, twinHole);
         }
       }
       img.at<float>(y, x) = static_cast<float>(acc / (kSub * kSub));
@@ -117,15 +119,18 @@ struct Files {
   std::filesystem::path calib = dir / "calib.json";
 };
 
+void writeTemplate(const std::filesystem::path& file, const cv::Mat& teachImg, cv::Rect crop) {
+  std::vector<uchar> bytes;
+  REQUIRE(cv::imencode(".png", teachImg(crop), bytes));
+  std::ofstream(file, std::ios::binary)
+      .write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
+
 /// 示教：画恒等位姿的一帧，从上面裁模板、写测量点文件（胶中线上每 4 px 一站，法向朝下）。
 Files teach() {
   Files f;
   std::filesystem::create_directories(f.dir);
-  const cv::Mat teachImg = render(Rigid{});
-  std::vector<uchar> bytes;
-  REQUIRE(cv::imencode(".png", teachImg(cv::Rect(590, 250, 220, 260)), bytes));
-  std::ofstream(f.tmpl, std::ios::binary)
-      .write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+  writeTemplate(f.tmpl, render(Rigid{}), cv::Rect(590, 250, 220, 260));
   Json pts = Json::array(), nrm = Json::array(), ids = Json::array();
   for (int x = 200, j = 0; x <= 700; x += 4, ++j) {
     pts.push_back({x, 350});
@@ -157,6 +162,15 @@ struct Out {
   std::string status;
   Json pose, measure;
 };
+
+/// 改 n_loc 的参数（定位门的用例只动定位）。
+Json withLocate(Json doc, const Json& params) {
+  for (Json& n : doc["nodes"]) {
+    if (n["id"] == "n_loc")
+      n["params"].update(params);
+  }
+  return doc;
+}
 
 Out run(const Json& doc, const cv::Mat& gray) {
   Session s(doc, {}, {}, false, 0, false,
@@ -336,22 +350,70 @@ TEST_CASE("glue 飞拍：加载期校验 —— innerSearch / beadSearch 倒了�
 }
 
 TEST_CASE(
-    "glue 飞拍：searchRadius 是硬边界 —— 真实偏移超出它时，匹配中心不出这个范围、分数明显低于真匹配") {
+    "glue 飞拍：searchRadius 是硬边界 —— 真实偏移超出它时，匹配中心不出这个范围，峰贴在窗边判 at_search_edge") {
+  // 防的回归：真值刚出窗时，贴着窗边的匹配分数仍很高（这里 > 0.9），1.0.0 报成功、位姿差几个 px
   const Files f = teach();
-  Json doc = flyshotGraph(f, false);
-  for (Json& n : doc["nodes"]) {
-    if (n["id"] == "n_loc")
-      n["params"]["searchRadius"] = 20;
+  const Json doc = withLocate(flyshotGraph(f, false), {{"searchRadius", 20}});
+  for (const Rigid T : {Rigid{24, 0, 0.0}, Rigid{40, 12, 0.0}}) {
+    CAPTURE(T.tx);
+    const Out o = run(doc, render(T));
+    REQUIRE(o.status == "ok");
+    INFO(o.pose.dump());
+    CHECK(std::fabs(o.pose["offset"][0].get<double>()) <= 21.0);
+    CHECK(std::fabs(o.pose["offset"][1].get<double>()) <= 21.0);
+    CHECK(o.pose["score"].get<double>() >= 0.6); // 分数过线，挡住它的只能是贴边门
+    CHECK(o.pose["ok"] == false);
+    CHECK(o.pose["reason"] == "at_search_edge");
   }
-  const Out o = run(doc, render(Rigid{40, 12, 0.0}));
-  REQUIRE(o.status == "ok");
-  CHECK(std::fabs(o.pose["offset"][0].get<double>()) <= 21.0);
-  CHECK(std::fabs(o.pose["offset"][1].get<double>()) <= 21.0);
-  CHECK(o.pose["score"].get<double>() < 0.9);
   const Out near = run(doc, render(Rigid{12, -9, 0.0}));
   REQUIRE(near.status == "ok");
   CHECK(near.pose["ok"] == true);
+  CHECK(near.pose["reason"] == "");
   CHECK(near.pose["score"].get<double>() >= 0.9);
+}
+
+TEST_CASE("glue 飞拍：真实转角超出 angleRange —— 最佳角度停在扫描端点，判 at_angle_edge") {
+  // 防的回归：转角超范围时粗扫停在端点、分数仍过线，1.0.0 报成功但角度被截在 angleRange 上
+  const Files f = teach();
+  const Out o = run(flyshotGraph(f, false), render(Rigid{0, 0, 4.5})); // 默认 angleRange = 3°
+  REQUIRE(o.status == "ok");
+  INFO(o.pose.dump());
+  CHECK(o.pose["score"].get<double>() >= 0.6);
+  CHECK(o.pose["ok"] == false);
+  CHECK(o.pose["reason"] == "at_angle_edge");
+}
+
+TEST_CASE(
+    "glue 飞拍：搜索区里有两个一样的孔 —— peakRatio≈1，maxPeakRatio = 0.9 时判 ambiguous；只有一个孔时 peakRatio 明显低、照常成功") {
+  // 防的回归：模板在搜索区里还有一处同样的特征时，NCC 随便挑一处报成功，位置可能差一个孔距。
+  // 默认 maxPeakRatio = 1 不判，1.0.0 存下的图结果不变。
+  const Files f = teach();
+  const auto hole = f.dir / "hole.png";
+  writeTemplate(hole, render(Rigid{}), cv::Rect(620, 440, 80, 80)); // (660, 480) 的孔
+  auto graph = [&](double maxPeakRatio) {
+    return withLocate(flyshotGraph(f, false), {{"template", hole.u8string()},
+                                               {"anchor", {620, 440}},
+                                               {"searchRadius", 100},
+                                               {"maxPeakRatio", maxPeakRatio}});
+  };
+  const cv::Mat twinFrame = render(Rigid{}, true, /*twinHole=*/true);
+  const Out twin = run(graph(0.9), twinFrame);
+  REQUIRE(twin.status == "ok");
+  INFO(twin.pose.dump());
+  CHECK(twin.pose["peakRatio"].get<double>() >= 0.95);
+  CHECK(twin.pose["ok"] == false);
+  CHECK(twin.pose["reason"] == "ambiguous");
+
+  const Out byDefault = run(graph(1.0), twinFrame);
+  REQUIRE(byDefault.status == "ok");
+  CHECK(byDefault.pose["ok"] == true);
+
+  const Out unique = run(graph(0.9), render(Rigid{}));
+  REQUIRE(unique.status == "ok");
+  INFO(unique.pose.dump());
+  CHECK(unique.pose["ok"] == true);
+  CHECK(unique.pose["reason"] == "");
+  CHECK(unique.pose["peakRatio"].get<double>() <= 0.7);
 }
 
 TEST_CASE("glue 飞拍：纯色模板不能产生成功位姿") {
