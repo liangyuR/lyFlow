@@ -18,6 +18,10 @@ struct Pose2D {
   bool ok = false;
   double score = 0;
   double angleDeg = 0;
+  /// 这个模板在这一帧上看不看得出角度。false：各角度的分数差不出来（圆孔这类旋转对称的模板，或真实图上
+  /// 角度约束太弱的小窗），angleDeg 报 0，center 是 0° 上最好的平移 —— 位姿只补了平移、没补转角。
+  /// angleRange = 0（只找平移）时不扫角度，恒为 true。
+  bool angleObservable = true;
   /// 最终角度的搜索窗里，主峰之外最高的独立峰（突起度 ≥ 0.02 的局部极大）/ 主峰分数；没有别的独立峰时为 0。
   /// 主峰自己的侧坡再宽也不算。接近 1 说明搜索区里还有一处几乎一样像的地方，位置不唯一。主峰分数 ≤ 0 时为 1。
   double peakRatio = 1;
@@ -41,11 +45,13 @@ struct LocateSpec {
 };
 
 /// 在 anchor 附近找模板。只在「模板外扩 searchRadius 与旋转余量」那一块里算。
-/// 角度在 ±angleRange 外各多扫一步（护栏），细扫后抛物线插值。
+/// 搜索区与模板先做同样的 σ = 1 px 高斯平滑，每个角度（含 0°）都经同一条三次插值旋转再算 NCC，
+/// 噪声不会把角度推离 0。角度在 ±angleRange 外各多扫一步（护栏），细扫后抛物线插值；
+/// 各角度分数差不出来时角度报 0、angleObservable = false，位置取 0° 上最好的平移。
 /// 失败时 ok = false，reason 给原因码，why 写给人看的原因。几道门按顺序判，先命中的为准：
 /// 模板没纹理（flat_template）；示教框离图边不到 2 px、搜索区落出图外或比模板还小（out_of_image）；
 /// 分数低于 minScore（low_score）；主峰离搜索窗边 ≤ 1 px（at_search_edge）；细扫后的转角超出 ±angleRange
-/// 且这个模板看得出角度（at_angle_edge；圆孔这类旋转对称的模板各角度分数差不出来，不判，角度夹回范围内）；
+/// 且这个模板看得出角度（at_angle_edge；看不出角度时不判）；
 /// peakRatio 超过 maxPeakRatio（ambiguous）。贴边的峰说明真值可能在扫描范围之外，分数再高也不可信。
 /// searchRadius 太小（1 左右）时窗口里没有不贴边的位置，每帧都判 at_search_edge；算子把它的下限设成 3。
 Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec& spec,

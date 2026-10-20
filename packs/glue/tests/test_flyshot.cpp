@@ -287,6 +287,27 @@ TEST_CASE("glue 飞拍：平移 ±40 px、旋转 ±2° —— 位姿误差 ≤ 0
   }
 }
 
+TEST_CASE("glue 飞拍：只加噪声（σ≈6）不转 —— 看得出角度的模板估出的角度 < 0.1°，中心不被假角度带偏") {
+  // 防的回归：1.0.0 在 0° 直接用原图、别的角度经双线性插值，插值相当于轻微平滑，噪声下非零角度的 NCC 反而更高：
+  // 这一帧报 0.25°（2026-10-17 样本集 σ = 6 时中位 0.63°），杠杆臂末端偏出零点几 mm，比不定位还差
+  const Files f = teach();
+  cv::Mat noisy;
+  render(Rigid{}).convertTo(noisy, CV_32F);
+  cv::Mat noise(noisy.size(), CV_32F);
+  cv::RNG rng(101);
+  rng.fill(noise, cv::RNG::NORMAL, 0.0, 6.0);
+  noisy += noise;
+  noisy.convertTo(noisy, CV_8U);
+  const Out o = run(flyshotGraph(f, false), noisy);
+  REQUIRE(o.status == "ok");
+  INFO(o.pose.dump());
+  CHECK(o.pose["ok"] == true);
+  CHECK(o.pose["angleObservable"] == true); // 角度是估出来的，不是「看不出」被置 0
+  CHECK(std::fabs(o.pose["angle"].get<double>()) < 0.1);
+  CHECK(std::fabs(o.pose["offset"][0].get<double>()) <= 0.1);
+  CHECK(std::fabs(o.pose["offset"][1].get<double>()) <= 0.1);
+}
+
 TEST_CASE("glue 飞拍：模板在图上根本没有 —— pose.ok = false，全部站 pose_fail，不是执行错误") {
   const Files f = teach();
   const Out o = run(flyshotGraph(f, false), render(Rigid{}, /*part=*/false));
@@ -391,8 +412,10 @@ TEST_CASE(
   CHECK(outside.pose["reason"] == "at_angle_edge");
 }
 
-TEST_CASE("glue 飞拍：圆孔模板看不出角度 —— 小转角、平移的帧照常成功，不判 at_angle_edge，中心准") {
-  // 防的回归：旋转对称的模板各角度分数几乎一样，噪声挑到扫描端点就判 at_angle_edge（合成图上大半帧失败），
+TEST_CASE(
+    "glue 飞拍：圆孔模板看不出角度 —— angle 报 0、angleObservable = false，平移照常求、中心准，不判 at_angle_edge") {
+  // 防的回归：旋转对称的模板各角度分数几乎一样，以前照样挑一个角度报出来（这几帧上 0.75…3°），
+  // 宿主按这个假角度绕模板中心转测量点，杠杆臂一长就偏出零点几 mm；更早还会因为挑到扫描端点判 at_angle_edge。
   // 而设计里定位特征首选的就是孔
   const Files f = teach();
   const auto hole = f.dir / "hole.png";
@@ -407,6 +430,8 @@ TEST_CASE("glue 飞拍：圆孔模板看不出角度 —— 小转角、平移�
     REQUIRE(o.status == "ok");
     INFO(o.pose.dump());
     CHECK(o.pose["ok"] == true);
+    CHECK(o.pose["angleObservable"] == false);
+    CHECK(o.pose["angle"].get<double>() == 0.0);
     const P2 want = T.apply(teachCenter);
     CHECK(std::fabs(o.pose["center"][0].get<double>() - want.x) <= 0.3);
     CHECK(std::fabs(o.pose["center"][1].get<double>() - want.y) <= 0.3);

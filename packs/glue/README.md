@@ -178,16 +178,24 @@ io.load_image ─→ glue.locate ─→ glue.station_calipers ←─ image.load_
 
 | type | data |
 |---|---|
-| `glue.Pose2D` | `ok`、`reason`（成功为空）、`message`、`score`、`peakRatio`、`angle`（度，屏幕上顺时针为正）、`center`、`teachCenter`、`offset`、`templateSize`、`minScore`、`maxPeakRatio`；`T(p) = R(angle)·(p − teachCenter) + center` 把示教图坐标映射到这一帧 |
+| `glue.Pose2D` | `ok`、`reason`（成功为空）、`message`、`score`、`peakRatio`、`angle`（度，屏幕上顺时针为正）、`angleObservable`、`center`、`teachCenter`、`offset`、`templateSize`、`minScore`、`maxPeakRatio`；`T(p) = R(angle)·(p − teachCenter) + center` 把示教图坐标映射到这一帧 |
 | `glue.StationMeasure` | `count`、`unit`、`poseGiven`、`poseOk`、`counts{ok, noInner, noBead, incompleteBead, poseFail, outOfImage}`、`calib`，逐站对齐：`ids[]`、`point[]`、`normal[]`（这一帧里的）、`status[]`（ok / no_inner / no_bead / incomplete_bead / pose_fail / out_of_image）、`inner[]` / `near[]` / `far[]`（沿法向的偏移 px）、`innerNear[]` / `innerCenter[]` / `width[]`（按 `unit`）、`innerNearPx[]` / `innerCenterPx[]` / `widthPx[]`、`innerContrast[]`、`beadContrast[]`；不成立的是 `null` |
 
 **失败语义**：定位不过质量门时 `pose.ok = false`，`reason` 按顺序取先命中的：`flat_template`（模板没纹理）、`out_of_image`（示教框离图边不到 2 px，或搜索区落出图外）、
 `low_score`（低于 `minScore`）、`at_search_edge`（峰离搜索窗边 ≤ 1 px，真值可能超出 `searchRadius`；实际可用偏移约 `searchRadius` − 2，下限 3）、
-`at_angle_edge`（细扫后的转角超出 ±`angleRange`；角度两端外各多扫一步作护栏，圆孔这类看不出角度的模板不判、角度夹回范围内）、
+`at_angle_edge`（细扫后的转角超出 ±`angleRange`；角度两端外各多扫一步作护栏，看不出角度的模板不判）、
 `ambiguous`（`peakRatio` > `maxPeakRatio`）。`peakRatio` = 最终角度的搜索窗里主峰之外最高的独立峰（突起度 ≥ 0.02 的局部极大）/ 主峰分数，
 主峰自己的侧坡再宽也不算；没有别的独立峰时为 0。1.1.0 起两道贴边门总是开着（1.0.0 下贴边、分数够的帧算成功），`maxPeakRatio` 默认 1 不判。
 逐点卡尺全部 `pose_fail`（错误即值，宿主报定位失败）；
 内边没找到是 `no_inner`（测不了），找到内边但没有胶是 `no_bead`（断胶的证据）。胶边被窗口截断是 `incomplete_bead`，宿主应作为无效量测处理，不能算断胶或 OK。纯色/低对比度模板返回 `pose.ok=false`。
+
+
+**角度**：搜索区与模板先做同样的 σ = 1 px 高斯平滑，每个角度（含 0°）走同一条三次插值旋转再算 NCC，噪声不会把角度推离 0
+（1.1.0 之前 0° 用原图、别的角度经双线性插值，插值的平滑让噪声下非零角度分数更高：2026-10-17 样本集只加 σ = 6 噪声时角度中位 0.63°）。
+各角度分数差不出来时（粗扫最高与最低分之差 < clamp(4 ×（1 − 最高分）, 0.004, 0.02)：圆孔这类旋转对称的模板，或真实图上角度约束太弱的小窗）
+`angle` 报 0、`angleObservable = false`，`center` 是 0° 上最好的平移。**杠杆臂长（模板离测量点远）的宿主必须把 `angleObservable = false`
+当作「转角没补偿」处理**（例如报定位不足、或只在杠杆臂允许的转角误差内采信），不能当成「零件没转」。`angleRange = 0`（只找平移）时不扫角度，
+`angleObservable` 恒为 true。
 
 ## 叠画（lyflow.overlay2d 的 role）
 

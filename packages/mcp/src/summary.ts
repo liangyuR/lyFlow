@@ -118,6 +118,8 @@ export function assessment(value: unknown): Record<string, unknown> {
       message: d['message'] || null,
       score: d['score'] ?? null,
       peakRatio: d['peakRatio'] ?? null,
+      // false：看不出角度，angle 报 0、转角没补偿（不是「零件没转」）
+      angleObservable: typeof d['angleObservable'] === 'boolean' ? d['angleObservable'] : null,
     };
   }
   if (type === 'glue.PathInfo') {

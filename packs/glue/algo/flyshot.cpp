@@ -13,10 +13,18 @@ namespace {
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 /// 峰离搜索窗边 ≤ 1 px 判贴边，所以示教框至少要离图边这么远（px）。
 constexpr double kBorderMin = 2.0;
+/// 匹配前对搜索区和模板做同样的高斯平滑（σ，px）。每个角度（含 0°）都经同一次三次插值旋转，但插值在非零角度上
+/// 仍相当于再平滑一点、在 0° 上是原样拷贝；白噪声下平滑过的那几个角度 NCC 反而更高，噪声会把角度推离 0
+/// （σ = 6 的纯噪声帧：220 px 模板 0.25°，2026-10-17 样本集 96 px 模板中位 0.63°）。先平滑掉单像素噪声后插值几乎
+/// 不再改变图像，同样的帧上降到 ≤ 0.004° / P95 0.06°（双线性 + 预平滑仍有 0.46°，所以用三次插值）。
+/// 平移的亚像素精度不受影响（两边平滑一样，峰不偏）。
+constexpr double kPreSmoothSigma = 1.0;
 /// 看不看得出角度：粗扫各角度（含护栏）里最高分与最低分之差，要超过这一帧本身的失配（1 − 最高分）的
-/// kAngleContrastGain 倍，夹在 [kAngleContrastMin, kAngleContrastMax] 里。圆孔这类旋转对称的模板差值与噪声同级
-/// （合成图实测差 ≤ 0.0031、失配 0.0013…0.0039）；2026-10-17 样本集上 96 px 模板转 3.4° 时差 0.0055…0.10、
-/// 失配 ≤ 0.0005。
+/// kAngleContrastGain 倍，夹在 [kAngleContrastMin, kAngleContrastMax] 里；看不出时角度报 0、angleObservable = false。
+/// 预平滑之后圆孔模板的差只剩 0.00015 左右（之前 ≤ 0.0036，是插值造出来的）。下限 0.004 现在拦的是「真实模板
+/// 角度约束太弱」：2026-10-17 样本集 36 个选中的 96 px 模板里有 5 个差 0.001…0.004（转不转、加不加噪声都是），
+/// 整图转 ±1…2° 时照估的角度误差最大 0.14…0.67°；三对复拍（真实转角≈0）里两对差 0.0022 / 0.0037，照估会报出
+/// 0.25° 的假角度，只找平移反而更准。别的模板转 ±2° 时差 0.005…0.06。
 /// 差值过了上限总算看得出：转角远超范围时分数掉得多、失配也大，不能让它按比例躲过 at_angle_edge。
 constexpr double kAngleContrastGain = 4.0;
 constexpr double kAngleContrastMin = 0.004;
@@ -150,8 +158,28 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
   const cv::Rect roi = want & cv::Rect(0, 0, gray.cols, gray.rows);
   if (roi.width < tw + 2 || roi.height < th + 2)
     return fail("out_of_image", "搜索区落在图外，或者比模板还小");
-  const cv::Mat sub = gray(roi);
   const P2 rc((roi.width - 1) / 2.0, (roi.height - 1) / 2.0);
+  // 搜索区和模板做同样的预平滑（见 kPreSmoothSigma），在浮点上做，不再量化回 u8（量化误差又是白噪声）。
+  // 核半径 pad = 4σ。搜索区按外扩 pad 的一块平滑再裁回来，边上用的是真实邻域；模板只有它自己，平滑后四边各裁掉 pad，
+  // 剩下的部分与图上同一处平滑出来的完全一样。中心不变（对称地裁），太小的模板不裁。
+  const int pad = static_cast<int>(std::ceil(4.0 * kPreSmoothSigma));
+  const cv::Size kernel(2 * pad + 1, 2 * pad + 1);
+  cv::Mat sub, smoothTmpl;
+  {
+    const cv::Rect padded =
+        cv::Rect(roi.x - pad, roi.y - pad, roi.width + 2 * pad, roi.height + 2 * pad) &
+        cv::Rect(0, 0, gray.cols, gray.rows);
+    cv::Mat f;
+    gray(padded).convertTo(f, CV_32F);
+    cv::GaussianBlur(f, f, kernel, kPreSmoothSigma, kPreSmoothSigma, cv::BORDER_REPLICATE);
+    sub = f(roi - padded.tl()).clone();
+    tmpl.convertTo(smoothTmpl, CV_32F);
+    cv::GaussianBlur(smoothTmpl, smoothTmpl, kernel, kPreSmoothSigma, kPreSmoothSigma,
+                     cv::BORDER_REPLICATE);
+    const int cut = (tw - 2 * pad >= 8 && th - 2 * pad >= 8) ? pad : 0;
+    smoothTmpl = smoothTmpl(cv::Rect(cut, cut, tw - 2 * cut, th - 2 * cut));
+  }
+  const int cw = smoothTmpl.cols, ch = smoothTmpl.rows;
 
   /// 一个角度上的匹配：搜索窗（转过的图里、按模板左上角计）里的 NCC 响应与其中的最高点。
   struct Match {
@@ -166,33 +194,30 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
   auto matchAt = [&](double phiDeg) {
     Match m;
     m.phi = phiDeg;
-    // rot 不能先指向 sub：warpAffine 会写进共享的缓冲区，把输入图本身改掉
-    cv::Mat rot;
-    if (phiDeg == 0.0) {
-      rot = sub;
-    } else {
-      const double a = phiDeg * CV_PI / 180.0;
-      const double c = std::cos(a), s = std::sin(a);
-      const cv::Matx23d M(c, -s, rc.x - c * rc.x + s * rc.y, s, c, rc.y - s * rc.x - c * rc.y);
-      cv::warpAffine(sub, rot, M, sub.size(), cv::INTER_LINEAR, cv::BORDER_REPLICATE);
-    }
-    cv::Mat full;
-    cv::matchTemplate(rot, tmpl, full, cv::TM_CCOEFF_NORMED);
-    // 只认模板中心离示教位置不超过 searchRadius 的匹配（转过的图里，示教中心也跟着转）
-    const P2 tcRoi = pose.teachCenter - P2(roi.x, roi.y);
     const double a = phiDeg * CV_PI / 180.0;
+    const double c = std::cos(a), s = std::sin(a);
+    // 只认模板中心离示教位置不超过 searchRadius 的匹配（转过的图里，示教中心也跟着转）。
+    // 响应图（整块搜索区上的）里只有这一窗有用，旋转与 NCC 都只算盖住它的那一块
+    const P2 tcRoi = pose.teachCenter - P2(roi.x, roi.y);
     const P2 d = tcRoi - rc;
-    const P2 want(std::cos(a) * d.x - std::sin(a) * d.y + rc.x - (tw - 1) / 2.0,
-                  std::sin(a) * d.x + std::cos(a) * d.y + rc.y - (th - 1) / 2.0);
+    const P2 want(c * d.x - s * d.y + rc.x - (cw - 1) / 2.0,
+                  s * d.x + c * d.y + rc.y - (ch - 1) / 2.0);
+    const int fullCols = sub.cols - cw + 1, fullRows = sub.rows - ch + 1;
     const int u0 = std::max(0, static_cast<int>(std::floor(want.x - spec.searchRadius)));
     const int v0 = std::max(0, static_cast<int>(std::floor(want.y - spec.searchRadius)));
-    const int u1 = std::min(full.cols - 1, static_cast<int>(std::ceil(want.x + spec.searchRadius)));
-    const int v1 = std::min(full.rows - 1, static_cast<int>(std::ceil(want.y + spec.searchRadius)));
+    const int u1 = std::min(fullCols - 1, static_cast<int>(std::ceil(want.x + spec.searchRadius)));
+    const int v1 = std::min(fullRows - 1, static_cast<int>(std::ceil(want.y + spec.searchRadius)));
     if (u1 < u0 || v1 < v0) {
       m.loc = want;
       return m;
     }
-    m.window = full(cv::Rect(u0, v0, u1 - u0 + 1, v1 - v0 + 1));
+    // 0° 也走同一次 warpAffine（单位变换，结果就是原样拷贝），不给 0° 单独开一条路
+    const cv::Matx23d M(c, -s, rc.x - c * rc.x + s * rc.y - u0, s, c,
+                        rc.y - s * rc.x - c * rc.y - v0);
+    cv::Mat rot;
+    cv::warpAffine(sub, rot, M, cv::Size(u1 - u0 + cw, v1 - v0 + ch), cv::INTER_CUBIC,
+                   cv::BORDER_REPLICATE);
+    cv::matchTemplate(rot, smoothTmpl, m.window, cv::TM_CCOEFF_NORMED);
     const cv::Mat& res = m.window;
     double best = 0;
     cv::Point at;
@@ -244,15 +269,17 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
     if (bestK > 0 && bestK < 4) {
       phi += fine * parabolaPeak(fineScores[bestK - 1], fineScores[bestK], fineScores[bestK + 1]);
     }
-    // 圆孔这类旋转对称的模板看不出角度：各角度分数几乎一样，噪声挑哪个都行，不能据此判贴边，
-    // 角度夹回 ±angleRange 里照常输出
-    const bool angleObservable =
+    // 圆孔这类旋转对称的模板、或角度约束太弱的模板看不出角度：各角度分数几乎一样，挑出来的角度是随机的。
+    // 不报这个角度，也不据此判贴边：角度报 0、angleObservable = false，位置取 0° 上最好的平移
+    const bool observable =
         best - lowest >= std::clamp(kAngleContrastGain * (1.0 - best), kAngleContrastMin,
                                     kAngleContrastMax);
-    if (std::fabs(phi) > spec.angleRange && angleObservable)
+    if (!observable) {
+      phi = 0.0;
+      pose.angleObservable = false;
+    } else if (std::fabs(phi) > spec.angleRange) {
       angleOff = true;
-    else
-      phi = std::clamp(phi, -spec.angleRange, spec.angleRange);
+    }
   }
   const Match final = matchAt(phi);
   pose.score = final.score;
@@ -263,7 +290,7 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
     back.angleDeg = -phiDeg;
     return back.rotate(q - rc) + rc + P2(roi.x, roi.y);
   };
-  const P2 halfT((tw - 1) / 2.0, (th - 1) / 2.0);
+  const P2 halfT((cw - 1) / 2.0, (ch - 1) / 2.0);
   pose.center = toImage(phi, final.loc + halfT);
   pose.angleDeg = -phi;
 
