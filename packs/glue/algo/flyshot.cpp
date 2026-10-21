@@ -86,7 +86,7 @@ std::vector<Peak> prominentPeaks(const cv::Mat& response, double minProminence) 
   std::sort(order.begin(), order.end(),
             [&](int a, int b) { return v[a] > v[b] || (v[a] == v[b] && a < b); });
   std::vector<int> parent(static_cast<std::size_t>(count), -1); // -1 = 还没加进来
-  std::vector<int> top(static_cast<std::size_t>(count));         // 块的根上记这块的峰顶
+  std::vector<int> top(static_cast<std::size_t>(count));        // 块的根上记这块的峰顶
   auto find = [&](int i) {
     while (parent[i] != i) {
       parent[i] = parent[parent[i]];
@@ -164,15 +164,17 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
   // 贴边门会让它永远失败；直接说清楚是示教框放得不对
   if (spec.anchor.x < kBorderMin || spec.anchor.y < kBorderMin ||
       spec.anchor.x + tw > gray.cols - kBorderMin || spec.anchor.y + th > gray.rows - kBorderMin) {
-    return fail("out_of_image", "模板示教框离图边不到 2 px：零件往外一动模板就出图，请示教时离图边留出余量");
+    return fail("out_of_image",
+                "模板示教框离图边不到 2 px：零件往外一动模板就出图，请示教时离图边留出余量");
   }
   // 带外圈的模板（示教框四边各外扩 templatePad）是从同样大小的示教图上裁的，放不进这一帧说明示教框离图边
   // 不到 templatePad：外圈裁不全（或帧与示教图不是同一个相机画幅），同样判 out_of_image
   if (spec.anchor.x < tp || spec.anchor.y < tp || spec.anchor.x + tw + tp > gray.cols ||
       spec.anchor.y + th + tp > gray.rows) {
-    return fail("out_of_image",
-                "带外圈的模板（示教框四边各外扩 templatePad px）放不进这一帧：示教框离图边不到 templatePad，"
-                "请示教时离图边留出余量");
+    return fail(
+        "out_of_image",
+        "带外圈的模板（示教框四边各外扩 templatePad px）放不进这一帧：示教框离图边不到 templatePad，"
+        "请示教时离图边留出余量");
   }
   // 模板旋转后外接圆的半径 + 搜索半径：任何允许的位姿下模板都完整落在这一块里
   const double half = spec.searchRadius + 0.5 * std::hypot(tw, th) + 4.0;
@@ -218,11 +220,11 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
   /// 一个角度上的匹配：搜索窗（转过的图里、按模板左上角计）里的 NCC 响应与其中的最高点。
   struct Match {
     double phi = 0;
-    double score = 0;  ///< 最高点（整像素）的 NCC
-    double peak = 0;   ///< 抛物线插值到亚像素峰顶的 NCC：比各角度时用它，不受峰落在整像素哪一侧影响
-    P2 loc;            ///< 最高点，含亚像素插值（转过的图里模板左上角）
+    double score = 0; ///< 最高点（整像素）的 NCC
+    double peak = 0;  ///< 抛物线插值到亚像素峰顶的 NCC：比各角度时用它，不受峰落在整像素哪一侧影响
+    P2 loc;           ///< 最高点，含亚像素插值（转过的图里模板左上角）
     bool atEdge = true; ///< 最高点离搜索窗边 ≤ 1 px；没有搜索窗也算
-    cv::Mat window;    ///< 搜索窗里的响应
+    cv::Mat window;     ///< 搜索窗里的响应
   };
 
   // 把搜索区转 phi 度（绕它的中心），在转过的图里做 NCC：物体在原图里就是转了 −phi。
@@ -284,9 +286,11 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
     m.score = std::isfinite(best) ? best : 0.0;
     m.peak = m.score;
     if (at.x > 0 && at.x + 1 < res.cols)
-      m.peak += parabolaRise(res.at<float>(at.y, at.x - 1), best, res.at<float>(at.y, at.x + 1), dx);
+      m.peak +=
+          parabolaRise(res.at<float>(at.y, at.x - 1), best, res.at<float>(at.y, at.x + 1), dx);
     if (at.y > 0 && at.y + 1 < res.rows)
-      m.peak += parabolaRise(res.at<float>(at.y - 1, at.x), best, res.at<float>(at.y + 1, at.x), dy);
+      m.peak +=
+          parabolaRise(res.at<float>(at.y - 1, at.x), best, res.at<float>(at.y + 1, at.x), dy);
     return m;
   };
 
@@ -364,8 +368,8 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
     // 例外是最高分落在护栏上（±(n·step + angleStep)，已出 ±angleRange）、又比 0° 高出一截（见 kOffScanFraction）：
     // 分数是朝扫描范围外一路升上去的，不是平的，真实转角多半在范围外，0° 上的平移也跟着偏（样本集 +4° 时偏 7…13 px），
     // 判 at_angle_edge（angle 报细扫出的角度）
-    const double contrastMin = std::clamp(kAngleContrastGain * (1.0 - best), kAngleContrastMin,
-                                          kAngleContrastMax);
+    const double contrastMin =
+        std::clamp(kAngleContrastGain * (1.0 - best), kAngleContrastMin, kAngleContrastMax);
     const bool observable = best - lowest >= contrastMin;
     if (!observable) {
       pose.angleObservable = false;
@@ -407,7 +411,8 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
   if (angleOff)
     return fail("at_angle_edge", "细扫后的转角超出 angleRange：真实转角可能在扫描范围之外");
   if (pose.peakRatio > spec.maxPeakRatio) {
-    return fail("ambiguous", "搜索区里还有一处几乎一样像的匹配（peakRatio 超过 maxPeakRatio），位置不唯一");
+    return fail("ambiguous",
+                "搜索区里还有一处几乎一样像的匹配（peakRatio 超过 maxPeakRatio），位置不唯一");
   }
   pose.ok = true;
   return pose;

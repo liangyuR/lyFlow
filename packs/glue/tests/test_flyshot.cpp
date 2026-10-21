@@ -320,8 +320,7 @@ TEST_CASE(
   }
 }
 
-TEST_CASE(
-    "glue 飞拍：96 px 模板、只平移半个像素、不转 —— 看得出角度时估出的角度 < 0.15°") {
+TEST_CASE("glue 飞拍：96 px 模板、只平移半个像素、不转 —— 看得出角度时估出的角度 < 0.15°") {
   // 防的回归：各角度不在同一个亚像素相位上比时，物体落在半像素上 0° 的分数被压低得多、别的角度转过去的小数部分
   // 不同、压低得少，最好的角度被推到恰好对齐整像素的那个。这个框（开口右边的竖边与胶条的一端）上
   // 1ffdc06 报 0.61°，只去掉相位对齐报 0.32°，这一版 ≤ 0.07°（复拍对 S001→S034 的 0.49° 也是这个原因）
@@ -425,7 +424,8 @@ TEST_CASE(
             const double px = x - 0.5 + (i + 0.5) / kSub - tx - kAx;
             const double py = y - 0.5 + (j + 0.5) / kSub - ty - kAy;
             double v = 160; // 示教框里的特征：暗十字 + 暗圆盘
-            if (std::hypot(px - 24, py - 24) < 8 || (std::fabs(px - 24) < 1.5 && py > 6 && py < 42) ||
+            if (std::hypot(px - 24, py - 24) < 8 ||
+                (std::fabs(px - 24) < 1.5 && py > 6 && py < 42) ||
                 (std::fabs(py - 24) < 1.5 && px > 6 && px < 42))
               v = 60;
             if (px < -0.5 - gap || py < -0.5 - gap) // 示教框左、上两边外 gap px 起的暗半平面
@@ -447,9 +447,9 @@ TEST_CASE(
   const P2 teachCenter = P2(kAx, kAy) + P2((kBox - 1) / 2.0, (kBox - 1) / 2.0);
   for (const double gap : {0.0, 0.5, 1.5}) {
     CAPTURE(gap);
-    const cv::Mat tmpl = frame(gap, 0, 0, 1)(cv::Rect(kAx - kPad, kAy - kPad, kBox + 2 * kPad,
-                                                      kBox + 2 * kPad))
-                             .clone();
+    const cv::Mat tmpl =
+        frame(gap, 0, 0, 1)(cv::Rect(kAx - kPad, kAy - kPad, kBox + 2 * kPad, kBox + 2 * kPad))
+            .clone();
     for (const double range : {0.0, 3.0}) {
       CAPTURE(range);
       lyflow::packs::glue::LocateSpec spec;
@@ -464,8 +464,8 @@ TEST_CASE(
                       << ", " << pose.center.y);
         CHECK(pose.ok);
         CHECK(pose.teachCenter.x == teachCenter.x); // teachCenter 按示教框算，不含外圈
-        CHECK(std::hypot(pose.center.x - teachCenter.x - t.x, pose.center.y - teachCenter.y - t.y) <=
-              0.3);
+        CHECK(std::hypot(pose.center.x - teachCenter.x - t.x,
+                         pose.center.y - teachCenter.y - t.y) <= 0.3);
       }
     }
   }
@@ -490,9 +490,11 @@ TEST_CASE(
   CHECK(loadErrors(4).empty());
 
   const auto small = f.dir / "small.png";
-  writeTemplate(small, render(Rigid{}), cv::Rect(650, 470, 8, 20)); // 8 px 宽，去掉两边各 4 px 后宽 0
-  const Json doc = withLocate(flyshotGraph(f, false),
-                              {{"template", small.u8string()}, {"anchor", {654, 474}}, {"templatePad", 4}});
+  writeTemplate(small, render(Rigid{}),
+                cv::Rect(650, 470, 8, 20)); // 8 px 宽，去掉两边各 4 px 后宽 0
+  const Json doc =
+      withLocate(flyshotGraph(f, false),
+                 {{"template", small.u8string()}, {"anchor", {654, 474}}, {"templatePad", 4}});
   Session s(doc, {}, {}, false, 0, false,
             {exec::InjectedInput{"n_load", "image", Data::image(imageOf(render(Rigid{})))}});
   const Json e = s.wait().nodeEvent("n_loc", "error");
@@ -814,8 +816,8 @@ TEST_CASE("glue 飞拍：示教框离图边不到 2 px —— 判 out_of_image�
   for (const int x : {3, 300 - 70 - 3, 4, 300 - 70 - 4}) {
     CAPTURE(x);
     spec.anchor = P2(x, 60);
-    const auto pose = lyflow::packs::glue::locateTemplate(
-        img, teachImg(cv::Rect(x, 60, 78, 78)).clone(), spec);
+    const auto pose =
+        lyflow::packs::glue::locateTemplate(img, teachImg(cv::Rect(x, 60, 78, 78)).clone(), spec);
     const bool tooClose = x < 4 || x + 70 > 300 - 4;
     CHECK(pose.ok == !tooClose);
     CHECK(pose.reason == (tooClose ? "out_of_image" : ""));

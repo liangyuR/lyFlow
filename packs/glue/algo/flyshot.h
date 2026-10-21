@@ -40,12 +40,13 @@ struct Pose2D {
 constexpr int kLocateSmoothRadius = 4;
 
 struct LocateSpec {
-  P2 anchor{0, 0};          ///< 示教框（内框，不含外圈）左上角像素在示教图上的位置
+  P2 anchor{0, 0}; ///< 示教框（内框，不含外圈）左上角像素在示教图上的位置
   /// 模板图带的外圈宽度（px）：tmpl = 示教框四边各外扩 templatePad 从示教图上裁的一块，示教框 = tmpl 去掉四边各
   /// templatePad。外圈只给预平滑当真实邻域用，匹配、各道门、teachCenter 都只按示教框算。0 = 模板就是示教框（旧图）。
   int templatePad = 0;
-  double searchRadius = 80; ///< 模板中心最多偏开这么远（px）；峰离窗边 ≤ 1 px 判贴边，实际可用约 searchRadius − 2
-  double angleRange = 3;    ///< 角度扫描 ±range（度）
+  double searchRadius =
+      80; ///< 模板中心最多偏开这么远（px）；峰离窗边 ≤ 1 px 判贴边，实际可用约 searchRadius − 2
+  double angleRange = 3; ///< 角度扫描 ±range（度）
   double angleStep = 0.5;
   double minScore = 0.6;
   double maxPeakRatio = 1; ///< peakRatio 超过它判 ambiguous；1 = 不判

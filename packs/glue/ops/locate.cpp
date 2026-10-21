@@ -16,7 +16,8 @@ namespace {
 
 std::string templatePadTooSmall() {
   return "templatePad 要么是 0（模板就是示教框），要么不小于预平滑核半径 " +
-         std::to_string(kLocateSmoothRadius) + " px：外圈更窄时示教框边上的像素平滑仍要按边延伸，框外有强边时平移照样偏";
+         std::to_string(kLocateSmoothRadius) +
+         " px：外圈更窄时示教框边上的像素平滑仍要按边延伸，框外有强边时平移照样偏";
 }
 
 Status loadTemplate(const ParamView& params, cv::Mat* out) {
@@ -101,11 +102,10 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     corners.push_back(Px{p.x, p.y});
   }
   Overlay2D ov;
-  const std::string label =
-      "定位 " + fmt(pose.score, 2) +
-      (pose.ok                       ? ""
-       : pose.reason == "low_score" ? "（低于 " + fmt(spec.minScore, 2) + "）"
-                                     : "（" + pose.reason + "）");
+  const std::string label = "定位 " + fmt(pose.score, 2) +
+                            (pose.ok                      ? ""
+                             : pose.reason == "low_score" ? "（低于 " + fmt(spec.minScore, 2) + "）"
+                                                          : "（" + pose.reason + "）");
   ov.polyline(pose.ok ? "station" : "missing", corners, /*closed=*/true, label);
   ov.points(pose.ok ? "part" : "outlier", {Px{pose.center.x, pose.center.y}});
   if (!pose.ok)
@@ -199,14 +199,16 @@ void registerLocate(Registry& r) {
   tmpl.type = ParamType::Path;
   tmpl.tuningRole = "input";
   tmpl.label = "Template";
-  tmpl.doc = "模板图像：示教时从示教图上把示教框四边各外扩 templatePad px 裁下的一块（templatePad = 0 时就是示教框）。"
-             "相对路径相对于图文件所在目录。";
+  tmpl.doc =
+      "模板图像：示教时从示教图上把示教框四边各外扩 templatePad px 裁下的一块（templatePad = 0 时就是示教框）。"
+      "相对路径相对于图文件所在目录。";
   tmpl.def = Value::text("");
   tmpl.mode = "open";
   tmpl.filters = {FileFilter{"Image", {"png", "jpg", "jpeg", "bmp", "tif", "tiff", "pgm"}},
                   FileFilter{"All Files", {"*"}}};
-  Param anchor = vec2Param("anchor", "Anchor", 0, 0, "px", {"X", "Y"},
-                           "示教框（不含外圈）左上角像素在示教图上的位置；模板文件的左上角在 anchor − templatePad。");
+  Param anchor = vec2Param(
+      "anchor", "Anchor", 0, 0, "px", {"X", "Y"},
+      "示教框（不含外圈）左上角像素在示教图上的位置；模板文件的左上角在 anchor − templatePad。");
   Param tpad;
   tpad.name = "templatePad";
   tpad.type = ParamType::Int;
@@ -227,18 +229,20 @@ void registerLocate(Registry& r) {
   radius.min = 3.0;
   Param range = floatParam(
       "angleRange", "Angle Range", 3.0, "°",
-      "角度扫描范围 ±range；0 = 只找平移。模板看不出角度时也只补平移，angleObservable = false。", true);
+      "角度扫描范围 ±range；0 = 只找平移。模板看不出角度时也只补平移，angleObservable = false。",
+      true);
   range.min = 0.0;
   range.max = 45.0;
-  Param step = floatParam("angleStep", "Angle Step", 0.5, "°",
-                          "角度扫描步长（结果按抛物线插值到步长以下）；大于 angleRange 时按 angleRange 扫。", true);
+  Param step = floatParam(
+      "angleStep", "Angle Step", 0.5, "°",
+      "角度扫描步长（结果按抛物线插值到步长以下）；大于 angleRange 时按 angleRange 扫。", true);
   step.min = 0.05;
   Param minScore = floatParam("minScore", "Min Score", 0.6, "", "分数低于它判定位失败。");
   minScore.min = -1.0;
   minScore.max = 1.0;
-  Param maxPeak = floatParam("maxPeakRatio", "Max Peak Ratio", 1.0, "",
-                             "peakRatio（主峰之外最高的独立峰 / 主峰分数）超过它判 ambiguous；1 = 不判。",
-                             true);
+  Param maxPeak = floatParam(
+      "maxPeakRatio", "Max Peak Ratio", 1.0, "",
+      "peakRatio（主峰之外最高的独立峰 / 主峰分数）超过它判 ambiguous；1 = 不判。", true);
   maxPeak.min = 0.0;
   maxPeak.max = 1.0;
   op.params = {tmpl, anchor, radius, range, step, minScore, maxPeak, tpad};
