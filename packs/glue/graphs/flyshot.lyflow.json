@@ -139,7 +139,7 @@
     "template": {
       "type": "path",
       "label": "模板",
-      "doc": "这一帧（拍照点 k）的定位模板，示教时从示教图上裁下。",
+      "doc": "这一帧（拍照点 k）的定位模板，示教时从示教图上把示教框四边各外扩 templatePad px 裁下。",
       "default": "",
       "binds": [
         "n_locate.template"
@@ -149,7 +149,7 @@
     "anchor": {
       "type": "vec2f",
       "label": "模板锚点",
-      "doc": "模板左上角在示教图上的位置（px）。",
+      "doc": "示教框（不含外圈）左上角在示教图上的位置（px）。",
       "default": [
         0,
         0
@@ -162,6 +162,18 @@
         "X",
         "Y"
       ]
+    },
+    "templatePad": {
+      "type": "int",
+      "label": "模板外圈",
+      "doc": "模板文件四边比示教框各多出的外圈宽度（px）：0 = 模板就是示教框（旧模板）；新示教的模板带 4 px 外圈，填 4。",
+      "default": 0,
+      "binds": [
+        "n_locate.templatePad"
+      ],
+      "unit": "px",
+      "min": 0,
+      "max": 16
     },
     "stations": {
       "type": "path",

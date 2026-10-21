@@ -110,7 +110,19 @@ export function assessment(value: unknown): Record<string, unknown> {
   const o = object(value);
   const d = object(o['data']);
   const type = o['type'];
-  if (type === 'glue.Pose2D' || type === 'glue.PathInfo') {
+  if (type === 'glue.Pose2D') {
+    // Pose2D 有自己的原因码（low_score / ambiguous / at_search_edge …），reason 给它；中文说明放 message
+    return {
+      detectionStatus: typeof d['ok'] !== 'boolean' ? 'unknown' : d['ok'] ? 'valid' : 'invalid',
+      reason: d['reason'] || null,
+      message: d['message'] || null,
+      score: d['score'] ?? null,
+      peakRatio: d['peakRatio'] ?? null,
+      // false：看不出角度，angle 报 0、转角没补偿（不是「零件没转」）
+      angleObservable: typeof d['angleObservable'] === 'boolean' ? d['angleObservable'] : null,
+    };
+  }
+  if (type === 'glue.PathInfo') {
     return {
       detectionStatus: typeof d['ok'] !== 'boolean' ? 'unknown' : d['ok'] ? 'valid' : 'invalid',
       reason: d['message'] ?? null,
