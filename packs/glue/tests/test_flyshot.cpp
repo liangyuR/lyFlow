@@ -406,6 +406,100 @@ TEST_CASE("glue 飞拍：模板里唯一的特征贴着框边（离框边 < 4 px
   }
 }
 
+TEST_CASE(
+    "glue 飞拍：示教框外 0…1.5 px 紧挨着平行于框边的强暗边、模板带 4 px 外圈 —— 平移误差 ≤ 0.3 px（只找平移与扫 ±3° 都是）") {
+  // 防的回归：模板只有示教框自己时整块平滑、框外按框边像素延伸（BORDER_REPLICATE），搜索区却按真实邻域平滑，
+  // 框边上少了那条暗边的平滑尾巴，平移被拉偏：dcc726b 上离框边 0 px 时 0.61 px（±3° 时 0.65 px）、0.5 px 时
+  // 0.33…0.38 px，分数仍 > 0.96、照常成功。带外圈后示教框与图上同一处平滑得一样（无噪声、整像素平移时分数 1.00000）。
+  // 剩下的 ≤ 0.23 px 不是平滑造成的：暗边紧挨着框边时 NCC 峰两侧不对称，三点抛物线插值的峰顶偏向平坦一侧，
+  // 无噪声、整像素平移、分数 1.00000 时也偏 0.097 px；暗边离框边 10 px 时 ≤ 0.03 px
+  constexpr int kAx = 100, kAy = 80, kBox = 48, kPad = 4;
+  auto frame = [&](double gap, double tx, double ty, int seed) {
+    cv::Mat img(260, 320, CV_32F);
+    constexpr int kSub = 4;
+    for (int y = 0; y < img.rows; ++y) {
+      for (int x = 0; x < img.cols; ++x) {
+        double acc = 0;
+        for (int j = 0; j < kSub; ++j) {
+          for (int i = 0; i < kSub; ++i) {
+            const double px = x - 0.5 + (i + 0.5) / kSub - tx - kAx;
+            const double py = y - 0.5 + (j + 0.5) / kSub - ty - kAy;
+            double v = 160; // 示教框里的特征：暗十字 + 暗圆盘
+            if (std::hypot(px - 24, py - 24) < 8 || (std::fabs(px - 24) < 1.5 && py > 6 && py < 42) ||
+                (std::fabs(py - 24) < 1.5 && px > 6 && px < 42))
+              v = 60;
+            if (px < -0.5 - gap || py < -0.5 - gap) // 示教框左、上两边外 gap px 起的暗半平面
+              v = 30;
+            acc += v;
+          }
+        }
+        img.at<float>(y, x) = static_cast<float>(acc / (kSub * kSub));
+      }
+    }
+    cv::Mat noise(img.size(), CV_32F);
+    cv::RNG rng(seed);
+    rng.fill(noise, cv::RNG::NORMAL, 0.0, 1.0);
+    img += noise;
+    cv::Mat out;
+    img.convertTo(out, CV_8U);
+    return out;
+  };
+  const P2 teachCenter = P2(kAx, kAy) + P2((kBox - 1) / 2.0, (kBox - 1) / 2.0);
+  for (const double gap : {0.0, 0.5, 1.5}) {
+    CAPTURE(gap);
+    const cv::Mat tmpl = frame(gap, 0, 0, 1)(cv::Rect(kAx - kPad, kAy - kPad, kBox + 2 * kPad,
+                                                      kBox + 2 * kPad))
+                             .clone();
+    for (const double range : {0.0, 3.0}) {
+      CAPTURE(range);
+      lyflow::packs::glue::LocateSpec spec;
+      spec.anchor = P2(kAx, kAy);
+      spec.templatePad = kPad;
+      spec.searchRadius = 20;
+      spec.angleRange = range;
+      for (const P2 t : {P2(0, 0), P2(3.25, 2.5), P2(6.5, 4.75), P2(9.0, 7.0), P2(12.5, 10.25)}) {
+        CAPTURE(t.x);
+        const auto pose = lyflow::packs::glue::locateTemplate(frame(gap, t.x, t.y, 7), tmpl, spec);
+        INFO("score " << pose.score << " reason " << pose.reason << " center " << pose.center.x
+                      << ", " << pose.center.y);
+        CHECK(pose.ok);
+        CHECK(pose.teachCenter.x == teachCenter.x); // teachCenter 按示教框算，不含外圈
+        CHECK(std::hypot(pose.center.x - teachCenter.x - t.x, pose.center.y - teachCenter.y - t.y) <=
+              0.3);
+      }
+    }
+  }
+}
+
+TEST_CASE(
+    "glue 飞拍：templatePad —— 1…3 加载期判错；模板文件去掉外圈后没有示教框判 bad_param，不当成别的大小去匹配") {
+  // 防的回归：外圈比预平滑核半径窄时框边照样按边延伸、偏差还在，不能悄悄接受；模板文件与 templatePad 对不上
+  // （例如宿主把没带外圈的小模板配上 templatePad）时不能裁出空的或负尺寸的示教框
+  const Files f = teach();
+  auto loadErrors = [&](int pad) {
+    std::vector<std::string> paths;
+    const Json doc = withLocate(flyshotGraph(f, false), {{"templatePad", pad}});
+    for (const Json& d : Json::parse(exec::validateGraphJson(doc.dump(), {}))) {
+      if (d.value("severity", "") == "error")
+        paths.push_back(d.value("paramPath", ""));
+    }
+    return paths;
+  };
+  CHECK(loadErrors(0).empty());
+  CHECK(loadErrors(2) == std::vector<std::string>{"templatePad"});
+  CHECK(loadErrors(4).empty());
+
+  const auto small = f.dir / "small.png";
+  writeTemplate(small, render(Rigid{}), cv::Rect(650, 470, 8, 20)); // 8 px 宽，去掉两边各 4 px 后宽 0
+  const Json doc = withLocate(flyshotGraph(f, false),
+                              {{"template", small.u8string()}, {"anchor", {654, 474}}, {"templatePad", 4}});
+  Session s(doc, {}, {}, false, 0, false,
+            {exec::InjectedInput{"n_load", "image", Data::image(imageOf(render(Rigid{})))}});
+  const Json e = s.wait().nodeEvent("n_loc", "error");
+  CHECK(e["error"]["code"] == "bad_param");
+  CHECK(e["error"]["paramPath"] == "template");
+}
+
 TEST_CASE("glue 飞拍：模板在图上根本没有 —— pose.ok = false，全部站 pose_fail，不是执行错误") {
   const Files f = teach();
   const Out o = run(flyshotGraph(f, false), render(Rigid{}, /*part=*/false));
@@ -709,6 +803,20 @@ TEST_CASE("glue 飞拍：示教框离图边不到 2 px —— 判 out_of_image�
     const auto pose =
         lyflow::packs::glue::locateTemplate(img, img(cv::Rect(x, 60, 70, 70)).clone(), spec);
     const bool tooClose = x < 2 || x + 70 > 300 - 2;
+    CHECK(pose.ok == !tooClose);
+    CHECK(pose.reason == (tooClose ? "out_of_image" : ""));
+  }
+  // 带 4 px 外圈的模板：示教框离图边不到 4 px 时带外圈的模板放不进这一帧，同样判 out_of_image
+  // （外圈按示教图四边各镜像 4 px 后裁，模板大小总是对的）
+  spec.templatePad = 4;
+  cv::Mat teachImg;
+  cv::copyMakeBorder(img, teachImg, 4, 4, 4, 4, cv::BORDER_REFLECT);
+  for (const int x : {3, 300 - 70 - 3, 4, 300 - 70 - 4}) {
+    CAPTURE(x);
+    spec.anchor = P2(x, 60);
+    const auto pose = lyflow::packs::glue::locateTemplate(
+        img, teachImg(cv::Rect(x, 60, 78, 78)).clone(), spec);
+    const bool tooClose = x < 4 || x + 70 > 300 - 4;
     CHECK(pose.ok == !tooClose);
     CHECK(pose.reason == (tooClose ? "out_of_image" : ""));
   }

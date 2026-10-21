@@ -166,11 +166,12 @@ io.load_image ─→ glue.locate ─→ glue.station_calipers ←─ image.load_
   （宿主注入）      定位   pose     逐点卡尺          calib   工位标定
 ```
 
-顶层参数 `template`、`anchor`、`stations`、`calib` 由宿主逐帧给（拍照点 k 的模板、模板锚点、测量点文件、工位标定文件）。
+顶层参数 `template`、`anchor`、`stations`、`calib` 由宿主逐帧给（拍照点 k 的模板、模板锚点、测量点文件、工位标定文件）；
+`templatePad` 是模板文件的外圈宽度，新示教的模板填 4（见下面「模板文件」）。
 
 | id | 输入 → 输出 | 人要填的（其余在「高级」） |
 |---|---|---|
-| `glue.locate` 定位 | `image` → `pose: Record<glue.Pose2D>`、`score`、`overlay` | `template`（Path）、`anchor`（point）、`searchRadius`（80 px）、`minScore`（0.6）；高级：`angleRange`（3°）、`angleStep`（0.5°）、`maxPeakRatio`（1 = 不判） |
+| `glue.locate` 定位 | `image` → `pose: Record<glue.Pose2D>`、`score`、`overlay` | `template`（Path）、`anchor`（point）、`searchRadius`（80 px）、`minScore`（0.6）；高级：`angleRange`（3°）、`angleStep`（0.5°）、`maxPeakRatio`（1 = 不判）、`templatePad`（0 px） |
 | `glue.station_calipers` 逐点卡尺 | `image`、`pose?`、`calib?` → `measure: Record<glue.StationMeasure>`、`coverage`、`distanceMean`、`overlay` | `stations`（Path）、`searchHalf`（48 px）、`innerSearch`（[−40, −3]）、`beadSearch`（[−15, 40]）、`innerPolarity`、`innerSelect`；高级：`caliperWidth`、`beadPolarity`、`contrastMin`（25）、`widthMin`（3 px） |
 
 **站的约定**（K3）：站点在名义胶条中线上，法向从内边（开口一侧）指向翻边，卡尺上 `t < 0` 是内边一侧。
@@ -178,10 +179,10 @@ io.load_image ─→ glue.locate ─→ glue.station_calipers ←─ image.load_
 
 | type | data |
 |---|---|
-| `glue.Pose2D` | `ok`、`reason`（成功为空）、`message`、`score`、`peakRatio`、`angle`（度，屏幕上顺时针为正）、`angleObservable`、`center`、`teachCenter`、`offset`、`templateSize`、`minScore`、`maxPeakRatio`；`T(p) = R(angle)·(p − teachCenter) + center` 把示教图坐标映射到这一帧 |
+| `glue.Pose2D` | `ok`、`reason`（成功为空）、`message`、`score`、`peakRatio`、`angle`（度，屏幕上顺时针为正）、`angleObservable`、`center`、`teachCenter`、`offset`、`templateSize`（示教框大小，不含外圈）、`minScore`、`maxPeakRatio`；`T(p) = R(angle)·(p − teachCenter) + center` 把示教图坐标映射到这一帧 |
 | `glue.StationMeasure` | `count`、`unit`、`poseGiven`、`poseOk`、`counts{ok, noInner, noBead, incompleteBead, poseFail, outOfImage}`、`calib`，逐站对齐：`ids[]`、`point[]`、`normal[]`（这一帧里的）、`status[]`（ok / no_inner / no_bead / incomplete_bead / pose_fail / out_of_image）、`inner[]` / `near[]` / `far[]`（沿法向的偏移 px）、`innerNear[]` / `innerCenter[]` / `width[]`（按 `unit`）、`innerNearPx[]` / `innerCenterPx[]` / `widthPx[]`、`innerContrast[]`、`beadContrast[]`；不成立的是 `null` |
 
-**失败语义**：定位不过质量门时 `pose.ok = false`，`reason` 按顺序取先命中的：`flat_template`（模板没纹理）、`out_of_image`（示教框离图边不到 2 px，或搜索区落出图外）、
+**失败语义**：定位不过质量门时 `pose.ok = false`，`reason` 按顺序取先命中的：`flat_template`（模板没纹理）、`out_of_image`（示教框离图边不到 2 px、带外圈的模板放不进这一帧即示教框离图边不到 `templatePad`，或搜索区落出图外）、
 `low_score`（低于 `minScore`）、`at_search_edge`（峰离搜索窗边 ≤ 1 px，真值可能超出 `searchRadius`；实际可用偏移约 `searchRadius` − 2，下限 3）、
 `at_angle_edge`（细扫后的转角超出 ±`angleRange`；角度两端外各多扫一步作护栏；看不出角度的模板只在最高分落在护栏上、又比 0° 明显高时判）、
 `ambiguous`（`peakRatio` > `maxPeakRatio`）。`peakRatio` = 最终角度的搜索窗里主峰之外最高的独立峰（突起度 ≥ 0.02 的局部极大）/ 主峰分数，
@@ -191,7 +192,14 @@ io.load_image ─→ glue.locate ─→ glue.station_calipers ←─ image.load_
 内边没找到是 `no_inner`（测不了），找到内边但没有胶是 `no_bead`（断胶的证据）。胶边被窗口截断是 `incomplete_bead`，宿主应作为无效量测处理，不能算断胶或 OK。纯色/低对比度模板返回 `pose.ok=false`。
 
 
-**角度**：搜索区与模板先做同样的 σ = 1 px 高斯平滑（模板整块平滑、边外按边上像素延伸，不裁边），每个角度（含 0°）走同一条三次插值旋转再算 NCC，
+**模板文件**：示教时把示教框四边各外扩 `templatePad` px 从示教图上裁下，文件大小 (w + 2·`templatePad`) × (h + 2·`templatePad`)；
+`anchor` 是示教框（不含外圈）左上角，文件左上角在 `anchor − templatePad`。外圈只给匹配前的预平滑当真实邻域：整个文件平滑后裁回示教框去匹配，
+`teachCenter`、`templateSize`、叠画与各道门都只按示教框算。`templatePad` ≥ 4（预平滑核半径）时模板与图上同一处平滑得一样；
+`templatePad` = 0（旧模板，文件就是示教框）时框外缺的邻域按框边像素延伸，示教框外 1.5 px 内有平行于框边的强边（如暗半平面）时平移被拉偏
+（合成图上离框边 0 / 0.5 / 1 px 时约 0.6 / 0.35 / 0.2 px，分数仍 > 0.96、照常成功）。1…3 是加载期错误；文件去掉外圈后没有示教框是执行错误 `bad_param`（指向 `template`）。
+带外圈时示教框离图边要不小于 `templatePad`。暗边紧挨着框边时 NCC 峰两侧不对称，三点抛物线插值另有 ≤ 0.2 px 的偏差，与外圈无关。
+
+**角度**：搜索区与模板先做同样的 σ = 1 px 高斯平滑（模板连外圈整块平滑后裁回示教框，示教框不裁边），每个角度（含 0°）走同一条三次插值旋转再算 NCC，
 转过的图按估出的模板位置挪到同一个亚像素相位上，各角度按插值到亚像素的峰顶比分：噪声和半像素的平移都不会把角度推离 0
 （1.1.0 之前 0° 用原图、别的角度经双线性插值，插值的平滑让噪声下非零角度分数更高：2026-10-17 样本集只加 σ = 6 噪声时角度中位 0.63°；
 只统一插值路径时，NCC 只在整像素上取分，物体落在半像素上时各角度被压低的程度不同，无噪声、只平移半像素的帧仍报 0.25…0.44°）。

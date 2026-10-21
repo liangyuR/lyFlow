@@ -17,7 +17,8 @@ constexpr double kBorderMin = 2.0;
 /// 仍相当于再平滑一点、在 0° 上（不挪亚像素相位时）是原样拷贝；白噪声下平滑过的那几个角度 NCC 反而更高，噪声会把角度推离 0
 /// （σ = 6 的纯噪声帧：220 px 模板 0.25°，2026-10-17 样本集 96 px 模板中位 0.63°）。先平滑掉单像素噪声后插值几乎
 /// 不再改变图像，同样的帧上降到 ≤ 0.004° / P95 0.06°（双线性 + 预平滑仍有 0.46°，所以用三次插值）。
-/// 平移的亚像素精度不受影响（两边平滑一样，峰不偏）。
+/// 平移的亚像素精度不受影响：两边平滑一样，峰不偏 —— 模板带足外圈（templatePad ≥ kLocateSmoothRadius）时
+/// 严格一样；不带外圈时框外紧挨着有强边会偏（见下面预平滑处）。
 constexpr double kPreSmoothSigma = 1.0;
 /// 看不看得出角度：粗扫各角度（含护栏）里最高分与最低分之差，要超过这一帧本身的失配（1 − 最高分）的
 /// kAngleContrastGain 倍，夹在 [kAngleContrastMin, kAngleContrastMax] 里；看不出时角度报 0、angleObservable = false。
@@ -145,11 +146,17 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
     // 算子在进来之前已经把这种输入拒成执行错误；直接调内核时没有图可搜，归到 out_of_image
     return fail("out_of_image", "图像和模板需要非空 u8 灰度图");
   }
-  const int tw = tmpl.cols, th = tmpl.rows;
+  // tmpl 带 templatePad 宽的外圈时，示教框是去掉外圈的那一块；下面除了预平滑，全都只看示教框
+  const int tp = spec.templatePad;
+  if (tp < 0 || tmpl.cols <= 2 * tp || tmpl.rows <= 2 * tp)
+    return fail("out_of_image", "模板图不比两倍 templatePad 大，去掉外圈后没有示教框");
+  const cv::Rect innerBox(tp, tp, tmpl.cols - 2 * tp, tmpl.rows - 2 * tp);
+  const cv::Mat inner = tmpl(innerBox);
+  const int tw = inner.cols, th = inner.rows;
   pose.teachCenter = spec.anchor + P2((tw - 1) / 2.0, (th - 1) / 2.0);
   pose.center = pose.teachCenter;
   cv::Scalar mean, deviation;
-  cv::meanStdDev(tmpl, mean, deviation);
+  cv::meanStdDev(inner, mean, deviation);
   // OpenCV 对常量模板的 TM_CCOEFF_NORMED 返回 1；没有纹理不能作为成功定位的证据。
   if (deviation[0] < 1.0)
     return fail("flat_template", "模板对比度不足，请选择含边缘或纹理的模板");
@@ -158,6 +165,14 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
   if (spec.anchor.x < kBorderMin || spec.anchor.y < kBorderMin ||
       spec.anchor.x + tw > gray.cols - kBorderMin || spec.anchor.y + th > gray.rows - kBorderMin) {
     return fail("out_of_image", "模板示教框离图边不到 2 px：零件往外一动模板就出图，请示教时离图边留出余量");
+  }
+  // 带外圈的模板（示教框四边各外扩 templatePad）是从同样大小的示教图上裁的，放不进这一帧说明示教框离图边
+  // 不到 templatePad：外圈裁不全（或帧与示教图不是同一个相机画幅），同样判 out_of_image
+  if (spec.anchor.x < tp || spec.anchor.y < tp || spec.anchor.x + tw + tp > gray.cols ||
+      spec.anchor.y + th + tp > gray.rows) {
+    return fail("out_of_image",
+                "带外圈的模板（示教框四边各外扩 templatePad px）放不进这一帧：示教框离图边不到 templatePad，"
+                "请示教时离图边留出余量");
   }
   // 模板旋转后外接圆的半径 + 搜索半径：任何允许的位姿下模板都完整落在这一块里
   const double half = spec.searchRadius + 0.5 * std::hypot(tw, th) + 4.0;
@@ -170,11 +185,18 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
     return fail("out_of_image", "搜索区落在图外，或者比模板还小");
   const P2 rc((roi.width - 1) / 2.0, (roi.height - 1) / 2.0);
   // 搜索区和模板做同样的预平滑（见 kPreSmoothSigma），在浮点上做，不再量化回 u8（量化误差又是白噪声）。
-  // 核半径 pad = 4σ。搜索区按外扩 pad 的一块平滑再裁回来，边上用的是真实邻域。模板只有它自己，整块平滑、边外按
-  // 边上的像素延伸（BORDER_REPLICATE），不裁：框外的真实邻域与框边一样时（框边落在平坦处，或特征垂直穿过框边）
-  // 与图上同一处平滑出来的一样，否则只差框边 4 px 里平滑尾巴的那一点，不偏峰。以前平滑后四边各裁 4 px，
-  // 贴着框边的特征（离框边 < 4 px 的细条、角点）被整个裁掉，只剩平滑的尾巴，平移漂 1…2 px 还照常成功。
+  // 核半径 pad = 4σ（kLocateSmoothRadius）。搜索区按外扩 pad 的一块平滑再裁回来，边上用的是真实邻域。
+  // 模板连外圈（templatePad）整块平滑、再裁回示教框，示教框不裁边：以前平滑后四边各裁 4 px，贴着框边的特征
+  // （离框边 < 4 px 的细条、角点）被整个裁掉，只剩平滑的尾巴，平移漂 1…2 px 还照常成功。
+  // templatePad ≥ pad 时示教框里每个像素平滑用的都是真实邻域，与图上同一处平滑出来的一样，框外的强边不偏峰。
+  // 外圈不够（templatePad = 0 的旧图）时缺的邻域按 tmpl 边上的像素延伸（BORDER_REPLICATE）：框外真实邻域与框边
+  // 一样时（框边落在平坦处，或特征垂直穿过框边）没有差别；框外 1.5 px 内有平行于框边的强边（暗半平面）时，
+  // 模板框边上少了那条边的平滑尾巴、图上有，平移被拉偏 —— 合成图上离框边 0 / 0.5 / 1 / 1.5 px 时偏
+  // 0.61 / 0.33 / 0.15 / 0.06 px（扫 ±3° 时 0.65 / 0.38 / 0.22 / 0.10 px），分数仍 > 0.96、照常成功
   const int pad = static_cast<int>(std::ceil(4.0 * kPreSmoothSigma));
+  static_assert(4.0 * kPreSmoothSigma <= kLocateSmoothRadius &&
+                    4.0 * kPreSmoothSigma > kLocateSmoothRadius - 1,
+                "kLocateSmoothRadius 要等于 ⌈4σ⌉");
   const cv::Size kernel(2 * pad + 1, 2 * pad + 1);
   cv::Mat sub, smoothTmpl;
   {
@@ -185,9 +207,10 @@ Pose2D locateTemplate(const cv::Mat& gray, const cv::Mat& tmpl, const LocateSpec
     gray(padded).convertTo(f, CV_32F);
     cv::GaussianBlur(f, f, kernel, kPreSmoothSigma, kPreSmoothSigma, cv::BORDER_REPLICATE);
     sub = f(roi - padded.tl()).clone();
-    tmpl.convertTo(smoothTmpl, CV_32F);
-    cv::GaussianBlur(smoothTmpl, smoothTmpl, kernel, kPreSmoothSigma, kPreSmoothSigma,
-                     cv::BORDER_REPLICATE);
+    cv::Mat t;
+    tmpl.convertTo(t, CV_32F);
+    cv::GaussianBlur(t, t, kernel, kPreSmoothSigma, kPreSmoothSigma, cv::BORDER_REPLICATE);
+    smoothTmpl = t(innerBox).clone();
   }
   const int cw = smoothTmpl.cols, ch = smoothTmpl.rows;
   const P2 halfT((cw - 1) / 2.0, (ch - 1) / 2.0);

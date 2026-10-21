@@ -2,6 +2,7 @@
 #include <cmath>
 #include <fstream>
 #include <iterator>
+#include <string>
 #include <system_error>
 
 #include <opencv2/imgcodecs.hpp>
@@ -12,6 +13,11 @@
 
 namespace lyflow::packs::glue {
 namespace {
+
+std::string templatePadTooSmall() {
+  return "templatePad 要么是 0（模板就是示教框），要么不小于预平滑核半径 " +
+         std::to_string(kLocateSmoothRadius) + " px：外圈更窄时示教框边上的像素平滑仍要按边延伸，框外有强边时平移照样偏";
+}
 
 Status loadTemplate(const ParamView& params, cv::Mat* out) {
   std::ifstream in(params.path("template"), std::ios::binary);
@@ -41,8 +47,22 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   cv::Mat tmpl;
   if (Status s = loadTemplate(params, &tmpl); !s.ok)
     return s;
+  // 模板文件 = 示教框四边各外扩 templatePad 裁下的一块：去掉外圈后必须还有示教框
+  const int pad = static_cast<int>(params.integer("templatePad"));
+  if (pad > 0 && pad < kLocateSmoothRadius) {
+    return Status::Error(Phase::Execute, "bad_param", templatePadTooSmall(), "templatePad");
+  }
+  if (tmpl.cols <= 2 * pad || tmpl.rows <= 2 * pad) {
+    return Status::Error(Phase::Execute, "bad_param",
+                         "模板图 " + std::to_string(tmpl.cols) + "×" + std::to_string(tmpl.rows) +
+                             " 去掉四边各 templatePad = " + std::to_string(pad) +
+                             " px 的外圈后没有示教框：模板文件要按示教框四边各外扩 templatePad 裁",
+                         "template");
+  }
+  const int tw = tmpl.cols - 2 * pad, th = tmpl.rows - 2 * pad; // 示教框
 
   LocateSpec spec;
+  spec.templatePad = pad;
   const auto anchor = params.vec2("anchor");
   spec.anchor = P2(anchor[0], anchor[1]);
   spec.searchRadius = params.number("searchRadius");
@@ -64,7 +84,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   rec["center"] = pxJson(pose.center);
   rec["teachCenter"] = pxJson(pose.teachCenter);
   rec["offset"] = pxJson(pose.center - pose.teachCenter);
-  rec["templateSize"] = Json::array({tmpl.cols, tmpl.rows});
+  rec["templateSize"] = Json::array({tw, th}); // 示教框的大小，不含外圈
   rec["minScore"] = spec.minScore;
   rec["maxPeakRatio"] = spec.maxPeakRatio;
   Record out;
@@ -73,8 +93,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   outputs.set("pose", Data::record(std::move(out)));
   outputs.set("score", measurement(pose.score, "", why));
 
-  // 叠画：模板四角按位姿映射到当前图（示教图上它是 anchor 起的一个框）
-  const double w = tmpl.cols - 1.0, h = tmpl.rows - 1.0;
+  // 叠画：示教框四角按位姿映射到当前图（示教图上它是 anchor 起的一个框）
+  const double w = tw - 1.0, h = th - 1.0;
   std::vector<Px> corners;
   for (const P2 c : {P2(0, 0), P2(w, 0), P2(w, h), P2(0, h)}) {
     const P2 p = pose.apply(spec.anchor + c);
@@ -112,6 +132,9 @@ std::vector<Issue> validate(const ParamView& params, const std::set<std::string>
   if (params.number("angleRange") > 0 && params.number("angleStep") <= 0) {
     issues.push_back(Issue::error("bad_param", "angleStep 要大于 0", "angleStep"));
   }
+  const auto pad = params.integer("templatePad");
+  if (pad > 0 && pad < kLocateSmoothRadius)
+    issues.push_back(Issue::error("bad_param", templatePadTooSmall(), "templatePad"));
   return issues;
 }
 
@@ -128,9 +151,15 @@ void registerLocate(Registry& r) {
       "固定相机飞拍：按示教时从示教图上裁下的模板，求这一帧相对示教图的刚体位姿"
       "（T(p) = R(angle)·(p − teachCenter) + center，glue-plan K2）。只在模板外扩 searchRadius 的一块里做"
       "归一化互相关，角度在 ±angleRange 里按 angleStep 扫描（两端外各多扫一步作护栏；angleRange 小于 angleStep 时"
-      "范围内按 angleRange 一步扫，护栏仍在 ±(angleRange + angleStep)）后抛物线插值。搜索区与模板先做同样的 σ = 1 px 高斯平滑（模板整块平滑、不裁边），"
+      "范围内按 angleRange 一步扫，护栏仍在 ±(angleRange + angleStep)）后抛物线插值。搜索区与模板先做同样的 σ = 1 px 高斯平滑"
+      "（模板连外圈整块平滑后裁回示教框，示教框不裁边），"
       "每个角度（含 0°）走同一条三次插值旋转，并对齐到同一个亚像素相位、按插值到亚像素的峰顶比分，"
       "噪声和半像素的平移不会把角度推离 0。\n"
+      "模板文件与 anchor：模板文件是示教时把示教框四边各外扩 templatePad px 从示教图上裁下的一块，"
+      "anchor 是示教框（不含外圈）左上角；teachCenter、templateSize、叠画与各道门都只按示教框算，外圈只给预平滑当真实邻域。"
+      "templatePad ≥ 4（预平滑核半径）时模板与图上同一处平滑得一样；templatePad = 0（旧图，模板就是示教框）时框外缺的"
+      "邻域按框边像素延伸，示教框外 1.5 px 内有平行于框边的强边（如暗半平面）时平移被拉偏，离框边 0 px 时约 0.6 px、"
+      "分数仍 > 0.96；1…3 是加载期错误（bad_param）。新示教的模板应带 4 px 外圈。\n"
       "看不出角度时（各角度分数差不出来：圆孔这类旋转对称的模板，或真实图上角度约束太弱的小窗）angle 报 0、"
       "angleObservable = false，center 是 0° 上最好的平移（与 angleRange = 0 的结果相同）—— 位姿只补了平移、"
       "没补转角；但最高分落在护栏角度上、又比 0° 明显高时（分数朝扫描范围外升上去）判 at_angle_edge，"
@@ -138,8 +167,9 @@ void registerLocate(Registry& r) {
       "center 约有 0.1 px 的峰值锁定偏差（1.0.0 也有）。"
       "杠杆臂长（模板离测量点远）的宿主必须把 angleObservable = false 当作「转角没补偿」处理，"
       "不能当成「零件没转」；angleRange = 0 时不扫角度，angleObservable 恒为 true。\n"
-      "质量门按顺序判，先命中的为准：模板没纹理（flat_template）；示教框离图边不到 2 px 或搜索区落出图外"
-      "（out_of_image）；分数低于 minScore（low_score）；主峰离搜索窗边 ≤ 1 px（at_search_edge，真实位置可能"
+      "模板文件去掉外圈后没有示教框是执行错误（bad_param，指向 template）。"
+      "质量门按顺序判，先命中的为准：模板没纹理（flat_template）；示教框离图边不到 2 px、带外圈的模板放不进这一帧"
+      "（示教框离图边不到 templatePad），或搜索区落出图外（out_of_image）；分数低于 minScore（low_score）；主峰离搜索窗边 ≤ 1 px（at_search_edge，真实位置可能"
       "超出 searchRadius，实际可用的偏移约 searchRadius − 2）；细扫后的转角超出 ±angleRange，或看不出角度但"
       "最高分落在护栏上、比 0° 明显高（at_angle_edge）；peakRatio > maxPeakRatio（ambiguous，搜索区里还有一处"
       "几乎一样像的地方）。peakRatio = 最终角度的搜索窗里主峰之外最高的独立峰（突起度 ≥ 0.02 的局部极大）/ "
@@ -151,7 +181,8 @@ void registerLocate(Registry& r) {
       "示教框贴着图边（< 2 px）的现在判 out_of_image；searchRadius 下限从 1 提到 3；"
       "angleRange 小于 angleStep 时 1.0.0 一个角度都不扫（只找平移、angle 0），现在扫 ±angleRange，"
       "转出范围判 at_angle_edge。"
-      "匹配前的预平滑让 score 比 1.0.0 略高（噪声被平滑掉一部分），看不出角度的模板 angle 从随机值变成 0。";
+      "匹配前的预平滑让 score 比 1.0.0 略高（噪声被平滑掉一部分），看不出角度的模板 angle 从随机值变成 0。"
+      "新增 templatePad 参数（默认 0，旧图结果不变）。";
   op.inputs = {Port{"image", "Image", "Image", "这一帧。", true}};
   op.outputs = {
       Port{
@@ -168,13 +199,27 @@ void registerLocate(Registry& r) {
   tmpl.type = ParamType::Path;
   tmpl.tuningRole = "input";
   tmpl.label = "Template";
-  tmpl.doc = "模板图像（示教时从示教图上裁下的一块）。相对路径相对于图文件所在目录。";
+  tmpl.doc = "模板图像：示教时从示教图上把示教框四边各外扩 templatePad px 裁下的一块（templatePad = 0 时就是示教框）。"
+             "相对路径相对于图文件所在目录。";
   tmpl.def = Value::text("");
   tmpl.mode = "open";
   tmpl.filters = {FileFilter{"Image", {"png", "jpg", "jpeg", "bmp", "tif", "tiff", "pgm"}},
                   FileFilter{"All Files", {"*"}}};
   Param anchor = vec2Param("anchor", "Anchor", 0, 0, "px", {"X", "Y"},
-                           "模板左上角像素在示教图上的位置（裁模板时的偏移）。");
+                           "示教框（不含外圈）左上角像素在示教图上的位置；模板文件的左上角在 anchor − templatePad。");
+  Param tpad;
+  tpad.name = "templatePad";
+  tpad.type = ParamType::Int;
+  tpad.tuningRole = "input";
+  tpad.label = "Template Pad";
+  tpad.doc =
+      "模板文件四边比示教框各多出的外圈宽度（px）。外圈只给匹配前的预平滑当真实邻域，匹配与各道门只看示教框。"
+      "0 = 模板就是示教框（旧图）：示教框外 1.5 px 内有平行于框边的强边时平移偏到 0.6 px；"
+      "否则不小于 4（预平滑核半径），示教框离图边要不小于它。";
+  tpad.def = Value::integer(0);
+  tpad.min = 0.0;
+  tpad.max = 16.0;
+  tpad.advanced = true;
   Param radius = floatParam(
       "searchRadius", "Search Radius", 80.0, "px",
       "模板中心最多偏开示教位置这么远。峰离搜索窗边 ≤ 1 px 判 at_search_edge，实际可用约 searchRadius − 2。");
@@ -196,7 +241,7 @@ void registerLocate(Registry& r) {
                              true);
   maxPeak.min = 0.0;
   maxPeak.max = 1.0;
-  op.params = {tmpl, anchor, radius, range, step, minScore, maxPeak};
+  op.params = {tmpl, anchor, radius, range, step, minScore, maxPeak, tpad};
   op.params[1].tuningRole = "geometry";
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;

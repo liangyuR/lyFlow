@@ -83,11 +83,13 @@ pwsh -NoProfile -File scripts/check-glue.ps1 -Steps manifest,schema
 
 GlueSight「特征定位 + 示教胶路判胶偏」的 L1：定位失败要说得出原因，贴边、歧义的匹配不能当成功。
 
-本节按时间顺序记了四轮修改，前面几小节的个别说法被后面的小节改掉了（就地标了「后改」）。1.1.0 的最终行为以
+本节按时间顺序记了五轮修改，前面几小节的个别说法被后面的小节改掉了（就地标了「后改」）。1.1.0 的最终行为以
 `packs/glue/algo/flyshot.h` 里 `locateTemplate` 的注释、`packs/glue/README.md`「失败语义」「角度」两段与 op.doc 为准，要点：
 
 - 质量门与原因码顺序：`flat_template → out_of_image → low_score → at_search_edge → at_angle_edge → ambiguous`；`maxPeakRatio` 默认 1 不判。
-- 角度：搜索区与模板同样 σ = 1 px 预平滑（模板整块平滑、不裁边），每个角度（含 0°）同一条三次插值路径、对齐到同一个亚像素相位、按插值峰顶比分；
+- 模板文件：示教框四边各外扩 `templatePad` px 裁下（新示教取 4，0 = 旧模板），`anchor` 是示教框左上角；外圈只给预平滑当真实邻域，
+  匹配、各道门、`teachCenter`、`templateSize` 都只按示教框算（最后一小节）。
+- 角度：搜索区与模板同样 σ = 1 px 预平滑（模板连外圈整块平滑后裁回示教框、示教框不裁边），每个角度（含 0°）同一条三次插值路径、对齐到同一个亚像素相位、按插值峰顶比分；
   粗扫 ±`angleRange`（`angleRange` < `angleStep` 时按 `angleRange` 一步），护栏在 ±(n·step + `angleStep`)，细扫 step/4、落在窗口两端时外补一个再做抛物线。
 - 看不出角度：`angle` 0、`angleObservable = false`、位置取 0° 上的平移；最高分落在护栏上、比 0° 高出差值门限的 1/8 时判 `at_angle_edge`（`angle` 报细扫出的角度）。
 - `angleRange = 0` 与看不出角度时最终匹配不挪相位，半像素平移的中心有约 0.1 px 的峰值锁定偏差（1.0.0 也有）。
@@ -264,6 +266,47 @@ GlueSight 阶段 0 评测（`ly-gluesight` docs/testing/algorithm-evaluation.md 
 
 **行为变化**（相对 71503de，仍记 1.1.0）：`angleRange` < `angleStep` 时护栏外移、多扫两个角度；每次扫角度的定位多 1…2 次匹配（约 22…23 次，原来 21 次）；
 默认参数下角度只差细扫的那一点（上面第 2、3 条）。2026-10-17 样本集上的复测见 GlueSight `docs/testing/algorithm-evaluation.md` §9.4（`fixture-p0-l1` 等三次运行）。
+
+### 模板带外圈：框边预平滑偏置（2026-10-21 复审，仍是 1.1.0）
+
+复审确认的问题：搜索区按外扩 4 px 的一块平滑（真实邻域），模板只有示教框自己、整块平滑时框外按框边像素延伸（`BORDER_REPLICATE`）。
+示教框外 1.5 px 内有平行于框边的强边时，图上框边处有那条边的平滑尾巴、模板上没有，平移峰被拉偏，分数仍 > 0.96、照常成功。
+合成场景（48 px 框，暗十字 + 暗圆盘，框左、上两边外 gap px 起是暗半平面，σ = 1 噪声，5 个平移）上 dcc726b 的最大中心误差：
+
+| gap（px） | 0 | 0.5 | 1 | 1.5 |
+|---|---|---|---|---|
+| dcc726b，只找平移 / ±3° | 0.61 / 0.65 | 0.33 / 0.38 | 0.15 / 0.22 | 0.06 / 0.10 |
+| `templatePad` = 4，只找平移 / ±3° | 0.16 / 0.22 | 0.12 / 0.16 | 0.09 / 0.16 | 0.04 / 0.08 |
+
+决定（2026-10-21）：发布前修这一项，示教时存带 4 px 外圈的模板，用真实邻域平滑。复审的另两项转角问题按同日决定留作已知问题（v1 只找平移，`angleRange = 0`）。
+
+实现：
+
+- 新参数 `templatePad`（int，默认 0，0…16，高级；产线图 `graphs/flyshot.lyflow.json` 加了同名顶层参数）。模板文件 = 示教图上示教框四边各外扩 `templatePad` px 的一块，
+  大小 (w + 2·pad) × (h + 2·pad)；示教框 = 文件去掉四边各 `templatePad`；`anchor` 仍是示教框（不含外圈）左上角，文件左上角在 `anchor − templatePad`。
+- 内核先把整个文件平滑（与搜索区同一个核，σ = 1、半径 4），再裁回示教框去匹配。`templatePad` ≥ 4（`kLocateSmoothRadius`）时示教框里每个像素用的都是真实邻域，
+  与图上同一处平滑得一样（无噪声、整像素平移时分数 1.00000），这一偏置没了。`templatePad` = 0 时与 dcc726b 逐位相同（旧图结果不变），
+  偏置照旧，记在 op.doc / README / 头文件里。
+- `templatePad` 为 1…3 是加载期错误（`bad_param`，指向 `templatePad`）：外圈比核半径窄，框边仍要按边延伸，偏置只是变小。
+  模板文件去掉外圈后没有示教框（宽或高 ≤ 2·`templatePad`）是执行错误 `bad_param`，指向 `template`。内核直接调时同样情况判 `out_of_image`。
+- 图边：原来「示教框离图边不到 2 px → `out_of_image`」不变；另加带外圈的模板（示教框外扩 `templatePad`）放不进这一帧也判 `out_of_image`，
+  即示教框离图边至少 max(2, `templatePad`) px。宿主示教时框离图边不到 4 px 就裁不出完整外圈，应在示教时拒绝。
+- `flat_template`、`teachCenter`、`peakRatio`、两道贴边门、`angleObservable`、叠画与 Pose2D 的 `templateSize` 都只按示教框算，与以前一样（`templateSize` 不含外圈）。
+  Pose2D 字段没变。
+
+剩下的误差不是平滑造成的：暗边紧挨着框边时 NCC 峰两侧不对称（往暗边挪一格失配大、往平坦处挪一格失配小），三点抛物线插值的峰顶偏向平坦一侧——
+无噪声、整像素平移、分数 1.00000 时也偏 0.097 px；同一场景暗边离框边 10 px 时 ≤ 0.03 px。8 个亚像素相位上 `templatePad` = 4 时最大 0.19 px（只找平移）/ 0.23 px（±3°），
+dcc726b 是 0.63 / 0.63 px。这一项属于亚像素估计器，本轮不改（改了所有帧的平移都会变，要重新复核样本集）；任务里设想的 ≤ 0.1 px 在 gap 0 上达不到，用例按 0.3 px 判。
+
+用例：新增「示教框外 0…1.5 px 紧挨着平行于框边的强暗边、模板带 4 px 外圈」（gap 0 / 0.5 / 1.5 × 只找平移 / ±3° × 5 个平移，中心误差 ≤ 0.3 px），
+内核的模板平滑换回 dcc726b 的做法（只平滑示教框、框外按边延伸）时这一例 16 条中心误差断言失败（gap 0 与 0.5 上，最大约 0.65 px）；
+新增「templatePad 契约」：`templatePad` = 2 加载期判错、0 / 4 不判，8 px 宽的模板配 `templatePad` = 4 执行时 `bad_param` 指向 `template`；
+「示教框离图边不到 2 px」一例加 `templatePad` = 4 时离图边 3 px 判 `out_of_image`、4 px 照常成功。其余用例不变。
+`lyflow-core-tests` 全量 210 例 / 12224 条断言通过；glue、飞拍、标定、std-image 专项 64 例 / 7994 条；`check-glue.ps1 -Steps manifest,schema` 通过，
+manifest 里 `glue.locate` 1.1.0、含 `templatePad`（int，0…16，默认 0）。
+
+**行为变化**（相对 dcc726b，仍记 1.1.0）：不写 `templatePad` 的图结果不变。新示教的模板应带 4 px 外圈、图里给 `templatePad` = 4；
+带外圈时示教框离图边要不小于 4 px（原来 2 px）。
 
 ## 仍属后续范围
 

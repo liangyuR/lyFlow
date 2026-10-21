@@ -36,8 +36,14 @@ struct Pose2D {
   P2 apply(P2 p) const;
 };
 
+/// 匹配前预平滑核的半径（px，= ⌈4σ⌉，σ = 1）。templatePad 不小于它时模板框边上的像素平滑时用的全是真实邻域。
+constexpr int kLocateSmoothRadius = 4;
+
 struct LocateSpec {
-  P2 anchor{0, 0};          ///< 模板左上角像素在示教图上的位置
+  P2 anchor{0, 0};          ///< 示教框（内框，不含外圈）左上角像素在示教图上的位置
+  /// 模板图带的外圈宽度（px）：tmpl = 示教框四边各外扩 templatePad 从示教图上裁的一块，示教框 = tmpl 去掉四边各
+  /// templatePad。外圈只给预平滑当真实邻域用，匹配、各道门、teachCenter 都只按示教框算。0 = 模板就是示教框（旧图）。
+  int templatePad = 0;
   double searchRadius = 80; ///< 模板中心最多偏开这么远（px）；峰离窗边 ≤ 1 px 判贴边，实际可用约 searchRadius − 2
   double angleRange = 3;    ///< 角度扫描 ±range（度）
   double angleStep = 0.5;
@@ -46,7 +52,9 @@ struct LocateSpec {
 };
 
 /// 在 anchor 附近找模板。只在「模板外扩 searchRadius 与旋转余量」那一块里算。
-/// 搜索区与模板先做同样的 σ = 1 px 高斯平滑（模板整块平滑、不裁边），每个角度（含 0°）都经同一条三次插值旋转再算 NCC，
+/// 搜索区与模板先做同样的 σ = 1 px 高斯平滑，每个角度（含 0°）都经同一条三次插值旋转再算 NCC，
+/// 模板连外圈整块平滑后裁回示教框：templatePad ≥ kLocateSmoothRadius 时示教框里每个像素与图上同一处平滑出来的一样；
+/// 外圈不够（含 0）时缺的邻域按 tmpl 边上的像素延伸（BORDER_REPLICATE），示教框外 1.5 px 内有强边时平移偏到 0.6 px（见 .cpp）。
 /// 噪声不会把角度推离 0。扫角度时先在 0° 上找一次平移，各角度把转过的图挪到同一个亚像素相位上，
 /// 并按两个方向三点抛物线插值到亚像素的峰顶比分（score 仍报整像素上的值），半像素的平移不会把角度推离 0。
 /// 角度在 ±angleRange 里按 angleStep 粗扫（angleRange 小于 angleStep 时按 angleRange 一步），两端外各多扫一个
@@ -55,7 +63,8 @@ struct LocateSpec {
 /// 各角度分数差不出来时角度报 0、angleObservable = false，位置取 0° 上最好的平移（与 angleRange = 0 相同）。
 /// angleRange = 0 与看不出角度时最终匹配不挪相位：物体落在半像素上时中心有约 0.1 px 的峰值锁定偏差（1.0.0 也有）。
 /// 失败时 ok = false，reason 给原因码，why 写给人看的原因。几道门按顺序判，先命中的为准：
-/// 模板没纹理（flat_template）；示教框离图边不到 2 px、搜索区落出图外或比模板还小（out_of_image）；
+/// tmpl 不比 2·templatePad 大（没有示教框，最先判，out_of_image）；模板没纹理（flat_template）；示教框离图边不到 max(2, templatePad) px
+/// （带外圈的模板放不进这一帧）、搜索区落出图外或比模板还小（out_of_image）；
 /// 分数低于 minScore（low_score）；主峰离搜索窗边 ≤ 1 px（at_search_edge）；at_angle_edge：看得出角度时
 /// 细扫后的转角超出 ±angleRange，看不出角度时最高分落在护栏角度上、又比 0° 高出差值门限的 1/8（angleDeg 报细扫出的角度）；
 /// peakRatio 超过 maxPeakRatio（ambiguous）。贴边的峰说明真值可能在扫描范围之外，分数再高也不可信。
