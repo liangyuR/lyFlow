@@ -9,7 +9,7 @@
     },
     "./node": {
       "types": "./node.d.ts",
-      "default": "./node.js"
+      "default": "./render-node.js"
     }
   },
   "files": [
