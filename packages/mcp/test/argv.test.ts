@@ -19,6 +19,36 @@ interface MappingRow {
 test('工具入参 → CLI argv 的映射（params / recipes / eval / perturb / patch）', () => {
   const rows: MappingRow[] = [
     {
+      name: '逐样本同次输出快照捕获',
+      argv: evalArgv(
+        {
+          graphPath: 'g',
+          metric: ['outputs.gap'],
+          snapshotRoot: 'snapshots',
+          capture: {
+            policy: 'selected',
+            outputs: [{ nodeId: 'fit', port: 'line' }],
+            maxBytes: 128,
+          },
+        },
+        null,
+      ),
+      want: [
+        'eval',
+        'g',
+        '--snapshot-root',
+        'snapshots',
+        '--capture-policy',
+        'selected',
+        '--capture-max-bytes',
+        '128',
+        '--capture-output',
+        'fit:line',
+        '--metric',
+        'outputs.gap',
+      ],
+    },
+    {
       name: '顶层参数按 JSON 透传，显式值在配方之后',
       argv: paramsArgv({
         graphPath: 'g',

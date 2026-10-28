@@ -17,12 +17,14 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit",
-    "test": "node --import ./test/resolve-ts.mjs --test test/*.test.mjs"
+    "test": "node --import ./test/resolve-ts.mjs --test test/*.test.mjs",
+    "pack:release": "node scripts/pack.mjs"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",
     "immer": "^11.1.18",
-    "motion": "^12.43.0"
+    "motion": "^12.43.0",
+    "@lyflow/visualization": "workspace:*"
   },
   "peerDependencies": {
     "@tauri-apps/api": "^2",

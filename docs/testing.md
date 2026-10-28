@@ -170,3 +170,17 @@ C++ doctest 已在 `core/CMakeLists.txt` 中通过 `enable_testing()` 和 `add_t
 原 PR #8 移植到当前 main 后，2026-10-12 本地 std-image + glue 组合通过 CTest：190 项 doctest、10704 项断言、0 跳过；包含 26 项涂胶测试。GlueSight 现有的原生像素量测、多视图 OR、相同标签并发隔离测试分别通过，共 3 项。该 DLL 为本地构建，源码修订为空，不能作为正式依赖包。
 
 发布检查新增必需算子清单校验；对旧 main c625155c 的实际 DLL 执行检查时，以缺少 glue.taught_path 拒绝。正式候选包的完整构建与下游依赖校验仍需对应 GitHub 运行和实际产物证据；这些软件测试不能替代现场准确率验收。
+
+## 运行快照与原生可视化（2026-10-28）
+
+新增验证入口：
+
+| 命令 | 范围 |
+| --- | --- |
+| `node --test packages/editor/test-server/snapshots.test.mjs` | 9 项真实 CLI/HTTP 集成：同次快照、源文件变化、重启、保存策略、LYIM 图像、总配额、保留期、崩溃暂存占用与路径边界；需已构建标准包 CLI。 |
+| `pnpm --filter @lyflow/visualization test` | 3 项纯逻辑：坐标与变换、几何与图像、统一视口网格；PNG 另用真实无 GPU 浏览器检查。 |
+| `pnpm --filter @lyflow/mcp test` | 当前 36 项 MCP（34 项非 smoke）及 2 项启动器测试；覆盖可视化字段解析、身份与目录依赖、快照就绪状态。 |
+
+编辑器既有 161 项纯逻辑测试保持通过。新增共享渲染不增加 DOM 单元测试；实际图片、20 样本网格和真实 DTS 端到端复测用于视觉验收。验收约束见 [MCP 可视化](mcp-visualization.md)。
+
+本轮真实 HTTP 宿主 e2e 36/36 通过（在原 34 项基础上新增共享二维导图 2 项）：真实 CLI 点云执行后，切换二维并点击导出 PNG；验证共享 SVG 与 PNG、运行来源图注和控制台无错误。

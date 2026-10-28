@@ -17,6 +17,13 @@ function clean(value: string | undefined): string | undefined {
 export const MISSING_BASE =
   '缺 LYFLOW_HTTP_BASE。它是 /lyflow/* 契约的基址，例如 http://127.0.0.1:8787';
 
+export function resolveWorkDir(env: NodeJS.ProcessEnv = process.env): string {
+  return path.resolve(
+    clean(env['LYFLOW_WORK_DIR']) ??
+      path.join(clean(env['LOCALAPPDATA']) ?? os.homedir(), 'lyflow', 'work'),
+  );
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const base = clean(env['LYFLOW_HTTP_BASE']);
   if (!base) throw new Error(MISSING_BASE);
@@ -25,6 +32,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     token: clean(env['LYFLOW_HTTP_TOKEN']),
     cli: clean(env['LYFLOW_CLI']),
     packs: clean(env['LYFLOW_PACKS']),
-    workDir: clean(env['LYFLOW_WORK_DIR']) ?? path.join(os.tmpdir(), 'lyflow-mcp'),
+    workDir: resolveWorkDir(env),
   };
 }

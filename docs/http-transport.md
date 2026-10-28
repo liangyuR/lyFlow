@@ -489,3 +489,28 @@ magic 对不上时编辑器会当成「响应不是点云」直接报错，所�
 - **不发热重载帧**。
 
 这些都是桩的省略，不是契约的一部分。
+
+## 持久运行快照（MCP 可视化）
+
+`POST /lyflow/run` 可带 `capture`：
+
+```json
+{"capture":{"policy":"selected","outputs":[{"nodeId":"load","port":"cloud"}],"maxBytes":268435456}}
+```
+
+`policy` 支持 `all`（默认）、`selected`、`failures`、`metrics`；`selected` 必须给非空输出列表。`metrics` 不保存点云和图像载荷。保存策略影响可查看的输出，不改变算法的执行结果。
+
+| 方法 | 路径 | 返回 |
+| --- | --- | --- |
+| GET | `/lyflow/runs/:runId/snapshot` | 等待当次执行及快照持久化完成后返回清单 |
+| GET | `/lyflow/snapshots/:snapshotId` | 持久快照清单；无需原进程内存中的 run |
+| GET | `/lyflow/snapshots/:snapshotId/clouds/:nodeId/:port?maxPoints=` | 已保存点云的 LYCP 二进制 |
+| GET | `/lyflow/snapshots/:snapshotId/images/:nodeId/:port?row=&rows=` | 已保存图像的 LYIM 二进制（level 0） |
+
+清单 `schemaVersion:1` 包含 `snapshotId`、`runId`、`status`、执行图 `graph`、`effectiveParams`、`engine`、`inputs`、`outputs`、`summary` 和 `capture`。输出项保留端口类型、数目及值，额外包含 `nodeId`，二进制输出使用清单内的相对 `file`；未保存的输出带 `missing` 原因。文件名不是客户端可随意读取的路径。
+
+快照 ID 对应真实执行 ID。服务必须从当次结果句柄保存输出，不能重新跑 `dump` 或运行图冒充旧结果。客户端不能仅根据 `run_finished` 事件断定保存已结束，必须等待快照接口。MCP `run_graph` 仅在清单验证成功后报告 `snapshotStatus:ready`。
+
+不存在的快照返回 404，过期或未捕获的输出返回 410，非法参数返回 400。兼容旧业务服务时，MCP 会分别报告执行结果与快照不可用，不声称具备持久结果。业务服务要启用新可视化工具，须实现这组端点。
+
+参考实现的 `LYFLOW_WORK_DIR` 保存 `snapshots/`。单次载荷默认限额 256 MiB；总存储默认 10 GiB，可通过 `LYFLOW_SNAPSHOT_MAX_TOTAL_BYTES` 配置。总配额包含 `pending-*` 暂存目录的实际占用；不足时拒绝新快照，不自动替换已有快照。异常退出的暂存目录需在停止捕获后检查并手动清理，服务不会误删活跃捕获。默认永久保留，可设置 `LYFLOW_SNAPSHOT_RETENTION_DAYS`；过期读取返回 410，后续捕获清理过期内容。CLI `run --snapshot-dir` 和 `eval/sweep --snapshot-root` 使用同一捕获实现，批量结果行包含 `snapshotId`。

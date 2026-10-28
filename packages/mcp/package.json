@@ -18,13 +18,17 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.test.json --noEmit",
     "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.test.json && node --test build-test/test/*.test.js",
+    "test": "tsc -p tsconfig.test.json && node --test build-test/test/*.test.js && node --test scripts/local.test.mjs",
     "start": "node dist/index.js",
-    "test:unit": "tsc -p tsconfig.test.json && node --test \"build-test/test/!(smoke).test.js\""
+    "test:unit": "tsc -p tsconfig.test.json && node --test \"build-test/test/!(smoke).test.js\"",
+    "local": "node scripts/local.mjs",
+    "check:local": "node scripts/check-local.mjs",
+    "test:launcher": "node --test scripts/local.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "@lyflow/visualization": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

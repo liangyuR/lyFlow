@@ -50,6 +50,8 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
                           [--recipe <配方文件>] [--param <名字>=<json>]...
                           [--base-dir <dir>] [--parallel <n>] [--no-cache]
                           [--preview] [--preview-points <n>] [--outputs] [--summary]
+                          [--snapshot-dir <new-dir>] [--capture-policy all|selected|failures|metrics]
+                          [--capture-output node:port] [--capture-max-bytes <n>]
                           [--input <nodeId>.<port>=<file.pcd>]...
         --input：把一片点云注入这个端口（与宿主经 C ABI 的 run inputs 同一条路）。端口是输出时
                  整节点注入、compute 不跑；只是输入时是输入注入，例如 --input n_scan.primary=a.pcd
@@ -166,6 +168,7 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
 
 // ------------------------------------------------------------------ 参数解析
 
+#[derive(Clone)]
 pub(crate) struct Parsed {
     pub positional: Vec<String>,
     pub values: BTreeMap<String, Vec<String>>,
@@ -1442,6 +1445,8 @@ impl RunProgress {
     }
 }
 
+pub(crate) mod snapshot;
+
 fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let Some(path) = parsed.positional.first().cloned() else {
         line(err, "用法：lyflow run <graph>");
@@ -1490,6 +1495,10 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         }
         Err(e) => return fail(err, &e, EXIT_FAILED),
     }
+    let capture = match snapshot::Capture::prepare(parsed, &core, &loaded) {
+        Ok(c) => c,
+        Err(e) => return fail(err, &e, EXIT_USAGE),
+    };
     let targets: Vec<String> = parsed.many("to").to_vec();
     let progress = progress_line().then(|| Arc::new(Mutex::new(RunProgress::new(err))));
     let hook = progress.as_ref().map(|p| {
@@ -1527,6 +1536,15 @@ fn cmd_run(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         Ok(r) => r,
         Err(e) => return fail(err, &e, EXIT_FAILED),
     };
+    if let Some(capture) = capture {
+        match capture.save(&core, &loaded, &result) {
+            Ok(manifest) => json_line(
+                out,
+                &json!({"kind":"run_snapshot", "runId":result.run_id(), "snapshotId":manifest["snapshotId"]}),
+            ),
+            Err(e) => return fail(err, &e, EXIT_FAILED),
+        }
+    }
     // --outputs：图级命名输出（ADR-0017）。必须在 RunResult 还活着时取 ——
     // 它一 drop 就 lyflow_run_free，结果仓的索引跟着没了。
     if parsed.has("outputs") {
@@ -1905,6 +1923,7 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     let metrics = [metric];
     let samples = [eval::Sample::whole_graph()];
     let engine = eval::Engine {
+        capture: Some(parsed),
         started: None,
         core: &core,
         base: &loaded,
@@ -1936,6 +1955,7 @@ fn cmd_sweep(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
                 out,
                 &json!({
                     "kind": "sweep_row",
+                    "snapshotId": row.snapshot_id,
                     "index": row.param_set,
                     "params": Value::Object(combo.clone()),
                     "metric": metric_spec,
@@ -2262,6 +2282,12 @@ pub(crate) fn fail(err: &Sink, message: &str, code: i32) -> i32 {
 }
 
 const VALUE_OPTS: &[&str] = &[
+    "snapshot-max-total-bytes",
+    "snapshot-root",
+    "snapshot-dir",
+    "capture-policy",
+    "capture-output",
+    "capture-max-bytes",
     "resume-rows",
     "max-runs",
     "to",

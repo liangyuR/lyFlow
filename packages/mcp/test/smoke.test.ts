@@ -14,7 +14,9 @@ import { findRepoRoot } from '../src/repo.js';
 import { encodePng, toPicture } from '../src/image.js';
 
 const ROOT = findRepoRoot();
-const CLI = ROOT ? path.join(ROOT, 'bridge', 'target', 'debug', 'lyflow.exe') : '';
+const CLI =
+  process.env['LYFLOW_CLI'] ||
+  (ROOT ? path.join(ROOT, 'bridge', 'target', 'debug', 'lyflow.exe') : '');
 const TEST_SERVER = ROOT ? path.join(ROOT, 'packages', 'editor', 'test-server', 'server.mjs') : '';
 
 function entryPoint(): string | null {
@@ -333,6 +335,37 @@ async function tuningWorkflow(client: Client, workspace: string): Promise<void> 
   };
   assert.deepEqual(pictureMeta.origin, [80, 80]);
   assert.ok(pictureMeta.overlayItems > 0);
+  const imageFrame = { id: 'image', unit: 'px', axes: ['x', 'y'], yDirection: 'down' };
+  const nativeView = await client.callTool({
+    name: 'view_outputs',
+    arguments: {
+      snapshotId: rerun['snapshotId'],
+      frame: imageFrame,
+      layers: [
+        { nodeId: 'n_load', port: 'image', frame: imageFrame },
+        { nodeId: 'n_path', port: 'overlay', frame: imageFrame, kind: 'overlay2d' },
+        { nodeId: 'n_judge', port: 'overlay', frame: imageFrame, kind: 'overlay2d' },
+      ],
+      view: { width: 640, height: 480 },
+    },
+  });
+  assert.notEqual(nativeView.isError, true, JSON.stringify(nativeView).slice(-1000));
+  const nativeImage = (
+    nativeView.content as { type: string; data?: string; mimeType?: string }[]
+  ).find((c) => c.type === 'image');
+  assert.equal(nativeImage?.mimeType, 'image/png');
+  assert.deepEqual(
+    [...Buffer.from(nativeImage?.data ?? '', 'base64').subarray(1, 4)],
+    [0x50, 0x4e, 0x47],
+  );
+  const nativeMeta = payload(nativeView);
+  assert.deepEqual(nativeMeta['missing'], []);
+  const nativeScene = JSON.parse(fs.readFileSync(String(nativeMeta['scenePath']), 'utf8')) as {
+    layers: { kind: string; source: { snapshotId: string } }[];
+  };
+  assert.ok(nativeScene.layers.some((l) => l.kind === 'image'));
+  assert.ok(nativeScene.layers.some((l) => l.kind !== 'image'));
+  assert.ok(nativeScene.layers.every((l) => l.source.snapshotId === rerun['snapshotId']));
   const summary = await call('summarize_output', {
     runId: rerun['runId'],
     nodeId: 'n_width',
@@ -405,7 +438,15 @@ test(
         process.execPath,
         [TEST_SERVER, '--port', String(port), '--root', workspace, '--cli', CLI],
         // LYFLOW_TEST_OPS：桩起的 CLI 继承它，图像那一段的 test.make_image 才注册得上
-        { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LYFLOW_TEST_OPS: '1' } },
+        {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: {
+            ...process.env,
+            LYFLOW_TEST_OPS: '1',
+            LYFLOW_WORK_DIR: path.join(workspace, 'mcp-work'),
+            LYFLOW_SNAPSHOT_RETENTION_DAYS: '1',
+          },
+        },
       );
       server.stderr?.setEncoding('utf8');
       server.stderr?.on('data', (c: string) => process.stderr.write(`[test-server] ${c}`));
@@ -452,6 +493,8 @@ test(
       );
       // ADR-0022：status 三态来自 core 的 summary，nodes 是 id -> 收尾状态的对象
       assert.equal(run['status'], 'ok', JSON.stringify(run));
+      assert.equal(run['snapshotStatus'], 'ready', JSON.stringify(run));
+      assert.equal(run['snapshotId'], run['runId']);
       assert.equal(run['runStatus'], 'ok', JSON.stringify(run));
       const nodes = run['nodes'] as Record<string, { state: string; outputsAvailable: boolean }>;
       assert.equal(nodes['gen']?.state, 'done', JSON.stringify(nodes));
@@ -532,6 +575,47 @@ test(
         metrics: Record<string, unknown>;
         replay: { set: Record<string, unknown> };
       }[];
+      const snapshotRows = sweptRows as unknown as { snapshotId: string }[];
+      const firstManifest = path.join(
+        workspace,
+        'mcp-work',
+        'snapshots',
+        snapshotRows[0]!.snapshotId,
+        'snapshot.json',
+      );
+      const secondManifest = path.join(
+        workspace,
+        'mcp-work',
+        'snapshots',
+        snapshotRows[1]!.snapshotId,
+        'snapshot.json',
+      );
+      const firstTimes = fs.statSync(firstManifest),
+        old = new Date(Date.now() - 2 * 86400000);
+      fs.utimesSync(firstManifest, old, old);
+      fs.renameSync(secondManifest, `${secondManifest}.held`);
+      try {
+        const frame = { id: 'cloud', unit: 'm', axes: ['x', 'y'], yDirection: 'up' };
+        const gallery = await client.callTool({
+          name: 'view_evaluation',
+          arguments: {
+            evaluationId: swept['evaluationId'],
+            frame,
+            layers: [{ nodeId: 'voxel', port: 'cloud', frame, axes: ['x', 'y'] }],
+            limit: 3,
+          },
+        });
+        assert.notEqual(gallery.isError, true, JSON.stringify(gallery).slice(-1000));
+        const entries = payload(gallery)['entries'] as { missing: unknown }[];
+        assert.equal(entries.length, 3);
+        assert.equal((entries[0]!.missing as { httpStatus: number }).httpStatus, 410);
+        assert.equal((entries[1]!.missing as { httpStatus: number }).httpStatus, 404);
+        assert.deepEqual(entries[2]!.missing, []);
+        assert.ok((gallery.content as { type: string }[]).some((c) => c.type === 'image'));
+      } finally {
+        fs.utimesSync(firstManifest, firstTimes.atime, firstTimes.mtime);
+        fs.renameSync(`${secondManifest}.held`, secondManifest);
+      }
       const legacy = cliJsonLines([
         'eval',
         graphFile,

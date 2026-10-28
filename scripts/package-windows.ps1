@@ -191,7 +191,7 @@ try {
     if ($editorVersion -cne $version) { throw "@lyflow/editor version $editorVersion differs from product version $version." }
     $editorStage = Join-Path $stage 'editor'
     New-Item -ItemType Directory -Path $editorStage -Force | Out-Null
-    & npm pack $editorDir --pack-destination $editorStage --silent
+    & node (Join-Path $editorDir 'scripts/pack.mjs') --pack-destination $editorStage
     Assert-ReleaseExit 'Pack @lyflow/editor'
     $editorPacked = @(Get-ChildItem -LiteralPath $editorStage -Filter '*.tgz' -File)
     if ($editorPacked.Count -ne 1) { throw 'npm pack did not produce exactly one editor tarball.' }

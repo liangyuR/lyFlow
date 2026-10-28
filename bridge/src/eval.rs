@@ -942,6 +942,7 @@ pub(crate) fn parse_holdout(spec: &str) -> Result<(String, String), String> {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Row {
+    pub snapshot_id: Option<String>,
     pub param_set: usize,
     pub sample: usize,
     pub status: String,
@@ -960,6 +961,7 @@ pub(crate) enum EngineError {
 }
 
 pub(crate) struct Engine<'a> {
+    pub capture: Option<&'a Parsed>,
     pub started: Option<&'a Sink>,
     pub core: &'a Arc<Core>,
     /// 已经叠好「基础 → --recipe → --param」的图（load_graph）。
@@ -1257,6 +1259,7 @@ impl<'a> Engine<'a> {
             }
             return Ok(Attempt {
                 row: Row {
+                    snapshot_id: None,
                     param_set: pi,
                     sample: si,
                     status: "validation_failed".to_string(),
@@ -1278,6 +1281,12 @@ impl<'a> Engine<'a> {
                 resolved: vec![false; self.metrics.len()],
             });
         }
+        let capture = match self.capture {
+            Some(options) => {
+                crate::cli::snapshot::Capture::prepare_eval(options, self.core, &loaded)?
+            }
+            None => None,
+        };
         let result = execute(
             self.core,
             RunRequest {
@@ -1295,6 +1304,10 @@ impl<'a> Engine<'a> {
                 on_event: None,
             },
         )?;
+        let snapshot_id = match capture {
+            Some(c) => Some(c.save_eval(self.core, &loaded, &result)?),
+            None => None,
+        };
         let wants_outputs = enumerate
             || sample.truth.is_some()
             || self.metrics.iter().any(MetricPath::needs_outputs);
@@ -1364,6 +1377,7 @@ impl<'a> Engine<'a> {
                 param_set: pi,
                 sample: si,
                 status: status.to_string(),
+                snapshot_id,
                 metrics: values,
                 errors,
                 duration_ms: result.duration_ms(),
@@ -1886,6 +1900,7 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         .collect();
 
     let engine = Engine {
+        capture: Some(parsed),
         started: if !list_only && parsed.has("progress-json") {
             Some(out)
         } else {
@@ -1943,6 +1958,7 @@ pub(crate) fn cmd_eval(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
             }
             let mut line_json = json!({
                 "kind": "eval_row",
+                "snapshotId": row.snapshot_id,
                 "paramSet": row.param_set,
                 "params": Value::Object(param_sets[row.param_set].display.clone()),
                 "sample": sample.id,
@@ -2094,6 +2110,7 @@ fn resume_rows(
             return Err("resume 指标集合已改变".into());
         }
         let row = Row {
+            snapshot_id: v["snapshotId"].as_str().map(str::to_string),
             param_set: pi,
             sample: si,
             status: v["status"].as_str().ok_or("resume 缺 status")?.into(),

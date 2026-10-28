@@ -113,6 +113,7 @@ export function toPicture(
   depth: 1 | 2 | 4,
   values: Float64Array,
   maxEdge: number,
+  fixedRange?: [number, number],
 ): Picture {
   let lo = 0;
   let hi = 255;
@@ -128,6 +129,11 @@ export function toPicture(
       lo = 0;
       hi = 1;
     }
+  }
+  if (fixedRange) {
+    if (!fixedRange.every(Number.isFinite) || fixedRange[1] <= fixedRange[0])
+      throw new Error('Invalid image range');
+    [lo, hi] = fixedRange;
   }
   const step = Math.max(1, Math.ceil(Math.max(width, height) / maxEdge));
   const w = Math.ceil(width / step);

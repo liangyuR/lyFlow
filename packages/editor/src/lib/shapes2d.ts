@@ -1,6 +1,7 @@
 // --------------------------------------------------------- 2D 几何叠画（G7）
 
 import * as THREE from 'three';
+import { geometryPaths } from '@lyflow/visualization';
 
 import type { OutputStat } from '../types/execution';
 
@@ -41,53 +42,7 @@ export function extentOf(out: OutputStat): number {
 
 /** 一个输出值 → 若干条线。认不出的 kind 返回空数组（前端不硬编码算子，也不该硬编码到崩）。 */
 export function shapesOf(out: OutputStat, color: number, span: number): THREE.Line[] {
-  const v = out.value;
-  if (!v) return [];
-  // 图像算子产出的几何是像素坐标（docs/image-plan.md Q2）：叠在米制的点云场景里只会画错地方
-  if (v.unit === 'px') return [];
-  switch (v.kind) {
-    case 'Box2D': {
-      const [x0, y0] = Array.isArray(v.min) ? v.min : [0, 0];
-      const [x1, y1] = Array.isArray(v.max) ? v.max : [0, 0];
-      return [polyline([x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0], color, true)];
-    }
-    case 'Line2D': {
-      if (v.hasSegment && v.start && v.end) {
-        return [polyline([v.start[0], v.start[1], 0, v.end[0], v.end[1], 0], color, false)];
-      }
-      const [px, py] = v.point ?? [0, 0];
-      const [dx, dy] = v.dir ?? [1, 0];
-      const n = Math.hypot(dx, dy) || 1;
-      const h = span / 2;
-      return [
-        polyline(
-          [px - (dx / n) * h, py - (dy / n) * h, 0, px + (dx / n) * h, py + (dy / n) * h, 0],
-          color,
-          false,
-        ),
-      ];
-    }
-    case 'Circle2D': {
-      const [cx, cy] = v.center ?? [0, 0];
-      const r = v.radius ?? 0;
-      const pts: number[] = [];
-      const SEGMENTS = 72;
-      for (let i = 0; i < SEGMENTS; i += 1) {
-        const t = (i / SEGMENTS) * Math.PI * 2;
-        pts.push(cx + r * Math.cos(t), cy + r * Math.sin(t), 0);
-      }
-      return [polyline(pts, color, true)];
-    }
-    case 'Point2D': {
-      const [x, y] = v.p ?? [0, 0];
-      // 十字而不是一个点：单个 Point 在细线材质下根本看不见
-      const s = span * 0.01 || 0.001;
-      return [
-        polyline([x - s, y, 0, x + s, y, 0], color, false),
-        polyline([x, y - s, 0, x, y + s, 0], color, false),
-      ];
-    }
-    default:
-      return [];
-  }
+  return geometryPaths(out.value ?? {}, span).map(({ points, loop }) =>
+    polyline(points, color, loop),
+  );
 }

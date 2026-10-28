@@ -22,6 +22,33 @@ Agent ── stdio ── @lyflow/mcp ──┬── HTTP + WS ── /lyflow/*
 
 ## 起它
 
+### 本地独立调试入口
+
+业务仓库不需要复制 MCP 源码、HTTP 桥接或安装脚本。在 LyFlow 检出中执行一次：
+
+```powershell
+pnpm install
+pnpm --filter @lyflow/mcp build
+```
+
+将客户端 stdio 命令配置为：
+
+```powershell
+node C:/work/lyFlow/packages/mcp/scripts/local.mjs --cli C:/runtime/lyflow.exe --root C:/work/data
+```
+
+此入口直接复用仓库内现有 HTTP/CLI 桥接，使用系统分配的本地端口和随机鉴权令牌，启动 MCP 后仅向 stdout 写协议消息；客户端退出时回收两个子进程。`--cli` 可由 `LYFLOW_CLI` 提供，`--root` 可由 `LYFLOW_HTTP_ROOT` 提供，默认工作区是当前目录。CLI 必须来自可用的工具发布包或本地构建（`pnpm cli:build`），应用的 runtime 包不保证包含 CLI。桥接仍保留现有按请求调用 CLI 的限制，不是新的常驻引擎服务。
+
+验收安装与 HTTP/CLI 环境：
+
+```powershell
+pnpm --filter @lyflow/mcp check:local --cli C:/runtime/lyflow.exe --root C:/work/data
+```
+
+输出工具列表与 `get_environment` 结果，不绑定 `gap`、车型目录或任何业务算子。图执行、节点输出、评估比较直接使用下文现有 MCP 工具；现场样本发现、业务判定与报表仍由应用仓库负责。
+
+独立点云强度阈值探索见 [PCD 强度诊断页](../examples/intensity-bench/README.md)。
+
 ### 1. 后端
 
 开发期用仓库自带的桩服务器（每个请求起一次 CLI，零依赖）：
@@ -384,3 +411,16 @@ pnpm --filter @lyflow/mcp test
 `list_operators → get_operator → validate_graph → run_graph → get_node_outputs → summarize_output`，
 另一条走配方：`list_recipes → run_graph recipe`（点数与 `lyflow run --recipe --outputs` 相同）→ 失配的配方被拦 → 内联图带 recipe →
 `get_params recipe`。glue 构建还覆盖环境核对、绑定入口、规格锁定、预算耗尽/续跑、输入漂移拒绝、验证与留出评估、基线比较、失败叠画、候选图/配方导出与后台取消。没有 `bridge/target/debug/lyflow.exe` 时集成测试 skip 并打出原因；显式 LYFLOW_PACKS=glue 时缺 glue 算子视为失败。`pnpm check` 里带着这一步。
+
+## 原生可视化
+
+见 [MCP 可视化与离线复测](mcp-visualization.md) 和 [HTTP 快照契约](http-transport.md#持久运行快照mcp-可视化)。
+
+- `run_graph` 返回可用的 `snapshotId`；`eval` 默认保存每个样本当次运行的可视化输出。
+- `view_outputs` 接受快照与节点端口图层，返回 PNG 图片内容及高清 PNG、SVG、SceneSpec 文件。点云必须声明投影轴，全部图层必须声明坐标系、单位和纵轴方向。
+- `compare_views` 接受 A/B 快照和各自图层映射，核对输入内容身份并统一视口。并排图保持对应图层配色；叠加图使用 A/B 颜色。
+- `view_evaluation` 按指标或相对基线的绝对差值排序，支持样本、参数组、失败筛选和分页。每条记录包含 `snapshotId`，可直接下钻；旧评估没有捕获的输出会明确说明，不会补跑冒充旧结果。
+
+PNG 使用共享 `@lyflow/visualization` 渲染，由系统 Edge/Chrome/Chromium 的 headless 模式生成，使用 `--disable-gpu`。可通过 `LYFLOW_BROWSER` 指定浏览器可执行文件。不会通过 Python 重画或重新拟合几何。原有 `view_output_image` 仍保留像素 ROI/overlay 兼容入口。
+
+编辑器二维导图（主预览与 Peek）和 MCP 共用 SceneSpec/SVG 渲染器；三维视口继续使用原截图方式。编辑器发布采用 `pnpm --filter @lyflow/editor pack:release --pack-destination <目录>`，暂存包内联共享源码，消费方不需要安装未发布的 workspace 包；Windows 发布入口已使用此命令对应脚本。

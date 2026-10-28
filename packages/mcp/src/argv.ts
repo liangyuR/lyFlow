@@ -1,3 +1,4 @@
+import type { CaptureOptions } from './types.js';
 export interface SampleSelector {
   samplesPath?: string | undefined;
   samplesGlob?: string | undefined;
@@ -18,6 +19,9 @@ export function graphParamsArgv(values: Record<string, unknown> | undefined): st
 }
 
 export interface EvalInput extends SampleSelector {
+  capture?: CaptureOptions | undefined;
+  snapshotRoot?: string | undefined;
+  snapshotMaxTotalBytes?: number | undefined;
   progressJson?: boolean | undefined;
   maxRuns?: number | undefined;
   resumeRows?: string | undefined;
@@ -114,6 +118,18 @@ export function evalArgv(input: EvalInput, paramsFile: string | null): string[] 
     throw new Error('至少给一个 metric，例如 outputs.gap');
   }
   const argv = ['eval', input.graphPath];
+  if (input.snapshotRoot) {
+    const capture = input.capture ?? { policy: 'all' };
+    argv.push('--snapshot-root', input.snapshotRoot, '--capture-policy', capture.policy);
+    if (input.snapshotMaxTotalBytes !== undefined) {
+      if (!Number.isSafeInteger(input.snapshotMaxTotalBytes) || input.snapshotMaxTotalBytes < 0)
+        throw new Error('Invalid snapshot total byte limit');
+      argv.push('--snapshot-max-total-bytes', String(input.snapshotMaxTotalBytes));
+    }
+    if (capture.maxBytes !== undefined) argv.push('--capture-max-bytes', String(capture.maxBytes));
+    for (const output of capture.outputs ?? [])
+      argv.push('--capture-output', `${output.nodeId}:${output.port}`);
+  }
   if (input.resumeRows) argv.push('--resume-rows', input.resumeRows);
   if (input.maxRuns !== undefined) argv.push('--max-runs', String(input.maxRuns));
   if (input.progressJson) argv.push('--progress-json');

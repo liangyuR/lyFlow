@@ -264,6 +264,9 @@ importers:
       '@dagrejs/dagre':
         specifier: ^3.1.1
         version: 3.1.1
+      '@lyflow/visualization':
+        specifier: workspace:*
+        version: link:../visualization
       immer:
         specifier: ^11.1.18
         version: 11.1.18
@@ -304,6 +307,9 @@ importers:
 
   packages/mcp:
     dependencies:
+      '@lyflow/visualization':
+        specifier: workspace:*
+        version: link:../visualization
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.30.0(zod@3.25.76)
@@ -317,6 +323,8 @@ importers:
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
+
+  packages/visualization: {}
 
 packages:
 

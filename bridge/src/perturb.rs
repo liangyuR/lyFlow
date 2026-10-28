@@ -600,6 +600,7 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
         let anchor_metrics: Vec<MetricPath> = anchors.iter().map(|a| a.metric.clone()).collect();
         let zero = displacement_param_sets(&perturb_id, axis_index, &[0.0]);
         let pre = Engine {
+            capture: None,
             started: None,
             core: &core,
             base: &loaded,
@@ -659,6 +660,7 @@ pub(crate) fn cmd_perturb(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
     };
 
     let engine = Engine {
+        capture: None,
         started: None,
         core: &core,
         base: &loaded,
