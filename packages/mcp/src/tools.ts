@@ -23,6 +23,11 @@ import { drawOverlays } from './overlay.js';
 import { registerInspectionTools } from './inspect.js';
 import { EvaluationStore } from './evaluations.js';
 import { registerExperimentTools, sampleSchema, splitSchema } from './experiments.js';
+import {
+  registerVisualizationTools,
+  captureSchema,
+  visualizationCapability,
+} from './visualizations.js';
 
 const MAX_FAILURES = 20;
 const DEFAULT_RUN_TIMEOUT_MS = 300000;
@@ -268,6 +273,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
   const artifacts = new ArtifactStore(config.workDir);
   const evaluations = new EvaluationStore(config, artifacts);
   registerExperimentTools(server, evaluations);
+  registerVisualizationTools(server, config, http, evaluations);
   registerInspectionTools(server, config, http, artifacts);
   server.registerTool(
     'read_artifact',
@@ -446,9 +452,12 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         'decisions 是全图每一个 fallback 选了哪一路。' +
         '给了 recipe 就按那个配方跑（与 lyflow run --recipe 同一个结果），返回里多一个 recipe。' +
         '不要自己从 nodes 重建成败判定 —— 那正是这个工具存在的理由。' +
-        '不返回点云 —— 要看点云走 summarize_output。',
+        '返回 snapshotId；看图用 view_outputs，统计用 summarize_output。',
       inputSchema: {
         ...graphInput,
+        capture: captureSchema
+          .optional()
+          .describe('保存当次运行可视输出，默认 all；metrics 不保留点云/图像'),
         targets: z.array(z.string()).optional().describe('只跑到这些节点'),
         set: z
           .record(z.unknown())
@@ -504,6 +513,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         const result = await http.runAndWait(
           {
             doc: graph.doc,
+            capture: args.capture ?? { policy: 'all' },
             graphPath: graph.graphPath,
             targets: args.targets ?? null,
             mode: args.mode ?? 'full',
@@ -517,11 +527,36 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           args.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS,
           extra.signal,
         );
+        let snapshotInfo: Record<string, unknown> = { snapshotId: null, snapshotStatus: 'pending' };
+        if (!result.cancelled && !result.timedOut) {
+          try {
+            const saved = await http.getJson<{ snapshotId: string }>(
+              `/lyflow/runs/${encodeURIComponent(result.runId)}/snapshot`,
+            );
+            if (saved.snapshotId !== result.runId) throw new Error('Snapshot identity mismatch');
+            snapshotInfo = {
+              snapshotId: saved.snapshotId,
+              snapshotStatus: 'ready',
+              visualization: {
+                tool: 'view_outputs',
+                snapshotId: saved.snapshotId,
+                requiresExplicitFrame: true,
+              },
+            };
+          } catch (e) {
+            snapshotInfo = {
+              snapshotId: null,
+              snapshotStatus: 'unavailable',
+              snapshotError: e instanceof Error ? e.message : String(e),
+            };
+          }
+        }
         const events = summarizeRun(result.events);
         const summary = coreSummary(result.events);
         if (summary) {
           return ok({
             runId: result.runId,
+            ...snapshotInfo,
             ...(result.cancellation ? { cancellation: result.cancellation } : {}),
             // 三态来自 core（H2）。超时是 MCP 这一侧的事，core 那边还没收尾。
             status: result.cancelled ? 'cancelled' : result.timedOut ? 'timeout' : summary.status,
@@ -555,6 +590,7 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
         }
         return ok({
           runId: result.runId,
+          ...snapshotInfo,
           ...(result.cancellation ? { cancellation: result.cancellation } : {}),
           status: result.cancelled ? 'cancelled' : result.timedOut ? 'timeout' : events.status,
           runStatus: events.status,
@@ -597,7 +633,31 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
     },
     async (args) => {
       try {
-        return ok({ outputs: await http.nodeOutputs(args.runId, args.nodeId) });
+        try {
+          const snapshot = await http.getJson<{
+            snapshotId: string;
+            outputs: Record<string, unknown>[];
+          }>(`/lyflow/snapshots/${encodeURIComponent(args.runId)}`);
+          return ok({
+            snapshotId: snapshot.snapshotId,
+            outputs: snapshot.outputs
+              .filter((o) => o['nodeId'] === args.nodeId)
+              .map((o) => ({ ...o, visualization: visualizationCapability(o) })),
+          });
+        } catch (e) {
+          if (!(e instanceof HttpError) || e.status !== 404) throw e;
+          const outputs = await http.nodeOutputs(args.runId, args.nodeId);
+          return ok({
+            snapshotId: null,
+            outputs: outputs.map((o) => ({
+              ...o,
+              visualization: {
+                ...visualizationCapability({ ...o }),
+                missing: 'snapshot_unavailable',
+              },
+            })),
+          });
+        }
       } catch (e) {
         return failed(e);
       }
@@ -834,6 +894,9 @@ export function registerTools(server: McpServer, config: Config, http: LyFlowHtt
           .array(sampleSchema)
           .optional()
           .describe('带 graphParams/truth/tags 的样本；与 samplesPath/Glob/Dir 二选一'),
+        capture: captureSchema
+          .optional()
+          .describe('保存评估每次运行的实际输出，默认 all；view_evaluation 按需生成缩略图'),
         split: splitSchema.optional().describe('按工件或批次固定分组，保持多帧同组'),
         partition: z.enum(['all', 'train', 'validation', 'holdout']).optional(),
         cachePolicy: z

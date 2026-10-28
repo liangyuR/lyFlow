@@ -218,9 +218,9 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
     ui.showToast(`主 3D 视图已钉住 ${live.label}`);
   }, [win.path, win.from.node, win.from.port, win.field, live.label]);
 
-  const exportPng = useCallback(() => {
+  const exportPng = useCallback(async () => {
     const ui = useUiStore.getState();
-    const canvas = takePeekCanvas(win.id);
+    const canvas = await takePeekCanvas(win.id);
     if (!canvas) {
       ui.showToast('这个视图还没有画面可以导出', 'warn');
       return;

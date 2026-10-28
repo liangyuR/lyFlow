@@ -9,7 +9,13 @@ import { coreSummary, parseDiagnostics, summarizeOutputs, summarizeRun } from '.
 import type { ExecutionEvent } from '../src/types.js';
 import { assessment, projectValue, valueAt } from '../src/summary.js';
 import { ArtifactStore } from '../src/artifacts.js';
-import { EvaluationStore, expandAxes, freezeSplits, type Snapshot } from '../src/evaluations.js';
+import {
+  EvaluationStore,
+  expandAxes,
+  freezeSplits,
+  fileIdentity,
+  type Snapshot,
+} from '../src/evaluations.js';
 import { assessCandidate, compareEvaluations, generateCandidates } from '../src/experiments.js';
 import { loadConfig } from '../src/config.js';
 import { digest } from '../src/inspect.js';
@@ -85,6 +91,16 @@ test('复杂记录分页保留全量分布，artifact 在原文件改变后仍�
   assert.equal((read['rows'] as { id: string }[])[0]?.id, 'a');
   assert.equal(read['total'], 1);
   await assert.rejects(store.read('../rows'), /artifactId/);
+  const before = fileIdentity(dir);
+  fs.mkdirSync(path.join(dir, 'nested'));
+  fs.writeFileSync(path.join(dir, 'nested', 'input.pcd'), '1 2 3');
+  const added = fileIdentity(dir);
+  assert.notEqual(before.sha256, added.sha256);
+  assert.equal(fileIdentity(dir).sha256, added.sha256);
+  fs.writeFileSync(path.join(dir, 'nested', 'input.pcd'), '1 2 4');
+  assert.notEqual(fileIdentity(dir).sha256, added.sha256);
+  fs.renameSync(path.join(dir, 'nested', 'input.pcd'), path.join(dir, 'nested', 'renamed.pcd'));
+  assert.notEqual(fileIdentity(dir).sha256, added.sha256);
   assert.equal(path.dirname(path.resolve(dir)), path.resolve(os.tmpdir()));
   fs.rmSync(dir, { recursive: true });
 });

@@ -29,6 +29,9 @@ const TOOLS = [
   'get_node_outputs',
   'summarize_output',
   'view_output_image',
+  'view_outputs',
+  'compare_views',
+  'view_evaluation',
   'eval',
   'perturb',
   'diff_graphs',
@@ -58,7 +61,15 @@ test('loadConfig：LYFLOW_HTTP_BASE 必填、缺了说清楚；其余配置项�
   assert.equal(config.httpBase, 'http://127.0.0.1:8787');
   assert.equal(config.token, undefined);
   assert.equal(config.cli, undefined);
-  assert.equal(config.workDir, path.join(os.tmpdir(), 'lyflow-mcp'));
+  assert.equal(config.workDir, path.join(os.homedir(), 'lyflow', 'work'));
+  assert.equal(
+    loadConfig({ LYFLOW_HTTP_BASE: 'http://localhost', LOCALAPPDATA: os.tmpdir() }).workDir,
+    path.join(os.tmpdir(), 'lyflow', 'work'),
+  );
+  assert.equal(
+    loadConfig({ LYFLOW_HTTP_BASE: 'http://localhost', LYFLOW_WORK_DIR: 'explicit' }).workDir,
+    path.resolve('explicit'),
+  );
 });
 
 test('工具面和输入 schema 的必填项对得上', async () => {
@@ -85,6 +96,9 @@ test('工具面和输入 schema 的必填项对得上', async () => {
     list_operators: [],
     summarize_output: ['nodeId', 'port', 'runId'],
     view_output_image: ['nodeId', 'port', 'runId'],
+    view_outputs: ['frame', 'layers', 'snapshotId'],
+    compare_views: ['a', 'b', 'frame'],
+    view_evaluation: ['evaluationId', 'frame', 'layers'],
     run_graph: [],
     eval: ['graphPath', 'metric'],
     perturb: ['after', 'axis', 'graphPath', 'metric', 'region'],

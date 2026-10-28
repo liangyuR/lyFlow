@@ -1,0 +1,22 @@
+{
+  "name": "@lyflow/visualization",
+  "version": "1.1.5",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./node": {
+      "types": "./node.d.ts",
+      "default": "./node.js"
+    }
+  },
+  "files": [
+    "*.js",
+    "*.d.ts"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

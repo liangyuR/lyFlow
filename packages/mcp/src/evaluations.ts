@@ -87,15 +87,38 @@ export interface EvaluationState {
 export function fileIdentity(file: string): FileIdentity {
   const resolved = fs.realpathSync(file);
   const hash = crypto.createHash('sha256');
-  const fd = fs.openSync(resolved, 'r'),
-    buf = Buffer.alloc(128 * 1024);
-  try {
-    for (let n; (n = fs.readSync(fd, buf)) > 0; ) hash.update(buf.subarray(0, n));
-  } finally {
-    fs.closeSync(fd);
-  }
-  return { path: resolved, bytes: fs.statSync(resolved).size, sha256: hash.digest('hex') };
+  const directory = fs.statSync(resolved).isDirectory();
+  let bytes = 0,
+    entries = 0;
+  const visit = (current: string, relative: string): void => {
+    if (++entries > 100000) throw new Error(`Input identity exceeds 100000 entries: ${resolved}`);
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink()) throw new Error(`Input directory contains a symlink: ${current}`);
+    if (stat.isDirectory()) {
+      hash.update(`directory:${JSON.stringify(relative)}\n`);
+      for (const name of fs.readdirSync(current).sort())
+        visit(path.join(current, name), `${relative}/${name}`);
+      return;
+    }
+    if (!stat.isFile()) throw new Error(`Unsupported input entry: ${current}`);
+    if (directory) hash.update(`file:${JSON.stringify(relative)}:${stat.size}\n`);
+    const fd = fs.openSync(current, 'r'),
+      buf = Buffer.alloc(128 * 1024);
+    try {
+      for (let n; (n = fs.readSync(fd, buf)) > 0; ) {
+        bytes += n;
+        if (bytes > 256 * 1024 * 1024 * 1024)
+          throw new Error(`Input identity exceeds 256 GiB: ${resolved}`);
+        hash.update(buf.subarray(0, n));
+      }
+    } finally {
+      fs.closeSync(fd);
+    }
+  };
+  visit(resolved, '');
+  return { path: resolved, bytes, sha256: hash.digest('hex') };
 }
+
 function save(file: string, value: unknown): void {
   const temp = `${file}.${crypto.randomUUID()}.tmp`;
   fs.writeFileSync(temp, JSON.stringify(value));
@@ -538,6 +561,15 @@ export class EvaluationStore {
       );
     const integrity = await this.verify(snapshot);
     if (integrity.length) throw new Error(`冻结输入/构建已改变: ${integrity.join(', ')}`);
+    const snapshotMaxTotalBytes =
+      process.env['LYFLOW_SNAPSHOT_MAX_TOTAL_BYTES'] === undefined
+        ? undefined
+        : Number(process.env['LYFLOW_SNAPSHOT_MAX_TOTAL_BYTES']);
+    if (
+      snapshotMaxTotalBytes !== undefined &&
+      (!Number.isSafeInteger(snapshotMaxTotalBytes) || snapshotMaxTotalBytes < 0)
+    )
+      throw new Error('Invalid snapshot total byte limit');
     const abort = new AbortController();
     this.active.set(id, abort);
     const cancel = () => abort.abort();
@@ -567,6 +599,8 @@ export class EvaluationStore {
     const argv = evalArgv(
       {
         ...snapshot.args,
+        snapshotRoot: path.join(this.config.workDir, 'snapshots'),
+        snapshotMaxTotalBytes,
         progressJson: true,
         maxRuns,
         resumeRows: seen.size ? previous : undefined,

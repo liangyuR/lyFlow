@@ -33,6 +33,7 @@ import { fullId, levelOf, resolveOutput } from '../lib/subgraph';
 import { compareContentFor } from '../lib/viewRule';
 import { gridSpec, sameFrame } from '../lib/viewFit';
 import { exportCanvasPng } from '../lib/exportPng';
+import { profileCanvas } from '../lib/sceneExport';
 import {
   MAX_POINTS_CHOICES,
   rangeDigits,
@@ -726,7 +727,19 @@ export function Viewer3D({
     const name = compareOn
       ? `${display.nodeId ?? 'A'}_vs_${compareB?.nodeId ?? 'B'}`
       : (display.nodeId ?? 'view');
-    await exportCanvasPng(scene.renderer.domElement, name);
+    const canvas =
+      cameraMode === '2d'
+        ? await profileCanvas(
+            scene,
+            [display.nodeId ?? 'A', compareB?.nodeId ?? 'B'],
+            roiEditing ? roiItems : [],
+            [
+              { runId: display.runId, nodeId: display.nodeId, port: display.port },
+              { runId: sourceB.display.runId ?? null, nodeId: compareB?.nodeId ?? null },
+            ],
+          )
+        : scene.renderer.domElement;
+    await exportCanvasPng(canvas, name);
   };
 
   return (

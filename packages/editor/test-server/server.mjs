@@ -1,6 +1,6 @@
 // docs/http-transport.md 的最小实现，给 `pnpm e2e:http` 当后端。
 // 每个请求起一次 `lyflow` CLI —— 桩服务器不常驻 core，所以缓存统计恒为 0，
-// 取点云会重跑一次图。真正的业务服务应该用 core/include/lyflow/client.hpp 常驻。
+// 运行结果在同一次 CLI 执行中保存，读取只访问不可变快照。
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -10,6 +10,7 @@ import path from 'node:path';
 
 import { encodeCloudFromPcd } from './pcd.mjs';
 import { WsHub } from './ws.mjs';
+import { snapshotStore } from './snapshots.mjs';
 
 // ------------------------------------------------------------------ 配置
 
@@ -38,6 +39,13 @@ const CLI = path.resolve(
   args.cli ??
     process.env.LYFLOW_CLI ??
     path.join(process.cwd(), 'bridge', 'target', 'debug', 'lyflow.exe'),
+);
+const snapshots = snapshotStore(
+  path.resolve(
+    args['work-dir'] ??
+      process.env.LYFLOW_WORK_DIR ??
+      path.join(process.env.LOCALAPPDATA ?? os.homedir(), 'lyflow', 'work'),
+  ),
 );
 const SCRATCH = fs.mkdtempSync(path.join(os.tmpdir(), 'lyflow-http-'));
 
@@ -239,7 +247,7 @@ function noteEvent(state, value) {
 }
 
 /** R7 的最小语义：全图计划里这次没有收场事件、但 cacheKey 跑出过结果的节点算「挂上」。
- *  桩取点云本来就是按图重跑一遍 CLI，不看 runId，所以挂不挂只影响 attached 与 getOutputInfo。 */
+ *  结果读取以本次快照为准，没有捕获的输出明确返回不可用。 */
 function attachUnplanned(state) {
   const attached = [];
   for (const [id, key] of state.fullKeys ?? []) {
@@ -379,7 +387,16 @@ async function startRun(body) {
     verdict = await isolateVerdict(body, file, baseDir);
     if (verdict && verdict.missing.length > 0) return rejectNotReady(body, verdict);
   }
-  const argv = ['run', file, '--base-dir', baseDir, '--outputs', ...paramArgs(body.params)];
+  const capture = snapshots.prepare(body.capture);
+  const argv = [
+    'run',
+    file,
+    '--base-dir',
+    baseDir,
+    '--outputs',
+    ...paramArgs(body.params),
+    ...capture.argv,
+  ];
   const scope = isolate ?? body.targets ?? [];
   for (const t of scope) argv.push('--to', t);
   // 带 targets 的运行都要挂结果（修订一 V2），先把全图的键拿到
@@ -394,7 +411,6 @@ async function startRun(body) {
   const state = {
     graphFile: file,
     baseDir,
-    // 取点云是按图重跑一遍 CLI（cloudOf）：这次的图参数取值得跟着，否则重跑的是 default
     params: body.params ?? null,
     targets: isolate ?? body.targets ?? [],
     events: [],
@@ -435,6 +451,10 @@ async function startRun(body) {
       hub.broadcast(value);
       return;
     }
+    if (value.kind === 'run_snapshot') {
+      state.snapshotId = value.snapshotId;
+      return;
+    }
     // 不带 runId/seq 的那些：校验诊断，或者 --outputs 的最后一行
     if (Array.isArray(value) || value.severity) state.diagnostics = value;
     else state.outputs = value;
@@ -442,6 +462,16 @@ async function startRun(body) {
 
   state.child = child;
   state.done = done.then((r) => {
+    try {
+      if (state.id && snapshots.finish(capture, state.id)) state.snapshotId = state.id;
+      else
+        state.snapshotError = Object.assign(
+          new Error(r.stderr.trim() || 'Run ended without a snapshot'),
+          { status: r.stderr.includes('quota exceeded') ? 507 : 410 },
+        );
+    } catch (error) {
+      state.snapshotError = error;
+    }
     if (state.cancelled && state.id) {
       const event = {
         schemaVersion: 1,
@@ -462,7 +492,7 @@ async function startRun(body) {
     const detail = state.diagnostics ? JSON.stringify(state.diagnostics) : '校验失败，没有执行';
     throw Object.assign(new Error(detail), { status: 400 });
   }
-  return { runId: id };
+  return { runId: id, snapshotId: id };
 }
 
 /** run summary（ADR-0022）就挂在最后一条 run_finished 上，不必再起一次 CLI。 */
@@ -556,67 +586,40 @@ function scanSnippets() {
   return { dirs, snippets, problems };
 }
 
-async function cloudOf(state, nodeId, port, maxPoints) {
-  const pcd = scratchFile('.pcd');
-  const r = await runCli([
-    'dump',
-    state.graphFile,
-    `${nodeId}:${port}`,
-    pcd,
-    '--base-dir',
-    state.baseDir,
-    '--format',
-    'ascii',
-    ...paramArgs(state.params),
-  ]);
-  if (!fs.existsSync(pcd)) {
-    throw Object.assign(new Error(`取不到 ${nodeId}:${port} 的点云：${r.stderr.trim()}`), {
-      status: 404,
-    });
-  }
-  try {
-    return encodeCloudFromPcd(pcd, maxPoints);
-  } finally {
-    fs.rmSync(pcd, { force: true });
-  }
+function nonnegativeInteger(value, name) {
+  if (!Number.isSafeInteger(value) || value < 0)
+    throw Object.assign(new Error(`${name} must be a nonnegative integer`), { status: 400 });
+  return value;
 }
 
-// 图像（docs/http-transport.md「图像」）：`lyflow dump` 写出 .lyim（就是 LYIM 载荷、level 0、全部行），
+async function cloudOf(state, nodeId, port, maxPoints) {
+  nonnegativeInteger(maxPoints, 'maxPoints');
+  return encodeCloudFromPcd(
+    snapshots.output(state.snapshotId ?? state.id, nodeId, port, 'PointCloud'),
+    maxPoints,
+  );
+}
+
+// 图像（docs/http-transport.md「图像」）：快照保存 .lyim（LYIM 载荷、level 0、全部行），
 // 这里只按行切。缩小（level > 0）不做 —— 帧头的 level 照实写 0，调用方按它解释尺寸。
 async function imageOf(state, nodeId, port, row, rows) {
-  const file = scratchFile('.lyim');
-  const r = await runCli([
-    'dump',
-    state.graphFile,
-    `${nodeId}:${port}`,
-    file,
-    '--base-dir',
-    state.baseDir,
-    ...paramArgs(state.params),
-  ]);
-  if (!fs.existsSync(file)) {
-    throw Object.assign(new Error(`取不到 ${nodeId}:${port} 的图像：${r.stderr.trim()}`), {
-      status: 404,
-    });
-  }
-  try {
-    const whole = fs.readFileSync(file);
-    const head = new Uint32Array(whole.buffer, whole.byteOffset, 12).slice();
-    const height = head[2];
-    const rowBytes = head[10];
-    const begin = Math.min(row, height);
-    const take = rows > 0 ? Math.min(rows, height - begin) : height - begin;
-    head[5] = 0; // level
-    head[8] = row; // rowOffset：照请求写，越界时 rowCount = 0
-    head[9] = take;
-    const pixels = whole.subarray(48 + begin * rowBytes, 48 + (begin + take) * rowBytes);
-    const out = Buffer.alloc(48 + ((pixels.length + 3) & ~3));
-    Buffer.from(head.buffer).copy(out, 0);
-    pixels.copy(out, 48);
-    return out;
-  } finally {
-    fs.rmSync(file, { force: true });
-  }
+  nonnegativeInteger(row, 'row');
+  nonnegativeInteger(rows, 'rows');
+  const file = snapshots.output(state.snapshotId ?? state.id, nodeId, port, 'Image');
+  const whole = fs.readFileSync(file);
+  const head = Uint32Array.from({ length: 12 }, (_, i) => whole.readUInt32LE(i * 4));
+  const height = head[2];
+  const rowBytes = head[10];
+  const begin = Math.min(row, height);
+  const take = rows > 0 ? Math.min(rows, height - begin) : height - begin;
+  head[5] = 0; // level
+  head[8] = row; // rowOffset：照请求写，越界时 rowCount = 0
+  head[9] = take;
+  const pixels = whole.subarray(48 + begin * rowBytes, 48 + (begin + take) * rowBytes);
+  const out = Buffer.alloc(48 + ((pixels.length + 3) & ~3));
+  Buffer.from(head.buffer).copy(out, 0);
+  pixels.copy(out, 48);
+  return out;
 }
 
 // -------------------------------------------------------------------- HTTP
@@ -689,6 +692,39 @@ async function route(req, res, url) {
     return send(res, 200, {});
   }
 
+  let snapshotMatch =
+    /^\/lyflow\/(runs|snapshots)\/([^/]+)(?:\/(snapshot|clouds|images)(?:\/([^/]+)\/([^/]+))?)?$/.exec(
+      p,
+    );
+  if (
+    req.method === 'GET' &&
+    snapshotMatch &&
+    (snapshotMatch[1] === 'snapshots' || snapshotMatch[3] === 'snapshot')
+  ) {
+    const [, kind, rawId, resource, rawNode, rawPort] = snapshotMatch;
+    const id = decodeURIComponent(rawId);
+    const pending = runs.get(id);
+    if (pending) {
+      await pending.done;
+      if (pending.snapshotError) throw pending.snapshotError;
+    }
+    const { manifest } = snapshots.read(id);
+    if (!resource || resource === 'snapshot') return send(res, 200, manifest);
+    const state = { id, snapshotId: id };
+    const node = decodeURIComponent(rawNode ?? '');
+    const port = decodeURIComponent(rawPort ?? '');
+    const buf =
+      resource === 'clouds'
+        ? await cloudOf(state, node, port, Number(q.get('maxPoints') ?? 0))
+        : await imageOf(state, node, port, Number(q.get('row') ?? 0), Number(q.get('rows') ?? 0));
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': buf.length,
+      'Access-Control-Allow-Origin': '*',
+    });
+    return res.end(buf);
+  }
+
   let m = /^\/lyflow\/runs\/([^/]+)\/outputs$/.exec(p);
   if (req.method === 'GET' && m) {
     const state = runOf(decodeURIComponent(m[1]));
@@ -700,9 +736,10 @@ async function route(req, res, url) {
   // 还没有（run 没结束，或者接的是老 core）就是 404 —— 不能压成 {}。
   m = /^\/lyflow\/runs\/([^/]+)\/summary$/.exec(p);
   if (req.method === 'GET' && m) {
-    const state = runOf(decodeURIComponent(m[1]));
-    await state.done;
-    const summary = summaryOf(state);
+    const id = decodeURIComponent(m[1]);
+    const state = runs.get(id);
+    if (state) await state.done;
+    const summary = state ? summaryOf(state) : snapshots.read(id).manifest.summary;
     if (!summary) {
       return send(res, 404, { error: '这次运行没有 run summary（core 的 ABI < v9？）' });
     }
@@ -984,7 +1021,9 @@ hub.attach(server, '/lyflow/events', (protocols) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`lyflow test-server: http://127.0.0.1:${PORT}`);
+  const port = server.address().port;
+  process.send?.({ type: 'ready', port });
+  console.log(`lyflow test-server: http://127.0.0.1:${port}`);
   console.log(`  工作区 ${ROOT}`);
   console.log(`  CLI    ${CLI}`);
   console.log(`  鉴权   ${TOKEN ? '开（Bearer token）' : '关'}`);

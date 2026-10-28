@@ -296,3 +296,54 @@ test('view_output_image 按段取齐（fetchImage）：每段 4 行的 10 行图
     },
   );
 });
+
+test('可视化快照身份、字段引用与指标不猜值', async () => {
+  const { inputIdentity, pointer, metricValue, captureSchema, displayNumber } = await import(
+    '../src/visualizations.js'
+  );
+  const snapshot = {
+    schemaVersion: 1,
+    snapshotId: 'a',
+    runId: 'a',
+    status: 'ok',
+    effectiveParams: {},
+    outputs: [],
+    inputs: [{ path: 'a.pcd', bytes: 3, sha256: 'abc', unchangedDuringRun: true }],
+  };
+  assert.equal(
+    inputIdentity(snapshot),
+    inputIdentity({ ...snapshot, inputs: [{ ...snapshot.inputs[0], path: 'copy.pcd' }] }),
+  );
+  assert.notEqual(
+    inputIdentity(snapshot),
+    inputIdentity({ ...snapshot, inputs: [{ ...snapshot.inputs[0], sha256: 'def' }] }),
+  );
+  assert.throws(() => inputIdentity({ ...snapshot, inputs: [] }), /no verifiable/);
+  assert.throws(
+    () =>
+      inputIdentity({
+        ...snapshot,
+        inputs: [{ ...snapshot.inputs[0], unchangedDuringRun: false }],
+      }),
+    /changed/,
+  );
+  assert.deepEqual(pointer({ data: { 'a/b': [1, 2] } }, '/data/a~1b'), [1, 2]);
+  assert.throws(() => pointer({}, '/__proto__'), /no field/);
+  assert.throws(() => pointer({}, 'data'), /JSON pointer/);
+  assert.equal(displayNumber(1.001352790556848), '1.00135');
+  assert.equal(displayNumber(0.000000123456789), '1.23457e-7');
+  assert.equal(metricValue({ metrics: { gap: 1.001352790556848 } }, 'gap'), 1.001352790556848);
+  assert.equal(metricValue({ metrics: { gap: { value: 0 } } }, 'gap'), 0);
+  assert.equal(metricValue({ metrics: { gap: { value: null } } }, 'gap'), null);
+  assert.equal(metricValue({ metrics: { gap: Infinity } }, 'gap'), null);
+  assert.equal(captureSchema.safeParse({ policy: 'selected' }).success, false);
+  assert.equal(
+    captureSchema.safeParse({ policy: 'selected', outputs: [{ nodeId: 'n', port: 'p' }] }).success,
+    true,
+  );
+  const values = new Float64Array([0, 10]);
+  const picture = toPicture(2, 1, 1, 4, values, 8, [0, 20]);
+  assert.deepEqual([...picture.bytes], [0, 128]);
+  assert.deepEqual(picture.range, [0, 20]);
+  assert.throws(() => toPicture(2, 1, 1, 4, values, 8, [1, 1]), /Invalid image range/);
+});

@@ -210,6 +210,32 @@ async function suiteEditAndRun(cdp, report, ws) {
     `count=${view.count} canvas=${view.hasCanvas} status=${view.status}`,
   );
 
+  const exportDir = path.join(ROOT, 'build', 'shared-export-http');
+  fs.mkdirSync(exportDir, {recursive:true});
+  await cdp.send('Browser.setDownloadBehavior', {behavior:'allow', downloadPath:exportDir});
+  await cdp.eval(`
+    const select=document.querySelector('[data-testid="viewer-camera"]');
+    select.value='2d';select.dispatchEvent(new Event('change',{bubbles:true}));
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    window.__sharedExportSvg=null;
+    const original=URL.createObjectURL;
+    URL.createObjectURL=function(blob){if(blob.type.startsWith('image/svg+xml')) blob.text().then(text=>window.__sharedExportSvg=text);return original.call(URL,blob);};
+    return true;
+  `);
+  await cdp.waitFor(`document.querySelector('.viewer')?.dataset.camera === '2d'`, {what:'2D profile camera'});
+  const prior=new Set(fs.readdirSync(exportDir));
+  await cdp.eval(`document.querySelector('[data-testid="viewer-export"]').click();return true;`);
+  await cdp.waitFor(`typeof window.__sharedExportSvg === 'string'`,{what:'shared SceneSpec SVG export'});
+  const exportedSvg=await cdp.eval(`return window.__sharedExportSvg;`);
+  report.ok('2D PNG export uses shared scene renderer with explicit XY/m axes',exportedSvg.includes('X (m)')&&exportedSvg.includes('Y (m)')&&exportedSvg.includes('<circle'));
+  const deadline=Date.now()+15000;
+  let png;
+  while(Date.now()<deadline) {png=fs.readdirSync(exportDir).find(n=>!prior.has(n)&&n.endsWith('.png'));if(png)break;await sleep(100);}
+  const exported=png?fs.readFileSync(path.join(exportDir,png)):null;
+  report.ok('2D shared PNG downloaded with native renderer dimensions',exported&&exported.readUInt32BE(16)===1100&&exported.readUInt32BE(20)===700,png??'no PNG download');
+  if(exported) fs.writeFileSync(path.join(exportDir,'latest.png'),exported);
+  fs.writeFileSync(path.join(exportDir,'latest.svg'),exportedSvg);
+
   const outputs = await cdp.eval(`
     const runId = window.__lyflow.stores.execution.getState().runId;
     return await window.__lyflow.runOutputs(runId);
@@ -602,6 +628,7 @@ async function main() {
         `--remote-debugging-port=${CDP_PORT}`,
         `--user-data-dir=${profile}`,
         "--no-first-run",
+        "--window-size=1600,1100",
         "--no-default-browser-check",
         "--disable-extensions",
         "--remote-allow-origins=*",

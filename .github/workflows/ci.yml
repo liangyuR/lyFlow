@@ -123,6 +123,12 @@ jobs:
           pnpm --filter @lyflow/editor test 2>&1 | Tee-Object -FilePath build/ci/editor-test.log
           if ($LASTEXITCODE -ne 0) { throw "前端单元测试失败 (exit $LASTEXITCODE)" }
 
+      - name: Shared visualization tests
+        shell: pwsh
+        run: |
+          pnpm --filter @lyflow/visualization test 2>&1 | Tee-Object -FilePath build/ci/visualization-test.log
+          if ($LASTEXITCODE -ne 0) { throw "Visualization tests failed (exit $LASTEXITCODE)" }
+
       - name: MCP 类型检查
         run: pnpm --filter @lyflow/mcp typecheck
 

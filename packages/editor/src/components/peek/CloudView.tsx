@@ -1,3 +1,4 @@
+import { profileCanvas } from '../../lib/sceneExport';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 
@@ -155,9 +156,16 @@ export function CloudView({ win, src }: PeekViewProps) {
         const scene = sceneRef.current;
         if (!scene) return null;
         scene.renderFrame();
-        return scene.renderer.domElement;
+        return scene.mode === '2d'
+          ? profileCanvas(
+              scene,
+              [win.id],
+              [],
+              [{ runId: display.runId, nodeId: win.from.node, port: win.from.port }],
+            )
+          : scene.renderer.domElement;
       }),
-    [win.id],
+    [win.id, win.from.node, win.from.port, display.runId],
   );
 
   useEffect(() => {
