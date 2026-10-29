@@ -851,26 +851,13 @@ BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec) {
   fs.r0 = spec.zoneStart;
   fs.r1 = spec.zoneStart + std::min(spec.fanLength, spec.zoneEnd - spec.zoneStart);
   fs.radialStep = spec.fanStep;
-  fs.peakCount = 0;
+  fs.peakCount = 3;
+  fs.peakSeparation = spec.fanSeparationDeg;
+  fs.includeInvalid = true;
   const FanResult scan = fanScan(R, fs);
-  std::vector<std::pair<double, double>>
-      fan; // (score, angle)；无效的方向记 −1，照样排在最后参与挑选
-  for (std::size_t i = 0; i < scan.angles.size(); ++i)
-    fan.emplace_back(std::isfinite(scan.scores[i]) ? scan.scores[i] : -1.0, scan.angles[i]);
-  std::stable_sort(fan.begin(), fan.end(),
-                   [](const auto& x, const auto& y) { return x.first > y.first; });
-  std::vector<std::pair<double, double>> picks;
-  for (const auto& f : fan) {
-    bool far = true;
-    for (const auto& p : picks) {
-      if (angleDiffDeg(p.second, f.second) <= spec.fanSeparationDeg)
-        far = false;
-    }
-    if (far)
-      picks.push_back(f);
-    if (picks.size() == 3)
-      break;
-  }
+  std::vector<std::pair<double, double>> picks; // (score, angle)；无效的方向记 −1
+  for (const FanPeak& p : scan.peaks)
+    picks.emplace_back(std::isfinite(p.score) ? p.score : -1.0, p.angle);
 
   // 前三个峰各粗找一遍，按「覆盖率 ×（像胶 ? 1 : 0.1）」留一个（D15）。射线本身几乎没有响应（不到最强那条的
   // 四分之一）的方向再打个对折：它是靠 ±widthMax 的卡尺从旁边「蹭」上胶的，起点落在胶外面；而真正的方向
@@ -948,13 +935,17 @@ FanResult fanScan(const Field& R, const FanSpec& spec) {
     out.scores.push_back(total > 0 && bad < spec.invalidMax * total ? sum / total : kNaN);
     out.invalid.push_back(bad);
   }
+  // includeInvalid：与 1.1 一样，无效方向按得分 −1 一起排（同分保持角度顺序）
+  const auto key = [&](std::size_t i) {
+    return std::isfinite(out.scores[i]) ? out.scores[i] : -1.0;
+  };
   std::vector<std::size_t> order;
   for (std::size_t i = 0; i < out.scores.size(); ++i) {
-    if (std::isfinite(out.scores[i]))
+    if (spec.includeInvalid || std::isfinite(out.scores[i]))
       order.push_back(i);
   }
   std::stable_sort(order.begin(), order.end(),
-                   [&](std::size_t x, std::size_t y) { return out.scores[x] > out.scores[y]; });
+                   [&](std::size_t x, std::size_t y) { return key(x) > key(y); });
   for (std::size_t i : order) {
     if (static_cast<int>(out.peaks.size()) >= spec.peakCount)
       break;

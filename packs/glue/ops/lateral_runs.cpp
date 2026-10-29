@@ -8,19 +8,19 @@ namespace lyflow::packs::glue {
 namespace {
 
 Json runJson(const Run& r, const RunEdges& e, double level) {
-  return Json{{"lo", round3(r.lo)},
-              {"hi", round3(r.hi)},
-              {"width", round3(r.width())},
-              {"mid", round3(r.mid())},
-              {"peak", numOrNull(r.peak, 3)},
+  return Json{{"lo", exact(r.lo)},
+              {"hi", exact(r.hi)},
+              {"width", exact(r.width())},
+              {"mid", exact(r.mid())},
+              {"peak", exact(r.peak)},
               {"parts", r.parts},
               {"loComplete", r.loComplete},
               {"hiComplete", r.hiComplete},
-              {"edgeLo", numOrNull(e.edgeLo, 3)},
-              {"edgeHi", numOrNull(e.edgeHi, 3)},
-              {"depth", numOrNull(e.depth, 3)},
-              {"sharpness", numOrNull(e.sharpness, 4)},
-              {"level", level >= 0 ? numOrNull(level, 3) : Json()}};
+              {"edgeLo", exact(e.edgeLo)},
+              {"edgeHi", exact(e.edgeHi)},
+              {"depth", exact(e.depth)},
+              {"sharpness", exact(e.sharpness)},
+              {"level", level >= 0 ? exact(level) : Json()}};
 }
 
 Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
@@ -71,12 +71,11 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
       const P2 p0 = st.c + st.n * r.lo, p1 = st.c + st.n * r.hi;
       runSegs.push_back({Px{p0.x, p0.y}, Px{p1.x, p1.y}});
     }
-    stations.push_back(Json{
-        {"s", round3(st.s)},
-        {"center", pxJson(st.c)},
-        {"normal", Json::array({std::round(st.n.x * 1e5) / 1e5, std::round(st.n.y * 1e5) / 1e5})},
-        {"validFraction", numOrNull(valid, 4)},
-        {"runs", std::move(js)}});
+    stations.push_back(Json{{"s", exact(st.s)},
+                            {"center", exactPx(st.c)},
+                            {"normal", exactPx(st.n)},
+                            {"validFraction", exact(valid)},
+                            {"runs", std::move(js)}});
     const P2 e0 = st.c - st.n * half, e1 = st.c + st.n * half;
     calipers.push_back({Px{e0.x, e0.y}, Px{e1.x, e1.y}});
   }
@@ -84,7 +83,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   Json rec;
   rec["count"] = poses.size();
   rec["stationStep"] = step;
-  rec["sRange"] = poses.empty() ? Json() : Json::array({round3(a), round3(b)});
+  rec["sRange"] = poses.empty() ? Json() : Json::array({exact(a), exact(b)});
   rec["searchHalf"] = half;
   rec["split"] = spec.halfMax ? "half_max" : "connected";
   rec["stations"] = std::move(stations);

@@ -1253,19 +1253,30 @@ TEST_CASE(
   sc.beadWidth = 30;
   sc.breaks = {{234, 274}};
   const cv::Mat gray = render(sc);
-  const Result old = run(inspectGraph(sceneParams(sc)), gray);
+  // 扇区起点不是整数度：每个方向都是小数（现场的扇区就是示教方向 ± 容差）。峰方向若被舍入，粗跟踪起跑的方向就与 1.1 差一点
+  Params old11 = sceneParams(sc);
+  old11.path["sector"] = {-119.56, 0.44};
+  const Result old = run(inspectGraph(old11), gray);
   REQUIRE(old.status == "ok");
   MeasureParams p = measureParams(sc);
+  p.fan["sector"] = {-119.56, 0.44};
+  p.fan["includeInvalid"] = true;
+  p.track["bearingRange"] = {-119.56, 0.44};
   p.runs = Json{{"split", "connected"}, {"mergePeakRatio", 0}};
   const Measured m = runMeasure(measureGraph(p), gray);
   REQUIRE(m.status == "ok");
-  // 1.1 在前三个峰里按覆盖率挑；干净的合成场景挑的是第 0 个峰
-  REQUIRE(old.pathInfo["heading"] == m.scan["peaks"][0]["angle"]);
-  CHECK(old.pathInfo["coverage"] == m.track["coverage"]);
-  CHECK(old.pathInfo["sharpness"] == m.track["sharpness"]);
-  CHECK(old.pathInfo["residual"] == m.track["residual"]);
+  // 1.1 在前三个峰里按覆盖率挑；干净的合成场景挑的是第 0 个峰。1.1 的 info 是舍入过的，新算子输出不舍入
+  const double heading = m.scan["peaks"][0]["angle"].get<double>();
+  CHECK(heading != std::round(heading));
+  REQUIRE(std::fabs(old.pathInfo["heading"].get<double>() - heading) <= 0.005);
+  CHECK(std::fabs(old.pathInfo["coverage"].get<double>() - m.track["coverage"].get<double>()) <=
+        5e-5);
+  CHECK(std::fabs(old.pathInfo["sharpness"].get<double>() - m.track["sharpness"].get<double>()) <=
+        5e-4);
+  CHECK(std::fabs(old.pathInfo["residual"].get<double>() - m.track["residual"].get<double>()) <=
+        5e-4);
 
-  Session s(inspectGraph(sceneParams(sc)), {}, {}, false, 0, false,
+  Session s(inspectGraph(old11), {}, {}, false, 0, false,
             {exec::InjectedInput{"n_load", "image", Data::image(imageOf(gray))}});
   REQUIRE(s.wait().runStatus() == "ok");
   Data path;
@@ -1404,6 +1415,22 @@ TEST_CASE("glue 测量算子：取不到的峰、没有胶都是值不是错 —
     CHECK(m.line["count"] == 0);
     CHECK(m.runs["count"] == 0);
     CHECK(m.edges["count"] == 0);
+  }
+  SUBCASE("扇区里没有一个有效方向：默认不出峰，includeInvalid 时按角度顺序补（1.1 的挑法）") {
+    const glue::Field none = glue::Field::whole(
+        cv::Mat(200, 200, CV_32F, cv::Scalar(std::numeric_limits<float>::quiet_NaN())));
+    glue::FanSpec spec;
+    spec.anchor = P2(100, 100);
+    spec.r0 = 10;
+    spec.r1 = 50;
+    CHECK(glue::fanScan(none, spec).peaks.empty());
+    spec.includeInvalid = true;
+    const glue::FanResult fan = glue::fanScan(none, spec);
+    REQUIRE(fan.peaks.size() == 3);
+    CHECK(fan.peaks[0].angle == -180.0);
+    CHECK(fan.peaks[1].angle == -164.0);
+    CHECK(fan.peaks[2].angle == -148.0);
+    CHECK(std::isnan(fan.peaks[0].score));
   }
   SUBCASE("一片空白：照常输出，覆盖率 0、陡度 null、沿起始方向的直线") {
     sc.bead = false;

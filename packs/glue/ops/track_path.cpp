@@ -83,8 +83,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   rec["headingSource"] = fromFan ? "fan" : "param";
   rec["peakIndex"] = fromFan ? Json(peakIndex) : Json();
   rec["valid"] = valid;
-  rec["heading"] = valid ? numOrNull(heading, 3) : Json();
-  rec["anchor"] = pxJson(spec.anchor);
+  rec["heading"] = valid ? exact(heading) : Json();
+  rec["anchor"] = exactPx(spec.anchor);
   rec["zone"] = Json::array({spec.zoneStart, spec.zoneEnd});
   rec["bearingRange"] = Json::array({spec.bearingFrom, spec.bearingTo});
 
@@ -115,21 +115,21 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     }
     rec["steps"] = tr.steps;
     rec["found"] = tr.points.size();
-    rec["coverage"] = numOrNull(tr.coverage, 4);
-    rec["sharpness"] = numOrNull(tr.sharpness, 3);
+    rec["coverage"] = exact(tr.coverage);
+    rec["sharpness"] = exact(tr.sharpness);
     rec["fitted"] = fitted;
     rec["lineSource"] = fitted ? "fit" : "ray";
-    rec["residual"] = numOrNull(residual, 3);
-    rec["stoppedAt"] = numOrNull(tr.stoppedAt, 3);
+    rec["residual"] = exact(residual);
+    rec["stoppedAt"] = exact(tr.stoppedAt);
     Json pts = Json::array();
     std::vector<P2> coarsePts;
     for (const TrackPoint& q : tr.points) {
-      pts.push_back(Json{{"s", round3(q.s)},
-                         {"point", pxJson(q.point)},
-                         {"mid", round3(q.mid)},
-                         {"width", round3(q.width)},
-                         {"peak", numOrNull(q.peak, 3)},
-                         {"sharpness", numOrNull(q.sharpness, 3)},
+      pts.push_back(Json{{"s", exact(q.s)},
+                         {"point", exactPx(q.point)},
+                         {"mid", exact(q.mid)},
+                         {"width", exact(q.width)},
+                         {"peak", exact(q.peak)},
+                         {"sharpness", exact(q.sharpness)},
                          {"onRay", q.onRay}});
       coarsePts.push_back(q.point);
     }

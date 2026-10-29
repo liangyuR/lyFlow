@@ -112,6 +112,10 @@ Json numOrNull(double v, int decimals) {
   return roundTo(v, decimals);
 }
 
+Json exact(double v) { return std::isfinite(v) ? Json(v) : Json(); }
+
+Json exactPx(P2 p) { return finite(p) ? Json::array({p.x, p.y}) : Json(); }
+
 double numOf(const Json& j) { return j.is_number() ? j.get<double>() : kNaN; }
 
 // ------------------------------------------------------------------ 折线

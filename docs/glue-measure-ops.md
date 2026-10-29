@@ -50,7 +50,7 @@ io.load_image ──image──────────────────�
 - **输入图**：`glue.response` 与 `glue.part_edges` 的 `image` 接受全分辨率 u8 灰度 / RGB / RGBA（三通道按 BT.601 转灰度，与 1.1 相同）；
   其他位深先接 `image.normalize`；预览缩小图（`scale > 1`）报 `bad_input`。`response` / `gray` / `level` 端口要求单通道 f32、`scale = 1`，
   否则 `bad_input`。
-- **JSON 数值**：坐标、偏移保留 3 位小数；取不到的值是 `null`，不用 NaN 或 −1。
+- **JSON 数值**：新算子的输出**一律不舍入**（双精度原样写出，JSON 读回逐位相同）：宿主拿这些值做判定，舍入会让落在门限上的判断与 1.1 不一致，扇形峰的方向舍入后再喂给粗跟踪还会让起跑方向偏一点。只有 `glue.Polyline` 沿用 1.1 的格式（坐标 3 位、切向 5 位小数），1.1 的 `bead_width` 量的也是这条舍入过的折线。取不到的值是 `null`，不用 NaN 或 −1。
 - **确定性**：全部算子 `deterministic = true`，同输入同参数逐位相同。
 
 ### `glue.Polyline`（Record，沿用 1.1 格式）
@@ -105,10 +105,14 @@ io.load_image ──image──────────────────�
 | `invalidMax` | float | — | 0.3 | 0–1 | 一条射线上无效采样占比 ≥ 它时，这个方向的得分为 `null` |
 | `peakCount` | int | — | 3 | 0–20 | 输出前几个峰；0 = 不输出峰 |
 | `peakSeparation` | float | deg | 15 | 0–180 | 峰之间的最小角差（严格大于，见下） |
+| `includeInvalid` | bool | — | false | — | 有效方向凑不够峰时，得分为 `null` 的方向也拿来补（1.1 的挑法，见下） |
 
-**计算**：方向 `aₖ = from + k·angleStep`（`aₖ ≤ to + 1e-6`）；每个方向在 `t = r0 + j·radialStep`（`t < r1`）上双线性采样响应，
+**计算**：方向从 `from` 起每次加 `angleStep`（累加，与 1.1 逐位相同），到 `to + 1e-6` 为止；每个方向在 `t = r0 + j·radialStep`（`t < r1`）上双线性采样响应，
 得分 = 有效采样之和 / 总采样数（无效采样按 0 计入分母）。**峰**：把有得分的方向按得分从高到低排（同分保持角度顺序），
 依次取与已取的每个峰角差都 **> `peakSeparation`** 的（与 1.1 `bead_path` 的取法相同），取满 `peakCount` 个为止。
+`includeInvalid = true` 时得分为 `null` 的方向按 −1 一起排（同分保持角度顺序，所以排在全部有效方向之后），有效方向凑不够时它们也会成为峰，
+这种峰的 `score` 是 `null` —— 1.1 `bead_path` 就是这样凑满三个候选的。默认 false：峰只从有得分的方向里取，这是有意的差异
+（没有响应的方向不当候选）；要与 1.1 逐位等价就打开它。
 角差按圆周取（−170° 与 170° 相差 20°）。
 
 `glue.FanScan`：
@@ -120,9 +124,9 @@ io.load_image ──image──────────────────�
 | `angles[]` | 各方向（度） |
 | `scores[]` | 各方向得分；无效方向 `null` |
 | `invalid[]` | 各方向的无效采样数 |
-| `peaks[]` | `{index, angle, score}`，按得分降序；`index` 是在 `angles` 里的下标 |
+| `peaks[]` | `{index, angle, score}`，按得分降序；`index` 是在 `angles` 里的下标；`angle` 与 `angles[index]` 逐位相同；`includeInvalid` 补上的峰 `score` 为 `null` |
 
-1.1 `bead_path` 的扇形搜索等价于 `radial = [zoneStart, zoneStart + min(150, zoneEnd − zoneStart)]`、其余参数取默认值；
+1.1 `bead_path` 的扇形搜索等价于 `radial = [zoneStart, zoneStart + min(150, zoneEnd − zoneStart)]`、`includeInvalid = true`、其余参数取默认值；
 给了 heading 的回退等价于 `sector = [heading − headingTol, heading + headingTol]`。
 
 ## 3. `glue.track_path` 粗跟踪与拟合
@@ -403,6 +407,13 @@ TS 接口里非可选的方法都要有；调试页真正用到的是下面这�
 
 普通依赖 `@dagrejs/dagre`、`immer`、`motion` 由包管理器装；`@lyflow/visualization` 在发布的 tarball 里已内联。包按 TypeScript 源码发布，
 宿主的打包器要能编译 TS/TSX。一页只能挂一个编辑器（store 与 transport 是模块级单例）。
+
+## 变更记录
+
+- **2026-10-29（联调后）**：GS 在 seg-new14 NEW-14 cam1 段 3 帧 12 上发现与 1.1 不等价：`fan_scan` 的 `angles[]`、`peaks[].angle` 舍入到 3 位小数，
+  `track_path` 接 fan 后用舍入的方向起跑（−45.670° 对 1.1 的 −45.66976°），同一个峰找到的胶点从 4 个变成 2 个，选中的候选随之不同。
+  改为：新算子的全部输出不再舍入（`glue.Polyline` 除外）；`track_path` 从 fan 记录读到的就是完整精度的方向。`fan_scan` 加参数 `includeInvalid`
+  （默认 false，打开即 1.1 的挑法）。端口与其余参数不变。
 
 ## 版本与兼容
 

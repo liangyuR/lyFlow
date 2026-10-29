@@ -22,6 +22,7 @@ FanSpec specOf(const ParamView& params) {
   spec.invalidMax = params.number("invalidMax");
   spec.peakCount = static_cast<int>(params.integer("peakCount"));
   spec.peakSeparation = params.number("peakSeparation");
+  spec.includeInvalid = params.flag("includeInvalid");
   return spec;
 }
 
@@ -43,7 +44,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   const FanResult fan = fanScan(R, spec);
 
   Json rec;
-  rec["anchor"] = pxJson(spec.anchor);
+  rec["anchor"] = exactPx(spec.anchor);
   rec["sector"] = Json::array({spec.from, spec.to});
   rec["radial"] = Json::array({spec.r0, spec.r1});
   rec["angleStep"] = spec.angleStep;
@@ -51,8 +52,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   rec["samples"] = fan.samples;
   Json angles = Json::array(), scores = Json::array(), invalid = Json::array();
   for (std::size_t i = 0; i < fan.angles.size(); ++i) {
-    angles.push_back(round3(fan.angles[i]));
-    scores.push_back(numOrNull(fan.scores[i], 4));
+    angles.push_back(exact(fan.angles[i]));
+    scores.push_back(exact(fan.scores[i]));
     invalid.push_back(fan.invalid[i]);
   }
   rec["angles"] = std::move(angles);
@@ -60,8 +61,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   rec["invalid"] = std::move(invalid);
   Json peaks = Json::array();
   for (const FanPeak& p : fan.peaks) {
-    peaks.push_back(
-        Json{{"index", p.index}, {"angle", round3(p.angle)}, {"score", numOrNull(p.score, 4)}});
+    peaks.push_back(Json{{"index", p.index}, {"angle", exact(p.angle)}, {"score", exact(p.score)}});
   }
   rec["peaks"] = std::move(peaks);
   Record out;
@@ -124,7 +124,7 @@ void registerFanScan(Registry& r) {
       "从锚点出发，在扇区里每隔 angleStep 一条射线，射线在径向区间 radial 上每 radialStep 采一次响应，"
       "得分 = 有效采样之和 / 总采样数；无效采样占比 ≥ invalidMax 的方向得分为 null。\n"
       "峰：有得分的方向按得分从高到低，依次取与已取的峰角差都 > peakSeparation 的，取满 peakCount 个"
-      "（与 1.1 bead_path 的取法相同）。只测量，不挑方向。";
+      "（与 1.1 bead_path 的取法相同；includeInvalid 时无效方向排在最后也可当峰）。只测量，不挑方向。输出不舍入。";
   op.inputs = {Port{"response", "Image", "Response", "glue.response 的 response。", true}};
   op.outputs = {
       Port{
@@ -155,8 +155,13 @@ void registerFanScan(Registry& r) {
       intParam("peakCount", "Peak Count", 3, "输出前几个峰；0 = 不输出峰。", 0, 20, true);
   Param peakSeparation = rangedFloat("peakSeparation", "Peak Separation", 15.0, "deg",
                                      "峰之间的角差要严格大于它。", 0.0, 180.0, true);
-  op.params = {anchor,     sector,     radial,    angleStep,
-               radialStep, invalidMax, peakCount, peakSeparation};
+  Param includeInvalid = boolParam(
+      "includeInvalid", "Include Invalid", false,
+      "有效方向凑不够 peakCount 个峰时，得分为 null 的方向（按角度顺序）也拿来补，这种峰的 score 是 null。"
+      "1.1 bead_path 是这样挑的：要与 1.1 等价就打开。",
+      true);
+  op.params = {anchor,     sector,    radial,         angleStep,     radialStep,
+               invalidMax, peakCount, peakSeparation, includeInvalid};
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;
   op.validate = &validate;

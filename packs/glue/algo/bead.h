@@ -184,6 +184,8 @@ struct FanSpec {
   double invalidMax = 0.3;
   int peakCount = 3;
   double peakSeparation = 15;
+  /// 有效方向不够 peakCount 个峰时，得分为 NaN 的方向（按角度顺序）也拿来补（1.1 bead_path 的做法）
+  bool includeInvalid = false;
 };
 
 struct FanPeak {
@@ -200,7 +202,7 @@ struct FanResult {
   std::vector<FanPeak> peaks;
 };
 
-/// 每个方向一条射线上响应的均值；峰按得分降序贪心取，与已取的角差都 > peakSeparation。
+/// 每个方向一条射线上响应的均值；峰按得分降序贪心取，与已取的角差都 > peakSeparation（includeInvalid 时无效方向排在最后）。
 FanResult fanScan(const Field& response, const FanSpec& spec);
 
 // ------------------------------------------------------------------ 粗跟踪与拟合（glue.track_path）

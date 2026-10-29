@@ -77,6 +77,9 @@ double round3(double v);
 Json pxJson(P2 p);
 P2 pxOf(const Json& j); ///< 不是两个数的数组时返回 (NaN, NaN)
 Json numOrNull(double v, int decimals = 3);
+/// 1.2 测量算子的输出不舍入（宿主拿它们做判定，舍入会让门限上的判断与 1.1 不一致）：有限值原样，否则 null。
+Json exact(double v);
+Json exactPx(P2 p);
 double numOf(const Json& j); ///< null / 缺 → NaN
 
 // ------------------------------------------------------------------ 胶路（glue.Polyline）

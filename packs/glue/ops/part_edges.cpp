@@ -65,27 +65,26 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
       Json edges = Json::array();
       for (const EdgeHit& h : hits) {
         const P2 q = st.c + dir * h.t;
-        edges.push_back(Json{{"t", round3(h.t)},
-                             {"point", pxJson(q)},
-                             {"contrast", numOrNull(h.contrast, 3)},
-                             {"farMargin", numOrNull(h.farMargin, 3)},
-                             {"descent", numOrNull(h.descent, 3)}});
+        edges.push_back(Json{{"t", exact(h.t)},
+                             {"point", exactPx(q)},
+                             {"contrast", exact(h.contrast)},
+                             {"farMargin", exact(h.farMargin)},
+                             {"descent", exact(h.descent)}});
         parts.push_back(Px{q.x, q.y});
       }
       return Json{{"length", samples > 0 ? samples - 1 : 0}, {"edges", std::move(edges)}};
     };
-    stations.push_back(Json{
-        {"s", round3(st.s)},
-        {"center", pxJson(st.c)},
-        {"normal", Json::array({std::round(st.n.x * 1e5) / 1e5, std::round(st.n.y * 1e5) / 1e5})},
-        {"right", right ? side(st.n) : Json()},
-        {"left", left ? side(-st.n) : Json()}});
+    stations.push_back(Json{{"s", exact(st.s)},
+                            {"center", exactPx(st.c)},
+                            {"normal", exactPx(st.n)},
+                            {"right", right ? side(st.n) : Json()},
+                            {"left", left ? side(-st.n) : Json()}});
   }
 
   Json rec;
   rec["count"] = poses.size();
   rec["stationStep"] = step;
-  rec["sRange"] = poses.empty() ? Json() : Json::array({round3(a), round3(b)});
+  rec["sRange"] = poses.empty() ? Json() : Json::array({exact(a), exact(b)});
   rec["sides"] = sides;
   rec["start"] = start;
   rec["searchLength"] = length;

@@ -203,7 +203,9 @@
       "id": "n_fan",
       "op": "glue.fan_scan",
       "opVersion": "1.0.0",
-      "params": {},
+      "params": {
+        "includeInvalid": true
+      },
       "ui": {
         "position": {
           "x": 260,
