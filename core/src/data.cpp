@@ -664,10 +664,13 @@ std::string Data::valueJsonUncached() const {
     const int nc = img.consistent() ? img.channels : 0;
     std::vector<double> lo(nc, 0), hi(nc, 0), sum(nc, 0);
     std::vector<std::size_t> finite(nc, 0);
-    for (std::int32_t y = 0; nc > 0 && y < img.height; ++y) {
-      for (std::int32_t x = 0; x < img.width; ++x) {
+    // 按位深直接读行紧排的像素（逐像素 Image::at 的分支在整幅图上要几毫秒，每个图像输出的事件都要算一遍）；
+    // 行主序、通道交错的累加顺序不变，结果与逐像素读一位不差
+    const auto scan = [&](const auto* px) {
+      const std::size_t count = img.pixelCount();
+      for (std::size_t i = 0; i < count; ++i, px += nc) {
         for (int c = 0; c < nc; ++c) {
-          const double v = img.at(x, y, c);
+          const double v = static_cast<double>(px[c]);
           if (!std::isfinite(v))
             continue;
           if (finite[c] == 0) {
@@ -679,6 +682,19 @@ std::string Data::valueJsonUncached() const {
           sum[c] += v;
           ++finite[c];
         }
+      }
+    };
+    if (nc > 0) {
+      switch (img.depth) {
+      case PixelDepth::U8:
+        scan(img.pixels.get());
+        break;
+      case PixelDepth::U16:
+        scan(reinterpret_cast<const std::uint16_t*>(img.pixels.get()));
+        break;
+      case PixelDepth::F32:
+        scan(reinterpret_cast<const float*>(img.pixels.get()));
+        break;
       }
     }
     const double nan = std::numeric_limits<double>::quiet_NaN();
