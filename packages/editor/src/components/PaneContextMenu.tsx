@@ -21,8 +21,8 @@ export function PaneContextMenu({
   onClose,
 }: {
   menu: PaneMenuState;
-  /** 在右键处打开算子搜索（与双击空白处一样）。 */
-  onAddOperator: (at: { x: number; y: number }) => void;
+  /** 在右键处打开算子搜索（与双击空白处一样）。拓扑锁着时不给，这一项不出。 */
+  onAddOperator?: ((at: { x: number; y: number }) => void) | undefined;
   onSelectAll: () => void;
   onLayout?: (() => void) | undefined;
   onFitView: () => void;
@@ -51,8 +51,17 @@ export function PaneContextMenu({
       data-testid="pane-context-menu"
       onClick={(e) => e.stopPropagation()}
     >
-      {item('pane-ctx-add', '添加算子…', () => onAddOperator({ x: menu.x, y: menu.y }), 'search')}
-      <hr className="ctxmenu__sep" />
+      {onAddOperator && (
+        <>
+          {item(
+            'pane-ctx-add',
+            '添加算子…',
+            () => onAddOperator({ x: menu.x, y: menu.y }),
+            'search',
+          )}
+          <hr className="ctxmenu__sep" />
+        </>
+      )}
       {item('pane-ctx-select-all', '全选', onSelectAll, 'selectAll')}
       {onLayout && item('pane-ctx-layout', '整理布局', onLayout, 'layout')}
       {item('pane-ctx-fit', '适配视图', onFitView, 'fitView')}

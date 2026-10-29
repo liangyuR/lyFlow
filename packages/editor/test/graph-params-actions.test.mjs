@@ -4,7 +4,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
-import { copyParams, pasteParams, resetParams } from '../src/lib/editActions.ts';
+import {
+  copyNodes,
+  copyParams,
+  deleteSelection,
+  pasteParams,
+  resetParams,
+} from '../src/lib/editActions.ts';
 import {
   effectiveGraphValues,
   resolveGraphBinding,
@@ -1069,4 +1075,80 @@ test('恢复某次运行的参数（调参记录）：节点参数、静音、�
     '改了名还是那个配方：0.03 改回 0.01、基础 0.02 改回 0.006，算一处',
   );
   resetRecipes(null, 'none');
+});
+
+test('拓扑锁（流程调试页）：改结构的动作写「拓扑已锁定」、doc 不动、返回各自的「没做」；调参与图参数取值照常；锁上时清空撤销栈', () => {
+  reset();
+  resetRecipes(null, 'none');
+  g().setParam('n_voxel', 'minPointsPerVoxel', 2);
+  g().addNode('filter.voxel_grid', { x: 0, y: 400 });
+  assert.ok(g().past.length > 0);
+  g().setTopologyLocked(true);
+  assert.equal(g().past.length, 0, '锁之前的结构改动撤不回去');
+  assert.equal(g().future.length, 0);
+
+  const frozen = doc();
+  const edge = frozen.edges[0];
+  const clip = { nodes: [structuredClone(node('n_voxel'))], edges: [] };
+  const clipBefore = useUiStore.getState().clipboard;
+  const rejected = [
+    ['addNode', () => g().addNode('filter.voxel_grid', { x: 0, y: 0 }), null],
+    ['addNodeAuto', () => g().addNodeAuto('filter.voxel_grid', { x: 0, y: 0 }).nodeIds, []],
+    ['deleteNodes', () => g().deleteNodes(['n_voxel']), []],
+    ['deleteNodesHealing', () => g().deleteNodesHealing(['n_voxel']).wired, 0],
+    ['pasteNodes', () => g().pasteNodes(clip, { x: 0, y: 0 }).nodeIds, []],
+    ['duplicateNodes', () => g().duplicateNodes(['n_voxel'], { keepInputs: true }).nodeIds, []],
+    ['connect', () => g().connect(edge.from, edge.to), { ok: false, reason: '拓扑已锁定' }],
+    ['disconnect', () => g().disconnect([edge.id]), undefined],
+    ['reconnectEdge', () => g().reconnectEdge(edge.id, edge.to).ok, false],
+    ['insertOnEdge', () => g().insertOnEdge(edge.id, 'n_plane', 'cloud', 'rest'), false],
+    ['replaceNodeOp', () => g().replaceNodeOp('n_voxel', 'segment.plane'), null],
+    ['composeSubgraph', () => g().composeSubgraph(['n_voxel', 'n_plane']), null],
+    ['dissolveSubgraph', () => g().dissolveSubgraph('n_clean'), []],
+    ['setBypass', () => g().setBypass(['n_voxel'], true), undefined],
+    ['promoteToGraphParam', () => g().promoteToGraphParam('n_voxel', 'leafSize'), null],
+    ['bindToGraphParam', () => g().bindToGraphParam('planeTol', 'n_voxel', 'leafSize'), false],
+    [
+      'unbindFromGraphParam',
+      () => g().unbindFromGraphParam('planeTol', 'n_plane.distanceThreshold'),
+      undefined,
+    ],
+    ['removeGraphParam', () => g().removeGraphParam('planeTol'), undefined],
+    ['renameGraphParam', () => g().renameGraphParam('planeTol', 'tol'), false],
+    ['setGraphParamSpec', () => g().setGraphParamSpec('planeTol', { unit: 'mm' }), undefined],
+    ['markGraphOutput', () => g().markGraphOutput({ node: 'n_plane', port: 'rest' }), ''],
+    ['removeGraphOutput', () => g().removeGraphOutput('cloud'), undefined],
+    // 界面手势：剪切不写剪贴板、删除不清选中，动手前就拦下
+    ['剪切', () => copyNodes(new Set(['n_voxel']), true), 0],
+    ['删除选中', () => deleteSelection(['n_voxel'], [edge.id]), undefined],
+  ];
+  for (const [what, act, want] of rejected) {
+    g().clearRejection();
+    assert.deepEqual(act(), want, what);
+    assert.equal(g().lastRejection, '拓扑已锁定', what);
+    assert.equal(doc(), frozen, `${what}：doc 不动`);
+  }
+  assert.equal(useUiStore.getState().clipboard, clipBefore, '剪切被拦：剪贴板不动');
+  inClean();
+  g().clearRejection();
+  assert.equal(g().promoteParam('s_voxel', 'minPointsPerVoxel'), null);
+  assert.equal(g().lastRejection, '拓扑已锁定');
+  useUiStore.getState().setPath([]);
+
+  // 调参、图参数取值、挪位置照常，撤销只走得到这些
+  g().clearRejection();
+  g().setParam('n_voxel', 'minPointsPerVoxel', 5);
+  g().setParam('n_plane', 'distanceThreshold', 0.02);
+  g().editGraphParamValue('planeTol', 0.03);
+  g().moveNodes([{ id: 'n_voxel', position: { x: 7, y: 7 } }]);
+  assert.equal(g().lastRejection, null);
+  assert.equal(node('n_voxel').params.minPointsPerVoxel, 5);
+  assert.equal(doc().params.planeTol.default, 0.03, '被绑定的参数改的是图参数');
+  assert.equal(g().past.length, 3);
+  while (g().canUndo()) g().undo();
+  assert.equal(node('n_voxel').params.minPointsPerVoxel, 2);
+  assert.equal(doc().nodes.length, frozen.nodes.length);
+
+  g().setTopologyLocked(false);
+  assert.ok(g().addNode('filter.voxel_grid', { x: 0, y: 0 }), '解锁之后照常加节点');
 });

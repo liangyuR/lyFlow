@@ -71,6 +71,8 @@ export function NodeContextMenu({
   const docNow = useGraphStore((s) => s.doc);
   const running = useExecutionStore((s) => s.runStatus === 'running');
   const declaredOutputs = useGraphStore((s) => s.doc.outputs);
+  // 拓扑锁着：改结构的几项置灰（store 照样会拒，这里只是不让人点了才知道）
+  const locked = useGraphStore((s) => s.topologyLocked);
   const { fitView } = useReactFlow();
   const motionOn = useMotionEnabled();
 
@@ -174,6 +176,7 @@ export function NodeContextMenu({
       <button
         type="button"
         data-testid="ctx-duplicate"
+        disabled={locked}
         onClick={() => {
           const made = useGraphStore.getState().duplicateNodes(menuTargets());
           if (made.nodeIds.length > 0) useUiStore.getState().setSelection(made.nodeIds, []);
@@ -185,6 +188,7 @@ export function NodeContextMenu({
       <button
         type="button"
         data-testid="ctx-duplicate-wired"
+        disabled={locked}
         title="副本的输入接到同一个上游、输出空着：并排调两组参数比一比"
         onClick={() => {
           const made = useGraphStore.getState().duplicateNodes(menuTargets(), { keepInputs: true });
@@ -198,6 +202,7 @@ export function NodeContextMenu({
         type="button"
         data-testid="ctx-disconnect"
         disabled={
+          locked ||
           !view.edges.some(
             (e) => menuTargets().includes(e.from.node) || menuTargets().includes(e.to.node),
           )
@@ -265,6 +270,7 @@ export function NodeContextMenu({
       <button
         type="button"
         data-testid="ctx-replace-op"
+        disabled={locked}
         title="只换右键的这一个：连线与同名参数能留的都留着"
         onClick={() => {
           onClose();
@@ -280,6 +286,7 @@ export function NodeContextMenu({
       <button
         type="button"
         data-testid="ctx-delete-heal"
+        disabled={locked}
         title="删掉后把上下游接回去（规则与静音透传一致）"
         onClick={() => {
           deleteHealing(menuTargets());
@@ -292,6 +299,7 @@ export function NodeContextMenu({
         type="button"
         className="ctxmenu__danger"
         data-testid="ctx-delete"
+        disabled={locked}
         onClick={() => {
           deleteSelection(menuTargets(), []);
           onClose();
@@ -396,7 +404,7 @@ export function NodeContextMenu({
       >
         选中下游
       </button>
-      <button type="button" data-testid="ctx-compose" onClick={doCompose}>
+      <button type="button" data-testid="ctx-compose" disabled={locked} onClick={doCompose}>
         合成子图 <kbd>{keyHint('compose')}</kbd>
       </button>
       {menuSubgraphId && (
@@ -411,12 +419,13 @@ export function NodeContextMenu({
           >
             进入子图
           </button>
-          <button type="button" data-testid="ctx-dissolve" onClick={doDissolve}>
+          <button type="button" data-testid="ctx-dissolve" disabled={locked} onClick={doDissolve}>
             解散子图 <kbd>{keyHint('dissolve')}</kbd>
           </button>
           <button
             type="button"
             data-testid="ctx-save-library"
+            disabled={locked}
             onClick={() => {
               onSaveLibrary(menuSubgraphId);
               onClose();
@@ -430,6 +439,7 @@ export function NodeContextMenu({
         <button
           type="button"
           data-testid="ctx-inline-library"
+          disabled={locked}
           title="把库算子的定义拷进这张图、换成可编辑的子图；之后与库文件脱钩，改库文件不影响这张图"
           onClick={() => {
             const nodeId = menu.nodeId;
@@ -461,6 +471,7 @@ export function NodeContextMenu({
           type="button"
           data-testid={`ctx-mark-output-${o.port}`}
           data-marked={o.name ? '1' : '0'}
+          disabled={locked}
           onClick={() => {
             const graph = useGraphStore.getState();
             if (o.name) {
@@ -468,7 +479,7 @@ export function NodeContextMenu({
               useUiStore.getState().showToast(`已取消图级输出 ${o.name}`);
             } else {
               const name = graph.markGraphOutput({ node: o.ref.nodeId, port: o.ref.port });
-              useUiStore.getState().showToast(`已标为图级输出 ${name}`);
+              if (name) useUiStore.getState().showToast(`已标为图级输出 ${name}`);
             }
             onClose();
           }}
@@ -479,6 +490,7 @@ export function NodeContextMenu({
       <button
         type="button"
         data-testid="ctx-mute"
+        disabled={locked}
         onClick={() => {
           const ids = menuTargets();
           useGraphStore.getState().setBypass(ids, !(menuNode?.bypass === true));
