@@ -6,7 +6,7 @@ import { useLayoutEffect, useState, type CSSProperties, type RefObject } from 'r
 import { placeMenu, type Placement } from '../lib/placement';
 
 export function useMenuPlacement(
-  box: RefObject<HTMLElement>,
+  box: RefObject<HTMLElement | null>,
   at: { x: number; y: number },
 ): CSSProperties {
   const key = `${at.x},${at.y}`;

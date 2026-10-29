@@ -1,7 +1,15 @@
 // 编辑器的三栏（算子面板 | 画布 | 右栏）与右栏里预览的高度：拖分栏、记住宽度、窗口窄了两侧让位（lib/panes.ts）。
 // 原来都写在 Workspace 里，和打开、保存、执行事件那些搅在一起。
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type RefObject,
+} from 'react';
 
 import { fitSidePanes } from '../lib/panes';
 import { readStoredNumber, writeStoredNumber } from '../lib/prefs';
@@ -109,9 +117,9 @@ export interface PaneLayout {
   rightWidth: number;
   onPaletteSplitterDown: () => void;
   onRightSplitterDown: () => void;
-  /** 挂到右栏与预览上：上下拖时按它们量。 */
-  rightCol: RefObject<HTMLElement>;
-  viewerBox: RefObject<HTMLDivElement>;
+  /** 挂到右栏与预览上：上下拖时按它们量。写成 MutableRefObject<T | null>：React 18 与 19 的 ref 属性都收它。 */
+  rightCol: MutableRefObject<HTMLElement | null>;
+  viewerBox: MutableRefObject<HTMLDivElement | null>;
   viewer: {
     /** 参数面板开着、预览收起时没有把手。 */
     shown: boolean;
@@ -162,8 +170,8 @@ export function usePaneLayout(
   widths.current = { palette: fitted.left, right: fitted.right };
 
   // 右栏里预览与下面（检查器 / 参数面板）之间可以上下拖，两种模式各记各的比例（参数面板开着时下面要的地方多）
-  const rightCol = useRef<HTMLElement>(null);
-  const viewerBox = useRef<HTMLDivElement>(null);
+  const rightCol = useRef<HTMLElement | null>(null);
+  const viewerBox = useRef<HTMLDivElement | null>(null);
   const getRightCol = useCallback(() => rightCol.current, []);
   const getViewerBox = useCallback(() => viewerBox.current, []);
   const inspectorViewer = useDragFraction({

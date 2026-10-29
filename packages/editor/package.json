@@ -15,7 +15,7 @@
     "src"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.react19.json",
     "build": "tsc --noEmit",
     "test": "node --import ./test/resolve-ts.mjs --test test/*.test.mjs",
     "pack:release": "node scripts/pack.mjs"
@@ -37,7 +37,9 @@
   "devDependencies": {
     "@tauri-apps/api": "^2",
     "@types/react": "^18.3.12",
+    "@types/react-19": "npm:@types/react@^19.1.0",
     "@types/react-dom": "^18.3.1",
+    "@types/react-dom-19": "npm:@types/react-dom@^19.1.0",
     "@types/three": "^0.169.0",
     "@xyflow/react": "^12.11.6",
     "react": "^18.3.1",

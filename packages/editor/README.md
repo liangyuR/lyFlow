@@ -44,7 +44,8 @@ resolve: { dedupe: ["react", "react-dom", "@xyflow/react", "three", "zustand"] }
 构建期插件：打包结果里任何一个 peer 出现两份就直接让构建失败。
 
 包按 **TypeScript 源码**发布（`exports` 指向 `src/index.ts`），所以宿主要用一个
-能编译 TS/TSX 的打包器（Vite、Next、Rspack 都行）。
+能编译 TS/TSX 的打包器（Vite、Next、Rspack 都行）。宿主的 `tsc` 会连编辑器源码一起查，所以
+`pnpm --filter @lyflow/editor typecheck` 用 React 18 与 19 两套类型各查一遍（`tsconfig.react19.json`）。
 
 ## Props
 
