@@ -2,15 +2,13 @@
   "schemaVersion": 1,
   "architecture": "x64",
   "triplet": "x64-windows",
+  "dependencyToolchain": {
+    "msvcToolset": "14.44.35207",
+    "windowsSdk": "10.0.26100.0"
+  },
   "vcpkgBaseline": "04a9d8e5212d01ee1dd9478eadd9caade4f8b0d4",
   "onnxruntimeVersion": "1.19.2",
-  "packs": [
-    "std-pointcloud",
-    "std-image",
-    "std-ml",
-    "glue",
-    "gap"
-  ],
+  "packs": ["std-pointcloud", "std-image", "std-ml", "glue", "gap"],
   "requiredOperators": [
     "io.load_image",
     "image.board_calib",
