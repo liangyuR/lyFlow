@@ -6,7 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       rebuild_deps:
-        description: 不恢复 Actions 依赖缓存，全部依赖重编并推送到 NuGet 二进制源（给源补全用）
+        description: 显式允许缺失依赖编译并补全 NuGet 缓存；默认只恢复二进制
+        type: boolean
+        default: false
+      dependencies_only:
+        description: 只准备依赖并验证空目录从 NuGet 恢复，不构建或发布产品
         type: boolean
         default: false
 
@@ -37,10 +41,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
       - name: 依赖缓存身份
         id: native-cache
         shell: pwsh
@@ -48,13 +48,22 @@ jobs:
           $configuration = Get-Content -LiteralPath packaging/release.json -Raw | ConvertFrom-Json
           $baseline = $configuration.vcpkgBaseline
           $onnxVersion = $configuration.onnxruntimeVersion
-          $toolset = "$env:VCToolsVersion".Trim().TrimEnd('\')
+          $toolset = $configuration.dependencyToolchain.msvcToolset
+          $windowsSdk = $configuration.dependencyToolchain.windowsSdk
           if ($baseline -notmatch '^[0-9a-f]{40}$') { throw '发布配置缺少固定 vcpkg baseline' }
-          if ($toolset -notmatch '^\d+\.\d+\.\d+$') { throw '无法识别当前 MSVC toolset' }
+          if ($toolset -notmatch '^\d+\.\d+\.\d+$') { throw '发布配置缺少固定 MSVC toolset' }
+          if ($windowsSdk -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw '发布配置缺少固定 Windows SDK' }
           if ($onnxVersion -notmatch '^\d+\.\d+\.\d+$') { throw '发布配置缺少固定 ONNX Runtime 版本' }
           "onnx-version=$onnxVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "baseline=$baseline" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "toolset=$toolset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "windows-sdk=$windowsSdk" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+          toolset: ${{ steps.native-cache.outputs.toolset }}
+          sdk: ${{ steps.native-cache.outputs.windows-sdk }}
 
       - name: 恢复固定版本 vcpkg 工具
         uses: actions/cache/restore@v4
@@ -73,11 +82,9 @@ jobs:
         if: ${{ !inputs.rebuild_deps }}
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-std-glue-gap-v1
-          # 组合变了（加包、改 features）时退回同工具集、同基线的最近一份：vcpkg 按每个包的 ABI 哈希取缓存，
-          # 对不上的包自己重编，不会用错二进制；于是只编新增或变化的那几个包。
+          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-glue-gap-v1
           restore-keys: |
-            windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-
+            windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-
 
       - uses: actions/cache/restore@v4
         id: onnx-cache-restore
@@ -90,8 +97,23 @@ jobs:
         env:
           LYFLOW_VCPKG_FEED_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LYFLOW_VCPKG_FEED_USER: ${{ github.actor }}
-          LYFLOW_VCPKG_FEED_MODE: readwrite
-        run: ./scripts/prepare-release-deps.ps1
+          LYFLOW_VCPKG_FEED_MODE: ${{ inputs.rebuild_deps && 'readwrite' || 'read' }}
+          LYFLOW_ALLOW_DEPENDENCY_BUILD: ${{ inputs.rebuild_deps && 'true' || 'false' }}
+        run: |
+          ./scripts/prepare-release-deps.ps1 -AllowBuild:($env:LYFLOW_ALLOW_DEPENDENCY_BUILD -eq 'true')
+
+      - name: 空目录验证 NuGet 二进制恢复
+        if: ${{ inputs.rebuild_deps || inputs.dependencies_only }}
+        shell: pwsh
+        env:
+          LYFLOW_VCPKG_FEED_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LYFLOW_VCPKG_FEED_USER: ${{ github.actor }}
+          LYFLOW_VCPKG_FEED_MODE: read
+        run: |
+          $installRoot = Join-Path $env:RUNNER_TEMP 'lyflow-nuget-proof-installed'
+          $binaryCache = Join-Path $env:RUNNER_TEMP 'lyflow-nuget-proof-cache'
+          if ((Test-Path -LiteralPath $installRoot) -or (Test-Path -LiteralPath $binaryCache)) { throw 'NuGet 验证目录必须为空' }
+          ./scripts/prepare-release-deps.ps1 -InstallRoot $installRoot -BinaryCache $binaryCache -DiagnosticsName nuget-proof
 
       - name: 保存已验证的 vcpkg 工具
         uses: actions/cache/save@v4
@@ -110,7 +132,7 @@ jobs:
         if: steps.native-cache-restore.outputs.cache-hit != 'true'
         with:
           path: build/release-deps/binary-cache
-          key: ${{ steps.native-cache-restore.outputs.cache-primary-key }}
+          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-glue-gap-v1
 
       - name: 保存 ONNX Runtime 缓存
         uses: actions/cache/save@v4
@@ -119,9 +141,19 @@ jobs:
           path: third_party/onnxruntime/onnxruntime-win-x64-${{ steps.native-cache.outputs.onnx-version }}
           key: ${{ steps.onnx-cache-restore.outputs.cache-primary-key }}
 
+      - name: 保存依赖 ABI 诊断
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-deps-diagnostics
+          path: build/release-dependency-diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
+
   build:
     name: 完整 Windows x64 构建
     needs: deps
+    if: ${{ !inputs.dependencies_only }}
     permissions:
       contents: read
       packages: read
@@ -169,10 +201,6 @@ jobs:
       - name: Python 依赖
         run: python -m pip install -r scripts/requirements.txt
 
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
       - name: 依赖缓存身份
         id: native-cache
         shell: pwsh
@@ -180,13 +208,22 @@ jobs:
           $configuration = Get-Content -LiteralPath packaging/release.json -Raw | ConvertFrom-Json
           $baseline = $configuration.vcpkgBaseline
           $onnxVersion = $configuration.onnxruntimeVersion
-          $toolset = "$env:VCToolsVersion".Trim().TrimEnd('\')
+          $toolset = $configuration.dependencyToolchain.msvcToolset
+          $windowsSdk = $configuration.dependencyToolchain.windowsSdk
           if ($baseline -notmatch '^[0-9a-f]{40}$') { throw '发布配置缺少固定 vcpkg baseline' }
-          if ($toolset -notmatch '^\d+\.\d+\.\d+$') { throw '无法识别当前 MSVC toolset' }
+          if ($toolset -notmatch '^\d+\.\d+\.\d+$') { throw '发布配置缺少固定 MSVC toolset' }
+          if ($windowsSdk -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw '发布配置缺少固定 Windows SDK' }
           if ($onnxVersion -notmatch '^\d+\.\d+\.\d+$') { throw '发布配置缺少固定 ONNX Runtime 版本' }
           "onnx-version=$onnxVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "baseline=$baseline" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "toolset=$toolset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "windows-sdk=$windowsSdk" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+          toolset: ${{ steps.native-cache.outputs.toolset }}
+          sdk: ${{ steps.native-cache.outputs.windows-sdk }}
 
       - name: 恢复固定版本 vcpkg 工具
         uses: actions/cache/restore@v4
@@ -204,11 +241,9 @@ jobs:
         id: native-cache-restore
         with:
           path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-std-glue-gap-v1
-          # 组合变了（加包、改 features）时退回同工具集、同基线的最近一份：vcpkg 按每个包的 ABI 哈希取缓存，
-          # 对不上的包自己重编，不会用错二进制；于是只编新增或变化的那几个包。
+          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-std-glue-gap-v1
           restore-keys: |
-            windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-
+            windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-sdk-${{ steps.native-cache.outputs.windows-sdk }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-locked-tools-v1-
 
       - uses: actions/cache/restore@v4
         id: onnx-cache-restore
@@ -268,6 +303,7 @@ jobs:
             build/release-diagnostics/*.log
             build/release-core/**/*.log
             build/release-core/ctest-results.xml
+            build/release-dependency-diagnostics/
           if-no-files-found: warn
           retention-days: 7
 

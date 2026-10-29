@@ -11,7 +11,7 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'release-common.ps1')
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
-$environmentNames = @('LYFLOW_STD_PACKS', 'LYFLOW_PACKS', 'LYFLOW_OP_PACKS', 'LYFLOW_PREBUILT_CORE_DIR', 'LYFLOW_TEST_ONNX_MODEL', 'CARGO_TARGET_DIR', 'VCPKG_ROOT', 'VCPKG_INSTALLED_DIR', 'LYFLOW_ONNXRUNTIME_ROOT', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_DIR', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'VCPKG_DEFAULT_BINARY_CACHE', 'VCPKG_BINARY_SOURCES', 'VCPKG_NUGET_REPOSITORY')
+$environmentNames = @('LYFLOW_STD_PACKS', 'LYFLOW_PACKS', 'LYFLOW_OP_PACKS', 'LYFLOW_PREBUILT_CORE_DIR', 'LYFLOW_TEST_ONNX_MODEL', 'CARGO_TARGET_DIR', 'VCPKG_ROOT', 'VCPKG_INSTALLED_DIR', 'LYFLOW_ONNXRUNTIME_ROOT', 'VCPKG_MANIFEST_MODE', 'VCPKG_MANIFEST_DIR', 'VCPKG_MANIFEST_INSTALL', 'VCPKG_TARGET_TRIPLET', 'VCPKG_DEFAULT_BINARY_CACHE', 'VCPKG_BINARY_SOURCES', 'VCPKG_NUGET_REPOSITORY', 'VCPKG_FORCE_DOWNLOADED_BINARIES', 'VCPKG_OVERLAY_TRIPLETS')
 $previousEnvironment = @{}
 foreach ($name in $environmentNames) { $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 try {
@@ -40,7 +40,7 @@ try {
     $buildParent = Join-Path $root 'build'
     if (-not $OutputDir) { $OutputDir = Join-Path $buildParent 'release' }
     $output = [IO.Path]::GetFullPath($OutputDir)
-    foreach ($reserved in @('release-stage', 'release-core', 'release-rust', 'release-fixtures', 'release-tools', 'release-deps', 'release-diagnostics')) {
+    foreach ($reserved in @('release-stage', 'release-core', 'release-rust', 'release-fixtures', 'release-tools', 'release-deps', 'release-diagnostics', 'release-dependency-diagnostics')) {
         $reservedPath = [IO.Path]::GetFullPath((Join-Path $buildParent $reserved))
         if ($output.Equals($reservedPath, [StringComparison]::OrdinalIgnoreCase) -or $output.StartsWith($reservedPath + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Output directory overlaps internal release workspace: $output"
@@ -59,7 +59,7 @@ try {
     $runtime = Join-Path $stage 'runtime'
     $sdk = Join-Path $stage 'sdk'
     New-Item -ItemType Directory -Path $runtime, $sdk -Force | Out-Null
-    & (Join-Path $PSScriptRoot 'prepare-release-deps.ps1') -SkipDependencySetup:$SkipDependencySetup
+    & (Join-Path $PSScriptRoot 'prepare-release-deps.ps1') -SkipDependencySetup:$SkipDependencySetup -DiagnosticsName package-dependencies
     $fixtures = Join-Path $buildParent 'release-fixtures'
     & python (Join-Path $root 'tests/release/make_fixtures.py') --output-dir $fixtures
     Assert-ReleaseExit 'Generate release fixtures'
