@@ -43,7 +43,7 @@ function Get-ReleaseVersion {
     param([string]$Root)
     $version = (Get-Content -LiteralPath (Join-Path $Root 'package.json') -Raw | ConvertFrom-Json).version
     if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Unsupported product version: $version" }
-    foreach ($relative in @('app/package.json', 'packages/editor/package.json', 'packages/mcp/package.json', 'examples/host-react/package.json', 'bridge/tauri.conf.json')) {
+    foreach ($relative in @('app/package.json', 'packages/editor/package.json', 'packages/mcp/package.json', 'packages/visualization/package.json', 'examples/host-react/package.json', 'bridge/tauri.conf.json')) {
         $actual = (Get-Content -LiteralPath (Join-Path $Root $relative) -Raw | ConvertFrom-Json).version
         if ($actual -ne $version) { throw "Version mismatch in ${relative}: expected $version, got $actual" }
     }
