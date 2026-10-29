@@ -1,6 +1,6 @@
 # glue — LyFlow 领域算子包：涂胶检测
 
-版本 0.1.0，**默认关闭**（ADR-0015）。打开它：`$env:LYFLOW_PACKS = "glue"`（与别的领域包一起：`"gap;dts;glue"`）。
+版本 0.2.0，**默认关闭**（ADR-0015）。打开它：`$env:LYFLOW_PACKS = "glue"`（与别的领域包一起：`"gap;dts;glue"`）。
 
 对胶枪相机的一帧图像，用几个叫得出名字的积木量出胶宽、查出断胶、量出胶到零件边的距离，并判 OK / NG
 （[docs/glue-plan.md](../../docs/glue-plan.md) §2，G2）。一张检测图 6 个节点：
@@ -23,10 +23,11 @@ io.load_image → glue.bead_path → glue.bead_width → glue.bead_breaks ─┐
 ```
 packs/glue/
   algo/      算法内核（D1–D16）：响应图、卡尺、定胶路、逐站、零件边、人造断胶。纯函数，吃 cv::Mat
-  ops/       9 个算子 + 两种 Bundle + 片段注册；Record / Bundle 的读写在 common.cpp
+  ops/       15 个算子（含 1.2 的 6 个测量算子）+ 两种 Bundle + 片段注册；Record / Bundle 的读写在 common.cpp
   tests/     doctest（合成图：已知宽度、断口、边距、标定，§4 第 13 条）
   snippets/  随包的片段「涂胶检测」（glue.bead_inspect）
-  graphs/    glue1 / glue2（随动单帧检测）、taught（逐拍照点示教胶路）、flyshot（飞拍定位 + 逐点卡尺）
+  graphs/    glue1 / glue2（随动单帧检测）、taught（逐拍照点示教胶路）、flyshot（飞拍定位 + 逐点卡尺）、
+             measure（1.2 测量算子的参考连法：逐帧定向）
   tools/     真实帧的批量评估、人造断胶数据集、叠画缩略图（只调 lyflow CLI，D14）
 ```
 
@@ -103,6 +104,24 @@ configure 时没有这个目标就 FATAL（`LYFLOW_STD_PACKS=0` 的纯平台构�
 **失败语义**（ADR-0016 错误即值）：没有胶本身就是一个 NG 结果，不是执行错误 —— `bead_path` 覆盖率低于 `minCoverage`
 或不像胶（D15）时 `info.ok = false`，折线是沿选中方向的一条直线；下游照常跑：`bead_width` 全部判无胶、`bead_breaks`
 报出整个检测区一段、`judge` 报「检测区内没找到胶」。
+
+## 测量算子（1.2，GlueSight 用）
+
+GlueSight 从 1.2 起只用下面 6 个算子，判定（有无胶、像不像胶、方向回退、每站取哪一段）全部在宿主里做；契约（端口、全部参数、
+输出字段、与 1.1 的等价设置）见 [docs/glue-measure-ops.md](../../docs/glue-measure-ops.md)，参考连法见 `graphs/measure.lyflow.json`。
+1.1 的积木原样保留，结果一位不变。
+
+| id | 输入 → 输出 | 一步做什么 |
+|---|---|---|
+| `glue.response` 响应图 | `image` → `response`、`gray`、`level`（f32） | 黑 / 白顶帽 + 陡度用的平滑灰度 + 局部亮度，整幅或 roi，只算一次 |
+| `glue.fan_scan` 扇形扫描 | `response` → `scan: Record<glue.FanScan>` | 每个方向射线上的平均响应，前 N 个相距 > peakSeparation 的峰 |
+| `glue.track_path` 粗跟踪与拟合 | `response`、`gray`、`fan?` → `line`、`track: Record<glue.Track>` | 沿一个方向找胶点、拟合光滑胶路；覆盖率、陡度 P25、逐点陡度，不判 ok |
+| `glue.lateral_runs` 横向卡尺 | `response`、`gray`、`line`、`level?` → `runs: Record<glue.LateralRuns>` | 每站全部暗段（半高拆分 / 连通段、分段门限、合并缝与峰值比都是参数） |
+| `glue.part_edges` 找零件边 | `image`、`line` → `edges: Record<glue.PartEdges>` | 每站两侧全部合格跳变，不选侧、不剔野 |
+| `glue.polyline` 折线胶路 | （无）→ `line` | 参数折线按弧长重采样（示教走廊） |
+
+算法仍只有一份：1.1 的 `bead_path` / `bead_width` / `edge_distance` 改成调用同一组参数化函数（`trackBead`、`fitBeadPath`、
+`caliperRuns`、`runEdges`、`fanScan`、`findPartEdges`），默认参数即 1.1 的取值，doctest 对拍胶路逐位相同。
 
 ## 示教胶路（glue-plan §6，G5）
 

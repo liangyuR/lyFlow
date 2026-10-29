@@ -28,8 +28,10 @@ std::vector<double> smooth1d(const std::vector<double>& v) {
 
 } // namespace
 
-double findPartEdge(const Field& gray, P2 c, P2 dir, double start, const EdgeSpec& spec) {
-  const int want = static_cast<int>(std::floor(spec.searchLength)) + 1;
+std::vector<EdgeHit> findPartEdges(const Field& gray, P2 c, P2 dir, double start, double length,
+                                   const EdgeScanSpec& spec, bool firstOnly, int* samples) {
+  std::vector<EdgeHit> hits;
+  const int want = static_cast<int>(std::floor(length)) + 1;
   std::vector<double> v;
   v.reserve(static_cast<std::size_t>(want));
   for (int k = 0; k < want; ++k) {
@@ -38,17 +40,19 @@ double findPartEdge(const Field& gray, P2 c, P2 dir, double start, const EdgeSpe
       break; // 出了图：截断，不把图外当成暗（否则图像边界本身就成了「零件边」）
     v.push_back(spec.darkToBright ? 255.0 - x : x);
   }
+  if (samples)
+    *samples = static_cast<int>(v.size());
   const int far = std::max(1, static_cast<int>(std::lround(spec.farRun)));
   const int n = static_cast<int>(v.size());
   if (n < far + 10)
-    return kNaN;
+    return hits;
   const std::vector<double> p = smooth1d(v);
   auto descent = [&](int k) {
     return 0.5 * (p[static_cast<std::size_t>(k - 1)] - p[static_cast<std::size_t>(k + 1)]);
   };
   for (int k = 5; k + 2 + far <= n && k + 1 < n; ++k) {
     const double dk = descent(k);
-    if (dk <= 0.05 * spec.contrastMin)
+    if (dk <= spec.descentRatio * spec.contrastMin)
       continue;
     // 跳变里下降最快的那一点：往前、往后都不比它陡
     if (descent(k - 1) > dk)
@@ -67,15 +71,27 @@ double findPartEdge(const Field& gray, P2 c, P2 dir, double start, const EdgeSpe
     farMean /= far;
     if (nearMean - farMean < spec.contrastMin)
       continue;
-    if (nearMean - farMax < 0.5 * spec.contrastMin)
+    if (nearMean - farMax < spec.farDropRatio * spec.contrastMin)
       continue; // 远侧没持续暗下去：划痕、反光条
     const double a = descent(k - 1);
     const double b = k + 2 < n ? descent(k + 1) : dk;
     const double den = a - 2.0 * dk + b;
     const double delta = den < -1e-12 ? std::clamp(0.5 * (a - b) / den, -0.5, 0.5) : 0.0;
-    return start + k + delta;
+    hits.push_back(EdgeHit{start + k + delta, nearMean - farMean, nearMean - farMax, dk});
+    if (firstOnly)
+      break;
   }
-  return kNaN;
+  return hits;
+}
+
+double findPartEdge(const Field& gray, P2 c, P2 dir, double start, const EdgeSpec& spec) {
+  EdgeScanSpec es;
+  es.contrastMin = spec.contrastMin;
+  es.farRun = spec.farRun;
+  es.darkToBright = spec.darkToBright;
+  const std::vector<EdgeHit> hits =
+      findPartEdges(gray, c, dir, start, spec.searchLength, es, /*firstOnly=*/true);
+  return hits.empty() ? kNaN : hits.front().t;
 }
 
 EdgeResult measureEdges(const cv::Mat& gray, const std::vector<Station>& stations,

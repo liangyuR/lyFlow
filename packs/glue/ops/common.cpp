@@ -66,6 +66,29 @@ cv::Mat grayOf(const Data& image) {
   return img && img->scale == 1 ? cvx::gray8(*img) : cv::Mat{};
 }
 
+bool f32FieldOf(const Data& image, Field* out) {
+  const Image* img = image.asImage();
+  if (!img || img->scale != 1 || img->channels != 1 || img->depth != PixelDepth::F32 ||
+      !img->consistent())
+    return false;
+  *out = Field::whole(cvx::view(*img));
+  return true;
+}
+
+Data f32Image(cv::Mat m) {
+  Image img;
+  cvx::fromMat(std::move(m), img);
+  return Data::image(std::move(img));
+}
+
+Status badImage(const char* port, bool f32) {
+  return Status::Error(
+      Phase::Execute, "bad_input",
+      f32 ? "需要 glue.response 输出的全分辨率单通道 f32 图"
+          : "需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行",
+      {}, port);
+}
+
 // ------------------------------------------------------------------ JSON
 
 double round3(double v) { return roundTo(v, 3); }
@@ -154,6 +177,47 @@ bool readPolyline(const Data& d, Polyline* out) {
   }
   *out = std::move(line);
   return true;
+}
+
+bool readLine(const Data& d, Polyline* out) {
+  const Record* rec = d.asRecord();
+  if (!rec || rec->type != kPolylineType)
+    return false;
+  const auto count = rec->data.find("count");
+  if (count != rec->data.end() && count->is_number() && count->get<double>() == 0) {
+    *out = Polyline();
+    return true;
+  }
+  return readPolyline(d, out);
+}
+
+std::vector<StationPose> layStations(const Polyline& line, double step, double rangeA,
+                                     double rangeB, double* usedA, double* usedB) {
+  std::vector<StationPose> out;
+  *usedA = *usedB = kNaN;
+  if (line.s.empty() || !(step > 0))
+    return out;
+  double a = line.s.front(), b = line.s.back();
+  if (!(rangeA == 0 && rangeB == 0)) {
+    a = std::max(a, rangeA);
+    b = std::min(b, rangeB);
+  }
+  if (!(b >= a))
+    return out;
+  *usedA = a;
+  *usedB = b;
+  const PolylineView v = line.view();
+  for (int k = 0;; ++k) {
+    const double s = a + k * step;
+    if (s > b + 1e-6)
+      break;
+    StationPose st;
+    st.s = s;
+    v.at(s, &st.c, &st.t);
+    st.n = perp(st.t);
+    out.push_back(st);
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------ Bundle 读写
@@ -408,6 +472,31 @@ Param boolParam(const char* name, const char* label, bool def, const char* doc, 
   p.doc = doc;
   p.def = Value::boolean(def);
   p.advanced = advanced;
+  return p;
+}
+
+Param intParam(const char* name, const char* label, int def, const char* doc, int lo, int hi,
+               bool advanced) {
+  Param p;
+  p.name = name;
+  p.tuningRole = "detection";
+  p.type = ParamType::Int;
+  p.label = label;
+  p.doc = doc;
+  p.def = Value::integer(def);
+  p.min = lo;
+  p.max = hi;
+  p.advanced = advanced;
+  return p;
+}
+
+Param rangedFloat(const char* name, const char* label, double def, const char* unitName,
+                  const char* doc, double lo, double hi, bool advanced) {
+  Param p = floatParam(name, label, def, unitName, doc, advanced);
+  if (std::isfinite(lo))
+    p.min = lo;
+  if (std::isfinite(hi))
+    p.max = hi;
   return p;
 }
 

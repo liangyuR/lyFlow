@@ -84,6 +84,8 @@ io.load_image ──image──────────────────�
 | `levelSigma` | float | px | 1.2 | 0–3 | `level` 的 5×5 高斯 σ；0 = 不平滑 |
 
 固定（不开放）：结构元是近似圆盘的正八边形（方形 ⊕ 两条对角线段，比 OpenCV 椭圆核快三十多倍）；高斯核固定 5×5；roi 内部按两倍结构元半径 + 4 外扩计算。
+八边形拆成三次形态学串着做，离图边两倍半径以内闭运算可能比原图低一点（1.1 的 `responseField` 也是这样，那里会出负响应）；
+`glue.response` 把负值截到 0 再平滑，所以 `response` 处处 ≥ 0，离图边远的地方与 1.1 逐位相同。
 
 ## 2. `glue.fan_scan` 扇形扫描
 
@@ -341,29 +343,27 @@ n_resp.response, n_resp.gray, n_tK.line, n_resp.level → n_rK (glue.lateral_run
 
 ## 嵌入编辑器：只读拓扑的流程调试页（GS LF-6）
 
-GS 在候选工作区嵌入 `@lyflow/editor` 做流程调试页：拓扑锁住，只调参数。排在算子之后实现，同在 1.2 系列。
+GS 在候选工作区嵌入 `@lyflow/editor` 做流程调试页：拓扑锁住，只调参数。1.2.0 已实现，说明与完整拦截清单见
+[packages/editor/README.md](../packages/editor/README.md)「Props」。
 
-### 现状
+### `topologyLocked?: boolean`（默认 false）
 
-编辑器目前**没有**只读或锁拓扑的开关。现有 props 只有 `transport`、`dialogs`、`graphPath`、`onDocChange`、`theme`、`className`、`animations`
-（[packages/editor/README.md](../packages/editor/README.md)「Props」）。`StaticTransport` 只读的是「什么都跑不了」，和这里的需求不是一回事。
-
-### 计划：`topologyLocked?: boolean`（默认 false）
-
-拦截放在 graph store 的结构性动作里（不只是隐藏按钮），快捷键、粘贴、右键菜单、拖线都走同一道门；被拦时弹一条 info toast「拓扑已锁定」。
+拦截放在 graph store 的结构性动作里（不只是隐藏按钮），快捷键、粘贴、右键菜单、拖线都走同一道门；被拦时动作返回各自的「没做」值
+（null / false / 空数组 / `{ok: false}`），`lastRejection` = 「拓扑已锁定」，编辑器弹提示。锁上时撤销 / 重做栈清空。
 
 | 锁住（`topologyLocked = true`） | 照常可用 |
 |---|---|
 | 增删节点（含 Delete、剪切、粘贴、复制节点、Ctrl+D） | 节点参数表单（含多选同算子一起改） |
 | 连线、断线、拖线改接、插入到连线中间、拖线松在空白处建节点 | 顶层图参数的取值与配方切换 |
-| 改节点算子类型、应用迁移里改连线的那一类 | 运行、运行到此、仅此节点、强制重算、取消 |
-| 节点面板 / 搜索弹层（不渲染）、从库拖入、插入片段、展开库算子 | 节点输出预览、连线内容查看器、Inspector、日志页 |
+| 改节点算子类型；打开图时只要改连线的迁移整条不写回（节点停在老版本），只改版本与参数的照写 | 运行、运行到此、仅此节点、强制重算、取消 |
+| 算子面板与片段（左栏不渲染）、算子搜索弹层、从外部拖入、展开库算子 | 节点输出预览、连线内容查看器、Inspector、日志页 |
 | 合成子图 / 解散子图、保存到库 | 进出子图查看、查找节点（Ctrl+F）、适配视图 |
-| 静音 / 旁路节点（改变数据流） | 挪节点位置、自动布局（只改坐标，算不算 dirty 由宿主经 `onDocChange` 自己决定） |
-| 图参数的增删、改规格、提升 / 解绑（改变图结构） | 撤销 / 重做（只会撤到参数改动；锁上之前的历史清空） |
+| 静音 / 旁路节点（改变数据流）；「恢复这组参数」锁着时不恢复静音状态，参数照恢复 | 挪节点位置、自动布局（只改坐标，算不算 dirty 由宿主经 `onDocChange` 自己决定） |
+| 图参数的增删、改名、改规格、提升 / 绑定 / 解绑，图级输出的标记与删除；参数面板的「改为只在本配方生效」（它会新建图参数） | 撤销 / 重做（只撤得到锁上之后的调参） |
 
-React Flow 一侧同时设 `nodesConnectable={false}`、`edgesReconnectable={false}`。测试按 [testing.md](testing.md)：
-store 守卫进 `packages/editor/test`，真界面只在 e2e 留一组（拖线不生效、面板不出现、改参数能跑）。
+React Flow 一侧 `nodesConnectable`、`edgesReconnectable` 关掉；节点 / 连线右键菜单里改结构的项置灰。工具栏的「新建」没拦（锁着时新建出的空图
+加不了节点，要不要藏由宿主决定）；检查器与参数面板里「纳入配方」「解除绑定」「删图参数」这类按钮没有置灰，点了被 store 拒、doc 不变。
+store 守卫的单元测试在 `packages/editor/test/graph-params-actions.test.mjs`、`migrations.test.mjs`；真界面（面板不出、端口拖不出线）没有 e2e。
 
 ### 自定义 Transport 要实现什么
 
@@ -412,4 +412,24 @@ TS 接口里非可选的方法都要有；调试页真正用到的是下面这�
 
 ## 实测耗时
 
-（实现完成后填写：全分辨率 1280×1024、Release 构建，上面那张逐帧定向图的分节点与整图 p50 / p95。）
+2026-10-29，本机（Windows 11、MSVC 14.44、RelWithDebInfo），seg-new14 cam2 录制的 22 帧 1280×1024 灰度图，`lyflow eval --no-cache`、
+默认节点并行度，每组跑两遍取后一遍（两遍相差 < 0.5 ms）。图是 `packs/glue/graphs/measure.lyflow.json`：响应图 → 扇形扫描（取 3 个峰）→
+3 × 粗跟踪 → 3 × 横向卡尺，一次运行算完全部候选。参数：出胶点 (629.1, 890.7)、扇区 [−146.44, −116.44]°、检测区 [0, 300]、
+径向区间 [0, 150]、`diameter` 61、跟踪胶宽上限 60、站距 10、卡尺半长 150、`half_max`。「整图」= `run_finished.durationMs` − 读图节点
+（宿主注入图像，不读文件）。
+
+| 节点 | 整幅响应图 p50 / p95（ms） | `roi` = 出胶点 ± 368 px p50 / p95（ms） |
+|---|---|---|
+| `glue.response` | 9.6 / 10.8 | 5.9 / 6.6 |
+| `glue.fan_scan` | 0.1 / 0.1 | 0.1 / 0.2 |
+| `glue.track_path`（每个候选） | 0.8 / 1.1 | 0.8 / 1.3 |
+| `glue.lateral_runs`（每个候选，31 站） | 0.9 / 1.1 | 0.9 / 1.4 |
+| 节点合计 | 13.1 / 14.9 | 9.9 / 11.3 |
+| **整图** | **18.2 / 19.3** | **14.5 / 16.3** |
+
+对照：同一批帧上 1.1 的 `bead_path` → `bead_width`（只有搜索、不含回退那张图）整图 8.7 / 10.1 ms。GS 现有的逐帧定向含回退 p50 / p95 约 16 / 31 ms
+（要跑第二张图）；新图一次运行把三个候选和每个候选的卡尺都算完，宿主再加一个回退分支（扇区收窄的扇形扫描 + 跟踪 + 卡尺，共用同一张响应图）
+约多 2 ms。**宿主应给 `glue.response` 设 `roi`**（出胶点 ± 检测区外沿 + 胶宽上限 + 8，与 1.1 `bead_path` 只算的那一块相同）：整幅计算多花约 4 ms。
+
+响应图节点之外还有约 1.5 ms 花在执行器给三张 f32 输出做的逐通道统计（事件里的 min / max / mean）上；这次把图像统计改成按位深直接读像素，
+结果不变、整幅图每张约快 1 ms。

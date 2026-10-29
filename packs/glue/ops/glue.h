@@ -33,6 +33,11 @@ inline constexpr const char* kVerdictType = "glue.Verdict";
 inline constexpr const char* kSynthType = "glue.SynthBreak";
 inline constexpr const char* kPoseType = "glue.Pose2D";
 inline constexpr const char* kStationMeasureType = "glue.StationMeasure";
+// 1.2 的测量算子（docs/glue-measure-ops.md）
+inline constexpr const char* kFanScanType = "glue.FanScan";
+inline constexpr const char* kTrackType = "glue.Track";
+inline constexpr const char* kLateralRunsType = "glue.LateralRuns";
+inline constexpr const char* kPartEdgesType = "glue.PartEdges";
 /// 胶路没找到时，bead_path 的 info.message 与 judge 的 verdict.message 都是这一句（§2.3 失败语义）。
 inline constexpr const char* kNoBeadMessage = "检测区内没找到胶";
 
@@ -47,11 +52,23 @@ void registerSynthBreak(Registry& r);
 void registerLocate(Registry& r);
 void registerStationCalipers(Registry& r);
 void registerSnippets(Registry& r);
+void registerResponse(Registry& r);
+void registerFanScan(Registry& r);
+void registerTrackPath(Registry& r);
+void registerLateralRuns(Registry& r);
+void registerPartEdges(Registry& r);
+void registerPolyline(Registry& r);
 
 // ------------------------------------------------------------------ 图像
 
 /// 端口上的 Image → 8 位单通道 Mat（三通道先按 BT.601 转灰度，与 image.to_gray 同一条路）。
 cv::Mat grayOf(const Data& image);
+/// glue.response 的输出（单通道 f32、全分辨率）→ 整幅的 Field（零拷贝，Image 要活得比它久）。不合格返回 false。
+bool f32FieldOf(const Data& image, Field* out);
+/// 单通道 f32 的 cv::Mat → Image Data（零拷贝）。
+Data f32Image(cv::Mat m);
+/// 输入图不合格时的执行错误（指到端口）。
+Status badImage(const char* port, bool f32);
 
 // ------------------------------------------------------------------ JSON 小工具
 
@@ -77,6 +94,16 @@ struct Polyline {
 Data polylineRecord(const std::vector<double>& s, const std::vector<P2>& points,
                     const std::vector<P2>& tangents);
 bool readPolyline(const Data& d, Polyline* out);
+/// 1.2 测量算子的 line 端口：Record 类型必须是 glue.Polyline，允许 count = 0（空胶路）。
+bool readLine(const Data& d, Polyline* out);
+
+/// 沿胶路布站（glue-measure-ops「约定 / 布站」）：range = [0, 0] 是整条胶路，否则与胶路求交。
+struct StationPose {
+  double s = 0;
+  P2 c, t, n;
+};
+std::vector<StationPose> layStations(const Polyline& line, double step, double rangeA,
+                                     double rangeB, double* usedA, double* usedB);
 
 // ------------------------------------------------------------------ Bundle
 
@@ -131,6 +158,11 @@ Param enumParam(const char* name, const char* label, const char* def, const char
                 std::vector<EnumOption> options, bool advanced = false);
 Param boolParam(const char* name, const char* label, bool def, const char* doc,
                 bool advanced = false);
+Param intParam(const char* name, const char* label, int def, const char* doc, int lo, int hi,
+               bool advanced = false);
+/// 带硬边界的 float 参数（lo / hi 给 NaN 表示那一侧不限）。
+Param rangedFloat(const char* name, const char* label, double def, const char* unit,
+                  const char* doc, double lo, double hi, bool advanced = false);
 Param visibleWhen(Param p, const char* param, const char* eq);
 
 // ------------------------------------------------------------------ 叠画

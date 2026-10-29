@@ -100,115 +100,32 @@ double angleDiffDeg(double a, double b) {
 
 // ------------------------------------------------------------------ 粗找（D1 / D6 / D15）
 
+/// findBeadPath 的一个候选方向：参数化的 trackBead，换回 1.1 的 PathCandidate。
 PathCandidate coarseTrack(const Field& R, const Field& g, const PathSpec& spec, double headingDeg,
                           double fanLo, double fanHi) {
+  TrackSpec ts;
+  ts.anchor = spec.nozzle;
+  ts.zoneStart = spec.zoneStart;
+  ts.zoneEnd = spec.zoneEnd;
+  ts.bearingFrom = fanLo;
+  ts.bearingTo = fanHi;
+  ts.searchHalf = spec.widthMax;
+  ts.runs.segmentMin = 0.5 * spec.contrastMin;
+  ts.runs.peakMin = spec.contrastMin;
+  ts.runs.mergeWidthMax = spec.widthMax;
+  ts.widthMax = spec.widthMax;
+  ts.coarseStep = spec.coarseStep;
+  ts.maxGap = spec.maxGap;
+  ts.sharpMin = spec.sharpMin;
+  ts.dirWindow = spec.dirWindow;
+  const TrackResult tr = trackBead(R, g, ts, headingDeg);
   PathCandidate cand;
   cand.headingDeg = headingDeg;
-  RunSpec runs;
-  runs.contrastMin = spec.contrastMin;
-  runs.widthMax = spec.widthMax;
-  P2 d = dirOfDeg(headingDeg);
-  P2 p = spec.nozzle + d * spec.zoneStart;
-  double s = spec.zoneStart;
-  double lastFound = -std::numeric_limits<double>::infinity();
-  bool stopped = false;
-  int stepsAtLastFound = 0; // 最近一次找到胶时已经走了几步（断口之前那一段的覆盖率）
-  std::vector<double> sharp, widths, peaks;
-  while (s <= spec.zoneEnd + 1e-6) {
-    cand.steps += 1;
-    const P2 n = perp(d);
-    bool found = false;
-    P2 c;
-    if (!stopped) {
-      // 已经找到过几个胶点之后，卡尺上的暗段不是都能接：
-      // - 紧接着上一步（中间没断）时，胶点离预测点横着不超过半个胶宽（此前胶宽的中位数，至少 8 px）——
-      //   光滑的胶 8 px 一步横着挪不了这么多；断口一开头卡尺会横着够到胶旁边的阴影、纹理，接上它胶路就被一路拽歪；
-      // - 滑过一段没找到胶之后重新接上的那一个，横向不限，但得像此前找到的胶：对比度不到此前中位数的一半的不要
-      //   （断口里、翻边上的拉丝纹理淡得多）；此前的胶宽很一致（直胶）时，宽度不到中位数一半的也不要（卡尺斜着
-      //   擦过断口端头只量到半截胶，中心是偏的）；边缘陡度不到 sharpMin 的也不要（D15 的判据逐个用在这里：
-      //   阴影也是暗带，但边缘是缓的）
-      const bool afterGap = !cand.coarse.empty() && s - lastFound > 1.5 * spec.coarseStep;
-      auto lookAt = [&](P2 q, P2 nq) {
-        std::vector<Run> rs = lateralRuns(R, q, nq, spec.widthMax, runs);
-        if (widths.size() >= 3) {
-          const double wMed = median(widths);
-          const double pMed = median(peaks);
-          const bool steady = percentile(widths, 75) - percentile(widths, 25) < 0.3 * wMed;
-          rs.erase(std::remove_if(rs.begin(), rs.end(),
-                                  [&](const Run& x) {
-                                    if (!afterGap)
-                                      return std::fabs(x.mid()) > std::max(0.5 * wMed, 8.0);
-                                    if (x.peak < 0.5 * pMed || (steady && x.width() < 0.5 * wMed))
-                                      return true;
-                                    const double sh = runSharpness(g, q, nq, x);
-                                    return std::isfinite(sh) && sh < spec.sharpMin;
-                                  }),
-                   rs.end());
-        }
-        return rs;
-      };
-      std::vector<Run> rs = lookAt(p, n);
-      const Run* r = nearestRun(rs);
-      P2 at = p, nAt = n;
-      bool onFanRay = false;
-      // 断口之前那一段得确实像胶（几乎每步都找到、边缘够陡）才这么做：没胶的帧里粗找跟的是零件上的纹理，
-      // 再给它一条退路，覆盖率就凑够了
-      const bool looksLikeBead = sharp.size() >= 3 && percentile(sharp, 25.0) >= spec.sharpMin &&
-                                 static_cast<double>(cand.coarse.size()) >= 0.6 * stepsAtLastFound;
-      if ((!r || std::fabs(r->mid()) >= 0.6 * spec.widthMax) && afterGap && looksLikeBead) {
-        // 断口后面跟丢了：退回扇形搜索选中的那条射线上找（断口前那几个胶点定出的方向可能是歪的，
-        // 螺旋胶尤其如此；而那条射线本来就是检测区前段响应最强的方向）
-        const P2 d0 = dirOfDeg(headingDeg);
-        at = spec.nozzle + d0 * s;
-        nAt = perp(d0);
-        rs = lookAt(at, nAt);
-        r = nearestRun(rs);
-        onFanRay = true;
-      }
-      // 胶是从喷嘴沿扇区里的方向往外走出去的：胶点相对喷嘴的方位跑出搜索范围 20° 以外、或者离喷嘴的
-      // 距离不到 0.75·s（沿着检测区的圆弧横着走），跟的就不是胶了 —— 零件上一条纹理边能把粗找一路带偏。
-      // 演示数据满胶段的胶路上处处是 距离 / s ≥ 0.98
-      const auto plausible = [&](P2 q) {
-        if (length(q - spec.nozzle) < 0.75 * s)
-          return false;
-        if (fanHi - fanLo >= 360.0 - 1e-6)
-          return true;
-        const double b = degOf(q - spec.nozzle);
-        const double mid = 0.5 * (fanLo + fanHi);
-        return angleDiffDeg(b, mid) <= 0.5 * (fanHi - fanLo) + 20.0;
-      };
-      if (r && std::fabs(r->mid()) < 0.6 * spec.widthMax && plausible(at + nAt * r->mid())) {
-        c = at + nAt * r->mid();
-        cand.coarse.emplace_back(s, c);
-        widths.push_back(r->width());
-        peaks.push_back(r->peak);
-        const double sh = runSharpness(g, at, nAt, *r);
-        if (std::isfinite(sh))
-          sharp.push_back(sh);
-        lastFound = s;
-        stepsAtLastFound = cand.steps;
-        found = true;
-        // 在那条射线上接上的：方向也回到它，断口前的方向不作数了
-        if (onFanRay)
-          d = dirOfDeg(headingDeg);
-      }
-    }
-    std::vector<P2> recent;
-    for (const auto& [ss, q] : cand.coarse) {
-      if (ss >= s - spec.dirWindow)
-        recent.push_back(q);
-    }
-    if (recent.size() >= 3)
-      d = principalDirection(recent, d);
-    p = (found ? c : p) + d * spec.coarseStep;
-    s += spec.coarseStep;
-    // 在长断口里一直顺着预测方向滑下去，迟早会滑到别的暗带上：已经找到过胶、又连续 maxGap
-    // 没找到，就不再接受新的胶点，后面的胶路交给拟合按已有的胶点外推
-    if (!cand.coarse.empty() && s - lastFound > spec.maxGap)
-      stopped = true;
-  }
-  cand.coverage = cand.steps > 0 ? static_cast<double>(cand.coarse.size()) / cand.steps : 0.0;
-  cand.sharpness = sharp.size() >= 3 ? percentile(sharp, 25.0) : -1.0;
+  cand.steps = tr.steps;
+  for (const TrackPoint& q : tr.points)
+    cand.coarse.emplace_back(q.s, q.point);
+  cand.coverage = tr.coverage;
+  cand.sharpness = std::isfinite(tr.sharpness) ? tr.sharpness : -1.0;
   cand.beadlike = cand.sharpness >= spec.sharpMin;
   cand.score = cand.beadlike ? cand.coverage : 0.1 * cand.coverage;
   return cand;
@@ -281,7 +198,8 @@ std::vector<P2> localLinearFit(const std::vector<std::pair<double, P2>>& centers
 /// 把拟合出来的一串点按真实弧长重新参数化：第一个点取离喷嘴恰好 zoneStart 的那一处（s = zoneStart），
 /// 之后 s 按弧长累加，每 2 px 取一个点直到 zoneEnd；拟合点不够长就沿末端切向外推。
 void resampleByArcLength(const std::vector<P2>& dense, P2 nozzle, double zoneStart, double zoneEnd,
-                         BeadPath& out) {
+                         std::vector<double>* outS, std::vector<P2>* outPoints,
+                         std::vector<P2>* outTangents) {
   // 起点：第一次走到离喷嘴 zoneStart 的地方
   std::size_t k0 = 0;
   P2 start = dense.front();
@@ -325,8 +243,8 @@ void resampleByArcLength(const std::vector<P2>& dense, P2 nozzle, double zoneSta
     targets.push_back(t);
   targets.push_back(total);
   P2 endTangent = pts.size() >= 2 ? unit(pts.back() - pts[pts.size() - 2]) : P2(1, 0);
-  out.s.clear();
-  out.points.clear();
+  outS->clear();
+  outPoints->clear();
   std::size_t seg = 0;
   for (double t : targets) {
     P2 q;
@@ -339,29 +257,16 @@ void resampleByArcLength(const std::vector<P2>& dense, P2 nozzle, double zoneSta
       const double f = span > 1e-12 ? (t - arc[seg]) / span : 0.0;
       q = pts[seg] + (pts[seg + 1] - pts[seg]) * f;
     }
-    out.s.push_back(zoneStart + t);
-    out.points.push_back(q);
+    outS->push_back(zoneStart + t);
+    outPoints->push_back(q);
   }
-  out.tangents.assign(out.points.size(), P2(1, 0));
-  for (std::size_t i = 0; i < out.points.size(); ++i) {
+  const std::vector<P2>& P = *outPoints;
+  outTangents->assign(P.size(), P2(1, 0));
+  for (std::size_t i = 0; i < P.size(); ++i) {
     const std::size_t a = i == 0 ? 0 : i - 1;
-    const std::size_t b = i + 1 < out.points.size() ? i + 1 : i;
-    out.tangents[i] = unit(out.points[b] - out.points[a]);
+    const std::size_t b = i + 1 < P.size() ? i + 1 : i;
+    (*outTangents)[i] = unit(P[b] - P[a]);
   }
-}
-
-/// 没找到胶时的胶路：从喷嘴沿选中方向的一条直线，照样覆盖整个检测区（下游据此画出「全段无胶」）。
-void straightPath(P2 nozzle, double headingDeg, double zoneStart, double zoneEnd, BeadPath& out) {
-  const P2 d = dirOfDeg(headingDeg);
-  out.s.clear();
-  out.points.clear();
-  const double total = zoneEnd - zoneStart;
-  for (double t = 0.0; t < total - 1e-9; t += 2.0)
-    out.s.push_back(zoneStart + t);
-  out.s.push_back(zoneEnd);
-  for (double s : out.s)
-    out.points.push_back(nozzle + d * s);
-  out.tangents.assign(out.points.size(), d);
 }
 
 std::string fmt2(double v) {
@@ -696,24 +601,82 @@ Field smoothGrayField(const cv::Mat& gray, bool bright, cv::Rect roi) {
   return Field(g, outer.tl(), inner);
 }
 
+ResponseMaps responseMaps(const cv::Mat& gray, const ResponseSpec& spec) {
+  const cv::Rect all = imageRect(gray);
+  const cv::Rect inner = (spec.roi.width > 0 && spec.roi.height > 0 ? spec.roi : all) & all;
+  const auto nanImage = [&] {
+    return cv::Mat(gray.size(), CV_32F, cv::Scalar(std::numeric_limits<float>::quiet_NaN()));
+  };
+  ResponseMaps out;
+  if (inner.empty()) {
+    out.response = nanImage();
+    out.gray = nanImage();
+    out.level = nanImage();
+    return out;
+  }
+  const auto blur = [](cv::Mat& m, double sigma) {
+    if (sigma > 0)
+      cv::GaussianBlur(m, m, cv::Size(5, 5), sigma);
+  };
+  // 与 responseField 同一套外扩：inner 里的值与整幅图逐位相同。clone 让形态学只看到外扩块
+  // （OpenCV 的滤波默认会读子矩阵外的父图像素）
+  const Octagon o = octagon(spec.diameter);
+  const cv::Rect outer = inflate(inner, 2 * o.radius + 4) & all;
+  const cv::Mat src = gray(outer).clone();
+  const cv::Mat morph = closeOrOpen(src, o, spec.bright);
+  cv::Mat r, l, g;
+  if (spec.bright) {
+    cv::subtract(src, morph, r, cv::noArray(), CV_32F);
+  } else {
+    cv::subtract(morph, src, r, cv::noArray(), CV_32F);
+  }
+  // 八边形拆成三次形态学串着做，贴图边（两倍半径以内）时中间那一步出了图，闭运算会比原图还低一点：
+  // 负的响应是这个假象，按契约（≥ 0）截到 0。responseField 不截（1.1 的结果一位不变）
+  cv::max(r, 0.0, r);
+  blur(r, spec.responseSigma);
+  (spec.bright ? src : morph).convertTo(l, CV_32F);
+  blur(l, spec.levelSigma);
+  src.convertTo(g, CV_32F);
+  blur(g, spec.graySigma);
+  if (spec.bright)
+    g = 255.0 - g;
+  const cv::Rect local(inner.tl() - outer.tl(), inner.size());
+  const auto place = [&](const cv::Mat& part) {
+    if (inner == all)
+      return part;
+    cv::Mat whole = nanImage();
+    part(local).copyTo(whole(inner));
+    return whole;
+  };
+  out.response = place(r);
+  out.level = place(l);
+  out.gray = place(g);
+  return out;
+}
+
 // ------------------------------------------------------------------ 卡尺
 
-std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, const RunSpec& spec,
-                             std::vector<Run>* candidates, bool separatePeaks) {
+std::vector<Run> caliperRuns(const Field& response, P2 c, P2 n, double half,
+                             const RunSplitSpec& spec, std::vector<Run>* rawOut,
+                             double* validFraction) {
   constexpr double kRes = 0.5;
   const int count = static_cast<int>(std::floor(2.0 * half / kRes + 1e-9)) + 1;
   std::vector<double> v(static_cast<std::size_t>(std::max(count, 0)));
   std::vector<char> ok(v.size());
+  int valid = 0;
   for (int i = 0; i < count; ++i) {
     const double t = -half + i * kRes;
     const double x = response.at(c + n * t);
     ok[i] = x >= 0.0;
     v[i] = ok[i] ? x : 0.0;
+    valid += ok[i] ? 1 : 0;
   }
-  // 不扣局部底：零件上成片的纹理、渐暗区响应整体抬高，「> contrastMin / 2」连成一整条、宽过 widthMax
+  if (validFraction)
+    *validFraction = count > 0 ? static_cast<double>(valid) / count : 0.0;
+  // 不扣局部底：零件上成片的纹理、渐暗区响应整体抬高，「> segmentMin」连成一整条、宽过 widthMax
   // 被筛掉 —— 胶是干净背景上一条分明的暗带，这正是把纹理挡在外面的那一道（Glue2 #1–2 的无胶帧）
   auto tAt = [&](int i) { return -half + i * kRes; };
-  const double thr = 0.5 * spec.contrastMin;
+  const double thr = spec.segmentMin;
   std::vector<Run> raw;
   for (int i = 0; i < count;) {
     if (!(ok[i] && v[i] > thr)) {
@@ -726,7 +689,7 @@ std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, con
     double peak = 0;
     for (int k = i; k <= j; ++k)
       peak = std::max(peak, v[k]);
-    if (peak >= spec.contrastMin) {
+    if (peak >= spec.peakMin) {
       // D4：半高处取边，按这一段自己的峰值
       const double lvl = 0.5 * peak;
       for (int a = i; a <= j;) {
@@ -735,7 +698,7 @@ std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, con
         if (a > j)
           break;
         int b = a;
-        if (separatePeaks) {
+        if (spec.halfMax) {
           while (b < j && v[b + 1] >= lvl)
             ++b;
         } else {
@@ -750,31 +713,57 @@ std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, con
         double localPeak = 0;
         for (int k = a; k <= b; ++k)
           localPeak = std::max(localPeak, v[k]);
-        if (localPeak >= spec.contrastMin)
-          raw.push_back(Run{la, lb, localPeak,
-                            a > 0 && b < count - 1 && ok[a - 1] && ok[b + 1] && v[a - 1] < lvl &&
-                                v[b + 1] < lvl});
+        if (localPeak >= spec.peakMin) {
+          Run r;
+          r.lo = la;
+          r.hi = lb;
+          r.peak = localPeak;
+          r.loComplete = a > 0 && ok[a - 1] && v[a - 1] < lvl;
+          r.hiComplete = b < count - 1 && ok[b + 1] && v[b + 1] < lvl;
+          r.completeEdges = r.loComplete && r.hiComplete;
+          raw.push_back(r);
+        }
         a = b + 1;
       }
     }
     i = j + 1;
   }
-  // 高光条会把一条胶劈成两段（教训 3）：缝不超过 mergeGap、合并后不宽于 widthMax 就并回去。
-  // 分离半高子段时（示教直胶）两段还得一样浓：胶被高光劈开的两半都是胶，峰值相近；紧贴胶边的一条淡肩
+  // 高光条会把一条胶劈成两段（教训 3）：缝不超过 mergeGap、合并后不宽于 mergeWidthMax 就并回去。
+  // 给了峰值比时两段还得一样浓：胶被高光劈开的两半都是胶，峰值相近；紧贴胶边的一条淡肩
   // （法兰过渡、浅阴影）峰值只有胶的零头，并进来胶宽就时宽时窄
   std::vector<Run> merged;
   for (const Run& r : raw) {
     if (!merged.empty() && r.lo - merged.back().hi <= spec.mergeGap &&
-        r.hi - merged.back().lo <= spec.widthMax &&
-        (!separatePeaks || std::min(r.peak, merged.back().peak) >=
-                               kMergePeakRatio * std::max(r.peak, merged.back().peak))) {
-      merged.back().completeEdges = merged.back().completeEdges && r.completeEdges;
-      merged.back().hi = r.hi;
-      merged.back().peak = std::max(merged.back().peak, r.peak);
+        r.hi - merged.back().lo <= spec.mergeWidthMax &&
+        (spec.mergePeakRatio <= 0 ||
+         std::min(r.peak, merged.back().peak) >=
+             spec.mergePeakRatio * std::max(r.peak, merged.back().peak))) {
+      Run& m = merged.back();
+      m.completeEdges = m.completeEdges && r.completeEdges;
+      m.hiComplete = r.hiComplete;
+      m.hi = r.hi;
+      m.peak = std::max(m.peak, r.peak);
+      m.parts += r.parts;
     } else {
       merged.push_back(r);
     }
   }
+  if (rawOut)
+    *rawOut = std::move(raw);
+  return merged;
+}
+
+std::vector<Run> lateralRuns(const Field& response, P2 c, P2 n, double half, const RunSpec& spec,
+                             std::vector<Run>* candidates, bool separatePeaks) {
+  RunSplitSpec cs;
+  cs.segmentMin = 0.5 * spec.contrastMin;
+  cs.peakMin = spec.contrastMin;
+  cs.mergeGap = spec.mergeGap;
+  cs.mergePeakRatio = separatePeaks ? kMergePeakRatio : 0.0;
+  cs.mergeWidthMax = spec.widthMax;
+  cs.halfMax = separatePeaks;
+  std::vector<Run> raw;
+  const std::vector<Run> merged = caliperRuns(response, c, n, half, cs, &raw);
   if (candidates) {
     candidates->clear();
     const auto add = [&](const Run& r) {
@@ -807,27 +796,35 @@ const Run* nearestRun(const std::vector<Run>& runs, double expect) {
   return best;
 }
 
-double runSharpness(const Field& g, P2 c, P2 n, const Run& run) {
+RunEdges runEdges(const Field& g, P2 c, P2 n, const Run& run, double edgeProbe,
+                  double backgroundProbe) {
+  RunEdges out;
   auto at = [&](double t) { return g.at(c + n * t); };
   const double w = run.width();
-  const double samples[6] = {at(run.lo - 3), at(run.lo + 3), at(run.hi + 3),
-                             at(run.hi - 3), at(run.lo - 8), at(run.hi + 8)};
+  const double samples[6] = {at(run.lo - edgeProbe),       at(run.lo + edgeProbe),
+                             at(run.hi + edgeProbe),       at(run.hi - edgeProbe),
+                             at(run.lo - backgroundProbe), at(run.hi + backgroundProbe)};
   double inside = 0;
   for (int k = 0; k < 5; ++k) {
     const double v = at(run.lo + 0.25 * w + (0.5 * w) * k / 4.0);
     if (v < 0)
-      return kNaN;
+      return out;
     inside += v;
   }
   for (double v : samples) {
     if (v < 0)
-      return kNaN;
+      return out;
   }
   inside /= 5.0;
-  const double dl = samples[0] - samples[1];
-  const double dr = samples[2] - samples[3];
-  const double depth = std::max(1.0, 0.5 * (samples[4] + samples[5]) - inside);
-  return std::min(dl, dr) / depth;
+  out.edgeLo = samples[0] - samples[1];
+  out.edgeHi = samples[2] - samples[3];
+  out.depth = std::max(1.0, 0.5 * (samples[4] + samples[5]) - inside);
+  out.sharpness = std::min(out.edgeLo, out.edgeHi) / out.depth;
+  return out;
+}
+
+double runSharpness(const Field& g, P2 c, P2 n, const Run& run) {
+  return runEdges(g, c, n, run).sharpness;
 }
 
 // ------------------------------------------------------------------ 定胶路
@@ -847,24 +844,19 @@ BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec) {
   // D6：扇形搜索。每条射线在检测区前段（≤ 150 px）上取响应的均值
   const double lo = spec.useHeading ? spec.headingDeg - spec.headingTolDeg : spec.sectorFromDeg;
   const double hi = spec.useHeading ? spec.headingDeg + spec.headingTolDeg : spec.sectorToDeg;
-  const double fanLen = std::min(spec.fanLength, spec.zoneEnd - spec.zoneStart);
-  std::vector<std::pair<double, double>> fan; // (score, angle)
-  for (double a = lo; a <= hi + 1e-6; a += 1.0) {
-    const P2 d = dirOfDeg(a);
-    int total = 0, bad = 0;
-    double sum = 0;
-    for (double t = spec.zoneStart; t < spec.zoneStart + fanLen - 1e-9; t += spec.fanStep) {
-      const double v = R.at(spec.nozzle + d * t);
-      total += 1;
-      if (v < 0) {
-        bad += 1;
-      } else {
-        sum += v;
-      }
-    }
-    const double score = total > 0 && bad < 0.3 * total ? sum / total : -1.0;
-    fan.emplace_back(score, a);
-  }
+  FanSpec fs;
+  fs.anchor = spec.nozzle;
+  fs.from = lo;
+  fs.to = hi;
+  fs.r0 = spec.zoneStart;
+  fs.r1 = spec.zoneStart + std::min(spec.fanLength, spec.zoneEnd - spec.zoneStart);
+  fs.radialStep = spec.fanStep;
+  fs.peakCount = 0;
+  const FanResult scan = fanScan(R, fs);
+  std::vector<std::pair<double, double>>
+      fan; // (score, angle)；无效的方向记 −1，照样排在最后参与挑选
+  for (std::size_t i = 0; i < scan.angles.size(); ++i)
+    fan.emplace_back(std::isfinite(scan.scores[i]) ? scan.scores[i] : -1.0, scan.angles[i]);
   std::stable_sort(fan.begin(), fan.end(),
                    [](const auto& x, const auto& y) { return x.first > y.first; });
   std::vector<std::pair<double, double>> picks;
@@ -899,7 +891,8 @@ BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec) {
   if (best < 0) {
     out.reason = "扇区里一个方向都没有（检查 sector / heading）";
     out.headingDeg = 0.5 * (lo + hi);
-    straightPath(spec.nozzle, out.headingDeg, spec.zoneStart, spec.zoneEnd, out);
+    straightBeadPath(spec.nozzle, out.headingDeg, spec.zoneStart, spec.zoneEnd, &out.s, &out.points,
+                     &out.tangents);
     out.residual = kNaN;
     return out;
   }
@@ -920,59 +913,258 @@ BeadPath findBeadPath(const cv::Mat& gray, const PathSpec& spec) {
     out.reason = "粗找到的胶点不到 3 个";
   }
   if (!out.reason.empty()) {
-    straightPath(spec.nozzle, out.headingDeg, spec.zoneStart, spec.zoneEnd, out);
+    straightBeadPath(spec.nozzle, out.headingDeg, spec.zoneStart, spec.zoneEnd, &out.s, &out.points,
+                     &out.tangents);
     out.residual = kNaN;
     return out;
   }
-
-  // 拟合网格往两头各多走一截（局部线性拟合在那里就是沿端点切向外推）：起点要落在「离喷嘴 zoneStart」
-  // 的那一处，终点要够得着 zoneEnd，下面的高斯平滑也不能让两头的截断影响到检测区里
-  std::vector<double> grid;
-  for (double s = spec.zoneStart - 48.0; s <= spec.zoneEnd + 56.0 + 1e-6; s += 1.0)
-    grid.push_back(s);
-  std::vector<P2> dense = localLinearFit(chosen.coarse, grid, spec.smoothWindow, nullptr);
-  // 检测区开头一段没找到胶（断口正好落在那里）：局部线性拟合会沿后面几个胶点的切向往回外推，拐错了方向
-  // 就是一条横着的胶路。胶是从喷嘴出来的 —— 第一个胶点之前的那一段取喷嘴到它的连线
-  const double sFirst = chosen.coarse.front().first;
-  if (sFirst > spec.zoneStart + 2.0 * spec.coarseStep) {
-    std::size_t k = 0;
-    while (k + 1 < grid.size() && grid[k] < sFirst)
-      ++k;
-    const P2 anchor = dense[k];
-    for (std::size_t i = 0; i < k; ++i) {
-      dense[i] = spec.nozzle + (anchor - spec.nozzle) * (grid[i] / sFirst);
-    }
-  }
-  // 再做一次 σ = 12 px 的高斯平滑：粗找 8 px 一步，螺旋胶的胶点左右摆，局部线性拟合会留下与螺距同频的
-  // 小摆动 —— 胶路不光滑，按弧长算的 s 就比实际长出一截（300 px 的检测区能长出 20 px），断口的位置跟着漂
-  std::vector<P2> smooth(dense.size());
-  constexpr int kHalf = 36;
-  constexpr double kSigma = 12.0;
-  for (std::size_t i = 0; i < dense.size(); ++i) {
-    P2 acc(0, 0);
-    double wsum = 0;
-    for (int k = -kHalf; k <= kHalf; ++k) {
-      const std::ptrdiff_t j = static_cast<std::ptrdiff_t>(i) + k;
-      if (j < 0 || j >= static_cast<std::ptrdiff_t>(dense.size()))
-        continue;
-      const double w = std::exp(-0.5 * k * k / (kSigma * kSigma));
-      acc += dense[static_cast<std::size_t>(j)] * w;
-      wsum += w;
-    }
-    smooth[i] = acc * (1.0 / wsum);
-  }
-  resampleByArcLength(smooth, spec.nozzle, spec.zoneStart, spec.zoneEnd, out);
-  std::vector<double> resid;
-  for (const P2& q : out.coarse) {
-    double bestD = std::numeric_limits<double>::infinity();
-    for (const P2& p : out.points)
-      bestD = std::min(bestD, length(p - q));
-    resid.push_back(bestD);
-  }
-  out.residual = median(resid);
+  fitBeadPath(chosen.coarse, spec.nozzle, spec.zoneStart, spec.zoneEnd, spec.coarseStep,
+              spec.smoothWindow, 12.0, &out.s, &out.points, &out.tangents, &out.residual);
   out.ok = true;
   out.fallback = false;
   return out;
+}
+
+// ------------------------------------------------------------------ 扇形扫描
+
+FanResult fanScan(const Field& R, const FanSpec& spec) {
+  FanResult out;
+  for (double t = spec.r0; t < spec.r1 - 1e-9; t += spec.radialStep)
+    out.samples += 1;
+  for (double a = spec.from; a <= spec.to + 1e-6; a += spec.angleStep) {
+    const P2 d = dirOfDeg(a);
+    int total = 0, bad = 0;
+    double sum = 0;
+    for (double t = spec.r0; t < spec.r1 - 1e-9; t += spec.radialStep) {
+      const double v = R.at(spec.anchor + d * t);
+      total += 1;
+      if (v < 0) {
+        bad += 1;
+      } else {
+        sum += v;
+      }
+    }
+    out.angles.push_back(a);
+    out.scores.push_back(total > 0 && bad < spec.invalidMax * total ? sum / total : kNaN);
+    out.invalid.push_back(bad);
+  }
+  std::vector<std::size_t> order;
+  for (std::size_t i = 0; i < out.scores.size(); ++i) {
+    if (std::isfinite(out.scores[i]))
+      order.push_back(i);
+  }
+  std::stable_sort(order.begin(), order.end(),
+                   [&](std::size_t x, std::size_t y) { return out.scores[x] > out.scores[y]; });
+  for (std::size_t i : order) {
+    if (static_cast<int>(out.peaks.size()) >= spec.peakCount)
+      break;
+    const bool far = std::all_of(out.peaks.begin(), out.peaks.end(), [&](const FanPeak& p) {
+      return angleDiffDeg(p.angle, out.angles[i]) > spec.peakSeparation;
+    });
+    if (far)
+      out.peaks.push_back(FanPeak{i, out.angles[i], out.scores[i]});
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------ 粗跟踪
+
+TrackResult trackBead(const Field& R, const Field& g, const TrackSpec& spec, double headingDeg) {
+  TrackResult out;
+  P2 d = dirOfDeg(headingDeg);
+  P2 p = spec.anchor + d * spec.zoneStart;
+  double s = spec.zoneStart;
+  double lastFound = -std::numeric_limits<double>::infinity();
+  bool stopped = false;
+  int stepsAtLastFound = 0; // 最近一次找到胶时已经走了几步（断口之前那一段的覆盖率）
+  std::vector<double> sharp, widths, peaks;
+  const double accept = spec.acceptOffsetRatio * spec.widthMax;
+  while (s <= spec.zoneEnd + 1e-6) {
+    out.steps += 1;
+    const P2 n = perp(d);
+    bool found = false;
+    P2 c;
+    if (!stopped) {
+      // 已经找到过几个胶点之后，卡尺上的暗段不是都能接：
+      // - 紧接着上一步（中间没断）时，胶点离预测点横着不超过半个胶宽（此前胶宽的中位数，至少 8 px）——
+      //   光滑的胶 8 px 一步横着挪不了这么多；断口一开头卡尺会横着够到胶旁边的阴影、纹理，接上它胶路就被一路拽歪；
+      // - 滑过一段没找到胶之后重新接上的那一个，横向不限，但得像此前找到的胶：对比度不到此前中位数的一半的不要
+      //   （断口里、翻边上的拉丝纹理淡得多）；此前的胶宽很一致（直胶）时，宽度不到中位数一半的也不要（卡尺斜着
+      //   擦过断口端头只量到半截胶，中心是偏的）；边缘陡度不到 sharpMin 的也不要（D15 的判据逐个用在这里：
+      //   阴影也是暗带，但边缘是缓的）
+      const bool afterGap = !out.points.empty() && s - lastFound > spec.gapSteps * spec.coarseStep;
+      auto lookAt = [&](P2 q, P2 nq) {
+        std::vector<Run> rs = caliperRuns(R, q, nq, spec.searchHalf, spec.runs);
+        rs.erase(std::remove_if(rs.begin(), rs.end(),
+                                [&](const Run& x) {
+                                  return x.width() < spec.widthMin || x.width() > spec.widthMax;
+                                }),
+                 rs.end());
+        if (static_cast<int>(widths.size()) >= spec.historyMin) {
+          const double wMed = median(widths);
+          const double pMed = median(peaks);
+          const bool steady =
+              percentile(widths, 75) - percentile(widths, 25) < spec.steadyIqrRatio * wMed;
+          rs.erase(std::remove_if(
+                       rs.begin(), rs.end(),
+                       [&](const Run& x) {
+                         if (!afterGap)
+                           return std::fabs(x.mid()) >
+                                  std::max(spec.jumpRatio * wMed, spec.jumpMin);
+                         if (x.peak < spec.reacquirePeakRatio * pMed ||
+                             (steady && x.width() < spec.reacquireWidthRatio * wMed))
+                           return true;
+                         const double sh =
+                             runEdges(g, q, nq, x, spec.edgeProbe, spec.backgroundProbe).sharpness;
+                         return std::isfinite(sh) && sh < spec.sharpMin;
+                       }),
+                   rs.end());
+        }
+        return rs;
+      };
+      std::vector<Run> rs = lookAt(p, n);
+      const Run* r = nearestRun(rs);
+      P2 at = p, nAt = n;
+      bool onFanRay = false;
+      // 断口之前那一段得确实像胶（几乎每步都找到、边缘够陡）才这么做：没胶的帧里粗找跟的是零件上的纹理，
+      // 再给它一条退路，覆盖率就凑够了
+      const bool looksLikeBead =
+          sharp.size() >= 3 && percentile(sharp, 25.0) >= spec.sharpMin &&
+          static_cast<double>(out.points.size()) >= spec.rayFallbackCoverage * stepsAtLastFound;
+      if (spec.rayFallback && (!r || std::fabs(r->mid()) >= accept) && afterGap && looksLikeBead) {
+        // 断口后面跟丢了：退回起始方向的那条射线上找（断口前那几个胶点定出的方向可能是歪的，
+        // 螺旋胶尤其如此；而那条射线本来就是检测区前段响应最强的方向）
+        const P2 d0 = dirOfDeg(headingDeg);
+        at = spec.anchor + d0 * s;
+        nAt = perp(d0);
+        rs = lookAt(at, nAt);
+        r = nearestRun(rs);
+        onFanRay = true;
+      }
+      // 胶是从喷嘴沿扇区里的方向往外走出去的：胶点相对喷嘴的方位跑出搜索范围 bearingMargin 以外、或者离喷嘴的
+      // 距离不到 outwardRatio·s（沿着检测区的圆弧横着走），跟的就不是胶了 —— 零件上一条纹理边能把粗找一路带偏。
+      // 演示数据满胶段的胶路上处处是 距离 / s ≥ 0.98
+      const auto plausible = [&](P2 q) {
+        if (length(q - spec.anchor) < spec.outwardRatio * s)
+          return false;
+        if (spec.bearingTo - spec.bearingFrom >= 360.0 - 1e-6)
+          return true;
+        const double b = degOf(q - spec.anchor);
+        const double mid = 0.5 * (spec.bearingFrom + spec.bearingTo);
+        return angleDiffDeg(b, mid) <=
+               0.5 * (spec.bearingTo - spec.bearingFrom) + spec.bearingMargin;
+      };
+      if (r && std::fabs(r->mid()) < accept && plausible(at + nAt * r->mid())) {
+        c = at + nAt * r->mid();
+        TrackPoint tp;
+        tp.s = s;
+        tp.point = c;
+        tp.mid = r->mid();
+        tp.width = r->width();
+        tp.peak = r->peak;
+        tp.sharpness = runEdges(g, at, nAt, *r, spec.edgeProbe, spec.backgroundProbe).sharpness;
+        tp.onRay = onFanRay;
+        out.points.push_back(tp);
+        widths.push_back(r->width());
+        peaks.push_back(r->peak);
+        if (std::isfinite(tp.sharpness))
+          sharp.push_back(tp.sharpness);
+        lastFound = s;
+        stepsAtLastFound = out.steps;
+        found = true;
+        // 在那条射线上接上的：方向也回到它，断口前的方向不作数了
+        if (onFanRay)
+          d = dirOfDeg(headingDeg);
+      }
+    }
+    std::vector<P2> recent;
+    for (const TrackPoint& q : out.points) {
+      if (q.s >= s - spec.dirWindow)
+        recent.push_back(q.point);
+    }
+    if (recent.size() >= 3)
+      d = principalDirection(recent, d);
+    p = (found ? c : p) + d * spec.coarseStep;
+    s += spec.coarseStep;
+    // 在长断口里一直顺着预测方向滑下去，迟早会滑到别的暗带上：已经找到过胶、又连续 maxGap
+    // 没找到，就不再接受新的胶点，后面的胶路交给拟合按已有的胶点外推
+    if (!stopped && !out.points.empty() && s - lastFound > spec.maxGap) {
+      stopped = true;
+      out.stoppedAt = s;
+    }
+  }
+  out.coverage = out.steps > 0 ? static_cast<double>(out.points.size()) / out.steps : 0.0;
+  out.sharpness = sharp.size() >= 3 ? percentile(sharp, 25.0) : kNaN;
+  return out;
+}
+
+// ------------------------------------------------------------------ 拟合
+
+void fitBeadPath(const std::vector<std::pair<double, P2>>& coarse, P2 anchor, double zoneStart,
+                 double zoneEnd, double coarseStep, double fitWindow, double fitSigma,
+                 std::vector<double>* s, std::vector<P2>* points, std::vector<P2>* tangents,
+                 double* residual) {
+  // 拟合网格往两头各多走一截（局部线性拟合在那里就是沿端点切向外推）：起点要落在「离喷嘴 zoneStart」
+  // 的那一处，终点要够得着 zoneEnd，下面的高斯平滑也不能让两头的截断影响到检测区里
+  std::vector<double> grid;
+  for (double g = zoneStart - 48.0; g <= zoneEnd + 56.0 + 1e-6; g += 1.0)
+    grid.push_back(g);
+  std::vector<P2> dense = localLinearFit(coarse, grid, fitWindow, nullptr);
+  // 检测区开头一段没找到胶（断口正好落在那里）：局部线性拟合会沿后面几个胶点的切向往回外推，拐错了方向
+  // 就是一条横着的胶路。胶是从喷嘴出来的 —— 第一个胶点之前的那一段取喷嘴到它的连线
+  const double sFirst = coarse.front().first;
+  if (sFirst > zoneStart + 2.0 * coarseStep) {
+    std::size_t k = 0;
+    while (k + 1 < grid.size() && grid[k] < sFirst)
+      ++k;
+    const P2 head = dense[k];
+    for (std::size_t i = 0; i < k; ++i) {
+      dense[i] = anchor + (head - anchor) * (grid[i] / sFirst);
+    }
+  }
+  // 再做一次高斯平滑（1.1 是 σ = 12 px）：粗找 8 px 一步，螺旋胶的胶点左右摆，局部线性拟合会留下与螺距同频的
+  // 小摆动 —— 胶路不光滑，按弧长算的 s 就比实际长出一截（300 px 的检测区能长出 20 px），断口的位置跟着漂
+  std::vector<P2> smooth = dense;
+  if (fitSigma > 0) {
+    const int half = static_cast<int>(std::ceil(3.0 * fitSigma));
+    for (std::size_t i = 0; i < dense.size(); ++i) {
+      P2 acc(0, 0);
+      double wsum = 0;
+      for (int k = -half; k <= half; ++k) {
+        const std::ptrdiff_t j = static_cast<std::ptrdiff_t>(i) + k;
+        if (j < 0 || j >= static_cast<std::ptrdiff_t>(dense.size()))
+          continue;
+        const double w = std::exp(-0.5 * k * k / (fitSigma * fitSigma));
+        acc += dense[static_cast<std::size_t>(j)] * w;
+        wsum += w;
+      }
+      smooth[i] = acc * (1.0 / wsum);
+    }
+  }
+  resampleByArcLength(smooth, anchor, zoneStart, zoneEnd, s, points, tangents);
+  std::vector<double> resid;
+  for (const auto& q : coarse) {
+    double bestD = std::numeric_limits<double>::infinity();
+    for (const P2& pt : *points)
+      bestD = std::min(bestD, length(pt - q.second));
+    resid.push_back(bestD);
+  }
+  if (residual)
+    *residual = median(resid);
+}
+
+void straightBeadPath(P2 anchor, double headingDeg, double zoneStart, double zoneEnd,
+                      std::vector<double>* s, std::vector<P2>* points, std::vector<P2>* tangents) {
+  const P2 d = dirOfDeg(headingDeg);
+  s->clear();
+  points->clear();
+  const double total = zoneEnd - zoneStart;
+  for (double t = 0.0; t < total - 1e-9; t += 2.0)
+    s->push_back(zoneStart + t);
+  s->push_back(zoneEnd);
+  for (double v : *s)
+    points->push_back(anchor + d * v);
+  tangents->assign(points->size(), d);
 }
 
 void PolylineView::at(double sq, P2* point, P2* tangent) const {
