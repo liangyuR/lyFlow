@@ -18,7 +18,7 @@
 `TauriTransport` 走 `#[tauri::command]`，`HttpTransport` 走
 [docs/http-transport.md](http-transport.md) 的 REST + WebSocket，
 `StaticTransport` 只读一份 dump 出来的 manifest。三者的方法一一对应，
-执行相关调用最终由按产品版本系列兼容的 C ABI 提供，文件与库目录等宿主能力由桥接层实现。当前 ABI 为字符串 `"1.1.5"`，客户端与引擎须属于同一 主.次 系列，补丁版本之间保持兼容，详见 [嵌入指南](embedding.md)。
+执行相关调用最终由按产品版本系列兼容的 C ABI 提供，文件与库目录等宿主能力由桥接层实现。当前 ABI 为字符串 `"1.1.6"`，客户端与引擎须属于同一 主.次 系列，补丁版本之间保持兼容，详见 [嵌入指南](embedding.md)。
 
 核心编译成一个只导出 C ABI 的 DLL，桥接层在运行时加载它（[ADR-0004](adr/0004-core-as-dll.md)）。
 DLL 与宿主在同一进程内执行，C ABI 是语言与生命周期边界，也是热重载的接缝；原生崩溃会影响宿主进程。需要进程隔离时，由宿主另起 CLI 或后端服务。
