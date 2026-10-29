@@ -14,7 +14,7 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   endif()
 endif()
 
-project(lyflow_core LANGUAGES CXX VERSION 1.1.6)
+project(lyflow_core LANGUAGES CXX VERSION 1.2.0)
 option(LYFLOW_RELEASE_BUILD "Release dependency inputs were verified by package-windows.ps1" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -371,6 +371,8 @@ set(_fixture_other_minor "${PROJECT_VERSION_MAJOR}.${_fixture_next_minor}.0")
 foreach(fixture matching legacy abi_patch engine_patch abi_minor engine_minor null_abi)
   add_library(lyflow-client-${fixture} SHARED "${LYFLOW_TESTS}/fixtures/client_version.cpp")
   target_include_directories(lyflow-client-${fixture} PRIVATE "${LYFLOW_INCLUDE}")
+  # version.h 里有中文注释：中文代码页（936）下不加 /utf-8，注释会吞掉下一行的 #define
+  target_compile_options(lyflow-client-${fixture} PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
   target_compile_definitions(lyflow-client-${fixture} PRIVATE "LYFLOW_FIXTURE_${fixture}"
     "LYFLOW_FIXTURE_OTHER_VERSION=\"${_fixture_other_version}\""
     "LYFLOW_FIXTURE_OTHER_MINOR=\"${_fixture_other_minor}\"")
