@@ -40,12 +40,16 @@ struct ResponseSpec {
   double levelSigma = 1.2;
 };
 
-/// 三张与输入同尺寸的 CV_32F 图，roi 之外是 NaN；roi 里的值与整幅计算逐位相同。
+/// 三张 CV_32F 图，只有 frame（roi ∩ 图像，没给 roi 时是整幅）那一块，(0, 0) 在图像坐标 frame.tl()；
+/// 块里的值与整幅计算逐位相同。frame 为空（roi 与图像不相交）时三张图都是空的。
 /// response = 顶帽响应，gray = 平滑灰度（bright 时 255 − g），level = 局部亮度（暗胶取闭运算、亮胶取原图）。
 struct ResponseMaps {
   cv::Mat response;
   cv::Mat gray;
   cv::Mat level;
+  cv::Rect frame;
+  /// 按 frame 摆回图像坐标的采样场（零拷贝，Mat 要活得比它久）。
+  Field field(const cv::Mat& m) const { return Field(m, frame.tl(), frame); }
 };
 
 ResponseMaps responseMaps(const cv::Mat& gray, const ResponseSpec& spec);

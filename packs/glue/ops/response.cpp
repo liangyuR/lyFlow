@@ -21,9 +21,13 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   spec.graySigma = params.number("graySigma");
   spec.levelSigma = params.number("levelSigma");
   ResponseMaps maps = responseMaps(gray, spec);
-  outputs.set("response", f32Image(std::move(maps.response)));
-  outputs.set("gray", f32Image(std::move(maps.gray)));
-  outputs.set("level", f32Image(std::move(maps.level)));
+  if (maps.frame.empty()) {
+    return Status::Error(Phase::Execute, "bad_param",
+                         "roi 与图像（" + std::to_string(gray.cols) + "×" +
+                             std::to_string(gray.rows) + "）不相交",
+                         "roi");
+  }
+  outputs.set("maps", mapsBundle(std::move(maps), gray.size()));
   return Status::Ok();
 }
 
@@ -52,14 +56,16 @@ void registerResponse(Registry& r) {
       "胶的响应图：暗胶取黑顶帽（闭运算 − 原图），亮胶取白顶帽（原图 − 开运算），再做 5×5 高斯。"
       "比结构元窄的暗带才有完整响应，所以 diameter 要大于期望最大胶宽。顺带输出陡度用的平滑灰度 gray"
       "（亮胶时取 255 − g，「胶比背景暗」恒成立）与局部亮度 level（暗胶取闭运算、亮胶取原图）。\n"
-      "三张图都是单通道 f32、与输入同尺寸；给了 roi 只算那一块（块里的值与整幅计算逐位相同），块外是 NaN。"
-      "扇形扫描、粗跟踪、横向卡尺都接它，极性只在这里设一次。";
+      "三张图都是单通道 f32，打包在 maps 里：给了 roi 只有 roi ∩ 图像那一块（块里的值与整幅计算逐位相同），"
+      "块的左上角在整幅图里的坐标在 maps.frame；roi 与图像不相交是 bad_param。"
+      "扇形扫描、粗跟踪、横向卡尺都接 maps，极性只在这里设一次。";
   op.inputs = {
       Port{"image", "Image", "Image", "胶枪相机的一帧（u8 灰度 / RGB / RGBA，全分辨率）。", true}};
   op.outputs = {
-      Port{"response", "Image", "Response", "顶帽响应（f32，≥ 0；roi 外 NaN）。", true},
-      Port{"gray", "Image", "Gray", "平滑灰度（f32，亮胶已取反；roi 外 NaN），边缘陡度用。", true},
-      Port{"level", "Image", "Level", "局部亮度（f32；roi 外 NaN），对比度归一化用。", true},
+      Port{"maps", "Bundle<glue.ResponseMaps>", "Maps",
+           "response（顶帽响应，≥ 0）、gray（平滑灰度，亮胶已取反）、level（局部亮度）三张 f32 图，"
+           "只有 frame 那一块；frame 是块在整幅图里的位置。",
+           true},
   };
   Param polarity = enumParam("polarity", "Polarity", "dark",
                              "胶比背景暗（dark，黑顶帽）还是亮（bright，白顶帽）。",
@@ -73,7 +79,8 @@ void registerResponse(Registry& r) {
   roi.tuningRole = "geometry";
   roi.type = ParamType::Vec4f;
   roi.label = "ROI";
-  roi.doc = "[x, y, w, h]（px）：只算这一块（与图像求交）；w、h 同为 ≤ 0 表示整幅。";
+  roi.doc =
+      "[x, y, w, h]（px）：只算、只输出这一块（与图像求交，不相交是 bad_param）；w、h 同为 ≤ 0 表示整幅。";
   roi.def = Value::vec({0, 0, 0, 0});
   roi.unit = "px";
   roi.componentLabels = {"X", "Y", "W", "H"};

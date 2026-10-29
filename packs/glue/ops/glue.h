@@ -34,6 +34,8 @@ inline constexpr const char* kSynthType = "glue.SynthBreak";
 inline constexpr const char* kPoseType = "glue.Pose2D";
 inline constexpr const char* kStationMeasureType = "glue.StationMeasure";
 // 1.2 的测量算子（docs/glue-measure-ops.md）
+inline constexpr const char* kResponseMapsKind = "glue.ResponseMaps";
+inline constexpr const char* kFrameType = "glue.Frame";
 inline constexpr const char* kFanScanType = "glue.FanScan";
 inline constexpr const char* kTrackType = "glue.Track";
 inline constexpr const char* kLateralRunsType = "glue.LateralRuns";
@@ -63,12 +65,19 @@ void registerPolyline(Registry& r);
 
 /// 端口上的 Image → 8 位单通道 Mat（三通道先按 BT.601 转灰度，与 image.to_gray 同一条路）。
 cv::Mat grayOf(const Data& image);
-/// glue.response 的输出（单通道 f32、全分辨率）→ 整幅的 Field（零拷贝，Image 要活得比它久）。不合格返回 false。
-bool f32FieldOf(const Data& image, Field* out);
 /// 单通道 f32 的 cv::Mat → Image Data（零拷贝）。
 Data f32Image(cv::Mat m);
+
+/// glue.response 的 maps（Bundle<glue.ResponseMaps>）读成三张按 frame 摆回图像坐标的采样场（零拷贝，Bundle 要活得比它们久）。
+struct MapsView {
+  Field response, gray, level;
+  cv::Rect frame;
+};
+Data mapsBundle(ResponseMaps maps, cv::Size image);
+/// 不是完整的 glue.ResponseMaps（字段缺、不是单通道 f32、尺寸与 frame 对不上）返回 false。
+bool readMaps(const Data& d, MapsView* out);
 /// 输入图不合格时的执行错误（指到端口）。
-Status badImage(const char* port, bool f32);
+Status badImage(const char* port, bool maps);
 
 // ------------------------------------------------------------------ JSON 小工具
 

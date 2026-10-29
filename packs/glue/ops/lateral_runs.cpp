@@ -24,14 +24,12 @@ Json runJson(const Run& r, const RunEdges& e, double level) {
 }
 
 Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
-  Field R, g, level;
-  if (!f32FieldOf(inputs.get("response"), &R))
-    return badImage("response", true);
-  if (!f32FieldOf(inputs.get("gray"), &g))
-    return badImage("gray", true);
-  const bool hasLevel = inputs.has("level");
-  if (hasLevel && !f32FieldOf(inputs.get("level"), &level))
-    return badImage("level", true);
+  MapsView maps;
+  if (!readMaps(inputs.get("maps"), &maps))
+    return badImage("maps", true);
+  const Field& R = maps.response;
+  const Field& g = maps.gray;
+  const Field& level = maps.level;
   Polyline line;
   if (!readLine(inputs.get("line"), &line))
     return Status::Error(Phase::Execute, "bad_input", "line 不是 glue.Polyline", {}, "line");
@@ -60,13 +58,10 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     Json js = Json::array();
     for (const Run& r : runs) {
       const RunEdges e = runEdges(g, st.c, st.n, r, edgeProbe, backgroundProbe);
-      double lv = -1;
-      if (hasLevel) {
-        // 与 1.1 示教胶路的对比度同一个取法：lo, lo + 1, …（< hi）与 hi 上的最大值
-        lv = level.at(st.c + st.n * r.hi);
-        for (double t = r.lo; t < r.hi; t += 1.0)
-          lv = std::max(lv, level.at(st.c + st.n * t));
-      }
+      // 与 1.1 示教胶路的对比度同一个取法：lo, lo + 1, …（< hi）与 hi 上的最大值
+      double lv = level.at(st.c + st.n * r.hi);
+      for (double t = r.lo; t < r.hi; t += 1.0)
+        lv = std::max(lv, level.at(st.c + st.n * t));
       js.push_back(runJson(r, e, lv));
       const P2 p0 = st.c + st.n * r.lo, p1 = st.c + st.n * r.hi;
       runSegs.push_back({Px{p0.x, p0.y}, Px{p1.x, p1.y}});
@@ -117,14 +112,14 @@ void registerLateralRuns(Registry& r) {
       "响应 > segmentMin 的相邻采样连成连通段（峰值 < peakMin 的丢掉），按连通段自己的半高取边 —— connected 一个连通段"
       "一段，half_max 每串连续 ≥ 半高的采样各一段；相邻两段缝 ≤ mergeGap、合并后 ≤ mergeWidthMax、峰值比够时合并。\n"
       "每段给出 lo / hi / width / mid（沿法向相对胶路）、peak、两边是否完整、D15 陡度的组成（edgeLo、edgeHi、depth、"
-      "sharpness），接了 level 再给段内最亮的局部亮度。不按宽度筛、不挑段、不判有无胶。";
+      "sharpness）与段内最亮的局部亮度 level。不按宽度筛、不挑段、不判有无胶。";
   op.inputs = {
-      Port{"response", "Image", "Response", "glue.response 的 response。", true},
-      Port{"gray", "Image", "Gray", "glue.response 的 gray（边缘陡度）。", true},
+      Port{
+          "maps", "Bundle<glue.ResponseMaps>", "Maps",
+          "glue.response 的 maps（response 分段、gray 算陡度、level 取局部亮度；块外的采样算无效）。",
+          true},
       withContract(Port{"line", "Record", "Line", "glue.Polyline：胶路。", true},
                    {{"recordType", kPolylineType}}),
-      Port{"level", "Image", "Level", "可选：glue.response 的 level；不接时 level 字段为 null。",
-           false},
   };
   op.outputs = {
       Port{

@@ -37,9 +37,10 @@ std::vector<Px> arc(P2 center, double r, double a0, double a1) {
 }
 
 Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
-  Field R;
-  if (!f32FieldOf(inputs.get("response"), &R))
-    return badImage("response", true);
+  MapsView maps;
+  if (!readMaps(inputs.get("maps"), &maps))
+    return badImage("maps", true);
+  const Field& R = maps.response;
   const FanSpec spec = specOf(params);
   const FanResult fan = fanScan(R, spec);
 
@@ -125,7 +126,8 @@ void registerFanScan(Registry& r) {
       "得分 = 有效采样之和 / 总采样数；无效采样占比 ≥ invalidMax 的方向得分为 null。\n"
       "峰：有得分的方向按得分从高到低，依次取与已取的峰角差都 > peakSeparation 的，取满 peakCount 个"
       "（与 1.1 bead_path 的取法相同；includeInvalid 时无效方向排在最后也可当峰）。只测量，不挑方向。输出不舍入。";
-  op.inputs = {Port{"response", "Image", "Response", "glue.response 的 response。", true}};
+  op.inputs = {Port{"maps", "Bundle<glue.ResponseMaps>", "Maps",
+                    "glue.response 的 maps（用 response；块外的采样算无效）。", true}};
   op.outputs = {
       Port{
           "scan", "Record", "Scan",

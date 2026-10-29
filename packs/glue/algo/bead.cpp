@@ -604,16 +604,10 @@ Field smoothGrayField(const cv::Mat& gray, bool bright, cv::Rect roi) {
 ResponseMaps responseMaps(const cv::Mat& gray, const ResponseSpec& spec) {
   const cv::Rect all = imageRect(gray);
   const cv::Rect inner = (spec.roi.width > 0 && spec.roi.height > 0 ? spec.roi : all) & all;
-  const auto nanImage = [&] {
-    return cv::Mat(gray.size(), CV_32F, cv::Scalar(std::numeric_limits<float>::quiet_NaN()));
-  };
   ResponseMaps out;
-  if (inner.empty()) {
-    out.response = nanImage();
-    out.gray = nanImage();
-    out.level = nanImage();
+  if (inner.empty())
     return out;
-  }
+  out.frame = inner;
   const auto blur = [](cv::Mat& m, double sigma) {
     if (sigma > 0)
       cv::GaussianBlur(m, m, cv::Size(5, 5), sigma);
@@ -624,29 +618,31 @@ ResponseMaps responseMaps(const cv::Mat& gray, const ResponseSpec& spec) {
   const cv::Rect outer = inflate(inner, 2 * o.radius + 4) & all;
   const cv::Mat src = gray(outer).clone();
   const cv::Mat morph = closeOrOpen(src, o, spec.bright);
+  // 5×5 的平滑只要块外 2 px：之后的几步只在这一圈里做（形态学要的那一大圈外扩到这里已经用完了）。
+  // 块里每个点的 5×5 邻域都落在这一圈里，碰到图像边界时与整幅计算一样截在图边，所以结果一位不差
+  const cv::Rect near = inflate(inner, 2) & all;
+  const cv::Rect nl(near.tl() - outer.tl(), near.size());
+  const cv::Mat srcN = src(nl), morphN = morph(nl);
   cv::Mat r, l, g;
   if (spec.bright) {
-    cv::subtract(src, morph, r, cv::noArray(), CV_32F);
+    cv::subtract(srcN, morphN, r, cv::noArray(), CV_32F);
   } else {
-    cv::subtract(morph, src, r, cv::noArray(), CV_32F);
+    cv::subtract(morphN, srcN, r, cv::noArray(), CV_32F);
   }
   // 八边形拆成三次形态学串着做，贴图边（两倍半径以内）时中间那一步出了图，闭运算会比原图还低一点：
   // 负的响应是这个假象，按契约（≥ 0）截到 0。responseField 不截（1.1 的结果一位不变）
   cv::max(r, 0.0, r);
   blur(r, spec.responseSigma);
-  (spec.bright ? src : morph).convertTo(l, CV_32F);
+  (spec.bright ? srcN : morphN).convertTo(l, CV_32F);
   blur(l, spec.levelSigma);
-  src.convertTo(g, CV_32F);
+  srcN.convertTo(g, CV_32F);
   blur(g, spec.graySigma);
   if (spec.bright)
     g = 255.0 - g;
-  const cv::Rect local(inner.tl() - outer.tl(), inner.size());
+  // 只交出块内：整幅不再分配、不再填 NaN，执行器给每张输出做的统计也只扫这一块
+  const cv::Rect local(inner.tl() - near.tl(), inner.size());
   const auto place = [&](const cv::Mat& part) {
-    if (inner == all)
-      return part;
-    cv::Mat whole = nanImage();
-    part(local).copyTo(whole(inner));
-    return whole;
+    return near == inner ? part : part(local).clone();
   };
   out.response = place(r);
   out.level = place(l);
@@ -1118,6 +1114,10 @@ void fitBeadPath(const std::vector<std::pair<double, P2>>& coarse, P2 anchor, do
   std::vector<P2> smooth = dense;
   if (fitSigma > 0) {
     const int half = static_cast<int>(std::ceil(3.0 * fitSigma));
+    // 权重只算一遍（逐点逐抽头调 exp 占了拟合的大半）；每个抽头的算式不变，结果一位不差
+    std::vector<double> weights(static_cast<std::size_t>(2 * half + 1));
+    for (int k = -half; k <= half; ++k)
+      weights[static_cast<std::size_t>(k + half)] = std::exp(-0.5 * k * k / (fitSigma * fitSigma));
     for (std::size_t i = 0; i < dense.size(); ++i) {
       P2 acc(0, 0);
       double wsum = 0;
@@ -1125,7 +1125,7 @@ void fitBeadPath(const std::vector<std::pair<double, P2>>& coarse, P2 anchor, do
         const std::ptrdiff_t j = static_cast<std::ptrdiff_t>(i) + k;
         if (j < 0 || j >= static_cast<std::ptrdiff_t>(dense.size()))
           continue;
-        const double w = std::exp(-0.5 * k * k / (fitSigma * fitSigma));
+        const double w = weights[static_cast<std::size_t>(k + half)];
         acc += dense[static_cast<std::size_t>(j)] * w;
         wsum += w;
       }

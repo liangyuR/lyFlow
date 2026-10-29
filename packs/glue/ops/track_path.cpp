@@ -56,11 +56,11 @@ std::vector<Px> pxList(const std::vector<P2>& pts) {
 }
 
 Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
-  Field R, g;
-  if (!f32FieldOf(inputs.get("response"), &R))
-    return badImage("response", true);
-  if (!f32FieldOf(inputs.get("gray"), &g))
-    return badImage("gray", true);
+  MapsView maps;
+  if (!readMaps(inputs.get("maps"), &maps))
+    return badImage("maps", true);
+  const Field& R = maps.response;
+  const Field& g = maps.gray;
   const TrackSpec spec = specOf(params);
 
   Json rec;
@@ -183,8 +183,8 @@ void registerTrackPath(Registry& r) {
       "接了 fan：起始方向 = fan.peaks[peakIndex].angle（没有这个峰时 valid = false、line 为空）。"
       "不输出 ok：覆盖率、陡度够不够由宿主判。";
   op.inputs = {
-      Port{"response", "Image", "Response", "glue.response 的 response。", true},
-      Port{"gray", "Image", "Gray", "glue.response 的 gray（逐点陡度）。", true},
+      Port{"maps", "Bundle<glue.ResponseMaps>", "Maps",
+           "glue.response 的 maps（response 找胶点、gray 算逐点陡度；块外的采样算无效）。", true},
       withContract(Port{"fan", "Record", "Fan",
                         "可选：glue.fan_scan 的 scan；接了就用它的第 peakIndex 个峰作起始方向。",
                         false},

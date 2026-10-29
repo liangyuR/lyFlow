@@ -1137,12 +1137,10 @@ Json measureGraph(const MeasureParams& p) {
                     N{"n_track", "glue.track_path", p.track},
                     N{"n_runs", "glue.lateral_runs", p.runs},
                     N{"n_edges", "glue.part_edges", p.edges}},
-                   {E{"n_load.image", "n_resp.image"}, E{"n_resp.response", "n_fan.response"},
-                    E{"n_resp.response", "n_track.response"}, E{"n_resp.gray", "n_track.gray"},
-                    E{"n_fan.scan", "n_track.fan"}, E{"n_resp.response", "n_runs.response"},
-                    E{"n_resp.gray", "n_runs.gray"}, E{"n_track.line", "n_runs.line"},
-                    E{"n_resp.level", "n_runs.level"}, E{"n_load.image", "n_edges.image"},
-                    E{"n_track.line", "n_edges.line"}});
+                   {E{"n_load.image", "n_resp.image"}, E{"n_resp.maps", "n_fan.maps"},
+                    E{"n_resp.maps", "n_track.maps"}, E{"n_fan.scan", "n_track.fan"},
+                    E{"n_resp.maps", "n_runs.maps"}, E{"n_track.line", "n_runs.line"},
+                    E{"n_load.image", "n_edges.image"}, E{"n_track.line", "n_edges.line"}});
 }
 
 struct Measured {
@@ -1370,8 +1368,9 @@ TEST_CASE("glue 测量算子：卡尺拆分 —— 胶旁隔一道浅谷的灰�
   }
 }
 
-TEST_CASE("glue 测量算子：响应图 roi 与整幅逐位相同、块外 NaN，与 1.1 的 responseField 相同；"
-          "亮胶的 gray 取反") {
+TEST_CASE(
+    "glue 测量算子：响应图只给 roi 那一块、块里与整幅逐位相同、块外采样无效，与 1.1 的 responseField 相同；"
+    "亮胶的 gray 取反") {
   Scene sc;
   const cv::Mat gray = render(sc);
   glue::ResponseSpec spec;
@@ -1379,25 +1378,32 @@ TEST_CASE("glue 测量算子：响应图 roi 与整幅逐位相同、块外 NaN�
   spec.roi = cv::Rect(200, 150, 180, 160);
   const glue::ResponseMaps part = glue::responseMaps(gray, spec);
   const glue::Field old = glue::responseField(gray, false, 90, spec.roi);
-  REQUIRE(part.response.size() == gray.size());
+  CHECK(whole.frame == cv::Rect(0, 0, gray.cols, gray.rows));
+  REQUIRE(part.frame == spec.roi);
+  REQUIRE(part.response.size() == spec.roi.size());
   int diffs = 0;
   for (int y = spec.roi.y; y < spec.roi.br().y; ++y) {
     for (int x = spec.roi.x; x < spec.roi.br().x; ++x) {
-      diffs += whole.response.at<float>(y, x) != part.response.at<float>(y, x);
-      diffs += whole.gray.at<float>(y, x) != part.gray.at<float>(y, x);
-      diffs += whole.level.at<float>(y, x) != part.level.at<float>(y, x);
+      const int py = y - spec.roi.y, px = x - spec.roi.x;
+      diffs += whole.response.at<float>(y, x) != part.response.at<float>(py, px);
+      diffs += whole.gray.at<float>(y, x) != part.gray.at<float>(py, px);
+      diffs += whole.level.at<float>(y, x) != part.level.at<float>(py, px);
       if (x + 1 < spec.roi.br().x && y + 1 < spec.roi.br().y)
-        diffs += old.at(x, y) != part.response.at<float>(y, x);
+        diffs += old.at(x, y) != part.response.at<float>(py, px);
     }
   }
   CHECK(diffs == 0);
   double lo = 0;
   cv::minMaxLoc(whole.response, &lo);
   CHECK(lo >= 0.0); // 贴图边处的形态学假象截到 0
-  CHECK(std::isnan(part.response.at<float>(spec.roi.y, spec.roi.x - 1)));
-  CHECK(glue::Field::whole(part.response).at(spec.roi.x - 1.0, spec.roi.y + 5.0) == glue::kInvalid);
-  spec.bright = true;
+  const glue::Field f = part.field(part.response);
+  CHECK(f.at(spec.roi.x + 10.5, spec.roi.y + 20.25) ==
+        glue::Field::whole(whole.response).at(spec.roi.x + 10.5, spec.roi.y + 20.25));
+  CHECK(f.at(spec.roi.x - 1.0, spec.roi.y + 5.0) == glue::kInvalid);
+  spec.roi = cv::Rect(gray.cols + 10, 0, 50, 50);
+  CHECK(glue::responseMaps(gray, spec).frame.empty());
   spec.roi = cv::Rect();
+  spec.bright = true;
   const glue::ResponseMaps bright = glue::responseMaps(gray, spec);
   CHECK(bright.gray.at<float>(100, 100) == doctest::Approx(255.0 - whole.gray.at<float>(100, 100)));
 }
@@ -1431,6 +1437,11 @@ TEST_CASE("glue 测量算子：取不到的峰、没有胶都是值不是错 —
     CHECK(fan.peaks[1].angle == -164.0);
     CHECK(fan.peaks[2].angle == -148.0);
     CHECK(std::isnan(fan.peaks[0].score));
+  }
+  SUBCASE("roi 与图像不相交：bad_param 指到 roi（不是值）") {
+    MeasureParams p = measureParams(sc);
+    p.resp["roi"] = {5000, 5000, 100, 100};
+    CHECK(runMeasure(measureGraph(p), render(sc)).status != "ok");
   }
   SUBCASE("一片空白：照常输出，覆盖率 0、陡度 null、沿起始方向的直线") {
     sc.bead = false;

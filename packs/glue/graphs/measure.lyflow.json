@@ -4,7 +4,7 @@
   "name": "涂胶测量 · 逐帧定向（1.2 测量算子示例）",
   "meta": {
     "app": "lyflow/1.2.0",
-    "note": "docs/glue-measure-ops.md 的参考连法：响应图只算一次，扇形扫描取前三个峰，每个峰各跟踪、拟合一条胶路并沿它布横向卡尺，一次运行算完全部候选；判定（覆盖率、陡度、选哪个候选、每站取哪一段）归宿主。宿主逐帧注入 n_load.image，顶层参数逐相机 / 段给。拿文件跑：lyflow run <图> --set n_load.source='\"file\"' --set n_load.path='\"<帧>\"' --param anchor='[629.1,890.7]' --param sector='[-146.44,-116.44]' --param zone='[0,300]' --outputs。"
+    "note": "docs/glue-measure-ops.md 的参考连法：响应图只算一次（maps 一条线接给下游），扇形扫描取前三个峰，每个峰各跟踪、拟合一条胶路并沿它布横向卡尺，一次运行算完全部候选；判定（覆盖率、陡度、选哪个候选、每站取哪一段）归宿主。宿主逐帧注入 n_load.image，顶层参数逐相机 / 段给。拿文件跑：lyflow run <图> --set n_load.source='\"file\"' --set n_load.path='\"<帧>\"' --param anchor='[629.1,890.7]' --param sector='[-146.44,-116.44]' --param zone='[0,300]' --outputs。"
   },
   "params": {
     "anchor": {
@@ -315,37 +315,26 @@
       "id": "e1",
       "from": {
         "node": "n_resp",
-        "port": "response"
+        "port": "maps"
       },
       "to": {
         "node": "n_fan",
-        "port": "response"
+        "port": "maps"
       }
     },
     {
       "id": "e2",
       "from": {
         "node": "n_resp",
-        "port": "response"
+        "port": "maps"
       },
       "to": {
         "node": "n_t0",
-        "port": "response"
+        "port": "maps"
       }
     },
     {
       "id": "e3",
-      "from": {
-        "node": "n_resp",
-        "port": "gray"
-      },
-      "to": {
-        "node": "n_t0",
-        "port": "gray"
-      }
-    },
-    {
-      "id": "e4",
       "from": {
         "node": "n_fan",
         "port": "scan"
@@ -356,40 +345,18 @@
       }
     },
     {
+      "id": "e4",
+      "from": {
+        "node": "n_resp",
+        "port": "maps"
+      },
+      "to": {
+        "node": "n_r0",
+        "port": "maps"
+      }
+    },
+    {
       "id": "e5",
-      "from": {
-        "node": "n_resp",
-        "port": "response"
-      },
-      "to": {
-        "node": "n_r0",
-        "port": "response"
-      }
-    },
-    {
-      "id": "e6",
-      "from": {
-        "node": "n_resp",
-        "port": "gray"
-      },
-      "to": {
-        "node": "n_r0",
-        "port": "gray"
-      }
-    },
-    {
-      "id": "e7",
-      "from": {
-        "node": "n_resp",
-        "port": "level"
-      },
-      "to": {
-        "node": "n_r0",
-        "port": "level"
-      }
-    },
-    {
-      "id": "e8",
       "from": {
         "node": "n_t0",
         "port": "line"
@@ -400,25 +367,58 @@
       }
     },
     {
-      "id": "e9",
+      "id": "e6",
       "from": {
         "node": "n_resp",
-        "port": "response"
+        "port": "maps"
       },
       "to": {
         "node": "n_t1",
-        "port": "response"
+        "port": "maps"
+      }
+    },
+    {
+      "id": "e7",
+      "from": {
+        "node": "n_fan",
+        "port": "scan"
+      },
+      "to": {
+        "node": "n_t1",
+        "port": "fan"
+      }
+    },
+    {
+      "id": "e8",
+      "from": {
+        "node": "n_resp",
+        "port": "maps"
+      },
+      "to": {
+        "node": "n_r1",
+        "port": "maps"
+      }
+    },
+    {
+      "id": "e9",
+      "from": {
+        "node": "n_t1",
+        "port": "line"
+      },
+      "to": {
+        "node": "n_r1",
+        "port": "line"
       }
     },
     {
       "id": "e10",
       "from": {
         "node": "n_resp",
-        "port": "gray"
+        "port": "maps"
       },
       "to": {
-        "node": "n_t1",
-        "port": "gray"
+        "node": "n_t2",
+        "port": "maps"
       }
     },
     {
@@ -428,7 +428,7 @@
         "port": "scan"
       },
       "to": {
-        "node": "n_t1",
+        "node": "n_t2",
         "port": "fan"
       }
     },
@@ -436,114 +436,15 @@
       "id": "e12",
       "from": {
         "node": "n_resp",
-        "port": "response"
+        "port": "maps"
       },
       "to": {
-        "node": "n_r1",
-        "port": "response"
+        "node": "n_r2",
+        "port": "maps"
       }
     },
     {
       "id": "e13",
-      "from": {
-        "node": "n_resp",
-        "port": "gray"
-      },
-      "to": {
-        "node": "n_r1",
-        "port": "gray"
-      }
-    },
-    {
-      "id": "e14",
-      "from": {
-        "node": "n_resp",
-        "port": "level"
-      },
-      "to": {
-        "node": "n_r1",
-        "port": "level"
-      }
-    },
-    {
-      "id": "e15",
-      "from": {
-        "node": "n_t1",
-        "port": "line"
-      },
-      "to": {
-        "node": "n_r1",
-        "port": "line"
-      }
-    },
-    {
-      "id": "e16",
-      "from": {
-        "node": "n_resp",
-        "port": "response"
-      },
-      "to": {
-        "node": "n_t2",
-        "port": "response"
-      }
-    },
-    {
-      "id": "e17",
-      "from": {
-        "node": "n_resp",
-        "port": "gray"
-      },
-      "to": {
-        "node": "n_t2",
-        "port": "gray"
-      }
-    },
-    {
-      "id": "e18",
-      "from": {
-        "node": "n_fan",
-        "port": "scan"
-      },
-      "to": {
-        "node": "n_t2",
-        "port": "fan"
-      }
-    },
-    {
-      "id": "e19",
-      "from": {
-        "node": "n_resp",
-        "port": "response"
-      },
-      "to": {
-        "node": "n_r2",
-        "port": "response"
-      }
-    },
-    {
-      "id": "e20",
-      "from": {
-        "node": "n_resp",
-        "port": "gray"
-      },
-      "to": {
-        "node": "n_r2",
-        "port": "gray"
-      }
-    },
-    {
-      "id": "e21",
-      "from": {
-        "node": "n_resp",
-        "port": "level"
-      },
-      "to": {
-        "node": "n_r2",
-        "port": "level"
-      }
-    },
-    {
-      "id": "e22",
       "from": {
         "node": "n_t2",
         "port": "line"

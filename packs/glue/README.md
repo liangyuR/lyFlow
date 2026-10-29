@@ -113,10 +113,10 @@ GlueSight 从 1.2 起只用下面 6 个算子，判定（有无胶、像不像�
 
 | id | 输入 → 输出 | 一步做什么 |
 |---|---|---|
-| `glue.response` 响应图 | `image` → `response`、`gray`、`level`（f32） | 黑 / 白顶帽 + 陡度用的平滑灰度 + 局部亮度，整幅或 roi，只算一次 |
-| `glue.fan_scan` 扇形扫描 | `response` → `scan: Record<glue.FanScan>` | 每个方向射线上的平均响应，前 N 个相距 > peakSeparation 的峰 |
-| `glue.track_path` 粗跟踪与拟合 | `response`、`gray`、`fan?` → `line`、`track: Record<glue.Track>` | 沿一个方向找胶点、拟合光滑胶路；覆盖率、陡度 P25、逐点陡度，不判 ok |
-| `glue.lateral_runs` 横向卡尺 | `response`、`gray`、`line`、`level?` → `runs: Record<glue.LateralRuns>` | 每站全部暗段（半高拆分 / 连通段、分段门限、合并缝与峰值比都是参数） |
+| `glue.response` 响应图 | `image` → `maps: Bundle<glue.ResponseMaps>` | 黑 / 白顶帽 + 陡度用的平滑灰度 + 局部亮度（f32），只输出 roi 那一块，`frame` 给块的位置；只算一次 |
+| `glue.fan_scan` 扇形扫描 | `maps` → `scan: Record<glue.FanScan>` | 每个方向射线上的平均响应，前 N 个相距 > peakSeparation 的峰 |
+| `glue.track_path` 粗跟踪与拟合 | `maps`、`fan?` → `line`、`track: Record<glue.Track>` | 沿一个方向找胶点、拟合光滑胶路；覆盖率、陡度 P25、逐点陡度，不判 ok |
+| `glue.lateral_runs` 横向卡尺 | `maps`、`line` → `runs: Record<glue.LateralRuns>` | 每站全部暗段（半高拆分 / 连通段、分段门限、合并缝与峰值比都是参数） |
 | `glue.part_edges` 找零件边 | `image`、`line` → `edges: Record<glue.PartEdges>` | 每站两侧全部合格跳变，不选侧、不剔野 |
 | `glue.polyline` 折线胶路 | （无）→ `line` | 参数折线按弧长重采样（示教走廊） |
 

@@ -17,18 +17,18 @@ GS 从 1.2 起不再使用前三个的语义。
 
 ```
                     ┌→ glue.fan_scan ──fan──┐
-io.load_image → glue.response ─response─────┼→ glue.track_path ─line─→ glue.lateral_runs
-                    └──gray / level─────────┴──────────────────────────↗
+io.load_image → glue.response ──maps────────┼→ glue.track_path ─line─→ glue.lateral_runs
+                    └──maps─────────────────┴──────────────────────────↗
 glue.polyline（示教折线）─line─→ glue.lateral_runs / glue.part_edges
 io.load_image ──image──────────────────────────────────────────────→ glue.part_edges
 ```
 
 | id | 名称 | 输入 → 输出 | 一步做什么 |
 |---|---|---|---|
-| `glue.response` | 响应图 | `image` → `response`、`gray`、`level` | 整幅（或 roi）黑 / 白顶帽，附带陡度用的平滑灰度与局部亮度 |
-| `glue.fan_scan` | 扇形扫描 | `response` → `scan`、`overlay` | 每个方向一条射线上的平均响应；可选前 N 个峰 |
-| `glue.track_path` | 粗跟踪与拟合 | `response`、`gray`、`fan?` → `line`、`track`、`overlay` | 沿一个方向逐步找胶点，稳健拟合光滑胶路 |
-| `glue.lateral_runs` | 横向卡尺 | `response`、`gray`、`line`、`level?` → `runs`、`overlay` | 沿胶路布站，每站卡尺上的全部暗段 |
+| `glue.response` | 响应图 | `image` → `maps` | 整幅（或 roi 那一块）黑 / 白顶帽，附带陡度用的平滑灰度与局部亮度，打包成一个 Bundle |
+| `glue.fan_scan` | 扇形扫描 | `maps` → `scan`、`overlay` | 每个方向一条射线上的平均响应；可选前 N 个峰 |
+| `glue.track_path` | 粗跟踪与拟合 | `maps`、`fan?` → `line`、`track`、`overlay` | 沿一个方向逐步找胶点，稳健拟合光滑胶路 |
+| `glue.lateral_runs` | 横向卡尺 | `maps`、`line` → `runs`、`overlay` | 沿胶路布站，每站卡尺上的全部暗段 |
 | `glue.part_edges` | 找零件边 | `image`、`line` → `edges`、`overlay` | 沿胶路布站，每站两侧的全部合格零件边跳变 |
 | `glue.polyline` | 折线胶路 | （无）→ `line`、`overlay` | 把一条参数给定的折线重采样成胶路（示教走廊用） |
 
@@ -45,11 +45,12 @@ io.load_image ──image──────────────────�
 - **布站**：`lateral_runs` 与 `part_edges` 用同一套规则，同一条胶路、同样的 `stationStep` / `sRange` 得到逐一对齐的站：
   `sRange = [0, 0]` 表示整条胶路 `[s₀, s_last]`；否则取 `[a, b] ∩ [s₀, s_last]`。站在 `s = a + k·stationStep`（k = 0, 1, …，`s ≤ b + 1e-6`）。
   站上的点与切向按 `s` 在折线上线性插值（切向重新归一化）。胶路为空或交集为空时没有站。
-- **f32 图**：`glue.response` 输出的三张图都是单通道 f32、与输入同尺寸；roi 之外的像素是 NaN。下游采样（双线性）
-  四个邻点里有 NaN 或落出图外即视为**无效采样**。
+- **响应图（`maps`）**：`glue.response` 输出一个 `Bundle<glue.ResponseMaps>`，三张单通道 f32 图只覆盖 `frame` 那一块
+  （roi ∩ 图像；没设 roi 时是整幅），下游按 `frame` 的偏移采样，**坐标仍是整幅图的像素坐标**。下游采样（双线性）四个邻点里有一个
+  落在块外（或图外）即视为**无效采样**（1.2.0 联调前的版本是整幅图、块外填 NaN，采样结果相同）。
 - **输入图**：`glue.response` 与 `glue.part_edges` 的 `image` 接受全分辨率 u8 灰度 / RGB / RGBA（三通道按 BT.601 转灰度，与 1.1 相同）；
-  其他位深先接 `image.normalize`；预览缩小图（`scale > 1`）报 `bad_input`。`response` / `gray` / `level` 端口要求单通道 f32、`scale = 1`，
-  否则 `bad_input`。
+  其他位深先接 `image.normalize`；预览缩小图（`scale > 1`）报 `bad_input`。`maps` 端口要求完整的 `glue.ResponseMaps`
+  （三张单通道 f32、`scale = 1`、尺寸与 `frame` 一致），否则 `bad_input`。
 - **JSON 数值**：新算子的输出**一律不舍入**（双精度原样写出，JSON 读回逐位相同）：宿主拿这些值做判定，舍入会让落在门限上的判断与 1.1 不一致，扇形峰的方向舍入后再喂给粗跟踪还会让起跑方向偏一点。只有 `glue.Polyline` 沿用 1.1 的格式（坐标 3 位、切向 5 位小数），1.1 的 `bead_width` 量的也是这条舍入过的折线。取不到的值是 `null`，不用 NaN 或 −1。
 - **确定性**：全部算子 `deterministic = true`，同输入同参数逐位相同。
 
@@ -70,15 +71,25 @@ io.load_image ──image──────────────────�
 | 端口 | 类型 | 说明 |
 |---|---|---|
 | 入 `image` | Image | 见「约定 / 输入图」 |
-| 出 `response` | Image（f32 × 1） | 暗胶：闭运算 − 原图（黑顶帽）；亮胶：原图 − 开运算（白顶帽）；再做 5×5 高斯（`responseSigma`）。≥ 0 |
-| 出 `gray` | Image（f32 × 1） | 原图做 5×5 高斯（`graySigma`）；亮胶时取 255 − g，使「胶比背景暗」恒成立。边缘陡度用它 |
-| 出 `level` | Image（f32 × 1） | 局部亮度：暗胶取闭运算、亮胶取原图，再做 5×5 高斯（`levelSigma`）。处处 ≥ response（σ 相同时） |
+| 出 `maps` | Bundle `glue.ResponseMaps` | 下面四个字段 |
+
+`glue.ResponseMaps` 的字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `response` | Image（f32 × 1，`frame` 大小） | 暗胶：闭运算 − 原图（黑顶帽）；亮胶：原图 − 开运算（白顶帽）；再做 5×5 高斯（`responseSigma`）。≥ 0 |
+| `gray` | Image（f32 × 1，`frame` 大小） | 原图做 5×5 高斯（`graySigma`）；亮胶时取 255 − g，使「胶比背景暗」恒成立。边缘陡度用它 |
+| `level` | Image（f32 × 1，`frame` 大小） | 局部亮度：暗胶取闭运算、亮胶取原图，再做 5×5 高斯（`levelSigma`）。处处 ≥ response（σ 相同时） |
+| `frame` | Record `glue.Frame` | `{x, y, width, height, imageWidth, imageHeight}`，全是整数像素：`x`、`y` 是块的左上角像素在整幅图里的坐标，`width`、`height` 是块的宽高（= 三张图的宽高），`imageWidth`、`imageHeight` 是整幅输入图的宽高。三张图的 (0, 0) 像素就是整幅图的 (x, y) |
+
+块 = `roi`（`[x, y, w, h]`，四舍五入到整数）与图像求交；没设 roi（w、h ≤ 0）就是整幅图。**roi 与图像不相交（交集为空）是执行错误
+`bad_param`，指到 `roi`**：这只会是参数配错（例如出胶点填错），不当成值往下传。块里的值与整幅计算逐位相同。
 
 | 参数 | 类型 | 单位 | 默认 | 范围 | 说明 |
 |---|---|---|---|---|---|
 | `polarity` | enum `dark` / `bright` | — | `dark` | — | 胶比背景暗（黑顶帽）还是亮（白顶帽） |
 | `diameter` | int | px | 91 | 3–401 | 结构元直径。比它窄的暗带才有完整响应，应大于期望最大胶宽（1.1 用的是 `widthMax + 1`） |
-| `roi` | vec4 `[x, y, w, h]` | px | `[0, 0, 0, 0]` | w、h 同为 ≤ 0（整幅）或同为 > 0 | 只算这一块（与图像求交）；块内的值与整幅计算逐位相同，块外为 NaN |
+| `roi` | vec4 `[x, y, w, h]` | px | `[0, 0, 0, 0]` | w、h 同为 ≤ 0（整幅）或同为 > 0 | 只算、只输出这一块（与图像求交，不相交是 `bad_param`）；块内的值与整幅计算逐位相同 |
 | `responseSigma` | float | px | 1.2 | 0–3 | 响应图的 5×5 高斯 σ；0 = 不平滑 |
 | `graySigma` | float | px | 1.0 | 0–3 | `gray` 的 5×5 高斯 σ；0 = 不平滑 |
 | `levelSigma` | float | px | 1.2 | 0–3 | `level` 的 5×5 高斯 σ；0 = 不平滑 |
@@ -91,7 +102,7 @@ io.load_image ──image──────────────────�
 
 | 端口 | 类型 | 说明 |
 |---|---|---|
-| 入 `response` | Image（f32 × 1） | `glue.response.response` |
+| 入 `maps` | Bundle `glue.ResponseMaps` | `glue.response.maps`（用 `response`） |
 | 出 `scan` | Record `glue.FanScan` | 见下 |
 | 出 `overlay` | Record `lyflow.overlay2d` | role：`anchor`、`sector`、`radial`（两段圆弧）、`peak`（峰方向的射线，label 为序号与得分） |
 
@@ -136,8 +147,7 @@ io.load_image ──image──────────────────�
 
 | 端口 | 类型 | 说明 |
 |---|---|---|
-| 入 `response` | Image（f32 × 1） | `glue.response.response` |
-| 入 `gray` | Image（f32 × 1） | `glue.response.gray`（逐点陡度与重新接上时的陡度门） |
+| 入 `maps` | Bundle `glue.ResponseMaps` | `glue.response.maps`（`response` 找胶点，`gray` 算逐点陡度与重新接上时的陡度门） |
 | 入 `fan`（可选） | Record `glue.FanScan` | 接了：起始方向 = `fan.peaks[peakIndex].angle`，`heading` 参数不用 |
 | 出 `line` | Record `glue.Polyline` | 拟合胶路：第一个点离锚点恰好 `zone[0]`，之后按平滑胶路的真实弧长每 2 px 一点，最后一点 `s = zone[1]`；s 从锚点量起 |
 | 出 `track` | Record `glue.Track` | 见下 |
@@ -216,10 +226,8 @@ io.load_image ──image──────────────────�
 
 | 端口 | 类型 | 说明 |
 |---|---|---|
-| 入 `response` | Image（f32 × 1） | `glue.response.response` |
-| 入 `gray` | Image（f32 × 1） | `glue.response.gray`（边缘陡度） |
+| 入 `maps` | Bundle `glue.ResponseMaps` | `glue.response.maps`（`response` 分段、`gray` 算边缘陡度、`level` 取局部亮度） |
 | 入 `line` | Record `glue.Polyline` | `track_path.line` 或 `polyline.line` |
-| 入 `level`（可选） | Image（f32 × 1） | `glue.response.level`；不接时 `level` 字段为 `null` |
 | 出 `runs` | Record `glue.LateralRuns` | 见下 |
 | 出 `overlay` | Record `lyflow.overlay2d` | role：`path`、`station`（卡尺线）、`run`（每段从 lo 到 hi） |
 
@@ -272,7 +280,7 @@ io.load_image ──image──────────────────�
 | `edgeHi` | `g(hi + edgeProbe) − g(hi − edgeProbe)` |
 | `depth` | `max(1, (g(lo − backgroundProbe) + g(hi + backgroundProbe)) / 2 − 段中间一半上 5 个采样的均值)` |
 | `sharpness` | `min(edgeLo, edgeHi) / depth`（1.1 的 D15 陡度）。任一采样无效时 `edgeLo`、`edgeHi`、`depth`、`sharpness` 全为 `null` |
-| `level` | `level` 图在 `t = lo, lo + 1, …（< hi）` 与 `t = hi` 上采样的最大值；没接 `level` 或全无效时 `null`。1.1 示教胶路的对比度 = `peak / max(level, 1)` |
+| `level` | `level` 图在 `t = lo, lo + 1, …（< hi）` 与 `t = hi` 上采样的最大值；全部采样无效时 `null`。1.1 示教胶路的对比度 = `peak / max(level, 1)` |
 
 ## 5. `glue.part_edges` 找零件边
 
@@ -335,11 +343,11 @@ io.load_image ──image──────────────────�
 GS 的模板由 GS 维护；下面只说明算子怎么接。图参数经 `binds` 一处写入多个节点（例如 `anchor` 绑 `n_fan.anchor`、`n_t0.anchor`…）。
 
 ```
-n_load(io.load_image) → n_resp(glue.response)
-n_resp.response → n_fan(glue.fan_scan)
-n_resp.response, n_resp.gray, n_fan.scan → n_t0 / n_t1 / n_t2 (glue.track_path, peakIndex 0 / 1 / 2)
-n_resp.response, n_resp.gray, n_tK.line, n_resp.level → n_rK (glue.lateral_runs)
-回退：n_resp.response → n_fanB(glue.fan_scan, sector = 示教方向 ± 容差) → n_tB → n_rB
+n_load(io.load_image) → n_resp(glue.response, roi)
+n_resp.maps → n_fan(glue.fan_scan)
+n_resp.maps, n_fan.scan → n_t0 / n_t1 / n_t2 (glue.track_path, peakIndex 0 / 1 / 2)
+n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
+回退：n_resp.maps → n_fanB(glue.fan_scan, sector = 示教方向 ± 容差) → n_tB → n_rB
 找边：n_load.image, n_tK.line → n_eK (glue.part_edges)
 ```
 
@@ -414,6 +422,11 @@ TS 接口里非可选的方法都要有；调试页真正用到的是下面这�
   `track_path` 接 fan 后用舍入的方向起跑（−45.670° 对 1.1 的 −45.66976°），同一个峰找到的胶点从 4 个变成 2 个，选中的候选随之不同。
   改为：新算子的全部输出不再舍入（`glue.Polyline` 除外）；`track_path` 从 fan 记录读到的就是完整精度的方向。`fan_scan` 加参数 `includeInvalid`
   （默认 false，打开即 1.1 的挑法）。端口与其余参数不变。
+- **2026-10-29（联调后，提速）**：GS 实测单帧约为 1.1 的两倍，瓶颈在 `glue.response`（整幅输出 + 执行器给整幅图做统计）。按 GS 选的方案 A：
+  `glue.response` 的三个 Image 输出端口合并成一个 `maps: Bundle<glue.ResponseMaps>`（`response`、`gray`、`level` 只覆盖 roi 那一块，加 `frame`
+  给块在整幅图里的位置）；`fan_scan`、`track_path`、`lateral_runs` 的 `response` / `gray` / `level` 输入合并成一个 `maps` 输入，`lateral_runs`
+  的 `level` 字段因此总有值。roi 与图像不相交是 `bad_param`。采样结果与之前逐位相同（块外原来是 NaN，现在是块外，都算无效采样）。
+  执行器的图像统计提速：u8 / u16 结果精确，**f32 的 mean 只差在舍入的末位**。
 
 ## 版本与兼容
 
@@ -424,23 +437,21 @@ TS 接口里非可选的方法都要有；调试页真正用到的是下面这�
 ## 实测耗时
 
 2026-10-29，本机（Windows 11、MSVC 14.44、RelWithDebInfo），seg-new14 cam2 录制的 22 帧 1280×1024 灰度图，`lyflow eval --no-cache`、
-默认节点并行度，每组跑两遍取后一遍（两遍相差 < 0.5 ms）。图是 `packs/glue/graphs/measure.lyflow.json`：响应图 → 扇形扫描（取 3 个峰）→
-3 × 粗跟踪 → 3 × 横向卡尺，一次运行算完全部候选。参数：出胶点 (629.1, 890.7)、扇区 [−146.44, −116.44]°、检测区 [0, 300]、
-径向区间 [0, 150]、`diameter` 61、跟踪胶宽上限 60、站距 10、卡尺半长 150、`half_max`。「整图」= `run_finished.durationMs` − 读图节点
-（宿主注入图像，不读文件）。
+节点并行度 4（宿主经 C ABI 运行时的默认），每组跑两遍、两遍都列出。「整图」= `run_finished.durationMs` − 读图节点（宿主注入图像，不读文件）。
+对照组是同一台机器、同一批帧上的 1.1 算子。GS 的机器比这台快，绝对值以 GS 实测为准，看相对 1.1 的差。
 
-| 节点 | 整幅响应图 p50 / p95（ms） | `roi` = 出胶点 ± 368 px p50 / p95（ms） |
+| 图 | 1.2 整图 p50 / p95（ms） | 1.1 对照整图 p50 / p95（ms） |
 |---|---|---|
-| `glue.response` | 9.6 / 10.8 | 5.9 / 6.6 |
-| `glue.fan_scan` | 0.1 / 0.1 | 0.1 / 0.2 |
-| `glue.track_path`（每个候选） | 0.8 / 1.1 | 0.8 / 1.3 |
-| `glue.lateral_runs`（每个候选，31 站） | 0.9 / 1.1 | 0.9 / 1.4 |
-| 节点合计 | 13.1 / 14.9 | 9.9 / 11.3 |
-| **整图** | **18.2 / 19.3** | **14.5 / 16.3** |
+| 示教走廊：`response`（roi = 走廊外包框 ± 卡尺半长 + 4）→ `polyline` → 2 × `lateral_runs`（站距 10、卡尺半长 150） | 6.0 / 7.9；5.6 / 6.5 | `taught_path` → `bead_width`：4.0 / 5.2；4.2 / 5.6 |
+| 逐帧定向：`response`（roi = 出胶点 ± (300 + max(60 + 8, 150 + 5))）→ 扇形扫描 → 3 × 粗跟踪 → 3 × 卡尺，再加回退一支（扇形扫描 + 粗跟踪 + 卡尺），一次跑完 | 11.7 / 14.3；11.0 / 12.4 | 只有搜索那张图 `bead_path` → `bead_width`：6.8 / 9.3；6.7 / 8.5（1.1 回退要再跑一张图） |
 
-对照：同一批帧上 1.1 的 `bead_path` → `bead_width`（只有搜索、不含回退那张图）整图 8.7 / 10.1 ms。GS 现有的逐帧定向含回退 p50 / p95 约 16 / 31 ms
-（要跑第二张图）；新图一次运行把三个候选和每个候选的卡尺都算完，宿主再加一个回退分支（扇区收窄的扇形扫描 + 跟踪 + 卡尺，共用同一张响应图）
-约多 2 ms。**宿主应给 `glue.response` 设 `roi`**（出胶点 ± 检测区外沿 + 胶宽上限 + 8，与 1.1 `bead_path` 只算的那一块相同）：整幅计算多花约 4 ms。
+逐帧定向的节点（p50，ms）：`glue.response` 4.5，`glue.fan_scan` 0.1，`glue.track_path` 每个约 0.8，`glue.lateral_runs`（31 站）每个约 1.0。
+示教走廊的 `glue.response` 2.3。
 
-响应图节点之外还有约 1.5 ms 花在执行器给三张 f32 输出做的逐通道统计（事件里的 min / max / mean）上；这次把图像统计改成按位深直接读像素，
-结果不变、整幅图每张约快 1 ms。
+这一轮的提速（2026-10-29 联调后）：
+- `glue.response` 只输出 roi 那一块（`maps.frame` 给偏移），不再分配整幅图、填 NaN（约 3.5 ms），执行器给事件做的逐通道统计也只扫这一块；
+  三次 5×5 平滑只在块外 2 px 以内做（结果一位不差）。
+- 执行器的图像统计：u8 / u16 按整数累加（精确），f32 分 8 条累加链、不分支。整幅 u8 从 2.2 ms 到 0.5 ms（1.1 的链路一样受益），
+  整幅 f32 每张从约 1.6 ms 到 1.0 ms。**f32 的 mean 只差在舍入的末位**，min / max 不变。
+- 拟合胶路的高斯平滑权重只算一遍（原来逐点逐抽头调 `exp`），1.1 的 `bead_path` 一样受益，结果一位不差。
+
