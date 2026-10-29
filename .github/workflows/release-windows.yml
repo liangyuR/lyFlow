@@ -24,35 +24,18 @@ jobs:
           NUGET_AUDIT_USER: ${{ github.actor }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $false
           $evidence = Join-Path $env:GITHUB_WORKSPACE 'build/abi-audit/evidence'
           $downloads = Join-Path $env:RUNNER_TEMP 'lyflow-abi-packages'
           New-Item -ItemType Directory -Path $evidence, $downloads -Force | Out-Null
-          $nuget = (Get-Command nuget.exe -ErrorAction Stop).Source
           $identity = [ordered]@{
             powershell = $PSVersionTable.PSVersion.ToString()
             powershellPath = (Get-Process -Id $PID).Path
             runnerImage = $env:ImageOS
             runnerImageVersion = $env:ImageVersion
-            nuget = $nuget
           }
           $identity | ConvertTo-Json | Tee-Object -FilePath (Join-Path $evidence 'environment.json')
-          $config = Join-Path $downloads 'nuget.config'
-          @'
-          <?xml version="1.0" encoding="utf-8"?>
-          <configuration>
-            <packageSources>
-              <clear />
-              <add key="lyflow-audit" value="https://nuget.pkg.github.com/liangyuR/index.json" />
-            </packageSources>
-            <packageSourceCredentials>
-              <lyflow-audit>
-                <add key="Username" value="%NUGET_AUDIT_USER%" />
-                <add key="ClearTextPassword" value="%NUGET_AUDIT_TOKEN%" />
-              </lyflow-audit>
-            </packageSourceCredentials>
-          </configuration>
-          '@ | Set-Content -LiteralPath $config -Encoding utf8NoBOM
+          $password = ConvertTo-SecureString $env:NUGET_AUDIT_TOKEN -AsPlainText -Force
+          $credential = [pscredential]::new($env:NUGET_AUDIT_USER, $password)
           $packages = @(
             @{ label = 'old'; version = '1.15.1-vcpkgdd91614e76233881a8bd5916fe08b100f6f502848fd189e416b34022fabf2857' },
             @{ label = 'new'; version = '1.15.1-vcpkg9353061669f350e8e7168f24330c96bcdcb03588ec5f67a92ddef39df3ba8e0b' }
@@ -60,9 +43,17 @@ jobs:
           $results = @()
           foreach ($package in $packages) {
             $destination = Join-Path $downloads $package.label
-            $output = & $nuget install pcl_x64-windows -Version $package.version -ConfigFile $config -OutputDirectory $destination -ExcludeVersion -PreRelease -PackageSaveMode nupkg -DirectDownload -NoHttpCache -NonInteractive -ForceEnglishOutput -Verbosity normal 2>&1
-            $exitCode = $LASTEXITCODE
-            $safeOutput = ($output | Out-String).Replace($env:NUGET_AUDIT_TOKEN, '***')
+            $archive = Join-Path $downloads "$($package.label).nupkg"
+            $url = "https://nuget.pkg.github.com/liangyuR/download/pcl_x64-windows/$($package.version)/pcl_x64-windows.$($package.version).nupkg"
+            try {
+              Invoke-WebRequest -Uri $url -Authentication Basic -Credential $credential -OutFile $archive
+              [IO.Compression.ZipFile]::ExtractToDirectory($archive, $destination)
+              $exitCode = 0
+              $safeOutput = "Downloaded and extracted $($package.label) PCL $($package.version)"
+            } catch {
+              $exitCode = 1
+              $safeOutput = $_.Exception.Message.Replace($env:NUGET_AUDIT_TOKEN, '***')
+            }
             $safeOutput | Tee-Object -FilePath (Join-Path $evidence "$($package.label)-download.log")
             $files = @(Get-ChildItem -LiteralPath $destination -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*abi_info*' })
             foreach ($file in $files) {
