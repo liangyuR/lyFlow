@@ -1,334 +1,93 @@
 name: Windows release
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
-    inputs:
-      rebuild_deps:
-        description: 不恢复 Actions 依赖缓存，全部依赖重编并推送到 NuGet 二进制源（给源补全用）
-        type: boolean
-        default: false
 
 permissions:
   contents: read
-
-concurrency:
-  group: windows-release-${{ github.ref }}
-  cancel-in-progress: false
-
-env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: '0'
+  packages: read
 
 jobs:
-  deps:
-    name: 固定发布依赖（vcpkg 二进制缓存）
-    # 只装固定基线的 vcpkg 端口、不编译或运行库代码，所以只有这个 job 拿 packages: write，
-    # 把编好的依赖推到 GitHub Packages 的 NuGet 源；编译 job 仍然只读。
-    permissions:
-      contents: read
-      packages: write
+  abi-audit:
+    name: Compare cached PCL ABI inputs
     runs-on: windows-2022
-    timeout-minutes: 300
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           persist-credentials: false
 
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: 依赖缓存身份
-        id: native-cache
-        shell: pwsh
-        run: |
-          $configuration = Get-Content -LiteralPath packaging/release.json -Raw | ConvertFrom-Json
-          $baseline = $configuration.vcpkgBaseline
-          $onnxVersion = $configuration.onnxruntimeVersion
-          $toolset = "$env:VCToolsVersion".Trim().TrimEnd('\')
-          if ($baseline -notmatch '^[0-9a-f]{40}$') { throw '发布配置缺少固定 vcpkg baseline' }
-          if ($toolset -notmatch '^\d+\.\d+\.\d+$') { throw '无法识别当前 MSVC toolset' }
-          if ($onnxVersion -notmatch '^\d+\.\d+\.\d+$') { throw '发布配置缺少固定 ONNX Runtime 版本' }
-          "onnx-version=$onnxVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "baseline=$baseline" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "toolset=$toolset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
-      - name: 恢复固定版本 vcpkg 工具
-        uses: actions/cache/restore@v4
-        id: vcpkg-tool-cache-restore
-        with:
-          path: |
-            build/release-tools/vcpkg/*
-            !build/release-tools/vcpkg/downloads/**
-            !build/release-tools/vcpkg/buildtrees/**
-            !build/release-tools/vcpkg/packages/**
-            !build/release-tools/vcpkg/installed/**
-          key: vcpkg-tool-windows-x64-${{ steps.native-cache.outputs.baseline }}-v1
-
-      - uses: actions/cache/restore@v4
-        id: native-cache-restore
-        if: ${{ !inputs.rebuild_deps }}
-        with:
-          path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-std-glue-gap-v1
-          # 组合变了（加包、改 features）时退回同工具集、同基线的最近一份：vcpkg 按每个包的 ABI 哈希取缓存，
-          # 对不上的包自己重编，不会用错二进制；于是只编新增或变化的那几个包。
-          restore-keys: |
-            windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-
-
-      - uses: actions/cache/restore@v4
-        id: onnx-cache-restore
-        with:
-          path: third_party/onnxruntime/onnxruntime-win-x64-${{ steps.native-cache.outputs.onnx-version }}
-          key: onnxruntime-win-x64-cpu-${{ steps.native-cache.outputs.onnx-version }}-v1
-
-      - name: 准备并验证固定发布依赖
+      - name: Download cached packages and extract ABI evidence
         shell: pwsh
         env:
-          LYFLOW_VCPKG_FEED_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          LYFLOW_VCPKG_FEED_USER: ${{ github.actor }}
-          LYFLOW_VCPKG_FEED_MODE: readwrite
-        run: ./scripts/prepare-release-deps.ps1
-
-      - name: 保存已验证的 vcpkg 工具
-        uses: actions/cache/save@v4
-        if: steps.vcpkg-tool-cache-restore.outputs.cache-hit != 'true'
-        with:
-          path: |
-            build/release-tools/vcpkg/*
-            !build/release-tools/vcpkg/downloads/**
-            !build/release-tools/vcpkg/buildtrees/**
-            !build/release-tools/vcpkg/packages/**
-            !build/release-tools/vcpkg/installed/**
-          key: ${{ steps.vcpkg-tool-cache-restore.outputs.cache-primary-key }}
-
-      - name: 保存完整 vcpkg 缓存
-        uses: actions/cache/save@v4
-        if: steps.native-cache-restore.outputs.cache-hit != 'true'
-        with:
-          path: build/release-deps/binary-cache
-          key: ${{ steps.native-cache-restore.outputs.cache-primary-key }}
-
-      - name: 保存 ONNX Runtime 缓存
-        uses: actions/cache/save@v4
-        if: steps.onnx-cache-restore.outputs.cache-hit != 'true'
-        with:
-          path: third_party/onnxruntime/onnxruntime-win-x64-${{ steps.native-cache.outputs.onnx-version }}
-          key: ${{ steps.onnx-cache-restore.outputs.cache-primary-key }}
-
-  build:
-    name: 完整 Windows x64 构建
-    needs: deps
-    permissions:
-      contents: read
-      packages: read
-    runs-on: windows-2022
-    timeout-minutes: 350
-    outputs:
-      version: ${{ steps.source.outputs.version }}
-      revision: ${{ steps.source.outputs.revision }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: 核对版本 tag 与 main 历史
-        id: source
-        shell: pwsh
+          NUGET_AUDIT_TOKEN: ${{ github.token }}
+          NUGET_AUDIT_USER: ${{ github.actor }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
-          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "不支持的产品版本: $version" }
-          if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            if ($env:GITHUB_REF_NAME -cne "v$version") { throw 'tag 与产品版本不一致' }
-            git merge-base --is-ancestor HEAD origin/main
-            if ($LASTEXITCODE -ne 0) { throw '版本 tag 必须指向 main 历史中的提交' }
+          $PSNativeCommandUseErrorActionPreference = $false
+          $evidence = Join-Path $env:GITHUB_WORKSPACE 'build/abi-audit/evidence'
+          $downloads = Join-Path $env:RUNNER_TEMP 'lyflow-abi-packages'
+          New-Item -ItemType Directory -Path $evidence, $downloads -Force | Out-Null
+          $nuget = (Get-Command nuget.exe -ErrorAction Stop).Source
+          $identity = [ordered]@{
+            powershell = $PSVersionTable.PSVersion.ToString()
+            powershellPath = (Get-Process -Id $PID).Path
+            runnerImage = $env:ImageOS
+            runnerImageVersion = $env:ImageVersion
+            nuget = $nuget
           }
-          $revision = git rev-parse HEAD
-          if ($LASTEXITCODE -ne 0) { throw '无法读取源码修订' }
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "revision=$revision" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $identity | ConvertTo-Json | Tee-Object -FilePath (Join-Path $evidence 'environment.json')
+          $config = Join-Path $downloads 'nuget.config'
+          @'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="lyflow-audit" value="https://nuget.pkg.github.com/liangyuR/index.json" />
+            </packageSources>
+            <packageSourceCredentials>
+              <lyflow-audit>
+                <add key="Username" value="%NUGET_AUDIT_USER%" />
+                <add key="ClearTextPassword" value="%NUGET_AUDIT_TOKEN%" />
+              </lyflow-audit>
+            </packageSourceCredentials>
+          </configuration>
+          '@ | Set-Content -LiteralPath $config -Encoding utf8NoBOM
+          $packages = @(
+            @{ label = 'old'; version = '1.15.1-vcpkgdd91614e76233881a8bd5916fe08b100f6f502848fd189e416b34022fabf2857' },
+            @{ label = 'new'; version = '1.15.1-vcpkg9353061669f350e8e7168f24330c96bcdcb03588ec5f67a92ddef39df3ba8e0b' }
+          )
+          $results = @()
+          foreach ($package in $packages) {
+            $destination = Join-Path $downloads $package.label
+            $output = & $nuget install pcl_x64-windows -Version $package.version -ConfigFile $config -OutputDirectory $destination -ExcludeVersion -PreRelease -PackageSaveMode nupkg -DirectDownload -NoHttpCache -NonInteractive -ForceEnglishOutput -Verbosity normal 2>&1
+            $exitCode = $LASTEXITCODE
+            $safeOutput = ($output | Out-String).Replace($env:NUGET_AUDIT_TOKEN, '***')
+            $safeOutput | Tee-Object -FilePath (Join-Path $evidence "$($package.label)-download.log")
+            $files = @(Get-ChildItem -LiteralPath $destination -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*abi_info*' })
+            foreach ($file in $files) {
+              $relative = [IO.Path]::GetRelativePath($destination, $file.FullName)
+              $target = Join-Path (Join-Path $evidence $package.label) $relative
+              New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+              Copy-Item -LiteralPath $file.FullName -Destination $target
+              Write-Host "$($package.label): $relative"
+              Get-Content -LiteralPath $file.FullName
+            }
+            $results += [pscustomobject]@{ label = $package.label; version = $package.version; exitCode = $exitCode; abiFiles = $files.Count }
+          }
+          $results | ConvertTo-Json | Tee-Object -FilePath (Join-Path $evidence 'results.json')
+          $old = Get-ChildItem -LiteralPath (Join-Path $evidence 'old') -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*abi_info*' } | Select-Object -First 1
+          $new = Get-ChildItem -LiteralPath (Join-Path $evidence 'new') -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*abi_info*' } | Select-Object -First 1
+          if ($old -and $new) {
+            Compare-Object (Get-Content -LiteralPath $old.FullName) (Get-Content -LiteralPath $new.FullName) | Format-Table -AutoSize | Out-String -Width 300 | Tee-Object -FilePath (Join-Path $evidence 'abi-diff.txt')
+          }
+          if (-not $new) { throw 'New PCL package ABI evidence was unavailable; see saved download log.' }
 
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: pip
-          cache-dependency-path: scripts/requirements.txt
-
-      - name: Python 依赖
-        run: python -m pip install -r scripts/requirements.txt
-
-      - uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: 依赖缓存身份
-        id: native-cache
-        shell: pwsh
-        run: |
-          $configuration = Get-Content -LiteralPath packaging/release.json -Raw | ConvertFrom-Json
-          $baseline = $configuration.vcpkgBaseline
-          $onnxVersion = $configuration.onnxruntimeVersion
-          $toolset = "$env:VCToolsVersion".Trim().TrimEnd('\')
-          if ($baseline -notmatch '^[0-9a-f]{40}$') { throw '发布配置缺少固定 vcpkg baseline' }
-          if ($toolset -notmatch '^\d+\.\d+\.\d+$') { throw '无法识别当前 MSVC toolset' }
-          if ($onnxVersion -notmatch '^\d+\.\d+\.\d+$') { throw '发布配置缺少固定 ONNX Runtime 版本' }
-          "onnx-version=$onnxVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "baseline=$baseline" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "toolset=$toolset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
-      - name: 恢复固定版本 vcpkg 工具
-        uses: actions/cache/restore@v4
-        id: vcpkg-tool-cache-restore
-        with:
-          path: |
-            build/release-tools/vcpkg/*
-            !build/release-tools/vcpkg/downloads/**
-            !build/release-tools/vcpkg/buildtrees/**
-            !build/release-tools/vcpkg/packages/**
-            !build/release-tools/vcpkg/installed/**
-          key: vcpkg-tool-windows-x64-${{ steps.native-cache.outputs.baseline }}-v1
-
-      - uses: actions/cache/restore@v4
-        id: native-cache-restore
-        with:
-          path: build/release-deps/binary-cache
-          key: windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-std-glue-gap-v1
-          # 组合变了（加包、改 features）时退回同工具集、同基线的最近一份：vcpkg 按每个包的 ABI 哈希取缓存，
-          # 对不上的包自己重编，不会用错二进制；于是只编新增或变化的那几个包。
-          restore-keys: |
-            windows-2022-x64-msvc-${{ steps.native-cache.outputs.toolset }}-vcpkg-${{ steps.native-cache.outputs.baseline }}-
-
-      - uses: actions/cache/restore@v4
-        id: onnx-cache-restore
-        with:
-          path: third_party/onnxruntime/onnxruntime-win-x64-${{ steps.native-cache.outputs.onnx-version }}
-          key: onnxruntime-win-x64-cpu-${{ steps.native-cache.outputs.onnx-version }}-v1
-
-      - name: 固定 Rust 工具链
-        shell: pwsh
-        run: |
-          $channel = (Select-String -LiteralPath rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          if (-not $channel) { throw '未声明 Rust 工具链' }
-          rustup toolchain install $channel --profile minimal --component clippy,rustfmt
-          if ($LASTEXITCODE -ne 0) { throw '安装 Rust 工具链失败' }
-          rustc --version
-
-      - name: pnpm install
-        run: pnpm install --frozen-lockfile
-
-      - name: 准备并验证固定发布依赖
-        shell: pwsh
-        env:
-          LYFLOW_VCPKG_FEED_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          LYFLOW_VCPKG_FEED_USER: ${{ github.actor }}
-        run: ./scripts/prepare-release-deps.ps1
-
-      - name: 同一本地入口构建、测试和打包
-        shell: pwsh
-        env:
-          LYFLOW_VCPKG_FEED_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          LYFLOW_VCPKG_FEED_USER: ${{ github.actor }}
-        run: |
-          $arguments = @('-OutputDir', (Join-Path $env:RUNNER_TEMP 'lyflow-release'))
-          if ($env:GITHUB_REF_TYPE -eq 'tag') { $arguments += @('-ExpectedTag', $env:GITHUB_REF_NAME) }
-          pnpm run package @arguments
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-release
-          path: |
-            ${{ runner.temp }}/lyflow-release/*.zip
-            ${{ runner.temp }}/lyflow-release/*.json
-            ${{ runner.temp }}/lyflow-release/*.tgz
-            ${{ runner.temp }}/lyflow-release/*.nupkg
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: 保存构建与暂存诊断
+      - name: Save ABI evidence without credentials or package binaries
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-release-build-diagnostics
-          path: |
-            build/release-stage/*.json
-            build/release-stage/*.log
-            build/release-diagnostics/*.log
-            build/release-core/**/*.log
-            build/release-core/ctest-results.xml
-          if-no-files-found: warn
-          retention-days: 7
-
-  publish:
-    name: 创建草稿 Release
-    needs: build
-    if: github.event_name == 'push' && github.ref_type == 'tag'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: windows-release
-          path: release
-
-      - name: 创建草稿且不覆盖已有资产
-        uses: actions/github-script@v7
-        env:
-          RELEASE_VERSION: ${{ needs.build.outputs.version }}
-          SOURCE_REVISION: ${{ needs.build.outputs.revision }}
-        with:
-          script: |
-            const fs = require('node:fs');
-            const path = require('node:path');
-            const version = process.env.RELEASE_VERSION;
-            const revision = process.env.SOURCE_REVISION;
-            const tag = `v${version}`;
-            if (context.ref !== `refs/tags/${tag}`) throw new Error('tag 与构建版本不一致');
-            const releases = await github.paginate(github.rest.repos.listReleases, { ...context.repo, per_page: 100 });
-            if (releases.some(release => release.tag_name === tag)) throw new Error(`Release ${tag} 已存在；禁止覆盖`);
-            const files = fs.readdirSync('release').filter(name => /\.(zip|json|tgz|nupkg)$/.test(name));
-            for (const name of [`lyflow-runtime-win-x64-v${version}.zip`, `lyflow-sdk-win-x64-v${version}.zip`, `lyflow-editor-v${version}.tgz`, `LyFlow.Runtime.win-x64.${version}.nupkg`, 'lyflow-runtime.json']) {
-              if (!files.includes(name)) throw new Error(`缺少构建资产: ${name}`);
-            }
-            const repository = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`;
-            const body = [
-              `Windows x64 运行库、SDK/CLI 与节点图编辑器 ${tag}。人工复核后正式发布。`,
-              '',
-              `源码修订：\`${revision}\`。ABI、算子及依赖版本见随包 \`lyflow-runtime.json\`。`,
-              '',
-              '固定算子包：std-pointcloud、std-image、std-ml、glue、gap。ONNX Runtime 使用 CPU 版；不含 dts、客户模型、桌面安装程序或调试符号。',
-              '',
-              `\`lyflow-editor-v${version}.tgz\` 是 \`@lyflow/editor\` 的 TypeScript 源码包（npm pack），宿主按 tarball 依赖安装、用自己的打包器编译。`,
-              '',
-              'Rust 客户端使用同一修订：',
-              '```toml',
-              `lyflow-client = { git = "${repository}.git", rev = "${revision}" }`,
-              '```',
-              '',
-              '构建门禁覆盖 core 与完整标准包的 Rust 单测、DLL 版本/ABI/算子及运行库/SDK 暂存布局。最终 ZIP 独立消费、客户图像效果、真实设备、现场节拍及 GlueSight 安装验收由下游按需执行。',
-              '',
-              '下游固定正式发布的 tag 与资产名；依赖或二进制变化必须增加产品版本，不覆盖旧资产。'
-            ].join('\n');
-            const { data: release } = await github.rest.repos.createRelease({
-              ...context.repo, tag_name: tag, target_commitish: revision,
-              name: `lyFlow ${tag} Windows x64`, body, draft: true, prerelease: false,
-              make_latest: 'false'
-            });
-            for (const name of files.sort()) {
-              const data = fs.readFileSync(path.join('release', name));
-              await github.rest.repos.uploadReleaseAsset({ ...context.repo, release_id: release.id, name, data });
-            }
+          name: pcl-abi-audit
+          path: build/abi-audit/evidence/
+          if-no-files-found: error
+          retention-days: 14
