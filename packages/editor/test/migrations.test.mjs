@@ -92,4 +92,16 @@ test('edits：删两条旧边、插一个节点、加三条边，一次撤销全
     ['a', 'b', 's'],
   );
   assert.deepEqual(migrated.edges, before.edges);
+
+  // 拓扑锁着：改连线的那条整条不写回（节点停在老版本），只改版本与参数的照写
+  useGraphStore.getState().loadDoc(structuredClone(before), 'g.lyflow.json');
+  useGraphStore.getState().setTopologyLocked(true);
+  const paramOnly = { ...plain, nodeId: 'a', op: 't.src', opVersion: '2.0.0', params: { k: 1 } };
+  assert.equal(useGraphStore.getState().applyMigrations([action, paramOnly]), 1);
+  const locked = JSON.parse(JSON.stringify(useGraphStore.getState().doc));
+  assert.equal(useGraphStore.getState().lastRejection, '拓扑已锁定');
+  assert.equal(locked.nodes.find((n) => n.id === 's').opVersion, '1.1.0');
+  assert.equal(locked.nodes.find((n) => n.id === 'a').opVersion, '2.0.0');
+  assert.deepEqual(locked.edges, before.edges);
+  useGraphStore.getState().setTopologyLocked(false);
 });

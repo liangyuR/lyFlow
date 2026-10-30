@@ -28,6 +28,7 @@ export function EdgeContextMenu({
   const box = useRef<HTMLDivElement>(null);
   const style = useMenuPlacement(box, { x: menu.x, y: menu.y });
   const at = { x: menu.x, y: menu.y };
+  const locked = useGraphStore((s) => s.topologyLocked);
   return (
     <div
       ref={box}
@@ -39,6 +40,7 @@ export function EdgeContextMenu({
       <button
         type="button"
         data-testid="edge-ctx-insert"
+        disabled={locked}
         onClick={() => {
           onClose();
           onInsertOp(menu.edgeId, at);
@@ -59,6 +61,7 @@ export function EdgeContextMenu({
       <button
         type="button"
         data-testid="edge-ctx-reroute"
+        disabled={locked}
         onClick={() => {
           onReroute(menu.edgeId, at);
           onClose();
@@ -69,6 +72,7 @@ export function EdgeContextMenu({
       <button
         type="button"
         data-testid="edge-ctx-delete"
+        disabled={locked}
         onClick={() => {
           useGraphStore.getState().disconnect([menu.edgeId]);
           onClose();

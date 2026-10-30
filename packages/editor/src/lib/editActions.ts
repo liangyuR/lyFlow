@@ -1,7 +1,7 @@
 // 节点的几个基本编辑动作：快捷键（useShortcuts）与右键菜单（NodeContextMenu、空白处菜单）共用这一份，
 // 免得两边各写一遍、行为慢慢走样（复制的范围、删除的撤销粒度、接通的提示）。
 
-import { useGraphStore, type PasteResult } from '../store/graph';
+import { rejectIfTopologyLocked, useGraphStore, type PasteResult } from '../store/graph';
 import { useManifestStore } from '../store/manifest';
 import { currentOverrides } from '../store/recipe';
 import { useUiStore } from '../store/ui';
@@ -20,6 +20,7 @@ import { augmentOperators, levelOf, subgraphsUsedBy } from './subgraph';
  *  子图节点用到的子图定义也带走（粘进另一张图才认得出来）。
  *  应用内一份，系统剪贴板也写一份（另一个窗口、重开之后照样粘得进来）。返回复制了几个。 */
 export function copyNodes(ids: ReadonlySet<string>, cut: boolean): number {
+  if (cut && rejectIfTopologyLocked()) return 0;
   const graph = useGraphStore.getState();
   const ui = useUiStore.getState();
   const doc = graph.doc;
@@ -85,7 +86,7 @@ export function pasteNotice(r: PasteResult): { text: string; kind: 'info' | 'war
 
 /** 删掉这些节点与连线，一条撤销（框选会把相连的边一起选上：以前先断边、再删节点记成两条）。清掉选中。 */
 export function deleteSelection(nodes: readonly string[], edges: readonly string[]): void {
-  if (nodes.length === 0 && edges.length === 0) return;
+  if ((nodes.length === 0 && edges.length === 0) || rejectIfTopologyLocked()) return;
   const graph = useGraphStore.getState();
   const label =
     nodes.length > 0
@@ -111,7 +112,7 @@ function droppedOutputsText(names: readonly string[]): string {
 
 /** 删掉这些节点、上下游按静音透传的规则接回去（一条撤销），提示接了几条、几条没接上。 */
 export function deleteHealing(ids: readonly string[]): void {
-  if (ids.length === 0) return;
+  if (ids.length === 0 || rejectIfTopologyLocked()) return;
   const ui = useUiStore.getState();
   const r = useGraphStore.getState().deleteNodesHealing(ids);
   ui.clearSelection();

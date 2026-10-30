@@ -1,0 +1,13 @@
+{
+  "//": "peer 声明支持 React 18 与 19；包按 TS 源码发布，宿主的 tsc 会连编辑器源码一起查。这份用 React 19 的类型再查一遍（typecheck 两份都跑）。",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [],
+    "paths": {
+      "react": ["./node_modules/@types/react-19"],
+      "react/*": ["./node_modules/@types/react-19/*"],
+      "react-dom": ["./node_modules/@types/react-dom-19"],
+      "react-dom/*": ["./node_modules/@types/react-dom-19/*"]
+    }
+  }
+}

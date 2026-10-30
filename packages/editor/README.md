@@ -44,7 +44,8 @@ resolve: { dedupe: ["react", "react-dom", "@xyflow/react", "three", "zustand"] }
 构建期插件：打包结果里任何一个 peer 出现两份就直接让构建失败。
 
 包按 **TypeScript 源码**发布（`exports` 指向 `src/index.ts`），所以宿主要用一个
-能编译 TS/TSX 的打包器（Vite、Next、Rspack 都行）。
+能编译 TS/TSX 的打包器（Vite、Next、Rspack 都行）。宿主的 `tsc` 会连编辑器源码一起查，所以
+`pnpm --filter @lyflow/editor typecheck` 用 React 18 与 19 两套类型各查一遍（`tsconfig.react19.json`）。
 
 ## Props
 
@@ -57,6 +58,7 @@ interface LyFlowEditorProps {
   theme?: Record<string, string>;    // --lyflow-* 变量覆盖
   className?: string;
   animations?: boolean;              // 画布动效，默认 true
+  topologyLocked?: boolean;          // 锁住拓扑、只许调参，默认 false
 }
 ```
 
@@ -66,6 +68,24 @@ interface LyFlowEditorProps {
 全部直接落到终态，CSS 的循环与过渡一并停掉。系统设了「减少动态效果」
 （`prefers-reduced-motion: reduce`）时等同于 false，不用宿主自己判断。信息不会跟着丢：
 正在流数据的边关了动画仍是一条静态高亮。
+
+`topologyLocked` 给「流程调试页」这类只许调参的宿主页面：图的结构冻结，参数照常调。拦在 graph store 里，
+快捷键、粘贴、右键菜单、拖线都过同一道关 —— 被拦的动作什么都不做、返回各自的「没做」（null / false / 空数组 /
+不通过的 `ConnectVerdict`），`lastRejection` 写成 `拓扑已锁定`，编辑器把它弹成提示。
+
+- 拦下的：加 / 删 / 粘贴 / 复制节点（`addNode`、`addNodeAuto`、`insertSnippet`、`deleteNodes`、`deleteNodesHealing`、
+  `pasteNodes`、`duplicateNodes`，含剪切与 Ctrl+D）；连线（`connect`、`disconnect`、`reconnectEdge`、`insertOnEdge`，
+  含拖线松在空白处建节点）；`replaceNodeOp`、`inlineLibrary`、`composeSubgraph`、`dissolveSubgraph`、保存到库；
+  `setBypass`（静音改的是数据流）；图参数与图级输出的结构（`promoteToGraphParam`、`bindToGraphParam`、
+  `unbindFromGraphParam`、`removeGraphParam`、`renameGraphParam`、`setGraphParamSpec`、`moveBaseEditToRecipe`、
+  `promoteParam`、`unpromoteParam`、`markGraphOutput`、`removeGraphOutput`）。`applyMigrations` 只拦带连线改写
+  （edits）的那几条，整条不写回；只改版本与参数的照写。`restoreParams` 照常恢复参数，但不恢复静音。
+- 照常的：`setParam` / `setParamMany` / `restoreParams`、`editGraphParamValue` / `setGraphParamDefault`、配方动作、
+  挪位置与布局、折叠、改名、运行（整图、到某节点、仅此节点、强制重算、取消）、预览、检查器、日志、进出子图、查找节点、
+  适配视图、打开与保存。
+- 界面：算子面板（连同片段）与算子搜索弹层不渲染，画布 `nodesConnectable` / `edgesReconnectable` 关掉，
+  节点与连线右键菜单里改结构的项置灰，空白处右键没有「添加算子…」。
+- 锁上的那一刻清空撤销 / 重做栈：Ctrl+Z 只走得到锁上之后的调参。
 
 ## Transport
 

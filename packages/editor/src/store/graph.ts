@@ -369,6 +369,13 @@ interface GraphState {
   /** 最近一次被拒绝的操作原因，给 UI 弹提示用。 */
   lastRejection: string | null;
 
+  /** 拓扑锁（宿主的「流程调试页」，LyFlowEditor 的 topologyLocked）：增删节点与连线、换算子、子图合成 / 解散 / 展开、
+   *  静音、图参数与图级输出的结构都拒绝（返回各自的「没做」、写 lastRejection），只留调参、配方、挪位置与运行。
+   *  拦在 store 而不只是藏界面：快捷键、粘贴、右键、拖线都走这里。 */
+  topologyLocked: boolean;
+  /** 锁上时清空撤销 / 重做栈：撤销只走得到锁上之后的调参，回不到锁之前的结构改动。 */
+  setTopologyLocked(locked: boolean): void;
+
   // -- 事务 ---------------------------------------------------------------
   /** 拖动/滑块这类连续操作：开始时拍一张，结束时整体记一条撤销。 */
   begin(): void;
@@ -424,7 +431,7 @@ interface GraphState {
   /** 把参数恢复成 from 那一份里的（调参记录的「恢复这组参数」）：两边都有、算子没换的节点（子图定义里的按定义对上）
    *  逐个参数按有效值恢复、恢复静音，图参数恢复基础值；那时绑着图参数、后来图参数删掉了的，把那时的值写回节点。
    *  现在或那时由图参数 / 子图参数提供的参数不动（节点上写值会冲突，那时的值也不在节点上），算子已不声明的也不动 ——
-   *  这两种记在 skipped。节点不增不删、连线不动。run 是那次运行的图参数取值（params）与配方（recipeId，老记录只有名字
+   *  这两种记在 skipped（拓扑锁着时静音不恢复，也记在这里）。节点不增不删、连线不动。run 是那次运行的图参数取值（params）与配方（recipeId，老记录只有名字
    *  recipe；null 为基础）：给了 params 且那次就是现在选着的配方时，把该配方里的值改到让每个图参数的有效值与
    *  run.params 一样（也计入 changed，一个图参数只算一处，与 doc 的改动同一条撤销）；否则配方不动。一条撤销；changed 为 0 时不记。 */
   restoreParams(
@@ -523,7 +530,7 @@ interface GraphState {
   renameSubgraph(subgraphId: string, name: string): void;
 
   // -- 图级输出（ADR-0017）-------------------------------------------------
-  /** 把一个端口标成图级命名输出。名字重了自动加后缀，返回最终用的名字。 */
+  /** 把一个端口标成图级命名输出。名字重了自动加后缀，返回最终用的名字；拓扑锁着时返回空串。 */
   markGraphOutput(ref: PortRef, name?: string): string;
   removeGraphOutput(name: string): void;
 
@@ -577,9 +584,23 @@ function emitCommitted(change: CommittedChange): void {
   }
 }
 
+export const TOPOLOGY_LOCKED = '拓扑已锁定';
+
+/** 迁移动作要不要改连线（ADR-0025 的 edits）：拓扑锁着时这种整条不写回。 */
+function migrationTouchesTopology(a: MigrationAction): boolean {
+  const e = a.edits;
+  return !!e && e.removeEdges.length + e.addNodes.length + e.addEdges.length > 0;
+}
+
 export const useGraphStore = create<GraphState>((set, get) => {
   /** 正在跑的 batch 有几层。> 0 时 transact 只改不记，由 batch 合成一条。 */
   let batchDepth = 0;
+  /** 拓扑锁着：写 lastRejection、返回 true，动作照各自的「没做」返回。 */
+  const locked = (): boolean => {
+    if (!get().topologyLocked) return false;
+    set({ lastRejection: TOPOLOGY_LOCKED });
+    return true;
+  };
   /** 这段事务里实际改了什么（拖动参数、挪节点每帧记一句、去重）：commit 不给名字时拿它起名，撤销历史里看得出是哪一步。 */
   let hints: string[] = [];
   const note = (h: string) => {
@@ -671,6 +692,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
     pendingSnapshot: null,
     pendingRecipes: null,
     lastRejection: null,
+    topologyLocked: false,
+
+    setTopologyLocked(value) {
+      if (get().topologyLocked === value) return;
+      set(value ? { topologyLocked: true, past: [], future: [] } : { topologyLocked: false });
+    },
 
     begin() {
       // 已经在事务里就不要覆盖起点 —— 嵌套 begin 应当是幂等的
@@ -740,6 +767,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     addNode(opId, position) {
+      if (locked()) return null;
       const op = ctx(get().doc).operatorsById.get(opId);
       if (!op) {
         set({ lastRejection: `算子未注册：${opId}` });
@@ -763,6 +791,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     addNodeAuto(opId, position) {
+      if (locked()) return { nodeIds: [], wired: 0, ambiguous: [], missing: [] };
       const { doc } = get();
       const c = ctx(doc);
       const op = c.operatorsById.get(opId);
@@ -804,6 +833,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     insertSnippet(snippet, at) {
+      if (locked()) return { nodeIds: [], wired: 0, ambiguous: [], missing: [] };
       const { doc } = get();
       const c = ctx(doc);
       const taken = allIds(doc);
@@ -893,7 +923,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     deleteNodes(ids) {
-      if (ids.length === 0) return [];
+      if (ids.length === 0 || locked()) return [];
       const kill = new Set(ids);
       const label = ids.length === 1 ? '删除节点' : `删除 ${ids.length} 个节点`;
       const before = get().doc;
@@ -928,7 +958,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     deleteNodesHealing(ids) {
-      if (ids.length === 0) return { wired: 0, unresolved: 0, dropped: [] };
+      if (ids.length === 0 || locked()) return { wired: 0, unresolved: 0, dropped: [] };
       const doc = get().doc;
       const plan = healPlan(ctx(doc), levelDoc(doc), new Set(ids));
       let wired = 0;
@@ -1055,6 +1085,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     connect(from, to) {
+      if (locked()) return { ok: false, reason: TOPOLOGY_LOCKED };
       const { doc } = get();
       const verdict = canConnect(ctx(doc), levelDoc(doc), from, to);
       if (!verdict.ok) {
@@ -1069,7 +1100,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     disconnect(edgeIds) {
-      if (edgeIds.length === 0) return;
+      if (edgeIds.length === 0 || locked()) return;
       const kill = new Set(edgeIds);
       transact(edgeIds.length === 1 ? '断开连线' : `断开 ${edgeIds.length} 条连线`, (d) => {
         const lvl = level(d);
@@ -1078,6 +1109,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     pasteNodes(payload, at) {
+      if (locked()) return NOTHING_PASTED;
       const doc = get().doc;
       const taken = allIds(doc);
       const idMap = new Map<string, string>();
@@ -1168,6 +1200,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     restoreParams(from, label, run) {
+      const lockedNow = get().topologyLocked;
       let changed = 0;
       let skipped = 0;
       const ops = ctx(get().doc).operatorsById;
@@ -1246,6 +1279,11 @@ export const useGraphStore = create<GraphState>((set, get) => {
                 changed += 1;
               }
               if ((n.bypass === true) !== (old.bypass === true)) {
+                // 静音改的是数据流：拓扑锁着时不恢复
+                if (lockedNow) {
+                  skipped += 1;
+                  continue;
+                }
                 if (old.bypass) n.bypass = true;
                 else delete n.bypass;
                 changed += 1;
@@ -1281,7 +1319,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     setBypass(ids, value) {
-      if (ids.length === 0) return;
+      if (ids.length === 0 || locked()) return;
       const target = new Set(ids);
       const label = value
         ? ids.length === 1
@@ -1324,6 +1362,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     reconnectEdge(edgeId, to) {
+      if (locked()) return { ok: false, reason: TOPOLOGY_LOCKED };
       const { doc } = get();
       const lvl = level(doc);
       const edge = lvl.edges.find((e) => e.id === edgeId);
@@ -1346,6 +1385,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     insertOnEdge(edgeId, nodeId, inPort, outPort) {
+      if (locked()) return false;
       const { doc } = get();
       const edge = level(doc).edges.find((e) => e.id === edgeId);
       if (!edge) return false;
@@ -1388,7 +1428,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     duplicateNodes(ids, opts) {
-      if (ids.length === 0) return NOTHING_PASTED;
+      if (ids.length === 0 || locked()) return NOTHING_PASTED;
       const { doc } = get();
       const lvl = level(doc);
       const kept = new Set(ids);
@@ -1444,7 +1484,12 @@ export const useGraphStore = create<GraphState>((set, get) => {
       });
     },
 
-    applyMigrations(actions, relayout) {
+    applyMigrations(all, relayout) {
+      // 拓扑锁着：只写回不改连线的（改算子版本、参数）；要改连线的整条留着不写，节点停在老版本
+      const actions =
+        all.some(migrationTouchesTopology) && locked()
+          ? all.filter((a) => !migrationTouchesTopology(a))
+          : all;
       if (actions.length === 0) return 0;
       const byNode = new Map(actions.map((a) => [a.nodeId, a]));
       let changed = 0;
@@ -1480,7 +1525,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     composeSubgraph(ids) {
-      if (ids.length === 0) return null;
+      if (ids.length === 0 || locked()) return null;
       const path = useUiStore.getState().path;
       let result: ComposeResult | null = null;
       const before = get().doc;
@@ -1500,6 +1545,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     dissolveSubgraph(nodeId) {
+      if (locked()) return [];
       const path = useUiStore.getState().path;
       let inlined: string[] = [];
       const before = get().doc;
@@ -1530,6 +1576,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     replaceNodeOp(nodeId, opId) {
+      if (locked()) return null;
       const { doc } = get();
       const path = useUiStore.getState().path;
       const c = ctx(doc);
@@ -1583,6 +1630,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     inlineLibrary(nodeId, def) {
+      if (locked()) return null;
       const path = useUiStore.getState().path;
       const node = levelOf(get().doc, path).nodes.find((n) => n.id === nodeId);
       if (!node || !node.op.startsWith(LIBRARY_OP_PREFIX)) return null;
@@ -1594,6 +1642,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     promoteParam(nodeId, paramName, at) {
+      if (locked()) return null;
       const { doc } = get();
       const path = at ?? useUiStore.getState().path;
       const last = path[path.length - 1];
@@ -1633,6 +1682,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     unpromoteParam(paramName, at) {
+      if (locked()) return;
       const path = at ?? useUiStore.getState().path;
       const last = path[path.length - 1];
       if (!last) return;
@@ -1671,6 +1721,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     promoteToGraphParam(nodeId, paramName, at) {
+      if (locked()) return null;
       const found = lookupParam(nodeId, paramName, at);
       if (!found) return null;
       const { doc, path, ops, node, op, decl } = found;
@@ -1692,6 +1743,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     bindToGraphParam(name, nodeId, paramName) {
+      if (locked()) return false;
       const found = lookupParam(nodeId, paramName);
       if (!found) return false;
       const { doc, path, op, node, decl } = found;
@@ -1732,6 +1784,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     unbindFromGraphParam(name, bind) {
+      if (locked()) return;
       const { doc } = get();
       const gp = doc.params?.[name];
       if (!gp || !gp.binds.includes(bind)) return;
@@ -1746,6 +1799,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     removeGraphParam(name) {
+      if (locked()) return;
       const { doc } = get();
       const gp = doc.params?.[name];
       if (!gp) return;
@@ -1762,6 +1816,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     renameGraphParam(name, next) {
+      if (locked()) return false;
       const { doc } = get();
       if (!doc.params?.[name]) return false;
       if (next === name) return true;
@@ -1799,7 +1854,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     setGraphParamSpec(name, patch) {
-      if (!get().doc.params?.[name]) return;
+      if (locked() || !get().doc.params?.[name]) return;
       transact(`修改图参数 ${name} 的规格`, (d) => {
         const into = d.params?.[name] as Record<string, unknown> | undefined;
         if (!into) return;
@@ -1999,6 +2054,8 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     moveBaseEditToRecipe(key) {
+      // 它要新建一个图参数（同 promoteToGraphParam）
+      if (locked()) return null;
       const edit = useRecipeStore.getState().baseEdits[key];
       const current = useRecipeStore.getState().current;
       if (!edit || current === null || edit.recipe !== current) return null;
@@ -2041,6 +2098,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     markGraphOutput(ref, name) {
+      if (locked()) return '';
       const { doc } = get();
       const existing = doc.outputs ?? {};
       // 同一个端口已经标过就复用原来的名字，右键两次不会冒出两条
@@ -2058,7 +2116,7 @@ export const useGraphStore = create<GraphState>((set, get) => {
     },
 
     removeGraphOutput(name) {
-      if (get().doc.outputs?.[name] === undefined) return;
+      if (locked() || get().doc.outputs?.[name] === undefined) return;
       transact(`取消输出 ${name}`, (d) => {
         const next = { ...(d.outputs ?? {}) };
         delete next[name];
@@ -2202,6 +2260,14 @@ export function rebaseHistoryRecipes(from: RecipeSet, to: RecipeSet): void {
   const past = fix(s.past);
   const future = fix(s.future);
   if (past !== s.past || future !== s.future) useGraphStore.setState({ past, future });
+}
+
+/** 界面上不经 store 动作就会先做掉一半的手势（剪切先写剪贴板、删除先清选中）在动手前问一句：
+ *  拓扑锁着就写 lastRejection、返回 true。 */
+export function rejectIfTopologyLocked(): boolean {
+  if (!useGraphStore.getState().topologyLocked) return false;
+  useGraphStore.setState({ lastRejection: TOPOLOGY_LOCKED });
+  return true;
 }
 
 /** 当前层级的子图定义。Inspector 与画布都要读它。 */

@@ -353,6 +353,8 @@ export function useShortcuts(handlers: ShortcutHandlers, root: RefObject<HTMLEle
           // 焦点在按钮、勾选框这些控件上时 Tab / Space 是它们自己的（挪焦点、按下去）。以前一律拿去开算子搜索：
           // 用键盘点不了工具栏的按钮，Tab 也走不出去
           if (onControl(e.target)) return;
+          // 拓扑锁着不开算子搜索（宿主那边连弹层都不渲染）
+          if (graph.topologyLocked) return;
           e.preventDefault();
           {
             // 只选中了一个节点：新算子接在它的输出后面（预览里选看的那个输出，没选过就是第一个），放在它右边、

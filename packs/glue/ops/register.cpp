@@ -17,6 +17,13 @@ void registerPackOps(Registry& r) {
   // 固定相机飞拍后检（glue-plan §5）：定位 → 逐点卡尺
   registerLocate(r);
   registerStationCalipers(r);
+  // 1.2 的测量算子：只测量、门限全开放，判定归宿主（docs/glue-measure-ops.md）
+  registerResponse(r);
+  registerFanScan(r);
+  registerTrackPath(r);
+  registerLateralRuns(r);
+  registerPartEdges(r);
+  registerPolyline(r);
   // 片段引用上面的算子；自检在注册表填满之后才跑
   registerSnippets(r);
 }

@@ -43,4 +43,26 @@ EdgeResult measureEdges(const cv::Mat& gray, const std::vector<Station>& station
 /// 灰度下降最快的那一点（三点抛物线细化）。图外的采样截断剖面，不当成暗。
 double findPartEdge(const Field& gray, P2 c, P2 dir, double start, const EdgeSpec& spec);
 
+/// glue.part_edges 的门限（glue-measure-ops §5）。默认值即 findPartEdge 的取值。
+struct EdgeScanSpec {
+  double contrastMin = 40;
+  double farRun = 12;
+  double farDropRatio = 0.5;
+  double descentRatio = 0.05;
+  bool darkToBright = false;
+};
+
+struct EdgeHit {
+  double t = 0; ///< 从 c 沿 dir 的距离（亚像素）
+  double contrast = 0;
+  double farMargin = 0;
+  double descent = 0;
+};
+
+/// 沿 c + dir·t（t 从 start 起 1 px 一步、到 start + length，出图截断）的全部合格跳变，按 t 升序。
+/// firstOnly 时找到第一个就停（findPartEdge）。samples 给了就写实际采到的点数。
+std::vector<EdgeHit> findPartEdges(const Field& gray, P2 c, P2 dir, double start, double length,
+                                   const EdgeScanSpec& spec, bool firstOnly = false,
+                                   int* samples = nullptr);
+
 } // namespace lyflow::packs::glue

@@ -28,12 +28,18 @@ inline bool finite(P2 p) { return std::isfinite(p.x) && std::isfinite(p.y); }
 constexpr double kInvalid = -1.0;
 
 /// 图像坐标里的一块 CV_32F 场。data 的 (0, 0) 在图像坐标 origin 处；只有 valid 里的值可信
-/// （外扩出来算卷积、形态学用的那一圈不算）。
+/// （外扩出来算卷积、形态学用的那一圈不算）。glue.response 输出的整幅图在 roi 外是 NaN，同样按不可信处理。
 class Field {
 public:
   Field() = default;
   Field(cv::Mat data, cv::Point origin, cv::Rect valid)
       : data_(std::move(data)), origin_(origin), valid_(valid) {}
+
+  /// 整幅的一张 CV_32F 图（零拷贝），NaN 的像素不可信。
+  static Field whole(cv::Mat data) {
+    const cv::Rect all(0, 0, data.cols, data.rows);
+    return Field(std::move(data), cv::Point(0, 0), all);
+  }
 
   bool empty() const { return data_.empty() || valid_.empty(); }
   const cv::Rect& valid() const { return valid_; }
@@ -56,7 +62,8 @@ public:
     const float* r1 = data_.ptr<float>(y0 + 1 - origin_.y) + (x0 - origin_.x);
     const double top = r0[0] + ax * (r0[1] - r0[0]);
     const double bottom = r1[0] + ax * (r1[1] - r1[0]);
-    return top + ay * (bottom - top);
+    const double v = top + ay * (bottom - top);
+    return std::isnan(v) ? kInvalid : v;
   }
   double at(P2 p) const { return at(p.x, p.y); }
 

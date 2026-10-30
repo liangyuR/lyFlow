@@ -48,7 +48,7 @@ import {
   type GraphContext,
 } from '../lib/typecheck';
 import { keyHint } from '../lib/keymap';
-import { useGraphStore } from '../store/graph';
+import { rejectIfTopologyLocked, useGraphStore } from '../store/graph';
 import { useManifestStore } from '../store/manifest';
 import { clampPeekScreen, findWindowForEdge, usePeekStore, PEEK_DEFAULT_SIZE } from '../store/peek';
 import { useUiStore } from '../store/ui';
@@ -365,6 +365,7 @@ function applySelectChanges(
 
 export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActions) {
   const doc = useGraphStore((s) => s.doc);
+  const topologyLocked = useGraphStore((s) => s.topologyLocked);
   const path = useUiStore((s) => s.path);
   const baseOperators = useManifestStore((s) => s.operatorsById);
   const typesByName = useManifestStore((s) => s.typesByName);
@@ -623,6 +624,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
   const insertOnHoveredEdge = useCallback(
     (nodeId: string) => {
       const graph = useGraphStore.getState();
+      if (graph.topologyLocked) return false;
       const current = levelView();
       const me = rectOf(current, nodeId, measured.current);
       const center = { x: me.x + me.w / 2, y: me.y + me.h / 2 };
@@ -922,6 +924,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
     (e: React.MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!target.classList.contains('react-flow__pane')) return;
+      if (useGraphStore.getState().topologyLocked) return;
       useUiStore.getState().openSearch({
         screen: { x: e.clientX, y: e.clientY },
         flow: screenToFlowPosition({ x: e.clientX, y: e.clientY }),
@@ -1185,6 +1188,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
+      if (rejectIfTopologyLocked()) return;
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
       const snippetId = e.dataTransfer.getData(SNIPPET_DND_MIME);
       if (snippetId) {
@@ -1248,7 +1252,9 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
         onReconnectStart={onReconnectStart}
         onReconnect={onReconnect}
         onReconnectEnd={onReconnectEnd}
-        edgesReconnectable
+        // 拓扑锁着：端口拖不出线、线头拖不动（store 那道关之外，手感上也别让人拖出来再被拒）
+        nodesConnectable={!topologyLocked}
+        edgesReconnectable={!topologyLocked}
         reconnectRadius={CONNECTION_RADIUS}
         connectionRadius={CONNECTION_RADIUS}
         isValidConnection={isValidConnection}
@@ -1335,8 +1341,11 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
       {paneMenu && (
         <PaneContextMenu
           menu={paneMenu}
-          onAddOperator={(at) =>
-            useUiStore.getState().openSearch({ screen: at, flow: screenToFlowPosition(at) })
+          onAddOperator={
+            topologyLocked
+              ? undefined
+              : (at) =>
+                  useUiStore.getState().openSearch({ screen: at, flow: screenToFlowPosition(at) })
           }
           onSelectAll={() =>
             useUiStore.getState().setSelection(

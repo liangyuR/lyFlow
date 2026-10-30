@@ -664,21 +664,62 @@ std::string Data::valueJsonUncached() const {
     const int nc = img.consistent() ? img.channels : 0;
     std::vector<double> lo(nc, 0), hi(nc, 0), sum(nc, 0);
     std::vector<std::size_t> finite(nc, 0);
-    for (std::int32_t y = 0; nc > 0 && y < img.height; ++y) {
-      for (std::int32_t x = 0; x < img.width; ++x) {
-        for (int c = 0; c < nc; ++c) {
-          const double v = img.at(x, y, c);
-          if (!std::isfinite(v))
-            continue;
-          if (finite[c] == 0) {
-            lo[c] = hi[c] = v;
-          } else {
-            lo[c] = std::min(lo[c], v);
-            hi[c] = std::max(hi[c], v);
-          }
-          sum[c] += v;
-          ++finite[c];
-        }
+    // 每个图像输出的事件都要算一遍，整幅图上要快：按位深直接读行紧排的像素、逐通道走一遍。
+    // 整数位深没有非有限值，按整数累加（结果精确）；f32 分 8 条累加链（一条串行的 double 累加链每个元素等 4 个周期），
+    // min / max 精确，mean 只差在舍入的末位
+    const std::size_t count = img.pixelCount();
+    const auto scanInt = [&](const auto* px, int c) {
+      std::uint32_t a = std::numeric_limits<std::uint32_t>::max(), b = 0;
+      std::uint64_t s = 0;
+      for (std::size_t i = 0; i < count; ++i) {
+        const std::uint32_t v = px[i * static_cast<std::size_t>(nc) + static_cast<std::size_t>(c)];
+        a = std::min(a, v);
+        b = std::max(b, v);
+        s += v;
+      }
+      finite[c] = count;
+      lo[c] = a;
+      hi[c] = b;
+      sum[c] = static_cast<double>(s);
+    };
+    const auto scanFloat = [&](const float* px, int c) {
+      constexpr std::size_t kLanes = 8;
+      float a[kLanes], b[kLanes];
+      double s[kLanes] = {};
+      std::size_t n[kLanes] = {};
+      std::fill(a, a + kLanes, std::numeric_limits<float>::infinity());
+      std::fill(b, b + kLanes, -std::numeric_limits<float>::infinity());
+      const float big = std::numeric_limits<float>::max();
+      for (std::size_t i = 0; i < count; ++i) {
+        const float v = px[i * static_cast<std::size_t>(nc) + static_cast<std::size_t>(c)];
+        const std::size_t l = i & (kLanes - 1);
+        // 不分支：非有限值（NaN、±inf）不进 min / max / sum，也不计数
+        const bool ok = v >= -big && v <= big;
+        a[l] = ok && v < a[l] ? v : a[l];
+        b[l] = ok && v > b[l] ? v : b[l];
+        s[l] += ok ? static_cast<double>(v) : 0.0;
+        n[l] += ok ? 1u : 0u;
+      }
+      for (std::size_t l = 0; l < kLanes; ++l) {
+        if (n[l] == 0)
+          continue;
+        lo[c] = finite[c] == 0 ? a[l] : std::min(lo[c], static_cast<double>(a[l]));
+        hi[c] = finite[c] == 0 ? b[l] : std::max(hi[c], static_cast<double>(b[l]));
+        sum[c] += s[l];
+        finite[c] += n[l];
+      }
+    };
+    for (int c = 0; c < nc; ++c) {
+      switch (img.depth) {
+      case PixelDepth::U8:
+        scanInt(img.pixels.get(), c);
+        break;
+      case PixelDepth::U16:
+        scanInt(reinterpret_cast<const std::uint16_t*>(img.pixels.get()), c);
+        break;
+      case PixelDepth::F32:
+        scanFloat(reinterpret_cast<const float*>(img.pixels.get()), c);
+        break;
       }
     }
     const double nan = std::numeric_limits<double>::quiet_NaN();

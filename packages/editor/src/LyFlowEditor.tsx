@@ -1,6 +1,6 @@
 import { ReactFlowProvider, useReactFlow } from '@xyflow/react';
 import { MotionConfig } from 'motion/react';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 
 import { BottomDrawer } from './components/BottomDrawer';
 import { GraphCanvas } from './components/GraphCanvas';
@@ -72,7 +72,13 @@ import './styles.editor.css';
 import './styles.peek.css';
 import './styles.blocks.css';
 
-function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps) {
+function Workspace({
+  graphPath,
+  onDocChange,
+  className,
+  theme,
+  topologyLocked: lockProp,
+}: WorkspaceProps) {
   const { screenToFlowPosition, flowToScreenPosition, fitView, getNodes } = useReactFlow();
   const root = useRef<HTMLDivElement>(null);
   // 关动效时视口也一步到位（A4）：适配视图、整理之后的 fitView 都不带过渡
@@ -81,6 +87,15 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   const panel = useUiStore((s) => s.paramPanel);
   const viewerMax = useUiStore((s) => s.viewerMaximized);
   const layout = usePaneLayout(root, panel);
+
+  // 拓扑锁写进 graph store（各个改结构的动作在那里拒）。layout effect：画出来之前就锁上（面板不闪一下），
+  // 也排在下面「打开宿主给的图」之前 —— 打开时的迁移要按锁判
+  const lockWanted = lockProp === true;
+  useLayoutEffect(() => {
+    useGraphStore.getState().setTopologyLocked(lockWanted);
+    if (lockWanted) useUiStore.getState().closeSearch();
+  }, [lockWanted]);
+  const topologyLocked = useGraphStore((s) => s.topologyLocked);
 
   // 粘贴和搜索面板要知道往哪儿放。跟着鼠标走比总是放在画布中心自然得多。
   const cursor = useRef({ x: 0, y: 0 });
@@ -582,28 +597,33 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         className={`app__body${viewerMax ? ' is-viewer-max' : panel.open && panel.maximized ? ' is-panel-max' : ''}`}
         data-viewer-max={viewerMax ? '1' : undefined}
       >
-        <aside className="app__sidebar" style={{ width: layout.paletteWidth }}>
-          {manifestStatus === 'loading' && <p className="app__hint">正在读取算子描述…</p>}
-          {manifestStatus === 'error' && (
-            <div className="app__error">
-              <strong>读不到算子描述</strong>
-              <p>{manifestError}</p>
-              <button type="button" onClick={() => void loadManifest()}>
-                重试
-              </button>
-            </div>
-          )}
-          {manifestStatus === 'ready' && <NodePalette />}
-        </aside>
+        {/* 拓扑锁着：算子面板（连同片段）整栏不出 */}
+        {!topologyLocked && (
+          <>
+            <aside className="app__sidebar" style={{ width: layout.paletteWidth }}>
+              {manifestStatus === 'loading' && <p className="app__hint">正在读取算子描述…</p>}
+              {manifestStatus === 'error' && (
+                <div className="app__error">
+                  <strong>读不到算子描述</strong>
+                  <p>{manifestError}</p>
+                  <button type="button" onClick={() => void loadManifest()}>
+                    重试
+                  </button>
+                </div>
+              )}
+              {manifestStatus === 'ready' && <NodePalette />}
+            </aside>
 
-        <div
-          className="app__splitter app__splitter--left"
-          onPointerDown={layout.onPaletteSplitterDown}
-          role="separator"
-          aria-orientation="vertical"
-          title="拖动调整算子面板宽度"
-          data-testid="left-splitter"
-        />
+            <div
+              className="app__splitter app__splitter--left"
+              onPointerDown={layout.onPaletteSplitterDown}
+              role="separator"
+              aria-orientation="vertical"
+              title="拖动调整算子面板宽度"
+              data-testid="left-splitter"
+            />
+          </>
+        )}
 
         <section className="app__canvas">
           <GraphCanvas
@@ -676,7 +696,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
 
       <BottomDrawer />
       <StatusBar />
-      <NodeSearch />
+      {!topologyLocked && <NodeSearch />}
       <NodeFinder />
       <ShortcutPanel />
       <Modal />
@@ -693,6 +713,9 @@ interface WorkspaceProps {
   className?: string | undefined;
   /** `--lyflow-*` 变量的覆盖值，写在编辑器根元素上。 */
   theme?: Record<string, string> | undefined;
+  /** 锁住拓扑（宿主的「流程调试页」）：节点与连线不能增删改、不能换算子 / 合成解散子图 / 静音 / 改图参数与图级输出的结构，
+   *  只能调参数、切配方、挪位置与运行。默认 false。锁上的那一刻清空撤销栈。 */
+  topologyLocked?: boolean | undefined;
 }
 
 export interface LyFlowEditorProps extends WorkspaceProps {

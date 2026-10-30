@@ -24,6 +24,18 @@ double roundTo(double v, int decimals) {
 
 void registerBundles(Registry& r) {
   r.addBundle(BundleDesc{
+      kResponseMapsKind,
+      "响应图",
+      "glue.response 的输出：三张单通道 f32 图只有 frame 那一块（roi ∩ 图像，没设 roi 时是整幅），"
+      "下游按 frame 的偏移采样，坐标仍是整幅图像素坐标。",
+      "",
+      {BundleField{"response", "Image", "顶帽响应（≥ 0）。"},
+       BundleField{"gray", "Image", "平滑灰度（亮胶已取反），边缘陡度用。"},
+       BundleField{"level", "Image", "局部亮度，对比度归一化用。"},
+       BundleField{"frame", "Record",
+                   "glue.Frame：x、y（块左上角在整幅图里的整数像素坐标）、width、height（块的宽高，"
+                   "与三张图一致）、imageWidth、imageHeight（整幅图的宽高）。"}}});
+  r.addBundle(BundleDesc{
       kPathKind,
       "胶路",
       "glue.bead_path 定下的胶路：一条覆盖整个检测区的光滑折线（跨得过断口），与它是怎么找到的。"
@@ -66,6 +78,64 @@ cv::Mat grayOf(const Data& image) {
   return img && img->scale == 1 ? cvx::gray8(*img) : cv::Mat{};
 }
 
+Data mapsBundle(ResponseMaps maps, cv::Size image) {
+  Record frame;
+  frame.type = kFrameType;
+  frame.data = Json{{"x", maps.frame.x},         {"y", maps.frame.y},
+                    {"width", maps.frame.width}, {"height", maps.frame.height},
+                    {"imageWidth", image.width}, {"imageHeight", image.height}};
+  Bundle b(kResponseMapsKind);
+  b.set("response", f32Image(std::move(maps.response)));
+  b.set("gray", f32Image(std::move(maps.gray)));
+  b.set("level", f32Image(std::move(maps.level)));
+  b.set("frame", Data::record(std::move(frame)));
+  return Data::bundle(std::move(b));
+}
+
+bool readMaps(const Data& d, MapsView* out) {
+  const Bundle* b = d.asBundle();
+  if (!b || b->kind != kResponseMapsKind)
+    return false;
+  const Data* f = b->field("frame");
+  const Record* rec = f ? f->asRecord() : nullptr;
+  if (!rec || rec->type != kFrameType)
+    return false;
+  const Json& j = rec->data;
+  const auto num = [&](const char* k) { return j.contains(k) && j[k].is_number_integer(); };
+  if (!num("x") || !num("y") || !num("width") || !num("height"))
+    return false;
+  const cv::Rect frame(j["x"].get<int>(), j["y"].get<int>(), j["width"].get<int>(),
+                       j["height"].get<int>());
+  const auto field = [&](const char* name, Field* to) {
+    const Data* x = b->field(name);
+    const Image* img = x ? x->asImage() : nullptr;
+    if (!img || img->scale != 1 || img->channels != 1 || img->depth != PixelDepth::F32 ||
+        !img->consistent() || img->width != frame.width || img->height != frame.height)
+      return false;
+    *to = Field(cvx::view(*img), frame.tl(), frame);
+    return true;
+  };
+  if (!field("response", &out->response) || !field("gray", &out->gray) ||
+      !field("level", &out->level))
+    return false;
+  out->frame = frame;
+  return true;
+}
+
+Data f32Image(cv::Mat m) {
+  Image img;
+  cvx::fromMat(std::move(m), img);
+  return Data::image(std::move(img));
+}
+
+Status badImage(const char* port, bool maps) {
+  return Status::Error(
+      Phase::Execute, "bad_input",
+      maps ? "需要 glue.response 输出的 maps（Bundle<glue.ResponseMaps>）"
+           : "需要全分辨率非空 u8 图像；其他位深先接 image.normalize，缩小预览请改用完整运行",
+      {}, port);
+}
+
 // ------------------------------------------------------------------ JSON
 
 double round3(double v) { return roundTo(v, 3); }
@@ -88,6 +158,10 @@ Json numOrNull(double v, int decimals) {
     return Json();
   return roundTo(v, decimals);
 }
+
+Json exact(double v) { return std::isfinite(v) ? Json(v) : Json(); }
+
+Json exactPx(P2 p) { return finite(p) ? Json::array({p.x, p.y}) : Json(); }
 
 double numOf(const Json& j) { return j.is_number() ? j.get<double>() : kNaN; }
 
@@ -154,6 +228,47 @@ bool readPolyline(const Data& d, Polyline* out) {
   }
   *out = std::move(line);
   return true;
+}
+
+bool readLine(const Data& d, Polyline* out) {
+  const Record* rec = d.asRecord();
+  if (!rec || rec->type != kPolylineType)
+    return false;
+  const auto count = rec->data.find("count");
+  if (count != rec->data.end() && count->is_number() && count->get<double>() == 0) {
+    *out = Polyline();
+    return true;
+  }
+  return readPolyline(d, out);
+}
+
+std::vector<StationPose> layStations(const Polyline& line, double step, double rangeA,
+                                     double rangeB, double* usedA, double* usedB) {
+  std::vector<StationPose> out;
+  *usedA = *usedB = kNaN;
+  if (line.s.empty() || !(step > 0))
+    return out;
+  double a = line.s.front(), b = line.s.back();
+  if (!(rangeA == 0 && rangeB == 0)) {
+    a = std::max(a, rangeA);
+    b = std::min(b, rangeB);
+  }
+  if (!(b >= a))
+    return out;
+  *usedA = a;
+  *usedB = b;
+  const PolylineView v = line.view();
+  for (int k = 0;; ++k) {
+    const double s = a + k * step;
+    if (s > b + 1e-6)
+      break;
+    StationPose st;
+    st.s = s;
+    v.at(s, &st.c, &st.t);
+    st.n = perp(st.t);
+    out.push_back(st);
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------ Bundle 读写
@@ -408,6 +523,31 @@ Param boolParam(const char* name, const char* label, bool def, const char* doc, 
   p.doc = doc;
   p.def = Value::boolean(def);
   p.advanced = advanced;
+  return p;
+}
+
+Param intParam(const char* name, const char* label, int def, const char* doc, int lo, int hi,
+               bool advanced) {
+  Param p;
+  p.name = name;
+  p.tuningRole = "detection";
+  p.type = ParamType::Int;
+  p.label = label;
+  p.doc = doc;
+  p.def = Value::integer(def);
+  p.min = lo;
+  p.max = hi;
+  p.advanced = advanced;
+  return p;
+}
+
+Param rangedFloat(const char* name, const char* label, double def, const char* unitName,
+                  const char* doc, double lo, double hi, bool advanced) {
+  Param p = floatParam(name, label, def, unitName, doc, advanced);
+  if (std::isfinite(lo))
+    p.min = lo;
+  if (std::isfinite(hi))
+    p.max = hi;
   return p;
 }
 

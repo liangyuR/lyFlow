@@ -106,7 +106,7 @@ install(DIRECTORY "${LYFLOW_ROOT}/bin/" DESTINATION "backend/bin")
 ## CMake 消费方
 
 ```cmake
-find_package(lyflow 1.1.6 EXACT CONFIG REQUIRED)     # -DCMAKE_PREFIX_PATH=<prefix>
+find_package(lyflow 1.2.0 EXACT CONFIG REQUIRED)     # -DCMAKE_PREFIX_PATH=<prefix>
 target_link_libraries(my_app PRIVATE lyflow::client)
 ```
 
@@ -567,6 +567,7 @@ let spec = RunSpec::new(&graph_json, &run_id, &base_dir, &[])
   onDocChange={(doc, dirty) => …}
   theme={{ "--lyflow-accent": "#ff8a3d" }}
   animations={false}             // 可选：关掉画布动效，默认 true
+  topologyLocked                 // 可选：锁住拓扑、只许调参，默认 false
 />
 ```
 
@@ -577,6 +578,12 @@ let spec = RunSpec::new(&graph_json, &run_id, &base_dir, &[])
 宿主不用判断。关掉之后信息不丢：正在流数据的边仍是一条静态高亮，running 的节点仍是蓝框加光。
 适合的场景：录屏/截图要稳定的画面、远程桌面这类重绘很贵的环境、宿主页面自己有一套动效规范。
 `examples/host-react/` 的宿主栏上有一个「动效」开关，就是这个 prop。
+
+`topologyLocked`（默认 `false`）给「流程调试页」这类只许调参的页面：节点与连线不能增删改，不能换算子、
+合成 / 解散 / 展开子图、静音，图参数与图级输出的结构也不能动；调参数、切配方、挪位置、运行、预览照常。
+拦在编辑器的 graph store 里，快捷键、粘贴、右键、拖线走同一道关，被拦时弹「拓扑已锁定」；算子面板与算子搜索不出，
+端口拖不出线。打开图时只改连线的迁移不写回（节点停在老版本），只改版本与参数的照写。锁上时撤销栈清空。
+完整的拦截清单见 [`packages/editor/README.md`](../packages/editor/README.md) 的 Props 一节。
 
 **一页一个编辑器。** store 与 transport 都是模块级单例（[ADR-0018](adr/0018-editor-as-package.md)）：
 同一页面挂两个 `<LyFlowEditor>` 会共用同一份文档与 store，后挂载的 `transport` 顶掉先挂的。
