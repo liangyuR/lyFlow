@@ -9,6 +9,7 @@
 #include <opencv2/core.hpp>
 
 #include "algo/bead.h"
+#include "algo/color.h"
 #include "lyflow/data.h"
 #include "lyflow/operator.h"
 #include "lyflow/overlay.h"
@@ -40,6 +41,9 @@ inline constexpr const char* kFanScanType = "glue.FanScan";
 inline constexpr const char* kTrackType = "glue.Track";
 inline constexpr const char* kLateralRunsType = "glue.LateralRuns";
 inline constexpr const char* kPartEdgesType = "glue.PartEdges";
+// 1.3 的彩色测量算子（docs/glue-measure-ops.md「1.3 彩色测量算子」）
+inline constexpr const char* kColorMapsKind = "glue.ColorMaps";
+inline constexpr const char* kColorModelType = "glue.ColorModel";
 /// 胶路没找到时，bead_path 的 info.message 与 judge 的 verdict.message 都是这一句（§2.3 失败语义）。
 inline constexpr const char* kNoBeadMessage = "检测区内没找到胶";
 
@@ -60,6 +64,11 @@ void registerTrackPath(Registry& r);
 void registerLateralRuns(Registry& r);
 void registerPartEdges(Registry& r);
 void registerPolyline(Registry& r);
+void registerColorModel(Registry& r);
+void registerColorMap(Registry& r);
+void registerColorFan(Registry& r);
+void registerColorTrack(Registry& r);
+void registerColorRuns(Registry& r);
 
 // ------------------------------------------------------------------ 图像
 
@@ -78,6 +87,25 @@ Data mapsBundle(ResponseMaps maps, cv::Size image);
 bool readMaps(const Data& d, MapsView* out);
 /// 输入图不合格时的执行错误（指到端口）。
 Status badImage(const char* port, bool maps);
+
+/// 端口上的 Image → 8 位三通道 RGB Mat（RGBA 去掉 alpha）。单通道、其他位深、预览缩小图返回空 Mat。
+cv::Mat rgbOf(const Data& image);
+/// 彩色算子的输入图不合格（不是全分辨率 u8 RGB / RGBA）。
+Status badColorImage(const char* port);
+
+/// glue.color_map 的 maps（Bundle<glue.ColorMaps>）：score 是按 frame 摆回图像坐标的采样场，state / luma 是块本身。
+struct ColorMapsView {
+  Field score;
+  cv::Mat state, luma;
+  cv::Rect frame;
+};
+Data colorMapsBundle(ColorMaps maps, cv::Size image);
+bool readColorMaps(const Data& d, ColorMapsView* out);
+
+/// glue.fan_scan 的参数、计算与校验；glue.color_fan 在得分图上原样复用。
+std::vector<Param> fanScanParams();
+Status fanScanCompute(const Field& R, const ParamView& params, Outputs& outputs);
+std::vector<Issue> fanScanValidate(const ParamView& params, const std::set<std::string>&);
 
 // ------------------------------------------------------------------ JSON 小工具
 

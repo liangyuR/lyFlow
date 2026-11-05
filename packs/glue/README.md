@@ -1,6 +1,6 @@
 # glue — LyFlow 领域算子包：涂胶检测
 
-版本 0.2.0，**默认关闭**（ADR-0015）。打开它：`$env:LYFLOW_PACKS = "glue"`（与别的领域包一起：`"gap;dts;glue"`）。
+版本 0.3.0，**默认关闭**（ADR-0015）。打开它：`$env:LYFLOW_PACKS = "glue"`（与别的领域包一起：`"gap;dts;glue"`）。
 
 对胶枪相机的一帧图像，用几个叫得出名字的积木量出胶宽、查出断胶、量出胶到零件边的距离，并判 OK / NG
 （[docs/glue-plan.md](../../docs/glue-plan.md) §2，G2）。一张检测图 6 个节点：
@@ -22,13 +22,13 @@ io.load_image → glue.bead_path → glue.bead_width → glue.bead_breaks ─┐
 
 ```
 packs/glue/
-  algo/      算法内核（D1–D16）：响应图、卡尺、定胶路、逐站、零件边、人造断胶。纯函数，吃 cv::Mat
-  ops/       15 个算子（含 1.2 的 6 个测量算子）+ 两种 Bundle + 片段注册；Record / Bundle 的读写在 common.cpp
+  algo/      算法内核（D1–D16）：响应图、卡尺、定胶路、逐站、零件边、人造断胶；color.h 是彩色胶条的颜色模型与彩色跟踪。纯函数，吃 cv::Mat
+  ops/       20 个算子（含 1.2 的 6 个测量算子、1.3 的 5 个彩色算子）+ 四种 Bundle + 片段注册；Record / Bundle 的读写在 common.cpp
   tests/     doctest（合成图：已知宽度、断口、边距、标定，§4 第 13 条）
   snippets/  随包的片段「涂胶检测」（glue.bead_inspect）
   graphs/    glue1 / glue2（随动单帧检测）、taught（逐拍照点示教胶路）、flyshot（飞拍定位 + 逐点卡尺）、
-             measure（1.2 测量算子的参考连法：逐帧定向）
-  tools/     真实帧的批量评估、人造断胶数据集、叠画缩略图（只调 lyflow CLI，D14）
+             measure（1.2 测量算子的参考连法：逐帧定向）、color（1.3 彩色算子的参考连法：示教建模 + 生产打分）
+  tools/     真实帧的批量评估（灰度 / 彩色）、人造断胶数据集、叠画缩略图（只调 lyflow CLI，D14）
 ```
 
 **算法只有一份**（D11）：积木算子、doctest、CLI（`lyflow run / eval / dump`）走的都是 `algo/` 里的同一组函数；
@@ -122,6 +122,22 @@ GlueSight 从 1.2 起只用下面 6 个算子，判定（有无胶、像不像�
 
 算法仍只有一份：1.1 的 `bead_path` / `bead_width` / `edge_distance` 改成调用同一组参数化函数（`trackBead`、`fitBeadPath`、
 `caliperRuns`、`runEdges`、`fanScan`、`findPartEdges`），默认参数即 1.1 的取值，doctest 对拍胶路逐位相同。
+
+## 彩色测量算子（1.3，GlueSight 用）
+
+粉色胶压在发黑铸件或镀锌面上，灰度下明暗方向会反，改按颜色量。宿主去马赛克后按 RGB 注入，示教时沿示教线建一次颜色模型，生产时逐帧打分、
+沿胶路量。契约（三态语义、`glue.ColorModel` 的字段、全部参数、实测）见 [docs/glue-measure-ops.md「1.3 彩色测量算子」](../../docs/glue-measure-ops.md#13-彩色测量算子)，
+参考连法见 `graphs/color.lyflow.json`。
+
+| id | 输入 → 输出 | 一步做什么 |
+|---|---|---|
+| `glue.color_model` 胶色建模 | `image`、`line`、`prior?` → `model: Record<glue.ColorModel>` | 沿示教线取胶 / 背景的对数色度，胶 1 个高斯、背景 ≤ 3 个；按得分重新居中；统计可相加（prior 累加与顺序无关） |
+| `glue.color_map` 胶色得分图 | `image`、`model?` → `maps: Bundle<glue.ColorMaps>` | 每像素胶的面积占比 ∈ [0, 1]；高光、暗区是 NaN（无信息），明显比胶暗的是 0；只算 roi 那一块 |
+| `glue.color_fan` 彩色扇形扫描 | `maps` → `scan: Record<glue.FanScan>` | `glue.fan_scan` 用在得分图上 |
+| `glue.color_track` 彩色粗跟踪 | `maps`、`fan?` → `line`、`track: Record<glue.Track>` | 高光挡住的步记为无信息、不计入 maxGap；另给 `coverageInformative` |
+| `glue.color_runs` 彩色横向卡尺 | `maps`、`line` → `runs: Record<glue.LateralRuns>` | 每站的胶色段与无信息区间（原因），段两边各是真边还是被高光截断；被高光劈开的胶并回一段 |
+
+**无信息不是断胶**：高光、暗区挡住的站要由宿主判成「未检」。`part_edges` 仍按灰度量（`grayOf`），彩色帧照样能接。
 
 ## 示教胶路（glue-plan §6，G5）
 
@@ -310,6 +326,10 @@ python packs\glue\tools\glue_thumbs.py    # 第 17 条：每帧画上判定的�
   （两条检测链的 s 不是同一把尺子）。`--dump-failures` 把没过的样本 dump 出图、画上叠画。
 - `glue_thumbs.py` 的配色与编辑器同一张 role 表（`glue_draw.py`），中文用 PIL + 系统字体写。
 - 找 CLI：`--lyflow` / `LYFLOW_EXE`，否则 `bridge/target/{release,debug}/lyflow.exe` 里最新的、manifest 里有 glue 的那一个。
+- `glue_color_eval.py`（彩色算子，只出报告、不判门禁）：数据由 `LYFLOW_GLUE_COLOR_DATA` 给（下面是 `cam1/`、`cam2/`…，帧叫 `camN_s000001.png`，
+  已去马赛克的 RGB），另手写一份 `teach.json`（默认在数据目录下，或 `--teach`）：每条一段示教 —— 相机、示教帧、示教线、要评的帧范围、大约的胶宽，
+  可带 `color_model` / `color_runs` 的参数，`modelFrom` 复用前面某条的模型。逐帧报中心有段 / 中心落在无信息区间 / 有信息却没有段的站占比、中心段宽、
+  彩色跟踪的覆盖率与耗时，`draw` 里的帧画上卡尺段（绿 = 中心段，黄 = 无信息，红点 = 缺段）。
 
 ## 测试
 
@@ -323,6 +343,10 @@ python packs\glue\tools\glue_thumbs.py    # 第 17 条：每帧画上判定的�
   起止误差 ≤ 4 px；示教线绕喷嘴偏 4°（偏移沿 s 线性变到 28 px）时逐站的胶中心误差 ≤ 1.5 px、断口照样报对；没有胶、只有压痕（D15）、只有一条平行暗线（tolerance 之外，或之内但比 `widthRange` 下限窄）、胶偏出
   tolerance 都是「检测区内没找到胶」，`maxBreak = −1` 也不判 OK；胶断一截、旁边一条更长的平行暗线一直在（tolerance 之外 30 px，
   或放宽 tolerance 后之内 −27 px）时断口照样报在 [234, 314]；`points` / `zone` 的加载期校验与折线重采样。
+- **彩色测量算子**（`tests/test_color.cpp`）：合成 RGB 场景（粉胶 (230, 120, 130) 在发黑铸件 / 镀锌灰 / 两侧各一上，铸件先排成 Bayer 再去马赛克带真实假色，
+  可叠照明渐变、横穿的饱和高光带、胶内的湿胶高光条、断口、中性灰暗带）上：宽度 × 底材 × 照明每站一段、宽度中位误差 ≤ 1 px；高光横穿的站中心落在
+  highlight 区间而真断口有信息、没有段；湿胶高光条并回一段；只有铸件 / 只有灰暗带不出段；像素三态与「得分 = 面积占比」；建模的重新居中、确定性、
+  prior 累加与顺序无关、模型 JSON 往返、roi 与整幅及与线程数无关；坏模型 / 灰度图 / roi 的执行错误；圆弧胶 + 高光的彩色跟踪。
 - **飞拍宿主链路**（`tests/test_flyshot.cpp`）：实际载入随包产线图，C ABI 注入带行填充的相机帧、绑定图参数、读取毫米点表，并验证换帧不会误用旧缓存。
 - **标定**（`packs/std-image/tests/test_calib.cpp`）：棋盘真值、中文路径往返、非法角点参数和错误 Record 类型。
 

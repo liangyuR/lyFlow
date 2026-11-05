@@ -3,6 +3,8 @@
 #include <cstdio>
 #include <limits>
 
+#include <opencv2/imgproc.hpp>
+
 #include "glue.h"
 #include "lyflow_cv/adapter.h"
 
@@ -35,6 +37,18 @@ void registerBundles(Registry& r) {
        BundleField{"frame", "Record",
                    "glue.Frame：x、y（块左上角在整幅图里的整数像素坐标）、width、height（块的宽高，"
                    "与三张图一致）、imageWidth、imageHeight（整幅图的宽高）。"}}});
+  r.addBundle(BundleDesc{
+      kColorMapsKind,
+      "胶色得分图",
+      "glue.color_map 的输出：三张单通道 f32 图只有 frame 那一块（roi ∩ 图像，没设 roi 时是整幅），"
+      "下游按 frame 的偏移采样，坐标仍是整幅图像素坐标。",
+      "",
+      {BundleField{"score", "Image",
+                   "像胶的得分 ∈ [0, 1]；高光、暗区（无信息）是 NaN，暗背景是 0。"},
+       BundleField{"luma", "Image", "平滑后的 BT.601 亮度。"},
+       BundleField{"state", "Image",
+                   "像素状态：0 有信息、1 高光、2 暗区（无信息）、3 暗背景（得分 0）。"},
+       BundleField{"frame", "Record", "glue.Frame：与 glue.ResponseMaps 的 frame 相同。"}}});
   r.addBundle(BundleDesc{
       kPathKind,
       "胶路",
@@ -76,6 +90,90 @@ cv::Mat grayOf(const Data& image) {
   const Image* img = image.asImage();
   // 文件里的测量点、模板和标定都以原图为准；预览缩小图不能冒充正式量测。
   return img && img->scale == 1 ? cvx::gray8(*img) : cv::Mat{};
+}
+
+cv::Mat rgbOf(const Data& image) {
+  const Image* img = image.asImage();
+  if (!img || img->scale != 1 || img->depth != PixelDepth::U8 || !img->consistent() ||
+      (img->channels != 3 && img->channels != 4))
+    return {};
+  const cv::Mat v = cvx::view(*img);
+  if (img->channels == 3)
+    return v;
+  cv::Mat out;
+  cv::cvtColor(v, out, cv::COLOR_RGBA2RGB);
+  return out;
+}
+
+Status badColorImage(const char* port) {
+  return Status::Error(
+      Phase::Execute, "bad_input",
+      "彩色算子需要 RGB：全分辨率 u8 三通道 / 四通道图像（灰度图请走 glue.response 链路）", {},
+      port);
+}
+
+namespace {
+
+Record frameRecord(cv::Rect frame, cv::Size image) {
+  Record rec;
+  rec.type = kFrameType;
+  rec.data = Json{{"x", frame.x},
+                  {"y", frame.y},
+                  {"width", frame.width},
+                  {"height", frame.height},
+                  {"imageWidth", image.width},
+                  {"imageHeight", image.height}};
+  return rec;
+}
+
+/// Bundle 里的 frame 与同尺寸的单通道 f32 图。
+bool frameOf(const Bundle& b, cv::Rect* out) {
+  const Data* f = b.field("frame");
+  const Record* rec = f ? f->asRecord() : nullptr;
+  if (!rec || rec->type != kFrameType)
+    return false;
+  const Json& j = rec->data;
+  const auto num = [&](const char* k) { return j.contains(k) && j[k].is_number_integer(); };
+  if (!num("x") || !num("y") || !num("width") || !num("height"))
+    return false;
+  *out =
+      cv::Rect(j["x"].get<int>(), j["y"].get<int>(), j["width"].get<int>(), j["height"].get<int>());
+  return true;
+}
+
+bool planeOf(const Bundle& b, const char* name, cv::Rect frame, cv::Mat* out) {
+  const Data* x = b.field(name);
+  const Image* img = x ? x->asImage() : nullptr;
+  if (!img || img->scale != 1 || img->channels != 1 || img->depth != PixelDepth::F32 ||
+      !img->consistent() || img->width != frame.width || img->height != frame.height)
+    return false;
+  *out = cvx::view(*img);
+  return true;
+}
+
+} // namespace
+
+Data colorMapsBundle(ColorMaps maps, cv::Size image) {
+  Bundle b(kColorMapsKind);
+  b.set("score", f32Image(std::move(maps.score)));
+  b.set("luma", f32Image(std::move(maps.luma)));
+  b.set("state", f32Image(std::move(maps.state)));
+  b.set("frame", Data::record(frameRecord(maps.frame, image)));
+  return Data::bundle(std::move(b));
+}
+
+bool readColorMaps(const Data& d, ColorMapsView* out) {
+  const Bundle* b = d.asBundle();
+  if (!b || b->kind != kColorMapsKind)
+    return false;
+  cv::Rect frame;
+  cv::Mat score;
+  if (!frameOf(*b, &frame) || !planeOf(*b, "score", frame, &score) ||
+      !planeOf(*b, "state", frame, &out->state) || !planeOf(*b, "luma", frame, &out->luma))
+    return false;
+  out->score = Field(score, frame.tl(), frame);
+  out->frame = frame;
+  return true;
 }
 
 Data mapsBundle(ResponseMaps maps, cv::Size image) {

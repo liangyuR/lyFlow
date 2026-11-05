@@ -64,6 +64,8 @@ cv::Rect inflate(cv::Rect r, int pad) {
   return cv::Rect(r.x - pad, r.y - pad, r.width + 2 * pad, r.height + 2 * pad);
 }
 
+} // namespace
+
 // ------------------------------------------------------------------ 方向
 
 /// 一组点的主方向（PCA），朝向与 fallback 同侧。不到 3 个点返回 fallback。
@@ -97,6 +99,8 @@ double angleDiffDeg(double a, double b) {
   double d = std::fmod(std::fabs(a - b), 360.0);
   return d > 180.0 ? 360.0 - d : d;
 }
+
+namespace {
 
 // ------------------------------------------------------------------ 粗找（D1 / D6 / D15）
 

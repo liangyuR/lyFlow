@@ -36,11 +36,9 @@ std::vector<Px> arc(P2 center, double r, double a0, double a1) {
   return pts;
 }
 
-Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
-  MapsView maps;
-  if (!readMaps(inputs.get("maps"), &maps))
-    return badImage("maps", true);
-  const Field& R = maps.response;
+} // namespace
+
+Status fanScanCompute(const Field& R, const ParamView& params, Outputs& outputs) {
   const FanSpec spec = specOf(params);
   const FanResult fan = fanScan(R, spec);
 
@@ -93,7 +91,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   return Status::Ok();
 }
 
-std::vector<Issue> validate(const ParamView& params, const std::set<std::string>&) {
+std::vector<Issue> fanScanValidate(const ParamView& params, const std::set<std::string>&) {
   std::vector<Issue> issues;
   const auto sector = params.vec2("sector");
   if (!(sector[1] > sector[0]) || sector[1] - sector[0] > 360.0 + 1e-6) {
@@ -110,6 +108,45 @@ std::vector<Issue> validate(const ParamView& params, const std::set<std::string>
                                   "radial"));
   }
   return issues;
+}
+
+std::vector<Param> fanScanParams() {
+  Param anchor = vec2Param("anchor", "Anchor", 640.0, 512.0, "px", {"X", "Y"}, "锚点（出胶点）。");
+  anchor.tuningRole = "geometry";
+  Param sector = vec2Param("sector", "Sector", -180.0, 180.0, "deg", {"From", "To"},
+                           "扫描的方向范围（度，图像坐标：0° 朝右、−90° 朝上）。");
+  sector.tuningRole = "geometry";
+  Param radial = vec2Param("radial", "Radial", 100.0, 250.0, "px", {"R0", "R1"},
+                           "射线上采样的径向区间：t = r0, r0 + radialStep, …（t < r1）。");
+  radial.min = 0.0;
+  radial.tuningRole = "geometry";
+  Param angleStep =
+      rangedFloat("angleStep", "Angle Step", 1.0, "deg", "方向步长。", 0.1, 30.0, true);
+  Param radialStep =
+      rangedFloat("radialStep", "Radial Step", 2.0, "px", "射线上的采样步长。", 0.5, 50.0, true);
+  Param invalidMax =
+      rangedFloat("invalidMax", "Invalid Max", 0.3, "",
+                  "一条射线上无效采样占比 ≥ 它时这个方向的得分为 null。", 0.0, 1.0, true);
+  Param peakCount =
+      intParam("peakCount", "Peak Count", 3, "输出前几个峰；0 = 不输出峰。", 0, 20, true);
+  Param peakSeparation = rangedFloat("peakSeparation", "Peak Separation", 15.0, "deg",
+                                     "峰之间的角差要严格大于它。", 0.0, 180.0, true);
+  Param includeInvalid = boolParam(
+      "includeInvalid", "Include Invalid", false,
+      "有效方向凑不够 peakCount 个峰时，得分为 null 的方向（按角度顺序）也拿来补，这种峰的 score 是 null。"
+      "1.1 bead_path 是这样挑的：要与 1.1 等价就打开。",
+      true);
+  return {anchor,     sector,    radial,         angleStep,     radialStep,
+          invalidMax, peakCount, peakSeparation, includeInvalid};
+}
+
+namespace {
+
+Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
+  MapsView maps;
+  if (!readMaps(inputs.get("maps"), &maps))
+    return badImage("maps", true);
+  return fanScanCompute(maps.response, params, outputs);
 }
 
 } // namespace
@@ -137,36 +174,10 @@ void registerFanScan(Registry& r) {
       Port{"overlay", "Record", "Overlay", "lyflow.overlay2d：锚点、扇区、径向区间、峰方向。",
            true},
   };
-  Param anchor = vec2Param("anchor", "Anchor", 640.0, 512.0, "px", {"X", "Y"}, "锚点（出胶点）。");
-  anchor.tuningRole = "geometry";
-  Param sector = vec2Param("sector", "Sector", -180.0, 180.0, "deg", {"From", "To"},
-                           "扫描的方向范围（度，图像坐标：0° 朝右、−90° 朝上）。");
-  sector.tuningRole = "geometry";
-  Param radial = vec2Param("radial", "Radial", 100.0, 250.0, "px", {"R0", "R1"},
-                           "射线上采样的径向区间：t = r0, r0 + radialStep, …（t < r1）。");
-  radial.min = 0.0;
-  radial.tuningRole = "geometry";
-  Param angleStep =
-      rangedFloat("angleStep", "Angle Step", 1.0, "deg", "方向步长。", 0.1, 30.0, true);
-  Param radialStep =
-      rangedFloat("radialStep", "Radial Step", 2.0, "px", "射线上的采样步长。", 0.5, 50.0, true);
-  Param invalidMax =
-      rangedFloat("invalidMax", "Invalid Max", 0.3, "",
-                  "一条射线上无效采样占比 ≥ 它时这个方向的得分为 null。", 0.0, 1.0, true);
-  Param peakCount =
-      intParam("peakCount", "Peak Count", 3, "输出前几个峰；0 = 不输出峰。", 0, 20, true);
-  Param peakSeparation = rangedFloat("peakSeparation", "Peak Separation", 15.0, "deg",
-                                     "峰之间的角差要严格大于它。", 0.0, 180.0, true);
-  Param includeInvalid = boolParam(
-      "includeInvalid", "Include Invalid", false,
-      "有效方向凑不够 peakCount 个峰时，得分为 null 的方向（按角度顺序）也拿来补，这种峰的 score 是 null。"
-      "1.1 bead_path 是这样挑的：要与 1.1 等价就打开。",
-      true);
-  op.params = {anchor,     sector,    radial,         angleStep,     radialStep,
-               invalidMax, peakCount, peakSeparation, includeInvalid};
+  op.params = fanScanParams();
   op.capabilities = {/*cancellable=*/false, /*previewable=*/false, /*deterministic=*/true};
   op.compute = &compute;
-  op.validate = &validate;
+  op.validate = &fanScanValidate;
   r.addOperator(std::move(op));
 }
 
