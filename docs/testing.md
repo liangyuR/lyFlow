@@ -12,6 +12,7 @@
 |---|---|---|
 | 完整开发门禁 | `pnpm check` | core、manifest、schema、Rust bridge/客户端、CLI、C++ SDK、前端与 MCP；按 `LYFLOW_STD_PACKS`、`LYFLOW_PACKS` 选择包。 |
 | C++ core 与算子包 | `pnpm core:build` | 编译并运行 doctest；算子数值与 C ABI 契约的主要入口。 |
+| Tensor 元信息微基准 | `pwsh -NoProfile -File scripts/bench-tensor-metadata.ps1` | 对不可变张量的首次与重复 `valueJson()` 计时，输出源码摘要和 p50/p95；不代表整图耗时。 |
 | editor 纯逻辑 | `pnpm --filter @lyflow/editor test` | node:test，不启动桌面壳。 |
 | MCP | `pnpm --filter @lyflow/mcp test` | node:test；集成冒烟需要已构建的 CLI。完整 typecheck/build/test 可用 `pwsh scripts/check.ps1 -Steps mcp`。 |
 | glue 开发门禁 | `pnpm check:glue` | 固定标准包 + glue，另查必需算子；设置 `LYFLOW_GLUE_DATA` 才跑真实帧评估，人造断胶只报告。 |

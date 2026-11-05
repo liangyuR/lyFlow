@@ -75,6 +75,7 @@
 | 参数面板与配方 | [研究](param-recipe-research.md) · [计划](param-recipe-plan.md) · [P1](param-recipe-p1-acceptance.md) · [P2](param-recipe-p2-acceptance.md) · [P3](param-recipe-p3-acceptance.md) · [P4](param-recipe-p4-acceptance.md) |
 | 动效 | [计划](motion-plan.md) · [验收](motion-acceptance.md) |
 | 易用性与性能 | [验收](usability-perf-acceptance.md) |
+| 算子稳定性与资源管理 | [实施说明](operator-optimization.md) · [第一轮历史验收](operator-stability-round1-acceptance.md) |
 | 业务图迁移 | [KUN10 验收](kun10-graphs-migration-acceptance.md) |
 
 其他专项设计：[结果 Bundle](result-bundle-plan.md)、[通用量测](measure-plan.md)、[Edge Peek](edge-peek-plan.md)、[输出对比](compare-plan.md)、[库算子内联](library-inline-plan.md)、[逐帧锚点](pointfrom-plan.md)、[磁盘缓存研究](disk-cache-research.md)与[计划](disk-cache-plan.md)、[多实例研究](multi-instance-research.md)。
