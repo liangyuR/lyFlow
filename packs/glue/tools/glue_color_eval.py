@@ -9,6 +9,11 @@ teach.json 手写，每一条是一段示教：
                   "frames": [1, 60], "beadWidth": 30, "draw": [35, 50],
                   "model": {…color_model 参数…}, "runs": {…color_runs 参数…}}]}
 
+可选：track = {"anchor", "sector", "zone", "radial", …}（彩色跟踪的锚点 / 扇区 / 检测区 / 扇形径向区间，默认按示教线推；
+其余键原样给 glue.color_track，例如 widthMin 挡住出胶点旁的细胶丝），
+roi（color_map 的 roi，默认示教线外包框 ± 卡尺半长），primary = "track"（叠画与首列按跟踪胶路的卡尺：胶的方向逐帧在变时用），
+mmPerPx（报告里另给 mm）。
+
 modelFrom = 前面某一条的 name：不另建模，用那一条的模型（例如绕圈胶丝用同一相机直胶段示教的模型）。
 
 每条：示教帧 + 示教线 → glue.color_model；frames 范围里的每一帧 → glue.color_map（模型 JSON 填进参数）→ 沿示教线
@@ -86,21 +91,25 @@ def production_graph(e: dict, model: dict) -> dict:
     runs = {"stationStep": 4, "searchHalf": max(40, W + 20)} | e.get("runs", {})
     reach = runs["searchHalf"] + 8
     xs, ys = [p[0] for p in pts], [p[1] for p in pts]
-    roi = [min(xs) - reach, min(ys) - reach, max(xs) - min(xs) + 2 * reach, max(ys) - min(ys) + 2 * reach]
+    roi = e.get("roi") or [min(xs) - reach, min(ys) - reach, max(xs) - min(xs) + 2 * reach,
+                           max(ys) - min(ys) + 2 * reach]
     h = heading_deg(pts)
-    anchor = pts[0]
     L = line_length(pts)
+    t = {"anchor": pts[0], "sector": [h - 30, h + 30], "zone": [10, L], "radial": [20, min(160, L)]} | e.get("track", {})
     return graph(
         [node("n_load", "io.load_image", {"source": "file"}),
          node("n_line", "glue.polyline", {"points": json.dumps(pts)}),
          node("n_map", "glue.color_map", {"model": json.dumps(model), "roi": roi}),
          node("n_runs", "glue.color_runs", runs),
-         node("n_fan", "glue.color_fan", {"anchor": anchor, "sector": [h - 30, h + 30], "radial": [20, min(160, L)]}),
-         node("n_track", "glue.color_track", {"anchor": anchor, "zone": [10, L], "bearingRange": [h - 30, h + 30],
-                                              "widthMax": 2 * W, "searchHalf": max(40, W + 20)})],
+         node("n_fan", "glue.color_fan", {"anchor": t["anchor"], "sector": t["sector"], "radial": t["radial"]}),
+         node("n_track", "glue.color_track", {"anchor": t["anchor"], "zone": t["zone"], "bearingRange": t["sector"],
+                                              "widthMax": 2 * W, "searchHalf": max(40, W + 20)}
+              | {k: v for k, v in t.items() if k not in ("anchor", "sector", "zone", "radial")}),
+         node("n_truns", "glue.color_runs", runs)],
         [("n_load.image", "n_map.image"), ("n_map.maps", "n_runs.maps"), ("n_line.line", "n_runs.line"),
-         ("n_map.maps", "n_fan.maps"), ("n_map.maps", "n_track.maps"), ("n_fan.scan", "n_track.fan")],
-        {"runs": "n_runs.runs", "track": "n_track.track"})
+         ("n_map.maps", "n_fan.maps"), ("n_map.maps", "n_track.maps"), ("n_fan.scan", "n_track.fan"),
+         ("n_map.maps", "n_truns.maps"), ("n_track.line", "n_truns.line")],
+        {"runs": "n_runs.runs", "track": "n_track.track", "trackRuns": "n_truns.runs"})
 
 
 def summarize(runs: dict, W: float) -> dict:
@@ -129,6 +138,14 @@ def summarize(runs: dict, W: float) -> dict:
             "width": statistics.median(widths) if widths else None,
             "widthP10": sorted(widths)[len(widths) // 10] if widths else None,
             "widthP90": sorted(widths)[(len(widths) * 9) // 10] if widths else None}
+
+
+def widths(r: dict, prefix: str, mm: float | None) -> str:
+    vals = [r[f"{prefix}{k}"] for k in ("widthP10", "width", "widthP90")]
+    text = " / ".join(fmt(v) for v in vals)
+    if mm and vals[1] is not None:
+        text += "（" + " / ".join(fmt(v * mm, 2) for v in vals) + " mm）"
+    return text
 
 
 def draw(data: Path, e: dict, frame: int, runs: dict, out: Path) -> None:
@@ -207,7 +224,9 @@ def main():
             n = int(row["sample"].split("#")[1])
             runs = output_value(row, "runs") or {}
             track = output_value(row, "track") or {}
+            truns = output_value(row, "trackRuns") or {}
             s = summarize(runs, W)
+            s |= {f"t_{k}": v for k, v in summarize(truns, W).items()}
             s |= {"frame": n, "status": row["status"],
                   "trackCoverage": track.get("coverage"), "trackInformative": track.get("coverageInformative"),
                   "unknownSteps": track.get("unknownSteps"),
@@ -215,10 +234,11 @@ def main():
                   "runsMs": row["metrics"].get("nodes.n_runs.durationMs")}
             result.append(s)
             if n == e["teach"] or n in e.get("draw", []):
-                draw(data, e, n, runs, out)
+                draw(data, e, n, truns if e.get("primary") == "track" else runs, out)
         result.sort(key=lambda r: r["frame"])
         report["entries"].append({"entry": {k: v for k, v in e.items() if k != "slug"}, "quality": q,
                                   "frames": result})
+        mm = e.get("mmPerPx")
         md += [f"## {e['name']}（{e['cam']}，示教帧 {e['teach']}，期望胶宽约 {W} px）", "",
                "模型：" + "，".join(f"{k} = {fmt(q.get(k), 3) if isinstance(q.get(k), float) else q.get(k)}"
                                   for k in ("usable", "separation", "components", "glueCount", "bgCount",
@@ -226,12 +246,13 @@ def main():
                                             "centerShift", "recentered")),
                "",
                md_table(["帧", "中心有段", "无信息", "缺段", "无信息原因", "info", "中心段宽 P10 / P50 / P90",
-                         "跟踪", "map ms", "runs ms"],
+                         "跟踪", "跟踪胶路：有段 / 无信息 / 缺段", "跟踪胶路段宽 P10 / P50 / P90", "map ms", "runs ms"],
                         [[r["frame"], fmt(r["present"], 2), fmt(r["unknown"], 2), fmt(r["missing"], 2),
                           " ".join(f"{k}:{v}" for k, v in r["causes"].items()), fmt(r["info"], 2),
-                          f"{fmt(r['widthP10'])} / {fmt(r['width'])} / {fmt(r['widthP90'])}",
+                          widths(r, "", mm),
                           f"{fmt(r['trackCoverage'], 2)} / {fmt(r['trackInformative'], 2)}",
-                          fmt(r["mapMs"]), fmt(r["runsMs"])] for r in result]),
+                          f"{fmt(r['t_present'], 2)} / {fmt(r['t_unknown'], 2)} / {fmt(r['t_missing'], 2)}",
+                          widths(r, "t_", mm), fmt(r["mapMs"]), fmt(r["runsMs"])] for r in result]),
                ""]
         times = [r["mapMs"] + r["runsMs"] for r in result if r["mapMs"] is not None and r["runsMs"] is not None]
         if times:

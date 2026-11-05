@@ -50,6 +50,7 @@ struct ColorScene {
   std::vector<std::pair<double, double>> highlights; ///< 横穿的饱和高光带 [s0, s1]，横向 ±60 px
   double streakLo = NAN;                             ///< 胶内沿胶走的湿胶高光条（横向 [lo, hi]）
   double streakHi = NAN;
+  double streakHalo = 0; ///< 高光条两侧发白却没饱和的一圈（px）
   bool bead = true;
   bool grayBand = false; ///< 胶的位置上换成一条中性灰的暗带（阴影、槽）
   unsigned seed = 11;
@@ -138,6 +139,9 @@ cv::Mat render(const ColorScene& sc) {
             c = white; // 镀锌面上一大片饱和高光
           if (inBead && !broken && sc.bead)
             c = sc.grayBand ? cv::Vec3d(62, 62, 64) * illum : glueColor * illum;
+          if (inBead && !broken && sc.bead && rel >= sc.streakLo - sc.streakHalo &&
+              rel <= sc.streakHi + sc.streakHalo)
+            c = cv::Vec3d(235, 205, 205) * illum;
           if (inBead && !broken && sc.bead && rel >= sc.streakLo && rel <= sc.streakHi)
             c = white;
           if (inHighlight)
@@ -348,9 +352,11 @@ TEST_CASE(
   }
 }
 
-// 防：湿胶上沿胶走的高光条比 mergeGap 宽时把一条胶劈成两段（宽度只量到半条），以及并段时把真边也当成无信息。
+// 防：湿胶上沿胶走的高光条比 mergeGap 宽时把一条胶劈成两段（宽度只量到半条）、高光条带一圈没饱和的发白光晕时
+// 就不并（现场湿胶的反光点都是这样），以及并段时把真边也当成无信息。
 TEST_CASE(
-    "glue 彩色：湿胶高光条劈开胶 → mergeUnknownGap 并回一段、宽度完整、两边是真边；不并时两段内侧是 highlight") {
+    "glue 彩色：湿胶高光条劈开胶（含没饱和的光晕）→ mergeUnknownGap 并回一段、宽度完整、两边是真边；"
+    "不并时两段内侧是 highlight") {
   ColorScene sc;
   sc.beadWidth = 30;
   sc.streakLo = -3;
@@ -359,19 +365,24 @@ TEST_CASE(
   teach.streakLo = teach.streakHi = NAN;
   ColorParams p = colorParams(sc);
   const cv::Mat frame = render(sc);
-  const ColorRun merged = runColor(colorGraph(p), render(teach), frame);
-  REQUIRE(merged.status == "ok");
-  std::vector<double> err;
-  for (const Json& st : merged.runs["stations"]) {
-    const Json* c = centralRun(st, 4.0);
-    REQUIRE(c);
-    CHECK((*c)["parts"] == 2);
-    CHECK((*c)["loCause"] == "edge");
-    CHECK((*c)["hiCause"] == "edge");
-    CHECK((*c)["unknownWidth"].get<double>() > 4.0);
-    err.push_back(std::fabs((*c)["width"].get<double>() - 30.0));
+  for (const double halo : {0.0, 3.0}) {
+    CAPTURE(halo);
+    ColorScene wet = sc;
+    wet.streakHalo = halo;
+    const ColorRun merged = runColor(colorGraph(p), render(teach), render(wet));
+    REQUIRE(merged.status == "ok");
+    std::vector<double> err;
+    for (const Json& st : merged.runs["stations"]) {
+      const Json* c = centralRun(st, 4.0);
+      REQUIRE(c);
+      CHECK((*c)["parts"] == 2);
+      CHECK((*c)["loCause"] == "edge");
+      CHECK((*c)["hiCause"] == "edge");
+      CHECK((*c)["unknownWidth"].get<double>() > 4.0);
+      err.push_back(std::fabs((*c)["width"].get<double>() - 30.0));
+    }
+    CHECK(medianOf(err) <= 1.0);
   }
-  CHECK(medianOf(err) <= 1.0);
 
   p.runs["mergeUnknownGap"] = 0;
   const ColorRun split = runColor(colorGraph(p), render(teach), frame);
