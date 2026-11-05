@@ -39,6 +39,7 @@ ColorTrackSpec specOf(const ParamView& params) {
   spec.steadyIqrRatio = params.number("steadyIqrRatio");
   spec.dirWindow = params.number("dirWindow");
   spec.infoMin = params.number("infoMin");
+  spec.mergeUnknownGap = params.number("mergeUnknownGap");
   return spec;
 }
 
@@ -229,6 +230,11 @@ void registerColorTrack(Registry& r) {
       rangedFloat("mergeGap", "Merge Gap", 8.0, "px", "合并缝。", 0.0, kOpen, true),
       rangedFloat("mergeWidthMax", "Merge Width Max", 90.0, "px", "合并后不宽于它才合并。", 1.0,
                   kOpen, true),
+      rangedFloat(
+          "mergeUnknownGap", "Merge Unknown Gap", 16.0, "px",
+          "同 glue.color_runs：两段之间缝里明确是背景的采样不过半时，缝不超过它就合并，胶点取合并段的中点"
+          "（湿胶中间一条反光带把胶劈成两半时不只跟一半）。",
+          0.0, kOpen, true),
       rangedFloat("widthMin", "Width Min", 4.0, "px", "胶点段宽度下限。", 0.0, kOpen, true),
       rangedFloat("widthMax", "Width Max", 90.0, "px", "胶点段宽度上限。", 0.0, kOpen, true),
       rangedFloat("acceptOffsetRatio", "Accept Offset Ratio", 0.6, "",

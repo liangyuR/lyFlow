@@ -25,8 +25,6 @@ const char* edgeCause(bool complete, bool caliper, ColorCause c) {
   return c == ColorCause::None ? "edge" : causeName(c);
 }
 
-bool unknown(ColorCause c) { return c == ColorCause::Highlight || c == ColorCause::Dark; }
-
 Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
   ColorMapsView maps;
   if (!readColorMaps(inputs.get("maps"), &maps))
@@ -98,32 +96,21 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
         cr.hiCause = cause[hi];
       runs.push_back(cr);
     }
-    // 被高光 / 暗区隔开的两段胶并回去（湿胶的高光条比 mergeGap 宽时）。反光点的芯饱和、四周一圈发白却没饱和，
-    // 那一圈有信息但得分低（两半相邻的边因此是「真边」）：只看缝里无信息的采样是否过半
+    // 被高光 / 暗区隔开的两段胶并回去（湿胶的高光条比 mergeGap 宽时）
+    std::vector<char> background(static_cast<std::size_t>(count));
+    for (int i = 0; i < count; ++i)
+      background[static_cast<std::size_t>(i)] = v[i] >= 0 && v[i] < 0.5 * spec.segmentMin;
+    std::vector<Run> plain;
+    for (const ColorRun& cr : runs)
+      plain.push_back(cr.run);
     std::vector<ColorRun> merged;
-    for (const ColorRun& cr : runs) {
-      if (!merged.empty()) {
-        ColorRun& m = merged.back();
-        const int from = static_cast<int>(std::floor((m.run.hi + half) / kRes + 1e-6)) + 1;
-        const int to = static_cast<int>(std::ceil((cr.run.lo + half) / kRes - 1e-6)) - 1;
-        int blind = 0, total = 0;
-        for (int i = std::max(from, 0); i <= std::min(to, count - 1); ++i) {
-          ++total;
-          blind += unknown(cause[i]) ? 1 : 0;
-        }
-        if (total > 0 && 2 * blind >= total && cr.run.lo - m.run.hi <= mergeUnknownGap &&
-            cr.run.hi - m.run.lo <= spec.mergeWidthMax) {
-          m.run.hi = cr.run.hi;
-          m.run.hiComplete = cr.run.hiComplete;
-          m.run.completeEdges = m.run.completeEdges && cr.run.completeEdges;
-          m.run.peak = std::max(m.run.peak, cr.run.peak);
-          m.run.parts += cr.run.parts;
-          m.hiCause = cr.hiCause;
-          m.hiCaliper = cr.hiCaliper;
-          continue;
-        }
-      }
-      merged.push_back(cr);
+    for (const auto& [first, last] :
+         mergeAcrossGaps(&plain, background, half, mergeUnknownGap, spec.mergeWidthMax)) {
+      ColorRun m = runs[first];
+      m.run = plain[merged.size()];
+      m.hiCause = runs[last].hiCause;
+      m.hiCaliper = runs[last].hiCaliper;
+      merged.push_back(m);
     }
     Json js = Json::array();
     for (const ColorRun& cr : merged) {
@@ -213,7 +200,7 @@ void registerColorRuns(Registry& r) {
       "- 每站给出 infoFraction（有信息的采样占比）与 unknownSpans[{lo, hi, cause}]（cause = highlight / dark / outside）；\n"
       "- 每段给出两条边外侧是什么（loCause / hiCause = edge 真边 / caliper 卡尺端点 / highlight / dark / outside）、"
       "段内有效采样的平均得分 meanScore 与段内无信息的宽度 unknownWidth；\n"
-      "- 两段之间缝里的采样过半是高光 / 暗区、缝 ≤ mergeUnknownGap、合并后 ≤ mergeWidthMax 时并成一段（湿胶被高光劈开）。\n"
+      "- 两段之间缝里明确是背景的采样（有信息且得分 < segmentMin / 2）不过半、缝 ≤ mergeUnknownGap、合并后 ≤ mergeWidthMax 时并成一段（湿胶被高光劈开）。\n"
       "输出 glue.LateralRuns 的超集（source = color；edgeLo、edgeHi、depth、sharpness 为 null，level 恒为 1）。"
       "不按宽度筛、不挑段、不判有无胶。";
   op.inputs = {
@@ -249,8 +236,10 @@ void registerColorRuns(Registry& r) {
       rangedFloat("mergeGap", "Merge Gap", 8.0, "px",
                   "合并缝（不看缝里是什么）：胶面上没饱和的镜面反光会把胶劈成两段。", 0.0, kOpen,
                   true),
-      rangedFloat("mergeUnknownGap", "Merge Unknown Gap", 16.0, "px",
-                  "两段之间缝里的采样过半是高光 / 暗区时，缝不超过它就合并。", 0.0, kOpen, true),
+      rangedFloat(
+          "mergeUnknownGap", "Merge Unknown Gap", 16.0, "px",
+          "两段之间缝里明确是背景的采样（有信息且得分 < segmentMin / 2）不过半时，缝不超过它就合并（湿胶中间的反光带）。",
+          0.0, kOpen, true),
       rangedFloat("mergeWidthMax", "Merge Width Max", 90.0, "px", "合并后不宽于它才合并。", 1.0,
                   kOpen, true),
   };

@@ -72,6 +72,7 @@ struct ColorModel {
   std::array<double, 3> glueLuma{0, 0, 0}; ///< 胶亮度的 P5 / P50 / P95
   std::vector<Gauss2> background;
   ColorStats stats;
+  bool hasStats = true; ///< 读进来的精简模型没有 stats：能打分，不能当 prior
   bool usable() const { return stats.glueN >= 2 && !background.empty(); }
 };
 
@@ -102,6 +103,14 @@ struct ColorMaps {
 };
 /// roi 宽高 ≤ 0 = 整幅。roi 与图像不相交时 frame 为空。行按 threads 个线程分块并行，结果与线程数无关。
 ColorMaps colorMaps(const cv::Mat& rgb, const ColorModel& m, cv::Rect roi, int threads = 1);
+
+/// 卡尺（caliperRuns 的采样：t = −half + 0.5·i，background[i] 标出「明确是背景」的采样：有信息且得分 < segmentMin / 2）
+/// 上的相邻两段，缝里明确是背景的采样不过半、缝 ≤ gap、合并后 ≤ widthMax 时并成一段。湿胶中间的反光带：芯饱和（无信息）、
+/// 四周发白却没饱和（胶色混白光，得分在 0.2–0.5 之间），两半相邻的边是真边；胶旁的胶丝隔着真背景（得分≈ 0），不并。
+/// 原地改 runs，返回每个输出段由哪几个输入段（首、末下标）合成。
+std::vector<std::pair<std::size_t, std::size_t>>
+mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, double half,
+                double gap, double widthMax);
 
 /// 卡尺上一个采样无信息的原因。
 enum class ColorCause { None, Highlight, Dark, Outside };
@@ -170,6 +179,7 @@ struct ColorTrackSpec {
   double steadyIqrRatio = 0.3;
   double dirWindow = 48;
   double infoMin = 0.5;
+  double mergeUnknownGap = 16; ///< 同 glue.color_runs：被高光 / 暗区隔开的两段并成一段再挑胶点
 };
 
 struct ColorTrackResult {
@@ -182,8 +192,8 @@ struct ColorTrackResult {
   double stoppedAt = std::numeric_limits<double>::quiet_NaN();
 };
 
-/// trackBead 的彩色版：在得分图上找段，没有陡度门与退回射线；接受窗里有效采样不到 infoMin 且没找到胶的一步
-/// 是「无信息」，不计入 maxGap。
+/// trackBead 的彩色版：在得分图上找段（先按 mergeAcrossGaps 把被反光带隔开的两段并起来，胶点取合并段的中点），
+/// 没有陡度门与退回射线；接受窗里有效采样不到 infoMin 且没找到胶的一步是「无信息」，不计入 maxGap。
 ColorTrackResult colorTrack(const Field& score, const ColorTrackSpec& spec, double headingDeg);
 
 } // namespace lyflow::packs::glue

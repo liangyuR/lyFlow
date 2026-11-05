@@ -627,6 +627,41 @@ ColorMaps colorMaps(const cv::Mat& rgb, const ColorModel& m, cv::Rect roi, int t
   return out;
 }
 
+std::vector<std::pair<std::size_t, std::size_t>>
+mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, double half,
+                double gap, double widthMax) {
+  constexpr double kRes = 0.5;
+  const int count = static_cast<int>(background.size());
+  std::vector<Run> out;
+  std::vector<std::pair<std::size_t, std::size_t>> groups;
+  for (std::size_t k = 0; k < runs->size(); ++k) {
+    const Run& r = (*runs)[k];
+    if (!out.empty()) {
+      Run& m = out.back();
+      const int from = static_cast<int>(std::floor((m.hi + half) / kRes + 1e-6)) + 1;
+      const int to = static_cast<int>(std::ceil((r.lo + half) / kRes - 1e-6)) - 1;
+      int bg = 0, total = 0;
+      for (int i = std::max(from, 0); i <= std::min(to, count - 1); ++i) {
+        ++total;
+        bg += background[static_cast<std::size_t>(i)] ? 1 : 0;
+      }
+      if (total > 0 && 2 * bg <= total && r.lo - m.hi <= gap && r.hi - m.lo <= widthMax) {
+        m.hi = r.hi;
+        m.hiComplete = r.hiComplete;
+        m.completeEdges = m.completeEdges && r.completeEdges;
+        m.peak = std::max(m.peak, r.peak);
+        m.parts += r.parts;
+        groups.back().second = k;
+        continue;
+      }
+    }
+    out.push_back(r);
+    groups.emplace_back(k, k);
+  }
+  *runs = std::move(out);
+  return groups;
+}
+
 const char* causeName(ColorCause c) {
   switch (c) {
   case ColorCause::Highlight:
@@ -936,6 +971,12 @@ bool readColorModel(const Json& j, ColorModel* out, std::string* why) {
       return fail("background 的分量不合格（weight > 0、cov 对称正定、intensity > 0）");
     m.background.push_back(x);
   }
+  // 生产用的精简模型可以不带 stats（只能打分，不能当 prior 累加）
+  if (!j.contains("stats") || j["stats"].is_null()) {
+    m.hasStats = false;
+    *out = std::move(m);
+    return true;
+  }
   const Json st = j.value("stats", Json());
   const Json sg = st.value("glue", Json());
   const Json sb = st.value("background", Json());
@@ -1002,6 +1043,15 @@ ColorTrackResult colorTrack(const Field& R, const ColorTrackSpec& spec, double h
     if (!stopped) {
       const bool afterGap = !out.points.empty() && s - lastFound > spec.gapSteps * spec.coarseStep;
       std::vector<Run> rs = caliperRuns(R, p, n, spec.searchHalf, spec.runs);
+      // 胶中间一条反光带把胶劈成两半时，只跟其中一半，下一步就偏出半个胶宽：先并回来
+      std::vector<char> background(
+          static_cast<std::size_t>(std::floor(2.0 * spec.searchHalf / 0.5 + 1e-9)) + 1);
+      for (std::size_t i = 0; i < background.size(); ++i) {
+        const double x = R.at(p + n * (-spec.searchHalf + 0.5 * static_cast<double>(i)));
+        background[i] = x >= 0.0 && x < 0.5 * spec.runs.segmentMin;
+      }
+      mergeAcrossGaps(&rs, background, spec.searchHalf, spec.mergeUnknownGap,
+                      spec.runs.mergeWidthMax);
       rs.erase(std::remove_if(rs.begin(), rs.end(),
                               [&](const Run& x) {
                                 return x.width() < spec.widthMin || x.width() > spec.widthMax;

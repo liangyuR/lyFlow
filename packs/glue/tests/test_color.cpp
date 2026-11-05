@@ -4,6 +4,7 @@
 // 真实帧的评估走 packs/glue/tools/glue_color_eval.py。
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -545,7 +546,11 @@ TEST_CASE(
       "模型 JSON 填进 color_map 的 model 参数，得分图与接端口逐位相同；roi 那一块与整幅逐位相同") {
     const ColorRun ported = modelOf(colorParams(sc), img);
     ColorParams p = colorParams(sc);
-    p.map["model"] = ported.model.dump();
+    // 生产用的精简模型：只留 spec 与高斯（stats、train、quality 都去掉），打分照样逐位相同
+    Json compact = ported.model;
+    for (const char* k : {"stats", "train", "quality"})
+      compact.erase(k);
+    p.map["model"] = compact.dump();
     p.map["roi"] = {100, 80, 150, 120};
     Json doc = makeGraph({N{"n_load", "io.load_image", Json{{"source", "inputs"}}},
                           N{"n_map", "glue.color_map", p.map}},
@@ -604,6 +609,25 @@ TEST_CASE(
   broken["background"] = Json::array();
   CHECK(errorsOf(mapGraph(Json{{"model", broken.dump()}})) == model);
   CHECK(errorsOf(mapGraph(Json{{"model", r.model.dump()}})).empty());
+  // 精简模型（不带 stats）能打分，不能当 prior 累加
+  Json compact = r.model;
+  compact.erase("stats");
+  CHECK(errorsOf(mapGraph(Json{{"model", compact.dump()}})).empty());
+  {
+    OpCall line;
+    REQUIRE(line.run("glue.polyline", {{"points", Value::text(taughtLine(sc))}}).ok);
+    Record prior;
+    prior.type = glue::kColorModelType;
+    prior.data = compact;
+    OpCall call;
+    call.inputs["image"] = Data::image(imageOf(img));
+    call.inputs["line"] = line.out("line");
+    call.inputs["prior"] = Data::record(prior);
+    const Status st = call.run("glue.color_model");
+    CHECK_FALSE(st.ok);
+    CHECK(st.code == "bad_input");
+    CHECK(st.portName == "prior");
+  }
   CHECK(errorsOf(mapGraph(Json{{"model", r.model.dump()}, {"roi", {0, 0, 10, 0}}})) ==
         std::vector<std::string>{"roi"});
 
@@ -627,53 +651,89 @@ TEST_CASE(
   CHECK(errorsOf(Json::parse(in)).empty());
 }
 
-// 防：彩色跟踪把高光挡住的几步算进 maxGap（跟到一半停下、后半段胶路外推跑偏），覆盖率把无信息当没找到。
-TEST_CASE("glue 彩色：color_fan → color_track 跟圆弧胶，高光横穿两步 —— coverageInformative ≥ 0.9、"
-          "无信息步不计 maxGap、拟合胶路贴着真胶") {
+// 防：彩色跟踪把高光挡住的几步算进 maxGap（跟到一半停下、后半段胶路外推跑偏），覆盖率把无信息当没找到；
+// 以及湿胶中间一条反光带把胶劈成两半时只跟其中一半，胶点偏出半个胶宽、拟合胶路漂到胶边上（现场 cam3 s169 / s176）。
+TEST_CASE("glue 彩色：color_fan → color_track 跟圆弧胶 —— 高光横穿两步：coverageInformative ≥ 0.9、"
+          "无信息步不计 maxGap；中间一条反光带：胶点取合并段中点、不跟半条；拟合胶路贴着真胶") {
+  struct Tracked {
+    Json track, line;
+  };
+  const auto runTrack = [](const ColorScene& sc, const ColorScene& teach, const Json& extra) {
+    ColorParams p = colorParams(teach);
+    p.line["points"] = taughtLine(teach);
+    const Json anchor = {sc.start.x, sc.start.y};
+    Json track = {{"anchor", anchor}, {"zone", {40, 330}}, {"bearingRange", {-130, 0}},
+                  {"maxGap", 12},     {"widthMax", 40},    {"searchHalf", 40}};
+    track.update(extra);
+    Json doc =
+        makeGraph({N{"n_teach", "io.load_image", Json{{"source", "inputs"}}},
+                   N{"n_load", "io.load_image", Json{{"source", "inputs"}}},
+                   N{"n_line", "glue.polyline", p.line}, N{"n_model", "glue.color_model", p.model},
+                   N{"n_map", "glue.color_map", Json::object()},
+                   N{"n_fan", "glue.color_fan",
+                     Json{{"anchor", anchor}, {"sector", {-130, 0}}, {"radial", {40, 120}}}},
+                   N{"n_track", "glue.color_track", track}},
+                  {E{"n_teach.image", "n_model.image"}, E{"n_line.line", "n_model.line"},
+                   E{"n_load.image", "n_map.image"}, E{"n_model.model", "n_map.model"},
+                   E{"n_map.maps", "n_fan.maps"}, E{"n_map.maps", "n_track.maps"},
+                   E{"n_fan.scan", "n_track.fan"}});
+    Session s(doc, {}, {}, false, 0, false,
+              {exec::InjectedInput{"n_teach", "image", Data::image(imageOf(render(teach)))},
+               exec::InjectedInput{"n_load", "image", Data::image(imageOf(render(sc)))}});
+    REQUIRE(s.wait().runStatus() == "ok");
+    Tracked t;
+    Data d;
+    REQUIRE(exec::ResultStore::instance().get(s.runId(), "n_track", "track", d));
+    t.track = recordOf(d);
+    REQUIRE(exec::ResultStore::instance().get(s.runId(), "n_track", "line", d));
+    t.line = recordOf(d);
+    return t;
+  };
+  const auto lineOffset = [](const ColorScene& sc, const Json& line, bool max) {
+    std::vector<double> dist;
+    for (const Json& q : line["points"]) {
+      double along, across;
+      coords(sc, q[0].get<double>(), q[1].get<double>(), &along, &across);
+      dist.push_back(std::fabs(across));
+    }
+    return max ? *std::max_element(dist.begin(), dist.end()) : medianOf(dist);
+  };
   ColorScene sc;
   sc.curvature = 1.0 / 300.0;
-  sc.beadWidth = 18;
   sc.length = 360;
-  sc.highlights = {{196, 214}};
-  const cv::Mat img = render(sc);
-  ColorScene teach = sc;
-  teach.highlights.clear();
-  ColorParams p = colorParams(teach);
-  p.line["points"] = taughtLine(teach);
-  const Json anchor = {sc.start.x, sc.start.y};
-  const Json track = {{"anchor", anchor}, {"zone", {40, 330}}, {"bearingRange", {-130, 0}},
-                      {"maxGap", 12},     {"widthMax", 40},    {"searchHalf", 40}};
-  Json doc =
-      makeGraph({N{"n_teach", "io.load_image", Json{{"source", "inputs"}}},
-                 N{"n_load", "io.load_image", Json{{"source", "inputs"}}},
-                 N{"n_line", "glue.polyline", p.line}, N{"n_model", "glue.color_model", p.model},
-                 N{"n_map", "glue.color_map", Json::object()},
-                 N{"n_fan", "glue.color_fan",
-                   Json{{"anchor", anchor}, {"sector", {-130, 0}}, {"radial", {40, 120}}}},
-                 N{"n_track", "glue.color_track", track}},
-                {E{"n_teach.image", "n_model.image"}, E{"n_line.line", "n_model.line"},
-                 E{"n_load.image", "n_map.image"}, E{"n_model.model", "n_map.model"},
-                 E{"n_map.maps", "n_fan.maps"}, E{"n_map.maps", "n_track.maps"},
-                 E{"n_fan.scan", "n_track.fan"}});
-  Session s(doc, {}, {}, false, 0, false,
-            {exec::InjectedInput{"n_teach", "image", Data::image(imageOf(render(teach)))},
-             exec::InjectedInput{"n_load", "image", Data::image(imageOf(img))}});
-  REQUIRE(s.wait().runStatus() == "ok");
-  Data d;
-  REQUIRE(exec::ResultStore::instance().get(s.runId(), "n_track", "track", d));
-  const Json tr = recordOf(d);
-  REQUIRE(exec::ResultStore::instance().get(s.runId(), "n_track", "line", d));
-  const Json line = recordOf(d);
-  CHECK(tr["valid"] == true);
-  CHECK(tr["fitted"] == true);
-  CHECK(tr["unknownSteps"].get<int>() >= 1);
-  CHECK(tr["stoppedAt"].is_null());
-  CHECK(tr["coverageInformative"].get<double>() >= 0.9);
-  std::vector<double> dist;
-  for (const Json& q : line["points"]) {
-    double along, across;
-    coords(sc, q[0].get<double>(), q[1].get<double>(), &along, &across);
-    dist.push_back(std::fabs(across));
+  SUBCASE("高光横穿 s ∈ [196, 214]") {
+    sc.beadWidth = 18;
+    sc.highlights = {{196, 214}};
+    ColorScene teach = sc;
+    teach.highlights.clear();
+    const Tracked t = runTrack(sc, teach, Json::object());
+    CHECK(t.track["valid"] == true);
+    CHECK(t.track["fitted"] == true);
+    CHECK(t.track["unknownSteps"].get<int>() >= 1);
+    CHECK(t.track["stoppedAt"].is_null());
+    CHECK(t.track["coverageInformative"].get<double>() >= 0.9);
+    CHECK(lineOffset(sc, t.line, false) <= 1.5);
   }
-  CHECK(medianOf(dist) <= 1.5);
+  SUBCASE("湿胶中间一条反光带（芯饱和、两侧各 3 px 没饱和的发白光晕）") {
+    sc.beadWidth = 30;
+    sc.streakLo = -3;
+    sc.streakHi = 4;
+    sc.streakHalo = 3;
+    ColorScene teach = sc;
+    teach.streakLo = teach.streakHi = NAN;
+    const auto halves = [](const Json& track) {
+      std::size_t narrow = 0;
+      for (const Json& q : track["points"])
+        narrow += q["width"].get<double>() < 0.7 * 30 ? 1 : 0;
+      return static_cast<double>(narrow) / std::max<std::size_t>(track["points"].size(), 1);
+    };
+    const Tracked t = runTrack(sc, teach, Json::object());
+    CHECK(t.track["coverageInformative"].get<double>() >= 0.9);
+    CHECK(halves(t.track) <= 0.1);
+    CHECK(lineOffset(sc, t.line, false) <= 1.5);
+    CHECK(lineOffset(sc, t.line, true) <= 4.0);
+    // 不合并时胶点大多是半条胶（这就是现场漂到胶边上的起因）
+    const Tracked split = runTrack(sc, teach, Json{{"mergeUnknownGap", 0}});
+    CHECK(halves(split.track) > 0.5);
+  }
 }

@@ -423,11 +423,13 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 - `spec` 是像素级参数：建模与出图用同一份，`color_map` 只读模型里的这一份。
 - `glue` / `background` 由 `stats` 拟合：胶取矩；背景从二维直方图做确定性的 EM（初始中心按「计数 × 到已选中心的最小距离²」逐个挑，硬分 10 轮、软 EM 30 轮，
   权重 < 2 % 的分量去掉，按权重降序）。`stats` 全是可相加的量：接 `prior` 时两份 `stats` 逐项相加再拟合。
+- **生产用的精简模型**：`stats`、`train`、`quality` 都可以去掉（只留 `version`、`space`、`spec`、`glue`、`background`，几百字节），`color_map` 打分逐位相同；
+  不带 `stats` 的模型不能当 `prior`（`bad_input`）。宿主宜在配方里存一份完整模型（以后累加用）和一份精简模型（逐帧填 `n_map.model`）。
 - `quality` **只测量不判定**（够不够用由宿主判）：`usable` = 胶样本 ≥ 2 且至少一个背景分量；`separation` = 胶与各背景分量在合并协方差（+ chromaFloor²）下
   两均值马氏距离的最小值；`glueSpread` = 胶协方差最大特征值的平方根；`saturatedFraction` / `darkFraction` / `glueLikeFraction` 是两条取样带里高光 /
   暗区 / 背景带里像胶的样本占比（分母是这些样本加上进了模型的样本）；`centerShift` 是重新居中后各站 |偏移| 的中位数（px），`recentered` 是最后一轮量到中心的站占比
   （这两个只看这一帧）。
-- `color_map` 读模型时校验：version、space、spec 取值、胶与每个背景分量的 cov 对称正定、intensity > 0、背景 1–3 个分量、stats 完整；不合格是 `bad_param`（参数）或 `bad_input`（端口）。
+- `color_map` 读模型时校验：version、space、spec 取值、胶与每个背景分量的 cov 对称正定、intensity > 0、背景 1–3 个分量、带 stats 时 stats 完整；不合格是 `bad_param`（参数）或 `bad_input`（端口）。
 
 ### 1.3.1 `glue.color_model` 胶色建模
 
@@ -495,7 +497,9 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 
 端口同 `glue.track_path`（`maps` 换成 `Bundle<glue.ColorMaps>`，`fan` 接 `glue.color_fan.scan`）。逐步的做法同第 3 节，差别：
 
-- 卡尺在得分图上分段（`split` 默认 `connected`、`segmentMin` 0.3、`peakMin` 0.6、`mergeGap` 8、合并不查峰值比）；
+- 卡尺在得分图上分段（`split` 默认 `connected`、`segmentMin` 0.3、`peakMin` 0.6、`mergeGap` 8、合并不查峰值比），再按 `mergeUnknownGap`
+  （默认 16 px，规则同第 1.3.5 节）把被反光带隔开的两段并成一段，胶点取合并段的中点 —— 否则湿胶中间一条反光带把胶劈成两半时只跟其中一半，
+  胶点偏出半个胶宽，拟合胶路漂到胶边上；
 - 没有陡度门、不退回射线：去掉 `sharpMin`、`edgeProbe`、`backgroundProbe`、`rayFallback`、`rayFallbackCoverage`、`reacquirePeakRatio`、`mergePeakRatio` 这几个参数；
 - **无信息步**：这一步没找到胶、且接受窗 t ∈ ±min(acceptOffsetRatio × widthMax, searchHalf) 上（每 0.5 px）有效采样占比 < `infoMin`（默认 0.5，0–1）。
   无信息步走过的长度不计入 `maxGap`：停止条件是「s − 上一个胶点的 s − 其间无信息步的长度 > maxGap」。
@@ -513,7 +517,7 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 | `segmentMin` | float | — | 0.3 | 0–1 | 分段门限：得分 > 它的相邻采样连成一段 |
 | `peakMin` | float | — | 0.6 | 0–1 | 段的得分峰值下限 |
 | `mergeGap` | float | px | 8 | ≥ 0 | 合并缝（不看缝里是什么；胶面上没饱和的镜面反光会把胶劈开）；合并不查峰值比 |
-| `mergeUnknownGap` | float | px | 16 | ≥ 0 | 两段之间缝里的采样**过半**是高光 / 暗区（湿胶反光点的芯饱和、四周一圈发白却没饱和，那一圈有信息但得分低，两半相邻的边因此是真边）、缝 ≤ 它、合并后 ≤ mergeWidthMax 时并成一段（湿胶被高光劈开） |
+| `mergeUnknownGap` | float | px | 16 | ≥ 0 | 两段之间缝里**明确是背景**的采样（有信息且得分 < segmentMin / 2）不过半、缝 ≤ 它、合并后 ≤ mergeWidthMax 时并成一段。湿胶中间的反光带：芯饱和（无信息）、四周发白却没饱和（胶色混白光，得分在 0.2–0.5 之间，两半相邻的边因此是真边），都不算背景；胶旁的胶丝隔着真背景（得分≈ 0），不并 |
 
 分段、半高取边、`mergeGap` 合并同第 4 节（`caliperRuns`），然后再做 `mergeUnknownGap` 合并。输出 `glue.LateralRuns` 的超集：
 
@@ -552,14 +556,15 @@ GS 判每站的建议读法（判定在 GS）：中心窗里有段 → 有胶（
 
 | 段 | 帧 | 每站有段 | 胶宽与参考的中位差 / \|差\| P90 | 说明 |
 |---|---|---|---|---|
-| cam3 上行胶（左暗背景、右亮铝） | #111–190 | ≥ 95.7 %（只有 2 帧各缺 ≤ 4.3 % 的站） | −0.13 / 0.35 mm | 灰度链路在 #104–124、155、168–172、175、184 报的假断胶全部消失；#104–110 胶刚出来、只有胶丝 |
-| cam1 左下行胶（铸件） | #21–47 | ≥ 86 % | +0.20 / 0.30 mm | #16–20 胶条还短 |
+| cam3 上行胶（左暗背景、右亮铝） | #111–190 | ≥ 95.7 %（只有 1 帧缺 4.3 % 的站） | −0.11 / 0.27 mm | 灰度链路在 #104–124、155、168–172、175、184 报的假断胶全部消失；#104–110 胶刚出来、只有胶丝 |
+| cam1 左下行胶（铸件） | #21–47 | ≥ 92 % | +0.20 / 0.30 mm | #16–20 胶条还短 |
 | cam3 左行胶 | #21–47 | ≥ 92 % | +0.24 / 0.35 mm | 同上 |
 | 无胶段（只有胶丝） | #48–103 | 彩色跟踪覆盖率 0 | — | 沿射线碰到的胶丝宽 0.7–1.1 mm，宿主按宽度下限滤掉 |
 
 调参要点（都是宿主给的参数）：`color_track` 的 `widthMin` 按期望胶宽给（约 0.4 倍，这里 26 px），否则出胶点旁的细胶丝会把跟踪拐走；检测区从出胶点外约 5 mm 起
 （喷嘴、胶丝、胶根挤在一起的那一截不跟），`widthMax` 约 1.5 倍期望胶宽。胶边紧贴饱和的铝面时，那条边的 `loCause` / `hiCause` 是 `highlight`，
-高光膨胀与平滑会吃掉约 3 px，宽度在这些站是下限（#167–171 比参考窄 0.6–0.8 mm）。
+高光膨胀与平滑会吃掉约 3 px，宽度在这些站是下限（#170 比参考窄 0.7 mm）。#160–190 上段胶面有一条沿中线的反光带，跟踪按合并段的中点走，
+拟合胶路离颜色掩膜中心线的偏差每帧中位 ≤ 0.9 px、P90 ≤ 3.8 px（只在出胶点外 6–10 mm 那一截大些，那里参考的中心线被旁边的胶丝拉偏）。
 
 耗时（本机 RelWithDebInfo）：`color_map` + `color_runs`（站距 4、卡尺半长 66）在 cam1 的 roi（约 725×671）上 p50 8.7 ms，cam3（约 596×264）p50 4.0 ms；
 `color_map` 整幅 1280×1024 单线程约 75 ms、8 线程约 20 ms；`color_model` 一次约 20 ms。

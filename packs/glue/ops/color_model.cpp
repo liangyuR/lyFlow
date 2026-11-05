@@ -60,6 +60,9 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     if (!rec || rec->type != kColorModelType || !readColorModel(rec->data, &prior, &why))
       return Status::Error(Phase::Execute, "bad_input", "prior 不是合格的 glue.ColorModel：" + why,
                            {}, "prior");
+    if (!prior.hasStats)
+      return Status::Error(Phase::Execute, "bad_input",
+                           "prior 不带 stats（生产用的精简模型），不能累加", {}, "prior");
     if (!sameSpec(prior.spec, spec.pixel))
       return Status::Error(Phase::Execute, "bad_input",
                            "prior 的像素参数（blurSigma、satLevel……）与本节点不同，统计不能相加",
