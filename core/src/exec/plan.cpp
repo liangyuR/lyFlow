@@ -446,6 +446,29 @@ bool valueEquals(const Value& a, const Value& b) {
   return false;
 }
 
+void hashResolvedPaths(Hasher& hash, const OperatorDesc& op, const ParamView& params) {
+  for (const Param& p : op.params) {
+    if (p.type != ParamType::Path || params.text(p.name).empty())
+      continue;
+    hash.add(p.name);
+    try {
+      const auto resolved = params.path(p.name);
+      std::error_code ec;
+      const auto absolute = std::filesystem::absolute(resolved, ec);
+      if (ec) {
+        hash.add(resolved.generic_u8string());
+      } else {
+        const auto canonical = std::filesystem::weakly_canonical(absolute, ec);
+        hash.add((ec ? absolute : canonical).generic_u8string());
+      }
+    } catch (const std::filesystem::filesystem_error&) {
+      const auto& base = params.baseDir().native();
+      hash.add(params.text(p.name));
+      hash.addBytes(base.data(), base.size() * sizeof(std::filesystem::path::value_type));
+    }
+  }
+}
+
 } // namespace
 
 /// 条件未设置视为成立。引用了不存在的参数也视为成立 —— 那是 Registry::validate()
@@ -1083,13 +1106,15 @@ bool buildPlan(const Registry& registry, const RawGraph& input, const BuildOptio
     // bypass 改变的是结果本身，所以必须进键 —— 不然静音再取消静音会拿到旧结果。
     h.add(pn.bypass ? std::string("bypass") : std::string());
     h.add(canonicalParamsJson(pn.params));
+    // 同一相对路径在不同图目录下指向不同文件，不能只靠原始参数与 size/mtime 区分。
+    ParamView view(pn.params, options.baseDir);
+    hashResolvedPaths(h, *pn.op, view);
     // 注入的数据取代了 compute 的结果，所以它必须进键，否则换一片云会命中旧结果。
     {
       auto injected = options.providedDigest.find(pn.id);
       h.add(injected == options.providedDigest.end() ? std::string() : injected->second);
     }
     if (pn.op->externalKey) {
-      ParamView view(pn.params, options.baseDir);
       h.add(pn.op->externalKey(view));
     } else {
       h.add(std::string{});

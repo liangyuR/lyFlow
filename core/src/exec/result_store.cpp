@@ -19,6 +19,28 @@ std::string entryKey(const std::string& cacheKey, const std::string& port) {
   return cacheKey + ":" + port;
 }
 
+struct OutputSnapshot {
+  std::string port;
+  Data data;
+  std::size_t bytes;
+};
+
+OutputInfo snapshotInfo(const OutputSnapshot& snapshot) {
+  const Data& data = snapshot.data;
+  return OutputInfo{snapshot.port, data.typeName(), data.elementCount(), snapshot.bytes,
+                    data.valueJson()};
+}
+
+void fillSnapshotInfos(const std::vector<OutputSnapshot>& snapshots,
+                       std::vector<OutputInfo>& infos) {
+  infos.clear();
+  infos.reserve(snapshots.size());
+  for (const auto& snapshot : snapshots) {
+    infos.push_back(snapshotInfo(snapshot));
+    appendBundleFieldInfos(snapshot.port, snapshot.data, infos);
+  }
+}
+
 } // namespace
 
 bool splitFieldAddress(const std::string& address, std::string* port, std::string* field) {
@@ -299,25 +321,27 @@ bool ResultStore::reuse(const std::string& runId, const std::string& nodeId,
     counters_.misses += 1;
     return false;
   }
-  std::lock_guard<std::mutex> lock(mu_);
-  for (auto& [port, data] : fromDisk)
-    insertLocked(cacheKey, port, std::move(data));
-  if (!completeLocked(cacheKey, ports)) {
-    counters_.misses += 1;
-    return false;
+  std::vector<OutputSnapshot> snapshots;
+  snapshots.reserve(ports.size());
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    for (auto& [port, data] : fromDisk)
+      insertLocked(cacheKey, port, std::move(data));
+    if (!completeLocked(cacheKey, ports)) {
+      counters_.misses += 1;
+      return false;
+    }
+    for (const auto& port : ports) {
+      const std::string key = entryKey(cacheKey, port);
+      const Entry& e = byKey_.at(key);
+      snapshots.push_back(OutputSnapshot{port, e.data, e.bytes});
+      touchLocked(key);
+      index_[runId][nodeId][port] = key;
+    }
+    counters_.hits += 1;
+    evictLocked();
   }
-  infos.clear();
-  for (const auto& port : ports) {
-    const std::string key = entryKey(cacheKey, port);
-    const Entry& e = byKey_.at(key);
-    infos.push_back(
-        OutputInfo{port, e.data.typeName(), e.data.elementCount(), e.bytes, e.data.valueJson()});
-    appendBundleFieldInfos(port, e.data, infos);
-    touchLocked(key);
-    index_[runId][nodeId][port] = key;
-  }
-  counters_.hits += 1;
-  evictLocked();
+  fillSnapshotInfos(snapshots, infos);
   return true;
 }
 
@@ -341,28 +365,31 @@ bool ResultStore::attach(const std::string& runId, const std::string& nodeId,
 
 std::vector<OutputInfo> ResultStore::outputsOf(const std::string& runId,
                                                const std::string& nodeId) const {
-  std::lock_guard<std::mutex> lock(mu_);
-  std::vector<OutputInfo> out;
-  auto run = index_.find(runId);
-  if (run == index_.end())
-    return out;
-  auto node = run->second.find(nodeId);
-  if (node == run->second.end())
-    return out;
-  for (const auto& kv : node->second) {
-    auto data = byKey_.find(kv.second);
-    if (data == byKey_.end())
-      continue;
-    out.push_back(OutputInfo{kv.first, data->second.data.typeName(),
-                             data->second.data.elementCount(), data->second.bytes,
-                             data->second.data.valueJson()});
-    appendBundleFieldInfos(kv.first, data->second.data, out);
+  std::vector<OutputSnapshot> snapshots;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto run = index_.find(runId);
+    if (run == index_.end())
+      return {};
+    auto node = run->second.find(nodeId);
+    if (node == run->second.end())
+      return {};
+    snapshots.reserve(node->second.size());
+    for (const auto& kv : node->second) {
+      auto data = byKey_.find(kv.second);
+      if (data != byKey_.end())
+        snapshots.push_back(OutputSnapshot{kv.first, data->second.data, data->second.bytes});
+    }
   }
-  return out;
+  std::vector<OutputInfo> infos;
+  fillSnapshotInfos(snapshots, infos);
+  return infos;
 }
 
 bool ResultStore::outputInfo(const std::string& runId, const std::string& nodeId,
                              const std::string& port, OutputInfo& out) const {
+  OutputSnapshot snapshot{port, {}, 0};
+  bool bundleField = false;
   {
     std::lock_guard<std::mutex> lock(mu_);
     auto run = index_.find(runId);
@@ -376,17 +403,25 @@ bool ResultStore::outputInfo(const std::string& runId, const std::string& nodeId
       auto data = byKey_.find(entry->second);
       if (data == byKey_.end())
         return false;
-      out = OutputInfo{port, data->second.data.typeName(), data->second.data.elementCount(),
-                       data->second.bytes, data->second.data.valueJson()};
-      return true;
+      snapshot.data = data->second.data;
+      snapshot.bytes = data->second.bytes;
+    } else {
+      std::string bundlePort, field;
+      Data whole;
+      if (!splitFieldAddress(port, &bundlePort, &field) ||
+          !getLocked(runId, nodeId, bundlePort, whole))
+        return false;
+      const Bundle* bundle = whole.asBundle();
+      const Data* value = bundle ? bundle->field(field) : nullptr;
+      if (!value)
+        return false;
+      snapshot.data = *value;
+      bundleField = true;
     }
   }
-  // `<port>.<field>`：图输出与 summary 指向 Bundle 字段时走这里（m8-plan L3）。
-  Data field;
-  if (port.find('.') == std::string::npos || !get(runId, nodeId, port, field))
-    return false;
-  out =
-      OutputInfo{port, field.typeName(), field.elementCount(), field.byteSize(), field.valueJson()};
+  if (bundleField)
+    snapshot.bytes = snapshot.data.byteSize();
+  out = snapshotInfo(snapshot);
   return true;
 }
 
