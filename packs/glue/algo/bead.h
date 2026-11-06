@@ -359,5 +359,9 @@ StationResult measureStations(const cv::Mat& gray, const PolylineView& path, boo
 
 double median(std::vector<double> v);
 double percentile(std::vector<double> v, double q);
+/// 一组点的主方向（PCA），朝向与 fallback 同侧。不到 3 个点返回 fallback。
+P2 principalDirection(const std::vector<P2>& pts, P2 fallback);
+/// 两个角（度）在圆周上的差，∈ [0, 180]。
+double angleDiffDeg(double a, double b);
 
 } // namespace lyflow::packs::glue
