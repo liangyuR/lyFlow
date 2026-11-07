@@ -133,10 +133,23 @@ struct Tensor {
   std::vector<std::int64_t> shape;
   std::vector<float> data;
 
-  /// shape 各维之积。shape 为空时是 0（不是标量 1）。
+  /// shape 各维之积。空形状、非正维度或乘积溢出时为 0。
   std::size_t elementCount() const;
   /// data.size() 与 shape 对得上。
-  bool consistent() const { return data.size() == elementCount(); }
+  bool consistent() const {
+    if (shape.empty())
+      return data.empty();
+    bool emptyAxis = false;
+    for (std::int64_t d : shape) {
+      if (d < 0)
+        return false;
+      emptyAxis = emptyAxis || d == 0;
+    }
+    if (emptyAxis)
+      return data.empty();
+    const std::size_t count = elementCount();
+    return count != 0 && data.size() == count;
+  }
   std::string shapeString() const;
 };
 
@@ -285,11 +298,11 @@ public:
   std::size_t elementCount() const;
 
   /// 给 Inspector / 3D 叠画看的可读 JSON。点云与 Indices 返回空串（太大，走二进制）。
-  /// 图像的逐通道统计要扫整张图：只算一次，同一份 Data 的浅拷贝共用结果（Image 不可变）。
+  /// 图像与张量的统计只算一次，同一份 Data 的浅拷贝共用结果（载荷不可变）。
   std::string valueJson() const;
 
 private:
-  /// 图像 valueJson 的一次性缓存（PR #1 review 留下的一条：结果仓在锁里一遍遍重算整图统计）。
+  /// 图像 JSON 与张量统计的一次性缓存，浅拷贝共用。
   struct ValueCache;
   std::string valueJsonUncached() const;
 

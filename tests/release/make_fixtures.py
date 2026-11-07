@@ -21,9 +21,9 @@ def field(n, value):
     return varint((n << 3) | 2) + varint(len(value)) + value
 
 
-def value_info(name, dims):
+def value_info(name, dims, element_type=1):
     shape = b''.join(field(1, field(2 if isinstance(d, str) else 1, d)) for d in dims)
-    return field(1, name) + field(2, field(1, field(1, 1) + field(2, shape)))
+    return field(1, name) + field(2, field(1, field(1, element_type) + field(2, shape)))
 
 
 def model(node, inputs, outputs, initializer=b''):
@@ -39,7 +39,10 @@ def generate(output):
     pads = field(1, 6) + field(2, 7) + field(8, 'pads') + field(9, struct.pack('<6q', 0, 0, 0, 0, 2, 0))
     node = field(1, 'input') + field(1, 'pads') + field(2, 'output') + field(4, 'Pad')
     (output / 'channels-6-to-8.onnx').write_bytes(model(node, value_info('input', ['N', 6, 1280]), value_info('output', ['N', 8, 1280]), pads))
-    (output / 'provenance.json').write_text(json.dumps({'origin': 'repository-generated synthetic fixtures', 'customerData': False, 'nativeTestModel': 'channels-6-to-8.onnx'}, indent=2), encoding='utf-8')
+    cast_to = field(1, 'to') + field(3, 7) + field(20, 2)
+    cast = field(1, 'input') + field(2, 'output') + field(4, 'Cast') + field(5, cast_to)
+    (output / 'cast-to-int64.onnx').write_bytes(model(cast, value_info('input', ['N', 6, 1280]), value_info('output', ['N', 6, 1280], 7)))
+    (output / 'provenance.json').write_text(json.dumps({'origin': 'repository-generated synthetic fixtures', 'customerData': False, 'nativeTestModel': 'channels-6-to-8.onnx', 'negativeTestModels': ['cast-to-int64.onnx']}, indent=2), encoding='utf-8')
 
 
 if __name__ == '__main__':

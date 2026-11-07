@@ -1,7 +1,9 @@
 #include <doctest/doctest.h>
 
+#include <atomic>
 #include <cstdint>
 #include <string>
+#include <thread>
 
 #include "exec/result_store.h"
 #include "lyflow/c_api.h"
@@ -239,6 +241,194 @@ TEST_CASE("视图的 handle 让借来的数据活过结果仓的清空") {
 
   lyflow_tensor_view_free(&view);
   lyflow_indices_view_free(&ix);
+}
+
+TEST_CASE("结果仓元信息：并发替换 Bundle 时复用和查询各自返回一致快照") {
+  exec::ResultStore& store = exec::ResultStore::instance();
+  store.clear();
+  const auto makeBundle = [](std::int32_t scale) {
+    Tensor t;
+    t.shape = {scale * 256};
+    t.data.resize(static_cast<std::size_t>(t.shape[0]), static_cast<float>(scale));
+    Bundle bundle("test.Metadata");
+    bundle.set("sample", Data::tensor(std::move(t)).withTensorScale(scale));
+    return Data::bundle(std::move(bundle));
+  };
+  const Data half = makeBundle(2);
+  const Data quarter = makeBundle(4);
+  store.put("metadata", "n", "out", "metadata-key", half);
+  std::atomic<bool> start{false};
+  std::atomic<int> failures{0};
+  std::vector<std::vector<exec::OutputInfo>> observed(4);
+  std::vector<std::thread> threads;
+  threads.emplace_back([&] {
+    while (!start.load(std::memory_order_acquire))
+      std::this_thread::yield();
+    for (int i = 0; i < 128; ++i)
+      store.put("metadata", "n", "out", "metadata-key", i % 2 ? half : quarter, true);
+  });
+  for (std::size_t i = 0; i < observed.size(); ++i) {
+    threads.emplace_back([&, i] {
+      while (!start.load(std::memory_order_acquire))
+        std::this_thread::yield();
+      for (int n = 0; n < 32; ++n) {
+        std::vector<exec::OutputInfo> infos;
+        if (n % 4 >= 2) {
+          exec::OutputInfo info;
+          if (!store.outputInfo("metadata", "n", n % 4 == 2 ? "out.sample" : "out", info)) {
+            failures.fetch_add(1, std::memory_order_relaxed);
+            continue;
+          }
+          observed[i].push_back(std::move(info));
+          continue;
+        }
+        if (n % 4 == 0) {
+          if (!store.reuse("metadata-reader-" + std::to_string(i), "n", "metadata-key", {"out"},
+                           infos)) {
+            failures.fetch_add(1, std::memory_order_relaxed);
+            continue;
+          }
+        } else {
+          infos = store.outputsOf("metadata", "n");
+        }
+        if (infos.size() != 2) {
+          failures.fetch_add(1, std::memory_order_relaxed);
+          continue;
+        }
+        const nlohmann::json whole = nlohmann::json::parse(infos[0].valueJson);
+        if (whole["fields"][0]["value"] != nlohmann::json::parse(infos[1].valueJson))
+          failures.fetch_add(1, std::memory_order_relaxed);
+        observed[i].push_back(std::move(infos[1]));
+      }
+    });
+  }
+  start.store(true, std::memory_order_release);
+  for (auto& thread : threads)
+    thread.join();
+  CHECK(failures.load() == 0);
+  for (const auto& reader : observed) {
+    REQUIRE(reader.size() == 32);
+    for (const auto& info : reader) {
+      const nlohmann::json root = nlohmann::json::parse(info.valueJson);
+      const bool bundle = info.type == "Bundle<test.Metadata>";
+      const nlohmann::json j = bundle ? root["fields"][0]["value"] : root;
+      const int scale = j["scale"].get<int>();
+      CHECK((scale == 2 || scale == 4));
+      const auto count = static_cast<std::size_t>(scale * 256);
+      const std::size_t tensorBytes = count * sizeof(float) + sizeof(std::int64_t);
+      if (bundle) {
+        CHECK(info.port == "out");
+        CHECK(info.elementCount == 1);
+        CHECK(info.byteSize == sizeof(Bundle) + std::string("test.Metadata").size() +
+                                   std::string("sample").size() + tensorBytes);
+      } else {
+        CHECK(info.port == "out.sample");
+        CHECK(info.type == "Tensor");
+        CHECK(info.elementCount == count);
+        CHECK(info.byteSize == tensorBytes);
+      }
+      CHECK(j["count"] == count);
+      CHECK(j["mean"] == scale);
+      CHECK(j["min"] == scale);
+      CHECK(j["max"] == scale);
+    }
+  }
+  store.clear();
+}
+
+TEST_CASE("结果仓查询：保持端口和 Bundle 字段顺序，精确端口优先于字段地址") {
+  exec::ResultStore& store = exec::ResultStore::instance();
+  store.clear();
+  const auto measured = [](double value) {
+    Measurement measurement;
+    measurement.value = value;
+    measurement.ok = true;
+    return Data::measurement(std::move(measurement));
+  };
+  Bundle pair("test.Order");
+  pair.set("last", measured(5)).set("first", measured(3));
+  store.put("order", "n", "z", "z-key", measured(10));
+  store.put("order", "n", "pair.first", "exact-key", measured(9));
+  store.put("order", "n", "pair", "pair-key", Data::bundle(std::move(pair)));
+  store.put("order", "n", "a", "a-key", measured(0));
+  const auto infos = store.outputsOf("order", "n");
+  REQUIRE(infos.size() == 6);
+  const std::vector<std::string> ports = {"a",          "pair",       "pair.last",
+                                          "pair.first", "pair.first", "z"};
+  for (std::size_t i = 0; i < infos.size(); ++i)
+    CHECK(infos[i].port == ports[i]);
+  CHECK(nlohmann::json::parse(infos[3].valueJson)["value"] == 3.0);
+  CHECK(nlohmann::json::parse(infos[4].valueJson)["value"] == 9.0);
+  exec::OutputInfo exact, field;
+  REQUIRE(store.outputInfo("order", "n", "pair.first", exact));
+  REQUIRE(store.outputInfo("order", "n", "pair.last", field));
+  CHECK(nlohmann::json::parse(exact.valueJson)["value"] == 9.0);
+  CHECK(nlohmann::json::parse(field.valueJson)["value"] == 5.0);
+  CHECK(store.evict({"exact-key"}, nullptr) == 1);
+  CHECK_FALSE(store.outputInfo("order", "n", "pair.first", exact));
+  CHECK(nlohmann::json::parse(exact.valueJson)["value"] == 9.0);
+  CHECK(store.outputInfo("order", "n", "pair.last", field));
+  CHECK_FALSE(store.outputInfo("order", "n", "pair.", field));
+  CHECK_FALSE(store.outputInfo("order", "n", "pair.missing", field));
+  CHECK(store.outputsOf("order", "missing").empty());
+  store.freeRun("order");
+  CHECK(store.outputsOf("order", "n").empty());
+  CHECK_FALSE(store.outputInfo("order", "n", "pair.last", field));
+  CHECK(nlohmann::json::parse(infos[2].valueJson)["value"] == 5.0);
+  store.clear();
+}
+
+TEST_CASE("结果仓查询：并发 freeRun 或 clear 不复活索引，取得的元信息保留完整快照") {
+  exec::ResultStore& store = exec::ResultStore::instance();
+  for (bool removeAll : {false, true}) {
+    for (int iteration = 0; iteration < 8; ++iteration) {
+      store.clear();
+      Tensor tensor;
+      tensor.shape = {65536};
+      tensor.data.resize(65536, 4.f);
+      Bundle bundle("test.QueryLifetime");
+      bundle.set("sample", Data::tensor(std::move(tensor)).withTensorScale(2));
+      store.put("query-delete", "n", "out", "query-delete-key", Data::bundle(std::move(bundle)));
+      std::atomic<bool> start{false};
+      std::vector<exec::OutputInfo> infos;
+      exec::OutputInfo field;
+      bool found = false;
+      std::thread all([&] {
+        while (!start.load(std::memory_order_acquire))
+          std::this_thread::yield();
+        infos = store.outputsOf("query-delete", "n");
+      });
+      std::thread one([&] {
+        while (!start.load(std::memory_order_acquire))
+          std::this_thread::yield();
+        found = store.outputInfo("query-delete", "n", "out.sample", field);
+      });
+      start.store(true, std::memory_order_release);
+      if (removeAll)
+        store.clear();
+      else
+        store.freeRun("query-delete");
+      all.join();
+      one.join();
+      CHECK(store.outputsOf("query-delete", "n").empty());
+      exec::OutputInfo missing;
+      CHECK_FALSE(store.outputInfo("query-delete", "n", "out.sample", missing));
+      if (!infos.empty()) {
+        REQUIRE(infos.size() == 2);
+        CHECK(nlohmann::json::parse(infos[0].valueJson)["fields"][0]["value"] ==
+              nlohmann::json::parse(infos[1].valueJson));
+        CHECK(nlohmann::json::parse(infos[1].valueJson)["mean"] == 4.0);
+        CHECK(infos[1].elementCount == 65536);
+      }
+      if (found) {
+        const auto value = nlohmann::json::parse(field.valueJson);
+        CHECK(value["mean"] == 4.0);
+        CHECK(value["scale"] == 2);
+        CHECK(field.elementCount == 65536);
+      }
+    }
+  }
+  store.clear();
 }
 
 // ------------------------------------------- 图像（ABI v15，docs/image-plan.md §5.1）

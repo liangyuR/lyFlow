@@ -1,15 +1,16 @@
-// ml.onnx_run：一次 ONNX 前向。会话按「路径 + mtime + 线程数」缓存，
+// ml.onnx_run：一次 ONNX 前向。会话按「路径 + 文件指纹 + 线程数」缓存，
 // 每次运行重新加载十几 MB 的模型撑不住 live preview（ADR-0015）。
 #include <onnxruntime_cxx_api.h>
 
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "ops.h"
+#include "session_cache.h"
 
 namespace lyflow::ops {
 namespace {
@@ -31,9 +32,11 @@ std::string fileStamp(const fs::path& p) {
 struct Cached {
   Ort::Session session;
   Ort::AllocatorWithDefaultOptions allocator;
+  Ort::MemoryInfo inputMemory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
   std::string inputName;
   std::string outputName;
-  std::mutex mutex; // Ort::Session::Run 不是并发安全的
+  std::vector<float> inputScratch;
+  std::mutex mutex;
 
   Cached(Ort::Env& env, const fs::path& model, int threads)
       : session(makeSession(env, model, threads)) {
@@ -54,28 +57,17 @@ Ort::Env& sharedEnv() {
   return env;
 }
 
-std::mutex& cacheMutex() {
-  static std::mutex m;
-  return m;
-}
-
-/// 构造失败返回 nullptr、message 是一句人话；指针归缓存所有。
-Cached* sessionFor(const fs::path& model, int threads, std::string* message) {
+std::shared_ptr<Cached> sessionFor(const fs::path& model, int threads, std::string* message) {
   const std::string stamp = fileStamp(model);
   if (stamp.empty()) {
     *message = "模型文件读不到: " + model.string();
     return nullptr;
   }
-  const std::string key = model.string() + "|" + stamp + "|" + std::to_string(threads);
-
-  static std::unordered_map<std::string, std::unique_ptr<Cached>> cache;
-  std::lock_guard<std::mutex> lock(cacheMutex());
-  auto it = cache.find(key);
-  if (it != cache.end())
-    return it->second.get();
+  const detail::SessionKey key{detail::sessionModelPath(model).generic_u8string(), stamp, threads};
   try {
-    auto made = std::make_unique<Cached>(sharedEnv(), model, threads);
-    return cache.emplace(key, std::move(made)).first->second.get();
+    Ort::Env& env = sharedEnv();
+    static detail::SessionCache<Cached> cache(8);
+    return cache.getOrCreate(key, [&] { return std::make_shared<Cached>(env, model, threads); });
   } catch (const std::exception& e) {
     *message = "加载模型失败 " + model.string() + ": " + e.what();
     return nullptr;
@@ -106,7 +98,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
 
   const int threads = static_cast<int>(std::max<std::int64_t>(1, params.integer("intraOpThreads")));
   std::string message;
-  Cached* cached = sessionFor(model, threads, &message);
+  const auto cached = sessionFor(model, threads, &message);
   if (cached == nullptr) {
     return Status::Error(Phase::Execute, "bad_param", message, "modelPath");
   }
@@ -118,25 +110,41 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
 
   Tensor out;
   try {
-    const Ort::MemoryInfo memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    std::vector<float> data = in->data; // CreateTensor 要非 const 指针，且不拷贝
-    Ort::Value input = Ort::Value::CreateTensor<float>(memory, data.data(), data.size(),
-                                                       in->shape.data(), in->shape.size());
+    std::lock_guard<std::mutex> lock(cached->mutex);
+    auto& data = cached->inputScratch;
+    data.assign(in->data.begin(), in->data.end());
+    Ort::Value input = Ort::Value::CreateTensor<float>(
+        cached->inputMemory, data.data(), data.size(), in->shape.data(), in->shape.size());
     const char* inNames[] = {inName.c_str()};
     const char* outNames[] = {outName.c_str()};
 
-    std::vector<Ort::Value> results;
-    {
-      std::lock_guard<std::mutex> lock(cached->mutex);
-      results = cached->session.Run(Ort::RunOptions{nullptr}, inNames, &input, 1, outNames, 1);
-    }
+    const auto results =
+        cached->session.Run(Ort::RunOptions{nullptr}, inNames, &input, 1, outNames, 1);
     if (results.empty() || !results.front().IsTensor()) {
       return Status::Error(Phase::Execute, "bad_input", "模型没有输出张量", {}, "input");
     }
-    out.shape = results.front().GetTensorTypeAndShapeInfo().GetShape();
-    const std::size_t n = out.elementCount();
-    const float* raw = results.front().GetTensorData<float>();
-    out.data.assign(raw, raw + n);
+    const auto info = results.front().GetTensorTypeAndShapeInfo();
+    const auto elementType = info.GetElementType();
+    if (elementType != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
+      return Status::Error(Phase::Execute, "bad_input",
+                           "模型输出必须是 float32，实际 ONNX 元素类型编号: " +
+                               std::to_string(static_cast<int>(elementType)),
+                           "outputName");
+    }
+    out.shape = info.GetShape();
+    const std::size_t n = info.GetElementCount();
+    if (n != out.elementCount() || n > out.data.max_size() ||
+        std::any_of(out.shape.begin(), out.shape.end(), [](std::int64_t d) { return d < 0; })) {
+      return Status::Error(Phase::Execute, "bad_input", "模型输出形状或元素数量不受支持",
+                           "outputName");
+    }
+    if (n > 0) {
+      const float* raw = results.front().GetTensorData<float>();
+      if (raw == nullptr) {
+        return Status::Error(Phase::Execute, "bad_input", "模型输出张量没有数据", "outputName");
+      }
+      out.data.assign(raw, raw + n);
+    }
   } catch (const Ort::Exception& e) {
     // 形状不符、名字不存在都从这里出来，portName 指回输入端口
     return Status::Error(Phase::Execute, "bad_input", std::string("推理失败: ") + e.what(), {},
@@ -171,9 +179,11 @@ void registerMlOnnxRun(Registry& r) {
   // 关键词里不能出现小写的 i-n-f：manifest 的序列化用例是子串匹配（test_executor.cpp:252）
   op.keywords = {"onnx", "Inference", "model", "tensor", "推理", "模型"};
   op.doc = "跑一次 ONNX 前向：float32 张量进、float32 张量出。"
-           "会话按「模型路径 + mtime + 线程数」缓存，改模型文件会自动重载。\n"
-           "输入输出名留空就用模型自己的第 0 个。形状不符时报 bad_input，"
-           "错误消息是 onnxruntime 的原话。";
+           "会话按「模型路径 + 文件大小/mtime + 线程数」缓存，最多保留 8 个最近使用的会话，"
+           "改模型文件会自动重载并回收该路径的旧指纹缓存。\n"
+           "同会话复用输入缓冲，输入复制、推理与输出复制串行完成，源张量保持只读。\n"
+           "输入输出名留空就用模型自己的第 0 个。输出元素类型必须是 float32，"
+           "支持零元素输出，不支持标量。类型或形状不符时报 bad_input；ORT 推理错误保留原始消息。";
 
   op.inputs = {Port{"input", "Tensor", "Input", "喂给模型的张量。", true}};
   op.outputs = {Port{"output", "Tensor", "Output", "模型的输出张量。", true}};
@@ -194,6 +204,7 @@ void registerMlOnnxRun(Registry& r) {
   threads.doc = "算子内并行的线程数，同时用作 inter-op。默认 1 —— 归约顺序固定，同输入逐位可复现。";
   threads.def = Value::integer(1);
   threads.min = 1.0;
+  threads.max = static_cast<double>(std::numeric_limits<int>::max());
 
   op.params = {
       model,

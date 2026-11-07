@@ -197,7 +197,7 @@ std::size_t Tensor::elementCount() const {
     return 0;
   std::size_t n = 1;
   for (std::int64_t d : shape) {
-    if (d <= 0)
+    if (d <= 0 || static_cast<std::uint64_t>(d) > std::numeric_limits<std::size_t>::max() / n)
       return 0;
     n *= static_cast<std::size_t>(d);
   }
@@ -373,10 +373,19 @@ Data Data::record(lyflow::Record r) {
   return d;
 }
 
+struct Data::ValueCache {
+  std::once_flag once;
+  std::string json;
+  double minimum = std::numeric_limits<double>::quiet_NaN();
+  double maximum = std::numeric_limits<double>::quiet_NaN();
+  double mean = std::numeric_limits<double>::quiet_NaN();
+};
+
 Data Data::tensor(std::shared_ptr<const lyflow::Tensor> t) {
   Data d;
   d.kind_ = Kind::Tensor;
   d.tensor_ = std::move(t);
+  d.valueCache_ = std::make_shared<ValueCache>();
   return d;
 }
 
@@ -395,11 +404,6 @@ Data Data::bundle(lyflow::Bundle b) {
   d.bundle_ = std::make_shared<const lyflow::Bundle>(std::move(b));
   return d;
 }
-
-struct Data::ValueCache {
-  std::once_flag once;
-  std::string json;
-};
 
 Data Data::image(std::shared_ptr<const lyflow::Image> i) {
   Data d;
@@ -536,7 +540,7 @@ std::size_t Data::elementCount() const {
 }
 
 std::string Data::valueJson() const {
-  if (valueCache_) {
+  if (valueCache_ && kind_ != Kind::Tensor) {
     std::call_once(valueCache_->once, [this] { valueCache_->json = valueJsonUncached(); });
     return valueCache_->json;
   }
@@ -629,26 +633,31 @@ std::string Data::valueJsonUncached() const {
     w.field("count", static_cast<std::int64_t>(t.data.size()));
     if (tensorScale_ > 1)
       w.field("scale", static_cast<std::int64_t>(tensorScale_));
-    // 张量本身不进 IPC，Inspector 只看得到这三个数（T7）
-    double lo = 0, hi = 0, sum = 0;
-    std::size_t finite = 0;
-    for (float v : t.data) {
-      if (!std::isfinite(v))
-        continue;
-      const double x = static_cast<double>(v);
-      if (finite == 0) {
-        lo = hi = x;
-      } else {
-        lo = std::min(lo, x);
-        hi = std::max(hi, x);
+    std::call_once(valueCache_->once, [&] {
+      double lo = 0, hi = 0, sum = 0;
+      std::size_t finite = 0;
+      for (float v : t.data) {
+        if (!std::isfinite(v))
+          continue;
+        const double x = static_cast<double>(v);
+        if (finite == 0) {
+          lo = hi = x;
+        } else {
+          lo = std::min(lo, x);
+          hi = std::max(hi, x);
+        }
+        sum += x;
+        ++finite;
       }
-      sum += x;
-      ++finite;
-    }
-    const double nan = std::numeric_limits<double>::quiet_NaN();
-    w.field("min", finite ? lo : nan);
-    w.field("max", finite ? hi : nan);
-    w.field("mean", finite ? sum / static_cast<double>(finite) : nan);
+      if (finite) {
+        valueCache_->minimum = lo;
+        valueCache_->maximum = hi;
+        valueCache_->mean = sum / static_cast<double>(finite);
+      }
+    });
+    w.field("min", valueCache_->minimum);
+    w.field("max", valueCache_->maximum);
+    w.field("mean", valueCache_->mean);
     break;
   }
   case Kind::Image: {

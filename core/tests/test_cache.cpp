@@ -135,6 +135,97 @@ TEST_CASE("改中间节点参数：只重算它和它的下游") {
   CHECK(second.finalState("p") == "done"); // 下游跟着失效
 }
 
+TEST_CASE("cacheKey：修复同名相对路径在不同目录、相同大小与 mtime 时错误复用") {
+  namespace fs = std::filesystem;
+  const auto dir = fs::temp_directory_path() /
+                   ("lyflow-cache-path-" +
+                    std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+  struct Cleanup {
+    fs::path dir;
+    ~Cleanup() {
+      std::error_code ec;
+      fs::remove_all(dir, ec);
+    }
+  } cleanup{dir};
+  const auto a = dir / "a";
+  const auto b = dir / "b";
+  fs::create_directories(a / "unused");
+  fs::create_directories(b);
+  std::ofstream(a / "input.bin", std::ios::binary) << "AAA";
+  std::ofstream(b / "input.bin", std::ios::binary) << "BBB";
+  fs::last_write_time(b / "input.bin", fs::last_write_time(a / "input.bin"));
+  REQUIRE(fs::file_size(a / "input.bin") == fs::file_size(b / "input.bin"));
+  REQUIRE(fs::last_write_time(a / "input.bin") == fs::last_write_time(b / "input.bin"));
+
+  Registry registry;
+  registry.addType(PortType{"Transform", "#a0d030", {}, ""});
+  OperatorDesc op;
+  op.id = "test.path_identity";
+  op.version = "1.0.0";
+  op.label = "Path Identity";
+  op.category = "Test";
+  op.outputs = {Port{"out", "Transform", "Out", "", true}};
+  op.compute = [](const Inputs&, const ParamView&, Outputs& out, ExecContext&) {
+    out.set("out", Data::transform(Transform{}));
+    return Status::Ok();
+  };
+  Param path;
+  path.name = "path";
+  path.type = ParamType::Path;
+  path.def = Value::text("");
+  op.params = {path};
+  registry.addOperator(op);
+  OperatorDesc noPath = op;
+  noPath.id = "test.no_path_identity";
+  noPath.params.clear();
+  registry.addOperator(std::move(noPath));
+  op.id = "test.stamped_path_identity";
+  op.externalKey = [](const ParamView& params) {
+    const auto file = params.path("path");
+    std::error_code ec;
+    const auto size = fs::file_size(file, ec);
+    if (ec)
+      return std::string{};
+    const auto mtime = fs::last_write_time(file, ec);
+    return ec ? std::string{}
+              : std::to_string(size) + ":" + std::to_string(mtime.time_since_epoch().count());
+  };
+  registry.addOperator(std::move(op));
+  REQUIRE(registry.validate().empty());
+
+  auto keyOf = [&](const std::string& opId, const fs::path& base, const std::string& rawPath) {
+    const Json params = opId == "test.no_path_identity" ? Json::object() : Json{{"path", rawPath}};
+    const Json doc = makeGraph({{"n", opId, params}}, {});
+    exec::RawGraph raw;
+    Diagnostics diags;
+    REQUIRE(exec::parseGraph(doc.dump(), raw, diags));
+    exec::BuildOptions options;
+    options.runId = "path-identity";
+    options.baseDir = base;
+    exec::Plan plan;
+    REQUIRE(exec::buildPlan(registry, raw, options, plan, diags));
+    REQUIRE_FALSE(diags.hasErrors());
+    REQUIRE(plan.nodes.size() == 1);
+    return plan.nodes.front().cacheKey;
+  };
+  for (const auto* opId : {"test.path_identity", "test.stamped_path_identity"}) {
+    CAPTURE(opId);
+    const auto first = keyOf(opId, a, "input.bin");
+    CHECK(first != keyOf(opId, b, "input.bin"));
+    CHECK(first == keyOf(opId, a, "input.bin"));
+    CHECK(first == keyOf(opId, a / "." / "unused" / "..", "input.bin"));
+    const auto absolute = (a / "input.bin").u8string();
+    CHECK(keyOf(opId, a, absolute) == keyOf(opId, b, absolute));
+    CHECK(keyOf(opId, a, "missing.bin") != keyOf(opId, b, "missing.bin"));
+    CHECK_NOTHROW(keyOf(opId, a, "invalid<>path.bin"));
+  }
+  CHECK(keyOf("test.no_path_identity", a, "") == keyOf("test.no_path_identity", b, ""));
+  const auto stamped = keyOf("test.stamped_path_identity", a, "input.bin");
+  fs::last_write_time(a / "input.bin",
+                      fs::last_write_time(a / "input.bin") + std::chrono::seconds(2));
+  CHECK(stamped != keyOf("test.stamped_path_identity", a, "input.bin"));
+}
+
 TEST_CASE("lyflow_plan 的预测集合与实际 skipped 集合完全一致") {
   ensureTestOps();
   const Json doc = chainGraph();
