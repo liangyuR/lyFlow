@@ -497,9 +497,8 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 
 端口同 `glue.track_path`（`maps` 换成 `Bundle<glue.ColorMaps>`，`fan` 接 `glue.color_fan.scan`）。逐步的做法同第 3 节，差别：
 
-- 卡尺在得分图上分段（`split` 默认 `connected`、`segmentMin` 0.3、`peakMin` 0.6、`mergeGap` 8、合并不查峰值比），再按 `mergeUnknownGap`
-  （默认 16 px，规则同第 1.3.5 节）把被反光带隔开的两段并成一段，胶点取合并段的中点 —— 否则湿胶中间一条反光带把胶劈成两半时只跟其中一半，
-  胶点偏出半个胶宽，拟合胶路漂到胶边上；
+- 卡尺在得分图上分段（`split` 默认 `connected`、`segmentMin` 0.3、`peakMin` 0.6），按第 1.3.5 节的背景约束统一处理短缝和高光内谷；胶点取合并段的中点。
+- 有至少 `historyMin` 个历史宽度且四分位距小于 `steadyIqrRatio × 宽度中位数` 时，使用历史宽度中位数引导合并，中心参考为当前预测点。连续跟踪时，宽度小于 `reacquireWidthRatio × 参考宽度` 且中心偏移超过参考宽度的 15% 的片段不作为胶点，防止整胶被反光分裂后吸附单侧碎片；真正居中的窄胶仍保留。
 - 没有陡度门、不退回射线：去掉 `sharpMin`、`edgeProbe`、`backgroundProbe`、`rayFallback`、`rayFallbackCoverage`、`reacquirePeakRatio`、`mergePeakRatio` 这几个参数；
 - **无信息步**：这一步没找到胶、且接受窗 t ∈ ±min(acceptOffsetRatio × widthMax, searchHalf) 上（每 0.5 px）有效采样占比 < `infoMin`（默认 0.5，0–1）。
   无信息步走过的长度不计入 `maxGap`：停止条件是「s − 上一个胶点的 s − 其间无信息步的长度 > maxGap」。
@@ -516,10 +515,16 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 | `stationStep`、`sRange`、`searchHalf`、`split`、`mergeWidthMax` | | | 同第 4 节 | | |
 | `segmentMin` | float | — | 0.3 | 0–1 | 分段门限：得分 > 它的相邻采样连成一段 |
 | `peakMin` | float | — | 0.6 | 0–1 | 段的得分峰值下限 |
-| `mergeGap` | float | px | 8 | ≥ 0 | 合并缝（不看缝里是什么；胶面上没饱和的镜面反光会把胶劈开）；合并不查峰值比 |
-| `mergeUnknownGap` | float | px | 16 | ≥ 0 | 两段之间缝里**明确是背景**的采样（有信息且得分 < segmentMin / 2）不过半、缝 ≤ 它、合并后 ≤ mergeWidthMax 时并成一段。湿胶中间的反光带：芯饱和（无信息）、四周发白却没饱和（胶色混白光，得分在 0.2–0.5 之间，两半相邻的边因此是真边），都不算背景；胶旁的胶丝隔着真背景（得分≈ 0），不并 |
+| `mergeGap` | float | px | 8 | ≥ 0 | 无明确背景的短缝合并上限；不查峰值比 |
+| `mergeUnknownGap` | float | px | 16 | ≥ 0 | 无明确背景的高光/低分内谷合并上限；大于 0 时启用邻站自适应，0 时关闭自适应。总宽仍受 mergeWidthMax 限制 |
 
-分段、半高取边、`mergeGap` 合并同第 4 节（`caliperRuns`），然后再做 `mergeUnknownGap` 合并。输出 `glue.LateralRuns` 的超集：
+分段与半高取边同第 4 节（`caliperRuns`），彩色分支不做无条件短缝合并。两段之间任何采样明确为背景（有限得分 < `segmentMin / 2`）都禁止合并；饱和高光和未饱和低分色谷本身不是明确背景。没有邻站参考时，允许缝宽为 `max(mergeGap, mergeUnknownGap)`。
+
+`color_runs` 首遍按上述固定范围提取每站最近段，取得全局宽度中位数；同时保留原片段，按「相对全局中位数的宽度偏差 + 2 × 中心偏移」比较原片段与首遍合并段，选择参考候选，避免侧条并入后污染邻站参考。再筛掉宽度不在全局中位数 0.7–1.3 倍范围、或中心偏移超过其一半的站。每站从其余站选弧长最近的至多 5 个参考，至少需要 3 个。第二遍使用这些首遍候选的宽度和中心中位数，不用自适应合并后的结果回填参考。`color_track` 使用稳定历史宽度作为同类参考。
+
+有参考时，缝宽上限可扩大到 `max(mergeGap, mergeUnknownGap, 参考宽度 / 2)`；合并宽度必须在参考的 0.7–1.3 倍内，中心偏差不超过参考宽度的 30%。合并结果的「宽度偏差 + 2 × 中心偏差」必须优于每个参与的原片段，避免吞掉原本正确的主胶。参考只约束合并，不能替代当站实测宽度；无法恢复的外边仍保留 incomplete 与 cause，不进行宽度插值或按标称值补齐。
+
+输出 `glue.LateralRuns` 的超集：
 
 - 顶层多 `source = "color"`、`mergeUnknownGap`；
 - 每站多 `infoFraction`（卡尺采样中得分有效的占比）、`unknownSpans[{lo, hi, cause}]`（同一原因的连续无效采样，`lo` / `hi` 是首末采样的 t，
@@ -646,11 +651,10 @@ TS 接口里非可选的方法都要有；调试页真正用到的是下面这�
 
 ## 版本与兼容
 
-- 产品版本升到 **1.2.0**（开发中，未发布）；glue 包版本 0.2.0；新算子各自 1.0.0。
-- C ABI 没有变化；按 [packaging.md](deployment/packaging.md) 的系列规则，1.2 客户端只加载 1.2.x 引擎，GS 需要同步升级 `crates/lyflow-client` 的引用。
-- `packaging/release.json` 的 `requiredOperators` 增加上面 6 个算子。
-- 1.3 系列：glue 包 0.3.0，新增 5 个彩色算子（各自 1.0.0）、Bundle `glue.ColorMaps` 与 Record `glue.ColorModel`；1.2 的算子与输出不变，C ABI 没有变化。
-  `requiredOperators` 再加这 5 个。产品版本号随 1.3.0 发布时再升。
+- 产品与 ABI 版本为 **1.3.1**，glue 包版本为 **0.3.1**。
+- `glue.color_track` 与 `glue.color_runs` 为 **1.0.1**；参数和输出结构兼容，增加受参考宽度与中心约束的内谷合并，短缝也禁止跨明确背景。
+- C ABI 布局没有变化；按 [packaging.md](deployment/packaging.md) 的系列规则，1.3 客户端可以加载同系列的 1.3.x 引擎。
+- `packaging/release.json` 的 `requiredOperators` 包含 6 个测量算子和 5 个彩色算子；彩色接口使用 Bundle `glue.ColorMaps` 与 Record `glue.ColorModel`，保留既有测量算子的端口与输出。
 
 ## 实测耗时
 

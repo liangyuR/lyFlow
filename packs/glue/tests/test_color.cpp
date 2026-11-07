@@ -270,6 +270,53 @@ std::vector<std::string> errorsOf(const Json& doc) {
   return paths;
 }
 
+Data splitBeadMaps(double gap, float valley, bool sideBand = false, double from = 80,
+                   double to = 140) {
+  constexpr int width = 201, height = 241;
+  cv::Mat score(height, width, CV_32F);
+  for (int y = 0; y < height; ++y) {
+    const double along = 220 - y;
+    for (int x = 0; x < width; ++x) {
+      const double across = x - 100;
+      double value = std::clamp(24.5 - std::fabs(across), 0.0, 1.0);
+      if (along >= from && along <= to) {
+        if (sideBand) {
+          const double sideHi = -24 - gap;
+          if (across >= sideHi - 4 && across <= sideHi)
+            value = 0.7;
+          else if (across > sideHi && across < -24)
+            value = 0.25;
+        } else if (std::fabs(across) < 0.5 * gap) {
+          value = valley;
+        }
+      }
+      score.at<float>(y, x) = static_cast<float>(value);
+    }
+  }
+  Record frame;
+  frame.type = "glue.Frame";
+  frame.data = Json{{"x", 0},
+                    {"y", 0},
+                    {"width", width},
+                    {"height", height},
+                    {"imageWidth", width},
+                    {"imageHeight", height}};
+  Bundle maps("glue.ColorMaps");
+  maps.set("score", Data::image(imageOf(score)));
+  maps.set("state", Data::image(imageOf(cv::Mat::zeros(height, width, CV_32F))));
+  maps.set("luma", Data::image(imageOf(cv::Mat(height, width, CV_32F, cv::Scalar(140)))));
+  maps.set("frame", Data::record(std::move(frame)));
+  return Data::bundle(std::move(maps));
+}
+
+Json runColorMaps(const Json& doc, const Data& maps, const char* node, const char* port) {
+  Session session(doc, {}, {}, false, 0, false, {exec::InjectedInput{node, "maps", maps}});
+  REQUIRE(session.wait().runStatus() == "ok");
+  Data result;
+  REQUIRE(exec::ResultStore::instance().get(session.runId(), node, port, result));
+  return recordOf(result);
+}
+
 } // namespace
 
 // 防：对数色度丢了照明不变性（渐变暗端胶变窄或断）、胶—背景的边不落在混合像素的中点（宽度系统性偏 1 px 以上）、
@@ -735,5 +782,76 @@ TEST_CASE("glue 彩色：color_fan → color_track 跟圆弧胶 —— 高光横
     // 不合并时胶点大多是半条胶（这就是现场漂到胶边上的起因）
     const Tracked split = runTrack(sc, teach, Json{{"mergeUnknownGap", 0}});
     CHECK(halves(split.track) > 0.5);
+  }
+}
+
+TEST_CASE("glue 彩色：有相邻完整胶宽的长低分内谷恢复整胶，真背景与主胶旁弱条不并入") {
+  struct Case {
+    const char* name;
+    double gap;
+    float valley;
+    bool sideBand;
+    bool recover;
+  };
+  const Case cases[] = {{"17 px 有限低分内谷", 17, 0.25F, false, true},
+                        {"21 px 有限低分内谷", 21, 0.25F, false, true},
+                        {"4 px 真实背景", 4, 0.0F, false, false},
+                        {"21 px 真实背景", 21, 0.0F, false, false},
+                        {"正常主胶旁的远侧弱色条", 18, 0.25F, true, true},
+                        {"正常主胶旁的近侧弱色条", 9, 0.25F, true, true}};
+  const Json doc =
+      makeGraph({N{"n_line", "glue.polyline", Json{{"points", "[[100,220],[100,20]]"}}},
+                 N{"n_runs", "glue.color_runs",
+                   Json{{"searchHalf", 80},
+                        {"sRange", {20, 180}},
+                        {"stationStep", 4},
+                        {"split", "half_max"},
+                        {"mergeUnknownGap", 16},
+                        {"mergeWidthMax", 90}}}},
+                {E{"n_line.line", "n_runs.line"}});
+  for (const auto& c : cases) {
+    CAPTURE(c.name);
+    const Json runs =
+        runColorMaps(doc, splitBeadMaps(c.gap, c.valley, c.sideBand), "n_runs", "runs");
+    REQUIRE_FALSE(runs["stations"].empty());
+    for (const Json& station : runs["stations"]) {
+      const double along = station["s"].get<double>();
+      CAPTURE(along);
+      const Json* central = centralRun(station, 2.0);
+      if (!c.recover && along >= 84 && along <= 136) {
+        CHECK(central == nullptr);
+        CHECK(station["runs"].size() == 2);
+        CHECK(station["unknownSpans"].empty());
+      } else if (c.recover || along < 76 || along > 144) {
+        REQUIRE(central);
+        CHECK(std::fabs((*central)["width"].get<double>() - 48.0) <= 1.0);
+        CHECK((*central)["loComplete"] == true);
+        CHECK((*central)["hiComplete"] == true);
+      }
+    }
+  }
+}
+
+TEST_CASE("glue 彩色：稳定整胶进入长低分内谷后，跟踪保持胶中心而不吸附左侧半条胶") {
+  const Json doc = makeGraph({N{"n_track", "glue.color_track",
+                                Json{{"anchor", {100, 220}},
+                                     {"heading", -90},
+                                     {"zone", {20, 180}},
+                                     {"searchHalf", 80},
+                                     {"widthMax", 90},
+                                     {"split", "half_max"},
+                                     {"mergeUnknownGap", 16},
+                                     {"mergeWidthMax", 90}}}},
+                             {});
+  const Json track =
+      runColorMaps(doc, splitBeadMaps(21, 0.25F, false, 88, 200), "n_track", "track");
+  CHECK(track["fitted"] == true);
+  CHECK(track["stoppedAt"].is_null());
+  CHECK(track["coverageInformative"].get<double>() >= 0.95);
+  REQUIRE_FALSE(track["points"].empty());
+  for (const Json& point : track["points"]) {
+    CAPTURE(point["s"].get<double>());
+    CHECK(std::fabs(point["point"][0].get<double>() - 100.0) <= 2.0);
+    CHECK(std::fabs(point["width"].get<double>() - 48.0) <= 1.0);
   }
 }

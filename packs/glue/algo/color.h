@@ -104,13 +104,16 @@ struct ColorMaps {
 /// roi 宽高 ≤ 0 = 整幅。roi 与图像不相交时 frame 为空。行按 threads 个线程分块并行，结果与线程数无关。
 ColorMaps colorMaps(const cv::Mat& rgb, const ColorModel& m, cv::Rect roi, int threads = 1);
 
-/// 卡尺（caliperRuns 的采样：t = −half + 0.5·i，background[i] 标出「明确是背景」的采样：有信息且得分 < segmentMin / 2）
-/// 上的相邻两段，缝里明确是背景的采样不过半、缝 ≤ gap、合并后 ≤ widthMax 时并成一段。湿胶中间的反光带：芯饱和（无信息）、
-/// 四周发白却没饱和（胶色混白光，得分在 0.2–0.5 之间），两半相邻的边是真边；胶旁的胶丝隔着真背景（得分≈ 0），不并。
-/// 原地改 runs，返回每个输出段由哪几个输入段（首、末下标）合成。
+struct ColorMergeGuide {
+  double width = std::numeric_limits<double>::quiet_NaN();
+  double center = 0;
+};
+
+/// 缝内不得有明确背景（有限 score < segmentMin / 2）。有邻站参考时允许缝宽到 max(gap, width / 2)，
+/// 只接受宽度、中心与参考一致且比原片段更合理的组合。保留外边完成标记，返回各输出对应的输入首末下标。
 std::vector<std::pair<std::size_t, std::size_t>>
 mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, double half,
-                double gap, double widthMax);
+                double gap, double widthMax, const ColorMergeGuide* guide = nullptr);
 
 /// 卡尺上一个采样无信息的原因。
 enum class ColorCause { None, Highlight, Dark, Outside };

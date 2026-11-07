@@ -1,5 +1,6 @@
 // glue.color_runs「彩色横向卡尺」（docs/glue-measure-ops.md §1.3.5）：沿胶路布站，每站卡尺上的全部胶色段与无信息区间。
 // 输出 glue.LateralRuns 的超集；不按宽度筛、不挑段、不判有无胶 —— 无信息的站是不是断胶也由宿主判。
+#include <algorithm>
 #include <cmath>
 
 #include "glue.h"
@@ -23,6 +24,65 @@ const char* edgeCause(bool complete, bool caliper, ColorCause c) {
   if (caliper)
     return "caliper";
   return c == ColorCause::None ? "edge" : causeName(c);
+}
+
+std::vector<ColorMergeGuide> mergeGuides(const ColorMapsView& maps,
+                                         const std::vector<StationPose>& poses, double half,
+                                         const RunSplitSpec& rawSpec, double gap) {
+  std::vector<ColorMergeGuide> seeds(poses.size()), guides(poses.size());
+  std::vector<std::vector<Run>> rawRuns(poses.size());
+  std::vector<double> widths;
+  const auto count = static_cast<std::size_t>(std::floor(2.0 * half / kRes + 1e-9)) + 1;
+  std::vector<char> background(count);
+  for (std::size_t i = 0; i < poses.size(); ++i) {
+    const auto& st = poses[i];
+    rawRuns[i] = caliperRuns(maps.score, st.c, st.n, half, rawSpec);
+    auto runs = rawRuns[i];
+    for (std::size_t k = 0; k < count; ++k) {
+      const double score = maps.score.at(st.c + st.n * (-half + k * kRes));
+      background[k] = score >= 0 && score < 0.5 * rawSpec.segmentMin;
+    }
+    mergeAcrossGaps(&runs, background, half, gap, rawSpec.mergeWidthMax);
+    if (const Run* r = nearestRun(runs)) {
+      seeds[i].width = r->width();
+      seeds[i].center = r->mid();
+      widths.push_back(r->width());
+    }
+  }
+  if (widths.size() < 3)
+    return guides;
+  const double reference = median(widths);
+  std::vector<std::size_t> anchors;
+  for (std::size_t i = 0; i < seeds.size(); ++i) {
+    const auto cost = [&](double width, double center) {
+      return std::fabs(width - reference) + 2.0 * std::fabs(center);
+    };
+    for (const Run& r : rawRuns[i]) {
+      if (!std::isfinite(seeds[i].width) ||
+          cost(r.width(), r.mid()) < cost(seeds[i].width, seeds[i].center))
+        seeds[i] = {r.width(), r.mid()};
+    }
+    if (seeds[i].width >= 0.7 * reference && seeds[i].width <= 1.3 * reference &&
+        std::fabs(seeds[i].center) <= 0.5 * reference)
+      anchors.push_back(i);
+  }
+  for (std::size_t i = 0; i < poses.size(); ++i) {
+    auto nearby = anchors;
+    nearby.erase(std::remove(nearby.begin(), nearby.end(), i), nearby.end());
+    std::stable_sort(nearby.begin(), nearby.end(), [&](std::size_t a, std::size_t b) {
+      return std::fabs(poses[a].s - poses[i].s) < std::fabs(poses[b].s - poses[i].s);
+    });
+    if (nearby.size() < 3)
+      continue;
+    nearby.resize(std::min<std::size_t>(nearby.size(), 5));
+    std::vector<double> localWidths, centers;
+    for (std::size_t j : nearby) {
+      localWidths.push_back(seeds[j].width);
+      centers.push_back(seeds[j].center);
+    }
+    guides[i] = {median(localWidths), median(centers)};
+  }
+  return guides;
 }
 
 Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, ExecContext&) {
@@ -49,13 +109,19 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   const std::vector<StationPose> poses = layStations(line, step, range[0], range[1], &a, &b);
   const int count = static_cast<int>(std::floor(2.0 * half / kRes + 1e-9)) + 1;
   const auto tAt = [&](int i) { return -half + i * kRes; };
+  RunSplitSpec rawSpec = spec;
+  rawSpec.mergeGap = 0;
+  const double baseGap = std::max(spec.mergeGap, mergeUnknownGap);
+  const auto guides = mergeUnknownGap > 0 ? mergeGuides(maps, poses, half, rawSpec, baseGap)
+                                          : std::vector<ColorMergeGuide>(poses.size());
 
   Json stations = Json::array();
   Overlay2D ov;
   std::vector<std::array<Px, 2>> calipers, runSegs, unknownSegs;
   std::vector<double> v(static_cast<std::size_t>(count));
   std::vector<ColorCause> cause(static_cast<std::size_t>(count));
-  for (const StationPose& st : poses) {
+  for (std::size_t station = 0; station < poses.size(); ++station) {
+    const StationPose& st = poses[station];
     int inFrame = 0, valid = 0;
     for (int i = 0; i < count; ++i) {
       const P2 p = st.c + st.n * tAt(i);
@@ -83,7 +149,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     }
     // 段的两条边外侧是什么：真边、卡尺端点，还是被无信息的采样截断
     std::vector<ColorRun> runs;
-    for (const Run& r : caliperRuns(maps.score, st.c, st.n, half, spec)) {
+    for (const Run& r : caliperRuns(maps.score, st.c, st.n, half, rawSpec)) {
       ColorRun cr;
       cr.run = r;
       const int lo = static_cast<int>(std::ceil((r.lo + half) / kRes - 1e-6)) - 1;
@@ -105,7 +171,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
       plain.push_back(cr.run);
     std::vector<ColorRun> merged;
     for (const auto& [first, last] :
-         mergeAcrossGaps(&plain, background, half, mergeUnknownGap, spec.mergeWidthMax)) {
+         mergeAcrossGaps(&plain, background, half, baseGap, spec.mergeWidthMax, &guides[station])) {
       ColorRun m = runs[first];
       m.run = plain[merged.size()];
       m.hiCause = runs[last].hiCause;
@@ -190,7 +256,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
 void registerColorRuns(Registry& r) {
   OperatorDesc op;
   op.id = "glue.color_runs";
-  op.version = "1.0.0";
+  op.version = "1.0.1";
   op.label = "彩色横向卡尺";
   op.category = "涂胶/彩色";
   op.keywords = {"glue", "color", "caliper", "runs", "width", "涂胶", "彩色", "卡尺", "胶宽"};
@@ -200,7 +266,9 @@ void registerColorRuns(Registry& r) {
       "- 每站给出 infoFraction（有信息的采样占比）与 unknownSpans[{lo, hi, cause}]（cause = highlight / dark / outside）；\n"
       "- 每段给出两条边外侧是什么（loCause / hiCause = edge 真边 / caliper 卡尺端点 / highlight / dark / outside）、"
       "段内有效采样的平均得分 meanScore 与段内无信息的宽度 unknownWidth；\n"
-      "- 两段之间缝里明确是背景的采样（有信息且得分 < segmentMin / 2）不过半、缝 ≤ mergeUnknownGap、合并后 ≤ mergeWidthMax 时并成一段（湿胶被高光劈开）。\n"
+      "- 合并不跨明确背景（有限得分 < segmentMin / 2），总宽不超过 mergeWidthMax。至少三个可信邻站时，"
+      "允许缝宽到 max(mergeGap, mergeUnknownGap, 参考胶宽 / 2)，组合须符合参考宽度和中心，且优于每个原片段；"
+      "外边被高光截断的标记保留。mergeUnknownGap = 0 关闭邻站自适应。\n"
       "输出 glue.LateralRuns 的超集（source = color；edgeLo、edgeHi、depth、sharpness 为 null，level 恒为 1）。"
       "不按宽度筛、不挑段、不判有无胶。";
   op.inputs = {
@@ -233,12 +301,11 @@ void registerColorRuns(Registry& r) {
       rangedFloat("segmentMin", "Segment Min", 0.3, "", "分段门限：得分 > 它的相邻采样连成一段。",
                   0.0, 1.0),
       rangedFloat("peakMin", "Peak Min", 0.6, "", "段的得分峰值下限。", 0.0, 1.0),
-      rangedFloat("mergeGap", "Merge Gap", 8.0, "px",
-                  "合并缝（不看缝里是什么）：胶面上没饱和的镜面反光会把胶劈成两段。", 0.0, kOpen,
+      rangedFloat("mergeGap", "Merge Gap", 8.0, "px", "无明确背景的短缝合并上限。", 0.0, kOpen,
                   true),
       rangedFloat(
           "mergeUnknownGap", "Merge Unknown Gap", 16.0, "px",
-          "两段之间缝里明确是背景的采样（有信息且得分 < segmentMin / 2）不过半时，缝不超过它就合并（湿胶中间的反光带）。",
+          "无明确背景的高光缝基础上限；可信邻站允许按半个参考胶宽自适应，仍检查组合宽度与中心。0 关闭该自适应。",
           0.0, kOpen, true),
       rangedFloat("mergeWidthMax", "Merge Width Max", 90.0, "px", "合并后不宽于它才合并。", 1.0,
                   kOpen, true),

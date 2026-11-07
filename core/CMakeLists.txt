@@ -14,7 +14,7 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   endif()
 endif()
 
-project(lyflow_core LANGUAGES CXX VERSION 1.3.0)
+project(lyflow_core LANGUAGES CXX VERSION 1.3.1)
 option(LYFLOW_RELEASE_BUILD "Release dependency inputs were verified by package-windows.ps1" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
