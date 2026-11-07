@@ -172,7 +172,7 @@ std::vector<Issue> validate(const ParamView& params, const std::set<std::string>
 void registerColorTrack(Registry& r) {
   OperatorDesc op;
   op.id = "glue.color_track";
-  op.version = "1.0.0";
+  op.version = "1.0.1";
   op.label = "彩色粗跟踪";
   op.category = "涂胶/彩色";
   op.keywords = {"glue", "color", "track", "path", "fit", "涂胶", "彩色", "跟踪", "拟合", "胶路"};
@@ -181,6 +181,7 @@ void registerColorTrack(Registry& r) {
       "（分段同 glue.lateral_runs），只留宽度在 [widthMin, widthMax] 的，过连续性门后取离预测点最近的作胶点；"
       "没有陡度门、不退回射线。没找到胶、且接受窗（± acceptOffsetRatio × widthMax）里有效采样不到 infoMin 的一步"
       "是「无信息」（高光、暗区挡住了），不计入 maxGap。胶点 ≥ minPoints 时稳健拟合成胶路，否则输出直线。\n"
+      "宽度历史稳定时按参考宽度约束高光合并，连续跟踪也拒绝明显偏心的半宽片段，避免吸附到胶的一侧。\n"
       "track 另给 unknownSteps 与 coverageInformative = found / (steps − unknownSteps)。不输出 ok。";
   op.inputs = {
       Port{"maps", "Bundle<glue.ColorMaps>", "Maps",
@@ -227,13 +228,14 @@ void registerColorTrack(Registry& r) {
       rangedFloat("segmentMin", "Segment Min", 0.3, "", "分段门限：得分 > 它的相邻采样连成一段。",
                   0.0, 1.0, true),
       rangedFloat("peakMin", "Peak Min", 0.6, "", "段的得分峰值下限。", 0.0, 1.0, true),
-      rangedFloat("mergeGap", "Merge Gap", 8.0, "px", "合并缝。", 0.0, kOpen, true),
+      rangedFloat("mergeGap", "Merge Gap", 8.0, "px", "无明确背景的短缝合并上限。", 0.0, kOpen,
+                  true),
       rangedFloat("mergeWidthMax", "Merge Width Max", 90.0, "px", "合并后不宽于它才合并。", 1.0,
                   kOpen, true),
       rangedFloat(
           "mergeUnknownGap", "Merge Unknown Gap", 16.0, "px",
-          "同 glue.color_runs：两段之间缝里明确是背景的采样不过半时，缝不超过它就合并，胶点取合并段的中点"
-          "（湿胶中间一条反光带把胶劈成两半时不只跟一半）。",
+          "无明确背景的高光缝基础上限；稳定历史允许按半个参考胶宽自适应，仍检查组合宽度与中心。"
+          "0 关闭该自适应，胶点取合并段中点。",
           0.0, kOpen, true),
       rangedFloat("widthMin", "Width Min", 4.0, "px", "胶点段宽度下限。", 0.0, kOpen, true),
       rangedFloat("widthMax", "Width Max", 90.0, "px", "胶点段宽度上限。", 0.0, kOpen, true),
@@ -250,8 +252,10 @@ void registerColorTrack(Registry& r) {
       rangedFloat("jumpRatio", "Jump Ratio", 0.5, "",
                   "紧接上一步时横向 ≤ max(jumpRatio × 胶宽中位数, jumpMin)。", 0.0, kOpen, true),
       rangedFloat("jumpMin", "Jump Min", 8.0, "px", "同上。", 0.0, kOpen, true),
-      rangedFloat("reacquireWidthRatio", "Reacquire Width Ratio", 0.5, "",
-                  "胶宽稳定时重新接上的宽度 ≥ 它 × 已有胶宽中位数。", 0.0, kOpen, true),
+      rangedFloat(
+          "reacquireWidthRatio", "Reacquire Width Ratio", 0.5, "",
+          "胶宽稳定时重新接上的宽度下限比例；连续跟踪也拒绝低于该比例且偏心超过参考宽度15%的片段。",
+          0.0, kOpen, true),
       rangedFloat("steadyIqrRatio", "Steady IQR Ratio", 0.3, "",
                   "胶宽 IQR < 它 × 中位数算稳定（直胶）。", 0.0, kOpen, true),
       rangedFloat("dirWindow", "Dir Window", 48.0, "px", "用最近这么长 s 内的胶点做主方向。", 0.0,

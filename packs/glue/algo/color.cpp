@@ -629,34 +629,55 @@ ColorMaps colorMaps(const cv::Mat& rgb, const ColorModel& m, cv::Rect roi, int t
 
 std::vector<std::pair<std::size_t, std::size_t>>
 mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, double half,
-                double gap, double widthMax) {
+                double gap, double widthMax, const ColorMergeGuide* guide) {
   constexpr double kRes = 0.5;
   const int count = static_cast<int>(background.size());
+  const bool guided = guide && std::isfinite(guide->width) && guide->width > 0;
+  const double limit = guided ? std::max(gap, 0.5 * guide->width) : gap;
   std::vector<Run> out;
   std::vector<std::pair<std::size_t, std::size_t>> groups;
-  for (std::size_t k = 0; k < runs->size(); ++k) {
-    const Run& r = (*runs)[k];
-    if (!out.empty()) {
-      Run& m = out.back();
-      const int from = static_cast<int>(std::floor((m.hi + half) / kRes + 1e-6)) + 1;
+  const auto cost = [&](const Run& r) {
+    return std::fabs(r.width() - guide->width) + 2.0 * std::fabs(r.mid() - guide->center);
+  };
+  for (std::size_t first = 0; first < runs->size();) {
+    Run candidate = (*runs)[first], best = candidate;
+    std::size_t last = first;
+    double bestCost = guided ? cost(best) : 0;
+    double componentCost = bestCost;
+    for (std::size_t k = first + 1; k < runs->size(); ++k) {
+      const Run& r = (*runs)[k];
+      if (r.lo - candidate.hi > limit || r.hi - candidate.lo > widthMax)
+        break;
+      const int from = static_cast<int>(std::floor((candidate.hi + half) / kRes + 1e-6)) + 1;
       const int to = static_cast<int>(std::ceil((r.lo + half) / kRes - 1e-6)) - 1;
       int bg = 0, total = 0;
       for (int i = std::max(from, 0); i <= std::min(to, count - 1); ++i) {
         ++total;
         bg += background[static_cast<std::size_t>(i)] ? 1 : 0;
       }
-      if (total > 0 && 2 * bg <= total && r.lo - m.hi <= gap && r.hi - m.lo <= widthMax) {
-        m.hi = r.hi;
-        m.hiComplete = r.hiComplete;
-        m.completeEdges = m.completeEdges && r.completeEdges;
-        m.peak = std::max(m.peak, r.peak);
-        m.parts += r.parts;
-        groups.back().second = k;
+      if (total <= 0 || bg > 0)
+        break;
+      candidate.hi = r.hi;
+      candidate.hiComplete = r.hiComplete;
+      candidate.completeEdges = candidate.completeEdges && r.completeEdges;
+      candidate.peak = std::max(candidate.peak, r.peak);
+      candidate.parts += r.parts;
+      if (guided)
+        componentCost = std::min(componentCost, cost(r));
+      if (guided &&
+          (candidate.width() < 0.7 * guide->width || candidate.width() > 1.3 * guide->width ||
+           std::fabs(candidate.mid() - guide->center) > 0.3 * guide->width))
         continue;
+      const double nextCost = guided ? cost(candidate) : 0;
+      if (!guided || (nextCost < bestCost && nextCost < componentCost)) {
+        best = candidate;
+        bestCost = nextCost;
+        last = k;
       }
     }
-    out.push_back(r);
-    groups.emplace_back(k, k);
+    out.push_back(best);
+    groups.emplace_back(first, last);
+    first = last + 1;
   }
   *runs = std::move(out);
   return groups;
@@ -1035,6 +1056,8 @@ ColorTrackResult colorTrack(const Field& R, const ColorTrackSpec& spec, double h
   std::vector<double> widths;
   const double accept = spec.acceptOffsetRatio * spec.widthMax;
   const double window = std::min(accept, spec.searchHalf);
+  RunSplitSpec rawSpec = spec.runs;
+  rawSpec.mergeGap = 0;
   while (s <= spec.zoneEnd + 1e-6) {
     out.steps += 1;
     const P2 n = perp(d);
@@ -1042,7 +1065,14 @@ ColorTrackResult colorTrack(const Field& R, const ColorTrackSpec& spec, double h
     P2 c;
     if (!stopped) {
       const bool afterGap = !out.points.empty() && s - lastFound > spec.gapSteps * spec.coarseStep;
-      std::vector<Run> rs = caliperRuns(R, p, n, spec.searchHalf, spec.runs);
+      const bool hasHistory = static_cast<int>(widths.size()) >= spec.historyMin;
+      const double wMed = hasHistory ? median(widths) : kNaN;
+      const bool steady = hasHistory && percentile(widths, 75) - percentile(widths, 25) <
+                                            spec.steadyIqrRatio * wMed;
+      ColorMergeGuide guide;
+      if (steady && spec.mergeUnknownGap > 0)
+        guide.width = wMed;
+      std::vector<Run> rs = caliperRuns(R, p, n, spec.searchHalf, rawSpec);
       // 胶中间一条反光带把胶劈成两半时，只跟其中一半，下一步就偏出半个胶宽：先并回来
       std::vector<char> background(
           static_cast<std::size_t>(std::floor(2.0 * spec.searchHalf / 0.5 + 1e-9)) + 1);
@@ -1050,22 +1080,22 @@ ColorTrackResult colorTrack(const Field& R, const ColorTrackSpec& spec, double h
         const double x = R.at(p + n * (-spec.searchHalf + 0.5 * static_cast<double>(i)));
         background[i] = x >= 0.0 && x < 0.5 * spec.runs.segmentMin;
       }
-      mergeAcrossGaps(&rs, background, spec.searchHalf, spec.mergeUnknownGap,
-                      spec.runs.mergeWidthMax);
+      mergeAcrossGaps(&rs, background, spec.searchHalf,
+                      std::max(spec.runs.mergeGap, spec.mergeUnknownGap), spec.runs.mergeWidthMax,
+                      &guide);
       rs.erase(std::remove_if(rs.begin(), rs.end(),
                               [&](const Run& x) {
                                 return x.width() < spec.widthMin || x.width() > spec.widthMax;
                               }),
                rs.end());
-      if (static_cast<int>(widths.size()) >= spec.historyMin) {
-        const double wMed = median(widths);
-        const bool steady =
-            percentile(widths, 75) - percentile(widths, 25) < spec.steadyIqrRatio * wMed;
+      if (hasHistory) {
         rs.erase(std::remove_if(rs.begin(), rs.end(),
                                 [&](const Run& x) {
                                   if (!afterGap)
                                     return std::fabs(x.mid()) >
-                                           std::max(spec.jumpRatio * wMed, spec.jumpMin);
+                                               std::max(spec.jumpRatio * wMed, spec.jumpMin) ||
+                                           (steady && x.width() < spec.reacquireWidthRatio * wMed &&
+                                            std::fabs(x.mid()) > 0.15 * wMed);
                                   return steady && x.width() < spec.reacquireWidthRatio * wMed;
                                 }),
                  rs.end());
