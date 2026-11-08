@@ -181,6 +181,12 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
         cr.loCause = cause[lo];
       if (!r.hiComplete && !cr.hiCaliper)
         cr.hiCause = cause[hi];
+      if (extent) {
+        if (!r.loComplete && !cr.loCaliper)
+          cr.run.lo = tAt(lo + 1);
+        if (!r.hiComplete && !cr.hiCaliper)
+          cr.run.hi = tAt(hi - 1);
+      }
       runs.push_back(cr);
     }
     // 被高光 / 暗区隔开的两段胶并回去（湿胶的高光条比 mergeGap 宽时）

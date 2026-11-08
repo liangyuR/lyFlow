@@ -543,7 +543,7 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 
 `glue.LateralRuns` 回显 `widthPolicy`。`extent` 不丢弃超预期宽候选；仍返回所有候选，由宿主关联目标及判规格。
 `loComplete`/`hiComplete` 只有观测到真边才为 true。搜索端点原因保持 `caliper`；有合法原图尺寸元数据时，`extent` 将原先 `outside` 细分为 `roi` 与 `image`，同样用于 `unknownSpans[].cause`；旧模式或缺少原图尺寸仍为 `outside`。
-`highlight` 与 `dark` 保持无信息原因，不能当作完整边界或宽度下界。被截断候选的 `width`/`mid` 是已观测片段几何，宿主不得直接解释为完整胶宽或胶中心。
+`highlight` 与 `dark` 保持无信息原因，不能当作完整边界或宽度下界。`extent` 的不完整端点收回最后一个有效采样，不向无信息区插值，以免高估可证明的宽度下界。被截断候选的 `width`/`mid` 是已观测片段几何，宿主不得直接解释为完整胶宽或胶中心。
 
 ### 参考连法与 GS 侧的判定
 

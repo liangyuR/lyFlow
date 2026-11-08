@@ -969,6 +969,7 @@ TEST_CASE("glue 彩色 extent：搜索、ROI、图像与高光截断保留原因
       const Json& run = station["runs"][0];
       CHECK(run["hiComplete"] == false);
       CHECK(run["hiCause"] == cause);
+      CHECK(run["hi"].get<double>() == doctest::Approx(cause == "caliper" ? 16.0 : 14.5));
     }
     const Json trackDoc = makeGraph({N{"n_track", "glue.color_track",
                                        Json{{"anchor", {100, 220}},
