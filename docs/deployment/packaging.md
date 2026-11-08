@@ -88,6 +88,10 @@ vcpkg 只把本次现编的包推到源里，从 Actions 缓存恢复的包不�
 
 `Windows release` 独立运行，不再由日常 `CI` 调用，也不在 main push 时自动运行。需要发包时手动选择分支，或推送与产品版本匹配的 `vX.Y.Z` tag。
 
+发布 Rust 缓存分别对应 `build/release-rust` 和 `build/release-probes/probe`，与日常 CI 的纯平台构建隔离。缓存只复用编译依赖，仍执行本轮源码构建、单测与 DLL 身份检查。GitHub 的不同 tag 不能互相读取缓存；要让后续 tag 复用缓存，先在 `main` 手动运行一次完整 `Windows release`（`dependencies_only=false`），成功后会同时预热固定依赖和 Rust 缓存，且不会创建 Release。只运行依赖准备不会预热 Rust；依赖配置或 Rust 工具链变更后需要重新预热，缓存也可能被 GitHub 驱逐。
+
+日常 CI 的 C++ 编译使用 sccache 与 MSVC `/Z7`，每轮仍重新配置 CMake、链接 DLL 并执行 CTest。前端/MCP 与 Rust 客户端在独立 Windows job 中并行检查，原 `fast` 检查名称保留为汇总门禁；Rust target 缓存只在 `main` 保存，PR 可恢复主分支缓存。PR 旧运行按原有并发配置自动取消。
+
 正式发布顺序：先合并经过审查的版本改动并确认日常 CI 成功，再推送匹配版本的 tag；检查草稿资产、ABI、算子组合及源码修订，最后人工发布。GS 仅引用已正式发布的固定 tag 和资产名，不使用 `latest`。签名和自动更新不属于首版。
 
 工作流拒绝任何已存在同版本 Release，包括草稿，不覆盖旧资产。若上传中断，保留草稿供排查，禁止通过重跑覆盖；采用新产品版本重新发包。源码、依赖或交付文件改变，都必须增加产品版本。
