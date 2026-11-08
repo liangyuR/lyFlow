@@ -683,6 +683,54 @@ mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, dou
   return groups;
 }
 
+bool backgroundBeyond(const std::vector<double>& score, int from, int dir, double segmentMin,
+                      double boundarySpan, const std::vector<char>* outside) {
+  constexpr double kRes = 0.5;
+  const int count = static_cast<int>(score.size());
+  if (from < 0 || from >= count || score[static_cast<std::size_t>(from)] >= 0 ||
+      (outside && (*outside)[static_cast<std::size_t>(from)]))
+    return false;
+  int i = from;
+  for (; i >= 0 && i < count; i += dir) {
+    const auto k = static_cast<std::size_t>(i);
+    if (outside && (*outside)[k])
+      break;
+    if (score[k] >= 0)
+      return score[k] < segmentMin;
+  }
+  return std::abs(i - from) * kRes >= boundarySpan;
+}
+
+bool completeAgainstBackground(Run* r, const std::vector<double>& score, double half,
+                               double segmentMin, double reference,
+                               const std::vector<char>* outside) {
+  constexpr double kRes = 0.5;
+  const int count = static_cast<int>(score.size());
+  const int lo = static_cast<int>(std::ceil((r->lo + half) / kRes - 1e-6)) - 1;
+  const int hi = static_cast<int>(std::floor((r->hi + half) / kRes + 1e-6)) + 1;
+  // 无信息区一直延伸到卡尺端点或 ROI / 图像外时看不到它后面是什么：有邻站参考宽时由下面的宽度门兜底，
+  // 没有参考时要求无信息区至少和可见胶一样宽
+  const double span = std::isfinite(reference) ? 0.0 : r->width();
+  const bool loBg =
+      !r->loComplete && lo >= 0 && backgroundBeyond(score, lo, -1, segmentMin, span, outside);
+  const bool hiBg =
+      !r->hiComplete && hi < count && backgroundBeyond(score, hi, 1, segmentMin, span, outside);
+  if (!loBg && !hiBg)
+    return false;
+  if (std::isfinite(reference) && r->width() < 0.7 * reference)
+    return false;
+  if (loBg) {
+    r->lo = -half + (lo + 1) * kRes;
+    r->loComplete = true;
+  }
+  if (hiBg) {
+    r->hi = -half + (hi - 1) * kRes;
+    r->hiComplete = true;
+  }
+  r->completeEdges = r->loComplete && r->hiComplete;
+  return true;
+}
+
 const char* causeName(ColorCause c) {
   switch (c) {
   case ColorCause::Highlight:
@@ -1083,6 +1131,23 @@ ColorTrackResult colorTrack(const Field& R, const ColorTrackSpec& spec, double h
       mergeAcrossGaps(&rs, background, spec.searchHalf,
                       std::max(spec.runs.mergeGap, spec.mergeUnknownGap),
                       spec.extent ? 2.0 * spec.searchHalf : spec.runs.mergeWidthMax, &guide);
+      std::vector<double> score;
+      std::vector<char> outside;
+      if (spec.extent) {
+        // 胶边外侧是成片的饱和 / 过暗背景时，这条边看得见，不当作被遮挡
+        score.resize(background.size());
+        outside.resize(background.size());
+        const cv::Rect& in = R.valid();
+        for (std::size_t i = 0; i < score.size(); ++i) {
+          const P2 q = p + n * (-spec.searchHalf + 0.5 * static_cast<double>(i));
+          score[i] = R.at(q);
+          outside[i] = !(q.x >= in.x && q.y >= in.y && q.x + 1 < in.x + in.width &&
+                         q.y + 1 < in.y + in.height);
+        }
+        for (Run& x : rs)
+          completeAgainstBackground(&x, score, spec.searchHalf, spec.runs.segmentMin, wMed,
+                                    &outside);
+      }
       rs.erase(std::remove_if(rs.begin(), rs.end(),
                               [&](const Run& x) {
                                 return (x.width() < spec.widthMin &&
@@ -1106,6 +1171,7 @@ ColorTrackResult colorTrack(const Field& R, const ColorTrackSpec& spec, double h
       }
       const Run* r = nearestRun(rs);
       bool ambiguous = false, incomplete = false;
+      double edgeOnly = kNaN; // 贴画面边的胶点中心（法向偏移），NaN = 两边都看得见
       if (spec.extent && r && std::fabs(r->mid()) < accept) {
         for (const Run& other : rs) {
           if (&other != r && std::fabs(other.mid()) < accept &&
@@ -1114,6 +1180,19 @@ ColorTrackResult colorTrack(const Field& R, const ColorTrackSpec& spec, double h
             ambiguous = true;
         }
         incomplete = !r->loComplete || !r->hiComplete;
+        // 一侧是真边、另一侧走出 ROI / 图像（胶贴着画面边）：位置仍可信，只是看不到全宽。
+        // 有稳定宽度时按真边 + 半个参考宽取中心，否则取可见片段中点；宽度不进历史
+        if (incomplete && !ambiguous && r->loComplete != r->hiComplete) {
+          const int count = static_cast<int>(outside.size());
+          const int beyond =
+              r->loComplete ? static_cast<int>(std::floor((r->hi + spec.searchHalf) / 0.5 + 1e-6)) + 1
+                            : static_cast<int>(std::ceil((r->lo + spec.searchHalf) / 0.5 - 1e-6)) - 1;
+          if (beyond >= 0 && beyond < count && outside[static_cast<std::size_t>(beyond)]) {
+            const bool known = std::isfinite(wMed) && r->width() < wMed;
+            edgeOnly = known ? (r->loComplete ? r->lo + 0.5 * wMed : r->hi - 0.5 * wMed) : r->mid();
+            incomplete = false;
+          }
+        }
         if (ambiguous)
           out.ambiguousS.push_back(s);
         else if (incomplete)
@@ -1131,16 +1210,18 @@ ColorTrackResult colorTrack(const Field& R, const ColorTrackSpec& spec, double h
         return angleDiffDeg(b, mid) <=
                0.5 * (spec.bearingTo - spec.bearingFrom) + spec.bearingMargin;
       };
-      if (r && std::fabs(r->mid()) < accept && plausible(p + n * r->mid())) {
-        c = p + n * r->mid();
+      const double mid = r && std::isfinite(edgeOnly) ? edgeOnly : r ? r->mid() : 0.0;
+      if (r && std::fabs(mid) < accept && plausible(p + n * mid)) {
+        c = p + n * mid;
         TrackPoint tp;
         tp.s = s;
         tp.point = c;
-        tp.mid = r->mid();
+        tp.mid = mid;
         tp.width = r->width();
         tp.peak = r->peak;
         out.points.push_back(tp);
-        widths.push_back(r->width());
+        if (!std::isfinite(edgeOnly))
+          widths.push_back(r->width());
         lastFound = s;
         unknownSince = 0;
         found = true;

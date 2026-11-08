@@ -16,7 +16,11 @@ struct ColorRun {
   ColorCause hiCause = ColorCause::None;
   bool loCaliper = false; ///< 段顶到了卡尺端点
   bool hiCaliper = false;
+  ColorCause loBackground = ColorCause::None; ///< 认作真边的那一侧外面是哪种无信息背景
+  ColorCause hiBackground = ColorCause::None;
 };
+
+Json backgroundName(ColorCause c) { return c == ColorCause::None ? Json() : Json(causeName(c)); }
 
 const char* edgeCause(bool complete, bool caliper, ColorCause c) {
   if (complete)
@@ -205,6 +209,23 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
       m.hiCaliper = runs[last].hiCaliper;
       merged.push_back(m);
     }
+    if (extent) {
+      // 胶边外侧是成片的饱和 / 过暗背景（打磨面反光、黑色零件）时，这条边看得见，不当作被遮挡；
+      // 半条胶落在高光里只剩半宽的，按邻站参考宽拦下
+      std::vector<char> outside(static_cast<std::size_t>(count));
+      for (int i = 0; i < count; ++i)
+        outside[static_cast<std::size_t>(i)] = cause[i] == ColorCause::Outside;
+      for (ColorRun& m : merged) {
+        const bool loOpen = !m.run.loComplete, hiOpen = !m.run.hiComplete;
+        if (completeAgainstBackground(&m.run, v, half, spec.segmentMin, guides[station].width,
+                                      &outside)) {
+          if (loOpen && m.run.loComplete)
+            m.loBackground = m.loCause;
+          if (hiOpen && m.run.hiComplete)
+            m.hiBackground = m.hiCause;
+        }
+      }
+    }
     Json js = Json::array();
     for (const ColorRun& cr : merged) {
       const Run& r = cr.run;
@@ -232,6 +253,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
                {"hiComplete", r.hiComplete},
                {"loCause", boundaryCause(r.loComplete, cr.loCaliper, cr.loCause, r.lo, true)},
                {"hiCause", boundaryCause(r.hiComplete, cr.hiCaliper, cr.hiCause, r.hi, false)},
+               {"loBackground", backgroundName(cr.loBackground)},
+               {"hiBackground", backgroundName(cr.hiBackground)},
                {"meanScore", n > 0 ? exact(sum / n) : Json()},
                {"unknownWidth", blind * kRes},
                {"edgeLo", Json()},

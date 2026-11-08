@@ -115,6 +115,18 @@ std::vector<std::pair<std::size_t, std::size_t>>
 mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, double half,
                 double gap, double widthMax, const ColorMergeGuide* guide = nullptr);
 
+/// extent：段的一条边被无信息采样截断（`from` 是边外第一个采样，`dir` = ±1 朝外）时，往外走过连续的无信息采样：
+/// 先遇到明确不是胶的采样（0 ≤ score < segmentMin），说明胶在这里结束、外侧是饱和或过暗的背景，这条边是看得见的真边；
+/// 又接上胶色时不能确定；无信息区一直到卡尺端点或 ROI / 图像外（`outside`）时，长度不小于 `boundarySpan`（px）才算。
+/// score < 0 为无信息；`from` 本身在 ROI / 图像外时不算（那是观测边界截断）。
+bool backgroundBeyond(const std::vector<double>& score, int from, int dir, double segmentMin,
+                      double boundarySpan, const std::vector<char>* outside = nullptr);
+/// 按 backgroundBeyond 把段 `r` 外侧是背景的不完整边认作真边；`reference` 有限时，认边后的宽度须不小于它的 0.7 倍
+/// （半条胶落在高光里时只剩半宽，不能当完整胶宽）。`half` 是卡尺半长，采样间距 0.5 px。返回是否改了边。
+bool completeAgainstBackground(Run* r, const std::vector<double>& score, double half,
+                               double segmentMin, double reference,
+                               const std::vector<char>* outside = nullptr);
+
 /// 卡尺上一个采样无信息的原因。
 enum class ColorCause { None, Highlight, Dark, Outside };
 const char* causeName(ColorCause c);

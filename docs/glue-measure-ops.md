@@ -509,7 +509,9 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 `widthPolicy` 为 `range`（默认）或 `extent`。默认策略保留 `[widthMin, widthMax]` 筛选、`mergeWidthMax` 合并上限和原接受窗。
 显式 `extent` 策略对完整候选保留宽度下限，不完整片段保留为无信息证据，不因完整胶宽超过 `widthMax` 丢弃胶点；搜索仍固定在 `±searchHalf`，合并总宽最多 `2 × searchHalf`，接受窗改为 `±acceptOffsetRatio × searchHalf`。
 真实背景阻断、有限合并缝、邻站/历史合并证据及连续性门保持有效。两个候选都落在接受窗、中心距离差不超过 `max(1 px, 0.1 × widthMax)` 且次候选峰值至少为首候选的 80% 时，该步记为歧义，不任意选边。
-不完整边界的候选也不以片段中点参与拟合，沿上一个可靠方向继续有限搜索。
+不完整边界的候选也不以片段中点参与拟合，沿上一个可靠方向继续有限搜索。两种情况例外：
+一条边外侧是饱和或过暗的背景时按真边处理（规则同 `glue.color_runs`，参考宽取稳定的宽度历史）；
+一侧是真边、另一侧走出 ROI / 图像（胶贴着画面边）时照样出胶点，有稳定宽度历史时中心取真边加半个参考宽，否则取可见片段中点，这类胶点的宽度不进历史。
 
 `glue.Track` 回显 `widthPolicy`，并给出 `ambiguousS[]`（歧义步）和 `incompleteS[]`（非歧义但边界不完整的步，包含高光/暗区/观测边界，不等同可靠截断）。
 这两类步都计入 `unknownS`/`unknownSteps`，不计 `maxGap`；宽度值只来自完整边界胶点。没有有效方向峰时两数组为空、原有统计为 `null`。
@@ -543,7 +545,12 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 
 `glue.LateralRuns` 回显 `widthPolicy`。`extent` 不丢弃超预期宽候选；仍返回所有候选，由宿主关联目标及判规格。
 `loComplete`/`hiComplete` 只有观测到真边才为 true。搜索端点原因保持 `caliper`；有合法原图尺寸元数据时，`extent` 将原先 `outside` 细分为 `roi` 与 `image`，同样用于 `unknownSpans[].cause`；旧模式或缺少原图尺寸仍为 `outside`。
-`highlight` 与 `dark` 保持无信息原因，不能当作完整边界或宽度下界。`extent` 的不完整端点收回最后一个有效采样，不向无信息区插值，以免高估可证明的宽度下界。被截断候选的 `width`/`mid` 是已观测片段几何，宿主不得直接解释为完整胶宽或胶中心。
+`highlight` 与 `dark` 本身是无信息原因，不能当作宽度下界。`extent` 下一条边外侧先是无信息采样时，继续往外看：
+走过这段无信息区后先遇到明确不是胶的采样（得分 < `segmentMin`），说明胶在这里结束、外侧是饱和或过暗的背景（打磨面反光、黑色零件），
+这条边按真边输出（`loComplete`/`hiComplete` 为 true，`loCause`/`hiCause` 为 `edge`），另给 `loBackground`/`hiBackground` = `highlight`/`dark` 说明外侧背景；
+无信息区一直延伸到卡尺端点或 ROI / 图像外时看不到后面，有邻站参考宽才按真边处理，没有参考时要求无信息区不窄于可见胶宽；
+无信息区之后又接上胶色时仍不完整。按真边处理后的宽度须不小于邻站参考宽的 0.7 倍，半条胶落在高光里、只剩半宽的站仍记不完整。
+胶本身被高光覆盖到边缘、又紧贴同样饱和的背景时，覆盖部分不计入胶宽，量出的是可见部分。`extent` 的不完整端点收回最后一个有效采样，不向无信息区插值，以免高估可证明的宽度下界。被截断候选的 `width`/`mid` 是已观测片段几何，宿主不得直接解释为完整胶宽或胶中心。
 
 ### 参考连法与 GS 侧的判定
 
