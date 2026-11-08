@@ -1127,3 +1127,46 @@ TEST_CASE("glue 彩色 extent：宽胶中间的反光带宽过合并上限仍并
     }
   }
 }
+
+TEST_CASE("glue 彩色 extent：局部鼓包比邻站宽、中间被反光或浅色带劈开，仍并成一条完整胶") {
+  // 胶宽 48 px（x 76–124），中间 40 行鼓到 70 px（x 60–130），鼓包里 x 92–100 是一条反光（无信息）或浅色（低分）带
+  for (const bool blind : {true, false}) {
+    CAPTURE(blind);
+    glue::ColorMaps maps;
+    maps.frame = cv::Rect(0, 0, 201, 241);
+    maps.score = cv::Mat(maps.frame.size(), CV_32F, cv::Scalar(0));
+    maps.state = cv::Mat::zeros(maps.frame.size(), CV_32F);
+    maps.luma = cv::Mat(maps.frame.size(), CV_32F, cv::Scalar(140));
+    for (int y = 0; y < maps.score.rows; ++y) {
+      const bool bulge = y >= 100 && y < 140;
+      for (int x = bulge ? 60 : 76; x < (bulge ? 130 : 124); ++x) {
+        const bool band = bulge && x >= 92 && x < 100;
+        maps.score.at<float>(y, x) = band ? (blind ? NAN : 0.2F) : 1.0F;
+        maps.state.at<float>(y, x) = band && blind ? 1.0F : 0.0F;
+      }
+    }
+    const Data input = glue::colorMapsBundle(std::move(maps), cv::Size(201, 241));
+    const Json runs = runColorMaps(
+        makeGraph({N{"n_line", "glue.polyline", Json{{"points", "[[100,220],[100,20]]"}}},
+                   N{"n_runs", "glue.color_runs",
+                     Json{{"searchHalf", 80},
+                          {"sRange", {20, 180}},
+                          {"widthPolicy", "extent"},
+                          {"mergeWidthMax", 30}}}},
+                  {E{"n_line.line", "n_runs.line"}}),
+        input, "n_runs", "runs");
+    int bulges = 0;
+    for (const Json& station : runs["stations"]) {
+      const double y = station["center"][1].get<double>();
+      if (y < 104 || y > 136)
+        continue;
+      ++bulges;
+      CAPTURE(y);
+      REQUIRE(station["runs"].size() == 1);
+      CHECK(station["runs"][0]["loComplete"] == true);
+      CHECK(station["runs"][0]["hiComplete"] == true);
+      CHECK(station["runs"][0]["width"].get<double>() == doctest::Approx(70.0).epsilon(0.05));
+    }
+    CHECK(bulges >= 8);
+  }
+}

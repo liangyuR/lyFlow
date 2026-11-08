@@ -630,7 +630,7 @@ ColorMaps colorMaps(const cv::Mat& rgb, const ColorModel& m, cv::Rect roi, int t
 std::vector<std::pair<std::size_t, std::size_t>>
 mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, double half,
                 double gap, double widthMax, const ColorMergeGuide* guide,
-                const std::vector<char>* noInfo) {
+                const std::vector<char>* noInfo, bool keepWide) {
   constexpr double kRes = 0.5;
   const int count = static_cast<int>(background.size());
   const bool guided = guide && std::isfinite(guide->width) && guide->width > 0;
@@ -657,10 +657,11 @@ mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, dou
         bg += background[static_cast<std::size_t>(i)] ? 1 : 0;
         blind += noInfo && (*noInfo)[static_cast<std::size_t>(i)] ? 1 : 0;
       }
-      // 缝里全是高光 / 暗区、不宽于两边较窄的一段：宽胶面上的一条镜面反光带，可以比 limit 宽
+      // extent：缝里全是高光 / 暗区、不宽于两边较窄的一段（宽胶面上的一条镜面反光带，可以比 limit 宽），
+      // 或两段紧挨着、中间没有采样（胶里一道浅谷被半高拆开）：都是同一条胶，直接并
       const bool stripe =
           noInfo && blind == total && r.lo - candidate.hi <= std::min(candidate.width(), r.width());
-      if ((r.lo - candidate.hi > limit && !stripe) || total <= 0 || bg > 0)
+      if ((r.lo - candidate.hi > limit && !stripe) || (total <= 0 && !keepWide) || bg > 0)
         break;
       candidate.hi = r.hi;
       candidate.hiComplete = r.hiComplete;
@@ -669,9 +670,16 @@ mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, dou
       candidate.parts += r.parts;
       if (guided)
         componentCost = std::min(componentCost, cost(r));
-      if (guided &&
-          (candidate.width() < 0.7 * guide->width || candidate.width() > 1.3 * guide->width ||
-           std::fabs(candidate.mid() - guide->center) > 0.3 * guide->width))
+      if (stripe && keepWide) {
+        best = candidate;
+        bestCost = guided ? cost(candidate) : 0;
+        last = k;
+        continue;
+      }
+      // extent 不按参考宽设上限：局部鼓包比邻站宽是要量出来的
+      if (guided && (candidate.width() < 0.7 * guide->width ||
+                     (!keepWide && candidate.width() > 1.3 * guide->width) ||
+                     std::fabs(candidate.mid() - guide->center) > 0.3 * guide->width))
         continue;
       const double nextCost = guided ? cost(candidate) : 0;
       if (!guided || (nextCost < bestCost && nextCost < componentCost)) {
@@ -718,7 +726,7 @@ bool backgroundBeyond(const std::vector<double>& score, int from, int dir, doubl
 
 bool completeAgainstBackground(Run* r, const std::vector<double>& score, double half,
                                double segmentMin, double reference,
-                               const std::vector<char>* outside) {
+                               const std::vector<char>* outside, double minRatio) {
   constexpr double kRes = 0.5;
   const int count = static_cast<int>(score.size());
   const int lo = static_cast<int>(std::ceil((r->lo + half) / kRes - 1e-6)) - 1;
@@ -734,7 +742,7 @@ bool completeAgainstBackground(Run* r, const std::vector<double>& score, double 
                     backgroundBeyond(score, hi, 1, segmentMin, span, glueSpan, outside);
   if (!loBg && !hiBg)
     return false;
-  if (std::isfinite(reference) && r->width() < 0.7 * reference)
+  if (std::isfinite(reference) && r->width() < minRatio * reference)
     return false;
   if (loBg) {
     r->lo = -half + (lo + 1) * kRes;
