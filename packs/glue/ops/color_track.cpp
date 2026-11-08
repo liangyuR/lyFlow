@@ -178,7 +178,7 @@ std::vector<Issue> validate(const ParamView& params, const std::set<std::string>
 void registerColorTrack(Registry& r) {
   OperatorDesc op;
   op.id = "glue.color_track";
-  op.version = "1.1.0";
+  op.version = "1.2.0";
   op.label = "彩色粗跟踪";
   op.category = "涂胶/彩色";
   op.keywords = {"glue", "color", "track", "path", "fit", "涂胶", "彩色", "跟踪", "拟合", "胶路"};
