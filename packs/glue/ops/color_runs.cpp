@@ -102,6 +102,9 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   spec.mergePeakRatio = 0;
   spec.mergeWidthMax = params.number("mergeWidthMax");
   const double half = params.number("searchHalf");
+  const bool extent = params.choice("widthPolicy") == "extent";
+  if (extent)
+    spec.mergeWidthMax = 2.0 * half;
   const double step = params.number("stationStep");
   const double mergeUnknownGap = params.number("mergeUnknownGap");
   const auto range = params.vec2("sRange");
@@ -132,6 +135,23 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
       if (cause[i] != ColorCause::Outside)
         ++inFrame;
     }
+    const auto namedCause = [&](ColorCause c, int i) {
+      if (extent && c == ColorCause::Outside && maps.image.width > 0 && maps.image.height > 0) {
+        const P2 p = st.c + st.n * tAt(i);
+        return p.x < 0 || p.y < 0 || p.x >= maps.image.width - 1 || p.y >= maps.image.height - 1
+                   ? "image"
+                   : "roi";
+      }
+      return causeName(c);
+    };
+    const auto boundaryCause = [&](bool complete, bool caliper, ColorCause c, double t, bool lo) {
+      if (!complete && !caliper && c == ColorCause::Outside && extent) {
+        const int i = lo ? static_cast<int>(std::ceil((t + half) / kRes - 1e-6)) - 1
+                         : static_cast<int>(std::floor((t + half) / kRes + 1e-6)) + 1;
+        return namedCause(c, i);
+      }
+      return edgeCause(complete, caliper, c);
+    };
     // 无信息区间：同一原因的连续采样
     Json spans = Json::array();
     for (int i = 0; i < count;) {
@@ -140,9 +160,10 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
         continue;
       }
       int j = i;
-      while (j + 1 < count && cause[j + 1] == cause[i])
+      while (j + 1 < count && cause[j + 1] == cause[i] &&
+             std::string(namedCause(cause[j + 1], j + 1)) == namedCause(cause[i], i))
         ++j;
-      spans.push_back(Json{{"lo", tAt(i)}, {"hi", tAt(j)}, {"cause", causeName(cause[i])}});
+      spans.push_back(Json{{"lo", tAt(i)}, {"hi", tAt(j)}, {"cause", namedCause(cause[i], i)}});
       const P2 p0 = st.c + st.n * tAt(i), p1 = st.c + st.n * tAt(j);
       unknownSegs.push_back({Px{p0.x, p0.y}, Px{p1.x, p1.y}});
       i = j + 1;
@@ -160,6 +181,12 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
         cr.loCause = cause[lo];
       if (!r.hiComplete && !cr.hiCaliper)
         cr.hiCause = cause[hi];
+      if (extent) {
+        if (!r.loComplete && !cr.loCaliper)
+          cr.run.lo = tAt(lo + 1);
+        if (!r.hiComplete && !cr.hiCaliper)
+          cr.run.hi = tAt(hi - 1);
+      }
       runs.push_back(cr);
     }
     // 被高光 / 暗区隔开的两段胶并回去（湿胶的高光条比 mergeGap 宽时）
@@ -194,23 +221,24 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
           ++blind;
         }
       }
-      js.push_back(Json{{"lo", exact(r.lo)},
-                        {"hi", exact(r.hi)},
-                        {"width", exact(r.width())},
-                        {"mid", exact(r.mid())},
-                        {"peak", exact(r.peak)},
-                        {"parts", r.parts},
-                        {"loComplete", r.loComplete},
-                        {"hiComplete", r.hiComplete},
-                        {"loCause", edgeCause(r.loComplete, cr.loCaliper, cr.loCause)},
-                        {"hiCause", edgeCause(r.hiComplete, cr.hiCaliper, cr.hiCause)},
-                        {"meanScore", n > 0 ? exact(sum / n) : Json()},
-                        {"unknownWidth", blind * kRes},
-                        {"edgeLo", Json()},
-                        {"edgeHi", Json()},
-                        {"depth", Json()},
-                        {"sharpness", Json()},
-                        {"level", 1}});
+      js.push_back(
+          Json{{"lo", exact(r.lo)},
+               {"hi", exact(r.hi)},
+               {"width", exact(r.width())},
+               {"mid", exact(r.mid())},
+               {"peak", exact(r.peak)},
+               {"parts", r.parts},
+               {"loComplete", r.loComplete},
+               {"hiComplete", r.hiComplete},
+               {"loCause", boundaryCause(r.loComplete, cr.loCaliper, cr.loCause, r.lo, true)},
+               {"hiCause", boundaryCause(r.hiComplete, cr.hiCaliper, cr.hiCause, r.hi, false)},
+               {"meanScore", n > 0 ? exact(sum / n) : Json()},
+               {"unknownWidth", blind * kRes},
+               {"edgeLo", Json()},
+               {"edgeHi", Json()},
+               {"depth", Json()},
+               {"sharpness", Json()},
+               {"level", 1}});
       const P2 p0 = st.c + st.n * r.lo, p1 = st.c + st.n * r.hi;
       runSegs.push_back({Px{p0.x, p0.y}, Px{p1.x, p1.y}});
     }
@@ -228,6 +256,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   Json rec;
   rec["count"] = poses.size();
   rec["source"] = "color";
+  rec["widthPolicy"] = extent ? "extent" : "range";
   rec["stationStep"] = step;
   rec["sRange"] = poses.empty() ? Json() : Json::array({exact(a), exact(b)});
   rec["searchHalf"] = half;
@@ -256,7 +285,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
 void registerColorRuns(Registry& r) {
   OperatorDesc op;
   op.id = "glue.color_runs";
-  op.version = "1.0.1";
+  op.version = "1.1.0";
   op.label = "彩色横向卡尺";
   op.category = "涂胶/彩色";
   op.keywords = {"glue", "color", "caliper", "runs", "width", "涂胶", "彩色", "卡尺", "胶宽"};
@@ -270,6 +299,8 @@ void registerColorRuns(Registry& r) {
       "允许缝宽到 max(mergeGap, mergeUnknownGap, 参考胶宽 / 2)，组合须符合参考宽度和中心，且优于每个原片段；"
       "外边被高光截断的标记保留。mergeUnknownGap = 0 关闭邻站自适应。\n"
       "输出 glue.LateralRuns 的超集（source = color；edgeLo、edgeHi、depth、sharpness 为 null，level 恒为 1）。"
+      "widthPolicy=extent 时不受 mergeWidthMax 限制，合并仍限于 ±searchHalf，并保留背景阻断；"
+      "观测边界 outside 在元数据可用时细分 roi/image。输出回显 widthPolicy。"
       "不按宽度筛、不挑段、不判有无胶。";
   op.inputs = {
       Port{"maps", "Bundle<glue.ColorMaps>", "Maps",
@@ -307,6 +338,10 @@ void registerColorRuns(Registry& r) {
           "mergeUnknownGap", "Merge Unknown Gap", 16.0, "px",
           "无明确背景的高光缝基础上限；可信邻站允许按半个参考胶宽自适应，仍检查组合宽度与中心。0 关闭该自适应。",
           0.0, kOpen, true),
+      enumParam(
+          "widthPolicy", "Width Policy", "range",
+          "range 保留合并宽度上限；extent 由有限 searchHalf 限定合并宽度，仍保留背景阻断和邻站证据。",
+          {EnumOption{"range", "宽度范围", ""}, EnumOption{"extent", "完整边界", ""}}, true),
       rangedFloat("mergeWidthMax", "Merge Width Max", 90.0, "px", "合并后不宽于它才合并。", 1.0,
                   kOpen, true),
   };

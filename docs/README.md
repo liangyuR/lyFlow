@@ -49,6 +49,7 @@
 - [快速开始](getting-started.md)：依赖准备、桌面 / CLI / 浏览器、纯平台构建与常见阻塞。
 - [测试地图](testing.md)：按目的选择检查入口，区分单测、交互验收、CI 与发布门禁。
 - [E2E 脚本说明](../scripts/e2e/README.md)：真实桌面与浏览器的驱动方式、分组运行。
+- [版本变更](CHANGELOG.md)：当前产品版本的算子行为与兼容要求。
 - [Windows 发包](deployment/packaging.md)：固定依赖、运行库 / SDK、版本、草稿 Release 与消费验收。
 - [C++ core](../core/README.md)、[Rust 桥接](../bridge/README.md)、[桌面前端](../app/README.md)：各模块的开发约定。
 - [React 编辑器](../packages/editor/README.md)：组件 API、Transport、宿主样式与依赖去重。

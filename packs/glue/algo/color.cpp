@@ -1054,7 +1054,7 @@ ColorTrackResult colorTrack(const Field& R, const ColorTrackSpec& spec, double h
   double unknownSince = 0; // 上一个胶点之后无信息步走过的长度
   bool stopped = false;
   std::vector<double> widths;
-  const double accept = spec.acceptOffsetRatio * spec.widthMax;
+  const double accept = spec.acceptOffsetRatio * (spec.extent ? spec.searchHalf : spec.widthMax);
   const double window = std::min(accept, spec.searchHalf);
   RunSplitSpec rawSpec = spec.runs;
   rawSpec.mergeGap = 0;
@@ -1081,16 +1081,20 @@ ColorTrackResult colorTrack(const Field& R, const ColorTrackSpec& spec, double h
         background[i] = x >= 0.0 && x < 0.5 * spec.runs.segmentMin;
       }
       mergeAcrossGaps(&rs, background, spec.searchHalf,
-                      std::max(spec.runs.mergeGap, spec.mergeUnknownGap), spec.runs.mergeWidthMax,
-                      &guide);
+                      std::max(spec.runs.mergeGap, spec.mergeUnknownGap),
+                      spec.extent ? 2.0 * spec.searchHalf : spec.runs.mergeWidthMax, &guide);
       rs.erase(std::remove_if(rs.begin(), rs.end(),
                               [&](const Run& x) {
-                                return x.width() < spec.widthMin || x.width() > spec.widthMax;
+                                return (x.width() < spec.widthMin &&
+                                        (!spec.extent || (x.loComplete && x.hiComplete))) ||
+                                       (!spec.extent && x.width() > spec.widthMax);
                               }),
                rs.end());
       if (hasHistory) {
         rs.erase(std::remove_if(rs.begin(), rs.end(),
                                 [&](const Run& x) {
+                                  if (spec.extent && (!x.loComplete || !x.hiComplete))
+                                    return false;
                                   if (!afterGap)
                                     return std::fabs(x.mid()) >
                                                std::max(spec.jumpRatio * wMed, spec.jumpMin) ||
@@ -1101,6 +1105,22 @@ ColorTrackResult colorTrack(const Field& R, const ColorTrackSpec& spec, double h
                  rs.end());
       }
       const Run* r = nearestRun(rs);
+      bool ambiguous = false, incomplete = false;
+      if (spec.extent && r && std::fabs(r->mid()) < accept) {
+        for (const Run& other : rs) {
+          if (&other != r && std::fabs(other.mid()) < accept &&
+              std::fabs(other.mid()) - std::fabs(r->mid()) <= std::max(1.0, 0.1 * spec.widthMax) &&
+              other.peak >= 0.8 * r->peak)
+            ambiguous = true;
+        }
+        incomplete = !r->loComplete || !r->hiComplete;
+        if (ambiguous)
+          out.ambiguousS.push_back(s);
+        else if (incomplete)
+          out.incompleteS.push_back(s);
+        if (ambiguous || incomplete)
+          r = nullptr;
+      }
       const auto plausible = [&](P2 q) {
         if (length(q - spec.anchor) < spec.outwardRatio * s)
           return false;
@@ -1130,7 +1150,8 @@ ColorTrackResult colorTrack(const Field& R, const ColorTrackSpec& spec, double h
           total += 1;
           valid += R.at(p + n * t) >= 0.0 ? 1 : 0;
         }
-        if (total > 0 && static_cast<double>(valid) / total < spec.infoMin) {
+        if (ambiguous || incomplete ||
+            (total > 0 && static_cast<double>(valid) / total < spec.infoMin)) {
           out.unknownSteps += 1;
           out.unknownS.push_back(s);
           unknownSince += spec.coarseStep;

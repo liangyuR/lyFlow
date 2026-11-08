@@ -171,6 +171,11 @@ bool readColorMaps(const Data& d, ColorMapsView* out) {
   if (!frameOf(*b, &frame) || !planeOf(*b, "score", frame, &score) ||
       !planeOf(*b, "state", frame, &out->state) || !planeOf(*b, "luma", frame, &out->luma))
     return false;
+  out->image = {};
+  const Json& meta = b->field("frame")->asRecord()->data;
+  if (meta.contains("imageWidth") && meta["imageWidth"].is_number_integer() &&
+      meta.contains("imageHeight") && meta["imageHeight"].is_number_integer())
+    out->image = cv::Size(meta["imageWidth"].get<int>(), meta["imageHeight"].get<int>());
   out->score = Field(score, frame.tl(), frame);
   out->frame = frame;
   return true;

@@ -28,6 +28,7 @@ ColorTrackSpec specOf(const ParamView& params) {
   spec.runs.mergeWidthMax = params.number("mergeWidthMax");
   spec.widthMin = params.number("widthMin");
   spec.widthMax = params.number("widthMax");
+  spec.extent = params.choice("widthPolicy") == "extent";
   spec.acceptOffsetRatio = params.number("acceptOffsetRatio");
   spec.coarseStep = params.number("coarseStep");
   spec.maxGap = params.number("maxGap");
@@ -74,6 +75,9 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     if (valid)
       heading = (*peaks)[static_cast<std::size_t>(peakIndex)]["angle"].get<double>();
   }
+  rec["widthPolicy"] = spec.extent ? "extent" : "range";
+  rec["ambiguousS"] = Json::array();
+  rec["incompleteS"] = Json::array();
   rec["headingSource"] = fromFan ? "fan" : "param";
   rec["peakIndex"] = fromFan ? Json(peakIndex) : Json();
   rec["valid"] = valid;
@@ -108,6 +112,8 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     } else {
       straightBeadPath(spec.anchor, heading, spec.zoneStart, spec.zoneEnd, &s, &points, &tangents);
     }
+    rec["ambiguousS"] = tr.ambiguousS;
+    rec["incompleteS"] = tr.incompleteS;
     rec["steps"] = tr.steps;
     rec["found"] = tr.points.size();
     rec["unknownSteps"] = tr.unknownSteps;
@@ -172,7 +178,7 @@ std::vector<Issue> validate(const ParamView& params, const std::set<std::string>
 void registerColorTrack(Registry& r) {
   OperatorDesc op;
   op.id = "glue.color_track";
-  op.version = "1.0.1";
+  op.version = "1.1.0";
   op.label = "彩色粗跟踪";
   op.category = "涂胶/彩色";
   op.keywords = {"glue", "color", "track", "path", "fit", "涂胶", "彩色", "跟踪", "拟合", "胶路"};
@@ -182,6 +188,8 @@ void registerColorTrack(Registry& r) {
       "没有陡度门、不退回射线。没找到胶、且接受窗（± acceptOffsetRatio × widthMax）里有效采样不到 infoMin 的一步"
       "是「无信息」（高光、暗区挡住了），不计入 maxGap。胶点 ≥ minPoints 时稳健拟合成胶路，否则输出直线。\n"
       "宽度历史稳定时按参考宽度约束高光合并，连续跟踪也拒绝明显偏心的半宽片段，避免吸附到胶的一侧。\n"
+      "widthPolicy=extent 时保留超 widthMax 的完整胶，以 searchHalf 限定搜索及合并；同等候选歧义或边界不完整时不拟合片段中心。"
+      "track 给 widthPolicy、ambiguousS、incompleteS（两类步计入 unknownS）。"
       "track 另给 unknownSteps 与 coverageInformative = found / (steps − unknownSteps)。不输出 ok。";
   op.inputs = {
       Port{"maps", "Bundle<glue.ColorMaps>", "Maps",
@@ -237,6 +245,10 @@ void registerColorTrack(Registry& r) {
           "无明确背景的高光缝基础上限；稳定历史允许按半个参考胶宽自适应，仍检查组合宽度与中心。"
           "0 关闭该自适应，胶点取合并段中点。",
           0.0, kOpen, true),
+      enumParam(
+          "widthPolicy", "Width Policy", "range",
+          "range 保留宽度上限；extent 在有限 searchHalf 内保留完整宽胶，不用截断或歧义段拟合中心。",
+          {EnumOption{"range", "宽度范围", ""}, EnumOption{"extent", "完整边界", ""}}, true),
       rangedFloat("widthMin", "Width Min", 4.0, "px", "胶点段宽度下限。", 0.0, kOpen, true),
       rangedFloat("widthMax", "Width Max", 90.0, "px", "胶点段宽度上限。", 0.0, kOpen, true),
       rangedFloat("acceptOffsetRatio", "Accept Offset Ratio", 0.6, "",
