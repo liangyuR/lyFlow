@@ -32,21 +32,24 @@ const char* edgeCause(bool complete, bool caliper, ColorCause c) {
 
 std::vector<ColorMergeGuide> mergeGuides(const ColorMapsView& maps,
                                          const std::vector<StationPose>& poses, double half,
-                                         const RunSplitSpec& rawSpec, double gap) {
+                                         const RunSplitSpec& rawSpec, double gap, bool extent) {
   std::vector<ColorMergeGuide> seeds(poses.size()), guides(poses.size());
   std::vector<std::vector<Run>> rawRuns(poses.size());
   std::vector<double> widths;
   const auto count = static_cast<std::size_t>(std::floor(2.0 * half / kRes + 1e-9)) + 1;
-  std::vector<char> background(count);
+  std::vector<char> background(count), noInfo(count);
   for (std::size_t i = 0; i < poses.size(); ++i) {
     const auto& st = poses[i];
     rawRuns[i] = caliperRuns(maps.score, st.c, st.n, half, rawSpec);
     auto runs = rawRuns[i];
     for (std::size_t k = 0; k < count; ++k) {
-      const double score = maps.score.at(st.c + st.n * (-half + k * kRes));
+      const P2 p = st.c + st.n * (-half + k * kRes);
+      const double score = maps.score.at(p);
       background[k] = score >= 0 && score < 0.5 * rawSpec.segmentMin;
+      noInfo[k] = score < 0 && causeAt(maps.state, maps.frame, p) != ColorCause::Outside;
     }
-    mergeAcrossGaps(&runs, background, half, gap, rawSpec.mergeWidthMax);
+    mergeAcrossGaps(&runs, background, half, gap, rawSpec.mergeWidthMax, nullptr,
+                    extent ? &noInfo : nullptr);
     if (const Run* r = nearestRun(runs)) {
       seeds[i].width = r->width();
       seeds[i].center = r->mid();
@@ -119,7 +122,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
   RunSplitSpec rawSpec = spec;
   rawSpec.mergeGap = 0;
   const double baseGap = std::max(spec.mergeGap, mergeUnknownGap);
-  const auto guides = mergeUnknownGap > 0 ? mergeGuides(maps, poses, half, rawSpec, baseGap)
+  const auto guides = mergeUnknownGap > 0 ? mergeGuides(maps, poses, half, rawSpec, baseGap, extent)
                                           : std::vector<ColorMergeGuide>(poses.size());
 
   Json stations = Json::array();
@@ -194,15 +197,18 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
       runs.push_back(cr);
     }
     // 被高光 / 暗区隔开的两段胶并回去（湿胶的高光条比 mergeGap 宽时）
-    std::vector<char> background(static_cast<std::size_t>(count));
-    for (int i = 0; i < count; ++i)
+    std::vector<char> background(static_cast<std::size_t>(count)), noInfo(background.size());
+    for (int i = 0; i < count; ++i) {
       background[static_cast<std::size_t>(i)] = v[i] >= 0 && v[i] < 0.5 * spec.segmentMin;
+      noInfo[static_cast<std::size_t>(i)] = v[i] < 0 && cause[i] != ColorCause::Outside;
+    }
     std::vector<Run> plain;
     for (const ColorRun& cr : runs)
       plain.push_back(cr.run);
     std::vector<ColorRun> merged;
     for (const auto& [first, last] :
-         mergeAcrossGaps(&plain, background, half, baseGap, spec.mergeWidthMax, &guides[station])) {
+         mergeAcrossGaps(&plain, background, half, baseGap, spec.mergeWidthMax, &guides[station],
+                         extent ? &noInfo : nullptr)) {
       ColorRun m = runs[first];
       m.run = plain[merged.size()];
       m.hiCause = runs[last].hiCause;

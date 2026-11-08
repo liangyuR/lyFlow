@@ -629,7 +629,8 @@ ColorMaps colorMaps(const cv::Mat& rgb, const ColorModel& m, cv::Rect roi, int t
 
 std::vector<std::pair<std::size_t, std::size_t>>
 mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, double half,
-                double gap, double widthMax, const ColorMergeGuide* guide) {
+                double gap, double widthMax, const ColorMergeGuide* guide,
+                const std::vector<char>* noInfo) {
   constexpr double kRes = 0.5;
   const int count = static_cast<int>(background.size());
   const bool guided = guide && std::isfinite(guide->width) && guide->width > 0;
@@ -646,16 +647,20 @@ mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, dou
     double componentCost = bestCost;
     for (std::size_t k = first + 1; k < runs->size(); ++k) {
       const Run& r = (*runs)[k];
-      if (r.lo - candidate.hi > limit || r.hi - candidate.lo > widthMax)
+      if (r.hi - candidate.lo > widthMax)
         break;
       const int from = static_cast<int>(std::floor((candidate.hi + half) / kRes + 1e-6)) + 1;
       const int to = static_cast<int>(std::ceil((r.lo + half) / kRes - 1e-6)) - 1;
-      int bg = 0, total = 0;
+      int bg = 0, total = 0, blind = 0;
       for (int i = std::max(from, 0); i <= std::min(to, count - 1); ++i) {
         ++total;
         bg += background[static_cast<std::size_t>(i)] ? 1 : 0;
+        blind += noInfo && (*noInfo)[static_cast<std::size_t>(i)] ? 1 : 0;
       }
-      if (total <= 0 || bg > 0)
+      // 缝里全是高光 / 暗区、不宽于两边较窄的一段：宽胶面上的一条镜面反光带，可以比 limit 宽
+      const bool stripe =
+          noInfo && blind == total && r.lo - candidate.hi <= std::min(candidate.width(), r.width());
+      if ((r.lo - candidate.hi > limit && !stripe) || total <= 0 || bg > 0)
         break;
       candidate.hi = r.hi;
       candidate.hiComplete = r.hiComplete;
@@ -684,7 +689,7 @@ mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, dou
 }
 
 bool backgroundBeyond(const std::vector<double>& score, int from, int dir, double segmentMin,
-                      double boundarySpan, const std::vector<char>* outside) {
+                      double boundarySpan, double glueSpan, const std::vector<char>* outside) {
   constexpr double kRes = 0.5;
   const int count = static_cast<int>(score.size());
   if (from < 0 || from >= count || score[static_cast<std::size_t>(from)] >= 0 ||
@@ -696,7 +701,7 @@ bool backgroundBeyond(const std::vector<double>& score, int from, int dir, doubl
     if (outside && (*outside)[k])
       break;
     if (score[k] >= 0)
-      return score[k] < segmentMin;
+      return score[k] < segmentMin || std::abs(i - from) * kRes > glueSpan;
   }
   return std::abs(i - from) * kRes >= boundarySpan;
 }
@@ -711,10 +716,12 @@ bool completeAgainstBackground(Run* r, const std::vector<double>& score, double 
   // 无信息区一直延伸到卡尺端点或 ROI / 图像外时看不到它后面是什么：有邻站参考宽时由下面的宽度门兜底，
   // 没有参考时要求无信息区至少和可见胶一样宽
   const double span = std::isfinite(reference) ? 0.0 : r->width();
-  const bool loBg =
-      !r->loComplete && lo >= 0 && backgroundBeyond(score, lo, -1, segmentMin, span, outside);
-  const bool hiBg =
-      !r->hiComplete && hi < count && backgroundBeyond(score, hi, 1, segmentMin, span, outside);
+  // 无信息区比可见胶还宽、之后才又见到胶色：那是另一处胶（宽胶上的反光带不会比胶本身宽，见 mergeAcrossGaps）
+  const double glueSpan = r->width();
+  const bool loBg = !r->loComplete && lo >= 0 &&
+                    backgroundBeyond(score, lo, -1, segmentMin, span, glueSpan, outside);
+  const bool hiBg = !r->hiComplete && hi < count &&
+                    backgroundBeyond(score, hi, 1, segmentMin, span, glueSpan, outside);
   if (!loBg && !hiBg)
     return false;
   if (std::isfinite(reference) && r->width() < 0.7 * reference)
@@ -1128,22 +1135,27 @@ ColorTrackResult colorTrack(const Field& R, const ColorTrackSpec& spec, double h
         const double x = R.at(p + n * (-spec.searchHalf + 0.5 * static_cast<double>(i)));
         background[i] = x >= 0.0 && x < 0.5 * spec.runs.segmentMin;
       }
-      mergeAcrossGaps(&rs, background, spec.searchHalf,
-                      std::max(spec.runs.mergeGap, spec.mergeUnknownGap),
-                      spec.extent ? 2.0 * spec.searchHalf : spec.runs.mergeWidthMax, &guide);
       std::vector<double> score;
-      std::vector<char> outside;
+      std::vector<char> outside, noInfo;
       if (spec.extent) {
-        // 胶边外侧是成片的饱和 / 过暗背景时，这条边看得见，不当作被遮挡
         score.resize(background.size());
         outside.resize(background.size());
+        noInfo.resize(background.size());
         const cv::Rect& in = R.valid();
         for (std::size_t i = 0; i < score.size(); ++i) {
           const P2 q = p + n * (-spec.searchHalf + 0.5 * static_cast<double>(i));
           score[i] = R.at(q);
           outside[i] = !(q.x >= in.x && q.y >= in.y && q.x + 1 < in.x + in.width &&
                          q.y + 1 < in.y + in.height);
+          noInfo[i] = score[i] < 0 && !outside[i];
         }
+      }
+      mergeAcrossGaps(&rs, background, spec.searchHalf,
+                      std::max(spec.runs.mergeGap, spec.mergeUnknownGap),
+                      spec.extent ? 2.0 * spec.searchHalf : spec.runs.mergeWidthMax, &guide,
+                      spec.extent ? &noInfo : nullptr);
+      if (spec.extent) {
+        // 胶边外侧是成片的饱和 / 过暗背景时，这条边看得见，不当作被遮挡
         for (Run& x : rs)
           completeAgainstBackground(&x, score, spec.searchHalf, spec.runs.segmentMin, wMed,
                                     &outside);

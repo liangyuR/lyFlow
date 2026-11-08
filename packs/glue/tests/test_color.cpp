@@ -11,6 +11,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -991,9 +992,10 @@ TEST_CASE("glue 彩色 extent：搜索、ROI、图像截断保留原因；只有
 
 TEST_CASE("glue 彩色 extent：胶边外侧是饱和背景时认作真边，接胶色或只剩半宽仍不完整") {
   // 胶宽 49 px（x 76–124）。beyond：高光之后是什么 —— background 明确背景、caliper 一直到卡尺端点、
-  // roi 走出得分图（卡尺按邻站参考宽认边，跟踪没有参考宽、高光窄于胶宽时不认）、glue 又接上一段胶色；
+  // roi 走出得分图（卡尺按邻站参考宽认边，跟踪没有参考宽、高光窄于胶宽时不认）、glue 隔着窄于胶的高光又接上一段胶色、
+  // far 隔着宽过胶的高光才在卡尺端点见到一点胶色（另一处胶）；
   // half：中间 40 行高光盖住胶的右半，邻站完整
-  for (const std::string beyond : {"background", "caliper", "roi", "glue", "half"}) {
+  for (const std::string beyond : {"background", "caliper", "roi", "glue", "far", "half"}) {
     CAPTURE(beyond);
     const int width = beyond == "roi" ? 150 : 201;
     glue::ColorMaps maps;
@@ -1006,10 +1008,12 @@ TEST_CASE("glue 彩色 extent：胶边外侧是饱和背景时认作真边，接
       const int from = halfRow(y) ? 100 : 125;
       const int to = beyond == "background" || beyond == "half" ? 160
                      : beyond == "glue"                         ? 165
+                     : beyond == "far"                          ? 176
                                                                 : width;
       for (int x = 0; x < maps.score.cols; ++x) {
         const bool lit = beyond == "half" ? halfRow(y) && x >= from && x < to : x >= from && x < to;
-        const bool tail = beyond == "glue" && x >= 165 && x < 180;
+        const bool tail = (beyond == "glue" && x >= 165 && x < 180) ||
+                          (beyond == "far" && x >= 176 && x < 179);
         maps.score.at<float>(y, x) =
             lit ? NAN
                 : tail ? 1.0F
@@ -1029,7 +1033,7 @@ TEST_CASE("glue 彩色 extent：胶边外侧是饱和背景时认作真边，接
     const Json runs = runColorMaps(runsDoc, input, "n_runs", "runs");
     for (const Json& station : runs["stations"]) {
       const double y = station["center"][1].get<double>();
-      REQUIRE(station["runs"].size() == (beyond == "glue" ? 2 : 1));
+      REQUIRE(station["runs"].size() == (beyond == "glue" || beyond == "far" ? 2 : 1));
       const Json& run = station["runs"][0];
       CAPTURE(y);
       CHECK(run["loComplete"] == true);
@@ -1060,5 +1064,62 @@ TEST_CASE("glue 彩色 extent：胶边外侧是饱和背景时认作真边，接
     }
     if (beyond == "half")
       CHECK_FALSE(track["incompleteS"].empty());
+  }
+}
+
+TEST_CASE("glue 彩色 extent：宽胶中间的反光带宽过合并上限仍并成一条，缝比两边都宽的两段不并") {
+  // 两段胶各宽 w、中间一条全无信息的缝 g（x 从 60 起），外侧是明确背景
+  for (const auto& [w, g, merged] : {std::tuple{30, 20, true}, std::tuple{15, 24, false}}) {
+    CAPTURE(w);
+    CAPTURE(g);
+    glue::ColorMaps maps;
+    maps.frame = cv::Rect(0, 0, 201, 241);
+    maps.score = cv::Mat(maps.frame.size(), CV_32F, cv::Scalar(0));
+    maps.state = cv::Mat::zeros(maps.frame.size(), CV_32F);
+    maps.luma = cv::Mat(maps.frame.size(), CV_32F, cv::Scalar(140));
+    for (int y = 0; y < maps.score.rows; ++y) {
+      for (int x = 60; x < 60 + 2 * w + g; ++x) {
+        const bool stripe = x >= 60 + w && x < 60 + w + g;
+        maps.score.at<float>(y, x) = stripe ? NAN : 1.0F;
+        maps.state.at<float>(y, x) = stripe ? 1.0F : 0.0F;
+      }
+    }
+    const double centre = 60 + w + 0.5 * g;
+    const Data input = glue::colorMapsBundle(std::move(maps), cv::Size(201, 241));
+    const std::string line = "[[" + std::to_string(centre) + ",220],[" + std::to_string(centre) + ",20]]";
+    const Json runsDoc =
+        makeGraph({N{"n_line", "glue.polyline", Json{{"points", line}}},
+                   N{"n_runs", "glue.color_runs",
+                     Json{{"searchHalf", 80},
+                          {"sRange", {20, 180}},
+                          {"widthPolicy", "extent"},
+                          {"mergeWidthMax", 30}}}},
+                  {E{"n_line.line", "n_runs.line"}});
+    const Json runs = runColorMaps(runsDoc, input, "n_runs", "runs");
+    for (const Json& station : runs["stations"]) {
+      REQUIRE(station["runs"].size() == (merged ? 1 : 2));
+      if (merged) {
+        CHECK(station["runs"][0]["loComplete"] == true);
+        CHECK(station["runs"][0]["hiComplete"] == true);
+        CHECK(station["runs"][0]["width"].get<double>() == doctest::Approx(2 * w + g).epsilon(0.05));
+      }
+    }
+    const Json track = runColorMaps(
+        makeGraph({N{"n_track", "glue.color_track",
+                     Json{{"anchor", {centre, 220}},
+                          {"heading", -90},
+                          {"zone", {20, 180}},
+                          {"widthPolicy", "extent"},
+                          {"searchHalf", 80},
+                          {"widthMax", 30}}}},
+                  {}),
+        input, "n_track", "track");
+    if (merged) {
+      CHECK(track["coverage"].get<double>() >= 0.95);
+      for (const Json& point : track["points"])
+        CHECK(std::fabs(point["point"][0].get<double>() - centre) <= 1.5);
+    } else {
+      CHECK(track["points"].empty());
+    }
   }
 }
