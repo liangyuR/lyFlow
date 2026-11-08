@@ -1197,8 +1197,9 @@ ColorTrackResult colorTrack(const Field& R, const ColorTrackSpec& spec, double h
         if (incomplete && !ambiguous && r->loComplete != r->hiComplete) {
           const int count = static_cast<int>(outside.size());
           const int beyond =
-              r->loComplete ? static_cast<int>(std::floor((r->hi + spec.searchHalf) / 0.5 + 1e-6)) + 1
-                            : static_cast<int>(std::ceil((r->lo + spec.searchHalf) / 0.5 - 1e-6)) - 1;
+              r->loComplete
+                  ? static_cast<int>(std::floor((r->hi + spec.searchHalf) / 0.5 + 1e-6)) + 1
+                  : static_cast<int>(std::ceil((r->lo + spec.searchHalf) / 0.5 - 1e-6)) - 1;
           if (beyond >= 0 && beyond < count && outside[static_cast<std::size_t>(beyond)]) {
             const bool known = std::isfinite(wMed) && r->width() < wMed;
             edgeOnly = known ? (r->loComplete ? r->lo + 0.5 * wMed : r->hi - 0.5 * wMed) : r->mid();

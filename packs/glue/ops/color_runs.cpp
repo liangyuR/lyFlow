@@ -314,7 +314,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
 void registerColorRuns(Registry& r) {
   OperatorDesc op;
   op.id = "glue.color_runs";
-  op.version = "1.1.0";
+  op.version = "1.2.0";
   op.label = "彩色横向卡尺";
   op.category = "涂胶/彩色";
   op.keywords = {"glue", "color", "caliper", "runs", "width", "涂胶", "彩色", "卡尺", "胶宽"};

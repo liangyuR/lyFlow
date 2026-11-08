@@ -1012,12 +1012,12 @@ TEST_CASE("glue 彩色 extent：胶边外侧是饱和背景时认作真边，接
                                                                 : width;
       for (int x = 0; x < maps.score.cols; ++x) {
         const bool lit = beyond == "half" ? halfRow(y) && x >= from && x < to : x >= from && x < to;
-        const bool tail = (beyond == "glue" && x >= 165 && x < 180) ||
-                          (beyond == "far" && x >= 176 && x < 179);
+        const bool tail =
+            (beyond == "glue" && x >= 165 && x < 180) || (beyond == "far" && x >= 176 && x < 179);
         maps.score.at<float>(y, x) =
-            lit ? NAN
-                : tail ? 1.0F
-                       : static_cast<float>(std::clamp(24.5 - std::abs(x - 100), 0.0, 1.0));
+            lit    ? NAN
+            : tail ? 1.0F
+                   : static_cast<float>(std::clamp(24.5 - std::abs(x - 100), 0.0, 1.0));
         maps.state.at<float>(y, x) = lit ? 1.0F : 0.0F;
       }
     }
@@ -1086,34 +1086,34 @@ TEST_CASE("glue 彩色 extent：宽胶中间的反光带宽过合并上限仍并
     }
     const double centre = 60 + w + 0.5 * g;
     const Data input = glue::colorMapsBundle(std::move(maps), cv::Size(201, 241));
-    const std::string line = "[[" + std::to_string(centre) + ",220],[" + std::to_string(centre) + ",20]]";
-    const Json runsDoc =
-        makeGraph({N{"n_line", "glue.polyline", Json{{"points", line}}},
-                   N{"n_runs", "glue.color_runs",
-                     Json{{"searchHalf", 80},
-                          {"sRange", {20, 180}},
-                          {"widthPolicy", "extent"},
-                          {"mergeWidthMax", 30}}}},
-                  {E{"n_line.line", "n_runs.line"}});
+    const std::string line =
+        "[[" + std::to_string(centre) + ",220],[" + std::to_string(centre) + ",20]]";
+    const Json runsDoc = makeGraph(
+        {N{"n_line", "glue.polyline", Json{{"points", line}}}, N{"n_runs", "glue.color_runs",
+                                                                 Json{{"searchHalf", 80},
+                                                                      {"sRange", {20, 180}},
+                                                                      {"widthPolicy", "extent"},
+                                                                      {"mergeWidthMax", 30}}}},
+        {E{"n_line.line", "n_runs.line"}});
     const Json runs = runColorMaps(runsDoc, input, "n_runs", "runs");
     for (const Json& station : runs["stations"]) {
       REQUIRE(station["runs"].size() == (merged ? 1 : 2));
       if (merged) {
         CHECK(station["runs"][0]["loComplete"] == true);
         CHECK(station["runs"][0]["hiComplete"] == true);
-        CHECK(station["runs"][0]["width"].get<double>() == doctest::Approx(2 * w + g).epsilon(0.05));
+        CHECK(station["runs"][0]["width"].get<double>() ==
+              doctest::Approx(2 * w + g).epsilon(0.05));
       }
     }
-    const Json track = runColorMaps(
-        makeGraph({N{"n_track", "glue.color_track",
-                     Json{{"anchor", {centre, 220}},
-                          {"heading", -90},
-                          {"zone", {20, 180}},
-                          {"widthPolicy", "extent"},
-                          {"searchHalf", 80},
-                          {"widthMax", 30}}}},
-                  {}),
-        input, "n_track", "track");
+    const Json track = runColorMaps(makeGraph({N{"n_track", "glue.color_track",
+                                                 Json{{"anchor", {centre, 220}},
+                                                      {"heading", -90},
+                                                      {"zone", {20, 180}},
+                                                      {"widthPolicy", "extent"},
+                                                      {"searchHalf", 80},
+                                                      {"widthMax", 30}}}},
+                                              {}),
+                                    input, "n_track", "track");
     if (merged) {
       CHECK(track["coverage"].get<double>() >= 0.95);
       for (const Json& point : track["points"])
