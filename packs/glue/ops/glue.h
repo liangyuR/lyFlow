@@ -98,6 +98,7 @@ struct ColorMapsView {
   Field score;
   cv::Mat state, luma;
   cv::Rect frame;
+  cv::Size image;
 };
 Data colorMapsBundle(ColorMaps maps, cv::Size image);
 bool readColorMaps(const Data& d, ColorMapsView* out);

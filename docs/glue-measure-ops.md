@@ -506,6 +506,14 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 其余参数（名称、默认值、范围）同第 3 节。`glue.Track` 另有：`unknownSteps`（无信息步数）、`coverageInformative` = found / (steps − unknownSteps)（分母为 0 时 `null`）、
 `unknownS[]`（无信息步的 s）；`sharpness` 与 `points[].sharpness` 恒为 `null`，`points[].onRay` 恒为 false，`points[].peak` 是段内得分峰值。
 
+`widthPolicy` 为 `range`（默认）或 `extent`。默认策略保留 `[widthMin, widthMax]` 筛选、`mergeWidthMax` 合并上限和原接受窗。
+显式 `extent` 策略对完整候选保留宽度下限，不完整片段保留为无信息证据，不因完整胶宽超过 `widthMax` 丢弃胶点；搜索仍固定在 `±searchHalf`，合并总宽最多 `2 × searchHalf`，接受窗改为 `±acceptOffsetRatio × searchHalf`。
+真实背景阻断、有限合并缝、邻站/历史合并证据及连续性门保持有效。两个候选都落在接受窗、中心距离差不超过 `max(1 px, 0.1 × widthMax)` 且次候选峰值至少为首候选的 80% 时，该步记为歧义，不任意选边。
+不完整边界的候选也不以片段中点参与拟合，沿上一个可靠方向继续有限搜索。
+
+`glue.Track` 回显 `widthPolicy`，并给出 `ambiguousS[]`（歧义步）和 `incompleteS[]`（非歧义但边界不完整的步，包含高光/暗区/观测边界，不等同可靠截断）。
+这两类步都计入 `unknownS`/`unknownSteps`，不计 `maxGap`；宽度值只来自完整边界胶点。没有有效方向峰时两数组为空、原有统计为 `null`。
+
 ### 1.3.5 `glue.color_runs` 彩色横向卡尺
 
 端口同 `glue.lateral_runs`（`maps` 换成 `Bundle<glue.ColorMaps>`），overlay 多一个 role `unknown`（无信息区间）。
@@ -516,7 +524,8 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 | `segmentMin` | float | — | 0.3 | 0–1 | 分段门限：得分 > 它的相邻采样连成一段 |
 | `peakMin` | float | — | 0.6 | 0–1 | 段的得分峰值下限 |
 | `mergeGap` | float | px | 8 | ≥ 0 | 无明确背景的短缝合并上限；不查峰值比 |
-| `mergeUnknownGap` | float | px | 16 | ≥ 0 | 无明确背景的高光/低分内谷合并上限；大于 0 时启用邻站自适应，0 时关闭自适应。总宽仍受 mergeWidthMax 限制 |
+| `mergeUnknownGap` | float | px | 16 | ≥ 0 | 无明确背景的高光/低分内谷合并上限；大于 0 时启用邻站自适应，0 时关闭自适应。range 策略的总宽受 mergeWidthMax 限制 |
+| `widthPolicy` | enum | — | range | range / extent | range 保留 mergeWidthMax；extent 在固定 searchHalf 内恢复完整宽度，合并上限为 2 × searchHalf |
 
 分段与半高取边同第 4 节（`caliperRuns`），彩色分支不做无条件短缝合并。两段之间任何采样明确为背景（有限得分 < `segmentMin / 2`）都禁止合并；饱和高光和未饱和低分色谷本身不是明确背景。没有邻站参考时，允许缝宽为 `max(mergeGap, mergeUnknownGap)`。
 
@@ -532,13 +541,17 @@ n_resp.maps, n_tK.line → n_rK (glue.lateral_runs)
 - 每段多 `loCause` / `hiCause`（`edge` 降到半高以下的真边 / `caliper` 顶到卡尺端点 / `highlight` / `dark` / `outside` 被无信息截断）、
   `meanScore`（段内有效采样得分的均值）、`unknownWidth`（段内无效采样的宽度，px）；`edgeLo`、`edgeHi`、`depth`、`sharpness` 为 `null`，`level` 恒为 1。
 
+`glue.LateralRuns` 回显 `widthPolicy`。`extent` 不丢弃超预期宽候选；仍返回所有候选，由宿主关联目标及判规格。
+`loComplete`/`hiComplete` 只有观测到真边才为 true。搜索端点原因保持 `caliper`；有合法原图尺寸元数据时，`extent` 将原先 `outside` 细分为 `roi` 与 `image`，同样用于 `unknownSpans[].cause`；旧模式或缺少原图尺寸仍为 `outside`。
+`highlight` 与 `dark` 保持无信息原因，不能当作完整边界或宽度下界。被截断候选的 `width`/`mid` 是已观测片段几何，宿主不得直接解释为完整胶宽或胶中心。
+
 ### 参考连法与 GS 侧的判定
 
 随包参考图 `packs/glue/graphs/color.lyflow.json`：示教帧 + 示教线 → `color_model`；生产帧 → `color_map`（接 `n_model.model`）→ 沿示教线的 `color_runs`，
 以及 `color_fan` → `color_track` → `color_runs`。宿主生产时不带示教那两个节点，把配方里的模型 JSON 填进 `n_map.model`。
 
-GS 判每站的建议读法（判定在 GS）：中心窗里有段 → 有胶（宽度 = 段宽）；没有段、而中心落在 `unknownSpans` 里 → **未检**（cause 给原因）；
-有信息却没有段 → 缺胶，连续若干站即断胶。`quality.separation`、`glueSpread`、`saturatedFraction` 可作示教验收的依据。
+宿主判每站时先确认目标关联与双侧完整性：可信的完整边界段才能提供完整胶宽；截断片段只保留边界证据，可靠时可形成保守下界，不能以片段中点替代胶中心。
+有多个无法区分的候选、中心落入 `unknownSpans` 或观察范围不足时为未知；只有充分观察到有效背景且没有目标，才可判为缺胶。`quality.separation`、`glueSpread`、`saturatedFraction` 可作示教验收的依据。
 
 ### 实测（2026-11-06）
 

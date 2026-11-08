@@ -171,6 +171,7 @@ struct ColorTrackSpec {
   RunSplitSpec runs;
   double widthMin = 4;
   double widthMax = 90;
+  bool extent = false;
   double acceptOffsetRatio = 0.6;
   double coarseStep = 8;
   double maxGap = 120;
@@ -189,6 +190,8 @@ struct ColorTrackResult {
   int steps = 0;
   int unknownSteps = 0;
   std::vector<TrackPoint> points;
+  std::vector<double> ambiguousS;
+  std::vector<double> incompleteS;
   std::vector<double> unknownS; ///< 无信息步的 s
   double coverage = 0;
   double coverageInformative = std::numeric_limits<double>::quiet_NaN();
