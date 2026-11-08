@@ -700,8 +700,18 @@ bool backgroundBeyond(const std::vector<double>& score, int from, int dir, doubl
     const auto k = static_cast<std::size_t>(i);
     if (outside && (*outside)[k])
       break;
-    if (score[k] >= 0)
-      return score[k] < segmentMin || std::abs(i - from) * kRes > glueSpan;
+    if (score[k] >= 0) {
+      if (score[k] < segmentMin || std::abs(i - from) * kRes > glueSpan)
+        return true;
+      // 高光与另一片背景（暗区、明确背景）交界处的过渡像素会带一点胶色：只有一窄条、紧接着又不是胶的，不算胶
+      int j = i;
+      while (j >= 0 && j < count && score[static_cast<std::size_t>(j)] >= segmentMin &&
+             !(outside && (*outside)[static_cast<std::size_t>(j)]))
+        j += dir;
+      const bool closed =
+          j >= 0 && j < count && !(outside && (*outside)[static_cast<std::size_t>(j)]);
+      return closed && std::abs(j - i) * kRes <= std::max(4.0, 0.1 * glueSpan);
+    }
   }
   return std::abs(i - from) * kRes >= boundarySpan;
 }

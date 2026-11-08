@@ -119,7 +119,8 @@ mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, dou
 
 /// extent：段的一条边被无信息采样截断（`from` 是边外第一个采样，`dir` = ±1 朝外）时，往外走过连续的无信息采样：
 /// 先遇到明确不是胶的采样（0 ≤ score < segmentMin），说明胶在这里结束、外侧是饱和或过暗的背景，这条边是看得见的真边；
-/// 又接上胶色时，无信息区宽过 `glueSpan`（px）才算（那是隔开的另一处胶）；
+/// 又接上胶色时，无信息区宽过 `glueSpan`（px）才算（那是隔开的另一处胶），或那段胶色不宽于 max(4 px, glueSpan / 10)、
+/// 之后又不是胶（两片背景交界的过渡像素）；
 /// 无信息区一直到卡尺端点或 ROI / 图像外（`outside`）时，长度不小于 `boundarySpan`（px）才算。
 /// score < 0 为无信息；`from` 本身在 ROI / 图像外时不算（那是观测边界截断）。
 bool backgroundBeyond(const std::vector<double>& score, int from, int dir, double segmentMin,

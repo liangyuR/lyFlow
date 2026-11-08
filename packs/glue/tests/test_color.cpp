@@ -993,9 +993,10 @@ TEST_CASE("glue 彩色 extent：搜索、ROI、图像截断保留原因；只有
 TEST_CASE("glue 彩色 extent：胶边外侧是饱和背景时认作真边，接胶色或只剩半宽仍不完整") {
   // 胶宽 49 px（x 76–124）。beyond：高光之后是什么 —— background 明确背景、caliper 一直到卡尺端点、
   // roi 走出得分图（卡尺按邻站参考宽认边，跟踪没有参考宽、高光窄于胶宽时不认）、glue 隔着窄于胶的高光又接上一段胶色、
-  // far 隔着宽过胶的高光才在卡尺端点见到一点胶色（另一处胶）；
+  // far 隔着宽过胶的高光才在卡尺端点见到一点胶色（另一处胶）、sliver 高光与明确背景之间夹一条 3 px 的过渡色；
   // half：中间 40 行高光盖住胶的右半，邻站完整
-  for (const std::string beyond : {"background", "caliper", "roi", "glue", "far", "half"}) {
+  for (const std::string beyond :
+       {"background", "caliper", "roi", "glue", "far", "sliver", "half"}) {
     CAPTURE(beyond);
     const int width = beyond == "roi" ? 150 : 201;
     glue::ColorMaps maps;
@@ -1009,11 +1010,13 @@ TEST_CASE("glue 彩色 extent：胶边外侧是饱和背景时认作真边，接
       const int to = beyond == "background" || beyond == "half" ? 160
                      : beyond == "glue"                         ? 165
                      : beyond == "far"                          ? 176
+                     : beyond == "sliver"                       ? 150
                                                                 : width;
       for (int x = 0; x < maps.score.cols; ++x) {
         const bool lit = beyond == "half" ? halfRow(y) && x >= from && x < to : x >= from && x < to;
-        const bool tail =
-            (beyond == "glue" && x >= 165 && x < 180) || (beyond == "far" && x >= 176 && x < 179);
+        const bool tail = (beyond == "glue" && x >= 165 && x < 180) ||
+                          (beyond == "far" && x >= 176 && x < 179) ||
+                          (beyond == "sliver" && x >= 150 && x < 153);
         maps.score.at<float>(y, x) =
             lit    ? NAN
             : tail ? 1.0F
@@ -1033,7 +1036,8 @@ TEST_CASE("glue 彩色 extent：胶边外侧是饱和背景时认作真边，接
     const Json runs = runColorMaps(runsDoc, input, "n_runs", "runs");
     for (const Json& station : runs["stations"]) {
       const double y = station["center"][1].get<double>();
-      REQUIRE(station["runs"].size() == (beyond == "glue" || beyond == "far" ? 2 : 1));
+      REQUIRE(station["runs"].size() ==
+              (beyond == "glue" || beyond == "far" || beyond == "sliver" ? 2 : 1));
       const Json& run = station["runs"][0];
       CAPTURE(y);
       CHECK(run["loComplete"] == true);
