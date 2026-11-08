@@ -111,11 +111,13 @@ struct ColorMergeGuide {
 
 /// 缝内不得有明确背景（有限 score < segmentMin / 2）。有邻站参考时允许缝宽到 max(gap, width / 2)，
 /// 只接受宽度、中心与参考一致且比原片段更合理的组合。给了 `noInfo`（无信息采样，不含 ROI / 图像外）时，
-/// 缝里全是无信息、且不宽于两边较窄一段的也并（宽胶面上的镜面反光带）。保留外边完成标记，返回各输出对应的输入首末下标。
+/// 缝里全是无信息、且不宽于两边较窄一段的也可以并（宽胶面上的镜面反光带）。`keepWide`（extent 量宽用）时
+/// 这种反光带与紧挨着、中间没有采样的两段（胶里的浅谷）直接并，其余组合不按参考宽设上限（局部鼓包要量出来）；
+/// 跟踪不开它，免得在交叉、接头处把两条胶并成一段、拉偏胶路。保留外边完成标记，返回各输出对应的输入首末下标。
 std::vector<std::pair<std::size_t, std::size_t>>
 mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, double half,
                 double gap, double widthMax, const ColorMergeGuide* guide = nullptr,
-                const std::vector<char>* noInfo = nullptr);
+                const std::vector<char>* noInfo = nullptr, bool keepWide = false);
 
 /// extent：段的一条边被无信息采样截断（`from` 是边外第一个采样，`dir` = ±1 朝外）时，往外走过连续的无信息采样：
 /// 先遇到明确不是胶的采样（0 ≤ score < segmentMin），说明胶在这里结束、外侧是饱和或过暗的背景，这条边是看得见的真边；
@@ -126,11 +128,11 @@ mergeAcrossGaps(std::vector<Run>* runs, const std::vector<char>& background, dou
 bool backgroundBeyond(const std::vector<double>& score, int from, int dir, double segmentMin,
                       double boundarySpan, double glueSpan,
                       const std::vector<char>* outside = nullptr);
-/// 按 backgroundBeyond 把段 `r` 外侧是背景的不完整边认作真边；`reference` 有限时，认边后的宽度须不小于它的 0.7 倍
+/// 按 backgroundBeyond 把段 `r` 外侧是背景的不完整边认作真边；`reference` 有限时，认边后的宽度须不小于它的 `minRatio` 倍
 /// （半条胶落在高光里时只剩半宽，不能当完整胶宽）。`half` 是卡尺半长，采样间距 0.5 px。返回是否改了边。
 bool completeAgainstBackground(Run* r, const std::vector<double>& score, double half,
                                double segmentMin, double reference,
-                               const std::vector<char>* outside = nullptr);
+                               const std::vector<char>* outside = nullptr, double minRatio = 0.7);
 
 /// 卡尺上一个采样无信息的原因。
 enum class ColorCause { None, Highlight, Dark, Outside };

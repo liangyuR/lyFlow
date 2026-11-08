@@ -49,7 +49,7 @@ std::vector<ColorMergeGuide> mergeGuides(const ColorMapsView& maps,
       noInfo[k] = score < 0 && causeAt(maps.state, maps.frame, p) != ColorCause::Outside;
     }
     mergeAcrossGaps(&runs, background, half, gap, rawSpec.mergeWidthMax, nullptr,
-                    extent ? &noInfo : nullptr);
+                    extent ? &noInfo : nullptr, extent);
     if (const Run* r = nearestRun(runs)) {
       seeds[i].width = r->width();
       seeds[i].center = r->mid();
@@ -208,7 +208,7 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
     std::vector<ColorRun> merged;
     for (const auto& [first, last] :
          mergeAcrossGaps(&plain, background, half, baseGap, spec.mergeWidthMax, &guides[station],
-                         extent ? &noInfo : nullptr)) {
+                         extent ? &noInfo : nullptr, extent)) {
       ColorRun m = runs[first];
       m.run = plain[merged.size()];
       m.hiCause = runs[last].hiCause;
@@ -223,8 +223,9 @@ Status compute(const Inputs& inputs, const ParamView& params, Outputs& outputs, 
         outside[static_cast<std::size_t>(i)] = cause[i] == ColorCause::Outside;
       for (ColorRun& m : merged) {
         const bool loOpen = !m.run.loComplete, hiOpen = !m.run.hiComplete;
+        // 量宽的半宽门放到 0.55：胶尾收窄的圆头仍能认边，半条胶落在高光里（约 0.5）仍拦下；跟踪保留 0.7
         if (completeAgainstBackground(&m.run, v, half, spec.segmentMin, guides[station].width,
-                                      &outside)) {
+                                      &outside, 0.55)) {
           if (loOpen && m.run.loComplete)
             m.loBackground = m.loCause;
           if (hiOpen && m.run.hiComplete)
