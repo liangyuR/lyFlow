@@ -296,7 +296,7 @@ TEST_CASE("ONNX 会话缓存有界，淘汰保留活跃句柄") {
   }
 }
 
-TEST_CASE("ONNX 会话缓存路径解析保留符号链接后父目录的真实语义") {
+TEST_CASE("ONNX 会话缓存路径解析与系统实际打开的文件一致（含符号链接后的父目录）") {
   namespace fs = std::filesystem;
   using lyflow::ops::detail::sessionModelPath;
   const auto dir = fs::temp_directory_path() /
@@ -321,9 +321,16 @@ TEST_CASE("ONNX 会话缓存路径解析保留符号链接后父目录的真实�
     MESSAGE("跳过符号链接断言：无法创建目录符号链接: " << ec.message());
     return;
   }
+  // link/.. 指向哪个文件随平台而定：POSIX 先解析链接（得 target/model.onnx），Windows 先按字面消去 ..（得 model.onnx）。
+  // 缓存键必须与系统实际打开的文件一致，并与另一个文件区分开。
   const auto throughLink = dir / "link" / ".." / "model.onnx";
-  CHECK(sessionModelPath(throughLink) == sessionModelPath(dir / "target" / "model.onnx"));
-  CHECK(sessionModelPath(throughLink) != sessionModelPath(dir / "model.onnx"));
+  std::string opened;
+  std::getline(std::ifstream(throughLink), opened);
+  REQUIRE((opened == "first" || opened == "other"));
+  const auto actual = opened == "other" ? dir / "target" / "model.onnx" : dir / "model.onnx";
+  const auto other = opened == "other" ? dir / "model.onnx" : dir / "target" / "model.onnx";
+  CHECK(sessionModelPath(throughLink) == sessionModelPath(actual));
+  CHECK(sessionModelPath(throughLink) != sessionModelPath(other));
 }
 
 TEST_CASE("ONNX 会话缓存并发创建只保留一个实例，慢创建不阻塞命中") {
