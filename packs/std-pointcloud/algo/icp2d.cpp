@@ -27,6 +27,20 @@ Eigen::Matrix3d makeRigid2D(double angle, double x, double y) {
 
 double wrapAngle(double angle) { return std::atan2(std::sin(angle), std::cos(angle)); }
 
+double robustWeight(double residual, const Icp2DOptions& options) {
+  if (options.robustLoss == Icp2DRobustLoss::None)
+    return 1.0;
+  if (!(options.robustScale > 0.0) || !std::isfinite(options.robustScale))
+    return 0.0;
+  const double ratio = std::abs(residual) / options.robustScale;
+  if (options.robustLoss == Icp2DRobustLoss::Huber)
+    return ratio <= 1.0 ? 1.0 : 1.0 / ratio;
+  if (!(ratio < 1.0))
+    return 0.0;
+  const double remaining = 1.0 - ratio * ratio;
+  return remaining * remaining;
+}
+
 } // namespace
 
 Icp2D::Icp2D(const Icp2DOptions& options) : options_(options) {
@@ -136,8 +150,17 @@ Icp2DResult Icp2D::align(const Eigen::Matrix3f& initPose) {
       const Eigen::Vector2d normal = rotation * baseNormals[i];
       const auto jacobian = computePointToPlaneJacobian(reading, normal);
       const Eigen::Vector3d row(jacobian.rotation, jacobian.translationX, jacobian.translationY);
-      information += row * row.transpose();
-      gradient -= row * delta.dot(normal);
+      if (options_.robustLoss == Icp2DRobustLoss::None) {
+        information += row * row.transpose();
+        gradient -= row * delta.dot(normal);
+      } else {
+        const double residual = delta.dot(normal);
+        const double weight = robustWeight(residual, options_);
+        if (!(weight > 0.0))
+          continue;
+        information += weight * row * row.transpose();
+        gradient -= weight * row * residual;
+      }
       ++matched;
     }
 
@@ -197,6 +220,64 @@ float Icp2D::computeFitness(float fitDist) const {
   }
   return static_cast<float>(static_cast<double>(matched) /
                             static_cast<double>(lastSquaredDistances_.size()));
+}
+
+Icp2DQuality Icp2D::evaluatePose(const Eigen::Matrix3f& pose) const {
+  Icp2DQuality quality;
+  quality.sourceCount = sourcePoints_.size();
+  quality.targetCount = targetPoints_.size();
+  if (sourcePoints_.empty() || targetPoints_.empty() || !pose.allFinite())
+    return quality;
+
+  const Eigen::Matrix3d local = targetInTargetMean_.inverse() * pose.cast<double>();
+  const Eigen::Matrix2d rotation = local.block<2, 2>(0, 0);
+  const Eigen::Vector2d translation = local.block<2, 1>(0, 2);
+  const double maxSquaredDistance = options_.maxMatchingDistance * options_.maxMatchingDistance;
+  double squaredPointError = 0.0;
+  double squaredPlaneError = 0.0;
+  double weightedSquaredPlaneError = 0.0;
+  std::vector<int> nearestIndex;
+  std::vector<float> nearestSquaredDistance;
+  for (std::size_t i = 0; i < sourcePoints_.size(); ++i) {
+    const Eigen::Vector2d reading = rotation * sourcePoints_[i] + translation;
+    pcl::PointXYZ query;
+    query.x = static_cast<float>(reading.x());
+    query.y = static_cast<float>(reading.y());
+    query.z = 0.0F;
+    nearestIndex.clear();
+    nearestSquaredDistance.clear();
+    if (targetTree_.nearestKSearch(query, 1, nearestIndex, nearestSquaredDistance) == 0)
+      continue;
+    const Eigen::Vector2d delta =
+        reading - targetPoints_[static_cast<std::size_t>(nearestIndex[0])];
+    const double squaredDistance = delta.squaredNorm();
+    if (!(squaredDistance <= maxSquaredDistance))
+      continue;
+    ++quality.matchedCount;
+    squaredPointError += squaredDistance;
+    const Eigen::Vector2d normal = rotation * sourceNormals_[i];
+    if (!normal.allFinite() || normal.squaredNorm() < 1e-12)
+      continue;
+    const double residual = delta.dot(normal);
+    ++quality.normalMatchedCount;
+    squaredPlaneError += residual * residual;
+    const double weight = robustWeight(residual, options_);
+    if (weight > 0.0) {
+      ++quality.effectiveMatchedCount;
+      quality.weightSum += weight;
+      weightedSquaredPlaneError += weight * residual * residual;
+    }
+  }
+  quality.inlierRatio =
+      static_cast<double>(quality.matchedCount) / static_cast<double>(quality.sourceCount);
+  if (quality.matchedCount > 0)
+    quality.pointRmse = std::sqrt(squaredPointError / static_cast<double>(quality.matchedCount));
+  if (quality.normalMatchedCount > 0)
+    quality.planeRmse =
+        std::sqrt(squaredPlaneError / static_cast<double>(quality.normalMatchedCount));
+  if (quality.weightSum > 0.0)
+    quality.weightedPlaneRmse = std::sqrt(weightedSquaredPlaneError / quality.weightSum);
+  return quality;
 }
 
 } // namespace lyflow::std_pc

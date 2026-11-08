@@ -2,11 +2,13 @@
 // select 是所有滤波算子的唯一出口，它漏搬一个通道就等于每个滤波算子都漏搬。
 #include <doctest/doctest.h>
 
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <initializer_list>
 #include <iterator>
 #include <limits>
+#include <thread>
 
 #include "lyflow/data.h"
 #include "lyflow/json_writer.h"
@@ -229,7 +231,22 @@ TEST_CASE("Measurement 的非有限值写成 null 而不是把整份 JSON 弄坏
   CHECK_FALSE(good.contains("message"));
 }
 
-TEST_CASE("Tensor 只把形状与统计量写进 valueJson，全是非有限值时统计量写成 null") {
+TEST_CASE("Tensor：统计忽略非有限值、浅拷贝共用缓存、预览 scale 独立") {
+  SUBCASE("形状溢出或负维度不能伪装成有效空张量") {
+    Tensor t;
+    t.shape = {std::numeric_limits<std::int64_t>::max(), 4};
+    CHECK(t.elementCount() == 0);
+    CHECK_FALSE(t.consistent());
+    t.shape = {-1, 3};
+    CHECK_FALSE(t.consistent());
+    t.shape = {0, 3};
+    CHECK(t.consistent());
+    t.data = {1.f};
+    CHECK_FALSE(t.consistent());
+    t.shape = {1};
+    CHECK(t.consistent());
+  }
+
   SUBCASE("只把形状与统计量写进 valueJson") {
     Tensor t;
     t.shape = {2, 3};
@@ -257,8 +274,80 @@ TEST_CASE("Tensor 只把形状与统计量写进 valueJson，全是非有限值�
     t.data = {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()};
     const nlohmann::json j = nlohmann::json::parse(Data::tensor(t).valueJson());
     CHECK(j["min"].is_null());
+    CHECK(j["max"].is_null());
     CHECK(j["mean"].is_null());
     CHECK(j["count"].get<int>() == 2);
+  }
+
+  SUBCASE("空张量与混合非有限值") {
+    const nlohmann::json empty = nlohmann::json::parse(Data::tensor(Tensor{}).valueJson());
+    CHECK(empty["count"] == 0);
+    CHECK(empty["min"].is_null());
+    CHECK(empty["max"].is_null());
+    CHECK(empty["mean"].is_null());
+
+    Tensor t;
+    t.shape = {4};
+    t.data = {-3.f, std::numeric_limits<float>::quiet_NaN(), 7.f,
+              -std::numeric_limits<float>::infinity()};
+    const nlohmann::json mixed = nlohmann::json::parse(Data::tensor(t).valueJson());
+    CHECK(mixed["count"] == 4);
+    CHECK(mixed["min"] == -3.0);
+    CHECK(mixed["max"] == 7.0);
+    CHECK(mixed["mean"] == 2.0);
+  }
+
+  SUBCASE("浅拷贝与不同比例共用统计，scale 不共用") {
+    auto t = std::make_shared<Tensor>();
+    t->shape = {2};
+    t->data = {10.f, 30.f};
+    const Data original = Data::tensor(t);
+    const Data half = original.withTensorScale(2);
+    const std::string first = half.valueJson();
+    // 故意违反不可变约定，确认浅拷贝与改比例没有重扫载荷。
+    t->data[1] = 250.f;
+    const Data copy = original;
+    const Data quarter = copy.withTensorScale(4);
+    CHECK(copy.asTensor() == half.asTensor());
+    CHECK(half.valueJson() == first);
+    const nlohmann::json full = nlohmann::json::parse(copy.valueJson());
+    const nlohmann::json small = nlohmann::json::parse(quarter.valueJson());
+    CHECK_FALSE(full.contains("scale"));
+    CHECK(full["max"] == 30.0);
+    CHECK(full["mean"] == 20.0);
+    CHECK(small["scale"] == 4);
+    CHECK(small["max"] == 30.0);
+    CHECK(nlohmann::json::parse(quarter.withTensorScale(1).valueJson()) == full);
+  }
+
+  SUBCASE("不同比例的浅拷贝并发首次读取") {
+    Tensor t;
+    t.shape = {65536};
+    t.data.resize(65536, 4.f);
+    t.data.front() = -2.f;
+    t.data.back() = 10.f;
+    const Data original = Data::tensor(std::move(t));
+    std::atomic<bool> start{false};
+    std::vector<std::string> results(8);
+    std::vector<std::thread> readers;
+    for (std::size_t i = 0; i < results.size(); ++i) {
+      const Data copy = original.withTensorScale(static_cast<std::int32_t>(i % 3 + 1));
+      readers.emplace_back([&, i, copy] {
+        while (!start.load(std::memory_order_acquire))
+          std::this_thread::yield();
+        results[i] = copy.valueJson();
+      });
+    }
+    start.store(true, std::memory_order_release);
+    for (auto& reader : readers)
+      reader.join();
+    for (std::size_t i = 0; i < results.size(); ++i) {
+      const nlohmann::json j = nlohmann::json::parse(results[i]);
+      CHECK(j["min"] == -2.0);
+      CHECK(j["max"] == 10.0);
+      CHECK(j["mean"] == 4.0);
+      CHECK(j.value("scale", 1) == static_cast<int>(i % 3 + 1));
+    }
   }
 }
 
