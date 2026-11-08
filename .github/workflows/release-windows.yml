@@ -260,6 +260,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw '安装 Rust 工具链失败' }
           rustc --version
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            bridge -> ../build/release-rust
+            tests/release/probe -> ../../../build/release-probes/probe
+          key: windows-release-${{ hashFiles('packaging/release.json') }}
+
       - name: pnpm install
         run: pnpm install --frozen-lockfile
 
