@@ -236,6 +236,7 @@ fn main() {
             // 只构建 lyflow_core：core 没有 install 规则，两个 exe 归 build-core.ps1 管。
             // vcpkg 的 applocal 对 SHARED 目标同样生效，PCL 的依赖 DLL 照样落到 bin/。
             .build_target("lyflow_core")
+            .define("BUILD_TESTING", "OFF")
             .define("LYFLOW_OP_PACKS", &packs)
             .define("LYFLOW_STD_PACKS", &std_packs)
             .define("LYFLOW_PACKS", &repo_packs)

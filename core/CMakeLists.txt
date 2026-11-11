@@ -16,6 +16,7 @@ endif()
 
 project(lyflow_core LANGUAGES CXX VERSION 1.3.3)
 option(LYFLOW_RELEASE_BUILD "Release dependency inputs were verified by package-windows.ps1" OFF)
+option(BUILD_TESTING "Build lyFlow tests and client fixtures" ON)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -149,6 +150,8 @@ macro(lyflow_op_pack)
   # 热重载就跟不上手了。
   if(LYPACK_PCH)
     target_precompile_headers(${LYPACK_TARGET} PRIVATE "${LYPACK_PCH}")
+  else()
+    target_precompile_headers(${LYPACK_TARGET} PRIVATE <nlohmann/json.hpp>)
   endif()
 
   if(LYFLOW_PACK_IS_STD)
@@ -307,6 +310,7 @@ set(LYFLOW_E2E_OPS "${LYFLOW_TESTS}/e2e/register_e2e_ops.cpp")
 
 add_library(lyflow_core_obj OBJECT ${LYFLOW_CORE_SOURCES} "${LYFLOW_PACK_REGISTRAR}" "${LYFLOW_E2E_OPS}")
 lyflow_apply_common(lyflow_core_obj)
+target_precompile_headers(lyflow_core_obj PRIVATE <nlohmann/json.hpp>)
 set(_release_identity_packs "${LYFLOW_STD_PACK_NAMES}")
 list(SORT _release_identity_packs)
 set(LYFLOW_RELEASE_IDENTITY_ALLOWED FALSE)
@@ -346,47 +350,51 @@ lyflow_apply_common(lyflow-dump-manifest)
 target_link_libraries(lyflow-dump-manifest PRIVATE ${LYFLOW_PACK_LIBS})
 
 # 带包构建时把包自己的测试源也编进同一个 doctest 目标（不另起一个 exe）。
-file(GLOB LYFLOW_TEST_SOURCES CONFIGURE_DEPENDS "${LYFLOW_TESTS}/*.cpp")
-add_executable(lyflow-core-tests
-  ${LYFLOW_TEST_SOURCES} ${LYFLOW_PACK_TEST_SOURCES}
-  "${LYFLOW_MANIFEST}"
-  $<TARGET_OBJECTS:lyflow_core_obj> ${LYFLOW_PACK_OBJECTS})
-lyflow_apply_common(lyflow-core-tests)
-# 包的测试也 #include "helpers.h"，而它在 core/tests/ 下
-target_include_directories(lyflow-core-tests PRIVATE "${LYFLOW_TESTS}")
-if(LYFLOW_PACK_INCLUDES)
-  target_include_directories(lyflow-core-tests PRIVATE ${LYFLOW_PACK_INCLUDES})
-endif()
-if(MSVC)
-  # doctest 为了 stringify 特化了 std::tuple，C++20 起标准禁止，MSVC 会警告。
-  # 不是我们能修的第三方代码，单独关掉这一条，其余 /W4 照旧。
-  target_compile_options(lyflow-core-tests PRIVATE /wd5285)
-endif()
-target_link_libraries(lyflow-core-tests PRIVATE ${LYFLOW_PACK_LIBS})
+if(BUILD_TESTING)
+  file(GLOB LYFLOW_TEST_SOURCES CONFIGURE_DEPENDS "${LYFLOW_TESTS}/*.cpp")
+  add_executable(lyflow-core-tests
+    ${LYFLOW_TEST_SOURCES} ${LYFLOW_PACK_TEST_SOURCES}
+    "${LYFLOW_MANIFEST}"
+    $<TARGET_OBJECTS:lyflow_core_obj> ${LYFLOW_PACK_OBJECTS})
+  lyflow_apply_common(lyflow-core-tests)
+  target_precompile_headers(lyflow-core-tests PRIVATE <doctest/doctest.h> <nlohmann/json.hpp>)
+  set_source_files_properties("${LYFLOW_TESTS}/doctest_main.cpp" PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+  # 包的测试也 #include "helpers.h"，而它在 core/tests/ 下
+  target_include_directories(lyflow-core-tests PRIVATE "${LYFLOW_TESTS}")
+  if(LYFLOW_PACK_INCLUDES)
+    target_include_directories(lyflow-core-tests PRIVATE ${LYFLOW_PACK_INCLUDES})
+  endif()
+  if(MSVC)
+    # doctest 为了 stringify 特化了 std::tuple，C++20 起标准禁止，MSVC 会警告。
+    # 不是我们能修的第三方代码，单独关掉这一条，其余 /W4 照旧。
+    target_compile_options(lyflow-core-tests PRIVATE /wd5285)
+  endif()
+  target_link_libraries(lyflow-core-tests PRIVATE ${LYFLOW_PACK_LIBS})
 
-math(EXPR _fixture_next_patch "${PROJECT_VERSION_PATCH} + 1")
-set(_fixture_other_version "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${_fixture_next_patch}")
-math(EXPR _fixture_next_minor "${PROJECT_VERSION_MINOR} + 1")
-set(_fixture_other_minor "${PROJECT_VERSION_MAJOR}.${_fixture_next_minor}.0")
-foreach(fixture matching legacy abi_patch engine_patch abi_minor engine_minor null_abi)
-  add_library(lyflow-client-${fixture} SHARED "${LYFLOW_TESTS}/fixtures/client_version.cpp")
-  target_include_directories(lyflow-client-${fixture} PRIVATE "${LYFLOW_INCLUDE}")
-  # version.h 里有中文注释：中文代码页（936）下不加 /utf-8，注释会吞掉下一行的 #define
-  target_compile_options(lyflow-client-${fixture} PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
-  target_compile_definitions(lyflow-client-${fixture} PRIVATE "LYFLOW_FIXTURE_${fixture}"
-    "LYFLOW_FIXTURE_OTHER_VERSION=\"${_fixture_other_version}\""
-    "LYFLOW_FIXTURE_OTHER_MINOR=\"${_fixture_other_minor}\"")
-  set_target_properties(lyflow-client-${fixture} PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/client-fixtures"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/client-fixtures"
-    MSVC_RUNTIME_LIBRARY "MultiThreaded")
-  add_dependencies(lyflow-core-tests lyflow-client-${fixture})
-  target_compile_definitions(lyflow-core-tests PRIVATE
-    "LYFLOW_FIXTURE_PATH_${fixture}=\"$<TARGET_FILE:lyflow-client-${fixture}>\"")
-endforeach()
+  math(EXPR _fixture_next_patch "${PROJECT_VERSION_PATCH} + 1")
+  set(_fixture_other_version "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${_fixture_next_patch}")
+  math(EXPR _fixture_next_minor "${PROJECT_VERSION_MINOR} + 1")
+  set(_fixture_other_minor "${PROJECT_VERSION_MAJOR}.${_fixture_next_minor}.0")
+  foreach(fixture matching legacy abi_patch engine_patch abi_minor engine_minor null_abi)
+    add_library(lyflow-client-${fixture} SHARED "${LYFLOW_TESTS}/fixtures/client_version.cpp")
+    target_include_directories(lyflow-client-${fixture} PRIVATE "${LYFLOW_INCLUDE}")
+    # version.h 里有中文注释：中文代码页（936）下不加 /utf-8，注释会吞掉下一行的 #define
+    target_compile_options(lyflow-client-${fixture} PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+    target_compile_definitions(lyflow-client-${fixture} PRIVATE "LYFLOW_FIXTURE_${fixture}"
+      "LYFLOW_FIXTURE_OTHER_VERSION=\"${_fixture_other_version}\""
+      "LYFLOW_FIXTURE_OTHER_MINOR=\"${_fixture_other_minor}\"")
+    set_target_properties(lyflow-client-${fixture} PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/client-fixtures"
+      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/client-fixtures"
+      MSVC_RUNTIME_LIBRARY "MultiThreaded")
+    add_dependencies(lyflow-core-tests lyflow-client-${fixture})
+    target_compile_definitions(lyflow-core-tests PRIVATE
+      "LYFLOW_FIXTURE_PATH_${fixture}=\"$<TARGET_FILE:lyflow-client-${fixture}>\"")
+  endforeach()
 
-enable_testing()
-add_test(NAME lyflow-core-tests COMMAND lyflow-core-tests)
+  enable_testing()
+  add_test(NAME lyflow-core-tests COMMAND lyflow-core-tests)
+endif()
 
 # --------------------------------------------------------------- 安装布局
 # A1-11 / docs/embedding.md。产出 bin（core DLL + 依赖 DLL + lyflow CLI）、

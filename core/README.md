@@ -77,8 +77,15 @@ C ABI 使用产品版本字符串：`LYFLOW_ABI_VERSION` 引用 `LYFLOW_VERSION`
 pnpm core:build
 # 或者直接
 pwsh -File scripts/build-core.ps1
-pwsh -File scripts/build-core.ps1 RelWithDebInfo -NoTests   # 只构建
+pwsh -File scripts/build-core.ps1 RelWithDebInfo -NoTests   # 只构建 DLL 与算子自检工具
 ```
+
+`-NoTests` 会设置 `BUILD_TESTING=OFF`，不生成测试程序和客户端 fixture；再次运行默认命令会恢复测试构建。
+Cargo 依赖构建也关闭这部分目标，C++ 测试仍由 `core:build` 负责。
+
+core 与未指定 PCH 的算子包预编译 `nlohmann/json.hpp`，点云和图像包把 JSON 放入各自的 PCH，
+测试单独预编译 doctest 与 JSON。core 与测试新增的 PCH 仅包含第三方头，避免修改 core 公共头时连带重建 PCH。
+手动配置时可用 `-DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON` 关闭；CI 的 sccache 构建显式关闭 PCH，继续复用编译缓存。
 
 产物全部落在 `build/core/bin/`：
 
