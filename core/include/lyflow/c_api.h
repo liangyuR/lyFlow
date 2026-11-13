@@ -50,6 +50,12 @@ LYFLOW_API size_t lyflow_library_count(void);
 // 编辑器「展开为内联子图」直接写进 doc。找不到返回空串。
 LYFLOW_API char* lyflow_library_definition(const char* op_id);
 
+// Python worker configuration/discovery. Returned status JSON uses lyflow_string_free.
+// Configure/refresh require no active run. An empty configuration disables Python.
+LYFLOW_API char* lyflow_configure_python(const char* config_json);
+LYFLOW_API char* lyflow_python_status(void);
+LYFLOW_API char* lyflow_refresh_python(void);
+
 // ------------------------------------------------------------------ 只校验
 
 // 同步校验一张图，不执行。返回诊断 JSON 数组（可能是空数组 "[]"）。

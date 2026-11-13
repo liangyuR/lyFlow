@@ -1,3 +1,5 @@
+import { unsupportedPythonSettings } from '../lib/pythonConfig';
+
 import type { CoreInfo, OperatorManifestBundle } from '../types/manifest';
 import type { GraphDoc, SubgraphDef } from '../types/graph';
 import type {
@@ -14,6 +16,8 @@ import type {
   CoreReloadFailed,
   LibraryRefresh,
   LibrarySettings,
+  PythonSettings,
+  PythonRefresh,
   LibraryStatus,
   LoadedGraph,
   ManifestUpdated,
@@ -158,6 +162,15 @@ export class StaticTransport implements Transport {
   }
   async writeFileBytes(): Promise<void> {
     throw new Error('静态模式不能写盘，请用 Tauri 壳或 HttpTransport');
+  }
+  async getPythonSettings(): Promise<PythonSettings> {
+    return unsupportedPythonSettings();
+  }
+  async setPythonSettings(): Promise<PythonRefresh> {
+    return browserOnly('配置 Python 节点');
+  }
+  async refreshPythonNodes(): Promise<PythonRefresh> {
+    return browserOnly('刷新 Python 节点');
   }
   async getLibraryStatus(): Promise<LibraryStatus> {
     return { dirs: [], count: 0, problems: [] };

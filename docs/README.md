@@ -29,6 +29,7 @@
 | [HTTP 传输](http-transport.md) | REST、WebSocket、结果载荷与后端实现约定 |
 | [参数配方](recipe.md) | 配方文件、默认值、覆盖顺序与失配处理 |
 | [库算子目录](library-dirs.md) | 桌面、CLI 与宿主共用的库目录配置 |
+| [Python 自定义节点](python-nodes.md) | SDK、解释器配置、worker、四类数据与嵌入接口 |
 
 ## 算子与业务接入
 

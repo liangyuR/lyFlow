@@ -46,6 +46,7 @@ pub struct HostConfig {
     /// 库算子目录（ADR-0010）。`None` = 现状：app data 下的 `library/` 加
     /// `LYFLOW_LIBRARY_DIRS`。给 `Some(vec![])` 就是「这个宿主不要库算子」。
     pub library_dirs: Option<Vec<PathBuf>>,
+    pub python: Option<crate::python_settings::PythonRuntimeConfig>,
     /// 点云注入的来源。`None` 时带 `sceneId` 的 `run_graph` 直接报错，
     /// 而不是静默地跑一张没注入的图。
     pub scenes: Option<Arc<dyn SceneProvider>>,
@@ -60,6 +61,7 @@ impl Default for HostConfig {
         Self {
             workspace_root: None,
             library_dirs: None,
+            python: None,
             scenes: None,
             hot_reload: true,
         }
@@ -106,6 +108,7 @@ pub fn setup<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if hot_reload {
         crate::watcher::spawn_library(app.clone());
     }
+    crate::commands::initialize_python(app);
 }
 
 /// 取 managed 的 `HostConfig`。宿主忘了 `attach()` 时退回一份默认配置，
@@ -331,6 +334,9 @@ macro_rules! lyflow_handler {
             $crate::commands::get_library_definition,
             $crate::commands::get_library_settings,
             $crate::commands::set_library_dirs,
+            $crate::commands::get_python_settings,
+            $crate::commands::set_python_settings,
+            $crate::commands::refresh_python_nodes,
             $($host_cmd,)*
         ]
     };

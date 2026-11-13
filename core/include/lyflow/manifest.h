@@ -3,6 +3,7 @@
 // 序列化结果必须符合 schema/operator-manifest.schema.json，改这里等于改跨语言 API。
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <set>
 #include <string>
@@ -22,7 +23,7 @@ class Outputs;
 class ExecContext;
 
 /// 算子的计算函数。输入已按端口类型校验过，参数已合并默认值，ctx 提供取消与进度。
-using ComputeFn = Status (*)(const Inputs&, const ParamView&, Outputs&, ExecContext&);
+using ComputeFn = std::function<Status(const Inputs&, const ParamView&, Outputs&, ExecContext&)>;
 
 /// 可选钩子：把「文件内容变了」这类外部状态揉进 cacheKey。
 /// IO 算子返回 "size:mtime"，读不到文件时返回空串（当作没有外部状态）。

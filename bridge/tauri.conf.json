@@ -32,7 +32,8 @@
     "active": true,
     "targets": "all",
     "resources": {
-      "target/bundle-core/*.dll": "./"
+      "target/bundle-core/*.dll": "./",
+      "target/bundle-core/python/": "python/"
     },
     "icon": [
       "icons/32x32.png",

@@ -84,7 +84,7 @@ function model(d = doc(), diagnostics = NO_DIAGNOSTICS) {
 const view = (m, filter = {}) =>
   flattenPanel(m, { query: '', chip: 'all', type: null, toggled: {}, ...filter });
 
-test('行的全集：图参数 + 每个节点的可见参数 + 按实例展开的子图定义', () => {
+test('参数面板模型：可见行全集、共享子图与已改动/配方chip计数', () => {
   const m = model();
   assert.equal(m.graphRows.length, 1);
   const [a, b, s1, s2] = m.sections;
@@ -105,14 +105,12 @@ test('行的全集：图参数 + 每个节点的可见参数 + 按实例展开�
   assert.equal(s2.children[0].fullNodeId, 's2/in1');
   // 1 + 5 + 6 + 5 + 5
   assert.equal(view(m).counts.all, 22);
-});
 
-test('chip：已改动 = 与算子默认不同；配方 = 图参数与被它提供的行', () => {
-  const v = view(model());
+  const v = view(m);
   // a.gain=2、b.mode=b、b.gain=3（由图参数提供）、b.note、图参数 gain（3 ≠ 算子默认 1）
   assert.equal(v.counts.modified, 5);
   assert.equal(v.counts.recipe, 2);
-  const rows = view(model(), { chip: 'recipe' }).items.filter((i) => i.kind === 'row');
+  const rows = view(m, { chip: 'recipe' }).items.filter((i) => i.kind === 'row');
   assert.deepEqual(
     rows.map((i) => i.key),
     ['b.gain'],
@@ -121,7 +119,7 @@ test('chip：已改动 = 与算子默认不同；配方 = 图参数与被它提�
   assert.equal(rows[0].row.value, 3);
 });
 
-test('enabledWhen 不满足的置灰（ne），advanced 组默认收起、过滤时展开', () => {
+test('参数面板展开规则：联动禁用、高级组与共享子图的默认折叠', () => {
   const m = model();
   const tolA = m.sections[0].rows.find((r) => r.param.name === 'tol');
   const tolB = m.sections[1].rows.find((r) => r.param.name === 'tol');
@@ -140,10 +138,7 @@ test('enabledWhen 不满足的置灰（ne），advanced 组默认收起、过滤
     searched.map((i) => i.key),
     ['a.seed', 'b.seed', 's1/in1.seed', 's2/in1.seed'],
   );
-});
 
-test('子图定义默认收起；展开后定义里的节点带共享标记', () => {
-  const m = model();
   const def = view(m).items.find((i) => i.kind === 'def-head' && i.key === 'n:s1|def');
   assert.equal(def.open, false);
   assert.equal(def.shared, 2);
@@ -153,41 +148,42 @@ test('子图定义默认收起；展开后定义里的节点带共享标记', ()
   assert.ok(open.some((i) => i.kind === 'row' && i.key === 's1/in1.mode' && i.row.shared === 2));
 });
 
-test('搜索：参数名、label、节点标题、节点 id、值的文本，多个词都要中', () => {
-  const m = model();
-  const keys = (q) =>
-    view(m, { query: q })
+test('参数面板筛选：多字段多词AND、类型过滤与节点/图参数诊断', () => {
+  {
+    const m = model();
+    const keys = (q) =>
+      view(m, { query: q })
+        .items.filter((i) => i.kind === 'row')
+        .map((i) => i.key);
+    assert.deepEqual(keys('hello'), ['b.note']);
+    assert.deepEqual(keys('甲 gain'), ['a.gain']);
+    assert.deepEqual(keys('s2 mode'), ['s2/in1.mode']);
+    assert.equal(
+      view(m, { query: 'Gain' }).counts.all,
+      5,
+      '大小写不敏感：4 个节点的 gain + 图参数 gain',
+    );
+    assert.deepEqual(
+      view(m, { query: 'zzz' }).items.map((i) => i.kind),
+      ['empty'],
+    );
+  }
+  {
+    const diagnostics = {
+      byNode: new Map([['a', new Map([['gain', [{ severity: 'error', message: '太大' }]]])]]),
+      byGraphParam: new Map([['gain', [{ severity: 'error', message: '越界' }]]]),
+    };
+    const m = model(doc(), diagnostics);
+    const v = view(m, { chip: 'diag' });
+    assert.equal(v.counts.diag, 2);
+    assert.deepEqual(
+      v.items.filter((i) => i.kind === 'row' || i.kind === 'gp-row').map((i) => i.key),
+      ['gp:gain', 'a.gain'],
+    );
+    const ints = view(m, { type: 'int' })
       .items.filter((i) => i.kind === 'row')
       .map((i) => i.key);
-  assert.deepEqual(keys('hello'), ['b.note']);
-  assert.deepEqual(keys('甲 gain'), ['a.gain']);
-  assert.deepEqual(keys('s2 mode'), ['s2/in1.mode']);
-  assert.equal(
-    view(m, { query: 'Gain' }).counts.all,
-    5,
-    '大小写不敏感：4 个节点的 gain + 图参数 gain',
-  );
-  assert.deepEqual(
-    view(m, { query: 'zzz' }).items.map((i) => i.kind),
-    ['empty'],
-  );
-});
-
-test('类型过滤与诊断：带 paramPath 的诊断贴到那一行，图参数的贴到图参数行', () => {
-  const diagnostics = {
-    byNode: new Map([['a', new Map([['gain', [{ severity: 'error', message: '太大' }]]])]]),
-    byGraphParam: new Map([['gain', [{ severity: 'error', message: '越界' }]]]),
-  };
-  const m = model(doc(), diagnostics);
-  const v = view(m, { chip: 'diag' });
-  assert.equal(v.counts.diag, 2);
-  assert.deepEqual(
-    v.items.filter((i) => i.kind === 'row' || i.kind === 'gp-row').map((i) => i.key),
-    ['gp:gain', 'a.gain'],
-  );
-  const ints = view(m, { type: 'int' })
-    .items.filter((i) => i.kind === 'row')
-    .map((i) => i.key);
-  assert.deepEqual(ints, ['a.seed', 'b.extra', 'b.seed', 's1/in1.seed', 's2/in1.seed']);
-  assert.equal(view(m).counts.byType.int, 5);
+    assert.deepEqual(ints, ['a.seed', 'b.extra', 'b.seed', 's1/in1.seed', 's2/in1.seed']);
+    assert.equal(view(m).counts.byType.int, 5);
+  }
 });

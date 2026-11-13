@@ -376,6 +376,7 @@ pub enum CoreError {
 /// （`Symbol<_>` 推不出来，`into_raw()` 断了推导链）。
 type FnVersion = unsafe extern "C" fn() -> *const c_char;
 type FnJson = unsafe extern "C" fn() -> *mut c_char;
+type FnPythonConfigure = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 type FnStringFree = unsafe extern "C" fn(*mut c_char);
 type FnValidate = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_char;
 type FnValidateParams =
@@ -525,6 +526,9 @@ pub struct Core {
     // 用到时才报 MissingSymbol。
     plan_inputs: Option<FnPlanInputs>,
     cache_evict_inputs: Option<FnCacheEvictInputs>,
+    configure_python: Option<FnPythonConfigure>,
+    python_status: Option<FnJson>,
+    refresh_python: Option<FnJson>,
     #[allow(dead_code)]
     lib: Library,
 }
@@ -632,6 +636,9 @@ impl Core {
             cache_set_dir: sym!(lib, "lyflow_cache_set_dir", FnCacheSetDir),
             plan_inputs: sym_opt!(lib, "lyflow_plan_inputs", FnPlanInputs),
             cache_evict_inputs: sym_opt!(lib, "lyflow_cache_evict_inputs", FnCacheEvictInputs),
+            configure_python: sym_opt!(lib, "lyflow_configure_python", FnPythonConfigure),
+            python_status: sym_opt!(lib, "lyflow_python_status", FnJson),
+            refresh_python: sym_opt!(lib, "lyflow_refresh_python", FnJson),
             lib,
         })
     }
@@ -957,6 +964,34 @@ impl Core {
 
     pub fn library_count(&self) -> usize {
         unsafe { (self.library_count)() }
+    }
+
+    pub fn supports_python(&self) -> bool {
+        self.configure_python.is_some()
+            && self.python_status.is_some()
+            && self.refresh_python.is_some()
+    }
+
+    pub fn configure_python(&self, config_json: &str) -> Result<String, CoreError> {
+        let call = self
+            .configure_python
+            .ok_or(CoreError::MissingSymbol("lyflow_configure_python"))?;
+        let config = CString::new(config_json)?;
+        unsafe { self.take_owned(call(config.as_ptr())) }
+    }
+
+    pub fn python_status(&self) -> Result<String, CoreError> {
+        let call = self
+            .python_status
+            .ok_or(CoreError::MissingSymbol("lyflow_python_status"))?;
+        unsafe { self.take_owned(call()) }
+    }
+
+    pub fn refresh_python(&self) -> Result<String, CoreError> {
+        let call = self
+            .refresh_python
+            .ok_or(CoreError::MissingSymbol("lyflow_refresh_python"))?;
+        unsafe { self.take_owned(call()) }
     }
 
     /// 落盘缓存放在 `<dir>/<build_identity>/` 下，`dir` 空串 = 关。

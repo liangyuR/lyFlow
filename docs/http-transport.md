@@ -51,6 +51,9 @@ v11 再加的 `isolate`（只运行某几个节点）与 `force`（强制重算�
 | GET | `/lyflow/library/definition?op=lib.<id>` | `getLibraryDefinition` | `lyflow_library_definition`（v13） |
 | GET | `/lyflow/library/settings` | `getLibrarySettings` | 桥接层的事（[library-dirs.md](library-dirs.md)） |
 | POST | `/lyflow/library/dirs` | `setLibraryDirs` | 桥接层写设置，再 `lyflow_set_library_dirs` 重扫 |
+| GET | `/lyflow/python/settings` | `getPythonSettings`（可选） | `lyflow_python_status` + 共享配置 |
+| PUT | `/lyflow/python/settings` | `setPythonSettings`（可选） | `lyflow_configure_python` |
+| POST | `/lyflow/python/refresh` | `refreshPythonNodes`（可选） | `lyflow_refresh_python` |
 | POST | `/lyflow/import` | `importGraph` | `lyflow_import` |
 | GET / PUT | `/lyflow/files/graph?path=` | `loadGraph` / `saveGraph` | 桥接层 |
 | GET / PUT / DELETE | `/lyflow/files/backup?path=` | `readBackup` / `writeBackup` / `discardBackup` | 桥接层 |
@@ -66,6 +69,8 @@ v11 再加的 `isolate`（只运行某几个节点）与 `force`（强制重算�
 | WS | `/lyflow/events` | `onExecutionEvent` 等三个 | `lyflow_event_cb` |
 
 `path` 查询参数是**相对工作区根**的路径。服务端必须拒绝逃出工作区的路径（返回 403）。
+
+Python 设置 GET 返回 `{supported, editable, config, status}`，PUT 接受 `{executable, packagePaths, timeoutMs}`，PUT/刷新返回 `{status, manifest}`。旧后端可不实现这三个端点，编辑器仅禁用该能力。宿主覆盖配置时 `editable:false`，后端同时拒绝写入。导入错误保存在 `status.problems`，包含路径、消息及可选 traceback；合法包继续进入 manifest。完整说明见 [Python 自定义节点](python-nodes.md)。
 
 ---
 

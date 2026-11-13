@@ -56,7 +56,7 @@ const base = {
 };
 const withNodes = (nodes, extra = {}) => ({ ...base, nodes, ...extra });
 
-test('调参记录：两次运行之间改了什么 —— 有效参数（缺省值也算）、静音、增删节点、图参数；写成一行', () => {
+test('调参差异与比较基线：有效值/静音/结构、共享定义去重及预览/取消回退', () => {
   const rec = (doc, params = { thr: 1 }) => ({ doc, params });
   const cases = [
     // [说明, 后一次, 期望的一行]
@@ -129,12 +129,10 @@ test('调参记录：两次运行之间改了什么 —— 有效参数（缺省
   );
   assert.equal(shortValue('x'.repeat(40)).length, 24, '长字符串截短');
   assert.equal(shortValue(true), '开');
-});
 
-test('还没跑的改动跟哪一次比：屏幕上那次结果的记录；不在记录里（预览）、没跑完、被取消的退到最近一条跑完的；一共几处', () => {
   const r = (runId, status) => ({ runId, status });
   const records = [r('p', 'running'), r('c', 'cancelled'), r('b', 'error'), r('a', 'ok')];
-  const cases = [
+  const baselines = [
     // [说明, 屏幕上是哪一次的结果, 期望跟哪一次比]
     ['屏幕上就是 a', 'a', 'a'],
     ['出错的那一次也算跑完', 'b', 'b'],
@@ -143,7 +141,7 @@ test('还没跑的改动跟哪一次比：屏幕上那次结果的记录；不�
     ['还在跑', 'p', 'b'],
     ['还没有结果', null, 'b'],
   ];
-  for (const [name, shown, want] of cases)
+  for (const [name, shown, want] of baselines)
     assert.equal(pendingBase(records, shown)?.runId ?? null, want, name);
   assert.equal(
     pendingBase([r('c', 'cancelled'), r('p', 'running')], 'c'),

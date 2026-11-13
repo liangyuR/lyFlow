@@ -361,6 +361,8 @@ if(BUILD_TESTING)
   set_source_files_properties("${LYFLOW_TESTS}/doctest_main.cpp" PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
   # 包的测试也 #include "helpers.h"，而它在 core/tests/ 下
   target_include_directories(lyflow-core-tests PRIVATE "${LYFLOW_TESTS}")
+  target_compile_definitions(lyflow-core-tests PRIVATE
+    "LYFLOW_PYTHON_SDK_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/../python\"")
   if(LYFLOW_PACK_INCLUDES)
     target_include_directories(lyflow-core-tests PRIVATE ${LYFLOW_PACK_INCLUDES})
   endif()
@@ -429,6 +431,19 @@ install(TARGETS lyflow_core
         RUNTIME DESTINATION bin
         LIBRARY DESTINATION bin
         ARCHIVE DESTINATION lib)
+
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../python/lyflow_python"
+        DESTINATION bin/python
+        FILES_MATCHING PATTERN "*.py")
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../python/examples/"
+        DESTINATION examples/python
+        FILES_MATCHING PATTERN "*.py")
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../python/examples/"
+        DESTINATION bin/python/examples
+        FILES_MATCHING PATTERN "*.py")
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../python/README.md"
+              "${CMAKE_CURRENT_SOURCE_DIR}/../python/pyproject.toml"
+        DESTINATION bin/python)
 
 # vcpkg 的 applocal 部署把 PCL/boost/onnxruntime 那些依赖 DLL 拷进了 build 的 bin/。
 # 整目录带走 —— 少一个的表现是宿主 LoadLibrary 失败而错误信息只说「找不到模块」。

@@ -382,14 +382,26 @@ void Registry::setCurrentPack(std::string pack) { currentPack_ = std::move(pack)
 void Registry::addOperator(OperatorDesc op) {
   if (op.pack.empty())
     op.pack = currentPack_;
-  operators_.push_back(std::move(op));
-  builtinCount_ = operators_.size();
+  operators_.insert(operators_.begin() + builtinCount_, std::move(op));
+  ++builtinCount_;
 }
 
 void Registry::setLibraryOperators(std::vector<OperatorDesc> ops) {
+  libraryOperators_ = std::move(ops);
+  rebuildOperators();
+}
+
+void Registry::setPythonOperators(std::vector<OperatorDesc> ops) {
+  pythonOperators_ = std::move(ops);
+  rebuildOperators();
+}
+
+void Registry::rebuildOperators() {
   operators_.resize(builtinCount_);
-  for (auto& op : ops)
-    operators_.push_back(std::move(op));
+  for (const auto& op : libraryOperators_)
+    operators_.push_back(op);
+  for (const auto& op : pythonOperators_)
+    operators_.push_back(op);
 }
 
 void Registry::addImporter(ImporterDesc importer) {
@@ -423,6 +435,8 @@ void Registry::clear() {
   importers_.clear();
   snippets_.clear();
   builtinCount_ = 0;
+  libraryOperators_.clear();
+  pythonOperators_.clear();
 }
 
 const OperatorDesc* Registry::find(const std::string& id) const {

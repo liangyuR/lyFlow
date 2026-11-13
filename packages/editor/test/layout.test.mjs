@@ -26,16 +26,12 @@ const chain = (withPositions) => ({
   edges: [{ id: 'e', from: { node: 'a', port: 'cloud' }, to: { node: 'b', port: 'cloud' } }],
 });
 
-test('缺坐标的文档会被判定为需要布局', () => {
+test('初始布局生命周期：缺失/完整/空坐标、上游顺序与打开时不记撤销', async () => {
   assert.equal(needsInitialLayout(chain(false)), true);
-});
 
-test('坐标齐全的文档不布局，空文档也不布局', () => {
   assert.equal(needsInitialLayout(chain(true)), false);
   assert.equal(needsInitialLayout({ schemaVersion: 1, id: 'y', nodes: [], edges: [] }), false);
-});
 
-test('自动布局给每个节点一个落点，上游排在下游左边；打开时的那一次不记撤销、不算改动（layoutLoaded）', async () => {
   const moves = layoutGraph(chain(false));
   assert.equal(moves.length, 2);
   const at = Object.fromEntries(moves.map((m) => [m.id, m.position]));
@@ -120,47 +116,49 @@ test('自动布局给每个节点一个落点，上游排在下游左边；打�
 
 // 三栏分宽度：窗口窄了两侧面板让位（右栏先缩），画布至少留 320。
 // 修前两侧都不缩：1024 宽的窗口打开参数面板，画布挤成 0，面板右边一截跑到窗口外
-test('窗口窄了两侧面板让位：右栏先缩到最窄，不够再缩左栏，画布留够最窄', () => {
-  const palette = { width: 280, min: 180 };
-  const panel = { width: 804, min: 360 };
-  const cases = [
-    ['放得下：原样', 1436, palette, { width: 380, min: 260 }, { left: 280, right: 380 }],
-    ['只缩右栏就够', 1020, palette, panel, { left: 280, right: 420 }],
-    ['右栏到最窄，再缩左栏', 896, palette, panel, { left: 216, right: 360 }],
-    ['两侧都到最窄还放不下：停在最窄，画布让', 700, palette, panel, { left: 180, right: 360 }],
-    ['还没量到宽度：原样', 0, palette, panel, { left: 280, right: 804 }],
-  ];
-  for (const [name, total, left, right, want] of cases) {
-    assert.deepEqual(fitSidePanes(total, left, right, 320), want, name);
+test('工作区边界布局：侧栏让位、最小画布与菜单翻转限高', () => {
+  {
+    const palette = { width: 280, min: 180 };
+    const panel = { width: 804, min: 360 };
+    const cases = [
+      ['放得下：原样', 1436, palette, { width: 380, min: 260 }, { left: 280, right: 380 }],
+      ['只缩右栏就够', 1020, palette, panel, { left: 280, right: 420 }],
+      ['右栏到最窄，再缩左栏', 896, palette, panel, { left: 216, right: 360 }],
+      ['两侧都到最窄还放不下：停在最窄，画布让', 700, palette, panel, { left: 180, right: 360 }],
+      ['还没量到宽度：原样', 0, palette, panel, { left: 280, right: 804 }],
+    ];
+    for (const [name, total, left, right, want] of cases) {
+      assert.deepEqual(fitSidePanes(total, left, right, 320), want, name);
+    }
+  }
+  {
+    const vp = { width: 1440, height: 900 };
+    const menu = { width: 150, height: 300 };
+    const cases = [
+      ['放得下：照鼠标位置', { x: 100, y: 100 }, menu, { left: 100, top: 100 }],
+      ['下面放不下：翻到鼠标上面', { x: 100, y: 800 }, menu, { left: 100, top: 500 }],
+      ['右边放不下：翻到鼠标左边', { x: 1400, y: 100 }, menu, { left: 1250, top: 100 }],
+      [
+        '翻上去还放不下：贴着窗口顶',
+        { x: 100, y: 500 },
+        { width: 150, height: 600 },
+        { left: 100, top: 4 },
+      ],
+      [
+        '比窗口还高：贴顶、限高（里面滚）',
+        { x: 100, y: 400 },
+        { width: 150, height: 1000 },
+        { left: 100, top: 4, maxHeight: 892 },
+      ],
+    ];
+    for (const [name, at, size, want] of cases) {
+      assert.deepEqual(placeMenu(at, size, vp), want, name);
+    }
   }
 });
 
 // 右键菜单摆进窗口（1440 × 900 的窗口、离边 4 px）：放不下就翻到鼠标另一边，比窗口还高就贴顶限高。
 // 修前照鼠标位置往右下摆，画布下半部分右键节点时菜单大半截在窗口外
-test('右键菜单摆进窗口：放不下翻到鼠标另一边，比窗口还高就贴顶、限高', () => {
-  const vp = { width: 1440, height: 900 };
-  const menu = { width: 150, height: 300 };
-  const cases = [
-    ['放得下：照鼠标位置', { x: 100, y: 100 }, menu, { left: 100, top: 100 }],
-    ['下面放不下：翻到鼠标上面', { x: 100, y: 800 }, menu, { left: 100, top: 500 }],
-    ['右边放不下：翻到鼠标左边', { x: 1400, y: 100 }, menu, { left: 1250, top: 100 }],
-    [
-      '翻上去还放不下：贴着窗口顶',
-      { x: 100, y: 500 },
-      { width: 150, height: 600 },
-      { left: 100, top: 4 },
-    ],
-    [
-      '比窗口还高：贴顶、限高（里面滚）',
-      { x: 100, y: 400 },
-      { width: 150, height: 1000 },
-      { left: 100, top: 4, maxHeight: 892 },
-    ],
-  ];
-  for (const [name, at, size, want] of cases) {
-    assert.deepEqual(placeMenu(at, size, vp), want, name);
-  }
-});
 
 // 记在 localStorage 里的开关（检查器端口小节的开合）：只认 "1" / "0"，存储读不到、写不进都不报错
 test('readStoredBool / writeStoredBool：坏值当没有，存储抛异常时照样往下走', async () => {
