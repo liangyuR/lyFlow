@@ -34,20 +34,32 @@
   scrollbar-width: thin;
 }
 .flow-tab {
+  position: relative;
   display: flex;
   align-items: center;
   flex: none;
   max-width: 280px;
   min-width: 120px;
   padding-right: 6px;
-  border-radius: var(--r-full);
+  border-radius: var(--r-sm);
   background: transparent;
 }
 .flow-tab:hover {
   background: var(--state-hover);
 }
 .flow-tab.is-active {
-  background: var(--secondary-container);
+  background: var(--state-hover);
+}
+.flow-tab.is-active::after {
+  position: absolute;
+  right: 12px;
+  bottom: 0;
+  left: 12px;
+  height: 2px;
+  border-radius: var(--r-full);
+  background: var(--primary);
+  content: '';
+  pointer-events: none;
 }
 .flow-tab__select {
   display: flex;
@@ -58,7 +70,7 @@
   height: var(--ctl-h);
   padding: 0 10px 0 16px;
   border: 0;
-  border-radius: var(--r-full);
+  border-radius: var(--r-sm);
   background: transparent;
   color: var(--on-surface-variant);
   font: 400 13px/1 var(--font-sans);
@@ -66,7 +78,7 @@
   cursor: pointer;
 }
 .flow-tab.is-active .flow-tab__select {
-  color: var(--on-secondary-container);
+  color: var(--on-surface);
   font-weight: 600;
 }
 .flow-tab__select:disabled {
@@ -94,7 +106,7 @@
   flex: none;
 }
 .flow-tab.is-active .flow-tab__close {
-  --btn-fg: var(--on-secondary-container);
+  --btn-fg: var(--on-surface);
 }
 .flow-tabs__new {
   flex: none;

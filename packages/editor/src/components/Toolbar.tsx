@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { useDismiss } from '../hooks/useDismiss';
 import { usePendingChanges } from '../hooks/usePendingChanges';
 import { dialogs } from '../lib/dialogs';
-import { baseName, parentName, recentFiles } from '../lib/files';
 import { historyRows, jumpHistory, stepHistory } from '../lib/history';
 import { keyHint } from '../lib/keymap';
 import { revealError } from '../lib/revealError';
@@ -21,31 +20,18 @@ import { useCacheStore } from '../store/cache';
 import { runControlsOf, summarize, useExecutionStore, useJudgedNodes } from '../store/execution';
 import { useGraphStore } from '../store/graph';
 import { useManifestStore } from '../store/manifest';
-import { useRecipeStore, useRecipesDirty } from '../store/recipe';
+import { useRecipeStore } from '../store/recipe';
 import { useUiStore } from '../store/ui';
 import { usePythonStore } from '../store/python';
-import {
-  transport,
-  type LibraryRefresh,
-  type LibrarySettings,
-  type RecentEntry,
-} from '../transport';
+import { transport, type LibraryRefresh, type LibrarySettings } from '../transport';
 
-import { CommitText } from './CommitText';
 import { RecipeMenu } from './RecipeMenu';
 import { PythonLibrary } from './PythonLibrary';
 
 type ToolbarIconName =
-  | 'flow'
-  | 'plus'
-  | 'folder'
   | 'save'
-  | 'copy'
   | 'undo'
   | 'redo'
-  | 'layout'
-  | 'sliders'
-  | 'logs'
   | 'library'
   | 'help'
   | 'play'
@@ -55,51 +41,14 @@ type ToolbarIconName =
 
 function ToolbarIcon({ name }: { name: ToolbarIconName }) {
   const paths: Record<ToolbarIconName, React.ReactNode> = {
-    flow: (
-      <>
-        <rect x="3" y="3" width="6" height="6" rx="2" />
-        <rect x="15" y="15" width="6" height="6" rx="2" />
-        <path d="M9 6h6a3 3 0 0 1 3 3v6M6 9v6a3 3 0 0 0 3 3h6" />
-      </>
-    ),
-    plus: <path d="M12 5v14M5 12h14" />,
-    folder: (
-      <path d="M3 8V6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z" />
-    ),
     save: (
       <>
         <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12l4 4v12a2 2 0 0 1-2 2Z" />
         <path d="M7 3v6h10V3M7 21v-8h10v8" />
       </>
     ),
-    copy: (
-      <>
-        <rect x="8" y="8" width="13" height="13" rx="2" />
-        <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
-      </>
-    ),
     undo: <path d="m9 5-6 6 6 6M3 11h11a7 7 0 0 1 7 7" />,
     redo: <path d="m15 5 6 6-6 6m6-6H10a7 7 0 0 0-7 7" />,
-    layout: (
-      <>
-        <rect x="3" y="3" width="7" height="7" rx="2" />
-        <rect x="14" y="14" width="7" height="7" rx="2" />
-        <path d="M14 6h7M17.5 3v7M3 17.5h7M6.5 14v7" />
-      </>
-    ),
-    sliders: (
-      <>
-        <path d="M4 7h7m4 0h5M4 17h3m4 0h9" />
-        <circle cx="13" cy="7" r="2" />
-        <circle cx="9" cy="17" r="2" />
-      </>
-    ),
-    logs: (
-      <>
-        <rect x="3" y="4" width="18" height="16" rx="3" />
-        <path d="m7 9 3 3-3 3m6 0h4" />
-      </>
-    ),
     library: (
       <>
         <path d="M4 4h4v16H4zM11 4h4v16h-4zM18 4l3 15" />
@@ -138,65 +87,142 @@ function ToolbarIcon({ name }: { name: ToolbarIconName }) {
 }
 
 export interface ToolbarActions {
-  onNew: () => void;
-  onOpen: () => void;
-  onOpenRecent: (path: string) => void;
   onSave: () => void;
   onSaveAs: () => void;
+  onRename: () => void;
   onRun: () => void;
   /** 运行中点「↻ 重跑」：同样的范围再来一次。F5 照旧是运行整张图。 */
   onRerun: () => void;
   onCancel: () => void;
-  onLayout: () => void;
 }
 
-/** 最近文件下拉（最多 10 条，存在 Tauri 的 app data 里）。 */
-function RecentMenu({ onPick }: { onPick: (path: string) => void }) {
+function SaveMenu({
+  onSave,
+  onSaveAs,
+  onRename,
+}: Pick<ToolbarActions, 'onSave' | 'onSaveAs' | 'onRename'>) {
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<RecentEntry[]>([]);
+  const menuId = useId();
   const box = useRef<HTMLDivElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
   useDismiss(
     open,
     box,
-    useCallback(() => setOpen(false), []),
+    useCallback(() => {
+      setOpen(false);
+      const active = box.current?.ownerDocument.activeElement;
+      if (!active || active === box.current?.ownerDocument.body || box.current?.contains(active))
+        toggle.current?.focus();
+    }, []),
   );
-
   useEffect(() => {
-    if (!open) return;
-    void recentFiles().then(setItems);
+    if (open) menu.current?.querySelector<HTMLButtonElement>('button')?.focus();
   }, [open]);
-
+  const choose = (action: () => void) => {
+    setOpen(false);
+    toggle.current?.focus();
+    action();
+  };
   return (
-    <div className="toolbar__recent" ref={box}>
+    <div
+      className="toolbar__group toolbar__save toolbar__recent"
+      ref={box}
+      role="group"
+      aria-label="保存操作"
+    >
       <button
+        className="qs-btn tonal sm"
         type="button"
-        className="qs-btn icon sm"
-        aria-label="最近打开"
+        onClick={onSave}
+        title="保存 (Ctrl+S)"
+        data-testid="save-button"
+      >
+        <ToolbarIcon name="save" />
+        <span>保存</span>
+      </button>
+      <button
+        ref={toggle}
+        type="button"
+        className="qs-btn tonal icon sm"
+        aria-label="保存选项"
+        aria-haspopup="menu"
+        aria-controls={open ? menuId : undefined}
         aria-expanded={open}
-        data-testid="recent-toggle"
-        title="最近打开"
+        data-testid="save-menu-toggle"
+        title="保存选项"
         onClick={() => setOpen((v) => !v)}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            event.stopPropagation();
+            setOpen(true);
+          }
+        }}
       >
         <ToolbarIcon name="chevron" />
       </button>
       {open && (
-        <div className="toolbar__recentmenu qs-popover" data-testid="recent-menu">
-          {items.length === 0 && <span className="toolbar__recentempty">还没有打开过文件</span>}
-          {items.map((r) => (
-            <button
-              key={r.path}
-              type="button"
-              data-testid="recent-item"
-              title={r.path}
-              onClick={() => {
-                setOpen(false);
-                onPick(r.path);
-              }}
-            >
-              {baseName(r.path)}
-              <span className="recent__dir">{parentName(r.path)}</span>
-            </button>
-          ))}
+        <div
+          className="toolbar__recentmenu toolbar__save-menu qs-popover"
+          id={menuId}
+          ref={menu}
+          role="menu"
+          aria-label="保存选项"
+          data-testid="save-menu"
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              const item = (event.target as Element).closest<HTMLButtonElement>(
+                '[role="menuitem"]',
+              );
+              if (item) {
+                event.preventDefault();
+                event.stopPropagation();
+                item.click();
+              }
+              return;
+            }
+            if (event.key === 'Tab') {
+              setOpen(false);
+              toggle.current?.focus();
+              return;
+            }
+            if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const items = [
+              ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+            ];
+            const at = items.indexOf(
+              event.currentTarget.ownerDocument.activeElement as HTMLButtonElement,
+            );
+            const next =
+              event.key === 'Home'
+                ? 0
+                : event.key === 'End'
+                  ? items.length - 1
+                  : (at + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+            items[next]?.focus();
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            tabIndex={-1}
+            data-testid="save-as"
+            onClick={() => choose(onSaveAs)}
+          >
+            另存为 <kbd>Ctrl+Shift+S</kbd>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            tabIndex={-1}
+            data-testid="rename-flow"
+            onClick={() => choose(onRename)}
+          >
+            重命名 <kbd>F2</kbd>
+          </button>
         </div>
       )}
     </div>
@@ -575,24 +601,6 @@ function LibraryMenu() {
   );
 }
 
-/** 参数面板的开关（param-recipe P2.1）。开着时替代 Inspector。 */
-function ParamPanelButton() {
-  const open = useUiStore((s) => s.paramPanel.open);
-  return (
-    <button
-      type="button"
-      className={`qs-btn sm ${open ? 'tonal is-on' : 'text'}`}
-      data-testid="param-panel-toggle"
-      aria-pressed={open}
-      onClick={() => useUiStore.getState().toggleParamPanel()}
-      title={`参数面板 (${keyHint('paramPanel')})`}
-    >
-      <ToolbarIcon name="sliders" />
-      <span>参数</span>
-    </button>
-  );
-}
-
 function formatDuration(ms: number): string {
   if (ms >= 1000) return `${(ms / 1000).toFixed(2)} s`;
   return `${Math.round(ms)} ms`;
@@ -787,96 +795,16 @@ function VerdictTallyChips() {
   );
 }
 
-export function Toolbar({
-  onNew,
-  onOpen,
-  onOpenRecent,
-  onSave,
-  onSaveAs,
-  onRun,
-  onRerun,
-  onCancel,
-  onLayout,
-}: ToolbarActions) {
+export function Toolbar({ onSave, onSaveAs, onRename, onRun, onRerun, onCancel }: ToolbarActions) {
   // 选长度而不是调 canUndo()：函数引用不变，组件不会因为栈变化而重渲染。
   const pastLen = useGraphStore((s) => s.past.length);
   const futureLen = useGraphStore((s) => s.future.length);
   const nextUndo = useGraphStore((s) => s.past[s.past.length - 1]?.label);
   const nextRedo = useGraphStore((s) => s.future[s.future.length - 1]?.label);
-  // 脏标记合并显示（K6 ③）：图或任何一个配方有没存的改动都算，Ctrl+S 一次存全
-  const graphDirty = useGraphStore((s) => s.dirty);
-  const recipesDirty = useRecipesDirty();
-  const dirty = graphDirty || recipesDirty;
-  const filePath = useGraphStore((s) => s.filePath);
-  const name = useGraphStore((s) => s.doc.name);
-
   return (
     <header className="toolbar" aria-label="工作流工具栏">
       <div className="toolbar__top qs-top">
-        <div className="toolbar__doc">
-          <CommitText
-            className="toolbar__name"
-            data-testid="doc-name"
-            value={name ?? ''}
-            spellCheck={false}
-            placeholder="未命名工作流"
-            aria-label="工作流名称"
-            title={filePath ?? '工作流名称'}
-            onCommit={(text) => useGraphStore.getState().setName(text)}
-          />
-          {dirty && (
-            <span
-              className="toolbar__dirty"
-              data-testid="toolbar-dirty"
-              title={
-                graphDirty && recipesDirty
-                  ? '图与配方都有未保存的改动'
-                  : recipesDirty
-                    ? '配方有未保存的改动'
-                    : '有未保存的改动'
-              }
-            >
-              ●
-            </span>
-          )}
-          {filePath && (
-            <span className="toolbar__path" title={filePath}>
-              {baseName(filePath)}
-            </span>
-          )}
-        </div>
-        <div className="toolbar__group toolbar__files" role="group" aria-label="文件操作">
-          <button className="qs-btn text sm" type="button" onClick={onNew} title="新建 (Ctrl+N)">
-            <ToolbarIcon name="plus" />
-            <span>新建</span>
-          </button>
-          <div className="toolbar__group toolbar__open">
-            <button
-              className="qs-btn text sm"
-              type="button"
-              onClick={onOpen}
-              title={`打开 (${keyHint('open')})`}
-            >
-              <ToolbarIcon name="folder" />
-              <span>打开</span>
-            </button>
-            <RecentMenu onPick={onOpenRecent} />
-          </div>
-          <button className="qs-btn tonal sm" type="button" onClick={onSave} title="保存 (Ctrl+S)">
-            <ToolbarIcon name="save" />
-            <span>保存</span>
-          </button>
-          <button
-            className="qs-btn text sm toolbar__save-as"
-            type="button"
-            onClick={onSaveAs}
-            title="另存为 (Ctrl+Shift+S)"
-            aria-label="另存为"
-          >
-            <ToolbarIcon name="copy" />
-            <span>另存为</span>
-          </button>
-        </div>
+        <SaveMenu onSave={onSave} onSaveAs={onSaveAs} onRename={onRename} />
         <span className="toolbar__divider" aria-hidden="true" />
         <RecipeMenu />
       </div>
@@ -906,26 +834,6 @@ export function Toolbar({
         </div>
         <span className="toolbar__divider" aria-hidden="true" />
         <div className="toolbar__group toolbar__tools" role="group" aria-label="工作区视图">
-          <button
-            className="qs-btn text sm"
-            type="button"
-            onClick={onLayout}
-            title={`整理布局 (${keyHint('layout')})`}
-          >
-            <ToolbarIcon name="layout" />
-            <span>整理</span>
-          </button>
-          <ParamPanelButton />
-          <button
-            className="qs-btn text sm"
-            type="button"
-            data-testid="drawer-toggle"
-            onClick={() => useUiStore.getState().toggleDrawer()}
-            title={`日志与诊断 (${keyHint('toggleDrawer')})`}
-          >
-            <ToolbarIcon name="logs" />
-            <span>日志</span>
-          </button>
           <LibraryMenu />
           <button
             className="qs-btn icon sm"

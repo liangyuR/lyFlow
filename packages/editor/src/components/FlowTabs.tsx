@@ -14,6 +14,7 @@ export interface FlowTabsProps {
   activeId: string;
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
+  onRename: (id: string) => void;
   onNew: () => void;
   disabled?: boolean;
   windowChrome?: FlowWindowChrome | undefined;
@@ -31,6 +32,7 @@ export function FlowTabs({
   activeId,
   onSelect,
   onClose,
+  onRename,
   onNew,
   disabled = false,
   windowChrome,
@@ -66,6 +68,12 @@ export function FlowTabs({
 
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, id: string) => {
     if (disabled || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.key === 'F2') {
+      event.preventDefault();
+      event.stopPropagation();
+      onRename(id);
+      return;
+    }
     if (event.key === 'Delete') {
       event.preventDefault();
       event.stopPropagation();
@@ -145,13 +153,18 @@ export function FlowTabs({
                 aria-selected={active}
                 tabIndex={active ? 0 : -1}
                 disabled={disabled}
-                title={tab.path ?? title}
+                title={`${tab.path ?? title}\n双击或按 F2 重命名`}
                 onClick={(event) => {
                   pendingFocus.current =
                     event.detail === 0 && tab.id !== activeId
                       ? { kind: 'select', id: tab.id }
                       : null;
                   onSelect(tab.id);
+                }}
+                onDoubleClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (!disabled) onRename(tab.id);
                 }}
                 onKeyDown={(event) => onKeyDown(event, tab.id)}
                 data-testid="flow-tab-select"

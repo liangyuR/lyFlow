@@ -2042,6 +2042,30 @@ async function suitePanels(cdp, report, ws) {
     ],
     [{ from: ["gen", "cloud"], to: ["voxel", "cloud"] }],
   );
+  await cdp.eval(`
+    const b=window.__lyflow, g=b.stores.graph.getState(), ui=b.stores.ui.getState();
+    window.__navigationLockBefore={doc:g.doc,past:g.past,future:g.future,locked:g.topologyLocked,ui:{paramPanel:ui.paramPanel,drawer:ui.drawer,helpOpen:ui.helpOpen,viewerMaximized:ui.viewerMaximized}};
+    b.stores.ui.setState({paramPanel:{...ui.paramPanel,open:false,maximized:false},drawer:null,helpOpen:false,viewerMaximized:false});
+    g.setTopologyLocked(true);
+    return true;
+  `);
+  try {
+    await cdp.waitFor(`!document.querySelector('[data-testid="nav-nodes"], [data-testid="nav-flows"]')`, { what: "拓扑锁隐藏结构入口" });
+    report.ok("拓扑锁宿主隐藏节点/工作流入口，参数、日志、帮助导航仍可见",
+      await cdp.eval(`return ['nav-parameters','nav-logs','nav-help'].every(id=>{const b=document.querySelector('[data-testid="'+id+'"]');return b && b.getBoundingClientRect().width>0;});`));
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="nav-parameters"]'));
+    await cdp.waitFor(`window.__lyflow.stores.ui.getState().paramPanel.open && document.querySelector('[data-testid="nav-parameters"]')?.getAttribute('aria-pressed') === 'true'`, { what: "拓扑锁下展开参数面板" });
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="nav-parameters"]'));
+    await cdp.waitFor(`!window.__lyflow.stores.ui.getState().paramPanel.open`, { what: "拓扑锁下收起参数面板" });
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="nav-logs"]'));
+    await cdp.waitFor(`window.__lyflow.stores.ui.getState().drawer === 'log' && document.querySelector('[data-testid="nav-logs"]')?.getAttribute('aria-pressed') === 'true'`, { what: "拓扑锁下展开日志" });
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="nav-logs"]'));
+    await cdp.waitFor(`window.__lyflow.stores.ui.getState().drawer === null`, { what: "拓扑锁下收起日志" });
+    report.ok("拓扑锁下参数与日志可正常切换，锁状态和文档保持不变",
+      await cdp.eval(`const g=window.__lyflow.stores.graph.getState();return g.topologyLocked && g.doc === window.__navigationLockBefore.doc;`));
+  } finally {
+    await cdp.eval(`const b=window.__lyflow,s=window.__navigationLockBefore;b.stores.graph.getState().setTopologyLocked(s.locked);b.stores.graph.setState({past:s.past,future:s.future});b.stores.ui.setState(s.ui);delete window.__navigationLockBefore;return true;`);
+  }
   // 坏参数让这次运行失败；失败本身不单独断言，下面诊断抽屉列出那条错误就是证据
   await runAndWait(cdp, () => pressF5(cdp));
 
@@ -2066,24 +2090,31 @@ async function suitePanels(cdp, report, ws) {
   const graphPath = path.join(ws.dir, "最近 文件.lyflow.json");
   await saveGraphTo(cdp, graphPath);
   await cdp.eval(`await window.__lyflow.transport.pushRecentFile(${lit(graphPath)}); return true;`);
-  await cdp.eval(`document.querySelector('[data-testid="recent-toggle"]').click(); return true;`);
+  const showWorkflows = async () => {
+    await cdp.eval(`const nav = document.querySelector('[data-testid="nav-flows"]'); if (nav.getAttribute('aria-expanded') !== 'true') nav.click(); return true;`);
+    await cdp.waitFor(`!!document.querySelector('[data-testid="workspace-library"]')`, { what: "工作流库展开" });
+  };
+  await showWorkflows();
+  await cdp.eval(`document.querySelector('[data-testid="library-refresh-recent"]').click(); return true;`);
   await sleep(300);
-  const recent = await cdp.eval(`
-    const menu = document.querySelector('[data-testid="recent-menu"]');
-    return menu ? [...menu.querySelectorAll('[data-testid="recent-item"]')].map(b => b.title) : null;
-  `);
-  report.ok("最近文件里有刚存的那个", (recent ?? []).includes(graphPath), JSON.stringify(recent));
-  // 工具栏的下拉框：Esc 收起，点它外面也收起（以前只有再点一下按钮才收）
-  const recentOpen = () => cdp.eval(`return !!document.querySelector('[data-testid="recent-menu"]');`);
+  const recent = await cdp.eval(`return [...document.querySelectorAll('[data-testid="library-recent-document"]')].map(b => b.title);`);
+  report.ok("左侧最近文件里有刚存的那个", recent.includes(graphPath), JSON.stringify(recent));
+  report.ok("文件入口分工：工具栏没有名称、新建、打开和最近文件重复入口，保留保存按钮",
+    await cdp.eval(`return !document.querySelector('.toolbar [data-testid="doc-name"], .toolbar [data-testid="recent-toggle"], .toolbar button[title^="新建"], .toolbar button[title^="打开"]') && !!document.querySelector('[data-testid="save-button"]');`));
+  await cdp.eval(`document.querySelector('[data-testid="save-menu-toggle"]').click(); return true;`);
+  await cdp.waitFor(`!!document.querySelector('[data-testid="save-menu"]')`, { what: "保存菜单展开" });
+  report.ok("保存菜单包含另存为和重命名", await cdp.eval(`const menu=document.querySelector('[data-testid="save-menu"]'); return /另存为/.test(menu.textContent) && /重命名/.test(menu.textContent);`));
+  const saveMenuOpen = () => cdp.eval(`return !!document.querySelector('[data-testid="save-menu"]');`);
   await pressEscape(cdp);
   await sleep(100);
-  const afterEsc = await recentOpen();
-  await cdp.eval(`document.querySelector('[data-testid="recent-toggle"]').click(); return true;`);
+  const afterEsc = await saveMenuOpen();
+  await cdp.eval(`document.querySelector('[data-testid="save-menu-toggle"]').click(); return true;`);
   await sleep(200);
   const paneCorner = await cdp.eval(`const r = document.querySelector('.react-flow__pane').getBoundingClientRect(); return { x: Math.round(r.right - 30), y: Math.round(r.bottom - 30) };`);
   await clickAt(cdp, paneCorner);
   await sleep(150);
-  report.eq("最近文件的下拉框：Esc 收起，点它外面（画布上）也收起", { esc: afterEsc, outside: await recentOpen() }, { esc: false, outside: false });
+  report.eq("保存菜单：Esc 收起，点它外面（画布上）也收起", { esc: afterEsc, outside: await saveMenuOpen() }, { esc: false, outside: false });
+  await cdp.eval(`document.querySelector('[data-testid="nav-flows"]').click(); return true;`);
 
   // 新建之后空画布上直接列出最近打开的（以前只藏在工具栏 16 px 宽的 ▾ 里）：别处双击照样开算子搜索，点一条打开它
   await cdp.eval(`window.__lyflow.stores.graph.getState().newDoc(); return true;`);
@@ -2174,26 +2205,39 @@ async function suitePanels(cdp, report, ws) {
     { file: 2468, dirty: false });
   await cdp.eval(`document.activeElement?.blur(); return true;`);
 
-  // 图名框：一个字一个字地敲、回车，只记一条「重命名」撤销；再敲、按 Esc，撤回。以前每敲一个字一条撤销
-  // （中文输入法拼音没上屏的那几下也算），Esc 也不撤
   const nameState = () => cdp.eval(`
     const g = window.__lyflow.stores.graph.getState();
-    return { name: g.doc.name ?? null, past: g.past.length, box: document.querySelector('[data-testid="doc-name"]').value };
+    return { name: g.doc.name ?? null, past: g.past.length, shown: document.querySelector('[data-testid="flow-tab-select"][aria-selected="true"] .flow-tab__title').textContent };
   `);
+  const renameActive = async (keyboard = false) => {
+    const selector = '[data-testid="flow-tab-select"][aria-selected="true"]';
+    await cdp.eval(`document.querySelector(${lit(selector)}).scrollIntoView({ block: 'nearest', inline: 'center' }); document.querySelector(${lit(selector)}).focus(); return true;`);
+    if (keyboard) await pressKey(cdp, "F2", 113);
+    else {
+      const point = await centerOf(cdp, selector);
+      for (const clickCount of [1, 2]) {
+        await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...point, button: "left", buttons: 1, clickCount });
+        await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", buttons: 0, clickCount });
+      }
+    }
+    await cdp.waitFor(`!!document.querySelector('[data-testid="modal"][aria-label="重命名工作流"] [data-testid="modal-input"]')`, { what: "重命名工作流对话框" });
+  };
   const n0 = await nameState();
-  await cdp.eval(`document.querySelector('[data-testid="doc-name"]').focus(); return true;`);
+  await renameActive();
   await pressKey(cdp, "a", 65, ["ctrl"]);
   for (const ch of "门缝检测") await cdp.send("Input.insertText", { text: ch });
   await pressKey(cdp, "Enter", 13);
   await sleep(150);
   const n1 = await nameState();
-  report.eq("图名框一个字一个字地敲完回车：改了名，只记一条撤销", { name: n1.name, added: n1.past - n0.past }, { name: "门缝检测", added: 1 });
-  await cdp.eval(`document.querySelector('[data-testid="doc-name"]').focus(); return true;`);
+  report.eq("双击标签后逐字重命名、回车：标题同步，只记一条撤销", { name: n1.name, shown: n1.shown, added: n1.past - n0.past }, { name: "门缝检测", shown: "门缝检测", added: 1 });
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}], []); return true;`);
+  await renameActive(true);
+  report.eq("选中一个节点时标签 F2 只重命名工作流，不打开节点标题编辑器", await cdp.eval(`return window.__lyflow.stores.ui.getState().renamingNode;`), null);
   await pressKey(cdp, "a", 65, ["ctrl"]);
   await cdp.send("Input.insertText", { text: "别的名字" });
   await pressKey(cdp, "Escape", 27);
   await sleep(150);
-  report.eq("图名框里敲了再按 Esc：撤回，名字与撤销栈都不动", await nameState(), n1);
+  report.eq("标签 F2 重命名时按 Esc：名字与撤销栈都不动", await nameState(), n1);
   // 检查器里的节点标题同一个框（CommitText）：一个字一个字地敲完回车，一条撤销
   await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}], []); return true;`);
   await sleep(200);
@@ -2283,7 +2327,7 @@ async function suitePanels(cdp, report, ws) {
   mustOk(originalTab != null, "当前图有工作流标签");
   const beforeNew = await tabState();
   const beforeTabs = await tabIds();
-  await clickAt(cdp, await centerOf(cdp, '.toolbar button[title^="新建"]'));
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="flow-tab-new"]'));
   await cdp.waitFor(`document.querySelector('[data-testid="flow-tab-select"][aria-selected="true"]')?.dataset.id !== ${lit(originalTab)} &&
     window.__lyflow.stores.graph.getState().doc.nodes.length === 0`, { timeoutMs: 5000, what: "新建空白工作流标签" });
   const emptyTab = await activeTab();
@@ -2291,6 +2335,20 @@ async function suitePanels(cdp, report, ws) {
     (await tabIds()).length === beforeTabs.length + 1 && (await tabState()).path === null &&
       await cdp.eval(`return !document.querySelector('[data-testid="modal"]') &&
         !!document.querySelector('[data-testid="flow-tab"][data-id="${originalTab}"] [data-testid="flow-tab-dirty"]');`));
+  const inactiveSelector = `[data-testid="flow-tab-select"][data-id="${originalTab}"]`;
+  await cdp.eval(`document.querySelector(${lit(inactiveSelector)}).scrollIntoView({ block: 'nearest', inline: 'center' }); return true;`);
+  const inactivePoint = await centerOf(cdp, inactiveSelector);
+  for (const clickCount of [1, 2]) {
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", ...inactivePoint, button: "left", buttons: 1, clickCount });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...inactivePoint, button: "left", buttons: 0, clickCount });
+    if (clickCount === 1) await sleep(80);
+  }
+  await cdp.waitFor(`!!document.querySelector('[data-testid="modal"][aria-label="重命名工作流"]')`, { what: "双击后台标签先切换再重命名" });
+  report.ok("双击后台标签：重命名属于点击的工作流，取消不修改文档",
+    await activeTab() === originalTab && await cdp.eval(`return document.querySelector('[data-testid="modal-input"]').value === '门缝检测';`));
+  await pressEscape(cdp);
+  report.eq("后台标签重命名取消后，参数与撤销记录保持", await tabState(), beforeNew);
+  await selectTab(emptyTab);
 
   const backgroundClose = await shouldClose("cancel");
   report.ok("活动标签是干净空图时，关闭窗口仍询问后台未保存工作流；取消保留全部标签并回到空图",
@@ -2309,9 +2367,9 @@ async function suitePanels(cdp, report, ws) {
   report.eq("重做后再切换回来：原参数与撤销记录仍保留", await tabState(), beforeNew);
 
   const beforeDuplicate = await tabIds();
-  await clickAt(cdp, await centerOf(cdp, '[data-testid="recent-toggle"]'));
+  await showWorkflows();
   await sleep(150);
-  await clickAt(cdp, await centerOf(cdp, `[data-testid="recent-item"][title="${graphPath.replace(/\\/g, "\\\\")}"]`));
+  await clickAt(cdp, await centerOf(cdp, `[data-testid="library-recent-document"][title="${graphPath.replace(/\\/g, "\\\\")}"]`));
   await sleep(250);
   report.ok("再次打开同一路径：只激活已有标签，不重读文件或覆盖未保存参数",
     JSON.stringify(await tabIds()) === JSON.stringify(beforeDuplicate) && await activeTab() === originalTab &&
@@ -2391,7 +2449,7 @@ async function suitePanels(cdp, report, ws) {
       el.dispatchEvent(ev);
       return ev.defaultPrevented;
     };
-    return { toolbar: fire(document.querySelector('.toolbar')), input: fire(document.querySelector('[data-testid="doc-name"]')) };
+    return { toolbar: fire(document.querySelector('.toolbar')), input: fire(document.querySelector('[data-testid="library-flow-search"]')) };
   `);
   report.eq("右键：工具栏上不弹浏览器自己的菜单（刷新、另存为），输入框里照旧有剪切 / 复制 / 粘贴", nativeMenu, { toolbar: true, input: false });
 
