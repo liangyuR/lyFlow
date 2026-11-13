@@ -12,10 +12,10 @@
 
 /* 三档时长，与 lib/motion.ts 的 MOTION_MS 一致 */
 .app {
-  --lyflow-motion-fast: 120ms;
-  --lyflow-motion-base: 200ms;
-  --lyflow-motion-slow: 320ms;
-  --lyflow-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --lyflow-motion-fast: var(--dur-short);
+  --lyflow-motion-base: var(--dur-medium);
+  --lyflow-motion-slow: var(--dur-long);
+  --lyflow-ease-out: var(--ease-decel);
 }
 
 /* ------------------------------------------------------------------ 节点 */
@@ -30,22 +30,8 @@
     box-shadow var(--lyflow-motion-fast) var(--lyflow-ease-out);
 }
 
-/* hover「抬起」只用阴影表达，不位移（A5 / H1）。选中、校验失败、running 的阴影优先 */
-.node:hover {
-  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55);
-}
 .node[data-node-state="idle"]:not(.is-selected):not(.is-invalid):hover {
-  border-color: #5d6778;
-}
-
-/* running 的呼吸光（S2 沿用）。关动效时停在 .node--running 那一档静态光上 */
-.node--running {
-  animation: node-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes node-pulse {
-  0%, 100% { box-shadow: 0 0 0 1px var(--lyflow-accent), 0 2px 10px rgba(74, 158, 255, 0.25); }
-  50%      { box-shadow: 0 0 0 2px var(--lyflow-accent), 0 2px 18px rgba(74, 158, 255, 0.55); }
+  border-color: var(--primary);
 }
 
 /* 光晕层：进场的 accent 光圈、完成的绿、出错的红（N2 / S2）。颜色由 data-kind 选，
@@ -53,7 +39,7 @@
 .node__fx {
   position: absolute;
   inset: -1px;
-  border-radius: 7px;
+  border-radius: var(--r-lg);
   pointer-events: none;
   opacity: 0;
 }
@@ -61,10 +47,10 @@
   box-shadow: 0 0 0 2px var(--lyflow-accent), 0 0 18px color-mix(in srgb, var(--lyflow-accent) 65%, transparent);
 }
 .node__fx[data-kind="done"] {
-  box-shadow: 0 0 0 2px #46a758, 0 0 20px rgba(70, 167, 88, 0.65);
+  box-shadow: 0 0 0 2px var(--ok), 0 0 20px color-mix(in srgb, var(--ok) 65%, transparent);
 }
 .node__fx[data-kind="error"] {
-  box-shadow: 0 0 0 2px #e5484d, 0 0 20px rgba(229, 72, 77, 0.7);
+  box-shadow: 0 0 0 2px var(--ng), 0 0 20px color-mix(in srgb, var(--ng) 70%, transparent);
 }
 
 /* 鼠标指着的连线的两端节点（H3）。用 outline：不占布局，也不和状态边框抢颜色 */
@@ -97,7 +83,7 @@
 }
 .node-run__play,
 .node-run__stop {
-  fill: #fff;
+  fill: var(--on-primary);
   opacity: 0;
   transition: opacity var(--lyflow-motion-fast) var(--lyflow-ease-out);
 }
@@ -112,10 +98,10 @@
   opacity: 1;
 }
 .node-run[data-run-state="done"] .node-run__ring {
-  stroke: #46a758;
+  stroke: var(--ok);
 }
 .node-run[data-run-state="error"] .node-run__ring {
-  stroke: #e5484d;
+  stroke: var(--ng);
 }
 .node-run[data-run-state="disabled"] {
   cursor: not-allowed;
@@ -149,7 +135,7 @@
   fill: var(--lyflow-accent);
 }
 .node-run[data-run-own="1"]:hover .node-run__stop {
-  fill: #fff;
+  fill: var(--on-primary);
 }
 
 /* ------------------------------------------------------------------ 端口 */

@@ -31,6 +31,12 @@ import { applyRecipeSet, recipeSet, resetRecipes, selectRecipe, useRecipeStore }
 let loadTicket = 0;
 let loading: Promise<void> = Promise.resolve();
 
+export function invalidateRecipeLoad(): void {
+  loadTicket += 1;
+  loading = Promise.resolve();
+}
+
+
 /** 当前这一次载入（没有在载入就是一个已完成的 Promise）。验收脚本与「从备份恢复」等它。 */
 export function recipesLoaded(): Promise<void> {
   return loading;

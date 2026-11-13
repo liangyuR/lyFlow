@@ -44,7 +44,7 @@ export function PaneContextMenu({
     </button>
   );
   return (
-    <div ref={box} className="ctxmenu" style={style} data-testid="pane-context-menu" onClick={(e) => e.stopPropagation()}>
+    <div ref={box} className="qs-popover ctxmenu" style={style} data-testid="pane-context-menu" onClick={(e) => e.stopPropagation()}>
       {item("pane-ctx-add", "添加算子…", () => onAddOperator({ x: menu.x, y: menu.y }), "search")}
       <hr className="ctxmenu__sep" />
       {item("pane-ctx-select-all", "全选", onSelectAll, "selectAll")}

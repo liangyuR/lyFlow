@@ -3,38 +3,40 @@
 
 /* ------------------------------------------------------------ 通用按钮 */
 
-.lf-btn {
-  padding: 3px 10px;
-  background: var(--lyflow-bg-2);
-  border: 1px solid var(--lyflow-border);
-  border-radius: var(--lyflow-radius);
-  color: var(--lyflow-fg-1);
-  font: inherit;
-  font-size: 12px;
-  line-height: 18px;
+.lf-btn:not(.qs-btn) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  min-height: var(--ctl-h-sm);
+  padding: 0 var(--space-12);
+  background: var(--secondary-container);
+  border: 0;
+  border-radius: var(--r-full);
+  color: var(--on-secondary-container);
+  font: var(--text-label);
   white-space: nowrap;
   cursor: pointer;
 }
 
-.lf-btn:hover:not(:disabled) {
+.lf-btn:not(.qs-btn):hover:not(:disabled) {
   border-color: var(--lyflow-border-strong);
   color: var(--lyflow-fg-0);
 }
 
-.lf-btn:disabled {
+.lf-btn:not(.qs-btn):disabled {
   opacity: 0.45;
   cursor: default;
 }
 
-.lf-btn--primary {
-  background: color-mix(in srgb, var(--lyflow-accent) 18%, var(--lyflow-bg-2));
-  border-color: var(--lyflow-accent-dim);
-  color: var(--lyflow-fg-0);
+.lf-btn--primary:not(.qs-btn) {
+  background: var(--primary-container);
+  color: var(--on-primary-container);
 }
 
-.lf-btn--danger {
-  border-color: color-mix(in srgb, var(--lyflow-danger) 55%, transparent);
-  color: var(--lyflow-danger);
+.lf-btn--danger:not(.qs-btn) {
+  background: var(--ng-container);
+  color: var(--on-ng-container);
 }
 
 .recipe-badge {
@@ -44,7 +46,7 @@
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  border-radius: 8px;
+  border-radius: var(--r-full);
   font-family: var(--lyflow-mono);
   font-size: 10px;
   line-height: 1;
@@ -52,7 +54,7 @@
 
 .recipe-badge--bad {
   background: var(--lyflow-danger);
-  color: #fff;
+  color: var(--on-ng);
 }
 
 .recipe-badge--spec {
@@ -70,15 +72,19 @@
 .toolbar .recipe-menu__toggle {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-8);
   max-width: 260px;
-  padding: 3px 8px;
-  border: 1px solid var(--lyflow-border);
-  background: var(--lyflow-bg-2);
+  min-height: var(--ctl-h-sm);
+  padding: 0 var(--space-12);
+  border: 0;
+  border-radius: var(--r-full);
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
 }
 
 .toolbar .recipe-menu__toggle.is-recipe {
-  border-color: color-mix(in srgb, var(--lyflow-recipe) 55%, var(--lyflow-border));
+  background: var(--tertiary-container);
+  color: var(--on-tertiary-container);
 }
 
 .recipe-menu__label {
@@ -119,10 +125,6 @@
   max-height: 60vh;
   overflow: auto;
   padding: 4px;
-  background: var(--lyflow-bg-2);
-  border: 1px solid var(--lyflow-border-strong);
-  border-radius: var(--lyflow-radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 .recipe-menu__list .recipe-menu__item,
@@ -134,7 +136,7 @@
   padding: 5px 8px;
   background: none;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   color: var(--lyflow-fg-1);
   font: inherit;
   font-size: 12px;
@@ -222,7 +224,7 @@
   padding: 0 4px;
   background: none;
   border: 0;
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   color: var(--lyflow-recipe);
   font: inherit;
   font-size: 11px;
@@ -407,10 +409,6 @@
   left: 0;
   min-width: 320px;
   padding: 10px;
-  background: var(--lyflow-bg-2);
-  border: 1px solid var(--lyflow-border-strong);
-  border-radius: var(--lyflow-radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   font-family: inherit;
   white-space: normal;
   user-select: text;
@@ -436,7 +434,7 @@
 
 .mx-legend__item {
   padding: 0 5px;
-  border-radius: 3px;
+  border-radius: var(--r-sm);
 }
 
 .mx-legend__item.is-inherit {
@@ -514,9 +512,9 @@
 }
 
 .mg-item.is-picked {
-  background: var(--lyflow-bg-3);
-  border-color: var(--lyflow-border-strong);
-  color: var(--lyflow-fg-0);
+  background: var(--secondary-container);
+  border-color: transparent;
+  color: var(--on-secondary-container);
 }
 
 .mg-item.is-current .mg-item__name {
@@ -601,7 +599,7 @@
 .mg-tag {
   margin-left: 6px;
   padding: 0 6px;
-  border-radius: 8px;
+  border-radius: var(--r-full);
   background: var(--lyflow-bg-3);
   color: var(--lyflow-fg-1);
   font-size: 10px;
@@ -645,19 +643,19 @@
   flex: 0 0 auto;
   min-width: 56px;
   padding: 1px 6px;
-  border-radius: 8px;
+  border-radius: var(--r-full);
   font-size: 11px;
   text-align: center;
 }
 
 .mg-kind--extra {
-  background: color-mix(in srgb, #a78bfa 20%, transparent);
-  color: #c4b5fd;
+  background: color-mix(in srgb, var(--fault) 20%, transparent);
+  color: var(--on-fault-container);
 }
 
 .mg-kind--type {
   background: color-mix(in srgb, var(--lyflow-danger) 20%, transparent);
-  color: #ff8a8d;
+  color: var(--on-ng-container);
 }
 
 .mg-kind--range {
@@ -712,17 +710,13 @@
   align-items: flex-start;
   justify-content: center;
   padding-top: 14vh;
-  background: rgba(0, 0, 0, 0.45);
 }
 
 .lf-modal {
   width: min(460px, calc(100% - 32px));
-  padding: 16px 18px 14px;
-  background: var(--lyflow-bg-2);
-  border: 1px solid var(--lyflow-border-strong);
-  border-radius: 8px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
-  color: var(--lyflow-fg-0);
+  max-height: 72vh;
+  overflow-y: auto;
+  padding: var(--space-24);
 }
 
 .lf-modal__title {

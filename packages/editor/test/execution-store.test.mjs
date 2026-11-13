@@ -406,10 +406,12 @@ test("自动运行的调度（lib/preview）：提交了一步攒 250 ms 补；�
   const manifest = JSON.parse(readFileSync(new URL("../../../schema/examples/manifest.example.json", import.meta.url), "utf8"));
   useManifestStore.getState().replaceBundle(manifest, 1);
   const calls = [];
+  const requests = [];
   setTransport({
     kind: "tauri",
     async runGraph(_doc, _path, opts) {
       calls.push(opts.targets ?? null);
+      requests.push(opts);
       return `auto${calls.length}`;
     },
   });
@@ -480,9 +482,28 @@ test("自动运行的调度（lib/preview）：提交了一步攒 250 ms 补；�
     useUiStore.setState({ autoRun: false });
     await settle();
     assert.deepEqual(calls.splice(0), [], "关掉自动运行：攒着的也不发");
+
+    const branches = { ...base, nodes: [...base.nodes, voxel("n3"), voxel("n4")], edges: [...base.edges,
+      { id: "e2", from: { node: "n1", port: "cloud" }, to: { node: "n3", port: "cloud" } },
+      { id: "e3", from: { node: "n2", port: "cloud" }, to: { node: "n4", port: "cloud" } }] };
+    g().loadDoc(branches, null);
+    ran({ n1: "done", n2: "done", n3: "done", n4: "done" });
+    useUiStore.setState({ autoRun: true, selectedNodes: new Set(["n2", "n3"]), pinnedNode: "n4" });
+    g().setParam("n1", "leafSize", leaf(0.1));
+    await startRun(g().doc, null, { targets: ["n2", "n3"], exactTargets: true });
+    await settle();
+    assert.deepEqual(calls.splice(0), [["n2", "n3"]], "精确运行两个选中目标：不追加钉住的未选中下游，也不让旧定时器另跑一次");
+    assert.equal(requests.at(-1).isolate, undefined, "保留 targets 语义，由 core 计算所需上游");
+    assert.equal("exactTargets" in requests.at(-1), false, "范围标记只在编辑器内部使用");
+    assert.equal(useExecutionStore.getState().request.exactTargets, true, "重跑需保留精确范围");
+
+    g().setParam("n4", "leafSize", leaf(0.11));
+    await restartRun(g().doc, null);
+    await settle();
+    assert.deepEqual(calls.splice(0), [["n2", "n3"]], "精确范围重跑仍只提交两个原目标，取消刚攒的下游自动运行");
   } finally {
     stop();
-    useUiStore.setState({ autoRun: true, previewing: false });
+    useUiStore.setState({ autoRun: true, previewing: false, selectedNodes: new Set(), pinnedNode: null });
     useExecutionStore.getState().reset();
   }
 });

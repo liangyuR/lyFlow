@@ -14,7 +14,7 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: #8fb8ff;
+  color: var(--primary);
 }
 
 /* 「底图：xxx」——几何节点借上游的云当背景时得说清楚画的是谁的点。 */
@@ -23,35 +23,39 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: #9aa6b8;
+  color: var(--on-surface-variant);
   border: 1px solid var(--lyflow-border);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   padding: 0 4px;
 }
 
 .viewer__num {
   width: 66px;
-  background: var(--lyflow-bg-2);
-  color: var(--lyflow-fg-0);
-  border: 1px solid var(--lyflow-border);
-  border-radius: 4px;
-  font-size: 11px;
-  padding: 1px 3px;
+  min-height: var(--ctl-h-sm);
+  background: var(--surface-lowest);
+  color: var(--on-surface);
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--r-md);
+  font: var(--text-label);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  padding: 2px var(--space-8);
 }
 
 .viewer__btn {
-  border: 1px solid var(--lyflow-border);
-  border-radius: 4px;
-  background: var(--lyflow-bg-2);
-  color: var(--lyflow-fg-0);
-  font-size: 11px;
+  min-height: var(--ctl-h-sm);
+  border: 0;
+  border-radius: var(--r-full);
+  background: var(--surface-high);
+  color: var(--on-surface-variant);
+  font: var(--text-label);
   cursor: pointer;
-  padding: 1px 6px;
+  padding: 2px var(--space-8);
 }
 
 .viewer__btn:disabled { opacity: 0.45; cursor: default; }
 
-.viewer__btn[data-pinned="1"] { border-color: #8fb8ff; color: #8fb8ff; }
+.viewer__btn[data-pinned="1"] { border-color: var(--primary); color: var(--primary); }
 
 /* 空态文案要盖住画布而不是压住工具栏；老规则写死的 inset:28px 在两行栏下会错位。 */
 .viewer__stage {
@@ -73,8 +77,8 @@
   padding: 6px 10px;
   text-align: left;
   border: 1px solid color-mix(in srgb, var(--lyflow-danger) 50%, transparent);
-  border-radius: 6px;
-  background: rgba(17, 20, 26, 0.88);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--surface-low) 90%, transparent);
 }
 .viewer__empty--docked [data-testid="viewer3d-status"] { color: var(--lyflow-danger); }
 .viewer__empty--docked .viewer__empty-actions { align-items: flex-start; }
@@ -92,8 +96,8 @@
   max-width: calc(100% - 16px);
   padding: 2px 3px 2px 8px;
   border: 1px solid color-mix(in srgb, var(--lyflow-warn) 60%, transparent);
-  border-radius: 4px;
-  background: rgba(17, 20, 26, 0.85);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--surface-low) 90%, transparent);
   color: var(--lyflow-warn);
   font-size: 11px;
   pointer-events: none;
@@ -103,7 +107,7 @@
   flex: none;
   padding: 1px 8px;
   border: 1px solid var(--lyflow-border-strong);
-  border-radius: var(--lyflow-radius);
+  border-radius: var(--r-full);
   background: var(--lyflow-bg-2);
   color: var(--lyflow-fg-0);
   font-size: 11px;
@@ -155,20 +159,20 @@
 }
 
 .viewer__tab {
-  border: 1px solid var(--lyflow-border);
-  border-radius: 4px;
-  background: var(--lyflow-bg-2);
-  color: var(--lyflow-fg-2);
-  font-size: 11px;
+  min-height: var(--ctl-h-sm);
+  border: 0;
+  border-radius: var(--r-full);
+  background: var(--surface-high);
+  color: var(--on-surface-variant);
+  font: var(--text-label);
   cursor: pointer;
-  padding: 1px 8px;
+  padding: 2px var(--space-12);
   white-space: nowrap;
 }
 
 .viewer__tab.is-active {
-  border-color: #8fb8ff;
-  color: #8fb8ff;
-  background: color-mix(in srgb, #8fb8ff 14%, var(--lyflow-bg-2));
+  color: var(--on-secondary-container);
+  background: var(--secondary-container);
 }
 
 /* 「值」内容（lib/viewRule）：盖在画布上。画布本身不卸载 —— three.js 场景只建一次。 */
@@ -251,12 +255,12 @@
   padding: 0 6px;
   font-size: 11px;
   color: var(--lyflow-fg-1);
-  background: rgba(17, 20, 26, 0.72);
+  background: color-mix(in srgb, var(--surface-low) 80%, transparent);
   pointer-events: auto;
 }
 
-.compare-pane__side { font-weight: 600; white-space: nowrap; color: #8fb8ff; }
-.compare-pane--b .compare-pane__side { color: #fbbf24; }
+.compare-pane__side { font-weight: 600; white-space: nowrap; color: var(--primary); }
+.compare-pane--b .compare-pane__side { color: var(--warn); }
 
 .compare-pane__label {
   min-width: 0;
@@ -265,7 +269,7 @@
   text-overflow: ellipsis;
 }
 
-.compare-pane__freeze.is-on { border-color: #7dd3fc; color: #7dd3fc; }
+.compare-pane__freeze.is-on { border-color: var(--primary); color: var(--primary); }
 
 .compare-pane__status {
   position: absolute;
@@ -277,7 +281,7 @@
   text-align: center;
   color: var(--lyflow-fg-2);
   font-size: 12px;
-  background: rgba(17, 20, 26, 0.88);
+  background: color-mix(in srgb, var(--surface-low) 90%, transparent);
 }
 
 .compare-pane__count {
@@ -325,7 +329,7 @@
 .compare-diff__badge {
   padding: 0 4px;
   border: 1px solid var(--lyflow-warn);
-  border-radius: 4px;
+  border-radius: var(--r-sm);
   color: var(--lyflow-warn);
 }
 
@@ -379,8 +383,8 @@
   max-width: min(65%, 300px);
   padding: 4px 6px;
   border: 1px solid var(--lyflow-border-strong);
-  border-radius: 6px;
-  background: rgba(17, 20, 26, 0.9);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--surface-low) 90%, transparent);
   color: var(--lyflow-fg-1);
   font-size: 10.5px;
   line-height: 1.35;
@@ -397,8 +401,8 @@
 }
 
 .measure-readout__label { flex: none; width: 40px; color: var(--lyflow-fg-2); }
-.measure-readout__row[data-key="p1"] .measure-readout__label { color: #34d399; }
-.measure-readout__row[data-key="p2"] .measure-readout__label { color: #f472b6; }
+.measure-readout__row[data-key="p1"] .measure-readout__label { color: var(--ok); }
+.measure-readout__row[data-key="p2"] .measure-readout__label { color: var(--cam-4); }
 .measure-readout__row[data-key="dist"] .measure-readout__value { color: var(--lyflow-fg-0); font-weight: 500; }
 .measure-readout__value { overflow-wrap: anywhere; }
 

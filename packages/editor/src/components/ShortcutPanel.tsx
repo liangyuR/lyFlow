@@ -10,15 +10,15 @@ export function ShortcutPanel() {
   if (!open) return null;
 
   return (
-    <div className="sheet" data-testid="shortcut-panel" onClick={() => setOpen(false)}>
-      <div className="sheet__box" onClick={(e) => e.stopPropagation()}>
-        <header className="sheet__head">
+    <div className="qs-scrim sheet" data-testid="shortcut-panel" onClick={() => setOpen(false)}>
+      <div className="qs-dialog sheet__box" onClick={(e) => e.stopPropagation()}>
+        <header className="hd sheet__head">
           <h2>快捷键</h2>
-          <button type="button" data-testid="shortcut-close" onClick={() => setOpen(false)}>
+          <button type="button" className="qs-btn sm text" data-testid="shortcut-close" onClick={() => setOpen(false)}>
             关闭
           </button>
         </header>
-        <div className="sheet__body">
+        <div className="bd sheet__body">
           {groupedShortcuts().map((g) => (
             <section key={g.group} className="sheet__group">
               <h3>{g.group}</h3>

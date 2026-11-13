@@ -193,14 +193,14 @@ export function RecipeMatrix() {
         <span className="ppanel__spacer" />
         {!dir && <span className="insp__hint">图还没存过盘：先保存图才能建配方</span>}
         {dir && set.recipes.length === 0 && (
-          <button type="button" className="lf-btn" data-testid="mx-new" onClick={() => void newRecipeInteractive(null)}>
+          <button type="button" className="qs-btn sm tonal lf-btn" data-testid="mx-new" onClick={() => void newRecipeInteractive(null)}>
             + 新建配方
           </button>
         )}
         <div className="mx-copy">
           <button
             type="button"
-            className="lf-btn lf-btn--primary"
+            className="qs-btn sm tonal lf-btn lf-btn--primary"
             data-testid="mx-copy"
             data-count={selected.size}
             disabled={selected.size === 0 || set.recipes.length === 0}
@@ -209,7 +209,7 @@ export function RecipeMatrix() {
             复制选中 {selected.size} 格 → 配方 ▾
           </button>
           {copyOpen && (
-            <div className="recipe-menu__list mx-copy__menu" data-testid="mx-copy-menu">
+            <div className="qs-popover recipe-menu__list mx-copy__menu" data-testid="mx-copy-menu">
               {set.recipes.map((r) => (
                 <button
                   key={r.id}
@@ -387,7 +387,7 @@ function CellEditor({
   return (
     <div
       ref={box}
-      className={inline ? "mx-edit mx-edit--inline" : "mx-edit mx-edit--pop"}
+      className={inline ? "mx-edit mx-edit--inline" : "qs-popover mx-edit mx-edit--pop"}
       data-testid="mx-editor"
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
@@ -408,7 +408,7 @@ function CellEditor({
               恢复基础
             </button>
           )}
-          <button type="button" className="lf-btn" data-testid="mx-edit-done" onClick={() => setTimeout(onClose, 0)}>
+          <button type="button" className="qs-btn sm tonal lf-btn" data-testid="mx-edit-done" onClick={() => setTimeout(onClose, 0)}>
             完成
           </button>
         </div>

@@ -669,6 +669,25 @@ export async function subscribeExecutionEvents(): Promise<void> {
  *  run_graph 在主线程上排队、按发起顺序回复，而且不再等被抢占的 run 退出（ADR-0027）；
  *  HTTP 宿主的回复顺序没有保证 —— 序号对两者都成立。 */
 let runTicket = 0;
+let pendingStarts = 0;
+let executionBlocked = false;
+
+export function executionBusy(): boolean {
+  return pendingStarts > 0 || useExecutionStore.getState().runStatus === "running";
+}
+
+export function blockExecution(blocked: boolean): void {
+  executionBlocked = blocked;
+}
+
+export function invalidateExecutionRequests(): void {
+  runTicket += 1;
+  dropStaged();
+  notReady = [];
+  served = new Set();
+  touched = new Set();
+}
+
 
 /** 宿主给的点云会话 id。`setRunSceneId` 由 `<LyFlowEditor sceneId>` 在渲染期装上，和
  *  `setTransport` / `setDialogs` 是同一类宿主配置：运行是从工具栏、快捷键、实时预览三处
@@ -681,6 +700,7 @@ export function setRunSceneId(next: string | null): void {
 
 export interface RunRequest {
   targets?: string[] | undefined;
+  exactTargets?: boolean | undefined;
   /** 只运行这些节点（docs/node-run-plan.md R1），展开后的路径 id。给了它 targets 就不用再传。 */
   isolate?: string[] | undefined;
   /** 强制重算这些节点（修订一 V1），展开后的路径 id。 */
@@ -709,6 +729,7 @@ export async function startRun(
   graphPath: string | null,
   request: RunRequest = {},
 ): Promise<void> {
+  if (executionBlocked) throw new Error("正在切换或保存工作流，请稍后运行");
   const store = useExecutionStore.getState();
   const ticket = ++runTicket;
   const preview = request.preview === true;
@@ -717,8 +738,9 @@ export async function startRun(
   let targets = request.targets;
   if (!request.auto || full) {
     const pending = beforeExplicitRun?.(doc) ?? [];
-    if (!full && isolate.length === 0 && targets && pending.length > 0) targets = [...new Set([...targets, ...pending])];
+    if (!full && !request.exactTargets && isolate.length === 0 && targets && pending.length > 0) targets = [...new Set([...targets, ...pending])];
   }
+  pendingStarts += 1;
   try {
     // 当前配方有 ①–③ 失配时不能运行（P3.7）：配方里多出来的名字 core 根本看不见（只交声明着的），
     // 类型不符、越界的 core 会报 bad_param，但原因在配方文件里，这里先说清楚是哪个配方的哪几处。
@@ -747,6 +769,8 @@ export async function startRun(
     if (ticket !== runTicket) throw e;
     store.failRun(e instanceof Error ? e.message : String(e));
     throw e;
+  } finally {
+    pendingStarts -= 1;
   }
 }
 

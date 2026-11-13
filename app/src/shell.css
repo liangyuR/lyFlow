@@ -8,6 +8,6 @@ body,
 }
 
 body {
-  background: #14161a;
+  background: var(--surface);
   overflow: hidden;
 }

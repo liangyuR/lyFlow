@@ -7,6 +7,7 @@ import {
   Controls,
   MiniMap,
   ReactFlow,
+  SelectionMode,
   useReactFlow,
   ViewportPortal,
   type Connection,
@@ -19,7 +20,6 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdditiveSelection } from "../hooks/useAdditiveSelection";
-import { useRightDragPan } from "../hooks/useRightDragPan";
 import { useMotionEnabled, viewportMs } from "../lib/motion";
 import { registerViewportHandle } from "../lib/viewportHandle";
 import {
@@ -49,6 +49,7 @@ import {
 } from "../lib/typecheck";
 import { keyHint } from "../lib/keymap";
 import { useGraphStore } from "../store/graph";
+import { useExecutionStore } from "../store/execution";
 import { useManifestStore } from "../store/manifest";
 import {
   clampPeekScreen,
@@ -70,6 +71,7 @@ import { EdgeContextMenu, type EdgeMenuState } from "./EdgeContextMenu";
 import { NodeContextMenu, type ContextMenuState } from "./NodeContextMenu";
 import { PaneContextMenu, type PaneMenuState } from "./PaneContextMenu";
 import { OperatorNode } from "./OperatorNode";
+import { SelectionToolbar } from "./SelectionToolbar";
 import { useCanvasMotion } from "./useCanvasMotion";
 
 import "@xyflow/react/dist/style.css";
@@ -98,16 +100,17 @@ const VIRTUALIZE_ABOVE = 80;
 // 按**引用**比较它跟踪的那批 props（`defaultEdgeOptions` 就在里面），内联对象每次渲染
 // 都是新引用，effect 于是每帧跑满一遍并往 store 里写一次、通知一遍所有订阅者。
 // 剩下几个虽然不在跟踪表里，但一样会白白透传给内层组件。
-const MULTI_SELECTION_KEYS = ["Shift", "Control"];
-/** 中键与右键平移。左键留给框选。 */
-const PAN_BUTTONS = [1, 2];
+const MULTI_SELECTION_KEYS = ["Shift", "Control", "Meta"];
+const BOX_SELECTION_KEYS = ["Control", "Meta"];
+const PAN_BUTTONS = [0, 1];
 const PRO_OPTIONS = { hideAttribution: false };
-const CONNECTION_LINE_STYLE = { stroke: "#4a9eff", strokeWidth: 2 };
+const CONNECTION_LINE_STYLE = { stroke: "var(--lyflow-accent)", strokeWidth: 2 };
 const DEFAULT_EDGE_OPTIONS = { type: "default" };
 
 export interface CanvasActions {
   /** 只跑到某个节点（交互清单 P1 #27）。 */
   onRunToNode: (nodeId: string) => void;
+  onRunToSelected: () => void;
   /** 空画布上点了一个最近打开的文件。不给就不列。 */
   onOpenRecent?: ((path: string) => void) | undefined;
   /** 整张图整理布局（与工具栏、Ctrl+L 同一个）。空白处右键菜单用；不给就不列这一项。 */
@@ -175,6 +178,7 @@ function edgeAt(canvas: HTMLElement | null, point: { x: number; y: number }): st
  *  不挡鼠标（双击照样落到画布上），这一层有了节点就消失。 */
 function EmptyHint({ inSubgraph, onOpenRecent }: { inSubgraph: boolean; onOpenRecent?: ((path: string) => void) | undefined }) {
   // 还没打开文件的空白新图：把最近打开的几个直接列在这里（以前藏在工具栏 16 px 宽的 ▾ 里，每次开 app 都是一张空图）
+  const { screenToFlowPosition } = useReactFlow();
   const filePath = useGraphStore((s) => s.filePath);
   const showRecent = !inSubgraph && !filePath && onOpenRecent !== undefined;
   const [recent, setRecent] = useState<RecentEntry[]>([]);
@@ -190,10 +194,38 @@ function EmptyHint({ inSubgraph, onOpenRecent }: { inSubgraph: boolean; onOpenRe
   }, [showRecent]);
   return (
     <div className="canvas__empty" data-testid="canvas-empty-hint">
+      <svg className="canvas__empty-illustration" viewBox="0 0 180 92" fill="none" aria-hidden="true">
+        <path d="M54 46h22c16 0 12-24 28-24h20M54 46h22c16 0 12 24 28 24h20" stroke="var(--primary-container)" strokeWidth="2" />
+        <rect x="8" y="26" width="48" height="40" rx="12" fill="var(--secondary-container)" />
+        <rect x="124" y="4" width="48" height="36" rx="12" fill="var(--surface-high)" />
+        <rect x="124" y="52" width="48" height="36" rx="12" fill="var(--surface-high)" />
+        <path d="M25 46h14m-7-7v14" stroke="var(--on-secondary-container)" strokeWidth="2" strokeLinecap="round" />
+        <circle cx="56" cy="46" r="4" fill="var(--primary)" />
+        <circle cx="124" cy="22" r="4" fill="var(--primary)" />
+        <circle cx="124" cy="70" r="4" fill="var(--secondary)" />
+        <path d="M140 22h16m-16 48h16" stroke="var(--outline)" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+      <p className="canvas__empty-eyebrow">{inSubgraph ? "子图工作区" : "LYFLOW 工作区"}</p>
       <p className="canvas__empty-title">{inSubgraph ? "这个子图还是空的" : "从一个算子开始"}</p>
       <p>
-        从左侧算子面板拖一个进来，或在空白处双击、按 <kbd>{keyHint("search")}</kbd> 搜索算子
+        从左侧拖入算子，连接节点，构建你的视觉处理流程。
       </p>
+      <div className="canvas__empty-actions" onDoubleClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          className="qs-btn tonal"
+          data-testid="canvas-add-operator"
+          onClick={(e) => {
+            e.stopPropagation();
+            const rect = e.currentTarget.closest(".app__canvas")?.getBoundingClientRect();
+            if (!rect) return;
+            const screen = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+            useUiStore.getState().openSearch({ screen, flow: screenToFlowPosition(screen) });
+          }}
+        >
+          <span aria-hidden="true">＋</span> 添加算子 <kbd>{keyHint("search")}</kbd>
+        </button>
+      </div>
       {inSubgraph ? (
         <p>
           按 <kbd>Esc</kbd> 回到上一层
@@ -340,7 +372,7 @@ function LibraryDialog({
 }
 
 /** React Flow 的 select 变更（增量：只列状态变了的那些）合进 ui store 的选中。setSelection 自己先比对再写。
- *  keep 里的不取消选中：按着 Shift / Ctrl 框选时那一刻已经选着的（useAdditiveSelection）。 */
+ *  keep 里的不取消选中：Ctrl+Shift 追加框选时原先选着的节点（useAdditiveSelection）。 */
 function applySelectChanges(
   changes: readonly { type: string; id?: string; selected?: boolean }[],
   kind: "nodes" | "edges",
@@ -360,13 +392,17 @@ function applySelectChanges(
   else ui.setSelection([...ui.selectedNodes], [...next]);
 }
 
-export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActions) {
+export function GraphCanvas({ onRunToNode, onRunToSelected, onOpenRecent, onLayout }: CanvasActions) {
   const doc = useGraphStore((s) => s.doc);
+  const epoch = useGraphStore((s) => s.epoch);
   const path = useUiStore((s) => s.path);
   const baseOperators = useManifestStore((s) => s.operatorsById);
   const typesByName = useManifestStore((s) => s.typesByName);
   const selectedNodes = useUiStore((s) => s.selectedNodes);
   const selectedEdges = useUiStore((s) => s.selectedEdges);
+  const selectedNodeIds = useMemo(() => [...selectedNodes], [selectedNodes]);
+  const running = useExecutionStore((s) => s.runStatus === "running");
+  const [selecting, setSelecting] = useState(false);
 
   const { screenToFlowPosition, fitView, getViewport, setViewport, setCenter } = useReactFlow();
   useEffect(() => {
@@ -374,9 +410,6 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
     return () => registerViewportHandle(null);
   }, [getViewport, setViewport]);
   const wrapper = useRef<HTMLDivElement>(null);
-  // 右键在节点 / 连线上拖也平移；拖过之后松手不弹右键菜单
-  useRightDragPan(wrapper);
-  // 按着 Shift / Ctrl 拖框是往选中里加
   const keepSelected = useAdditiveSelection(wrapper);
   // 删除残影挂在这一层（N3）。它在 ViewportPortal 里，坐标就是画布坐标
   const ghostLayer = useRef<HTMLDivElement>(null);
@@ -400,6 +433,11 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
   // 映射结果的引用归一：没变的节点保持同一个对象，React Flow 的 adoptUserNodes 才会走
   // checkEquality 快路径，不重建内部节点、不丢 measured。详见 lib/mapping.ts 的 MappingCache。
   const mapping = useRef(createMappingCache());
+  useEffect(() => {
+    measured.current.clear();
+    mapping.current = createMappingCache();
+    setMeasuredTick((tick) => tick + 1);
+  }, [epoch]);
   // 同一次挂载/布局抖动里，允许连续触发重渲染的次数上限，见下面 onNodesChange 里的说明。
   const sizeBurst = useRef({ count: 0, resetHandle: null as number | null });
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
@@ -862,11 +900,13 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
 
   // 框选期间不淡化（H2）：拖出来的框会扫过一大片节点
   const onSelectionStart = useCallback(() => {
+    setSelecting(true);
     useUiStore.getState().setHoverPaused(true);
   }, []);
   const onSelectionEnd = useCallback(() => {
+    setSelecting(false);
     useUiStore.getState().setHoverPaused(false);
-    // 按着 Shift / Ctrl 框选完：React Flow 框选时把框外节点的内部状态直接改成未选中（getSelectionChanges 带 mutate），
+    // 追加框选完：React Flow 框选时把框外节点的内部状态直接改成未选中（getSelectionChanges 带 mutate），
     // 留下来的那几个我们没取消选中、节点对象没变，它不重建 —— 内部一直当它们没选中：选区框不含它们，拖选区也不带它们。
     // 从映射缓存里拿掉，下一轮换成新对象，React Flow 照 selected: true 重建
     const kept = keepSelected.current;
@@ -895,7 +935,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
     const subgraphId = node ? subgraphIdOf(node.op) : null;
     if (!subgraphId) return false;
     useUiStore.getState().enterSubgraph({ nodeId, subgraphId });
-    setTimeout(() => void fitView({ duration: viewportMs(motionOn) }), 60);
+    setTimeout(() => void fitView({ duration: viewportMs(motionOn), maxZoom: 1, padding: 0.22 }), 60);
     return true;
     // fitView 的引用是稳定的（useReactFlow 返回的都是），列进依赖只是为了 lint
   }, [fitView, motionOn]);
@@ -1044,8 +1084,6 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
     setEdgeMenu({ edgeId: edge.id, x: e.clientX, y: e.clientY });
   }, []);
 
-  /** 空白处右键：React Flow 在「右键拖平移」模式下自己吞掉了这个 contextmenu（只 preventDefault、不往下发），
-   *  冒泡到外层这里再接。右键拖过平移之后的那一次 useRightDragPan 在捕获阶段就吞掉了，到不了这里。 */
   const onCanvasContextMenu = useCallback((e: React.MouseEvent) => {
     if (!(e.target instanceof Element) || !e.target.classList.contains("react-flow__pane")) return;
     e.preventDefault();
@@ -1196,26 +1234,39 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
         zoomOnDoubleClick={false}
         deleteKeyCode={null}
         multiSelectionKeyCode={MULTI_SELECTION_KEYS}
-        selectionKeyCode={null}
+        selectionKeyCode={BOX_SELECTION_KEYS}
+        selectionMode={SelectionMode.Partial}
         panOnDrag={PAN_BUTTONS}
-        selectionOnDrag
+        selectionOnDrag={false}
         snapToGrid={snapping}
         snapGrid={GRID}
         proOptions={PRO_OPTIONS}
         fitView
+        fitViewOptions={{ maxZoom: 1, padding: 0.22 }}
         minZoom={0.2}
         maxZoom={2.5}
         connectionLineStyle={CONNECTION_LINE_STYLE}
         defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
       >
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#2a2f39" />
-        <Controls showInteractive={false} />
+        <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="var(--lyflow-border)" />
+        <div className="canvas__gesture-hint" data-testid="canvas-gesture-hint">
+          左键拖动画布 <span>按住 <kbd>Ctrl</kbd> 拖动框选</span>
+        </div>
+        <SelectionToolbar
+          selectedNodeIds={selectedNodeIds}
+          visible={!selecting && !menuOpen && !viewerMax}
+          disabled={running}
+          onRun={onRunToSelected}
+          onLayout={() => onLayout?.()}
+          onClear={() => useUiStore.getState().clearSelection()}
+        />
+        <Controls showInteractive={false} fitViewOptions={{ maxZoom: 1, padding: 0.22 }} />
         <MiniMap
           pannable
           zoomable
-          nodeColor="#55607a"
-          nodeStrokeColor="#8a94a8"
-          maskColor="rgba(20, 22, 26, 0.75)"
+          nodeColor="var(--secondary-container)"
+          nodeStrokeColor="var(--primary)"
+          maskColor="color-mix(in srgb, var(--surface-lowest) 80%, transparent)"
         />
         {/* 参考线自绘：React Flow 没有这个能力，而它是「摆得整齐」的全部来源。
             ViewportPortal 让这几条线活在画布坐标系里，跟着平移缩放走。 */}
@@ -1264,7 +1315,7 @@ export function GraphCanvas({ onRunToNode, onOpenRecent, onLayout }: CanvasActio
           onAddOperator={(at) => useUiStore.getState().openSearch({ screen: at, flow: screenToFlowPosition(at) })}
           onSelectAll={() => useUiStore.getState().setSelection(levelView().nodes.map((n) => n.id), [])}
           onLayout={onLayout}
-          onFitView={() => void fitView({ duration: viewportMs(motionOn) })}
+          onFitView={() => void fitView({ duration: viewportMs(motionOn), maxZoom: 1, padding: 0.22 })}
           onHelp={() => useUiStore.getState().setHelpOpen(true)}
           onClose={closeMenu}
         />

@@ -1,32 +1,27 @@
-/* 设计变量与基础样式，只在这里定义、别处只消费；编辑器样式在 styles.editor.css。
-   暗色是节点编辑器的默认预期（ComfyUI / Blender / Houdini），点云在暗底上也更好看。 */
-
-/* 全部动效（时长变量、keyframes、hover）集中在一个文件里（docs/motion-plan.md A2） */
+@import "qing-steel/tokens.css";
+@import "qing-steel/components.css";
 @import "./styles.motion.css";
 
 /* 定义在编辑器根元素上而不是 :root：宿主页面的其余部分不该被我们改色。
    宿主想换皮就在更外层或 `theme` prop 里覆盖同名变量。 */
 .app {
-  --lyflow-bg-0: #14161a;
-  --lyflow-bg-1: #1a1d23;
-  --lyflow-bg-2: #21252d;
-  --lyflow-bg-3: #2a2f39;
-  --lyflow-border: #333a46;
-  --lyflow-border-strong: #454d5c;
-
-  --lyflow-fg-0: #e6e9ef;
-  --lyflow-fg-1: #a8b0bd;
-  --lyflow-fg-2: #6f7887;
-
-  --lyflow-accent: #4a9eff;
-  --lyflow-accent-dim: #2d6099;
-  --lyflow-warn: #f0a020;
-  /* 配方（param-recipe P3）：橙 = 被当前配方覆盖，红 = 失配 / 越界。与节点的 cancelled / error 同一对颜色 */
-  --lyflow-recipe: #e0a030;
-  --lyflow-danger: #e5484d;
-
-  --lyflow-radius: 6px;
-  --lyflow-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  --lyflow-bg-0: var(--surface);
+  --lyflow-bg-1: var(--surface-low);
+  --lyflow-bg-2: var(--surface-mid);
+  --lyflow-bg-3: var(--surface-high);
+  --lyflow-border: var(--outline-variant);
+  --lyflow-border-strong: var(--outline);
+  --lyflow-fg-0: var(--on-surface);
+  --lyflow-fg-1: var(--on-surface-variant);
+  --lyflow-fg-2: color-mix(in srgb, var(--on-surface-variant) 76%, var(--surface));
+  --lyflow-accent: var(--primary);
+  --lyflow-accent-dim: var(--primary-container);
+  --lyflow-ok: var(--ok);
+  --lyflow-warn: var(--warn);
+  --lyflow-recipe: var(--tertiary);
+  --lyflow-danger: var(--ng);
+  --lyflow-radius: var(--r-md);
+  --lyflow-mono: var(--font-mono);
 
   color-scheme: dark;
 }
@@ -43,6 +38,20 @@
   font-size: 0.92em;
 }
 
+.app :where(button, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.app :where(input, select, textarea) {
+  accent-color: var(--primary);
+}
+
+.app * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-highest) transparent;
+}
+
 /* ---------------------------------------------------------------- layout */
 
 .app {
@@ -54,7 +63,8 @@
   min-height: 0;
   background: var(--lyflow-bg-0);
   color: var(--lyflow-fg-0);
-  font: 13px/1.55 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font: 13px/1.55 var(--font-sans);
+  font-variant-numeric: tabular-nums;
   overflow: hidden;
   color-scheme: dark;
 }
@@ -68,21 +78,37 @@
   display: flex;
   flex: 1;
   min-height: 0;
+  padding: 0 var(--space-12) var(--space-8);
+  gap: var(--space-8);
 }
 
 .app__sidebar {
   flex-shrink: 0;
-  border-right: 1px solid var(--lyflow-border);
-  background: var(--lyflow-bg-1);
   display: flex;
   flex-direction: column;
   min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.app__sidebar-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.app[data-flow-busy="1"] :is(.toolbar, .app__body) {
+  pointer-events: none;
 }
 
 .app__canvas {
   flex: 1;
   min-width: 0;
   position: relative;
+  border-radius: var(--r-xl);
+  overflow: hidden;
+  background: var(--surface-lowest);
 }
 
 /* 右侧一整列：3D 视图在上、参数在下。可拖宽。 */
@@ -91,9 +117,9 @@
   min-width: 260px;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--lyflow-border);
-  background: var(--lyflow-bg-1);
   min-height: 0;
+  padding: 0;
+  overflow: hidden;
 }
 
 .app__viewer {
@@ -101,7 +127,6 @@
   min-height: 160px;
   display: flex;
   flex-direction: column;
-  border-bottom: 1px solid var(--lyflow-border);
   min-width: 0;
 }
 
@@ -128,7 +153,7 @@
   content: "";
   position: absolute;
   inset: 0 3px;
-  background: var(--lyflow-border);
+  background: transparent;
 }
 
 .app__splitter:hover::after {
@@ -184,7 +209,7 @@
 }
 
 .app__error {
-  color: #ff9a9a;
+  color: var(--ng);
 }
 
 .app__error p {
@@ -657,8 +682,7 @@
   flex-shrink: 0;
   height: 26px;
   padding: 0 12px;
-  border-top: 1px solid var(--lyflow-border);
-  background: var(--lyflow-bg-1);
+  background: var(--surface);
   color: var(--lyflow-fg-2);
   font-size: 11px;
   font-family: var(--lyflow-mono);
@@ -679,12 +703,12 @@
 }
 
 .statusbar__transport--tauri {
-  background: rgba(74, 158, 255, 0.15);
+  background: color-mix(in srgb, var(--primary) 15%, transparent);
   color: var(--lyflow-accent);
 }
 
 .statusbar__transport--static {
-  background: rgba(240, 160, 32, 0.15);
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
   color: var(--lyflow-warn);
 }
 

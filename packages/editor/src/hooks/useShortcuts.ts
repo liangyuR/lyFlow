@@ -14,6 +14,7 @@ import { stepAlong, type NavDir, type NavHop } from "../lib/nodeRun";
 import { revealError } from "../lib/revealError";
 import { useCompareStore } from "../store/compare";
 import { runControlsOf, useExecutionStore } from "../store/execution";
+import { useFlowTabsStore } from "../store/flowTabs";
 import { useGraphStore } from "../store/graph";
 import { usePeekStore, type PeekWindow } from "../store/peek";
 import { useUiStore } from "../store/ui";
@@ -117,6 +118,13 @@ export function useShortcuts(
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
+      if (useFlowTabsStore.getState().switching) return;
+      if (e.target instanceof Element && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const localTab = e.target.closest('.flow-tabs [role="tab"]');
+        const localToolbar = e.target.closest('.selection-toolbar');
+        if (localTab && ["Delete", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+        if (localToolbar && ["Escape", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+      }
       const graph = useGraphStore.getState();
       const ui = useUiStore.getState();
 

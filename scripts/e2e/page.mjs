@@ -199,6 +199,19 @@ export async function dragMouse(cdp, from, to, { steps = 12, button = "left", mo
   await sleep(120);
 }
 
+export async function dragSelection(cdp, from, to, { steps = 10, append = false } = {}) {
+  const control = { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 };
+  const shift = { key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16, nativeVirtualKeyCode: 16 };
+  await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...control, modifiers: 2 });
+  try {
+    if (append) await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...shift, modifiers: 10 });
+    await dragMouse(cdp, from, to, { steps, modifiers: append ? 10 : 2 });
+  } finally {
+    if (append) await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...shift, modifiers: 2 });
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...control, modifiers: 0 });
+  }
+}
+
 /** 把画布缩放压到 maxScale 以下。fitView 会随节点数把缩放放大到 2 倍以上，
  *  那时两个节点并排就塞不进画布，拖拽类断言的落点会跑到右侧面板上去。 */
 export async function normalizeZoom(cdp, maxScale = 0.8) {
@@ -362,9 +375,9 @@ export async function viewerBounds(cdp) {
 }
 
 /** 真鼠标单击（按下、原地松开）。 */
-export async function clickAt(cdp, p, { button = "left" } = {}) {
-  const common = { x: p.x, y: p.y, button, clickCount: 1 };
-  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y, buttons: 0 });
+export async function clickAt(cdp, p, { button = "left", modifiers = 0 } = {}) {
+  const common = { x: p.x, y: p.y, button, clickCount: 1, modifiers };
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y, buttons: 0, modifiers });
   await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", buttons: BUTTON_MASK[button] ?? 1, ...common });
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", buttons: 0, ...common });
   await sleep(150);

@@ -240,7 +240,7 @@ export function EdgePeek({ win, rank }: { win: PeekWindow; rank: number }) {
   return (
     <div
       ref={rootRef}
-      className="peek"
+      className="peek qs-popover"
       data-testid="edge-peek"
       data-peek-id={win.id}
       data-edge-id={win.edgeId}

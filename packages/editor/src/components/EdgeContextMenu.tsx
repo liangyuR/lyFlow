@@ -29,7 +29,7 @@ export function EdgeContextMenu({
   const style = useMenuPlacement(box, { x: menu.x, y: menu.y });
   const at = { x: menu.x, y: menu.y };
   return (
-    <div ref={box} className="ctxmenu" style={style} data-testid="edge-context-menu" onClick={(e) => e.stopPropagation()}>
+    <div ref={box} className="qs-popover ctxmenu" style={style} data-testid="edge-context-menu" onClick={(e) => e.stopPropagation()}>
       <button
         type="button"
         data-testid="edge-ctx-insert"

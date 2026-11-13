@@ -61,6 +61,13 @@ export const useValidationStore = create<ValidationState>((set) => ({
 let timer: ReturnType<typeof setTimeout> | null = null;
 let ticket = 0;
 
+export function invalidateValidationRequests(): void {
+  ticket += 1;
+  if (timer !== null) clearTimeout(timer);
+  timer = null;
+}
+
+
 /** doc 变了就重新校验。晚发的那次赢，与 schedulePlan 同一套 debounce + ticket。 */
 export function scheduleValidate(doc: GraphDoc, graphPath: string | null): void {
   if (transport.kind === "static") return;

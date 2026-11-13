@@ -17,6 +17,11 @@ import {
   useRecipeStore,
   useUiStore,
   useValidationStore,
+  useFlowTabsStore,
+  backupWorkspace,
+  readWorkspaceBackup,
+  restoreWorkspaceBackup,
+  resolveAllUnsaved,
   requestValidate,
   runParamsOf,
   recipesLoaded,
@@ -31,7 +36,6 @@ import {
   findUntitledBackup,
   restoreUntitled,
   discardUntitledBackup,
-  resolveUnsaved,
   type RunRequest,
   type StateTransition,
   type Transport,
@@ -55,6 +59,7 @@ interface DevBridge {
     validation: typeof useValidationStore;
     /** 配方（param-recipe P3）：配方集合、当前配方、存盘簿记。改配方走 graph store 的动作（K7）。 */
     recipe: typeof useRecipeStore;
+    flowTabs: typeof useFlowTabsStore;
   };
   /** 配方的文件操作（只读转发）：等配方目录读完、导入 / 导出（界面上这两个要弹文件对话框，脚本直接给路径）。 */
   recipes: {
@@ -103,6 +108,11 @@ interface DevBridge {
   runOutputs(runId: string): Promise<unknown>;
   /** 把 Map 拍平成可以 JSON 化的对象 —— CDP 的 evaluate 只认 JSON。 */
   snapshot(): unknown;
+  workspaceBackup: {
+    write: typeof backupWorkspace;
+    read: typeof readWorkspaceBackup;
+    restore: typeof restoreWorkspaceBackup;
+  };
 }
 
 declare global {
@@ -144,6 +154,7 @@ export function installDevBridge(transport: Transport): void {
       compare: useCompareStore,
       validation: useValidationStore,
       recipe: useRecipeStore,
+      flowTabs: useFlowTabsStore,
     },
     recipes: {
       loaded: () => recipesLoaded(),
@@ -175,11 +186,12 @@ export function installDevBridge(transport: Transport): void {
         let asked = false;
         const close = await shouldClose(() => {
           asked = true;
-          return resolveUnsaved("关闭窗口");
+          return resolveAllUnsaved("关闭窗口");
         });
         return { asked, close };
       },
     },
+    workspaceBackup: { write: backupWorkspace, read: readWorkspaceBackup, restore: restoreWorkspaceBackup },
     async plan() {
       const g = useGraphStore.getState();
       await requestPlan(g.doc, g.filePath);

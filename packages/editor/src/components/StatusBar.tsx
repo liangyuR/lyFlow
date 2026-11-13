@@ -50,7 +50,7 @@ export function StatusBar() {
 
   return (
     <footer className="statusbar">
-      <span className="statusbar__milestone">M4 · 能扩展</span>
+      <span className="statusbar__milestone">工作流</span>
       <span>{nodeCount} 节点</span>
       <span>{edgeCount} 连线</span>
       {libraryCount > 0 && (

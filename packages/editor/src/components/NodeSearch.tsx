@@ -328,7 +328,7 @@ export function NodeSearch() {
     <>
       <div className="search-backdrop" onClick={closeSearch} />
       <div
-        className="search-popup"
+        className="qs-popover search-popup"
         style={{ left, top, width: POPUP_WIDTH, maxHeight: POPUP_HEIGHT }}
         onKeyDown={onKeyDown}
       >

@@ -7,6 +7,7 @@ import { discardBackup, pickSavePath, rememberFile, saveDocTo, suggestFileName }
 import { useGraphStore } from "../store/graph";
 import { commitRecipeSave, prepareRecipeSave } from "../store/recipeFiles";
 import { useUiStore } from "../store/ui";
+import { findFlowByPath, useFlowTabsStore } from "../store/flowTabs";
 
 /** 存成了返回 true。forcePicker = 另存为。 */
 export async function saveCurrent(forcePicker: boolean): Promise<boolean> {
@@ -18,6 +19,11 @@ export async function saveCurrent(forcePicker: boolean): Promise<boolean> {
     if (!path || forcePicker) {
       path = await pickSavePath(path ?? suggestFileName(graph.doc));
       if (!path) return false; // 用户取消
+    }
+    const opened = findFlowByPath(path);
+    if (opened && opened !== useFlowTabsStore.getState().activeId) {
+      ui.showToast("该文件已在另一个工作流标签中打开，请切换到那个标签保存", "warn");
+      return false;
     }
     // 一次保存图与所有有改动的配方文件（K6 ③）。配方先查外部修改：用户选了取消，图也不存
     const doc = graph.doc;

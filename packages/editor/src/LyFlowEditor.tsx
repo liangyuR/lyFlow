@@ -1,6 +1,6 @@
 import { ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { MotionConfig } from "motion/react";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BottomDrawer } from "./components/BottomDrawer";
 import { GraphCanvas } from "./components/GraphCanvas";
@@ -15,6 +15,9 @@ import { StatusBar } from "./components/StatusBar";
 import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
 import { Viewer3D } from "./components/Viewer3D";
+import { FlowTabs } from "./components/FlowTabs";
+import { NavigationRail, type NavigationPanel } from "./components/NavigationRail";
+import { WorkspaceLibrary } from "./components/WorkspaceLibrary";
 import { usePaneLayout } from "./hooks/usePaneLayout";
 import { useShortcuts } from "./hooks/useShortcuts";
 import {
@@ -27,7 +30,13 @@ import {
 } from "./lib/autosave";
 import { autoRunOnCommit } from "./lib/preview";
 import { saveCurrent } from "./lib/saveFlow";
-import { resolveUnsaved } from "./lib/unsaved";
+import { askChoice } from "./lib/modal";
+import { backupWorkspace, readWorkspaceBackup, restoreWorkspaceBackup, resumeWorkspaceBackups, deferWorkspaceBackups } from "./lib/workspaceRecovery";
+import { clearFlowBackup } from "./lib/flowBackup";
+import {
+  startFlowTabs, useFlowTabsStore, isRestoringFlow, prepareNewTab,
+  switchTab, closeTab, findFlowByPath, withFlowOperation,
+} from "./store/flowTabs";
 import {
   BACKUP_INTERVAL_MS,
   loadDocFrom,
@@ -80,6 +89,32 @@ import "./styles.css";
 import "./styles.editor.css";
 import "./styles.peek.css";
 import "./styles.blocks.css";
+import "./styles.toolbar.css";
+import "./styles.workspace.css";
+
+function qingTheme(theme: Record<string, string> | undefined): React.CSSProperties | undefined {
+  if (!theme) return undefined;
+  const roles: Record<string, string> = {
+    "--lyflow-bg-0": "--surface",
+    "--lyflow-bg-1": "--surface-low",
+    "--lyflow-bg-2": "--surface-mid",
+    "--lyflow-bg-3": "--surface-high",
+    "--lyflow-fg-0": "--on-surface",
+    "--lyflow-fg-1": "--on-surface-variant",
+    "--lyflow-border": "--outline-variant",
+    "--lyflow-border-strong": "--outline",
+    "--lyflow-accent": "--primary",
+    "--lyflow-accent-dim": "--primary-container",
+    "--lyflow-ok": "--ok",
+    "--lyflow-warn": "--warn",
+    "--lyflow-danger": "--ng",
+    "--lyflow-recipe": "--tertiary",
+    "--lyflow-radius": "--r-md",
+    "--lyflow-mono": "--font-mono",
+  };
+  const mapped = Object.fromEntries(Object.entries(theme).filter(([key]) => key in roles).map(([key, value]) => [roles[key], value]));
+  return { ...mapped, ...theme } as React.CSSProperties;
+}
 
 function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps) {
   const { screenToFlowPosition, flowToScreenPosition, fitView, getNodes } = useReactFlow();
@@ -89,7 +124,16 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   const fitMs = viewportMs(motionOn);
   const panel = useUiStore((s) => s.paramPanel);
   const viewerMax = useUiStore((s) => s.viewerMaximized);
-  const layout = usePaneLayout(root, panel);
+  const drawer = useUiStore((s) => s.drawer);
+  const [navigation, setNavigation] = useState<NavigationPanel>("nodes");
+  const flowTabs = useFlowTabsStore((s) => s.tabs);
+  const activeFlow = useFlowTabsStore((s) => s.activeId);
+  const flowBusy = useFlowTabsStore((s) => s.switching);
+  const layout = usePaneLayout(root, panel, navigation !== null);
+  const backupReady = useRef(false);
+  const backupWarning = useRef(false);
+
+  useEffect(() => { resumeWorkspaceBackups(); return startFlowTabs(); }, []);
 
   // 粘贴和搜索面板要知道往哪儿放。跟着鼠标走比总是放在画布中心自然得多。
   const cursor = useRef({ x: 0, y: 0 });
@@ -168,6 +212,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     void schedulePlan(graph.doc, graph.filePath);
     scheduleValidate(graph.doc, graph.filePath);
     const stopGraph = useGraphStore.subscribe((state, prev) => {
+      if (isRestoringFlow()) return;
       if (state.doc === prev.doc && state.filePath === prev.filePath) return;
       if (state.doc !== prev.doc) useExecutionStore.getState().markStale();
       schedulePlan(state.doc, state.filePath);
@@ -176,6 +221,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     // 当前配方的覆盖变了（切配方，或改了当前配方里的值）：doc 没动，但交给 core 的取值变了 ——
     // 计划（stale 与「将重算 N 个」）与诊断跟着重算（K5、P3.8）。切换配方时开着「自动运行」就照常补一次运行
     const stopRecipe = useRecipeStore.subscribe((state, prev) => {
+      if (isRestoringFlow()) return;
       if (state.overrides === prev.overrides) return;
       const g = useGraphStore.getState();
       useExecutionStore.getState().markStale();
@@ -194,6 +240,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     // （第一次存盘）就只换目录。放在订阅里而不是 openPath 里：宿主与脚本直接 loadDoc 也一样生效
     void loadRecipesFor(graph.filePath);
     const stopFiles = useGraphStore.subscribe((state, prev) => {
+      if (isRestoringFlow()) return;
       if (state.epoch !== prev.epoch) {
         void loadRecipesFor(state.filePath);
         // 换了一张图（打开、新建）：上一张图那次运行的范围不能拿来「↻ 重跑」这一张（节点 id 常常同名）
@@ -230,7 +277,17 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
 
   // -- 每 30 秒一次自动备份：存过盘的写 `<file>~`，没存过盘的写到 app data 里（lib/autosave.ts）-------
   useEffect(() => {
-    const t = setInterval(() => void autosaveTick(), BACKUP_INTERVAL_MS);
+    const t = setInterval(() => {
+      if (useFlowTabsStore.getState().switching) return;
+      void autosaveTick();
+      if (!backupReady.current) return;
+      void backupWorkspace().then((ok) => {
+        if (!ok && !backupWarning.current) {
+          backupWarning.current = true;
+          useUiStore.getState().showToast("工作区自动备份失败，请及时保存各个工作流", "warn");
+        }
+      });
+    }, BACKUP_INTERVAL_MS);
     return () => clearInterval(t);
   }, []);
 
@@ -240,22 +297,44 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     if (manifestStatus !== "ready" || offeredUntitled.current) return;
     offeredUntitled.current = true;
     void (async () => {
-      const backup = await findUntitledBackup();
+      let deferred = false;
       const blank = () => {
         const g = useGraphStore.getState();
         return !g.filePath && !g.dirty && g.doc.nodes.length === 0;
       };
-      // 只在还是那张空白的新图时问：宿主可能一开就载入了别的图，那就不打扰（备份留到下次）
-      if (!backup || !blank()) return;
-      const answer = await askRestoreUntitled(backup);
-      if (answer === "discard") await discardUntitledBackup();
-      if (answer !== "restore") return;
-      if (!blank()) return;
-      restoreUntitled(backup);
-      setTimeout(() => void fitView({ duration: fitMs }), 50);
-      useUiStore.getState().showToast(`已恢复上次没存的图（${backup.loaded.doc.nodes.length} 个节点），记得保存`);
+      try {
+        const workspace = await readWorkspaceBackup();
+        if (workspace && blank()) {
+          const answer = await askChoice({
+            title: "恢复工作区？",
+            message: `上次有 ${workspace.tabs.length} 个工作流，包含未保存的改动。是否恢复？`,
+            choices: [{ id: "restore", label: "恢复工作区", tone: "primary" }, { id: "discard", label: "丢弃备份", tone: "danger" }, { id: "cancel", label: "稍后" }],
+          });
+          if (answer === "restore" && blank()) restoreWorkspaceBackup(workspace);
+          if (answer === "discard") { await clearFlowBackup(); await discardUntitledBackup(); }
+          if (answer !== "restore" && answer !== "discard") { deferred = true; deferWorkspaceBackups(); }
+          return;
+        }
+        if (workspace) { deferred = true; deferWorkspaceBackups(); }
+        const backup = await findUntitledBackup();
+        // 只在还是那张空白的新图时问：宿主可能一开就载入了别的图，那就不打扰（备份留到下次）
+        if (!backup || !blank()) return;
+        const answer = await askRestoreUntitled(backup);
+        if (answer === "discard") await discardUntitledBackup();
+        if (answer !== "restore") return;
+        if (!blank()) return;
+        restoreUntitled(backup);
+        setTimeout(() => void fitView({ duration: fitMs, maxZoom: 1, padding: 0.22 }), 50);
+        useUiStore.getState().showToast(`已恢复上次没存的图（${backup.loaded.doc.nodes.length} 个节点），记得保存`);
+      } finally { backupReady.current = !deferred; }
     })();
   }, [manifestStatus, fitView, fitMs]);
+
+  useEffect(() => {
+    if (!backupReady.current || flowBusy) return;
+    const timer = setTimeout(() => void backupWorkspace(), 250);
+    return () => clearTimeout(timer);
+  }, [activeFlow, flowBusy]);
 
   // -- 打开文件的公共尾巴：迁移写回、缺坐标就布局、记最近文件 -----------------
   const afterOpen = useCallback(
@@ -264,6 +343,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       const ui = useUiStore.getState();
       graph.loadDoc(doc, path);
       ui.clearSelection();
+      ui.setPath([]);
 
       // 脚本生成的图必须能打开（graph-doc.md 的承诺）。只排缺坐标的，永远不覆盖用户摆好的位置（E8）。
       // 不记撤销、不算改动（2026-10-04 拍板）；排在迁移前面：迁移那一条撤销回去也是排好的样子
@@ -271,7 +351,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       const bare = loaded.nodes.length > 0 && loaded.nodes.every((n) => n.ui?.position == null);
       if (needsInitialLayout(loaded)) {
         useGraphStore.getState().layoutLoaded(initialLayout(loaded));
-        setTimeout(() => void fitView({ duration: fitMs }), 50);
+        setTimeout(() => void fitView({ duration: fitMs, maxZoom: 1, padding: 0.22 }), 50);
       }
       // 一条撤销记录、置 dirty：用户可以撤销掉这次迁移再决定（ADR-0008）。一个坐标都没有的图迁移时加了节点：同一步里整张重排
       const migrated =
@@ -286,26 +366,34 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   const openPath = useCallback(
     async (path: string) => {
       const ui = useUiStore.getState();
+      const existing = findFlowByPath(path);
+      if (existing) {
+        await switchTab(existing);
+        return;
+      }
       try {
-        // 备份比正文新：先问恢复 / 丢弃 / 取消（§2.5）。取消就不打开，备份留着
-        const from = await openSourceFor(path);
-        if (from === null) return;
-        if (from === "backup") {
-          const restored = await readBackup(path);
-          await afterOpen(
-            restored.doc,
-            path,
-            restored.migrations.filter(isMigration),
-          );
-          // 内容不在盘上：算没保存（以前 markSaved 成「已保存」—— 标题没有 *、关窗口也不问，恢复出来的又丢了）
-          useGraphStore.getState().markUnsaved();
-          const recipes = await restoreRecipeAutosave();
-          useUiStore.getState().showToast(recipes ? "已从自动备份恢复图与配方，记得保存" : "已从自动备份恢复，记得保存");
-          return;
+        const source = await withFlowOperation(async () => {
+          const from = await openSourceFor(path);
+          if (from === null) return null;
+          const loaded = from === "backup" ? await readBackup(path) : await loadDocFrom(path);
+          return { loaded, restored: from === "backup" };
+        });
+        if (!source) return;
+        const change = prepareNewTab({ reuseEmpty: true });
+        if (!change) return;
+        try {
+          await afterOpen(source.loaded.doc, path, source.loaded.migrations.filter(isMigration));
+          await loadRecipesFor(path);
+          if (source.restored) {
+            useGraphStore.getState().markUnsaved();
+            await restoreRecipeAutosave();
+          }
+          change.commit();
+          if (source.restored) ui.showToast("已从自动备份恢复，记得保存");
+        } catch (error) {
+          change.cancel();
+          throw error;
         }
-
-        const loaded = await loadDocFrom(path);
-        await afterOpen(loaded.doc, path, loaded.migrations.filter(isMigration));
       } catch (e) {
         ui.showToast(e instanceof Error ? e.message : String(e), "warn");
       }
@@ -313,54 +401,38 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     [afterOpen],
   );
 
-  // -- 文件操作 -------------------------------------------------------------
-  // 保存在 lib/saveFlow：「保存 / 不保存 / 取消」那一问选了保存，也走它
   const doSave = useCallback(async (forcePicker: boolean) => {
-    await saveCurrent(forcePicker);
+    await withFlowOperation(() => saveCurrent(forcePicker));
   }, []);
 
-  /** 打开一张图；被换掉的是没存过盘的那张时，它的备份也删掉（用户已经确认过放弃它）。 */
-  const openUnlessCancelled = useCallback(
-    async (path: string) => {
-      const wasUntitled = !useGraphStore.getState().filePath;
-      await openPath(path);
-      if (wasUntitled && useGraphStore.getState().filePath === path) await discardUntitledBackup();
-    },
-    [openPath],
-  );
-
   const doOpen = useCallback(async () => {
-    const ui = useUiStore.getState();
     try {
-      if (!(await resolveUnsaved("打开别的图"))) return;
-      const path = await pickOpenPath();
-      if (!path) return;
-      await openUnlessCancelled(path);
+      const path = await withFlowOperation(() => pickOpenPath());
+      if (path) await openPath(path);
     } catch (e) {
-      ui.showToast(e instanceof Error ? e.message : String(e), "warn");
+      useUiStore.getState().showToast(e instanceof Error ? e.message : String(e), "warn");
     }
-  }, [openUnlessCancelled]);
+  }, [openPath]);
 
-  const doOpenRecent = useCallback(
-    async (path: string) => {
-      if (!(await resolveUnsaved("打开别的图"))) return;
-      await openUnlessCancelled(path);
-    },
-    [openUnlessCancelled],
-  );
+  const doOpenRecent = useCallback((path: string) => openPath(path), [openPath]);
 
   const doNew = useCallback(async () => {
-    if (!(await resolveUnsaved("新建"))) return;
-    // 问过之后再取：选了保存，没存过盘的图这时已经有了路径
-    const graph = useGraphStore.getState();
-    if (!graph.filePath) void discardUntitledBackup();
-    graph.newDoc();
-    useUiStore.getState().clearSelection();
-    useCacheStore.getState().reset();
+    const change = prepareNewTab();
+    if (!change) return;
+    try {
+      useGraphStore.getState().newDoc();
+      useUiStore.getState().clearSelection();
+      useCacheStore.getState().reset();
+      await loadRecipesFor(null);
+      change.commit();
+    } catch (error) {
+      change.cancel();
+      useUiStore.getState().showToast(error instanceof Error ? error.message : String(error), "warn");
+    }
   }, []);
 
   // -- 运行 -----------------------------------------------------------------
-  const doRun = useCallback(async (targets?: string[]) => {
+  const doRun = useCallback(async (targets?: string[], exactTargets = false) => {
     const graph = useGraphStore.getState();
     const ui = useUiStore.getState();
     if (graph.doc.nodes.length === 0) {
@@ -380,7 +452,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       // 目标是**展开后**的路径 id：在子图里点「运行到此节点」也要说得清是哪一个（F2）
       const path = useUiStore.getState().path;
       const full = targets?.map((t) => fullId(path, t));
-      await startRun(graph.doc, graph.filePath, { targets: full });
+      await startRun(graph.doc, graph.filePath, { targets: full, exactTargets });
     } catch (e) {
       ui.showToast(e instanceof Error ? e.message : String(e), "warn");
     }
@@ -404,7 +476,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
     const moves = layoutGraph(view, ui.selectedNodes.size > 1 ? { only: ui.selectedNodes } : {});
     // 用户触发的整理才过渡（docs/motion-plan.md N4）；打开文件时的初始布局照旧一步到位
     withLayoutTransition(() => graph.applyLayout(moves));
-    setTimeout(() => void fitView({ duration: fitMs }), 50);
+    setTimeout(() => void fitView({ duration: fitMs, maxZoom: 1, padding: 0.22 }), 50);
   }, [fitView, fitMs]);
 
   const handlers = useMemo(
@@ -430,13 +502,13 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       onRunToSelected: () => {
         const ids = [...useUiStore.getState().selectedNodes];
         if (ids.length === 0) {
-          useUiStore.getState().showToast("先选一个节点再按 Shift+F5", "warn");
+          useUiStore.getState().showToast("先按住 Ctrl 拖动框选节点，再运行选中", "warn");
           return;
         }
-        void doRun(ids);
+        void doRun(ids, true);
       },
       onLayout: doLayout,
-      onFitView: () => void fitView({ duration: fitMs }),
+      onFitView: () => void fitView({ duration: fitMs, maxZoom: 1, padding: 0.22 }),
       onFitSelection: () => {
         const ids = [...useUiStore.getState().selectedNodes];
         if (ids.length === 0) {
@@ -503,22 +575,30 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
   useEffect(() => {
     if (!onDocChange) return;
     const stopGraph = useGraphStore.subscribe((state, prev) => {
+      if (isRestoringFlow()) return;
       if (state.doc === prev.doc && state.dirty === prev.dirty) return;
       onDocChange(state.doc, state.dirty || recipesDirty());
     });
     const stopRecipes = useRecipeStore.subscribe((state, prev) => {
+      if (isRestoringFlow()) return;
       if ((state.set !== state.saved) === (prev.set !== prev.saved)) return;
       const g = useGraphStore.getState();
       onDocChange(g.doc, g.dirty || state.set !== state.saved);
     });
+    const stopTabs = useFlowTabsStore.subscribe((state, prev) => {
+      if (state.activeId === prev.activeId) return;
+      const graph = useGraphStore.getState();
+      onDocChange(graph.doc, graph.dirty || recipesDirty());
+    });
     return () => {
       stopGraph();
       stopRecipes();
+      stopTabs();
     };
   }, [onDocChange]);
 
   // 关动效时 CSS 那一半靠根上的 lyflow-motion-off（系统设置另有 @media 兜底，见 styles.motion.css）
-  const rootClass = ["app", motionOn ? "" : "lyflow-motion-off", className ?? ""]
+  const rootClass = ["app", "qs-scheme-dark", motionOn ? "" : "lyflow-motion-off", className ?? ""]
     .filter(Boolean)
     .join(" ");
 
@@ -529,9 +609,18 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       tabIndex={-1}
       data-lyflow-editor="1"
       data-motion={motionOn ? "on" : "off"}
-      style={theme as React.CSSProperties | undefined}
+      data-flow-busy={flowBusy ? "1" : undefined}
+      style={qingTheme(theme)}
       onMouseMove={onMouseMove}
     >
+      <FlowTabs
+        tabs={flowTabs.map((tab) => ({ id: tab.id, title: tab.title, dirty: tab.dirty, path: tab.filePath ?? undefined }))}
+        activeId={activeFlow}
+        disabled={flowBusy}
+        onNew={handlers.onNew}
+        onSelect={(id) => void switchTab(id)}
+        onClose={(id) => void closeTab(id)}
+      />
       <Toolbar
         onNew={handlers.onNew}
         onOpen={handlers.onOpen}
@@ -548,7 +637,23 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         className={`app__body${viewerMax ? " is-viewer-max" : panel.open && panel.maximized ? " is-panel-max" : ""}`}
         data-viewer-max={viewerMax ? "1" : undefined}
       >
-        <aside className="app__sidebar" style={{ width: layout.paletteWidth }}>
+        <NavigationRail
+          active={navigation}
+          onSelect={(next) => {
+            if (next !== null) {
+              useUiStore.getState().setViewerMaximized(false);
+              if (panel.maximized) useUiStore.getState().setParamPanelMaximized(false);
+            }
+            setNavigation(next);
+          }}
+          parametersOpen={panel.open}
+          logsOpen={drawer !== null}
+          onParameters={() => useUiStore.getState().toggleParamPanel()}
+          onLogs={() => useUiStore.getState().toggleDrawer()}
+          onHelp={() => useUiStore.getState().setHelpOpen(true)}
+        />
+        <aside className="app__sidebar qs-panel" style={{ width: layout.paletteWidth, display: navigation === null ? "none" : undefined }}>
+          <div className="app__sidebar-content" style={{ display: navigation === "nodes" ? undefined : "none" }}>
           {manifestStatus === "loading" && <p className="app__hint">正在读取算子描述…</p>}
           {manifestStatus === "error" && (
             <div className="app__error">
@@ -559,20 +664,30 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
               </button>
             </div>
           )}
-          {manifestStatus === "ready" && <NodePalette />}
+          {manifestStatus === "ready" && <NodePalette onClose={() => setNavigation(null)} />}
+          </div>
+          {navigation === "flows" && <WorkspaceLibrary
+            tabs={flowTabs.map((tab) => ({ id: tab.id, title: tab.title, dirty: tab.dirty, path: tab.filePath ?? undefined }))}
+            activeId={activeFlow}
+            onSelect={(id) => void switchTab(id)}
+            onOpen={handlers.onOpen}
+            onNew={handlers.onNew}
+            onOpenRecent={(path) => void doOpenRecent(path)}
+            onClose={() => setNavigation(null)}
+          />}
         </aside>
 
-        <div
+        {navigation !== null && <div
           className="app__splitter app__splitter--left"
           onPointerDown={layout.onPaletteSplitterDown}
           role="separator"
           aria-orientation="vertical"
           title="拖动调整算子面板宽度"
           data-testid="left-splitter"
-        />
+        />}
 
         <section className="app__canvas">
-          <GraphCanvas onRunToNode={handlers.onRunToNode} onOpenRecent={(p) => void doOpenRecent(p)} onLayout={handlers.onLayout} />
+          <GraphCanvas onRunToNode={handlers.onRunToNode} onRunToSelected={handlers.onRunToSelected} onOpenRecent={(p) => void doOpenRecent(p)} onLayout={handlers.onLayout} />
         </section>
 
         <div
@@ -584,7 +699,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
         />
 
         <aside
-          className={`app__right${panel.open ? " app__right--panel" : ""}`}
+          className={`app__right qs-panel${panel.open ? " app__right--panel" : ""}`}
           style={{ width: layout.rightWidth }}
           data-testid="right-pane"
           ref={layout.rightCol}
@@ -649,7 +764,7 @@ interface WorkspaceProps {
   /** 文档或 dirty 状态变化时回调，给宿主做自己的标题栏/保存提示。 */
   onDocChange?: ((doc: GraphDoc, dirty: boolean) => void) | undefined;
   className?: string | undefined;
-  /** `--lyflow-*` 变量的覆盖值，写在编辑器根元素上。 */
+  /** Qing Steel token 或兼容的 `--lyflow-*` 变量覆盖值，写在编辑器根元素上。 */
   theme?: Record<string, string> | undefined;
 }
 

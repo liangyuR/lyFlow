@@ -42,7 +42,7 @@
 .peek-tensor__eff {
   padding: 0 4px;
   border: 1px solid var(--lyflow-border);
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   color: var(--lyflow-fg-1);
   font-family: var(--lyflow-mono);
   line-height: 15px;
@@ -52,7 +52,7 @@
 .peek-tensor__num {
   padding: 1px 2px;
   border: 1px solid var(--lyflow-border);
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   background: var(--lyflow-bg-2);
   color: var(--lyflow-fg-1);
   font-size: 11px;
@@ -96,7 +96,7 @@
   text-align: center;
   color: var(--lyflow-fg-2);
   font-size: 12px;
-  background: rgba(20, 22, 26, 0.72);
+  background: color-mix(in srgb, var(--surface-lowest) 80%, transparent);
 }
 
 .peek-tensor__foot {

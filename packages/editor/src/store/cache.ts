@@ -119,6 +119,13 @@ export function formatBytes(bytes: number): string {
 let timer: ReturnType<typeof setTimeout> | null = null;
 let ticket = 0;
 
+export function invalidatePlanRequests(): void {
+  ticket += 1;
+  if (timer !== null) clearTimeout(timer);
+  timer = null;
+}
+
+
 /** doc 变了就重新编译一次。debounce + ticket：拖滑块时每帧一次编译既浪费，
  *  回复顺序也不保证等于发起顺序，晚发的那次必须赢。 */
 export function schedulePlan(doc: GraphDoc, graphPath: string | null): void {

@@ -12,7 +12,7 @@ export function Modal() {
   useEffect(() => registerModalHost(), []);
   if (!current) return null;
   return (
-    <div className="lf-modal__backdrop" data-testid="modal-backdrop" onPointerDown={(e) => e.stopPropagation()}>
+    <div className="qs-scrim lf-modal__backdrop" data-testid="modal-backdrop" onPointerDown={(e) => e.stopPropagation()}>
       {current.kind === "text" ? <TextModal key={current.id} /> : <ChoiceModal key={current.id} />}
     </div>
   );
@@ -34,8 +34,9 @@ function TextModal() {
   };
   return (
     <div
-      className="lf-modal"
+      className="qs-dialog lf-modal"
       role="dialog"
+      aria-modal="true"
       aria-label={req.title}
       data-testid="modal"
       data-kind="text"
@@ -71,12 +72,12 @@ function TextModal() {
         </label>
       )}
       <div className="lf-modal__buttons">
-        <button type="button" className="lf-btn" data-testid="modal-cancel" onClick={() => settleModal(null)}>
+        <button type="button" className="qs-btn sm tonal lf-btn" data-testid="modal-cancel" onClick={() => settleModal(null)}>
           取消
         </button>
         <button
           type="button"
-          className="lf-btn lf-btn--primary"
+          className="qs-btn sm lf-btn lf-btn--primary"
           data-testid="modal-ok"
           disabled={problem !== null}
           onClick={ok}
@@ -95,8 +96,9 @@ function ChoiceModal() {
   if (!req || req.kind !== "choice") return null;
   return (
     <div
-      className="lf-modal"
+      className="qs-dialog lf-modal"
       role="dialog"
+      aria-modal="true"
       aria-label={req.title}
       data-testid="modal"
       data-kind="choice"
@@ -120,7 +122,7 @@ function ChoiceModal() {
             key={c.id}
             ref={i === 0 ? first : undefined}
             type="button"
-            className={`lf-btn${c.tone === "primary" ? " lf-btn--primary" : c.tone === "danger" ? " lf-btn--danger" : ""}`}
+            className={`qs-btn sm lf-btn${c.tone === "primary" ? " lf-btn--primary" : c.tone === "danger" ? " danger-tonal lf-btn--danger" : " tonal"}`}
             data-testid={`modal-choice-${c.id}`}
             onClick={() => settleModal(c.id)}
           >

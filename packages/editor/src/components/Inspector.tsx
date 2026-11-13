@@ -33,6 +33,7 @@ import { MultiEditContext } from "./NumberInput";
 import { copyText } from "../lib/clipboard";
 import { formatOutputValue } from "../lib/outputs";
 
+
 /** 六位有效数字。2D 几何的坐标是米，原样打印会拖一串浮点噪声。 */
 // num 搬到了 lib/format（对比的差异表要在纯函数里用）；从这里转出，老的 import 不用改
 export { num } from "../lib/format";
@@ -764,8 +765,16 @@ function SubgraphInspector({ subgraphId, def }: { subgraphId: string; def: Subgr
 }
 
 export function Inspector() {
+  const selectedCount = useUiStore((s) => s.selectedNodes.size);
   return (
     <>
+      <header className="workspace-heading workspace-heading--inspector">
+        <span className="workspace-heading__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M4 7h16M4 17h16" /><circle cx="9" cy="7" r="3" fill="var(--surface-low)" /><circle cx="15" cy="17" r="3" fill="var(--surface-low)" /></svg>
+        </span>
+        <h2>节点参数</h2>
+        {selectedCount > 0 && <span className="workspace-heading__count">{selectedCount} 个选中</span>}
+      </header>
       <GraphOutputs />
       <GraphParams />
       <InspectorBody />
@@ -963,10 +972,12 @@ function InspectorBody() {
 
   return (
     <div className="insp insp--empty">
-      <p>选中一个节点来编辑它的参数。</p>
-      <p className="insp__hint">
-        双击画布空白处搜索算子；从端口拖出连线来连接节点。
-      </p>
+      <span className="insp__empty-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m6 3 13 9-6 1.5L10 20 6 3Z" strokeLinejoin="round" /></svg>
+      </span>
+      <h3>选择一个节点</h3>
+      <p className="insp__hint">在这里调整参数，立即查看处理结果。</p>
+      <p className="insp__empty-shortcut">双击画布添加算子 <kbd>Tab</kbd></p>
     </div>
   );
 }

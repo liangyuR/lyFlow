@@ -101,7 +101,11 @@ CI 与本地走同一个入口 `scripts/check.ps1`，按 job 用 `-Steps` 点名
 | HTTP 传输、宿主嵌入（含用户片段、底图点云文件两个端点，图像端点的行切片） | `scripts/e2e/http.mjs` |
 | 外部 Rust/Tauri 宿主（`attach`、`lyflow_handler!`、`sceneId` 注入、工作区路径） | `bridge/tests/host.rs`（`MockRuntime` 跑真 IPC） |
 | 自动备份（存过盘的写 `<file>~`、没存过盘的写到传输层给的那一处、找回来、换上算没保存、删掉；没有那个口的传输不备份；读坏了的删掉；开图时备份比正文新问「恢复 / 丢弃 / 取消」—— 取消与 Esc 不打开、备份留着，没挂对话框退回原生的是 / 否） | `packages/editor/test/autosave.test.mjs`（内存里的假传输）；真按 Esc 关掉那一问、再点「丢弃」在 e2e `m3.mjs` 的 `suitePanels`（备份那一段）；真的 app data 位置与写盘在 e2e `m3.mjs` 的 `suitePanels` 末尾（harness 跑之前把用户自己的那份挪开、收尾时挪回去） |
-| 桌面壳：窗口标题（只有文件名：Windows 的反斜杠路径也拆开）、新建之后空画布列出最近打开的（点一条打开、别处双击照样开搜索）、关窗口与工具栏「新建」前问「保存 / 不保存 / 取消」（有没存的改动才问；真鼠标点编辑器画的那一问：取消不关、不保存文件不动、保存先存盘；关窗口经 devbridge 不点 × 走一遍，监听装没装上、destroy 的权限另查；各个选项的分支与另存为取消了的情况在 `packages/editor/test/autosave.test.mjs`）、主窗口放行剪贴板读取、挡掉 WebView2 的刷新键（Ctrl+R / 搜索面板开着时的 F5 不重新载入）与右键菜单 | e2e `m3.mjs` 的 `suitePanels` 末尾；剪贴板读取在 `params_p1.mjs` 的 `suiteIncludeTopLevel` |
+| 桌面壳：窗口标题（只有文件名：Windows 的反斜杠路径也拆开）、新建之后空画布列出最近打开的（点一条打开、别处双击照样开搜索）、关闭未保存标签与关窗口时问「保存 / 不保存 / 取消」（有没存的改动才问；真鼠标点编辑器画的那一问：取消不关、不保存文件不动、保存先存盘；关窗口经 devbridge 不点 × 走一遍，监听装没装上、destroy 的权限另查；各个选项的分支与另存为取消了的情况在 `packages/editor/test/autosave.test.mjs`）、主窗口放行剪贴板读取、挡掉 WebView2 的刷新键（Ctrl+R / 搜索面板开着时的 F5 不重新载入）与右键菜单 | e2e `m3.mjs` 的 `suitePanels` 末尾；剪贴板读取在 `params_p1.mjs` 的 `suiteIncludeTopLevel` |
+
+本轮画布交互的回归复用 `m3:suiteEditing`（左键平移、Ctrl 框选、Ctrl+Shift 追加、右键菜单且不平移）、`m3:suiteRunToSelected`（浮动操作条多目标运行，必要上游参与、未选中下游不参与）与 `motion:suiteEnter`（左键平移触发虚拟化）。精确选区运行取消待自动运行、保留多个目标与重跑范围的断言扩展在现有 `execution-store.test.mjs` 自动运行用例中，测试数量不变。
+
+多文档标签复用 `m3:suitePanels` 验证新建保留后台文档、同路径去重、切换参数与撤销/重做、关闭标签和后台未保存文档的窗口保护。`packages/editor/test/flow-tabs.test.mjs` 的 5 个用例覆盖对象身份、独立会话、异步迟到隔离与关闭取消；`flow-backup.test.mjs` 的 5 个用例覆盖 IndexedDB 适配器、载荷校验及串行写入/清理。编辑器纯逻辑测试由 161 增至 171。
 
 ## 共用的夹具与辅助
 

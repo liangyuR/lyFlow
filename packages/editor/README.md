@@ -54,7 +54,7 @@ interface LyFlowEditorProps {
   dialogs?: EditorDialogs;           // 文件对话框，宿主提供
   graphPath?: string;                // 挂载后自动打开这张图
   onDocChange?: (doc: GraphDoc, dirty: boolean) => void;
-  theme?: Record<string, string>;    // --lyflow-* 变量覆盖
+  theme?: Record<string, string>;    // Qing Steel token 或兼容的 --lyflow-* 变量覆盖
   className?: string;
   animations?: boolean;              // 画布动效，默认 true
 }
@@ -126,29 +126,39 @@ const dialogs: EditorDialogs = {
 
 ## 主题
 
-样式全部走 `--lyflow-*` 变量，默认值定义在编辑器根元素 `.app` 上（不是 `:root`，
-宿主页面的其余部分不会被改色）。覆盖方式二选一：`theme` prop，或者在更外层的
-选择器里重定义。
+界面依赖 Qing Steel **v0.11.2** 发布包，统一使用上游颜色、字体、圆角、控件和动效刻度。默认深色，根容器使用 `.qs-scheme-dark`；常驻面板按 surface 色阶分层，临时菜单和对话框使用上游浮层角色。
 
-| 变量 | 默认 | 用处 |
+通过 `theme` prop 覆盖 Qing Steel token。原有 `--lyflow-*` prop 会映射到对应的上游角色；两者同时传入时，上游 token 优先。CSS 定制新界面时请在编辑器根选择器上覆盖上游 token。
+
+| 兼容变量 | Qing Steel 角色 | 用处 |
 |---|---|---|
-| `--lyflow-bg-0` … `--lyflow-bg-3` | `#14161a` … `#2a2f39` | 由深到浅的四层底色 |
-| `--lyflow-border` / `--lyflow-border-strong` | `#333a46` / `#454d5c` | 分隔线、边框 |
-| `--lyflow-fg-0` … `--lyflow-fg-2` | `#e6e9ef` … `#6f7887` | 由亮到暗的三级文字 |
-| `--lyflow-accent` / `--lyflow-accent-dim` | `#4a9eff` / `#2d6099` | 选中、连线、焦点 |
-| `--lyflow-warn` | `#f0a020` | 警告 |
-| `--lyflow-recipe` | `#e0a030` | 被当前配方覆盖（橙色竖条、矩阵里配方存的值） |
-| `--lyflow-danger` | `#e5484d` | 配方失配、越界的单元格 |
-| `--lyflow-radius` | `6px` | 圆角 |
-| `--lyflow-mono` | 一串等宽字体 | 代码与 id |
+| `--lyflow-bg-0` … `--lyflow-bg-3` | `--surface` / `--surface-low` / `--surface-mid` / `--surface-high` | 四层表面 |
+| `--lyflow-border` / `--lyflow-border-strong` | `--outline-variant` / `--outline` | 分隔线、边框 |
+| `--lyflow-fg-0` / `--lyflow-fg-1` | `--on-surface` / `--on-surface-variant` | 正文、次要文字 |
+| `--lyflow-accent` / `--lyflow-accent-dim` | `--primary` / `--primary-container` | 主操作、选中、焦点 |
+| `--lyflow-ok` / `--lyflow-warn` / `--lyflow-danger` | `--ok` / `--warn` / `--ng` | 成功、警告、错误 |
+| `--lyflow-recipe` | `--tertiary` | 配方覆盖 |
+| `--lyflow-radius` / `--lyflow-mono` | `--r-md` / `--font-mono` | 输入圆角、等宽字体 |
 
 ```tsx
-<LyFlowEditor transport={t} theme={{ "--lyflow-accent": "#ff8a3d" }} />
+<LyFlowEditor transport={t} theme={{ "--primary": "#7FD4F0", "--primary-container": "#004E63" }} />
 ```
 
 CSS 由组件自己 `import`，宿主不用单独引样式文件。
 
+## 工作流标签与导航
+
+顶部标签对应独立工作流；新建或打开会保留其它标签的未保存内容，重复打开同一路径只激活已有标签。切换保留节点、配方、撤销/重做、选择、视口与已完成的运行结果；当前工作流运行中或配方读取中，先完成或停止操作再切换。
+
+标签支持方向键/Home/End切换，Delete关闭；关闭未保存标签与关闭窗口都会询问保存、不保存或取消，窗口关闭会检查所有标签。左侧导航可展开/收起节点库和工作流列表，并进入参数、日志与帮助；当前工作流名称仍可在操作栏编辑。
+
+多文档未保存内容另外备份到当前浏览器/WebView配置的 IndexedDB，重新打开时询问恢复。它与原有图文件旁的 `~` 备份并存；不是自动保存到原文件，备份恢复不包含撤销历史和运行结果。选择稍后会保留原工作区备份；本次会话仍有原来的活动图文件备份。
+
 ## 快捷键
+
+画布使用 Qing Steel 深色背景与点阵。空白处左键拖动平移，节点上左键拖动移动节点，右键打开菜单。按住 Ctrl 拖动框选（与框相交的节点即可选中），Ctrl+Shift 拖动追加选区；Ctrl/Shift 单击仍可加选或取消单个节点。
+
+选中多个节点后，选区上方显示操作条，可点击「运行选中」或按 Shift+F5。选区运行只计算这些节点及其必要上游，复用缓存，不运行未选中的下游，也不合并待自动运行的其它目标；F5 仍运行整图。
 
 键盘监听挂在**编辑器根元素**上，不挂 `window`：宿主页面里的其它输入框不会被拦。
 代价是根元素得拿得到焦点 —— 组件自己 `tabIndex={-1}` 并在挂载时 focus，
