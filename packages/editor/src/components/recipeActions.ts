@@ -6,7 +6,7 @@ import { askChoice, askText } from '../lib/modal';
 import { recipeFileName, recipeNameProblem, uniqueRecipeName } from '../lib/recipes';
 import { useGraphStore } from '../store/graph';
 import { recipeSet, selectRecipe, useRecipeStore } from '../store/recipe';
-import { exportRecipeTo, importRecipeFrom, recipeImportOwner } from '../store/recipeFiles';
+import { exportRecipeTo, importRecipeFrom, recipeFileOwner } from '../store/recipeFiles';
 import { useUiStore } from '../store/ui';
 
 const toast = (text: string, kind: 'info' | 'warn' = 'info') =>
@@ -116,7 +116,7 @@ async function pickFile(
 
 export async function importRecipeInteractive(): Promise<string | null> {
   if (!needDir()) return null;
-  const owns = recipeImportOwner();
+  const owns = recipeFileOwner();
   const path = await pickFile('open', '', owns);
   if (!path || !owns()) return null;
   try {
@@ -134,14 +134,16 @@ export async function importRecipeInteractive(): Promise<string | null> {
 }
 
 export async function exportRecipeInteractive(name: string): Promise<boolean> {
-  const path = await pickFile('save', recipeFileName(name));
-  if (!path) return false;
+  const owns = recipeFileOwner();
+  const path = await pickFile('save', recipeFileName(name), owns);
+  if (!path || !owns()) return false;
   try {
     await exportRecipeTo(name, path);
+    if (!owns()) return false;
     toast(`已导出 ${path}`);
     return true;
   } catch (e) {
-    toast(e instanceof Error ? e.message : String(e), 'warn');
+    if (owns()) toast(e instanceof Error ? e.message : String(e), 'warn');
     return false;
   }
 }

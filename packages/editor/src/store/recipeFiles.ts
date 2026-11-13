@@ -478,15 +478,16 @@ export async function readRecipeForImport(path: string): Promise<RecipeEntry> {
   return entryFromParsed(parsed);
 }
 
-export function recipeImportOwner(): () => boolean {
+export function recipeFileOwner(): () => boolean {
   const ticket = loadTicket;
-  const { doc, filePath } = useGraphStore.getState();
+  const { doc, filePath, epoch } = useGraphStore.getState();
   const host = activeTransport();
   return () => {
     const current = useGraphStore.getState();
     return (
       ticket === loadTicket &&
       host === activeTransport() &&
+      current.epoch === epoch &&
       current.doc.id === doc.id &&
       current.filePath === filePath
     );
@@ -495,7 +496,7 @@ export function recipeImportOwner(): () => boolean {
 
 /** 导入：复制进配方目录（存盘时写），重名时让用户改名（P3.6）。返回最终的名字；取消返回 null。 */
 export async function importRecipeFrom(path: string, name?: string): Promise<string | null> {
-  const owns = recipeImportOwner();
+  const owns = recipeFileOwner();
   await loading;
   if (!owns()) return null;
   const entry = await readRecipeForImport(path);
@@ -519,7 +520,10 @@ export async function importRecipeFrom(path: string, name?: string): Promise<str
 
 /** 导出：把配方按当前格式另存到任意位置（立即写，不进撤销、不改内存里的配方）。 */
 export async function exportRecipeTo(name: string, path: string): Promise<void> {
+  const host = activeTransport();
+  const doc = useGraphStore.getState().doc;
   const entry = recipeSet().recipes.find((r) => r.name === name);
   if (!entry) throw new Error(`没有配方 ${name}`);
-  await transport.writeRecipeFile(path, serializeRecipe(entry, useGraphStore.getState().doc));
+  const text = serializeRecipe(entry, doc);
+  await host.writeRecipeFile(path, text);
 }

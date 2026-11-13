@@ -35,8 +35,15 @@ import {
 import { useUiStore } from '../src/store/ui.ts';
 import { setDialogs, browserDialogs } from '../src/lib/dialogs.ts';
 import { settleModal, useModalStore } from '../src/lib/modal.ts';
-import { importRecipeInteractive } from '../src/components/recipeActions.ts';
-import { importRecipeFrom, invalidateRecipeLoad } from '../src/store/recipeFiles.ts';
+import {
+  exportRecipeInteractive,
+  importRecipeInteractive,
+} from '../src/components/recipeActions.ts';
+import {
+  exportRecipeTo,
+  importRecipeFrom,
+  invalidateRecipeLoad,
+} from '../src/store/recipeFiles.ts';
 import { restoreFlowDocuments, startFlowTabs, switchTab } from '../src/store/flowTabs.ts';
 import { useExecutionStore } from '../src/store/execution.ts';
 import { setTransport } from '../src/transport/index.ts';
@@ -604,7 +611,7 @@ test('配方参数事务：拖动合并、图参数改名与失配阻断及修�
   );
 });
 
-test('配方导入所有权：延迟读取、选文件和重名确认不污染其他标签，取消或失败后可继续', async () => {
+test('配方文件所有权：延迟读取、选择路径和确认不污染其他标签，取消或失败后可继续', async () => {
   const deferred = () => {
     let resolve;
     let reject;
@@ -768,6 +775,151 @@ test('配方导入所有权：延迟读取、选文件和重名确认不污染�
       assert.deepEqual(r().set.recipes, []);
       assert.equal(r().current, null);
       assert.equal(g().dirty, false);
+    } finally {
+      stop();
+      setDialogs(undefined);
+      setTransport({ kind: 'static' });
+    }
+  }
+  {
+    const writes = [];
+    const stop = arrange(async () => text);
+    const addShared = (origin) =>
+      assert.equal(
+        g().addImportedRecipe({
+          id: `shared-${origin}`,
+          name: 'Shared',
+          values: { origin },
+          graph: null,
+          updatedAt: null,
+        }),
+        true,
+      );
+    try {
+      addShared('A');
+      assert.equal(await switchTab('b'), true);
+      resetRecipes('B.recipes', 'ready');
+      addShared('B');
+      assert.equal(await switchTab('a'), true);
+      setTransport({
+        kind: 'static',
+        writeRecipeFile: async (path, value) => {
+          writes.push([path, value]);
+        },
+      });
+      for (const result of ['resolve', 'reject']) {
+        const picker = deferred();
+        setDialogs({ ...browserDialogs, pickRecipePath: () => picker.promise });
+        const pending = exportRecipeInteractive('Shared');
+        assert.equal(await switchTab('b'), true);
+        const untouched = r().set;
+        if (result === 'resolve') picker.resolve('A-output.lyflow-recipe.json');
+        else picker.reject(new Error('native picker failed'));
+        await tick();
+        assert.equal(useModalStore.getState().current, null, '过期导出不在新标签弹路径输入框');
+        assert.equal(await pending, false);
+        assert.deepEqual(writes, [], '不能把新标签的同名配方写进旧标签选择的文件');
+        assert.equal(r().set, untouched);
+        assert.equal(await switchTab('a'), true);
+      }
+      const replacementPicker = deferred();
+      setDialogs({ ...browserDialogs, pickRecipePath: () => replacementPicker.promise });
+      const replaced = exportRecipeInteractive('Shared');
+      g().loadDoc(structuredClone(g().doc), g().filePath);
+      resetRecipes('A.recipes', 'ready');
+      addShared('Reloaded');
+      replacementPicker.resolve('before-reload.lyflow-recipe.json');
+      assert.equal(await replaced, false, '同ID同路径重新加载文档也使旧导出失效');
+      assert.deepEqual(writes, []);
+      setDialogs(browserDialogs);
+      const pending = exportRecipeInteractive('Shared');
+      assert.equal(useModalStore.getState().current?.kind, 'text');
+      settleModal({ value: 'manual-output.lyflow-recipe.json', checked: false });
+      const switched = switchTab('b');
+      assert.equal(await pending, false);
+      assert.equal(await switched, true);
+      assert.deepEqual(writes, []);
+    } finally {
+      settleModal(null);
+      stop();
+      setDialogs(undefined);
+      setTransport({ kind: 'static' });
+    }
+  }
+  {
+    const writes = [];
+    let gate = deferred();
+    const stop = arrange(async () => text);
+    try {
+      assert.equal(
+        g().addImportedRecipe({
+          id: 'shared-a',
+          name: 'Shared',
+          values: { origin: 'A' },
+          graph: null,
+          updatedAt: null,
+        }),
+        true,
+      );
+      setTransport({
+        kind: 'static',
+        writeRecipeFile: async (path, value) => {
+          writes.push([path, JSON.parse(value)]);
+          await gate.promise;
+        },
+      });
+      const direct = exportRecipeTo('Shared', 'direct-output.lyflow-recipe.json');
+      assert.equal(writes.length, 1);
+      assert.equal(await switchTab('b'), true);
+      resetRecipes('B.recipes', 'ready');
+      assert.equal(
+        g().addImportedRecipe({
+          id: 'shared-b',
+          name: 'Shared',
+          values: { origin: 'B' },
+          graph: null,
+          updatedAt: null,
+        }),
+        true,
+      );
+      gate.resolve();
+      await direct;
+      assert.deepEqual(writes[0][1].values, { origin: 'A' });
+      assert.equal(writes[0][1].graph.id, 'a', '直接导出在等待写入前已捕获原图和原配方');
+      assert.equal(await switchTab('a'), true);
+      setDialogs({
+        ...browserDialogs,
+        pickRecipePath: async () => 'pending-output.lyflow-recipe.json',
+      });
+      gate = deferred();
+      const pending = exportRecipeInteractive('Shared');
+      await tick();
+      assert.equal(writes.length, 2);
+      assert.equal(await switchTab('b'), true);
+      useUiStore.setState({ toast: null });
+      gate.reject(new Error('write failed'));
+      assert.equal(await pending, false);
+      assert.equal(useUiStore.getState().toast, null, '不把旧标签的写入错误提示到新标签');
+      assert.deepEqual(writes[1][1].values, { origin: 'A' });
+      assert.equal(await switchTab('a'), true);
+      const before = { doc: g().doc, set: r().set, saved: r().saved, current: r().current };
+      setTransport({
+        kind: 'static',
+        writeRecipeFile: async (path, value) => {
+          writes.push([path, JSON.parse(value)]);
+        },
+      });
+      assert.equal(await exportRecipeInteractive('Shared'), true);
+      assert.deepEqual(writes[2][1].values, { origin: 'A' });
+      assert.equal(writes[2][1].graph.id, 'a');
+      assert.equal(g().doc, before.doc);
+      assert.equal(r().set, before.set);
+      assert.equal(r().saved, before.saved);
+      assert.equal(r().current, before.current);
+      setDialogs({ ...browserDialogs, pickRecipePath: async () => null });
+      assert.equal(await exportRecipeInteractive('Shared'), false);
+      assert.equal(writes.length, 3);
+      assert.equal(await switchTab('b'), true);
     } finally {
       stop();
       setDialogs(undefined);
