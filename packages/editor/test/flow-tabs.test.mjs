@@ -3,12 +3,16 @@ import { test } from 'node:test';
 
 import { settleModal, useModalStore } from '../src/lib/modal.ts';
 import { registerViewportHandle } from '../src/lib/viewportHandle.ts';
+import { listGraphNodes, searchGraphNodes } from '../src/lib/findNodes.ts';
+import { verdictTally, worstTone } from '../src/lib/outputs.ts';
+import { runReadingsOf } from '../src/lib/runHistory.ts';
 import { useGraphStore } from '../src/store/graph.ts';
 import { resetRecipes, selectRecipe, useRecipeStore } from '../src/store/recipe.ts';
 import { loadRecipesFor, invalidateRecipeLoad } from '../src/store/recipeFiles.ts';
 import {
   executionBusy,
   invalidateExecutionRequests,
+  judgedNodesOf,
   startRun,
   useExecutionStore,
 } from '../src/store/execution.ts';
@@ -85,7 +89,7 @@ function addBlank(options) {
   return useFlowTabsStore.getState().activeId;
 }
 
-test('工作流会话快照：引用身份、撤销/配方/视口与全局偏好，路径去重及备份保存基线', async () => {
+test('工作流会话快照：引用身份、正式判定、撤销/配方/视口与全局偏好，路径去重及备份保存基线', async () => {
   {
     const stop = fresh();
     let viewport = { x: 13, y: 24, zoom: 0.8 };
@@ -171,6 +175,120 @@ test('工作流会话快照：引用身份、撤销/配方/视口与全局偏好
     } finally {
       stop();
       registerViewportHandle(null);
+    }
+  }
+  {
+    const a = doc('a');
+    a.nodes.push({ id: 'm', op: 'gen.synthetic', params: {} });
+    const stop = fresh([
+      { id: 'a', doc: a, filePath: 'C:/flows/A.lyflow.json', dirty: false },
+      { id: 'b', doc: doc('b'), filePath: 'C:/flows/B.lyflow.json', dirty: false },
+    ]);
+    const finish = (runId, verdicts, preview = false) => {
+      const execution = useExecutionStore.getState();
+      execution.beginRun(runId, [], preview);
+      let seq = 0;
+      const emit = (event) =>
+        execution.apply({ schemaVersion: 1, runId, at: '', seq: seq++, ...event });
+      emit({
+        kind: 'run_started',
+        mode: preview ? 'preview' : 'full',
+        plan: Object.keys(verdicts),
+      });
+      for (const [nodeId, verdict] of Object.entries(verdicts)) {
+        emit({
+          kind: 'node_state',
+          nodeId,
+          state: 'done',
+          stats: {
+            outputs: [
+              {
+                port: 'value',
+                type: 'Measurement',
+                value: { kind: 'Measurement', value: 1, unit: 'mm', verdict },
+              },
+            ],
+          },
+        });
+      }
+      emit({ kind: 'run_finished', status: 'ok', durationMs: 1 });
+      return useExecutionStore.getState().nodes;
+    };
+    const seen = [];
+    const off = useExecutionStore.subscribe((state) => seen.push(judgedNodesOf(state)));
+    try {
+      finish('formal-a', { n: 'high', m: 'margin' });
+      const formalA = useExecutionStore.getState().nodes;
+      off();
+      const previewA = finish('preview-a', { n: 'ok', m: 'ok' }, true);
+      assert.equal(
+        judgedNodesOf(useExecutionStore.getState()),
+        formalA,
+        '预览即使没有渲染订阅也保留正式结果',
+      );
+      const observe = useExecutionStore.subscribe((state) => seen.push(judgedNodesOf(state)));
+      try {
+        assert.equal(await switchTab('b'), true);
+        assert.equal(
+          judgedNodesOf(useExecutionStore.getState()).size,
+          0,
+          '从文档恢复的新tab没有旧判定',
+        );
+        const formalB = finish('formal-b', { n: 'ok' });
+        assert.equal(judgedNodesOf(useExecutionStore.getState()), formalB);
+        assert.equal(await switchTab('a'), true);
+        assert.equal(useExecutionStore.getState().nodes, previewA);
+        assert.equal(useExecutionStore.getState().preview, true);
+        assert.equal(seen.at(-1), formalA, 'store订阅在恢复预览快照时立即收到该tab的正式判定');
+        const restored = judgedNodesOf(useExecutionStore.getState());
+        assert.equal(restored, formalA);
+        assert.deepEqual(verdictTally(runReadingsOf(restored)), {
+          ng: 1,
+          margin: 1,
+          ok: 0,
+          unmeasured: 0,
+        });
+        const entries = listGraphNodes(g().doc, new Map());
+        const ids = (query) =>
+          searchGraphNodes(entries, query, undefined, (id) =>
+            worstTone(restored.get(id)?.stats?.outputs),
+          ).map((hit) => hit.entry.id);
+        assert.deepEqual(ids('is:ng'), ['n']);
+        assert.deepEqual(ids('is:margin'), ['m']);
+        useExecutionStore.getState().apply({
+          schemaVersion: 1,
+          runId: 'formal-b',
+          at: '',
+          seq: 50,
+          kind: 'log',
+          level: 'info',
+          message: 'late',
+        });
+        assert.equal(
+          judgedNodesOf(useExecutionStore.getState()),
+          formalA,
+          '其他tab迟到事件不覆盖判定',
+        );
+        const blank = addBlank();
+        assert.equal(judgedNodesOf(useExecutionStore.getState()).size, 0, '新建tab清空正式判定');
+        assert.equal(await switchTab('b'), true);
+        assert.equal(judgedNodesOf(useExecutionStore.getState()), formalB, 'B保留自己的正式判定');
+        assert.equal(await switchTab('a'), true);
+        assert.equal(judgedNodesOf(useExecutionStore.getState()), formalA);
+        assert.equal(
+          getFlowSnapshots().tabs.find((tab) => tab.id === 'a').snapshot.judgedNodes,
+          formalA,
+        );
+        assert.equal(await switchTab(blank), true);
+        assert.equal(judgedNodesOf(useExecutionStore.getState()).size, 0);
+        useExecutionStore.getState().reset();
+        assert.equal(judgedNodesOf(useExecutionStore.getState()).size, 0);
+      } finally {
+        observe();
+      }
+    } finally {
+      off();
+      stop();
     }
   }
   {

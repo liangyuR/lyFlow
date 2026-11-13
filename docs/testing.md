@@ -43,7 +43,7 @@ pnpm e2e
 |---|---|---|---|
 | C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 186 例；`LYFLOW_PACKS=dts` 194 例；`LYFLOW_PACKS=gap;dts` 276 例；`LYFLOW_PACKS=gap` 280 例（2026-10-12 实测，含相切带新增的 1 例；另外三种构建这次没重跑） | 分钟级（含编译） |
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 154（纯平台构建 95 通过 / 59 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
-| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 91（24 个文件，包含工作区与 PythonNode 契约，全部执行） | 秒级 |
+| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 94（24 个文件，包含工作区与 PythonNode 契约，全部执行） | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 35（2026-10-08） | 秒级 |
 | 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 971 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 34 条断言（精简前 58） | 几分钟 |

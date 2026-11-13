@@ -206,6 +206,14 @@ export function useJudgedNodes(): ReadonlyMap<string, NodeExecution> {
   return useExecutionStore(judgedNodesOf);
 }
 
+export function restoreExecutionState(
+  state: Partial<ExecutionState>,
+  formalNodes: ReadonlyMap<string, NodeExecution>,
+): void {
+  judgedNodes = formalNodes;
+  useExecutionStore.setState(state);
+}
+
 export const useExecutionStore = create<ExecutionState>((set, get) => ({
   runId: null,
   resultRunId: null,
@@ -227,6 +235,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   request: null,
 
   beginRun(runId, targets, preview, isolate = [], request = null) {
+    judgedNodesOf(get());
     const claimed = get()
       .orphans.filter((e) => e.runId === runId)
       .sort((a, b) => a.seq - b.seq);
@@ -445,6 +454,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   reset() {
     dropStaged();
     notReady = [];
+    judgedNodes = new Map();
     set({
       runId: null,
       resultRunId: null,

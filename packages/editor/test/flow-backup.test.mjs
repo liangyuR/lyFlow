@@ -2,8 +2,136 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { clearFlowBackup, readFlowBackup, writeFlowBackup } from '../src/lib/flowBackup.ts';
+import { subscribeDocChanges, watchInitialWorkspace } from '../src/lib/flowSession.ts';
+import { useGraphStore } from '../src/store/graph.ts';
+import { useRecipeStore, resetRecipes } from '../src/store/recipe.ts';
+import { useUiStore } from '../src/store/ui.ts';
+import { useExecutionStore } from '../src/store/execution.ts';
+import { invalidateRecipeLoad } from '../src/store/recipeFiles.ts';
+import {
+  closeTab,
+  getFlowSnapshots,
+  prepareNewTab,
+  restoreFlowDocuments,
+  startFlowTabs,
+  useFlowTabsStore,
+} from '../src/store/flowTabs.ts';
+import { settleModal } from '../src/lib/modal.ts';
+import { setTransport, StaticTransport } from '../src/transport/index.ts';
 
 const emptyRecipes = () => ({ recipes: [], defaultName: null });
+
+function blankSession() {
+  setTransport(new StaticTransport());
+  invalidateRecipeLoad();
+  useExecutionStore.getState().reset();
+  useUiStore.setState({ previewing: false, autoRun: false });
+  settleModal(null);
+  resetRecipes(null, 'none');
+  const doc = { schemaVersion: 1, id: 'initial', name: '未命名', nodes: [], edges: [] };
+  assert.equal(
+    restoreFlowDocuments({
+      activeId: 'initial-tab',
+      tabs: [{ id: 'initial-tab', doc, filePath: null, dirty: false }],
+    }),
+    true,
+  );
+  return startFlowTabs();
+}
+
+test('宿主通知：复用空标签打开文档仅在提交完成后通知，取消不通知且订阅可清理', () => {
+  const stopTabs = blankSession();
+  const events = [];
+  const stop = subscribeDocChanges((doc, dirty) => events.push({ doc, dirty }));
+  try {
+    const initialId = useFlowTabsStore.getState().activeId;
+    const opened = { schemaVersion: 1, id: 'opened', name: '打开的文件', nodes: [], edges: [] };
+    const change = prepareNewTab({ reuseEmpty: true });
+    assert.ok(change);
+    useGraphStore.getState().loadDoc(opened, 'C:/flows/opened.lyflow.json');
+    assert.equal(events.length, 0);
+    change.commit();
+    assert.equal(useFlowTabsStore.getState().activeId, initialId);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].doc, opened);
+    assert.equal(events[0].dirty, false);
+    const next = prepareNewTab();
+    useGraphStore.getState().newDoc();
+    assert.equal(events.length, 1);
+    next.cancel();
+    assert.equal(events.length, 1);
+    const recipe = useRecipeStore.getState();
+    useRecipeStore.setState({ set: { ...recipe.set } });
+    assert.equal(events.at(-1).dirty, true);
+    useRecipeStore.setState({ saved: useRecipeStore.getState().set });
+    assert.equal(events.at(-1).dirty, false);
+    const count = events.length;
+    stop();
+    useGraphStore.getState().newDoc();
+    assert.equal(events.length, count);
+  } finally {
+    stop();
+    stopTabs();
+  }
+});
+
+test('启动恢复：仅允许未触碰的初始单标签，延迟备份不能覆盖其他标签的未保存内容', async () => {
+  let stopTabs = blankSession();
+  let guard = watchInitialWorkspace();
+  try {
+    assert.equal(guard.unchanged(), true);
+    resetRecipes(null, 'none');
+    assert.equal(guard.unchanged(), true);
+    let resolve;
+    const delayed = new Promise((done) => {
+      resolve = done;
+    });
+    const decision = delayed.then(() => guard.unchanged());
+    const edited = {
+      ...useGraphStore.getState().doc,
+      nodes: [{ id: 'unsaved', op: 'util.reroute' }],
+    };
+    useGraphStore.setState({ doc: edited, dirty: true });
+    const change = prepareNewTab();
+    useGraphStore.getState().newDoc();
+    change.commit();
+    assert.equal(useGraphStore.getState().dirty, false);
+    assert.equal(useGraphStore.getState().doc.nodes.length, 0);
+    resolve();
+    assert.equal(await decision, false);
+    const workspace = getFlowSnapshots();
+    assert.equal(workspace.tabs.length, 2);
+    assert.equal(workspace.tabs.find((tab) => tab.id === 'initial-tab').snapshot.graph.doc, edited);
+    assert.equal(workspace.tabs.find((tab) => tab.id === 'initial-tab').snapshot.graph.dirty, true);
+  } finally {
+    guard.stop();
+    stopTabs();
+  }
+  stopTabs = blankSession();
+  guard = watchInitialWorkspace();
+  try {
+    const change = prepareNewTab();
+    useGraphStore.getState().newDoc();
+    change.commit();
+    await closeTab(useFlowTabsStore.getState().activeId);
+    assert.equal(useFlowTabsStore.getState().tabs.length, 1);
+    assert.equal(useFlowTabsStore.getState().activeId, 'initial-tab');
+    assert.equal(guard.unchanged(), false);
+  } finally {
+    guard.stop();
+    stopTabs();
+  }
+  stopTabs = blankSession();
+  guard = watchInitialWorkspace();
+  try {
+    useRecipeStore.setState({ set: { ...useRecipeStore.getState().set } });
+    useRecipeStore.setState({ saved: useRecipeStore.getState().set });
+    assert.equal(guard.unchanged(), false);
+  } finally {
+    guard.stop();
+    stopTabs();
+  }
+});
 
 function workspace() {
   const tab = (id, filePath) => ({

@@ -11,7 +11,10 @@ import {
   blockExecution,
   executionBusy,
   invalidateExecutionRequests,
+  judgedNodesOf,
+  restoreExecutionState,
   useExecutionStore,
+  type NodeExecution,
 } from './execution';
 import { useGraphStore } from './graph';
 import { usePeekStore } from './peek';
@@ -58,6 +61,7 @@ export interface FlowSnapshot {
   recipe: FlowRecipeSnapshot;
   ui: DocumentUi;
   execution: Data<ReturnType<typeof useExecutionStore.getState>>;
+  judgedNodes: ReadonlyMap<string, NodeExecution>;
   cache: Pick<ReturnType<typeof useCacheStore.getState>, 'plan' | 'ranWith' | 'unavailable'>;
   history: Data<ReturnType<typeof useRunHistoryStore.getState>>;
   validation: Data<ReturnType<typeof useValidationStore.getState>>;
@@ -152,6 +156,7 @@ function capture(): FlowSnapshot {
     recipe: useRecipeStore.getState(),
     ui: documentUi(useUiStore.getState()),
     execution: dataOnly(useExecutionStore.getState()),
+    judgedNodes: judgedNodesOf(useExecutionStore.getState()),
     cache: { plan, ranWith, unavailable },
     history: dataOnly(useRunHistoryStore.getState()),
     validation: dataOnly(useValidationStore.getState()),
@@ -326,7 +331,10 @@ function restore(id: string): void {
     useGraphStore.setState({ ...snapshot.graph, ...history, epoch: graph.epoch + 1 });
     useUiStore.setState(snapshot.ui);
     useCacheStore.setState(snapshot.cache);
-    useExecutionStore.setState({ ...snapshot.execution, orphans: [], cancelling: false });
+    restoreExecutionState(
+      { ...snapshot.execution, orphans: [], cancelling: false },
+      snapshot.judgedNodes,
+    );
     useRunHistoryStore.setState(snapshot.history);
     useValidationStore.setState(snapshot.validation);
     usePeekStore.setState(snapshot.peek);
@@ -594,6 +602,7 @@ export function restoreFlowDocuments(payload: { activeId: string; tabs: FlowDocu
       recipe,
       ui: documentUi(useUiStore.getInitialState()),
       execution: dataOnly(useExecutionStore.getInitialState()),
+      judgedNodes: new Map(),
       cache: { plan: new Map(), ranWith: new Map(), unavailable: false },
       history: dataOnly(useRunHistoryStore.getInitialState()),
       validation: dataOnly(useValidationStore.getInitialState()),

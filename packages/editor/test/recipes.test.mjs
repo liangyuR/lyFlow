@@ -33,6 +33,13 @@ import {
   useRecipeStore,
 } from '../src/store/recipe.ts';
 import { useUiStore } from '../src/store/ui.ts';
+import { setDialogs, browserDialogs } from '../src/lib/dialogs.ts';
+import { settleModal, useModalStore } from '../src/lib/modal.ts';
+import { importRecipeInteractive } from '../src/components/recipeActions.ts';
+import { importRecipeFrom, invalidateRecipeLoad } from '../src/store/recipeFiles.ts';
+import { restoreFlowDocuments, startFlowTabs, switchTab } from '../src/store/flowTabs.ts';
+import { useExecutionStore } from '../src/store/execution.ts';
+import { setTransport } from '../src/transport/index.ts';
 
 const root = new URL('../../../', import.meta.url);
 const readText = (rel) => readFileSync(new URL(rel, root), 'utf8');
@@ -595,4 +602,176 @@ test('配方参数事务：拖动合并、图参数改名与失配阻断及修�
     ],
     setup,
   );
+});
+
+test('配方导入所有权：延迟读取、选文件和重名确认不污染其他标签，取消或失败后可继续', async () => {
+  const deferred = () => {
+    let resolve;
+    let reject;
+    const promise = new Promise((done, fail) => {
+      resolve = done;
+      reject = fail;
+    });
+    return { promise, resolve, reject };
+  };
+  const tick = () => new Promise((resolve) => setImmediate(resolve));
+  const text = serializeRecipe(
+    { id: 'imported', name: 'Imported', values: {}, graph: null, updatedAt: null },
+    example,
+  );
+  function arrange(readRecipeFile) {
+    settleModal(null);
+    setDialogs(undefined);
+    setTransport({ kind: 'static', readRecipeFile });
+    invalidateRecipeLoad();
+    useExecutionStore.getState().reset();
+    useUiStore.setState({ previewing: false, path: [], autoRun: false });
+    assert.equal(
+      restoreFlowDocuments({
+        activeId: 'a',
+        tabs: [
+          {
+            id: 'a',
+            doc: { ...structuredClone(example), id: 'a' },
+            filePath: 'A.lyflow.json',
+            dirty: false,
+          },
+          {
+            id: 'b',
+            doc: { ...structuredClone(example), id: 'b' },
+            filePath: 'B.lyflow.json',
+            dirty: false,
+          },
+        ],
+      }),
+      true,
+    );
+    resetRecipes('A.recipes', 'ready');
+    return startFlowTabs();
+  }
+  {
+    const gate = deferred();
+    const stop = arrange(() => gate.promise);
+    try {
+      const pending = importRecipeFrom('external.lyflow-recipe.json');
+      await tick();
+      assert.equal(await switchTab('b'), true);
+      const untouched = r().set;
+      gate.resolve(text);
+      assert.equal(await pending, null);
+      assert.equal(r().set, untouched);
+      assert.equal(g().dirty, false);
+      assert.equal(await switchTab('a'), true);
+      assert.deepEqual(r().set.recipes, []);
+      const returning = deferred();
+      setTransport({ kind: 'static', readRecipeFile: () => returning.promise });
+      const second = importRecipeFrom('external.lyflow-recipe.json');
+      await tick();
+      assert.equal(await switchTab('b'), true);
+      assert.equal(await switchTab('a'), true);
+      returning.resolve(text);
+      assert.equal(await second, null, '切走再回原标签也使旧导入失效');
+      assert.deepEqual(r().set.recipes, []);
+      const changedHost = deferred();
+      setTransport({ kind: 'static', readRecipeFile: () => changedHost.promise });
+      const third = importRecipeFrom('external.lyflow-recipe.json');
+      await tick();
+      setTransport({ kind: 'static', readRecipeFile: async () => text });
+      changedHost.resolve(text);
+      assert.equal(await third, null, '宿主改变时丢弃旧后端返回的配方');
+      assert.deepEqual(r().set.recipes, []);
+    } finally {
+      stop();
+    }
+  }
+  {
+    const picker = deferred();
+    const stop = arrange(async () => text);
+    setDialogs({ ...browserDialogs, pickRecipePath: () => picker.promise });
+    try {
+      const pending = importRecipeInteractive();
+      assert.equal(await switchTab('b'), true);
+      picker.reject(new Error('native picker failed'));
+      await tick();
+      assert.equal(useModalStore.getState().current, null, '切换后不在新标签弹出旧操作的输入框');
+      assert.equal(await pending, null);
+      assert.deepEqual(r().set.recipes, []);
+    } finally {
+      settleModal(null);
+      stop();
+      setDialogs(undefined);
+    }
+  }
+  {
+    let reads = 0;
+    const picker = deferred();
+    const stop = arrange(async () => {
+      reads += 1;
+      return text;
+    });
+    setDialogs({ ...browserDialogs, pickRecipePath: () => picker.promise });
+    try {
+      const pending = importRecipeInteractive();
+      assert.equal(await switchTab('b'), true);
+      picker.resolve('external.lyflow-recipe.json');
+      assert.equal(await pending, null);
+      assert.equal(reads, 0, '文件选择等待期间已切标签，不再发起导入');
+      assert.deepEqual(r().set.recipes, []);
+      assert.equal(r().current, null);
+    } finally {
+      stop();
+      setDialogs(undefined);
+    }
+  }
+  {
+    const stop = arrange(async () => text);
+    try {
+      assert.equal(g().createRecipe('Imported'), true);
+      const pending = importRecipeFrom('external.lyflow-recipe.json');
+      await tick();
+      assert.equal(useModalStore.getState().current?.kind, 'text');
+      settleModal({ value: 'Renamed', checked: false });
+      const switched = switchTab('b');
+      assert.equal(await pending, null);
+      assert.equal(await switched, true);
+      assert.deepEqual(r().set.recipes, []);
+      assert.equal(await switchTab('a'), true);
+      assert.deepEqual(
+        r().set.recipes.map((entry) => entry.name),
+        ['Imported'],
+      );
+    } finally {
+      settleModal(null);
+      stop();
+    }
+  }
+  {
+    const stop = arrange(async () => {
+      throw new Error('read failed');
+    });
+    try {
+      await assert.rejects(importRecipeFrom('broken.lyflow-recipe.json'), /read failed/);
+      assert.equal(await switchTab('b'), true);
+      assert.equal(await switchTab('a'), true);
+      setDialogs({ ...browserDialogs, pickRecipePath: async () => null });
+      assert.equal(await importRecipeInteractive(), null);
+      setTransport({ kind: 'static', readRecipeFile: async () => text });
+      setDialogs({ ...browserDialogs, pickRecipePath: async () => 'external.lyflow-recipe.json' });
+      assert.equal(await importRecipeInteractive(), 'Imported');
+      assert.equal(r().current, 'Imported');
+      assert.deepEqual(
+        r().set.recipes.map((entry) => entry.name),
+        ['Imported'],
+      );
+      assert.equal(recipesDirty(), true);
+      assert.equal(await switchTab('b'), true);
+      assert.deepEqual(r().set.recipes, []);
+      assert.equal(r().current, null);
+      assert.equal(g().dirty, false);
+    } finally {
+      stop();
+      setDialogs(undefined);
+      setTransport({ kind: 'static' });
+    }
+  }
 });

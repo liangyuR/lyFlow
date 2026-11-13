@@ -39,6 +39,7 @@ import {
   deferWorkspaceBackups,
 } from './lib/workspaceRecovery';
 import { clearFlowBackup } from './lib/flowBackup';
+import { subscribeDocChanges, watchInitialWorkspace } from './lib/flowSession';
 import {
   startFlowTabs,
   useFlowTabsStore,
@@ -76,7 +77,7 @@ import {
 } from './store/execution';
 import { onCommitted, useGraphStore } from './store/graph';
 import { useManifestStore } from './store/manifest';
-import { recipesDirty, useRecipeStore } from './store/recipe';
+import { useRecipeStore } from './store/recipe';
 import { followGraphPath, loadRecipesFor, restoreRecipeAutosave } from './store/recipeFiles';
 import { useUiStore } from './store/ui';
 import { scheduleValidate } from './store/validation';
@@ -326,12 +327,10 @@ function Workspace({
   useEffect(() => {
     if (manifestStatus !== 'ready' || offeredUntitled.current) return;
     offeredUntitled.current = true;
+    const initial = watchInitialWorkspace();
     void (async () => {
       let deferred = false;
-      const blank = () => {
-        const g = useGraphStore.getState();
-        return !g.filePath && !g.dirty && g.doc.nodes.length === 0;
-      };
+      const blank = initial.unchanged;
       try {
         const workspace = await readWorkspaceBackup();
         if (workspace && blank()) {
@@ -344,7 +343,13 @@ function Workspace({
               { id: 'cancel', label: '稍后' },
             ],
           });
-          if (answer === 'restore' && blank()) restoreWorkspaceBackup(workspace);
+          if (answer === 'restore') {
+            if (blank()) restoreWorkspaceBackup(workspace);
+            else {
+              deferred = true;
+              deferWorkspaceBackups();
+            }
+          }
           if (answer === 'discard') {
             await clearFlowBackup();
             await discardUntitledBackup();
@@ -372,6 +377,7 @@ function Workspace({
           .getState()
           .showToast(`已恢复上次没存的图（${backup.loaded.doc.nodes.length} 个节点），记得保存`);
       } finally {
+        initial.stop();
         backupReady.current = !deferred;
       }
     })();
@@ -660,27 +666,7 @@ function Workspace({
   // doc 变化推给宿主。dirty 是图与配方合并的（K6 ③）：只改了配方也算有没存的改动
   useEffect(() => {
     if (!onDocChange) return;
-    const stopGraph = useGraphStore.subscribe((state, prev) => {
-      if (isRestoringFlow()) return;
-      if (state.doc === prev.doc && state.dirty === prev.dirty) return;
-      onDocChange(state.doc, state.dirty || recipesDirty());
-    });
-    const stopRecipes = useRecipeStore.subscribe((state, prev) => {
-      if (isRestoringFlow()) return;
-      if ((state.set !== state.saved) === (prev.set !== prev.saved)) return;
-      const g = useGraphStore.getState();
-      onDocChange(g.doc, g.dirty || state.set !== state.saved);
-    });
-    const stopTabs = useFlowTabsStore.subscribe((state, prev) => {
-      if (state.activeId === prev.activeId) return;
-      const graph = useGraphStore.getState();
-      onDocChange(graph.doc, graph.dirty || recipesDirty());
-    });
-    return () => {
-      stopGraph();
-      stopRecipes();
-      stopTabs();
-    };
+    return subscribeDocChanges(onDocChange);
   }, [onDocChange]);
 
   // 关动效时 CSS 那一半靠根上的 lyflow-motion-off（系统设置另有 @media 兜底，见 styles.motion.css）

@@ -6,7 +6,7 @@ import { askChoice, askText } from '../lib/modal';
 import { recipeFileName, recipeNameProblem, uniqueRecipeName } from '../lib/recipes';
 import { useGraphStore } from '../store/graph';
 import { recipeSet, selectRecipe, useRecipeStore } from '../store/recipe';
-import { exportRecipeTo, importRecipeFrom } from '../store/recipeFiles';
+import { exportRecipeTo, importRecipeFrom, recipeImportOwner } from '../store/recipeFiles';
 import { useUiStore } from '../store/ui';
 
 const toast = (text: string, kind: 'info' | 'warn' = 'info') =>
@@ -82,7 +82,11 @@ export async function deleteRecipeInteractive(name: string): Promise<boolean> {
 
 /** 选一个文件：宿主给了配方专用的就用它，其次通用的 pickPath，都没有就在编辑器里输路径
  *  （HTTP 宿主：工作区里的相对路径）。 */
-async function pickFile(mode: 'open' | 'save', suggested: string): Promise<string | null> {
+async function pickFile(
+  mode: 'open' | 'save',
+  suggested: string,
+  owns: () => boolean = () => true,
+): Promise<string | null> {
   const d = dialogs();
   try {
     if (d.pickRecipePath) return await d.pickRecipePath(mode, suggested);
@@ -96,6 +100,7 @@ async function pickFile(mode: 'open' | 'save', suggested: string): Promise<strin
   } catch {
     /* 宿主的对话框用不了（比如不在 Tauri 里）：退回输路径 */
   }
+  if (!owns()) return null;
   const answer = await askText({
     title: mode === 'open' ? '导入配方：文件路径' : '导出配方：存到哪里',
     message:
@@ -111,17 +116,19 @@ async function pickFile(mode: 'open' | 'save', suggested: string): Promise<strin
 
 export async function importRecipeInteractive(): Promise<string | null> {
   if (!needDir()) return null;
-  const path = await pickFile('open', '');
-  if (!path) return null;
+  const owns = recipeImportOwner();
+  const path = await pickFile('open', '', owns);
+  if (!path || !owns()) return null;
   try {
     const name = await importRecipeFrom(path);
+    if (!owns()) return null;
     if (name) {
       selectRecipe(name);
       toast(`已导入配方 ${name}（Ctrl+S 写进配方目录）`);
     }
     return name;
   } catch (e) {
-    toast(e instanceof Error ? e.message : String(e), 'warn');
+    if (owns()) toast(e instanceof Error ? e.message : String(e), 'warn');
     return null;
   }
 }

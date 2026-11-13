@@ -23,7 +23,7 @@ import {
   type RecipeEntry,
   type RecipeSet,
 } from '../lib/recipes';
-import { transport } from '../transport';
+import { activeTransport, transport } from '../transport';
 import type { GraphDoc } from '../types/graph';
 import { rebaseHistoryRecipes, useGraphStore } from './graph';
 import { applyRecipeSet, recipeSet, resetRecipes, selectRecipe, useRecipeStore } from './recipe';
@@ -478,9 +478,28 @@ export async function readRecipeForImport(path: string): Promise<RecipeEntry> {
   return entryFromParsed(parsed);
 }
 
+export function recipeImportOwner(): () => boolean {
+  const ticket = loadTicket;
+  const { doc, filePath } = useGraphStore.getState();
+  const host = activeTransport();
+  return () => {
+    const current = useGraphStore.getState();
+    return (
+      ticket === loadTicket &&
+      host === activeTransport() &&
+      current.doc.id === doc.id &&
+      current.filePath === filePath
+    );
+  };
+}
+
 /** 导入：复制进配方目录（存盘时写），重名时让用户改名（P3.6）。返回最终的名字；取消返回 null。 */
 export async function importRecipeFrom(path: string, name?: string): Promise<string | null> {
+  const owns = recipeImportOwner();
+  await loading;
+  if (!owns()) return null;
   const entry = await readRecipeForImport(path);
+  if (!owns()) return null;
   let final = name ?? entry.name;
   const problem = recipeNameProblem(recipeSet(), final);
   if (problem) {
@@ -491,7 +510,7 @@ export async function importRecipeFrom(path: string, name?: string): Promise<str
       okLabel: '导入',
       validate: (v) => recipeNameProblem(recipeSet(), v),
     });
-    if (!answer) return null;
+    if (!answer || !owns()) return null;
     final = answer.value;
   }
   const ok = useGraphStore.getState().addImportedRecipe({ ...entry, name: final });
