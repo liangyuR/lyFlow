@@ -2042,6 +2042,30 @@ async function suitePanels(cdp, report, ws) {
     ],
     [{ from: ["gen", "cloud"], to: ["voxel", "cloud"] }],
   );
+  await cdp.eval(`
+    const b=window.__lyflow, g=b.stores.graph.getState(), ui=b.stores.ui.getState();
+    window.__navigationLockBefore={doc:g.doc,past:g.past,future:g.future,locked:g.topologyLocked,ui:{paramPanel:ui.paramPanel,drawer:ui.drawer,helpOpen:ui.helpOpen,viewerMaximized:ui.viewerMaximized}};
+    b.stores.ui.setState({paramPanel:{...ui.paramPanel,open:false,maximized:false},drawer:null,helpOpen:false,viewerMaximized:false});
+    g.setTopologyLocked(true);
+    return true;
+  `);
+  try {
+    await cdp.waitFor(`!document.querySelector('[data-testid="nav-nodes"], [data-testid="nav-flows"]')`, { what: "拓扑锁隐藏结构入口" });
+    report.ok("拓扑锁宿主隐藏节点/工作流入口，参数、日志、帮助导航仍可见",
+      await cdp.eval(`return ['nav-parameters','nav-logs','nav-help'].every(id=>{const b=document.querySelector('[data-testid="'+id+'"]');return b && b.getBoundingClientRect().width>0;});`));
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="nav-parameters"]'));
+    await cdp.waitFor(`window.__lyflow.stores.ui.getState().paramPanel.open && document.querySelector('[data-testid="nav-parameters"]')?.getAttribute('aria-pressed') === 'true'`, { what: "拓扑锁下展开参数面板" });
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="nav-parameters"]'));
+    await cdp.waitFor(`!window.__lyflow.stores.ui.getState().paramPanel.open`, { what: "拓扑锁下收起参数面板" });
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="nav-logs"]'));
+    await cdp.waitFor(`window.__lyflow.stores.ui.getState().drawer === 'log' && document.querySelector('[data-testid="nav-logs"]')?.getAttribute('aria-pressed') === 'true'`, { what: "拓扑锁下展开日志" });
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="nav-logs"]'));
+    await cdp.waitFor(`window.__lyflow.stores.ui.getState().drawer === null`, { what: "拓扑锁下收起日志" });
+    report.ok("拓扑锁下参数与日志可正常切换，锁状态和文档保持不变",
+      await cdp.eval(`const g=window.__lyflow.stores.graph.getState();return g.topologyLocked && g.doc === window.__navigationLockBefore.doc;`));
+  } finally {
+    await cdp.eval(`const b=window.__lyflow,s=window.__navigationLockBefore;b.stores.graph.getState().setTopologyLocked(s.locked);b.stores.graph.setState({past:s.past,future:s.future});b.stores.ui.setState(s.ui);delete window.__navigationLockBefore;return true;`);
+  }
   // 坏参数让这次运行失败；失败本身不单独断言，下面诊断抽屉列出那条错误就是证据
   await runAndWait(cdp, () => pressF5(cdp));
 

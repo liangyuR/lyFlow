@@ -8,6 +8,7 @@ export interface NavigationRailProps {
   onHelp: () => void;
   parametersOpen: boolean;
   logsOpen: boolean;
+  workspaceVisible?: boolean;
 }
 
 export function NavigationRail({
@@ -18,6 +19,7 @@ export function NavigationRail({
   onHelp,
   parametersOpen,
   logsOpen,
+  workspaceVisible = true,
 }: NavigationRailProps) {
   return (
     <nav
@@ -25,40 +27,44 @@ export function NavigationRail({
       aria-label="工作区导航"
       data-testid="navigation-rail"
     >
-      <button
-        type="button"
-        className="item"
-        aria-current={active === 'nodes' ? 'page' : undefined}
-        aria-expanded={active === 'nodes'}
-        title={active === 'nodes' ? '收起节点面板' : '展开节点面板'}
-        onClick={() => onSelect(active === 'nodes' ? null : 'nodes')}
-        data-testid="nav-nodes"
-      >
-        <span className="pill" aria-hidden="true" />
-        <svg className="qs-ic" viewBox="0 0 24 24" aria-hidden="true">
-          <rect x="3" y="3" width="6" height="6" rx="2" />
-          <rect x="15" y="15" width="6" height="6" rx="2" />
-          <path d="M9 6h6a3 3 0 0 1 3 3v6M6 9v6a3 3 0 0 0 3 3h6" />
-        </svg>
-        <span className="lbl">节点</span>
-      </button>
-      <button
-        type="button"
-        className="item"
-        aria-current={active === 'flows' ? 'page' : undefined}
-        aria-expanded={active === 'flows'}
-        title={active === 'flows' ? '收起工作流面板' : '展开工作流面板'}
-        onClick={() => onSelect(active === 'flows' ? null : 'flows')}
-        data-testid="nav-flows"
-      >
-        <span className="pill" aria-hidden="true" />
-        <svg className="qs-ic" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M3 8V6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z" />
-          <path d="M8 12h8M8 16h5" />
-        </svg>
-        <span className="lbl">工作流</span>
-      </button>
-      <span className="grp" aria-hidden="true" />
+      {workspaceVisible && (
+        <>
+          <button
+            type="button"
+            className="item"
+            aria-current={active === 'nodes' ? 'page' : undefined}
+            aria-expanded={active === 'nodes'}
+            title={active === 'nodes' ? '收起节点面板' : '展开节点面板'}
+            onClick={() => onSelect(active === 'nodes' ? null : 'nodes')}
+            data-testid="nav-nodes"
+          >
+            <span className="pill" aria-hidden="true" />
+            <svg className="qs-ic" viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="3" width="6" height="6" rx="2" />
+              <rect x="15" y="15" width="6" height="6" rx="2" />
+              <path d="M9 6h6a3 3 0 0 1 3 3v6M6 9v6a3 3 0 0 0 3 3h6" />
+            </svg>
+            <span className="lbl">节点</span>
+          </button>
+          <button
+            type="button"
+            className="item"
+            aria-current={active === 'flows' ? 'page' : undefined}
+            aria-expanded={active === 'flows'}
+            title={active === 'flows' ? '收起工作流面板' : '展开工作流面板'}
+            onClick={() => onSelect(active === 'flows' ? null : 'flows')}
+            data-testid="nav-flows"
+          >
+            <span className="pill" aria-hidden="true" />
+            <svg className="qs-ic" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 8V6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z" />
+              <path d="M8 12h8M8 16h5" />
+            </svg>
+            <span className="lbl">工作流</span>
+          </button>
+          <span className="grp" aria-hidden="true" />
+        </>
+      )}
       <button
         type="button"
         className="item"

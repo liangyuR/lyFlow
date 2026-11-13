@@ -738,23 +738,22 @@ function Workspace({
         className={`app__body${viewerMax ? ' is-viewer-max' : panel.open && panel.maximized ? ' is-panel-max' : ''}`}
         data-viewer-max={viewerMax ? '1' : undefined}
       >
-        {!topologyLocked && (
-          <NavigationRail
-            active={navigation}
-            onSelect={(next) => {
-              if (next !== null) {
-                useUiStore.getState().setViewerMaximized(false);
-                if (panel.maximized) useUiStore.getState().setParamPanelMaximized(false);
-              }
-              setNavigation(next);
-            }}
-            parametersOpen={panel.open}
-            logsOpen={drawer !== null}
-            onParameters={() => useUiStore.getState().toggleParamPanel()}
-            onLogs={() => useUiStore.getState().toggleDrawer()}
-            onHelp={() => useUiStore.getState().setHelpOpen(true)}
-          />
-        )}
+        <NavigationRail
+          workspaceVisible={!topologyLocked}
+          active={navigation}
+          onSelect={(next) => {
+            if (next !== null) {
+              useUiStore.getState().setViewerMaximized(false);
+              if (panel.maximized) useUiStore.getState().setParamPanelMaximized(false);
+            }
+            setNavigation(next);
+          }}
+          parametersOpen={panel.open}
+          logsOpen={drawer !== null}
+          onParameters={() => useUiStore.getState().toggleParamPanel()}
+          onLogs={() => useUiStore.getState().toggleDrawer()}
+          onHelp={() => useUiStore.getState().setHelpOpen(true)}
+        />
         <aside
           className="app__sidebar qs-panel"
           style={{
