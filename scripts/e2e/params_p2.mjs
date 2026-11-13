@@ -274,7 +274,7 @@ async function suiteLayout(cdp, report) {
       return {
         panel: !!document.querySelector('[data-testid="param-panel"]'),
         inspector: !!document.querySelector('.app__inspector'),
-        pressed: document.querySelector('[data-testid="param-panel-toggle"]')?.getAttribute('aria-pressed'),
+        pressed: document.querySelector('[data-testid="nav-parameters"]')?.getAttribute('aria-pressed'),
         right: r('[data-testid="right-pane"]'),
         canvas: r('.app__canvas'),
         sidebar: r('.app__sidebar'),
@@ -291,10 +291,10 @@ async function suiteLayout(cdp, report) {
   await pressCtrlShiftP(cdp);
   d = await dom();
   report.eq("再按一次 Ctrl+Shift+P 关上，Inspector 回来", [d.panel, d.inspector], [false, true]);
-  await cdp.eval(`document.querySelector('[data-testid="param-panel-toggle"]').click(); return true;`);
+  await cdp.eval(`document.querySelector('[data-testid="nav-parameters"]').click(); return true;`);
   await sleep(200);
   d = await dom();
-  report.eq("工具栏「参数」按钮打开", [d.panel, d.inspector, d.pressed], [true, false, "true"]);
+  report.eq("左侧导航「参数」按钮打开", [d.panel, d.inspector, d.pressed], [true, false, "true"]);
   const width0 = d.right.w;
   report.ok("默认宽度比 Inspector 宽（≥ 560）", width0 >= 560, `${width0}px`);
 

@@ -43,9 +43,6 @@ type ToolbarIconName =
   | 'copy'
   | 'undo'
   | 'redo'
-  | 'layout'
-  | 'sliders'
-  | 'logs'
   | 'library'
   | 'help'
   | 'play'
@@ -80,26 +77,6 @@ function ToolbarIcon({ name }: { name: ToolbarIconName }) {
     ),
     undo: <path d="m9 5-6 6 6 6M3 11h11a7 7 0 0 1 7 7" />,
     redo: <path d="m15 5 6 6-6 6m6-6H10a7 7 0 0 0-7 7" />,
-    layout: (
-      <>
-        <rect x="3" y="3" width="7" height="7" rx="2" />
-        <rect x="14" y="14" width="7" height="7" rx="2" />
-        <path d="M14 6h7M17.5 3v7M3 17.5h7M6.5 14v7" />
-      </>
-    ),
-    sliders: (
-      <>
-        <path d="M4 7h7m4 0h5M4 17h3m4 0h9" />
-        <circle cx="13" cy="7" r="2" />
-        <circle cx="9" cy="17" r="2" />
-      </>
-    ),
-    logs: (
-      <>
-        <rect x="3" y="4" width="18" height="16" rx="3" />
-        <path d="m7 9 3 3-3 3m6 0h4" />
-      </>
-    ),
     library: (
       <>
         <path d="M4 4h4v16H4zM11 4h4v16h-4zM18 4l3 15" />
@@ -147,7 +124,6 @@ export interface ToolbarActions {
   /** 运行中点「↻ 重跑」：同样的范围再来一次。F5 照旧是运行整张图。 */
   onRerun: () => void;
   onCancel: () => void;
-  onLayout: () => void;
 }
 
 /** 最近文件下拉（最多 10 条，存在 Tauri 的 app data 里）。 */
@@ -575,24 +551,6 @@ function LibraryMenu() {
   );
 }
 
-/** 参数面板的开关（param-recipe P2.1）。开着时替代 Inspector。 */
-function ParamPanelButton() {
-  const open = useUiStore((s) => s.paramPanel.open);
-  return (
-    <button
-      type="button"
-      className={`qs-btn sm ${open ? 'tonal is-on' : 'text'}`}
-      data-testid="param-panel-toggle"
-      aria-pressed={open}
-      onClick={() => useUiStore.getState().toggleParamPanel()}
-      title={`参数面板 (${keyHint('paramPanel')})`}
-    >
-      <ToolbarIcon name="sliders" />
-      <span>参数</span>
-    </button>
-  );
-}
-
 function formatDuration(ms: number): string {
   if (ms >= 1000) return `${(ms / 1000).toFixed(2)} s`;
   return `${Math.round(ms)} ms`;
@@ -796,7 +754,6 @@ export function Toolbar({
   onRun,
   onRerun,
   onCancel,
-  onLayout,
 }: ToolbarActions) {
   // 选长度而不是调 canUndo()：函数引用不变，组件不会因为栈变化而重渲染。
   const pastLen = useGraphStore((s) => s.past.length);
@@ -906,26 +863,6 @@ export function Toolbar({
         </div>
         <span className="toolbar__divider" aria-hidden="true" />
         <div className="toolbar__group toolbar__tools" role="group" aria-label="工作区视图">
-          <button
-            className="qs-btn text sm"
-            type="button"
-            onClick={onLayout}
-            title={`整理布局 (${keyHint('layout')})`}
-          >
-            <ToolbarIcon name="layout" />
-            <span>整理</span>
-          </button>
-          <ParamPanelButton />
-          <button
-            className="qs-btn text sm"
-            type="button"
-            data-testid="drawer-toggle"
-            onClick={() => useUiStore.getState().toggleDrawer()}
-            title={`日志与诊断 (${keyHint('toggleDrawer')})`}
-          >
-            <ToolbarIcon name="logs" />
-            <span>日志</span>
-          </button>
           <LibraryMenu />
           <button
             className="qs-btn icon sm"

@@ -108,7 +108,7 @@ export interface CanvasActions {
   onRunToSelected: () => void;
   /** 空画布上点了一个最近打开的文件。不给就不列。 */
   onOpenRecent?: ((path: string) => void) | undefined;
-  /** 整张图整理布局（与工具栏、Ctrl+L 同一个）。空白处右键菜单用；不给就不列这一项。 */
+  /** 整张图整理布局（与 Ctrl+L 同一个）。空白处右键菜单用；不给就不列这一项。 */
   onLayout?: (() => void) | undefined;
 }
 

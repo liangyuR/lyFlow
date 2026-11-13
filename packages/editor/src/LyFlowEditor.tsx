@@ -708,7 +708,6 @@ function Workspace({
         onRun={handlers.onRun}
         onRerun={handlers.onRerun}
         onCancel={handlers.onCancel}
-        onLayout={handlers.onLayout}
       />
 
       <main
