@@ -35,8 +35,22 @@ test("容差：|a − b| ≤ max(absTol, relTol · max(|a|, |b|))", () => {
   assert.deepEqual(wrong, [], "说明 / 实际 / 期望");
 });
 
-test("每种类型摊开成哪些行、Δ = A − B 怎么写", () => {
+test("输出差异表：各类型行与Δ文本，点云使用全量载荷并处理未取到的端口", () => {
+  const cloudOut = [stat("cloud", "PointCloud", undefined, 100)];
+  const fullCloud = { cloud: cloud(1000, [0, 0, 0, 1, 1, 1], 50), cloudPort: "cloud" };
   const cases = [
+    ["点云：全量点数和包围盒独立于显示抽稀", cloudOut, cloudOut, {
+      "cloud.points": ["1 000", "800", "+200 (+25%)", true],
+      "cloud.bounds.max": ["(1, 1, 1)", "(1, 1, 2)", "(0, 0, -1)", true],
+      "cloud.size": ["(1, 1, 1)", "(1, 1, 2)", "(0, 0, -1)", true],
+    }, fullCloud, { cloud: cloud(800, [0, 0, 0, 1, 1, 2], 50), cloudPort: "cloud" }],
+    ["点云：B载荷属于其他端口，退回elementCount", cloudOut, cloudOut, {
+      "cloud.points": ["1 000", "100", "+900 (+900%)", true],
+      "cloud.bounds.min": ["(0, 0, 0)", "—", "—", true],
+    }, fullCloud, { cloud: cloud(5, [0, 0, 0, 9, 9, 9]), cloudPort: "other" }],
+    ["点云：两侧未取到云时省略包围盒", cloudOut, cloudOut, {
+      "cloud.points": ["100", "100", "0", false], "cloud.bounds.min": undefined,
+    }],
     // [说明, A 的输出, B 的输出, 期望的 key → [a, b, delta, changed]（只列关心的行）]
     [
       "Box2D：两角 + 尺寸 + 中心",
@@ -163,37 +177,24 @@ test("每种类型摊开成哪些行、Δ = A − B 怎么写", () => {
     ],
   ];
   const wrong = [];
-  for (const [name, outA, outB, want] of cases) {
-    const got = table(diffSides(side(outA), side(outB)));
-    for (const [key, [a, b, delta, changed]] of Object.entries(want)) {
+  for (const [name, outA, outB, want, extraA, extraB] of cases) {
+    const got = table(diffSides(side(outA, extraA), side(outB, extraB)));
+    for (const [key, expected] of Object.entries(want)) {
+      if (expected === undefined) {
+        if (got[key] !== undefined) wrong.push([name, key, got[key], "不应出现此行"]);
+        continue;
+      }
+      const [a, b, delta, changed] = expected;
       const row = got[key];
       const actual = row && [a === undefined ? a : row[0], b === undefined ? b : row[1], row[2], row[3]];
       if (JSON.stringify(actual) !== JSON.stringify([a, b, delta, changed])) wrong.push([name, key, actual, [a, b, delta, changed]]);
     }
   }
   assert.deepEqual(wrong, [], "说明 / 行 / 实际 / 期望");
+
 });
 
-test("点云：点数取载荷头的全量 totalPoints，包围盒取全量 bounds；没取到云退回 elementCount", () => {
-  const out = [stat("cloud", "PointCloud", undefined, 100)];
-  // 显示抽稀到 50 点，但全量是 1000 / 800
-  const a = side(out, { cloud: cloud(1000, [0, 0, 0, 1, 1, 1], 50), cloudPort: "cloud" });
-  const b = side(out, { cloud: cloud(800, [0, 0, 0, 1, 1, 2], 50), cloudPort: "cloud" });
-  const t = table(diffSides(a, b));
-  assert.deepEqual(t["cloud.points"], ["1 000", "800", "+200 (+25%)", true]);
-  assert.deepEqual(t["cloud.bounds.max"], ["(1, 1, 1)", "(1, 1, 2)", "(0, 0, -1)", true]);
-  assert.deepEqual(t["cloud.size"], ["(1, 1, 1)", "(1, 1, 2)", "(0, 0, -1)", true]);
-
-  // B 侧没取到云（还在取、或那片云是别的端口的）：点数用 elementCount，包围盒「—」且不算不同
-  const noCloud = table(diffSides(a, side(out, { cloud: cloud(5, [0, 0, 0, 9, 9, 9]), cloudPort: "other" })));
-  assert.deepEqual(noCloud["cloud.points"], ["1 000", "100", "+900 (+900%)", true]);
-  assert.deepEqual(noCloud["cloud.bounds.min"], ["(0, 0, 0)", "—", "—", true]);
-  const neither = table(diffSides(side(out), side(out)));
-  assert.deepEqual(neither["cloud.points"], ["100", "100", "0", false]);
-  assert.equal(neither["cloud.bounds.min"], undefined, "两侧都没云：包围盒不出行");
-});
-
-test("端口配对：同名优先，其次（类型，出现顺序），剩下的只计数；Bundle 只比字段项", () => {
+test("端口配对与模式：同名优先、类型顺序、Bundle字段、单侧缺失及预览标记", () => {
   const m = (value) => ({ kind: "Measurement", value, unit: "mm" });
   const a = side([
     stat("gap", "Measurement", m(4)),
@@ -222,9 +223,7 @@ test("端口配对：同名优先，其次（类型，出现顺序），剩下�
   assert.equal(r.only, 2);
   assert.equal(r.changed, 1, "只有 scan.merged 的点数不同；only 行不算不同");
   assert.equal(r.changed + r.same + r.only, r.rows.length);
-});
 
-test("模式不同（一侧预览、一侧正式）打标记", () => {
   assert.equal(diffSides(side([]), side([])).modeMismatch, false);
   assert.equal(diffSides(side([], { preview: true }), side([])).modeMismatch, true);
   assert.deepEqual(diffSides(side(undefined), side(undefined)).rows, [], "还没有输出：空表");

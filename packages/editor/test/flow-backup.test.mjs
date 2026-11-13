@@ -47,45 +47,38 @@ test("工作区备份同时保留多个未保存文档、活动tab及配方独�
   assert.equal(await writeFlowBackup(payload, backend), true);
   const restored = await readFlowBackup(backend);
   assert.deepEqual(restored, payload);
-  assert.deepEqual(restored.tabs.filter((entry) => entry.filePath === null).map((entry) => entry.doc.id), ["graph-tab-a", "graph-c"]);
-  assert.equal(restored.tabs[1].dirty, false);
-  assert.equal(restored.tabs[1].recipeDirty, true);
-  assert.equal(new Map(restored.tabs[1].recipe.savedFiles).get("r1"), "原配方.lyflow-recipe.json");
   restored.tabs[1].recipe.set.recipes[0].values.threshold = 99;
   assert.equal((await readFlowBackup(backend)).tabs[1].recipe.set.recipes[0].values.threshold, 12);
   assert.equal(await clearFlowBackup(backend), true);
   assert.equal(await readFlowBackup(backend), null);
 });
 
-test("旧版本、活动tab缺失、重复tab及损坏的文档或配方不会恢复或覆盖现有备份", async () => {
+test("备份安全矩阵：损坏载荷不覆盖/恢复，配额与权限失败可重试且不冒充成功", async () => {
   const backend = memoryBackend();
   const valid = workspace();
   assert.equal(await writeFlowBackup(valid, backend), true);
   const original = backend.value;
   const invalid = [
-    null,
-    { ...valid, version: 2 },
-    { ...valid, activeId: "missing" },
-    { ...valid, tabs: [] },
-    { ...valid, tabs: [valid.tabs[0], valid.tabs[0]] },
-    { ...valid, activeId: "tab-a", tabs: [{ ...valid.tabs[0], doc: { nodes: [], edges: [] } }] },
-    { ...valid, activeId: "tab-a", tabs: [{ ...valid.tabs[0], doc: { ...valid.tabs[0].doc, nodes: [null] } }] },
-    { ...valid, activeId: "tab-a", tabs: [{ ...valid.tabs[0], recipe: { ...valid.tabs[0].recipe, set: { recipes: [null], defaultName: null } } }] },
-    { ...valid, activeId: "tab-a", tabs: [{ ...valid.tabs[0], recipe: { ...valid.tabs[0].recipe, savedFiles: {} } }] },
-    { ...valid, activeId: "tab-a", tabs: [{ ...valid.tabs[0], recipeDirty: undefined }] },
+    ["无载荷", null],
+    ["不支持的版本", { ...valid, version: 2 }],
+    ["活动tab缺失", { ...valid, activeId: "missing" }],
+    ["空tab集合", { ...valid, tabs: [] }],
+    ["重复tab", { ...valid, tabs: [valid.tabs[0], valid.tabs[0]] }],
+    ["文档缺少schema", { ...valid, activeId: "tab-a", tabs: [{ ...valid.tabs[0], doc: { nodes: [], edges: [] } }] }],
+    ["损坏节点", { ...valid, activeId: "tab-a", tabs: [{ ...valid.tabs[0], doc: { ...valid.tabs[0].doc, nodes: [null] } }] }],
+    ["损坏配方", { ...valid, activeId: "tab-a", tabs: [{ ...valid.tabs[0], recipe: { ...valid.tabs[0].recipe, set: { recipes: [null], defaultName: null } } }] }],
+    ["配方文件映射非数组", { ...valid, activeId: "tab-a", tabs: [{ ...valid.tabs[0], recipe: { ...valid.tabs[0].recipe, savedFiles: {} } }] }],
+    ["配方保存状态缺失", { ...valid, activeId: "tab-a", tabs: [{ ...valid.tabs[0], recipeDirty: undefined }] }],
   ];
-  for (const payload of invalid) {
-    assert.equal(await writeFlowBackup(payload, backend), false);
-    assert.equal(backend.value, original);
+  for (const [name, payload] of invalid) {
+    assert.deepEqual([await writeFlowBackup(payload, backend), backend.value], [false, original], `${name}：不覆盖已有备份`);
     backend.value = JSON.stringify(payload);
-    assert.equal(await readFlowBackup(backend), null);
+    assert.equal(await readFlowBackup(backend), null, `${name}：不恢复损坏载荷`);
     backend.value = original;
   }
-});
 
-test("配额、权限或存储错误返回失败，不报告为已备份，后续操作仍然可以重试", async () => {
+  await clearFlowBackup(backend);
   let fail = true;
-  const backend = memoryBackend();
   const write = backend.write.bind(backend);
   backend.write = async (payload) => {
     if (fail) throw new Error("QuotaExceededError");

@@ -45,10 +45,7 @@ async function halfwayRun() {
   await new Promise((resolve) => setTimeout(resolve, 40));
 }
 
-test("resultRunId：全图运行发起即换；带 targets 的等它的 run_started", async () => {
-  await halfwayRun();
-  assert.equal(useExecutionStore.getState().resultRunId, "A", "全图运行 A 发起时就归它");
-
+test("运行结果生命周期：全图/targets/isolate归属、排队取消/失败与正式判定节点表", async () => {
   const cases = [
     // [说明, beginRun 的参数, 发起后、开跑前的 resultRunId]
     ["预览（targets）", ["B", ["n2"], true], "A"],
@@ -63,9 +60,7 @@ test("resultRunId：全图运行发起即换；带 targets 的等它的 run_star
     apply(ev("B", "run_started", { plan: ["n2"], targets: args[1], isolate: args[3] ?? [], nodes: [] }));
     assert.equal(useExecutionStore.getState().resultRunId, "B", `${name}：run_started 之后`);
   }
-});
 
-test("排队的那次没开跑就收场：视图留在被抢占的那次，它在算的节点落成已取消（不一直转圈）", async () => {
   const seen = [];
   const off = onNodeTransition((t) => seen.push(`${t.nodeId}:${t.state}`));
   try {
@@ -94,6 +89,20 @@ test("排队的那次没开跑就收场：视图留在被抢占的那次，它�
   } finally {
     off();
   }
+
+  const { judgedNodesOf } = await import("../src/store/execution.ts");
+  const formal = new Map([["j", { state: "done", errors: [] }]]);
+  const later = new Map();
+  const base = { nodes: formal, preview: false, runId: "r1", resultRunId: "r1", runStatus: "ok", request: null };
+  assert.equal(judgedNodesOf(base), formal, "正式运行跑完：就是它");
+  const judgedCases = [
+    ["预览", { ...base, nodes: later, preview: true }],
+    ["带 targets 的运行还没开跑（节点表还是上一次的）", { ...base, nodes: later, runId: "r2" }],
+    ["松手自动补的那一次在跑", { ...base, nodes: later, runId: "r2", resultRunId: "r2", runStatus: "running", request: { auto: true } }],
+  ];
+  for (const [name, s] of judgedCases) assert.equal(judgedNodesOf(s), formal, name);
+  assert.equal(judgedNodesOf({ ...base, nodes: later, runId: "r3", resultRunId: "r3", runStatus: "running", request: {} }), later,
+    "手按的运行在跑：看这一次的");
 });
 
 // 子图内部节点的错误（事件 id 是路径，ADR-0010）：顶层原来只看得到「这个子图红了」，要自己进去找
@@ -117,7 +126,7 @@ const sgOps = new Map([
   ["lib.denoise", { label: "库去噪" }],
 ]);
 
-test("事件 id → 打开到哪一层、选中谁、一层层叫什么", () => {
+test("子图事件定位：路径与名称、错误来源聚合、重复定位保持路径并推进请求", () => {
   const cases = [
     // [事件 id, 路径（子图节点 id）, 选中, 名字, 落到的就是它本身]
     ["top", [], "top", ["体素降采样"], true],
@@ -136,22 +145,38 @@ test("事件 id → 打开到哪一层、选中谁、一层层叫什么", () => 
   }
   assert.equal(locateEventNode(sgDoc, "gone/x"), null, "节点被删了");
   assert.deepEqual(locateEventNode(sgDoc, "a/n/x").path, [{ nodeId: "a", subgraphId: "s1" }, { nodeId: "n", subgraphId: "s2" }]);
-});
 
-test("判定看的节点表：预览、节点表还不是这一次的、松手自动补的那一次在跑 —— 都留着上一次正式运行的", async () => {
-  const { judgedNodesOf } = await import("../src/store/execution.ts");
-  const formal = new Map([["j", { state: "done", errors: [] }]]);
-  const later = new Map();
-  const base = { nodes: formal, preview: false, runId: "r1", resultRunId: "r1", runStatus: "ok", request: null };
-  assert.equal(judgedNodesOf(base), formal, "正式运行跑完：就是它");
-  const cases = [
-    ["预览", { ...base, nodes: later, preview: true }],
-    ["带 targets 的运行还没开跑（节点表还是上一次的）", { ...base, nodes: later, runId: "r2" }],
-    ["松手自动补的那一次在跑", { ...base, nodes: later, runId: "r2", resultRunId: "r2", runStatus: "running", request: { auto: true } }],
-  ];
-  for (const [name, s] of cases) assert.equal(judgedNodesOf(s), formal, name);
-  assert.equal(judgedNodesOf({ ...base, nodes: later, runId: "r3", resultRunId: "r3", runStatus: "running", request: {} }), later,
-    "手按的运行在跑：看这一次的");
+  const err = { phase: "execute", code: "bad_param", message: "Leaf size 太小", paramPath: "leafSize" };
+  const nodes = new Map([
+    ["top", { state: "done", errors: [] }],
+    ["a/v", { state: "done", errors: [] }],
+    ["a/n/x", { state: "error", errors: [err] }],
+    ["b/only", { state: "error", errors: [err] }],
+    ["c/p", { state: "error", errors: [err] }],
+    ["c/q", { state: "error", errors: [err, err] }],
+  ]);
+  const top = aggregatedNodes([], nodes);
+  assert.equal(top.get("top"), nodes.get("top"), "叶子节点原样复用");
+  assert.deepEqual([top.get("a").state, top.get("a").errorSource, top.get("a").children], ["error", "a/n/x", { total: 2, finished: 1 }]);
+  assert.deepEqual([top.get("b").errorSource, top.get("b").children], ["b/only", { total: 1, finished: 0 }]);
+  // 每一条错误都记着来源（检查器里逐条写明）：与 errors 一一对应
+  assert.deepEqual(top.get("a").errorSources, ["a/n/x"]);
+  assert.deepEqual([top.get("c").errors.length, top.get("c").errorSources], [3, ["c/p", "c/q", "c/q"]]);
+  // 进到 a 这一层：n 是它的子图节点，来源还是那个完整 id
+  assert.equal(aggregatedNodes([{ nodeId: "a", subgraphId: "s1" }], nodes).get("n").errorSource, "a/n/x");
+
+  useUiStore.setState({ path: [], selectedNodes: new Set(), focusedDiagnostic: null, revealRequest: null });
+  const path = [{ nodeId: "a", subgraphId: "s1" }];
+  useUiStore.getState().revealNode(path, "v", "leafSize");
+  let s = useUiStore.getState();
+  assert.deepEqual([s.path, [...s.selectedNodes], s.focusedDiagnostic, s.revealRequest?.nodeId],
+    [path, ["v"], { nodeId: "v", paramPath: "leafSize" }, "v"]);
+  const seq = s.revealRequest.seq;
+  const samePath = s.path;
+  useUiStore.getState().revealNode(path, "v");
+  s = useUiStore.getState();
+  assert.equal(s.revealRequest.seq, seq + 1);
+  assert.equal(s.path, samePath, "同一层不换路径对象");
 });
 
 test("查找节点（Ctrl+F）：整张图连子图里面的一起列，按名字模糊找；库算子里面进不去，不列；is:muted / is:error / op: 筛选", () => {
@@ -217,43 +242,7 @@ test("查找节点（Ctrl+F）：整张图连子图里面的一起列，按名�
   assert.equal(matchShortcut(key("f"))?.id, "findNode");
 });
 
-test("聚合出来的子图节点记着错误来自哪个内部节点；只有一个内部节点的子图也是", () => {
-  const err = { phase: "execute", code: "bad_param", message: "Leaf size 太小", paramPath: "leafSize" };
-  const nodes = new Map([
-    ["top", { state: "done", errors: [] }],
-    ["a/v", { state: "done", errors: [] }],
-    ["a/n/x", { state: "error", errors: [err] }],
-    ["b/only", { state: "error", errors: [err] }],
-    ["c/p", { state: "error", errors: [err] }],
-    ["c/q", { state: "error", errors: [err, err] }],
-  ]);
-  const top = aggregatedNodes([], nodes);
-  assert.equal(top.get("top"), nodes.get("top"), "叶子节点原样复用");
-  assert.deepEqual([top.get("a").state, top.get("a").errorSource, top.get("a").children], ["error", "a/n/x", { total: 2, finished: 1 }]);
-  assert.deepEqual([top.get("b").errorSource, top.get("b").children], ["b/only", { total: 1, finished: 0 }]);
-  // 每一条错误都记着来源（检查器里逐条写明）：与 errors 一一对应
-  assert.deepEqual(top.get("a").errorSources, ["a/n/x"]);
-  assert.deepEqual([top.get("c").errors.length, top.get("c").errorSources], [3, ["c/p", "c/q", "c/q"]]);
-  // 进到 a 这一层：n 是它的子图节点，来源还是那个完整 id
-  assert.equal(aggregatedNodes([{ nodeId: "a", subgraphId: "s1" }], nodes).get("n").errorSource, "a/n/x");
-});
-
-test("revealNode：打开到那一层、选中、请画布移过去；同一个节点再点一次也要动", () => {
-  useUiStore.setState({ path: [], selectedNodes: new Set(), focusedDiagnostic: null, revealRequest: null });
-  const path = [{ nodeId: "a", subgraphId: "s1" }];
-  useUiStore.getState().revealNode(path, "v", "leafSize");
-  let s = useUiStore.getState();
-  assert.deepEqual([s.path, [...s.selectedNodes], s.focusedDiagnostic, s.revealRequest?.nodeId],
-    [path, ["v"], { nodeId: "v", paramPath: "leafSize" }, "v"]);
-  const seq = s.revealRequest.seq;
-  const samePath = s.path;
-  useUiStore.getState().revealNode(path, "v");
-  s = useUiStore.getState();
-  assert.equal(s.revealRequest.seq, seq + 1);
-  assert.equal(s.path, samePath, "同一层不换路径对象");
-});
-
-test("在出错的节点之间跳：第一个是根因，F8 往后、Shift+F8 往前，到头绕回；上游失败连带的不算", () => {
+test("错误导航：F8往返、最近上游根因与跨子图追溯，不穿过已恢复的节点", () => {
   const err = (paramPath) => ({ phase: "execute", code: "bad_param", message: "坏了", paramPath });
   useGraphStore.setState({ doc: sgDoc });
   useManifestStore.setState({ operatorsById: sgOps });
@@ -306,9 +295,7 @@ test("在出错的节点之间跳：第一个是根因，F8 往后、Shift+F8 �
 
   const key = (k, shiftKey) => ({ key: k, ctrlKey: false, metaKey: false, shiftKey, altKey: false });
   assert.deepEqual([matchShortcut(key("F8", false))?.id, matchShortcut(key("F8", true))?.id], ["nextError", "prevError"]);
-});
 
-test("连带没执行的根因在子图外面：从子图节点那里往外一层接着找，不跳到整张图的第一个错", () => {
   // 顶层 z（不相干的错，节点表里排第一）、p → S；S 里面 x 接的是 S 的入口（不是边），被 p 连带取消
   const doc = {
     schemaVersion: 1,
@@ -332,7 +319,7 @@ test("连带没执行的根因在子图外面：从子图节点那里往外一�
   assert.equal(culpritOf(doc, [], "z", new Map([["z", { state: "cancelled", errors: [upstream] }]])), null, "哪一层都没有");
 });
 
-test("工具栏的运行 / 重跑 / 取消中：人发起的运行在跑时是重跑；预览、自动补的那次不变；取消发出去之后是取消中", () => {
+test("运行控制生命周期：手动/预览/自动状态，取消去重与失败撤回、重跑沿用或回退范围", async () => {
   const base = { runStatus: "running", preview: false, cancelling: false, request: {} };
   const cases = [
     ["没在跑", { ...base, runStatus: "idle" }, ["run", "off"]],
@@ -346,9 +333,7 @@ test("工具栏的运行 / 重跑 / 取消中：人发起的运行在跑时是�
     const c = runControlsOf(s);
     assert.deepEqual([c.run, c.cancel], want, name);
   }
-});
 
-test("取消中的起落；重跑照原来的范围再来一次，目标删掉了就跑整张图", async () => {
   const calls = [];
   const cancels = [];
   let failCancel = false;

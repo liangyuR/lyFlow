@@ -43,7 +43,7 @@ const doc = {
   edges: [edge("g", "cloud", "v1", "cloud"), edge("v1", "cloud", "v2", "cloud"), edge("g", "cloud", "r1", "in"), edge("r1", "out", "r2", "in")],
 };
 
-test("canConnect：每一种拒绝都给出人话原因，能连的放行", () => {
+test("连接判定契约：类型方向、Any双向推导、兼容端口、替换输入与成环保护", () => {
   const P = (n, p) => ({ node: n, port: p });
   const cases = [
     [P("g", "cloud"), P("g", "cloud"), "不能连到自己"],
@@ -76,9 +76,7 @@ test("canConnect：每一种拒绝都给出人话原因，能连的放行", () =
   assert.deepEqual(v, { ok: false, reason: "会形成环" });
   assert.equal(wouldCreateCycle(doc, "v2", "v3"), false);
   assert.equal(wouldCreateCycle(doc, "v2", "g"), true, "g 在 v2 的上游：v2 → g 就成环");
-});
 
-test("inferAnyTypes：Any 沿连线往下游推，也从下游的具体输入往上游推；推不出来的不在表里", () => {
   const types = inferAnyTypes(ctx, doc);
   assert.equal(types.get("r1"), "PointCloud");
   assert.equal(types.get("r2"), "PointCloud", "两级之后照样推得到");
@@ -87,9 +85,7 @@ test("inferAnyTypes：Any 沿连线往下游推，也从下游的具体输入往
   assert.equal(inferAnyTypes(ctx, back).get("r3"), "Box2D");
   const lonely = { ...doc, nodes: [...doc.nodes, node("r4", "reroute")] };
   assert.equal(inferAnyTypes(ctx, lonely).has("r4"), false);
-});
 
-test("compatibleTargets / compatibleSources：拖线时置灰与高亮的那张表", () => {
   // 从 g 拖：空着的 v3、本来就连着 g 的 v1 与 r1（重连同一对端口不算占用）；b、i 类型接不住，
   // v2、r2 已被别的源占着，ghost 没注册
   const targets = [...compatibleTargets(ctx, doc, { node: "g", port: "cloud" })].sort();
@@ -97,9 +93,15 @@ test("compatibleTargets / compatibleSources：拖线时置灰与高亮的那张�
   // 往 v3 的输入拖回去找源：点云类的输出都行（XYZI 可当 PointCloud 用；r2 推成了 PointCloud）
   const sources = [...compatibleSources(ctx, doc, { node: "v3", port: "cloud" })].sort();
   assert.deepEqual(sources, ["g:cloud", "gi:cloud", "r1:out", "r2:out", "v1:cloud", "v2:cloud"]);
+
+  assert.deepEqual(canConnectReplacing(ctx, doc, P("gi", "cloud"), P("v1", "cloud")), { ok: true, replaces: "g.cloud-v1.cloud" });
+  assert.deepEqual(canConnectReplacing(ctx, doc, P("g", "cloud"), P("v3", "cloud")), { ok: true, replaces: null });
+  assert.deepEqual(canConnectReplacing(ctx, doc, P("g", "cloud"), P("v1", "cloud")), { ok: true, replaces: null }, "同一条线不算顶掉");
+  assert.deepEqual(canConnectReplacing(ctx, doc, P("v2", "cloud"), P("v1", "cloud")), { ok: false, reason: "会形成环" });
+  assert.deepEqual([...replaceableTargets(ctx, doc, P("g", "cloud"))].sort(), ["r2:in", "v2:cloud"]);
 });
 
-test("dropOnNode：拖线松在节点的身子上 —— 恰好一个能接就接它，多个提示对准，接不上说为什么，松回自己不动", () => {
+test("拖放连接：节点身上的唯一端口、具体端口替换，歧义/类型/方向/成环拒绝", () => {
   // 加一个两路输入的 m（合并点云那种）
   const mctx = { ...ctx, operatorsById: new Map([...ctx.operatorsById, ["merge", op("merge", [port("a", "PointCloud"), port("b", "PointCloud")], [port("cloud", "PointCloud")])]]) };
   const mdoc = { ...doc, nodes: [...doc.nodes, node("m", "merge")] };
@@ -119,9 +121,23 @@ test("dropOnNode：拖线松在节点的身子上 —— 恰好一个能接就�
   for (const [ref, side, target, want] of cases) {
     assert.deepEqual(dropOnNode(mctx, mdoc, ref, side, target), want, `${ref.node}.${ref.port}（${side}）→ ${target}`);
   }
+
+  const portCases = [
+    // [拖的那一头, 方向, 松手处的端口, 它的哪一侧, 期望]
+    [P("g", "cloud"), "output", P("v3", "cloud"), "input", { kind: "connect", from: P("g", "cloud"), to: P("v3", "cloud") }],
+    [P("g", "cloud"), "output", P("v2", "cloud"), "input", { kind: "connect", from: P("g", "cloud"), to: P("v2", "cloud"), replaces: "v1.cloud-v2.cloud" }],
+    [P("v2", "cloud"), "output", P("v1", "cloud"), "input", { kind: "reject", reason: "会形成环" }],
+    [P("g", "cloud"), "output", P("b", "box"), "input", { kind: "reject", reason: "类型不匹配：PointCloud → Box2D" }],
+    [P("g", "cloud"), "output", P("v1", "cloud"), "output", { kind: "reject", reason: "这是输出端口：拖到输入端口上" }],
+    [P("g", "cloud"), "output", P("g", "cloud"), "output", { kind: "self" }],
+    [P("v3", "cloud"), "input", P("gi", "cloud"), "output", { kind: "connect", from: P("gi", "cloud"), to: P("v3", "cloud") }],
+  ];
+  for (const [ref, side, target, targetSide, want] of portCases) {
+    assert.deepEqual(dropOnPort(ctx, doc, ref, side, target, targetSide), want, `${ref.node}.${ref.port} → ${target.node}.${target.port}（${targetSide}）`);
+  }
 });
 
-test("insertPortsFor：插到 g → v1 那条线中间 —— 恰好一对端口两头都接得上才给，不止一对或接不上给 null", () => {
+test("插入与新节点吸附：唯一输入输出对，类型精确/可转换/Any与声明顺序", () => {
   const ictx = {
     ...ctx,
     operatorsById: new Map([
@@ -144,35 +160,7 @@ test("insertPortsFor：插到 g → v1 那条线中间 —— 恰好一对端口
   for (const [name, nodeId, want] of cases) {
     assert.deepEqual(insertPortsFor(ictx, idoc, line, nodeId), want, name);
   }
-});
 
-test("dropOnPort：拖线松在一个具体端口上 —— 只判它；已接着线的输入换来源，类型不对、同一侧说自己的原因，不另找", () => {
-  const P = (n, p) => ({ node: n, port: p });
-  const cases = [
-    // [拖的那一头, 方向, 松手处的端口, 它的哪一侧, 期望]
-    [P("g", "cloud"), "output", P("v3", "cloud"), "input", { kind: "connect", from: P("g", "cloud"), to: P("v3", "cloud") }],
-    [P("g", "cloud"), "output", P("v2", "cloud"), "input", { kind: "connect", from: P("g", "cloud"), to: P("v2", "cloud"), replaces: "v1.cloud-v2.cloud" }],
-    [P("v2", "cloud"), "output", P("v1", "cloud"), "input", { kind: "reject", reason: "会形成环" }],
-    [P("g", "cloud"), "output", P("b", "box"), "input", { kind: "reject", reason: "类型不匹配：PointCloud → Box2D" }],
-    [P("g", "cloud"), "output", P("v1", "cloud"), "output", { kind: "reject", reason: "这是输出端口：拖到输入端口上" }],
-    [P("g", "cloud"), "output", P("g", "cloud"), "output", { kind: "self" }],
-    [P("v3", "cloud"), "input", P("gi", "cloud"), "output", { kind: "connect", from: P("gi", "cloud"), to: P("v3", "cloud") }],
-  ];
-  for (const [ref, side, target, targetSide, want] of cases) {
-    assert.deepEqual(dropOnPort(ctx, doc, ref, side, target, targetSide), want, `${ref.node}.${ref.port} → ${target.node}.${target.port}（${targetSide}）`);
-  }
-});
-
-test("canConnectReplacing / replaceableTargets：已接着线的输入能换来源（给出顶掉哪条），成环、类型不对照样拒绝", () => {
-  const P = (n, p) => ({ node: n, port: p });
-  assert.deepEqual(canConnectReplacing(ctx, doc, P("gi", "cloud"), P("v1", "cloud")), { ok: true, replaces: "g.cloud-v1.cloud" });
-  assert.deepEqual(canConnectReplacing(ctx, doc, P("g", "cloud"), P("v3", "cloud")), { ok: true, replaces: null });
-  assert.deepEqual(canConnectReplacing(ctx, doc, P("g", "cloud"), P("v1", "cloud")), { ok: true, replaces: null }, "同一条线不算顶掉");
-  assert.deepEqual(canConnectReplacing(ctx, doc, P("v2", "cloud"), P("v1", "cloud")), { ok: false, reason: "会形成环" });
-  assert.deepEqual([...replaceableTargets(ctx, doc, P("g", "cloud"))].sort(), ["r2:in", "v2:cloud"]);
-});
-
-test("pendingPort：拖线松在空白处挑了新算子，接它的哪个端口 —— 类型相同 > 能转 > Any，同分按必填与声明顺序", () => {
   const pctx = {
     ...ctx,
     operatorsById: new Map([
@@ -186,7 +174,7 @@ test("pendingPort：拖线松在空白处挑了新算子，接它的哪个端口
   const pdoc = { ...doc, nodes: [...doc.nodes, node("ra", "ransac"), node("x", "extract"), node("r9", "reroute")] };
   const P = (n, p) => ({ node: n, port: p });
   const O = (id) => pctx.operatorsById.get(id);
-  const cases = [
+  const pendingCases = [
     // [拖出的那一头, 哪一侧, 新算子, 期望]
     ["点云 → 提取索引：cloud", P("g", "cloud"), "output", "extract", "cloud"],
     ["Indices → 提取索引：indices（修前固定接第一个 cloud，类型不对）", P("ra", "inliers"), "output", "extract", "indices"],
@@ -198,7 +186,7 @@ test("pendingPort：拖线松在空白处挑了新算子，接它的哪个端口
     ["推出了类型的 reroute（点云）→ 提取索引：cloud", P("r2", "out"), "output", "extract", "cloud"],
     ["没推出类型的 reroute：取第一个", P("r9", "out"), "output", "extract", "cloud"],
   ];
-  for (const [name, from, side, opId, want] of cases) {
+  for (const [name, from, side, opId, want] of pendingCases) {
     assert.equal(pendingPort(pctx, pdoc, from, side, O(opId)), want, name);
   }
 });

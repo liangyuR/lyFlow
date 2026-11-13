@@ -128,7 +128,7 @@ test("自动运行补谁（paramEditTargets）：参数有效值、静音、图�
   assert.deepEqual(autoRunTargetsReady(base, edits, states([["b", "done"]])), { nodes: ["b"], graphParams: [] }, "thr 绑着的 a 没跑过");
 });
 
-test("stepAlong（Alt+方向键沿连线走）：上下游取最上面的；刚从那边过来先退回去；同级在同一组里挪、到头不绕回", () => {
+test("图遍历与索引缓存：方向导航、源头优先祖先、扫描等价与连线变更失效", () => {
   // 同一张图摆上位置：b 的下游 d 在上、x 在下；x 的上游 b 在上、c 在下；e 的上游 d 在上、x 在下
   const pos = { a: [0, 0], b: [200, 0], c: [0, 200], d: [400, 0], x: [400, 200], e: [600, 100], f: [0, 400] };
   const placed = { ...level, nodes: level.nodes.map((n) => ({ ...n, ui: { position: { x: pos[n.id][0], y: pos[n.id][1] } } })) };
@@ -150,12 +150,25 @@ test("stepAlong（Alt+方向键沿连线走）：上下游取最上面的；刚�
     assert.equal(stepAlong(placed, cur, dir, last)?.id ?? null, want, name);
   }
   assert.deepEqual(stepAlong(placed, "x", "up", hop("c", "down", "x")).hop, hop("x", "up", "c"), "记下这一步，再往下能回到 x");
-});
 
-test("ancestorsOf：不含自己，离源头近的排前面", () => {
   // 从 e 往上数最长的那条路：a 三步，b、c 两步，d、x 一步
   assert.deepEqual(ancestorsOf(level, "e"), ["a", "b", "c", "d", "x"]);
   assert.deepEqual(ancestorsOf(level, "a"), []);
+
+  // 一张有扇出、有汇合的 60 节点图，边的先后打乱（同深度的先后靠它定）
+  const nodes = Array.from({ length: 60 }, (_, i) => ({ id: `n${i}`, op: "t.op" }));
+  const edges = [];
+  for (let i = 1; i < 60; i += 1) {
+    edges.push(edge(`n${Math.floor((i - 1) / 2)}`, `n${i}`));
+    if (i % 3 === 0) edges.push(edge(`n${i - 2}`, `n${i}`));
+  }
+  edges.reverse();
+  const lvl = { nodes, edges };
+  for (const n of nodes) assert.deepEqual(ancestorsOf(lvl, n.id), ancestorsByScan(lvl, n.id), n.id);
+  assert.equal(ancestorsOf(lvl, "n59"), ancestorsOf(lvl, "n59"), "同一份连线：直接给缓存");
+  const changed = { nodes, edges: [...edges, edge("n1", "n58")] };
+  assert.deepEqual(ancestorsOf(changed, "n59"), ancestorsByScan(changed, "n59"));
+  assert.deepEqual(ancestorsOf(changed, "n58"), ancestorsByScan(changed, "n58"));
 });
 
 /** 原来的 ancestorsOf：每往上一层把全部连线扫一遍。缓存与索引版必须逐个给出同样的结果与顺序。 */
@@ -177,23 +190,6 @@ function ancestorsByScan(lvl, nodeId) {
   }
   return [...depth.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
 }
-
-test("ancestorsOf 的索引与缓存：与逐条扫的结果逐个相同；连线变了（新数组）就重算", () => {
-  // 一张有扇出、有汇合的 60 节点图，边的先后打乱（同深度的先后靠它定）
-  const nodes = Array.from({ length: 60 }, (_, i) => ({ id: `n${i}`, op: "t.op" }));
-  const edges = [];
-  for (let i = 1; i < 60; i += 1) {
-    edges.push(edge(`n${Math.floor((i - 1) / 2)}`, `n${i}`));
-    if (i % 3 === 0) edges.push(edge(`n${i - 2}`, `n${i}`));
-  }
-  edges.reverse();
-  const lvl = { nodes, edges };
-  for (const n of nodes) assert.deepEqual(ancestorsOf(lvl, n.id), ancestorsByScan(lvl, n.id), n.id);
-  assert.equal(ancestorsOf(lvl, "n59"), ancestorsOf(lvl, "n59"), "同一份连线：直接给缓存");
-  const changed = { nodes, edges: [...edges, edge("n1", "n58")] };
-  assert.deepEqual(ancestorsOf(changed, "n59"), ancestorsByScan(changed, "n59"));
-  assert.deepEqual(ancestorsOf(changed, "n58"), ancestorsByScan(changed, "n58"));
-});
 
 test("willCompute / upstreamToRun 的计划索引：与逐条扫计划的判断相同，子图节点看它的全部内部节点", () => {
   const plan = new Map([

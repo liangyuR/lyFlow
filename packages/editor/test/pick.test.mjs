@@ -10,7 +10,7 @@ const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const W_IS_Z = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0];
 const VP = { x: 0, y: 0, w: 100, h: 100 };
 
-test("屏幕空间最近点：半径内取最近，同距取离相机近的，看不见的点跳过", () => {
+test("空间选择：屏幕最近点、遮挡深度和视口边界，2D框选含边且忽略NaN", () => {
   const cases = [
     // [说明, 点, 矩阵, 视口, 单击, 期望的下标]
     ["正中那个", [[0, 0, 0], [0.5, 0.5, 0]], I, VP, { x: 50, y: 50 }, 0],
@@ -29,9 +29,15 @@ test("屏幕空间最近点：半径内取最近，同距取离相机近的，�
     if (got !== want) wrong.push([name, got, want]);
   }
   assert.deepEqual(wrong, [], "说明 / 实际 / 期望");
+
+  const xyz = Float32Array.from([0, 0, 9, 1, 1, 9, 2, 2, 9, 1, 3, 9, NaN, 1, 0]);
+  assert.deepEqual(
+    [countInRect(xyz, [0, 0, 2, 2]), countInRect(xyz, [0.5, 0.5, 1.5, 3]), countInRect(xyz, [5, 5, 6, 6]), countInRect(null, [0, 0, 1, 1])],
+    [3, 2, 0, 0],
+  );
 });
 
-test("一组两点：第 3 次重新开始；readout 米 + 毫米并列、坐标 4 位，2D 多一行 XY 距离，对比标 A / B", () => {
+test("测量读数生命周期：两点重置、米毫米与包围盒格式和浮点边界", () => {
   const p = (x, y, z, pane = 0) => ({ xyz: [x, y, z], pane });
   let m = addPick(NO_MEASURE, p(0, 0, 0));
   assert.equal(pickCount(m), 1);
@@ -59,15 +65,8 @@ test("一组两点：第 3 次重新开始；readout 米 + 毫米并列、坐标
 
   m = addPick(m, p(1, 1, 1));
   assert.deepEqual([pickCount(m), m.p1?.xyz], [1, [1, 1, 1]], "第 3 次点 = 新一组的 P1");
-});
 
-// 预览栏上的包围盒尺寸：一组一个单位，最长边（取整后）不到 1 m 换成 mm；4 位有效数字同坐标
-test("extentText：包围盒尺寸的写法；countInRect：拖 2D 框时数框里有几个点（只看 x、y，含边）", () => {
-  const xyz = Float32Array.from([0, 0, 9, 1, 1, 9, 2, 2, 9, 1, 3, 9, NaN, 1, 0]);
-  assert.deepEqual(
-    [countInRect(xyz, [0, 0, 2, 2]), countInRect(xyz, [0.5, 0.5, 1.5, 3]), countInRect(xyz, [5, 5, 6, 6]), countInRect(null, [0, 0, 1, 1])],
-    [3, 2, 0, 0],
-  );
+  // 预览栏上的包围盒尺寸：一组一个单位，最长边（取整后）不到 1 m 换成 mm；4 位有效数字同坐标
   const cases = [
     ["没有", null, null],
     ["不够 6 个数", [0, 0, 0, 1, 1], null],

@@ -37,7 +37,7 @@ const op = {
 };
 const node = (params) => ({ id: "n", op: "t.locate", params });
 
-test("每个启用的槽一组框，标签是「模板 k · Id」，底图是那个槽的左右模板；数据坐标系的框不混进来", () => {
+test("ROI分组与选择生命周期：只列启用槽、保留选择或回退、检查器识别底图键", () => {
   const one = roiFramesOf(op, node({ templateDir: "D:/tpl" }));
   assert.equal(one.length, 1, "槽 2 没启用：只有槽 1 一组");
   assert.equal(one[0].label, "模板 1 · f1");
@@ -57,21 +57,14 @@ test("每个启用的槽一组框，标签是「模板 k · Id」，底图是那
     frames.map((f) => ({ key: f.key, files: f.files, inputs: f.inputs, params: f.params.map((p) => p.name) })),
     [{ key: "inputs|tplLeft,tplRight", files: [], inputs: ["tplLeft", "tplRight"], params: ["base", "gap"] }],
   );
-});
 
-test("选过的组还在就用它，槽被关掉了就退回第一组", () => {
-  const two = roiFramesOf(op, node({ t2Enabled: true }));
-  assert.equal(pickFrame(two, two[1].key).label, "模板 2 · f2");
-  const one = roiFramesOf(op, node({}));
-  assert.equal(pickFrame(one, two[1].key).label, "模板 1 · f1");
+  assert.equal(pickFrame(two, two[1].key).label, "模板 2 · big", "保留仍启用的槽选择");
+  assert.equal(pickFrame(one, two[1].key).label, "模板 1 · f1", "关闭所选槽后退回第一组");
   assert.equal(pickFrame([], "x"), null);
-});
 
-test("Inspector 的参数组认得出属于哪一组框（没启用的槽也认得出）", () => {
   const slot2 = op.params.filter((p) => p.group === "模板槽 2");
   const key = frameKeyOfGroup(slot2);
-  const two = roiFramesOf(op, node({ t2Enabled: true }));
-  assert.equal(key, two[1].key);
+  assert.equal(key, two[1].key, "检查器识别槽的底图键");
   assert.equal(frameKeyOfGroup([op.params[0]]), null);
 });
 

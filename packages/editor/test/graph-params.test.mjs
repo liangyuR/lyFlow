@@ -37,18 +37,6 @@ function saved() {
   return JSON.parse(JSON.stringify(useGraphStore.getState().doc));
 }
 
-test("打开即保存：params 原样保留", () => {
-  assert.ok(example.params && Object.keys(example.params).length > 0, "前提：样例图带顶层 params");
-  const doc = fixture();
-  assert.equal(Object.keys(doc.params).length, 2, "前提：fixture 里有两个图参数");
-  const before = JSON.stringify(doc.params);
-  useGraphStore.getState().loadDoc(structuredClone(doc), "g.lyflow.json");
-  const out = saved();
-  assert.deepEqual(out.params, doc.params);
-  assert.equal(JSON.stringify(out.params), before);
-  assert.deepEqual(out, doc);
-});
-
 /** 两份样例各走一串不碰图参数的编辑；`edit` 里顺带确认编辑确实生效，`check` 是该样例特有的收尾检查。 */
 const EDIT_SAMPLES = [
   {
@@ -91,32 +79,40 @@ const EDIT_SAMPLES = [
       }
     },
   },
+  {
+    name: "没有顶层 params",
+    doc: () => { const doc = structuredClone(example); delete doc.params; return doc; },
+    edit(g) { g.setName("x"); },
+    undos: 1,
+    check(params) { assert.equal(params, undefined); },
+  },
 ];
 
-test("打开、编辑、迁移、撤销重做之后 params 一个字段都不丢（两份样例）", () => {
+test("图参数往返生命周期：多目标、完整规格与无params三种图的打开/编辑/迁移/撤销重做", () => {
+  assert.ok(example.params && Object.keys(example.params).length > 0, "样例图带顶层params");
+  assert.equal(Object.keys(fixture().params).length, 2, "多目标夹具有两个图参数");
   useManifestStore.getState().replaceBundle(manifest, 1);
   for (const sample of EDIT_SAMPLES) {
     const doc = sample.doc();
     const before = JSON.stringify(doc.params);
     const g = useGraphStore.getState();
     g.loadDoc(structuredClone(doc), "g.lyflow.json");
-    assert.equal(JSON.stringify(saved().params), before, `${sample.name}：打开即保存`);
+    assert.deepEqual(saved(), doc, `${sample.name}：打开即保存全图往返`);
+    const check = (stage) => {
+      const out = saved();
+      assert.deepEqual(out.params, doc.params, `${sample.name}：${stage}值完整`);
+      assert.equal(JSON.stringify(out.params), before, `${sample.name}：${stage}字段与键序`);
+      assert.equal("params" in out, "params" in doc, `${sample.name}：${stage}不凭空增删params`);
+    };
+    check("打开即保存");
 
     sample.edit(g);
-    assert.equal(JSON.stringify(saved().params), before, `${sample.name}：别的编辑不碰图参数`);
+    check("别的编辑不碰图参数");
 
     for (let i = 0; i < sample.undos; i++) g.undo();
-    assert.equal(JSON.stringify(saved().params), before, `${sample.name}：撤销之后`);
+    check("撤销之后");
     g.redo();
-    assert.equal(JSON.stringify(saved().params), before, `${sample.name}：重做之后`);
+    check("重做之后");
     sample.check?.(saved().params);
   }
-});
-
-test("没有顶层 params 的图不会凭空多出这个键", () => {
-  const doc = structuredClone(example);
-  delete doc.params;
-  useGraphStore.getState().loadDoc(doc, null);
-  useGraphStore.getState().setName("x");
-  assert.equal("params" in saved(), false);
 });

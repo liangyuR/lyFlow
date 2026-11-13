@@ -10,7 +10,7 @@
 |---|---|---|---|
 | C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 186 例；`LYFLOW_PACKS=dts` 194 例；`LYFLOW_PACKS=gap;dts` 276 例；`LYFLOW_PACKS=gap` 278 例（2026-10-10 实测，含圆拟合新增的 4 例；另外三种构建这次没重跑） | 分钟级（含编译） |
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 154（纯平台构建 95 通过 / 59 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
-| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 161 | 秒级 |
+| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 89（24 个文件） | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 35（2026-10-08） | 秒级 |
 | 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 971 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 34 条断言（精简前 58） | 几分钟 |
@@ -107,7 +107,7 @@ CI 与本地走同一个入口 `scripts/check.ps1`，按 job 用 `-Steps` 点名
 
 本轮画布交互的回归复用 `m3:suiteEditing`（左键平移、Ctrl 框选、Ctrl+Shift 追加、右键菜单且不平移）、`m3:suiteRunToSelected`（浮动操作条多目标运行，必要上游参与、未选中下游不参与）与 `motion:suiteEnter`（左键平移触发虚拟化）。精确选区运行取消待自动运行、保留多个目标与重跑范围的断言扩展在现有 `execution-store.test.mjs` 自动运行用例中，测试数量不变。
 
-多文档标签复用 `m3:suitePanels` 验证新建保留后台文档、同路径去重、切换参数与撤销/重做、关闭标签和后台未保存文档的窗口保护。`packages/editor/test/flow-tabs.test.mjs` 的 5 个用例覆盖对象身份、独立会话、异步迟到隔离与关闭取消；`flow-backup.test.mjs` 的 5 个用例覆盖 IndexedDB 适配器、载荷校验及串行写入/清理。编辑器纯逻辑测试由 161 增至 171。
+多文档标签复用 `m3:suitePanels` 验证新建保留后台文档、同路径去重、切换参数与撤销/重做、关闭标签和后台未保存文档的窗口保护。`packages/editor/test/flow-tabs.test.mjs` 的 3 个用例覆盖对象身份、独立会话、异步迟到隔离与关闭取消；`flow-backup.test.mjs` 的 4 个用例覆盖 IndexedDB 适配器、载荷校验及串行写入/清理。编辑器纯逻辑测试由 171 项收敛为 89 项，原有 24 个测试文件全部执行。同一功能契约的正常、边界与失败场景共用夹具或具名场景表，保留状态隔离和异步清理；后续回归优先补入已有契约。
 
 ## 共用的夹具与辅助
 

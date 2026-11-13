@@ -26,7 +26,7 @@ const base = {
 };
 const withNodes = (nodes, extra = {}) => ({ ...base, nodes, ...extra });
 
-test("调参记录：两次运行之间改了什么 —— 有效参数（缺省值也算）、静音、增删节点、图参数；写成一行", () => {
+test("调参差异与比较基线：有效参数/静音/结构、共享定义去重及预览/取消回退", () => {
   const rec = (doc, params = { thr: 1 }) => ({ doc, params });
   const cases = [
     // [说明, 后一次, 期望的一行]
@@ -52,12 +52,9 @@ test("调参记录：两次运行之间改了什么 —— 有效参数（缺省
   assert.equal(diffRuns(rec(shared(0.02)), rec(shared(0.03)), subOps).changes.length, 1, "两个实例里是同一个节点：改一处只算一处");
   assert.equal(shortValue("x".repeat(40)).length, 24, "长字符串截短");
   assert.equal(shortValue(true), "开");
-});
-
-test("还没跑的改动跟哪一次比：屏幕上那次结果的记录；不在记录里（预览）、没跑完、被取消的退到最近一条跑完的；一共几处", () => {
   const r = (runId, status) => ({ runId, status });
   const records = [r("p", "running"), r("c", "cancelled"), r("b", "error"), r("a", "ok")];
-  const cases = [
+  const baselines = [
     // [说明, 屏幕上是哪一次的结果, 期望跟哪一次比]
     ["屏幕上就是 a", "a", "a"],
     ["出错的那一次也算跑完", "b", "b"],
@@ -66,12 +63,9 @@ test("还没跑的改动跟哪一次比：屏幕上那次结果的记录；不�
     ["还在跑", "p", "b"],
     ["还没有结果", null, "b"],
   ];
-  for (const [name, shown, want] of cases) assert.equal(pendingBase(records, shown)?.runId ?? null, want, name);
+  for (const [name, shown, want] of baselines) assert.equal(pendingBase(records, shown)?.runId ?? null, want, name);
   assert.equal(pendingBase([r("c", "cancelled"), r("p", "running")], "c"), null, "一条跑完的都没有");
-  const d = diffRuns({ doc: base, params: { thr: 1 } }, {
-    doc: withNodes([{ ...base.nodes[0], bypass: true }, { ...base.nodes[1], params: { leafSize: [0.03, 0.03, 0.03] } }]),
-    params: { thr: 2 },
-  }, ops);
+  const d = diffRuns(rec(base), rec(withNodes([{ ...base.nodes[0], bypass: true }, { ...base.nodes[1], params: { leafSize: [0.03, 0.03, 0.03] } }]), { thr: 2 }), ops);
   assert.deepEqual([changeCount(d), d.changes.map((c) => [c.id, c.name, c.param])],
     [3, [["v", "leafSize", "Leaf Size"], ["gp:thr", "thr", "阈值"]]], "两个参数 + 一处静音；带着参数名（改回去要用）");
 });

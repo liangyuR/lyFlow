@@ -18,16 +18,12 @@ const chain = (withPositions) => ({
   edges: [{ id: "e", from: { node: "a", port: "cloud" }, to: { node: "b", port: "cloud" } }],
 });
 
-test("缺坐标的文档会被判定为需要布局", () => {
-  assert.equal(needsInitialLayout(chain(false)), true);
-});
-
-test("坐标齐全的文档不布局，空文档也不布局", () => {
-  assert.equal(needsInitialLayout(chain(true)), false);
-  assert.equal(needsInitialLayout({ schemaVersion: 1, id: "y", nodes: [], edges: [] }), false);
-});
-
-test("自动布局给每个节点一个落点，上游排在下游左边；打开时的那一次不记撤销、不算改动（layoutLoaded）", async () => {
+test("文档布局生命周期：缺坐标判定、初始落点、手动撤销与迁移重排", async () => {
+  for (const [name, doc, want] of [
+    ["缺坐标", chain(false), true],
+    ["坐标齐全", chain(true), false],
+    ["空文档", { schemaVersion: 1, id: "y", nodes: [], edges: [] }, false],
+  ]) assert.equal(needsInitialLayout(doc), want, name);
   const moves = layoutGraph(chain(false));
   assert.equal(moves.length, 2);
   const at = Object.fromEntries(moves.map((m) => [m.id, m.position]));
@@ -36,78 +32,88 @@ test("自动布局给每个节点一个落点，上游排在下游左边；打�
   // 2026-10-04 拍板：打开文件时缺坐标排出来的那一次不算一步撤销 —— 当成文件本来就排成这样
   const { useGraphStore } = await import("../src/store/graph.ts");
   const g = () => useGraphStore.getState();
-  g().loadDoc(chain(false), "c.lyflow.json");
-  g().layoutLoaded(moves);
-  assert.deepEqual([g().doc.nodes.map((n) => n.ui?.position), g().past.length, g().dirty, g().savedDoc === g().doc],
-    [[at.a, at.b], 0, false, true], "排好了、撤销栈是空的、标题不带 *");
-  // 手动「整理布局」（Ctrl+L）照旧是一步撤销
-  g().applyLayout([{ id: "a", position: { x: 999, y: 0 } }]);
-  assert.deepEqual([g().past.length, g().dirty], [1, true]);
+  const { useRecipeStore } = await import("../src/store/recipe.ts");
+  const { useUiStore } = await import("../src/store/ui.ts");
+  const { useCompareStore } = await import("../src/store/compare.ts");
+  const before = [g(), useRecipeStore.getState(), useUiStore.getState(), useCompareStore.getState()];
+  try {
+    g().loadDoc(chain(false), "c.lyflow.json");
+    g().layoutLoaded(moves);
+    assert.deepEqual([g().doc.nodes.map((n) => n.ui?.position), g().past.length, g().dirty, g().savedDoc === g().doc],
+      [[at.a, at.b], 0, false, true], "排好了、撤销栈是空的、标题不带 *");
+    // 手动「整理布局」（Ctrl+L）照旧是一步撤销
+    g().applyLayout([{ id: "a", position: { x: 999, y: 0 } }]);
+    assert.deepEqual([g().past.length, g().dirty], [1, true]);
 
-  // 有的有坐标、有的没有（脚本往摆好的图里加了一个）：只排没坐标的，放在摆好的右边，摆好的不动
-  const mixed = chain(true);
-  mixed.nodes.push({ id: "c", op: "filter.voxel_grid" });
-  const partial = initialLayout(mixed);
-  assert.deepEqual(partial.map((m) => m.id), ["c"]);
-  assert.ok(partial[0].position.x >= 300 + 300, JSON.stringify(partial));
-  assert.deepEqual(initialLayout(chain(false)), moves, "一个坐标都没有：整张排");
-  assert.deepEqual(initialLayout(chain(true)), [], "坐标都有：不排");
+    // 有的有坐标、有的没有（脚本往摆好的图里加了一个）：只排没坐标的，放在摆好的右边，摆好的不动
+    const mixed = chain(true);
+    mixed.nodes.push({ id: "c", op: "filter.voxel_grid" });
+    const partial = initialLayout(mixed);
+    assert.deepEqual(partial.map((m) => m.id), ["c"]);
+    assert.ok(partial[0].position.x >= 300 + 300, JSON.stringify(partial));
+    assert.deepEqual(initialLayout(chain(false)), moves, "一个坐标都没有：整张排");
+    assert.deepEqual(initialLayout(chain(true)), [], "坐标都有：不排");
 
-  // 一个坐标都没有的图、迁移时又加了节点：同一步里整张重排（不然加出来的按 near 摆，压在刚排好的那一列上）；撤销回到打开时排好的样子
-  // 五个上游汇进一个节点：迁移按 near 加在它左下方的节点正好压在上游那一列上
-  const fan = { schemaVersion: 1, id: "f", nodes: [...[1, 2, 3, 4, 5].map((k) => ({ id: `p${k}`, op: "gen.synthetic" })), { id: "b", op: "filter.voxel_grid" }],
-    edges: [1, 2, 3, 4, 5].map((k) => ({ id: `e${k}`, from: { node: `p${k}`, port: "cloud" }, to: { node: "b", port: "cloud" } })) };
-  g().loadDoc(fan, "m.lyflow.json");
-  g().layoutLoaded(initialLayout(g().doc));
-  const laid = structuredClone(g().doc.nodes.map((n) => n.ui.position));
-  const action = { kind: "migration", nodeId: "b", severity: "warning", code: "migrated", message: "", op: "filter.voxel_grid", opVersion: "2.0.0",
-    params: {}, edits: { removeEdges: [], addNodes: [{ id: "x", op: "gen.synthetic", params: {}, near: "b" }], addEdges: [] } };
-  g().applyMigrations([action], (d) => layoutGraph(d));
-  const boxes = g().doc.nodes.map((n) => ({ id: n.id, ...n.ui.position }));
-  const overlap = boxes.some((p, i) => boxes.some((q, j) => i < j && Math.abs(p.x - q.x) < 220 && Math.abs(p.y - q.y) < 90));
-  assert.deepEqual([boxes.length, overlap, g().past.length], [7, false, 1], JSON.stringify(boxes));
-  g().undo();
-  assert.deepEqual(g().doc.nodes.map((n) => n.ui.position), laid);
+    // 一个坐标都没有的图、迁移时又加了节点：同一步里整张重排（不然加出来的按 near 摆，压在刚排好的那一列上）；撤销回到打开时排好的样子
+    // 五个上游汇进一个节点：迁移按 near 加在它左下方的节点正好压在上游那一列上
+    const fan = { schemaVersion: 1, id: "f", nodes: [...[1, 2, 3, 4, 5].map((k) => ({ id: `p${k}`, op: "gen.synthetic" })), { id: "b", op: "filter.voxel_grid" }],
+      edges: [1, 2, 3, 4, 5].map((k) => ({ id: `e${k}`, from: { node: `p${k}`, port: "cloud" }, to: { node: "b", port: "cloud" } })) };
+    g().loadDoc(fan, "m.lyflow.json");
+    g().layoutLoaded(initialLayout(g().doc));
+    const laid = structuredClone(g().doc.nodes.map((n) => n.ui.position));
+    const action = { kind: "migration", nodeId: "b", severity: "warning", code: "migrated", message: "", op: "filter.voxel_grid", opVersion: "2.0.0",
+      params: {}, edits: { removeEdges: [], addNodes: [{ id: "x", op: "gen.synthetic", params: {}, near: "b" }], addEdges: [] } };
+    g().applyMigrations([action], (d) => layoutGraph(d));
+    const boxes = g().doc.nodes.map((n) => ({ id: n.id, ...n.ui.position }));
+    const overlap = boxes.some((p, i) => boxes.some((q, j) => i < j && Math.abs(p.x - q.x) < 220 && Math.abs(p.y - q.y) < 90));
+    assert.deepEqual([boxes.length, overlap, g().past.length], [7, false, 1], JSON.stringify(boxes));
+    g().undo();
+    assert.deepEqual(g().doc.nodes.map((n) => n.ui.position), laid);
+  } finally {
+    useGraphStore.setState(before[0], true);
+    useRecipeStore.setState(before[1], true);
+    useUiStore.setState(before[2], true);
+    useCompareStore.setState(before[3], true);
+  }
 });
 
 // 三栏分宽度：窗口窄了两侧面板让位（右栏先缩），画布至少留 320。
 // 修前两侧都不缩：1024 宽的窗口打开参数面板，画布挤成 0，面板右边一截跑到窗口外
-test("窗口窄了两侧面板让位：右栏先缩到最窄，不够再缩左栏，画布留够最窄", () => {
+test("视口空间约束：侧栏缩窄保住画布，菜单翻转贴边并限高", () => {
   const palette = { width: 280, min: 180 };
   const panel = { width: 804, min: 360 };
-  const cases = [
+  const paneCases = [
     ["放得下：原样", 1436, palette, { width: 380, min: 260 }, { left: 280, right: 380 }],
     ["只缩右栏就够", 1020, palette, panel, { left: 280, right: 420 }],
     ["右栏到最窄，再缩左栏", 896, palette, panel, { left: 216, right: 360 }],
     ["两侧都到最窄还放不下：停在最窄，画布让", 700, palette, panel, { left: 180, right: 360 }],
     ["还没量到宽度：原样", 0, palette, panel, { left: 280, right: 804 }],
   ];
-  for (const [name, total, left, right, want] of cases) {
+  for (const [name, total, left, right, want] of paneCases) {
     assert.deepEqual(fitSidePanes(total, left, right, 320), want, name);
   }
-});
 
-// 右键菜单摆进窗口（1440 × 900 的窗口、离边 4 px）：放不下就翻到鼠标另一边，比窗口还高就贴顶限高。
-// 修前照鼠标位置往右下摆，画布下半部分右键节点时菜单大半截在窗口外
-test("右键菜单摆进窗口：放不下翻到鼠标另一边，比窗口还高就贴顶、限高", () => {
+  // 右键菜单摆进窗口（1440 × 900 的窗口、离边 4 px）：放不下就翻到鼠标另一边，比窗口还高就贴顶限高。
+  // 修前照鼠标位置往右下摆，画布下半部分右键节点时菜单大半截在窗口外
   const vp = { width: 1440, height: 900 };
   const menu = { width: 150, height: 300 };
-  const cases = [
+  const menuCases = [
     ["放得下：照鼠标位置", { x: 100, y: 100 }, menu, { left: 100, top: 100 }],
     ["下面放不下：翻到鼠标上面", { x: 100, y: 800 }, menu, { left: 100, top: 500 }],
     ["右边放不下：翻到鼠标左边", { x: 1400, y: 100 }, menu, { left: 1250, top: 100 }],
     ["翻上去还放不下：贴着窗口顶", { x: 100, y: 500 }, { width: 150, height: 600 }, { left: 100, top: 4 }],
     ["比窗口还高：贴顶、限高（里面滚）", { x: 100, y: 400 }, { width: 150, height: 1000 }, { left: 100, top: 4, maxHeight: 892 }],
   ];
-  for (const [name, at, size, want] of cases) {
+  for (const [name, at, size, want] of menuCases) {
     assert.deepEqual(placeMenu(at, size, vp), want, name);
   }
 });
 
 // 记在 localStorage 里的开关（检查器端口小节的开合）：只认 "1" / "0"，存储读不到、写不进都不报错
-test("readStoredBool / writeStoredBool：坏值当没有，存储抛异常时照样往下走", async () => {
+test("开关存储：只认0/1，坏值回退且读写异常不阻断操作", async () => {
   const { readStoredBool, writeStoredBool } = await import("../src/lib/prefs.ts");
   const mem = new Map();
+  const storageBefore = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   globalThis.localStorage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)) };
   try {
     assert.equal(readStoredBool("k"), null, "没存过");
@@ -123,7 +129,8 @@ test("readStoredBool / writeStoredBool：坏值当没有，存储抛异常时照
     assert.equal(readStoredBool("k"), null, "读不到");
     writeStoredBool("k", true); // 写不进：不抛
   } finally {
-    delete globalThis.localStorage;
+    if (storageBefore) Object.defineProperty(globalThis, "localStorage", storageBefore);
+    else delete globalThis.localStorage;
   }
 });
 

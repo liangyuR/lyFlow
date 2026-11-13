@@ -12,7 +12,7 @@ const bundles = [
   { kind: "t.Rois", fields: [{ name: "datum", type: "Box2D" }, { name: "info", type: "Record" }] },
 ];
 
-test("主预览：有一个可画的端口就显示点云场景，全是值才换成表格", () => {
+test("预览内容选择：主视图按可画端口优先，对比两侧只有值才用表格", () => {
   const cases = [
     // [说明, 输出类型, 期望, 输入类型（可选）]
     ["点云", ["PointCloud"], "cloud"],
@@ -37,9 +37,7 @@ test("主预览：有一个可画的端口就显示点云场景，全是值才�
     .map(([name, types, want, inputs]) => [name, viewerContentFor(types, bundles, inputs), want])
     .filter(([, got, want]) => got !== want);
   assert.deepEqual(wrong, [], "说明 / 实际 / 期望");
-});
 
-test("对比的两栏：一侧可画就是点云场景，两侧都只有值才是值表格", () => {
   const got = [["cloud", "cloud"], ["cloud", "value"], ["value", "cloud"], ["value", "value"]].map(
     ([a, b]) => compareContentFor(a, b),
   );
@@ -47,11 +45,11 @@ test("对比的两栏：一侧可画就是点云场景，两侧都只有值才�
 });
 
 // 换了一片云要不要重新取景（lib/viewFit）。修前每片新云都取景：重跑、在链上逐个点节点都把视角拉回斜 45°
-test("sameFrame：包围盒相交、对角线差不到 4 倍才算同一个坐标系（不重新取景）", async () => {
-  const { sameFrame } = await import("../src/lib/viewFit.ts");
+test("取景几何：坐标系变化、网格档位与标准视角保持转心和距离", async () => {
+  const { sameFrame, gridSpec, ISO_DIR, presetPosition } = await import("../src/lib/viewFit.ts");
   const box = (x0, y0, z0, x1, y1, z1) => [x0, y0, z0, x1, y1, z1];
   const base = box(0, 0, 0, 10, 10, 2);
-  const cases = [
+  const frameCases = [
     ["同一片", base, true],
     ["抽稀之后小一圈", box(0.2, 0.1, 0, 9.8, 9.9, 1.9), true],
     ["只截了一部分（大小差 3 倍）", box(0, 0, 0, 3.5, 3.5, 1), true],
@@ -60,13 +58,9 @@ test("sameFrame：包围盒相交、对角线差不到 4 倍才算同一个坐�
     ["小到 1/10（差 10 倍）", box(0, 0, 0, 1, 1, 0.2), false],
     ["退化成一个点、与一片云", box(5, 5, 1, 5, 5, 1), false],
   ];
-  for (const [name, other, want] of cases) assert.equal(sameFrame(base, other), want, name);
-});
+  for (const [name, other, want] of frameCases) assert.equal(sameFrame(base, other), want, name);
 
-// 预览的网格跟着云走（lib/viewFit 的 gridSpec）
-test("gridSpec：格子 1/2/5、云上 10–25 格、居中在整格上、铺在最低处、没重新取景时不换档", async () => {
-  const { gridSpec } = await import("../src/lib/viewFit.ts");
-  const cases = [
+  const gridCases = [
     // [说明, 包围盒, 上一次的格子, 期望的格子, 期望的文字]
     ["1.2 m 的云", [0, 0, 0, 1.2, 0.5, 0.25], null, 0.1, "格 100 mm"],
     ["±5 cm（Float32 的尾巴不露出来）", Float32Array.from([-0.05, -0.05, 0, 0.05, 0.05, 0.02]), null, 0.01, "格 10 mm"],
@@ -78,7 +72,7 @@ test("gridSpec：格子 1/2/5、云上 10–25 格、居中在整格上、铺在
     ["没重新取景：差太远了照样换档", [0, 0, 0, 0.8, 0.5, 0], 0.01, 0.05, "格 50 mm"],
   ];
   const wrong = [];
-  for (const [name, b, keep, cell, text] of cases) {
+  for (const [name, b, keep, cell, text] of gridCases) {
     const g = gridSpec(b, keep);
     if (!g || Math.abs(g.cell - cell) > cell * 1e-9 || g.text !== text) {
       wrong.push([name, g && { cell: g.cell, text: g.text }, { cell, text }]);
@@ -94,11 +88,7 @@ test("gridSpec：格子 1/2/5、云上 10–25 格、居中在整格上、铺在
   }
   assert.deepEqual(wrong, [], "说明 / 实际 / 期望");
   assert.equal(gridSpec([NaN, 0, 0, 1, 1, 1]), null, "NaN：不动");
-});
 
-// 标准视角（lib/viewFit 的 presetPosition）：绕着现在的转心转过去、距离不变
-test("presetPosition：绕同一个转心、距离不变；俯视屏幕上方是 +Y；轴测与 ⤢ 同一个方向", async () => {
-  const { ISO_DIR, presetPosition } = await import("../src/lib/viewFit.ts");
   const target = [1, 2, 3];
   const from = [4, -2, 3]; // 离转心 5
   const unit = (v) => {
@@ -106,13 +96,13 @@ test("presetPosition：绕同一个转心、距离不变；俯视屏幕上方是
     return v.map((x) => x / n);
   };
   const iso = unit(ISO_DIR);
-  const cases = [
+  const presetCases = [
     // [视角, 期望的方向（从转心指向相机）]
     ["front", [0, -1, 0]],
     ["side", [1, 0, 0]],
     ["iso", iso],
   ];
-  for (const [view, dir] of cases) {
+  for (const [view, dir] of presetCases) {
     const p = presetPosition(view, target, from);
     const got = unit([p[0] - target[0], p[1] - target[1], p[2] - target[2]]);
     assert.ok(got.every((v, i) => Math.abs(v - dir[i]) < 1e-9), `${view}：${got}`);
@@ -123,8 +113,8 @@ test("presetPosition：绕同一个转心、距离不变；俯视屏幕上方是
 });
 
 // 预览的显示设置（lib/viewPrefs）：读回存着的那一份时逐项校验；手动着色范围按着色模式分开记
-test("显示设置读回：坏的那一项回到默认，别的照用", async () => {
-  const { DEFAULT_VIEWER_PREFS: d, parseViewerPrefs } = await import("../src/lib/viewPrefs.ts");
+test("显示设置生命周期：损坏项回退、着色范围隔离及存储读写", async () => {
+  const { DEFAULT_VIEWER_PREFS: d, parseViewerPrefs, rangeFor, withRangeAuto, withRangeEnd, rangeDigits, roundTo, VIEWER_PREFS_KEY } = await import("../src/lib/viewPrefs.ts");
   const good = { shading: "height", ramp: "jet", pointSize: 2.4, maxPoints: 500_000 };
   const cases = [
     ["没存过", null, d],
@@ -138,10 +128,7 @@ test("显示设置读回：坏的那一项回到默认，别的照用", async ()
     ["显示点数不在可选项里", JSON.stringify({ ...good, maxPoints: 123 }), { ...good, maxPoints: d.maxPoints }],
   ];
   for (const [name, raw, want] of cases) assert.deepEqual(parseViewerPrefs(raw), want, name);
-});
 
-test("手动着色范围：只改当前着色那一份，另一个界取当前值；「自动」只清当前那一份", async () => {
-  const { rangeFor, withRangeAuto, withRangeEnd } = await import("../src/lib/viewPrefs.ts");
   const autoI = [0, 255];
   const autoH = [-1, 3];
   let m = {};
@@ -156,27 +143,29 @@ test("手动着色范围：只改当前着色那一份，另一个界取当前�
   assert.equal(withRangeAuto(m, "normal"), m, "本来就是自动：原样返回");
 
   // 范围框的小数位随跨度走（米为单位）：亚毫米的高度范围两端不能显示成同一个数，取整差不过跨度的千分之一
-  const { rangeDigits, roundTo } = await import("../src/lib/viewPrefs.ts");
   for (const [lo, hi, want] of [[0, 255, 3], [0, 1, 3], [0.0101, 0.0104, 7], [-0.0003, 0.0004, 7], [5, 5, 3], [0, Infinity, 3]]) {
     assert.equal(rangeDigits(lo, hi), want, `${lo}–${hi}`);
   }
-  const d = rangeDigits(0.0101, 0.0104);
-  assert.ok(roundTo(0.0101, d) < roundTo(0.0104, d), "两端显示得出差别");
-});
+  const digits = rangeDigits(0.0101, 0.0104);
+  assert.ok(roundTo(0.0101, digits) < roundTo(0.0104, digits), "两端显示得出差别");
 
-test("启动时从 localStorage 读回显示设置，改了就写回去", async () => {
-  const { VIEWER_PREFS_KEY } = await import("../src/lib/viewPrefs.ts");
   const stored = { shading: "height", ramp: "gray", pointSize: 3, maxPoints: 500_000 };
   const mem = new Map([[VIEWER_PREFS_KEY, JSON.stringify(stored)]]);
+  const storageBefore = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  let restoreUi = () => {};
   globalThis.localStorage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
   try {
     // 这个文件里别处没引过 ui store：这里才第一次加载，初值就从上面这份存储里读
     const { useUiStore } = await import("../src/store/ui.ts");
+    const uiBefore = useUiStore.getState();
+    restoreUi = () => useUiStore.setState(uiBefore, true);
     assert.deepEqual(useUiStore.getState().viewerPrefs, stored);
     useUiStore.getState().setViewerPrefs({ pointSize: 2 });
     assert.deepEqual(JSON.parse(mem.get(VIEWER_PREFS_KEY)), { ...stored, pointSize: 2 });
   } finally {
-    delete globalThis.localStorage;
+    restoreUi();
+    if (storageBefore) Object.defineProperty(globalThis, "localStorage", storageBefore);
+    else delete globalThis.localStorage;
   }
 });
 
@@ -284,4 +273,3 @@ test("量测读数：节点底栏写四位有效数字 + 单位与判定，悬�
   assert.deepEqual([worstTone(outputs), worstTone([m("a", 1, { verdict: "ok" }), m("b", 2, { verdict: "margin" })]), worstTone([outputs[0]])],
     ["ng", "margin", null]);
 });
-
