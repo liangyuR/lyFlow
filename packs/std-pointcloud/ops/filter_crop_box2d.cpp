@@ -35,9 +35,18 @@ void registerFilterCropBox2D(Registry& r) {
   OperatorDesc op;
   op.id = "filter.crop_box2d";
   op.version = "1.0.0";
-  op.label = "裁剪框 2D";
+  op.label = "二维矩形裁剪";
   op.category = "过滤/裁剪";
-  op.keywords = {"crop", "box", "roi", "2d", "裁剪", "感兴趣区域"};
+  op.keywords = {"2D rectangular cropping",
+                 "XY crop box",
+                 "ROI",
+                 "二维裁剪",
+                 "矩形区域",
+                 "感兴趣区域",
+                 "crop",
+                 "box",
+                 "2d",
+                 "裁剪"};
   op.doc = "按 Box2D 在 XY 平面上裁剪（z 不参与）。\n"
            "Bounds 选 open 就是四边严格不等 —— 线扫量测域的既有语义，"
            "落在边上的点会被丢掉，非有限点也因为比较恒假而一并丢掉。裁空报 roi_empty。";

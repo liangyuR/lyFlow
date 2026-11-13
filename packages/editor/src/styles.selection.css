@@ -1,0 +1,27 @@
+.selection-toolbar.qs-popover {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12);
+  white-space: nowrap;
+}
+
+.selection-toolbar__count {
+  padding-right: var(--space-4);
+  color: var(--on-surface-variant);
+  font: var(--text-label);
+}
+
+.selection-toolbar__count strong {
+  padding-inline: 2px;
+  color: var(--on-surface);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.selection-toolbar__divider {
+  width: 1px;
+  height: 20px;
+  margin-inline: var(--space-4);
+  background: var(--outline-variant);
+}

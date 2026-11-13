@@ -65,7 +65,8 @@ export interface Scene {
 export function createScene(host: HTMLDivElement): Scene {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setClearColor(0x11141a, 1);
+  const theme = getComputedStyle(host);
+  renderer.setClearColor(theme.getPropertyValue('--surface-lowest').trim(), 1);
   host.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -233,7 +234,12 @@ export function createScene(host: HTMLDivElement): Scene {
         scene.remove(grid);
         disposeHelper(grid);
         // 中心不在原点了：中心线与别的线同一个颜色（不然像是坐标轴）
-        grid = new THREE.GridHelper(spec.cell * spec.divisions, spec.divisions, 0x232a33, 0x232a33);
+        grid = new THREE.GridHelper(
+          spec.cell * spec.divisions,
+          spec.divisions,
+          new THREE.Color(theme.getPropertyValue('--outline-variant').trim()),
+          new THREE.Color(theme.getPropertyValue('--outline-variant').trim()),
+        );
         grid.rotation.x = Math.PI / 2; // GridHelper 默认躺在 XZ 面上，转到 XY
         // 永远先画、不写深度：2D 剖面里网格与最底下那层点的深度分不开（正交相机的深度精度不够），
         // 后建的网格会压在点上，重跑时还一会儿压一会儿不压

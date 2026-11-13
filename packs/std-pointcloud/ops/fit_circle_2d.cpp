@@ -71,9 +71,20 @@ void registerFitCircle2D(Registry& r) {
   OperatorDesc op;
   op.id = "fit.circle_2d";
   op.version = "1.0.0";
-  op.label = "拟合圆 2D";
+  op.label = "二维圆拟合";
   op.category = "拟合/圆";
-  op.keywords = {"circle", "ransac", "fit", "2d", "圆", "拟合"};
+  op.keywords = {"2D circle fitting",
+                 "RANSAC circle",
+                 "fixed radius fitting",
+                 "二维圆弧拟合",
+                 "随机采样一致性",
+                 "定半径拟合",
+                 "circle",
+                 "ransac",
+                 "fit",
+                 "2d",
+                 "圆",
+                 "拟合"};
   op.doc = "在 XY 平面上拟合一个圆（PCL 的 SACMODEL_CIRCLE2D）。\n"
            "Fixed Radius 大于 0 时半径被钉死：先按上下限拟合一次，"
            "再用定半径最小二乘重定圆心并按新圆重筛内点。";

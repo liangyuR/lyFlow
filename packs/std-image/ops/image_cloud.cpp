@@ -222,7 +222,19 @@ void registerCloudFromDepth(Registry& r) {
   op.version = "1.0.0";
   op.label = "深度图转点云";
   op.category = "图像/转换";
-  op.keywords = {"depth", "point cloud", "rgbd", "deproject", "深度图", "点云", "反投影"};
+  op.keywords = {"depth image to point cloud",
+                 "depth back projection",
+                 "deprojection",
+                 "RGB-D",
+                 "反投影",
+                 "深度重建",
+                 "相机内参",
+                 "depth",
+                 "point cloud",
+                 "rgbd",
+                 "deproject",
+                 "深度图",
+                 "点云"};
   op.doc = "按针孔内参把深度图反投影成点云（相机坐标系：x 右、y 下、z 前，米）。0、非有限值、"
            "深度范围外的像素不出点。接了 color（与深度图同样大、已配准的 RGB 图）就给点上色。"
            "要换到世界坐标系接 transform.apply。";
@@ -260,7 +272,18 @@ void registerCloudToDepthImage(Registry& r) {
   op.version = "1.0.0";
   op.label = "点云转深度图";
   op.category = "图像/转换";
-  op.keywords = {"depth", "project", "range image", "深度图", "投影", "点云"};
+  op.keywords = {"point cloud to depth image",
+                 "depth projection",
+                 "range image",
+                 "z-buffer",
+                 "深度投影",
+                 "点云投影",
+                 "距离图",
+                 "depth",
+                 "project",
+                 "深度图",
+                 "投影",
+                 "点云"};
   op.doc =
       "按针孔内参把相机坐标系下的点云投影成深度图：一个像素落多个点取最近的，没落到点的像素是 0，"
       "z ≤ 0 与投影到图外的点丢掉；u16 输出时超出量程（取整后为 0 或大于 65535）的点也丢掉。"

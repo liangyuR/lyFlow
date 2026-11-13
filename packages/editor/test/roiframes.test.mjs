@@ -54,66 +54,56 @@ const op = {
 };
 const node = (params) => ({ id: 'n', op: 't.locate', params });
 
-test('ROI模板分组：文件/输入底图、启用槽与选择回退、参数组识别', () => {
-  {
-    const one = roiFramesOf(op, node({ templateDir: 'D:/tpl' }));
-    assert.equal(one.length, 1, '槽 2 没启用：只有槽 1 一组');
-    assert.equal(one[0].label, '模板 1 · f1');
-    assert.deepEqual(
-      one[0].params.map((p) => p.name),
-      ['t1Datum', 't1Target'],
-    );
-    assert.deepEqual(one[0].files, ['D:/tpl/l1.pcd', 'D:/tpl/r1.pcd']);
+test('ROI分组与选择生命周期：只列启用槽、保留选择或回退、检查器识别底图键', () => {
+  const one = roiFramesOf(op, node({ templateDir: 'D:/tpl' }));
+  assert.equal(one.length, 1, '槽 2 没启用：只有槽 1 一组');
+  assert.equal(one[0].label, '模板 1 · f1');
+  assert.deepEqual(
+    one[0].params.map((p) => p.name),
+    ['t1Datum', 't1Target'],
+  );
+  assert.deepEqual(one[0].files, ['D:/tpl/l1.pcd', 'D:/tpl/r1.pcd']);
 
-    const two = roiFramesOf(op, node({ templateDir: 'D:/tpl', t2Enabled: true, t2Id: 'big' }));
-    assert.deepEqual(
-      two.map((f) => f.label),
-      ['模板 1 · f1', '模板 2 · big'],
-    );
-    assert.deepEqual(
-      two[1].params.map((p) => p.name),
-      ['t2Datum', 't2Target'],
-    );
-    assert.ok(two.every((f) => f.params.every((p) => p.name !== 'overall')));
+  const two = roiFramesOf(op, node({ templateDir: 'D:/tpl', t2Enabled: true, t2Id: 'big' }));
+  assert.deepEqual(
+    two.map((f) => f.label),
+    ['模板 1 · f1', '模板 2 · big'],
+  );
+  assert.deepEqual(
+    two[1].params.map((p) => p.name),
+    ['t2Datum', 't2Target'],
+  );
+  assert.ok(two.every((f) => f.params.every((p) => p.name !== 'overall')));
 
-    // 底图是输入端口的那一种（gap.align_template 的模板从 tplLeft / tplRight 进来）：一组、没有文件
-    const byPort = (name) => ({
-      ...roi(name, 0),
-      roiBackdrop: { inputs: ['tplLeft', 'tplRight'] },
-    });
-    const align = { ...op, id: 't.align', params: [byPort('base'), byPort('gap')] };
-    const frames = roiFramesOf(align, { id: 'a', op: 't.align', params: {} });
-    assert.deepEqual(
-      frames.map((f) => ({
-        key: f.key,
-        files: f.files,
-        inputs: f.inputs,
-        params: f.params.map((p) => p.name),
-      })),
-      [
-        {
-          key: 'inputs|tplLeft,tplRight',
-          files: [],
-          inputs: ['tplLeft', 'tplRight'],
-          params: ['base', 'gap'],
-        },
-      ],
-    );
-  }
-  {
-    const two = roiFramesOf(op, node({ t2Enabled: true }));
-    assert.equal(pickFrame(two, two[1].key).label, '模板 2 · f2');
-    const one = roiFramesOf(op, node({}));
-    assert.equal(pickFrame(one, two[1].key).label, '模板 1 · f1');
-    assert.equal(pickFrame([], 'x'), null);
-  }
-  {
-    const slot2 = op.params.filter((p) => p.group === '模板槽 2');
-    const key = frameKeyOfGroup(slot2);
-    const two = roiFramesOf(op, node({ t2Enabled: true }));
-    assert.equal(key, two[1].key);
-    assert.equal(frameKeyOfGroup([op.params[0]]), null);
-  }
+  // 底图是输入端口的那一种（gap.align_template 的模板从 tplLeft / tplRight 进来）：一组、没有文件
+  const byPort = (name) => ({ ...roi(name, 0), roiBackdrop: { inputs: ['tplLeft', 'tplRight'] } });
+  const align = { ...op, id: 't.align', params: [byPort('base'), byPort('gap')] };
+  const frames = roiFramesOf(align, { id: 'a', op: 't.align', params: {} });
+  assert.deepEqual(
+    frames.map((f) => ({
+      key: f.key,
+      files: f.files,
+      inputs: f.inputs,
+      params: f.params.map((p) => p.name),
+    })),
+    [
+      {
+        key: 'inputs|tplLeft,tplRight',
+        files: [],
+        inputs: ['tplLeft', 'tplRight'],
+        params: ['base', 'gap'],
+      },
+    ],
+  );
+
+  assert.equal(pickFrame(two, two[1].key).label, '模板 2 · big', '保留仍启用的槽选择');
+  assert.equal(pickFrame(one, two[1].key).label, '模板 1 · f1', '关闭所选槽后退回第一组');
+  assert.equal(pickFrame([], 'x'), null);
+
+  const slot2 = op.params.filter((p) => p.group === '模板槽 2');
+  const key = frameKeyOfGroup(slot2);
+  assert.equal(key, two[1].key, '检查器识别槽的底图键');
+  assert.equal(frameKeyOfGroup([op.params[0]]), null);
 });
 
 test('复制到其它槽：按组内顺序一一对应、值取当前组的有效值，只写启用的槽', () => {

@@ -134,9 +134,22 @@ void registerEdgeDistance(Registry& r) {
   OperatorDesc op;
   op.id = "glue.edge_distance";
   op.version = "1.0.0";
-  op.label = "量边距";
+  op.label = "胶路边距测量";
   op.category = "涂胶/积木";
-  op.keywords = {"glue", "bead", "edge", "distance", "margin", "涂胶", "边距", "零件边", "积木"};
+  op.keywords = {"glue bead edge distance",
+                 "edge clearance measurement",
+                 "margin measurement",
+                 "胶边距",
+                 "零件边距",
+                 "胶路偏距",
+                 "glue",
+                 "bead",
+                 "edge",
+                 "distance",
+                 "margin",
+                 "涂胶",
+                 "边距",
+                 "零件边"};
   op.doc =
       "胶靠零件边那一侧的胶边 → 零件边，沿胶路法向量（reference = bead_center 时从胶的中线量）。"
       "零件边在哪一侧自动判：每个有胶的站两侧都找，取多数站找到强边的那一侧（D8，不设人要填的 side）。\n"

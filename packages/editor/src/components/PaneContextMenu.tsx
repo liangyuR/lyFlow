@@ -46,7 +46,7 @@ export function PaneContextMenu({
   return (
     <div
       ref={box}
-      className="ctxmenu"
+      className="qs-popover ctxmenu"
       style={style}
       data-testid="pane-context-menu"
       onClick={(e) => e.stopPropagation()}

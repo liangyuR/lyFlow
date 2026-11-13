@@ -63,9 +63,20 @@ void registerSealDome(Registry& r) {
   OperatorDesc op;
   op.id = "dts.seal_dome";
   op.version = "1.0.0";
-  op.label = "胶条主体";
+  op.label = "胶条主体提取";
   op.category = "DTS/胶条";
-  op.keywords = {"seal", "dome", "circle", "胶条", "凸起", "圆"};
+  op.keywords = {"seal dome extraction",
+                 "seal body detection",
+                 "circle fitting",
+                 "胶条凸起",
+                 "顶点轴",
+                 "圆拟合",
+                 "seal",
+                 "dome",
+                 "circle",
+                 "胶条",
+                 "凸起",
+                 "圆"};
   op.doc = "找胶条主体那个凸起：宽高合适、顶部圆拟合半径落在范围内的最显著凸包。\n"
            "顶点轴 = 圆心 → 顶点，是挑钣金面时量角度的参照。实测它比两端脊点的连线稳一个数量级\n"
            "（绝对角 std 1.9° 对 14.8°），因为圆拟合吃的是顶部两百多个点，不由两个端点决定。";

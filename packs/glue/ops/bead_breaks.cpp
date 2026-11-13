@@ -115,9 +115,20 @@ void registerBeadBreaks(Registry& r) {
   OperatorDesc op;
   op.id = "glue.bead_breaks";
   op.version = "1.0.0";
-  op.label = "查断胶";
+  op.label = "断胶检测";
   op.category = "涂胶/积木";
-  op.keywords = {"glue", "bead", "break", "gap", "涂胶", "断胶", "积木"};
+  op.keywords = {"glue bead break detection",
+                 "adhesive discontinuity",
+                 "gap detection",
+                 "胶路连续性",
+                 "断胶缺陷",
+                 "断口检测",
+                 "glue",
+                 "bead",
+                 "break",
+                 "gap",
+                 "涂胶",
+                 "断胶"};
   op.doc =
       "胶路上连续无胶的站连成一段，长度 ≥ minLength 就是一处断胶（D7：一根卡尺偶发失手不报缺陷）。"
       "一段断口从它第一个无胶站往前半个站距起、到最后一个无胶站往后半个站距止，夹在检测区里；"

@@ -261,7 +261,8 @@ const std::set<std::string>& blockOps() {
 
 TEST_CASE("积木算子与细粒度算子同源：细粒度算子注册的 compute 就是积木算子调的那个包内函数") {
   namespace fine = packs::gap::fine;
-  const std::pair<const char*, ComputeFn> pairs[] = {
+  using NativeComputeFn = decltype(&fine::loadPair);
+  const std::pair<const char*, NativeComputeFn> pairs[] = {
       {"gap.load_profile_pair", &fine::loadPair},
       {"gap.to_measurement_frame", &fine::toMeasurementFrame},
       {"gap.load_template", &fine::loadTemplate},
@@ -284,7 +285,9 @@ TEST_CASE("积木算子与细粒度算子同源：细粒度算子注册的 compu
     CAPTURE(id);
     const OperatorDesc* op = packRegistry().find(id);
     REQUIRE(op != nullptr);
-    CHECK(op->compute == fn);
+    const auto* target = op->compute.target<NativeComputeFn>();
+    REQUIRE(target != nullptr);
+    CHECK(*target == fn);
   }
   // 校验钩子也是同一个：role_line / seam_circles / datum_direction 直接挂细粒度算子的
   CHECK(packRegistry().find("gap.role_line")->validate ==

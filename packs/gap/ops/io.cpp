@@ -172,9 +172,20 @@ void registerLoadProfilePair(Registry& r) {
   OperatorDesc op;
   op.id = "gap.load_profile_pair";
   op.version = "1.0.0";
-  op.label = "加载剖面对";
+  op.label = "双相机剖面加载";
   op.category = "间隙/输入输出";
-  op.keywords = {"pcd", "profile", "master", "slave", "线扫", "测点"};
+  op.keywords = {"dual camera profile loading",
+                 "profile pair input",
+                 "PCD",
+                 "line scan",
+                 "双头线扫",
+                 "剖面读取",
+                 "原始剖面",
+                 "profile",
+                 "master",
+                 "slave",
+                 "线扫",
+                 "测点"};
   op.doc = "读一个测点目录下的双头线扫剖面：Master 是 primary，Slave 是 secondary。"
            "输出恒为传感器 XZ 帧的米（x=u, y=0, z=h）；归档成剖面布局（x=u, y=h, z=0）的 PCD "
            "用 layout=profile 声明，读入时把 y 搬到 z、y 置 0，其他通道原样 —— 不声明的话下游"
@@ -244,9 +255,19 @@ void registerToMeasurementFrame(Registry& r) {
   OperatorDesc op;
   op.id = "gap.to_measurement_frame";
   op.version = "1.0.0";
-  op.label = "转换到测量帧";
+  op.label = "测量坐标系转换";
   op.category = "间隙/预处理";
-  op.keywords = {"axis", "swap", "frame", "换轴", "测量帧"};
+  op.keywords = {"measurement frame conversion",
+                 "axis swap",
+                 "XZ to XY",
+                 "coordinate conversion",
+                 "坐标轴交换",
+                 "传感器坐标系",
+                 "测量坐标系",
+                 "axis",
+                 "swap",
+                 "frame",
+                 "测量帧"};
   op.doc = "传感器 XZ 帧 → 测量 XY 帧：交换 y 与 z（swapCloudAxis）。这是反射不是旋转，手性会翻，"
            "不要拿它当刚体变换用；已经在测量帧里的云（比如模板）再走一遍会把高度搬回 z。";
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "传感器帧的点云。", true}};
@@ -260,9 +281,16 @@ void registerLoadTemplate(Registry& r) {
   OperatorDesc op;
   op.id = "gap.load_template";
   op.version = "1.0.0";
-  op.label = "加载模板";
+  op.label = "剖面模板加载";
   op.category = "间隙/输入输出";
-  op.keywords = {"template", "模板", "pcd"};
+  op.keywords = {"profile template loading",
+                 "template pair input",
+                 "PCD",
+                 "模板点云",
+                 "双侧模板",
+                 "模板读取",
+                 "template",
+                 "模板"};
   op.doc = "读一对模板 PCD。模板已经在测量 XY 帧里（z=0），不要再接 gap.to_measurement_frame。"
            "模板必须与当前样本出自同一个配置：对不上时 ICP 照样给分，只是配到了别的形状上。";
   op.outputs = {

@@ -96,9 +96,19 @@ void registerFilterCropBox(Registry& r) {
   OperatorDesc op;
   op.id = "filter.crop_box";
   op.version = "1.0.0";
-  op.label = "裁剪框";
+  op.label = "三维包围盒裁剪";
   op.category = "过滤/裁剪";
-  op.keywords = {"crop", "box", "roi", "aabb", "裁剪", "包围盒", "感兴趣区域"};
+  op.keywords = {"3D bounding box cropping",
+                 "crop box",
+                 "AABB",
+                 "OBB",
+                 "三维裁剪",
+                 "包围盒",
+                 "感兴趣区域",
+                 "crop",
+                 "box",
+                 "roi",
+                 "裁剪"};
   op.doc = "用一个长方体裁剪点云。接了 Pose 输入时，盒子定义在该变换的局部坐标系里。";
 
   op.inputs = {

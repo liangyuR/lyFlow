@@ -92,9 +92,21 @@ void registerSynthBreak(Registry& r) {
   OperatorDesc op;
   op.id = "glue.synth_break";
   op.version = "1.0.0";
-  op.label = "人造断胶";
+  op.label = "断胶缺陷合成";
   op.category = "涂胶/工具";
-  op.keywords = {"glue", "synthetic", "break", "test", "涂胶", "断胶", "人造", "自测"};
+  op.keywords = {"synthetic glue break",
+                 "adhesive defect synthesis",
+                 "synthetic defect",
+                 "断胶仿真",
+                 "缺陷合成",
+                 "测试数据生成",
+                 "glue",
+                 "synthetic",
+                 "break",
+                 "test",
+                 "涂胶",
+                 "断胶",
+                 "自测"};
   op.doc =
       "验收与自测用：在一帧满胶图上人造一段断胶。把胶路一侧干净的背景平移过来盖住 s ∈ [sStart, sStart + length] "
       "那一段胶，羽化约 3 px；两侧都试，源带里响应 > contrastMin 的采样超过 dirtyMax 就换一侧，两侧都不干净就不做"

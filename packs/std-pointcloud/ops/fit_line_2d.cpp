@@ -93,9 +93,20 @@ void registerFitLine2D(Registry& r) {
   OperatorDesc op;
   op.id = "fit.line_2d";
   op.version = "1.0.0";
-  op.label = "拟合直线 2D";
+  op.label = "二维直线拟合";
   op.category = "拟合/直线";
-  op.keywords = {"line", "ransac", "fit", "2d", "直线", "拟合"};
+  op.keywords = {"2D line fitting",
+                 "RANSAC line",
+                 "line regression",
+                 "直线拟合",
+                 "线段拟合",
+                 "随机采样一致性",
+                 "line",
+                 "ransac",
+                 "fit",
+                 "2d",
+                 "直线",
+                 "拟合"};
   op.doc = "在 XY 平面上拟合一条直线（z 不参与）。RANSAC 的 random 关掉，同输入同结果。\n"
            "线扫剖面常带两条近平行的迹线：假设选择用 1/3 阈值隔出单条，"
            "再在补集里搜一次伴线，两条平行且间距合理时取靠上那条。";

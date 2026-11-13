@@ -299,9 +299,11 @@ void registerFlush(Registry& r) {
   OperatorDesc op;
   op.id = "gap.flush";
   op.version = "1.1.0";
-  op.label = "面差";
+  op.label = "面差测量";
   op.category = "间隙/测量";
-  op.keywords = {"flush", "段差", "面差"};
+  op.keywords = {
+      "flush measurement", "flushness", "step height", "perpendicular distance", "段差", "高度差",
+      "垂直距离",          "flush"};
   op.doc = "段差 = 参考点到基准线的带符号垂距 × scale + offset（参考点在基准线上方为正；"
            "signed 关掉时取绝对值）。"
            "基准线的方向完全来自上游拟合：基准面拟歪了，垂距连带 scale 一起错。";
@@ -345,9 +347,15 @@ void registerGap(Registry& r) {
   OperatorDesc op;
   op.id = "gap.gap";
   op.version = "1.0.0";
-  op.label = "间隙";
+  op.label = "间隙测量";
   op.category = "间隙/测量";
-  op.keywords = {"gap", "间隙"};
+  op.keywords = {"gap measurement",
+                 "clearance measurement",
+                 "circle separation",
+                 "tangent distance",
+                 "缝隙宽度",
+                 "切线距离",
+                 "gap"};
   op.doc =
       "间隙。definition B 是两圆的圆心连线距离；definition A 是沿基准面方向的两条切线之间的"
       "距离，需要接带两个端点的基准线定方向。\n"
@@ -381,9 +389,20 @@ void registerCornerVertex(Registry& r) {
   OperatorDesc op;
   op.id = "gap.corner_vertex";
   op.version = "1.0.0";
-  op.label = "软装夹角";
+  op.label = "夹角接缝间隙测量";
   op.category = "间隙/测量";
-  op.keywords = {"corner", "vertex", "夹角", "软装", "间隙"};
+  op.keywords = {"corner joint gap measurement",
+                 "virtual vertex displacement",
+                 "flank line intersection",
+                 "虚拟顶点",
+                 "翼面交点",
+                 "夹角接缝",
+                 "投影位移",
+                 "corner",
+                 "vertex",
+                 "夹角",
+                 "软装",
+                 "间隙"};
   op.doc = "两件软装贴合成一个夹角时的间隙。两侧翼面各给一条拟合直线，取交点作虚拟顶点 V，"
            "间隙 = V 相对金件顶点沿基准面方向的位移。相对「两侧圆拟合」的好处是 V 由几十个点的"
            "直线拟合决定，不依赖缝边那几个受遮挡影响最大的点。\n"
@@ -450,9 +469,19 @@ void registerJudge(Registry& r) {
   OperatorDesc op;
   op.id = "gap.judge";
   op.version = "1.0.0";
-  op.label = "判定";
+  op.label = "间隙面差判定";
   op.category = "间隙/测量";
-  op.keywords = {"judge", "tolerance", "判定", "公差"};
+  op.keywords = {"gap and flush judgement",
+                 "tolerance check",
+                 "quality verdict",
+                 "OK",
+                 "NG",
+                 "公差判定",
+                 "质量判定",
+                 "巡检",
+                 "judge",
+                 "tolerance",
+                 "公差"};
   op.doc = "按标称值与上下偏差判定，不做任何统计；上游 ok=false 或值非有限一律判 fail。"
            "margin 是「接近边界」的宽度，patrol 是巡检模式：超差只标 margin，不判 NG —— "
            "那时 verdict 里分不出「接近边界」和「已经超差」。";

@@ -310,9 +310,20 @@ void registerJudge(Registry& r) {
   OperatorDesc op;
   op.id = "glue.judge";
   op.version = "1.0.0";
-  op.label = "判定";
+  op.label = "涂胶质量判定";
   op.category = "涂胶/积木";
-  op.keywords = {"glue", "bead", "judge", "verdict", "ok", "ng", "涂胶", "判定", "积木"};
+  op.keywords = {"glue inspection judgement",
+                 "adhesive quality verdict",
+                 "OK",
+                 "NG",
+                 "涂胶检测",
+                 "缺陷判定",
+                 "公差判定",
+                 "glue",
+                 "bead",
+                 "judge",
+                 "verdict",
+                 "涂胶"};
   op.doc =
       "把断胶、窄胶、宽胶、边距过近 / 过远汇成一个 OK / NG。除断胶外都是「连续 ≥ minDefectLength 的同类站」"
       "才算一处缺陷（D7）；断胶由 bead_breaks 按它的 minLength 连好，比 maxBreak 长的判 NG。"

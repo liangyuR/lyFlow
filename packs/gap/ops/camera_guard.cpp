@@ -212,9 +212,20 @@ void registerCameraGuard(Registry& r) {
   OperatorDesc op;
   op.id = "gap.camera_guard";
   op.version = "1.0.0";
-  op.label = "双相机闸";
+  op.label = "双相机一致性校验";
   op.category = "间隙/质量";
-  op.keywords = {"camera", "guard", "consistency", "双相机", "一致性", "二次反射"};
+  op.keywords = {"dual camera consistency check",
+                 "profile consistency",
+                 "camera guard",
+                 "双相机校验",
+                 "高度一致性",
+                 "二次反射检测",
+                 "camera",
+                 "guard",
+                 "consistency",
+                 "双相机",
+                 "一致性",
+                 "二次反射"};
   op.doc = "比两台线扫在重叠段上的高度，判断它们看到的是不是同一个面；不是的话把不可信的那台"
            "挡在模型之前。**串在 gap.load_profile_pair 与下游之间**，两台一致时原样透传，"
            "下游完全无感。\n"

@@ -84,7 +84,7 @@ function model(d = doc(), diagnostics = NO_DIAGNOSTICS) {
 const view = (m, filter = {}) =>
   flattenPanel(m, { query: '', chip: 'all', type: null, toggled: {}, ...filter });
 
-test('参数面板模型：可见行全集、共享子图与已改动/配方chip计数', () => {
+test('参数面板模型：可见参数与实例展开生成全集，改动和配方chip共享该模型', () => {
   const m = model();
   assert.equal(m.graphRows.length, 1);
   const [a, b, s1, s2] = m.sections;
@@ -119,7 +119,7 @@ test('参数面板模型：可见行全集、共享子图与已改动/配方chip
   assert.equal(rows[0].row.value, 3);
 });
 
-test('参数面板展开规则：联动禁用、高级组与共享子图的默认折叠', () => {
+test('面板展开契约：条件禁用、高级组与共享子图默认折叠，搜索时展开', () => {
   const m = model();
   const tolA = m.sections[0].rows.find((r) => r.param.name === 'tol');
   const tolB = m.sections[1].rows.find((r) => r.param.name === 'tol');
@@ -148,42 +148,38 @@ test('参数面板展开规则：联动禁用、高级组与共享子图的默�
   assert.ok(open.some((i) => i.kind === 'row' && i.key === 's1/in1.mode' && i.row.shared === 2));
 });
 
-test('参数面板筛选：多字段多词AND、类型过滤与节点/图参数诊断', () => {
-  {
-    const m = model();
-    const keys = (q) =>
-      view(m, { query: q })
-        .items.filter((i) => i.kind === 'row')
-        .map((i) => i.key);
-    assert.deepEqual(keys('hello'), ['b.note']);
-    assert.deepEqual(keys('甲 gain'), ['a.gain']);
-    assert.deepEqual(keys('s2 mode'), ['s2/in1.mode']);
-    assert.equal(
-      view(m, { query: 'Gain' }).counts.all,
-      5,
-      '大小写不敏感：4 个节点的 gain + 图参数 gain',
-    );
-    assert.deepEqual(
-      view(m, { query: 'zzz' }).items.map((i) => i.kind),
-      ['empty'],
-    );
-  }
-  {
-    const diagnostics = {
-      byNode: new Map([['a', new Map([['gain', [{ severity: 'error', message: '太大' }]]])]]),
-      byGraphParam: new Map([['gain', [{ severity: 'error', message: '越界' }]]]),
-    };
-    const m = model(doc(), diagnostics);
-    const v = view(m, { chip: 'diag' });
-    assert.equal(v.counts.diag, 2);
-    assert.deepEqual(
-      v.items.filter((i) => i.kind === 'row' || i.kind === 'gp-row').map((i) => i.key),
-      ['gp:gain', 'a.gain'],
-    );
-    const ints = view(m, { type: 'int' })
+test('面板筛选：参数与节点和值搜索、类型过滤及图参数/节点诊断定位', () => {
+  const diagnostics = {
+    byNode: new Map([['a', new Map([['gain', [{ severity: 'error', message: '太大' }]]])]]),
+    byGraphParam: new Map([['gain', [{ severity: 'error', message: '越界' }]]]),
+  };
+  const m = model(doc(), diagnostics);
+  const v = view(m, { chip: 'diag' });
+  assert.equal(v.counts.diag, 2);
+  assert.deepEqual(
+    v.items.filter((i) => i.kind === 'row' || i.kind === 'gp-row').map((i) => i.key),
+    ['gp:gain', 'a.gain'],
+  );
+  const ints = view(m, { type: 'int' })
+    .items.filter((i) => i.kind === 'row')
+    .map((i) => i.key);
+  assert.deepEqual(ints, ['a.seed', 'b.extra', 'b.seed', 's1/in1.seed', 's2/in1.seed']);
+  assert.equal(view(m).counts.byType.int, 5);
+
+  const keys = (q) =>
+    view(m, { query: q })
       .items.filter((i) => i.kind === 'row')
       .map((i) => i.key);
-    assert.deepEqual(ints, ['a.seed', 'b.extra', 'b.seed', 's1/in1.seed', 's2/in1.seed']);
-    assert.equal(view(m).counts.byType.int, 5);
-  }
+  assert.deepEqual(keys('hello'), ['b.note']);
+  assert.deepEqual(keys('甲 gain'), ['a.gain']);
+  assert.deepEqual(keys('s2 mode'), ['s2/in1.mode']);
+  assert.equal(
+    view(m, { query: 'Gain' }).counts.all,
+    5,
+    '大小写不敏感：4 个节点的 gain + 图参数 gain',
+  );
+  assert.deepEqual(
+    view(m, { query: 'zzz' }).items.map((i) => i.kind),
+    ['empty'],
+  );
 });

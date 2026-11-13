@@ -234,7 +234,19 @@ void registerImageToTensor(Registry& r) {
   op.version = "1.0.0";
   op.label = "图像转张量";
   op.category = "图像/转换";
-  op.keywords = {"tensor", "onnx", "preprocess", "nchw", "张量", "预处理", "推理"};
+  op.keywords = {"image to tensor",
+                 "image preprocessing",
+                 "NCHW",
+                 "NHWC",
+                 "ONNX",
+                 "图像张量转换",
+                 "模型预处理",
+                 "通道归一化",
+                 "tensor",
+                 "preprocess",
+                 "张量",
+                 "预处理",
+                 "推理"};
   op.doc = "推理前的预处理：值 × scale，再按通道 (v − mean) / std，排成指定布局的 float32 张量。"
            "u8 图像配 ImageNet 模型的常见写法：scale = 1/255，mean = (0.485, 0.456, 0.406)，"
            "std = (0.229, 0.224, 0.225)。尺寸先接 image.resize 调好。";
@@ -271,7 +283,18 @@ void registerTensorToImage(Registry& r) {
   op.version = "1.0.0";
   op.label = "张量转图像";
   op.category = "图像/转换";
-  op.keywords = {"tensor", "image", "mask", "张量", "图像", "分割结果"};
+  op.keywords = {"tensor to image",
+                 "tensor visualization",
+                 "segmentation mask",
+                 "张量图像转换",
+                 "分割掩膜",
+                 "热力图",
+                 "tensor",
+                 "image",
+                 "mask",
+                 "张量",
+                 "图像",
+                 "分割结果"};
   op.doc =
       "把张量（分割掩膜、热力图、生成的图）读成图像。批里取一张；u8 时按这一张的范围拉到 0..255，"
       "f32 原值保留。通道要是 1 / 3 / 4。";

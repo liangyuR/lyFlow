@@ -43,10 +43,12 @@ pnpm e2e
 |---|---|---|---|
 | C++ core + 算子包（doctest） | `pnpm core:build`（`pnpm check` 第一步） | 默认 186 例；`LYFLOW_PACKS=dts` 194 例；`LYFLOW_PACKS=gap;dts` 276 例；`LYFLOW_PACKS=gap` 280 例（2026-10-12 实测，含相切带新增的 1 例；另外三种构建这次没重跑） | 分钟级（含编译） |
 | Rust bridge / CLI（`cargo test`） | `pnpm check` 的 Rust 步骤 | lib 154（纯平台构建 95 通过 / 59 ignored）；`tests/host.rs` 13（默认 11 通过 / 2 ignored，要 `LYFLOW_PACKS=dts` 才全跑）；`tests/disk_cache.rs` 2（真起两次 `lyflow` 进程验落盘缓存；纯平台构建 1 通过 / 1 ignored） | < 1 分钟（已编译时） |
-| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 98（按功能契约收敛，包含 PythonNode，22 文件全执行） | 秒级 |
+| editor 纯逻辑（node:test） | `pnpm --filter @lyflow/editor test` | 94（24 个文件，包含工作区与 PythonNode 契约，全部执行） | 秒级 |
 | MCP（node:test） | `pnpm --filter @lyflow/mcp test` | 35（2026-10-08） | 秒级 |
 | 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 971 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 34 条断言（精简前 58） | 几分钟 |
+
+自定义桌面标题栏在 `scripts/e2e/m3.mjs` 的 `suitePanels` 验证：关闭系统装饰、合并工作流标签与窗口按钮、最大化 / 双击还原、最小化与焦点恢复，以及点击关闭后取消未保存确认仍保留窗口和改动。
 
 ## CI（GitHub Actions）
 
@@ -110,7 +112,7 @@ C++ doctest 已在 `core/CMakeLists.txt` 中通过 `enable_testing()` 和 `add_t
 | 子图、库算子（含展开为内联子图：定义去掉 id、内联后逐位相同；库目录设置：`bridge/src/library_settings.rs` 单测、e2e m4 面板增删 + CLI 同读 + 「浏览…」选目录（文件对话框是 run.mjs 装的桩）） | `core/tests/test_subgraph.cpp`；`packages/editor/test/graph-params-actions.test.mjs`（合成 / 解散 / 展开库算子的 store 动作）；e2e `m4.mjs` |
 | 多选同一种算子一起改参数（`setParamMany`：每个节点照 `setParam` 路由、一条撤销、并进拖动的外层事务）；撤销记录写节点名字与参数 label（拖动、挪节点不给名字时按实际改了什么起名）、撤销历史列表（`travel(n)` 与连按 n 次一样、`historyRows` 标出存盘的那一步）在 `graph-params-actions.test.mjs`，真点 ▾ 一次走两步、Esc 收起在 e2e `m3.mjs` 的 `suiteEditing` | `packages/editor/test/graph-params-actions.test.mjs`；真界面（标「不同」、拖一下两个都变、一条撤销）在 e2e `m3.mjs` 的 `suiteEditing` |
 | 拖线时的即时挡错（P0 #7 端口类型、#16 环检测、E6 Any 推导；`compatibleTargets` / `compatibleSources` 的置灰表；松在节点身子上接哪个端口的 `dropOnNode`、松在一个具体端口上只判它的 `dropOnPort`、已接着线的输入换来源的 `canConnectReplacing` / `replaceableTargets`；插到连线中间用哪一对端口的 `insertPortsFor`；拖线松在空白处挑了新算子、接它哪个端口的 `pendingPort`）；GraphDoc → React Flow 的映射（连线按实际类型着色、惰性边虚线、引用复用；只挪了位置的节点 data 沿用原对象）| `packages/editor/test/typecheck.test.mjs`；真鼠标拖线在 e2e `m3.mjs`、`m8b.mjs`；长一点的提示按字数停留（警告至少 4 秒）在 `m3.mjs` 的 `suiteDropToSearch` |
-| 算子搜索的排序（名字命中优先、短的优先、缩写与中文关键词、说明命中标字段） | `packages/editor/test/search.test.mjs`；弹层与面板的真界面在 e2e `m3.mjs` |
+| 算子搜索（中英文、全半角、缩写、多词跨字段 AND、有限英文拼写容错、排序与原文高亮） | `packages/editor/test/search.test.mjs`；侧栏与画布结果一致、中文输入法确认不误触在 e2e `m3.mjs` 的 `suiteDropToSearch` |
 | 图参数（规格、校验、传参） | `core/tests/test_graph_params.cpp`、`test_params.cpp`；`packages/editor/test/graph-params*.test.mjs`；e2e `params_p1.mjs`（参数菜单的复制路径名 / 粘贴值、读剪贴板不弹权限框也在它的 `suiteIncludeTopLevel` 末尾） |
 | 配方与四类失配 | 共享夹具 `schema/fixtures/recipes/`：`bridge/src/recipe.rs` 与 `packages/editor/test/recipes.test.mjs` 对着同一份 `expected.json`；e2e `params_p3.mjs` 只验界面、磁盘与对话框 |
 | 参数面板（虚拟列表、搜索、chip、14 种控件；打字之后按 Esc 撤回：数字框与文字框在 `suiteAllTypes`、图参数规格在 `suiteSearchFilter`；聚焦的数字框上滚滚轮不改值、数字框里按 ↑ 按参数的步长走一格、没范围的参数按值的量级走（步长怎么取：`stepFor` 在 `param-values.test.mjs`）、下拉框里选完一项就按 Ctrl+Z 撤得掉、取色器拖着选一条撤销也在 `suiteAllTypes`）；数字框能打算式与相对改法（`lib/numExpr`：算式、*2 / +=5、全角符号、越界夹住与取整说一声在 `param-values.test.mjs`；多选里各按各的值改、绑着同一个图参数只改一次在 `graph-params-actions.test.mjs`；真界面在 e2e `m3.mjs` 的 `suiteEditing`：多选里打全角「＊２０００」）；路径框粘进带引号、前后有空格的路径时去掉引号与空白（`cleanPathText` 在 `param-values.test.mjs`；真粘、真跑、旁边摆着「浏览…」在 e2e `m4.mjs` 的 `suiteM3Tails` 末尾（浏览器宿主没有文件对话框、不摆在 `http.mjs` 的 `suiteEditAndRun` 末尾）） | `packages/editor/test/param-panel.test.mjs`、`param-values.test.mjs`；e2e `params_p2.mjs`；路径参数的「浏览…」（原生文件对话框：按 open / save / dir 与文件类型过滤、从框里的路径开 —— 相对路径拼上图所在的目录，选在那下面的照旧存相对的；验收里是 run.mjs 经 devbridge 装的桩）真点在 e2e `m4.mjs` 的 `suiteM3Tails` |
@@ -149,7 +151,11 @@ C++ doctest 已在 `core/CMakeLists.txt` 中通过 `enable_testing()` 和 `add_t
 | HTTP 传输、宿主嵌入（含用户片段、底图点云文件两个端点，图像端点的行切片） | `scripts/e2e/http.mjs` |
 | 外部 Rust/Tauri 宿主（`attach`、`lyflow_handler!`、`sceneId` 注入、工作区路径） | `bridge/tests/host.rs`（`MockRuntime` 跑真 IPC） |
 | 自动备份（存过盘的写 `<file>~`、没存过盘的写到传输层给的那一处、找回来、换上算没保存、删掉；没有那个口的传输不备份；读坏了的删掉；开图时备份比正文新问「恢复 / 丢弃 / 取消」—— 取消与 Esc 不打开、备份留着，没挂对话框退回原生的是 / 否） | `packages/editor/test/autosave.test.mjs`（内存里的假传输）；真按 Esc 关掉那一问、再点「丢弃」在 e2e `m3.mjs` 的 `suitePanels`（备份那一段）；真的 app data 位置与写盘在 e2e `m3.mjs` 的 `suitePanels` 末尾（harness 跑之前把用户自己的那份挪开、收尾时挪回去） |
-| 桌面壳：窗口标题（只有文件名：Windows 的反斜杠路径也拆开）、新建之后空画布列出最近打开的（点一条打开、别处双击照样开搜索）、关窗口与工具栏「新建」前问「保存 / 不保存 / 取消」（有没存的改动才问；真鼠标点编辑器画的那一问：取消不关、不保存文件不动、保存先存盘；关窗口经 devbridge 不点 × 走一遍，监听装没装上、destroy 的权限另查；各个选项的分支与另存为取消了的情况在 `packages/editor/test/autosave.test.mjs`）、主窗口放行剪贴板读取、挡掉 WebView2 的刷新键（Ctrl+R / 搜索面板开着时的 F5 不重新载入）与右键菜单 | e2e `m3.mjs` 的 `suitePanels` 末尾；剪贴板读取在 `params_p1.mjs` 的 `suiteIncludeTopLevel` |
+| 桌面壳：窗口标题（只有文件名：Windows 的反斜杠路径也拆开）、新建之后空画布列出最近打开的（点一条打开、别处双击照样开搜索）、关闭未保存标签与关窗口时问「保存 / 不保存 / 取消」（有没存的改动才问；真鼠标点编辑器画的那一问：取消不关、不保存文件不动、保存先存盘；关窗口经 devbridge 不点 × 走一遍，监听装没装上、destroy 的权限另查；各个选项的分支与另存为取消了的情况在 `packages/editor/test/autosave.test.mjs`）、主窗口放行剪贴板读取、挡掉 WebView2 的刷新键（Ctrl+R / 搜索面板开着时的 F5 不重新载入）与右键菜单 | e2e `m3.mjs` 的 `suitePanels` 末尾；剪贴板读取在 `params_p1.mjs` 的 `suiteIncludeTopLevel` |
+
+本轮画布交互的回归复用 `m3:suiteEditing`（左键平移、Ctrl 框选、Ctrl+Shift 追加、右键菜单且不平移）、`m3:suiteRunToSelected`（浮动操作条多目标运行，必要上游参与、未选中下游不参与）与 `motion:suiteEnter`（左键平移触发虚拟化）。精确选区运行取消待自动运行、保留多个目标与重跑范围的断言扩展在现有 `execution-store.test.mjs` 自动运行用例中，测试数量不变。
+
+多文档标签复用 `m3:suitePanels` 验证新建保留后台文档、同路径去重、切换参数与撤销/重做、关闭标签和后台未保存文档的窗口保护。`packages/editor/test/flow-tabs.test.mjs` 的 3 个用例覆盖对象身份、独立会话、异步迟到隔离、关闭取消及全局拓扑锁下的跨标签撤销隔离；`flow-backup.test.mjs` 的 4 个用例覆盖 IndexedDB 适配器、载荷校验及串行写入/清理。编辑器纯逻辑测试由 171 项收敛为 89 项，原有 24 个测试文件全部执行。整合 main 后补回拓扑锁契约测试，共 90 项；拓扑锁下的迁移写回沿用 `migrations.test.mjs` 的现有用例。同一功能契约的正常、边界与失败场景共用夹具或具名场景表，保留状态隔离和异步清理；后续回归优先补入已有契约。
 
 ## 共用的夹具与辅助
 

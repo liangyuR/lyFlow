@@ -56,7 +56,7 @@ const base = {
 };
 const withNodes = (nodes, extra = {}) => ({ ...base, nodes, ...extra });
 
-test('调参差异与比较基线：有效值/静音/结构、共享定义去重及预览/取消回退', () => {
+test('调参差异与比较基线：有效参数/静音/结构、共享定义去重及预览/取消回退', () => {
   const rec = (doc, params = { thr: 1 }) => ({ doc, params });
   const cases = [
     // [说明, 后一次, 期望的一行]
@@ -129,7 +129,6 @@ test('调参差异与比较基线：有效值/静音/结构、共享定义去重
   );
   assert.equal(shortValue('x'.repeat(40)).length, 24, '长字符串截短');
   assert.equal(shortValue(true), '开');
-
   const r = (runId, status) => ({ runId, status });
   const records = [r('p', 'running'), r('c', 'cancelled'), r('b', 'error'), r('a', 'ok')];
   const baselines = [
@@ -149,14 +148,14 @@ test('调参差异与比较基线：有效值/静音/结构、共享定义去重
     '一条跑完的都没有',
   );
   const d = diffRuns(
-    { doc: base, params: { thr: 1 } },
-    {
-      doc: withNodes([
+    rec(base),
+    rec(
+      withNodes([
         { ...base.nodes[0], bypass: true },
         { ...base.nodes[1], params: { leafSize: [0.03, 0.03, 0.03] } },
       ]),
-      params: { thr: 2 },
-    },
+      { thr: 2 },
+    ),
     ops,
   );
   assert.deepEqual(

@@ -112,7 +112,18 @@ void registerFilterStatisticalOutlier(Registry& r) {
   op.version = "1.0.0";
   op.label = "统计离群点剔除";
   op.category = "过滤/离群点";
-  op.keywords = {"outlier", "noise", "statistical", "sor", "离群", "去噪", "统计"};
+  op.keywords = {"statistical outlier removal",
+                 "SOR",
+                 "KNN outlier filtering",
+                 "统计滤波",
+                 "离群点去除",
+                 "点云去噪",
+                 "outlier",
+                 "noise",
+                 "statistical",
+                 "离群",
+                 "去噪",
+                 "统计"};
   op.doc = "按每个点到 K 近邻的平均距离剔除离群点。距离超过 均值 + n×标准差 的点被认为是噪声。";
 
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "输入点云。", true}};

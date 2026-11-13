@@ -504,9 +504,19 @@ void registerProfileTensor(Registry& r) {
   OperatorDesc op;
   op.id = "gap.profile_tensor";
   op.version = "1.0.0";
-  op.label = "剖面张量";
+  op.label = "剖面特征张量构建";
   op.category = "间隙/模型";
-  op.keywords = {"onnx", "tensor", "channels", "剖面", "张量"};
+  op.keywords = {"profile feature tensor construction",
+                 "model input tensor",
+                 "feature channels",
+                 "ONNX",
+                 "剖面特征",
+                 "张量构建",
+                 "模型预处理",
+                 "tensor",
+                 "channels",
+                 "剖面",
+                 "张量"};
   op.doc = "把两片**原始 1280 槽**剖面拼成模型输入张量 [2, 6, 1280]。"
            "六个通道是 z_norm / x_diff / normal_angle / curvature / intensity_norm / valid，"
            "逐条对着 ml_handoff 的 build_channels 契约 —— 训练侧改了通道定义，这里要跟着改。\n"
@@ -534,9 +544,19 @@ void registerLabelsFromLogits(Registry& r) {
   OperatorDesc op;
   op.id = "gap.labels_from_logits";
   op.version = "1.0.0";
-  op.label = "由 Logits 得到标签";
+  op.label = "Logits 标签解码";
   op.category = "间隙/模型";
-  op.keywords = {"argmax", "labels", "logits", "分割", "类别"};
+  op.keywords = {"logits label decoding",
+                 "argmax",
+                 "semantic segmentation labels",
+                 "classification",
+                 "分类标签",
+                 "语义分割",
+                 "最大值索引",
+                 "labels",
+                 "logits",
+                 "分割",
+                 "类别"};
   op.doc = "逐槽 argmax：[2, 类别数, 1280] 的 logits -> 两行各 1280 个类 id。"
            "并列时留最小的类 id（与 np.argmax 一致）。行 0 是 primary、行 1 是 secondary。"
            "只做 argmax、不看置信度：模型对整帧都没把握时照样给出满满一行标签。";
@@ -555,9 +575,18 @@ void registerRoiFromLabels(Registry& r) {
   OperatorDesc op;
   op.id = "gap.roi_from_labels";
   op.version = "1.2.0";
-  op.label = "由标签得到 ROI";
+  op.label = "标签区域提取";
   op.category = "间隙/模型";
-  op.keywords = {"roi", "boxes", "refine", "模型框"};
+  op.keywords = {"ROI extraction from labels",
+                 "segmentation ROI",
+                 "bounding boxes",
+                 "ROI",
+                 "标签区域",
+                 "分割区域",
+                 "包围盒提取",
+                 "boxes",
+                 "refine",
+                 "模型框"};
   op.doc = "逐槽标签 → 四个业务 ROI。框在这里就换成测量帧的米（x→x, z→y, /1000），"
            "下游的裁剪与叠画零改动（H3）。有 missing_segments 就报 model_roi_failed。\n"
            "可选的 backdrop 接一片**测量帧**的同帧云（通常是 gap.labels_to_cloud 的输出），"
@@ -613,9 +642,18 @@ void registerLabelsToCloud(Registry& r) {
   OperatorDesc op;
   op.id = "gap.labels_to_cloud";
   op.version = "1.0.0";
-  op.label = "标签映射到点云";
+  op.label = "点云标签可视化";
   op.category = "间隙/模型";
-  op.keywords = {"labels", "color", "着色", "分割结果"};
+  op.keywords = {"point cloud label visualization",
+                 "semantic coloring",
+                 "label mapping",
+                 "点云着色",
+                 "语义标签",
+                 "分割可视化",
+                 "labels",
+                 "color",
+                 "着色",
+                 "分割结果"};
   op.doc = "按类别给点上色，只为了在 3D 视图里看分割结果。八类固定色表写进 rgb，"
            "同时把类 id 写进 intensity —— 视图没有 rgb 着色模式，靠强度才看得见。\n"
            "接**测量帧**的云（gap.to_measurement_frame 之后、gap.drop_non_finite 之前）："
@@ -649,10 +687,19 @@ void registerDropNonFinite(Registry& r) {
   OperatorDesc op;
   op.id = "gap.drop_non_finite";
   op.version = "1.0.0";
-  op.label = "剔除非有限值";
+  op.label = "非有限点剔除";
   op.category = "间隙/预处理";
   // 关键词不能出现小写的 n-a-n：core 的 manifest 序列化用例是子串匹配（test_executor.cpp:419）
-  op.keywords = {"NaN", "finite", "剔除", "无效槽"};
+  op.keywords = {"non-finite point removal",
+                 "finite point filtering",
+                 "NaN",
+                 "infinity",
+                 "无效点剔除",
+                 "有限坐标",
+                 "非有限值过滤",
+                 "finite",
+                 "剔除",
+                 "无效槽"};
   op.doc = "剔除非有限点，对应 NonFinitePointPolicy::kRemove。只看坐标是否有限，不做离群点剔除。"
            "模型路径里 load 必须保留 NaN 槽，所以这一步单独拿出来。\n"
            "删点会打乱槽号：按槽号与标签或张量对齐的算子（gap.profile_tensor、"
@@ -668,9 +715,18 @@ void registerRollAnchoredCrop(Registry& r) {
   OperatorDesc op;
   op.id = "gap.roll_anchored_crop";
   op.version = "1.1.0";
-  op.label = "随动裁剪";
+  op.label = "零件随动裁剪";
   op.category = "间隙/模型";
-  op.keywords = {"crop", "roll", "window", "跟随零件"};
+  op.keywords = {"part anchored cropping",
+                 "roll anchored crop",
+                 "adaptive ROI",
+                 "ROI",
+                 "零件跟随",
+                 "随动区域",
+                 "点云裁剪",
+                 "crop",
+                 "roll",
+                 "window"};
   op.doc = "跟随零件的整体裁剪窗：中心取两个 roll 框中心的中点，半宽半高来自参数。"
            "窗恒为轴对齐，不随零件姿态旋转。五种失效保护（disabled / bad_config / "
            "degenerate_roll_box / roll_box_height / span）都让两片云原样透传；裁后点数不足 "

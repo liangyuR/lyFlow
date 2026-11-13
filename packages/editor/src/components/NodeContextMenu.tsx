@@ -146,7 +146,7 @@ export function NodeContextMenu({
   return (
     <div
       ref={box}
-      className="ctxmenu"
+      className="qs-popover ctxmenu"
       style={placement}
       data-testid="node-context-menu"
       onClick={(e) => e.stopPropagation()}

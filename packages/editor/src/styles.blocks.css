@@ -5,28 +5,28 @@
 
 /* 没连上的那个输入：虚线描边，说明「这里等你挑一个」 */
 .node-port--auto-target .node-port__handle {
-  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.55);
-  outline: 1px dashed #fbbf24;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 55%, transparent);
+  outline: 1px dashed var(--warn);
   outline-offset: 3px;
 }
 .node-port--auto-target .node-port__label {
-  color: #fbbf24;
+  color: var(--warn);
 }
 
 /* 它的每一个候选输出 */
 .node-port--auto-candidate .node-port__handle {
   --lyflow-handle-scale: 1.35;
-  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.55);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 55%, transparent);
 }
 .node-port--auto-candidate .node-port__label {
-  color: #fbbf24;
+  color: var(--warn);
 }
 
 /* ------------------------------------------------------ 实时校验（L16） */
 
 .node.is-invalid {
-  border-color: #e5484d;
-  box-shadow: 0 0 0 1px rgba(229, 72, 77, 0.6);
+  border-color: var(--ng);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ng) 60%, transparent);
 }
 
 .node__invalid {
@@ -34,11 +34,11 @@
   align-items: baseline;
   gap: 5px;
   padding: 3px 8px 4px;
-  border-top: 1px solid rgba(229, 72, 77, 0.35);
-  background: rgba(229, 72, 77, 0.1);
+  border-top: 1px solid color-mix(in srgb, var(--ng) 35%, transparent);
+  background: var(--ng-container);
   font-size: 10.5px;
   line-height: 1.35;
-  color: #ff9a9a;
+  color: var(--on-ng-container);
 }
 
 .node__invalid-mark {
@@ -60,7 +60,7 @@
 }
 
 .insp__errors--validate li[data-severity='warning'] {
-  color: #e0a030;
+  color: var(--warn);
 }
 
 /* ---------------------------------------------------------- 片段库（L14） */
@@ -68,7 +68,7 @@
 .op-row--snippet .op-row__glyph,
 .search-popup__glyph {
   margin-right: 5px;
-  color: #c8a86b;
+  color: var(--tertiary);
 }
 
 .op-row--snippet.is-missing {
@@ -115,8 +115,8 @@
   margin-top: 2px;
   padding: 0 4px;
   border: 1px solid var(--roi-color);
-  border-radius: 3px;
-  background: rgba(17, 20, 26, 0.85);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--surface-low) 90%, transparent);
   color: var(--lyflow-fg-0);
   font-size: 10px;
   line-height: 14px;
@@ -141,16 +141,16 @@
   font-size: 10px;
   line-height: 14px;
   white-space: nowrap;
-  color: #11141a;
+  color: var(--surface-lowest);
   background: var(--roi-color);
-  border-radius: 3px 3px 0 0;
+  border-radius: var(--r-xs) var(--r-xs) 0 0;
   pointer-events: none;
 }
 
 .roi-box__label[data-pos='inside'],
 .roi-box__label[data-pos='stack'],
 .roi-box__label[data-pos='below'] {
-  border-radius: 3px;
+  border-radius: var(--r-sm);
 }
 
 .roi-box__handle {
@@ -159,8 +159,8 @@
   width: 9px;
   height: 9px;
   background: var(--roi-color);
-  border: 1px solid #11141a;
-  border-radius: 2px;
+  border: 1px solid var(--surface-lowest);
+  border-radius: var(--r-xs);
 }
 .roi-box__handle--nw {
   left: -5px;
@@ -188,15 +188,15 @@
   inset: auto auto 6px 8px;
   padding: 2px 6px;
   font-size: 11px;
-  background: rgba(17, 20, 26, 0.75);
-  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface-low) 80%, transparent);
+  border-radius: var(--r-sm);
   pointer-events: none;
 }
 
 /* -------------------------------------------------- Bundle 字段表（L17） */
 
 .peek__field {
-  color: #c8a86b;
+  color: var(--tertiary);
 }
 
 .peek-fields {
@@ -247,7 +247,7 @@
   flex-shrink: 0;
   padding: 0 4px;
   border: 1px solid;
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   font-size: 10px;
 }
 
@@ -256,7 +256,7 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--lyflow-fg-1, #c9d1dc);
+  color: var(--lyflow-fg-1);
 }
 
 .peek-fields__go {

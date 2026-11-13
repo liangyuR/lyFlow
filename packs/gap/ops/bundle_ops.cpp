@@ -84,9 +84,17 @@ void registerBundleOps(Registry& r) {
     OperatorDesc op;
     op.id = "gap.make_scan_pair";
     op.version = "1.0.0";
-    op.label = "组剖面对";
+    op.label = "剖面对组装";
     op.category = "间隙/组合";
-    op.keywords = {"bundle", "scan pair", "组合", "打包"};
+    op.keywords = {"scan pair assembly",
+                   "profile pair bundle",
+                   "bundle packing",
+                   "双相机剖面",
+                   "数据组装",
+                   "剖面对封装",
+                   "bundle",
+                   "scan pair",
+                   "组合"};
     op.doc =
         "把三片云收成一个 ScanPair（Bundle<gap.ScanPair>），交给 gap.result_bundle 或积木算子。"
         "只搬不算：三片云原样装进去。";
@@ -102,9 +110,16 @@ void registerBundleOps(Registry& r) {
     OperatorDesc op;
     op.id = "gap.split_scan_pair";
     op.version = "1.0.0";
-    op.label = "拆剖面对";
+    op.label = "剖面对解包";
     op.category = "间隙/组合";
-    op.keywords = {"bundle", "scan pair", "拆开"};
+    op.keywords = {"scan pair unpacking",
+                   "profile pair split",
+                   "bundle unpacking",
+                   "双相机剖面",
+                   "数据解包",
+                   "剖面对拆分",
+                   "bundle",
+                   "scan pair"};
     op.doc = "把 ScanPair 拆成三根散线，接给细粒度算子。只搬不算。";
     op.inputs = {Port{"scan", "Bundle<gap.ScanPair>", "Scan", "ScanPair。", true}};
     op.outputs = {cloud("primary", "Primary", "Master 那一片。"),
@@ -118,9 +133,19 @@ void registerBundleOps(Registry& r) {
     OperatorDesc op;
     op.id = "gap.make_roi_set";
     op.version = "1.1.0";
-    op.label = "组角色框";
+    op.label = "角色 ROI 集组装";
     op.category = "间隙/组合";
-    op.keywords = {"bundle", "roi set", "组合", "角色框"};
+    op.keywords = {"role ROI set assembly",
+                   "region of interest",
+                   "ROI bundle",
+                   "ROI",
+                   "区域集封装",
+                   "角色区域",
+                   "感兴趣区域",
+                   "bundle",
+                   "roi set",
+                   "组合",
+                   "角色框"};
     op.doc = "把四个业务框按角色收成一个 RoiSet（Bundle<gap.RoiSet>）。datum = 段差基准面框，"
              "target = 段差参考面框，seamLeft / seamRight = 缝左右两侧的框。info 里记"
              "基准件在哪一侧、框从哪来，以及接上来的对齐结果、整体框、裁剪状态。";
@@ -171,9 +196,18 @@ void registerBundleOps(Registry& r) {
     OperatorDesc op;
     op.id = "gap.split_roi_set";
     op.version = "1.0.0";
-    op.label = "拆角色框";
+    op.label = "角色 ROI 集解包";
     op.category = "间隙/组合";
-    op.keywords = {"bundle", "roi set", "拆开", "角色框"};
+    op.keywords = {"role ROI set unpacking",
+                   "ROI set split",
+                   "region of interest",
+                   "ROI",
+                   "区域集拆分",
+                   "角色区域",
+                   "感兴趣区域",
+                   "bundle",
+                   "roi set",
+                   "角色框"};
     op.doc = "把 RoiSet 拆成散线接给细粒度算子。另出一个 seam：两个缝框中心连线的中点，"
              "接 gap.fit_line 的 toward，与积木算子取「靠缝那一端」是同一个判据。";
     op.inputs = {Port{"rois", "Bundle<gap.RoiSet>", "ROIs", "RoiSet。", true}};

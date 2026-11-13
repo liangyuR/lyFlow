@@ -284,10 +284,25 @@ void registerStationCalipers(Registry& r) {
   OperatorDesc op;
   op.id = "glue.station_calipers";
   op.version = "1.0.0";
-  op.label = "逐点卡尺";
+  op.label = "胶路逐点卡尺测量";
   op.category = "涂胶/飞拍";
-  op.keywords = {"glue", "caliper", "station", "inner edge", "flyshot",
-                 "涂胶", "卡尺",    "内边",    "飞拍",       "测量点"};
+  op.keywords = {"glue station caliper measurement",
+                 "edge calipers",
+                 "flyshot inspection",
+                 "逐点测量",
+                 "胶边检测",
+                 "内边测量",
+                 "飞拍检测",
+                 "glue",
+                 "caliper",
+                 "station",
+                 "inner edge",
+                 "flyshot",
+                 "涂胶",
+                 "卡尺",
+                 "内边",
+                 "飞拍",
+                 "测量点"};
   op.doc =
       "固定相机飞拍：在宿主给的名义胶路测量点上逐点卡尺，量内边与胶条两条边（glue-plan K1 / K3）。"
       "站点在名义胶条中线上，法向从内边（开口一侧）指向翻边，卡尺上 t < 0 是内边一侧。\n"

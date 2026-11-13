@@ -44,6 +44,17 @@ test('fuzzyMatch：按顺序找到每个字符，大小写不敏感；缩写命�
     '连着的比跳着的值钱',
   );
   assert.deepEqual(fuzzyMatch('', 'anything'), { score: 0, indices: [] });
+  for (const [query, text, indices] of [
+    ['ＶＧ', 'Voxel Grid', [0, 6]],
+    ['vg', 'Ｖｏｘｅｌ　Ｇｒｉｄ', [0, 6]],
+    ['ffi', 'oﬃce', [1]],
+    ['abc', 'a b abc', [4, 5, 6]],
+  ])
+    assert.deepEqual(
+      fuzzyMatch(query, text)?.indices,
+      indices,
+      `${query}：归一化后的高亮仍指向原文，优先连续命中`,
+    );
 });
 
 test('searchOperators：名字命中排前、短的排前、中文关键词与说明也认，说明命中的标出是哪个字段', () => {
@@ -58,6 +69,99 @@ test('searchOperators：名字命中排前、短的排前、中文关键词与�
   assert.equal(FIELD_LABELS[ground[0].fieldIndex], '说明', '只在说明里命中：行上标出来');
   assert.equal(searchOperators(ops, 'pcd')[0].op.id, 'io.load_pcd');
   assert.deepEqual(ids('   '), [], '空查询不搜（调用方自己列全部）');
+
+  const bilingual = [
+    op(
+      'register.icp_2d',
+      'ICP 配准 2D',
+      ['点云配准', 'Iterative Closest Point'],
+      '根据最近邻迭代对齐。',
+    ),
+    op('image.gaussian_blur', '高斯平滑', ['Gaussian Blur', '高斯滤波'], '抑制图像中的噪声。'),
+    op('io.load_pcd', '读取点云 PCD', ['Load PCD', '点云文件'], '从磁盘读取PCD文件。'),
+  ];
+  for (const [query, expected] of [
+    ['closest 配准', ['register.icp_2d']],
+    ['配准 closest', ['register.icp_2d']],
+    ['２Ｄ　ＩＣＰ', ['register.icp_2d']],
+    ['ＰＣＤ　读取', ['io.load_pcd']],
+    ['blur 高斯', ['image.gaussian_blur']],
+    ['高斯 blu', ['image.gaussian_blur']],
+    ['clsoest 配准', ['register.icp_2d']],
+    ['gausian', ['image.gaussian_blur']],
+    ['gaussain', ['image.gaussian_blur']],
+    ['gausssian', ['image.gaussian_blur']],
+    ['iteratvie', ['register.icp_2d']],
+    ['closest 不存在', []],
+    ['xyz 配准', []],
+    ['icpx', []],
+    ['gauszzan', []],
+  ])
+    assert.deepEqual(
+      searchOperators(bilingual, query).map((hit) => hit.op.id),
+      expected,
+      `${query}：多词跨字段 AND，中英文归一化与有限拼写容错`,
+    );
+
+  assert.deepEqual(
+    searchOperators(bilingual, 'PCD 磁盘').map(({ fieldIndex, indices }) => ({
+      fieldIndex,
+      indices,
+    })),
+    [{ fieldIndex: 0, indices: [5, 6, 7] }],
+    '混合名称与说明时只返回主字段的原文高亮下标',
+  );
+  assert.deepEqual(
+    searchOperators(bilingual, '读取 PCD').map(({ fieldIndex, indices }) => ({
+      fieldIndex,
+      indices,
+    })),
+    [{ fieldIndex: 0, indices: [0, 1, 5, 6, 7] }],
+    '多个词在同一主字段命中时合并高亮',
+  );
+
+  const ranked = [
+    op('fixture.description', '说明命中', [], 'voxel'),
+    op('fixture.fuzzy', 'VolXEL'),
+    op('fixture.keyword', '体素降采样', ['voxel']),
+    op('fixture.name', 'voxel'),
+    op('fixture.long', 'Voxel Grid'),
+  ];
+  assert.deepEqual(
+    searchOperators(ranked, 'voxel')
+      .slice(0, 3)
+      .map((hit) => hit.op.id),
+    ['fixture.name', 'fixture.keyword', 'fixture.long'],
+    '精确名称、关键词与完整单词优先于弱子序列和说明',
+  );
+  const chineseNames = [
+    op('transform.make', '刚体变换构造', ['平移']),
+    op('edit.translate_region', '点云选区平移'),
+    op('dts.seal_dome', '胶条主体提取', ['圆拟合']),
+    op('fit.circle_2d', '二维圆拟合'),
+  ];
+  for (const [query, expected] of [
+    ['平移', ['edit.translate_region', 'transform.make']],
+    ['圆拟合', ['fit.circle_2d', 'dts.seal_dome']],
+  ])
+    assert.deepEqual(
+      searchOperators(chineseNames, query).map((hit) => hit.op.id),
+      expected,
+      `${query}：中文名称没有空格，连续命中优先于其它算子的完整关键词`,
+    );
+  assert.deepEqual(
+    searchOperators([op('fixture.negative', 'Load Scale Blur')], 'road'),
+    [],
+    '不把首字母不同的另一个英文词当成拼写错误',
+  );
+  assert.deepEqual(
+    searchOperators(
+      [op('fixture.negative', 'Very broad explanatory text with scattered letters')],
+      'vort',
+    ),
+    [],
+    '拒绝说明中跨度过大的偶然子序列',
+  );
 });
 
 test('searchSnippets：名称、id、分类、说明都认（与算子同一套模糊匹配），名称命中的排前、标出命中的字段', () => {
@@ -73,6 +177,12 @@ test('searchSnippets：名称、id、分类、说明都认（与算子同一套�
   assert.deepEqual(found('用户'), ['user.mine'], '分类');
   assert.equal(SNIPPET_FIELD_LABELS[searchSnippets(snippets, '剖面')[0].fieldIndex], '说明');
   assert.deepEqual(found('  '), [], '空查询不搜（弹层自己列全部）');
+  assert.deepEqual(
+    found('gap 剖面'),
+    ['gap.measure-skeleton'],
+    '片段同样支持跨 id 与说明的多词搜索',
+  );
+  assert.deepEqual(found('圆 ＧＡＰ'), ['gap.gap-circles'], '片段支持乱序和全半角归一化');
 });
 
 test('searchableOps：manifest 的算子加上这张图的子图；会套进当前这几层自己的不列', () => {

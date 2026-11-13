@@ -94,9 +94,19 @@ void registerPickMetal(Registry& r) {
   OperatorDesc op;
   op.id = "dts.pick_metal";
   op.version = "1.0.0";
-  op.label = "挑钣金基准面";
+  op.label = "钣金基准面提取";
   op.category = "DTS/钣金";
-  op.keywords = {"metal", "reference", "钣金", "基准"};
+  op.keywords = {"sheet metal datum extraction",
+                 "metal reference surface",
+                 "datum line",
+                 "sheet metal",
+                 "钣金基准面",
+                 "基准线拟合",
+                 "参考面提取",
+                 "metal",
+                 "reference",
+                 "钣金",
+                 "基准"};
   op.doc = "在胶条钣金侧的面里挑基准面：与顶点轴的夹角落在容差内、离胶条最近的那一块，\n"
            "基准线只在该面朝胶条那一端取一小段拟合 —— 整块面可能几十毫米长且远端微弯，\n"
            "拿整块拟合会把弯曲摊进基准线里。\n"

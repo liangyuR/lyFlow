@@ -139,7 +139,7 @@ export function NodeFinder() {
     <>
       <div className="search-backdrop" onClick={close} />
       <div
-        className="search-popup finder"
+        className="qs-popover search-popup finder"
         data-testid="node-finder"
         style={{ left, top: 64, width: POPUP_WIDTH, maxHeight: POPUP_HEIGHT }}
         onKeyDown={onKeyDown}

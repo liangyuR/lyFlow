@@ -207,19 +207,27 @@ async function suiteEnter(cdp, report) {
   report.ok("> 80 节点：开了虚拟化（只渲染了一部分）", big.rendered.length < big.total, `${big.rendered.length}/${big.total}`);
   await startRecord(cdp, "pan", "data-entering");
   const box = await canvasBox(cdp);
-  // 中键拖动平移（PAN_BUTTONS）：往左拖两段，把右半边拉进视口
+  // 左键从空白处往左拖两段，把右半边拉进视口。
   for (let round = 0; round < 2; round += 1) {
-    const from = { x: box.x + box.w - 40, y: box.y + Math.round(box.h / 2) };
+    const from = await cdp.eval(`
+      const r = document.querySelector('.react-flow__pane').getBoundingClientRect();
+      const x = Math.round(r.right - 48);
+      for (let y = r.top + 64; y < r.bottom - 64; y += 20) {
+        if (document.elementFromPoint(x, y)?.classList.contains('react-flow__pane')) return { x, y: Math.round(y) };
+      }
+      return null;
+    `);
+    mustOk(from != null, "虚拟化画布右侧有空白可以左键平移");
     const to = { x: box.x + 40, y: from.y };
     await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y, buttons: 0 });
-    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: from.x, y: from.y, button: "middle", buttons: 4, clickCount: 1 });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: from.x, y: from.y, button: "left", buttons: 1, clickCount: 1 });
     for (let i = 1; i <= 10; i += 1) {
       await cdp.send("Input.dispatchMouseEvent", {
-        type: "mouseMoved", x: Math.round(from.x + ((to.x - from.x) * i) / 10), y: from.y, button: "middle", buttons: 4,
+        type: "mouseMoved", x: Math.round(from.x + ((to.x - from.x) * i) / 10), y: from.y, button: "left", buttons: 1,
       });
       await sleep(16);
     }
-    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: to.x, y: to.y, button: "middle", buttons: 4, clickCount: 1 });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: to.x, y: to.y, button: "left", buttons: 0, clickCount: 1 });
     await sleep(250);
   }
   await sleep(400);

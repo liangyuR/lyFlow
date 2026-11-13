@@ -1,10 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "主窗口的默认权限。只开自定义 command、文件对话框，和关窗口前问一句之后的 destroy，以及问之前把最小化 / 压在后面的窗口拿出来（app/src/closeGuard.ts）。",
+  "description": "主窗口的默认权限：自定义 command、文件对话框、自定义标题栏的拖动与窗口控制，以及关闭前的未保存确认。",
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-start-dragging",
     "core:window:allow-destroy",
     "core:window:allow-unminimize",
     "core:window:allow-show",

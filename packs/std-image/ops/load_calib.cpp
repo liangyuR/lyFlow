@@ -59,9 +59,21 @@ void registerLoadCalib(Registry& r) {
   OperatorDesc op;
   op.id = "image.load_calib";
   op.version = "1.0.0";
-  op.label = "读标定";
+  op.label = "平面标定读取";
   op.category = "图像/标定";
-  op.keywords = {"calib", "calibration", "load", "标定", "读取", "单应"};
+  op.keywords = {"plane calibration loading",
+                 "calibration file reading",
+                 "homography",
+                 "JSON",
+                 "平面标定",
+                 "标定文件",
+                 "单应矩阵",
+                 "calib",
+                 "calibration",
+                 "load",
+                 "标定",
+                 "读取",
+                 "单应"};
   op.doc = "读一份 image.PlaneCalib 的 JSON 文件（整个 Record 或只有 data 都行），出 Record。"
            "标定属于相机工位：宿主标一次存成文件，产线图经这个节点读，接到量测积木的 calib 口。";
   op.outputs = {Port{"calib", "Record", "Calib", "image.PlaneCalib。", true}};

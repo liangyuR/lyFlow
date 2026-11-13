@@ -338,9 +338,20 @@ void registerAlignTemplate(Registry& r) {
   OperatorDesc op;
   op.id = "gap.align_template";
   op.version = "1.1.0";
-  op.label = "配准模板";
+  op.label = "模板配准";
   op.category = "间隙/配准";
-  op.keywords = {"icp", "template", "align", "配准", "模板"};
+  op.keywords = {"template registration",
+                 "2D ICP",
+                 "iterative closest point",
+                 "rigid registration",
+                 "模板对齐",
+                 "二维刚体配准",
+                 "粗配准",
+                 "icp",
+                 "template",
+                 "align",
+                 "配准",
+                 "模板"};
   op.doc = "把一对模板配到当前样本上（evaluate_pair）：全局粗配 → 左右两侧 ICP、"
            "信赖域钳制、退化方向锁定；模板两侧内容相同时右侧复用左侧的结果。\n"
            "刚体 2D 配准，假定样本与模板之间只差一个小的平移加旋转：超出信赖域的部分被钳掉而不是"
@@ -414,9 +425,18 @@ void registerSelectAlignment(Registry& r) {
   OperatorDesc op;
   op.id = "gap.select_alignment";
   op.version = "1.0.0";
-  op.label = "选择配准结果";
+  op.label = "配准结果选择";
   op.category = "间隙/配准";
-  op.keywords = {"template", "select", "best icp", "模板选择"};
+  op.keywords = {"alignment selection",
+                 "registration candidate selection",
+                 "best ICP",
+                 "score ranking",
+                 "配准候选",
+                 "模板优选",
+                 "配准评分",
+                 "template",
+                 "select",
+                 "模板选择"};
   op.doc = "在候选模板里挑一个：先过滤左右都 ≥ minScore 的，"
            "再按 min(l,r) 降、mean 降、配置顺序升、id 升排序取第一个；全打平时由 templateId 定，"
            "与接在哪个端口无关。只挑不配；全部低于 minScore 时报 icp_score_low，不退而求其次。";

@@ -56,10 +56,7 @@ async function halfwayRun() {
   await new Promise((resolve) => setTimeout(resolve, 40));
 }
 
-test('运行结果生命周期：全图/部分范围归属、排队取消失败与正式判定节点表', async () => {
-  await halfwayRun();
-  assert.equal(useExecutionStore.getState().resultRunId, 'A', '全图运行 A 发起时就归它');
-
+test('运行结果生命周期：全图/targets/isolate归属、排队取消/失败与正式判定节点表', async () => {
   const cases = [
     // [说明, beginRun 的参数, 发起后、开跑前的 resultRunId]
     ['预览（targets）', ['B', ['n2'], true], 'A'],
@@ -72,12 +69,7 @@ test('运行结果生命周期：全图/部分范围归属、排队取消失败�
     assert.equal(useExecutionStore.getState().runId, 'B', name);
     assert.equal(useExecutionStore.getState().resultRunId, beforeStart, `${name}：开跑前`);
     apply(
-      ev('B', 'run_started', {
-        plan: ['n2'],
-        targets: args[1],
-        isolate: args[3] ?? [],
-        nodes: [],
-      }),
+      ev('B', 'run_started', { plan: ['n2'], targets: args[1], isolate: args[3] ?? [], nodes: [] }),
     );
     assert.equal(useExecutionStore.getState().resultRunId, 'B', `${name}：run_started 之后`);
   }
@@ -195,7 +187,7 @@ const sgOps = new Map([
   ['lib.denoise', { label: '库去噪' }],
 ]);
 
-test('子图事件定位：路径名称、错误来源聚合与重复定位请求', () => {
+test('子图事件定位：路径与名称、错误来源聚合、重复定位保持路径并推进请求', () => {
   const cases = [
     // [事件 id, 路径（子图节点 id）, 选中, 名字, 落到的就是它本身]
     ['top', [], 'top', ['体素降采样'], true],
@@ -370,13 +362,8 @@ test('查找节点（Ctrl+F）：整张图连子图里面的一起列，按名�
   assert.equal(matchShortcut(key('f'))?.id, 'findNode');
 });
 
-test('错误导航：F8往返、最近上游根因及跨子图追溯', () => {
-  const err = (paramPath) => ({
-    phase: 'execute',
-    code: 'bad_param',
-    message: '坏了',
-    paramPath,
-  });
+test('错误导航：F8往返、最近上游根因与跨子图追溯，不穿过已恢复的节点', () => {
+  const err = (paramPath) => ({ phase: 'execute', code: 'bad_param', message: '坏了', paramPath });
   useGraphStore.setState({ doc: sgDoc });
   useManifestStore.setState({ operatorsById: sgOps });
   useExecutionStore.setState({
@@ -500,7 +487,7 @@ test('错误导航：F8往返、最近上游根因及跨子图追溯', () => {
   );
 });
 
-test('运行控制生命周期：手动/预览/自动状态，取消去重/失败与重跑范围', async () => {
+test('运行控制生命周期：手动/预览/自动状态，取消去重与失败撤回、重跑沿用或回退范围', async () => {
   const base = { runStatus: 'running', preview: false, cancelling: false, request: {} };
   const cases = [
     ['没在跑', { ...base, runStatus: 'idle' }, ['run', 'off']],
@@ -591,10 +578,12 @@ test('自动运行的调度（lib/preview）：提交了一步攒 250 ms 补；�
   );
   useManifestStore.getState().replaceBundle(manifest, 1);
   const calls = [];
+  const requests = [];
   setTransport({
     kind: 'tauri',
     async runGraph(_doc, _path, opts) {
       calls.push(opts.targets ?? null);
+      requests.push(opts);
       return `auto${calls.length}`;
     },
   });
@@ -683,9 +672,47 @@ test('自动运行的调度（lib/preview）：提交了一步攒 250 ms 补；�
     useUiStore.setState({ autoRun: false });
     await settle();
     assert.deepEqual(calls.splice(0), [], '关掉自动运行：攒着的也不发');
+
+    const branches = {
+      ...base,
+      nodes: [...base.nodes, voxel('n3'), voxel('n4')],
+      edges: [
+        ...base.edges,
+        { id: 'e2', from: { node: 'n1', port: 'cloud' }, to: { node: 'n3', port: 'cloud' } },
+        { id: 'e3', from: { node: 'n2', port: 'cloud' }, to: { node: 'n4', port: 'cloud' } },
+      ],
+    };
+    g().loadDoc(branches, null);
+    ran({ n1: 'done', n2: 'done', n3: 'done', n4: 'done' });
+    useUiStore.setState({ autoRun: true, selectedNodes: new Set(['n2', 'n3']), pinnedNode: 'n4' });
+    g().setParam('n1', 'leafSize', leaf(0.1));
+    await startRun(g().doc, null, { targets: ['n2', 'n3'], exactTargets: true });
+    await settle();
+    assert.deepEqual(
+      calls.splice(0),
+      [['n2', 'n3']],
+      '精确运行两个选中目标：不追加钉住的未选中下游，也不让旧定时器另跑一次',
+    );
+    assert.equal(requests.at(-1).isolate, undefined, '保留 targets 语义，由 core 计算所需上游');
+    assert.equal('exactTargets' in requests.at(-1), false, '范围标记只在编辑器内部使用');
+    assert.equal(useExecutionStore.getState().request.exactTargets, true, '重跑需保留精确范围');
+
+    g().setParam('n4', 'leafSize', leaf(0.11));
+    await restartRun(g().doc, null);
+    await settle();
+    assert.deepEqual(
+      calls.splice(0),
+      [['n2', 'n3']],
+      '精确范围重跑仍只提交两个原目标，取消刚攒的下游自动运行',
+    );
   } finally {
     stop();
-    useUiStore.setState({ autoRun: true, previewing: false });
+    useUiStore.setState({
+      autoRun: true,
+      previewing: false,
+      selectedNodes: new Set(),
+      pinnedNode: null,
+    });
     useExecutionStore.getState().reset();
   }
 });

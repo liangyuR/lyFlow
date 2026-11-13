@@ -48,7 +48,7 @@ export function RecipeManager() {
         <div className="mg-tools">
           <button
             type="button"
-            className="lf-btn"
+            className="qs-btn sm tonal lf-btn"
             data-testid="mg-new"
             disabled={!dir}
             onClick={() => void choose(newRecipeInteractive(null))}
@@ -57,7 +57,7 @@ export function RecipeManager() {
           </button>
           <button
             type="button"
-            className="lf-btn"
+            className="qs-btn sm tonal lf-btn"
             data-testid="mg-dup"
             disabled={!entry}
             onClick={() => entry && void choose(duplicateRecipeInteractive(entry.name))}
@@ -66,7 +66,7 @@ export function RecipeManager() {
           </button>
           <button
             type="button"
-            className="lf-btn"
+            className="qs-btn sm tonal lf-btn"
             data-testid="mg-import"
             disabled={!dir}
             onClick={() => void choose(importRecipeInteractive())}
@@ -175,7 +175,7 @@ export function RecipeManager() {
                 {entry.name !== current && (
                   <button
                     type="button"
-                    className="lf-btn"
+                    className="qs-btn sm tonal lf-btn"
                     data-testid="mg-use"
                     onClick={() => selectRecipe(entry.name)}
                   >
@@ -184,7 +184,7 @@ export function RecipeManager() {
                 )}
                 <button
                   type="button"
-                  className="lf-btn"
+                  className="qs-btn sm tonal lf-btn"
                   data-testid="mg-default"
                   onClick={() =>
                     useGraphStore
@@ -196,7 +196,7 @@ export function RecipeManager() {
                 </button>
                 <button
                   type="button"
-                  className="lf-btn"
+                  className="qs-btn sm tonal lf-btn"
                   data-testid="mg-rename"
                   onClick={() => void choose(renameRecipeInteractive(entry.name))}
                 >
@@ -204,7 +204,7 @@ export function RecipeManager() {
                 </button>
                 <button
                   type="button"
-                  className="lf-btn"
+                  className="qs-btn sm tonal lf-btn"
                   data-testid="mg-export"
                   onClick={() => void exportRecipeInteractive(entry.name)}
                 >
@@ -212,7 +212,7 @@ export function RecipeManager() {
                 </button>
                 <button
                   type="button"
-                  className="lf-btn lf-btn--danger"
+                  className="qs-btn sm danger-tonal lf-btn lf-btn--danger"
                   data-testid="mg-delete"
                   onClick={() => void deleteRecipeInteractive(entry.name)}
                 >
@@ -242,7 +242,7 @@ export function RecipeManager() {
                 </span>
                 <button
                   type="button"
-                  className="lf-btn lf-btn--primary"
+                  className="qs-btn sm tonal lf-btn lf-btn--primary"
                   data-testid="mg-fix-all"
                   onClick={() => useGraphStore.getState().fixRecipe(entry.name, report.items)}
                 >
@@ -267,7 +267,7 @@ function MismatchRow({ recipe, m }: { recipe: string; m: Mismatch }) {
       </div>
       <button
         type="button"
-        className="lf-btn mg-mm__fix"
+        className="qs-btn sm tonal lf-btn mg-mm__fix"
         data-testid="mg-fix"
         onClick={() => useGraphStore.getState().fixRecipe(recipe, [m])}
       >

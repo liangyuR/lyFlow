@@ -32,7 +32,7 @@ export function EdgeContextMenu({
   return (
     <div
       ref={box}
-      className="ctxmenu"
+      className="qs-popover ctxmenu"
       style={style}
       data-testid="edge-context-menu"
       onClick={(e) => e.stopPropagation()}

@@ -15,6 +15,7 @@ import {
   pressKey,
   openInspectorAdvanced,
   dragMouse,
+  dragSelection,
   lit,
   mustOk,
   newDoc,
@@ -32,6 +33,7 @@ import {
   runAndWait,
   saveGraphTo,
   select,
+  setViewport,
   selectAndReadViewer,
   viewerBounds,
   stubClipboard,
@@ -525,7 +527,7 @@ async function suiteBypassReroute(cdp, report) {
   // 回到随机采样再按 Tab：它右边已经是刚接的体素，新节点往下让、不压着它（并出第二条分支）。这次真框选它 ——
   // 框选会把相连的线一起选上，照样算「只选中了一个节点」
   const t1Now = await boxOf(t1.id);
-  await dragMouse(cdp, { x: t1Now.l - 10, y: t1Now.t - 10 }, { x: t1Now.r + 10, y: t1Now.b + 10 }, { steps: 8 });
+  await dragSelection(cdp, { x: t1Now.l - 10, y: t1Now.t - 10 }, { x: t1Now.r + 10, y: t1Now.b + 10 }, { steps: 8 });
   await sleep(200);
   const boxed = await cdp.eval(`
     const ui = window.__lyflow.stores.ui.getState();
@@ -1007,10 +1009,51 @@ async function suiteInsertOnEdge(cdp, report) {
 
 // ------------------------------------------------------------ P1 #18 搜索接上
 
+export async function checkOperatorSearch(cdp, report) {
+  const setQuery = (selector, value) => cdp.eval(`
+    const input = document.querySelector(${lit(selector)});
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${lit(value)});
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  `);
+  if (await cdp.eval(`return document.querySelector('.palette').getClientRects().length === 0;`)) {
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="nav-nodes"]'));
+  }
+  for (const query of ["体素 降采样", "voxl", "grid 降采样"]) {
+    await setQuery('.palette__search input', query);
+    await sleep(120);
+    const paletteFirst = await cdp.eval(`return document.querySelector('.palette .op-row')?.dataset.opId;`);
+    await cdp.eval(`window.__lyflow.stores.ui.getState().openSearch({ screen: { x: 500, y: 180 }, flow: { x: 0, y: 0 } });`);
+    await sleep(120);
+    await setQuery('.search-popup__input', query);
+    await sleep(120);
+    const popupFirst = await cdp.eval(`return document.querySelector('.search-popup__row')?.dataset.opId;`);
+    report.eq(`算子库与画布搜索「${query}」返回一致的专业算子`, { paletteFirst, popupFirst },
+      { paletteFirst: 'filter.voxel_grid', popupFirst: 'filter.voxel_grid' });
+    const composition = await cdp.eval(`
+      const before = window.__lyflow.stores.graph.getState().doc.nodes.length;
+      const event = new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, isComposing: true, bubbles: true, cancelable: true });
+      document.querySelector('.search-popup__input').dispatchEvent(event);
+      return { open: !!document.querySelector('.search-popup'), added: window.__lyflow.stores.graph.getState().doc.nodes.length - before, prevented: event.defaultPrevented };
+    `);
+    report.eq(`搜索「${query}」时输入法确认文字不会误添加节点`, composition, { open: true, added: 0, prevented: false });
+    await pressEscape(cdp);
+  }
+  await setQuery('.palette__search input', 'voxel');
+  await sleep(120);
+  report.eq("侧栏搜索的输入法确认不会触发算子详情选择", await cdp.eval(`
+    const before = window.__lyflow.stores.ui.getState().inspectedOperator;
+    const event = new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, isComposing: true, bubbles: true, cancelable: true });
+    document.querySelector('.palette__search input').dispatchEvent(event);
+    return { changed: window.__lyflow.stores.ui.getState().inspectedOperator !== before, prevented: event.defaultPrevented };
+  `), { changed: false, prevented: false });
+  await setQuery('.palette__search input', '');
+}
+
 async function suiteDropToSearch(cdp, report) {
   report.section("P1 #18：连线中途松手 → 搜索面板 → 自动接上");
 
   await newDoc(cdp);
+  await checkOperatorSearch(cdp, report);
   const ids = await buildGraph(
     cdp,
     [{ key: "gen", op: "gen.synthetic", params: { pointCount: 1000 } }],
@@ -1085,6 +1128,7 @@ async function suiteDropToSearch(cdp, report) {
     const g = window.__lyflow.stores.graph.getState();
     return { voxel: g.addNode('filter.voxel_grid', { x: 0, y: 0 }), merge: window.__lyflow.stores.graph.getState().addNode('util.merge', { x: 0, y: 0 }) };
   `);
+  const mergeLabel = await cdp.eval(`return window.__lyflow.stores.manifest.getState().operatorsById.get('util.merge').label;`);
   const dropBox = await canvasBox(cdp);
   await placeAtScreen(cdp, {
     [ids.gen]: { x: 40, y: 60 },
@@ -1108,12 +1152,12 @@ async function suiteDropToSearch(cdp, report) {
   report.eq("松在合并点云的身子上（a、b 都能接）：什么也不接，提示对准端口",
     { edges: await wired(), search: await cdp.eval(`return !!document.querySelector('.search-popup');`),
       toast: await cdp.eval(`return window.__lyflow.stores.ui.getState().toast?.text ?? null;`) },
-    { edges: [`${ids.gen}>${extra.voxel}.cloud`], search: false, toast: "合并点云 上有 2 个端口能接，拖到要接的那个端口上" });
+    { edges: [`${ids.gen}>${extra.voxel}.cloud`], search: false, toast: `${mergeLabel} 上有 2 个端口能接，拖到要接的那个端口上` });
   // 长一点的提示停得够读完（按字数算，警告至少 4 秒）。以前一律 2.6 秒，这一句没读完就收了
   await sleep(3200);
   report.eq("这条提示 3 秒多之后还在（以前 2.6 秒就收了）",
     await cdp.eval(`return document.querySelector('[data-testid="toast"]')?.textContent ?? null;`),
-    "合并点云 上有 2 个端口能接，拖到要接的那个端口上");
+    `${mergeLabel} 上有 2 个端口能接，拖到要接的那个端口上`);
 
   // 松在一个已接着线的输入上（合并的 a 已经接着 gen）：给它换来源 —— 顶掉 gen→a、接上体素→a，一条撤销；拖到它附近时
   // 端口亮成「替换」。以前当成松在节点身上、在整个节点里另找能接的：体素悄悄接进了隔壁的 b，没有任何提示
@@ -1157,6 +1201,7 @@ async function suiteDropToSearch(cdp, report) {
     window.__lyflow.stores.graph.getState().connect({ node: ${lit(ids.gen)}, port: 'cloud' }, { node: id, port: 'cloud' });
     return id;
   `);
+  const ransacLabel = await cdp.eval(`return window.__lyflow.stores.manifest.getState().operatorsById.get('segment.ransac_plane').label;`);
   await placeAtScreen(cdp, { [ransac]: { x: 40, y: Math.round(dropBox.h * 0.6) } });
   await sleep(250);
   const inliers = await centerOf(cdp, `[data-testid="port-${ransac}-inliers"] .react-flow__handle`);
@@ -1185,7 +1230,7 @@ async function suiteDropToSearch(cdp, report) {
   `);
   report.ok("从 inliers 拖到空白处：接得上的排前面、写着接到哪个端口，接不上的置灰在后；打「提取」回车接到提取索引的 indices，一条撤销",
     listed.firstPort !== null && listed.extract === "indices" && listed.greyedAfter && /接不上 Indices/.test(listed.sep ?? "") &&
-      /RANSAC 平面\.Inliers/.test(listed.placeholder ?? "") && JSON.stringify(typedWire.edges) === JSON.stringify(["inliers>indices"]) &&
+      (listed.placeholder ?? "").includes(`${ransacLabel}.Inliers`) && JSON.stringify(typedWire.edges) === JSON.stringify(["inliers>indices"]) &&
       typedWire.rejected === null && typedWire.past - pastBeforeTyped === 1,
     JSON.stringify({ listed, typedWire, pastBeforeTyped }));
 }
@@ -1244,11 +1289,15 @@ async function suiteEditing(cdp, report) {
   report.section("P1 #25 #26 #28 #29：折叠重命名、参数右键、拖动改值、快捷键面板；空画布的提示");
 
   await newDoc(cdp);
+  await setViewport(cdp, { x: 0, y: 0, zoom: 0.7 });
   // 空画布的提示：第一次打开就是一片空白时告诉人从哪开始；有了节点就消失
   const hint = () => cdp.eval(`return document.querySelector('[data-testid="canvas-empty-hint"]')?.textContent ?? null;`);
   const empty = await hint();
-  report.ok("空画布上写着从哪开始（算子面板、双击、搜索键、打开）",
-    typeof empty === "string" && empty.includes("算子面板") && empty.includes("双击") && empty.includes("Ctrl+O"), String(empty));
+  report.ok("空画布给出添加算子、搜索键和打开快捷键",
+    typeof empty === "string" && empty.includes("添加算子") && empty.includes("Tab") && empty.includes("Ctrl+O"), String(empty));
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="canvas-add-operator"]'));
+  report.ok("真点空画布的添加按钮打开算子搜索", await cdp.eval(`return !!document.querySelector('.search-popup__input');`));
+  await pressEscape(cdp);
   const ids = await buildGraph(cdp, CHAIN_NODES, CHAIN_EDGES);
   await sleep(150);
   report.eq("有了节点提示就消失", await hint(), null);
@@ -1530,7 +1579,7 @@ async function suiteEditing(cdp, report) {
   mustOk(box != null, "gen 与 voxel 左上角外面有离画布边够远的空白可以开始框选", box);
   // 以前框选只选上先碰到的那一个、选区也不出来：onSelectionChange 与 onNodesChange/onEdgesChange
   // 来回改连线的选中，控制台报 Maximum update depth exceeded（那条红字由 run.mjs 收尾的「控制台无报错」兜住）
-  await dragMouse(cdp, box.from, box.to, { steps: 10 });
+  await dragSelection(cdp, box.from, box.to);
   await sleep(200);
   const boxed = await cdp.eval(`return [...window.__lyflow.stores.ui.getState().selectedNodes];`);
   report.ok("框选：gen 与 voxel 都选上了", boxed.includes(ids.gen) && boxed.includes(ids.voxel), JSON.stringify(boxed));
@@ -1570,21 +1619,17 @@ async function suiteEditing(cdp, report) {
   await sleep(200);
   report.eq("Ctrl+Z 一次都回来", await docCount(), { nodes: beforeDel.nodes, edges: beforeDel.edges });
 
-  // 按着 Shift 框选是往选中里加（与按着 Shift / Ctrl 点选一致），不按是换掉。以前按不按都换掉：开框时 React Flow
-  // 先把选中清空。原来选的也要跟着整组拖 —— React Flow 框选时把框外节点的内部状态改成了未选中，不换新对象它不重建
+  // Ctrl 框选替换选中，Ctrl+Shift 框选追加；追加后拖节点，原来的选中也一起移动。
   const selectedNow = () => cdp.eval(`return [...window.__lyflow.stores.ui.getState().selectedNodes];`);
   const voxelBox = await boxAround([ids.voxel]);
   mustOk(voxelBox != null, "voxel 四周有离画布边够远的空白可以开始框选", voxelBox);
   const genHead0 = await centerOf(cdp, `[data-testid="node-${ids.gen}"] .node__head`);
   await clickAt(cdp, genHead0);
-  await dragMouse(cdp, voxelBox.from, voxelBox.to, { steps: 10 });
+  await dragSelection(cdp, voxelBox.from, voxelBox.to);
   await sleep(200);
   const replaced = await selectedNow();
   await clickAt(cdp, genHead0);
-  const shiftKey = { key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16, nativeVirtualKeyCode: 16 };
-  await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...shiftKey, modifiers: 8 });
-  await dragMouse(cdp, voxelBox.from, voxelBox.to, { steps: 10, modifiers: 8 });
-  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...shiftKey, modifiers: 0 });
+  await dragSelection(cdp, voxelBox.from, voxelBox.to, { append: true });
   await sleep(200);
   const added = await selectedNow();
   const voxelHead = await centerOf(cdp, `[data-testid="node-${ids.voxel}"] .node__head`);
@@ -1592,28 +1637,42 @@ async function suiteEditing(cdp, report) {
   await dragMouse(cdp, voxelHead, { x: voxelHead.x + 40, y: voxelHead.y + 24 }, { steps: 12 });
   await sleep(200);
   const m1 = { gen: await posOf(ids.gen), voxel: await posOf(ids.voxel) };
-  report.ok("不按键框选换掉选中；按着 Shift 框选加进去，拖新框的那个、原来选的跟着走",
+  report.ok("Ctrl+左键框选替换选中；Ctrl+Shift+左键框选追加，拖新框的那个、原来选的跟着走",
     !replaced.includes(ids.gen) && replaced.includes(ids.voxel) && added.includes(ids.gen) && added.includes(ids.voxel) &&
       m1.gen.x !== m0.gen.x && m1.voxel.x !== m0.voxel.x,
     JSON.stringify({ replaced, added, m0, m1 }));
   await pressCtrl(cdp, "z");
   await sleep(150);
 
-  // 右键拖动平移（中键与右键平移）：按在节点上拖也平移、松手不弹菜单；不挪的右键单击照样弹节点菜单。
-  // 以前按在节点上拖不动（React Flow 只在空白处接右键平移），松手时指针在哪个节点 / 连线上就弹哪个的菜单
+  // 左键从空白处平移；右键只打开菜单，不移动画布或节点。
   const vpAt = () => cdp.eval(`
     const m = new DOMMatrixReadOnly(getComputedStyle(document.querySelector('.react-flow__viewport')).transform);
     return { x: Math.round(m.e), y: Math.round(m.f) };
   `);
   const anyMenu = () => cdp.eval(`return !!document.querySelector('[data-testid="node-context-menu"], [data-testid="edge-context-menu"]');`);
-  const genHead = await centerOf(cdp, `[data-testid="node-${ids.gen}"] .node__head`);
+  const blankPan = await cdp.eval(`
+    const r = document.querySelector('.react-flow__pane').getBoundingClientRect();
+    for (let y = r.top + 64; y < r.bottom - 100; y += 24) {
+      for (let x = r.left + 64; x < r.right - 140; x += 24) {
+        if (document.elementFromPoint(x, y)?.classList.contains('react-flow__pane')) return { x: Math.round(x), y: Math.round(y) };
+      }
+    }
+    return null;
+  `);
+  mustOk(blankPan != null, "画布里有空白可以左键平移");
   const v0 = await vpAt();
+  const panPositions = { gen: await posOf(ids.gen), voxel: await posOf(ids.voxel) };
+  await dragMouse(cdp, blankPan, { x: blankPan.x + 60, y: blankPan.y + 40 }, { steps: 8 });
+  const v1 = await vpAt();
+  report.ok("左键从空白处拖：画布平移，不框选或移动节点",
+    Math.abs(v1.x - v0.x - 60) <= 2 && Math.abs(v1.y - v0.y - 40) <= 2 &&
+      JSON.stringify({ gen: await posOf(ids.gen), voxel: await posOf(ids.voxel) }) === JSON.stringify(panPositions), JSON.stringify({ v0, v1 }));
+  const genHead = await centerOf(cdp, `[data-testid="node-${ids.gen}"] .node__head`);
+  const beforeRight = { viewport: await vpAt(), node: await posOf(ids.gen) };
   await dragMouse(cdp, genHead, { x: genHead.x + 60, y: genHead.y + 40 }, { steps: 8, button: "right" });
   await sleep(200);
-  const v1 = await vpAt();
-  const menuAfterDrag = await anyMenu();
-  report.ok("右键按在节点上拖：画布跟着平移，松手不弹菜单",
-    Math.abs(v1.x - v0.x - 60) <= 2 && Math.abs(v1.y - v0.y - 40) <= 2 && !menuAfterDrag, JSON.stringify({ v0, v1, menuAfterDrag }));
+  report.eq("右键在节点上拖：画布与节点位置都不变", { viewport: await vpAt(), node: await posOf(ids.gen) }, beforeRight);
+  await pressEscape(cdp);
   await clickAt(cdp, await centerOf(cdp, `[data-testid="node-${ids.gen}"] .node__head`), { button: "right" });
   await sleep(200);
   report.ok("右键单击节点照样弹节点菜单", await cdp.eval(`return !!document.querySelector('[data-testid="node-context-menu"]');`));
@@ -1929,7 +1988,7 @@ async function suiteEditing(cdp, report) {
   if (sheet) {
     report.ok("面板从键表生成，条目数与表一致", sheet.rows >= 20, `${sheet.rows} 条`);
     report.ok("表里有 F5 / Ctrl+M / Ctrl+G", sheet.hasRun && sheet.hasMute && sheet.hasLayout);
-    // 鼠标的用法也写出来（右键拖平移、松在节点身上接线、预览里双击设转心……不写没人知道）：画布、预览两组
+    // 鼠标用法覆盖画布与预览两组。
     report.ok("面板里还有鼠标的用法：画布、预览两组", sheet.mouse.length === 2 && sheet.mouse.every((n) => n >= 4), JSON.stringify(sheet.mouse));
   }
   await cdp.eval(`window.__lyflow.stores.ui.getState().setHelpOpen(false); return true;`);
@@ -1937,10 +1996,44 @@ async function suiteEditing(cdp, report) {
 
 // ------------------------------------------------- §2.5 面板、最近文件、备份
 
+export async function checkWindowChrome(cdp, report) {
+  report.eq("自定义标题栏去掉系统装饰，并提供三个窗口按钮", await cdp.eval(`
+    return {
+      decorated: await window.__TAURI_INTERNALS__.invoke('plugin:window|is_decorated', { label: 'main' }),
+      buttons: document.querySelectorAll('.flow-tabs--titlebar .window-controls button').length,
+      height: document.querySelector('.flow-tabs--titlebar')?.getBoundingClientRect().height,
+    };
+  `), { decorated: false, buttons: 3, height: 44 });
+  const maximized = () => cdp.eval(`return window.__TAURI_INTERNALS__.invoke('plugin:window|is_maximized', { label: 'main' });`);
+  if (await maximized()) {
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="window-maximize"]'));
+    await cdp.waitFor(`!(await window.__TAURI_INTERNALS__.invoke('plugin:window|is_maximized', { label: 'main' }))`, { what: "窗口还原" });
+  }
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="window-maximize"]'));
+  await cdp.waitFor(`document.querySelector('[data-testid="window-maximize"]').getAttribute('aria-pressed') === 'true'`, { what: "标题栏最大化图标同步" });
+  report.ok("标题栏按钮最大化原生窗口", await maximized());
+  const dragRegion = await centerOf(cdp, '[data-testid="titlebar-drag-region"]');
+  for (const clickCount of [1, 2]) {
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: dragRegion.x, y: dragRegion.y, button: "left", clickCount });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: dragRegion.x, y: dragRegion.y, button: "left", clickCount });
+  }
+  await cdp.waitFor(`document.querySelector('[data-testid="window-maximize"]').getAttribute('aria-pressed') === 'false'`, { what: "双击标题栏还原窗口" });
+  report.ok("双击标题栏空白区域还原原生窗口", !(await maximized()));
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="window-minimize"]'));
+  await cdp.waitFor(`await window.__TAURI_INTERNALS__.invoke('plugin:window|is_minimized', { label: 'main' })`, { what: "最小化原生窗口" });
+  report.ok("标题栏按钮最小化原生窗口", true);
+  await cdp.eval(`
+    await window.__TAURI_INTERNALS__.invoke('plugin:window|unminimize', { label: 'main' });
+    await window.__TAURI_INTERNALS__.invoke('plugin:window|set_focus', { label: 'main' });
+  `);
+  await cdp.waitFor(`document.querySelector('.flow-tabs').dataset.windowFocused === 'true'`, { what: "恢复窗口后焦点状态同步" });
+}
+
 async function suitePanels(cdp, report, ws) {
   report.section("§2.5：日志/诊断抽屉、最近文件、备份恢复、窗口标题");
 
   await newDoc(cdp);
+  await checkWindowChrome(cdp, report);
   const ids = await buildGraph(
     cdp,
     [
@@ -2129,6 +2222,10 @@ async function suitePanels(cdp, report, ws) {
   // 关窗口前问一句（app/src/closeGuard.ts）。原生对话框脚本点不了，tauri 的 invoke 也换不掉（只读属性），
   // 所以经 devbridge 换个对话框走一遍「要不要关」；监听装没装上、destroy 有没有权限另外查
   report.ok("关窗口前那一问装上了", await cdp.eval(`return window.__lyflow.shell.closeGuardInstalled();`));
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="window-close"]'));
+  await cdp.waitFor(`!!document.querySelector('[data-testid="modal-choice-cancel"]')`, { what: "标题栏关闭经过未保存确认" });
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="modal-choice-cancel"]'));
+  report.ok("标题栏关闭选择取消后，窗口与未保存改动保留", await cdp.eval(`return window.__lyflow.stores.graph.getState().dirty && !document.querySelector('[data-testid="modal"]');`));
   // 问的是编辑器画的「保存 / 不保存 / 取消」（lib/unsaved；以前是原生的「关闭 / 取消」，想保住改动只能先取消、存盘、再点 ×）。
   // 真鼠标点对话框里的按钮
   const savedSeed = () => JSON.parse(fs.readFileSync(graphPath, "utf8")).nodes.find((n) => n.id === ids.gen)?.params?.seed ?? null;
@@ -2160,22 +2257,86 @@ async function suitePanels(cdp, report, ws) {
     { asked: true, close: true, dirty: false, file: 9 });
   report.eq("没有改动时点 × 直接关、不问", await shouldClose(null), { asked: false, close: true, dirty: false });
 
-  // 工具栏「新建」同一问：取消 → 什么都不动；保存 → 先存盘再换成空图
-  await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.gen)}, 'seed', 11); return true;`);
-  const newBtn = '.toolbar button[title^="新建"]';
-  const docState = () => cdp.eval(`
+  const activeTab = () => cdp.eval(`return document.querySelector('[data-testid="flow-tab-select"][aria-selected="true"]')?.dataset.id ?? null;`);
+  const tabIds = () => cdp.eval(`return [...document.querySelectorAll('[data-testid="flow-tab"]')].map((tab) => tab.dataset.id);`);
+  const tabState = () => cdp.eval(`
     const g = window.__lyflow.stores.graph.getState();
-    return { nodes: g.doc.nodes.length, dirty: g.dirty, path: g.filePath };
+    return { nodes: g.doc.nodes.length, dirty: g.dirty, path: g.filePath,
+      seed: g.doc.nodes.find((n) => n.id === ${lit(ids.gen)})?.params?.seed ?? null, past: g.past.length };
   `);
-  const beforeNew = await docState();
-  await clickAt(cdp, await centerOf(cdp, newBtn));
+  const tabButton = async (testId, id) => {
+    const selector = `[data-testid="${testId}"][data-id="${id}"]`;
+    await cdp.eval(`document.querySelector(${lit(selector)})?.scrollIntoView({ block: 'nearest', inline: 'center' }); return true;`);
+    await sleep(80);
+    const at = await centerOf(cdp, selector);
+    mustOk(at != null, `找到标签按钮 ${testId}`, id);
+    await clickAt(cdp, at);
+  };
+  const selectTab = async (id) => {
+    await tabButton("flow-tab-select", id);
+    await cdp.waitFor(`document.querySelector('[data-testid="flow-tab-select"][aria-selected="true"]')?.dataset.id === ${lit(id)} &&
+      !document.querySelector('[data-testid="flow-tab-select"][aria-selected="true"]')?.disabled`,
+    { timeoutMs: 5000, what: `切换到工作流 ${id}` });
+  };
+  await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.gen)}, 'seed', 11); return true;`);
+  const originalTab = await activeTab();
+  mustOk(originalTab != null, "当前图有工作流标签");
+  const beforeNew = await tabState();
+  const beforeTabs = await tabIds();
+  await clickAt(cdp, await centerOf(cdp, '.toolbar button[title^="新建"]'));
+  await cdp.waitFor(`document.querySelector('[data-testid="flow-tab-select"][aria-selected="true"]')?.dataset.id !== ${lit(originalTab)} &&
+    window.__lyflow.stores.graph.getState().doc.nodes.length === 0`, { timeoutMs: 5000, what: "新建空白工作流标签" });
+  const emptyTab = await activeTab();
+  report.ok("改了参数点新建：不问保存，新增空白标签，原图以未保存状态留在后台",
+    (await tabIds()).length === beforeTabs.length + 1 && (await tabState()).path === null &&
+      await cdp.eval(`return !document.querySelector('[data-testid="modal"]') &&
+        !!document.querySelector('[data-testid="flow-tab"][data-id="${originalTab}"] [data-testid="flow-tab-dirty"]');`));
+
+  const backgroundClose = await shouldClose("cancel");
+  report.ok("活动标签是干净空图时，关闭窗口仍询问后台未保存工作流；取消保留全部标签并回到空图",
+    backgroundClose.asked && !backgroundClose.close && await activeTab() === emptyTab &&
+      JSON.stringify(await tabIds()) === JSON.stringify([...beforeTabs, emptyTab]), JSON.stringify(backgroundClose));
+  await selectTab(originalTab);
+  report.eq("切回原标签：参数与撤销栈保留", await tabState(), beforeNew);
+  await pressCtrl(cdp, "z");
+  await sleep(150);
+  const tabUndo = await tabState();
+  report.ok("切换后撤销仍作用于原文档", tabUndo.seed === 9 && tabUndo.past === beforeNew.past - 1, JSON.stringify(tabUndo));
+  await pressCtrl(cdp, "z", ["shift"]);
+  await sleep(150);
+  await selectTab(emptyTab);
+  await selectTab(originalTab);
+  report.eq("重做后再切换回来：原参数与撤销记录仍保留", await tabState(), beforeNew);
+
+  const beforeDuplicate = await tabIds();
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="recent-toggle"]'));
+  await sleep(150);
+  await clickAt(cdp, await centerOf(cdp, `[data-testid="recent-item"][title="${graphPath.replace(/\\/g, "\\\\")}"]`));
+  await sleep(250);
+  report.ok("再次打开同一路径：只激活已有标签，不重读文件或覆盖未保存参数",
+    JSON.stringify(await tabIds()) === JSON.stringify(beforeDuplicate) && await activeTab() === originalTab &&
+      (await tabState()).seed === 11 && await cdp.eval(`return !document.querySelector('[data-testid="modal"]');`));
+
+  await tabButton("flow-tab-close", originalTab);
   await pickChoice("cancel");
-  report.eq("改了参数点「新建」、选「取消」：图没换、改动还在", await docState(), beforeNew);
-  await clickAt(cdp, await centerOf(cdp, newBtn));
+  await sleep(150);
+  report.eq("关闭未保存标签选取消：标签和改动均保留", { ids: await tabIds(), state: await tabState() },
+    { ids: beforeDuplicate, state: beforeNew });
+  await tabButton("flow-tab-close", originalTab);
   await pickChoice("save");
-  for (let i = 0; i < 25 && (await docState()).nodes !== 0; i += 1) await sleep(100);
-  report.eq("再点「新建」、选「保存」：文件里是改过的那份，换成了空图", { ...(await docState()), file: savedSeed() },
-    { nodes: 0, dirty: false, path: null, file: 11 });
+  await cdp.waitFor(`!document.querySelector('[data-testid="flow-tab"][data-id="${originalTab}"]')`,
+    { timeoutMs: 5000, what: "保存后关闭工作流标签" });
+  report.ok("关闭未保存标签选保存：先写入原文件再移除标签，另一个工作流保留",
+    savedSeed() === 11 && (await tabIds()).includes(emptyTab) && await activeTab() === emptyTab);
+
+  await openFromEmpty(graphPath);
+  const discardTab = await activeTab();
+  await cdp.eval(`window.__lyflow.stores.graph.getState().setParam(${lit(ids.gen)}, 'seed', 13); return true;`);
+  await tabButton("flow-tab-close", discardTab);
+  await pickChoice("discard");
+  await cdp.waitFor(`!document.querySelector('[data-testid="flow-tab"][data-id="${discardTab}"]')`,
+    { timeoutMs: 5000, what: "不保存并关闭工作流标签" });
+  report.eq("关闭未保存标签选不保存：关闭标签，磁盘保留上次保存的参数", savedSeed(), 11);
   // 有监听时 tauri 不自己关、由 JS 来 destroy：壳得有这个权限，没有的话点 × 就再也关不掉。
   // 拿一个不存在的窗口名真调一次：权限不够是 ACL 先拒，够了才走到「找不到窗口」
   const destroyCheck = await cdp.eval(`
@@ -2752,15 +2913,47 @@ async function suiteMeasure(cdp, report) {
 // ---------------------------------------------------------- Shift+F5 / #27
 
 async function suiteRunToSelected(cdp, report) {
-  report.section("P1 #27 + E7：Shift+F5 跑到选中节点");
+  report.section("P1 #27 + E7：Shift+F5 与多选浮动条精确运行到选中节点");
 
   await newDoc(cdp);
+  await setViewport(cdp, { x: 0, y: 0, zoom: 0.7 });
   const ids = await buildGraph(cdp, CHAIN_NODES, CHAIN_EDGES);
   await select(cdp, ids.voxel);
   const run = await runAndWait(cdp, () => pressShiftF5(cdp));
   report.eq("运行状态 ok", run.status, "ok");
   report.eq("目标就是选中的那个节点", run.targets, [ids.voxel]);
   report.ok("下游没进计划", run.nodes[ids.tail] === undefined, JSON.stringify(run.nodes[ids.tail]));
+
+  await newDoc(cdp);
+  await setViewport(cdp, { x: 0, y: 0, zoom: 0.7 });
+  const picked = await buildGraph(cdp, CHAIN_NODES, CHAIN_EDGES);
+  await waitForNodes(cdp, picked);
+  await normalizeZoom(cdp, 0.7);
+  const pane = await canvasBox(cdp);
+  await placeAtScreen(cdp, {
+    [picked.gen]: { x: 64, y: 120 },
+    [picked.voxel]: { x: Math.round(pane.w * 0.48), y: 120 },
+    [picked.tail]: { x: Math.round(pane.w * 0.48), y: 320 },
+  });
+  await clickAt(cdp, await centerOf(cdp, `[data-testid="node-${picked.gen}"] .node__head`));
+  const control = { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 };
+  await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...control, modifiers: 2 });
+  try {
+    await clickAt(cdp, await centerOf(cdp, `[data-testid="node-${picked.voxel}"] .node__head`), { modifiers: 2 });
+  } finally {
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...control, modifiers: 0 });
+  }
+  const selected = await cdp.eval(`return [...window.__lyflow.stores.ui.getState().selectedNodes].sort();`);
+  report.eq("Ctrl+单击保留多选", selected, [picked.gen, picked.voxel].sort());
+  await cdp.waitFor(`!!document.querySelector('[data-testid="selection-toolbar"] [data-testid="selection-run"]')`,
+    { timeoutMs: 4000, what: "两个节点选中后出现多选运行浮动条" });
+  const selectionRun = await centerOf(cdp, '[data-testid="selection-run"]');
+  mustOk(selectionRun != null, "浮动条运行按钮可以真实点击");
+  const floated = await runAndWait(cdp, () => clickAt(cdp, selectionRun));
+  report.eq("真点浮动条运行：后端targets精确等于两个选中节点", [...floated.targets].sort(), selected);
+  report.eq("选中区域运行成功", floated.status, "ok");
+  report.eq("运行计划只包含选中节点及必要上游，不执行选区外下游", Object.keys(floated.nodes).sort(), selected);
+  report.eq("点击浮动条后多选仍保留", await cdp.eval(`return [...window.__lyflow.stores.ui.getState().selectedNodes].sort();`), selected);
 }
 
 export const m3Suites = [

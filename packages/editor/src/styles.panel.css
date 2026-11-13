@@ -12,28 +12,30 @@
 .ppanel__head {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 0 6px 0 8px;
-  height: 34px;
+  gap: var(--space-4);
+  padding: var(--space-8);
+  height: 48px;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--lyflow-border);
-  background: var(--lyflow-bg-2);
+  background: var(--surface-low);
 }
 
 .ppanel__tabs {
   display: flex;
-  gap: 2px;
-  height: 100%;
+  gap: var(--space-4);
+  padding: 2px;
+  height: 34px;
+  border-radius: var(--r-full);
+  background: var(--surface-mid);
 }
 
 .ppanel__tab {
-  padding: 0 12px;
-  background: none;
+  padding: 0 var(--space-12);
+  background: transparent;
   border: 0;
-  border-bottom: 2px solid transparent;
-  color: var(--lyflow-fg-1);
-  font: inherit;
-  font-size: 12px;
+  border-radius: var(--r-full);
+  color: var(--on-surface-variant);
+  font: var(--text-label);
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -42,8 +44,8 @@
 }
 
 .ppanel__tab.is-active {
-  color: var(--lyflow-fg-0);
-  border-bottom-color: var(--lyflow-accent);
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
 }
 
 .ppanel__spacer {
@@ -51,13 +53,13 @@
 }
 
 .ppanel__icon {
-  width: 26px;
-  height: 24px;
+  width: var(--ctl-h-sm);
+  height: var(--ctl-h-sm);
   padding: 0;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: var(--lyflow-radius);
-  color: var(--lyflow-fg-1);
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-full);
+  color: var(--on-surface-variant);
   font: inherit;
   font-size: 13px;
   line-height: 1;
@@ -87,9 +89,8 @@
 .pp-filter {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--lyflow-border);
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12) var(--space-12);
   flex-shrink: 0;
 }
 
@@ -173,7 +174,7 @@
 }
 
 .pp-title.is-invalid {
-  color: #ff9a9a;
+  color: var(--on-ng-container);
 }
 
 .pp-gp-head {
@@ -189,7 +190,7 @@
 .pp-group__adv {
   padding: 0 5px;
   border: 1px solid var(--lyflow-border-strong);
-  border-radius: 8px;
+  border-radius: var(--r-full);
   font-size: 9px;
   letter-spacing: 0;
 }
@@ -214,7 +215,7 @@
 }
 
 .pp-node.is-focused {
-  background: rgba(74, 158, 255, 0.08);
+  background: color-mix(in srgb, var(--primary-container) 45%, transparent);
   border-left-color: var(--lyflow-accent);
 }
 
@@ -261,7 +262,7 @@
 .pp-badge {
   padding: 0 6px;
   border: 1px solid var(--lyflow-border-strong);
-  border-radius: 8px;
+  border-radius: var(--r-full);
   color: var(--lyflow-fg-1);
   font-size: 10px;
   white-space: nowrap;
@@ -284,11 +285,11 @@
 }
 
 .prow:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--state-hover);
 }
 
 .prow.is-focused {
-  background: rgba(74, 158, 255, 0.05);
+  background: color-mix(in srgb, var(--primary-container) 30%, transparent);
 }
 
 .prow.is-disabled .prow__control {
@@ -302,7 +303,7 @@
   top: 4px;
   bottom: 4px;
   width: 3px;
-  border-radius: 2px;
+  border-radius: var(--r-xs);
   background: transparent;
 }
 
@@ -346,7 +347,7 @@
 
 .prow__tag {
   padding: 0 5px;
-  border-radius: 8px;
+  border-radius: var(--r-full);
   background: var(--lyflow-bg-3);
   color: var(--lyflow-fg-2);
   font-size: 10px;
@@ -354,7 +355,7 @@
 }
 
 .prow__tag--graph {
-  background: rgba(74, 158, 255, 0.12);
+  background: var(--primary-container);
   color: var(--lyflow-accent);
 }
 
@@ -408,7 +409,7 @@
 .prow.has-error input,
 .prow.has-error select,
 .prow.has-error textarea {
-  border-color: #c84040;
+  border-color: var(--ng);
 }
 
 .pp-diags {
@@ -423,7 +424,7 @@
 }
 
 .pp-diag.is-error {
-  color: #ff9a9a;
+  color: var(--on-ng-container);
 }
 
 .pp-diag.is-warning {
@@ -454,7 +455,7 @@
 .prow__thumb {
   flex-shrink: 0;
   border: 1px solid var(--lyflow-border);
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   background: var(--lyflow-bg-0);
   cursor: pointer;
 }
@@ -464,7 +465,7 @@
 }
 
 .prow__thumb-bg {
-  fill: rgba(209, 213, 219, 0.06);
+  fill: var(--state-hover);
 }
 
 .prow__thumb-box {
@@ -474,8 +475,8 @@
 }
 
 .prow__thumb-box.is-current {
-  fill: rgba(52, 211, 153, 0.18);
-  stroke: #34d399;
+  fill: color-mix(in srgb, var(--ok) 18%, transparent);
+  stroke: var(--ok);
   stroke-width: 1.5;
 }
 
@@ -505,16 +506,15 @@
 .app__viewer-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-8);
   width: 100%;
-  padding: 5px 10px;
+  min-height: var(--ctl-h);
+  padding: 0 var(--space-16);
   flex-shrink: 0;
-  background: var(--lyflow-bg-2);
+  background: var(--surface-mid);
   border: 0;
-  border-bottom: 1px solid var(--lyflow-border);
-  color: var(--lyflow-fg-1);
-  font: inherit;
-  font-size: 11px;
+  color: var(--on-surface-variant);
+  font: var(--text-label);
   text-align: left;
   cursor: pointer;
 }

@@ -632,7 +632,7 @@ function ParamMenu({
   return (
     <div
       ref={ref}
-      className="ctxmenu param-menu"
+      className="qs-popover ctxmenu param-menu"
       data-testid="param-menu"
       style={placement}
       onContextMenu={(e) => e.preventDefault()}

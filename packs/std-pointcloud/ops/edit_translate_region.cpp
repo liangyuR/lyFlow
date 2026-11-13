@@ -72,10 +72,25 @@ void registerEditTranslateRegion(Registry& r) {
   OperatorDesc op;
   op.id = "edit.translate_region";
   op.version = "1.0.0";
-  op.label = "平移选区";
+  op.label = "点云选区平移";
   op.category = "编辑";
-  op.keywords = {"translate", "region", "perturb", "halfspace", "box",
-                 "平移",      "选区",   "扰动",    "半空间",    "合成位移"};
+  op.keywords = {"point cloud region translation",
+                 "regional displacement",
+                 "halfspace",
+                 "AABB",
+                 "点云平移",
+                 "区域位移",
+                 "半空间选区",
+                 "合成扰动",
+                 "translate",
+                 "region",
+                 "perturb",
+                 "box",
+                 "平移",
+                 "选区",
+                 "扰动",
+                 "半空间",
+                 "合成位移"};
   op.doc = "把几何选区内的点整体平移，其余点原样。选区是半空间（点 + 法向，取 dot(p-point, "
            "normal) > 0 的一侧）或轴对齐盒（闭区间）。平移量与选区参数（point / boxMin / boxMax）"
            "和输入云同帧同单位，都是米 —— 传感器帧与测量帧都是米（gap.to_measurement_frame "

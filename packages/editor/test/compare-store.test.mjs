@@ -51,72 +51,75 @@ const state = () => {
   };
 };
 
-test('预览与画布交互契约：快捷键无冲突、最大化还原与参数面板可见性', () => {
-  {
-    const key = (k, ctrlKey, shiftKey = false, altKey = false) => ({
-      key: k,
-      ctrlKey,
-      metaKey: false,
-      shiftKey,
-      altKey,
-    });
-    const got = [
-      key('D', true, true),
-      key('d', true),
-      key('D', false, true),
-      key('m', false),
-      key('m', true),
-      key(' ', false, true),
-      key(' ', false),
-      key('ArrowRight', false, false, true),
-      key('ArrowUp', false, false, true),
-      key('ArrowRight', false),
-      key('ArrowRight', false, true, true),
-      key('1', false),
-      key('4', false),
-      key('1', true),
-      key('!', false, true),
-      key('p', false),
-      key('P', true, true),
-    ].map((e) => matchShortcut(e)?.id ?? null);
-    assert.deepEqual(got, [
-      'compare',
-      'duplicate',
-      'duplicateWired',
-      'measure',
-      'mute',
-      'maximizeViewer',
-      'search',
-      'navDown',
-      'navPrev',
-      null,
-      null,
-      'viewTop',
-      'viewIso',
-      null,
-      null,
-      'pin',
-      'paramPanel',
-    ]);
-    // 表里每一个键位按下去都回到它自己：以后谁再加一个键撞上了前面的，这里先红
-    const collided = SHORTCUTS.flatMap((s) =>
-      s.keys.map((combo) => {
-        const parts = combo.split('+');
-        const last = parts[parts.length - 1];
-        const e = key(
-          last === 'Space' ? ' ' : last,
-          parts.includes('Ctrl'),
-          parts.includes('Shift') || last === '?',
-          parts.includes('Alt'),
-        );
-        return matchShortcut(e)?.id === s.id
-          ? null
-          : `${combo} → ${matchShortcut(e)?.id}（应为 ${s.id}）`;
-      }),
-    ).filter(Boolean);
-    assert.deepEqual(collided, []);
-  }
-  {
+test('预览的快捷键不与画布的撞：Ctrl+Shift+D 对比 / Ctrl+D 原地复制 / Shift+D 复制并保留输入，M 测量 / Ctrl+M 静音，P 钉住 / Ctrl+Shift+P 参数面板，Shift+Space 最大化 / Space 搜索，Alt+方向键沿连线走 / 方向键挪节点', () => {
+  const key = (k, ctrlKey, shiftKey = false, altKey = false) => ({
+    key: k,
+    ctrlKey,
+    metaKey: false,
+    shiftKey,
+    altKey,
+  });
+  const got = [
+    key('D', true, true),
+    key('d', true),
+    key('D', false, true),
+    key('m', false),
+    key('m', true),
+    key(' ', false, true),
+    key(' ', false),
+    key('ArrowRight', false, false, true),
+    key('ArrowUp', false, false, true),
+    key('ArrowRight', false),
+    key('ArrowRight', false, true, true),
+    key('1', false),
+    key('4', false),
+    key('1', true),
+    key('!', false, true),
+    key('p', false),
+    key('P', true, true),
+  ].map((e) => matchShortcut(e)?.id ?? null);
+  assert.deepEqual(got, [
+    'compare',
+    'duplicate',
+    'duplicateWired',
+    'measure',
+    'mute',
+    'maximizeViewer',
+    'search',
+    'navDown',
+    'navPrev',
+    null,
+    null,
+    'viewTop',
+    'viewIso',
+    null,
+    null,
+    'pin',
+    'paramPanel',
+  ]);
+  // 表里每一个键位按下去都回到它自己：以后谁再加一个键撞上了前面的，这里先红
+  const collided = SHORTCUTS.flatMap((s) =>
+    s.keys.map((combo) => {
+      const parts = combo.split('+');
+      const last = parts[parts.length - 1];
+      const e = key(
+        last === 'Space' ? ' ' : last,
+        parts.includes('Ctrl'),
+        parts.includes('Shift') || last === '?',
+        parts.includes('Alt'),
+      );
+      return matchShortcut(e)?.id === s.id
+        ? null
+        : `${combo} → ${matchShortcut(e)?.id}（应为 ${s.id}）`;
+    }),
+  ).filter(Boolean);
+  assert.deepEqual(collided, []);
+});
+
+test('预览最大化：画布定位和面板动作还原视图，其他动作保留最大化', () => {
+  const beforeUi = useUiStore.getState();
+  const beforeCompare = useCompareStore.getState();
+  try {
     const ui = () => useUiStore.getState();
     const cases = [
       // [说明, 动作, 之后还最大化着吗]
@@ -164,15 +167,16 @@ test('预览与画布交互契约：快捷键无冲突、最大化还原与参�
       [false, true],
       '最大化着点「参数」',
     );
-    useUiStore.setState({
-      viewerMaximized: false,
-      paramPanel: { ...ui().paramPanel, open: false, maximized: false },
-    });
+  } finally {
+    useUiStore.setState(beforeUi, true);
+    useCompareStore.setState(beforeCompare, true);
   }
 });
 
-test('对比生命周期：进入/退出、展开预览、选择B与冻结/解冻', () => {
-  {
+test('对比生命周期：选择或钉住进入、展开预览、冻结换B及节点删除后退出', () => {
+  const beforeUi = useUiStore.getState();
+  const beforeCompare = useCompareStore.getState();
+  try {
     const cases = [
       // [说明, reset 参数, 期望]
       [
@@ -205,24 +209,19 @@ test('对比生命周期：进入/退出、展开预览、选择B与冻结/解�
         { selected: ['n1', 'n2'] },
         { on: false, b: null, frozen: null, toast: COMPARE_NO_NODE },
       ],
+      [
+        '参数面板开着、预览收起时先展开预览',
+        { selected: ['n1'], panel: { open: true, viewerOpen: false } },
+        { on: true, b: 'n1', frozen: null, toast: COMPARE_NO_RESULT },
+      ],
     ];
     for (const [name, setup, want] of cases) {
       reset(setup);
       useCompareStore.getState().toggle();
       assert.deepEqual(state(), want, name);
+      if (setup.panel?.open) assert.equal(useUiStore.getState().paramPanel.viewerOpen, true, name);
     }
-    // 开着再按一次：退出，B 与快照一起丢
-    reset({ selected: ['n1'], capture: () => snap('r') });
-    useCompareStore.getState().toggle();
-    useCompareStore.getState().toggle();
-    assert.deepEqual(state(), { on: false, b: null, frozen: null, toast: null });
-  }
-  {
-    reset({ selected: ['n1'], panel: { open: true, viewerOpen: false } });
-    useCompareStore.getState().toggle();
-    assert.equal(useUiStore.getState().paramPanel.viewerOpen, true);
-  }
-  {
+
     const cmp = () => useCompareStore.getState();
     reset();
     cmp().freeze(snap('r0'));
@@ -251,39 +250,47 @@ test('对比生命周期：进入/退出、展开预览、选择B与冻结/解�
       { on: true, b: 'n2', frozen: null, toast: null },
       '解冻后 B 仍是同一节点',
     );
-  }
-});
-
-test('prune：B 的节点没了（含它所在的子图没了）就退出并提示，别的改动不管', () => {
-  const seg = { nodeId: 'sg', subgraphId: 's1' };
-  const docWith = (topNodes, inner) => ({
-    nodes: topNodes.map((id) => ({ id, op: id === 'sg' ? 'sub:s1' : 't.op', params: {} })),
-    edges: [],
-    subgraphs: inner
-      ? { s1: { nodes: inner.map((id) => ({ id, op: 't.op', params: {} })), edges: [] } }
-      : {},
-  });
-  const cases = [
-    // [说明, B 槽, 图, 期望还在对比]
-    ['顶层节点还在', { path: [], nodeId: 'n1' }, docWith(['n1', 'n2']), true],
-    ['顶层节点被删', { path: [], nodeId: 'n1' }, docWith(['n2']), false],
-    [
-      '子图里的节点还在（当前层是顶层也不退出）',
-      { path: [seg], nodeId: 'i1' },
-      docWith(['sg'], ['i1']),
-      true,
-    ],
-    ['子图里的节点被删', { path: [seg], nodeId: 'i1' }, docWith(['sg'], ['i2']), false],
-    ['整个子图节点被删', { path: [seg], nodeId: 'i1' }, docWith(['n2'], ['i1']), false],
-  ];
-  for (const [name, slot, doc, alive] of cases) {
-    reset();
-    useCompareStore.getState().enter(slot, snap('r'));
-    useCompareStore.getState().prune(doc);
+    cmp().freeze(snap('r3'));
+    cmp().toggle();
     assert.deepEqual(
-      [state().on, state().toast],
-      alive ? [true, null] : [false, COMPARE_B_GONE],
-      name,
+      state(),
+      { on: false, b: null, frozen: null, toast: null },
+      '开着再按一次：退出并清除B与冻结快照',
     );
+
+    const seg = { nodeId: 'sg', subgraphId: 's1' };
+    const docWith = (topNodes, inner) => ({
+      nodes: topNodes.map((id) => ({ id, op: id === 'sg' ? 'sub:s1' : 't.op', params: {} })),
+      edges: [],
+      subgraphs: inner
+        ? { s1: { nodes: inner.map((id) => ({ id, op: 't.op', params: {} })), edges: [] } }
+        : {},
+    });
+    const pruneCases = [
+      // [说明, B 槽, 图, 期望还在对比]
+      ['顶层节点还在', { path: [], nodeId: 'n1' }, docWith(['n1', 'n2']), true],
+      ['顶层节点被删', { path: [], nodeId: 'n1' }, docWith(['n2']), false],
+      [
+        '子图里的节点还在（当前层是顶层也不退出）',
+        { path: [seg], nodeId: 'i1' },
+        docWith(['sg'], ['i1']),
+        true,
+      ],
+      ['子图里的节点被删', { path: [seg], nodeId: 'i1' }, docWith(['sg'], ['i2']), false],
+      ['整个子图节点被删', { path: [seg], nodeId: 'i1' }, docWith(['n2'], ['i1']), false],
+    ];
+    for (const [name, slot, doc, alive] of pruneCases) {
+      reset();
+      useCompareStore.getState().enter(slot, snap('r'));
+      useCompareStore.getState().prune(doc);
+      assert.deepEqual(
+        [state().on, state().toast],
+        alive ? [true, null] : [false, COMPARE_B_GONE],
+        name,
+      );
+    }
+  } finally {
+    useUiStore.setState(beforeUi, true);
+    useCompareStore.setState(beforeCompare, true);
   }
 });

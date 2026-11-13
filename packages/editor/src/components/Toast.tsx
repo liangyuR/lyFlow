@@ -29,8 +29,9 @@ export function Toast() {
   if (!toast) return null;
   return (
     <div
-      className={`toast toast--${toast.kind}`}
+      className={`qs-snackbar ${toast.kind} toast toast--${toast.kind}`}
       data-testid="toast"
+      role="status"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >

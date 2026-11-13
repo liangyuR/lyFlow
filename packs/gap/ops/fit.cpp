@@ -1231,9 +1231,18 @@ void registerFitLine(Registry& r) {
   OperatorDesc op;
   op.id = "gap.fit_line";
   op.version = "1.1.0";
-  op.label = "拟合直线";
+  op.label = "二维剖面直线拟合";
   op.category = "间隙/拟合";
-  op.keywords = {"line", "ransac", "直线", "拟合"};
+  op.keywords = {"2D profile line fitting",
+                 "RANSAC line",
+                 "ROI line fitting",
+                 "二维直线拟合",
+                 "剖面拟合",
+                 "局部重拟合",
+                 "line",
+                 "ransac",
+                 "直线",
+                 "拟合"};
   op.doc = "在 ROI 里拟合一条直线：先整体拟合，再截取靠缝隙那一端的 segmentPoints 个内点、"
            "用 1/3 的阈值重拟合一次。「靠缝那一端」由 toward 框的中心定：内点沿直线方向投影，"
            "离它最近的那些留下，innerEnd 也取离它最近的那一个。line 带与 ROI 框的两个交点作端点。\n"
@@ -1365,9 +1374,18 @@ void registerFitGapCircles(Registry& r) {
   OperatorDesc op;
   op.id = "gap.fit_gap_circles";
   op.version = "1.4.0";
-  op.label = "拟合间隙圆";
+  op.label = "间隙双侧圆拟合";
   op.category = "间隙/拟合";
-  op.keywords = {"circle", "ransac", "圆", "拟合", "间隙"};
+  op.keywords = {"gap circle pair fitting",
+                 "2D circle fitting",
+                 "RANSAC",
+                 "间隙圆拟合",
+                 "双侧圆弧拟合",
+                 "固定半径拟合",
+                 "circle",
+                 "圆",
+                 "拟合",
+                 "间隙"};
   op.doc = "间隙两侧的圆拟合。先在合并云的 ROI 里拟合；失败按 retryDistance 再试一次；"
            "还失败就退到「两台相机各拟合一个」，两台都合格时按 |gap − nominal| 二选一（§3.9）。"
            "另有两个逐侧的收紧手段：leftCamera/rightCamera 把某一侧钉到单台相机；"

@@ -113,10 +113,23 @@ void registerBoardCalib(Registry& r) {
   OperatorDesc op;
   op.id = "image.board_calib";
   op.version = "1.0.0";
-  op.label = "标定板标定";
+  op.label = "棋盘格平面标定";
   op.category = "图像/标定";
-  op.keywords = {"calib", "calibration", "chessboard", "homography",
-                 "标定",  "棋盘格",      "单应",       "毫米"};
+  op.keywords = {"chessboard plane calibration",
+                 "homography calibration",
+                 "planar calibration",
+                 "棋盘格标定",
+                 "工作平面标定",
+                 "单应矩阵",
+                 "像素毫米转换",
+                 "calib",
+                 "calibration",
+                 "chessboard",
+                 "homography",
+                 "标定",
+                 "棋盘格",
+                 "单应",
+                 "毫米"};
   op.doc = "棋盘格图 → 工作平面标定 image.PlaneCalib（图像 px → 板面 mm 的 3×3 单应）。"
            "findChessboardCornersSB 找内角点，全部角点一起求单应，报残差 RMS 与平均 mm/px。"
            "板要放在要量的那个平面上（涂胶飞拍：内边所在的高度）。原点在第一个角点。\n"

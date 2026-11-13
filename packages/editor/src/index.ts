@@ -1,4 +1,5 @@
 export { LyFlowEditor, type LyFlowEditorProps } from './LyFlowEditor';
+export type { FlowWindowChrome } from './components/FlowTabs';
 
 export * from './transport';
 export {
@@ -8,6 +9,13 @@ export {
   type PathPickRequest,
 } from './lib/dialogs';
 export { resolveUnsaved } from './lib/unsaved';
+export { flowsDirty, resolveAllUnsaved, useFlowTabsStore } from './store/flowTabs';
+export {
+  backupWorkspace,
+  readWorkspaceBackup,
+  restoreWorkspaceBackup,
+  clearWorkspaceBackup,
+} from './lib/workspaceRecovery';
 export { modalHostReady } from './lib/modal';
 
 export type * from './types/graph';

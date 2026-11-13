@@ -74,7 +74,12 @@ function SnippetBranch({ query }: { query: string }) {
       data-testid="snippet-library"
       style={{ ['--depth' as string]: 0 }}
     >
-      <button type="button" className="tree-branch__head" onClick={() => setOpen((v) => !v)}>
+      <button
+        type="button"
+        className="tree-branch__head"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
         <span className={`tree-branch__caret${open ? ' is-open' : ''}`} aria-hidden>
           ▸
         </span>
@@ -109,11 +114,16 @@ function RecentBranch() {
       data-testid="palette-recent"
       style={{ ['--depth' as string]: 0 }}
     >
-      <button type="button" className="tree-branch__head" onClick={() => setOpen((v) => !v)}>
+      <button
+        type="button"
+        className="tree-branch__head"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
         <span className={`tree-branch__caret${open ? ' is-open' : ''}`} aria-hidden>
           ▸
         </span>
-        最近用过
+        最近使用
         <span className="tree-branch__count">{ops.length}</span>
       </button>
       {open && (
@@ -200,6 +210,7 @@ function OperatorRow({
     <button
       type="button"
       className={`op-row${active ? ' is-active' : ''}`}
+      aria-pressed={active}
       data-op-id={op.id}
       draggable
       onDragStart={(e) => {
@@ -231,7 +242,12 @@ function TreeBranch({ node, depth }: { node: TreeNode; depth: number }) {
 
   return (
     <div className="tree-branch" style={{ ['--depth' as string]: depth }}>
-      <button type="button" className="tree-branch__head" onClick={() => setOpen((v) => !v)}>
+      <button
+        type="button"
+        className="tree-branch__head"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
         <span className={`tree-branch__caret${open ? ' is-open' : ''}`} aria-hidden>
           ▸
         </span>
@@ -252,7 +268,7 @@ function TreeBranch({ node, depth }: { node: TreeNode; depth: number }) {
   );
 }
 
-export function NodePalette() {
+export function NodePalette({ onClose }: { onClose?: (() => void) | undefined }) {
   const operators = useManifestStore((s) => s.bundle?.operators);
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
@@ -274,6 +290,10 @@ export function NodePalette() {
   }, [cursor, hits, query]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) {
+      e.stopPropagation();
+      return;
+    }
     if (!query.trim() || hits.length === 0) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -295,11 +315,47 @@ export function NodePalette() {
 
   return (
     <div className="palette">
+      <header className="workspace-heading">
+        <span className="workspace-heading__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+            <rect x="3" y="3" width="7" height="7" rx="2" />
+            <rect x="14" y="3" width="7" height="7" rx="2" />
+            <rect x="3" y="14" width="7" height="7" rx="2" />
+            <path d="M14 17.5h7m-3.5-3.5v7" />
+          </svg>
+        </span>
+        <h2>算子库</h2>
+        <span className="workspace-heading__count">{searching ? hits.length : all.length}</span>
+        {onClose && (
+          <button
+            className="qs-btn icon xs"
+            type="button"
+            data-testid="palette-close"
+            aria-label="收起算子库"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        )}
+      </header>
       <div className="palette__search">
+        <svg
+          className="palette__search-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          aria-hidden="true"
+        >
+          <circle cx="10.5" cy="10.5" r="6.5" />
+          <path d="m16 16 4.5 4.5" />
+        </svg>
         <input
           type="search"
+          aria-label="搜索算子"
           value={query}
-          placeholder="搜索算子…"
+          placeholder="搜索名称或关键词…"
+          title="支持中文、英文、缩写和模糊搜索"
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}
           spellCheck={false}
@@ -331,7 +387,9 @@ export function NodePalette() {
         )}
       </div>
 
-      <p className="palette__tip">拖到画布，或双击添加；单击查看说明。</p>
+      <p className="palette__tip">
+        <span aria-hidden="true">↗</span> 拖入画布或双击添加 · 单击查看说明
+      </p>
     </div>
   );
 }

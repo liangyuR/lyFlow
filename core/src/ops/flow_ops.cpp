@@ -105,9 +105,10 @@ void registerFlowOps(Registry& r) {
     OperatorDesc op;
     op.id = "flow.fallback";
     op.version = "1.0.0";
-    op.label = "回退";
+    op.label = "容错回退";
     op.category = "流程";
-    op.keywords = {"fallback", "retry", "error", "回退", "备用", "容错"};
+    op.keywords = {"fallback", "error fallback", "lazy fallback", "fault tolerance", "容错",
+                   "故障回退", "备用分支",       "惰性求值",      "error",           "备用"};
     op.doc = "a 成功就透传 a；a 失败（或没有产出）才调度 b 的上游闭包并透传 b。"
              "b 的闭包在被 demand 之前不进计划，未被 demand 的节点报 skipped/not_demanded。";
 
@@ -132,9 +133,20 @@ void registerFlowOps(Registry& r) {
     OperatorDesc op;
     op.id = "flow.select";
     op.version = "1.0.0";
-    op.label = "选择";
+    op.label = "条件选择";
     op.category = "流程";
-    op.keywords = {"select", "switch", "if", "condition", "条件", "分支", "选择"};
+    op.keywords = {"conditional selection",
+                   "conditional switch",
+                   "branch selection",
+                   "if",
+                   "condition",
+                   "条件分支",
+                   "条件路由",
+                   "惰性求值",
+                   "select",
+                   "switch",
+                   "条件",
+                   "分支"};
     op.doc = "按 cond 选一路：Measurement 看它的 ok，Record 看 path 指向的布尔字段。"
              "两路都是惰性的，只有被选中的那一路才会被调度。";
 

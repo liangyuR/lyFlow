@@ -6,18 +6,12 @@
   min-height: 140px;
   overflow: hidden;
   resize: both;
-  border: 1px solid var(--lyflow-border-strong);
-  border-radius: var(--lyflow-radius);
-  background: var(--lyflow-bg-2);
-  color: var(--lyflow-fg-0);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 0;
 }
 
 .peek.is-flash {
-  border-color: var(--lyflow-accent);
-  box-shadow:
-    0 0 0 2px var(--lyflow-accent),
-    0 8px 24px rgba(0, 0, 0, 0.5);
+  outline: 2px solid var(--lyflow-accent);
+  outline-offset: 2px;
 }
 
 .peek__title {
@@ -57,7 +51,7 @@
   flex: 0 0 auto;
   padding: 0 5px;
   border: 1px solid currentColor;
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   font-size: 10px;
   line-height: 15px;
 }
@@ -66,7 +60,7 @@
   flex: 0 0 auto;
   padding: 0 5px;
   border: 1px solid var(--lyflow-accent);
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   color: var(--lyflow-accent);
   font-size: 10px;
   line-height: 15px;
@@ -81,7 +75,7 @@
   flex: 0 0 auto;
   padding: 1px 5px;
   border: 0;
-  border-radius: 3px;
+  border-radius: var(--r-full);
   background: transparent;
   color: var(--lyflow-fg-1);
   font-size: 11px;
@@ -108,7 +102,7 @@
 .peek__tool {
   padding: 2px 8px;
   border: 1px solid var(--lyflow-border);
-  border-radius: 3px;
+  border-radius: var(--r-full);
   background: var(--lyflow-bg-1);
   color: var(--lyflow-fg-1);
   font-size: 11px;
@@ -143,7 +137,7 @@
   right: 8px;
   z-index: 2;
   padding: 1px 6px;
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   background: var(--lyflow-bg-1);
   color: var(--lyflow-fg-2);
   font-size: 11px;
@@ -235,7 +229,7 @@
   flex: 0 0 auto;
   margin-right: 2px;
   border: 1px solid var(--lyflow-border);
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   overflow: hidden;
 }
 
@@ -297,7 +291,7 @@
   text-overflow: ellipsis;
   padding: 0 4px;
   border: 1px solid var(--lyflow-border);
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   color: var(--lyflow-fg-1);
 }
 
@@ -314,7 +308,7 @@
   max-width: 84px;
   padding: 1px 2px;
   border: 1px solid var(--lyflow-border);
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   background: var(--lyflow-bg-2);
   color: var(--lyflow-fg-1);
   font-size: 11px;
@@ -449,7 +443,7 @@
 .peek-indices__more {
   padding: 2px 8px;
   border: 1px solid var(--lyflow-border);
-  border-radius: 3px;
+  border-radius: var(--r-full);
   background: var(--lyflow-bg-2);
   color: var(--lyflow-fg-1);
   font-size: 11px;

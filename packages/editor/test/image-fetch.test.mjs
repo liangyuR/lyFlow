@@ -55,39 +55,40 @@ function fakeGet(spec, maxRows) {
   return { get, asked };
 }
 
-test('分段取齐：每段 4 行的 10 行图要三次（0、4、8 起），拼出来逐个通道值与原图相同', async () => {
-  for (const spec of [
-    { width: 5, height: 10, channels: 1, depth: 1 },
-    { width: 3, height: 10, channels: 3, depth: 2 },
-    { width: 4, height: 10, channels: 1, depth: 4 },
+test('图像分段载荷：u8/u16/f32逐通道拼接、按帧头行数续取及实际级别回退', async () => {
+  for (const [name, spec, maxRows, requestedLevel, rows] of [
+    ['u8单通道分三段', { width: 5, height: 10, channels: 1, depth: 1 }, 4, 0, [0, 4, 8]],
+    ['u16三通道分三段', { width: 3, height: 10, channels: 3, depth: 2 }, 4, 0, [0, 4, 8]],
+    ['f32单通道分三段', { width: 4, height: 10, channels: 1, depth: 4 }, 4, 0, [0, 4, 8]],
+    [
+      '一段取完并采用帧头级别',
+      { width: 2, height: 3, channels: 1, depth: 1, level: 7 },
+      100,
+      9,
+      [0],
+    ],
   ]) {
-    const { get, asked } = fakeGet(spec, 4);
-    const img = await fetchImageLevel(get, 'r', 'n', 'image', 0);
+    const { get, asked } = fakeGet(spec, maxRows);
+    const img = await fetchImageLevel(get, 'r', 'n', 'image', requestedLevel);
     assert.deepEqual(
       {
         size: [img.width, img.height, img.channels],
         rows: asked.map((a) => a.row),
+        level: img.level,
+        firstLevel: asked[0].level,
         type: img.pixels.constructor.name,
       },
       {
         size: [spec.width, spec.height, spec.channels],
-        rows: [0, 4, 8],
+        rows,
+        level: spec.level ?? 0,
+        firstLevel: requestedLevel,
         type: spec.depth === 1 ? 'Uint8Array' : spec.depth === 2 ? 'Uint16Array' : 'Float32Array',
       },
-      JSON.stringify(spec),
+      name,
     );
-    assert.deepEqual(Array.from(img.pixels), expected(spec), JSON.stringify(spec));
+    assert.deepEqual(Array.from(img.pixels), expected(spec), name);
   }
-});
-
-test('一段就取完的图只要一次；给出的级别照帧头（要得太大时 core 收到 1 像素那级）', async () => {
-  const spec = { width: 2, height: 3, channels: 1, depth: 1, level: 7 };
-  const { get, asked } = fakeGet(spec, 100);
-  const img = await fetchImageLevel(get, 'r', 'n', 'image', 9);
-  assert.deepEqual(
-    { level: img.level, asked: asked.length, firstLevel: asked[0].level },
-    { level: 7, asked: 1, firstLevel: 9 },
-  );
 });
 
 test('作废了就不再要后面几段：取第一段之后作废，抛 FetchAbandoned、只要过一次', async () => {

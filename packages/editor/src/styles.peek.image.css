@@ -40,7 +40,7 @@
   background: var(--lyflow-bg-0);
   padding: 1px 6px;
   border: 1px solid var(--lyflow-warn);
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   color: var(--lyflow-warn);
   font-size: 11px;
   line-height: 16px;

@@ -77,7 +77,7 @@ export function RecipeMenu() {
         <span className="recipe-menu__chev">▾</span>
       </button>
       {open && (
-        <div className="recipe-menu__list" data-testid="recipe-menu" role="menu">
+        <div className="qs-popover recipe-menu__list" data-testid="recipe-menu" role="menu">
           <button
             type="button"
             role="menuitemradio"
