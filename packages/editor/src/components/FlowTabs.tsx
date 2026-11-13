@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 
 import "../styles.navigation.css";
 
@@ -16,9 +16,17 @@ export interface FlowTabsProps {
   onClose: (id: string) => void;
   onNew: () => void;
   disabled?: boolean;
+  windowChrome?: FlowWindowChrome | undefined;
 }
 
-export function FlowTabs({ tabs, activeId, onSelect, onClose, onNew, disabled = false }: FlowTabsProps) {
+export interface FlowWindowChrome {
+  controls: ReactNode;
+  focused: boolean;
+  onDragStart(): void;
+  onToggleMaximize(): void;
+}
+
+export function FlowTabs({ tabs, activeId, onSelect, onClose, onNew, disabled = false, windowChrome }: FlowTabsProps) {
   const tablist = useRef<HTMLDivElement>(null);
   const pendingFocus = useRef<{ kind: "select"; id: string } | { kind: "close" } | null>(null);
 
@@ -68,7 +76,19 @@ export function FlowTabs({ tabs, activeId, onSelect, onClose, onNew, disabled = 
   };
 
   return (
-    <div className="flow-tabs" data-testid="flow-tabs">
+    <div
+      className={`flow-tabs${windowChrome ? " flow-tabs--titlebar" : ""}`}
+      data-testid="flow-tabs"
+      data-window-focused={windowChrome?.focused}
+      role={windowChrome ? "banner" : undefined}
+      aria-label={windowChrome ? "LyFlow 标题栏" : undefined}
+      onMouseDown={windowChrome ? (event) => {
+        if (event.button !== 0 || (event.target as Element).closest("button, [role=tablist]")) return;
+        event.preventDefault();
+        if (event.detail === 2) windowChrome.onToggleMaximize();
+        else windowChrome.onDragStart();
+      } : undefined}
+    >
       <div className="flow-tabs__brand" aria-label="LyFlow">
         <svg className="qs-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="2" /><rect x="15" y="15" width="6" height="6" rx="2" /><path d="M9 6h6a3 3 0 0 1 3 3v6M6 9v6a3 3 0 0 0 3 3h6" /></svg>
         <strong>LyFlow</strong>
@@ -121,6 +141,10 @@ export function FlowTabs({ tabs, activeId, onSelect, onClose, onNew, disabled = 
       <button type="button" className="qs-btn icon flow-tabs__new" disabled={disabled} onClick={onNew} aria-label="新建工作流" title="新建工作流 (Ctrl+N)" data-testid="flow-tab-new">
         <svg className="qs-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
       </button>
+      {windowChrome && <>
+        <div className="flow-tabs__drag-space" data-testid="titlebar-drag-region" />
+        {windowChrome.controls}
+      </>}
     </div>
   );
 }

@@ -1953,10 +1953,44 @@ async function suiteEditing(cdp, report) {
 
 // ------------------------------------------------- §2.5 面板、最近文件、备份
 
+export async function checkWindowChrome(cdp, report) {
+  report.eq("自定义标题栏去掉系统装饰，并提供三个窗口按钮", await cdp.eval(`
+    return {
+      decorated: await window.__TAURI_INTERNALS__.invoke('plugin:window|is_decorated', { label: 'main' }),
+      buttons: document.querySelectorAll('.flow-tabs--titlebar .window-controls button').length,
+      height: document.querySelector('.flow-tabs--titlebar')?.getBoundingClientRect().height,
+    };
+  `), { decorated: false, buttons: 3, height: 44 });
+  const maximized = () => cdp.eval(`return window.__TAURI_INTERNALS__.invoke('plugin:window|is_maximized', { label: 'main' });`);
+  if (await maximized()) {
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="window-maximize"]'));
+    await cdp.waitFor(`!(await window.__TAURI_INTERNALS__.invoke('plugin:window|is_maximized', { label: 'main' }))`, { what: "窗口还原" });
+  }
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="window-maximize"]'));
+  await cdp.waitFor(`document.querySelector('[data-testid="window-maximize"]').getAttribute('aria-pressed') === 'true'`, { what: "标题栏最大化图标同步" });
+  report.ok("标题栏按钮最大化原生窗口", await maximized());
+  const dragRegion = await centerOf(cdp, '[data-testid="titlebar-drag-region"]');
+  for (const clickCount of [1, 2]) {
+    await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: dragRegion.x, y: dragRegion.y, button: "left", clickCount });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: dragRegion.x, y: dragRegion.y, button: "left", clickCount });
+  }
+  await cdp.waitFor(`document.querySelector('[data-testid="window-maximize"]').getAttribute('aria-pressed') === 'false'`, { what: "双击标题栏还原窗口" });
+  report.ok("双击标题栏空白区域还原原生窗口", !(await maximized()));
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="window-minimize"]'));
+  await cdp.waitFor(`await window.__TAURI_INTERNALS__.invoke('plugin:window|is_minimized', { label: 'main' })`, { what: "最小化原生窗口" });
+  report.ok("标题栏按钮最小化原生窗口", true);
+  await cdp.eval(`
+    await window.__TAURI_INTERNALS__.invoke('plugin:window|unminimize', { label: 'main' });
+    await window.__TAURI_INTERNALS__.invoke('plugin:window|set_focus', { label: 'main' });
+  `);
+  await cdp.waitFor(`document.querySelector('.flow-tabs').dataset.windowFocused === 'true'`, { what: "恢复窗口后焦点状态同步" });
+}
+
 async function suitePanels(cdp, report, ws) {
   report.section("§2.5：日志/诊断抽屉、最近文件、备份恢复、窗口标题");
 
   await newDoc(cdp);
+  await checkWindowChrome(cdp, report);
   const ids = await buildGraph(
     cdp,
     [
@@ -2145,6 +2179,10 @@ async function suitePanels(cdp, report, ws) {
   // 关窗口前问一句（app/src/closeGuard.ts）。原生对话框脚本点不了，tauri 的 invoke 也换不掉（只读属性），
   // 所以经 devbridge 换个对话框走一遍「要不要关」；监听装没装上、destroy 有没有权限另外查
   report.ok("关窗口前那一问装上了", await cdp.eval(`return window.__lyflow.shell.closeGuardInstalled();`));
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="window-close"]'));
+  await cdp.waitFor(`!!document.querySelector('[data-testid="modal-choice-cancel"]')`, { what: "标题栏关闭经过未保存确认" });
+  await clickAt(cdp, await centerOf(cdp, '[data-testid="modal-choice-cancel"]'));
+  report.ok("标题栏关闭选择取消后，窗口与未保存改动保留", await cdp.eval(`return window.__lyflow.stores.graph.getState().dirty && !document.querySelector('[data-testid="modal"]');`));
   // 问的是编辑器画的「保存 / 不保存 / 取消」（lib/unsaved；以前是原生的「关闭 / 取消」，想保住改动只能先取消、存盘、再点 ×）。
   // 真鼠标点对话框里的按钮
   const savedSeed = () => JSON.parse(fs.readFileSync(graphPath, "utf8")).nodes.find((n) => n.id === ids.gen)?.params?.seed ?? null;

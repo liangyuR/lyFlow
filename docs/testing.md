@@ -15,6 +15,8 @@
 | 桌面 app e2e（CDP） | `pnpm e2e`（带 `LYFLOW_PACKS=gap;dts`）；只跑几组用 `--only 模块[:分组],…`（scripts/e2e/README.md） | 971 条断言、104 个分组（精简前 1095） | 已编译时约 3.3 分钟（精简前 4.5）；首次要编 core 与 tauri，另加十几分钟 |
 | 浏览器宿主 e2e | `pnpm e2e:http` | 34 条断言（精简前 58） | 几分钟 |
 
+自定义桌面标题栏在 `scripts/e2e/m3.mjs` 的 `suitePanels` 验证：关闭系统装饰、合并工作流标签与窗口按钮、最大化 / 双击还原、最小化与焦点恢复，以及点击关闭后取消未保存确认仍保留窗口和改动。
+
 ## CI（GitHub Actions）
 
 `.github/workflows/ci.yml`，只用 GitHub 托管的 `windows-2022` runner；每个 PR、每次推 main 都跑这两个 job。合并前两个都要绿是约定：main 上还没设分支保护把它们列成 required check，红着也能点合并（要设的话，check 名就是 ci.yml 里 job 的 `name:`）。

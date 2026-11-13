@@ -15,7 +15,7 @@ import { StatusBar } from "./components/StatusBar";
 import { Toast } from "./components/Toast";
 import { Toolbar } from "./components/Toolbar";
 import { Viewer3D } from "./components/Viewer3D";
-import { FlowTabs } from "./components/FlowTabs";
+import { FlowTabs, type FlowWindowChrome } from "./components/FlowTabs";
 import { NavigationRail, type NavigationPanel } from "./components/NavigationRail";
 import { WorkspaceLibrary } from "./components/WorkspaceLibrary";
 import { usePaneLayout } from "./hooks/usePaneLayout";
@@ -116,7 +116,7 @@ function qingTheme(theme: Record<string, string> | undefined): React.CSSProperti
   return { ...mapped, ...theme } as React.CSSProperties;
 }
 
-function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps) {
+function Workspace({ graphPath, onDocChange, className, theme, windowChrome }: WorkspaceProps) {
   const { screenToFlowPosition, flowToScreenPosition, fitView, getNodes } = useReactFlow();
   const root = useRef<HTMLDivElement>(null);
   // 关动效时视口也一步到位（A4）：适配视图、整理之后的 fitView 都不带过渡
@@ -614,6 +614,7 @@ function Workspace({ graphPath, onDocChange, className, theme }: WorkspaceProps)
       onMouseMove={onMouseMove}
     >
       <FlowTabs
+        windowChrome={windowChrome}
         tabs={flowTabs.map((tab) => ({ id: tab.id, title: tab.title, dirty: tab.dirty, path: tab.filePath ?? undefined }))}
         activeId={activeFlow}
         disabled={flowBusy}
@@ -766,6 +767,7 @@ interface WorkspaceProps {
   className?: string | undefined;
   /** Qing Steel token 或兼容的 `--lyflow-*` 变量覆盖值，写在编辑器根元素上。 */
   theme?: Record<string, string> | undefined;
+  windowChrome?: FlowWindowChrome | undefined;
 }
 
 export interface LyFlowEditorProps extends WorkspaceProps {

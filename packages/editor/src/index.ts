@@ -1,4 +1,5 @@
 export { LyFlowEditor, type LyFlowEditorProps } from "./LyFlowEditor";
+export type { FlowWindowChrome } from "./components/FlowTabs";
 
 export * from "./transport";
 export { browserDialogs, NoDialogError, type EditorDialogs, type PathPickRequest } from "./lib/dialogs";

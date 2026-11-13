@@ -35,6 +35,18 @@
 .flow-tab.is-active .flow-tab__close { --btn-fg: var(--on-secondary-container); }
 .flow-tabs__new { flex: none; }
 
+.flow-tabs--titlebar {
+  height: 44px;
+  padding: 0 0 0 12px;
+  border-bottom: 1px solid var(--outline-variant);
+  user-select: none;
+}
+
+.flow-tabs--titlebar .flow-tabs__brand { font-size: 14px; }
+.flow-tabs--titlebar .flow-tabs__brand > .qs-ic { width: 20px; height: 20px; }
+.flow-tabs__drag-space { flex: 1 0 72px; align-self: stretch; }
+.flow-tabs--titlebar[data-window-focused="false"] .flow-tabs__brand { color: var(--on-surface-variant); }
+
 .navigation-rail.qs-nav.rail { min-height: 0; height: 100%; border-radius: var(--r-xl); }
 .navigation-rail .item[aria-pressed="true"] { color: var(--on-surface); }
 .navigation-rail .item[aria-pressed="true"] .pill { background: var(--secondary-container); }
