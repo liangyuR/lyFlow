@@ -134,7 +134,7 @@ export function useShortcuts(handlers: ShortcutHandlers, root: RefObject<HTMLEle
       if (e.target instanceof Element && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const localTab = e.target.closest('.flow-tabs [role="tab"]');
         const localToolbar = e.target.closest('.selection-toolbar');
-        if (localTab && ['Delete', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key))
+        if (localTab && ['F2', 'Delete', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key))
           return;
         if (localToolbar && ['Escape', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key))
           return;

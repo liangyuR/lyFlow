@@ -2230,7 +2230,9 @@ async function suitePanels(cdp, report, ws) {
   await sleep(150);
   const n1 = await nameState();
   report.eq("双击标签后逐字重命名、回车：标题同步，只记一条撤销", { name: n1.name, shown: n1.shown, added: n1.past - n0.past }, { name: "门缝检测", shown: "门缝检测", added: 1 });
+  await cdp.eval(`window.__lyflow.stores.ui.getState().setSelection([${lit(ids.gen)}], []); return true;`);
   await renameActive(true);
+  report.eq("选中一个节点时标签 F2 只重命名工作流，不打开节点标题编辑器", await cdp.eval(`return window.__lyflow.stores.ui.getState().renamingNode;`), null);
   await pressKey(cdp, "a", 65, ["ctrl"]);
   await cdp.send("Input.insertText", { text: "别的名字" });
   await pressKey(cdp, "Escape", 27);
