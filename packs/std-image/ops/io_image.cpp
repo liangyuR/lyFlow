@@ -140,7 +140,14 @@ void registerIoLoadImage(Registry& r) {
   op.version = "1.0.0";
   op.label = "加载图像";
   op.category = "输入输出/输入";
-  op.keywords = {"load", "read", "open", "image", "png", "jpg", "tif", "读取", "图像", "图片"};
+  op.keywords = {
+      "image loading", "image file reading", "PNG",
+      "JPEG", "BMP", "TIFF",
+      "图像读取", "图片导入", "load",
+      "read", "open", "image",
+      "jpg", "tif", "读取",
+      "图像", "图片"
+  };
   op.doc = "从磁盘读取图像（PNG / JPEG / BMP / TIFF）。通道顺序转成 RGB(A)；16 位 PNG / TIFF 保留 u16。";
   op.doc += " source=inputs 时使用宿主经 RunImageInput 注入或上游连接的 image，不读文件。";
   op.inputs = {Port{"image", "Image", "Image", "source=inputs 时使用的图像。", false}};
@@ -181,7 +188,13 @@ void registerIoSaveImage(Registry& r) {
   op.version = "1.0.0";
   op.label = "保存图像";
   op.category = "输入输出/输出";
-  op.keywords = {"save", "write", "export", "image", "png", "保存", "导出", "图像"};
+  op.keywords = {
+      "image saving", "image file writing", "image export",
+      "PNG", "TIFF", "图像写入",
+      "图片导出", "save", "write",
+      "export", "image", "保存",
+      "导出", "图像"
+  };
   op.doc = "把图像写到磁盘，按扩展名选格式。u8 / u16 存 PNG；f32 只能存 TIFF。";
   op.inputs = {img::imageIn("image", "要保存的图像。")};
 

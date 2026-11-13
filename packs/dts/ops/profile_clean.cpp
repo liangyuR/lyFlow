@@ -46,9 +46,15 @@ void registerProfileClean(Registry& r) {
   OperatorDesc op;
   op.id = "dts.profile_clean";
   op.version = "1.0.0";
-  op.label = "轮廓清理";
+  op.label = "轮廓预处理";
   op.category = "DTS/预处理";
-  op.keywords = {"clean", "median", "smooth", "清理", "中值", "平滑"};
+  op.keywords = {
+      "profile preprocessing", "profile filtering", "median filter",
+      "invalid point removal", "轮廓滤波", "中值滤波",
+      "无效点剔除", "轮廓平滑", "clean",
+      "median", "smooth", "中值",
+      "平滑"
+  };
   op.doc =
       "丢掉无效点（亮度低于阈值或 z 非有限），其余点做一次忽略无效邻居的滑动中值。\n"
       "**保持列序**：切片靠相邻列判断，按 x 排序会把重叠面交错起来。";

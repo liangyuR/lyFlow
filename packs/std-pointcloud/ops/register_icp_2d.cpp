@@ -94,9 +94,14 @@ void registerRegisterIcp2D(Registry& r) {
   OperatorDesc op;
   op.id = "register.icp_2d";
   op.version = "1.0.0";
-  op.label = "ICP 配准 2D";
+  op.label = "二维 ICP 配准";
   op.category = "配准/ICP";
-  op.keywords = {"icp", "register", "align", "2d", "配准", "对齐"};
+  op.keywords = {
+      "2D ICP registration", "iterative closest point", "point to plane ICP",
+      "二维点云配准", "点到平面", "刚体对齐",
+      "icp", "register", "align",
+      "2d", "配准", "对齐"
+  };
   op.doc =
       "XY 平面上的 point-to-plane ICP。源云的法线由 knn 邻域现估，"
       "收敛判据是最近 Smooth Length 步的平均旋转/平移增量都低于阈值。\n"

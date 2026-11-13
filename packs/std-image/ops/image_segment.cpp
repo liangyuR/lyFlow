@@ -193,9 +193,15 @@ void registerImageThreshold(Registry& r) {
   OperatorDesc op;
   op.id = "image.threshold";
   op.version = "1.0.0";
-  op.label = "二值化";
+  op.label = "图像二值化";
   op.category = "图像/分割";
-  op.keywords = {"threshold", "binary", "otsu", "adaptive", "mask", "二值化", "阈值", "掩膜"};
+  op.keywords = {
+      "image thresholding", "binary segmentation", "Otsu",
+      "adaptive threshold", "阈值分割", "自适应阈值",
+      "掩膜生成", "threshold", "binary",
+      "adaptive", "mask", "阈值",
+      "掩膜"
+  };
   op.doc = "单通道图 → u8 掩膜（0 / 255）。固定阈值任何位深都行；Otsu 自动选阈值、自适应按邻域算，"
            "这两种只收 u8。";
   op.inputs = {img::grayIn()};
@@ -226,9 +232,15 @@ void registerImageMorphology(Registry& r) {
   OperatorDesc op;
   op.id = "image.morphology";
   op.version = "1.0.0";
-  op.label = "形态学";
+  op.label = "形态学运算";
   op.category = "图像/分割";
-  op.keywords = {"morphology", "erode", "dilate", "open", "close", "腐蚀", "膨胀", "开运算", "闭运算"};
+  op.keywords = {
+      "morphological operations", "erosion", "dilation",
+      "opening", "closing", "腐蚀",
+      "膨胀", "开运算", "闭运算",
+      "morphology", "erode", "dilate",
+      "open", "close"
+  };
   op.doc = "腐蚀 / 膨胀 / 开 / 闭。开运算去掉小亮点，闭运算填掉小暗洞，通常接在二值化后面。";
   op.inputs = {img::imageIn()};
   op.outputs = {img::imageOut()};
@@ -255,9 +267,14 @@ void registerImageFindCircle(Registry& r) {
   OperatorDesc op;
   op.id = "image.find_circle";
   op.version = "1.0.0";
-  op.label = "找圆";
+  op.label = "霍夫圆检测";
   op.category = "图像/测量";
-  op.keywords = {"circle", "hough", "find", "找圆", "霍夫", "孔"};
+  op.keywords = {
+      "Hough circle detection", "circle detection", "Hough gradient",
+      "圆检测", "圆形检测", "霍夫变换",
+      "孔检测", "circle", "hough",
+      "find", "霍夫", "孔"
+  };
   op.doc = "霍夫梯度法找圆，取累加值最高的一个。输出像素坐标的 Circle2D（unit = px）。"
            "边缘噪声多时先接 image.blur。";
   op.inputs = {img::grayIn("image", "单通道 u8 图像。")};
@@ -292,7 +309,14 @@ void registerImageRegionStats(Registry& r) {
   op.version = "1.0.0";
   op.label = "区域统计";
   op.category = "图像/测量";
-  op.keywords = {"stats", "mean", "area", "region", "统计", "面积", "均值", "灰度"};
+  op.keywords = {
+      "region statistics", "region measurements", "mean intensity",
+      "pixel area", "区域均值", "像素面积",
+      "外接矩形", "灰度统计", "stats",
+      "mean", "area", "region",
+      "统计", "面积", "均值",
+      "灰度"
+  };
   op.doc = "掩膜里（没接掩膜就是整张图）某个通道的均值、像素面积与外接框。"
            "外接框是像素坐标的 Box2D，可以直接接给 image.crop。";
   op.inputs = {img::imageIn(),

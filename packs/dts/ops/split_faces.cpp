@@ -41,9 +41,14 @@ void registerSplitFaces(Registry& r) {
   OperatorDesc op;
   op.id = "dts.split_faces";
   op.version = "1.0.0";
-  op.label = "切分平面片";
+  op.label = "轮廓平面分割";
   op.category = "DTS/分面";
-  op.keywords = {"faces", "split", "flat", "分面", "平面"};
+  op.keywords = {
+      "profile face segmentation", "planar segment extraction", "sliding window fitting",
+      "轮廓分段", "平面片提取", "平面拟合",
+      "faces", "split", "flat",
+      "分面", "平面"
+  };
   op.doc =
       "先按 x 间断与 z 跳变切成分片，再在每个分片里滑窗找平：\n"
       "rms 达标的窗口、相邻窗口夹角不超过阈值的连成一块面，合并后整体拟合。\n"

@@ -89,9 +89,14 @@ void registerPointOffset(Registry& r) {
   OperatorDesc op;
   op.id = "gap.point_offset";
   op.version = "1.0.0";
-  op.label = "两点分量";
+  op.label = "二维位移分解";
   op.category = "间隙/测量";
-  op.keywords = {"offset", "dx", "dy", "两点", "分量", "面板边"};
+  op.keywords = {
+      "2D displacement decomposition", "point offset", "dx",
+      "dy", "两点位移", "坐标分量",
+      "水平位移", "竖向位移", "offset",
+      "两点", "分量", "面板边"
+  };
   op.doc =
       "把 b 相对 a 的位移分解到测量帧的两个轴上：dx 沿 x（+ = b 在 a 右侧），"
       "dy 沿 y（+ = b 更远离传感器 / 更低）。用于面板边与翻边平台这类「缝是横着的」工况"

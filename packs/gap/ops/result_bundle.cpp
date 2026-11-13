@@ -371,9 +371,14 @@ void registerResultBundle(Registry& r) {
   OperatorDesc op;
   op.id = "gap.result_bundle";
   op.version = "2.1.0";
-  op.label = "结果汇总";
+  op.label = "间隙检测结果汇总";
   op.category = "间隙/测量";
-  op.keywords = {"bundle", "quality", "diagnostics", "汇总", "质量"};
+  op.keywords = {
+      "gap inspection result bundle", "measurement aggregation", "quality diagnostics",
+      "检测结果", "测量汇总", "质量诊断",
+      "bundle", "quality", "diagnostics",
+      "汇总", "质量"
+  };
   op.doc =
       "把一次测量的所有结果与质量指标汇聚成一个 GapResultBundle Record，"
       "字段与旧 QualityMetrics 一一对应，业务侧的 results.csv 与 metadata.json 由它填。\n"

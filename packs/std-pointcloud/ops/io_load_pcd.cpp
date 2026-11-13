@@ -109,9 +109,14 @@ void registerIoLoadPcd(Registry& r) {
   OperatorDesc op;
   op.id = "io.load_pcd";
   op.version = "1.0.0";
-  op.label = "加载 PCD";
+  op.label = "点云读取";
   op.category = "输入输出/输入";
-  op.keywords = {"load", "read", "open", "pcd", "ply", "读取", "载入"};
+  op.keywords = {
+      "point cloud loading", "point cloud file reading", "PCD",
+      "PLY", "点云导入", "点云文件",
+      "点云加载", "load", "read",
+      "open", "读取", "载入"
+  };
   op.doc = "从磁盘读取点云文件。支持 PCD 与 PLY，按文件里实际存在的字段带出强度/法线/颜色通道。";
 
   // 无输入端口：这是一个源节点。

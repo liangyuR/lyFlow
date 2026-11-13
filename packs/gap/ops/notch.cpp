@@ -610,9 +610,15 @@ void registerNotchWidth(Registry& r) {
   OperatorDesc op;
   op.id = "gap.notch_width";
   op.version = "1.0.0";
-  op.label = "V 缝开口";
+  op.label = "V 形缝开口测量";
   op.category = "间隙/测量";
-  op.keywords = {"notch", "V", "开口", "夹角", "软装", "间隙", "圆边"};
+  op.keywords = {
+      "V-notch width measurement", "notch opening", "cross-section width",
+      "V形缝", "开口宽度", "截面间隙",
+      "面差测量", "notch", "V",
+      "开口", "夹角", "软装",
+      "间隙", "圆边"
+  };
   op.doc =
       "两件软装的圆边贴合成 V 形缝、缝底没有槽时的间隙（罗石 点 1 / 1_1）。\n"
       "以基准侧翼面（锚点一侧 [baseNear, baseFar] 窗口里拟的直线）为深度基准，在它下方 "

@@ -105,9 +105,14 @@ void registerFeaturesNormals(Registry& r) {
   OperatorDesc op;
   op.id = "features.normals";
   op.version = "1.0.0";
-  op.label = "估计法线";
+  op.label = "点云法线估计";
   op.category = "特征";
-  op.keywords = {"normal", "normals", "法线", "法向量"};
+  op.keywords = {
+      "point cloud normal estimation", "surface normals", "PCA",
+      "KNN", "法向量估计", "表面法线",
+      "邻域搜索", "normal", "normals",
+      "法线", "法向量"
+  };
   op.doc = "估计每个点的法线，写进点云的 normals 通道。原有的强度与颜色通道保持不变。";
 
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "输入点云。", true}};

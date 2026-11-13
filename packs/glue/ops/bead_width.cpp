@@ -173,9 +173,14 @@ void registerBeadWidth(Registry& r) {
   OperatorDesc op;
   op.id = "glue.bead_width";
   op.version = "1.0.0";
-  op.label = "量胶宽";
+  op.label = "胶宽测量";
   op.category = "涂胶/积木";
-  op.keywords = {"glue", "bead", "width", "涂胶", "胶宽", "螺旋胶", "积木"};
+  op.keywords = {
+      "glue bead width measurement", "adhesive width", "caliper measurement",
+      "胶条宽度", "涂胶宽度", "卡尺测量",
+      "glue", "bead", "width",
+      "涂胶", "胶宽", "螺旋胶"
+  };
   op.doc =
       "沿胶路每隔 stationStep 布一站，站上的卡尺沿法向（行进方向右侧为正）量胶的两边：边取响应的半高处"
       "（每站按本站峰值自适应），暗段之间的缝小于 mergeGap 且合并后不宽于 widthRange 上限就合并（高光条不会"

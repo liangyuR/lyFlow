@@ -103,9 +103,16 @@ void registerLocate(Registry& r) {
   OperatorDesc op;
   op.id = "glue.locate";
   op.version = "1.0.0";
-  op.label = "定位";
+  op.label = "二维模板定位";
   op.category = "涂胶/飞拍";
-  op.keywords = {"glue", "locate", "template", "match", "pose", "涂胶", "定位", "模板", "飞拍"};
+  op.keywords = {
+      "2D template localization", "normalized cross correlation", "NCC",
+      "rigid pose estimation", "模板匹配", "归一化互相关",
+      "位姿估计", "飞拍定位", "glue",
+      "locate", "template", "match",
+      "pose", "涂胶", "模板",
+      "飞拍"
+  };
   op.doc =
       "固定相机飞拍：按示教时从示教图上裁下的模板，求这一帧相对示教图的刚体位姿"
       "（T(p) = R(angle)·(p − teachCenter) + center，glue-plan K2）。只在模板外扩 searchRadius 的一块里做"

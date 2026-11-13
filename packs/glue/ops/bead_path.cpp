@@ -140,9 +140,15 @@ void registerBeadPath(Registry& r) {
   OperatorDesc op;
   op.id = "glue.bead_path";
   op.version = "1.0.0";
-  op.label = "定胶路";
+  op.label = "胶路提取";
   op.category = "涂胶/积木";
-  op.keywords = {"glue", "bead", "path", "nozzle", "涂胶", "胶路", "喷嘴", "积木"};
+  op.keywords = {
+      "glue bead path extraction", "adhesive path fitting", "centerline fitting",
+      "胶路拟合", "胶路中心线", "胶条路径",
+      "glue", "bead", "path",
+      "nozzle", "涂胶", "胶路",
+      "喷嘴"
+  };
   op.doc =
       "在检测区里粗找胶点，稳健拟合一条光滑的胶路（跨得过断口，覆盖整个检测区）。检测区是从喷嘴出胶点"
       "沿胶路的弧长 s 的一段，离开喷嘴（D2：喷嘴附近约 100 px 有拉丝、胶头、阴影，不可信）。\n"

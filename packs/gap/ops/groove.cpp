@@ -442,9 +442,14 @@ void registerGrooveJoint(Registry& r) {
   OperatorDesc op;
   op.id = "gap.groove_joint";
   op.version = "1.0.0";
-  op.label = "软装对接缝";
+  op.label = "槽形对接缝测量";
   op.category = "间隙/测量";
-  op.keywords = {"groove", "slot", "seam", "对接缝", "软装", "间隙"};
+  op.keywords = {
+      "groove joint measurement", "slot width", "gap and flush",
+      "槽宽测量", "对接缝", "间隙测量",
+      "面差测量", "groove", "slot",
+      "seam", "软装", "间隙"
+  };
   op.doc =
       "两件软装对接、中间留一条窄槽时的槽宽与面差。\n"
       "槽心由整体粗拟合面下方最深的那几个点定位（取它们 x 的中位数），不依赖模板与 ICP。\n"

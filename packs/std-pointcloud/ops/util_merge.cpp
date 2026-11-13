@@ -55,9 +55,14 @@ void registerUtilMerge(Registry& r) {
   OperatorDesc op;
   op.id = "util.merge";
   op.version = "1.0.0";
-  op.label = "合并点云";
+  op.label = "点云合并";
   op.category = "工具";
-  op.keywords = {"merge", "concat", "combine", "join", "合并", "拼接"};
+  op.keywords = {
+      "point cloud merging", "point cloud concatenation", "concatenate",
+      "点云拼接", "点集合并", "通道交集",
+      "merge", "concat", "combine",
+      "join", "合并", "拼接"
+  };
   op.doc = "把两片点云拼成一片。通道求交：只有一方带的通道会被丢弃并告警。";
 
   // 两个显式端口而不是一个可变长端口：往一个端口连多条边的话，

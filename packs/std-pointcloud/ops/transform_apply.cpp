@@ -49,9 +49,14 @@ void registerTransformApply(Registry& r) {
   OperatorDesc op;
   op.id = "transform.apply";
   op.version = "1.0.0";
-  op.label = "应用变换";
+  op.label = "点云变换";
   op.category = "变换";
-  op.keywords = {"transform", "apply", "rigid", "变换", "应用"};
+  op.keywords = {
+      "point cloud transformation", "rigid transform application", "coordinate transformation",
+      "坐标变换", "刚体变换", "法线旋转",
+      "transform", "apply", "rigid",
+      "变换", "应用"
+  };
   op.doc = "把 4x4 变换作用到点云上。法线同时被旋转并重新归一化。";
 
   op.inputs = {

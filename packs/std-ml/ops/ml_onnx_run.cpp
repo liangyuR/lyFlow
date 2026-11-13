@@ -170,7 +170,13 @@ void registerMlOnnxRun(Registry& r) {
   op.label = "ONNX 推理";
   op.category = "机器学习/推理";
   // 关键词里不能出现小写的 i-n-f：manifest 的序列化用例是子串匹配（test_executor.cpp:252）
-  op.keywords = {"onnx", "Inference", "model", "tensor", "推理", "模型"};
+  op.keywords = {
+      "ONNX inference", "ONNX Runtime", "ORT",
+      "model forward pass", "神经网络推理", "模型推理",
+      "前向计算", "onnx", "Inference",
+      "model", "tensor", "推理",
+      "模型"
+  };
   op.doc =
       "跑一次 ONNX 前向：float32 张量进、float32 张量出。"
       "会话按「模型路径 + mtime + 线程数」缓存，改模型文件会自动重载。\n"

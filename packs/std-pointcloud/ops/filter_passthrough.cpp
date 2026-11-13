@@ -84,7 +84,13 @@ void registerFilterPassthrough(Registry& r) {
   op.version = "1.0.0";
   op.label = "直通滤波";
   op.category = "过滤/裁剪";
-  op.keywords = {"crop", "clip", "range", "limit", "裁剪", "直通", "范围"};
+  op.keywords = {
+      "pass through filter", "passthrough", "field range filtering",
+      "区间滤波", "字段范围", "轴向裁剪",
+      "crop", "clip", "range",
+      "limit", "裁剪", "直通",
+      "范围"
+  };
   op.doc = "沿某个字段做区间裁剪，保留（或排除）落在 [min, max] 内的点。";
 
   op.inputs = {Port{"cloud", "PointCloud", "Cloud", "待裁剪的点云。", true}};

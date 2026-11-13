@@ -103,7 +103,7 @@ function RecentBranch() {
         <span className={`tree-branch__caret${open ? " is-open" : ""}`} aria-hidden>
           ▸
         </span>
-        最近用过
+        最近使用
         <span className="tree-branch__count">{ops.length}</span>
       </button>
       {open && (
@@ -265,6 +265,10 @@ export function NodePalette({ onClose }: { onClose?: (() => void) | undefined })
   }, [cursor, hits, query]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) {
+      e.stopPropagation();
+      return;
+    }
     if (!query.trim() || hits.length === 0) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -300,7 +304,8 @@ export function NodePalette({ onClose }: { onClose?: (() => void) | undefined })
           type="search"
           aria-label="搜索算子"
           value={query}
-          placeholder="搜索算子…"
+          placeholder="搜索名称或关键词…"
+          title="支持中文、英文、缩写和模糊搜索"
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}
           spellCheck={false}

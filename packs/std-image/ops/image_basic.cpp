@@ -142,9 +142,14 @@ void registerImageToGray(Registry& r) {
   OperatorDesc op;
   op.id = "image.to_gray";
   op.version = "1.0.0";
-  op.label = "转灰度";
+  op.label = "灰度转换";
   op.category = "图像/基础";
-  op.keywords = {"gray", "grey", "grayscale", "灰度"};
+  op.keywords = {
+      "grayscale conversion", "RGB to gray", "BT.601",
+      "gray", "grey", "灰度化",
+      "彩色转灰度", "单通道转换", "grayscale",
+      "灰度"
+  };
   op.doc = "RGB(A) 转单通道（按 BT.601 加权），alpha 丢掉；已经是灰度的原样传下去。位深不变。";
   op.inputs = {img::imageIn()};
   op.outputs = {img::imageOut("image", "单通道图像。")};
@@ -157,9 +162,14 @@ void registerImageResize(Registry& r) {
   OperatorDesc op;
   op.id = "image.resize";
   op.version = "1.0.0";
-  op.label = "缩放";
+  op.label = "图像缩放";
   op.category = "图像/基础";
-  op.keywords = {"resize", "scale", "缩放", "尺寸"};
+  op.keywords = {
+      "image resizing", "image scaling", "resampling",
+      "resize", "图像重采样", "尺寸调整",
+      "放大", "缩小", "scale",
+      "尺寸"
+  };
   op.doc = "按倍数或指定尺寸缩放。缩小默认用区域平均（不出摩尔纹），放大建议线性或三次。";
   op.inputs = {img::imageIn()};
   op.outputs = {img::imageOut()};
@@ -197,9 +207,13 @@ void registerImageCrop(Registry& r) {
   OperatorDesc op;
   op.id = "image.crop";
   op.version = "1.0.0";
-  op.label = "裁剪";
+  op.label = "图像裁剪";
   op.category = "图像/基础";
-  op.keywords = {"crop", "roi", "裁剪", "截取"};
+  op.keywords = {
+      "image cropping", "ROI extraction", "crop",
+      "region of interest", "ROI", "区域截取",
+      "感兴趣区域", "截取"
+  };
   op.doc = "按像素矩形 [x0, y0, x1, y1] 裁出一块（主预览里可以在输入图上拖框）；接了 box 就用框"
            "（像素单位的 Box2D）。超出图像的部分截掉。";
   op.inputs = {img::imageIn(),
@@ -225,9 +239,15 @@ void registerImageBlur(Registry& r) {
   OperatorDesc op;
   op.id = "image.blur";
   op.version = "1.0.0";
-  op.label = "平滑";
+  op.label = "图像平滑滤波";
   op.category = "图像/基础";
-  op.keywords = {"blur", "smooth", "gaussian", "median", "平滑", "滤波", "去噪"};
+  op.keywords = {
+      "image smoothing", "Gaussian blur", "median filter",
+      "mean filter", "高斯滤波", "中值滤波",
+      "均值滤波", "图像去噪", "blur",
+      "smooth", "gaussian", "median",
+      "滤波", "去噪"
+  };
   op.doc = "高斯 / 中值 / 均值平滑。中值对椒盐噪声最好、保边；高斯最通用。";
   op.inputs = {img::imageIn()};
   op.outputs = {img::imageOut()};
@@ -252,9 +272,15 @@ void registerImageNormalize(Registry& r) {
   OperatorDesc op;
   op.id = "image.normalize";
   op.version = "1.0.0";
-  op.label = "位深与拉伸";
+  op.label = "位深转换与拉伸";
   op.category = "图像/基础";
-  op.keywords = {"normalize", "convert", "depth", "stretch", "8bit", "位深", "拉伸", "归一化"};
+  op.keywords = {
+      "bit depth conversion", "intensity stretching", "normalization",
+      "dynamic range", "位深转换", "灰度拉伸",
+      "动态范围", "归一化", "normalize",
+      "convert", "depth", "stretch",
+      "8bit", "位深", "拉伸"
+  };
   op.doc = "转换位深。拉伸：每个通道的 min..max 拉到目标位深的满量程（f32 是 0..1）；"
            "不拉伸：输出 = 输入 × scale + offset，超出量程截断。";
   op.inputs = {img::imageIn()};

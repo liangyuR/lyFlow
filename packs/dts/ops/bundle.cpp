@@ -43,9 +43,13 @@ void registerProfileBundle(Registry& r) {
   OperatorDesc op;
   op.id = "dts.profile_bundle";
   op.version = "1.0.0";
-  op.label = "单剖面汇总";
+  op.label = "单剖面结果汇总";
   op.category = "DTS/输出";
-  op.keywords = {"bundle", "result", "汇总"};
+  op.keywords = {
+      "profile result bundle", "profile aggregation", "bundle",
+      "激光轮廓", "剖面结果", "检测结果汇总",
+      "result", "汇总"
+  };
   op.doc = "把这一条轮廓上所有中间结果装成一个 Record，宿主拿它画界面、落库。";
   op.inputs = {Port{"faces", "Record", "Faces", "面表。", true},
                Port{"dome", "Record", "Dome", "胶条主体。", true},

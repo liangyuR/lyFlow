@@ -75,7 +75,12 @@ void registerFilterRandomSample(Registry& r) {
   op.version = "2.0.0";
   op.label = "随机采样";
   op.category = "过滤/降采样";
-  op.keywords = {"random", "sample", "subsample", "随机", "抽样", "降采样"};
+  op.keywords = {
+      "random sampling", "random downsampling", "subsampling",
+      "随机抽样", "随机降采样", "点云抽稀",
+      "random", "sample", "subsample",
+      "随机", "抽样", "降采样"
+  };
   op.doc = "随机抽取一部分点。种子固定，同输入同结果。";
   // v2 把 count/ratio 改名成 keepCount/keepRatio：原来的名字读不出「保留还是丢弃」。
 

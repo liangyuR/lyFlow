@@ -43,9 +43,15 @@ void registerTransformMake(Registry& r) {
   OperatorDesc op;
   op.id = "transform.make";
   op.version = "1.0.0";
-  op.label = "构造变换";
+  op.label = "刚体变换构造";
   op.category = "变换";
-  op.keywords = {"transform", "pose", "translate", "rotate", "变换", "位姿", "平移", "旋转"};
+  op.keywords = {
+      "rigid transform construction", "pose matrix", "Euler angles",
+      "SE3", "位姿矩阵", "欧拉角",
+      "平移旋转", "transform", "pose",
+      "translate", "rotate", "变换",
+      "位姿", "平移", "旋转"
+  };
   op.doc = "由平移和欧拉角构造 4x4 刚体变换。旋转顺序为内旋 X→Y→Z（R = Rz·Ry·Rx）。";
 
   op.outputs = {Port{"transform", "Transform", "Transform", "构造出的变换。", true}};

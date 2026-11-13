@@ -44,9 +44,13 @@ void registerFlush(Registry& r) {
   OperatorDesc op;
   op.id = "dts.flush";
   op.version = "1.0.0";
-  op.label = "面差";
+  op.label = "胶条面差测量";
   op.category = "DTS/面差";
-  op.keywords = {"flush", "面差", "垂距"};
+  op.keywords = {
+      "seal flush measurement", "flushness", "perpendicular distance",
+      "段差", "垂直距离", "胶条高度差",
+      "flush", "垂距"
+  };
   op.doc =
       "胶条底部到基准线的垂距。判定不在这里做 —— 标准表按 (段号, 站位号) 存在库里，\n"
       "图拿不到也不该拿，所以 verdict / 公差留空。";

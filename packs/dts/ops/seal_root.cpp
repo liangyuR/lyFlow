@@ -54,9 +54,15 @@ void registerSealRoot(Registry& r) {
   OperatorDesc op;
   op.id = "dts.seal_root";
   op.version = "1.0.0";
-  op.label = "胶条底部";
+  op.label = "胶条根部定位";
   op.category = "DTS/胶条";
-  op.keywords = {"root", "foot", "bump", "根部", "底部", "凸起"};
+  op.keywords = {
+      "seal root localization", "seal foot detection", "root point",
+      "胶条根部", "底部特征", "谷底检测",
+      "特征点定位", "root", "foot",
+      "bump", "根部", "底部",
+      "凸起"
+  };
   op.doc =
       "在「基准面朝胶条那一端 → 胶条顶点」这段区间里找底部：\n"
       "优先取「凹-凸-凹」里的凸起顶点（有多个取离胶条最近的），没有凸起就取区间里的谷底。\n"

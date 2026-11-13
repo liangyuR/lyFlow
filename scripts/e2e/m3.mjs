@@ -1009,10 +1009,51 @@ async function suiteInsertOnEdge(cdp, report) {
 
 // ------------------------------------------------------------ P1 #18 搜索接上
 
+export async function checkOperatorSearch(cdp, report) {
+  const setQuery = (selector, value) => cdp.eval(`
+    const input = document.querySelector(${lit(selector)});
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${lit(value)});
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  `);
+  if (await cdp.eval(`return document.querySelector('.palette').getClientRects().length === 0;`)) {
+    await clickAt(cdp, await centerOf(cdp, '[data-testid="nav-nodes"]'));
+  }
+  for (const query of ["体素 降采样", "voxl", "grid 降采样"]) {
+    await setQuery('.palette__search input', query);
+    await sleep(120);
+    const paletteFirst = await cdp.eval(`return document.querySelector('.palette .op-row')?.dataset.opId;`);
+    await cdp.eval(`window.__lyflow.stores.ui.getState().openSearch({ screen: { x: 500, y: 180 }, flow: { x: 0, y: 0 } });`);
+    await sleep(120);
+    await setQuery('.search-popup__input', query);
+    await sleep(120);
+    const popupFirst = await cdp.eval(`return document.querySelector('.search-popup__row')?.dataset.opId;`);
+    report.eq(`算子库与画布搜索「${query}」返回一致的专业算子`, { paletteFirst, popupFirst },
+      { paletteFirst: 'filter.voxel_grid', popupFirst: 'filter.voxel_grid' });
+    const composition = await cdp.eval(`
+      const before = window.__lyflow.stores.graph.getState().doc.nodes.length;
+      const event = new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, isComposing: true, bubbles: true, cancelable: true });
+      document.querySelector('.search-popup__input').dispatchEvent(event);
+      return { open: !!document.querySelector('.search-popup'), added: window.__lyflow.stores.graph.getState().doc.nodes.length - before, prevented: event.defaultPrevented };
+    `);
+    report.eq(`搜索「${query}」时输入法确认文字不会误添加节点`, composition, { open: true, added: 0, prevented: false });
+    await pressEscape(cdp);
+  }
+  await setQuery('.palette__search input', 'voxel');
+  await sleep(120);
+  report.eq("侧栏搜索的输入法确认不会触发算子详情选择", await cdp.eval(`
+    const before = window.__lyflow.stores.ui.getState().inspectedOperator;
+    const event = new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, isComposing: true, bubbles: true, cancelable: true });
+    document.querySelector('.palette__search input').dispatchEvent(event);
+    return { changed: window.__lyflow.stores.ui.getState().inspectedOperator !== before, prevented: event.defaultPrevented };
+  `), { changed: false, prevented: false });
+  await setQuery('.palette__search input', '');
+}
+
 async function suiteDropToSearch(cdp, report) {
   report.section("P1 #18：连线中途松手 → 搜索面板 → 自动接上");
 
   await newDoc(cdp);
+  await checkOperatorSearch(cdp, report);
   const ids = await buildGraph(
     cdp,
     [{ key: "gen", op: "gen.synthetic", params: { pointCount: 1000 } }],
@@ -1087,6 +1128,7 @@ async function suiteDropToSearch(cdp, report) {
     const g = window.__lyflow.stores.graph.getState();
     return { voxel: g.addNode('filter.voxel_grid', { x: 0, y: 0 }), merge: window.__lyflow.stores.graph.getState().addNode('util.merge', { x: 0, y: 0 }) };
   `);
+  const mergeLabel = await cdp.eval(`return window.__lyflow.stores.manifest.getState().operatorsById.get('util.merge').label;`);
   const dropBox = await canvasBox(cdp);
   await placeAtScreen(cdp, {
     [ids.gen]: { x: 40, y: 60 },
@@ -1110,12 +1152,12 @@ async function suiteDropToSearch(cdp, report) {
   report.eq("松在合并点云的身子上（a、b 都能接）：什么也不接，提示对准端口",
     { edges: await wired(), search: await cdp.eval(`return !!document.querySelector('.search-popup');`),
       toast: await cdp.eval(`return window.__lyflow.stores.ui.getState().toast?.text ?? null;`) },
-    { edges: [`${ids.gen}>${extra.voxel}.cloud`], search: false, toast: "合并点云 上有 2 个端口能接，拖到要接的那个端口上" });
+    { edges: [`${ids.gen}>${extra.voxel}.cloud`], search: false, toast: `${mergeLabel} 上有 2 个端口能接，拖到要接的那个端口上` });
   // 长一点的提示停得够读完（按字数算，警告至少 4 秒）。以前一律 2.6 秒，这一句没读完就收了
   await sleep(3200);
   report.eq("这条提示 3 秒多之后还在（以前 2.6 秒就收了）",
     await cdp.eval(`return document.querySelector('[data-testid="toast"]')?.textContent ?? null;`),
-    "合并点云 上有 2 个端口能接，拖到要接的那个端口上");
+    `${mergeLabel} 上有 2 个端口能接，拖到要接的那个端口上`);
 
   // 松在一个已接着线的输入上（合并的 a 已经接着 gen）：给它换来源 —— 顶掉 gen→a、接上体素→a，一条撤销；拖到它附近时
   // 端口亮成「替换」。以前当成松在节点身上、在整个节点里另找能接的：体素悄悄接进了隔壁的 b，没有任何提示
@@ -1159,6 +1201,7 @@ async function suiteDropToSearch(cdp, report) {
     window.__lyflow.stores.graph.getState().connect({ node: ${lit(ids.gen)}, port: 'cloud' }, { node: id, port: 'cloud' });
     return id;
   `);
+  const ransacLabel = await cdp.eval(`return window.__lyflow.stores.manifest.getState().operatorsById.get('segment.ransac_plane').label;`);
   await placeAtScreen(cdp, { [ransac]: { x: 40, y: Math.round(dropBox.h * 0.6) } });
   await sleep(250);
   const inliers = await centerOf(cdp, `[data-testid="port-${ransac}-inliers"] .react-flow__handle`);
@@ -1187,7 +1230,7 @@ async function suiteDropToSearch(cdp, report) {
   `);
   report.ok("从 inliers 拖到空白处：接得上的排前面、写着接到哪个端口，接不上的置灰在后；打「提取」回车接到提取索引的 indices，一条撤销",
     listed.firstPort !== null && listed.extract === "indices" && listed.greyedAfter && /接不上 Indices/.test(listed.sep ?? "") &&
-      /RANSAC 平面\.Inliers/.test(listed.placeholder ?? "") && JSON.stringify(typedWire.edges) === JSON.stringify(["inliers>indices"]) &&
+      (listed.placeholder ?? "").includes(`${ransacLabel}.Inliers`) && JSON.stringify(typedWire.edges) === JSON.stringify(["inliers>indices"]) &&
       typedWire.rejected === null && typedWire.past - pastBeforeTyped === 1,
     JSON.stringify({ listed, typedWire, pastBeforeTyped }));
 }

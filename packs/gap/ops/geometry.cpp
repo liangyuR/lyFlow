@@ -269,9 +269,14 @@ void registerDatumWindow(Registry& r) {
   OperatorDesc op;
   op.id = "gap.datum_window";
   op.version = "1.0.0";
-  op.label = "方向基准窗";
+  op.label = "方向基准区域构建";
   op.category = "间隙/预处理";
-  op.keywords = {"roi", "datum", "方向", "基准", "长面"};
+  op.keywords = {
+      "direction datum ROI construction", "datum window", "region of interest",
+      "ROI", "方向参考区域", "基准窗口",
+      "长面区域", "datum", "方向",
+      "基准", "长面"
+  };
   op.doc =
       "由一个锚框推出一条长窗，用来在**旁边那张长面**上拟一条方向基准线。\n"
       "基准面是一道很窄的台肩时（天幕 L4 只有 2 mm），它自己拟出来的方向基本是噪声；"
@@ -314,9 +319,14 @@ void registerOverallRoi(Registry& r) {
   OperatorDesc op;
   op.id = "gap.overall_roi";
   op.version = "1.0.0";
-  op.label = "整体 ROI";
+  op.label = "整体 ROI 构建";
   op.category = "间隙/预处理";
-  op.keywords = {"roi", "auto center", "整体", "裁剪框"};
+  op.keywords = {
+      "overall ROI construction", "global ROI", "auto center",
+      "region of interest", "ROI", "整体区域",
+      "自动居中", "裁剪区域", "整体",
+      "裁剪框"
+  };
   op.doc =
       "整体 ROI 框（轴对齐，宽高来自配置）。auto_center 保留配置的宽高，中心跟着两片云"
       "各自的稳健中心（逐坐标中位数）的中点走 —— 视野里有大片背景或另一件零件时中心会被拖走。";
@@ -360,9 +370,13 @@ void registerBusinessRois(Registry& r) {
   OperatorDesc op;
   op.id = "gap.business_rois";
   op.version = "1.2.0";
-  op.label = "业务 ROI";
+  op.label = "测量 ROI 映射";
   op.category = "间隙/配准";
-  op.keywords = {"roi", "business", "业务框"};
+  op.keywords = {
+      "measurement ROI mapping", "template ROI transform", "region of interest",
+      "ROI", "测量区域映射", "基准区域",
+      "参考区域", "business", "业务框"
+  };
   op.doc =
       "把选中模板的四个业务 ROI 按 ICP 变换搬到当前样本上：框中心按变换搬过去，"
       "宽高保持配置里的原值，仍是轴对齐框。\n"
@@ -403,9 +417,13 @@ void registerSelectedPoint(Registry& r) {
   OperatorDesc op;
   op.id = "gap.selected_point";
   op.version = "1.0.0";
-  op.label = "选点";
+  op.label = "区域锚点近邻提取";
   op.category = "间隙/拟合";
-  op.keywords = {"selected point", "选点"};
+  op.keywords = {
+      "ROI anchor nearest point", "nearest neighbor query", "corner nearest point",
+      "锚点近邻", "最近邻查询", "参考点提取",
+      "selected point"
+  };
   op.doc =
       "取离 ROI 的 min 角最近的点。取自**整片云**、不裁 ROI：框外更近的点照样会被选中；"
       "框的大小不影响结果。";
@@ -423,9 +441,13 @@ void registerNearestToLine(Registry& r) {
   OperatorDesc op;
   op.id = "gap.nearest_to_line";
   op.version = "1.0.0";
-  op.label = "最近点到直线";
+  op.label = "直线最近点提取";
   op.category = "间隙/拟合";
-  op.keywords = {"nearest point", "最近点"};
+  op.keywords = {
+      "nearest point to line", "point set query", "minimum perpendicular distance",
+      "最近点查询", "点集查询", "参考点提取",
+      "nearest point", "最近点"
+  };
   op.doc =
       "取离给定直线垂距最小的那个云点，对应配置里的 ref_type: nearest point。"
       "不要求点落在线段两端之间，所以输入云要先按业务 ROI 裁过；垂距相同时取点序靠前的。";

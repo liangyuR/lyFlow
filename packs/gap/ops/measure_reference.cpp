@@ -197,9 +197,14 @@ void registerMeasureReference(Registry& r) {
   OperatorDesc op;
   op.id = "gap.measure_reference";
   op.version = "1.0.0";
-  op.label = "测量（参考）";
+  op.label = "参考基线测量";
   op.category = "间隙/参考";
-  op.keywords = {"reference", "blackbox", "对照", "基线"};
+  op.keywords = {
+      "reference baseline measurement", "legacy measurement engine", "regression comparison",
+      "参考实现", "基线对照", "回归对比",
+      "reference", "blackbox", "对照",
+      "基线"
+  };
   op.doc =
       "整条主路径的黑盒实现：直接调 MeasurementEngine::measure，日志里带一份 quality JSON。"
       "历史对拍用：拆分算子的行为已有意偏离它，图上改任何上游算子都不影响它，只有 "

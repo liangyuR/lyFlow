@@ -306,6 +306,10 @@ export function NodeSearch() {
   const top = Math.max(12, Math.min(popup.screen.y, window.innerHeight - POPUP_HEIGHT - 12));
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) {
+      e.stopPropagation();
+      return;
+    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setCursor((c) => Math.min(c + 1, rows.length - 1));
@@ -336,8 +340,10 @@ export function NodeSearch() {
           ref={inputRef}
           className="search-popup__input"
           type="text"
+          aria-label="搜索算子"
           value={query}
-          placeholder={guide ? guide.placeholder : "搜索算子…"}
+          placeholder={guide ? guide.placeholder : "搜索名称或关键词…"}
+          title="支持中文、英文、缩写和模糊搜索"
           spellCheck={false}
           onChange={(e) => setQuery(e.target.value)}
         />

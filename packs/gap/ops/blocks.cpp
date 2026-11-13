@@ -705,9 +705,14 @@ void registerBlockOps(Registry& r) {
     op.id = "gap.read_scan";
     // 1.1.0：接上 / 注入的两个输入压过 source（L18），validate 只查「成对给」
     op.version = "1.1.0";
-    op.label = "读剖面";
+    op.label = "双相机剖面读取";
     op.category = "间隙/积木";
-    op.keywords = {"read", "scan", "pcd", "剖面", "测点", "积木"};
+    op.keywords = {
+        "dual camera profile input", "scan pair acquisition", "line scan",
+        "PCD", "双头线扫", "剖面读取",
+        "传感器输入", "测量剖面", "read",
+        "scan", "剖面", "测点"
+    };
     op.doc =
         "读一个测点的双头线扫剖面，换到测量帧，出一个 ScanPair。primary / secondary 保留原始"
         "1280 个槽（NaN 槽不剔，模型定位要靠槽号）；merged 是两片有限点合并（secondary 在前）"
@@ -777,7 +782,12 @@ void registerBlockOps(Registry& r) {
     op.version = "2.1.0";
     op.label = "模板定位";
     op.category = "间隙/积木";
-    op.keywords = {"template", "icp", "locate", "模板", "定位", "积木"};
+    op.keywords = {
+        "template localization", "template registration", "2D ICP",
+        "ROI localization", "模板匹配", "区域定位",
+        "二维配准", "template", "icp",
+        "locate", "模板", "定位"
+    };
     op.doc =
         "整体框 → 裁剪 → 加载模板 → ICP 对齐 → 选模板 → 业务框，一步给出 RoiSet。"
         "多模板用四个固定槽位：槽 1 恒启用，槽 2–4 按需打开；每个槽有自己的左右模板和四个角色框，"
@@ -885,9 +895,14 @@ void registerBlockOps(Registry& r) {
     OperatorDesc op;
     op.id = "gap.locate_model";
     op.version = "1.0.0";
-    op.label = "模型定位";
+    op.label = "分割模型定位";
     op.category = "间隙/积木";
-    op.keywords = {"model", "onnx", "locate", "模型", "定位", "积木"};
+    op.keywords = {
+        "segmentation model localization", "semantic segmentation", "ONNX",
+        "ROI prediction", "语义分割", "模型推理",
+        "区域定位", "model", "locate",
+        "模型", "定位"
+    };
     op.doc =
         "分割模型给出四个角色框：剖面张量 → ONNX 推理 → 逐槽 argmax → 由标签推框（可选精修），"
         "再剔 NaN、按两个缝框做跟随零件的裁剪窗。scan 输出是裁过的那一对云（合并云也跟着裁），"
@@ -932,9 +947,15 @@ void registerBlockOps(Registry& r) {
     OperatorDesc op;
     op.id = "gap.role_line";
     op.version = "1.0.0";
-    op.label = "按角色拟合直线";
+    op.label = "角色区域直线拟合";
     op.category = "间隙/积木";
-    op.keywords = {"line", "fit", "datum", "直线", "拟合", "基准线", "积木"};
+    op.keywords = {
+        "role ROI line fitting", "2D line fitting", "datum line",
+        "reference line", "RANSAC", "区域拟合",
+        "基准线拟合", "参考线拟合", "line",
+        "fit", "datum", "直线",
+        "拟合", "基准线"
+    };
     op.doc =
         "按角色（datum 基准面 / target 参考面）从 RoiSet 取框，在 ScanPair 的合并云上裁出来拟一条"
         "直线（gap.fit_line）。「靠缝那一端」取两个缝框中心的中点 —— 截取与 innerEnd 都朝它，"
@@ -974,9 +995,13 @@ void registerBlockOps(Registry& r) {
     OperatorDesc op;
     op.id = "gap.ref_point";
     op.version = "1.0.0";
-    op.label = "取参考点";
+    op.label = "参考点提取";
     op.category = "间隙/积木";
-    op.keywords = {"reference", "point", "line end", "参考点", "选点", "积木"};
+    op.keywords = {
+        "reference point extraction", "line endpoint", "nearest point",
+        "参考点", "端点提取", "特征点提取",
+        "reference", "point", "line end"
+    };
     op.doc =
         "段差的参考点，三种取法：line_end = 在角色框里拟一条线、取靠缝那一端（与 gap.role_line "
         "同一个判据）；selected_point = 离角色框 min 角最近的云点（gap.selected_point）；"
@@ -1023,9 +1048,14 @@ void registerBlockOps(Registry& r) {
     OperatorDesc op;
     op.id = "gap.seam_circles";
     op.version = "1.1.0";
-    op.label = "拟合缝两侧圆";
+    op.label = "缝隙双侧圆拟合";
     op.category = "间隙/积木";
-    op.keywords = {"circle", "gap", "seam", "圆", "间隙", "积木"};
+    op.keywords = {
+        "seam circle pair fitting", "bilateral circle fitting", "RANSAC",
+        "缝隙圆拟合", "双侧圆弧拟合", "圆心约束",
+        "circle", "gap", "seam",
+        "圆", "间隙"
+    };
     op.doc =
         "在 RoiSet 的两个缝框里各拟一个圆（gap.fit_gap_circles）：合并云优先，失败退到两台相机"
         "各拟一个。固定半径、逐侧相机、圆心高度带、弱拟合地板都在「高级」里；配了高度带就接 "
@@ -1064,9 +1094,14 @@ void registerBlockOps(Registry& r) {
     OperatorDesc op;
     op.id = "gap.datum_direction";
     op.version = "1.0.0";
-    op.label = "方向基准";
+    op.label = "方向基准线提取";
     op.category = "间隙/积木";
-    op.keywords = {"datum", "direction", "long plane", "方向", "基准", "长面", "积木"};
+    op.keywords = {
+        "direction datum line extraction", "orientation reference", "line fitting",
+        "方向基准线", "方向约束", "长面拟合",
+        "datum", "direction", "long plane",
+        "方向", "基准", "长面"
+    };
     op.doc =
         "基准面很窄时，它自己拟出的方向不可信：在角色框背离缝的那一侧推出一条长窗、在旁边那张"
         "长面上拟一条线，接到 gap.role_line 的 refLine 做方向约束（gap.datum_window + gap.fit_line）。"

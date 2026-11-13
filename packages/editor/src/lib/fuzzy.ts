@@ -20,18 +20,37 @@ function isUpper(c: string): boolean {
   return c !== c.toLowerCase() && c === c.toUpperCase();
 }
 
+export function normalizeSearchText(text: string): string {
+  return text.normalize("NFKC").toLowerCase();
+}
+
+function normalizedSource(text: string): { text: string; indices: number[] } {
+  let normalized = "";
+  const indices: number[] = [];
+  let offset = 0;
+  for (const character of text) {
+    const part = normalizeSearchText(character);
+    normalized += part;
+    for (let i = 0; i < part.length; i++) indices.push(offset + Math.min(i, character.length - 1));
+    offset += character.length;
+  }
+  return { text: normalized, indices };
+}
+
 /** 在 text 中按顺序找 query 的每个字符，返回 null 表示没匹配上。
  *  大小写不敏感；中文字符直接参与匹配。 */
 export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
   if (query.length === 0) return { score: 0, indices: [] };
   if (text.length === 0) return null;
 
-  const q = query.toLowerCase();
-  const t = text.toLowerCase();
+  const q = normalizeSearchText(query);
+  const source = normalizedSource(text);
+  const t = source.text;
+  const contiguous = t.indexOf(q);
 
   const indices: number[] = [];
   let score = 0;
-  let ti = 0;
+  let ti = Math.max(0, contiguous);
   let lastHit = -2;
 
   for (let qi = 0; qi < q.length; qi++) {
@@ -53,14 +72,15 @@ export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
       score += Math.max(PENALTY_GAP * (found - lastHit - 1), -6);
     }
 
-    const prev = found > 0 ? text[found - 1]! : "";
+    const originalIndex = source.indices[found]!;
+    const prev = originalIndex > 0 ? text[originalIndex - 1]! : "";
     if (found === 0 || isWordSeparator(prev)) {
       score += SCORE_WORD_START;
-    } else if (isUpper(text[found]!) && !isUpper(prev)) {
+    } else if (isUpper(text[originalIndex]!) && !isUpper(prev)) {
       score += SCORE_CAMEL_START;
     }
 
-    indices.push(found);
+    if (indices[indices.length - 1] !== originalIndex) indices.push(originalIndex);
     lastHit = found;
     ti = found + 1;
   }

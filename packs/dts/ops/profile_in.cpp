@@ -61,9 +61,14 @@ void registerProfileIn(Registry& r) {
   OperatorDesc op;
   op.id = "dts.profile_in";
   op.version = "1.0.0";
-  op.label = "轮廓输入";
+  op.label = "激光轮廓输入";
   op.category = "DTS/输入";
-  op.keywords = {"profile", "input", "轮廓", "输入"};
+  op.keywords = {
+      "laser profile input", "profile source", "CSV",
+      "激光剖面", "传感器输入", "轮廓读取",
+      "profile", "input", "轮廓",
+      "输入"
+  };
   op.doc =
       "一条激光轮廓。产线上由宿主把传感器的那一条注入进来（节点整个 compute 不跑）；\n"
       "离线调图时从 path 指的 CSV 读，每行 `x,z[,亮度]`，单位 mm，亮度 0 表示无效点。";
