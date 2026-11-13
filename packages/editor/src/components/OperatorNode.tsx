@@ -32,7 +32,8 @@ function formatSize(stats: NodeStats): string {
   if (first?.type === "Image" && first.value?.width !== undefined) {
     return `${first.value.width}×${first.value.height}`;
   }
-  return formatCount(stats.elementCount ?? 0);
+  const count = formatCount(stats.elementCount ?? 0);
+  return first?.type === "PointCloud" ? `${count}点` : count;
 }
 
 function formatDuration(ms: number): string {
@@ -385,7 +386,16 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
               )}
             </span>
           ) : (
-            exec?.stats?.elementCount != null && <span className="node__count">{formatSize(exec.stats)}</span>
+            exec?.stats?.elementCount != null && (
+              <span
+                className="node__count"
+                title={exec.stats.outputs?.[0]?.type === "PointCloud"
+                  ? `输出点数：${exec.stats.elementCount.toLocaleString("zh-CN")} 点`
+                  : undefined}
+              >
+                {formatSize(exec.stats)}
+              </span>
+            )
           )}
           {exec?.children && (
             <span className="node__count" data-testid={`node-children-${id}`}>
