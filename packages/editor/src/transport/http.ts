@@ -15,6 +15,9 @@ import type {
   LibraryMeta,
   LibraryRefresh,
   LibrarySettings,
+  PythonRuntimeConfig,
+  PythonSettings,
+  PythonRefresh,
   LibraryStatus,
   LoadedGraph,
   ManifestUpdated,
@@ -416,6 +419,15 @@ export class HttpTransport implements Transport {
 
   // ---- 库算子与导入 --------------------------------------------------------
 
+  getPythonSettings(): Promise<PythonSettings> {
+    return this.#get<PythonSettings>('/lyflow/python/settings');
+  }
+  setPythonSettings(config: PythonRuntimeConfig): Promise<PythonRefresh> {
+    return this.#send<PythonRefresh>('PUT', '/lyflow/python/settings', config);
+  }
+  refreshPythonNodes(): Promise<PythonRefresh> {
+    return this.#send<PythonRefresh>('POST', '/lyflow/python/refresh');
+  }
   getLibraryStatus(): Promise<LibraryStatus> {
     return this.#get<LibraryStatus>('/lyflow/library');
   }

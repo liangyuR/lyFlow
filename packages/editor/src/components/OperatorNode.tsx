@@ -1,3 +1,4 @@
+import { PythonLibraryGuide } from './PythonLibrary';
 // 画布上的算子节点。按 op id 现查 manifest，不把算子描述塞进节点 data ——
 // 这是热重载的前提：推一份新 manifest 进 store，节点外观自动跟着变。
 
@@ -211,6 +212,7 @@ function OperatorNodeImpl({ id, data, selected }: NodeProps) {
         <div className="node__missing-body">
           <code>{opId}</code>
           <span>当前 core 未注册</span>
+          {opId.startsWith('py.') && <PythonLibraryGuide />}
         </div>
       </div>
     );

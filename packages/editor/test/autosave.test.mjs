@@ -67,52 +67,49 @@ function fresh(transportOpts) {
   return t;
 }
 
-test('没存过盘：有改动、不是空图才写，写在传输层给的那一处旁边；空白的新图不写', async () => {
+test('自动备份生命周期：未保存/已保存路径、恢复与撤销的未保存保护和清理', async () => {
   const t = fresh();
   await autosaveTick();
-  assert.equal(t.files.size, 0, '空白的新图不备份');
+  assert.equal(t.files.size, 0, '空白新图不备份');
   g().addNode('filter.voxel_grid', { x: 0, y: 0 });
-  assert.equal(g().dirty, true);
+  assert.equal(g().dirty, true, '新图添加节点后未保存');
   await autosaveTick();
-  assert.deepEqual([...t.files.keys()], [`${UNTITLED}~`]);
-  assert.equal(t.files.get(`${UNTITLED}~`).doc.nodes.length, 1);
-});
-
-test('存过盘的图写 `<file>~`，不碰没存过盘的那一处；没改动不写', async () => {
-  const t = fresh();
-  g().addNode('filter.voxel_grid', { x: 0, y: 0 });
-  g().markSaved('g.lyflow.json');
-  await autosaveTick();
-  assert.equal(t.files.size, 0, '刚存过盘：没改动');
-  g().addNode('filter.voxel_grid', { x: 300, y: 0 });
-  await autosaveTick();
-  assert.deepEqual([...t.files.keys()], ['g.lyflow.json~']);
-});
-
-test('找回来、换上：没有路径、算没保存（撤销回不到「已保存」）；删掉之后再找是 null', async () => {
-  const t = fresh();
-  g().addNode('filter.voxel_grid', { x: 0, y: 0 });
-  await autosaveTick();
-  g().newDoc(); // 相当于重开 app：一张空白的新图
+  assert.deepEqual(
+    [...t.files].map(([path, entry]) => [path, entry.doc.nodes.length]),
+    [[`${UNTITLED}~`, 1]],
+    '非空新图写入未命名备份路径',
+  );
+  g().newDoc();
   const backup = await findUntitledBackup();
-  assert.ok(backup);
-  assert.equal(backup.path, UNTITLED);
-  assert.equal(backup.loaded.doc.nodes.length, 1);
-  assert.equal(backup.savedAt, t.files.get(`${UNTITLED}~`).at);
-
+  assert.deepEqual(
+    [backup?.path, backup?.loaded.doc.nodes.length, backup?.savedAt],
+    [UNTITLED, 1, t.files.get(`${UNTITLED}~`).at],
+    '重新打开后找到内容和备份时间',
+  );
   restoreUntitled(backup);
-  assert.equal(g().doc.nodes.length, 1);
-  assert.equal(g().filePath, null);
-  assert.equal(g().dirty, true, '内容不在盘上：标题要带 *、关窗口要问');
-  assert.equal(g().savedDoc, null);
-  // 换上之后接着改、再撤销回来：仍然没保存
+  assert.deepEqual(
+    [g().doc.nodes.length, g().filePath, g().dirty, g().savedDoc],
+    [1, null, true, null],
+    '恢复内容没有保存点，关闭前仍需确认',
+  );
   g().addNode('filter.voxel_grid', { x: 300, y: 0 });
   g().undo();
-  assert.equal(g().dirty, true);
-
+  assert.equal(g().dirty, true, '恢复后编辑再撤销也不能变成已保存');
   await discardUntitledBackup();
-  assert.equal(t.files.size, 0);
-  assert.equal(await findUntitledBackup(), null);
+  assert.deepEqual([t.files.size, await findUntitledBackup()], [0, null], '丢弃后不会再次发现备份');
+  g().markSaved('g.lyflow.json');
+  await autosaveTick();
+  assert.deepEqual([g().dirty, t.files.size], [false, 0], '已保存且未改动不写备份');
+  g().addNode('filter.voxel_grid', { x: 300, y: 0 });
+  await autosaveTick();
+  assert.deepEqual([...t.files.keys()], ['g.lyflow.json~'], '已保存文档不写入未命名备份路径');
+  g().markSaved('g.lyflow.json');
+  g().markUnsaved();
+  assert.deepEqual(
+    [g().dirty, g().filePath],
+    [true, 'g.lyflow.json'],
+    '从文件备份恢复时保留文件路径并标为未保存',
+  );
 });
 
 test('打开时备份比正文新：编辑器里问恢复 / 丢弃 / 取消 —— 取消与 Esc 不打开、备份留着；丢弃才删；没挂对话框退回原生的是 / 否', async () => {
@@ -167,37 +164,28 @@ test('打开时备份比正文新：编辑器里问恢复 / 丢弃 / 取消 —�
   setDialogs(undefined);
 });
 
-test('传输层没有 untitledBackupPath（HTTP、静态快照）：没存过盘的图不备份，也找不到', async () => {
-  const t = fresh({ untitled: null });
-  assert.equal(await untitledBackupPath(), null);
-  g().addNode('filter.voxel_grid', { x: 0, y: 0 });
-  await autosaveTick();
-  assert.equal(t.files.size, 0);
-  assert.equal(await findUntitledBackup(), null);
-});
+test('自动备份负向矩阵：不支持、损坏与空图都不能恢复', async () => {
+  {
+    const t = fresh({ untitled: null });
+    assert.equal(await untitledBackupPath(), null);
+    g().addNode('filter.voxel_grid', { x: 0, y: 0 });
+    await autosaveTick();
+    assert.equal(t.files.size, 0);
+    assert.equal(await findUntitledBackup(), null);
+  }
+  {
+    const t = fresh({ corrupt: true });
+    g().addNode('filter.voxel_grid', { x: 0, y: 0 });
+    await autosaveTick();
+    assert.equal(t.files.size, 1);
+    assert.equal(await findUntitledBackup(), null);
+    assert.equal(t.files.size, 0, '读坏了的删掉，免得每次开 app 都问');
 
-test('备份读不出来或是空图：当作没有，顺手删掉', async () => {
-  const t = fresh({ corrupt: true });
-  g().addNode('filter.voxel_grid', { x: 0, y: 0 });
-  await autosaveTick();
-  assert.equal(t.files.size, 1);
-  assert.equal(await findUntitledBackup(), null);
-  assert.equal(t.files.size, 0, '读坏了的删掉，免得每次开 app 都问');
-
-  const t2 = fresh();
-  await t2.writeBackup(UNTITLED, { schemaVersion: 1, id: 'x', nodes: [], edges: [] });
-  assert.equal(await findUntitledBackup(), null);
-  assert.equal(t2.files.size, 0);
-});
-
-test('markUnsaved：从 `<file>~` 恢复出来的图保留路径、算没保存', () => {
-  fresh();
-  g().addNode('filter.voxel_grid', { x: 0, y: 0 });
-  g().markSaved('g.lyflow.json');
-  assert.equal(g().dirty, false);
-  g().markUnsaved();
-  assert.equal(g().dirty, true);
-  assert.equal(g().filePath, 'g.lyflow.json');
+    const t2 = fresh();
+    await t2.writeBackup(UNTITLED, { schemaVersion: 1, id: 'x', nodes: [], edges: [] });
+    assert.equal(await findUntitledBackup(), null);
+    assert.equal(t2.files.size, 0);
+  }
 });
 
 test('有没存的改动时问「保存 / 不保存 / 取消」：存成了或不保存才接着做；另存为取消了等于取消', async () => {

@@ -47,7 +47,8 @@ function Assert-RuntimeNuGetMetadata {
         if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Runtime cannot contain reparse points.' }
         if (-not $item.PSIsContainer) {
             $relative = [IO.Path]::GetRelativePath($RuntimeDir, $item.FullName).Replace('\', '/')
-            if ($relative -ne 'lyflow-runtime.json' -and $relative -notlike 'licenses/*' -and ($relative.Contains('/') -or $item.Extension -ine '.dll')) { throw "Unexpected runtime content: $relative" }
+            $pythonFile = $relative -in @('python/README.md', 'python/pyproject.toml') -or (($relative -like 'python/lyflow_python/*' -or $relative -like 'python/examples/*') -and $item.Extension -ceq '.py')
+            if ($relative -ne 'lyflow-runtime.json' -and $relative -notlike 'licenses/*' -and -not $pythonFile -and ($relative.Contains('/') -or $item.Extension -ine '.dll')) { throw "Unexpected runtime content: $relative" }
             if ($item.Extension -ieq '.dll') {
                 $reader = [IO.BinaryReader]::new([IO.File]::OpenRead($item.FullName))
                 try {

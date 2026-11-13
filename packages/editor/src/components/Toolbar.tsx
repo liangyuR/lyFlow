@@ -23,6 +23,7 @@ import { useGraphStore } from '../store/graph';
 import { useManifestStore } from '../store/manifest';
 import { useRecipeStore, useRecipesDirty } from '../store/recipe';
 import { useUiStore } from '../store/ui';
+import { usePythonStore } from '../store/python';
 import {
   transport,
   type LibraryRefresh,
@@ -32,6 +33,7 @@ import {
 
 import { CommitText } from './CommitText';
 import { RecipeMenu } from './RecipeMenu';
+import { PythonLibrary } from './PythonLibrary';
 
 export interface ToolbarActions {
   onNew: () => void;
@@ -248,6 +250,15 @@ function PreviewControls() {
  *  改了当场保存并重扫。宿主经 HostConfig 整个指定了目录时只读。 */
 function LibraryMenu() {
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<'native' | 'python'>('native');
+  const pythonRequest = usePythonStore((state) => state.openRequest);
+  const pythonBusy = usePythonStore((state) => state.busy);
+  useEffect(() => {
+    if (pythonRequest > 0) {
+      setOpen(true);
+      setTab('python');
+    }
+  }, [pythonRequest]);
   const [busy, setBusy] = useState(false);
   const [settings, setSettings] = useState<LibrarySettings | null>(null);
   const [draft, setDraft] = useState('');
@@ -325,102 +336,128 @@ function LibraryMenu() {
       </button>
       {open && (
         <div className="toolbar__recentmenu library-menu" data-testid="library-menu">
-          <div className="library-menu__title">库算子目录</div>
-          {settings && (
-            <ul className="library-menu__dirs">
-              {settings.defaultDir && (
-                <li data-testid="library-dir" data-kind="default" title={settings.defaultDir}>
-                  <span className="library-menu__path">{settings.defaultDir}</span>
-                  <span className="library-menu__tag">默认 ·「保存到库」写这里</span>
-                </li>
-              )}
-              {settings.extraDirs.map((d) => (
-                <li
-                  key={d}
-                  data-testid="library-dir"
-                  data-kind={editable ? 'extra' : 'host'}
-                  title={d}
-                >
-                  <span className="library-menu__path">{d}</span>
-                  {editable && (
-                    <button
-                      type="button"
-                      className="library-menu__remove"
-                      data-testid="library-remove"
-                      disabled={busy}
-                      title="从库目录里去掉（目录本身不删）"
-                      onClick={() => void save(settings.extraDirs.filter((x) => x !== d))}
-                    >
-                      ×
-                    </button>
-                  )}
-                </li>
-              ))}
-              {settings.envDirs.map((d) => (
-                <li key={`env:${d}`} data-testid="library-dir" data-kind="env" title={d}>
-                  <span className="library-menu__path">{d}</span>
-                  <span className="library-menu__tag">环境变量 LYFLOW_LIBRARY_DIRS</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          {settings && !editable && (
-            <div className="library-menu__note">目录由宿主配置，在这里改不了</div>
-          )}
-          {editable && (
-            <div className="library-menu__add">
-              <input
-                data-testid="library-dir-input"
-                placeholder="粘贴一个目录路径，回车添加"
-                value={draft}
-                disabled={busy}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') add(draft);
-                }}
-              />
-              <button
-                type="button"
-                data-testid="library-add"
-                disabled={busy || !draft.trim()}
-                onClick={() => add(draft)}
-              >
-                添加
-              </button>
-              {pickPath && (
-                <button
-                  type="button"
-                  data-testid="library-browse"
-                  disabled={busy}
-                  onClick={() => void browse()}
-                >
-                  浏览…
-                </button>
-              )}
-            </div>
-          )}
-          <div className="library-menu__foot">
-            <span data-testid="library-count">
-              {status
-                ? status.problems.length === 0
-                  ? `${status.count} 个库算子`
-                  : `${status.problems.length} 个问题`
-                : ''}
-            </span>
+          <div className="library-menu__tabs" role="group" aria-label="库类型">
             <button
               type="button"
-              data-testid="library-refresh"
-              disabled={busy}
-              title="重扫库算子目录（库文件是手工放进去的，不重启就生效）"
-              onClick={() => void run(() => transport.refreshLibrary())}
+              aria-pressed={tab === 'native'}
+              disabled={busy || pythonBusy}
+              onClick={() => setTab('native')}
+              data-testid="library-native-tab"
             >
-              重扫
+              库算子
+            </button>
+            <button
+              type="button"
+              aria-pressed={tab === 'python'}
+              disabled={busy || pythonBusy}
+              onClick={() => setTab('python')}
+              data-testid="library-python-tab"
+            >
+              Python 节点
             </button>
           </div>
-          {editable && (
-            <div className="library-menu__note">
-              新加的目录下次启动才会自动盯着文件变化；在那之前改了库文件点「重扫」
-            </div>
+          {tab === 'python' ? (
+            <PythonLibrary />
+          ) : (
+            <>
+              <div className="library-menu__title">库算子目录</div>
+              {settings && (
+                <ul className="library-menu__dirs">
+                  {settings.defaultDir && (
+                    <li data-testid="library-dir" data-kind="default" title={settings.defaultDir}>
+                      <span className="library-menu__path">{settings.defaultDir}</span>
+                      <span className="library-menu__tag">默认 ·「保存到库」写这里</span>
+                    </li>
+                  )}
+                  {settings.extraDirs.map((d) => (
+                    <li
+                      key={d}
+                      data-testid="library-dir"
+                      data-kind={editable ? 'extra' : 'host'}
+                      title={d}
+                    >
+                      <span className="library-menu__path">{d}</span>
+                      {editable && (
+                        <button
+                          type="button"
+                          className="library-menu__remove"
+                          data-testid="library-remove"
+                          disabled={busy || pythonBusy}
+                          title="从库目录里去掉（目录本身不删）"
+                          onClick={() => void save(settings.extraDirs.filter((x) => x !== d))}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                  {settings.envDirs.map((d) => (
+                    <li key={`env:${d}`} data-testid="library-dir" data-kind="env" title={d}>
+                      <span className="library-menu__path">{d}</span>
+                      <span className="library-menu__tag">环境变量 LYFLOW_LIBRARY_DIRS</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {settings && !editable && (
+                <div className="library-menu__note">目录由宿主配置，在这里改不了</div>
+              )}
+              {editable && (
+                <div className="library-menu__add">
+                  <input
+                    data-testid="library-dir-input"
+                    placeholder="粘贴一个目录路径，回车添加"
+                    value={draft}
+                    disabled={busy || pythonBusy}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') add(draft);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    data-testid="library-add"
+                    disabled={busy || pythonBusy || !draft.trim()}
+                    onClick={() => add(draft)}
+                  >
+                    添加
+                  </button>
+                  {pickPath && (
+                    <button
+                      type="button"
+                      data-testid="library-browse"
+                      disabled={busy || pythonBusy}
+                      onClick={() => void browse()}
+                    >
+                      浏览…
+                    </button>
+                  )}
+                </div>
+              )}
+              <div className="library-menu__foot">
+                <span data-testid="library-count">
+                  {status
+                    ? status.problems.length === 0
+                      ? `${status.count} 个库算子`
+                      : `${status.problems.length} 个问题`
+                    : ''}
+                </span>
+                <button
+                  type="button"
+                  data-testid="library-refresh"
+                  disabled={busy || pythonBusy}
+                  title="重扫库算子目录（库文件是手工放进去的，不重启就生效）"
+                  onClick={() => void run(() => transport.refreshLibrary())}
+                >
+                  重扫
+                </button>
+              </div>
+              {editable && (
+                <div className="library-menu__note">
+                  新加的目录下次启动才会自动盯着文件变化；在那之前改了库文件点「重扫」
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

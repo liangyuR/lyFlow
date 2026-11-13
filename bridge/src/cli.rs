@@ -81,6 +81,9 @@ lyflow —— LyFlow 的 headless 命令行（stdout 是 JSON Lines，stderr 给
         未知节点 / 未知参数按 unknown_node / unknown_param 报，退出码 4。
   lyflow migrate  <graph> [--write]
   lyflow manifest [--check]
+  lyflow python settings|refresh
+  lyflow python configure --config <python-nodes.json>
+        与桌面共用解释器、节点包路径和超时配置；LYFLOW_PYTHON_CONFIG 可覆盖配置文件路径。
   lyflow info
         当前 core 的版本、构建指纹、实际 DLL 路径与算子包，JSON Lines。
   lyflow samples [--samples <jsonl> | --samples-glob <pat> --bind <n>.<p> | --samples-dir <root> ...]
@@ -2282,6 +2285,7 @@ pub(crate) fn fail(err: &Sink, message: &str, code: i32) -> i32 {
 }
 
 const VALUE_OPTS: &[&str] = &[
+    "config",
     "snapshot-max-total-bytes",
     "snapshot-root",
     "snapshot-dir",
@@ -2402,6 +2406,7 @@ pub fn run_cli(args: &[String], out: &Sink, err: &Sink) -> i32 {
         "params" => cmd_params(&parsed, out, err),
         "migrate" => cmd_migrate(&parsed, out, err),
         "manifest" => cmd_manifest(&parsed, out, err),
+        "python" => cmd_python(&parsed, out, err),
         "samples" => match eval::collect_samples(&parsed, err) {
             Ok(samples) => {
                 for s in eval::samples_jsonl(&samples).lines() {
@@ -2484,6 +2489,63 @@ pub fn load_library(dirs: &[String]) -> Vec<String> {
     core.set_library_dirs(&existing).unwrap_or_default()
 }
 
+fn cmd_python(parsed: &Parsed, out: &Sink, err: &Sink) -> i32 {
+    let action = parsed
+        .positional
+        .first()
+        .map(String::as_str)
+        .unwrap_or("settings");
+    if parsed.positional.len() > 1 || !matches!(action, "settings" | "configure" | "refresh") {
+        line(
+            err,
+            "用法: lyflow python settings|refresh，或 python configure --config <json>",
+        );
+        return EXIT_USAGE;
+    }
+    let result = (|| -> Result<Value, String> {
+        let core = core()?;
+        let supported = core.supports_python();
+        let config = if action == "configure" {
+            if !supported {
+                return Err("当前运行库不支持 Python 节点".into());
+            }
+            let file = parsed
+                .one("config")
+                .ok_or("configure 需要 --config <json>")?;
+            if !Path::new(file).is_file() {
+                return Err(format!("Python 配置文件不存在: {file}"));
+            }
+            crate::python_settings::write(crate::python_settings::read_from(Path::new(file))?)?
+        } else {
+            crate::python_settings::read()?
+        };
+        if action == "settings" {
+            let status = crate::python_settings::status()?;
+            return Ok(
+                json!({"supported": supported, "editable": true, "config": config, "status": status}),
+            );
+        }
+        if !supported {
+            return Err("当前运行库不支持 Python 节点".into());
+        }
+        let status = crate::python_settings::apply(&config)?;
+        let manifest: Value =
+            serde_json::from_str(&core.manifest_json().map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
+        Ok(json!({"status": status, "manifest": manifest}))
+    })();
+    match result {
+        Ok(value) => {
+            json_line(out, &value);
+            EXIT_OK
+        }
+        Err(error) => {
+            line(err, &error);
+            EXIT_FAILED
+        }
+    }
+}
+
 /// stderr 是终端、stdout 不是（`lyflow eval … > rows.jsonl`）：这时 eval / sweep / perturb 才在 stderr 上
 /// 画一行进度（eval::Progress）。只有真正的 `lyflow` 进程（main）会打开：run_cli 的测试、MCP 的管道里
 /// 永远是关的；stdout 也在终端上时 JSON 行本身就在滚，再插一行进度只会把两者搅在一起。
@@ -2504,6 +2566,45 @@ pub fn main() -> i32 {
     let err = sink_of(std::io::stderr());
     for problem in load_library(&library_dirs()) {
         line(&err, &format!("库算子: {problem}"));
+    }
+    let needs_catalog = args.first().is_some_and(|arg| {
+        matches!(
+            arg.as_str(),
+            "run"
+                | "validate"
+                | "plan"
+                | "params"
+                | "manifest"
+                | "info"
+                | "import"
+                | "dump"
+                | "sweep"
+                | "eval"
+                | "perturb"
+                | "patch"
+                | "recipes"
+                | "diff"
+                | "migrate"
+        )
+    }) && !args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--help" | "-h"));
+    if needs_catalog {
+        match crate::python_settings::read().and_then(|config| {
+            if config.executable.is_empty() {
+                return Ok(());
+            }
+            let status = crate::python_settings::apply(&config)?;
+            if let Some(problems) = status["problems"].as_array() {
+                for problem in problems {
+                    line(&err, &format!("Python 节点: {problem}"));
+                }
+            }
+            Ok(())
+        }) {
+            Ok(()) => {}
+            Err(error) => line(&err, &format!("Python 节点: {error}")),
+        }
     }
     run_cli(&args, &out, &err)
 }

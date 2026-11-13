@@ -30,112 +30,115 @@ const bundles = [
   },
 ];
 
-test('主预览：有一个可画的端口就显示点云场景，全是值才换成表格', () => {
-  const cases = [
-    // [说明, 输出类型, 期望, 输入类型（可选）]
-    ['点云', ['PointCloud'], 'cloud'],
-    ['只有 2D 几何：叠在上游借来的底图上', ['Box2D', 'Line2D'], 'cloud'],
-    ['Indices 指向一片云，底图有意义', ['Indices', 'Plane'], 'cloud'],
-    ['点云 + 量测：点云优先', ['PointCloud', 'Measurement'], 'cloud'],
-    ['只有 Record（字符串 / JSON）', ['Record'], 'value'],
-    ['量测与平面', ['Measurement', 'Plane'], 'value'],
-    ['张量在主预览里只看得到值', ['Tensor'], 'value'],
-    ['输出图像：图像模式', ['Image'], 'image'],
-    [
-      '图像域的像素几何（找圆 / 区域统计）：画在输入那张图上',
-      ['Measurement', 'Box2D'],
-      'image',
-      ['Image', 'Image'],
-    ],
-    ['输入是图像、输出是点云（深度图转点云）：点云优先', ['PointCloud'], 'cloud', ['Image']],
-    ['没有图像的 2D 几何照旧叠在点云底图上', ['Box2D'], 'cloud', ['PointCloud']],
-    ['Bundle 里有点云字段', ['Bundle<gap.ScanPair>'], 'cloud'],
-    ['Bundle 里有 2D 几何字段', ['Bundle<t.Rois>'], 'cloud'],
-    ['Bundle 里全是值', ['Bundle<t.Info>'], 'value'],
-    ['不认识的 Bundle 按老行为走点云场景', ['Bundle<t.Unknown>'], 'cloud'],
-    ['Any 还没跑过，类型未知：按老行为', ['Any', 'Record'], 'cloud'],
-    ['没有输出端口', [], 'cloud'],
-  ];
-  const wrong = cases
-    .map(([name, types, want, inputs]) => [name, viewerContentFor(types, bundles, inputs), want])
-    .filter(([, got, want]) => got !== want);
-  assert.deepEqual(wrong, [], '说明 / 实际 / 期望');
-});
-
-test('对比的两栏：一侧可画就是点云场景，两侧都只有值才是值表格', () => {
-  const got = [
-    ['cloud', 'cloud'],
-    ['cloud', 'value'],
-    ['value', 'cloud'],
-    ['value', 'value'],
-  ].map(([a, b]) => compareContentFor(a, b));
-  assert.deepEqual(got, ['cloud', 'cloud', 'cloud', 'value']);
+test('预览内容选择：主视图与对比的云/图像/数值模式', () => {
+  {
+    const cases = [
+      // [说明, 输出类型, 期望, 输入类型（可选）]
+      ['点云', ['PointCloud'], 'cloud'],
+      ['只有 2D 几何：叠在上游借来的底图上', ['Box2D', 'Line2D'], 'cloud'],
+      ['Indices 指向一片云，底图有意义', ['Indices', 'Plane'], 'cloud'],
+      ['点云 + 量测：点云优先', ['PointCloud', 'Measurement'], 'cloud'],
+      ['只有 Record（字符串 / JSON）', ['Record'], 'value'],
+      ['量测与平面', ['Measurement', 'Plane'], 'value'],
+      ['张量在主预览里只看得到值', ['Tensor'], 'value'],
+      ['输出图像：图像模式', ['Image'], 'image'],
+      [
+        '图像域的像素几何（找圆 / 区域统计）：画在输入那张图上',
+        ['Measurement', 'Box2D'],
+        'image',
+        ['Image', 'Image'],
+      ],
+      ['输入是图像、输出是点云（深度图转点云）：点云优先', ['PointCloud'], 'cloud', ['Image']],
+      ['没有图像的 2D 几何照旧叠在点云底图上', ['Box2D'], 'cloud', ['PointCloud']],
+      ['Bundle 里有点云字段', ['Bundle<gap.ScanPair>'], 'cloud'],
+      ['Bundle 里有 2D 几何字段', ['Bundle<t.Rois>'], 'cloud'],
+      ['Bundle 里全是值', ['Bundle<t.Info>'], 'value'],
+      ['不认识的 Bundle 按老行为走点云场景', ['Bundle<t.Unknown>'], 'cloud'],
+      ['Any 还没跑过，类型未知：按老行为', ['Any', 'Record'], 'cloud'],
+      ['没有输出端口', [], 'cloud'],
+    ];
+    const wrong = cases
+      .map(([name, types, want, inputs]) => [name, viewerContentFor(types, bundles, inputs), want])
+      .filter(([, got, want]) => got !== want);
+    assert.deepEqual(wrong, [], '说明 / 实际 / 期望');
+  }
+  {
+    const got = [
+      ['cloud', 'cloud'],
+      ['cloud', 'value'],
+      ['value', 'cloud'],
+      ['value', 'value'],
+    ].map(([a, b]) => compareContentFor(a, b));
+    assert.deepEqual(got, ['cloud', 'cloud', 'cloud', 'value']);
+  }
 });
 
 // 换了一片云要不要重新取景（lib/viewFit）。修前每片新云都取景：重跑、在链上逐个点节点都把视角拉回斜 45°
-test('sameFrame：包围盒相交、对角线差不到 4 倍才算同一个坐标系（不重新取景）', async () => {
-  const { sameFrame } = await import('../src/lib/viewFit.ts');
-  const box = (x0, y0, z0, x1, y1, z1) => [x0, y0, z0, x1, y1, z1];
-  const base = box(0, 0, 0, 10, 10, 2);
-  const cases = [
-    ['同一片', base, true],
-    ['抽稀之后小一圈', box(0.2, 0.1, 0, 9.8, 9.9, 1.9), true],
-    ['只截了一部分（大小差 3 倍）', box(0, 0, 0, 3.5, 3.5, 1), true],
-    ['平移 100 m', box(100, 0, 0, 110, 10, 2), false],
-    ['放大 1000 倍', box(0, 0, 0, 10000, 10000, 2000), false],
-    ['小到 1/10（差 10 倍）', box(0, 0, 0, 1, 1, 0.2), false],
-    ['退化成一个点、与一片云', box(5, 5, 1, 5, 5, 1), false],
-  ];
-  for (const [name, other, want] of cases) assert.equal(sameFrame(base, other), want, name);
+test('视口与网格：同坐标系判据、尺度/位置及未重新取景时保持', async () => {
+  {
+    const { sameFrame } = await import('../src/lib/viewFit.ts');
+    const box = (x0, y0, z0, x1, y1, z1) => [x0, y0, z0, x1, y1, z1];
+    const base = box(0, 0, 0, 10, 10, 2);
+    const cases = [
+      ['同一片', base, true],
+      ['抽稀之后小一圈', box(0.2, 0.1, 0, 9.8, 9.9, 1.9), true],
+      ['只截了一部分（大小差 3 倍）', box(0, 0, 0, 3.5, 3.5, 1), true],
+      ['平移 100 m', box(100, 0, 0, 110, 10, 2), false],
+      ['放大 1000 倍', box(0, 0, 0, 10000, 10000, 2000), false],
+      ['小到 1/10（差 10 倍）', box(0, 0, 0, 1, 1, 0.2), false],
+      ['退化成一个点、与一片云', box(5, 5, 1, 5, 5, 1), false],
+    ];
+    for (const [name, other, want] of cases) assert.equal(sameFrame(base, other), want, name);
+  }
+  {
+    const { gridSpec } = await import('../src/lib/viewFit.ts');
+    const cases = [
+      // [说明, 包围盒, 上一次的格子, 期望的格子, 期望的文字]
+      ['1.2 m 的云', [0, 0, 0, 1.2, 0.5, 0.25], null, 0.1, '格 100 mm'],
+      [
+        '±5 cm（Float32 的尾巴不露出来）',
+        Float32Array.from([-0.05, -0.05, 0, 0.05, 0.05, 0.02]),
+        null,
+        0.01,
+        '格 10 mm',
+      ],
+      [
+        'x≈1000 处的 12 mm 小零件',
+        Float32Array.from([1000, 0, 0, 1000.012, 0.008, 0.003]),
+        null,
+        0.001,
+        '格 1 mm',
+      ],
+      ['12 km', [0, 0, 0, 12000, 500, 30], null, 1000, '格 1000 m'],
+      ['一个点', [1, 2, 3, 1, 2, 3], null, 0.001, '格 1 mm'],
+      ['竖着的一条线（XY 没有跨度）', [0, 0, 0, 0, 0, 2], null, 0.2, '格 200 mm'],
+      ['没重新取景：云上还有 6–40 格就不换档', [0, 0, 0, 0.0999, 0.05, 0], 0.01, 0.01, '格 10 mm'],
+      ['没重新取景：差太远了照样换档', [0, 0, 0, 0.8, 0.5, 0], 0.01, 0.05, '格 50 mm'],
+    ];
+    const wrong = [];
+    for (const [name, b, keep, cell, text] of cases) {
+      const g = gridSpec(b, keep);
+      if (!g || Math.abs(g.cell - cell) > cell * 1e-9 || g.text !== text) {
+        wrong.push([name, g && { cell: g.cell, text: g.text }, { cell, text }]);
+        continue;
+      }
+      // 中心落在整格上、格数是偶数（每条线都在整格坐标上）、四周至少多出一格、铺在最低点下面一丝
+      const onCell = g.center.every((c) => Math.abs(c / g.cell - Math.round(c / g.cell)) < 1e-6);
+      const half = (g.cell * g.divisions) / 2;
+      const covers =
+        g.center[0] - half <= b[0] - g.cell + 1e-9 &&
+        g.center[0] + half >= b[3] + g.cell - 1e-9 &&
+        g.center[1] - half <= b[1] - g.cell + 1e-9 &&
+        g.center[1] + half >= b[4] + g.cell - 1e-9;
+      const under = g.z <= b[2] && g.z >= b[2] - g.cell / 100;
+      if (!onCell || g.divisions % 2 !== 0 || !covers || !under) wrong.push([name, g, '不变式']);
+    }
+    assert.deepEqual(wrong, [], '说明 / 实际 / 期望');
+    assert.equal(gridSpec([NaN, 0, 0, 1, 1, 1]), null, 'NaN：不动');
+  }
 });
 
 // 预览的网格跟着云走（lib/viewFit 的 gridSpec）
-test('gridSpec：格子 1/2/5、云上 10–25 格、居中在整格上、铺在最低处、没重新取景时不换档', async () => {
-  const { gridSpec } = await import('../src/lib/viewFit.ts');
-  const cases = [
-    // [说明, 包围盒, 上一次的格子, 期望的格子, 期望的文字]
-    ['1.2 m 的云', [0, 0, 0, 1.2, 0.5, 0.25], null, 0.1, '格 100 mm'],
-    [
-      '±5 cm（Float32 的尾巴不露出来）',
-      Float32Array.from([-0.05, -0.05, 0, 0.05, 0.05, 0.02]),
-      null,
-      0.01,
-      '格 10 mm',
-    ],
-    [
-      'x≈1000 处的 12 mm 小零件',
-      Float32Array.from([1000, 0, 0, 1000.012, 0.008, 0.003]),
-      null,
-      0.001,
-      '格 1 mm',
-    ],
-    ['12 km', [0, 0, 0, 12000, 500, 30], null, 1000, '格 1000 m'],
-    ['一个点', [1, 2, 3, 1, 2, 3], null, 0.001, '格 1 mm'],
-    ['竖着的一条线（XY 没有跨度）', [0, 0, 0, 0, 0, 2], null, 0.2, '格 200 mm'],
-    ['没重新取景：云上还有 6–40 格就不换档', [0, 0, 0, 0.0999, 0.05, 0], 0.01, 0.01, '格 10 mm'],
-    ['没重新取景：差太远了照样换档', [0, 0, 0, 0.8, 0.5, 0], 0.01, 0.05, '格 50 mm'],
-  ];
-  const wrong = [];
-  for (const [name, b, keep, cell, text] of cases) {
-    const g = gridSpec(b, keep);
-    if (!g || Math.abs(g.cell - cell) > cell * 1e-9 || g.text !== text) {
-      wrong.push([name, g && { cell: g.cell, text: g.text }, { cell, text }]);
-      continue;
-    }
-    // 中心落在整格上、格数是偶数（每条线都在整格坐标上）、四周至少多出一格、铺在最低点下面一丝
-    const onCell = g.center.every((c) => Math.abs(c / g.cell - Math.round(c / g.cell)) < 1e-6);
-    const half = (g.cell * g.divisions) / 2;
-    const covers =
-      g.center[0] - half <= b[0] - g.cell + 1e-9 &&
-      g.center[0] + half >= b[3] + g.cell - 1e-9 &&
-      g.center[1] - half <= b[1] - g.cell + 1e-9 &&
-      g.center[1] + half >= b[4] + g.cell - 1e-9;
-    const under = g.z <= b[2] && g.z >= b[2] - g.cell / 100;
-    if (!onCell || g.divisions % 2 !== 0 || !covers || !under) wrong.push([name, g, '不变式']);
-  }
-  assert.deepEqual(wrong, [], '说明 / 实际 / 期望');
-  assert.equal(gridSpec([NaN, 0, 0, 1, 1, 1]), null, 'NaN：不动');
-});
 
 // 标准视角（lib/viewFit 的 presetPosition）：绕着现在的转心转过去、距离不变
 test('presetPosition：绕同一个转心、距离不变；俯视屏幕上方是 +Y；轴测与 ⤢ 同一个方向', async () => {

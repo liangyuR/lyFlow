@@ -87,6 +87,39 @@ export interface LibraryRefresh {
   manifest: OperatorManifestBundle;
 }
 
+export interface PythonRuntimeConfig {
+  executable: string;
+  packagePaths: string[];
+  timeoutMs: number;
+}
+
+export interface PythonNodeProblem {
+  path: string;
+  message: string;
+  traceback?: string;
+}
+
+export interface PythonRuntimeStatus extends PythonRuntimeConfig {
+  configured: boolean;
+  ready: boolean;
+  operatorCount: number;
+  problems: PythonNodeProblem[];
+  pythonVersion?: string;
+  numpyVersion?: string;
+}
+
+export interface PythonSettings {
+  supported: boolean;
+  editable: boolean;
+  config: PythonRuntimeConfig;
+  status: PythonRuntimeStatus;
+}
+
+export interface PythonRefresh {
+  status: PythonRuntimeStatus;
+  manifest: OperatorManifestBundle;
+}
+
 export interface LibraryMeta {
   id: string;
   category?: string;
@@ -220,6 +253,9 @@ export interface Transport {
   getLibrarySettings(): Promise<LibrarySettings>;
   /** 写设置里的额外目录并立刻重扫，拿回新 manifest（与 refreshLibrary 同形）。 */
   setLibraryDirs(extraDirs: string[]): Promise<LibraryRefresh>;
+  getPythonSettings?(): Promise<PythonSettings>;
+  setPythonSettings?(config: PythonRuntimeConfig): Promise<PythonRefresh>;
+  refreshPythonNodes?(): Promise<PythonRefresh>;
   /** 把 doc 里的一个子图存成库文件。 */
   saveAsLibrary(doc: GraphDoc, subgraphId: string, meta: LibraryMeta): Promise<LibraryStatus>;
   /** 库算子 `lib.<id>` 的定义（C ABI v13）：形状同 `doc.subgraphs.<id>`，「展开为内联子图」写进 doc。

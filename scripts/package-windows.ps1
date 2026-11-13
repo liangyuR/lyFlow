@@ -84,6 +84,7 @@ try {
     foreach ($file in Get-ChildItem -LiteralPath (Join-Path $sdk 'bin') -Filter '*.dll' -File) {
         Copy-Item -LiteralPath $file.FullName -Destination $runtime
     }
+    Copy-Item -LiteralPath (Join-Path $sdk 'bin/python') -Destination (Join-Path $runtime 'python') -Recurse
     $redistRoot = Join-Path $vs 'VC/Redist/MSVC'
     $redistVersions = @(Get-ChildItem -LiteralPath $redistRoot -Directory | Where-Object Name -Match '^\d+\.\d+\.\d+$' | Sort-Object { [version]$_.Name } -Descending)
     if (-not $redistVersions.Count) { throw 'Visual C++ redistributable files were not found.' }
@@ -172,7 +173,7 @@ try {
     Write-ReleaseJson -Value $metadata -Path $metadataPath
     foreach ($file in Get-ChildItem -LiteralPath $runtime -Force) { Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $sdk 'bin') -Recurse -Force }
     Copy-Item -LiteralPath (Join-Path $env:CARGO_TARGET_DIR 'release/lyflow.exe') -Destination (Join-Path $sdk 'bin/lyflow.exe')
-    foreach ($relative in @('bin/lyflow_core.dll', 'bin/lyflow.exe', 'include/lyflow/client.hpp', 'include/lyflow/c_api.h', 'lib/lyflow_core.lib', 'lyflow-config.cmake', 'lyflow-config-version.cmake', 'examples/embed_minimal.cpp', 'examples/embed_concurrent.cpp', 'examples/embed_inject.cpp', 'library')) {
+    foreach ($relative in @('bin/lyflow_core.dll', 'bin/lyflow.exe', 'bin/python/lyflow_python/worker.py', 'bin/python/examples/offset.py', 'include/lyflow/client.hpp', 'include/lyflow/c_api.h', 'lib/lyflow_core.lib', 'lyflow-config.cmake', 'lyflow-config-version.cmake', 'examples/embed_minimal.cpp', 'examples/embed_concurrent.cpp', 'examples/embed_inject.cpp', 'library')) {
         if (-not (Test-Path -LiteralPath (Join-Path $sdk $relative))) { throw "SDK missing $relative" }
     }
     if (@(Get-ChildItem -LiteralPath $stage -File -Recurse | Where-Object Extension -In @('.pdb', '.onnx')).Count) { throw 'Debug symbols or test models leaked into staging.' }

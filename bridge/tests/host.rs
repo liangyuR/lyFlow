@@ -103,6 +103,7 @@ fn fixture() -> Fixture {
         // 仓库里真有 build/core/bin/lyflow_core.dll 时 watcher 会起线程，
         // 测试期间一次热重载就会把结果仓清掉。
         hot_reload: false,
+        python: Some(Default::default()),
     };
 
     let app = host::attach(mock_builder(), cfg)
@@ -199,6 +200,17 @@ fn manifest_and_core_info_over_ipc() {
     let info = invoke(&view, "get_core_info", serde_json::json!({})).expect("get_core_info 失败");
     assert_eq!(info["operatorCount"].as_u64().unwrap() as usize, ops.len());
     assert!(!info["version"].as_str().unwrap().is_empty());
+    let python = invoke(&view, "get_python_settings", serde_json::json!({})).unwrap();
+    assert_eq!(python["supported"], true);
+    assert_eq!(python["editable"], false);
+    assert_eq!(python["config"]["executable"], "");
+    let error = invoke(
+        &view,
+        "set_python_settings",
+        serde_json::json!({"config":{"executable":"python", "packagePaths":[], "timeoutMs":60000}}),
+    )
+    .unwrap_err();
+    assert!(error.contains("只读"), "{error}");
 }
 
 // ------------------------------------------------------------------ 注入

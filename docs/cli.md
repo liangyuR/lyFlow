@@ -1,5 +1,7 @@
 # 命令行使用指南
 
+Python 节点通过 `lyflow python configure --config <json>` 配置，`lyflow python settings` 查询，`lyflow python refresh` 手动重载；随后可直接用于 run、validate、plan 等命令。与桌面共享配置，详见 [Python 自定义节点](python-nodes.md)。
+
 [文档首页](README.md) · [快速开始](getting-started.md)
 
 `lyflow` 是同一个 crate 的第二个 bin，**不依赖 Tauri**，与桌面共用同一份加载、校验、

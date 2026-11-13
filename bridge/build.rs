@@ -289,6 +289,7 @@ fn main() {
                 dest.display()
             );
         }
+        stage_python(&dest).expect("准备 Python SDK 失败");
     }
     #[cfg(feature = "desktop")]
     stage_bundle_core(&bin);
@@ -364,6 +365,7 @@ fn stage_bundle_core(bin: &Path) {
         .join("target")
         .join("bundle-core");
     let is_dll = |p: &Path| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("dll"));
+    stage_python(&staging).expect("准备安装包 Python SDK 失败");
     let staged: Vec<PathBuf> = std::fs::read_dir(&staging)
         .map(|d| {
             d.flatten()
@@ -435,4 +437,32 @@ fn copy_dir_contents(from: &Path, to: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn stage_python(destination: &Path) -> std::io::Result<()> {
+    let source = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root")
+        .join("python");
+    println!("cargo:rerun-if-changed={}", source.display());
+    fn copy_tree(source: &Path, destination: &Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(destination)?;
+        for entry in std::fs::read_dir(source)? {
+            let entry = entry?;
+            let path = entry.path();
+            if entry.file_name() == "__pycache__" || entry.file_name() == "tests" {
+                continue;
+            }
+            if entry.file_type()?.is_dir() {
+                copy_tree(&path, &destination.join(entry.file_name()))?;
+            } else if path
+                .extension()
+                .is_some_and(|ext| ext == "py" || ext == "md" || ext == "toml")
+            {
+                std::fs::copy(path, destination.join(entry.file_name()))?;
+            }
+        }
+        Ok(())
+    }
+    copy_tree(&source, &destination.join("python"))
 }

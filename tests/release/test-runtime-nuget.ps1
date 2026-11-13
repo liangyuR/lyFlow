@@ -15,6 +15,11 @@ try {
     $pe[64] = 0x50; $pe[65] = 0x45; $pe[68] = 0x64; $pe[69] = 0x86
     foreach ($name in @('lyflow_core.dll', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll', 'vcomp140.dll')) { [IO.File]::WriteAllBytes((Join-Path $runtime $name), $pe) }
     Set-Content -LiteralPath (Join-Path $runtime 'licenses/PROJECT-NOTICE.txt') -Value 'Test fixture'
+    New-Item -ItemType Directory -Path (Join-Path $runtime 'python/lyflow_python'), (Join-Path $runtime 'python/examples') -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $runtime 'python/lyflow_python/worker.py') -Value '# worker fixture'
+    Set-Content -LiteralPath (Join-Path $runtime 'python/examples/offset.py') -Value '# example fixture'
+    Set-Content -LiteralPath (Join-Path $runtime 'python/README.md') -Value 'Python SDK'
+    Set-Content -LiteralPath (Join-Path $runtime 'python/pyproject.toml') -Value '[project]'
     $configuration = Get-Content -LiteralPath (Join-Path $root 'packaging/release.json') -Raw | ConvertFrom-Json
     $metadata = [ordered]@{
         schemaVersion = 1; architecture = 'x64'; localValidationOnly = $false

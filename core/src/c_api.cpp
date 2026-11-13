@@ -17,6 +17,7 @@
 #include "lyflow/cloud_io.h"
 #include "lyflow/json_writer.h"
 #include "lyflow/registry.h"
+#include "python_runtime.h"
 #include "lyflow/version.h"
 #include "source_revision.h"
 
@@ -165,6 +166,7 @@ const char* lyflow_source_revision(void) { return LYFLOW_SOURCE_REVISION; }
 
 char* lyflow_manifest_json(void) {
   try {
+    std::shared_lock<std::shared_mutex> registryLock(registry().mutex());
     return dup(registry().toManifestJson());
   } catch (...) {
     return nullptr;
@@ -173,6 +175,7 @@ char* lyflow_manifest_json(void) {
 
 char* lyflow_manifest_problems(void) {
   try {
+    std::shared_lock<std::shared_mutex> registryLock(registry().mutex());
     const auto problems = registry().validate();
     std::string joined;
     for (const auto& p : problems) {
@@ -188,8 +191,33 @@ char* lyflow_manifest_problems(void) {
 
 void lyflow_string_free(char* s) { std::free(s); }
 
+char* lyflow_configure_python(const char* config_json) {
+  try {
+    return dup(lyflow::python_runtime::configure(registry(), fromC(config_json)).dump());
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+char* lyflow_python_status(void) {
+  try {
+    return dup(lyflow::python_runtime::status().dump());
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+char* lyflow_refresh_python(void) {
+  try {
+    return dup(lyflow::python_runtime::refresh(registry()).dump());
+  } catch (...) {
+    return nullptr;
+  }
+}
+
 char* lyflow_set_library_dirs(const char* const* dirs, size_t n) {
   try {
+    std::unique_lock<std::shared_mutex> registryLock(registry().mutex());
     registry();
     std::vector<std::filesystem::path> paths;
     for (std::size_t i = 0; dirs && i < n; ++i) {
@@ -235,6 +263,7 @@ char* lyflow_validate(const char* graph_json, const char* base_dir) {
 char* lyflow_validate_params(const char* graph_json, const char* base_dir,
                              const char* params_json) {
   try {
+    std::shared_lock<std::shared_mutex> registryLock(registry().mutex());
     registry(); // 确保注册表已填充
     const std::string base = fromC(base_dir);
     return dup(lyflow::exec::validateGraphJson(
@@ -264,6 +293,7 @@ char* lyflow_plan_inputs(const char* graph_json, const char* base_dir, const cha
                          size_t input_count, const lyflow_run_image_input* image_inputs,
                          size_t image_input_count) {
   try {
+    std::shared_lock<std::shared_mutex> registryLock(registry().mutex());
     registry();
     const std::string base = fromC(base_dir);
     std::vector<std::string> ts;
@@ -284,6 +314,7 @@ char* lyflow_plan_inputs(const char* graph_json, const char* base_dir, const cha
 
 char* lyflow_effective_params(const char* graph_json, const char* base_dir) {
   try {
+    std::shared_lock<std::shared_mutex> registryLock(registry().mutex());
     registry();
     const std::string base = fromC(base_dir);
     return dup(lyflow::exec::effectiveParamsJson(
@@ -327,6 +358,7 @@ char* lyflow_cache_evict_inputs(const char* graph_json, const char* base_dir,
                                 size_t input_count, const lyflow_run_image_input* image_inputs,
                                 size_t image_input_count) {
   try {
+    std::shared_lock<std::shared_mutex> registryLock(registry().mutex());
     registry();
     const std::string base = fromC(base_dir);
     std::vector<std::string> ids;
@@ -366,6 +398,7 @@ char* lyflow_cache_stats(void) {
 lyflow_run* lyflow_run_start(const char* graph_json, const lyflow_run_options* opts,
                              lyflow_event_cb cb, void* user) {
   try {
+    std::shared_lock<std::shared_mutex> registryLock(registry().mutex());
     registry();
     lyflow::exec::RunOptions options;
     if (opts) {
@@ -657,6 +690,7 @@ char* lyflow_run_summary(const char* run_id) {
 
 char* lyflow_import(const char* kind, const char* text, const char* base_dir) {
   try {
+    std::shared_lock<std::shared_mutex> registryLock(registry().mutex());
     registry();
     const std::string base = fromC(base_dir);
     return dup(lyflow::exec::importGraphJson(fromC(kind), fromC(text),

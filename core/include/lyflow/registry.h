@@ -1,6 +1,8 @@
 #pragma once
 // 算子注册表。进程内唯一，启动时由 registerBuiltinOps() 填充。
 #include <string>
+#include <memory>
+#include <shared_mutex>
 #include <vector>
 
 #include "lyflow/data.h"
@@ -29,10 +31,13 @@ public:
   /// 整份替换库算子（ADR-0010）。它们排在内置算子之后，其余处处与内置无差别。
   /// 与热重载同一条约定：调用时必须没有活跃的 run —— 会让旧的 OperatorDesc* 失效。
   void setLibraryOperators(std::vector<OperatorDesc> ops);
+  void setPythonOperators(std::vector<OperatorDesc> ops);
+  std::shared_mutex& mutex() const { return *mutex_; }
 
   const std::vector<PortType>& types() const { return types_; }
   const std::vector<BundleDesc>& bundles() const { return bundles_; }
   const std::vector<OperatorDesc>& operators() const { return operators_; }
+  const std::vector<OperatorDesc>& pythonOperators() const { return pythonOperators_; }
   const std::vector<ImporterDesc>& importers() const { return importers_; }
   const std::vector<SnippetDesc>& snippets() const { return snippets_; }
 
@@ -63,6 +68,7 @@ public:
   Registry() = default;
 
 private:
+  std::shared_ptr<std::shared_mutex> mutex_ = std::make_shared<std::shared_mutex>();
   std::vector<PortType> types_;
   std::vector<BundleDesc> bundles_;
   std::vector<OperatorDesc> operators_;
@@ -70,6 +76,9 @@ private:
   std::vector<SnippetDesc> snippets_;
   /// operators_ 里前多少个是内置的。setLibraryOperators 从这里往后重写。
   std::size_t builtinCount_ = 0;
+  std::vector<OperatorDesc> libraryOperators_;
+  std::vector<OperatorDesc> pythonOperators_;
+  void rebuildOperators();
   std::string currentPack_;
 };
 
