@@ -22,6 +22,7 @@ struct PythonFixture {
     std::ofstream file(dir / "nodes.py");
     file << R"PY(
 import os
+import sys
 import time
 from pathlib import Path
 import numpy as np
@@ -58,6 +59,8 @@ def roundtrip(ctx, cloud, image, measurement, record, amount, curve):
 @node(id='py.integration.control', version='1.0.0', label='执行控制',
       outputs={'record':'Record'}, params={'mode':{'type':'string','default':'ok'}})
 def control(ctx, mode):
+    print('native-stdout-' + mode, flush=True)
+    print('native-stderr-' + mode, file=sys.stderr, flush=True)
     if mode == 'exception':
         raise RuntimeError('integration traceback sentinel')
     if mode == 'crash':
@@ -68,6 +71,9 @@ def control(ctx, mode):
             time.sleep(0.01)
     if mode == 'stubborn':
         time.sleep(30)
+    if mode == 'verbose':
+        print('x' * (2 * 1024 * 1024), flush=True)
+        print('native-verbose-end', flush=True)
     return {'record':Record({'pid':os.getpid()})}
 
 @node(id='py.integration.invalid', version='1.0.0', label='输出边界',
@@ -125,6 +131,10 @@ struct PythonContext : ExecContext {
   }
   const std::filesystem::path& baseDir() const override { return base; }
   int threadBudget() const override { return 3; }
+  bool logged(std::string_view text) const {
+    return std::any_of(logs.begin(), logs.end(),
+                       [&](const std::string& log) { return log.find(text) != std::string::npos; });
+  }
 };
 
 Status control(const ComputeFn& compute, const char* mode, PythonContext& context,
@@ -232,6 +242,7 @@ TEST_CASE("Python worker exchanges all supported data through a real named pipe"
       CHECK_FALSE(std::filesystem::exists(std::filesystem::u8path(
           result.at("record").asRecord()->data.at("requestDir").get<std::string>())));
       CHECK(context.progressCount == 1);
+      CHECK(context.logged("stdout is not protocol"));
       CHECK(cloud.xyz[0] == 1);
     }
   }
@@ -281,11 +292,26 @@ TEST_CASE("Python failures, queued cancellation and forced termination recover o
   std::unordered_map<std::string, Data> result;
   const auto error = control(compute, "exception", context, result);
   CHECK(error.code == "python_exception");
+  CHECK(context.logged("native-stdout-exception"));
+  CHECK(context.logged("native-stderr-exception"));
   CHECK(std::any_of(context.logs.begin(), context.logs.end(), [](const std::string& text) {
     return text.find("Traceback") != std::string::npos &&
            text.find("integration traceback sentinel") != std::string::npos;
   }));
-  CHECK(control(compute, "ok", context, result).ok);
+  PythonContext followingError;
+  CHECK(control(compute, "ok", followingError, result).ok);
+  CHECK(followingError.logged("native-stdout-ok"));
+  CHECK(followingError.logged("native-stderr-ok"));
+  CHECK_FALSE(followingError.logged("native-stdout-exception"));
+  CHECK_FALSE(followingError.logged("native-stderr-exception"));
+  PythonContext verbose;
+  CHECK(control(compute, "verbose", verbose, result).ok);
+  CHECK(verbose.logged("日志已截断"));
+  CHECK(verbose.logged("native-verbose-end"));
+  PythonContext followingVerbose;
+  CHECK(control(compute, "ok", followingVerbose, result).ok);
+  CHECK_FALSE(followingVerbose.logged("native-verbose-end"));
+  CHECK_FALSE(followingVerbose.logged(std::string(100, 'x')));
   const auto initialPid = result.at("record").asRecord()->data.at("pid");
   for (const char* mode : {"cooperative", "stubborn"}) {
     CAPTURE(mode);
@@ -302,15 +328,25 @@ TEST_CASE("Python failures, queued cancellation and forced termination recover o
     running.cancel = true;
     REQUIRE(future.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
     CHECK(future.get().code == "python_cancelled");
+    CHECK(running.logged(std::string("native-stdout-") + mode));
+    CHECK(running.logged(std::string("native-stderr-") + mode));
     CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(2));
-    CHECK(control(compute, "ok", context, result).ok);
+    PythonContext followingCancellation;
+    CHECK(control(compute, "ok", followingCancellation, result).ok);
+    CHECK_FALSE(followingCancellation.logged(std::string("native-stdout-") + mode));
+    CHECK_FALSE(followingCancellation.logged(std::string("native-stderr-") + mode));
     CHECK(result.at("record").asRecord()->data.at("pid") != initialPid);
   }
-  CHECK(control(compute, "crash", context, result).code == "python_worker_crashed");
+  PythonContext crashed;
+  CHECK(control(compute, "crash", crashed, result).code == "python_worker_crashed");
+  CHECK(crashed.logged("native-stdout-crash"));
+  CHECK(crashed.logged("native-stderr-crash"));
   const auto slow = fixture.dir / "slow.py";
   {
     std::ofstream file(slow);
-    file << "import time\nfrom pathlib import Path\n"
+    file << "import time\nimport sys\nfrom pathlib import Path\n"
+            "print('native-import-stdout', flush=True)\n"
+            "print('native-import-stderr', file=sys.stderr, flush=True)\n"
             "Path(__file__).with_suffix('.started').write_text('started')\n"
             "time.sleep(10)\n";
   }
@@ -325,11 +361,66 @@ TEST_CASE("Python failures, queued cancellation and forced termination recover o
   rebuilding.cancel = true;
   REQUIRE(restart.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
   CHECK(restart.get().code == "python_cancelled");
+  CHECK(rebuilding.logged("native-import-stdout"));
+  CHECK(rebuilding.logged("native-import-stderr"));
   std::filesystem::remove(slow);
   std::filesystem::remove(marker);
   CHECK(control(compute, "ok", context, result).ok);
   const auto beforeTimeout = std::chrono::steady_clock::now();
-  CHECK(control(compute, "stubborn", context, result).code == "python_timeout");
+  PythonContext timedOut;
+  CHECK(control(compute, "stubborn", timedOut, result).code == "python_timeout");
+  CHECK(timedOut.logged("native-stdout-stubborn"));
+  CHECK(timedOut.logged("native-stderr-stubborn"));
   CHECK(std::chrono::steady_clock::now() - beforeTimeout < std::chrono::seconds(5));
-  CHECK(control(compute, "ok", context, result).ok);
+  PythonContext followingTimeout;
+  CHECK(control(compute, "ok", followingTimeout, result).ok);
+  CHECK_FALSE(followingTimeout.logged("native-stdout-stubborn"));
+  CHECK_FALSE(followingTimeout.logged("native-stderr-stubborn"));
+
+  const auto sourcePath = fixture.dir / "nodes.py";
+  std::ifstream sourceFile(sourcePath);
+  const std::string original((std::istreambuf_iterator<char>(sourceFile)),
+                             std::istreambuf_iterator<char>());
+  sourceFile.close();
+  auto changeSource = [&](const std::string& before, const std::string& after) {
+    auto changed = original;
+    const auto at = changed.find(before);
+    REQUIRE(at != std::string::npos);
+    changed.replace(at, before.size(), after);
+    std::ofstream(sourcePath) << changed;
+  };
+  CHECK(control(compute, "crash", context, result).code == "python_worker_crashed");
+  changeSource("return {'record':Record({'pid':os.getpid()})}",
+               "return {'record':Record({'pid':os.getpid(), 'body':'changed'})}");
+  REQUIRE(control(compute, "ok", context, result).ok);
+  CHECK(result.at("record").asRecord()->data.at("body") == "changed");
+  std::ofstream(sourcePath) << original;
+  REQUIRE(python_runtime::refresh(registry).at("ready") == true);
+  const std::vector<std::pair<std::string, std::string>> changes{
+      {"id='py.integration.control', version='1.0.0'",
+       "id='py.integration.control', version='1.1.0'"},
+      {"outputs={'record':'Record'}", "outputs={'record':'Measurement'}"},
+      {"'mode':{'type':'string','default':'ok'}", "'mode':{'type':'string','default':'changed'}"},
+      {"id='py.integration.control'", "id='py.integration.renamed'"}};
+  for (const auto& change : changes) {
+    CAPTURE(change.first);
+    REQUIRE(control(compute, "crash", context, result).code == "python_worker_crashed");
+    changeSource(change.first, change.second);
+    for (int repeat = 0; repeat < 2; ++repeat) {
+      const auto stale = control(compute, "ok", context, result);
+      CHECK(stale.code == "python_definition_changed");
+      CHECK(stale.message.find("手动刷新") != std::string::npos);
+    }
+    CHECK(registry.find("py.integration.control")->version == "1.0.0");
+    if (change.first.find("version=") != std::string::npos) {
+      REQUIRE(python_runtime::refresh(registry).at("ready") == true);
+      CHECK(registry.find("py.integration.control")->version == "1.1.0");
+      const auto refreshedCompute = registry.find("py.integration.control")->compute;
+      CHECK(control(refreshedCompute, "ok", context, result).ok);
+      CHECK(control(compute, "ok", context, result).code == "python_definition_changed");
+    }
+    std::ofstream(sourcePath) << original;
+    REQUIRE(python_runtime::refresh(registry).at("ready") == true);
+    CHECK(control(compute, "ok", context, result).ok);
+  }
 }

@@ -335,7 +335,7 @@ class WorkerTests(unittest.TestCase):
                     event = self.request(self.execution("fail", inputs={"cloud": {"type": "PointCloud", "xyz": {"file": str(array_file), "shape": [2, 3], "dtype": "f32"}}}))[-1]
                     self.assertEqual(event["code"], code)
                     if code != "python_output_invalid":
-                        self.assertIn(str(file).casefold(), event["traceback"].casefold())
+                        self.assertIn(str(file.resolve()).casefold(), event["traceback"].casefold())
                     self.assertIn(diagnostic, event["traceback"])
                     self.assertEqual(terminals, [[(1, int(code == "python_output_invalid"), True, True)]], "错误帧发送前关闭全部映射并删除失败输出")
                     array_file.unlink()

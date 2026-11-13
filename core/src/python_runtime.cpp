@@ -331,7 +331,7 @@ fs::path defaultSdk() {
 class Worker {
 public:
   ~Worker() { stop(); }
-  void stop() {
+  void stop(ExecContext* ctx = nullptr) {
     if (process_.valid() && WaitForSingleObject(process_.value, 0) == WAIT_TIMEOUT) {
       if (job_.valid())
         TerminateJobObject(job_.value, 1);
@@ -339,6 +339,7 @@ public:
         TerminateProcess(process_.value, 1);
       WaitForSingleObject(process_.value, 3000);
     }
+    drainLogs(ctx);
     pipe_.reset();
     process_.reset();
     job_.reset();
@@ -347,6 +348,31 @@ public:
   }
   bool alive() const {
     return process_.valid() && WaitForSingleObject(process_.value, 0) == WAIT_TIMEOUT;
+  }
+
+  void drainLogs(ExecContext* ctx) {
+    if (!directory_)
+      return;
+    std::error_code ec;
+    const auto end = fs::file_size(directory_->path / "worker.log", ec);
+    if (ec)
+      return;
+    if (!ctx) {
+      logOffset_ = end;
+      return;
+    }
+    constexpr std::uint64_t limit = 1024 * 1024;
+    if (end > logOffset_ && end - logOffset_ > limit) {
+      logOffset_ = end - limit;
+      ctx->log(LogLevel::Warn, "Python stdout/stderr 日志已截断，仅保留最后 1 MiB");
+    }
+    while (logOffset_ < end) {
+      const auto text =
+          logs(static_cast<std::size_t>(std::min<std::uint64_t>(65536, end - logOffset_)));
+      if (text.empty())
+        return;
+      ctx->log(LogLevel::Info, text);
+    }
   }
 
   void start(const std::string& executable, const fs::path& sdk, Clock::time_point deadline,
@@ -414,7 +440,7 @@ public:
         if (!alive() || Clock::now() >= deadline) {
           CancelIoEx(pipe_.value, &connection);
           WaitForSingleObject(event.value, INFINITE);
-          throw Failure("python_start_failed", "Python 未能连接运行库管道" + logs());
+          throw Failure("python_start_failed", "Python 未能连接运行库管道" + logDetails(ctx));
         }
       }
       DWORD ignored = 0;
@@ -427,7 +453,7 @@ public:
   Json exchange(Json request, Clock::time_point deadline, ExecContext* ctx = nullptr) {
     const auto id = ++sequence;
     request["id"] = id;
-    send(request, deadline);
+    send(request, deadline, ctx);
     std::optional<Clock::time_point> interrupted;
     std::string interruptCode;
     auto check = [&] {
@@ -435,18 +461,18 @@ public:
       if (!interrupted && ((ctx && ctx->cancelled()) || now >= deadline)) {
         interruptCode = ctx && ctx->cancelled() ? "python_cancelled" : "python_timeout";
         interrupted = now;
-        send({{"id", id}, {"command", "cancel"}}, now + std::chrono::milliseconds(100));
+        send({{"id", id}, {"command", "cancel"}}, now + std::chrono::milliseconds(100), ctx);
       }
       if (interrupted && now - *interrupted >= std::chrono::milliseconds(500)) {
-        stop();
+        stop(ctx);
         throw Failure(interruptCode, interruptCode == "python_cancelled" ? "Python 运行已取消"
                                                                          : "Python 运行超时");
       }
       if (!alive())
-        throw Failure("python_worker_crashed", "Python worker 意外退出" + logs());
+        throw Failure("python_worker_crashed", "Python worker 意外退出" + logDetails(ctx));
     };
     for (;;) {
-      const Json response = receive(check);
+      const Json response = receive(check, ctx);
       if (!response.is_object() || response.at("id") != id)
         throw Failure("python_protocol_error", "Python 响应 ID 不匹配");
       const auto event = response.at("event").get<std::string>();
@@ -466,9 +492,10 @@ public:
         if (ctx)
           ctx->progress(ratio, response.value("message", std::string()));
       } else if (event == "cancelled") {
-        stop();
+        stop(ctx);
         throw Failure("python_cancelled", "Python 运行已取消");
       } else if (event == "error") {
+        drainLogs(ctx);
         if (ctx && response.contains("traceback"))
           ctx->log(LogLevel::Error, response.at("traceback").get<std::string>());
         throw Failure(response.value("code", std::string("python_exception")),
@@ -476,14 +503,10 @@ public:
                       response.value("traceback", std::string()));
       } else if (event == "result") {
         if (interrupted) {
-          stop();
+          stop(ctx);
           throw Failure(interruptCode, "Python 任务已中止");
         }
-        if (ctx) {
-          const auto text = logs();
-          if (!text.empty())
-            ctx->log(LogLevel::Info, text);
-        }
+        drainLogs(ctx);
         return response;
       } else {
         throw Failure("python_protocol_error", "未知 Python 响应事件");
@@ -496,19 +519,26 @@ private:
   std::unique_ptr<Directory> directory_;
   std::uint64_t logOffset_ = 0;
 
-  std::string logs() {
+  std::string logs(std::size_t limit = 65536) {
     if (!directory_)
       return {};
     std::ifstream in(directory_->path / "worker.log", std::ios::binary);
     in.seekg(static_cast<std::streamoff>(logOffset_));
-    std::string text(65536, '\0');
+    std::string text(limit, '\0');
     in.read(text.data(), static_cast<std::streamsize>(text.size()));
     text.resize(static_cast<std::size_t>(in.gcount()));
     logOffset_ += text.size();
     return text;
   }
 
-  void send(const Json& j, Clock::time_point deadline) {
+  std::string logDetails(ExecContext* ctx) {
+    if (!ctx)
+      return logs();
+    drainLogs(ctx);
+    return {};
+  }
+
+  void send(const Json& j, Clock::time_point deadline, ExecContext* ctx) {
     const auto text = j.dump();
     if (text.size() > kMaxFrame)
       throw Failure("python_protocol_error", "Python 请求帧过大");
@@ -527,7 +557,7 @@ private:
                                 static_cast<DWORD>(frame.size() - done), &wrote, &io);
       if (!ok) {
         if (GetLastError() != ERROR_IO_PENDING)
-          throw Failure("python_worker_crashed", "Python 管道写入失败" + logs());
+          throw Failure("python_worker_crashed", "Python 管道写入失败" + logDetails(ctx));
         while (WaitForSingleObject(event.value, 20) == WAIT_TIMEOUT) {
           if (Clock::now() >= deadline || !alive()) {
             CancelIoEx(pipe_.value, &io);
@@ -536,7 +566,7 @@ private:
           }
         }
         if (!GetOverlappedResult(pipe_.value, &io, &wrote, FALSE))
-          throw Failure("python_worker_crashed", "Python 管道写入中断" + logs());
+          throw Failure("python_worker_crashed", "Python 管道写入中断" + logDetails(ctx));
       }
       if (!wrote)
         throw Failure("python_protocol_error", "Python 管道写入为空");
@@ -544,14 +574,14 @@ private:
     }
   }
 
-  Json receive(const std::function<void()>& check) {
+  Json receive(const std::function<void()>& check, ExecContext* ctx) {
     auto read = [&](char* target, std::size_t count) {
       std::size_t done = 0;
       while (done < count) {
         check();
         DWORD available = 0;
         if (!PeekNamedPipe(pipe_.value, nullptr, 0, nullptr, &available, nullptr))
-          throw Failure("python_worker_crashed", "Python 管道断开" + logs());
+          throw Failure("python_worker_crashed", "Python 管道断开" + logDetails(ctx));
         if (!available) {
           std::this_thread::sleep_for(std::chrono::milliseconds(10));
           continue;
@@ -564,7 +594,7 @@ private:
         const BOOL ok = ReadFile(pipe_.value, target + done, n, &received, &io);
         if (!ok) {
           if (GetLastError() != ERROR_IO_PENDING)
-            throw Failure("python_worker_crashed", "Python 管道读取失败" + logs());
+            throw Failure("python_worker_crashed", "Python 管道读取失败" + logDetails(ctx));
           while (WaitForSingleObject(event.value, 20) == WAIT_TIMEOUT) {
             try {
               check();
@@ -575,10 +605,10 @@ private:
             }
           }
           if (!GetOverlappedResult(pipe_.value, &io, &received, FALSE))
-            throw Failure("python_worker_crashed", "Python 管道读取中断" + logs());
+            throw Failure("python_worker_crashed", "Python 管道读取中断" + logDetails(ctx));
         }
         if (!received)
-          throw Failure("python_worker_crashed", "Python 管道意外关闭" + logs());
+          throw Failure("python_worker_crashed", "Python 管道意外关闭" + logDetails(ctx));
         done += received;
       }
     };
@@ -602,7 +632,8 @@ private:
 fs::path defaultSdk() { return {}; }
 class Worker {
 public:
-  void stop() {}
+  void stop(ExecContext* = nullptr) {}
+  void drainLogs(ExecContext*) {}
   bool alive() const { return false; }
   void start(const std::string&, const fs::path&, Clock::time_point, ExecContext* = nullptr) {
     throw Failure("python_platform_unsupported", "Python worker 当前需要 Windows 命名管道");
@@ -679,6 +710,7 @@ public:
 
 private:
   Worker worker_;
+  Json workerDefinitions_ = Json::object();
   std::string executable_, pythonVersion_, numpyVersion_;
   std::vector<std::string> paths_;
   fs::path sdk_;
@@ -710,8 +742,13 @@ private:
   }
 
   Json launch(Clock::time_point deadline, ExecContext* ctx = nullptr) {
+    workerDefinitions_ = Json::object();
     worker_.start(executable_, sdk_, deadline, ctx);
-    return worker_.exchange({{"command", "discover"}, {"packagePaths", paths_}}, deadline, ctx);
+    auto result =
+        worker_.exchange({{"command", "discover"}, {"packagePaths", paths_}}, deadline, ctx);
+    for (const auto& definition : result.at("operators"))
+      workerDefinitions_[definition.at("id").get<std::string>()] = definition;
+    return result;
   }
 
   Json discover(Registry& registry) {
@@ -843,14 +880,14 @@ private:
     const auto inputs = op.inputs;
     const auto outputs = op.outputs;
     const auto parameters = op.params;
-    op.compute = [this, id, inputs, outputs, parameters](const Inputs& in, const ParamView& params,
-                                                         Outputs& out, ExecContext& ctx) {
-      return execute(id, inputs, outputs, parameters, in, params, out, ctx);
+    op.compute = [this, id, inputs, outputs, parameters, definition = j](
+                     const Inputs& in, const ParamView& params, Outputs& out, ExecContext& ctx) {
+      return execute(id, definition, inputs, outputs, parameters, in, params, out, ctx);
     };
     return op;
   }
 
-  Status execute(const std::string& id, const std::vector<Port>& inputPorts,
+  Status execute(const std::string& id, const Json& definition, const std::vector<Port>& inputPorts,
                  const std::vector<Port>& outputPorts, const std::vector<Param>& parameters,
                  const Inputs& inputs, const ParamView& params, Outputs& outputs,
                  ExecContext& ctx) {
@@ -873,6 +910,9 @@ private:
         numpyVersion_ = discovered.at("numpyVersion").get<std::string>();
         publish();
       }
+      if (!workerDefinitions_.contains(id) || workerDefinitions_.at(id) != definition)
+        throw Failure("python_definition_changed",
+                      "Python 节点定义已变化，请手动刷新 Python 节点目录: " + id);
       Directory directory;
       Json encoded = Json::object();
       for (const auto& p : inputPorts) {
@@ -905,16 +945,17 @@ private:
         outputs.set(output.first, std::move(output.second));
       return Status::Ok();
     } catch (const Failure& e) {
+      worker_.drainLogs(&ctx);
       if (e.code == "python_timeout" || e.code == "python_worker_crashed" ||
           e.code == "python_cancelled" || e.code == "python_protocol_error") {
-        worker_.stop();
+        worker_.stop(&ctx);
         std::lock_guard<std::mutex> lock(mutex);
         ready_ = false;
         publish();
       }
       return Status::Error(Phase::Execute, e.code, e.what());
     } catch (const std::exception& e) {
-      worker_.stop();
+      worker_.stop(&ctx);
       std::lock_guard<std::mutex> lock(mutex);
       ready_ = false;
       publish();
