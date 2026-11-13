@@ -30,6 +30,8 @@ def offset(inputs, params, ctx):
 
 `id` 使用 `py.` 命名空间，建议 `py.<包名>.<节点名>`。版本写语义版本，如 `1.0.0`。参数规格沿用 LyFlow manifest 的 `type`、`default`、`label`、`min/max`、`unit`、`options`、分组与联动字段；运行时补齐默认值并检查参数类型和硬范围。函数接收 `inputs`、`params` 两个字典及 `ctx` 上下文；输出返回字典，键必须与所有声明输出完全一致。SDK 也兼容 `def offset(ctx, cloud, offset)` 这类按名称接收关键字参数的函数。端口与参数名不能重叠或占用 `ctx`。
 
+`enum` 的执行值始终是字符串。声明中的数字 `default` 和选项 `value` 会转换为字符串，例如 `default: 2`、`options: [{"value": 1, "label": "低"}, {"value": 2, "label": "高", "doc": "高精度"}]` 对应函数收到 `"2"`；显式参数也传 `"1"` 等字符串。选项支持 `value`、`label`、`doc`，省略 `label` 时使用规范后的值；布尔值和非有限数不能作为枚举值。
+
 端口可以简写为类型字符串，也可写 `{"type": "PointCloud", "label": "输入", "required": false}` 等完整规格。可选输入未连接时不出现在 `inputs` 字典中，节点可用 `inputs.get("name")` 处理；关键字兼容签名需提供对应默认参数。函数必须同步执行；异步协程、额外必填参数与未声明端口会给出明确错误。
 
 发现方式：

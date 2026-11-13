@@ -47,6 +47,35 @@ class SDKTests(unittest.TestCase):
             node(id="py.test.bad", version="1.0.0", label="坏签名", inputs={"cloud": "PointCloud"}, outputs={"out": "Record"})(lambda: None)
         with self.assertRaisesRegex(NodeError, "unsupported type"):
             node(id="py.test.bad", version="1.0.0", label="不支持张量", outputs={"out": "Tensor"})
+        for default, options, expected_default, expected_values in [
+            (2, [{"value": 1, "label": "低"}, {"value": 2, "label": "高", "doc": "高精度"}], "2", ["1", "2"]),
+            (2.5, [{"value": -1}, {"value": 2.5}, {"value": "auto", "label": "自动"}], "2.5", ["-1", "2.5", "auto"]),
+            ("high", [{"value": "low"}, {"value": "high", "label": "高"}], "high", ["low", "high"]),
+        ]:
+            with self.subTest(default=default):
+                specification = {"type": "enum", "default": default, "options": options}
+                enum_node = node(id="py.test.enum", version="1.0.0", label="枚举", outputs={"out": "Record"},
+                                 params={"choice": specification})(lambda inputs, params, ctx: {"out": Record(params)})
+                specs = json.loads(json.dumps(enum_node.__lyflow_node__))["params"]
+                self.assertEqual(specs[0]["default"], expected_default)
+                self.assertEqual([option["value"] for option in specs[0]["options"]], expected_values)
+                self.assertEqual(specs[0]["options"][0]["label"], options[0].get("label", expected_values[0]))
+                if "doc" in options[1]:
+                    self.assertEqual(specs[0]["options"][1]["doc"], options[1]["doc"])
+                self.assertEqual(resolve_params(specs, {}), {"choice": expected_default})
+                for value in expected_values:
+                    self.assertEqual(resolve_params(specs, {"choice": value}), {"choice": value})
+                for invalid in [1, True, "missing"]:
+                    with self.subTest(invalid=invalid), self.assertRaises(NodeError):
+                        resolve_params(specs, {"choice": invalid})
+                self.assertEqual(specification["default"], default)
+                self.assertEqual(specification["options"], options)
+        for default, options in [(True, [{"value": 1}]), (1, [{"value": True}]),
+                                 (float("inf"), [{"value": 1}]), (1, [{"value": float("nan")}]),
+                                 (1, [{"value": 1, "label": 1}]), (1, [{"value": 1, "doc": 1}]), (1, [])]:
+            with self.subTest(default=default, options=options), self.assertRaises(NodeError):
+                node(id="py.test.bad", version="1.0.0", label="非法枚举", outputs={"out": "Record"},
+                     params={"choice": {"type": "enum", "default": default, "options": options}})
         events, cancellation = [], threading.Event()
         ctx = Context(base_dir="C:/data", thread_budget=3, emit=events.append, cancel_event=cancellation)
         ctx.log("中文日志")
@@ -293,6 +322,16 @@ class WorkerTests(unittest.TestCase):
         events = self.request(self.execution("execute"))
         self.assertEqual([event["event"] for event in events], ["log", "progress", "result"])
         self.assertEqual(events[-1]["outputs"]["out"]["data"], {"amount": 2, "threads": 2, "base": str(self.root)})
+        file.write_text(source("py.test.run", "return {'out': Record({'choice': kwargs['choice'], 'isString': isinstance(kwargs['choice'], str)})}",
+                               params="{'choice':{'type':'enum','default':2,'options':[{'value':1,'label':'低'},{'value':2,'label':'高','doc':'高精度'}]}}"), encoding="utf-8")
+        enum = self.discover(file)["operators"][0]["params"][0]
+        self.assertEqual(enum["default"], "2")
+        self.assertEqual(enum["options"], [{"value": "1", "label": "低"}, {"value": "2", "label": "高", "doc": "高精度"}])
+        for params, expected in [({}, "2"), ({"choice": "1"}, "1"), ({"choice": "2"}, "2")]:
+            with self.subTest(params=params):
+                event = self.request(self.execution("enum", params=params))[-1]
+                self.assertEqual(event["event"], "result", event)
+                self.assertEqual(event["outputs"]["out"]["data"], {"choice": expected, "isString": True})
         for body, message in [("return {'wrong': Record({})}", "declared ports"), ("return {'out': Measurement(1)}", "requires Record")]:
             with self.subTest(body=body):
                 file.write_text(source("py.test.run", body), encoding="utf-8")

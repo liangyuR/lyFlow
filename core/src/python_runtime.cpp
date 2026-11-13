@@ -493,7 +493,8 @@ public:
           ctx->progress(ratio, response.value("message", std::string()));
       } else if (event == "cancelled") {
         stop(ctx);
-        throw Failure("python_cancelled", "Python 运行已取消");
+        const auto code = interrupted ? interruptCode : std::string("python_cancelled");
+        throw Failure(code, code == "python_timeout" ? "Python 运行超时" : "Python 运行已取消");
       } else if (event == "error") {
         drainLogs(ctx);
         if (ctx && response.contains("traceback"))

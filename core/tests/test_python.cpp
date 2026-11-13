@@ -35,9 +35,12 @@ if Path(__file__).with_name('slow.py').is_file():
       inputs={'cloud':'PointCloud', 'image':'Image', 'measurement':'Measurement', 'record':'Record'},
       outputs={'cloud':'PointCloud', 'image':'Image', 'measurement':'Measurement', 'record':'Record'},
       params={'amount': {'type':'float', 'default':2.0},
-              'curve': {'type':'curve', 'default':{'interp':'linear','points':[[0,0],[1,1]]}}})
-def roundtrip(ctx, cloud, image, measurement, record, amount, curve):
+              'curve': {'type':'curve', 'default':{'interp':'linear','points':[[0,0],[1,1]]}},
+              'numeric': {'type':'enum', 'default':1,
+                          'options':[{'value':1,'label':'One'},{'value':2,'label':'Two'}]}})
+def roundtrip(ctx, cloud, image, measurement, record, amount, curve, numeric):
     assert curve['points'][1] == [1,1]
+    assert isinstance(numeric, str) and numeric in ('1', '2')
     ctx.log('native-pipe-log')
     ctx.progress(0.5, 'native-pipe-progress')
     assert not cloud.xyz.flags.writeable
@@ -50,6 +53,7 @@ def roundtrip(ctx, cloud, image, measurement, record, amount, curve):
     details.data['base'] = str(ctx.base_dir)
     details.data['pid'] = os.getpid()
     details.data['requestDir'] = str(Path(cloud.xyz.filename).parent)
+    details.data['numeric'] = numeric
     print('stdout is not protocol')
     return {'cloud': result, 'image': pixels,
             'measurement':Measurement(measurement.value + amount, measurement.unit, True,
@@ -201,6 +205,12 @@ TEST_CASE("Python worker exchanges all supported data through a real named pipe"
   CHECK_FALSE(op->capabilities.deterministic);
   CHECK_FALSE(op->capabilities.previewable);
   CHECK(op->capabilities.cancellable);
+  const auto numeric = std::find_if(op->params.begin(), op->params.end(),
+                                    [](const Param& p) { return p.name == "numeric"; });
+  REQUIRE(numeric != op->params.end());
+  CHECK(numeric->def.stringValue() == "1");
+  REQUIRE(numeric->options.size() == 2);
+  CHECK(numeric->options[1].value == "2");
   const ComputeFn compute = op->compute;
   PointCloud cloud;
   cloud.xyz = {1, 2, 3, 4, 5, 6};
@@ -217,9 +227,11 @@ TEST_CASE("Python worker exchanges all supported data through a real named pipe"
           {"image", Data::image(image)},
           {"measurement", Data::measurement({5.0, true, "mm"})},
           {"record", Data::record({"integration", {{"name", "中文"}}})}};
-      const ParamMap params{
-          {"amount", Value::number(2.0)},
-          {"curve", Value::text(R"({"interp":"linear","points":[[0,0],[1,1]]})")}};
+      ParamMap params;
+      for (const auto& p : op->params)
+        params.emplace(p.name, p.def);
+      if (channels != 1)
+        params["numeric"] = Value::text("2");
       std::unordered_map<std::string, Data> result;
       PythonContext context;
       Outputs out(result);
@@ -239,6 +251,7 @@ TEST_CASE("Python worker exchanges all supported data through a real named pipe"
       CHECK(result.at("record").asRecord()->type == "integration");
       CHECK(result.at("record").asRecord()->data.at("name") == "中文");
       CHECK(result.at("record").asRecord()->data.at("threads") == 3);
+      CHECK(result.at("record").asRecord()->data.at("numeric") == (channels == 1 ? "1" : "2"));
       CHECK_FALSE(std::filesystem::exists(std::filesystem::u8path(
           result.at("record").asRecord()->data.at("requestDir").get<std::string>())));
       CHECK(context.progressCount == 1);
@@ -366,16 +379,19 @@ TEST_CASE("Python failures, queued cancellation and forced termination recover o
   std::filesystem::remove(slow);
   std::filesystem::remove(marker);
   CHECK(control(compute, "ok", context, result).ok);
-  const auto beforeTimeout = std::chrono::steady_clock::now();
-  PythonContext timedOut;
-  CHECK(control(compute, "stubborn", timedOut, result).code == "python_timeout");
-  CHECK(timedOut.logged("native-stdout-stubborn"));
-  CHECK(timedOut.logged("native-stderr-stubborn"));
-  CHECK(std::chrono::steady_clock::now() - beforeTimeout < std::chrono::seconds(5));
-  PythonContext followingTimeout;
-  CHECK(control(compute, "ok", followingTimeout, result).ok);
-  CHECK_FALSE(followingTimeout.logged("native-stdout-stubborn"));
-  CHECK_FALSE(followingTimeout.logged("native-stderr-stubborn"));
+  for (const char* mode : {"cooperative", "stubborn"}) {
+    CAPTURE(mode);
+    const auto beforeTimeout = std::chrono::steady_clock::now();
+    PythonContext timedOut;
+    CHECK(control(compute, mode, timedOut, result).code == "python_timeout");
+    CHECK(timedOut.logged(std::string("native-stdout-") + mode));
+    CHECK(timedOut.logged(std::string("native-stderr-") + mode));
+    CHECK(std::chrono::steady_clock::now() - beforeTimeout < std::chrono::seconds(5));
+    PythonContext followingTimeout;
+    CHECK(control(compute, "ok", followingTimeout, result).ok);
+    CHECK_FALSE(followingTimeout.logged(std::string("native-stdout-") + mode));
+    CHECK_FALSE(followingTimeout.logged(std::string("native-stderr-") + mode));
+  }
 
   const auto sourcePath = fixture.dir / "nodes.py";
   std::ifstream sourceFile(sourcePath);

@@ -55,6 +55,14 @@ PORT_FIELDS = {"type", "label", "doc", "required", "contract", "example"}
 PARAM_FIELDS = {"type", "label", "doc", "default", "group", "advanced", "min", "max", "softMin", "softMax", "step", "unit", "componentLabels", "options", "placeholder", "pattern", "rows", "filters", "mode", "alpha", "visibleWhen", "enabledWhen", "semantic", "roiBackdrop", "tuningRole", "unitSource"}
 
 
+def _enum_string(value, name):
+    if isinstance(value, str):
+        return value
+    if (isinstance(value, int) and not isinstance(value, bool)) or (isinstance(value, float) and math.isfinite(value)):
+        return json.dumps(value, allow_nan=False)
+    raise NodeError(f"{name}: enum values must be strings or finite numbers")
+
+
 def resolve_params(specs, supplied):
     if not isinstance(supplied, dict) or set(supplied) - {p["name"] for p in specs}:
         raise NodeError("params must be a dictionary containing only declared parameters")
@@ -76,7 +84,7 @@ def resolve_params(specs, supplied):
             length = {"vec2f": 2, "vec3f": 3, "vec4f": 4, "color": 4 if spec.get("alpha") else 3, "transform": 16}[kind]
             valid = isinstance(value, list) and len(value) == length and all(number(v) for v in value)
         elif kind == "enum":
-            valid = any(value == item["value"] and type(value) is type(item["value"]) for item in spec.get("options", []))
+            valid = isinstance(value, str) and any(value == item["value"] for item in spec.get("options", []))
         elif kind == "curve":
             valid = isinstance(value, dict) and isinstance(value.get("points"), list) and len(value["points"]) >= 2
         if not valid:
@@ -111,7 +119,20 @@ def _named_specs(specs, ports):
             raise NodeError(f"{name}: parameter default is required")
         if ports and "required" in spec and not isinstance(spec["required"], bool):
             raise NodeError(f"{name}: required must be boolean")
-        result.append({"name": name, **copy.deepcopy(spec)})
+        normalized = {"name": name, **copy.deepcopy(spec)}
+        if not ports and normalized["type"] == "enum":
+            options = normalized.get("options")
+            if not isinstance(options, list) or not options:
+                raise NodeError(f"{name}: enum options must be a nonempty list")
+            for option in options:
+                if not isinstance(option, dict) or "value" not in option or set(option) - {"value", "label", "doc"}:
+                    raise NodeError(f"{name}: enum options must contain value and optional label/doc")
+                option["value"] = _enum_string(option["value"], name)
+                option.setdefault("label", option["value"])
+                if not isinstance(option["label"], str) or ("doc" in option and not isinstance(option["doc"], str)):
+                    raise NodeError(f"{name}: enum option label/doc must be strings")
+            normalized["default"] = _enum_string(normalized["default"], name)
+        result.append(normalized)
     return result
 
 
