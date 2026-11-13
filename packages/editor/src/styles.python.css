@@ -1,0 +1,150 @@
+.library-menu__tabs {
+  display: flex;
+  gap: 6px;
+  padding: 4px 4px 8px;
+}
+.toolbar__recentmenu .library-menu__tabs button {
+  width: auto;
+  padding: 4px 10px;
+}
+.library-menu__tabs button[aria-pressed='true'] {
+  background: var(--lyflow-bg-3);
+  color: var(--lyflow-accent);
+}
+.library-menu:has(.python-library) {
+  width: min(480px, calc(100vw - 32px));
+  max-height: min(75vh, 760px);
+  overflow-y: auto;
+}
+.python-library {
+  padding: 4px 8px 8px;
+  font-size: 12px;
+  white-space: normal;
+}
+.python-library p {
+  margin: 6px 0 10px;
+}
+.python-library fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.python-library__field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+  color: var(--lyflow-fg-1);
+}
+.python-library__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.python-library__row input {
+  flex: 1;
+  min-width: 120px;
+}
+.python-library input {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--lyflow-border);
+  border-radius: var(--lyflow-radius);
+  background: var(--lyflow-bg-0);
+  color: var(--lyflow-fg-0);
+  font: inherit;
+}
+.python-library input:focus {
+  outline: 1px solid var(--lyflow-accent);
+}
+.python-library__field > input[type='number'] {
+  width: 100px;
+}
+.toolbar__recentmenu .python-library button {
+  width: auto;
+  padding: 5px 8px;
+  border: 1px solid var(--lyflow-border);
+  background: var(--lyflow-bg-2);
+  border-radius: var(--lyflow-radius);
+}
+.python-library fieldset:disabled,
+.python-library button:disabled {
+  opacity: 0.6;
+}
+.python-library__paths {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.python-library__paths li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: var(--lyflow-radius);
+  background: var(--lyflow-bg-0);
+}
+.python-library__paths li > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--lyflow-mono);
+  font-size: 11px;
+}
+.python-library__actions {
+  margin-top: 12px;
+}
+.python-library__note {
+  color: var(--lyflow-fg-2);
+  font-size: 11px;
+}
+.python-library__error {
+  color: var(--lyflow-danger);
+  overflow-wrap: anywhere;
+}
+.python-library__status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding-top: 12px;
+  color: var(--lyflow-fg-1);
+}
+.python-library__status strong {
+  color: var(--lyflow-fg-0);
+}
+.python-library__problems {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+.python-library__problems summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  color: var(--lyflow-warn);
+}
+.python-library__problems pre {
+  max-height: 220px;
+  margin: 8px 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--lyflow-fg-1);
+  font: 11px/1.5 var(--lyflow-mono);
+}
+.python-library__guide {
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--lyflow-accent);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.python-library__guide:hover {
+  text-decoration: underline;
+}

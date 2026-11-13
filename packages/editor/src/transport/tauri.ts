@@ -15,6 +15,9 @@ import type {
   LibraryMeta,
   LibraryRefresh,
   LibrarySettings,
+  PythonRuntimeConfig,
+  PythonSettings,
+  PythonRefresh,
   LibraryStatus,
   LoadedGraph,
   ManifestUpdated,
@@ -273,6 +276,18 @@ export class TauriTransport implements Transport {
   async setLibraryDirs(extraDirs: string[]): Promise<LibraryRefresh> {
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke<LibraryRefresh>('set_library_dirs', { extraDirs });
+  }
+  async getPythonSettings(): Promise<PythonSettings> {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<PythonSettings>('get_python_settings');
+  }
+  async setPythonSettings(config: PythonRuntimeConfig): Promise<PythonRefresh> {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<PythonRefresh>('set_python_settings', { config });
+  }
+  async refreshPythonNodes(): Promise<PythonRefresh> {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return invoke<PythonRefresh>('refresh_python_nodes');
   }
   async getLibraryStatus(): Promise<LibraryStatus> {
     const { invoke } = await import('@tauri-apps/api/core');

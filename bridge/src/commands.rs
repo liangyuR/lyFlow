@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, RwLock};
 use tauri::{Manager, Runtime};
 
@@ -17,9 +18,11 @@ use crate::execution::{
 use crate::graph::GraphDoc;
 use crate::host::{self, HostConfig};
 use crate::library_settings;
+use crate::python_settings::{self, PythonRuntimeConfig};
 
 /// 解析过的 manifest，连同它属于第几代 core。热重载换代后这份要作废（ADR-0009）。
-static MANIFEST: RwLock<Option<(u32, serde_json::Value)>> = RwLock::new(None);
+static MANIFEST: RwLock<Option<(u32, u64, serde_json::Value)>> = RwLock::new(None);
+static MANIFEST_REVISION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Serialize)]
 pub struct CoreInfo {
@@ -44,19 +47,155 @@ pub struct LoadedGraph {
 }
 
 fn manifest_value() -> Result<serde_json::Value, String> {
-    let generation = core_ffi::generation();
-    if let Some((cached, value)) = MANIFEST.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
-        if *cached == generation {
-            return Ok(value.clone());
+    loop {
+        let generation = core_ffi::generation();
+        let revision = MANIFEST_REVISION.load(Ordering::Acquire);
+        if let Some((cached, cached_revision, value)) =
+            MANIFEST.read().unwrap_or_else(|e| e.into_inner()).as_ref()
+        {
+            if *cached == generation && *cached_revision == revision {
+                return Ok(value.clone());
+            }
         }
+        let raw = core_ffi::manifest_json()?;
+        // 在边界上解析一次，等于顺手验证了 C++ 那个手写 JSON writer 的输出。
+        // 它坏掉的话应该在这里炸，而不是让前端拿到半截 JSON 去猜。
+        let value: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|e| format!("core 返回的 manifest 不是合法 JSON: {e}"))?;
+        let mut cache = MANIFEST.write().unwrap_or_else(|e| e.into_inner());
+        if MANIFEST_REVISION.load(Ordering::Acquire) != revision {
+            continue;
+        }
+        *cache = Some((generation, revision, value.clone()));
+        return Ok(value);
     }
-    let raw = core_ffi::manifest_json()?;
-    // 在边界上解析一次，等于顺手验证了 C++ 那个手写 JSON writer 的输出。
-    // 它坏掉的话应该在这里炸，而不是让前端拿到半截 JSON 去猜。
-    let value: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|e| format!("core 返回的 manifest 不是合法 JSON: {e}"))?;
-    *MANIFEST.write().unwrap_or_else(|e| e.into_inner()) = Some((generation, value.clone()));
-    Ok(value)
+}
+
+fn invalidate_manifest() {
+    MANIFEST_REVISION.fetch_add(1, Ordering::AcqRel);
+    *MANIFEST.write().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+#[derive(Serialize)]
+pub struct PythonSettings {
+    supported: bool,
+    editable: bool,
+    config: PythonRuntimeConfig,
+    status: serde_json::Value,
+}
+
+#[derive(Serialize)]
+pub struct PythonRefresh {
+    pub status: serde_json::Value,
+    pub manifest: serde_json::Value,
+}
+
+fn python_config<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<PythonRuntimeConfig, String> {
+    match host::config(app).python.as_ref() {
+        Some(config) => config.clone().normalized(),
+        None => python_settings::read(),
+    }
+}
+
+pub(crate) fn configure_python_catalog<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<PythonRefresh, String> {
+    let config = python_config(app)?;
+    let status = python_settings::apply(&config)?;
+    invalidate_manifest();
+    Ok(PythonRefresh {
+        status,
+        manifest: manifest_value()?,
+    })
+}
+
+#[tauri::command]
+pub async fn get_python_settings<R: Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<PythonSettings, String> {
+    off_main(move || {
+        let (config, error) = match python_config(&app) {
+            Ok(config) => (config, None),
+            Err(error) => (PythonRuntimeConfig::default(), Some(error)),
+        };
+        let supported = core_ffi::core()?.supports_python();
+        let mut status = if supported { python_settings::status()? } else { python_settings::unavailable_status(&config) };
+        if let Some(message) = error {
+            status["problems"].as_array_mut().ok_or("Python 问题列表格式无效")?
+                .push(serde_json::json!({"path": python_settings::settings_file(), "message": message}));
+        }
+        Ok(PythonSettings { supported, editable: host::config(&app).python.is_none(), config, status })
+    }).await
+}
+
+#[tauri::command]
+pub async fn set_python_settings<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    runs: tauri::State<'_, RunManager>,
+    config: PythonRuntimeConfig,
+) -> Result<PythonRefresh, String> {
+    if host::config(&app).python.is_some() {
+        return Err("Python 节点由宿主配置，此处只读".into());
+    }
+    let config = config.normalized()?;
+    let runs = runs.inner().clone();
+    off_main(move || {
+        if !core_ffi::core()?.supports_python() {
+            return Err("当前运行库不支持 Python 节点".into());
+        }
+        let mut paused = runs.pause(PauseMode::KeepResults);
+        paused.drain();
+        python_settings::write(config)?;
+        configure_python_catalog(&app)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn refresh_python_nodes<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    runs: tauri::State<'_, RunManager>,
+) -> Result<PythonRefresh, String> {
+    let runs = runs.inner().clone();
+    off_main(move || {
+        let mut paused = runs.pause(PauseMode::KeepResults);
+        paused.drain();
+        configure_python_catalog(&app)
+    })
+    .await
+}
+
+pub fn initialize_python<R: Runtime>(app: &tauri::AppHandle<R>) {
+    let config = match python_config(app) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("Python 节点: {error}");
+            return;
+        }
+    };
+    if config.executable.is_empty() {
+        return;
+    }
+    let Some(runs) = app.try_state::<RunManager>() else {
+        return;
+    };
+    let runs = runs.inner().clone();
+    let app = app.clone();
+    std::thread::spawn(move || {
+        use tauri::Emitter;
+        let mut paused = runs.pause(PauseMode::KeepResults);
+        paused.drain();
+        match configure_python_catalog(&app) {
+            Ok(refresh) => {
+                let _ = app.emit(crate::watcher::EVENT_UPDATED, serde_json::json!({
+                    "generation": core_ffi::generation(),
+                    "operatorCount": refresh.manifest["operators"].as_array().map_or(0, Vec::len),
+                    "manifest": refresh.manifest,
+                }));
+            }
+            Err(error) => eprintln!("Python 节点: {error}"),
+        }
+    });
 }
 
 #[tauri::command]
@@ -800,7 +939,7 @@ pub fn rescan_library_dirs(dirs: Vec<String>) -> Result<LibraryStatus, String> {
     let problems = core.set_library_dirs(&dirs).map_err(|e| e.to_string())?;
     *LAST_SCAN.lock().unwrap_or_else(|e| e.into_inner()) = Some(seen);
     // 算子集合变了，缓存的 manifest 立刻作废
-    *MANIFEST.write().unwrap_or_else(|e| e.into_inner()) = None;
+    invalidate_manifest();
     Ok(LibraryStatus {
         dirs,
         count: core.library_count(),

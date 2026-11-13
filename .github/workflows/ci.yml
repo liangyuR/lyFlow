@@ -234,6 +234,21 @@ jobs:
       - name: C++ 配置（纯平台 + dts）
         run: cmake -S core -B build/core -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE= -DLYFLOW_STD_PACKS=OFF -DLYFLOW_PACKS=dts -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON -DCMAKE_POLICY_DEFAULT_CMP0141=NEW -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
+
+      - name: Python SDK 与 worker 测试
+        shell: pwsh
+        run: |
+          python -m pip install -r scripts/requirements.txt
+          "LYFLOW_TEST_PYTHON=$((Get-Command python).Source)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $env:PYTHONPATH = Join-Path $env:GITHUB_WORKSPACE 'python'
+          python -B -m unittest discover -s python/tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Python SDK/worker 测试失败' }
+
       - name: C++ 编译
         run: cmake --build build/core --config RelWithDebInfo --parallel
 
@@ -249,6 +264,8 @@ jobs:
           New-Item -ItemType Directory -Path build/ci -Force | Out-Null
           cargo test --locked --manifest-path bridge/Cargo.toml --lib --bins 2>&1 | Tee-Object -FilePath build/ci/bridge-test.log
           if ($LASTEXITCODE -ne 0) { throw "Rust 单元测试失败 (exit $LASTEXITCODE)" }
+          cargo test --locked --manifest-path bridge/Cargo.toml --test python_nodes 2>&1 | Tee-Object -FilePath build/ci/python-client-test.log
+          if ($LASTEXITCODE -ne 0) { throw "Python CLI/嵌入客户端集成失败 (exit $LASTEXITCODE)" }
 
       - name: 保存失败构建与测试诊断
         if: failure()

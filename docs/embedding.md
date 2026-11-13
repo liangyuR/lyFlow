@@ -1,5 +1,7 @@
 # 把 LyFlow 嵌进自己的进程
 
+Python 自定义节点也由同一执行器调度；配置、可选 C ABI/C++/Rust 接口和宿主只读覆盖见 [Python 自定义节点](python-nodes.md)。
+
 几条路：
 
 - **C++ 宿主**（本文大半篇幅）：`lyflow/client.hpp` + 运行时加载的 core DLL。

@@ -101,6 +101,9 @@ fn reload<R: Runtime>(app: &AppHandle<R>, source: &Path) {
 
     match core_ffi::reload_from(source) {
         Ok(generation) => {
+            if let Err(error) = crate::commands::configure_python_catalog(app) {
+                emit_failed(app, vec![format!("Python 节点: {error}")]);
+            }
             let payload = core_ffi::core()
                 .and_then(|c| c.manifest_json().map_err(|e| e.to_string()))
                 .and_then(|raw| {

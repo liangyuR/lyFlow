@@ -485,6 +485,22 @@ public:
   /// 注册表自检。空字符串 = 干净。宿主启动时应当查一次。
   std::string problems() const { return owned(fn_.manifest_problems()); }
 
+  std::string configurePython(const std::string& configJson) const {
+    requireInjected(fn_.configure_python, "lyflow_configure_python");
+    return owned(fn_.configure_python(configJson.c_str()));
+  }
+  bool supportsPython() const {
+    return fn_.configure_python && fn_.python_status && fn_.refresh_python;
+  }
+  std::string pythonStatus() const {
+    requireInjected(fn_.python_status, "lyflow_python_status");
+    return owned(fn_.python_status());
+  }
+  std::string refreshPython() const {
+    requireInjected(fn_.refresh_python, "lyflow_refresh_python");
+    return owned(fn_.refresh_python());
+  }
+
   /// 只校验不执行。返回诊断 JSON 数组文本（"[]" = 干净）。
   /// paramsJson 是顶层图参数的取值（与 RunOptions::paramsJson 同义），空 = 全用 default。
   std::string validate(const std::string& graphJson, const std::string& baseDir = {},
@@ -664,6 +680,9 @@ private:
     const char* (*source_revision)() = nullptr;
     char* (*manifest_json)() = nullptr;
     char* (*manifest_problems)() = nullptr;
+    char* (*configure_python)(const char*) = nullptr;
+    char* (*python_status)() = nullptr;
+    char* (*refresh_python)() = nullptr;
     void (*string_free)(char*) = nullptr;
     char* (*validate)(const char*, const char*) = nullptr;
     char* (*validate_params)(const char*, const char*, const char*) = nullptr;
@@ -841,6 +860,9 @@ inline void Client::bind(const std::string& where) {
   need(fn_.source_revision, "lyflow_source_revision", where);
   need(fn_.manifest_json, "lyflow_manifest_json", where);
   need(fn_.manifest_problems, "lyflow_manifest_problems", where);
+  maybe(fn_.configure_python, "lyflow_configure_python");
+  maybe(fn_.python_status, "lyflow_python_status");
+  maybe(fn_.refresh_python, "lyflow_refresh_python");
   need(fn_.string_free, "lyflow_string_free", where);
   need(fn_.validate, "lyflow_validate", where);
   need(fn_.validate_params, "lyflow_validate_params", where);

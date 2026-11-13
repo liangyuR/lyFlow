@@ -1,3 +1,4 @@
+import { PythonLibraryGuide } from './PythonLibrary';
 // 右侧检查器：选中节点的参数表单。字段、控件、范围、单位、分组、联动条件
 // 全部由 manifest 生成（ADR-0003），这个文件里没有任何算子的名字。
 
@@ -1005,6 +1006,7 @@ function InspectorBody() {
           <h3>未知算子</h3>
           <code>{node.op}</code>
           <p>当前 core 里没有注册这个算子。可能是打开了用别的版本存的图。</p>
+          {node.op.startsWith('py.') && <PythonLibraryGuide />}
         </div>
       );
     }

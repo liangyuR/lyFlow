@@ -858,6 +858,31 @@ async function route(req, res, url) {
     // 桩服务器没有库目录：只读的空设置，界面上显示「宿主不支持」
     return send(res, 200, { defaultDir: '', extraDirs: [], envDirs: [], editable: false });
   }
+  if (p === '/lyflow/python/settings' || p === '/lyflow/python/refresh') {
+    const settings = p.endsWith('/settings');
+    if (
+      (settings && !['GET', 'PUT'].includes(req.method)) ||
+      (!settings && req.method !== 'POST')
+    ) {
+      return send(res, 405, { error: 'Method not allowed' });
+    }
+    const file = settings && req.method === 'PUT' ? scratchFile('.python.json') : null;
+    try {
+      if (file) fs.writeFileSync(file, JSON.stringify(await json()), 'utf8');
+      const argv = file
+        ? ['python', 'configure', '--config', file]
+        : ['python', settings ? 'settings' : 'refresh'];
+      const result = await runCli(argv);
+      const value = lastJson(result.lines);
+      if (result.code !== 0 || !value) {
+        throw Object.assign(new Error(result.stderr.trim() || 'Python 配置失败'), { status: 400 });
+      }
+      if (!settings || file) manifestCache = null;
+      return send(res, 200, value);
+    } finally {
+      if (file) fs.rmSync(file, { force: true });
+    }
+  }
   if (req.method === 'POST' && p === '/lyflow/library/dirs') {
     throw Object.assign(new Error('桩服务器没有库目录，设置不了'), { status: 501 });
   }
